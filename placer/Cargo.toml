@@ -1,0 +1,11 @@
+[package]
+name = "eda-placer"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+eda-common = { path = "../common" }
+rustfft = "6.2"
+rayon = "1.10"
+log = "0.4"
+anyhow = "1.0"

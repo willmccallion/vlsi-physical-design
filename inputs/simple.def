@@ -1,0 +1,24 @@
+VERSION 5.8 ;
+DIVIDERCHAR "/" ;
+BUSBITCHARS "[]" ;
+DESIGN simple_demo ;
+
+UNITS DISTANCE MICRONS 1000 ;
+
+DIEAREA ( 0 0 ) ( 100000 100000 ) ;
+
+COMPONENTS 5 ;
+- inst1 NAND2 + PLACED ( 10000 10000 ) N ;
+- inst2 NAND2 + PLACED ( 20000 10000 ) N ;
+- inst3 NAND2 + PLACED ( 10000 20000 ) N ;
+- inst4 DFF + PLACED ( 50000 50000 ) N ;
+- inst5 DFF + PLACED ( 60000 60000 ) N ;
+END COMPONENTS
+
+NETS 3 ;
+- net1 ( inst1 A ) ( inst4 Q ) ;
+- net2 ( inst2 B ) ( inst1 Y ) ;
+- net3 ( inst3 A ) ( inst5 Q ) ( inst2 Y ) ;
+END NETS
+
+END DESIGN

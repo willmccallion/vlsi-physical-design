@@ -1,0 +1,4 @@
+/target
+output/*
+inputs/random.def
+inputs/benchmarks

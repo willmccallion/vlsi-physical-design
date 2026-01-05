@@ -1,0 +1,15 @@
+[package]
+name = "eda-cli"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+eda-common = { path = "../common" }
+eda-placer = { path = "../placer" }
+eda-router = { path = "../router" }
+clap = { version = "4.5", features = ["derive"] }
+toml = "0.8"
+env_logger = "0.11"
+log = "0.4"
+anyhow = "1.0"
+serde = { version = "1.0", features = ["derive"] }

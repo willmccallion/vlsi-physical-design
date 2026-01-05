@@ -1,0 +1,11 @@
+[package]
+name = "eda-router"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+eda-common = { path = "../common" }
+priority-queue = "1.3"
+log = "0.4"
+rand = "0.8"
+rayon = "1.8"
