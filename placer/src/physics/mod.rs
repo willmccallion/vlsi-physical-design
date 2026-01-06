@@ -45,11 +45,9 @@ impl PhysicsContext {
             *g = Point::new(0.0, 0.0);
         }
 
-        // 1. Wirelength Gradient
         let wl_cost =
             wirelength::compute_wa_gradient(db, current_positions, wa_gamma, output_gradients);
 
-        // 2. Density Gradient
         let density_cost = electrostatics::compute_density_force(
             self,
             db,

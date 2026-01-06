@@ -1,6 +1,7 @@
 use crate::physics::PhysicsContext;
 use eda_common::db::core::NetlistDB;
 use eda_common::geom::point::Point;
+use rand::Rng;
 
 pub struct NesterovParams {
     pub max_iterations: usize,
@@ -36,8 +37,35 @@ impl NesterovOptimizer {
         physics: &mut PhysicsContext,
     ) -> Result<(), String> {
         self.x_k.copy_from_slice(&db.positions);
-        self.x_prev.copy_from_slice(&db.positions);
-        self.y_k.copy_from_slice(&db.positions);
+
+        let mut rng = rand::thread_rng();
+
+        let center_x = (db.die_area.min.x + db.die_area.max.x) / 2.0;
+        let center_y = (db.die_area.min.y + db.die_area.max.y) / 2.0;
+
+        let noise_scale_x = db.die_area.width() * 0.25;
+        let noise_scale_y = db.die_area.height() * 0.25;
+
+        for (i, pos) in self.x_k.iter_mut().enumerate() {
+            if !db.cells[i].is_fixed {
+                let noise_x = rng.gen_range(-noise_scale_x..noise_scale_x);
+                let noise_y = rng.gen_range(-noise_scale_y..noise_scale_y);
+
+                pos.x = center_x + noise_x;
+                pos.y = center_y + noise_y;
+
+                pos.x = pos
+                    .x
+                    .clamp(db.die_area.min.x, db.die_area.max.x - db.cells[i].width);
+                pos.y = pos
+                    .y
+                    .clamp(db.die_area.min.y, db.die_area.max.y - db.cells[i].height);
+            }
+        }
+
+        // Initialize history vectors
+        self.x_prev.copy_from_slice(&self.x_k);
+        self.y_k.copy_from_slice(&self.x_k);
 
         let mut a_k: f64 = 1.0;
         let mut step_size = self.params.initial_learning_rate;
@@ -71,14 +99,15 @@ impl NesterovOptimizer {
                 );
             }
 
-            if k > 100 && avg_disp < self.params.convergence_threshold {
+            // Convergence Condition
+            if k > 500 && avg_disp < self.params.convergence_threshold && density_cost < 50000.0 {
                 log::info!("Converged: Cells stabilized at iteration {}", k);
                 Self::apply_clamping(db, &mut self.x_k);
                 db.positions.copy_from_slice(&self.x_k);
                 return Ok(());
             }
 
-            // Nesterov update
+            // Nesterov Update
             let mut x_next: Vec<Point<f64>> = self
                 .y_k
                 .iter()
@@ -86,7 +115,6 @@ impl NesterovOptimizer {
                 .map(|(y, g)| *y - *g * step_size)
                 .collect();
 
-            // Apply clamping to x_next
             Self::apply_clamping(db, &mut x_next);
 
             let a_next = (1.0 + (4.0 * a_k * a_k + 1.0).sqrt()) / 2.0;
@@ -100,18 +128,17 @@ impl NesterovOptimizer {
                 self.y_k[i] = x_next[i] + (x_next[i] - self.x_k[i]) * momentum;
             }
 
-            // Apply clamping to y_k
             Self::apply_clamping(db, &mut self.y_k);
 
             self.x_prev.copy_from_slice(&self.x_k);
             self.x_k = x_next;
             a_k = a_next;
 
-            // Decay step size
-            step_size *= 0.999;
+            if k >= 500 {
+                step_size *= 0.9995;
+            }
         }
 
-        // Final clamp
         Self::apply_clamping(db, &mut self.x_k);
         db.positions.copy_from_slice(&self.x_k);
         log::warn!("Placer reached max iterations. Proceeding with current solution.");
@@ -132,7 +159,6 @@ impl NesterovOptimizer {
             let w = db.cells[i].width;
             let h = db.cells[i].height;
 
-            // Clamp so that (pos + width) <= die_max
             pos.x = pos.x.clamp(die_min_x, die_max_x - w);
             pos.y = pos.y.clamp(die_min_y, die_max_y - h);
         }

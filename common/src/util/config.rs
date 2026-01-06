@@ -156,6 +156,7 @@ pub struct InputConfig {
     pub def_file: String,
     #[serde(default = "default_output_def")]
     pub output_def: String,
+    pub bookshelf_aux_file: Option<String>,
 }
 
 impl Default for InputConfig {
@@ -164,6 +165,7 @@ impl Default for InputConfig {
             lef_files: default_lef_files(),
             def_file: default_def_file(),
             output_def: default_output_def(),
+            bookshelf_aux_file: None,
         }
     }
 }

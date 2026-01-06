@@ -10,7 +10,7 @@ use rand::thread_rng;
 use rayon::prelude::*;
 use std::collections::{HashMap, HashSet};
 use std::io::Write;
-use std::sync::Mutex;
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::Instant;
 
 #[derive(Clone)]
@@ -175,25 +175,45 @@ pub fn run(
 ) -> Result<(), String> {
     log::info!("Starting Detailed Routing...");
 
-    let (step_x, off_x) = db
+    let (mut step_x, off_x) = db
         .tracks
         .iter()
-        .find(|t| t.direction == "X")
+        .find(|t| t.direction == "X" && t.step > 2.0)
         .map(|t| (t.step, t.start))
         .unwrap_or_else(|| {
             let p = db.layers.first().map(|l| l.pitch).unwrap_or(0.2);
             (p, 0.0)
         });
 
-    let (step_y, off_y) = db
+    let (mut step_y, off_y) = db
         .tracks
         .iter()
-        .find(|t| t.direction == "Y")
+        .find(|t| t.direction == "Y" && t.step > 2.0)
         .map(|t| (t.step, t.start))
         .unwrap_or_else(|| {
             let p = db.layers.first().map(|l| l.pitch).unwrap_or(0.2);
             (p, 0.0)
         });
+
+    let layers = if db.layers.is_empty() {
+        2
+    } else {
+        db.layers.len() as u8
+    };
+    let raw_grid_w = ((db.die_area.width() - off_x) / step_x).ceil() as u64;
+    let raw_grid_h = ((db.die_area.height() - off_y) / step_y).ceil() as u64;
+    let total_points = raw_grid_w * raw_grid_h * (layers as u64);
+
+    if total_points > 50_000_000 {
+        let scale_factor = (total_points as f64 / 50_000_000.0).sqrt().ceil();
+        log::warn!(
+            "Grid too large ({:.1}B points). Scaling step by {:.0}x.",
+            total_points as f64 / 1e9,
+            scale_factor
+        );
+        step_x *= scale_factor;
+        step_y *= scale_factor;
+    }
 
     let grid_w = ((db.die_area.width() - off_x) / step_x).ceil() as u32;
     let grid_h = ((db.die_area.height() - off_y) / step_y).ceil() as u32;
@@ -206,20 +226,8 @@ pub fn run(
         step_y
     );
 
-    let layers = if db.layers.is_empty() {
-        2
-    } else {
-        db.layers.len() as u8
-    };
     let mut grid = DenseGrid::new(grid_w, grid_h, layers, config.capacity);
     let converter = GridConverter::from_steps(step_x, step_y, off_x, off_y, grid_w, grid_h);
-
-    let coarse_max = coarse_converter.to_grid(
-        eda_common::geom::point::Point::new(db.die_area.width(), db.die_area.height()),
-        0,
-    );
-    let coarse_w = coarse_max.x + 1;
-    let coarse_h = coarse_max.y + 1;
 
     for i in 0..db.num_cells() {
         let cell = &db.cells[i];
@@ -237,22 +245,39 @@ pub fn run(
 
     let mut net_paths: Vec<Vec<GridCoord>> = vec![Vec::new(); db.nets.len()];
     let mut net_topologies: Vec<Vec<Vec<GridCoord>>> = vec![Vec::new(); db.nets.len()];
-
     let mut ripup_counts: Vec<u32> = vec![0; db.nets.len()];
 
     let total_nets = db.nets.len();
+
+    let mut net_indices: Vec<usize> = (0..total_nets).collect();
+    net_indices.sort_by_key(|&id| {
+        if let Some(pin) = db.nets[id].pins.first() {
+            let cid = db.pin_to_cell[pin.index()];
+            let pos = db.positions[cid.index()];
+            ((pos.x as i32) / 1000, (pos.y as i32) / 1000)
+        } else {
+            (0, 0)
+        }
+    });
+
     let batch_count = (total_nets / 1000).clamp(8, 128);
     let batch_size = (total_nets + batch_count - 1) / batch_count;
 
-    log::info!("DR: Batched Initial Route...");
+    log::info!("DR: Batched Initial Route (Windowed Order)...");
     let start_time = Instant::now();
-    let net_indices: Vec<usize> = (0..total_nets).collect();
 
-    let progress = Mutex::new(0);
+    let progress = AtomicUsize::new(0);
 
     for (b_idx, chunk) in net_indices.chunks(batch_size).enumerate() {
         let batch_penalty = if b_idx == 0 { 0.5 } else { 1.5 };
         grid.set_penalty(batch_penalty);
+
+        let coarse_max = coarse_converter.to_grid(
+            eda_common::geom::point::Point::new(db.die_area.width(), db.die_area.height()),
+            0,
+        );
+        let coarse_w = coarse_max.x + 1;
+        let coarse_h = coarse_max.y + 1;
 
         let results: Vec<(usize, Option<(Vec<GridCoord>, Vec<Vec<GridCoord>>)>)> = chunk
             .par_iter()
@@ -286,20 +311,12 @@ pub fn run(
                         100.0,
                         config,
                         0,
-                        false,
+                        true,
                     );
 
-                    let mut p: usize = *progress.lock().unwrap();
-                    p += 1;
-                    if p.is_multiple_of(10) || p == total_nets {
-                        let pct = (p as f64 / total_nets as f64) * 100.0;
-                        eprint!(
-                            "\r\x1b[36m[DR Init] Progress: {:>3.0}% ({}/{}) Time: {:.1}s\x1b[0m",
-                            pct,
-                            p,
-                            total_nets,
-                            start_time.elapsed().as_secs_f32()
-                        );
+                    let p = progress.fetch_add(1, Ordering::Relaxed) + 1;
+                    if p.is_multiple_of(100) || p == total_nets {
+                        eprint!("\r\x1b[36m[DR Init] {}/{}\x1b[0m\x1b[K", p, total_nets);
                         let _ = std::io::stderr().flush();
                     }
 
@@ -321,7 +338,7 @@ pub fn run(
             }
         }
     }
-    eprint!("\r\x1b[2K");
+    eprint!("\r\x1b[K");
 
     log::info!("Initial Route: {:.2}s", start_time.elapsed().as_secs_f32());
 
@@ -358,31 +375,23 @@ pub fn run(
         }
         last_conflicts = conflicts;
 
-        if stagnation_counter > 50 {
-            log::error!(
-                "Routing stagnated for 50 iterations. Stopping early to prevent infinite loop."
-            );
+        if stagnation_counter > 2 * config.stagnation_threshold {
+            log::error!("Routing stagnated. Stopping early.");
             break;
         }
 
         let mut force_ripup = false;
-        let effective_history_inc = if stagnation_counter > 15 {
+        let effective_history_inc = if stagnation_counter > config.stagnation_threshold {
             force_ripup = true;
-            history_increment * 20.0
+            history_increment * config.history_increment
         } else {
             history_increment
         };
 
         grid.update_history(effective_history_inc);
 
-        if force_ripup {
-            log::warn!(
-                "Stagnation ({} iters)! Applying massive history penalty.",
-                stagnation_counter
-            );
-            if stagnation_counter == 16 {
-                grid.decay_history(0.5);
-            }
+        if force_ripup && stagnation_counter == config.stagnation_threshold + 1 {
+            grid.decay_history(0.5);
         }
 
         grid.set_penalty(collision_penalty);
@@ -412,12 +421,12 @@ pub fn run(
         }
 
         if force_ripup && !congested_nodes.is_empty() {
-            let radius = config.ripup_radius;
+            let dynamic_radius = config.ripup_radius + (stagnation_counter as i32 / 5);
             let mut kill_zone = HashSet::new();
             for &c in &congested_nodes {
                 for dz in 0..layers {
-                    for dy in -radius..=radius {
-                        for dx in -radius..=radius {
+                    for dy in -dynamic_radius..=dynamic_radius {
+                        for dx in -dynamic_radius..=dynamic_radius {
                             let nx = c.x as i32 + dx;
                             let ny = c.y as i32 + dy;
                             if nx >= 0 && nx < grid_w as i32 && ny >= 0 && ny < grid_h as i32 {
@@ -481,7 +490,7 @@ pub fn run(
             .collect();
 
         let total_ripped = nets_vec.len();
-        let progress = Mutex::new(0);
+        let progress = AtomicUsize::new(0);
 
         while !candidates.is_empty() {
             let mut batch = Vec::new();
@@ -501,6 +510,13 @@ pub fn run(
                     grid.remove_wire(coord);
                 }
             }
+
+            let coarse_max = coarse_converter.to_grid(
+                eda_common::geom::point::Point::new(db.die_area.width(), db.die_area.height()),
+                0,
+            );
+            let coarse_w = coarse_max.x + 1;
+            let coarse_h = coarse_max.y + 1;
 
             let results: Vec<(usize, Option<(Vec<GridCoord>, Vec<Vec<GridCoord>>)>)> = batch
                 .par_iter()
@@ -530,18 +546,14 @@ pub fn run(
                             1.0,
                             config,
                             ripup_counts[net_id],
-                            false,
+                            false, // STRICT MODE DISABLED for Rip-up
                         );
 
-                        let mut p: usize = *progress.lock().unwrap();
-                        p += 1;
-                        if p.is_multiple_of(10) || p == total_ripped {
+                        let p = progress.fetch_add(1, Ordering::Relaxed) + 1;
+                        if p % 100 == 0 || p == total_ripped {
                             eprint!(
-                                "\r\x1b[36m[DR Iter {}] Reroute: {}/{} | Time: {:.1}s\x1b[0m",
-                                iter,
-                                p,
-                                total_ripped,
-                                start.elapsed().as_secs_f32()
+                                "\r\x1b[36m[DR Iter {}] {}/{}\x1b[0m\x1b[K",
+                                iter, p, total_ripped
                             );
                             let _ = std::io::stderr().flush();
                         }
@@ -565,7 +577,7 @@ pub fn run(
             }
             candidates = remaining;
         }
-        eprint!("\r\x1b[2K"); // Clear line after reroute loop
+        eprint!("\r\x1b[K");
 
         log::info!(
             "Iter {}: Conflicts: {}, Ripped: {}, Pen: {:.1}, Time: {}ms",
@@ -580,14 +592,6 @@ pub fn run(
             break;
         }
         collision_penalty = (collision_penalty * config.penalty_multiplier).min(20000.0);
-    }
-
-    let final_conflicts = grid.total_conflicts();
-    if final_conflicts > 0 {
-        log::warn!(
-            "Detailed Routing finished with {} unresolved conflicts! The design may have shorts.",
-            final_conflicts
-        );
     }
 
     let mut all_segments = Vec::with_capacity(db.nets.len());
@@ -637,7 +641,6 @@ fn generate_segments_from_topology(
     let mut adj: HashMap<GridCoord, HashSet<GridCoord>> = HashMap::new();
     let mut nodes = HashSet::new();
 
-    // Build graph
     for path in topology {
         for i in 0..path.len().saturating_sub(1) {
             let u = path[i];
@@ -684,7 +687,6 @@ fn generate_segments_from_topology(
         }
     }
 
-    // Generate wire segments (planar)
     let mut visited_edges = HashSet::new();
     for &start_node in &stop_points {
         if let Some(neighbors) = adj.get(&start_node) {
@@ -721,10 +723,9 @@ fn generate_segments_from_topology(
                     }
                     if !found_next {
                         break;
-                    } // Should not happen if graph is correct
+                    }
                 }
 
-                // Re-walk to mark
                 let mut w_prev = start_node;
                 let mut w_curr = next_node;
                 loop {
@@ -761,7 +762,6 @@ fn generate_segments_from_topology(
         }
     }
 
-    // Generate vias
     for &u in &nodes {
         if let Some(neighbors) = adj.get(&u) {
             for &v in neighbors {
@@ -777,7 +777,6 @@ fn generate_segments_from_topology(
         }
     }
 
-    // Generate pin snaps
     for (&(x, y, z), &exact_pos) in pin_locations {
         let grid_coord = GridCoord::new(x, y, z);
         if nodes.contains(&grid_coord) {
@@ -789,7 +788,6 @@ fn generate_segments_from_topology(
                     p2: exact_pos,
                 });
             }
-
             for l in 0..z {
                 segments.push(RouteSegment {
                     layer: l,
@@ -907,11 +905,9 @@ fn route_net_dr_pure<O: GuideOracle>(
 
         if let Some(path) = path_opt {
             tree_nodes.extend_from_slice(&path);
-
             for &node in &path {
                 occupied_set.insert(node);
             }
-
             paths.push(path);
         } else {
             return None;

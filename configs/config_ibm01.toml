@@ -1,0 +1,35 @@
+[global_placement]
+target_density = 0.86
+bin_dimension = 512
+placer_max_iterations = 5000
+initial_learning_rate = 0.05
+convergence_threshold = 1e-4
+wa_gamma = 4000.0
+electro_force_multiplier = 100000.0
+
+[legalization]
+algorithm = "abacus"
+
+[global_routing]
+gcell_size = 1260
+max_iterations = 300
+history_increment = 0.5
+initial_penalty = 0.5
+penalty_multiplier = 1.1
+capacity = 18
+
+[detailed_routing]
+max_iterations = 2000
+history_increment = 2.0
+initial_penalty = 5.0
+penalty_multiplier = 1.2
+capacity = 1
+astar_heuristic_weight = 2.0
+astar_window_margin_base = 5
+astar_window_margin_max = 20
+stagnation_threshold = 50
+ripup_radius = 5
+
+[input]
+bookshelf_aux_file = "inputs/benchmarks/ibm01_raw/ibm01.aux"
+output_def = "output/ibm01_placed.def"

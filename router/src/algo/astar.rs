@@ -250,10 +250,8 @@ impl AStar {
                     continue;
                 }
 
-                if strict_mode && grid.is_congested(neighbor) && neighbor != end {
-                    if !allowed_pins.contains(&neighbor) {
-                        continue;
-                    }
+                if strict_mode && !oracle.is_in_guide(neighbor) && neighbor != end {
+                    continue;
                 }
 
                 if grid.is_obstacle(neighbor) && neighbor != end {
@@ -276,6 +274,12 @@ impl AStar {
                 } else {
                     guide_penalty
                 };
+
+                // Check if we are very close to the target pin (Manhattan distance < 2).
+                let dist_to_end =
+                    (neighbor.x as i32 - end_x).abs() + (neighbor.y as i32 - end_y).abs();
+                let is_near_pin = dist_to_end < 2;
+
                 let mut step_move_cost = base_move_cost;
                 if position.z != neighbor.z {
                     step_move_cost = layer_change_cost;
@@ -285,10 +289,20 @@ impl AStar {
                 } else if (position.z as usize) < db.layers.len() {
                     match db.layers[position.z as usize].direction {
                         LayerDirection::Vertical if position.x != neighbor.x => {
-                            step_move_cost = wrong_dir_cost
+                            // If we are right next to the pin, allow wrong-way routing cheaply
+                            step_move_cost = if is_near_pin {
+                                base_move_cost * 2.0
+                            } else {
+                                wrong_dir_cost
+                            };
                         }
                         LayerDirection::Horizontal if position.y != neighbor.y => {
-                            step_move_cost = wrong_dir_cost
+                            // If we are right next to the pin, allow wrong-way routing cheaply
+                            step_move_cost = if is_near_pin {
+                                base_move_cost * 2.0
+                            } else {
+                                wrong_dir_cost
+                            };
                         }
                         _ => {}
                     }

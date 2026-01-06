@@ -6,27 +6,31 @@ pub fn generate_random_def(
     filename: &str,
     num_cells: usize,
     num_nets: usize,
+    target_utilization: f64,
 ) -> std::io::Result<()> {
     let mut file = File::create(filename)?;
     let mut rng = rand::thread_rng();
 
-    let cell_w = 1500; // 1.5um approx for NAND2_X1
-    let cell_h = 2000; // Standard row height
+    let cell_w = 500;
+    let cell_h = 2000;
+
     let cell_area = cell_w * cell_h;
-    let target_utilization = 0.40;
     let total_cell_area = (num_cells as f64) * (cell_area as f64);
-    let required_die_area = total_cell_area / target_utilization;
+
+    let util = target_utilization.clamp(0.01, 0.99);
+    let required_die_area = total_cell_area / util;
     let die_side = required_die_area.sqrt() as i32;
 
     let die_h = ((die_side / cell_h) * cell_h).max(cell_h * 10);
     let die_w = die_side.max(20000);
 
     log::info!(
-        "Generating Benchmark: {} cells, {} nets, Die: {}x{}",
+        "Generating Benchmark: {} cells, {} nets, Die: {}x{} (Target Util: {:.1}%)",
         num_cells,
         num_nets,
         die_w,
-        die_h
+        die_h,
+        util * 100.0
     );
 
     writeln!(file, "VERSION 5.8 ;")?;
@@ -36,14 +40,33 @@ pub fn generate_random_def(
     writeln!(file, "UNITS DISTANCE MICRONS 1000 ;")?;
     writeln!(file, "DIEAREA ( 0 0 ) ( {} {} ) ;", die_w, die_h)?;
 
+    // Define Tracks
     writeln!(file, "TRACKS X 0 DO {} STEP 500 LAYER M2 ;", die_w / 500)?;
     writeln!(file, "TRACKS Y 0 DO {} STEP 500 LAYER M1 ;", die_h / 500)?;
 
     writeln!(file, "COMPONENTS {} ;", num_cells)?;
     for i in 0..num_cells {
-        let x = rng.gen_range(0..die_w.saturating_sub(cell_w));
-        let y = rng.gen_range(0..die_h.saturating_sub(cell_h));
-        writeln!(file, "- inst{} NAND2_X1 + PLACED ( {} {} ) N ;", i, x, y)?;
+        let max_x = die_w.saturating_sub(cell_w);
+        let max_y = die_h.saturating_sub(cell_h);
+
+        let x = if max_x > 0 {
+            rng.gen_range(0..max_x)
+        } else {
+            0
+        };
+        let y = if max_y > 0 {
+            rng.gen_range(0..max_y)
+        } else {
+            0
+        };
+
+        let y_snapped = (y / cell_h) * cell_h;
+
+        writeln!(
+            file,
+            "- inst{} NAND2_X1 + PLACED ( {} {} ) N ;",
+            i, x, y_snapped
+        )?;
     }
     writeln!(file, "END COMPONENTS")?;
 

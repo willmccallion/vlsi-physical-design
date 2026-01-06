@@ -5,6 +5,8 @@ use eda_common::util::config::Config;
 use eda_common::util::{check, generator, logger, visualization};
 use eda_placer::physics::PhysicsContext;
 use eda_placer::solver::nesterov::{NesterovOptimizer, NesterovParams};
+use std::fs::File;
+use std::io::{BufRead, BufReader};
 use std::path::{Path, PathBuf};
 
 #[derive(Parser)]
@@ -27,6 +29,10 @@ enum Commands {
         cells: usize,
         #[arg(long, default_value_t = 1000)]
         nets: usize,
+        #[arg(long, default_value_t = 0.50)]
+        utilization: f64,
+        #[arg(long, default_value = "inputs/random.def")]
+        output: String,
     },
 }
 
@@ -51,12 +57,34 @@ fn main() -> anyhow::Result<()> {
     let command = args.command.unwrap_or(Commands::Flow);
 
     match command {
-        Commands::Generate { cells, nets } => {
-            if let Some(parent) = Path::new("inputs/random.def").parent() {
-                std::fs::create_dir_all(parent)?;
+        Commands::Generate {
+            cells,
+            nets,
+            utilization,
+            output,
+        } => {
+            let safe_util = utilization.clamp(0.05, 0.95);
+            if (safe_util - utilization).abs() > f64::EPSILON {
+                log::warn!(
+                    "Requested utilization {:.2} is unsafe. Clamped to {:.2}",
+                    utilization,
+                    safe_util
+                );
             }
-            log::info!("Generating random benchmark...");
-            generator::generate_random_def("inputs/random.def", cells, nets)?;
+
+            if let Some(parent) = Path::new(&output).parent() {
+                if !parent.as_os_str().is_empty() {
+                    std::fs::create_dir_all(parent)?;
+                }
+            }
+            log::info!(
+                "Generating random benchmark (Cells: {}, Nets: {}, Util: {:.0}%)...",
+                cells,
+                nets,
+                safe_util * 100.0
+            );
+            generator::generate_random_def(&output, cells, nets, safe_util)?;
+            log::info!("Generated: {}", output);
         }
         Commands::Place => {
             validate_input_paths(&config)?;
@@ -67,7 +95,9 @@ fn main() -> anyhow::Result<()> {
             }
         }
         Commands::Route => {
-            validate_lef_paths(&config)?;
+            if config.input.bookshelf_aux_file.is_none() {
+                validate_lef_paths(&config)?;
+            }
             if !Path::new(&config.input.output_def).exists() {
                 return Err(anyhow::anyhow!(
                     "Placed DEF file missing: '{}'. Did you run 'place'?",
@@ -97,6 +127,9 @@ fn main() -> anyhow::Result<()> {
 }
 
 fn validate_lef_paths(config: &Config) -> anyhow::Result<()> {
+    if config.input.bookshelf_aux_file.is_some() {
+        return Ok(());
+    }
     for lef in &config.input.lef_files {
         if !Path::new(lef).exists() {
             return Err(anyhow::anyhow!("Input LEF file missing: {}", lef));
@@ -106,6 +139,13 @@ fn validate_lef_paths(config: &Config) -> anyhow::Result<()> {
 }
 
 fn validate_input_paths(config: &Config) -> anyhow::Result<()> {
+    if let Some(aux) = &config.input.bookshelf_aux_file {
+        if !Path::new(aux).exists() {
+            return Err(anyhow::anyhow!("Input AUX file missing: {}", aux));
+        }
+        return Ok(());
+    }
+
     validate_lef_paths(config)?;
     if !Path::new(&config.input.def_file).exists() {
         return Err(anyhow::anyhow!(
@@ -117,11 +157,11 @@ fn validate_input_paths(config: &Config) -> anyhow::Result<()> {
 }
 
 fn prepare_output_dir(path_str: &str) -> anyhow::Result<()> {
-    if let Some(parent) = Path::new(path_str).parent()
-        && !parent.exists()
-    {
-        log::info!("Creating output directory: {:?}", parent);
-        std::fs::create_dir_all(parent)?;
+    if let Some(parent) = Path::new(path_str).parent() {
+        if !parent.exists() && !parent.as_os_str().is_empty() {
+            log::info!("Creating output directory: {:?}", parent);
+            std::fs::create_dir_all(parent)?;
+        }
     }
     Ok(())
 }
@@ -131,10 +171,7 @@ fn place_io_pins(db: &mut NetlistDB) {
 
     let io_cell_id = match db.cell_name_map.get("IO_VIRTUAL_CELL") {
         Some(&id) => id,
-        None => {
-            log::warn!("No IO_VIRTUAL_CELL found. Skipping IO placement.");
-            return;
-        }
+        None => return,
     };
 
     let die_w = db.die_area.width();
@@ -157,19 +194,15 @@ fn place_io_pins(db: &mut NetlistDB) {
         let y;
 
         if current_dist < die_h {
-            // Left edge (moving up)
             x = 0.0;
             y = current_dist;
         } else if current_dist < die_h + die_w {
-            // Top edge (moving right)
             x = current_dist - die_h;
             y = die_h;
         } else if current_dist < 2.0 * die_h + die_w {
-            // Right edge (moving down)
             x = die_w;
             y = die_h - (current_dist - (die_h + die_w));
         } else {
-            // Bottom edge (moving left)
             x = die_w - (current_dist - (2.0 * die_h + die_w));
             y = 0.0;
         }
@@ -177,7 +210,6 @@ fn place_io_pins(db: &mut NetlistDB) {
         let safe_x = x.max(0.0).min(die_w);
         let safe_y = y.max(0.0).min(die_h);
 
-        // Update the pin offset. Since IO cell is at (0,0), offset == absolute position.
         db.pin_offsets[pin_id.index()] = Point::new(safe_x, safe_y);
 
         current_dist += step;
@@ -188,15 +220,22 @@ fn place_io_pins(db: &mut NetlistDB) {
 fn run_placement(config: &Config) -> anyhow::Result<()> {
     let mut db = NetlistDB::new();
 
-    if let Some(lef_path) = config.input.lef_files.first() {
-        log::info!("Parsing LEF: {}", lef_path);
-        eda_common::db::parser::lef::parse(&mut db, lef_path)
-            .map_err(|e| anyhow::anyhow!("Invalid LEF syntax in '{}': {}", lef_path, e))?;
-    }
+    if let Some(aux_path) = &config.input.bookshelf_aux_file {
+        log::info!("Parsing Bookshelf AUX: {}", aux_path);
+        eda_common::db::parser::bookshelf::parse(&mut db, aux_path)
+            .map_err(|e| anyhow::anyhow!("Invalid Bookshelf syntax in '{}': {}", aux_path, e))?;
+    } else {
+        if let Some(lef_path) = config.input.lef_files.first() {
+            log::info!("Parsing LEF: {}", lef_path);
+            eda_common::db::parser::lef::parse(&mut db, lef_path)
+                .map_err(|e| anyhow::anyhow!("Invalid LEF syntax in '{}': {}", lef_path, e))?;
+        }
 
-    log::info!("Parsing DEF: {}", config.input.def_file);
-    eda_common::db::parser::def::parse(&mut db, &config.input.def_file)
-        .map_err(|e| anyhow::anyhow!("Invalid DEF syntax in '{}': {}", config.input.def_file, e))?;
+        log::info!("Parsing DEF: {}", config.input.def_file);
+        eda_common::db::parser::def::parse(&mut db, &config.input.def_file).map_err(|e| {
+            anyhow::anyhow!("Invalid DEF syntax in '{}': {}", config.input.def_file, e)
+        })?;
+    }
 
     place_io_pins(&mut db);
 
@@ -234,6 +273,9 @@ fn run_placement(config: &Config) -> anyhow::Result<()> {
         .optimize(&mut db, &mut physics)
         .map_err(|e| anyhow::anyhow!(e))?;
 
+    log::info!("Generating nesterov visualization");
+    visualization::draw_placement(&db, "output/nesterov_placer.png", 1000, 1000);
+
     log::info!("Starting Legalization...");
     let legalizer = eda_placer::legalize::abacus::AbacusLegalizer::new();
     legalizer.legalize(&mut db);
@@ -251,10 +293,78 @@ fn run_placement(config: &Config) -> anyhow::Result<()> {
     Ok(())
 }
 
+fn preload_bookshelf_geometry(db: &mut NetlistDB, aux_path: &str) -> anyhow::Result<()> {
+    log::info!("Preloading Bookshelf Geometry from AUX: {}", aux_path);
+    let path = Path::new(aux_path);
+    let parent = path.parent().unwrap_or(Path::new("."));
+    let file = File::open(path)?;
+    let reader = BufReader::new(file);
+
+    let mut nodes_file = String::new();
+
+    for line in reader.lines() {
+        let line = line?;
+        let parts: Vec<&str> = line.split_whitespace().collect();
+        if parts.is_empty() {
+            continue;
+        }
+        if parts[0].starts_with("RowBasedPlacement") {
+            for part in &parts[2..] {
+                if part.ends_with(".nodes") {
+                    nodes_file = part.to_string();
+                }
+            }
+        }
+    }
+
+    if nodes_file.is_empty() {
+        return Ok(());
+    }
+
+    let nodes_path = parent.join(&nodes_file);
+    log::info!("Reading Nodes: {:?}", nodes_path);
+    let nfile = File::open(nodes_path)?;
+    let nreader = BufReader::new(nfile);
+
+    for line in nreader.lines() {
+        let line = line?;
+        let line = line.trim();
+        if line.is_empty()
+            || line.starts_with('#')
+            || line.starts_with("UCLA")
+            || line.starts_with("Num")
+        {
+            continue;
+        }
+        let parts: Vec<&str> = line.split_whitespace().collect();
+        if parts.len() < 3 {
+            continue;
+        }
+
+        let width: f64 = parts[1].parse().unwrap_or(1.0);
+        let height: f64 = parts[2].parse().unwrap_or(1.0);
+
+        // This format MUST match what parse_nodes uses in bookshelf.rs
+        let lib_name = format!("BLK_{}_{}", width as i32, height as i32);
+
+        db.macro_sizes.insert(lib_name, (width, height));
+    }
+    Ok(())
+}
+
 fn run_routing(config: &Config) -> anyhow::Result<()> {
     let mut db = NetlistDB::new();
 
-    if let Some(lef_path) = config.input.lef_files.first() {
+    let is_bookshelf = config.input.bookshelf_aux_file.is_some();
+
+    if let Some(aux) = &config.input.bookshelf_aux_file {
+        preload_bookshelf_geometry(&mut db, aux)?;
+    }
+
+    if !is_bookshelf
+        && let Some(lef_path) = config.input.lef_files.first()
+        && Path::new(lef_path).exists()
+    {
         log::info!("Parsing LEF: {}", lef_path);
         eda_common::db::parser::lef::parse(&mut db, lef_path)
             .map_err(|e| anyhow::anyhow!("Invalid LEF syntax in '{}': {}", lef_path, e))?;
@@ -264,6 +374,52 @@ fn run_routing(config: &Config) -> anyhow::Result<()> {
     log::info!("Parsing Placed DEF: {}", input_def);
     eda_common::db::parser::def::parse(&mut db, input_def)
         .map_err(|e| anyhow::anyhow!("Invalid Placed DEF syntax in '{}': {}", input_def, e))?;
+
+    if is_bookshelf || db.layers.is_empty() {
+        log::info!("Bookshelf/No-LEF: Calculating routing pitch from cell geometry...");
+
+        let mut height_counts = std::collections::HashMap::new();
+        for cell in &db.cells {
+            if !cell.is_macro && cell.height > 0.0 {
+                let h_key = (cell.height * 1000.0) as i64;
+                *height_counts.entry(h_key).or_insert(0) += 1;
+            }
+        }
+
+        let std_height = height_counts
+            .into_iter()
+            .max_by_key(|&(_, count)| count)
+            .map(|(h, _)| h as f64 / 1000.0)
+            .unwrap_or(16.0);
+
+        // Pitch = Height / 8 (Tighter pitch for dense designs)
+        let pitch = std_height / 8.0;
+        let width = pitch * 0.5;
+
+        log::warn!(
+            "Layer data missing! Synthesizing default layers based on Cell Height ({:.2}).",
+            std_height
+        );
+        log::info!(
+            "Inferred Pitch = {:.2} (Height / 8.0). Adding 6 Layers (M1-M6).",
+            pitch
+        );
+
+        db.layers.clear();
+        db.layer_name_map.clear();
+
+        use eda_common::db::core::LayerDirection;
+        db.add_layer("M1".to_string(), LayerDirection::Horizontal, pitch, width);
+        db.add_layer("M2".to_string(), LayerDirection::Vertical, pitch, width);
+        db.add_layer("M3".to_string(), LayerDirection::Horizontal, pitch, width);
+        db.add_layer("M4".to_string(), LayerDirection::Vertical, pitch, width);
+        db.add_layer("M5".to_string(), LayerDirection::Horizontal, pitch, width);
+        db.add_layer("M6".to_string(), LayerDirection::Vertical, pitch, width);
+    }
+
+    if db.layers.is_empty() {
+        return Err(anyhow::anyhow!("No layers defined! Cannot route."));
+    }
 
     log::info!("Starting Routing...");
 

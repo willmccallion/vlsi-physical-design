@@ -1,8 +1,10 @@
 pub mod dense;
 
+pub use dense::DenseGrid;
+
 use eda_common::geom::coord::GridCoord;
 
-pub trait RoutingGrid {
+pub trait RoutingGrid: Sync + Send {
     fn width(&self) -> u32;
     fn height(&self) -> u32;
     fn layers(&self) -> u8;
@@ -16,7 +18,6 @@ pub trait RoutingGrid {
 
     fn get_cost(&self, coord: GridCoord, collision_penalty: f64) -> f64;
     fn update_history(&mut self, history_increment: f64);
-
     fn decay_history(&mut self, decay_factor: f64);
 
     fn max_occupancy(&self) -> u32;
@@ -24,6 +25,5 @@ pub trait RoutingGrid {
     fn total_conflicts(&self) -> usize;
 
     fn capacity(&self, coord: GridCoord) -> u32;
-
     fn set_penalty(&mut self, penalty: f64);
 }

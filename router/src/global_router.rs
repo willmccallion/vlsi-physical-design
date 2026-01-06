@@ -10,7 +10,7 @@ use rand::thread_rng;
 use rayon::prelude::*;
 use std::collections::HashSet;
 use std::io::Write;
-use std::sync::Mutex;
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::Instant;
 
 pub fn run(
@@ -19,18 +19,49 @@ pub fn run(
 ) -> Result<(Vec<HashSet<GridCoord>>, GridConverter), String> {
     log::info!("Starting Global Routing...");
 
-    let grid_w = config.gcell_size as u32;
-    let grid_h = config.gcell_size as u32;
+    let bin_width = config.gcell_size as f64;
+    let die_w = db.die_area.width();
+    let die_h = db.die_area.height();
+
+    let grid_w = (die_w / bin_width).ceil() as u32;
+    let grid_h = (die_h / bin_width).ceil() as u32;
+
+    let grid_w = grid_w.max(1);
+    let grid_h = grid_h.max(1);
+
     let layers = if db.layers.is_empty() {
         2
     } else {
         db.layers.len() as u8
     };
 
+    let avg_pitch = if !db.layers.is_empty() {
+        let sum: f64 = db.layers.iter().map(|l| l.pitch).sum();
+        sum / db.layers.len() as f64
+    } else {
+        1.0
+    };
+
+    let physical_tracks = (bin_width / avg_pitch).floor() as u32;
     let default_capacity = config.capacity;
+
+    log::info!(
+        "GR Grid: {}x{} (Bin Size: {:.1}). Pitch={:.2} -> Physical Tracks/Bin={}. Config Cap={}",
+        grid_w,
+        grid_h,
+        bin_width,
+        avg_pitch,
+        physical_tracks,
+        default_capacity
+    );
 
     let mut grid = DenseGrid::new(grid_w, grid_h, layers, default_capacity);
     let converter = GridConverter::new(db.die_area.width(), db.die_area.height(), grid_w, grid_h);
+
+    if layers > 0 {
+        log::info!("Setting Layer 0 (M1) capacity to INFINITE for pin access.");
+        grid.set_layer_capacity(0, 999_999);
+    }
 
     let mut net_paths: Vec<Vec<GridCoord>> = vec![Vec::new(); db.nets.len()];
     let mut collision_penalty = config.initial_penalty;
@@ -38,11 +69,11 @@ pub fn run(
     let total_nets = db.nets.len();
 
     log::info!("GR: Starting Initial Route for {} nets...", total_nets);
-    let start_time = Instant::now();
 
     let batch_size = 500;
     let net_indices: Vec<usize> = (0..total_nets).collect();
-    let progress = Mutex::new(0);
+
+    let progress = AtomicUsize::new(0);
 
     for chunk in net_indices.chunks(batch_size) {
         let results: Vec<(usize, Vec<GridCoord>)> = chunk
@@ -62,17 +93,10 @@ pub fn run(
                     config,
                 );
 
-                let mut p: usize = *progress.lock().unwrap();
-                p += 1;
-                if p.is_multiple_of(50) || p == total_nets {
-                    let pct = (p as f64 / total_nets as f64) * 100.0;
-                    eprint!(
-                        "\r\x1b[36m[GR Init] Progress: {:>3.0}% ({}/{}) Time: {:.1}s\x1b[0m",
-                        pct,
-                        p,
-                        total_nets,
-                        start_time.elapsed().as_secs_f32()
-                    );
+                let p = progress.fetch_add(1, Ordering::Relaxed) + 1;
+
+                if p % 100 == 0 || p == total_nets {
+                    eprint!("\r\x1b[36m[GR Init] {}/{}\x1b[0m\x1b[K", p, total_nets);
                     let _ = std::io::stderr().flush();
                 }
                 (net_id, path)
@@ -86,7 +110,7 @@ pub fn run(
             net_paths[net_id] = path;
         }
     }
-    eprint!("\r\x1b[2K");
+    eprint!("\r\x1b[K");
 
     for iter in 0..config.max_iterations {
         let start = Instant::now();
@@ -99,7 +123,6 @@ pub fn run(
 
         grid.update_history(history_increment);
 
-        // Identify and rip-up congested nets
         let mut nets_to_reroute = Vec::new();
         for net_id in 0..total_nets {
             let path = &net_paths[net_id];
@@ -112,7 +135,6 @@ pub fn run(
 
             for (i, &coord) in path.iter().enumerate() {
                 if grid.is_congested(coord) {
-                    // We only rip up if there is "internal" congestion along the wire.
                     if i > 0 && i < len - 1 {
                         internal_congestion = true;
                         break;
@@ -120,8 +142,6 @@ pub fn run(
                 }
             }
 
-            // If the path is just 2 nodes (start and end) and both are congested,
-            // we treat it as endpoint congestion and do not rip up.
             if internal_congestion {
                 for &coord in path {
                     grid.remove_wire(coord);
@@ -132,14 +152,11 @@ pub fn run(
         }
 
         let ripped = nets_to_reroute.len();
-
-        // Shuffle to prevent livelock
         let mut rng = thread_rng();
         nets_to_reroute.shuffle(&mut rng);
 
-        // Hybrid Execution Strategy
         if ripped < 500 {
-            // Sequential: For precision when conflicts are few.
+            // Sequential
             for (i, &net_id) in nets_to_reroute.iter().enumerate() {
                 let path = compute_net_path_gr(
                     &db.nets[net_id],
@@ -155,20 +172,19 @@ pub fn run(
                 }
                 net_paths[net_id] = path;
 
-                if i % 10 == 0 && i > 0 {
+                if i % 50 == 0 || i == ripped - 1 {
                     eprint!(
-                        "\r\x1b[36m[GR Iter {}] Seq Reroute: {}/{} | Time: {:.1}s\x1b[0m",
+                        "\r\x1b[36m[GR Iter {}] {}/{}\x1b[0m\x1b[K",
                         iter,
-                        i,
-                        ripped,
-                        start.elapsed().as_secs_f32()
+                        i + 1,
+                        ripped
                     );
                     let _ = std::io::stderr().flush();
                 }
             }
         } else {
-            // Parallel: For speed when conflicts are many.
-            let progress = Mutex::new(0);
+            // Parallel
+            let progress = AtomicUsize::new(0);
             for chunk in nets_to_reroute.chunks(batch_size) {
                 let results: Vec<(usize, Vec<GridCoord>)> = chunk
                     .par_iter()
@@ -183,16 +199,9 @@ pub fn run(
                             config,
                         );
 
-                        let mut p: usize = *progress.lock().unwrap();
-                        p += 1;
-                        if p.is_multiple_of(50) || p == ripped {
-                            eprint!(
-                                "\r\x1b[36m[GR Iter {}] Par Reroute: {}/{} | Time: {:.1}s\x1b[0m",
-                                iter,
-                                p,
-                                ripped,
-                                start.elapsed().as_secs_f32()
-                            );
+                        let p = progress.fetch_add(1, Ordering::Relaxed) + 1;
+                        if p % 100 == 0 || p == ripped {
+                            eprint!("\r\x1b[36m[GR Iter {}] {}/{}\x1b[0m\x1b[K", iter, p, ripped);
                             let _ = std::io::stderr().flush();
                         }
                         (net_id, path)
@@ -207,7 +216,7 @@ pub fn run(
                 }
             }
         }
-        eprint!("\r\x1b[2K");
+        eprint!("\r\x1b[K");
 
         log::info!(
             "GR Iter {}: Conflicts: {}, Ripped: {}, Penalty: {:.2}, Time: {}ms",
@@ -219,15 +228,13 @@ pub fn run(
         );
 
         if ripped == 0 {
-            log::info!(
-                "Global Routing Converged (Remaining conflicts are unavoidable endpoint congestion)."
-            );
+            log::info!("Global Routing Converged (Endpoint congestion only).");
             break;
         }
 
-        if iter > 100 && ripped < 50 {
+        if iter > 100 && ripped < 10 {
             log::warn!(
-                "GR: Stopping early. Remaining {} ripped nets are likely unresolvable at global level.",
+                "GR: Stopping early. Remaining {} ripped nets are likely unresolvable.",
                 ripped
             );
             break;
@@ -314,7 +321,7 @@ fn compute_net_path_gr(
             penalty,
             config.heuristic_weight,
             config.margin,
-            1.0, // No dynamic margin in GR
+            1.0,
             &NoGuide,
             &[],
             500_000,

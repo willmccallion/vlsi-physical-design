@@ -17,8 +17,10 @@ pub fn compute_density_force(
     let bin_h = db.die_area.height() / dim as f64;
     let bin_area = bin_w * bin_h;
 
+    // Reset density map
     ctx.density_map.fill(0.0);
 
+    // Binning
     for (i, pos) in positions.iter().enumerate() {
         let cell = &db.cells[i];
 
@@ -48,6 +50,7 @@ pub fn compute_density_force(
         }
     }
 
+    // Overflow calculation
     let mut overflow = 0.0;
     for val in ctx.density_map.iter_mut() {
         *val /= bin_area;
@@ -57,6 +60,7 @@ pub fn compute_density_force(
         *val -= target_density;
     }
 
+    // FFT
     let fft = ctx.fft_planner.plan_fft_forward(dim * dim);
     let ifft = ctx.fft_planner.plan_fft_inverse(dim * dim);
 
@@ -88,28 +92,31 @@ pub fn compute_density_force(
         ctx.potential_map[i] = c.re * norm;
     }
 
+    // Gradient Calculation with Boundary Fix
     for y in 0..dim {
         for x in 0..dim {
             let idx = y * dim + x;
+
             let l = if x > 0 {
                 ctx.potential_map[idx - 1]
             } else {
-                0.0
+                ctx.potential_map[idx]
             };
             let r = if x < dim - 1 {
                 ctx.potential_map[idx + 1]
             } else {
-                0.0
+                ctx.potential_map[idx]
             };
+
             let d = if y > 0 {
                 ctx.potential_map[idx - dim]
             } else {
-                0.0
+                ctx.potential_map[idx]
             };
             let u = if y < dim - 1 {
                 ctx.potential_map[idx + dim]
             } else {
-                0.0
+                ctx.potential_map[idx]
             };
 
             ctx.electro_force_x[idx] = -(r - l) / (2.0 * bin_w);
@@ -117,6 +124,7 @@ pub fn compute_density_force(
         }
     }
 
+    // Apply forces
     for (i, pos) in positions.iter().enumerate() {
         if db.cells[i].is_fixed {
             continue;

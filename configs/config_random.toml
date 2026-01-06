@@ -1,0 +1,36 @@
+[global_placement]
+target_density = 0.70
+bin_dimension = 256
+placer_max_iterations = 1000
+initial_learning_rate = 0.005
+convergence_threshold = 2e-4
+wa_gamma = 4.0
+electro_force_multiplier = 20.0
+
+[legalization]
+algorithm = "abacus"
+
+[global_routing]
+gcell_size = 128
+max_iterations = 300
+history_increment = 0.5
+initial_penalty = 0.5
+penalty_multiplier = 1.1
+capacity = 15
+
+[detailed_routing]
+max_iterations = 1000
+history_increment = 0.5
+initial_penalty = 1.0
+penalty_multiplier = 1.05
+capacity = 1
+astar_heuristic_weight = 1.1
+astar_window_margin_base = 100
+astar_window_margin_max = 1000
+stagnation_threshold = 100
+ripup_radius = 6
+
+[input]
+lef_files = ["inputs/simple.lef"]
+def_file = "inputs/random.def"
+output_def = "output/placed.def"
