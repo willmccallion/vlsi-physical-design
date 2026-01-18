@@ -1,7 +1,20 @@
+//! Synthetic Benchmark Generator.
+//!
+//! Generates random DEF files for testing and evaluation of placement and
+//! routing algorithms. Creates designs with specified cell counts, net counts,
+//! and target utilization, using a chain topology to connect cells.
+
 use rand::Rng;
 use std::fs::File;
 use std::io::Write;
 
+/// Generates a random DEF file with the specified characteristics.
+///
+/// Creates a synthetic design with the given number of cells and nets,
+/// distributed to achieve the target utilization. The design uses a chain
+/// topology where each net connects one cell's output to the next cell's
+/// input. The die size is computed to accommodate the cell area at the
+/// target utilization. Returns an I/O error if file creation fails.
 pub fn generate_random_def(
     filename: &str,
     num_cells: usize,
@@ -40,7 +53,6 @@ pub fn generate_random_def(
     writeln!(file, "UNITS DISTANCE MICRONS 1000 ;")?;
     writeln!(file, "DIEAREA ( 0 0 ) ( {} {} ) ;", die_w, die_h)?;
 
-    // Define Tracks
     writeln!(file, "TRACKS X 0 DO {} STEP 500 LAYER M2 ;", die_w / 500)?;
     writeln!(file, "TRACKS Y 0 DO {} STEP 500 LAYER M1 ;", die_h / 500)?;
 

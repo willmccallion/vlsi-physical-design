@@ -1,3 +1,10 @@
+//! Command-Line Interface for Electronic Design Automation Toolchain.
+//!
+//! This module provides the entry point for the EDA toolchain, orchestrating
+//! the placement and routing workflows. It handles configuration loading,
+//! command parsing, input validation, and coordinates the execution of
+//! placement and routing algorithms through the common database interface.
+
 use clap::{Parser, Subcommand};
 use eda_common::db::core::NetlistDB;
 use eda_common::geom::point::Point;
@@ -9,33 +16,79 @@ use std::fs::File;
 use std::io::{BufRead, BufReader};
 use std::path::{Path, PathBuf};
 
+/// Command-line argument structure parsed from the user's invocation.
+///
+/// Contains the configuration file path and an optional subcommand that
+/// determines which EDA operation to execute (placement, routing, or both).
 #[derive(Parser)]
 #[command(author, version, about, long_about = None)]
 struct Args {
+    /// Path to the TOML configuration file containing algorithm parameters.
+    ///
+    /// If the file does not exist, the tool falls back to internal defaults
+    /// for all configuration sections.
     #[arg(short, long, value_name = "FILE", default_value = "config.toml")]
     config: PathBuf,
 
+    /// Subcommand specifying the EDA operation to perform.
     #[command(subcommand)]
     command: Option<Commands>,
 }
 
+/// Enumeration of available EDA operations that can be executed.
+///
+/// Each variant represents a distinct workflow: placement-only, routing-only,
+/// full flow (placement then routing), or benchmark generation for testing.
 #[derive(Subcommand)]
 enum Commands {
+    /// Execute global placement and legalization only.
+    ///
+    /// Reads the input netlist, performs analytical placement using the
+    /// Nesterov-accelerated gradient descent solver, legalizes the result,
+    /// and writes the placed DEF file. Does not perform routing.
     Place,
+    /// Execute detailed routing only.
+    ///
+    /// Requires a pre-placed DEF file from a previous placement run.
+    /// Performs global routing to generate guides, then detailed routing
+    /// to produce the final routed design with wire segments.
     Route,
+    /// Execute the complete EDA flow: placement followed by routing.
+    ///
+    /// This is the default command if no subcommand is specified. It
+    /// chains the placement and routing operations sequentially, with
+    /// the placed DEF serving as input to the routing stage.
     Flow,
+    /// Generate a synthetic benchmark netlist for testing and evaluation.
+    ///
+    /// Creates a random DEF file with the specified number of cells and nets,
+    /// distributed to achieve the target utilization ratio. The generated
+    /// design uses a chain topology connecting cells in sequence.
     Generate {
+        /// Number of standard cells to generate in the benchmark.
         #[arg(long, default_value_t = 1000)]
         cells: usize,
+        /// Number of nets to generate in the benchmark.
         #[arg(long, default_value_t = 1000)]
         nets: usize,
+        /// Target utilization ratio (0.0 to 1.0) for cell area versus die area.
+        ///
+        /// The tool automatically clamps this value to a safe range (0.05 to 0.95)
+        /// to prevent degenerate designs that cannot be placed or routed.
         #[arg(long, default_value_t = 0.50)]
         utilization: f64,
+        /// Output file path for the generated DEF file.
         #[arg(long, default_value = "inputs/random.def")]
         output: String,
     },
 }
 
+/// Main entry point for the EDA toolchain executable.
+///
+/// Initializes logging, parses command-line arguments, loads configuration
+/// from TOML (or uses defaults), and dispatches to the appropriate workflow
+/// handler based on the selected command. Returns an error if any critical
+/// operation fails, causing the process to exit with a non-zero status code.
 fn main() -> anyhow::Result<()> {
     logger::init();
     let args = Args::parse();
@@ -126,6 +179,12 @@ fn main() -> anyhow::Result<()> {
     Ok(())
 }
 
+/// Validates that all LEF library files specified in the configuration exist.
+///
+/// Checks each LEF file path in the configuration's input section. If the
+/// configuration uses Bookshelf format (indicated by a non-empty aux_file),
+/// this validation is skipped since Bookshelf does not require LEF files.
+/// Returns an error if any required LEF file is missing from the filesystem.
 fn validate_lef_paths(config: &Config) -> anyhow::Result<()> {
     if config.input.bookshelf_aux_file.is_some() {
         return Ok(());
@@ -138,6 +197,12 @@ fn validate_lef_paths(config: &Config) -> anyhow::Result<()> {
     Ok(())
 }
 
+/// Validates that all required input files for placement exist.
+///
+/// For Bookshelf format, checks that the AUX file exists. For LEF/DEF format,
+/// validates both the LEF library files and the DEF netlist file. This
+/// function is called before placement to ensure all inputs are available,
+/// preventing runtime failures during parsing.
 fn validate_input_paths(config: &Config) -> anyhow::Result<()> {
     if let Some(aux) = &config.input.bookshelf_aux_file {
         if !Path::new(aux).exists() {
@@ -156,6 +221,12 @@ fn validate_input_paths(config: &Config) -> anyhow::Result<()> {
     Ok(())
 }
 
+/// Creates the parent directory for an output file path if it does not exist.
+///
+/// Extracts the directory component from the given file path and creates
+/// all necessary parent directories using `create_dir_all`. This ensures
+/// that output files can be written without filesystem errors. If the path
+/// has no parent directory or the parent is empty, no action is taken.
 fn prepare_output_dir(path_str: &str) -> anyhow::Result<()> {
     if let Some(parent) = Path::new(path_str).parent() {
         if !parent.exists() && !parent.as_os_str().is_empty() {
@@ -166,6 +237,13 @@ fn prepare_output_dir(path_str: &str) -> anyhow::Result<()> {
     Ok(())
 }
 
+/// Distributes I/O pins uniformly around the die perimeter.
+///
+/// Locates the virtual IO cell in the database and places all its pins
+/// at evenly spaced intervals along the die boundary, traversing clockwise
+/// from the bottom-left corner. This ensures I/O pins are accessible
+/// from the chip edges for bonding and package connections. The spacing
+/// is calculated to distribute pins evenly across the total perimeter length.
 fn place_io_pins(db: &mut NetlistDB) {
     log::info!("Running IO Placement...");
 
@@ -217,6 +295,14 @@ fn place_io_pins(db: &mut NetlistDB) {
     log::info!("Placed {} IO pins around the perimeter.", num_pins);
 }
 
+/// Executes the complete placement workflow from netlist parsing to legalization.
+///
+/// Loads the input netlist (either Bookshelf or LEF/DEF format), places I/O pins,
+/// computes design utilization, initializes the physics-based placement engine
+/// with the configured bin grid, runs the Nesterov-accelerated optimizer to
+/// minimize wirelength and density violations, legalizes the result using
+/// Abacus, verifies placement correctness, and writes the placed DEF output.
+/// Returns an error if placement fails or verification detects violations.
 fn run_placement(config: &Config) -> anyhow::Result<()> {
     let mut db = NetlistDB::new();
 
@@ -293,6 +379,13 @@ fn run_placement(config: &Config) -> anyhow::Result<()> {
     Ok(())
 }
 
+/// Preloads cell geometry information from a Bookshelf nodes file.
+///
+/// Parses the AUX file to locate the associated .nodes file, then reads
+/// the node definitions to extract width and height for each cell type.
+/// This geometry is stored in the database's macro_sizes map before the
+/// main Bookshelf parser runs, ensuring that cell dimensions are available
+/// when the DEF parser encounters references to these library cells.
 fn preload_bookshelf_geometry(db: &mut NetlistDB, aux_path: &str) -> anyhow::Result<()> {
     log::info!("Preloading Bookshelf Geometry from AUX: {}", aux_path);
     let path = Path::new(aux_path);
@@ -344,7 +437,6 @@ fn preload_bookshelf_geometry(db: &mut NetlistDB, aux_path: &str) -> anyhow::Res
         let width: f64 = parts[1].parse().unwrap_or(1.0);
         let height: f64 = parts[2].parse().unwrap_or(1.0);
 
-        // This format MUST match what parse_nodes uses in bookshelf.rs
         let lib_name = format!("BLK_{}_{}", width as i32, height as i32);
 
         db.macro_sizes.insert(lib_name, (width, height));
@@ -352,6 +444,14 @@ fn preload_bookshelf_geometry(db: &mut NetlistDB, aux_path: &str) -> anyhow::Res
     Ok(())
 }
 
+/// Executes the complete routing workflow from placed netlist to routed design.
+///
+/// Loads the placed DEF file, synthesizes routing layers if missing (for Bookshelf
+/// or designs without LEF), infers routing pitch from standard cell height,
+/// performs global routing to generate coarse guides, executes detailed routing
+/// with rip-up and reroute to resolve congestion, verifies routing correctness
+/// (DRC/LVS), and writes the routed DEF output with wire segments. Returns an
+/// error if routing fails or verification detects shorts or opens.
 fn run_routing(config: &Config) -> anyhow::Result<()> {
     let mut db = NetlistDB::new();
 
@@ -392,8 +492,7 @@ fn run_routing(config: &Config) -> anyhow::Result<()> {
             .map(|(h, _)| h as f64 / 1000.0)
             .unwrap_or(16.0);
 
-        // Pitch = Height / 8 (Tighter pitch for dense designs)
-        let pitch = std_height / 8.0;
+        let pitch = std_height / 16.0;
         let width = pitch * 0.5;
 
         log::warn!(
@@ -401,7 +500,7 @@ fn run_routing(config: &Config) -> anyhow::Result<()> {
             std_height
         );
         log::info!(
-            "Inferred Pitch = {:.2} (Height / 8.0). Adding 6 Layers (M1-M6).",
+            "Inferred Pitch = {:.2} (Height / 16.0). Adding 6 Layers (M1-M6).",
             pitch
         );
 
@@ -441,6 +540,14 @@ fn run_routing(config: &Config) -> anyhow::Result<()> {
     Ok(())
 }
 
+/// Writes the netlist database to a DEF file in standard format.
+///
+/// Serializes all design data including die area, component placements,
+/// I/O pin locations, net connectivity, and routing segments. Converts
+/// internal floating-point coordinates to integer microns using the
+/// standard DEF units (1000 units per micron). Handles special cases
+/// such as virtual IO cells, via generation for layer transitions, and
+/// segment compression for degenerate wire segments that represent vias.
 fn save_def(db: &NetlistDB, filename: &str) -> std::io::Result<()> {
     use std::io::Write;
     let mut file = std::fs::File::create(filename)?;

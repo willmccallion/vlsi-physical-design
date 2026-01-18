@@ -1,172 +1,56 @@
-use crate::algo::astar::{AStar, GuideOracle, NoGuide};
+/// Fast guide oracle for efficient guide constraint checking.
+///
+/// Provides efficient guide constraint checking for detailed routing using
+/// precomputed coordinate mapping tables and tag-based tracking. Maintains
+/// precomputed mapping tables from fine grid coordinates to coarse grid
+/// coordinates, allowing O(1) guide checking. Expands guides by a small radius
+/// to provide routing flexibility while maintaining guide adherence. Uses tag-based
+/// tracking to support multiple nets without clearing the entire grid.
+mod oracle;
+/// A* pathfinding router with guide constraints and topology generation.
+///
+/// Routes individual nets using A* pathfinding with guide constraints. Converts
+/// pin positions to grid coordinates, sorts pins by proximity to build a minimum
+/// spanning tree topology, then routes paths sequentially from the tree root to
+/// each remaining pin. Uses A* with guide constraints and falls back to
+/// unconstrained routing if guide-constrained routing fails. Generates routing
+/// segments from grid paths for database storage.
+mod router;
+/// Spatial data structure for batching routing operations.
+///
+/// Maintains a grid of bins to track which regions have active routing operations.
+/// Used to schedule routing batches that don't spatially overlap, enabling parallel
+/// execution without conflicts. Uses tag-based tracking to reset state efficiently
+/// between batches, providing O(1) reset performance without clearing the entire
+/// array. The bin size controls the granularity of spatial conflict detection.
+mod scheduler;
+
+use self::oracle::FastGuideOracle;
+use self::router::{generate_segments_from_topology, route_net_dr_pure};
+use self::scheduler::SpatialSet;
+
+use crate::algo::astar::AStar;
 use crate::grid::RoutingGrid;
 use crate::grid::dense::DenseGrid;
 use crate::utils::conversion::GridConverter;
-use eda_common::db::core::{NetlistDB, RouteSegment};
+use eda_common::db::core::NetlistDB;
 use eda_common::geom::coord::GridCoord;
 use eda_common::util::config::DetailedRoutingConfig;
-use rand::seq::SliceRandom;
-use rand::thread_rng;
+use eda_common::util::visualization::draw_congestion_heatmap;
 use rayon::prelude::*;
 use std::collections::{HashMap, HashSet};
 use std::io::Write;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::Instant;
 
-#[derive(Clone)]
-struct FastGuideOracle {
-    x_map: Vec<u32>,
-    y_map: Vec<u32>,
-    grid: Vec<u32>,
-    coarse_w: u32,
-    coarse_h: u32,
-    current_net_id: u32,
-    allow_all: bool,
-}
-
-impl FastGuideOracle {
-    fn new(
-        fine_w: u32,
-        fine_h: u32,
-        coarse_w: u32,
-        coarse_h: u32,
-        layers: u8,
-        fine_conv: &GridConverter,
-        coarse_conv: &GridConverter,
-    ) -> Self {
-        let mut x_map = vec![0; fine_w as usize];
-        let mut y_map = vec![0; fine_h as usize];
-
-        for x in 0..fine_w {
-            let fine_coord = GridCoord::new(x, 0, 0);
-            let world_pos = fine_conv.to_world(fine_coord);
-            let coarse_coord = coarse_conv.to_grid(world_pos, 0);
-            x_map[x as usize] = coarse_coord.x.min(coarse_w - 1);
-        }
-
-        for y in 0..fine_h {
-            let fine_coord = GridCoord::new(0, y, 0);
-            let world_pos = fine_conv.to_world(fine_coord);
-            let coarse_coord = coarse_conv.to_grid(world_pos, 0);
-            y_map[y as usize] = coarse_coord.y.min(coarse_h - 1);
-        }
-
-        let size = (coarse_w * coarse_h * layers as u32) as usize;
-        Self {
-            x_map,
-            y_map,
-            grid: vec![0; size],
-            coarse_w,
-            coarse_h,
-            current_net_id: 0,
-            allow_all: false,
-        }
-    }
-
-    fn prepare(&mut self, net_id: usize, guides: &HashSet<GridCoord>) {
-        if guides.is_empty() {
-            self.allow_all = true;
-            return;
-        }
-        self.allow_all = false;
-
-        self.current_net_id = (net_id as u32) + 1;
-        if self.current_net_id == 0 {
-            self.grid.fill(0);
-            self.current_net_id = 1;
-        }
-
-        let w = self.coarse_w as i32;
-        let h = self.coarse_h as i32;
-
-        for &g in guides {
-            for dy in -1..=1 {
-                for dx in -1..=1 {
-                    let nx = g.x as i32 + dx;
-                    let ny = g.y as i32 + dy;
-
-                    if nx >= 0 && nx < w && ny >= 0 && ny < h {
-                        let idx = (g.z as u32 * self.coarse_w * self.coarse_h
-                            + (ny as u32) * self.coarse_w
-                            + (nx as u32)) as usize;
-                        if idx < self.grid.len() {
-                            self.grid[idx] = self.current_net_id;
-                        }
-                    }
-                }
-            }
-        }
-    }
-}
-
-impl GuideOracle for FastGuideOracle {
-    #[inline(always)]
-    fn is_in_guide(&self, c: GridCoord) -> bool {
-        if self.allow_all {
-            return true;
-        }
-        let cx = unsafe { *self.x_map.get_unchecked(c.x as usize) };
-        let cy = unsafe { *self.y_map.get_unchecked(c.y as usize) };
-        let idx = (c.z as u32 * self.coarse_w * self.coarse_h + cy * self.coarse_w + cx) as usize;
-        unsafe { *self.grid.get_unchecked(idx) == self.current_net_id }
-    }
-}
-
-struct SpatialSet {
-    grid: Vec<u32>,
-    w: u32,
-    h: u32,
-    bin_size: u32,
-    current_batch: u32,
-}
-
-impl SpatialSet {
-    fn new(width: u32, height: u32, bin_size: u32) -> Self {
-        let w = (width + bin_size - 1) / bin_size;
-        let h = (height + bin_size - 1) / bin_size;
-        Self {
-            grid: vec![0; (w * h) as usize],
-            w,
-            h,
-            bin_size,
-            current_batch: 0,
-        }
-    }
-
-    fn reset(&mut self) {
-        self.current_batch += 1;
-        if self.current_batch == 0 {
-            self.grid.fill(0);
-            self.current_batch = 1;
-        }
-    }
-
-    fn try_insert(&mut self, bbox: &(i32, i32, i32, i32)) -> bool {
-        let min_x = (bbox.0.max(0) as u32) / self.bin_size;
-        let max_x = (bbox.1.max(0) as u32) / self.bin_size;
-        let min_y = (bbox.2.max(0) as u32) / self.bin_size;
-        let max_y = (bbox.3.max(0) as u32) / self.bin_size;
-
-        let limit_x = self.w - 1;
-        let limit_y = self.h - 1;
-
-        for y in min_y..=max_y.min(limit_y) {
-            for x in min_x..=max_x.min(limit_x) {
-                if self.grid[(y * self.w + x) as usize] == self.current_batch {
-                    return false;
-                }
-            }
-        }
-
-        for y in min_y..=max_y.min(limit_y) {
-            for x in min_x..=max_x.min(limit_x) {
-                self.grid[(y * self.w + x) as usize] = self.current_batch;
-            }
-        }
-        true
-    }
-}
-
+/// Executes detailed routing on a fine grid using global routing guides.
+///
+/// First performs initial routing of all nets in batches, then iteratively
+/// reroutes congested nets using rip-up-and-reroute. Uses spatial batching
+/// to parallelize routing while avoiding conflicts. Tracks congestion history
+/// and adaptively increases penalties for persistent congestion. Generates
+/// routing segments from the grid paths and updates the database. Returns
+/// an error if routing fails to converge.
 pub fn run(
     db: &mut NetlistDB,
     config: &DetailedRoutingConfig,
@@ -227,8 +111,14 @@ pub fn run(
     );
 
     let mut grid = DenseGrid::new(grid_w, grid_h, layers, config.capacity);
-    let converter = GridConverter::from_steps(step_x, step_y, off_x, off_y, grid_w, grid_h);
-
+    let converter = GridConverter::from_steps(
+        step_x,
+        step_y,
+        db.die_area.min.x,
+        db.die_area.min.y,
+        grid_w,
+        grid_h,
+    );
     for i in 0..db.num_cells() {
         let cell = &db.cells[i];
         let pos = db.positions[i];
@@ -269,7 +159,7 @@ pub fn run(
     let progress = AtomicUsize::new(0);
 
     for (b_idx, chunk) in net_indices.chunks(batch_size).enumerate() {
-        let batch_penalty = if b_idx == 0 { 0.5 } else { 1.5 };
+        let batch_penalty = if b_idx == 0 { 1.0 } else { 2.0 };
         grid.set_penalty(batch_penalty);
 
         let coarse_max = coarse_converter.to_grid(
@@ -308,10 +198,9 @@ pub fn run(
                         db,
                         batch_penalty,
                         oracle,
-                        100.0,
                         config,
                         0,
-                        true,
+                        b_idx > 0,
                     );
 
                     let p = progress.fetch_add(1, Ordering::Relaxed) + 1;
@@ -342,11 +231,13 @@ pub fn run(
 
     log::info!("Initial Route: {:.2}s", start_time.elapsed().as_secs_f32());
 
+    draw_congestion_heatmap(&grid, "output/dr_initial_congestion.png");
+
     let mut collision_penalty = config.initial_penalty.max(2.5);
     let history_increment = config.history_increment.max(1.0);
     let mut last_conflicts = usize::MAX;
     let mut stagnation_counter = 0;
-    let mut spatial_set = SpatialSet::new(grid_w, grid_h, 60);
+    let mut spatial_set = SpatialSet::new(grid_w, grid_h, 200);
 
     for iter in 0..config.max_iterations {
         let start = Instant::now();
@@ -374,6 +265,32 @@ pub fn run(
             stagnation_counter = 0;
         }
         last_conflicts = conflicts;
+
+        if stagnation_counter > config.stagnation_threshold {
+            log::warn!(
+                "Stagnation detected ({} iters). Dumping congestion heatmap...",
+                stagnation_counter
+            );
+            draw_congestion_heatmap(&grid, &format!("output/dr_congestion_iter_{}.png", iter));
+
+            if stagnation_counter == config.stagnation_threshold + 1 {
+                log::warn!("Dumping first 5 failing nets for debug:");
+                for &net_id in failed_nets.iter().take(5) {
+                    let net = &db.nets[net_id];
+                    log::warn!(" - Net {}: {} pins", net.name, net.pins.len());
+                    for &pin in &net.pins {
+                        let cell_id = db.pin_to_cell[pin.index()];
+                        let pos = db.positions[cell_id.index()];
+                        log::warn!(
+                            "   - Pin on cell {} at ({:.2}, {:.2})",
+                            db.cells[cell_id.index()].name,
+                            pos.x,
+                            pos.y
+                        );
+                    }
+                }
+            }
+        }
 
         if stagnation_counter > 2 * config.stagnation_threshold {
             log::error!("Routing stagnated. Stopping early.");
@@ -450,8 +367,30 @@ pub fn run(
             }
         }
 
-        let mut nets_vec: Vec<usize> = nets_to_reroute.into_iter().collect();
-        nets_vec.shuffle(&mut thread_rng());
+        let mut nets_with_priority: Vec<(usize, u32)> = nets_to_reroute
+            .into_iter()
+            .map(|net_id| {
+                let occupied = &net_paths[net_id];
+                let congestion_score: u32 =
+                    occupied.iter().filter(|&&c| grid.is_congested(c)).count() as u32;
+                (net_id, congestion_score + ripup_counts[net_id])
+            })
+            .collect();
+
+        nets_with_priority.sort_by(|a, b| b.1.cmp(&a.1));
+        let mut nets_vec: Vec<usize> = nets_with_priority.into_iter().map(|(id, _)| id).collect();
+
+        let max_reroute = if iter == 0 {
+            (nets_vec.len() * 15 / 100).max(500).min(nets_vec.len())
+        } else if iter < 3 {
+            (nets_vec.len() * 30 / 100).max(1500).min(nets_vec.len())
+        } else if iter < 8 {
+            (nets_vec.len() * 50 / 100).max(2500).min(nets_vec.len())
+        } else {
+            nets_vec.len()
+        };
+
+        nets_vec.truncate(max_reroute);
 
         for &net_id in &nets_vec {
             ripup_counts[net_id] += 1;
@@ -535,6 +474,7 @@ pub fn run(
                     ),
                     |(solver, oracle), &net_id| {
                         oracle.prepare(net_id, &guides[net_id]);
+                        let use_strict = iter > 2 && ripup_counts[net_id] < 3;
                         let res = route_net_dr_pure(
                             &db.nets[net_id],
                             &grid,
@@ -543,10 +483,9 @@ pub fn run(
                             db,
                             collision_penalty,
                             oracle,
-                            1.0,
                             config,
                             ripup_counts[net_id],
-                            false, // STRICT MODE DISABLED for Rip-up
+                            use_strict,
                         );
 
                         let p = progress.fetch_add(1, Ordering::Relaxed) + 1;
@@ -630,290 +569,4 @@ pub fn run(
     }
 
     Ok(())
-}
-
-fn generate_segments_from_topology(
-    topology: &[Vec<GridCoord>],
-    pin_locations: &HashMap<(u32, u32, u8), eda_common::geom::point::Point<f64>>,
-    converter: &GridConverter,
-) -> Vec<RouteSegment> {
-    let mut segments = Vec::new();
-    let mut adj: HashMap<GridCoord, HashSet<GridCoord>> = HashMap::new();
-    let mut nodes = HashSet::new();
-
-    for path in topology {
-        for i in 0..path.len().saturating_sub(1) {
-            let u = path[i];
-            let v = path[i + 1];
-            if u != v {
-                adj.entry(u).or_default().insert(v);
-                adj.entry(v).or_default().insert(u);
-                nodes.insert(u);
-                nodes.insert(v);
-            }
-        }
-    }
-
-    let mut stop_points = HashSet::new();
-    for &u in &nodes {
-        if pin_locations.contains_key(&(u.x, u.y, u.z)) {
-            stop_points.insert(u);
-        }
-
-        let neighbors = if let Some(n) = adj.get(&u) {
-            n
-        } else {
-            continue;
-        };
-
-        if neighbors.len() != 2 {
-            stop_points.insert(u);
-        } else {
-            let ns: Vec<&GridCoord> = neighbors.iter().collect();
-            let n1 = ns[0];
-            let n2 = ns[1];
-
-            if n1.z != u.z || n2.z != u.z {
-                stop_points.insert(u);
-            } else if (n1.x != n2.x) && (n1.y != n2.y) {
-                stop_points.insert(u);
-            }
-        }
-
-        for &v in neighbors {
-            if v.z != u.z {
-                stop_points.insert(u);
-            }
-        }
-    }
-
-    let mut visited_edges = HashSet::new();
-    for &start_node in &stop_points {
-        if let Some(neighbors) = adj.get(&start_node) {
-            for &next_node in neighbors {
-                if next_node.z != start_node.z {
-                    continue;
-                }
-
-                let edge_key = if start_node.x < next_node.x
-                    || (start_node.x == next_node.x && start_node.y < next_node.y)
-                {
-                    (start_node, next_node)
-                } else {
-                    (next_node, start_node)
-                };
-
-                if visited_edges.contains(&edge_key) {
-                    continue;
-                }
-
-                let mut curr = next_node;
-                let mut prev = start_node;
-
-                while !stop_points.contains(&curr) {
-                    let n_neighbors = adj.get(&curr).unwrap();
-                    let mut found_next = false;
-                    for &n in n_neighbors {
-                        if n != prev && n.z == curr.z {
-                            prev = curr;
-                            curr = n;
-                            found_next = true;
-                            break;
-                        }
-                    }
-                    if !found_next {
-                        break;
-                    }
-                }
-
-                let mut w_prev = start_node;
-                let mut w_curr = next_node;
-                loop {
-                    let key =
-                        if w_prev.x < w_curr.x || (w_prev.x == w_curr.x && w_prev.y < w_curr.y) {
-                            (w_prev, w_curr)
-                        } else {
-                            (w_curr, w_prev)
-                        };
-                    visited_edges.insert(key);
-
-                    if w_curr == curr {
-                        break;
-                    }
-
-                    let n_neighbors = adj.get(&w_curr).unwrap();
-                    for &n in n_neighbors {
-                        if n != w_prev && n.z == w_curr.z {
-                            w_prev = w_curr;
-                            w_curr = n;
-                            break;
-                        }
-                    }
-                }
-
-                let p1 = converter.to_world(start_node);
-                let p2 = converter.to_world(curr);
-                segments.push(RouteSegment {
-                    layer: start_node.z,
-                    p1,
-                    p2,
-                });
-            }
-        }
-    }
-
-    for &u in &nodes {
-        if let Some(neighbors) = adj.get(&u) {
-            for &v in neighbors {
-                if v.z > u.z {
-                    let p = converter.to_world(u);
-                    segments.push(RouteSegment {
-                        layer: u.z,
-                        p1: p,
-                        p2: p,
-                    });
-                }
-            }
-        }
-    }
-
-    for (&(x, y, z), &exact_pos) in pin_locations {
-        let grid_coord = GridCoord::new(x, y, z);
-        if nodes.contains(&grid_coord) {
-            let grid_pos = converter.to_world(grid_coord);
-            if (grid_pos.x - exact_pos.x).abs() > 1e-6 || (grid_pos.y - exact_pos.y).abs() > 1e-6 {
-                segments.push(RouteSegment {
-                    layer: z,
-                    p1: grid_pos,
-                    p2: exact_pos,
-                });
-            }
-            for l in 0..z {
-                segments.push(RouteSegment {
-                    layer: l,
-                    p1: exact_pos,
-                    p2: exact_pos,
-                });
-            }
-        }
-    }
-
-    segments
-}
-
-fn route_net_dr_pure<O: GuideOracle>(
-    net: &eda_common::db::core::NetData,
-    grid: &DenseGrid,
-    solver: &mut AStar,
-    converter: &GridConverter,
-    db: &NetlistDB,
-    penalty: f64,
-    oracle: &O,
-    _pattern_threshold: f64,
-    config: &DetailedRoutingConfig,
-    ripup_count: u32,
-    strict_mode: bool,
-) -> Option<(Vec<GridCoord>, Vec<Vec<GridCoord>>)> {
-    let pin_coords: Vec<GridCoord> = net
-        .pins
-        .iter()
-        .map(|&pid| {
-            let cell_id = db.pin_to_cell[pid.index()];
-            let pos = db.get_pin_position(pid, &db.positions[cell_id.index()]);
-
-            let die_w = db.die_area.width();
-            let die_h = db.die_area.height();
-            let is_io = pos.x <= 0.001
-                || pos.x >= die_w - 0.001
-                || pos.y <= 0.001
-                || pos.y >= die_h - 0.001;
-
-            let layer = if is_io { 2 } else { 1 };
-            let safe_layer = layer.min(grid.layers() - 1);
-
-            converter.to_grid(pos, safe_layer)
-        })
-        .collect();
-
-    let mut pin_indices: Vec<usize> = (0..net.pins.len()).collect();
-    let mut sorted_indices = Vec::with_capacity(net.pins.len());
-    let mut current_idx = pin_indices.remove(0);
-    sorted_indices.push(current_idx);
-
-    while !pin_indices.is_empty() {
-        let curr_pos = pin_coords[current_idx];
-        let mut best_dist = u32::MAX;
-        let mut best_k = 0;
-        for (k, &idx) in pin_indices.iter().enumerate() {
-            let target_pos = pin_coords[idx];
-            let dist = (curr_pos.x as i32 - target_pos.x as i32).abs()
-                + (curr_pos.y as i32 - target_pos.y as i32).abs();
-            if (dist as u32) < best_dist {
-                best_dist = dist as u32;
-                best_k = k;
-            }
-        }
-        current_idx = pin_indices.remove(best_k);
-        sorted_indices.push(current_idx);
-    }
-
-    let start_idx = sorted_indices[0];
-    let mut tree_nodes = vec![pin_coords[start_idx]];
-
-    let mut paths = Vec::new();
-    let mut occupied_set = HashSet::new();
-    occupied_set.insert(pin_coords[start_idx]);
-
-    let margin_multiplier = 1.0 + (ripup_count as f64 * 0.2);
-    let max_expansions = 300_000 + (ripup_count * 10_000);
-
-    for i in 1..sorted_indices.len() {
-        let next_pin_idx = sorted_indices[i];
-        let target = pin_coords[next_pin_idx];
-
-        let path_opt = solver
-            .find_path(
-                grid,
-                db,
-                &tree_nodes,
-                target,
-                penalty,
-                config.astar_heuristic_weight,
-                config.astar_window_margin_base,
-                margin_multiplier,
-                oracle,
-                &pin_coords,
-                max_expansions,
-                strict_mode,
-            )
-            .or_else(|| {
-                solver.find_path(
-                    grid,
-                    db,
-                    &tree_nodes,
-                    target,
-                    penalty,
-                    config.astar_heuristic_weight,
-                    config.astar_window_margin_max,
-                    1.0,
-                    &NoGuide,
-                    &pin_coords,
-                    max_expansions * 2,
-                    strict_mode,
-                )
-            });
-
-        if let Some(path) = path_opt {
-            tree_nodes.extend_from_slice(&path);
-            for &node in &path {
-                occupied_set.insert(node);
-            }
-            paths.push(path);
-        } else {
-            return None;
-        }
-    }
-
-    let occupied_vec: Vec<GridCoord> = occupied_set.into_iter().collect();
-    Some((occupied_vec, paths))
 }

@@ -1,8 +1,20 @@
+//! Nesterov-Accelerated Gradient Descent Optimizer.
+//!
+//! Implements the Nesterov accelerated gradient descent algorithm for
+//! placement optimization. This algorithm uses momentum to accelerate
+//! convergence compared to standard gradient descent, making it well-suited
+//! for large-scale placement problems.
+
 use crate::physics::PhysicsContext;
 use eda_common::db::core::NetlistDB;
 use eda_common::geom::point::Point;
 use rand::Rng;
 
+/// Parameters controlling the Nesterov optimizer's behavior.
+///
+/// Specifies convergence criteria, learning rate, and objective function
+/// weights. These parameters are typically tuned based on design characteristics
+/// and desired trade-offs between runtime and solution quality.
 pub struct NesterovParams {
     pub max_iterations: usize,
     pub initial_learning_rate: f64,
@@ -12,6 +24,12 @@ pub struct NesterovParams {
     pub electro_force_multiplier: f64,
 }
 
+/// Nesterov-accelerated gradient descent optimizer for placement.
+///
+/// Maintains state for the current positions (x_k), previous positions (x_prev),
+/// and auxiliary positions (y_k) used in the Nesterov update. The optimizer
+/// iteratively updates positions using gradient information from the physics
+/// context until convergence or maximum iterations.
 pub struct NesterovOptimizer {
     params: NesterovParams,
     x_k: Vec<Point<f64>>,
@@ -21,6 +39,11 @@ pub struct NesterovOptimizer {
 }
 
 impl NesterovOptimizer {
+    /// Creates a new Nesterov optimizer with the specified parameters.
+    ///
+    /// Allocates state vectors sized for the number of movable cells. The
+    /// optimizer will initialize positions randomly around the die center
+    /// when optimize() is called.
     pub fn new(params: NesterovParams, num_movable: usize) -> Self {
         Self {
             params,
@@ -31,6 +54,15 @@ impl NesterovOptimizer {
         }
     }
 
+    /// Optimizes cell positions to minimize wirelength and density violations.
+    ///
+    /// Initializes positions randomly around the die center, then iteratively
+    /// updates positions using Nesterov-accelerated gradient descent. Each
+    /// iteration computes gradients from the physics context, applies the
+    /// Nesterov update with momentum, and clamps positions to die boundaries.
+    /// Convergence is detected when average cell movement falls below the
+    /// threshold and density violations are low. Returns an error if optimization
+    /// fails, otherwise updates the database positions and returns Ok(()).
     pub fn optimize(
         &mut self,
         db: &mut NetlistDB,
@@ -63,7 +95,6 @@ impl NesterovOptimizer {
             }
         }
 
-        // Initialize history vectors
         self.x_prev.copy_from_slice(&self.x_k);
         self.y_k.copy_from_slice(&self.x_k);
 
@@ -71,7 +102,6 @@ impl NesterovOptimizer {
         let mut step_size = self.params.initial_learning_rate;
 
         for k in 0..self.params.max_iterations {
-            // Compute gradient at y_k
             let (wl_cost, density_cost) = physics.compute_gradients(
                 db,
                 &self.y_k,
@@ -81,7 +111,6 @@ impl NesterovOptimizer {
                 self.params.electro_force_multiplier,
             );
 
-            // Convergence check
             let mut total_disp = 0.0;
             for (curr, prev) in self.x_k.iter().zip(self.x_prev.iter()) {
                 total_disp += (curr.x - prev.x).abs() + (curr.y - prev.y).abs();
@@ -99,7 +128,6 @@ impl NesterovOptimizer {
                 );
             }
 
-            // Convergence Condition
             if k > 500 && avg_disp < self.params.convergence_threshold && density_cost < 50000.0 {
                 log::info!("Converged: Cells stabilized at iteration {}", k);
                 Self::apply_clamping(db, &mut self.x_k);
@@ -107,7 +135,6 @@ impl NesterovOptimizer {
                 return Ok(());
             }
 
-            // Nesterov Update
             let mut x_next: Vec<Point<f64>> = self
                 .y_k
                 .iter()
@@ -145,6 +172,11 @@ impl NesterovOptimizer {
         Ok(())
     }
 
+    /// Clamps cell positions to ensure they remain within die boundaries.
+    ///
+    /// Adjusts positions so that cells do not extend beyond the die area,
+    /// accounting for cell dimensions. Fixed cells are not modified. This
+    /// is called after each gradient update to maintain feasibility.
     fn apply_clamping(db: &NetlistDB, positions: &mut [Point<f64>]) {
         let die_min_x = db.die_area.min.x;
         let die_min_y = db.die_area.min.y;

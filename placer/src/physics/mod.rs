@@ -1,10 +1,31 @@
+//! Physics-Based Placement Optimization.
+//!
+//! Implements the physics simulation used in analytical placement, including
+//! wirelength computation using weighted average (WA) approximation and
+//! density force computation using electrostatic analogy with FFT acceleration.
+
 pub mod electrostatics;
+/// Weighted average wirelength approximation for placement optimization.
+///
+/// Implements the weighted average (WA) wirelength model which approximates
+/// half-perimeter wirelength using smooth exponential functions. This provides
+/// differentiable gradients for optimization while closely approximating the
+/// true wirelength objective. The gamma parameter controls the smoothness of
+/// the approximation, with smaller values providing tighter approximation but
+/// potentially steeper gradients. Computes gradients with respect to each cell's
+/// position for use in gradient-based optimizers.
 pub mod wirelength;
 
 use eda_common::db::core::NetlistDB;
 use eda_common::geom::point::Point;
 use rustfft::FftPlanner;
 
+/// Context structure for physics-based placement computations.
+///
+/// Maintains the bin grid for density computation, FFT scratch space for
+/// efficient potential field computation, and intermediate arrays for
+/// gradient calculations. This structure is reused across iterations to
+/// avoid repeated allocations.
 pub struct PhysicsContext {
     pub bin_dim: usize,
     pub density_map: Vec<f64>,
@@ -12,12 +33,16 @@ pub struct PhysicsContext {
     pub electro_force_x: Vec<f64>,
     pub electro_force_y: Vec<f64>,
 
-    // FFT
     fft_planner: FftPlanner<f64>,
     fft_scratch: Vec<rustfft::num_complex::Complex<f64>>,
 }
 
 impl PhysicsContext {
+    /// Creates a new physics context with the specified bin grid dimensions.
+    ///
+    /// Allocates arrays for density maps, potential fields, and force vectors
+    /// sized to match the bin grid. Initializes the FFT planner for later use
+    /// in computing electrostatic potentials.
     pub fn new(width: usize, height: usize) -> Self {
         let size = width * height;
         Self {
@@ -31,6 +56,12 @@ impl PhysicsContext {
         }
     }
 
+    /// Computes gradients for wirelength and density objectives.
+    ///
+    /// Evaluates the wirelength cost using weighted average approximation
+    /// and the density cost using electrostatic force computation. Accumulates
+    /// gradients into the output_gradients array, which guides the optimizer's
+    /// search direction. Returns both cost values for monitoring convergence.
     pub fn compute_gradients(
         &mut self,
         db: &NetlistDB,
@@ -40,7 +71,6 @@ impl PhysicsContext {
         target_density: f64,
         force_multiplier: f64,
     ) -> (f64, f64) {
-        // Reset gradients
         for g in output_gradients.iter_mut() {
             *g = Point::new(0.0, 0.0);
         }

@@ -1,10 +1,28 @@
+//! Abacus Legalization Algorithm.
+//!
+//! Implements the Abacus legalization algorithm, which places cells in rows
+//! by clustering cells together and computing optimal cluster positions using
+//! weighted average calculations. The algorithm handles fixed cells, macros,
+//! and standard cells differently, with dynamic padding to prevent row overflow.
+
 use eda_common::db::core::NetlistDB;
 use eda_common::geom::point::Point;
 use eda_common::geom::rect::Rect;
 use std::collections::HashMap;
 
+/// Abacus legalization algorithm implementation.
+///
+/// This legalizer places cells into rows by grouping them into clusters
+/// and computing optimal cluster positions that minimize displacement from
+/// the analytical placement solution while ensuring no overlaps.
 pub struct AbacusLegalizer;
 
+/// A cluster of cells in the Abacus algorithm.
+///
+/// Represents a group of cells that have been merged together during
+/// legalization. The cluster's position (x) is computed as a weighted
+/// average of member cell positions. The q field stores the weighted
+/// sum used in position computation.
 struct Cluster {
     x: f64,
     width: f64,
@@ -13,6 +31,11 @@ struct Cluster {
     member_cells: Vec<usize>,
 }
 
+/// A sub-row region within a placement row.
+///
+/// Represents a contiguous free region in a row, bounded by fixed
+/// blockages or die boundaries. Tracks the used width and list of
+/// cells assigned to this sub-row for legalization.
 struct SubRow {
     min_x: f64,
     max_x: f64,
@@ -21,13 +44,20 @@ struct SubRow {
 }
 
 impl AbacusLegalizer {
+    /// Creates a new Abacus legalizer instance.
     pub fn new() -> Self {
         Self
     }
 
+    /// Legalizes the placement by moving cells to non-overlapping positions in rows.
+    ///
+    /// First places fixed cells and macros, then processes standard cells row by row.
+    /// For each row, cells are assigned to sub-rows (regions between fixed blockages),
+    /// then clustered using the Abacus algorithm to minimize displacement. Dynamic
+    /// padding is computed based on design utilization to prevent row overflow while
+    /// maintaining reasonable spacing. The algorithm searches nearby rows if the
+    /// ideal row cannot accommodate a cell.
     pub fn legalize(&self, db: &mut NetlistDB) {
-        const CELL_PADDING: f64 = 0.05;
-
         let mut height_counts = HashMap::new();
         for cell in &db.cells {
             if cell.height > 0.001 {
@@ -53,6 +83,39 @@ impl AbacusLegalizer {
         }
 
         let is_macro = |h: f64| h > row_height * 1.5;
+
+        let mut total_movable_width = 0.0;
+        let mut movable_cell_count = 0;
+
+        for cell in &db.cells {
+            if !cell.is_fixed && !is_macro(cell.height) {
+                total_movable_width += cell.width;
+                movable_cell_count += 1;
+            }
+        }
+
+        let total_row_capacity = (die_max_x - die_min_x) * (num_rows as f64);
+        let utilization = if total_row_capacity > 0.0 {
+            total_movable_width / total_row_capacity
+        } else {
+            1.0
+        };
+
+        let whitespace = total_row_capacity - total_movable_width;
+        let raw_padding = if movable_cell_count > 0 && whitespace > 0.0 {
+            (whitespace * 0.90 / (movable_cell_count as f64)).max(0.0)
+        } else {
+            0.0
+        };
+
+        let padding_per_cell = raw_padding.min(2.0);
+
+        log::info!(
+            "Abacus: Util={:.2}%. Padding: {:.2} units/cell (Raw: {:.2})",
+            utilization * 100.0,
+            padding_per_cell,
+            raw_padding
+        );
 
         let mut fixed_rects = Vec::new();
         let mut movable_macros = Vec::new();
@@ -180,7 +243,7 @@ impl AbacusLegalizer {
                     let mut min_dist = f64::INFINITY;
 
                     for (k, sub) in rows[r].iter().enumerate() {
-                        let cell_total_w = cell.width + CELL_PADDING;
+                        let cell_total_w = cell.width + padding_per_cell;
                         if sub.used_width + cell_total_w <= (sub.max_x - sub.min_x) {
                             let sub_center = (sub.min_x + sub.max_x) / 2.0;
                             let dist = (pos.x - sub_center).abs();
@@ -193,7 +256,7 @@ impl AbacusLegalizer {
 
                     if let Some(k) = best_sub {
                         rows[r][k].cells.push(i);
-                        rows[r][k].used_width += cell.width + CELL_PADDING;
+                        rows[r][k].used_width += cell.width + padding_per_cell;
                         placed = true;
                         break;
                     }
@@ -225,7 +288,7 @@ impl AbacusLegalizer {
                 let mut clusters: Vec<Cluster> = Vec::new();
 
                 for &cell_idx in &sub.cells {
-                    let cell_w = db.cells[cell_idx].width + CELL_PADDING;
+                    let cell_w = db.cells[cell_idx].width + padding_per_cell;
                     let target_x = db.positions[cell_idx].x;
 
                     let new_cluster = Cluster {
@@ -264,13 +327,19 @@ impl AbacusLegalizer {
 
                         db.positions[cell_idx].x = safe_x;
                         db.positions[cell_idx].y = row_y;
-                        current_x += db.cells[cell_idx].width + CELL_PADDING;
+                        current_x += db.cells[cell_idx].width + padding_per_cell;
                     }
                 }
             }
         }
     }
 
+    /// Collapses overlapping clusters into a single cluster.
+    ///
+    /// Merges clusters that overlap by computing a weighted average position
+    /// and combined width. This implements the core Abacus algorithm where
+    /// clusters are merged left-to-right until no overlaps remain. The min_x
+    /// parameter ensures clusters do not extend beyond the sub-row boundary.
     fn collapse(&self, clusters: &mut Vec<Cluster>, min_x: f64) {
         loop {
             if let Some(last) = clusters.last_mut() {

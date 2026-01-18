@@ -1,8 +1,25 @@
+//! Tetris Legalization Algorithm.
+//!
+//! Implements a simpler legalization algorithm that places cells one at a time
+//! in the nearest available slot, similar to the Tetris game. Cells are sorted
+//! by X coordinate and placed in the best available position near their ideal
+//! location, searching nearby rows if the ideal row is full.
+
 use eda_common::db::core::NetlistDB;
 use std::cmp::Ordering;
 
+/// Tetris-style legalization algorithm implementation.
+///
+/// Places cells sequentially by finding the nearest available slot to their
+/// ideal position. Simpler than Abacus but may produce less optimal results
+/// for designs with high utilization.
 pub struct TetrisLegalizer;
 
+/// Tracks occupancy intervals for a placement row in Tetris legalization.
+///
+/// Maintains a list of occupied intervals (start, end) and provides
+/// methods to find available slots for cell placement. The intervals
+/// are merged automatically to maintain a sorted, non-overlapping list.
 #[derive(Clone)]
 struct RowIntervals {
     blockages: Vec<(f64, f64)>,
@@ -11,6 +28,11 @@ struct RowIntervals {
 }
 
 impl RowIntervals {
+    /// Creates a new row intervals structure for a placement row.
+    ///
+    /// Initializes with a single blockage at the die minimum X to represent
+    /// the left boundary. The row_y parameter stores the Y coordinate of this
+    /// row for later use in cell placement.
     fn new(row_y: f64, die_min_x: f64, die_max_x: f64) -> Self {
         Self {
             blockages: vec![(die_min_x, die_min_x)],
@@ -19,6 +41,11 @@ impl RowIntervals {
         }
     }
 
+    /// Adds an occupied interval and merges overlapping intervals.
+    ///
+    /// Inserts a new occupancy interval and automatically merges it with
+    /// existing intervals if they overlap or are adjacent. Maintains the
+    /// intervals in sorted order for efficient slot finding.
     fn add_occupancy(&mut self, start: f64, end: f64) {
         self.blockages.push((start, end));
         self.blockages
@@ -43,6 +70,12 @@ impl RowIntervals {
         self.blockages = merged;
     }
 
+    /// Finds the best available slot for a cell of the given width.
+    ///
+    /// Searches all gaps between occupied intervals to find the slot closest
+    /// to the target X position that can accommodate the cell width. Returns
+    /// the slot position and distance from target, or None if no suitable
+    /// slot exists in this row.
     fn find_best_slot(&self, target_x: f64, width: f64) -> Option<(f64, f64)> {
         let mut best_x = None;
         let mut min_dist = f64::INFINITY;
@@ -77,10 +110,18 @@ impl RowIntervals {
 }
 
 impl TetrisLegalizer {
+    /// Creates a new Tetris legalizer instance.
     pub fn new() -> Self {
         Self
     }
 
+    /// Legalizes the placement by placing cells in the nearest available slots.
+    ///
+    /// Sorts cells by X coordinate, then for each cell searches nearby rows
+    /// (starting from the ideal row) to find the best available slot. The
+    /// algorithm maintains occupancy intervals for each row to track available
+    /// space. If no slot is found within the search radius, the cell is placed
+    /// at the die boundary as a fallback.
     pub fn legalize(&self, db: &mut NetlistDB) {
         let row_height = db
             .cells

@@ -1,6 +1,20 @@
+//! Weighted Average Wirelength Approximation.
+//!
+//! Implements the weighted average (WA) wirelength model which approximates
+//! half-perimeter wirelength using smooth exponential functions. This provides
+//! differentiable gradients for optimization while closely approximating the
+//! true wirelength objective.
+
 use eda_common::db::core::NetlistDB;
 use eda_common::geom::point::Point;
 
+/// Computes wirelength cost and gradients using weighted average approximation.
+///
+/// For each net, computes the WA approximation of half-perimeter wirelength
+/// by taking weighted averages of pin positions using exponential weighting.
+/// The gamma parameter controls the smoothness of the approximation. Computes
+/// gradients with respect to each cell's position and accumulates them into
+/// the gradients array. Returns the total wirelength cost.
 pub fn compute_wa_gradient(
     db: &NetlistDB,
     positions: &[Point<f64>],
@@ -20,7 +34,6 @@ pub fn compute_wa_gradient(
         let mut max_y = f64::NEG_INFINITY;
         let mut min_y = f64::INFINITY;
 
-        // Find bounds for LogSumExp stability
         for &pin_id in &net.pins {
             let cell_id = db.pin_to_cell[pin_id.index()];
             let pos = db.get_pin_position(pin_id, &positions[cell_id.index()]);
@@ -30,7 +43,6 @@ pub fn compute_wa_gradient(
             min_y = min_y.min(pos.y);
         }
 
-        // Compute WA terms
         let mut sum_exp_x_pos = 0.0;
         let mut sum_x_exp_x_pos = 0.0;
         let mut sum_exp_x_neg = 0.0;
@@ -70,8 +82,6 @@ pub fn compute_wa_gradient(
 
         total_wl += (wa_x_pos - wa_x_neg) + (wa_y_pos - wa_y_neg);
 
-        // Compute gradients
-        // dWA/dx_i = ( (1 + (x_i - WA)/gamma) * exp(...) ) / Sum exp
         for &pin_id in &net.pins {
             let cell_id = db.pin_to_cell[pin_id.index()];
             let pos = db.get_pin_position(pin_id, &positions[cell_id.index()]);

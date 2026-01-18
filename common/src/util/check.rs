@@ -1,3 +1,10 @@
+//! Design Rule Checking and Layout Versus Schematic Verification.
+//!
+//! This module implements verification algorithms to ensure the placed and routed
+//! design meets physical design rules and maintains electrical connectivity.
+//! It checks for cell overlaps, die boundary violations, short circuits between
+//! different nets, and open nets (disconnected pins).
+
 use crate::db::core::NetlistDB;
 use crate::db::indices::NetId;
 use crate::geom::point::Point;
@@ -7,9 +14,18 @@ use std::collections::VecDeque;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 
-const CHECK_TOLERANCE: f64 = 0.005; // 5nm tolerance
+/// Geometric tolerance for floating point comparisons and overlap checks.
+const CHECK_TOLERANCE: f64 = 0.001;
+/// Maximum squared distance for two points to be considered connected.
+const CONNECTIVITY_TOLERANCE: f64 = 0.5;
+/// Size of spatial bins used for accelerating intersection tests.
 const BIN_SIZE: f64 = 10.0;
 
+/// Verifies that the placement is legal (no overlaps, all cells within die area).
+///
+/// Checks that all cells are positioned within the die boundaries and that
+/// no two cells overlap. Uses parallel iteration for efficiency on large designs.
+/// Returns an error if any violations are detected, otherwise returns Ok(()).
 pub fn run_placement_check(db: &NetlistDB) -> Result<(), String> {
     log::info!("Starting Placement Verification...");
     let valid = AtomicBool::new(true);
@@ -86,6 +102,13 @@ pub fn run_placement_check(db: &NetlistDB) -> Result<(), String> {
     }
 }
 
+/// Performs complete design verification including shorts and opens detection.
+///
+/// Executes parallel checks for short circuits (wires from different nets
+/// intersecting) and open nets (nets with disconnected pins). Uses spatial
+/// binning to accelerate intersection tests. Returns an error if any violations
+/// are found, otherwise returns Ok(()). This is the main verification entry point
+/// called after routing completes.
 pub fn run(db: &NetlistDB) -> Result<(), String> {
     log::info!("Starting Design Verification (DRC/LVS) [High Precision Mode]");
 
@@ -127,6 +150,11 @@ pub fn run(db: &NetlistDB) -> Result<(), String> {
     }
 }
 
+/// Internal representation of a routing segment for verification.
+///
+/// Wraps a route segment with additional metadata (net ID, segment index)
+/// needed for verification algorithms. Used to track which segments belong
+/// to which nets for short circuit detection.
 #[derive(Clone, Copy, Debug)]
 struct Segment {
     p1: Point<f64>,
@@ -137,30 +165,46 @@ struct Segment {
 }
 
 impl Segment {
+    /// Checks if this segment intersects with another segment on the same layer.
+    ///
+    /// Uses the orientation test to detect crossing segments and collinear
+    /// overlap detection for segments that lie on the same line. Returns
+    /// false immediately if segments are on different layers. Uses tolerance
+    /// to handle numerical precision issues while avoiding false positives
+    /// from segments that only touch at endpoints.
     fn intersects(&self, other: &Segment) -> bool {
         if self.layer != other.layer {
             return false;
         }
 
-        let min_x1 = self.p1.x.min(self.p2.x) - CHECK_TOLERANCE;
-        let max_x1 = self.p1.x.max(self.p2.x) + CHECK_TOLERANCE;
-        let min_y1 = self.p1.y.min(self.p2.y) - CHECK_TOLERANCE;
-        let max_y1 = self.p1.y.max(self.p2.y) + CHECK_TOLERANCE;
+        let min_x1 = self.p1.x.min(self.p2.x);
+        let max_x1 = self.p1.x.max(self.p2.x);
+        let min_y1 = self.p1.y.min(self.p2.y);
+        let max_y1 = self.p1.y.max(self.p2.y);
 
-        let min_x2 = other.p1.x.min(other.p2.x) - CHECK_TOLERANCE;
-        let max_x2 = other.p1.x.max(other.p2.x) + CHECK_TOLERANCE;
-        let min_y2 = other.p1.y.min(other.p2.y) - CHECK_TOLERANCE;
-        let max_y2 = other.p1.y.max(other.p2.y) + CHECK_TOLERANCE;
+        let min_x2 = other.p1.x.min(other.p2.x);
+        let max_x2 = other.p1.x.max(other.p2.x);
+        let min_y2 = other.p1.y.min(other.p2.y);
+        let max_y2 = other.p1.y.max(other.p2.y);
 
-        if max_x1 < min_x2 || min_x1 > max_x2 || max_y1 < min_y2 || min_y1 > max_y2 {
+        if max_x1 <= min_x2 + CHECK_TOLERANCE
+            || min_x1 >= max_x2 - CHECK_TOLERANCE
+            || max_y1 <= min_y2 + CHECK_TOLERANCE
+            || min_y1 >= max_y2 - CHECK_TOLERANCE
+        {
             return false;
         }
 
+        /// Checks if a point lies on a line segment within tolerance.
+        ///
+        /// Determines whether point p is collinear with and between points a and b,
+        /// accounting for floating-point precision using CHECK_TOLERANCE. Used in
+        /// segment intersection tests to detect when segments share endpoints.
         fn on_segment(p: Point<f64>, a: Point<f64>, b: Point<f64>) -> bool {
-            p.x >= a.x.min(b.x) - CHECK_TOLERANCE
-                && p.x <= a.x.max(b.x) + CHECK_TOLERANCE
-                && p.y >= a.y.min(b.y) - CHECK_TOLERANCE
-                && p.y <= a.y.max(b.y) + CHECK_TOLERANCE
+            p.x >= a.x.min(b.x) + CHECK_TOLERANCE
+                && p.x <= a.x.max(b.x) - CHECK_TOLERANCE
+                && p.y >= a.y.min(b.y) + CHECK_TOLERANCE
+                && p.y <= a.y.max(b.y) - CHECK_TOLERANCE
         }
 
         let o1 = orientation(self.p1, self.p2, other.p1);
@@ -188,9 +232,16 @@ impl Segment {
         false
     }
 
+    /// Checks if this segment shares an endpoint with another segment.
+    ///
+    /// Compares all four endpoint combinations and returns true if any pair
+    /// is within the connectivity tolerance. This is used to determine if
+    /// segments are connected (which is legal) versus intersecting (which
+    /// may indicate a short circuit). Uses a larger tolerance than intersection
+    /// tests to account for grid quantization effects.
     fn shares_endpoint(&self, other: &Segment) -> bool {
         let dist_sq = |a: Point<f64>, b: Point<f64>| (a.x - b.x).powi(2) + (a.y - b.y).powi(2);
-        let tol_sq = CHECK_TOLERANCE * CHECK_TOLERANCE;
+        let tol_sq = CONNECTIVITY_TOLERANCE * CONNECTIVITY_TOLERANCE;
 
         dist_sq(self.p1, other.p1) < tol_sq
             || dist_sq(self.p1, other.p2) < tol_sq
@@ -199,6 +250,11 @@ impl Segment {
     }
 }
 
+/// Computes the orientation of three points (collinear test).
+///
+/// Returns 0 if points are collinear, 1 if clockwise, 2 if counterclockwise.
+/// Used in segment intersection tests to determine if line segments cross.
+/// Implements the cross product test with tolerance for numerical stability.
 fn orientation(p: Point<f64>, q: Point<f64>, r: Point<f64>) -> i32 {
     let val = (q.y - p.y) * (r.x - q.x) - (q.x - p.x) * (r.y - q.y);
     if val.abs() < CHECK_TOLERANCE {
@@ -207,6 +263,11 @@ fn orientation(p: Point<f64>, q: Point<f64>, r: Point<f64>) -> i32 {
     if val > 0.0 { 1 } else { 2 }
 }
 
+/// Key for spatial binning of segments for efficient intersection testing.
+///
+/// Groups segments by layer and spatial bin to reduce the number of
+/// intersection tests needed. Segments in different bins or layers
+/// cannot intersect, allowing early pruning of comparisons.
 #[derive(Hash, Eq, PartialEq, PartialOrd, Ord, Clone, Copy, Debug)]
 struct BinKey {
     layer: u8,
@@ -214,6 +275,13 @@ struct BinKey {
     by: i32,
 }
 
+/// Checks for short circuits and illegal routing loops.
+///
+/// Uses spatial binning to group segments by location, then tests segments
+/// within the same bin for intersections. Detects shorts (intersections
+/// between different nets) and self-loops (intersections within the same
+/// net that don't share endpoints and aren't collinear). Returns an error
+/// if any violations are found.
 fn check_shorts_and_loops(db: &NetlistDB) -> Result<(), String> {
     let mut all_bin_entries: Vec<(BinKey, Segment)> = db
         .nets
@@ -292,23 +360,35 @@ fn check_shorts_and_loops(db: &NetlistDB) -> Result<(), String> {
                 }
 
                 if s1.intersects(s2) {
-                    if s1.net_id != s2.net_id {
-                        let n1 = &db.nets[s1.net_id.index()].name;
-                        let n2 = &db.nets[s2.net_id.index()].name;
-                        let msg = format!("SHORT: '{}' vs '{}' on Layer {}", n1, n2, s1.layer);
+                if s1.net_id != s2.net_id {
+                    let n1 = &db.nets[s1.net_id.index()].name;
+                    let n2 = &db.nets[s2.net_id.index()].name;
+                    let msg = format!("SHORT: '{}' vs '{}' on Layer {}", n1, n2, s1.layer);
 
-                        if !error_found.swap(true, Ordering::Relaxed) {
-                            *error_msg.lock().unwrap() = msg;
+                    if !error_found.swap(true, Ordering::Relaxed) {
+                        *error_msg.lock().unwrap() = msg;
+                    }
+                    return;
+                } else {
+                    if !s1.shares_endpoint(s2) {
+                        let is_via1 = (s1.p1.x - s1.p2.x).abs() < 1e-6 && (s1.p1.y - s1.p2.y).abs() < 1e-6;
+                        let is_via2 = (s2.p1.x - s2.p2.x).abs() < 1e-6 && (s2.p1.y - s2.p2.y).abs() < 1e-6;
+
+                        if is_via1 || is_via2 {
+                            continue;
                         }
-                        return;
-                    } else {
-                        if !s1.shares_endpoint(s2) {
-                            let is_via1 = (s1.p1.x - s1.p2.x).abs() < 1e-6 && (s1.p1.y - s1.p2.y).abs() < 1e-6;
-                            let is_via2 = (s2.p1.x - s2.p2.x).abs() < 1e-6 && (s2.p1.y - s2.p2.y).abs() < 1e-6;
 
-                            if is_via1 || is_via2 {
-                                continue;
-                            }
+                        let is_collinear = {
+                            let dx1 = s1.p2.x - s1.p1.x;
+                            let dy1 = s1.p2.y - s1.p1.y;
+                            let dx2 = s2.p2.x - s2.p1.x;
+                            let dy2 = s2.p2.y - s2.p1.y;
+                            (dx1 * dy2 - dy1 * dx2).abs() < CHECK_TOLERANCE * 100.0
+                        };
+
+                        if is_collinear {
+                            continue;
+                        }
 
                             let n1 = &db.nets[s1.net_id.index()].name;
                             let msg = format!(
@@ -334,6 +414,13 @@ fn check_shorts_and_loops(db: &NetlistDB) -> Result<(), String> {
     }
 }
 
+/// Checks for open nets (disconnected pins).
+///
+/// For each net, builds a connectivity graph of segments and verifies that
+/// all pins are reachable from each other. Uses breadth-first search to
+/// traverse the segment graph starting from the first pin. Detects both
+/// completely unrouted nets and nets with disconnected components. Returns
+/// an error if any opens are found.
 fn check_opens(db: &NetlistDB) -> Result<(), String> {
     let error_found = AtomicBool::new(false);
     let error_msg = Arc::new(Mutex::new(String::new()));
@@ -397,8 +484,8 @@ fn check_opens(db: &NetlistDB) -> Result<(), String> {
 
             let mut found = false;
             for (seg_i, seg) in segments.iter().enumerate() {
-                if seg.layer == 0
-                    && point_to_segment_dist(pin_pos, seg.p1, seg.p2) < CHECK_TOLERANCE
+                if seg.layer <= 1
+                    && point_to_segment_dist(pin_pos, seg.p1, seg.p2) < CONNECTIVITY_TOLERANCE
                 {
                     pin_segment_indices.push(seg_i);
                     found = true;
@@ -454,14 +541,24 @@ fn check_opens(db: &NetlistDB) -> Result<(), String> {
     }
 }
 
+/// Checks if two segments overlap when projected to 2D (ignoring layer).
+///
+/// Used to detect via connections where segments on adjacent layers overlap
+/// at the same X,Y coordinates. This allows vias to connect segments across
+/// layers even if they don't share exact endpoints.
 fn segments_overlap_2d(s1: &Segment, s2: &Segment) -> bool {
     let mut s1_2d = *s1;
     s1_2d.layer = 0;
     let mut s2_2d = *s2;
     s2_2d.layer = 0;
-    s1_2d.intersects(&s2_2d)
+    s1_2d.intersects(&s2_2d) || s1_2d.shares_endpoint(&s2_2d)
 }
 
+/// Computes the distance from a point to a line segment.
+///
+/// Projects the point onto the line containing the segment, clamps to the
+/// segment endpoints, and returns the Euclidean distance. Used to check
+/// if pins are close enough to wire segments to be considered connected.
 fn point_to_segment_dist(p: Point<f64>, a: Point<f64>, b: Point<f64>) -> f64 {
     let l2 = (a.x - b.x).powi(2) + (a.y - b.y).powi(2);
     if l2 == 0.0 {

@@ -1,9 +1,80 @@
+//! Visualization Utilities for Design Rendering.
+//!
+//! Provides functions to generate image visualizations of placed and routed
+//! designs, including cell placements, wire routes, and routing congestion
+//! heatmaps. Uses the image crate for pixel manipulation and file output.
+
 use crate::db::core::NetlistDB;
 use image::{Rgb, RgbImage, Rgba, RgbaImage};
 use imageproc::drawing::{draw_filled_rect_mut, draw_line_segment_mut};
 use imageproc::rect::Rect as ImageRect;
 use std::path::Path;
 
+/// Trait for routing grids that can provide congestion information.
+///
+/// Allows visualization code to query congestion ratios (occupancy/capacity)
+/// for each grid cell to generate heatmaps. Implementations should aggregate
+/// congestion across all layers for a given X,Y coordinate.
+pub trait CongestionProvider {
+    /// Returns the dimensions of the congestion grid (width, height).
+    fn get_dims(&self) -> (u32, u32);
+    /// Returns the congestion ratio for a given grid coordinate.
+    ///
+    /// The ratio represents occupancy divided by capacity. A value of 0.0
+    /// indicates an empty cell, 1.0 indicates full capacity, and values
+    /// greater than 1.0 indicate overflow (congestion violations).
+    fn get_congestion_ratio(&self, x: u32, y: u32) -> f32;
+}
+
+/// Generates a congestion heatmap visualization of the routing grid.
+///
+/// Creates an RGB image where each pixel represents a grid cell, colored
+/// according to its congestion ratio. The color scheme transitions from
+/// black (empty) through blue, green, yellow, red, to white (extreme
+/// congestion) to provide visual feedback on routing difficulty. The image
+/// is saved to the specified filename.
+pub fn draw_congestion_heatmap<G: CongestionProvider>(grid: &G, filename: &str) {
+    let (w, h) = grid.get_dims();
+    let mut img = RgbImage::new(w, h);
+
+    for y in 0..h {
+        for x in 0..w {
+            let ratio = grid.get_congestion_ratio(x, y);
+
+            let pixel = if ratio == 0.0 {
+                Rgb([0, 0, 0])
+            } else if ratio < 0.8 {
+                let t = ratio / 0.8;
+                Rgb([0, (255.0 * t) as u8, (255.0 * (1.0 - t)) as u8])
+            } else if ratio <= 1.0 {
+                let t = (ratio - 0.8) / 0.2;
+                Rgb([(255.0 * t) as u8, 255, 0])
+            } else if ratio <= 1.5 {
+                let t = (ratio - 1.0) / 0.5;
+                Rgb([255, (255.0 * (1.0 - t)) as u8, 0])
+            } else {
+                let t = ((ratio - 1.5) / 2.0).min(1.0);
+                Rgb([255, (255.0 * t) as u8, (255.0 * t) as u8])
+            };
+
+            img.put_pixel(x, h - 1 - y, pixel);
+        }
+    }
+
+    if let Err(e) = img.save(Path::new(filename)) {
+        log::error!("Failed to save congestion map to {}: {}", filename, e);
+    } else {
+        log::info!("Dumped congestion map to {}", filename);
+    }
+}
+
+/// Generates a visualization of the cell placement.
+///
+/// Creates an RGB image showing all cells in the design as colored rectangles.
+/// Fixed cells are drawn in a distinct color from movable cells to distinguish
+/// pre-placed components. The image is scaled to fit the specified dimensions
+/// while maintaining aspect ratio. Cells are drawn with minimum sizes to ensure
+/// visibility even for very small cells.
 pub fn draw_placement(db: &NetlistDB, filename: &str, width: u32, height: u32) {
     let mut img = RgbImage::new(width, height);
     image::imageops::replace(
@@ -49,6 +120,14 @@ pub fn draw_placement(db: &NetlistDB, filename: &str, width: u32, height: u32) {
     let _ = img.save(Path::new(filename));
 }
 
+/// Generates a visualization of the complete routed design.
+///
+/// Creates an RGBA image showing cells as dark rectangles, wire segments
+/// as colored lines (with different colors for each routing layer), vias
+/// as white squares, and pins as small white dots. Each routing layer
+/// is assigned a distinct color to visualize the layer assignment. The
+/// image uses high resolution (minimum 4000x4000) to ensure wire details
+/// are visible, then resizes if a smaller output size is requested.
 pub fn draw_routed_design(db: &NetlistDB, filename: &str, width: u32, height: u32) {
     let w = width.max(4000);
     let h = height.max(4000);
@@ -90,17 +169,11 @@ pub fn draw_routed_design(db: &NetlistDB, filename: &str, width: u32, height: u3
     }
 
     let colors = [
-        // M1 (Vertical): Blue
         Rgba([0, 110, 255, 90]),
-        // M2 (Horizontal): Red
         Rgba([255, 20, 80, 90]),
-        // M3 (Vertical): Green
         Rgba([0, 255, 100, 170]),
-        // M4 (Horizontal): Gold
         Rgba([255, 215, 0, 170]),
-        // M5 (Vertical): Violet
         Rgba([180, 50, 255, 190]),
-        // M6 (Horizontal): Cyan
         Rgba([0, 240, 255, 190]),
     ];
     let mut segments: Vec<_> = db

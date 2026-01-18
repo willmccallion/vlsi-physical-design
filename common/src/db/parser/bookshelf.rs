@@ -1,3 +1,10 @@
+//! Bookshelf Format Parser.
+//!
+//! Parses the Bookshelf placement benchmark format, which consists of multiple
+//! files referenced from an AUX file: .nodes (cell definitions), .nets
+//! (connectivity), .pl (placement), and .scl (site/row definitions). This
+//! format is commonly used in academic placement research.
+
 use crate::db::core::{LayerDirection, NetlistDB};
 use crate::geom::point::Point;
 use crate::geom::rect::Rect;
@@ -6,6 +13,12 @@ use std::fs::File;
 use std::io::{BufRead, BufReader};
 use std::path::Path;
 
+/// Parses a complete Bookshelf design from an AUX file and populates the database.
+///
+/// Reads the AUX file to locate the associated .nodes, .nets, .pl, and .scl files,
+/// then parses each in sequence to build the complete design. If no layer information
+/// is present, synthesizes a default 6-layer metal stack based on standard cell
+/// height heuristics. Returns an error if any required file is missing or malformed.
 pub fn parse(db: &mut NetlistDB, aux_filename: &str) -> Result<()> {
     let aux_path = Path::new(aux_filename);
     let parent_dir = aux_path.parent().unwrap_or(Path::new("."));
@@ -19,7 +32,6 @@ pub fn parse(db: &mut NetlistDB, aux_filename: &str) -> Result<()> {
     let mut pl_file = String::new();
     let mut scl_file = String::new();
 
-    // Parse AUX file
     for line in reader.lines() {
         let line = line?;
         let parts: Vec<&str> = line.split_whitespace().collect();
@@ -41,31 +53,26 @@ pub fn parse(db: &mut NetlistDB, aux_filename: &str) -> Result<()> {
         }
     }
 
-    // Parse Nodes
     if !nodes_file.is_empty() {
         let path = parent_dir.join(&nodes_file);
         parse_nodes(db, path.to_str().unwrap())?;
     }
 
-    // Parse PL
     if !pl_file.is_empty() {
         let path = parent_dir.join(&pl_file);
         parse_pl(db, path.to_str().unwrap())?;
     }
 
-    // Parse SCL
     if !scl_file.is_empty() {
         let path = parent_dir.join(&scl_file);
         parse_scl(db, path.to_str().unwrap())?;
     }
 
-    // Parse Nets
     if !nets_file.is_empty() {
         let path = parent_dir.join(&nets_file);
         parse_nets(db, path.to_str().unwrap())?;
     }
 
-    // Inject Default Metal Stack
     if db.layers.is_empty() {
         let mut height_counts = std::collections::HashMap::new();
         for cell in &db.cells {
@@ -102,6 +109,12 @@ pub fn parse(db: &mut NetlistDB, aux_filename: &str) -> Result<()> {
     Ok(())
 }
 
+/// Parses the Bookshelf .nodes file containing cell definitions.
+///
+/// Reads node entries specifying cell names, widths, heights, and terminal
+/// status. Creates library cell entries in macro_sizes for later reference
+/// and adds cell instances to the database. Terminal nodes are marked as
+/// fixed cells that cannot be moved by the placer.
 fn parse_nodes(db: &mut NetlistDB, filename: &str) -> Result<()> {
     log::info!("Parsing Nodes: {}", filename);
     let file = File::open(filename)?;
@@ -139,6 +152,12 @@ fn parse_nodes(db: &mut NetlistDB, filename: &str) -> Result<()> {
     Ok(())
 }
 
+/// Parses the Bookshelf .pl file containing cell placements.
+///
+/// Reads placement entries specifying cell positions and orientations.
+/// Updates the database positions array and handles cell rotation by
+/// swapping width and height for east/west orientations. Fixed placements
+/// are marked in the cell data to prevent movement during optimization.
 fn parse_pl(db: &mut NetlistDB, filename: &str) -> Result<()> {
     log::info!("Parsing PL: {}", filename);
     let file = File::open(filename)?;
@@ -186,6 +205,11 @@ fn parse_pl(db: &mut NetlistDB, filename: &str) -> Result<()> {
     Ok(())
 }
 
+/// Parses the Bookshelf .scl file containing site and row definitions.
+///
+/// Extracts row coordinates, heights, and site widths from subrow definitions
+/// to compute the die area bounds. The die area is inferred from the union
+/// of all row extents, providing the placement region for the design.
 fn parse_scl(db: &mut NetlistDB, filename: &str) -> Result<()> {
     log::info!("Parsing SCL: {}", filename);
     let file = File::open(filename)?;
@@ -245,6 +269,13 @@ fn parse_scl(db: &mut NetlistDB, filename: &str) -> Result<()> {
     Ok(())
 }
 
+/// Parses the Bookshelf .nets file containing net connectivity.
+///
+/// Reads net degree statements and node connections, creating nets and
+/// associating pins with cells. Since Bookshelf does not specify exact pin
+/// locations, pins are placed at cell centers as a default. Nets are
+/// assigned sequential names (n0, n1, ...) since the format does not
+/// provide explicit net names.
 fn parse_nets(db: &mut NetlistDB, filename: &str) -> Result<()> {
     log::info!("Parsing Nets: {}", filename);
     let file = File::open(filename)?;

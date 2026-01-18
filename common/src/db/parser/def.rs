@@ -1,3 +1,9 @@
+//! DEF (Design Exchange Format) Parser.
+//!
+//! Parses the industry-standard DEF format used to represent netlists,
+//! component placements, pin locations, and routing information. This parser
+//! handles the major DEF sections: DIEAREA, TRACKS, COMPONENTS, PINS, and NETS.
+
 use crate::db::core::{NetlistDB, TrackDef};
 use crate::geom::point::Point;
 use crate::geom::rect::Rect;
@@ -5,6 +11,13 @@ use anyhow::Result;
 use std::fs::File;
 use std::io::{BufRead, BufReader};
 
+/// Parses a DEF file and populates the netlist database.
+///
+/// Processes DEF statements in sequence, maintaining state for the current
+/// section (COMPONENTS, PINS, NETS). Handles unit conversion from DEF's
+/// micron-based coordinates to internal floating-point representation.
+/// Extracts cell placements, pin locations, net connectivity, and routing
+/// track definitions. Returns an error if the file is malformed or unreadable.
 pub fn parse(db: &mut NetlistDB, filename: &str) -> Result<()> {
     let file = File::open(filename)?;
     let reader = BufReader::new(file);
@@ -169,7 +182,6 @@ pub fn parse(db: &mut NetlistDB, filename: &str) -> Result<()> {
                                 }
 
                                 if !found {
-                                    // Heuristic fallback
                                     let h = pin_name.chars().fold(0, |acc, c| acc + c as usize);
                                     let dx = (h % 7) as f64 * 0.25 - 0.75;
                                     let dy = ((h / 7) % 7) as f64 * 0.25 - 0.75;

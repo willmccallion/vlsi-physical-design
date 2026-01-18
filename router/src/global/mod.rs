@@ -5,6 +5,7 @@ use crate::utils::conversion::GridConverter;
 use eda_common::db::core::NetlistDB;
 use eda_common::geom::coord::GridCoord;
 use eda_common::util::config::GlobalRoutingConfig;
+use eda_common::util::visualization::draw_congestion_heatmap;
 use rand::seq::SliceRandom;
 use rand::thread_rng;
 use rayon::prelude::*;
@@ -13,6 +14,14 @@ use std::io::Write;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::Instant;
 
+/// Executes global routing on a coarse grid to generate routing guides.
+///
+/// Routes all nets on a coarse grid (typically 100-200x coarser than detailed
+/// routing) to determine preferred routing regions. Uses A* pathfinding with
+/// congestion-aware costs and rip-up-and-reroute to resolve conflicts. The
+/// resulting paths are expanded into guides that constrain detailed routing.
+/// Returns the guide sets for each net and a grid converter for coordinate
+/// transformation, or an error if routing fails.
 pub fn run(
     db: &NetlistDB,
     config: &GlobalRoutingConfig,
@@ -56,7 +65,8 @@ pub fn run(
     );
 
     let mut grid = DenseGrid::new(grid_w, grid_h, layers, default_capacity);
-    let converter = GridConverter::new(db.die_area.width(), db.die_area.height(), grid_w, grid_h);
+
+    let converter = GridConverter::new(db.die_area, grid_w, grid_h);
 
     if layers > 0 {
         log::info!("Setting Layer 0 (M1) capacity to INFINITE for pin access.");
@@ -69,6 +79,7 @@ pub fn run(
     let total_nets = db.nets.len();
 
     log::info!("GR: Starting Initial Route for {} nets...", total_nets);
+    let start_time = Instant::now();
 
     let batch_size = 500;
     let net_indices: Vec<usize> = (0..total_nets).collect();
@@ -111,6 +122,12 @@ pub fn run(
         }
     }
     eprint!("\r\x1b[K");
+    log::info!("Initial Route: {:.2}s", start_time.elapsed().as_secs_f32());
+
+    draw_congestion_heatmap(&grid, "output/gr_initial_congestion.png");
+
+    let mut last_conflicts = usize::MAX;
+    let mut stagnation_counter = 0;
 
     for iter in 0..config.max_iterations {
         let start = Instant::now();
@@ -119,6 +136,25 @@ pub fn run(
         if conflicts == 0 {
             log::info!("Global Routing Converged at iter {}!", iter);
             break;
+        }
+
+        let improvement = last_conflicts.saturating_sub(conflicts);
+        if improvement < (last_conflicts / 100).max(5) {
+            stagnation_counter += 1;
+        } else {
+            stagnation_counter = 0;
+        }
+        last_conflicts = conflicts;
+
+        if stagnation_counter > 10 {
+            log::warn!(
+                "GR Stagnation detected ({} iters). Dumping heatmap.",
+                stagnation_counter
+            );
+            draw_congestion_heatmap(&grid, &format!("output/gr_congestion_iter_{}.png", iter));
+            if stagnation_counter % 5 == 0 {
+                grid.decay_history(0.9);
+            }
         }
 
         grid.update_history(history_increment);
@@ -156,7 +192,6 @@ pub fn run(
         nets_to_reroute.shuffle(&mut rng);
 
         if ripped < 500 {
-            // Sequential
             for (i, &net_id) in nets_to_reroute.iter().enumerate() {
                 let path = compute_net_path_gr(
                     &db.nets[net_id],
@@ -183,7 +218,6 @@ pub fn run(
                 }
             }
         } else {
-            // Parallel
             let progress = AtomicUsize::new(0);
             for chunk in nets_to_reroute.chunks(batch_size) {
                 let results: Vec<(usize, Vec<GridCoord>)> = chunk
@@ -232,7 +266,7 @@ pub fn run(
             break;
         }
 
-        if iter > 100 && ripped < 10 {
+        if iter > 50 && ripped < 20 {
             log::warn!(
                 "GR: Stopping early. Remaining {} ripped nets are likely unresolvable.",
                 ripped
@@ -240,8 +274,18 @@ pub fn run(
             break;
         }
 
-        collision_penalty *= config.penalty_multiplier;
+        if stagnation_counter > 20 {
+            log::warn!(
+                "GR: Stopping due to stagnation ({} iters without improvement).",
+                stagnation_counter
+            );
+            break;
+        }
+
+        collision_penalty = (collision_penalty * config.penalty_multiplier).min(10_000.0);
     }
+
+    draw_congestion_heatmap(&grid, "output/gr_congestion.png");
 
     let mut net_guides: Vec<HashSet<GridCoord>> = vec![HashSet::new(); db.nets.len()];
     for (net_id, path) in net_paths.iter().enumerate() {
@@ -258,6 +302,13 @@ pub fn run(
     Ok((net_guides, converter))
 }
 
+/// Computes the routing path for a single net in global routing.
+///
+/// Converts pin positions to grid coordinates, sorts pins by proximity
+/// to build a routing order, then routes paths sequentially using A*
+/// pathfinding. Connects paths end-to-end to form a complete tree
+/// connecting all pins. Returns the complete path as a sequence of grid
+/// coordinates.
 fn compute_net_path_gr(
     net: &eda_common::db::core::NetData,
     grid: &DenseGrid,
@@ -324,7 +375,7 @@ fn compute_net_path_gr(
             1.0,
             &NoGuide,
             &[],
-            500_000,
+            50_000,
             false,
         ) {
             if !full_path.is_empty() {
@@ -338,6 +389,11 @@ fn compute_net_path_gr(
     full_path
 }
 
+/// Returns the 2D neighbors of a grid coordinate (same layer).
+///
+/// Generates the four adjacent coordinates (north, south, east, west)
+/// on the same layer, excluding coordinates outside the grid boundaries.
+/// Used for guide expansion in global routing to create routing regions.
 fn get_neighbors_2d(c: GridCoord, w: u32, h: u32) -> Vec<GridCoord> {
     let mut n = Vec::new();
     if c.x > 0 {

@@ -1,9 +1,23 @@
+//! Electrostatic Density Force Computation.
+//!
+//! Implements density penalty computation using an electrostatic analogy where
+//! cells are charges and density violations create repulsive forces. Uses FFT
+//! to efficiently compute the potential field in O(N log N) time rather than
+//! O(N^2) for direct computation.
+
 use super::PhysicsContext;
 use eda_common::db::core::NetlistDB;
 use eda_common::geom::point::Point;
 use rustfft::num_complex::Complex;
 use std::f64::consts::PI;
 
+/// Computes density forces and adds them to the gradient array.
+///
+/// First bins cells into the density grid, computes overflow for each bin,
+/// then uses FFT to solve Poisson's equation for the potential field. Takes
+/// finite differences to compute force gradients, and applies these forces
+/// to cells based on their bin locations. Returns the total overflow cost
+/// for monitoring convergence.
 pub fn compute_density_force(
     ctx: &mut PhysicsContext,
     db: &NetlistDB,
@@ -17,10 +31,8 @@ pub fn compute_density_force(
     let bin_h = db.die_area.height() / dim as f64;
     let bin_area = bin_w * bin_h;
 
-    // Reset density map
     ctx.density_map.fill(0.0);
 
-    // Binning
     for (i, pos) in positions.iter().enumerate() {
         let cell = &db.cells[i];
 
@@ -50,7 +62,6 @@ pub fn compute_density_force(
         }
     }
 
-    // Overflow calculation
     let mut overflow = 0.0;
     for val in ctx.density_map.iter_mut() {
         *val /= bin_area;
@@ -60,7 +71,6 @@ pub fn compute_density_force(
         *val -= target_density;
     }
 
-    // FFT
     let fft = ctx.fft_planner.plan_fft_forward(dim * dim);
     let ifft = ctx.fft_planner.plan_fft_inverse(dim * dim);
 
@@ -92,7 +102,6 @@ pub fn compute_density_force(
         ctx.potential_map[i] = c.re * norm;
     }
 
-    // Gradient Calculation with Boundary Fix
     for y in 0..dim {
         for x in 0..dim {
             let idx = y * dim + x;
@@ -124,7 +133,6 @@ pub fn compute_density_force(
         }
     }
 
-    // Apply forces
     for (i, pos) in positions.iter().enumerate() {
         if db.cells[i].is_fixed {
             continue;

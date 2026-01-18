@@ -1,3 +1,9 @@
+//! LEF (Library Exchange Format) Parser.
+//!
+//! Parses the industry-standard LEF format used to define cell libraries
+//! and routing layer properties. Extracts layer definitions (pitch, width,
+//! direction), macro cell sizes, and pin locations within macro cells.
+
 use crate::db::core::{LayerDirection, NetlistDB};
 use crate::geom::point::Point;
 use anyhow::Result;
@@ -5,6 +11,13 @@ use std::collections::HashMap;
 use std::fs::File;
 use std::io::{BufRead, BufReader};
 
+/// Parses a LEF file and populates layer and macro information in the database.
+///
+/// Processes LEF statements to extract routing layer properties (TYPE, DIRECTION,
+/// PITCH, WIDTH) and macro cell definitions including pin locations and cell
+/// dimensions. Maintains parsing state to track the current layer, macro, and
+/// pin being processed. If no layers are found, synthesizes a default 6-layer
+/// stack. Returns an error if the file is malformed or unreadable.
 pub fn parse(db: &mut NetlistDB, filename: &str) -> Result<()> {
     let file = File::open(filename)?;
     let reader = BufReader::new(file);

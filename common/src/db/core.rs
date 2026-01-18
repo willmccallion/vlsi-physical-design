@@ -1,59 +1,138 @@
+//! Core Netlist Database Data Structures.
+//!
+//! This module defines the central NetlistDB structure that holds all design
+//! information including cells, nets, pins, routing layers, and spatial
+//! relationships. It serves as the single source of truth for the design state
+//! throughout the placement and routing algorithms.
+
 use crate::db::indices::*;
 use crate::geom::point::Point;
 use crate::geom::rect::Rect;
 use std::collections::HashMap;
 
+/// Routing direction for a metal layer.
+///
+/// Determines the preferred routing orientation for wires on a given layer.
+/// Vertical layers route primarily in the Y direction, horizontal layers in
+/// the X direction. This alternation enables efficient routing by allowing
+/// orthogonal wire crossings without shorts.
 #[derive(Clone, Debug, PartialEq)]
 pub enum LayerDirection {
+    /// Wires on this layer route primarily in the vertical (Y) direction.
     Vertical,
+    /// Wires on this layer route primarily in the horizontal (X) direction.
     Horizontal,
+    /// Layer direction is unspecified or unknown.
     Unknown,
 }
 
+/// Metadata for a single routing layer in the metal stack.
+///
+/// Contains the physical properties of a metal layer including its routing
+/// direction, track pitch (spacing between adjacent tracks), and wire width.
+/// The index field provides a unique identifier for the layer within the
+/// stack, typically corresponding to metal layer numbers (M1, M2, etc.).
 #[derive(Clone, Debug)]
 pub struct LayerData {
+    /// Human-readable layer name (e.g., "M1", "M2").
     pub name: String,
+    /// Zero-based index of this layer in the layer stack.
     pub index: u8,
+    /// Preferred routing direction for wires on this layer.
     pub direction: LayerDirection,
+    /// Spacing between adjacent routing tracks in physical units.
     pub pitch: f64,
+    /// Width of wires on this layer in physical units.
     pub width: f64,
 }
 
+/// A single wire segment connecting two points on a routing layer.
+///
+/// Represents a straight-line wire segment between two physical coordinates
+/// on a specific metal layer. Used to store the final routed net topology
+/// after detailed routing completes. Degenerate segments (p1 == p2) represent
+/// vias for layer transitions.
 #[derive(Clone, Debug)]
 pub struct RouteSegment {
+    /// Layer index on which this segment resides.
     pub layer: u8,
+    /// Starting point of the wire segment in physical coordinates.
     pub p1: Point<f64>,
+    /// Ending point of the wire segment in physical coordinates.
     pub p2: Point<f64>,
 }
 
+/// Data structure representing a single cell instance in the design.
+///
+/// Contains the cell's name, library reference, physical dimensions, placement
+/// constraints, and list of pins. The is_fixed flag indicates that the cell
+/// position is predetermined (e.g., I/O pads, pre-placed macros) and should
+/// not be moved by the placer. The is_macro flag distinguishes large blocks
+/// from standard cells for legalization purposes.
 #[derive(Clone, Debug)]
 pub struct CellData {
+    /// Instance name of this cell in the design hierarchy.
     pub name: String,
+    /// Library cell name that defines this cell's physical properties.
     pub lib_name: String,
+    /// Width of the cell in physical units.
     pub width: f64,
+    /// Height of the cell in physical units.
     pub height: f64,
+    /// Whether this cell's position is fixed and cannot be moved.
     pub is_fixed: bool,
+    /// Whether this cell is a macro (large block) rather than a standard cell.
     pub is_macro: bool,
+    /// List of pin identifiers belonging to this cell.
     pub pins: Vec<PinId>,
 }
 
+/// Data structure representing a single net (signal) in the design.
+///
+/// A net connects multiple pins together, forming the electrical connectivity
+/// of the circuit. The weight field allows critical nets to be prioritized
+/// during placement and routing. The route_segments field stores the final
+/// wire paths after routing completes.
 #[derive(Clone, Debug)]
 pub struct NetData {
+    /// Name of the net in the design hierarchy.
     pub name: String,
+    /// Weight factor for prioritizing this net during optimization.
     pub weight: f64,
+    /// List of pin identifiers that this net connects.
     pub pins: Vec<PinId>,
+    /// Final routed wire segments for this net after detailed routing.
     pub route_segments: Vec<RouteSegment>,
 }
 
+/// Definition of a routing track grid for a specific layer.
+///
+/// Specifies the regular grid of routing tracks that wires must align to
+/// on a given layer. Tracks are uniformly spaced starting from the start
+/// coordinate with the specified step size. This information is parsed
+/// from DEF TRACKS statements and used to constrain wire placement during
+/// detailed routing.
 #[derive(Clone, Debug, Default)]
 pub struct TrackDef {
+    /// Layer name for which these tracks are defined.
     pub layer: String,
+    /// Direction of the tracks ("X" for horizontal, "Y" for vertical).
     pub direction: String,
+    /// Starting coordinate of the first track.
     pub start: f64,
+    /// Number of tracks in this grid.
     pub num_tracks: u32,
+    /// Spacing between adjacent tracks.
     pub step: f64,
 }
 
+/// Central database structure containing all design information.
+///
+/// This is the primary data structure that holds the complete netlist,
+/// including cells, nets, pins, routing layers, and spatial information.
+/// It serves as the interface between parsers, placement algorithms, and
+/// routing algorithms. All design modifications during placement and routing
+/// are reflected in this structure.
 pub struct NetlistDB {
     pub layers: Vec<LayerData>,
     pub cells: Vec<CellData>,
@@ -77,6 +156,12 @@ pub struct NetlistDB {
 }
 
 impl NetlistDB {
+    /// Creates a new empty netlist database with pre-allocated capacity.
+    ///
+    /// Initializes all vectors and hash maps with default values and
+    /// reasonable initial capacities to reduce reallocation overhead
+    /// during parsing and optimization. The die area is set to a default
+    /// empty rectangle that will be populated by the parser.
     pub fn new() -> Self {
         Self {
             layers: Vec::new(),
@@ -97,19 +182,38 @@ impl NetlistDB {
         }
     }
 
+    /// Returns the total number of cell instances in the design.
+    ///
+    /// This count includes all cells regardless of whether they are fixed,
+    /// movable, standard cells, or macros.
     pub fn num_cells(&self) -> usize {
         self.cells.len()
     }
+    /// Returns the total number of nets in the design.
+    ///
+    /// This includes all nets regardless of pin count or connectivity.
     pub fn num_nets(&self) -> usize {
         self.nets.len()
     }
 
+    /// Computes the absolute physical position of a pin given its cell's position.
+    ///
+    /// Adds the pin's offset (relative to the cell origin) to the cell's
+    /// position to obtain the pin's absolute coordinates in the design space.
+    /// This is used extensively during wirelength calculation and routing
+    /// to determine where wires must connect.
     #[inline]
     pub fn get_pin_position(&self, pin: PinId, cell_pos: &Point<f64>) -> Point<f64> {
         let offset = self.pin_offsets[pin.index()];
         *cell_pos + offset
     }
 
+    /// Adds a new routing layer to the metal stack.
+    ///
+    /// Creates a LayerData entry with the specified properties and assigns
+    /// it the next available layer index. Updates the layer name map for
+    /// efficient lookup by name. This is called during LEF parsing and when
+    /// synthesizing default layers for formats that don't specify layer information.
     pub fn add_layer(&mut self, name: String, direction: LayerDirection, pitch: f64, width: f64) {
         let idx = self.layers.len() as u8;
         self.layer_name_map.insert(name.clone(), idx);
@@ -122,6 +226,12 @@ impl NetlistDB {
         });
     }
 
+    /// Adds a new cell instance to the design and returns its identifier.
+    ///
+    /// Creates a CellData entry with the specified properties, initializes
+    /// its position to the origin, and updates the cell name map for lookup.
+    /// The cell is initially marked as not a macro; this can be updated later
+    /// based on size heuristics or explicit annotations.
     pub fn add_cell(
         &mut self,
         name: String,
@@ -145,6 +255,12 @@ impl NetlistDB {
         id
     }
 
+    /// Adds a new net to the design or returns the existing net's ID if it already exists.
+    ///
+    /// Checks the net name map first to avoid duplicate net creation. If the net
+    /// is new, creates a NetData entry with default weight and empty pin/segment
+    /// lists. This deduplication is important for formats that may reference
+    /// the same net multiple times.
     pub fn add_net(&mut self, name: String) -> NetId {
         if let Some(&id) = self.net_name_map.get(&name) {
             return id;
@@ -160,6 +276,13 @@ impl NetlistDB {
         id
     }
 
+    /// Adds a new pin to the design and associates it with a cell and net.
+    ///
+    /// Creates pin data structures including offset, name, and bidirectional
+    /// mappings between pins, cells, and nets. Updates both the cell's pin
+    /// list and the net's pin list to maintain referential integrity. The
+    /// offset is relative to the cell's origin and is used to compute absolute
+    /// pin positions during placement and routing.
     pub fn add_pin(&mut self, cell: CellId, net: NetId, offset: Point<f64>, name: String) {
         let pid = PinId::new(self.pin_offsets.len());
         self.pin_offsets.push(offset);
@@ -171,6 +294,13 @@ impl NetlistDB {
         self.nets[net.index()].pins.push(pid);
     }
 
+    /// Returns the identifier of the virtual I/O cell, creating it if necessary.
+    ///
+    /// The virtual I/O cell is a special cell that holds all I/O pins that
+    /// are not associated with regular cell instances. This allows I/O pins
+    /// to be treated uniformly in the database structure. The cell is created
+    /// with zero dimensions and fixed placement, and its position is never
+    /// modified by the placer.
     pub fn get_or_create_io_cell(&mut self) -> CellId {
         if let Some(&id) = self.cell_name_map.get("IO_VIRTUAL_CELL") {
             return id;
