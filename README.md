@@ -1,12 +1,16 @@
 # PARE — Placement And Routing Engine
 
-A digital IC placement and routing engine written in Rust. Implements the full physical design flow — analytical global placement, Abacus legalization, and two-stage negotiation-based routing — from scratch. Successfully places and routes real ISPD benchmarks up to 12k+ cells / 11.5k nets with zero DRC violations.
+A digital IC placement and routing engine written in Rust. Implements the full physical design flow — analytical global placement, Abacus legalization, and two-stage negotiation-based routing — from scratch. Successfully places and routes real benchmarks up to 51k+ nets with zero DRC violations.
+
+| AES (51,671 nets) | IBM05 (28,446 nets) |
+|:---:|:---:|
+| ![AES Routing](assets/routed_aes.png) | ![IBM05 Routing](assets/routed_ibm05.png) |
 
 | GCD (~500 nets) | IBM01 (11,507 nets) |
 |:---:|:---:|
 | ![GCD Routing](assets/routed_gcd.png) | ![IBM01 Routing](assets/routed_ibm01.png) |
 
-*Left: GCD block, a real standard-cell design. Right: IBM01 ISPD benchmark — 12,506 cells, 11,507 nets, routed across 5 metal layers with full Pathfinder convergence. Both verified DRC-clean (no shorts, no opens).*
+*Top: AES cipher (Nangate45, 10 metal layers) and IBM05 ISPD benchmark (28k cells, 80% utilization). Bottom: GCD and IBM01. All verified DRC-clean — no shorts, no opens.*
 
 ---
 
@@ -104,12 +108,14 @@ Type-safe index newtypes (`CellId`, `NetId`, `PinId`) prevent accidental index c
 
 ## Performance
 
-| Benchmark | Cells | Nets | Route Time | Result |
-|---|---|---|---|---|
-| GCD | 579 | 579 | <1s | Fully routed, verified DRC-clean |
-| IBM01 | 12,506 | 11,507 | ~75s | Converges in 10 iterations across M2–M5, verified DRC-clean |
+| Benchmark | Cells | Nets | Utilization | Layers | Result |
+|---|---|---|---|---|---|
+| GCD | 579 | 579 | 27% | 10 (Nangate45) | DRC-clean |
+| IBM01 | 12,506 | 11,507 | 85% | 6 (Bookshelf) | DRC-clean |
+| IBM05 | 28,146 | 28,446 | 80% | 6 (Bookshelf) | DRC-clean |
+| AES | 20,533 | 51,671 | 5% | 10 (Nangate45) | DRC-clean |
 
-The IBM01 benchmark is a real ISPD circuit — not synthetic — with 85% utilization and complex multi-pin nets. The router distributes wires across 5 metal layers and resolves all overflow from 23,537 down to 0.
+All benchmarks are real circuits (ISPD or open-source RTL), not synthetic. IBM05 runs at 80% utilization with complex multi-pin nets. AES uses a real technology library (Nangate45) with 10 metal layers at realistic pitches.
 
 ---
 
@@ -121,8 +127,12 @@ The IBM01 benchmark is a real ISPD circuit — not synthetic — with 85% utiliz
 # Run the full flow on the GCD benchmark (LEF/DEF)
 cargo run --release -- --config configs/config_gcd.toml
 
-# Run on IBM01 (Bookshelf format, ~12k cells)
+# Run on IBM01 or IBM05 (Bookshelf format)
 cargo run --release -- --config configs/config_ibm01.toml
+cargo run --release -- --config configs/config_ibm05.toml
+
+# Run on AES (LEF/DEF, Nangate45, 51k nets)
+cargo run --release -- --config configs/config_aes.toml
 
 # Route only (skip placement, uses previously placed DEF)
 cargo run --release -- --config configs/config_gcd.toml route
