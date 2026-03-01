@@ -5,7 +5,6 @@ use crate::utils::conversion::GridConverter;
 use pare_common::db::core::NetlistDB;
 use pare_common::geom::coord::GridCoord;
 use pare_common::util::config::GlobalRoutingConfig;
-use pare_common::util::visualization::draw_congestion_heatmap;
 use rand::seq::SliceRandom;
 use rand::thread_rng;
 use rayon::prelude::*;
@@ -138,8 +137,6 @@ pub fn run(
     eprint!("\r\x1b[K");
     log::info!("Initial Route: {:.2}s", start_time.elapsed().as_secs_f32());
 
-    draw_congestion_heatmap(&grid, "output/gr_initial_congestion.png");
-
     let mut last_overflow = usize::MAX;
     let mut stagnation_counter = 0;
 
@@ -166,7 +163,6 @@ pub fn run(
                 "GR Stagnation detected ({} iters). Dumping heatmap.",
                 stagnation_counter
             );
-            draw_congestion_heatmap(&grid, &format!("output/gr_congestion_iter_{}.png", iter));
             if stagnation_counter % 5 == 0 {
                 grid.decay_history(0.9);
             }
@@ -286,8 +282,6 @@ pub fn run(
 
         collision_penalty = (collision_penalty * config.penalty_multiplier).min(10_000.0);
     }
-
-    draw_congestion_heatmap(&grid, "output/gr_congestion.png");
 
     let mut net_guides: Vec<HashSet<GridCoord>> = vec![HashSet::new(); db.nets.len()];
     for (net_id, path) in net_paths.iter().enumerate() {

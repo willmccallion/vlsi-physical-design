@@ -17,7 +17,6 @@ use pare_common::db::core::NetlistDB;
 use pare_common::geom::coord::GridCoord;
 use pare_common::geom::point::Point;
 use pare_common::util::config::DetailedRoutingConfig;
-use pare_common::util::visualization::draw_congestion_heatmap;
 use rayon::prelude::*;
 use std::collections::{HashMap, HashSet};
 use std::io::Write;
@@ -221,8 +220,6 @@ pub fn run(
         .count();
     log::info!("Failed nets (no path found): {}", failed_init);
 
-    draw_congestion_heatmap(&grid, "output/dr_initial_congestion.png");
-
     let mut collision_penalty = init_penalty;
     let history_increment = config.history_increment;
     let mut last_overflow = usize::MAX;
@@ -261,7 +258,6 @@ pub fn run(
                 "Stagnation detected ({} iters). Dumping congestion heatmap...",
                 stagnation_counter
             );
-            draw_congestion_heatmap(&grid, &format!("output/dr_congestion_iter_{}.png", iter));
         }
 
         if stagnation_counter > 2 * config.stagnation_threshold {

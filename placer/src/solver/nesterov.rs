@@ -157,40 +157,7 @@ impl NesterovOptimizer {
                 self.grads[i].y += self.density_grads[i].y * density_weight;
             }
 
-            // --- Density weight update (every 10 iters) ---
-            if k > 0 && k % 10 == 0 {
-                // Multiplicative growth based on HPWL trend
-                let delta_hpwl = wl_cost - prev_hpwl;
-                let mu = if delta_hpwl < 0.0 {
-                    1.05
-                } else {
-                    let slowdown = (delta_hpwl / ref_hpwl).min(1.0);
-                    1.01 + 0.04 * (1.0 - slowdown)
-                };
-                density_weight *= mu;
-
-                // Re-anchor to gradient norm ratio: ensure density weight
-                // produces forces that match or exceed WL forces.
-                // Target ratio ramps with progress² so density forces
-                // dominate more in later iterations.
-                if density_grad_norm > 1e-20 && wl_grad_norm > 1e-20 {
-                    let current_ratio = wl_grad_norm / density_grad_norm;
-                    let progress = (k as f64 / self.params.max_iterations as f64).min(1.0);
-                    let target_multiplier = 1.0 + 255.0 * progress * progress;
-                    let ideal = current_ratio * target_multiplier;
-                    density_weight = density_weight.max(ideal);
-                }
-
-                prev_hpwl = wl_cost;
-            }
-
-            // --- Metrics ---
-            let mut total_disp = 0.0;
-            for (curr, prev) in self.x_k.iter().zip(self.x_prev.iter()) {
-                total_disp += (curr.x - prev.x).abs() + (curr.y - prev.y).abs();
-            }
-            let avg_disp = total_disp / n as f64;
-
+            // Compute overflow from the density map (populated by compute_gradients_separate)
             let overflow_area: f64 = physics
                 .density_map
                 .iter()
@@ -202,6 +169,47 @@ impl NesterovOptimizer {
             } else {
                 0.0
             };
+
+            // --- Density weight update (every 10 iters) ---
+            // Only grow density weight if overflow is still too high.
+            // Once overflow is acceptable, freeze the weight and let cells
+            // settle under wirelength optimization with fixed density pressure.
+            if k > 0 && k % 10 == 0 && overflow_ratio > 0.10 {
+                // Multiplicative growth based on HPWL trend
+                let delta_hpwl = wl_cost - prev_hpwl;
+                let mu = if delta_hpwl < 0.0 {
+                    1.05
+                } else {
+                    let slowdown = (delta_hpwl / ref_hpwl).min(1.0);
+                    1.01 + 0.04 * (1.0 - slowdown)
+                };
+                density_weight *= mu;
+
+                // Re-anchor to gradient norm ratio with capped multiplier.
+                // Uses sqrt(progress) instead of progress² to ramp more
+                // gently, and caps the multiplier to prevent runaway growth.
+                if density_grad_norm > 1e-20 && wl_grad_norm > 1e-20 {
+                    let current_ratio = wl_grad_norm / density_grad_norm;
+                    let progress = (k as f64 / self.params.max_iterations as f64).min(1.0);
+                    let target_multiplier = 1.0 + 15.0 * progress.sqrt();
+                    let ideal = current_ratio * target_multiplier;
+                    density_weight = density_weight.max(ideal);
+                }
+
+                // Cap density weight relative to initial calibration to
+                // prevent unbounded growth that destabilizes large designs.
+                let max_density_weight = base_ratio * 1e6;
+                density_weight = density_weight.min(max_density_weight);
+
+                prev_hpwl = wl_cost;
+            }
+
+            // --- Metrics ---
+            let mut total_disp = 0.0;
+            for (curr, prev) in self.x_k.iter().zip(self.x_prev.iter()) {
+                total_disp += (curr.x - prev.x).abs() + (curr.y - prev.y).abs();
+            }
+            let avg_disp = total_disp / n as f64;
 
             // Track best solution
             if overflow_ratio < best_overflow {
@@ -216,11 +224,22 @@ impl NesterovOptimizer {
                 );
             }
 
-            // --- Instability detection: if movement explodes, rollback to best ---
+            // --- Instability detection ---
+            // Sudden spike: movement explodes in a single step
             if k > 100 && avg_disp > prev_avg_disp * 5.0 && avg_disp > 2.0 {
                 log::info!(
                     "Instability detected at iter {} (avg_disp={:.2}). Rolling back to best (overflow={:.4})",
                     k, avg_disp, best_overflow
+                );
+                Self::apply_clamping(db, &mut best_positions);
+                db.positions.copy_from_slice(&best_positions);
+                return Ok(());
+            }
+            // Overflow regression: had a good solution but now diverging badly
+            if k > 200 && best_overflow < 0.10 && overflow_ratio > 0.50 {
+                log::info!(
+                    "Divergence detected at iter {} (overflow={:.3}, best was {:.4}). Rolling back.",
+                    k, overflow_ratio, best_overflow
                 );
                 Self::apply_clamping(db, &mut best_positions);
                 db.positions.copy_from_slice(&best_positions);
