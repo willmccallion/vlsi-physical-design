@@ -1,10 +1,11 @@
 [package]
-name = "eda-router"
+name = "pare-router"
 version = "0.1.0"
 edition = "2024"
+description = "PARE — Placement And Routing Engine: global and detailed routing"
 
 [dependencies]
-eda-common = { path = "../common" }
+pare-common = { path = "../common" }
 priority-queue = "1.3"
 log = "0.4"
 rand = "0.8"

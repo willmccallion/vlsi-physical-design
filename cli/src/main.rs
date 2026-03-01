@@ -1,17 +1,17 @@
-//! Command-Line Interface for Electronic Design Automation Toolchain.
+//! PARE — Placement And Routing Engine.
 //!
-//! This module provides the entry point for the EDA toolchain, orchestrating
+//! This module provides the entry point for PARE, orchestrating
 //! the placement and routing workflows. It handles configuration loading,
 //! command parsing, input validation, and coordinates the execution of
 //! placement and routing algorithms through the common database interface.
 
 use clap::{Parser, Subcommand};
-use eda_common::db::core::NetlistDB;
-use eda_common::geom::point::Point;
-use eda_common::util::config::Config;
-use eda_common::util::{check, generator, logger, visualization};
-use eda_placer::physics::PhysicsContext;
-use eda_placer::solver::nesterov::{NesterovOptimizer, NesterovParams};
+use pare_common::db::core::NetlistDB;
+use pare_common::geom::point::Point;
+use pare_common::util::config::Config;
+use pare_common::util::{check, generator, logger, visualization};
+use pare_placer::physics::PhysicsContext;
+use pare_placer::solver::nesterov::{NesterovOptimizer, NesterovParams};
 use std::fs::File;
 use std::io::{BufRead, BufReader};
 use std::path::{Path, PathBuf};
@@ -21,7 +21,7 @@ use std::path::{Path, PathBuf};
 /// Contains the configuration file path and an optional subcommand that
 /// determines which EDA operation to execute (placement, routing, or both).
 #[derive(Parser)]
-#[command(author, version, about, long_about = None)]
+#[command(author, version, about = "PARE — Placement And Routing Engine", long_about = None)]
 struct Args {
     /// Path to the TOML configuration file containing algorithm parameters.
     ///
@@ -309,17 +309,17 @@ fn run_placement(config: &Config) -> anyhow::Result<()> {
 
     if let Some(aux_path) = &config.input.bookshelf_aux_file {
         log::info!("Parsing Bookshelf AUX: {}", aux_path);
-        eda_common::db::parser::bookshelf::parse(&mut db, aux_path)
+        pare_common::db::parser::bookshelf::parse(&mut db, aux_path)
             .map_err(|e| anyhow::anyhow!("Invalid Bookshelf syntax in '{}': {}", aux_path, e))?;
     } else {
         if let Some(lef_path) = config.input.lef_files.first() {
             log::info!("Parsing LEF: {}", lef_path);
-            eda_common::db::parser::lef::parse(&mut db, lef_path)
+            pare_common::db::parser::lef::parse(&mut db, lef_path)
                 .map_err(|e| anyhow::anyhow!("Invalid LEF syntax in '{}': {}", lef_path, e))?;
         }
 
         log::info!("Parsing DEF: {}", config.input.def_file);
-        eda_common::db::parser::def::parse(&mut db, &config.input.def_file).map_err(|e| {
+        pare_common::db::parser::def::parse(&mut db, &config.input.def_file).map_err(|e| {
             anyhow::anyhow!("Invalid DEF syntax in '{}': {}", config.input.def_file, e)
         })?;
     }
@@ -337,20 +337,76 @@ fn run_placement(config: &Config) -> anyhow::Result<()> {
 
     log::info!("Design Utilization: {:.2}%", utilization * 100.0);
 
-    let target_density = config.global_placement.target_density;
+    // Auto-detect placement parameters from design properties
+    let die_diag = (db.die_area.width().powi(2) + db.die_area.height().powi(2)).sqrt();
+
+    let wa_gamma = config.global_placement.wa_gamma.unwrap_or_else(|| {
+        let auto = die_diag * 1.5;
+        log::info!("Auto-detected wa_gamma = {:.1} (die_diagonal * 1.5)", auto);
+        auto
+    });
+
+    let bin_dimension = config.global_placement.bin_dimension.unwrap_or_else(|| {
+        // Use sqrt(movable_cells) as base, clamped to [64, 512].
+        // This ensures each bin covers several cells on average, giving
+        // meaningful density gradients. Matches DREAMPlace/ePlace heuristics.
+        let movable = db.cells.iter().filter(|c| !c.is_fixed).count();
+        let auto = ((movable as f64).sqrt().ceil() as usize).next_power_of_two().clamp(64, 512);
+        let die_max_dim = db.die_area.width().max(db.die_area.height());
+        log::info!(
+            "Auto-detected bin_dimension = {} (bin_size ≈ {:.1}, {} movable cells)",
+            auto,
+            die_max_dim / auto as f64,
+            movable
+        );
+        auto
+    });
+
+    let target_density = config.global_placement.target_density.unwrap_or_else(|| {
+        let auto = (utilization + 0.05).max(0.80);
+        log::info!("Auto-detected target_density = {:.2}", auto);
+        auto
+    });
+
+    // Auto-detect initial learning rate from design scale.
+    // Larger designs (bigger die, bigger cells) need larger steps to move
+    // cells meaningfully. Scale LR so that `step * typical_gradient ≈ cell_height`.
+    let initial_learning_rate =
+        config.global_placement.initial_learning_rate.unwrap_or_else(|| {
+            // Use median cell height as reference scale.
+            // A step should move cells ~1% of the reference height initially.
+            let mut heights: Vec<f64> = db
+                .cells
+                .iter()
+                .filter(|c| !c.is_fixed)
+                .map(|c| c.height)
+                .collect();
+            heights.sort_by(|a, b| a.partial_cmp(b).unwrap());
+            let median_height = if heights.is_empty() {
+                1.0
+            } else {
+                heights[heights.len() / 2]
+            };
+            // Scale: for ibm05 (height=16), LR≈0.01; for ibm01 (height=504), LR≈0.30
+            let auto = (median_height * 0.0006).clamp(0.005, 1.0);
+            log::info!(
+                "Auto-detected initial_learning_rate = {:.4} (median_cell_height = {:.1})",
+                auto,
+                median_height
+            );
+            auto
+        });
+
     let electro_force = config.global_placement.electro_force_multiplier;
 
     log::info!("Starting Global Placement...");
-    let mut physics = PhysicsContext::new(
-        config.global_placement.bin_dimension,
-        config.global_placement.bin_dimension,
-    );
+    let mut physics = PhysicsContext::new(bin_dimension, bin_dimension);
 
     let params = NesterovParams {
         max_iterations: config.global_placement.placer_max_iterations,
-        initial_learning_rate: config.global_placement.initial_learning_rate,
+        initial_learning_rate,
         convergence_threshold: config.global_placement.convergence_threshold,
-        wa_gamma: config.global_placement.wa_gamma,
+        wa_gamma,
         target_density,
         electro_force_multiplier: electro_force,
     };
@@ -364,7 +420,7 @@ fn run_placement(config: &Config) -> anyhow::Result<()> {
     visualization::draw_placement(&db, "output/nesterov_placer.png", 1000, 1000);
 
     log::info!("Starting Legalization...");
-    let legalizer = eda_placer::legalize::abacus::AbacusLegalizer::new();
+    let legalizer = pare_placer::legalize::abacus::AbacusLegalizer::new();
     legalizer.legalize(&mut db);
 
     if let Err(e) = check::run_placement_check(&db) {
@@ -467,13 +523,13 @@ fn run_routing(config: &Config) -> anyhow::Result<()> {
         && Path::new(lef_path).exists()
     {
         log::info!("Parsing LEF: {}", lef_path);
-        eda_common::db::parser::lef::parse(&mut db, lef_path)
+        pare_common::db::parser::lef::parse(&mut db, lef_path)
             .map_err(|e| anyhow::anyhow!("Invalid LEF syntax in '{}': {}", lef_path, e))?;
     }
 
     let input_def = &config.input.output_def;
     log::info!("Parsing Placed DEF: {}", input_def);
-    eda_common::db::parser::def::parse(&mut db, input_def)
+    pare_common::db::parser::def::parse(&mut db, input_def)
         .map_err(|e| anyhow::anyhow!("Invalid Placed DEF syntax in '{}': {}", input_def, e))?;
 
     if is_bookshelf || db.layers.is_empty() {
@@ -508,7 +564,7 @@ fn run_routing(config: &Config) -> anyhow::Result<()> {
         db.layers.clear();
         db.layer_name_map.clear();
 
-        use eda_common::db::core::LayerDirection;
+        use pare_common::db::core::LayerDirection;
         db.add_layer("M1".to_string(), LayerDirection::Horizontal, pitch, width);
         db.add_layer("M2".to_string(), LayerDirection::Vertical, pitch, width);
         db.add_layer("M3".to_string(), LayerDirection::Horizontal, pitch, width);
@@ -523,7 +579,7 @@ fn run_routing(config: &Config) -> anyhow::Result<()> {
 
     log::info!("Starting Routing...");
 
-    eda_router::route(&mut db, config).map_err(|e| anyhow::anyhow!(e))?;
+    pare_router::route(&mut db, config).map_err(|e| anyhow::anyhow!(e))?;
 
     log::info!("Generating routed visualization...");
     visualization::draw_routed_design(&db, "output/routed.png", 2000, 2000);

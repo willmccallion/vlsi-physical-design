@@ -45,8 +45,8 @@ pub mod grid;
 /// algorithms.
 pub mod utils;
 
-use eda_common::db::core::NetlistDB;
-use eda_common::util::config::Config;
+use pare_common::db::core::NetlistDB;
+use pare_common::util::config::Config;
 
 /// Executes the complete routing workflow: global routing followed by detailed routing.
 ///

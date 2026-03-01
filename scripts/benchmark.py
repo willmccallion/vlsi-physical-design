@@ -1,6 +1,5 @@
 #!/usr/bin/env python3
 import os
-import sys
 import urllib.request
 import gzip
 import shutil
@@ -22,10 +21,24 @@ DESIGNS = {
         "description": "Tiny (~1k cells, Sanity Check)",
         "is_bookshelf": False
     },
+    "aes": {
+        "url": "https://raw.githubusercontent.com/The-OpenROAD-Project/OpenROAD/master/test/upf_aes.defok",
+        "lef_url": LEF_URL,
+        "config_file": "config_aes.toml",
+        "description": "Large (~45k cells, AES Encryption block)",
+        "is_bookshelf": False,
+        "local_filename": "aes.def"
+    },
     "ibm01": {
         "url": IBM_GITHUB_BASE,
         "config_file": "config_ibm01.toml",
         "description": "Classic ISPD98 Mixed-Size Benchmark (~12k cells)",
+        "is_bookshelf": True
+    },
+    "ibm05": {
+        "url": "https://raw.githubusercontent.com/ckmarkoh/101_2_pdpa2/master/benchmark/ibm05",
+        "config_file": "config_ibm05.toml",
+        "description": "ISPD98 Benchmark (~29k cells)",
         "is_bookshelf": True
     }
 }
@@ -70,20 +83,45 @@ def download_file(url, filepath):
         if os.path.exists(filepath):
             os.remove(filepath)
 
-def process_ibm01(data):
-    extract_dir = os.path.join(INPUT_DIR, "ibm01_raw")
+def process_lef_def(name, data):
+    local_filename = data.get("local_filename", f"{name}.def")
+    def_path = os.path.join(INPUT_DIR, local_filename)
+    download_file(data["url"], def_path)
+
+    lef_path = os.path.join(INPUT_DIR, "Nangate45.lef")
+    download_file(data["lef_url"], lef_path)
+
+def process_bookshelf(name, data):
+    extract_dir = os.path.join(INPUT_DIR, f"{name}_raw")
     if not os.path.exists(extract_dir):
         os.makedirs(extract_dir)
         print(f"[INFO] Created {extract_dir}")
 
-    files_to_download = {
-        "ibm01.nodes": "ibm01.nodes",
-        "ibm01.nets":  "ibm01.nets",
-        "ibm01-cu85.pl": "ibm01.pl",
-        "ibm01-cu85.scl": "ibm01.scl"
+    # ibm01 uses non-standard filenames for pl/scl
+    file_map = {
+        "ibm01": {
+            "ibm01.nodes":    "ibm01.nodes",
+            "ibm01.nets":     "ibm01.nets",
+            "ibm01-cu85.pl":  "ibm01.pl",
+            "ibm01-cu85.scl": "ibm01.scl",
+        },
+        "ibm05": {
+            "ibm05.nodes": "ibm05.nodes",
+            "ibm05.nets":  "ibm05.nets",
+            "ibm05.pl":    "ibm05.pl",
+            "ibm05.scl":   "ibm05.scl",
+            "ibm05.wts":   "ibm05.wts",
+        },
     }
 
-    print("[INFO] Downloading IBM01 files from GitHub mirror...")
+    files_to_download = file_map.get(name, {
+        f"{name}.nodes": f"{name}.nodes",
+        f"{name}.nets":  f"{name}.nets",
+        f"{name}.pl":    f"{name}.pl",
+        f"{name}.scl":   f"{name}.scl",
+    })
+
+    print(f"[INFO] Downloading {name.upper()} files from GitHub mirror...")
     all_files_present = True
     for remote_name, local_name in files_to_download.items():
         url = f"{data['url']}/{remote_name}"
@@ -94,26 +132,35 @@ def process_ibm01(data):
             all_files_present = False
 
     if not all_files_present:
-        print("[ERROR] Failed to download all required IBM01 files.")
+        print(f"[ERROR] Failed to download all required {name.upper()} files.")
         return
 
-    # Generate AUX file
-    aux_path = os.path.join(extract_dir, "ibm01.aux")
+    aux_path = os.path.join(extract_dir, f"{name}.aux")
     if not os.path.exists(aux_path):
-        print("[INFO] Generating ibm01.aux...")
+        print(f"[INFO] Generating {name}.aux...")
+        core_files = " ".join(f"{name}.{ext}" for ext in ["nodes", "nets", "pl", "scl"])
+        if name == "ibm05":
+            core_files = "ibm05.nodes ibm05.nets ibm05.wts ibm05.pl ibm05.scl"
         with open(aux_path, "w") as f:
-            f.write("RowBasedPlacement : ibm01.nodes ibm01.nets ibm01.pl ibm01.scl\n")
-
-    output_def_path = os.path.join(OUTPUT_DIR, "ibm01_placed.def")
+            f.write(f"RowBasedPlacement : {core_files}\n")
 
 def main():
     setup_directories()
 
-    print("\n Benchmark setup complete.")
+    for name, data in DESIGNS.items():
+        print(f"\n[INFO] Setting up: {data['description']}")
+        if data.get("is_bookshelf"):
+            process_bookshelf(name, data)
+        else:
+            process_lef_def(name, data)
+
+    print("\nBenchmark setup complete.")
     print("You can now run the tool:")
     print("-" * 50)
-    print(f"1. cargo run --release -- --config configs/config_gcd.toml flow")
-    print(f"2. cargo run --release -- --config configs/config_ibm01.toml flow")
+    print("1. cargo run --release -- --config configs/config_gcd.toml flow")
+    print("2. cargo run --release -- --config configs/config_aes.toml flow")
+    print("3. cargo run --release -- --config configs/config_ibm01.toml flow")
+    print("4. cargo run --release -- --config configs/config_ibm05.toml flow")
     print("-" * 50)
 
 if __name__ == "__main__":

@@ -1,18 +1,22 @@
 [global_placement]
+target_density = 0.6
+bin_dimension = 64
 placer_max_iterations = 2000
+initial_learning_rate = 0.05
 convergence_threshold = 1e-4
+wa_gamma = 4000.0
 electro_force_multiplier = 100000.0
 
 [legalization]
 algorithm = "abacus"
 
 [global_routing]
-gcell_size = 1260
+gcell_size = 10
 max_iterations = 300
 history_increment = 0.5
 initial_penalty = 0.5
 penalty_multiplier = 1.1
-capacity = 16
+capacity = 15
 
 [detailed_routing]
 max_iterations = 2000
@@ -27,5 +31,6 @@ stagnation_threshold = 30
 ripup_radius = 3
 
 [input]
-bookshelf_aux_file = "inputs/benchmarks/ibm01_raw/ibm01.aux"
-output_def = "output/ibm01_placed.def"
+lef_files = ["inputs/benchmarks/Nangate45.lef"]
+def_file = "inputs/benchmarks/aes.def"
+output_def = "output/aes_placed.def"

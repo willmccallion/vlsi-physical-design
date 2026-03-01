@@ -31,7 +31,7 @@ pub fn run_placement_check(db: &NetlistDB) -> Result<(), String> {
     let valid = AtomicBool::new(true);
 
     db.cells.par_iter().enumerate().for_each(|(i, cell)| {
-        if cell.name == "IO_VIRTUAL_CELL" {
+        if cell.name == "IO_VIRTUAL_CELL" || cell.is_fixed {
             return;
         }
 
@@ -49,7 +49,7 @@ pub fn run_placement_check(db: &NetlistDB) -> Result<(), String> {
     });
 
     let has_overlap = (0..db.num_cells()).into_par_iter().any(|i| {
-        if db.cells[i].name == "IO_VIRTUAL_CELL" {
+        if db.cells[i].name == "IO_VIRTUAL_CELL" || db.cells[i].is_fixed {
             return false;
         }
 
@@ -66,7 +66,7 @@ pub fn run_placement_check(db: &NetlistDB) -> Result<(), String> {
         );
 
         for j in (i + 1)..db.num_cells() {
-            if db.cells[j].name == "IO_VIRTUAL_CELL" {
+            if db.cells[j].name == "IO_VIRTUAL_CELL" || db.cells[j].is_fixed {
                 continue;
             }
 

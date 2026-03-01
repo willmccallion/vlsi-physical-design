@@ -251,61 +251,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "eda-cli"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "clap",
- "eda-common",
- "eda-placer",
- "eda-router",
- "env_logger",
- "log",
- "serde",
- "toml",
-]
-
-[[package]]
-name = "eda-common"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "dashmap",
- "env_logger",
- "image",
- "imageproc",
- "log",
- "rand 0.8.5",
- "rayon",
- "rstar",
- "serde",
- "thiserror",
-]
-
-[[package]]
-name = "eda-placer"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "eda-common",
- "log",
- "rand 0.8.5",
- "rayon",
- "rustfft",
-]
-
-[[package]]
-name = "eda-router"
-version = "0.1.0"
-dependencies = [
- "eda-common",
- "log",
- "priority-queue",
- "rand 0.8.5",
- "rayon",
-]
-
-[[package]]
 name = "either"
 version = "1.15.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -731,6 +676,61 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "05e6affeb1632d6ff6a23d2cd40ffed138e82f1532571a26f527c8a284bb2fbb"
 dependencies = [
  "ttf-parser",
+]
+
+[[package]]
+name = "pare"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "clap",
+ "env_logger",
+ "log",
+ "pare-common",
+ "pare-placer",
+ "pare-router",
+ "serde",
+ "toml",
+]
+
+[[package]]
+name = "pare-common"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "dashmap",
+ "env_logger",
+ "image",
+ "imageproc",
+ "log",
+ "rand 0.8.5",
+ "rayon",
+ "rstar",
+ "serde",
+ "thiserror",
+]
+
+[[package]]
+name = "pare-placer"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "log",
+ "pare-common",
+ "rand 0.8.5",
+ "rayon",
+ "rustfft",
+]
+
+[[package]]
+name = "pare-router"
+version = "0.1.0"
+dependencies = [
+ "log",
+ "pare-common",
+ "priority-queue",
+ "rand 0.8.5",
+ "rayon",
 ]
 
 [[package]]

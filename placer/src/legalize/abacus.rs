@@ -5,9 +5,9 @@
 //! weighted average calculations. The algorithm handles fixed cells, macros,
 //! and standard cells differently, with dynamic padding to prevent row overflow.
 
-use eda_common::db::core::NetlistDB;
-use eda_common::geom::point::Point;
-use eda_common::geom::rect::Rect;
+use pare_common::db::core::NetlistDB;
+use pare_common::geom::point::Point;
+use pare_common::geom::rect::Rect;
 use std::collections::HashMap;
 
 /// Abacus legalization algorithm implementation.
@@ -108,8 +108,11 @@ impl AbacusLegalizer {
         };
 
         let whitespace = total_row_capacity - total_movable_width;
+        // Use at most 50% of global whitespace as padding so locally dense rows
+        // don't overflow when the global utilization is high (>75%).
+        let padding_fraction = if utilization > 0.75 { 0.25 } else { 0.50 };
         let raw_padding = if movable_cell_count > 0 && whitespace > 0.0 {
-            (whitespace * 0.90 / (movable_cell_count as f64)).max(0.0)
+            (whitespace * padding_fraction / (movable_cell_count as f64)).max(0.0)
         } else {
             0.0
         };
@@ -234,7 +237,7 @@ impl AbacusLegalizer {
             let ideal_row_idx = ((pos.y - die_min_y) / row_height).round() as isize;
 
             let mut placed = false;
-            let search_radius = 50;
+            let search_radius = num_rows;
 
             for offset in 0..=search_radius {
                 let signs = if offset == 0 { vec![1] } else { vec![1, -1] };
@@ -275,7 +278,9 @@ impl AbacusLegalizer {
             if !placed {
                 let r = ideal_row_idx.clamp(0, num_rows as isize - 1) as usize;
                 if !rows[r].is_empty() {
+                    let cell_w = db.cells[i].width + padding_per_cell;
                     rows[r][0].cells.push(i);
+                    rows[r][0].used_width += cell_w;
                 }
             }
         }
@@ -309,6 +314,7 @@ impl AbacusLegalizer {
                     self.collapse(&mut clusters, sub.min_x);
                 }
 
+                // Left-to-right: push clusters right if they underflow
                 let mut left_limit = sub.min_x;
                 for cluster in clusters.iter_mut() {
                     if cluster.x < left_limit {
@@ -317,6 +323,7 @@ impl AbacusLegalizer {
                     left_limit = cluster.x + cluster.width;
                 }
 
+                // Right-to-left: push clusters left if they overflow
                 let mut right_limit = sub.max_x;
                 for cluster in clusters.iter_mut().rev() {
                     if cluster.x + cluster.width > right_limit {
@@ -325,16 +332,90 @@ impl AbacusLegalizer {
                     right_limit = cluster.x;
                 }
 
-                for cluster in &clusters {
-                    let mut current_x = cluster.x;
-                    for &cell_idx in &cluster.member_cells {
-                        current_x = current_x.max(sub.min_x);
-                        let safe_x = current_x;
+                // Collect all cells ordered by their cluster-assigned x position,
+                // then do a single strict left-to-right sequential placement.
+                // This guarantees no overlaps and no out-of-bounds regardless of
+                // how many clusters collided at the right edge.
+                let sub_capacity = sub.max_x - sub.min_x;
+                let sub_cell_width: f64 = sub.cells.iter()
+                    .map(|&ci| db.cells[ci].width)
+                    .sum();
+                let has_slack = sub_cell_width < sub_capacity - 0.001;
 
-                        db.positions[cell_idx].x = safe_x;
-                        db.positions[cell_idx].y = row_y;
-                        current_x += db.cells[cell_idx].width + padding_per_cell;
+                let mut ordered: Vec<(f64, usize)> = clusters
+                    .iter()
+                    .flat_map(|c| {
+                        let mut cx = c.x;
+                        c.member_cells.iter().map(move |&ci| {
+                            let entry = (cx, ci);
+                            cx += 0.0; // width advanced below during sort
+                            entry
+                        })
+                    })
+                    .collect();
+                // Re-compute each cell's ideal x by walking clusters properly
+                ordered.clear();
+                for cluster in &clusters {
+                    let mut cx = cluster.x;
+                    for &ci in &cluster.member_cells {
+                        ordered.push((cx, ci));
+                        cx += db.cells[ci].width + if has_slack { padding_per_cell } else { 0.0 };
                     }
+                }
+                ordered.sort_by(|a, b| a.0.partial_cmp(&b.0).unwrap());
+
+                // Sequential pack: honour ideal positions where possible,
+                // but always advance monotonically and clamp to die boundary.
+                let mut cursor = sub.min_x;
+                for (ideal_x, cell_idx) in &ordered {
+                    let cell_w = db.cells[*cell_idx].width;
+                    let pad = if has_slack { padding_per_cell } else { 0.0 };
+                    // Move cursor to ideal_x if it doesn't go backward
+                    if *ideal_x > cursor {
+                        cursor = *ideal_x;
+                    }
+                    // Clamp to left boundary (cursor always advances, never backward)
+                    let place_x = cursor.max(die_min_x);
+                    db.positions[*cell_idx].x = place_x;
+                    db.positions[*cell_idx].y = row_y;
+                    cursor = place_x + cell_w + pad;
+                }
+            }
+        }
+
+        // Post-legalization: clamp Y to die boundary, then compact any
+        // cells that overflow the right die boundary by pushing them left
+        // (and their neighbors) in a right-to-left pass per row.
+        for i in 0..db.num_cells() {
+            if db.cells[i].is_fixed {
+                continue;
+            }
+            let h = db.cells[i].height;
+            db.positions[i].y = db.positions[i].y.clamp(die_min_y, db.die_area.max.y - h);
+        }
+
+        // Right-to-left compaction for each row to fix right-boundary overflow.
+        for row in rows.iter() {
+            for sub in row.iter() {
+                if sub.cells.is_empty() {
+                    continue;
+                }
+
+                // Sort cells by their placed x position
+                let mut cells_in_sub: Vec<usize> = sub.cells.clone();
+                cells_in_sub.sort_by(|&a, &b| {
+                    db.positions[a].x.partial_cmp(&db.positions[b].x).unwrap()
+                });
+
+                // Right-to-left: if the rightmost cell exceeds die, push it left,
+                // which may push its left neighbor left, etc.
+                let mut right_limit = die_max_x;
+                for &ci in cells_in_sub.iter().rev() {
+                    let w = db.cells[ci].width;
+                    if db.positions[ci].x + w > right_limit {
+                        db.positions[ci].x = (right_limit - w).max(die_min_x);
+                    }
+                    right_limit = db.positions[ci].x;
                 }
             }
         }

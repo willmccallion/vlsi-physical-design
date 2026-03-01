@@ -1,4 +1,4 @@
-# VLSI Physical Design Tool
+# PARE — Placement And Routing Engine
 
 A digital IC placement and routing engine written in Rust. Implements the full physical design flow — analytical global placement, Abacus legalization, and two-stage negotiation-based routing — from scratch. Successfully places and routes real ISPD benchmarks up to 12k+ cells / 11.5k nets with zero DRC violations.
 

@@ -6,8 +6,8 @@
 //! allow layer transitions at the same gcell.
 
 use crate::grid::RoutingGrid;
-use eda_common::db::core::{LayerDirection, NetlistDB};
-use eda_common::geom::coord::GridCoord;
+use pare_common::db::core::{LayerDirection, NetlistDB};
+use pare_common::geom::coord::GridCoord;
 use std::cmp::Ordering;
 use std::collections::BinaryHeap;
 

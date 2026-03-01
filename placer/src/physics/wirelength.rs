@@ -5,8 +5,8 @@
 //! differentiable gradients for optimization while closely approximating the
 //! true wirelength objective.
 
-use eda_common::db::core::NetlistDB;
-use eda_common::geom::point::Point;
+use pare_common::db::core::NetlistDB;
+use pare_common::geom::point::Point;
 
 /// Computes wirelength cost and gradients using weighted average approximation.
 ///

@@ -8,8 +8,8 @@
 //! capacity.
 
 use super::RoutingGrid;
-use eda_common::db::core::{LayerDirection, NetlistDB};
-use eda_common::util::visualization::CongestionProvider;
+use pare_common::db::core::{LayerDirection, NetlistDB};
+use pare_common::util::visualization::CongestionProvider;
 
 /// Edge-based gcell routing grid.
 ///

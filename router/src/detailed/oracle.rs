@@ -5,7 +5,7 @@
 
 use crate::algo::astar::GuideOracle;
 use crate::utils::conversion::GridConverter;
-use eda_common::geom::coord::GridCoord;
+use pare_common::geom::coord::GridCoord;
 use std::collections::HashSet;
 
 /// Fast guide oracle implementation using lookup tables.

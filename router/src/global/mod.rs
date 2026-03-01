@@ -2,10 +2,10 @@ use crate::algo::astar::{AStar, NoGuide};
 use crate::grid::GCellGrid;
 use crate::grid::RoutingGrid;
 use crate::utils::conversion::GridConverter;
-use eda_common::db::core::NetlistDB;
-use eda_common::geom::coord::GridCoord;
-use eda_common::util::config::GlobalRoutingConfig;
-use eda_common::util::visualization::draw_congestion_heatmap;
+use pare_common::db::core::NetlistDB;
+use pare_common::geom::coord::GridCoord;
+use pare_common::util::config::GlobalRoutingConfig;
+use pare_common::util::visualization::draw_congestion_heatmap;
 use rand::seq::SliceRandom;
 use rand::thread_rng;
 use rayon::prelude::*;
@@ -306,7 +306,7 @@ pub fn run(
 
 /// Computes the routing path for a single net in global routing.
 fn compute_net_path_gr(
-    net: &eda_common::db::core::NetData,
+    net: &pare_common::db::core::NetData,
     grid: &GCellGrid,
     solver: &mut AStar,
     converter: &GridConverter,

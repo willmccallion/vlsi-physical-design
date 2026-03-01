@@ -1,12 +1,13 @@
 [package]
-name = "eda-cli"
+name = "pare"
 version = "0.1.0"
 edition = "2024"
+description = "PARE — Placement And Routing Engine: CLI entry point"
 
 [dependencies]
-eda-common = { path = "../common" }
-eda-placer = { path = "../placer" }
-eda-router = { path = "../router" }
+pare-common = { path = "../common" }
+pare-placer = { path = "../placer" }
+pare-router = { path = "../router" }
 clap = { version = "4.5", features = ["derive"] }
 toml = "0.8"
 env_logger = "0.11"

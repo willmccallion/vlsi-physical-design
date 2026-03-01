@@ -7,5 +7,8 @@ members = [
 ]
 resolver = "2"
 
+[workspace.package]
+description = "PARE — Placement And Routing Engine: a digital IC physical design tool written in Rust"
+
 [profile.release]
 debug = true

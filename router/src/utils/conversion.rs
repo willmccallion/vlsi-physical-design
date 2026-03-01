@@ -4,9 +4,9 @@
 //! and discrete grid coordinates (integer indices). Handles coordinate
 //! system transformations including origin offsets and scaling factors.
 
-use eda_common::geom::coord::GridCoord;
-use eda_common::geom::point::Point;
-use eda_common::geom::rect::Rect;
+use pare_common::geom::coord::GridCoord;
+use pare_common::geom::point::Point;
+use pare_common::geom::rect::Rect;
 
 /// Converter between physical coordinates and grid coordinates.
 ///

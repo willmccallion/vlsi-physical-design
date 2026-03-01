@@ -48,35 +48,27 @@ impl Default for Config {
 /// parameters significantly affect placement quality and runtime.
 #[derive(Debug, Deserialize)]
 pub struct GlobalPlacementConfig {
-    #[serde(default = "default_target_density")]
-    pub target_density: f64,
-    #[serde(default = "default_bin_dimension")]
-    pub bin_dimension: usize,
+    pub target_density: Option<f64>,
+    pub bin_dimension: Option<usize>,
     #[serde(default = "default_placer_max_iterations")]
     pub placer_max_iterations: usize,
-    #[serde(default = "default_initial_learning_rate")]
-    pub initial_learning_rate: f64,
+    pub initial_learning_rate: Option<f64>,
     #[serde(default = "default_convergence_threshold")]
     pub convergence_threshold: f64,
-    #[serde(default = "default_wa_gamma")]
-    pub wa_gamma: f64,
+    pub wa_gamma: Option<f64>,
     #[serde(default = "default_electro_force_multiplier")]
     pub electro_force_multiplier: f64,
 }
 
 impl Default for GlobalPlacementConfig {
-    /// Creates a default global placement configuration with standard parameters.
-    ///
-    /// Uses helper functions to set default values for all placement parameters,
-    /// providing reasonable defaults for typical designs.
     fn default() -> Self {
         Self {
-            target_density: default_target_density(),
-            bin_dimension: default_bin_dimension(),
+            target_density: None,
+            bin_dimension: None,
             placer_max_iterations: default_placer_max_iterations(),
-            initial_learning_rate: default_initial_learning_rate(),
+            initial_learning_rate: None,
             convergence_threshold: default_convergence_threshold(),
-            wa_gamma: default_wa_gamma(),
+            wa_gamma: None,
             electro_force_multiplier: default_electro_force_multiplier(),
         }
     }
@@ -235,35 +227,18 @@ impl Default for InputConfig {
     }
 }
 
-/// Default target density for placement (60% utilization).
-fn default_target_density() -> f64 {
-    0.60
-}
-
-/// Default bin grid dimension for density computation (256x256).
-fn default_bin_dimension() -> usize {
-    256
-}
 
 /// Default maximum iterations for placement optimization (2000).
 fn default_placer_max_iterations() -> usize {
     2000
 }
 
-/// Default initial learning rate for gradient descent (0.003).
-fn default_initial_learning_rate() -> f64 {
-    0.003
-}
 
 /// Default convergence threshold for placement (average cell movement < 0.0002).
 fn default_convergence_threshold() -> f64 {
     2e-4
 }
 
-/// Default gamma parameter for weighted average wirelength approximation (4.0).
-fn default_wa_gamma() -> f64 {
-    4.0
-}
 
 /// Default multiplier for electrostatic density forces (20.0).
 fn default_electro_force_multiplier() -> f64 {

@@ -7,8 +7,8 @@
 //! rather than node occupancy.
 
 use crate::grid::RoutingGrid;
-use eda_common::db::core::{LayerDirection, NetlistDB};
-use eda_common::geom::coord::GridCoord;
+use pare_common::db::core::{LayerDirection, NetlistDB};
+use pare_common::geom::coord::GridCoord;
 
 /// Attempts to route a 2-pin connection using pattern routes on the gcell grid.
 ///

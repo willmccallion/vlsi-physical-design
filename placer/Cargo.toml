@@ -1,10 +1,11 @@
 [package]
-name = "eda-placer"
+name = "pare-placer"
 version = "0.1.0"
 edition = "2024"
+description = "PARE — Placement And Routing Engine: analytical placement and legalization"
 
 [dependencies]
-eda-common = { path = "../common" }
+pare-common = { path = "../common" }
 rustfft = "6.2"
 rayon = "1.10"
 log = "0.4"

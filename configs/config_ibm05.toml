@@ -1,13 +1,13 @@
 [global_placement]
 placer_max_iterations = 2000
 convergence_threshold = 1e-4
-electro_force_multiplier = 100000.0
+electro_force_multiplier = 1000.0
 
 [legalization]
 algorithm = "abacus"
 
 [global_routing]
-gcell_size = 1260
+gcell_size = 50
 max_iterations = 300
 history_increment = 0.5
 initial_penalty = 0.5
@@ -27,5 +27,5 @@ stagnation_threshold = 30
 ripup_radius = 3
 
 [input]
-bookshelf_aux_file = "inputs/benchmarks/ibm01_raw/ibm01.aux"
-output_def = "output/ibm01_placed.def"
+bookshelf_aux_file = "inputs/benchmarks/ibm05_raw/ibm05.aux"
+output_def = "output/ibm05_placed.def"

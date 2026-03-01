@@ -13,11 +13,11 @@ use crate::algo::astar::AStar;
 use crate::grid::GCellGrid;
 use crate::grid::RoutingGrid;
 use crate::utils::conversion::GridConverter;
-use eda_common::db::core::NetlistDB;
-use eda_common::geom::coord::GridCoord;
-use eda_common::geom::point::Point;
-use eda_common::util::config::DetailedRoutingConfig;
-use eda_common::util::visualization::draw_congestion_heatmap;
+use pare_common::db::core::NetlistDB;
+use pare_common::geom::coord::GridCoord;
+use pare_common::geom::point::Point;
+use pare_common::util::config::DetailedRoutingConfig;
+use pare_common::util::visualization::draw_congestion_heatmap;
 use rayon::prelude::*;
 use std::collections::{HashMap, HashSet};
 use std::io::Write;
@@ -154,7 +154,7 @@ pub fn run(
     let start_time = Instant::now();
 
     let coarse_max = coarse_converter.to_grid(
-        eda_common::geom::point::Point::new(db.die_area.width(), db.die_area.height()),
+        pare_common::geom::point::Point::new(db.die_area.width(), db.die_area.height()),
         0,
     );
     let coarse_w = coarse_max.x + 1;
@@ -280,7 +280,17 @@ pub fn run(
         grid.update_history(effective_history_inc);
 
         if force_ripup && stagnation_counter == config.stagnation_threshold + 1 {
-            grid.decay_history(0.5);
+            // Full history reset + penalty reduction for small overflow.
+            // When only a few edges are congested, accumulated history
+            // makes them prohibitively expensive, trapping the router in
+            // a cycle where nets keep avoiding the same edges.
+            if overflow <= 10 {
+                grid.decay_history(0.0);
+                collision_penalty = init_penalty;
+                log::info!("Reset history and penalty for small overflow ({})", overflow);
+            } else {
+                grid.decay_history(0.5);
+            }
         }
 
         grid.set_penalty(collision_penalty);
@@ -439,7 +449,7 @@ pub fn run(
             }
 
             let coarse_max = coarse_converter.to_grid(
-                eda_common::geom::point::Point::new(db.die_area.width(), db.die_area.height()),
+                pare_common::geom::point::Point::new(db.die_area.width(), db.die_area.height()),
                 0,
             );
             let coarse_w = coarse_max.x + 1;

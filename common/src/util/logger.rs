@@ -13,5 +13,15 @@ pub fn init() {
     env_logger::builder()
         .filter_level(log::LevelFilter::Info)
         .format_timestamp(None)
+        .format(|buf, record| {
+            use std::io::Write;
+            let level_style = buf.default_level_style(record.level());
+            writeln!(
+                buf,
+                "[{level_style}{:<5}{level_style:#} PARE] {}",
+                record.level(),
+                record.args()
+            )
+        })
         .init();
 }

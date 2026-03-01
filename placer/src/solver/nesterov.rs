@@ -6,8 +6,8 @@
 //! HPWL changes, replacing the fixed electro_force_multiplier.
 
 use crate::physics::PhysicsContext;
-use eda_common::db::core::NetlistDB;
-use eda_common::geom::point::Point;
+use pare_common::db::core::NetlistDB;
+use pare_common::geom::point::Point;
 use rand::Rng;
 
 /// Parameters controlling the Nesterov optimizer's behavior.
@@ -44,10 +44,6 @@ impl NesterovOptimizer {
     }
 
     /// Optimizes cell positions to minimize wirelength and density violations.
-    ///
-    /// Uses Nesterov acceleration with adaptive density weighting: the density
-    /// force multiplier is set from the WL/density gradient norm ratio and
-    /// adjusted based on HPWL trends (DREAMPlace/RePlAce style).
     pub fn optimize(
         &mut self,
         db: &mut NetlistDB,
@@ -56,18 +52,48 @@ impl NesterovOptimizer {
         let n = db.positions.len();
         self.x_k.copy_from_slice(&db.positions);
 
-        let mut rng = rand::thread_rng();
-        let center_x = (db.die_area.min.x + db.die_area.max.x) / 2.0;
-        let center_y = (db.die_area.min.y + db.die_area.max.y) / 2.0;
-        let noise_scale_x = db.die_area.width() * 0.25;
-        let noise_scale_y = db.die_area.height() * 0.25;
+        // Check whether the parsed positions are already a reasonable initial placement
+        let in_bounds_count = self.x_k.iter().enumerate()
+            .filter(|(i, pos)| {
+                let cell = &db.cells[*i];
+                !cell.is_fixed
+                    && pos.x >= db.die_area.min.x
+                    && pos.y >= db.die_area.min.y
+                    && pos.x + cell.width <= db.die_area.max.x
+                    && pos.y + cell.height <= db.die_area.max.y
+            })
+            .count();
+        let movable_count = db.cells.iter().filter(|c| !c.is_fixed).count();
+        let use_initial_placement = movable_count > 0
+            && (in_bounds_count as f64 / movable_count as f64) > 0.90;
 
-        for (i, pos) in self.x_k.iter_mut().enumerate() {
-            if !db.cells[i].is_fixed {
-                pos.x = center_x + rng.gen_range(-noise_scale_x..noise_scale_x);
-                pos.y = center_y + rng.gen_range(-noise_scale_y..noise_scale_y);
-                pos.x = pos.x.clamp(db.die_area.min.x, db.die_area.max.x - db.cells[i].width);
-                pos.y = pos.y.clamp(db.die_area.min.y, db.die_area.max.y - db.cells[i].height);
+        if use_initial_placement {
+            for (i, pos) in self.x_k.iter_mut().enumerate() {
+                if !db.cells[i].is_fixed {
+                    pos.x = pos.x.clamp(
+                        db.die_area.min.x,
+                        db.die_area.max.x - db.cells[i].width,
+                    );
+                    pos.y = pos.y.clamp(
+                        db.die_area.min.y,
+                        db.die_area.max.y - db.cells[i].height,
+                    );
+                }
+            }
+        } else {
+            let mut rng = rand::thread_rng();
+            let center_x = (db.die_area.min.x + db.die_area.max.x) / 2.0;
+            let center_y = (db.die_area.min.y + db.die_area.max.y) / 2.0;
+            let noise_scale_x = db.die_area.width() * 0.25;
+            let noise_scale_y = db.die_area.height() * 0.25;
+
+            for (i, pos) in self.x_k.iter_mut().enumerate() {
+                if !db.cells[i].is_fixed {
+                    pos.x = center_x + rng.gen_range(-noise_scale_x..noise_scale_x);
+                    pos.y = center_y + rng.gen_range(-noise_scale_y..noise_scale_y);
+                    pos.x = pos.x.clamp(db.die_area.min.x, db.die_area.max.x - db.cells[i].width);
+                    pos.y = pos.y.clamp(db.die_area.min.y, db.die_area.max.y - db.cells[i].height);
+                }
             }
         }
 
@@ -96,12 +122,25 @@ impl NesterovOptimizer {
         };
         let mut density_weight = base_ratio * 0.5;
 
-        let total_bins = (physics.bin_dim * physics.bin_dim) as f64;
+        // Precompute bin geometry for overflow metric
+        let dim = physics.bin_dim;
+        let bin_w = db.die_area.width() / dim as f64;
+        let bin_h = db.die_area.height() / dim as f64;
+        let bin_area = bin_w * bin_h;
+        let total_cell_area: f64 = db.cells.iter()
+            .filter(|c| !c.is_fixed)
+            .map(|c| c.width * c.height)
+            .sum();
+
         let mut prev_hpwl = wl_cost_0;
         let ref_hpwl = wl_cost_0.max(1.0);
 
+        // Track best solution for rollback on instability
+        let mut best_positions = self.x_k.clone();
+        let mut best_overflow = f64::INFINITY;
+        let mut prev_avg_disp = 0.0;
+
         for k in 0..self.params.max_iterations {
-            // Compute WL and density gradients separately
             let (wl_cost, density_cost, wl_grad_norm, density_grad_norm) =
                 physics.compute_gradients_separate(
                     db,
@@ -118,27 +157,31 @@ impl NesterovOptimizer {
                 self.grads[i].y += self.density_grads[i].y * density_weight;
             }
 
-            // --- Density weight update (every 10 iters, DREAMPlace style) ---
+            // --- Density weight update (every 10 iters) ---
             if k > 0 && k % 10 == 0 {
+                // Multiplicative growth based on HPWL trend
                 let delta_hpwl = wl_cost - prev_hpwl;
                 let mu = if delta_hpwl < 0.0 {
-                    // HPWL improved: can afford more density pressure
-                    1.05 * 0.9999_f64.powi(k as i32).max(0.98)
+                    1.05
                 } else {
-                    // HPWL worsened: back off density pressure
-                    1.05_f64.powf(-(delta_hpwl / ref_hpwl).min(10.0)).max(0.95)
+                    let slowdown = (delta_hpwl / ref_hpwl).min(1.0);
+                    1.01 + 0.04 * (1.0 - slowdown)
                 };
                 density_weight *= mu;
-                prev_hpwl = wl_cost;
 
-                // Re-anchor to gradient norm ratio — target grows with progress
-                if k % 50 == 0 && density_grad_norm > 1e-20 && wl_grad_norm > 1e-20 {
+                // Re-anchor to gradient norm ratio: ensure density weight
+                // produces forces that match or exceed WL forces.
+                // Target ratio ramps with progress² so density forces
+                // dominate more in later iterations.
+                if density_grad_norm > 1e-20 && wl_grad_norm > 1e-20 {
+                    let current_ratio = wl_grad_norm / density_grad_norm;
                     let progress = (k as f64 / self.params.max_iterations as f64).min(1.0);
-                    let target_ratio = 0.5 + 1.5 * progress;
-                    let ideal = base_ratio * target_ratio;
-                    // Blend: only move toward ideal, never below current
-                    density_weight = density_weight.max(density_weight * 0.7 + ideal * 0.3);
+                    let target_multiplier = 1.0 + 255.0 * progress * progress;
+                    let ideal = current_ratio * target_multiplier;
+                    density_weight = density_weight.max(ideal);
                 }
+
+                prev_hpwl = wl_cost;
             }
 
             // --- Metrics ---
@@ -148,22 +191,47 @@ impl NesterovOptimizer {
             }
             let avg_disp = total_disp / n as f64;
 
-            let overflow_ratio = physics
+            let overflow_area: f64 = physics
                 .density_map
                 .iter()
                 .filter(|&&v| v > 0.0)
-                .count() as f64
-                / total_bins;
+                .map(|&v| v * bin_area)
+                .sum();
+            let overflow_ratio = if total_cell_area > 0.0 {
+                overflow_area / total_cell_area
+            } else {
+                0.0
+            };
+
+            // Track best solution
+            if overflow_ratio < best_overflow {
+                best_overflow = overflow_ratio;
+                best_positions.copy_from_slice(&self.x_k);
+            }
 
             if k % 100 == 0 {
                 log::info!(
-                    "Iter {}: WL={:.0} Density={:.0} DensW={:.2e} Step={:.5} AvgMove={:.4} OvfRatio={:.3}",
+                    "Iter {}: WL={:.0} Density={:.0} DensW={:.2e} Step={:.5} AvgMove={:.4} Overflow={:.3}",
                     k, wl_cost, density_cost, density_weight, step_size, avg_disp, overflow_ratio,
                 );
             }
 
+            // --- Instability detection: if movement explodes, rollback to best ---
+            if k > 100 && avg_disp > prev_avg_disp * 5.0 && avg_disp > 2.0 {
+                log::info!(
+                    "Instability detected at iter {} (avg_disp={:.2}). Rolling back to best (overflow={:.4})",
+                    k, avg_disp, best_overflow
+                );
+                Self::apply_clamping(db, &mut best_positions);
+                db.positions.copy_from_slice(&best_positions);
+                return Ok(());
+            }
+            if k > 0 {
+                prev_avg_disp = avg_disp.max(0.01);
+            }
+
             // --- Convergence ---
-            if k > 200 && overflow_ratio < 0.05 && avg_disp < 0.1 {
+            if k > 200 && overflow_ratio < 0.10 && avg_disp < 0.1 {
                 log::info!(
                     "Converged at iteration {}: overflow={:.4}, avg_disp={:.4}",
                     k, overflow_ratio, avg_disp
@@ -173,14 +241,14 @@ impl NesterovOptimizer {
                 return Ok(());
             }
 
-            if k > 500 && avg_disp < self.params.convergence_threshold && density_cost < 50000.0 {
-                log::info!("Converged: Cells stabilized at iteration {}", k);
+            if k > 500 && avg_disp < self.params.convergence_threshold {
+                log::info!("Converged: Cells stabilized at iteration {} (overflow={:.4})", k, overflow_ratio);
                 Self::apply_clamping(db, &mut self.x_k);
                 db.positions.copy_from_slice(&self.x_k);
                 return Ok(());
             }
 
-            // --- Nesterov update (original working scheme) ---
+            // --- Nesterov update ---
             let mut x_next: Vec<Point<f64>> = self
                 .y_k
                 .iter()
@@ -214,9 +282,13 @@ impl NesterovOptimizer {
             }
         }
 
-        Self::apply_clamping(db, &mut self.x_k);
-        db.positions.copy_from_slice(&self.x_k);
-        log::warn!("Placer reached max iterations. Proceeding with current solution.");
+        // Use best solution found during optimization
+        Self::apply_clamping(db, &mut best_positions);
+        db.positions.copy_from_slice(&best_positions);
+        log::warn!(
+            "Placer reached max iterations. Using best solution (overflow={:.4}).",
+            best_overflow
+        );
         Ok(())
     }
 

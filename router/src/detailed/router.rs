@@ -3,10 +3,10 @@ use crate::algo::pattern;
 use crate::grid::GCellGrid;
 use crate::grid::RoutingGrid;
 use crate::utils::conversion::GridConverter;
-use eda_common::db::core::{NetData, NetlistDB, RouteSegment};
-use eda_common::geom::coord::GridCoord;
-use eda_common::geom::point::Point;
-use eda_common::util::config::DetailedRoutingConfig;
+use pare_common::db::core::{NetData, NetlistDB, RouteSegment};
+use pare_common::geom::coord::GridCoord;
+use pare_common::geom::point::Point;
+use pare_common::util::config::DetailedRoutingConfig;
 use std::collections::{HashMap, HashSet};
 
 /// Routes a single net using A* pathfinding with guide constraints.
@@ -66,7 +66,7 @@ pub fn route_net_dr_pure<O: GuideOracle>(
     let start_idx = sorted_indices[0];
     let mut tree_nodes = vec![pin_coords[start_idx]];
     let mut paths = Vec::new();
-    let margin_multiplier = 1.0 + (ripup_count as f64 * 0.15);
+    let margin_multiplier = 1.0 + (ripup_count as f64 * 0.25);
 
     let net_hpwl = {
         let mut min_x = u32::MAX;
@@ -81,10 +81,10 @@ pub fn route_net_dr_pure<O: GuideOracle>(
         }
         (max_x.saturating_sub(min_x)) + (max_y.saturating_sub(min_y))
     };
-    let hpwl_expansions = (net_hpwl * 50).clamp(5_000, 500_000);
+    let hpwl_expansions = (net_hpwl * 50).clamp(5_000, 1_000_000);
     let max_expansions = hpwl_expansions
-        .saturating_add(ripup_count.saturating_mul(30_000))
-        .min(500_000);
+        .saturating_add(ripup_count.saturating_mul(50_000))
+        .min(1_000_000);
 
     for &next_pin_idx in &sorted_indices[1..] {
         let target = pin_coords[next_pin_idx];
@@ -114,7 +114,7 @@ pub fn route_net_dr_pure<O: GuideOracle>(
             solver.find_path(
                 grid, db, &tree_nodes, target, penalty,
                 config.astar_heuristic_weight, config.astar_window_margin_max,
-                1.0, &NoGuide, &pin_coords, max_expansions * 2, false,
+                margin_multiplier, &NoGuide, &pin_coords, max_expansions * 2, false,
             )
         };
 

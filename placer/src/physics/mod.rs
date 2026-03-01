@@ -16,8 +16,8 @@ pub mod electrostatics;
 /// position for use in gradient-based optimizers.
 pub mod wirelength;
 
-use eda_common::db::core::NetlistDB;
-use eda_common::geom::point::Point;
+use pare_common::db::core::NetlistDB;
+use pare_common::geom::point::Point;
 use rustfft::FftPlanner;
 
 /// Context structure for physics-based placement computations.
@@ -34,17 +34,21 @@ pub struct PhysicsContext {
     pub electro_force_y: Vec<f64>,
 
     fft_planner: FftPlanner<f64>,
-    fft_scratch: Vec<rustfft::num_complex::Complex<f64>>,
+    /// Scratch buffer sized for 2N×2N mirrored FFT (DCT via mirror padding).
+    pub(crate) fft_scratch: Vec<rustfft::num_complex::Complex<f64>>,
+    /// Mirrored density map for 2N×2N DCT computation.
+    pub(crate) mirror_map: Vec<f64>,
 }
 
 impl PhysicsContext {
     /// Creates a new physics context with the specified bin grid dimensions.
     ///
     /// Allocates arrays for density maps, potential fields, and force vectors
-    /// sized to match the bin grid. Initializes the FFT planner for later use
-    /// in computing electrostatic potentials.
+    /// sized to match the bin grid. The FFT scratch space is sized for 2N×2N
+    /// to support mirror-padded DCT boundary conditions.
     pub fn new(width: usize, height: usize) -> Self {
         let size = width * height;
+        let mirror_size = (2 * width) * (2 * height);
         Self {
             bin_dim: width,
             density_map: vec![0.0; size],
@@ -52,7 +56,8 @@ impl PhysicsContext {
             electro_force_x: vec![0.0; size],
             electro_force_y: vec![0.0; size],
             fft_planner: FftPlanner::new(),
-            fft_scratch: vec![rustfft::num_complex::Complex::default(); size],
+            fft_scratch: vec![rustfft::num_complex::Complex::default(); mirror_size],
+            mirror_map: vec![0.0; mirror_size],
         }
     }
 

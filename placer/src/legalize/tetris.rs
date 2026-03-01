@@ -5,7 +5,7 @@
 //! by X coordinate and placed in the best available position near their ideal
 //! location, searching nearby rows if the ideal row is full.
 
-use eda_common::db::core::NetlistDB;
+use pare_common::db::core::NetlistDB;
 use std::cmp::Ordering;
 
 /// Tetris-style legalization algorithm implementation.
