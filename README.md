@@ -2,7 +2,11 @@
 
 A digital IC placement and routing engine written in Rust. Implements the full physical design flow — analytical global placement, Abacus legalization, and two-stage negotiation-based routing — from scratch, targeting synthetic benchmarks up to ~10k nets.
 
-![GCD Routing](assets/routed_gcd.png)
+| GCD (~500 nets) | 5k Synthetic |
+|:---:|:---:|
+| ![GCD Routing](assets/routed_gcd.png) | ![5k Routing](assets/routed_5k.png) |
+
+*Left: GCD block, a real standard-cell design. Right: randomly generated synthetic netlist — uniform fanout, no critical paths — used to stress-test routing at scale.*
 
 ---
 
