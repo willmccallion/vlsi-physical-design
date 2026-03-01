@@ -89,4 +89,56 @@ impl PhysicsContext {
 
         (wl_cost, density_cost)
     }
+
+    /// Computes WL and density gradients separately with their norms.
+    ///
+    /// Returns (wl_cost, density_cost, wl_grad_norm, density_grad_norm).
+    /// The WL gradients are written to output_gradients, and the density
+    /// gradients are written to density_gradients. The caller combines them
+    /// with an adaptive weight.
+    pub fn compute_gradients_separate(
+        &mut self,
+        db: &NetlistDB,
+        current_positions: &[Point<f64>],
+        output_gradients: &mut [Point<f64>],
+        density_gradients: &mut [Point<f64>],
+        wa_gamma: f64,
+        target_density: f64,
+    ) -> (f64, f64, f64, f64) {
+        for g in output_gradients.iter_mut() {
+            *g = Point::new(0.0, 0.0);
+        }
+        for g in density_gradients.iter_mut() {
+            *g = Point::new(0.0, 0.0);
+        }
+
+        let wl_cost =
+            wirelength::compute_wa_gradient(db, current_positions, wa_gamma, output_gradients);
+
+        // Compute WL gradient norm
+        let wl_grad_norm = output_gradients
+            .iter()
+            .map(|g| g.x * g.x + g.y * g.y)
+            .sum::<f64>()
+            .sqrt();
+
+        // Compute density force with multiplier=1.0 into separate buffer
+        let density_cost = electrostatics::compute_density_force(
+            self,
+            db,
+            current_positions,
+            target_density,
+            1.0,
+            density_gradients,
+        );
+
+        // Compute density gradient norm
+        let density_grad_norm = density_gradients
+            .iter()
+            .map(|g| g.x * g.x + g.y * g.y)
+            .sum::<f64>()
+            .sqrt();
+
+        (wl_cost, density_cost, wl_grad_norm, density_grad_norm)
+    }
 }

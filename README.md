@@ -1,12 +1,12 @@
 # VLSI Physical Design Tool
 
-A digital IC placement and routing engine written in Rust. Implements the full physical design flow — analytical global placement, Abacus legalization, and two-stage negotiation-based routing — from scratch, targeting synthetic benchmarks up to ~10k nets.
+A digital IC placement and routing engine written in Rust. Implements the full physical design flow — analytical global placement, Abacus legalization, and two-stage negotiation-based routing — from scratch. Successfully places and routes real ISPD benchmarks up to 12k+ cells / 11.5k nets with zero DRC violations.
 
-| GCD (~500 nets) | 5k Synthetic |
+| GCD (~500 nets) | IBM01 (11,507 nets) |
 |:---:|:---:|
-| ![GCD Routing](assets/routed_gcd.png) | ![5k Routing](assets/routed_5k.png) |
+| ![GCD Routing](assets/routed_gcd.png) | ![IBM01 Routing](assets/routed_ibm01.png) |
 
-*Left: GCD block, a real standard-cell design. Right: randomly generated synthetic netlist — uniform fanout, no critical paths — used to stress-test routing at scale.*
+*Left: GCD block, a real standard-cell design. Right: IBM01 ISPD benchmark — 12,506 cells, 11,507 nets, routed across 5 metal layers with full Pathfinder convergence. Both verified DRC-clean (no shorts, no opens).*
 
 ---
 
@@ -26,14 +26,14 @@ flowchart TD
     LEG["Legalization (Abacus)<br/>snap cells to row grid<br/>resolve overlaps · minimize displacement"]
 
     subgraph GR["Global Routing"]
-        GRA["Coarse grid A*<br/>generate per-net routing guides"]
+        GRA["Coarse gcell grid A*<br/>generate per-net routing guides"]
         GRR["Rip-up & reroute loop<br/>history-based congestion penalty"]
     end
 
     subgraph DR["Detailed Routing"]
-        DRA["Fine grid A* (3D)<br/>guide-constrained maze routing"]
+        DRA["Edge-based gcell grid<br/>guide-constrained A* + pattern routing"]
         DRR["Spatial rip-up & reroute<br/>non-overlapping parallel batches"]
-        VIA["Via generation<br/>layer-transition segments"]
+        VIA["Via generation & pin access<br/>layer-transition segments"]
     end
 
     VER["Verification<br/>no shorts · no opens · all cells legal"]
@@ -72,13 +72,15 @@ Displacement from global placement is minimized throughout — the Abacus cost f
 
 ---
 
-## Routing: Pathfinder with 3D A*
+## Routing: Two-Stage Pathfinder on GCell Grid
 
-Routing runs in two stages:
+Routing runs in two stages on an edge-based gcell grid where capacity is structurally tied to the metal layer stack. Direction is enforced by the grid itself — horizontal layers only have horizontal edge capacity, vertical layers only have vertical. Capacities are auto-computed from track pitch and gcell size.
 
-**Global routing** operates on a coarse grid (~100×100 gcells). A* finds paths for all nets in parallel, then a Rip-up-and-Reroute loop resolves congestion. History costs accumulate on overloaded edges, steering later iterations away from hot spots (the Pathfinder algorithm).
+**Global routing** operates on a coarse grid (~50×50 gcells). A* finds paths for all nets, then a Rip-up-and-Reroute loop resolves congestion. History costs accumulate on overloaded edges, steering later iterations away from hot spots (the Pathfinder algorithm).
 
-**Detailed routing** operates on the fine routing grid (track pitch resolution). Each net is routed with guide-constrained A* — the search is restricted to gcells assigned by global routing, dramatically pruning the search space. Spatial batching enables parallel rerouting: non-overlapping congested nets are rerouted simultaneously each iteration. Via costs penalize layer transitions, encouraging planar routes where possible.
+**Detailed routing** operates on a finer gcell grid (auto-scaled to ~400×400 for large designs). Each net is first attempted with pattern routing (L-shaped and Z-shaped routes that check edge capacity), falling back to guide-constrained A* for complex paths. Spatial batching enables parallel rerouting: non-overlapping congested nets are rerouted simultaneously each iteration.
+
+**Segment generation** converts gcell paths to physical wire segments. Pin access uses L-shaped Manhattan M1 wires with via stacks, and gcell-center routing guarantees consistent via positions across layer transitions.
 
 ---
 
@@ -102,11 +104,12 @@ Type-safe index newtypes (`CellId`, `NetId`, `PinId`) prevent accidental index c
 
 ## Performance
 
-| Benchmark | Nets | Status | Notes |
-|---|---|---|---|
-| GCD block | ~500 | Fully routed | Standard cell logic, verified routable end-to-end |
-| Random synthetic | 1k–2k | Placement converges | Routing may not fully resolve congestion |
-| IBM01 and above | 12k+ | Not supported | Global routing congestion resolution breaks down at this scale |
+| Benchmark | Cells | Nets | Route Time | Result |
+|---|---|---|---|---|
+| GCD | 579 | 579 | <1s | Fully routed, verified DRC-clean |
+| IBM01 | 12,506 | 11,507 | ~75s | Converges in 10 iterations across M2–M5, verified DRC-clean |
+
+The IBM01 benchmark is a real ISPD circuit — not synthetic — with 85% utilization and complex multi-pin nets. The router distributes wires across 5 metal layers and resolves all overflow from 23,537 down to 0.
 
 ---
 
@@ -115,12 +118,14 @@ Type-safe index newtypes (`CellId`, `NetId`, `PinId`) prevent accidental index c
 **Requirements:** Rust stable
 
 ```bash
-# Generate a random benchmark (2000 cells, 50% density) and run the full flow
-cargo run --release -p eda-cli -- generate --cells 2000 --nets 2000 --utilization 0.5
-cargo run --release -p eda-cli -- flow
+# Run the full flow on the GCD benchmark (LEF/DEF)
+cargo run --release -- --config configs/config_gcd.toml
 
-# Run on a Bookshelf benchmark
-cargo run --release -p eda-cli -- flow --input benchmarks/gcd
+# Run on IBM01 (Bookshelf format, ~12k cells)
+cargo run --release -- --config configs/config_ibm01.toml
+
+# Route only (skip placement, uses previously placed DEF)
+cargo run --release -- --config configs/config_gcd.toml route
 ```
 
-Output images (`nesterov_placer.png`, `placed.png`, `gr_initial_congestion.png`, `routed.png`) are written to the working directory after each stage.
+Output images (`nesterov_placer.png`, `placed.png`, `dr_initial_congestion.png`, `routed.png`) and the routed DEF are written to the `output/` directory.

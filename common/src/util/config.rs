@@ -178,6 +178,8 @@ pub struct DetailedRoutingConfig {
     pub stagnation_threshold: usize,
     #[serde(default = "default_ripup_radius")]
     pub ripup_radius: i32,
+    #[serde(default = "default_dr_gcell_size")]
+    pub gcell_size: f64,
 }
 
 impl Default for DetailedRoutingConfig {
@@ -197,6 +199,7 @@ impl Default for DetailedRoutingConfig {
             astar_window_margin_max: default_dr_margin_max(),
             stagnation_threshold: default_stagnation_threshold(),
             ripup_radius: default_ripup_radius(),
+            gcell_size: default_dr_gcell_size(),
         }
     }
 }
@@ -322,14 +325,14 @@ fn default_dr_history_increment() -> f64 {
     0.5
 }
 
-/// Default initial congestion penalty for detailed routing (2.0).
+/// Default initial congestion penalty for detailed routing (0.5).
 fn default_dr_initial_penalty() -> f64 {
-    2.0
+    0.5
 }
 
-/// Default penalty multiplier per iteration for detailed routing (1.1).
+/// Default penalty multiplier per iteration for detailed routing (1.3).
 fn default_dr_penalty_multiplier() -> f64 {
-    1.1
+    1.3
 }
 
 /// Default routing capacity per grid cell for detailed routing (1).
@@ -342,14 +345,14 @@ fn default_dr_heuristic() -> f64 {
     3.0
 }
 
-/// Default base search window margin for detailed routing (20 cells).
+/// Default base search window margin for detailed routing (30 cells).
 fn default_dr_margin_base() -> u32 {
-    20
+    30
 }
 
-/// Default maximum search window margin for detailed routing (100 cells).
+/// Default maximum search window margin for detailed routing (200 cells).
 fn default_dr_margin_max() -> u32 {
-    100
+    200
 }
 
 /// Default stagnation threshold before triggering aggressive rip-up (25 iterations).
@@ -360,6 +363,11 @@ fn default_stagnation_threshold() -> usize {
 /// Default radius for rip-up operations in detailed routing (2 cells).
 fn default_ripup_radius() -> i32 {
     2
+}
+
+/// Default gcell size for detailed routing (2.0 microns).
+fn default_dr_gcell_size() -> f64 {
+    2.0
 }
 
 /// Default LEF file paths (single file: "inputs/simple.lef").

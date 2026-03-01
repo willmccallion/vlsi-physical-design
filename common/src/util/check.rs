@@ -363,7 +363,12 @@ fn check_shorts_and_loops(db: &NetlistDB) -> Result<(), String> {
                 if s1.net_id != s2.net_id {
                     let n1 = &db.nets[s1.net_id.index()].name;
                     let n2 = &db.nets[s2.net_id.index()].name;
-                    let msg = format!("SHORT: '{}' vs '{}' on Layer {}", n1, n2, s1.layer);
+                    let msg = format!(
+                        "SHORT: '{}' vs '{}' on Layer {}\n  seg1: ({:.3},{:.3})->({:.3},{:.3})\n  seg2: ({:.3},{:.3})->({:.3},{:.3})",
+                        n1, n2, s1.layer,
+                        s1.p1.x, s1.p1.y, s1.p2.x, s1.p2.y,
+                        s2.p1.x, s2.p1.y, s2.p2.x, s2.p2.y
+                    );
 
                     if !error_found.swap(true, Ordering::Relaxed) {
                         *error_msg.lock().unwrap() = msg;

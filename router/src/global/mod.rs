@@ -1,6 +1,6 @@
 use crate::algo::astar::{AStar, NoGuide};
+use crate::grid::GCellGrid;
 use crate::grid::RoutingGrid;
-use crate::grid::dense::DenseGrid;
 use crate::utils::conversion::GridConverter;
 use eda_common::db::core::NetlistDB;
 use eda_common::geom::coord::GridCoord;
@@ -14,14 +14,63 @@ use std::io::Write;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::Instant;
 
-/// Executes global routing on a coarse grid to generate routing guides.
-///
-/// Routes all nets on a coarse grid (typically 100-200x coarser than detailed
-/// routing) to determine preferred routing regions. Uses A* pathfinding with
-/// congestion-aware costs and rip-up-and-reroute to resolve conflicts. The
-/// resulting paths are expanded into guides that constrain detailed routing.
-/// Returns the guide sets for each net and a grid converter for coordinate
-/// transformation, or an error if routing fails.
+/// Adds edge usage for a path on the grid.
+fn add_path_to_grid(grid: &mut GCellGrid, path: &[GridCoord]) {
+    for i in 0..path.len().saturating_sub(1) {
+        let a = path[i];
+        let b = path[i + 1];
+        if a.z == b.z {
+            if a.x != b.x {
+                let min_x = a.x.min(b.x);
+                grid.add_h_wire(min_x, a.y, a.z);
+            } else if a.y != b.y {
+                let min_y = a.y.min(b.y);
+                grid.add_v_wire(a.x, min_y, a.z);
+            }
+        }
+    }
+}
+
+/// Removes edge usage for a path from the grid.
+fn remove_path_from_grid(grid: &mut GCellGrid, path: &[GridCoord]) {
+    for i in 0..path.len().saturating_sub(1) {
+        let a = path[i];
+        let b = path[i + 1];
+        if a.z == b.z {
+            if a.x != b.x {
+                let min_x = a.x.min(b.x);
+                grid.remove_h_wire(min_x, a.y, a.z);
+            } else if a.y != b.y {
+                let min_y = a.y.min(b.y);
+                grid.remove_v_wire(a.x, min_y, a.z);
+            }
+        }
+    }
+}
+
+/// Checks if any edge along a path is congested.
+fn path_is_congested(grid: &GCellGrid, path: &[GridCoord]) -> bool {
+    for i in 0..path.len().saturating_sub(1) {
+        let a = path[i];
+        let b = path[i + 1];
+        if a.z == b.z {
+            if a.x != b.x {
+                let min_x = a.x.min(b.x);
+                if grid.is_h_congested(min_x, a.y, a.z) {
+                    return true;
+                }
+            } else if a.y != b.y {
+                let min_y = a.y.min(b.y);
+                if grid.is_v_congested(a.x, min_y, a.z) {
+                    return true;
+                }
+            }
+        }
+    }
+    false
+}
+
+/// Executes global routing on a gcell grid to generate routing guides.
 pub fn run(
     db: &NetlistDB,
     config: &GlobalRoutingConfig,
@@ -29,49 +78,16 @@ pub fn run(
     log::info!("Starting Global Routing...");
 
     let bin_width = config.gcell_size as f64;
-    let die_w = db.die_area.width();
-    let die_h = db.die_area.height();
+    let grid = GCellGrid::new(db, bin_width);
 
-    let grid_w = (die_w / bin_width).ceil() as u32;
-    let grid_h = (die_h / bin_width).ceil() as u32;
-
-    let grid_w = grid_w.max(1);
-    let grid_h = grid_h.max(1);
-
-    let layers = if db.layers.is_empty() {
-        2
-    } else {
-        db.layers.len() as u8
-    };
-
-    let avg_pitch = if !db.layers.is_empty() {
-        let sum: f64 = db.layers.iter().map(|l| l.pitch).sum();
-        sum / db.layers.len() as f64
-    } else {
-        1.0
-    };
-
-    let physical_tracks = (bin_width / avg_pitch).floor() as u32;
-    let default_capacity = config.capacity;
-
-    log::info!(
-        "GR Grid: {}x{} (Bin Size: {:.1}). Pitch={:.2} -> Physical Tracks/Bin={}. Config Cap={}",
-        grid_w,
-        grid_h,
-        bin_width,
-        avg_pitch,
-        physical_tracks,
-        default_capacity
-    );
-
-    let mut grid = DenseGrid::new(grid_w, grid_h, layers, default_capacity);
+    let grid_w = grid.width();
+    let grid_h = grid.height();
+    let layers = grid.layers();
 
     let converter = GridConverter::new(db.die_area, grid_w, grid_h);
 
-    if layers > 0 {
-        log::info!("Setting Layer 0 (M1) capacity to INFINITE for pin access.");
-        grid.set_layer_capacity(0, 999_999);
-    }
+    // Wrap in mutable for routing loop
+    let mut grid = grid;
 
     let mut net_paths: Vec<Vec<GridCoord>> = vec![Vec::new(); db.nets.len()];
     let mut collision_penalty = config.initial_penalty;
@@ -115,9 +131,7 @@ pub fn run(
             .collect();
 
         for (net_id, path) in results {
-            for &c in &path {
-                grid.add_wire(c);
-            }
+            add_path_to_grid(&mut grid, &path);
             net_paths[net_id] = path;
         }
     }
@@ -126,25 +140,26 @@ pub fn run(
 
     draw_congestion_heatmap(&grid, "output/gr_initial_congestion.png");
 
-    let mut last_conflicts = usize::MAX;
+    let mut last_overflow = usize::MAX;
     let mut stagnation_counter = 0;
 
     for iter in 0..config.max_iterations {
         let start = Instant::now();
-        let conflicts = grid.total_conflicts();
+        grid.set_penalty(collision_penalty);
+        let overflow = grid.total_overflow();
 
-        if conflicts == 0 {
+        if overflow == 0 {
             log::info!("Global Routing Converged at iter {}!", iter);
             break;
         }
 
-        let improvement = last_conflicts.saturating_sub(conflicts);
-        if improvement < (last_conflicts / 100).max(5) {
+        let improvement = last_overflow.saturating_sub(overflow);
+        if improvement < (last_overflow / 100).max(5) {
             stagnation_counter += 1;
         } else {
             stagnation_counter = 0;
         }
-        last_conflicts = conflicts;
+        last_overflow = overflow;
 
         if stagnation_counter > 10 {
             log::warn!(
@@ -166,22 +181,9 @@ pub fn run(
                 continue;
             }
 
-            let mut internal_congestion = false;
-            let len = path.len();
-
-            for (i, &coord) in path.iter().enumerate() {
-                if grid.is_congested(coord) {
-                    if i > 0 && i < len - 1 {
-                        internal_congestion = true;
-                        break;
-                    }
-                }
-            }
-
-            if internal_congestion {
-                for &coord in path {
-                    grid.remove_wire(coord);
-                }
+            // Check if internal edges are congested
+            if path_is_congested(&grid, path) {
+                remove_path_from_grid(&mut grid, path);
                 net_paths[net_id].clear();
                 nets_to_reroute.push(net_id);
             }
@@ -202,9 +204,7 @@ pub fn run(
                     collision_penalty,
                     config,
                 );
-                for &c in &path {
-                    grid.add_wire(c);
-                }
+                add_path_to_grid(&mut grid, &path);
                 net_paths[net_id] = path;
 
                 if i % 50 == 0 || i == ripped - 1 {
@@ -235,7 +235,10 @@ pub fn run(
 
                         let p = progress.fetch_add(1, Ordering::Relaxed) + 1;
                         if p % 100 == 0 || p == ripped {
-                            eprint!("\r\x1b[36m[GR Iter {}] {}/{}\x1b[0m\x1b[K", iter, p, ripped);
+                            eprint!(
+                                "\r\x1b[36m[GR Iter {}] {}/{}\x1b[0m\x1b[K",
+                                iter, p, ripped
+                            );
                             let _ = std::io::stderr().flush();
                         }
                         (net_id, path)
@@ -243,9 +246,7 @@ pub fn run(
                     .collect();
 
                 for (net_id, path) in results {
-                    for &c in &path {
-                        grid.add_wire(c);
-                    }
+                    add_path_to_grid(&mut grid, &path);
                     net_paths[net_id] = path;
                 }
             }
@@ -253,9 +254,9 @@ pub fn run(
         eprint!("\r\x1b[K");
 
         log::info!(
-            "GR Iter {}: Conflicts: {}, Ripped: {}, Penalty: {:.2}, Time: {}ms",
+            "GR Iter {}: Overflow: {}, Ripped: {}, Penalty: {:.2}, Time: {}ms",
             iter,
-            conflicts,
+            overflow,
             ripped,
             collision_penalty,
             start.elapsed().as_millis()
@@ -303,26 +304,15 @@ pub fn run(
 }
 
 /// Computes the routing path for a single net in global routing.
-///
-/// Converts pin positions to grid coordinates, sorts pins by proximity
-/// to build a routing order, then routes paths sequentially using A*
-/// pathfinding. Connects paths end-to-end to form a complete tree
-/// connecting all pins. Returns the complete path as a sequence of grid
-/// coordinates.
 fn compute_net_path_gr(
     net: &eda_common::db::core::NetData,
-    grid: &DenseGrid,
+    grid: &GCellGrid,
     solver: &mut AStar,
     converter: &GridConverter,
     db: &NetlistDB,
     penalty: f64,
     config: &GlobalRoutingConfig,
 ) -> Vec<GridCoord> {
-    let mut pin_indices: Vec<usize> = (0..net.pins.len()).collect();
-    let mut sorted_indices = Vec::with_capacity(net.pins.len());
-    let mut current_idx = pin_indices.remove(0);
-    sorted_indices.push(current_idx);
-
     let pin_coords: Vec<GridCoord> = net
         .pins
         .iter()
@@ -332,6 +322,11 @@ fn compute_net_path_gr(
             converter.to_grid(pos, 0)
         })
         .collect();
+
+    let mut pin_indices: Vec<usize> = (0..net.pins.len()).collect();
+    let mut sorted_indices = Vec::with_capacity(net.pins.len());
+    let mut current_idx = pin_indices.remove(0);
+    sorted_indices.push(current_idx);
 
     while !pin_indices.is_empty() {
         let curr_pos = pin_coords[current_idx];
@@ -350,25 +345,18 @@ fn compute_net_path_gr(
         sorted_indices.push(current_idx);
     }
 
-    let start_pin = net.pins[sorted_indices[0]];
-    let c1 = db.pin_to_cell[start_pin.index()];
-    let start_pos = db.get_pin_position(start_pin, &db.positions[c1.index()]);
-    let start = converter.to_grid(start_pos, 0);
-
-    let mut full_path = Vec::new();
-    let mut curr = start;
+    let mut tree_nodes = vec![pin_coords[sorted_indices[0]]];
+    let mut occupied = HashSet::new();
+    occupied.insert(pin_coords[sorted_indices[0]]);
 
     for i in 1..sorted_indices.len() {
-        let next_pin = net.pins[sorted_indices[i]];
-        let c2 = db.pin_to_cell[next_pin.index()];
-        let end_pos = db.get_pin_position(next_pin, &db.positions[c2.index()]);
-        let end = converter.to_grid(end_pos, 0);
+        let target = pin_coords[sorted_indices[i]];
 
         if let Some(path) = solver.find_path(
             grid,
             db,
-            &[curr],
-            end,
+            &tree_nodes,
+            target,
             penalty,
             config.heuristic_weight,
             config.margin,
@@ -378,22 +366,16 @@ fn compute_net_path_gr(
             50_000,
             false,
         ) {
-            if !full_path.is_empty() {
-                full_path.extend(path.into_iter().skip(1));
-            } else {
-                full_path.extend(path);
+            for &c in &path {
+                occupied.insert(c);
             }
-            curr = end;
+            tree_nodes.extend_from_slice(&path);
         }
     }
-    full_path
+    occupied.into_iter().collect()
 }
 
 /// Returns the 2D neighbors of a grid coordinate (same layer).
-///
-/// Generates the four adjacent coordinates (north, south, east, west)
-/// on the same layer, excluding coordinates outside the grid boundaries.
-/// Used for guide expansion in global routing to create routing regions.
 fn get_neighbors_2d(c: GridCoord, w: u32, h: u32) -> Vec<GridCoord> {
     let mut n = Vec::new();
     if c.x > 0 {

@@ -5,8 +5,6 @@
 //! overlap, enabling parallel execution without conflicts. Uses tag-based
 //! tracking to reset state efficiently between batches.
 
-use std::collections::HashSet;
-
 /// Spatial data structure for batching routing operations.
 ///
 /// Maintains a grid of bins to track which regions have active routing

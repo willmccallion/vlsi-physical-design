@@ -5,3 +5,4 @@
 //! cost functions and guide constraints to find high-quality routes.
 
 pub mod astar;
+pub mod pattern;

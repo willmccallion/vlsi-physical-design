@@ -16,7 +16,7 @@ use std::collections::HashMap;
 /// Vertical layers route primarily in the Y direction, horizontal layers in
 /// the X direction. This alternation enables efficient routing by allowing
 /// orthogonal wire crossings without shorts.
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Copy, Debug, PartialEq)]
 pub enum LayerDirection {
     /// Wires on this layer route primarily in the vertical (Y) direction.
     Vertical,

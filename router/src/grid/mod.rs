@@ -1,65 +1,71 @@
 //! Routing Grid Data Structures.
 //!
 //! Defines the interface and implementation for routing grids that track
-//! wire occupancy, obstacles, and congestion. The grid is used by routing
-//! algorithms to check feasibility and compute routing costs.
+//! edge-based wire usage and congestion. The grid uses gcells (global routing
+//! cells) where capacity and usage are tracked on edges between adjacent
+//! gcells, not on the gcells themselves. This models real physical routing
+//! tracks: horizontal edges carry horizontal wires, vertical edges carry
+//! vertical wires.
 
 pub mod dense;
 
-pub use dense::DenseGrid;
+pub use dense::GCellGrid;
 
-use eda_common::geom::coord::GridCoord;
 
-/// Trait defining the interface for routing grid implementations.
+/// Trait defining the interface for edge-based routing grid implementations.
 ///
-/// Provides methods for querying and modifying grid state including
-/// obstacles, wire occupancy, congestion, and routing costs. Implementations
-/// must be thread-safe to support parallel routing.
+/// Routing capacity and usage are tracked on **edges** between adjacent gcells,
+/// not on the gcells themselves. A horizontal edge between (x,y) and (x+1,y)
+/// on layer L has capacity equal to the number of horizontal tracks crossing
+/// that boundary. Direction is structurally enforced: horizontal layers only
+/// have horizontal edge capacity, vertical layers only have vertical edge
+/// capacity.
 pub trait RoutingGrid: Sync + Send {
-    /// Returns the width of the routing grid in grid cells.
+    /// Returns the width of the routing grid in gcells.
     fn width(&self) -> u32;
-    /// Returns the height of the routing grid in grid cells.
+    /// Returns the height of the routing grid in gcells.
     fn height(&self) -> u32;
     /// Returns the number of routing layers in the grid.
     fn layers(&self) -> u8;
 
-    /// Marks a grid coordinate as an obstacle that cannot be routed through.
-    fn set_obstacle(&mut self, coord: GridCoord);
-    /// Removes the obstacle status from a grid coordinate.
-    fn clear_obstacle(&mut self, coord: GridCoord);
-    /// Checks whether a grid coordinate is marked as an obstacle.
-    fn is_obstacle(&self, coord: GridCoord) -> bool;
+    /// Returns the cost of using the horizontal edge from (x,y) to (x+1,y) on a layer.
+    fn h_edge_cost(&self, x: u32, y: u32, layer: u8, collision_penalty: f64) -> f64;
+    /// Returns the cost of using the vertical edge from (x,y) to (x,y+1) on a layer.
+    fn v_edge_cost(&self, x: u32, y: u32, layer: u8, collision_penalty: f64) -> f64;
+    /// Returns the cost of a via at gcell (x,y) between layers.
+    fn via_cost(&self, x: u32, y: u32, layer: u8) -> f64;
 
-    /// Increments the wire occupancy count at the specified coordinate.
-    fn add_wire(&mut self, coord: GridCoord);
-    /// Decrements the wire occupancy count at the specified coordinate.
-    fn remove_wire(&mut self, coord: GridCoord);
+    /// Increments horizontal edge usage from (x,y) to (x+1,y) on a layer.
+    fn add_h_wire(&mut self, x: u32, y: u32, layer: u8);
+    /// Decrements horizontal edge usage from (x,y) to (x+1,y) on a layer.
+    fn remove_h_wire(&mut self, x: u32, y: u32, layer: u8);
+    /// Increments vertical edge usage from (x,y) to (x,y+1) on a layer.
+    fn add_v_wire(&mut self, x: u32, y: u32, layer: u8);
+    /// Decrements vertical edge usage from (x,y) to (x,y+1) on a layer.
+    fn remove_v_wire(&mut self, x: u32, y: u32, layer: u8);
 
-    /// Computes the routing cost for a grid coordinate given the collision penalty.
-    ///
-    /// The cost increases with congestion and history violations. Used by A*
-    /// pathfinding to prefer less congested routes.
-    fn get_cost(&self, coord: GridCoord, collision_penalty: f64) -> f64;
-    /// Updates the congestion history for all overflowing grid cells.
-    ///
-    /// Increments history values for cells that exceed capacity, discouraging
-    /// future routing through persistently congested regions.
+    /// Checks if horizontal edge from (x,y) to (x+1,y) exceeds capacity.
+    fn is_h_congested(&self, x: u32, y: u32, layer: u8) -> bool;
+    /// Checks if vertical edge from (x,y) to (x,y+1) exceeds capacity.
+    fn is_v_congested(&self, x: u32, y: u32, layer: u8) -> bool;
+
+    /// Returns the total number of edges exceeding capacity across all layers.
+    fn total_overflow(&self) -> usize;
+
+    /// Updates history costs based on current congestion.
     fn update_history(&mut self, history_increment: f64);
     /// Decays all history values by the specified factor.
-    ///
-    /// Reduces history costs over time to allow previously congested regions
-    /// to become available again as the routing solution evolves.
     fn decay_history(&mut self, decay_factor: f64);
 
-    /// Returns the maximum wire occupancy across all grid cells.
-    fn max_occupancy(&self) -> u32;
-    /// Checks whether a grid coordinate exceeds its routing capacity.
-    fn is_congested(&self, coord: GridCoord) -> bool;
-    /// Returns the total number of grid cells that exceed their capacity.
-    fn total_conflicts(&self) -> usize;
-
-    /// Returns the routing capacity for a grid coordinate's layer.
-    fn capacity(&self, coord: GridCoord) -> u32;
-    /// Sets the collision penalty multiplier for cost computation.
+    /// Sets the collision penalty multiplier.
     fn set_penalty(&mut self, penalty: f64);
+
+    /// Returns the horizontal edge capacity for (x,y) to (x+1,y) on a layer.
+    fn h_edge_cap(&self, x: u32, y: u32, layer: u8) -> u16;
+    /// Returns the vertical edge capacity for (x,y) to (x,y+1) on a layer.
+    fn v_edge_cap(&self, x: u32, y: u32, layer: u8) -> u16;
+    /// Returns the horizontal edge usage for (x,y) to (x+1,y) on a layer.
+    fn h_edge_usage(&self, x: u32, y: u32, layer: u8) -> u16;
+    /// Returns the vertical edge usage for (x,y) to (x,y+1) on a layer.
+    fn v_edge_usage(&self, x: u32, y: u32, layer: u8) -> u16;
 }
