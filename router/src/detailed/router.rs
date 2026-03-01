@@ -10,6 +10,7 @@ use eda_common::util::config::DetailedRoutingConfig;
 use std::collections::{HashMap, HashSet};
 
 /// Routes a single net using A* pathfinding with guide constraints.
+#[allow(clippy::too_many_arguments)]
 pub fn route_net_dr_pure<O: GuideOracle>(
     net: &NetData,
     grid: &GCellGrid,
@@ -85,8 +86,7 @@ pub fn route_net_dr_pure<O: GuideOracle>(
         .saturating_add(ripup_count.saturating_mul(30_000))
         .min(500_000);
 
-    for i in 1..sorted_indices.len() {
-        let next_pin_idx = sorted_indices[i];
+    for &next_pin_idx in &sorted_indices[1..] {
         let target = pin_coords[next_pin_idx];
         let nearest_start = tree_nodes
             .iter()
@@ -128,33 +128,19 @@ pub fn route_net_dr_pure<O: GuideOracle>(
     Some(paths)
 }
 
-/// Track info for a specific layer.
-#[derive(Clone, Debug)]
-pub struct LayerTrackInfo {
-    pub start: f64,
-    pub pitch: f64,
-}
-
-fn snap_to_track(coord: f64, ti: &LayerTrackInfo) -> f64 {
-    if ti.pitch < 0.001 { return coord; }
-    let idx = ((coord - ti.start) / ti.pitch).round();
-    ti.start + idx * ti.pitch
-}
-
 /// Converts grid path topology to physical routing segments.
 ///
 /// Uses gcell centers for all internal node positions to guarantee
 /// connectivity at via transitions and junctions. Pin access uses
 /// short M1 wire + via stack from pin to the gcell center.
+#[allow(clippy::too_many_arguments)]
 pub fn generate_segments_from_topology(
     topology: &[Vec<GridCoord>],
     pin_locations: &HashMap<(u32, u32, u8), Vec<Point<f64>>>,
-    _track_info: &[LayerTrackInfo],
     gcell_w: f64,
     gcell_h: f64,
     origin_x: f64,
     origin_y: f64,
-    _edge_slots: &HashMap<(u32, u32, u8, bool), u16>,
 ) -> Vec<RouteSegment> {
     let mut segments = Vec::new();
 

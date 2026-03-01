@@ -109,6 +109,12 @@ impl RowIntervals {
     }
 }
 
+impl Default for TetrisLegalizer {
+    fn default() -> Self {
+        Self
+    }
+}
+
 impl TetrisLegalizer {
     /// Creates a new Tetris legalizer instance.
     pub fn new() -> Self {

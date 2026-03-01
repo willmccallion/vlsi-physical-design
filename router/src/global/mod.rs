@@ -122,7 +122,7 @@ pub fn run(
 
                 let p = progress.fetch_add(1, Ordering::Relaxed) + 1;
 
-                if p % 100 == 0 || p == total_nets {
+                if p.is_multiple_of(100) || p == total_nets {
                     eprint!("\r\x1b[36m[GR Init] {}/{}\x1b[0m\x1b[K", p, total_nets);
                     let _ = std::io::stderr().flush();
                 }
@@ -175,6 +175,7 @@ pub fn run(
         grid.update_history(history_increment);
 
         let mut nets_to_reroute = Vec::new();
+        #[allow(clippy::needless_range_loop)]
         for net_id in 0..total_nets {
             let path = &net_paths[net_id];
             if path.is_empty() {
@@ -234,7 +235,7 @@ pub fn run(
                         );
 
                         let p = progress.fetch_add(1, Ordering::Relaxed) + 1;
-                        if p % 100 == 0 || p == ripped {
+                        if p.is_multiple_of(100) || p == ripped {
                             eprint!(
                                 "\r\x1b[36m[GR Iter {}] {}/{}\x1b[0m\x1b[K",
                                 iter, p, ripped

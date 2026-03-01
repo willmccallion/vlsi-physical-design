@@ -43,6 +43,12 @@ struct SubRow {
     cells: Vec<usize>,
 }
 
+impl Default for AbacusLegalizer {
+    fn default() -> Self {
+        Self
+    }
+}
+
 impl AbacusLegalizer {
     /// Creates a new Abacus legalizer instance.
     pub fn new() -> Self {
@@ -165,8 +171,8 @@ impl AbacusLegalizer {
         }
 
         let mut rows: Vec<Vec<SubRow>> = Vec::with_capacity(num_rows);
-        for r in 0..num_rows {
-            let mut blockages = row_blockages[r].clone();
+        for blockage_list in row_blockages.iter() {
+            let mut blockages = blockage_list.clone();
             blockages.sort_by(|a, b| a.0.partial_cmp(&b.0).unwrap());
 
             let mut merged = Vec::new();
@@ -274,10 +280,10 @@ impl AbacusLegalizer {
             }
         }
 
-        for r in 0..num_rows {
+        for (r, row) in rows.iter_mut().enumerate() {
             let row_y = die_min_y + (r as f64) * row_height;
 
-            for sub in rows[r].iter_mut() {
+            for sub in row.iter_mut() {
                 if sub.cells.is_empty() {
                     continue;
                 }
@@ -342,10 +348,10 @@ impl AbacusLegalizer {
     /// parameter ensures clusters do not extend beyond the sub-row boundary.
     fn collapse(&self, clusters: &mut Vec<Cluster>, min_x: f64) {
         loop {
-            if let Some(last) = clusters.last_mut() {
-                if last.x < min_x {
-                    last.x = min_x;
-                }
+            if let Some(last) = clusters.last_mut()
+                && last.x < min_x
+            {
+                last.x = min_x;
             }
 
             if clusters.len() <= 1 {

@@ -193,6 +193,7 @@ impl NesterovOptimizer {
             let a_next = (1.0 + (4.0 * a_k * a_k + 1.0).sqrt()) / 2.0;
             let momentum = (a_k - 1.0) / a_next;
 
+            #[allow(clippy::needless_range_loop)]
             for i in 0..n {
                 if db.cells[i].is_fixed {
                     self.y_k[i] = self.x_k[i];

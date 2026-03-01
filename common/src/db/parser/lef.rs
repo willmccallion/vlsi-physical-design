@@ -82,7 +82,7 @@ pub fn parse(db: &mut NetlistDB, filename: &str) -> Result<()> {
                         if layer_type == "ROUTING" {
                             db.add_layer(
                                 current_layer.clone(),
-                                layer_dir.clone(),
+                                layer_dir,
                                 layer_pitch,
                                 layer_width,
                             );

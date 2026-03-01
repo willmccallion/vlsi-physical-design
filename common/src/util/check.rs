@@ -374,39 +374,37 @@ fn check_shorts_and_loops(db: &NetlistDB) -> Result<(), String> {
                         *error_msg.lock().unwrap() = msg;
                     }
                     return;
-                } else {
-                    if !s1.shares_endpoint(s2) {
-                        let is_via1 = (s1.p1.x - s1.p2.x).abs() < 1e-6 && (s1.p1.y - s1.p2.y).abs() < 1e-6;
-                        let is_via2 = (s2.p1.x - s2.p2.x).abs() < 1e-6 && (s2.p1.y - s2.p2.y).abs() < 1e-6;
+                } else if !s1.shares_endpoint(s2) {
+                    let is_via1 = (s1.p1.x - s1.p2.x).abs() < 1e-6 && (s1.p1.y - s1.p2.y).abs() < 1e-6;
+                    let is_via2 = (s2.p1.x - s2.p2.x).abs() < 1e-6 && (s2.p1.y - s2.p2.y).abs() < 1e-6;
 
-                        if is_via1 || is_via2 {
-                            continue;
-                        }
-
-                        let is_collinear = {
-                            let dx1 = s1.p2.x - s1.p1.x;
-                            let dy1 = s1.p2.y - s1.p1.y;
-                            let dx2 = s2.p2.x - s2.p1.x;
-                            let dy2 = s2.p2.y - s2.p1.y;
-                            (dx1 * dy2 - dy1 * dx2).abs() < CHECK_TOLERANCE * 100.0
-                        };
-
-                        if is_collinear {
-                            continue;
-                        }
-
-                            let n1 = &db.nets[s1.net_id.index()].name;
-                            let msg = format!(
-                                "SELF-SHORT/LOOP: Net '{}' intersects itself on Layer {} near ({:.3},{:.3})",
-                                n1, s1.layer, s1.p1.x, s1.p1.y
-                            );
-
-                            if !error_found.swap(true, Ordering::Relaxed) {
-                                *error_msg.lock().unwrap() = msg;
-                            }
-                            return;
-                        }
+                    if is_via1 || is_via2 {
+                        continue;
                     }
+
+                    let is_collinear = {
+                        let dx1 = s1.p2.x - s1.p1.x;
+                        let dy1 = s1.p2.y - s1.p1.y;
+                        let dx2 = s2.p2.x - s2.p1.x;
+                        let dy2 = s2.p2.y - s2.p1.y;
+                        (dx1 * dy2 - dy1 * dx2).abs() < CHECK_TOLERANCE * 100.0
+                    };
+
+                    if is_collinear {
+                        continue;
+                    }
+
+                    let n1 = &db.nets[s1.net_id.index()].name;
+                    let msg = format!(
+                        "SELF-SHORT/LOOP: Net '{}' intersects itself on Layer {} near ({:.3},{:.3})",
+                        n1, s1.layer, s1.p1.x, s1.p1.y
+                    );
+
+                    if !error_found.swap(true, Ordering::Relaxed) {
+                        *error_msg.lock().unwrap() = msg;
+                    }
+                    return;
+                }
                 }
             }
         }

@@ -155,6 +155,12 @@ pub struct NetlistDB {
     pub macro_sizes: HashMap<String, (f64, f64)>,
 }
 
+impl Default for NetlistDB {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl NetlistDB {
     /// Creates a new empty netlist database with pre-allocated capacity.
     ///

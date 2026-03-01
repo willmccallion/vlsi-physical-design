@@ -25,8 +25,8 @@ impl SpatialSet {
     /// Allocates a grid of bins sized to cover the routing area. The bin_size
     /// parameter controls the granularity of spatial conflict detection.
     pub fn new(width: u32, height: u32, bin_size: u32) -> Self {
-        let w = (width + bin_size - 1) / bin_size;
-        let h = (height + bin_size - 1) / bin_size;
+        let w = width.div_ceil(bin_size);
+        let h = height.div_ceil(bin_size);
         Self {
             grid: vec![0; (w * h) as usize],
             w,

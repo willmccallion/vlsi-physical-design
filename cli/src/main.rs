@@ -125,10 +125,10 @@ fn main() -> anyhow::Result<()> {
                 );
             }
 
-            if let Some(parent) = Path::new(&output).parent() {
-                if !parent.as_os_str().is_empty() {
-                    std::fs::create_dir_all(parent)?;
-                }
+            if let Some(parent) = Path::new(&output).parent()
+                && !parent.as_os_str().is_empty()
+            {
+                std::fs::create_dir_all(parent)?;
             }
             log::info!(
                 "Generating random benchmark (Cells: {}, Nets: {}, Util: {:.0}%)...",
@@ -228,11 +228,12 @@ fn validate_input_paths(config: &Config) -> anyhow::Result<()> {
 /// that output files can be written without filesystem errors. If the path
 /// has no parent directory or the parent is empty, no action is taken.
 fn prepare_output_dir(path_str: &str) -> anyhow::Result<()> {
-    if let Some(parent) = Path::new(path_str).parent() {
-        if !parent.exists() && !parent.as_os_str().is_empty() {
-            log::info!("Creating output directory: {:?}", parent);
-            std::fs::create_dir_all(parent)?;
-        }
+    if let Some(parent) = Path::new(path_str).parent()
+        && !parent.exists()
+        && !parent.as_os_str().is_empty()
+    {
+        log::info!("Creating output directory: {:?}", parent);
+        std::fs::create_dir_all(parent)?;
     }
     Ok(())
 }

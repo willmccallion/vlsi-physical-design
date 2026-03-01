@@ -6,7 +6,7 @@ mod router;
 mod scheduler;
 
 use self::oracle::FastGuideOracle;
-use self::router::{generate_segments_from_topology, route_net_dr_pure, LayerTrackInfo};
+use self::router::{generate_segments_from_topology, route_net_dr_pure};
 use self::scheduler::SpatialSet;
 
 use crate::algo::astar::AStar;
@@ -291,6 +291,7 @@ pub fn run(
         }
 
         // Find nets using congested edges
+        #[allow(clippy::needless_range_loop)]
         for net_id in 0..db.nets.len() {
             let topo = &net_topologies[net_id];
             if !topo.is_empty() && topology_is_congested(&grid, topo) {
@@ -318,6 +319,7 @@ pub fn run(
                     }
                 }
             }
+            #[allow(clippy::needless_range_loop)]
             for net_id in 0..db.nets.len() {
                 if nets_to_reroute.contains(&net_id) {
                     continue;
@@ -475,7 +477,7 @@ pub fn run(
                         );
 
                         let p = progress.fetch_add(1, Ordering::Relaxed) + 1;
-                        if p % 100 == 0 || p == total_ripped {
+                        if p.is_multiple_of(100) || p == total_ripped {
                             eprint!(
                                 "\r\x1b[36m[DR Iter {}] {}/{}\x1b[0m\x1b[K",
                                 iter, p, total_ripped
@@ -528,81 +530,10 @@ pub fn run(
         collision_penalty = (collision_penalty * config.penalty_multiplier).min(20000.0);
     }
 
-    // Build track info per layer
-    let track_info: Vec<LayerTrackInfo> = (0..layers)
-        .map(|z| {
-            let zi = z as usize;
-            if zi < db.layers.len() {
-                let layer = &db.layers[zi];
-                let pitch = if layer.pitch > 0.001 {
-                    layer.pitch
-                } else {
-                    db.tracks
-                        .iter()
-                        .find(|t| t.layer == layer.name && t.step > 0.001)
-                        .map(|t| t.step)
-                        .unwrap_or(0.28)
-                };
-                let start = db
-                    .tracks
-                    .iter()
-                    .find(|t| t.layer == layer.name)
-                    .map(|t| t.start)
-                    .unwrap_or(0.0);
-                LayerTrackInfo { start, pitch }
-            } else {
-                LayerTrackInfo {
-                    start: 0.0,
-                    pitch: 0.28,
-                }
-            }
-        })
-        .collect();
-
     let origin_x = db.die_area.min.x;
     let origin_y = db.die_area.min.y;
     let gw = grid.gcell_w();
     let gh = grid.gcell_h();
-
-    // Build per-edge track assignment.
-    // For each gcell edge, collect which nets use it, then assign each net
-    // a unique track slot on that edge.
-    // Edge key: (x, y, layer, is_horizontal) -> list of net_ids
-    let mut edge_nets: HashMap<(u32, u32, u8, bool), Vec<usize>> = HashMap::new();
-    for (net_id, topology) in net_topologies.iter().enumerate() {
-        for path in topology {
-            for i in 0..path.len().saturating_sub(1) {
-                let a = path[i];
-                let b = path[i + 1];
-                if a.z == b.z {
-                    if a.x != b.x {
-                        let min_x = a.x.min(b.x);
-                        let key = (min_x, a.y, a.z, true);
-                        let nets = edge_nets.entry(key).or_default();
-                        if !nets.contains(&net_id) {
-                            nets.push(net_id);
-                        }
-                    } else if a.y != b.y {
-                        let min_y = a.y.min(b.y);
-                        let key = (a.x, min_y, a.z, false);
-                        let nets = edge_nets.entry(key).or_default();
-                        if !nets.contains(&net_id) {
-                            nets.push(net_id);
-                        }
-                    }
-                }
-            }
-        }
-    }
-
-    // For each edge, assign slot indices
-    // net_edge_slot[net_id] maps edge_key -> slot_index
-    let mut net_edge_slots: Vec<HashMap<(u32, u32, u8, bool), u16>> = vec![HashMap::new(); db.nets.len()];
-    for (edge_key, nets) in &edge_nets {
-        for (slot, &net_id) in nets.iter().enumerate() {
-            net_edge_slots[net_id].insert(*edge_key, slot as u16);
-        }
-    }
 
     // Generate segments from topology
     let mut all_segments = Vec::with_capacity(db.nets.len());
@@ -634,10 +565,8 @@ pub fn run(
             segments = generate_segments_from_topology(
                 topology,
                 &pin_locations,
-                &track_info,
                 gw, gh,
                 origin_x, origin_y,
-                &net_edge_slots[net_id],
             );
         }
         all_segments.push(segments);

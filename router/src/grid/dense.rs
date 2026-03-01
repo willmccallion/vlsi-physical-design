@@ -33,8 +33,6 @@ pub struct GCellGrid {
     v_cap: Vec<u16>,
     v_usage: Vec<u16>,
     v_history: Vec<u16>,
-    // Via usage at gcells: [layer * height * width + y * width + x]
-    via_usage: Vec<u16>,
     current_penalty: f64,
 }
 
@@ -92,7 +90,6 @@ impl GCellGrid {
 
         let h_edge_count = (layers as usize) * (grid_h as usize) * ((grid_w - 1) as usize);
         let v_edge_count = (layers as usize) * ((grid_h - 1) as usize) * (grid_w as usize);
-        let node_count = (layers as usize) * (grid_h as usize) * (grid_w as usize);
 
         let mut grid = Self {
             width: grid_w,
@@ -106,7 +103,6 @@ impl GCellGrid {
             v_cap: vec![0; v_edge_count],
             v_usage: vec![0; v_edge_count],
             v_history: vec![0; v_edge_count],
-            via_usage: vec![0; node_count],
             current_penalty: 1.0,
         };
 
@@ -399,11 +395,13 @@ impl RoutingGrid for GCellGrid {
 
     fn total_overflow(&self) -> usize {
         let mut overflow = 0usize;
+        #[allow(clippy::needless_range_loop)]
         for i in 0..self.h_usage.len() {
             if self.h_usage[i] > self.h_cap[i] {
                 overflow += (self.h_usage[i] - self.h_cap[i]) as usize;
             }
         }
+        #[allow(clippy::needless_range_loop)]
         for i in 0..self.v_usage.len() {
             if self.v_usage[i] > self.v_cap[i] {
                 overflow += (self.v_usage[i] - self.v_cap[i]) as usize;
@@ -413,6 +411,7 @@ impl RoutingGrid for GCellGrid {
     }
 
     fn update_history(&mut self, history_increment: f64) {
+        #[allow(clippy::needless_range_loop)]
         for i in 0..self.h_usage.len() {
             if self.h_usage[i] > self.h_cap[i] {
                 let overflow = (self.h_usage[i] - self.h_cap[i]) as f64;
@@ -420,6 +419,7 @@ impl RoutingGrid for GCellGrid {
                 self.h_history[i] = self.h_history[i].saturating_add(inc);
             }
         }
+        #[allow(clippy::needless_range_loop)]
         for i in 0..self.v_usage.len() {
             if self.v_usage[i] > self.v_cap[i] {
                 let overflow = (self.v_usage[i] - self.v_cap[i]) as f64;

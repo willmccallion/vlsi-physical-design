@@ -43,6 +43,12 @@ impl rstar::RTreeObject for IndexedRect {
     }
 }
 
+impl Default for SpatialIndex {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl SpatialIndex {
     /// Creates a new empty spatial index.
     ///

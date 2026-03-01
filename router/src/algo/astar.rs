@@ -128,6 +128,12 @@ pub struct AStar {
     capacity: usize,
 }
 
+impl Default for AStar {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl AStar {
     pub fn new() -> Self {
         let cap = 100_000;
@@ -164,6 +170,7 @@ impl AStar {
     /// - Vertical layers allow moves in ±Y (using v_edge_cost)
     /// - Vias allow layer changes at the same gcell
     /// - Near pins (within 1 gcell), any direction is allowed for pin access
+    #[allow(clippy::too_many_arguments)]
     pub fn find_path<G: RoutingGrid + ?Sized, O: GuideOracle>(
         &mut self,
         grid: &G,

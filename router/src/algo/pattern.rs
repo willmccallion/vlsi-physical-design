@@ -29,12 +29,12 @@ pub fn try_pattern_route<G: RoutingGrid + ?Sized>(
     }
 
     // Try Z-routes (2 bends) - only if meaningful distance
-    let dx = (end.x as i32 - start.x as i32).abs() as u32;
-    let dy = (end.y as i32 - start.y as i32).abs() as u32;
-    if dx >= 2 || dy >= 2 {
-        if let Some(path) = try_z_route(grid, start, end, h_layer, v_layer) {
-            return Some(path);
-        }
+    let dx = (end.x as i32 - start.x as i32).unsigned_abs();
+    let dy = (end.y as i32 - start.y as i32).unsigned_abs();
+    if (dx >= 2 || dy >= 2)
+        && let Some(path) = try_z_route(grid, start, end, h_layer, v_layer)
+    {
+        return Some(path);
     }
 
     None
