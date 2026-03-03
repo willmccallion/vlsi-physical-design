@@ -239,9 +239,7 @@ fn run_placement(config: &Config) -> anyhow::Result<()> {
     // Auto-detect placement parameters from design properties
     let die_diag = (db.die_area.width().powi(2) + db.die_area.height().powi(2)).sqrt();
 
-    let wa_gamma = config.global_placement.wa_gamma.unwrap_or_else(|| {
-        die_diag * 1.5
-    });
+    let wa_gamma = config.global_placement.wa_gamma.unwrap_or(die_diag * 1.5);
 
     let bin_dimension = config.global_placement.bin_dimension.unwrap_or_else(|| {
         let movable = db.cells.iter().filter(|c| !c.is_fixed).count();

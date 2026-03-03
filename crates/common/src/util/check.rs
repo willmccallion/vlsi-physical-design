@@ -308,7 +308,7 @@ fn check_shorts_and_loops(db: &NetlistDB) -> Result<(), String> {
         }
 
         // Check within each bin
-        for (_key, segs) in &bins {
+        for segs in bins.values() {
             if error_found.load(Ordering::Relaxed) {
                 return;
             }

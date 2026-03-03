@@ -468,7 +468,7 @@ fn route_cluster<O: GuideOracle>(
         let target = local_coords[local_idx];
 
         // Check if target is already in tree
-        if tree_nodes.iter().any(|&n| n == target) {
+        if tree_nodes.contains(&target) {
             continue;
         }
 

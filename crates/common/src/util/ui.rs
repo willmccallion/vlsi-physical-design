@@ -120,11 +120,10 @@ pub fn done(elapsed_secs: f64) {
 /// Prints a carriage-return progress line (overwrites current line).
 pub fn progress(label: &str, cur: usize, total: usize) {
     eprint!(
-        "\r  {} {}/{}{}",
+        "\r  {} {}/{}\x1b[K",
         label.cyan(),
         cur,
-        total,
-        "\x1b[K"
+        total
     );
     let _ = std::io::Write::flush(&mut std::io::stderr());
 }

@@ -166,17 +166,16 @@ pub fn parse(db: &mut NetlistDB, filename: &str) -> Result<()> {
                     while i < parts.len() {
                         if parts[i] == "NET" && i + 1 < parts.len() {
                             net_name = parts[i + 1].to_string();
-                        } else if parts[i] == "PLACED" || parts[i] == "FIXED" {
-                            if i + 3 < parts.len()
-                                && parts[i + 1] == "("
-                                && let (Ok(px), Ok(py)) = (
-                                    parts[i + 2].parse::<f64>(),
-                                    parts[i + 3].parse::<f64>(),
-                                )
-                            {
-                                x = px / def_units;
-                                y = py / def_units;
-                            }
+                        } else if (parts[i] == "PLACED" || parts[i] == "FIXED")
+                            && i + 3 < parts.len()
+                            && parts[i + 1] == "("
+                            && let (Ok(px), Ok(py)) = (
+                                parts[i + 2].parse::<f64>(),
+                                parts[i + 3].parse::<f64>(),
+                            )
+                        {
+                            x = px / def_units;
+                            y = py / def_units;
                         }
                         i += 1;
                     }
