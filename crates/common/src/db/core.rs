@@ -44,6 +44,9 @@ pub struct LayerData {
     pub pitch: f64,
     /// Width of wires on this layer in physical units.
     pub width: f64,
+    /// Minimum spacing between wires from different nets on this layer.
+    /// Derived from (pitch - width) or explicitly set from LEF SPACING rules.
+    pub min_spacing: f64,
 }
 
 /// A single wire segment connecting two points on a routing layer.
@@ -276,6 +279,7 @@ impl NetlistDB {
     /// synthesizing default layers for formats that don't specify layer information.
     pub fn add_layer(&mut self, name: String, direction: LayerDirection, pitch: f64, width: f64) {
         let idx = self.layers.len() as u8;
+        let min_spacing = (pitch - width).max(0.0);
         self.layer_name_map.insert(name.clone(), idx);
         self.layers.push(LayerData {
             name,
@@ -283,7 +287,16 @@ impl NetlistDB {
             direction,
             pitch,
             width,
+            min_spacing,
         });
+    }
+
+    /// Sets an explicit minimum spacing for a layer, overriding the default
+    /// (pitch - width) value. Called when LEF SPACING rules are parsed.
+    pub fn set_layer_spacing(&mut self, layer_name: &str, spacing: f64) {
+        if let Some(&idx) = self.layer_name_map.get(layer_name) {
+            self.layers[idx as usize].min_spacing = spacing;
+        }
     }
 
     /// Adds a new cell instance to the design and returns its identifier.

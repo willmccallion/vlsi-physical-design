@@ -140,6 +140,43 @@ pub fn run(db: &NetlistDB) -> Result<(), String> {
         Ok(_) => ui::check("LVS passed -- all nets fully connected."),
     }
 
+    // Design rule checks (spacing/width) — run only if layers have spacing info.
+    // These are reported as informational metrics since the router doesn't yet
+    // guarantee spacing-clean output. Width violations (non-Manhattan) are
+    // treated as errors since they indicate a routing bug.
+    let has_spacing_info = db.layers.iter().any(|l| l.min_spacing > 0.0);
+    if has_spacing_info {
+        match check_design_rules(db) {
+            Err(e) => {
+                ui::fail("Design Rule Check Error");
+                log::error!("{}", e);
+                msgs.push(e);
+                valid = false;
+            }
+            Ok((spacing_violations, width_violations)) => {
+                if spacing_violations == 0 && width_violations == 0 {
+                    ui::check("Design rules passed -- spacing and width OK.");
+                } else {
+                    if spacing_violations > 0 {
+                        log::info!(
+                            "DRC: {} spacing violations (informational)",
+                            spacing_violations
+                        );
+                    }
+                    if width_violations > 0 {
+                        let msg = format!(
+                            "DRC: {} non-Manhattan wire violations",
+                            width_violations
+                        );
+                        ui::fail(&msg);
+                        msgs.push(msg);
+                        valid = false;
+                    }
+                }
+            }
+        }
+    }
+
     if valid {
         Ok(())
     } else {
@@ -262,6 +299,168 @@ fn segment_bin_keys(s: &Segment) -> Vec<BinKey> {
         }
     }
     keys
+}
+
+/// Computes the minimum bounding-box gap between two same-layer segments.
+///
+/// For Manhattan segments, the gap is the shortest distance between their
+/// bounding boxes. Returns 0.0 if they overlap or touch. This is a
+/// conservative approximation suitable for spacing DRC.
+fn segment_gap_distance(s1: &Segment, s2: &Segment) -> f64 {
+    let min_x1 = s1.p1.x.min(s1.p2.x);
+    let max_x1 = s1.p1.x.max(s1.p2.x);
+    let min_y1 = s1.p1.y.min(s1.p2.y);
+    let max_y1 = s1.p1.y.max(s1.p2.y);
+
+    let min_x2 = s2.p1.x.min(s2.p2.x);
+    let max_x2 = s2.p1.x.max(s2.p2.x);
+    let min_y2 = s2.p1.y.min(s2.p2.y);
+    let max_y2 = s2.p1.y.max(s2.p2.y);
+
+    let dx = (min_x1 - max_x2).max(min_x2 - max_x1).max(0.0);
+    let dy = (min_y1 - max_y2).max(min_y2 - max_y1).max(0.0);
+
+    // For Manhattan segments, the gap is max(dx, dy) when they're parallel,
+    // or the Euclidean distance of the bounding box gap for L-shaped pairs.
+    (dx * dx + dy * dy).sqrt()
+}
+
+/// Checks design rules: minimum spacing between cross-net segments and
+/// Manhattan width constraints.
+///
+/// Uses spatial binning (same approach as shorts checking) to efficiently
+/// find nearby cross-net segment pairs on the same layer, then computes
+/// their gap distance and compares against the layer's min_spacing rule.
+///
+/// Returns Ok((spacing_violations, width_violations)) on completion, or
+/// Err if a fatal error occurs.
+fn check_design_rules(db: &NetlistDB) -> Result<(usize, usize), String> {
+    let spacing_count = std::sync::atomic::AtomicUsize::new(0);
+    let width_count = std::sync::atomic::AtomicUsize::new(0);
+
+    // Width check: verify all wire segments are Manhattan
+    db.nets.par_iter().enumerate().for_each(|(net_idx, net)| {
+        for seg in &net.route_segments {
+            // Skip vias (degenerate segments)
+            if (seg.p1.x - seg.p2.x).abs() < 1e-6 && (seg.p1.y - seg.p2.y).abs() < 1e-6 {
+                continue;
+            }
+            // Non-Manhattan check: a wire should be either horizontal or vertical
+            let is_horizontal = (seg.p1.y - seg.p2.y).abs() < CHECK_TOLERANCE;
+            let is_vertical = (seg.p1.x - seg.p2.x).abs() < CHECK_TOLERANCE;
+            if !is_horizontal && !is_vertical {
+                log::warn!(
+                    "Width violation: Net '{}' has diagonal segment on L{}: ({:.3},{:.3})->({:.3},{:.3})",
+                    net.name, seg.layer, seg.p1.x, seg.p1.y, seg.p2.x, seg.p2.y
+                );
+                width_count.fetch_add(1, Ordering::Relaxed);
+            }
+        }
+        let _ = net_idx;
+    });
+
+    // Spacing check: use spatial binning to find nearby cross-net pairs.
+    // Use a larger bin size to capture spacing violations (segments that
+    // are close but don't overlap).
+    let max_spacing: f64 = db.layers.iter().map(|l| l.min_spacing).fold(0.0, f64::max);
+    if max_spacing <= 0.0 {
+        return Ok((
+            spacing_count.load(Ordering::Relaxed),
+            width_count.load(Ordering::Relaxed),
+        ));
+    }
+
+    let spacing_bin_size = BIN_SIZE.max(max_spacing * 2.0);
+
+    let chunk_size = 2048;
+    let net_chunks: Vec<_> = (0..db.nets.len())
+        .collect::<Vec<_>>()
+        .chunks(chunk_size)
+        .map(|c| c.to_vec())
+        .collect();
+
+    net_chunks.par_iter().for_each(|chunk| {
+        let mut bins: HashMap<BinKey, Vec<Segment>> = HashMap::new();
+
+        for &net_idx in chunk {
+            let net = &db.nets[net_idx];
+            let net_id = NetId::new(net_idx);
+
+            for seg in &net.route_segments {
+                // Skip vias for spacing check
+                if (seg.p1.x - seg.p2.x).abs() < 1e-6 && (seg.p1.y - seg.p2.y).abs() < 1e-6 {
+                    continue;
+                }
+
+                let s = Segment {
+                    p1: seg.p1,
+                    p2: seg.p2,
+                    layer: seg.layer,
+                    net_id,
+                };
+
+                // Expand bins by max_spacing to catch nearby segments
+                let min_x = s.p1.x.min(s.p2.x) - max_spacing;
+                let max_x = s.p1.x.max(s.p2.x) + max_spacing;
+                let min_y = s.p1.y.min(s.p2.y) - max_spacing;
+                let max_y = s.p1.y.max(s.p2.y) + max_spacing;
+
+                let start_bx = (min_x / spacing_bin_size).floor() as i32;
+                let end_bx = (max_x / spacing_bin_size).floor() as i32;
+                let start_by = (min_y / spacing_bin_size).floor() as i32;
+                let end_by = (max_y / spacing_bin_size).floor() as i32;
+
+                for bx in start_bx..=end_bx {
+                    for by in start_by..=end_by {
+                        bins.entry(BinKey {
+                            layer: s.layer,
+                            bx,
+                            by,
+                        })
+                        .or_default()
+                        .push(s);
+                    }
+                }
+            }
+        }
+
+        for segs in bins.values() {
+            let first_net = segs[0].net_id;
+            if segs.iter().all(|s| s.net_id == first_net) {
+                continue;
+            }
+
+            for i in 0..segs.len() {
+                for j in (i + 1)..segs.len() {
+                    let s1 = &segs[i];
+                    let s2 = &segs[j];
+
+                    if s1.net_id == s2.net_id || s1.layer != s2.layer {
+                        continue;
+                    }
+
+                    let li = s1.layer as usize;
+                    if li >= db.layers.len() {
+                        continue;
+                    }
+                    let min_space = db.layers[li].min_spacing;
+                    if min_space <= 0.0 {
+                        continue;
+                    }
+
+                    let gap = segment_gap_distance(s1, s2);
+                    if gap > 0.0 && gap < min_space - CHECK_TOLERANCE {
+                        spacing_count.fetch_add(1, Ordering::Relaxed);
+                    }
+                }
+            }
+        }
+    });
+
+    Ok((
+        spacing_count.load(Ordering::Relaxed),
+        width_count.load(Ordering::Relaxed),
+    ))
 }
 
 /// Checks for short circuits and illegal routing loops.

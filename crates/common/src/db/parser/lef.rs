@@ -33,6 +33,7 @@ pub fn parse(db: &mut NetlistDB, filename: &str) -> Result<()> {
     let mut layer_dir = LayerDirection::Unknown;
     let mut layer_pitch = 0.0;
     let mut layer_width = 0.0;
+    let mut layer_spacing: Option<f64> = None;
 
     for line in reader.lines() {
         let line = line?;
@@ -50,6 +51,7 @@ pub fn parse(db: &mut NetlistDB, filename: &str) -> Result<()> {
                     layer_dir = LayerDirection::Unknown;
                     layer_pitch = 1.0;
                     layer_width = 1.0;
+                    layer_spacing = None;
                 }
             }
             "TYPE" => {
@@ -76,6 +78,15 @@ pub fn parse(db: &mut NetlistDB, filename: &str) -> Result<()> {
                     layer_width = parts[1].parse().unwrap_or(1.0);
                 }
             }
+            "SPACING" => {
+                if in_layer && parts.len() > 1 {
+                    // LEF SPACING <value> ; — strip trailing semicolon
+                    let val_str = parts[1].trim_end_matches(';');
+                    if let Ok(v) = val_str.parse::<f64>() {
+                        layer_spacing = Some(v);
+                    }
+                }
+            }
             "END" => {
                 if parts.len() > 1 {
                     if parts[1] == current_layer && in_layer {
@@ -86,6 +97,9 @@ pub fn parse(db: &mut NetlistDB, filename: &str) -> Result<()> {
                                 layer_pitch,
                                 layer_width,
                             );
+                            if let Some(spacing) = layer_spacing {
+                                db.set_layer_spacing(&current_layer, spacing);
+                            }
                         }
                         in_layer = false;
                     } else if parts[1] == current_pin && in_pin {
