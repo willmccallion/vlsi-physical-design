@@ -3,6 +3,7 @@
 //! Parses the industry-standard DEF format used to represent netlists,
 //! component placements, pin locations, and routing information. This parser
 //! handles the major DEF sections: DIEAREA, TRACKS, COMPONENTS, PINS, and NETS.
+//! Supports multi-line statements (lines are accumulated until a semicolon).
 
 use crate::db::core::{NetlistDB, TrackDef};
 use crate::geom::point::Point;
@@ -13,11 +14,9 @@ use std::io::{BufRead, BufReader};
 
 /// Parses a DEF file and populates the netlist database.
 ///
-/// Processes DEF statements in sequence, maintaining state for the current
-/// section (COMPONENTS, PINS, NETS). Handles unit conversion from DEF's
-/// micron-based coordinates to internal floating-point representation.
-/// Extracts cell placements, pin locations, net connectivity, and routing
-/// track definitions. Returns an error if the file is malformed or unreadable.
+/// Processes DEF statements by accumulating lines until a semicolon is found,
+/// then parsing the complete statement. This correctly handles multi-line
+/// statements common in real-world DEF files.
 pub fn parse(db: &mut NetlistDB, filename: &str) -> Result<()> {
     let file = File::open(filename)?;
     let reader = BufReader::new(file);
@@ -27,9 +26,37 @@ pub fn parse(db: &mut NetlistDB, filename: &str) -> Result<()> {
     let mut in_pins = false;
     let mut def_units = 1000.0;
 
+    // Accumulator for multi-line statements.
+    let mut stmt_buf = String::new();
+
     for line in reader.lines() {
         let line = line?;
-        let parts: Vec<&str> = line.split_whitespace().collect();
+        let trimmed = line.trim();
+        if trimmed.is_empty() {
+            continue;
+        }
+
+        // Accumulate into statement buffer.
+        if !stmt_buf.is_empty() {
+            stmt_buf.push(' ');
+        }
+        stmt_buf.push_str(trimmed);
+
+        // If the line doesn't end with ';', keep accumulating.
+        if !trimmed.ends_with(';') {
+            // Section headers and END markers don't need ';'.
+            let first = trimmed.split_whitespace().next().unwrap_or("");
+            match first {
+                "COMPONENTS" | "PINS" | "NETS" | "END" | "PROPERTYDEFINITIONS" => {}
+                _ => continue,
+            }
+        }
+
+        // We have a complete statement. Parse it.
+        let owned: Vec<String> = stmt_buf.split_whitespace().map(|s| s.to_string()).collect();
+        let parts: Vec<&str> = owned.iter().map(|s| s.as_str()).collect();
+        stmt_buf.clear();
+
         if parts.is_empty() {
             continue;
         }
@@ -62,7 +89,7 @@ pub fn parse(db: &mut NetlistDB, filename: &str) -> Result<()> {
                 let start: f64 = parts[2].parse()?;
                 let num: u32 = parts[4].parse()?;
                 let step: f64 = parts[6].parse()?;
-                let layer = parts[8].to_string();
+                let layer = parts[8].trim_matches(';').to_string();
 
                 db.tracks.push(TrackDef {
                     layer,
@@ -87,6 +114,7 @@ pub fn parse(db: &mut NetlistDB, filename: &str) -> Result<()> {
                 in_components = false;
                 in_pins = false;
             }
+            "PROPERTYDEFINITIONS" | "ROW" => {}
             "END" => {
                 if parts.len() > 1 {
                     match parts[1] {
@@ -107,6 +135,7 @@ pub fn parse(db: &mut NetlistDB, filename: &str) -> Result<()> {
 
                     for (i, &part) in parts.iter().enumerate() {
                         if part == "("
+                            && i + 2 < parts.len()
                             && let (Ok(px), Ok(py)) =
                                 (parts[i + 1].parse::<f64>(), parts[i + 2].parse::<f64>())
                         {
@@ -137,13 +166,17 @@ pub fn parse(db: &mut NetlistDB, filename: &str) -> Result<()> {
                     while i < parts.len() {
                         if parts[i] == "NET" && i + 1 < parts.len() {
                             net_name = parts[i + 1].to_string();
-                        } else if parts[i] == "("
-                            && i + 2 < parts.len()
-                            && let (Ok(px), Ok(py)) =
-                                (parts[i + 1].parse::<f64>(), parts[i + 2].parse::<f64>())
-                        {
-                            x = px / def_units;
-                            y = py / def_units;
+                        } else if parts[i] == "PLACED" || parts[i] == "FIXED" {
+                            if i + 3 < parts.len()
+                                && parts[i + 1] == "("
+                                && let (Ok(px), Ok(py)) = (
+                                    parts[i + 2].parse::<f64>(),
+                                    parts[i + 3].parse::<f64>(),
+                                )
+                            {
+                                x = px / def_units;
+                                y = py / def_units;
+                            }
                         }
                         i += 1;
                     }
@@ -159,7 +192,7 @@ pub fn parse(db: &mut NetlistDB, filename: &str) -> Result<()> {
 
                     let mut i = 2;
                     while i < parts.len() {
-                        if parts[i] == "(" {
+                        if parts[i] == "(" && i + 2 < parts.len() {
                             let node = parts[i + 1];
 
                             if node != "PIN"
@@ -182,14 +215,20 @@ pub fn parse(db: &mut NetlistDB, filename: &str) -> Result<()> {
                                 }
 
                                 if !found {
-                                    let h = pin_name.chars().fold(0, |acc, c| acc + c as usize);
+                                    let h =
+                                        pin_name.chars().fold(0, |acc, c| acc + c as usize);
                                     let dx = (h % 7) as f64 * 0.25 - 0.75;
                                     let dy = ((h / 7) % 7) as f64 * 0.25 - 0.75;
                                     offset.x += dx;
                                     offset.y += dy;
                                 }
 
-                                db.add_pin(cell_id, current_net_id, offset, pin_name.to_string());
+                                db.add_pin(
+                                    cell_id,
+                                    current_net_id,
+                                    offset,
+                                    pin_name.to_string(),
+                                );
                             }
                         }
                         i += 1;

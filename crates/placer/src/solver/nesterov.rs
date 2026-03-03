@@ -143,11 +143,15 @@ impl NesterovOptimizer {
 
         let mut prev_hpwl = wl_cost_0;
         let ref_hpwl = wl_cost_0.max(1.0);
+        let initial_hpwl = wl_cost_0;
 
         // Track best solution for rollback on instability
         let mut best_positions = self.x_k.clone();
         let mut best_overflow = f64::INFINITY;
+        let mut best_wl = f64::INFINITY;
         let mut prev_avg_disp = 0.0;
+        let mut wl_stable_iters = 0u32;
+        let mut prev_wl = wl_cost_0;
 
         for k in 0..self.params.max_iterations {
             let (wl_cost, _density_cost, wl_grad_norm, density_grad_norm) =
@@ -220,11 +224,26 @@ impl NesterovOptimizer {
             }
             let avg_disp = total_disp / n as f64;
 
-            // Track best solution
-            if overflow_ratio < best_overflow {
+            // Track best solution (prefer lower overflow, break ties by WL)
+            if overflow_ratio < best_overflow
+                || (overflow_ratio < best_overflow + 0.01 && wl_cost < best_wl)
+            {
                 best_overflow = overflow_ratio;
+                best_wl = wl_cost;
                 best_positions.copy_from_slice(&self.x_k);
             }
+
+            // Track wirelength stability: count consecutive iterations where
+            // WL changes by less than 0.1% of the reference.
+            if k > 0 {
+                let wl_change = (wl_cost - prev_wl).abs() / ref_hpwl;
+                if wl_change < 0.001 {
+                    wl_stable_iters += 1;
+                } else {
+                    wl_stable_iters = 0;
+                }
+            }
+            prev_wl = wl_cost;
 
             if k % 100 == 0 {
                 ui::placement_iter(k, wl_cost, overflow_ratio, avg_disp, step_size);
@@ -262,10 +281,19 @@ impl NesterovOptimizer {
             }
 
             // --- Convergence ---
-            if k > 200 && overflow_ratio < 0.10 && avg_disp < 0.1 {
+            // Require that wirelength has actually improved from the initial
+            // value before declaring convergence. This prevents premature exit
+            // for pre-placed designs where overflow starts low but WL hasn't
+            // been optimized yet.
+            let wl_improved = wl_cost < initial_hpwl * 0.95;
+            let wl_stable = wl_stable_iters >= 50;
+
+            if k > 200 && overflow_ratio < 0.10 && avg_disp < 0.1
+                && (wl_improved || wl_stable)
+            {
                 log::debug!(
-                    "Converged at iteration {}: overflow={:.4}, avg_disp={:.4}",
-                    k, overflow_ratio, avg_disp
+                    "Converged at iteration {}: overflow={:.4}, avg_disp={:.4}, WL={:.0}",
+                    k, overflow_ratio, avg_disp, wl_cost
                 );
                 Self::apply_clamping(db, &mut self.x_k);
                 db.positions.copy_from_slice(&self.x_k);
@@ -275,7 +303,9 @@ impl NesterovOptimizer {
                 });
             }
 
-            if k > 500 && avg_disp < self.params.convergence_threshold {
+            if k > 500 && avg_disp < self.params.convergence_threshold
+                && (wl_improved || wl_stable)
+            {
                 log::debug!("Converged: Cells stabilized at iteration {} (overflow={:.4})", k, overflow_ratio);
                 Self::apply_clamping(db, &mut self.x_k);
                 db.positions.copy_from_slice(&self.x_k);

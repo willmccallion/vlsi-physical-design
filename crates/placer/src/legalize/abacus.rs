@@ -407,9 +407,9 @@ impl AbacusLegalizer {
                     db.positions[a].x.partial_cmp(&db.positions[b].x).unwrap()
                 });
 
-                // Right-to-left: if the rightmost cell exceeds die, push it left,
-                // which may push its left neighbor left, etc.
-                let mut right_limit = die_max_x;
+                // Right-to-left: if the rightmost cell exceeds the sub-row
+                // boundary, push it left (and its neighbors).
+                let mut right_limit = sub.max_x;
                 for &ci in cells_in_sub.iter().rev() {
                     let w = db.cells[ci].width;
                     if db.positions[ci].x + w > right_limit {
