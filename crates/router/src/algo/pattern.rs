@@ -37,6 +37,13 @@ pub fn try_pattern_route<G: RoutingGrid + ?Sized>(
         return Some(path);
     }
 
+    // Try 3-bend routes (S-shape and U-shape) - only if sufficient distance
+    if (dx >= 3 || dy >= 3)
+        && let Some(path) = try_three_bend_route(grid, start, end, h_layer, v_layer)
+    {
+        return Some(path);
+    }
+
     None
 }
 
@@ -265,6 +272,121 @@ fn try_z_route<G: RoutingGrid + ?Sized>(
                 let ok3 = trace_vertical(grid, &mut path, end.x, mid_y, end.y, v_layer);
                 if ok3 {
                     add_via(&mut path, end.x, end.y, v_layer, end.z);
+                    if !path.is_empty() {
+                        return Some(path);
+                    }
+                }
+            }
+        }
+    }
+
+    None
+}
+
+/// Tries 3-bend routes: S-shapes (asymmetric splits) and U-shapes (detours).
+///
+/// S-shapes split the horizontal or vertical span at 1/3 and 2/3 points,
+/// providing alternative paths when the midpoint Z-route is blocked.
+/// U-shapes detour by overshooting in one direction, useful when the
+/// direct corridor between start and end is congested.
+fn try_three_bend_route<G: RoutingGrid + ?Sized>(
+    grid: &G,
+    start: GridCoord,
+    end: GridCoord,
+    h_layer: u8,
+    v_layer: u8,
+) -> Option<Vec<GridCoord>> {
+    // S-shape: H-V-H with 1/3 and 2/3 split points
+    for &frac in &[1, 2] {
+        let split_x = start.x as i32 + (end.x as i32 - start.x as i32) * frac / 3;
+        let split_x = split_x.max(0) as u32;
+
+        let mut path = Vec::new();
+        add_via(&mut path, start.x, start.y, start.z, h_layer);
+        if trace_horizontal(grid, &mut path, start.x, split_x, start.y, h_layer) {
+            add_via(&mut path, split_x, start.y, h_layer, v_layer);
+            if trace_vertical(grid, &mut path, split_x, start.y, end.y, v_layer) {
+                add_via(&mut path, split_x, end.y, v_layer, h_layer);
+                if trace_horizontal(grid, &mut path, split_x, end.x, end.y, h_layer) {
+                    add_via(&mut path, end.x, end.y, h_layer, end.z);
+                    if !path.is_empty() {
+                        return Some(path);
+                    }
+                }
+            }
+        }
+    }
+
+    // S-shape: V-H-V with 1/3 and 2/3 split points
+    for &frac in &[1, 2] {
+        let split_y = start.y as i32 + (end.y as i32 - start.y as i32) * frac / 3;
+        let split_y = split_y.max(0) as u32;
+
+        let mut path = Vec::new();
+        add_via(&mut path, start.x, start.y, start.z, v_layer);
+        if trace_vertical(grid, &mut path, start.x, start.y, split_y, v_layer) {
+            add_via(&mut path, start.x, split_y, v_layer, h_layer);
+            if trace_horizontal(grid, &mut path, start.x, end.x, split_y, h_layer) {
+                add_via(&mut path, end.x, split_y, h_layer, v_layer);
+                if trace_vertical(grid, &mut path, end.x, split_y, end.y, v_layer) {
+                    add_via(&mut path, end.x, end.y, v_layer, end.z);
+                    if !path.is_empty() {
+                        return Some(path);
+                    }
+                }
+            }
+        }
+    }
+
+    // U-shape: detour by overshooting in Y direction
+    // H to target X, then V overshoot past target Y, then H back, then V to target
+    let dy = (end.y as i32 - start.y as i32).unsigned_abs();
+    let dx = (end.x as i32 - start.x as i32).unsigned_abs();
+    let overshoot = (dy.max(dx) / 3).max(2);
+
+    for &dir in &[-1i32, 1] {
+        let detour_y = end.y as i32 + dir * overshoot as i32;
+        if detour_y < 0 {
+            continue;
+        }
+        let detour_y = detour_y as u32;
+
+        // U-shape A: V-H-V-H — go vertically to detour_y, horizontally to end.x,
+        // vertically to end.y, done
+        let mut path = Vec::new();
+        add_via(&mut path, start.x, start.y, start.z, v_layer);
+        if trace_vertical(grid, &mut path, start.x, start.y, detour_y, v_layer) {
+            add_via(&mut path, start.x, detour_y, v_layer, h_layer);
+            if trace_horizontal(grid, &mut path, start.x, end.x, detour_y, h_layer) {
+                add_via(&mut path, end.x, detour_y, h_layer, v_layer);
+                if trace_vertical(grid, &mut path, end.x, detour_y, end.y, v_layer) {
+                    add_via(&mut path, end.x, end.y, v_layer, end.z);
+                    if !path.is_empty() {
+                        return Some(path);
+                    }
+                }
+            }
+        }
+    }
+
+    // U-shape: detour by overshooting in X direction
+    for &dir in &[-1i32, 1] {
+        let detour_x = end.x as i32 + dir * overshoot as i32;
+        if detour_x < 0 {
+            continue;
+        }
+        let detour_x = detour_x as u32;
+
+        // U-shape B: H-V-H-V — go horizontally to detour_x, vertically to end.y,
+        // horizontally to end.x, done
+        let mut path = Vec::new();
+        add_via(&mut path, start.x, start.y, start.z, h_layer);
+        if trace_horizontal(grid, &mut path, start.x, detour_x, start.y, h_layer) {
+            add_via(&mut path, detour_x, start.y, h_layer, v_layer);
+            if trace_vertical(grid, &mut path, detour_x, start.y, end.y, v_layer) {
+                add_via(&mut path, detour_x, end.y, v_layer, h_layer);
+                if trace_horizontal(grid, &mut path, detour_x, end.x, end.y, h_layer) {
+                    add_via(&mut path, end.x, end.y, h_layer, end.z);
                     if !path.is_empty() {
                         return Some(path);
                     }
