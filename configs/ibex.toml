@@ -1,18 +1,17 @@
 [global_placement]
 placer_max_iterations = 2000
 convergence_threshold = 1e-4
-electro_force_multiplier = 1000.0
 
 [legalization]
 algorithm = "abacus"
 
 [global_routing]
-gcell_size = 128
+gcell_size = 20
 max_iterations = 300
 history_increment = 0.5
 initial_penalty = 0.5
 penalty_multiplier = 1.1
-capacity = 16
+capacity = 15
 
 [detailed_routing]
 max_iterations = 2000
@@ -27,6 +26,6 @@ stagnation_threshold = 30
 ripup_radius = 3
 
 [input]
-bookshelf_aux_file = "inputs/ibm18/ibm18.aux"
-output_def = "output/ibm18/placed.def"
-num_layers = 10
+lef_files = ["inputs/ibex/Nangate45.lef"]
+def_file = "inputs/ibex/ibex.def"
+output_def = "output/ibex/placed.def"

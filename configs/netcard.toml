@@ -27,6 +27,6 @@ stagnation_threshold = 30
 ripup_radius = 3
 
 [input]
-bookshelf_aux_file = "inputs/ibm18/ibm18.aux"
-output_def = "output/ibm18/placed.def"
-num_layers = 10
+lef_files = ["inputs/netcard/Nangate45.lef"]
+def_file = "inputs/netcard/netcard.def"
+output_def = "output/netcard/placed.def"

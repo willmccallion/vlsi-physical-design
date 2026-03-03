@@ -459,8 +459,11 @@ fn run_routing(config: &Config) -> anyhow::Result<()> {
         let pitch = std_height / 16.0;
         let width = pitch * 0.5;
 
+        let num_layers = config.input.num_layers.max(2);
+
         log::warn!(
-            "Layer data missing! Synthesizing default layers (Cell Height={:.2}, Pitch={:.2}).",
+            "Layer data missing! Synthesizing {} layers (Cell Height={:.2}, Pitch={:.2}).",
+            num_layers,
             std_height,
             pitch
         );
@@ -469,12 +472,15 @@ fn run_routing(config: &Config) -> anyhow::Result<()> {
         db.layer_name_map.clear();
 
         use pare_common::db::core::LayerDirection;
-        db.add_layer("M1".to_string(), LayerDirection::Horizontal, pitch, width);
-        db.add_layer("M2".to_string(), LayerDirection::Vertical, pitch, width);
-        db.add_layer("M3".to_string(), LayerDirection::Horizontal, pitch, width);
-        db.add_layer("M4".to_string(), LayerDirection::Vertical, pitch, width);
-        db.add_layer("M5".to_string(), LayerDirection::Horizontal, pitch, width);
-        db.add_layer("M6".to_string(), LayerDirection::Vertical, pitch, width);
+        for i in 0..num_layers {
+            let name = format!("M{}", i + 1);
+            let dir = if i % 2 == 0 {
+                LayerDirection::Horizontal
+            } else {
+                LayerDirection::Vertical
+            };
+            db.add_layer(name, dir, pitch, width);
+        }
     }
 
     if db.layers.is_empty() {

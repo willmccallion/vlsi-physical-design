@@ -7,7 +7,7 @@ electro_force_multiplier = 1000.0
 algorithm = "abacus"
 
 [global_routing]
-gcell_size = 128
+gcell_size = 64
 max_iterations = 300
 history_increment = 0.5
 initial_penalty = 0.5
@@ -27,6 +27,6 @@ stagnation_threshold = 30
 ripup_radius = 3
 
 [input]
-bookshelf_aux_file = "inputs/ibm18/ibm18.aux"
-output_def = "output/ibm18/placed.def"
-num_layers = 10
+lef_files = ["inputs/swerv/Nangate45.lef"]
+def_file = "inputs/swerv/swerv.def"
+output_def = "output/swerv/placed.def"

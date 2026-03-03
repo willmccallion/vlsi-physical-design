@@ -210,6 +210,8 @@ pub struct InputConfig {
     #[serde(default = "default_output_def")]
     pub output_def: String,
     pub bookshelf_aux_file: Option<String>,
+    #[serde(default = "default_num_layers")]
+    pub num_layers: usize,
 }
 
 impl Default for InputConfig {
@@ -223,6 +225,7 @@ impl Default for InputConfig {
             def_file: default_def_file(),
             output_def: default_output_def(),
             bookshelf_aux_file: None,
+            num_layers: default_num_layers(),
         }
     }
 }
@@ -343,6 +346,11 @@ fn default_ripup_radius() -> i32 {
 /// Default gcell size for detailed routing (2.0 microns).
 fn default_dr_gcell_size() -> f64 {
     2.0
+}
+
+/// Default number of synthesized metal layers for Bookshelf designs (6).
+fn default_num_layers() -> usize {
+    6
 }
 
 fn default_lef_files() -> Vec<String> {
