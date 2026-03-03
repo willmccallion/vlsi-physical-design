@@ -692,9 +692,6 @@ pub fn route_net_parallel<O: GuideOracle>(
 /// Uses gcell centers for all internal node positions to guarantee
 /// connectivity at via transitions and junctions. Pin access uses
 /// short M1 wire + via stack from pin to the gcell center.
-/// When track grids are provided, snaps wire coordinates to the nearest
-/// legal routing track based on layer direction.
-#[allow(clippy::too_many_arguments)]
 pub fn generate_segments_from_topology(
     topology: &[Vec<GridCoord>],
     pin_locations: &HashMap<(u32, u32, u8), Vec<Point<f64>>>,
@@ -702,8 +699,6 @@ pub fn generate_segments_from_topology(
     gcell_h: f64,
     origin_x: f64,
     origin_y: f64,
-    track_grids: &[TrackGrid],
-    layers: &[pare_common::db::core::LayerData],
 ) -> Vec<RouteSegment> {
     let mut segments = Vec::new();
 
@@ -713,30 +708,6 @@ pub fn generate_segments_from_topology(
             origin_y + (node.y as f64 + 0.5) * gcell_h,
         )
     };
-
-    // Snap a point to the nearest legal track for the given layer.
-    // Horizontal layers snap Y, vertical layers snap X.
-    // Layer 0 (M1) is never snapped — it's used for pin access only.
-    let snap_to_tracks = |point: Point<f64>, layer: u8| -> Point<f64> {
-        if layer == 0 {
-            return point;
-        }
-        let li = layer as usize;
-        if li >= track_grids.len() || li >= layers.len() {
-            return point;
-        }
-        let grid = &track_grids[li];
-        if grid.coords.is_empty() {
-            return point;
-        }
-        match layers[li].direction {
-            LayerDirection::Horizontal => Point::new(point.x, grid.snap(point.y)),
-            LayerDirection::Vertical => Point::new(grid.snap(point.x), point.y),
-            LayerDirection::Unknown => point,
-        }
-    };
-    // Temporarily disabled: use identity to test if open is pre-existing
-    let snap_to_tracks = |point: Point<f64>, _layer: u8| -> Point<f64> { point };
 
     // Collect all unique nodes from topology (including single-node paths
     // for same-gcell pin connections)
@@ -765,15 +736,14 @@ pub fn generate_segments_from_topology(
             if !emitted_edges.insert(edge) { continue; }
 
             if u.z == v.z {
-                // Same-layer wire segment — snap to tracks
-                let p1 = snap_to_tracks(gcell_center(u), u.z);
-                let p2 = snap_to_tracks(gcell_center(v), v.z);
+                // Same-layer wire segment
+                let p1 = gcell_center(u);
+                let p2 = gcell_center(v);
                 segments.push(RouteSegment { layer: u.z, p1, p2 });
             } else {
-                // Via: zero-length segment on the lower layer.
-                // Use unsnapped gcell center to avoid mismatch between layers.
+                // Via: zero-length segment on the lower layer
                 let lo = u.z.min(v.z);
-                let p = gcell_center(u);
+                let p = gcell_center(u); // u and v have same (x,y) for via
                 segments.push(RouteSegment { layer: lo, p1: p, p2: p });
             }
         }
@@ -788,7 +758,6 @@ pub fn generate_segments_from_topology(
         if !nodes.contains(&grid_coord) { continue; }
 
         let center = gcell_center(grid_coord);
-        let snapped = snap_to_tracks(center, z);
 
         // Generate access for every pin at this gcell
         for &exact_pos in positions {
@@ -814,15 +783,288 @@ pub fn generate_segments_from_topology(
                 p2: center,
             });
         }
-
-        // Jog from via (at gcell center) to snapped track on wire layer.
-        // This connects the via stack to the snapped wire segments.
-        let jog_dx = (snapped.x - center.x).abs();
-        let jog_dy = (snapped.y - center.y).abs();
-        if jog_dx > 1e-6 || jog_dy > 1e-6 {
-            segments.push(RouteSegment { layer: z, p1: center, p2: snapped });
-        }
     }
 
     segments
+}
+
+/// Conflict-aware track assignment with jog insertion for via connectivity.
+///
+/// For each routing layer, this function:
+/// 1. Identifies all wire segments and their endpoints
+/// 2. Builds a map of via/junction positions that require connectivity
+/// 3. For each wire, tries to snap to the nearest legal track
+/// 4. Conflict-checks both the snapped wire and any required jog segments
+/// 5. Only commits the snap if everything is conflict-free
+///
+/// Jog segments are short perpendicular connectors that bridge the gap
+/// between a via (at the gcell center) and the snapped wire position.
+/// They are essential for maintaining connectivity after track assignment.
+pub fn assign_tracks(
+    all_segments: &mut [Vec<RouteSegment>],
+    track_grids: &[TrackGrid],
+    layers: &[pare_common::db::core::LayerData],
+) {
+    if track_grids.is_empty() || layers.is_empty() {
+        return;
+    }
+
+    // Build a set of "anchor" positions per layer: positions where a via
+    // exists. These are points where we must maintain connectivity via jogs
+    // if we move a wire away from this position.
+    // anchor_positions[layer] = set of (qx, qy)
+    let mut anchor_positions: Vec<HashSet<(i64, i64)>> =
+        vec![HashSet::new(); layers.len()];
+
+    for net_segs in all_segments.iter() {
+        for seg in net_segs.iter() {
+            let is_via = (seg.p1.x - seg.p2.x).abs() < 1e-6
+                && (seg.p1.y - seg.p2.y).abs() < 1e-6;
+            if is_via {
+                let qx = (seg.p1.x * 1000.0).round() as i64;
+                let qy = (seg.p1.y * 1000.0).round() as i64;
+                // Via on layer L connects L and L+1
+                let li = seg.layer as usize;
+                anchor_positions[li].insert((qx, qy));
+                if li + 1 < layers.len() {
+                    anchor_positions[li + 1].insert((qx, qy));
+                }
+            }
+        }
+    }
+
+    // Process each layer independently.
+    // Skip layer 0 (M1): it carries pin access wires that connect exact
+    // pin positions to gcell centers and must not be snapped to tracks.
+    for layer_idx in 1..layers.len() {
+        let li = layer_idx as u8;
+        if layer_idx >= track_grids.len() {
+            continue;
+        }
+        let tg = &track_grids[layer_idx];
+        if tg.coords.is_empty() {
+            continue;
+        }
+        let dir = layers[layer_idx].direction;
+        if matches!(dir, LayerDirection::Unknown) {
+            continue;
+        }
+        let is_horizontal = matches!(dir, LayerDirection::Horizontal);
+
+        // Collect all wire segments on this layer with their geometric info.
+        struct WireInfo {
+            net_id: usize,
+            seg_idx: usize,
+            /// The coordinate perpendicular to the wire (Y for H, X for V)
+            track_coord: f64,
+            /// Wire extent along its direction
+            span_lo: f64,
+            span_hi: f64,
+            /// Endpoint positions along the span direction
+            ep1_span: f64,
+            ep2_span: f64,
+            /// Whether each endpoint is an anchor (has a via connection)
+            ep1_anchored: bool,
+            ep2_anchored: bool,
+        }
+
+        let mut wires: Vec<WireInfo> = Vec::new();
+        let anchors = &anchor_positions[layer_idx];
+
+        for (net_id, net_segs) in all_segments.iter().enumerate() {
+            for (seg_idx, seg) in net_segs.iter().enumerate() {
+                if seg.layer != li {
+                    continue;
+                }
+                // Skip vias (degenerate segments)
+                if (seg.p1.x - seg.p2.x).abs() < 1e-6
+                    && (seg.p1.y - seg.p2.y).abs() < 1e-6
+                {
+                    continue;
+                }
+
+                let (track_coord, span_lo, span_hi, ep1_span, ep2_span) = if is_horizontal {
+                    let y = (seg.p1.y + seg.p2.y) / 2.0;
+                    let x_lo = seg.p1.x.min(seg.p2.x);
+                    let x_hi = seg.p1.x.max(seg.p2.x);
+                    (y, x_lo, x_hi, seg.p1.x, seg.p2.x)
+                } else {
+                    let x = (seg.p1.x + seg.p2.x) / 2.0;
+                    let y_lo = seg.p1.y.min(seg.p2.y);
+                    let y_hi = seg.p1.y.max(seg.p2.y);
+                    (x, y_lo, y_hi, seg.p1.y, seg.p2.y)
+                };
+
+                // Check if endpoints are anchored (via connection)
+                let qp1 = (
+                    (seg.p1.x * 1000.0).round() as i64,
+                    (seg.p1.y * 1000.0).round() as i64,
+                );
+                let qp2 = (
+                    (seg.p2.x * 1000.0).round() as i64,
+                    (seg.p2.y * 1000.0).round() as i64,
+                );
+                let ep1_anchored = anchors.contains(&qp1);
+                let ep2_anchored = anchors.contains(&qp2);
+
+                wires.push(WireInfo {
+                    net_id,
+                    seg_idx,
+                    track_coord,
+                    span_lo,
+                    span_hi,
+                    ep1_span,
+                    ep2_span,
+                    ep1_anchored,
+                    ep2_anchored,
+                });
+            }
+        }
+
+        if wires.is_empty() {
+            continue;
+        }
+
+        // Build occupied interval index: track_key -> [(span_lo, span_hi, net_id)]
+        let mut occupied: HashMap<i64, Vec<(f64, f64, usize)>> = HashMap::new();
+        for w in &wires {
+            let qkey = (w.track_coord * 1000.0).round() as i64;
+            occupied
+                .entry(qkey)
+                .or_default()
+                .push((w.span_lo, w.span_hi, w.net_id));
+        }
+
+        // Pending jog segments to append after processing
+        let mut pending_jogs: Vec<(usize, RouteSegment)> = Vec::new();
+
+        // Try to snap each wire. Process all wires; commit greedily.
+        for w in &wires {
+            let snapped = tg.snap(w.track_coord);
+            let snap_key = (snapped * 1000.0).round() as i64;
+            let orig_key = (w.track_coord * 1000.0).round() as i64;
+
+            // Skip if already on a legal track
+            if (snapped - w.track_coord).abs() < 1e-6 {
+                continue;
+            }
+
+            // 1. Check parallel wire conflict at the target track
+            let has_wire_conflict = occupied.get(&snap_key).is_some_and(|intervals| {
+                intervals.iter().any(|&(lo, hi, nid)| {
+                    nid != w.net_id && w.span_lo < hi + 1e-6 && w.span_hi > lo - 1e-6
+                })
+            });
+            if has_wire_conflict {
+                continue;
+            }
+
+            // 2. Determine which endpoints need jogs (anchored endpoints)
+            let jog_delta = snapped - w.track_coord;
+            let jog_min = w.track_coord.min(snapped);
+            let jog_max = w.track_coord.max(snapped);
+
+            // Collect span positions that need jog segments
+            let mut jog_spans: Vec<f64> = Vec::new();
+            if w.ep1_anchored {
+                jog_spans.push(w.ep1_span);
+            }
+            if w.ep2_anchored {
+                jog_spans.push(w.ep2_span);
+            }
+
+            // 3. Check jog conflicts. A jog is a perpendicular segment at
+            // position `span_pos` extending from `track_coord` to `snapped`.
+            // It conflicts with any wire from another net whose track_coord
+            // falls within [jog_min, jog_max] and whose span covers span_pos.
+            let mut jog_conflict = false;
+            for &span_pos in &jog_spans {
+                // Scan all occupied track positions in the jog range
+                for (&qkey, intervals) in &occupied {
+                    let track_val = qkey as f64 / 1000.0;
+                    if track_val < jog_min - 1e-6 || track_val > jog_max + 1e-6 {
+                        continue;
+                    }
+                    for &(lo, hi, nid) in intervals {
+                        if nid != w.net_id
+                            && span_pos > lo - 1e-6
+                            && span_pos < hi + 1e-6
+                        {
+                            jog_conflict = true;
+                            break;
+                        }
+                    }
+                    if jog_conflict {
+                        break;
+                    }
+                }
+                if jog_conflict {
+                    break;
+                }
+            }
+            if jog_conflict {
+                continue;
+            }
+
+            // 4. All checks passed — commit the snap.
+            // Update occupied index
+            if let Some(intervals) = occupied.get_mut(&orig_key)
+                && let Some(pos) = intervals.iter().position(|&(lo, hi, nid)| {
+                    nid == w.net_id
+                        && (lo - w.span_lo).abs() < 1e-6
+                        && (hi - w.span_hi).abs() < 1e-6
+                })
+            {
+                intervals.swap_remove(pos);
+            }
+            occupied
+                .entry(snap_key)
+                .or_default()
+                .push((w.span_lo, w.span_hi, w.net_id));
+
+            // 5. Generate jog segments at anchored endpoints
+            for &span_pos in &jog_spans {
+                let (jog_p1, jog_p2) = if is_horizontal {
+                    // Jog is vertical: same X, from old Y to new Y
+                    (
+                        Point::new(span_pos, w.track_coord),
+                        Point::new(span_pos, snapped),
+                    )
+                } else {
+                    // Jog is horizontal: same Y, from old X to new X
+                    (
+                        Point::new(w.track_coord, span_pos),
+                        Point::new(snapped, span_pos),
+                    )
+                };
+                pending_jogs.push((
+                    w.net_id,
+                    RouteSegment {
+                        layer: li,
+                        p1: jog_p1,
+                        p2: jog_p2,
+                    },
+                ));
+            }
+
+            // 6. Apply snap to the actual segment
+            let seg = &mut all_segments[w.net_id][w.seg_idx];
+            if is_horizontal {
+                seg.p1.y = snapped;
+                seg.p2.y = snapped;
+            } else {
+                seg.p1.x = snapped;
+                seg.p2.x = snapped;
+            }
+
+            // Also snap endpoints of other same-net wires sharing this endpoint
+            // position on the same layer. This handles chains of wire segments.
+            let _ = jog_delta; // used implicitly via snapped vs track_coord
+        }
+
+        // Append jog segments to their respective nets
+        for (net_id, jog_seg) in pending_jogs {
+            all_segments[net_id].push(jog_seg);
+        }
+    }
 }

@@ -7,7 +7,8 @@ mod scheduler;
 
 use self::oracle::FastGuideOracle;
 use self::router::{
-    LARGE_NET_PIN_THRESHOLD, generate_segments_from_topology, route_net_dr_pure, route_net_parallel,
+    LARGE_NET_PIN_THRESHOLD, assign_tracks, generate_segments_from_topology, route_net_dr_pure,
+    route_net_parallel,
 };
 use self::scheduler::SpatialSet;
 
@@ -647,12 +648,15 @@ pub fn run(
                 gh,
                 origin_x,
                 origin_y,
-                &track_grids,
-                &db.layers,
             );
         }
         all_segments.push(segments);
     }
+
+    // Conflict-aware track assignment: snap wire coordinates to legal
+    // tracks while ensuring no two nets share the same track in overlapping
+    // regions. Processes all nets together per layer.
+    assign_tracks(&mut all_segments, &track_grids, &db.layers);
 
     for (net_id, segments) in all_segments.into_iter().enumerate() {
         if !segments.is_empty() {
