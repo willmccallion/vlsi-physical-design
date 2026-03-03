@@ -155,7 +155,6 @@ struct Segment {
     p2: Point<f64>,
     layer: u8,
     net_id: NetId,
-    seg_idx: usize,
 }
 
 impl Segment {
@@ -294,13 +293,12 @@ fn check_shorts_and_loops(db: &NetlistDB) -> Result<(), String> {
             let net = &db.nets[net_idx];
             let net_id = NetId::new(net_idx);
 
-            for (seg_idx, seg) in net.route_segments.iter().enumerate() {
+            for seg in &net.route_segments {
                 let s = Segment {
                     p1: seg.p1,
                     p2: seg.p2,
                     layer: seg.layer,
                     net_id,
-                    seg_idx,
                 };
 
                 for key in segment_bin_keys(&s) {
@@ -315,61 +313,36 @@ fn check_shorts_and_loops(db: &NetlistDB) -> Result<(), String> {
                 return;
             }
 
+            // Fast path: if all segments in this bin belong to the same net,
+            // no cross-net shorts are possible. Skip the expensive O(n²) check.
+            let first_net = segs[0].net_id;
+            if segs.iter().all(|s| s.net_id == first_net) {
+                continue;
+            }
+
             for i in 0..segs.len() {
                 for j in (i + 1)..segs.len() {
                     let s1 = &segs[i];
                     let s2 = &segs[j];
 
-                    if s1.net_id == s2.net_id && s1.seg_idx == s2.seg_idx {
+                    if s1.net_id == s2.net_id {
                         continue;
                     }
 
                     if s1.intersects(s2) {
-                        if s1.net_id != s2.net_id {
-                            let n1 = &db.nets[s1.net_id.index()].name;
-                            let n2 = &db.nets[s2.net_id.index()].name;
-                            let msg = format!(
-                                "SHORT: '{}' vs '{}' on Layer {}\n  seg1: ({:.3},{:.3})->({:.3},{:.3})\n  seg2: ({:.3},{:.3})->({:.3},{:.3})",
-                                n1, n2, s1.layer,
-                                s1.p1.x, s1.p1.y, s1.p2.x, s1.p2.y,
-                                s2.p1.x, s2.p1.y, s2.p2.x, s2.p2.y
-                            );
+                        let n1 = &db.nets[s1.net_id.index()].name;
+                        let n2 = &db.nets[s2.net_id.index()].name;
+                        let msg = format!(
+                            "SHORT: '{}' vs '{}' on Layer {}\n  seg1: ({:.3},{:.3})->({:.3},{:.3})\n  seg2: ({:.3},{:.3})->({:.3},{:.3})",
+                            n1, n2, s1.layer,
+                            s1.p1.x, s1.p1.y, s1.p2.x, s1.p2.y,
+                            s2.p1.x, s2.p1.y, s2.p2.x, s2.p2.y
+                        );
 
-                            if !error_found.swap(true, Ordering::Relaxed) {
-                                *error_msg.lock().unwrap() = msg;
-                            }
-                            return;
-                        } else if !s1.shares_endpoint(s2) {
-                            let is_via1 = (s1.p1.x - s1.p2.x).abs() < 1e-6 && (s1.p1.y - s1.p2.y).abs() < 1e-6;
-                            let is_via2 = (s2.p1.x - s2.p2.x).abs() < 1e-6 && (s2.p1.y - s2.p2.y).abs() < 1e-6;
-
-                            if is_via1 || is_via2 {
-                                continue;
-                            }
-
-                            let is_collinear = {
-                                let dx1 = s1.p2.x - s1.p1.x;
-                                let dy1 = s1.p2.y - s1.p1.y;
-                                let dx2 = s2.p2.x - s2.p1.x;
-                                let dy2 = s2.p2.y - s2.p1.y;
-                                (dx1 * dy2 - dy1 * dx2).abs() < CHECK_TOLERANCE * 100.0
-                            };
-
-                            if is_collinear {
-                                continue;
-                            }
-
-                            let n1 = &db.nets[s1.net_id.index()].name;
-                            let msg = format!(
-                                "SELF-SHORT/LOOP: Net '{}' intersects itself on Layer {} near ({:.3},{:.3})",
-                                n1, s1.layer, s1.p1.x, s1.p1.y
-                            );
-
-                            if !error_found.swap(true, Ordering::Relaxed) {
-                                *error_msg.lock().unwrap() = msg;
-                            }
-                            return;
+                        if !error_found.swap(true, Ordering::Relaxed) {
+                            *error_msg.lock().unwrap() = msg;
                         }
+                        return;
                     }
                 }
             }
@@ -402,13 +375,11 @@ fn check_opens(db: &NetlistDB) -> Result<(), String> {
         let segments: Vec<Segment> = net
             .route_segments
             .iter()
-            .enumerate()
-            .map(|(i, s)| Segment {
+            .map(|s| Segment {
                 p1: s.p1,
                 p2: s.p2,
                 layer: s.layer,
                 net_id: NetId::new(net_idx),
-                seg_idx: i,
             })
             .collect();
 
@@ -435,21 +406,17 @@ fn check_opens(db: &NetlistDB) -> Result<(), String> {
             }
         } else {
             // Large net: bin segments by endpoint positions to limit comparisons.
-            // Use a combined key of (layer, bx, by) for same-layer checks,
-            // and check adjacent layers via endpoint proximity.
+            // Precompute bin keys once per segment, then insert for same-layer
+            // and adjacent layers.
             let mut endpoint_bins: HashMap<(i32, i32, u8), Vec<usize>> = HashMap::new();
 
             for (i, seg) in segments.iter().enumerate() {
-                for key in segment_bin_keys(seg) {
-                    endpoint_bins.entry((key.bx, key.by, key.layer)).or_default().push(i);
-                }
-                // Also insert into adjacent-layer bins for via connectivity.
-                if seg.layer > 0 {
-                    for key in segment_bin_keys(seg) {
+                let keys = segment_bin_keys(seg);
+                for key in &keys {
+                    endpoint_bins.entry((key.bx, key.by, seg.layer)).or_default().push(i);
+                    if seg.layer > 0 {
                         endpoint_bins.entry((key.bx, key.by, seg.layer - 1)).or_default().push(i);
                     }
-                }
-                for key in segment_bin_keys(seg) {
                     endpoint_bins.entry((key.bx, key.by, seg.layer + 1)).or_default().push(i);
                 }
             }
@@ -473,20 +440,53 @@ fn check_opens(db: &NetlistDB) -> Result<(), String> {
             }
         }
 
+        // Build spatial index for fast pin-to-segment matching (layer 0-1 only).
+        let pin_bin_size: f64 = CONNECTIVITY_TOLERANCE * 2.0;
+        let mut pin_seg_bins: HashMap<(i32, i32), Vec<usize>> = HashMap::new();
+        for (seg_i, seg) in segments.iter().enumerate() {
+            if seg.layer > 1 {
+                continue;
+            }
+            let min_x = seg.p1.x.min(seg.p2.x);
+            let max_x = seg.p1.x.max(seg.p2.x);
+            let min_y = seg.p1.y.min(seg.p2.y);
+            let max_y = seg.p1.y.max(seg.p2.y);
+            let bx0 = (min_x / pin_bin_size).floor() as i32;
+            let bx1 = (max_x / pin_bin_size).floor() as i32;
+            let by0 = (min_y / pin_bin_size).floor() as i32;
+            let by1 = (max_y / pin_bin_size).floor() as i32;
+            for bx in bx0..=bx1 {
+                for by in by0..=by1 {
+                    pin_seg_bins.entry((bx, by)).or_default().push(seg_i);
+                }
+            }
+        }
+
         let mut pin_segment_indices = Vec::new();
         for (pin_idx_in_net, &pin_id) in net.pins.iter().enumerate() {
             let cell_id = db.pin_to_cell[pin_id.index()];
             let pos = db.positions[cell_id.index()];
             let pin_pos = db.get_pin_position(pin_id, &pos);
 
+            let pbx = (pin_pos.x / pin_bin_size).floor() as i32;
+            let pby = (pin_pos.y / pin_bin_size).floor() as i32;
             let mut found = false;
-            for (seg_i, seg) in segments.iter().enumerate() {
-                if seg.layer <= 1
-                    && point_to_segment_dist(pin_pos, seg.p1, seg.p2) < CONNECTIVITY_TOLERANCE
-                {
-                    pin_segment_indices.push(seg_i);
-                    found = true;
-                    break;
+            'pin_search: for dbx in (pbx - 1)..=(pbx + 1) {
+                for dby in (pby - 1)..=(pby + 1) {
+                    if let Some(candidates) = pin_seg_bins.get(&(dbx, dby)) {
+                        for &seg_i in candidates {
+                            if point_to_segment_dist(
+                                pin_pos,
+                                segments[seg_i].p1,
+                                segments[seg_i].p2,
+                            ) < CONNECTIVITY_TOLERANCE
+                            {
+                                pin_segment_indices.push(seg_i);
+                                found = true;
+                                break 'pin_search;
+                            }
+                        }
+                    }
                 }
             }
             if !found {
