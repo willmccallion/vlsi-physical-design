@@ -1,9 +1,9 @@
 [workspace]
 members = [
-    "common",
-    "placer",
-    "router",
-    "cli"
+    "crates/common",
+    "crates/placer",
+    "crates/router",
+    "crates/cli",
 ]
 resolver = "2"
 

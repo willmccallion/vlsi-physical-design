@@ -25,7 +25,7 @@ def main():
     download(DEF_URL, os.path.join(INPUT_DIR, "aes.def"))
     download(LEF_URL, os.path.join(INPUT_DIR, "Nangate45.lef"))
     print("[aes] Done. Run with:")
-    print("  cargo run --release -- flow configs/config_aes.toml")
+    print("  cargo run --release -- flow configs/aes.toml")
 
 
 if __name__ == "__main__":

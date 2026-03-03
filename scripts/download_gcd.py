@@ -25,7 +25,7 @@ def main():
     download(DEF_URL, os.path.join(INPUT_DIR, "gcd.def"))
     download(LEF_URL, os.path.join(INPUT_DIR, "gcd.lef"))
     print("[gcd] Done. Run with:")
-    print("  cargo run --release -- flow configs/config_gcd.toml")
+    print("  cargo run --release -- flow configs/gcd.toml")
 
 
 if __name__ == "__main__":

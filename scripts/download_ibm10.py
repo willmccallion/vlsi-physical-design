@@ -33,7 +33,7 @@ def main():
 
     os.remove(tarball)
     print(f"[{NAME}] Done. Run with:")
-    print(f"  cargo run --release -- flow configs/config_{NAME}.toml")
+    print(f"  cargo run --release -- flow configs/{NAME}.toml")
 
 
 if __name__ == "__main__":
