@@ -735,6 +735,8 @@ pub fn generate_segments_from_topology(
             LayerDirection::Unknown => point,
         }
     };
+    // Temporarily disabled: use identity to test if open is pre-existing
+    let snap_to_tracks = |point: Point<f64>, _layer: u8| -> Point<f64> { point };
 
     // Collect all unique nodes from topology (including single-node paths
     // for same-gcell pin connections)
