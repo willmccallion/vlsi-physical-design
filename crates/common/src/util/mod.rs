@@ -2,7 +2,7 @@
 //!
 //! This module provides supporting functionality for the EDA toolchain including
 //! configuration management, logging setup, design verification (DRC/LVS),
-//! benchmark generation, performance profiling, and visualization utilities.
+//! performance profiling, and visualization utilities.
 
 pub mod check;
 /// Structured CLI output with colored formatting.
@@ -20,15 +20,6 @@ pub mod ui;
 /// file paths. All sections have default implementations that provide reasonable
 /// starting values for typical designs.
 pub mod config;
-/// Synthetic benchmark generator for testing and evaluation.
-///
-/// Generates random DEF files with specified cell counts, net counts, and target
-/// utilization for testing placement and routing algorithms. Creates designs
-/// using a chain topology where each net connects one cell's output to the next
-/// cell's input. The die size is computed to accommodate the cell area at the
-/// target utilization, enabling controlled experiments with varying design
-/// characteristics.
-pub mod generator;
 /// Logging infrastructure initialization.
 ///
 /// Sets up the logging system using env_logger with default Info level filtering.

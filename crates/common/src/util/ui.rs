@@ -105,6 +105,11 @@ pub fn wrote(path: &str) {
     eprintln!("    {} {}", "->".dim(), path);
 }
 
+/// Prints a dimmed phase timing line.
+pub fn phase_time(elapsed_secs: f64) {
+    eprintln!("    {}", format!("time: {:.1}s", elapsed_secs).dim());
+}
+
 /// Prints a "Done in Xs" line with a rule.
 pub fn done(elapsed_secs: f64) {
     eprintln!();

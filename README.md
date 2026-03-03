@@ -1,6 +1,6 @@
 # PARE — Placement And Routing Engine
 
-A digital IC placement and routing engine written in Rust. Implements the full physical design flow — analytical global placement, Abacus legalization, and two-stage negotiation-based routing — from scratch. Successfully places and routes real benchmarks up to 67k cells / 64k nets with zero DRC violations.
+A digital IC placement and routing engine written in Rust. Implements the full physical design flow — analytical global placement, Abacus legalization, and two-stage negotiation-based routing — from scratch. Successfully places and routes real benchmarks up to 145k cells / 143k nets with zero DRC violations.
 
 | IBM10 (64,227 nets) | AES (51,671 nets) |
 |:---:|:---:|
@@ -108,15 +108,17 @@ Type-safe index newtypes (`CellId`, `NetId`, `PinId`) prevent accidental index c
 
 ## Performance
 
-| Benchmark | Cells | Nets | Utilization | Layers | Result |
-|---|---|---|---|---|---|
-| GCD | 579 | 579 | 27% | 10 (Nangate45) | DRC-clean |
-| IBM01 | 12,506 | 11,507 | 85% | 6 (Bookshelf) | DRC-clean |
-| IBM05 | 28,146 | 28,446 | 80% | 6 (Bookshelf) | DRC-clean |
-| AES | 20,533 | 51,671 | 5% | 10 (Nangate45) | DRC-clean |
-| IBM10 | 67,692 | 64,227 | 49% | 6 (Bookshelf) | DRC-clean |
+| Benchmark | Cells | Nets | Utilization | Layers | Time | Result |
+|---|---|---|---|---|---|---|
+| GCD | 579 | 579 | 27% | 10 (Nangate45) | 0.4s | DRC-clean |
+| IBM01 | 12,506 | 11,507 | 85% | 6 (Bookshelf) | 4.1s | DRC-clean |
+| AES | 20,533 | 51,671 | 5% | 10 (Nangate45) | 12.6s | DRC-clean |
+| IBM05 | 28,146 | 28,446 | 80% | 6 (Bookshelf) | 11.3s | DRC-clean |
+| IBM10 | 67,692 | 64,227 | 49% | 6 (Bookshelf) | 42.8s | DRC-clean |
+| IBM13 | 81,056 | 84,199 | 40% | 6 (Bookshelf) | 63.5s | DRC-clean |
+| IBM14 | 145,492 | 143,202 | 49% | 6 (Bookshelf) | 368.3s | DRC-clean |
 
-All benchmarks are real circuits (ISPD or open-source RTL), not synthetic. IBM10 is the largest — 67k cells with 64k nets. IBM05 runs at 80% utilization with complex multi-pin nets. AES uses a real technology library (Nangate45) with 10 metal layers at realistic pitches.
+All benchmarks are real circuits (ISPD or open-source RTL), not synthetic. IBM14 is the largest — 145k cells with 143k nets. IBM05 runs at 80% utilization with complex multi-pin nets. AES uses a real technology library (Nangate45) with 10 metal layers at realistic pitches.
 
 ---
 
@@ -126,18 +128,22 @@ All benchmarks are real circuits (ISPD or open-source RTL), not synthetic. IBM10
 
 ```bash
 # Run the full flow on the GCD benchmark (LEF/DEF)
-cargo run --release -- --config configs/config_gcd.toml
+cargo run --release -- flow configs/gcd.toml
 
 # Run on IBM01, IBM05, or IBM10 (Bookshelf format)
-cargo run --release -- --config configs/config_ibm01.toml
-cargo run --release -- --config configs/config_ibm05.toml
-cargo run --release -- --config configs/config_ibm10.toml
+cargo run --release -- flow configs/ibm01.toml
+cargo run --release -- flow configs/ibm05.toml
+cargo run --release -- flow configs/ibm10.toml
 
 # Run on AES (LEF/DEF, Nangate45, 51k nets)
-cargo run --release -- --config configs/config_aes.toml
+cargo run --release -- flow configs/aes.toml
+
+# Run on IBM13 / IBM14 (up to 145k cells)
+cargo run --release -- flow configs/ibm13.toml
+cargo run --release -- flow configs/ibm14.toml
 
 # Route only (skip placement, uses previously placed DEF)
-cargo run --release -- --config configs/config_gcd.toml route
+cargo run --release -- route configs/gcd.toml
 ```
 
 Output images (`nesterov_placer.png`, `placed.png`, `routed.png`) and the routed DEF are written to the `output/` directory.

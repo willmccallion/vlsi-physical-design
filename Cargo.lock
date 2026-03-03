@@ -720,7 +720,6 @@ dependencies = [
  "image",
  "imageproc",
  "log",
- "rand 0.8.5",
  "rayon",
  "rstar",
  "serde",

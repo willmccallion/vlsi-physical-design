@@ -7,7 +7,7 @@ electro_force_multiplier = 1000.0
 algorithm = "abacus"
 
 [global_routing]
-gcell_size = 50
+gcell_size = 64
 max_iterations = 300
 history_increment = 0.5
 initial_penalty = 0.5

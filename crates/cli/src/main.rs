@@ -9,11 +9,11 @@ use clap::{Parser, Subcommand};
 use pare_common::db::core::NetlistDB;
 use pare_common::geom::point::Point;
 use pare_common::util::config::Config;
-use pare_common::util::{check, generator, logger, ui, visualization};
+use pare_common::util::{check, logger, ui, visualization};
 use pare_placer::physics::PhysicsContext;
 use pare_placer::solver::nesterov::{NesterovOptimizer, NesterovParams};
 use std::fs::File;
-use std::io::{BufRead, BufReader};
+use std::io::{BufRead, BufReader, BufWriter};
 use std::path::{Path, PathBuf};
 use std::time::Instant;
 
@@ -41,17 +41,6 @@ enum Commands {
         /// TOML configuration file.
         config: PathBuf,
     },
-    /// Generate a synthetic benchmark netlist.
-    Generate {
-        #[arg(long, default_value_t = 1000)]
-        cells: usize,
-        #[arg(long, default_value_t = 1000)]
-        nets: usize,
-        #[arg(long, default_value_t = 0.50)]
-        utilization: f64,
-        #[arg(long, default_value = "inputs/random.def")]
-        output: String,
-    },
 }
 
 fn load_config(path: &Path) -> anyhow::Result<Config> {
@@ -73,33 +62,6 @@ fn main() -> anyhow::Result<()> {
     ui::banner();
 
     match args.command {
-        Commands::Generate {
-            cells,
-            nets,
-            utilization,
-            output,
-        } => {
-            let safe_util = utilization.clamp(0.05, 0.95);
-            if (safe_util - utilization).abs() > f64::EPSILON {
-                log::warn!(
-                    "Requested utilization {:.2} is unsafe. Clamped to {:.2}",
-                    utilization,
-                    safe_util
-                );
-            }
-
-            if let Some(parent) = Path::new(&output).parent()
-                && !parent.as_os_str().is_empty()
-            {
-                std::fs::create_dir_all(parent)?;
-            }
-            ui::header("Generate", &format!(
-                "Cells: {}, Nets: {}, Util: {:.0}%",
-                cells, nets, safe_util * 100.0
-            ));
-            generator::generate_random_def(&output, cells, nets, safe_util)?;
-            ui::wrote(&output);
-        }
         Commands::Place { ref config } => {
             let config = load_config(config)?;
             validate_input_paths(&config)?;
@@ -310,6 +272,7 @@ fn run_placement(config: &Config) -> anyhow::Result<()> {
     let electro_force = config.global_placement.electro_force_multiplier;
 
     // --- Placement section ---
+    let phase_start = Instant::now();
     ui::section("Placement");
     ui::stat_row(
         "Cells:", &format!("{}", movable_cells),
@@ -355,15 +318,20 @@ fn run_placement(config: &Config) -> anyhow::Result<()> {
         );
     }
 
+    ui::phase_time(phase_start.elapsed().as_secs_f64());
+
     let output_dir = Path::new(&config.input.output_def)
         .parent()
         .unwrap_or(Path::new("."));
 
     // --- Legalization ---
+    let phase_start = Instant::now();
     ui::phase("Legalization");
     let legalizer = pare_placer::legalize::abacus::AbacusLegalizer::new();
     legalizer.legalize(&mut db);
     ui::check(&format!("Legalized {} cells", movable_cells));
+
+    ui::phase_time(phase_start.elapsed().as_secs_f64());
 
     // --- Placement Verification ---
     if let Err(e) = check::run_placement_check(&db) {
@@ -371,6 +339,7 @@ fn run_placement(config: &Config) -> anyhow::Result<()> {
     }
 
     // --- Output ---
+    let phase_start = Instant::now();
     ui::phase("Output");
     let nesterov_png = output_dir.join("nesterov_placer.png");
     visualization::draw_placement(&db, nesterov_png.to_str().unwrap(), 1000, 1000);
@@ -382,6 +351,7 @@ fn run_placement(config: &Config) -> anyhow::Result<()> {
 
     save_def(&db, &config.input.output_def)?;
     ui::wrote(&config.input.output_def);
+    ui::phase_time(phase_start.elapsed().as_secs_f64());
 
     Ok(())
 }
@@ -511,6 +481,7 @@ fn run_routing(config: &Config) -> anyhow::Result<()> {
         return Err(anyhow::anyhow!("No layers defined! Cannot route."));
     }
 
+    let phase_start = Instant::now();
     ui::section("Routing");
     ui::stat_row(
         "Nets:", &format!("{}", db.num_nets()),
@@ -518,12 +489,16 @@ fn run_routing(config: &Config) -> anyhow::Result<()> {
     );
 
     pare_router::route(&mut db, config).map_err(|e| anyhow::anyhow!(e))?;
+    ui::phase_time(phase_start.elapsed().as_secs_f64());
 
     // --- Verification ---
+    let phase_start = Instant::now();
     ui::phase("Verification");
     check::run(&db).map_err(|e| anyhow::anyhow!("Verification Failed: {}", e))?;
+    ui::phase_time(phase_start.elapsed().as_secs_f64());
 
     // --- Output ---
+    let phase_start = Instant::now();
     ui::phase("Output");
     let output_dir = Path::new(&config.input.output_def)
         .parent()
@@ -540,6 +515,7 @@ fn run_routing(config: &Config) -> anyhow::Result<()> {
 
     save_def(&db, output_path.to_str().unwrap())?;
     ui::wrote(output_path.to_str().unwrap());
+    ui::phase_time(phase_start.elapsed().as_secs_f64());
 
     Ok(())
 }
@@ -547,7 +523,7 @@ fn run_routing(config: &Config) -> anyhow::Result<()> {
 /// Writes the netlist database to a DEF file in standard format.
 fn save_def(db: &NetlistDB, filename: &str) -> std::io::Result<()> {
     use std::io::Write;
-    let mut file = std::fs::File::create(filename)?;
+    let mut file = BufWriter::with_capacity(256 * 1024, std::fs::File::create(filename)?);
 
     writeln!(file, "VERSION 5.8 ;")?;
     writeln!(file, "DIVIDERCHAR \"/\" ;")?;

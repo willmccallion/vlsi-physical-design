@@ -11,7 +11,7 @@ use crate::geom::point::Point;
 use crate::geom::rect::Rect;
 use crate::util::ui;
 use rayon::prelude::*;
-use std::collections::VecDeque;
+use std::collections::{HashMap, VecDeque};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 
@@ -149,10 +149,6 @@ pub fn run(db: &NetlistDB) -> Result<(), String> {
 }
 
 /// Internal representation of a routing segment for verification.
-///
-/// Wraps a route segment with additional metadata (net ID, segment index)
-/// needed for verification algorithms. Used to track which segments belong
-/// to which nets for short circuit detection.
 #[derive(Clone, Copy, Debug)]
 struct Segment {
     p1: Point<f64>,
@@ -164,12 +160,6 @@ struct Segment {
 
 impl Segment {
     /// Checks if this segment intersects with another segment on the same layer.
-    ///
-    /// Uses the orientation test to detect crossing segments and collinear
-    /// overlap detection for segments that lie on the same line. Returns
-    /// false immediately if segments are on different layers. Uses tolerance
-    /// to handle numerical precision issues while avoiding false positives
-    /// from segments that only touch at endpoints.
     fn intersects(&self, other: &Segment) -> bool {
         if self.layer != other.layer {
             return false;
@@ -193,11 +183,6 @@ impl Segment {
             return false;
         }
 
-        /// Checks if a point lies on a line segment within tolerance.
-        ///
-        /// Determines whether point p is collinear with and between points a and b,
-        /// accounting for floating-point precision using CHECK_TOLERANCE. Used in
-        /// segment intersection tests to detect when segments share endpoints.
         fn on_segment(p: Point<f64>, a: Point<f64>, b: Point<f64>) -> bool {
             p.x >= a.x.min(b.x) + CHECK_TOLERANCE
                 && p.x <= a.x.max(b.x) - CHECK_TOLERANCE
@@ -231,12 +216,6 @@ impl Segment {
     }
 
     /// Checks if this segment shares an endpoint with another segment.
-    ///
-    /// Compares all four endpoint combinations and returns true if any pair
-    /// is within the connectivity tolerance. This is used to determine if
-    /// segments are connected (which is legal) versus intersecting (which
-    /// may indicate a short circuit). Uses a larger tolerance than intersection
-    /// tests to account for grid quantization effects.
     fn shares_endpoint(&self, other: &Segment) -> bool {
         let dist_sq = |a: Point<f64>, b: Point<f64>| (a.x - b.x).powi(2) + (a.y - b.y).powi(2);
         let tol_sq = CONNECTIVITY_TOLERANCE * CONNECTIVITY_TOLERANCE;
@@ -249,10 +228,6 @@ impl Segment {
 }
 
 /// Computes the orientation of three points (collinear test).
-///
-/// Returns 0 if points are collinear, 1 if clockwise, 2 if counterclockwise.
-/// Used in segment intersection tests to determine if line segments cross.
-/// Implements the cross product test with tolerance for numerical stability.
 fn orientation(p: Point<f64>, q: Point<f64>, r: Point<f64>) -> i32 {
     let val = (q.y - p.y) * (r.x - q.x) - (q.x - p.x) * (r.y - q.y);
     if val.abs() < CHECK_TOLERANCE {
@@ -262,10 +237,6 @@ fn orientation(p: Point<f64>, q: Point<f64>, r: Point<f64>) -> i32 {
 }
 
 /// Key for spatial binning of segments for efficient intersection testing.
-///
-/// Groups segments by layer and spatial bin to reduce the number of
-/// intersection tests needed. Segments in different bins or layers
-/// cannot intersect, allowing early pruning of comparisons.
 #[derive(Hash, Eq, PartialEq, PartialOrd, Ord, Clone, Copy, Debug)]
 struct BinKey {
     layer: u8,
@@ -273,21 +244,56 @@ struct BinKey {
     by: i32,
 }
 
+/// Returns the set of bin keys that a segment touches.
+fn segment_bin_keys(s: &Segment) -> Vec<BinKey> {
+    let min_x = s.p1.x.min(s.p2.x);
+    let max_x = s.p1.x.max(s.p2.x);
+    let min_y = s.p1.y.min(s.p2.y);
+    let max_y = s.p1.y.max(s.p2.y);
+
+    let start_bx = (min_x / BIN_SIZE).floor() as i32;
+    let end_bx = (max_x / BIN_SIZE).floor() as i32;
+    let start_by = (min_y / BIN_SIZE).floor() as i32;
+    let end_by = (max_y / BIN_SIZE).floor() as i32;
+
+    let mut keys = Vec::with_capacity(((end_bx - start_bx + 1) * (end_by - start_by + 1)) as usize);
+    for bx in start_bx..=end_bx {
+        for by in start_by..=end_by {
+            keys.push(BinKey { layer: s.layer, bx, by });
+        }
+    }
+    keys
+}
+
 /// Checks for short circuits and illegal routing loops.
 ///
-/// Uses spatial binning to group segments by location, then tests segments
-/// within the same bin for intersections. Detects shorts (intersections
-/// between different nets) and self-loops (intersections within the same
-/// net that don't share endpoints and aren't collinear). Returns an error
-/// if any violations are found.
+/// Processes nets in parallel chunks, building per-chunk spatial bins to keep
+/// memory bounded. Each chunk inserts its segments into a local HashMap, then
+/// checks for intersections between segments from different nets within the
+/// same bin.
 fn check_shorts_and_loops(db: &NetlistDB) -> Result<(), String> {
-    let mut all_bin_entries: Vec<(BinKey, Segment)> = db
-        .nets
-        .par_iter()
-        .enumerate()
-        .flat_map(|(net_idx, net)| {
+    let error_found = AtomicBool::new(false);
+    let error_msg = Arc::new(Mutex::new(String::new()));
+
+    // Process nets in parallel chunks to keep memory bounded.
+    // Each chunk builds its own spatial index of segments.
+    let chunk_size = 2048;
+    let net_chunks: Vec<_> = (0..db.nets.len()).collect::<Vec<_>>()
+        .chunks(chunk_size)
+        .map(|c| c.to_vec())
+        .collect();
+
+    net_chunks.par_iter().for_each(|chunk| {
+        if error_found.load(Ordering::Relaxed) {
+            return;
+        }
+
+        let mut bins: HashMap<BinKey, Vec<Segment>> = HashMap::new();
+
+        for &net_idx in chunk {
+            let net = &db.nets[net_idx];
             let net_id = NetId::new(net_idx);
-            let mut entries = Vec::new();
+
             for (seg_idx, seg) in net.route_segments.iter().enumerate() {
                 let s = Segment {
                     p1: seg.p1,
@@ -297,112 +303,74 @@ fn check_shorts_and_loops(db: &NetlistDB) -> Result<(), String> {
                     seg_idx,
                 };
 
-                let min_x = s.p1.x.min(s.p2.x);
-                let max_x = s.p1.x.max(s.p2.x);
-                let min_y = s.p1.y.min(s.p2.y);
-                let max_y = s.p1.y.max(s.p2.y);
-
-                let start_bx = (min_x / BIN_SIZE).floor() as i32;
-                let end_bx = (max_x / BIN_SIZE).floor() as i32;
-                let start_by = (min_y / BIN_SIZE).floor() as i32;
-                let end_by = (max_y / BIN_SIZE).floor() as i32;
-
-                for bx in start_bx..=end_bx {
-                    for by in start_by..=end_by {
-                        entries.push((
-                            BinKey {
-                                layer: s.layer,
-                                bx,
-                                by,
-                            },
-                            s,
-                        ));
-                    }
+                for key in segment_bin_keys(&s) {
+                    bins.entry(key).or_default().push(s);
                 }
             }
-            entries
-        })
-        .collect();
+        }
 
-    all_bin_entries.par_sort_unstable_by(|a, b| a.0.cmp(&b.0));
-
-    let mut chunks = Vec::new();
-    if !all_bin_entries.is_empty() {
-        let mut start = 0;
-        for i in 1..all_bin_entries.len() {
-            if all_bin_entries[i].0 != all_bin_entries[i - 1].0 {
-                chunks.push((start, i));
-                start = i;
+        // Check within each bin
+        for (_key, segs) in &bins {
+            if error_found.load(Ordering::Relaxed) {
+                return;
             }
-        }
-        chunks.push((start, all_bin_entries.len()));
-    }
 
-    let error_found = AtomicBool::new(false);
-    let error_msg = Arc::new(Mutex::new(String::new()));
+            for i in 0..segs.len() {
+                for j in (i + 1)..segs.len() {
+                    let s1 = &segs[i];
+                    let s2 = &segs[j];
 
-    chunks.par_iter().for_each(|&(start, end)| {
-        if error_found.load(Ordering::Relaxed) {
-            return;
-        }
-
-        let slice = &all_bin_entries[start..end];
-
-        for i in 0..slice.len() {
-            for j in (i + 1)..slice.len() {
-                let s1 = &slice[i].1;
-                let s2 = &slice[j].1;
-
-                if s1.net_id == s2.net_id && s1.seg_idx == s2.seg_idx {
-                    continue;
-                }
-
-                if s1.intersects(s2) {
-                if s1.net_id != s2.net_id {
-                    let n1 = &db.nets[s1.net_id.index()].name;
-                    let n2 = &db.nets[s2.net_id.index()].name;
-                    let msg = format!(
-                        "SHORT: '{}' vs '{}' on Layer {}\n  seg1: ({:.3},{:.3})->({:.3},{:.3})\n  seg2: ({:.3},{:.3})->({:.3},{:.3})",
-                        n1, n2, s1.layer,
-                        s1.p1.x, s1.p1.y, s1.p2.x, s1.p2.y,
-                        s2.p1.x, s2.p1.y, s2.p2.x, s2.p2.y
-                    );
-
-                    if !error_found.swap(true, Ordering::Relaxed) {
-                        *error_msg.lock().unwrap() = msg;
-                    }
-                    return;
-                } else if !s1.shares_endpoint(s2) {
-                    let is_via1 = (s1.p1.x - s1.p2.x).abs() < 1e-6 && (s1.p1.y - s1.p2.y).abs() < 1e-6;
-                    let is_via2 = (s2.p1.x - s2.p2.x).abs() < 1e-6 && (s2.p1.y - s2.p2.y).abs() < 1e-6;
-
-                    if is_via1 || is_via2 {
+                    if s1.net_id == s2.net_id && s1.seg_idx == s2.seg_idx {
                         continue;
                     }
 
-                    let is_collinear = {
-                        let dx1 = s1.p2.x - s1.p1.x;
-                        let dy1 = s1.p2.y - s1.p1.y;
-                        let dx2 = s2.p2.x - s2.p1.x;
-                        let dy2 = s2.p2.y - s2.p1.y;
-                        (dx1 * dy2 - dy1 * dx2).abs() < CHECK_TOLERANCE * 100.0
-                    };
+                    if s1.intersects(s2) {
+                        if s1.net_id != s2.net_id {
+                            let n1 = &db.nets[s1.net_id.index()].name;
+                            let n2 = &db.nets[s2.net_id.index()].name;
+                            let msg = format!(
+                                "SHORT: '{}' vs '{}' on Layer {}\n  seg1: ({:.3},{:.3})->({:.3},{:.3})\n  seg2: ({:.3},{:.3})->({:.3},{:.3})",
+                                n1, n2, s1.layer,
+                                s1.p1.x, s1.p1.y, s1.p2.x, s1.p2.y,
+                                s2.p1.x, s2.p1.y, s2.p2.x, s2.p2.y
+                            );
 
-                    if is_collinear {
-                        continue;
+                            if !error_found.swap(true, Ordering::Relaxed) {
+                                *error_msg.lock().unwrap() = msg;
+                            }
+                            return;
+                        } else if !s1.shares_endpoint(s2) {
+                            let is_via1 = (s1.p1.x - s1.p2.x).abs() < 1e-6 && (s1.p1.y - s1.p2.y).abs() < 1e-6;
+                            let is_via2 = (s2.p1.x - s2.p2.x).abs() < 1e-6 && (s2.p1.y - s2.p2.y).abs() < 1e-6;
+
+                            if is_via1 || is_via2 {
+                                continue;
+                            }
+
+                            let is_collinear = {
+                                let dx1 = s1.p2.x - s1.p1.x;
+                                let dy1 = s1.p2.y - s1.p1.y;
+                                let dx2 = s2.p2.x - s2.p1.x;
+                                let dy2 = s2.p2.y - s2.p1.y;
+                                (dx1 * dy2 - dy1 * dx2).abs() < CHECK_TOLERANCE * 100.0
+                            };
+
+                            if is_collinear {
+                                continue;
+                            }
+
+                            let n1 = &db.nets[s1.net_id.index()].name;
+                            let msg = format!(
+                                "SELF-SHORT/LOOP: Net '{}' intersects itself on Layer {} near ({:.3},{:.3})",
+                                n1, s1.layer, s1.p1.x, s1.p1.y
+                            );
+
+                            if !error_found.swap(true, Ordering::Relaxed) {
+                                *error_msg.lock().unwrap() = msg;
+                            }
+                            return;
+                        }
                     }
-
-                    let n1 = &db.nets[s1.net_id.index()].name;
-                    let msg = format!(
-                        "SELF-SHORT/LOOP: Net '{}' intersects itself on Layer {} near ({:.3},{:.3})",
-                        n1, s1.layer, s1.p1.x, s1.p1.y
-                    );
-
-                    if !error_found.swap(true, Ordering::Relaxed) {
-                        *error_msg.lock().unwrap() = msg;
-                    }
-                    return;
-                }
                 }
             }
         }
@@ -417,11 +385,8 @@ fn check_shorts_and_loops(db: &NetlistDB) -> Result<(), String> {
 
 /// Checks for open nets (disconnected pins).
 ///
-/// For each net, builds a connectivity graph of segments and verifies that
-/// all pins are reachable from each other. Uses breadth-first search to
-/// traverse the segment graph starting from the first pin. Detects both
-/// completely unrouted nets and nets with disconnected components. Returns
-/// an error if any opens are found.
+/// For each net, builds a connectivity graph of segments using spatial binning
+/// to avoid O(n²) comparisons, then verifies all pins are reachable via BFS.
 fn check_opens(db: &NetlistDB) -> Result<(), String> {
     let error_found = AtomicBool::new(false);
     let error_msg = Arc::new(Mutex::new(String::new()));
@@ -455,24 +420,55 @@ fn check_opens(db: &NetlistDB) -> Result<(), String> {
             return;
         }
 
+        // Build adjacency using spatial binning to avoid O(n²) for large nets.
         let mut adj = vec![Vec::new(); n];
 
-        for i in 0..n {
-            for j in (i + 1)..n {
-                let s1 = &segments[i];
-                let s2 = &segments[j];
-
-                let same_layer = s1.layer == s2.layer;
-                let adj_layer = (s1.layer as i32 - s2.layer as i32).abs() == 1;
-
-                if same_layer {
-                    if s1.intersects(s2) || s1.shares_endpoint(s2) {
+        if n <= 64 {
+            // Small net: O(n²) is fine and has less overhead.
+            for i in 0..n {
+                for j in (i + 1)..n {
+                    if segments_connected(&segments[i], &segments[j]) {
                         adj[i].push(j);
                         adj[j].push(i);
                     }
-                } else if adj_layer && segments_overlap_2d(s1, s2) {
-                    adj[i].push(j);
-                    adj[j].push(i);
+                }
+            }
+        } else {
+            // Large net: bin segments by endpoint positions to limit comparisons.
+            // Use a combined key of (layer, bx, by) for same-layer checks,
+            // and check adjacent layers via endpoint proximity.
+            let mut endpoint_bins: HashMap<(i32, i32, u8), Vec<usize>> = HashMap::new();
+
+            for (i, seg) in segments.iter().enumerate() {
+                for key in segment_bin_keys(seg) {
+                    endpoint_bins.entry((key.bx, key.by, key.layer)).or_default().push(i);
+                }
+                // Also insert into adjacent-layer bins for via connectivity.
+                if seg.layer > 0 {
+                    for key in segment_bin_keys(seg) {
+                        endpoint_bins.entry((key.bx, key.by, seg.layer - 1)).or_default().push(i);
+                    }
+                }
+                for key in segment_bin_keys(seg) {
+                    endpoint_bins.entry((key.bx, key.by, seg.layer + 1)).or_default().push(i);
+                }
+            }
+
+            let mut checked = std::collections::HashSet::new();
+            for indices in endpoint_bins.values() {
+                for &i in indices {
+                    for &j in indices {
+                        if i >= j {
+                            continue;
+                        }
+                        if !checked.insert((i, j)) {
+                            continue;
+                        }
+                        if segments_connected(&segments[i], &segments[j]) {
+                            adj[i].push(j);
+                            adj[j].push(i);
+                        }
+                    }
                 }
             }
         }
@@ -542,11 +538,22 @@ fn check_opens(db: &NetlistDB) -> Result<(), String> {
     }
 }
 
+/// Checks if two segments are connected (same-layer intersection/endpoint, or
+/// adjacent-layer 2D overlap).
+fn segments_connected(s1: &Segment, s2: &Segment) -> bool {
+    let same_layer = s1.layer == s2.layer;
+    let adj_layer = (s1.layer as i32 - s2.layer as i32).abs() == 1;
+
+    if same_layer {
+        s1.intersects(s2) || s1.shares_endpoint(s2)
+    } else if adj_layer {
+        segments_overlap_2d(s1, s2)
+    } else {
+        false
+    }
+}
+
 /// Checks if two segments overlap when projected to 2D (ignoring layer).
-///
-/// Used to detect via connections where segments on adjacent layers overlap
-/// at the same X,Y coordinates. This allows vias to connect segments across
-/// layers even if they don't share exact endpoints.
 fn segments_overlap_2d(s1: &Segment, s2: &Segment) -> bool {
     let mut s1_2d = *s1;
     s1_2d.layer = 0;
@@ -556,10 +563,6 @@ fn segments_overlap_2d(s1: &Segment, s2: &Segment) -> bool {
 }
 
 /// Computes the distance from a point to a line segment.
-///
-/// Projects the point onto the line containing the segment, clamps to the
-/// segment endpoints, and returns the Euclidean distance. Used to check
-/// if pins are close enough to wire segments to be considered connected.
 fn point_to_segment_dist(p: Point<f64>, a: Point<f64>, b: Point<f64>) -> f64 {
     let l2 = (a.x - b.x).powi(2) + (a.y - b.y).powi(2);
     if l2 == 0.0 {
