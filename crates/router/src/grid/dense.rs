@@ -68,7 +68,7 @@ impl GCellGrid {
             } else {
                 needed
             };
-            log::info!(
+            log::debug!(
                 "Auto-scaling gcell_size: {:.2} -> {:.2} (die: {:.0}x{:.0})",
                 gcell_size, scaled, die_w, die_h
             );
@@ -109,7 +109,7 @@ impl GCellGrid {
         // Compute per-layer, per-edge capacities from track definitions
         grid.init_capacities(db);
 
-        log::info!(
+        log::debug!(
             "GCellGrid: {}x{} gcells ({:.2}um), {} layers",
             grid_w,
             grid_h,
@@ -131,7 +131,7 @@ impl GCellGrid {
                 } else {
                     0
                 };
-                log::info!(
+                log::debug!(
                     "  Layer {} ({}): dir={:?}, pitch={:.3}, h_cap={}, v_cap={}",
                     li,
                     layer.name,

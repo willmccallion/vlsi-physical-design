@@ -5,6 +5,12 @@
 //! benchmark generation, performance profiling, and visualization utilities.
 
 pub mod check;
+/// Structured CLI output with colored formatting.
+///
+/// Provides presentation functions for banners, section headers, stat rows,
+/// check marks, progress bars, and file-wrote lines. All output goes to stderr
+/// with automatic TTY color detection via `yansi`.
+pub mod ui;
 /// Configuration management for algorithm parameters.
 ///
 /// Defines the configuration structure that controls algorithm behavior across

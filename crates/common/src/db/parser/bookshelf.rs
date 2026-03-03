@@ -92,7 +92,7 @@ pub fn parse(db: &mut NetlistDB, aux_filename: &str) -> Result<()> {
         let width = pitch * 0.5;
 
         log::warn!("Bookshelf: No layers defined. Synthesizing 6 default layers.");
-        log::info!(
+        log::debug!(
             "Bookshelf: Detected StdCell Height = {:.2}. Setting Layer Pitch = {:.2}",
             std_height,
             pitch
@@ -116,7 +116,7 @@ pub fn parse(db: &mut NetlistDB, aux_filename: &str) -> Result<()> {
 /// and adds cell instances to the database. Terminal nodes are marked as
 /// fixed cells that cannot be moved by the placer.
 fn parse_nodes(db: &mut NetlistDB, filename: &str) -> Result<()> {
-    log::info!("Parsing Nodes: {}", filename);
+    log::debug!("Parsing Nodes: {}", filename);
     let file = File::open(filename)?;
     let reader = BufReader::new(file);
 
@@ -159,7 +159,7 @@ fn parse_nodes(db: &mut NetlistDB, filename: &str) -> Result<()> {
 /// swapping width and height for east/west orientations. Fixed placements
 /// are marked in the cell data to prevent movement during optimization.
 fn parse_pl(db: &mut NetlistDB, filename: &str) -> Result<()> {
-    log::info!("Parsing PL: {}", filename);
+    log::debug!("Parsing PL: {}", filename);
     let file = File::open(filename)?;
     let reader = BufReader::new(file);
 
@@ -211,7 +211,7 @@ fn parse_pl(db: &mut NetlistDB, filename: &str) -> Result<()> {
 /// to compute the die area bounds. The die area is inferred from the union
 /// of all row extents, providing the placement region for the design.
 fn parse_scl(db: &mut NetlistDB, filename: &str) -> Result<()> {
-    log::info!("Parsing SCL: {}", filename);
+    log::debug!("Parsing SCL: {}", filename);
     let file = File::open(filename)?;
     let reader = BufReader::new(file);
 
@@ -263,7 +263,7 @@ fn parse_scl(db: &mut NetlistDB, filename: &str) -> Result<()> {
 
     if min_x < max_x {
         db.die_area = Rect::new(Point::new(min_x, min_y), Point::new(max_x, max_y));
-        log::info!("Die Area inferred from SCL: {:?}", db.die_area);
+        log::debug!("Die Area inferred from SCL: {:?}", db.die_area);
     }
 
     Ok(())
@@ -277,7 +277,7 @@ fn parse_scl(db: &mut NetlistDB, filename: &str) -> Result<()> {
 /// assigned sequential names (n0, n1, ...) since the format does not
 /// provide explicit net names.
 fn parse_nets(db: &mut NetlistDB, filename: &str) -> Result<()> {
-    log::info!("Parsing Nets: {}", filename);
+    log::debug!("Parsing Nets: {}", filename);
     let file = File::open(filename)?;
     let reader = BufReader::new(file);
 

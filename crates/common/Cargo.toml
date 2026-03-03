@@ -16,3 +16,4 @@ rstar = "0.12"
 env_logger = "0.11"
 rayon = "1.8"
 dashmap = "5.5"
+yansi = { version = "1.0", features = ["detect-tty", "detect-env"] }

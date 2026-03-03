@@ -5,11 +5,11 @@ use crate::utils::conversion::GridConverter;
 use pare_common::db::core::NetlistDB;
 use pare_common::geom::coord::GridCoord;
 use pare_common::util::config::GlobalRoutingConfig;
+use pare_common::util::ui;
 use rand::seq::SliceRandom;
 use rand::thread_rng;
 use rayon::prelude::*;
 use std::collections::HashSet;
-use std::io::Write;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::Instant;
 
@@ -74,7 +74,7 @@ pub fn run(
     db: &NetlistDB,
     config: &GlobalRoutingConfig,
 ) -> Result<(Vec<HashSet<GridCoord>>, GridConverter), String> {
-    log::info!("Starting Global Routing...");
+    log::debug!("Starting Global Routing...");
 
     let bin_width = config.gcell_size as f64;
     let grid = GCellGrid::new(db, bin_width);
@@ -93,7 +93,7 @@ pub fn run(
     let history_increment = config.history_increment;
     let total_nets = db.nets.len();
 
-    log::info!("GR: Starting Initial Route for {} nets...", total_nets);
+    log::debug!("GR: Starting Initial Route for {} nets...", total_nets);
     let start_time = Instant::now();
 
     let batch_size = 500;
@@ -122,8 +122,7 @@ pub fn run(
                 let p = progress.fetch_add(1, Ordering::Relaxed) + 1;
 
                 if p.is_multiple_of(100) || p == total_nets {
-                    eprint!("\r\x1b[36m[GR Init] {}/{}\x1b[0m\x1b[K", p, total_nets);
-                    let _ = std::io::stderr().flush();
+                    ui::progress("[GR Init]", p, total_nets);
                 }
                 (net_id, path)
             })
@@ -134,11 +133,13 @@ pub fn run(
             net_paths[net_id] = path;
         }
     }
-    eprint!("\r\x1b[K");
-    log::info!("Initial Route: {:.2}s", start_time.elapsed().as_secs_f32());
+    ui::progress_clear();
+    ui::phase("Global Routing");
+    log::info!("Initial route: {:.2}s", start_time.elapsed().as_secs_f32());
 
     let mut last_overflow = usize::MAX;
     let mut stagnation_counter = 0;
+    let mut gr_table_printed = false;
 
     for iter in 0..config.max_iterations {
         let start = Instant::now();
@@ -146,8 +147,13 @@ pub fn run(
         let overflow = grid.total_overflow();
 
         if overflow == 0 {
-            log::info!("Global Routing Converged at iter {}!", iter);
+            ui::check(&format!("Global routing converged at iter {}", iter));
             break;
+        }
+
+        if !gr_table_printed {
+            ui::routing_table_header("GR");
+            gr_table_printed = true;
         }
 
         let improvement = last_overflow.saturating_sub(overflow);
@@ -205,13 +211,7 @@ pub fn run(
                 net_paths[net_id] = path;
 
                 if i % 50 == 0 || i == ripped - 1 {
-                    eprint!(
-                        "\r\x1b[36m[GR Iter {}] {}/{}\x1b[0m\x1b[K",
-                        iter,
-                        i + 1,
-                        ripped
-                    );
-                    let _ = std::io::stderr().flush();
+                    ui::progress(&format!("[GR Iter {}]", iter), i + 1, ripped);
                 }
             }
         } else {
@@ -232,11 +232,7 @@ pub fn run(
 
                         let p = progress.fetch_add(1, Ordering::Relaxed) + 1;
                         if p.is_multiple_of(100) || p == ripped {
-                            eprint!(
-                                "\r\x1b[36m[GR Iter {}] {}/{}\x1b[0m\x1b[K",
-                                iter, p, ripped
-                            );
-                            let _ = std::io::stderr().flush();
+                            ui::progress(&format!("[GR Iter {}]", iter), p, ripped);
                         }
                         (net_id, path)
                     })
@@ -248,19 +244,12 @@ pub fn run(
                 }
             }
         }
-        eprint!("\r\x1b[K");
+        ui::progress_clear();
 
-        log::info!(
-            "GR Iter {}: Overflow: {}, Ripped: {}, Penalty: {:.2}, Time: {}ms",
-            iter,
-            overflow,
-            ripped,
-            collision_penalty,
-            start.elapsed().as_millis()
-        );
+        ui::routing_iter("GR", iter, overflow, ripped, collision_penalty, start.elapsed().as_millis());
 
         if ripped == 0 {
-            log::info!("Global Routing Converged (Endpoint congestion only).");
+            ui::check("Global routing converged (endpoint congestion only)");
             break;
         }
 

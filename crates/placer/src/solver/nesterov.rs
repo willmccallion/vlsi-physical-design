@@ -8,7 +8,16 @@
 use crate::physics::PhysicsContext;
 use pare_common::db::core::NetlistDB;
 use pare_common::geom::point::Point;
+use pare_common::util::ui;
 use rand::Rng;
+
+/// Result returned by the placement optimizer.
+pub struct PlacementResult {
+    pub converged: bool,
+    pub iterations: usize,
+    pub final_overflow: f64,
+    pub final_wirelength: f64,
+}
 
 /// Parameters controlling the Nesterov optimizer's behavior.
 pub struct NesterovParams {
@@ -48,7 +57,7 @@ impl NesterovOptimizer {
         &mut self,
         db: &mut NetlistDB,
         physics: &mut PhysicsContext,
-    ) -> Result<(), String> {
+    ) -> Result<PlacementResult, String> {
         let n = db.positions.len();
         self.x_k.copy_from_slice(&db.positions);
 
@@ -141,7 +150,7 @@ impl NesterovOptimizer {
         let mut prev_avg_disp = 0.0;
 
         for k in 0..self.params.max_iterations {
-            let (wl_cost, density_cost, wl_grad_norm, density_grad_norm) =
+            let (wl_cost, _density_cost, wl_grad_norm, density_grad_norm) =
                 physics.compute_gradients_separate(
                     db,
                     &self.y_k,
@@ -218,32 +227,35 @@ impl NesterovOptimizer {
             }
 
             if k % 100 == 0 {
-                log::info!(
-                    "Iter {}: WL={:.0} Density={:.0} DensW={:.2e} Step={:.5} AvgMove={:.4} Overflow={:.3}",
-                    k, wl_cost, density_cost, density_weight, step_size, avg_disp, overflow_ratio,
-                );
+                ui::placement_iter(k, wl_cost, overflow_ratio, avg_disp, step_size);
             }
 
             // --- Instability detection ---
             // Sudden spike: movement explodes in a single step
             if k > 100 && avg_disp > prev_avg_disp * 5.0 && avg_disp > 2.0 {
-                log::info!(
+                log::debug!(
                     "Instability detected at iter {} (avg_disp={:.2}). Rolling back to best (overflow={:.4})",
                     k, avg_disp, best_overflow
                 );
                 Self::apply_clamping(db, &mut best_positions);
                 db.positions.copy_from_slice(&best_positions);
-                return Ok(());
+                return Ok(PlacementResult {
+                    converged: true, iterations: k,
+                    final_overflow: best_overflow, final_wirelength: wl_cost,
+                });
             }
             // Overflow regression: had a good solution but now diverging badly
             if k > 200 && best_overflow < 0.10 && overflow_ratio > 0.50 {
-                log::info!(
+                log::debug!(
                     "Divergence detected at iter {} (overflow={:.3}, best was {:.4}). Rolling back.",
                     k, overflow_ratio, best_overflow
                 );
                 Self::apply_clamping(db, &mut best_positions);
                 db.positions.copy_from_slice(&best_positions);
-                return Ok(());
+                return Ok(PlacementResult {
+                    converged: true, iterations: k,
+                    final_overflow: best_overflow, final_wirelength: wl_cost,
+                });
             }
             if k > 0 {
                 prev_avg_disp = avg_disp.max(0.01);
@@ -251,20 +263,26 @@ impl NesterovOptimizer {
 
             // --- Convergence ---
             if k > 200 && overflow_ratio < 0.10 && avg_disp < 0.1 {
-                log::info!(
+                log::debug!(
                     "Converged at iteration {}: overflow={:.4}, avg_disp={:.4}",
                     k, overflow_ratio, avg_disp
                 );
                 Self::apply_clamping(db, &mut self.x_k);
                 db.positions.copy_from_slice(&self.x_k);
-                return Ok(());
+                return Ok(PlacementResult {
+                    converged: true, iterations: k,
+                    final_overflow: overflow_ratio, final_wirelength: wl_cost,
+                });
             }
 
             if k > 500 && avg_disp < self.params.convergence_threshold {
-                log::info!("Converged: Cells stabilized at iteration {} (overflow={:.4})", k, overflow_ratio);
+                log::debug!("Converged: Cells stabilized at iteration {} (overflow={:.4})", k, overflow_ratio);
                 Self::apply_clamping(db, &mut self.x_k);
                 db.positions.copy_from_slice(&self.x_k);
-                return Ok(());
+                return Ok(PlacementResult {
+                    converged: true, iterations: k,
+                    final_overflow: overflow_ratio, final_wirelength: wl_cost,
+                });
             }
 
             // --- Nesterov update ---
@@ -308,7 +326,12 @@ impl NesterovOptimizer {
             "Placer reached max iterations. Using best solution (overflow={:.4}).",
             best_overflow
         );
-        Ok(())
+        Ok(PlacementResult {
+            converged: false,
+            iterations: self.params.max_iterations,
+            final_overflow: best_overflow,
+            final_wirelength: 0.0,
+        })
     }
 
     /// Clamps cell positions to ensure they remain within die boundaries.

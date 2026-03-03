@@ -9,6 +9,7 @@ use crate::db::core::NetlistDB;
 use crate::db::indices::NetId;
 use crate::geom::point::Point;
 use crate::geom::rect::Rect;
+use crate::util::ui;
 use rayon::prelude::*;
 use std::collections::VecDeque;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -27,7 +28,7 @@ const BIN_SIZE: f64 = 10.0;
 /// no two cells overlap. Uses parallel iteration for efficiency on large designs.
 /// Returns an error if any violations are detected, otherwise returns Ok(()).
 pub fn run_placement_check(db: &NetlistDB) -> Result<(), String> {
-    log::info!("Starting Placement Verification...");
+    log::debug!("Starting Placement Verification...");
     let valid = AtomicBool::new(true);
 
     db.cells.par_iter().enumerate().for_each(|(i, cell)| {
@@ -95,9 +96,10 @@ pub fn run_placement_check(db: &NetlistDB) -> Result<(), String> {
     }
 
     if valid.load(Ordering::Relaxed) {
-        log::info!("\x1b[32mPASS\x1b[0m: Placement is valid.");
+        ui::check("Placement is valid.");
         Ok(())
     } else {
+        ui::fail("Placement verification failed.");
         Err("Placement verification failed.".to_string())
     }
 }
@@ -110,7 +112,7 @@ pub fn run_placement_check(db: &NetlistDB) -> Result<(), String> {
 /// are found, otherwise returns Ok(()). This is the main verification entry point
 /// called after routing completes.
 pub fn run(db: &NetlistDB) -> Result<(), String> {
-    log::info!("Starting Design Verification (DRC/LVS) [High Precision Mode]");
+    log::debug!("Starting Design Verification (DRC/LVS)");
 
     let (shorts_result, opens_result) =
         rayon::join(|| check_shorts_and_loops(db), || check_opens(db));
@@ -120,32 +122,28 @@ pub fn run(db: &NetlistDB) -> Result<(), String> {
 
     match shorts_result {
         Err(e) => {
-            log::error!("\x1b[31mFAIL\x1b[0m: Short Circuits / Loops Detected");
+            ui::fail("Short Circuits / Loops Detected");
             log::error!("{}", e);
             msgs.push(e);
             valid = false;
         }
-        Ok(_) => log::info!("\x1b[32mPASS\x1b[0m: No Shorts or Illegal Loops found."),
+        Ok(_) => ui::check("DRC passed -- no shorts or illegal loops."),
     }
 
     match opens_result {
         Err(e) => {
-            log::error!("\x1b[31mFAIL\x1b[0m: Open Net (Disconnected) Detected");
+            ui::fail("Open Net (Disconnected) Detected");
             log::error!("{}", e);
             msgs.push(e);
             valid = false;
         }
-        Ok(_) => log::info!("\x1b[32mPASS\x1b[0m: All nets are fully connected."),
+        Ok(_) => ui::check("LVS passed -- all nets fully connected."),
     }
 
     if valid {
-        log::info!("\x1b[32mSUCCESS\x1b[0m: VALID CHIP");
         Ok(())
     } else {
-        log::error!(
-            "\x1b[31mFAILURE\x1b[0m: INVALID CHIP ({} Errors)",
-            msgs.len()
-        );
+        ui::fail(&format!("INVALID CHIP ({} Errors)", msgs.len()));
         Err(msgs.join("; "))
     }
 }

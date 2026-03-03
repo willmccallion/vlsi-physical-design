@@ -41,7 +41,7 @@ pub fn parse(db: &mut NetlistDB, filename: &str) -> Result<()> {
                         let val_str = parts[i + 1].trim_matches(';');
                         if let Ok(val) = val_str.parse::<f64>() {
                             def_units = val;
-                            log::info!("DEF Units updated to: {}", def_units);
+                            log::debug!("DEF Units updated to: {}", def_units);
                         }
                         break;
                     }

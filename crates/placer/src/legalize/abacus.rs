@@ -119,7 +119,7 @@ impl AbacusLegalizer {
 
         let padding_per_cell = raw_padding.min(2.0);
 
-        log::info!(
+        log::debug!(
             "Abacus: Util={:.2}%. Padding: {:.2} units/cell (Raw: {:.2})",
             utilization * 100.0,
             padding_per_cell,

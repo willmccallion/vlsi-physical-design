@@ -17,9 +17,9 @@ use pare_common::db::core::NetlistDB;
 use pare_common::geom::coord::GridCoord;
 use pare_common::geom::point::Point;
 use pare_common::util::config::DetailedRoutingConfig;
+use pare_common::util::ui;
 use rayon::prelude::*;
 use std::collections::{HashMap, HashSet};
-use std::io::Write;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::Instant;
 
@@ -102,7 +102,7 @@ pub fn run(
     guides: &[HashSet<GridCoord>],
     coarse_converter: &GridConverter,
 ) -> Result<(), String> {
-    log::info!("Starting Detailed Routing (GCell-based)...");
+    log::debug!("Starting Detailed Routing (GCell-based)...");
 
     let gcell_size = config.gcell_size;
     let mut grid = GCellGrid::new(db, gcell_size);
@@ -149,7 +149,7 @@ pub fn run(
         ((max_x - min_x) + (max_y - min_y)) as i64
     });
 
-    log::info!("DR: Sequential Initial Route ({} nets)...", total_nets);
+    log::debug!("DR: Sequential Initial Route ({} nets)...", total_nets);
     let start_time = Instant::now();
 
     let coarse_max = coarse_converter.to_grid(
@@ -198,17 +198,13 @@ pub fn run(
         }
 
         if (progress + 1) % 100 == 0 || progress + 1 == total_nets {
-            eprint!(
-                "\r\x1b[36m[DR Init] {}/{}\x1b[0m\x1b[K",
-                progress + 1,
-                total_nets
-            );
-            let _ = std::io::stderr().flush();
+            ui::progress("[DR Init]", progress + 1, total_nets);
         }
     }
-    eprint!("\r\x1b[K");
+    ui::progress_clear();
 
-    log::info!("Initial Route: {:.2}s", start_time.elapsed().as_secs_f32());
+    ui::phase("Detailed Routing");
+    log::info!("Initial route: {:.2}s", start_time.elapsed().as_secs_f32());
 
     // Debug: per-layer edge overflow breakdown
     log_layer_stats(&grid, db, layers);
@@ -218,7 +214,11 @@ pub fn run(
         .enumerate()
         .filter(|(id, t)| t.is_empty() && db.nets[*id].pins.len() >= 2)
         .count();
-    log::info!("Failed nets (no path found): {}", failed_init);
+    if failed_init > 0 {
+        log::info!("Failed nets (no path found): {}", failed_init);
+    }
+
+    ui::routing_table_header("DR");
 
     let mut collision_penalty = init_penalty;
     let history_increment = config.history_increment;
@@ -239,7 +239,7 @@ pub fn run(
         overflow += failed_nets.len();
 
         if overflow == 0 {
-            log::info!("Converged at iter {}!", iter);
+            ui::check(&format!("Detailed routing converged at iter {}", iter));
             break;
         }
 
@@ -484,11 +484,7 @@ pub fn run(
 
                         let p = progress.fetch_add(1, Ordering::Relaxed) + 1;
                         if p.is_multiple_of(100) || p == total_ripped {
-                            eprint!(
-                                "\r\x1b[36m[DR Iter {}] {}/{}\x1b[0m\x1b[K",
-                                iter, p, total_ripped
-                            );
-                            let _ = std::io::stderr().flush();
+                            ui::progress(&format!("[DR Iter {}]", iter), p, total_ripped);
                         }
 
                         (net_id, res)
@@ -506,29 +502,14 @@ pub fn run(
             }
             candidates = remaining;
         }
-        eprint!("\r\x1b[K");
+        ui::progress_clear();
 
         // Per-layer breakdown periodically
         if iter % 5 == 0 || iter < 3 {
             log_layer_stats_compact(&grid, db, layers);
-            log::info!(
-                "Iter {}: Overflow: {}, Ripped: {}, Pen: {:.1}, Time: {}ms",
-                iter,
-                overflow,
-                nets_vec.len(),
-                collision_penalty,
-                start.elapsed().as_millis(),
-            );
-        } else {
-            log::info!(
-                "Iter {}: Overflow: {}, Ripped: {}, Pen: {:.1}, Time: {}ms",
-                iter,
-                overflow,
-                nets_vec.len(),
-                collision_penalty,
-                start.elapsed().as_millis()
-            );
         }
+
+        ui::routing_iter("DR", iter, overflow, nets_vec.len(), collision_penalty, start.elapsed().as_millis());
 
         if nets_vec.is_empty() {
             break;
@@ -632,7 +613,7 @@ fn log_layer_stats(grid: &GCellGrid, db: &NetlistDB, layers: u8) {
             } else {
                 "?"
             };
-            log::info!(
+            log::debug!(
                 "  Layer {} ({}): h_overflow={}, v_overflow={}, h_used={}/{}, v_used={}/{}",
                 z,
                 name,
@@ -691,6 +672,6 @@ fn log_layer_stats_compact(grid: &GCellGrid, db: &NetlistDB, layers: u8) {
         }
     }
     if !info.is_empty() {
-        log::info!("  Layers:{}", info);
+        log::debug!("  Layers:{}", info);
     }
 }

@@ -1,4 +1,4 @@
-//! PARE — Placement And Routing Engine.
+//! PARE -- Placement And Routing Engine.
 //!
 //! This module provides the entry point for PARE, orchestrating
 //! the placement and routing workflows. It handles configuration loading,
@@ -9,15 +9,16 @@ use clap::{Parser, Subcommand};
 use pare_common::db::core::NetlistDB;
 use pare_common::geom::point::Point;
 use pare_common::util::config::Config;
-use pare_common::util::{check, generator, logger, visualization};
+use pare_common::util::{check, generator, logger, ui, visualization};
 use pare_placer::physics::PhysicsContext;
 use pare_placer::solver::nesterov::{NesterovOptimizer, NesterovParams};
 use std::fs::File;
 use std::io::{BufRead, BufReader};
 use std::path::{Path, PathBuf};
+use std::time::Instant;
 
 #[derive(Parser)]
-#[command(author, version, about = "PARE — Placement And Routing Engine", long_about = None)]
+#[command(author, version, about = "PARE -- Placement And Routing Engine", long_about = None)]
 struct Args {
     #[command(subcommand)]
     command: Commands,
@@ -57,7 +58,7 @@ fn load_config(path: &Path) -> anyhow::Result<Config> {
     if !path.exists() {
         return Err(anyhow::anyhow!("Config file not found: {:?}", path));
     }
-    log::info!("Loading configuration from {:?}", path);
+    ui::header("Config", &path.display().to_string());
     let config_str = std::fs::read_to_string(path)
         .map_err(|e| anyhow::anyhow!("Failed to read config file: {}", e))?;
     toml::from_str(&config_str)
@@ -67,6 +68,9 @@ fn load_config(path: &Path) -> anyhow::Result<Config> {
 fn main() -> anyhow::Result<()> {
     logger::init();
     let args = Args::parse();
+    let start_time = Instant::now();
+
+    ui::banner();
 
     match args.command {
         Commands::Generate {
@@ -89,14 +93,12 @@ fn main() -> anyhow::Result<()> {
             {
                 std::fs::create_dir_all(parent)?;
             }
-            log::info!(
-                "Generating random benchmark (Cells: {}, Nets: {}, Util: {:.0}%)...",
-                cells,
-                nets,
-                safe_util * 100.0
-            );
+            ui::header("Generate", &format!(
+                "Cells: {}, Nets: {}, Util: {:.0}%",
+                cells, nets, safe_util * 100.0
+            ));
             generator::generate_random_def(&output, cells, nets, safe_util)?;
-            log::info!("Generated: {}", output);
+            ui::wrote(&output);
         }
         Commands::Place { ref config } => {
             let config = load_config(config)?;
@@ -138,15 +140,11 @@ fn main() -> anyhow::Result<()> {
         }
     }
 
+    ui::done(start_time.elapsed().as_secs_f64());
     Ok(())
 }
 
 /// Validates that all LEF library files specified in the configuration exist.
-///
-/// Checks each LEF file path in the configuration's input section. If the
-/// configuration uses Bookshelf format (indicated by a non-empty aux_file),
-/// this validation is skipped since Bookshelf does not require LEF files.
-/// Returns an error if any required LEF file is missing from the filesystem.
 fn validate_lef_paths(config: &Config) -> anyhow::Result<()> {
     if config.input.bookshelf_aux_file.is_some() {
         return Ok(());
@@ -160,11 +158,6 @@ fn validate_lef_paths(config: &Config) -> anyhow::Result<()> {
 }
 
 /// Validates that all required input files for placement exist.
-///
-/// For Bookshelf format, checks that the AUX file exists. For LEF/DEF format,
-/// validates both the LEF library files and the DEF netlist file. This
-/// function is called before placement to ensure all inputs are available,
-/// preventing runtime failures during parsing.
 fn validate_input_paths(config: &Config) -> anyhow::Result<()> {
     if let Some(aux) = &config.input.bookshelf_aux_file {
         if !Path::new(aux).exists() {
@@ -184,32 +177,19 @@ fn validate_input_paths(config: &Config) -> anyhow::Result<()> {
 }
 
 /// Creates the parent directory for an output file path if it does not exist.
-///
-/// Extracts the directory component from the given file path and creates
-/// all necessary parent directories using `create_dir_all`. This ensures
-/// that output files can be written without filesystem errors. If the path
-/// has no parent directory or the parent is empty, no action is taken.
 fn prepare_output_dir(path_str: &str) -> anyhow::Result<()> {
     if let Some(parent) = Path::new(path_str).parent()
         && !parent.exists()
         && !parent.as_os_str().is_empty()
     {
-        log::info!("Creating output directory: {:?}", parent);
+        log::debug!("Creating output directory: {:?}", parent);
         std::fs::create_dir_all(parent)?;
     }
     Ok(())
 }
 
 /// Distributes I/O pins uniformly around the die perimeter.
-///
-/// Locates the virtual IO cell in the database and places all its pins
-/// at evenly spaced intervals along the die boundary, traversing clockwise
-/// from the bottom-left corner. This ensures I/O pins are accessible
-/// from the chip edges for bonding and package connections. The spacing
-/// is calculated to distribute pins evenly across the total perimeter length.
 fn place_io_pins(db: &mut NetlistDB) {
-    log::info!("Running IO Placement...");
-
     let io_cell_id = match db.cell_name_map.get("IO_VIRTUAL_CELL") {
         Some(&id) => id,
         None => return,
@@ -255,39 +235,36 @@ fn place_io_pins(db: &mut NetlistDB) {
 
         current_dist += step;
     }
-    log::info!("Placed {} IO pins around the perimeter.", num_pins);
+    log::debug!("Placed {} IO pins around the perimeter.", num_pins);
 }
 
 /// Executes the complete placement workflow from netlist parsing to legalization.
-///
-/// Loads the input netlist (either Bookshelf or LEF/DEF format), places I/O pins,
-/// computes design utilization, initializes the physics-based placement engine
-/// with the configured bin grid, runs the Nesterov-accelerated optimizer to
-/// minimize wirelength and density violations, legalizes the result using
-/// Abacus, verifies placement correctness, and writes the placed DEF output.
-/// Returns an error if placement fails or verification detects violations.
 fn run_placement(config: &Config) -> anyhow::Result<()> {
     let mut db = NetlistDB::new();
 
     if let Some(aux_path) = &config.input.bookshelf_aux_file {
-        log::info!("Parsing Bookshelf AUX: {}", aux_path);
+        ui::header("Input", aux_path);
         pare_common::db::parser::bookshelf::parse(&mut db, aux_path)
             .map_err(|e| anyhow::anyhow!("Invalid Bookshelf syntax in '{}': {}", aux_path, e))?;
     } else {
         if let Some(lef_path) = config.input.lef_files.first() {
-            log::info!("Parsing LEF: {}", lef_path);
+            ui::header("Input", lef_path);
             pare_common::db::parser::lef::parse(&mut db, lef_path)
                 .map_err(|e| anyhow::anyhow!("Invalid LEF syntax in '{}': {}", lef_path, e))?;
         }
 
-        log::info!("Parsing DEF: {}", config.input.def_file);
+        ui::header("Input", &config.input.def_file);
         pare_common::db::parser::def::parse(&mut db, &config.input.def_file).map_err(|e| {
             anyhow::anyhow!("Invalid DEF syntax in '{}': {}", config.input.def_file, e)
         })?;
     }
 
+    ui::header("Output", &config.input.output_def);
+
     place_io_pins(&mut db);
 
+    let movable_cells = db.cells.iter().filter(|c| !c.is_fixed).count();
+    let num_nets = db.num_nets();
     let total_cell_area: f64 = db
         .cells
         .iter()
@@ -297,46 +274,24 @@ fn run_placement(config: &Config) -> anyhow::Result<()> {
     let die_area = db.die_area.width() * db.die_area.height();
     let utilization = total_cell_area / die_area;
 
-    log::info!("Design Utilization: {:.2}%", utilization * 100.0);
-
     // Auto-detect placement parameters from design properties
     let die_diag = (db.die_area.width().powi(2) + db.die_area.height().powi(2)).sqrt();
 
     let wa_gamma = config.global_placement.wa_gamma.unwrap_or_else(|| {
-        let auto = die_diag * 1.5;
-        log::info!("Auto-detected wa_gamma = {:.1} (die_diagonal * 1.5)", auto);
-        auto
+        die_diag * 1.5
     });
 
     let bin_dimension = config.global_placement.bin_dimension.unwrap_or_else(|| {
-        // Use sqrt(movable_cells) as base, clamped to [64, 512].
-        // This ensures each bin covers several cells on average, giving
-        // meaningful density gradients. Matches DREAMPlace/ePlace heuristics.
         let movable = db.cells.iter().filter(|c| !c.is_fixed).count();
-        let auto = ((movable as f64).sqrt().ceil() as usize).next_power_of_two().clamp(64, 512);
-        let die_max_dim = db.die_area.width().max(db.die_area.height());
-        log::info!(
-            "Auto-detected bin_dimension = {} (bin_size ≈ {:.1}, {} movable cells)",
-            auto,
-            die_max_dim / auto as f64,
-            movable
-        );
-        auto
+        ((movable as f64).sqrt().ceil() as usize).next_power_of_two().clamp(64, 512)
     });
 
     let target_density = config.global_placement.target_density.unwrap_or_else(|| {
-        let auto = (utilization + 0.05).max(0.80);
-        log::info!("Auto-detected target_density = {:.2}", auto);
-        auto
+        (utilization + 0.05).max(0.80)
     });
 
-    // Auto-detect initial learning rate from design scale.
-    // Larger designs (bigger die, bigger cells) need larger steps to move
-    // cells meaningfully. Scale LR so that `step * typical_gradient ≈ cell_height`.
     let initial_learning_rate =
         config.global_placement.initial_learning_rate.unwrap_or_else(|| {
-            // Use median cell height as reference scale.
-            // A step should move cells ~1% of the reference height initially.
             let mut heights: Vec<f64> = db
                 .cells
                 .iter()
@@ -349,19 +304,26 @@ fn run_placement(config: &Config) -> anyhow::Result<()> {
             } else {
                 heights[heights.len() / 2]
             };
-            // Scale: for ibm05 (height=16), LR≈0.01; for ibm01 (height=504), LR≈0.30
-            let auto = (median_height * 0.0006).clamp(0.005, 1.0);
-            log::info!(
-                "Auto-detected initial_learning_rate = {:.4} (median_cell_height = {:.1})",
-                auto,
-                median_height
-            );
-            auto
+            (median_height * 0.0006).clamp(0.005, 1.0)
         });
 
     let electro_force = config.global_placement.electro_force_multiplier;
 
-    log::info!("Starting Global Placement...");
+    // --- Placement section ---
+    ui::section("Placement");
+    ui::stat_row(
+        "Cells:", &format!("{}", movable_cells),
+        "Nets:", &format!("{}", num_nets),
+    );
+    ui::stat_row(
+        "Utilization:", &format!("{:.2}%", utilization * 100.0),
+        "Target Density:", &format!("{:.2}", target_density),
+    );
+    ui::stat_row(
+        "Bin Grid:", &format!("{}x{}", bin_dimension, bin_dimension),
+        "WA Gamma:", &format!("{:.1}", wa_gamma),
+    );
+
     let mut physics = PhysicsContext::new(bin_dimension, bin_dimension);
 
     let params = NesterovParams {
@@ -374,45 +336,59 @@ fn run_placement(config: &Config) -> anyhow::Result<()> {
     };
     let mut solver = NesterovOptimizer::new(params, db.num_cells());
 
-    solver
+    ui::placement_table_header();
+
+    let result = solver
         .optimize(&mut db, &mut physics)
         .map_err(|e| anyhow::anyhow!(e))?;
+
+    eprintln!();
+    if result.converged {
+        ui::check(&format!(
+            "Converged at iter {} (overflow={:.4}, WL={:.0})",
+            result.iterations, result.final_overflow, result.final_wirelength
+        ));
+    } else {
+        log::warn!(
+            "Did not converge after {} iterations (overflow={:.4})",
+            result.iterations, result.final_overflow
+        );
+    }
 
     let output_dir = Path::new(&config.input.output_def)
         .parent()
         .unwrap_or(Path::new("."));
 
-    log::info!("Generating nesterov visualization");
-    let nesterov_png = output_dir.join("nesterov_placer.png");
-    visualization::draw_placement(&db, nesterov_png.to_str().unwrap(), 1000, 1000);
-
-    log::info!("Starting Legalization...");
+    // --- Legalization ---
+    ui::phase("Legalization");
     let legalizer = pare_placer::legalize::abacus::AbacusLegalizer::new();
     legalizer.legalize(&mut db);
+    ui::check(&format!("Legalized {} cells", movable_cells));
 
+    // --- Placement Verification ---
     if let Err(e) = check::run_placement_check(&db) {
         return Err(anyhow::anyhow!(e));
     }
 
-    log::info!("Generating placement visualization...");
+    // --- Output ---
+    ui::phase("Output");
+    let nesterov_png = output_dir.join("nesterov_placer.png");
+    visualization::draw_placement(&db, nesterov_png.to_str().unwrap(), 1000, 1000);
+    ui::wrote(nesterov_png.to_str().unwrap());
+
     let placed_png = output_dir.join("placed.png");
     visualization::draw_placement(&db, placed_png.to_str().unwrap(), 1000, 1000);
+    ui::wrote(placed_png.to_str().unwrap());
 
-    log::info!("Writing placed DEF to {}", config.input.output_def);
     save_def(&db, &config.input.output_def)?;
+    ui::wrote(&config.input.output_def);
 
     Ok(())
 }
 
 /// Preloads cell geometry information from a Bookshelf nodes file.
-///
-/// Parses the AUX file to locate the associated .nodes file, then reads
-/// the node definitions to extract width and height for each cell type.
-/// This geometry is stored in the database's macro_sizes map before the
-/// main Bookshelf parser runs, ensuring that cell dimensions are available
-/// when the DEF parser encounters references to these library cells.
 fn preload_bookshelf_geometry(db: &mut NetlistDB, aux_path: &str) -> anyhow::Result<()> {
-    log::info!("Preloading Bookshelf Geometry from AUX: {}", aux_path);
+    log::debug!("Preloading Bookshelf Geometry from AUX: {}", aux_path);
     let path = Path::new(aux_path);
     let parent = path.parent().unwrap_or(Path::new("."));
     let file = File::open(path)?;
@@ -440,7 +416,7 @@ fn preload_bookshelf_geometry(db: &mut NetlistDB, aux_path: &str) -> anyhow::Res
     }
 
     let nodes_path = parent.join(&nodes_file);
-    log::info!("Reading Nodes: {:?}", nodes_path);
+    log::debug!("Reading Nodes: {:?}", nodes_path);
     let nfile = File::open(nodes_path)?;
     let nreader = BufReader::new(nfile);
 
@@ -470,13 +446,6 @@ fn preload_bookshelf_geometry(db: &mut NetlistDB, aux_path: &str) -> anyhow::Res
 }
 
 /// Executes the complete routing workflow from placed netlist to routed design.
-///
-/// Loads the placed DEF file, synthesizes routing layers if missing (for Bookshelf
-/// or designs without LEF), infers routing pitch from standard cell height,
-/// performs global routing to generate coarse guides, executes detailed routing
-/// with rip-up and reroute to resolve congestion, verifies routing correctness
-/// (DRC/LVS), and writes the routed DEF output with wire segments. Returns an
-/// error if routing fails or verification detects shorts or opens.
 fn run_routing(config: &Config) -> anyhow::Result<()> {
     let mut db = NetlistDB::new();
 
@@ -490,18 +459,18 @@ fn run_routing(config: &Config) -> anyhow::Result<()> {
         && let Some(lef_path) = config.input.lef_files.first()
         && Path::new(lef_path).exists()
     {
-        log::info!("Parsing LEF: {}", lef_path);
+        log::debug!("Parsing LEF: {}", lef_path);
         pare_common::db::parser::lef::parse(&mut db, lef_path)
             .map_err(|e| anyhow::anyhow!("Invalid LEF syntax in '{}': {}", lef_path, e))?;
     }
 
     let input_def = &config.input.output_def;
-    log::info!("Parsing Placed DEF: {}", input_def);
+    log::debug!("Parsing Placed DEF: {}", input_def);
     pare_common::db::parser::def::parse(&mut db, input_def)
         .map_err(|e| anyhow::anyhow!("Invalid Placed DEF syntax in '{}': {}", input_def, e))?;
 
     if is_bookshelf || db.layers.is_empty() {
-        log::info!("Bookshelf/No-LEF: Calculating routing pitch from cell geometry...");
+        log::debug!("Bookshelf/No-LEF: Calculating routing pitch from cell geometry...");
 
         let mut height_counts = std::collections::HashMap::new();
         for cell in &db.cells {
@@ -521,11 +490,8 @@ fn run_routing(config: &Config) -> anyhow::Result<()> {
         let width = pitch * 0.5;
 
         log::warn!(
-            "Layer data missing! Synthesizing default layers based on Cell Height ({:.2}).",
-            std_height
-        );
-        log::info!(
-            "Inferred Pitch = {:.2} (Height / 16.0). Adding 6 Layers (M1-M6).",
+            "Layer data missing! Synthesizing default layers (Cell Height={:.2}, Pitch={:.2}).",
+            std_height,
             pitch
         );
 
@@ -545,39 +511,40 @@ fn run_routing(config: &Config) -> anyhow::Result<()> {
         return Err(anyhow::anyhow!("No layers defined! Cannot route."));
     }
 
-    log::info!("Starting Routing...");
+    ui::section("Routing");
+    ui::stat_row(
+        "Nets:", &format!("{}", db.num_nets()),
+        "Layers:", &format!("{}", db.layers.len()),
+    );
 
     pare_router::route(&mut db, config).map_err(|e| anyhow::anyhow!(e))?;
 
+    // --- Verification ---
+    ui::phase("Verification");
+    check::run(&db).map_err(|e| anyhow::anyhow!("Verification Failed: {}", e))?;
+
+    // --- Output ---
+    ui::phase("Output");
     let output_dir = Path::new(&config.input.output_def)
         .parent()
         .unwrap_or(Path::new("."));
 
-    log::info!("Generating routed visualization...");
     let routed_png = output_dir.join("routed.png");
     visualization::draw_routed_design(&db, routed_png.to_str().unwrap(), 2000, 2000);
-
-    check::run(&db).map_err(|e| anyhow::anyhow!("Verification Failed: {}", e))?;
+    ui::wrote(routed_png.to_str().unwrap());
 
     let input_path = Path::new(&config.input.output_def);
     let parent = input_path.parent().unwrap_or(Path::new("."));
     let routed_filename = "routed.def";
     let output_path = parent.join(routed_filename);
 
-    log::info!("Writing routed DEF to {:?}", output_path);
     save_def(&db, output_path.to_str().unwrap())?;
+    ui::wrote(output_path.to_str().unwrap());
 
     Ok(())
 }
 
 /// Writes the netlist database to a DEF file in standard format.
-///
-/// Serializes all design data including die area, component placements,
-/// I/O pin locations, net connectivity, and routing segments. Converts
-/// internal floating-point coordinates to integer microns using the
-/// standard DEF units (1000 units per micron). Handles special cases
-/// such as virtual IO cells, via generation for layer transitions, and
-/// segment compression for degenerate wire segments that represent vias.
 fn save_def(db: &NetlistDB, filename: &str) -> std::io::Result<()> {
     use std::io::Write;
     let mut file = std::fs::File::create(filename)?;
