@@ -27,5 +27,5 @@ stagnation_threshold = 30
 ripup_radius = 3
 
 [input]
-bookshelf_aux_file = "inputs/ibm05/ibm05.aux"
-output_def = "output/ibm05/placed.def"
+bookshelf_aux_file = "inputs/ibm13/ibm13.aux"
+output_def = "output/ibm13/placed.def"

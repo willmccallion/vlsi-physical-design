@@ -31,6 +31,6 @@ stagnation_threshold = 30
 ripup_radius = 3
 
 [input]
-lef_files = ["inputs/benchmarks/Nangate45.lef"]
-def_file = "inputs/benchmarks/aes.def"
-output_def = "output/aes_placed.def"
+lef_files = ["inputs/aes/Nangate45.lef"]
+def_file = "inputs/aes/aes.def"
+output_def = "output/aes/placed.def"

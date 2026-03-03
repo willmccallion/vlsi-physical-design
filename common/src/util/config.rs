@@ -345,17 +345,14 @@ fn default_dr_gcell_size() -> f64 {
     2.0
 }
 
-/// Default LEF file paths (single file: "inputs/simple.lef").
 fn default_lef_files() -> Vec<String> {
-    vec!["inputs/simple.lef".to_string()]
+    vec![]
 }
 
-/// Default input DEF file path ("inputs/simple.def").
 fn default_def_file() -> String {
-    "inputs/simple.def".to_string()
+    String::new()
 }
 
-/// Default output DEF file path for placed design ("output/placed.def").
 fn default_output_def() -> String {
     "output/placed.def".to_string()
 }

@@ -16,100 +16,59 @@ use std::fs::File;
 use std::io::{BufRead, BufReader};
 use std::path::{Path, PathBuf};
 
-/// Command-line argument structure parsed from the user's invocation.
-///
-/// Contains the configuration file path and an optional subcommand that
-/// determines which EDA operation to execute (placement, routing, or both).
 #[derive(Parser)]
 #[command(author, version, about = "PARE — Placement And Routing Engine", long_about = None)]
 struct Args {
-    /// Path to the TOML configuration file containing algorithm parameters.
-    ///
-    /// If the file does not exist, the tool falls back to internal defaults
-    /// for all configuration sections.
-    #[arg(short, long, value_name = "FILE", default_value = "config.toml")]
-    config: PathBuf,
-
-    /// Subcommand specifying the EDA operation to perform.
     #[command(subcommand)]
-    command: Option<Commands>,
+    command: Commands,
 }
 
-/// Enumeration of available EDA operations that can be executed.
-///
-/// Each variant represents a distinct workflow: placement-only, routing-only,
-/// full flow (placement then routing), or benchmark generation for testing.
 #[derive(Subcommand)]
 enum Commands {
-    /// Execute global placement and legalization only.
-    ///
-    /// Reads the input netlist, performs analytical placement using the
-    /// Nesterov-accelerated gradient descent solver, legalizes the result,
-    /// and writes the placed DEF file. Does not perform routing.
-    Place,
-    /// Execute detailed routing only.
-    ///
-    /// Requires a pre-placed DEF file from a previous placement run.
-    /// Performs global routing to generate guides, then detailed routing
-    /// to produce the final routed design with wire segments.
-    Route,
-    /// Execute the complete EDA flow: placement followed by routing.
-    ///
-    /// This is the default command if no subcommand is specified. It
-    /// chains the placement and routing operations sequentially, with
-    /// the placed DEF serving as input to the routing stage.
-    Flow,
-    /// Generate a synthetic benchmark netlist for testing and evaluation.
-    ///
-    /// Creates a random DEF file with the specified number of cells and nets,
-    /// distributed to achieve the target utilization ratio. The generated
-    /// design uses a chain topology connecting cells in sequence.
+    /// Run placement only.
+    Place {
+        /// TOML configuration file.
+        config: PathBuf,
+    },
+    /// Run routing only (requires a prior placement run).
+    Route {
+        /// TOML configuration file.
+        config: PathBuf,
+    },
+    /// Run the full placement + routing flow.
+    Flow {
+        /// TOML configuration file.
+        config: PathBuf,
+    },
+    /// Generate a synthetic benchmark netlist.
     Generate {
-        /// Number of standard cells to generate in the benchmark.
         #[arg(long, default_value_t = 1000)]
         cells: usize,
-        /// Number of nets to generate in the benchmark.
         #[arg(long, default_value_t = 1000)]
         nets: usize,
-        /// Target utilization ratio (0.0 to 1.0) for cell area versus die area.
-        ///
-        /// The tool automatically clamps this value to a safe range (0.05 to 0.95)
-        /// to prevent degenerate designs that cannot be placed or routed.
         #[arg(long, default_value_t = 0.50)]
         utilization: f64,
-        /// Output file path for the generated DEF file.
         #[arg(long, default_value = "inputs/random.def")]
         output: String,
     },
 }
 
-/// Main entry point for the EDA toolchain executable.
-///
-/// Initializes logging, parses command-line arguments, loads configuration
-/// from TOML (or uses defaults), and dispatches to the appropriate workflow
-/// handler based on the selected command. Returns an error if any critical
-/// operation fails, causing the process to exit with a non-zero status code.
+fn load_config(path: &Path) -> anyhow::Result<Config> {
+    if !path.exists() {
+        return Err(anyhow::anyhow!("Config file not found: {:?}", path));
+    }
+    log::info!("Loading configuration from {:?}", path);
+    let config_str = std::fs::read_to_string(path)
+        .map_err(|e| anyhow::anyhow!("Failed to read config file: {}", e))?;
+    toml::from_str(&config_str)
+        .map_err(|e| anyhow::anyhow!("Failed to parse config TOML: {}", e))
+}
+
 fn main() -> anyhow::Result<()> {
     logger::init();
     let args = Args::parse();
 
-    let config = if args.config.exists() {
-        log::info!("Loading configuration from {:?}", args.config);
-        let config_str = std::fs::read_to_string(&args.config)
-            .map_err(|e| anyhow::anyhow!("Failed to read config file: {}", e))?;
-        toml::from_str(&config_str)
-            .map_err(|e| anyhow::anyhow!("Failed to parse config TOML: {}", e))?
-    } else {
-        log::warn!(
-            "Configuration file {:?} not found. Using internal defaults.",
-            args.config
-        );
-        Config::default()
-    };
-
-    let command = args.command.unwrap_or(Commands::Flow);
-
-    match command {
+    match args.command {
         Commands::Generate {
             cells,
             nets,
@@ -139,7 +98,8 @@ fn main() -> anyhow::Result<()> {
             generator::generate_random_def(&output, cells, nets, safe_util)?;
             log::info!("Generated: {}", output);
         }
-        Commands::Place => {
+        Commands::Place { ref config } => {
+            let config = load_config(config)?;
             validate_input_paths(&config)?;
             prepare_output_dir(&config.input.output_def)?;
 
@@ -147,7 +107,8 @@ fn main() -> anyhow::Result<()> {
                 std::process::exit(1);
             }
         }
-        Commands::Route => {
+        Commands::Route { ref config } => {
+            let config = load_config(config)?;
             if config.input.bookshelf_aux_file.is_none() {
                 validate_lef_paths(&config)?;
             }
@@ -162,7 +123,8 @@ fn main() -> anyhow::Result<()> {
                 std::process::exit(1);
             }
         }
-        Commands::Flow => {
+        Commands::Flow { ref config } => {
+            let config = load_config(config)?;
             validate_input_paths(&config)?;
             prepare_output_dir(&config.input.output_def)?;
 
@@ -416,8 +378,13 @@ fn run_placement(config: &Config) -> anyhow::Result<()> {
         .optimize(&mut db, &mut physics)
         .map_err(|e| anyhow::anyhow!(e))?;
 
+    let output_dir = Path::new(&config.input.output_def)
+        .parent()
+        .unwrap_or(Path::new("."));
+
     log::info!("Generating nesterov visualization");
-    visualization::draw_placement(&db, "output/nesterov_placer.png", 1000, 1000);
+    let nesterov_png = output_dir.join("nesterov_placer.png");
+    visualization::draw_placement(&db, nesterov_png.to_str().unwrap(), 1000, 1000);
 
     log::info!("Starting Legalization...");
     let legalizer = pare_placer::legalize::abacus::AbacusLegalizer::new();
@@ -428,7 +395,8 @@ fn run_placement(config: &Config) -> anyhow::Result<()> {
     }
 
     log::info!("Generating placement visualization...");
-    visualization::draw_placement(&db, "output/placed.png", 1000, 1000);
+    let placed_png = output_dir.join("placed.png");
+    visualization::draw_placement(&db, placed_png.to_str().unwrap(), 1000, 1000);
 
     log::info!("Writing placed DEF to {}", config.input.output_def);
     save_def(&db, &config.input.output_def)?;
@@ -581,8 +549,13 @@ fn run_routing(config: &Config) -> anyhow::Result<()> {
 
     pare_router::route(&mut db, config).map_err(|e| anyhow::anyhow!(e))?;
 
+    let output_dir = Path::new(&config.input.output_def)
+        .parent()
+        .unwrap_or(Path::new("."));
+
     log::info!("Generating routed visualization...");
-    visualization::draw_routed_design(&db, "output/routed.png", 2000, 2000);
+    let routed_png = output_dir.join("routed.png");
+    visualization::draw_routed_design(&db, routed_png.to_str().unwrap(), 2000, 2000);
 
     check::run(&db).map_err(|e| anyhow::anyhow!("Verification Failed: {}", e))?;
 

@@ -30,6 +30,6 @@ ripup_radius = 2
 gcell_size = 2.0
 
 [input]
-lef_files = ["inputs/benchmarks/gcd.lef"]
-def_file = "inputs/benchmarks/gcd.def"
-output_def = "output/gcd_placed.def"
+lef_files = ["inputs/gcd/gcd.lef"]
+def_file = "inputs/gcd/gcd.def"
+output_def = "output/gcd/placed.def"
