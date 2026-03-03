@@ -117,8 +117,10 @@ Type-safe index newtypes (`CellId`, `NetId`, `PinId`) prevent accidental index c
 | IBM10 | 67,692 | 64,227 | 49% | 6 (Bookshelf) | 42.8s | DRC-clean |
 | IBM13 | 81,056 | 84,199 | 40% | 6 (Bookshelf) | 63.5s | DRC-clean |
 | IBM14 | 145,492 | 143,202 | 49% | 6 (Bookshelf) | 368.3s | DRC-clean |
+| Netcard | 252,978 | 290,354 | 43% | 10 (Nangate45) | 91.7s | DRC-clean |
+| Leon3mp | 312,529 | 406,912 | — | 10 (Nangate45) | 29.0s | DRC-clean |
 
-All benchmarks are real circuits (ISPD or open-source RTL), not synthetic. IBM14 is the largest — 145k cells with 143k nets. IBM05 runs at 80% utilization with complex multi-pin nets. AES uses a real technology library (Nangate45) with 10 metal layers at realistic pitches.
+All benchmarks are real circuits (ISPD or open-source RTL), not synthetic. Leon3mp is the largest — 313k cells with 407k nets, routed in 29s. Netcard has 253k cells with 290k nets including a 67k-pin power net. IBM14 has 145k cells with 143k nets. IBM05 runs at 80% utilization with complex multi-pin nets. AES uses a real technology library (Nangate45) with 10 metal layers at realistic pitches.
 
 ---
 
