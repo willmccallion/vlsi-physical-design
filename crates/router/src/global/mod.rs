@@ -13,6 +13,9 @@ use std::collections::HashSet;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::Instant;
 
+/// Global routing result: (net_guides, converter, congestion_map, grid_w, grid_h).
+pub(crate) type GrResult = (Vec<HashSet<GridCoord>>, GridConverter, Vec<f32>, u32, u32);
+
 /// Adds edge usage for a path on the grid.
 fn add_path_to_grid(grid: &mut GCellGrid, path: &[GridCoord]) {
     for i in 0..path.len().saturating_sub(1) {
@@ -70,10 +73,14 @@ fn path_is_congested(grid: &GCellGrid, path: &[GridCoord]) -> bool {
 }
 
 /// Executes global routing on a gcell grid to generate routing guides.
+///
+/// Returns (net_guides, converter, congestion_map, grid_w, grid_h).
+/// The congestion map is a flat row-major array of per-GCell congestion ratios
+/// (max across all layers of usage/capacity).
 pub fn run(
     db: &NetlistDB,
     config: &GlobalRoutingConfig,
-) -> Result<(Vec<HashSet<GridCoord>>, GridConverter), String> {
+) -> Result<GrResult, String> {
     log::debug!("Starting Global Routing...");
 
     let bin_width = config.gcell_size as f64;
@@ -284,7 +291,34 @@ pub fn run(
         }
     }
 
-    Ok((net_guides, converter))
+    // Extract per-GCell congestion map: max(usage/capacity) across all layers.
+    let mut congestion_map = vec![0.0f32; (grid_w * grid_h) as usize];
+    for y in 0..grid_h {
+        for x in 0..grid_w {
+            let mut max_ratio: f32 = 0.0;
+            for z in 0..layers {
+                // Horizontal edge congestion
+                if x < grid_w - 1 {
+                    let cap = grid.h_edge_cap(x, y, z) as f32;
+                    let usage = grid.h_edge_usage(x, y, z) as f32;
+                    if cap > 0.0 {
+                        max_ratio = max_ratio.max(usage / cap);
+                    }
+                }
+                // Vertical edge congestion
+                if y < grid_h - 1 {
+                    let cap = grid.v_edge_cap(x, y, z) as f32;
+                    let usage = grid.v_edge_usage(x, y, z) as f32;
+                    if cap > 0.0 {
+                        max_ratio = max_ratio.max(usage / cap);
+                    }
+                }
+            }
+            congestion_map[(y * grid_w + x) as usize] = max_ratio;
+        }
+    }
+
+    Ok((net_guides, converter, congestion_map, grid_w, grid_h))
 }
 
 /// Computes the routing path for a single net in global routing.

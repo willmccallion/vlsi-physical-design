@@ -38,6 +38,12 @@ pub struct PhysicsContext {
     pub(crate) fft_scratch: Vec<rustfft::num_complex::Complex<f64>>,
     /// Mirrored density map for 2N×2N DCT computation.
     pub(crate) mirror_map: Vec<f64>,
+
+    /// Routing congestion map from global router (row-major, values 0.0-2.0+).
+    congestion_map: Option<Vec<f32>>,
+    /// Dimensions of the congestion grid.
+    congestion_grid_w: u32,
+    congestion_grid_h: u32,
 }
 
 impl PhysicsContext {
@@ -58,7 +64,86 @@ impl PhysicsContext {
             fft_planner: FftPlanner::new(),
             fft_scratch: vec![rustfft::num_complex::Complex::default(); mirror_size],
             mirror_map: vec![0.0; mirror_size],
+            congestion_map: None,
+            congestion_grid_w: 0,
+            congestion_grid_h: 0,
         }
+    }
+
+    /// Sets the routing congestion map for congestion-driven placement.
+    ///
+    /// The map is a flat row-major array of per-GCell congestion ratios
+    /// (usage/capacity). Values > 1.0 indicate overflow.
+    pub fn set_congestion_map(&mut self, map: Vec<f32>, grid_w: u32, grid_h: u32) {
+        self.congestion_map = Some(map);
+        self.congestion_grid_w = grid_w;
+        self.congestion_grid_h = grid_h;
+    }
+
+    /// Computes congestion-aware gradients that push cells away from congested regions.
+    ///
+    /// For each movable cell, maps its center to the congestion grid and computes
+    /// a repulsive gradient via finite differences on the congestion map. Cells in
+    /// low-congestion regions (< threshold) are not affected. Returns the total
+    /// congestion cost (sum of congestion values at cell locations).
+    pub fn compute_congestion_gradient(
+        &self,
+        db: &NetlistDB,
+        positions: &[Point<f64>],
+        gradients: &mut [Point<f64>],
+        weight: f64,
+    ) -> f64 {
+        let cmap = match &self.congestion_map {
+            Some(m) => m,
+            None => return 0.0,
+        };
+        let gw = self.congestion_grid_w as usize;
+        let gh = self.congestion_grid_h as usize;
+        if gw == 0 || gh == 0 {
+            return 0.0;
+        }
+
+        let die_w = db.die_area.width();
+        let die_h = db.die_area.height();
+        let bin_w = die_w / gw as f64;
+        let bin_h = die_h / gh as f64;
+
+        let congestion_threshold = 0.5;
+        let mut total_cost = 0.0;
+
+        for (i, pos) in positions.iter().enumerate() {
+            if db.cells[i].is_fixed {
+                continue;
+            }
+
+            let cx = pos.x + db.cells[i].width * 0.5;
+            let cy = pos.y + db.cells[i].height * 0.5;
+
+            let gx = ((cx - db.die_area.min.x) / bin_w) as usize;
+            let gy = ((cy - db.die_area.min.y) / bin_h) as usize;
+            let gx = gx.min(gw - 1);
+            let gy = gy.min(gh - 1);
+
+            let c = cmap[gy * gw + gx] as f64;
+            if c < congestion_threshold {
+                continue;
+            }
+            total_cost += c;
+
+            // Finite difference gradient on the congestion map
+            let cx_left = if gx > 0 { cmap[gy * gw + (gx - 1)] as f64 } else { c };
+            let cx_right = if gx < gw - 1 { cmap[gy * gw + (gx + 1)] as f64 } else { c };
+            let cy_down = if gy > 0 { cmap[(gy - 1) * gw + gx] as f64 } else { c };
+            let cy_up = if gy < gh - 1 { cmap[(gy + 1) * gw + gx] as f64 } else { c };
+
+            let grad_x = (cx_right - cx_left) / (2.0 * bin_w);
+            let grad_y = (cy_up - cy_down) / (2.0 * bin_h);
+
+            gradients[i].x += grad_x * weight;
+            gradients[i].y += grad_y * weight;
+        }
+
+        total_cost
     }
 
     /// Computes gradients for wirelength and density objectives.

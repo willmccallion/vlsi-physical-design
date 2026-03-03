@@ -58,6 +58,10 @@ pub struct GlobalPlacementConfig {
     pub wa_gamma: Option<f64>,
     #[serde(default = "default_electro_force_multiplier")]
     pub electro_force_multiplier: f64,
+    /// Number of congestion-driven placement iterations (0 = disabled).
+    /// Each iteration re-places with routing congestion feedback, then re-routes.
+    #[serde(default)]
+    pub congestion_iterations: usize,
 }
 
 impl Default for GlobalPlacementConfig {
@@ -70,6 +74,7 @@ impl Default for GlobalPlacementConfig {
             convergence_threshold: default_convergence_threshold(),
             wa_gamma: None,
             electro_force_multiplier: default_electro_force_multiplier(),
+            congestion_iterations: 0,
         }
     }
 }

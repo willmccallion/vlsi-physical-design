@@ -170,6 +170,14 @@ impl NesterovOptimizer {
                 self.grads[i].y += self.density_grads[i].y * density_weight;
             }
 
+            // Add congestion gradient if congestion map is available
+            let _congestion_cost = physics.compute_congestion_gradient(
+                db,
+                &self.y_k,
+                &mut self.grads,
+                density_weight * 0.1,
+            );
+
             // Compute overflow from the density map (populated by compute_gradients_separate)
             let overflow_area: f64 = physics
                 .density_map

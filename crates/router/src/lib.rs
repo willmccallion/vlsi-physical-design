@@ -48,16 +48,33 @@ pub mod utils;
 use pare_common::db::core::NetlistDB;
 use pare_common::util::config::Config;
 
+/// Result from the routing workflow including congestion data for feedback.
+pub struct RoutingResult {
+    /// Flat congestion map (row-major): ratio of usage/capacity per GCell.
+    /// Values > 1.0 indicate overflow.
+    pub congestion_map: Vec<f32>,
+    /// Width of the congestion grid in GCells.
+    pub congestion_grid_w: u32,
+    /// Height of the congestion grid in GCells.
+    pub congestion_grid_h: u32,
+}
+
 /// Executes the complete routing workflow: global routing followed by detailed routing.
 ///
 /// First performs global routing on a coarse grid to generate routing guides,
 /// then executes detailed routing on a fine grid using these guides. The guides
 /// constrain detailed routing to preferred regions, improving routability and
-/// reducing runtime. Returns an error if routing fails to complete successfully.
-pub fn route(db: &mut NetlistDB, config: &Config) -> Result<(), String> {
-    let (guides, coarse_converter) = global::run(db, &config.global_routing)?;
+/// reducing runtime. Returns a RoutingResult containing congestion data that
+/// can be fed back to the placer for congestion-driven placement iterations.
+pub fn route(db: &mut NetlistDB, config: &Config) -> Result<RoutingResult, String> {
+    let (guides, coarse_converter, congestion_map, grid_w, grid_h) =
+        global::run(db, &config.global_routing)?;
 
     detailed::run(db, &config.detailed_routing, &guides, &coarse_converter)?;
 
-    Ok(())
+    Ok(RoutingResult {
+        congestion_map,
+        congestion_grid_w: grid_w,
+        congestion_grid_h: grid_h,
+    })
 }

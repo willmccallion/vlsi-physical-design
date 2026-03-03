@@ -96,8 +96,27 @@ fn main() -> anyhow::Result<()> {
                 std::process::exit(1);
             }
 
-            if run_routing(&config).is_err() {
-                std::process::exit(1);
+            let routing_result = match run_routing(&config) {
+                Ok(r) => r,
+                Err(_) => std::process::exit(1),
+            };
+
+            // Congestion-driven placement iterations
+            let cong_iters = config.global_placement.congestion_iterations;
+            if cong_iters > 0 {
+                let mut result = routing_result;
+                for ci in 0..cong_iters {
+                    ui::section(&format!("Congestion Iteration {}/{}", ci + 1, cong_iters));
+
+                    if run_congestion_placement(&config, &result).is_err() {
+                        std::process::exit(1);
+                    }
+
+                    result = match run_routing(&config) {
+                        Ok(r) => r,
+                        Err(_) => std::process::exit(1),
+                    };
+                }
             }
         }
     }
@@ -354,6 +373,107 @@ fn run_placement(config: &Config) -> anyhow::Result<()> {
     Ok(())
 }
 
+/// Re-runs placement with routing congestion feedback.
+///
+/// Loads the previously placed design, feeds the congestion map into the
+/// PhysicsContext, and re-optimizes cell positions to push cells away from
+/// congested regions. The result is legalized and saved back to the output DEF.
+fn run_congestion_placement(
+    config: &Config,
+    routing_result: &pare_router::RoutingResult,
+) -> anyhow::Result<()> {
+    let mut db = NetlistDB::new();
+
+    if let Some(aux_path) = &config.input.bookshelf_aux_file {
+        pare_common::db::parser::bookshelf::parse(&mut db, aux_path)
+            .map_err(|e| anyhow::anyhow!("Bookshelf parse error: {}", e))?;
+    } else {
+        if let Some(lef_path) = config.input.lef_files.first() {
+            pare_common::db::parser::lef::parse(&mut db, lef_path)
+                .map_err(|e| anyhow::anyhow!("LEF parse error: {}", e))?;
+        }
+        // Load the placed DEF (output from previous placement)
+        pare_common::db::parser::def::parse(&mut db, &config.input.output_def)
+            .map_err(|e| anyhow::anyhow!("DEF parse error: {}", e))?;
+    }
+
+    place_io_pins(&mut db);
+
+    let die_diag = (db.die_area.width().powi(2) + db.die_area.height().powi(2)).sqrt();
+    let wa_gamma = config.global_placement.wa_gamma.unwrap_or(die_diag * 1.5);
+    let utilization = {
+        let total_cell_area: f64 = db.cells.iter()
+            .filter(|c| !c.is_fixed)
+            .map(|c| c.width * c.height)
+            .sum();
+        let die_area = db.die_area.width() * db.die_area.height();
+        total_cell_area / die_area
+    };
+    let target_density = config.global_placement.target_density
+        .unwrap_or_else(|| (utilization + 0.05).max(0.80));
+    let bin_dimension = config.global_placement.bin_dimension.unwrap_or_else(|| {
+        let movable = db.cells.iter().filter(|c| !c.is_fixed).count();
+        ((movable as f64).sqrt().ceil() as usize).next_power_of_two().clamp(64, 512)
+    });
+    let initial_learning_rate =
+        config.global_placement.initial_learning_rate.unwrap_or_else(|| {
+            let mut heights: Vec<f64> = db.cells.iter()
+                .filter(|c| !c.is_fixed)
+                .map(|c| c.height)
+                .collect();
+            heights.sort_by(|a, b| a.partial_cmp(b).unwrap());
+            let median_height = if heights.is_empty() { 1.0 } else { heights[heights.len() / 2] };
+            (median_height * 0.0006).clamp(0.005, 1.0)
+        });
+
+    let phase_start = Instant::now();
+    ui::phase("Congestion-Driven Placement");
+
+    let mut physics = PhysicsContext::new(bin_dimension, bin_dimension);
+    physics.set_congestion_map(
+        routing_result.congestion_map.clone(),
+        routing_result.congestion_grid_w,
+        routing_result.congestion_grid_h,
+    );
+
+    let params = NesterovParams {
+        max_iterations: config.global_placement.placer_max_iterations,
+        initial_learning_rate,
+        convergence_threshold: config.global_placement.convergence_threshold,
+        wa_gamma,
+        target_density,
+        electro_force_multiplier: config.global_placement.electro_force_multiplier,
+    };
+    let mut solver = NesterovOptimizer::new(params, db.num_cells());
+
+    ui::placement_table_header();
+    let result = solver
+        .optimize(&mut db, &mut physics)
+        .map_err(|e| anyhow::anyhow!(e))?;
+
+    eprintln!();
+    if result.converged {
+        ui::check(&format!(
+            "Congestion placement converged at iter {} (overflow={:.4}, WL={:.0})",
+            result.iterations, result.final_overflow, result.final_wirelength
+        ));
+    }
+
+    // Legalize
+    let legalizer = pare_placer::legalize::abacus::AbacusLegalizer::new();
+    legalizer.legalize(&mut db);
+    ui::check("Re-legalized");
+
+    if let Err(e) = check::run_placement_check(&db) {
+        return Err(anyhow::anyhow!(e));
+    }
+
+    save_def(&db, &config.input.output_def)?;
+    ui::phase_time(phase_start.elapsed().as_secs_f64());
+
+    Ok(())
+}
+
 /// Preloads cell geometry information from a Bookshelf nodes file.
 fn preload_bookshelf_geometry(db: &mut NetlistDB, aux_path: &str) -> anyhow::Result<()> {
     log::debug!("Preloading Bookshelf Geometry from AUX: {}", aux_path);
@@ -414,7 +534,8 @@ fn preload_bookshelf_geometry(db: &mut NetlistDB, aux_path: &str) -> anyhow::Res
 }
 
 /// Executes the complete routing workflow from placed netlist to routed design.
-fn run_routing(config: &Config) -> anyhow::Result<()> {
+/// Returns the RoutingResult containing congestion data for feedback.
+fn run_routing(config: &Config) -> anyhow::Result<pare_router::RoutingResult> {
     let mut db = NetlistDB::new();
 
     let is_bookshelf = config.input.bookshelf_aux_file.is_some();
@@ -492,7 +613,7 @@ fn run_routing(config: &Config) -> anyhow::Result<()> {
         "Layers:", &format!("{}", db.layers.len()),
     );
 
-    pare_router::route(&mut db, config).map_err(|e| anyhow::anyhow!(e))?;
+    let routing_result = pare_router::route(&mut db, config).map_err(|e| anyhow::anyhow!(e))?;
     ui::phase_time(phase_start.elapsed().as_secs_f64());
 
     // --- Verification ---
@@ -521,7 +642,7 @@ fn run_routing(config: &Config) -> anyhow::Result<()> {
     ui::wrote(output_path.to_str().unwrap());
     ui::phase_time(phase_start.elapsed().as_secs_f64());
 
-    Ok(())
+    Ok(routing_result)
 }
 
 /// Writes the netlist database to a DEF file in standard format.
