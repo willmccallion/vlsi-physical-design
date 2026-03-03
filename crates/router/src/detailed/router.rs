@@ -3,7 +3,7 @@ use crate::algo::pattern;
 use crate::grid::GCellGrid;
 use crate::grid::RoutingGrid;
 use crate::utils::conversion::GridConverter;
-use pare_common::db::core::{NetData, NetlistDB, RouteSegment};
+use pare_common::db::core::{LayerDirection, NetData, NetlistDB, RouteSegment, TrackGrid};
 use pare_common::geom::coord::GridCoord;
 use pare_common::geom::point::Point;
 use pare_common::util::config::DetailedRoutingConfig;
@@ -692,6 +692,8 @@ pub fn route_net_parallel<O: GuideOracle>(
 /// Uses gcell centers for all internal node positions to guarantee
 /// connectivity at via transitions and junctions. Pin access uses
 /// short M1 wire + via stack from pin to the gcell center.
+/// When track grids are provided, snaps wire coordinates to the nearest
+/// legal routing track based on layer direction.
 #[allow(clippy::too_many_arguments)]
 pub fn generate_segments_from_topology(
     topology: &[Vec<GridCoord>],
@@ -700,6 +702,8 @@ pub fn generate_segments_from_topology(
     gcell_h: f64,
     origin_x: f64,
     origin_y: f64,
+    track_grids: &[TrackGrid],
+    layers: &[pare_common::db::core::LayerData],
 ) -> Vec<RouteSegment> {
     let mut segments = Vec::new();
 
@@ -708,6 +712,28 @@ pub fn generate_segments_from_topology(
             origin_x + (node.x as f64 + 0.5) * gcell_w,
             origin_y + (node.y as f64 + 0.5) * gcell_h,
         )
+    };
+
+    // Snap a point to the nearest legal track for the given layer.
+    // Horizontal layers snap Y, vertical layers snap X.
+    // Layer 0 (M1) is never snapped — it's used for pin access only.
+    let snap_to_tracks = |point: Point<f64>, layer: u8| -> Point<f64> {
+        if layer == 0 {
+            return point;
+        }
+        let li = layer as usize;
+        if li >= track_grids.len() || li >= layers.len() {
+            return point;
+        }
+        let grid = &track_grids[li];
+        if grid.coords.is_empty() {
+            return point;
+        }
+        match layers[li].direction {
+            LayerDirection::Horizontal => Point::new(point.x, grid.snap(point.y)),
+            LayerDirection::Vertical => Point::new(grid.snap(point.x), point.y),
+            LayerDirection::Unknown => point,
+        }
     };
 
     // Collect all unique nodes from topology (including single-node paths
@@ -737,14 +763,15 @@ pub fn generate_segments_from_topology(
             if !emitted_edges.insert(edge) { continue; }
 
             if u.z == v.z {
-                // Same-layer wire segment
-                let p1 = gcell_center(u);
-                let p2 = gcell_center(v);
+                // Same-layer wire segment — snap to tracks
+                let p1 = snap_to_tracks(gcell_center(u), u.z);
+                let p2 = snap_to_tracks(gcell_center(v), v.z);
                 segments.push(RouteSegment { layer: u.z, p1, p2 });
             } else {
-                // Via: zero-length segment on the lower layer
+                // Via: zero-length segment on the lower layer.
+                // Use unsnapped gcell center to avoid mismatch between layers.
                 let lo = u.z.min(v.z);
-                let p = gcell_center(u); // u and v have same (x,y) for via
+                let p = gcell_center(u);
                 segments.push(RouteSegment { layer: lo, p1: p, p2: p });
             }
         }
@@ -759,6 +786,7 @@ pub fn generate_segments_from_topology(
         if !nodes.contains(&grid_coord) { continue; }
 
         let center = gcell_center(grid_coord);
+        let snapped = snap_to_tracks(center, z);
 
         // Generate access for every pin at this gcell
         for &exact_pos in positions {
@@ -783,6 +811,14 @@ pub fn generate_segments_from_topology(
                 p1: center,
                 p2: center,
             });
+        }
+
+        // Jog from via (at gcell center) to snapped track on wire layer.
+        // This connects the via stack to the snapped wire segments.
+        let jog_dx = (snapped.x - center.x).abs();
+        let jog_dy = (snapped.y - center.y).abs();
+        if jog_dx > 1e-6 || jog_dy > 1e-6 {
+            segments.push(RouteSegment { layer: z, p1: center, p2: snapped });
         }
     }
 

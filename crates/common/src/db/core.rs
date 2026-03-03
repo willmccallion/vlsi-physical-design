@@ -126,6 +126,60 @@ pub struct TrackDef {
     pub step: f64,
 }
 
+/// A resolved grid of routing track coordinates for a single layer.
+///
+/// Contains the sorted physical coordinates of all legal routing tracks
+/// on a layer. Used to snap routed wire coordinates to legal track positions
+/// during segment generation.
+#[derive(Clone, Debug)]
+pub struct TrackGrid {
+    /// Sorted track coordinates in physical units.
+    pub coords: Vec<f64>,
+}
+
+impl TrackGrid {
+    /// Builds a track grid from a DEF TrackDef.
+    pub fn from_track_def(td: &TrackDef) -> Self {
+        let mut coords = Vec::with_capacity(td.num_tracks as usize);
+        for i in 0..td.num_tracks {
+            coords.push(td.start + i as f64 * td.step);
+        }
+        Self { coords }
+    }
+
+    /// Builds a track grid from pitch and die extent (fallback when no TrackDef exists).
+    pub fn from_pitch(die_min: f64, die_max: f64, pitch: f64) -> Self {
+        if pitch <= 0.0 {
+            return Self { coords: Vec::new() };
+        }
+        let mut coords = Vec::new();
+        let mut pos = die_min;
+        while pos <= die_max {
+            coords.push(pos);
+            pos += pitch;
+        }
+        Self { coords }
+    }
+
+    /// Snaps a coordinate to the nearest track using binary search.
+    /// Returns the original coordinate if no tracks are available.
+    pub fn snap(&self, coord: f64) -> f64 {
+        if self.coords.is_empty() {
+            return coord;
+        }
+        let idx = self.coords.partition_point(|&t| t < coord);
+        if idx == 0 {
+            self.coords[0]
+        } else if idx >= self.coords.len() {
+            self.coords[self.coords.len() - 1]
+        } else {
+            let lo = self.coords[idx - 1];
+            let hi = self.coords[idx];
+            if (coord - lo) <= (hi - coord) { lo } else { hi }
+        }
+    }
+}
+
 /// Central database structure containing all design information.
 ///
 /// This is the primary data structure that holds the complete netlist,
@@ -298,6 +352,41 @@ impl NetlistDB {
 
         self.cells[cell.index()].pins.push(pid);
         self.nets[net.index()].pins.push(pid);
+    }
+
+    /// Builds per-layer track grids for snapping wire coordinates.
+    ///
+    /// For each routing layer, uses the first matching TrackDef if available,
+    /// otherwise falls back to generating tracks from layer pitch and die extent.
+    /// Returns a Vec indexed by layer index.
+    pub fn build_track_grids(&self) -> Vec<TrackGrid> {
+        let mut grids = Vec::with_capacity(self.layers.len());
+        for layer in &self.layers {
+            // Try to find a TrackDef for this layer
+            let td = self.tracks.iter().find(|t| t.layer == layer.name);
+            let grid = if let Some(td) = td {
+                TrackGrid::from_track_def(td)
+            } else if layer.pitch > 0.0 {
+                // Use layer direction to decide which die extent to cover
+                match layer.direction {
+                    LayerDirection::Horizontal => {
+                        // Horizontal layer: tracks run horizontally, snapping Y
+                        TrackGrid::from_pitch(self.die_area.min.y, self.die_area.max.y, layer.pitch)
+                    }
+                    LayerDirection::Vertical => {
+                        // Vertical layer: tracks run vertically, snapping X
+                        TrackGrid::from_pitch(self.die_area.min.x, self.die_area.max.x, layer.pitch)
+                    }
+                    LayerDirection::Unknown => {
+                        TrackGrid::from_pitch(self.die_area.min.x, self.die_area.max.x, layer.pitch)
+                    }
+                }
+            } else {
+                TrackGrid { coords: Vec::new() }
+            };
+            grids.push(grid);
+        }
+        grids
     }
 
     /// Returns the identifier of the virtual I/O cell, creating it if necessary.

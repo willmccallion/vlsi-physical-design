@@ -609,6 +609,9 @@ pub fn run(
     let gw = grid.gcell_w();
     let gh = grid.gcell_h();
 
+    // Build track grids for snapping wire coordinates to legal tracks
+    let track_grids = db.build_track_grids();
+
     // Generate segments from topology
     let mut all_segments = Vec::with_capacity(db.nets.len());
     for (net_id, topology) in net_topologies.iter().enumerate() {
@@ -644,6 +647,8 @@ pub fn run(
                 gh,
                 origin_x,
                 origin_y,
+                &track_grids,
+                &db.layers,
             );
         }
         all_segments.push(segments);
