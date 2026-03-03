@@ -41,6 +41,7 @@ pub trait GuideOracle {
 }
 
 /// Dummy guide oracle that allows routing anywhere.
+#[derive(Clone, Copy)]
 pub struct NoGuide;
 impl GuideOracle for NoGuide {
     fn is_in_guide(&self, _c: GridCoord) -> bool {
@@ -126,6 +127,8 @@ pub struct AStar {
     visited_tag: Vec<u32>,
     current_tag: u32,
     capacity: usize,
+    /// Number of expansions in the last find_path call.
+    pub last_expansions: u32,
 }
 
 impl Default for AStar {
@@ -143,6 +146,7 @@ impl AStar {
             visited_tag: vec![0; cap],
             current_tag: 1,
             capacity: cap,
+            last_expansions: 0,
         }
     }
 
@@ -186,6 +190,7 @@ impl AStar {
         max_expansions: u32,
         strict_mode: bool,
     ) -> Option<Vec<GridCoord>> {
+        self.last_expansions = 0;
         if starts.is_empty() {
             return None;
         }
@@ -237,11 +242,13 @@ impl AStar {
             }
             let position = window.get_coord(index);
             if position == end {
+                self.last_expansions = expansions;
                 return Some(self.reconstruct_path(end, &window));
             }
 
             expansions += 1;
             if expansions > max_expansions {
+                self.last_expansions = expansions;
                 return None;
             }
 
@@ -370,6 +377,7 @@ impl AStar {
                 );
             }
         }
+        self.last_expansions = expansions;
         None
     }
 

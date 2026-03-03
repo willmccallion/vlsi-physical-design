@@ -297,18 +297,57 @@ fn compute_net_path_gr(
     penalty: f64,
     config: &GlobalRoutingConfig,
 ) -> Vec<GridCoord> {
-    let pin_coords: Vec<GridCoord> = net
-        .pins
-        .iter()
-        .map(|&pid| {
-            let cell_id = db.pin_to_cell[pid.index()];
-            let pos = db.get_pin_position(pid, &db.positions[cell_id.index()]);
-            converter.to_grid(pos, 0)
-        })
-        .collect();
+    // Deduplicate pins to unique gcell coordinates.
+    let mut seen = HashSet::new();
+    let mut pin_coords = Vec::new();
+    for &pid in &net.pins {
+        let cell_id = db.pin_to_cell[pid.index()];
+        let pos = db.get_pin_position(pid, &db.positions[cell_id.index()]);
+        let gc = converter.to_grid(pos, 0);
+        if seen.insert(gc) {
+            pin_coords.push(gc);
+        }
+    }
 
-    let mut pin_indices: Vec<usize> = (0..net.pins.len()).collect();
-    let mut sorted_indices = Vec::with_capacity(net.pins.len());
+    if pin_coords.len() < 2 {
+        return pin_coords;
+    }
+
+    // High-fanout nets: skip O(n²) sort and A*, use L-shaped connections
+    // along Morton order. These are typically power/clock nets that just
+    // need connectivity — GR guides will cover the whole path.
+    if pin_coords.len() > 500 {
+        pin_coords.sort_unstable_by_key(|c| {
+            let mut z = 0u64;
+            for bit in 0..16 {
+                z |= ((c.x as u64 >> bit) & 1) << (2 * bit);
+                z |= ((c.y as u64 >> bit) & 1) << (2 * bit + 1);
+            }
+            z
+        });
+        let mut occupied = HashSet::new();
+        occupied.insert(pin_coords[0]);
+        let mut prev = pin_coords[0];
+        for &target in &pin_coords[1..] {
+            if occupied.contains(&target) {
+                continue;
+            }
+            let (x0, x1) = (prev.x.min(target.x), prev.x.max(target.x));
+            for x in x0..=x1 {
+                occupied.insert(GridCoord::new(x, prev.y, 0));
+            }
+            let (y0, y1) = (prev.y.min(target.y), prev.y.max(target.y));
+            for y in y0..=y1 {
+                occupied.insert(GridCoord::new(target.x, y, 0));
+            }
+            prev = target;
+        }
+        return occupied.into_iter().collect();
+    }
+
+    // Normal nets: O(n²) nearest-neighbor sort + A*
+    let mut pin_indices: Vec<usize> = (0..pin_coords.len()).collect();
+    let mut sorted_indices = Vec::with_capacity(pin_coords.len());
     let mut current_idx = pin_indices.remove(0);
     sorted_indices.push(current_idx);
 
@@ -335,6 +374,10 @@ fn compute_net_path_gr(
 
     for i in 1..sorted_indices.len() {
         let target = pin_coords[sorted_indices[i]];
+
+        if occupied.contains(&target) {
+            continue;
+        }
 
         if let Some(path) = solver.find_path(
             grid,

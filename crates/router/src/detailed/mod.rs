@@ -6,7 +6,9 @@ mod router;
 mod scheduler;
 
 use self::oracle::FastGuideOracle;
-use self::router::{generate_segments_from_topology, route_net_dr_pure};
+use self::router::{
+    LARGE_NET_PIN_THRESHOLD, generate_segments_from_topology, route_net_dr_pure, route_net_parallel,
+};
 use self::scheduler::SpatialSet;
 
 use crate::algo::astar::AStar;
@@ -173,24 +175,59 @@ pub fn run(
     let init_penalty = config.initial_penalty.max(0.5);
 
     // Sequential initial routing
+    let dummy_stat = AtomicUsize::new(0);
     for (progress, &net_id) in net_indices.iter().enumerate() {
         let net = &db.nets[net_id];
         if net.pins.len() < 2 {
             continue;
         }
         oracle.prepare(net_id, &guides[net_id]);
-        let res = route_net_dr_pure(
-            net,
-            &grid,
-            &mut solver,
-            &converter,
-            db,
-            init_penalty,
-            &oracle,
-            config,
-            0,
-            false,
-        );
+        let res = if net.pins.len() >= LARGE_NET_PIN_THRESHOLD {
+            route_net_parallel(
+                net,
+                &grid,
+                &mut solver,
+                &converter,
+                db,
+                init_penalty,
+                &oracle,
+                config,
+                0,
+                false,
+                grid_w,
+                grid_h,
+                coarse_w,
+                coarse_h,
+                layers,
+                &converter,
+                coarse_converter,
+                &guides[net_id],
+                net_id,
+                &dummy_stat,
+                &dummy_stat,
+                &dummy_stat,
+                &dummy_stat,
+                &dummy_stat,
+            )
+        } else {
+            route_net_dr_pure(
+                net,
+                &grid,
+                &mut solver,
+                &converter,
+                db,
+                init_penalty,
+                &oracle,
+                config,
+                0,
+                false,
+                &dummy_stat,
+                &dummy_stat,
+                &dummy_stat,
+                &dummy_stat,
+                &dummy_stat,
+            )
+        };
 
         if let Some(topology) = res {
             add_topology_to_grid(&mut grid, &topology);
@@ -283,7 +320,10 @@ pub fn run(
             if overflow <= 10 {
                 grid.decay_history(0.0);
                 collision_penalty = init_penalty;
-                log::info!("Reset history and penalty for small overflow ({})", overflow);
+                log::info!(
+                    "Reset history and penalty for small overflow ({})",
+                    overflow
+                );
             } else {
                 grid.decay_history(0.5);
             }
@@ -451,6 +491,11 @@ pub fn run(
             let coarse_w = coarse_max.x + 1;
             let coarse_h = coarse_max.y + 1;
 
+            let stat_pattern_hits = AtomicUsize::new(0);
+            let stat_astar_calls = AtomicUsize::new(0);
+            let stat_astar_fallback = AtomicUsize::new(0);
+            let stat_astar_expansions = AtomicUsize::new(0);
+            let stat_max_expansions = AtomicUsize::new(0);
             let results: Vec<(usize, Option<Vec<Vec<GridCoord>>>)> = batch
                 .par_iter()
                 .map_with(
@@ -469,18 +514,53 @@ pub fn run(
                     |(solver, oracle), &net_id| {
                         oracle.prepare(net_id, &guides[net_id]);
                         let use_strict = iter > 2 && ripup_counts[net_id] < 3;
-                        let res = route_net_dr_pure(
-                            &db.nets[net_id],
-                            &grid,
-                            solver,
-                            &converter,
-                            db,
-                            collision_penalty,
-                            oracle,
-                            config,
-                            ripup_counts[net_id],
-                            use_strict,
-                        );
+                        let net = &db.nets[net_id];
+                        let res = if net.pins.len() >= LARGE_NET_PIN_THRESHOLD {
+                            route_net_parallel(
+                                net,
+                                &grid,
+                                solver,
+                                &converter,
+                                db,
+                                collision_penalty,
+                                oracle,
+                                config,
+                                ripup_counts[net_id],
+                                use_strict,
+                                grid_w,
+                                grid_h,
+                                coarse_w,
+                                coarse_h,
+                                layers,
+                                &converter,
+                                coarse_converter,
+                                &guides[net_id],
+                                net_id,
+                                &stat_pattern_hits,
+                                &stat_astar_calls,
+                                &stat_astar_fallback,
+                                &stat_astar_expansions,
+                                &stat_max_expansions,
+                            )
+                        } else {
+                            route_net_dr_pure(
+                                net,
+                                &grid,
+                                solver,
+                                &converter,
+                                db,
+                                collision_penalty,
+                                oracle,
+                                config,
+                                ripup_counts[net_id],
+                                use_strict,
+                                &stat_pattern_hits,
+                                &stat_astar_calls,
+                                &stat_astar_fallback,
+                                &stat_astar_expansions,
+                                &stat_max_expansions,
+                            )
+                        };
 
                         let p = progress.fetch_add(1, Ordering::Relaxed) + 1;
                         if p.is_multiple_of(100) || p == total_ripped {
@@ -509,7 +589,14 @@ pub fn run(
             log_layer_stats_compact(&grid, db, layers);
         }
 
-        ui::routing_iter("DR", iter, overflow, nets_vec.len(), collision_penalty, start.elapsed().as_millis());
+        ui::routing_iter(
+            "DR",
+            iter,
+            overflow,
+            nets_vec.len(),
+            collision_penalty,
+            start.elapsed().as_millis(),
+        );
 
         if nets_vec.is_empty() {
             break;
@@ -543,7 +630,8 @@ pub fn run(
             let safe_layer = layer.min(grid.layers() - 1);
             let grid_pos = converter.to_grid(exact_pos, safe_layer);
 
-            pin_locations.entry((grid_pos.x, grid_pos.y, grid_pos.z))
+            pin_locations
+                .entry((grid_pos.x, grid_pos.y, grid_pos.z))
                 .or_default()
                 .push(exact_pos);
         }
@@ -552,8 +640,10 @@ pub fn run(
             segments = generate_segments_from_topology(
                 topology,
                 &pin_locations,
-                gw, gh,
-                origin_x, origin_y,
+                gw,
+                gh,
+                origin_x,
+                origin_y,
             );
         }
         all_segments.push(segments);
