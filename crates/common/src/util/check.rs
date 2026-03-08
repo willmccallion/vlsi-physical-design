@@ -49,43 +49,70 @@ pub fn run_placement_check(db: &NetlistDB) -> Result<(), String> {
         }
     });
 
-    let has_overlap = (0..db.num_cells()).into_par_iter().any(|i| {
-        if db.cells[i].name == "IO_VIRTUAL_CELL" || db.cells[i].is_fixed {
-            return false;
-        }
+    // Use spatial binning to reduce overlap check from O(n²) to O(n·k).
+    // Compute bin size from max cell dimension.
+    let max_cell_dim = db.cells.iter()
+        .filter(|c| !c.is_fixed && c.name != "IO_VIRTUAL_CELL")
+        .map(|c| c.width.max(c.height))
+        .fold(0.0_f64, f64::max);
+    let overlap_bin_size = (max_cell_dim * 2.0).max(1.0);
 
-        let r1 = Rect::new(
-            db.positions[i],
-            Point::new(
-                db.positions[i].x + db.cells[i].width,
-                db.positions[i].y + db.cells[i].height,
-            ),
-        );
-        let r1_shrink = Rect::new(
-            Point::new(r1.min.x + CHECK_TOLERANCE, r1.min.y + CHECK_TOLERANCE),
-            Point::new(r1.max.x - CHECK_TOLERANCE, r1.max.y - CHECK_TOLERANCE),
-        );
+    // Collect movable cell indices and insert into bins by position.
+    let movable: Vec<usize> = (0..db.num_cells())
+        .filter(|&i| !db.cells[i].is_fixed && db.cells[i].name != "IO_VIRTUAL_CELL")
+        .collect();
 
-        for j in (i + 1)..db.num_cells() {
-            if db.cells[j].name == "IO_VIRTUAL_CELL" || db.cells[j].is_fixed {
-                continue;
+    let mut cell_bins: HashMap<(i32, i32), Vec<usize>> = HashMap::new();
+    for &i in &movable {
+        let pos = db.positions[i];
+        let cell = &db.cells[i];
+        let bx0 = (pos.x / overlap_bin_size).floor() as i32;
+        let bx1 = ((pos.x + cell.width) / overlap_bin_size).floor() as i32;
+        let by0 = (pos.y / overlap_bin_size).floor() as i32;
+        let by1 = ((pos.y + cell.height) / overlap_bin_size).floor() as i32;
+        for bx in bx0..=bx1 {
+            for by in by0..=by1 {
+                cell_bins.entry((bx, by)).or_default().push(i);
             }
+        }
+    }
 
-            let r2 = Rect::new(
-                db.positions[j],
+    // Check overlap only within same/adjacent bins using canonical ordering (i < j).
+    let bin_entries: Vec<_> = cell_bins.into_iter().collect();
+    let has_overlap = bin_entries.par_iter().any(|(_key, indices)| {
+        for a in 0..indices.len() {
+            let i = indices[a];
+            let r1 = Rect::new(
+                db.positions[i],
                 Point::new(
-                    db.positions[j].x + db.cells[j].width,
-                    db.positions[j].y + db.cells[j].height,
+                    db.positions[i].x + db.cells[i].width,
+                    db.positions[i].y + db.cells[i].height,
                 ),
             );
+            let r1_shrink = Rect::new(
+                Point::new(r1.min.x + CHECK_TOLERANCE, r1.min.y + CHECK_TOLERANCE),
+                Point::new(r1.max.x - CHECK_TOLERANCE, r1.max.y - CHECK_TOLERANCE),
+            );
 
-            if r1_shrink.overlaps(&r2) {
-                log::error!(
-                    "FAIL: Cell Overlap '{}' and '{}'",
-                    db.cells[i].name,
-                    db.cells[j].name
+            for &j in &indices[(a + 1)..] {
+                if i >= j { continue; }
+
+                let r2 = Rect::new(
+                    db.positions[j],
+                    Point::new(
+                        db.positions[j].x + db.cells[j].width,
+                        db.positions[j].y + db.cells[j].height,
+                    ),
                 );
-                return true;
+
+                if r1_shrink.overlaps(&r2) {
+                    log::error!(
+                        "FAIL: Cell Overlap '{}' and '{}'",
+                        db.cells[i].name,
+                        db.cells[j].name
+                    );
+                    return true;
+                }
             }
         }
         false
@@ -372,86 +399,74 @@ fn check_design_rules(db: &NetlistDB) -> Result<(usize, usize), String> {
 
     let spacing_bin_size = BIN_SIZE.max(max_spacing * 2.0);
 
-    let chunk_size = 2048;
-    let net_chunks: Vec<_> = (0..db.nets.len())
-        .collect::<Vec<_>>()
-        .chunks(chunk_size)
-        .map(|c| c.to_vec())
-        .collect();
+    // Build ONE global spatial index over ALL nets so cross-chunk spacing
+    // violations are never missed. Expand bins by max_spacing to catch nearby segments.
+    let mut bins: HashMap<BinKey, Vec<Segment>> = HashMap::new();
 
-    net_chunks.par_iter().for_each(|chunk| {
-        let mut bins: HashMap<BinKey, Vec<Segment>> = HashMap::new();
-
-        for &net_idx in chunk {
-            let net = &db.nets[net_idx];
-            let net_id = NetId::new(net_idx);
-
-            for seg in &net.route_segments {
-                // Skip vias for spacing check
-                if (seg.p1.x - seg.p2.x).abs() < 1e-6 && (seg.p1.y - seg.p2.y).abs() < 1e-6 {
-                    continue;
-                }
-
-                let s = Segment {
-                    p1: seg.p1,
-                    p2: seg.p2,
-                    layer: seg.layer,
-                    net_id,
-                };
-
-                // Expand bins by max_spacing to catch nearby segments
-                let min_x = s.p1.x.min(s.p2.x) - max_spacing;
-                let max_x = s.p1.x.max(s.p2.x) + max_spacing;
-                let min_y = s.p1.y.min(s.p2.y) - max_spacing;
-                let max_y = s.p1.y.max(s.p2.y) + max_spacing;
-
-                let start_bx = (min_x / spacing_bin_size).floor() as i32;
-                let end_bx = (max_x / spacing_bin_size).floor() as i32;
-                let start_by = (min_y / spacing_bin_size).floor() as i32;
-                let end_by = (max_y / spacing_bin_size).floor() as i32;
-
-                for bx in start_bx..=end_bx {
-                    for by in start_by..=end_by {
-                        bins.entry(BinKey {
-                            layer: s.layer,
-                            bx,
-                            by,
-                        })
-                        .or_default()
-                        .push(s);
-                    }
-                }
-            }
-        }
-
-        for segs in bins.values() {
-            let first_net = segs[0].net_id;
-            if segs.iter().all(|s| s.net_id == first_net) {
+    for (net_idx, net) in db.nets.iter().enumerate() {
+        let net_id = NetId::new(net_idx);
+        for seg in &net.route_segments {
+            // Skip vias for spacing check
+            if (seg.p1.x - seg.p2.x).abs() < 1e-6 && (seg.p1.y - seg.p2.y).abs() < 1e-6 {
                 continue;
             }
 
-            for i in 0..segs.len() {
-                for j in (i + 1)..segs.len() {
-                    let s1 = &segs[i];
-                    let s2 = &segs[j];
+            let s = Segment {
+                p1: seg.p1,
+                p2: seg.p2,
+                layer: seg.layer,
+                net_id,
+            };
 
-                    if s1.net_id == s2.net_id || s1.layer != s2.layer {
-                        continue;
-                    }
+            let min_x = s.p1.x.min(s.p2.x) - max_spacing;
+            let max_x = s.p1.x.max(s.p2.x) + max_spacing;
+            let min_y = s.p1.y.min(s.p2.y) - max_spacing;
+            let max_y = s.p1.y.max(s.p2.y) + max_spacing;
 
-                    let li = s1.layer as usize;
-                    if li >= db.layers.len() {
-                        continue;
-                    }
-                    let min_space = db.layers[li].min_spacing;
-                    if min_space <= 0.0 {
-                        continue;
-                    }
+            let start_bx = (min_x / spacing_bin_size).floor() as i32;
+            let end_bx = (max_x / spacing_bin_size).floor() as i32;
+            let start_by = (min_y / spacing_bin_size).floor() as i32;
+            let end_by = (max_y / spacing_bin_size).floor() as i32;
 
-                    let gap = segment_gap_distance(s1, s2);
-                    if gap > 0.0 && gap < min_space - CHECK_TOLERANCE {
-                        spacing_count.fetch_add(1, Ordering::Relaxed);
-                    }
+            for bx in start_bx..=end_bx {
+                for by in start_by..=end_by {
+                    bins.entry(BinKey { layer: s.layer, bx, by })
+                        .or_default()
+                        .push(s);
+                }
+            }
+        }
+    }
+
+    // Check bins in parallel.
+    let bin_entries: Vec<_> = bins.into_iter().collect();
+    bin_entries.par_iter().for_each(|(_key, segs)| {
+        let first_net = segs[0].net_id;
+        if segs.iter().all(|s| s.net_id == first_net) {
+            return;
+        }
+
+        for i in 0..segs.len() {
+            for j in (i + 1)..segs.len() {
+                let s1 = &segs[i];
+                let s2 = &segs[j];
+
+                if s1.net_id == s2.net_id || s1.layer != s2.layer {
+                    continue;
+                }
+
+                let li = s1.layer as usize;
+                if li >= db.layers.len() {
+                    continue;
+                }
+                let min_space = db.layers[li].min_spacing;
+                if min_space <= 0.0 {
+                    continue;
+                }
+
+                let gap = segment_gap_distance(s1, s2);
+                if gap > 0.0 && gap < min_space - CHECK_TOLERANCE {
+                    spacing_count.fetch_add(1, Ordering::Relaxed);
                 }
             }
         }
@@ -470,65 +485,51 @@ fn check_design_rules(db: &NetlistDB) -> Result<(usize, usize), String> {
 /// checks for intersections between segments from different nets within the
 /// same bin.
 fn check_shorts_and_loops(db: &NetlistDB) -> Result<(), String> {
-    let error_found = AtomicBool::new(false);
-    let error_msg = Arc::new(Mutex::new(String::new()));
+    use std::sync::atomic::AtomicUsize;
 
-    // Process nets in parallel chunks to keep memory bounded.
-    // Each chunk builds its own spatial index of segments.
-    let chunk_size = 2048;
-    let net_chunks: Vec<_> = (0..db.nets.len()).collect::<Vec<_>>()
-        .chunks(chunk_size)
-        .map(|c| c.to_vec())
-        .collect();
+    // Build ONE global spatial index over ALL nets so cross-chunk shorts
+    // are never missed.
+    let mut bins: HashMap<BinKey, Vec<Segment>> = HashMap::new();
 
-    net_chunks.par_iter().for_each(|chunk| {
-        if error_found.load(Ordering::Relaxed) {
+    for (net_idx, net) in db.nets.iter().enumerate() {
+        let net_id = NetId::new(net_idx);
+        for seg in &net.route_segments {
+            let s = Segment {
+                p1: seg.p1,
+                p2: seg.p2,
+                layer: seg.layer,
+                net_id,
+            };
+            for key in segment_bin_keys(&s) {
+                bins.entry(key).or_default().push(s);
+            }
+        }
+    }
+
+    // Check bins in parallel, counting ALL shorts and collecting first 100 examples.
+    let short_count = AtomicUsize::new(0);
+    let error_msgs: Mutex<Vec<String>> = Mutex::new(Vec::new());
+
+    let bin_entries: Vec<_> = bins.into_iter().collect();
+    bin_entries.par_iter().for_each(|(_key, segs)| {
+        // Fast path: single-net bin → no cross-net shorts possible.
+        let first_net = segs[0].net_id;
+        if segs.iter().all(|s| s.net_id == first_net) {
             return;
         }
 
-        let mut bins: HashMap<BinKey, Vec<Segment>> = HashMap::new();
+        for i in 0..segs.len() {
+            for j in (i + 1)..segs.len() {
+                let s1 = &segs[i];
+                let s2 = &segs[j];
 
-        for &net_idx in chunk {
-            let net = &db.nets[net_idx];
-            let net_id = NetId::new(net_idx);
-
-            for seg in &net.route_segments {
-                let s = Segment {
-                    p1: seg.p1,
-                    p2: seg.p2,
-                    layer: seg.layer,
-                    net_id,
-                };
-
-                for key in segment_bin_keys(&s) {
-                    bins.entry(key).or_default().push(s);
+                if s1.net_id == s2.net_id {
+                    continue;
                 }
-            }
-        }
 
-        // Check within each bin
-        for segs in bins.values() {
-            if error_found.load(Ordering::Relaxed) {
-                return;
-            }
-
-            // Fast path: if all segments in this bin belong to the same net,
-            // no cross-net shorts are possible. Skip the expensive O(n²) check.
-            let first_net = segs[0].net_id;
-            if segs.iter().all(|s| s.net_id == first_net) {
-                continue;
-            }
-
-            for i in 0..segs.len() {
-                for j in (i + 1)..segs.len() {
-                    let s1 = &segs[i];
-                    let s2 = &segs[j];
-
-                    if s1.net_id == s2.net_id {
-                        continue;
-                    }
-
-                    if s1.intersects(s2) {
+                if s1.intersects(s2) {
+                    let prev = short_count.fetch_add(1, Ordering::Relaxed);
+                    if prev < 100 {
                         let n1 = &db.nets[s1.net_id.index()].name;
                         let n2 = &db.nets[s2.net_id.index()].name;
                         let msg = format!(
@@ -537,19 +538,18 @@ fn check_shorts_and_loops(db: &NetlistDB) -> Result<(), String> {
                             s1.p1.x, s1.p1.y, s1.p2.x, s1.p2.y,
                             s2.p1.x, s2.p1.y, s2.p2.x, s2.p2.y
                         );
-
-                        if !error_found.swap(true, Ordering::Relaxed) {
-                            *error_msg.lock().unwrap() = msg;
-                        }
-                        return;
+                        error_msgs.lock().unwrap().push(msg);
                     }
                 }
             }
         }
     });
 
-    if error_found.load(Ordering::Relaxed) {
-        Err(error_msg.lock().unwrap().clone())
+    let total = short_count.load(Ordering::Relaxed);
+    if total > 0 {
+        let msgs = error_msgs.into_inner().unwrap();
+        let first = msgs.first().cloned().unwrap_or_default();
+        Err(format!("{} short(s) detected. First: {}", total, first))
     } else {
         Ok(())
     }
@@ -639,13 +639,10 @@ fn check_opens(db: &NetlistDB) -> Result<(), String> {
             }
         }
 
-        // Build spatial index for fast pin-to-segment matching (layer 0-1 only).
+        // Build spatial index for fast pin-to-segment matching (all layers).
         let pin_bin_size: f64 = CONNECTIVITY_TOLERANCE * 2.0;
         let mut pin_seg_bins: HashMap<(i32, i32), Vec<usize>> = HashMap::new();
         for (seg_i, seg) in segments.iter().enumerate() {
-            if seg.layer > 1 {
-                continue;
-            }
             let min_x = seg.p1.x.min(seg.p2.x);
             let max_x = seg.p1.x.max(seg.p2.x);
             let min_y = seg.p1.y.min(seg.p2.y);
