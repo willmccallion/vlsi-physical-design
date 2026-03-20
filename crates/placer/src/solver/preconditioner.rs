@@ -9,6 +9,7 @@
 /// Stores the inverse of diagonal matrix elements and applies element-wise
 /// multiplication to precondition gradients. This can accelerate convergence
 /// for problems with ill-conditioned Hessian matrices.
+#[derive(Debug)]
 pub struct JacobiPreconditioner {
     /// Inverse diagonal elements of the preconditioner matrix.
     pub inv_diag: Vec<f64>,

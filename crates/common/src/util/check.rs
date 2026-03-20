@@ -150,21 +150,21 @@ pub fn run(db: &NetlistDB) -> Result<(), String> {
     match shorts_result {
         Err(e) => {
             ui::fail("Short Circuits / Loops Detected");
-            log::error!("{}", e);
+            log::error!("{e}");
             msgs.push(e);
             valid = false;
         }
-        Ok(_) => ui::check("DRC passed -- no shorts or illegal loops."),
+        Ok(()) => ui::check("DRC passed -- no shorts or illegal loops."),
     }
 
     match opens_result {
         Err(e) => {
             ui::fail("Open Net (Disconnected) Detected");
-            log::error!("{}", e);
+            log::error!("{e}");
             msgs.push(e);
             valid = false;
         }
-        Ok(_) => ui::check("LVS passed -- all nets fully connected."),
+        Ok(()) => ui::check("LVS passed -- all nets fully connected."),
     }
 
     // Design rule checks (spacing/width) — run only if layers have spacing info.
@@ -173,33 +173,18 @@ pub fn run(db: &NetlistDB) -> Result<(), String> {
     // treated as errors since they indicate a routing bug.
     let has_spacing_info = db.layers.iter().any(|l| l.min_spacing > 0.0);
     if has_spacing_info {
-        match check_design_rules(db) {
-            Err(e) => {
-                ui::fail("Design Rule Check Error");
-                log::error!("{}", e);
-                msgs.push(e);
-                valid = false;
+        let (spacing_violations, width_violations) = check_design_rules(db);
+        if spacing_violations == 0 && width_violations == 0 {
+            ui::check("Design rules passed -- spacing and width OK.");
+        } else {
+            if spacing_violations > 0 {
+                log::info!("DRC: {spacing_violations} spacing violations (informational)");
             }
-            Ok((spacing_violations, width_violations)) => {
-                if spacing_violations == 0 && width_violations == 0 {
-                    ui::check("Design rules passed -- spacing and width OK.");
-                } else {
-                    if spacing_violations > 0 {
-                        log::info!(
-                            "DRC: {} spacing violations (informational)",
-                            spacing_violations
-                        );
-                    }
-                    if width_violations > 0 {
-                        let msg = format!(
-                            "DRC: {} non-Manhattan wire violations",
-                            width_violations
-                        );
-                        ui::fail(&msg);
-                        msgs.push(msg);
-                        valid = false;
-                    }
-                }
+            if width_violations > 0 {
+                let msg = format!("DRC: {width_violations} non-Manhattan wire violations");
+                ui::fail(&msg);
+                msgs.push(msg);
+                valid = false;
             }
         }
     }
@@ -223,7 +208,14 @@ struct Segment {
 
 impl Segment {
     /// Checks if this segment intersects with another segment on the same layer.
-    fn intersects(&self, other: &Segment) -> bool {
+    fn intersects(&self, other: &Self) -> bool {
+        fn on_segment(p: Point<f64>, a: Point<f64>, b: Point<f64>) -> bool {
+            p.x >= a.x.min(b.x) + CHECK_TOLERANCE
+                && p.x <= a.x.max(b.x) - CHECK_TOLERANCE
+                && p.y >= a.y.min(b.y) + CHECK_TOLERANCE
+                && p.y <= a.y.max(b.y) - CHECK_TOLERANCE
+        }
+
         if self.layer != other.layer {
             return false;
         }
@@ -244,13 +236,6 @@ impl Segment {
             || min_y1 >= max_y2 - CHECK_TOLERANCE
         {
             return false;
-        }
-
-        fn on_segment(p: Point<f64>, a: Point<f64>, b: Point<f64>) -> bool {
-            p.x >= a.x.min(b.x) + CHECK_TOLERANCE
-                && p.x <= a.x.max(b.x) - CHECK_TOLERANCE
-                && p.y >= a.y.min(b.y) + CHECK_TOLERANCE
-                && p.y <= a.y.max(b.y) - CHECK_TOLERANCE
         }
 
         let o1 = orientation(self.p1, self.p2, other.p1);
@@ -279,8 +264,8 @@ impl Segment {
     }
 
     /// Checks if this segment shares an endpoint with another segment.
-    fn shares_endpoint(&self, other: &Segment) -> bool {
-        let dist_sq = |a: Point<f64>, b: Point<f64>| (a.x - b.x).powi(2) + (a.y - b.y).powi(2);
+    fn shares_endpoint(&self, other: &Self) -> bool {
+        let dist_sq = |a: Point<f64>, b: Point<f64>| (a.x - b.x).mul_add(a.x - b.x, (a.y - b.y).powi(2));
         let tol_sq = CONNECTIVITY_TOLERANCE * CONNECTIVITY_TOLERANCE;
 
         dist_sq(self.p1, other.p1) < tol_sq
@@ -292,7 +277,7 @@ impl Segment {
 
 /// Computes the orientation of three points (collinear test).
 fn orientation(p: Point<f64>, q: Point<f64>, r: Point<f64>) -> i32 {
-    let val = (q.y - p.y) * (r.x - q.x) - (q.x - p.x) * (r.y - q.y);
+    let val = (q.y - p.y).mul_add(r.x - q.x, -((q.x - p.x) * (r.y - q.y)));
     if val.abs() < CHECK_TOLERANCE {
         return 0;
     }
@@ -349,7 +334,7 @@ fn segment_gap_distance(s1: &Segment, s2: &Segment) -> f64 {
 
     // For Manhattan segments, the gap is max(dx, dy) when they're parallel,
     // or the Euclidean distance of the bounding box gap for L-shaped pairs.
-    (dx * dx + dy * dy).sqrt()
+    dx.hypot(dy)
 }
 
 /// Checks design rules: minimum spacing between cross-net segments and
@@ -357,11 +342,10 @@ fn segment_gap_distance(s1: &Segment, s2: &Segment) -> f64 {
 ///
 /// Uses spatial binning (same approach as shorts checking) to efficiently
 /// find nearby cross-net segment pairs on the same layer, then computes
-/// their gap distance and compares against the layer's min_spacing rule.
+/// their gap distance and compares against the layer's `min_spacing` rule.
 ///
-/// Returns Ok((spacing_violations, width_violations)) on completion, or
-/// Err if a fatal error occurs.
-fn check_design_rules(db: &NetlistDB) -> Result<(usize, usize), String> {
+/// Returns `(spacing_violations, width_violations)` on completion.
+fn check_design_rules(db: &NetlistDB) -> (usize, usize) {
     let spacing_count = std::sync::atomic::AtomicUsize::new(0);
     let width_count = std::sync::atomic::AtomicUsize::new(0);
 
@@ -380,7 +364,7 @@ fn check_design_rules(db: &NetlistDB) -> Result<(usize, usize), String> {
                     "Width violation: Net '{}' has diagonal segment on L{}: ({:.3},{:.3})->({:.3},{:.3})",
                     net.name, seg.layer, seg.p1.x, seg.p1.y, seg.p2.x, seg.p2.y
                 );
-                width_count.fetch_add(1, Ordering::Relaxed);
+                let _ = width_count.fetch_add(1, Ordering::Relaxed);
             }
         }
         let _ = net_idx;
@@ -391,10 +375,10 @@ fn check_design_rules(db: &NetlistDB) -> Result<(usize, usize), String> {
     // are close but don't overlap).
     let max_spacing: f64 = db.layers.iter().map(|l| l.min_spacing).fold(0.0, f64::max);
     if max_spacing <= 0.0 {
-        return Ok((
+        return (
             spacing_count.load(Ordering::Relaxed),
             width_count.load(Ordering::Relaxed),
-        ));
+        );
     }
 
     let spacing_bin_size = BIN_SIZE.max(max_spacing * 2.0);
@@ -466,22 +450,22 @@ fn check_design_rules(db: &NetlistDB) -> Result<(usize, usize), String> {
 
                 let gap = segment_gap_distance(s1, s2);
                 if gap > 0.0 && gap < min_space - CHECK_TOLERANCE {
-                    spacing_count.fetch_add(1, Ordering::Relaxed);
+                    let _ = spacing_count.fetch_add(1, Ordering::Relaxed);
                 }
             }
         }
     });
 
-    Ok((
+    (
         spacing_count.load(Ordering::Relaxed),
         width_count.load(Ordering::Relaxed),
-    ))
+    )
 }
 
 /// Checks for short circuits and illegal routing loops.
 ///
 /// Processes nets in parallel chunks, building per-chunk spatial bins to keep
-/// memory bounded. Each chunk inserts its segments into a local HashMap, then
+/// memory bounded. Each chunk inserts its segments into a local `HashMap`, then
 /// checks for intersections between segments from different nets within the
 /// same bin.
 fn check_shorts_and_loops(db: &NetlistDB) -> Result<(), String> {
@@ -538,7 +522,9 @@ fn check_shorts_and_loops(db: &NetlistDB) -> Result<(), String> {
                             s1.p1.x, s1.p1.y, s1.p2.x, s1.p2.y,
                             s2.p1.x, s2.p1.y, s2.p2.x, s2.p2.y
                         );
-                        error_msgs.lock().unwrap().push(msg);
+                        if let Ok(mut msgs) = error_msgs.lock() {
+                            msgs.push(msg);
+                        }
                     }
                 }
             }
@@ -547,9 +533,9 @@ fn check_shorts_and_loops(db: &NetlistDB) -> Result<(), String> {
 
     let total = short_count.load(Ordering::Relaxed);
     if total > 0 {
-        let msgs = error_msgs.into_inner().unwrap();
+        let msgs = error_msgs.into_inner().unwrap_or_default();
         let first = msgs.first().cloned().unwrap_or_default();
-        Err(format!("{} short(s) detected. First: {}", total, first))
+        Err(format!("{total} short(s) detected. First: {first}"))
     } else {
         Ok(())
     }
@@ -584,8 +570,10 @@ fn check_opens(db: &NetlistDB) -> Result<(), String> {
 
         let n = segments.len();
         if n == 0 {
-            if !error_found.swap(true, Ordering::Relaxed) {
-                *error_msg.lock().unwrap() = format!("Net '{}': Unrouted (No segments)", net.name);
+            if !error_found.swap(true, Ordering::Relaxed)
+                && let Ok(mut guard) = error_msg.lock()
+            {
+                *guard = format!("Net '{}': Unrouted (No segments)", net.name);
             }
             return;
         }
@@ -686,8 +674,10 @@ fn check_opens(db: &NetlistDB) -> Result<(), String> {
                 }
             }
             if !found {
-                if !error_found.swap(true, Ordering::Relaxed) {
-                    *error_msg.lock().unwrap() = format!(
+                if !error_found.swap(true, Ordering::Relaxed)
+                    && let Ok(mut guard) = error_msg.lock()
+                {
+                    *guard = format!(
                         "Net '{}': Pin {} at ({:.3},{:.3}) not connected to any wire.",
                         net.name, pin_idx_in_net, pin_pos.x, pin_pos.y
                     );
@@ -718,9 +708,10 @@ fn check_opens(db: &NetlistDB) -> Result<(), String> {
 
         for &seg_idx in &pin_segment_indices {
             if !visited[seg_idx] {
-                if !error_found.swap(true, Ordering::Relaxed) {
-                    *error_msg.lock().unwrap() =
-                        format!("Net '{}': Broken connectivity (Split net).", net.name);
+                if !error_found.swap(true, Ordering::Relaxed)
+                    && let Ok(mut guard) = error_msg.lock()
+                {
+                    *guard = format!("Net '{}': Broken connectivity (Split net).", net.name);
                 }
                 return;
             }
@@ -728,7 +719,7 @@ fn check_opens(db: &NetlistDB) -> Result<(), String> {
     });
 
     if error_found.load(Ordering::Relaxed) {
-        Err(error_msg.lock().unwrap().clone())
+        Err(error_msg.lock().map_or_else(|e| e.into_inner().clone(), |g| g.clone()))
     } else {
         Ok(())
     }
@@ -760,16 +751,16 @@ fn segments_overlap_2d(s1: &Segment, s2: &Segment) -> bool {
 
 /// Computes the distance from a point to a line segment.
 fn point_to_segment_dist(p: Point<f64>, a: Point<f64>, b: Point<f64>) -> f64 {
-    let l2 = (a.x - b.x).powi(2) + (a.y - b.y).powi(2);
+    let l2 = (a.x - b.x).mul_add(a.x - b.x, (a.y - b.y).powi(2));
     if l2 == 0.0 {
-        return ((p.x - a.x).powi(2) + (p.y - a.y).powi(2)).sqrt();
+        return (p.x - a.x).hypot(p.y - a.y);
     }
 
-    let t = ((p.x - a.x) * (b.x - a.x) + (p.y - a.y) * (b.y - a.y)) / l2;
+    let t = (p.x - a.x).mul_add(b.x - a.x, (p.y - a.y) * (b.y - a.y)) / l2;
     let t = t.clamp(0.0, 1.0);
 
     let proj_x = a.x + t * (b.x - a.x);
     let proj_y = a.y + t * (b.y - a.y);
 
-    ((p.x - proj_x).powi(2) + (p.y - proj_y).powi(2)).sqrt()
+    (p.x - proj_x).hypot(p.y - proj_y)
 }

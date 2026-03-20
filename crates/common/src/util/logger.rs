@@ -6,7 +6,7 @@
 
 /// Initializes the logging system with styled formatting.
 ///
-/// Configures env_logger to use Info level filtering with clean,
+/// Configures `env_logger` to use Info level filtering with clean,
 /// minimal output formatting. Initializes `yansi` TTY detection
 /// for stderr so colors are automatically disabled when piped.
 pub fn init() {

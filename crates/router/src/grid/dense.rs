@@ -1,4 +1,4 @@
-//! GCell Grid Implementation for Routing.
+//! `GCell` Grid Implementation for Routing.
 //!
 //! Implements an edge-based gcell grid where routing capacity is tracked on
 //! edges between adjacent gcells. Each gcell covers a physical region of the
@@ -17,6 +17,7 @@ use pare_common::util::visualization::CongestionProvider;
 /// Horizontal edges connect (x,y) to (x+1,y) and carry horizontal wires.
 /// Vertical edges connect (x,y) to (x,y+1) and carry vertical wires.
 /// Each edge has per-layer capacity, usage, and history cost.
+#[derive(Debug)]
 pub struct GCellGrid {
     width: u32,
     height: u32,
@@ -37,9 +38,9 @@ pub struct GCellGrid {
 }
 
 impl GCellGrid {
-    /// Creates a new GCellGrid from the design database with auto-computed capacities.
+    /// Creates a new `GCellGrid` from the design database with auto-computed capacities.
     ///
-    /// The gcell_size parameter specifies the physical size of each gcell in microns.
+    /// The `gcell_size` parameter specifies the physical size of each gcell in microns.
     /// Capacities are computed from the track definitions in the database: for each
     /// layer, the number of tracks crossing each gcell boundary determines the edge
     /// capacity. Horizontal layers get horizontal edge capacity, vertical layers get
@@ -69,8 +70,7 @@ impl GCellGrid {
                 needed
             };
             log::debug!(
-                "Auto-scaling gcell_size: {:.2} -> {:.2} (die: {:.0}x{:.0})",
-                gcell_size, scaled, die_w, die_h
+                "Auto-scaling gcell_size: {gcell_size:.2} -> {scaled:.2} (die: {die_w:.0}x{die_h:.0})",
             );
             scaled
         } else {
@@ -110,11 +110,7 @@ impl GCellGrid {
         grid.init_capacities(db);
 
         log::debug!(
-            "GCellGrid: {}x{} gcells ({:.2}um), {} layers",
-            grid_w,
-            grid_h,
-            gcell_size,
-            layers,
+            "GCellGrid: {grid_w}x{grid_h} gcells ({gcell_size:.2}um), {layers} layers",
         );
 
         for li in 0..layers {
@@ -184,8 +180,7 @@ impl GCellGrid {
                 db.tracks
                     .iter()
                     .find(|t| t.layer == layer.name && t.step > 0.001)
-                    .map(|t| t.step)
-                    .unwrap_or(0.28)
+                    .map_or(0.28, |t| t.step)
             };
 
             let tracks_per_gcell = (gcell_w / pitch).floor().max(1.0) as u16;
@@ -223,19 +218,19 @@ impl GCellGrid {
     }
 
     /// Returns the physical width of each gcell.
-    pub fn gcell_w(&self) -> f64 {
+    pub const fn gcell_w(&self) -> f64 {
         self.gcell_w
     }
 
     /// Returns the physical height of each gcell.
-    pub fn gcell_h(&self) -> f64 {
+    pub const fn gcell_h(&self) -> f64 {
         self.gcell_h
     }
 
     /// Computes index into horizontal edge arrays.
     /// Edge from (x,y) to (x+1,y) on layer.
     #[inline(always)]
-    fn h_idx(&self, x: u32, y: u32, layer: u8) -> usize {
+    const fn h_idx(&self, x: u32, y: u32, layer: u8) -> usize {
         let w_minus_1 = (self.width - 1) as usize;
         (layer as usize) * (self.height as usize) * w_minus_1
             + (y as usize) * w_minus_1
@@ -245,7 +240,7 @@ impl GCellGrid {
     /// Computes index into vertical edge arrays.
     /// Edge from (x,y) to (x,y+1) on layer.
     #[inline(always)]
-    fn v_idx(&self, x: u32, y: u32, layer: u8) -> usize {
+    const fn v_idx(&self, x: u32, y: u32, layer: u8) -> usize {
         let h_minus_1 = (self.height - 1) as usize;
         (layer as usize) * h_minus_1 * (self.width as usize)
             + (y as usize) * (self.width as usize)
@@ -255,7 +250,7 @@ impl GCellGrid {
     /// Computes cost for an edge given usage, capacity, and history.
     #[inline(always)]
     fn edge_cost(usage: u16, cap: u16, history: u16, collision_penalty: f64) -> f64 {
-        let base = 1.0 + history as f64 * 0.5;
+        let base = (history as f64).mul_add(0.5, 1.0);
         let overflow = if usage >= cap {
             (usage as u32 - cap as u32 + 1) as f64 * collision_penalty
         } else {

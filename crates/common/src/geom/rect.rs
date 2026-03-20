@@ -25,7 +25,7 @@ impl Rect {
     ///
     /// The caller must ensure that min.x <= max.x and min.y <= max.y
     /// for the rectangle to be valid.
-    pub fn new(min: Point<f64>, max: Point<f64>) -> Self {
+    pub const fn new(min: Point<f64>, max: Point<f64>) -> Self {
         Self { min, max }
     }
 
@@ -47,7 +47,7 @@ impl Rect {
     /// Two rectangles overlap if they share any interior points. This is
     /// used for collision detection during placement to ensure cells do
     /// not overlap after legalization.
-    pub fn overlaps(&self, other: &Rect) -> bool {
+    pub fn overlaps(&self, other: &Self) -> bool {
         self.min.x < other.max.x
             && self.max.x > other.min.x
             && self.min.y < other.max.y

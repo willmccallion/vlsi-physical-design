@@ -1,4 +1,4 @@
-//! Pattern Routing for Simple Nets on Edge-Based GCell Grid.
+//! Pattern Routing for Simple Nets on Edge-Based `GCell` Grid.
 //!
 //! Attempts L-shaped (1-bend) and Z-shaped (2-bend) routes before falling
 //! back to full A* maze routing. Uses proper layer assignment: horizontal
@@ -13,7 +13,7 @@ use pare_common::geom::coord::GridCoord;
 /// Attempts to route a 2-pin connection using pattern routes on the gcell grid.
 ///
 /// Tries L-shaped routes first (1 bend), then Z-shaped routes (2 bends).
-/// Returns the path as a vector of GridCoords if successful, None if the
+/// Returns the path as a vector of `GridCoords` if successful, None if the
 /// pattern routes are blocked and A* fallback is needed.
 pub fn try_pattern_route<G: RoutingGrid + ?Sized>(
     grid: &G,
@@ -47,7 +47,7 @@ pub fn try_pattern_route<G: RoutingGrid + ?Sized>(
     None
 }
 
-/// Finds a layer pair (horizontal_layer, vertical_layer) near the pin layers.
+/// Finds a layer pair (`horizontal_layer`, `vertical_layer`) near the pin layers.
 fn find_layer_pair(db: &NetlistDB, z1: u8, z2: u8, max_layers: u8) -> Option<(u8, u8)> {
     let base = z1.min(z2).max(1);
     let top = max_layers.min(base + 3);
@@ -70,7 +70,7 @@ fn find_layer_pair(db: &NetlistDB, z1: u8, z2: u8, max_layers: u8) -> Option<(u8
                     v_layer = Some(z);
                 }
             }
-            _ => {}
+            LayerDirection::Unknown => {}
         }
         if h_layer.is_some() && v_layer.is_some() {
             break;
@@ -238,7 +238,7 @@ fn try_z_route<G: RoutingGrid + ?Sized>(
 ) -> Option<Vec<GridCoord>> {
     // Z-route A: H-V-H pattern
     {
-        let mid_x = (start.x + end.x) / 2;
+        let mid_x = u32::midpoint(start.x, end.x);
         let mut path = Vec::new();
         add_via(&mut path, start.x, start.y, start.z, h_layer);
         let ok = trace_horizontal(grid, &mut path, start.x, mid_x, start.y, h_layer);
@@ -260,7 +260,7 @@ fn try_z_route<G: RoutingGrid + ?Sized>(
 
     // Z-route B: V-H-V pattern
     {
-        let mid_y = (start.y + end.y) / 2;
+        let mid_y = u32::midpoint(start.y, end.y);
         let mut path = Vec::new();
         add_via(&mut path, start.x, start.y, start.z, v_layer);
         let ok = trace_vertical(grid, &mut path, start.x, start.y, mid_y, v_layer);

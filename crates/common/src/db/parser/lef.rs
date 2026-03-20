@@ -114,7 +114,7 @@ pub fn parse(db: &mut NetlistDB, filename: &str) -> Result<()> {
             "MACRO" => {
                 current_macro = parts[1].to_string();
                 in_macro = true;
-                db.macro_pins.insert(current_macro.clone(), HashMap::new());
+                let _ = db.macro_pins.insert(current_macro.clone(), HashMap::new());
             }
             "PIN" => {
                 if in_macro {
@@ -132,13 +132,13 @@ pub fn parse(db: &mut NetlistDB, filename: &str) -> Result<()> {
                         parts[4].parse::<f64>(),
                     )
                 {
-                    let center_x = (x1 + x2) / 2.0;
-                    let center_y = (y1 + y2) / 2.0;
+                    let center_x = f64::midpoint(x1, x2);
+                    let center_y = f64::midpoint(y1, y2);
 
                     if let Some(pins) = db.macro_pins.get_mut(&current_macro)
                         && !pins.contains_key(&current_pin)
                     {
-                        pins.insert(current_pin.clone(), Point::new(center_x, center_y));
+                        let _ = pins.insert(current_pin.clone(), Point::new(center_x, center_y));
                     }
                 }
             }
@@ -146,7 +146,7 @@ pub fn parse(db: &mut NetlistDB, filename: &str) -> Result<()> {
                 if in_macro {
                     let w: f64 = parts[1].parse()?;
                     let h: f64 = parts[3].parse()?;
-                    db.macro_sizes.insert(current_macro.clone(), (w, h));
+                    let _ = db.macro_sizes.insert(current_macro.clone(), (w, h));
                 }
             }
             _ => {}

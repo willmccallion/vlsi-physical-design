@@ -50,21 +50,23 @@ enum Commands {
 /// benchmark name and looked up in `configs/<mode>/`.
 fn resolve_config(name: &str, mode: &str) -> PathBuf {
     let path = Path::new(name);
-    if path.exists() || name.contains('/') || name.ends_with(".toml") {
+    if path.exists() || name.contains('/') || std::path::Path::new(name)
+        .extension()
+        .is_some_and(|ext| ext.eq_ignore_ascii_case("toml")) {
         return path.to_path_buf();
     }
-    PathBuf::from(format!("configs/{}/{}.toml", mode, name))
+    PathBuf::from(format!("configs/{mode}/{name}.toml"))
 }
 
 fn load_config(path: &Path) -> anyhow::Result<Config> {
     if !path.exists() {
-        return Err(anyhow::anyhow!("Config file not found: {:?}", path));
+        return Err(anyhow::anyhow!("Config file not found: {}", path.display()));
     }
     ui::header("Config", &path.display().to_string());
     let config_str = std::fs::read_to_string(path)
-        .map_err(|e| anyhow::anyhow!("Failed to read config file: {}", e))?;
+        .map_err(|e| anyhow::anyhow!("Failed to read config file: {e}"))?;
     toml::from_str(&config_str)
-        .map_err(|e| anyhow::anyhow!("Failed to parse config TOML: {}", e))
+        .map_err(|e| anyhow::anyhow!("Failed to parse config TOML: {e}"))
 }
 
 /// Validates that a pair of place/route configs are consistent for a flow run.
@@ -134,7 +136,10 @@ fn main() -> anyhow::Result<()> {
 
     match args.command {
         Commands::Place { ref config } => {
-            let path = resolve_config(config.to_str().unwrap(), "place");
+            let Some(config_s) = config.to_str() else {
+                return Err(anyhow::anyhow!("config path is not valid UTF-8"));
+            };
+            let path = resolve_config(config_s, "place");
             let config = load_config(&path)?;
             validate_input_paths(&config)?;
             prepare_output_dir(&config.input.output_def)?;
@@ -144,7 +149,10 @@ fn main() -> anyhow::Result<()> {
             }
         }
         Commands::Route { ref config } => {
-            let path = resolve_config(config.to_str().unwrap(), "route");
+            let Some(config_s) = config.to_str() else {
+                return Err(anyhow::anyhow!("config path is not valid UTF-8"));
+            };
+            let path = resolve_config(config_s, "route");
             let config = load_config(&path)?;
             if config.input.bookshelf_aux_file.is_none() {
                 validate_lef_paths(&config)?;
@@ -152,15 +160,14 @@ fn main() -> anyhow::Result<()> {
 
             // Route-only: read def_file directly (the pre-placed DEF).
             // Fallback to output_def for backward compatibility.
-            let placed_def = if !config.input.def_file.is_empty() {
-                &config.input.def_file
-            } else {
+            let placed_def = if config.input.def_file.is_empty() {
                 &config.input.output_def
+            } else {
+                &config.input.def_file
             };
             if !Path::new(placed_def).exists() {
                 return Err(anyhow::anyhow!(
-                    "DEF file not found: '{}'. Run `pare place` first or point def_file at a placed design.",
-                    placed_def
+                    "DEF file not found: '{placed_def}'. Run `pare place` first or point def_file at a placed design.",
                 ));
             }
 
@@ -174,7 +181,9 @@ fn main() -> anyhow::Result<()> {
             }
         }
         Commands::Flow { ref config } => {
-            let config_str = config.to_str().unwrap();
+            let Some(config_str) = config.to_str() else {
+                return Err(anyhow::anyhow!("config path is not valid UTF-8"));
+            };
             let place_path = resolve_config(config_str, "place");
             let route_path = resolve_config(config_str, "route");
 
@@ -199,9 +208,8 @@ fn main() -> anyhow::Result<()> {
             }
 
             // Flow: routing reads from placement output
-            let routing_result = match run_routing(&config, &config.input.output_def) {
-                Ok(r) => r,
-                Err(_) => std::process::exit(1),
+            let Ok(routing_result) = run_routing(&config, &config.input.output_def) else {
+                std::process::exit(1)
             };
 
             // Congestion-driven placement iterations
@@ -235,7 +243,7 @@ fn validate_lef_paths(config: &Config) -> anyhow::Result<()> {
     }
     for lef in &config.input.lef_files {
         if !Path::new(lef).exists() {
-            return Err(anyhow::anyhow!("Input LEF file missing: {}", lef));
+            return Err(anyhow::anyhow!("Input LEF file missing: {lef}"));
         }
     }
     Ok(())
@@ -245,7 +253,7 @@ fn validate_lef_paths(config: &Config) -> anyhow::Result<()> {
 fn validate_input_paths(config: &Config) -> anyhow::Result<()> {
     if let Some(aux) = &config.input.bookshelf_aux_file {
         if !Path::new(aux).exists() {
-            return Err(anyhow::anyhow!("Input AUX file missing: {}", aux));
+            return Err(anyhow::anyhow!("Input AUX file missing: {aux}"));
         }
         return Ok(());
     }
@@ -266,14 +274,14 @@ fn prepare_output_dir(path_str: &str) -> anyhow::Result<()> {
         && !parent.exists()
         && !parent.as_os_str().is_empty()
     {
-        log::debug!("Creating output directory: {:?}", parent);
+        log::debug!("Creating output directory: {}", parent.display());
         std::fs::create_dir_all(parent)?;
     }
     Ok(())
 }
 
 /// Resolves the output directory for generated files.
-/// Priority: config.input.output_dir > parent of output_def > "output/"
+/// Priority: `config.input.output_dir` > parent of `output_def` > "output/"
 fn resolve_output_dir(config: &Config) -> PathBuf {
     if let Some(ref dir) = config.input.output_dir {
         return PathBuf::from(dir);
@@ -281,15 +289,13 @@ fn resolve_output_dir(config: &Config) -> PathBuf {
     Path::new(&config.input.output_def)
         .parent()
         .filter(|p| !p.as_os_str().is_empty())
-        .map(|p| p.to_path_buf())
-        .unwrap_or_else(|| PathBuf::from("output"))
+        .map_or_else(|| PathBuf::from("output"), Path::to_path_buf)
 }
 
 /// Distributes I/O pins uniformly around the die perimeter.
 fn place_io_pins(db: &mut NetlistDB) {
-    let io_cell_id = match db.cell_name_map.get("IO_VIRTUAL_CELL") {
-        Some(&id) => id,
-        None => return,
+    let Some(&io_cell_id) = db.cell_name_map.get("IO_VIRTUAL_CELL") else {
+        return;
     };
 
     let die_w = db.die_area.width();
@@ -317,11 +323,11 @@ fn place_io_pins(db: &mut NetlistDB) {
         } else if current_dist < die_h + die_w {
             x = current_dist - die_h;
             y = die_h;
-        } else if current_dist < 2.0 * die_h + die_w {
+        } else if current_dist < 2.0f64.mul_add(die_h, die_w) {
             x = die_w;
             y = die_h - (current_dist - (die_h + die_w));
         } else {
-            x = die_w - (current_dist - (2.0 * die_h + die_w));
+            x = die_w - (current_dist - (2.0f64.mul_add(die_h, die_w)));
             y = 0.0;
         }
 
@@ -332,7 +338,7 @@ fn place_io_pins(db: &mut NetlistDB) {
 
         current_dist += step;
     }
-    log::debug!("Placed {} IO pins around the perimeter.", num_pins);
+    log::debug!("Placed {num_pins} IO pins around the perimeter.");
 }
 
 /// Executes the complete placement workflow from netlist parsing to legalization.
@@ -342,12 +348,12 @@ fn run_placement(config: &Config) -> anyhow::Result<()> {
     if let Some(aux_path) = &config.input.bookshelf_aux_file {
         ui::header("Input", aux_path);
         pare_common::db::parser::bookshelf::parse(&mut db, aux_path)
-            .map_err(|e| anyhow::anyhow!("Invalid Bookshelf syntax in '{}': {}", aux_path, e))?;
+            .map_err(|e| anyhow::anyhow!("Invalid Bookshelf syntax in '{aux_path}': {e}"))?;
     } else {
         if let Some(lef_path) = config.input.lef_files.first() {
             ui::header("Input", lef_path);
             pare_common::db::parser::lef::parse(&mut db, lef_path)
-                .map_err(|e| anyhow::anyhow!("Invalid LEF syntax in '{}': {}", lef_path, e))?;
+                .map_err(|e| anyhow::anyhow!("Invalid LEF syntax in '{lef_path}': {e}"))?;
         }
 
         ui::header("Input", &config.input.def_file);
@@ -372,7 +378,7 @@ fn run_placement(config: &Config) -> anyhow::Result<()> {
     let utilization = total_cell_area / die_area;
 
     // Auto-detect placement parameters from design properties
-    let die_diag = (db.die_area.width().powi(2) + db.die_area.height().powi(2)).sqrt();
+    let die_diag = db.die_area.width().hypot(db.die_area.height());
 
     let wa_gamma = config.global_placement.wa_gamma.unwrap_or(die_diag * 1.5);
 
@@ -393,7 +399,7 @@ fn run_placement(config: &Config) -> anyhow::Result<()> {
                 .filter(|c| !c.is_fixed)
                 .map(|c| c.height)
                 .collect();
-            heights.sort_by(|a, b| a.partial_cmp(b).unwrap());
+            heights.sort_by(f64::total_cmp);
             let median_height = if heights.is_empty() {
                 1.0
             } else {
@@ -408,16 +414,16 @@ fn run_placement(config: &Config) -> anyhow::Result<()> {
     let phase_start = Instant::now();
     ui::section("Placement");
     ui::stat_row(
-        "Cells:", &format!("{}", movable_cells),
-        "Nets:", &format!("{}", num_nets),
+        "Cells:", &format!("{movable_cells}"),
+        "Nets:", &format!("{num_nets}"),
     );
     ui::stat_row(
         "Utilization:", &format!("{:.2}%", utilization * 100.0),
-        "Target Density:", &format!("{:.2}", target_density),
+        "Target Density:", &format!("{target_density:.2}"),
     );
     ui::stat_row(
-        "Bin Grid:", &format!("{}x{}", bin_dimension, bin_dimension),
-        "WA Gamma:", &format!("{:.1}", wa_gamma),
+        "Bin Grid:", &format!("{bin_dimension}x{bin_dimension}"),
+        "WA Gamma:", &format!("{wa_gamma:.1}"),
     );
 
     let mut physics = PhysicsContext::new(bin_dimension, bin_dimension);
@@ -455,14 +461,14 @@ fn run_placement(config: &Config) -> anyhow::Result<()> {
 
     let output_dir = Path::new(&config.input.output_def)
         .parent()
-        .unwrap_or(Path::new("."));
+        .unwrap_or_else(|| Path::new("."));
 
     // --- Legalization ---
     let phase_start = Instant::now();
     ui::phase("Legalization");
     let legalizer = pare_placer::legalize::abacus::AbacusLegalizer::new();
     legalizer.legalize(&mut db);
-    ui::check(&format!("Legalized {} cells", movable_cells));
+    ui::check(&format!("Legalized {movable_cells} cells"));
 
     ui::phase_time(phase_start.elapsed().as_secs_f64());
 
@@ -475,12 +481,14 @@ fn run_placement(config: &Config) -> anyhow::Result<()> {
     let phase_start = Instant::now();
     ui::phase("Output");
     let nesterov_png = output_dir.join("nesterov_placer.png");
-    visualization::draw_placement(&db, nesterov_png.to_str().unwrap(), 1000, 1000);
-    ui::wrote(nesterov_png.to_str().unwrap());
+    let nesterov_png_str = nesterov_png.to_str().ok_or_else(|| anyhow::anyhow!("non-UTF-8 path"))?;
+    visualization::draw_placement(&db, nesterov_png_str, 1000, 1000);
+    ui::wrote(nesterov_png_str);
 
     let placed_png = output_dir.join("placed.png");
-    visualization::draw_placement(&db, placed_png.to_str().unwrap(), 1000, 1000);
-    ui::wrote(placed_png.to_str().unwrap());
+    let placed_png_str = placed_png.to_str().ok_or_else(|| anyhow::anyhow!("non-UTF-8 path"))?;
+    visualization::draw_placement(&db, placed_png_str, 1000, 1000);
+    ui::wrote(placed_png_str);
 
     save_def(&db, &config.input.output_def)?;
     ui::wrote(&config.input.output_def);
@@ -492,7 +500,7 @@ fn run_placement(config: &Config) -> anyhow::Result<()> {
 /// Re-runs placement with routing congestion feedback.
 ///
 /// Loads the previously placed design, feeds the congestion map into the
-/// PhysicsContext, and re-optimizes cell positions to push cells away from
+/// `PhysicsContext`, and re-optimizes cell positions to push cells away from
 /// congested regions. The result is legalized and saved back to the output DEF.
 fn run_congestion_placement(
     config: &Config,
@@ -502,20 +510,20 @@ fn run_congestion_placement(
 
     if let Some(aux_path) = &config.input.bookshelf_aux_file {
         pare_common::db::parser::bookshelf::parse(&mut db, aux_path)
-            .map_err(|e| anyhow::anyhow!("Bookshelf parse error: {}", e))?;
+            .map_err(|e| anyhow::anyhow!("Bookshelf parse error: {e}"))?;
     } else {
         if let Some(lef_path) = config.input.lef_files.first() {
             pare_common::db::parser::lef::parse(&mut db, lef_path)
-                .map_err(|e| anyhow::anyhow!("LEF parse error: {}", e))?;
+                .map_err(|e| anyhow::anyhow!("LEF parse error: {e}"))?;
         }
         // Load the placed DEF (output from previous placement)
         pare_common::db::parser::def::parse(&mut db, &config.input.output_def)
-            .map_err(|e| anyhow::anyhow!("DEF parse error: {}", e))?;
+            .map_err(|e| anyhow::anyhow!("DEF parse error: {e}"))?;
     }
 
     place_io_pins(&mut db);
 
-    let die_diag = (db.die_area.width().powi(2) + db.die_area.height().powi(2)).sqrt();
+    let die_diag = db.die_area.width().hypot(db.die_area.height());
     let wa_gamma = config.global_placement.wa_gamma.unwrap_or(die_diag * 1.5);
     let utilization = {
         let total_cell_area: f64 = db.cells.iter()
@@ -537,7 +545,7 @@ fn run_congestion_placement(
                 .filter(|c| !c.is_fixed)
                 .map(|c| c.height)
                 .collect();
-            heights.sort_by(|a, b| a.partial_cmp(b).unwrap());
+            heights.sort_by(f64::total_cmp);
             let median_height = if heights.is_empty() { 1.0 } else { heights[heights.len() / 2] };
             (median_height * 0.0006).clamp(0.005, 1.0)
         });
@@ -592,9 +600,9 @@ fn run_congestion_placement(
 
 /// Preloads cell geometry information from a Bookshelf nodes file.
 fn preload_bookshelf_geometry(db: &mut NetlistDB, aux_path: &str) -> anyhow::Result<()> {
-    log::debug!("Preloading Bookshelf Geometry from AUX: {}", aux_path);
+    log::debug!("Preloading Bookshelf Geometry from AUX: {aux_path}");
     let path = Path::new(aux_path);
-    let parent = path.parent().unwrap_or(Path::new("."));
+    let parent = path.parent().unwrap_or_else(|| Path::new("."));
     let file = File::open(path)?;
     let reader = BufReader::new(file);
 
@@ -608,7 +616,9 @@ fn preload_bookshelf_geometry(db: &mut NetlistDB, aux_path: &str) -> anyhow::Res
         }
         if parts[0].starts_with("RowBasedPlacement") {
             for part in &parts[2..] {
-                if part.ends_with(".nodes") {
+                if std::path::Path::new(part)
+                    .extension()
+                    .is_some_and(|ext| ext.eq_ignore_ascii_case("nodes")) {
                     nodes_file = part.to_string();
                 }
             }
@@ -620,7 +630,7 @@ fn preload_bookshelf_geometry(db: &mut NetlistDB, aux_path: &str) -> anyhow::Res
     }
 
     let nodes_path = parent.join(&nodes_file);
-    log::debug!("Reading Nodes: {:?}", nodes_path);
+    log::debug!("Reading Nodes: {}", nodes_path.display());
     let nfile = File::open(nodes_path)?;
     let nreader = BufReader::new(nfile);
 
@@ -644,17 +654,18 @@ fn preload_bookshelf_geometry(db: &mut NetlistDB, aux_path: &str) -> anyhow::Res
 
         let lib_name = format!("BLK_{}_{}", width as i32, height as i32);
 
-        db.macro_sizes.insert(lib_name, (width, height));
+        let _ = db.macro_sizes.insert(lib_name, (width, height));
     }
     Ok(())
 }
 
 /// Executes the complete routing workflow from placed netlist to routed design.
-/// Returns the RoutingResult containing congestion data for feedback.
+/// Returns the `RoutingResult` containing congestion data for feedback.
 ///
 /// `placed_def` is the path to the DEF file to route. For route-only use this
 /// is `def_file` directly; for the flow pipeline this is `output_def`.
 fn run_routing(config: &Config, placed_def: &str) -> anyhow::Result<pare_router::RoutingResult> {
+    use pare_common::db::core::LayerDirection;
     let mut db = NetlistDB::new();
 
     let is_bookshelf = config.input.bookshelf_aux_file.is_some();
@@ -667,14 +678,14 @@ fn run_routing(config: &Config, placed_def: &str) -> anyhow::Result<pare_router:
         && let Some(lef_path) = config.input.lef_files.first()
         && Path::new(lef_path).exists()
     {
-        log::debug!("Parsing LEF: {}", lef_path);
+        log::debug!("Parsing LEF: {lef_path}");
         pare_common::db::parser::lef::parse(&mut db, lef_path)
-            .map_err(|e| anyhow::anyhow!("Invalid LEF syntax in '{}': {}", lef_path, e))?;
+            .map_err(|e| anyhow::anyhow!("Invalid LEF syntax in '{lef_path}': {e}"))?;
     }
 
-    log::debug!("Parsing Placed DEF: {}", placed_def);
+    log::debug!("Parsing Placed DEF: {placed_def}");
     pare_common::db::parser::def::parse(&mut db, placed_def)
-        .map_err(|e| anyhow::anyhow!("Invalid Placed DEF syntax in '{}': {}", placed_def, e))?;
+        .map_err(|e| anyhow::anyhow!("Invalid Placed DEF syntax in '{placed_def}': {e}"))?;
 
     if is_bookshelf || db.layers.is_empty() {
         log::debug!("Bookshelf/No-LEF: Calculating routing pitch from cell geometry...");
@@ -690,8 +701,7 @@ fn run_routing(config: &Config, placed_def: &str) -> anyhow::Result<pare_router:
         let std_height = height_counts
             .into_iter()
             .max_by_key(|&(_, count)| count)
-            .map(|(h, _)| h as f64 / 1000.0)
-            .unwrap_or(16.0);
+            .map_or(16.0, |(h, _)| h as f64 / 1000.0);
 
         let pitch = std_height / 16.0;
         let width = pitch * 0.5;
@@ -699,16 +709,12 @@ fn run_routing(config: &Config, placed_def: &str) -> anyhow::Result<pare_router:
         let num_layers = config.input.num_layers.max(2);
 
         log::warn!(
-            "Layer data missing! Synthesizing {} layers (Cell Height={:.2}, Pitch={:.2}).",
-            num_layers,
-            std_height,
-            pitch
+            "Layer data missing! Synthesizing {num_layers} layers (Cell Height={std_height:.2}, Pitch={pitch:.2}).",
         );
 
         db.layers.clear();
         db.layer_name_map.clear();
 
-        use pare_common::db::core::LayerDirection;
         for i in 0..num_layers {
             let name = format!("M{}", i + 1);
             let dir = if i % 2 == 0 {
@@ -726,9 +732,11 @@ fn run_routing(config: &Config, placed_def: &str) -> anyhow::Result<pare_router:
 
     let phase_start = Instant::now();
     ui::section("Routing");
+    let net_count = db.num_nets();
+    let layer_count = db.layers.len();
     ui::stat_row(
-        "Nets:", &format!("{}", db.num_nets()),
-        "Layers:", &format!("{}", db.layers.len()),
+        "Nets:", &format!("{net_count}"),
+        "Layers:", &format!("{layer_count}"),
     );
 
     let routing_result = pare_router::route(&mut db, &config.global_routing, &config.detailed_routing)
@@ -738,7 +746,7 @@ fn run_routing(config: &Config, placed_def: &str) -> anyhow::Result<pare_router:
     // --- Verification ---
     let phase_start = Instant::now();
     ui::phase("Verification");
-    check::run(&db).map_err(|e| anyhow::anyhow!("Verification Failed: {}", e))?;
+    check::run(&db).map_err(|e| anyhow::anyhow!("Verification Failed: {e}"))?;
     ui::phase_time(phase_start.elapsed().as_secs_f64());
 
     // --- Output ---
@@ -750,13 +758,14 @@ fn run_routing(config: &Config, placed_def: &str) -> anyhow::Result<pare_router:
     }
 
     let routed_png = output_dir.join("routed.png");
-    visualization::draw_routed_design(&db, routed_png.to_str().unwrap(), 2000, 2000);
-    ui::wrote(routed_png.to_str().unwrap());
+    let routed_png_str = routed_png.to_str().ok_or_else(|| anyhow::anyhow!("non-UTF-8 path"))?;
+    visualization::draw_routed_design(&db, routed_png_str, 2000, 2000);
+    ui::wrote(routed_png_str);
 
     let output_path = output_dir.join("routed.def");
-
-    save_def(&db, output_path.to_str().unwrap())?;
-    ui::wrote(output_path.to_str().unwrap());
+    let output_path_str = output_path.to_str().ok_or_else(|| anyhow::anyhow!("non-UTF-8 path"))?;
+    save_def(&db, output_path_str)?;
+    ui::wrote(output_path_str);
     ui::phase_time(phase_start.elapsed().as_secs_f64());
 
     Ok(routing_result)
@@ -777,7 +786,7 @@ fn save_def(db: &NetlistDB, filename: &str) -> std::io::Result<()> {
     let y1 = (db.die_area.min.y * 1000.0) as i32;
     let x2 = (db.die_area.max.x * 1000.0) as i32;
     let y2 = (db.die_area.max.y * 1000.0) as i32;
-    writeln!(file, "DIEAREA ( {} {} ) ( {} {} ) ;", x1, y1, x2, y2)?;
+    writeln!(file, "DIEAREA ( {x1} {y1} ) ( {x2} {y2} ) ;")?;
 
     let real_cells: Vec<usize> = (0..db.num_cells())
         .filter(|&i| db.cells[i].name != "IO_VIRTUAL_CELL")
@@ -835,9 +844,9 @@ fn save_def(db: &NetlistDB, filename: &str) -> std::io::Result<()> {
             let pin_name = &db.pin_names[pin_id.index()];
 
             if cell_name == "IO_VIRTUAL_CELL" {
-                write!(file, "( PIN {} ) ", pin_name)?;
+                write!(file, "( PIN {pin_name} ) ")?;
             } else {
-                write!(file, "( {} {} ) ", cell_name, pin_name)?;
+                write!(file, "( {cell_name} {pin_name} ) ")?;
             }
         }
         writeln!(file)?;
@@ -848,22 +857,19 @@ fn save_def(db: &NetlistDB, filename: &str) -> std::io::Result<()> {
             let x2 = (seg.p2.x * 1000.0).round() as i32;
             let y2 = (seg.p2.y * 1000.0).round() as i32;
 
+            let layer_name = &db.layers[seg.layer as usize].name;
             if (x1 - x2).abs() < 2 && (y1 - y2).abs() < 2 {
-                let layer_name = &db.layers[seg.layer as usize].name;
                 let next_layer_idx = (seg.layer as usize + 1).min(db.layers.len() - 1);
                 let next_layer_name = &db.layers[next_layer_idx].name;
-                let via_name = format!("VIA_{}_{}", layer_name, next_layer_name);
+                let via_name = format!("VIA_{layer_name}_{next_layer_name}");
                 writeln!(
                     file,
-                    "  + ROUTED {} ( {} {} ) {} ",
-                    layer_name, x1, y1, via_name
+                    "  + ROUTED {layer_name} ( {x1} {y1} ) {via_name} ",
                 )?;
             } else {
-                let layer_name = &db.layers[seg.layer as usize].name;
                 writeln!(
                     file,
-                    "  + ROUTED {} ( {} {} ) ( {} {} )",
-                    layer_name, x1, y1, x2, y2
+                    "  + ROUTED {layer_name} ( {x1} {y1} ) ( {x2} {y2} )",
                 )?;
             }
         }

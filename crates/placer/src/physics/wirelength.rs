@@ -91,11 +91,11 @@ pub fn compute_wa_gradient(
             let exp_y_pos = ((pos.y - max_y) * inv_gamma).exp();
             let exp_y_neg = ((min_y - pos.y) * inv_gamma).exp();
 
-            let grad_x = ((1.0 + (pos.x - wa_x_pos) * inv_gamma) * exp_x_pos / sum_exp_x_pos)
-                - ((1.0 - (pos.x - wa_x_neg) * inv_gamma) * exp_x_neg / sum_exp_x_neg);
+            let grad_x = ((pos.x - wa_x_pos).mul_add(inv_gamma, 1.0) * exp_x_pos / sum_exp_x_pos)
+                - ((pos.x - wa_x_neg).mul_add(-inv_gamma, 1.0) * exp_x_neg / sum_exp_x_neg);
 
-            let grad_y = ((1.0 + (pos.y - wa_y_pos) * inv_gamma) * exp_y_pos / sum_exp_y_pos)
-                - ((1.0 - (pos.y - wa_y_neg) * inv_gamma) * exp_y_neg / sum_exp_y_neg);
+            let grad_y = ((pos.y - wa_y_pos).mul_add(inv_gamma, 1.0) * exp_y_pos / sum_exp_y_pos)
+                - ((pos.y - wa_y_neg).mul_add(-inv_gamma, 1.0) * exp_y_neg / sum_exp_y_neg);
 
             gradients[cell_id.index()].x += grad_x * net.weight;
             gradients[cell_id.index()].y += grad_y * net.weight;

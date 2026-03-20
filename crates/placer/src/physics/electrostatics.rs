@@ -55,9 +55,9 @@ pub fn compute_density_force(
         for r in start_row..end_row {
             for c in start_col..end_col {
                 // Bin bounding box
-                let bx_min = db.die_area.min.x + (c as f64) * bin_w;
+                let bx_min = (c as f64).mul_add(bin_w, db.die_area.min.x);
                 let bx_max = bx_min + bin_w;
-                let by_min = db.die_area.min.y + (r as f64) * bin_h;
+                let by_min = (r as f64).mul_add(bin_h, db.die_area.min.y);
                 let by_max = by_min + bin_h;
 
                 // Overlap area between cell and bin
@@ -73,7 +73,7 @@ pub fn compute_density_force(
 
     // Normalize to density and compute overflow
     let mut overflow = 0.0;
-    for val in ctx.density_map.iter_mut() {
+    for val in &mut ctx.density_map {
         *val /= bin_area;
         if *val > target_density {
             overflow += (*val - target_density).powi(2);

@@ -12,7 +12,7 @@ use std::ops::{Add, AddAssign, Div, Mul, Sub};
 /// T allows the point to work with different numeric types (f64 for physical
 /// coordinates, i32 for integer coordinates, etc.). The C representation
 /// ensures compatibility with external libraries that expect struct layout.
-#[derive(Clone, Copy, Debug, Default, PartialEq)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 #[repr(C)]
 pub struct Point<T> {
     /// X coordinate of the point.
@@ -23,7 +23,7 @@ pub struct Point<T> {
 
 impl<T> Point<T> {
     /// Creates a new point with the specified X and Y coordinates.
-    pub fn new(x: T, y: T) -> Self {
+    pub const fn new(x: T, y: T) -> Self {
         Self { x, y }
     }
 }

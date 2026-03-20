@@ -21,10 +21,10 @@ use std::path::Path;
 /// height heuristics. Returns an error if any required file is missing or malformed.
 pub fn parse(db: &mut NetlistDB, aux_filename: &str) -> Result<()> {
     let aux_path = Path::new(aux_filename);
-    let parent_dir = aux_path.parent().unwrap_or(Path::new("."));
+    let parent_dir = aux_path.parent().unwrap_or_else(|| Path::new("."));
 
     let file =
-        File::open(aux_path).context(format!("Failed to open AUX file: {}", aux_filename))?;
+        File::open(aux_path).context(format!("Failed to open AUX file: {aux_filename}"))?;
     let reader = BufReader::new(file);
 
     let mut nodes_file = String::new();
@@ -40,13 +40,14 @@ pub fn parse(db: &mut NetlistDB, aux_filename: &str) -> Result<()> {
         }
         if parts[0].starts_with("RowBasedPlacement") {
             for part in &parts[2..] {
-                if part.ends_with(".nodes") {
+                let ext = Path::new(part).extension().and_then(|e| e.to_str()).unwrap_or("");
+                if ext == "nodes" {
                     nodes_file = part.to_string();
-                } else if part.ends_with(".nets") {
+                } else if ext == "nets" {
                     nets_file = part.to_string();
-                } else if part.ends_with(".pl") {
+                } else if ext == "pl" {
                     pl_file = part.to_string();
-                } else if part.ends_with(".scl") {
+                } else if ext == "scl" {
                     scl_file = part.to_string();
                 }
             }
@@ -55,22 +56,26 @@ pub fn parse(db: &mut NetlistDB, aux_filename: &str) -> Result<()> {
 
     if !nodes_file.is_empty() {
         let path = parent_dir.join(&nodes_file);
-        parse_nodes(db, path.to_str().unwrap())?;
+        let path_str = path.to_str().ok_or_else(|| anyhow::anyhow!("Non-UTF-8 path: {}", path.display()))?;
+        parse_nodes(db, path_str)?;
     }
 
     if !pl_file.is_empty() {
         let path = parent_dir.join(&pl_file);
-        parse_pl(db, path.to_str().unwrap())?;
+        let path_str = path.to_str().ok_or_else(|| anyhow::anyhow!("Non-UTF-8 path: {}", path.display()))?;
+        parse_pl(db, path_str)?;
     }
 
     if !scl_file.is_empty() {
         let path = parent_dir.join(&scl_file);
-        parse_scl(db, path.to_str().unwrap())?;
+        let path_str = path.to_str().ok_or_else(|| anyhow::anyhow!("Non-UTF-8 path: {}", path.display()))?;
+        parse_scl(db, path_str)?;
     }
 
     if !nets_file.is_empty() {
         let path = parent_dir.join(&nets_file);
-        parse_nets(db, path.to_str().unwrap())?;
+        let path_str = path.to_str().ok_or_else(|| anyhow::anyhow!("Non-UTF-8 path: {}", path.display()))?;
+        parse_nets(db, path_str)?;
     }
 
     if db.layers.is_empty() {
@@ -85,17 +90,14 @@ pub fn parse(db: &mut NetlistDB, aux_filename: &str) -> Result<()> {
         let std_height = height_counts
             .into_iter()
             .max_by_key(|&(_, count)| count)
-            .map(|(h, _)| h as f64 / 1000.0)
-            .unwrap_or(16.0);
+            .map_or(16.0, |(h, _)| h as f64 / 1000.0);
 
         let pitch = std_height / 8.0;
         let width = pitch * 0.5;
 
         log::warn!("Bookshelf: No layers defined. Synthesizing 6 default layers.");
         log::debug!(
-            "Bookshelf: Detected StdCell Height = {:.2}. Setting Layer Pitch = {:.2}",
-            std_height,
-            pitch
+            "Bookshelf: Detected StdCell Height = {std_height:.2}. Setting Layer Pitch = {pitch:.2}"
         );
 
         db.add_layer("M1".to_string(), LayerDirection::Horizontal, pitch, width);
@@ -112,11 +114,11 @@ pub fn parse(db: &mut NetlistDB, aux_filename: &str) -> Result<()> {
 /// Parses the Bookshelf .nodes file containing cell definitions.
 ///
 /// Reads node entries specifying cell names, widths, heights, and terminal
-/// status. Creates library cell entries in macro_sizes for later reference
+/// status. Creates library cell entries in `macro_sizes` for later reference
 /// and adds cell instances to the database. Terminal nodes are marked as
 /// fixed cells that cannot be moved by the placer.
 fn parse_nodes(db: &mut NetlistDB, filename: &str) -> Result<()> {
-    log::debug!("Parsing Nodes: {}", filename);
+    log::debug!("Parsing Nodes: {filename}");
     let file = File::open(filename)?;
     let reader = BufReader::new(file);
 
@@ -144,10 +146,10 @@ fn parse_nodes(db: &mut NetlistDB, filename: &str) -> Result<()> {
         let lib_name = format!("BLK_{}_{}", width as i32, height as i32);
 
         if !db.macro_sizes.contains_key(&lib_name) {
-            db.macro_sizes.insert(lib_name.clone(), (width, height));
+            let _ = db.macro_sizes.insert(lib_name.clone(), (width, height));
         }
 
-        db.add_cell(name, lib_name, width, height, is_terminal);
+        let _ = db.add_cell(name, lib_name, width, height, is_terminal);
     }
     Ok(())
 }
@@ -159,7 +161,7 @@ fn parse_nodes(db: &mut NetlistDB, filename: &str) -> Result<()> {
 /// swapping width and height for east/west orientations. Fixed placements
 /// are marked in the cell data to prevent movement during optimization.
 fn parse_pl(db: &mut NetlistDB, filename: &str) -> Result<()> {
-    log::debug!("Parsing PL: {}", filename);
+    log::debug!("Parsing PL: {filename}");
     let file = File::open(filename)?;
     let reader = BufReader::new(file);
 
@@ -180,10 +182,7 @@ fn parse_pl(db: &mut NetlistDB, filename: &str) -> Result<()> {
         let y: f64 = parts[2].parse().unwrap_or(0.0);
         let is_fixed = line.contains("FIXED");
 
-        let mut orientation = "N";
-        if parts.len() >= 5 && parts[3] == ":" {
-            orientation = parts[4];
-        }
+        let orientation = if parts.len() >= 5 && parts[3] == ":" { parts[4] } else { "N" };
 
         if let Some(&id) = db.cell_name_map.get(name) {
             db.positions[id.index()] = Point::new(x, y);
@@ -211,7 +210,7 @@ fn parse_pl(db: &mut NetlistDB, filename: &str) -> Result<()> {
 /// to compute the die area bounds. The die area is inferred from the union
 /// of all row extents, providing the placement region for the design.
 fn parse_scl(db: &mut NetlistDB, filename: &str) -> Result<()> {
-    log::debug!("Parsing SCL: {}", filename);
+    log::debug!("Parsing SCL: {filename}");
     let file = File::open(filename)?;
     let reader = BufReader::new(file);
 
@@ -277,7 +276,7 @@ fn parse_scl(db: &mut NetlistDB, filename: &str) -> Result<()> {
 /// assigned sequential names (n0, n1, ...) since the format does not
 /// provide explicit net names.
 fn parse_nets(db: &mut NetlistDB, filename: &str) -> Result<()> {
-    log::debug!("Parsing Nets: {}", filename);
+    log::debug!("Parsing Nets: {filename}");
     let file = File::open(filename)?;
     let reader = BufReader::new(file);
 
@@ -296,7 +295,7 @@ fn parse_nets(db: &mut NetlistDB, filename: &str) -> Result<()> {
         }
 
         if line.starts_with("NetDegree") {
-            let net_name = format!("n{}", net_counter);
+            let net_name = format!("n{net_counter}");
             net_counter += 1;
             current_net_id = Some(db.add_net(net_name));
         } else if let Some(net_id) = current_net_id {

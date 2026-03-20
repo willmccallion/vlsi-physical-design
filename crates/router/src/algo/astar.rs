@@ -1,8 +1,8 @@
-//! A* Pathfinding Algorithm for Edge-Based GCell Routing.
+//! A* Pathfinding Algorithm for Edge-Based `GCell` Routing.
 //!
 //! Implements A* on an edge-based gcell graph where direction is structurally
-//! enforced. Horizontal layers only allow horizontal moves (using h_edge_cost),
-//! vertical layers only allow vertical moves (using v_edge_cost), and vias
+//! enforced. Horizontal layers only allow horizontal moves (using `h_edge_cost`),
+//! vertical layers only allow vertical moves (using `v_edge_cost`), and vias
 //! allow layer transitions at the same gcell.
 
 use crate::grid::RoutingGrid;
@@ -41,7 +41,7 @@ pub trait GuideOracle {
 }
 
 /// Dummy guide oracle that allows routing anywhere.
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Debug)]
 pub struct NoGuide;
 impl GuideOracle for NoGuide {
     fn is_in_guide(&self, _c: GridCoord) -> bool {
@@ -96,12 +96,12 @@ impl RoutingWindow {
     }
 
     #[inline(always)]
-    fn contains(&self, c: GridCoord) -> bool {
+    const fn contains(&self, c: GridCoord) -> bool {
         c.x >= self.min_x && c.x <= self.max_x && c.y >= self.min_y && c.y <= self.max_y
     }
 
     #[inline(always)]
-    fn get_local_idx(&self, c: GridCoord) -> usize {
+    const fn get_local_idx(&self, c: GridCoord) -> usize {
         let lx = c.x - self.min_x;
         let ly = c.y - self.min_y;
         let lz = c.z as u32;
@@ -109,7 +109,7 @@ impl RoutingWindow {
     }
 
     #[inline(always)]
-    fn get_coord(&self, idx: u32) -> GridCoord {
+    const fn get_coord(&self, idx: u32) -> GridCoord {
         let plane_size = self.width * self.height;
         let z = (idx / plane_size) as u8;
         let rem = idx % plane_size;
@@ -120,14 +120,14 @@ impl RoutingWindow {
 }
 
 /// A* pathfinding solver for edge-based gcell routing.
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct AStar {
     parents: Vec<u32>,
     g_score: Vec<i64>,
     visited_tag: Vec<u32>,
     current_tag: u32,
     capacity: usize,
-    /// Number of expansions in the last find_path call.
+    /// Number of expansions in the last `find_path` call.
     pub last_expansions: u32,
 }
 
@@ -138,6 +138,7 @@ impl Default for AStar {
 }
 
 impl AStar {
+    /// Creates a new A* solver with a default internal capacity.
     pub fn new() -> Self {
         let cap = 100_000;
         Self {
@@ -170,8 +171,8 @@ impl AStar {
     /// Finds a path on the edge-based gcell graph.
     ///
     /// Direction is structurally enforced:
-    /// - Horizontal layers allow moves in ±X (using h_edge_cost)
-    /// - Vertical layers allow moves in ±Y (using v_edge_cost)
+    /// - Horizontal layers allow moves in ±X (using `h_edge_cost`)
+    /// - Vertical layers allow moves in ±Y (using `v_edge_cost`)
     /// - Vias allow layer changes at the same gcell
     /// - Near pins (within 1 gcell), any direction is allowed for pin access
     #[allow(clippy::too_many_arguments)]
@@ -228,7 +229,7 @@ impl AStar {
             });
         }
 
-        let guide_penalty = (10.0 + collision_penalty * 0.5) * scale;
+        let guide_penalty = collision_penalty.mul_add(0.5, 10.0) * scale;
         let mut expansions = 0u32;
 
         while let Some(State { f_score, index, .. }) = heap.pop() {
@@ -279,13 +280,13 @@ impl AStar {
 
             let allow_x = match layer_dir {
                 None => true,
-                Some(LayerDirection::Horizontal) | Some(LayerDirection::Unknown) => true,
+                Some(LayerDirection::Horizontal | LayerDirection::Unknown) => true,
                 Some(LayerDirection::Vertical) => false,
             };
 
             let allow_y = match layer_dir {
                 None => true,
-                Some(LayerDirection::Vertical) | Some(LayerDirection::Unknown) => true,
+                Some(LayerDirection::Vertical | LayerDirection::Unknown) => true,
                 Some(LayerDirection::Horizontal) => false,
             };
 
@@ -418,7 +419,7 @@ impl AStar {
             guide_penalty
         };
 
-        let total_cost = (edge_cost * scale) + step_guide_cost;
+        let total_cost = edge_cost.mul_add(scale, step_guide_cost);
         let tentative_g = current_g + total_cost as i64;
         let neighbor_local = window.get_local_idx(neighbor);
 
@@ -439,9 +440,10 @@ impl AStar {
 
     #[inline(always)]
     fn heuristic(&self, a: GridCoord, ex: i32, ey: i32, ez: i32, weight: f64) -> f64 {
+        let _ = self;
         ((a.x as i32 - ex).abs() as f64
             + (a.y as i32 - ey).abs() as f64
-            + (a.z as i32 - ez).abs() as f64 * 1.0)
+            + (a.z as i32 - ez).abs() as f64)
             * weight
     }
 

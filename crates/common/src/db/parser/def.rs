@@ -53,8 +53,8 @@ pub fn parse(db: &mut NetlistDB, filename: &str) -> Result<()> {
         }
 
         // We have a complete statement. Parse it.
-        let owned: Vec<String> = stmt_buf.split_whitespace().map(|s| s.to_string()).collect();
-        let parts: Vec<&str> = owned.iter().map(|s| s.as_str()).collect();
+        let owned: Vec<String> = stmt_buf.split_whitespace().map(ToString::to_string).collect();
+        let parts: Vec<&str> = owned.iter().map(String::as_str).collect();
         stmt_buf.clear();
 
         if parts.is_empty() {
@@ -68,7 +68,7 @@ pub fn parse(db: &mut NetlistDB, filename: &str) -> Result<()> {
                         let val_str = parts[i + 1].trim_matches(';');
                         if let Ok(val) = val_str.parse::<f64>() {
                             def_units = val;
-                            log::debug!("DEF Units updated to: {}", def_units);
+                            log::debug!("DEF Units updated to: {def_units}");
                         }
                         break;
                     }
@@ -147,12 +147,7 @@ pub fn parse(db: &mut NetlistDB, filename: &str) -> Result<()> {
                         }
                     }
 
-                    let mut width = 1.0;
-                    let mut height = 1.0;
-                    if let Some(&(w, h)) = db.macro_sizes.get(&lib_name) {
-                        width = w;
-                        height = h;
-                    }
+                    let (width, height) = db.macro_sizes.get(&lib_name).copied().unwrap_or((1.0, 1.0));
 
                     let id = db.add_cell(name, lib_name, width, height, is_fixed);
                     db.positions[id.index()] = Point::new(x, y);
@@ -200,27 +195,19 @@ pub fn parse(db: &mut NetlistDB, filename: &str) -> Result<()> {
                                 let pin_name = parts[i + 2];
                                 let lib_name = &db.cells[cell_id.index()].lib_name;
 
-                                let mut offset = Point::new(
-                                    db.cells[cell_id.index()].width / 2.0,
-                                    db.cells[cell_id.index()].height / 2.0,
-                                );
-
-                                let mut found = false;
-                                if let Some(pins) = db.macro_pins.get(lib_name)
+                                let offset = if let Some(pins) = db.macro_pins.get(lib_name)
                                     && let Some(&p) = pins.get(pin_name)
                                 {
-                                    offset = p;
-                                    found = true;
-                                }
-
-                                if !found {
+                                    p
+                                } else {
+                                    let cx = db.cells[cell_id.index()].width / 2.0;
+                                    let cy = db.cells[cell_id.index()].height / 2.0;
                                     let h =
                                         pin_name.chars().fold(0, |acc, c| acc + c as usize);
-                                    let dx = (h % 7) as f64 * 0.25 - 0.75;
-                                    let dy = ((h / 7) % 7) as f64 * 0.25 - 0.75;
-                                    offset.x += dx;
-                                    offset.y += dy;
-                                }
+                                    let dx = ((h % 7) as f64).mul_add(0.25, -0.75);
+                                    let dy = (((h / 7) % 7) as f64).mul_add(0.25, -0.75);
+                                    Point::new(cx + dx, cy + dy)
+                                };
 
                                 db.add_pin(
                                     cell_id,

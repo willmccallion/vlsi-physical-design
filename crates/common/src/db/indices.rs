@@ -31,7 +31,7 @@ macro_rules! define_index {
             /// Converts the usize to u32 internally. Used when creating indices
             /// from vector lengths or array positions.
             #[inline(always)]
-            pub fn new(id: usize) -> Self {
+            pub const fn new(id: usize) -> Self {
                 Self(id as u32)
             }
             /// Returns the index as a usize for vector indexing.
@@ -39,7 +39,7 @@ macro_rules! define_index {
             /// Converts the internal u32 representation to usize, which is
             /// required for indexing into Rust vectors and slices.
             #[inline(always)]
-            pub fn index(&self) -> usize {
+            pub const fn index(&self) -> usize {
                 self.0 as usize
             }
         }

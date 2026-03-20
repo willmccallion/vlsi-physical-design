@@ -13,7 +13,7 @@ use std::collections::HashSet;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::Instant;
 
-/// Global routing result: (net_guides, converter, congestion_map, grid_w, grid_h).
+/// Global routing result: (`net_guides`, converter, `congestion_map`, `grid_w`, `grid_h`).
 pub(crate) type GrResult = (Vec<HashSet<GridCoord>>, GridConverter, Vec<f32>, u32, u32);
 
 /// Adds edge usage for a path on the grid.
@@ -74,7 +74,7 @@ fn path_is_congested(grid: &GCellGrid, path: &[GridCoord]) -> bool {
 
 /// Executes global routing on a gcell grid to generate routing guides.
 ///
-/// Returns (net_guides, converter, congestion_map, grid_w, grid_h).
+/// Returns (`net_guides`, converter, `congestion_map`, `grid_w`, `grid_h`).
 /// The congestion map is a flat row-major array of per-GCell congestion ratios
 /// (max across all layers of usage/capacity).
 pub fn run(
@@ -100,7 +100,7 @@ pub fn run(
     let history_increment = config.history_increment;
     let total_nets = db.nets.len();
 
-    log::debug!("GR: Starting Initial Route for {} nets...", total_nets);
+    log::debug!("GR: Starting Initial Route for {total_nets} nets...");
     let start_time = Instant::now();
 
     let batch_size = 500;
@@ -154,7 +154,7 @@ pub fn run(
         let overflow = grid.total_overflow();
 
         if overflow == 0 {
-            ui::check(&format!("Global routing converged at iter {}", iter));
+            ui::check(&format!("Global routing converged at iter {iter}"));
             break;
         }
 
@@ -173,8 +173,7 @@ pub fn run(
 
         if stagnation_counter > 10 {
             log::warn!(
-                "GR Stagnation detected ({} iters). Dumping heatmap.",
-                stagnation_counter
+                "GR Stagnation detected ({stagnation_counter} iters). Dumping heatmap.",
             );
             if stagnation_counter % 5 == 0 {
                 grid.decay_history(0.9);
@@ -218,7 +217,7 @@ pub fn run(
                 net_paths[net_id] = path;
 
                 if i % 50 == 0 || i == ripped - 1 {
-                    ui::progress(&format!("[GR Iter {}]", iter), i + 1, ripped);
+                    ui::progress(&format!("[GR Iter {iter}]"), i + 1, ripped);
                 }
             }
         } else {
@@ -239,7 +238,7 @@ pub fn run(
 
                         let p = progress.fetch_add(1, Ordering::Relaxed) + 1;
                         if p.is_multiple_of(100) || p == ripped {
-                            ui::progress(&format!("[GR Iter {}]", iter), p, ripped);
+                            ui::progress(&format!("[GR Iter {iter}]"), p, ripped);
                         }
                         (net_id, path)
                     })
@@ -262,16 +261,14 @@ pub fn run(
 
         if iter > 50 && ripped < 20 {
             log::warn!(
-                "GR: Stopping early. Remaining {} ripped nets are likely unresolvable.",
-                ripped
+                "GR: Stopping early. Remaining {ripped} ripped nets are likely unresolvable.",
             );
             break;
         }
 
         if stagnation_counter > 20 {
             log::warn!(
-                "GR: Stopping due to stagnation ({} iters without improvement).",
-                stagnation_counter
+                "GR: Stopping due to stagnation ({stagnation_counter} iters without improvement).",
             );
             break;
         }
@@ -283,9 +280,9 @@ pub fn run(
     for (net_id, path) in net_paths.iter().enumerate() {
         for &coord in path {
             for z in 0..layers {
-                net_guides[net_id].insert(GridCoord::new(coord.x, coord.y, z));
+                let _ = net_guides[net_id].insert(GridCoord::new(coord.x, coord.y, z));
                 for n in get_neighbors_2d(coord, grid_w, grid_h) {
-                    net_guides[net_id].insert(GridCoord::new(n.x, n.y, z));
+                    let _ = net_guides[net_id].insert(GridCoord::new(n.x, n.y, z));
                 }
             }
         }
@@ -360,7 +357,7 @@ fn compute_net_path_gr(
             z
         });
         let mut occupied = HashSet::new();
-        occupied.insert(pin_coords[0]);
+        let _ = occupied.insert(pin_coords[0]);
         let mut prev = pin_coords[0];
         for &target in &pin_coords[1..] {
             if occupied.contains(&target) {
@@ -368,11 +365,11 @@ fn compute_net_path_gr(
             }
             let (x0, x1) = (prev.x.min(target.x), prev.x.max(target.x));
             for x in x0..=x1 {
-                occupied.insert(GridCoord::new(x, prev.y, 0));
+                let _ = occupied.insert(GridCoord::new(x, prev.y, 0));
             }
             let (y0, y1) = (prev.y.min(target.y), prev.y.max(target.y));
             for y in y0..=y1 {
-                occupied.insert(GridCoord::new(target.x, y, 0));
+                let _ = occupied.insert(GridCoord::new(target.x, y, 0));
             }
             prev = target;
         }
@@ -404,7 +401,7 @@ fn compute_net_path_gr(
 
     let mut tree_nodes = vec![pin_coords[sorted_indices[0]]];
     let mut occupied = HashSet::new();
-    occupied.insert(pin_coords[sorted_indices[0]]);
+    let _ = occupied.insert(pin_coords[sorted_indices[0]]);
 
     for i in 1..sorted_indices.len() {
         let target = pin_coords[sorted_indices[i]];
@@ -428,7 +425,7 @@ fn compute_net_path_gr(
             false,
         ) {
             for &c in &path {
-                occupied.insert(c);
+                let _ = occupied.insert(c);
             }
             tree_nodes.extend_from_slice(&path);
         }

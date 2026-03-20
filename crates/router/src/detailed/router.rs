@@ -78,7 +78,7 @@ pub fn route_net_dr_pure<O: GuideOracle>(
     let start_idx = sorted_indices[0];
     let mut tree_nodes = vec![pin_coords[start_idx]];
     let mut paths = Vec::new();
-    let margin_multiplier = 1.0 + (ripup_count as f64 * 0.25);
+    let margin_multiplier = (ripup_count as f64).mul_add(0.25, 1.0);
 
     let net_hpwl = {
         let mut min_x = u32::MAX;
@@ -100,40 +100,42 @@ pub fn route_net_dr_pure<O: GuideOracle>(
 
     for &next_pin_idx in &sorted_indices[1..] {
         let target = pin_coords[next_pin_idx];
-        let nearest_start = tree_nodes
+        let Some(nearest_start) = tree_nodes
             .iter()
             .min_by_key(|&&s| {
                 (s.x as i32 - target.x as i32).unsigned_abs()
                     + (s.y as i32 - target.y as i32).unsigned_abs()
             })
             .copied()
-            .unwrap();
+        else {
+            continue;
+        };
 
         if let Some(path) = pattern::try_pattern_route(grid, nearest_start, target, db) {
-            stat_pattern_hits.fetch_add(1, Ordering::Relaxed);
+            let _ = stat_pattern_hits.fetch_add(1, Ordering::Relaxed);
             tree_nodes.extend_from_slice(&path);
             paths.push(path);
             continue;
         }
 
-        stat_astar_calls.fetch_add(1, Ordering::Relaxed);
+        let _ = stat_astar_calls.fetch_add(1, Ordering::Relaxed);
         let path_opt = solver.find_path(
             grid, db, &tree_nodes, target, penalty,
             config.astar_heuristic_weight, config.astar_window_margin_base,
             margin_multiplier, oracle, &pin_coords, max_expansions, strict_mode,
         );
-        stat_astar_expansions.fetch_add(solver.last_expansions as usize, Ordering::Relaxed);
+        let _ = stat_astar_expansions.fetch_add(solver.last_expansions as usize, Ordering::Relaxed);
         let _ = stat_max_expansions.fetch_max(solver.last_expansions as usize, Ordering::Relaxed);
         let path_opt = if path_opt.is_some() {
             path_opt
         } else {
-            stat_astar_fallback.fetch_add(1, Ordering::Relaxed);
+            let _ = stat_astar_fallback.fetch_add(1, Ordering::Relaxed);
             let p = solver.find_path(
                 grid, db, &tree_nodes, target, penalty,
                 config.astar_heuristic_weight, config.astar_window_margin_max,
                 margin_multiplier, &NoGuide, &pin_coords, max_expansions * 2, false,
             );
-            stat_astar_expansions.fetch_add(solver.last_expansions as usize, Ordering::Relaxed);
+            let _ = stat_astar_expansions.fetch_add(solver.last_expansions as usize, Ordering::Relaxed);
             let _ = stat_max_expansions.fetch_max(solver.last_expansions as usize, Ordering::Relaxed);
             p
         };
@@ -155,11 +157,11 @@ pub fn route_net_dr_pure<O: GuideOracle>(
 
 /// A spatial cluster of pins for parallel routing.
 struct PinCluster {
-    /// Indices into the pin_coords array.
+    /// Indices into the `pin_coords` array.
     pin_indices: Vec<usize>,
-    /// Index into pin_coords for the cluster representative.
+    /// Index into `pin_coords` for the cluster representative.
     representative_idx: usize,
-    /// Bounding box (min_x, max_x, min_y, max_y).
+    /// Bounding box (`min_x`, `max_x`, `min_y`, `max_y`).
     bbox: (u32, u32, u32, u32),
 }
 
@@ -205,18 +207,20 @@ fn cluster_pins(pin_coords: &[GridCoord], target_count: usize) -> Vec<PinCluster
         }
 
         // Bucket centroid
-        let cx = min_x as f64 + (bx as f64 + 0.5) * bucket_side as f64;
-        let cy = min_y as f64 + (by as f64 + 0.5) * bucket_side as f64;
+        let cx = (bx as f64 + 0.5).mul_add(bucket_side as f64, min_x as f64);
+        let cy = (by as f64 + 0.5).mul_add(bucket_side as f64, min_y as f64);
 
         // Find representative (pin nearest centroid)
-        let rep = *indices
+        let Some(&rep) = indices
             .iter()
             .min_by_key(|&&i| {
                 let dx = pin_coords[i].x as f64 - cx;
                 let dy = pin_coords[i].y as f64 - cy;
                 (dx * dx + dy * dy) as u64
             })
-            .unwrap();
+        else {
+            continue;
+        };
 
         // Compute cluster bbox
         let mut cmin_x = u32::MAX;
@@ -291,30 +295,32 @@ fn route_skeleton<O: GuideOracle>(
         sorted.push(current);
     }
 
-    let margin_multiplier = 1.0 + (ripup_count as f64 * 0.25);
+    let margin_multiplier = (ripup_count as f64).mul_add(0.25, 1.0);
     let mut tree_nodes = vec![reps[sorted[0]]];
     let mut paths = Vec::new();
 
     for &rep_idx in &sorted[1..] {
         let target = reps[rep_idx];
 
-        let nearest_start = tree_nodes
+        let Some(nearest_start) = tree_nodes
             .iter()
             .min_by_key(|&&s| {
                 (s.x as i32 - target.x as i32).unsigned_abs()
                     + (s.y as i32 - target.y as i32).unsigned_abs()
             })
             .copied()
-            .unwrap();
+        else {
+            continue;
+        };
 
         if let Some(path) = pattern::try_pattern_route(grid, nearest_start, target, db) {
-            stat_pattern_hits.fetch_add(1, Ordering::Relaxed);
+            let _ = stat_pattern_hits.fetch_add(1, Ordering::Relaxed);
             tree_nodes.extend_from_slice(&path);
             paths.push(path);
             continue;
         }
 
-        stat_astar_calls.fetch_add(1, Ordering::Relaxed);
+        let _ = stat_astar_calls.fetch_add(1, Ordering::Relaxed);
         let path_opt = solver.find_path(
             grid,
             db,
@@ -329,13 +335,13 @@ fn route_skeleton<O: GuideOracle>(
             max_expansions,
             false,
         );
-        stat_astar_expansions.fetch_add(solver.last_expansions as usize, Ordering::Relaxed);
+        let _ = stat_astar_expansions.fetch_add(solver.last_expansions as usize, Ordering::Relaxed);
         let _ = stat_max_expansions.fetch_max(solver.last_expansions as usize, Ordering::Relaxed);
 
         let path_opt = if path_opt.is_some() {
             path_opt
         } else {
-            stat_astar_fallback.fetch_add(1, Ordering::Relaxed);
+            let _ = stat_astar_fallback.fetch_add(1, Ordering::Relaxed);
             let p = solver.find_path(
                 grid,
                 db,
@@ -350,7 +356,7 @@ fn route_skeleton<O: GuideOracle>(
                 max_expansions * 2,
                 false,
             );
-            stat_astar_expansions.fetch_add(solver.last_expansions as usize, Ordering::Relaxed);
+            let _ = stat_astar_expansions.fetch_add(solver.last_expansions as usize, Ordering::Relaxed);
             let _ =
                 stat_max_expansions.fetch_max(solver.last_expansions as usize, Ordering::Relaxed);
             p
@@ -462,7 +468,7 @@ fn route_cluster<O: GuideOracle>(
     // Seed tree with anchors
     let mut tree_nodes: Vec<GridCoord> = anchors;
     let mut paths = Vec::new();
-    let margin_multiplier = 1.0 + (ripup_count as f64 * 0.25);
+    let margin_multiplier = (ripup_count as f64).mul_add(0.25, 1.0);
 
     for &local_idx in &sorted {
         let target = local_coords[local_idx];
@@ -472,23 +478,25 @@ fn route_cluster<O: GuideOracle>(
             continue;
         }
 
-        let nearest_start = tree_nodes
+        let Some(nearest_start) = tree_nodes
             .iter()
             .min_by_key(|&&s| {
                 (s.x as i32 - target.x as i32).unsigned_abs()
                     + (s.y as i32 - target.y as i32).unsigned_abs()
             })
             .copied()
-            .unwrap();
+        else {
+            continue;
+        };
 
         if let Some(path) = pattern::try_pattern_route(grid, nearest_start, target, db) {
-            stat_pattern_hits.fetch_add(1, Ordering::Relaxed);
+            let _ = stat_pattern_hits.fetch_add(1, Ordering::Relaxed);
             tree_nodes.extend_from_slice(&path);
             paths.push(path);
             continue;
         }
 
-        stat_astar_calls.fetch_add(1, Ordering::Relaxed);
+        let _ = stat_astar_calls.fetch_add(1, Ordering::Relaxed);
         let path_opt = solver.find_path(
             grid,
             db,
@@ -503,13 +511,13 @@ fn route_cluster<O: GuideOracle>(
             max_expansions,
             strict_mode,
         );
-        stat_astar_expansions.fetch_add(solver.last_expansions as usize, Ordering::Relaxed);
+        let _ = stat_astar_expansions.fetch_add(solver.last_expansions as usize, Ordering::Relaxed);
         let _ = stat_max_expansions.fetch_max(solver.last_expansions as usize, Ordering::Relaxed);
 
         let path_opt = if path_opt.is_some() {
             path_opt
         } else {
-            stat_astar_fallback.fetch_add(1, Ordering::Relaxed);
+            let _ = stat_astar_fallback.fetch_add(1, Ordering::Relaxed);
             let p = solver.find_path(
                 grid,
                 db,
@@ -524,7 +532,7 @@ fn route_cluster<O: GuideOracle>(
                 max_expansions * 2,
                 false,
             );
-            stat_astar_expansions.fetch_add(solver.last_expansions as usize, Ordering::Relaxed);
+            let _ = stat_astar_expansions.fetch_add(solver.last_expansions as usize, Ordering::Relaxed);
             let _ =
                 stat_max_expansions.fetch_max(solver.last_expansions as usize, Ordering::Relaxed);
             p
@@ -704,8 +712,8 @@ pub fn generate_segments_from_topology(
 
     let gcell_center = |node: GridCoord| -> Point<f64> {
         Point::new(
-            origin_x + (node.x as f64 + 0.5) * gcell_w,
-            origin_y + (node.y as f64 + 0.5) * gcell_h,
+            (node.x as f64 + 0.5).mul_add(gcell_w, origin_x),
+            (node.y as f64 + 0.5).mul_add(gcell_h, origin_y),
         )
     };
 
@@ -714,13 +722,13 @@ pub fn generate_segments_from_topology(
     let mut nodes = HashSet::new();
     for path in topology {
         for &coord in path {
-            nodes.insert(coord);
+            let _ = nodes.insert(coord);
         }
     }
     // Also add pin gcell nodes so that pin access is generated even
     // when the topology has no edges (e.g., all pins in the same gcell)
     for &(x, y, z) in pin_locations.keys() {
-        nodes.insert(GridCoord::new(x, y, z));
+        let _ = nodes.insert(GridCoord::new(x, y, z));
     }
     if nodes.is_empty() { return segments; }
 
@@ -817,7 +825,7 @@ pub fn assign_tracks(
         vec![HashSet::new(); layers.len()];
 
     for net_segs in all_segments.iter() {
-        for seg in net_segs.iter() {
+        for seg in net_segs {
             let is_via = (seg.p1.x - seg.p2.x).abs() < 1e-6
                 && (seg.p1.y - seg.p2.y).abs() < 1e-6;
             if is_via {
@@ -825,9 +833,9 @@ pub fn assign_tracks(
                 let qy = (seg.p1.y * 1000.0).round() as i64;
                 // Via on layer L connects L and L+1
                 let li = seg.layer as usize;
-                anchor_positions[li].insert((qx, qy));
+                let _ = anchor_positions[li].insert((qx, qy));
                 if li + 1 < layers.len() {
-                    anchor_positions[li + 1].insert((qx, qy));
+                    let _ = anchor_positions[li + 1].insert((qx, qy));
                 }
             }
         }
@@ -837,21 +845,6 @@ pub fn assign_tracks(
     // Skip layer 0 (M1): it carries pin access wires that connect exact
     // pin positions to gcell centers and must not be snapped to tracks.
     for layer_idx in 1..layers.len() {
-        let li = layer_idx as u8;
-        if layer_idx >= track_grids.len() {
-            continue;
-        }
-        let tg = &track_grids[layer_idx];
-        if tg.coords.is_empty() {
-            continue;
-        }
-        let dir = layers[layer_idx].direction;
-        if matches!(dir, LayerDirection::Unknown) {
-            continue;
-        }
-        let is_horizontal = matches!(dir, LayerDirection::Horizontal);
-
-        // Collect all wire segments on this layer with their geometric info.
         struct WireInfo {
             net_id: usize,
             seg_idx: usize,
@@ -868,6 +861,21 @@ pub fn assign_tracks(
             ep2_anchored: bool,
         }
 
+        let li = layer_idx as u8;
+        if layer_idx >= track_grids.len() {
+            continue;
+        }
+        let tg = &track_grids[layer_idx];
+        if tg.coords.is_empty() {
+            continue;
+        }
+        let dir = layers[layer_idx].direction;
+        if matches!(dir, LayerDirection::Unknown) {
+            continue;
+        }
+        let is_horizontal = matches!(dir, LayerDirection::Horizontal);
+
+        // Collect all wire segments on this layer with their geometric info.
         let mut wires: Vec<WireInfo> = Vec::new();
         let anchors = &anchor_positions[layer_idx];
 
@@ -884,12 +892,12 @@ pub fn assign_tracks(
                 }
 
                 let (track_coord, span_lo, span_hi, ep1_span, ep2_span) = if is_horizontal {
-                    let y = (seg.p1.y + seg.p2.y) / 2.0;
+                    let y = f64::midpoint(seg.p1.y, seg.p2.y);
                     let x_lo = seg.p1.x.min(seg.p2.x);
                     let x_hi = seg.p1.x.max(seg.p2.x);
                     (y, x_lo, x_hi, seg.p1.x, seg.p2.x)
                 } else {
-                    let x = (seg.p1.x + seg.p2.x) / 2.0;
+                    let x = f64::midpoint(seg.p1.x, seg.p2.x);
                     let y_lo = seg.p1.y.min(seg.p2.y);
                     let y_hi = seg.p1.y.max(seg.p2.y);
                     (x, y_lo, y_hi, seg.p1.y, seg.p2.y)
@@ -1015,7 +1023,7 @@ pub fn assign_tracks(
                         && (hi - w.span_hi).abs() < 1e-6
                 })
             {
-                intervals.swap_remove(pos);
+                let _ = intervals.swap_remove(pos);
             }
             occupied
                 .entry(snap_key)

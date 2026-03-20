@@ -22,7 +22,7 @@ pub struct SpatialSet {
 impl SpatialSet {
     /// Creates a new spatial set with the specified grid dimensions and bin size.
     ///
-    /// Allocates a grid of bins sized to cover the routing area. The bin_size
+    /// Allocates a grid of bins sized to cover the routing area. The `bin_size`
     /// parameter controls the granularity of spatial conflict detection.
     pub fn new(width: u32, height: u32, bin_size: u32) -> Self {
         let w = width.div_ceil(bin_size);

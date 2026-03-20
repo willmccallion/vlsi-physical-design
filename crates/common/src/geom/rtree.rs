@@ -13,6 +13,7 @@ use rstar::{AABB, RTree};
 /// queries for all rectangles that intersect a given query region. This
 /// is used during placement to quickly find cells that may overlap with
 /// a given region without checking every cell in the design.
+#[derive(Debug)]
 pub struct SpatialIndex {
     tree: RTree<IndexedRect>,
 }
@@ -22,6 +23,7 @@ pub struct SpatialIndex {
 /// Wraps a rectangle with an integer ID so that query results can identify
 /// which rectangle matched the query. This is used to map query results
 /// back to cell indices or other entities in the design.
+#[derive(Debug)]
 struct IndexedRect {
     rect: Rect,
     id: usize,

@@ -15,6 +15,7 @@ use std::collections::HashMap;
 /// This legalizer places cells into rows by grouping them into clusters
 /// and computing optimal cluster positions that minimize displacement from
 /// the analytical placement solution while ensuring no overlaps.
+#[derive(Debug)]
 pub struct AbacusLegalizer;
 
 /// A cluster of cells in the Abacus algorithm.
@@ -51,7 +52,7 @@ impl Default for AbacusLegalizer {
 
 impl AbacusLegalizer {
     /// Creates a new Abacus legalizer instance.
-    pub fn new() -> Self {
+    pub const fn new() -> Self {
         Self
     }
 
@@ -75,8 +76,7 @@ impl AbacusLegalizer {
         let row_height = height_counts
             .into_iter()
             .max_by_key(|&(_, count)| count)
-            .map(|(h, _)| h as f64 / 1000.0)
-            .unwrap_or(1.0);
+            .map_or(1.0, |(h, _)| h as f64 / 1000.0);
 
         let die_min_x = db.die_area.min.x;
         let die_max_x = db.die_area.max.x;
@@ -142,7 +142,7 @@ impl AbacusLegalizer {
             }
         }
 
-        movable_macros.sort_by(|&a, &b| db.positions[a].x.partial_cmp(&db.positions[b].x).unwrap());
+        movable_macros.sort_by(|&a, &b| db.positions[a].x.total_cmp(&db.positions[b].x));
 
         for &idx in &movable_macros {
             let cell = &db.cells[idx];
@@ -174,9 +174,9 @@ impl AbacusLegalizer {
         }
 
         let mut rows: Vec<Vec<SubRow>> = Vec::with_capacity(num_rows);
-        for blockage_list in row_blockages.iter() {
+        for blockage_list in &row_blockages {
             let mut blockages = blockage_list.clone();
-            blockages.sort_by(|a, b| a.0.partial_cmp(&b.0).unwrap());
+            blockages.sort_by(|a, b| a.0.total_cmp(&b.0));
 
             let mut merged = Vec::new();
             if !blockages.is_empty() {
@@ -228,7 +228,7 @@ impl AbacusLegalizer {
             let row_b = ((pos_b.y - die_min_y) / row_height).round() as isize;
             row_a
                 .cmp(&row_b)
-                .then(pos_a.x.partial_cmp(&pos_b.x).unwrap())
+                .then(pos_a.x.total_cmp(&pos_b.x))
         });
 
         for &i in &std_cells {
@@ -254,7 +254,7 @@ impl AbacusLegalizer {
                     for (k, sub) in rows[r].iter().enumerate() {
                         let cell_total_w = cell.width + padding_per_cell;
                         if sub.used_width + cell_total_w <= (sub.max_x - sub.min_x) {
-                            let sub_center = (sub.min_x + sub.max_x) / 2.0;
+                            let sub_center = f64::midpoint(sub.min_x, sub.max_x);
                             let dist = (pos.x - sub_center).abs();
                             if dist < min_dist {
                                 min_dist = dist;
@@ -286,7 +286,7 @@ impl AbacusLegalizer {
         }
 
         for (r, row) in rows.iter_mut().enumerate() {
-            let row_y = die_min_y + (r as f64) * row_height;
+            let row_y = (r as f64).mul_add(row_height, die_min_y);
 
             for sub in row.iter_mut() {
                 if sub.cells.is_empty() {
@@ -294,7 +294,7 @@ impl AbacusLegalizer {
                 }
 
                 sub.cells
-                    .sort_by(|&a, &b| db.positions[a].x.partial_cmp(&db.positions[b].x).unwrap());
+                    .sort_by(|&a, &b| db.positions[a].x.total_cmp(&db.positions[b].x));
 
                 let mut clusters: Vec<Cluster> = Vec::new();
 
@@ -311,12 +311,12 @@ impl AbacusLegalizer {
                     };
 
                     clusters.push(new_cluster);
-                    self.collapse(&mut clusters, sub.min_x);
+                    Self::collapse(&mut clusters, sub.min_x);
                 }
 
                 // Left-to-right: push clusters right if they underflow
                 let mut left_limit = sub.min_x;
-                for cluster in clusters.iter_mut() {
+                for cluster in &mut clusters {
                     if cluster.x < left_limit {
                         cluster.x = left_limit;
                     }
@@ -362,7 +362,7 @@ impl AbacusLegalizer {
                         cx += db.cells[ci].width + if has_slack { padding_per_cell } else { 0.0 };
                     }
                 }
-                ordered.sort_by(|a, b| a.0.partial_cmp(&b.0).unwrap());
+                ordered.sort_by(|a, b| a.0.total_cmp(&b.0));
 
                 // Sequential pack: honour ideal positions where possible,
                 // but always advance monotonically and clamp to die boundary.
@@ -395,8 +395,8 @@ impl AbacusLegalizer {
         }
 
         // Right-to-left compaction for each row to fix right-boundary overflow.
-        for row in rows.iter() {
-            for sub in row.iter() {
+        for row in &rows {
+            for sub in row {
                 if sub.cells.is_empty() {
                     continue;
                 }
@@ -404,7 +404,7 @@ impl AbacusLegalizer {
                 // Sort cells by their placed x position
                 let mut cells_in_sub: Vec<usize> = sub.cells.clone();
                 cells_in_sub.sort_by(|&a, &b| {
-                    db.positions[a].x.partial_cmp(&db.positions[b].x).unwrap()
+                    db.positions[a].x.total_cmp(&db.positions[b].x)
                 });
 
                 // Right-to-left: if the rightmost cell exceeds the sub-row
@@ -425,9 +425,9 @@ impl AbacusLegalizer {
     ///
     /// Merges clusters that overlap by computing a weighted average position
     /// and combined width. This implements the core Abacus algorithm where
-    /// clusters are merged left-to-right until no overlaps remain. The min_x
+    /// clusters are merged left-to-right until no overlaps remain. The `min_x`
     /// parameter ensures clusters do not extend beyond the sub-row boundary.
-    fn collapse(&self, clusters: &mut Vec<Cluster>, min_x: f64) {
+    fn collapse(clusters: &mut Vec<Cluster>, min_x: f64) {
         loop {
             if let Some(last) = clusters.last_mut()
                 && last.x < min_x
@@ -446,10 +446,10 @@ impl AbacusLegalizer {
             let prev_end = clusters[prev_idx].x + clusters[prev_idx].width;
 
             if prev_end > last_x {
-                let last_c = clusters.pop().unwrap();
+                let Some(last_c) = clusters.pop() else { break };
                 let prev_c = &mut clusters[prev_idx];
 
-                prev_c.q += last_c.q - (last_c.weight * prev_c.width);
+                prev_c.q += last_c.weight.mul_add(-prev_c.width, last_c.q);
                 prev_c.member_cells.extend(last_c.member_cells);
                 prev_c.width += last_c.width;
                 prev_c.weight += last_c.weight;

@@ -1,11 +1,11 @@
 //! Core Netlist Database Data Structures.
 //!
-//! This module defines the central NetlistDB structure that holds all design
+//! This module defines the central `NetlistDB` structure that holds all design
 //! information including cells, nets, pins, routing layers, and spatial
 //! relationships. It serves as the single source of truth for the design state
 //! throughout the placement and routing algorithms.
 
-use crate::db::indices::*;
+use crate::db::indices::{CellId, NetId, PinId};
 use crate::geom::point::Point;
 use crate::geom::rect::Rect;
 use std::collections::HashMap;
@@ -16,7 +16,7 @@ use std::collections::HashMap;
 /// Vertical layers route primarily in the Y direction, horizontal layers in
 /// the X direction. This alternation enables efficient routing by allowing
 /// orthogonal wire crossings without shorts.
-#[derive(Clone, Copy, Debug, PartialEq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum LayerDirection {
     /// Wires on this layer route primarily in the vertical (Y) direction.
     Vertical,
@@ -68,9 +68,9 @@ pub struct RouteSegment {
 /// Data structure representing a single cell instance in the design.
 ///
 /// Contains the cell's name, library reference, physical dimensions, placement
-/// constraints, and list of pins. The is_fixed flag indicates that the cell
+/// constraints, and list of pins. The `is_fixed` flag indicates that the cell
 /// position is predetermined (e.g., I/O pads, pre-placed macros) and should
-/// not be moved by the placer. The is_macro flag distinguishes large blocks
+/// not be moved by the placer. The `is_macro` flag distinguishes large blocks
 /// from standard cells for legalization purposes.
 #[derive(Clone, Debug)]
 pub struct CellData {
@@ -94,7 +94,7 @@ pub struct CellData {
 ///
 /// A net connects multiple pins together, forming the electrical connectivity
 /// of the circuit. The weight field allows critical nets to be prioritized
-/// during placement and routing. The route_segments field stores the final
+/// during placement and routing. The `route_segments` field stores the final
 /// wire paths after routing completes.
 #[derive(Clone, Debug)]
 pub struct NetData {
@@ -141,25 +141,28 @@ pub struct TrackGrid {
 }
 
 impl TrackGrid {
-    /// Builds a track grid from a DEF TrackDef.
+    /// Builds a track grid from a DEF `TrackDef`.
     pub fn from_track_def(td: &TrackDef) -> Self {
         let mut coords = Vec::with_capacity(td.num_tracks as usize);
         for i in 0..td.num_tracks {
-            coords.push(td.start + i as f64 * td.step);
+            coords.push((i as f64).mul_add(td.step, td.start));
         }
         Self { coords }
     }
 
-    /// Builds a track grid from pitch and die extent (fallback when no TrackDef exists).
+    /// Builds a track grid from pitch and die extent (fallback when no `TrackDef` exists).
     pub fn from_pitch(die_min: f64, die_max: f64, pitch: f64) -> Self {
         if pitch <= 0.0 {
             return Self { coords: Vec::new() };
         }
         let mut coords = Vec::new();
-        let mut pos = die_min;
-        while pos <= die_max {
+        let n = ((die_max - die_min) / pitch).floor() as usize + 1;
+        for i in 0..n {
+            let pos = (i as f64).mul_add(pitch, die_min);
+            if pos > die_max {
+                break;
+            }
             coords.push(pos);
-            pos += pitch;
         }
         Self { coords }
     }
@@ -190,25 +193,41 @@ impl TrackGrid {
 /// It serves as the interface between parsers, placement algorithms, and
 /// routing algorithms. All design modifications during placement and routing
 /// are reflected in this structure.
+#[derive(Debug)]
 pub struct NetlistDB {
+    /// Metal routing layers in the technology stack, ordered by index.
     pub layers: Vec<LayerData>,
+    /// All cell instances in the design (standard cells, macros, pads).
     pub cells: Vec<CellData>,
+    /// All signal and power nets connecting pins across the design.
     pub nets: Vec<NetData>,
+    /// Routing track definitions per layer for legal wire positions.
     pub tracks: Vec<TrackDef>,
 
+    /// Pin offsets relative to their parent cell's origin.
     pub pin_offsets: Vec<Point<f64>>,
+    /// Human-readable pin names for reporting and debugging.
     pub pin_names: Vec<String>,
+    /// Maps each pin to the cell instance that owns it.
     pub pin_to_cell: Vec<CellId>,
+    /// Maps each pin to the net it belongs to.
     pub pin_to_net: Vec<NetId>,
 
+    /// Current physical positions of each cell instance.
     pub positions: Vec<Point<f64>>,
+    /// Bounding rectangle of the chip die area.
     pub die_area: Rect,
 
+    /// Lookup table from cell name to cell identifier.
     pub cell_name_map: HashMap<String, CellId>,
+    /// Lookup table from net name to net identifier.
     pub net_name_map: HashMap<String, NetId>,
+    /// Lookup table from layer name to layer index.
     pub layer_name_map: HashMap<String, u8>,
 
+    /// Pin offset data for each macro, keyed by macro name then pin name.
     pub macro_pins: HashMap<String, HashMap<String, Point<f64>>>,
+    /// Width and height dimensions for each macro type.
     pub macro_sizes: HashMap<String, (f64, f64)>,
 }
 
@@ -249,13 +268,13 @@ impl NetlistDB {
     ///
     /// This count includes all cells regardless of whether they are fixed,
     /// movable, standard cells, or macros.
-    pub fn num_cells(&self) -> usize {
+    pub const fn num_cells(&self) -> usize {
         self.cells.len()
     }
     /// Returns the total number of nets in the design.
     ///
     /// This includes all nets regardless of pin count or connectivity.
-    pub fn num_nets(&self) -> usize {
+    pub const fn num_nets(&self) -> usize {
         self.nets.len()
     }
 
@@ -273,14 +292,14 @@ impl NetlistDB {
 
     /// Adds a new routing layer to the metal stack.
     ///
-    /// Creates a LayerData entry with the specified properties and assigns
+    /// Creates a `LayerData` entry with the specified properties and assigns
     /// it the next available layer index. Updates the layer name map for
     /// efficient lookup by name. This is called during LEF parsing and when
     /// synthesizing default layers for formats that don't specify layer information.
     pub fn add_layer(&mut self, name: String, direction: LayerDirection, pitch: f64, width: f64) {
         let idx = self.layers.len() as u8;
         let min_spacing = (pitch - width).max(0.0);
-        self.layer_name_map.insert(name.clone(), idx);
+        let _ = self.layer_name_map.insert(name.clone(), idx);
         self.layers.push(LayerData {
             name,
             index: idx,
@@ -301,7 +320,7 @@ impl NetlistDB {
 
     /// Adds a new cell instance to the design and returns its identifier.
     ///
-    /// Creates a CellData entry with the specified properties, initializes
+    /// Creates a `CellData` entry with the specified properties, initializes
     /// its position to the origin, and updates the cell name map for lookup.
     /// The cell is initially marked as not a macro; this can be updated later
     /// based on size heuristics or explicit annotations.
@@ -324,14 +343,14 @@ impl NetlistDB {
             pins: Vec::new(),
         });
         self.positions.push(Point::new(0.0, 0.0));
-        self.cell_name_map.insert(name, id);
+        let _ = self.cell_name_map.insert(name, id);
         id
     }
 
     /// Adds a new net to the design or returns the existing net's ID if it already exists.
     ///
     /// Checks the net name map first to avoid duplicate net creation. If the net
-    /// is new, creates a NetData entry with default weight and empty pin/segment
+    /// is new, creates a `NetData` entry with default weight and empty pin/segment
     /// lists. This deduplication is important for formats that may reference
     /// the same net multiple times.
     pub fn add_net(&mut self, name: String) -> NetId {
@@ -345,7 +364,7 @@ impl NetlistDB {
             pins: Vec::new(),
             route_segments: Vec::new(),
         });
-        self.net_name_map.insert(name, id);
+        let _ = self.net_name_map.insert(name, id);
         id
     }
 
@@ -369,7 +388,7 @@ impl NetlistDB {
 
     /// Builds per-layer track grids for snapping wire coordinates.
     ///
-    /// For each routing layer, uses the first matching TrackDef if available,
+    /// For each routing layer, uses the first matching `TrackDef` if available,
     /// otherwise falls back to generating tracks from layer pitch and die extent.
     /// Returns a Vec indexed by layer index.
     pub fn build_track_grids(&self) -> Vec<TrackGrid> {

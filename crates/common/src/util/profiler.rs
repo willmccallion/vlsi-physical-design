@@ -12,6 +12,7 @@ use std::time::Instant;
 /// logging the elapsed duration with the provided name. Useful for
 /// profiling individual functions or code blocks without manual timing
 /// code.
+#[derive(Debug)]
 pub struct ScopedTimer {
     name: &'static str,
     start: Instant,
@@ -33,7 +34,7 @@ impl ScopedTimer {
 impl Drop for ScopedTimer {
     /// Logs the elapsed time when the timer is dropped.
     ///
-    /// Automatically called when the ScopedTimer goes out of scope,
+    /// Automatically called when the `ScopedTimer` goes out of scope,
     /// providing a convenient way to measure function execution time
     /// without explicit cleanup code.
     fn drop(&mut self) {

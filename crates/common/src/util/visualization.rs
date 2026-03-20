@@ -62,9 +62,9 @@ pub fn draw_congestion_heatmap<G: CongestionProvider>(grid: &G, filename: &str) 
     }
 
     if let Err(e) = img.save(Path::new(filename)) {
-        log::error!("Failed to save congestion map to {}: {}", filename, e);
+        log::error!("Failed to save congestion map to {filename}: {e}");
     } else {
-        log::info!("Dumped congestion map to {}", filename);
+        log::info!("Dumped congestion map to {filename}");
     }
 }
 
@@ -96,7 +96,7 @@ pub fn draw_placement(db: &NetlistDB, filename: &str, width: u32, height: u32) {
     let map = |x: f64, y: f64| {
         (
             (x - db.die_area.min.x) * scale_x,
-            (height as f64 - (y - db.die_area.min.y) * scale_y),
+            (y - db.die_area.min.y).mul_add(-scale_y, height as f64),
         )
     };
 
@@ -152,7 +152,7 @@ pub fn draw_routed_design(db: &NetlistDB, filename: &str, width: u32, height: u3
     let map = |x: f64, y: f64| {
         (
             (x - db.die_area.min.x) * scale_x,
-            (h as f64 - (y - db.die_area.min.y) * scale_y),
+            (y - db.die_area.min.y).mul_add(-scale_y, h as f64),
         )
     };
 

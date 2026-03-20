@@ -63,8 +63,7 @@ pub fn placement_table_header() {
 /// Prints a single placement iteration row.
 pub fn placement_iter(iter: usize, wl: f64, overflow: f64, avg_move: f64, step: f64) {
     eprintln!(
-        "    {:<8} {:>12.0} {:>12.4} {:>12.4} {:>10.5}",
-        iter, wl, overflow, avg_move, step
+        "    {iter:<8} {wl:>12.0} {overflow:>12.4} {avg_move:>12.4} {step:>10.5}"
     );
 }
 
@@ -107,7 +106,7 @@ pub fn wrote(path: &str) {
 
 /// Prints a dimmed phase timing line.
 pub fn phase_time(elapsed_secs: f64) {
-    eprintln!("    {}", format!("time: {:.1}s", elapsed_secs).dim());
+    eprintln!("    {}", format!("time: {elapsed_secs:.1}s").dim());
 }
 
 /// Prints a "Done in Xs" line with a rule.

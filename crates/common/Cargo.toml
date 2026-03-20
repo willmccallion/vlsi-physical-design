@@ -3,6 +3,14 @@ name = "pare-common"
 version = "0.1.0"
 edition = "2024"
 description = "PARE — Placement And Routing Engine: shared data structures and parsers"
+license.workspace = true
+repository.workspace = true
+readme.workspace = true
+keywords.workspace = true
+categories.workspace = true
+
+[lints]
+workspace = true
 
 [dependencies]
 serde = { version = "1.0", features = ["derive"] }

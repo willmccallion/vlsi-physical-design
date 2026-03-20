@@ -13,6 +13,7 @@ use std::cmp::Ordering;
 /// Places cells sequentially by finding the nearest available slot to their
 /// ideal position. Simpler than Abacus but may produce less optimal results
 /// for designs with high utilization.
+#[derive(Debug)]
 pub struct TetrisLegalizer;
 
 /// Tracks occupancy intervals for a placement row in Tetris legalization.
@@ -31,7 +32,7 @@ impl RowIntervals {
     /// Creates a new row intervals structure for a placement row.
     ///
     /// Initializes with a single blockage at the die minimum X to represent
-    /// the left boundary. The row_y parameter stores the Y coordinate of this
+    /// the left boundary. The `row_y` parameter stores the Y coordinate of this
     /// row for later use in cell placement.
     fn new(row_y: f64, die_min_x: f64, die_max_x: f64) -> Self {
         Self {
@@ -49,7 +50,7 @@ impl RowIntervals {
     fn add_occupancy(&mut self, start: f64, end: f64) {
         self.blockages.push((start, end));
         self.blockages
-            .sort_by(|a, b| a.0.partial_cmp(&b.0).unwrap());
+            .sort_by(|a, b| a.0.total_cmp(&b.0));
 
         let mut merged = Vec::new();
         if let Some(first) = self.blockages.first() {
@@ -117,7 +118,7 @@ impl Default for TetrisLegalizer {
 
 impl TetrisLegalizer {
     /// Creates a new Tetris legalizer instance.
-    pub fn new() -> Self {
+    pub const fn new() -> Self {
         Self
     }
 
@@ -143,7 +144,7 @@ impl TetrisLegalizer {
 
         let mut rows: Vec<RowIntervals> = (0..num_rows)
             .map(|i| {
-                let y = die_min_y + (i as f64) * row_height;
+                let y = (i as f64).mul_add(row_height, die_min_y);
                 RowIntervals::new(y, db.die_area.min.x, db.die_area.max.x)
             })
             .collect();
@@ -207,7 +208,7 @@ impl TetrisLegalizer {
                     {
                         let y_cost = (rows[r_idx].row_y - original_pos.y).abs();
 
-                        let total_cost = x_cost + (y_cost * 2.0);
+                        let total_cost = y_cost.mul_add(2.0, x_cost);
 
                         if total_cost < best_cost {
                             best_cost = total_cost;

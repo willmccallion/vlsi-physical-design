@@ -23,6 +23,7 @@ use pare_common::util::config::DetailedRoutingConfig;
 use pare_common::util::ui;
 use rayon::prelude::*;
 use std::collections::{HashMap, HashSet};
+use std::fmt::Write;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::Instant;
 
@@ -99,6 +100,7 @@ fn topology_is_congested(grid: &GCellGrid, topology: &[Vec<GridCoord>]) -> bool 
 }
 
 /// Executes detailed routing on a gcell grid using global routing guides.
+#[allow(clippy::implicit_hasher)]
 pub fn run(
     db: &mut NetlistDB,
     config: &DetailedRoutingConfig,
@@ -152,7 +154,7 @@ pub fn run(
         ((max_x - min_x) + (max_y - min_y)) as i64
     });
 
-    log::debug!("DR: Sequential Initial Route ({} nets)...", total_nets);
+    log::debug!("DR: Sequential Initial Route ({total_nets} nets)...");
     let start_time = Instant::now();
 
     let coarse_max = coarse_converter.to_grid(
@@ -253,7 +255,7 @@ pub fn run(
         .filter(|(id, t)| t.is_empty() && db.nets[*id].pins.len() >= 2)
         .count();
     if failed_init > 0 {
-        log::info!("Failed nets (no path found): {}", failed_init);
+        log::info!("Failed nets (no path found): {failed_init}");
     }
 
     ui::routing_table_header("DR");
@@ -277,7 +279,7 @@ pub fn run(
         overflow += failed_nets.len();
 
         if overflow == 0 {
-            ui::check(&format!("Detailed routing converged at iter {}", iter));
+            ui::check(&format!("Detailed routing converged at iter {iter}"));
             break;
         }
 
@@ -293,8 +295,7 @@ pub fn run(
 
         if stagnation_counter > config.stagnation_threshold {
             log::warn!(
-                "Stagnation detected ({} iters). Dumping congestion heatmap...",
-                stagnation_counter
+                "Stagnation detected ({stagnation_counter} iters). Dumping congestion heatmap...",
             );
         }
 
@@ -322,8 +323,7 @@ pub fn run(
                 grid.decay_history(0.0);
                 collision_penalty = init_penalty;
                 log::info!(
-                    "Reset history and penalty for small overflow ({})",
-                    overflow
+                    "Reset history and penalty for small overflow ({overflow})",
                 );
             } else {
                 grid.decay_history(0.5);
@@ -334,7 +334,7 @@ pub fn run(
 
         let mut nets_to_reroute = HashSet::new();
         for &net_id in &failed_nets {
-            nets_to_reroute.insert(net_id);
+            let _ = nets_to_reroute.insert(net_id);
         }
 
         // Find nets using congested edges
@@ -342,7 +342,7 @@ pub fn run(
         for net_id in 0..db.nets.len() {
             let topo = &net_topologies[net_id];
             if !topo.is_empty() && topology_is_congested(&grid, topo) {
-                nets_to_reroute.insert(net_id);
+                let _ = nets_to_reroute.insert(net_id);
             }
         }
 
@@ -361,7 +361,7 @@ pub fn run(
                         let nx = cx as i32 + dx;
                         let ny = cy as i32 + dy;
                         if nx >= 0 && nx < grid_w as i32 && ny >= 0 && ny < grid_h as i32 {
-                            kill_zone.insert((nx as u32, ny as u32));
+                            let _ = kill_zone.insert((nx as u32, ny as u32));
                         }
                     }
                 }
@@ -385,7 +385,7 @@ pub fn run(
                     }
                 }
                 if found {
-                    nets_to_reroute.insert(net_id);
+                    let _ = nets_to_reroute.insert(net_id);
                 }
             }
         }
@@ -440,16 +440,7 @@ pub fn run(
                 let mut min_y = i32::MAX;
                 let mut max_y = i32::MIN;
 
-                if !topo.is_empty() {
-                    for path in topo {
-                        for c in path {
-                            min_x = min_x.min(c.x as i32);
-                            max_x = max_x.max(c.x as i32);
-                            min_y = min_y.min(c.y as i32);
-                            max_y = max_y.max(c.y as i32);
-                        }
-                    }
-                } else {
+                if topo.is_empty() {
                     for &pid in &net.pins {
                         let cid = db.pin_to_cell[pid.index()];
                         let pos = db.get_pin_position(pid, &db.positions[cid.index()]);
@@ -458,6 +449,15 @@ pub fn run(
                         max_x = max_x.max(g.x as i32);
                         min_y = min_y.min(g.y as i32);
                         max_y = max_y.max(g.y as i32);
+                    }
+                } else {
+                    for path in topo {
+                        for c in path {
+                            min_x = min_x.min(c.x as i32);
+                            max_x = max_x.max(c.x as i32);
+                            min_y = min_y.min(c.y as i32);
+                            max_y = max_y.max(c.y as i32);
+                        }
                     }
                 }
                 (net_id, (min_x - 2, max_x + 2, min_y - 2, max_y + 2))
@@ -565,7 +565,7 @@ pub fn run(
 
                         let p = progress.fetch_add(1, Ordering::Relaxed) + 1;
                         if p.is_multiple_of(100) || p == total_ripped {
-                            ui::progress(&format!("[DR Iter {}]", iter), p, total_ripped);
+                            ui::progress(&format!("[DR Iter {iter}]"), p, total_ripped);
                         }
 
                         (net_id, res)
@@ -713,15 +713,7 @@ fn log_layer_stats(grid: &GCellGrid, db: &NetlistDB, layers: u8) {
                 "?"
             };
             log::debug!(
-                "  Layer {} ({}): h_overflow={}, v_overflow={}, h_used={}/{}, v_used={}/{}",
-                z,
-                name,
-                h_overflow,
-                v_overflow,
-                h_used,
-                total_h_cap,
-                v_used,
-                total_v_cap,
+                "  Layer {z} ({name}): h_overflow={h_overflow}, v_overflow={v_overflow}, h_used={h_used}/{total_h_cap}, v_used={v_used}/{total_v_cap}",
             );
         }
     }
@@ -767,10 +759,10 @@ fn log_layer_stats_compact(grid: &GCellGrid, db: &NetlistDB, layers: u8) {
             } else {
                 "?"
             };
-            info.push_str(&format!(" {}:{}/{}", name, overflow, used));
+            let _ = write!(info, " {name}:{overflow}/{used}");
         }
     }
     if !info.is_empty() {
-        log::debug!("  Layers:{}", info);
+        log::debug!("  Layers:{info}");
     }
 }

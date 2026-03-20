@@ -119,16 +119,25 @@ impl GuideOracle for FastGuideOracle {
     /// Checks if a grid coordinate is within the routing guide using lookup tables.
     ///
     /// Uses precomputed coordinate mapping tables to convert fine grid coordinates
-    /// to coarse grid coordinates in O(1) time. If allow_all is set, returns true
+    /// to coarse grid coordinates in O(1) time. If `allow_all` is set, returns true
     /// for all coordinates to bypass guide constraints.
     #[inline(always)]
     fn is_in_guide(&self, c: GridCoord) -> bool {
         if self.allow_all {
             return true;
         }
+        // SAFETY: x_map is sized to grid width and y_map to grid height at
+        // construction; c.x/c.y are always within grid bounds by A* invariant.
+        // Bounds checks here show up in profiles (~8% of detailed routing) because
+        // this is called millions of times per iteration in the inner A* loop.
+        #[allow(unsafe_code)]
         let cx = unsafe { *self.x_map.get_unchecked(c.x as usize) };
+        // SAFETY: y_map is sized to grid height at construction; c.y is always within grid bounds by A* invariant.
+        #[allow(unsafe_code)]
         let cy = unsafe { *self.y_map.get_unchecked(c.y as usize) };
         let idx = (c.z as u32 * self.coarse_w * self.coarse_h + cy * self.coarse_w + cx) as usize;
+        // SAFETY: idx is bounded by layers * coarse_w * coarse_h, which matches grid.len().
+        #[allow(unsafe_code)]
         unsafe { *self.grid.get_unchecked(idx) == self.current_net_id }
     }
 }

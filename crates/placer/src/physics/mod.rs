@@ -27,10 +27,15 @@ use rustfft::FftPlanner;
 /// gradient calculations. This structure is reused across iterations to
 /// avoid repeated allocations.
 pub struct PhysicsContext {
+    /// Number of bins along each axis of the density grid.
     pub bin_dim: usize,
+    /// Per-bin density values (row-major, size = `bin_dim` * `bin_dim`).
     pub density_map: Vec<f64>,
+    /// Electrostatic potential at each bin center.
     pub potential_map: Vec<f64>,
+    /// X-component of the electrostatic force field per bin.
     pub electro_force_x: Vec<f64>,
+    /// Y-component of the electrostatic force field per bin.
     pub electro_force_y: Vec<f64>,
 
     fft_planner: FftPlanner<f64>,
@@ -44,6 +49,18 @@ pub struct PhysicsContext {
     /// Dimensions of the congestion grid.
     congestion_grid_w: u32,
     congestion_grid_h: u32,
+}
+
+impl std::fmt::Debug for PhysicsContext {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("PhysicsContext")
+            .field("bin_dim", &self.bin_dim)
+            .field("density_map", &self.density_map.len())
+            .field("potential_map", &self.potential_map.len())
+            .field("electro_force_x", &self.electro_force_x.len())
+            .field("electro_force_y", &self.electro_force_y.len())
+            .finish_non_exhaustive()
+    }
 }
 
 impl PhysicsContext {
@@ -93,9 +110,8 @@ impl PhysicsContext {
         gradients: &mut [Point<f64>],
         weight: f64,
     ) -> f64 {
-        let cmap = match &self.congestion_map {
-            Some(m) => m,
-            None => return 0.0,
+        let Some(cmap) = &self.congestion_map else {
+            return 0.0;
         };
         let gw = self.congestion_grid_w as usize;
         let gh = self.congestion_grid_h as usize;
@@ -116,8 +132,8 @@ impl PhysicsContext {
                 continue;
             }
 
-            let cx = pos.x + db.cells[i].width * 0.5;
-            let cy = pos.y + db.cells[i].height * 0.5;
+            let cx = db.cells[i].width.mul_add(0.5, pos.x);
+            let cy = db.cells[i].height.mul_add(0.5, pos.y);
 
             let gx = ((cx - db.die_area.min.x) / bin_w) as usize;
             let gy = ((cy - db.die_area.min.y) / bin_h) as usize;
@@ -150,7 +166,7 @@ impl PhysicsContext {
     ///
     /// Evaluates the wirelength cost using weighted average approximation
     /// and the density cost using electrostatic force computation. Accumulates
-    /// gradients into the output_gradients array, which guides the optimizer's
+    /// gradients into the `output_gradients` array, which guides the optimizer's
     /// search direction. Returns both cost values for monitoring convergence.
     pub fn compute_gradients(
         &mut self,
@@ -182,9 +198,9 @@ impl PhysicsContext {
 
     /// Computes WL and density gradients separately with their norms.
     ///
-    /// Returns (wl_cost, density_cost, wl_grad_norm, density_grad_norm).
-    /// The WL gradients are written to output_gradients, and the density
-    /// gradients are written to density_gradients. The caller combines them
+    /// Returns (`wl_cost`, `density_cost`, `wl_grad_norm`, `density_grad_norm`).
+    /// The WL gradients are written to `output_gradients`, and the density
+    /// gradients are written to `density_gradients`. The caller combines them
     /// with an adaptive weight.
     pub fn compute_gradients_separate(
         &mut self,
@@ -208,7 +224,7 @@ impl PhysicsContext {
         // Compute WL gradient norm
         let wl_grad_norm = output_gradients
             .iter()
-            .map(|g| g.x * g.x + g.y * g.y)
+            .map(|g| g.x.mul_add(g.x, g.y * g.y))
             .sum::<f64>()
             .sqrt();
 
@@ -225,7 +241,7 @@ impl PhysicsContext {
         // Compute density gradient norm
         let density_grad_norm = density_gradients
             .iter()
-            .map(|g| g.x * g.x + g.y * g.y)
+            .map(|g| g.x.mul_add(g.x, g.y * g.y))
             .sum::<f64>()
             .sqrt();
 

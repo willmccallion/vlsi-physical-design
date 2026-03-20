@@ -3,7 +3,7 @@
 //! Implements Nesterov's accelerated gradient descent with adaptive density
 //! weighting inspired by ePlace/DREAMPlace. The density force multiplier is
 //! initialized from the WL/density gradient norm ratio and updated based on
-//! HPWL changes, replacing the fixed electro_force_multiplier.
+//! HPWL changes, replacing the fixed `electro_force_multiplier`.
 
 use crate::physics::PhysicsContext;
 use pare_common::db::core::NetlistDB;
@@ -12,24 +12,37 @@ use pare_common::util::ui;
 use rand::Rng;
 
 /// Result returned by the placement optimizer.
+#[derive(Debug)]
 pub struct PlacementResult {
+    /// Whether the optimizer converged before reaching the iteration limit.
     pub converged: bool,
+    /// Number of iterations executed.
     pub iterations: usize,
+    /// Density overflow ratio at termination.
     pub final_overflow: f64,
+    /// Total wirelength at termination.
     pub final_wirelength: f64,
 }
 
 /// Parameters controlling the Nesterov optimizer's behavior.
+#[derive(Debug)]
 pub struct NesterovParams {
+    /// Maximum number of gradient descent iterations.
     pub max_iterations: usize,
+    /// Initial step size for gradient updates.
     pub initial_learning_rate: f64,
+    /// Average displacement threshold for convergence.
     pub convergence_threshold: f64,
+    /// Smoothing parameter for the weighted-average wirelength model.
     pub wa_gamma: f64,
+    /// Target bin density for the electrostatic penalty.
     pub target_density: f64,
+    /// Initial multiplier for density forces before adaptive calibration.
     pub electro_force_multiplier: f64,
 }
 
 /// Nesterov-accelerated gradient descent optimizer for placement.
+#[derive(Debug)]
 pub struct NesterovOptimizer {
     params: NesterovParams,
     x_k: Vec<Point<f64>>,
@@ -91,8 +104,8 @@ impl NesterovOptimizer {
             }
         } else {
             let mut rng = rand::thread_rng();
-            let center_x = (db.die_area.min.x + db.die_area.max.x) / 2.0;
-            let center_y = (db.die_area.min.y + db.die_area.max.y) / 2.0;
+            let center_x = f64::midpoint(db.die_area.min.x, db.die_area.max.x);
+            let center_y = f64::midpoint(db.die_area.min.y, db.die_area.max.y);
             let noise_scale_x = db.die_area.width() * 0.25;
             let noise_scale_y = db.die_area.height() * 0.25;
 
@@ -202,7 +215,7 @@ impl NesterovOptimizer {
                     1.05
                 } else {
                     let slowdown = (delta_hpwl / ref_hpwl).min(1.0);
-                    1.01 + 0.04 * (1.0 - slowdown)
+                    0.04f64.mul_add(1.0 - slowdown, 1.01)
                 };
                 density_weight *= mu;
 
@@ -212,7 +225,7 @@ impl NesterovOptimizer {
                 if density_grad_norm > 1e-20 && wl_grad_norm > 1e-20 {
                     let current_ratio = wl_grad_norm / density_grad_norm;
                     let progress = (k as f64 / self.params.max_iterations as f64).min(1.0);
-                    let target_multiplier = 1.0 + 15.0 * progress.sqrt();
+                    let target_multiplier = 15.0f64.mul_add(progress.sqrt(), 1.0);
                     let ideal = current_ratio * target_multiplier;
                     density_weight = density_weight.max(ideal);
                 }
@@ -261,8 +274,7 @@ impl NesterovOptimizer {
             // Sudden spike: movement explodes in a single step
             if k > 100 && avg_disp > prev_avg_disp * 5.0 && avg_disp > 2.0 {
                 log::debug!(
-                    "Instability detected at iter {} (avg_disp={:.2}). Rolling back to best (overflow={:.4})",
-                    k, avg_disp, best_overflow
+                    "Instability detected at iter {k} (avg_disp={avg_disp:.2}). Rolling back to best (overflow={best_overflow:.4})"
                 );
                 Self::apply_clamping(db, &mut best_positions);
                 db.positions.copy_from_slice(&best_positions);
@@ -274,8 +286,7 @@ impl NesterovOptimizer {
             // Overflow regression: had a good solution but now diverging badly
             if k > 200 && best_overflow < 0.10 && overflow_ratio > 0.50 {
                 log::debug!(
-                    "Divergence detected at iter {} (overflow={:.3}, best was {:.4}). Rolling back.",
-                    k, overflow_ratio, best_overflow
+                    "Divergence detected at iter {k} (overflow={overflow_ratio:.3}, best was {best_overflow:.4}). Rolling back."
                 );
                 Self::apply_clamping(db, &mut best_positions);
                 db.positions.copy_from_slice(&best_positions);
@@ -300,8 +311,7 @@ impl NesterovOptimizer {
                 && (wl_improved || wl_stable)
             {
                 log::debug!(
-                    "Converged at iteration {}: overflow={:.4}, avg_disp={:.4}, WL={:.0}",
-                    k, overflow_ratio, avg_disp, wl_cost
+                    "Converged at iteration {k}: overflow={overflow_ratio:.4}, avg_disp={avg_disp:.4}, WL={wl_cost:.0}"
                 );
                 Self::apply_clamping(db, &mut self.x_k);
                 db.positions.copy_from_slice(&self.x_k);
@@ -314,7 +324,7 @@ impl NesterovOptimizer {
             if k > 500 && avg_disp < self.params.convergence_threshold
                 && (wl_improved || wl_stable)
             {
-                log::debug!("Converged: Cells stabilized at iteration {} (overflow={:.4})", k, overflow_ratio);
+                log::debug!("Converged: Cells stabilized at iteration {k} (overflow={overflow_ratio:.4})");
                 Self::apply_clamping(db, &mut self.x_k);
                 db.positions.copy_from_slice(&self.x_k);
                 return Ok(PlacementResult {
@@ -333,7 +343,7 @@ impl NesterovOptimizer {
 
             Self::apply_clamping(db, &mut x_next);
 
-            let a_next = (1.0 + (4.0 * a_k * a_k + 1.0).sqrt()) / 2.0;
+            let a_next = f64::midpoint(1.0, (4.0 * a_k).mul_add(a_k, 1.0).sqrt());
             let momentum = (a_k - 1.0) / a_next;
 
             #[allow(clippy::needless_range_loop)]
@@ -361,8 +371,7 @@ impl NesterovOptimizer {
         Self::apply_clamping(db, &mut best_positions);
         db.positions.copy_from_slice(&best_positions);
         log::warn!(
-            "Placer reached max iterations. Using best solution (overflow={:.4}).",
-            best_overflow
+            "Placer reached max iterations. Using best solution (overflow={best_overflow:.4})."
         );
         Ok(PlacementResult {
             converged: false,
