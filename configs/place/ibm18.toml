@@ -1,0 +1,12 @@
+[input]
+bookshelf_aux_file = "inputs/ibm18/ibm18.aux"
+output_def = "output/ibm18/placed.def"
+num_layers = 10
+
+[global_placement]
+placer_max_iterations = 2000
+convergence_threshold = 1e-4
+electro_force_multiplier = 1000.0
+
+[legalization]
+algorithm = "abacus"

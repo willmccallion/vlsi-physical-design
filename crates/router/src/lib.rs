@@ -46,7 +46,7 @@ pub mod grid;
 pub mod utils;
 
 use pare_common::db::core::NetlistDB;
-use pare_common::util::config::Config;
+use pare_common::util::config::{DetailedRoutingConfig, GlobalRoutingConfig};
 
 /// Result from the routing workflow including congestion data for feedback.
 pub struct RoutingResult {
@@ -66,11 +66,15 @@ pub struct RoutingResult {
 /// constrain detailed routing to preferred regions, improving routability and
 /// reducing runtime. Returns a RoutingResult containing congestion data that
 /// can be fed back to the placer for congestion-driven placement iterations.
-pub fn route(db: &mut NetlistDB, config: &Config) -> Result<RoutingResult, String> {
+pub fn route(
+    db: &mut NetlistDB,
+    global_config: &GlobalRoutingConfig,
+    detailed_config: &DetailedRoutingConfig,
+) -> Result<RoutingResult, String> {
     let (guides, coarse_converter, congestion_map, grid_w, grid_h) =
-        global::run(db, &config.global_routing)?;
+        global::run(db, global_config)?;
 
-    detailed::run(db, &config.detailed_routing, &guides, &coarse_converter)?;
+    detailed::run(db, detailed_config, &guides, &coarse_converter)?;
 
     Ok(RoutingResult {
         congestion_map,

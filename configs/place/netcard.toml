@@ -1,0 +1,12 @@
+[input]
+lef_files = ["inputs/netcard/Nangate45.lef"]
+def_file = "inputs/netcard/netcard.def"
+output_def = "output/netcard/placed.def"
+
+[global_placement]
+placer_max_iterations = 2000
+convergence_threshold = 1e-4
+electro_force_multiplier = 1000.0
+
+[legalization]
+algorithm = "abacus"

@@ -129,23 +129,21 @@ All benchmarks are real circuits (ISPD or open-source RTL), not synthetic. Leon3
 **Requirements:** Rust stable
 
 ```bash
-# Run the full flow on the GCD benchmark (LEF/DEF)
-cargo run --release -- flow configs/gcd.toml
+# Route a benchmark by name (resolves to configs/route/leon3mp.toml)
+cargo run --release -- route leon3mp
 
-# Run on IBM01, IBM05, or IBM10 (Bookshelf format)
-cargo run --release -- flow configs/ibm01.toml
-cargo run --release -- flow configs/ibm05.toml
-cargo run --release -- flow configs/ibm10.toml
+# Place a benchmark by name (resolves to configs/place/leon3mp.toml)
+cargo run --release -- place leon3mp
 
-# Run on AES (LEF/DEF, Nangate45, 51k nets)
-cargo run --release -- flow configs/aes.toml
+# Full placement + routing flow (loads both place and route configs, merges them)
+cargo run --release -- flow leon3mp
 
-# Run on IBM13 / IBM14 (up to 145k cells)
-cargo run --release -- flow configs/ibm13.toml
-cargo run --release -- flow configs/ibm14.toml
+# Explicit config paths still work
+cargo run --release -- route configs/route/leon3mp.toml
 
-# Route only (skip placement, uses previously placed DEF)
-cargo run --release -- route configs/gcd.toml
+# Bookshelf benchmarks
+cargo run --release -- flow ibm01
+cargo run --release -- route ibm10
 ```
 
 Output images (`nesterov_placer.png`, `placed.png`, `routed.png`) and the routed DEF are written to the `output/` directory.

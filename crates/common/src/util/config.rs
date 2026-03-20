@@ -217,6 +217,9 @@ pub struct InputConfig {
     pub bookshelf_aux_file: Option<String>,
     #[serde(default = "default_num_layers")]
     pub num_layers: usize,
+    /// Explicit output directory for all generated files.
+    /// If unset, derived from output_def's parent directory.
+    pub output_dir: Option<String>,
 }
 
 impl Default for InputConfig {
@@ -231,6 +234,7 @@ impl Default for InputConfig {
             output_def: default_output_def(),
             bookshelf_aux_file: None,
             num_layers: default_num_layers(),
+            output_dir: None,
         }
     }
 }

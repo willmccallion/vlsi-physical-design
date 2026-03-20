@@ -1,0 +1,12 @@
+[input]
+lef_files = ["inputs/leon3mp/Nangate45.lef"]
+def_file = "inputs/leon3mp/leon3mp.def"
+output_def = "output/leon3mp/placed.def"
+
+[global_placement]
+placer_max_iterations = 2000
+convergence_threshold = 1e-4
+electro_force_multiplier = 1000.0
+
+[legalization]
+algorithm = "abacus"

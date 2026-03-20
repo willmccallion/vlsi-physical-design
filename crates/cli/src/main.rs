@@ -28,19 +28,32 @@ struct Args {
 enum Commands {
     /// Run placement only.
     Place {
-        /// TOML configuration file.
+        /// Design name (e.g. 'leon3mp') or path to TOML config.
         config: PathBuf,
     },
     /// Run routing only (requires a prior placement run).
     Route {
-        /// TOML configuration file.
+        /// Design name (e.g. 'leon3mp') or path to TOML config.
         config: PathBuf,
     },
     /// Run the full placement + routing flow.
     Flow {
-        /// TOML configuration file.
+        /// Design name (e.g. 'leon3mp') or path to TOML config.
         config: PathBuf,
     },
+}
+
+/// Resolves a config argument to a file path.
+///
+/// If the argument is already a file path (contains '/', ends with '.toml',
+/// or exists on disk), it is used directly. Otherwise, it is treated as a
+/// benchmark name and looked up in `configs/<mode>/`.
+fn resolve_config(name: &str, mode: &str) -> PathBuf {
+    let path = Path::new(name);
+    if path.exists() || name.contains('/') || name.ends_with(".toml") {
+        return path.to_path_buf();
+    }
+    PathBuf::from(format!("configs/{}/{}.toml", mode, name))
 }
 
 fn load_config(path: &Path) -> anyhow::Result<Config> {
@@ -54,6 +67,64 @@ fn load_config(path: &Path) -> anyhow::Result<Config> {
         .map_err(|e| anyhow::anyhow!("Failed to parse config TOML: {}", e))
 }
 
+/// Validates that a pair of place/route configs are consistent for a flow run.
+fn validate_flow_configs(
+    place: &Config,
+    route: &Config,
+    place_path: &Path,
+    route_path: &Path,
+) -> anyhow::Result<()> {
+    // LEF files must match (same technology library)
+    if place.input.lef_files != route.input.lef_files {
+        return Err(anyhow::anyhow!(
+            "LEF mismatch between configs:\n  place ({}) : {:?}\n  route ({}) : {:?}\n\
+             Fix: ensure both configs reference the same LEF files.",
+            place_path.display(),
+            place.input.lef_files,
+            route_path.display(),
+            route.input.lef_files,
+        ));
+    }
+
+    // Input DEF must match (same design)
+    if place.input.def_file != route.input.def_file
+        && !place.input.def_file.is_empty()
+        && !route.input.def_file.is_empty()
+    {
+        return Err(anyhow::anyhow!(
+            "def_file mismatch between configs:\n  place ({}) : {}\n  route ({}) : {}\n\
+             Fix: both configs should point to the same input design.",
+            place_path.display(),
+            place.input.def_file,
+            route_path.display(),
+            route.input.def_file,
+        ));
+    }
+
+    // Bookshelf aux must match if present in either
+    if place.input.bookshelf_aux_file != route.input.bookshelf_aux_file {
+        return Err(anyhow::anyhow!(
+            "bookshelf_aux_file mismatch between configs:\n  place ({}) : {:?}\n  route ({}) : {:?}\n\
+             Fix: both configs should reference the same Bookshelf aux file.",
+            place_path.display(),
+            place.input.bookshelf_aux_file,
+            route_path.display(),
+            route.input.bookshelf_aux_file,
+        ));
+    }
+
+    // Place config must have output_def (routing reads from it)
+    if place.input.output_def.is_empty() {
+        return Err(anyhow::anyhow!(
+            "Place config ({}) missing output_def.\n\
+             Fix: add output_def to [input] so routing knows where to find the placed design.",
+            place_path.display(),
+        ));
+    }
+
+    Ok(())
+}
+
 fn main() -> anyhow::Result<()> {
     logger::init();
     let args = Args::parse();
@@ -63,7 +134,8 @@ fn main() -> anyhow::Result<()> {
 
     match args.command {
         Commands::Place { ref config } => {
-            let config = load_config(config)?;
+            let path = resolve_config(config.to_str().unwrap(), "place");
+            let config = load_config(&path)?;
             validate_input_paths(&config)?;
             prepare_output_dir(&config.input.output_def)?;
 
@@ -72,23 +144,53 @@ fn main() -> anyhow::Result<()> {
             }
         }
         Commands::Route { ref config } => {
-            let config = load_config(config)?;
+            let path = resolve_config(config.to_str().unwrap(), "route");
+            let config = load_config(&path)?;
             if config.input.bookshelf_aux_file.is_none() {
                 validate_lef_paths(&config)?;
             }
-            if !Path::new(&config.input.output_def).exists() {
+
+            // Route-only: read def_file directly (the pre-placed DEF).
+            // Fallback to output_def for backward compatibility.
+            let placed_def = if !config.input.def_file.is_empty() {
+                &config.input.def_file
+            } else {
+                &config.input.output_def
+            };
+            if !Path::new(placed_def).exists() {
                 return Err(anyhow::anyhow!(
-                    "Placed DEF file missing: '{}'. Did you run 'place'?",
-                    config.input.output_def
+                    "DEF file not found: '{}'. Run `pare place` first or point def_file at a placed design.",
+                    placed_def
                 ));
             }
 
-            if run_routing(&config).is_err() {
+            let output_dir = resolve_output_dir(&config);
+            if !output_dir.exists() {
+                std::fs::create_dir_all(&output_dir)?;
+            }
+
+            if run_routing(&config, placed_def).is_err() {
                 std::process::exit(1);
             }
         }
         Commands::Flow { ref config } => {
-            let config = load_config(config)?;
+            let config_str = config.to_str().unwrap();
+            let place_path = resolve_config(config_str, "place");
+            let route_path = resolve_config(config_str, "route");
+
+            let place_cfg = load_config(&place_path)?;
+            let route_cfg = load_config(&route_path)?;
+
+            validate_flow_configs(&place_cfg, &route_cfg, &place_path, &route_path)?;
+
+            let config = Config {
+                global_placement: place_cfg.global_placement,
+                legalization: place_cfg.legalization,
+                global_routing: route_cfg.global_routing,
+                detailed_routing: route_cfg.detailed_routing,
+                input: place_cfg.input,
+            };
+
             validate_input_paths(&config)?;
             prepare_output_dir(&config.input.output_def)?;
 
@@ -96,7 +198,8 @@ fn main() -> anyhow::Result<()> {
                 std::process::exit(1);
             }
 
-            let routing_result = match run_routing(&config) {
+            // Flow: routing reads from placement output
+            let routing_result = match run_routing(&config, &config.input.output_def) {
                 Ok(r) => r,
                 Err(_) => std::process::exit(1),
             };
@@ -112,7 +215,7 @@ fn main() -> anyhow::Result<()> {
                         std::process::exit(1);
                     }
 
-                    result = match run_routing(&config) {
+                    result = match run_routing(&config, &config.input.output_def) {
                         Ok(r) => r,
                         Err(_) => std::process::exit(1),
                     };
@@ -167,6 +270,19 @@ fn prepare_output_dir(path_str: &str) -> anyhow::Result<()> {
         std::fs::create_dir_all(parent)?;
     }
     Ok(())
+}
+
+/// Resolves the output directory for generated files.
+/// Priority: config.input.output_dir > parent of output_def > "output/"
+fn resolve_output_dir(config: &Config) -> PathBuf {
+    if let Some(ref dir) = config.input.output_dir {
+        return PathBuf::from(dir);
+    }
+    Path::new(&config.input.output_def)
+        .parent()
+        .filter(|p| !p.as_os_str().is_empty())
+        .map(|p| p.to_path_buf())
+        .unwrap_or_else(|| PathBuf::from("output"))
 }
 
 /// Distributes I/O pins uniformly around the die perimeter.
@@ -535,7 +651,10 @@ fn preload_bookshelf_geometry(db: &mut NetlistDB, aux_path: &str) -> anyhow::Res
 
 /// Executes the complete routing workflow from placed netlist to routed design.
 /// Returns the RoutingResult containing congestion data for feedback.
-fn run_routing(config: &Config) -> anyhow::Result<pare_router::RoutingResult> {
+///
+/// `placed_def` is the path to the DEF file to route. For route-only use this
+/// is `def_file` directly; for the flow pipeline this is `output_def`.
+fn run_routing(config: &Config, placed_def: &str) -> anyhow::Result<pare_router::RoutingResult> {
     let mut db = NetlistDB::new();
 
     let is_bookshelf = config.input.bookshelf_aux_file.is_some();
@@ -553,10 +672,9 @@ fn run_routing(config: &Config) -> anyhow::Result<pare_router::RoutingResult> {
             .map_err(|e| anyhow::anyhow!("Invalid LEF syntax in '{}': {}", lef_path, e))?;
     }
 
-    let input_def = &config.input.output_def;
-    log::debug!("Parsing Placed DEF: {}", input_def);
-    pare_common::db::parser::def::parse(&mut db, input_def)
-        .map_err(|e| anyhow::anyhow!("Invalid Placed DEF syntax in '{}': {}", input_def, e))?;
+    log::debug!("Parsing Placed DEF: {}", placed_def);
+    pare_common::db::parser::def::parse(&mut db, placed_def)
+        .map_err(|e| anyhow::anyhow!("Invalid Placed DEF syntax in '{}': {}", placed_def, e))?;
 
     if is_bookshelf || db.layers.is_empty() {
         log::debug!("Bookshelf/No-LEF: Calculating routing pitch from cell geometry...");
@@ -613,7 +731,8 @@ fn run_routing(config: &Config) -> anyhow::Result<pare_router::RoutingResult> {
         "Layers:", &format!("{}", db.layers.len()),
     );
 
-    let routing_result = pare_router::route(&mut db, config).map_err(|e| anyhow::anyhow!(e))?;
+    let routing_result = pare_router::route(&mut db, &config.global_routing, &config.detailed_routing)
+        .map_err(|e| anyhow::anyhow!(e))?;
     ui::phase_time(phase_start.elapsed().as_secs_f64());
 
     // --- Verification ---
@@ -625,18 +744,16 @@ fn run_routing(config: &Config) -> anyhow::Result<pare_router::RoutingResult> {
     // --- Output ---
     let phase_start = Instant::now();
     ui::phase("Output");
-    let output_dir = Path::new(&config.input.output_def)
-        .parent()
-        .unwrap_or(Path::new("."));
+    let output_dir = resolve_output_dir(config);
+    if !output_dir.exists() {
+        std::fs::create_dir_all(&output_dir)?;
+    }
 
     let routed_png = output_dir.join("routed.png");
     visualization::draw_routed_design(&db, routed_png.to_str().unwrap(), 2000, 2000);
     ui::wrote(routed_png.to_str().unwrap());
 
-    let input_path = Path::new(&config.input.output_def);
-    let parent = input_path.parent().unwrap_or(Path::new("."));
-    let routed_filename = "routed.def";
-    let output_path = parent.join(routed_filename);
+    let output_path = output_dir.join("routed.def");
 
     save_def(&db, output_path.to_str().unwrap())?;
     ui::wrote(output_path.to_str().unwrap());
