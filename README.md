@@ -1,6 +1,6 @@
 # PARE — Placement And Routing Engine
 
-A digital IC placement and routing engine written in Rust. Implements the full physical design flow — analytical global placement, Abacus legalization, and two-stage negotiation-based routing — from scratch. Successfully places and routes real benchmarks up to 145k cells / 143k nets with zero DRC violations.
+A digital IC placement and routing engine written in Rust. Implements the full physical design flow — analytical global placement, Abacus legalization, and two-stage negotiation-based routing — from scratch. Successfully places and routes real benchmarks up to 145k cells / 143k nets with no shorts or opens.
 
 | IBM10 (64,227 nets) | AES (51,671 nets) |
 |:---:|:---:|
@@ -10,7 +10,7 @@ A digital IC placement and routing engine written in Rust. Implements the full p
 |:---:|:---:|
 | ![IBM05 Routing](assets/routed_ibm05.png) | ![IBM01 Routing](assets/routed_ibm01.png) |
 
-*Top: IBM10 ISPD benchmark (67k cells, 49% utilization) and AES cipher (Nangate45, 10 metal layers). Bottom: IBM05 (80% utilization) and IBM01. All verified DRC-clean — no shorts, no opens.*
+*Top: IBM10 ISPD benchmark (67k cells, 49% utilization) and AES cipher (Nangate45, 10 metal layers). Bottom: IBM05 (80% utilization) and IBM01. All verified short-free and open-free.*
 
 ---
 
@@ -40,7 +40,7 @@ flowchart TD
         VIA["Via generation & pin access<br/>layer-transition segments"]
     end
 
-    VER["Verification<br/>no shorts · no opens · all cells legal"]
+    VER["Topology check<br/>no shorts · no opens · cells legal"]
     OUT["Routed DEF output"]
 
     INPUT --> IO --> GP --> LEG --> GR --> DR --> VER --> OUT
@@ -88,6 +88,21 @@ Routing runs in two stages on an edge-based gcell grid where capacity is structu
 
 ---
 
+## Verification
+
+Post-route verification checks topology — not full design rules. It catches:
+
+- **Shorts** — centerline intersection between segments of different nets (wires are treated as zero-width lines, so this only catches wires that literally cross, not spacing violations)
+- **Opens** — BFS connectivity check that all pins on a net are reachable through the routed segments
+- **Placement legality** — cells within die boundary, no cell-to-cell overlaps
+- **Manhattan check** — flags any diagonal (non-Manhattan) wire segments
+
+There is also an informational spacing check that computes bounding-box gaps between centerlines and compares against `min_spacing` from the layer definitions, but this does not account for wire widths and is not treated as an error.
+
+**Not checked:** track alignment, minimum wire width, via design rules, end-of-line spacing, cut spacing, or any width-aware spacing. The router doesn't produce track-aligned output, so a real DRC (e.g. Calibre, KLayout DRC) would likely report violations. This verification is useful for catching routing bugs (crossed nets, unconnected pins) but should not be confused with signoff-quality DRC.
+
+---
+
 ## Data Representation
 
 The `NetlistDB` is the central data structure shared across all tools:
@@ -110,15 +125,15 @@ Type-safe index newtypes (`CellId`, `NetId`, `PinId`) prevent accidental index c
 
 | Benchmark | Cells | Nets | Utilization | Layers | Time | Result |
 |---|---|---|---|---|---|---|
-| GCD | 579 | 579 | 27% | 10 (Nangate45) | 0.4s | DRC-clean |
-| IBM01 | 12,506 | 11,507 | 85% | 6 (Bookshelf) | 4.1s | DRC-clean |
-| AES | 20,533 | 51,671 | 5% | 10 (Nangate45) | 12.6s | DRC-clean |
-| IBM05 | 28,146 | 28,446 | 80% | 6 (Bookshelf) | 11.3s | DRC-clean |
-| IBM10 | 67,692 | 64,227 | 49% | 6 (Bookshelf) | 42.8s | DRC-clean |
-| IBM13 | 81,056 | 84,199 | 40% | 6 (Bookshelf) | 63.5s | DRC-clean |
-| IBM14 | 145,492 | 143,202 | 49% | 6 (Bookshelf) | 368.3s | DRC-clean |
-| Netcard | 252,978 | 290,354 | 43% | 10 (Nangate45) | 91.7s | DRC-clean |
-| Leon3mp | 312,529 | 406,912 | 53% | 10 (Nangate45) | 29.0s | DRC-clean |
+| GCD | 579 | 579 | 27% | 10 (Nangate45) | 0.4s | No shorts/opens |
+| IBM01 | 12,506 | 11,507 | 85% | 6 (Bookshelf) | 4.1s | No shorts/opens |
+| AES | 20,533 | 51,671 | 5% | 10 (Nangate45) | 12.6s | No shorts/opens |
+| IBM05 | 28,146 | 28,446 | 80% | 6 (Bookshelf) | 11.3s | No shorts/opens |
+| IBM10 | 67,692 | 64,227 | 49% | 6 (Bookshelf) | 42.8s | No shorts/opens |
+| IBM13 | 81,056 | 84,199 | 40% | 6 (Bookshelf) | 63.5s | No shorts/opens |
+| IBM14 | 145,492 | 143,202 | 49% | 6 (Bookshelf) | 368.3s | No shorts/opens |
+| Netcard | 252,978 | 290,354 | 43% | 10 (Nangate45) | 91.7s | No shorts/opens |
+| Leon3mp | 312,529 | 406,912 | 53% | 10 (Nangate45) | 29.0s | No shorts/opens |
 
 All benchmarks are real circuits (ISPD or open-source RTL), not synthetic. Leon3mp is the largest — 313k cells with 407k nets, routed in 29s. Netcard has 253k cells with 290k nets including a 67k-pin power net. IBM14 has 145k cells with 143k nets. IBM05 runs at 80% utilization with complex multi-pin nets. AES uses a real technology library (Nangate45) with 10 metal layers at realistic pitches.
 
