@@ -158,13 +158,8 @@ fn main() -> anyhow::Result<()> {
                 validate_lef_paths(&config)?;
             }
 
-            // Route-only: read def_file directly (the pre-placed DEF).
-            // Fallback to output_def for backward compatibility.
-            let placed_def = if config.input.def_file.is_empty() {
-                &config.input.output_def
-            } else {
-                &config.input.def_file
-            };
+            let placed_def = placed_def_for_routing(&config)?;
+            let placed_def = placed_def.as_str();
             if !Path::new(placed_def).exists() {
                 return Err(anyhow::anyhow!(
                     "DEF file not found: '{placed_def}'. Run `pare place` first or point def_file at a placed design.",
@@ -282,6 +277,23 @@ fn prepare_output_dir(path_str: &str) -> anyhow::Result<()> {
 
 /// Resolves the output directory for generated files.
 /// Priority: `config.input.output_dir` > parent of `output_def` > "output/"
+/// The placed DEF a route-only run reads: `def_file` for a design that ships
+/// placed, otherwise the `placed.def` that `pare place` wrote to the output
+/// directory.
+fn placed_def_for_routing(config: &Config) -> anyhow::Result<String> {
+    if !config.input.def_file.is_empty() {
+        return Ok(config.input.def_file.clone());
+    }
+    if config.input.output_dir.is_none() {
+        return Ok(config.input.output_def.clone());
+    }
+    resolve_output_dir(config)
+        .join("placed.def")
+        .to_str()
+        .map(str::to_owned)
+        .ok_or_else(|| anyhow::anyhow!("non-UTF-8 path"))
+}
+
 fn resolve_output_dir(config: &Config) -> PathBuf {
     if let Some(ref dir) = config.input.output_dir {
         return PathBuf::from(dir);
