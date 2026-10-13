@@ -344,19 +344,7 @@ impl AbacusLegalizer {
                     .sum();
                 let has_slack = sub_cell_width < sub_capacity - 0.001;
 
-                let mut ordered: Vec<(f64, usize)> = clusters
-                    .iter()
-                    .flat_map(|c| {
-                        let mut cx = c.x;
-                        c.member_cells.iter().map(move |&ci| {
-                            let entry = (cx, ci);
-                            cx += 0.0; // width advanced below during sort
-                            entry
-                        })
-                    })
-                    .collect();
-                // Re-compute each cell's ideal x by walking clusters properly
-                ordered.clear();
+                let mut ordered: Vec<(f64, usize)> = Vec::with_capacity(sub.cells.len());
                 for cluster in &clusters {
                     let mut cx = cluster.x;
                     for &ci in &cluster.member_cells {
