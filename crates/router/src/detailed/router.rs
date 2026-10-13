@@ -836,22 +836,6 @@ pub fn assign_tracks(
     // Skip layer 0 (M1): it carries pin access wires that connect exact
     // pin positions to gcell centers and must not be snapped to tracks.
     for layer_idx in 1..layers.len() {
-        struct WireInfo {
-            net_id: usize,
-            seg_idx: usize,
-            /// The coordinate perpendicular to the wire (Y for H, X for V)
-            track_coord: f64,
-            /// Wire extent along its direction
-            span_lo: f64,
-            span_hi: f64,
-            /// Endpoint positions along the span direction
-            ep1_span: f64,
-            ep2_span: f64,
-            /// Whether each endpoint is an anchor (has a via connection)
-            ep1_anchored: bool,
-            ep2_anchored: bool,
-        }
-
         let li = layer_idx as u8;
         if layer_idx >= track_grids.len() {
             continue;
@@ -924,9 +908,11 @@ pub fn assign_tracks(
             continue;
         }
 
+        let runs = collinear_runs(&wires);
+
         // Build occupied interval index: track_key -> [(span_lo, span_hi, net_id)]
         let mut occupied: HashMap<i64, Vec<(f64, f64, usize)>> = HashMap::new();
-        for w in &wires {
+        for w in &runs {
             let qkey = (w.track_coord * 1000.0).round() as i64;
             occupied
                 .entry(qkey)
@@ -937,8 +923,8 @@ pub fn assign_tracks(
         // Pending jog segments to append after processing
         let mut pending_jogs: Vec<(usize, RouteSegment)> = Vec::new();
 
-        // Try to snap each wire. Process all wires; commit greedily.
-        for w in &wires {
+        // Snap each run as a unit, so pieces that meet end to end stay joined.
+        for w in &runs {
             let snapped = tg.snap(w.track_coord);
             let snap_key = (snapped * 1000.0).round() as i64;
             let orig_key = (w.track_coord * 1000.0).round() as i64;
@@ -959,25 +945,17 @@ pub fn assign_tracks(
             }
 
             // 2. Determine which endpoints need jogs (anchored endpoints)
-            let jog_delta = snapped - w.track_coord;
             let jog_min = w.track_coord.min(snapped);
             let jog_max = w.track_coord.max(snapped);
 
-            // Collect span positions that need jog segments
-            let mut jog_spans: Vec<f64> = Vec::new();
-            if w.ep1_anchored {
-                jog_spans.push(w.ep1_span);
-            }
-            if w.ep2_anchored {
-                jog_spans.push(w.ep2_span);
-            }
+            let jog_spans = &w.anchored_spans;
 
             // 3. Check jog conflicts. A jog is a perpendicular segment at
             // position `span_pos` extending from `track_coord` to `snapped`.
             // It conflicts with any wire from another net whose track_coord
             // falls within [jog_min, jog_max] and whose span covers span_pos.
             let mut jog_conflict = false;
-            for &span_pos in &jog_spans {
+            for &span_pos in jog_spans {
                 // Scan all occupied track positions in the jog range
                 for (&qkey, intervals) in &occupied {
                     let track_val = qkey as f64 / 1000.0;
@@ -1022,7 +1000,7 @@ pub fn assign_tracks(
                 .push((w.span_lo, w.span_hi, w.net_id));
 
             // 5. Generate jog segments at anchored endpoints
-            for &span_pos in &jog_spans {
+            for &span_pos in jog_spans {
                 let (jog_p1, jog_p2) = if is_horizontal {
                     // Jog is vertical: same X, from old Y to new Y
                     (
@@ -1046,24 +1024,159 @@ pub fn assign_tracks(
                 ));
             }
 
-            // 6. Apply snap to the actual segment
-            let seg = &mut all_segments[w.net_id][w.seg_idx];
-            if is_horizontal {
-                seg.p1.y = snapped;
-                seg.p2.y = snapped;
-            } else {
-                seg.p1.x = snapped;
-                seg.p2.x = snapped;
+            // 6. Move every segment of the run onto the new track
+            for &seg_idx in &w.seg_indices {
+                let seg = &mut all_segments[w.net_id][seg_idx];
+                if is_horizontal {
+                    seg.p1.y = snapped;
+                    seg.p2.y = snapped;
+                } else {
+                    seg.p1.x = snapped;
+                    seg.p2.x = snapped;
+                }
             }
-
-            // Also snap endpoints of other same-net wires sharing this endpoint
-            // position on the same layer. This handles chains of wire segments.
-            let _ = jog_delta; // used implicitly via snapped vs track_coord
         }
 
         // Append jog segments to their respective nets
         for (net_id, jog_seg) in pending_jogs {
             all_segments[net_id].push(jog_seg);
         }
+    }
+}
+
+/// One non-via wire segment on a layer, described along its track.
+struct WireInfo {
+    net_id: usize,
+    seg_idx: usize,
+    /// The coordinate perpendicular to the wire (Y for H, X for V)
+    track_coord: f64,
+    /// Wire extent along its direction
+    span_lo: f64,
+    span_hi: f64,
+    /// Endpoint positions along the span direction
+    ep1_span: f64,
+    ep2_span: f64,
+    /// Whether each endpoint is an anchor (has a via connection)
+    ep1_anchored: bool,
+    ep2_anchored: bool,
+}
+
+/// Collinear segments of one net that meet end to end on the same track.
+struct WireRun {
+    net_id: usize,
+    seg_indices: Vec<usize>,
+    track_coord: f64,
+    span_lo: f64,
+    span_hi: f64,
+    /// Positions along the run where a via needs a jog if the run moves.
+    anchored_spans: Vec<f64>,
+}
+
+/// Merges each net's touching collinear segments into runs that must move
+/// to a new track together.
+fn collinear_runs(wires: &[WireInfo]) -> Vec<WireRun> {
+    let mut by_track: HashMap<(usize, i64), Vec<&WireInfo>> = HashMap::new();
+    for w in wires {
+        let key = (w.net_id, (w.track_coord * 1000.0).round() as i64);
+        by_track.entry(key).or_default().push(w);
+    }
+
+    let mut runs = Vec::new();
+    for mut group in by_track.into_values() {
+        group.sort_by(|a, b| a.span_lo.total_cmp(&b.span_lo));
+        let mut current: Option<WireRun> = None;
+        for w in group {
+            if let Some(run) = current.as_mut()
+                && w.span_lo <= run.span_hi + 1e-6
+            {
+                run.span_hi = run.span_hi.max(w.span_hi);
+                run.seg_indices.push(w.seg_idx);
+                push_anchors(run, w);
+                continue;
+            }
+            runs.extend(current.take());
+            let mut run = WireRun {
+                net_id: w.net_id,
+                seg_indices: vec![w.seg_idx],
+                track_coord: w.track_coord,
+                span_lo: w.span_lo,
+                span_hi: w.span_hi,
+                anchored_spans: Vec::new(),
+            };
+            push_anchors(&mut run, w);
+            current = Some(run);
+        }
+        runs.extend(current);
+    }
+    runs
+}
+
+fn push_anchors(run: &mut WireRun, w: &WireInfo) {
+    for (anchored, span) in [(w.ep1_anchored, w.ep1_span), (w.ep2_anchored, w.ep2_span)] {
+        if anchored && !run.anchored_spans.iter().any(|&s| (s - span).abs() < 1e-6) {
+            run.anchored_spans.push(span);
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use pare_common::db::core::LayerData;
+
+    fn vertical_layer(index: u8) -> LayerData {
+        LayerData {
+            name: format!("M{}", index + 1),
+            index,
+            direction: LayerDirection::Vertical,
+            pitch: 2.0,
+            width: 1.0,
+            min_spacing: 0.0,
+        }
+    }
+
+    fn wire(x: f64, y1: f64, y2: f64) -> RouteSegment {
+        RouteSegment {
+            layer: 1,
+            p1: Point::new(x, y1),
+            p2: Point::new(x, y2),
+        }
+    }
+
+    #[test]
+    fn collinear_pieces_of_a_net_stay_joined_when_only_part_could_snap() {
+        let mut segments = vec![
+            vec![wire(50.0, 0.0, 20.0), wire(50.0, 20.0, 40.0)],
+            vec![wire(48.0, 25.0, 35.0)],
+        ];
+        let tracks = vec![
+            TrackGrid { coords: vec![] },
+            TrackGrid { coords: vec![48.0] },
+        ];
+        let layers = vec![vertical_layer(0), vertical_layer(1)];
+
+        assign_tracks(&mut segments, &tracks, &layers);
+
+        let (lower, upper) = (&segments[0][0], &segments[0][1]);
+        assert_eq!(lower.p2, upper.p1);
+    }
+
+    #[test]
+    fn a_free_run_moves_to_the_track_as_one_piece() {
+        let mut segments = vec![vec![wire(50.0, 0.0, 20.0), wire(50.0, 20.0, 40.0)]];
+        let tracks = vec![
+            TrackGrid { coords: vec![] },
+            TrackGrid { coords: vec![48.0] },
+        ];
+        let layers = vec![vertical_layer(0), vertical_layer(1)];
+
+        assign_tracks(&mut segments, &tracks, &layers);
+
+        let on_track = |x: f64| (x - 48.0).abs() < 1e-9;
+        assert!(
+            segments[0]
+                .iter()
+                .all(|s| on_track(s.p1.x) && on_track(s.p2.x))
+        );
     }
 }
