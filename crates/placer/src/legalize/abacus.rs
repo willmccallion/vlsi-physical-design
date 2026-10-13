@@ -196,6 +196,8 @@ impl AbacusLegalizer {
             let mut current_x = die_min_x;
 
             for (b_start, b_end) in merged {
+                // Fixed pads can sit outside the die; sub-rows must not follow them.
+                let b_start = b_start.min(die_max_x);
                 if b_start > current_x + 0.001 {
                     sub_rows.push(SubRow {
                         min_x: current_x,
@@ -457,6 +459,40 @@ impl AbacusLegalizer {
             } else {
                 break;
             }
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use pare_common::geom::rect::Rect;
+
+    #[test]
+    fn cells_stay_inside_the_die_when_a_fixed_pad_sits_past_its_edge() {
+        let mut db = NetlistDB::new();
+        db.die_area = Rect::new(Point::new(0.0, 0.0), Point::new(100.0, 10.0));
+        let pad = db.add_cell("pad".into(), "PAD".into(), 10.0, 10.0, true);
+        db.positions[pad.index()] = Point::new(105.0, 0.0);
+        for i in 0..9 {
+            let cell = db.add_cell(format!("c{i}"), "STD".into(), 10.0, 10.0, false);
+            db.positions[cell.index()] = Point::new(95.0, 0.0);
+        }
+
+        AbacusLegalizer::new().legalize(&mut db);
+
+        for (cell, pos) in db
+            .cells
+            .iter()
+            .zip(&db.positions)
+            .filter(|(c, _)| !c.is_fixed)
+        {
+            assert!(
+                pos.x >= 0.0 && pos.x + cell.width <= 100.0 + 1e-9,
+                "{} at x={}",
+                cell.name,
+                pos.x
+            );
         }
     }
 }
