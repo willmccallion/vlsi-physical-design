@@ -19,8 +19,18 @@ use std::sync::{Arc, Mutex};
 const CHECK_TOLERANCE: f64 = 0.001;
 /// Maximum squared distance for two points to be considered connected.
 const CONNECTIVITY_TOLERANCE: f64 = 0.5;
-/// Size of spatial bins used for accelerating intersection tests.
+/// Smallest edge of the spatial bins used for accelerating intersection tests.
 const BIN_SIZE: f64 = 10.0;
+/// Upper bound on bins along the die's longer side, so designs in fine units
+/// (e.g. Bookshelf sites) do not split every wire across thousands of bins.
+const MAX_BINS_PER_AXIS: f64 = 512.0;
+
+/// Spatial bin edge for `db`: at least [`BIN_SIZE`], and coarse enough that
+/// the die spans at most [`MAX_BINS_PER_AXIS`] bins.
+fn bin_size_for(db: &NetlistDB) -> f64 {
+    let span = db.die_area.width().max(db.die_area.height());
+    BIN_SIZE.max(span / MAX_BINS_PER_AXIS)
+}
 
 /// Verifies that the placement is legal (no overlaps, all cells within die area).
 ///
@@ -292,17 +302,27 @@ struct BinKey {
     by: i32,
 }
 
+/// The bin that owns a pair of segments whose bounding boxes, each grown by
+/// `margin`, overlap: the one holding the overlap's lower-left corner. Both
+/// segments are binned there, so counting a pair only in its owner counts it
+/// once however many bins they share.
+fn owning_bin(s1: &Segment, s2: &Segment, margin: f64, bin_size: f64) -> (i32, i32) {
+    let x = s1.p1.x.min(s1.p2.x).max(s2.p1.x.min(s2.p2.x)) - margin;
+    let y = s1.p1.y.min(s1.p2.y).max(s2.p1.y.min(s2.p2.y)) - margin;
+    ((x / bin_size).floor() as i32, (y / bin_size).floor() as i32)
+}
+
 /// Returns the set of bin keys that a segment touches.
-fn segment_bin_keys(s: &Segment) -> Vec<BinKey> {
+fn segment_bin_keys(s: &Segment, bin_size: f64) -> Vec<BinKey> {
     let min_x = s.p1.x.min(s.p2.x);
     let max_x = s.p1.x.max(s.p2.x);
     let min_y = s.p1.y.min(s.p2.y);
     let max_y = s.p1.y.max(s.p2.y);
 
-    let start_bx = (min_x / BIN_SIZE).floor() as i32;
-    let end_bx = (max_x / BIN_SIZE).floor() as i32;
-    let start_by = (min_y / BIN_SIZE).floor() as i32;
-    let end_by = (max_y / BIN_SIZE).floor() as i32;
+    let start_bx = (min_x / bin_size).floor() as i32;
+    let end_bx = (max_x / bin_size).floor() as i32;
+    let start_by = (min_y / bin_size).floor() as i32;
+    let end_by = (max_y / bin_size).floor() as i32;
 
     let mut keys = Vec::with_capacity(((end_bx - start_bx + 1) * (end_by - start_by + 1)) as usize);
     for bx in start_bx..=end_bx {
@@ -381,11 +401,12 @@ fn check_design_rules(db: &NetlistDB) -> (usize, usize) {
         );
     }
 
-    let spacing_bin_size = BIN_SIZE.max(max_spacing * 2.0);
+    let spacing_bin_size = bin_size_for(db).max(max_spacing * 2.0);
 
-    // Build ONE global spatial index over ALL nets so cross-chunk spacing
-    // violations are never missed. Expand bins by max_spacing to catch nearby segments.
-    let mut bins: HashMap<BinKey, Vec<Segment>> = HashMap::new();
+    // One global index over all nets; bins are expanded by max_spacing so
+    // nearby (not just touching) segments share a bin.
+    let mut segments: Vec<Segment> = Vec::new();
+    let mut bins: HashMap<BinKey, Vec<u32>> = HashMap::new();
 
     for (net_idx, net) in db.nets.iter().enumerate() {
         let net_id = NetId::new(net_idx);
@@ -412,11 +433,13 @@ fn check_design_rules(db: &NetlistDB) -> (usize, usize) {
             let start_by = (min_y / spacing_bin_size).floor() as i32;
             let end_by = (max_y / spacing_bin_size).floor() as i32;
 
+            let index = segments.len() as u32;
+            segments.push(s);
             for bx in start_bx..=end_bx {
                 for by in start_by..=end_by {
                     bins.entry(BinKey { layer: s.layer, bx, by })
                         .or_default()
-                        .push(s);
+                        .push(index);
                 }
             }
         }
@@ -424,18 +447,24 @@ fn check_design_rules(db: &NetlistDB) -> (usize, usize) {
 
     // Check bins in parallel.
     let bin_entries: Vec<_> = bins.into_iter().collect();
-    bin_entries.par_iter().for_each(|(_key, segs)| {
-        let first_net = segs[0].net_id;
-        if segs.iter().all(|s| s.net_id == first_net) {
+    bin_entries.par_iter().for_each(|(key, indices)| {
+        let first_net = segments[indices[0] as usize].net_id;
+        if indices
+            .iter()
+            .all(|&i| segments[i as usize].net_id == first_net)
+        {
             return;
         }
 
-        for i in 0..segs.len() {
-            for j in (i + 1)..segs.len() {
-                let s1 = &segs[i];
-                let s2 = &segs[j];
+        for (k, &i) in indices.iter().enumerate() {
+            for &j in &indices[k + 1..] {
+                let s1 = &segments[i as usize];
+                let s2 = &segments[j as usize];
 
                 if s1.net_id == s2.net_id || s1.layer != s2.layer {
+                    continue;
+                }
+                if owning_bin(s1, s2, max_spacing, spacing_bin_size) != (key.bx, key.by) {
                     continue;
                 }
 
@@ -464,16 +493,14 @@ fn check_design_rules(db: &NetlistDB) -> (usize, usize) {
 
 /// Checks for short circuits and illegal routing loops.
 ///
-/// Processes nets in parallel chunks, building per-chunk spatial bins to keep
-/// memory bounded. Each chunk inserts its segments into a local `HashMap`, then
-/// checks for intersections between segments from different nets within the
-/// same bin.
+/// Bins every segment of every net into one spatial index, then checks for
+/// intersections between segments of different nets that share a bin.
 fn check_shorts_and_loops(db: &NetlistDB) -> Result<(), String> {
     use std::sync::atomic::AtomicUsize;
 
-    // Build ONE global spatial index over ALL nets so cross-chunk shorts
-    // are never missed.
-    let mut bins: HashMap<BinKey, Vec<Segment>> = HashMap::new();
+    let bin_size = bin_size_for(db);
+    let mut segments: Vec<Segment> = Vec::new();
+    let mut bins: HashMap<BinKey, Vec<u32>> = HashMap::new();
 
     for (net_idx, net) in db.nets.iter().enumerate() {
         let net_id = NetId::new(net_idx);
@@ -484,8 +511,10 @@ fn check_shorts_and_loops(db: &NetlistDB) -> Result<(), String> {
                 layer: seg.layer,
                 net_id,
             };
-            for key in segment_bin_keys(&s) {
-                bins.entry(key).or_default().push(s);
+            let index = segments.len() as u32;
+            segments.push(s);
+            for key in segment_bin_keys(&s, bin_size) {
+                bins.entry(key).or_default().push(index);
             }
         }
     }
@@ -495,23 +524,25 @@ fn check_shorts_and_loops(db: &NetlistDB) -> Result<(), String> {
     let error_msgs: Mutex<Vec<String>> = Mutex::new(Vec::new());
 
     let bin_entries: Vec<_> = bins.into_iter().collect();
-    bin_entries.par_iter().for_each(|(_key, segs)| {
-        // Fast path: single-net bin → no cross-net shorts possible.
-        let first_net = segs[0].net_id;
-        if segs.iter().all(|s| s.net_id == first_net) {
+    bin_entries.par_iter().for_each(|(key, indices)| {
+        let first_net = segments[indices[0] as usize].net_id;
+        if indices
+            .iter()
+            .all(|&i| segments[i as usize].net_id == first_net)
+        {
             return;
         }
 
-        for i in 0..segs.len() {
-            for j in (i + 1)..segs.len() {
-                let s1 = &segs[i];
-                let s2 = &segs[j];
+        for (k, &i) in indices.iter().enumerate() {
+            for &j in &indices[k + 1..] {
+                let s1 = &segments[i as usize];
+                let s2 = &segments[j as usize];
 
                 if s1.net_id == s2.net_id {
                     continue;
                 }
 
-                if s1.intersects(s2) {
+                if s1.intersects(s2) && owning_bin(s1, s2, 0.0, bin_size) == (key.bx, key.by) {
                     let prev = short_count.fetch_add(1, Ordering::Relaxed);
                     if prev < 100 {
                         let n1 = &db.nets[s1.net_id.index()].name;
@@ -546,6 +577,7 @@ fn check_shorts_and_loops(db: &NetlistDB) -> Result<(), String> {
 /// For each net, builds a connectivity graph of segments using spatial binning
 /// to avoid O(n²) comparisons, then verifies all pins are reachable via BFS.
 fn check_opens(db: &NetlistDB) -> Result<(), String> {
+    let bin_size = bin_size_for(db);
     let error_found = AtomicBool::new(false);
     let error_msg = Arc::new(Mutex::new(String::new()));
 
@@ -598,7 +630,7 @@ fn check_opens(db: &NetlistDB) -> Result<(), String> {
             let mut endpoint_bins: HashMap<(i32, i32, u8), Vec<usize>> = HashMap::new();
 
             for (i, seg) in segments.iter().enumerate() {
-                let keys = segment_bin_keys(seg);
+                let keys = segment_bin_keys(seg, bin_size);
                 for key in &keys {
                     endpoint_bins.entry((key.bx, key.by, seg.layer)).or_default().push(i);
                     if seg.layer > 0 {
