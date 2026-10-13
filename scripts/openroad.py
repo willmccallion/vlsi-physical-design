@@ -67,7 +67,7 @@ def download(name: str):
     fetch(bench["def_url"], os.path.join(input_dir, bench["def_name"]))
 
     print(f"[{name}] Done. Run with:")
-    print(f"    pare flow configs/{name}.toml")
+    print(f"    cargo run --release -- flow {name}")
 
 
 def main():

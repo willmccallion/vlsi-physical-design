@@ -49,7 +49,7 @@ def download(num: str):
 
     os.remove(tarball)
     print(f"[{name}] Done. Run with:")
-    print(f"  pare flow configs/{name}.toml")
+    print(f"  cargo run --release -- flow {name}")
 
 
 def main():
