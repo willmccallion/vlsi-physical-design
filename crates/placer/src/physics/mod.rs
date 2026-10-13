@@ -39,10 +39,10 @@ pub struct PhysicsContext {
     pub electro_force_y: Vec<f64>,
 
     fft_planner: FftPlanner<f64>,
-    /// Scratch buffer sized for 2N×2N mirrored FFT (DCT via mirror padding).
+    /// Scratch buffer for the mirrored 2N×2N density and its spectrum.
     pub(crate) fft_scratch: Vec<rustfft::num_complex::Complex<f64>>,
-    /// Mirrored density map for 2N×2N DCT computation.
-    pub(crate) mirror_map: Vec<f64>,
+    /// Transpose buffer for the column pass of the 2D FFT.
+    pub(crate) fft_transpose: Vec<rustfft::num_complex::Complex<f64>>,
 
     /// Routing congestion map from global router (row-major, values 0.0-2.0+).
     congestion_map: Option<Vec<f32>>,
@@ -80,7 +80,7 @@ impl PhysicsContext {
             electro_force_y: vec![0.0; size],
             fft_planner: FftPlanner::new(),
             fft_scratch: vec![rustfft::num_complex::Complex::default(); mirror_size],
-            mirror_map: vec![0.0; mirror_size],
+            fft_transpose: vec![rustfft::num_complex::Complex::default(); mirror_size],
             congestion_map: None,
             congestion_grid_w: 0,
             congestion_grid_h: 0,

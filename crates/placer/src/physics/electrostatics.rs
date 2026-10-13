@@ -8,6 +8,7 @@
 use super::PhysicsContext;
 use pare_common::db::core::NetlistDB;
 use pare_common::geom::point::Point;
+use rustfft::FftPlanner;
 use rustfft::num_complex::Complex;
 use std::f64::consts::PI;
 
@@ -81,55 +82,14 @@ pub fn compute_density_force(
         *val -= target_density;
     }
 
-    // --- Step 2: Mirror-padded FFT (DCT-like Neumann boundaries) ---
-    let dim2 = 2 * dim;
-
-    // Build mirrored 2N×2N density map
-    for y in 0..dim {
-        for x in 0..dim {
-            let val = ctx.density_map[y * dim + x];
-            ctx.mirror_map[y * dim2 + x] = val;
-            ctx.mirror_map[y * dim2 + (dim2 - 1 - x)] = val;
-            ctx.mirror_map[(dim2 - 1 - y) * dim2 + x] = val;
-            ctx.mirror_map[(dim2 - 1 - y) * dim2 + (dim2 - 1 - x)] = val;
-        }
-    }
-
-    // FFT on 2N×2N
-    let fft = ctx.fft_planner.plan_fft_forward(dim2 * dim2);
-    let ifft = ctx.fft_planner.plan_fft_inverse(dim2 * dim2);
-
-    for (i, &rho) in ctx.mirror_map.iter().enumerate() {
-        ctx.fft_scratch[i] = Complex::new(rho, 0.0);
-    }
-
-    fft.process(&mut ctx.fft_scratch);
-
-    // Apply Green's function in frequency domain
-    for v in 0..dim2 {
-        for u in 0..dim2 {
-            let idx = v * dim2 + u;
-            let wu = 2.0 * PI * (u as f64) / (dim2 as f64);
-            let wv = 2.0 * PI * (v as f64) / (dim2 as f64);
-            let denom = wu * wu + wv * wv;
-
-            if denom > 1e-9 {
-                ctx.fft_scratch[idx] /= denom;
-            } else {
-                ctx.fft_scratch[idx] = Complex::new(0.0, 0.0);
-            }
-        }
-    }
-
-    ifft.process(&mut ctx.fft_scratch);
-
-    // Extract N×N potential from the top-left quadrant
-    let norm = 1.0 / (dim2 * dim2) as f64;
-    for y in 0..dim {
-        for x in 0..dim {
-            ctx.potential_map[y * dim + x] = ctx.fft_scratch[y * dim2 + x].re * norm;
-        }
-    }
+    solve_potential(
+        &mut ctx.fft_planner,
+        &ctx.density_map,
+        dim,
+        &mut ctx.fft_scratch,
+        &mut ctx.fft_transpose,
+        &mut ctx.potential_map,
+    );
 
     // --- Step 3: Compute force field via finite differences ---
     for y in 0..dim {
@@ -205,4 +165,153 @@ pub fn compute_density_force(
     }
 
     overflow
+}
+
+/// Solves `-∇²φ = ρ` on a `dim`×`dim` grid in bin units with zero-flux edges.
+///
+/// Mirroring the grid to 2N×2N makes it even, so a periodic 2D FFT solve
+/// gives the Neumann (DCT) solution. `scratch` and `transposed` hold 4N² values.
+fn solve_potential(
+    planner: &mut FftPlanner<f64>,
+    density: &[f64],
+    dim: usize,
+    scratch: &mut [Complex<f64>],
+    transposed: &mut [Complex<f64>],
+    potential: &mut [f64],
+) {
+    let dim2 = 2 * dim;
+
+    for y in 0..dim {
+        for x in 0..dim {
+            let val = Complex::new(density[y * dim + x], 0.0);
+            scratch[y * dim2 + x] = val;
+            scratch[y * dim2 + (dim2 - 1 - x)] = val;
+            scratch[(dim2 - 1 - y) * dim2 + x] = val;
+            scratch[(dim2 - 1 - y) * dim2 + (dim2 - 1 - x)] = val;
+        }
+    }
+
+    let fft = planner.plan_fft_forward(dim2);
+    let ifft = planner.plan_fft_inverse(dim2);
+
+    fft.process(scratch);
+    transpose(scratch, transposed, dim2);
+    fft.process(transposed);
+
+    for u in 0..dim2 {
+        let wu = angular_frequency(u, dim2);
+        for v in 0..dim2 {
+            let wv = angular_frequency(v, dim2);
+            let denom = wu.mul_add(wu, wv * wv);
+            let idx = u * dim2 + v;
+            transposed[idx] = if denom > 1e-12 {
+                transposed[idx] / denom
+            } else {
+                Complex::new(0.0, 0.0)
+            };
+        }
+    }
+
+    ifft.process(transposed);
+    transpose(transposed, scratch, dim2);
+    ifft.process(scratch);
+
+    let norm = 1.0 / (dim2 * dim2) as f64;
+    for y in 0..dim {
+        for x in 0..dim {
+            potential[y * dim + x] = scratch[y * dim2 + x].re * norm;
+        }
+    }
+}
+
+/// Angular frequency of DFT bin `k` out of `n`, with bins above `n / 2`
+/// standing for negative frequencies.
+fn angular_frequency(k: usize, n: usize) -> f64 {
+    let signed = if k <= n / 2 {
+        k as f64
+    } else {
+        k as f64 - n as f64
+    };
+    2.0 * PI * signed / n as f64
+}
+
+fn transpose(src: &[Complex<f64>], dst: &mut [Complex<f64>], n: usize) {
+    for r in 0..n {
+        for c in 0..n {
+            dst[c * n + r] = src[r * n + c];
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn cosine_mode(dim: usize, a: usize, b: usize) -> Vec<f64> {
+        let mut density = vec![0.0; dim * dim];
+        for y in 0..dim {
+            for x in 0..dim {
+                let cx = (PI * a as f64 * (x as f64 + 0.5) / dim as f64).cos();
+                let cy = (PI * b as f64 * (y as f64 + 0.5) / dim as f64).cos();
+                density[y * dim + x] = cx * cy;
+            }
+        }
+        density
+    }
+
+    fn solve(density: &[f64], dim: usize) -> Vec<f64> {
+        let mut planner = FftPlanner::new();
+        let mut scratch = vec![Complex::default(); 4 * dim * dim];
+        let mut transposed = vec![Complex::default(); 4 * dim * dim];
+        let mut potential = vec![0.0; dim * dim];
+        solve_potential(
+            &mut planner,
+            density,
+            dim,
+            &mut scratch,
+            &mut transposed,
+            &mut potential,
+        );
+        potential
+    }
+
+    fn assert_solves_cosine_mode(dim: usize, a: usize, b: usize) {
+        let density = cosine_mode(dim, a, b);
+        let wa = PI * a as f64 / dim as f64;
+        let wb = PI * b as f64 / dim as f64;
+        let eigenvalue = wa.mul_add(wa, wb * wb);
+
+        let potential = solve(&density, dim);
+
+        for (phi, rho) in potential.iter().zip(&density) {
+            assert!(
+                (phi - rho / eigenvalue).abs() < 1e-9,
+                "mode ({a}, {b}): got {phi}, expected {}",
+                rho / eigenvalue
+            );
+        }
+    }
+
+    #[test]
+    fn potential_of_a_cosine_mode_is_the_mode_over_its_eigenvalue() {
+        assert_solves_cosine_mode(16, 1, 2);
+    }
+
+    #[test]
+    fn potential_distinguishes_x_and_y_frequencies() {
+        assert_solves_cosine_mode(16, 5, 0);
+        assert_solves_cosine_mode(16, 0, 5);
+    }
+
+    #[test]
+    fn potential_of_high_frequency_modes_uses_negative_frequencies() {
+        assert_solves_cosine_mode(16, 15, 11);
+    }
+
+    #[test]
+    fn uniform_density_produces_no_potential() {
+        let potential = solve(&vec![0.25; 64], 8);
+
+        assert!(potential.iter().all(|phi| phi.abs() < 1e-12));
+    }
 }
