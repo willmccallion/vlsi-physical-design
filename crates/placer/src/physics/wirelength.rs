@@ -63,16 +63,16 @@ pub fn compute_wa_gradient(
             let exp_y_neg = ((min_y - pos.y) * inv_gamma).exp();
 
             sum_exp_x_pos += exp_x_pos;
-            sum_x_exp_x_pos += pos.x * exp_x_pos;
+            sum_x_exp_x_pos = pos.x.mul_add(exp_x_pos, sum_x_exp_x_pos);
 
             sum_exp_x_neg += exp_x_neg;
-            sum_x_exp_x_neg += pos.x * exp_x_neg;
+            sum_x_exp_x_neg = pos.x.mul_add(exp_x_neg, sum_x_exp_x_neg);
 
             sum_exp_y_pos += exp_y_pos;
-            sum_y_exp_y_pos += pos.y * exp_y_pos;
+            sum_y_exp_y_pos = pos.y.mul_add(exp_y_pos, sum_y_exp_y_pos);
 
             sum_exp_y_neg += exp_y_neg;
-            sum_y_exp_y_neg += pos.y * exp_y_neg;
+            sum_y_exp_y_neg = pos.y.mul_add(exp_y_neg, sum_y_exp_y_neg);
         }
 
         let wa_x_pos = sum_x_exp_x_pos / sum_exp_x_pos;

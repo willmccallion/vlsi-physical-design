@@ -179,8 +179,8 @@ impl NesterovOptimizer {
 
             // Combine: grad = wl_grad + density_weight * density_grad
             for i in 0..n {
-                self.grads[i].x += self.density_grads[i].x * density_weight;
-                self.grads[i].y += self.density_grads[i].y * density_weight;
+                self.grads[i].x = self.density_grads[i].x.mul_add(density_weight, self.grads[i].x);
+                self.grads[i].y = self.density_grads[i].y.mul_add(density_weight, self.grads[i].y);
             }
 
             // Add congestion gradient if congestion map is available

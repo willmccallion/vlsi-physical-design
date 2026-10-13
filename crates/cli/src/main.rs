@@ -314,22 +314,15 @@ fn place_io_pins(db: &mut NetlistDB) {
     let mut current_dist = 0.0;
 
     for pin_id in pins {
-        let x;
-        let y;
-
-        if current_dist < die_h {
-            x = 0.0;
-            y = current_dist;
+        let (x, y) = if current_dist < die_h {
+            (0.0, current_dist)
         } else if current_dist < die_h + die_w {
-            x = current_dist - die_h;
-            y = die_h;
+            (current_dist - die_h, die_h)
         } else if current_dist < 2.0f64.mul_add(die_h, die_w) {
-            x = die_w;
-            y = die_h - (current_dist - (die_h + die_w));
+            (die_w, die_h - (current_dist - (die_h + die_w)))
         } else {
-            x = die_w - (current_dist - (2.0f64.mul_add(die_h, die_w)));
-            y = 0.0;
-        }
+            (die_w - (current_dist - (2.0f64.mul_add(die_h, die_w))), 0.0)
+        };
 
         let safe_x = x.max(0.0).min(die_w);
         let safe_y = y.max(0.0).min(die_h);

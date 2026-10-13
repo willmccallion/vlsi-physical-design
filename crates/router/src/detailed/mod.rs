@@ -423,7 +423,7 @@ pub fn run(
             })
             .collect();
 
-        nets_with_priority.sort_by(|a, b| b.1.cmp(&a.1));
+        nets_with_priority.sort_by_key(|&(_, priority)| std::cmp::Reverse(priority));
         let nets_vec: Vec<usize> = nets_with_priority.into_iter().map(|(id, _)| id).collect();
 
         for &net_id in &nets_vec {

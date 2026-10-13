@@ -140,12 +140,9 @@ pub fn route_net_dr_pure<O: GuideOracle>(
             p
         };
 
-        if let Some(path) = path_opt {
-            tree_nodes.extend_from_slice(&path);
-            paths.push(path);
-        } else {
-            return None;
-        }
+        let path = path_opt?;
+        tree_nodes.extend_from_slice(&path);
+        paths.push(path);
     }
 
     Some(paths)
@@ -362,12 +359,9 @@ fn route_skeleton<O: GuideOracle>(
             p
         };
 
-        if let Some(path) = path_opt {
-            tree_nodes.extend_from_slice(&path);
-            paths.push(path);
-        } else {
-            return None;
-        }
+        let path = path_opt?;
+        tree_nodes.extend_from_slice(&path);
+        paths.push(path);
     }
 
     Some((paths, tree_nodes))
@@ -538,12 +532,9 @@ fn route_cluster<O: GuideOracle>(
             p
         };
 
-        if let Some(path) = path_opt {
-            tree_nodes.extend_from_slice(&path);
-            paths.push(path);
-        } else {
-            return None;
-        }
+        let path = path_opt?;
+        tree_nodes.extend_from_slice(&path);
+        paths.push(path);
     }
 
     Some(paths)

@@ -156,8 +156,8 @@ pub fn compute_density_force(
             let bx = bx.clamp(0, dim as isize - 1) as usize;
             let by = by.clamp(0, dim as isize - 1) as usize;
             let idx = by * dim + bx;
-            force_x += w * ctx.electro_force_x[idx];
-            force_y += w * ctx.electro_force_y[idx];
+            force_x = w.mul_add(ctx.electro_force_x[idx], force_x);
+            force_y = w.mul_add(ctx.electro_force_y[idx], force_y);
         }
 
         gradients[i].x -= force_x * force_multiplier;
