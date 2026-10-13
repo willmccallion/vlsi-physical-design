@@ -1,8 +1,8 @@
 # PARE — Placement And Routing Engine
 
-A digital IC placement and routing engine written in Rust. Implements the full physical design flow — analytical global placement, Abacus legalization, and two-stage negotiation-based routing — from scratch. Successfully places and routes real benchmarks up to 145k cells / 143k nets with no shorts or opens.
+A digital IC placement and routing engine written in Rust. Implements the full physical design flow — analytical global placement, Abacus legalization, and two-stage negotiation-based routing — from scratch. It places and routes real benchmarks up to 145k cells / 143k nets, and routes pre-placed designs up to 313k cells / 407k nets, with no shorts or opens.
 
-| IBM10 (64,227 nets) | AES (51,671 nets) |
+| IBM10 (64,227 nets) | AES (45,036 nets) |
 |:---:|:---:|
 | ![IBM10 Routing](assets/routed_ibm10.png) | ![AES Routing](assets/routed_aes.png) |
 
@@ -10,7 +10,7 @@ A digital IC placement and routing engine written in Rust. Implements the full p
 |:---:|:---:|
 | ![IBM05 Routing](assets/routed_ibm05.png) | ![IBM01 Routing](assets/routed_ibm01.png) |
 
-*Top: IBM10 ISPD benchmark (67k cells, 49% utilization) and AES cipher (Nangate45, 10 metal layers). Bottom: IBM05 (80% utilization) and IBM01. All verified short-free and open-free.*
+*Top: IBM10 ISPD benchmark (67k cells) and AES cipher (Nangate45, 10 metal layers). Bottom: IBM05 and IBM01. All verified short-free and open-free.*
 
 ---
 
@@ -123,19 +123,21 @@ Type-safe index newtypes (`CellId`, `NetId`, `PinId`) prevent accidental index c
 
 ## Performance
 
-| Benchmark | Cells | Nets | Utilization | Layers | Time | Result |
-|---|---|---|---|---|---|---|
-| GCD | 579 | 579 | 27% | 10 (Nangate45) | 0.4s | No shorts/opens |
-| IBM01 | 12,506 | 11,507 | 85% | 6 (Bookshelf) | 4.1s | No shorts/opens |
-| AES | 20,533 | 51,671 | 5% | 10 (Nangate45) | 12.6s | No shorts/opens |
-| IBM05 | 28,146 | 28,446 | 80% | 6 (Bookshelf) | 11.3s | No shorts/opens |
-| IBM10 | 67,692 | 64,227 | 49% | 6 (Bookshelf) | 42.8s | No shorts/opens |
-| IBM13 | 81,056 | 84,199 | 40% | 6 (Bookshelf) | 63.5s | No shorts/opens |
-| IBM14 | 145,492 | 143,202 | 49% | 6 (Bookshelf) | 368.3s | No shorts/opens |
-| Netcard | 252,978 | 290,354 | 43% | 10 (Nangate45) | 91.7s | No shorts/opens |
-| Leon3mp | 312,529 | 406,912 | 53% | 10 (Nangate45) | 29.0s | No shorts/opens |
+| Benchmark | Flow | Cells | Nets | Utilization | Layers | Time | Peak memory | Result |
+|---|---|---|---|---|---|---|---|---|
+| GCD | place + route | 508 | 579 | 7% | 10 (Nangate45) | 0.4s | 0.4 GB | No shorts/opens |
+| IBM01 | place + route | 12,036 | 11,507 | 49% | 6 (Bookshelf) | 17.9s | 0.7 GB | No shorts/opens |
+| AES | place + route | 44,749 | 45,036 | 4% | 10 (Nangate45) | 7.0s | 0.9 GB | No shorts/opens |
+| IBM05 | place + route | 28,146 | 28,446 | 49% | 6 (Bookshelf) | 109s | 2.1 GB | No shorts/opens |
+| IBM10 | place + route | 66,948 | 64,227 | 49% | 6 (Bookshelf) | 187s | 10.3 GB | No shorts/opens |
+| IBM13 | place + route | 81,018 | 83,806 | 49% | 6 (Bookshelf) | 308s | 13.7 GB | No shorts/opens |
+| IBM14 | place + route | 145,492 | 143,202 | 49% | 6 (Bookshelf) | 460s | 28.9 GB | No shorts/opens |
+| Netcard | route only | 274,700 | 290,354 | — | 10 (Nangate45) | 114s | 2.8 GB | No shorts/opens |
+| Leon3mp | route only | 312,529 | 406,912 | — | 10 (Nangate45) | 32.5s | 2.4 GB | No shorts/opens |
 
-All benchmarks are real circuits (ISPD or open-source RTL), not synthetic. Leon3mp is the largest — 313k cells with 407k nets, routed in 29s. Netcard has 253k cells with 290k nets including a 67k-pin power net. IBM14 has 145k cells with 143k nets. IBM05 runs at 80% utilization with complex multi-pin nets. AES uses a real technology library (Nangate45) with 10 metal layers at realistic pitches.
+Measured on a 28-thread machine. Utilization is movable cell area over die area; the Bookshelf dies include the gaps between rows. Netcard and Leon3mp ship already placed, so only routing runs on them. Routing keeps search state per worker thread, so its memory grows with the thread count. The routed result can differ slightly between runs because nets are routed in parallel.
+
+All benchmarks are real circuits (ISPD or open-source RTL), not synthetic. Leon3mp is the largest, with 313k cells and 407k nets routed in 33s. IBM14 is the largest placed from scratch, with 145k cells and 143k nets. AES uses a real technology library (Nangate45) with 10 metal layers at realistic pitches.
 
 ---
 
