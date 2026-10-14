@@ -90,6 +90,36 @@ fn lef_min_spacing_comes_from_plain_spacing_or_the_first_table_entry() {
 }
 
 #[test]
+fn lef_parallel_run_spacing_tables_are_read_whole() {
+    let lib = tiny_library();
+
+    let table = lib.routing_layers[1].spacing_table.clone().unwrap();
+
+    assert_eq!(table.run_lengths, [Dbu(0), Dbu(500)]);
+    assert_eq!(
+        table.rows,
+        [
+            (Dbu(0), vec![Dbu(110), Dbu(110)]),
+            (Dbu(300), vec![Dbu(110), Dbu(200)])
+        ]
+    );
+}
+
+#[test]
+fn spacing_grows_only_once_both_width_and_run_reach_their_thresholds() {
+    let table = tiny_library().routing_layers[1]
+        .spacing_table
+        .clone()
+        .unwrap();
+
+    assert_eq!(table.spacing(Dbu(100), Dbu(900)), Dbu(110));
+    assert_eq!(table.spacing(Dbu(300), Dbu(500)), Dbu(110));
+    assert_eq!(table.spacing(Dbu(300), Dbu(501)), Dbu(200));
+    assert_eq!(table.spacing(Dbu(400), Dbu(-50)), Dbu(110));
+    assert_eq!(table.widest_for(Dbu(400)), Dbu(200));
+}
+
+#[test]
 fn lef_cut_layers_sit_between_routing_layers() {
     let lib = tiny_library();
 

@@ -471,6 +471,7 @@ mod tests {
                 offset_y: None,
                 width: Dbu(4),
                 min_spacing: Dbu(4),
+                spacing_table: None,
             })
             .unwrap();
         let site = lib

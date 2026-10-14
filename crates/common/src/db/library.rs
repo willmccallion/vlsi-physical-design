@@ -34,6 +34,50 @@ pub struct RoutingLayer {
     pub width: Dbu,
     /// Minimum spacing between shapes of different nets at zero parallel run.
     pub min_spacing: Dbu,
+    /// Spacing that grows with width and parallel run, if the layer has one.
+    pub spacing_table: Option<SpacingTable>,
+}
+
+/// Spacing that grows with the width of the wider of two shapes and the
+/// length over which they run side by side (LEF `SPACINGTABLE
+/// PARALLELRUNLENGTH`).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct SpacingTable {
+    /// Run length thresholds, increasing from zero.
+    pub run_lengths: Vec<Dbu>,
+    /// Width thresholds, increasing from zero, each with one spacing per run
+    /// length threshold.
+    pub rows: Vec<(Dbu, Vec<Dbu>)>,
+}
+
+impl SpacingTable {
+    /// The spacing two shapes need when the wider is `width` wide and they
+    /// run side by side for `run`, zero or less when they do not face each
+    /// other. A width threshold applies from its value up, a run length one
+    /// only beyond it, as `OpenROAD` reads the table.
+    pub fn spacing(&self, width: Dbu, run: Dbu) -> Dbu {
+        let row = self
+            .rows
+            .iter()
+            .rposition(|(w, _)| *w <= width)
+            .unwrap_or(0);
+        let column = self.run_lengths.iter().rposition(|&r| r < run).unwrap_or(0);
+        self.rows
+            .get(row)
+            .and_then(|(_, spacings)| spacings.get(column))
+            .copied()
+            .unwrap_or_default()
+    }
+
+    /// The largest spacing a shape `width` wide can need, at any run length.
+    pub fn widest_for(&self, width: Dbu) -> Dbu {
+        self.rows
+            .iter()
+            .filter(|(w, _)| *w <= width)
+            .flat_map(|(_, spacings)| spacings.iter().copied())
+            .max()
+            .unwrap_or_default()
+    }
 }
 
 impl RoutingLayer {

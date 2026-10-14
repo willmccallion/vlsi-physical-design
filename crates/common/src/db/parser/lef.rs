@@ -7,7 +7,7 @@
 
 use crate::db::library::{
     CoreKind, CutLayer, Direction, LayerRef, Library, Macro, MacroClass, MacroPin, PinDirection,
-    RoutingLayer, Shape, SignalUse, Site, Symmetry, ViaDef,
+    RoutingLayer, Shape, SignalUse, Site, SpacingTable, Symmetry, ViaDef,
 };
 use crate::db::parser::lexer::{Lexer, ParseError, read_file};
 use crate::geom::dbu::{Dbu, DbuPerMicron};
@@ -139,6 +139,7 @@ impl<'a> LefParser<'a, '_> {
         let mut offset = None;
         let mut width = None;
         let mut spacings = Vec::new();
+        let mut spacing_table = None;
 
         loop {
             let t = self.lx.expect_token(&format!("'END {name}'"))?;
@@ -178,8 +179,9 @@ impl<'a> LefParser<'a, '_> {
                     }
                 }
                 "SPACINGTABLE" => {
-                    if let Some(s) = self.spacing_table()? {
-                        spacings.push(s);
+                    if let Some(table) = self.spacing_table()? {
+                        spacings.push(table.spacing(Dbu::ZERO, Dbu::ZERO));
+                        spacing_table = Some(table);
                     }
                 }
                 _ => self.lx.skip_statement()?,
@@ -209,6 +211,7 @@ impl<'a> LefParser<'a, '_> {
                         offset_y: offset.map(|o| o.1),
                         width,
                         min_spacing,
+                        spacing_table,
                     })
                     .map_err(|e| self.lx.error(line, e.to_string()))?;
             }
@@ -261,19 +264,36 @@ impl<'a> LefParser<'a, '_> {
         Ok((first, second))
     }
 
-    /// Returns the zero-width, zero-run-length entry of a parallel run table.
-    fn spacing_table(&mut self) -> Result<Option<Dbu>, ParseError> {
+    /// Reads a parallel run length spacing table; other kinds of table are
+    /// skipped.
+    fn spacing_table(&mut self) -> Result<Option<SpacingTable>, ParseError> {
         if !self.lx.accept("PARALLELRUNLENGTH") {
             self.lx.skip_statement()?;
             return Ok(None);
         }
+        let line = self.lx.line();
+        let mut run_lengths = Vec::new();
         while !self.lx.accept("WIDTH") {
-            let _ = self.lx.expect_token("'WIDTH'")?;
+            run_lengths.push(self.microns("parallel run length")?);
         }
-        let _row_width = self.microns("width")?;
-        let first = self.microns("spacing")?;
-        self.lx.skip_statement()?;
-        Ok(Some(first))
+        let mut rows = Vec::new();
+        loop {
+            let width = self.microns("width")?;
+            let spacings = (0..run_lengths.len())
+                .map(|_| self.microns("spacing"))
+                .collect::<Result<Vec<Dbu>, ParseError>>()?;
+            rows.push((width, spacings));
+            if self.lx.accept(";") {
+                break;
+            }
+            self.lx.expect("WIDTH")?;
+        }
+        if run_lengths.is_empty() {
+            return Err(self
+                .lx
+                .error(line, "spacing table has no run lengths".to_string()));
+        }
+        Ok(Some(SpacingTable { run_lengths, rows }))
     }
 
     /// Resolves a layer name, or `None` for layers whose shapes are dropped.

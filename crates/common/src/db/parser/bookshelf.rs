@@ -189,6 +189,7 @@ pub fn synthesize_layer_stack(
                 offset_y: Some(pitch / 2),
                 width,
                 min_spacing: pitch - width,
+                spacing_table: None,
             })
             .map_err(|e| e.to_string())?;
     }
