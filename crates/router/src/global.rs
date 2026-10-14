@@ -224,6 +224,83 @@ pub struct GlobalRoutes {
     pub paths: FxHashMap<NetId, Vec<Vec<GCell>>>,
 }
 
+/// A net's global route as a tree over its gcells, for finding the cells
+/// that join two of them.
+#[derive(Clone, Debug, Default)]
+pub struct RouteTree {
+    index: FxHashMap<GCell, usize>,
+    cells: Vec<GCell>,
+    parent: Vec<usize>,
+    depth: Vec<usize>,
+}
+
+impl RouteTree {
+    /// Builds the tree from paths that each start on the paths before them;
+    /// a path that does not becomes a separate tree.
+    pub fn new(paths: &[Vec<GCell>]) -> Self {
+        let mut tree = Self::default();
+        for path in paths {
+            let mut previous = None;
+            for &c in path {
+                let id = match tree.index.get(&c) {
+                    Some(&id) => id,
+                    None => tree.push(c, previous),
+                };
+                previous = Some(id);
+            }
+        }
+        tree
+    }
+
+    fn push(&mut self, c: GCell, parent: Option<usize>) -> usize {
+        let id = self.cells.len();
+        let _ = self.index.insert(c, id);
+        self.cells.push(c);
+        self.parent.push(parent.unwrap_or(id));
+        self.depth.push(parent.map_or(0, |p| self.depth[p] + 1));
+        id
+    }
+
+    /// Every gcell of the route, once.
+    pub fn cells(&self) -> &[GCell] {
+        &self.cells
+    }
+
+    /// Column and row ranges `(x0, x1, y0, y1)` of the branch joining `from`
+    /// and `to`, or `None` when either is off the route or they are not
+    /// joined.
+    pub fn span(&self, from: GCell, to: GCell) -> Option<(u16, u16, u16, u16)> {
+        let mut left = *self.index.get(&from)?;
+        let mut right = *self.index.get(&to)?;
+        let mut span = (
+            from.x.min(to.x),
+            from.x.max(to.x),
+            from.y.min(to.y),
+            from.y.max(to.y),
+        );
+        while left != right {
+            let deeper = if self.depth[left] >= self.depth[right] {
+                &mut left
+            } else {
+                &mut right
+            };
+            let up = self.parent[*deeper];
+            if up == *deeper {
+                return None;
+            }
+            *deeper = up;
+            let cell = self.cells[up];
+            span = (
+                span.0.min(cell.x),
+                span.1.max(cell.x),
+                span.2.min(cell.y),
+                span.3.max(cell.y),
+            );
+        }
+        Some(span)
+    }
+}
+
 /// A net to route globally: its pins' gcells.
 #[derive(Clone, Debug)]
 pub struct GlobalNet {
@@ -553,4 +630,42 @@ fn search(
         }
     }
     None
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn cell(x: u16, y: u16) -> GCell {
+        GCell {
+            layer: LayerId::new(1),
+            x,
+            y,
+        }
+    }
+
+    #[test]
+    fn span_covers_the_branch_that_joins_two_cells() {
+        let paths = vec![
+            vec![cell(0, 0)],
+            vec![cell(0, 0), cell(0, 1), cell(0, 2), cell(1, 2)],
+            vec![cell(0, 2), cell(0, 3), cell(0, 4)],
+            vec![cell(0, 0), cell(1, 0), cell(2, 0)],
+        ];
+
+        let tree = RouteTree::new(&paths);
+
+        assert_eq!(tree.span(cell(1, 2), cell(0, 4)), Some((0, 1, 2, 4)));
+        assert_eq!(tree.span(cell(2, 0), cell(1, 2)), Some((0, 2, 0, 2)));
+    }
+
+    #[test]
+    fn span_is_none_for_cells_on_separate_trees() {
+        let paths = vec![vec![cell(0, 0), cell(1, 0)], vec![cell(5, 5)]];
+
+        let tree = RouteTree::new(&paths);
+
+        assert_eq!(tree.span(cell(1, 0), cell(5, 5)), None);
+        assert_eq!(tree.span(cell(1, 0), cell(9, 9)), None);
+    }
 }

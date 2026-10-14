@@ -87,12 +87,12 @@ fn hilbert(mut x: u32, mut y: u32) -> u64 {
     d
 }
 
-fn curve_order(points: &[Point<Dbu>]) -> (usize, Vec<Join>) {
+/// Indices of `points` in the order a Hilbert curve over their bounding box
+/// visits them, so that neighbours in the order are close together.
+pub fn hilbert_order(points: &[Point<Dbu>]) -> Vec<usize> {
     let min_x = points.iter().map(|p| p.x).min().unwrap_or_default();
     let min_y = points.iter().map(|p| p.y).min().unwrap_or_default();
-    let max_x = points.iter().map(|p| p.x).max().unwrap_or_default();
-    let max_y = points.iter().map(|p| p.y).max().unwrap_or_default();
-    let span = (max_x - min_x).max(max_y - min_y).get().max(1);
+    let span = span(points);
     let scale = |v: Dbu, lo: Dbu| u32::try_from((v - lo).get() * 65_535 / span).unwrap_or(0);
     let mut order: Vec<usize> = (0..points.len()).collect();
     order.sort_by_key(|&i| {
@@ -101,6 +101,23 @@ fn curve_order(points: &[Point<Dbu>]) -> (usize, Vec<Join>) {
             i,
         )
     });
+    order
+}
+
+/// The larger side of the points' bounding box, at least one.
+fn span(points: &[Point<Dbu>]) -> i64 {
+    let min_x = points.iter().map(|p| p.x).min().unwrap_or_default();
+    let min_y = points.iter().map(|p| p.y).min().unwrap_or_default();
+    let max_x = points.iter().map(|p| p.x).max().unwrap_or_default();
+    let max_y = points.iter().map(|p| p.y).max().unwrap_or_default();
+    (max_x - min_x).max(max_y - min_y).get().max(1)
+}
+
+fn curve_order(points: &[Point<Dbu>]) -> (usize, Vec<Join>) {
+    let min_x = points.iter().map(|p| p.x).min().unwrap_or_default();
+    let min_y = points.iter().map(|p| p.y).min().unwrap_or_default();
+    let span = span(points);
+    let order = hilbert_order(points);
 
     let cells_per_side = (points.len() as f64).sqrt().ceil().max(1.0) as i64;
     let bucket = (span / cells_per_side).max(1);

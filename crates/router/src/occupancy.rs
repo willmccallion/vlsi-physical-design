@@ -12,6 +12,7 @@ use crate::tech::{LayerTech, RouteTech};
 use pare_common::db::indices::LayerId;
 use pare_common::geom::dbu::Dbu;
 use pare_common::geom::rect::Rect;
+use rustc_hash::FxHashMap;
 
 /// What occupies a stretch of track.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
@@ -195,5 +196,58 @@ impl Occupancy {
             }
         }
         out
+    }
+}
+
+/// A small, separately owned occupancy layered over the shared one, for a
+/// worker that routes several nets in sequence while others run in parallel.
+#[derive(Clone, Debug, Default)]
+pub struct LocalOccupancy {
+    tracks: FxHashMap<TrackRef, Vec<Occupant>>,
+}
+
+impl LocalOccupancy {
+    /// Records `rect` on `layer` for `owner`.
+    pub fn add_rect(&mut self, tech: &RouteTech, layer: LayerId, rect: &Rect<Dbu>, owner: Owner) {
+        let lt = tech.layer(layer);
+        let (_, (lo, hi)) = lt.across_along_rect(rect);
+        for (track, centered) in affected_tracks(lt, rect) {
+            self.tracks
+                .entry(TrackRef { layer, track })
+                .or_default()
+                .push(Occupant {
+                    lo,
+                    hi,
+                    owner,
+                    centered,
+                });
+        }
+    }
+
+    /// The conflicts `rect` on `layer` would have here.
+    pub fn rect_conflicts<'a>(
+        &'a self,
+        tech: &'a RouteTech,
+        layer: LayerId,
+        rect: &Rect<Dbu>,
+        owner: Owner,
+    ) -> impl Iterator<Item = (TrackRef, &'a Occupant)> + use<'a> {
+        let lt = tech.layer(layer);
+        let (_, (lo, hi)) = lt.across_along_rect(rect);
+        let spacing = lt.spacing;
+        affected_tracks(lt, rect).flat_map(move |(track, centered)| {
+            let t = TrackRef { layer, track };
+            self.tracks
+                .get(&t)
+                .into_iter()
+                .flatten()
+                .filter_map(move |o| {
+                    let clash = o.owner != owner
+                        && (centered || o.centered)
+                        && o.lo < hi + spacing
+                        && lo < o.hi + spacing;
+                    clash.then_some((t, o))
+                })
+        })
     }
 }
