@@ -14,14 +14,13 @@ pub mod tech;
 pub mod tree;
 pub mod wiring;
 
-use detailed::{Costs, DetailedRouter, NetRoute, routable_nets};
+use detailed::{Costs, DetailedRouter, routable_nets};
 use global::{GlobalGrid, GlobalNet, route_global};
-use pare_common::db::design::{NetlistDB, PlacementStatus};
+use pare_common::db::design::{NetlistDB, PlacementStatus, RouteElem};
 use pare_common::db::indices::NetId;
 use pare_common::db::library::Shape;
 use pare_common::util::config::RoutingConfig;
 use pare_common::util::ui;
-use rustc_hash::FxHashMap;
 use std::time::Instant;
 use tech::RouteTech;
 
@@ -115,8 +114,7 @@ pub fn route(db: &mut NetlistDB, config: &RoutingConfig) -> Result<RoutingSummar
             ..RoutingSummary::default()
         };
         let start = Instant::now();
-        let mut routes: FxHashMap<NetId, NetRoute> =
-            dr.route_nets(&nets, costs).into_iter().collect();
+        let _ = dr.route_nets(&nets, costs);
         ui::routing_table_header("DR");
         let mut conflicted = dr.conflicted_nets(1.0);
         ui::routing_iter(
@@ -132,40 +130,36 @@ pub fn route(db: &mut NetlistDB, config: &RoutingConfig) -> Result<RoutingSummar
                 break;
             }
             let start = Instant::now();
-            conflicted.extend(dr.access_blockers(&conflicted, 1.0));
-            conflicted.sort_unstable();
-            conflicted.dedup();
-            for &n in &conflicted {
-                dr.rip_up(n);
-            }
             costs.penalty *= 1.5;
-            routes.extend(dr.route_nets(&conflicted, costs));
-            let ripped = conflicted.len();
+            let repaired = dr.repair(costs, round);
             conflicted = dr.conflicted_nets(1.0);
             summary.rounds = round;
             ui::routing_iter(
                 "DR",
                 round,
                 conflicted.len(),
-                ripped,
+                repaired.pieces,
                 costs.penalty / pitch,
                 start.elapsed().as_millis(),
             );
         }
         summary.conflicted = conflicted;
-        summary.incomplete = routes
+        summary.incomplete = nets
             .iter()
-            .filter(|(_, r)| !r.complete)
-            .map(|(&n, _)| n)
+            .copied()
+            .filter(|n| !dr.routes()[n.index()].complete)
             .collect();
-        summary.incomplete.sort_unstable();
-        (routes, summary)
+        let wiring: Vec<(NetId, Vec<RouteElem>)> = nets
+            .iter()
+            .map(|&n| (n, dr.routes()[n.index()].elems(&tech)))
+            .collect();
+        (wiring, summary)
     };
     for net in &mut db.nets {
         net.routing.clear();
     }
-    for (n, r) in routes {
-        db.nets[n.index()].routing = r.elems(&tech);
+    for (n, elems) in routes {
+        db.nets[n.index()].routing = elems;
     }
     Ok(summary)
 }

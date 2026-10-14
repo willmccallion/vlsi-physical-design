@@ -240,6 +240,13 @@ impl LocalOccupancy {
         }
     }
 
+    /// Forgets every rectangle of `owner`.
+    pub fn remove_owner(&mut self, owner: Owner) {
+        for list in self.tracks.values_mut() {
+            list.retain(|o| o.owner != owner);
+        }
+    }
+
     /// The conflicts `rect` on `layer` would have here.
     pub fn rect_conflicts<'a>(
         &'a self,

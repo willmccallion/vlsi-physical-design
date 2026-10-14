@@ -5,6 +5,10 @@
 //! global route. Nets are routed in parallel batches that cannot interact,
 //! and nets in conflict are ripped up and rerouted until none remain.
 
+mod region;
+
+pub use region::RepairStats;
+
 use crate::access::{AccessPoint, Node, access_points};
 use crate::global::{GCell, GlobalGrid, GlobalRoutes, RouteTree};
 use crate::occupancy::{LocalOccupancy, Occupancy, Origin, Owner, TrackRef};
@@ -16,7 +20,7 @@ pub use crate::wiring::NetRoute;
 use crate::wiring::{Edge, access_elems, elem_metal, path_edges};
 use pare_common::db::design::NetlistDB;
 use pare_common::db::indices::{LayerId, NetId, ViaId};
-use pare_common::db::library::LayerRef;
+use pare_common::db::library::{Direction, LayerRef};
 use pare_common::geom::dbu::Dbu;
 use pare_common::geom::point::Point;
 use pare_common::geom::rect::Rect;
@@ -271,6 +275,53 @@ impl<'a> DetailedRouter<'a> {
         self.routed[net.index()] = touched;
         self.vias[net.index()] = route.vias(self.tech);
         self.routes[net.index()] = route.clone();
+    }
+
+    /// Replaces a net's recorded routing with `route`.
+    fn recommit(&mut self, net: NetId, route: &NetRoute) {
+        let tracks = std::mem::take(&mut self.routed[net.index()]);
+        self.occupancy.remove_wiring(&tracks, Owner::Net(net.0));
+        self.commit(net, route);
+    }
+
+    /// The current routing of every net.
+    pub fn routes(&self) -> &[NetRoute] {
+        &self.routes
+    }
+
+    /// Where every current conflict is, with the nets in it.
+    fn markers(&self) -> Vec<Marker> {
+        let net = |o: Owner| match o {
+            Owner::Net(n) => Some(NetId(n)),
+            Owner::Obstacle => None,
+        };
+        let mut out: Vec<Marker> = self
+            .occupancy
+            .all_conflicts(self.tech)
+            .into_iter()
+            .map(|(track, a, b)| {
+                let lt = self.tech.layer(track.layer);
+                let across = lt.tracks[track.track as usize];
+                let along = a.lo.max(b.lo);
+                let at = match lt.direction {
+                    Direction::Horizontal => Point::new(along, across),
+                    Direction::Vertical => Point::new(across, along),
+                };
+                Marker {
+                    at,
+                    nets: [net(a.owner), net(b.owner)],
+                }
+            })
+            .collect();
+        for n in 0..self.vias.len() {
+            for (_, at) in self.crowded_cuts(n) {
+                out.push(Marker {
+                    at,
+                    nets: [Some(NetId::new(n)), None],
+                });
+            }
+        }
+        out
     }
 
     /// Records every current conflict in the history and returns the nets
@@ -769,6 +820,13 @@ impl NetGuide {
     fn corridor(&self, from: usize, to: usize) -> Option<Vec<GCell>> {
         self.tree.branch(self.terminals[from], self.terminals[to])
     }
+}
+
+/// A conflict's location and the nets in it.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+struct Marker {
+    at: Point<Dbu>,
+    nets: [Option<NetId>; 2],
 }
 
 /// Indices of the cells where a long corridor is split: one about every
