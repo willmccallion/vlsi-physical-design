@@ -71,6 +71,15 @@ impl LayerTech {
         }
     }
 
+    /// The smallest distance between neighbouring tracks.
+    pub fn pitch(&self) -> Dbu {
+        self.tracks
+            .windows(2)
+            .map(|w| w[1] - w[0])
+            .min()
+            .unwrap_or_default()
+    }
+
     /// Indices of tracks whose centerline lies in `[lo, hi]`.
     pub fn tracks_within(&self, lo: Dbu, hi: Dbu) -> std::ops::Range<u32> {
         let a = self.tracks.partition_point(|&t| t < lo);

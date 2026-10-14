@@ -62,13 +62,7 @@ pub fn route(db: &mut NetlistDB, config: &RoutingConfig) -> Result<RoutingSummar
         return Err(error);
     }
     let tech = RouteTech::new(db, config)?;
-    let pitch = tech
-        .layer(tech.min_layer)
-        .tracks
-        .windows(2)
-        .map(|w| w[1] - w[0])
-        .min()
-        .unwrap_or_default();
+    let pitch = tech.layer(tech.min_layer).pitch();
     let gcell = pitch * i64::from(config.gcell_tracks.max(1));
     let pitch = pitch.to_f64();
     let mut costs = Costs {
@@ -144,14 +138,22 @@ pub fn route(db: &mut NetlistDB, config: &RoutingConfig) -> Result<RoutingSummar
             costs.penalty / pitch,
             start.elapsed().as_millis(),
         );
+        let mut stalled = false;
         for round in 1..=config.detailed_iterations {
             if conflicted.is_empty() {
                 break;
             }
             let start = Instant::now();
             costs.penalty = (costs.penalty * 1.5).min(MAX_PENALTY);
-            let repaired = dr.repair(costs, round, Scope::Conflicts);
+            let scope = if stalled {
+                Scope::NearConflicts
+            } else {
+                Scope::Conflicts
+            };
+            let repaired = dr.repair(costs, round, scope);
+            let before = conflicted.len();
             conflicted = dr.conflicted_nets(1.0);
+            stalled = conflicted.len() >= before;
             summary.rounds = round;
             ui::routing_iter(
                 "DR",

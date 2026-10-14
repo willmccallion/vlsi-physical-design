@@ -13,7 +13,7 @@
 
 use super::DetailedRouter;
 use crate::access::Node;
-use crate::occupancy::{LocalOccupancy, Owner};
+use crate::occupancy::{LocalOccupancy, Origin, Owner};
 use crate::search::{Costs, MAX_PENALTY, Search};
 use crate::wiring::{DisjointSets, Edge, NetRoute, path_edges};
 use pare_common::db::indices::{CutLayerId, NetId};
@@ -49,7 +49,16 @@ pub enum Scope {
     Everything,
     /// The nets of each conflict, in the region holding it.
     Conflicts,
+    /// The nets of each conflict and every net with wiring within
+    /// [`NEAR_TRACKS`] tracks of it, in the region holding it, so that
+    /// wiring hemming a conflict in can move aside, as `TritonRoute`'s
+    /// near-violation rip-up does.
+    NearConflicts,
 }
+
+/// Tracks of the lowest routing layer around a conflict within which
+/// [`Scope::NearConflicts`] rips nets up.
+const NEAR_TRACKS: i64 = 3;
 
 /// What a pass did.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -79,6 +88,15 @@ impl DetailedRouter<'_> {
                 for m in self.markers() {
                     let nets = regions.entry(key(m.at)).or_default();
                     nets.extend(m.nets.iter().flatten());
+                }
+            }
+            Scope::NearConflicts => {
+                let reach = self.tech.layer(self.tech.min_layer).pitch() * NEAR_TRACKS;
+                for m in self.markers() {
+                    let near = self.nets_near(m.at, reach);
+                    let nets = regions.entry(key(m.at)).or_default();
+                    nets.extend(m.nets.iter().flatten());
+                    nets.extend(near);
                 }
             }
             Scope::Everything => {
@@ -275,6 +293,27 @@ impl DetailedRouter<'_> {
             penalty = (penalty * 2.0).min(MAX_PENALTY);
         }
         results
+    }
+
+    /// Nets with wiring within `reach` of `at` on any routable layer.
+    fn nets_near(&self, at: Point<Dbu>, reach: Dbu) -> Vec<NetId> {
+        let probe = Rect::new(at, at).expand(reach);
+        let nobody = Owner::Net(u32::MAX);
+        let mut nets = Vec::new();
+        for l in self.tech.min_layer.index()..=self.tech.max_layer.index() {
+            let layer = pare_common::db::indices::LayerId::new(l);
+            for (_, o) in self
+                .occupancy
+                .rect_conflicts(self.tech, layer, &probe, nobody)
+            {
+                if let (Owner::Net(n), Origin::Wiring) = (o.owner, o.origin) {
+                    nets.push(NetId(n));
+                }
+            }
+        }
+        nets.sort_unstable();
+        nets.dedup();
+        nets
     }
 
     /// Whether the metal or cuts of `edges` of `net` conflict with anything.
