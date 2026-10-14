@@ -10,7 +10,7 @@
 
 use crate::access::{AccessPoint, Node, access_points};
 use crate::global::{GCell, GlobalGrid, GlobalRoutes, RouteTree};
-use crate::occupancy::{LocalOccupancy, Occupancy, Owner, TrackRef};
+use crate::occupancy::{LocalOccupancy, Occupancy, Origin, Owner, TrackRef};
 use crate::tech::RouteTech;
 use crate::tree::{connection_order, hilbert_order};
 use pare_common::db::design::{NetlistDB, RouteElem};
@@ -130,7 +130,7 @@ impl<'a> DetailedRouter<'a> {
                 shapes::Owner::Net(n) => Owner::Net(n.0),
                 shapes::Owner::Obstacle => Owner::Obstacle,
             };
-            let _ = occupancy.add_rect(tech, layer, &s.shape.rect, owner);
+            let _ = occupancy.add_rect(tech, layer, &s.shape.rect, owner, Origin::Fixed);
         }
         let access: Vec<Vec<Vec<AccessPoint>>> = (0..db.nets.len())
             .into_par_iter()
@@ -301,17 +301,20 @@ impl<'a> DetailedRouter<'a> {
     /// Removes a net's metal from the occupancy.
     pub fn rip_up(&mut self, net: NetId) {
         let tracks = std::mem::take(&mut self.routed[net.index()]);
-        self.occupancy.remove(&tracks, Owner::Net(net.0));
+        self.occupancy.remove_wiring(&tracks, Owner::Net(net.0));
     }
 
     fn commit(&mut self, net: NetId, route: &NetRoute) {
         let mut touched = Vec::new();
         for (layer, rect) in &route.metal {
             if self.tech.routable(*layer) {
-                touched.extend(
-                    self.occupancy
-                        .add_rect(self.tech, *layer, rect, Owner::Net(net.0)),
-                );
+                touched.extend(self.occupancy.add_rect(
+                    self.tech,
+                    *layer,
+                    rect,
+                    Owner::Net(net.0),
+                    Origin::Wiring,
+                ));
             }
         }
         touched.sort_unstable();
@@ -852,8 +855,13 @@ fn reserve_sole_accesses(
             emit_access(db, tech, only, &mut metal);
             for (layer, rect) in &metal.metal {
                 if tech.routable(*layer) {
-                    let _ =
-                        occupancy.add_rect(tech, *layer, rect, Owner::Net(crate::tech::to_u32(n)));
+                    let _ = occupancy.add_rect(
+                        tech,
+                        *layer,
+                        rect,
+                        Owner::Net(crate::tech::to_u32(n)),
+                        Origin::Fixed,
+                    );
                 }
             }
         }

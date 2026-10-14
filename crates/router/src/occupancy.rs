@@ -24,6 +24,15 @@ pub enum Owner {
     Obstacle,
 }
 
+/// Where an occupant's metal comes from.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Origin {
+    /// Pins, obstructions and reservations, which stay for the whole run.
+    Fixed,
+    /// Routed metal, which rip-up removes.
+    Wiring,
+}
+
 /// One interval on a track.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Occupant {
@@ -36,6 +45,8 @@ pub struct Occupant {
     /// Whether the metal covers this track's centerline, rather than
     /// reaching toward it from a neighbouring track.
     pub centered: bool,
+    /// Whether rip-up removes it.
+    pub origin: Origin,
 }
 
 /// A track of a layer.
@@ -90,6 +101,7 @@ impl Occupancy {
         layer: LayerId,
         rect: &Rect<Dbu>,
         owner: Owner,
+        origin: Origin,
     ) -> Vec<TrackRef> {
         let lt = tech.layer(layer);
         let (_, (lo, hi)) = lt.across_along_rect(rect);
@@ -104,6 +116,7 @@ impl Occupancy {
                     hi: end,
                     owner,
                     centered,
+                    origin,
                 };
                 let at = list.partition_point(|o| o.lo < start);
                 list.insert(at, occupant);
@@ -117,10 +130,12 @@ impl Occupancy {
         touched
     }
 
-    /// Removes every occupant of `owner` from the given tracks.
-    pub fn remove(&mut self, tracks: &[TrackRef], owner: Owner) {
+    /// Removes the wiring of `owner` from the given tracks, keeping its
+    /// fixed metal.
+    pub fn remove_wiring(&mut self, tracks: &[TrackRef], owner: Owner) {
         for t in tracks {
-            self.tracks[t.layer.index()][t.track as usize].retain(|o| o.owner != owner);
+            self.tracks[t.layer.index()][t.track as usize]
+                .retain(|o| o.owner != owner || o.origin == Origin::Fixed);
         }
     }
 
@@ -220,6 +235,7 @@ impl LocalOccupancy {
                     hi,
                     owner,
                     centered,
+                    origin: Origin::Wiring,
                 });
         }
     }
