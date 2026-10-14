@@ -13,7 +13,7 @@ use pare_common::util::config::Config;
 use pare_common::util::{logger, ui, visualization};
 use pare_common::verify::placement::{PlacementViolation, placement_violations};
 use pare_common::verify::routing::check_routing;
-use pare_placer::legalize::abacus::AbacusLegalizer;
+use pare_placer::legalize::abacus;
 use pare_placer::model::PlacementModel;
 use pare_placer::physics::PhysicsContext;
 use pare_placer::solver::nesterov::{NesterovOptimizer, NesterovParams};
@@ -253,10 +253,14 @@ fn run_placement(config: &Config, db: &mut NetlistDB, output_dir: &Path) -> anyh
 
     let phase_start = Instant::now();
     ui::phase("Legalization");
-    AbacusLegalizer::new().legalize(&mut model);
-    model.write_back(db);
+    abacus::legalize(db)?;
     ui::check(&format!("Legalized {movable_cells} cells"));
-    ui::stat_row("HPWL (um):", &format!("{:.0}", model.hpwl()), "", "");
+    ui::stat_row(
+        "HPWL (um):",
+        &format!("{:.0}", PlacementModel::from_db(db).hpwl()),
+        "",
+        "",
+    );
     ui::phase_time(phase_start.elapsed().as_secs_f64());
 
     if !report_placement(db) {

@@ -1,478 +1,560 @@
-//! Abacus Legalization Algorithm.
+//! Abacus legalization (Spindler, Schlichtmann and Johannes, ISPD 2008).
 //!
-//! Implements the Abacus legalization algorithm, which places cells in rows
-//! by clustering cells together and computing optimal cluster positions using
-//! weighted average calculations. The algorithm handles fixed cells, macros,
-//! and standard cells differently, with dynamic padding to prevent row overflow.
+//! Movable macros are placed first at the nearest free row- and site-aligned
+//! spot. Standard cells are then taken in order of their global X position;
+//! each is trial-placed in candidate rows by appending it to that row's
+//! clusters and collapsing them, and is committed to the row with the least
+//! displacement. Cluster positions snap to the site grid and cells take
+//! their row's orientation.
 
-use crate::model::PlacementModel;
+use pare_common::db::design::{NetlistDB, PlacementStatus};
+use pare_common::db::indices::CellId;
+use pare_common::db::library::MacroClass;
+use pare_common::geom::dbu::Dbu;
+use pare_common::geom::orient::Orientation;
 use pare_common::geom::point::Point;
 use pare_common::geom::rect::Rect;
-use std::collections::HashMap;
 
-/// Abacus legalization algorithm implementation.
-///
-/// This legalizer places cells into rows by grouping them into clusters
-/// and computing optimal cluster positions that minimize displacement from
-/// the analytical placement solution while ensuring no overlaps.
-#[derive(Debug)]
-pub struct AbacusLegalizer;
-
-/// A cluster of cells in the Abacus algorithm.
-///
-/// Represents a group of cells that have been merged together during
-/// legalization. The cluster's position (x) is computed as a weighted
-/// average of member cell positions. The q field stores the weighted
-/// sum used in position computation.
-struct Cluster {
-    x: f64,
-    width: f64,
-    weight: f64,
-    q: f64,
-    member_cells: Vec<usize>,
+/// Why legalization failed.
+#[derive(Debug, thiserror::Error, PartialEq, Eq)]
+pub enum LegalizeError {
+    /// The design has no placement rows.
+    #[error("the design has no placement rows")]
+    NoRows,
+    /// No row has room for a standard cell.
+    #[error("no row has room for cell '{0}'")]
+    CellDoesNotFit(String),
+    /// No free spot inside the die fits a macro.
+    #[error("no free spot fits macro '{0}'")]
+    MacroDoesNotFit(String),
 }
 
-/// A sub-row region within a placement row.
-///
-/// Represents a contiguous free region in a row, bounded by fixed
-/// blockages or die boundaries. Tracks the used width and list of
-/// cells assigned to this sub-row for legalization.
-struct SubRow {
-    min_x: f64,
-    max_x: f64,
-    used_width: f64,
-    cells: Vec<usize>,
-}
-
-impl Default for AbacusLegalizer {
-    fn default() -> Self {
-        Self
+/// Moves every movable cell to a legal, row- and site-aligned position.
+pub fn legalize(db: &mut NetlistDB) -> Result<(), LegalizeError> {
+    if db.rows.is_empty() {
+        return Err(LegalizeError::NoRows);
     }
+    let rows = expand_rows(db);
+    let (macros, std_cells) = classify(db, &rows);
+
+    let mut obstacles = fixed_obstacles(db);
+    legalize_macros(db, &rows, &macros, &mut obstacles)?;
+
+    let mut subrows = build_subrows(db, &rows, &obstacles);
+    let ranges = row_ranges(&subrows, rows.len());
+    let mut order = std_cells;
+    order.sort_by_key(|&c| (db.cells[c.index()].location.x, c));
+    for cell in order {
+        place_cell(db, &rows, &ranges, &mut subrows, cell)?;
+    }
+    for sub in &subrows {
+        sub.commit(db, &rows[sub.row]);
+    }
+    Ok(())
 }
 
-impl AbacusLegalizer {
-    /// Creates a new Abacus legalizer instance.
-    pub const fn new() -> Self {
-        Self
+/// One single-height row of sites.
+struct RowSpan {
+    y: Dbu,
+    height: Dbu,
+    x_min: Dbu,
+    x_max: Dbu,
+    site: Dbu,
+    orient: Orientation,
+}
+
+/// Rows from the design, with multi-row `DO ... BY n` statements split up,
+/// sorted by Y.
+fn expand_rows(db: &NetlistDB) -> Vec<RowSpan> {
+    let mut rows = Vec::new();
+    for r in &db.rows {
+        let site = r.orient.oriented_size(db.library.site(r.site).size);
+        let step = if r.step.x > Dbu::ZERO {
+            r.step.x
+        } else {
+            site.x
+        };
+        for k in 0..i64::from(r.num_y) {
+            rows.push(RowSpan {
+                y: r.origin.y + r.step.y * k,
+                height: site.y,
+                x_min: r.origin.x,
+                x_max: r.origin.x + step * i64::from(r.num_x.saturating_sub(1)) + site.x,
+                site: step,
+                orient: r.orient,
+            });
+        }
     }
+    rows.sort_by_key(|r| (r.y, r.x_min));
+    rows
+}
 
-    /// Legalizes the placement by moving cells to non-overlapping positions in rows.
-    ///
-    /// First places fixed cells and macros, then processes standard cells row by row.
-    /// For each row, cells are assigned to sub-rows (regions between fixed blockages),
-    /// then clustered using the Abacus algorithm to minimize displacement. Dynamic
-    /// padding is computed based on design utilization to prevent row overflow while
-    /// maintaining reasonable spacing. The algorithm searches nearby rows if the
-    /// ideal row cannot accommodate a cell.
-    pub fn legalize(&self, model: &mut PlacementModel) {
-        let mut height_counts = HashMap::new();
-        for size in &model.sizes {
-            if size.y > 0.001 {
-                let h_key = (size.y * 1000.0).round() as i32;
-                *height_counts.entry(h_key).or_insert(0) += 1;
-            }
+/// Splits movable cells into macros, placed freely, and single-row cells.
+fn classify(db: &NetlistDB, rows: &[RowSpan]) -> (Vec<CellId>, Vec<CellId>) {
+    let mut macros = Vec::new();
+    let mut cells = Vec::new();
+    for i in 0..db.num_cells() {
+        let id = CellId::new(i);
+        if !db.cells[i].status.is_movable() {
+            continue;
         }
-
-        let row_height = height_counts
-            .into_iter()
-            .max_by_key(|&(_, count)| count)
-            .map_or(1.0, |(h, _)| h as f64 / 1000.0);
-
-        let die_min_x = model.die.min.x;
-        let die_max_x = model.die.max.x;
-        let die_min_y = model.die.min.y;
-        let die_height = model.die.height();
-        let num_rows = (die_height / row_height).ceil() as usize;
-
-        if num_rows == 0 {
-            return;
-        }
-
-        let is_macro = |h: f64| h > row_height * 1.5;
-
-        let mut total_movable_width = 0.0;
-        let mut movable_cell_count = 0;
-
-        for (size, &movable) in model.sizes.iter().zip(&model.movable) {
-            if movable && !is_macro(size.y) {
-                total_movable_width += size.x;
-                movable_cell_count += 1;
-            }
-        }
-
-        let total_row_capacity = (die_max_x - die_min_x) * (num_rows as f64);
-        let utilization = if total_row_capacity > 0.0 {
-            total_movable_width / total_row_capacity
+        let m = db.cell_macro(id);
+        let fits_a_row =
+            matches!(m.class, MacroClass::Core(_)) && rows.iter().any(|r| r.height == m.size.y);
+        if fits_a_row {
+            cells.push(id);
         } else {
-            1.0
-        };
-
-        let whitespace = total_row_capacity - total_movable_width;
-        // Use at most 50% of global whitespace as padding so locally dense rows
-        // don't overflow when the global utilization is high (>75%).
-        let padding_fraction = if utilization > 0.75 { 0.25 } else { 0.50 };
-        let raw_padding = if movable_cell_count > 0 && whitespace > 0.0 {
-            (whitespace * padding_fraction / (movable_cell_count as f64)).max(0.0)
-        } else {
-            0.0
-        };
-
-        let padding_per_cell = raw_padding.min(2.0);
-
-        log::debug!(
-            "Abacus: Util={:.2}%. Padding: {:.2} units/cell (Raw: {:.2})",
-            utilization * 100.0,
-            padding_per_cell,
-            raw_padding
-        );
-
-        let mut fixed_rects = Vec::new();
-        let mut movable_macros = Vec::new();
-
-        for i in 0..model.num_cells() {
-            let cell = model.sizes[i];
-            if !model.movable[i] {
-                let pos = model.positions[i];
-                fixed_rects.push(Rect::new(pos, Point::new(pos.x + cell.x, pos.y + cell.y)));
-            } else if is_macro(cell.y) {
-                movable_macros.push(i);
-            }
+            macros.push(id);
         }
+    }
+    (macros, cells)
+}
 
-        movable_macros.sort_by(|&a, &b| model.positions[a].x.total_cmp(&model.positions[b].x));
+/// Fixed cells and hard placement blockages.
+fn fixed_obstacles(db: &NetlistDB) -> Vec<Rect<Dbu>> {
+    let mut out: Vec<Rect<Dbu>> = (0..db.num_cells())
+        .filter(|&i| !db.cells[i].status.is_movable())
+        .map(|i| db.cell_bbox(CellId::new(i)))
+        .collect();
+    out.extend(db.placement_blockages.iter().copied());
+    out
+}
 
-        for &idx in &movable_macros {
-            let cell = model.sizes[idx];
-            let mut pos = model.positions[idx];
-
-            let ideal_row = ((pos.y - die_min_y) / row_height).round();
-            pos.y = die_min_y + ideal_row * row_height;
-            pos.y = pos.y.clamp(die_min_y, model.die.max.y - cell.y);
-
-            pos.x = pos.x.clamp(die_min_x, die_max_x - cell.x);
-
-            model.positions[idx] = pos;
-            fixed_rects.push(Rect::new(pos, Point::new(pos.x + cell.x, pos.y + cell.y)));
+/// Free X intervals of `[lo, hi)` not covered by any obstacle overlapping the
+/// open band `(y0, y1)`.
+fn free_intervals(obstacles: &[Rect<Dbu>], lo: Dbu, hi: Dbu, y0: Dbu, y1: Dbu) -> Vec<(Dbu, Dbu)> {
+    let mut blocked: Vec<(Dbu, Dbu)> = obstacles
+        .iter()
+        .filter(|r| r.min.y < y1 && r.max.y > y0 && r.min.x < hi && r.max.x > lo)
+        .map(|r| (r.min.x, r.max.x))
+        .collect();
+    blocked.sort();
+    let mut free = Vec::new();
+    let mut cursor = lo;
+    for (b0, b1) in blocked {
+        if b0 > cursor {
+            free.push((cursor, b0.min(hi)));
         }
-
-        let mut row_blockages: Vec<Vec<(f64, f64)>> = vec![vec![]; num_rows];
-        for rect in &fixed_rects {
-            let start_row = ((rect.min.y - die_min_y) / row_height).floor() as isize;
-            let end_row = ((rect.max.y - 0.001 - die_min_y) / row_height).floor() as isize;
-
-            for r in start_row..=end_row {
-                if r >= 0 && (r as usize) < num_rows {
-                    row_blockages[r as usize].push((rect.min.x, rect.max.x));
-                }
-            }
+        cursor = cursor.max(b1);
+        if cursor >= hi {
+            break;
         }
+    }
+    if cursor < hi {
+        free.push((cursor, hi));
+    }
+    free
+}
 
-        let mut rows: Vec<Vec<SubRow>> = Vec::with_capacity(num_rows);
-        for blockage_list in &row_blockages {
-            let mut blockages = blockage_list.clone();
-            blockages.sort_by(|a, b| a.0.total_cmp(&b.0));
+/// Rounds `x` down to the site grid starting at `origin`.
+fn snap_down(x: Dbu, origin: Dbu, site: Dbu) -> Dbu {
+    origin + site * (x - origin).get().div_euclid(site.get())
+}
 
-            let mut merged = Vec::new();
-            if !blockages.is_empty() {
-                let mut curr = blockages[0];
-                for next in blockages.iter().skip(1) {
-                    if next.0 < curr.1 + 0.001 {
-                        curr.1 = curr.1.max(next.1);
-                    } else {
-                        merged.push(curr);
-                        curr = *next;
-                    }
-                }
-                merged.push(curr);
+/// Rounds `x` up to the site grid starting at `origin`.
+fn snap_up(x: Dbu, origin: Dbu, site: Dbu) -> Dbu {
+    let down = snap_down(x, origin, site);
+    if down == x { down } else { down + site }
+}
+
+/// Row indices in order of vertical distance from `y`, nearest first.
+fn rows_outward(rows: &[RowSpan], y: Dbu) -> impl Iterator<Item = usize> + '_ {
+    let start = rows.partition_point(|r| r.y < y);
+    let mut below = start;
+    let mut above = start;
+    std::iter::from_fn(move || {
+        let down = below.checked_sub(1).map(|i| (y - rows[i].y, i));
+        let up = (above < rows.len()).then(|| (rows[above].y - y, above));
+        match (down, up) {
+            (Some(d), Some(u)) if d.0 < u.0 => {
+                below -= 1;
+                Some(d.1)
             }
-
-            let mut sub_rows = Vec::new();
-            let mut current_x = die_min_x;
-
-            for (b_start, b_end) in merged {
-                // Fixed pads can sit outside the die; sub-rows must not follow them.
-                let b_start = b_start.min(die_max_x);
-                if b_start > current_x + 0.001 {
-                    sub_rows.push(SubRow {
-                        min_x: current_x,
-                        max_x: b_start,
-                        used_width: 0.0,
-                        cells: Vec::new(),
-                    });
-                }
-                current_x = current_x.max(b_end);
+            (_, Some(u)) => {
+                above += 1;
+                Some(u.1)
             }
-            if current_x < die_max_x - 0.001 {
-                sub_rows.push(SubRow {
-                    min_x: current_x,
-                    max_x: die_max_x,
-                    used_width: 0.0,
-                    cells: Vec::new(),
-                });
+            (Some(d), None) => {
+                below -= 1;
+                Some(d.1)
             }
-            rows.push(sub_rows);
+            (None, None) => None,
         }
+    })
+}
 
-        let mut std_cells: Vec<usize> = (0..model.num_cells())
-            .filter(|&i| model.movable[i] && !is_macro(model.sizes[i].y))
-            .collect();
+fn squared(d: Dbu) -> i128 {
+    i128::from(d.get()) * i128::from(d.get())
+}
 
-        std_cells.sort_by(|&a, &b| {
-            let pos_a = model.positions[a];
-            let pos_b = model.positions[b];
-            let row_a = ((pos_a.y - die_min_y) / row_height).round() as isize;
-            let row_b = ((pos_b.y - die_min_y) / row_height).round() as isize;
-            row_a.cmp(&row_b).then(pos_a.x.total_cmp(&pos_b.x))
-        });
-
-        for &i in &std_cells {
-            let cell = model.sizes[i];
-            let pos = model.positions[i];
-            let ideal_row_idx = ((pos.y - die_min_y) / row_height).round() as isize;
-
-            let mut placed = false;
-            let search_radius = num_rows;
-
-            for offset in 0..=search_radius {
-                let signs = if offset == 0 { vec![1] } else { vec![1, -1] };
-                for sign in signs {
-                    let r_idx = ideal_row_idx + (offset as isize * sign);
-                    if r_idx < 0 || r_idx >= num_rows as isize {
-                        continue;
-                    }
-                    let r = r_idx as usize;
-
-                    let mut best_sub = None;
-                    let mut min_dist = f64::INFINITY;
-
-                    for (k, sub) in rows[r].iter().enumerate() {
-                        let cell_total_w = cell.x + padding_per_cell;
-                        if sub.used_width + cell_total_w <= (sub.max_x - sub.min_x) {
-                            let sub_center = f64::midpoint(sub.min_x, sub.max_x);
-                            let dist = (pos.x - sub_center).abs();
-                            if dist < min_dist {
-                                min_dist = dist;
-                                best_sub = Some(k);
-                            }
-                        }
-                    }
-
-                    if let Some(k) = best_sub {
-                        rows[r][k].cells.push(i);
-                        rows[r][k].used_width += cell.x + padding_per_cell;
-                        placed = true;
-                        break;
-                    }
-                }
-                if placed {
-                    break;
-                }
+fn legalize_macros(
+    db: &mut NetlistDB,
+    rows: &[RowSpan],
+    macros: &[CellId],
+    obstacles: &mut Vec<Rect<Dbu>>,
+) -> Result<(), LegalizeError> {
+    let mut order = macros.to_vec();
+    order.sort_by_key(|&c| {
+        let size = db.cell_size(c);
+        std::cmp::Reverse((size.x * size.y, c))
+    });
+    let die = db.die_area;
+    for cell in order {
+        let size = db.cell_size(cell);
+        let target = db.cells[cell.index()].location;
+        let mut best: Option<(i128, Point<Dbu>)> = None;
+        for r in rows_outward(rows, target.y) {
+            let row = &rows[r];
+            let dy = squared(row.y - target.y);
+            if best.is_some_and(|(cost, _)| dy >= cost) {
+                break;
             }
-
-            if !placed {
-                let r = ideal_row_idx.clamp(0, num_rows as isize - 1) as usize;
-                if !rows[r].is_empty() {
-                    let cell_w = model.sizes[i].x + padding_per_cell;
-                    rows[r][0].cells.push(i);
-                    rows[r][0].used_width += cell_w;
-                }
-            }
-        }
-
-        for (r, row) in rows.iter_mut().enumerate() {
-            let row_y = (r as f64).mul_add(row_height, die_min_y);
-
-            for sub in row.iter_mut() {
-                if sub.cells.is_empty() {
-                    continue;
-                }
-
-                sub.cells
-                    .sort_by(|&a, &b| model.positions[a].x.total_cmp(&model.positions[b].x));
-
-                let mut clusters: Vec<Cluster> = Vec::new();
-
-                for &cell_idx in &sub.cells {
-                    let cell_w = model.sizes[cell_idx].x + padding_per_cell;
-                    let target_x = model.positions[cell_idx].x;
-
-                    let new_cluster = Cluster {
-                        x: target_x,
-                        width: cell_w,
-                        weight: 1.0,
-                        q: target_x,
-                        member_cells: vec![cell_idx],
-                    };
-
-                    clusters.push(new_cluster);
-                    Self::collapse(&mut clusters, sub.min_x);
-                }
-
-                // Left-to-right: push clusters right if they underflow
-                let mut left_limit = sub.min_x;
-                for cluster in &mut clusters {
-                    if cluster.x < left_limit {
-                        cluster.x = left_limit;
-                    }
-                    left_limit = cluster.x + cluster.width;
-                }
-
-                // Right-to-left: push clusters left if they overflow
-                let mut right_limit = sub.max_x;
-                for cluster in clusters.iter_mut().rev() {
-                    if cluster.x + cluster.width > right_limit {
-                        cluster.x = right_limit - cluster.width;
-                    }
-                    right_limit = cluster.x;
-                }
-
-                // Collect all cells ordered by their cluster-assigned x position,
-                // then do a single strict left-to-right sequential placement.
-                // This guarantees no overlaps and no out-of-bounds regardless of
-                // how many clusters collided at the right edge.
-                let sub_capacity = sub.max_x - sub.min_x;
-                let sub_cell_width: f64 = sub.cells.iter().map(|&ci| model.sizes[ci].x).sum();
-                let has_slack = sub_cell_width < sub_capacity - 0.001;
-
-                let mut ordered: Vec<(f64, usize)> = Vec::with_capacity(sub.cells.len());
-                for cluster in &clusters {
-                    let mut cx = cluster.x;
-                    for &ci in &cluster.member_cells {
-                        ordered.push((cx, ci));
-                        cx += model.sizes[ci].x + if has_slack { padding_per_cell } else { 0.0 };
-                    }
-                }
-                ordered.sort_by(|a, b| a.0.total_cmp(&b.0));
-
-                // Sequential pack: honour ideal positions where possible,
-                // but always advance monotonically and clamp to die boundary.
-                let mut cursor = sub.min_x;
-                for (ideal_x, cell_idx) in &ordered {
-                    let cell_w = model.sizes[*cell_idx].x;
-                    let pad = if has_slack { padding_per_cell } else { 0.0 };
-                    // Move cursor to ideal_x if it doesn't go backward
-                    if *ideal_x > cursor {
-                        cursor = *ideal_x;
-                    }
-                    // Clamp to left boundary (cursor always advances, never backward)
-                    let place_x = cursor.max(die_min_x);
-                    model.positions[*cell_idx].x = place_x;
-                    model.positions[*cell_idx].y = row_y;
-                    cursor = place_x + cell_w + pad;
-                }
-            }
-        }
-
-        // Post-legalization: clamp Y to die boundary, then compact any
-        // cells that overflow the right die boundary by pushing them left
-        // (and their neighbors) in a right-to-left pass per row.
-        for i in 0..model.num_cells() {
-            if !model.movable[i] {
+            if row.y + size.y > die.max.y {
                 continue;
             }
-            let h = model.sizes[i].y;
-            model.positions[i].y = model.positions[i].y.clamp(die_min_y, model.die.max.y - h);
-        }
-
-        // Right-to-left compaction for each row to fix right-boundary overflow.
-        for row in &rows {
-            for sub in row {
-                if sub.cells.is_empty() {
+            for (lo, hi) in free_intervals(obstacles, die.min.x, die.max.x, row.y, row.y + size.y) {
+                let lo = snap_up(lo, row.x_min, row.site);
+                let hi = snap_down(hi - size.x, row.x_min, row.site);
+                if lo > hi {
                     continue;
                 }
-
-                // Sort cells by their placed x position
-                let mut cells_in_sub: Vec<usize> = sub.cells.clone();
-                cells_in_sub
-                    .sort_by(|&a, &b| model.positions[a].x.total_cmp(&model.positions[b].x));
-
-                // Right-to-left: if the rightmost cell exceeds the sub-row
-                // boundary, push it left (and its neighbors).
-                let mut right_limit = sub.max_x;
-                for &ci in cells_in_sub.iter().rev() {
-                    let w = model.sizes[ci].x;
-                    if model.positions[ci].x + w > right_limit {
-                        model.positions[ci].x = (right_limit - w).max(die_min_x);
-                    }
-                    right_limit = model.positions[ci].x;
+                let x = snap_down(target.x.clamp(lo, hi), row.x_min, row.site).max(lo);
+                let cost = dy + squared(x - target.x);
+                if best.is_none_or(|(c, _)| cost < c) {
+                    best = Some((cost, Point::new(x, row.y)));
                 }
             }
         }
+        let (_, at) = best
+            .ok_or_else(|| LegalizeError::MacroDoesNotFit(db.cells[cell.index()].name.clone()))?;
+        let c = &mut db.cells[cell.index()];
+        c.location = at;
+        c.status = PlacementStatus::Placed;
+        obstacles.push(Rect::new(at, at + size));
+    }
+    Ok(())
+}
+
+/// A group of abutting cells placed where their total width-weighted squared
+/// displacement is least.
+#[derive(Clone, Copy)]
+struct Cluster {
+    /// Index of the cluster's first cell in the sub-row's cell list.
+    first: usize,
+    weight: f64,
+    q: f64,
+    width: Dbu,
+    x: Dbu,
+}
+
+/// A contiguous stretch of free sites in a row.
+struct SubRow {
+    row: usize,
+    lo: Dbu,
+    hi: Dbu,
+    used: Dbu,
+    cells: Vec<(CellId, Dbu)>,
+    clusters: Vec<Cluster>,
+}
+
+impl SubRow {
+    fn free(&self) -> Dbu {
+        self.hi - self.lo - self.used
     }
 
-    /// Collapses overlapping clusters into a single cluster.
-    ///
-    /// Merges clusters that overlap by computing a weighted average position
-    /// and combined width. This implements the core Abacus algorithm where
-    /// clusters are merged left-to-right until no overlaps remain. The `min_x`
-    /// parameter ensures clusters do not extend beyond the sub-row boundary.
-    fn collapse(clusters: &mut Vec<Cluster>, min_x: f64) {
-        loop {
-            if let Some(last) = clusters.last_mut()
-                && last.x < min_x
-            {
-                last.x = min_x;
-            }
+    /// Where a cluster lands: its optimum, snapped to a site and kept inside.
+    fn position(&self, q: f64, weight: f64, width: Dbu, site: Dbu) -> Dbu {
+        let ideal = q / weight;
+        let sites = ((ideal - self.lo.to_f64()) / site.to_f64()).round() as i64;
+        (self.lo + site * sites).clamp(self.lo, self.hi - width)
+    }
 
-            if clusters.len() <= 1 {
+    /// The x a new cell of `width` aiming for `target` would get, without
+    /// changing the sub-row.
+    fn trial(&self, target: Dbu, width: Dbu, site: Dbu) -> Dbu {
+        let mut weight = width.to_f64();
+        let mut q = weight * target.to_f64();
+        let mut total = width;
+        let mut x = self.position(q, weight, total, site);
+        for c in self.clusters.iter().rev() {
+            if c.x + c.width <= x {
                 break;
             }
+            q = weight.mul_add(-c.width.to_f64(), c.q + q);
+            weight += c.weight;
+            total += c.width;
+            x = self.position(q, weight, total, site);
+        }
+        x + total - width
+    }
 
-            let last_idx = clusters.len() - 1;
-            let prev_idx = last_idx - 1;
-
-            let last_x = clusters[last_idx].x;
-            let prev_end = clusters[prev_idx].x + clusters[prev_idx].width;
-
-            if prev_end > last_x {
-                let Some(last_c) = clusters.pop() else { break };
-                let prev_c = &mut clusters[prev_idx];
-
-                prev_c.q += last_c.weight.mul_add(-prev_c.width, last_c.q);
-                prev_c.member_cells.extend(last_c.member_cells);
-                prev_c.width += last_c.width;
-                prev_c.weight += last_c.weight;
-                prev_c.x = prev_c.q / prev_c.weight;
-            } else {
+    fn add(&mut self, cell: CellId, target: Dbu, width: Dbu, site: Dbu) {
+        let w = width.to_f64();
+        self.cells.push((cell, width));
+        self.used += width;
+        let mut cluster = Cluster {
+            first: self.cells.len() - 1,
+            weight: w,
+            q: w * target.to_f64(),
+            width,
+            x: Dbu::ZERO,
+        };
+        cluster.x = self.position(cluster.q, cluster.weight, cluster.width, site);
+        while let Some(prev) = self.clusters.last().copied() {
+            if prev.x + prev.width <= cluster.x {
                 break;
+            }
+            let _ = self.clusters.pop();
+            cluster = Cluster {
+                first: prev.first,
+                weight: prev.weight + cluster.weight,
+                q: cluster.weight.mul_add(-prev.width.to_f64(), prev.q + cluster.q),
+                width: prev.width + cluster.width,
+                x: Dbu::ZERO,
+            };
+            cluster.x = self.position(cluster.q, cluster.weight, cluster.width, site);
+        }
+        self.clusters.push(cluster);
+    }
+
+    fn commit(&self, db: &mut NetlistDB, row: &RowSpan) {
+        for (k, cluster) in self.clusters.iter().enumerate() {
+            let end = self
+                .clusters
+                .get(k + 1)
+                .map_or(self.cells.len(), |c| c.first);
+            let mut x = cluster.x;
+            for &(cell, width) in &self.cells[cluster.first..end] {
+                let c = &mut db.cells[cell.index()];
+                c.location = Point::new(x, row.y);
+                c.orient = row.orient;
+                c.status = PlacementStatus::Placed;
+                x += width;
             }
         }
     }
+}
+
+/// Sub-rows of every row between obstacles, in row order then X.
+fn build_subrows(db: &NetlistDB, rows: &[RowSpan], obstacles: &[Rect<Dbu>]) -> Vec<SubRow> {
+    let die = db.die_area;
+    let mut out = Vec::new();
+    for (r, row) in rows.iter().enumerate() {
+        let lo = row.x_min.max(die.min.x);
+        let hi = row.x_max.min(die.max.x);
+        for (a, b) in free_intervals(obstacles, lo, hi, row.y, row.y + row.height) {
+            let a = snap_up(a, row.x_min, row.site);
+            let b = snap_down(b, row.x_min, row.site);
+            if b > a {
+                out.push(SubRow {
+                    row: r,
+                    lo: a,
+                    hi: b,
+                    used: Dbu::ZERO,
+                    cells: Vec::new(),
+                    clusters: Vec::new(),
+                });
+            }
+        }
+    }
+    out
+}
+
+/// For each row, the half-open range of its sub-rows.
+fn row_ranges(subrows: &[SubRow], num_rows: usize) -> Vec<(usize, usize)> {
+    let mut ranges = vec![(0, 0); num_rows];
+    let mut start = 0;
+    while start < subrows.len() {
+        let row = subrows[start].row;
+        let end = start + subrows[start..].partition_point(|s| s.row == row);
+        ranges[row] = (start, end);
+        start = end;
+    }
+    ranges
+}
+
+/// Whether a cell may take this row orientation given its symmetry.
+fn orientation_allowed(db: &NetlistDB, cell: CellId, row: Orientation) -> bool {
+    let symmetry = db.cell_macro(cell).symmetry;
+    match row {
+        Orientation::N => true,
+        Orientation::FS => symmetry.x,
+        Orientation::FN => symmetry.y,
+        Orientation::S => symmetry.x && symmetry.y,
+        _ => false,
+    }
+}
+
+fn place_cell(
+    db: &NetlistDB,
+    rows: &[RowSpan],
+    ranges: &[(usize, usize)],
+    subrows: &mut [SubRow],
+    cell: CellId,
+) -> Result<(), LegalizeError> {
+    let target = db.cells[cell.index()].location;
+    let size = db.cell_size(cell);
+
+    let mut best: Option<(i128, usize)> = None;
+    for r in rows_outward(rows, target.y) {
+        let row = &rows[r];
+        let dy = squared(row.y - target.y);
+        if best.is_some_and(|(cost, _)| dy >= cost) {
+            break;
+        }
+        if row.height != size.y || !orientation_allowed(db, cell, row.orient) {
+            continue;
+        }
+        let width = snap_up(size.x, Dbu::ZERO, row.site);
+        let (start, end) = ranges[r];
+        for (s, sub) in subrows.iter().enumerate().take(end).skip(start) {
+            if sub.free() < width {
+                continue;
+            }
+            let x = sub.trial(target.x.clamp(sub.lo, sub.hi - width), width, row.site);
+            let cost = dy + squared(x - target.x);
+            if best.is_none_or(|(c, _)| cost < c) {
+                best = Some((cost, s));
+            }
+        }
+    }
+
+    let (_, s) =
+        best.ok_or_else(|| LegalizeError::CellDoesNotFit(db.cells[cell.index()].name.clone()))?;
+    let site = rows[subrows[s].row].site;
+    let width = snap_up(size.x, Dbu::ZERO, site);
+    let sub = &mut subrows[s];
+    let target_x = target.x.clamp(sub.lo, sub.hi - width);
+    sub.add(cell, target_x, width, site);
+    Ok(())
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use pare_common::db::design::Row;
+    use pare_common::db::indices::SiteId;
+    use pare_common::db::library::{CoreKind, Library, Macro, Site, Symmetry};
+    use pare_common::geom::dbu::DbuPerMicron;
+    use pare_common::verify::placement::placement_violations;
 
-    fn model(cells: &[(Point<f64>, bool)]) -> PlacementModel {
-        PlacementModel {
-            die: Rect::new(Point::new(0.0, 0.0), Point::new(100.0, 10.0)),
-            sizes: vec![Point::new(10.0, 10.0); cells.len()],
-            movable: cells.iter().map(|c| c.1).collect(),
-            positions: cells.iter().map(|c| c.0).collect(),
-            nets: Vec::new(),
+    fn pt(x: i64, y: i64) -> Point<Dbu> {
+        Point::new(Dbu(x), Dbu(y))
+    }
+
+    /// Two 10-site rows (N then FS) of 10 x 100 sites over a 100 x 200 die.
+    fn design(cells: &[(Point<Dbu>, PlacementStatus, i64)]) -> NetlistDB {
+        let mut lib = Library::new(DbuPerMicron::new(1000).unwrap());
+        let symmetry = Symmetry {
+            x: true,
+            y: true,
+            r90: false,
+        };
+        let site = lib
+            .add_site(Site {
+                name: "s".into(),
+                size: pt(10, 100),
+                symmetry,
+            })
+            .unwrap();
+        let mut db = NetlistDB::new("t".into(), lib);
+        db.die_area = Rect::new(pt(0, 0), pt(100, 200));
+        for (k, orient) in [Orientation::N, Orientation::FS].into_iter().enumerate() {
+            db.rows.push(Row {
+                name: format!("r{k}"),
+                site: SiteId(0),
+                origin: pt(0, 100 * k as i64),
+                orient,
+                num_x: 10,
+                num_y: 1,
+                step: pt(10, 0),
+            });
         }
+        for (i, &(at, status, width)) in cells.iter().enumerate() {
+            let name = format!("m{i}");
+            let m = db
+                .library
+                .add_macro(Macro::new(
+                    name.clone(),
+                    MacroClass::Core(CoreKind::Regular),
+                    pt(width, 100),
+                    symmetry,
+                    Some(site),
+                ))
+                .unwrap();
+            let _ = db.add_cell(name, m, at, Orientation::N, status).unwrap();
+        }
+        db
     }
 
     #[test]
-    fn cells_stay_inside_the_die_when_a_fixed_pad_sits_past_its_edge() {
-        let mut cells = vec![(Point::new(105.0, 0.0), false)];
-        cells.extend((0..9).map(|_| (Point::new(95.0, 0.0), true)));
-        let mut m = model(&cells);
+    fn overlapping_cells_end_up_legal() {
+        let mut db = design(&[(pt(33, 7), PlacementStatus::Placed, 20); 6]);
 
-        AbacusLegalizer::new().legalize(&mut m);
+        legalize(&mut db).unwrap();
 
-        for (i, pos) in m
-            .positions
+        assert!(
+            placement_violations(&db).is_empty(),
+            "{:?}",
+            placement_violations(&db)
+        );
+    }
+
+    #[test]
+    fn cells_take_their_row_orientation() {
+        let mut db = design(&[(pt(40, 95), PlacementStatus::Placed, 20)]);
+
+        legalize(&mut db).unwrap();
+
+        assert_eq!(db.cells[0].location, pt(40, 100));
+        assert_eq!(db.cells[0].orient, Orientation::FS);
+    }
+
+    #[test]
+    fn a_cell_already_on_a_site_does_not_move() {
+        let mut db = design(&[(pt(30, 0), PlacementStatus::Placed, 20)]);
+
+        legalize(&mut db).unwrap();
+
+        assert_eq!(db.cells[0].location, pt(30, 0));
+    }
+
+    #[test]
+    fn cells_flow_around_a_fixed_cell() {
+        let mut db = design(&[
+            (pt(40, 0), PlacementStatus::Fixed, 20),
+            (pt(42, 0), PlacementStatus::Placed, 20),
+        ]);
+
+        legalize(&mut db).unwrap();
+
+        assert_eq!(db.cells[0].location, pt(40, 0));
+        assert!(placement_violations(&db).is_empty());
+    }
+
+    #[test]
+    fn more_cells_than_sites_is_an_error() {
+        let mut db = design(&[(pt(0, 0), PlacementStatus::Placed, 50); 5]);
+
+        assert!(matches!(
+            legalize(&mut db),
+            Err(LegalizeError::CellDoesNotFit(_))
+        ));
+    }
+
+    #[test]
+    fn cells_fill_the_row_from_the_right_edge_inward() {
+        let mut db = design(&[(pt(95, 0), PlacementStatus::Placed, 30); 3]);
+
+        legalize(&mut db).unwrap();
+
+        let mut xs: Vec<Dbu> = db
+            .cells
             .iter()
-            .enumerate()
-            .filter(|(i, _)| m.movable[*i])
-        {
-            assert!(
-                pos.x >= 0.0 && pos.x + 10.0 <= 100.0 + 1e-9,
-                "cell {i} at x={}",
-                pos.x
-            );
-        }
+            .filter(|c| c.location.y == Dbu(0))
+            .map(|c| c.location.x)
+            .collect();
+        xs.sort();
+        assert_eq!(xs, [Dbu(10), Dbu(40), Dbu(70)]);
     }
 }

@@ -646,12 +646,11 @@ dependencies = [
 name = "pare-placer"
 version = "0.1.0"
 dependencies = [
- "anyhow",
  "log",
  "pare-common",
  "rand 0.8.5",
- "rayon",
  "rustfft",
+ "thiserror",
 ]
 
 [[package]]
