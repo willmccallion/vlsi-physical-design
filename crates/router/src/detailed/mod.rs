@@ -19,7 +19,7 @@ use crate::tech::RouteTech;
 use crate::track::TrackWire;
 use crate::tree::{connection_order, gap, hilbert_order};
 pub use crate::wiring::NetRoute;
-use crate::wiring::{Edge, access_elems, elem_cuts, elem_metal, path_edges};
+use crate::wiring::{Edge, access_elems, elem_cuts, elem_metal, gap_fills, path_edges};
 use pare_common::db::design::NetlistDB;
 use pare_common::db::indices::{CutLayerId, LayerId, NetId, ViaId};
 use pare_common::db::library::{Direction, LayerRef};
@@ -328,8 +328,14 @@ impl<'a> DetailedRouter<'a> {
         Slack::after_rip_ups(self.rip_ups[net.index()])
     }
 
-    /// Replaces a net's recorded routing with `route`.
+    /// Replaces a net's recorded routing with `route`, its narrow gaps
+    /// along tracks filled.
     fn commit(&mut self, net: NetId, route: &NetRoute) {
+        let mut route = route.clone();
+        route.edges.extend(gap_fills(&route, self.db, self.tech));
+        route.edges.sort_unstable();
+        route.edges.dedup();
+        let route = &route;
         let previous = std::mem::take(&mut self.routed[net.index()]);
         self.occupancy.remove_wiring(&previous, Owner::Net(net.0));
         let owner = Owner::Net(net.0);

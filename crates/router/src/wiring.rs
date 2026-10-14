@@ -15,6 +15,7 @@ use pare_common::geom::point::Point;
 use pare_common::geom::rect::Rect;
 use pare_common::verify::shapes::wire_rect;
 use rustc_hash::FxHashMap;
+use std::collections::BTreeMap;
 
 /// One edge of the track graph.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
@@ -194,6 +195,91 @@ impl DisjointSets {
     }
 }
 
+/// Wire edges joining pieces of `route` that lie along one track closer
+/// than the layer spacing without touching, a gap the spacing between
+/// shapes of one net forbids.
+pub fn gap_fills(route: &NetRoute, db: &NetlistDB, tech: &RouteTech) -> Vec<Edge> {
+    let mut lines: BTreeMap<(LayerId, u32), TrackLine> = BTreeMap::new();
+    let nodes = route
+        .edges
+        .iter()
+        .flat_map(|e| <[Node; 2]>::from(e.ends()))
+        .chain(route.access.iter().map(|a| a.node));
+    for n in nodes {
+        lines
+            .entry((n.layer, n.track))
+            .or_default()
+            .crossings
+            .push(n.cross);
+    }
+    for (layer, rect) in route.metal(db, tech) {
+        if !tech.routable(layer) {
+            continue;
+        }
+        let lt = tech.layer(layer);
+        let ((a0, a1), (b0, b1)) = lt.across_along_rect(&rect);
+        let centre = a0.midpoint(a1);
+        let track = lt
+            .tracks_within(a0, a1)
+            .min_by_key(|&t| (lt.tracks[t as usize] - centre).abs());
+        if let Some(track) = track {
+            lines
+                .entry((layer, track))
+                .or_default()
+                .metal
+                .push((b0, b1));
+        }
+    }
+    let mut fills = Vec::new();
+    for ((layer, track), line) in lines {
+        let lt = tech.layer(layer);
+        let at = |c: u32| lt.cross[c as usize].at;
+        for (a, b) in line.narrow_gaps(lt.spacing) {
+            let from = line.crossings.iter().copied().filter(|&c| at(c) <= a).max();
+            let to = line.crossings.iter().copied().filter(|&c| at(c) >= b).min();
+            if let (Some(from), Some(to)) = (from, to) {
+                fills.extend((from..to).map(|cross| {
+                    Edge::Wire(Node {
+                        layer,
+                        track,
+                        cross,
+                    })
+                }));
+            }
+        }
+    }
+    fills
+}
+
+/// A net's metal along one track and the crossings it uses there.
+#[derive(Debug, Default)]
+struct TrackLine {
+    metal: Vec<(Dbu, Dbu)>,
+    crossings: Vec<u32>,
+}
+
+impl TrackLine {
+    /// The gaps between its pieces of metal that are wider than zero but
+    /// narrower than `spacing`, as the end of one piece and the start of
+    /// the next.
+    fn narrow_gaps(&self, spacing: Dbu) -> Vec<(Dbu, Dbu)> {
+        let mut spans = self.metal.clone();
+        spans.sort_unstable();
+        let mut merged: Vec<(Dbu, Dbu)> = Vec::new();
+        for (lo, hi) in spans {
+            match merged.last_mut() {
+                Some(last) if lo <= last.1 => last.1 = last.1.max(hi),
+                _ => merged.push((lo, hi)),
+            }
+        }
+        merged
+            .windows(2)
+            .filter(|w| w[1].0 - w[0].1 < spacing)
+            .map(|w| (w[0].1, w[1].0))
+            .collect()
+    }
+}
+
 /// The stub and via stack joining an access point's node to its pin.
 pub fn access_elems(tech: &RouteTech, a: &AccessPoint) -> Vec<RouteElem> {
     let node = tech.layer(a.node.layer).point(a.node.track, a.node.cross);
@@ -272,6 +358,21 @@ mod tests {
             })
         );
         assert_eq!(Edge::between(node(1, 4, 7), node(1, 5, 7)), None);
+    }
+
+    #[test]
+    fn only_gaps_narrower_than_the_spacing_are_reported() {
+        let line = TrackLine {
+            metal: vec![
+                (Dbu(0), Dbu(100)),
+                (Dbu(150), Dbu(300)),
+                (Dbu(280), Dbu(400)),
+                (Dbu(600), Dbu(700)),
+            ],
+            crossings: Vec::new(),
+        };
+
+        assert_eq!(line.narrow_gaps(Dbu(70)), [(Dbu(100), Dbu(150))]);
     }
 
     #[test]
