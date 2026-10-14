@@ -13,6 +13,7 @@ use pare_common::util::config::Config;
 use pare_common::util::{logger, ui, visualization};
 use pare_common::verify::placement::{PlacementViolation, placement_violations};
 use pare_common::verify::routing::check_routing;
+use pare_placer::detailed;
 use pare_placer::legalize::abacus;
 use pare_placer::model::PlacementModel;
 use pare_placer::physics::PhysicsContext;
@@ -260,6 +261,17 @@ fn run_placement(config: &Config, db: &mut NetlistDB, output_dir: &Path) -> anyh
         &format!("{:.0}", PlacementModel::from_db(db).hpwl()),
         "",
         "",
+    );
+    ui::phase_time(phase_start.elapsed().as_secs_f64());
+
+    let phase_start = Instant::now();
+    ui::phase("Detailed Placement");
+    let result = detailed::improve(db, 3);
+    ui::stat_row(
+        "Moves:",
+        &result.moves.to_string(),
+        "HPWL (um):",
+        &format!("{:.0}", PlacementModel::from_db(db).hpwl()),
     );
     ui::phase_time(phase_start.elapsed().as_secs_f64());
 

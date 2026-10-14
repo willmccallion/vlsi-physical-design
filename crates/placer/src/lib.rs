@@ -5,6 +5,7 @@
 //! gradient descent, Abacus legalization, and
 //! physics simulation for wirelength and density optimization.
 
+pub mod detailed;
 pub mod legalize;
 pub mod model;
 /// Physics-based placement optimization using wirelength and density forces.
