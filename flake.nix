@@ -31,7 +31,8 @@
         eda = pkgs.mkShell {
           packages = rustTools pkgs ++ [
             pkgs.python3
-            pkgs.openroad
+            # nixpkgs 26Q2 fails its own dbSta.report_cell_usage_file log test.
+            (pkgs.openroad.overrideAttrs { doCheck = false; })
           ];
         };
       });
