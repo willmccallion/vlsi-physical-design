@@ -14,7 +14,7 @@ use crate::access::{AccessPoint, Node, access_points};
 use crate::global::{GCell, GlobalGrid, GlobalRoutes, RouteTree};
 use crate::occupancy::{LocalOccupancy, Occupancy, Origin, Owner, Slot, TrackRef, too_close};
 pub use crate::search::Costs;
-use crate::search::{Guide, History, OwnVias, Search, Slack};
+use crate::search::{GUIDE_SLACK_GCELLS, Guide, History, OwnVias, Search};
 use crate::tech::RouteTech;
 use crate::track::TrackWire;
 use crate::tree::{connection_order, gap, hilbert_order};
@@ -48,7 +48,6 @@ pub struct DetailedRouter<'a> {
     grid_origin: Point<Dbu>,
     guides: Vec<Option<NetGuide>>,
     wires: Vec<Vec<TrackWire>>,
-    rip_ups: Vec<u8>,
 }
 
 impl<'a> DetailedRouter<'a> {
@@ -92,7 +91,6 @@ impl<'a> DetailedRouter<'a> {
             history: History::new(gcell / 4),
             access,
             routed: vec![Vec::new(); db.nets.len()],
-            rip_ups: vec![0; db.nets.len()],
             routes: vec![NetRoute::default(); db.nets.len()],
             vias: vec![Vec::new(); db.nets.len()],
             window_margin: gcell * 4,
@@ -315,19 +313,6 @@ impl<'a> DetailedRouter<'a> {
         rest.metal(self.db, self.tech)
     }
 
-    /// Removes a net's metal from the occupancy and loosens its guide.
-    pub fn rip_up(&mut self, net: NetId) {
-        let tracks = std::mem::take(&mut self.routed[net.index()]);
-        self.occupancy.remove_wiring(&tracks, Owner::Net(net.0));
-        self.routes[net.index()] = NetRoute::default();
-        self.vias[net.index()].clear();
-        self.rip_ups[net.index()] = self.rip_ups[net.index()].saturating_add(1);
-    }
-
-    fn slack(&self, net: NetId) -> Slack {
-        Slack::after_rip_ups(self.rip_ups[net.index()])
-    }
-
     /// Replaces a net's recorded routing with `route`, its narrow gaps
     /// along tracks filled.
     fn commit(&mut self, net: NetId, route: &NetRoute) {
@@ -529,41 +514,6 @@ impl<'a> DetailedRouter<'a> {
         })
     }
 
-    /// Nets whose metal sits where an access point of one of `nets` would
-    /// go; those spots also gain history so the nets move off them.
-    pub fn access_blockers(&mut self, nets: &[NetId], history_step: f64) -> Vec<NetId> {
-        let mut blockers = FxHashSet::default();
-        for &n in nets {
-            for candidates in &self.access[n.index()] {
-                for a in candidates {
-                    let metal = access_elems(self.tech, a)
-                        .iter()
-                        .flat_map(|e| elem_metal(self.db, e))
-                        .collect::<Vec<_>>();
-                    for (layer, rect) in &metal {
-                        if !self.tech.routable(*layer) {
-                            continue;
-                        }
-                        let hits: Vec<(TrackRef, Dbu, Owner)> = self
-                            .occupancy
-                            .rect_conflicts(self.tech, *layer, rect, Owner::Net(n.0))
-                            .map(|(t, o)| (t, o.lo, o.owner))
-                            .collect();
-                        for (t, lo, owner) in hits {
-                            if let Owner::Net(m) = owner {
-                                let _ = blockers.insert(NetId(m));
-                                self.history.bump(t, lo, history_step);
-                            }
-                        }
-                    }
-                }
-            }
-        }
-        let mut out: Vec<NetId> = blockers.into_iter().collect();
-        out.sort_unstable();
-        out
-    }
-
     /// Global routing terminals: the gcell of each pin's best access point.
     pub fn terminals(&self, net: NetId, grid: &GlobalGrid) -> Option<Vec<GCell>> {
         self.access[net.index()]
@@ -602,7 +552,7 @@ impl<'a> DetailedRouter<'a> {
     /// box plus a margin.
     fn window(&self, net: NetId) -> Rect<Dbu> {
         if let Some(guide) = &self.guides[net.index()] {
-            return guide.bbox.expand(self.gcell * self.slack(net).gcells);
+            return guide.bbox.expand(self.gcell * GUIDE_SLACK_GCELLS);
         }
         let pins = &self.db.nets[net.index()].pins;
         pins.iter()
@@ -644,16 +594,8 @@ impl<'a> DetailedRouter<'a> {
         terms: &Terminals<'_>,
     ) -> Option<NetRoute> {
         let net_guide = self.guides[net.index()].as_ref();
-        let slack = self.slack(net);
-        let guide = net_guide.map(|g| {
-            Guide::new(
-                g.tree.cells(),
-                self.grid_origin,
-                self.gcell,
-                self.tech,
-                slack,
-            )
-        });
+        let guide =
+            net_guide.map(|g| Guide::new(g.tree.cells(), self.grid_origin, self.gcell, self.tech));
         let mut search = Search {
             db: self.db,
             tech: self.tech,

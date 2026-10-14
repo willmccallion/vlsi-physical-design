@@ -88,38 +88,15 @@ impl History {
     }
 }
 
-/// How far a net's detailed route may stray from its global route. It grows
-/// each time the net is ripped up, so a corridor that other nets fill
-/// cannot trap it.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(crate) struct Slack {
-    /// Gcells around each guide cell, in the plane.
-    pub(crate) gcells: i64,
-    /// Layers above and below each guide cell.
-    pub(crate) layers: usize,
-}
+/// Gcells around each global route cell a net's detailed route may use.
+pub(crate) const GUIDE_SLACK_GCELLS: i64 = 1;
 
-impl Slack {
-    pub(crate) const fn after_rip_ups(count: u8) -> Self {
-        match count {
-            0 | 1 => Self {
-                gcells: 1,
-                layers: 1,
-            },
-            2 | 3 => Self {
-                gcells: 2,
-                layers: 2,
-            },
-            _ => Self {
-                gcells: 4,
-                layers: usize::MAX,
-            },
-        }
-    }
-}
+/// Layers above and below each global route cell a net's detailed route
+/// may use.
+const GUIDE_SLACK_LAYERS: usize = 1;
 
-/// The gcells a net's detailed route may use: its global route grown by a
-/// [`Slack`].
+/// The gcells a net's detailed route may use: its global route grown by
+/// [`GUIDE_SLACK_GCELLS`] and [`GUIDE_SLACK_LAYERS`].
 #[derive(Debug)]
 pub(crate) struct Guide {
     origin: Point<Dbu>,
@@ -135,14 +112,8 @@ pub(crate) struct Guide {
 }
 
 impl Guide {
-    pub(crate) fn new(
-        cells: &[GCell],
-        origin: Point<Dbu>,
-        gcell: Dbu,
-        tech: &RouteTech,
-        slack: Slack,
-    ) -> Self {
-        let reach = slack.gcells;
+    pub(crate) fn new(cells: &[GCell], origin: Point<Dbu>, gcell: Dbu, tech: &RouteTech) -> Self {
+        let reach = GUIDE_SLACK_GCELLS;
         let x0 = cells.iter().map(|c| i64::from(c.x)).min().unwrap_or(0) - reach;
         let y0 = cells.iter().map(|c| i64::from(c.y)).min().unwrap_or(0) - reach;
         let x1 = cells.iter().map(|c| i64::from(c.x)).max().unwrap_or(0) + reach;
@@ -165,8 +136,8 @@ impl Guide {
         };
         for c in cells {
             let l = c.layer.index() - min_layer;
-            for dl in
-                l.saturating_sub(slack.layers)..=l.saturating_add(slack.layers).min(layers - 1)
+            for dl in l.saturating_sub(GUIDE_SLACK_LAYERS)
+                ..=l.saturating_add(GUIDE_SLACK_LAYERS).min(layers - 1)
             {
                 for dy in -reach..=reach {
                     for dx in -reach..=reach {
