@@ -12,27 +12,18 @@ pub use crate::search::Costs;
 use crate::search::{Guide, History, Search, Slack};
 use crate::tech::RouteTech;
 use crate::tree::{connection_order, hilbert_order};
-use pare_common::db::design::{NetlistDB, RouteElem};
+pub use crate::wiring::NetRoute;
+use crate::wiring::{Edge, access_elems, elem_metal, path_edges};
+use pare_common::db::design::NetlistDB;
 use pare_common::db::indices::{LayerId, NetId, ViaId};
 use pare_common::db::library::LayerRef;
 use pare_common::geom::dbu::Dbu;
 use pare_common::geom::point::Point;
 use pare_common::geom::rect::Rect;
-use pare_common::verify::shapes::{self, fixed_shapes, is_signal_net, wire_rect};
+use pare_common::verify::shapes::{self, fixed_shapes, is_signal_net};
 use rayon::prelude::*;
 use rustc_hash::{FxHashMap, FxHashSet};
 use std::collections::{BTreeMap, VecDeque};
-
-/// The result of routing one net.
-#[derive(Clone, Debug, Default)]
-pub struct NetRoute {
-    /// Wiring to store in the design.
-    pub elems: Vec<RouteElem>,
-    /// Metal to record in the occupancy, by layer.
-    pub metal: Vec<(LayerId, Rect<Dbu>)>,
-    /// Whether every pin was connected.
-    pub complete: bool,
-}
 
 /// State shared by all detailed routing rounds.
 #[derive(Debug)]
@@ -44,6 +35,7 @@ pub struct DetailedRouter<'a> {
     history: History,
     access: Vec<Vec<Vec<AccessPoint>>>,
     routed: Vec<Vec<TrackRef>>,
+    routes: Vec<NetRoute>,
     vias: Vec<Vec<(ViaId, Point<Dbu>)>>,
     window_margin: Dbu,
     gcell: Dbu,
@@ -92,6 +84,7 @@ impl<'a> DetailedRouter<'a> {
             access,
             routed: vec![Vec::new(); db.nets.len()],
             rip_ups: vec![0; db.nets.len()],
+            routes: vec![NetRoute::default(); db.nets.len()],
             vias: vec![Vec::new(); db.nets.len()],
             window_margin: gcell * 4,
             gcell,
@@ -176,7 +169,7 @@ impl<'a> DetailedRouter<'a> {
 
     /// Whether `route` of `net` conflicts with the wiring of any net in `nets`.
     fn touches_any(&self, net: NetId, route: &NetRoute, nets: &FxHashSet<u32>) -> bool {
-        route.metal.iter().any(|(layer, rect)| {
+        route.metal(self.db, self.tech).iter().any(|(layer, rect)| {
             self.tech.routable(*layer)
                 && self
                     .occupancy
@@ -237,9 +230,9 @@ impl<'a> DetailedRouter<'a> {
         let mut out = Vec::with_capacity(nets.len());
         for &n in nets {
             let route = self.route_net(n, costs, Some(&overlay));
-            for (layer, rect) in &route.metal {
-                if self.tech.routable(*layer) {
-                    overlay.add_rect(self.tech, *layer, rect, Owner::Net(n.0));
+            for (layer, rect) in route.metal(self.db, self.tech) {
+                if self.tech.routable(layer) {
+                    overlay.add_rect(self.tech, layer, &rect, Owner::Net(n.0));
                 }
             }
             out.push((n, route));
@@ -251,6 +244,8 @@ impl<'a> DetailedRouter<'a> {
     pub fn rip_up(&mut self, net: NetId) {
         let tracks = std::mem::take(&mut self.routed[net.index()]);
         self.occupancy.remove_wiring(&tracks, Owner::Net(net.0));
+        self.routes[net.index()] = NetRoute::default();
+        self.vias[net.index()].clear();
         self.rip_ups[net.index()] = self.rip_ups[net.index()].saturating_add(1);
     }
 
@@ -260,12 +255,12 @@ impl<'a> DetailedRouter<'a> {
 
     fn commit(&mut self, net: NetId, route: &NetRoute) {
         let mut touched = Vec::new();
-        for (layer, rect) in &route.metal {
-            if self.tech.routable(*layer) {
+        for (layer, rect) in route.metal(self.db, self.tech) {
+            if self.tech.routable(layer) {
                 touched.extend(self.occupancy.add_rect(
                     self.tech,
-                    *layer,
-                    rect,
+                    layer,
+                    &rect,
                     Owner::Net(net.0),
                     Origin::Wiring,
                 ));
@@ -274,14 +269,8 @@ impl<'a> DetailedRouter<'a> {
         touched.sort_unstable();
         touched.dedup();
         self.routed[net.index()] = touched;
-        self.vias[net.index()] = route
-            .elems
-            .iter()
-            .filter_map(|e| match *e {
-                RouteElem::Via { via, at } => Some((via, at)),
-                RouteElem::Wire { .. } => None,
-            })
-            .collect();
+        self.vias[net.index()] = route.vias(self.tech);
+        self.routes[net.index()] = route.clone();
     }
 
     /// Records every current conflict in the history and returns the nets
@@ -357,9 +346,11 @@ impl<'a> DetailedRouter<'a> {
         for &n in nets {
             for candidates in &self.access[n.index()] {
                 for a in candidates {
-                    let mut metal = NetRoute::default();
-                    emit_access(self.db, self.tech, a, &mut metal);
-                    for (layer, rect) in &metal.metal {
+                    let metal = access_elems(self.tech, a)
+                        .iter()
+                        .flat_map(|e| elem_metal(self.db, e))
+                        .collect::<Vec<_>>();
+                    for (layer, rect) in &metal {
                         if !self.tech.routable(*layer) {
                             continue;
                         }
@@ -492,17 +483,18 @@ impl<'a> DetailedRouter<'a> {
         } else {
             self.grow(search, pins, &all, window, guide)?
         };
-        let mut route = NetRoute {
+        let mut edges: Vec<Edge> = tree.paths.iter().flat_map(|p| path_edges(p)).collect();
+        edges.sort_unstable();
+        edges.dedup();
+        Some(NetRoute {
+            edges,
+            access: tree
+                .used
+                .iter()
+                .map(|&(pin, choice)| pins[pin][choice].clone())
+                .collect(),
             complete: true,
-            ..NetRoute::default()
-        };
-        for path in &tree.paths {
-            emit_path(self.db, self.tech, path, &mut route);
-        }
-        for &(pin, choice) in &tree.used {
-            emit_access(self.db, self.tech, &pins[pin][choice], &mut route);
-        }
-        Some(route)
+        })
     }
 
     /// Joins the `members` pins one at a time, each to the nearest member
@@ -933,9 +925,10 @@ fn reserve_accesses(
     for (count, n, k) in order {
         let owner = Owner::Net(crate::tech::to_u32(n));
         let metal_of = |a: &AccessPoint| {
-            let mut route = NetRoute::default();
-            emit_access(db, tech, a, &mut route);
-            route.metal
+            access_elems(tech, a)
+                .iter()
+                .flat_map(|e| elem_metal(db, e))
+                .collect::<Vec<_>>()
         };
         let clear = access[n][k].iter().position(|a| {
             metal_of(a).iter().all(|(layer, rect)| {
@@ -958,74 +951,6 @@ fn reserve_accesses(
         }
         let picked = access[n][k].swap_remove(chosen);
         access[n][k] = vec![picked];
-    }
-}
-
-/// Adds the wires and vias of a node path to `route`.
-fn emit_path(db: &NetlistDB, tech: &RouteTech, path: &[Node], route: &mut NetRoute) {
-    let point = |n: Node| tech.layer(n.layer).point(n.track, n.cross);
-    let mut start = 0;
-    for i in 1..=path.len() {
-        let breaks = i == path.len()
-            || path[i].layer != path[start].layer
-            || path[i].track != path[start].track;
-        if !breaks {
-            continue;
-        }
-        let run = &path[start..i];
-        let b = path[i - 1];
-        if let Some((first, last)) = span_of_run(run)
-            && first != last
-        {
-            add_wire(db, b.layer, point(first), point(last), route);
-        }
-        if i < path.len() {
-            let lower = path[i].layer.min(b.layer);
-            add_via(db, tech.via_above(lower).via, point(b), route);
-        }
-        start = i;
-    }
-}
-
-/// The nodes at either end of a run along one track. A run may double back
-/// where two searches meet, so its ends are not always its first and last
-/// nodes.
-fn span_of_run(run: &[Node]) -> Option<(Node, Node)> {
-    let lowest = run.iter().min_by_key(|n| n.cross)?;
-    let highest = run.iter().max_by_key(|n| n.cross)?;
-    Some((*lowest, *highest))
-}
-
-/// Adds a pin's access stub and via stack to `route`.
-fn emit_access(db: &NetlistDB, tech: &RouteTech, a: &AccessPoint, route: &mut NetRoute) {
-    let node = tech.layer(a.node.layer).point(a.node.track, a.node.cross);
-    if node != a.at {
-        add_wire(db, a.node.layer, node, a.at, route);
-    }
-    for &via in &a.vias {
-        add_via(db, via, a.at, route);
-    }
-}
-
-fn add_wire(
-    db: &NetlistDB,
-    layer: LayerId,
-    from: Point<Dbu>,
-    to: Point<Dbu>,
-    route: &mut NetRoute,
-) {
-    route.elems.push(RouteElem::Wire { layer, from, to });
-    if let Some(r) = wire_rect(from, to, db.library.layer(layer).width) {
-        route.metal.push((layer, r));
-    }
-}
-
-fn add_via(db: &NetlistDB, via: ViaId, at: Point<Dbu>, route: &mut NetRoute) {
-    route.elems.push(RouteElem::Via { via, at });
-    for s in &db.library.via(via).shapes {
-        if let LayerRef::Routing(l) = s.layer {
-            route.metal.push((l, s.rect.translate(at)));
-        }
     }
 }
 
@@ -1071,18 +996,6 @@ mod tests {
         let stops = waypoints(&cells, 4);
 
         assert_eq!(stops, [5, 9]);
-    }
-
-    #[test]
-    fn a_run_that_doubles_back_spans_its_farthest_crossings() {
-        let node = |cross| Node {
-            layer: LayerId::new(2),
-            track: 7,
-            cross,
-        };
-        let run = [node(5), node(9), node(6), node(3)];
-
-        assert_eq!(span_of_run(&run), Some((node(3), node(9))));
     }
 
     #[test]

@@ -12,6 +12,7 @@ pub mod occupancy;
 mod search;
 pub mod tech;
 pub mod tree;
+pub mod wiring;
 
 use detailed::{Costs, DetailedRouter, NetRoute, routable_nets};
 use global::{GlobalGrid, GlobalNet, route_global};
@@ -164,7 +165,7 @@ pub fn route(db: &mut NetlistDB, config: &RoutingConfig) -> Result<RoutingSummar
         net.routing.clear();
     }
     for (n, r) in routes {
-        db.nets[n.index()].routing = r.elems;
+        db.nets[n.index()].routing = r.elems(&tech);
     }
     Ok(summary)
 }
