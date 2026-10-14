@@ -172,6 +172,17 @@ impl GlobalGrid {
         l * per_layer + usize::from(c.y) * usize::from(self.nx) + usize::from(c.x)
     }
 
+    /// The gcell an index from [`Self::edge`] names.
+    fn cell_of(&self, index: usize) -> GCell {
+        let per_layer = usize::from(self.nx) * usize::from(self.ny);
+        let rest = index % per_layer;
+        GCell {
+            layer: LayerId::new(self.min_layer.index() + index / per_layer),
+            x: u16::try_from(rest % usize::from(self.nx)).unwrap_or(u16::MAX),
+            y: u16::try_from(rest / usize::from(self.nx)).unwrap_or(u16::MAX),
+        }
+    }
+
     fn direction(&self, layer: LayerId) -> Direction {
         self.directions[layer.index() - self.min_layer.index()]
     }
@@ -375,7 +386,14 @@ pub fn route_global(grid: &mut GlobalGrid, nets: &[GlobalNet], rounds: usize) ->
         }
         ripped.sort_by_key(|&i| (span(&nets[i].terminals), i));
         costs.penalty *= PENALTY_GROWTH;
+        let start = std::time::Instant::now();
         route_disjoint(grid, nets, &ripped, &margins, costs, &mut routes);
+        log::debug!(
+            "global round: {} nets ripped, overflow {}, {:.1}s",
+            ripped.len(),
+            grid.overflow(),
+            start.elapsed().as_secs_f64()
+        );
         if grid.overflow() < best.overflow {
             best = Snapshot::of(grid, &routes);
             stalled = 0;
@@ -416,8 +434,9 @@ fn span(cells: &[GCell]) -> u32 {
     u32::from(x1 - x0) + u32::from(y1 - y0)
 }
 
-/// Reroutes nets in parallel batches whose search areas share no gcell, so
-/// every net sees the usage of every other net that could compete with it.
+/// Reroutes nets in parallel batches whose search areas share no block of
+/// [`BATCH_BLOCK`] gcells, so every net sees the usage of every other net
+/// that could compete with it.
 fn route_disjoint(
     grid: &mut GlobalGrid,
     nets: &[GlobalNet],
@@ -426,28 +445,33 @@ fn route_disjoint(
     costs: GlobalCosts,
     routes: &mut GlobalRoutes,
 ) {
-    let (nx, ny) = (usize::from(grid.nx), usize::from(grid.ny));
-    let mut pending = which.to_vec();
-    let mut stamp = vec![0u32; nx * ny];
+    let blocks_x = usize::from(grid.nx.div_ceil(BATCH_BLOCK));
+    let blocks_y = usize::from(grid.ny.div_ceil(BATCH_BLOCK));
+    let areas: Vec<(usize, usize, usize, usize)> = which
+        .iter()
+        .map(|&i| {
+            let w = window(&nets[i].terminals, margins[i], grid.nx, grid.ny);
+            let block = |v: u16| usize::from(v / BATCH_BLOCK);
+            (block(w.0), block(w.1), block(w.2), block(w.3))
+        })
+        .collect();
+    let mut pending: Vec<usize> = (0..which.len()).collect();
+    let mut stamp = vec![0u32; blocks_x * blocks_y];
     let mut round = 0u32;
     while !pending.is_empty() {
         round += 1;
         let mut batch = Vec::new();
         let mut rest = Vec::new();
-        for i in pending {
-            let w = window(&nets[i].terminals, margins[i], grid.nx, grid.ny);
-            let cells = || {
-                (usize::from(w.2)..=usize::from(w.3)).flat_map(move |y| {
-                    (usize::from(w.0)..=usize::from(w.1)).map(move |x| y * nx + x)
-                })
-            };
-            if cells().all(|c| stamp[c] != round) {
-                for c in cells() {
-                    stamp[c] = round;
+        for k in pending {
+            let (x0, x1, y0, y1) = areas[k];
+            let free = (y0..=y1).all(|y| (x0..=x1).all(|x| stamp[y * blocks_x + x] != round));
+            if free {
+                for y in y0..=y1 {
+                    stamp[y * blocks_x + x0..=y * blocks_x + x1].fill(round);
                 }
-                batch.push(i);
+                batch.push(which[k]);
             } else {
-                rest.push(i);
+                rest.push(k);
             }
         }
         let shared: &GlobalGrid = grid;
@@ -461,7 +485,12 @@ fn route_disjoint(
         }
         pending = rest;
     }
+    log::debug!("global reroute of {} nets in {round} batches", which.len());
 }
+
+/// Edge, in gcells, of the blocks that keep the search areas of nets
+/// rerouted together apart.
+const BATCH_BLOCK: u16 = 4;
 
 /// Routes the given nets in parallel chunks, each against the usage left by
 /// the chunks before it. Nets in one chunk do not see each other; the
@@ -619,8 +648,62 @@ impl PartialOrd for Entry {
     }
 }
 
+/// A* state over every gcell of a grid, kept per thread between searches
+/// and cleared by bumping a generation stamp.
+#[derive(Debug, Default)]
+struct SearchState {
+    cost: Vec<f64>,
+    parent: Vec<u32>,
+    stamp: Vec<u32>,
+    generation: u32,
+}
+
+/// Marks a node without a parent.
+const NO_PARENT: u32 = u32::MAX;
+
+impl SearchState {
+    /// Forgets every node, sized for `nodes` nodes.
+    fn reset(&mut self, nodes: usize) {
+        if self.stamp.len() < nodes {
+            self.cost.resize(nodes, 0.0);
+            self.parent.resize(nodes, NO_PARENT);
+            self.stamp.resize(nodes, 0);
+        }
+        self.generation = self.generation.wrapping_add(1);
+        if self.generation == 0 {
+            self.stamp.fill(0);
+            self.generation = 1;
+        }
+    }
+
+    fn cost(&self, node: usize) -> Option<f64> {
+        (self.stamp[node] == self.generation).then(|| self.cost[node])
+    }
+
+    fn set(&mut self, node: usize, cost: f64, parent: u32) {
+        self.stamp[node] = self.generation;
+        self.cost[node] = cost;
+        self.parent[node] = parent;
+    }
+}
+
+thread_local! {
+    static SEARCH: std::cell::RefCell<SearchState> = std::cell::RefCell::new(SearchState::default());
+}
+
 /// Cheapest path from any source to `target` inside the window.
 fn search(
+    grid: &GlobalGrid,
+    sources: &[GCell],
+    target: GCell,
+    win: (u16, u16, u16, u16),
+    costs: GlobalCosts,
+) -> Option<Vec<GCell>> {
+    SEARCH.with_borrow_mut(|state| search_with(state, grid, sources, target, win, costs))
+}
+
+fn search_with(
+    state: &mut SearchState,
     grid: &GlobalGrid,
     sources: &[GCell],
     target: GCell,
@@ -632,10 +715,10 @@ fn search(
         let plane = f64::from(c.x.abs_diff(target.x) + c.y.abs_diff(target.y));
         costs.via.mul_add(layers, plane)
     };
-    let mut best: FxHashMap<GCell, (f64, Option<GCell>)> = FxHashMap::default();
+    state.reset(grid.usage.len());
     let mut heap = BinaryHeap::new();
     for &c in sources {
-        let _ = best.insert(c, (0.0, None));
+        state.set(grid.edge(c), 0.0, NO_PARENT);
         heap.push(Entry {
             f: h(c),
             g: 0.0,
@@ -643,23 +726,25 @@ fn search(
         });
     }
     while let Some(Entry { g, cell, .. }) = heap.pop() {
-        if best.get(&cell).is_some_and(|&(b, _)| g > b) {
+        let here = grid.edge(cell);
+        if state.cost(here).is_some_and(|b| g > b) {
             continue;
         }
         if cell == target {
             let mut path = vec![cell];
-            let mut cur = cell;
-            while let Some(&(_, Some(prev))) = best.get(&cur) {
-                path.push(prev);
-                cur = prev;
+            let mut node = state.parent[here];
+            while node != NO_PARENT {
+                path.push(grid.cell_of(node as usize));
+                node = state.parent[node as usize];
             }
             path.reverse();
             return Some(path);
         }
         let mut push = |next: GCell, step: f64| {
             let ng = g + step;
-            if best.get(&next).is_none_or(|&(b, _)| ng < b) {
-                let _ = best.insert(next, (ng, Some(cell)));
+            let index = grid.edge(next);
+            if state.cost(index).is_none_or(|b| ng < b) {
+                state.set(index, ng, crate::tech::to_u32(here));
                 heap.push(Entry {
                     f: ng + h(next),
                     g: ng,
