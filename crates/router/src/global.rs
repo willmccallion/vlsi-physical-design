@@ -2,10 +2,14 @@
 //!
 //! Each routable layer gets a capacity on every gcell edge in its preferred
 //! direction: the number of its tracks crossing that edge that no obstacle
-//! blocks. Nets are routed as trees of A* paths through the 3D grid with a
-//! cost that grows with overflow and with each edge's overflow history; nets
-//! crossing overflowed edges are ripped up and rerouted. The cells each net
-//! passes through become its guide for detailed routing.
+//! blocks. Nets are routed as trees of A* paths through the 3D grid. An
+//! edge costs its length, a logistic congestion term that rises as its
+//! usage nears capacity, its accumulated overflow history, and a penalty per
+//! unit of overflow that grows every round, in the manner of `PathFinder`.
+//! Nets crossing overflowed edges are ripped up and rerouted, each time
+//! with a search area grown around their pins so they can detour further
+//! around congestion. The cells each net passes through become its guide
+//! for detailed routing.
 
 use crate::occupancy::{Occupancy, Owner, TrackRef};
 use crate::tech::RouteTech;
@@ -210,9 +214,12 @@ impl GlobalGrid {
             .sum()
     }
 
-    fn edge_cost(&self, e: usize, penalty: f64) -> f64 {
-        let over = (f64::from(self.usage[e]) + 1.0 - f64::from(self.capacity[e])).max(0.0);
-        penalty.mul_add(over, 1.0 + f64::from(self.history[e]))
+    /// Cost of one more net on edge `e`.
+    fn edge_cost(&self, e: usize, costs: GlobalCosts) -> f64 {
+        let excess = f64::from(self.usage[e]) + 1.0 - f64::from(self.capacity[e]);
+        let congestion = costs.congestion / (1.0 + (-CONGESTION_SLOPE * excess).exp());
+        let overflow = costs.penalty * excess.max(0.0);
+        1.0 + f64::from(self.history[e]) + congestion + overflow
     }
 }
 
@@ -221,12 +228,30 @@ impl GlobalGrid {
 pub struct GlobalCosts {
     /// Cost of changing layer.
     pub via: f64,
+    /// Cost of an edge used to capacity, approached smoothly from below.
+    pub congestion: f64,
     /// Cost per unit of overflow an edge would reach.
     pub penalty: f64,
 }
 
+/// Steepness, per track, of the logistic congestion cost around capacity.
+const CONGESTION_SLOPE: f64 = 1.0;
+
+/// Search margin, in gcells, around a net's first route's connections.
+const FIRST_MARGIN: u16 = 2;
+
+/// Gcells the search margin grows by each time a net is ripped up.
+const MARGIN_STEP: u16 = 2;
+
+/// Largest search margin, in gcells; wider margins leave too few nets with
+/// disjoint search areas to reroute in parallel.
+const MAX_MARGIN: u16 = 12;
+
+/// Growth of the overflow penalty per round.
+const PENALTY_GROWTH: f64 = 1.5;
+
 /// Global routes of all nets.
-#[derive(Debug, Default)]
+#[derive(Clone, Debug, Default)]
 pub struct GlobalRoutes {
     /// The paths of each net's tree; each path starts on the tree built so far.
     pub paths: FxHashMap<NetId, Vec<Vec<GCell>>>,
@@ -309,25 +334,32 @@ pub struct GlobalNet {
     pub terminals: Vec<GCell>,
 }
 
-/// Routes `nets` and negotiates overflow for `rounds` rounds.
+/// Routes `nets` and negotiates overflow for at most `rounds` rounds.
+///
+/// Negotiation stops early once [`STALL_ROUNDS`] pass without a new lowest
+/// overflow. Returns the routes of the round with the lowest overflow, and
+/// leaves the grid's usage at theirs.
 pub fn route_global(grid: &mut GlobalGrid, nets: &[GlobalNet], rounds: usize) -> GlobalRoutes {
     let mut costs = GlobalCosts {
         via: 1.0,
+        congestion: 1.0,
         penalty: 1.0,
     };
     let mut routes = GlobalRoutes::default();
+    let mut margins = vec![FIRST_MARGIN; nets.len()];
     let all: Vec<usize> = (0..nets.len()).collect();
     route_batched(grid, nets, &all, costs, &mut routes);
+    let mut best = Snapshot::of(grid, &routes);
+    let mut stalled = 0;
     for _ in 0..rounds {
-        if grid.overflow() == 0 {
+        if best.overflow == 0 || stalled >= STALL_ROUNDS {
             break;
         }
         for e in 0..grid.usage.len() {
-            if grid.overflowed(e) {
-                grid.history[e] += 1.0;
-            }
+            let over = grid.usage[e].saturating_sub(grid.capacity[e]);
+            grid.history[e] += f32::from(over);
         }
-        let ripped: Vec<usize> = (0..nets.len())
+        let mut ripped: Vec<usize> = (0..nets.len())
             .filter(|&i| {
                 routes.paths.get(&nets[i].net).is_some_and(|tree| {
                     tree.iter()
@@ -339,19 +371,58 @@ pub fn route_global(grid: &mut GlobalGrid, nets: &[GlobalNet], rounds: usize) ->
             if let Some(tree) = routes.paths.remove(&nets[i].net) {
                 grid.add_tree(&tree, -1);
             }
+            margins[i] = margins[i].saturating_add(MARGIN_STEP).min(MAX_MARGIN);
         }
-        costs.penalty *= 1.5;
-        route_disjoint(grid, nets, &ripped, costs, &mut routes);
+        ripped.sort_by_key(|&i| (span(&nets[i].terminals), i));
+        costs.penalty *= PENALTY_GROWTH;
+        route_disjoint(grid, nets, &ripped, &margins, costs, &mut routes);
+        if grid.overflow() < best.overflow {
+            best = Snapshot::of(grid, &routes);
+            stalled = 0;
+        } else {
+            stalled += 1;
+        }
+    }
+    if grid.overflow() > best.overflow {
+        grid.usage = best.usage;
+        routes = best.routes;
     }
     routes
 }
 
-/// Reroutes nets in parallel batches whose windows share no gcell, so every
-/// net sees the usage of every other net that could compete with it.
+/// Rounds without a new lowest overflow after which negotiation stops.
+const STALL_ROUNDS: usize = 8;
+
+/// The routes and edge usage of one round.
+struct Snapshot {
+    overflow: u64,
+    usage: Vec<u16>,
+    routes: GlobalRoutes,
+}
+
+impl Snapshot {
+    fn of(grid: &GlobalGrid, routes: &GlobalRoutes) -> Self {
+        Self {
+            overflow: grid.overflow(),
+            usage: grid.usage.clone(),
+            routes: routes.clone(),
+        }
+    }
+}
+
+/// Half-perimeter of a net's terminals' bounding box, in gcells.
+fn span(cells: &[GCell]) -> u32 {
+    let (x0, x1, y0, y1) = window(cells, 0, u16::MAX, u16::MAX);
+    u32::from(x1 - x0) + u32::from(y1 - y0)
+}
+
+/// Reroutes nets in parallel batches whose search areas share no gcell, so
+/// every net sees the usage of every other net that could compete with it.
 fn route_disjoint(
     grid: &mut GlobalGrid,
     nets: &[GlobalNet],
     which: &[usize],
+    margins: &[u16],
     costs: GlobalCosts,
     routes: &mut GlobalRoutes,
 ) {
@@ -364,7 +435,7 @@ fn route_disjoint(
         let mut batch = Vec::new();
         let mut rest = Vec::new();
         for i in pending {
-            let w = window(&nets[i].terminals, 3, grid.nx, grid.ny);
+            let w = window(&nets[i].terminals, margins[i], grid.nx, grid.ny);
             let cells = || {
                 (usize::from(w.2)..=usize::from(w.3)).flat_map(move |y| {
                     (usize::from(w.0)..=usize::from(w.1)).map(move |x| y * nx + x)
@@ -382,7 +453,7 @@ fn route_disjoint(
         let shared: &GlobalGrid = grid;
         let found: Vec<(usize, Vec<Vec<GCell>>)> = batch
             .par_iter()
-            .map(|&i| (i, route_tree(shared, &nets[i].terminals, costs)))
+            .map(|&i| (i, route_tree(shared, &nets[i].terminals, margins[i], costs)))
             .collect();
         for (i, tree) in found {
             grid.add_tree(&tree, 1);
@@ -407,7 +478,12 @@ fn route_batched(
         let shared: &GlobalGrid = grid;
         let found: Vec<(usize, Vec<Vec<GCell>>)> = chunk
             .par_iter()
-            .map(|&i| (i, route_tree(shared, &nets[i].terminals, costs)))
+            .map(|&i| {
+                (
+                    i,
+                    route_tree(shared, &nets[i].terminals, FIRST_MARGIN, costs),
+                )
+            })
             .collect();
         for (i, tree) in found {
             grid.add_tree(&tree, 1);
@@ -434,8 +510,15 @@ fn window(cells: &[GCell], margin: u16, nx: u16, ny: u16) -> (u16, u16, u16, u16
 /// Edge, in gcells, of the buckets used to find tree cells near a connection.
 const BUCKET: u16 = 4;
 
-/// A tree through every terminal, as the paths that build it.
-fn route_tree(grid: &GlobalGrid, terminals: &[GCell], costs: GlobalCosts) -> Vec<Vec<GCell>> {
+/// A tree through every terminal, as the paths that build it. Each
+/// connection searches the box around its two ends grown by `margin`, and
+/// a larger box only when that holds no path.
+fn route_tree(
+    grid: &GlobalGrid,
+    terminals: &[GCell],
+    margin: u16,
+    costs: GlobalCosts,
+) -> Vec<Vec<GCell>> {
     let mut terminals: Vec<GCell> = terminals.to_vec();
     terminals.sort_unstable();
     terminals.dedup();
@@ -459,7 +542,7 @@ fn route_tree(grid: &GlobalGrid, terminals: &[GCell], costs: GlobalCosts) -> Vec
         if tree.contains(&target) {
             continue;
         }
-        let mut margin = 2;
+        let mut margin = margin;
         let path = loop {
             let w = window(&[target, terminals[join.parent]], margin, grid.nx, grid.ny);
             let sources = cells_in(&buckets, w);
@@ -471,7 +554,7 @@ fn route_tree(grid: &GlobalGrid, terminals: &[GCell], costs: GlobalCosts) -> Vec
             if w == full {
                 break vec![target];
             }
-            margin = margin.saturating_mul(4);
+            margin = margin.saturating_mul(4).max(1);
         };
         for &c in &path {
             add_cell(&mut tree, &mut buckets, c);
@@ -586,24 +669,24 @@ fn search(
             Direction::Horizontal => {
                 if x > win.0 {
                     let next = GCell { x: x - 1, ..cell };
-                    push(next, grid.edge_cost(grid.edge(next), costs.penalty));
+                    push(next, grid.edge_cost(grid.edge(next), costs));
                 }
                 if x < win.1 {
                     push(
                         GCell { x: x + 1, ..cell },
-                        grid.edge_cost(grid.edge(cell), costs.penalty),
+                        grid.edge_cost(grid.edge(cell), costs),
                     );
                 }
             }
             Direction::Vertical => {
                 if y > win.2 {
                     let next = GCell { y: y - 1, ..cell };
-                    push(next, grid.edge_cost(grid.edge(next), costs.penalty));
+                    push(next, grid.edge_cost(grid.edge(next), costs));
                 }
                 if y < win.3 {
                     push(
                         GCell { y: y + 1, ..cell },
-                        grid.edge_cost(grid.edge(cell), costs.penalty),
+                        grid.edge_cost(grid.edge(cell), costs),
                     );
                 }
             }
