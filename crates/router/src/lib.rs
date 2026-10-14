@@ -19,7 +19,7 @@ use global::{GlobalGrid, GlobalNet, route_global};
 use pare_common::db::design::{NetlistDB, PlacementStatus, RouteElem};
 use pare_common::db::indices::NetId;
 use pare_common::db::library::Shape;
-use pare_common::util::config::RoutingConfig;
+use pare_common::util::config::{LayerRangeError, RoutingConfig};
 use pare_common::util::ui;
 use std::time::Instant;
 use tech::RouteTech;
@@ -245,12 +245,9 @@ pub enum RouteError {
     /// The global capacity reserve is outside `[0, 1)`.
     #[error("global_capacity_reserve must be in [0, 1), got {0}")]
     CapacityReserve(f64),
-    /// A configured layer name is not a routing layer.
-    #[error("unknown routing layer '{0}'")]
-    UnknownLayer(String),
-    /// The minimum routing layer is above the maximum.
-    #[error("the minimum routing layer is above the maximum")]
-    EmptyLayerRange,
+    /// The configured routing layers are unusable.
+    #[error(transparent)]
+    Layers(#[from] LayerRangeError),
     /// A routable layer has no tracks and no pitch to derive them from.
     #[error("routing layer '{0}' has no tracks")]
     NoTracks(String),

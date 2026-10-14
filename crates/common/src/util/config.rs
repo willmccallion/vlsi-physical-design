@@ -1,6 +1,9 @@
 //! TOML run configuration.
 
+use crate::db::indices::LayerId;
+use crate::db::library::Library;
 use serde::Deserialize;
+use std::ops::RangeInclusive;
 
 /// A run configuration. Unknown keys are rejected so typos do not pass silently.
 #[derive(Debug, Default, Deserialize)]
@@ -70,6 +73,45 @@ pub struct RoutingConfig {
     /// Rip-up and reroute rounds of detailed routing.
     #[serde(default = "default_detailed_iterations")]
     pub detailed_iterations: usize,
+}
+
+/// Why the configured routing layers cannot be used.
+#[derive(Debug, thiserror::Error, PartialEq, Eq)]
+pub enum LayerRangeError {
+    /// The library defines no routing layer.
+    #[error("the library has no routing layers")]
+    NoLayers,
+    /// A configured layer name is not a routing layer.
+    #[error("unknown routing layer '{0}'")]
+    Unknown(String),
+    /// The minimum routing layer is above the maximum.
+    #[error("the minimum routing layer is above the maximum")]
+    Empty,
+}
+
+impl RoutingConfig {
+    /// The layers signal wires may use: `min_layer`, by default the second
+    /// layer (the first when there is only one), up to `max_layer`, by
+    /// default the top layer.
+    pub fn layer_range(&self, lib: &Library) -> Result<RangeInclusive<LayerId>, LayerRangeError> {
+        let top = lib
+            .routing_layers
+            .len()
+            .checked_sub(1)
+            .ok_or(LayerRangeError::NoLayers)?;
+        let resolve = |name: &Option<String>, default: usize| match name {
+            None => Ok(LayerId::new(default)),
+            Some(n) => lib
+                .routing_layer_id(n)
+                .ok_or_else(|| LayerRangeError::Unknown(n.clone())),
+        };
+        let min = resolve(&self.min_layer, top.min(1))?;
+        let max = resolve(&self.max_layer, top)?;
+        if min > max {
+            return Err(LayerRangeError::Empty);
+        }
+        Ok(min..=max)
+    }
 }
 
 impl Default for RoutingConfig {

@@ -124,17 +124,8 @@ impl RouteTech {
     pub fn new(db: &NetlistDB, config: &RoutingConfig) -> Result<Self, RouteError> {
         let lib = &db.library;
         let count = lib.routing_layers.len();
-        let layer_by_name = |name: &Option<String>, default: usize| match name {
-            None => Ok(LayerId::new(default)),
-            Some(n) => lib
-                .routing_layer_id(n)
-                .ok_or_else(|| RouteError::UnknownLayer(n.clone())),
-        };
-        let min_layer = layer_by_name(&config.min_layer, 1.min(count - 1))?;
-        let max_layer = layer_by_name(&config.max_layer, count - 1)?;
-        if min_layer > max_layer {
-            return Err(RouteError::EmptyLayerRange);
-        }
+        let range = config.layer_range(lib)?;
+        let (min_layer, max_layer) = (*range.start(), *range.end());
 
         let tracks: Vec<Vec<Dbu>> = (0..count)
             .map(|l| layer_tracks(db, LayerId::new(l)))
