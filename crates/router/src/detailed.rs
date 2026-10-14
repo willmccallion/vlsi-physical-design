@@ -173,14 +173,24 @@ impl<'a> DetailedRouter<'a> {
 
     /// Routes `nets` in parallel, so that every net sees the wiring of each
     /// net routed before it that it could touch.
+    ///
+    /// Nets are scheduled by tiles while the tiles spread the work: once one
+    /// block would hold more than a thread's share of a level's nets, the
+    /// rest are routed in speculative batches instead.
     pub fn route_nets(&mut self, nets: &[NetId], costs: Costs) -> Vec<(NetId, NetRoute)> {
         let die = self.db.die_area;
         let die_span = (die.max.x - die.min.x).max(die.max.y - die.min.y);
+        let threads = rayon::current_num_threads().max(1);
         let mut done = Vec::with_capacity(nets.len());
         let mut pending = nets.to_vec();
         let mut tile = self.gcell * TILE_GCELLS;
         while !pending.is_empty() && tile * MIN_TILES_ACROSS <= die_span {
             let (blocks, spanning) = self.partition_by_tile(&pending, tile);
+            let tiled: usize = blocks.values().map(Vec::len).sum();
+            let largest = blocks.values().map(Vec::len).max().unwrap_or(0);
+            if largest * threads > tiled {
+                break;
+            }
             self.route_blocks(&blocks, costs, &mut done);
             pending = spanning;
             tile = tile * 4;
