@@ -9,8 +9,10 @@
 //! that a route through one exists only when nothing else does.
 
 use crate::access::{AccessPoint, Node, access_points};
+use crate::global::{GCell, GlobalGrid, GlobalRoutes};
 use crate::occupancy::{Occupancy, Owner, TrackRef};
 use crate::tech::RouteTech;
+use crate::tree::connection_order;
 use pare_common::db::design::{NetlistDB, RouteElem};
 use pare_common::db::indices::{LayerId, NetId, ViaId};
 use pare_common::db::library::LayerRef;
@@ -98,6 +100,9 @@ pub struct DetailedRouter<'a> {
     routed: Vec<Vec<TrackRef>>,
     vias: Vec<Vec<(ViaId, Point<Dbu>)>>,
     window_margin: Dbu,
+    gcell: Dbu,
+    grid_origin: Point<Dbu>,
+    guides: Vec<Option<(Vec<GCell>, Rect<Dbu>)>>,
 }
 
 impl<'a> DetailedRouter<'a> {
@@ -141,6 +146,9 @@ impl<'a> DetailedRouter<'a> {
             routed: vec![Vec::new(); db.nets.len()],
             vias: vec![Vec::new(); db.nets.len()],
             window_margin: gcell * 4,
+            gcell,
+            grid_origin: db.die_area.min,
+            guides: vec![None; db.nets.len()],
         }
     }
 
@@ -299,8 +307,41 @@ impl<'a> DetailedRouter<'a> {
         out
     }
 
-    /// The window a net searches in: its pins' bounding box plus a margin.
+    /// Global routing terminals: the gcell of each pin's best access point.
+    pub fn terminals(&self, net: NetId, grid: &GlobalGrid) -> Option<Vec<GCell>> {
+        self.access[net.index()]
+            .iter()
+            .map(|c| {
+                let a = c.first()?;
+                let p = self
+                    .tech
+                    .layer(a.node.layer)
+                    .point(a.node.track, a.node.cross);
+                Some(grid.cell_at(a.node.layer, p))
+            })
+            .collect()
+    }
+
+    /// Restricts each net's detailed route to its global route.
+    pub fn set_guides(&mut self, routes: GlobalRoutes, grid: &GlobalGrid) {
+        for (net, paths) in routes.paths {
+            let cells: Vec<GCell> = paths.into_iter().flatten().collect();
+            let bbox = cells
+                .iter()
+                .map(|c| grid.cell_rect(c.x, c.y))
+                .reduce(|a, b| a.union(&b));
+            if let Some(bbox) = bbox {
+                self.guides[net.index()] = Some((cells, bbox.expand(grid.gcell())));
+            }
+        }
+    }
+
+    /// The window a net searches in: its guide, or else its pins' bounding
+    /// box plus a margin.
     fn window(&self, net: NetId) -> Rect<Dbu> {
+        if let Some((_, bbox)) = &self.guides[net.index()] {
+            return *bbox;
+        }
         let pins = &self.db.nets[net.index()].pins;
         pins.iter()
             .map(|&p| {
@@ -314,13 +355,32 @@ impl<'a> DetailedRouter<'a> {
 
     /// Splits nets into one batch with pairwise disjoint windows and the rest.
     fn disjoint_batch(&self, nets: &[NetId]) -> (Vec<NetId>, Vec<NetId>) {
-        let mut taken: Vec<Rect<Dbu>> = Vec::new();
+        let die = self.db.die_area;
+        let cell = |v: Dbu, o: Dbu| (v - o).get().div_euclid(self.gcell.get());
+        let nx = cell(die.max.x, die.min.x) + 1;
+        let ny = cell(die.max.y, die.min.y) + 1;
+        let mut taken = vec![false; usize::try_from(nx * ny).unwrap_or(0)];
         let mut batch = Vec::new();
         let mut rest = Vec::new();
         for &n in nets {
-            let w = self.window(n).expand(self.window_margin);
-            if batch.len() < 4096 && taken.iter().all(|t| !t.touches(&w)) {
-                taken.push(w);
+            let w = self.window(n).expand(self.gcell);
+            let (x0, x1) = (
+                cell(w.min.x, die.min.x).clamp(0, nx - 1),
+                cell(w.max.x, die.min.x).clamp(0, nx - 1),
+            );
+            let (y0, y1) = (
+                cell(w.min.y, die.min.y).clamp(0, ny - 1),
+                cell(w.max.y, die.min.y).clamp(0, ny - 1),
+            );
+            let cells = || {
+                (y0..=y1).flat_map(move |y| {
+                    (x0..=x1).map(move |x| usize::try_from(y * nx + x).unwrap_or(0))
+                })
+            };
+            if batch.len() < 8192 && cells().all(|i| !taken[i]) {
+                for i in cells() {
+                    taken[i] = true;
+                }
                 batch.push(n);
             } else {
                 rest.push(n);
@@ -334,16 +394,25 @@ impl<'a> DetailedRouter<'a> {
         if pins.iter().any(Vec::is_empty) || pins.len() < 2 {
             return NetRoute::default();
         }
-        let search = Search {
+        let guide = self.guides[net.index()]
+            .as_ref()
+            .map(|(cells, _)| Guide::new(cells, self.grid_origin, self.gcell, self.tech));
+        let mut search = Search {
             db: self.db,
             tech: self.tech,
             occupancy: &self.occupancy,
             history: &self.history,
             owner: Owner::Net(net.0),
             costs,
+            guide: guide.as_ref(),
         };
-        let mut window = self.window(net);
-        for _ in 0..3 {
+        let window = self.window(net);
+        if let Some(route) = self.route_tree(&search, pins, &window) {
+            return route;
+        }
+        search.guide = None;
+        let mut window = window.expand(self.window_margin);
+        for _ in 0..2 {
             if let Some(route) = self.route_tree(&search, pins, &window) {
                 return route;
             }
@@ -352,40 +421,63 @@ impl<'a> DetailedRouter<'a> {
         NetRoute::default()
     }
 
+    /// Joins the pins one at a time, each to the nearest pin joined before
+    /// it, searching a window around the two that grows until a path is
+    /// found or it covers `window`.
     fn route_tree(
         &self,
         search: &Search<'_>,
         pins: &[Vec<AccessPoint>],
         window: &Rect<Dbu>,
     ) -> Option<NetRoute> {
-        let mut tree: FxHashSet<Node> = FxHashSet::default();
+        let points: Vec<Point<Dbu>> = pins.iter().map(|c| self.point(c[0].node)).collect();
+        let (first, joins) = connection_order(&points);
+        let mut tree = TreeIndex::new(self.grid_origin, self.gcell);
         let mut paths: Vec<Vec<Node>> = Vec::new();
         let mut used: Vec<Option<usize>> = vec![None; pins.len()];
-        let mut connected = vec![false; pins.len()];
-
-        let first = 0;
-        connected[first] = true;
-        let mut sources: Vec<(Node, f64)> = pins[first]
+        let first_sources: Vec<(Node, f64)> = pins[first]
             .iter()
             .map(|a| (a.node, search.access_cost(a)))
             .collect();
 
-        while let Some(next) = self.nearest_unconnected(pins, &connected, &tree, &sources) {
-            let targets: FxHashMap<Node, (usize, f64)> = pins[next]
+        for join in joins {
+            if let Some(k) = pins[join.pin].iter().position(|a| tree.contains(a.node)) {
+                used[join.pin] = Some(k);
+                continue;
+            }
+            let targets: FxHashMap<Node, (usize, f64)> = pins[join.pin]
                 .iter()
                 .enumerate()
                 .map(|(k, a)| (a.node, (k, search.access_cost(a))))
                 .collect();
-            let (path, reached) = search.find(&sources, &targets, window)?;
+            let mut margin = self.gcell * 2;
+            let (path, reached) = loop {
+                let around =
+                    Rect::from_corners(points[join.pin], points[join.parent]).expand(margin);
+                let local = around.intersection(window).unwrap_or(*window);
+                let sources = if tree.is_empty() {
+                    first_sources.clone()
+                } else {
+                    tree.nodes_in(&local)
+                };
+                if !sources.is_empty()
+                    && let Some(found) = search.find(&sources, &targets, &local)
+                {
+                    break found;
+                }
+                if local.encloses(window) {
+                    return None;
+                }
+                margin = margin * 4;
+            };
             if tree.is_empty() {
-                let start = path[0];
-                used[first] = pins[first].iter().position(|a| a.node == start);
+                used[first] = pins[first].iter().position(|a| a.node == path[0]);
             }
-            used[next] = Some(reached);
-            connected[next] = true;
-            tree.extend(path.iter().copied());
+            used[join.pin] = Some(reached);
+            for &n in &path {
+                tree.insert(n, self.point(n));
+            }
             paths.push(path);
-            sources = tree.iter().map(|&n| (n, 0.0)).collect();
         }
 
         let mut route = NetRoute {
@@ -403,31 +495,69 @@ impl<'a> DetailedRouter<'a> {
         Some(route)
     }
 
-    /// The unconnected pin whose best access point is nearest the tree.
-    fn nearest_unconnected(
-        &self,
-        pins: &[Vec<AccessPoint>],
-        connected: &[bool],
-        tree: &FxHashSet<Node>,
-        sources: &[(Node, f64)],
-    ) -> Option<usize> {
-        let anchor: Vec<Point<Dbu>> = if tree.is_empty() {
-            sources.iter().map(|(n, _)| self.point(*n)).collect()
-        } else {
-            tree.iter().map(|&n| self.point(n)).collect()
-        };
-        let bbox = anchor
-            .iter()
-            .map(|&p| Rect::new(p, p))
-            .reduce(|a, b| a.union(&b))?;
-        (0..pins.len()).filter(|&k| !connected[k]).min_by_key(|&k| {
-            let p = self.point(pins[k][0].node);
-            distance_to(&bbox, p)
-        })
-    }
-
     fn point(&self, n: Node) -> Point<Dbu> {
         self.tech.layer(n.layer).point(n.track, n.cross)
+    }
+}
+
+/// A tree node and its location.
+type NodeAt = (Node, Point<Dbu>);
+
+/// The nodes of a growing tree, bucketed by gcell to find those in a window.
+struct TreeIndex {
+    origin: Point<Dbu>,
+    gcell: Dbu,
+    nodes: FxHashSet<Node>,
+    buckets: FxHashMap<(i64, i64), Vec<NodeAt>>,
+}
+
+impl TreeIndex {
+    fn new(origin: Point<Dbu>, gcell: Dbu) -> Self {
+        Self {
+            origin,
+            gcell,
+            nodes: FxHashSet::default(),
+            buckets: FxHashMap::default(),
+        }
+    }
+
+    fn key(&self, p: Point<Dbu>) -> (i64, i64) {
+        (
+            (p.x - self.origin.x).get().div_euclid(self.gcell.get()),
+            (p.y - self.origin.y).get().div_euclid(self.gcell.get()),
+        )
+    }
+
+    fn is_empty(&self) -> bool {
+        self.nodes.is_empty()
+    }
+
+    fn contains(&self, n: Node) -> bool {
+        self.nodes.contains(&n)
+    }
+
+    fn insert(&mut self, n: Node, p: Point<Dbu>) {
+        if self.nodes.insert(n) {
+            let key = self.key(p);
+            self.buckets.entry(key).or_default().push((n, p));
+        }
+    }
+
+    /// Tree nodes inside `r`, as zero-cost search sources.
+    fn nodes_in(&self, r: &Rect<Dbu>) -> Vec<(Node, f64)> {
+        let (x0, y0) = self.key(r.min);
+        let (x1, y1) = self.key(r.max);
+        let mut out = Vec::new();
+        for bx in x0..=x1 {
+            for by in y0..=y1 {
+                for &(n, p) in self.buckets.get(&(bx, by)).into_iter().flatten() {
+                    if r.contains(p) {
+                        out.push((n, 0.0));
+                    }
+                }
+            }
+        }
+        out
     }
 }
 
@@ -519,6 +649,76 @@ fn add_via(db: &NetlistDB, via: ViaId, at: Point<Dbu>, route: &mut NetRoute) {
     }
 }
 
+/// The gcells a net's detailed route may use: its global route grown by one
+/// gcell in the plane and one layer up and down.
+#[derive(Debug)]
+struct Guide {
+    origin: Point<Dbu>,
+    gcell: Dbu,
+    x0: i64,
+    y0: i64,
+    width: i64,
+    height: i64,
+    min_layer: usize,
+    layers: usize,
+    bits: Vec<u64>,
+}
+
+impl Guide {
+    fn new(cells: &[GCell], origin: Point<Dbu>, gcell: Dbu, tech: &RouteTech) -> Self {
+        let x0 = cells.iter().map(|c| i64::from(c.x)).min().unwrap_or(0) - 1;
+        let y0 = cells.iter().map(|c| i64::from(c.y)).min().unwrap_or(0) - 1;
+        let x1 = cells.iter().map(|c| i64::from(c.x)).max().unwrap_or(0) + 1;
+        let y1 = cells.iter().map(|c| i64::from(c.y)).max().unwrap_or(0) + 1;
+        let min_layer = tech.min_layer.index();
+        let layers = tech.max_layer.index() - min_layer + 1;
+        let (width, height) = (x1 - x0 + 1, y1 - y0 + 1);
+        let total = usize::try_from(width * height).unwrap_or(0) * layers;
+        let mut guide = Self {
+            origin,
+            gcell,
+            x0,
+            y0,
+            width,
+            height,
+            min_layer,
+            layers,
+            bits: vec![0; total.div_ceil(64)],
+        };
+        for c in cells {
+            let l = c.layer.index() - min_layer;
+            for dl in l.saturating_sub(1)..=(l + 1).min(layers - 1) {
+                for dy in -1..=1 {
+                    for dx in -1..=1 {
+                        if let Some(i) = guide.index(dl, i64::from(c.x) + dx, i64::from(c.y) + dy) {
+                            guide.bits[i / 64] |= 1 << (i % 64);
+                        }
+                    }
+                }
+            }
+        }
+        guide
+    }
+
+    fn index(&self, layer: usize, x: i64, y: i64) -> Option<usize> {
+        let (lx, ly) = (x - self.x0, y - self.y0);
+        if layer >= self.layers || lx < 0 || ly < 0 || lx >= self.width || ly >= self.height {
+            return None;
+        }
+        usize::try_from((layer as i64 * self.height + ly) * self.width + lx).ok()
+    }
+
+    fn contains(&self, layer: LayerId, p: Point<Dbu>) -> bool {
+        let Some(l) = layer.index().checked_sub(self.min_layer) else {
+            return false;
+        };
+        let x = (p.x - self.origin.x).get().div_euclid(self.gcell.get());
+        let y = (p.y - self.origin.y).get().div_euclid(self.gcell.get());
+        self.index(l, x, y)
+            .is_some_and(|i| self.bits[i / 64] & (1 << (i % 64)) != 0)
+    }
+}
+
 /// One A* search context.
 struct Search<'a> {
     db: &'a NetlistDB,
@@ -527,6 +727,7 @@ struct Search<'a> {
     history: &'a History,
     owner: Owner,
     costs: Costs,
+    guide: Option<&'a Guide>,
 }
 
 /// A search state's priority, smallest estimated total cost first.
@@ -623,6 +824,10 @@ impl Search<'_> {
             + self.conflict_cost(top, &via.top.translate(at))
     }
 
+    fn allowed(&self, layer: LayerId, p: Point<Dbu>) -> bool {
+        self.guide.is_none_or(|g| g.contains(layer, p))
+    }
+
     /// Whether a via from `n` to `to_layer` would land within cut spacing of
     /// the via this path took one short step earlier on the same cut.
     fn crowds_previous_via(
@@ -668,7 +873,7 @@ impl Search<'_> {
             if (next as usize) < lt.cross.len() {
                 let m = Node { cross: next, ..n };
                 let p = lt.point(m.track, m.cross);
-                if window.contains(p) {
+                if window.contains(p) && self.allowed(m.layer, p) {
                     out.push((m, self.wire_cost(n.layer, here, p)));
                 }
             }
@@ -676,6 +881,7 @@ impl Search<'_> {
         let cross = lt.cross[n.cross as usize];
         let up = LayerId::new(n.layer.index() + 1);
         if n.layer < self.tech.max_layer
+            && self.allowed(up, here)
             && !self.crowds_previous_via(n, up, parents)
             && let (Some(track), Some(c)) = (cross.up, lt.track_up[n.track as usize])
         {
@@ -687,6 +893,7 @@ impl Search<'_> {
             out.push((m, self.via_cost(n.layer, here)));
         }
         if n.layer > self.tech.min_layer
+            && self.allowed(LayerId::new(n.layer.index() - 1), here)
             && !self.crowds_previous_via(n, LayerId::new(n.layer.index() - 1), parents)
             && let (Some(track), Some(c)) = (cross.down, lt.track_down[n.track as usize])
         {

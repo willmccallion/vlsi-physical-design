@@ -7,10 +7,13 @@
 
 pub mod access;
 pub mod detailed;
+pub mod global;
 pub mod occupancy;
 pub mod tech;
+pub mod tree;
 
 use detailed::{Costs, DetailedRouter, NetRoute, routable_nets};
+use global::{GlobalGrid, GlobalNet, route_global};
 use pare_common::db::design::NetlistDB;
 use pare_common::db::indices::NetId;
 use pare_common::util::config::RoutingConfig;
@@ -53,8 +56,34 @@ pub fn route(db: &mut NetlistDB, config: &RoutingConfig) -> Result<RoutingSummar
     };
 
     let (routes, summary) = {
+        let start = Instant::now();
         let mut dr = DetailedRouter::new(db, &tech, gcell);
         let nets = routable_nets(db);
+        stage("Pin access:", start);
+
+        let start = Instant::now();
+        let mut grid = GlobalGrid::new(&tech, &dr.occupancy, db.die_area, gcell);
+        stage("GCell grid:", start);
+        let start = Instant::now();
+        let global_nets: Vec<GlobalNet> = nets
+            .iter()
+            .filter_map(|&net| {
+                Some(GlobalNet {
+                    net,
+                    terminals: dr.terminals(net, &grid)?,
+                })
+            })
+            .collect();
+        let global = route_global(&mut grid, &global_nets, config.global_iterations);
+        let (nx, ny) = grid.size();
+        stage("Global route:", start);
+        ui::stat_row(
+            "GCells:",
+            &format!("{nx}x{ny}"),
+            "GR overflow:",
+            &grid.overflow().to_string(),
+        );
+        dr.set_guides(global, &grid);
         let mut summary = RoutingSummary {
             nets: nets.len(),
             inaccessible: dr.inaccessible_nets(),
@@ -114,6 +143,15 @@ pub fn route(db: &mut NetlistDB, config: &RoutingConfig) -> Result<RoutingSummar
         db.nets[n.index()].routing = r.elems;
     }
     Ok(summary)
+}
+
+fn stage(label: &str, start: Instant) {
+    ui::stat_row(
+        label,
+        &format!("{:.1}s", start.elapsed().as_secs_f64()),
+        "",
+        "",
+    );
 }
 
 /// Why routing could not run.
