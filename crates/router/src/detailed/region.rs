@@ -168,7 +168,14 @@ impl DetailedRouter<'_> {
 
         let routed: Vec<Vec<Option<Vec<Edge>>>> = work
             .par_iter()
-            .map(|(area, pieces)| self.route_region(area, pieces, costs))
+            .enumerate()
+            .map(|(r, (area, pieces))| {
+                let old: Vec<&[Edge]> = pieces
+                    .iter()
+                    .map(|p| removed.get(&(r, p.net)).map_or(&[][..], Vec::as_slice))
+                    .collect();
+                self.route_region(area, pieces, &old, costs)
+            })
             .collect();
 
         let mut count = 0;
@@ -244,11 +251,14 @@ impl DetailedRouter<'_> {
     }
 
     /// Routes a region's pieces, rerouting those still in conflict with a
-    /// growing penalty. `None` for a piece that could not be connected.
+    /// growing penalty. `None` for a piece that could not be connected, and
+    /// for every piece when the new wiring leaves more pieces clashing than
+    /// their `old` wiring did, so that a region never gets worse.
     fn route_region(
         &self,
         area: &Rect<Dbu>,
         pieces: &[Piece],
+        old: &[&[Edge]],
         costs: Costs,
     ) -> Vec<Option<Vec<Edge>>> {
         let window = Rect::new(area.min, area.max - Point::new(Dbu(1), Dbu(1)));
@@ -295,7 +305,37 @@ impl DetailedRouter<'_> {
             }
             penalty = (penalty * 2.0).min(MAX_PENALTY);
         }
+        let new: Vec<&[Edge]> = results
+            .iter()
+            .zip(old)
+            .map(|(r, &o)| r.as_deref().unwrap_or(o))
+            .collect();
+        if self.clashing(area, pieces, &new) > self.clashing(area, pieces, old) {
+            return vec![None; pieces.len()];
+        }
         results
+    }
+
+    /// How many of `pieces` clash with anything when wired as `wiring`.
+    fn clashing(&self, area: &Rect<Dbu>, pieces: &[Piece], wiring: &[&[Edge]]) -> usize {
+        let mut overlay = LocalOccupancy::default();
+        for (piece, edges) in pieces.iter().zip(wiring) {
+            let owner = Owner::Net(piece.net.0);
+            for (layer, rect) in self.edge_metal(edges) {
+                overlay.add_rect(self.tech, layer, &rect, owner);
+            }
+            for (cut, rect) in self.edge_cuts(edges) {
+                overlay.add_cut(cut, &rect, owner);
+            }
+        }
+        pieces
+            .iter()
+            .zip(wiring)
+            .filter(|(piece, edges)| {
+                self.clashes(piece.net, edges, &overlay)
+                    || self.crowds_own_vias(piece.net, area, edges)
+            })
+            .count()
     }
 
     /// Joins `groups` into one tree inside `window`: each search runs from
