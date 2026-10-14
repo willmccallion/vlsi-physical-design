@@ -38,6 +38,14 @@ pub struct GlobalPlacementConfig {
     /// Seed for the random initial placement.
     #[serde(default = "default_seed")]
     pub seed: u64,
+    /// Whether cells in bins whose estimated routing demand exceeds the
+    /// tracks there are inflated during global placement.
+    #[serde(default = "default_routability_driven")]
+    pub routability_driven: bool,
+    /// Mean routing demand over supply of the most congested bins at which
+    /// routability-driven placement stops inflating cells.
+    #[serde(default = "default_target_congestion")]
+    pub target_congestion: f64,
 }
 
 impl Default for GlobalPlacementConfig {
@@ -48,6 +56,8 @@ impl Default for GlobalPlacementConfig {
             placer_max_iterations: default_placer_max_iterations(),
             target_overflow: default_target_overflow(),
             seed: default_seed(),
+            routability_driven: default_routability_driven(),
+            target_congestion: default_target_congestion(),
         }
     }
 }
@@ -172,6 +182,14 @@ const fn default_target_overflow() -> f64 {
 
 const fn default_seed() -> u64 {
     1
+}
+
+const fn default_routability_driven() -> bool {
+    true
+}
+
+const fn default_target_congestion() -> f64 {
+    1.25
 }
 
 const fn default_gcell_tracks() -> u32 {

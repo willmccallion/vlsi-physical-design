@@ -2,6 +2,7 @@
 //! wirelength whose error shrinks with the smoothing length `gamma`.
 
 use pare_common::geom::point::Point;
+use pare_common::geom::rect::Rect;
 use rayon::prelude::*;
 use std::ops::Range;
 
@@ -61,6 +62,26 @@ impl Netlist {
             }
         }
         counts
+    }
+
+    /// Each net's bounding box at `centers`, with its number of terminals.
+    pub(super) fn bounding_boxes<'a>(
+        &'a self,
+        centers: &'a [Point<f64>],
+    ) -> impl Iterator<Item = (Rect<f64>, usize)> + 'a {
+        self.nets.iter().map(move |(range, _)| {
+            let mut points = self.terminals[range.clone()]
+                .iter()
+                .map(|&t| position(t, centers));
+            let first = points.next().unwrap_or(Point::new(0.0, 0.0));
+            let bbox = points.fold(Rect::new(first, first), |r, p| {
+                Rect::new(
+                    Point::new(r.min.x.min(p.x), r.min.y.min(p.y)),
+                    Point::new(r.max.x.max(p.x), r.max.y.max(p.y)),
+                )
+            });
+            (bbox, range.len())
+        })
     }
 
     /// Writes the gradient of the weighted-average wirelength with respect

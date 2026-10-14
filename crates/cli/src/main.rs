@@ -15,7 +15,7 @@ use pare_common::util::{logger, ui, visualization};
 use pare_common::verify::placement::{PlacementViolation, placement_violations};
 use pare_common::verify::routing::check_routing;
 use pare_placer::detailed;
-use pare_placer::global::{self, GlobalParams, Outcome};
+use pare_placer::global::{self, GlobalParams, Outcome, RoutabilityParams, TrackSupply};
 use pare_placer::legalize::abacus;
 use pare_placer::model::PlacementModel;
 use std::path::{Path, PathBuf};
@@ -227,12 +227,22 @@ fn run_placement(config: &Config, db: &mut NetlistDB, output_dir: &Path) -> anyh
     );
     ui::stat_row("Bin Grid:", &format!("{bins}x{bins}"), "", "");
 
+    let routability = if gp.routability_driven {
+        let layers = config.routing.layer_range(&db.library)?;
+        Some(RoutabilityParams {
+            supply: TrackSupply::from_db(db, layers, config.routing.global_capacity_reserve),
+            target_congestion: gp.target_congestion,
+        })
+    } else {
+        None
+    };
     let params = GlobalParams {
         target_density,
         target_overflow: gp.target_overflow,
         max_iterations: gp.placer_max_iterations,
         bins,
         seed: gp.seed,
+        routability,
     };
     ui::placement_table_header();
     let result = global::place(&mut model, &params, |p| {
@@ -241,6 +251,17 @@ fn run_placement(config: &Config, db: &mut NetlistDB, output_dir: &Path) -> anyh
         }
     });
     eprintln!();
+    for (k, round) in result.congestion.iter().enumerate() {
+        ui::stat_row(
+            &format!("Congestion {}:", k + 1),
+            &format!("{:.2} @ {}", round.congestion, round.iteration),
+            "Inflated:",
+            &format!(
+                "{} cells, area x{:.2}, density {:.2}",
+                round.inflated, round.area_ratio, round.target_density
+            ),
+        );
+    }
     match result.outcome {
         Outcome::Converged => ui::check(&format!(
             "Converged at iteration {} (overflow {:.3})",

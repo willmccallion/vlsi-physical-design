@@ -5,12 +5,17 @@
 //! Filler cells take up the whitespace, so a design that uses a small part
 //! of its die still packs to the target density instead of scattering.
 //! Nesterov's method minimizes the sum, raising the weight of density until
-//! the cell area above the target density falls below a threshold.
+//! the cell area above the target density falls below a threshold. With
+//! routability enabled, cells in bins whose estimated routing demand exceeds
+//! the tracks there are inflated along the way.
 
 mod density;
 mod nesterov;
 mod poisson;
+mod routability;
 mod wirelength;
+
+pub use routability::{CongestionRound, RoutabilityParams, TrackSupply};
 
 use crate::model::{PinAnchor, PlacementModel};
 use density::DensityGrid;
@@ -34,6 +39,8 @@ pub struct GlobalParams {
     pub bins: usize,
     /// Seed for the initial placement.
     pub seed: u64,
+    /// Inflation of cells in routing-congested bins, if enabled.
+    pub routability: Option<RoutabilityParams>,
 }
 
 /// One iteration's state.
@@ -63,7 +70,7 @@ pub enum Outcome {
 }
 
 /// The result of global placement.
-#[derive(Clone, Copy, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct GlobalResult {
     /// How it ended.
     pub outcome: Outcome,
@@ -73,6 +80,8 @@ pub struct GlobalResult {
     pub overflow: f64,
     /// Final half-perimeter wirelength, in microns.
     pub hpwl: f64,
+    /// Each routability round, in order.
+    pub congestion: Vec<CongestionRound>,
 }
 
 /// Fewest and most bins per side of the density grid.

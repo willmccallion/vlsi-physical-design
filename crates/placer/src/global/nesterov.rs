@@ -3,6 +3,7 @@
 //! when the prediction overshoots.
 
 use super::density::{DensityGrid, Footprint};
+use super::routability::{CHECK_OVERFLOW, CongestionMap, Routability, SNAPSHOT_OVERFLOW, Verdict};
 use super::wirelength::{Netlist, Wirelength};
 use super::{GlobalParams, GlobalResult, Outcome, Progress};
 use pare_common::geom::point::Point;
@@ -180,9 +181,30 @@ fn distance(a: &[Point<f64>], b: &[Point<f64>]) -> f64 {
 fn all_finite(v: &[Point<f64>]) -> bool {
     v.iter().all(|p| p.x.is_finite() && p.y.is_finite())
 }
+/// Where Nesterov's method stands: enough to resume from.
+#[derive(Clone, Debug)]
+struct State {
+    major: Vec<Point<f64>>,
+    reference: Vec<Point<f64>>,
+    step: f64,
+    penalty: f64,
+    gamma: f64,
+    a: f64,
+    prev_hpwl: f64,
+}
+
+/// How one stretch of iterations ended.
+enum Phase {
+    /// Placement is finished.
+    Finished(GlobalResult),
+    /// Spreading reached the point where routability is checked.
+    Paused { iteration: usize, state: State },
+}
 
 /// Minimizes wirelength plus density energy over the objects' centers,
-/// leaving the best placement found in `objects.centers`.
+/// leaving the best placement found in `objects.centers`. With
+/// routability enabled, congestion is checked once cells have nearly
+/// spread, and placement resumes from a saved state after each inflation.
 pub(super) fn minimize(
     objects: &mut Objects,
     die: &Rect<f64>,
@@ -191,90 +213,212 @@ pub(super) fn minimize(
     params: &GlobalParams,
     mut report: impl FnMut(&Progress),
 ) -> GlobalResult {
+    let mut routability = params
+        .routability
+        .map(|r| Routability::new(r, objects, grid.free_area()));
+    let mut saved: Option<State> = None;
+    let mut resume: Option<State> = None;
+    let mut first = 0;
+    loop {
+        let checking = routability.as_ref().is_some_and(Routability::active);
+        let phase = run(
+            objects,
+            die,
+            grid,
+            netlist,
+            params,
+            &mut report,
+            Start {
+                first,
+                resume: resume.take(),
+                checking,
+            },
+            &mut saved,
+        );
+        match (phase, routability.as_mut(), params.routability) {
+            (Phase::Finished(mut result), r, _) => {
+                result.congestion = r.map(|r| std::mem::take(&mut r.rounds)).unwrap_or_default();
+                return result;
+            }
+            (Phase::Paused { iteration, state }, Some(r), Some(p)) => {
+                let map = CongestionMap::rudy(netlist, &objects.centers, die, grid.dim(), p.supply);
+                let mut target = grid.target();
+                let verdict = r.check(iteration, &map, objects, &mut target);
+                grid.set_target(target);
+                resume = match verdict {
+                    Verdict::Resume => saved.clone().or(Some(state)),
+                    Verdict::Done => Some(state),
+                };
+                first = iteration + 1;
+            }
+            (Phase::Paused { iteration, state }, _, _) => {
+                resume = Some(state);
+                first = iteration + 1;
+            }
+        }
+    }
+}
+
+/// Where a stretch of iterations starts.
+struct Start {
+    first: usize,
+    resume: Option<State>,
+    checking: bool,
+}
+
+/// Runs iterations from `start` until placement converges, the iteration
+/// limit is reached, or, when `start.checking`, density overflow falls to
+/// [`CHECK_OVERFLOW`]; the state at [`SNAPSHOT_OVERFLOW`] is kept in `saved`.
+#[allow(clippy::too_many_arguments)]
+fn run(
+    objects: &mut Objects,
+    die: &Rect<f64>,
+    grid: &mut DensityGrid,
+    netlist: &Netlist,
+    params: &GlobalParams,
+    report: &mut impl FnMut(&Progress),
+    start: Start,
+    saved: &mut Option<State>,
+) -> Phase {
     let bin = grid.bin();
     let reference_growth =
         REFERENCE_STRETCH_BINS * f64::midpoint(bin.x, bin.y) * netlist.len().max(1) as f64;
     let mut objective = Objective::new(objects, die, grid, netlist);
     let n = objects.centers.len();
-
-    let mut major = objects.centers.clone();
-    objective.clamp(&mut major);
-    let mut reference = major.clone();
-    let mut gamma = gamma_for(1.0, bin);
-
-    let first = objective.evaluate(&reference, gamma);
-    let mut penalty = objective.initial_penalty();
     let mut grad = vec![Point::new(0.0, 0.0); n];
-    let mut eval = objective.gradient(&reference, gamma, penalty, &mut grad);
-    let mut step = initial_step(&mut objective, &reference, &grad, gamma, penalty, bin);
 
-    let mut a = 1.0f64;
-    let mut prev_hpwl = first.wirelength.hpwl;
+    let mut s = if let Some(state) = start.resume {
+        restart(&mut objective, state, &mut grad, bin)
+    } else {
+        let mut major = objects.centers.clone();
+        objective.clamp(&mut major);
+        let gamma = gamma_for(1.0, bin);
+        let first = objective.evaluate(&major, gamma);
+        let penalty = objective.initial_penalty();
+        let _ = objective.gradient(&major, gamma, penalty, &mut grad);
+        let step = initial_step(&mut objective, &major, &grad, gamma, penalty, bin);
+        State {
+            reference: major.clone(),
+            major,
+            step,
+            penalty,
+            gamma,
+            a: 1.0,
+            prev_hpwl: first.wirelength.hpwl,
+        }
+    };
+    let mut eval = objective.gradient(&s.reference, s.gamma, s.penalty, &mut grad);
+
     let mut next_major = vec![Point::new(0.0, 0.0); n];
     let mut next_reference = vec![Point::new(0.0, 0.0); n];
     let mut next_grad = vec![Point::new(0.0, 0.0); n];
     let mut outcome = Outcome::IterationLimit;
-    let mut iterations = 0;
+    let mut iterations = start.first;
 
-    for k in 0..params.max_iterations {
+    for k in start.first..params.max_iterations {
         iterations = k + 1;
-        let a_next = f64::midpoint(1.0, (4.0 * a).mul_add(a, 1.0).sqrt());
-        let momentum = (a - 1.0) / a_next;
+        let a_next = f64::midpoint(1.0, (4.0 * s.a).mul_add(s.a, 1.0).sqrt());
+        let momentum = (s.a - 1.0) / a_next;
         let mut next_eval = eval;
-        let mut next_step = step;
+        let mut next_step = s.step;
         for attempt in 0..=MAX_BACKTRACKS {
             for i in 0..n {
-                next_major[i] = reference[i] - grad[i] * step;
+                next_major[i] = s.reference[i] - grad[i] * s.step;
             }
             objective.clamp(&mut next_major);
             for i in 0..n {
-                next_reference[i] = next_major[i] + (next_major[i] - major[i]) * momentum;
+                next_reference[i] = next_major[i] + (next_major[i] - s.major[i]) * momentum;
             }
             objective.clamp(&mut next_reference);
-            next_eval = objective.gradient(&next_reference, gamma, penalty, &mut next_grad);
-            let moved = distance(&next_reference, &reference);
+            next_eval = objective.gradient(&next_reference, s.gamma, s.penalty, &mut next_grad);
+            let moved = distance(&next_reference, &s.reference);
             let changed = distance(&next_grad, &grad);
-            next_step = if changed > 0.0 { moved / changed } else { step };
-            if next_step >= 0.95 * step || attempt == MAX_BACKTRACKS {
+            next_step = if changed > 0.0 {
+                moved / changed
+            } else {
+                s.step
+            };
+            if next_step >= 0.95 * s.step || attempt == MAX_BACKTRACKS {
                 break;
             }
-            step = next_step;
+            s.step = next_step;
         }
 
         if !(next_step.is_finite() && all_finite(&next_major) && all_finite(&next_grad)) {
             outcome = Outcome::Diverged;
             break;
         }
-        std::mem::swap(&mut major, &mut next_major);
-        std::mem::swap(&mut reference, &mut next_reference);
+        std::mem::swap(&mut s.major, &mut next_major);
+        std::mem::swap(&mut s.reference, &mut next_reference);
         std::mem::swap(&mut grad, &mut next_grad);
         eval = next_eval;
-        step = next_step;
-        a = a_next;
+        s.step = next_step;
+        s.a = a_next;
 
         report(&Progress {
             iteration: k,
             hpwl: eval.wirelength.hpwl,
             overflow: eval.overflow,
-            penalty,
-            step,
+            penalty: s.penalty,
+            step: s.step,
         });
-        if eval.overflow <= params.target_overflow {
+        let converged = eval.overflow <= params.target_overflow;
+        if !converged {
+            s.penalty *= penalty_growth(eval.wirelength.hpwl - s.prev_hpwl, reference_growth);
+            s.prev_hpwl = eval.wirelength.hpwl;
+            s.gamma = gamma_for(eval.overflow, bin);
+        }
+        if start.checking {
+            if saved.is_none() && eval.overflow <= SNAPSHOT_OVERFLOW {
+                *saved = Some(s.clone());
+            }
+            if eval.overflow <= CHECK_OVERFLOW {
+                objects.centers.copy_from_slice(&s.major);
+                return Phase::Paused {
+                    iteration: k,
+                    state: s,
+                };
+            }
+        }
+        if converged {
             outcome = Outcome::Converged;
             break;
         }
-        penalty *= penalty_growth(eval.wirelength.hpwl - prev_hpwl, reference_growth);
-        prev_hpwl = eval.wirelength.hpwl;
-        gamma = gamma_for(eval.overflow, bin);
     }
 
-    objects.centers.copy_from_slice(&major);
-    let last = objective.evaluate(&major, gamma);
-    GlobalResult {
+    objects.centers.copy_from_slice(&s.major);
+    let last = objective.evaluate(&s.major, s.gamma);
+    Phase::Finished(GlobalResult {
         outcome,
         iterations,
         overflow: last.overflow,
         hpwl: last.wirelength.hpwl,
+        congestion: Vec::new(),
+    })
+}
+
+/// `state` with momentum cleared and the step length estimated afresh, for
+/// resuming after object sizes changed.
+fn restart(
+    objective: &mut Objective<'_>,
+    state: State,
+    grad: &mut [Point<f64>],
+    bin: Point<f64>,
+) -> State {
+    let _ = objective.gradient(&state.major, state.gamma, state.penalty, grad);
+    let step = initial_step(
+        objective,
+        &state.major,
+        grad,
+        state.gamma,
+        state.penalty,
+        bin,
+    );
+    State {
+        reference: state.major.clone(),
+        step,
+        a: 1.0,
+        ..state
     }
 }
 

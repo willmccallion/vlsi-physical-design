@@ -123,10 +123,29 @@ impl DensityGrid {
         blocked
     }
 
+    /// The target density.
+    pub(super) const fn target(&self) -> f64 {
+        self.target
+    }
+
+    /// Changes the target density, rescaling the fixed charge with it.
+    pub(super) fn set_target(&mut self, target: f64) {
+        let scale = target / self.target;
+        for f in &mut self.fixed {
+            *f *= scale;
+        }
+        self.target = target;
+    }
+
     /// Area cells may use: the die less blocked area.
     pub(super) fn free_area(&self) -> f64 {
         let bin_area = self.bins.area();
         self.fixed.iter().map(|f| bin_area - f / self.target).sum()
+    }
+
+    /// Bins per side.
+    pub(super) const fn dim(&self) -> usize {
+        self.bins.dim
     }
 
     /// Width and height of one bin.
