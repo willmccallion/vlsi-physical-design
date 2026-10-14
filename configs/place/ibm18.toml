@@ -7,6 +7,3 @@ num_layers = 10
 placer_max_iterations = 2000
 convergence_threshold = 1e-4
 electro_force_multiplier = 1000.0
-
-[legalization]
-algorithm = "abacus"

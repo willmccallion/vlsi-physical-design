@@ -637,6 +637,7 @@ dependencies = [
  "log",
  "serde",
  "thiserror",
+ "toml",
  "yansi",
 ]
 
