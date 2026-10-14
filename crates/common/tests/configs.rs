@@ -6,8 +6,8 @@ use pare_common::util::config::Config;
 use std::path::Path;
 
 #[test]
-fn every_place_config_parses() {
-    let dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../configs/place");
+fn every_design_config_parses() {
+    let dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../configs");
     let mut count = 0;
 
     for entry in std::fs::read_dir(&dir).unwrap() {

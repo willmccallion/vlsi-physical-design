@@ -15,6 +15,7 @@ workspace = true
 [dependencies]
 pare-common = { path = "../common" }
 pare-placer = { path = "../placer" }
+pare-router = { path = "../router" }
 clap = { version = "4.5", features = ["derive"] }
 toml = "0.8"
 env_logger = "0.11"

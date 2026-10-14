@@ -1,6 +1,7 @@
 //! PARE -- Placement And Routing Engine.
 //!
-//! Loads a LEF/DEF or Bookshelf design, places it and writes the result.
+//! Loads a LEF/DEF or Bookshelf design, places and routes it, checks the
+//! result and writes it out.
 
 use anyhow::Context;
 use clap::{Parser, Subcommand};
@@ -30,8 +31,21 @@ struct Args {
 
 #[derive(Subcommand)]
 enum Commands {
-    /// Run placement.
+    /// Place a design.
     Place {
+        /// Design name (e.g. 'ibex') or path to a TOML config.
+        config: PathBuf,
+    },
+    /// Route a placed design.
+    Route {
+        /// Design name (e.g. 'gcd') or path to a TOML config.
+        config: PathBuf,
+        /// Placed DEF, or Bookshelf `.pl`, to route instead of the config's input.
+        #[arg(long)]
+        placement: Option<PathBuf>,
+    },
+    /// Place and then route a design.
+    Flow {
         /// Design name (e.g. 'ibex') or path to a TOML config.
         config: PathBuf,
     },
@@ -39,32 +53,33 @@ enum Commands {
     Check {
         /// Design name (e.g. 'ibex') or path to a TOML config.
         config: PathBuf,
-        /// DEF to check instead of the config's input DEF.
+        /// DEF, or Bookshelf `.pl`, to check instead of the config's input.
         #[arg(long)]
-        def: Option<PathBuf>,
+        placement: Option<PathBuf>,
     },
 }
 
 /// Resolves a config argument to a file path.
 ///
 /// An existing path, or anything containing '/' or ending in '.toml', is used
-/// as is; otherwise it names a benchmark in `configs/<mode>/`.
-fn resolve_config(name: &str, mode: &str) -> PathBuf {
-    let path = Path::new(name);
-    if path.exists()
-        || name.contains('/')
-        || path
+/// as is; otherwise it names a benchmark in `configs/`.
+fn resolve_config(name: &Path) -> anyhow::Result<PathBuf> {
+    let text = name.to_str().context("config path is not valid UTF-8")?;
+    if name.exists()
+        || text.contains('/')
+        || name
             .extension()
             .is_some_and(|ext| ext.eq_ignore_ascii_case("toml"))
     {
-        return path.to_path_buf();
+        return Ok(name.to_path_buf());
     }
-    PathBuf::from(format!("configs/{mode}/{name}.toml"))
+    Ok(PathBuf::from(format!("configs/{text}.toml")))
 }
 
-fn load_config(path: &Path) -> anyhow::Result<Config> {
+fn load_config(name: &Path) -> anyhow::Result<Config> {
+    let path = resolve_config(name)?;
     ui::header("Config", &path.display().to_string());
-    let text = std::fs::read_to_string(path)
+    let text = std::fs::read_to_string(&path)
         .with_context(|| format!("cannot read config {}", path.display()))?;
     toml::from_str(&text).with_context(|| format!("invalid config {}", path.display()))
 }
@@ -77,21 +92,25 @@ fn main() -> anyhow::Result<()> {
 
     match args.command {
         Commands::Place { config } => {
-            let name = config.to_str().context("config path is not valid UTF-8")?;
-            let config = load_config(&resolve_config(name, "place"))?;
-            let mut db = load_design(&config)?;
-            let output_dir = output_dir(&config);
-            std::fs::create_dir_all(&output_dir)
-                .with_context(|| format!("cannot create {}", output_dir.display()))?;
-            run_placement(&config, &mut db, &output_dir)?;
+            let config = load_config(&config)?;
+            let mut db = load_design(&config, None)?;
+            run_placement(&config, &mut db, &prepare_output_dir(&config)?)?;
         }
-        Commands::Check { config, def } => {
-            let name = config.to_str().context("config path is not valid UTF-8")?;
-            let mut config = load_config(&resolve_config(name, "place"))?;
-            if let Some(def) = def {
-                config.input.def_file = path_str(&def)?;
-            }
-            let db = load_design(&config)?;
+        Commands::Route { config, placement } => {
+            let config = load_config(&config)?;
+            let mut db = load_design(&config, placement.as_deref())?;
+            run_routing(&config, &mut db, &prepare_output_dir(&config)?)?;
+        }
+        Commands::Flow { config } => {
+            let config = load_config(&config)?;
+            let mut db = load_design(&config, None)?;
+            let output_dir = prepare_output_dir(&config)?;
+            run_placement(&config, &mut db, &output_dir)?;
+            run_routing(&config, &mut db, &output_dir)?;
+        }
+        Commands::Check { config, placement } => {
+            let config = load_config(&config)?;
+            let db = load_design(&config, placement.as_deref())?;
             let placement_ok = report_placement(&db);
             let routing_ok = report_routing(&db);
             if !(placement_ok && routing_ok) {
@@ -104,21 +123,33 @@ fn main() -> anyhow::Result<()> {
     Ok(())
 }
 
-/// Reads the design named by the `[input]` section.
-fn load_design(config: &Config) -> anyhow::Result<NetlistDB> {
+/// Reads the design named by the `[input]` section. `placement` replaces the
+/// input DEF, or for a Bookshelf design supplies a `.pl` to apply.
+fn load_design(config: &Config, placement: Option<&Path>) -> anyhow::Result<NetlistDB> {
     if let Some(aux) = &config.input.bookshelf_aux_file {
         ui::header("Input", aux);
-        return Ok(bookshelf::parse(Path::new(aux), config.input.num_layers)?);
+        let mut db = bookshelf::parse(Path::new(aux), config.input.num_layers)?;
+        if let Some(pl) = placement {
+            ui::header("Input", &pl.display().to_string());
+            bookshelf::read_placement(&mut db, pl)?;
+        }
+        return Ok(db);
     }
-    let def_path = Path::new(&config.input.def_file);
+    let def_path = placement.unwrap_or_else(|| Path::new(&config.input.def_file));
     let lefs: Vec<PathBuf> = config.input.lef_files.iter().map(PathBuf::from).collect();
     for lef in &lefs {
         ui::header("Input", &lef.display().to_string());
     }
-    ui::header("Input", &config.input.def_file);
+    ui::header("Input", &def_path.display().to_string());
     let units = def::read_units(def_path)?;
     let library = lef::parse_files(&lefs, units)?;
     Ok(def::parse(def_path, library)?)
+}
+
+fn prepare_output_dir(config: &Config) -> anyhow::Result<PathBuf> {
+    let dir = output_dir(config);
+    std::fs::create_dir_all(&dir).with_context(|| format!("cannot create {}", dir.display()))?;
+    Ok(dir)
 }
 
 /// Directory for images and results: `output_dir`, else `output_def`'s parent.
@@ -305,6 +336,52 @@ fn path_str(path: &Path) -> anyhow::Result<String> {
     path.to_str()
         .map(str::to_owned)
         .with_context(|| format!("path is not valid UTF-8: {}", path.display()))
+}
+
+/// Routes every signal net, checks the result and writes it out.
+fn run_routing(config: &Config, db: &mut NetlistDB, output_dir: &Path) -> anyhow::Result<()> {
+    let phase_start = Instant::now();
+    ui::section("Routing");
+    let summary = pare_router::route(db, &config.routing)?;
+    ui::stat_row(
+        "Nets:",
+        &summary.nets.to_string(),
+        "Rounds:",
+        &summary.rounds.to_string(),
+    );
+    ui::stat_row(
+        "No access:",
+        &summary.inaccessible.len().to_string(),
+        "Incomplete:",
+        &summary.incomplete.len().to_string(),
+    );
+    ui::stat_row(
+        "In conflict:",
+        &summary.conflicted.len().to_string(),
+        "",
+        "",
+    );
+    ui::phase_time(phase_start.elapsed().as_secs_f64());
+
+    let phase_start = Instant::now();
+    ui::phase("Verification");
+    let routing_ok = report_routing(db);
+    ui::phase_time(phase_start.elapsed().as_secs_f64());
+
+    let phase_start = Instant::now();
+    ui::phase("Output");
+    let png = output_dir.join("routed.png");
+    visualization::draw_routed_design(db, &path_str(&png)?, 2000, 2000);
+    ui::wrote(&path_str(&png)?);
+    let out = output_dir.join("routed.def");
+    writer::def::write_file(db, &out).with_context(|| format!("cannot write {}", out.display()))?;
+    ui::wrote(&path_str(&out)?);
+    ui::phase_time(phase_start.elapsed().as_secs_f64());
+
+    if !routing_ok {
+        anyhow::bail!("routing has shorts or opens");
+    }
+    Ok(())
 }
 
 /// Prints placement violations by kind; returns whether there were none.
