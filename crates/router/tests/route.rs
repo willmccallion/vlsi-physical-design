@@ -3,14 +3,14 @@
 #![allow(clippy::unwrap_used)]
 
 use pare_common::db::design::{NetlistDB, PlacementStatus, RouteElem};
-use pare_common::db::indices::LayerId;
+use pare_common::db::indices::{CutLayerId, LayerId};
 use pare_common::db::parser::{def, lef};
 use pare_common::geom::dbu::Dbu;
 use pare_common::geom::point::Point;
 use pare_common::geom::rect::Rect;
 use pare_common::util::config::RoutingConfig;
 use pare_router::access::Node;
-use pare_router::occupancy::{Occupancy, Origin, Owner};
+use pare_router::occupancy::{Occupancy, Origin, Owner, Slot};
 use pare_router::tech::RouteTech;
 use pare_router::wiring::{Edge, NetRoute};
 use pare_router::{RouteError, route};
@@ -55,8 +55,9 @@ fn removing_a_nets_wiring_keeps_its_fixed_metal() {
     let owner = Owner::Net(0);
     let mut tracks = occupancy.add_rect(&tech, layer, &pin, owner, Origin::Fixed);
     tracks.extend(occupancy.add_rect(&tech, layer, &wire, owner, Origin::Wiring));
+    let slots: Vec<Slot> = tracks.into_iter().map(Slot::Track).collect();
 
-    occupancy.remove_wiring(&tracks, owner);
+    occupancy.remove_wiring(&slots, owner);
 
     let other = Owner::Net(1);
     assert_eq!(
@@ -67,6 +68,59 @@ fn removing_a_nets_wiring_keeps_its_fixed_metal() {
         occupancy.rect_conflicts(&tech, layer, &wire, other).count(),
         0
     );
+}
+
+#[test]
+fn cuts_of_different_nets_conflict_within_the_cut_spacing() {
+    let db = tiny();
+    let tech = RouteTech::new(&db, &RoutingConfig::default()).unwrap();
+    let mut occupancy = Occupancy::new(&tech, Dbu(1000));
+    let v1 = CutLayerId::new(0);
+    let cut = |x: i64, y: i64| {
+        Rect::new(
+            Point::new(Dbu(x), Dbu(y)),
+            Point::new(Dbu(x + 100), Dbu(y + 100)),
+        )
+    };
+    let _ = occupancy.add_cut(v1, &cut(0, 0), Owner::Net(0), Origin::Wiring);
+
+    let close = occupancy
+        .cut_conflicts(v1, &cut(210, 0), Owner::Net(1))
+        .count();
+    let apart = occupancy
+        .cut_conflicts(v1, &cut(220, 0), Owner::Net(1))
+        .count();
+    let diagonal = occupancy
+        .cut_conflicts(v1, &cut(190, 190), Owner::Net(1))
+        .count();
+    let same_net = occupancy
+        .cut_conflicts(v1, &cut(150, 0), Owner::Net(0))
+        .count();
+
+    assert_eq!((close, apart, diagonal, same_net), (1, 0, 0, 0));
+}
+
+#[test]
+fn removing_a_nets_wiring_keeps_its_fixed_cuts() {
+    let db = tiny();
+    let tech = RouteTech::new(&db, &RoutingConfig::default()).unwrap();
+    let mut occupancy = Occupancy::new(&tech, Dbu(1000));
+    let v1 = CutLayerId::new(0);
+    let cut = |x: i64| {
+        Rect::new(
+            Point::new(Dbu(x), Dbu(0)),
+            Point::new(Dbu(x + 100), Dbu(100)),
+        )
+    };
+    let owner = Owner::Net(0);
+    let fixed = occupancy.add_cut(v1, &cut(0), owner, Origin::Fixed);
+    let wired = occupancy.add_cut(v1, &cut(5000), owner, Origin::Wiring);
+
+    occupancy.remove_wiring(&[Slot::Cut(fixed), Slot::Cut(wired)], owner);
+
+    let other = Owner::Net(1);
+    assert_eq!(occupancy.cut_conflicts(v1, &cut(150), other).count(), 1);
+    assert_eq!(occupancy.cut_conflicts(v1, &cut(5150), other).count(), 0);
 }
 
 #[test]

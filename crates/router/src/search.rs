@@ -11,7 +11,7 @@ use crate::global::GCell;
 use crate::occupancy::{LocalOccupancy, Occupancy, Owner, TrackRef};
 use crate::tech::RouteTech;
 use pare_common::db::design::NetlistDB;
-use pare_common::db::indices::LayerId;
+use pare_common::db::indices::{CutLayerId, LayerId};
 use pare_common::db::library::LayerRef;
 use pare_common::geom::dbu::Dbu;
 use pare_common::geom::point::Point;
@@ -310,12 +310,34 @@ impl Search<'_> {
         for &via in &a.vias {
             cost += self.costs.via;
             for s in &self.db.library.via(via).shapes {
-                if let LayerRef::Routing(l) = s.layer
-                    && self.tech.routable(l)
-                {
-                    cost += self.conflict_cost(l, &s.rect.translate(a.at));
+                let rect = s.rect.translate(a.at);
+                match s.layer {
+                    LayerRef::Routing(l) if self.tech.routable(l) => {
+                        cost += self.conflict_cost(l, &rect);
+                    }
+                    LayerRef::Routing(_) => {}
+                    LayerRef::Cut(c) => cost += self.cut_cost(c, &rect),
                 }
             }
+        }
+        cost
+    }
+
+    /// Cost of other owners' cuts that a cut at `rect` on `cut` would touch
+    /// or crowd.
+    fn cut_cost(&self, cut: CutLayerId, rect: &Rect<Dbu>) -> f64 {
+        let mut cost = 0.0;
+        for o in self.occupancy.cut_conflicts(cut, rect, self.owner) {
+            cost += match o.owner {
+                Owner::Obstacle => OBSTACLE_COST,
+                Owner::Net(_) => self.costs.penalty,
+            };
+        }
+        if let Some(overlay) = self.overlay {
+            let clashes = overlay
+                .cut_conflicts(self.tech, cut, rect, self.owner)
+                .count();
+            cost = self.costs.penalty.mul_add(clashes as f64, cost);
         }
         cost
     }
@@ -362,9 +384,15 @@ impl Search<'_> {
     fn via_cost(&self, bottom: LayerId, at: Point<Dbu>) -> f64 {
         let via = self.tech.via_above(bottom);
         let top = LayerId::new(bottom.index() + 1);
+        let cuts: f64 = via
+            .cuts
+            .iter()
+            .map(|c| self.cut_cost(bottom.cut_above(), &c.translate(at)))
+            .sum();
         self.costs.via
             + self.conflict_cost(bottom, &via.bottom.translate(at))
             + self.conflict_cost(top, &via.top.translate(at))
+            + cuts
     }
 
     pub(crate) fn allowed(&self, layer: LayerId, p: Point<Dbu>) -> bool {

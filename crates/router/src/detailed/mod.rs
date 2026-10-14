@@ -12,16 +12,16 @@ pub use region::{RepairStats, Scope};
 
 use crate::access::{AccessPoint, Node, access_points};
 use crate::global::{GCell, GlobalGrid, GlobalRoutes, RouteTree};
-use crate::occupancy::{LocalOccupancy, Occupancy, Origin, Owner, TrackRef};
+use crate::occupancy::{LocalOccupancy, Occupancy, Origin, Owner, Slot, TrackRef};
 pub use crate::search::Costs;
 use crate::search::{Guide, History, Search, Slack};
 use crate::tech::RouteTech;
 use crate::track::TrackWire;
 use crate::tree::{connection_order, gap, hilbert_order};
 pub use crate::wiring::NetRoute;
-use crate::wiring::{Edge, access_elems, elem_metal, path_edges};
+use crate::wiring::{Edge, access_elems, elem_cuts, elem_metal, path_edges};
 use pare_common::db::design::NetlistDB;
-use pare_common::db::indices::{LayerId, NetId, ViaId};
+use pare_common::db::indices::{CutLayerId, LayerId, NetId, ViaId};
 use pare_common::db::library::{Direction, LayerRef};
 use pare_common::geom::dbu::Dbu;
 use pare_common::geom::point::Point;
@@ -40,7 +40,7 @@ pub struct DetailedRouter<'a> {
     pub occupancy: Occupancy,
     history: History,
     access: Vec<Vec<Vec<AccessPoint>>>,
-    routed: Vec<Vec<TrackRef>>,
+    routed: Vec<Vec<Slot>>,
     routes: Vec<NetRoute>,
     vias: Vec<Vec<(ViaId, Point<Dbu>)>>,
     window_margin: Dbu,
@@ -52,22 +52,24 @@ pub struct DetailedRouter<'a> {
 }
 
 impl<'a> DetailedRouter<'a> {
-    /// Prepares routing: computes pin access and records obstacles and
-    /// pins on the routable layers.
+    /// Prepares routing: computes pin access and records obstacles, pins
+    /// and fixed cuts.
     pub fn new(db: &'a NetlistDB, tech: &'a RouteTech, gcell: Dbu) -> Self {
         let mut occupancy = Occupancy::new(tech, gcell);
         for s in fixed_shapes(db) {
-            let LayerRef::Routing(layer) = s.shape.layer else {
-                continue;
-            };
-            if !tech.routable(layer) {
-                continue;
-            }
             let owner = match s.owner {
                 shapes::Owner::Net(n) => Owner::Net(n.0),
                 shapes::Owner::Obstacle => Owner::Obstacle,
             };
-            let _ = occupancy.add_rect(tech, layer, &s.shape.rect, owner, Origin::Fixed);
+            match s.shape.layer {
+                LayerRef::Routing(layer) if tech.routable(layer) => {
+                    let _ = occupancy.add_rect(tech, layer, &s.shape.rect, owner, Origin::Fixed);
+                }
+                LayerRef::Routing(_) => {}
+                LayerRef::Cut(cut) => {
+                    let _ = occupancy.add_cut(cut, &s.shape.rect, owner, Origin::Fixed);
+                }
+            }
         }
         let mut access: Vec<Vec<Vec<AccessPoint>>> = (0..db.nets.len())
             .into_par_iter()
@@ -211,13 +213,21 @@ impl<'a> DetailedRouter<'a> {
 
     /// Whether `route` of `net` conflicts with the wiring of any net in `nets`.
     fn touches_any(&self, net: NetId, route: &NetRoute, nets: &FxHashSet<u32>) -> bool {
-        route.metal(self.db, self.tech).iter().any(|(layer, rect)| {
+        let owner = Owner::Net(net.0);
+        let listed = |o: Owner| matches!(o, Owner::Net(other) if nets.contains(&other));
+        let metal = route.metal(self.db, self.tech).iter().any(|(layer, rect)| {
             self.tech.routable(*layer)
                 && self
                     .occupancy
-                    .rect_conflicts(self.tech, *layer, rect, Owner::Net(net.0))
-                    .any(|(_, o)| matches!(o.owner, Owner::Net(other) if nets.contains(&other)))
-        })
+                    .rect_conflicts(self.tech, *layer, rect, owner)
+                    .any(|(_, o)| listed(o.owner))
+        });
+        metal
+            || route.cuts(self.db, self.tech).iter().any(|(cut, rect)| {
+                self.occupancy
+                    .cut_conflicts(*cut, rect, owner)
+                    .any(|o| listed(o.owner))
+            })
     }
 
     /// Routes the blocks in nine phases; blocks of one phase are at least a
@@ -277,6 +287,9 @@ impl<'a> DetailedRouter<'a> {
                     overlay.add_rect(self.tech, layer, &rect, Owner::Net(n.0));
                 }
             }
+            for (cut, rect) in route.cuts(self.db, self.tech) {
+                overlay.add_cut(cut, &rect, Owner::Net(n.0));
+            }
             out.push((n, route));
         }
         out
@@ -319,17 +332,19 @@ impl<'a> DetailedRouter<'a> {
     fn commit(&mut self, net: NetId, route: &NetRoute) {
         let previous = std::mem::take(&mut self.routed[net.index()]);
         self.occupancy.remove_wiring(&previous, Owner::Net(net.0));
+        let owner = Owner::Net(net.0);
         let mut touched = Vec::new();
         for (layer, rect) in route.metal(self.db, self.tech) {
             if self.tech.routable(layer) {
-                touched.extend(self.occupancy.add_rect(
-                    self.tech,
-                    layer,
-                    &rect,
-                    Owner::Net(net.0),
-                    Origin::Wiring,
-                ));
+                let tracks =
+                    self.occupancy
+                        .add_rect(self.tech, layer, &rect, owner, Origin::Wiring);
+                touched.extend(tracks.into_iter().map(Slot::Track));
             }
+        }
+        for (cut, rect) in route.cuts(self.db, self.tech) {
+            let bucket = self.occupancy.add_cut(cut, &rect, owner, Origin::Wiring);
+            touched.push(Slot::Cut(bucket));
         }
         touched.sort_unstable();
         touched.dedup();
@@ -367,6 +382,12 @@ impl<'a> DetailedRouter<'a> {
                 }
             })
             .collect();
+        for (_, a, b) in self.occupancy.all_cut_conflicts() {
+            out.push(Marker {
+                at: a.rect.center(),
+                nets: [net(a.owner), net(b.owner)],
+            });
+        }
         for n in 0..self.vias.len() {
             for (_, at) in self.crowded_cuts(n) {
                 out.push(Marker {
@@ -390,24 +411,33 @@ impl<'a> DetailedRouter<'a> {
                 }
             }
         }
+        for (cut, a, b) in self.occupancy.all_cut_conflicts() {
+            self.bump_cut(cut, a.rect.center(), history_step);
+            for o in [a.owner, b.owner] {
+                if let Owner::Net(n) = o {
+                    let _ = nets.insert(NetId(n));
+                }
+            }
+        }
         for n in 0..self.vias.len() {
             for (via, at) in self.crowded_cuts(n) {
-                let bottom = self.db.library.via(via).bottom();
-                for layer in [bottom, LayerId::new(bottom.index() + 1)] {
-                    if let Some(track) = self.track_at(layer, at) {
-                        self.history.bump(
-                            track,
-                            self.tech.layer(layer).across_along(at).1,
-                            history_step,
-                        );
-                    }
-                }
+                self.bump_cut(self.db.library.via(via).cut, at, history_step);
                 let _ = nets.insert(NetId::new(n));
             }
         }
         let mut out: Vec<NetId> = nets.into_iter().collect();
         out.sort_unstable();
         out
+    }
+
+    /// Adds history on the tracks of both layers a cut at `at` joins.
+    fn bump_cut(&mut self, cut: CutLayerId, at: Point<Dbu>, step: f64) {
+        for layer in [cut.below(), cut.above()] {
+            if let Some(track) = self.track_at(layer, at) {
+                let along = self.tech.layer(layer).across_along(at).1;
+                self.history.bump(track, along, step);
+            }
+        }
     }
 
     /// Vias of net `n` within cut spacing of another of its vias on the same cut.
@@ -1179,14 +1209,24 @@ fn reserve_accesses(
                 .flat_map(|e| elem_metal(db, e))
                 .collect::<Vec<_>>()
         };
+        let cuts_of = |a: &AccessPoint| {
+            access_elems(tech, a)
+                .iter()
+                .flat_map(|e| elem_cuts(db, e))
+                .collect::<Vec<_>>()
+        };
         let clear = access[n][k].iter().position(|a| {
-            metal_of(a).iter().all(|(layer, rect)| {
+            let metal_clear = metal_of(a).iter().all(|(layer, rect)| {
                 !tech.routable(*layer)
                     || occupancy
                         .rect_conflicts(tech, *layer, rect, owner)
                         .next()
                         .is_none()
-            })
+            });
+            metal_clear
+                && cuts_of(a)
+                    .iter()
+                    .all(|(cut, rect)| occupancy.cut_conflicts(*cut, rect, owner).next().is_none())
         });
         let chosen = match clear {
             Some(c) => c,
@@ -1197,6 +1237,9 @@ fn reserve_accesses(
             if tech.routable(layer) {
                 let _ = occupancy.add_rect(tech, layer, &rect, owner, Origin::Fixed);
             }
+        }
+        for (cut, rect) in cuts_of(&access[n][k][chosen]) {
+            let _ = occupancy.add_cut(cut, &rect, owner, Origin::Fixed);
         }
         let picked = access[n][k].swap_remove(chosen);
         access[n][k] = vec![picked];

@@ -95,8 +95,27 @@ pub struct ViaTech {
     pub bottom: Rect<Dbu>,
     /// Metal on the layer above.
     pub top: Rect<Dbu>,
+    /// Its cuts.
+    pub cuts: Vec<Rect<Dbu>>,
     /// Center distance below which two of these cuts break the cut spacing.
     pub cut_reach: Dbu,
+}
+
+/// Spacing rules of one cut layer.
+#[derive(Clone, Copy, Debug)]
+pub struct CutTech {
+    /// Minimum distance between cuts of different owners, edge to edge.
+    pub spacing: Dbu,
+    /// Half the largest side of any cut on the layer.
+    pub max_half: Dbu,
+}
+
+impl CutTech {
+    /// How far beyond a cut another cut's center can be and still be too
+    /// close to it.
+    pub const fn reach(&self) -> Dbu {
+        Dbu(self.spacing.0 + self.max_half.0)
+    }
 }
 
 /// Everything the router needs to know about the technology.
@@ -113,6 +132,8 @@ pub struct RouteTech {
     /// Every via on each cut, least overhang on the layer above first, for
     /// reaching pins below the routable layers.
     pub access_vias: Vec<Vec<ViaTech>>,
+    /// Spacing rules of every cut layer, indexed by cut id.
+    pub cuts: Vec<CutTech>,
 }
 
 pub(crate) fn to_u32(i: usize) -> u32 {
@@ -189,14 +210,17 @@ impl RouteTech {
             })
             .collect::<Result<Vec<_>, _>>()?;
         let access_vias = cuts
+            .clone()
             .map(|c| ranked_vias(db, CutLayerId::new(c), &layers, false))
             .collect();
+        let cuts = cuts.map(|c| cut_tech(db, CutLayerId::new(c))).collect();
         Ok(Self {
             min_layer,
             max_layer,
             layers,
             vias,
             access_vias,
+            cuts,
         })
     }
 
@@ -265,6 +289,23 @@ fn across_overhang(rect: &Rect<Dbu>, layer: &LayerTech) -> Dbu {
     (hi - half).max(-lo - half).max(Dbu::ZERO)
 }
 
+/// The spacing of cut layer `cut` and the largest cut of any via on it.
+fn cut_tech(db: &NetlistDB, cut: CutLayerId) -> CutTech {
+    let lib = &db.library;
+    let max_half = lib
+        .vias
+        .iter()
+        .flat_map(|v| v.shapes.iter())
+        .filter(|s| s.layer == LayerRef::Cut(cut))
+        .map(|s| s.rect.width().max(s.rect.height()))
+        .max()
+        .unwrap_or_default();
+    CutTech {
+        spacing: lib.cut_layers[cut.index()].spacing.unwrap_or_default(),
+        max_half: Dbu(max_half.get().div_euclid(2) + max_half.get().rem_euclid(2)),
+    }
+}
+
 /// Every LEF via through `cut`, ordered by how far its metal sticks out
 /// across the tracks of both layers (or of the upper layer only, when
 /// `both` is false), then LEF defaults first, then smaller metal.
@@ -300,12 +341,19 @@ fn ranked_vias(db: &NetlistDB, cut: CutLayerId, layers: &[LayerTech], both: bool
             .max()
             .unwrap_or_default();
         let spacing = lib.cut_layers[cut.index()].spacing.unwrap_or_default();
+        let cuts = v
+            .shapes
+            .iter()
+            .filter(|s| s.layer == LayerRef::Cut(cut))
+            .map(|s| s.rect)
+            .collect();
         ranked.push((
             key,
             ViaTech {
                 via: ViaId::new(i),
                 bottom,
                 top,
+                cuts,
                 cut_reach: cut_size + spacing,
             },
         ));

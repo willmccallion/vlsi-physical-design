@@ -16,7 +16,7 @@ use crate::access::Node;
 use crate::occupancy::{LocalOccupancy, Owner};
 use crate::search::{Costs, Search};
 use crate::wiring::{DisjointSets, Edge, NetRoute, path_edges};
-use pare_common::db::indices::NetId;
+use pare_common::db::indices::{CutLayerId, NetId};
 use pare_common::geom::dbu::Dbu;
 use pare_common::geom::point::Point;
 use pare_common::geom::rect::Rect;
@@ -257,6 +257,9 @@ impl DetailedRouter<'_> {
                     for (layer, rect) in self.edge_metal(edges) {
                         overlay.add_rect(self.tech, layer, &rect, owner);
                     }
+                    for (cut, rect) in self.edge_cuts(edges) {
+                        overlay.add_cut(cut, &rect, owner);
+                    }
                 }
             }
             todo = (0..pieces.len())
@@ -274,10 +277,10 @@ impl DetailedRouter<'_> {
         results
     }
 
-    /// Whether the metal of `edges` of `net` conflicts with anything.
+    /// Whether the metal or cuts of `edges` of `net` conflict with anything.
     fn clashes(&self, net: NetId, edges: &[Edge], overlay: &LocalOccupancy) -> bool {
         let owner = Owner::Net(net.0);
-        self.edge_metal(edges).iter().any(|(layer, rect)| {
+        let metal = self.edge_metal(edges).iter().any(|(layer, rect)| {
             self.occupancy
                 .rect_conflicts(self.tech, *layer, rect, owner)
                 .next()
@@ -286,7 +289,27 @@ impl DetailedRouter<'_> {
                     .rect_conflicts(self.tech, *layer, rect, owner)
                     .next()
                     .is_some()
-        })
+        });
+        metal
+            || self.edge_cuts(edges).iter().any(|(cut, rect)| {
+                self.occupancy
+                    .cut_conflicts(*cut, rect, owner)
+                    .next()
+                    .is_some()
+                    || overlay
+                        .cut_conflicts(self.tech, *cut, rect, owner)
+                        .next()
+                        .is_some()
+            })
+    }
+
+    /// The cuts of some edges.
+    fn edge_cuts(&self, edges: &[Edge]) -> Vec<(CutLayerId, Rect<Dbu>)> {
+        NetRoute {
+            edges: edges.to_vec(),
+            ..NetRoute::default()
+        }
+        .cuts(self.db, self.tech)
     }
 
     /// The metal of some edges on routable layers.

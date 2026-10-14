@@ -8,7 +8,7 @@
 use crate::access::{AccessPoint, Node};
 use crate::tech::RouteTech;
 use pare_common::db::design::{NetlistDB, RouteElem};
-use pare_common::db::indices::{LayerId, ViaId};
+use pare_common::db::indices::{CutLayerId, LayerId, ViaId};
 use pare_common::db::library::LayerRef;
 use pare_common::geom::dbu::Dbu;
 use pare_common::geom::point::Point;
@@ -142,6 +142,14 @@ impl NetRoute {
             .collect()
     }
 
+    /// Its via cuts, by cut layer.
+    pub fn cuts(&self, db: &NetlistDB, tech: &RouteTech) -> Vec<(CutLayerId, Rect<Dbu>)> {
+        self.elems(tech)
+            .iter()
+            .flat_map(|e| elem_cuts(db, e))
+            .collect()
+    }
+
     /// Every via it places, with its location.
     pub fn vias(&self, tech: &RouteTech) -> Vec<(ViaId, Point<Dbu>)> {
         self.elems(tech)
@@ -199,6 +207,23 @@ pub fn access_elems(tech: &RouteTech, a: &AccessPoint) -> Vec<RouteElem> {
     }
     out.extend(a.vias.iter().map(|&via| RouteElem::Via { via, at: a.at }));
     out
+}
+
+/// The cuts of one piece of wiring.
+pub fn elem_cuts(db: &NetlistDB, elem: &RouteElem) -> Vec<(CutLayerId, Rect<Dbu>)> {
+    match *elem {
+        RouteElem::Wire { .. } => Vec::new(),
+        RouteElem::Via { via, at } => db
+            .library
+            .via(via)
+            .shapes
+            .iter()
+            .filter_map(|s| match s.layer {
+                LayerRef::Cut(c) => Some((c, s.rect.translate(at))),
+                LayerRef::Routing(_) => None,
+            })
+            .collect(),
+    }
 }
 
 /// The metal of one piece of wiring on routing layers.
