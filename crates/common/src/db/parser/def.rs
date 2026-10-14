@@ -2,11 +2,12 @@
 //!
 //! Reads the die area, rows, tracks, vias, components, pins, blockages,
 //! special nets and nets of a design on top of a [`Library`] built from LEF.
-//! `REGIONS`, `GROUPS`, `GCELLGRID`, `SCANCHAINS` and similar sections are
-//! skipped, so region constraints are not honoured.
+//! `REGIONS`, `GROUPS`, `SCANCHAINS` and similar sections are skipped, so
+//! region constraints are not honoured.
 
 use crate::db::design::{
-    NetlistDB, PlacementStatus, RouteElem, Row, SpecialNet, SpecialWire, TrackAxis, TrackDef,
+    GCellGridDef, NetlistDB, PlacementStatus, RouteElem, Row, SpecialNet, SpecialWire, TrackAxis,
+    TrackDef,
 };
 use crate::db::indices::{LayerId, NetId, ViaId};
 use crate::db::library::{LayerRef, Library, PinDirection, Shape, SignalUse};
@@ -95,6 +96,7 @@ impl<'a> DefParser<'a> {
                 "DIEAREA" => self.die_area()?,
                 "ROW" => self.row()?,
                 "TRACKS" => self.tracks()?,
+                "GCELLGRID" => self.gcell_grid()?,
                 "VIAS" => self.section("VIAS", Self::def_via)?,
                 "COMPONENTS" => self.section("COMPONENTS", Self::component)?,
                 "PINS" => self.section("PINS", Self::io_pin)?,
@@ -296,17 +298,34 @@ impl<'a> DefParser<'a> {
         Ok(())
     }
 
+    fn axis(&mut self) -> Result<TrackAxis, ParseError> {
+        let t = self.lx.expect_token("axis")?;
+        match t.text {
+            "X" => Ok(TrackAxis::X),
+            "Y" => Ok(TrackAxis::Y),
+            other => Err(self.lx.error(t.line, format!("unknown axis '{other}'"))),
+        }
+    }
+
+    fn gcell_grid(&mut self) -> Result<(), ParseError> {
+        let axis = self.axis()?;
+        let start = self.dbu("gcell grid start")?;
+        self.lx.expect("DO")?;
+        let count = self.lx.number("gcell grid count")?;
+        self.lx.expect("STEP")?;
+        let step = self.dbu("gcell grid step")?;
+        self.lx.expect(";")?;
+        self.db.gcell_grid.push(GCellGridDef {
+            axis,
+            start,
+            count,
+            step,
+        });
+        Ok(())
+    }
+
     fn tracks(&mut self) -> Result<(), ParseError> {
-        let t = self.lx.expect_token("track axis")?;
-        let axis = match t.text {
-            "X" => TrackAxis::X,
-            "Y" => TrackAxis::Y,
-            other => {
-                return Err(self
-                    .lx
-                    .error(t.line, format!("unknown track axis '{other}'")));
-            }
-        };
+        let axis = self.axis()?;
         let start = self.dbu("track start")?;
         self.lx.expect("DO")?;
         let count = self.lx.number("track count")?;

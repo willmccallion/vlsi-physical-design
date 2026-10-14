@@ -18,9 +18,11 @@ pub mod wiring;
 
 use detailed::{Costs, DetailedRouter, Scope, routable_nets};
 use global::{GlobalGrid, GlobalNet, route_global};
-use pare_common::db::design::{NetlistDB, PlacementStatus, RouteElem};
+use pare_common::db::design::{GCellGridDef, NetlistDB, PlacementStatus, RouteElem, TrackAxis};
 use pare_common::db::indices::NetId;
 use pare_common::db::library::Shape;
+use pare_common::geom::dbu::Dbu;
+use pare_common::geom::point::Point;
 use pare_common::util::config::{LayerRangeError, RoutingConfig};
 use pare_common::util::ui;
 use search::MAX_PENALTY;
@@ -71,7 +73,7 @@ pub fn route(db: &mut NetlistDB, config: &RoutingConfig) -> Result<RoutingSummar
         history: 4.0 * pitch,
     };
 
-    let (routes, summary) = {
+    let (routes, summary, gcells) = {
         let start = Instant::now();
         let mut dr = DetailedRouter::new(db, &tech, gcell);
         let nets = routable_nets(db);
@@ -178,8 +180,9 @@ pub fn route(db: &mut NetlistDB, config: &RoutingConfig) -> Result<RoutingSummar
             .iter()
             .map(|&n| (n, dr.routes()[n.index()].elems(&tech)))
             .collect();
-        (wiring, summary)
+        (wiring, summary, gcell_grid(db.die_area.min, gcell, nx, ny))
     };
+    db.gcell_grid = gcells;
     for net in &mut db.nets {
         net.routing.clear();
     }
@@ -187,6 +190,23 @@ pub fn route(db: &mut NetlistDB, config: &RoutingConfig) -> Result<RoutingSummar
         db.nets[n.index()].routing = elems;
     }
     Ok(summary)
+}
+
+/// The DEF gcell grid of `nx` by `ny` gcells of edge `gcell` from `origin`.
+fn gcell_grid(origin: Point<Dbu>, gcell: Dbu, nx: u16, ny: u16) -> Vec<GCellGridDef> {
+    let lines = |start: Dbu, cells: u16| GCellGridDef {
+        axis: TrackAxis::X,
+        start,
+        count: u32::from(cells) + 1,
+        step: gcell,
+    };
+    vec![
+        lines(origin.x, nx),
+        GCellGridDef {
+            axis: TrackAxis::Y,
+            ..lines(origin.y, ny)
+        },
+    ]
 }
 
 /// An error naming the cells whose pins of different nets overlap, which

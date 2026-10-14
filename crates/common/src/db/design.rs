@@ -111,6 +111,20 @@ impl TrackAxis {
     }
 }
 
+/// A DEF `GCELLGRID` statement: evenly spaced gcell boundaries along one
+/// axis.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct GCellGridDef {
+    /// Coordinate the boundaries are spaced along.
+    pub axis: TrackAxis,
+    /// Position of the first boundary.
+    pub start: Dbu,
+    /// Number of boundaries.
+    pub count: u32,
+    /// Distance between boundaries.
+    pub step: Dbu,
+}
+
 /// A DEF `TRACKS` statement.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct TrackDef {
@@ -288,6 +302,8 @@ pub struct NetlistDB {
     pub rows: Vec<Row>,
     /// Routing tracks.
     pub tracks: Vec<TrackDef>,
+    /// The gcells routing works in.
+    pub gcell_grid: Vec<GCellGridDef>,
     /// Placed instances.
     pub cells: Vec<Cell>,
     /// Signal nets.
@@ -316,6 +332,7 @@ impl NetlistDB {
             die_area: Rect::default(),
             rows: Vec::new(),
             tracks: Vec::new(),
+            gcell_grid: Vec::new(),
             cells: Vec::new(),
             nets: Vec::new(),
             pins: Vec::new(),

@@ -2,7 +2,7 @@
 
 #![allow(clippy::unwrap_used)]
 
-use pare_common::db::design::{NetlistDB, PlacementStatus, RouteElem};
+use pare_common::db::design::{GCellGridDef, NetlistDB, PlacementStatus, RouteElem, TrackAxis};
 use pare_common::db::indices::{CellId, CutLayerId, LayerId, PinId};
 use pare_common::db::library::{Direction, LayerRef, Library, MacroClass, Shape};
 use pare_common::db::parser::{bookshelf, def, lef};
@@ -131,6 +131,21 @@ fn def_reads_rows_tracks_and_die_area() {
     assert_eq!(db.rows[1].orient, Orientation::FS);
     assert_eq!(db.rows[2].bbox(&db.library), rect(0, 4000, 4000, 6000));
     assert_eq!(db.tracks[2].layers, [LayerId(2)]);
+}
+
+#[test]
+fn def_reads_the_gcell_grid() {
+    let db = tiny_design();
+
+    assert_eq!(
+        db.gcell_grid,
+        [GCellGridDef {
+            axis: TrackAxis::X,
+            start: Dbu(0),
+            count: 4,
+            step: Dbu(2000),
+        }]
+    );
 }
 
 #[test]

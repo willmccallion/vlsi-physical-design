@@ -65,6 +65,17 @@ pub fn write(db: &NetlistDB, out: &mut impl Write) -> io::Result<()> {
         writeln!(out, " ;")?;
     }
 
+    for g in &db.gcell_grid {
+        writeln!(
+            out,
+            "GCELLGRID {} {} DO {} STEP {} ;",
+            g.axis.as_str(),
+            g.start,
+            g.count,
+            g.step
+        )?;
+    }
+
     write_vias(lib, out)?;
     write_components(db, out)?;
     write_pins(db, out)?;
