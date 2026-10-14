@@ -1,7 +1,9 @@
 //! Routing checks on exact geometry: shorts, spacing, opens and wiring stats.
 //!
 //! Only pairs involving routed wiring are checked for shorts and spacing;
-//! cell masters and pre-existing special wiring are assumed clean. Spacing
+//! cell masters and pre-existing special wiring are assumed clean. Shapes
+//! of different owners need the spacing of the layer's parallel run table,
+//! for the wider shape's width and the length they face each other. Spacing
 //! also applies between two shapes of the same net that do not touch,
 //! unless another shape of the net fills the gap between them, and between
 //! two cuts of the same net. The metal of two vias of one net must keep the
@@ -110,6 +112,46 @@ fn min_spacing(db: &NetlistDB, layer: LayerRef) -> Dbu {
         LayerRef::Cut(c) => db.library.cut_layers[c.index()]
             .spacing
             .unwrap_or(Dbu::ZERO),
+    }
+}
+
+/// The largest spacing any two shapes on `layer` can need.
+fn widest_spacing(db: &NetlistDB, layer: LayerRef) -> Dbu {
+    let min = min_spacing(db, layer);
+    match layer {
+        LayerRef::Routing(l) => db
+            .library
+            .layer(l)
+            .spacing_table
+            .as_ref()
+            .map_or(min, |t| t.widest_for(Dbu(i64::MAX)).max(min)),
+        LayerRef::Cut(_) => min,
+    }
+}
+
+/// The spacing two shapes of different owners on `layer` need: from the
+/// layer's spacing table for the wider shape's width and the length they
+/// run side by side, or its minimum spacing.
+fn required_spacing(db: &NetlistDB, layer: LayerRef, a: &Rect<Dbu>, b: &Rect<Dbu>) -> Dbu {
+    let LayerRef::Routing(l) = layer else {
+        return min_spacing(db, layer);
+    };
+    let Some(table) = &db.library.layer(l).spacing_table else {
+        return min_spacing(db, layer);
+    };
+    let width = |r: &Rect<Dbu>| r.width().min(r.height());
+    table.spacing(width(a).max(width(b)), parallel_run(a, b))
+}
+
+/// The length over which two disjoint rectangles face each other across a
+/// gap; zero or less when they are apart in both directions.
+fn parallel_run(a: &Rect<Dbu>, b: &Rect<Dbu>) -> Dbu {
+    let x = a.max.x.min(b.max.x) - a.min.x.max(b.min.x);
+    let y = a.max.y.min(b.max.y) - a.min.y.max(b.min.y);
+    match (x > Dbu::ZERO, y > Dbu::ZERO) {
+        (true, false) => x,
+        (false, true) => y,
+        _ => Dbu::ZERO,
     }
 }
 
@@ -268,7 +310,7 @@ fn check_wiring_shape(
     let index = &indexes[layer_slot(db, layer)];
     let sp = min_spacing(db, layer);
     let sp_sq = i128::from(sp.get()) * i128::from(sp.get());
-    let reach = wiring.shape.rect.expand(sp);
+    let reach = wiring.shape.rect.expand(widest_spacing(db, layer));
     index.grid.for_each_bin(&reach, |bin| {
         for &member in index.members(bin) {
             let near = member as usize;
@@ -316,7 +358,8 @@ fn check_wiring_shape(
                 });
             } else {
                 let d = distance_sq(&wiring.shape.rect, &r);
-                if d < sp_sq {
+                let need = i128::from(required_spacing(db, layer, &wiring.shape.rect, &r).get());
+                if d < need * need {
                     spacing.push(SpacingViolation {
                         layer,
                         net,

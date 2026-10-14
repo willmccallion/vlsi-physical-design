@@ -2,9 +2,9 @@
 
 #![allow(clippy::unwrap_used)]
 
-use pare_common::db::design::{NetlistDB, PlacementStatus, RouteElem};
+use pare_common::db::design::{NetlistDB, PlacementStatus, RouteElem, SpecialNet, SpecialWire};
 use pare_common::db::indices::{CellId, CutLayerId, LayerId, NetId};
-use pare_common::db::library::LayerRef;
+use pare_common::db::library::{LayerRef, SignalUse};
 use pare_common::db::parser::{def, lef};
 use pare_common::geom::dbu::{Dbu, DbuPerMicron};
 use pare_common::geom::orient::Orientation;
@@ -208,6 +208,34 @@ fn two_vias_of_one_net_must_keep_their_metal_apart_even_when_wired() {
         .collect();
     assert_eq!(on_m2.len(), 1, "{:?}", report.spacing);
     assert_eq!(on_m2[0].distance_sq, 80 * 80);
+}
+
+#[test]
+fn a_wire_running_long_beside_a_wide_shape_needs_the_table_spacing() {
+    let mut db = empty_design();
+    let _ = routed_net(&mut db, "a", vec![wire(M2, pt(600, 1000), pt(600, 3000))]);
+    let _ = routed_net(&mut db, "b", vec![wire(M2, pt(600, 4000), pt(600, 4300))]);
+    db.special_nets.push(SpecialNet {
+        name: "VDD".into(),
+        signal_use: SignalUse::Power,
+        connections: Vec::new(),
+        wires: vec![SpecialWire {
+            layer: M2,
+            width: Dbu(400),
+            from: pt(200, 1000),
+            to: pt(200, 3000),
+            shape: Some("STRIPE".into()),
+        }],
+        vias: Vec::new(),
+    });
+
+    let spacing = check_routing(&db).spacing;
+
+    assert_eq!(spacing.len(), 1, "{spacing:?}");
+    assert_eq!(
+        (spacing[0].other, spacing[0].distance_sq),
+        (Owner::Obstacle, 150 * 150)
+    );
 }
 
 #[test]
