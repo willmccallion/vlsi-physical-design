@@ -399,6 +399,32 @@ impl<'a> DetailedRouter<'a> {
         out
     }
 
+    /// Logs every remaining conflict at debug level.
+    pub fn log_conflicts(&self) {
+        if !log::log_enabled!(log::Level::Debug) {
+            return;
+        }
+        for (track, a, b) in self.occupancy.all_conflicts(self.tech) {
+            let lt = self.tech.layer(track.layer);
+            log::debug!(
+                "conflict on layer {} track {} at {}: {:?} {:?}",
+                track.layer.index(),
+                track.track,
+                lt.tracks[track.track as usize],
+                a,
+                b
+            );
+        }
+        for (cut, a, b) in self.occupancy.all_cut_conflicts() {
+            log::debug!("cut conflict on cut {}: {a:?} {b:?}", cut.index());
+        }
+        for n in 0..self.vias.len() {
+            for (_, at) in self.crowded_cuts(n) {
+                log::debug!("crowded cut of net {n} at {at:?}");
+            }
+        }
+    }
+
     /// Records every current conflict in the history and returns the nets
     /// involved.
     pub fn conflicted_nets(&mut self, history_step: f64) -> Vec<NetId> {

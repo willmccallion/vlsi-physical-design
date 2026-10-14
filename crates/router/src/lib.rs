@@ -164,6 +164,7 @@ pub fn route(db: &mut NetlistDB, config: &RoutingConfig) -> Result<RoutingSummar
                 start.elapsed().as_millis(),
             );
         }
+        dr.log_conflicts();
         summary.conflicted = conflicted;
         summary.incomplete = nets
             .iter()

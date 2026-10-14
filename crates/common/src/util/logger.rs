@@ -6,15 +6,14 @@
 
 /// Initializes the logging system with styled formatting.
 ///
-/// Configures `env_logger` to use Info level filtering with clean,
+/// Filters at Info level unless `RUST_LOG` says otherwise, with clean,
 /// minimal output formatting. Initializes `yansi` TTY detection
 /// for stderr so colors are automatically disabled when piped.
 pub fn init() {
     // Enable yansi colors only when stderr is a TTY
     yansi::whenever(yansi::Condition::TTY_AND_COLOR);
 
-    env_logger::builder()
-        .filter_level(log::LevelFilter::Info)
+    env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("info"))
         .format_timestamp(None)
         .format(|_buf, record| {
             use std::io::Write;

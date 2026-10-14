@@ -416,6 +416,20 @@ fn report_placement(db: &NetlistDB) -> bool {
 /// Prints routing check results; returns whether there are no shorts or opens.
 fn report_routing(db: &NetlistDB) -> bool {
     let report = check_routing(db);
+    for short in &report.shorts {
+        log::debug!("short: {short:?}");
+    }
+    for v in &report.spacing {
+        log::debug!("spacing: {v:?}");
+    }
+    for open in &report.opens {
+        log::debug!(
+            "open: net {} '{}' in {} pieces",
+            open.net.index(),
+            db.nets[open.net.index()].name,
+            open.components
+        );
+    }
     let units = db.dbu();
     let wirelength: f64 = report
         .stats
