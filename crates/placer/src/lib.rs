@@ -16,6 +16,7 @@ pub mod model;
 /// field computation, and intermediate arrays for gradient calculations. The
 /// physics context is reused across iterations to avoid repeated allocations.
 pub mod physics;
+pub mod rows;
 /// Optimization solvers for minimizing the placement objective function.
 ///
 /// Contains the optimization algorithms that minimize the placement objective
