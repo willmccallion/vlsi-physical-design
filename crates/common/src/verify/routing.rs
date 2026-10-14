@@ -1,8 +1,10 @@
 //! Routing checks on exact geometry: shorts, spacing, opens and wiring stats.
 //!
 //! Only pairs involving routed wiring are checked for shorts and spacing;
-//! cell masters and pre-existing special wiring are assumed clean. Cut
-//! spacing also applies between two cuts of the same net.
+//! cell masters and pre-existing special wiring are assumed clean. Spacing
+//! also applies between two shapes of the same net that do not touch,
+//! unless another shape of the net fills the gap between them, and between
+//! two cuts of the same net.
 
 use super::shapes::{
     OwnedShape, Owner, fixed_shapes, is_signal_net, layer_slot, route_elem_shapes, wiring_shapes,
@@ -40,6 +42,8 @@ pub struct SpacingViolation {
     pub other: Owner,
     /// Squared distance between the shapes.
     pub distance_sq: i128,
+    /// The space between the shapes.
+    pub at: Rect<Dbu>,
 }
 
 /// A signal net whose pins are not all connected.
@@ -268,28 +272,30 @@ fn check_wiring_shape(
             let other = &shapes[near];
             let same_net = other.owner == wiring.owner;
             let cut = matches!(layer, LayerRef::Cut(_));
-            if near == this || (other.wiring && near < this) || (same_net && !(cut && other.wiring))
-            {
+            if near == this || (other.wiring && near < this) || (same_net && cut && !other.wiring) {
                 continue;
             }
             let r = other.shape.rect;
             if !reach.touches(&r) {
                 continue;
             }
+            let owner_point = Point::new(reach.min.x.max(r.min.x), reach.min.y.max(r.min.y));
+            if index.grid.bin_of(owner_point) != bin {
+                continue;
+            }
             if same_net {
                 let d = distance_sq(&wiring.shape.rect, &r);
-                if d > 0 && d < sp_sq {
+                let bridged =
+                    || !cut && bridged(shapes, index, wiring.owner, &gap(&wiring.shape.rect, &r));
+                if d > 0 && d < sp_sq && !bridged() {
                     spacing.push(SpacingViolation {
                         layer,
                         net,
                         other: other.owner,
                         distance_sq: d,
+                        at: gap(&wiring.shape.rect, &r),
                     });
                 }
-                continue;
-            }
-            let owner_point = Point::new(reach.min.x.max(r.min.x), reach.min.y.max(r.min.y));
-            if index.grid.bin_of(owner_point) != bin {
                 continue;
             }
             if let Some(at) = wiring.shape.rect.intersection(&r) {
@@ -307,11 +313,44 @@ fn check_wiring_shape(
                         net,
                         other: other.owner,
                         distance_sq: d,
+                        at: gap(&wiring.shape.rect, &r),
                     });
                 }
             }
         }
     });
+}
+
+/// The rectangle between two disjoint rectangles: their overlap along an
+/// axis where they overlap, the space between them along one where they
+/// do not.
+fn gap(a: &Rect<Dbu>, b: &Rect<Dbu>) -> Rect<Dbu> {
+    let span = |lo_a: Dbu, hi_a: Dbu, lo_b: Dbu, hi_b: Dbu| {
+        if hi_a < lo_b {
+            (hi_a, lo_b)
+        } else if hi_b < lo_a {
+            (hi_b, lo_a)
+        } else {
+            (lo_a.max(lo_b), hi_a.min(hi_b))
+        }
+    };
+    let (x0, x1) = span(a.min.x, a.max.x, b.min.x, b.max.x);
+    let (y0, y1) = span(a.min.y, a.max.y, b.min.y, b.max.y);
+    Rect::new(Point::new(x0, y0), Point::new(x1, y1))
+}
+
+/// Whether some shape of `owner` in `index` covers all of `gap`, so that
+/// the two shapes on either side of it are one piece of metal.
+fn bridged(shapes: &[OwnedShape], index: &BinIndex, owner: Owner, gap: &Rect<Dbu>) -> bool {
+    let mut found = false;
+    index.grid.for_each_bin(gap, |bin| {
+        found = found
+            || index.members(bin).iter().any(|&m| {
+                let s = &shapes[m as usize];
+                s.owner == owner && s.shape.rect.encloses(gap)
+            });
+    });
+    found
 }
 
 /// Whether metal or cut shapes on these layers can conduct into each other.

@@ -147,6 +147,35 @@ fn wires_closer_than_min_spacing_are_a_spacing_violation() {
 }
 
 #[test]
+fn two_wires_of_one_net_closer_than_min_spacing_are_a_spacing_violation() {
+    let mut db = empty_design();
+    let routing = vec![
+        wire(M1, pt(0, 500), pt(1000, 500)),
+        wire(M1, pt(1180, 500), pt(2000, 500)),
+    ];
+    let _ = routed_net(&mut db, "a", routing);
+
+    let report = check_routing(&db);
+
+    assert!(report.shorts.is_empty());
+    assert_eq!(report.spacing.len(), 1);
+    assert_eq!(report.spacing[0].distance_sq, 80 * 80);
+}
+
+#[test]
+fn a_gap_in_one_net_filled_by_its_own_wire_is_clean() {
+    let mut db = empty_design();
+    let routing = vec![
+        wire(M1, pt(0, 500), pt(1000, 500)),
+        wire(M1, pt(1180, 500), pt(2000, 500)),
+        wire(M1, pt(900, 500), pt(1300, 500)),
+    ];
+    let _ = routed_net(&mut db, "a", routing);
+
+    assert!(check_routing(&db).spacing.is_empty());
+}
+
+#[test]
 fn pins_joined_through_vias_and_an_upper_wire_are_connected() {
     let mut db = empty_design();
     let net = two_inverters_on_a_net(&mut db);
