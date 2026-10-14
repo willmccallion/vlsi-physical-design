@@ -6,7 +6,7 @@
 //! compute the potential field in O(N log N) time.
 
 use super::PhysicsContext;
-use pare_common::db::core::NetlistDB;
+use crate::model::PlacementModel;
 use pare_common::geom::point::Point;
 use rustfft::FftPlanner;
 use rustfft::num_complex::Complex;
@@ -19,34 +19,34 @@ use std::f64::consts::PI;
 /// wraparound artifacts.
 pub fn compute_density_force(
     ctx: &mut PhysicsContext,
-    db: &NetlistDB,
+    model: &PlacementModel,
     positions: &[Point<f64>],
     target_density: f64,
     force_multiplier: f64,
     gradients: &mut [Point<f64>],
 ) -> f64 {
     let dim = ctx.bin_dim;
-    let bin_w = db.die_area.width() / dim as f64;
-    let bin_h = db.die_area.height() / dim as f64;
+    let bin_w = model.die.width() / dim as f64;
+    let bin_h = model.die.height() / dim as f64;
     let bin_area = bin_w * bin_h;
 
     // --- Step 1: Exact area overlap density distribution ---
     ctx.density_map.fill(0.0);
 
     for (i, pos) in positions.iter().enumerate() {
-        let cell = &db.cells[i];
+        let size = model.sizes[i];
 
         // Cell bounding box (position is lower-left corner)
         let cell_min_x = pos.x;
-        let cell_max_x = pos.x + cell.width;
+        let cell_max_x = pos.x + size.x;
         let cell_min_y = pos.y;
-        let cell_max_y = pos.y + cell.height;
+        let cell_max_y = pos.y + size.y;
 
         // Bin range that the cell overlaps
-        let start_col = ((cell_min_x - db.die_area.min.x) / bin_w).floor() as isize;
-        let end_col = ((cell_max_x - db.die_area.min.x) / bin_w).ceil() as isize;
-        let start_row = ((cell_min_y - db.die_area.min.y) / bin_h).floor() as isize;
-        let end_row = ((cell_max_y - db.die_area.min.y) / bin_h).ceil() as isize;
+        let start_col = ((cell_min_x - model.die.min.x) / bin_w).floor() as isize;
+        let end_col = ((cell_max_x - model.die.min.x) / bin_w).ceil() as isize;
+        let start_row = ((cell_min_y - model.die.min.y) / bin_h).floor() as isize;
+        let end_row = ((cell_max_y - model.die.min.y) / bin_h).ceil() as isize;
 
         let start_col = start_col.max(0).min(dim as isize - 1);
         let end_col = end_col.max(0).min(dim as isize);
@@ -56,9 +56,9 @@ pub fn compute_density_force(
         for r in start_row..end_row {
             for c in start_col..end_col {
                 // Bin bounding box
-                let bx_min = (c as f64).mul_add(bin_w, db.die_area.min.x);
+                let bx_min = (c as f64).mul_add(bin_w, model.die.min.x);
                 let bx_max = bx_min + bin_w;
-                let by_min = (r as f64).mul_add(bin_h, db.die_area.min.y);
+                let by_min = (r as f64).mul_add(bin_h, model.die.min.y);
                 let by_max = by_min + bin_h;
 
                 // Overlap area between cell and bin
@@ -125,16 +125,16 @@ pub fn compute_density_force(
 
     // --- Step 4: Apply forces to cells using bilinear interpolation at cell center ---
     for (i, pos) in positions.iter().enumerate() {
-        if db.cells[i].is_fixed {
+        if !model.movable[i] {
             continue;
         }
 
         // Use cell center for force lookup
-        let cx = pos.x + db.cells[i].width / 2.0;
-        let cy = pos.y + db.cells[i].height / 2.0;
+        let cx = pos.x + model.sizes[i].x / 2.0;
+        let cy = pos.y + model.sizes[i].y / 2.0;
 
-        let fx = (cx - db.die_area.min.x) / bin_w - 0.5;
-        let fy = (cy - db.die_area.min.y) / bin_h - 0.5;
+        let fx = (cx - model.die.min.x) / bin_w - 0.5;
+        let fy = (cy - model.die.min.y) / bin_h - 0.5;
 
         let ix = fx.floor() as isize;
         let iy = fy.floor() as isize;

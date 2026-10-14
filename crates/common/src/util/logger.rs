@@ -1,6 +1,6 @@
 //! Logging Initialization.
 //!
-//! Sets up the logging infrastructure using env_logger with styled output.
+//! Sets up the logging infrastructure using `env_logger` with styled output.
 //! Info messages get a clean 2-space indent, warnings get a yellow prefix,
 //! errors get a red prefix, and debug/trace use a bracketed format.
 

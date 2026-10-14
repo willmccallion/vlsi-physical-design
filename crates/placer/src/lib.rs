@@ -2,10 +2,11 @@
 //!
 //! This crate implements analytical placement algorithms using physics-based
 //! optimization. It includes global placement using Nesterov-accelerated
-//! gradient descent, legalization algorithms (Abacus and Tetris), and
+//! gradient descent, Abacus legalization, and
 //! physics simulation for wirelength and density optimization.
 
 pub mod legalize;
+pub mod model;
 /// Physics-based placement optimization using wirelength and density forces.
 ///
 /// Implements the physics simulation used in analytical placement, including

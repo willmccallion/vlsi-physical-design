@@ -5,7 +5,7 @@
 //! differentiable gradients for optimization while closely approximating the
 //! true wirelength objective.
 
-use pare_common::db::core::NetlistDB;
+use crate::model::{PinAnchor, PlacementModel};
 use pare_common::geom::point::Point;
 
 /// Computes wirelength cost and gradients using weighted average approximation.
@@ -16,7 +16,7 @@ use pare_common::geom::point::Point;
 /// gradients with respect to each cell's position and accumulates them into
 /// the gradients array. Returns the total wirelength cost.
 pub fn compute_wa_gradient(
-    db: &NetlistDB,
+    model: &PlacementModel,
     positions: &[Point<f64>],
     gamma: f64,
     gradients: &mut [Point<f64>],
@@ -24,7 +24,7 @@ pub fn compute_wa_gradient(
     let mut total_wl = 0.0;
     let inv_gamma = 1.0 / gamma;
 
-    for net in &db.nets {
+    for net in &model.nets {
         if net.pins.len() < 2 {
             continue;
         }
@@ -34,9 +34,8 @@ pub fn compute_wa_gradient(
         let mut max_y = f64::NEG_INFINITY;
         let mut min_y = f64::INFINITY;
 
-        for &pin_id in &net.pins {
-            let cell_id = db.pin_to_cell[pin_id.index()];
-            let pos = db.get_pin_position(pin_id, &positions[cell_id.index()]);
+        for pin in &net.pins {
+            let pos = PlacementModel::pin_position(pin, positions);
             max_x = max_x.max(pos.x);
             min_x = min_x.min(pos.x);
             max_y = max_y.max(pos.y);
@@ -53,9 +52,8 @@ pub fn compute_wa_gradient(
         let mut sum_exp_y_neg = 0.0;
         let mut sum_y_exp_y_neg = 0.0;
 
-        for &pin_id in &net.pins {
-            let cell_id = db.pin_to_cell[pin_id.index()];
-            let pos = db.get_pin_position(pin_id, &positions[cell_id.index()]);
+        for pin in &net.pins {
+            let pos = PlacementModel::pin_position(pin, positions);
 
             let exp_x_pos = ((pos.x - max_x) * inv_gamma).exp();
             let exp_x_neg = ((min_x - pos.x) * inv_gamma).exp();
@@ -82,9 +80,8 @@ pub fn compute_wa_gradient(
 
         total_wl += (wa_x_pos - wa_x_neg) + (wa_y_pos - wa_y_neg);
 
-        for &pin_id in &net.pins {
-            let cell_id = db.pin_to_cell[pin_id.index()];
-            let pos = db.get_pin_position(pin_id, &positions[cell_id.index()]);
+        for pin in &net.pins {
+            let pos = PlacementModel::pin_position(pin, positions);
 
             let exp_x_pos = ((pos.x - max_x) * inv_gamma).exp();
             let exp_x_neg = ((min_x - pos.x) * inv_gamma).exp();
@@ -97,8 +94,10 @@ pub fn compute_wa_gradient(
             let grad_y = ((pos.y - wa_y_pos).mul_add(inv_gamma, 1.0) * exp_y_pos / sum_exp_y_pos)
                 - ((pos.y - wa_y_neg).mul_add(-inv_gamma, 1.0) * exp_y_neg / sum_exp_y_neg);
 
-            gradients[cell_id.index()].x += grad_x * net.weight;
-            gradients[cell_id.index()].y += grad_y * net.weight;
+            if let PinAnchor::Cell { cell, .. } = *pin {
+                gradients[cell].x += grad_x * net.weight;
+                gradients[cell].y += grad_y * net.weight;
+            }
         }
     }
     total_wl

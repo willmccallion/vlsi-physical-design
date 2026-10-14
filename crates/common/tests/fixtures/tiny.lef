@@ -1,0 +1,186 @@
+# Two-site-row technology with three metal layers, for parser tests.
+VERSION 5.8 ;
+BUSBITCHARS "[]" ;
+DIVIDERCHAR "/" ;
+
+UNITS
+  DATABASE MICRONS 1000 ;
+END UNITS
+
+MANUFACTURINGGRID 0.005 ;
+
+SITE core
+  CLASS CORE ;
+  SYMMETRY Y ;
+  SIZE 0.2 BY 2.0 ;
+END core
+
+LAYER poly
+  TYPE MASTERSLICE ;
+END poly
+
+LAYER M1
+  TYPE ROUTING ;
+  DIRECTION HORIZONTAL ;
+  PITCH 0.2 ;
+  OFFSET 0.1 ;
+  WIDTH 0.1 ;
+  SPACING 0.1 ;
+END M1
+
+LAYER V1
+  TYPE CUT ;
+  WIDTH 0.1 ;
+  SPACING 0.12 ;
+END V1
+
+LAYER M2
+  TYPE ROUTING ;
+  DIRECTION VERTICAL ;
+  PITCH 0.2 0.25 ;
+  OFFSET 0.1 0.125 ;
+  WIDTH 0.1 ;
+  SPACINGTABLE
+    PARALLELRUNLENGTH 0.0 0.5
+    WIDTH 0.0 0.11 0.11
+    WIDTH 0.3 0.11 0.2 ;
+END M2
+
+LAYER V2
+  TYPE CUT ;
+  WIDTH 0.1 ;
+END V2
+
+LAYER M3
+  TYPE ROUTING ;
+  DIRECTION HORIZONTAL ;
+  PITCH 0.4 ;
+  WIDTH 0.2 ;
+  SPACING 0.2 ;
+  SPACING 0.3 RANGE 1.0 10.0 ;
+END M3
+
+VIA M1M2 DEFAULT
+  LAYER V1 ;
+    RECT -0.05 -0.05 0.05 0.05 ;
+  LAYER M1 ;
+    RECT -0.05 -0.1 0.05 0.1 ;
+  LAYER M2 ;
+    RECT -0.05 -0.1 0.05 0.1 ;
+END M1M2
+
+VIA M2M3 DEFAULT
+  LAYER V2 ;
+    RECT -0.05 -0.05 0.05 0.05 ;
+  LAYER M2 ;
+    RECT -0.05 -0.05 0.05 0.05 ;
+  LAYER M3 ;
+    RECT -0.1 -0.1 0.1 0.1 ;
+END M2M3
+
+VIARULE M1M2GEN GENERATE
+  LAYER M1 ;
+    ENCLOSURE 0 0.05 ;
+  LAYER M2 ;
+    ENCLOSURE 0 0.05 ;
+  LAYER V1 ;
+    RECT -0.05 -0.05 0.05 0.05 ;
+    SPACING 0.2 BY 0.2 ;
+END M1M2GEN
+
+MACRO INV
+  CLASS CORE ;
+  ORIGIN 0 0 ;
+  SIZE 0.4 BY 2.0 ;
+  SYMMETRY X Y ;
+  SITE core ;
+  PIN A
+    DIRECTION INPUT ;
+    USE SIGNAL ;
+    PORT
+      LAYER M1 ;
+        RECT 0.05 0.4 0.15 0.6 ;
+    END
+  END A
+  PIN Y
+    DIRECTION OUTPUT ;
+    USE SIGNAL ;
+    PORT
+      LAYER M1 ;
+        RECT 0.25 0.2 0.35 1.8 ;
+        RECT 0.25 1.0 0.3 1.1 ;
+    END
+  END Y
+  PIN VDD
+    DIRECTION INOUT ;
+    USE POWER ;
+    SHAPE ABUTMENT ;
+    PORT
+      LAYER M1 ;
+        RECT 0 1.9 0.4 2.1 ;
+    END
+  END VDD
+  PIN VSS
+    DIRECTION INOUT ;
+    USE GROUND ;
+    PORT
+      LAYER M1 ;
+        RECT 0 -0.1 0.4 0.1 ;
+    END
+  END VSS
+  OBS
+    LAYER M1 ;
+      RECT 0.15 0.8 0.25 1.2 ;
+    LAYER poly ;
+      RECT 0 0 0.4 2.0 ;
+  END
+END INV
+
+MACRO NAND2
+  CLASS CORE ;
+  SIZE 0.6 BY 2.0 ;
+  SYMMETRY X Y ;
+  SITE core ;
+  PIN A
+    DIRECTION INPUT ;
+    PORT
+      LAYER M1 ;
+        RECT 0.05 0.4 0.15 0.6 ;
+    END
+  END A
+  PIN B
+    DIRECTION INPUT ;
+    PORT
+      LAYER M1 ;
+        RECT 0.25 0.4 0.35 0.6 ;
+    END
+  END B
+  PIN Y
+    DIRECTION OUTPUT ;
+    PORT
+      LAYER M1 ;
+        RECT 0.45 0.2 0.55 1.8 ;
+    END
+  END Y
+END NAND2
+
+MACRO RAM
+  CLASS BLOCK ;
+  SIZE 2.0 BY 4.0 ;
+  PIN D
+    DIRECTION INPUT ;
+    USE SIGNAL ;
+    PORT
+      LAYER M2 ;
+        RECT 0.9 3.8 1.1 4.0 ;
+    END
+  END D
+  OBS
+    LAYER M1 ;
+      RECT 0 0 2.0 4.0 ;
+    LAYER M2 ;
+      RECT 0 0 2.0 3.5 ;
+  END
+END RAM
+
+END LIBRARY

@@ -2,7 +2,6 @@
 members = [
     "crates/common",
     "crates/placer",
-    "crates/router",
     "crates/cli",
 ]
 resolver = "2"

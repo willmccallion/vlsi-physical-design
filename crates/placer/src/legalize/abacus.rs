@@ -5,7 +5,7 @@
 //! weighted average calculations. The algorithm handles fixed cells, macros,
 //! and standard cells differently, with dynamic padding to prevent row overflow.
 
-use pare_common::db::core::NetlistDB;
+use crate::model::PlacementModel;
 use pare_common::geom::point::Point;
 use pare_common::geom::rect::Rect;
 use std::collections::HashMap;
@@ -64,11 +64,11 @@ impl AbacusLegalizer {
     /// padding is computed based on design utilization to prevent row overflow while
     /// maintaining reasonable spacing. The algorithm searches nearby rows if the
     /// ideal row cannot accommodate a cell.
-    pub fn legalize(&self, db: &mut NetlistDB) {
+    pub fn legalize(&self, model: &mut PlacementModel) {
         let mut height_counts = HashMap::new();
-        for cell in &db.cells {
-            if cell.height > 0.001 {
-                let h_key = (cell.height * 1000.0).round() as i32;
+        for size in &model.sizes {
+            if size.y > 0.001 {
+                let h_key = (size.y * 1000.0).round() as i32;
                 *height_counts.entry(h_key).or_insert(0) += 1;
             }
         }
@@ -78,10 +78,10 @@ impl AbacusLegalizer {
             .max_by_key(|&(_, count)| count)
             .map_or(1.0, |(h, _)| h as f64 / 1000.0);
 
-        let die_min_x = db.die_area.min.x;
-        let die_max_x = db.die_area.max.x;
-        let die_min_y = db.die_area.min.y;
-        let die_height = db.die_area.height();
+        let die_min_x = model.die.min.x;
+        let die_max_x = model.die.max.x;
+        let die_min_y = model.die.min.y;
+        let die_height = model.die.height();
         let num_rows = (die_height / row_height).ceil() as usize;
 
         if num_rows == 0 {
@@ -93,9 +93,9 @@ impl AbacusLegalizer {
         let mut total_movable_width = 0.0;
         let mut movable_cell_count = 0;
 
-        for cell in &db.cells {
-            if !cell.is_fixed && !is_macro(cell.height) {
-                total_movable_width += cell.width;
+        for (size, &movable) in model.sizes.iter().zip(&model.movable) {
+            if movable && !is_macro(size.y) {
+                total_movable_width += size.x;
                 movable_cell_count += 1;
             }
         }
@@ -129,36 +129,30 @@ impl AbacusLegalizer {
         let mut fixed_rects = Vec::new();
         let mut movable_macros = Vec::new();
 
-        for i in 0..db.num_cells() {
-            let cell = &db.cells[i];
-            if cell.is_fixed {
-                let pos = db.positions[i];
-                fixed_rects.push(Rect::new(
-                    pos,
-                    Point::new(pos.x + cell.width, pos.y + cell.height),
-                ));
-            } else if is_macro(cell.height) {
+        for i in 0..model.num_cells() {
+            let cell = model.sizes[i];
+            if !model.movable[i] {
+                let pos = model.positions[i];
+                fixed_rects.push(Rect::new(pos, Point::new(pos.x + cell.x, pos.y + cell.y)));
+            } else if is_macro(cell.y) {
                 movable_macros.push(i);
             }
         }
 
-        movable_macros.sort_by(|&a, &b| db.positions[a].x.total_cmp(&db.positions[b].x));
+        movable_macros.sort_by(|&a, &b| model.positions[a].x.total_cmp(&model.positions[b].x));
 
         for &idx in &movable_macros {
-            let cell = &db.cells[idx];
-            let mut pos = db.positions[idx];
+            let cell = model.sizes[idx];
+            let mut pos = model.positions[idx];
 
             let ideal_row = ((pos.y - die_min_y) / row_height).round();
             pos.y = die_min_y + ideal_row * row_height;
-            pos.y = pos.y.clamp(die_min_y, db.die_area.max.y - cell.height);
+            pos.y = pos.y.clamp(die_min_y, model.die.max.y - cell.y);
 
-            pos.x = pos.x.clamp(die_min_x, die_max_x - cell.width);
+            pos.x = pos.x.clamp(die_min_x, die_max_x - cell.x);
 
-            db.positions[idx] = pos;
-            fixed_rects.push(Rect::new(
-                pos,
-                Point::new(pos.x + cell.width, pos.y + cell.height),
-            ));
+            model.positions[idx] = pos;
+            fixed_rects.push(Rect::new(pos, Point::new(pos.x + cell.x, pos.y + cell.y)));
         }
 
         let mut row_blockages: Vec<Vec<(f64, f64)>> = vec![vec![]; num_rows];
@@ -219,21 +213,21 @@ impl AbacusLegalizer {
             rows.push(sub_rows);
         }
 
-        let mut std_cells: Vec<usize> = (0..db.num_cells())
-            .filter(|&i| !db.cells[i].is_fixed && !is_macro(db.cells[i].height))
+        let mut std_cells: Vec<usize> = (0..model.num_cells())
+            .filter(|&i| model.movable[i] && !is_macro(model.sizes[i].y))
             .collect();
 
         std_cells.sort_by(|&a, &b| {
-            let pos_a = db.positions[a];
-            let pos_b = db.positions[b];
+            let pos_a = model.positions[a];
+            let pos_b = model.positions[b];
             let row_a = ((pos_a.y - die_min_y) / row_height).round() as isize;
             let row_b = ((pos_b.y - die_min_y) / row_height).round() as isize;
             row_a.cmp(&row_b).then(pos_a.x.total_cmp(&pos_b.x))
         });
 
         for &i in &std_cells {
-            let cell = &db.cells[i];
-            let pos = db.positions[i];
+            let cell = model.sizes[i];
+            let pos = model.positions[i];
             let ideal_row_idx = ((pos.y - die_min_y) / row_height).round() as isize;
 
             let mut placed = false;
@@ -252,7 +246,7 @@ impl AbacusLegalizer {
                     let mut min_dist = f64::INFINITY;
 
                     for (k, sub) in rows[r].iter().enumerate() {
-                        let cell_total_w = cell.width + padding_per_cell;
+                        let cell_total_w = cell.x + padding_per_cell;
                         if sub.used_width + cell_total_w <= (sub.max_x - sub.min_x) {
                             let sub_center = f64::midpoint(sub.min_x, sub.max_x);
                             let dist = (pos.x - sub_center).abs();
@@ -265,7 +259,7 @@ impl AbacusLegalizer {
 
                     if let Some(k) = best_sub {
                         rows[r][k].cells.push(i);
-                        rows[r][k].used_width += cell.width + padding_per_cell;
+                        rows[r][k].used_width += cell.x + padding_per_cell;
                         placed = true;
                         break;
                     }
@@ -278,7 +272,7 @@ impl AbacusLegalizer {
             if !placed {
                 let r = ideal_row_idx.clamp(0, num_rows as isize - 1) as usize;
                 if !rows[r].is_empty() {
-                    let cell_w = db.cells[i].width + padding_per_cell;
+                    let cell_w = model.sizes[i].x + padding_per_cell;
                     rows[r][0].cells.push(i);
                     rows[r][0].used_width += cell_w;
                 }
@@ -294,13 +288,13 @@ impl AbacusLegalizer {
                 }
 
                 sub.cells
-                    .sort_by(|&a, &b| db.positions[a].x.total_cmp(&db.positions[b].x));
+                    .sort_by(|&a, &b| model.positions[a].x.total_cmp(&model.positions[b].x));
 
                 let mut clusters: Vec<Cluster> = Vec::new();
 
                 for &cell_idx in &sub.cells {
-                    let cell_w = db.cells[cell_idx].width + padding_per_cell;
-                    let target_x = db.positions[cell_idx].x;
+                    let cell_w = model.sizes[cell_idx].x + padding_per_cell;
+                    let target_x = model.positions[cell_idx].x;
 
                     let new_cluster = Cluster {
                         x: target_x,
@@ -337,7 +331,7 @@ impl AbacusLegalizer {
                 // This guarantees no overlaps and no out-of-bounds regardless of
                 // how many clusters collided at the right edge.
                 let sub_capacity = sub.max_x - sub.min_x;
-                let sub_cell_width: f64 = sub.cells.iter().map(|&ci| db.cells[ci].width).sum();
+                let sub_cell_width: f64 = sub.cells.iter().map(|&ci| model.sizes[ci].x).sum();
                 let has_slack = sub_cell_width < sub_capacity - 0.001;
 
                 let mut ordered: Vec<(f64, usize)> = Vec::with_capacity(sub.cells.len());
@@ -345,7 +339,7 @@ impl AbacusLegalizer {
                     let mut cx = cluster.x;
                     for &ci in &cluster.member_cells {
                         ordered.push((cx, ci));
-                        cx += db.cells[ci].width + if has_slack { padding_per_cell } else { 0.0 };
+                        cx += model.sizes[ci].x + if has_slack { padding_per_cell } else { 0.0 };
                     }
                 }
                 ordered.sort_by(|a, b| a.0.total_cmp(&b.0));
@@ -354,7 +348,7 @@ impl AbacusLegalizer {
                 // but always advance monotonically and clamp to die boundary.
                 let mut cursor = sub.min_x;
                 for (ideal_x, cell_idx) in &ordered {
-                    let cell_w = db.cells[*cell_idx].width;
+                    let cell_w = model.sizes[*cell_idx].x;
                     let pad = if has_slack { padding_per_cell } else { 0.0 };
                     // Move cursor to ideal_x if it doesn't go backward
                     if *ideal_x > cursor {
@@ -362,8 +356,8 @@ impl AbacusLegalizer {
                     }
                     // Clamp to left boundary (cursor always advances, never backward)
                     let place_x = cursor.max(die_min_x);
-                    db.positions[*cell_idx].x = place_x;
-                    db.positions[*cell_idx].y = row_y;
+                    model.positions[*cell_idx].x = place_x;
+                    model.positions[*cell_idx].y = row_y;
                     cursor = place_x + cell_w + pad;
                 }
             }
@@ -372,12 +366,12 @@ impl AbacusLegalizer {
         // Post-legalization: clamp Y to die boundary, then compact any
         // cells that overflow the right die boundary by pushing them left
         // (and their neighbors) in a right-to-left pass per row.
-        for i in 0..db.num_cells() {
-            if db.cells[i].is_fixed {
+        for i in 0..model.num_cells() {
+            if !model.movable[i] {
                 continue;
             }
-            let h = db.cells[i].height;
-            db.positions[i].y = db.positions[i].y.clamp(die_min_y, db.die_area.max.y - h);
+            let h = model.sizes[i].y;
+            model.positions[i].y = model.positions[i].y.clamp(die_min_y, model.die.max.y - h);
         }
 
         // Right-to-left compaction for each row to fix right-boundary overflow.
@@ -389,17 +383,18 @@ impl AbacusLegalizer {
 
                 // Sort cells by their placed x position
                 let mut cells_in_sub: Vec<usize> = sub.cells.clone();
-                cells_in_sub.sort_by(|&a, &b| db.positions[a].x.total_cmp(&db.positions[b].x));
+                cells_in_sub
+                    .sort_by(|&a, &b| model.positions[a].x.total_cmp(&model.positions[b].x));
 
                 // Right-to-left: if the rightmost cell exceeds the sub-row
                 // boundary, push it left (and its neighbors).
                 let mut right_limit = sub.max_x;
                 for &ci in cells_in_sub.iter().rev() {
-                    let w = db.cells[ci].width;
-                    if db.positions[ci].x + w > right_limit {
-                        db.positions[ci].x = (right_limit - w).max(die_min_x);
+                    let w = model.sizes[ci].x;
+                    if model.positions[ci].x + w > right_limit {
+                        model.positions[ci].x = (right_limit - w).max(die_min_x);
                     }
-                    right_limit = db.positions[ci].x;
+                    right_limit = model.positions[ci].x;
                 }
             }
         }
@@ -448,31 +443,34 @@ impl AbacusLegalizer {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use pare_common::geom::rect::Rect;
+
+    fn model(cells: &[(Point<f64>, bool)]) -> PlacementModel {
+        PlacementModel {
+            die: Rect::new(Point::new(0.0, 0.0), Point::new(100.0, 10.0)),
+            sizes: vec![Point::new(10.0, 10.0); cells.len()],
+            movable: cells.iter().map(|c| c.1).collect(),
+            positions: cells.iter().map(|c| c.0).collect(),
+            nets: Vec::new(),
+        }
+    }
 
     #[test]
     fn cells_stay_inside_the_die_when_a_fixed_pad_sits_past_its_edge() {
-        let mut db = NetlistDB::new();
-        db.die_area = Rect::new(Point::new(0.0, 0.0), Point::new(100.0, 10.0));
-        let pad = db.add_cell("pad".into(), "PAD".into(), 10.0, 10.0, true);
-        db.positions[pad.index()] = Point::new(105.0, 0.0);
-        for i in 0..9 {
-            let cell = db.add_cell(format!("c{i}"), "STD".into(), 10.0, 10.0, false);
-            db.positions[cell.index()] = Point::new(95.0, 0.0);
-        }
+        let mut cells = vec![(Point::new(105.0, 0.0), false)];
+        cells.extend((0..9).map(|_| (Point::new(95.0, 0.0), true)));
+        let mut m = model(&cells);
 
-        AbacusLegalizer::new().legalize(&mut db);
+        AbacusLegalizer::new().legalize(&mut m);
 
-        for (cell, pos) in db
-            .cells
+        for (i, pos) in m
+            .positions
             .iter()
-            .zip(&db.positions)
-            .filter(|(c, _)| !c.is_fixed)
+            .enumerate()
+            .filter(|(i, _)| m.movable[*i])
         {
             assert!(
-                pos.x >= 0.0 && pos.x + cell.width <= 100.0 + 1e-9,
-                "{} at x={}",
-                cell.name,
+                pos.x >= 0.0 && pos.x + 10.0 <= 100.0 + 1e-9,
+                "cell {i} at x={}",
                 pos.x
             );
         }

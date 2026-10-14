@@ -16,7 +16,7 @@ pub mod electrostatics;
 /// position for use in gradient-based optimizers.
 pub mod wirelength;
 
-use pare_common::db::core::NetlistDB;
+use crate::model::PlacementModel;
 use pare_common::geom::point::Point;
 use rustfft::FftPlanner;
 
@@ -105,7 +105,7 @@ impl PhysicsContext {
     /// congestion cost (sum of congestion values at cell locations).
     pub fn compute_congestion_gradient(
         &self,
-        db: &NetlistDB,
+        model: &PlacementModel,
         positions: &[Point<f64>],
         gradients: &mut [Point<f64>],
         weight: f64,
@@ -119,8 +119,8 @@ impl PhysicsContext {
             return 0.0;
         }
 
-        let die_w = db.die_area.width();
-        let die_h = db.die_area.height();
+        let die_w = model.die.width();
+        let die_h = model.die.height();
         let bin_w = die_w / gw as f64;
         let bin_h = die_h / gh as f64;
 
@@ -128,15 +128,15 @@ impl PhysicsContext {
         let mut total_cost = 0.0;
 
         for (i, pos) in positions.iter().enumerate() {
-            if db.cells[i].is_fixed {
+            if !model.movable[i] {
                 continue;
             }
 
-            let cx = db.cells[i].width.mul_add(0.5, pos.x);
-            let cy = db.cells[i].height.mul_add(0.5, pos.y);
+            let cx = model.sizes[i].x.mul_add(0.5, pos.x);
+            let cy = model.sizes[i].y.mul_add(0.5, pos.y);
 
-            let gx = ((cx - db.die_area.min.x) / bin_w) as usize;
-            let gy = ((cy - db.die_area.min.y) / bin_h) as usize;
+            let gx = ((cx - model.die.min.x) / bin_w) as usize;
+            let gy = ((cy - model.die.min.y) / bin_h) as usize;
             let gx = gx.min(gw - 1);
             let gy = gy.min(gh - 1);
 
@@ -186,7 +186,7 @@ impl PhysicsContext {
     /// search direction. Returns both cost values for monitoring convergence.
     pub fn compute_gradients(
         &mut self,
-        db: &NetlistDB,
+        model: &PlacementModel,
         current_positions: &[Point<f64>],
         output_gradients: &mut [Point<f64>],
         wa_gamma: f64,
@@ -198,11 +198,11 @@ impl PhysicsContext {
         }
 
         let wl_cost =
-            wirelength::compute_wa_gradient(db, current_positions, wa_gamma, output_gradients);
+            wirelength::compute_wa_gradient(model, current_positions, wa_gamma, output_gradients);
 
         let density_cost = electrostatics::compute_density_force(
             self,
-            db,
+            model,
             current_positions,
             target_density,
             force_multiplier,
@@ -220,7 +220,7 @@ impl PhysicsContext {
     /// with an adaptive weight.
     pub fn compute_gradients_separate(
         &mut self,
-        db: &NetlistDB,
+        model: &PlacementModel,
         current_positions: &[Point<f64>],
         output_gradients: &mut [Point<f64>],
         density_gradients: &mut [Point<f64>],
@@ -235,7 +235,7 @@ impl PhysicsContext {
         }
 
         let wl_cost =
-            wirelength::compute_wa_gradient(db, current_positions, wa_gamma, output_gradients);
+            wirelength::compute_wa_gradient(model, current_positions, wa_gamma, output_gradients);
 
         // Compute WL gradient norm
         let wl_grad_norm = output_gradients
@@ -247,7 +247,7 @@ impl PhysicsContext {
         // Compute density force with multiplier=1.0 into separate buffer
         let density_cost = electrostatics::compute_density_force(
             self,
-            db,
+            model,
             current_positions,
             target_density,
             1.0,

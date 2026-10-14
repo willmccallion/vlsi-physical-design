@@ -5,8 +5,8 @@
 //! initialized from the WL/density gradient norm ratio and updated based on
 //! HPWL changes, replacing the fixed `electro_force_multiplier`.
 
+use crate::model::PlacementModel;
 use crate::physics::PhysicsContext;
-use pare_common::db::core::NetlistDB;
 use pare_common::geom::point::Point;
 use pare_common::util::ui;
 use rand::Rng;
@@ -68,11 +68,11 @@ impl NesterovOptimizer {
     /// Optimizes cell positions to minimize wirelength and density violations.
     pub fn optimize(
         &mut self,
-        db: &mut NetlistDB,
+        model: &mut PlacementModel,
         physics: &mut PhysicsContext,
     ) -> Result<PlacementResult, String> {
-        let n = db.positions.len();
-        self.x_k.copy_from_slice(&db.positions);
+        let n = model.positions.len();
+        self.x_k.copy_from_slice(&model.positions);
 
         // Check whether the parsed positions are already a reasonable initial placement
         let in_bounds_count = self
@@ -80,46 +80,46 @@ impl NesterovOptimizer {
             .iter()
             .enumerate()
             .filter(|(i, pos)| {
-                let cell = &db.cells[*i];
-                !cell.is_fixed
-                    && pos.x >= db.die_area.min.x
-                    && pos.y >= db.die_area.min.y
-                    && pos.x + cell.width <= db.die_area.max.x
-                    && pos.y + cell.height <= db.die_area.max.y
+                let size = model.sizes[*i];
+                model.movable[*i]
+                    && pos.x >= model.die.min.x
+                    && pos.y >= model.die.min.y
+                    && pos.x + size.x <= model.die.max.x
+                    && pos.y + size.y <= model.die.max.y
             })
             .count();
-        let movable_count = db.cells.iter().filter(|c| !c.is_fixed).count();
+        let movable_count = model.movable.iter().filter(|&&m| m).count();
         let use_initial_placement =
             movable_count > 0 && (in_bounds_count as f64 / movable_count as f64) > 0.90;
 
         if use_initial_placement {
             for (i, pos) in self.x_k.iter_mut().enumerate() {
-                if !db.cells[i].is_fixed {
+                if model.movable[i] {
                     pos.x = pos
                         .x
-                        .clamp(db.die_area.min.x, db.die_area.max.x - db.cells[i].width);
+                        .clamp(model.die.min.x, model.die.max.x - model.sizes[i].x);
                     pos.y = pos
                         .y
-                        .clamp(db.die_area.min.y, db.die_area.max.y - db.cells[i].height);
+                        .clamp(model.die.min.y, model.die.max.y - model.sizes[i].y);
                 }
             }
         } else {
             let mut rng = rand::thread_rng();
-            let center_x = f64::midpoint(db.die_area.min.x, db.die_area.max.x);
-            let center_y = f64::midpoint(db.die_area.min.y, db.die_area.max.y);
-            let noise_scale_x = db.die_area.width() * 0.25;
-            let noise_scale_y = db.die_area.height() * 0.25;
+            let center_x = f64::midpoint(model.die.min.x, model.die.max.x);
+            let center_y = f64::midpoint(model.die.min.y, model.die.max.y);
+            let noise_scale_x = model.die.width() * 0.25;
+            let noise_scale_y = model.die.height() * 0.25;
 
             for (i, pos) in self.x_k.iter_mut().enumerate() {
-                if !db.cells[i].is_fixed {
+                if model.movable[i] {
                     pos.x = center_x + rng.gen_range(-noise_scale_x..noise_scale_x);
                     pos.y = center_y + rng.gen_range(-noise_scale_y..noise_scale_y);
                     pos.x = pos
                         .x
-                        .clamp(db.die_area.min.x, db.die_area.max.x - db.cells[i].width);
+                        .clamp(model.die.min.x, model.die.max.x - model.sizes[i].x);
                     pos.y = pos
                         .y
-                        .clamp(db.die_area.min.y, db.die_area.max.y - db.cells[i].height);
+                        .clamp(model.die.min.y, model.die.max.y - model.sizes[i].y);
                 }
             }
         }
@@ -133,7 +133,7 @@ impl NesterovOptimizer {
         // --- Compute initial gradients to calibrate density weight ---
         let (wl_cost_0, _, wl_grad_norm_0, density_grad_norm_0) = physics
             .compute_gradients_separate(
-                db,
+                model,
                 &self.y_k,
                 &mut self.grads,
                 &mut self.density_grads,
@@ -151,14 +151,15 @@ impl NesterovOptimizer {
 
         // Precompute bin geometry for overflow metric
         let dim = physics.bin_dim;
-        let bin_w = db.die_area.width() / dim as f64;
-        let bin_h = db.die_area.height() / dim as f64;
+        let bin_w = model.die.width() / dim as f64;
+        let bin_h = model.die.height() / dim as f64;
         let bin_area = bin_w * bin_h;
-        let total_cell_area: f64 = db
-            .cells
+        let total_cell_area: f64 = model
+            .sizes
             .iter()
-            .filter(|c| !c.is_fixed)
-            .map(|c| c.width * c.height)
+            .zip(&model.movable)
+            .filter(|(_, m)| **m)
+            .map(|(s, _)| s.x * s.y)
             .sum();
 
         let mut prev_hpwl = wl_cost_0;
@@ -176,7 +177,7 @@ impl NesterovOptimizer {
         for k in 0..self.params.max_iterations {
             let (wl_cost, _density_cost, wl_grad_norm, density_grad_norm) = physics
                 .compute_gradients_separate(
-                    db,
+                    model,
                     &self.y_k,
                     &mut self.grads,
                     &mut self.density_grads,
@@ -196,7 +197,7 @@ impl NesterovOptimizer {
 
             // Add congestion gradient if congestion map is available
             let _congestion_cost = physics.compute_congestion_gradient(
-                db,
+                model,
                 &self.y_k,
                 &mut self.grads,
                 density_weight * 0.1,
@@ -287,8 +288,8 @@ impl NesterovOptimizer {
                 log::debug!(
                     "Instability detected at iter {k} (avg_disp={avg_disp:.2}). Rolling back to best (overflow={best_overflow:.4})"
                 );
-                Self::apply_clamping(db, &mut best_positions);
-                db.positions.copy_from_slice(&best_positions);
+                Self::apply_clamping(model, &mut best_positions);
+                model.positions.copy_from_slice(&best_positions);
                 return Ok(PlacementResult {
                     converged: true,
                     iterations: k,
@@ -301,8 +302,8 @@ impl NesterovOptimizer {
                 log::debug!(
                     "Divergence detected at iter {k} (overflow={overflow_ratio:.3}, best was {best_overflow:.4}). Rolling back."
                 );
-                Self::apply_clamping(db, &mut best_positions);
-                db.positions.copy_from_slice(&best_positions);
+                Self::apply_clamping(model, &mut best_positions);
+                model.positions.copy_from_slice(&best_positions);
                 return Ok(PlacementResult {
                     converged: true,
                     iterations: k,
@@ -326,8 +327,8 @@ impl NesterovOptimizer {
                 log::debug!(
                     "Converged at iteration {k}: overflow={overflow_ratio:.4}, avg_disp={avg_disp:.4}, WL={wl_cost:.0}"
                 );
-                Self::apply_clamping(db, &mut self.x_k);
-                db.positions.copy_from_slice(&self.x_k);
+                Self::apply_clamping(model, &mut self.x_k);
+                model.positions.copy_from_slice(&self.x_k);
                 return Ok(PlacementResult {
                     converged: true,
                     iterations: k,
@@ -341,8 +342,8 @@ impl NesterovOptimizer {
                 log::debug!(
                     "Converged: Cells stabilized at iteration {k} (overflow={overflow_ratio:.4})"
                 );
-                Self::apply_clamping(db, &mut self.x_k);
-                db.positions.copy_from_slice(&self.x_k);
+                Self::apply_clamping(model, &mut self.x_k);
+                model.positions.copy_from_slice(&self.x_k);
                 return Ok(PlacementResult {
                     converged: true,
                     iterations: k,
@@ -359,21 +360,21 @@ impl NesterovOptimizer {
                 .map(|(y, g)| *y - *g * step_size)
                 .collect();
 
-            Self::apply_clamping(db, &mut x_next);
+            Self::apply_clamping(model, &mut x_next);
 
             let a_next = f64::midpoint(1.0, (4.0 * a_k).mul_add(a_k, 1.0).sqrt());
             let momentum = (a_k - 1.0) / a_next;
 
             #[allow(clippy::needless_range_loop)]
             for i in 0..n {
-                if db.cells[i].is_fixed {
+                if !model.movable[i] {
                     self.y_k[i] = self.x_k[i];
                     continue;
                 }
                 self.y_k[i] = x_next[i] + (x_next[i] - self.x_k[i]) * momentum;
             }
 
-            Self::apply_clamping(db, &mut self.y_k);
+            Self::apply_clamping(model, &mut self.y_k);
 
             self.x_prev.copy_from_slice(&self.x_k);
             self.x_k = x_next;
@@ -386,8 +387,8 @@ impl NesterovOptimizer {
         }
 
         // Use best solution found during optimization
-        Self::apply_clamping(db, &mut best_positions);
-        db.positions.copy_from_slice(&best_positions);
+        Self::apply_clamping(model, &mut best_positions);
+        model.positions.copy_from_slice(&best_positions);
         log::warn!(
             "Placer reached max iterations. Using best solution (overflow={best_overflow:.4})."
         );
@@ -400,18 +401,18 @@ impl NesterovOptimizer {
     }
 
     /// Clamps cell positions to ensure they remain within die boundaries.
-    fn apply_clamping(db: &NetlistDB, positions: &mut [Point<f64>]) {
-        let die_min_x = db.die_area.min.x;
-        let die_min_y = db.die_area.min.y;
-        let die_max_x = db.die_area.max.x;
-        let die_max_y = db.die_area.max.y;
+    fn apply_clamping(model: &PlacementModel, positions: &mut [Point<f64>]) {
+        let die_min_x = model.die.min.x;
+        let die_min_y = model.die.min.y;
+        let die_max_x = model.die.max.x;
+        let die_max_y = model.die.max.y;
 
         for (i, pos) in positions.iter_mut().enumerate() {
-            if db.cells[i].is_fixed {
+            if !model.movable[i] {
                 continue;
             }
-            let w = db.cells[i].width;
-            let h = db.cells[i].height;
+            let w = model.sizes[i].x;
+            let h = model.sizes[i].y;
             pos.x = pos.x.clamp(die_min_x, die_max_x - w);
             pos.y = pos.y.clamp(die_min_y, die_max_y - h);
         }
