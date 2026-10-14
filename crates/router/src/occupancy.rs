@@ -177,10 +177,20 @@ fn gap_sq(a: &Rect<Dbu>, b: &Rect<Dbu>) -> i128 {
 /// of every cut layer.
 #[derive(Clone, Debug)]
 pub struct Occupancy {
-    /// `[layer][track]`, each sorted by `lo`.
-    tracks: Vec<Vec<Vec<Occupant>>>,
+    /// `[layer][track]`.
+    tracks: Vec<Vec<Track>>,
+    /// The along-track coordinate where each layer's first bucket starts.
+    origins: Vec<Dbu>,
     chunk: Dbu,
     cuts: Vec<CutLayer>,
+}
+
+/// One track's occupants, bucketed by which stretch of `chunk` along the
+/// track each starts in; no occupant is longer than a chunk, so a query
+/// only looks at the buckets around it.
+#[derive(Clone, Debug, Default)]
+struct Track {
+    buckets: Vec<Vec<Occupant>>,
 }
 
 /// Tracks whose wires `rect` could touch or crowd, and whether each runs
@@ -205,11 +215,36 @@ impl Occupancy {
             tracks: tech
                 .layers
                 .iter()
-                .map(|l| vec![Vec::new(); l.tracks.len()])
+                .map(|l| vec![Track::default(); l.tracks.len()])
+                .collect(),
+            origins: tech
+                .layers
+                .iter()
+                .map(|l| l.cross.first().map_or(Dbu::ZERO, |c| c.at))
                 .collect(),
             chunk: chunk.max(Dbu(1)),
             cuts: tech.cuts.iter().map(|&c| CutLayer::new(c)).collect(),
         }
+    }
+
+    /// The bucket of a track of `layer` holding occupants that start at
+    /// `along`; coordinates before the layer's origin share the first one.
+    fn bucket(&self, layer: usize, along: Dbu) -> usize {
+        usize::try_from(
+            (along - self.origins[layer])
+                .get()
+                .div_euclid(self.chunk.get()),
+        )
+        .unwrap_or(0)
+    }
+
+    /// Occupants of a track that start in the buckets covering `[lo, hi]`.
+    fn starting_within(&self, t: TrackRef, lo: Dbu, hi: Dbu) -> impl Iterator<Item = &Occupant> {
+        let l = t.layer.index();
+        let track = &self.tracks[l][t.track as usize];
+        let first = self.bucket(l, lo).min(track.buckets.len());
+        let last = (self.bucket(l, hi) + 1).min(track.buckets.len());
+        track.buckets[first..last.max(first)].iter().flatten()
     }
 
     /// Records a cut on `cut` for `owner`; returns where it was put.
@@ -274,7 +309,6 @@ impl Occupancy {
         let (lo, hi) = (lo - wider, hi + wider);
         let mut touched = Vec::new();
         for (track, centered) in affected_tracks(lt, rect) {
-            let list = &mut self.tracks[layer.index()][track as usize];
             let mut start = lo;
             loop {
                 let end = (start + self.chunk).min(hi);
@@ -285,8 +319,12 @@ impl Occupancy {
                     centered,
                     origin,
                 };
-                let at = list.partition_point(|o| o.lo < start);
-                list.insert(at, occupant);
+                let b = self.bucket(layer.index(), start);
+                let buckets = &mut self.tracks[layer.index()][track as usize].buckets;
+                if buckets.len() <= b {
+                    buckets.resize_with(b + 1, Vec::new);
+                }
+                buckets[b].push(occupant);
                 if end >= hi {
                     break;
                 }
@@ -302,8 +340,11 @@ impl Occupancy {
     pub fn remove_wiring(&mut self, slots: &[Slot], owner: Owner) {
         for slot in slots {
             match *slot {
-                Slot::Track(t) => self.tracks[t.layer.index()][t.track as usize]
-                    .retain(|o| o.owner != owner || o.origin == Origin::Fixed),
+                Slot::Track(t) => {
+                    for bucket in &mut self.tracks[t.layer.index()][t.track as usize].buckets {
+                        bucket.retain(|o| o.owner != owner || o.origin == Origin::Fixed);
+                    }
+                }
                 Slot::Cut(c) => {
                     if let Some(list) = self.cuts[c.cut.index()].buckets.get_mut(&c.bucket) {
                         list.retain(|o| o.owner != owner || o.origin == Origin::Fixed);
@@ -324,15 +365,13 @@ impl Occupancy {
         owner: Owner,
         centered: bool,
     ) -> impl Iterator<Item = &Occupant> + use<'_> {
-        let list = &self.tracks[t.layer.index()][t.track as usize];
-        let from = list.partition_point(|o| o.lo < lo - spacing - self.chunk);
-        let to = list.partition_point(|o| o.lo < hi + spacing);
-        list[from..to].iter().filter(move |o| {
-            o.owner != owner
-                && (centered || o.centered)
-                && o.lo < hi + spacing
-                && lo < o.hi + spacing
-        })
+        self.starting_within(t, lo - spacing - self.chunk, hi + spacing)
+            .filter(move |o| {
+                o.owner != owner
+                    && (centered || o.centered)
+                    && o.lo < hi + spacing
+                    && lo < o.hi + spacing
+            })
     }
 
     /// Owners of wiring on `layer` whose metal runs along a track inside
@@ -346,13 +385,11 @@ impl Occupancy {
         let lt = tech.layer(layer);
         let ((a0, a1), (lo, hi)) = lt.across_along_rect(rect);
         let chunk = self.chunk;
-        lt.tracks_within(a0, a1).flat_map(move |t| {
-            let list = &self.tracks[layer.index()][t as usize];
-            let from = list.partition_point(|o| o.lo < lo - chunk);
-            let to = list.partition_point(|o| o.lo <= hi);
-            list[from..to]
-                .iter()
-                .filter(move |o| o.centered && o.origin == Origin::Wiring && lo <= o.hi)
+        lt.tracks_within(a0, a1).flat_map(move |track| {
+            self.starting_within(TrackRef { layer, track }, lo - chunk, hi)
+                .filter(move |o| {
+                    o.centered && o.origin == Origin::Wiring && lo <= o.hi && o.lo <= hi
+                })
                 .map(|o| o.owner)
         })
     }
@@ -384,23 +421,31 @@ impl Occupancy {
                 continue;
             }
             let spacing = tech.layer(layer).spacing;
-            for (t, list) in tracks.iter().enumerate() {
-                let track = TrackRef {
+            let reach =
+                usize::try_from((self.chunk + spacing).get() / self.chunk.get()).unwrap_or(0) + 1;
+            for (t, track) in tracks.iter().enumerate() {
+                let track_ref = TrackRef {
                     layer,
                     track: crate::tech::to_u32(t),
                 };
-                for (i, a) in list.iter().enumerate() {
-                    for b in &list[i + 1..] {
-                        if b.lo >= a.hi + spacing {
-                            break;
-                        }
-                        let clash = a.owner != b.owner
-                            && !(a.owner == Owner::Obstacle && b.owner == Owner::Obstacle)
-                            && (a.centered || b.centered)
-                            && b.lo < a.hi + spacing
-                            && a.lo < b.hi + spacing;
-                        if clash {
-                            out.push((track, *a, *b));
+                let clash = |a: &Occupant, b: &Occupant| {
+                    a.owner != b.owner
+                        && !(a.owner == Owner::Obstacle && b.owner == Owner::Obstacle)
+                        && (a.centered || b.centered)
+                        && b.lo < a.hi + spacing
+                        && a.lo < b.hi + spacing
+                };
+                for (i, bucket) in track.buckets.iter().enumerate() {
+                    for (k, a) in bucket.iter().enumerate() {
+                        let later = bucket[k + 1..].iter().chain(
+                            track.buckets[i + 1..(i + 1 + reach).min(track.buckets.len())]
+                                .iter()
+                                .flatten(),
+                        );
+                        for b in later {
+                            if clash(a, b) {
+                                out.push((track_ref, *a, *b));
+                            }
                         }
                     }
                 }
