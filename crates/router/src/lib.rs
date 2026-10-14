@@ -50,6 +50,9 @@ pub fn route(db: &mut NetlistDB, config: &RoutingConfig) -> Result<RoutingSummar
             first: first.name.clone(),
         });
     }
+    if !(0.0..1.0).contains(&config.global_capacity_reserve) {
+        return Err(RouteError::CapacityReserve(config.global_capacity_reserve));
+    }
     if let Some(error) = overlapping_pins(db) {
         return Err(error);
     }
@@ -76,7 +79,13 @@ pub fn route(db: &mut NetlistDB, config: &RoutingConfig) -> Result<RoutingSummar
         stage("Pin access:", start);
 
         let start = Instant::now();
-        let mut grid = GlobalGrid::new(&tech, &dr.occupancy, db.die_area, gcell);
+        let mut grid = GlobalGrid::new(
+            &tech,
+            &dr.occupancy,
+            db.die_area,
+            gcell,
+            config.global_capacity_reserve,
+        );
         stage("GCell grid:", start);
         let start = Instant::now();
         let global_nets: Vec<GlobalNet> = nets
@@ -211,7 +220,7 @@ fn stage(label: &str, start: Instant) {
 }
 
 /// Why routing could not run.
-#[derive(Debug, thiserror::Error, PartialEq, Eq)]
+#[derive(Debug, thiserror::Error, PartialEq)]
 pub enum RouteError {
     /// The design has cells without a location.
     #[error("{count} cells are unplaced, starting with '{first}'")]
@@ -237,6 +246,9 @@ pub enum RouteError {
         /// Two of its nets whose pins overlap.
         nets: (String, String),
     },
+    /// The global capacity reserve is outside `[0, 1)`.
+    #[error("global_capacity_reserve must be in [0, 1), got {0}")]
+    CapacityReserve(f64),
     /// A configured layer name is not a routing layer.
     #[error("unknown routing layer '{0}'")]
     UnknownLayer(String),

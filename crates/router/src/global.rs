@@ -45,8 +45,15 @@ pub struct GlobalGrid {
 }
 
 impl GlobalGrid {
-    /// Builds the grid over `die` and counts free tracks across each edge.
-    pub fn new(tech: &RouteTech, occupancy: &Occupancy, die: Rect<Dbu>, gcell: Dbu) -> Self {
+    /// A grid of `gcell`-sized cells over `die` whose edges offer the free
+    /// tracks crossing them less the `reserve` fraction.
+    pub fn new(
+        tech: &RouteTech,
+        occupancy: &Occupancy,
+        die: Rect<Dbu>,
+        gcell: Dbu,
+        reserve: f64,
+    ) -> Self {
         let span = |extent: Dbu| {
             u16::try_from((extent.get() + gcell.get() - 1) / gcell.get())
                 .unwrap_or(u16::MAX)
@@ -71,6 +78,7 @@ impl GlobalGrid {
         grid.capacity = layers
             .par_iter()
             .flat_map_iter(|&l| grid.layer_capacity(tech, occupancy, l))
+            .map(|tracks| (f64::from(tracks) * (1.0 - reserve)).floor() as u16)
             .collect();
         grid
     }

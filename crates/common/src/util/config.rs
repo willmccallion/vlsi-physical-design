@@ -63,6 +63,10 @@ pub struct RoutingConfig {
     /// Rip-up and reroute rounds of global routing.
     #[serde(default = "default_global_iterations")]
     pub global_iterations: usize,
+    /// Fraction of each gcell edge's tracks that global routing leaves for
+    /// detailed routing's vias, pin access and spacing, in `[0, 1)`.
+    #[serde(default = "default_global_capacity_reserve")]
+    pub global_capacity_reserve: f64,
     /// Rip-up and reroute rounds of detailed routing.
     #[serde(default = "default_detailed_iterations")]
     pub detailed_iterations: usize,
@@ -75,6 +79,7 @@ impl Default for RoutingConfig {
             max_layer: None,
             gcell_tracks: default_gcell_tracks(),
             global_iterations: default_global_iterations(),
+            global_capacity_reserve: default_global_capacity_reserve(),
             detailed_iterations: default_detailed_iterations(),
         }
     }
@@ -133,6 +138,10 @@ const fn default_gcell_tracks() -> u32 {
 
 const fn default_global_iterations() -> usize {
     50
+}
+
+const fn default_global_capacity_reserve() -> f64 {
+    0.5
 }
 
 const fn default_detailed_iterations() -> usize {
