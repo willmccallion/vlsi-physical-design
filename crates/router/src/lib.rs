@@ -9,6 +9,7 @@ pub mod access;
 pub mod detailed;
 pub mod global;
 pub mod occupancy;
+mod search;
 pub mod tech;
 pub mod tree;
 
