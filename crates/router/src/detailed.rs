@@ -28,10 +28,10 @@ use std::collections::{BTreeMap, BinaryHeap, VecDeque};
 const OBSTACLE_COST: f64 = 1e9;
 
 /// Heuristic weight of the first, near-optimal search of a connection.
-const FOCUSED_WEIGHT: f64 = 1.5;
+const FOCUSED_WEIGHT: f64 = 1.0;
 
 /// Search effort before the near-optimal search gives way to a greedy one.
-const FOCUSED_EXPANSIONS: usize = 400_000;
+const FOCUSED_EXPANSIONS: usize = 2_000_000;
 
 /// Heuristic weight of the greedy search that guarantees a path quickly.
 const GREEDY_WEIGHT: f64 = 4.0;
@@ -463,15 +463,23 @@ impl<'a> DetailedRouter<'a> {
         }
     }
 
-    /// The area around the branch of a net's global route that joins pins
-    /// `a` and `b`.
-    fn corridor(&self, guide: &NetGuide, a: usize, b: usize) -> Option<Rect<Dbu>> {
-        let (x0, x1, y0, y1) = guide.tree.span(guide.terminals[a], guide.terminals[b])?;
-        let corner = |x: u16, y: u16| {
-            self.grid_origin + Point::new(self.gcell * i64::from(x), self.gcell * i64::from(y))
-        };
-        let far = corner(x1, y1) + Point::new(self.gcell, self.gcell);
-        Some(Rect::new(corner(x0, y0), far).expand(self.gcell))
+    /// The area of one gcell.
+    fn gcell_rect(&self, cell: GCell) -> Rect<Dbu> {
+        let min = self.grid_origin
+            + Point::new(
+                self.gcell * i64::from(cell.x),
+                self.gcell * i64::from(cell.y),
+            );
+        Rect::new(min, min + Point::new(self.gcell, self.gcell))
+    }
+
+    /// The area the guide allows around `cells`.
+    fn cells_rect(&self, cells: &[GCell]) -> Option<Rect<Dbu>> {
+        cells
+            .iter()
+            .map(|&c| self.gcell_rect(c))
+            .reduce(|a, b| a.union(&b))
+            .map(|r| r.expand(self.gcell))
     }
 
     /// The window a net searches in: its guide, or else its pins' bounding
@@ -601,11 +609,11 @@ impl<'a> DetailedRouter<'a> {
                     tree.nodes_in(local)
                 }
             };
-            let corridor = guide.and_then(|g| self.corridor(g, pin, members[join.parent]));
+            let corridor = guide.and_then(|g| g.corridor(members[join.parent], pin));
             let (path, reached) = self.connect(
                 search,
                 (points[join.pin], points[join.parent]),
-                corridor,
+                corridor.as_deref(),
                 window,
                 sources_in,
                 &targets,
@@ -644,24 +652,29 @@ impl<'a> DetailedRouter<'a> {
         }
     }
 
-    /// Searches `corridor` first, then windows around the `ends` that grow
-    /// until a path from the sources inside them reaches a target, or they
-    /// cover `window`.
+    /// Searches along the `corridor` of gcells from the tree to the target
+    /// first, then windows around the `ends` that grow until a path from the
+    /// sources inside them reaches a target, or they cover `window`.
     fn connect(
         &self,
         search: &Search<'_>,
         ends: (Point<Dbu>, Point<Dbu>),
-        corridor: Option<Rect<Dbu>>,
+        corridor: Option<&[GCell]>,
         window: &Rect<Dbu>,
         sources_in: impl Fn(&Rect<Dbu>) -> Vec<(Node, f64)>,
         targets: &FxHashMap<Node, (usize, f64)>,
     ) -> Option<(Vec<Node>, usize)> {
-        if let Some(local) = corridor.and_then(|c| c.intersection(window)) {
-            let sources = sources_in(&local);
-            if !sources.is_empty()
-                && let Some(found) = search.find(&sources, targets, &local)
-            {
+        if let Some(cells) = corridor {
+            if let Some(found) = self.route_along(search, cells, window, &sources_in, targets) {
                 return Some(found);
+            }
+            if let Some(local) = self.cells_rect(cells).and_then(|c| c.intersection(window)) {
+                let sources = sources_in(&local);
+                if !sources.is_empty()
+                    && let Some(found) = search.find(&sources, targets, &local)
+                {
+                    return Some(found);
+                }
             }
         }
         let (from, to) = ends;
@@ -680,6 +693,75 @@ impl<'a> DetailedRouter<'a> {
             }
             margin = margin * 4;
         }
+    }
+
+    /// Follows a long corridor in segments, each searching only the gcells
+    /// from the end of the last segment to the next waypoint gcell, so a
+    /// search never floods more than a few gcells. `None` for a corridor too
+    /// short to split, or when a segment finds no path.
+    fn route_along(
+        &self,
+        search: &Search<'_>,
+        cells: &[GCell],
+        window: &Rect<Dbu>,
+        sources_in: &impl Fn(&Rect<Dbu>) -> Vec<(Node, f64)>,
+        targets: &FxHashMap<Node, (usize, f64)>,
+    ) -> Option<(Vec<Node>, usize)> {
+        let stops = waypoints(cells, SEGMENT_GCELLS);
+        if stops.is_empty() {
+            return None;
+        }
+        let mut path: Vec<Node> = Vec::new();
+        let mut start = 0;
+        for &stop in &stops {
+            let local = self
+                .cells_rect(&cells[start..=stop])?
+                .intersection(window)?;
+            let sources = match path.last() {
+                Some(&end) => vec![(end, 0.0)],
+                None => sources_in(&local),
+            };
+            let goal = self.nodes_in_cell(search, cells[stop]);
+            let (segment, _) = search.find(&sources, &goal, &local)?;
+            append_segment(&mut path, segment);
+            start = stop;
+        }
+        let local = self.cells_rect(&cells[start..])?.intersection(window)?;
+        let end = *path.last()?;
+        let (segment, reached) = search.find(&[(end, 0.0)], targets, &local)?;
+        append_segment(&mut path, segment);
+        Some((path, reached))
+    }
+
+    /// Every node the search may use in `cell`, on its layer and the layers
+    /// next to it.
+    fn nodes_in_cell(&self, search: &Search<'_>, cell: GCell) -> FxHashMap<Node, (usize, f64)> {
+        let area = self.gcell_rect(cell);
+        let lowest = cell
+            .layer
+            .index()
+            .saturating_sub(1)
+            .max(self.tech.min_layer.index());
+        let highest = (cell.layer.index() + 1).min(self.tech.max_layer.index());
+        let mut nodes = FxHashMap::default();
+        for l in lowest..=highest {
+            let layer = LayerId::new(l);
+            let lt = self.tech.layer(layer);
+            let ((a0, a1), (b0, b1)) = lt.across_along_rect(&area);
+            for track in lt.tracks_within(a0, a1) {
+                for cross in lt.cross_within(b0, b1) {
+                    let node = Node {
+                        layer,
+                        track,
+                        cross,
+                    };
+                    if search.allowed(layer, lt.point(track, cross)) {
+                        let _ = nodes.insert(node, (0, 0.0));
+                    }
+                }
+            }
+        }
+        nodes
     }
 
     /// Routes runs of nearby pins in parallel, then joins their subtrees.
@@ -709,12 +791,12 @@ impl<'a> DetailedRouter<'a> {
             let sub = &subtrees[join.pin];
             if !sub.nodes.iter().any(|&n| tree.contains(n)) {
                 let targets = self.join_targets(sub, reps[join.pin]);
-                let corridor = guide
-                    .and_then(|g| self.corridor(g, chunks[join.pin][0], chunks[join.parent][0]));
+                let corridor =
+                    guide.and_then(|g| g.corridor(chunks[join.parent][0], chunks[join.pin][0]));
                 let (path, _) = self.connect(
                     search,
                     (reps[join.pin], reps[join.parent]),
-                    corridor,
+                    corridor.as_deref(),
                     window,
                     |r| tree.nodes_in(r),
                     &targets,
@@ -743,6 +825,41 @@ impl<'a> DetailedRouter<'a> {
 /// Nets grouped by the lower-left tile of the 2x2 block their window fits.
 type TileBlocks = BTreeMap<(i64, i64), Vec<NetId>>;
 
+impl NetGuide {
+    /// The gcells of the global route from pin `from` to pin `to`.
+    fn corridor(&self, from: usize, to: usize) -> Option<Vec<GCell>> {
+        self.tree.branch(self.terminals[from], self.terminals[to])
+    }
+}
+
+/// Indices of the cells where a long corridor is split: one about every
+/// `every` steps between gcells, none closer than half that to the end.
+fn waypoints(cells: &[GCell], every: usize) -> Vec<usize> {
+    let steps: Vec<usize> = cells
+        .windows(2)
+        .scan(0, |n, w| {
+            *n += usize::from((w[0].x, w[0].y) != (w[1].x, w[1].y));
+            Some(*n)
+        })
+        .collect();
+    let total = steps.last().copied().unwrap_or(0);
+    let mut stops = Vec::new();
+    let mut last = 0;
+    for (i, &n) in steps.iter().enumerate() {
+        if n - last >= every && total - n >= every / 2 {
+            stops.push(i + 1);
+            last = n;
+        }
+    }
+    stops
+}
+
+/// Appends a segment that starts where `path` ends.
+fn append_segment(path: &mut Vec<Node>, segment: Vec<Node>) {
+    let skip = usize::from(path.last() == segment.first());
+    path.extend(segment.into_iter().skip(skip));
+}
+
 /// A net's global route and the gcell of each of its pins.
 #[derive(Clone, Debug)]
 struct NetGuide {
@@ -750,6 +867,9 @@ struct NetGuide {
     terminals: Vec<GCell>,
     window: Rect<Dbu>,
 }
+
+/// Gcells between the waypoints of a long connection.
+const SEGMENT_GCELLS: usize = 6;
 
 /// Tile levels stop once fewer tiles than this span the die.
 const MIN_TILES_ACROSS: i64 = 8;
@@ -886,9 +1006,12 @@ fn emit_path(db: &NetlistDB, tech: &RouteTech, path: &[Node], route: &mut NetRou
         if !breaks {
             continue;
         }
-        let (a, b) = (path[start], path[i - 1]);
-        if a != b {
-            add_wire(db, a.layer, point(a), point(b), route);
+        let run = &path[start..i];
+        let b = path[i - 1];
+        if let Some((first, last)) = span_of_run(run)
+            && first != last
+        {
+            add_wire(db, b.layer, point(first), point(last), route);
         }
         if i < path.len() {
             let lower = path[i].layer.min(b.layer);
@@ -896,6 +1019,15 @@ fn emit_path(db: &NetlistDB, tech: &RouteTech, path: &[Node], route: &mut NetRou
         }
         start = i;
     }
+}
+
+/// The nodes at either end of a run along one track. A run may double back
+/// where two searches meet, so its ends are not always its first and last
+/// nodes.
+fn span_of_run(run: &[Node]) -> Option<(Node, Node)> {
+    let lowest = run.iter().min_by_key(|n| n.cross)?;
+    let highest = run.iter().max_by_key(|n| n.cross)?;
+    Some((*lowest, *highest))
 }
 
 /// Adds a pin's access stub and via stack to `route`.
@@ -1317,4 +1449,46 @@ pub fn routable_nets(db: &NetlistDB) -> Vec<NetId> {
         .collect();
     nets.sort_unstable();
     nets.into_iter().map(|(_, n)| n).collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn cell(layer: u8, x: u16, y: u16) -> GCell {
+        GCell {
+            layer: LayerId::new(usize::from(layer)),
+            x,
+            y,
+        }
+    }
+
+    #[test]
+    fn waypoints_split_a_corridor_every_few_gcells_and_ignore_layer_changes() {
+        let mut cells = vec![cell(1, 0, 0), cell(2, 0, 0)];
+        cells.extend((1..=10).map(|x| cell(2, x, 0)));
+
+        let stops = waypoints(&cells, 4);
+
+        assert_eq!(stops, [5, 9]);
+    }
+
+    #[test]
+    fn a_run_that_doubles_back_spans_its_farthest_crossings() {
+        let node = |cross| Node {
+            layer: LayerId::new(2),
+            track: 7,
+            cross,
+        };
+        let run = [node(5), node(9), node(6), node(3)];
+
+        assert_eq!(span_of_run(&run), Some((node(3), node(9))));
+    }
+
+    #[test]
+    fn a_short_corridor_has_no_waypoints() {
+        let cells: Vec<GCell> = (0..=5).map(|x| cell(2, x, 0)).collect();
+
+        assert!(waypoints(&cells, 4).is_empty());
+    }
 }

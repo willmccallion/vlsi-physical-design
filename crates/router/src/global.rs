@@ -266,38 +266,29 @@ impl RouteTree {
         &self.cells
     }
 
-    /// Column and row ranges `(x0, x1, y0, y1)` of the branch joining `from`
-    /// and `to`, or `None` when either is off the route or they are not
-    /// joined.
-    pub fn span(&self, from: GCell, to: GCell) -> Option<(u16, u16, u16, u16)> {
+    /// The cells of the branch joining `from` to `to`, in order, or `None`
+    /// when either is off the route or they are not joined.
+    pub fn branch(&self, from: GCell, to: GCell) -> Option<Vec<GCell>> {
         let mut left = *self.index.get(&from)?;
         let mut right = *self.index.get(&to)?;
-        let mut span = (
-            from.x.min(to.x),
-            from.x.max(to.x),
-            from.y.min(to.y),
-            from.y.max(to.y),
-        );
+        let mut head = vec![from];
+        let mut tail = vec![to];
         while left != right {
-            let deeper = if self.depth[left] >= self.depth[right] {
-                &mut left
+            let (side, cells) = if self.depth[left] >= self.depth[right] {
+                (&mut left, &mut head)
             } else {
-                &mut right
+                (&mut right, &mut tail)
             };
-            let up = self.parent[*deeper];
-            if up == *deeper {
+            let up = self.parent[*side];
+            if up == *side {
                 return None;
             }
-            *deeper = up;
-            let cell = self.cells[up];
-            span = (
-                span.0.min(cell.x),
-                span.1.max(cell.x),
-                span.2.min(cell.y),
-                span.3.max(cell.y),
-            );
+            *side = up;
+            cells.push(self.cells[up]);
         }
-        Some(span)
+        let _ = tail.pop();
+        head.extend(tail.into_iter().rev());
+        Some(head)
     }
 }
 
@@ -645,7 +636,7 @@ mod tests {
     }
 
     #[test]
-    fn span_covers_the_branch_that_joins_two_cells() {
+    fn branch_walks_from_one_cell_to_the_other_through_their_junction() {
         let paths = vec![
             vec![cell(0, 0)],
             vec![cell(0, 0), cell(0, 1), cell(0, 2), cell(1, 2)],
@@ -655,17 +646,23 @@ mod tests {
 
         let tree = RouteTree::new(&paths);
 
-        assert_eq!(tree.span(cell(1, 2), cell(0, 4)), Some((0, 1, 2, 4)));
-        assert_eq!(tree.span(cell(2, 0), cell(1, 2)), Some((0, 2, 0, 2)));
+        assert_eq!(
+            tree.branch(cell(1, 2), cell(0, 4)),
+            Some(vec![cell(1, 2), cell(0, 2), cell(0, 3), cell(0, 4)])
+        );
+        assert_eq!(
+            tree.branch(cell(2, 0), cell(0, 1)),
+            Some(vec![cell(2, 0), cell(1, 0), cell(0, 0), cell(0, 1)])
+        );
     }
 
     #[test]
-    fn span_is_none_for_cells_on_separate_trees() {
+    fn branch_is_none_for_cells_on_separate_trees() {
         let paths = vec![vec![cell(0, 0), cell(1, 0)], vec![cell(5, 5)]];
 
         let tree = RouteTree::new(&paths);
 
-        assert_eq!(tree.span(cell(1, 0), cell(5, 5)), None);
-        assert_eq!(tree.span(cell(1, 0), cell(9, 9)), None);
+        assert_eq!(tree.branch(cell(1, 0), cell(5, 5)), None);
+        assert_eq!(tree.branch(cell(1, 0), cell(9, 9)), None);
     }
 }
