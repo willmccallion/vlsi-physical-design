@@ -224,12 +224,55 @@ pub(crate) struct Search<'a> {
     pub(crate) guide: Option<&'a Guide>,
 }
 
+/// A position in the search: a node, the way the path moves along the
+/// node's track, and the via the path last took if it is still within cut
+/// spacing, since a via back through the same cut there would break that
+/// spacing. Paths never turn back along a track, so once one moves out of
+/// a via's reach it cannot return to crowd it.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
+struct State {
+    node: Node,
+    heading: Heading,
+    recent_via: Option<RecentVia>,
+}
+
+/// Which way a path runs along its current track.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
+enum Heading {
+    /// It has not moved along the track yet.
+    Still,
+    /// Toward higher crossings.
+    Up,
+    /// Toward lower crossings.
+    Down,
+}
+
+/// A via the path took onto its current layer, close enough behind that
+/// the cut it used is still crowded.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
+struct RecentVia {
+    /// The layer the via came from.
+    from: LayerId,
+    /// Where it landed, along the current layer's tracks.
+    at: Dbu,
+}
+
+impl State {
+    const fn start(node: Node) -> Self {
+        Self {
+            node,
+            heading: Heading::Still,
+            recent_via: None,
+        }
+    }
+}
+
 /// A search state's priority, smallest estimated total cost first.
 #[derive(Clone, Copy, PartialEq)]
 struct Entry {
     f: f64,
     g: f64,
-    node: Node,
+    state: State,
 }
 
 impl Eq for Entry {}
@@ -240,7 +283,7 @@ impl Ord for Entry {
             .f
             .total_cmp(&self.f)
             .then_with(|| self.g.total_cmp(&other.g))
-            .then_with(|| self.node.cmp(&other.node))
+            .then_with(|| self.state.cmp(&other.state))
     }
 }
 
@@ -328,53 +371,62 @@ impl Search<'_> {
         self.guide.is_none_or(|g| g.contains(layer, p))
     }
 
-    /// Whether a via from `n` to `to_layer` would land within cut spacing of
-    /// the via this path took one short step earlier on the same cut.
-    fn crowds_previous_via(
-        &self,
-        node: Node,
-        to_layer: LayerId,
-        parents: &FxHashMap<Node, (f64, Option<Node>)>,
-    ) -> bool {
-        let parent = |x: Node| parents.get(&x).and_then(|&(_, p)| p);
-        let Some(prev) = parent(node) else {
-            return false;
-        };
-        if prev.layer != node.layer || prev.track != node.track {
-            return false;
-        }
-        let Some(before) = parent(prev) else {
-            return false;
-        };
-        if before.layer != to_layer {
-            return false;
-        }
-        let lower = node.layer.min(to_layer);
-        let (a, b) = (self.point(node), self.point(prev));
-        let gap = (a.x - b.x).abs().max((a.y - b.y).abs());
-        gap < self.tech.via_above(lower).cut_reach
+    /// Center distance below which two vias between `a` and `b` crowd each
+    /// other's cuts.
+    fn cut_reach(&self, a: LayerId, b: LayerId) -> Dbu {
+        self.tech.via_above(a.min(b)).cut_reach
     }
 
-    /// Neighbours of `n` with their step cost.
-    fn neighbours(
+    /// The recent via of a path that steps along its track to `along`.
+    fn after_step(
         &self,
-        n: Node,
-        window: &Rect<Dbu>,
-        parents: &FxHashMap<Node, (f64, Option<Node>)>,
-        out: &mut Vec<(Node, f64)>,
-    ) {
+        layer: LayerId,
+        recent: Option<RecentVia>,
+        along: Dbu,
+    ) -> Option<RecentVia> {
+        recent.filter(|v| (along - v.at).abs() < self.cut_reach(layer, v.from))
+    }
+
+    /// Whether a via from `state` to `to` would crowd the cut of the via the
+    /// path just came through.
+    fn crowds_recent_via(&self, state: State, to: LayerId, along: Dbu) -> bool {
+        state.recent_via.is_some_and(|v| {
+            v.from == to && (along - v.at).abs() < self.cut_reach(state.node.layer, to)
+        })
+    }
+
+    /// States reachable from `state` in one step, with the step's cost.
+    fn neighbours(&self, state: State, window: &Rect<Dbu>, out: &mut Vec<(State, f64)>) {
         out.clear();
+        let n = state.node;
         let lt = self.tech.layer(n.layer);
         let here = lt.point(n.track, n.cross);
-        for next in [n.cross.checked_sub(1), Some(n.cross + 1)]
-            .into_iter()
-            .flatten()
-        {
+        let steps = [
+            (n.cross.checked_sub(1), Heading::Down),
+            (Some(n.cross + 1), Heading::Up),
+        ];
+        for (next, heading) in steps {
+            let turns_back = matches!(
+                (state.heading, heading),
+                (Heading::Up, Heading::Down) | (Heading::Down, Heading::Up)
+            );
+            let Some(next) = next.filter(|_| !turns_back) else {
+                continue;
+            };
             if (next as usize) < lt.cross.len() {
                 let m = Node { cross: next, ..n };
                 let p = lt.point(m.track, m.cross);
                 if window.contains(p) && self.allowed(m.layer, p) {
-                    out.push((m, self.wire_cost(n.layer, here, p)));
+                    let moved = State {
+                        node: m,
+                        heading,
+                        recent_via: self.after_step(
+                            n.layer,
+                            state.recent_via,
+                            lt.cross[next as usize].at,
+                        ),
+                    };
+                    out.push((moved, self.wire_cost(n.layer, here, p)));
                 }
             }
         }
@@ -382,28 +434,42 @@ impl Search<'_> {
         let up = LayerId::new(n.layer.index() + 1);
         if n.layer < self.tech.max_layer
             && self.allowed(up, here)
-            && !self.crowds_previous_via(n, up, parents)
+            && !self.crowds_recent_via(state, up, cross.at)
             && let (Some(track), Some(c)) = (cross.up, lt.track_up[n.track as usize])
         {
             let m = Node {
-                layer: LayerId::new(n.layer.index() + 1),
+                layer: up,
                 track,
                 cross: c,
             };
-            out.push((m, self.via_cost(n.layer, here)));
+            out.push((self.via_state(m, n.layer), self.via_cost(n.layer, here)));
         }
-        if n.layer > self.tech.min_layer
-            && self.allowed(LayerId::new(n.layer.index() - 1), here)
-            && !self.crowds_previous_via(n, LayerId::new(n.layer.index() - 1), parents)
-            && let (Some(track), Some(c)) = (cross.down, lt.track_down[n.track as usize])
-        {
+        if n.layer > self.tech.min_layer {
             let below = LayerId::new(n.layer.index() - 1);
-            let m = Node {
-                layer: below,
-                track,
-                cross: c,
-            };
-            out.push((m, self.via_cost(below, here)));
+            if self.allowed(below, here)
+                && !self.crowds_recent_via(state, below, cross.at)
+                && let (Some(track), Some(c)) = (cross.down, lt.track_down[n.track as usize])
+            {
+                let m = Node {
+                    layer: below,
+                    track,
+                    cross: c,
+                };
+                out.push((self.via_state(m, n.layer), self.via_cost(below, here)));
+            }
+        }
+    }
+
+    /// The state on `node` just after a via from `from`.
+    fn via_state(&self, node: Node, from: LayerId) -> State {
+        let lt = self.tech.layer(node.layer);
+        State {
+            node,
+            heading: Heading::Still,
+            recent_via: Some(RecentVia {
+                from,
+                at: lt.cross[node.cross as usize].at,
+            }),
         }
     }
 
@@ -452,55 +518,56 @@ impl Search<'_> {
             weight * self.costs.via.mul_add(layers, plane)
         };
 
-        let mut best: FxHashMap<Node, (f64, Option<Node>)> = FxHashMap::default();
+        let mut best: FxHashMap<State, (f64, Option<State>)> = FxHashMap::default();
         let mut heap = BinaryHeap::new();
         for &(n, g) in sources {
-            if best.get(&n).is_none_or(|&(b, _)| g < b) {
-                let _ = best.insert(n, (g, None));
+            let state = State::start(n);
+            if best.get(&state).is_none_or(|&(b, _)| g < b) {
+                let _ = best.insert(state, (g, None));
                 heap.push(Entry {
                     f: g + h(n),
                     g,
-                    node: n,
+                    state,
                 });
             }
         }
-        let mut finish: Option<(f64, Node, usize)> = None;
+        let mut finish: Option<(f64, State, usize)> = None;
         let mut buf = Vec::new();
         let mut expansions = 0;
-        while let Some(Entry { f, g, node }) = heap.pop() {
+        while let Some(Entry { f, g, state }) = heap.pop() {
             if finish.is_some_and(|(cost, _, _)| f >= cost) {
                 break;
             }
-            if best.get(&node).is_some_and(|&(b, _)| g > b) {
+            if best.get(&state).is_some_and(|&(b, _)| g > b) {
                 continue;
             }
-            if let Some(&(k, extra)) = targets.get(&node)
+            if let Some(&(k, extra)) = targets.get(&state.node)
                 && finish.is_none_or(|(cost, _, _)| g + extra < cost)
             {
-                finish = Some((g + extra, node, k));
+                finish = Some((g + extra, state, k));
             }
             expansions += 1;
             if expansions > limit {
                 break;
             }
-            self.neighbours(node, window, &best, &mut buf);
+            self.neighbours(state, window, &mut buf);
             for &(m, step) in &buf {
                 let ng = g + step;
                 if best.get(&m).is_none_or(|&(b, _)| ng < b) {
-                    let _ = best.insert(m, (ng, Some(node)));
+                    let _ = best.insert(m, (ng, Some(state)));
                     heap.push(Entry {
-                        f: ng + h(m),
+                        f: ng + h(m.node),
                         g: ng,
-                        node: m,
+                        state: m,
                     });
                 }
             }
         }
         let (_, end, k) = finish?;
-        let mut path = vec![end];
+        let mut path = vec![end.node];
         let mut cur = end;
         while let Some(&(_, Some(prev))) = best.get(&cur) {
-            path.push(prev);
+            path.push(prev.node);
             cur = prev;
         }
         path.reverse();
@@ -513,4 +580,100 @@ fn distance_to(r: &Rect<Dbu>, p: Point<Dbu>) -> i64 {
     let dx = (r.min.x - p.x).max(p.x - r.max.x).max(Dbu::ZERO);
     let dy = (r.min.y - p.y).max(p.y - r.max.y).max(Dbu::ZERO);
     (dx + dy).get()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use pare_common::db::parser::{def, lef};
+    use pare_common::util::config::RoutingConfig;
+    use std::path::{Path, PathBuf};
+
+    fn fixture(name: &str) -> PathBuf {
+        Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../common/tests/fixtures")
+            .join(name)
+    }
+
+    fn tiny() -> NetlistDB {
+        let units = def::read_units(&fixture("tiny.def")).unwrap();
+        let library = lef::parse_files(&[fixture("tiny.lef")], units).unwrap();
+        def::parse(&fixture("tiny.def"), library).unwrap()
+    }
+
+    /// Runs on one track between two vias through the same cut, as the run's
+    /// length and the reach of that cut.
+    fn returns_through_a_cut(tech: &RouteTech, path: &[Node]) -> Vec<(Dbu, Dbu)> {
+        let mut out = Vec::new();
+        let mut i = 1;
+        while i < path.len() {
+            let (from, onto) = (path[i - 1], path[i]);
+            if from.layer == onto.layer {
+                i += 1;
+                continue;
+            }
+            let mut j = i;
+            while j + 1 < path.len()
+                && path[j + 1].layer == onto.layer
+                && path[j + 1].track == onto.track
+            {
+                j += 1;
+            }
+            if path.get(j + 1).is_some_and(|n| n.layer == from.layer) {
+                let lt = tech.layer(onto.layer);
+                let run =
+                    (lt.cross[path[j].cross as usize].at - lt.cross[onto.cross as usize].at).abs();
+                out.push((run, tech.via_above(from.layer.min(onto.layer)).cut_reach));
+            }
+            i = j + 1;
+        }
+        out
+    }
+
+    #[test]
+    fn a_path_leaves_a_cut_crowded_by_its_last_via_before_coming_back_through_it() {
+        let db = tiny();
+        let config = RoutingConfig {
+            min_layer: Some("M1".to_string()),
+            ..RoutingConfig::default()
+        };
+        let tech = RouteTech::new(&db, &config).unwrap();
+        let occupancy = Occupancy::new(&tech, Dbu(1000));
+        let history = History::new(Dbu(1000));
+        let search = Search {
+            db: &db,
+            tech: &tech,
+            occupancy: &occupancy,
+            overlay: None,
+            history: &history,
+            owner: Owner::Net(0),
+            costs: Costs {
+                via: 50.0,
+                penalty: 1000.0,
+                history: 0.0,
+            },
+            guide: None,
+        };
+        let m1 = LayerId(0);
+        let lt = tech.layer(m1);
+        let node = |y: i64| Node {
+            layer: m1,
+            track: lt.tracks.binary_search(&Dbu(y)).unwrap() as u32,
+            cross: lt.cross.partition_point(|c| c.at < Dbu(1100)) as u32,
+        };
+        let targets: FxHashMap<Node, (usize, f64)> =
+            std::iter::once((node(300), (0, 0.0))).collect();
+
+        let (path, _) = search
+            .find(&[(node(100), 0.0)], &targets, &db.die_area)
+            .unwrap();
+
+        assert_eq!(path.last(), Some(&node(300)));
+        for (run, reach) in returns_through_a_cut(&tech, &path) {
+            assert!(
+                run >= reach,
+                "a via returns after {run} of a {reach} reach: {path:?}"
+            );
+        }
+    }
 }
