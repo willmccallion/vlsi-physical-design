@@ -5,6 +5,7 @@
 //! units on exit. Supply nets are left out: they connect almost every cell
 //! and would only pull everything together.
 
+use crate::rows::expand_rows;
 use pare_common::db::design::{NetlistDB, PinOwner, PlacementStatus};
 use pare_common::db::indices::CellId;
 use pare_common::geom::point::Point;
@@ -38,6 +39,8 @@ pub struct ModelNet {
 pub struct PlacementModel {
     /// Placement region.
     pub die: Rect<f64>,
+    /// Rows cells may sit in, each one row high.
+    pub regions: Vec<Rect<f64>>,
     /// Width and height of each cell as placed.
     pub sizes: Vec<Point<f64>>,
     /// Whether the placer may move each cell.
@@ -77,8 +80,18 @@ impl PlacementModel {
                     .collect(),
             })
             .collect();
+        let regions = expand_rows(db)
+            .iter()
+            .map(|r| {
+                Rect::new(
+                    um(Point::new(r.x_min, r.y)),
+                    um(Point::new(r.x_max, r.y + r.height)),
+                )
+            })
+            .collect();
         Self {
             die: Rect::new(um(db.die_area.min), um(db.die_area.max)),
+            regions,
             sizes: (0..db.num_cells())
                 .map(|i| um(db.cell_size(CellId::new(i))))
                 .collect(),
@@ -100,6 +113,31 @@ impl PlacementModel {
             PinAnchor::Cell { cell, offset } => positions[cell] + offset,
             PinAnchor::Fixed(p) => p,
         }
+    }
+
+    /// Area of the rows not covered by fixed cells, or of the die for a
+    /// design without rows.
+    pub fn free_area(&self) -> f64 {
+        if self.regions.is_empty() {
+            return self.die.area();
+        }
+        let rows: f64 = self.regions.iter().map(Rect::area).sum();
+        let tallest = self.regions.iter().map(Rect::height).fold(0.0, f64::max);
+        let fixed: f64 = (0..self.num_cells())
+            .filter(|&i| !self.movable[i])
+            .map(|i| {
+                let cell = Rect::new(self.positions[i], self.positions[i] + self.sizes[i]);
+                let first = self
+                    .regions
+                    .partition_point(|r| r.min.y + tallest <= cell.min.y);
+                self.regions[first..]
+                    .iter()
+                    .take_while(|r| r.min.y < cell.max.y)
+                    .map(|r| overlap_area(r, &cell))
+                    .sum::<f64>()
+            })
+            .sum();
+        rows - fixed
     }
 
     /// Half-perimeter wirelength of all nets at the current positions.
@@ -134,4 +172,10 @@ impl PlacementModel {
             cell.status = PlacementStatus::Placed;
         }
     }
+}
+
+fn overlap_area(a: &Rect<f64>, b: &Rect<f64>) -> f64 {
+    let w = a.max.x.min(b.max.x) - a.min.x.max(b.min.x);
+    let h = a.max.y.min(b.max.y) - a.min.y.max(b.min.y);
+    w.max(0.0) * h.max(0.0)
 }

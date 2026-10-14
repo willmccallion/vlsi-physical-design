@@ -650,6 +650,7 @@ dependencies = [
  "log",
  "pare-common",
  "rand 0.8.5",
+ "rayon",
  "rustfft",
  "thiserror",
 ]

@@ -28,16 +28,13 @@ pub struct GlobalPlacementConfig {
     /// Iteration limit.
     #[serde(default = "default_placer_max_iterations")]
     pub placer_max_iterations: usize,
-    /// Initial step size; derived from the median cell height if unset.
-    pub initial_learning_rate: Option<f64>,
-    /// Average per-iteration cell movement below which placement has converged.
-    #[serde(default = "default_convergence_threshold")]
-    pub convergence_threshold: f64,
-    /// Weighted-average wirelength smoothing; derived from the die size if unset.
-    pub wa_gamma: Option<f64>,
-    /// Density weight used if it cannot be calibrated from gradient norms.
-    #[serde(default = "default_electro_force_multiplier")]
-    pub electro_force_multiplier: f64,
+    /// Cell area above the target density, as a fraction of all cell area,
+    /// at which global placement stops.
+    #[serde(default = "default_target_overflow")]
+    pub target_overflow: f64,
+    /// Seed for the random initial placement.
+    #[serde(default = "default_seed")]
+    pub seed: u64,
 }
 
 impl Default for GlobalPlacementConfig {
@@ -46,10 +43,8 @@ impl Default for GlobalPlacementConfig {
             target_density: None,
             bin_dimension: None,
             placer_max_iterations: default_placer_max_iterations(),
-            initial_learning_rate: None,
-            convergence_threshold: default_convergence_threshold(),
-            wa_gamma: None,
-            electro_force_multiplier: default_electro_force_multiplier(),
+            target_overflow: default_target_overflow(),
+            seed: default_seed(),
         }
     }
 }
@@ -124,12 +119,12 @@ const fn default_placer_max_iterations() -> usize {
     2000
 }
 
-const fn default_convergence_threshold() -> f64 {
-    2e-4
+const fn default_target_overflow() -> f64 {
+    0.1
 }
 
-const fn default_electro_force_multiplier() -> f64 {
-    20.0
+const fn default_seed() -> u64 {
+    1
 }
 
 const fn default_gcell_tracks() -> u32 {

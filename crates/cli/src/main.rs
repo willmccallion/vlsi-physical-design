@@ -15,10 +15,9 @@ use pare_common::util::{logger, ui, visualization};
 use pare_common::verify::placement::{PlacementViolation, placement_violations};
 use pare_common::verify::routing::check_routing;
 use pare_placer::detailed;
+use pare_placer::global::{self, GlobalParams, Outcome};
 use pare_placer::legalize::abacus;
 use pare_placer::model::PlacementModel;
-use pare_placer::physics::PhysicsContext;
-use pare_placer::solver::nesterov::{NesterovOptimizer, NesterovParams};
 use std::path::{Path, PathBuf};
 use std::time::Instant;
 
@@ -204,30 +203,13 @@ fn run_placement(config: &Config, db: &mut NetlistDB, output_dir: &Path) -> anyh
         .map(|(s, _)| s.x * s.y)
         .sum();
     let movable_cells = model.movable.iter().filter(|&&m| m).count();
-    let utilization = movable_area / model.die.area();
-    let wa_gamma = gp
-        .wa_gamma
-        .unwrap_or_else(|| model.die.width().hypot(model.die.height()) * 1.5);
-    let bin_dimension = gp.bin_dimension.unwrap_or_else(|| {
-        ((movable_cells as f64).sqrt().ceil() as usize)
-            .next_power_of_two()
-            .clamp(64, 512)
-    });
+    let utilization = movable_area / model.free_area();
+    let bins = gp
+        .bin_dimension
+        .unwrap_or_else(|| global::default_bins(&model));
     let target_density = gp
         .target_density
-        .unwrap_or_else(|| (utilization + 0.05).max(0.80));
-    let initial_learning_rate = gp.initial_learning_rate.unwrap_or_else(|| {
-        let mut heights: Vec<f64> = model
-            .sizes
-            .iter()
-            .zip(&model.movable)
-            .filter(|(_, m)| **m)
-            .map(|(s, _)| s.y)
-            .collect();
-        heights.sort_by(f64::total_cmp);
-        let median = heights.get(heights.len() / 2).copied().unwrap_or(1.0);
-        (median * 0.0006).clamp(0.005, 1.0)
-    });
+        .unwrap_or_else(|| (utilization + 0.05).clamp(0.80, 1.0));
 
     let phase_start = Instant::now();
     ui::section("Placement");
@@ -243,39 +225,35 @@ fn run_placement(config: &Config, db: &mut NetlistDB, output_dir: &Path) -> anyh
         "Target Density:",
         &format!("{target_density:.2}"),
     );
-    ui::stat_row(
-        "Bin Grid:",
-        &format!("{bin_dimension}x{bin_dimension}"),
-        "WA Gamma:",
-        &format!("{wa_gamma:.1}"),
-    );
+    ui::stat_row("Bin Grid:", &format!("{bins}x{bins}"), "", "");
 
-    let mut physics = PhysicsContext::new(bin_dimension, bin_dimension);
-    let params = NesterovParams {
-        max_iterations: gp.placer_max_iterations,
-        initial_learning_rate,
-        convergence_threshold: gp.convergence_threshold,
-        wa_gamma,
+    let params = GlobalParams {
         target_density,
-        electro_force_multiplier: gp.electro_force_multiplier,
+        target_overflow: gp.target_overflow,
+        max_iterations: gp.placer_max_iterations,
+        bins,
+        seed: gp.seed,
     };
-    let mut solver = NesterovOptimizer::new(params, model.num_cells());
     ui::placement_table_header();
-    let result = solver
-        .optimize(&mut model, &mut physics)
-        .map_err(|e| anyhow::anyhow!(e))?;
+    let result = global::place(&mut model, &params, |p| {
+        if p.iteration % 50 == 0 {
+            ui::placement_iter(p.iteration, p.hpwl, p.overflow, p.penalty, p.step);
+        }
+    });
     eprintln!();
-    if result.converged {
-        ui::check(&format!(
-            "Converged at iter {} (overflow={:.4}, WL={:.0})",
-            result.iterations, result.final_overflow, result.final_wirelength
-        ));
-    } else {
-        log::warn!(
-            "Did not converge after {} iterations (overflow={:.4})",
-            result.iterations,
-            result.final_overflow
-        );
+    match result.outcome {
+        Outcome::Converged => ui::check(&format!(
+            "Converged at iteration {} (overflow {:.3})",
+            result.iterations, result.overflow
+        )),
+        Outcome::IterationLimit => log::warn!(
+            "Stopped at the iteration limit with overflow {:.3}",
+            result.overflow
+        ),
+        Outcome::Diverged => anyhow::bail!(
+            "global placement diverged after {} iterations",
+            result.iterations
+        ),
     }
     ui::stat_row("HPWL (um):", &format!("{:.0}", model.hpwl()), "", "");
     model.write_back(db);

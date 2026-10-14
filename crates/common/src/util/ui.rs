@@ -47,7 +47,7 @@ pub fn placement_table_header() {
         "\n    {}",
         format!(
             "{:<8} {:>12} {:>12} {:>12} {:>10}",
-            "Iter", "Wirelength", "Overflow", "AvgMove", "Step"
+            "Iter", "HPWL", "Overflow", "Penalty", "Step"
         )
         .dim()
     );
@@ -55,8 +55,8 @@ pub fn placement_table_header() {
 }
 
 /// Prints a single placement iteration row.
-pub fn placement_iter(iter: usize, wl: f64, overflow: f64, avg_move: f64, step: f64) {
-    eprintln!("    {iter:<8} {wl:>12.0} {overflow:>12.4} {avg_move:>12.4} {step:>10.5}");
+pub fn placement_iter(iter: usize, hpwl: f64, overflow: f64, penalty: f64, step: f64) {
+    eprintln!("    {iter:<8} {hpwl:>12.0} {overflow:>12.4} {penalty:>12.3e} {step:>10.3e}");
 }
 
 /// Prints the header row for routing iteration table.
