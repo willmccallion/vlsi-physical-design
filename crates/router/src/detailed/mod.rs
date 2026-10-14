@@ -54,6 +54,7 @@ impl<'a> DetailedRouter<'a> {
     /// Prepares routing: computes pin access and records obstacles, pins
     /// and fixed cuts.
     pub fn new(db: &'a NetlistDB, tech: &'a RouteTech, gcell: Dbu) -> Self {
+        let start = std::time::Instant::now();
         let mut occupancy = Occupancy::new(tech, gcell);
         for s in fixed_shapes(db) {
             let owner = match s.owner {
@@ -70,6 +71,11 @@ impl<'a> DetailedRouter<'a> {
                 }
             }
         }
+        log::debug!(
+            "fixed shapes recorded in {:.1}s",
+            start.elapsed().as_secs_f64()
+        );
+        let start = std::time::Instant::now();
         let mut access: Vec<Vec<Vec<AccessPoint>>> = (0..db.nets.len())
             .into_par_iter()
             .map(|n| {
@@ -83,7 +89,16 @@ impl<'a> DetailedRouter<'a> {
                     .collect()
             })
             .collect();
+        log::debug!(
+            "access points found in {:.1}s",
+            start.elapsed().as_secs_f64()
+        );
+        let start = std::time::Instant::now();
         reserve_accesses(db, tech, &mut access, &mut occupancy);
+        log::debug!(
+            "access points reserved in {:.1}s",
+            start.elapsed().as_secs_f64()
+        );
         Self {
             db,
             tech,
@@ -1245,7 +1260,7 @@ fn reserve_accesses(
         })
         .collect();
     order.sort_unstable();
-    let mut reserved: Vec<Vec<(LayerRef, Rect<Dbu>)>> = vec![Vec::new(); access.len()];
+    let mut reserved: Vec<OwnVias> = vec![OwnVias::new(db); access.len()];
     for (count, n, k) in order {
         let owner = Owner::Net(crate::tech::to_u32(n));
         let metal_of = |a: &AccessPoint| {
@@ -1261,11 +1276,9 @@ fn reserve_accesses(
                 .collect::<Vec<_>>()
         };
         let clear = access[n][k].iter().position(|a| {
-            let leaves_room = footprint(db, tech, a).iter().all(|&(layer, rect)| {
-                reserved[n]
-                    .iter()
-                    .all(|&(l, r)| l != layer || !too_close(db, layer, &rect, &r))
-            });
+            let leaves_room = footprint(tech, a)
+                .iter()
+                .all(|&(via, at)| reserved[n].crowded(db, via, at) == 0);
             let metal_clear = metal_of(a).iter().all(|(layer, rect)| {
                 !tech.routable(*layer)
                     || occupancy
@@ -1293,28 +1306,19 @@ fn reserve_accesses(
             let _ = occupancy.add_cut(cut, &rect, owner, Origin::Fixed);
         }
         let picked = access[n][k].swap_remove(chosen);
-        reserved[n].extend(footprint(db, tech, &picked));
+        for (via, at) in footprint(tech, &picked) {
+            reserved[n].add(via, at);
+        }
         access[n][k] = vec![picked];
     }
 }
 
-/// The via shapes an access point commits its net to: its via stack, and
-/// the via up from its node that a route leaving the pin upward would take.
-fn footprint(db: &NetlistDB, tech: &RouteTech, a: &AccessPoint) -> Vec<(LayerRef, Rect<Dbu>)> {
+/// The vias an access point commits its net to: its via stack, and the via
+/// up from its node that a route leaving the pin upward would take.
+fn footprint(tech: &RouteTech, a: &AccessPoint) -> Vec<(ViaId, Point<Dbu>)> {
     let node = tech.layer(a.node.layer).point(a.node.track, a.node.cross);
     let up = (a.node.layer < tech.max_layer).then(|| (tech.via_above(a.node.layer).via, node));
-    a.vias
-        .iter()
-        .map(|&v| (v, a.at))
-        .chain(up)
-        .flat_map(|(via, at)| {
-            db.library
-                .via(via)
-                .shapes
-                .iter()
-                .map(move |s| (s.layer, s.rect.translate(at)))
-        })
-        .collect()
+    a.vias.iter().map(|&v| (v, a.at)).chain(up).collect()
 }
 
 /// Signal nets with at least two pins, shortest bounding box first.
