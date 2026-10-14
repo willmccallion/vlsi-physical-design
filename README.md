@@ -1,16 +1,16 @@
 # PARE — Placement And Routing Engine
 
-A digital IC placement and routing engine written in Rust. Implements the full physical design flow — analytical global placement, Abacus legalization, and two-stage negotiation-based routing — from scratch. It places and routes real benchmarks up to 145k cells / 143k nets, and routes pre-placed designs up to 313k cells / 407k nets, with no shorts or opens.
+A digital IC placement and routing engine written in Rust. Implements the full physical design flow — analytical global placement, Abacus legalization, and two-stage negotiation-based routing — from scratch. It runs on real benchmarks up to 145k cells / 143k nets (place and route) and 313k cells / 407k nets (route only), but its routed output is **not yet legal**: see [Known issues](#known-issues).
 
-| IBM10 (64,227 nets) | AES (45,036 nets) |
+| IBM10 (64,227 nets) | IBM05 (28,446 nets) |
 |:---:|:---:|
-| ![IBM10 Routing](assets/routed_ibm10.png) | ![AES Routing](assets/routed_aes.png) |
+| ![IBM10 Routing](assets/routed_ibm10.png) | ![IBM05 Routing](assets/routed_ibm05.png) |
 
-| IBM05 (28,446 nets) | IBM01 (11,507 nets) |
+| IBM01 (11,507 nets) | GCD (579 nets) |
 |:---:|:---:|
-| ![IBM05 Routing](assets/routed_ibm05.png) | ![IBM01 Routing](assets/routed_ibm01.png) |
+| ![IBM01 Routing](assets/routed_ibm01.png) | ![GCD Routing](assets/routed_gcd.png) |
 
-*Top: IBM10 ISPD benchmark (67k cells) and AES cipher (Nangate45, 10 metal layers). Bottom: IBM05 and IBM01. All verified short-free and open-free.*
+*IBM ISPD benchmarks (Bookshelf) and GCD (Nangate45). These images show routing topology only; the wires contain shorts between nets (see [Known issues](#known-issues)).*
 
 ---
 
@@ -90,7 +90,7 @@ Routing runs in two stages on an edge-based gcell grid where capacity is structu
 
 ## Verification
 
-Post-route verification checks topology — not full design rules. It catches:
+Post-route verification is meant to check topology — not full design rules. It currently misses most shorts (see [Known issues](#known-issues)). It is intended to catch:
 
 - **Shorts** — centerline intersection between segments of different nets (wires are treated as zero-width lines, so this only catches wires that literally cross, not spacing violations)
 - **Opens** — BFS connectivity check that all pins on a net are reachable through the routed segments
@@ -121,23 +121,21 @@ Type-safe index newtypes (`CellId`, `NetId`, `PinId`) prevent accidental index c
 
 ---
 
-## Performance
+## Known issues
 
-| Benchmark | Flow | Cells | Nets | Utilization | Layers | Time | Peak memory | Result |
-|---|---|---|---|---|---|---|---|---|
-| GCD | place + route | 508 | 579 | 7% | 10 (Nangate45) | 0.4s | 0.4 GB | No shorts/opens |
-| IBM01 | place + route | 12,036 | 11,507 | 49% | 6 (Bookshelf) | 17.9s | 0.7 GB | No shorts/opens |
-| AES | place + route | 44,749 | 45,036 | 4% | 10 (Nangate45) | 7.0s | 0.9 GB | No shorts/opens |
-| IBM05 | place + route | 28,146 | 28,446 | 49% | 6 (Bookshelf) | 109s | 2.1 GB | No shorts/opens |
-| IBM10 | place + route | 66,948 | 64,227 | 49% | 6 (Bookshelf) | 187s | 10.3 GB | No shorts/opens |
-| IBM13 | place + route | 81,018 | 83,806 | 49% | 6 (Bookshelf) | 308s | 13.7 GB | No shorts/opens |
-| IBM14 | place + route | 145,492 | 143,202 | 49% | 6 (Bookshelf) | 460s | 28.9 GB | No shorts/opens |
-| Netcard | route only | 274,700 | 290,354 | — | 10 (Nangate45) | 114s | 2.8 GB | No shorts/opens |
-| Leon3mp | route only | 312,529 | 406,912 | — | 10 (Nangate45) | 32.5s | 2.4 GB | No shorts/opens |
+Measured on the routed DEFs this tool currently produces:
 
-Measured on a 28-thread machine. Utilization is movable cell area over die area; the Bookshelf dies include the gaps between rows. Netcard and Leon3mp ship already placed, so only routing runs on them. Routing keeps search state per worker thread, so its memory grows with the thread count. The routed result can differ slightly between runs because nets are routed in parallel.
+| Design | Overlapping wire pairs from different nets | Nets involved | Via sites shared by different nets |
+|---|---|---|---|
+| GCD | 12,520 | 562 of 579 | 857 |
 
-All benchmarks are real circuits (ISPD or open-source RTL), not synthetic. Leon3mp is the largest, with 313k cells and 407k nets routed in 33s. IBM14 is the largest placed from scratch, with 145k cells and 143k nets. AES uses a real technology library (Nangate45) with 10 metal layers at realistic pitches.
+- **Shorts are not detected.** The shorts check rejects any pair of wires whose bounding boxes overlap by no more than a tolerance on one axis, so two parallel wires on the same track, T-junctions, and vias landing on another net's wire are never reported.
+- **The router produces shorts.** Detailed routing places every wire on gcell centers, so all nets crossing a gcell edge on a layer share one centerline. Track assignment only tries the nearest track and leaves conflicting wires in place, and pin access for every net meets at the gcell center.
+- **The opens check is permissive.** Wires that cross on adjacent layers count as connected without a via, and a pin counts as connected if a wire on any layer passes near it.
+- **Placement is not row/site legal.** DEF rows, sites, and cell orientations are ignored; Bookshelf rows with gaps between them are filled as if contiguous.
+- **The AES benchmark is invalid.** Its DEF uses sky130 cells but is paired with the Nangate45 LEF, so every cell is read as 1×1 µm. It has been removed from the results until it uses the matching library.
+
+Runtime and memory figures will be republished once routing is legal.
 
 ---
 
