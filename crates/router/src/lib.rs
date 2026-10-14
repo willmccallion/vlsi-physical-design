@@ -140,22 +140,17 @@ pub fn route(db: &mut NetlistDB, config: &RoutingConfig) -> Result<RoutingSummar
             costs.penalty / pitch,
             start.elapsed().as_millis(),
         );
-        let mut stalled = false;
+        let mut scope = Scope::Conflicts;
         for round in 1..=config.detailed_iterations {
             if conflicted.is_empty() {
                 break;
             }
             let start = Instant::now();
             costs.penalty = (costs.penalty * 1.5).min(MAX_PENALTY);
-            let scope = if stalled {
-                Scope::NearConflicts
-            } else {
-                Scope::Conflicts
-            };
             let repaired = dr.repair(costs, round, scope);
             let before = conflicted.len();
             conflicted = dr.conflicted_nets(1.0);
-            stalled = conflicted.len() >= before;
+            scope = next_scope(scope, conflicted.len() < before);
             summary.rounds = round;
             ui::routing_iter(
                 "DR",
@@ -190,6 +185,16 @@ pub fn route(db: &mut NetlistDB, config: &RoutingConfig) -> Result<RoutingSummar
         db.nets[n.index()].routing = elems;
     }
     Ok(summary)
+}
+
+/// The scope of the next repair pass: conflicts only, except for one pass
+/// that also rips up wiring near each conflict after a conflicts-only pass
+/// that left no fewer nets in conflict.
+const fn next_scope(previous: Scope, improved: bool) -> Scope {
+    match previous {
+        Scope::Conflicts if !improved => Scope::NearConflicts,
+        _ => Scope::Conflicts,
+    }
 }
 
 /// The DEF gcell grid of `nx` by `ny` gcells of edge `gcell` from `origin`.
