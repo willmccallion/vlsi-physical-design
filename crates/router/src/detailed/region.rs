@@ -15,7 +15,7 @@ use super::DetailedRouter;
 use crate::access::Node;
 use crate::occupancy::{LocalOccupancy, Owner};
 use crate::search::{Costs, Search};
-use crate::wiring::{Edge, NetRoute, path_edges};
+use crate::wiring::{DisjointSets, Edge, NetRoute, path_edges};
 use pare_common::db::indices::NetId;
 use pare_common::geom::dbu::Dbu;
 use pare_common::geom::point::Point;
@@ -121,36 +121,32 @@ impl DetailedRouter<'_> {
     /// Repairs regions that do not touch each other; returns the number of
     /// pieces routed again.
     fn repair_batch(&mut self, batch: &[(Rect<Dbu>, Vec<NetId>)], costs: Costs) -> usize {
-        let mut work: Vec<(Rect<Dbu>, Vec<Piece>)> = Vec::with_capacity(batch.len());
-        let mut removed: FxHashMap<(usize, NetId), Vec<Edge>> = FxHashMap::default();
-        let mut touched: Vec<NetId> = Vec::new();
-        for (r, (area, nets)) in batch.iter().enumerate() {
-            let mut pieces = Vec::new();
+        let mut regions_of: BTreeMap<NetId, Vec<usize>> = BTreeMap::new();
+        for (r, (_, nets)) in batch.iter().enumerate() {
             for &net in nets {
-                if !self.routes[net.index()].complete {
-                    continue;
-                }
-                let (inside, piece) = self.carve(net, area);
-                let _ = removed.insert((r, net), inside);
-                touched.push(net);
-                if let Some(piece) = piece {
-                    pieces.push(piece);
+                if self.routes[net.index()].complete {
+                    regions_of.entry(net).or_default().push(r);
                 }
             }
-            work.push((*area, pieces));
         }
-        touched.sort_unstable();
-        touched.dedup();
-        for &net in &touched {
+        let mut pieces: Vec<Vec<Piece>> = (0..batch.len()).map(|_| Vec::new()).collect();
+        let mut removed: FxHashMap<(usize, NetId), Vec<Edge>> = FxHashMap::default();
+        for (&net, regions) in &regions_of {
+            let areas: Vec<Rect<Dbu>> = regions.iter().map(|&r| batch[r].0).collect();
+            let mut gone: FxHashSet<Edge> = FxHashSet::default();
+            for (k, (inside, piece)) in self.carve(net, &areas).into_iter().enumerate() {
+                gone.extend(inside.iter().copied());
+                let _ = removed.insert((regions[k], net), inside);
+                if let Some(piece) = piece {
+                    pieces[regions[k]].push(piece);
+                }
+            }
             let mut route = self.routes[net.index()].clone();
-            let gone: FxHashSet<Edge> = removed
-                .iter()
-                .filter(|((_, n), _)| *n == net)
-                .flat_map(|(_, edges)| edges.iter().copied())
-                .collect();
             route.edges.retain(|e| !gone.contains(e));
             self.commit(net, &route);
         }
+        let work: Vec<(Rect<Dbu>, Vec<Piece>)> =
+            batch.iter().map(|(area, _)| *area).zip(pieces).collect();
 
         let routed: Vec<Vec<Option<Vec<Edge>>>> = work
             .par_iter()
@@ -177,38 +173,56 @@ impl DetailedRouter<'_> {
         count
     }
 
-    /// Splits `net`'s edges inside `area` off its route. Returns them, and
-    /// the piece to route again if the rest of the net reaches `area` in
-    /// more than one place.
-    fn carve(&self, net: NetId, area: &Rect<Dbu>) -> (Vec<Edge>, Option<Piece>) {
+    /// Splits `net`'s edges inside each of `areas`, which do not touch, off
+    /// its route. Returns, per area, the edges taken out and the piece to
+    /// route again if the wiring left outside every area reaches that area
+    /// in more than one place. Judging connectivity by what is left outside
+    /// all areas at once means that joining each area's groups restores every
+    /// connection the removed edges made.
+    fn carve(&self, net: NetId, areas: &[Rect<Dbu>]) -> Vec<(Vec<Edge>, Option<Piece>)> {
         let route = &self.routes[net.index()];
-        let inside = |n: Node| contains_half_open(area, self.point(n));
-        let (removed, kept): (Vec<Edge>, Vec<Edge>) = route.edges.iter().partition(|e| {
+        let area_of = |n: Node| {
+            let p = self.point(n);
+            areas.iter().position(|a| contains_half_open(a, p))
+        };
+        let mut removed: Vec<Vec<Edge>> = vec![Vec::new(); areas.len()];
+        let mut kept: Vec<Edge> = Vec::new();
+        for &e in &route.edges {
             let (a, b) = e.ends();
-            inside(a) && inside(b)
-        });
+            match (area_of(a), area_of(b)) {
+                (Some(i), Some(j)) if i == j => removed[i].push(e),
+                _ => kept.push(e),
+            }
+        }
 
         let mut sets = DisjointSets::default();
         for e in &kept {
             let (a, b) = e.ends();
             sets.union(a, b);
         }
-        let mut terminals: Vec<Node> = kept
-            .iter()
-            .flat_map(|e| <[Node; 2]>::from(e.ends()))
-            .filter(|&n| inside(n))
-            .collect();
-        terminals.extend(route.access.iter().map(|a| a.node).filter(|&n| inside(n)));
-        terminals.sort_unstable();
-        terminals.dedup();
-
-        let mut groups: BTreeMap<Node, Vec<Node>> = BTreeMap::new();
-        for n in terminals {
-            groups.entry(sets.find(n)).or_default().push(n);
+        let mut terminals: Vec<Vec<Node>> = vec![Vec::new(); areas.len()];
+        let ends = kept.iter().flat_map(|e| <[Node; 2]>::from(e.ends()));
+        for n in ends.chain(route.access.iter().map(|a| a.node)) {
+            if let Some(i) = area_of(n) {
+                terminals[i].push(n);
+            }
         }
-        let groups: Vec<Vec<Node>> = groups.into_values().collect();
-        let piece = (groups.len() > 1).then_some(Piece { net, groups });
-        (removed, piece)
+
+        removed
+            .into_iter()
+            .zip(terminals)
+            .map(|(inside, mut nodes)| {
+                nodes.sort_unstable();
+                nodes.dedup();
+                let mut groups: BTreeMap<Node, Vec<Node>> = BTreeMap::new();
+                for n in nodes {
+                    groups.entry(sets.find(n)).or_default().push(n);
+                }
+                let groups: Vec<Vec<Node>> = groups.into_values().collect();
+                let piece = (groups.len() > 1).then_some(Piece { net, groups });
+                (inside, piece)
+            })
+            .collect()
     }
 
     /// Routes a region's pieces, rerouting those still in conflict with a
@@ -342,61 +356,9 @@ fn contains_half_open(r: &Rect<Dbu>, p: Point<Dbu>) -> bool {
     r.min.x <= p.x && p.x < r.max.x && r.min.y <= p.y && p.y < r.max.y
 }
 
-/// Union-find over crossings.
-#[derive(Debug, Default)]
-struct DisjointSets {
-    parent: FxHashMap<Node, Node>,
-}
-
-impl DisjointSets {
-    fn find(&mut self, n: Node) -> Node {
-        let mut root = n;
-        while let Some(&p) = self.parent.get(&root) {
-            if p == root {
-                break;
-            }
-            root = p;
-        }
-        let mut cur = n;
-        while cur != root {
-            let next = self.parent.get(&cur).copied().unwrap_or(root);
-            let _ = self.parent.insert(cur, root);
-            cur = next;
-        }
-        root
-    }
-
-    fn union(&mut self, a: Node, b: Node) {
-        let (ra, rb) = (self.find(a), self.find(b));
-        if ra != rb {
-            let _ = self.parent.insert(ra.max(rb), ra.min(rb));
-        }
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
-    use pare_common::db::indices::LayerId;
-
-    fn node(cross: u32) -> Node {
-        Node {
-            layer: LayerId(1),
-            track: 0,
-            cross,
-        }
-    }
-
-    #[test]
-    fn joined_crossings_share_a_root() {
-        let mut sets = DisjointSets::default();
-
-        sets.union(node(1), node(2));
-        sets.union(node(3), node(2));
-
-        assert_eq!(sets.find(node(3)), sets.find(node(1)));
-        assert_ne!(sets.find(node(4)), sets.find(node(1)));
-    }
 
     #[test]
     fn a_region_holds_its_lower_left_edges_but_not_its_upper_right_ones() {

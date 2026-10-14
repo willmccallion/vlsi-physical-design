@@ -14,6 +14,7 @@ use pare_common::geom::dbu::Dbu;
 use pare_common::geom::point::Point;
 use pare_common::geom::rect::Rect;
 use pare_common::verify::shapes::wire_rect;
+use rustc_hash::FxHashMap;
 
 /// One edge of the track graph.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
@@ -121,6 +122,18 @@ impl NetRoute {
         out
     }
 
+    /// Whether its edges join the access points of all its pins.
+    pub fn is_connected(&self) -> bool {
+        let mut sets = DisjointSets::default();
+        for e in &self.edges {
+            let (a, b) = e.ends();
+            sets.union(a, b);
+        }
+        let mut roots = self.access.iter().map(|a| sets.find(a.node));
+        let first = roots.next();
+        roots.all(|r| Some(r) == first)
+    }
+
     /// Its metal, by layer.
     pub fn metal(&self, db: &NetlistDB, tech: &RouteTech) -> Vec<(LayerId, Rect<Dbu>)> {
         self.elems(tech)
@@ -138,6 +151,38 @@ impl NetRoute {
                 RouteElem::Wire { .. } => None,
             })
             .collect()
+    }
+}
+
+/// Union-find over crossings.
+#[derive(Debug, Default)]
+pub(crate) struct DisjointSets {
+    parent: FxHashMap<Node, Node>,
+}
+
+impl DisjointSets {
+    pub(crate) fn find(&mut self, n: Node) -> Node {
+        let mut root = n;
+        while let Some(&p) = self.parent.get(&root) {
+            if p == root {
+                break;
+            }
+            root = p;
+        }
+        let mut cur = n;
+        while cur != root {
+            let next = self.parent.get(&cur).copied().unwrap_or(root);
+            let _ = self.parent.insert(cur, root);
+            cur = next;
+        }
+        root
+    }
+
+    pub(crate) fn union(&mut self, a: Node, b: Node) {
+        let (ra, rb) = (self.find(a), self.find(b));
+        if ra != rb {
+            let _ = self.parent.insert(ra.max(rb), ra.min(rb));
+        }
     }
 }
 
@@ -202,6 +247,17 @@ mod tests {
             })
         );
         assert_eq!(Edge::between(node(1, 4, 7), node(1, 5, 7)), None);
+    }
+
+    #[test]
+    fn joined_crossings_share_a_root() {
+        let mut sets = DisjointSets::default();
+
+        sets.union(node(1, 4, 1), node(1, 4, 2));
+        sets.union(node(1, 4, 3), node(1, 4, 2));
+
+        assert_eq!(sets.find(node(1, 4, 3)), sets.find(node(1, 4, 1)));
+        assert_ne!(sets.find(node(1, 4, 4)), sets.find(node(1, 4, 1)));
     }
 
     #[test]

@@ -165,7 +165,10 @@ pub fn route(db: &mut NetlistDB, config: &RoutingConfig) -> Result<RoutingSummar
         summary.incomplete = nets
             .iter()
             .copied()
-            .filter(|n| !dr.routes()[n.index()].complete)
+            .filter(|n| {
+                let route = &dr.routes()[n.index()];
+                !(route.complete && route.is_connected())
+            })
             .collect();
         let wiring: Vec<(NetId, Vec<RouteElem>)> = nets
             .iter()
