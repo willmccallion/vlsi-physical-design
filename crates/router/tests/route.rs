@@ -124,6 +124,18 @@ fn removing_a_nets_wiring_keeps_its_fixed_cuts() {
 }
 
 #[test]
+fn wires_keep_the_table_spacing_from_a_long_wide_shape_and_the_minimum_from_a_wire() {
+    let db = tiny();
+    let tech = RouteTech::new(&db, &RoutingConfig::default()).unwrap();
+    let m2 = tech.layer(LayerId(1));
+    let stripe = Rect::new(Point::new(Dbu(0), Dbu(0)), Point::new(Dbu(400), Dbu(2000)));
+    let wire = Rect::new(Point::new(Dbu(0), Dbu(0)), Point::new(Dbu(100), Dbu(2000)));
+
+    assert_eq!(m2.spacing_around(&stripe), (Dbu(200), Dbu(110)));
+    assert_eq!(m2.spacing_around(&wire), (Dbu(110), Dbu(110)));
+}
+
+#[test]
 fn routing_refuses_pins_of_different_nets_that_overlap() {
     let mut db = tiny();
     for cell in &mut db.cells {

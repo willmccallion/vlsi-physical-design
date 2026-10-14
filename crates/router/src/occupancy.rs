@@ -190,7 +190,7 @@ pub(crate) fn affected_tracks<'t>(
     rect: &Rect<Dbu>,
 ) -> impl Iterator<Item = (u32, bool)> + use<'t> {
     let ((a0, a1), _) = lt.across_along_rect(rect);
-    let reach = lt.spacing + lt.width / 2;
+    let reach = lt.spacing_around(rect).0 + lt.width / 2;
     let range = lt.tracks_within(a0 - reach + Dbu(1), a1 + reach - Dbu(1));
     range.map(move |t| {
         let c = lt.tracks[t as usize];
@@ -270,6 +270,8 @@ impl Occupancy {
     ) -> Vec<TrackRef> {
         let lt = tech.layer(layer);
         let (_, (lo, hi)) = lt.across_along_rect(rect);
+        let wider = lt.spacing_around(rect).1 - lt.spacing;
+        let (lo, hi) = (lo - wider, hi + wider);
         let mut touched = Vec::new();
         for (track, centered) in affected_tracks(lt, rect) {
             let list = &mut self.tracks[layer.index()][track as usize];

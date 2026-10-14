@@ -9,7 +9,7 @@
 use crate::RouteError;
 use pare_common::db::design::{NetlistDB, TrackAxis};
 use pare_common::db::indices::{CutLayerId, LayerId, ViaId};
-use pare_common::db::library::{Direction, LayerRef};
+use pare_common::db::library::{Direction, LayerRef, SpacingTable};
 use pare_common::geom::dbu::Dbu;
 use pare_common::geom::point::Point;
 use pare_common::geom::rect::Rect;
@@ -43,6 +43,8 @@ pub struct LayerTech {
     pub width: Dbu,
     /// Minimum spacing to other nets.
     pub spacing: Dbu,
+    /// Spacing by width and parallel run, if the layer has a table.
+    pub spacing_table: Option<SpacingTable>,
 }
 
 impl LayerTech {
@@ -69,6 +71,21 @@ impl LayerTech {
             Direction::Horizontal => ((r.min.y, r.max.y), (r.min.x, r.max.x)),
             Direction::Vertical => ((r.min.x, r.max.x), (r.min.y, r.max.y)),
         }
+    }
+
+    /// The spacing other nets' wires on this layer must keep from `rect`:
+    /// across its tracks, the spacing for its width and a run alongside its
+    /// whole length, as if a wire could follow it all the way; along them,
+    /// the spacing for its width at no run.
+    pub fn spacing_around(&self, rect: &Rect<Dbu>) -> (Dbu, Dbu) {
+        let Some(table) = &self.spacing_table else {
+            return (self.spacing, self.spacing);
+        };
+        let ((a0, a1), (b0, b1)) = self.across_along_rect(rect);
+        let width = (a1 - a0).min(b1 - b0).max(self.width);
+        let across = table.spacing(width, b1 - b0).max(self.spacing);
+        let along = table.spacing(width, Dbu::ZERO).max(self.spacing);
+        (across, along)
     }
 
     /// The smallest distance between neighbouring tracks.
@@ -205,6 +222,7 @@ impl RouteTech {
                 tracks: tracks[l].clone(),
                 width: layer.width,
                 spacing: layer.min_spacing,
+                spacing_table: layer.spacing_table.clone(),
             });
         }
 
