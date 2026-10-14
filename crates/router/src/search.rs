@@ -1,14 +1,15 @@
 //! The A* search over track crossings and what it costs.
 //!
-//! Costs are wirelength, a fixed via cost, a penalty for every occupant of
-//! another net the new metal would short or crowd, and accumulated conflict
-//! history. Obstacles cost so much that a route through one exists only
-//! when nothing else does. A guide limits the search to gcells near a net's
-//! global route.
+//! Costs are wirelength, a fixed via cost, a penalty for every piece of
+//! another net's wiring the new metal or cuts would short or crowd, and
+//! accumulated conflict history. Obstacles, and other nets' pins and
+//! reserved pin access, never move, so they cost so much that a route
+//! through one exists only when nothing else does. A guide limits the
+//! search to gcells near a net's global route.
 
 use crate::access::{AccessPoint, Node};
 use crate::global::GCell;
-use crate::occupancy::{LocalOccupancy, Occupancy, Owner, TrackRef};
+use crate::occupancy::{LocalOccupancy, Occupancy, Origin, Owner, TrackRef};
 use crate::tech::RouteTech;
 use pare_common::db::design::NetlistDB;
 use pare_common::db::indices::{CutLayerId, LayerId};
@@ -20,8 +21,13 @@ use pare_common::verify::shapes::wire_rect;
 use rustc_hash::FxHashMap;
 use std::collections::BinaryHeap;
 
-/// Cost of crossing an obstacle, in DBU of wirelength.
+/// Cost of crossing an obstacle or another net's fixed metal, in DBU of
+/// wirelength.
 const OBSTACLE_COST: f64 = 1e9;
+
+/// Highest conflict penalty, far below the cost of an obstacle so that a
+/// route never prefers fixed metal to wiring that can move.
+pub(crate) const MAX_PENALTY: f64 = OBSTACLE_COST * 1e-3;
 
 /// Heuristic weight of the first, near-optimal search of a connection.
 const FOCUSED_WEIGHT: f64 = 1.0;
@@ -323,15 +329,20 @@ impl Search<'_> {
         cost
     }
 
+    /// Cost of conflicting with one occupant.
+    const fn occupant_cost(&self, owner: Owner, origin: Origin) -> f64 {
+        match (owner, origin) {
+            (Owner::Obstacle, _) | (Owner::Net(_), Origin::Fixed) => OBSTACLE_COST,
+            (Owner::Net(_), Origin::Wiring) => self.costs.penalty,
+        }
+    }
+
     /// Cost of other owners' cuts that a cut at `rect` on `cut` would touch
     /// or crowd.
     fn cut_cost(&self, cut: CutLayerId, rect: &Rect<Dbu>) -> f64 {
         let mut cost = 0.0;
         for o in self.occupancy.cut_conflicts(cut, rect, self.owner) {
-            cost += match o.owner {
-                Owner::Obstacle => OBSTACLE_COST,
-                Owner::Net(_) => self.costs.penalty,
-            };
+            cost += self.occupant_cost(o.owner, o.origin);
         }
         if let Some(overlay) = self.overlay {
             let clashes = overlay
@@ -351,10 +362,7 @@ impl Search<'_> {
             .occupancy
             .rect_conflicts(self.tech, layer, rect, self.owner)
         {
-            cost += match o.owner {
-                Owner::Obstacle => OBSTACLE_COST,
-                Owner::Net(_) => self.costs.penalty,
-            };
+            cost += self.occupant_cost(o.owner, o.origin);
         }
         if let Some(overlay) = self.overlay {
             let clashes = overlay

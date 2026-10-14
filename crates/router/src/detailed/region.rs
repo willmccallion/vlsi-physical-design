@@ -14,7 +14,7 @@
 use super::DetailedRouter;
 use crate::access::Node;
 use crate::occupancy::{LocalOccupancy, Owner};
-use crate::search::{Costs, Search};
+use crate::search::{Costs, MAX_PENALTY, Search};
 use crate::wiring::{DisjointSets, Edge, NetRoute, path_edges};
 use pare_common::db::indices::{CutLayerId, NetId};
 use pare_common::geom::dbu::Dbu;
@@ -272,7 +272,7 @@ impl DetailedRouter<'_> {
             if todo.is_empty() {
                 break;
             }
-            penalty *= 2.0;
+            penalty = (penalty * 2.0).min(MAX_PENALTY);
         }
         results
     }

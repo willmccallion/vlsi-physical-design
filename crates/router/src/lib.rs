@@ -23,6 +23,7 @@ use pare_common::db::indices::NetId;
 use pare_common::db::library::Shape;
 use pare_common::util::config::{LayerRangeError, RoutingConfig};
 use pare_common::util::ui;
+use search::MAX_PENALTY;
 use std::time::Instant;
 use tech::RouteTech;
 use track::assign_tracks;
@@ -148,7 +149,7 @@ pub fn route(db: &mut NetlistDB, config: &RoutingConfig) -> Result<RoutingSummar
                 break;
             }
             let start = Instant::now();
-            costs.penalty *= 1.5;
+            costs.penalty = (costs.penalty * 1.5).min(MAX_PENALTY);
             let repaired = dr.repair(costs, round, Scope::Conflicts);
             conflicted = dr.conflicted_nets(1.0);
             summary.rounds = round;
