@@ -17,6 +17,17 @@ pub enum Owner {
     Obstacle,
 }
 
+/// Where a shape comes from.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Source {
+    /// A cell, pin, obstruction, special net or blockage.
+    Fixed,
+    /// A routed wire.
+    Wire,
+    /// A routed via.
+    Via,
+}
+
 /// A rectangle on a layer and what it belongs to.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct OwnedShape {
@@ -24,8 +35,15 @@ pub struct OwnedShape {
     pub shape: Shape,
     /// Its net, if any.
     pub owner: Owner,
+    /// Where it comes from.
+    pub source: Source,
+}
+
+impl OwnedShape {
     /// Whether it is routed wiring rather than part of a cell, pin or obstacle.
-    pub wiring: bool,
+    pub const fn is_wiring(&self) -> bool {
+        !matches!(self.source, Source::Fixed)
+    }
 }
 
 /// The rectangle a default-width wire covers, extended by half its width
@@ -78,13 +96,17 @@ pub fn wiring_shapes(db: &NetlistDB) -> Vec<OwnedShape> {
     for (i, net) in db.nets.iter().enumerate() {
         let owner = Owner::Net(NetId::new(i));
         for elem in &net.routing {
+            let source = match elem {
+                RouteElem::Wire { .. } => Source::Wire,
+                RouteElem::Via { .. } => Source::Via,
+            };
             out.extend(
                 route_elem_shapes(db, elem)
                     .into_iter()
                     .map(|shape| OwnedShape {
                         shape,
                         owner,
-                        wiring: true,
+                        source,
                     }),
             );
         }
@@ -99,7 +121,7 @@ pub fn fixed_shapes(db: &NetlistDB) -> Vec<OwnedShape> {
     let fixed = |shape: Shape, owner: Owner| OwnedShape {
         shape,
         owner,
-        wiring: false,
+        source: Source::Fixed,
     };
 
     for i in 0..db.num_cells() {

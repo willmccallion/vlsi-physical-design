@@ -4,10 +4,13 @@
 //! cell masters and pre-existing special wiring are assumed clean. Spacing
 //! also applies between two shapes of the same net that do not touch,
 //! unless another shape of the net fills the gap between them, and between
-//! two cuts of the same net.
+//! two cuts of the same net. The metal of two vias of one net must keep the
+//! spacing even where wiring fills the gap, as `OpenROAD`'s checker flags
+//! it.
 
 use super::shapes::{
-    OwnedShape, Owner, fixed_shapes, is_signal_net, layer_slot, route_elem_shapes, wiring_shapes,
+    OwnedShape, Owner, Source, fixed_shapes, is_signal_net, layer_slot, route_elem_shapes,
+    wiring_shapes,
 };
 use crate::db::design::{NetlistDB, RouteElem, TrackAxis};
 use crate::db::indices::NetId;
@@ -272,7 +275,10 @@ fn check_wiring_shape(
             let other = &shapes[near];
             let same_net = other.owner == wiring.owner;
             let cut = matches!(layer, LayerRef::Cut(_));
-            if near == this || (other.wiring && near < this) || (same_net && cut && !other.wiring) {
+            if near == this
+                || (other.is_wiring() && near < this)
+                || (same_net && cut && !other.is_wiring())
+            {
                 continue;
             }
             let r = other.shape.rect;
@@ -285,8 +291,11 @@ fn check_wiring_shape(
             }
             if same_net {
                 let d = distance_sq(&wiring.shape.rect, &r);
-                let bridged =
-                    || !cut && bridged(shapes, index, wiring.owner, &gap(&wiring.shape.rect, &r));
+                let both_vias = wiring.source == Source::Via && other.source == Source::Via;
+                let bridged = || {
+                    !cut && !both_vias
+                        && bridged(shapes, index, wiring.owner, &gap(&wiring.shape.rect, &r))
+                };
                 if d > 0 && d < sp_sq && !bridged() {
                     spacing.push(SpacingViolation {
                         layer,
@@ -339,18 +348,49 @@ fn gap(a: &Rect<Dbu>, b: &Rect<Dbu>) -> Rect<Dbu> {
     Rect::new(Point::new(x0, y0), Point::new(x1, y1))
 }
 
-/// Whether some shape of `owner` in `index` covers all of `gap`, so that
-/// the two shapes on either side of it are one piece of metal.
+/// Whether the shapes of `owner` in `index` together cover all of `gap`,
+/// so that the two shapes on either side of it are one piece of metal.
 fn bridged(shapes: &[OwnedShape], index: &BinIndex, owner: Owner, gap: &Rect<Dbu>) -> bool {
-    let mut found = false;
+    let mut pieces: Vec<Rect<Dbu>> = Vec::new();
     index.grid.for_each_bin(gap, |bin| {
-        found = found
-            || index.members(bin).iter().any(|&m| {
-                let s = &shapes[m as usize];
-                s.owner == owner && s.shape.rect.encloses(gap)
-            });
+        for &m in index.members(bin) {
+            let s = &shapes[m as usize];
+            if s.owner == owner
+                && let Some(part) = s.shape.rect.intersection(gap)
+            {
+                pieces.push(part);
+            }
+        }
     });
-    found
+    covers(gap, &pieces)
+}
+
+/// Whether the union of `pieces`, each inside `area`, is all of `area`.
+fn covers(area: &Rect<Dbu>, pieces: &[Rect<Dbu>]) -> bool {
+    let mut xs: Vec<Dbu> = pieces
+        .iter()
+        .flat_map(|r| [r.min.x, r.max.x])
+        .chain([area.min.x, area.max.x])
+        .collect();
+    xs.sort_unstable();
+    xs.dedup();
+    let column_covered = |x0: Dbu, x1: Dbu| {
+        let mut spans: Vec<(Dbu, Dbu)> = pieces
+            .iter()
+            .filter(|r| r.min.x <= x0 && x1 <= r.max.x)
+            .map(|r| (r.min.y, r.max.y))
+            .collect();
+        spans.sort_unstable();
+        let mut reached = area.min.y;
+        for (lo, hi) in spans {
+            if lo > reached {
+                return false;
+            }
+            reached = reached.max(hi);
+        }
+        reached >= area.max.y
+    };
+    xs.windows(2).all(|w| column_covered(w[0], w[1]))
 }
 
 /// Whether metal or cut shapes on these layers can conduct into each other.

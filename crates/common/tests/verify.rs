@@ -176,6 +176,41 @@ fn a_gap_in_one_net_filled_by_its_own_wire_is_clean() {
 }
 
 #[test]
+fn a_gap_filled_by_two_overlapping_pieces_of_the_net_is_clean() {
+    let mut db = empty_design();
+    let routing = vec![
+        wire(M1, pt(0, 500), pt(1000, 500)),
+        wire(M1, pt(1180, 500), pt(2000, 500)),
+        wire(M1, pt(1000, 500), pt(1080, 500)),
+        wire(M1, pt(1060, 500), pt(1180, 500)),
+    ];
+    let _ = routed_net(&mut db, "a", routing);
+
+    assert!(check_routing(&db).spacing.is_empty());
+}
+
+#[test]
+fn two_vias_of_one_net_must_keep_their_metal_apart_even_when_wired() {
+    let mut db = empty_design();
+    let routing = vec![
+        via(&db, 0, pt(1000, 500)),
+        via(&db, 0, pt(1000, 780)),
+        wire(M2, pt(1000, 500), pt(1000, 780)),
+    ];
+    let _ = routed_net(&mut db, "a", routing);
+
+    let report = check_routing(&db);
+
+    let on_m2: Vec<_> = report
+        .spacing
+        .iter()
+        .filter(|v| v.layer == LayerRef::Routing(M2))
+        .collect();
+    assert_eq!(on_m2.len(), 1, "{:?}", report.spacing);
+    assert_eq!(on_m2[0].distance_sq, 80 * 80);
+}
+
+#[test]
 fn pins_joined_through_vias_and_an_upper_wire_are_connected() {
     let mut db = empty_design();
     let net = two_inverters_on_a_net(&mut db);
