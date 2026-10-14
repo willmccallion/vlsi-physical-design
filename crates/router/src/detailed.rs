@@ -112,6 +112,7 @@ pub struct DetailedRouter<'a> {
     gcell: Dbu,
     grid_origin: Point<Dbu>,
     guides: Vec<Option<NetGuide>>,
+    rip_ups: Vec<u8>,
 }
 
 impl<'a> DetailedRouter<'a> {
@@ -153,6 +154,7 @@ impl<'a> DetailedRouter<'a> {
             history: History::new(gcell / 4),
             access,
             routed: vec![Vec::new(); db.nets.len()],
+            rip_ups: vec![0; db.nets.len()],
             vias: vec![Vec::new(); db.nets.len()],
             window_margin: gcell * 4,
             gcell,
@@ -298,10 +300,15 @@ impl<'a> DetailedRouter<'a> {
         out
     }
 
-    /// Removes a net's metal from the occupancy.
+    /// Removes a net's metal from the occupancy and loosens its guide.
     pub fn rip_up(&mut self, net: NetId) {
         let tracks = std::mem::take(&mut self.routed[net.index()]);
         self.occupancy.remove_wiring(&tracks, Owner::Net(net.0));
+        self.rip_ups[net.index()] = self.rip_ups[net.index()].saturating_add(1);
+    }
+
+    fn slack(&self, net: NetId) -> Slack {
+        Slack::after_rip_ups(self.rip_ups[net.index()])
     }
 
     fn commit(&mut self, net: NetId, route: &NetRoute) {
@@ -457,36 +464,17 @@ impl<'a> DetailedRouter<'a> {
                 self.guides[net.index()] = Some(NetGuide {
                     tree,
                     terminals,
-                    window: bbox.expand(grid.gcell()),
+                    bbox,
                 });
             }
         }
-    }
-
-    /// The area of one gcell.
-    fn gcell_rect(&self, cell: GCell) -> Rect<Dbu> {
-        let min = self.grid_origin
-            + Point::new(
-                self.gcell * i64::from(cell.x),
-                self.gcell * i64::from(cell.y),
-            );
-        Rect::new(min, min + Point::new(self.gcell, self.gcell))
-    }
-
-    /// The area the guide allows around `cells`.
-    fn cells_rect(&self, cells: &[GCell]) -> Option<Rect<Dbu>> {
-        cells
-            .iter()
-            .map(|&c| self.gcell_rect(c))
-            .reduce(|a, b| a.union(&b))
-            .map(|r| r.expand(self.gcell))
     }
 
     /// The window a net searches in: its guide, or else its pins' bounding
     /// box plus a margin.
     fn window(&self, net: NetId) -> Rect<Dbu> {
         if let Some(guide) = &self.guides[net.index()] {
-            return guide.window;
+            return guide.bbox.expand(self.gcell * self.slack(net).gcells);
         }
         let pins = &self.db.nets[net.index()].pins;
         pins.iter()
@@ -505,8 +493,16 @@ impl<'a> DetailedRouter<'a> {
             return NetRoute::default();
         }
         let net_guide = self.guides[net.index()].as_ref();
-        let guide =
-            net_guide.map(|g| Guide::new(g.tree.cells(), self.grid_origin, self.gcell, self.tech));
+        let slack = self.slack(net);
+        let guide = net_guide.map(|g| {
+            Guide::new(
+                g.tree.cells(),
+                self.grid_origin,
+                self.gcell,
+                self.tech,
+                slack,
+            )
+        });
         let mut search = Search {
             db: self.db,
             tech: self.tech,
@@ -668,7 +664,8 @@ impl<'a> DetailedRouter<'a> {
             if let Some(found) = self.route_along(search, cells, window, &sources_in, targets) {
                 return Some(found);
             }
-            if let Some(local) = self.cells_rect(cells).and_then(|c| c.intersection(window)) {
+            let area = search.guide.and_then(|g| g.area(cells));
+            if let Some(local) = area.and_then(|c| c.intersection(window)) {
                 let sources = sources_in(&local);
                 if !sources.is_empty()
                     && let Some(found) = search.find(&sources, targets, &local)
@@ -707,6 +704,7 @@ impl<'a> DetailedRouter<'a> {
         sources_in: &impl Fn(&Rect<Dbu>) -> Vec<(Node, f64)>,
         targets: &FxHashMap<Node, (usize, f64)>,
     ) -> Option<(Vec<Node>, usize)> {
+        let guide = search.guide?;
         let stops = waypoints(cells, SEGMENT_GCELLS);
         if stops.is_empty() {
             return None;
@@ -714,29 +712,31 @@ impl<'a> DetailedRouter<'a> {
         let mut path: Vec<Node> = Vec::new();
         let mut start = 0;
         for &stop in &stops {
-            let local = self
-                .cells_rect(&cells[start..=stop])?
-                .intersection(window)?;
+            let local = guide.area(&cells[start..=stop])?.intersection(window)?;
             let sources = match path.last() {
                 Some(&end) => vec![(end, 0.0)],
                 None => sources_in(&local),
             };
-            let goal = self.nodes_in_cell(search, cells[stop]);
+            let goal = self.nodes_in_cell(search, guide.cell_rect(cells[stop]), cells[stop]);
             let (segment, _) = search.find(&sources, &goal, &local)?;
             append_segment(&mut path, segment);
             start = stop;
         }
-        let local = self.cells_rect(&cells[start..])?.intersection(window)?;
+        let local = guide.area(&cells[start..])?.intersection(window)?;
         let end = *path.last()?;
         let (segment, reached) = search.find(&[(end, 0.0)], targets, &local)?;
         append_segment(&mut path, segment);
         Some((path, reached))
     }
 
-    /// Every node the search may use in `cell`, on its layer and the layers
-    /// next to it.
-    fn nodes_in_cell(&self, search: &Search<'_>, cell: GCell) -> FxHashMap<Node, (usize, f64)> {
-        let area = self.gcell_rect(cell);
+    /// Every node the search may use in `area`, the extent of `cell`, on
+    /// the cell's layer and the layers next to it.
+    fn nodes_in_cell(
+        &self,
+        search: &Search<'_>,
+        area: Rect<Dbu>,
+        cell: GCell,
+    ) -> FxHashMap<Node, (usize, f64)> {
         let lowest = cell
             .layer
             .index()
@@ -865,7 +865,7 @@ fn append_segment(path: &mut Vec<Node>, segment: Vec<Node>) {
 struct NetGuide {
     tree: RouteTree,
     terminals: Vec<GCell>,
-    window: Rect<Dbu>,
+    bbox: Rect<Dbu>,
 }
 
 /// Gcells between the waypoints of a long connection.
@@ -1063,12 +1063,43 @@ fn add_via(db: &NetlistDB, via: ViaId, at: Point<Dbu>, route: &mut NetRoute) {
     }
 }
 
-/// The gcells a net's detailed route may use: its global route grown by one
-/// gcell in the plane and one layer up and down.
+/// How far a net's detailed route may stray from its global route. It grows
+/// each time the net is ripped up, so a corridor that other nets fill
+/// cannot trap it.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+struct Slack {
+    /// Gcells around each guide cell, in the plane.
+    gcells: i64,
+    /// Layers above and below each guide cell.
+    layers: usize,
+}
+
+impl Slack {
+    const fn after_rip_ups(count: u8) -> Self {
+        match count {
+            0 | 1 => Self {
+                gcells: 1,
+                layers: 1,
+            },
+            2 | 3 => Self {
+                gcells: 2,
+                layers: 2,
+            },
+            _ => Self {
+                gcells: 4,
+                layers: usize::MAX,
+            },
+        }
+    }
+}
+
+/// The gcells a net's detailed route may use: its global route grown by a
+/// [`Slack`].
 #[derive(Debug)]
 struct Guide {
     origin: Point<Dbu>,
     gcell: Dbu,
+    reach: i64,
     x0: i64,
     y0: i64,
     width: i64,
@@ -1079,11 +1110,18 @@ struct Guide {
 }
 
 impl Guide {
-    fn new(cells: &[GCell], origin: Point<Dbu>, gcell: Dbu, tech: &RouteTech) -> Self {
-        let x0 = cells.iter().map(|c| i64::from(c.x)).min().unwrap_or(0) - 1;
-        let y0 = cells.iter().map(|c| i64::from(c.y)).min().unwrap_or(0) - 1;
-        let x1 = cells.iter().map(|c| i64::from(c.x)).max().unwrap_or(0) + 1;
-        let y1 = cells.iter().map(|c| i64::from(c.y)).max().unwrap_or(0) + 1;
+    fn new(
+        cells: &[GCell],
+        origin: Point<Dbu>,
+        gcell: Dbu,
+        tech: &RouteTech,
+        slack: Slack,
+    ) -> Self {
+        let reach = slack.gcells;
+        let x0 = cells.iter().map(|c| i64::from(c.x)).min().unwrap_or(0) - reach;
+        let y0 = cells.iter().map(|c| i64::from(c.y)).min().unwrap_or(0) - reach;
+        let x1 = cells.iter().map(|c| i64::from(c.x)).max().unwrap_or(0) + reach;
+        let y1 = cells.iter().map(|c| i64::from(c.y)).max().unwrap_or(0) + reach;
         let min_layer = tech.min_layer.index();
         let layers = tech.max_layer.index() - min_layer + 1;
         let (width, height) = (x1 - x0 + 1, y1 - y0 + 1);
@@ -1091,6 +1129,7 @@ impl Guide {
         let mut guide = Self {
             origin,
             gcell,
+            reach,
             x0,
             y0,
             width,
@@ -1101,9 +1140,11 @@ impl Guide {
         };
         for c in cells {
             let l = c.layer.index() - min_layer;
-            for dl in l.saturating_sub(1)..=(l + 1).min(layers - 1) {
-                for dy in -1..=1 {
-                    for dx in -1..=1 {
+            for dl in
+                l.saturating_sub(slack.layers)..=l.saturating_add(slack.layers).min(layers - 1)
+            {
+                for dy in -reach..=reach {
+                    for dx in -reach..=reach {
                         if let Some(i) = guide.index(dl, i64::from(c.x) + dx, i64::from(c.y) + dy) {
                             guide.bits[i / 64] |= 1 << (i % 64);
                         }
@@ -1112,6 +1153,25 @@ impl Guide {
             }
         }
         guide
+    }
+
+    /// The extent of one gcell.
+    fn cell_rect(&self, cell: GCell) -> Rect<Dbu> {
+        let min = self.origin
+            + Point::new(
+                self.gcell * i64::from(cell.x),
+                self.gcell * i64::from(cell.y),
+            );
+        Rect::new(min, min + Point::new(self.gcell, self.gcell))
+    }
+
+    /// The area this guide allows around `cells`.
+    fn area(&self, cells: &[GCell]) -> Option<Rect<Dbu>> {
+        cells
+            .iter()
+            .map(|&c| self.cell_rect(c))
+            .reduce(|a, b| a.union(&b))
+            .map(|r| r.expand(self.gcell * self.reach))
     }
 
     fn index(&self, layer: usize, x: i64, y: i64) -> Option<usize> {
