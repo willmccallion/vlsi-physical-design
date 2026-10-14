@@ -95,6 +95,8 @@ pub struct ViaTech {
     pub bottom: Rect<Dbu>,
     /// Metal on the layer above.
     pub top: Rect<Dbu>,
+    /// Center distance below which two of these cuts break the cut spacing.
+    pub cut_reach: Dbu,
 }
 
 /// Everything the router needs to know about the technology.
@@ -299,12 +301,21 @@ fn ranked_vias(db: &NetlistDB, cut: CutLayerId, layers: &[LayerTech], both: bool
             top_overhang
         };
         let key = (overhang, !v.is_default, (bottom.area() + top.area()).get());
+        let cut_size = v
+            .shapes
+            .iter()
+            .filter(|s| s.layer == LayerRef::Cut(cut))
+            .map(|s| s.rect.width().max(s.rect.height()))
+            .max()
+            .unwrap_or_default();
+        let spacing = lib.cut_layers[cut.index()].spacing.unwrap_or_default();
         ranked.push((
             key,
             ViaTech {
                 via: ViaId::new(i),
                 bottom,
                 top,
+                cut_reach: cut_size + spacing,
             },
         ));
     }
