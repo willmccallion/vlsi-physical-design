@@ -9,6 +9,9 @@ pub struct Config {
     /// Global placement parameters.
     #[serde(default)]
     pub global_placement: GlobalPlacementConfig,
+    /// Routing parameters.
+    #[serde(default)]
+    pub routing: RoutingConfig,
     /// Input and output files.
     #[serde(default)]
     pub input: InputConfig,
@@ -47,6 +50,37 @@ impl Default for GlobalPlacementConfig {
             convergence_threshold: default_convergence_threshold(),
             wa_gamma: None,
             electro_force_multiplier: default_electro_force_multiplier(),
+        }
+    }
+}
+
+/// Parameters of the global and detailed router.
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct RoutingConfig {
+    /// Lowest routing layer for signal wires; defaults to the second layer.
+    pub min_layer: Option<String>,
+    /// Highest routing layer for signal wires; defaults to the top layer.
+    pub max_layer: Option<String>,
+    /// Global routing cell edge, in tracks of the lowest routing layer.
+    #[serde(default = "default_gcell_tracks")]
+    pub gcell_tracks: u32,
+    /// Rip-up and reroute rounds of global routing.
+    #[serde(default = "default_global_iterations")]
+    pub global_iterations: usize,
+    /// Rip-up and reroute rounds of detailed routing.
+    #[serde(default = "default_detailed_iterations")]
+    pub detailed_iterations: usize,
+}
+
+impl Default for RoutingConfig {
+    fn default() -> Self {
+        Self {
+            min_layer: None,
+            max_layer: None,
+            gcell_tracks: default_gcell_tracks(),
+            global_iterations: default_global_iterations(),
+            detailed_iterations: default_detailed_iterations(),
         }
     }
 }
@@ -96,6 +130,18 @@ const fn default_convergence_threshold() -> f64 {
 
 const fn default_electro_force_multiplier() -> f64 {
     20.0
+}
+
+const fn default_gcell_tracks() -> u32 {
+    15
+}
+
+const fn default_global_iterations() -> usize {
+    50
+}
+
+const fn default_detailed_iterations() -> usize {
+    40
 }
 
 const fn default_num_layers() -> usize {

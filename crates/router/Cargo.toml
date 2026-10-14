@@ -1,0 +1,20 @@
+[package]
+name = "pare-router"
+version = "0.1.0"
+edition = "2024"
+description = "PARE — Placement And Routing Engine: global and detailed routing"
+license.workspace = true
+repository.workspace = true
+readme.workspace = true
+keywords.workspace = true
+categories.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+pare-common = { path = "../common" }
+log = "0.4"
+rayon = "1.10"
+rustc-hash = "2.1"
+thiserror = "2.0"
