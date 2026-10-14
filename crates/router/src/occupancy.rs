@@ -68,7 +68,7 @@ pub struct Occupancy {
 
 /// Tracks whose wires `rect` could touch or crowd, and whether each runs
 /// through it.
-fn affected_tracks<'t>(
+pub(crate) fn affected_tracks<'t>(
     lt: &'t LayerTech,
     rect: &Rect<Dbu>,
 ) -> impl Iterator<Item = (u32, bool)> + use<'t> {

@@ -1,9 +1,10 @@
 //! Global and detailed routing on the design's tracks.
 //!
-//! Global routing finds a corridor of gcells for every net; detailed routing
-//! then draws wires on tracks and vias at track crossings inside those
-//! corridors, negotiating with other nets until no two touch or come closer
-//! than the layer spacing.
+//! Global routing finds a corridor of gcells for every net; track assignment
+//! puts the corridor's long straight runs on tracks; detailed routing then
+//! joins those wires and the pins with wires on tracks and vias at track
+//! crossings inside the corridors, repairing conflicts until no two nets
+//! touch or come closer than the layer spacing.
 
 pub mod access;
 pub mod detailed;
@@ -11,10 +12,11 @@ pub mod global;
 pub mod occupancy;
 mod search;
 pub mod tech;
+pub mod track;
 pub mod tree;
 pub mod wiring;
 
-use detailed::{Costs, DetailedRouter, routable_nets};
+use detailed::{Costs, DetailedRouter, Scope, routable_nets};
 use global::{GlobalGrid, GlobalNet, route_global};
 use pare_common::db::design::{NetlistDB, PlacementStatus, RouteElem};
 use pare_common::db::indices::NetId;
@@ -23,6 +25,7 @@ use pare_common::util::config::{LayerRangeError, RoutingConfig};
 use pare_common::util::ui;
 use std::time::Instant;
 use tech::RouteTech;
+use track::assign_tracks;
 
 /// What routing achieved.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
@@ -107,7 +110,11 @@ pub fn route(db: &mut NetlistDB, config: &RoutingConfig) -> Result<RoutingSummar
             "GR overflow:",
             &grid.overflow().to_string(),
         );
+        let start = Instant::now();
+        let wires = assign_tracks(&tech, &dr.occupancy, &grid, &global, &dr.pin_points());
         dr.set_guides(global, &grid);
+        dr.set_track_wires(wires);
+        stage("Track assign:", start);
         let mut summary = RoutingSummary {
             nets: nets.len(),
             inaccessible: dr.inaccessible_nets(),
@@ -116,12 +123,23 @@ pub fn route(db: &mut NetlistDB, config: &RoutingConfig) -> Result<RoutingSummar
         let start = Instant::now();
         let _ = dr.route_nets(&nets, costs);
         ui::routing_table_header("DR");
-        let mut conflicted = dr.conflicted_nets(1.0);
+        let conflicted = dr.conflicted_nets(1.0);
         ui::routing_iter(
             "DR",
             0,
             conflicted.len(),
             nets.len(),
+            costs.penalty / pitch,
+            start.elapsed().as_millis(),
+        );
+        let start = Instant::now();
+        let rerouted = dr.repair(costs, 0, Scope::Everything);
+        let mut conflicted = dr.conflicted_nets(1.0);
+        ui::routing_iter(
+            "DR",
+            0,
+            conflicted.len(),
+            rerouted.pieces,
             costs.penalty / pitch,
             start.elapsed().as_millis(),
         );
@@ -131,7 +149,7 @@ pub fn route(db: &mut NetlistDB, config: &RoutingConfig) -> Result<RoutingSummar
             }
             let start = Instant::now();
             costs.penalty *= 1.5;
-            let repaired = dr.repair(costs, round);
+            let repaired = dr.repair(costs, round, Scope::Conflicts);
             conflicted = dr.conflicted_nets(1.0);
             summary.rounds = round;
             ui::routing_iter(

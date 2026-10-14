@@ -1,13 +1,14 @@
 //! Detailed routing on the track graph.
 //!
-//! Each net grows a tree from one pin's access points, connecting the
-//! nearest remaining pin each time with a multi-source A* search inside its
-//! global route. Nets are routed in parallel batches that cannot interact,
-//! and nets in conflict are ripped up and rerouted until none remain.
+//! Each net starts from the wires track assignment placed for it and grows
+//! a tree through them and its pins' access points, joining the nearest
+//! remaining terminal each time with a multi-source A* search inside its
+//! global route. Nets are routed in parallel batches that cannot interact;
+//! conflicts left over are repaired region by region.
 
 mod region;
 
-pub use region::RepairStats;
+pub use region::{RepairStats, Scope};
 
 use crate::access::{AccessPoint, Node, access_points};
 use crate::global::{GCell, GlobalGrid, GlobalRoutes, RouteTree};
@@ -15,7 +16,8 @@ use crate::occupancy::{LocalOccupancy, Occupancy, Origin, Owner, TrackRef};
 pub use crate::search::Costs;
 use crate::search::{Guide, History, Search, Slack};
 use crate::tech::RouteTech;
-use crate::tree::{connection_order, hilbert_order};
+use crate::track::TrackWire;
+use crate::tree::{connection_order, gap, hilbert_order};
 pub use crate::wiring::NetRoute;
 use crate::wiring::{Edge, access_elems, elem_metal, path_edges};
 use pare_common::db::design::NetlistDB;
@@ -45,6 +47,7 @@ pub struct DetailedRouter<'a> {
     gcell: Dbu,
     grid_origin: Point<Dbu>,
     guides: Vec<Option<NetGuide>>,
+    wires: Vec<Vec<TrackWire>>,
     rip_ups: Vec<u8>,
 }
 
@@ -94,6 +97,41 @@ impl<'a> DetailedRouter<'a> {
             gcell,
             grid_origin: db.die_area.min,
             guides: vec![None; db.nets.len()],
+            wires: vec![Vec::new(); db.nets.len()],
+        }
+    }
+
+    /// Where each pin of each net is reached: the point of its best access
+    /// point, by net.
+    pub fn pin_points(&self) -> Vec<Vec<Point<Dbu>>> {
+        self.access
+            .iter()
+            .map(|pins| {
+                pins.iter()
+                    .filter_map(|c| c.first().map(|a| self.point(a.node)))
+                    .collect()
+            })
+            .collect()
+    }
+
+    /// Records the wires of track assignment as their nets' first wiring;
+    /// routing then joins each net's pins through them.
+    pub fn set_track_wires(&mut self, wires: Vec<TrackWire>) {
+        for w in wires {
+            self.wires[w.net.index()].push(w);
+        }
+        for n in 0..self.wires.len() {
+            if self.wires[n].is_empty() {
+                continue;
+            }
+            let mut edges: Vec<Edge> = self.wires[n].iter().flat_map(|w| w.edges()).collect();
+            edges.sort_unstable();
+            edges.dedup();
+            let route = NetRoute {
+                edges,
+                ..NetRoute::default()
+            };
+            self.commit(NetId::new(n), &route);
         }
     }
 
@@ -234,7 +272,7 @@ impl<'a> DetailedRouter<'a> {
         let mut out = Vec::with_capacity(nets.len());
         for &n in nets {
             let route = self.route_net(n, costs, Some(&overlay));
-            for (layer, rect) in route.metal(self.db, self.tech) {
+            for (layer, rect) in self.metal_beyond_wires(n, &route) {
                 if self.tech.routable(layer) {
                     overlay.add_rect(self.tech, layer, &rect, Owner::Net(n.0));
                 }
@@ -242,6 +280,26 @@ impl<'a> DetailedRouter<'a> {
             out.push((n, route));
         }
         out
+    }
+
+    /// The metal of `route` other than the track wires of `net`, which the
+    /// occupancy already holds.
+    fn metal_beyond_wires(&self, net: NetId, route: &NetRoute) -> Vec<(LayerId, Rect<Dbu>)> {
+        let wires: FxHashSet<Edge> = self.wires[net.index()]
+            .iter()
+            .flat_map(|w| w.edges())
+            .collect();
+        let rest = NetRoute {
+            edges: route
+                .edges
+                .iter()
+                .copied()
+                .filter(|e| !wires.contains(e))
+                .collect(),
+            access: route.access.clone(),
+            complete: route.complete,
+        };
+        rest.metal(self.db, self.tech)
     }
 
     /// Removes a net's metal from the occupancy and loosens its guide.
@@ -257,7 +315,10 @@ impl<'a> DetailedRouter<'a> {
         Slack::after_rip_ups(self.rip_ups[net.index()])
     }
 
+    /// Replaces a net's recorded routing with `route`.
     fn commit(&mut self, net: NetId, route: &NetRoute) {
+        let previous = std::mem::take(&mut self.routed[net.index()]);
+        self.occupancy.remove_wiring(&previous, Owner::Net(net.0));
         let mut touched = Vec::new();
         for (layer, rect) in route.metal(self.db, self.tech) {
             if self.tech.routable(layer) {
@@ -275,13 +336,6 @@ impl<'a> DetailedRouter<'a> {
         self.routed[net.index()] = touched;
         self.vias[net.index()] = route.vias(self.tech);
         self.routes[net.index()] = route.clone();
-    }
-
-    /// Replaces a net's recorded routing with `route`.
-    fn recommit(&mut self, net: NetId, route: &NetRoute) {
-        let tracks = std::mem::take(&mut self.routed[net.index()]);
-        self.occupancy.remove_wiring(&tracks, Owner::Net(net.0));
-        self.commit(net, route);
     }
 
     /// The current routing of every net.
@@ -476,11 +530,34 @@ impl<'a> DetailedRouter<'a> {
             .expand(self.window_margin)
     }
 
+    /// Routes a net through its track wires and pins, or through its pins
+    /// alone when the wires cannot all be joined.
     fn route_net(&self, net: NetId, costs: Costs, overlay: Option<&LocalOccupancy>) -> NetRoute {
         let pins = &self.access[net.index()];
         if pins.iter().any(Vec::is_empty) || pins.len() < 2 {
             return NetRoute::default();
         }
+        let wires = self.wires[net.index()].as_slice();
+        if !wires.is_empty() {
+            let terms = Terminals { pins, wires };
+            if let Some(route) = self.route_terminals(net, costs, overlay, &terms) {
+                return route;
+            }
+        }
+        let terms = Terminals { pins, wires: &[] };
+        self.route_terminals(net, costs, overlay, &terms)
+            .unwrap_or_default()
+    }
+
+    /// Joins every terminal inside the net's guide, or failing that in ever
+    /// larger windows without it.
+    fn route_terminals(
+        &self,
+        net: NetId,
+        costs: Costs,
+        overlay: Option<&LocalOccupancy>,
+        terms: &Terminals<'_>,
+    ) -> Option<NetRoute> {
         let net_guide = self.guides[net.index()].as_ref();
         let slack = self.slack(net);
         let guide = net_guide.map(|g| {
@@ -503,38 +580,39 @@ impl<'a> DetailedRouter<'a> {
             guide: guide.as_ref(),
         };
         let window = self.window(net);
-        if let Some(route) = self.route_tree(&search, pins, &window, net_guide) {
-            return route;
+        if let Some(route) = self.route_tree(&search, terms, &window, net_guide) {
+            return Some(route);
         }
         search.guide = None;
         let mut window = window.expand(self.window_margin);
         for _ in 0..2 {
-            if let Some(route) = self.route_tree(&search, pins, &window, None) {
-                return route;
+            if let Some(route) = self.route_tree(&search, terms, &window, None) {
+                return Some(route);
             }
             window = window.expand(self.window_margin * 4);
         }
-        NetRoute::default()
+        None
     }
 
-    /// Connects every pin of a net, searching first along the branches of
+    /// Connects every terminal, searching first along the branches of
     /// `guide`'s global route when given. Nets with more than
-    /// [`CHUNKED_PINS`] pins are split into runs of nearby pins whose
-    /// subtrees are routed in parallel and then joined.
+    /// [`CHUNKED_PINS`] terminals are split into runs of nearby terminals
+    /// whose subtrees are routed in parallel and then joined.
     fn route_tree(
         &self,
         search: &Search<'_>,
-        pins: &[Vec<AccessPoint>],
+        terms: &Terminals<'_>,
         window: &Rect<Dbu>,
         guide: Option<&NetGuide>,
     ) -> Option<NetRoute> {
-        let all: Vec<usize> = (0..pins.len()).collect();
-        let tree = if pins.len() > CHUNKED_PINS {
-            self.grow_chunked(search, pins, window, guide)?
+        let all: Vec<usize> = (0..terms.len()).collect();
+        let tree = if terms.len() > CHUNKED_PINS {
+            self.grow_chunked(search, terms, window, guide)?
         } else {
-            self.grow(search, pins, &all, window, guide)?
+            self.grow(search, terms, &all, window, guide)?
         };
         let mut edges: Vec<Edge> = tree.paths.iter().flat_map(|p| path_edges(p)).collect();
+        edges.extend(terms.wires.iter().flat_map(|w| w.edges()));
         edges.sort_unstable();
         edges.dedup();
         Some(NetRoute {
@@ -542,50 +620,49 @@ impl<'a> DetailedRouter<'a> {
             access: tree
                 .used
                 .iter()
-                .map(|&(pin, choice)| pins[pin][choice].clone())
+                .map(|&(pin, choice)| terms.pins[pin][choice].clone())
                 .collect(),
             complete: true,
         })
     }
 
-    /// Joins the `members` pins one at a time, each to the nearest member
-    /// joined before it.
+    /// Joins the `members` terminals one at a time, each to the nearest
+    /// member joined before it.
     fn grow(
         &self,
         search: &Search<'_>,
-        pins: &[Vec<AccessPoint>],
+        terms: &Terminals<'_>,
         members: &[usize],
         window: &Rect<Dbu>,
         guide: Option<&NetGuide>,
     ) -> Option<SubTree> {
-        let points: Vec<Point<Dbu>> = members
+        let extents: Vec<Rect<Dbu>> = members
             .iter()
-            .map(|&m| self.point(pins[m][0].node))
+            .map(|&m| terms.extent(self.tech, m))
             .collect();
-        let (first, joins) = connection_order(&points);
+        let (first, joins) = connection_order(&extents);
         let mut tree = TreeIndex::new(self.grid_origin, self.gcell);
         let mut out = SubTree::default();
-        let first_pin = members[first];
+        let first_term = members[first];
         if joins.is_empty() {
-            out.used.push((first_pin, 0));
-            out.nodes.push(pins[first_pin][0].node);
+            self.join_terminal(terms, first_term, None, &mut tree, &mut out);
+            out.nodes = tree.nodes.into_iter().collect();
             return Some(out);
         }
-        let first_sources: Vec<(Node, f64)> = pins[first_pin]
-            .iter()
-            .map(|a| (a.node, search.access_cost(a)))
-            .collect();
+        let first_sources: Vec<(Node, f64)> = terms.candidates(search, first_term);
+        let guide = guide.filter(|_| terms.wires.is_empty());
 
         for join in joins {
-            let pin = members[join.pin];
-            if let Some(k) = pins[pin].iter().position(|a| tree.contains(a.node)) {
-                out.used.push((pin, k));
+            let term = members[join.pin];
+            let candidates = terms.candidates(search, term);
+            if let Some(&(n, _)) = candidates.iter().find(|(n, _)| tree.contains(*n)) {
+                self.join_terminal(terms, term, Some(n), &mut tree, &mut out);
                 continue;
             }
-            let targets: FxHashMap<Node, (usize, f64)> = pins[pin]
+            let targets: FxHashMap<Node, (usize, f64)> = candidates
                 .iter()
                 .enumerate()
-                .map(|(k, a)| (a.node, (k, search.access_cost(a))))
+                .map(|(k, &(n, cost))| (n, (k, cost)))
                 .collect();
             let starting = tree.is_empty();
             let sources_in = |local: &Rect<Dbu>| {
@@ -595,39 +672,74 @@ impl<'a> DetailedRouter<'a> {
                     tree.nodes_in(local)
                 }
             };
-            let corridor = guide.and_then(|g| g.corridor(members[join.parent], pin));
-            let (path, reached) = self.connect(
+            let corridor = guide.and_then(|g| g.corridor(members[join.parent], term));
+            let (path, _) = self.connect(
                 search,
-                (points[join.pin], points[join.parent]),
+                closest_points(&extents[join.pin], &extents[join.parent]),
                 corridor.as_deref(),
                 window,
                 sources_in,
                 &targets,
             )?;
-            if starting {
-                let start = pins[first_pin].iter().position(|a| a.node == path[0])?;
-                out.used.push((first_pin, start));
-            }
-            out.used.push((pin, reached));
             for &n in &path {
                 tree.insert(n, self.point(n));
             }
+            if starting {
+                self.join_terminal(
+                    terms,
+                    first_term,
+                    path.first().copied(),
+                    &mut tree,
+                    &mut out,
+                );
+            }
+            self.join_terminal(terms, term, path.last().copied(), &mut tree, &mut out);
             out.paths.push(path);
         }
         out.nodes = tree.nodes.into_iter().collect();
         Some(out)
     }
 
+    /// Records terminal `term` as joined at node `at`: a pin keeps the
+    /// access point there (its best one when `at` is `None`), a track wire
+    /// joins the tree along its whole length.
+    fn join_terminal(
+        &self,
+        terms: &Terminals<'_>,
+        term: usize,
+        at: Option<Node>,
+        tree: &mut TreeIndex,
+        out: &mut SubTree,
+    ) {
+        match terms.kind(term) {
+            Terminal::Pin(pin) => {
+                let choices = &terms.pins[pin];
+                let k = at
+                    .and_then(|n| choices.iter().position(|a| a.node == n))
+                    .unwrap_or(0);
+                out.used.push((pin, k));
+                if let Some(a) = choices.get(k) {
+                    tree.insert(a.node, self.point(a.node));
+                }
+            }
+            Terminal::Wire(wire) => {
+                for n in wire.nodes() {
+                    tree.insert(n, self.point(n));
+                }
+            }
+        }
+    }
+
     /// The nodes of `sub` near `rep`, or all of them if none is; a small
     /// target area keeps the search's distance estimate sharp.
-    fn join_targets(&self, sub: &SubTree, rep: Point<Dbu>) -> FxHashMap<Node, (usize, f64)> {
-        let reach = self.gcell * JOIN_GCELLS;
+    fn join_targets(&self, sub: &SubTree, rep: &Rect<Dbu>) -> FxHashMap<Node, (usize, f64)> {
+        let reach = (self.gcell * JOIN_GCELLS).get();
         let near: FxHashMap<Node, (usize, f64)> = sub
             .nodes
             .iter()
             .filter(|&&n| {
                 let p = self.point(n);
-                (p.x - rep.x).abs() + (p.y - rep.y).abs() <= reach
+                gap(&Rect::new(p, p), rep) <= reach
             })
             .map(|&n| (n, (0, 0.0)))
             .collect();
@@ -754,38 +866,42 @@ impl<'a> DetailedRouter<'a> {
         nodes
     }
 
-    /// Routes runs of nearby pins in parallel, then joins their subtrees.
+    /// Routes runs of nearby terminals in parallel, then joins their subtrees.
     fn grow_chunked(
         &self,
         search: &Search<'_>,
-        pins: &[Vec<AccessPoint>],
+        terms: &Terminals<'_>,
         window: &Rect<Dbu>,
         guide: Option<&NetGuide>,
     ) -> Option<SubTree> {
-        let points: Vec<Point<Dbu>> = pins.iter().map(|c| self.point(c[0].node)).collect();
-        let order = hilbert_order(&points);
+        let extents: Vec<Rect<Dbu>> = (0..terms.len())
+            .map(|t| terms.extent(self.tech, t))
+            .collect();
+        let centres: Vec<Point<Dbu>> = extents.iter().map(Rect::center).collect();
+        let order = hilbert_order(&centres);
         let chunks: Vec<&[usize]> = order.chunks(CHUNK_PINS).collect();
         let subtrees: Vec<SubTree> = chunks
             .par_iter()
-            .map(|members| self.grow(search, pins, members, window, guide))
+            .map(|members| self.grow(search, terms, members, window, guide))
             .collect::<Option<Vec<_>>>()?;
 
-        let reps: Vec<Point<Dbu>> = chunks.iter().map(|c| points[c[0]]).collect();
+        let reps: Vec<Rect<Dbu>> = chunks.iter().map(|c| extents[c[0]]).collect();
         let (first, joins) = connection_order(&reps);
         let mut tree = TreeIndex::new(self.grid_origin, self.gcell);
         for &n in &subtrees[first].nodes {
             tree.insert(n, self.point(n));
         }
+        let guide = guide.filter(|_| terms.wires.is_empty());
         let mut out = SubTree::default();
         for join in joins {
             let sub = &subtrees[join.pin];
             if !sub.nodes.iter().any(|&n| tree.contains(n)) {
-                let targets = self.join_targets(sub, reps[join.pin]);
+                let targets = self.join_targets(sub, &reps[join.pin]);
                 let corridor =
                     guide.and_then(|g| g.corridor(chunks[join.parent][0], chunks[join.pin][0]));
                 let (path, _) = self.connect(
                     search,
-                    (reps[join.pin], reps[join.parent]),
+                    closest_points(&reps[join.pin], &reps[join.parent]),
                     corridor.as_deref(),
                     window,
                     |r| tree.nodes_in(r),
@@ -820,6 +936,81 @@ impl NetGuide {
     fn corridor(&self, from: usize, to: usize) -> Option<Vec<GCell>> {
         self.tree.branch(self.terminals[from], self.terminals[to])
     }
+}
+
+/// The pins and track wires a net's tree joins, numbered pins first.
+#[derive(Clone, Copy, Debug)]
+struct Terminals<'p> {
+    pins: &'p [Vec<AccessPoint>],
+    wires: &'p [TrackWire],
+}
+
+/// One terminal of a net.
+#[derive(Clone, Copy, Debug)]
+enum Terminal {
+    /// A pin, by index, reached through one of its access points.
+    Pin(usize),
+    /// A track wire, reached anywhere along it.
+    Wire(TrackWire),
+}
+
+impl Terminals<'_> {
+    const fn len(&self) -> usize {
+        self.pins.len() + self.wires.len()
+    }
+
+    const fn kind(&self, term: usize) -> Terminal {
+        match term.checked_sub(self.pins.len()) {
+            None => Terminal::Pin(term),
+            Some(w) => Terminal::Wire(self.wires[w]),
+        }
+    }
+
+    /// Where the terminal lies: its best access point, or its wire's span.
+    fn extent(&self, tech: &RouteTech, term: usize) -> Rect<Dbu> {
+        let point = |n: Node| tech.layer(n.layer).point(n.track, n.cross);
+        match self.kind(term) {
+            Terminal::Pin(pin) => {
+                let p = self.pins[pin]
+                    .first()
+                    .map(|a| point(a.node))
+                    .unwrap_or_default();
+                Rect::new(p, p)
+            }
+            Terminal::Wire(w) => Rect::from_corners(
+                tech.layer(w.layer).point(w.track, w.from),
+                tech.layer(w.layer).point(w.track, w.to),
+            ),
+        }
+    }
+
+    /// The nodes that join the terminal, each with the cost of joining there.
+    fn candidates(&self, search: &Search<'_>, term: usize) -> Vec<(Node, f64)> {
+        match self.kind(term) {
+            Terminal::Pin(pin) => self.pins[pin]
+                .iter()
+                .map(|a| (a.node, search.access_cost(a)))
+                .collect(),
+            Terminal::Wire(w) => w.nodes().map(|n| (n, 0.0)).collect(),
+        }
+    }
+}
+
+/// The closest points of two rectangles, the first on `a`.
+fn closest_points(a: &Rect<Dbu>, b: &Rect<Dbu>) -> (Point<Dbu>, Point<Dbu>) {
+    let axis = |a0: Dbu, a1: Dbu, b0: Dbu, b1: Dbu| {
+        if a1 < b0 {
+            (a1, b0)
+        } else if b1 < a0 {
+            (a0, b1)
+        } else {
+            let m = a0.max(b0).midpoint(a1.min(b1));
+            (m, m)
+        }
+    };
+    let (ax, bx) = axis(a.min.x, a.max.x, b.min.x, b.max.x);
+    let (ay, by) = axis(a.min.y, a.max.y, b.min.y, b.max.y);
+    (Point::new(ax, ay), Point::new(bx, by))
 }
 
 /// A conflict's location and the nets in it.

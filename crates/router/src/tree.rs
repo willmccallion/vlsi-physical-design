@@ -1,13 +1,15 @@
 //! The order in which a net's pins are joined into a tree.
 //!
 //! Every pin after the first is joined to the nearest pin joined before it,
-//! which makes each connection short and local. Small nets use exact Prim
-//! ordering; large ones take pins along a Hilbert curve and find the nearest
-//! earlier pin through a bucket grid, which keeps nets with tens of
-//! thousands of pins fast.
+//! which makes each connection short and local. A pin is a rectangle, so a
+//! wire can stand for one. Small nets use exact Prim ordering on the gaps
+//! between rectangles; large ones take their centres along a Hilbert curve
+//! and find the nearest earlier centre through a bucket grid, which keeps
+//! nets with tens of thousands of pins fast.
 
 use pare_common::geom::dbu::Dbu;
 use pare_common::geom::point::Point;
+use pare_common::geom::rect::Rect;
 use rustc_hash::FxHashMap;
 
 /// Nets up to this size are ordered by exact Prim.
@@ -23,20 +25,28 @@ pub struct Join {
 }
 
 /// The first pin and the joins that connect the rest, in order.
-pub fn connection_order(points: &[Point<Dbu>]) -> (usize, Vec<Join>) {
-    if points.len() <= PRIM_LIMIT {
-        prim(points)
+pub fn connection_order(pins: &[Rect<Dbu>]) -> (usize, Vec<Join>) {
+    if pins.len() <= PRIM_LIMIT {
+        prim(pins)
     } else {
-        curve_order(points)
+        let centres: Vec<Point<Dbu>> = pins.iter().map(Rect::center).collect();
+        curve_order(&centres)
     }
+}
+
+/// Manhattan distance between the closest points of two rectangles.
+pub fn gap(a: &Rect<Dbu>, b: &Rect<Dbu>) -> i64 {
+    let dx = (a.min.x - b.max.x).max(b.min.x - a.max.x).max(Dbu::ZERO);
+    let dy = (a.min.y - b.max.y).max(b.min.y - a.max.y).max(Dbu::ZERO);
+    (dx + dy).get()
 }
 
 fn manhattan(a: Point<Dbu>, b: Point<Dbu>) -> i64 {
     ((a.x - b.x).abs() + (a.y - b.y).abs()).get()
 }
 
-fn prim(points: &[Point<Dbu>]) -> (usize, Vec<Join>) {
-    let n = points.len();
+fn prim(pins: &[Rect<Dbu>]) -> (usize, Vec<Join>) {
+    let n = pins.len();
     let mut joined = vec![false; n];
     let mut best: Vec<(i64, usize)> = vec![(i64::MAX, 0); n];
     let mut joins = Vec::with_capacity(n.saturating_sub(1));
@@ -45,7 +55,7 @@ fn prim(points: &[Point<Dbu>]) -> (usize, Vec<Join>) {
     for _ in 1..n {
         for (i, b) in best.iter_mut().enumerate() {
             if !joined[i] {
-                let d = manhattan(points[i], points[current]);
+                let d = gap(&pins[i], &pins[current]);
                 if d < b.0 {
                     *b = (d, current);
                 }
@@ -168,11 +178,15 @@ mod tests {
         Point::new(Dbu(x), Dbu(y))
     }
 
+    fn at(x: i64, y: i64) -> Rect<Dbu> {
+        Rect::new(pt(x, y), pt(x, y))
+    }
+
     #[test]
     fn prim_joins_each_pin_to_its_nearest_joined_pin() {
-        let points = [pt(0, 0), pt(100, 0), pt(10, 0), pt(110, 5)];
+        let pins = [at(0, 0), at(100, 0), at(10, 0), at(110, 5)];
 
-        let (first, joins) = connection_order(&points);
+        let (first, joins) = connection_order(&pins);
 
         assert_eq!(first, 0);
         assert_eq!(
@@ -186,12 +200,31 @@ mod tests {
     }
 
     #[test]
+    fn prim_measures_a_wire_from_its_nearest_point() {
+        let wire = Rect::new(pt(0, 50), pt(1000, 50));
+        let pins = [at(0, 0), wire, at(990, 0), at(400, 0)];
+
+        let (_, joins) = connection_order(&pins);
+
+        assert_eq!(
+            joins,
+            [
+                Join { pin: 1, parent: 0 },
+                Join { pin: 2, parent: 1 },
+                Join { pin: 3, parent: 1 },
+            ]
+        );
+    }
+
+    #[test]
     fn large_nets_join_every_pin_to_its_nearest_earlier_pin() {
         let points: Vec<Point<Dbu>> = (0..1000)
             .map(|i| pt((i * 37 % 400) * 10, (i * 91 % 250) * 10))
             .collect();
 
-        let (first, joins) = connection_order(&points);
+        let pins: Vec<Rect<Dbu>> = points.iter().map(|&p| Rect::new(p, p)).collect();
+
+        let (first, joins) = connection_order(&pins);
 
         assert_eq!(joins.len(), 999);
         let mut earlier = vec![first];

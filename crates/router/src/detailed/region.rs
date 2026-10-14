@@ -1,13 +1,15 @@
-//! Repairing conflicts region by region.
+//! Routing again region by region.
 //!
-//! The die is cut into square regions a few gcells wide. In every region
-//! holding a conflict, the pieces of the nets in that conflict that lie
-//! wholly inside are ripped up and routed again, negotiating with each other
-//! for a few local rounds. Wiring outside the region stays put, and where it
-//! crosses into the region it becomes a terminal the new pieces must reach.
-//! Regions that do not touch are repaired in parallel, and the region grid
-//! shifts between passes so a conflict on one region's edge falls inside
-//! another's.
+//! The die is cut into square regions a few gcells wide. In every region a
+//! pass covers, the pieces of the chosen nets that lie wholly inside are
+//! ripped up and routed again, negotiating with each other for a few local
+//! rounds: every net in every region in the first pass, as `TritonRoute`'s
+//! first detailed routing iteration does, and afterwards only the nets of
+//! each conflict in the region holding it. Wiring outside the region stays
+//! put, and where it crosses into the region it becomes a terminal the new
+//! pieces must reach. Regions that do not touch are routed in parallel, and
+//! the region grid shifts between passes so a conflict on one region's edge
+//! falls inside another's.
 
 use super::DetailedRouter;
 use crate::access::Node;
@@ -40,6 +42,15 @@ struct Piece {
     groups: Vec<Vec<Node>>,
 }
 
+/// Which nets a repair pass routes again.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Scope {
+    /// Every net in every region it passes through.
+    Everything,
+    /// The nets of each conflict, in the region holding it.
+    Conflicts,
+}
+
 /// What a pass did.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct RepairStats {
@@ -50,9 +61,9 @@ pub struct RepairStats {
 }
 
 impl DetailedRouter<'_> {
-    /// Repairs every region holding a conflict, with the region grid shifted
-    /// by a third of a region per `pass`.
-    pub fn repair(&mut self, costs: Costs, pass: usize) -> RepairStats {
+    /// Routes again, region by region, the nets `scope` selects, with the
+    /// region grid shifted by a third of a region per `pass`.
+    pub fn repair(&mut self, costs: Costs, pass: usize, scope: Scope) -> RepairStats {
         let shift = self.gcell * (REGION_GCELLS * (pass as i64 % 3) / 3);
         let size = self.gcell * REGION_GCELLS;
         let origin = self.grid_origin - Point::new(shift, shift);
@@ -63,9 +74,28 @@ impl DetailedRouter<'_> {
             )
         };
         let mut regions: BTreeMap<RegionKey, FxHashSet<NetId>> = BTreeMap::new();
-        for m in self.markers() {
-            let nets = regions.entry(key(m.at)).or_default();
-            nets.extend(m.nets.iter().flatten());
+        match scope {
+            Scope::Conflicts => {
+                for m in self.markers() {
+                    let nets = regions.entry(key(m.at)).or_default();
+                    nets.extend(m.nets.iter().flatten());
+                }
+            }
+            Scope::Everything => {
+                for (n, route) in self.routes.iter().enumerate() {
+                    let nodes = route
+                        .edges
+                        .iter()
+                        .flat_map(|e| <[Node; 2]>::from(e.ends()))
+                        .chain(route.access.iter().map(|a| a.node));
+                    for node in nodes {
+                        let _ = regions
+                            .entry(key(self.point(node)))
+                            .or_default()
+                            .insert(NetId::new(n));
+                    }
+                }
+            }
         }
         let mut stats = RepairStats {
             regions: regions.len(),
@@ -119,7 +149,7 @@ impl DetailedRouter<'_> {
                 .flat_map(|(_, edges)| edges.iter().copied())
                 .collect();
             route.edges.retain(|e| !gone.contains(e));
-            self.recommit(net, &route);
+            self.commit(net, &route);
         }
 
         let routed: Vec<Vec<Option<Vec<Edge>>>> = work
@@ -142,7 +172,7 @@ impl DetailedRouter<'_> {
             route.edges.extend(edges);
             route.edges.sort_unstable();
             route.edges.dedup();
-            self.recommit(net, &route);
+            self.commit(net, &route);
         }
         count
     }

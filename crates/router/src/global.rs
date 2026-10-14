@@ -525,9 +525,12 @@ fn route_tree(
     if terminals.is_empty() {
         return Vec::new();
     }
-    let points: Vec<Point<Dbu>> = terminals
+    let points: Vec<Rect<Dbu>> = terminals
         .iter()
-        .map(|c| Point::new(Dbu(i64::from(c.x)), Dbu(i64::from(c.y))))
+        .map(|c| {
+            let p = Point::new(Dbu(i64::from(c.x)), Dbu(i64::from(c.y)));
+            Rect::new(p, p)
+        })
         .collect();
     let (first, joins) = connection_order(&points);
 
