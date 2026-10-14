@@ -38,13 +38,7 @@ pub fn header(label: &str, value: &str) {
 
 /// Prints a two-column stat row with dimmed labels.
 pub fn stat_row(l1: &str, v1: &str, l2: &str, v2: &str) {
-    eprintln!(
-        "    {:<18} {:<14} {:<18} {}",
-        l1.dim(),
-        v1,
-        l2.dim(),
-        v2
-    );
+    eprintln!("    {:<18} {:<14} {:<18} {}", l1.dim(), v1, l2.dim(), v2);
 }
 
 /// Prints the header row for placement iteration table.
@@ -62,9 +56,7 @@ pub fn placement_table_header() {
 
 /// Prints a single placement iteration row.
 pub fn placement_iter(iter: usize, wl: f64, overflow: f64, avg_move: f64, step: f64) {
-    eprintln!(
-        "    {iter:<8} {wl:>12.0} {overflow:>12.4} {avg_move:>12.4} {step:>10.5}"
-    );
+    eprintln!("    {iter:<8} {wl:>12.0} {overflow:>12.4} {avg_move:>12.4} {step:>10.5}");
 }
 
 /// Prints the header row for routing iteration table.
@@ -81,11 +73,22 @@ pub fn routing_table_header(phase: &str) {
 }
 
 /// Prints a single routing iteration row.
-pub fn routing_iter(phase: &str, iter: usize, overflow: usize, ripped: usize, penalty: f64, time_ms: u128) {
+pub fn routing_iter(
+    phase: &str,
+    iter: usize,
+    overflow: usize,
+    ripped: usize,
+    penalty: f64,
+    time_ms: u128,
+) {
     eprintln!(
         "    {}{:<8} {:>10} {:>10} {:>10.1} {:>8}ms",
         " ".repeat(phase.len() + 1),
-        iter, overflow, ripped, penalty, time_ms
+        iter,
+        overflow,
+        ripped,
+        penalty,
+        time_ms
     );
 }
 
@@ -118,12 +121,7 @@ pub fn done(elapsed_secs: f64) {
 
 /// Prints a carriage-return progress line (overwrites current line).
 pub fn progress(label: &str, cur: usize, total: usize) {
-    eprint!(
-        "\r  {} {}/{}\x1b[K",
-        label.cyan(),
-        cur,
-        total
-    );
+    eprint!("\r  {} {}/{}\x1b[K", label.cyan(), cur, total);
     let _ = std::io::Write::flush(&mut std::io::stderr());
 }
 

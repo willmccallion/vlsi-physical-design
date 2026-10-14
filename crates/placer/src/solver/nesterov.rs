@@ -75,7 +75,10 @@ impl NesterovOptimizer {
         self.x_k.copy_from_slice(&db.positions);
 
         // Check whether the parsed positions are already a reasonable initial placement
-        let in_bounds_count = self.x_k.iter().enumerate()
+        let in_bounds_count = self
+            .x_k
+            .iter()
+            .enumerate()
             .filter(|(i, pos)| {
                 let cell = &db.cells[*i];
                 !cell.is_fixed
@@ -86,20 +89,18 @@ impl NesterovOptimizer {
             })
             .count();
         let movable_count = db.cells.iter().filter(|c| !c.is_fixed).count();
-        let use_initial_placement = movable_count > 0
-            && (in_bounds_count as f64 / movable_count as f64) > 0.90;
+        let use_initial_placement =
+            movable_count > 0 && (in_bounds_count as f64 / movable_count as f64) > 0.90;
 
         if use_initial_placement {
             for (i, pos) in self.x_k.iter_mut().enumerate() {
                 if !db.cells[i].is_fixed {
-                    pos.x = pos.x.clamp(
-                        db.die_area.min.x,
-                        db.die_area.max.x - db.cells[i].width,
-                    );
-                    pos.y = pos.y.clamp(
-                        db.die_area.min.y,
-                        db.die_area.max.y - db.cells[i].height,
-                    );
+                    pos.x = pos
+                        .x
+                        .clamp(db.die_area.min.x, db.die_area.max.x - db.cells[i].width);
+                    pos.y = pos
+                        .y
+                        .clamp(db.die_area.min.y, db.die_area.max.y - db.cells[i].height);
                 }
             }
         } else {
@@ -113,8 +114,12 @@ impl NesterovOptimizer {
                 if !db.cells[i].is_fixed {
                     pos.x = center_x + rng.gen_range(-noise_scale_x..noise_scale_x);
                     pos.y = center_y + rng.gen_range(-noise_scale_y..noise_scale_y);
-                    pos.x = pos.x.clamp(db.die_area.min.x, db.die_area.max.x - db.cells[i].width);
-                    pos.y = pos.y.clamp(db.die_area.min.y, db.die_area.max.y - db.cells[i].height);
+                    pos.x = pos
+                        .x
+                        .clamp(db.die_area.min.x, db.die_area.max.x - db.cells[i].width);
+                    pos.y = pos
+                        .y
+                        .clamp(db.die_area.min.y, db.die_area.max.y - db.cells[i].height);
                 }
             }
         }
@@ -126,8 +131,8 @@ impl NesterovOptimizer {
         let mut step_size = self.params.initial_learning_rate;
 
         // --- Compute initial gradients to calibrate density weight ---
-        let (wl_cost_0, _, wl_grad_norm_0, density_grad_norm_0) =
-            physics.compute_gradients_separate(
+        let (wl_cost_0, _, wl_grad_norm_0, density_grad_norm_0) = physics
+            .compute_gradients_separate(
                 db,
                 &self.y_k,
                 &mut self.grads,
@@ -149,7 +154,9 @@ impl NesterovOptimizer {
         let bin_w = db.die_area.width() / dim as f64;
         let bin_h = db.die_area.height() / dim as f64;
         let bin_area = bin_w * bin_h;
-        let total_cell_area: f64 = db.cells.iter()
+        let total_cell_area: f64 = db
+            .cells
+            .iter()
             .filter(|c| !c.is_fixed)
             .map(|c| c.width * c.height)
             .sum();
@@ -167,8 +174,8 @@ impl NesterovOptimizer {
         let mut prev_wl = wl_cost_0;
 
         for k in 0..self.params.max_iterations {
-            let (wl_cost, _density_cost, wl_grad_norm, density_grad_norm) =
-                physics.compute_gradients_separate(
+            let (wl_cost, _density_cost, wl_grad_norm, density_grad_norm) = physics
+                .compute_gradients_separate(
                     db,
                     &self.y_k,
                     &mut self.grads,
@@ -179,8 +186,12 @@ impl NesterovOptimizer {
 
             // Combine: grad = wl_grad + density_weight * density_grad
             for i in 0..n {
-                self.grads[i].x = self.density_grads[i].x.mul_add(density_weight, self.grads[i].x);
-                self.grads[i].y = self.density_grads[i].y.mul_add(density_weight, self.grads[i].y);
+                self.grads[i].x = self.density_grads[i]
+                    .x
+                    .mul_add(density_weight, self.grads[i].x);
+                self.grads[i].y = self.density_grads[i]
+                    .y
+                    .mul_add(density_weight, self.grads[i].y);
             }
 
             // Add congestion gradient if congestion map is available
@@ -279,8 +290,10 @@ impl NesterovOptimizer {
                 Self::apply_clamping(db, &mut best_positions);
                 db.positions.copy_from_slice(&best_positions);
                 return Ok(PlacementResult {
-                    converged: true, iterations: k,
-                    final_overflow: best_overflow, final_wirelength: wl_cost,
+                    converged: true,
+                    iterations: k,
+                    final_overflow: best_overflow,
+                    final_wirelength: wl_cost,
                 });
             }
             // Overflow regression: had a good solution but now diverging badly
@@ -291,8 +304,10 @@ impl NesterovOptimizer {
                 Self::apply_clamping(db, &mut best_positions);
                 db.positions.copy_from_slice(&best_positions);
                 return Ok(PlacementResult {
-                    converged: true, iterations: k,
-                    final_overflow: best_overflow, final_wirelength: wl_cost,
+                    converged: true,
+                    iterations: k,
+                    final_overflow: best_overflow,
+                    final_wirelength: wl_cost,
                 });
             }
             if k > 0 {
@@ -307,29 +322,32 @@ impl NesterovOptimizer {
             let wl_improved = wl_cost < initial_hpwl * 0.95;
             let wl_stable = wl_stable_iters >= 50;
 
-            if k > 200 && overflow_ratio < 0.10 && avg_disp < 0.1
-                && (wl_improved || wl_stable)
-            {
+            if k > 200 && overflow_ratio < 0.10 && avg_disp < 0.1 && (wl_improved || wl_stable) {
                 log::debug!(
                     "Converged at iteration {k}: overflow={overflow_ratio:.4}, avg_disp={avg_disp:.4}, WL={wl_cost:.0}"
                 );
                 Self::apply_clamping(db, &mut self.x_k);
                 db.positions.copy_from_slice(&self.x_k);
                 return Ok(PlacementResult {
-                    converged: true, iterations: k,
-                    final_overflow: overflow_ratio, final_wirelength: wl_cost,
+                    converged: true,
+                    iterations: k,
+                    final_overflow: overflow_ratio,
+                    final_wirelength: wl_cost,
                 });
             }
 
-            if k > 500 && avg_disp < self.params.convergence_threshold
-                && (wl_improved || wl_stable)
+            if k > 500 && avg_disp < self.params.convergence_threshold && (wl_improved || wl_stable)
             {
-                log::debug!("Converged: Cells stabilized at iteration {k} (overflow={overflow_ratio:.4})");
+                log::debug!(
+                    "Converged: Cells stabilized at iteration {k} (overflow={overflow_ratio:.4})"
+                );
                 Self::apply_clamping(db, &mut self.x_k);
                 db.positions.copy_from_slice(&self.x_k);
                 return Ok(PlacementResult {
-                    converged: true, iterations: k,
-                    final_overflow: overflow_ratio, final_wirelength: wl_cost,
+                    converged: true,
+                    iterations: k,
+                    final_overflow: overflow_ratio,
+                    final_wirelength: wl_cost,
                 });
             }
 

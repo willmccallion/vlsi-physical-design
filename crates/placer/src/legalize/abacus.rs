@@ -228,9 +228,7 @@ impl AbacusLegalizer {
             let pos_b = db.positions[b];
             let row_a = ((pos_a.y - die_min_y) / row_height).round() as isize;
             let row_b = ((pos_b.y - die_min_y) / row_height).round() as isize;
-            row_a
-                .cmp(&row_b)
-                .then(pos_a.x.total_cmp(&pos_b.x))
+            row_a.cmp(&row_b).then(pos_a.x.total_cmp(&pos_b.x))
         });
 
         for &i in &std_cells {
@@ -339,9 +337,7 @@ impl AbacusLegalizer {
                 // This guarantees no overlaps and no out-of-bounds regardless of
                 // how many clusters collided at the right edge.
                 let sub_capacity = sub.max_x - sub.min_x;
-                let sub_cell_width: f64 = sub.cells.iter()
-                    .map(|&ci| db.cells[ci].width)
-                    .sum();
+                let sub_cell_width: f64 = sub.cells.iter().map(|&ci| db.cells[ci].width).sum();
                 let has_slack = sub_cell_width < sub_capacity - 0.001;
 
                 let mut ordered: Vec<(f64, usize)> = Vec::with_capacity(sub.cells.len());
@@ -393,9 +389,7 @@ impl AbacusLegalizer {
 
                 // Sort cells by their placed x position
                 let mut cells_in_sub: Vec<usize> = sub.cells.clone();
-                cells_in_sub.sort_by(|&a, &b| {
-                    db.positions[a].x.total_cmp(&db.positions[b].x)
-                });
+                cells_in_sub.sort_by(|&a, &b| db.positions[a].x.total_cmp(&db.positions[b].x));
 
                 // Right-to-left: if the rightmost cell exceeds the sub-row
                 // boundary, push it left (and its neighbors).

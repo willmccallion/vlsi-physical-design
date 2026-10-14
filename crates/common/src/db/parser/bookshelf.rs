@@ -23,8 +23,7 @@ pub fn parse(db: &mut NetlistDB, aux_filename: &str) -> Result<()> {
     let aux_path = Path::new(aux_filename);
     let parent_dir = aux_path.parent().unwrap_or_else(|| Path::new("."));
 
-    let file =
-        File::open(aux_path).context(format!("Failed to open AUX file: {aux_filename}"))?;
+    let file = File::open(aux_path).context(format!("Failed to open AUX file: {aux_filename}"))?;
     let reader = BufReader::new(file);
 
     let mut nodes_file = String::new();
@@ -40,7 +39,10 @@ pub fn parse(db: &mut NetlistDB, aux_filename: &str) -> Result<()> {
         }
         if parts[0].starts_with("RowBasedPlacement") {
             for part in &parts[2..] {
-                let ext = Path::new(part).extension().and_then(|e| e.to_str()).unwrap_or("");
+                let ext = Path::new(part)
+                    .extension()
+                    .and_then(|e| e.to_str())
+                    .unwrap_or("");
                 if ext == "nodes" {
                     nodes_file = part.to_string();
                 } else if ext == "nets" {
@@ -56,25 +58,33 @@ pub fn parse(db: &mut NetlistDB, aux_filename: &str) -> Result<()> {
 
     if !nodes_file.is_empty() {
         let path = parent_dir.join(&nodes_file);
-        let path_str = path.to_str().ok_or_else(|| anyhow::anyhow!("Non-UTF-8 path: {}", path.display()))?;
+        let path_str = path
+            .to_str()
+            .ok_or_else(|| anyhow::anyhow!("Non-UTF-8 path: {}", path.display()))?;
         parse_nodes(db, path_str)?;
     }
 
     if !pl_file.is_empty() {
         let path = parent_dir.join(&pl_file);
-        let path_str = path.to_str().ok_or_else(|| anyhow::anyhow!("Non-UTF-8 path: {}", path.display()))?;
+        let path_str = path
+            .to_str()
+            .ok_or_else(|| anyhow::anyhow!("Non-UTF-8 path: {}", path.display()))?;
         parse_pl(db, path_str)?;
     }
 
     if !scl_file.is_empty() {
         let path = parent_dir.join(&scl_file);
-        let path_str = path.to_str().ok_or_else(|| anyhow::anyhow!("Non-UTF-8 path: {}", path.display()))?;
+        let path_str = path
+            .to_str()
+            .ok_or_else(|| anyhow::anyhow!("Non-UTF-8 path: {}", path.display()))?;
         parse_scl(db, path_str)?;
     }
 
     if !nets_file.is_empty() {
         let path = parent_dir.join(&nets_file);
-        let path_str = path.to_str().ok_or_else(|| anyhow::anyhow!("Non-UTF-8 path: {}", path.display()))?;
+        let path_str = path
+            .to_str()
+            .ok_or_else(|| anyhow::anyhow!("Non-UTF-8 path: {}", path.display()))?;
         parse_nets(db, path_str)?;
     }
 
@@ -182,7 +192,11 @@ fn parse_pl(db: &mut NetlistDB, filename: &str) -> Result<()> {
         let y: f64 = parts[2].parse().unwrap_or(0.0);
         let is_fixed = line.contains("FIXED");
 
-        let orientation = if parts.len() >= 5 && parts[3] == ":" { parts[4] } else { "N" };
+        let orientation = if parts.len() >= 5 && parts[3] == ":" {
+            parts[4]
+        } else {
+            "N"
+        };
 
         if let Some(&id) = db.cell_name_map.get(name) {
             db.positions[id.index()] = Point::new(x, y);

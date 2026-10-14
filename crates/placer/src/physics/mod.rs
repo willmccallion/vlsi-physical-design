@@ -147,10 +147,26 @@ impl PhysicsContext {
             total_cost += c;
 
             // Finite difference gradient on the congestion map
-            let cx_left = if gx > 0 { cmap[gy * gw + (gx - 1)] as f64 } else { c };
-            let cx_right = if gx < gw - 1 { cmap[gy * gw + (gx + 1)] as f64 } else { c };
-            let cy_down = if gy > 0 { cmap[(gy - 1) * gw + gx] as f64 } else { c };
-            let cy_up = if gy < gh - 1 { cmap[(gy + 1) * gw + gx] as f64 } else { c };
+            let cx_left = if gx > 0 {
+                cmap[gy * gw + (gx - 1)] as f64
+            } else {
+                c
+            };
+            let cx_right = if gx < gw - 1 {
+                cmap[gy * gw + (gx + 1)] as f64
+            } else {
+                c
+            };
+            let cy_down = if gy > 0 {
+                cmap[(gy - 1) * gw + gx] as f64
+            } else {
+                c
+            };
+            let cy_up = if gy < gh - 1 {
+                cmap[(gy + 1) * gw + gx] as f64
+            } else {
+                c
+            };
 
             let grad_x = (cx_right - cx_left) / (2.0 * bin_w);
             let grad_y = (cy_up - cy_down) / (2.0 * bin_h);

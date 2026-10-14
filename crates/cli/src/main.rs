@@ -50,9 +50,12 @@ enum Commands {
 /// benchmark name and looked up in `configs/<mode>/`.
 fn resolve_config(name: &str, mode: &str) -> PathBuf {
     let path = Path::new(name);
-    if path.exists() || name.contains('/') || std::path::Path::new(name)
-        .extension()
-        .is_some_and(|ext| ext.eq_ignore_ascii_case("toml")) {
+    if path.exists()
+        || name.contains('/')
+        || std::path::Path::new(name)
+            .extension()
+            .is_some_and(|ext| ext.eq_ignore_ascii_case("toml"))
+    {
         return path.to_path_buf();
     }
     PathBuf::from(format!("configs/{mode}/{name}.toml"))
@@ -65,8 +68,7 @@ fn load_config(path: &Path) -> anyhow::Result<Config> {
     ui::header("Config", &path.display().to_string());
     let config_str = std::fs::read_to_string(path)
         .map_err(|e| anyhow::anyhow!("Failed to read config file: {e}"))?;
-    toml::from_str(&config_str)
-        .map_err(|e| anyhow::anyhow!("Failed to parse config TOML: {e}"))
+    toml::from_str(&config_str).map_err(|e| anyhow::anyhow!("Failed to parse config TOML: {e}"))
 }
 
 /// Validates that a pair of place/route configs are consistent for a flow run.
@@ -389,15 +391,20 @@ fn run_placement(config: &Config) -> anyhow::Result<()> {
 
     let bin_dimension = config.global_placement.bin_dimension.unwrap_or_else(|| {
         let movable = db.cells.iter().filter(|c| !c.is_fixed).count();
-        ((movable as f64).sqrt().ceil() as usize).next_power_of_two().clamp(64, 512)
+        ((movable as f64).sqrt().ceil() as usize)
+            .next_power_of_two()
+            .clamp(64, 512)
     });
 
-    let target_density = config.global_placement.target_density.unwrap_or_else(|| {
-        (utilization + 0.05).max(0.80)
-    });
+    let target_density = config
+        .global_placement
+        .target_density
+        .unwrap_or_else(|| (utilization + 0.05).max(0.80));
 
-    let initial_learning_rate =
-        config.global_placement.initial_learning_rate.unwrap_or_else(|| {
+    let initial_learning_rate = config
+        .global_placement
+        .initial_learning_rate
+        .unwrap_or_else(|| {
             let mut heights: Vec<f64> = db
                 .cells
                 .iter()
@@ -419,16 +426,22 @@ fn run_placement(config: &Config) -> anyhow::Result<()> {
     let phase_start = Instant::now();
     ui::section("Placement");
     ui::stat_row(
-        "Cells:", &format!("{movable_cells}"),
-        "Nets:", &format!("{num_nets}"),
+        "Cells:",
+        &format!("{movable_cells}"),
+        "Nets:",
+        &format!("{num_nets}"),
     );
     ui::stat_row(
-        "Utilization:", &format!("{:.2}%", utilization * 100.0),
-        "Target Density:", &format!("{target_density:.2}"),
+        "Utilization:",
+        &format!("{:.2}%", utilization * 100.0),
+        "Target Density:",
+        &format!("{target_density:.2}"),
     );
     ui::stat_row(
-        "Bin Grid:", &format!("{bin_dimension}x{bin_dimension}"),
-        "WA Gamma:", &format!("{wa_gamma:.1}"),
+        "Bin Grid:",
+        &format!("{bin_dimension}x{bin_dimension}"),
+        "WA Gamma:",
+        &format!("{wa_gamma:.1}"),
     );
 
     let mut physics = PhysicsContext::new(bin_dimension, bin_dimension);
@@ -458,7 +471,8 @@ fn run_placement(config: &Config) -> anyhow::Result<()> {
     } else {
         log::warn!(
             "Did not converge after {} iterations (overflow={:.4})",
-            result.iterations, result.final_overflow
+            result.iterations,
+            result.final_overflow
         );
     }
 
@@ -486,12 +500,16 @@ fn run_placement(config: &Config) -> anyhow::Result<()> {
     let phase_start = Instant::now();
     ui::phase("Output");
     let nesterov_png = output_dir.join("nesterov_placer.png");
-    let nesterov_png_str = nesterov_png.to_str().ok_or_else(|| anyhow::anyhow!("non-UTF-8 path"))?;
+    let nesterov_png_str = nesterov_png
+        .to_str()
+        .ok_or_else(|| anyhow::anyhow!("non-UTF-8 path"))?;
     visualization::draw_placement(&db, nesterov_png_str, 1000, 1000);
     ui::wrote(nesterov_png_str);
 
     let placed_png = output_dir.join("placed.png");
-    let placed_png_str = placed_png.to_str().ok_or_else(|| anyhow::anyhow!("non-UTF-8 path"))?;
+    let placed_png_str = placed_png
+        .to_str()
+        .ok_or_else(|| anyhow::anyhow!("non-UTF-8 path"))?;
     visualization::draw_placement(&db, placed_png_str, 1000, 1000);
     ui::wrote(placed_png_str);
 
@@ -531,27 +549,41 @@ fn run_congestion_placement(
     let die_diag = db.die_area.width().hypot(db.die_area.height());
     let wa_gamma = config.global_placement.wa_gamma.unwrap_or(die_diag * 1.5);
     let utilization = {
-        let total_cell_area: f64 = db.cells.iter()
+        let total_cell_area: f64 = db
+            .cells
+            .iter()
             .filter(|c| !c.is_fixed)
             .map(|c| c.width * c.height)
             .sum();
         let die_area = db.die_area.width() * db.die_area.height();
         total_cell_area / die_area
     };
-    let target_density = config.global_placement.target_density
+    let target_density = config
+        .global_placement
+        .target_density
         .unwrap_or_else(|| (utilization + 0.05).max(0.80));
     let bin_dimension = config.global_placement.bin_dimension.unwrap_or_else(|| {
         let movable = db.cells.iter().filter(|c| !c.is_fixed).count();
-        ((movable as f64).sqrt().ceil() as usize).next_power_of_two().clamp(64, 512)
+        ((movable as f64).sqrt().ceil() as usize)
+            .next_power_of_two()
+            .clamp(64, 512)
     });
-    let initial_learning_rate =
-        config.global_placement.initial_learning_rate.unwrap_or_else(|| {
-            let mut heights: Vec<f64> = db.cells.iter()
+    let initial_learning_rate = config
+        .global_placement
+        .initial_learning_rate
+        .unwrap_or_else(|| {
+            let mut heights: Vec<f64> = db
+                .cells
+                .iter()
                 .filter(|c| !c.is_fixed)
                 .map(|c| c.height)
                 .collect();
             heights.sort_by(f64::total_cmp);
-            let median_height = if heights.is_empty() { 1.0 } else { heights[heights.len() / 2] };
+            let median_height = if heights.is_empty() {
+                1.0
+            } else {
+                heights[heights.len() / 2]
+            };
             (median_height * 0.0006).clamp(0.005, 1.0)
         });
 
@@ -623,7 +655,8 @@ fn preload_bookshelf_geometry(db: &mut NetlistDB, aux_path: &str) -> anyhow::Res
             for part in &parts[2..] {
                 if std::path::Path::new(part)
                     .extension()
-                    .is_some_and(|ext| ext.eq_ignore_ascii_case("nodes")) {
+                    .is_some_and(|ext| ext.eq_ignore_ascii_case("nodes"))
+                {
                     nodes_file = part.to_string();
                 }
             }
@@ -740,12 +773,15 @@ fn run_routing(config: &Config, placed_def: &str) -> anyhow::Result<pare_router:
     let net_count = db.num_nets();
     let layer_count = db.layers.len();
     ui::stat_row(
-        "Nets:", &format!("{net_count}"),
-        "Layers:", &format!("{layer_count}"),
+        "Nets:",
+        &format!("{net_count}"),
+        "Layers:",
+        &format!("{layer_count}"),
     );
 
-    let routing_result = pare_router::route(&mut db, &config.global_routing, &config.detailed_routing)
-        .map_err(|e| anyhow::anyhow!(e))?;
+    let routing_result =
+        pare_router::route(&mut db, &config.global_routing, &config.detailed_routing)
+            .map_err(|e| anyhow::anyhow!(e))?;
     ui::phase_time(phase_start.elapsed().as_secs_f64());
 
     // --- Verification ---
@@ -763,12 +799,16 @@ fn run_routing(config: &Config, placed_def: &str) -> anyhow::Result<pare_router:
     }
 
     let routed_png = output_dir.join("routed.png");
-    let routed_png_str = routed_png.to_str().ok_or_else(|| anyhow::anyhow!("non-UTF-8 path"))?;
+    let routed_png_str = routed_png
+        .to_str()
+        .ok_or_else(|| anyhow::anyhow!("non-UTF-8 path"))?;
     visualization::draw_routed_design(&db, routed_png_str, 2000, 2000);
     ui::wrote(routed_png_str);
 
     let output_path = output_dir.join("routed.def");
-    let output_path_str = output_path.to_str().ok_or_else(|| anyhow::anyhow!("non-UTF-8 path"))?;
+    let output_path_str = output_path
+        .to_str()
+        .ok_or_else(|| anyhow::anyhow!("non-UTF-8 path"))?;
     save_def(&db, output_path_str)?;
     ui::wrote(output_path_str);
     ui::phase_time(phase_start.elapsed().as_secs_f64());
@@ -867,15 +907,9 @@ fn save_def(db: &NetlistDB, filename: &str) -> std::io::Result<()> {
                 let next_layer_idx = (seg.layer as usize + 1).min(db.layers.len() - 1);
                 let next_layer_name = &db.layers[next_layer_idx].name;
                 let via_name = format!("VIA_{layer_name}_{next_layer_name}");
-                writeln!(
-                    file,
-                    "  + ROUTED {layer_name} ( {x1} {y1} ) {via_name} ",
-                )?;
+                writeln!(file, "  + ROUTED {layer_name} ( {x1} {y1} ) {via_name} ")?;
             } else {
-                writeln!(
-                    file,
-                    "  + ROUTED {layer_name} ( {x1} {y1} ) ( {x2} {y2} )",
-                )?;
+                writeln!(file, "  + ROUTED {layer_name} ( {x1} {y1} ) ( {x2} {y2} )")?;
             }
         }
         writeln!(file, "  ;")?;

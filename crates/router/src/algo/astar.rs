@@ -262,8 +262,7 @@ impl AStar {
                 let dy = (position.y as i32 - end_y).abs();
                 dx + dy <= 1
             } || starts.iter().any(|s| {
-                (position.x as i32 - s.x as i32).abs() + (position.y as i32 - s.y as i32).abs()
-                    <= 1
+                (position.x as i32 - s.x as i32).abs() + (position.y as i32 - s.y as i32).abs() <= 1
             });
 
             // Structurally enforce direction:
@@ -296,13 +295,29 @@ impl AStar {
                 if position.x > 0 {
                     let neighbor = GridCoord::new(position.x - 1, position.y, position.z);
                     if window.contains(neighbor) {
-                        let edge_cost =
-                            grid.h_edge_cost(position.x - 1, position.y, position.z, collision_penalty);
+                        let edge_cost = grid.h_edge_cost(
+                            position.x - 1,
+                            position.y,
+                            position.z,
+                            collision_penalty,
+                        );
                         if edge_cost < f64::MAX / 2.0 {
                             self.try_push(
-                                neighbor, current_g, edge_cost, scale, guide_penalty,
-                                oracle, strict_mode, end, &window, end_x, end_y, end_z,
-                                heuristic_weight, curr_local, &mut heap,
+                                neighbor,
+                                current_g,
+                                edge_cost,
+                                scale,
+                                guide_penalty,
+                                oracle,
+                                strict_mode,
+                                end,
+                                &window,
+                                end_x,
+                                end_y,
+                                end_z,
+                                heuristic_weight,
+                                curr_local,
+                                &mut heap,
                             );
                         }
                     }
@@ -315,9 +330,21 @@ impl AStar {
                             grid.h_edge_cost(position.x, position.y, position.z, collision_penalty);
                         if edge_cost < f64::MAX / 2.0 {
                             self.try_push(
-                                neighbor, current_g, edge_cost, scale, guide_penalty,
-                                oracle, strict_mode, end, &window, end_x, end_y, end_z,
-                                heuristic_weight, curr_local, &mut heap,
+                                neighbor,
+                                current_g,
+                                edge_cost,
+                                scale,
+                                guide_penalty,
+                                oracle,
+                                strict_mode,
+                                end,
+                                &window,
+                                end_x,
+                                end_y,
+                                end_z,
+                                heuristic_weight,
+                                curr_local,
+                                &mut heap,
                             );
                         }
                     }
@@ -330,13 +357,29 @@ impl AStar {
                 if position.y > 0 {
                     let neighbor = GridCoord::new(position.x, position.y - 1, position.z);
                     if window.contains(neighbor) {
-                        let edge_cost =
-                            grid.v_edge_cost(position.x, position.y - 1, position.z, collision_penalty);
+                        let edge_cost = grid.v_edge_cost(
+                            position.x,
+                            position.y - 1,
+                            position.z,
+                            collision_penalty,
+                        );
                         if edge_cost < f64::MAX / 2.0 {
                             self.try_push(
-                                neighbor, current_g, edge_cost, scale, guide_penalty,
-                                oracle, strict_mode, end, &window, end_x, end_y, end_z,
-                                heuristic_weight, curr_local, &mut heap,
+                                neighbor,
+                                current_g,
+                                edge_cost,
+                                scale,
+                                guide_penalty,
+                                oracle,
+                                strict_mode,
+                                end,
+                                &window,
+                                end_x,
+                                end_y,
+                                end_z,
+                                heuristic_weight,
+                                curr_local,
+                                &mut heap,
                             );
                         }
                     }
@@ -349,9 +392,21 @@ impl AStar {
                             grid.v_edge_cost(position.x, position.y, position.z, collision_penalty);
                         if edge_cost < f64::MAX / 2.0 {
                             self.try_push(
-                                neighbor, current_g, edge_cost, scale, guide_penalty,
-                                oracle, strict_mode, end, &window, end_x, end_y, end_z,
-                                heuristic_weight, curr_local, &mut heap,
+                                neighbor,
+                                current_g,
+                                edge_cost,
+                                scale,
+                                guide_penalty,
+                                oracle,
+                                strict_mode,
+                                end,
+                                &window,
+                                end_x,
+                                end_y,
+                                end_z,
+                                heuristic_weight,
+                                curr_local,
+                                &mut heap,
                             );
                         }
                     }
@@ -363,18 +418,42 @@ impl AStar {
                 let neighbor = GridCoord::new(position.x, position.y, position.z - 1);
                 let via_c = grid.via_cost(position.x, position.y, position.z - 1);
                 self.try_push(
-                    neighbor, current_g, via_c, scale, guide_penalty,
-                    oracle, strict_mode, end, &window, end_x, end_y, end_z,
-                    heuristic_weight, curr_local, &mut heap,
+                    neighbor,
+                    current_g,
+                    via_c,
+                    scale,
+                    guide_penalty,
+                    oracle,
+                    strict_mode,
+                    end,
+                    &window,
+                    end_x,
+                    end_y,
+                    end_z,
+                    heuristic_weight,
+                    curr_local,
+                    &mut heap,
                 );
             }
             if position.z < grid.layers() - 1 {
                 let neighbor = GridCoord::new(position.x, position.y, position.z + 1);
                 let via_c = grid.via_cost(position.x, position.y, position.z);
                 self.try_push(
-                    neighbor, current_g, via_c, scale, guide_penalty,
-                    oracle, strict_mode, end, &window, end_x, end_y, end_z,
-                    heuristic_weight, curr_local, &mut heap,
+                    neighbor,
+                    current_g,
+                    via_c,
+                    scale,
+                    guide_penalty,
+                    oracle,
+                    strict_mode,
+                    end,
+                    &window,
+                    end_x,
+                    end_y,
+                    end_z,
+                    heuristic_weight,
+                    curr_local,
+                    &mut heap,
                 );
             }
         }

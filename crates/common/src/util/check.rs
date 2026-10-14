@@ -61,7 +61,9 @@ pub fn run_placement_check(db: &NetlistDB) -> Result<(), String> {
 
     // Use spatial binning to reduce overlap check from O(n²) to O(n·k).
     // Compute bin size from max cell dimension.
-    let max_cell_dim = db.cells.iter()
+    let max_cell_dim = db
+        .cells
+        .iter()
         .filter(|c| !c.is_fixed && c.name != "IO_VIRTUAL_CELL")
         .map(|c| c.width.max(c.height))
         .fold(0.0_f64, f64::max);
@@ -105,7 +107,9 @@ pub fn run_placement_check(db: &NetlistDB) -> Result<(), String> {
             );
 
             for &j in &indices[(a + 1)..] {
-                if i >= j { continue; }
+                if i >= j {
+                    continue;
+                }
 
                 let r2 = Rect::new(
                     db.positions[j],
@@ -275,7 +279,8 @@ impl Segment {
 
     /// Checks if this segment shares an endpoint with another segment.
     fn shares_endpoint(&self, other: &Self) -> bool {
-        let dist_sq = |a: Point<f64>, b: Point<f64>| (a.x - b.x).mul_add(a.x - b.x, (a.y - b.y).powi(2));
+        let dist_sq =
+            |a: Point<f64>, b: Point<f64>| (a.x - b.x).mul_add(a.x - b.x, (a.y - b.y).powi(2));
         let tol_sq = CONNECTIVITY_TOLERANCE * CONNECTIVITY_TOLERANCE;
 
         dist_sq(self.p1, other.p1) < tol_sq
@@ -327,7 +332,11 @@ fn segment_bin_keys(s: &Segment, bin_size: f64) -> Vec<BinKey> {
     let mut keys = Vec::with_capacity(((end_bx - start_bx + 1) * (end_by - start_by + 1)) as usize);
     for bx in start_bx..=end_bx {
         for by in start_by..=end_by {
-            keys.push(BinKey { layer: s.layer, bx, by });
+            keys.push(BinKey {
+                layer: s.layer,
+                bx,
+                by,
+            });
         }
     }
     keys
@@ -437,9 +446,13 @@ fn check_design_rules(db: &NetlistDB) -> (usize, usize) {
             segments.push(s);
             for bx in start_bx..=end_bx {
                 for by in start_by..=end_by {
-                    bins.entry(BinKey { layer: s.layer, bx, by })
-                        .or_default()
-                        .push(index);
+                    bins.entry(BinKey {
+                        layer: s.layer,
+                        bx,
+                        by,
+                    })
+                    .or_default()
+                    .push(index);
                 }
             }
         }
@@ -632,11 +645,20 @@ fn check_opens(db: &NetlistDB) -> Result<(), String> {
             for (i, seg) in segments.iter().enumerate() {
                 let keys = segment_bin_keys(seg, bin_size);
                 for key in &keys {
-                    endpoint_bins.entry((key.bx, key.by, seg.layer)).or_default().push(i);
+                    endpoint_bins
+                        .entry((key.bx, key.by, seg.layer))
+                        .or_default()
+                        .push(i);
                     if seg.layer > 0 {
-                        endpoint_bins.entry((key.bx, key.by, seg.layer - 1)).or_default().push(i);
+                        endpoint_bins
+                            .entry((key.bx, key.by, seg.layer - 1))
+                            .or_default()
+                            .push(i);
                     }
-                    endpoint_bins.entry((key.bx, key.by, seg.layer + 1)).or_default().push(i);
+                    endpoint_bins
+                        .entry((key.bx, key.by, seg.layer + 1))
+                        .or_default()
+                        .push(i);
                 }
             }
 
@@ -751,7 +773,9 @@ fn check_opens(db: &NetlistDB) -> Result<(), String> {
     });
 
     if error_found.load(Ordering::Relaxed) {
-        Err(error_msg.lock().map_or_else(|e| e.into_inner().clone(), |g| g.clone()))
+        Err(error_msg
+            .lock()
+            .map_or_else(|e| e.into_inner().clone(), |g| g.clone()))
     } else {
         Ok(())
     }

@@ -5,12 +5,6 @@
 //! performance profiling, and visualization utilities.
 
 pub mod check;
-/// Structured CLI output with colored formatting.
-///
-/// Provides presentation functions for banners, section headers, stat rows,
-/// check marks, progress bars, and file-wrote lines. All output goes to stderr
-/// with automatic TTY color detection via `yansi`.
-pub mod ui;
 /// Configuration management for algorithm parameters.
 ///
 /// Defines the configuration structure that controls algorithm behavior across
@@ -34,6 +28,12 @@ pub mod logger;
 /// and convergence metrics. Used for performance analysis and optimization of
 /// the EDA toolchain.
 pub mod profiler;
+/// Structured CLI output with colored formatting.
+///
+/// Provides presentation functions for banners, section headers, stat rows,
+/// check marks, progress bars, and file-wrote lines. All output goes to stderr
+/// with automatic TTY color detection via `yansi`.
+pub mod ui;
 /// Visualization utilities for debugging and analysis.
 ///
 /// Generates visual representations of placement and routing results including

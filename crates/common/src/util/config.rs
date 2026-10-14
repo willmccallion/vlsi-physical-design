@@ -276,18 +276,15 @@ impl Default for InputConfig {
     }
 }
 
-
 /// Default maximum iterations for placement optimization (2000).
 const fn default_placer_max_iterations() -> usize {
     2000
 }
 
-
 /// Default convergence threshold for placement (average cell movement < 0.0002).
 const fn default_convergence_threshold() -> f64 {
     2e-4
 }
-
 
 /// Default multiplier for electrostatic density forces (20.0).
 const fn default_electro_force_multiplier() -> f64 {

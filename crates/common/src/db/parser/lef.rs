@@ -142,12 +142,11 @@ pub fn parse(db: &mut NetlistDB, filename: &str) -> Result<()> {
                     }
                 }
             }
-            "SIZE"
-                if in_macro => {
-                    let w: f64 = parts[1].parse()?;
-                    let h: f64 = parts[3].parse()?;
-                    let _ = db.macro_sizes.insert(current_macro.clone(), (w, h));
-                }
+            "SIZE" if in_macro => {
+                let w: f64 = parts[1].parse()?;
+                let h: f64 = parts[3].parse()?;
+                let _ = db.macro_sizes.insert(current_macro.clone(), (w, h));
+            }
             _ => {}
         }
     }

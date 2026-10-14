@@ -49,8 +49,7 @@ impl RowIntervals {
     /// intervals in sorted order for efficient slot finding.
     fn add_occupancy(&mut self, start: f64, end: f64) {
         self.blockages.push((start, end));
-        self.blockages
-            .sort_by(|a, b| a.0.total_cmp(&b.0));
+        self.blockages.sort_by(|a, b| a.0.total_cmp(&b.0));
 
         let mut merged = Vec::new();
         if let Some(first) = self.blockages.first() {

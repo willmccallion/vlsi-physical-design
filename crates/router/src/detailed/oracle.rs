@@ -138,6 +138,8 @@ impl GuideOracle for FastGuideOracle {
         let idx = (c.z as u32 * self.coarse_w * self.coarse_h + cy * self.coarse_w + cx) as usize;
         // SAFETY: idx is bounded by layers * coarse_w * coarse_h, which matches grid.len().
         #[allow(unsafe_code)]
-        unsafe { *self.grid.get_unchecked(idx) == self.current_net_id }
+        unsafe {
+            *self.grid.get_unchecked(idx) == self.current_net_id
+        }
     }
 }

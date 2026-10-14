@@ -11,7 +11,6 @@ pub mod dense;
 
 pub use dense::GCellGrid;
 
-
 /// Trait defining the interface for edge-based routing grid implementations.
 ///
 /// Routing capacity and usage are tracked on **edges** between adjacent gcells,

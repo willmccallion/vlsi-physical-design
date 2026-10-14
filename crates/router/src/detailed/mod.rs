@@ -322,9 +322,7 @@ pub fn run(
             if overflow <= 10 {
                 grid.decay_history(0.0);
                 collision_penalty = init_penalty;
-                log::info!(
-                    "Reset history and penalty for small overflow ({overflow})",
-                );
+                log::info!("Reset history and penalty for small overflow ({overflow})");
             } else {
                 grid.decay_history(0.5);
             }

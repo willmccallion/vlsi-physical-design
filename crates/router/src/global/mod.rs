@@ -77,10 +77,7 @@ fn path_is_congested(grid: &GCellGrid, path: &[GridCoord]) -> bool {
 /// Returns (`net_guides`, converter, `congestion_map`, `grid_w`, `grid_h`).
 /// The congestion map is a flat row-major array of per-GCell congestion ratios
 /// (max across all layers of usage/capacity).
-pub fn run(
-    db: &NetlistDB,
-    config: &GlobalRoutingConfig,
-) -> Result<GrResult, String> {
+pub fn run(db: &NetlistDB, config: &GlobalRoutingConfig) -> Result<GrResult, String> {
     log::debug!("Starting Global Routing...");
 
     let bin_width = config.gcell_size as f64;
@@ -172,9 +169,7 @@ pub fn run(
         last_overflow = overflow;
 
         if stagnation_counter > 10 {
-            log::warn!(
-                "GR Stagnation detected ({stagnation_counter} iters). Dumping heatmap.",
-            );
+            log::warn!("GR Stagnation detected ({stagnation_counter} iters). Dumping heatmap.");
             if stagnation_counter % 5 == 0 {
                 grid.decay_history(0.9);
             }
@@ -252,7 +247,14 @@ pub fn run(
         }
         ui::progress_clear();
 
-        ui::routing_iter("GR", iter, overflow, ripped, collision_penalty, start.elapsed().as_millis());
+        ui::routing_iter(
+            "GR",
+            iter,
+            overflow,
+            ripped,
+            collision_penalty,
+            start.elapsed().as_millis(),
+        );
 
         if ripped == 0 {
             ui::check("Global routing converged (endpoint congestion only)");

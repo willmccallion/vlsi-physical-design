@@ -53,7 +53,10 @@ pub fn parse(db: &mut NetlistDB, filename: &str) -> Result<()> {
         }
 
         // We have a complete statement. Parse it.
-        let owned: Vec<String> = stmt_buf.split_whitespace().map(ToString::to_string).collect();
+        let owned: Vec<String> = stmt_buf
+            .split_whitespace()
+            .map(ToString::to_string)
+            .collect();
         let parts: Vec<&str> = owned.iter().map(String::as_str).collect();
         stmt_buf.clear();
 
@@ -147,7 +150,8 @@ pub fn parse(db: &mut NetlistDB, filename: &str) -> Result<()> {
                         }
                     }
 
-                    let (width, height) = db.macro_sizes.get(&lib_name).copied().unwrap_or((1.0, 1.0));
+                    let (width, height) =
+                        db.macro_sizes.get(&lib_name).copied().unwrap_or((1.0, 1.0));
 
                     let id = db.add_cell(name, lib_name, width, height, is_fixed);
                     db.positions[id.index()] = Point::new(x, y);
@@ -164,10 +168,8 @@ pub fn parse(db: &mut NetlistDB, filename: &str) -> Result<()> {
                         } else if (parts[i] == "PLACED" || parts[i] == "FIXED")
                             && i + 3 < parts.len()
                             && parts[i + 1] == "("
-                            && let (Ok(px), Ok(py)) = (
-                                parts[i + 2].parse::<f64>(),
-                                parts[i + 3].parse::<f64>(),
-                            )
+                            && let (Ok(px), Ok(py)) =
+                                (parts[i + 2].parse::<f64>(), parts[i + 3].parse::<f64>())
                         {
                             x = px / def_units;
                             y = py / def_units;
@@ -202,19 +204,13 @@ pub fn parse(db: &mut NetlistDB, filename: &str) -> Result<()> {
                                 } else {
                                     let cx = db.cells[cell_id.index()].width / 2.0;
                                     let cy = db.cells[cell_id.index()].height / 2.0;
-                                    let h =
-                                        pin_name.chars().fold(0, |acc, c| acc + c as usize);
+                                    let h = pin_name.chars().fold(0, |acc, c| acc + c as usize);
                                     let dx = ((h % 7) as f64).mul_add(0.25, -0.75);
                                     let dy = (((h / 7) % 7) as f64).mul_add(0.25, -0.75);
                                     Point::new(cx + dx, cy + dy)
                                 };
 
-                                db.add_pin(
-                                    cell_id,
-                                    current_net_id,
-                                    offset,
-                                    pin_name.to_string(),
-                                );
+                                db.add_pin(cell_id, current_net_id, offset, pin_name.to_string());
                             }
                         }
                         i += 1;

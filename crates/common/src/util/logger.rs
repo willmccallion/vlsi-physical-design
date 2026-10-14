@@ -21,10 +21,20 @@ pub fn init() {
             use yansi::Paint;
             match record.level() {
                 log::Level::Error => {
-                    writeln!(std::io::stderr(), "  {} {}", "ERROR".red().bold(), record.args())
+                    writeln!(
+                        std::io::stderr(),
+                        "  {} {}",
+                        "ERROR".red().bold(),
+                        record.args()
+                    )
                 }
                 log::Level::Warn => {
-                    writeln!(std::io::stderr(), "  {} {}", "WARN".yellow().bold(), record.args())
+                    writeln!(
+                        std::io::stderr(),
+                        "  {} {}",
+                        "WARN".yellow().bold(),
+                        record.args()
+                    )
                 }
                 log::Level::Info => {
                     writeln!(std::io::stderr(), "  {}", record.args())

@@ -58,7 +58,9 @@ impl GCellGrid {
         {
             let needed = (die_w.max(die_h) / max_dim as f64).ceil();
             // Also align to layer pitch if available
-            let min_pitch = db.layers.iter()
+            let min_pitch = db
+                .layers
+                .iter()
                 .filter(|l| l.pitch > 0.001)
                 .map(|l| l.pitch)
                 .fold(f64::MAX, f64::min);
@@ -109,9 +111,7 @@ impl GCellGrid {
         // Compute per-layer, per-edge capacities from track definitions
         grid.init_capacities(db);
 
-        log::debug!(
-            "GCellGrid: {grid_w}x{grid_h} gcells ({gcell_size:.2}um), {layers} layers",
-        );
+        log::debug!("GCellGrid: {grid_w}x{grid_h} gcells ({gcell_size:.2}um), {layers} layers");
 
         for li in 0..layers {
             if (li as usize) < db.layers.len() {
@@ -324,7 +324,12 @@ impl RoutingGrid for GCellGrid {
         if cap == 0 {
             return f64::MAX;
         }
-        Self::edge_cost(self.h_usage[idx], cap, self.h_history[idx], collision_penalty)
+        Self::edge_cost(
+            self.h_usage[idx],
+            cap,
+            self.h_history[idx],
+            collision_penalty,
+        )
     }
 
     fn v_edge_cost(&self, x: u32, y: u32, layer: u8, collision_penalty: f64) -> f64 {
@@ -336,7 +341,12 @@ impl RoutingGrid for GCellGrid {
         if cap == 0 {
             return f64::MAX;
         }
-        Self::edge_cost(self.v_usage[idx], cap, self.v_history[idx], collision_penalty)
+        Self::edge_cost(
+            self.v_usage[idx],
+            cap,
+            self.v_history[idx],
+            collision_penalty,
+        )
     }
 
     fn via_cost(&self, _x: u32, _y: u32, _layer: u8) -> f64 {
