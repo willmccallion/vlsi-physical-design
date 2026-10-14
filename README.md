@@ -2,7 +2,7 @@
 
 A digital IC placement and routing engine written in Rust, built from scratch: LEF/DEF and Bookshelf input, analytical global placement, and legalization. It reads real benchmarks up to 313k cells / 407k nets.
 
-**Status:** routing is being rebuilt. The previous gcell router placed every net on gcell centers, which shorted almost every net (12,520 overlapping wire pairs between different nets on GCD alone), and its checker could not see those shorts. Both have been removed and will be replaced by global routing, track assignment and track-level detailed routing with a width-aware checker. Placement output is not yet row- and site-legal (see [Known issues](#known-issues)).
+**Status:** routing is being rebuilt. The previous gcell router placed every net on gcell centers, which shorted almost every net (12,520 overlapping wire pairs between different nets on GCD alone), and its checker could not see those shorts. Both have been removed; global and track-level detailed routing are being rebuilt against a new width-aware checker. Placement is legal: OpenROAD's `check_placement` passes on every DEF benchmark.
 
 ---
 
@@ -19,11 +19,12 @@ flowchart TD
         OPT["Nesterov accelerated gradient descent<br/>min E = E_wirelength + λ·E_density"]
     end
 
-    LEG["Legalization (Abacus)"]
-    CHK["Placement check<br/>inside die · no overlaps"]
+    LEG["Legalization (Abacus)<br/>DEF rows · sites · row orientation"]
+    DP["Detailed placement<br/>global swap · local reordering"]
+    CHK["Placement check<br/>die · overlaps · rows · sites · orientation"]
     OUT["Placed DEF (or Bookshelf .pl)"]
 
-    INPUT --> IO --> GP --> LEG --> CHK --> OUT
+    INPUT --> IO --> GP --> LEG --> DP --> CHK --> OUT
     WL & DENS --> OPT
 ```
 
@@ -62,8 +63,7 @@ Typed indices (`CellId`, `NetId`, `PinId`, `LayerId`, `MacroId`, …) keep table
 ## Known issues
 
 - **No routing.** See the status note above.
-- **Placement is not row/site legal.** Legalization infers rows from the die instead of using DEF rows and sites, ignores row orientation, and fills the gaps between Bookshelf rows. OpenROAD's `check_placement` reports 487 off-site cells on GCD and 18,532 on AES.
-- **Placement quality is weak.** The density force ignores cell area, the step size is fixed and the wirelength smoothing is not annealed.
+- **Global placement quality is weak.** The density force ignores cell area, the step size is fixed and the wirelength smoothing is not annealed; on IBM10, IBM13 and IBM14 it does not spread cells at all. Detailed placement recovers much of the loss on the DEF designs (HPWL −70% on AES, −79% on ibex) but cannot fix a collapsed placement.
 - **Region constraints** (DEF `REGIONS`/`GROUPS`) are not honoured.
 
 ---
