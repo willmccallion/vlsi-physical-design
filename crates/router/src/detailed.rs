@@ -133,7 +133,7 @@ impl<'a> DetailedRouter<'a> {
             };
             let _ = occupancy.add_rect(tech, layer, &s.shape.rect, owner, Origin::Fixed);
         }
-        let access: Vec<Vec<Vec<AccessPoint>>> = (0..db.nets.len())
+        let mut access: Vec<Vec<Vec<AccessPoint>>> = (0..db.nets.len())
             .into_par_iter()
             .map(|n| {
                 if !is_signal_net(db, NetId::new(n)) {
@@ -146,7 +146,7 @@ impl<'a> DetailedRouter<'a> {
                     .collect()
             })
             .collect();
-        reserve_sole_accesses(db, tech, &access, &mut occupancy);
+        reserve_accesses(db, tech, &mut access, &mut occupancy);
         Self {
             db,
             tech,
@@ -968,33 +968,59 @@ impl TreeIndex {
     }
 }
 
-/// Records the access metal of every pin with exactly one access point as
-/// belonging to its net, so other nets keep clear of it from the start.
-fn reserve_sole_accesses(
+/// Chooses one access point per pin and records its metal as the net's
+/// own, so other nets keep clear of it from the start; the chosen point
+/// becomes the pin's only one.
+///
+/// Pins with the fewest candidates choose first, each taking its best
+/// candidate that clashes with nothing recorded before it. A pin with no
+/// such candidate keeps all of them, except that a pin with a single one
+/// still records it.
+fn reserve_accesses(
     db: &NetlistDB,
     tech: &RouteTech,
-    access: &[Vec<Vec<AccessPoint>>],
+    access: &mut [Vec<Vec<AccessPoint>>],
     occupancy: &mut Occupancy,
 ) {
-    for (n, pins) in access.iter().enumerate() {
-        for candidates in pins {
-            let [only] = candidates.as_slice() else {
-                continue;
-            };
-            let mut metal = NetRoute::default();
-            emit_access(db, tech, only, &mut metal);
-            for (layer, rect) in &metal.metal {
-                if tech.routable(*layer) {
-                    let _ = occupancy.add_rect(
-                        tech,
-                        *layer,
-                        rect,
-                        Owner::Net(crate::tech::to_u32(n)),
-                        Origin::Fixed,
-                    );
-                }
+    let mut order: Vec<(usize, usize, usize)> = access
+        .iter()
+        .enumerate()
+        .flat_map(|(n, pins)| {
+            pins.iter()
+                .enumerate()
+                .filter(|(_, c)| !c.is_empty())
+                .map(move |(k, c)| (c.len(), n, k))
+        })
+        .collect();
+    order.sort_unstable();
+    for (count, n, k) in order {
+        let owner = Owner::Net(crate::tech::to_u32(n));
+        let metal_of = |a: &AccessPoint| {
+            let mut route = NetRoute::default();
+            emit_access(db, tech, a, &mut route);
+            route.metal
+        };
+        let clear = access[n][k].iter().position(|a| {
+            metal_of(a).iter().all(|(layer, rect)| {
+                !tech.routable(*layer)
+                    || occupancy
+                        .rect_conflicts(tech, *layer, rect, owner)
+                        .next()
+                        .is_none()
+            })
+        });
+        let chosen = match clear {
+            Some(c) => c,
+            None if count == 1 => 0,
+            None => continue,
+        };
+        for (layer, rect) in metal_of(&access[n][k][chosen]) {
+            if tech.routable(layer) {
+                let _ = occupancy.add_rect(tech, layer, &rect, owner, Origin::Fixed);
             }
         }
+        let picked = access[n][k].swap_remove(chosen);
+        access[n][k] = vec![picked];
     }
 }
 
