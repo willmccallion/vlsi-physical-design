@@ -12,9 +12,9 @@ pub use region::{RepairStats, Scope};
 
 use crate::access::{AccessPoint, Node, access_points};
 use crate::global::{GCell, GlobalGrid, GlobalRoutes, RouteTree};
-use crate::occupancy::{LocalOccupancy, Occupancy, Origin, Owner, Slot, TrackRef};
+use crate::occupancy::{LocalOccupancy, Occupancy, Origin, Owner, Slot, TrackRef, too_close};
 pub use crate::search::Costs;
-use crate::search::{Guide, History, Search, Slack};
+use crate::search::{Guide, History, OwnVias, Search, Slack};
 use crate::tech::RouteTech;
 use crate::track::TrackWire;
 use crate::tree::{connection_order, gap, hilbert_order};
@@ -395,7 +395,7 @@ impl<'a> DetailedRouter<'a> {
             });
         }
         for n in 0..self.vias.len() {
-            for (_, at) in self.crowded_cuts(n) {
+            for (_, at) in self.crowded_vias(n) {
                 out.push(Marker {
                     at,
                     nets: [Some(NetId::new(n)), None],
@@ -425,7 +425,7 @@ impl<'a> DetailedRouter<'a> {
             log::debug!("cut conflict on cut {}: {a:?} {b:?}", cut.index());
         }
         for n in 0..self.vias.len() {
-            for (_, at) in self.crowded_cuts(n) {
+            for (_, at) in self.crowded_vias(n) {
                 log::debug!("crowded cut of net {n} at {at:?}");
             }
         }
@@ -452,7 +452,7 @@ impl<'a> DetailedRouter<'a> {
             }
         }
         for n in 0..self.vias.len() {
-            for (via, at) in self.crowded_cuts(n) {
+            for (via, at) in self.crowded_vias(n) {
                 self.bump_cut(self.db.library.via(via).cut, at, history_step);
                 let _ = nets.insert(NetId::new(n));
             }
@@ -472,24 +472,47 @@ impl<'a> DetailedRouter<'a> {
         }
     }
 
-    /// Vias of net `n` within cut spacing of another of its vias on the same cut.
-    fn crowded_cuts(&self, n: usize) -> Vec<(ViaId, Point<Dbu>)> {
+    /// Vias of net `n` whose cuts or metal come closer to those of another
+    /// of its vias than the layer's spacing without touching them. Metal
+    /// counts even where wiring fills the gap, as `OpenROAD` checks it.
+    fn crowded_vias(&self, n: usize) -> Vec<(ViaId, Point<Dbu>)> {
+        let lib = &self.db.library;
         let vias = &self.vias[n];
-        let mut out = Vec::new();
-        for (i, &(va, a)) in vias.iter().enumerate() {
-            let cut_a = self.db.library.via(va).cut;
-            for &(vb, b) in &vias[i + 1..] {
-                if self.db.library.via(vb).cut != cut_a || a == b {
+        let mut shapes: Vec<(LayerRef, Rect<Dbu>, usize)> = Vec::new();
+        for (k, &(via, at)) in vias.iter().enumerate() {
+            for s in &lib.via(via).shapes {
+                shapes.push((s.layer, s.rect.translate(at), k));
+            }
+        }
+        shapes.sort_by_key(|&(_, r, _)| r.min.x);
+        let spacing = |layer: LayerRef| match layer {
+            LayerRef::Routing(l) => lib.layer(l).min_spacing,
+            LayerRef::Cut(c) => lib.cut_layers[c.index()].spacing.unwrap_or_default(),
+        };
+        let widest = shapes
+            .iter()
+            .map(|&(l, _, _)| spacing(l))
+            .max()
+            .unwrap_or_default();
+        let mut crowded = vec![false; vias.len()];
+        for (i, &(la, ra, ka)) in shapes.iter().enumerate() {
+            for &(lb, rb, kb) in &shapes[i + 1..] {
+                if rb.min.x > ra.max.x + widest {
+                    break;
+                }
+                if la != lb || ka == kb {
                     continue;
                 }
-                let reach = self.tech.vias[cut_a.index()].cut_reach;
-                if (a.x - b.x).abs() < reach && (a.y - b.y).abs() < reach {
-                    out.push((va, a));
-                    out.push((vb, b));
+                if too_close(self.db, la, &ra, &rb) {
+                    crowded[ka] = true;
+                    crowded[kb] = true;
                 }
             }
         }
-        out
+        vias.iter()
+            .zip(crowded)
+            .filter_map(|(&v, c)| c.then_some(v))
+            .collect()
     }
 
     /// The track of `layer` running through `p`, if one does.
@@ -640,6 +663,7 @@ impl<'a> DetailedRouter<'a> {
             owner: Owner::Net(net.0),
             costs,
             guide: guide.as_ref(),
+            own_vias: None,
         };
         let window = self.window(net);
         if let Some(route) = self.route_tree(&search, terms, &window, net_guide) {
@@ -713,6 +737,7 @@ impl<'a> DetailedRouter<'a> {
         }
         let first_sources: Vec<(Node, f64)> = terms.candidates(search, first_term);
         let guide = guide.filter(|_| terms.wires.is_empty());
+        let mut own = self.reserved_access_vias(terms);
 
         for join in joins {
             let term = members[join.pin];
@@ -735,14 +760,21 @@ impl<'a> DetailedRouter<'a> {
                 }
             };
             let corridor = guide.and_then(|g| g.corridor(members[join.parent], term));
+            let joining = Search {
+                own_vias: Some(&own),
+                ..*search
+            };
             let (path, _) = self.connect(
-                search,
+                &joining,
                 closest_points(&extents[join.pin], &extents[join.parent]),
                 corridor.as_deref(),
                 window,
                 sources_in,
                 &targets,
             )?;
+            for (via, at) in self.path_vias(&path) {
+                own.add(via, at);
+            }
             for &n in &path {
                 tree.insert(n, self.point(n));
             }
@@ -954,6 +986,12 @@ impl<'a> DetailedRouter<'a> {
             tree.insert(n, self.point(n));
         }
         let guide = guide.filter(|_| terms.wires.is_empty());
+        let mut own = self.reserved_access_vias(terms);
+        for sub in &subtrees {
+            for (via, at) in sub.paths.iter().flat_map(|p| self.path_vias(p)) {
+                own.add(via, at);
+            }
+        }
         let mut out = SubTree::default();
         for join in joins {
             let sub = &subtrees[join.pin];
@@ -961,8 +999,12 @@ impl<'a> DetailedRouter<'a> {
                 let targets = self.join_targets(sub, &reps[join.pin]);
                 let corridor =
                     guide.and_then(|g| g.corridor(chunks[join.parent][0], chunks[join.pin][0]));
+                let joining = Search {
+                    own_vias: Some(&own),
+                    ..*search
+                };
                 let (path, _) = self.connect(
-                    search,
+                    &joining,
                     closest_points(&reps[join.pin], &reps[join.parent]),
                     corridor.as_deref(),
                     window,
@@ -971,6 +1013,9 @@ impl<'a> DetailedRouter<'a> {
                 )?;
                 for &n in &path {
                     tree.insert(n, self.point(n));
+                }
+                for (via, at) in self.path_vias(&path) {
+                    own.add(via, at);
                 }
                 out.paths.push(path);
             }
@@ -987,6 +1032,30 @@ impl<'a> DetailedRouter<'a> {
 
     fn point(&self, n: Node) -> Point<Dbu> {
         self.tech.layer(n.layer).point(n.track, n.cross)
+    }
+
+    /// The vias a path of crossings takes, with their locations.
+    fn path_vias<'p>(&'p self, path: &'p [Node]) -> impl Iterator<Item = (ViaId, Point<Dbu>)> + 'p {
+        path_edges(path).filter_map(|e| match e {
+            Edge::Via { lower, .. } => {
+                Some((self.tech.via_above(lower.layer).via, self.point(lower)))
+            }
+            Edge::Wire(_) => None,
+        })
+    }
+
+    /// The access vias of the pins among `terms` whose access point is
+    /// reserved, as the start of a net's own vias.
+    fn reserved_access_vias(&self, terms: &Terminals<'_>) -> OwnVias {
+        let mut own = OwnVias::new(self.db);
+        for choices in terms.pins {
+            if let [a] = choices.as_slice() {
+                for &via in &a.vias {
+                    own.add(via, a.at);
+                }
+            }
+        }
+        own
     }
 }
 
@@ -1213,9 +1282,10 @@ impl TreeIndex {
 /// becomes the pin's only one.
 ///
 /// Pins with the fewest candidates choose first, each taking its best
-/// candidate that clashes with nothing recorded before it. A pin with no
-/// such candidate keeps all of them, except that a pin with a single one
-/// still records it.
+/// candidate that clashes with nothing recorded before it and whose vias,
+/// counting the via up from its node, leave room for those of the net's
+/// pins that chose earlier. A pin with no such candidate keeps all of
+/// them, except that a pin with a single one still records it.
 fn reserve_accesses(
     db: &NetlistDB,
     tech: &RouteTech,
@@ -1233,6 +1303,7 @@ fn reserve_accesses(
         })
         .collect();
     order.sort_unstable();
+    let mut reserved: Vec<Vec<(LayerRef, Rect<Dbu>)>> = vec![Vec::new(); access.len()];
     for (count, n, k) in order {
         let owner = Owner::Net(crate::tech::to_u32(n));
         let metal_of = |a: &AccessPoint| {
@@ -1248,6 +1319,11 @@ fn reserve_accesses(
                 .collect::<Vec<_>>()
         };
         let clear = access[n][k].iter().position(|a| {
+            let leaves_room = footprint(db, tech, a).iter().all(|&(layer, rect)| {
+                reserved[n]
+                    .iter()
+                    .all(|&(l, r)| l != layer || !too_close(db, layer, &rect, &r))
+            });
             let metal_clear = metal_of(a).iter().all(|(layer, rect)| {
                 !tech.routable(*layer)
                     || occupancy
@@ -1255,7 +1331,8 @@ fn reserve_accesses(
                         .next()
                         .is_none()
             });
-            metal_clear
+            leaves_room
+                && metal_clear
                 && cuts_of(a)
                     .iter()
                     .all(|(cut, rect)| occupancy.cut_conflicts(*cut, rect, owner).next().is_none())
@@ -1274,8 +1351,28 @@ fn reserve_accesses(
             let _ = occupancy.add_cut(cut, &rect, owner, Origin::Fixed);
         }
         let picked = access[n][k].swap_remove(chosen);
+        reserved[n].extend(footprint(db, tech, &picked));
         access[n][k] = vec![picked];
     }
+}
+
+/// The via shapes an access point commits its net to: its via stack, and
+/// the via up from its node that a route leaving the pin upward would take.
+fn footprint(db: &NetlistDB, tech: &RouteTech, a: &AccessPoint) -> Vec<(LayerRef, Rect<Dbu>)> {
+    let node = tech.layer(a.node.layer).point(a.node.track, a.node.cross);
+    let up = (a.node.layer < tech.max_layer).then(|| (tech.via_above(a.node.layer).via, node));
+    a.vias
+        .iter()
+        .map(|&v| (v, a.at))
+        .chain(up)
+        .flat_map(|(via, at)| {
+            db.library
+                .via(via)
+                .shapes
+                .iter()
+                .map(move |s| (s.layer, s.rect.translate(at)))
+        })
+        .collect()
 }
 
 /// Signal nets with at least two pins, shortest bounding box first.

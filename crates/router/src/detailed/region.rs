@@ -14,7 +14,7 @@
 use super::DetailedRouter;
 use crate::access::Node;
 use crate::occupancy::{LocalOccupancy, Origin, Owner};
-use crate::search::{Costs, MAX_PENALTY, Search};
+use crate::search::{Costs, MAX_PENALTY, OwnVias, Search};
 use crate::wiring::{DisjointSets, Edge, NetRoute, path_edges};
 use pare_common::db::indices::{CutLayerId, NetId};
 use pare_common::geom::dbu::Dbu;
@@ -269,8 +269,10 @@ impl DetailedRouter<'_> {
                     owner,
                     costs: Costs { penalty, ..costs },
                     guide: None,
+                    own_vias: None,
                 };
-                results[i] = connect_groups(&search, &pieces[i].groups, &window);
+                let own = self.vias_near(pieces[i].net, area);
+                results[i] = self.connect_groups(&search, &pieces[i].groups, &window, own);
                 if let Some(edges) = &results[i] {
                     for (layer, rect) in self.edge_metal(edges) {
                         overlay.add_rect(self.tech, layer, &rect, owner);
@@ -282,9 +284,10 @@ impl DetailedRouter<'_> {
             }
             todo = (0..pieces.len())
                 .filter(|&i| {
-                    results[i]
-                        .as_ref()
-                        .is_some_and(|edges| self.clashes(pieces[i].net, edges, &overlay))
+                    results[i].as_ref().is_some_and(|edges| {
+                        self.clashes(pieces[i].net, edges, &overlay)
+                            || self.crowds_own_vias(pieces[i].net, area, edges)
+                    })
                 })
                 .collect();
             if todo.is_empty() {
@@ -293,6 +296,73 @@ impl DetailedRouter<'_> {
             penalty = (penalty * 2.0).min(MAX_PENALTY);
         }
         results
+    }
+
+    /// Joins `groups` into one tree inside `window`: each search runs from
+    /// the tree so far to the nearest remaining group, keeping new vias
+    /// clear of `own`, the net's vias so far.
+    fn connect_groups(
+        &self,
+        search: &Search<'_>,
+        groups: &[Vec<Node>],
+        window: &Rect<Dbu>,
+        mut own: OwnVias,
+    ) -> Option<Vec<Edge>> {
+        let (first, rest) = groups.split_first()?;
+        let mut tree: Vec<Node> = first.clone();
+        let mut remaining: Vec<&Vec<Node>> = rest.iter().collect();
+        let mut edges = Vec::new();
+        while !remaining.is_empty() {
+            let next = nearest_group(search, &tree, &remaining);
+            let group = remaining.swap_remove(next);
+            let sources: Vec<(Node, f64)> = tree.iter().map(|&n| (n, 0.0)).collect();
+            let targets: FxHashMap<Node, (usize, f64)> =
+                group.iter().map(|&n| (n, (0, 0.0))).collect();
+            let joining = Search {
+                own_vias: Some(&own),
+                ..*search
+            };
+            let (path, _) = joining.find(&sources, &targets, window)?;
+            for (via, at) in self.path_vias(&path) {
+                own.add(via, at);
+            }
+            edges.extend(path_edges(&path));
+            tree.extend(path);
+            tree.extend(group.iter().copied());
+            tree.sort_unstable();
+            tree.dedup();
+        }
+        edges.sort_unstable();
+        edges.dedup();
+        Some(edges)
+    }
+
+    /// The vias `net` has near `area`, which wiring routed there must not
+    /// crowd.
+    fn vias_near(&self, net: NetId, area: &Rect<Dbu>) -> OwnVias {
+        let near = area.expand(self.gcell);
+        let mut own = OwnVias::new(self.db);
+        for &(via, at) in &self.vias[net.index()] {
+            if near.contains(at) {
+                own.add(via, at);
+            }
+        }
+        own
+    }
+
+    /// Whether the vias of `edges` crowd each other or the vias `net` has
+    /// near `area`.
+    fn crowds_own_vias(&self, net: NetId, area: &Rect<Dbu>, edges: &[Edge]) -> bool {
+        let mut own = self.vias_near(net, area);
+        let route = NetRoute {
+            edges: edges.to_vec(),
+            ..NetRoute::default()
+        };
+        route.vias(self.tech).into_iter().any(|(via, at)| {
+            let crowded = own.crowded(self.db, via, at) > 0;
+            own.add(via, at);
+            crowded
+        })
     }
 
     /// Nets with wiring within `reach` of `at` on any routable layer.
@@ -363,34 +433,6 @@ impl DetailedRouter<'_> {
             .filter(|(layer, _)| self.tech.routable(*layer))
             .collect()
     }
-}
-
-/// Joins `groups` into one tree inside `window`: each search runs from the
-/// tree so far to the nearest remaining group.
-fn connect_groups(
-    search: &Search<'_>,
-    groups: &[Vec<Node>],
-    window: &Rect<Dbu>,
-) -> Option<Vec<Edge>> {
-    let (first, rest) = groups.split_first()?;
-    let mut tree: Vec<Node> = first.clone();
-    let mut remaining: Vec<&Vec<Node>> = rest.iter().collect();
-    let mut edges = Vec::new();
-    while !remaining.is_empty() {
-        let next = nearest_group(search, &tree, &remaining);
-        let group = remaining.swap_remove(next);
-        let sources: Vec<(Node, f64)> = tree.iter().map(|&n| (n, 0.0)).collect();
-        let targets: FxHashMap<Node, (usize, f64)> = group.iter().map(|&n| (n, (0, 0.0))).collect();
-        let (path, _) = search.find(&sources, &targets, window)?;
-        edges.extend(path_edges(&path));
-        tree.extend(path);
-        tree.extend(group.iter().copied());
-        tree.sort_unstable();
-        tree.dedup();
-    }
-    edges.sort_unstable();
-    edges.dedup();
-    Some(edges)
 }
 
 /// Index of the group in `groups` closest to any node of `tree`.

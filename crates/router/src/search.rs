@@ -9,10 +9,10 @@
 
 use crate::access::{AccessPoint, Node};
 use crate::global::GCell;
-use crate::occupancy::{LocalOccupancy, Occupancy, Origin, Owner, TrackRef};
+use crate::occupancy::{LocalOccupancy, Occupancy, Origin, Owner, TrackRef, too_close};
 use crate::tech::RouteTech;
 use pare_common::db::design::NetlistDB;
-use pare_common::db::indices::{CutLayerId, LayerId};
+use pare_common::db::indices::{CutLayerId, LayerId, ViaId};
 use pare_common::db::library::LayerRef;
 use pare_common::geom::dbu::Dbu;
 use pare_common::geom::point::Point;
@@ -218,7 +218,76 @@ impl Guide {
     }
 }
 
+/// A via and where it is placed.
+type PlacedVia = (ViaId, Point<Dbu>);
+
+/// The vias a net already has, which its new vias must not crowd.
+#[derive(Clone, Debug)]
+pub(crate) struct OwnVias {
+    bucket: Dbu,
+    vias: FxHashMap<(i64, i64), Vec<PlacedVia>>,
+}
+
+impl OwnVias {
+    /// An empty set, bucketed so that any via that could crowd another lies
+    /// in a neighbouring bucket.
+    pub(crate) fn new(db: &NetlistDB) -> Self {
+        let lib = &db.library;
+        let widest = lib
+            .vias
+            .iter()
+            .flat_map(|v| v.shapes.iter())
+            .map(|s| s.rect.width().max(s.rect.height()))
+            .max()
+            .unwrap_or_default();
+        let spacing = lib
+            .routing_layers
+            .iter()
+            .map(|l| l.min_spacing)
+            .chain(lib.cut_layers.iter().filter_map(|c| c.spacing))
+            .max()
+            .unwrap_or_default();
+        Self {
+            bucket: (widest + spacing).max(Dbu(1)),
+            vias: FxHashMap::default(),
+        }
+    }
+
+    const fn key(&self, p: Point<Dbu>) -> (i64, i64) {
+        (
+            p.x.get().div_euclid(self.bucket.get()),
+            p.y.get().div_euclid(self.bucket.get()),
+        )
+    }
+
+    pub(crate) fn add(&mut self, via: ViaId, at: Point<Dbu>) {
+        self.vias.entry(self.key(at)).or_default().push((via, at));
+    }
+
+    /// How many of the vias `via` at `at` would crowd: their cuts or metal
+    /// on a shared layer neither touch nor keep the spacing.
+    pub(crate) fn crowded(&self, db: &NetlistDB, via: ViaId, at: Point<Dbu>) -> usize {
+        let (x, y) = self.key(at);
+        let shapes = &db.library.via(via).shapes;
+        (x - 1..=x + 1)
+            .flat_map(|bx| (y - 1..=y + 1).map(move |by| (bx, by)))
+            .filter_map(|k| self.vias.get(&k))
+            .flatten()
+            .filter(|&&(other, p)| {
+                let theirs = &db.library.via(other).shapes;
+                shapes.iter().any(|a| {
+                    theirs.iter().any(|b| {
+                        a.layer == b.layer
+                            && too_close(db, a.layer, &a.rect.translate(at), &b.rect.translate(p))
+                    })
+                })
+            })
+            .count()
+    }
+}
+
 /// One A* search context.
+#[derive(Clone, Copy)]
 pub(crate) struct Search<'a> {
     pub(crate) db: &'a NetlistDB,
     pub(crate) tech: &'a RouteTech,
@@ -228,6 +297,8 @@ pub(crate) struct Search<'a> {
     pub(crate) owner: Owner,
     pub(crate) costs: Costs,
     pub(crate) guide: Option<&'a Guide>,
+    /// Vias the net already has, if new vias should keep clear of them.
+    pub(crate) own_vias: Option<&'a OwnVias>,
 }
 
 /// A position in the search: a node, the way the path moves along the
@@ -397,10 +468,14 @@ impl Search<'_> {
             .iter()
             .map(|c| self.cut_cost(bottom.cut_above(), &c.translate(at)))
             .sum();
-        self.costs.via
+        let crowded = self
+            .own_vias
+            .map_or(0, |own| own.crowded(self.db, via.via, at));
+        let conflicts = self.costs.via
             + self.conflict_cost(bottom, &via.bottom.translate(at))
             + self.conflict_cost(top, &via.top.translate(at))
-            + cuts
+            + cuts;
+        self.costs.penalty.mul_add(crowded as f64, conflicts)
     }
 
     pub(crate) fn allowed(&self, layer: LayerId, p: Point<Dbu>) -> bool {
@@ -413,6 +488,37 @@ impl Search<'_> {
         self.tech.via_above(a.min(b)).cut_reach
     }
 
+    /// The along-track extent, relative to the via's center, of the metal
+    /// on `layer` of the via between `layer` and `other`.
+    fn pad_along(&self, layer: LayerId, other: LayerId) -> (Dbu, Dbu) {
+        let via = self.tech.via_above(layer.min(other));
+        let pad = if other > layer { via.bottom } else { via.top };
+        self.tech.layer(layer).across_along_rect(&pad).1
+    }
+
+    /// How far along a track a via onto `layer` crowds later vias off it:
+    /// its cut while a via back through the same cut would be too close,
+    /// its metal while another via's metal could end short of it by less
+    /// than the spacing.
+    fn via_reach(&self, layer: LayerId, from: LayerId) -> Dbu {
+        let lt = self.tech.layer(layer);
+        let (lo, hi) = self.pad_along(layer, from);
+        let neighbours = [layer.index().checked_sub(1), Some(layer.index() + 1)];
+        let widest = neighbours
+            .into_iter()
+            .flatten()
+            .map(LayerId::new)
+            .filter(|&l| self.tech.min_layer <= l && l <= self.tech.max_layer)
+            .map(|l| {
+                let (a, b) = self.pad_along(layer, l);
+                (-a).max(b)
+            })
+            .max()
+            .unwrap_or_default();
+        let metal = (-lo).max(hi) + widest + lt.spacing;
+        metal.max(self.cut_reach(layer, from))
+    }
+
     /// The recent via of a path that steps along its track to `along`.
     fn after_step(
         &self,
@@ -420,14 +526,21 @@ impl Search<'_> {
         recent: Option<RecentVia>,
         along: Dbu,
     ) -> Option<RecentVia> {
-        recent.filter(|v| (along - v.at).abs() < self.cut_reach(layer, v.from))
+        recent.filter(|v| (along - v.at).abs() < self.via_reach(layer, v.from))
     }
 
-    /// Whether a via from `state` to `to` would crowd the cut of the via the
-    /// path just came through.
+    /// Whether a via from `state` to `to` would crowd the via the path just
+    /// came through: their cuts when both pass through one cut, or their
+    /// metal on this layer when it would end short of touching by less
+    /// than the spacing, a gap `OpenROAD` flags even where wire fills it.
     fn crowds_recent_via(&self, state: State, to: LayerId, along: Dbu) -> bool {
+        let layer = state.node.layer;
         state.recent_via.is_some_and(|v| {
-            v.from == to && (along - v.at).abs() < self.cut_reach(state.node.layer, to)
+            let cuts = v.from == to && (along - v.at).abs() < self.cut_reach(layer, to);
+            let (a0, a1) = self.pad_along(layer, v.from);
+            let (b0, b1) = self.pad_along(layer, to);
+            let gap = (along + b0 - (v.at + a1)).max(v.at + a0 - (along + b1));
+            cuts || (gap > Dbu::ZERO && gap < self.tech.layer(layer).spacing)
         })
     }
 
@@ -689,6 +802,7 @@ mod tests {
                 history: 0.0,
             },
             guide: None,
+            own_vias: None,
         };
         let m1 = LayerId(0);
         let lt = tech.layer(m1);

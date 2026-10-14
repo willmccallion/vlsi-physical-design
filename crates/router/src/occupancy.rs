@@ -13,7 +13,9 @@
 //! come closer than the cut layer's spacing.
 
 use crate::tech::{CutTech, LayerTech, RouteTech};
+use pare_common::db::design::NetlistDB;
 use pare_common::db::indices::{CutLayerId, LayerId};
+use pare_common::db::library::LayerRef;
 use pare_common::geom::dbu::Dbu;
 use pare_common::geom::point::Point;
 use pare_common::geom::rect::Rect;
@@ -147,6 +149,28 @@ pub fn cuts_clash(a: &Rect<Dbu>, b: &Rect<Dbu>, spacing: Dbu) -> bool {
     let dy = gap(a.min.y, a.max.y, b.min.y, b.max.y);
     let s = i128::from(spacing.get());
     a.touches(b) || dx * dx + dy * dy < s * s
+}
+
+/// Whether two shapes of one net on `layer` neither touch nor keep the
+/// layer's spacing.
+pub(crate) fn too_close(db: &NetlistDB, layer: LayerRef, a: &Rect<Dbu>, b: &Rect<Dbu>) -> bool {
+    let spacing = match layer {
+        LayerRef::Routing(l) => db.library.layer(l).min_spacing,
+        LayerRef::Cut(c) => db.library.cut_layers[c.index()].spacing.unwrap_or_default(),
+    };
+    let d = gap_sq(a, b);
+    let s = i128::from(spacing.get());
+    d > 0 && d < s * s
+}
+
+/// Squared distance between two rectangles; zero when they touch.
+fn gap_sq(a: &Rect<Dbu>, b: &Rect<Dbu>) -> i128 {
+    let gap = |lo_a: Dbu, hi_a: Dbu, lo_b: Dbu, hi_b: Dbu| {
+        i128::from((lo_a - hi_b).max(lo_b - hi_a).max(Dbu::ZERO).get())
+    };
+    let dx = gap(a.min.x, a.max.x, b.min.x, b.max.x);
+    let dy = gap(a.min.y, a.max.y, b.min.y, b.max.y);
+    dx * dx + dy * dy
 }
 
 /// Interval occupancy of every track of every routable layer, and the cuts
