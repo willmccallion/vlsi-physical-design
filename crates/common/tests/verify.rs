@@ -297,3 +297,19 @@ fn a_y_mirrored_cell_is_legal_in_its_row() {
             .any(|v| matches!(v, PlacementViolation::WrongOrientation(c) if *c == u1))
     );
 }
+
+#[test]
+fn two_cuts_of_one_net_closer_than_cut_spacing_are_a_spacing_violation() {
+    let mut db = empty_design();
+    let (a, b) = (via(&db, 0, pt(1000, 1000)), via(&db, 0, pt(1000, 1150)));
+    let _ = routed_net(&mut db, "a", vec![a, b]);
+
+    let report = check_routing(&db);
+
+    let cut = report
+        .spacing
+        .iter()
+        .filter(|v| v.layer == LayerRef::Cut(CutLayerId(0)))
+        .count();
+    assert_eq!(cut, 1, "{:?}", report.spacing);
+}

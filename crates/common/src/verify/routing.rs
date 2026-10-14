@@ -1,7 +1,8 @@
 //! Routing checks on exact geometry: shorts, spacing, opens and wiring stats.
 //!
 //! Only pairs involving routed wiring are checked for shorts and spacing;
-//! cell masters and pre-existing special wiring are assumed clean.
+//! cell masters and pre-existing special wiring are assumed clean. Cut
+//! spacing also applies between two cuts of the same net.
 
 use super::shapes::{
     OwnedShape, Owner, fixed_shapes, is_signal_net, layer_slot, route_elem_shapes, wiring_shapes,
@@ -265,11 +266,26 @@ fn check_wiring_shape(
         for &member in index.members(bin) {
             let near = member as usize;
             let other = &shapes[near];
-            if near == this || (other.wiring && near < this) || other.owner == wiring.owner {
+            let same_net = other.owner == wiring.owner;
+            let cut = matches!(layer, LayerRef::Cut(_));
+            if near == this || (other.wiring && near < this) || (same_net && !(cut && other.wiring))
+            {
                 continue;
             }
             let r = other.shape.rect;
             if !reach.touches(&r) {
+                continue;
+            }
+            if same_net {
+                let d = distance_sq(&wiring.shape.rect, &r);
+                if d > 0 && d < sp_sq {
+                    spacing.push(SpacingViolation {
+                        layer,
+                        net,
+                        other: other.owner,
+                        distance_sq: d,
+                    });
+                }
                 continue;
             }
             let owner_point = Point::new(reach.min.x.max(r.min.x), reach.min.y.max(r.min.y));
