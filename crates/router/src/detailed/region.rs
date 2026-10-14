@@ -13,10 +13,10 @@
 
 use super::DetailedRouter;
 use crate::access::Node;
-use crate::occupancy::{LocalOccupancy, Origin, Owner};
+use crate::occupancy::{LocalOccupancy, Owner};
 use crate::search::{Costs, MAX_PENALTY, OwnVias, Search};
 use crate::wiring::{DisjointSets, Edge, NetRoute, path_edges};
-use pare_common::db::indices::{CutLayerId, NetId};
+use pare_common::db::indices::{CutLayerId, LayerId, NetId};
 use pare_common::geom::dbu::Dbu;
 use pare_common::geom::point::Point;
 use pare_common::geom::rect::Rect;
@@ -368,19 +368,16 @@ impl DetailedRouter<'_> {
     /// Nets with wiring within `reach` of `at` on any routable layer.
     fn nets_near(&self, at: Point<Dbu>, reach: Dbu) -> Vec<NetId> {
         let probe = Rect::new(at, at).expand(reach);
-        let nobody = Owner::Net(u32::MAX);
-        let mut nets = Vec::new();
-        for l in self.tech.min_layer.index()..=self.tech.max_layer.index() {
-            let layer = pare_common::db::indices::LayerId::new(l);
-            for (_, o) in self
-                .occupancy
-                .rect_conflicts(self.tech, layer, &probe, nobody)
-            {
-                if let (Owner::Net(n), Origin::Wiring) = (o.owner, o.origin) {
-                    nets.push(NetId(n));
-                }
-            }
-        }
+        let mut nets: Vec<NetId> = (self.tech.min_layer.index()..=self.tech.max_layer.index())
+            .flat_map(|l| {
+                self.occupancy
+                    .wiring_owners_in(self.tech, LayerId::new(l), &probe)
+            })
+            .filter_map(|o| match o {
+                Owner::Net(n) => Some(NetId(n)),
+                Owner::Obstacle => None,
+            })
+            .collect();
         nets.sort_unstable();
         nets.dedup();
         nets

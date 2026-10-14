@@ -335,6 +335,28 @@ impl Occupancy {
         })
     }
 
+    /// Owners of wiring on `layer` whose metal runs along a track inside
+    /// `rect`.
+    pub fn wiring_owners_in<'a>(
+        &'a self,
+        tech: &'a RouteTech,
+        layer: LayerId,
+        rect: &Rect<Dbu>,
+    ) -> impl Iterator<Item = Owner> + use<'a> {
+        let lt = tech.layer(layer);
+        let ((a0, a1), (lo, hi)) = lt.across_along_rect(rect);
+        let chunk = self.chunk;
+        lt.tracks_within(a0, a1).flat_map(move |t| {
+            let list = &self.tracks[layer.index()][t as usize];
+            let from = list.partition_point(|o| o.lo < lo - chunk);
+            let to = list.partition_point(|o| o.lo <= hi);
+            list[from..to]
+                .iter()
+                .filter(move |o| o.centered && o.origin == Origin::Wiring && lo <= o.hi)
+                .map(|o| o.owner)
+        })
+    }
+
     /// The conflicts `rect` on `layer` would have, as (track, occupant) pairs.
     pub fn rect_conflicts<'a>(
         &'a self,
