@@ -2,7 +2,7 @@
 
 #![allow(clippy::unwrap_used)]
 
-use pare_common::db::design::NetlistDB;
+use pare_common::db::design::{NetlistDB, PlacementStatus};
 use pare_common::db::indices::LayerId;
 use pare_common::db::parser::{def, lef};
 use pare_common::geom::dbu::Dbu;
@@ -64,5 +64,34 @@ fn removing_a_nets_wiring_keeps_its_fixed_metal() {
     assert_eq!(
         occupancy.rect_conflicts(&tech, layer, &wire, other).count(),
         0
+    );
+}
+
+#[test]
+fn routing_refuses_pins_of_different_nets_that_overlap() {
+    let mut db = tiny();
+    for cell in &mut db.cells {
+        cell.status = PlacementStatus::Placed;
+    }
+    let nand = db
+        .library
+        .macros
+        .iter()
+        .position(|m| m.name == "NAND2")
+        .unwrap();
+    let pins = &mut db.library.macros[nand].pins;
+    let a = pins.iter().position(|p| p.name == "A").unwrap();
+    let b = pins.iter().position(|p| p.name == "B").unwrap();
+    pins[b].shapes = pins[a].shapes.clone();
+
+    let result = route(&mut db, &RoutingConfig::default());
+
+    assert_eq!(
+        result,
+        Err(RouteError::OverlappingPins {
+            count: 2,
+            cell: "u3".to_string(),
+            nets: ("n1".to_string(), "n2".to_string()),
+        })
     );
 }

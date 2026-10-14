@@ -16,6 +16,7 @@ use detailed::{Costs, DetailedRouter, NetRoute, routable_nets};
 use global::{GlobalGrid, GlobalNet, route_global};
 use pare_common::db::design::{NetlistDB, PlacementStatus};
 use pare_common::db::indices::NetId;
+use pare_common::db::library::Shape;
 use pare_common::util::config::RoutingConfig;
 use pare_common::util::ui;
 use rustc_hash::FxHashMap;
@@ -48,6 +49,9 @@ pub fn route(db: &mut NetlistDB, config: &RoutingConfig) -> Result<RoutingSummar
             count: 1 + unplaced.count(),
             first: first.name.clone(),
         });
+    }
+    if let Some(error) = overlapping_pins(db) {
+        return Err(error);
     }
     let tech = RouteTech::new(db, config)?;
     let pitch = tech
@@ -155,6 +159,48 @@ pub fn route(db: &mut NetlistDB, config: &RoutingConfig) -> Result<RoutingSummar
     Ok(summary)
 }
 
+/// An error naming the cells whose pins of different nets overlap, which
+/// no routing can keep apart.
+fn overlapping_pins(db: &NetlistDB) -> Option<RouteError> {
+    let mut first = None;
+    let mut count = 0;
+    for cell in &db.cells {
+        let pins: Vec<(NetId, Vec<Shape>)> = cell
+            .pins
+            .iter()
+            .map(|&p| (db.pins[p.index()].net, db.pin_shapes(p)))
+            .collect();
+        let clash = pins.iter().enumerate().find_map(|(i, (a, shapes_a))| {
+            pins[i + 1..]
+                .iter()
+                .find(|(b, shapes_b)| b != a && shapes_touch(shapes_a, shapes_b))
+                .map(|(b, _)| (*a, *b))
+        });
+        if let Some((a, b)) = clash {
+            count += 1;
+            let _ = first.get_or_insert_with(|| {
+                (
+                    cell.name.clone(),
+                    db.nets[a.index()].name.clone(),
+                    db.nets[b.index()].name.clone(),
+                )
+            });
+        }
+    }
+    first.map(|(cell, net_a, net_b)| RouteError::OverlappingPins {
+        count,
+        cell,
+        nets: (net_a, net_b),
+    })
+}
+
+fn shapes_touch(a: &[Shape], b: &[Shape]) -> bool {
+    a.iter().any(|x| {
+        b.iter()
+            .any(|y| x.layer == y.layer && x.rect.overlaps(&y.rect))
+    })
+}
+
 fn stage(label: &str, start: Instant) {
     ui::stat_row(
         label,
@@ -174,6 +220,22 @@ pub enum RouteError {
         count: usize,
         /// The first one's name.
         first: String,
+    },
+    /// Pins of different nets overlap inside cells, as in Bookshelf designs
+    /// whose pins are points at the cell center.
+    #[error(
+        "pins of different nets overlap in {count} cells, first in '{cell}' \
+         (nets '{}' and '{}')",
+        nets.0,
+        nets.1
+    )]
+    OverlappingPins {
+        /// How many cells.
+        count: usize,
+        /// The first one's name.
+        cell: String,
+        /// Two of its nets whose pins overlap.
+        nets: (String, String),
     },
     /// A configured layer name is not a routing layer.
     #[error("unknown routing layer '{0}'")]
