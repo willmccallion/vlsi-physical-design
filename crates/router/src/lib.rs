@@ -14,7 +14,7 @@ pub mod tree;
 
 use detailed::{Costs, DetailedRouter, NetRoute, routable_nets};
 use global::{GlobalGrid, GlobalNet, route_global};
-use pare_common::db::design::NetlistDB;
+use pare_common::db::design::{NetlistDB, PlacementStatus};
 use pare_common::db::indices::NetId;
 use pare_common::util::config::RoutingConfig;
 use pare_common::util::ui;
@@ -39,6 +39,16 @@ pub struct RoutingSummary {
 
 /// Routes every signal net of `db` and stores the wiring in the design.
 pub fn route(db: &mut NetlistDB, config: &RoutingConfig) -> Result<RoutingSummary, RouteError> {
+    let mut unplaced = db
+        .cells
+        .iter()
+        .filter(|c| c.status == PlacementStatus::Unplaced);
+    if let Some(first) = unplaced.next() {
+        return Err(RouteError::UnplacedCells {
+            count: 1 + unplaced.count(),
+            first: first.name.clone(),
+        });
+    }
     let tech = RouteTech::new(db, config)?;
     let pitch = tech
         .layer(tech.min_layer)
@@ -157,6 +167,14 @@ fn stage(label: &str, start: Instant) {
 /// Why routing could not run.
 #[derive(Debug, thiserror::Error, PartialEq, Eq)]
 pub enum RouteError {
+    /// The design has cells without a location.
+    #[error("{count} cells are unplaced, starting with '{first}'")]
+    UnplacedCells {
+        /// How many.
+        count: usize,
+        /// The first one's name.
+        first: String,
+    },
     /// A configured layer name is not a routing layer.
     #[error("unknown routing layer '{0}'")]
     UnknownLayer(String),
