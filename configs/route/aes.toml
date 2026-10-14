@@ -1,6 +1,6 @@
 [input]
 lef_files = ["inputs/aes/Nangate45.lef"]
-def_file = "inputs/aes/aes.def"
+def_file = "inputs/aes/aes_cipher_top.def"
 output_dir = "output/aes"
 
 [global_routing]

@@ -1,12 +1,13 @@
 #!/usr/bin/env python3
-"""Download the AES benchmark (~45k cells, AES encryption block)."""
+"""Download the AES benchmark (~19k cells, Nangate45 AES cipher, unplaced)."""
 import os
 import urllib.request
 import shutil
 
 INPUT_DIR = "inputs/aes"
-DEF_URL = "https://raw.githubusercontent.com/The-OpenROAD-Project/OpenROAD/master/test/upf_aes.defok"
-LEF_URL = "https://raw.githubusercontent.com/The-OpenROAD-Project/OpenROAD/master/test/Nangate45/Nangate45.lef"
+RAW = "https://raw.githubusercontent.com/The-OpenROAD-Project/OpenROAD/master"
+DEF_URL = f"{RAW}/src/gpl/test/design/nangate45/aes_cipher_top/aes_cipher_top.def"
+LEF_URL = f"{RAW}/test/Nangate45/Nangate45.lef"
 
 
 def download(url, path):
@@ -22,7 +23,7 @@ def download(url, path):
 def main():
     os.makedirs(INPUT_DIR, exist_ok=True)
     print("[aes] Downloading AES benchmark...")
-    download(DEF_URL, os.path.join(INPUT_DIR, "aes.def"))
+    download(DEF_URL, os.path.join(INPUT_DIR, "aes_cipher_top.def"))
     download(LEF_URL, os.path.join(INPUT_DIR, "Nangate45.lef"))
     print("[aes] Done. Run with:")
     print("  cargo run --release -- flow aes")
