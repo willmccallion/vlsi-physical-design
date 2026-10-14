@@ -635,6 +635,7 @@ dependencies = [
  "image",
  "imageproc",
  "log",
+ "rayon",
  "serde",
  "thiserror",
  "toml",

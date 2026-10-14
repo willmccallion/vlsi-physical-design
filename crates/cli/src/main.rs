@@ -10,7 +10,9 @@ use pare_common::db::writer;
 use pare_common::geom::dbu::Dbu;
 use pare_common::geom::point::Point;
 use pare_common::util::config::Config;
-use pare_common::util::{check, logger, ui, visualization};
+use pare_common::util::{logger, ui, visualization};
+use pare_common::verify::placement::{PlacementViolation, placement_violations};
+use pare_common::verify::routing::check_routing;
 use pare_placer::legalize::abacus::AbacusLegalizer;
 use pare_placer::model::PlacementModel;
 use pare_placer::physics::PhysicsContext;
@@ -31,6 +33,14 @@ enum Commands {
     Place {
         /// Design name (e.g. 'ibex') or path to a TOML config.
         config: PathBuf,
+    },
+    /// Check the placement and routing of a design.
+    Check {
+        /// Design name (e.g. 'ibex') or path to a TOML config.
+        config: PathBuf,
+        /// DEF to check instead of the config's input DEF.
+        #[arg(long)]
+        def: Option<PathBuf>,
     },
 }
 
@@ -73,6 +83,19 @@ fn main() -> anyhow::Result<()> {
             std::fs::create_dir_all(&output_dir)
                 .with_context(|| format!("cannot create {}", output_dir.display()))?;
             run_placement(&config, &mut db, &output_dir)?;
+        }
+        Commands::Check { config, def } => {
+            let name = config.to_str().context("config path is not valid UTF-8")?;
+            let mut config = load_config(&resolve_config(name, "place"))?;
+            if let Some(def) = def {
+                config.input.def_file = path_str(&def)?;
+            }
+            let db = load_design(&config)?;
+            let placement_ok = report_placement(&db);
+            let routing_ok = report_routing(&db);
+            if !(placement_ok && routing_ok) {
+                anyhow::bail!("{} failed its checks", db.name);
+            }
         }
     }
 
@@ -236,7 +259,9 @@ fn run_placement(config: &Config, db: &mut NetlistDB, output_dir: &Path) -> anyh
     ui::stat_row("HPWL (um):", &format!("{:.0}", model.hpwl()), "", "");
     ui::phase_time(phase_start.elapsed().as_secs_f64());
 
-    check::run_placement_check(db).map_err(|e| anyhow::anyhow!(e))?;
+    if !report_placement(db) {
+        anyhow::bail!("placement is not legal");
+    }
 
     let phase_start = Instant::now();
     ui::phase("Output");
@@ -264,4 +289,77 @@ fn path_str(path: &Path) -> anyhow::Result<String> {
     path.to_str()
         .map(str::to_owned)
         .with_context(|| format!("path is not valid UTF-8: {}", path.display()))
+}
+
+/// Prints placement violations by kind; returns whether there were none.
+fn report_placement(db: &NetlistDB) -> bool {
+    let violations = placement_violations(db);
+    if violations.is_empty() {
+        ui::check("Placement is legal.");
+        return true;
+    }
+    let count = |f: fn(&PlacementViolation) -> bool| violations.iter().filter(|v| f(v)).count();
+    ui::fail(&format!("Placement has {} violations", violations.len()));
+    ui::stat_row(
+        "Outside die:",
+        &count(|v| matches!(v, PlacementViolation::OutsideDie(_))).to_string(),
+        "Overlaps:",
+        &count(|v| matches!(v, PlacementViolation::Overlap(..))).to_string(),
+    );
+    ui::stat_row(
+        "Not in a row:",
+        &count(|v| matches!(v, PlacementViolation::NotInRow(_))).to_string(),
+        "Off site:",
+        &count(|v| matches!(v, PlacementViolation::OffSite(_))).to_string(),
+    );
+    ui::stat_row(
+        "Wrong orient:",
+        &count(|v| matches!(v, PlacementViolation::WrongOrientation(_))).to_string(),
+        "In blockage:",
+        &count(|v| matches!(v, PlacementViolation::InBlockage(_))).to_string(),
+    );
+    false
+}
+
+/// Prints routing check results; returns whether there are no shorts or opens.
+fn report_routing(db: &NetlistDB) -> bool {
+    let report = check_routing(db);
+    let units = db.dbu();
+    let wirelength: f64 = report
+        .stats
+        .wirelength
+        .iter()
+        .map(|&l| units.to_microns(l))
+        .sum();
+    ui::stat_row(
+        "Shorts:",
+        &report.shorts.len().to_string(),
+        "Opens:",
+        &report.opens.len().to_string(),
+    );
+    ui::stat_row(
+        "Spacing:",
+        &report.spacing.len().to_string(),
+        "Wirelength (um):",
+        &format!("{wirelength:.0}"),
+    );
+    ui::stat_row(
+        "Vias:",
+        &report.stats.vias.to_string(),
+        "Off track:",
+        &report.stats.off_track.to_string(),
+    );
+    ui::stat_row(
+        "Wrong way:",
+        &report.stats.wrong_way.to_string(),
+        "Non-Manhattan:",
+        &report.stats.non_manhattan.to_string(),
+    );
+    if report.is_connected_without_shorts() {
+        ui::check("Routing has no shorts or opens.");
+        true
+    } else {
+        ui::fail("Routing has shorts or opens.");
+        false
+    }
 }
