@@ -14,13 +14,16 @@ use pare_common::geom::rect::Rect;
 use std::f64::consts::SQRT_2;
 use std::ops::Range;
 
-/// Cell area above the target density, and all cell area, of one grid.
+/// Cell area above the target density, all cell area, and the electrostatic
+/// energy of one grid.
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub(super) struct Excess {
     /// Cell area above the target density.
     pub(super) over: f64,
     /// All cell area.
     pub(super) cells: f64,
+    /// Every charge, fixed ones included, times the potential where it is.
+    pub(super) energy: f64,
 }
 
 impl Excess {
@@ -229,9 +232,18 @@ impl DensityGrid {
         self.solver.solve(&density, &mut self.potential);
         self.compute_field();
 
+        let energy: f64 = self
+            .total
+            .iter()
+            .zip(&self.potential)
+            .map(|(q, phi)| q * phi)
+            .sum();
         let cell_area: f64 = self.cells.iter().sum();
         if cell_area <= 0.0 {
-            return Excess::default();
+            return Excess {
+                energy,
+                ..Excess::default()
+            };
         }
         let capacity = self.target * bin_area;
         let over: f64 = self
@@ -243,6 +255,7 @@ impl DensityGrid {
         Excess {
             over,
             cells: cell_area,
+            energy,
         }
     }
 

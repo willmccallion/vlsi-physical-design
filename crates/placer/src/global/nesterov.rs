@@ -2,6 +2,12 @@
 //! step length predicted from the local Lipschitz constant and backtracking
 //! when the prediction overshoots. Every field weighs its own density
 //! energy, and its objects stop moving once its overflow reaches the target.
+//!
+//! A single field's weight follows ePlace: it grows while wirelength
+//! shrinks. With several fields that one signal cannot tell which field
+//! still needs spreading, so their weights follow `DREAMPlace` 3.0 instead: a
+//! quadratic density penalty whose weights take normalized subgradient steps
+//! on each field's own energy.
 
 use super::density::{Excess, Footprint};
 use super::routability::{CHECK_OVERFLOW, CongestionMap, Routability, SNAPSHOT_OVERFLOW, Verdict};
@@ -25,6 +31,14 @@ const REFERENCE_STRETCH_BINS: f64 = 2.0;
 
 /// Times one iteration may shorten its step before accepting it.
 const MAX_BACKTRACKS: usize = 10;
+
+/// Weight of the quadratic density term against the linear one, relative to
+/// each field's initial energy, as in `DREAMPlace`.
+const QUADRATIC_COEFFICIENT: f64 = 2000.0;
+
+/// Bounds of the factor the subgradient step length grows by each
+/// iteration, as in `DREAMPlace`.
+const SCHEDULE_STEP_GROWTH: (f64, f64) = (1.03, 1.04);
 
 /// What is being placed: cells first, then fillers.
 #[derive(Debug)]
@@ -61,6 +75,105 @@ struct Evaluation {
     overflow: f64,
     /// The overflow of each field.
     field_overflow: Vec<f64>,
+    /// The electrostatic energy of each field.
+    field_energy: Vec<f64>,
+}
+
+/// How strongly each field's density energy pulls its objects apart.
+#[derive(Clone, Debug)]
+struct Weights {
+    /// Each field's density weight.
+    penalties: Vec<f64>,
+    /// Whether each field has stopped moving.
+    frozen: Vec<bool>,
+    /// With several fields, the schedule of the quadratic penalty.
+    schedule: Option<Schedule>,
+}
+
+/// `DREAMPlace` 3.0's density weights for several fields. Field `k`'s energy
+/// `D` enters the objective as `λ D (1 + c D / D0)`, with `c` the
+/// [`QUADRATIC_COEFFICIENT`] over two and `D0` its energy at the start;
+/// `λ = u (1 + 2c D / D0)`, where `u` takes subgradient steps along the
+/// normalized energies.
+#[derive(Clone, Debug)]
+struct Schedule {
+    /// One over each field's initial energy, or zero for a field without any.
+    precondition: Vec<f64>,
+    /// The subgradient iterate of each field.
+    u: Vec<f64>,
+    /// The subgradient step length.
+    step: f64,
+}
+
+impl Weights {
+    /// ePlace's weights: one per field, all free to move.
+    fn eplace(penalties: Vec<f64>) -> Self {
+        let frozen = vec![false; penalties.len()];
+        Self {
+            penalties,
+            frozen,
+            schedule: None,
+        }
+    }
+
+    /// What field `k`'s density gradient is multiplied by when its energy
+    /// is `energy`: its weight, times the quadratic term's derivative.
+    fn multiplier(&self, k: usize, energy: f64) -> f64 {
+        let quadratic = self
+            .schedule
+            .as_ref()
+            .map_or(0.0, |s| QUADRATIC_COEFFICIENT * s.precondition[k] * energy);
+        self.penalties[k] * (1.0 + quadratic)
+    }
+
+    fn highest(&self) -> f64 {
+        self.penalties.iter().copied().fold(0.0, f64::max)
+    }
+
+    /// Updates the weights of the fields still moving after an iteration
+    /// that evaluated to `eval`, with `growth` the ePlace factor.
+    fn update(&mut self, eval: &Evaluation, growth: f64) {
+        let Some(schedule) = self.schedule.as_mut() else {
+            for (penalty, _) in self
+                .penalties
+                .iter_mut()
+                .zip(&self.frozen)
+                .filter(|&(_, &frozen)| !frozen)
+            {
+                *penalty *= growth;
+            }
+            return;
+        };
+        let normalized: Vec<f64> = eval
+            .field_energy
+            .iter()
+            .zip(&schedule.precondition)
+            .map(|(d, p)| d * p)
+            .collect();
+        let half = QUADRATIC_COEFFICIENT / 2.0;
+        let direction: Vec<f64> = normalized
+            .iter()
+            .map(|&n| (half * n).mul_add(n, n))
+            .collect();
+        let length = norm(&direction);
+        if length > 0.0 {
+            for (u, d) in schedule.u.iter_mut().zip(&direction) {
+                *u = (schedule.step * d).mul_add(1.0 / length, *u);
+            }
+        }
+        for (k, penalty) in self.penalties.iter_mut().enumerate() {
+            if !self.frozen[k] {
+                *penalty = schedule.u[k] * QUADRATIC_COEFFICIENT.mul_add(normalized[k], 1.0);
+            }
+        }
+        let rate = (QUADRATIC_COEFFICIENT * norm(&normalized)).ln().max(0.0);
+        let (lo, hi) = SCHEDULE_STEP_GROWTH;
+        schedule.step *= (rate / (1.0 + rate)).mul_add(hi - lo, lo);
+    }
+}
+
+fn norm(v: &[f64]) -> f64 {
+    v.iter().map(|x| x * x).sum::<f64>().sqrt()
 }
 
 impl<'a> Objective<'a> {
@@ -129,43 +242,51 @@ impl<'a> Objective<'a> {
         let total = excess.iter().fold(Excess::default(), |a, e| Excess {
             over: a.over + e.over,
             cells: a.cells + e.cells,
+            energy: a.energy + e.energy,
         });
         Evaluation {
             wirelength,
             overflow: total.fraction(),
             field_overflow: excess.iter().map(|e| e.fraction()).collect(),
+            field_energy: excess.iter().map(|e| e.energy).collect(),
         }
     }
 
-    /// The preconditioned gradient of wirelength plus each field's
-    /// `penalties` times its density energy, written to `out`; objects of
-    /// `frozen` fields get none.
+    /// The preconditioned gradient of wirelength plus each field's weighted
+    /// density energy, written to `out`; objects of frozen fields get none.
     fn gradient(
         &mut self,
         centers: &[Point<f64>],
         gamma: f64,
-        penalties: &[f64],
-        frozen: &[bool],
+        weights: &Weights,
         out: &mut [Point<f64>],
     ) -> Evaluation {
         let eval = self.evaluate(centers, gamma);
+        let multipliers: Vec<f64> = eval
+            .field_energy
+            .iter()
+            .enumerate()
+            .map(|(k, &energy)| weights.multiplier(k, energy))
+            .collect();
         for (i, g) in out.iter_mut().enumerate() {
             let k = self.field_of[i];
-            if frozen[k] {
+            if weights.frozen[k] {
                 *g = Point::new(0.0, 0.0);
                 continue;
             }
-            let penalty = penalties[k];
-            let combined = self.wirelength_grad[i] + self.density_grad[i] * penalty;
-            let scale = 1.0 / penalty.mul_add(self.areas[i], self.pins[i]).max(1.0);
+            let combined = self.wirelength_grad[i] + self.density_grad[i] * multipliers[k];
+            let scale = 1.0
+                / weights.penalties[k]
+                    .mul_add(self.areas[i], self.pins[i])
+                    .max(1.0);
             *g = combined * scale;
         }
         eval
     }
 
-    /// Each field's initial density penalty, from the sizes of the two
-    /// gradients over its objects.
-    fn initial_penalties(&self) -> Vec<f64> {
+    /// The L1 norms of the wirelength and density gradients over each
+    /// field's objects, at the last evaluation.
+    fn gradient_norms(&self) -> Vec<(f64, f64)> {
         let l1 = |g: Point<f64>| g.x.abs() + g.y.abs();
         self.fields
             .iter()
@@ -173,13 +294,73 @@ impl<'a> Objective<'a> {
                 let objects = || f.cells.clone().chain(f.fillers.clone());
                 let wirelength: f64 = objects().map(|i| l1(self.wirelength_grad[i])).sum();
                 let density: f64 = objects().map(|i| l1(self.density_grad[i])).sum();
-                if wirelength > 0.0 && density > 0.0 {
-                    INITIAL_PENALTY * wirelength / density
-                } else {
-                    INITIAL_PENALTY
-                }
+                (wirelength, density)
             })
             .collect()
+    }
+
+    /// The weights to start from after evaluating `first`: ePlace's for a
+    /// single field, scaled so the density gradient starts at
+    /// [`INITIAL_PENALTY`] times the wirelength gradient; `DREAMPlace`'s
+    /// schedule, scaled the same way over all fields together, for several.
+    fn initial_weights(&self, first: &Evaluation) -> Weights {
+        let norms = self.gradient_norms();
+        if norms.len() == 1 {
+            let penalties = norms
+                .iter()
+                .map(|&(wirelength, density)| {
+                    if wirelength > 0.0 && density > 0.0 {
+                        INITIAL_PENALTY * wirelength / density
+                    } else {
+                        INITIAL_PENALTY
+                    }
+                })
+                .collect();
+            return Weights::eplace(penalties);
+        }
+        let precondition: Vec<f64> = first
+            .field_energy
+            .iter()
+            .map(|&d| if d > 0.0 { 1.0 / d } else { 0.0 })
+            .collect();
+        let half = QUADRATIC_COEFFICIENT / 2.0;
+        let normalized: Vec<f64> = first
+            .field_energy
+            .iter()
+            .zip(&precondition)
+            .map(|(d, p)| d * p)
+            .collect();
+        let mut u: Vec<f64> = normalized
+            .iter()
+            .map(|&n| (half * n).mul_add(n, n))
+            .collect();
+        let s: Vec<f64> = normalized
+            .iter()
+            .map(|&n| QUADRATIC_COEFFICIENT.mul_add(n, 1.0))
+            .collect();
+        let wirelength: f64 = norms.iter().map(|&(w, _)| w).sum();
+        let density: f64 = norms
+            .iter()
+            .zip(u.iter().zip(&s))
+            .map(|(&(_, d), (u, s))| u * s * d)
+            .sum();
+        if wirelength > 0.0 && density > 0.0 {
+            let scale = INITIAL_PENALTY * wirelength / density;
+            for x in &mut u {
+                *x *= scale;
+            }
+        }
+        let penalties = u.iter().zip(&s).map(|(u, s)| u * s).collect();
+        let step = (SCHEDULE_STEP_GROWTH.0 - 1.0) * norm(&u);
+        Weights {
+            frozen: vec![false; u.len()],
+            penalties,
+            schedule: Some(Schedule {
+                precondition,
+                u,
+                step,
+            }),
+        }
     }
 
     /// Whether each object may move: those of fields not yet frozen.
@@ -263,19 +444,10 @@ struct State {
     major: Vec<Point<f64>>,
     reference: Vec<Point<f64>>,
     step: f64,
-    /// Each field's density penalty.
-    penalties: Vec<f64>,
-    /// Whether each field has stopped moving.
-    frozen: Vec<bool>,
+    weights: Weights,
     gamma: f64,
     a: f64,
     prev_hpwl: f64,
-}
-
-impl State {
-    fn highest_penalty(&self) -> f64 {
-        self.penalties.iter().copied().fold(0.0, f64::max)
-    }
 }
 
 /// How one stretch of iterations ended.
@@ -387,31 +559,21 @@ fn run(
         objective.clamp(&mut major);
         let gamma = gamma_for(1.0, bin);
         let first = objective.evaluate(&major, gamma);
-        let penalties = objective.initial_penalties();
-        let frozen = vec![false; penalties.len()];
-        let _ = objective.gradient(&major, gamma, &penalties, &frozen, &mut grad);
-        let step = initial_step(
-            &mut objective,
-            &major,
-            &grad,
-            gamma,
-            &penalties,
-            &frozen,
-            bin,
-        );
+        let weights = objective.initial_weights(&first);
+        let _ = objective.gradient(&major, gamma, &weights, &mut grad);
+        let step = initial_step(&mut objective, &major, &grad, gamma, &weights, bin);
         State {
             reference: major.clone(),
             major,
             step,
-            penalties,
-            frozen,
+            weights,
             gamma,
             a: 1.0,
             prev_hpwl: first.wirelength.hpwl,
         }
     };
-    let mut eval = objective.gradient(&s.reference, s.gamma, &s.penalties, &s.frozen, &mut grad);
-    let mut moving = objective.moving(&s.frozen);
+    let mut eval = objective.gradient(&s.reference, s.gamma, &s.weights, &mut grad);
+    let mut moving = objective.moving(&s.weights.frozen);
 
     let mut next_major = vec![Point::new(0.0, 0.0); n];
     let mut next_reference = vec![Point::new(0.0, 0.0); n];
@@ -442,13 +604,7 @@ fn run(
                 };
             }
             objective.clamp(&mut next_reference);
-            next_eval = objective.gradient(
-                &next_reference,
-                s.gamma,
-                &s.penalties,
-                &s.frozen,
-                &mut next_grad,
-            );
+            next_eval = objective.gradient(&next_reference, s.gamma, &s.weights, &mut next_grad);
             let moved = distance(&next_reference, &s.reference);
             let changed = distance(&next_grad, &grad);
             next_step = if changed > 0.0 {
@@ -477,30 +633,23 @@ fn run(
             iteration: k,
             hpwl: eval.wirelength.hpwl,
             overflow: eval.overflow,
-            penalty: s.highest_penalty(),
+            penalty: s.weights.highest(),
             step: s.step,
         });
         let mut froze = false;
-        for (frozen, &overflow) in s.frozen.iter_mut().zip(&eval.field_overflow) {
+        for (frozen, &overflow) in s.weights.frozen.iter_mut().zip(&eval.field_overflow) {
             if !*frozen && overflow <= params.target_overflow {
                 *frozen = true;
                 froze = true;
             }
         }
         if froze {
-            moving = objective.moving(&s.frozen);
+            moving = objective.moving(&s.weights.frozen);
         }
-        let converged = s.frozen.iter().all(|&f| f);
+        let converged = s.weights.frozen.iter().all(|&f| f);
         if !converged {
             let growth = penalty_growth(eval.wirelength.hpwl - s.prev_hpwl, reference_growth);
-            for (penalty, _) in s
-                .penalties
-                .iter_mut()
-                .zip(&s.frozen)
-                .filter(|&(_, &frozen)| !frozen)
-            {
-                *penalty *= growth;
-            }
+            s.weights.update(&eval, growth);
             s.prev_hpwl = eval.wirelength.hpwl;
             s.gamma = gamma_for(eval.overflow, bin);
         }
@@ -542,20 +691,13 @@ fn restart(
     grad: &mut [Point<f64>],
     bin: Point<f64>,
 ) -> State {
-    let _ = objective.gradient(
-        &state.major,
-        state.gamma,
-        &state.penalties,
-        &state.frozen,
-        grad,
-    );
+    let _ = objective.gradient(&state.major, state.gamma, &state.weights, grad);
     let step = initial_step(
         objective,
         &state.major,
         grad,
         state.gamma,
-        &state.penalties,
-        &state.frozen,
+        &state.weights,
         bin,
     );
     State {
@@ -572,8 +714,7 @@ fn initial_step(
     at: &[Point<f64>],
     grad: &[Point<f64>],
     gamma: f64,
-    penalties: &[f64],
-    frozen: &[bool],
+    weights: &Weights,
     bin: Point<f64>,
 ) -> f64 {
     let largest = grad
@@ -588,7 +729,7 @@ fn initial_step(
     let mut probe: Vec<Point<f64>> = at.iter().zip(grad).map(|(&p, &g)| p - g * scale).collect();
     objective.clamp(&mut probe);
     let mut probe_grad = vec![Point::new(0.0, 0.0); at.len()];
-    let _ = objective.gradient(&probe, gamma, penalties, frozen, &mut probe_grad);
+    let _ = objective.gradient(&probe, gamma, weights, &mut probe_grad);
     let changed = distance(&probe_grad, grad);
     if changed > 0.0 {
         distance(&probe, at) / changed
@@ -615,6 +756,68 @@ mod tests {
         assert!((penalty_growth(-1.0, 100.0) - 1.05).abs() < 1e-12);
         assert!((penalty_growth(100.0, 100.0) - 1.0).abs() < 1e-12);
         assert!((penalty_growth(1e9, 100.0) - 0.95).abs() < 1e-12);
+    }
+
+    fn evaluation(field_energy: Vec<f64>) -> Evaluation {
+        Evaluation {
+            wirelength: Wirelength::default(),
+            overflow: 0.5,
+            field_overflow: vec![0.5; field_energy.len()],
+            field_energy,
+        }
+    }
+
+    #[test]
+    fn eplace_weights_grow_by_the_given_factor_except_when_frozen() {
+        let mut weights = Weights::eplace(vec![2.0, 4.0]);
+        weights.frozen[1] = true;
+
+        weights.update(&evaluation(vec![1.0, 1.0]), 1.05);
+
+        assert!((weights.penalties[0] - 2.1).abs() < 1e-12);
+        assert!((weights.penalties[1] - 4.0).abs() < 1e-12);
+    }
+
+    #[test]
+    fn a_scheduled_weight_steps_along_its_normalized_energy() {
+        let mut weights = Weights {
+            penalties: vec![1.0, 1.0],
+            frozen: vec![false, false],
+            schedule: Some(Schedule {
+                precondition: vec![0.1, 0.05],
+                u: vec![1.0, 1.0],
+                step: 0.1,
+            }),
+        };
+
+        weights.update(&evaluation(vec![10.0, 20.0]), 1.05);
+
+        let u = 0.1f64.mul_add(std::f64::consts::FRAC_1_SQRT_2, 1.0);
+        let penalty = u * 2001.0;
+        assert!((weights.penalties[0] - penalty).abs() < 1e-9);
+        assert!((weights.penalties[1] - penalty).abs() < 1e-9);
+        let rate = (2000.0 * std::f64::consts::SQRT_2).ln();
+        let growth = (rate / (1.0 + rate)).mul_add(0.01, 1.03);
+        let expected_step = 0.1 * growth;
+        let step = weights.schedule.map_or(0.0, |s| s.step);
+        assert!((step - expected_step).abs() < 1e-12);
+    }
+
+    #[test]
+    fn the_quadratic_term_scales_a_scheduled_weight_by_the_energy_left() {
+        let weights = Weights {
+            penalties: vec![3.0],
+            frozen: vec![false],
+            schedule: Some(Schedule {
+                precondition: vec![0.5],
+                u: vec![1.0],
+                step: 0.1,
+            }),
+        };
+
+        let expected = 3.0 * 1001.0;
+        assert!((weights.multiplier(0, 1.0) - expected).abs() < 1e-9);
+        assert!((weights.multiplier(0, 0.0) - 3.0).abs() < 1e-12);
     }
 
     #[test]
