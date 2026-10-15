@@ -19,7 +19,8 @@ pub(crate) struct RowSpan {
 }
 
 /// Rows from the design, with multi-row `DO ... BY n` statements split up,
-/// sorted by Y.
+/// sorted by Y. Rows at the same Y that overlap or abut on one site grid
+/// with one orientation are merged, so no site is counted twice.
 pub(crate) fn expand_rows(db: &NetlistDB) -> Vec<RowSpan> {
     let mut rows = Vec::new();
     for r in &db.rows {
@@ -41,7 +42,29 @@ pub(crate) fn expand_rows(db: &NetlistDB) -> Vec<RowSpan> {
         }
     }
     rows.sort_by_key(|r| (r.y, r.x_min));
-    rows
+    merge_overlapping(rows)
+}
+
+/// Merges each row into the one before it when they share Y, height,
+/// orientation and site grid and overlap or abut; `rows` are sorted by Y
+/// then X.
+fn merge_overlapping(rows: Vec<RowSpan>) -> Vec<RowSpan> {
+    let mut merged: Vec<RowSpan> = Vec::with_capacity(rows.len());
+    for row in rows {
+        if let Some(last) = merged.last_mut()
+            && last.y == row.y
+            && last.height == row.height
+            && last.orient == row.orient
+            && last.site == row.site
+            && (row.x_min - last.x_min) % row.site.get() == Dbu::ZERO
+            && row.x_min <= last.x_max
+        {
+            last.x_max = last.x_max.max(row.x_max);
+            continue;
+        }
+        merged.push(row);
+    }
+    merged
 }
 
 /// Splits movable cells into macros, placed freely, and single-row cells.
@@ -157,5 +180,55 @@ pub(crate) fn orientation_allowed(db: &NetlistDB, cell: CellId, row: Orientation
         Orientation::FN => symmetry.y,
         Orientation::S => symmetry.x && symmetry.y,
         _ => false,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn span(y: i64, x_min: i64, x_max: i64) -> RowSpan {
+        RowSpan {
+            y: Dbu(y),
+            height: Dbu(2000),
+            x_min: Dbu(x_min),
+            x_max: Dbu(x_max),
+            site: Dbu(200),
+            orient: Orientation::N,
+        }
+    }
+
+    fn extents(rows: &[RowSpan]) -> Vec<(i64, i64, i64)> {
+        rows.iter()
+            .map(|r| (r.y.get(), r.x_min.get(), r.x_max.get()))
+            .collect()
+    }
+
+    #[test]
+    fn a_row_inside_another_at_the_same_height_merges_into_it() {
+        let rows = vec![span(0, 0, 10_000), span(0, 200, 6_000)];
+
+        assert_eq!(extents(&merge_overlapping(rows)), [(0, 0, 10_000)]);
+    }
+
+    #[test]
+    fn abutting_rows_on_one_grid_merge_but_separate_ones_do_not() {
+        let rows = vec![
+            span(0, 0, 4_000),
+            span(0, 4_000, 6_000),
+            span(0, 8_000, 9_000),
+        ];
+
+        assert_eq!(
+            extents(&merge_overlapping(rows)),
+            [(0, 0, 6_000), (0, 8_000, 9_000)]
+        );
+    }
+
+    #[test]
+    fn rows_off_each_others_site_grid_stay_apart() {
+        let rows = vec![span(0, 0, 4_000), span(0, 100, 6_000)];
+
+        assert_eq!(merge_overlapping(rows).len(), 2);
     }
 }

@@ -32,6 +32,10 @@ pub enum LegalizeError {
     /// No free spot inside the die fits a macro.
     #[error("no free spot fits macro '{0}'")]
     MacroDoesNotFit(String),
+    /// Two rows overlap at one Y without sharing a site grid and
+    /// orientation, so their sites cannot be told apart.
+    #[error("rows overlap at y = {0} on different site grids or orientations")]
+    OverlappingRows(i64),
 }
 
 /// Moves every movable cell to a legal, row- and site-aligned position
@@ -41,6 +45,9 @@ pub fn legalize(db: &mut NetlistDB, zones: &Zones) -> Result<(), LegalizeError> 
         return Err(LegalizeError::NoRows);
     }
     let rows = expand_rows(db);
+    if let Some(y) = overlapping_row(&rows) {
+        return Err(LegalizeError::OverlappingRows(y.get()));
+    }
     let (macros, std_cells) = classify(db, &rows);
 
     let mut obstacles = fixed_obstacles(db);
@@ -57,6 +64,13 @@ pub fn legalize(db: &mut NetlistDB, zones: &Zones) -> Result<(), LegalizeError> 
         sub.commit(db, &rows[sub.row]);
     }
     Ok(())
+}
+
+/// The Y of the first two rows, sorted by Y then X, that still overlap.
+fn overlapping_row(rows: &[RowSpan]) -> Option<Dbu> {
+    rows.windows(2)
+        .find(|w| w[0].y == w[1].y && w[1].x_min < w[0].x_max)
+        .map(|w| w[0].y)
 }
 
 fn legalize_macros(
