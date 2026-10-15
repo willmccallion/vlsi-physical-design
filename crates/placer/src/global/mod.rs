@@ -99,7 +99,7 @@ pub fn default_bins(model: &PlacementModel) -> usize {
     let by_cells = ((cells as f64).sqrt().ceil() as usize)
         .next_power_of_two()
         .clamp(64, MAX_BINS);
-    match channel_pitch(&model.regions) {
+    match channel_pitch(&model.rows) {
         Some(pitch) => {
             let rows = (model.die.height() / pitch).floor().max(1.0) as usize;
             let by_pitch = 1usize << rows.ilog2();
@@ -141,7 +141,7 @@ pub fn place(
         &model.die,
         params.bins,
         params.target_density,
-        &model.regions,
+        &model.rows,
         &fixed,
     );
 
@@ -154,9 +154,9 @@ pub fn place(
         sizes: cell_sizes,
         cells: movable.len(),
     };
-    let regions = placeable_regions(model);
+    let placeable = placeable_area(model);
     for _ in 0..fillers {
-        objects.centers.push(random_point(&regions, &mut rng));
+        objects.centers.push(random_point(&placeable, &mut rng));
         objects.sizes.push(filler_size);
     }
     let netlist = build_netlist(model, &movable);
@@ -201,21 +201,21 @@ fn filler_layout(cells: &[Point<f64>], free_area: f64, target: f64) -> (Point<f6
 }
 
 /// The rows, or the whole die for a design without rows.
-fn placeable_regions(model: &PlacementModel) -> Vec<Rect<f64>> {
-    if model.regions.is_empty() {
+fn placeable_area(model: &PlacementModel) -> Vec<Rect<f64>> {
+    if model.rows.is_empty() {
         vec![model.die]
     } else {
-        model.regions.clone()
+        model.rows.clone()
     }
 }
 
 /// Cell centers in a small random cluster at the middle of the rows.
 fn initial_centers(model: &PlacementModel, movable: &[usize], rng: &mut StdRng) -> Vec<Point<f64>> {
-    let regions = placeable_regions(model);
-    let lo = regions.iter().fold(model.die.max, |p, r| {
+    let placeable = placeable_area(model);
+    let lo = placeable.iter().fold(model.die.max, |p, r| {
         Point::new(p.x.min(r.min.x), p.y.min(r.min.y))
     });
-    let hi = regions.iter().fold(model.die.min, |p, r| {
+    let hi = placeable.iter().fold(model.die.min, |p, r| {
         Point::new(p.x.max(r.max.x), p.y.max(r.max.y))
     });
     let area = Rect::new(lo, hi);
@@ -232,19 +232,19 @@ fn initial_centers(model: &PlacementModel, movable: &[usize], rng: &mut StdRng) 
         .collect()
 }
 
-/// A uniformly random point in the union of disjoint `regions`.
-fn random_point(regions: &[Rect<f64>], rng: &mut StdRng) -> Point<f64> {
-    let total: f64 = regions.iter().map(Rect::area).sum();
+/// A uniformly random point in the union of disjoint `rects`.
+fn random_point(rects: &[Rect<f64>], rng: &mut StdRng) -> Point<f64> {
+    let total: f64 = rects.iter().map(Rect::area).sum();
     let mut pick = rng.gen_range(0.0..=total);
-    let region = regions
+    let chosen = rects
         .iter()
         .find(|r| {
             let inside = pick <= r.area();
             pick -= r.area();
             inside
         })
-        .or_else(|| regions.last());
-    region.map_or(Point::new(0.0, 0.0), |r| {
+        .or_else(|| rects.last());
+    chosen.map_or(Point::new(0.0, 0.0), |r| {
         Point::new(
             rng.gen_range(r.min.x..=r.max.x),
             rng.gen_range(r.min.y..=r.max.y),

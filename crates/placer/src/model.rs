@@ -40,7 +40,7 @@ pub struct PlacementModel {
     /// Placement region.
     pub die: Rect<f64>,
     /// Rows cells may sit in, each one row high.
-    pub regions: Vec<Rect<f64>>,
+    pub rows: Vec<Rect<f64>>,
     /// Width and height of each cell as placed.
     pub sizes: Vec<Point<f64>>,
     /// Whether the placer may move each cell.
@@ -93,7 +93,7 @@ impl PlacementModel {
             })
             .filter(|n| n.pins.len() >= 2)
             .collect();
-        let regions = expand_rows(db)
+        let rows = expand_rows(db)
             .iter()
             .map(|r| {
                 Rect::new(
@@ -104,7 +104,7 @@ impl PlacementModel {
             .collect();
         Self {
             die: Rect::new(um(db.die_area.min), um(db.die_area.max)),
-            regions,
+            rows,
             sizes: (0..db.num_cells())
                 .map(|i| um(db.cell_size(CellId::new(i))))
                 .collect(),
@@ -131,19 +131,19 @@ impl PlacementModel {
     /// Area of the rows not covered by fixed cells, or of the die for a
     /// design without rows.
     pub fn free_area(&self) -> f64 {
-        if self.regions.is_empty() {
+        if self.rows.is_empty() {
             return self.die.area();
         }
-        let rows: f64 = self.regions.iter().map(Rect::area).sum();
-        let tallest = self.regions.iter().map(Rect::height).fold(0.0, f64::max);
+        let rows: f64 = self.rows.iter().map(Rect::area).sum();
+        let tallest = self.rows.iter().map(Rect::height).fold(0.0, f64::max);
         let fixed: f64 = (0..self.num_cells())
             .filter(|&i| !self.movable[i])
             .map(|i| {
                 let cell = Rect::new(self.positions[i], self.positions[i] + self.sizes[i]);
                 let first = self
-                    .regions
+                    .rows
                     .partition_point(|r| r.min.y + tallest <= cell.min.y);
-                self.regions[first..]
+                self.rows[first..]
                     .iter()
                     .take_while(|r| r.min.y < cell.max.y)
                     .map(|r| overlap_area(r, &cell))
