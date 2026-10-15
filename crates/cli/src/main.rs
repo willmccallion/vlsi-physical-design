@@ -479,6 +479,12 @@ fn report_placement(db: &NetlistDB) -> bool {
         "In blockage:",
         &count(|v| matches!(v, PlacementViolation::InBlockage(_))).to_string(),
     );
+    ui::stat_row(
+        "Unplaced:",
+        &count(|v| matches!(v, PlacementViolation::Unplaced(_))).to_string(),
+        "",
+        "",
+    );
     false
 }
 

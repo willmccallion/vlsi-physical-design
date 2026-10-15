@@ -1,7 +1,7 @@
 //! Placement legality: die containment, overlaps, blockages, rows, sites and
 //! row orientation.
 
-use crate::db::design::NetlistDB;
+use crate::db::design::{NetlistDB, PlacementStatus};
 use crate::db::indices::CellId;
 use crate::db::library::MacroClass;
 use crate::geom::dbu::Dbu;
@@ -12,9 +12,11 @@ use std::collections::HashMap;
 /// A placement rule a cell breaks.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum PlacementViolation {
+    /// A cell has no location, so no other rule is checked for it.
+    Unplaced(CellId),
     /// A movable cell extends past the die boundary.
     OutsideDie(CellId),
-    /// Two cells overlap, at least one of them movable.
+    /// A movable cell overlaps another placed cell, the first one found.
     Overlap(CellId, CellId),
     /// A movable cell overlaps a hard placement blockage.
     InBlockage(CellId),
@@ -26,13 +28,18 @@ pub enum PlacementViolation {
     WrongOrientation(CellId),
 }
 
-/// Checks every movable cell; fixed cells only matter as obstacles.
+/// Checks every movable cell; fixed cells only matter as obstacles, and
+/// unplaced cells are reported once without further checks.
 pub fn placement_violations(db: &NetlistDB) -> Vec<PlacementViolation> {
     let mut violations = Vec::new();
     let rows = RowIndex::new(db);
     for i in 0..db.num_cells() {
         let id = CellId::new(i);
         let cell = &db.cells[i];
+        if cell.status == PlacementStatus::Unplaced {
+            violations.push(PlacementViolation::Unplaced(id));
+            continue;
+        }
         if !cell.status.is_movable() {
             continue;
         }
@@ -102,58 +109,51 @@ const fn flip_y(o: Orientation) -> Orientation {
     }
 }
 
-/// Pairs of overlapping cells where at least one may move.
+/// One violation per movable cell that overlaps another placed cell, naming
+/// the first one found; like `OpenROAD`, this counts overlapping cells rather
+/// than pairs, so a stack of cells costs linear time and memory.
 fn overlaps(db: &NetlistDB) -> Vec<PlacementViolation> {
     let boxes: Vec<Rect<Dbu>> = (0..db.num_cells())
         .map(|i| db.cell_bbox(CellId::new(i)))
         .collect();
-    let movable: Vec<bool> = db.cells.iter().map(|c| c.status.is_movable()).collect();
-    let bin = boxes
-        .iter()
-        .zip(&movable)
-        .filter(|(_, m)| **m)
-        .map(|(r, _)| r.width().max(r.height()))
+    let checked = |i: usize| {
+        let r = boxes[i];
+        db.cells[i].status != PlacementStatus::Unplaced
+            && r.width() > Dbu::ZERO
+            && r.height() > Dbu::ZERO
+    };
+    let bin = (0..boxes.len())
+        .filter(|&i| db.cells[i].status.is_movable())
+        .map(|i| boxes[i].width().max(boxes[i].height()))
         .max()
         .unwrap_or(Dbu(1))
         .max(Dbu(1))
         .get();
 
     let mut bins: HashMap<(i64, i64), Vec<usize>> = HashMap::new();
-    for (i, r) in boxes.iter().enumerate() {
-        if r.width() <= Dbu::ZERO || r.height() <= Dbu::ZERO {
-            continue;
-        }
-        for bx in r.min.x.get().div_euclid(bin)..=(r.max.x.get() - 1).div_euclid(bin) {
-            for by in r.min.y.get().div_euclid(bin)..=(r.max.y.get() - 1).div_euclid(bin) {
-                bins.entry((bx, by)).or_default().push(i);
-            }
+    for i in (0..boxes.len()).filter(|&i| checked(i)) {
+        for key in bins_covering(&boxes[i], bin) {
+            bins.entry(key).or_default().push(i);
         }
     }
 
     let mut found = Vec::new();
-    for (&(bx, by), members) in &bins {
-        for (k, &a) in members.iter().enumerate() {
-            for &b in &members[k + 1..] {
-                let (ra, rb) = (boxes[a], boxes[b]);
-                if !(movable[a] || movable[b]) || !ra.overlaps(&rb) {
-                    continue;
-                }
-                let owner = (
-                    ra.min.x.max(rb.min.x).get().div_euclid(bin),
-                    ra.min.y.max(rb.min.y).get().div_euclid(bin),
-                );
-                if owner == (bx, by) {
-                    found.push(PlacementViolation::Overlap(
-                        CellId::new(a.min(b)),
-                        CellId::new(a.max(b)),
-                    ));
-                }
-            }
+    for a in (0..boxes.len()).filter(|&a| checked(a) && db.cells[a].status.is_movable()) {
+        let partner = bins_covering(&boxes[a], bin)
+            .filter_map(|key| bins.get(&key))
+            .flatten()
+            .copied()
+            .find(|&b| b != a && boxes[b].overlaps(&boxes[a]));
+        if let Some(b) = partner {
+            found.push(PlacementViolation::Overlap(CellId::new(a), CellId::new(b)));
         }
     }
-    found.sort_by_key(|v| match *v {
-        PlacementViolation::Overlap(a, b) => (a, b),
-        _ => (CellId(0), CellId(0)),
-    });
     found
+}
+
+/// The keys of the `bin`-sized squares a non-empty rectangle touches.
+fn bins_covering(r: &Rect<Dbu>, bin: i64) -> impl Iterator<Item = (i64, i64)> {
+    let xs = r.min.x.get().div_euclid(bin)..=(r.max.x.get() - 1).div_euclid(bin);
+    let ys = r.min.y.get().div_euclid(bin)..=(r.max.y.get() - 1).div_euclid(bin);
+    xs.flat_map(move |x| ys.clone().map(move |y| (x, y)))
 }

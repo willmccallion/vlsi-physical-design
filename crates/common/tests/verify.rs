@@ -325,14 +325,9 @@ fn cell(db: &NetlistDB, name: &str) -> CellId {
 }
 
 #[test]
-fn fixture_placement_violations_are_overlaps_and_a_wrong_orientation() {
+fn fixture_placement_violations_are_unplaced_cells_and_a_wrong_orientation() {
     let db = tiny_placed();
-    let (u1, u5, u6, u7) = (
-        cell(&db, "u1"),
-        cell(&db, "u5"),
-        cell(&db, "u6"),
-        cell(&db, "u7"),
-    );
+    let (u5, u6, u7) = (cell(&db, "u5"), cell(&db, "u6"), cell(&db, "u7"));
 
     let mut found = placement_violations(&db);
     found.sort_by_key(|v| format!("{v:?}"));
@@ -340,9 +335,8 @@ fn fixture_placement_violations_are_overlaps_and_a_wrong_orientation() {
     assert_eq!(
         found,
         [
-            PlacementViolation::Overlap(u1, u5),
-            PlacementViolation::Overlap(u1, u6),
-            PlacementViolation::Overlap(u5, u6),
+            PlacementViolation::Unplaced(u5),
+            PlacementViolation::Unplaced(u6),
             PlacementViolation::WrongOrientation(u7),
         ]
     );
@@ -357,6 +351,26 @@ fn a_movable_cell_on_a_fixed_macro_overlaps_it() {
     assert!(
         placement_violations(&db).contains(&PlacementViolation::Overlap(u4, cell(&db, "ram0")))
     );
+}
+
+#[test]
+fn stacked_cells_give_one_overlap_per_movable_cell() {
+    let mut db = tiny_placed();
+    let stacked = ["u1", "u2", "u4", "u7"].map(|name| cell(&db, name));
+    for c in stacked {
+        db.cells[c.index()].location = pt(1000, 2000);
+        db.cells[c.index()].orient = Orientation::FS;
+    }
+
+    let overlapping: Vec<CellId> = placement_violations(&db)
+        .into_iter()
+        .filter_map(|v| match v {
+            PlacementViolation::Overlap(a, _) => Some(a),
+            _ => None,
+        })
+        .collect();
+
+    assert_eq!(overlapping, stacked);
 }
 
 #[test]
