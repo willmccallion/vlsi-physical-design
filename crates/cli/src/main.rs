@@ -8,14 +8,13 @@ use clap::{Parser, Subcommand};
 use pare_common::db::design::{NetlistDB, PlacementStatus};
 use pare_common::db::parser::{bookshelf, def, lef};
 use pare_common::db::writer;
-use pare_common::geom::dbu::Dbu;
-use pare_common::geom::point::Point;
 use pare_common::util::config::Config;
 use pare_common::util::{logger, ui, visualization};
 use pare_common::verify::placement::{PlacementViolation, placement_violations};
 use pare_common::verify::routing::check_routing;
 use pare_placer::detailed;
 use pare_placer::global::{self, GlobalParams, Outcome, RoutabilityParams, TrackSupply};
+use pare_placer::io::{self, IoLayers};
 use pare_placer::legalize::abacus;
 use pare_placer::model::PlacementModel;
 use std::path::{Path, PathBuf};
@@ -162,37 +161,126 @@ fn output_dir(config: &Config) -> PathBuf {
         .map_or_else(|| PathBuf::from("output"), Path::to_path_buf)
 }
 
-/// Spreads unplaced I/O pins evenly around the die boundary, counter-clockwise
-/// from the lower-left corner.
-fn place_io_pins(db: &mut NetlistDB) {
-    let die = db.die_area;
-    let (width, height) = (die.width().get(), die.height().get());
-    let perimeter = 2 * (width + height);
-    let unplaced: Vec<usize> = (0..db.io_pins.len())
-        .filter(|&i| db.io_pins[i].status == PlacementStatus::Unplaced)
-        .collect();
-    let count = i64::try_from(unplaced.len()).unwrap_or(i64::MAX);
-    for (k, i) in (0_i64..).zip(unplaced) {
-        let along = perimeter * k / count.max(1);
-        let offset = if along < height {
-            (0, along)
-        } else if along < height + width {
-            (along - height, height)
-        } else if along < 2 * height + width {
-            (width, height - (along - height - width))
-        } else {
-            (width - (along - 2 * height - width), 0)
-        };
-        let pin = &mut db.io_pins[i];
-        pin.location = die.min + Point::new(Dbu(offset.0), Dbu(offset.1));
-        pin.status = PlacementStatus::Placed;
+/// Global placement, I/O pin placement, legalization, checking and output.
+fn run_placement(config: &Config, db: &mut NetlistDB, output_dir: &Path) -> anyhow::Result<()> {
+    let movable_io = io::movable_io_pins(db);
+    let io_layers = if movable_io.is_empty() {
+        None
+    } else if config.io_placement.enabled {
+        Some(IoLayers::from_config(&config.io_placement, &db.library)?)
+    } else {
+        let unplaced = movable_io
+            .iter()
+            .filter(|&&p| db.io_pins[p.index()].status == PlacementStatus::Unplaced)
+            .count();
+        if unplaced > 0 {
+            anyhow::bail!("I/O pin placement is disabled but {unplaced} I/O pins are unplaced");
+        }
+        None
+    };
+
+    ui::section("Placement");
+    let model = if let Some(layers) = io_layers {
+        place_cells_and_io_pins(config, db, layers)?
+    } else {
+        let phase_start = Instant::now();
+        let model = global_placement(config, db, PlacementModel::from_db(db))?;
+        ui::phase_time(phase_start.elapsed().as_secs_f64());
+        model
+    };
+    let movable_cells = model.movable.iter().filter(|&&m| m).count();
+    model.write_back(db);
+    let global_png = output_dir.join("nesterov_placer.png");
+    visualization::draw_placement(db, &path_str(&global_png)?, 1000, 1000);
+
+    let phase_start = Instant::now();
+    ui::phase("Legalization");
+    abacus::legalize(db)?;
+    ui::check(&format!("Legalized {movable_cells} cells"));
+    ui::stat_row(
+        "HPWL (um):",
+        &format!("{:.0}", PlacementModel::from_db(db).hpwl()),
+        "",
+        "",
+    );
+    ui::phase_time(phase_start.elapsed().as_secs_f64());
+
+    let phase_start = Instant::now();
+    ui::phase("Detailed Placement");
+    let result = detailed::improve(db, 3);
+    ui::stat_row(
+        "Moves:",
+        &result.moves.to_string(),
+        "HPWL (um):",
+        &format!("{:.0}", PlacementModel::from_db(db).hpwl()),
+    );
+    ui::phase_time(phase_start.elapsed().as_secs_f64());
+
+    if !report_placement(db) {
+        anyhow::bail!("placement is not legal");
     }
+
+    let phase_start = Instant::now();
+    ui::phase("Output");
+    ui::wrote(&path_str(&global_png)?);
+    let placed_png = output_dir.join("placed.png");
+    visualization::draw_placement(db, &path_str(&placed_png)?, 1000, 1000);
+    ui::wrote(&path_str(&placed_png)?);
+    let placed = if config.input.bookshelf_aux_file.is_some() {
+        let pl = output_dir.join("placed.pl");
+        writer::bookshelf::write_pl(db, &pl)
+            .with_context(|| format!("cannot write {}", pl.display()))?;
+        pl
+    } else {
+        let out = PathBuf::from(&config.input.output_def);
+        writer::def::write_file(db, &out)
+            .with_context(|| format!("cannot write {}", out.display()))?;
+        out
+    };
+    ui::wrote(&path_str(&placed)?);
+    ui::phase_time(phase_start.elapsed().as_secs_f64());
+    Ok(())
 }
 
-/// Global placement, legalization, checking and output.
-fn run_placement(config: &Config, db: &mut NetlistDB, output_dir: &Path) -> anyhow::Result<()> {
-    place_io_pins(db);
-    let mut model = PlacementModel::from_db(db);
+/// Global placement without the movable I/O pins, I/O pin placement for
+/// the cells' positions, then global placement again with the pins, as
+/// `OpenROAD`'s flow does.
+fn place_cells_and_io_pins(
+    config: &Config,
+    db: &mut NetlistDB,
+    layers: IoLayers,
+) -> anyhow::Result<PlacementModel> {
+    let phase_start = Instant::now();
+    ui::phase("Global Placement Without I/O");
+    let model = global_placement(config, db, PlacementModel::from_db_without_movable_io(db))?;
+    model.write_back(db);
+    ui::phase_time(phase_start.elapsed().as_secs_f64());
+
+    let phase_start = Instant::now();
+    ui::phase("I/O Pin Placement");
+    let placed = io::place_io_pins(db, layers)?;
+    ui::stat_row(
+        "Pins:",
+        &placed.pins.to_string(),
+        "Free slots:",
+        &placed.slots.to_string(),
+    );
+    ui::phase_time(phase_start.elapsed().as_secs_f64());
+
+    let phase_start = Instant::now();
+    ui::phase("Global Placement");
+    let model = global_placement(config, db, PlacementModel::from_db(db))?;
+    ui::phase_time(phase_start.elapsed().as_secs_f64());
+    Ok(model)
+}
+
+/// Runs global placement on `model` and reports it; `db` supplies the
+/// routing resources for routability-driven placement.
+fn global_placement(
+    config: &Config,
+    db: &NetlistDB,
+    mut model: PlacementModel,
+) -> anyhow::Result<PlacementModel> {
     let gp = &config.global_placement;
 
     let movable_area: f64 = model
@@ -211,8 +299,6 @@ fn run_placement(config: &Config, db: &mut NetlistDB, output_dir: &Path) -> anyh
         .target_density
         .unwrap_or_else(|| (utilization + 0.05).clamp(0.80, 1.0));
 
-    let phase_start = Instant::now();
-    ui::section("Placement");
     ui::stat_row(
         "Cells:",
         &movable_cells.to_string(),
@@ -277,58 +363,7 @@ fn run_placement(config: &Config, db: &mut NetlistDB, output_dir: &Path) -> anyh
         ),
     }
     ui::stat_row("HPWL (um):", &format!("{:.0}", model.hpwl()), "", "");
-    model.write_back(db);
-    ui::phase_time(phase_start.elapsed().as_secs_f64());
-    let global_png = output_dir.join("nesterov_placer.png");
-    visualization::draw_placement(db, &path_str(&global_png)?, 1000, 1000);
-
-    let phase_start = Instant::now();
-    ui::phase("Legalization");
-    abacus::legalize(db)?;
-    ui::check(&format!("Legalized {movable_cells} cells"));
-    ui::stat_row(
-        "HPWL (um):",
-        &format!("{:.0}", PlacementModel::from_db(db).hpwl()),
-        "",
-        "",
-    );
-    ui::phase_time(phase_start.elapsed().as_secs_f64());
-
-    let phase_start = Instant::now();
-    ui::phase("Detailed Placement");
-    let result = detailed::improve(db, 3);
-    ui::stat_row(
-        "Moves:",
-        &result.moves.to_string(),
-        "HPWL (um):",
-        &format!("{:.0}", PlacementModel::from_db(db).hpwl()),
-    );
-    ui::phase_time(phase_start.elapsed().as_secs_f64());
-
-    if !report_placement(db) {
-        anyhow::bail!("placement is not legal");
-    }
-
-    let phase_start = Instant::now();
-    ui::phase("Output");
-    ui::wrote(&path_str(&global_png)?);
-    let placed_png = output_dir.join("placed.png");
-    visualization::draw_placement(db, &path_str(&placed_png)?, 1000, 1000);
-    ui::wrote(&path_str(&placed_png)?);
-    let placed = if config.input.bookshelf_aux_file.is_some() {
-        let pl = output_dir.join("placed.pl");
-        writer::bookshelf::write_pl(db, &pl)
-            .with_context(|| format!("cannot write {}", pl.display()))?;
-        pl
-    } else {
-        let out = PathBuf::from(&config.input.output_def);
-        writer::def::write_file(db, &out)
-            .with_context(|| format!("cannot write {}", out.display()))?;
-        out
-    };
-    ui::wrote(&path_str(&placed)?);
-    ui::phase_time(phase_start.elapsed().as_secs_f64());
-    Ok(())
+    Ok(model)
 }
 
 fn path_str(path: &Path) -> anyhow::Result<String> {

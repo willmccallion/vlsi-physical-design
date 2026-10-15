@@ -54,6 +54,16 @@ pub struct PlacementModel {
 impl PlacementModel {
     /// Builds the model from the current state of `db`.
     pub fn from_db(db: &NetlistDB) -> Self {
+        Self::build(db, true)
+    }
+
+    /// Builds the model from `db` without the I/O pins placement may still
+    /// move, so that cells are not pulled toward where those pins are now.
+    pub fn from_db_without_movable_io(db: &NetlistDB) -> Self {
+        Self::build(db, false)
+    }
+
+    fn build(db: &NetlistDB, movable_io: bool) -> Self {
         let units = db.dbu();
         let um = |p: Point<pare_common::geom::dbu::Dbu>| {
             Point::new(units.to_microns(p.x), units.to_microns(p.y))
@@ -61,24 +71,27 @@ impl PlacementModel {
         let nets = db
             .nets
             .iter()
-            .filter(|n| !n.signal_use.is_supply() && n.pins.len() >= 2)
+            .filter(|n| !n.signal_use.is_supply())
             .map(|n| ModelNet {
                 weight: n.weight,
                 pins: n
                     .pins
                     .iter()
-                    .map(|&pin| {
+                    .filter_map(|&pin| {
                         let at = db.pin_position(pin);
                         match db.pins[pin.index()].owner {
-                            PinOwner::Cell { cell, .. } => PinAnchor::Cell {
+                            PinOwner::Cell { cell, .. } => Some(PinAnchor::Cell {
                                 cell: cell.index(),
                                 offset: um(at - db.cells[cell.index()].location),
-                            },
-                            PinOwner::Io(_) => PinAnchor::Fixed(um(at)),
+                            }),
+                            PinOwner::Io(io) => (movable_io
+                                || !db.io_pins[io.index()].status.is_movable())
+                            .then(|| PinAnchor::Fixed(um(at))),
                         }
                     })
                     .collect(),
             })
+            .filter(|n| n.pins.len() >= 2)
             .collect();
         let regions = expand_rows(db)
             .iter()

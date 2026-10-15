@@ -12,6 +12,9 @@ pub struct Config {
     /// Global placement parameters.
     #[serde(default)]
     pub global_placement: GlobalPlacementConfig,
+    /// Placement of top-level I/O pins.
+    #[serde(default)]
+    pub io_placement: IoPlacementConfig,
     /// Routing parameters.
     #[serde(default)]
     pub routing: RoutingConfig,
@@ -60,6 +63,33 @@ impl Default for GlobalPlacementConfig {
             target_congestion: default_target_congestion(),
         }
     }
+}
+
+/// Placement of top-level I/O pins that are not fixed.
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct IoPlacementConfig {
+    /// Whether placement moves unplaced and placed (not fixed) I/O pins.
+    #[serde(default = "default_io_placement_enabled")]
+    pub enabled: bool,
+    /// Horizontal routing layer for pins on the left and right edges.
+    pub horizontal_layer: Option<String>,
+    /// Vertical routing layer for pins on the top and bottom edges.
+    pub vertical_layer: Option<String>,
+}
+
+impl Default for IoPlacementConfig {
+    fn default() -> Self {
+        Self {
+            enabled: default_io_placement_enabled(),
+            horizontal_layer: None,
+            vertical_layer: None,
+        }
+    }
+}
+
+const fn default_io_placement_enabled() -> bool {
+    true
 }
 
 /// Parameters of the global and detailed router.

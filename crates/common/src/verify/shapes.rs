@@ -1,6 +1,6 @@
 //! Metal and cut rectangles of a design, tagged with what they belong to.
 
-use crate::db::design::{NetlistDB, PinOwner, RouteElem};
+use crate::db::design::{IoPin, NetlistDB, PinOwner, RouteElem};
 use crate::db::indices::{CellId, NetId};
 use crate::db::library::{LayerRef, Shape};
 use crate::geom::dbu::Dbu;
@@ -117,6 +117,11 @@ pub fn wiring_shapes(db: &NetlistDB) -> Vec<OwnedShape> {
 /// Everything the wiring must connect to or avoid: pins, obstructions,
 /// special nets and routing blockages.
 pub fn fixed_shapes(db: &NetlistDB) -> Vec<OwnedShape> {
+    fixed_shapes_keeping_io(db, |_| true)
+}
+
+/// [`fixed_shapes`] with only the I/O pins `keep` accepts.
+pub fn fixed_shapes_keeping_io(db: &NetlistDB, keep: impl Fn(&IoPin) -> bool) -> Vec<OwnedShape> {
     let mut out = Vec::new();
     let fixed = |shape: Shape, owner: Owner| OwnedShape {
         shape,
@@ -152,7 +157,7 @@ pub fn fixed_shapes(db: &NetlistDB) -> Vec<OwnedShape> {
         );
     }
 
-    for p in &db.io_pins {
+    for p in db.io_pins.iter().filter(|p| keep(p)) {
         let owner = if is_signal_net(db, p.net) {
             Owner::Net(p.net)
         } else {
