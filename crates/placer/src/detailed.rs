@@ -6,12 +6,14 @@
 //! consecutive cells in a row. A move is kept only if it shortens the
 //! half-perimeter wirelength of the nets it touches. Nets with more than
 //! [`MAX_NET_PINS`] pins are left out of the cost, as is usual for
-//! high-fanout nets whose bounding box barely changes.
+//! high-fanout nets whose bounding box barely changes. Cells only move
+//! within the stretches of row their zone may use.
 
 use crate::rows::{
     RowSpan, classify, expand_rows, fixed_obstacles, free_intervals, orientation_allowed,
     snap_down, snap_up,
 };
+use crate::zones::{Zone, Zones, intersect};
 use pare_common::db::design::{NetlistDB, PinOwner};
 use pare_common::db::indices::{CellId, NetId};
 use pare_common::geom::dbu::Dbu;
@@ -34,8 +36,8 @@ pub struct DetailedResult {
 }
 
 /// Runs `passes` rounds of global swap and local reordering on a legal placement.
-pub fn improve(db: &mut NetlistDB, passes: usize) -> DetailedResult {
-    let mut dp = DetailedPlacer::new(db);
+pub fn improve(db: &mut NetlistDB, zones: &Zones, passes: usize) -> DetailedResult {
+    let mut dp = DetailedPlacer::new(db, zones);
     let hpwl_before = dp.total_cost(db);
     let mut moves = 0;
     for _ in 0..passes {
@@ -52,9 +54,10 @@ pub fn improve(db: &mut NetlistDB, passes: usize) -> DetailedResult {
     }
 }
 
-/// A free stretch of a row and the cells in it, ordered by X.
+/// A free stretch of a row in one zone and the cells in it, ordered by X.
 struct Segment {
     row: usize,
+    zone: Zone,
     lo: Dbu,
     hi: Dbu,
     cells: Vec<CellId>,
@@ -67,12 +70,14 @@ struct DetailedPlacer {
     row_segments: Vec<(usize, usize)>,
     /// For each movable standard cell, its segment.
     segment_of: HashMap<CellId, usize>,
+    /// The zone of every cell.
+    zone_of: Vec<Zone>,
     /// For each cell, the cost nets it is on.
     nets_of: Vec<Vec<NetId>>,
 }
 
 impl DetailedPlacer {
-    fn new(db: &NetlistDB) -> Self {
+    fn new(db: &NetlistDB, zones: &Zones) -> Self {
         let rows = expand_rows(db);
         let (macros, std_cells) = classify(db, &rows);
         let mut obstacles = fixed_obstacles(db);
@@ -84,18 +89,23 @@ impl DetailedPlacer {
             let start = segments.len();
             let lo = row.x_min.max(db.die_area.min.x);
             let hi = row.x_max.min(db.die_area.max.x);
-            for (a, b) in free_intervals(&obstacles, lo, hi, row.y, row.y + row.height) {
-                let (a, b) = (
-                    snap_up(a, row.x_min, row.site),
-                    snap_down(b, row.x_min, row.site),
-                );
-                if b > a {
-                    segments.push(Segment {
-                        row: r,
-                        lo: a,
-                        hi: b,
-                        cells: Vec::new(),
-                    });
+            let (y0, y1) = (row.y, row.y + row.height);
+            let free = free_intervals(&obstacles, lo, hi, y0, y1);
+            for zone in zones.all() {
+                for (a, b) in intersect(&free, &zones.intervals(zone, lo, hi, y0, y1)) {
+                    let (a, b) = (
+                        snap_up(a, row.x_min, row.site),
+                        snap_down(b, row.x_min, row.site),
+                    );
+                    if b > a {
+                        segments.push(Segment {
+                            row: r,
+                            zone,
+                            lo: a,
+                            hi: b,
+                            cells: Vec::new(),
+                        });
+                    }
                 }
             }
             row_segments.push((start, segments.len()));
@@ -106,10 +116,14 @@ impl DetailedPlacer {
             let at = db.cells[cell.index()].location;
             let width = db.cell_size(cell).x;
             let r = rows.partition_point(|row| row.y < at.y);
+            let zone = zones.of(cell);
             let found = (r..rows.len())
                 .take_while(|&r| rows[r].y == at.y)
                 .flat_map(|r| row_segments[r].0..row_segments[r].1)
-                .find(|&s| segments[s].lo <= at.x && at.x + width <= segments[s].hi);
+                .find(|&s| {
+                    let seg = &segments[s];
+                    seg.zone == zone && seg.lo <= at.x && at.x + width <= seg.hi
+                });
             if let Some(s) = found {
                 segments[s].cells.push(cell);
                 let _ = segment_of.insert(cell, s);
@@ -139,6 +153,9 @@ impl DetailedPlacer {
             segments,
             row_segments,
             segment_of,
+            zone_of: (0..db.num_cells())
+                .map(|i| zones.of(CellId::new(i)))
+                .collect(),
             nets_of,
         }
     }
@@ -268,7 +285,10 @@ impl DetailedPlacer {
             }
             for s in self.row_segments[row].0..self.row_segments[row].1 {
                 let seg = &self.segments[s];
-                if seg.hi < target.x - size.x * 4 || seg.lo > target.x + size.x * 4 {
+                if seg.zone != self.zone_of[cell.index()]
+                    || seg.hi < target.x - size.x * 4
+                    || seg.lo > target.x + size.x * 4
+                {
                     continue;
                 }
                 if let Some(x) = self.gap_near(db, s, target.x, size.x) {
@@ -281,7 +301,9 @@ impl DetailedPlacer {
                 if let Some(other) = self.equal_width_near(db, s, target.x, size.x, cell) {
                     let other_at = db.cells[other.index()].location;
                     let other_row = self.segments[from].row;
-                    if !orientation_allowed(db, other, self.rows[other_row].orient) {
+                    if self.zone_of[other.index()] != self.segments[from].zone
+                        || !orientation_allowed(db, other, self.rows[other_row].orient)
+                    {
                         continue;
                     }
                     if self.try_move(
@@ -439,8 +461,8 @@ fn net_cost(db: &NetlistDB, net: NetId) -> f64 {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use pare_common::db::design::{PlacementStatus, Row};
-    use pare_common::db::indices::{LayerId, SiteId};
+    use pare_common::db::design::{PlacementStatus, Region, RegionKind, Row};
+    use pare_common::db::indices::{LayerId, RegionId, SiteId};
     use pare_common::db::library::{
         CoreKind, Direction, LayerRef, Library, Macro, MacroClass, MacroPin, PinDirection,
         RoutingLayer, Shape, SignalUse, Site, SiteClass, Symmetry,
@@ -452,6 +474,11 @@ mod tests {
 
     const fn pt(x: i64, y: i64) -> Point<Dbu> {
         Point::new(Dbu(x), Dbu(y))
+    }
+
+    fn improve_zoned(db: &mut NetlistDB) -> DetailedResult {
+        let zones = Zones::new(db).unwrap();
+        improve(db, &zones, 2)
     }
 
     /// One 20-site row over a 200 x 100 die, with 20-wide one-pin cells.
@@ -534,7 +561,7 @@ mod tests {
             &[(2, 1), (3, 0)],
         );
 
-        let result = improve(&mut db, 2);
+        let result = improve_zoned(&mut db);
 
         assert!(result.hpwl_after < result.hpwl_before, "{result:?}");
         assert!(db.cells[2].location.x > db.cells[3].location.x);
@@ -554,12 +581,35 @@ mod tests {
         );
         let before: Vec<_> = db.cells.iter().map(|c| c.location).collect();
 
-        let result = improve(&mut db, 2);
+        let result = improve_zoned(&mut db);
 
         assert_eq!(result.moves, 0);
         assert_eq!(
             db.cells.iter().map(|c| c.location).collect::<Vec<_>>(),
             before
+        );
+    }
+
+    #[test]
+    fn a_fence_member_moves_toward_its_net_only_up_to_the_fence_edge() {
+        use PlacementStatus::{Fixed, Placed};
+        let mut db = design(&[(0, Fixed), (180, Fixed), (40, Placed)], &[(2, 1)]);
+        db.regions.push(Region {
+            name: "f".into(),
+            rects: vec![Rect::new(pt(0, 0), pt(100, 100))],
+            kind: RegionKind::Fence,
+        });
+        db.cells[2].region = Some(RegionId(0));
+
+        let result = improve_zoned(&mut db);
+
+        let x = db.cells[2].location.x;
+        assert!(result.moves > 0, "{result:?}");
+        assert!(Dbu(40) < x && x <= Dbu(80), "{x:?}");
+        assert!(
+            placement_violations(&db).is_empty(),
+            "{:?}",
+            placement_violations(&db)
         );
     }
 }

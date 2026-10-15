@@ -17,6 +17,7 @@ use pare_placer::global::{self, GlobalParams, Outcome, RoutabilityParams, TrackS
 use pare_placer::io::{self, IoLayers};
 use pare_placer::legalize::abacus;
 use pare_placer::model::PlacementModel;
+use pare_placer::zones::Zones;
 use std::path::{Path, PathBuf};
 use std::time::Instant;
 
@@ -227,9 +228,10 @@ fn run_placement(config: &Config, db: &mut NetlistDB, output_dir: &Path) -> anyh
     let global_png = output_dir.join("nesterov_placer.png");
     visualization::draw_placement(db, &path_str(&global_png)?, 1000, 1000);
 
+    let zones = Zones::new(db)?;
     let phase_start = Instant::now();
     ui::phase("Legalization");
-    abacus::legalize(db)?;
+    abacus::legalize(db, &zones)?;
     ui::check(&format!("Legalized {movable_cells} cells"));
     ui::stat_row(
         "HPWL (um):",
@@ -241,7 +243,7 @@ fn run_placement(config: &Config, db: &mut NetlistDB, output_dir: &Path) -> anyh
 
     let phase_start = Instant::now();
     ui::phase("Detailed Placement");
-    let result = detailed::improve(db, 3);
+    let result = detailed::improve(db, &zones, 3);
     ui::stat_row(
         "Moves:",
         &result.moves.to_string(),

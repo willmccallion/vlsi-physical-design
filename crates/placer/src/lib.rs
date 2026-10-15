@@ -8,3 +8,4 @@ pub mod io;
 pub mod legalize;
 pub mod model;
 pub mod rows;
+pub mod zones;
