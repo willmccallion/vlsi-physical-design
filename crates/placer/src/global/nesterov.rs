@@ -1,13 +1,15 @@
 //! Nesterov's method on wirelength plus weighted density energy, with the
 //! step length predicted from the local Lipschitz constant and backtracking
-//! when the prediction overshoots.
+//! when the prediction overshoots. Every field weighs its own density
+//! energy, and its objects stop moving once its overflow reaches the target.
 
-use super::density::{DensityGrid, Footprint};
+use super::density::{Excess, Footprint};
 use super::routability::{CHECK_OVERFLOW, CongestionMap, Routability, SNAPSHOT_OVERFLOW, Verdict};
 use super::wirelength::{Netlist, Wirelength};
-use super::{GlobalParams, GlobalResult, Outcome, Progress};
+use super::{Field, GlobalParams, GlobalResult, Outcome, Progress, ZoneOutcome};
 use pare_common::geom::point::Point;
 use pare_common::geom::rect::Rect;
+use rayon::prelude::*;
 
 /// Density penalty at the start, relative to the ratio of the wirelength and
 /// density gradient norms.
@@ -37,35 +39,53 @@ pub(super) struct Objects {
 
 /// The objective and the buffers to evaluate it.
 struct Objective<'a> {
-    grid: &'a mut DensityGrid,
+    fields: &'a mut [Field],
     netlist: &'a Netlist,
+    /// The field of each object.
+    field_of: Vec<usize>,
     footprints: Vec<Footprint>,
     areas: Vec<f64>,
     pins: Vec<f64>,
     bounds: Vec<Rect<f64>>,
-    cells: usize,
     wirelength_grad: Vec<Point<f64>>,
     density_grad: Vec<Point<f64>>,
     scratch: Vec<Point<f64>>,
 }
 
 /// The state of a placement besides its gradient.
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Debug)]
 struct Evaluation {
     wirelength: Wirelength,
+    /// Cell area above the target density over all cell area, every field
+    /// together.
     overflow: f64,
+    /// The overflow of each field.
+    field_overflow: Vec<f64>,
 }
 
 impl<'a> Objective<'a> {
+    /// `fields` must not be empty; they all share one bin grid.
     fn new(
         objects: &Objects,
         die: &Rect<f64>,
-        grid: &'a mut DensityGrid,
+        fields: &'a mut [Field],
         netlist: &'a Netlist,
     ) -> Self {
         let n = objects.centers.len();
+        let mut field_of = vec![0; n];
+        for (k, f) in fields.iter().enumerate() {
+            for i in f.cells.clone().chain(f.fillers.clone()) {
+                field_of[i] = k;
+            }
+        }
+        let footprints = objects
+            .sizes
+            .iter()
+            .map(|&s| fields[0].grid.footprint(s))
+            .collect();
         Self {
-            footprints: objects.sizes.iter().map(|&s| grid.footprint(s)).collect(),
+            field_of,
+            footprints,
             areas: objects.sizes.iter().map(|s| s.x * s.y).collect(),
             pins: netlist.pin_counts(n),
             bounds: objects
@@ -73,8 +93,7 @@ impl<'a> Objective<'a> {
                 .iter()
                 .map(|&s| center_bounds(die, s))
                 .collect(),
-            cells: objects.cells,
-            grid,
+            fields,
             netlist,
             wirelength_grad: vec![Point::new(0.0, 0.0); n],
             density_grad: vec![Point::new(0.0, 0.0); n],
@@ -82,31 +101,61 @@ impl<'a> Objective<'a> {
         }
     }
 
-    /// Evaluates both gradients, unweighted, at `centers`.
+    /// Evaluates both gradients, unweighted, at `centers`: wirelength over
+    /// every object, and each object's density energy in its own field.
     fn evaluate(&mut self, centers: &[Point<f64>], gamma: f64) -> Evaluation {
         let wirelength =
             self.netlist
                 .gradient(centers, gamma, &mut self.scratch, &mut self.wirelength_grad);
-        let overflow = self.grid.update(centers, &self.footprints, self.cells);
-        self.grid
-            .gradient(centers, &self.footprints, &mut self.density_grad);
+        let footprints = &self.footprints;
+        let excess: Vec<Excess> = self
+            .fields
+            .par_iter_mut()
+            .map(|f| {
+                f.grid
+                    .update(centers, footprints, f.cells.clone(), f.fillers.clone())
+            })
+            .collect();
+        let fields: &[Field] = self.fields;
+        let field_of = &self.field_of;
+        self.density_grad
+            .par_iter_mut()
+            .enumerate()
+            .for_each(|(i, g)| {
+                *g = fields[field_of[i]]
+                    .grid
+                    .gradient_at(centers[i], &footprints[i]);
+            });
+        let total = excess.iter().fold(Excess::default(), |a, e| Excess {
+            over: a.over + e.over,
+            cells: a.cells + e.cells,
+        });
         Evaluation {
             wirelength,
-            overflow,
+            overflow: total.fraction(),
+            field_overflow: excess.iter().map(|e| e.fraction()).collect(),
         }
     }
 
-    /// The preconditioned gradient of wirelength plus `penalty` times
-    /// density energy, written to `out`.
+    /// The preconditioned gradient of wirelength plus each field's
+    /// `penalties` times its density energy, written to `out`; objects of
+    /// `frozen` fields get none.
     fn gradient(
         &mut self,
         centers: &[Point<f64>],
         gamma: f64,
-        penalty: f64,
+        penalties: &[f64],
+        frozen: &[bool],
         out: &mut [Point<f64>],
     ) -> Evaluation {
         let eval = self.evaluate(centers, gamma);
         for (i, g) in out.iter_mut().enumerate() {
+            let k = self.field_of[i];
+            if frozen[k] {
+                *g = Point::new(0.0, 0.0);
+                continue;
+            }
+            let penalty = penalties[k];
             let combined = self.wirelength_grad[i] + self.density_grad[i] * penalty;
             let scale = 1.0 / penalty.mul_add(self.areas[i], self.pins[i]).max(1.0);
             *g = combined * scale;
@@ -114,16 +163,43 @@ impl<'a> Objective<'a> {
         eval
     }
 
-    /// The initial density penalty, from the sizes of the two gradients.
-    fn initial_penalty(&self) -> f64 {
-        let l1 = |v: &[Point<f64>]| v.iter().map(|g| g.x.abs() + g.y.abs()).sum::<f64>();
-        let wirelength = l1(&self.wirelength_grad);
-        let density = l1(&self.density_grad);
-        if wirelength > 0.0 && density > 0.0 {
-            INITIAL_PENALTY * wirelength / density
-        } else {
-            INITIAL_PENALTY
-        }
+    /// Each field's initial density penalty, from the sizes of the two
+    /// gradients over its objects.
+    fn initial_penalties(&self) -> Vec<f64> {
+        let l1 = |g: Point<f64>| g.x.abs() + g.y.abs();
+        self.fields
+            .iter()
+            .map(|f| {
+                let objects = || f.cells.clone().chain(f.fillers.clone());
+                let wirelength: f64 = objects().map(|i| l1(self.wirelength_grad[i])).sum();
+                let density: f64 = objects().map(|i| l1(self.density_grad[i])).sum();
+                if wirelength > 0.0 && density > 0.0 {
+                    INITIAL_PENALTY * wirelength / density
+                } else {
+                    INITIAL_PENALTY
+                }
+            })
+            .collect()
+    }
+
+    /// Whether each object may move: those of fields not yet frozen.
+    fn moving(&self, frozen: &[bool]) -> Vec<bool> {
+        self.field_of.iter().map(|&k| !frozen[k]).collect()
+    }
+
+    /// How each field ended, at the overflows of `eval`.
+    fn outcomes(&self, eval: &Evaluation) -> Vec<ZoneOutcome> {
+        self.fields
+            .iter()
+            .zip(&eval.field_overflow)
+            .map(|(f, &overflow)| ZoneOutcome {
+                zone: f.zone,
+                cells: f.cells.len(),
+                utilization: f.utilization,
+                target: f.grid.target(),
+                overflow,
+            })
+            .collect()
     }
 
     fn clamp(&self, centers: &mut [Point<f64>]) {
@@ -187,10 +263,19 @@ struct State {
     major: Vec<Point<f64>>,
     reference: Vec<Point<f64>>,
     step: f64,
-    penalty: f64,
+    /// Each field's density penalty.
+    penalties: Vec<f64>,
+    /// Whether each field has stopped moving.
+    frozen: Vec<bool>,
     gamma: f64,
     a: f64,
     prev_hpwl: f64,
+}
+
+impl State {
+    fn highest_penalty(&self) -> f64 {
+        self.penalties.iter().copied().fold(0.0, f64::max)
+    }
 }
 
 /// How one stretch of iterations ended.
@@ -208,14 +293,24 @@ enum Phase {
 pub(super) fn minimize(
     objects: &mut Objects,
     die: &Rect<f64>,
-    grid: &mut DensityGrid,
+    fields: &mut [Field],
     netlist: &Netlist,
     params: &GlobalParams,
     mut report: impl FnMut(&Progress),
 ) -> GlobalResult {
-    let mut routability = params
-        .routability
-        .map(|r| Routability::new(r, objects, grid.free_area()));
+    let Some(dim) = fields.first().map(|f| f.grid.dim()) else {
+        let mut grad = vec![Point::new(0.0, 0.0); objects.centers.len()];
+        let wirelength = netlist.gradient(&objects.centers, 1.0, &mut Vec::new(), &mut grad);
+        return GlobalResult {
+            outcome: Outcome::Converged,
+            iterations: 0,
+            overflow: 0.0,
+            hpwl: wirelength.hpwl,
+            congestion: Vec::new(),
+            zones: Vec::new(),
+        };
+    };
+    let mut routability = params.routability.map(|r| Routability::new(r, objects));
     let mut saved: Option<State> = None;
     let mut resume: Option<State> = None;
     let mut first = 0;
@@ -224,7 +319,7 @@ pub(super) fn minimize(
         let phase = run(
             objects,
             die,
-            grid,
+            fields,
             netlist,
             params,
             &mut report,
@@ -241,10 +336,8 @@ pub(super) fn minimize(
                 return result;
             }
             (Phase::Paused { iteration, state }, Some(r), Some(p)) => {
-                let map = CongestionMap::rudy(netlist, &objects.centers, die, grid.dim(), p.supply);
-                let mut target = grid.target();
-                let verdict = r.check(iteration, &map, objects, &mut target);
-                grid.set_target(target);
+                let map = CongestionMap::rudy(netlist, &objects.centers, die, dim, p.supply);
+                let verdict = r.check(iteration, &map, objects, fields);
                 resume = match verdict {
                     Verdict::Resume => saved.clone().or(Some(state)),
                     Verdict::Done => Some(state),
@@ -273,17 +366,17 @@ struct Start {
 fn run(
     objects: &mut Objects,
     die: &Rect<f64>,
-    grid: &mut DensityGrid,
+    fields: &mut [Field],
     netlist: &Netlist,
     params: &GlobalParams,
     report: &mut impl FnMut(&Progress),
     start: Start,
     saved: &mut Option<State>,
 ) -> Phase {
-    let bin = grid.bin();
+    let bin = fields[0].grid.bin();
     let reference_growth =
         REFERENCE_STRETCH_BINS * f64::midpoint(bin.x, bin.y) * netlist.len().max(1) as f64;
-    let mut objective = Objective::new(objects, die, grid, netlist);
+    let mut objective = Objective::new(objects, die, fields, netlist);
     let n = objects.centers.len();
     let mut grad = vec![Point::new(0.0, 0.0); n];
 
@@ -294,20 +387,31 @@ fn run(
         objective.clamp(&mut major);
         let gamma = gamma_for(1.0, bin);
         let first = objective.evaluate(&major, gamma);
-        let penalty = objective.initial_penalty();
-        let _ = objective.gradient(&major, gamma, penalty, &mut grad);
-        let step = initial_step(&mut objective, &major, &grad, gamma, penalty, bin);
+        let penalties = objective.initial_penalties();
+        let frozen = vec![false; penalties.len()];
+        let _ = objective.gradient(&major, gamma, &penalties, &frozen, &mut grad);
+        let step = initial_step(
+            &mut objective,
+            &major,
+            &grad,
+            gamma,
+            &penalties,
+            &frozen,
+            bin,
+        );
         State {
             reference: major.clone(),
             major,
             step,
-            penalty,
+            penalties,
+            frozen,
             gamma,
             a: 1.0,
             prev_hpwl: first.wirelength.hpwl,
         }
     };
-    let mut eval = objective.gradient(&s.reference, s.gamma, s.penalty, &mut grad);
+    let mut eval = objective.gradient(&s.reference, s.gamma, &s.penalties, &s.frozen, &mut grad);
+    let mut moving = objective.moving(&s.frozen);
 
     let mut next_major = vec![Point::new(0.0, 0.0); n];
     let mut next_reference = vec![Point::new(0.0, 0.0); n];
@@ -319,18 +423,32 @@ fn run(
         iterations = k + 1;
         let a_next = f64::midpoint(1.0, (4.0 * s.a).mul_add(s.a, 1.0).sqrt());
         let momentum = (s.a - 1.0) / a_next;
-        let mut next_eval = eval;
+        let mut next_eval = eval.clone();
         let mut next_step = s.step;
         for attempt in 0..=MAX_BACKTRACKS {
             for i in 0..n {
-                next_major[i] = s.reference[i] - grad[i] * s.step;
+                next_major[i] = if moving[i] {
+                    s.reference[i] - grad[i] * s.step
+                } else {
+                    s.major[i]
+                };
             }
             objective.clamp(&mut next_major);
             for i in 0..n {
-                next_reference[i] = next_major[i] + (next_major[i] - s.major[i]) * momentum;
+                next_reference[i] = if moving[i] {
+                    next_major[i] + (next_major[i] - s.major[i]) * momentum
+                } else {
+                    s.major[i]
+                };
             }
             objective.clamp(&mut next_reference);
-            next_eval = objective.gradient(&next_reference, s.gamma, s.penalty, &mut next_grad);
+            next_eval = objective.gradient(
+                &next_reference,
+                s.gamma,
+                &s.penalties,
+                &s.frozen,
+                &mut next_grad,
+            );
             let moved = distance(&next_reference, &s.reference);
             let changed = distance(&next_grad, &grad);
             next_step = if changed > 0.0 {
@@ -359,12 +477,30 @@ fn run(
             iteration: k,
             hpwl: eval.wirelength.hpwl,
             overflow: eval.overflow,
-            penalty: s.penalty,
+            penalty: s.highest_penalty(),
             step: s.step,
         });
-        let converged = eval.overflow <= params.target_overflow;
+        let mut froze = false;
+        for (frozen, &overflow) in s.frozen.iter_mut().zip(&eval.field_overflow) {
+            if !*frozen && overflow <= params.target_overflow {
+                *frozen = true;
+                froze = true;
+            }
+        }
+        if froze {
+            moving = objective.moving(&s.frozen);
+        }
+        let converged = s.frozen.iter().all(|&f| f);
         if !converged {
-            s.penalty *= penalty_growth(eval.wirelength.hpwl - s.prev_hpwl, reference_growth);
+            let growth = penalty_growth(eval.wirelength.hpwl - s.prev_hpwl, reference_growth);
+            for (penalty, _) in s
+                .penalties
+                .iter_mut()
+                .zip(&s.frozen)
+                .filter(|&(_, &frozen)| !frozen)
+            {
+                *penalty *= growth;
+            }
             s.prev_hpwl = eval.wirelength.hpwl;
             s.gamma = gamma_for(eval.overflow, bin);
         }
@@ -394,6 +530,7 @@ fn run(
         overflow: last.overflow,
         hpwl: last.wirelength.hpwl,
         congestion: Vec::new(),
+        zones: objective.outcomes(&last),
     })
 }
 
@@ -405,13 +542,20 @@ fn restart(
     grad: &mut [Point<f64>],
     bin: Point<f64>,
 ) -> State {
-    let _ = objective.gradient(&state.major, state.gamma, state.penalty, grad);
+    let _ = objective.gradient(
+        &state.major,
+        state.gamma,
+        &state.penalties,
+        &state.frozen,
+        grad,
+    );
     let step = initial_step(
         objective,
         &state.major,
         grad,
         state.gamma,
-        state.penalty,
+        &state.penalties,
+        &state.frozen,
         bin,
     );
     State {
@@ -428,7 +572,8 @@ fn initial_step(
     at: &[Point<f64>],
     grad: &[Point<f64>],
     gamma: f64,
-    penalty: f64,
+    penalties: &[f64],
+    frozen: &[bool],
     bin: Point<f64>,
 ) -> f64 {
     let largest = grad
@@ -443,7 +588,7 @@ fn initial_step(
     let mut probe: Vec<Point<f64>> = at.iter().zip(grad).map(|(&p, &g)| p - g * scale).collect();
     objective.clamp(&mut probe);
     let mut probe_grad = vec![Point::new(0.0, 0.0); at.len()];
-    let _ = objective.gradient(&probe, gamma, penalty, &mut probe_grad);
+    let _ = objective.gradient(&probe, gamma, penalties, frozen, &mut probe_grad);
     let changed = distance(&probe_grad, grad);
     if changed > 0.0 {
         distance(&probe, at) / changed

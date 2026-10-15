@@ -6,8 +6,10 @@
 //! and would only pull everything together.
 
 use crate::rows::expand_rows;
+use crate::zones::{Zone, Zones};
 use pare_common::db::design::{NetlistDB, PinOwner, PlacementStatus};
 use pare_common::db::indices::CellId;
+use pare_common::geom::dbu::Dbu;
 use pare_common::geom::point::Point;
 use pare_common::geom::rect::Rect;
 
@@ -34,6 +36,16 @@ pub struct ModelNet {
     pub weight: f64,
 }
 
+/// The stretches of row the cells of one zone may use.
+#[derive(Clone, Debug, PartialEq)]
+pub struct ZoneRows {
+    /// The zone.
+    pub zone: Zone,
+    /// Its stretches of row, each one row high; the zone's whole area for a
+    /// design without rows.
+    pub rects: Vec<Rect<f64>>,
+}
+
 /// A design in microns, with one entry per cell in the same order as the database.
 #[derive(Clone, Debug, PartialEq)]
 pub struct PlacementModel {
@@ -49,21 +61,26 @@ pub struct PlacementModel {
     pub positions: Vec<Point<f64>>,
     /// Signal nets with at least two connections.
     pub nets: Vec<ModelNet>,
+    /// Every zone's stretches of row: each fence, then the space outside.
+    pub zones: Vec<ZoneRows>,
+    /// For each cell, the index of its zone in `zones`.
+    pub zone_of: Vec<usize>,
 }
 
 impl PlacementModel {
-    /// Builds the model from the current state of `db`.
-    pub fn from_db(db: &NetlistDB) -> Self {
-        Self::build(db, true)
+    /// Builds the model from the current state of `db`, its cells in
+    /// `zones`.
+    pub fn from_db(db: &NetlistDB, zones: &Zones) -> Self {
+        Self::build(db, zones, true)
     }
 
     /// Builds the model from `db` without the I/O pins placement may still
     /// move, so that cells are not pulled toward where those pins are now.
-    pub fn from_db_without_movable_io(db: &NetlistDB) -> Self {
-        Self::build(db, false)
+    pub fn from_db_without_movable_io(db: &NetlistDB, zones: &Zones) -> Self {
+        Self::build(db, zones, false)
     }
 
-    fn build(db: &NetlistDB, movable_io: bool) -> Self {
+    fn build(db: &NetlistDB, zones: &Zones, movable_io: bool) -> Self {
         let units = db.dbu();
         let um = |p: Point<pare_common::geom::dbu::Dbu>| {
             Point::new(units.to_microns(p.x), units.to_microns(p.y))
@@ -93,13 +110,35 @@ impl PlacementModel {
             })
             .filter(|n| n.pins.len() >= 2)
             .collect();
-        let rows = expand_rows(db)
+        let spans = expand_rows(db);
+        let um_rect = |x0: Dbu, x1: Dbu, y0: Dbu, y1: Dbu| {
+            Rect::new(um(Point::new(x0, y0)), um(Point::new(x1, y1)))
+        };
+        let rows = spans
             .iter()
-            .map(|r| {
-                Rect::new(
-                    um(Point::new(r.x_min, r.y)),
-                    um(Point::new(r.x_max, r.y + r.height)),
-                )
+            .map(|r| um_rect(r.x_min, r.x_max, r.y, r.y + r.height))
+            .collect();
+        let zone_rows = zones
+            .all()
+            .map(|zone| {
+                let rects = if spans.is_empty() {
+                    whole_zone(db, zones, zone)
+                        .iter()
+                        .map(|r| um_rect(r.min.x, r.max.x, r.min.y, r.max.y))
+                        .collect()
+                } else {
+                    spans
+                        .iter()
+                        .flat_map(|r| {
+                            let (y0, y1) = (r.y, r.y + r.height);
+                            zones
+                                .intervals(zone, r.x_min, r.x_max, y0, y1)
+                                .into_iter()
+                                .map(move |(a, b)| um_rect(a, b, y0, y1))
+                        })
+                        .collect()
+                };
+                ZoneRows { zone, rects }
             })
             .collect();
         Self {
@@ -111,6 +150,10 @@ impl PlacementModel {
             movable: db.cells.iter().map(|c| c.status.is_movable()).collect(),
             positions: db.cells.iter().map(|c| um(c.location)).collect(),
             nets,
+            zones: zone_rows,
+            zone_of: (0..db.num_cells())
+                .map(|i| zones.index(zones.of(CellId::new(i))))
+                .collect(),
         }
     }
 
@@ -184,6 +227,16 @@ impl PlacementModel {
             cell.location = Point::new(units.to_dbu_rounded(p.x), units.to_dbu_rounded(p.y));
             cell.status = PlacementStatus::Placed;
         }
+    }
+}
+
+/// The area of a zone in a design without rows: a fence's rectangles, or
+/// the die outside them, which only a design without fences has whole.
+fn whole_zone(db: &NetlistDB, zones: &Zones, zone: Zone) -> Vec<Rect<Dbu>> {
+    match zone {
+        Zone::Fence(_) => zones.fence_rects(zone).to_vec(),
+        Zone::Outside if !zones.has_fences() => vec![db.die_area],
+        Zone::Outside => Vec::new(),
     }
 }
 

@@ -8,6 +8,12 @@
 //! the cell area above the target density falls below a threshold. With
 //! routability enabled, cells in bins whose estimated routing demand exceeds
 //! the tracks there are inflated along the way.
+//!
+//! Fence regions are handled as in `DREAMPlace` 3.0: each zone's cells and
+//! fillers form an electrostatic system of their own, whose fixed charge
+//! covers everything outside the zone, so the field pushes them into it.
+//! Every system has its own target density, density weight and stopping
+//! point; wirelength couples them all.
 
 mod density;
 mod nesterov;
@@ -18,12 +24,14 @@ mod wirelength;
 pub use routability::{CongestionRound, RoutabilityParams, TrackSupply};
 
 use crate::model::{PinAnchor, PlacementModel};
+use crate::zones::Zone;
 use density::DensityGrid;
 use nesterov::Objects;
 use pare_common::geom::point::Point;
 use pare_common::geom::rect::Rect;
 use rand::rngs::StdRng;
 use rand::{Rng, SeedableRng};
+use std::ops::Range;
 use wirelength::{Netlist, Terminal};
 
 /// Settings for global placement.
@@ -82,7 +90,43 @@ pub struct GlobalResult {
     pub hpwl: f64,
     /// Each routability round, in order.
     pub congestion: Vec<CongestionRound>,
+    /// How each zone with cells ended.
+    pub zones: Vec<ZoneOutcome>,
 }
+
+/// How the cells of one zone were spread.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct ZoneOutcome {
+    /// The zone.
+    pub zone: Zone,
+    /// Its movable cells.
+    pub cells: usize,
+    /// Their area over the free area of the zone's rows.
+    pub utilization: f64,
+    /// The density they were spread to.
+    pub target: f64,
+    /// Their final overflow.
+    pub overflow: f64,
+}
+
+/// One electrostatic system: the cells of one zone and their fillers,
+/// spread over that zone's rows only.
+#[derive(Debug)]
+pub(super) struct Field {
+    zone: Zone,
+    grid: DensityGrid,
+    /// Where its objects may go.
+    area: Vec<Rect<f64>>,
+    /// Object indices of its cells.
+    cells: Range<usize>,
+    /// Object indices of its fillers.
+    fillers: Range<usize>,
+    utilization: f64,
+}
+
+/// How far above its cells' utilization a zone's target density is set
+/// when the requested target is lower, so that it can still be met.
+const ZONE_DENSITY_MARGIN: f64 = 0.01;
 
 /// Fewest and most bins per side of the density grid.
 const MIN_BINS: usize = 16;
@@ -130,41 +174,38 @@ pub fn place(
     params: &GlobalParams,
     report: impl FnMut(&Progress),
 ) -> GlobalResult {
-    let movable: Vec<usize> = (0..model.num_cells())
+    let mut movable: Vec<usize> = (0..model.num_cells())
         .filter(|&i| model.movable[i])
         .collect();
+    movable.sort_by_key(|&i| (model.zone_of[i], i));
     let fixed: Vec<Rect<f64>> = (0..model.num_cells())
         .filter(|&i| !model.movable[i])
         .map(|i| Rect::new(model.positions[i], model.positions[i] + model.sizes[i]))
         .collect();
-    let mut grid = DensityGrid::new(
-        &model.die,
-        params.bins,
-        params.target_density,
-        &model.rows,
-        &fixed,
-    );
 
     let mut rng = StdRng::seed_from_u64(params.seed);
-    let cell_sizes: Vec<Point<f64>> = movable.iter().map(|&i| model.sizes[i]).collect();
-    let (filler_size, fillers) =
-        filler_layout(&cell_sizes, grid.free_area(), params.target_density);
     let mut objects = Objects {
         centers: initial_centers(model, &movable, &mut rng),
-        sizes: cell_sizes,
+        sizes: movable.iter().map(|&i| model.sizes[i]).collect(),
         cells: movable.len(),
     };
-    let placeable = placeable_area(model);
-    for _ in 0..fillers {
-        objects.centers.push(random_point(&placeable, &mut rng));
-        objects.sizes.push(filler_size);
+    let mut fields = build_fields(model, &movable, &fixed, params);
+    for field in &mut fields {
+        let cells = &objects.sizes[field.cells.clone()];
+        let (size, count) = filler_layout(cells, field.grid.free_area(), field.grid.target());
+        let first = objects.centers.len();
+        for _ in 0..count {
+            objects.centers.push(random_point(&field.area, &mut rng));
+            objects.sizes.push(size);
+        }
+        field.fillers = first..objects.centers.len();
     }
     let netlist = build_netlist(model, &movable);
 
     let result = nesterov::minimize(
         &mut objects,
         &model.die,
-        &mut grid,
+        &mut fields,
         &netlist,
         params,
         report,
@@ -174,6 +215,59 @@ pub fn place(
         model.positions[i] = objects.centers[k] - model.sizes[i] * 0.5;
     }
     result
+}
+
+/// One field for each zone with movable cells, over the cells of
+/// `movable`, which are grouped by zone; their fillers are added later.
+fn build_fields(
+    model: &PlacementModel,
+    movable: &[usize],
+    fixed: &[Rect<f64>],
+    params: &GlobalParams,
+) -> Vec<Field> {
+    let mut fields = Vec::new();
+    let mut start = 0;
+    for (k, zone) in model.zones.iter().enumerate() {
+        let end = movable.partition_point(|&i| model.zone_of[i] <= k);
+        if end == start {
+            continue;
+        }
+        let area = zone_area(model, k);
+        let mut grid =
+            DensityGrid::new(&model.die, params.bins, params.target_density, &area, fixed);
+        let cell_area: f64 = movable[start..end]
+            .iter()
+            .map(|&i| model.sizes[i].x * model.sizes[i].y)
+            .sum();
+        let free = grid.free_area();
+        let utilization = if free > 0.0 {
+            cell_area / free
+        } else {
+            f64::INFINITY
+        };
+        grid.set_target(zone_target(params.target_density, utilization));
+        fields.push(Field {
+            zone: zone.zone,
+            grid,
+            area,
+            cells: start..end,
+            fillers: 0..0,
+            utilization,
+        });
+        start = end;
+    }
+    fields
+}
+
+/// The density a zone's cells are spread to: the requested target, or just
+/// above their utilization when that is higher, since the target could
+/// never be met otherwise.
+fn zone_target(requested: f64, utilization: f64) -> f64 {
+    if utilization > requested {
+        (utilization + ZONE_DENSITY_MARGIN).min(1.0)
+    } else {
+        requested
+    }
 }
 
 /// The size and number of fillers that bring the free area to the target
@@ -207,6 +301,14 @@ fn placeable_area(model: &PlacementModel) -> Vec<Rect<f64>> {
     } else {
         model.rows.clone()
     }
+}
+
+/// The area the cells of zone `k` may use.
+fn zone_area(model: &PlacementModel, k: usize) -> Vec<Rect<f64>> {
+    model
+        .zones
+        .get(k)
+        .map_or_else(|| placeable_area(model), |z| z.rects.clone())
 }
 
 /// Cell centers in a small random cluster at the middle of the rows.

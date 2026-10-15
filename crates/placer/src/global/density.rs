@@ -11,8 +11,28 @@
 use super::poisson::PoissonSolver;
 use pare_common::geom::point::Point;
 use pare_common::geom::rect::Rect;
-use rayon::prelude::*;
 use std::f64::consts::SQRT_2;
+use std::ops::Range;
+
+/// Cell area above the target density, and all cell area, of one grid.
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub(super) struct Excess {
+    /// Cell area above the target density.
+    pub(super) over: f64,
+    /// All cell area.
+    pub(super) cells: f64,
+}
+
+impl Excess {
+    /// The overflow: area above the target as a fraction of cell area.
+    pub(super) fn fraction(self) -> f64 {
+        if self.cells > 0.0 {
+            self.over / self.cells
+        } else {
+            0.0
+        }
+    }
+}
 
 /// How an object spreads its charge: half its smoothed size, and the
 /// density at which it is spread.
@@ -180,22 +200,27 @@ impl DensityGrid {
         }
     }
 
-    /// Deposits every object, the first `cells` of them as cells and the rest
-    /// as fillers, and solves for the field. Returns the overflow: the cell
-    /// area above the target density as a fraction of all cell area.
+    /// Deposits the objects in `cells` as cells and those in `fillers` as
+    /// fillers, and solves for the field. Returns the cell area above the
+    /// target density and all cell area.
     pub(super) fn update(
         &mut self,
         centers: &[Point<f64>],
         footprints: &[Footprint],
-        cells: usize,
-    ) -> f64 {
+        cells: Range<usize>,
+        fillers: Range<usize>,
+    ) -> Excess {
         self.cells.fill(0.0);
         self.total.copy_from_slice(&self.fixed);
-        for (i, (&c, f)) in centers.iter().zip(footprints).enumerate() {
-            let rect = Rect::new(c - f.half, c + f.half);
-            if i < cells {
-                self.bins.spread(&rect, f.density, &mut self.cells);
-            }
+        for i in cells {
+            let f = footprints[i];
+            let rect = Rect::new(centers[i] - f.half, centers[i] + f.half);
+            self.bins.spread(&rect, f.density, &mut self.cells);
+            self.bins.spread(&rect, f.density, &mut self.total);
+        }
+        for i in fillers {
+            let f = footprints[i];
+            let rect = Rect::new(centers[i] - f.half, centers[i] + f.half);
             self.bins.spread(&rect, f.density, &mut self.total);
         }
 
@@ -206,7 +231,7 @@ impl DensityGrid {
 
         let cell_area: f64 = self.cells.iter().sum();
         if cell_area <= 0.0 {
-            return 0.0;
+            return Excess::default();
         }
         let capacity = self.target * bin_area;
         let over: f64 = self
@@ -215,7 +240,10 @@ impl DensityGrid {
             .zip(&self.fixed)
             .map(|(c, f)| (c + f - capacity).max(0.0))
             .sum();
-        over / cell_area
+        Excess {
+            over,
+            cells: cell_area,
+        }
     }
 
     /// The field `-∇φ` at each bin, by central differences with mirrored edges.
@@ -236,31 +264,22 @@ impl DensityGrid {
         }
     }
 
-    /// Writes the gradient of the density energy with respect to each
-    /// object's center: minus its charge times the field it sits in.
-    pub(super) fn gradient(
-        &self,
-        centers: &[Point<f64>],
-        footprints: &[Footprint],
-        out: &mut [Point<f64>],
-    ) {
-        out.par_iter_mut()
-            .zip(centers.par_iter().zip(footprints))
-            .for_each(|(g, (&c, f))| {
-                let rect = Rect::new(c - f.half, c + f.half);
-                let mut force = Point::new(0.0, 0.0);
-                if let Some((cols, rows)) = self.bins.under(&rect) {
-                    for (r, oy) in rows {
-                        for &(col, ox) in &cols {
-                            let q = ox * oy * f.density;
-                            let idx = r * self.bins.dim + col;
-                            force.x = q.mul_add(self.field_x[idx], force.x);
-                            force.y = q.mul_add(self.field_y[idx], force.y);
-                        }
-                    }
+    /// The gradient of the density energy with respect to an object's
+    /// center: minus its charge times the field it sits in.
+    pub(super) fn gradient_at(&self, center: Point<f64>, f: &Footprint) -> Point<f64> {
+        let rect = Rect::new(center - f.half, center + f.half);
+        let mut force = Point::new(0.0, 0.0);
+        if let Some((cols, rows)) = self.bins.under(&rect) {
+            for (r, oy) in rows {
+                for &(col, ox) in &cols {
+                    let q = ox * oy * f.density;
+                    let idx = r * self.bins.dim + col;
+                    force.x = q.mul_add(self.field_x[idx], force.x);
+                    force.y = q.mul_add(self.field_y[idx], force.y);
                 }
-                *g = Point::new(-force.x, -force.y);
-            });
+            }
+        }
+        Point::new(-force.x, -force.y)
     }
 }
 
@@ -309,9 +328,9 @@ mod tests {
         let mut grid = DensityGrid::new(&die(4.0, 4.0), 4, 0.5, &[], &[]);
         let f = grid.footprint(Point::new(2.0, 2.0));
 
-        let overflow = grid.update(&[Point::new(1.0, 1.0)], &[f], 1);
+        let excess = grid.update(&[Point::new(1.0, 1.0)], &[f], 0..1, 1..1);
 
-        assert!((overflow - 0.5).abs() < 1e-12);
+        assert!((excess.fraction() - 0.5).abs() < 1e-12);
     }
 
     #[test]
@@ -348,11 +367,10 @@ mod tests {
         let crowd = grid.footprint(Point::new(4.0, 4.0));
         let probe = grid.footprint(Point::new(1.0, 1.0));
         let centers = [Point::new(8.0, 8.0), Point::new(11.0, 8.0)];
-        let _ = grid.update(&centers, &[crowd, probe], 2);
-        let mut grads = [Point::new(0.0, 0.0); 2];
+        let _ = grid.update(&centers, &[crowd, probe], 0..2, 2..2);
 
-        grid.gradient(&centers, &[crowd, probe], &mut grads);
+        let probe_grad = grid.gradient_at(centers[1], &probe);
 
-        assert!(grads[1].x < 0.0, "{:?}", grads[1]);
+        assert!(probe_grad.x < 0.0, "{probe_grad:?}");
     }
 }

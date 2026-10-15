@@ -1,6 +1,6 @@
 //! Placement: global placement by electrostatic spreading, I/O pin
 //! placement on the die boundary, Abacus legalization onto rows and sites,
-//! and detailed placement.
+//! and detailed placement, all keeping cells to their fence regions.
 
 pub mod detailed;
 pub mod global;

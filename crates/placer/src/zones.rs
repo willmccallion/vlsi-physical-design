@@ -81,6 +81,30 @@ impl Zones {
         !self.fences.is_empty()
     }
 
+    /// The position of `zone` in [`Self::all`].
+    pub fn index(&self, zone: Zone) -> usize {
+        match zone {
+            Zone::Fence(r) => self
+                .fences
+                .iter()
+                .position(|&(id, _)| id == r)
+                .unwrap_or(self.fences.len()),
+            Zone::Outside => self.fences.len(),
+        }
+    }
+
+    /// The rectangles of a fence, or nothing for the space outside them.
+    pub fn fence_rects(&self, zone: Zone) -> &[Rect<Dbu>] {
+        match zone {
+            Zone::Fence(r) => self
+                .fences
+                .iter()
+                .find(|(id, _)| *id == r)
+                .map_or(&[], |(_, rects)| rects.as_slice()),
+            Zone::Outside => &[],
+        }
+    }
+
     /// The X intervals of `[lo, hi)` where a cell of `zone` spanning the band
     /// `[y0, y1)` may sit, ignoring obstacles.
     pub fn intervals(&self, zone: Zone, lo: Dbu, hi: Dbu, y0: Dbu, y1: Dbu) -> Vec<(Dbu, Dbu)> {

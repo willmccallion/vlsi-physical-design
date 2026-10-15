@@ -17,7 +17,7 @@ use pare_placer::global::{self, GlobalParams, Outcome, RoutabilityParams, TrackS
 use pare_placer::io::{self, IoLayers};
 use pare_placer::legalize::abacus;
 use pare_placer::model::PlacementModel;
-use pare_placer::zones::Zones;
+use pare_placer::zones::{Zone, Zones};
 use std::path::{Path, PathBuf};
 use std::time::Instant;
 
@@ -214,12 +214,13 @@ fn run_placement(config: &Config, db: &mut NetlistDB, output_dir: &Path) -> anyh
         None
     };
 
+    let zones = Zones::new(db)?;
     ui::section("Placement");
     let model = if let Some(layers) = io_layers {
-        place_cells_and_io_pins(config, db, layers)?
+        place_cells_and_io_pins(config, db, &zones, layers)?
     } else {
         let phase_start = Instant::now();
-        let model = global_placement(config, db, PlacementModel::from_db(db))?;
+        let model = global_placement(config, db, PlacementModel::from_db(db, &zones))?;
         ui::phase_time(phase_start.elapsed().as_secs_f64());
         model
     };
@@ -228,14 +229,13 @@ fn run_placement(config: &Config, db: &mut NetlistDB, output_dir: &Path) -> anyh
     let global_png = output_dir.join("nesterov_placer.png");
     visualization::draw_placement(db, &path_str(&global_png)?, 1000, 1000);
 
-    let zones = Zones::new(db)?;
     let phase_start = Instant::now();
     ui::phase("Legalization");
     abacus::legalize(db, &zones)?;
     ui::check(&format!("Legalized {movable_cells} cells"));
     ui::stat_row(
         "HPWL (um):",
-        &format!("{:.0}", PlacementModel::from_db(db).hpwl()),
+        &format!("{:.0}", PlacementModel::from_db(db, &zones).hpwl()),
         "",
         "",
     );
@@ -248,7 +248,7 @@ fn run_placement(config: &Config, db: &mut NetlistDB, output_dir: &Path) -> anyh
         "Moves:",
         &result.moves.to_string(),
         "HPWL (um):",
-        &format!("{:.0}", PlacementModel::from_db(db).hpwl()),
+        &format!("{:.0}", PlacementModel::from_db(db, &zones).hpwl()),
     );
     ui::phase_time(phase_start.elapsed().as_secs_f64());
 
@@ -284,11 +284,16 @@ fn run_placement(config: &Config, db: &mut NetlistDB, output_dir: &Path) -> anyh
 fn place_cells_and_io_pins(
     config: &Config,
     db: &mut NetlistDB,
+    zones: &Zones,
     layers: IoLayers,
 ) -> anyhow::Result<PlacementModel> {
     let phase_start = Instant::now();
     ui::phase("Global Placement Without I/O");
-    let model = global_placement(config, db, PlacementModel::from_db_without_movable_io(db))?;
+    let model = global_placement(
+        config,
+        db,
+        PlacementModel::from_db_without_movable_io(db, zones),
+    )?;
     model.write_back(db);
     ui::phase_time(phase_start.elapsed().as_secs_f64());
 
@@ -305,7 +310,7 @@ fn place_cells_and_io_pins(
 
     let phase_start = Instant::now();
     ui::phase("Global Placement");
-    let model = global_placement(config, db, PlacementModel::from_db(db))?;
+    let model = global_placement(config, db, PlacementModel::from_db(db, zones))?;
     ui::phase_time(phase_start.elapsed().as_secs_f64());
     Ok(model)
 }
@@ -383,6 +388,20 @@ fn global_placement(
                 round.inflated, round.area_ratio, round.target_density
             ),
         );
+    }
+    if result.zones.len() > 1 {
+        for z in &result.zones {
+            let name = match z.zone {
+                Zone::Fence(r) => db.regions[r.index()].name.as_str(),
+                Zone::Outside => "outside fences",
+            };
+            ui::stat_row(
+                &format!("Zone {name}:"),
+                &format!("{} cells, util {:.3}", z.cells, z.utilization),
+                "Target / ovfl:",
+                &format!("{:.3} / {:.3}", z.target, z.overflow),
+            );
+        }
     }
     match result.outcome {
         Outcome::Converged => ui::check(&format!(

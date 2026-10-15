@@ -5,13 +5,15 @@
 //! tracks and its vertical part on vertical ones, and a bin's congestion is
 //! the larger ratio of demand to the tracks crossing it. When spreading is
 //! nearly done, cells in congested bins grow by a power of their bin's
-//! congestion; fillers shrink by the area cells gained, and the target
-//! density rises only once no filler area is left. Placement then resumes
+//! congestion; fillers of the same field shrink by the area its cells
+//! gained, and the field's target density rises only once no filler area is
+//! left. Placement then resumes
 //! from an earlier, less spread state so the inflated cells push their
 //! neighbours apart. This repeats until the most congested bins fall below
 //! a target, or a few rounds pass, after which the inflation that measured
 //! least congestion is kept.
 
+use super::Field;
 use super::nesterov::Objects;
 use super::wirelength::Netlist;
 use pare_common::db::design::NetlistDB;
@@ -224,12 +226,13 @@ fn for_each_overlap(
     }
 }
 
-/// The sizes and target density in effect when a congestion was measured.
+/// The sizes and each field's target density in effect when a congestion
+/// was measured.
 #[derive(Clone, Debug)]
 struct Inflation {
     congestion: f64,
     sizes: Vec<Point<f64>>,
-    target: f64,
+    targets: Vec<f64>,
 }
 
 /// What to do after measuring congestion.
@@ -246,7 +249,6 @@ pub(super) enum Verdict {
 pub(super) struct Routability {
     params: RoutabilityParams,
     original_area: f64,
-    free_area: f64,
     tried: Vec<Inflation>,
     /// Every measurement so far.
     pub(super) rounds: Vec<CongestionRound>,
@@ -254,11 +256,10 @@ pub(super) struct Routability {
 }
 
 impl Routability {
-    pub(super) fn new(params: RoutabilityParams, objects: &Objects, free_area: f64) -> Self {
+    pub(super) fn new(params: RoutabilityParams, objects: &Objects) -> Self {
         Self {
             params,
             original_area: cell_area(objects),
-            free_area,
             tried: Vec::new(),
             rounds: Vec::new(),
             done: false,
@@ -270,28 +271,29 @@ impl Routability {
     }
 
     /// Measures congestion at `centers` and inflates `objects` in place,
-    /// updating `target` density, unless congestion is low enough or the
-    /// rounds are spent. When the rounds are spent without reaching the
-    /// target, the sizes that measured least congestion are restored.
+    /// updating each field's target density, unless congestion is low
+    /// enough or the rounds are spent. When the rounds are spent without
+    /// reaching the target, the sizes that measured least congestion are
+    /// restored.
     pub(super) fn check(
         &mut self,
         iteration: usize,
         map: &CongestionMap,
         objects: &mut Objects,
-        target: &mut f64,
+        fields: &mut [Field],
     ) -> Verdict {
         let congestion = map.metric();
         self.tried.push(Inflation {
             congestion,
             sizes: objects.sizes.clone(),
-            target: *target,
+            targets: fields.iter().map(|f| f.grid.target()).collect(),
         });
         let mut round = CongestionRound {
             iteration,
             congestion,
             inflated: 0,
             area_ratio: cell_area(objects) / self.original_area,
-            target_density: *target,
+            target_density: highest_target(fields),
         };
         if congestion <= self.params.target_congestion {
             self.done = true;
@@ -306,19 +308,25 @@ impl Routability {
                 .min_by(|a, b| a.congestion.total_cmp(&b.congestion))
             {
                 objects.sizes.clone_from(&best.sizes);
-                *target = best.target;
+                for (f, &t) in fields.iter_mut().zip(&best.targets) {
+                    f.grid.set_target(t);
+                }
             }
             round.area_ratio = cell_area(objects) / self.original_area;
-            round.target_density = *target;
+            round.target_density = highest_target(fields);
             self.rounds.push(round);
             return Verdict::Done;
         }
-        round.inflated = inflate(map, objects, self.free_area, target);
+        round.inflated = fields.iter_mut().map(|f| inflate(map, objects, f)).sum();
         round.area_ratio = cell_area(objects) / self.original_area;
-        round.target_density = *target;
+        round.target_density = highest_target(fields);
         self.rounds.push(round);
         Verdict::Resume
     }
+}
+
+fn highest_target(fields: &[Field]) -> f64 {
+    fields.iter().map(|f| f.grid.target()).fold(0.0, f64::max)
 }
 
 fn cell_area(objects: &Objects) -> f64 {
@@ -328,16 +336,17 @@ fn cell_area(objects: &Objects) -> f64 {
         .sum()
 }
 
-/// Grows every cell in a bin with congestion above one by that congestion
-/// to the power [`INFLATION_EXPONENT`], at most [`MAX_INFLATION`], and
-/// shrinks the fillers to make room, raising `target` once they are gone.
-/// Growth is scaled down if it would need a target above [`MAX_DENSITY`].
-/// Returns how many cells grew.
-fn inflate(map: &CongestionMap, objects: &mut Objects, free_area: f64, target: &mut f64) -> usize {
-    let cells = objects.cells;
-    let growth: Vec<f64> = (0..cells)
-        .map(|i| {
-            let c = map.at(objects.centers[i]);
+/// Grows every cell of `field` in a bin with congestion above one by that
+/// congestion to the power [`INFLATION_EXPONENT`], at most
+/// [`MAX_INFLATION`], and shrinks the field's fillers to make room, raising
+/// its target density once they are gone. Growth is scaled down if it would
+/// need a target above [`MAX_DENSITY`]. Returns how many cells grew.
+fn inflate(map: &CongestionMap, objects: &mut Objects, field: &mut Field) -> usize {
+    let cells = field.cells.clone();
+    let growth: Vec<f64> = objects.centers[cells.clone()]
+        .iter()
+        .map(|&center| {
+            let c = map.at(center);
             if c > 1.0 {
                 c.powf(INFLATION_EXPONENT).min(MAX_INFLATION)
             } else {
@@ -346,13 +355,17 @@ fn inflate(map: &CongestionMap, objects: &mut Objects, free_area: f64, target: &
         })
         .collect();
     let area = |s: Point<f64>| s.x * s.y;
-    let current: f64 = objects.sizes[..cells].iter().map(|&s| area(s)).sum();
-    let wanted: f64 = objects.sizes[..cells]
+    let current: f64 = objects.sizes[cells.clone()].iter().map(|&s| area(s)).sum();
+    let wanted: f64 = objects.sizes[cells.clone()]
         .iter()
         .zip(&growth)
         .map(|(&s, g)| area(s) * (g - 1.0))
         .sum();
-    let fillers: f64 = objects.sizes[cells..].iter().map(|&s| area(s)).sum();
+    let fillers: f64 = objects.sizes[field.fillers.clone()]
+        .iter()
+        .map(|&s| area(s))
+        .sum();
+    let free_area = field.grid.free_area();
     let room = MAX_DENSITY.mul_add(free_area, -current).max(0.0);
     let scale = if wanted > room && wanted > 0.0 {
         room / wanted
@@ -360,7 +373,7 @@ fn inflate(map: &CongestionMap, objects: &mut Objects, free_area: f64, target: &
         1.0
     };
     let mut inflated = 0;
-    for (size, g) in objects.sizes[..cells].iter_mut().zip(&growth) {
+    for (size, g) in objects.sizes[cells].iter_mut().zip(&growth) {
         if *g > 1.0 {
             *size = *size * scale.mul_add(g - 1.0, 1.0).sqrt();
             inflated += 1;
@@ -373,17 +386,24 @@ fn inflate(map: &CongestionMap, objects: &mut Objects, free_area: f64, target: &
     } else {
         0.0
     };
-    for size in &mut objects.sizes[cells..] {
+    for size in &mut objects.sizes[field.fillers.clone()] {
         *size = *size * shrink;
     }
-    *target = target.max((current + added) / free_area).min(MAX_DENSITY);
+    if free_area > 0.0 {
+        let needed = (current + added) / free_area;
+        field
+            .grid
+            .set_target(field.grid.target().max(needed).min(MAX_DENSITY));
+    }
     inflated
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::global::density::DensityGrid;
     use crate::global::wirelength::Terminal;
+    use crate::zones::Zone;
 
     fn die(side: f64) -> Rect<f64> {
         Rect::new(Point::new(0.0, 0.0), Point::new(side, side))
@@ -456,13 +476,20 @@ mod tests {
             bin: Point::new(1.0, 1.0),
             ratio,
         };
-        let mut target = 0.5;
+        let mut field = Field {
+            zone: Zone::Outside,
+            grid: DensityGrid::new(&die(4.0), 4, 0.5, &[], &[]),
+            area: vec![die(4.0)],
+            cells: 0..2,
+            fillers: 2..3,
+            utilization: 2.0 / 16.0,
+        };
 
-        let inflated = inflate(&map, &mut objects, 16.0, &mut target);
+        let inflated = inflate(&map, &mut objects, &mut field);
 
         assert_eq!(inflated, 1);
         assert!(objects.sizes[0].x.mul_add(objects.sizes[0].y, -2.0).abs() < 1e-9);
         assert!(objects.sizes[2].x.mul_add(objects.sizes[2].y, -3.0).abs() < 1e-9);
-        assert!((target - 0.5).abs() < 1e-12);
+        assert!((field.grid.target() - 0.5).abs() < 1e-12);
     }
 }
