@@ -1,19 +1,19 @@
 //! Global routing on a grid of gcells.
 //!
 //! Each routable layer gets a capacity on every gcell edge in its preferred
-//! direction: the number of its tracks crossing that edge that no obstacle
-//! blocks. Nets are routed as trees of A* paths through the 3D grid. An
-//! edge costs its length, a logistic congestion term that rises as its
-//! usage nears capacity, its accumulated overflow history, and a penalty per
-//! unit of overflow that grows every round, in the manner of `PathFinder`.
-//! Nets crossing overflowed edges are ripped up and rerouted, each time
-//! with a search area grown around their pins so they can detour further
-//! around congestion. The cells each net passes through become its guide
-//! for detailed routing.
+//! direction: its tracks crossing that edge, each counted for the share of
+//! the edge that fixed metal leaves usable. Nets are routed as trees of A*
+//! paths through the 3D grid. An edge costs its length, a logistic
+//! congestion term that rises as its usage nears capacity, its accumulated
+//! overflow history, and a penalty per unit of overflow that grows every
+//! round, in the manner of `PathFinder`. Nets crossing overflowed edges are
+//! ripped up and rerouted, each time with a search area grown around their
+//! pins so they can detour further around congestion. The cells each net
+//! passes through become its guide for detailed routing.
 
 mod maze;
 
-use crate::occupancy::{Occupancy, Owner, TrackRef};
+use crate::occupancy::{Occupancy, TrackRef};
 use crate::tech::RouteTech;
 use maze::route_tree;
 use pare_common::db::indices::{LayerId, NetId};
@@ -82,22 +82,35 @@ impl GlobalGrid {
         };
         grid.capacity = layers
             .par_iter()
-            .flat_map_iter(|&l| grid.layer_capacity(tech, occupancy, l))
-            .map(|tracks| (f64::from(tracks) * (1.0 - reserve)).floor() as u16)
+            .flat_map_iter(|&l| grid.layer_capacity(tech, occupancy, die, l))
+            .map(|tracks| (tracks * (1.0 - reserve)).floor() as u16)
             .collect();
         grid
     }
 
-    /// Free-track counts across each preferred-direction edge of one layer.
-    fn layer_capacity(&self, tech: &RouteTech, occupancy: &Occupancy, layer: LayerId) -> Vec<u16> {
+    /// Usable tracks across each preferred-direction edge of one layer, as
+    /// in CUGR: each track counts for the fraction of the stretch between
+    /// the centres of the edge's two gcells that fixed metal leaves usable,
+    /// and nothing when fixed metal crosses the boundary between them.
+    fn layer_capacity(
+        &self,
+        tech: &RouteTech,
+        occupancy: &Occupancy,
+        die: Rect<Dbu>,
+        layer: LayerId,
+    ) -> Vec<f64> {
         let lt = tech.layer(layer);
         let (nx, ny) = (usize::from(self.nx), usize::from(self.ny));
-        let mut cap = vec![0u16; nx * ny];
-        let (along_origin, across_origin, along_cells) = match lt.direction {
-            Direction::Horizontal => (self.origin.x, self.origin.y, nx),
-            Direction::Vertical => (self.origin.y, self.origin.x, ny),
+        let mut cap = vec![0.0; nx * ny];
+        let (along_origin, along_end, across_origin, along_cells) = match lt.direction {
+            Direction::Horizontal => (self.origin.x, die.max.x, self.origin.y, nx),
+            Direction::Vertical => (self.origin.y, die.max.y, self.origin.x, ny),
         };
-        let probe = Owner::Net(u32::MAX);
+        let centre = |i: usize| {
+            let start = along_origin + self.gcell * i as i64;
+            let end = (start + self.gcell).min(along_end).max(start);
+            start + (end - start) / 2
+        };
         for (t, &across) in lt.tracks.iter().enumerate() {
             let row = (across - across_origin).get().div_euclid(self.gcell.get());
             let Ok(row) = usize::try_from(row) else {
@@ -108,27 +121,14 @@ impl GlobalGrid {
                 track: crate::tech::to_u32(t),
             };
             for i in 0..along_cells.saturating_sub(1) {
-                let boundary = along_origin + self.gcell * (i as i64 + 1);
-                let half = lt.width / 2;
-                let blocked = occupancy
-                    .conflicts(
-                        track,
-                        boundary - half,
-                        boundary + half,
-                        lt.spacing,
-                        probe,
-                        true,
-                    )
-                    .any(|o| o.owner == Owner::Obstacle);
-                if blocked {
-                    continue;
-                }
                 let index = match lt.direction {
                     Direction::Horizontal if row < ny => row * nx + i,
                     Direction::Vertical if row < nx => i * nx + row,
                     _ => continue,
                 };
-                cap[index] = cap[index].saturating_add(1);
+                let boundary = along_origin + self.gcell * (i as i64 + 1);
+                let stretch = (centre(i), centre(i + 1));
+                cap[index] += usable_fraction(occupancy, track, boundary, stretch);
             }
         }
         cap
@@ -233,6 +233,32 @@ impl GlobalGrid {
         let overflow = costs.penalty * excess.max(0.0);
         1.0 + f64::from(self.history[e]) + congestion + overflow
     }
+}
+
+/// The fraction of `stretch` along `track` that a wire crossing `boundary`
+/// can use between the fixed metal on either side of it.
+fn usable_fraction(
+    occupancy: &Occupancy,
+    track: TrackRef,
+    boundary: Dbu,
+    stretch: (Dbu, Dbu),
+) -> f64 {
+    let (lo, hi) = stretch;
+    if hi <= lo {
+        return 0.0;
+    }
+    let mut usable = (lo, hi);
+    for o in occupancy.fixed_within(track, lo, hi) {
+        if o.lo <= boundary && boundary <= o.hi {
+            return 0.0;
+        }
+        if o.hi < boundary {
+            usable.0 = usable.0.max(o.hi);
+        } else {
+            usable.1 = usable.1.min(o.lo);
+        }
+    }
+    (usable.1 - usable.0).to_f64() / (hi - lo).to_f64()
 }
 
 /// Search costs of global routing, in gcells.

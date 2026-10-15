@@ -374,6 +374,12 @@ impl Occupancy {
             })
     }
 
+    /// Fixed metal and obstacles on a track that overlap `(lo, hi)`.
+    pub fn fixed_within(&self, t: TrackRef, lo: Dbu, hi: Dbu) -> impl Iterator<Item = &Occupant> {
+        self.starting_within(t, lo - self.chunk, hi)
+            .filter(move |o| o.origin == Origin::Fixed && o.lo < hi && lo < o.hi)
+    }
+
     /// Owners of wiring on `layer` whose metal runs along a track inside
     /// `rect`.
     pub fn wiring_owners_in<'a>(
