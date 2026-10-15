@@ -7,6 +7,8 @@
 //! through one exists only when nothing else does. A guide limits the
 //! search to gcells near a net's global route.
 
+mod dense;
+
 use crate::access::{AccessPoint, Node};
 use crate::global::GCell;
 use crate::occupancy::{LocalOccupancy, Occupancy, Origin, Owner, TrackRef, too_close};
@@ -29,17 +31,27 @@ const OBSTACLE_COST: f64 = 1e9;
 /// route never prefers fixed metal to wiring that can move.
 pub(crate) const MAX_PENALTY: f64 = OBSTACLE_COST * 1e-3;
 
-/// Heuristic weight of the first, near-optimal search of a connection.
-const FOCUSED_WEIGHT: f64 = 1.0;
+/// How hard one A* run tries.
+#[derive(Clone, Copy, Debug)]
+struct Effort {
+    /// Scale of the heuristic; above one trades optimality for speed.
+    weight: f64,
+    /// Expansions before giving up unless a target has been reached.
+    limit: usize,
+}
 
-/// Search effort before the near-optimal search gives way to a greedy one.
-const FOCUSED_EXPANSIONS: usize = 2_000_000;
+/// The first, near-optimal search of a connection.
+const FOCUSED: Effort = Effort {
+    weight: 1.0,
+    limit: 2_000_000,
+};
 
-/// Heuristic weight of the greedy search that guarantees a path quickly.
-const GREEDY_WEIGHT: f64 = 4.0;
-
-/// Search effort before a connection gives up in one window.
-const MAX_EXPANSIONS: usize = 4_000_000;
+/// The greedy search that finds a path quickly when the focused one gives
+/// up; past its limit the connection gives up in this window.
+const GREEDY: Effort = Effort {
+    weight: 4.0,
+    limit: 4_000_000,
+};
 
 /// Tunable costs of the search.
 #[derive(Clone, Copy, Debug)]
@@ -301,8 +313,8 @@ enum Heading {
 struct RecentVia {
     /// The layer the via came from.
     from: LayerId,
-    /// Where it landed, along the current layer's tracks.
-    at: Dbu,
+    /// The crossing it landed on, along the current track.
+    cross: u32,
 }
 
 impl State {
@@ -429,6 +441,8 @@ impl Search<'_> {
         length + conflict
     }
 
+    /// Cost of a via up from `bottom` at `at`, apart from crowding the
+    /// net's own vias.
     fn via_cost(&self, bottom: LayerId, at: Point<Dbu>) -> f64 {
         let via = self.tech.via_above(bottom);
         let top = LayerId::new(bottom.index() + 1);
@@ -437,14 +451,17 @@ impl Search<'_> {
             .iter()
             .map(|c| self.cut_cost(bottom.cut_above(), &c.translate(at)))
             .sum();
-        let crowded = self
-            .own_vias
-            .map_or(0, |own| own.crowded(self.db, via.via, at));
-        let conflicts = self.costs.via
+        self.costs.via
             + self.conflict_cost(bottom, &via.bottom.translate(at))
             + self.conflict_cost(top, &via.top.translate(at))
-            + cuts;
-        self.costs.penalty.mul_add(crowded as f64, conflicts)
+            + cuts
+    }
+
+    /// Cost of a via up from `bottom` at `at` crowding the net's own vias.
+    fn own_via_cost(&self, bottom: LayerId, at: Point<Dbu>) -> f64 {
+        let via = self.tech.via_above(bottom).via;
+        let crowded = self.own_vias.map_or(0, |own| own.crowded(self.db, via, at));
+        self.costs.penalty * crowded as f64
     }
 
     pub(crate) fn allowed(&self, layer: LayerId, p: Point<Dbu>) -> bool {
@@ -495,7 +512,10 @@ impl Search<'_> {
         recent: Option<RecentVia>,
         along: Dbu,
     ) -> Option<RecentVia> {
-        recent.filter(|v| (along - v.at).abs() < self.via_reach(layer, v.from))
+        let lt = self.tech.layer(layer);
+        recent.filter(|v| {
+            (along - lt.cross[v.cross as usize].at).abs() < self.via_reach(layer, v.from)
+        })
     }
 
     /// Whether a via from `state` to `to` would crowd the via the path just
@@ -505,16 +525,23 @@ impl Search<'_> {
     fn crowds_recent_via(&self, state: State, to: LayerId, along: Dbu) -> bool {
         let layer = state.node.layer;
         state.recent_via.is_some_and(|v| {
-            let cuts = v.from == to && (along - v.at).abs() < self.cut_reach(layer, to);
+            let at = self.tech.layer(layer).cross[v.cross as usize].at;
+            let cuts = v.from == to && (along - at).abs() < self.cut_reach(layer, to);
             let (a0, a1) = self.pad_along(layer, v.from);
             let (b0, b1) = self.pad_along(layer, to);
-            let gap = (along + b0 - (v.at + a1)).max(v.at + a0 - (along + b1));
+            let gap = (along + b0 - (at + a1)).max(at + a0 - (along + b1));
             cuts || (gap > Dbu::ZERO && gap < self.tech.layer(layer).spacing)
         })
     }
 
     /// States reachable from `state` in one step, with the step's cost.
-    fn neighbours(&self, state: State, window: &Rect<Dbu>, out: &mut Vec<(State, f64)>) {
+    fn neighbours(
+        &self,
+        state: State,
+        window: &Rect<Dbu>,
+        costs: &mut impl StepCosts,
+        out: &mut Vec<(State, f64)>,
+    ) {
         out.clear();
         let n = state.node;
         let lt = self.tech.layer(n.layer);
@@ -544,7 +571,11 @@ impl Search<'_> {
                             lt.cross[next as usize].at,
                         ),
                     };
-                    out.push((moved, self.wire_cost(n.layer, here, p)));
+                    let lower = Node {
+                        cross: n.cross.min(m.cross),
+                        ..n
+                    };
+                    out.push((moved, costs.wire(self, lower)));
                 }
             }
         }
@@ -560,7 +591,8 @@ impl Search<'_> {
                 track,
                 cross: c,
             };
-            out.push((self.via_state(m, n.layer), self.via_cost(n.layer, here)));
+            let step = costs.via(self, n) + self.own_via_cost(n.layer, here);
+            out.push((Self::via_state(m, n.layer), step));
         }
         if n.layer > self.tech.min_layer {
             let below = LayerId::new(n.layer.index() - 1);
@@ -573,20 +605,20 @@ impl Search<'_> {
                     track,
                     cross: c,
                 };
-                out.push((self.via_state(m, n.layer), self.via_cost(below, here)));
+                let step = costs.via(self, m) + self.own_via_cost(below, here);
+                out.push((Self::via_state(m, n.layer), step));
             }
         }
     }
 
     /// The state on `node` just after a via from `from`.
-    fn via_state(&self, node: Node, from: LayerId) -> State {
-        let lt = self.tech.layer(node.layer);
+    const fn via_state(node: Node, from: LayerId) -> State {
         State {
             node,
             heading: Heading::Still,
             recent_via: Some(RecentVia {
                 from,
-                at: lt.cross[node.cross as usize].at,
+                cross: node.cross,
             }),
         }
     }
@@ -599,19 +631,18 @@ impl Search<'_> {
         targets: &FxHashMap<Node, (usize, f64)>,
         window: &Rect<Dbu>,
     ) -> Option<(Vec<Node>, usize)> {
-        self.find_weighted(sources, targets, window, FOCUSED_WEIGHT, FOCUSED_EXPANSIONS)
-            .or_else(|| self.find_weighted(sources, targets, window, GREEDY_WEIGHT, MAX_EXPANSIONS))
+        WindowCache::new(self, *window).find(self, sources, targets)
     }
 
-    /// A* with the heuristic scaled by `weight`, giving up after `limit`
-    /// expansions unless a target has been reached.
-    fn find_weighted(
+    /// One A* run with the given effort.
+    fn find_with(
         &self,
         sources: &[(Node, f64)],
         targets: &FxHashMap<Node, (usize, f64)>,
         window: &Rect<Dbu>,
-        weight: f64,
-        limit: usize,
+        effort: Effort,
+        visits: &mut impl Visits,
+        costs: &mut impl StepCosts,
     ) -> Option<(Vec<Node>, usize)> {
         let goal = targets
             .keys()
@@ -633,15 +664,15 @@ impl Search<'_> {
                 .min()
                 .unwrap_or(0) as f64;
             let plane = distance_to(&goal, self.point(n)) as f64;
-            weight * self.costs.via.mul_add(layers, plane)
+            effort.weight * self.costs.via.mul_add(layers, plane)
         };
 
-        let mut best: FxHashMap<State, (f64, Option<State>)> = FxHashMap::default();
+        visits.clear();
         let mut heap = BinaryHeap::new();
         for &(n, g) in sources {
             let state = State::start(n);
-            if best.get(&state).is_none_or(|&(b, _)| g < b) {
-                let _ = best.insert(state, (g, None));
+            if visits.best(state).is_none_or(|b| g < b) {
+                visits.record(state, g, None);
                 heap.push(Entry {
                     f: g + h(n),
                     g,
@@ -656,7 +687,7 @@ impl Search<'_> {
             if finish.is_some_and(|(cost, _, _)| f >= cost) {
                 break;
             }
-            if best.get(&state).is_some_and(|&(b, _)| g > b) {
+            if visits.best(state).is_some_and(|b| g > b) {
                 continue;
             }
             if let Some(&(k, extra)) = targets.get(&state.node)
@@ -665,14 +696,14 @@ impl Search<'_> {
                 finish = Some((g + extra, state, k));
             }
             expansions += 1;
-            if expansions > limit {
+            if expansions > effort.limit {
                 break;
             }
-            self.neighbours(state, window, &mut buf);
+            self.neighbours(state, window, costs, &mut buf);
             for &(m, step) in &buf {
                 let ng = g + step;
-                if best.get(&m).is_none_or(|&(b, _)| ng < b) {
-                    let _ = best.insert(m, (ng, Some(state)));
+                if visits.best(m).is_none_or(|b| ng < b) {
+                    visits.record(m, ng, Some(state));
                     heap.push(Entry {
                         f: ng + h(m.node),
                         g: ng,
@@ -682,14 +713,116 @@ impl Search<'_> {
             }
         }
         let (_, end, k) = finish?;
+        Some((visits.path_to(end), k))
+    }
+}
+
+/// Where a search keeps the cheapest known cost of each state it reached
+/// and the state it came from.
+trait Visits {
+    /// Forgets every state.
+    fn clear(&mut self);
+    fn best(&self, state: State) -> Option<f64>;
+    fn record(&mut self, state: State, cost: f64, from: Option<State>);
+    /// The nodes of the cheapest known path to `end`, from its source.
+    fn path_to(&self, end: State) -> Vec<Node>;
+}
+
+/// Visits kept in a hash map, for windows too large to number densely.
+#[derive(Default)]
+struct HashVisits(FxHashMap<State, (f64, Option<State>)>);
+
+impl Visits for HashVisits {
+    fn clear(&mut self) {
+        self.0.clear();
+    }
+
+    fn best(&self, state: State) -> Option<f64> {
+        self.0.get(&state).map(|&(cost, _)| cost)
+    }
+
+    fn record(&mut self, state: State, cost: f64, from: Option<State>) {
+        let _ = self.0.insert(state, (cost, from));
+    }
+
+    fn path_to(&self, end: State) -> Vec<Node> {
         let mut path = vec![end.node];
         let mut cur = end;
-        while let Some(&(_, Some(prev))) = best.get(&cur) {
+        while let Some(&(_, Some(prev))) = self.0.get(&cur) {
             path.push(prev.node);
             cur = prev;
         }
         path.reverse();
-        Some((path, k))
+        path
+    }
+}
+
+/// The cost of each step a search takes, apart from crowding the net's own
+/// vias.
+trait StepCosts {
+    /// The wire step from `lower` to the next crossing along its track.
+    fn wire(&mut self, search: &Search<'_>, lower: Node) -> f64;
+    /// The via from `lower` up to the layer above.
+    fn via(&mut self, search: &Search<'_>, lower: Node) -> f64;
+}
+
+/// Step costs computed afresh every time.
+struct FreshCosts;
+
+impl StepCosts for FreshCosts {
+    fn wire(&mut self, search: &Search<'_>, lower: Node) -> f64 {
+        let lt = search.tech.layer(lower.layer);
+        let a = lt.point(lower.track, lower.cross);
+        let b = lt.point(lower.track, lower.cross + 1);
+        search.wire_cost(lower.layer, a, b)
+    }
+
+    fn via(&mut self, search: &Search<'_>, lower: Node) -> f64 {
+        search.via_cost(lower.layer, search.point(lower))
+    }
+}
+
+/// The searches of one window, sharing the costs of the steps they take.
+///
+/// Step costs are kept between searches, so every search through one cache
+/// must see the same occupancy, overlay, history, owner and penalty; only
+/// the net's own vias, which [`Search::own_vias`] holds, may change.
+pub(crate) struct WindowCache {
+    window: Rect<Dbu>,
+    dense: Option<dense::Dense>,
+}
+
+impl WindowCache {
+    /// A cache for searches of `search`'s net inside `window`.
+    pub(crate) fn new(search: &Search<'_>, window: Rect<Dbu>) -> Self {
+        Self {
+            window,
+            dense: dense::Dense::new(search, &window),
+        }
+    }
+
+    /// Cheapest path from any source to any target inside the window, as
+    /// [`Search::find`] gives it.
+    pub(crate) fn find(
+        &mut self,
+        search: &Search<'_>,
+        sources: &[(Node, f64)],
+        targets: &FxHashMap<Node, (usize, f64)>,
+    ) -> Option<(Vec<Node>, usize)> {
+        let window = self.window;
+        let indexed = self
+            .dense
+            .as_mut()
+            .filter(|d| sources.iter().all(|&(n, _)| d.covers(n)));
+        let Some(dense) = indexed else {
+            let mut visits = HashVisits::default();
+            let mut run =
+                |e| search.find_with(sources, targets, &window, e, &mut visits, &mut FreshCosts);
+            return run(FOCUSED).or_else(|| run(GREEDY));
+        };
+        let (mut visits, mut costs) = dense.split();
+        let mut run = |e| search.find_with(sources, targets, &window, e, &mut visits, &mut costs);
+        run(FOCUSED).or_else(|| run(GREEDY))
     }
 }
 

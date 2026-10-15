@@ -13,7 +13,7 @@
 use super::DetailedRouter;
 use crate::access::Node;
 use crate::occupancy::{LocalOccupancy, Owner};
-use crate::search::{Costs, Guide, MAX_PENALTY, OwnVias, Search};
+use crate::search::{Costs, Guide, MAX_PENALTY, OwnVias, Search, WindowCache};
 use crate::wiring::{DisjointSets, Edge, NetRoute, path_edges};
 use pare_common::db::indices::{CutLayerId, LayerId, NetId};
 use pare_common::geom::dbu::Dbu;
@@ -398,6 +398,7 @@ impl DetailedRouter<'_> {
         mut own: OwnVias,
     ) -> Option<Vec<Edge>> {
         let (first, rest) = groups.split_first()?;
+        let mut cache = WindowCache::new(search, *window);
         let mut tree: Vec<Node> = first.clone();
         let mut remaining: Vec<&Vec<Node>> = rest.iter().collect();
         let mut edges = Vec::new();
@@ -411,7 +412,7 @@ impl DetailedRouter<'_> {
                 own_vias: Some(&own),
                 ..*search
             };
-            let (path, _) = joining.find(&sources, &targets, window)?;
+            let (path, _) = cache.find(&joining, &sources, &targets)?;
             for (via, at) in self.path_vias(&path) {
                 own.add(via, at);
             }
