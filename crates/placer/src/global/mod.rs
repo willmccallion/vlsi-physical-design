@@ -207,6 +207,7 @@ pub fn place(
         &model.die,
         &mut fields,
         &netlist,
+        model.site_width,
         params,
         report,
     );

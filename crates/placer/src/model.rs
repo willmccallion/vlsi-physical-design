@@ -65,6 +65,9 @@ pub struct PlacementModel {
     pub zones: Vec<ZoneRows>,
     /// For each cell, the index of its zone in `zones`.
     pub zone_of: Vec<usize>,
+    /// Width of the narrowest row site, one micron for a design without
+    /// rows.
+    pub site_width: f64,
 }
 
 impl PlacementModel {
@@ -154,6 +157,11 @@ impl PlacementModel {
             zone_of: (0..db.num_cells())
                 .map(|i| zones.index(zones.of(CellId::new(i))))
                 .collect(),
+            site_width: spans
+                .iter()
+                .map(|r| units.to_microns(r.site))
+                .reduce(f64::min)
+                .unwrap_or(1.0),
         }
     }
 

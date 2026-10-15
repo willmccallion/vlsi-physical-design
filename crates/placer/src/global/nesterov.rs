@@ -13,6 +13,7 @@ use super::density::{Excess, Footprint};
 use super::routability::{CHECK_OVERFLOW, CongestionMap, Routability, SNAPSHOT_OVERFLOW, Verdict};
 use super::wirelength::{Netlist, Wirelength};
 use super::{Field, GlobalParams, GlobalResult, Outcome, Progress, ZoneOutcome};
+use crate::zones::Zone;
 use pare_common::geom::point::Point;
 use pare_common::geom::rect::Rect;
 use rayon::prelude::*;
@@ -39,6 +40,17 @@ const QUADRATIC_COEFFICIENT: f64 = 2000.0;
 /// Bounds of the factor the subgradient step length grows by each
 /// iteration, as in `DREAMPlace`.
 const SCHEDULE_STEP_GROWTH: (f64, f64) = (1.03, 1.04);
+
+/// Largest density weight of a scheduled field, in `DREAMPlace`'s units of
+/// one site width, where the weight scales as length to the minus three.
+const SCHEDULED_WEIGHT_CAP: f64 = 10.0;
+
+/// Overflow every field must be under before the preconditioner's damping
+/// of large objects starts doubling, every [`DAMPING_PERIOD`] iterations up
+/// to [`MAX_DAMPING`], as in `DREAMPlace`.
+const DAMPING_OVERFLOW: f64 = 0.3;
+const DAMPING_PERIOD: usize = 20;
+const MAX_DAMPING: f64 = 1024.0;
 
 /// What is being placed: cells first, then fillers.
 #[derive(Debug)]
@@ -90,6 +102,16 @@ struct Weights {
     schedule: Option<Schedule>,
 }
 
+/// How an object's gradient is preconditioned.
+#[derive(Clone, Copy, Debug, PartialEq)]
+enum Precondition {
+    /// ePlace's: pins plus the field's weight times the object's area.
+    Weighted,
+    /// `DREAMPlace` 3.0's for a fence field: pins plus its area, unweighted,
+    /// so its density force keeps growing with the weight.
+    Unweighted,
+}
+
 /// `DREAMPlace` 3.0's density weights for several fields. Field `k`'s energy
 /// `D` enters the objective as `λ D (1 + c D / D0)`, with `c` the
 /// [`QUADRATIC_COEFFICIENT`] over two and `D0` its energy at the start;
@@ -103,6 +125,15 @@ struct Schedule {
     u: Vec<f64>,
     /// The subgradient step length.
     step: f64,
+    /// The largest weight, [`SCHEDULED_WEIGHT_CAP`] in microns.
+    cap: f64,
+    /// The site width, in microns: `DREAMPlace`'s unit of length, which its
+    /// preconditioner is tuned for.
+    site: f64,
+    /// How each field's objects are preconditioned.
+    kinds: Vec<Precondition>,
+    /// The factor damping large objects, doubled late in placement.
+    damping: f64,
 }
 
 impl Weights {
@@ -128,6 +159,56 @@ impl Weights {
 
     fn highest(&self) -> f64 {
         self.penalties.iter().copied().fold(0.0, f64::max)
+    }
+
+    /// The denominator of the preconditioner for an object of field `k`
+    /// with `pins` pins and `area`, at least one. ePlace's weighs the area
+    /// by the field's weight; with a schedule it follows `DREAMPlace`,
+    /// computed in its units of one site width.
+    fn precondition(&self, k: usize, pins: f64, area: f64) -> f64 {
+        let Some(s) = self.schedule.as_ref() else {
+            return self.penalties[k].mul_add(area, pins).max(1.0);
+        };
+        let scaled = match s.kinds[k] {
+            Precondition::Weighted => self.penalties[k] * area * s.site,
+            Precondition::Unweighted => area / (s.site * s.site),
+        };
+        s.damping.mul_add(scaled, pins).max(1.0)
+    }
+
+    /// Doubles the damping of large objects every [`DAMPING_PERIOD`]
+    /// iterations once every field's overflow is under
+    /// [`DAMPING_OVERFLOW`], up to [`MAX_DAMPING`].
+    fn damp(&mut self, iteration: usize, eval: &Evaluation) {
+        let Some(s) = self.schedule.as_mut() else {
+            return;
+        };
+        let spread = eval.field_overflow.iter().all(|&o| o < DAMPING_OVERFLOW);
+        if spread && s.damping < MAX_DAMPING && iteration.is_multiple_of(DAMPING_PERIOD) {
+            s.damping *= 2.0;
+        }
+    }
+
+    /// Logs every field's overflow, energy against its initial energy, and
+    /// weight.
+    fn log(&self, iteration: usize, eval: &Evaluation) {
+        for (k, (&overflow, &energy)) in eval
+            .field_overflow
+            .iter()
+            .zip(&eval.field_energy)
+            .enumerate()
+        {
+            let relative = self
+                .schedule
+                .as_ref()
+                .map_or(f64::NAN, |s| energy * s.precondition[k]);
+            log::debug!(
+                "iteration {iteration} field {k}: overflow {overflow:.3}, energy/initial {relative:.3e}, \
+                 weight {:.3e}{}",
+                self.penalties[k],
+                if self.frozen[k] { " (frozen)" } else { "" }
+            );
+        }
     }
 
     /// Updates the weights of the fields still moving after an iteration
@@ -163,7 +244,8 @@ impl Weights {
         }
         for (k, penalty) in self.penalties.iter_mut().enumerate() {
             if !self.frozen[k] {
-                *penalty = schedule.u[k] * QUADRATIC_COEFFICIENT.mul_add(normalized[k], 1.0);
+                let weight = schedule.u[k] * QUADRATIC_COEFFICIENT.mul_add(normalized[k], 1.0);
+                *penalty = weight.min(schedule.cap);
             }
         }
         let rate = (QUADRATIC_COEFFICIENT * norm(&normalized)).ln().max(0.0);
@@ -275,11 +357,7 @@ impl<'a> Objective<'a> {
                 continue;
             }
             let combined = self.wirelength_grad[i] + self.density_grad[i] * multipliers[k];
-            let scale = 1.0
-                / weights.penalties[k]
-                    .mul_add(self.areas[i], self.pins[i])
-                    .max(1.0);
-            *g = combined * scale;
+            *g = combined * (1.0 / weights.precondition(k, self.pins[i], self.areas[i]));
         }
         eval
     }
@@ -302,8 +380,9 @@ impl<'a> Objective<'a> {
     /// The weights to start from after evaluating `first`: ePlace's for a
     /// single field, scaled so the density gradient starts at
     /// [`INITIAL_PENALTY`] times the wirelength gradient; `DREAMPlace`'s
-    /// schedule, scaled the same way over all fields together, for several.
-    fn initial_weights(&self, first: &Evaluation) -> Weights {
+    /// schedule, scaled the same way over all fields together, for several,
+    /// with `site` its unit of length in microns.
+    fn initial_weights(&self, first: &Evaluation, site: f64) -> Weights {
         let norms = self.gradient_norms();
         if norms.len() == 1 {
             let penalties = norms
@@ -350,8 +429,17 @@ impl<'a> Objective<'a> {
                 *x *= scale;
             }
         }
-        let penalties = u.iter().zip(&s).map(|(u, s)| u * s).collect();
+        let cap = SCHEDULED_WEIGHT_CAP / site.powi(3);
+        let penalties = u.iter().zip(&s).map(|(u, s)| (u * s).min(cap)).collect();
         let step = (SCHEDULE_STEP_GROWTH.0 - 1.0) * norm(&u);
+        let kinds = self
+            .fields
+            .iter()
+            .map(|f| match f.zone {
+                Zone::Outside => Precondition::Weighted,
+                Zone::Fence(_) => Precondition::Unweighted,
+            })
+            .collect();
         Weights {
             frozen: vec![false; u.len()],
             penalties,
@@ -359,6 +447,10 @@ impl<'a> Objective<'a> {
                 precondition,
                 u,
                 step,
+                cap,
+                site,
+                kinds,
+                damping: 1.0,
             }),
         }
     }
@@ -467,6 +559,7 @@ pub(super) fn minimize(
     die: &Rect<f64>,
     fields: &mut [Field],
     netlist: &Netlist,
+    site: f64,
     params: &GlobalParams,
     mut report: impl FnMut(&Progress),
 ) -> GlobalResult {
@@ -493,6 +586,7 @@ pub(super) fn minimize(
             die,
             fields,
             netlist,
+            site,
             params,
             &mut report,
             Start {
@@ -540,6 +634,7 @@ fn run(
     die: &Rect<f64>,
     fields: &mut [Field],
     netlist: &Netlist,
+    site: f64,
     params: &GlobalParams,
     report: &mut impl FnMut(&Progress),
     start: Start,
@@ -559,7 +654,7 @@ fn run(
         objective.clamp(&mut major);
         let gamma = gamma_for(1.0, bin);
         let first = objective.evaluate(&major, gamma);
-        let weights = objective.initial_weights(&first);
+        let weights = objective.initial_weights(&first, site);
         let _ = objective.gradient(&major, gamma, &weights, &mut grad);
         let step = initial_step(&mut objective, &major, &grad, gamma, &weights, bin);
         State {
@@ -636,6 +731,9 @@ fn run(
             penalty: s.weights.highest(),
             step: s.step,
         });
+        if k.is_multiple_of(50) && log::log_enabled!(log::Level::Debug) {
+            s.weights.log(k, &eval);
+        }
         let mut froze = false;
         for (frozen, &overflow) in s.weights.frozen.iter_mut().zip(&eval.field_overflow) {
             if !*frozen && overflow <= params.target_overflow {
@@ -646,6 +744,7 @@ fn run(
         if froze {
             moving = objective.moving(&s.weights.frozen);
         }
+        s.weights.damp(k, &eval);
         let converged = s.weights.frozen.iter().all(|&f| f);
         if !converged {
             let growth = penalty_growth(eval.wirelength.hpwl - s.prev_hpwl, reference_growth);
@@ -787,6 +886,10 @@ mod tests {
                 precondition: vec![0.1, 0.05],
                 u: vec![1.0, 1.0],
                 step: 0.1,
+                cap: f64::MAX,
+                site: 1.0,
+                kinds: vec![Precondition::Weighted; 2],
+                damping: 1.0,
             }),
         };
 
@@ -812,6 +915,10 @@ mod tests {
                 precondition: vec![0.5],
                 u: vec![1.0],
                 step: 0.1,
+                cap: f64::MAX,
+                site: 1.0,
+                kinds: vec![Precondition::Weighted],
+                damping: 1.0,
             }),
         };
 
