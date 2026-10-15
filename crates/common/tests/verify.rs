@@ -2,8 +2,10 @@
 
 #![allow(clippy::unwrap_used)]
 
-use pare_common::db::design::{NetlistDB, PlacementStatus, RouteElem, SpecialNet, SpecialWire};
-use pare_common::db::indices::{CellId, CutLayerId, LayerId, NetId};
+use pare_common::db::design::{
+    NetlistDB, PlacementStatus, Region, RegionKind, RouteElem, SpecialNet, SpecialWire,
+};
+use pare_common::db::indices::{CellId, CutLayerId, LayerId, NetId, RegionId};
 use pare_common::db::library::{LayerRef, SignalUse};
 use pare_common::db::parser::{def, lef};
 use pare_common::geom::dbu::{Dbu, DbuPerMicron};
@@ -420,4 +422,126 @@ fn two_cuts_of_one_net_closer_than_cut_spacing_are_a_spacing_violation() {
         .filter(|v| v.layer == LayerRef::Cut(CutLayerId(0)))
         .count();
     assert_eq!(cut, 1, "{:?}", report.spacing);
+}
+
+/// Adds a region of `kind` over `rects` and assigns `members` to it.
+fn add_region(db: &mut NetlistDB, kind: RegionKind, rects: &[Rect<Dbu>], members: &[CellId]) {
+    let id = RegionId::new(db.regions.len());
+    db.regions.push(Region {
+        name: format!("r{}", id.index()),
+        rects: rects.to_vec(),
+        kind,
+    });
+    for &c in members {
+        db.cells[c.index()].region = Some(id);
+    }
+}
+
+fn region_violations(db: &NetlistDB) -> Vec<PlacementViolation> {
+    placement_violations(db)
+        .into_iter()
+        .filter(|v| {
+            matches!(
+                v,
+                PlacementViolation::OutsideRegion(_) | PlacementViolation::InFence(_)
+            )
+        })
+        .collect()
+}
+
+/// u1 sits at x 200..600, y 0..2000 in the fixture.
+const fn rect(x0: i64, y0: i64, x1: i64, y1: i64) -> Rect<Dbu> {
+    Rect::new(pt(x0, y0), pt(x1, y1))
+}
+
+#[test]
+fn a_fence_member_inside_its_fence_is_legal() {
+    let mut db = tiny_placed();
+    let u1 = cell(&db, "u1");
+    add_region(&mut db, RegionKind::Fence, &[rect(0, 0, 1000, 2000)], &[u1]);
+
+    assert!(region_violations(&db).is_empty());
+}
+
+#[test]
+fn a_fence_member_spanning_two_abutting_rectangles_is_inside() {
+    let mut db = tiny_placed();
+    let u1 = cell(&db, "u1");
+    let rects = [rect(0, 0, 400, 2000), rect(400, 0, 1000, 2000)];
+    add_region(&mut db, RegionKind::Fence, &rects, &[u1]);
+
+    assert!(region_violations(&db).is_empty());
+}
+
+#[test]
+fn a_fence_member_sticking_out_is_outside_its_region() {
+    let mut db = tiny_placed();
+    let u1 = cell(&db, "u1");
+    add_region(&mut db, RegionKind::Fence, &[rect(0, 0, 400, 2000)], &[u1]);
+
+    assert_eq!(
+        region_violations(&db),
+        [PlacementViolation::OutsideRegion(u1)]
+    );
+}
+
+#[test]
+fn an_inclusive_region_member_must_lie_inside_too() {
+    let mut db = tiny_placed();
+    let u1 = cell(&db, "u1");
+    add_region(
+        &mut db,
+        RegionKind::Inclusive,
+        &[rect(0, 0, 400, 2000)],
+        &[u1],
+    );
+
+    assert_eq!(
+        region_violations(&db),
+        [PlacementViolation::OutsideRegion(u1)]
+    );
+}
+
+#[test]
+fn a_guide_region_constrains_nothing() {
+    let mut db = tiny_placed();
+    let u1 = cell(&db, "u1");
+    add_region(
+        &mut db,
+        RegionKind::Guide,
+        &[rect(5000, 0, 6000, 2000)],
+        &[u1],
+    );
+
+    assert!(region_violations(&db).is_empty());
+}
+
+#[test]
+fn a_cell_outside_every_fence_may_not_overlap_one() {
+    let mut db = tiny_placed();
+    let u1 = cell(&db, "u1");
+    add_region(&mut db, RegionKind::Fence, &[rect(500, 0, 900, 2000)], &[]);
+
+    assert_eq!(region_violations(&db), [PlacementViolation::InFence(u1)]);
+}
+
+#[test]
+fn a_cell_outside_every_fence_may_overlap_an_inclusive_region() {
+    let mut db = tiny_placed();
+    add_region(
+        &mut db,
+        RegionKind::Inclusive,
+        &[rect(500, 0, 900, 2000)],
+        &[],
+    );
+
+    assert!(region_violations(&db).is_empty());
+}
+
+#[test]
+fn a_cell_abutting_a_fence_does_not_overlap_it() {
+    let mut db = tiny_placed();
+    add_region(&mut db, RegionKind::Fence, &[rect(600, 0, 900, 2000)], &[]);
+
+    assert!(region_violations(&db).is_empty());
 }

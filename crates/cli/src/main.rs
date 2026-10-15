@@ -480,6 +480,12 @@ fn report_placement(db: &NetlistDB) -> bool {
         &count(|v| matches!(v, PlacementViolation::InBlockage(_))).to_string(),
     );
     ui::stat_row(
+        "Outside region:",
+        &count(|v| matches!(v, PlacementViolation::OutsideRegion(_))).to_string(),
+        "In a fence:",
+        &count(|v| matches!(v, PlacementViolation::InFence(_))).to_string(),
+    );
+    ui::stat_row(
         "Unplaced:",
         &count(|v| matches!(v, PlacementViolation::Unplaced(_))).to_string(),
         "",

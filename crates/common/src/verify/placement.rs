@@ -1,7 +1,7 @@
-//! Placement legality: die containment, overlaps, blockages, rows, sites and
-//! row orientation.
+//! Placement legality: die containment, overlaps, blockages, rows, sites,
+//! row orientation and placement regions.
 
-use crate::db::design::{NetlistDB, PlacementStatus};
+use crate::db::design::{NetlistDB, PlacementStatus, RegionKind};
 use crate::db::indices::CellId;
 use crate::db::library::MacroClass;
 use crate::geom::dbu::Dbu;
@@ -26,6 +26,11 @@ pub enum PlacementViolation {
     OffSite(CellId),
     /// A movable standard cell's orientation does not match its row.
     WrongOrientation(CellId),
+    /// A movable cell assigned to a fence or inclusive region is not
+    /// entirely inside it.
+    OutsideRegion(CellId),
+    /// A movable cell not assigned to a fence region overlaps one.
+    InFence(CellId),
 }
 
 /// Checks every movable cell; fixed cells only matter as obstacles, and
@@ -53,9 +58,30 @@ pub fn placement_violations(db: &NetlistDB) -> Vec<PlacementViolation> {
         if matches!(db.cell_macro(id).class, MacroClass::Core(_)) {
             violations.extend(rows.check(db, id, &bbox));
         }
+        violations.extend(region_violation(db, id, &bbox));
     }
     violations.extend(overlaps(db));
     violations
+}
+
+/// The region rule a movable cell at `bbox` breaks: a member of a fence or
+/// inclusive region must lie inside it, and no other cell may overlap a
+/// fence. Guide regions constrain nothing.
+fn region_violation(db: &NetlistDB, id: CellId, bbox: &Rect<Dbu>) -> Option<PlacementViolation> {
+    match db.cells[id.index()].region {
+        Some(r) => {
+            let region = &db.regions[r.index()];
+            let confined = matches!(region.kind, RegionKind::Fence | RegionKind::Inclusive);
+            (confined && !bbox.covered_by(&region.rects))
+                .then_some(PlacementViolation::OutsideRegion(id))
+        }
+        None => db
+            .regions
+            .iter()
+            .filter(|region| region.kind == RegionKind::Fence)
+            .any(|region| region.rects.iter().any(|r| r.overlaps(bbox)))
+            .then_some(PlacementViolation::InFence(id)),
+    }
 }
 
 /// Rows grouped by the Y coordinate of their origin.

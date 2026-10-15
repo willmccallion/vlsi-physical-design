@@ -113,6 +113,47 @@ impl Rect<Dbu> {
             self.min.y.midpoint(self.max.y),
         )
     }
+
+    /// Whether the union of `cover`, whose rectangles may overlap, contains
+    /// this rectangle.
+    pub fn covered_by(&self, cover: &[Self]) -> bool {
+        if self.width() <= Dbu::ZERO || self.height() <= Dbu::ZERO {
+            return cover.iter().any(|c| c.encloses(self));
+        }
+        let pieces: Vec<Self> = cover
+            .iter()
+            .filter(|c| c.overlaps(self))
+            .filter_map(|c| c.intersection(self))
+            .collect();
+        let mut xs: Vec<Dbu> = pieces
+            .iter()
+            .flat_map(|p| [p.min.x, p.max.x])
+            .chain([self.min.x, self.max.x])
+            .collect();
+        xs.sort_unstable();
+        xs.dedup();
+        xs.windows(2)
+            .all(|slab| self.slab_covered(&pieces, slab[0], slab[1]))
+    }
+
+    /// Whether `pieces` spanning the whole slab `[x0, x1]` cover this
+    /// rectangle's height there.
+    fn slab_covered(&self, pieces: &[Self], x0: Dbu, x1: Dbu) -> bool {
+        let mut spans: Vec<(Dbu, Dbu)> = pieces
+            .iter()
+            .filter(|p| p.min.x <= x0 && x1 <= p.max.x)
+            .map(|p| (p.min.y, p.max.y))
+            .collect();
+        spans.sort_unstable();
+        let mut reached = self.min.y;
+        for (lo, hi) in spans {
+            if lo > reached {
+                return false;
+            }
+            reached = reached.max(hi);
+        }
+        reached >= self.max.y
+    }
 }
 
 #[cfg(test)]
@@ -130,6 +171,33 @@ mod tests {
 
         assert!(a.touches(&b));
         assert!(!a.overlaps(&b));
+    }
+
+    #[test]
+    fn a_rectangle_split_across_two_abutting_covers_is_covered() {
+        let cell = rect(5, 0, 15, 10);
+
+        assert!(cell.covered_by(&[rect(0, 0, 10, 10), rect(10, 0, 20, 10)]));
+    }
+
+    #[test]
+    fn a_gap_between_covers_leaves_the_rectangle_uncovered() {
+        let cell = rect(5, 0, 15, 10);
+
+        assert!(!cell.covered_by(&[rect(0, 0, 10, 10), rect(11, 0, 20, 10)]));
+    }
+
+    #[test]
+    fn covers_stacked_vertically_cover_the_full_height() {
+        let cell = rect(0, 0, 10, 10);
+
+        assert!(cell.covered_by(&[rect(0, 0, 10, 4), rect(0, 3, 10, 10)]));
+        assert!(!cell.covered_by(&[rect(0, 0, 10, 4), rect(0, 5, 10, 10)]));
+    }
+
+    #[test]
+    fn a_rectangle_sticking_out_of_its_cover_is_not_covered() {
+        assert!(!rect(0, 0, 10, 10).covered_by(&[rect(0, 0, 10, 9)]));
     }
 
     #[test]
