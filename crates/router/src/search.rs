@@ -387,9 +387,7 @@ impl Search<'_> {
             cost += self.occupant_cost(o.owner, o.origin);
         }
         if let Some(overlay) = self.overlay {
-            let clashes = overlay
-                .cut_conflicts(self.tech, cut, rect, self.owner)
-                .count();
+            let clashes = overlay.cut_conflicts(cut, rect, self.owner).count();
             cost = self.costs.penalty.mul_add(clashes as f64, cost);
         }
         cost

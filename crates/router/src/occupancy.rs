@@ -466,7 +466,7 @@ impl Occupancy {
 #[derive(Clone, Debug, Default)]
 pub struct LocalOccupancy {
     tracks: FxHashMap<TrackRef, Vec<Occupant>>,
-    cuts: FxHashMap<CutLayerId, Vec<CutOccupant>>,
+    cuts: FxHashMap<CutLayerId, CutLayer>,
 }
 
 impl LocalOccupancy {
@@ -489,12 +489,16 @@ impl LocalOccupancy {
     }
 
     /// Records a cut on `cut` for `owner`.
-    pub fn add_cut(&mut self, cut: CutLayerId, rect: &Rect<Dbu>, owner: Owner) {
-        self.cuts.entry(cut).or_default().push(CutOccupant {
-            rect: *rect,
-            owner,
-            origin: Origin::Wiring,
-        });
+    pub fn add_cut(&mut self, tech: &RouteTech, cut: CutLayerId, rect: &Rect<Dbu>, owner: Owner) {
+        let _ = self
+            .cuts
+            .entry(cut)
+            .or_insert_with(|| CutLayer::new(tech.cuts[cut.index()]))
+            .add(CutOccupant {
+                rect: *rect,
+                owner,
+                origin: Origin::Wiring,
+            });
     }
 
     /// Forgets every rectangle and cut of `owner`.
@@ -502,26 +506,25 @@ impl LocalOccupancy {
         for list in self.tracks.values_mut() {
             list.retain(|o| o.owner != owner);
         }
-        for list in self.cuts.values_mut() {
-            list.retain(|o| o.owner != owner);
+        for layer in self.cuts.values_mut() {
+            for list in layer.buckets.values_mut() {
+                list.retain(|o| o.owner != owner);
+            }
         }
     }
 
     /// Cuts here that a cut at `rect` on `cut` of `owner` would touch or crowd.
     pub fn cut_conflicts<'a>(
         &'a self,
-        tech: &'a RouteTech,
         cut: CutLayerId,
         rect: &Rect<Dbu>,
         owner: Owner,
     ) -> impl Iterator<Item = &'a CutOccupant> + use<'a> {
-        let spacing = tech.cuts[cut.index()].spacing;
         let rect = *rect;
         self.cuts
             .get(&cut)
             .into_iter()
-            .flatten()
-            .filter(move |c| c.owner != owner && cuts_clash(&rect, &c.rect, spacing))
+            .flat_map(move |layer| layer.conflicts(rect, owner))
     }
 
     /// The conflicts `rect` on `layer` would have here.

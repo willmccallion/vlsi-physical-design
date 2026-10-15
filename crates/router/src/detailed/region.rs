@@ -326,7 +326,7 @@ impl DetailedRouter<'_> {
                         overlay.add_rect(self.tech, layer, &rect, owner);
                     }
                     for (cut, rect) in self.edge_cuts(edges) {
-                        overlay.add_cut(cut, &rect, owner);
+                        overlay.add_cut(self.tech, cut, &rect, owner);
                     }
                 }
             }
@@ -374,7 +374,7 @@ impl DetailedRouter<'_> {
                 overlay.add_rect(self.tech, layer, &rect, owner);
             }
             for (cut, rect) in self.edge_cuts(edges) {
-                overlay.add_cut(cut, &rect, owner);
+                overlay.add_cut(self.tech, cut, &rect, owner);
             }
         }
         pieces
@@ -491,10 +491,7 @@ impl DetailedRouter<'_> {
                     .cut_conflicts(*cut, rect, owner)
                     .next()
                     .is_some()
-                    || overlay
-                        .cut_conflicts(self.tech, *cut, rect, owner)
-                        .next()
-                        .is_some()
+                    || overlay.cut_conflicts(*cut, rect, owner).next().is_some()
             })
     }
 
