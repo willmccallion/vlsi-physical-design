@@ -1,17 +1,20 @@
-//! Global routing on a grid of gcells.
+//! Global routing on a grid of gcells, in the manner of CUGR.
 //!
 //! Each routable layer gets a capacity on every gcell edge in its preferred
 //! direction: its tracks crossing that edge, each counted for the share of
-//! the edge that fixed metal leaves usable. Nets are routed as trees of A*
-//! paths through the 3D grid. An edge costs its length, a logistic
-//! congestion term that rises as its usage nears capacity, its accumulated
-//! overflow history, and a penalty per unit of overflow that grows every
-//! round, in the manner of `PathFinder`. Nets crossing overflowed edges are
-//! ripped up and rerouted, each time with a search area grown around their
-//! pins so they can detour further around congestion. The cells each net
+//! the edge that fixed metal leaves usable. An edge costs its length, a
+//! logistic congestion term that rises as its usage nears capacity, its
+//! accumulated overflow history, and a penalty per unit of overflow that
+//! grows every round, as in `PathFinder`. Every net is first routed along
+//! its Steiner tree by 3D pattern routing (`pattern`); then nets crossing
+//! overflowed edges are ripped up and rerouted by maze search (`maze`), each
+//! time in a search area grown around their pins so they can detour
+//! further, in parallel batches whose areas do not meet. The cells each net
 //! passes through become its guide for detailed routing.
 
 mod maze;
+mod pattern;
+mod steiner;
 
 use crate::occupancy::{Occupancy, TrackRef};
 use crate::tech::RouteTech;
@@ -21,6 +24,7 @@ use pare_common::db::library::Direction;
 use pare_common::geom::dbu::Dbu;
 use pare_common::geom::point::Point;
 use pare_common::geom::rect::Rect;
+use pattern::route_pattern;
 use rayon::prelude::*;
 use rustc_hash::FxHashMap;
 
@@ -205,8 +209,12 @@ impl GlobalGrid {
         })
     }
 
+    /// Adds `delta` to the usage of every edge a net's paths use, counting
+    /// an edge its paths share once.
     fn add_tree(&mut self, paths: &[Vec<GCell>], delta: i32) {
-        let edges: Vec<usize> = paths.iter().flat_map(|p| self.path_edges(p)).collect();
+        let mut edges: Vec<usize> = paths.iter().flat_map(|p| self.path_edges(p)).collect();
+        edges.sort_unstable();
+        edges.dedup();
         for e in edges {
             let u = i32::from(self.usage[e]) + delta;
             self.usage[e] = u16::try_from(u.max(0)).unwrap_or(u16::MAX);
@@ -385,8 +393,7 @@ pub fn route_global(grid: &mut GlobalGrid, nets: &[GlobalNet], rounds: usize) ->
     };
     let mut routes = GlobalRoutes::default();
     let mut margins = vec![FIRST_MARGIN; nets.len()];
-    let all: Vec<usize> = (0..nets.len()).collect();
-    route_batched(grid, nets, &all, costs, &mut routes);
+    route_initial(grid, nets, costs, &mut routes);
     let mut best = Snapshot::of(grid, &routes);
     let mut stalled = 0;
     for _ in 0..rounds {
@@ -519,27 +526,23 @@ fn route_disjoint(
 /// rerouted together apart.
 const BATCH_BLOCK: u16 = 4;
 
-/// Routes the given nets in parallel chunks, each against the usage left by
-/// the chunks before it. Nets in one chunk do not see each other; the
-/// rip-up rounds settle the overflow that causes.
-fn route_batched(
+/// Pattern-routes every net, shortest first, in parallel chunks, each
+/// against the usage left by the chunks before it. Nets in one chunk do not
+/// see each other; the rip-up rounds settle the overflow that causes.
+fn route_initial(
     grid: &mut GlobalGrid,
     nets: &[GlobalNet],
-    which: &[usize],
     costs: GlobalCosts,
     routes: &mut GlobalRoutes,
 ) {
-    const CHUNK: usize = 4096;
-    for chunk in which.chunks(CHUNK) {
+    let chunk = rayon::current_num_threads().max(1) * INITIAL_PER_THREAD;
+    let mut order: Vec<usize> = (0..nets.len()).collect();
+    order.sort_by_key(|&i| (span(&nets[i].terminals), i));
+    for batch in order.chunks(chunk) {
         let shared: &GlobalGrid = grid;
-        let found: Vec<(usize, Vec<Vec<GCell>>)> = chunk
+        let found: Vec<(usize, Vec<Vec<GCell>>)> = batch
             .par_iter()
-            .map(|&i| {
-                (
-                    i,
-                    route_tree(shared, &nets[i].terminals, FIRST_MARGIN, costs),
-                )
-            })
+            .map(|&i| (i, route_pattern(shared, &nets[i].terminals, costs)))
             .collect();
         for (i, tree) in found {
             grid.add_tree(&tree, 1);
@@ -547,6 +550,9 @@ fn route_batched(
         }
     }
 }
+
+/// Nets per thread pattern-routed in one chunk of the initial routing.
+const INITIAL_PER_THREAD: usize = 32;
 
 /// Bounding box of cells, grown by `margin` and clamped to the grid, as
 /// (x0, x1, y0, y1).
