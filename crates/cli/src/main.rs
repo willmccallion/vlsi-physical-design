@@ -6,6 +6,7 @@
 use anyhow::Context;
 use clap::{Parser, Subcommand};
 use pare_common::db::design::{NetlistDB, PlacementStatus};
+use pare_common::db::indices::CellId;
 use pare_common::db::parser::{bookshelf, def, lef};
 use pare_common::db::writer;
 use pare_common::util::config::{Config, Purpose};
@@ -480,6 +481,11 @@ fn report_placement(db: &NetlistDB) -> bool {
         ui::check("Placement is legal.");
         return true;
     }
+    if log::log_enabled!(log::Level::Debug) {
+        for v in &violations {
+            log::debug!("placement violation: {}", describe_violation(db, v));
+        }
+    }
     let count = |f: fn(&PlacementViolation) -> bool| violations.iter().filter(|v| f(v)).count();
     ui::fail(&format!("Placement has {} violations", violations.len()));
     ui::stat_row(
@@ -513,6 +519,35 @@ fn report_placement(db: &NetlistDB) -> bool {
         "",
     );
     false
+}
+
+/// A violation with the names, locations and sizes of the cells in it.
+fn describe_violation(db: &NetlistDB, v: &PlacementViolation) -> String {
+    let cell = |c: CellId| {
+        let bbox = db.cell_bbox(c);
+        format!(
+            "{} {:?} at ({}, {})-({}, {})",
+            db.cells[c.index()].name,
+            db.cells[c.index()]
+                .region
+                .map(|r| db.regions[r.index()].name.as_str()),
+            bbox.min.x.get(),
+            bbox.min.y.get(),
+            bbox.max.x.get(),
+            bbox.max.y.get()
+        )
+    };
+    match *v {
+        PlacementViolation::Overlap(a, b) => format!("overlap {} with {}", cell(a), cell(b)),
+        PlacementViolation::Unplaced(c) => format!("unplaced {}", cell(c)),
+        PlacementViolation::OutsideDie(c) => format!("outside die {}", cell(c)),
+        PlacementViolation::InBlockage(c) => format!("in blockage {}", cell(c)),
+        PlacementViolation::NotInRow(c) => format!("not in a row {}", cell(c)),
+        PlacementViolation::OffSite(c) => format!("off site {}", cell(c)),
+        PlacementViolation::WrongOrientation(c) => format!("wrong orientation {}", cell(c)),
+        PlacementViolation::OutsideRegion(c) => format!("outside region {}", cell(c)),
+        PlacementViolation::InFence(c) => format!("in a fence {}", cell(c)),
+    }
 }
 
 /// Prints routing check results; returns whether there are no shorts or opens.
