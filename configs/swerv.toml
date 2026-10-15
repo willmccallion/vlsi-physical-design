@@ -1,6 +1,8 @@
+purpose = "placement"
+
 [input]
-lef_files = ["inputs/swerv/Nangate45.lef"]
-def_file = "inputs/swerv/swerv.def"
+lef_files = ["inputs/tech/nangate45/Nangate45.lef"]
+def_file = "inputs/openroad/swerv/swerv.def"
 output_def = "output/swerv/placed.def"
 
 [global_placement]

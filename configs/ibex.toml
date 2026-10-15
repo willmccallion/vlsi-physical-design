@@ -1,6 +1,8 @@
+purpose = "place_and_route"
+
 [input]
-lef_files = ["inputs/ibex/Nangate45.lef"]
-def_file = "inputs/ibex/ibex.def"
+lef_files = ["inputs/tech/nangate45/Nangate45.lef"]
+def_file = "inputs/openroad/ibex/ibex.def"
 output_def = "output/ibex/placed.def"
 
 [global_placement]

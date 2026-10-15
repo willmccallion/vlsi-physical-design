@@ -1,5 +1,7 @@
+purpose = "placement"
+
 [input]
-bookshelf_aux_file = "inputs/ibm13/ibm13.aux"
+bookshelf_aux_file = "inputs/ibm/ibm13/ibm13.aux"
 output_def = "output/ibm13/placed.def"
 
 [global_placement]

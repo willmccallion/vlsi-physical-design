@@ -1,0 +1,10 @@
+purpose = "place_and_route"
+
+[input]
+lef_files = ["inputs/ispd2015/mgc_edit_dist_a/tech.lef", "inputs/ispd2015/mgc_edit_dist_a/cells.lef"]
+def_file = "inputs/ispd2015/mgc_edit_dist_a/floorplan.def"
+output_def = "output/mgc_edit_dist_a/placed.def"
+
+[global_placement]
+placer_max_iterations = 2000
+target_density = 0.455

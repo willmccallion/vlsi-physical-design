@@ -8,7 +8,7 @@ use clap::{Parser, Subcommand};
 use pare_common::db::design::{NetlistDB, PlacementStatus};
 use pare_common::db::parser::{bookshelf, def, lef};
 use pare_common::db::writer;
-use pare_common::util::config::Config;
+use pare_common::util::config::{Config, Purpose};
 use pare_common::util::{logger, ui, visualization};
 use pare_common::verify::placement::{PlacementViolation, placement_violations};
 use pare_common::verify::routing::check_routing;
@@ -42,8 +42,8 @@ enum Commands {
         #[arg(long)]
         placement: Option<PathBuf>,
     },
-    /// Place and then route a design.
-    Flow {
+    /// Place, route, or place and route a design, as its purpose says.
+    Run {
         /// Design name (e.g. 'ibex') or path to a TOML config.
         config: PathBuf,
     },
@@ -89,22 +89,41 @@ fn main() -> anyhow::Result<()> {
     ui::banner();
 
     match args.command {
-        Commands::Place { config } => {
-            let config = load_config(&config)?;
+        Commands::Place { config: name } => {
+            let config = load_config(&name)?;
+            if config.purpose == Purpose::Routing {
+                anyhow::bail!(
+                    "{} is a routing benchmark: its placement is part of the input",
+                    name.display()
+                );
+            }
             let mut db = load_design(&config, None)?;
             run_placement(&config, &mut db, &prepare_output_dir(&config)?)?;
         }
-        Commands::Route { config, placement } => {
-            let config = load_config(&config)?;
+        Commands::Route {
+            config: name,
+            placement,
+        } => {
+            let config = load_config(&name)?;
+            if config.purpose == Purpose::Placement {
+                anyhow::bail!(
+                    "{} is a placement benchmark and is not routed",
+                    name.display()
+                );
+            }
             let mut db = load_design(&config, placement.as_deref())?;
             run_routing(&config, &mut db, &prepare_output_dir(&config)?)?;
         }
-        Commands::Flow { config } => {
+        Commands::Run { config } => {
             let config = load_config(&config)?;
             let mut db = load_design(&config, None)?;
             let output_dir = prepare_output_dir(&config)?;
-            run_placement(&config, &mut db, &output_dir)?;
-            run_routing(&config, &mut db, &output_dir)?;
+            if config.purpose != Purpose::Routing {
+                run_placement(&config, &mut db, &output_dir)?;
+            }
+            if config.purpose != Purpose::Placement {
+                run_routing(&config, &mut db, &output_dir)?;
+            }
         }
         Commands::Check { config, placement } => {
             let config = load_config(&config)?;

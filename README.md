@@ -70,14 +70,27 @@ Typed indices (`CellId`, `NetId`, `PinId`, `LayerId`, `MacroId`, …) keep table
 
 ## Usage
 
-**Requirements:** Rust stable. Benchmarks are downloaded with the scripts in `scripts/` (e.g. `python3 scripts/download_gcd.py`, `python3 scripts/ibm.py 01`). `nix develop .#eda` provides OpenROAD for cross-checking results.
+**Requirements:** Rust stable and Python 3. `nix develop .#eda` provides OpenROAD for cross-checking results.
+
+Benchmarks are downloaded by `scripts/download.py`, which also writes each design's config to `configs/<design>.toml`. Every design has a purpose, by what it was made to test: placement benchmarks are only placed, routing benchmarks (whose placement is part of the input) are only routed, and the rest are placed and then routed.
+
+| Suite | Designs | Purpose |
+|---|---|---|
+| `openroad` | gcd | routing |
+| `openroad` | aes, ibex (ORFS floorplans) | place and route |
+| `openroad` | jpeg, swerv, netcard, leon3mp (OpenROAD placer tests) | placement |
+| `ibm` | ibm01–ibm18 (Bookshelf) | placement |
+| `ispd2015` | 20 `mgc_*` designs, up to 1.3M nets | place and route |
+| `ispd2018`, `ispd2019` | `ispd18_test1`–`10`, `ispd19_test1`–`10` | routing |
 
 ```bash
-# Place a benchmark by name (resolves to configs/place/ibex.toml)
-cargo run --release -- place ibex
+python3 scripts/download.py --list          # every design and its purpose
+python3 scripts/download.py gcd aes ibex    # designs, a suite (e.g. ispd2018), or all
 
-# Explicit config paths also work
-cargo run --release -- place configs/place/ibm01.toml
+cargo run --release -- run aes              # does what the design's purpose says
+cargo run --release -- place aes            # placement only (refused for routing benchmarks)
+cargo run --release -- route gcd            # routing only (refused for placement benchmarks)
+cargo run --release -- check aes --placement output/aes/routed.def
 ```
 
 Images (`nesterov_placer.png` before legalization, `placed.png` after) and the placed DEF (or `placed.pl` for Bookshelf designs) are written to the output directory named in the config.

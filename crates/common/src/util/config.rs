@@ -6,9 +6,11 @@ use serde::Deserialize;
 use std::ops::RangeInclusive;
 
 /// A run configuration. Unknown keys are rejected so typos do not pass silently.
-#[derive(Debug, Default, Deserialize)]
+#[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Config {
+    /// What the design is a benchmark of.
+    pub purpose: Purpose,
     /// Global placement parameters.
     #[serde(default)]
     pub global_placement: GlobalPlacementConfig,
@@ -21,6 +23,19 @@ pub struct Config {
     /// Input and output files.
     #[serde(default)]
     pub input: InputConfig,
+}
+
+/// What a design is a benchmark of, which decides what running it does.
+#[derive(Clone, Copy, Debug, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum Purpose {
+    /// Made to test placement: it is placed and never routed.
+    Placement,
+    /// Made to test routing: its placement is part of the input, and it is
+    /// only routed.
+    Routing,
+    /// Placed and then routed.
+    PlaceAndRoute,
 }
 
 /// Parameters of the analytical global placer.

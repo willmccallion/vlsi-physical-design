@@ -1,6 +1,8 @@
+purpose = "place_and_route"
+
 [input]
-lef_files = ["inputs/aes/Nangate45.lef"]
-def_file = "inputs/aes/aes_cipher_top.def"
+lef_files = ["inputs/tech/nangate45/Nangate45.lef"]
+def_file = "inputs/openroad/aes/aes_cipher_top.def"
 output_def = "output/aes/placed.def"
 
 [global_placement]
