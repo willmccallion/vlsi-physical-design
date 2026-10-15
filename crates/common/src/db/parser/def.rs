@@ -10,7 +10,7 @@ use crate::db::design::{
     TrackDef,
 };
 use crate::db::indices::{LayerId, NetId, ViaId};
-use crate::db::library::{LayerRef, Library, PinDirection, Shape, SignalUse};
+use crate::db::library::{LayerRef, Library, PinDirection, Shape, SignalUse, ViaDef};
 use crate::db::parser::lef::{parse_pin_direction, parse_signal_use, via_from_shapes};
 use crate::db::parser::lexer::{Lexer, ParseError, read_file};
 use crate::geom::dbu::{Dbu, DbuPerMicron};
@@ -435,6 +435,15 @@ impl<'a> DefParser<'a> {
             shapes.extend(generated);
         }
         let via = via_from_shapes(name, false, shapes, true).map_err(|m| self.lx.error(line, m))?;
+        if let Some(existing) = self.db.library.via_id(name) {
+            if same_geometry(self.db.library.via(existing), &via) {
+                return Ok(());
+            }
+            return Err(self.lx.error(
+                line,
+                format!("via '{name}' differs from the LEF via of the same name"),
+            ));
+        }
         let _ = self
             .db
             .library
@@ -979,4 +988,19 @@ impl ViaRuleParams {
         });
         Ok(shapes)
     }
+}
+
+/// Whether two vias have the same cut and the same shapes, in any order.
+fn same_geometry(a: &ViaDef, b: &ViaDef) -> bool {
+    if a.cut != b.cut || a.shapes.len() != b.shapes.len() {
+        return false;
+    }
+    let mut unmatched: Vec<&Shape> = b.shapes.iter().collect();
+    a.shapes.iter().all(|s| {
+        unmatched
+            .iter()
+            .position(|t| *t == s)
+            .map(|i| unmatched.swap_remove(i))
+            .is_some()
+    })
 }
