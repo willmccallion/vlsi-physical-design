@@ -1,6 +1,10 @@
 //! Technology and cell library: layers, sites, cell masters and vias.
 
 use crate::db::indices::{CutLayerId, LayerId, MacroId, MacroPinId, SiteId, ViaId};
+use crate::db::rules::{
+    CellEdge, CutLayerRules, CutSpacingCondition, LibraryRules, RoutingLayerRules, SpacingTable,
+    ViaRule,
+};
 use crate::geom::dbu::{Dbu, DbuPerMicron};
 use crate::geom::point::Point;
 use crate::geom::rect::Rect;
@@ -36,48 +40,8 @@ pub struct RoutingLayer {
     pub min_spacing: Dbu,
     /// Spacing that grows with width and parallel run, if the layer has one.
     pub spacing_table: Option<SpacingTable>,
-}
-
-/// Spacing that grows with the width of the wider of two shapes and the
-/// length over which they run side by side (LEF `SPACINGTABLE
-/// PARALLELRUNLENGTH`).
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct SpacingTable {
-    /// Run length thresholds, increasing from zero.
-    pub run_lengths: Vec<Dbu>,
-    /// Width thresholds, increasing from zero, each with one spacing per run
-    /// length threshold.
-    pub rows: Vec<(Dbu, Vec<Dbu>)>,
-}
-
-impl SpacingTable {
-    /// The spacing two shapes need when the wider is `width` wide and they
-    /// run side by side for `run`, zero or less when they do not face each
-    /// other. A width threshold applies from its value up, a run length one
-    /// only beyond it, as `OpenROAD` reads the table.
-    pub fn spacing(&self, width: Dbu, run: Dbu) -> Dbu {
-        let row = self
-            .rows
-            .iter()
-            .rposition(|(w, _)| *w <= width)
-            .unwrap_or(0);
-        let column = self.run_lengths.iter().rposition(|&r| r < run).unwrap_or(0);
-        self.rows
-            .get(row)
-            .and_then(|(_, spacings)| spacings.get(column))
-            .copied()
-            .unwrap_or_default()
-    }
-
-    /// The largest spacing a shape `width` wide can need, at any run length.
-    pub fn widest_for(&self, width: Dbu) -> Dbu {
-        self.rows
-            .iter()
-            .filter(|(w, _)| *w <= width)
-            .flat_map(|(_, spacings)| spacings.iter().copied())
-            .max()
-            .unwrap_or_default()
-    }
+    /// Further rules on the layer's shapes.
+    pub rules: RoutingLayerRules,
 }
 
 impl RoutingLayer {
@@ -97,8 +61,32 @@ pub struct CutLayer {
     pub name: String,
     /// Cut width, if given.
     pub width: Option<Dbu>,
-    /// Minimum cut-to-cut spacing, if given.
+    /// Edge-to-edge spacing every pair of cuts of different nets needs, if the
+    /// layer has an unconditional rule; a center-to-center rule counts as its
+    /// value less the cut width, which is exact along an axis and stricter
+    /// diagonally.
     pub spacing: Option<Dbu>,
+    /// All of the layer's cut spacing and enclosure rules.
+    pub rules: CutLayerRules,
+}
+
+impl CutLayer {
+    /// Derives [`CutLayer::spacing`] from the layer's unconditional
+    /// different-net rules.
+    pub fn unconditional_spacing(width: Option<Dbu>, rules: &CutLayerRules) -> Option<Dbu> {
+        rules
+            .spacings
+            .iter()
+            .filter(|r| !r.same_net && r.condition == CutSpacingCondition::Always)
+            .filter_map(|r| {
+                if r.center_to_center {
+                    width.map(|w| r.spacing - w)
+                } else {
+                    Some(r.spacing)
+                }
+            })
+            .max()
+    }
 }
 
 /// A layer a shape can be drawn on.
@@ -130,11 +118,23 @@ pub struct Symmetry {
     pub r90: bool,
 }
 
+/// What a placement site is for.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum SiteClass {
+    /// Rows of standard cells.
+    #[default]
+    Core,
+    /// I/O pad rings.
+    Pad,
+}
+
 /// A placement site.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Site {
     /// LEF site name.
     pub name: String,
+    /// What the site is for.
+    pub class: SiteClass,
     /// Width and height.
     pub size: Point<Dbu>,
     /// Allowed symmetries.
@@ -296,6 +296,8 @@ pub struct Macro {
     pub pins: Vec<MacroPin>,
     /// Routing obstructions in macro coordinates.
     pub obstructions: Vec<Shape>,
+    /// Edge types for cell edge spacing rules.
+    pub edges: Vec<CellEdge>,
     pin_by_name: HashMap<String, MacroPinId>,
 }
 
@@ -316,6 +318,7 @@ impl Macro {
             site,
             pins: Vec::new(),
             obstructions: Vec::new(),
+            edges: Vec::new(),
             pin_by_name: HashMap::new(),
         }
     }
@@ -392,6 +395,10 @@ pub struct Library {
     pub macros: Vec<Macro>,
     /// Via definitions.
     pub vias: Vec<ViaDef>,
+    /// Rules for generating via arrays.
+    pub via_rules: Vec<ViaRule>,
+    /// Technology-wide rules.
+    pub rules: LibraryRules,
     layer_by_name: HashMap<String, LayerRef>,
     site_by_name: HashMap<String, SiteId>,
     macro_by_name: HashMap<String, MacroId>,
@@ -418,6 +425,8 @@ impl Library {
             sites: Vec::new(),
             macros: Vec::new(),
             vias: Vec::new(),
+            via_rules: Vec::new(),
+            rules: LibraryRules::default(),
             layer_by_name: HashMap::new(),
             site_by_name: HashMap::new(),
             macro_by_name: HashMap::new(),

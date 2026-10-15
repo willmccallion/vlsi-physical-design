@@ -9,7 +9,8 @@
 use crate::RouteError;
 use pare_common::db::design::{NetlistDB, TrackAxis};
 use pare_common::db::indices::{CutLayerId, LayerId, ViaId};
-use pare_common::db::library::{Direction, LayerRef, SpacingTable};
+use pare_common::db::library::{Direction, LayerRef};
+use pare_common::db::rules::SpacingTable;
 use pare_common::geom::dbu::Dbu;
 use pare_common::geom::point::Point;
 use pare_common::geom::rect::Rect;
@@ -83,8 +84,10 @@ impl LayerTech {
         };
         let ((a0, a1), (b0, b1)) = self.across_along_rect(rect);
         let width = (a1 - a0).min(b1 - b0).max(self.width);
-        let across = table.spacing(width, b1 - b0).max(self.spacing);
-        let along = table.spacing(width, Dbu::ZERO).max(self.spacing);
+        let across = table.spacing(width, self.width, b1 - b0).max(self.spacing);
+        let along = table
+            .spacing(width, self.width, Dbu::ZERO)
+            .max(self.spacing);
         (across, along)
     }
 

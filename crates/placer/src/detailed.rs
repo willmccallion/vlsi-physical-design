@@ -443,8 +443,9 @@ mod tests {
     use pare_common::db::indices::{LayerId, SiteId};
     use pare_common::db::library::{
         CoreKind, Direction, LayerRef, Library, Macro, MacroClass, MacroPin, PinDirection,
-        RoutingLayer, Shape, SignalUse, Site, Symmetry,
+        RoutingLayer, Shape, SignalUse, Site, SiteClass, Symmetry,
     };
+    use pare_common::db::rules::RoutingLayerRules;
     use pare_common::geom::dbu::DbuPerMicron;
     use pare_common::geom::orient::Orientation;
     use pare_common::verify::placement::placement_violations;
@@ -472,11 +473,13 @@ mod tests {
                 width: Dbu(4),
                 min_spacing: Dbu(4),
                 spacing_table: None,
+                rules: RoutingLayerRules::default(),
             })
             .unwrap();
         let site = lib
             .add_site(Site {
                 name: "s".into(),
+                class: SiteClass::Core,
                 size: pt(10, 100),
                 symmetry,
             })

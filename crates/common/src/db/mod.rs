@@ -4,4 +4,5 @@ pub mod design;
 pub mod indices;
 pub mod library;
 pub mod parser;
+pub mod rules;
 pub mod writer;

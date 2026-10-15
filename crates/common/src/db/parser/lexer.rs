@@ -72,6 +72,19 @@ impl<'a> Lexer<'a> {
         }
     }
 
+    /// Creates a lexer over text that starts at `line` of `path`, such as the
+    /// contents of a quoted LEF property value.
+    pub const fn starting_at(src: &'a str, path: &'a Path, line: usize) -> Self {
+        Self {
+            src,
+            pos: 0,
+            line,
+            path,
+            peeked: None,
+            split_semicolon: None,
+        }
+    }
+
     /// The file being read.
     pub const fn path(&self) -> &Path {
         self.path

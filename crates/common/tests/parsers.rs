@@ -6,6 +6,7 @@ use pare_common::db::design::{GCellGridDef, NetlistDB, PlacementStatus, RouteEle
 use pare_common::db::indices::{CellId, CutLayerId, LayerId, PinId};
 use pare_common::db::library::{Direction, LayerRef, Library, MacroClass, Shape};
 use pare_common::db::parser::{bookshelf, def, lef};
+use pare_common::db::rules::SpacingTable;
 use pare_common::db::writer;
 use pare_common::geom::dbu::{Dbu, DbuPerMicron};
 use pare_common::geom::orient::Orientation;
@@ -93,7 +94,10 @@ fn lef_min_spacing_comes_from_plain_spacing_or_the_first_table_entry() {
 fn lef_parallel_run_spacing_tables_are_read_whole() {
     let lib = tiny_library();
 
-    let table = lib.routing_layers[1].spacing_table.clone().unwrap();
+    let Some(SpacingTable::ParallelRunLength(table)) = lib.routing_layers[1].spacing_table.clone()
+    else {
+        panic!("M2 has a parallel run length table");
+    };
 
     assert_eq!(table.run_lengths, [Dbu(0), Dbu(500)]);
     assert_eq!(
@@ -112,11 +116,11 @@ fn spacing_grows_only_once_both_width_and_run_reach_their_thresholds() {
         .clone()
         .unwrap();
 
-    assert_eq!(table.spacing(Dbu(100), Dbu(900)), Dbu(110));
-    assert_eq!(table.spacing(Dbu(300), Dbu(500)), Dbu(110));
-    assert_eq!(table.spacing(Dbu(300), Dbu(501)), Dbu(200));
-    assert_eq!(table.spacing(Dbu(400), Dbu(-50)), Dbu(110));
-    assert_eq!(table.widest_for(Dbu(400)), Dbu(200));
+    assert_eq!(table.spacing(Dbu(100), Dbu(100), Dbu(900)), Dbu(110));
+    assert_eq!(table.spacing(Dbu(300), Dbu(100), Dbu(500)), Dbu(110));
+    assert_eq!(table.spacing(Dbu(100), Dbu(300), Dbu(501)), Dbu(200));
+    assert_eq!(table.spacing(Dbu(400), Dbu(100), Dbu(-50)), Dbu(110));
+    assert_eq!(table.max_spacing(), Dbu(200));
 }
 
 #[test]

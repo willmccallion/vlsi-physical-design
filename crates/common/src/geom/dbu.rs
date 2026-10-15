@@ -110,6 +110,24 @@ impl Sum for Dbu {
     }
 }
 
+/// An area in square database units.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct DbuArea(pub i64);
+
+impl DbuArea {
+    /// Returns the raw integer value.
+    #[must_use]
+    pub const fn get(self) -> i64 {
+        self.0
+    }
+}
+
+impl fmt::Display for DbuArea {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}", self.0)
+    }
+}
+
 /// A micron value that is not a whole number of database units.
 #[derive(Clone, Copy, Debug, PartialEq, thiserror::Error)]
 #[error("{microns} um is not a multiple of 1/{dbu_per_micron} um")]
@@ -150,6 +168,21 @@ impl DbuPerMicron {
         Ok(Dbu(rounded as i64))
     }
 
+    /// Converts square microns to square DBU, failing if the value is not a
+    /// whole number of square DBU.
+    pub fn to_dbu_area(self, square_microns: f64) -> Result<DbuArea, OffGrid> {
+        let per = f64::from(self.0);
+        let scaled = square_microns * per * per;
+        let rounded = scaled.round();
+        if (scaled - rounded).abs() > 1e-6 * scaled.abs().max(1.0) {
+            return Err(OffGrid {
+                microns: square_microns,
+                dbu_per_micron: self.0,
+            });
+        }
+        Ok(DbuArea(rounded as i64))
+    }
+
     /// Converts microns to the nearest DBU.
     #[must_use]
     pub fn to_dbu_rounded(self, microns: f64) -> Dbu {
@@ -180,6 +213,13 @@ mod tests {
         let units = DbuPerMicron::new(1000).unwrap();
 
         assert!(units.to_dbu(0.0005).is_err());
+    }
+
+    #[test]
+    fn square_microns_convert_to_square_dbu() {
+        let units = DbuPerMicron::new(2000).unwrap();
+
+        assert_eq!(units.to_dbu_area(0.0115), Ok(DbuArea(46_000)));
     }
 
     #[test]

@@ -346,7 +346,9 @@ fn free_slots(db: &NetlistDB, layers: IoLayers) -> Result<Vec<Slot>, IoPlacement
                 let spacing = rules
                     .spacing_table
                     .as_ref()
-                    .map_or(rules.min_spacing, |t| t.spacing(width, size.length))
+                    .map_or(rules.min_spacing, |t| {
+                        t.spacing(width, size.half_width * 2, size.length)
+                    })
                     .max(rules.min_spacing);
                 too_close(&pin, r, spacing)
             });

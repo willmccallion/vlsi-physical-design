@@ -11,9 +11,10 @@ use crate::db::design::{NetlistDB, PlacementStatus, Row, TrackAxis, TrackDef};
 use crate::db::indices::{CellId, LayerId, MacroId, MacroPinId, SiteId};
 use crate::db::library::{
     CoreKind, CutLayer, Direction, LayerRef, Library, Macro, MacroClass, MacroPin, PinDirection,
-    RoutingLayer, Shape, SignalUse, Site, Symmetry, ViaDef,
+    RoutingLayer, Shape, SignalUse, Site, SiteClass, Symmetry, ViaDef,
 };
 use crate::db::parser::lexer::{ParseError, read_file};
+use crate::db::rules::{CutLayerRules, RoutingLayerRules};
 use crate::geom::dbu::{Dbu, DbuPerMicron};
 use crate::geom::orient::Orientation;
 use crate::geom::point::Point;
@@ -148,6 +149,7 @@ pub fn synthesize_layer_stack(
                     name: format!("V{i}"),
                     width: Some(width),
                     spacing: Some(width),
+                    rules: CutLayerRules::default(),
                 })
                 .map_err(|e| e.to_string())?;
             let shapes = vec![
@@ -190,6 +192,7 @@ pub fn synthesize_layer_stack(
                 width,
                 min_spacing: pitch - width,
                 spacing_table: None,
+                rules: RoutingLayerRules::default(),
             })
             .map_err(|e| e.to_string())?;
     }
@@ -393,6 +396,7 @@ impl Scl {
             .library
             .add_site(Site {
                 name: "core".into(),
+                class: SiteClass::Core,
                 size: Point::new(site_width, row_height),
                 symmetry: Symmetry {
                     x: false,

@@ -293,7 +293,9 @@ mod tests {
     use super::*;
     use pare_common::db::design::Row;
     use pare_common::db::indices::SiteId;
-    use pare_common::db::library::{CoreKind, Library, Macro, MacroClass, Site, Symmetry};
+    use pare_common::db::library::{
+        CoreKind, Library, Macro, MacroClass, Site, SiteClass, Symmetry,
+    };
     use pare_common::geom::dbu::DbuPerMicron;
     use pare_common::geom::orient::Orientation;
     use pare_common::verify::placement::placement_violations;
@@ -313,6 +315,7 @@ mod tests {
         let site = lib
             .add_site(Site {
                 name: "s".into(),
+                class: SiteClass::Core,
                 size: pt(10, 100),
                 symmetry,
             })

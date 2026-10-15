@@ -124,14 +124,14 @@ fn widest_spacing(db: &NetlistDB, layer: LayerRef) -> Dbu {
             .layer(l)
             .spacing_table
             .as_ref()
-            .map_or(min, |t| t.widest_for(Dbu(i64::MAX)).max(min)),
+            .map_or(min, |t| t.max_spacing().max(min)),
         LayerRef::Cut(_) => min,
     }
 }
 
 /// The spacing two shapes of different owners on `layer` need: from the
-/// layer's spacing table for the wider shape's width and the length they
-/// run side by side, or its minimum spacing.
+/// layer's spacing table for their widths and the length they run side by
+/// side, or its minimum spacing.
 fn required_spacing(db: &NetlistDB, layer: LayerRef, a: &Rect<Dbu>, b: &Rect<Dbu>) -> Dbu {
     let LayerRef::Routing(l) = layer else {
         return min_spacing(db, layer);
@@ -140,7 +140,7 @@ fn required_spacing(db: &NetlistDB, layer: LayerRef, a: &Rect<Dbu>, b: &Rect<Dbu
         return min_spacing(db, layer);
     };
     let width = |r: &Rect<Dbu>| r.width().min(r.height());
-    table.spacing(width(a).max(width(b)), parallel_run(a, b))
+    table.spacing(width(a), width(b), parallel_run(a, b))
 }
 
 /// The length over which two disjoint rectangles face each other across a
