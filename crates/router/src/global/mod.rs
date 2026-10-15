@@ -49,6 +49,8 @@ pub struct GlobalGrid {
     min_layer: LayerId,
     directions: Vec<Direction>,
     capacity: Vec<u16>,
+    /// Edges no track crosses at all, which fixed metal blocks outright.
+    blocked: Vec<bool>,
     usage: Vec<u16>,
     history: Vec<f32>,
 }
@@ -81,14 +83,19 @@ impl GlobalGrid {
             min_layer: tech.min_layer,
             directions: layers.iter().map(|&l| tech.layer(l).direction).collect(),
             capacity: Vec::new(),
+            blocked: Vec::new(),
             usage: vec![0; per_layer * layers.len()],
             history: vec![0.0; per_layer * layers.len()],
         };
-        grid.capacity = layers
+        let tracks: Vec<f64> = layers
             .par_iter()
             .flat_map_iter(|&l| grid.layer_capacity(tech, occupancy, die, l))
-            .map(|tracks| (tracks * (1.0 - reserve)).floor() as u16)
             .collect();
+        grid.capacity = tracks
+            .iter()
+            .map(|&t| (t * (1.0 - reserve)).floor() as u16)
+            .collect();
+        grid.blocked = tracks.iter().map(|&t| t <= 0.0).collect();
         grid
     }
 
@@ -454,7 +461,25 @@ pub fn route_global(grid: &mut GlobalGrid, nets: &[GlobalNet], rounds: usize) ->
         grid.usage = best.usage;
         routes = best.routes;
     }
+    log_zero_capacity_crossings(grid, &routes);
     routes
+}
+
+/// Logs, at debug level, every net whose route uses edges without capacity.
+fn log_zero_capacity_crossings(grid: &GlobalGrid, routes: &GlobalRoutes) {
+    if !log::log_enabled!(log::Level::Debug) {
+        return;
+    }
+    for (net, tree) in &routes.paths {
+        let blocked = tree
+            .iter()
+            .flat_map(|p| grid.path_edges(p))
+            .filter(|&e| grid.capacity[e] == 0)
+            .count();
+        if blocked > 0 {
+            log::debug!("net {} crosses {blocked} zero-capacity edges", net.index());
+        }
+    }
 }
 
 /// Rounds without a new lowest overflow after which negotiation stops.

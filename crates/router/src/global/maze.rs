@@ -1,6 +1,9 @@
 //! Maze routing of one net through the 3D gcell grid: each pin joins the
 //! tree built so far by an A* search confined to a window around the two
-//! pins it connects, widened only when the window holds no path.
+//! pins it connects, widened only when the window holds no path. Edges that
+//! fixed metal blocks outright are never crossed, so a net detours around a
+//! macro however far that takes it; only a pin no detour reaches crosses
+//! them.
 
 use super::{GCell, GlobalCosts, GlobalGrid, window};
 use crate::tree::connection_order;
@@ -55,12 +58,14 @@ pub(super) fn route_tree(
             let w = window(&[target, terminals[join.parent]], margin, grid.nx, grid.ny);
             let sources = cells_in(&buckets, w);
             if !sources.is_empty()
-                && let Some(p) = search(grid, &sources, target, w, costs)
+                && let Some(p) = search(grid, &sources, target, w, costs, Blocked::Avoid)
             {
                 break p;
             }
             if w == full {
-                break vec![target];
+                let all = cells_in(&buckets, full);
+                break search(grid, &all, target, full, costs, Blocked::Cross)
+                    .unwrap_or_else(|| vec![target]);
             }
             margin = margin.saturating_mul(4).max(1);
         };
@@ -167,6 +172,13 @@ thread_local! {
     static SEARCH: std::cell::RefCell<SearchState> = std::cell::RefCell::new(SearchState::default());
 }
 
+/// Whether a search may cross edges that fixed metal blocks outright.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Blocked {
+    Avoid,
+    Cross,
+}
+
 /// Cheapest path from any source to `target` inside the window.
 fn search(
     grid: &GlobalGrid,
@@ -174,8 +186,9 @@ fn search(
     target: GCell,
     win: (u16, u16, u16, u16),
     costs: GlobalCosts,
+    blocked: Blocked,
 ) -> Option<Vec<GCell>> {
-    SEARCH.with_borrow_mut(|state| search_with(state, grid, sources, target, win, costs))
+    SEARCH.with_borrow_mut(|state| search_with(state, grid, sources, target, win, costs, blocked))
 }
 
 fn search_with(
@@ -185,7 +198,9 @@ fn search_with(
     target: GCell,
     win: (u16, u16, u16, u16),
     costs: GlobalCosts,
+    blocked: Blocked,
 ) -> Option<Vec<GCell>> {
+    let passable = |e: usize| blocked == Blocked::Cross || !grid.blocked[e];
     let h = |c: GCell| {
         let layers = c.layer.index().abs_diff(target.layer.index()) as f64;
         let plane = f64::from(c.x.abs_diff(target.x) + c.y.abs_diff(target.y));
@@ -233,25 +248,25 @@ fn search_with(
             Direction::Horizontal => {
                 if x > win.0 {
                     let next = GCell { x: x - 1, ..cell };
-                    push(next, grid.edge_cost(grid.edge(next), costs));
+                    let e = grid.edge(next);
+                    if passable(e) {
+                        push(next, grid.edge_cost(e, costs));
+                    }
                 }
-                if x < win.1 {
-                    push(
-                        GCell { x: x + 1, ..cell },
-                        grid.edge_cost(grid.edge(cell), costs),
-                    );
+                if x < win.1 && passable(here) {
+                    push(GCell { x: x + 1, ..cell }, grid.edge_cost(here, costs));
                 }
             }
             Direction::Vertical => {
                 if y > win.2 {
                     let next = GCell { y: y - 1, ..cell };
-                    push(next, grid.edge_cost(grid.edge(next), costs));
+                    let e = grid.edge(next);
+                    if passable(e) {
+                        push(next, grid.edge_cost(e, costs));
+                    }
                 }
-                if y < win.3 {
-                    push(
-                        GCell { y: y + 1, ..cell },
-                        grid.edge_cost(grid.edge(cell), costs),
-                    );
+                if y < win.3 && passable(here) {
+                    push(GCell { y: y + 1, ..cell }, grid.edge_cost(here, costs));
                 }
             }
         }
@@ -276,4 +291,85 @@ fn search_with(
         }
     }
     None
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    const COSTS: GlobalCosts = GlobalCosts {
+        via: 1.0,
+        congestion: 1.0,
+        penalty: 1.0,
+    };
+
+    /// A 10x10 grid with a horizontal layer 1 over a vertical layer 2,
+    /// every edge holding 4 tracks.
+    fn grid() -> GlobalGrid {
+        let (nx, ny) = (10, 10);
+        let edges = 2 * usize::from(nx) * usize::from(ny);
+        GlobalGrid {
+            origin: Point::new(Dbu(0), Dbu(0)),
+            gcell: Dbu(100),
+            nx,
+            ny,
+            min_layer: LayerId::new(1),
+            directions: vec![Direction::Horizontal, Direction::Vertical],
+            capacity: vec![4; edges],
+            blocked: vec![false; edges],
+            usage: vec![0; edges],
+            history: vec![0.0; edges],
+        }
+    }
+
+    fn cell(layer: usize, x: u16, y: u16) -> GCell {
+        GCell {
+            layer: LayerId::new(layer),
+            x,
+            y,
+        }
+    }
+
+    /// Blocks the horizontal edges from column `x` to `x + 1` in rows `rows`.
+    fn wall(grid: &mut GlobalGrid, x: u16, rows: std::ops::RangeInclusive<u16>) {
+        for y in rows {
+            let e = grid.edge(cell(1, x, y));
+            grid.capacity[e] = 0;
+            grid.blocked[e] = true;
+        }
+    }
+
+    fn crossed_blocked(grid: &GlobalGrid, paths: &[Vec<GCell>]) -> usize {
+        paths
+            .iter()
+            .flat_map(|p| grid.path_edges(p))
+            .filter(|&e| grid.blocked[e])
+            .count()
+    }
+
+    #[test]
+    fn a_net_detours_around_a_blocked_wall_beyond_its_margin() {
+        let mut grid = grid();
+        wall(&mut grid, 4, 0..=8);
+        let terminals = [cell(1, 2, 4), cell(1, 7, 4)];
+
+        let paths = route_tree(&grid, &terminals, 1, COSTS);
+
+        let reached = paths.iter().flatten().any(|&c| c == terminals[1]);
+        assert!(reached);
+        assert_eq!(crossed_blocked(&grid, &paths), 0);
+    }
+
+    #[test]
+    fn a_pin_no_detour_reaches_is_joined_across_blocked_edges() {
+        let mut grid = grid();
+        wall(&mut grid, 4, 0..=9);
+        let terminals = [cell(1, 2, 4), cell(1, 7, 4)];
+
+        let paths = route_tree(&grid, &terminals, 1, COSTS);
+
+        let reached = paths.iter().flatten().any(|&c| c == terminals[1]);
+        assert!(reached);
+        assert_eq!(crossed_blocked(&grid, &paths), 1);
+    }
 }
