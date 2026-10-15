@@ -1,11 +1,14 @@
 # OpenROAD design rule check of a routed DEF.
 #
-#   DRC_LEF=inputs/ibex/Nangate45.lef DRC_DEF=output/ibex/routed.def DRC_RPT=drc.rpt \
+#   DRC_LEF=inputs/tech/nangate45/Nangate45.lef DRC_DEF=output/ibex/routed.def DRC_RPT=drc.rpt \
 #     nix develop .#eda -c openroad -no_init -no_splash -exit scripts/openroad_drc.tcl
 #
-# The DEF must carry the GCELLGRID it was routed on, as PARE writes it.
+# DRC_LEF lists the LEF files, technology first, separated by spaces. The DEF
+# must carry the GCELLGRID it was routed on, as PARE writes it.
 
-read_lef $::env(DRC_LEF)
+foreach lef $::env(DRC_LEF) {
+  read_lef $lef
+}
 read_def $::env(DRC_DEF)
 if {[[ord::get_db_block] getGCellGrid] == "NULL"} {
   puts "error: $::env(DRC_DEF) has no GCELLGRID"

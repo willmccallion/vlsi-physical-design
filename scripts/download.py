@@ -14,7 +14,7 @@ Usage:
     python scripts/download.py --configs          # rewrite every config only
 
 Designs land in inputs/<suite>/<design>/, technology files shared by a
-suite in inputs/tech/, and configs in configs/<design>.toml.
+suite in inputs/tech/, and configs in configs/<suite>/<design>.toml.
 """
 import argparse
 import os
@@ -75,6 +75,8 @@ def ispd2015(name, max_utilization, hidden=False):
         "def": "floorplan.def",
         "placer_iterations": 2000,
         "target_density": max_utilization,
+        # The contest forbids moving I/O pins, though the floorplans mark them PLACED.
+        "io_enabled": False,
     }
 
 
@@ -254,12 +256,19 @@ def config_text(name):
     if d.get("io"):
         lines += ["", "[io_placement]"]
         lines += [f'{k} = "{v}"' for k, v in d["io"].items()]
+    if d.get("io_enabled") is False:
+        lines += ["", "[io_placement]", "enabled = false"]
     return "\n".join(lines) + "\n"
 
 
+def config_path(name):
+    return f"configs/{DESIGNS[name]['suite']}/{name}.toml"
+
+
 def write_config(name):
-    os.makedirs("configs", exist_ok=True)
-    with open(f"configs/{name}.toml", "w") as f:
+    path = config_path(name)
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    with open(path, "w") as f:
         f.write(config_text(name))
 
 

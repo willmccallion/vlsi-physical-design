@@ -60,7 +60,8 @@ enum Commands {
 /// Resolves a config argument to a file path.
 ///
 /// An existing path, or anything containing '/' or ending in '.toml', is used
-/// as is; otherwise it names a benchmark in `configs/`.
+/// as is; otherwise it names a design whose config is
+/// `configs/<suite>/<design>.toml`.
 fn resolve_config(name: &Path) -> anyhow::Result<PathBuf> {
     let text = name.to_str().context("config path is not valid UTF-8")?;
     if name.exists()
@@ -71,7 +72,21 @@ fn resolve_config(name: &Path) -> anyhow::Result<PathBuf> {
     {
         return Ok(name.to_path_buf());
     }
-    Ok(PathBuf::from(format!("configs/{text}.toml")))
+    let file = format!("{text}.toml");
+    let mut found = Vec::new();
+    for suite in std::fs::read_dir("configs").context("cannot read configs/")? {
+        let candidate = suite?.path().join(&file);
+        if candidate.is_file() {
+            found.push(candidate);
+        }
+    }
+    match found.as_slice() {
+        [one] => Ok(one.clone()),
+        [] => anyhow::bail!(
+            "no config for '{text}' in configs/<suite>/; download it with scripts/download.py"
+        ),
+        _ => anyhow::bail!("'{text}' names several configs: {found:?}"),
+    }
 }
 
 fn load_config(name: &Path) -> anyhow::Result<Config> {

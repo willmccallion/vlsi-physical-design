@@ -8,3 +8,6 @@ output_def = "output/mgc_des_perf_b/placed.def"
 [global_placement]
 placer_max_iterations = 2000
 target_density = 0.497
+
+[io_placement]
+enabled = false
