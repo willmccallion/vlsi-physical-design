@@ -264,7 +264,9 @@ impl DetailedRouter<'_> {
         let window = Rect::new(area.min, area.max - Point::new(Dbu(1), Dbu(1)));
         let mut results: Vec<Option<Vec<Edge>>> = vec![None; pieces.len()];
         let mut overlay = LocalOccupancy::default();
-        let mut todo: Vec<usize> = (0..pieces.len()).collect();
+        let mut order: Vec<usize> = (0..pieces.len()).collect();
+        order.sort_by_cached_key(|&i| (self.extent(&pieces[i]), pieces[i].net));
+        let mut todo = order.clone();
         let mut penalty = costs.penalty;
         for _ in 0..LOCAL_ROUNDS {
             for &i in &todo {
@@ -292,7 +294,9 @@ impl DetailedRouter<'_> {
                     }
                 }
             }
-            todo = (0..pieces.len())
+            todo = order
+                .iter()
+                .copied()
                 .filter(|&i| {
                     results[i].as_ref().is_some_and(|edges| {
                         self.clashes(pieces[i].net, edges, &overlay)
@@ -314,6 +318,23 @@ impl DetailedRouter<'_> {
             return vec![None; pieces.len()];
         }
         results
+    }
+
+    /// Half-perimeter of the box around a piece's nodes. Pieces are routed
+    /// smallest first: a short piece tied to its pins has few ways through,
+    /// while one passing through the region can shift to another track.
+    fn extent(&self, piece: &Piece) -> Dbu {
+        let mut points = piece.groups.iter().flatten().map(|&n| self.point(n));
+        let Some(first) = points.next() else {
+            return Dbu::ZERO;
+        };
+        let (min, max) = points.fold((first, first), |(lo, hi), p| {
+            (
+                Point::new(lo.x.min(p.x), lo.y.min(p.y)),
+                Point::new(hi.x.max(p.x), hi.y.max(p.y)),
+            )
+        });
+        (max.x - min.x) + (max.y - min.y)
     }
 
     /// How many of `pieces` clash with anything when wired as `wiring`.
