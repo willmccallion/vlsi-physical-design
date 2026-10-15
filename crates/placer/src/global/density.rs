@@ -4,8 +4,9 @@
 //! Objects are charges equal to their area. One narrower or shorter than
 //! √2 bins is spread over that width at a proportionally lower density, so
 //! that its force varies smoothly as it crosses bin edges. Space outside the
-//! rows and under fixed cells is charge that never moves, scaled by the
-//! target density so a fully blocked bin is exactly full.
+//! placeable rectangles, and the part of them under fixed cells, is charge
+//! that never moves, scaled by the target density so a fully blocked bin is
+//! exactly full.
 
 use super::poisson::PoissonSolver;
 use pare_common::geom::point::Point;
@@ -103,24 +104,40 @@ impl DensityGrid {
         grid
     }
 
-    /// Area of each bin outside every placeable rectangle or under a fixed one.
+    /// Area of each bin cells may not use: outside every placeable
+    /// rectangle, or under a fixed one. A design without placeable
+    /// rectangles may use the whole die. Placeable rectangles must not
+    /// overlap each other, nor fixed ones each other.
     fn blocked_area(&self, placeable: &[Rect<f64>], fixed: &[Rect<f64>]) -> Vec<f64> {
         let bin_area = self.bins.area();
+        let die = Rect::new(
+            self.bins.origin,
+            self.bins.origin + self.bins.size * self.bins.dim as f64,
+        );
+        let whole_die = [die];
+        let placeable = if placeable.is_empty() {
+            &whole_die[..]
+        } else {
+            placeable
+        };
         let mut open = vec![0.0; self.bins.dim * self.bins.dim];
-        if placeable.is_empty() {
-            open.fill(bin_area);
-        }
         for r in placeable {
             self.bins.spread(r, 1.0, &mut open);
         }
-        let mut blocked: Vec<f64> = open.iter().map(|&o| (bin_area - o).max(0.0)).collect();
-        for r in fixed {
-            self.bins.spread(r, 1.0, &mut blocked);
+        let mut by_bottom: Vec<&Rect<f64>> = placeable.iter().collect();
+        by_bottom.sort_by(|a, b| a.min.y.total_cmp(&b.min.y));
+        let tallest = placeable.iter().map(Rect::height).fold(0.0, f64::max);
+        for f in fixed {
+            let first = by_bottom.partition_point(|r| r.min.y + tallest <= f.min.y);
+            for r in by_bottom[first..].iter().take_while(|r| r.min.y < f.max.y) {
+                if let Some(covered) = overlap(r, f) {
+                    self.bins.spread(&covered, -1.0, &mut open);
+                }
+            }
         }
-        for b in &mut blocked {
-            *b = b.min(bin_area);
-        }
-        blocked
+        open.iter()
+            .map(|&o| (bin_area - o.max(0.0)).clamp(0.0, bin_area))
+            .collect()
     }
 
     /// The target density.
@@ -247,6 +264,13 @@ impl DensityGrid {
     }
 }
 
+/// The overlap of two rectangles, if it has area.
+fn overlap(a: &Rect<f64>, b: &Rect<f64>) -> Option<Rect<f64>> {
+    let min = Point::new(a.min.x.max(b.min.x), a.min.y.max(b.min.y));
+    let max = Point::new(a.max.x.min(b.max.x), a.max.y.min(b.max.y));
+    (min.x < max.x && min.y < max.y).then(|| Rect::new(min, max))
+}
+
 /// The bins along one axis that `[lo, hi]` overlaps, with overlap lengths.
 fn overlaps(lo: f64, hi: f64, origin: f64, size: f64, count: usize) -> Vec<(usize, f64)> {
     let first = ((lo - origin) / size).floor().max(0.0) as usize;
@@ -296,6 +320,26 @@ mod tests {
         let grid = DensityGrid::new(&die(4.0, 4.0), 2, 0.8, &rows, &[]);
 
         assert_eq!(grid.fixed, [0.0, 0.0, 0.8 * 4.0, 0.8 * 4.0]);
+    }
+
+    #[test]
+    fn a_fixed_cell_off_the_rows_blocks_nothing_more() {
+        let rows = [Rect::new(Point::new(0.0, 0.0), Point::new(4.0, 2.0))];
+        let fixed = [Rect::new(Point::new(0.0, 2.0), Point::new(4.0, 4.0))];
+
+        let grid = DensityGrid::new(&die(4.0, 4.0), 2, 0.8, &rows, &fixed);
+
+        assert_eq!(grid.fixed, [0.0, 0.0, 0.8 * 4.0, 0.8 * 4.0]);
+    }
+
+    #[test]
+    fn a_fixed_cell_on_a_row_blocks_its_overlap() {
+        let rows = [Rect::new(Point::new(0.0, 0.0), Point::new(4.0, 2.0))];
+        let fixed = [Rect::new(Point::new(0.0, 1.0), Point::new(2.0, 3.0))];
+
+        let grid = DensityGrid::new(&die(4.0, 4.0), 2, 1.0, &rows, &fixed);
+
+        assert_eq!(grid.fixed, [2.0, 0.0, 4.0, 4.0]);
     }
 
     #[test]
