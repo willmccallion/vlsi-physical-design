@@ -362,14 +362,17 @@ impl<'a> LefParser<'a, '_> {
         let line = self.lx.line();
         let name = self.word("via name")?;
         let mut is_default = false;
+        let mut top_of_stack_only = false;
         loop {
             match self.lx.peek().map(|t| t.text) {
                 Some("DEFAULT") => is_default = true,
+                Some("TOPOFSTACKONLY") => top_of_stack_only = true,
                 Some("GENERATED") => {}
                 _ => break,
             }
             let _ = self.lx.next_token();
         }
+        let is_default = is_default && !top_of_stack_only;
 
         let mut shapes = Vec::new();
         let mut layer = None;

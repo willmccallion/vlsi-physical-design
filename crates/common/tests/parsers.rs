@@ -333,6 +333,30 @@ fn def_at_a_different_resolution_than_the_library_is_rejected() {
 }
 
 #[test]
+fn lef_top_of_stack_vias_are_read_but_never_the_default() {
+    let text = std::fs::read_to_string(fixture("tiny.lef")).unwrap().replacen(
+        "VIA M1M2 DEFAULT",
+        "VIA M1M2_TOP DEFAULT TOPOFSTACKONLY\n  LAYER V1 ;\n    RECT -0.05 -0.05 0.05 0.05 ;\n  \
+         LAYER M1 ;\n    RECT -0.05 -0.1 0.05 0.1 ;\n  LAYER M2 ;\n    RECT -0.05 -0.1 0.05 0.3 ;\n\
+         END M1M2_TOP\n\nVIA M1M2 DEFAULT",
+        1,
+    );
+    let path = std::env::temp_dir().join(format!("pare-top-of-stack-{}.lef", std::process::id()));
+    std::fs::write(&path, text).unwrap();
+    let units = def::read_units(&fixture("tiny.def")).unwrap();
+
+    let lib = lef::parse_files(std::slice::from_ref(&path), units);
+    std::fs::remove_file(&path).unwrap();
+
+    let lib = lib.unwrap();
+    assert!(lib.via_id("M1M2_TOP").is_some());
+    assert_eq!(
+        lib.via(lib.default_via(CutLayerId(0)).unwrap()).name,
+        "M1M2"
+    );
+}
+
+#[test]
 fn lef_values_off_the_dbu_grid_are_rejected() {
     let units = DbuPerMicron::new(100).unwrap();
 
