@@ -77,6 +77,8 @@ pub fn write(db: &NetlistDB, out: &mut impl Write) -> io::Result<()> {
     }
 
     write_vias(lib, out)?;
+    write_non_default_rules(db, out)?;
+    write_regions(db, out)?;
     write_components(db, out)?;
     write_pins(db, out)?;
     write_blockages(db, out)?;
@@ -87,6 +89,15 @@ pub fn write(db: &NetlistDB, out: &mut impl Write) -> io::Result<()> {
 
 fn pt(p: Point<Dbu>) -> String {
     format!("( {} {} )", p.x, p.y)
+}
+
+/// A path point, with its end extension when it has one.
+fn path_point(p: Point<Dbu>, extension: Dbu) -> String {
+    if extension == Dbu::ZERO {
+        pt(p)
+    } else {
+        format!("( {} {} {extension} )", p.x, p.y)
+    }
 }
 
 fn write_vias(lib: &Library, out: &mut impl Write) -> io::Result<()> {
@@ -111,6 +122,67 @@ fn write_vias(lib: &Library, out: &mut impl Write) -> io::Result<()> {
     writeln!(out, "END VIAS")
 }
 
+fn write_non_default_rules(db: &NetlistDB, out: &mut impl Write) -> io::Result<()> {
+    if db.non_default_rules.is_empty() {
+        return Ok(());
+    }
+    let lib = &db.library;
+    writeln!(out, "NONDEFAULTRULES {} ;", db.non_default_rules.len())?;
+    for r in &db.non_default_rules {
+        write!(out, "- {}", r.name)?;
+        if r.hard_spacing {
+            write!(out, "\n  + HARDSPACING")?;
+        }
+        for l in &r.layers {
+            write!(
+                out,
+                "\n  + LAYER {} WIDTH {}",
+                lib.layer(l.layer).name,
+                l.width
+            )?;
+            if let Some(s) = l.spacing {
+                write!(out, " SPACING {s}")?;
+            }
+            if let Some(e) = l.wire_extension {
+                write!(out, " WIREEXT {e}")?;
+            }
+        }
+        for &v in &r.vias {
+            write!(out, "\n  + VIA {}", lib.via(v).name)?;
+        }
+        for &v in &r.via_rules {
+            write!(out, "\n  + VIARULE {}", lib.via_rules[v.index()].name)?;
+        }
+        for &(cut, n) in &r.min_cuts {
+            write!(
+                out,
+                "\n  + MINCUTS {} {n}",
+                lib.cut_layers[cut.index()].name
+            )?;
+        }
+        writeln!(out, " ;")?;
+    }
+    writeln!(out, "END NONDEFAULTRULES")
+}
+
+fn write_regions(db: &NetlistDB, out: &mut impl Write) -> io::Result<()> {
+    if db.regions.is_empty() {
+        return Ok(());
+    }
+    writeln!(out, "REGIONS {} ;", db.regions.len())?;
+    for r in &db.regions {
+        write!(out, "- {}", r.name)?;
+        for rect in &r.rects {
+            write!(out, " {} {}", pt(rect.min), pt(rect.max))?;
+        }
+        if let Some(kind) = r.kind.def_keyword() {
+            write!(out, " + TYPE {kind}")?;
+        }
+        writeln!(out, " ;")?;
+    }
+    writeln!(out, "END REGIONS")
+}
+
 fn write_components(db: &NetlistDB, out: &mut impl Write) -> io::Result<()> {
     writeln!(out, "COMPONENTS {} ;", db.cells.len())?;
     for c in &db.cells {
@@ -122,6 +194,9 @@ fn write_components(db: &NetlistDB, out: &mut impl Write) -> io::Result<()> {
         )?;
         if let Some(kw) = c.status.def_keyword() {
             write!(out, " + {kw} {} {}", pt(c.location), c.orient)?;
+        }
+        if let Some(r) = c.region {
+            write!(out, " + REGION {}", db.regions[r.index()].name)?;
         }
         writeln!(out, " ;")?;
     }
@@ -198,7 +273,13 @@ fn write_special_nets(db: &NetlistDB, out: &mut impl Write) -> io::Result<()> {
             if let Some(shape) = &w.shape {
                 write!(out, " + SHAPE {shape}")?;
             }
-            write!(out, " {} {}", pt(w.from), pt(w.to))?;
+            let (from_ext, to_ext) = w.extensions;
+            write!(
+                out,
+                " {} {}",
+                path_point(w.from, from_ext),
+                path_point(w.to, to_ext)
+            )?;
             keyword = "NEW";
         }
         for &(via, at) in &n.vias {
@@ -211,6 +292,15 @@ fn write_special_nets(db: &NetlistDB, out: &mut impl Write) -> io::Result<()> {
                 v.name
             )?;
             keyword = "NEW";
+        }
+        for s in &n.rects {
+            write!(
+                out,
+                "\n  + RECT {} {} {}",
+                lib.layer_name(s.layer),
+                pt(s.rect.min),
+                pt(s.rect.max)
+            )?;
         }
         writeln!(out, " ;")?;
     }
@@ -239,6 +329,13 @@ fn write_nets(db: &NetlistDB, out: &mut impl Write) -> io::Result<()> {
         let _ = write!(line, " + USE {}", net.signal_use.as_str());
         if (net.weight - 1.0).abs() > f64::EPSILON {
             let _ = write!(line, " + WEIGHT {}", net.weight);
+        }
+        if let Some(r) = net.non_default_rule {
+            let _ = write!(
+                line,
+                " + NONDEFAULTRULE {}",
+                db.non_default_rules[r.index()].name
+            );
         }
         let mut keyword = "+ ROUTED";
         for elem in &net.routing {

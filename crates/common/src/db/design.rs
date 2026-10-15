@@ -1,7 +1,8 @@
 //! The placed and routed design: instances, nets, rows, tracks and wiring.
 
 use crate::db::indices::{
-    CellId, IoPinId, LayerId, MacroId, MacroPinId, NetId, PinId, SiteId, ViaId,
+    CellId, CutLayerId, IoPinId, LayerId, MacroId, MacroPinId, NetId, NonDefaultRuleId, PinId,
+    RegionId, SiteId, ViaId, ViaRuleId,
 };
 use crate::db::library::{DuplicateName, Library, Macro, PinDirection, Shape, SignalUse};
 use crate::geom::dbu::{Dbu, DbuPerMicron};
@@ -54,8 +55,73 @@ pub struct Cell {
     pub orient: Orientation,
     /// Placement status.
     pub status: PlacementStatus,
+    /// The region the instance is constrained to, if any.
+    pub region: Option<RegionId>,
     /// Net connections on this instance.
     pub pins: Vec<PinId>,
+}
+
+/// How a region constrains the cells assigned to it.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum RegionKind {
+    /// Assigned cells must lie inside; other cells may too (no `TYPE`).
+    Inclusive,
+    /// Assigned cells must lie inside and no other cell may (`FENCE`).
+    Fence,
+    /// Assigned cells should lie inside (`GUIDE`).
+    Guide,
+}
+
+impl RegionKind {
+    /// The DEF `TYPE` keyword, or `None` for an inclusive region.
+    pub const fn def_keyword(self) -> Option<&'static str> {
+        match self {
+            Self::Inclusive => None,
+            Self::Fence => Some("FENCE"),
+            Self::Guide => Some("GUIDE"),
+        }
+    }
+}
+
+/// A placement region from the DEF `REGIONS` section.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Region {
+    /// Region name.
+    pub name: String,
+    /// The area, as a union of rectangles.
+    pub rects: Vec<Rect<Dbu>>,
+    /// How it constrains its cells.
+    pub kind: RegionKind,
+}
+
+/// A metal layer's width and spacing under a non-default rule.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct NonDefaultLayer {
+    /// The layer.
+    pub layer: LayerId,
+    /// Wire width.
+    pub width: Dbu,
+    /// Spacing to other nets, if it differs from the layer's.
+    pub spacing: Option<Dbu>,
+    /// How far wires extend past their ends, if not half the width.
+    pub wire_extension: Option<Dbu>,
+}
+
+/// A DEF `NONDEFAULTRULES` entry: wider wires, spacing or vias for some nets.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct NonDefaultRule {
+    /// Rule name.
+    pub name: String,
+    /// Whether the spacing is a hard rule rather than a preference.
+    pub hard_spacing: bool,
+    /// Per-layer widths and spacings.
+    pub layers: Vec<NonDefaultLayer>,
+    /// Vias the rule's nets may use.
+    pub vias: Vec<ViaId>,
+    /// Via generation rules the rule's nets may use.
+    pub via_rules: Vec<ViaRuleId>,
+    /// Least number of cuts per via on a cut layer.
+    pub min_cuts: Vec<(CutLayerId, u32)>,
 }
 
 /// A row of placement sites.
@@ -236,6 +302,8 @@ pub struct Net {
     pub pins: Vec<PinId>,
     /// Placement weight.
     pub weight: f64,
+    /// The non-default routing rule the net uses, if any.
+    pub non_default_rule: Option<NonDefaultRuleId>,
     /// Routed wiring.
     pub routing: Vec<RouteElem>,
 }
@@ -249,8 +317,11 @@ pub struct SpecialWire {
     pub width: Dbu,
     /// One end of the centerline.
     pub from: Point<Dbu>,
-    /// The other end of the centerline; special wires do not extend past it.
+    /// The other end of the centerline.
     pub to: Point<Dbu>,
+    /// How far the wire extends past `from` and past `to`; zero unless the
+    /// DEF path gives an extension.
+    pub extensions: (Dbu, Dbu),
     /// The DEF `SHAPE` keyword, such as `STRIPE` or `FOLLOWPIN`.
     pub shape: Option<String>,
 }
@@ -259,17 +330,23 @@ impl SpecialWire {
     /// The rectangle the wire covers.
     pub fn rect(&self) -> Rect<Dbu> {
         let half = self.width / 2;
-        let r = Rect::from_corners(self.from, self.to);
+        let (from_ext, to_ext) = self.extensions;
         if self.from.y == self.to.y {
-            Rect::new(
-                Point::new(r.min.x, r.min.y - half),
-                Point::new(r.max.x, r.max.y - half + self.width),
-            )
+            let (lo, hi) = if self.from.x <= self.to.x {
+                (self.from.x - from_ext, self.to.x + to_ext)
+            } else {
+                (self.to.x - to_ext, self.from.x + from_ext)
+            };
+            let y = self.from.y - half;
+            Rect::new(Point::new(lo, y), Point::new(hi, y + self.width))
         } else {
-            Rect::new(
-                Point::new(r.min.x - half, r.min.y),
-                Point::new(r.max.x - half + self.width, r.max.y),
-            )
+            let (lo, hi) = if self.from.y <= self.to.y {
+                (self.from.y - from_ext, self.to.y + to_ext)
+            } else {
+                (self.to.y - to_ext, self.from.y + from_ext)
+            };
+            let x = self.from.x - half;
+            Rect::new(Point::new(x, lo), Point::new(x + self.width, hi))
         }
     }
 }
@@ -285,6 +362,8 @@ pub struct SpecialNet {
     pub connections: Vec<(String, String)>,
     /// Wire segments.
     pub wires: Vec<SpecialWire>,
+    /// Rectangles given directly with `+ RECT`.
+    pub rects: Vec<Shape>,
     /// Via instances.
     pub vias: Vec<(ViaId, Point<Dbu>)>,
 }
@@ -318,6 +397,10 @@ pub struct NetlistDB {
     pub routing_blockages: Vec<Shape>,
     /// Areas no cell may be placed in.
     pub placement_blockages: Vec<Rect<Dbu>>,
+    /// Placement regions.
+    pub regions: Vec<Region>,
+    /// Non-default routing rules.
+    pub non_default_rules: Vec<NonDefaultRule>,
     cell_by_name: HashMap<String, CellId>,
     net_by_name: HashMap<String, NetId>,
     io_pin_by_name: HashMap<String, IoPinId>,
@@ -340,6 +423,8 @@ impl NetlistDB {
             special_nets: Vec::new(),
             routing_blockages: Vec::new(),
             placement_blockages: Vec::new(),
+            regions: Vec::new(),
+            non_default_rules: Vec::new(),
             cell_by_name: HashMap::new(),
             net_by_name: HashMap::new(),
             io_pin_by_name: HashMap::new(),
@@ -384,6 +469,7 @@ impl NetlistDB {
             location,
             orient,
             status,
+            region: None,
             pins: Vec::new(),
         });
         Ok(id)
@@ -401,6 +487,7 @@ impl NetlistDB {
             signal_use: SignalUse::Signal,
             pins: Vec::new(),
             weight: 1.0,
+            non_default_rule: None,
             routing: Vec::new(),
         });
         id

@@ -61,6 +61,19 @@ define_index!(
     ViaId(u32)
 );
 define_index!(
+    /// A via generation rule in [`Library::via_rules`](crate::db::library::Library::via_rules).
+    ViaRuleId(u32)
+);
+define_index!(
+    /// A placement region in [`NetlistDB::regions`](crate::db::design::NetlistDB::regions).
+    RegionId(u32)
+);
+define_index!(
+    /// A non-default routing rule in
+    /// [`NetlistDB::non_default_rules`](crate::db::design::NetlistDB::non_default_rules).
+    NonDefaultRuleId(u32)
+);
+define_index!(
     /// A routing layer, numbered from the bottom of the stack.
     LayerId(u8)
 );

@@ -174,6 +174,7 @@ pub fn fixed_shapes_keeping_io(db: &NetlistDB, keep: impl Fn(&IoPin) -> bool) ->
             };
             out.push(fixed(shape, Owner::Obstacle));
         }
+        out.extend(n.rects.iter().map(|&s| fixed(s, Owner::Obstacle)));
         for &(via, at) in &n.vias {
             out.extend(db.library.via(via).shapes.iter().map(|s| {
                 fixed(

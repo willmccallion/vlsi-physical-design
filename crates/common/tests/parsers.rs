@@ -383,13 +383,16 @@ fn a_def_via_identical_to_a_lef_via_of_its_name_is_accepted() {
 }
 
 #[test]
-fn a_def_via_differing_from_a_lef_via_of_its_name_is_rejected() {
+fn a_def_via_differing_from_a_lef_via_of_its_name_leaves_the_lef_via_in_use() {
     let via = "- M1M2 + RECT M1 ( -50 -100 ) ( 50 100 ) + RECT V1 ( -50 -50 ) ( 50 50 ) \
                + RECT M2 ( -50 -300 ) ( 50 300 ) ;";
 
-    let err = tiny_with_def_via(via, "other-via").unwrap_err();
+    let db = tiny_with_def_via(via, "other-via").unwrap();
 
-    assert!(err.contains("differs from the LEF via"), "{err}");
+    assert_eq!(
+        db.library.via(db.library.via_id("M1M2").unwrap()),
+        tiny_library().via(tiny_library().via_id("M1M2").unwrap())
+    );
 }
 
 #[test]

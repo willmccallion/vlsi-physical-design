@@ -224,8 +224,10 @@ fn a_wire_running_long_beside_a_wide_shape_needs_the_table_spacing() {
             width: Dbu(400),
             from: pt(200, 1000),
             to: pt(200, 3000),
+            extensions: (Dbu::ZERO, Dbu::ZERO),
             shape: Some("STRIPE".into()),
         }],
+        rects: Vec::new(),
         vias: Vec::new(),
     });
 
