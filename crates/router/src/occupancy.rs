@@ -10,7 +10,9 @@
 //!
 //! Via cuts are kept per cut layer as exact rectangles in square buckets.
 //! Two cuts of different owners conflict when they touch or their edges
-//! come closer than the cut layer's spacing.
+//! come closer than the cut layer's spacing. Shapes larger than any via cut,
+//! such as cut-layer obstructions over macros, are filed separately in
+//! coarser buckets so they do not widen every query.
 
 use crate::tech::{CutTech, LayerTech, RouteTech};
 use pare_common::db::design::NetlistDB;
@@ -76,13 +78,27 @@ pub struct CutOccupant {
     pub origin: Origin,
 }
 
-/// One bucket of one cut layer.
+/// Where a cut is filed on its layer.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub enum CutBucket {
+    /// A cut no larger than a via cut, in the bucket holding its center.
+    Small((i64, i64)),
+    /// A larger shape, in every coarse bucket from `min` to `max`.
+    Large {
+        /// Lowest coarse bucket column and row.
+        min: (i64, i64),
+        /// Highest coarse bucket column and row.
+        max: (i64, i64),
+    },
+}
+
+/// Where one cut was recorded.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub struct CutRef {
     /// Cut layer.
     pub cut: CutLayerId,
-    /// Bucket column and row.
-    pub bucket: (i64, i64),
+    /// Its bucket or buckets.
+    pub bucket: CutBucket,
 }
 
 /// Where an owner's metal or cuts were recorded.
@@ -94,12 +110,17 @@ pub enum Slot {
     Cut(CutRef),
 }
 
-/// The cuts of one cut layer.
+/// How many fine buckets wide a coarse bucket of large shapes is.
+const LARGE_BUCKET_SCALE: i64 = 64;
+
+/// The cuts of one cut layer: via-sized cuts by the fine bucket holding
+/// their center, larger shapes in every coarse bucket they touch.
 #[derive(Clone, Debug)]
 struct CutLayer {
     rules: CutTech,
     bucket: Dbu,
     buckets: FxHashMap<(i64, i64), Vec<CutOccupant>>,
+    large: FxHashMap<(i64, i64), Vec<CutOccupant>>,
 }
 
 impl CutLayer {
@@ -108,6 +129,7 @@ impl CutLayer {
             rules,
             bucket: (rules.reach() * 4).max(Dbu(1)),
             buckets: FxHashMap::default(),
+            large: FxHashMap::default(),
         }
     }
 
@@ -118,26 +140,89 @@ impl CutLayer {
         )
     }
 
-    fn add(&mut self, cut: CutOccupant) -> (i64, i64) {
-        let half = cut.rect.width().max(cut.rect.height());
-        self.rules.max_half = self.rules.max_half.max(half / 2 + half % 2);
-        let key = self.key(cut.rect.center());
-        self.buckets.entry(key).or_default().push(cut);
-        key
+    const fn large_key(&self, p: Point<Dbu>) -> (i64, i64) {
+        let size = self.bucket.get() * LARGE_BUCKET_SCALE;
+        (p.x.get().div_euclid(size), p.y.get().div_euclid(size))
+    }
+
+    /// Whether a shape fits within the largest via cut, so a query widened
+    /// by the layer's reach finds it by its center.
+    fn is_small(&self, rect: &Rect<Dbu>) -> bool {
+        let side = rect.width().max(rect.height());
+        side.get() <= self.rules.max_half.get() * 2
+    }
+
+    fn add(&mut self, cut: CutOccupant) -> CutBucket {
+        if self.is_small(&cut.rect) {
+            let key = self.key(cut.rect.center());
+            self.buckets.entry(key).or_default().push(cut);
+            return CutBucket::Small(key);
+        }
+        let (min, max) = (self.large_key(cut.rect.min), self.large_key(cut.rect.max));
+        for key in keys_between(min, max) {
+            self.large.entry(key).or_default().push(cut);
+        }
+        CutBucket::Large { min, max }
+    }
+
+    /// Keeps only the cuts in `bucket` that `keep` accepts.
+    fn retain_in(&mut self, bucket: CutBucket, keep: impl Fn(&CutOccupant) -> bool) {
+        match bucket {
+            CutBucket::Small(key) => {
+                if let Some(list) = self.buckets.get_mut(&key) {
+                    list.retain(&keep);
+                }
+            }
+            CutBucket::Large { min, max } => {
+                for key in keys_between(min, max) {
+                    if let Some(list) = self.large.get_mut(&key) {
+                        list.retain(&keep);
+                    }
+                }
+            }
+        }
     }
 
     /// Cuts of owners other than `owner` too close to `rect`.
     fn conflicts(&self, rect: Rect<Dbu>, owner: Owner) -> impl Iterator<Item = &CutOccupant> + '_ {
         let spacing = self.rules.spacing;
-        let area = rect.expand(self.rules.reach());
-        let (x0, y0) = self.key(area.min);
-        let (x1, y1) = self.key(area.max);
-        (x0..=x1)
-            .flat_map(move |x| (y0..=y1).map(move |y| (x, y)))
+        let near = rect.expand(self.rules.reach());
+        let small = keys_between(self.key(near.min), self.key(near.max))
             .filter_map(|k| self.buckets.get(&k))
-            .flatten()
+            .flatten();
+        let around = rect.expand(spacing);
+        let (q0, q1) = (self.large_key(around.min), self.large_key(around.max));
+        let large = keys_between(q0, q1)
+            .filter_map(move |k| self.large.get(&k).map(|list| (k, list)))
+            .flat_map(move |(k, list)| {
+                list.iter().filter(move |c| {
+                    let first = self.large_key(c.rect.min);
+                    (first.0.max(q0.0), first.1.max(q0.1)) == k
+                })
+            });
+        small
+            .chain(large)
             .filter(move |c| c.owner != owner && cuts_clash(&rect, &c.rect, spacing))
     }
+
+    /// Every cut once: each large shape is taken from its first bucket.
+    fn all(&self) -> impl Iterator<Item = &CutOccupant> + '_ {
+        let large = self.large.iter().flat_map(move |(&k, list)| {
+            list.iter().filter(move |c| self.large_key(c.rect.min) == k)
+        });
+        self.buckets.values().flatten().chain(large)
+    }
+
+    fn retain(&mut self, keep: impl Fn(&CutOccupant) -> bool) {
+        for list in self.buckets.values_mut().chain(self.large.values_mut()) {
+            list.retain(&keep);
+        }
+    }
+}
+
+/// Bucket keys from `min` to `max` inclusive, row by row.
+fn keys_between(min: (i64, i64), max: (i64, i64)) -> impl Iterator<Item = (i64, i64)> {
+    (min.0..=max.0).flat_map(move |x| (min.1..=max.1).map(move |y| (x, y)))
 }
 
 /// Whether two cuts touch or their edges are closer than `spacing`.
@@ -279,14 +364,12 @@ impl Occupancy {
         let mut out = Vec::new();
         for (c, layer) in self.cuts.iter().enumerate() {
             let cut = CutLayerId::new(c);
-            for list in layer.buckets.values() {
-                for a in list {
-                    for b in layer.conflicts(a.rect, a.owner) {
-                        let both_fixed = a.owner == Owner::Obstacle && b.owner == Owner::Obstacle;
-                        let key = |c: &CutOccupant| (c.rect.min.x, c.rect.min.y, c.owner);
-                        if !both_fixed && key(a) < key(b) {
-                            out.push((cut, *a, *b));
-                        }
+            for a in layer.all() {
+                for b in layer.conflicts(a.rect, a.owner) {
+                    let both_fixed = a.owner == Owner::Obstacle && b.owner == Owner::Obstacle;
+                    let key = |c: &CutOccupant| (c.rect.min.x, c.rect.min.y, c.owner);
+                    if !both_fixed && key(a) < key(b) {
+                        out.push((cut, *a, *b));
                     }
                 }
             }
@@ -345,11 +428,8 @@ impl Occupancy {
                         bucket.retain(|o| o.owner != owner || o.origin == Origin::Fixed);
                     }
                 }
-                Slot::Cut(c) => {
-                    if let Some(list) = self.cuts[c.cut.index()].buckets.get_mut(&c.bucket) {
-                        list.retain(|o| o.owner != owner || o.origin == Origin::Fixed);
-                    }
-                }
+                Slot::Cut(c) => self.cuts[c.cut.index()]
+                    .retain_in(c.bucket, |o| o.owner != owner || o.origin == Origin::Fixed),
             }
         }
     }
@@ -507,9 +587,7 @@ impl LocalOccupancy {
             list.retain(|o| o.owner != owner);
         }
         for layer in self.cuts.values_mut() {
-            for list in layer.buckets.values_mut() {
-                list.retain(|o| o.owner != owner);
-            }
+            layer.retain(|o| o.owner != owner);
         }
     }
 
@@ -552,5 +630,101 @@ impl LocalOccupancy {
                     clash.then_some((t, o))
                 })
         })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn rect(x0: i64, y0: i64, x1: i64, y1: i64) -> Rect<Dbu> {
+        Rect::from_corners(Point::new(Dbu(x0), Dbu(y0)), Point::new(Dbu(x1), Dbu(y1)))
+    }
+
+    /// Via cuts are 100 wide with spacing 100, so fine buckets are 800 wide
+    /// and coarse ones 51200.
+    fn layer() -> CutLayer {
+        CutLayer::new(CutTech {
+            spacing: Dbu(100),
+            max_half: Dbu(50),
+        })
+    }
+
+    fn cut(rect: Rect<Dbu>, owner: Owner, origin: Origin) -> CutOccupant {
+        CutOccupant {
+            rect,
+            owner,
+            origin,
+        }
+    }
+
+    #[test]
+    fn a_cut_beside_the_far_edge_of_a_large_obstruction_conflicts_with_it() {
+        let mut cuts = layer();
+        let _ = cuts.add(cut(
+            rect(0, 0, 300_000, 40_000),
+            Owner::Obstacle,
+            Origin::Fixed,
+        ));
+
+        let near_edge = cuts
+            .conflicts(rect(300_050, 100, 300_150, 200), Owner::Net(1))
+            .count();
+        let clear = cuts
+            .conflicts(rect(300_100, 100, 300_200, 200), Owner::Net(1))
+            .count();
+
+        assert_eq!(near_edge, 1);
+        assert_eq!(clear, 0);
+    }
+
+    #[test]
+    fn a_large_shape_is_reported_once_however_many_buckets_a_query_spans() {
+        let mut cuts = layer();
+        let _ = cuts.add(cut(
+            rect(0, 0, 300_000, 40_000),
+            Owner::Obstacle,
+            Origin::Fixed,
+        ));
+
+        let spanning = cuts
+            .conflicts(rect(51_100, 39_950, 51_300, 40_050), Owner::Net(1))
+            .count();
+
+        assert_eq!(spanning, 1);
+    }
+
+    #[test]
+    fn removing_wiring_keeps_fixed_cuts_in_both_tiers() {
+        let mut cuts = layer();
+        let wire = cuts.add(cut(rect(0, 0, 100, 100), Owner::Net(1), Origin::Wiring));
+        let pad = cuts.add(cut(rect(0, 0, 100, 100), Owner::Net(1), Origin::Fixed));
+        let big = cuts.add(cut(
+            rect(1000, 0, 60_000, 500),
+            Owner::Net(1),
+            Origin::Wiring,
+        ));
+
+        for bucket in [wire, pad, big] {
+            cuts.retain_in(bucket, |o| {
+                o.owner != Owner::Net(1) || o.origin == Origin::Fixed
+            });
+        }
+
+        assert_eq!(cuts.all().count(), 1);
+        assert_eq!(cuts.all().next().map(|c| c.origin), Some(Origin::Fixed));
+    }
+
+    #[test]
+    fn every_cut_is_listed_once() {
+        let mut cuts = layer();
+        let _ = cuts.add(cut(rect(0, 0, 100, 100), Owner::Net(1), Origin::Wiring));
+        let _ = cuts.add(cut(
+            rect(-60_000, -60_000, 60_000, 60_000),
+            Owner::Obstacle,
+            Origin::Fixed,
+        ));
+
+        assert_eq!(cuts.all().count(), 2);
     }
 }
