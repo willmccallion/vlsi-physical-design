@@ -3,12 +3,13 @@
 #![allow(clippy::unwrap_used)]
 
 use pare_common::db::design::{NetlistDB, PlacementStatus, RouteElem};
-use pare_common::db::indices::{CutLayerId, LayerId};
+use pare_common::db::indices::{CutLayerId, LayerId, NetId};
 use pare_common::db::parser::{def, lef};
 use pare_common::geom::dbu::Dbu;
 use pare_common::geom::point::Point;
 use pare_common::geom::rect::Rect;
 use pare_common::util::config::RoutingConfig;
+use pare_common::verify::routing::net_components;
 use pare_router::access::Node;
 use pare_router::occupancy::{Occupancy, Origin, Owner, Slot};
 use pare_router::tech::RouteTech;
@@ -41,6 +42,30 @@ fn routing_refuses_a_design_with_unplaced_cells() {
             first: "u5".to_string(),
         })
     );
+}
+
+fn place(db: &mut NetlistDB, name: &str, at: Point<Dbu>) {
+    let cell = db.cells.iter_mut().find(|c| c.name == name).unwrap();
+    cell.location = at;
+    cell.status = PlacementStatus::Placed;
+}
+
+#[test]
+fn nets_crossing_many_regions_are_routed_connected() {
+    let mut db = tiny();
+    place(&mut db, "u5", Point::new(Dbu(2000), Dbu(4000)));
+    place(&mut db, "u6", Point::new(Dbu(3000), Dbu(4000)));
+    let config = RoutingConfig {
+        gcell_tracks: 3,
+        ..RoutingConfig::default()
+    };
+
+    let summary = route(&mut db, &config).unwrap();
+
+    assert!(summary.incomplete.is_empty(), "{:?}", summary.incomplete);
+    for n in 0..db.nets.len() {
+        assert_eq!(net_components(&db, NetId::new(n)), 1, "net {n}");
+    }
 }
 
 #[test]

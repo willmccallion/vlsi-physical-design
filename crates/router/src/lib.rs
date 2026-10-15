@@ -118,25 +118,14 @@ pub fn route(db: &mut NetlistDB, config: &RoutingConfig) -> Result<RoutingSummar
             ..RoutingSummary::default()
         };
         let start = Instant::now();
-        let _ = dr.route_nets(&nets, costs);
+        let first = dr.route_initial(&nets, costs);
         ui::routing_table_header("DR");
-        let conflicted = dr.conflicted_nets(1.0);
-        ui::routing_iter(
-            "DR",
-            0,
-            conflicted.len(),
-            nets.len(),
-            costs.penalty / pitch,
-            start.elapsed().as_millis(),
-        );
-        let start = Instant::now();
-        let rerouted = dr.repair(costs, 0, Scope::Everything);
         let mut conflicted = dr.conflicted_nets(1.0);
         ui::routing_iter(
             "DR",
             0,
             conflicted.len(),
-            rerouted.pieces,
+            first.pieces,
             costs.penalty / pitch,
             start.elapsed().as_millis(),
         );

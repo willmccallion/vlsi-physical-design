@@ -1,18 +1,20 @@
 //! Detailed routing on the track graph.
 //!
-//! Each net starts from the wires track assignment placed for it and grows
-//! a tree through them and its pins' access points, joining the nearest
-//! remaining terminal each time with a multi-source A* search inside its
-//! global route. Nets are routed in parallel batches that cannot interact;
-//! conflicts left over are repaired region by region.
+//! The first pass routes every net region by region along its global route
+//! (`initial`); conflicts left over are repaired region by region
+//! (`region`). A net the regions cannot route is routed whole instead: a
+//! tree grown through its track wires and its pins' access points, joining
+//! the nearest remaining terminal each time with a multi-source A* search
+//! inside its global route.
 
+mod initial;
 mod region;
 
 pub use region::{RepairStats, Scope};
 
 use crate::access::{AccessPoint, Node, access_points};
 use crate::global::{GCell, GlobalGrid, GlobalRoutes, RouteTree};
-use crate::occupancy::{LocalOccupancy, Occupancy, Origin, Owner, Slot, TrackRef, too_close};
+use crate::occupancy::{Occupancy, Origin, Owner, Slot, TrackRef, too_close};
 pub use crate::search::Costs;
 use crate::search::{GUIDE_SLACK_GCELLS, Guide, History, OwnVias, Search};
 use crate::tech::RouteTech;
@@ -29,7 +31,7 @@ use pare_common::geom::rect::Rect;
 use pare_common::verify::shapes::{self, fixed_shapes, is_signal_net};
 use rayon::prelude::*;
 use rustc_hash::{FxHashMap, FxHashSet};
-use std::collections::{BTreeMap, VecDeque};
+use std::collections::VecDeque;
 
 /// State shared by all detailed routing rounds.
 #[derive(Debug)]
@@ -158,34 +160,6 @@ impl<'a> DetailedRouter<'a> {
             .collect()
     }
 
-    /// Routes `nets` in parallel, so that every net sees the wiring of each
-    /// net routed before it that it could touch.
-    ///
-    /// Nets are scheduled by tiles while the tiles spread the work: once one
-    /// block would hold more than a thread's share of a level's nets, the
-    /// rest are routed in speculative batches instead.
-    pub fn route_nets(&mut self, nets: &[NetId], costs: Costs) -> Vec<(NetId, NetRoute)> {
-        let die = self.db.die_area;
-        let die_span = (die.max.x - die.min.x).max(die.max.y - die.min.y);
-        let threads = rayon::current_num_threads().max(1);
-        let mut done = Vec::with_capacity(nets.len());
-        let mut pending = nets.to_vec();
-        let mut tile = self.gcell * TILE_GCELLS;
-        while !pending.is_empty() && tile * MIN_TILES_ACROSS <= die_span {
-            let (blocks, spanning) = self.partition_by_tile(&pending, tile);
-            let tiled: usize = blocks.values().map(Vec::len).sum();
-            let largest = blocks.values().map(Vec::len).max().unwrap_or(0);
-            if largest * threads > tiled {
-                break;
-            }
-            self.route_blocks(&blocks, costs, &mut done);
-            pending = spanning;
-            tile = tile * 4;
-        }
-        self.route_speculatively(pending, costs, &mut done);
-        done
-    }
-
     /// Routes nets in parallel batches against the same occupancy, then
     /// commits them in order. A net whose wiring touches a net committed
     /// earlier in its batch is routed once more in the next batch; after
@@ -204,7 +178,7 @@ impl<'a> DetailedRouter<'a> {
             let batch: Vec<NetId> = pending.drain(..take).collect();
             let results: Vec<(NetId, NetRoute)> = batch
                 .par_iter()
-                .map(|&n| (n, self.route_net(n, costs, None)))
+                .map(|&n| (n, self.route_net(n, costs)))
                 .collect();
             let mut committed: FxHashSet<u32> = FxHashSet::default();
             let mut deferred = Vec::new();
@@ -241,91 +215,6 @@ impl<'a> DetailedRouter<'a> {
                     .cut_conflicts(*cut, rect, owner)
                     .any(|o| listed(o.owner))
             })
-    }
-
-    /// Routes the blocks in nine phases; blocks of one phase are at least a
-    /// tile apart, so they are routed in parallel without their nets meeting.
-    fn route_blocks(
-        &mut self,
-        blocks: &TileBlocks,
-        costs: Costs,
-        done: &mut Vec<(NetId, NetRoute)>,
-    ) {
-        for phase in 0..9 {
-            let work: Vec<&Vec<NetId>> = blocks
-                .iter()
-                .filter(|((bx, by), _)| bx.rem_euclid(3) + 3 * by.rem_euclid(3) == phase)
-                .map(|(_, nets)| nets)
-                .collect();
-            let results: Vec<Vec<(NetId, NetRoute)>> = work
-                .par_iter()
-                .map(|nets| self.route_block(nets, costs))
-                .collect();
-            for (n, route) in results.into_iter().flatten() {
-                self.commit(n, &route);
-                done.push((n, route));
-            }
-        }
-    }
-
-    /// Groups nets whose window fits in a 2x2 block of `tile` squares by the
-    /// block's lower-left tile; the rest are returned separately.
-    fn partition_by_tile(&self, nets: &[NetId], tile: Dbu) -> (TileBlocks, Vec<NetId>) {
-        let tile = tile.get();
-        let origin = self.grid_origin;
-        let mut blocks: TileBlocks = BTreeMap::new();
-        let mut spanning = Vec::new();
-        for &n in nets {
-            let w = self.window(n);
-            let tx = |v: Dbu| (v - origin.x).get().div_euclid(tile);
-            let ty = |v: Dbu| (v - origin.y).get().div_euclid(tile);
-            let (x0, x1, y0, y1) = (tx(w.min.x), tx(w.max.x), ty(w.min.y), ty(w.max.y));
-            if x1 - x0 <= 1 && y1 - y0 <= 1 {
-                blocks.entry((x0, y0)).or_default().push(n);
-            } else {
-                spanning.push(n);
-            }
-        }
-        (blocks, spanning)
-    }
-
-    /// Routes one block's nets in order, each seeing the ones before it.
-    fn route_block(&self, nets: &[NetId], costs: Costs) -> Vec<(NetId, NetRoute)> {
-        let mut overlay = LocalOccupancy::default();
-        let mut out = Vec::with_capacity(nets.len());
-        for &n in nets {
-            let route = self.route_net(n, costs, Some(&overlay));
-            for (layer, rect) in self.metal_beyond_wires(n, &route) {
-                if self.tech.routable(layer) {
-                    overlay.add_rect(self.tech, layer, &rect, Owner::Net(n.0));
-                }
-            }
-            for (cut, rect) in route.cuts(self.db, self.tech) {
-                overlay.add_cut(cut, &rect, Owner::Net(n.0));
-            }
-            out.push((n, route));
-        }
-        out
-    }
-
-    /// The metal of `route` other than the track wires of `net`, which the
-    /// occupancy already holds.
-    fn metal_beyond_wires(&self, net: NetId, route: &NetRoute) -> Vec<(LayerId, Rect<Dbu>)> {
-        let wires: FxHashSet<Edge> = self.wires[net.index()]
-            .iter()
-            .flat_map(|w| w.edges())
-            .collect();
-        let rest = NetRoute {
-            edges: route
-                .edges
-                .iter()
-                .copied()
-                .filter(|e| !wires.contains(e))
-                .collect(),
-            access: route.access.clone(),
-            complete: route.complete,
-        };
-        rest.metal(self.db, self.tech)
     }
 
     /// Replaces a net's recorded routing with `route`, its narrow gaps
@@ -582,7 +471,7 @@ impl<'a> DetailedRouter<'a> {
 
     /// Routes a net through its track wires and pins, or through its pins
     /// alone when the wires cannot all be joined.
-    fn route_net(&self, net: NetId, costs: Costs, overlay: Option<&LocalOccupancy>) -> NetRoute {
+    fn route_net(&self, net: NetId, costs: Costs) -> NetRoute {
         let pins = &self.access[net.index()];
         if pins.iter().any(Vec::is_empty) || pins.len() < 2 {
             return NetRoute::default();
@@ -590,24 +479,17 @@ impl<'a> DetailedRouter<'a> {
         let wires = self.wires[net.index()].as_slice();
         if !wires.is_empty() {
             let terms = Terminals { pins, wires };
-            if let Some(route) = self.route_terminals(net, costs, overlay, &terms) {
+            if let Some(route) = self.route_terminals(net, costs, &terms) {
                 return route;
             }
         }
         let terms = Terminals { pins, wires: &[] };
-        self.route_terminals(net, costs, overlay, &terms)
-            .unwrap_or_default()
+        self.route_terminals(net, costs, &terms).unwrap_or_default()
     }
 
     /// Joins every terminal inside the net's guide, or failing that in ever
     /// larger windows without it.
-    fn route_terminals(
-        &self,
-        net: NetId,
-        costs: Costs,
-        overlay: Option<&LocalOccupancy>,
-        terms: &Terminals<'_>,
-    ) -> Option<NetRoute> {
+    fn route_terminals(&self, net: NetId, costs: Costs, terms: &Terminals<'_>) -> Option<NetRoute> {
         let net_guide = self.guides[net.index()].as_ref();
         let guide =
             net_guide.map(|g| Guide::new(g.tree.cells(), self.grid_origin, self.gcell, self.tech));
@@ -615,7 +497,7 @@ impl<'a> DetailedRouter<'a> {
             db: self.db,
             tech: self.tech,
             occupancy: &self.occupancy,
-            overlay,
+            overlay: None,
             history: &self.history,
             owner: Owner::Net(net.0),
             costs,
@@ -1016,9 +898,6 @@ impl<'a> DetailedRouter<'a> {
     }
 }
 
-/// Nets grouped by the lower-left tile of the 2x2 block their window fits.
-type TileBlocks = BTreeMap<(i64, i64), Vec<NetId>>;
-
 impl NetGuide {
     /// The gcells of the global route from pin `from` to pin `to`.
     fn corridor(&self, from: usize, to: usize) -> Option<Vec<GCell>> {
@@ -1146,13 +1025,6 @@ struct NetGuide {
 
 /// Gcells between the waypoints of a long connection.
 const SEGMENT_GCELLS: usize = 6;
-
-/// Tile levels stop once fewer tiles than this span the die.
-const MIN_TILES_ACROSS: i64 = 8;
-
-/// Edge, in gcells, of the smallest tiles that schedule nets for parallel
-/// routing; each further level of tiles is four times larger.
-const TILE_GCELLS: i64 = 8;
 
 /// Nets with more pins than this are routed as parallel chunks.
 const CHUNKED_PINS: usize = 1024;

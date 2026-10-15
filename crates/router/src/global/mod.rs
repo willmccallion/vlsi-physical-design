@@ -345,6 +345,21 @@ impl RouteTree {
         &self.cells
     }
 
+    /// The position of a cell in [`Self::cells`], if the route has it.
+    pub fn position(&self, c: GCell) -> Option<usize> {
+        self.index.get(&c).copied()
+    }
+
+    /// Every link of the tree as (cell, parent) positions in
+    /// [`Self::cells`]; the root of each separate tree is left out.
+    pub fn links(&self) -> impl Iterator<Item = (usize, usize)> + '_ {
+        self.parent
+            .iter()
+            .enumerate()
+            .filter(|&(c, &p)| c != p)
+            .map(|(c, &p)| (c, p))
+    }
+
     /// The cells of the branch joining `from` to `to`, in order, or `None`
     /// when either is off the route or they are not joined.
     pub fn branch(&self, from: GCell, to: GCell) -> Option<Vec<GCell>> {

@@ -3,10 +3,9 @@
 //! The die is cut into square regions a few gcells wide. In every region a
 //! pass covers, the pieces of the chosen nets that lie wholly inside are
 //! ripped up and routed again, negotiating with each other for a few local
-//! rounds: every net in every region in the first pass, as `TritonRoute`'s
-//! first detailed routing iteration does, and afterwards only the nets of
-//! each conflict in the region holding it. Wiring outside the region stays
-//! put, and where it crosses into the region it becomes a terminal the new
+//! rounds: the nets of each conflict in the region holding it, and when
+//! that stalls the nets near it too. Wiring outside the region stays put,
+//! and where it crosses into the region it becomes a terminal the new
 //! pieces must reach. Regions that do not touch are routed in parallel, and
 //! the region grid shifts between passes so a conflict on one region's edge
 //! falls inside another's.
@@ -14,7 +13,7 @@
 use super::DetailedRouter;
 use crate::access::Node;
 use crate::occupancy::{LocalOccupancy, Owner};
-use crate::search::{Costs, MAX_PENALTY, OwnVias, Search};
+use crate::search::{Costs, Guide, MAX_PENALTY, OwnVias, Search};
 use crate::wiring::{DisjointSets, Edge, NetRoute, path_edges};
 use pare_common::db::indices::{CutLayerId, LayerId, NetId};
 use pare_common::geom::dbu::Dbu;
@@ -25,28 +24,69 @@ use rustc_hash::{FxHashMap, FxHashSet};
 use std::collections::BTreeMap;
 
 /// Edge of a region, in gcells.
-const REGION_GCELLS: i64 = 6;
+pub(super) const REGION_GCELLS: i64 = 6;
 
 /// Local rip-up and reroute rounds within one region.
 const LOCAL_ROUNDS: usize = 6;
 
 /// One region's position in the region grid.
-type RegionKey = (i64, i64);
+pub(super) type RegionKey = (i64, i64);
+
+/// Square regions of [`REGION_GCELLS`] gcells from an origin.
+#[derive(Clone, Copy, Debug)]
+pub(super) struct RegionGrid {
+    origin: Point<Dbu>,
+    size: Dbu,
+}
+
+impl RegionGrid {
+    /// The grid of one pass: aligned with the gcells, shifted by a third of
+    /// a region per `pass`.
+    pub(super) fn of_pass(router: &DetailedRouter<'_>, pass: usize) -> Self {
+        let shift = router.gcell * (REGION_GCELLS * (pass as i64 % 3) / 3);
+        Self {
+            origin: router.grid_origin - Point::new(shift, shift),
+            size: router.gcell * REGION_GCELLS,
+        }
+    }
+
+    /// The region holding `p`, counting regions' lower and left edges as
+    /// theirs.
+    pub(super) const fn key(&self, p: Point<Dbu>) -> RegionKey {
+        (
+            (p.x.get() - self.origin.x.get()).div_euclid(self.size.get()),
+            (p.y.get() - self.origin.y.get()).div_euclid(self.size.get()),
+        )
+    }
+
+    /// The area of a region.
+    pub(super) fn area(&self, (rx, ry): RegionKey) -> Rect<Dbu> {
+        let min = self.origin + Point::new(self.size * rx, self.size * ry);
+        Rect::new(min, min + Point::new(self.size, self.size))
+    }
+}
+
+/// Which of four batches a region is routed in; regions of one batch do
+/// not touch.
+pub(super) const fn colour((rx, ry): RegionKey) -> i64 {
+    rx.rem_euclid(2) + 2 * ry.rem_euclid(2)
+}
 
 /// The part of a net a region worker routes again.
 #[derive(Debug)]
-struct Piece {
-    net: NetId,
+pub(super) struct Piece {
+    pub(super) net: NetId,
     /// Groups of crossings that must be joined; each group is already
     /// connected outside the region or is one pin's access point.
-    groups: Vec<Vec<Node>>,
+    pub(super) groups: Vec<Vec<Node>>,
+    /// The cells the piece should keep to, if any; it may leave them when
+    /// they hold no way through.
+    pub(super) guide: Option<Guide>,
 }
 
 /// Which nets a repair pass routes again.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Scope {
-    /// Every net in every region it passes through.
-    Everything,
     /// The nets of each conflict, in the region holding it.
     Conflicts,
     /// The nets of each conflict and every net with wiring within
@@ -73,15 +113,8 @@ impl DetailedRouter<'_> {
     /// Routes again, region by region, the nets `scope` selects, with the
     /// region grid shifted by a third of a region per `pass`.
     pub fn repair(&mut self, costs: Costs, pass: usize, scope: Scope) -> RepairStats {
-        let shift = self.gcell * (REGION_GCELLS * (pass as i64 % 3) / 3);
-        let size = self.gcell * REGION_GCELLS;
-        let origin = self.grid_origin - Point::new(shift, shift);
-        let key = |p: Point<Dbu>| {
-            (
-                (p.x - origin.x).get().div_euclid(size.get()),
-                (p.y - origin.y).get().div_euclid(size.get()),
-            )
-        };
+        let grid = RegionGrid::of_pass(self, pass);
+        let key = |p: Point<Dbu>| grid.key(p);
         let mut regions: BTreeMap<RegionKey, FxHashSet<NetId>> = BTreeMap::new();
         match scope {
             Scope::Conflicts => {
@@ -99,36 +132,19 @@ impl DetailedRouter<'_> {
                     nets.extend(near);
                 }
             }
-            Scope::Everything => {
-                for (n, route) in self.routes.iter().enumerate() {
-                    let nodes = route
-                        .edges
-                        .iter()
-                        .flat_map(|e| <[Node; 2]>::from(e.ends()))
-                        .chain(route.access.iter().map(|a| a.node));
-                    for node in nodes {
-                        let _ = regions
-                            .entry(key(self.point(node)))
-                            .or_default()
-                            .insert(NetId::new(n));
-                    }
-                }
-            }
         }
         let mut stats = RepairStats {
             regions: regions.len(),
             pieces: 0,
         };
-        for colour in 0..4 {
+        for batch_colour in 0..4 {
             let batch: Vec<(Rect<Dbu>, Vec<NetId>)> = regions
                 .iter()
-                .filter(|((rx, ry), _)| rx.rem_euclid(2) + 2 * ry.rem_euclid(2) == colour)
-                .map(|(&(rx, ry), nets)| {
-                    let min = origin + Point::new(size * rx, size * ry);
-                    let area = Rect::new(min, min + Point::new(size, size));
+                .filter(|&(&k, _)| colour(k) == batch_colour)
+                .map(|(&k, nets)| {
                     let mut nets: Vec<NetId> = nets.iter().copied().collect();
                     nets.sort_unstable();
-                    (area, nets)
+                    (grid.area(k), nets)
                 })
                 .collect();
             stats.pieces += self.repair_batch(&batch, costs);
@@ -174,7 +190,16 @@ impl DetailedRouter<'_> {
                     .iter()
                     .map(|p| removed.get(&(r, p.net)).map_or(&[][..], Vec::as_slice))
                     .collect();
-                self.route_region(area, pieces, &old, costs)
+                let results = self.route_region(area, pieces, costs);
+                let new: Vec<&[Edge]> = results
+                    .iter()
+                    .zip(&old)
+                    .map(|(r, &o)| r.as_deref().unwrap_or(o))
+                    .collect();
+                if self.clashing(area, pieces, &new) > self.clashing(area, pieces, &old) {
+                    return vec![None; pieces.len()];
+                }
+                results
             })
             .collect();
 
@@ -244,21 +269,22 @@ impl DetailedRouter<'_> {
                     groups.entry(sets.find(n)).or_default().push(n);
                 }
                 let groups: Vec<Vec<Node>> = groups.into_values().collect();
-                let piece = (groups.len() > 1).then_some(Piece { net, groups });
+                let piece = (groups.len() > 1).then_some(Piece {
+                    net,
+                    groups,
+                    guide: None,
+                });
                 (inside, piece)
             })
             .collect()
     }
 
     /// Routes a region's pieces, rerouting those still in conflict with a
-    /// growing penalty. `None` for a piece that could not be connected, and
-    /// for every piece when the new wiring leaves more pieces clashing than
-    /// their `old` wiring did, so that a region never gets worse.
-    fn route_region(
+    /// growing penalty; `None` for a piece that could not be connected.
+    pub(super) fn route_region(
         &self,
         area: &Rect<Dbu>,
         pieces: &[Piece],
-        old: &[&[Edge]],
         costs: Costs,
     ) -> Vec<Option<Vec<Edge>>> {
         let window = Rect::new(area.min, area.max - Point::new(Dbu(1), Dbu(1)));
@@ -272,7 +298,7 @@ impl DetailedRouter<'_> {
             for &i in &todo {
                 let owner = Owner::Net(pieces[i].net.0);
                 overlay.remove_owner(owner);
-                let search = Search {
+                let guided = Search {
                     db: self.db,
                     tech: self.tech,
                     occupancy: &self.occupancy,
@@ -280,11 +306,21 @@ impl DetailedRouter<'_> {
                     history: &self.history,
                     owner,
                     costs: Costs { penalty, ..costs },
-                    guide: None,
+                    guide: pieces[i].guide.as_ref(),
                     own_vias: None,
                 };
+                let free = Search {
+                    guide: None,
+                    ..guided
+                };
                 let own = self.vias_near(pieces[i].net, area);
-                results[i] = self.connect_groups(&search, &pieces[i].groups, &window, own);
+                let groups = &pieces[i].groups;
+                results[i] = if guided.guide.is_some() {
+                    self.connect_groups(&guided, groups, &window, own.clone())
+                        .or_else(|| self.connect_groups(&free, groups, &window, own))
+                } else {
+                    self.connect_groups(&free, groups, &window, own)
+                };
                 if let Some(edges) = &results[i] {
                     for (layer, rect) in self.edge_metal(edges) {
                         overlay.add_rect(self.tech, layer, &rect, owner);
@@ -308,14 +344,6 @@ impl DetailedRouter<'_> {
                 break;
             }
             penalty = (penalty * 2.0).min(MAX_PENALTY);
-        }
-        let new: Vec<&[Edge]> = results
-            .iter()
-            .zip(old)
-            .map(|(r, &o)| r.as_deref().unwrap_or(o))
-            .collect();
-        if self.clashing(area, pieces, &new) > self.clashing(area, pieces, old) {
-            return vec![None; pieces.len()];
         }
         results
     }
@@ -514,7 +542,7 @@ fn nearest_group(search: &Search<'_>, tree: &[Node], groups: &[&Vec<Node>]) -> u
 
 /// Whether `p` is in `r`, counting its lower and left edges but not its
 /// upper and right ones, so that adjacent regions do not share a point.
-fn contains_half_open(r: &Rect<Dbu>, p: Point<Dbu>) -> bool {
+pub(super) fn contains_half_open(r: &Rect<Dbu>, p: Point<Dbu>) -> bool {
     r.min.x <= p.x && p.x < r.max.x && r.min.y <= p.y && p.y < r.max.y
 }
 
