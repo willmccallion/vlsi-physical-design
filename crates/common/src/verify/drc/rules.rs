@@ -5,8 +5,8 @@ use crate::db::design::{NetlistDB, NonDefaultRule};
 use crate::db::indices::{LayerId, NonDefaultRuleId};
 use crate::db::library::Library;
 use crate::db::rules::{
-    CutSpacing, EndOfLineSpacing, Lef58CutSpacing, MinStep, MinimumCut, ParallelRunLengthTable,
-    SpacingTable, WidthRangeSpacing,
+    CutSpacing, CutSpacingCondition, EndOfLineSpacing, Lef58CutSpacing, MinStep, MinimumCut,
+    ParallelRunLengthTable, SpacingTable, WidthRangeSpacing,
 };
 use crate::geom::dbu::{Dbu, DbuArea};
 
@@ -130,6 +130,36 @@ impl Rules {
             .filter_map(|n| n.hard_spacing.get(layer.index()).copied().flatten())
             .max()
             .unwrap_or(Dbu::ZERO)
+    }
+
+    /// The farthest any rule looks from a shape: the distance within which
+    /// every other shape a check of it can involve lies.
+    pub fn max_reach(&self) -> Dbu {
+        let metal = self.metal.iter().enumerate().flat_map(|(l, m)| {
+            let layer = LayerId::new(l);
+            let eol = m.end_of_line.iter().map(|e| {
+                e.spacing + e.within + e.parallel_edge.map_or(Dbu::ZERO, |p| p.spacing + p.within)
+            });
+            let cuts = m
+                .minimum_cuts
+                .iter()
+                .filter_map(|c| c.length.map(|(_, within)| within).or(c.within));
+            [m.max_spacing(), self.max_hard_spacing(layer)]
+                .into_iter()
+                .chain(m.ranges.iter().map(|r| r.spacing))
+                .chain(eol)
+                .chain(cuts)
+                .collect::<Vec<_>>()
+        });
+        let cut = self.cut.iter().flat_map(|c| {
+            let statements = c.spacings.iter().map(|s| match s.condition {
+                CutSpacingCondition::AdjacentCuts { within, .. } => s.spacing.max(within),
+                _ => s.spacing,
+            });
+            let properties = c.lef58_spacings.iter().map(|s| s.spacing);
+            statements.chain(properties).collect::<Vec<_>>()
+        });
+        metal.chain(cut).max().unwrap_or(Dbu::ZERO)
     }
 
     /// The rules of `library`, with no nondefault rules.

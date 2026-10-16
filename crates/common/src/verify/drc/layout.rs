@@ -184,16 +184,24 @@ impl Layout {
         if rect.width() < Dbu::ZERO || rect.height() < Dbu::ZERO {
             return;
         }
+        self.add_shape(
+            layer,
+            &LayoutShape {
+                owner,
+                rect,
+                origin,
+            },
+        );
+    }
+
+    /// Adds a shape as it is, on a layer the layout has.
+    pub fn add_shape(&mut self, layer: LayerRef, shape: &LayoutShape) {
         let shapes = match layer {
             LayerRef::Routing(l) => self.metal.get_mut(l.index()),
             LayerRef::Cut(c) => self.cut.get_mut(c.index()),
         };
         if let Some(shapes) = shapes {
-            shapes.push(LayoutShape {
-                owner,
-                rect,
-                origin,
-            });
+            shapes.push(*shape);
         }
     }
 

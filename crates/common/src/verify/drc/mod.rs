@@ -20,9 +20,14 @@ mod rules;
 mod shape;
 #[cfg(test)]
 mod tests;
+mod tile;
 
 pub use layout::{Layout, LayoutShape, Origin, Owner, OwnerIndex};
 pub use rules::{CutRules, MetalRules, NonDefaultRules, Rules};
+pub use tile::check_tiled;
+
+/// How many halos wide a tile of [`check_drc`] is.
+const TILE_HALOS: i64 = 32;
 
 use crate::db::design::NetlistDB;
 use crate::db::library::LayerRef;
@@ -146,12 +151,15 @@ impl Marker {
     }
 }
 
-/// Markers being collected: those routing can fix, and those among fixed
-/// metal only.
+/// Markers being collected. The checks fill `violations` and `fixed`, those
+/// among fixed metal only; [`classify`] sorts them into the other classes.
 #[derive(Debug, Default)]
 struct Markers {
     violations: Vec<Marker>,
     fixed: Vec<Marker>,
+    advisory: Vec<Marker>,
+    placement: Vec<Marker>,
+    input: Vec<Marker>,
 }
 
 impl Markers {
@@ -166,6 +174,9 @@ impl Markers {
     fn merge(mut self, other: Self) -> Self {
         self.violations.extend(other.violations);
         self.fixed.extend(other.fixed);
+        self.advisory.extend(other.advisory);
+        self.placement.extend(other.placement);
+        self.input.extend(other.input);
         self
     }
 }
@@ -190,6 +201,18 @@ pub struct DrcReport {
 }
 
 impl DrcReport {
+    /// The report of classified markers, each class sorted and without
+    /// repeats.
+    fn from_markers(found: Markers, owners: Vec<Owner>) -> Self {
+        Self {
+            violations: deduplicated(found.violations),
+            advisory: deduplicated(found.advisory),
+            placement: deduplicated(found.placement),
+            input: deduplicated(found.input),
+            owners,
+        }
+    }
+
     /// How many violations of each kind there are, by kind.
     pub fn counts(&self) -> Vec<(Violation, usize)> {
         counts(&self.violations)
@@ -225,7 +248,7 @@ fn counts(markers: &[Marker]) -> Vec<(Violation, usize)> {
 }
 
 /// Checks every shape of `db` against the rules of its library and its
-/// nondefault rules.
+/// nondefault rules, tile by tile.
 ///
 /// `OpenROAD` reads every wire at its layer's default width, so the wiring
 /// of nets under a nondefault rule must also meet the shape rules at that
@@ -233,7 +256,8 @@ fn counts(markers: &[Marker]) -> Vec<(Violation, usize)> {
 pub fn check_drc(db: &NetlistDB) -> DrcReport {
     let layout = Layout::from_db(db);
     let rules = Rules::from_design(db);
-    let mut report = check(&layout, &rules);
+    let halo = rules.max_reach() * 2;
+    let mut report = check_tiled(&layout, &rules, halo * TILE_HALOS, halo);
     let default_width = Layout::default_width_view_of_rule_nets(db, &layout);
     let found = shape::check(&Model::new(&default_width), &rules);
     report.violations = deduplicated(
@@ -246,35 +270,45 @@ pub fn check_drc(db: &NetlistDB) -> DrcReport {
     report
 }
 
-/// Checks every shape of `layout` against `rules`.
+/// Checks every shape of `layout` against `rules` in one piece.
 pub fn check(layout: &Layout, rules: &Rules) -> DrcReport {
     let model = Model::new(layout);
-    let found = metal::check(&model, rules)
-        .merge(eol::check(&model, rules))
-        .merge(min_step::check(&model, rules))
-        .merge(cut::check(&model, &rules.cut))
-        .merge(shape::check(&model, rules))
-        .merge(min_cut::check(&model, rules));
+    let found = classify(run_checks(&model, rules), &model);
+    DrcReport::from_markers(found, layout.owners().to_vec())
+}
+
+/// Every rule's markers on `model`.
+fn run_checks(model: &Model<'_>, rules: &Rules) -> Markers {
+    metal::check(model, rules)
+        .merge(eol::check(model, rules))
+        .merge(min_step::check(model, rules))
+        .merge(cut::check(model, &rules.cut))
+        .merge(shape::check(model, rules))
+        .merge(min_cut::check(model, rules))
+}
+
+/// Sorts `found` into the report's classes: advisory kinds apart from the
+/// rest, and fixed-only markers by whether placement takes part in them.
+fn classify(found: Markers, model: &Model<'_>) -> Markers {
     let (advisory, violations): (Vec<Marker>, Vec<Marker>) = deduplicated(found.violations)
         .into_iter()
         .partition(|m| m.violation.is_advisory());
     let seen: HashSet<Marker> = violations.iter().copied().collect();
-    let fixed = deduplicated(
+    let (placement, input) = deduplicated(
         found
             .fixed
             .into_iter()
             .filter(|m| !seen.contains(m))
             .collect(),
-    );
-    let (placement, input) = fixed
-        .into_iter()
-        .partition(|m| placement_takes_part(&model, m));
-    DrcReport {
+    )
+    .into_iter()
+    .partition(|m| placement_takes_part(model, m));
+    Markers {
         violations,
+        fixed: Vec::new(),
         advisory,
         placement,
         input,
-        owners: layout.owners().to_vec(),
     }
 }
 

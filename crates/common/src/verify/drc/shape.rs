@@ -22,6 +22,7 @@ pub(super) fn check(model: &Model<'_>, rules: &Rules) -> Markers {
                 layer: LayerId::new(l),
                 rules: &rules.metal[l],
                 grid: rules.manufacturing_grid,
+                window: model.window,
             };
             let pieces = metal
                 .polygons
@@ -50,6 +51,7 @@ struct PieceCheck<'m> {
     layer: LayerId,
     rules: &'m MetalRules,
     grid: Option<Dbu>,
+    window: Option<Rect<Dbu>>,
 }
 
 impl PieceCheck<'_> {
@@ -87,12 +89,19 @@ impl PieceCheck<'_> {
         }
     }
 
-    /// A piece with any edge of fixed metal is exempt.
+    /// A piece with any edge of fixed metal is exempt, and so is one that
+    /// reaches the edge of the model's window, where it may be cut short.
     fn min_area(&self, piece: &GcPolygon, found: &mut Markers) {
         let Some(min_area) = self.rules.min_area else {
             return;
         };
-        if piece.area < min_area && !piece.has_fixed_edge {
+        let whole = self.window.is_none_or(|w| {
+            w.min.x < piece.bbox.min.x
+                && w.min.y < piece.bbox.min.y
+                && piece.bbox.max.x < w.max.x
+                && piece.bbox.max.y < w.max.y
+        });
+        if whole && piece.area < min_area && !piece.has_fixed_edge {
             found.add(self.marker(Violation::MinArea, 0, piece, piece.bbox), false);
         }
     }

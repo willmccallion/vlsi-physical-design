@@ -1172,3 +1172,57 @@ fn a_loop_with_a_single_long_edge_is_not_checked_for_steps() {
         [Violation::MinStep, Violation::MinStep]
     );
 }
+
+/// A scene with violations of several kinds spread over a few microns, some
+/// straddling the tile edges a 1000-DBU tiling puts at multiples of 1000.
+fn scattered_scene() -> (Layout, Rules) {
+    let mut rules = rules(vec![cut_rule(100)]);
+    rules.metal[0].min_area = Some(DbuArea(20_000));
+    rules.metal[0].end_of_line = vec![EndOfLineSpacing {
+        spacing: Dbu(200),
+        eol_width: Dbu(120),
+        within: Dbu(45),
+        parallel_edge: None,
+    }];
+    rules.metal[0].min_steps = vec![MinStep {
+        length: Dbu(60),
+        max_edges: Some(1),
+    }];
+    let mut f = Fixture::new();
+    let (a, b) = (f.a, f.b);
+    f.route(M1, a, rect(900, 0, 1100, 100));
+    f.route(M1, b, rect(1050, 50, 1300, 150));
+    f.route(M1, a, rect(1900, 500, 2100, 600));
+    f.route(M1, b, rect(1900, 680, 2100, 780));
+    f.route(M1, a, rect(2950, 2950, 3050, 3100));
+    f.route(M1, a, rect(0, 2000, 100, 2990));
+    f.route(M1, b, rect(0, 850, 100, 1850));
+    f.fix(M1, b, rect(3900, 3900, 4100, 4000));
+    f.place(M1, a, rect(4050, 3950, 4300, 4050));
+    f.route(V1, a, rect(950, 1950, 1050, 2050));
+    f.route(V1, b, rect(1100, 1950, 1200, 2050));
+    f.route(M1, a, rect(2000, 0, 2300, 100));
+    f.route(M1, a, rect(2100, 100, 2150, 150));
+    (f.layout, rules)
+}
+
+#[test]
+fn checking_in_tiles_finds_what_checking_whole_finds() {
+    let (layout, rules) = scattered_scene();
+
+    let whole = check(&layout, &rules);
+    let tiled = check_tiled(&layout, &rules, Dbu(1000), Dbu(500));
+
+    assert!(whole.violations.len() >= 5, "{:?}", whole.violations);
+    assert_eq!(tiled, whole);
+}
+
+#[test]
+fn tiles_smaller_than_the_rules_reach_still_find_everything() {
+    let (layout, rules) = scattered_scene();
+
+    assert_eq!(
+        check_tiled(&layout, &rules, Dbu(300), Dbu(500)),
+        check(&layout, &rules)
+    );
+}

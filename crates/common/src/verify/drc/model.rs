@@ -347,6 +347,10 @@ pub(super) struct Model<'a> {
     pub layout: &'a Layout,
     pub metal: Vec<Metal<'a>>,
     pub cut: Vec<Cut<'a>>,
+    /// The area the layout's shapes were taken from, when it holds only the
+    /// shapes meeting a window of the design; a piece reaching the window's
+    /// edge may be cut short there.
+    pub window: Option<Rect<Dbu>>,
 }
 
 impl<'a> Model<'a> {
@@ -359,6 +363,15 @@ impl<'a> Model<'a> {
                 .map(|c| Cut::new(layout.cut(c)))
                 .collect(),
             layout,
+            window: None,
+        }
+    }
+
+    /// The model of a layout holding the shapes that meet `window`.
+    pub fn in_window(layout: &'a Layout, window: Rect<Dbu>) -> Self {
+        Self {
+            window: Some(window),
+            ..Self::new(layout)
         }
     }
 }
