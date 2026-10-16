@@ -207,6 +207,7 @@ impl CutLayer {
     }
 
     /// Every cut once: each large shape is taken from its first bucket.
+    #[cfg(test)]
     fn all(&self) -> impl Iterator<Item = &CutOccupant> + '_ {
         let large = self.large.iter().flat_map(move |(&k, list)| {
             list.iter().filter(move |c| self.large_key(c.rect.min) == k)
@@ -477,24 +478,6 @@ impl Occupancy {
         self.cuts[cut.index()].conflicts(*rect, owner)
     }
 
-    /// Every conflicting pair of cuts, by cut layer.
-    pub fn all_cut_conflicts(&self) -> Vec<(CutLayerId, CutOccupant, CutOccupant)> {
-        let mut out = Vec::new();
-        for (c, layer) in self.cuts.iter().enumerate() {
-            let cut = CutLayerId::new(c);
-            for a in layer.all() {
-                for b in layer.conflicts(a.rect, a.owner) {
-                    let both_fixed = a.owner == Owner::Obstacle && b.owner == Owner::Obstacle;
-                    let key = |c: &CutOccupant| (c.rect.min.x, c.rect.min.y, c.owner);
-                    if !both_fixed && key(a) < key(b) {
-                        out.push((cut, *a, *b));
-                    }
-                }
-            }
-        }
-        out
-    }
-
     /// Records `shapes` as fixed metal and cuts, on the layers `tech` routes.
     pub fn add_fixed(&mut self, tech: &RouteTech, shapes: impl IntoIterator<Item = OwnedShape>) {
         for s in shapes {
@@ -616,6 +599,24 @@ impl Occupancy {
         })
     }
 
+    /// Owners with metal of any origin running along a track inside `rect`
+    /// on `layer`: nets whose wiring or reserved pin access lies there.
+    pub fn owners_in<'a>(
+        &'a self,
+        tech: &'a RouteTech,
+        layer: LayerId,
+        rect: &Rect<Dbu>,
+    ) -> impl Iterator<Item = Owner> + use<'a> {
+        let lt = tech.layer(layer);
+        let ((a0, a1), (lo, hi)) = lt.across_along_rect(rect);
+        let chunk = self.chunk;
+        lt.tracks_within(a0, a1).flat_map(move |track| {
+            self.starting_within(TrackRef { layer, track }, lo - chunk, hi)
+                .filter(move |o| o.centered && lo <= o.hi && o.lo <= hi)
+                .map(|o| o.owner)
+        })
+    }
+
     /// The conflicts `rect` on `layer` would have, as (track, occupant) pairs.
     pub fn rect_conflicts<'a>(
         &'a self,
@@ -632,48 +633,6 @@ impl Occupancy {
             self.conflicts(t, lo, hi, spacing, owner, centered)
                 .map(move |o| (t, o))
         })
-    }
-
-    /// Every conflicting pair of occupants, by track.
-    pub fn all_conflicts(&self, tech: &RouteTech) -> Vec<(TrackRef, Occupant, Occupant)> {
-        let mut out = Vec::new();
-        for (l, tracks) in self.tracks.iter().enumerate() {
-            let layer = LayerId::new(l);
-            if !tech.routable(layer) {
-                continue;
-            }
-            let spacing = tech.layer(layer).spacing;
-            let reach =
-                usize::try_from((self.chunk + spacing).get() / self.chunk.get()).unwrap_or(0) + 1;
-            for (t, track) in tracks.iter().enumerate() {
-                let track_ref = TrackRef {
-                    layer,
-                    track: crate::tech::to_u32(t),
-                };
-                let clash = |a: &Occupant, b: &Occupant| {
-                    a.owner != b.owner
-                        && !(a.owner == Owner::Obstacle && b.owner == Owner::Obstacle)
-                        && (a.centered || b.centered)
-                        && b.lo < a.hi + spacing
-                        && a.lo < b.hi + spacing
-                };
-                for (i, bucket) in track.buckets.iter().enumerate() {
-                    for (k, a) in bucket.iter().enumerate() {
-                        let later = bucket[k + 1..].iter().chain(
-                            track.buckets[i + 1..(i + 1 + reach).min(track.buckets.len())]
-                                .iter()
-                                .flatten(),
-                        );
-                        for b in later {
-                            if clash(a, b) {
-                                out.push((track_ref, *a, *b));
-                            }
-                        }
-                    }
-                }
-            }
-        }
-        out
     }
 }
 

@@ -8,13 +8,14 @@
 //! inside its global route.
 
 mod initial;
+mod judge;
 mod region;
 
 pub use region::{RepairStats, Scope};
 
 use crate::access::{AccessPoint, Node, access_points};
 use crate::global::{GCell, GlobalGrid, GlobalRoutes, RouteTree};
-use crate::occupancy::{Occupancy, Origin, Owner, Slot, TrackRef, too_close};
+use crate::occupancy::{Occupancy, Origin, Owner, Slot, TrackRef};
 pub use crate::search::Costs;
 use crate::search::{GUIDE_SLACK_GCELLS, Guide, History, OwnVias, Search};
 use crate::tech::RouteTech;
@@ -22,12 +23,15 @@ use crate::track::TrackWire;
 use crate::tree::{connection_order, gap, hilbert_order};
 pub use crate::wiring::NetRoute;
 use crate::wiring::{Edge, access_elems, elem_cuts, elem_metal, gap_fills, path_edges};
+use judge::ShapeTiles;
 use pare_common::db::design::NetlistDB;
+use pare_common::db::design::RouteElem;
 use pare_common::db::indices::{CutLayerId, LayerId, NetId, ViaId};
-use pare_common::db::library::{Direction, LayerRef};
+use pare_common::db::library::LayerRef;
 use pare_common::geom::dbu::Dbu;
 use pare_common::geom::point::Point;
 use pare_common::geom::rect::Rect;
+use pare_common::verify::drc::{Layout, Rules};
 use pare_common::verify::shapes::{fixed_shapes, is_signal_net};
 use rayon::prelude::*;
 use rustc_hash::{FxHashMap, FxHashSet};
@@ -50,6 +54,19 @@ pub struct DetailedRouter<'a> {
     grid_origin: Point<Dbu>,
     guides: Vec<Option<NetGuide>>,
     wires: Vec<Vec<TrackWire>>,
+    /// The design rules the judge applies.
+    rules: Rules,
+    /// The fixed shapes of the design, with every net an owner.
+    fixed: Layout,
+    fixed_tiles: ShapeTiles,
+    /// How far beyond a region its judge looks: twice the farthest any rule
+    /// reaches.
+    halo: Dbu,
+    /// The wiring of every net as the design will hold it, kept in step
+    /// with `routes`.
+    elems: Vec<Vec<RouteElem>>,
+    /// Every violation found by the last round's judge.
+    markers: Vec<Marker>,
 }
 
 impl<'a> DetailedRouter<'a> {
@@ -87,6 +104,14 @@ impl<'a> DetailedRouter<'a> {
             "access points reserved in {:.1}s",
             start.elapsed().as_secs_f64()
         );
+        let start = std::time::Instant::now();
+        let rules = Rules::from_design(db);
+        let fixed = Layout::fixed_from_db(db);
+        let fixed_tiles = ShapeTiles::new(&fixed, &db.die_area, gcell);
+        log::debug!(
+            "fixed layout built for the judge in {:.1}s",
+            start.elapsed().as_secs_f64()
+        );
         Self {
             db,
             tech,
@@ -101,6 +126,12 @@ impl<'a> DetailedRouter<'a> {
             grid_origin: db.die_area.min,
             guides: vec![None; db.nets.len()],
             wires: vec![Vec::new(); db.nets.len()],
+            halo: rules.max_reach() * 2,
+            rules,
+            fixed,
+            fixed_tiles,
+            elems: vec![Vec::new(); db.nets.len()],
+            markers: Vec::new(),
         }
     }
 
@@ -231,6 +262,7 @@ impl<'a> DetailedRouter<'a> {
         touched.dedup();
         self.routed[net.index()] = touched;
         self.vias[net.index()] = route.vias(self.tech);
+        self.elems[net.index()] = route.elems(self.tech);
         self.routes[net.index()] = route.clone();
     }
 
@@ -239,99 +271,46 @@ impl<'a> DetailedRouter<'a> {
         &self.routes
     }
 
-    /// Where every current conflict is, with the nets in it.
-    fn markers(&self) -> Vec<Marker> {
-        let net = |o: Owner| match o {
-            Owner::Net(n) => Some(NetId(n)),
-            Owner::Obstacle => None,
-        };
-        let mut out: Vec<Marker> = self
-            .occupancy
-            .all_conflicts(self.tech)
-            .into_iter()
-            .map(|(track, a, b)| {
-                let lt = self.tech.layer(track.layer);
-                let across = lt.tracks[track.track as usize];
-                let along = a.lo.max(b.lo);
-                let at = match lt.direction {
-                    Direction::Horizontal => Point::new(along, across),
-                    Direction::Vertical => Point::new(across, along),
-                };
-                Marker {
-                    at,
-                    nets: [net(a.owner), net(b.owner)],
-                }
-            })
-            .collect();
-        for (_, a, b) in self.occupancy.all_cut_conflicts() {
-            out.push(Marker {
-                at: a.rect.center(),
-                nets: [net(a.owner), net(b.owner)],
-            });
-        }
-        for n in 0..self.vias.len() {
-            for (_, at) in self.crowded_vias(n) {
-                out.push(Marker {
-                    at,
-                    nets: [Some(NetId::new(n)), None],
-                });
-            }
-        }
-        out
+    /// Every violation the last round's judge found, with the nets in it.
+    fn markers(&self) -> &[Marker] {
+        &self.markers
     }
 
-    /// Logs every remaining conflict at debug level.
+    /// Logs every remaining violation at debug level.
     pub fn log_conflicts(&self) {
-        if !log::log_enabled!(log::Level::Debug) {
-            return;
-        }
-        for (track, a, b) in self.occupancy.all_conflicts(self.tech) {
-            let lt = self.tech.layer(track.layer);
+        for m in &self.markers {
             log::debug!(
-                "conflict on layer {} track {} at {}: {:?} {:?}",
-                track.layer.index(),
-                track.track,
-                lt.tracks[track.track as usize],
-                a,
-                b
+                "violation at ({}, {}) on {:?} between {:?} and {:?}",
+                m.at.x.get(),
+                m.at.y.get(),
+                m.layer,
+                m.nets[0],
+                m.nets[1]
             );
         }
-        for (cut, a, b) in self.occupancy.all_cut_conflicts() {
-            log::debug!("cut conflict on cut {}: {a:?} {b:?}", cut.index());
-        }
-        for n in 0..self.vias.len() {
-            for (_, at) in self.crowded_vias(n) {
-                log::debug!("crowded cut of net {n} at {at:?}");
-            }
-        }
     }
 
-    /// Records every current conflict in the history and returns the nets
-    /// involved.
+    /// Judges the whole design, records every violation in the history and
+    /// returns the nets involved.
     pub fn conflicted_nets(&mut self, history_step: f64) -> Vec<NetId> {
+        let (markers, counts) = self.exact_markers();
+        for (kind, count) in &counts {
+            log::debug!("round markers: {} {}", kind.name(), count);
+        }
         let mut nets = FxHashSet::default();
-        for (track, a, b) in self.occupancy.all_conflicts(self.tech) {
-            self.history.bump(track, a.lo.max(b.lo), history_step);
-            for o in [a.owner, b.owner] {
-                if let Owner::Net(n) = o {
-                    let _ = nets.insert(NetId(n));
+        for m in &markers {
+            match m.layer {
+                LayerRef::Routing(layer) => {
+                    if let Some(track) = self.track_at(layer, m.at) {
+                        let along = self.tech.layer(layer).across_along(m.at).1;
+                        self.history.bump(track, along, history_step);
+                    }
                 }
+                LayerRef::Cut(cut) => self.bump_cut(cut, m.at, history_step),
             }
+            nets.extend(m.nets.iter().flatten().copied());
         }
-        for (cut, a, b) in self.occupancy.all_cut_conflicts() {
-            self.bump_cut(cut, a.rect.center(), history_step);
-            for o in [a.owner, b.owner] {
-                if let Owner::Net(n) = o {
-                    let _ = nets.insert(NetId(n));
-                }
-            }
-        }
-        for n in 0..self.vias.len() {
-            for (via, at) in self.crowded_vias(n) {
-                self.bump_cut(self.db.library.via(via).cut, at, history_step);
-                let _ = nets.insert(NetId::new(n));
-            }
-        }
+        self.markers = markers;
         let mut out: Vec<NetId> = nets.into_iter().collect();
         out.sort_unstable();
         out
@@ -345,49 +324,6 @@ impl<'a> DetailedRouter<'a> {
                 self.history.bump(track, along, step);
             }
         }
-    }
-
-    /// Vias of net `n` whose cuts or metal come closer to those of another
-    /// of its vias than the layer's spacing without touching them. Metal
-    /// counts even where wiring fills the gap, as `OpenROAD` checks it.
-    fn crowded_vias(&self, n: usize) -> Vec<(ViaId, Point<Dbu>)> {
-        let lib = &self.db.library;
-        let vias = &self.vias[n];
-        let mut shapes: Vec<(LayerRef, Rect<Dbu>, usize)> = Vec::new();
-        for (k, &(via, at)) in vias.iter().enumerate() {
-            for s in &lib.via(via).shapes {
-                shapes.push((s.layer, s.rect.translate(at), k));
-            }
-        }
-        shapes.sort_by_key(|&(_, r, _)| r.min.x);
-        let spacing = |layer: LayerRef| match layer {
-            LayerRef::Routing(l) => lib.layer(l).min_spacing,
-            LayerRef::Cut(c) => lib.cut_layers[c.index()].spacing.unwrap_or_default(),
-        };
-        let widest = shapes
-            .iter()
-            .map(|&(l, _, _)| spacing(l))
-            .max()
-            .unwrap_or_default();
-        let mut crowded = vec![false; vias.len()];
-        for (i, &(la, ra, ka)) in shapes.iter().enumerate() {
-            for &(lb, rb, kb) in &shapes[i + 1..] {
-                if rb.min.x > ra.max.x + widest {
-                    break;
-                }
-                if la != lb || ka == kb {
-                    continue;
-                }
-                if too_close(self.db, la, &ra, &rb) {
-                    crowded[ka] = true;
-                    crowded[kb] = true;
-                }
-            }
-        }
-        vias.iter()
-            .zip(crowded)
-            .filter_map(|(&v, c)| c.then_some(v))
-            .collect()
     }
 
     /// The track of `layer` running through `p`, if one does.
@@ -966,10 +902,11 @@ fn closest_points(a: &Rect<Dbu>, b: &Rect<Dbu>) -> (Point<Dbu>, Point<Dbu>) {
     (Point::new(ax, ay), Point::new(bx, by))
 }
 
-/// A conflict's location and the nets in it.
+/// A violation's location, layer and the nets in it.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 struct Marker {
     at: Point<Dbu>,
+    layer: LayerRef,
     nets: [Option<NetId>; 2],
 }
 

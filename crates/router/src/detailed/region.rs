@@ -11,14 +11,17 @@
 //! falls inside another's.
 
 use super::DetailedRouter;
+use super::judge::Judgment;
 use crate::access::Node;
 use crate::occupancy::{LocalOccupancy, Owner};
 use crate::search::{Costs, Guide, MAX_PENALTY, OwnVias, Search, WindowCache};
 use crate::wiring::{DisjointSets, Edge, NetRoute, path_edges};
 use pare_common::db::indices::{CutLayerId, LayerId, NetId};
+use pare_common::db::library::LayerRef;
 use pare_common::geom::dbu::Dbu;
 use pare_common::geom::point::Point;
 use pare_common::geom::rect::Rect;
+use pare_common::verify::drc::Marker as DrcMarker;
 use rayon::prelude::*;
 use rustc_hash::{FxHashMap, FxHashSet};
 use std::collections::BTreeMap;
@@ -196,7 +199,21 @@ impl DetailedRouter<'_> {
                     .zip(&old)
                     .map(|(r, &o)| r.as_deref().unwrap_or(o))
                     .collect();
-                if self.clashing(area, pieces, &new) > self.clashing(area, pieces, &old) {
+                let violations = |wiring: &[&[Edge]]| {
+                    self.judge(area, &paired(pieces, wiring))
+                        .findings
+                        .violations
+                        .len()
+                };
+                let (after, before) = (violations(&new), violations(&old));
+                if after > before {
+                    log::trace!(
+                        "region ({}, {})-({}, {}): new wiring rejected, {after} violations against {before}",
+                        area.min.x.get(),
+                        area.min.y.get(),
+                        area.max.x.get(),
+                        area.max.y.get()
+                    );
                     return vec![None; pieces.len()];
                 }
                 results
@@ -294,7 +311,7 @@ impl DetailedRouter<'_> {
         order.sort_by_cached_key(|&i| (self.extent(&pieces[i]), pieces[i].net));
         let mut todo = order.clone();
         let mut penalty = costs.penalty;
-        for _ in 0..LOCAL_ROUNDS {
+        for round in 0..LOCAL_ROUNDS {
             for &i in &todo {
                 let owner = Owner::Net(pieces[i].net.0);
                 overlay.remove_owner(owner);
@@ -330,22 +347,71 @@ impl DetailedRouter<'_> {
                     }
                 }
             }
+            let wired: Vec<(NetId, &[Edge])> = pieces
+                .iter()
+                .zip(&results)
+                .filter_map(|(p, r)| r.as_deref().map(|edges| (p.net, edges)))
+                .collect();
+            let judgment = self.judge(area, &wired);
+            self.price_markers(&judgment.findings.violations, &mut overlay);
             todo = order
                 .iter()
                 .copied()
-                .filter(|&i| {
-                    results[i].as_ref().is_some_and(|edges| {
-                        self.clashes(pieces[i].net, edges, &overlay)
-                            || self.crowds_own_vias(pieces[i].net, area, edges)
-                    })
-                })
+                .filter(|&i| results[i].is_some() && judgment.nets.contains(&pieces[i].net))
                 .collect();
             if todo.is_empty() {
                 break;
             }
+            self.log_judgment(area, round, &judgment);
             penalty = (penalty * 2.0).min(MAX_PENALTY);
         }
         results
+    }
+
+    /// Logs what the judge still holds against a region's pieces.
+    fn log_judgment(&self, area: &Rect<Dbu>, round: usize, judgment: &Judgment) {
+        if !log::log_enabled!(log::Level::Trace) {
+            return;
+        }
+        let name = |o: pare_common::verify::drc::OwnerIndex| match self.fixed.owners()[o.index()] {
+            pare_common::verify::drc::Owner::Net(n) => self.db.nets[n.index()].name.clone(),
+            other => format!("{other:?}"),
+        };
+        log::trace!(
+            "region ({}, {})-({}, {}) local round {round} still violates:",
+            area.min.x.get(),
+            area.min.y.get(),
+            area.max.x.get(),
+            area.max.y.get()
+        );
+        for m in &judgment.findings.violations {
+            log::trace!(
+                "    {} on {:?} at ({}, {})-({}, {}) between {} and {}",
+                m.violation.name(),
+                m.layer,
+                m.bbox.min.x.get(),
+                m.bbox.min.y.get(),
+                m.bbox.max.x.get(),
+                m.bbox.max.y.get(),
+                name(m.owners.0),
+                name(m.owners.1)
+            );
+        }
+    }
+
+    /// Makes the search pay the conflict penalty wherever the judge found a
+    /// violation, so that the next route of a piece avoids the spot, as
+    /// `TritonRoute` adds marker costs.
+    fn price_markers(&self, markers: &[DrcMarker], overlay: &mut LocalOccupancy) {
+        for m in markers {
+            match m.layer {
+                LayerRef::Routing(layer) if self.tech.routable(layer) => {
+                    overlay.add_rect(self.tech, layer, &m.bbox, Owner::Obstacle);
+                }
+                LayerRef::Routing(_) => {}
+                LayerRef::Cut(cut) => overlay.add_cut(self.tech, cut, &m.bbox, Owner::Obstacle),
+            }
+        }
     }
 
     /// Half-perimeter of the box around a piece's nodes. Pieces are routed
@@ -363,28 +429,6 @@ impl DetailedRouter<'_> {
             )
         });
         (max.x - min.x) + (max.y - min.y)
-    }
-
-    /// How many of `pieces` clash with anything when wired as `wiring`.
-    fn clashing(&self, area: &Rect<Dbu>, pieces: &[Piece], wiring: &[&[Edge]]) -> usize {
-        let mut overlay = LocalOccupancy::default();
-        for (piece, edges) in pieces.iter().zip(wiring) {
-            let owner = Owner::Net(piece.net.0);
-            for (layer, rect) in self.edge_metal(edges) {
-                overlay.add_rect(self.tech, layer, &rect, owner);
-            }
-            for (cut, rect) in self.edge_cuts(edges) {
-                overlay.add_cut(self.tech, cut, &rect, owner);
-            }
-        }
-        pieces
-            .iter()
-            .zip(wiring)
-            .filter(|(piece, edges)| {
-                self.clashes(piece.net, edges, &overlay)
-                    || self.crowds_own_vias(piece.net, area, edges)
-            })
-            .count()
     }
 
     /// Joins `groups` into one tree inside `window`: each search runs from
@@ -440,21 +484,6 @@ impl DetailedRouter<'_> {
         own
     }
 
-    /// Whether the vias of `edges` crowd each other or the vias `net` has
-    /// near `area`.
-    fn crowds_own_vias(&self, net: NetId, area: &Rect<Dbu>, edges: &[Edge]) -> bool {
-        let mut own = self.vias_near(net, area);
-        let route = NetRoute {
-            edges: edges.to_vec(),
-            ..NetRoute::default()
-        };
-        route.vias(self.tech).into_iter().any(|(via, at)| {
-            let crowded = own.crowded(self.db, via, at) > 0;
-            own.add(via, at);
-            crowded
-        })
-    }
-
     /// Nets with wiring within `reach` of `at` on any routable layer.
     fn nets_near(&self, at: Point<Dbu>, reach: Dbu) -> Vec<NetId> {
         let probe = Rect::new(at, at).expand(reach);
@@ -471,29 +500,6 @@ impl DetailedRouter<'_> {
         nets.sort_unstable();
         nets.dedup();
         nets
-    }
-
-    /// Whether the metal or cuts of `edges` of `net` conflict with anything.
-    fn clashes(&self, net: NetId, edges: &[Edge], overlay: &LocalOccupancy) -> bool {
-        let owner = Owner::Net(net.0);
-        let metal = self.edge_metal(edges).iter().any(|(layer, rect)| {
-            self.occupancy
-                .rect_conflicts(self.tech, *layer, rect, owner)
-                .next()
-                .is_some()
-                || overlay
-                    .rect_conflicts(self.tech, *layer, rect, owner)
-                    .next()
-                    .is_some()
-        });
-        metal
-            || self.edge_cuts(edges).iter().any(|(cut, rect)| {
-                self.occupancy
-                    .cut_conflicts(*cut, rect, owner)
-                    .next()
-                    .is_some()
-                    || overlay.cut_conflicts(*cut, rect, owner).next().is_some()
-            })
     }
 
     /// The cuts of some edges.
@@ -517,6 +523,15 @@ impl DetailedRouter<'_> {
             .filter(|(layer, _)| self.tech.routable(*layer))
             .collect()
     }
+}
+
+/// Each piece's net with its wiring in `wiring`, in order.
+fn paired<'e>(pieces: &[Piece], wiring: &[&'e [Edge]]) -> Vec<(NetId, &'e [Edge])> {
+    pieces
+        .iter()
+        .zip(wiring)
+        .map(|(p, &w)| (p.net, w))
+        .collect()
 }
 
 /// Index of the group in `groups` closest to any node of `tree`.
