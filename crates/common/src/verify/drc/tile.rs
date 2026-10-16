@@ -11,7 +11,7 @@
 use super::layout::{Layout, LayoutShape};
 use super::model::Model;
 use super::rules::Rules;
-use super::{DrcReport, Marker, Markers, classify, run_checks};
+use super::{DrcReport, Findings, Marker, classify, run_checks};
 use crate::db::indices::{CutLayerId, LayerId};
 use crate::db::library::LayerRef;
 use crate::geom::dbu::Dbu;
@@ -29,18 +29,34 @@ pub fn check_tiled(layout: &Layout, rules: &Rules, core: Dbu, halo: Dbu) -> DrcR
         };
     };
     let tiles = grid.bucket(layout, halo);
-    let found: Vec<Markers> = tiles
+    let found: Vec<Findings> = tiles
         .into_par_iter()
-        .map(|tile| {
-            let model = Model::in_window(&tile.layout, tile.window);
-            let mut found = run_checks(&model, rules);
-            found.violations.retain(|m| tile.owns(m));
-            found.fixed.retain(|m| tile.owns(m));
-            classify(found, &model)
-        })
+        .map(|tile| check_window(&tile.layout, rules, tile.core, tile.window))
         .collect();
-    let merged = found.into_iter().fold(Markers::default(), Markers::merge);
-    DrcReport::from_markers(merged, layout.owners().to_vec())
+    let merged = found.into_iter().fold(Findings::default(), Findings::merge);
+    DrcReport::from_findings(merged, layout.owners().to_vec())
+}
+
+/// Checks the shapes of `layout`, which are those meeting `window`, and
+/// reports the markers whose lower-left corner lies in `core`.
+pub fn check_window(
+    layout: &Layout,
+    rules: &Rules,
+    core: Rect<Dbu>,
+    window: Rect<Dbu>,
+) -> Findings {
+    let model = Model::in_window(layout, window);
+    let mut found = run_checks(&model, rules);
+    found.violations.retain(|m| owns(&core, m));
+    found.fixed.retain(|m| owns(&core, m));
+    classify(found, &model)
+}
+
+/// Whether the marker's lower-left corner falls in `core`, counting the
+/// core's lower and left edges as its own.
+fn owns(core: &Rect<Dbu>, m: &Marker) -> bool {
+    let p = m.bbox.min;
+    core.min.x <= p.x && p.x < core.max.x && core.min.y <= p.y && p.y < core.max.y
 }
 
 /// The tiles as a grid over the layout's shapes.
@@ -131,18 +147,6 @@ struct Tile {
     core: Rect<Dbu>,
     window: Rect<Dbu>,
     layout: Layout,
-}
-
-impl Tile {
-    /// Whether the marker's lower-left corner falls in the tile's core,
-    /// counting the core's lower and left edges as its own.
-    fn owns(&self, m: &Marker) -> bool {
-        let p = m.bbox.min;
-        self.core.min.x <= p.x
-            && p.x < self.core.max.x
-            && self.core.min.y <= p.y
-            && p.y < self.core.max.y
-    }
 }
 
 fn all_shapes(layout: &Layout) -> impl Iterator<Item = &LayoutShape> {

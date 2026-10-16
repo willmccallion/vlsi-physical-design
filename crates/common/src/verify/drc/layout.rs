@@ -5,13 +5,14 @@
 //! obstructions; a blockage owns itself; a pin on no net is its own owner,
 //! except supply pins, which share one owner per supply.
 
-use crate::db::design::{NetlistDB, PinOwner, PlacementStatus};
+use crate::db::design::{NetlistDB, PinOwner, PlacementStatus, RouteElem};
 use crate::db::indices::{BlockageId, CellId, MacroPinId, NetId, NonDefaultRuleId, SpecialNetId};
 use crate::db::library::{LayerRef, Shape, SignalUse};
 use crate::geom::dbu::Dbu;
 use crate::geom::rect::Rect;
 use crate::verify::shapes::{default_width_shapes, route_elem_shapes, special_net_metal};
 use std::collections::HashMap;
+use std::sync::Arc;
 
 /// What a group of shapes belongs to. Shapes of one owner never short or
 /// space against each other as different nets do.
@@ -119,13 +120,20 @@ impl LayoutShape {
     }
 }
 
-/// Every shape on every layer, with its owner.
+/// The owners of a layout's shapes, shared by every layout of one design so
+/// that a window of it names owners the way the whole does.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
-pub struct Layout {
-    owners: Vec<Owner>,
+struct Owners {
+    by_index: Vec<Owner>,
     supply: Vec<bool>,
     rule_of: Vec<Option<NonDefaultRuleId>>,
     index_of: HashMap<Owner, OwnerIndex>,
+}
+
+/// Every shape on every layer, with its owner.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct Layout {
+    owners: Arc<Owners>,
     metal: Vec<Vec<LayoutShape>>,
     cut: Vec<Vec<LayoutShape>>,
 }
@@ -140,14 +148,11 @@ impl Layout {
         }
     }
 
-    /// An empty layout with the owners of `other`, so that markers found in
-    /// either name the same owners.
+    /// An empty layout sharing the owners of `other`, so that markers found
+    /// in either name the same owners.
     pub fn with_owners_of(other: &Self) -> Self {
         Self {
-            owners: other.owners.clone(),
-            supply: other.supply.clone(),
-            rule_of: other.rule_of.clone(),
-            index_of: other.index_of.clone(),
+            owners: Arc::clone(&other.owners),
             ..Self::new(other.metal.len(), other.cut.len())
         }
     }
@@ -155,27 +160,36 @@ impl Layout {
     /// The index of `owner`, adding it if new; `supply` says whether it
     /// carries power or ground.
     pub fn owner(&mut self, owner: Owner, supply: bool) -> OwnerIndex {
-        if let Some(&index) = self.index_of.get(&owner) {
+        if let Some(index) = self.owner_index(owner) {
             return index;
         }
-        let index = OwnerIndex(u32::try_from(self.owners.len()).unwrap_or(u32::MAX));
-        self.owners.push(owner);
-        self.supply.push(supply);
-        self.rule_of.push(None);
-        let _ = self.index_of.insert(owner, index);
+        let owners = Arc::make_mut(&mut self.owners);
+        let index = OwnerIndex(u32::try_from(owners.by_index.len()).unwrap_or(u32::MAX));
+        owners.by_index.push(owner);
+        owners.supply.push(supply);
+        owners.rule_of.push(None);
+        let _ = owners.index_of.insert(owner, index);
         index
+    }
+
+    /// The index of `owner`, if the layout knows it.
+    pub fn owner_index(&self, owner: Owner) -> Option<OwnerIndex> {
+        self.owners.index_of.get(&owner).copied()
     }
 
     /// Puts `owner`'s shapes under nondefault rule `rule`.
     pub fn set_non_default_rule(&mut self, owner: OwnerIndex, rule: NonDefaultRuleId) {
-        if let Some(slot) = self.rule_of.get_mut(owner.index()) {
+        if let Some(slot) = Arc::make_mut(&mut self.owners)
+            .rule_of
+            .get_mut(owner.index())
+        {
             *slot = Some(rule);
         }
     }
 
     /// The nondefault rule `owner`'s shapes follow, if any.
     pub fn non_default_rule(&self, owner: OwnerIndex) -> Option<NonDefaultRuleId> {
-        self.rule_of.get(owner.index()).copied().flatten()
+        self.owners.rule_of.get(owner.index()).copied().flatten()
     }
 
     /// Adds a rectangle; one on a layer the layout does not have, or
@@ -207,12 +221,16 @@ impl Layout {
 
     /// Every owner, by index.
     pub fn owners(&self) -> &[Owner] {
-        &self.owners
+        &self.owners.by_index
     }
 
     /// Whether `owner` carries power or ground.
     pub fn is_supply(&self, owner: OwnerIndex) -> bool {
-        self.supply.get(owner.index()).copied().unwrap_or(false)
+        self.owners
+            .supply
+            .get(owner.index())
+            .copied()
+            .unwrap_or(false)
     }
 
     /// The shapes on a routing layer.
@@ -239,6 +257,18 @@ impl Layout {
     /// pins, special wiring and routing blockages as fixed shapes, and the
     /// wiring of regular nets as routed shapes.
     pub fn from_db(db: &NetlistDB) -> Self {
+        let mut layout = Self::fixed_from_db(db);
+        for (i, net) in db.nets.iter().enumerate() {
+            layout.add_wiring(db, NetId::new(i), &net.routing, None);
+        }
+        layout
+    }
+
+    /// The fixed shapes of `db`: placed cells' pins and obstructions, placed
+    /// I/O pins, special wiring and routing blockages, with every net
+    /// already an owner so that wiring added later, to this layout or to a
+    /// window sharing its owners, names the same owners.
+    pub fn fixed_from_db(db: &NetlistDB) -> Self {
         let mut layout = Self::new(db.library.routing_layers.len(), db.library.cut_layers.len());
         let special = SpecialOwners::new(db);
         for (i, cell) in db.cells.iter().enumerate() {
@@ -275,20 +305,34 @@ impl Layout {
         }
         for (i, net) in db.nets.iter().enumerate() {
             let id = NetId::new(i);
-            if net.routing.is_empty() && net.non_default_rule.is_none() {
-                continue;
-            }
             let owner = layout.owner(Owner::Net(id), net_is_supply(db, &special, id));
             if let Some(rule) = net.non_default_rule {
                 layout.set_non_default_rule(owner, rule);
             }
-            for elem in &net.routing {
-                for s in route_elem_shapes(db, id, elem) {
-                    layout.add(s.layer, owner, s.rect, Origin::Routing);
+        }
+        layout
+    }
+
+    /// Adds the shapes of `net`'s wiring `elems` as routed metal, only those
+    /// meeting `within` when it is given.
+    pub fn add_wiring(
+        &mut self,
+        db: &NetlistDB,
+        net: NetId,
+        elems: &[RouteElem],
+        within: Option<&Rect<Dbu>>,
+    ) {
+        if elems.is_empty() {
+            return;
+        }
+        let owner = self.owner(Owner::Net(net), db.nets[net.index()].signal_use.is_supply());
+        for elem in elems {
+            for s in route_elem_shapes(db, net, elem) {
+                if within.is_none_or(|w| w.touches(&s.rect)) {
+                    self.add(s.layer, owner, s.rect, Origin::Routing);
                 }
             }
         }
-        layout
     }
 
     /// The nets of `db` under a nondefault rule as `OpenROAD` reads them:
@@ -301,7 +345,7 @@ impl Layout {
                 continue;
             }
             let id = NetId::new(i);
-            let Some(&owner) = layout.index_of.get(&Owner::Net(id)) else {
+            let Some(owner) = layout.owner_index(Owner::Net(id)) else {
                 continue;
             };
             for &pin in &net.pins {

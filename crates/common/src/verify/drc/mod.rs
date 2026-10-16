@@ -24,7 +24,7 @@ mod tile;
 
 pub use layout::{Layout, LayoutShape, Origin, Owner, OwnerIndex};
 pub use rules::{CutRules, MetalRules, NonDefaultRules, Rules};
-pub use tile::check_tiled;
+pub use tile::{check_tiled, check_window};
 
 /// How many halos wide a tile of [`check_drc`] is.
 const TILE_HALOS: i64 = 32;
@@ -151,15 +151,12 @@ impl Marker {
     }
 }
 
-/// Markers being collected. The checks fill `violations` and `fixed`, those
-/// among fixed metal only; [`classify`] sorts them into the other classes.
+/// Markers being collected: those routing can fix, and those among fixed
+/// metal only.
 #[derive(Debug, Default)]
 struct Markers {
     violations: Vec<Marker>,
     fixed: Vec<Marker>,
-    advisory: Vec<Marker>,
-    placement: Vec<Marker>,
-    input: Vec<Marker>,
 }
 
 impl Markers {
@@ -174,6 +171,29 @@ impl Markers {
     fn merge(mut self, other: Self) -> Self {
         self.violations.extend(other.violations);
         self.fixed.extend(other.fixed);
+        self
+    }
+}
+
+/// Markers sorted into the classes a report has, without the owner table.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct Findings {
+    /// Violations involving routed metal, which routing can fix.
+    pub violations: Vec<Marker>,
+    /// Violations of advisory rules involving routed metal.
+    pub advisory: Vec<Marker>,
+    /// Violations among fixed metal only that a placed cell or I/O pin
+    /// takes part in.
+    pub placement: Vec<Marker>,
+    /// Violations among fixed metal only that the input alone makes.
+    pub input: Vec<Marker>,
+}
+
+impl Findings {
+    /// Both sets of findings together.
+    #[must_use]
+    pub fn merge(mut self, other: Self) -> Self {
+        self.violations.extend(other.violations);
         self.advisory.extend(other.advisory);
         self.placement.extend(other.placement);
         self.input.extend(other.input);
@@ -201,9 +221,8 @@ pub struct DrcReport {
 }
 
 impl DrcReport {
-    /// The report of classified markers, each class sorted and without
-    /// repeats.
-    fn from_markers(found: Markers, owners: Vec<Owner>) -> Self {
+    /// The report of `found`, each class sorted and without repeats.
+    fn from_findings(found: Findings, owners: Vec<Owner>) -> Self {
         Self {
             violations: deduplicated(found.violations),
             advisory: deduplicated(found.advisory),
@@ -274,7 +293,7 @@ pub fn check_drc(db: &NetlistDB) -> DrcReport {
 pub fn check(layout: &Layout, rules: &Rules) -> DrcReport {
     let model = Model::new(layout);
     let found = classify(run_checks(&model, rules), &model);
-    DrcReport::from_markers(found, layout.owners().to_vec())
+    DrcReport::from_findings(found, layout.owners().to_vec())
 }
 
 /// Every rule's markers on `model`.
@@ -289,7 +308,7 @@ fn run_checks(model: &Model<'_>, rules: &Rules) -> Markers {
 
 /// Sorts `found` into the report's classes: advisory kinds apart from the
 /// rest, and fixed-only markers by whether placement takes part in them.
-fn classify(found: Markers, model: &Model<'_>) -> Markers {
+fn classify(found: Markers, model: &Model<'_>) -> Findings {
     let (advisory, violations): (Vec<Marker>, Vec<Marker>) = deduplicated(found.violations)
         .into_iter()
         .partition(|m| m.violation.is_advisory());
@@ -303,9 +322,8 @@ fn classify(found: Markers, model: &Model<'_>) -> Markers {
     )
     .into_iter()
     .partition(|m| placement_takes_part(model, m));
-    Markers {
+    Findings {
         violations,
-        fixed: Vec::new(),
         advisory,
         placement,
         input,
