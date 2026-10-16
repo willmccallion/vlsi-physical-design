@@ -90,7 +90,7 @@ pub fn net_components(db: &NetlistDB, net: NetId) -> usize {
     let mut shapes: Vec<(Shape, Option<usize>)> = n
         .routing
         .iter()
-        .flat_map(|e| route_elem_shapes(db, e))
+        .flat_map(|e| route_elem_shapes(db, net, e))
         .map(|s| (s, None))
         .collect();
     let mut shapeless_pins = 0;

@@ -2,15 +2,20 @@
 
 #![allow(clippy::unwrap_used)]
 
-use pare_common::db::design::{NetlistDB, PlacementStatus, Region, RegionKind, RouteElem};
-use pare_common::db::indices::{CellId, CutLayerId, LayerId, NetId, RegionId};
+use pare_common::db::design::{
+    NetlistDB, NonDefaultLayer, NonDefaultRule, PlacementStatus, Region, RegionKind, RouteElem,
+};
+use pare_common::db::indices::{CellId, CutLayerId, LayerId, NetId, NonDefaultRuleId, RegionId};
+use pare_common::db::library::LayerRef;
 use pare_common::db::parser::{def, lef};
-use pare_common::geom::dbu::{Dbu, DbuPerMicron};
+use pare_common::geom::dbu::{Dbu, DbuArea, DbuPerMicron};
 use pare_common::geom::orient::Orientation;
 use pare_common::geom::point::Point;
 use pare_common::geom::rect::Rect;
+use pare_common::verify::drc::{Violation, check_drc};
 use pare_common::verify::placement::{PlacementViolation, placement_violations};
 use pare_common::verify::routing::check_routing;
+use pare_common::verify::shapes::route_elem_shapes;
 use std::path::{Path, PathBuf};
 
 const M1: LayerId = LayerId(0);
@@ -139,6 +144,73 @@ fn wiring_stats_count_wrong_way_wires_and_vias() {
     assert_eq!(stats.vias, 2);
     assert_eq!(stats.wrong_way, 1);
     assert_eq!(stats.wirelength[M2.index()], Dbu(1000));
+}
+
+/// Puts `net` under a nondefault rule of double width and hard double
+/// spacing on M2, with the given wire extension.
+fn double_width_rule(db: &mut NetlistDB, net: NetId, wire_extension: Option<Dbu>) {
+    db.non_default_rules.push(NonDefaultRule {
+        name: "DW".into(),
+        hard_spacing: true,
+        layers: vec![NonDefaultLayer {
+            layer: M2,
+            width: Dbu(200),
+            spacing: Some(Dbu(200)),
+            wire_extension,
+        }],
+        vias: Vec::new(),
+        via_rules: Vec::new(),
+        min_cuts: Vec::new(),
+    });
+    db.nets[net.index()].non_default_rule = Some(NonDefaultRuleId::new(0));
+}
+
+#[test]
+fn wires_of_a_net_under_a_nondefault_rule_take_its_width() {
+    let mut db = empty_design();
+    let net = db.net_or_insert("n");
+    double_width_rule(&mut db, net, None);
+
+    let shapes = route_elem_shapes(&db, net, &wire(M2, pt(1000, 0), pt(1000, 1000)));
+
+    assert_eq!(shapes.len(), 1);
+    assert_eq!(shapes[0].layer, LayerRef::Routing(M2));
+    assert_eq!(shapes[0].rect, Rect::new(pt(900, -100), pt(1100, 1100)));
+}
+
+#[test]
+fn a_nondefault_wire_extension_replaces_the_half_width_at_the_ends() {
+    let mut db = empty_design();
+    let net = db.net_or_insert("n");
+    double_width_rule(&mut db, net, Some(Dbu(20)));
+
+    let shapes = route_elem_shapes(&db, net, &wire(M2, pt(0, 500), pt(1000, 500)));
+
+    assert_eq!(shapes[0].rect, Rect::new(pt(-20, 400), pt(1020, 600)));
+}
+
+#[test]
+fn nondefault_wires_must_meet_the_minimum_area_at_the_default_width_too() {
+    let mut db = empty_design();
+    db.library.routing_layers[M2.index()].rules.min_area = Some(DbuArea(60_000));
+    let net = db.net_or_insert("n");
+    double_width_rule(&mut db, net, None);
+    db.nets[net.index()].routing = vec![wire(M2, pt(1000, 1000), pt(1000, 1300))];
+
+    let report = check_drc(&db);
+
+    assert_eq!(
+        report
+            .violations
+            .iter()
+            .map(|m| m.violation)
+            .collect::<Vec<_>>(),
+        [Violation::MinArea]
+    );
+    assert_eq!(
+        report.violations[0].bbox,
+        Rect::new(pt(950, 950), pt(1050, 1350))
+    );
 }
 
 fn tiny_placed() -> NetlistDB {

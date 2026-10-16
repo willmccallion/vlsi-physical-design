@@ -1,6 +1,8 @@
 //! The rules the checker applies, read from the library as `OpenROAD`'s
 //! detailed router reads them.
 
+use crate::db::design::{NetlistDB, NonDefaultRule};
+use crate::db::indices::{LayerId, NonDefaultRuleId};
 use crate::db::library::Library;
 use crate::db::rules::{
     CutSpacing, Lef58CutSpacing, MinimumCut, ParallelRunLengthTable, SpacingTable,
@@ -57,6 +59,28 @@ impl CutRules {
     }
 }
 
+/// What a nondefault rule asks of its nets beyond the layer rules.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct NonDefaultRules {
+    /// The hard spacing the rule's wires need on each routing layer, where
+    /// the rule makes its spacing hard.
+    pub hard_spacing: Vec<Option<Dbu>>,
+}
+
+impl NonDefaultRules {
+    fn from_rule(rule: &NonDefaultRule, layers: usize) -> Self {
+        let mut hard_spacing = vec![None; layers];
+        if rule.hard_spacing {
+            for l in &rule.layers {
+                if let Some(slot) = hard_spacing.get_mut(l.layer.index()) {
+                    *slot = l.spacing;
+                }
+            }
+        }
+        Self { hard_spacing }
+    }
+}
+
 /// The rules of every layer.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Rules {
@@ -69,10 +93,42 @@ pub struct Rules {
     pub min_spacing_for_obstructions: bool,
     /// The grid every routed shape must lie on, if the library sets one.
     pub manufacturing_grid: Option<Dbu>,
+    /// The design's nondefault rules, by their index.
+    pub non_default: Vec<NonDefaultRules>,
 }
 
 impl Rules {
-    /// The rules of `library`.
+    /// The rules of `db`'s library and its nondefault rules.
+    pub fn from_design(db: &NetlistDB) -> Self {
+        let layers = db.library.routing_layers.len();
+        Self {
+            non_default: db
+                .non_default_rules
+                .iter()
+                .map(|r| NonDefaultRules::from_rule(r, layers))
+                .collect(),
+            ..Self::from_library(&db.library)
+        }
+    }
+
+    /// The hard spacing nondefault rule `rule` asks of its wires on `layer`,
+    /// or zero.
+    pub fn hard_spacing(&self, rule: Option<NonDefaultRuleId>, layer: LayerId) -> Dbu {
+        rule.and_then(|r| self.non_default.get(r.index()))
+            .and_then(|n| n.hard_spacing.get(layer.index()).copied().flatten())
+            .unwrap_or(Dbu::ZERO)
+    }
+
+    /// The most hard spacing any nondefault rule asks of its wires on `layer`.
+    pub fn max_hard_spacing(&self, layer: LayerId) -> Dbu {
+        self.non_default
+            .iter()
+            .filter_map(|n| n.hard_spacing.get(layer.index()).copied().flatten())
+            .max()
+            .unwrap_or(Dbu::ZERO)
+    }
+
+    /// The rules of `library`, with no nondefault rules.
     pub fn from_library(library: &Library) -> Self {
         let metal = library
             .routing_layers
@@ -112,6 +168,7 @@ impl Rules {
             cut,
             min_spacing_for_obstructions: library.rules.min_spacing_for_obstructions,
             manufacturing_grid: library.rules.manufacturing_grid,
+            non_default: Vec::new(),
         }
     }
 }

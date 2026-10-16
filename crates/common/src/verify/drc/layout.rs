@@ -6,11 +6,11 @@
 //! except supply pins, which share one owner per supply.
 
 use crate::db::design::{NetlistDB, PinOwner, PlacementStatus};
-use crate::db::indices::{BlockageId, CellId, MacroPinId, NetId, SpecialNetId};
+use crate::db::indices::{BlockageId, CellId, MacroPinId, NetId, NonDefaultRuleId, SpecialNetId};
 use crate::db::library::{LayerRef, Shape, SignalUse};
 use crate::geom::dbu::Dbu;
 use crate::geom::rect::Rect;
-use crate::verify::shapes::{route_elem_shapes, special_net_metal};
+use crate::verify::shapes::{default_width_shapes, route_elem_shapes, special_net_metal};
 use std::collections::HashMap;
 
 /// What a group of shapes belongs to. Shapes of one owner never short or
@@ -124,6 +124,7 @@ impl LayoutShape {
 pub struct Layout {
     owners: Vec<Owner>,
     supply: Vec<bool>,
+    rule_of: Vec<Option<NonDefaultRuleId>>,
     index_of: HashMap<Owner, OwnerIndex>,
     metal: Vec<Vec<LayoutShape>>,
     cut: Vec<Vec<LayoutShape>>,
@@ -139,6 +140,18 @@ impl Layout {
         }
     }
 
+    /// An empty layout with the owners of `other`, so that markers found in
+    /// either name the same owners.
+    pub fn with_owners_of(other: &Self) -> Self {
+        Self {
+            owners: other.owners.clone(),
+            supply: other.supply.clone(),
+            rule_of: other.rule_of.clone(),
+            index_of: other.index_of.clone(),
+            ..Self::new(other.metal.len(), other.cut.len())
+        }
+    }
+
     /// The index of `owner`, adding it if new; `supply` says whether it
     /// carries power or ground.
     pub fn owner(&mut self, owner: Owner, supply: bool) -> OwnerIndex {
@@ -148,8 +161,21 @@ impl Layout {
         let index = OwnerIndex(u32::try_from(self.owners.len()).unwrap_or(u32::MAX));
         self.owners.push(owner);
         self.supply.push(supply);
+        self.rule_of.push(None);
         let _ = self.index_of.insert(owner, index);
         index
+    }
+
+    /// Puts `owner`'s shapes under nondefault rule `rule`.
+    pub fn set_non_default_rule(&mut self, owner: OwnerIndex, rule: NonDefaultRuleId) {
+        if let Some(slot) = self.rule_of.get_mut(owner.index()) {
+            *slot = Some(rule);
+        }
+    }
+
+    /// The nondefault rule `owner`'s shapes follow, if any.
+    pub fn non_default_rule(&self, owner: OwnerIndex) -> Option<NonDefaultRuleId> {
+        self.rule_of.get(owner.index()).copied().flatten()
     }
 
     /// Adds a rectangle; one on a layer the layout does not have, or
@@ -241,17 +267,51 @@ impl Layout {
         }
         for (i, net) in db.nets.iter().enumerate() {
             let id = NetId::new(i);
-            if net.routing.is_empty() {
+            if net.routing.is_empty() && net.non_default_rule.is_none() {
                 continue;
             }
             let owner = layout.owner(Owner::Net(id), net_is_supply(db, &special, id));
+            if let Some(rule) = net.non_default_rule {
+                layout.set_non_default_rule(owner, rule);
+            }
             for elem in &net.routing {
-                for s in route_elem_shapes(db, elem) {
+                for s in route_elem_shapes(db, id, elem) {
                     layout.add(s.layer, owner, s.rect, Origin::Routing);
                 }
             }
         }
         layout
+    }
+
+    /// The nets of `db` under a nondefault rule as `OpenROAD` reads them:
+    /// their wiring at the layers' default widths, with their pins, under
+    /// the owners of `layout`.
+    pub fn default_width_view_of_rule_nets(db: &NetlistDB, layout: &Self) -> Self {
+        let mut view = Self::with_owners_of(layout);
+        for (i, net) in db.nets.iter().enumerate() {
+            if net.non_default_rule.is_none() || net.routing.is_empty() {
+                continue;
+            }
+            let id = NetId::new(i);
+            let Some(&owner) = layout.index_of.get(&Owner::Net(id)) else {
+                continue;
+            };
+            for &pin in &net.pins {
+                let origin = match db.pins[pin.index()].owner {
+                    PinOwner::Cell { cell, .. } => Origin::of_placed(db.cells[cell.index()].status),
+                    PinOwner::Io(io) => Origin::of_placed(db.io_pins[io.index()].status),
+                };
+                for s in db.pin_shapes(pin) {
+                    view.add(s.layer, owner, s.rect, origin);
+                }
+            }
+            for elem in &net.routing {
+                for s in default_width_shapes(db, elem) {
+                    view.add(s.layer, owner, s.rect, Origin::Routing);
+                }
+            }
+        }
+        view
     }
 
     fn add_cell(&mut self, db: &NetlistDB, special: &SpecialOwners, cell: CellId) {

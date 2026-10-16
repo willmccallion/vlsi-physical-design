@@ -20,7 +20,7 @@ mod shape;
 mod tests;
 
 pub use layout::{Layout, LayoutShape, Origin, Owner, OwnerIndex};
-pub use rules::{CutRules, MetalRules, Rules};
+pub use rules::{CutRules, MetalRules, NonDefaultRules, Rules};
 
 use crate::db::design::NetlistDB;
 use crate::db::library::LayerRef;
@@ -201,10 +201,26 @@ fn counts(markers: &[Marker]) -> Vec<(Violation, usize)> {
     out
 }
 
-/// Checks every shape of `db` against the rules of its library.
+/// Checks every shape of `db` against the rules of its library and its
+/// nondefault rules.
+///
+/// `OpenROAD` reads every wire at its layer's default width, so the wiring
+/// of nets under a nondefault rule must also meet the shape rules at that
+/// width, and is checked for them a second time that way.
 pub fn check_drc(db: &NetlistDB) -> DrcReport {
     let layout = Layout::from_db(db);
-    check(&layout, &Rules::from_library(&db.library))
+    let rules = Rules::from_design(db);
+    let mut report = check(&layout, &rules);
+    let default_width = Layout::default_width_view_of_rule_nets(db, &layout);
+    let found = shape::check(&Model::new(&default_width), &rules);
+    report.violations = deduplicated(
+        report
+            .violations
+            .into_iter()
+            .chain(found.violations)
+            .collect(),
+    );
+    report
 }
 
 /// Checks every shape of `layout` against `rules`.

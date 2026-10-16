@@ -1,5 +1,5 @@
 use super::*;
-use crate::db::indices::{CellId, CutLayerId, LayerId, NetId};
+use crate::db::indices::{CellId, CutLayerId, LayerId, NetId, NonDefaultRuleId};
 use crate::db::rules::{
     CutApproach, CutSpacing, CutSpacingCondition, Lef58CutSpacing, Lef58CutSpacingCondition,
     MinimumCut, ParallelRunLengthTable, SpacingTable, WidthRangeSpacing,
@@ -59,6 +59,7 @@ fn rules(cut_spacings: Vec<CutSpacing>) -> Rules {
         }],
         min_spacing_for_obstructions: true,
         manufacturing_grid: None,
+        non_default: Vec::new(),
     }
 }
 
@@ -824,6 +825,7 @@ fn routed_metal_off_the_manufacturing_grid_violates_it() {
     f.route(M1, a, rect(0, 0, 1003, 100));
     let rules = Rules {
         manufacturing_grid: Some(Dbu(5)),
+        non_default: Vec::new(),
         ..rules(Vec::new())
     };
 
@@ -840,6 +842,7 @@ fn fixed_metal_off_the_manufacturing_grid_is_exempt() {
     f.fix(M1, a, rect(0, 0, 1003, 100));
     let rules = Rules {
         manufacturing_grid: Some(Dbu(5)),
+        non_default: Vec::new(),
         ..rules(Vec::new())
     };
 
@@ -888,4 +891,53 @@ fn placed_metal_near_a_fixed_only_violation_but_not_in_it_leaves_it_an_input_def
 
     assert_eq!(kinds(&report.input), [Violation::MetalSpacing]);
     assert!(report.placement.is_empty());
+}
+
+/// The rules of [`rules`] with one nondefault rule whose hard spacing on the
+/// first metal layer is `spacing`.
+fn rules_with_hard_spacing(spacing: i64) -> Rules {
+    let mut rules = rules(Vec::new());
+    rules.non_default = vec![NonDefaultRules {
+        hard_spacing: vec![Some(Dbu(spacing)), None],
+    }];
+    rules
+}
+
+#[test]
+fn a_hard_nondefault_spacing_widens_the_gap_a_net_needs() {
+    let mut f = Fixture::new();
+    let (a, b) = (f.a, f.b);
+    f.layout.set_non_default_rule(a, NonDefaultRuleId::new(0));
+    f.route(M1, a, rect(0, 0, 1000, 100));
+    f.route(M1, b, rect(0, 250, 1000, 350));
+
+    assert!(f.check(&rules(Vec::new())).violations.is_empty());
+    let report = f.check(&rules_with_hard_spacing(200));
+    assert_eq!(kinds(&report.violations), [Violation::MetalSpacing]);
+    assert_eq!(report.violations[0].bbox, rect(0, 100, 1000, 250));
+}
+
+#[test]
+fn a_hard_nondefault_spacing_binds_the_nets_own_pieces_too() {
+    let mut f = Fixture::new();
+    let a = f.a;
+    f.layout.set_non_default_rule(a, NonDefaultRuleId::new(0));
+    f.route(M1, a, rect(0, 0, 1000, 100));
+    f.route(M1, a, rect(0, 250, 1000, 350));
+
+    assert_eq!(
+        kinds(&f.check(&rules_with_hard_spacing(200)).violations),
+        [Violation::MetalSpacing]
+    );
+}
+
+#[test]
+fn a_hard_nondefault_spacing_on_another_layer_changes_nothing() {
+    let mut f = Fixture::new();
+    let (a, b) = (f.a, f.b);
+    f.layout.set_non_default_rule(a, NonDefaultRuleId::new(0));
+    f.route(M2, a, rect(0, 0, 1000, 100));
+    f.route(M2, b, rect(0, 250, 1000, 350));
+
+    assert!(f.check(&rules_with_hard_spacing(200)).violations.is_empty());
 }

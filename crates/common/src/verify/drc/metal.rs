@@ -26,6 +26,7 @@ pub(super) fn check(model: &Model<'_>, rules: &Rules) -> Markers {
                 layer: LayerId::new(l),
                 metal,
                 layer_rules: &rules.metal[l],
+                hard_spacing_reach: rules.max_hard_spacing(LayerId::new(l)),
             };
             (0..metal.rects.len())
                 .into_par_iter()
@@ -45,6 +46,8 @@ struct LayerCheck<'m> {
     layer: LayerId,
     metal: &'m Metal<'m>,
     layer_rules: &'m MetalRules,
+    /// The most spacing a nondefault rule can add on this layer.
+    hard_spacing_reach: Dbu,
 }
 
 impl LayerCheck<'_> {
@@ -58,7 +61,10 @@ impl LayerCheck<'_> {
             .iter()
             .filter(|r| in_range(r.min_width, r.max_width, rect.width()))
             .map(|r| r.spacing)
-            .fold(self.layer_rules.max_spacing(), Dbu::max);
+            .fold(
+                self.layer_rules.max_spacing().max(self.hard_spacing_reach),
+                Dbu::max,
+            );
         for j in self.metal.rects_near(&rect.rect.expand(reach)) {
             if j != i {
                 self.check_pair(&rect, &self.metal.rects[j], found);
@@ -246,7 +252,11 @@ impl LayerCheck<'_> {
                 }
             }
         }
-        (required, range)
+        let hard = |r: &GcRect| {
+            self.rules
+                .hard_spacing(self.model.layout.non_default_rule(r.owner), self.layer)
+        };
+        (required.max(hard(r1)).max(hard(r2)), range)
     }
 
     /// Whether boundary edges of the two owners bound the space between

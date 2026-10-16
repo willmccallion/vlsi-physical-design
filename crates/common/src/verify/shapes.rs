@@ -1,7 +1,9 @@
 //! Metal and cut rectangles of a design, tagged with what they belong to.
 
-use crate::db::design::{Cell, IoPin, NetlistDB, PinOwner, RouteElem, SpecialNet, SpecialWire};
-use crate::db::indices::{CellId, NetId};
+use crate::db::design::{
+    Cell, IoPin, NetlistDB, NonDefaultRule, PinOwner, RouteElem, SpecialNet, SpecialWire,
+};
+use crate::db::indices::{CellId, LayerId, NetId};
 use crate::db::library::{LayerRef, Shape};
 use crate::geom::dbu::Dbu;
 use crate::geom::point::Point;
@@ -41,8 +43,65 @@ pub fn wire_rect(from: Point<Dbu>, to: Point<Dbu>, width: Dbu) -> Option<Rect<Db
     ))
 }
 
-/// The shapes of one routing element; empty for a diagonal wire.
-pub fn route_elem_shapes(db: &NetlistDB, elem: &RouteElem) -> Vec<Shape> {
+/// The nondefault rule the wires of `net` follow, if any.
+fn rule_of(db: &NetlistDB, net: NetId) -> Option<&NonDefaultRule> {
+    db.nets[net.index()]
+        .non_default_rule
+        .map(|r| &db.non_default_rules[r.index()])
+}
+
+/// The width wires of `net` have on `layer`: the layer's unless the net's
+/// nondefault rule sets one.
+pub fn wire_width(db: &NetlistDB, net: NetId, layer: LayerId) -> Dbu {
+    rule_of(db, net)
+        .and_then(|r| r.layers.iter().find(|l| l.layer == layer))
+        .map_or_else(|| db.library.layer(layer).width, |l| l.width)
+}
+
+/// The rectangle a wire of `net` covers: its width on the layer, extended
+/// past each end by half that width or by the nondefault rule's extension.
+fn wire_shape(
+    db: &NetlistDB,
+    net: NetId,
+    layer: LayerId,
+    from: Point<Dbu>,
+    to: Point<Dbu>,
+) -> Option<Rect<Dbu>> {
+    if from.x != to.x && from.y != to.y {
+        return None;
+    }
+    let rule = rule_of(db, net).and_then(|r| r.layers.iter().find(|l| l.layer == layer));
+    let width = rule.map_or_else(|| db.library.layer(layer).width, |l| l.width);
+    let lo = width / 2;
+    let hi = width - lo;
+    let ext = rule.and_then(|l| l.wire_extension).unwrap_or(lo);
+    let r = Rect::from_corners(from, to);
+    let (dx, dy) = if from.y == to.y {
+        (Point::new(ext, lo), Point::new(ext, hi))
+    } else {
+        (Point::new(lo, ext), Point::new(hi, ext))
+    };
+    Some(Rect::new(r.min - dx, r.max + dy))
+}
+
+/// The shapes of one routing element of `net`; empty for a diagonal wire.
+pub fn route_elem_shapes(db: &NetlistDB, net: NetId, elem: &RouteElem) -> Vec<Shape> {
+    match *elem {
+        RouteElem::Wire { layer, from, to } => wire_shape(db, net, layer, from, to)
+            .map(|rect| Shape {
+                layer: LayerRef::Routing(layer),
+                rect,
+            })
+            .into_iter()
+            .collect(),
+        _ => default_width_shapes(db, elem),
+    }
+}
+
+/// The shapes of one routing element with every wire at its layer's default
+/// width, which is how `OpenROAD` reads routed wiring whatever the net's
+/// nondefault rule says.
+pub fn default_width_shapes(db: &NetlistDB, elem: &RouteElem) -> Vec<Shape> {
     match *elem {
         RouteElem::Wire { layer, from, to } => wire_rect(from, to, db.library.layer(layer).width)
             .map(|rect| Shape {
