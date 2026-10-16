@@ -1,0 +1,333 @@
+//! Each owner's merged metal on every layer, and indexes to find it.
+//!
+//! On a metal layer an owner's shapes merge into polygons, described by
+//! their maximal rectangles and boundary edges. A rectangle or edge is
+//! fixed when the owner's fixed shapes alone have it too. Cuts are kept one
+//! by one; a cut is fixed when a fixed cut of its owner has its rectangle.
+
+use super::layout::{Layout, LayoutShape, OwnerIndex};
+use crate::geom::dbu::{Dbu, DbuArea};
+use crate::geom::point::Point;
+use crate::geom::rect::Rect;
+use crate::geom::region::{Edge, Region};
+use rayon::prelude::*;
+use rstar::{AABB, RTree, RTreeObject};
+use std::collections::HashSet;
+
+/// A maximal rectangle of one owner's metal on a layer, or one cut.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(super) struct GcRect {
+    pub rect: Rect<Dbu>,
+    pub owner: OwnerIndex,
+    pub fixed: bool,
+}
+
+impl GcRect {
+    /// The smaller of the rectangle's sides.
+    pub fn width(&self) -> Dbu {
+        self.rect.width().min(self.rect.height())
+    }
+}
+
+/// A boundary edge of one owner's metal on a layer.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(super) struct GcEdge {
+    pub edge: Edge,
+    pub owner: OwnerIndex,
+    pub fixed: bool,
+}
+
+/// One connected piece of an owner's metal on a layer.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(super) struct GcPolygon {
+    pub owner: OwnerIndex,
+    pub bbox: Rect<Dbu>,
+    pub area: DbuArea,
+    pub has_fixed_edge: bool,
+}
+
+/// The maximal rectangles, edges and pieces of one owner's metal on a
+/// layer.
+#[derive(Debug, Default)]
+struct OwnerGeometry {
+    rects: Vec<GcRect>,
+    edges: Vec<GcEdge>,
+    polygons: Vec<GcPolygon>,
+}
+
+/// A box of the index and the position of what it bounds.
+#[derive(Clone, Copy, Debug, PartialEq)]
+struct Entry {
+    lo: [i64; 2],
+    hi: [i64; 2],
+    index: usize,
+}
+
+impl RTreeObject for Entry {
+    type Envelope = AABB<[i64; 2]>;
+
+    fn envelope(&self) -> Self::Envelope {
+        AABB::from_corners(self.lo, self.hi)
+    }
+}
+
+/// Positions of boxes, found by area.
+#[derive(Debug)]
+struct Index {
+    tree: RTree<Entry>,
+}
+
+impl Index {
+    fn new(boxes: impl Iterator<Item = Rect<Dbu>>) -> Self {
+        let entries = boxes
+            .enumerate()
+            .map(|(i, r)| Entry {
+                lo: [r.min.x.get(), r.min.y.get()],
+                hi: [r.max.x.get(), r.max.y.get()],
+                index: i,
+            })
+            .collect();
+        Self {
+            tree: RTree::bulk_load(entries),
+        }
+    }
+
+    /// Positions of the boxes that meet `area`, edges included.
+    fn near(&self, area: &Rect<Dbu>) -> impl Iterator<Item = usize> + '_ {
+        let envelope = AABB::from_corners(
+            [area.min.x.get(), area.min.y.get()],
+            [area.max.x.get(), area.max.y.get()],
+        );
+        self.tree
+            .locate_in_envelope_intersecting(envelope)
+            .map(|e| e.index)
+    }
+}
+
+/// The merged metal of every owner on one routing layer.
+#[derive(Debug)]
+pub(super) struct Metal<'a> {
+    pub rects: Vec<GcRect>,
+    pub edges: Vec<GcEdge>,
+    pub polygons: Vec<GcPolygon>,
+    shapes: &'a [LayoutShape],
+    rect_index: Index,
+    edge_index: Index,
+    shape_index: Index,
+}
+
+impl<'a> Metal<'a> {
+    fn new(shapes: &'a [LayoutShape]) -> Self {
+        let mut order: Vec<usize> = (0..shapes.len()).collect();
+        order.sort_by_key(|&i| shapes[i].owner);
+        let groups: Vec<&[usize]> = order
+            .chunk_by(|&a, &b| shapes[a].owner == shapes[b].owner)
+            .collect();
+        let owners: Vec<OwnerGeometry> = groups
+            .par_iter()
+            .map(|group| owner_geometry(shapes, group))
+            .collect();
+        let mut rects = Vec::new();
+        let mut edges = Vec::new();
+        let mut polygons = Vec::new();
+        for geometry in owners {
+            rects.extend(geometry.rects);
+            edges.extend(geometry.edges);
+            polygons.extend(geometry.polygons);
+        }
+        Self {
+            rect_index: Index::new(rects.iter().map(|r| r.rect)),
+            edge_index: Index::new(
+                edges
+                    .iter()
+                    .map(|e| Rect::from_corners(e.edge.from, e.edge.to)),
+            ),
+            shape_index: Index::new(shapes.iter().map(|s| s.rect)),
+            rects,
+            edges,
+            polygons,
+            shapes,
+        }
+    }
+
+    /// Positions of the maximal rectangles meeting `area`.
+    pub fn rects_near(&self, area: &Rect<Dbu>) -> impl Iterator<Item = usize> + '_ {
+        self.rect_index.near(area)
+    }
+
+    /// The edges meeting `area`.
+    pub fn edges_near(&self, area: &Rect<Dbu>) -> impl Iterator<Item = &GcEdge> + '_ {
+        self.edge_index.near(area).map(|i| &self.edges[i])
+    }
+
+    /// The part of `window` the fixed metal of `owner` covers.
+    pub fn fixed_within(&self, owner: OwnerIndex, window: &Rect<Dbu>) -> Region {
+        Region::from_rects(
+            self.shape_index
+                .near(window)
+                .map(|i| self.shapes[i])
+                .filter(|s| s.owner == owner && s.fixed)
+                .filter_map(|s| s.rect.intersection(window)),
+        )
+    }
+
+    /// Whether routed metal of `owner` shares area with `area`.
+    pub fn has_route_in(&self, owner: OwnerIndex, area: &Rect<Dbu>) -> bool {
+        self.shape_index
+            .near(area)
+            .map(|i| self.shapes[i])
+            .any(|s| s.owner == owner && !s.fixed && s.rect.overlaps(area))
+    }
+}
+
+/// The geometry of the metal made of `group`, shapes of one owner.
+fn owner_geometry(shapes: &[LayoutShape], group: &[usize]) -> OwnerGeometry {
+    let owner = shapes[group[0]].owner;
+    let all = Region::from_rects(group.iter().map(|&i| shapes[i].rect));
+    let fixed = Region::from_rects(
+        group
+            .iter()
+            .map(|&i| shapes[i])
+            .filter(|s| s.fixed)
+            .map(|s| s.rect),
+    );
+    let fixed_rects: HashSet<Rect<Dbu>> = fixed.max_rectangles().into_iter().collect();
+    let fixed_edges: HashSet<Edge> = fixed.edges().into_iter().collect();
+    let mut geometry = OwnerGeometry {
+        rects: all
+            .max_rectangles()
+            .into_iter()
+            .map(|rect| GcRect {
+                rect,
+                owner,
+                fixed: fixed_rects.contains(&rect),
+            })
+            .collect(),
+        ..OwnerGeometry::default()
+    };
+    for piece in all.components() {
+        let first = geometry.edges.len();
+        geometry
+            .edges
+            .extend(piece.edges().into_iter().map(|edge| GcEdge {
+                edge,
+                owner,
+                fixed: fixed_edges.contains(&edge),
+            }));
+        if let Some(bbox) = piece.bounding_box() {
+            geometry.polygons.push(GcPolygon {
+                owner,
+                bbox,
+                area: piece.area(),
+                has_fixed_edge: geometry.edges[first..].iter().any(|e| e.fixed),
+            });
+        }
+    }
+    geometry
+}
+
+/// The cuts of every owner on one cut layer.
+#[derive(Debug)]
+pub(super) struct Cut {
+    pub rects: Vec<GcRect>,
+    index: Index,
+}
+
+impl Cut {
+    fn new(shapes: &[LayoutShape]) -> Self {
+        let fixed_cuts: HashSet<(OwnerIndex, Rect<Dbu>)> = shapes
+            .iter()
+            .filter(|s| s.fixed)
+            .map(|s| (s.owner, s.rect))
+            .collect();
+        let rects: Vec<GcRect> = shapes
+            .iter()
+            .map(|s| GcRect {
+                rect: s.rect,
+                owner: s.owner,
+                fixed: fixed_cuts.contains(&(s.owner, s.rect)),
+            })
+            .collect();
+        Self {
+            index: Index::new(rects.iter().map(|r| r.rect)),
+            rects,
+        }
+    }
+
+    /// Positions of the cuts meeting `area`.
+    pub fn near(&self, area: &Rect<Dbu>) -> impl Iterator<Item = usize> + '_ {
+        self.index.near(area)
+    }
+}
+
+/// The geometry of every layer of a layout.
+#[derive(Debug)]
+pub(super) struct Model<'a> {
+    pub layout: &'a Layout,
+    pub metal: Vec<Metal<'a>>,
+    pub cut: Vec<Cut>,
+}
+
+impl<'a> Model<'a> {
+    pub fn new(layout: &'a Layout) -> Self {
+        Self {
+            metal: (0..layout.metal_layers())
+                .map(|l| Metal::new(layout.metal(l)))
+                .collect(),
+            cut: (0..layout.cut_layers())
+                .map(|c| Cut::new(layout.cut(c)))
+                .collect(),
+            layout,
+        }
+    }
+}
+
+/// The overlap of two intervals, or the gap between them when apart.
+pub(super) fn between(a: (Dbu, Dbu), b: (Dbu, Dbu)) -> (Dbu, Dbu) {
+    if a.1 < b.0 {
+        (a.1, b.0)
+    } else if b.1 < a.0 {
+        (b.1, a.0)
+    } else {
+        (a.0.max(b.0), a.1.min(b.1))
+    }
+}
+
+/// How far apart two intervals are; zero when they meet.
+pub(super) fn apart(a: (Dbu, Dbu), b: (Dbu, Dbu)) -> Dbu {
+    (b.0 - a.1).max(a.0 - b.1).max(Dbu::ZERO)
+}
+
+/// Where two rectangles relate: the rectangle between them (their overlap
+/// along an axis where they overlap, the gap where they are apart), the
+/// gaps along X and Y, and the run along X and Y, negative where apart.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(super) struct Facing {
+    pub marker: Rect<Dbu>,
+    pub dist_x: Dbu,
+    pub dist_y: Dbu,
+    pub prl_x: Dbu,
+    pub prl_y: Dbu,
+}
+
+impl Facing {
+    pub fn new(a: &Rect<Dbu>, b: &Rect<Dbu>) -> Self {
+        let (x0, x1) = between((a.min.x, a.max.x), (b.min.x, b.max.x));
+        let (y0, y1) = between((a.min.y, a.max.y), (b.min.y, b.max.y));
+        let dist_x = apart((a.min.x, a.max.x), (b.min.x, b.max.x));
+        let dist_y = apart((a.min.y, a.max.y), (b.min.y, b.max.y));
+        let signed = |run: Dbu, dist: Dbu| if dist > Dbu::ZERO { -run } else { run };
+        Self {
+            marker: Rect::new(Point::new(x0, y0), Point::new(x1, y1)),
+            dist_x,
+            dist_y,
+            prl_x: signed(x1 - x0, dist_x),
+            prl_y: signed(y1 - y0, dist_y),
+        }
+    }
+
+    /// The longer run.
+    pub fn prl(&self) -> Dbu {
+        self.prl_x.max(self.prl_y)
+    }
+}

@@ -45,6 +45,15 @@ define_index!(
     IoPinId(u32)
 );
 define_index!(
+    /// A special net in [`NetlistDB::special_nets`](crate::db::design::NetlistDB::special_nets).
+    SpecialNetId(u32)
+);
+define_index!(
+    /// A routing blockage in
+    /// [`NetlistDB::routing_blockages`](crate::db::design::NetlistDB::routing_blockages).
+    BlockageId(u32)
+);
+define_index!(
     /// A cell master in [`Library::macros`](crate::db::library::Library::macros).
     MacroId(u32)
 );
