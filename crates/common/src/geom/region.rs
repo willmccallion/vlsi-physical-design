@@ -9,7 +9,8 @@
 use super::dbu::{Dbu, DbuArea};
 use super::point::Point;
 use super::rect::Rect;
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
+use std::ops::Bound;
 
 /// Disjoint, non-touching Y intervals in increasing order.
 type Spans = Vec<(Dbu, Dbu)>;
@@ -431,6 +432,195 @@ impl Region {
         }
         out
     }
+
+    /// The region cut into rectangles as Boost.Polygon's `get_rectangles`
+    /// cuts it with horizontal slicing: a sweep upward opens a rectangle
+    /// over each horizontal run and closes it where a boundary edge next
+    /// touches it.
+    pub fn horizontal_slices(&self) -> Vec<Rect<Dbu>> {
+        let events = self
+            .edges()
+            .into_iter()
+            .filter(|e| matches!(e.heading(), Heading::East | Heading::West))
+            .map(|e| (e.from.y, e.from.x.min(e.to.x), e.from.x.max(e.to.x)));
+        Sweep::slices(events)
+            .into_iter()
+            .map(|s| Rect::new(Point::new(s.lo, s.start), Point::new(s.hi, s.end)))
+            .collect()
+    }
+
+    /// The region cut into rectangles as Boost.Polygon's `get_rectangles`
+    /// cuts it with vertical slicing: [`Self::horizontal_slices`] with the
+    /// axes swapped.
+    pub fn vertical_slices(&self) -> Vec<Rect<Dbu>> {
+        let events = self
+            .edges()
+            .into_iter()
+            .filter(|e| matches!(e.heading(), Heading::North | Heading::South))
+            .map(|e| (e.from.x, e.from.y.min(e.to.y), e.from.y.max(e.to.y)));
+        Sweep::slices(events)
+            .into_iter()
+            .map(|s| Rect::new(Point::new(s.start, s.lo), Point::new(s.end, s.hi)))
+            .collect()
+    }
+}
+
+/// A rectangle of a slicing sweep: `[lo, hi]` across the sweep, from
+/// `start` to `end` along it.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+struct Slice {
+    lo: Dbu,
+    hi: Dbu,
+    start: Dbu,
+    end: Dbu,
+}
+
+/// Boost.Polygon's `ScanLineToRects`: the rectangles open at the sweep
+/// position, keyed by their low end, and the one being widened by edges
+/// at the current position.
+#[derive(Debug, Default)]
+struct Sweep {
+    open: BTreeMap<Dbu, Slice>,
+    current: Option<Slice>,
+    at: Dbu,
+    out: Vec<Slice>,
+}
+
+impl Sweep {
+    /// The slices made by `events`, boundary edges across the sweep as
+    /// `(position, lo, hi)`.
+    fn slices(events: impl Iterator<Item = (Dbu, Dbu, Dbu)>) -> Vec<Slice> {
+        let mut events: Vec<(Dbu, Dbu, Dbu)> = events.collect();
+        events.sort_unstable();
+        let mut sweep = Self::default();
+        let mut position = None;
+        for (at, lo, hi) in events {
+            if position != Some(at) {
+                sweep.advance(at);
+                position = Some(at);
+            }
+            sweep.edge(lo, hi);
+        }
+        sweep.out
+    }
+
+    fn advance(&mut self, at: Dbu) {
+        if let Some(current) = self.current.take() {
+            let _ = self.open.insert(current.lo, current);
+        }
+        self.at = at;
+    }
+
+    const fn opened(&self, lo: Dbu, hi: Dbu) -> Slice {
+        Slice {
+            lo,
+            hi,
+            start: self.at,
+            end: self.at,
+        }
+    }
+
+    fn close(&mut self, slice: Slice) {
+        if slice.start < self.at {
+            self.out.push(Slice {
+                end: self.at,
+                ..slice
+            });
+        }
+    }
+
+    /// `processEdge_`: an edge inside an open rectangle closes that part of
+    /// it; an edge only touching open rectangles closes them and starts a
+    /// wider one with them.
+    fn edge(&mut self, lo: Dbu, hi: Dbu) {
+        let mut processed = false;
+        let mut cursor = self
+            .open
+            .range(..=lo)
+            .next_back()
+            .or_else(|| self.open.iter().next())
+            .map(|(&k, _)| k);
+        while let Some(key) = cursor {
+            let Some(&slice) = self.open.get(&key) else {
+                break;
+            };
+            if slice.lo > hi {
+                break;
+            }
+            let next = self
+                .open
+                .range((Bound::Excluded(key), Bound::Unbounded))
+                .next()
+                .map(|(&k, _)| k);
+            cursor = next;
+            if slice.hi < lo {
+                continue;
+            }
+            self.close(slice);
+            let _ = self.open.remove(&key);
+            if slice.lo <= lo && hi <= slice.hi {
+                if slice.lo < lo {
+                    let _ = self.open.insert(slice.lo, self.opened(slice.lo, lo));
+                }
+                if slice.hi > hi {
+                    let _ = self.open.insert(hi, self.opened(hi, slice.hi));
+                }
+                return;
+            }
+            self.widen_touching(slice, lo, hi, processed);
+            processed = true;
+        }
+        if !processed {
+            self.open_alone(lo, hi);
+        }
+    }
+
+    /// The edge `[lo, hi]` touches the open rectangle `slice`, now closed.
+    fn widen_touching(&mut self, slice: Slice, lo: Dbu, hi: Dbu, processed: bool) {
+        let joined = self.opened(slice.lo.min(lo), slice.hi.max(hi));
+        let Some(mut current) = self.current else {
+            self.current = Some(joined);
+            return;
+        };
+        if current.hi < lo {
+            let _ = self.open.insert(current.lo, current);
+            self.current = Some(joined);
+            return;
+        }
+        if !processed && current.hi > lo {
+            let _ = self.open.insert(current.lo, Slice { hi: lo, ..current });
+            if current.hi > hi {
+                current.lo = hi;
+                self.current = Some(current);
+            } else {
+                self.current = None;
+            }
+        } else {
+            current.hi = hi.max(slice.hi);
+            self.current = Some(current);
+        }
+    }
+
+    /// The edge `[lo, hi]` touches no open rectangle.
+    fn open_alone(&mut self, lo: Dbu, hi: Dbu) {
+        if let Some(mut current) = self.current.take() {
+            if current.hi >= lo {
+                if current.hi > lo {
+                    let _ = self.open.insert(current.lo, Slice { hi: lo, ..current });
+                    if current.hi > hi {
+                        current.lo = hi;
+                        self.current = Some(current);
+                    }
+                } else {
+                    current.hi = hi;
+                    self.current = Some(current);
+                }
+                return;
+            }
+            let _ = self.open.insert(current.lo, current);
+        }
+        let _ = self.open.insert(lo, self.opened(lo, hi));
+    }
 }
 
 /// The spans of the slab of `slabs` covering `[x0, x1]`, advancing `cursor`
@@ -636,6 +826,61 @@ mod tests {
         assert_eq!(
             rects,
             vec![(0, 0, 2, 10), (0, 0, 10, 2), (0, 8, 10, 10), (8, 0, 10, 10)]
+        );
+    }
+
+    #[test]
+    fn horizontal_slices_of_an_ell_span_whole_horizontal_runs() {
+        let slices = sorted(ell().horizontal_slices().iter().map(key).collect());
+
+        assert_eq!(slices, vec![(0, 0, 10, 2), (0, 2, 2, 10)]);
+    }
+
+    #[test]
+    fn vertical_slices_of_an_ell_span_whole_vertical_runs() {
+        let slices = sorted(ell().vertical_slices().iter().map(key).collect());
+
+        assert_eq!(slices, vec![(0, 0, 2, 10), (2, 0, 10, 2)]);
+    }
+
+    #[test]
+    fn a_slice_runs_on_past_changes_elsewhere_across_the_sweep() {
+        let bumped_c = Region::from_rects([
+            rect(0, 0, 1, 10),
+            rect(1, 0, 5, 1),
+            rect(1, 9, 5, 10),
+            rect(3, 1, 4, 2),
+        ]);
+
+        let slices = sorted(bumped_c.vertical_slices().iter().map(key).collect());
+
+        assert_eq!(
+            slices,
+            vec![
+                (0, 0, 1, 10),
+                (1, 0, 3, 1),
+                (1, 9, 5, 10),
+                (3, 0, 4, 2),
+                (4, 0, 5, 1)
+            ]
+        );
+    }
+
+    #[test]
+    fn slices_go_around_a_hole() {
+        let ring = Region::from_rects([rect(0, 0, 6, 6)])
+            .difference(&Region::from_rects([rect(2, 2, 4, 4)]));
+
+        let horizontal = sorted(ring.horizontal_slices().iter().map(key).collect());
+        let vertical = sorted(ring.vertical_slices().iter().map(key).collect());
+
+        assert_eq!(
+            horizontal,
+            vec![(0, 0, 6, 2), (0, 2, 2, 4), (0, 4, 6, 6), (4, 2, 6, 4)]
+        );
+        assert_eq!(
+            vertical,
+            vec![(0, 0, 2, 6), (2, 0, 4, 2), (2, 4, 4, 6), (4, 0, 6, 6)]
         );
     }
 
