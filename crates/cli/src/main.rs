@@ -7,12 +7,14 @@ use anyhow::Context;
 use clap::{Parser, Subcommand};
 use pare_common::db::design::{NetlistDB, PlacementStatus};
 use pare_common::db::indices::{CellId, LayerId};
+use pare_common::db::library::LayerRef;
 use pare_common::db::parser::{bookshelf, def, lef};
 use pare_common::db::writer;
 use pare_common::geom::dbu::Dbu;
 use pare_common::geom::point::Point;
 use pare_common::util::config::{Config, Purpose};
 use pare_common::util::{logger, ui, visualization};
+use pare_common::verify::drc::{DrcReport, Marker, check_drc};
 use pare_common::verify::placement::{PlacementViolation, placement_violations};
 use pare_common::verify::routing::check_routing;
 use pare_placer::detailed;
@@ -646,6 +648,22 @@ fn report_routing(db: &NetlistDB) -> bool {
         "Non-Manhattan:",
         &report.stats.non_manhattan.to_string(),
     );
+    let drc = check_drc(db);
+    for m in &drc.violations {
+        log::debug!("drc: {}", describe_marker(db, &drc, m));
+    }
+    for m in &drc.fixed {
+        log::debug!("drc among fixed metal: {}", describe_marker(db, &drc, m));
+    }
+    ui::stat_row(
+        "DRC violations:",
+        &drc.violations.len().to_string(),
+        "Among fixed:",
+        &drc.fixed.len().to_string(),
+    );
+    for (kind, count) in drc.counts() {
+        ui::stat_row(&format!("  {}:", kind.name()), &count.to_string(), "", "");
+    }
     if report.is_connected_without_shorts() {
         ui::check("Routing has no shorts or opens.");
         true
@@ -653,4 +671,24 @@ fn report_routing(db: &NetlistDB) -> bool {
         ui::fail("Routing has shorts or opens.");
         false
     }
+}
+
+/// A violation, where it is and what it involves, for the debug log.
+fn describe_marker(db: &NetlistDB, drc: &DrcReport, m: &Marker) -> String {
+    let units = db.dbu();
+    let layer = match m.layer {
+        LayerRef::Routing(l) => db.library.layer(l).name.as_str(),
+        LayerRef::Cut(c) => db.library.cut_layers[c.index()].name.as_str(),
+    };
+    let name = |i: usize| drc.owners[i].name(db);
+    format!(
+        "{} on {layer} at ({:.4}, {:.4}) - ({:.4}, {:.4}) between {} and {}",
+        m.violation.name(),
+        units.to_microns(m.bbox.min.x),
+        units.to_microns(m.bbox.min.y),
+        units.to_microns(m.bbox.max.x),
+        units.to_microns(m.bbox.max.y),
+        name(m.owners.0.index()),
+        name(m.owners.1.index()),
+    )
 }
