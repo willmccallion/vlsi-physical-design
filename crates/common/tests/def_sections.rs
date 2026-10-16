@@ -65,6 +65,34 @@ fn special_net_rects_and_wire_extensions_are_kept() {
     assert_eq!(vdd.wires[1].rect(), rect(4800, -50, 5200, 6070));
     assert_eq!(vdd.rects.len(), 1);
     assert_eq!(vdd.rects[0].rect, rect(0, 0, 300, 100));
+    assert_eq!(vdd.rects[0].shape, None);
+}
+
+#[test]
+fn a_special_net_rect_takes_the_shape_option_before_it() {
+    let db = design_with(&[(
+        "  NEW M1 0 ( 4800 4000 ) M1M2_2CUT ;",
+        "  NEW M1 0 ( 4800 4000 ) M1M2_2CUT\n  + RECT M2 ( 0 0 ) ( 300 100 )\n  \
+         + SHAPE STRIPE + RECT M2 ( 0 200 ) ( 300 300 ) + RECT M2 ( 0 400 ) ( 300 500 ) ;",
+    )])
+    .unwrap();
+
+    let shapes: Vec<Option<&str>> = db.special_nets[0]
+        .rects
+        .iter()
+        .map(|r| r.shape.as_deref())
+        .collect();
+    assert_eq!(shapes, [None, Some("STRIPE"), Some("STRIPE")]);
+
+    let mut text = Vec::new();
+    pare_common::db::writer::def::write(&db, &mut text).unwrap();
+    let written = String::from_utf8(text).unwrap();
+    assert!(
+        written.contains("+ RECT M2 ( 0 0 ) ( 300 100 )\n  + SHAPE STRIPE\n  + RECT M2 ( 0 200 )"),
+        "{written}"
+    );
+    let reread = def::parse_str(&written, Path::new("written.def"), tiny_library()).unwrap();
+    assert_eq!(reread.special_nets, db.special_nets);
 }
 
 #[test]

@@ -8,7 +8,7 @@
 
 use crate::db::design::{
     GCellGridDef, NetlistDB, NonDefaultLayer, NonDefaultRule, PlacementStatus, Region, RegionKind,
-    RouteElem, Row, SpecialNet, SpecialWire, TrackAxis, TrackDef,
+    RouteElem, Row, SpecialNet, SpecialRect, SpecialWire, TrackAxis, TrackDef,
 };
 use crate::db::indices::{CellId, LayerId, NetId, NonDefaultRuleId, RegionId, ViaId, ViaRuleId};
 use crate::db::library::{LayerRef, Library, PinDirection, Shape, SignalUse, ViaDef};
@@ -821,6 +821,7 @@ impl<'a> DefParser<'a> {
             rects: Vec::new(),
             vias: Vec::new(),
         };
+        let mut rect_shape: Option<String> = None;
         while self.lx.accept("+") {
             let t = self.lx.expect_token("special net option")?;
             match t.text {
@@ -835,6 +836,7 @@ impl<'a> DefParser<'a> {
                     }
                     self.special_wiring(&mut net)?;
                 }
+                "SHAPE" => rect_shape = Some(self.word("shape")?.to_string()),
                 "RECT" => {
                     let layer = self.any_layer()?;
                     if self.lx.accept("+") {
@@ -842,7 +844,11 @@ impl<'a> DefParser<'a> {
                         let _ = self.word("mask number")?;
                     }
                     let rect = self.rect()?;
-                    net.rects.push(Shape { layer, rect });
+                    net.rects.push(SpecialRect {
+                        layer,
+                        rect,
+                        shape: rect_shape.clone(),
+                    });
                 }
                 "POLYGON" | "VIA" => {
                     return Err(self.lx.error(

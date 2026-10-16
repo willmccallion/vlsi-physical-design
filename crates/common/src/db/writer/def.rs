@@ -1,6 +1,6 @@
 //! DEF writer.
 
-use crate::db::design::{NetlistDB, PinOwner, RouteElem};
+use crate::db::design::{NetlistDB, PinOwner, RouteElem, SpecialRect};
 use crate::db::library::{LayerRef, Library};
 use crate::geom::dbu::Dbu;
 use crate::geom::point::Point;
@@ -293,7 +293,16 @@ fn write_special_nets(db: &NetlistDB, out: &mut impl Write) -> io::Result<()> {
             )?;
             keyword = "NEW";
         }
-        for s in &n.rects {
+        let mut rects: Vec<&SpecialRect> = n.rects.iter().collect();
+        rects.sort_by(|a, b| a.shape.cmp(&b.shape));
+        let mut shape_in_force: Option<&str> = None;
+        for s in rects {
+            if s.shape.as_deref() != shape_in_force
+                && let Some(shape) = &s.shape
+            {
+                write!(out, "\n  + SHAPE {shape}")?;
+                shape_in_force = Some(shape);
+            }
             write!(
                 out,
                 "\n  + RECT {} {} {}",

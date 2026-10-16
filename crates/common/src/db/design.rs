@@ -4,7 +4,7 @@ use crate::db::indices::{
     CellId, CutLayerId, IoPinId, LayerId, MacroId, MacroPinId, NetId, NonDefaultRuleId, PinId,
     RegionId, SiteId, ViaId, ViaRuleId,
 };
-use crate::db::library::{DuplicateName, Library, Macro, PinDirection, Shape, SignalUse};
+use crate::db::library::{DuplicateName, LayerRef, Library, Macro, PinDirection, Shape, SignalUse};
 use crate::geom::dbu::{Dbu, DbuPerMicron};
 use crate::geom::orient::Orientation;
 use crate::geom::point::Point;
@@ -371,9 +371,20 @@ pub struct SpecialNet {
     /// Wire segments.
     pub wires: Vec<SpecialWire>,
     /// Rectangles given directly with `+ RECT`.
-    pub rects: Vec<Shape>,
+    pub rects: Vec<SpecialRect>,
     /// Via instances.
     pub vias: Vec<(ViaId, Point<Dbu>)>,
+}
+
+/// A rectangle of special wiring given directly (DEF `+ RECT`).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct SpecialRect {
+    /// Layer of the rectangle.
+    pub layer: LayerRef,
+    /// The rectangle.
+    pub rect: Rect<Dbu>,
+    /// The DEF `SHAPE` keyword in force for it, such as `STRIPE`.
+    pub shape: Option<String>,
 }
 
 /// The complete design database.

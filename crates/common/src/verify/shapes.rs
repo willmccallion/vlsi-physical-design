@@ -80,7 +80,11 @@ pub fn special_net_metal(net: &SpecialNet) -> impl Iterator<Item = Shape> + '_ {
     });
     let rects = net.rects.iter().map(|s| Shape {
         layer: s.layer,
-        rect: special_rect_box(&s.rect),
+        rect: if s.shape.is_some() {
+            s.rect
+        } else {
+            special_rect_box(&s.rect)
+        },
     });
     wires.chain(rects)
 }
@@ -220,6 +224,7 @@ fn fixed_shapes_of(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::db::design::SpecialRect;
     use crate::db::indices::LayerId;
 
     fn rect(x0: i64, y0: i64, x1: i64, y1: i64) -> Rect<Dbu> {
@@ -286,5 +291,32 @@ mod tests {
     #[test]
     fn a_special_rect_odd_both_ways_stays_as_written() {
         assert_eq!(special_rect_box(&rect(0, 0, 45, 45)), rect(0, 0, 45, 45));
+    }
+
+    #[test]
+    fn only_special_rects_without_a_shape_are_stretched() {
+        let net = SpecialNet {
+            name: "VDD".into(),
+            signal_use: crate::db::library::SignalUse::Power,
+            connections: Vec::new(),
+            wires: Vec::new(),
+            rects: vec![
+                SpecialRect {
+                    layer: LayerRef::Routing(LayerId(0)),
+                    rect: rect(0, 0, 900, 45),
+                    shape: Some("STRIPE".into()),
+                },
+                SpecialRect {
+                    layer: LayerRef::Routing(LayerId(0)),
+                    rect: rect(0, 0, 900, 45),
+                    shape: None,
+                },
+            ],
+            vias: Vec::new(),
+        };
+
+        let boxes: Vec<Rect<Dbu>> = special_net_metal(&net).map(|s| s.rect).collect();
+
+        assert_eq!(boxes, [rect(0, 0, 900, 45), rect(0, -450, 900, 495)]);
     }
 }
