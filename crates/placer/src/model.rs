@@ -27,6 +27,18 @@ pub enum PinAnchor {
     Fixed(Point<f64>),
 }
 
+/// How the placer treats a cell.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum CellKind {
+    /// A standard cell.
+    Standard,
+    /// A block, or a cell more than six rows high, as in `OpenROAD`.
+    Macro,
+}
+
+/// Rows of height a cell must exceed to count as a macro.
+const MACRO_ROWS: i64 = 6;
+
 /// A net as the placer sees it.
 #[derive(Clone, Debug, PartialEq)]
 pub struct ModelNet {
@@ -57,6 +69,8 @@ pub struct PlacementModel {
     pub sizes: Vec<Point<f64>>,
     /// Whether the placer may move each cell.
     pub movable: Vec<bool>,
+    /// Whether each cell is a standard cell or a macro.
+    pub kinds: Vec<CellKind>,
     /// Lower-left corner of each cell.
     pub positions: Vec<Point<f64>>,
     /// Signal nets with at least two connections.
@@ -68,6 +82,21 @@ pub struct PlacementModel {
     /// Width of the narrowest row site, one micron for a design without
     /// rows.
     pub site_width: f64,
+}
+
+/// The kind of every cell of `db`, given the height of the shortest row.
+fn cell_kinds(db: &NetlistDB, row_height: Option<Dbu>) -> Vec<CellKind> {
+    (0..db.num_cells())
+        .map(|i| {
+            let id = CellId::new(i);
+            let tall = row_height.is_some_and(|h| db.cell_size(id).y > h * MACRO_ROWS);
+            if db.cell_macro(id).is_block() || tall {
+                CellKind::Macro
+            } else {
+                CellKind::Standard
+            }
+        })
+        .collect()
 }
 
 impl PlacementModel {
@@ -151,6 +180,7 @@ impl PlacementModel {
                 .map(|i| um(db.cell_size(CellId::new(i))))
                 .collect(),
             movable: db.cells.iter().map(|c| c.status.is_movable()).collect(),
+            kinds: cell_kinds(db, spans.iter().map(|r| r.height).min()),
             positions: db.cells.iter().map(|c| um(c.location)).collect(),
             nets,
             zones: zone_rows,
