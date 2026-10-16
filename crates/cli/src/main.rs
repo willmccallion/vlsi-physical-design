@@ -519,7 +519,7 @@ fn run_routing(config: &Config, db: &mut NetlistDB, output_dir: &Path) -> anyhow
     ui::phase_time(phase_start.elapsed().as_secs_f64());
 
     if !routing_ok {
-        anyhow::bail!("routing has shorts or opens");
+        anyhow::bail!("routing has opens or design rule violations");
     }
     Ok(())
 }
@@ -600,15 +600,10 @@ fn describe_violation(db: &NetlistDB, v: &PlacementViolation) -> String {
     }
 }
 
-/// Prints routing check results; returns whether there are no shorts or opens.
+/// Prints the connectivity and design rule check results; returns whether
+/// every net is connected and nothing routed breaks a rule.
 fn report_routing(db: &NetlistDB) -> bool {
     let report = check_routing(db);
-    for short in &report.shorts {
-        log::debug!("short: {short:?}");
-    }
-    for v in &report.spacing {
-        log::debug!("spacing: {v:?}");
-    }
     for open in &report.opens {
         log::debug!(
             "open: net {} '{}' in {} pieces",
@@ -625,14 +620,8 @@ fn report_routing(db: &NetlistDB) -> bool {
         .map(|&l| units.to_microns(l))
         .sum();
     ui::stat_row(
-        "Shorts:",
-        &report.shorts.len().to_string(),
         "Opens:",
         &report.opens.len().to_string(),
-    );
-    ui::stat_row(
-        "Spacing:",
-        &report.spacing.len().to_string(),
         "Wirelength (um):",
         &format!("{wirelength:.0}"),
     );
@@ -668,11 +657,11 @@ fn report_routing(db: &NetlistDB) -> bool {
     for (kind, count) in drc.counts() {
         ui::stat_row(&format!("  {}:", kind.name()), &count.to_string(), "", "");
     }
-    if report.is_connected_without_shorts() {
-        ui::check("Routing has no shorts or opens.");
+    if report.is_connected() && drc.violations.is_empty() {
+        ui::check("Routing is connected and clean.");
         true
     } else {
-        ui::fail("Routing has shorts or opens.");
+        ui::fail("Routing has opens or design rule violations.");
         false
     }
 }

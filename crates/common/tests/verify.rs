@@ -1,12 +1,9 @@
-//! Placement and routing checker tests on small hand-built designs.
+//! Placement and connectivity checker tests on small hand-built designs.
 
 #![allow(clippy::unwrap_used)]
 
-use pare_common::db::design::{
-    NetlistDB, PlacementStatus, Region, RegionKind, RouteElem, SpecialNet, SpecialWire,
-};
+use pare_common::db::design::{NetlistDB, PlacementStatus, Region, RegionKind, RouteElem};
 use pare_common::db::indices::{CellId, CutLayerId, LayerId, NetId, RegionId};
-use pare_common::db::library::{LayerRef, SignalUse};
 use pare_common::db::parser::{def, lef};
 use pare_common::geom::dbu::{Dbu, DbuPerMicron};
 use pare_common::geom::orient::Orientation;
@@ -14,7 +11,6 @@ use pare_common::geom::point::Point;
 use pare_common::geom::rect::Rect;
 use pare_common::verify::placement::{PlacementViolation, placement_violations};
 use pare_common::verify::routing::check_routing;
-use pare_common::verify::shapes::Owner;
 use std::path::{Path, PathBuf};
 
 const M1: LayerId = LayerId(0);
@@ -50,12 +46,6 @@ fn via(db: &NetlistDB, cut: u8, at: Point<Dbu>) -> RouteElem {
     }
 }
 
-fn routed_net(db: &mut NetlistDB, name: &str, routing: Vec<RouteElem>) -> NetId {
-    let net = db.net_or_insert(name);
-    db.nets[net.index()].routing = routing;
-    net
-}
-
 fn inv(db: &mut NetlistDB, name: &str, at: Point<Dbu>) -> CellId {
     let inv = db.library.macro_id("INV").unwrap();
     db.add_cell(
@@ -81,168 +71,6 @@ fn two_inverters_on_a_net(db: &mut NetlistDB) -> NetId {
 }
 
 #[test]
-fn collinear_overlapping_wires_of_two_nets_are_a_short() {
-    let mut db = empty_design();
-    let _ = routed_net(&mut db, "a", vec![wire(M2, pt(1000, 0), pt(1000, 2000))]);
-    let _ = routed_net(&mut db, "b", vec![wire(M2, pt(1000, 1500), pt(1000, 4000))]);
-
-    let report = check_routing(&db);
-
-    assert_eq!(report.shorts.len(), 1);
-    assert_eq!(report.shorts[0].layer, LayerRef::Routing(M2));
-}
-
-#[test]
-fn a_t_junction_between_two_nets_is_a_short() {
-    let mut db = empty_design();
-    let _ = routed_net(&mut db, "a", vec![wire(M1, pt(0, 500), pt(1000, 500))]);
-    let _ = routed_net(&mut db, "b", vec![wire(M1, pt(500, 500), pt(500, 1500))]);
-
-    assert_eq!(check_routing(&db).shorts.len(), 1);
-}
-
-#[test]
-fn a_via_landing_on_another_nets_wire_is_a_short() {
-    let mut db = empty_design();
-    let _ = routed_net(&mut db, "a", vec![wire(M2, pt(1000, 0), pt(1000, 2000))]);
-    let b = via(&db, 0, pt(1000, 1000));
-    let _ = routed_net(&mut db, "b", vec![b]);
-
-    let shorts = check_routing(&db).shorts;
-
-    assert_eq!(shorts.len(), 1);
-    assert_eq!(shorts[0].layer, LayerRef::Routing(M2));
-}
-
-#[test]
-fn wire_ends_extended_by_half_width_touch_and_short() {
-    let mut db = empty_design();
-    let _ = routed_net(&mut db, "a", vec![wire(M1, pt(0, 500), pt(1000, 500))]);
-    let _ = routed_net(&mut db, "b", vec![wire(M1, pt(1100, 500), pt(2000, 500))]);
-
-    assert_eq!(check_routing(&db).shorts.len(), 1);
-}
-
-#[test]
-fn wires_exactly_min_spacing_apart_are_clean() {
-    let mut db = empty_design();
-    let _ = routed_net(&mut db, "a", vec![wire(M1, pt(0, 500), pt(1000, 500))]);
-    let _ = routed_net(&mut db, "b", vec![wire(M1, pt(0, 700), pt(1000, 700))]);
-
-    let report = check_routing(&db);
-
-    assert!(report.shorts.is_empty());
-    assert!(report.spacing.is_empty());
-}
-
-#[test]
-fn wires_closer_than_min_spacing_are_a_spacing_violation() {
-    let mut db = empty_design();
-    let _ = routed_net(&mut db, "a", vec![wire(M1, pt(0, 500), pt(1000, 500))]);
-    let _ = routed_net(&mut db, "b", vec![wire(M1, pt(0, 680), pt(1000, 680))]);
-
-    let report = check_routing(&db);
-
-    assert!(report.shorts.is_empty());
-    assert_eq!(report.spacing.len(), 1);
-    assert_eq!(report.spacing[0].distance_sq, 80 * 80);
-}
-
-#[test]
-fn two_wires_of_one_net_closer_than_min_spacing_are_a_spacing_violation() {
-    let mut db = empty_design();
-    let routing = vec![
-        wire(M1, pt(0, 500), pt(1000, 500)),
-        wire(M1, pt(1180, 500), pt(2000, 500)),
-    ];
-    let _ = routed_net(&mut db, "a", routing);
-
-    let report = check_routing(&db);
-
-    assert!(report.shorts.is_empty());
-    assert_eq!(report.spacing.len(), 1);
-    assert_eq!(report.spacing[0].distance_sq, 80 * 80);
-}
-
-#[test]
-fn a_gap_in_one_net_filled_by_its_own_wire_is_clean() {
-    let mut db = empty_design();
-    let routing = vec![
-        wire(M1, pt(0, 500), pt(1000, 500)),
-        wire(M1, pt(1180, 500), pt(2000, 500)),
-        wire(M1, pt(900, 500), pt(1300, 500)),
-    ];
-    let _ = routed_net(&mut db, "a", routing);
-
-    assert!(check_routing(&db).spacing.is_empty());
-}
-
-#[test]
-fn a_gap_filled_by_two_overlapping_pieces_of_the_net_is_clean() {
-    let mut db = empty_design();
-    let routing = vec![
-        wire(M1, pt(0, 500), pt(1000, 500)),
-        wire(M1, pt(1180, 500), pt(2000, 500)),
-        wire(M1, pt(1000, 500), pt(1080, 500)),
-        wire(M1, pt(1060, 500), pt(1180, 500)),
-    ];
-    let _ = routed_net(&mut db, "a", routing);
-
-    assert!(check_routing(&db).spacing.is_empty());
-}
-
-#[test]
-fn two_vias_of_one_net_must_keep_their_metal_apart_even_when_wired() {
-    let mut db = empty_design();
-    let routing = vec![
-        via(&db, 0, pt(1000, 500)),
-        via(&db, 0, pt(1000, 780)),
-        wire(M2, pt(1000, 500), pt(1000, 780)),
-    ];
-    let _ = routed_net(&mut db, "a", routing);
-
-    let report = check_routing(&db);
-
-    let on_m2: Vec<_> = report
-        .spacing
-        .iter()
-        .filter(|v| v.layer == LayerRef::Routing(M2))
-        .collect();
-    assert_eq!(on_m2.len(), 1, "{:?}", report.spacing);
-    assert_eq!(on_m2[0].distance_sq, 80 * 80);
-}
-
-#[test]
-fn a_wire_running_long_beside_a_wide_shape_needs_the_table_spacing() {
-    let mut db = empty_design();
-    let _ = routed_net(&mut db, "a", vec![wire(M2, pt(600, 1000), pt(600, 3000))]);
-    let _ = routed_net(&mut db, "b", vec![wire(M2, pt(600, 4000), pt(600, 4300))]);
-    db.special_nets.push(SpecialNet {
-        name: "VDD".into(),
-        signal_use: SignalUse::Power,
-        connections: Vec::new(),
-        wires: vec![SpecialWire {
-            layer: M2,
-            width: Dbu(400),
-            from: pt(200, 1000),
-            to: pt(200, 3000),
-            extensions: (Dbu::ZERO, Dbu::ZERO),
-            shape: Some("STRIPE".into()),
-        }],
-        rects: Vec::new(),
-        vias: Vec::new(),
-    });
-
-    let spacing = check_routing(&db).spacing;
-
-    assert_eq!(spacing.len(), 1, "{spacing:?}");
-    assert_eq!(
-        (spacing[0].other, spacing[0].distance_sq),
-        (Owner::Obstacle, 150 * 150)
-    );
-}
-
-#[test]
 fn pins_joined_through_vias_and_an_upper_wire_are_connected() {
     let mut db = empty_design();
     let net = two_inverters_on_a_net(&mut db);
@@ -256,7 +84,7 @@ fn pins_joined_through_vias_and_an_upper_wire_are_connected() {
     let report = check_routing(&db);
 
     assert!(report.opens.is_empty(), "{:?}", report.opens);
-    assert!(report.shorts.is_empty(), "{:?}", report.shorts);
+    assert!(report.is_connected());
 }
 
 #[test]
@@ -287,17 +115,12 @@ fn an_unrouted_net_is_open() {
 }
 
 #[test]
-fn a_wire_through_an_unused_pin_shorts_to_it() {
+fn a_wire_along_the_pin_layer_connects_the_pins_it_crosses() {
     let mut db = empty_design();
     let net = two_inverters_on_a_net(&mut db);
     db.nets[net.index()].routing = vec![wire(M1, pt(100, 500), pt(1100, 500))];
 
-    let shorts = check_routing(&db).shorts;
-
-    assert!(
-        shorts.iter().any(|s| s.other == Owner::Obstacle),
-        "{shorts:?}"
-    );
+    assert!(check_routing(&db).opens.is_empty());
 }
 
 #[test]
@@ -406,22 +229,6 @@ fn a_y_mirrored_cell_is_legal_in_its_row() {
             .iter()
             .any(|v| matches!(v, PlacementViolation::WrongOrientation(c) if *c == u1))
     );
-}
-
-#[test]
-fn two_cuts_of_one_net_closer_than_cut_spacing_are_a_spacing_violation() {
-    let mut db = empty_design();
-    let (a, b) = (via(&db, 0, pt(1000, 1000)), via(&db, 0, pt(1000, 1150)));
-    let _ = routed_net(&mut db, "a", vec![a, b]);
-
-    let report = check_routing(&db);
-
-    let cut = report
-        .spacing
-        .iter()
-        .filter(|v| v.layer == LayerRef::Cut(CutLayerId(0)))
-        .count();
-    assert_eq!(cut, 1, "{:?}", report.spacing);
 }
 
 /// Adds a region of `kind` over `rects` and assigns `members` to it.

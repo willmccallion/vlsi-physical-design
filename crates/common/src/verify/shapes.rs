@@ -17,35 +17,13 @@ pub enum Owner {
     Obstacle,
 }
 
-/// Where a shape comes from.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum Source {
-    /// A cell, pin, obstruction, special net or blockage.
-    Fixed,
-    /// A routed wire.
-    Wire,
-    /// A routed via.
-    Via,
-    /// A patch of metal on routed wiring.
-    Patch,
-}
-
-/// A rectangle on a layer and what it belongs to.
+/// A fixed rectangle on a layer and what it belongs to.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct OwnedShape {
     /// The geometry.
     pub shape: Shape,
     /// Its net, if any.
     pub owner: Owner,
-    /// Where it comes from.
-    pub source: Source,
-}
-
-impl OwnedShape {
-    /// Whether it is routed wiring rather than part of a cell, pin or obstacle.
-    pub const fn is_wiring(&self) -> bool {
-        !matches!(self.source, Source::Fixed)
-    }
 }
 
 /// The rectangle a default-width wire covers, extended by half its width
@@ -146,31 +124,6 @@ pub fn is_signal_net(db: &NetlistDB, net: NetId) -> bool {
     !n.signal_use.is_supply() && n.pins.len() >= 2
 }
 
-/// Routed wiring of every signal net.
-pub fn wiring_shapes(db: &NetlistDB) -> Vec<OwnedShape> {
-    let mut out = Vec::new();
-    for (i, net) in db.nets.iter().enumerate() {
-        let owner = Owner::Net(NetId::new(i));
-        for elem in &net.routing {
-            let source = match elem {
-                RouteElem::Wire { .. } => Source::Wire,
-                RouteElem::Via { .. } => Source::Via,
-                RouteElem::Patch { .. } => Source::Patch,
-            };
-            out.extend(
-                route_elem_shapes(db, elem)
-                    .into_iter()
-                    .map(|shape| OwnedShape {
-                        shape,
-                        owner,
-                        source,
-                    }),
-            );
-        }
-    }
-    out
-}
-
 /// Everything the wiring must connect to or avoid: pins, obstructions,
 /// special nets and routing blockages.
 pub fn fixed_shapes(db: &NetlistDB) -> Vec<OwnedShape> {
@@ -199,11 +152,7 @@ fn fixed_shapes_of(
     keep_io: impl Fn(&IoPin) -> bool,
 ) -> Vec<OwnedShape> {
     let mut out = Vec::new();
-    let fixed = |shape: Shape, owner: Owner| OwnedShape {
-        shape,
-        owner,
-        source: Source::Fixed,
-    };
+    let fixed = |shape: Shape, owner: Owner| OwnedShape { shape, owner };
 
     for i in 0..db.num_cells() {
         let id = CellId::new(i);
@@ -266,15 +215,6 @@ fn fixed_shapes_of(
             .map(|&s| fixed(s, Owner::Obstacle)),
     );
     out
-}
-
-/// A dense index for every layer a shape can be on: routing layers first,
-/// then cut layers.
-pub const fn layer_slot(db: &NetlistDB, layer: LayerRef) -> usize {
-    match layer {
-        LayerRef::Routing(l) => l.index(),
-        LayerRef::Cut(c) => db.library.routing_layers.len() + c.index(),
-    }
 }
 
 #[cfg(test)]
