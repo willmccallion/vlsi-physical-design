@@ -1,7 +1,8 @@
 use super::*;
 use crate::db::indices::{CellId, CutLayerId, LayerId, NetId};
 use crate::db::rules::{
-    CutSpacing, CutSpacingCondition, ParallelRunLengthTable, SpacingTable, WidthRangeSpacing,
+    CutApproach, CutSpacing, CutSpacingCondition, MinimumCut, ParallelRunLengthTable, SpacingTable,
+    WidthRangeSpacing,
 };
 use crate::geom::dbu::DbuArea;
 use crate::geom::point::Point;
@@ -31,6 +32,7 @@ fn metal(spacing: SpacingTable) -> MetalRules {
         spacing,
         ranges: Vec::new(),
         min_area: None,
+        minimum_cuts: Vec::new(),
     }
 }
 
@@ -551,4 +553,96 @@ fn a_narrow_slice_partly_over_fixed_metal_violates_the_minimum_width() {
 
     assert_eq!(kinds(&report.violations), [Violation::MinWidth]);
     assert_eq!(report.violations[0].bbox, rect(0, 0, 1000, 50));
+}
+
+/// The rules of [`rules`] with `rule` on the first metal layer.
+fn rules_with_minimum_cut(rule: MinimumCut) -> Rules {
+    let mut rules = rules(Vec::new());
+    rules.metal[0].minimum_cuts = vec![rule];
+    rules
+}
+
+fn minimum_cut(width: i64) -> MinimumCut {
+    MinimumCut {
+        cuts: 2,
+        width: Dbu(width),
+        within: None,
+        from: None,
+        length: None,
+    }
+}
+
+#[test]
+fn a_cut_on_metal_wide_enough_for_a_minimum_cut_rule_violates_it() {
+    let mut f = Fixture::new();
+    let a = f.a;
+    f.route(M1, a, rect(0, 0, 1000, 500));
+    f.route(V1, a, rect(100, 100, 200, 200));
+
+    let report = f.check(&rules_with_minimum_cut(minimum_cut(400)));
+
+    assert_eq!(kinds(&report.violations), [Violation::MinimumCut]);
+    assert_eq!(report.violations[0].bbox, rect(100, 100, 200, 200));
+    assert_eq!(report.violations[0].layer, M1);
+}
+
+#[test]
+fn a_cut_on_metal_narrower_than_the_rule_width_is_legal() {
+    let mut f = Fixture::new();
+    let a = f.a;
+    f.route(M1, a, rect(0, 0, 1000, 300));
+    f.route(V1, a, rect(100, 100, 200, 200));
+
+    assert!(
+        f.check(&rules_with_minimum_cut(minimum_cut(400)))
+            .violations
+            .is_empty()
+    );
+}
+
+#[test]
+fn a_minimum_cut_rule_from_above_ignores_cuts_below() {
+    let mut f = Fixture::new();
+    let a = f.a;
+    f.route(M2, a, rect(0, 0, 1000, 500));
+    f.route(V1, a, rect(100, 100, 200, 200));
+    let mut rules = rules(Vec::new());
+    rules.metal[1].minimum_cuts = vec![MinimumCut {
+        from: Some(CutApproach::Above),
+        ..minimum_cut(400)
+    }];
+
+    assert!(f.check(&rules).violations.is_empty());
+}
+
+#[test]
+fn with_a_length_a_cut_inside_the_wide_metal_is_exempt() {
+    let mut f = Fixture::new();
+    let a = f.a;
+    f.route(M1, a, rect(0, 0, 1000, 500));
+    f.route(V1, a, rect(100, 100, 200, 200));
+    let rule = MinimumCut {
+        length: Some((Dbu(800), Dbu(800))),
+        ..minimum_cut(400)
+    };
+
+    assert!(f.check(&rules_with_minimum_cut(rule)).violations.is_empty());
+}
+
+#[test]
+fn with_a_length_a_cut_joined_to_the_wide_metal_within_the_distance_violates_it() {
+    let mut f = Fixture::new();
+    let a = f.a;
+    f.route(M1, a, rect(0, 0, 1000, 500));
+    f.route(M1, a, rect(1000, 200, 1500, 300));
+    f.route(V1, a, rect(1300, 200, 1400, 300));
+    let rule = MinimumCut {
+        length: Some((Dbu(800), Dbu(800))),
+        ..minimum_cut(400)
+    };
+
+    let report = f.check(&rules_with_minimum_cut(rule));
+
+    assert_eq!(kinds(&report.violations), [Violation::MinimumCut]);
+    assert_eq!(report.violations[0].bbox, rect(1000, 200, 1300, 300));
 }

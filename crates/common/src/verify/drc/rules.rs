@@ -2,7 +2,9 @@
 //! detailed router reads them.
 
 use crate::db::library::Library;
-use crate::db::rules::{CutSpacing, ParallelRunLengthTable, SpacingTable, WidthRangeSpacing};
+use crate::db::rules::{
+    CutSpacing, MinimumCut, ParallelRunLengthTable, SpacingTable, WidthRangeSpacing,
+};
 use crate::geom::dbu::{Dbu, DbuArea};
 
 /// Rules of one metal layer.
@@ -20,6 +22,8 @@ pub struct MetalRules {
     pub ranges: Vec<WidthRangeSpacing>,
     /// Smallest legal area of a connected piece of metal.
     pub min_area: Option<DbuArea>,
+    /// Cuts that vias to wide metal need.
+    pub minimum_cuts: Vec<MinimumCut>,
 }
 
 impl MetalRules {
@@ -75,6 +79,7 @@ impl Rules {
                 }),
                 ranges: l.rules.width_range_spacing.clone(),
                 min_area: l.rules.min_area,
+                minimum_cuts: l.rules.minimum_cuts.clone(),
             })
             .collect();
         let cut = library

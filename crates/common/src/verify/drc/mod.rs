@@ -11,6 +11,7 @@
 mod cut;
 mod layout;
 mod metal;
+mod min_cut;
 mod model;
 mod rules;
 mod shape;
@@ -50,6 +51,8 @@ pub enum Violation {
     MinArea,
     /// Metal narrower than the layer's minimum width.
     MinWidth,
+    /// A cut on metal wide enough for a minimum-cut rule.
+    MinimumCut,
 }
 
 impl Violation {
@@ -65,6 +68,7 @@ impl Violation {
             Self::CutSpacing => "Cut Spacing",
             Self::MinArea => "Min Area",
             Self::MinWidth => "Min Width",
+            Self::MinimumCut => "Minimum Cut",
         }
     }
 }
@@ -192,7 +196,8 @@ pub fn check(layout: &Layout, rules: &Rules) -> DrcReport {
     let model = Model::new(layout);
     let found = metal::check(&model, rules)
         .merge(cut::check(&model, &rules.cut))
-        .merge(shape::check(&model, rules));
+        .merge(shape::check(&model, rules))
+        .merge(min_cut::check(&model, rules));
     let violations = deduplicated(found.violations);
     let seen: HashSet<Marker> = violations.iter().copied().collect();
     let fixed = deduplicated(
