@@ -386,29 +386,42 @@ impl Region {
 
     /// Every rectangle inside the region that no larger rectangle inside
     /// the region contains.
+    ///
+    /// A maximal rectangle starting at a slab cannot lie in a span the slab
+    /// to its left covers, so such spans are dropped as the rectangles grow
+    /// right: a long piece of metal is not walked again from every slab it
+    /// crosses.
     pub fn max_rectangles(&self) -> Vec<Rect<Dbu>> {
         let n = self.slabs.len();
         let mut out = Vec::new();
         for i in 0..n {
-            let mut common = self.slabs[i].spans.clone();
+            let left: &[(Dbu, Dbu)] = if i > 0 && self.slabs[i - 1].x1 == self.slabs[i].x0 {
+                &self.slabs[i - 1].spans
+            } else {
+                &[]
+            };
+            let mut common: Spans = self.slabs[i]
+                .spans
+                .iter()
+                .copied()
+                .filter(|&(lo, hi)| !spans_cover(left, lo, hi))
+                .collect();
             for j in i..n {
                 if j > i {
                     if self.slabs[j].x0 != self.slabs[j - 1].x1 {
                         break;
                     }
                     common = combine_spans(&common, &self.slabs[j].spans, |a, b| a && b);
-                    if common.is_empty() {
-                        break;
-                    }
+                    common.retain(|&(lo, hi)| !spans_cover(left, lo, hi));
+                }
+                if common.is_empty() {
+                    break;
                 }
                 for &(lo, hi) in &common {
-                    let grows_left = i > 0
-                        && self.slabs[i - 1].x1 == self.slabs[i].x0
-                        && spans_cover(&self.slabs[i - 1].spans, lo, hi);
                     let grows_right = j + 1 < n
                         && self.slabs[j + 1].x0 == self.slabs[j].x1
                         && spans_cover(&self.slabs[j + 1].spans, lo, hi);
-                    if !grows_left && !grows_right {
+                    if !grows_right {
                         out.push(Rect::new(
                             Point::new(self.slabs[i].x0, lo),
                             Point::new(self.slabs[j].x1, hi),
@@ -482,7 +495,8 @@ fn combine_spans(a: &[(Dbu, Dbu)], b: &[(Dbu, Dbu)], keep: fn(bool, bool) -> boo
 
 /// Whether `spans` contain all of `[lo, hi]`.
 fn spans_cover(spans: &[(Dbu, Dbu)], lo: Dbu, hi: Dbu) -> bool {
-    spans.iter().any(|&(a, b)| a <= lo && hi <= b)
+    let k = spans.partition_point(|&(_, b)| b < hi);
+    spans.get(k).is_some_and(|&(a, b)| a <= lo && hi <= b)
 }
 
 const fn find(parent: &mut [usize], mut x: usize) -> usize {
