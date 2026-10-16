@@ -280,6 +280,47 @@ fn def_regular_wiring_switches_layers_at_vias() {
 }
 
 #[test]
+fn def_regular_wiring_patches_are_rectangles_offset_from_the_current_point() {
+    let src = "UNITS DISTANCE MICRONS 1000 ;\nCOMPONENTS 2 ;\n- x INV + PLACED ( 0 0 ) N ;\n\
+               - y INV + PLACED ( 5000 0 ) N ;\nEND COMPONENTS\nNETS 1 ;\n- n ( x Y ) ( y A )\n\
+               + ROUTED M1 ( 2500 1000 ) ( 2700 * ) M1M2\n\
+               NEW M2 ( 2700 1000 ) RECT ( -50 -100 50 0 ) ;\nEND NETS\nEND DESIGN\n";
+
+    let db = def::parse_str(src, Path::new("patch.def"), tiny_library()).unwrap();
+
+    let n = &db.nets[db.net_id("n").unwrap().index()];
+    assert_eq!(
+        n.routing[2],
+        RouteElem::Patch {
+            layer: LayerId(1),
+            rect: rect(2650, 900, 2750, 1000),
+        }
+    );
+    assert_eq!(n.routing.len(), 3);
+}
+
+#[test]
+fn def_regular_wiring_patches_survive_writing_and_reading_back() {
+    let mut db = tiny_design();
+    let n3 = db.net_id("n3").unwrap();
+    db.nets[n3.index()].routing.push(RouteElem::Patch {
+        layer: LayerId(2),
+        rect: rect(4950, 3450, 5100, 3550),
+    });
+
+    let mut text = Vec::new();
+    writer::def::write(&db, &mut text).unwrap();
+    let written = String::from_utf8(text).unwrap();
+    let reread = def::parse_str(&written, Path::new("written.def"), tiny_library()).unwrap();
+
+    assert!(
+        written.contains("M3 ( 4950 3450 ) RECT ( 0 0 150 100 )"),
+        "{written}"
+    );
+    assert_eq!(reread, db);
+}
+
+#[test]
 fn def_special_wiring_keeps_widths_shapes_and_vias() {
     let db = tiny_design();
 

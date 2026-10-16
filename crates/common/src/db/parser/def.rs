@@ -778,6 +778,21 @@ impl<'a> DefParser<'a> {
         Ok((Point::new(x, y), extension))
     }
 
+    /// `( dx1 dy1 dx2 dy2 )`: the corners of a wiring patch, offset from the
+    /// current point `at`.
+    fn patch_rect(&mut self, at: Point<Dbu>) -> Result<Rect<Dbu>, ParseError> {
+        self.lx.expect("(")?;
+        let dx1 = self.dbu("patch corner")?;
+        let dy1 = self.dbu("patch corner")?;
+        let dx2 = self.dbu("patch corner")?;
+        let dy2 = self.dbu("patch corner")?;
+        self.lx.expect(")")?;
+        Ok(Rect::from_corners(
+            at + Point::new(dx1, dy1),
+            at + Point::new(dx2, dy2),
+        ))
+    }
+
     fn path_coord(&mut self, prev: Option<Dbu>) -> Result<Dbu, ParseError> {
         let t = self.lx.expect_token("coordinate")?;
         if t.text == "*" {
@@ -1031,10 +1046,17 @@ impl<'a> DefParser<'a> {
                         let _ = self.lx.next_token();
                         let _ = self.word("value")?;
                     }
-                    "VIRTUAL" | "RECT" => {
-                        return Err(self
-                            .lx
-                            .error(t.line, format!("{} wiring is not supported", t.text)));
+                    "RECT" => {
+                        let _ = self.lx.next_token();
+                        let at =
+                            prev.ok_or_else(|| self.lx.error(t.line, "RECT before any point"))?;
+                        let rect = self.patch_rect(at)?;
+                        self.db.nets[net.index()]
+                            .routing
+                            .push(RouteElem::Patch { layer, rect });
+                    }
+                    "VIRTUAL" => {
+                        return Err(self.lx.error(t.line, "VIRTUAL wiring is not supported"));
                     }
                     _ => {
                         let t = self.lx.expect_token("via name")?;

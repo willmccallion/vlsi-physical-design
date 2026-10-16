@@ -26,6 +26,8 @@ pub enum Source {
     Wire,
     /// A routed via.
     Via,
+    /// A patch of metal on routed wiring.
+    Patch,
 }
 
 /// A rectangle on a layer and what it belongs to.
@@ -81,6 +83,10 @@ pub fn route_elem_shapes(db: &NetlistDB, elem: &RouteElem) -> Vec<Shape> {
                 rect: s.rect.translate(at),
             })
             .collect(),
+        RouteElem::Patch { layer, rect } => vec![Shape {
+            layer: LayerRef::Routing(layer),
+            rect,
+        }],
     }
 }
 
@@ -99,6 +105,7 @@ pub fn wiring_shapes(db: &NetlistDB) -> Vec<OwnedShape> {
             let source = match elem {
                 RouteElem::Wire { .. } => Source::Wire,
                 RouteElem::Via { .. } => Source::Via,
+                RouteElem::Patch { .. } => Source::Patch,
             };
             out.extend(
                 route_elem_shapes(db, elem)

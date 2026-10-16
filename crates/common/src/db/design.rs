@@ -289,6 +289,14 @@ pub enum RouteElem {
         /// Its center.
         at: Point<Dbu>,
     },
+    /// A rectangle of metal patched onto the wiring (DEF `RECT`), as routers
+    /// add to meet minimum area or enclosure.
+    Patch {
+        /// Layer of the patch.
+        layer: LayerId,
+        /// The rectangle.
+        rect: Rect<Dbu>,
+    },
 }
 
 /// A signal net.

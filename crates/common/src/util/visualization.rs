@@ -99,7 +99,7 @@ pub fn draw_routed_design(db: &NetlistDB, filename: &str, width: u32, height: u3
         .flat_map(|n| n.routing.iter())
         .filter_map(|e| match *e {
             RouteElem::Wire { layer, from, to } => Some((layer, from, to)),
-            RouteElem::Via { .. } => None,
+            RouteElem::Via { .. } | RouteElem::Patch { .. } => None,
         })
         .collect();
     wires.sort_by_key(|w| w.0);
@@ -125,10 +125,22 @@ pub fn draw_routed_design(db: &NetlistDB, filename: &str, width: u32, height: u3
 
     for net in &db.nets {
         for e in &net.routing {
-            if let RouteElem::Via { at, .. } = *e {
-                let (x, y) = map.map(at);
-                let rect = ImageRect::at(x as i32 - 1, y as i32 - 1).of_size(3, 3);
-                draw_filled_rect_mut(&mut img, rect, Rgba([255, 255, 255, 200]));
+            match *e {
+                RouteElem::Via { at, .. } => {
+                    let (x, y) = map.map(at);
+                    let rect = ImageRect::at(x as i32 - 1, y as i32 - 1).of_size(3, 3);
+                    draw_filled_rect_mut(&mut img, rect, Rgba([255, 255, 255, 200]));
+                }
+                RouteElem::Patch { layer, rect } => {
+                    let (x1, y1) = map.map(rect.min);
+                    let (x2, y2) = map.map(rect.max);
+                    let (w, h) = ((x2 - x1).abs().max(1.0), (y2 - y1).abs().max(1.0));
+                    let area = ImageRect::at(x1.min(x2) as i32, y1.min(y2) as i32)
+                        .of_size(w as u32, h as u32);
+                    let color = colors[layer.index().min(colors.len() - 1)];
+                    draw_filled_rect_mut(&mut img, area, color);
+                }
+                RouteElem::Wire { .. } => {}
             }
         }
     }

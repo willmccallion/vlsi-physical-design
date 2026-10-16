@@ -359,6 +359,16 @@ fn write_nets(db: &NetlistDB, out: &mut impl Write) -> io::Result<()> {
                         v.name
                     );
                 }
+                RouteElem::Patch { layer, rect } => {
+                    let _ = write!(
+                        line,
+                        "\n  {keyword} {} {} RECT ( 0 0 {} {} )",
+                        lib.layer(layer).name,
+                        pt(rect.min),
+                        rect.width(),
+                        rect.height()
+                    );
+                }
             }
             keyword = "NEW";
         }

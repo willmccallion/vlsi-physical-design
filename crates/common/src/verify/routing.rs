@@ -552,6 +552,7 @@ fn wiring_stats(db: &NetlistDB) -> WiringStats {
         for elem in &net.routing {
             match *elem {
                 RouteElem::Via { .. } => stats.vias += 1,
+                RouteElem::Patch { .. } => {}
                 RouteElem::Wire { layer, from, to } => {
                     let l = layer.index();
                     let (dx, dy) = ((to.x - from.x).abs(), (to.y - from.y).abs());

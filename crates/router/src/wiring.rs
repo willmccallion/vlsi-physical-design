@@ -157,7 +157,7 @@ impl NetRoute {
             .into_iter()
             .filter_map(|e| match e {
                 RouteElem::Via { via, at } => Some((via, at)),
-                RouteElem::Wire { .. } => None,
+                RouteElem::Wire { .. } | RouteElem::Patch { .. } => None,
             })
             .collect()
     }
@@ -298,7 +298,7 @@ pub fn access_elems(tech: &RouteTech, a: &AccessPoint) -> Vec<RouteElem> {
 /// The cuts of one piece of wiring.
 pub fn elem_cuts(db: &NetlistDB, elem: &RouteElem) -> Vec<(CutLayerId, Rect<Dbu>)> {
     match *elem {
-        RouteElem::Wire { .. } => Vec::new(),
+        RouteElem::Wire { .. } | RouteElem::Patch { .. } => Vec::new(),
         RouteElem::Via { via, at } => db
             .library
             .via(via)
@@ -319,6 +319,7 @@ pub fn elem_metal(db: &NetlistDB, elem: &RouteElem) -> Vec<(LayerId, Rect<Dbu>)>
             .map(|r| (layer, r))
             .into_iter()
             .collect(),
+        RouteElem::Patch { layer, rect } => vec![(layer, rect)],
         RouteElem::Via { via, at } => db
             .library
             .via(via)
