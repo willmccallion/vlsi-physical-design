@@ -2,8 +2,8 @@ use super::*;
 use crate::db::indices::{CellId, CutLayerId, LayerId, NetId, NonDefaultRuleId};
 use crate::db::rules::{
     CutApproach, CutSpacing, CutSpacingCondition, EndOfLineSpacing, Lef58CutSpacing,
-    Lef58CutSpacingCondition, MinimumCut, ParallelEdge, ParallelRunLengthTable, SpacingTable,
-    WidthRangeSpacing,
+    Lef58CutSpacingCondition, MinStep, MinimumCut, ParallelEdge, ParallelRunLengthTable,
+    SpacingTable, WidthRangeSpacing,
 };
 use crate::geom::dbu::DbuArea;
 use crate::geom::point::Point;
@@ -36,6 +36,7 @@ fn metal(spacing: SpacingTable) -> MetalRules {
         minimum_cuts: Vec::new(),
         min_enclosed_areas: Vec::new(),
         end_of_line: Vec::new(),
+        min_steps: Vec::new(),
     }
 }
 
@@ -1092,5 +1093,82 @@ fn two_edges_need_a_neighbour_beside_both_ends() {
     assert_eq!(
         kinds(&both_sides.check(&rules_with_eol(parallel)).violations),
         [Violation::EndOfLineSpacing]
+    );
+}
+
+/// The rules of [`rules`] with a minimum step rule on the first metal layer.
+fn rules_with_min_step(length: i64, max_edges: Option<u32>) -> Rules {
+    let mut rules = rules(Vec::new());
+    rules.metal[0].min_steps = vec![MinStep {
+        length: Dbu(length),
+        max_edges,
+    }];
+    rules
+}
+
+#[test]
+fn more_short_edges_in_a_row_than_max_edges_allows_is_a_min_step() {
+    let mut f = Fixture::new();
+    let a = f.a;
+    f.route(M1, a, rect(0, 0, 300, 100));
+    f.route(M1, a, rect(100, 100, 150, 150));
+
+    let report = f.check(&rules_with_min_step(60, Some(1)));
+
+    assert_eq!(kinds(&report.advisory), [Violation::MinStep]);
+    assert_eq!(report.advisory[0].bbox, rect(100, 100, 150, 150));
+    assert!(!kinds(&report.violations).contains(&Violation::MinStep));
+}
+
+#[test]
+fn a_single_short_edge_is_allowed_with_max_edges_one() {
+    let mut f = Fixture::new();
+    let a = f.a;
+    f.route(M1, a, rect(0, 0, 300, 100));
+    f.route(M1, a, rect(0, 100, 250, 200));
+
+    assert!(
+        f.check(&rules_with_min_step(60, Some(1)))
+            .advisory
+            .is_empty()
+    );
+}
+
+#[test]
+fn any_short_edge_breaks_a_min_step_rule_without_max_edges() {
+    let mut f = Fixture::new();
+    let a = f.a;
+    f.route(M1, a, rect(0, 0, 300, 100));
+    f.route(M1, a, rect(0, 100, 250, 200));
+
+    let report = f.check(&rules_with_min_step(60, None));
+
+    assert_eq!(kinds(&report.advisory), [Violation::MinStep]);
+    assert_eq!(report.advisory[0].bbox, rect(250, 100, 300, 100));
+}
+
+#[test]
+fn steps_of_fixed_metal_alone_are_left_alone() {
+    let mut f = Fixture::new();
+    let a = f.a;
+    f.fix(M1, a, rect(0, 0, 300, 100));
+    f.fix(M1, a, rect(100, 100, 150, 150));
+
+    let report = f.check(&rules_with_min_step(60, Some(1)));
+
+    assert!(report.advisory.is_empty());
+}
+
+#[test]
+fn a_loop_with_a_single_long_edge_is_not_checked_for_steps() {
+    let mut f = Fixture::new();
+    let a = f.a;
+    f.route(M1, a, rect(0, 0, 300, 50));
+    f.route(M1, a, rect(0, 50, 50, 100));
+
+    assert!(f.check(&rules_with_min_step(260, None)).advisory.is_empty());
+    assert_eq!(
+        kinds(&f.check(&rules_with_min_step(60, None)).advisory),
+        [Violation::MinStep, Violation::MinStep]
     );
 }

@@ -14,6 +14,7 @@ mod eol;
 mod layout;
 mod metal;
 mod min_cut;
+mod min_step;
 mod model;
 mod rules;
 mod shape;
@@ -61,9 +62,18 @@ pub enum Violation {
     OffGrid,
     /// A line end closer to facing metal than the end-of-line rule allows.
     EndOfLineSpacing,
+    /// More short boundary edges in a row than the minimum step rule allows.
+    MinStep,
 }
 
 impl Violation {
+    /// Whether the kind is reported for information only and does not
+    /// decide whether a routing passes: the minimum step rule, which
+    /// `OpenROAD` never checks when the LEF gives it as a property.
+    pub const fn is_advisory(self) -> bool {
+        matches!(self, Self::MinStep)
+    }
+
     /// The name `OpenROAD` reports the violation by.
     pub const fn name(self) -> &'static str {
         match self {
@@ -80,6 +90,7 @@ impl Violation {
             Self::MinHole => "Min Hole",
             Self::OffGrid => "Off Grid",
             Self::EndOfLineSpacing => "EOL Spacing",
+            Self::MinStep => "Min Step",
         }
     }
 }
@@ -165,6 +176,9 @@ pub struct DrcReport {
     /// Violations involving routed metal, which routing can fix, as
     /// `OpenROAD` reports them.
     pub violations: Vec<Marker>,
+    /// Violations of advisory rules involving routed metal, reported but
+    /// not held against the routing.
+    pub advisory: Vec<Marker>,
     /// Violations among fixed metal only where a cell or I/O pin placement
     /// can move takes part, which placement could have avoided.
     pub placement: Vec<Marker>,
@@ -179,6 +193,11 @@ impl DrcReport {
     /// How many violations of each kind there are, by kind.
     pub fn counts(&self) -> Vec<(Violation, usize)> {
         counts(&self.violations)
+    }
+
+    /// How many advisory violations there are, by kind.
+    pub fn advisory_counts(&self) -> Vec<(Violation, usize)> {
+        counts(&self.advisory)
     }
 
     /// How many fixed-only violations placement takes part in, by kind.
@@ -232,10 +251,13 @@ pub fn check(layout: &Layout, rules: &Rules) -> DrcReport {
     let model = Model::new(layout);
     let found = metal::check(&model, rules)
         .merge(eol::check(&model, rules))
+        .merge(min_step::check(&model, rules))
         .merge(cut::check(&model, &rules.cut))
         .merge(shape::check(&model, rules))
         .merge(min_cut::check(&model, rules));
-    let violations = deduplicated(found.violations);
+    let (advisory, violations): (Vec<Marker>, Vec<Marker>) = deduplicated(found.violations)
+        .into_iter()
+        .partition(|m| m.violation.is_advisory());
     let seen: HashSet<Marker> = violations.iter().copied().collect();
     let fixed = deduplicated(
         found
@@ -249,6 +271,7 @@ pub fn check(layout: &Layout, rules: &Rules) -> DrcReport {
         .partition(|m| placement_takes_part(&model, m));
     DrcReport {
         violations,
+        advisory,
         placement,
         input,
         owners: layout.owners().to_vec(),

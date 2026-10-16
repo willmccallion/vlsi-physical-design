@@ -641,6 +641,9 @@ fn report_routing(db: &NetlistDB) -> bool {
     for m in &drc.violations {
         log::debug!("drc: {}", describe_marker(db, &drc, m));
     }
+    for m in &drc.advisory {
+        log::debug!("drc advisory: {}", describe_marker(db, &drc, m));
+    }
     for m in &drc.placement {
         log::debug!("drc from placement: {}", describe_marker(db, &drc, m));
     }
@@ -653,9 +656,22 @@ fn report_routing(db: &NetlistDB) -> bool {
         "From placement:",
         &drc.placement.len().to_string(),
     );
-    ui::stat_row("In the input:", &drc.input.len().to_string(), "", "");
+    ui::stat_row(
+        "In the input:",
+        &drc.input.len().to_string(),
+        "Advisory:",
+        &drc.advisory.len().to_string(),
+    );
     for (kind, count) in drc.counts() {
         ui::stat_row(&format!("  {}:", kind.name()), &count.to_string(), "", "");
+    }
+    for (kind, count) in drc.advisory_counts() {
+        ui::stat_row(
+            &format!("  {} (advisory):", kind.name()),
+            &count.to_string(),
+            "",
+            "",
+        );
     }
     if report.is_connected() && drc.violations.is_empty() {
         ui::check("Routing is connected and clean.");
