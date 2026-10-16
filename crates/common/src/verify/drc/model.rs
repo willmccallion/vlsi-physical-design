@@ -5,7 +5,7 @@
 //! fixed when the owner's fixed shapes alone have it too. Cuts are kept one
 //! by one; a cut is fixed when a fixed cut of its owner has its rectangle.
 
-use super::layout::{Layout, LayoutShape, OwnerIndex};
+use super::layout::{Layout, LayoutShape, Origin, OwnerIndex};
 use crate::geom::dbu::{Dbu, DbuArea};
 use crate::geom::point::Point;
 use crate::geom::rect::Rect;
@@ -169,7 +169,7 @@ impl<'a> Metal<'a> {
             self.shape_index
                 .near(window)
                 .map(|i| self.shapes[i])
-                .filter(|s| s.owner == owner && s.fixed)
+                .filter(|s| s.owner == owner && s.is_fixed())
                 .filter_map(|s| s.rect.intersection(window)),
         )
     }
@@ -179,8 +179,23 @@ impl<'a> Metal<'a> {
         self.shape_index
             .near(area)
             .map(|i| self.shapes[i])
-            .any(|s| s.owner == owner && !s.fixed && s.rect.overlaps(area))
+            .any(|s| s.owner == owner && !s.is_fixed() && s.rect.overlaps(area))
     }
+
+    /// Whether metal that placement put there, of either of `owners`, meets
+    /// `area`.
+    pub fn placed_metal_meets(&self, owners: (OwnerIndex, OwnerIndex), area: &Rect<Dbu>) -> bool {
+        placed_shape_meets(self.shapes, self.shape_index.near(area), owners)
+    }
+}
+
+fn placed_shape_meets(
+    shapes: &[LayoutShape],
+    near: impl Iterator<Item = usize>,
+    owners: (OwnerIndex, OwnerIndex),
+) -> bool {
+    near.map(|i| shapes[i])
+        .any(|s| s.origin == Origin::Placement && (s.owner == owners.0 || s.owner == owners.1))
 }
 
 /// The geometry of the metal made of `group`, shapes of one owner.
@@ -191,13 +206,13 @@ fn owner_geometry(shapes: &[LayoutShape], group: &[usize]) -> OwnerGeometry {
         group
             .iter()
             .map(|&i| shapes[i])
-            .filter(|s| s.fixed)
+            .filter(LayoutShape::is_fixed)
             .map(|s| s.rect),
     );
     let routed: Vec<Rect<Dbu>> = group
         .iter()
         .map(|&i| shapes[i])
-        .filter(|s| !s.fixed)
+        .filter(|s| !s.is_fixed())
         .map(|s| s.rect)
         .collect();
     let fixed_rects: HashSet<Rect<Dbu>> = fixed.max_rectangles().into_iter().collect();
@@ -244,16 +259,17 @@ fn owner_geometry(shapes: &[LayoutShape], group: &[usize]) -> OwnerGeometry {
 
 /// The cuts of every owner on one cut layer.
 #[derive(Debug)]
-pub(super) struct Cut {
+pub(super) struct Cut<'a> {
     pub rects: Vec<GcRect>,
+    shapes: &'a [LayoutShape],
     index: Index,
 }
 
-impl Cut {
-    fn new(shapes: &[LayoutShape]) -> Self {
+impl<'a> Cut<'a> {
+    fn new(shapes: &'a [LayoutShape]) -> Self {
         let fixed_cuts: HashSet<(OwnerIndex, Rect<Dbu>)> = shapes
             .iter()
-            .filter(|s| s.fixed)
+            .filter(|s| s.is_fixed())
             .map(|s| (s.owner, s.rect))
             .collect();
         let rects: Vec<GcRect> = shapes
@@ -267,12 +283,19 @@ impl Cut {
         Self {
             index: Index::new(rects.iter().map(|r| r.rect)),
             rects,
+            shapes,
         }
     }
 
     /// Positions of the cuts meeting `area`.
     pub fn near(&self, area: &Rect<Dbu>) -> impl Iterator<Item = usize> + '_ {
         self.index.near(area)
+    }
+
+    /// Whether a cut that placement put there, of either of `owners`, meets
+    /// `area`.
+    pub fn placed_cut_meets(&self, owners: (OwnerIndex, OwnerIndex), area: &Rect<Dbu>) -> bool {
+        placed_shape_meets(self.shapes, self.index.near(area), owners)
     }
 }
 
@@ -281,7 +304,7 @@ impl Cut {
 pub(super) struct Model<'a> {
     pub layout: &'a Layout,
     pub metal: Vec<Metal<'a>>,
-    pub cut: Vec<Cut>,
+    pub cut: Vec<Cut<'a>>,
 }
 
 impl<'a> Model<'a> {

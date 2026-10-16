@@ -51,7 +51,7 @@ pub(super) fn check(model: &Model<'_>, rules: &[CutRules]) -> Markers {
 struct LayerCheck<'m> {
     model: &'m Model<'m>,
     layer: CutLayerId,
-    cut: &'m Cut,
+    cut: &'m Cut<'m>,
     rules: &'m CutRules,
     below: Option<&'m Metal<'m>>,
     above: Option<&'m Metal<'m>>,

@@ -71,6 +71,36 @@ impl OwnerIndex {
     }
 }
 
+/// Which step of the flow put a shape where it is.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Origin {
+    /// Routed wiring, which routing can move.
+    Routing,
+    /// A pin or obstruction of a cell, or an I/O pin, that placement can move.
+    Placement,
+    /// Metal nothing in the flow moves: a fixed cell or I/O pin, special
+    /// wiring or a blockage.
+    Input,
+}
+
+impl Origin {
+    /// Whether the shape is fixed as far as routing is concerned: part of a
+    /// cell, an I/O pin, special wiring or a blockage rather than routed
+    /// wiring.
+    pub const fn is_fixed(self) -> bool {
+        !matches!(self, Self::Routing)
+    }
+
+    /// The origin of a cell or I/O pin with placement status `status`.
+    pub const fn of_placed(status: PlacementStatus) -> Self {
+        if status.is_movable() {
+            Self::Placement
+        } else {
+            Self::Input
+        }
+    }
+}
+
 /// One rectangle of the layout.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct LayoutShape {
@@ -78,9 +108,15 @@ pub struct LayoutShape {
     pub owner: OwnerIndex,
     /// The rectangle.
     pub rect: Rect<Dbu>,
-    /// Whether it is fixed: part of a cell, an I/O pin, special wiring or a
-    /// blockage, rather than routed wiring.
-    pub fixed: bool,
+    /// Where it comes from.
+    pub origin: Origin,
+}
+
+impl LayoutShape {
+    /// Whether it is fixed rather than routed wiring.
+    pub const fn is_fixed(&self) -> bool {
+        self.origin.is_fixed()
+    }
 }
 
 /// Every shape on every layer, with its owner.
@@ -118,7 +154,7 @@ impl Layout {
 
     /// Adds a rectangle; one on a layer the layout does not have, or
     /// without area, is ignored.
-    pub fn add(&mut self, layer: LayerRef, owner: OwnerIndex, rect: Rect<Dbu>, fixed: bool) {
+    pub fn add(&mut self, layer: LayerRef, owner: OwnerIndex, rect: Rect<Dbu>, origin: Origin) {
         if rect.width() < Dbu::ZERO || rect.height() < Dbu::ZERO {
             return;
         }
@@ -127,7 +163,11 @@ impl Layout {
             LayerRef::Cut(c) => self.cut.get_mut(c.index()),
         };
         if let Some(shapes) = shapes {
-            shapes.push(LayoutShape { owner, rect, fixed });
+            shapes.push(LayoutShape {
+                owner,
+                rect,
+                origin,
+            });
         }
     }
 
@@ -178,25 +218,26 @@ impl Layout {
                 continue;
             }
             let owner = layout.owner(Owner::Net(io.net), net_is_supply(db, &special, io.net));
+            let origin = Origin::of_placed(io.status);
             for s in io.placed_shapes() {
-                layout.add(s.layer, owner, s.rect, true);
+                layout.add(s.layer, owner, s.rect, origin);
             }
         }
         for (i, net) in db.special_nets.iter().enumerate() {
             let (owner, supply) = special.owner(db, SpecialNetId::new(i));
             let owner = layout.owner(owner, supply);
             for s in special_net_metal(net) {
-                layout.add(s.layer, owner, s.rect, true);
+                layout.add(s.layer, owner, s.rect, Origin::Input);
             }
             for &(via, at) in &net.vias {
                 for s in &db.library.via(via).shapes {
-                    layout.add(s.layer, owner, s.rect.translate(at), true);
+                    layout.add(s.layer, owner, s.rect.translate(at), Origin::Input);
                 }
             }
         }
         for (i, s) in db.routing_blockages.iter().enumerate() {
             let owner = layout.owner(Owner::Blockage(BlockageId::new(i)), false);
-            layout.add(s.layer, owner, s.rect, true);
+            layout.add(s.layer, owner, s.rect, Origin::Input);
         }
         for (i, net) in db.nets.iter().enumerate() {
             let id = NetId::new(i);
@@ -206,7 +247,7 @@ impl Layout {
             let owner = layout.owner(Owner::Net(id), net_is_supply(db, &special, id));
             for elem in &net.routing {
                 for s in route_elem_shapes(db, elem) {
-                    layout.add(s.layer, owner, s.rect, false);
+                    layout.add(s.layer, owner, s.rect, Origin::Routing);
                 }
             }
         }
@@ -216,6 +257,7 @@ impl Layout {
     fn add_cell(&mut self, db: &NetlistDB, special: &SpecialOwners, cell: CellId) {
         let c = &db.cells[cell.index()];
         let m = db.cell_macro(cell);
+        let origin = Origin::of_placed(c.status);
         let place = |s: &Shape| c.orient.place_rect(&s.rect, m.size, c.location);
         let mut net_of_pin: Vec<Option<NetId>> = vec![None; m.pins.len()];
         for &pin in &c.pins {
@@ -240,13 +282,13 @@ impl Layout {
             };
             let owner = self.owner(owner, supply);
             for s in &mp.shapes {
-                self.add(s.layer, owner, place(s), true);
+                self.add(s.layer, owner, place(s), origin);
             }
         }
         if !m.obstructions.is_empty() {
             let owner = self.owner(Owner::Obstruction(cell), false);
             for s in &m.obstructions {
-                self.add(s.layer, owner, place(s), true);
+                self.add(s.layer, owner, place(s), origin);
             }
         }
     }

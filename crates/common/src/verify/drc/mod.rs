@@ -6,7 +6,8 @@
 //! edges the rules look at, while cuts are checked one by one. A violation
 //! made of fixed metal alone (cells, I/O pins, special wiring, blockages) is
 //! one routing cannot fix; `OpenROAD` leaves those out, and they are
-//! reported here apart from the rest.
+//! reported here apart from the rest, split by whether placement could have
+//! avoided them.
 
 mod cut;
 mod layout;
@@ -18,7 +19,7 @@ mod shape;
 #[cfg(test)]
 mod tests;
 
-pub use layout::{Layout, LayoutShape, Owner, OwnerIndex};
+pub use layout::{Layout, LayoutShape, Origin, Owner, OwnerIndex};
 pub use rules::{CutRules, MetalRules, Rules};
 
 use crate::db::design::NetlistDB;
@@ -160,8 +161,12 @@ pub struct DrcReport {
     /// Violations involving routed metal, which routing can fix, as
     /// `OpenROAD` reports them.
     pub violations: Vec<Marker>,
-    /// Violations among fixed metal only, which routing cannot fix.
-    pub fixed: Vec<Marker>,
+    /// Violations among fixed metal only where a cell or I/O pin placement
+    /// can move takes part, which placement could have avoided.
+    pub placement: Vec<Marker>,
+    /// Violations among fixed metal only that the input alone makes: fixed
+    /// cells and I/O pins, special wiring and blockages.
+    pub input: Vec<Marker>,
     /// The owner each index of the markers stands for.
     pub owners: Vec<Owner>,
 }
@@ -172,9 +177,14 @@ impl DrcReport {
         counts(&self.violations)
     }
 
-    /// How many fixed-only violations of each kind there are, by kind.
-    pub fn fixed_counts(&self) -> Vec<(Violation, usize)> {
-        counts(&self.fixed)
+    /// How many fixed-only violations placement takes part in, by kind.
+    pub fn placement_counts(&self) -> Vec<(Violation, usize)> {
+        counts(&self.placement)
+    }
+
+    /// How many fixed-only violations the input alone makes, by kind.
+    pub fn input_counts(&self) -> Vec<(Violation, usize)> {
+        counts(&self.input)
     }
 }
 
@@ -213,10 +223,29 @@ pub fn check(layout: &Layout, rules: &Rules) -> DrcReport {
             .filter(|m| !seen.contains(m))
             .collect(),
     );
+    let (placement, input) = fixed
+        .into_iter()
+        .partition(|m| placement_takes_part(&model, m));
     DrcReport {
         violations,
-        fixed,
+        placement,
+        input,
         owners: layout.owners().to_vec(),
+    }
+}
+
+/// Whether metal of a cell or I/O pin placement can move is part of the
+/// fixed-only marker `m`.
+fn placement_takes_part(model: &Model<'_>, m: &Marker) -> bool {
+    match m.layer {
+        LayerRef::Routing(l) => model
+            .metal
+            .get(l.index())
+            .is_some_and(|metal| metal.placed_metal_meets(m.owners, &m.bbox)),
+        LayerRef::Cut(c) => model
+            .cut
+            .get(c.index())
+            .is_some_and(|cut| cut.placed_cut_meets(m.owners, &m.bbox)),
     }
 }
 

@@ -110,11 +110,15 @@ impl Fixture {
     }
 
     fn route(&mut self, layer: LayerRef, owner: OwnerIndex, r: Rect<Dbu>) {
-        self.layout.add(layer, owner, r, false);
+        self.layout.add(layer, owner, r, Origin::Routing);
     }
 
     fn fix(&mut self, layer: LayerRef, owner: OwnerIndex, r: Rect<Dbu>) {
-        self.layout.add(layer, owner, r, true);
+        self.layout.add(layer, owner, r, Origin::Input);
+    }
+
+    fn place(&mut self, layer: LayerRef, owner: OwnerIndex, r: Rect<Dbu>) {
+        self.layout.add(layer, owner, r, Origin::Placement);
     }
 
     fn check(&self, rules: &Rules) -> DrcReport {
@@ -189,7 +193,7 @@ fn violations_of_fixed_metal_alone_are_reported_apart() {
     let report = f.check(&rules(Vec::new()));
 
     assert!(report.violations.is_empty());
-    assert_eq!(kinds(&report.fixed), [Violation::Short]);
+    assert_eq!(kinds(&report.input), [Violation::Short]);
 }
 
 #[test]
@@ -359,7 +363,7 @@ fn a_routed_cut_on_a_fixed_cut_of_its_owner_counts_as_fixed() {
     let report = f.check(&rules(vec![cut_rule(100)]));
 
     assert!(report.violations.is_empty());
-    assert_eq!(kinds(&report.fixed), [Violation::CutShort]);
+    assert_eq!(kinds(&report.input), [Violation::CutShort]);
 }
 
 #[test]
@@ -625,7 +629,7 @@ fn a_piece_with_an_edge_of_fixed_metal_is_exempt_from_the_minimum_area() {
     let report = f.check(&rules_with_min_area(20_000));
 
     assert!(report.violations.is_empty());
-    assert!(report.fixed.is_empty());
+    assert!(report.input.is_empty());
 }
 
 #[test]
@@ -842,5 +846,46 @@ fn fixed_metal_off_the_manufacturing_grid_is_exempt() {
     let report = f.check(&rules);
 
     assert!(report.violations.is_empty());
-    assert!(report.fixed.is_empty());
+    assert!(report.input.is_empty());
+}
+
+#[test]
+fn fixed_metal_a_placed_cell_takes_part_in_is_a_placement_defect() {
+    let mut f = Fixture::new();
+    let (a, b) = (f.a, f.b);
+    f.place(M1, a, rect(0, 0, 1000, 100));
+    f.fix(M1, b, rect(500, 0, 1500, 100));
+
+    let report = f.check(&rules(Vec::new()));
+
+    assert!(report.violations.is_empty());
+    assert_eq!(kinds(&report.placement), [Violation::Short]);
+    assert!(report.input.is_empty());
+}
+
+#[test]
+fn placed_cuts_touching_input_cuts_are_a_placement_defect() {
+    let mut f = Fixture::new();
+    let (a, b) = (f.a, f.b);
+    f.place(V1, a, rect(0, 0, 100, 100));
+    f.fix(V1, b, rect(100, 0, 200, 100));
+
+    let report = f.check(&rules(vec![cut_rule(100)]));
+
+    assert_eq!(kinds(&report.placement), [Violation::CutShort]);
+    assert!(report.input.is_empty());
+}
+
+#[test]
+fn placed_metal_near_a_fixed_only_violation_but_not_in_it_leaves_it_an_input_defect() {
+    let mut f = Fixture::new();
+    let (a, b) = (f.a, f.b);
+    f.fix(M1, a, rect(0, 0, 1000, 100));
+    f.fix(M1, b, rect(1050, 0, 2000, 100));
+    f.place(M1, a, rect(0, 300, 1000, 400));
+
+    let report = f.check(&rules(Vec::new()));
+
+    assert_eq!(kinds(&report.input), [Violation::MetalSpacing]);
+    assert!(report.placement.is_empty());
 }

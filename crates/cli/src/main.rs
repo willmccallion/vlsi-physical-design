@@ -652,15 +652,19 @@ fn report_routing(db: &NetlistDB) -> bool {
     for m in &drc.violations {
         log::debug!("drc: {}", describe_marker(db, &drc, m));
     }
-    for m in &drc.fixed {
-        log::debug!("drc among fixed metal: {}", describe_marker(db, &drc, m));
+    for m in &drc.placement {
+        log::debug!("drc from placement: {}", describe_marker(db, &drc, m));
+    }
+    for m in &drc.input {
+        log::debug!("drc in the input: {}", describe_marker(db, &drc, m));
     }
     ui::stat_row(
         "DRC violations:",
         &drc.violations.len().to_string(),
-        "Among fixed:",
-        &drc.fixed.len().to_string(),
+        "From placement:",
+        &drc.placement.len().to_string(),
     );
+    ui::stat_row("In the input:", &drc.input.len().to_string(), "", "");
     for (kind, count) in drc.counts() {
         ui::stat_row(&format!("  {}:", kind.name()), &count.to_string(), "", "");
     }

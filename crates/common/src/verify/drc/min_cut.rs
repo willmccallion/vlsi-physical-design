@@ -45,8 +45,8 @@ struct LayerCheck<'m> {
     layer: LayerId,
     metal: &'m Metal<'m>,
     rules: &'m [MinimumCut],
-    below: Option<&'m Cut>,
-    above: Option<&'m Cut>,
+    below: Option<&'m Cut<'m>>,
+    above: Option<&'m Cut<'m>>,
 }
 
 impl LayerCheck<'_> {
