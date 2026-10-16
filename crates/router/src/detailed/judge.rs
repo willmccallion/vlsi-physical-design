@@ -108,15 +108,23 @@ pub(super) struct Judgment {
     pub nets: FxHashSet<NetId>,
 }
 
+/// A net's wiring as a worker proposes it: its committed wiring without
+/// the edges the worker took out, with the edges it routed.
+#[derive(Clone, Copy, Debug)]
+pub(super) struct Candidate<'e> {
+    pub net: NetId,
+    pub without: &'e [Edge],
+    pub with: &'e [Edge],
+}
+
 impl DetailedRouter<'_> {
     /// The window a region is judged from: the region grown by the halo.
     pub(super) fn judge_window(&self, area: &Rect<Dbu>) -> Rect<Dbu> {
         area.expand(self.halo)
     }
 
-    /// Judges `area` with each candidate net's wiring inside it replaced by
-    /// its candidate edges, added to what the net keeps outside.
-    pub(super) fn judge(&self, area: &Rect<Dbu>, candidates: &[(NetId, &[Edge])]) -> Judgment {
+    /// Judges `area` with each candidate net's wiring as proposed.
+    pub(super) fn judge(&self, area: &Rect<Dbu>, candidates: &[Candidate<'_>]) -> Judgment {
         let window = self.judge_window(area);
         let layout = self.window_layout(&window, candidates);
         let findings = check_window(&layout, &self.rules, *area, window);
@@ -136,7 +144,7 @@ impl DetailedRouter<'_> {
     /// the wiring of every net with metal or cuts in it, which brings along
     /// via pads on layers below the routable ones, and for each candidate
     /// net its kept wiring together with its candidate edges.
-    fn window_layout(&self, window: &Rect<Dbu>, candidates: &[(NetId, &[Edge])]) -> Layout {
+    fn window_layout(&self, window: &Rect<Dbu>, candidates: &[Candidate<'_>]) -> Layout {
         let mut layout = Layout::with_owners_of(&self.fixed);
         for (layer, i) in self.fixed_tiles.near(window) {
             let shape = match layer {
@@ -147,7 +155,7 @@ impl DetailedRouter<'_> {
                 layout.add_shape(layer, shape);
             }
         }
-        let candidate_nets: FxHashSet<NetId> = candidates.iter().map(|&(n, _)| n).collect();
+        let candidate_nets: FxHashSet<NetId> = candidates.iter().map(|c| c.net).collect();
         let mut present: FxHashSet<NetId> = FxHashSet::default();
         let mut note = |owner: crate::occupancy::Owner| {
             if let crate::occupancy::Owner::Net(n) = owner {
@@ -171,9 +179,9 @@ impl DetailedRouter<'_> {
                 layout.add_wiring(self.db, net, &self.elems[net.index()], Some(window));
             }
         }
-        for &(net, edges) in candidates {
-            let elems: Vec<RouteElem> = self.as_committed(net, edges).elems(self.tech);
-            layout.add_wiring(self.db, net, &elems, Some(window));
+        for c in candidates {
+            let elems: Vec<RouteElem> = self.as_committed(c).elems(self.tech);
+            layout.add_wiring(self.db, c.net, &elems, Some(window));
         }
         layout
     }
@@ -195,11 +203,15 @@ impl DetailedRouter<'_> {
         (markers, counts)
     }
 
-    /// Fills the gaps a route's wiring leaves along its tracks, as committing
-    /// it does, so that a candidate is judged as it will be kept.
-    pub(super) fn as_committed(&self, net: NetId, edges: &[Edge]) -> NetRoute {
-        let mut route = self.routes[net.index()].clone();
-        route.edges.extend_from_slice(edges);
+    /// The route a candidate stands for, with the gaps along its tracks
+    /// filled as committing it does, so that it is judged as it will be kept.
+    pub(super) fn as_committed(&self, c: &Candidate<'_>) -> NetRoute {
+        let mut route = self.routes[c.net.index()].clone();
+        if !c.without.is_empty() {
+            let gone: FxHashSet<Edge> = c.without.iter().copied().collect();
+            route.edges.retain(|e| !gone.contains(e));
+        }
+        route.edges.extend_from_slice(c.with);
         route.edges.extend(gap_fills(&route, self.db, self.tech));
         route.edges.sort_unstable();
         route.edges.dedup();

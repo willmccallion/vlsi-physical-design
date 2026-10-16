@@ -425,6 +425,7 @@ impl<'a> DetailedRouter<'a> {
             costs,
             guide: guide.as_ref(),
             own_vias: None,
+            ripped: &[],
         };
         let window = self.window(net);
         if let Some(route) = self.route_tree(&search, terms, &window, net_guide) {

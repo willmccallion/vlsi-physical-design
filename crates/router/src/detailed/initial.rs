@@ -10,7 +10,9 @@
 //! share it, so the pieces of a net form one tree. Nets the regions cannot
 //! route are routed whole afterwards.
 
-use super::region::{Piece, RegionGrid, RegionKey, RepairStats, colour, contains_half_open};
+use super::region::{
+    Changes, Piece, RegionGrid, RegionKey, RepairStats, Routed, colour, contains_half_open,
+};
 use super::{DetailedRouter, NetRoute};
 use crate::access::{AccessPoint, Node};
 use crate::global::GCell;
@@ -129,28 +131,23 @@ impl DetailedRouter<'_> {
             self.commit(net, &route);
         }
 
-        let routed: Vec<Vec<Option<Vec<Edge>>>> = batch
+        let routed: Vec<Vec<Routed>> = batch
             .par_iter()
             .map(|(area, pieces)| self.route_region(area, pieces, costs))
             .collect();
 
         let mut failed = Vec::new();
-        let mut additions: BTreeMap<NetId, Vec<Edge>> = BTreeMap::new();
-        for ((_, pieces), results) in batch.iter().zip(routed) {
-            for (piece, result) in pieces.iter().zip(results) {
-                match result {
-                    Some(edges) => additions.entry(piece.net).or_default().extend(edges),
-                    None => failed.push(piece.net),
+        let mut changes = Changes::default();
+        for ((_, pieces), routed) in batch.iter().zip(routed) {
+            for (i, item) in routed.into_iter().enumerate() {
+                match item.edges {
+                    Some(edges) => changes.apply(item.net, item.removed, edges),
+                    None if i < pieces.len() => failed.push(item.net),
+                    None => {}
                 }
             }
         }
-        for (net, edges) in additions {
-            let mut route = self.routes[net.index()].clone();
-            route.edges.extend(edges);
-            route.edges.sort_unstable();
-            route.edges.dedup();
-            self.commit(net, &route);
-        }
+        self.commit_changes(changes);
         failed
     }
 

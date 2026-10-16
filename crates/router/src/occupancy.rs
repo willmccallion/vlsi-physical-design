@@ -645,8 +645,26 @@ pub struct LocalOccupancy {
 }
 
 impl LocalOccupancy {
-    /// Records `rect` on `layer` for `owner`.
+    /// Records `rect` on `layer` as wiring of `owner` routed here.
     pub fn add_rect(&mut self, tech: &RouteTech, layer: LayerId, rect: &Rect<Dbu>, owner: Owner) {
+        self.record_rect(tech, layer, rect, owner, Origin::Wiring);
+    }
+
+    /// Records `rect` on `layer` as wiring of `owner` that stays when the
+    /// owner is routed again here: wiring of a net ripped up in this worker
+    /// that lies beyond the worker's reach.
+    pub fn keep_rect(&mut self, tech: &RouteTech, layer: LayerId, rect: &Rect<Dbu>, owner: Owner) {
+        self.record_rect(tech, layer, rect, owner, Origin::Fixed);
+    }
+
+    fn record_rect(
+        &mut self,
+        tech: &RouteTech,
+        layer: LayerId,
+        rect: &Rect<Dbu>,
+        owner: Owner,
+        origin: Origin,
+    ) {
         let lt = tech.layer(layer);
         let (_, (lo, hi)) = lt.across_along_rect(rect);
         for (track, centered) in affected_tracks(lt, rect) {
@@ -658,13 +676,30 @@ impl LocalOccupancy {
                     hi,
                     owner,
                     centered,
-                    origin: Origin::Wiring,
+                    origin,
                 });
         }
     }
 
-    /// Records a cut on `cut` for `owner`.
+    /// Records a cut on `cut` as wiring of `owner` routed here.
     pub fn add_cut(&mut self, tech: &RouteTech, cut: CutLayerId, rect: &Rect<Dbu>, owner: Owner) {
+        self.record_cut(tech, cut, rect, owner, Origin::Wiring);
+    }
+
+    /// Records a cut on `cut` of `owner` that stays when the owner is routed
+    /// again here.
+    pub fn keep_cut(&mut self, tech: &RouteTech, cut: CutLayerId, rect: &Rect<Dbu>, owner: Owner) {
+        self.record_cut(tech, cut, rect, owner, Origin::Fixed);
+    }
+
+    fn record_cut(
+        &mut self,
+        tech: &RouteTech,
+        cut: CutLayerId,
+        rect: &Rect<Dbu>,
+        owner: Owner,
+        origin: Origin,
+    ) {
         let _ = self
             .cuts
             .entry(cut)
@@ -672,17 +707,17 @@ impl LocalOccupancy {
             .add(CutOccupant {
                 rect: *rect,
                 owner,
-                origin: Origin::Wiring,
+                origin,
             });
     }
 
-    /// Forgets every rectangle and cut of `owner`.
+    /// Forgets the wiring routed here for `owner`, keeping what stays.
     pub fn remove_owner(&mut self, owner: Owner) {
         for list in self.tracks.values_mut() {
-            list.retain(|o| o.owner != owner);
+            list.retain(|o| o.owner != owner || o.origin == Origin::Fixed);
         }
         for layer in self.cuts.values_mut() {
-            layer.retain(|o| o.owner != owner);
+            layer.retain(|o| o.owner != owner || o.origin == Origin::Fixed);
         }
     }
 

@@ -282,6 +282,10 @@ pub(crate) struct Search<'a> {
     pub(crate) guide: Option<&'a Guide>,
     /// Vias the net already has, if new vias should keep clear of them.
     pub(crate) own_vias: Option<&'a OwnVias>,
+    /// Nets the worker is routing again whose wiring in the shared
+    /// occupancy therefore does not count; what they keep near the worker
+    /// is in the overlay.
+    pub(crate) ripped: &'a [Owner],
 }
 
 /// A position in the search: a node, the way the path moves along the
@@ -383,10 +387,11 @@ impl Search<'_> {
         cost
     }
 
-    /// Cost of conflicting with one occupant.
-    const fn occupant_cost(&self, owner: Owner, origin: Origin) -> f64 {
+    /// Cost of conflicting with one occupant of the shared occupancy.
+    fn occupant_cost(&self, owner: Owner, origin: Origin) -> f64 {
         match (owner, origin) {
             (Owner::Obstacle, _) | (Owner::Net(_), Origin::Fixed) => OBSTACLE_COST,
+            (Owner::Net(_), Origin::Wiring) if self.ripped.contains(&owner) => 0.0,
             (Owner::Net(_), Origin::Wiring) => self.costs.penalty,
         }
     }
@@ -905,6 +910,7 @@ mod tests {
             },
             guide: None,
             own_vias: None,
+            ripped: &[],
         };
         let m1 = LayerId(0);
         let lt = tech.layer(m1);
