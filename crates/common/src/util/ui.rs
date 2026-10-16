@@ -3,6 +3,7 @@
 //! All functions write to stderr so stdout stays clean for piping.
 //! Uses `yansi` for ANSI colors with automatic TTY detection.
 
+use crate::db::library::Direction;
 use yansi::Paint;
 
 /// Prints the PARE banner and a horizontal rule.
@@ -70,6 +71,35 @@ pub fn routing_table_header(phase: &str) {
         .dim()
     );
     eprintln!("    {}", "-".repeat(2 + 8 + 10 * 4 + phase.len()).dim());
+}
+
+/// Prints the header of the global routing table: each layer's resources,
+/// the demand on them and the overflow, as `OpenROAD` reports them.
+pub fn gr_layer_table_header() {
+    eprintln!(
+        "    {}",
+        format!(
+            "{:<10} {:<10} {:>12} {:>12} {:>8} {:>10}",
+            "Layer", "Direction", "Resource", "Demand", "Usage", "Overflow"
+        )
+        .dim()
+    );
+}
+
+/// Prints one layer of the global routing table.
+pub fn gr_layer_row(layer: &str, direction: Direction, capacity: u64, usage: u64, overflow: u64) {
+    let direction = match direction {
+        Direction::Horizontal => "horizontal",
+        Direction::Vertical => "vertical",
+    };
+    let percent = if capacity == 0 {
+        0.0
+    } else {
+        100.0 * usage as f64 / capacity as f64
+    };
+    eprintln!(
+        "    {layer:<10} {direction:<10} {capacity:>12} {usage:>12} {percent:>7.1}% {overflow:>10}"
+    );
 }
 
 /// Prints the header of the detailed routing table: the design rule

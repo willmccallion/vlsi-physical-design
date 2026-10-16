@@ -55,6 +55,21 @@ pub struct GlobalGrid {
     history: Vec<f32>,
 }
 
+/// One layer's routing resources and their use, summed over its edges.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct LayerTotals {
+    /// The layer.
+    pub layer: LayerId,
+    /// Its preferred direction, which its edges run along.
+    pub direction: Direction,
+    /// Tracks the edges offer, after the reserve and fixed metal.
+    pub capacity: u64,
+    /// Tracks the routes take.
+    pub usage: u64,
+    /// Usage above capacity.
+    pub overflow: u64,
+}
+
 impl GlobalGrid {
     /// A grid of `gcell`-sized cells over `die` whose edges offer the free
     /// tracks crossing them less the `reserve` fraction.
@@ -309,6 +324,32 @@ impl GlobalGrid {
             .zip(&self.capacity)
             .map(|(&u, &c)| u64::from(u.saturating_sub(c)))
             .sum()
+    }
+
+    /// Capacity, usage and overflow summed over each layer's edges, lowest
+    /// routing layer first.
+    pub fn layer_totals(&self) -> Vec<LayerTotals> {
+        let per_layer = usize::from(self.nx) * usize::from(self.ny);
+        self.directions
+            .iter()
+            .enumerate()
+            .map(|(l, &direction)| {
+                let edges = l * per_layer..(l + 1) * per_layer;
+                let mut totals = LayerTotals {
+                    layer: LayerId::new(self.min_layer.index() + l),
+                    direction,
+                    capacity: 0,
+                    usage: 0,
+                    overflow: 0,
+                };
+                for e in edges {
+                    totals.capacity += u64::from(self.capacity[e]);
+                    totals.usage += u64::from(self.usage[e]);
+                    totals.overflow += u64::from(self.usage[e].saturating_sub(self.capacity[e]));
+                }
+                totals
+            })
+            .collect()
     }
 
     /// Cost of one more net on edge `e`.

@@ -107,6 +107,16 @@ pub fn route(db: &mut NetlistDB, config: &RoutingConfig) -> Result<RoutingSummar
             "GR overflow:",
             &grid.overflow().to_string(),
         );
+        ui::gr_layer_table_header();
+        for t in grid.layer_totals() {
+            ui::gr_layer_row(
+                &db.library.layer(t.layer).name,
+                t.direction,
+                t.capacity,
+                t.usage,
+                t.overflow,
+            );
+        }
         let start = Instant::now();
         let wires = assign_tracks(&tech, &dr.occupancy, &grid, &global, &dr.pin_points());
         dr.set_guides(global, &grid);
