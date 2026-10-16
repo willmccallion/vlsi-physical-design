@@ -1,6 +1,6 @@
 //! Metal and cut rectangles of a design, tagged with what they belong to.
 
-use crate::db::design::{Cell, IoPin, NetlistDB, PinOwner, RouteElem};
+use crate::db::design::{Cell, IoPin, NetlistDB, PinOwner, RouteElem, SpecialNet, SpecialWire};
 use crate::db::indices::{CellId, NetId};
 use crate::db::library::{LayerRef, Shape};
 use crate::geom::dbu::Dbu;
@@ -88,6 +88,56 @@ pub fn route_elem_shapes(db: &NetlistDB, elem: &RouteElem) -> Vec<Shape> {
             rect,
         }],
     }
+}
+
+/// The metal of a special net as `TritonRoute` reads it.
+///
+/// Every wire and `RECT` is a path along its centerline, and one without a
+/// `SHAPE` grows by half its width at both ends. A `RECT` odd in both
+/// dimensions, which `OpenDB` drops, stays as written.
+pub fn special_net_metal(net: &SpecialNet) -> impl Iterator<Item = Shape> + '_ {
+    let wires = net.wires.iter().map(|w| Shape {
+        layer: LayerRef::Routing(w.layer),
+        rect: special_wire_box(w),
+    });
+    let rects = net.rects.iter().map(|s| Shape {
+        layer: s.layer,
+        rect: special_rect_box(&s.rect),
+    });
+    wires.chain(rects)
+}
+
+fn special_wire_box(wire: &SpecialWire) -> Rect<Dbu> {
+    let rect = wire.rect();
+    if wire.shape.is_some() {
+        return rect;
+    }
+    let along_y = wire.from.y != wire.to.y;
+    extend_along(&rect, along_y, wire.width / 2)
+}
+
+/// A `RECT` read as a path: an even side is the width (the shorter one when
+/// both are even) and the box grows by half of it along the other axis.
+fn special_rect_box(rect: &Rect<Dbu>) -> Rect<Dbu> {
+    let (dx, dy) = (rect.width(), rect.height());
+    let even = |d: Dbu| d.get() % 2 == 0;
+    let along_y = match (even(dx), even(dy)) {
+        (true, true) => dy >= dx,
+        (true, false) => true,
+        (false, true) => false,
+        (false, false) => return *rect,
+    };
+    let width = if along_y { dx } else { dy };
+    extend_along(rect, along_y, width / 2)
+}
+
+fn extend_along(rect: &Rect<Dbu>, along_y: bool, by: Dbu) -> Rect<Dbu> {
+    let step = if along_y {
+        Point::new(Dbu::ZERO, by)
+    } else {
+        Point::new(by, Dbu::ZERO)
+    };
+    Rect::new(rect.min - step, rect.max + step)
 }
 
 /// Whether the router is responsible for connecting this net.
@@ -196,14 +246,7 @@ fn fixed_shapes_of(
     }
 
     for n in &db.special_nets {
-        for w in &n.wires {
-            let shape = Shape {
-                layer: LayerRef::Routing(w.layer),
-                rect: w.rect(),
-            };
-            out.push(fixed(shape, Owner::Obstacle));
-        }
-        out.extend(n.rects.iter().map(|&s| fixed(s, Owner::Obstacle)));
+        out.extend(special_net_metal(n).map(|s| fixed(s, Owner::Obstacle)));
         for &(via, at) in &n.vias {
             out.extend(db.library.via(via).shapes.iter().map(|s| {
                 fixed(
@@ -231,5 +274,77 @@ pub const fn layer_slot(db: &NetlistDB, layer: LayerRef) -> usize {
     match layer {
         LayerRef::Routing(l) => l.index(),
         LayerRef::Cut(c) => db.library.routing_layers.len() + c.index(),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::db::indices::LayerId;
+
+    fn rect(x0: i64, y0: i64, x1: i64, y1: i64) -> Rect<Dbu> {
+        Rect::from_corners(Point::new(Dbu(x0), Dbu(y0)), Point::new(Dbu(x1), Dbu(y1)))
+    }
+
+    fn wire(from: (i64, i64), to: (i64, i64), shape: Option<&str>) -> SpecialWire {
+        SpecialWire {
+            layer: LayerId(0),
+            width: Dbu(100),
+            from: Point::new(Dbu(from.0), Dbu(from.1)),
+            to: Point::new(Dbu(to.0), Dbu(to.1)),
+            extensions: (Dbu::ZERO, Dbu::ZERO),
+            shape: shape.map(str::to_string),
+        }
+    }
+
+    #[test]
+    fn a_shaped_special_wire_keeps_its_box() {
+        let w = wire((0, 500), (1000, 500), Some("STRIPE"));
+        assert_eq!(special_wire_box(&w), rect(0, 450, 1000, 550));
+    }
+
+    #[test]
+    fn an_unshaped_special_wire_grows_by_half_its_width_at_both_ends() {
+        assert_eq!(
+            special_wire_box(&wire((0, 500), (1000, 500), None)),
+            rect(-50, 450, 1050, 550)
+        );
+        assert_eq!(
+            special_wire_box(&wire((500, 0), (500, 1000), None)),
+            rect(450, -50, 550, 1050)
+        );
+    }
+
+    #[test]
+    fn a_special_rect_with_one_even_side_grows_along_the_other() {
+        assert_eq!(
+            special_rect_box(&rect(0, 0, 900, 45)),
+            rect(0, -450, 900, 495)
+        );
+        assert_eq!(
+            special_rect_box(&rect(0, 0, 45, 900)),
+            rect(-450, 0, 495, 900)
+        );
+    }
+
+    #[test]
+    fn a_special_rect_even_both_ways_takes_the_shorter_side_as_its_width() {
+        assert_eq!(
+            special_rect_box(&rect(0, 0, 400, 100)),
+            rect(-50, 0, 450, 100)
+        );
+        assert_eq!(
+            special_rect_box(&rect(0, 0, 100, 400)),
+            rect(0, -50, 100, 450)
+        );
+        assert_eq!(
+            special_rect_box(&rect(0, 0, 200, 200)),
+            rect(0, -100, 200, 300)
+        );
+    }
+
+    #[test]
+    fn a_special_rect_odd_both_ways_stays_as_written() {
+        assert_eq!(special_rect_box(&rect(0, 0, 45, 45)), rect(0, 0, 45, 45));
     }
 }

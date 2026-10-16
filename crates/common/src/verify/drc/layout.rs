@@ -10,7 +10,7 @@ use crate::db::indices::{BlockageId, CellId, MacroPinId, NetId, SpecialNetId};
 use crate::db::library::{LayerRef, Shape, SignalUse};
 use crate::geom::dbu::Dbu;
 use crate::geom::rect::Rect;
-use crate::verify::shapes::route_elem_shapes;
+use crate::verify::shapes::{route_elem_shapes, special_net_metal};
 use std::collections::HashMap;
 
 /// What a group of shapes belongs to. Shapes of one owner never short or
@@ -185,10 +185,7 @@ impl Layout {
         for (i, net) in db.special_nets.iter().enumerate() {
             let (owner, supply) = special.owner(db, SpecialNetId::new(i));
             let owner = layout.owner(owner, supply);
-            for w in &net.wires {
-                layout.add(LayerRef::Routing(w.layer), owner, w.rect(), true);
-            }
-            for s in &net.rects {
+            for s in special_net_metal(net) {
                 layout.add(s.layer, owner, s.rect, true);
             }
             for &(via, at) in &net.vias {
