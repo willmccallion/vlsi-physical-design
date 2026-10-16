@@ -14,7 +14,7 @@ use pare_router::access::Node;
 use pare_router::occupancy::{Occupancy, Origin, Owner, Slot};
 use pare_router::tech::RouteTech;
 use pare_router::wiring::{Edge, NetRoute};
-use pare_router::{RouteError, route};
+use pare_router::{RouteError, capacity_reduction, route};
 use std::path::{Path, PathBuf};
 
 fn fixture(name: &str) -> PathBuf {
@@ -218,4 +218,47 @@ fn consecutive_wire_edges_become_one_wire() {
             to: lt.point(0, 3),
         }]
     );
+}
+
+fn no_reserve() -> RoutingConfig {
+    RoutingConfig {
+        global_capacity_reserve: 0.0,
+        ..RoutingConfig::default()
+    }
+}
+
+#[test]
+fn every_track_through_a_gcell_counts_toward_its_capacity() {
+    let db = tiny();
+
+    let reduction = capacity_reduction(&db, &no_reserve()).unwrap();
+
+    assert_eq!((reduction.nx, reduction.ny), (2, 2));
+    assert_eq!(reduction.capacity, vec![22.0, 22.0, 23.0, 23.0]);
+    assert!(reduction.reduction[0].abs() < 1e-12);
+    assert!(reduction.reduction[2].abs() < 1e-12);
+}
+
+#[test]
+fn the_capacity_reserve_counts_as_reduction() {
+    let db = tiny();
+    let config = RoutingConfig {
+        global_capacity_reserve: 0.5,
+        ..RoutingConfig::default()
+    };
+
+    let reduction = capacity_reduction(&db, &config).unwrap();
+
+    assert!((reduction.reduction[0] - 12.0).abs() < 1e-12);
+    assert!((reduction.reduction[2] - 12.0).abs() < 1e-12);
+}
+
+#[test]
+fn a_fixed_block_takes_the_tracks_its_obstruction_crosses() {
+    let db = tiny();
+
+    let reduction = capacity_reduction(&db, &no_reserve()).unwrap();
+
+    assert!(reduction.reduction[1] >= 10.0, "{:?}", reduction.reduction);
+    assert!(reduction.reduction[3] >= 10.0, "{:?}", reduction.reduction);
 }

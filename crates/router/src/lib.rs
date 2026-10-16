@@ -17,7 +17,9 @@ pub mod tree;
 pub mod wiring;
 
 use detailed::{Costs, DetailedRouter, Scope, routable_nets};
+pub use global::CapacityReduction;
 use global::{GlobalGrid, GlobalNet, route_global};
+use occupancy::Occupancy;
 use pare_common::db::design::{GCellGridDef, NetlistDB, PlacementStatus, RouteElem, TrackAxis};
 use pare_common::db::indices::NetId;
 use pare_common::db::library::Shape;
@@ -25,6 +27,7 @@ use pare_common::geom::dbu::Dbu;
 use pare_common::geom::point::Point;
 use pare_common::util::config::{LayerRangeError, RoutingConfig};
 use pare_common::util::ui;
+use pare_common::verify::shapes::obstruction_shapes;
 use search::MAX_PENALTY;
 use std::time::Instant;
 use tech::RouteTech;
@@ -57,16 +60,13 @@ pub fn route(db: &mut NetlistDB, config: &RoutingConfig) -> Result<RoutingSummar
             first: first.name.clone(),
         });
     }
-    if !(0.0..1.0).contains(&config.global_capacity_reserve) {
-        return Err(RouteError::CapacityReserve(config.global_capacity_reserve));
-    }
+    check_reserve(config)?;
     if let Some(error) = overlapping_pins(db) {
         return Err(error);
     }
     let tech = RouteTech::new(db, config)?;
-    let pitch = tech.layer(tech.min_layer).pitch();
-    let gcell = pitch * i64::from(config.gcell_tracks.max(1));
-    let pitch = pitch.to_f64();
+    let gcell = gcell_size(&tech, config);
+    let pitch = tech.layer(tech.min_layer).pitch().to_f64();
     let mut costs = Costs {
         via: 4.0 * pitch,
         penalty: 8.0 * pitch,
@@ -184,6 +184,44 @@ const fn next_scope(previous: Scope, improved: bool) -> Scope {
         Scope::Conflicts if !improved => Scope::NearConflicts,
         _ => Scope::Conflicts,
     }
+}
+
+/// Every gcell's routing capacity and what global routing loses of it
+/// before any cell is placed.
+///
+/// The losses are the capacity reserve and the metal placement cannot move:
+/// that of fixed cells and I/O pins, special nets and routing blockages.
+pub fn capacity_reduction(
+    db: &NetlistDB,
+    config: &RoutingConfig,
+) -> Result<CapacityReduction, RouteError> {
+    check_reserve(config)?;
+    let tech = RouteTech::new(db, config)?;
+    let gcell = gcell_size(&tech, config);
+    let mut occupancy = Occupancy::new(&tech, gcell);
+    occupancy.add_fixed(&tech, obstruction_shapes(db));
+    let grid = GlobalGrid::new(
+        &tech,
+        &occupancy,
+        db.die_area,
+        gcell,
+        config.global_capacity_reserve,
+    );
+    Ok(grid.capacity_reduction(&tech))
+}
+
+fn check_reserve(config: &RoutingConfig) -> Result<(), RouteError> {
+    if (0.0..1.0).contains(&config.global_capacity_reserve) {
+        Ok(())
+    } else {
+        Err(RouteError::CapacityReserve(config.global_capacity_reserve))
+    }
+}
+
+/// The edge of a gcell: `config.gcell_tracks` pitches of the lowest
+/// routing layer.
+fn gcell_size(tech: &RouteTech, config: &RoutingConfig) -> Dbu {
+    tech.layer(tech.min_layer).pitch() * i64::from(config.gcell_tracks.max(1))
 }
 
 /// The DEF gcell grid of `nx` by `ny` gcells of edge `gcell` from `origin`.

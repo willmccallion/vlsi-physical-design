@@ -21,6 +21,7 @@ use pare_common::db::library::LayerRef;
 use pare_common::geom::dbu::Dbu;
 use pare_common::geom::point::Point;
 use pare_common::geom::rect::Rect;
+use pare_common::verify::shapes::{self, OwnedShape};
 use rustc_hash::FxHashMap;
 
 /// What occupies a stretch of track.
@@ -375,6 +376,25 @@ impl Occupancy {
             }
         }
         out
+    }
+
+    /// Records `shapes` as fixed metal and cuts, on the layers `tech` routes.
+    pub fn add_fixed(&mut self, tech: &RouteTech, shapes: impl IntoIterator<Item = OwnedShape>) {
+        for s in shapes {
+            let owner = match s.owner {
+                shapes::Owner::Net(n) => Owner::Net(n.0),
+                shapes::Owner::Obstacle => Owner::Obstacle,
+            };
+            match s.shape.layer {
+                LayerRef::Routing(layer) if tech.routable(layer) => {
+                    let _ = self.add_rect(tech, layer, &s.shape.rect, owner, Origin::Fixed);
+                }
+                LayerRef::Routing(_) => {}
+                LayerRef::Cut(cut) => {
+                    let _ = self.add_cut(cut, &s.shape.rect, owner, Origin::Fixed);
+                }
+            }
+        }
     }
 
     /// Records `rect` on `layer` for `owner`; returns the tracks touched.

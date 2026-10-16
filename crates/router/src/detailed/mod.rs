@@ -28,7 +28,7 @@ use pare_common::db::library::{Direction, LayerRef};
 use pare_common::geom::dbu::Dbu;
 use pare_common::geom::point::Point;
 use pare_common::geom::rect::Rect;
-use pare_common::verify::shapes::{self, fixed_shapes, is_signal_net};
+use pare_common::verify::shapes::{fixed_shapes, is_signal_net};
 use rayon::prelude::*;
 use rustc_hash::{FxHashMap, FxHashSet};
 use std::collections::VecDeque;
@@ -58,21 +58,7 @@ impl<'a> DetailedRouter<'a> {
     pub fn new(db: &'a NetlistDB, tech: &'a RouteTech, gcell: Dbu) -> Self {
         let start = std::time::Instant::now();
         let mut occupancy = Occupancy::new(tech, gcell);
-        for s in fixed_shapes(db) {
-            let owner = match s.owner {
-                shapes::Owner::Net(n) => Owner::Net(n.0),
-                shapes::Owner::Obstacle => Owner::Obstacle,
-            };
-            match s.shape.layer {
-                LayerRef::Routing(layer) if tech.routable(layer) => {
-                    let _ = occupancy.add_rect(tech, layer, &s.shape.rect, owner, Origin::Fixed);
-                }
-                LayerRef::Routing(_) => {}
-                LayerRef::Cut(cut) => {
-                    let _ = occupancy.add_cut(cut, &s.shape.rect, owner, Origin::Fixed);
-                }
-            }
-        }
+        occupancy.add_fixed(tech, fixed_shapes(db));
         log::debug!(
             "fixed shapes recorded in {:.1}s",
             start.elapsed().as_secs_f64()

@@ -1,6 +1,6 @@
 //! Metal and cut rectangles of a design, tagged with what they belong to.
 
-use crate::db::design::{IoPin, NetlistDB, PinOwner, RouteElem};
+use crate::db::design::{Cell, IoPin, NetlistDB, PinOwner, RouteElem};
 use crate::db::indices::{CellId, NetId};
 use crate::db::library::{LayerRef, Shape};
 use crate::geom::dbu::Dbu;
@@ -122,6 +122,25 @@ pub fn fixed_shapes(db: &NetlistDB) -> Vec<OwnedShape> {
 
 /// [`fixed_shapes`] with only the I/O pins `keep` accepts.
 pub fn fixed_shapes_keeping_io(db: &NetlistDB, keep: impl Fn(&IoPin) -> bool) -> Vec<OwnedShape> {
+    fixed_shapes_of(db, |_| true, keep)
+}
+
+/// The shapes placement cannot move: those of fixed cells and fixed I/O
+/// pins, special nets and routing blockages.
+pub fn obstruction_shapes(db: &NetlistDB) -> Vec<OwnedShape> {
+    fixed_shapes_of(
+        db,
+        |c| !c.status.is_movable(),
+        |p: &IoPin| !p.status.is_movable(),
+    )
+}
+
+/// [`fixed_shapes`] of only the cells and I/O pins the filters accept.
+fn fixed_shapes_of(
+    db: &NetlistDB,
+    keep_cell: impl Fn(&Cell) -> bool,
+    keep_io: impl Fn(&IoPin) -> bool,
+) -> Vec<OwnedShape> {
     let mut out = Vec::new();
     let fixed = |shape: Shape, owner: Owner| OwnedShape {
         shape,
@@ -132,6 +151,9 @@ pub fn fixed_shapes_keeping_io(db: &NetlistDB, keep: impl Fn(&IoPin) -> bool) ->
     for i in 0..db.num_cells() {
         let id = CellId::new(i);
         let c = &db.cells[i];
+        if !keep_cell(c) {
+            continue;
+        }
         let m = db.cell_macro(id);
         let place = |s: &Shape| Shape {
             layer: s.layer,
@@ -157,7 +179,7 @@ pub fn fixed_shapes_keeping_io(db: &NetlistDB, keep: impl Fn(&IoPin) -> bool) ->
         );
     }
 
-    for p in db.io_pins.iter().filter(|p| keep(p)) {
+    for p in db.io_pins.iter().filter(|p| keep_io(p)) {
         let owner = if is_signal_net(db, p.net) {
             Owner::Net(p.net)
         } else {

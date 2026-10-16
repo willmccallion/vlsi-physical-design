@@ -145,6 +145,76 @@ impl GlobalGrid {
         cap
     }
 
+    /// Every gcell's [`CapacityReduction`] in the terms `FastRoute` reports
+    /// it to RUDY: each layer adds the tracks of the edge leaving the gcell
+    /// along its direction and the tracks that edge lost; the last gcell of a
+    /// row or column takes those of the edge before it.
+    pub fn capacity_reduction(&self, tech: &RouteTech) -> CapacityReduction {
+        let (nx, ny) = (usize::from(self.nx), usize::from(self.ny));
+        let mut capacity = vec![0.0; nx * ny];
+        let mut reduction = vec![0.0; nx * ny];
+        for l in self.layers() {
+            let layer = LayerId::new(l);
+            let direction = self.direction(layer);
+            let along = match direction {
+                Direction::Horizontal => nx,
+                Direction::Vertical => ny,
+            };
+            if along < 2 {
+                continue;
+            }
+            let tracks = self.tracks_per_line(tech, layer);
+            for y in 0..ny {
+                for x in 0..nx {
+                    let (line, edge) = match direction {
+                        Direction::Horizontal => (y, self.cell_index(layer, x.min(along - 2), y)),
+                        Direction::Vertical => (x, self.cell_index(layer, x, y.min(along - 2))),
+                    };
+                    let usable = f64::from(self.capacity[edge]);
+                    capacity[y * nx + x] += tracks[line];
+                    reduction[y * nx + x] += (tracks[line] - usable).max(0.0);
+                }
+            }
+        }
+        CapacityReduction {
+            origin: self.origin,
+            gcell: self.gcell,
+            nx,
+            ny,
+            capacity,
+            reduction,
+        }
+    }
+
+    /// How many of `layer`'s tracks run through each row of gcells when it
+    /// is horizontal, or each column when it is vertical.
+    fn tracks_per_line(&self, tech: &RouteTech, layer: LayerId) -> Vec<f64> {
+        let lt = tech.layer(layer);
+        let (origin, lines) = match lt.direction {
+            Direction::Horizontal => (self.origin.y, usize::from(self.ny)),
+            Direction::Vertical => (self.origin.x, usize::from(self.nx)),
+        };
+        let mut count = vec![0.0; lines];
+        for &across in &lt.tracks {
+            let line = (across - origin).get().div_euclid(self.gcell.get());
+            if let Ok(line) = usize::try_from(line)
+                && line < lines
+            {
+                count[line] += 1.0;
+            }
+        }
+        count
+    }
+
+    /// Index of the edge leaving gcell (`x`, `y`) of `layer`.
+    fn cell_index(&self, layer: LayerId, x: usize, y: usize) -> usize {
+        self.edge(GCell {
+            layer,
+            x: u16::try_from(x).unwrap_or(u16::MAX),
+            y: u16::try_from(y).unwrap_or(u16::MAX),
+        })
+    }
+
     /// Number of grid columns and rows.
     pub const fn size(&self) -> (u16, u16) {
         (self.nx, self.ny)
@@ -248,6 +318,24 @@ impl GlobalGrid {
         let overflow = costs.penalty * excess.max(0.0);
         1.0 + f64::from(self.history[e]) + congestion + overflow
     }
+}
+
+/// Each gcell's routing capacity and the part of it obstructions and the
+/// capacity reserve take, in tracks summed over the layers, row by row.
+#[derive(Clone, Debug, PartialEq)]
+pub struct CapacityReduction {
+    /// Lower-left corner of the gcell grid.
+    pub origin: Point<Dbu>,
+    /// Edge of one gcell.
+    pub gcell: Dbu,
+    /// Columns.
+    pub nx: usize,
+    /// Rows.
+    pub ny: usize,
+    /// Tracks through each gcell before any reduction.
+    pub capacity: Vec<f64>,
+    /// Tracks of each gcell that obstructions and the reserve take.
+    pub reduction: Vec<f64>,
 }
 
 /// The fraction of `stretch` along `track` that a wire crossing `boundary`
