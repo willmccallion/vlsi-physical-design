@@ -281,20 +281,19 @@ impl Region {
         let mut index_of_root: HashMap<usize, usize> = HashMap::new();
         let mut pieces: Vec<Self> = Vec::new();
         for (k, s) in self.slabs.iter().enumerate() {
-            let mut by_piece: Vec<(usize, Spans)> = Vec::new();
+            let mut by_piece: Vec<(usize, (Dbu, Dbu))> = Vec::with_capacity(s.spans.len());
             for (n, &span) in s.spans.iter().enumerate() {
                 let root = find(&mut parent, offsets[k] + n);
                 let piece = *index_of_root.entry(root).or_insert_with(|| {
                     pieces.push(Self::new());
                     pieces.len() - 1
                 });
-                match by_piece.iter_mut().find(|(p, _)| *p == piece) {
-                    Some((_, spans)) => spans.push(span),
-                    None => by_piece.push((piece, vec![span])),
-                }
+                by_piece.push((piece, span));
             }
-            for (piece, spans) in by_piece {
-                pieces[piece].push_slab(s.x0, s.x1, spans);
+            by_piece.sort_by_key(|&(piece, _)| piece);
+            for group in by_piece.chunk_by(|a, b| a.0 == b.0) {
+                let spans = group.iter().map(|&(_, span)| span).collect();
+                pieces[group[0].0].push_slab(s.x0, s.x1, spans);
             }
         }
         pieces
