@@ -247,6 +247,33 @@ impl Region {
     /// The region's connected pieces. Pieces meeting only at a corner are
     /// separate.
     pub fn components(&self) -> Vec<Self> {
+        self.connected(Corners::Separate)
+    }
+
+    /// The parts of the plane the region encloses, as Boost.Polygon gives
+    /// the holes of a polygon: empty space meeting the outside even at a
+    /// single corner is outside.
+    pub fn holes(&self) -> Vec<Self> {
+        let Some(bbox) = self.bounding_box() else {
+            return Vec::new();
+        };
+        let frame = bbox.expand(Dbu(1));
+        Self::from_rects([frame])
+            .difference(self)
+            .connected(Corners::Join)
+            .into_iter()
+            .filter(|space| {
+                space.bounding_box().is_some_and(|b| {
+                    frame.min.x < b.min.x
+                        && frame.min.y < b.min.y
+                        && b.max.x < frame.max.x
+                        && b.max.y < frame.max.y
+                })
+            })
+            .collect()
+    }
+
+    fn connected(&self, corners: Corners) -> Vec<Self> {
         let offsets: Vec<usize> = self
             .slabs
             .iter()
@@ -269,7 +296,11 @@ impl Region {
             while a < left.spans.len() && b < right.spans.len() {
                 let (la, ha) = left.spans[a];
                 let (lb, hb) = right.spans[b];
-                if la < hb && lb < ha {
+                let meet = match corners {
+                    Corners::Separate => la < hb && lb < ha,
+                    Corners::Join => la <= hb && lb <= ha,
+                };
+                if meet {
                     union(&mut parent, offsets[k - 1] + a, offsets[k] + b);
                 }
                 if ha < hb {
@@ -463,6 +494,13 @@ impl Region {
             .map(|s| Rect::new(Point::new(s.start, s.lo), Point::new(s.end, s.hi)))
             .collect()
     }
+}
+
+/// Whether pieces of a region meeting only at a corner are one piece.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Corners {
+    Separate,
+    Join,
 }
 
 /// A rectangle of a slicing sweep: `[lo, hi]` across the sweep, from
@@ -882,6 +920,28 @@ mod tests {
             vertical,
             vec![(0, 0, 2, 6), (2, 0, 4, 2), (2, 4, 4, 6), (4, 0, 6, 6)]
         );
+    }
+
+    #[test]
+    fn a_ring_has_one_hole() {
+        let ring = Region::from_rects([rect(0, 0, 6, 6)])
+            .difference(&Region::from_rects([rect(2, 2, 4, 4)]));
+
+        let holes = ring.holes();
+
+        assert_eq!(holes, vec![Region::from_rects([rect(2, 2, 4, 4)])]);
+    }
+
+    #[test]
+    fn empty_space_meeting_the_outside_at_a_corner_is_not_a_hole() {
+        let notched = Region::from_rects([
+            rect(0, 0, 3, 1),
+            rect(0, 0, 1, 3),
+            rect(2, 0, 3, 2),
+            rect(0, 2, 2, 3),
+        ]);
+
+        assert!(notched.holes().is_empty());
     }
 
     #[test]
