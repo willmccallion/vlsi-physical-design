@@ -297,7 +297,9 @@ impl DetailedRouter<'_> {
     }
 
     /// Routes a region's pieces, rerouting those still in conflict with a
-    /// growing penalty; `None` for a piece that could not be connected.
+    /// growing penalty, and returns the wiring of the local round the judge
+    /// liked best, as `TritonRoute` keeps a worker's best iteration; `None`
+    /// for a piece that could not be connected.
     pub(super) fn route_region(
         &self,
         area: &Rect<Dbu>,
@@ -306,6 +308,7 @@ impl DetailedRouter<'_> {
     ) -> Vec<Option<Vec<Edge>>> {
         let window = Rect::new(area.min, area.max - Point::new(Dbu(1), Dbu(1)));
         let mut results: Vec<Option<Vec<Edge>>> = vec![None; pieces.len()];
+        let mut best: Option<(Score, Vec<Option<Vec<Edge>>>)> = None;
         let mut overlay = LocalOccupancy::default();
         let mut order: Vec<usize> = (0..pieces.len()).collect();
         order.sort_by_cached_key(|&i| (self.extent(&pieces[i]), pieces[i].net));
@@ -353,6 +356,13 @@ impl DetailedRouter<'_> {
                 .filter_map(|(p, r)| r.as_deref().map(|edges| (p.net, edges)))
                 .collect();
             let judgment = self.judge(area, &wired);
+            let score = Score {
+                unconnected: results.iter().filter(|r| r.is_none()).count(),
+                violations: judgment.findings.violations.len(),
+            };
+            if best.as_ref().is_none_or(|(b, _)| score < *b) {
+                best = Some((score, results.clone()));
+            }
             self.price_markers(&judgment.findings.violations, &mut overlay);
             todo = order
                 .iter()
@@ -365,7 +375,7 @@ impl DetailedRouter<'_> {
             self.log_judgment(area, round, &judgment);
             penalty = (penalty * 2.0).min(MAX_PENALTY);
         }
-        results
+        best.map_or(results, |(_, kept)| kept)
     }
 
     /// Logs what the judge still holds against a region's pieces.
@@ -523,6 +533,14 @@ impl DetailedRouter<'_> {
             .filter(|(layer, _)| self.tech.routable(*layer))
             .collect()
     }
+}
+
+/// How well a local round did: pieces left unconnected count before
+/// violations, so that a connected result with a marker beats a gap.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
+struct Score {
+    unconnected: usize,
+    violations: usize,
 }
 
 /// Each piece's net with its wiring in `wiring`, in order.
