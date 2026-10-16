@@ -17,7 +17,6 @@ use crate::db::rules::MinStep;
 use crate::geom::dbu::Dbu;
 use crate::geom::point::Point;
 use crate::geom::rect::Rect;
-use rayon::prelude::*;
 
 /// Checks every boundary loop on every routing layer with minimum step rules.
 pub(super) fn check(model: &Model<'_>, rules: &Rules) -> Markers {
@@ -33,12 +32,11 @@ pub(super) fn check(model: &Model<'_>, rules: &Rules) -> Markers {
                 rules: &rules.metal[l].min_steps,
             };
             piece_ranges(&metal.edges)
-                .into_par_iter()
-                .fold(Markers::default, |mut found, range| {
+                .into_iter()
+                .fold(Markers::default(), |mut found, range| {
                     check.check_piece(range, &mut found);
                     found
                 })
-                .reduce(Markers::default, Markers::merge)
         })
         .fold(Markers::default(), Markers::merge)
 }

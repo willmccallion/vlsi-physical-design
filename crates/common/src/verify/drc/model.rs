@@ -10,7 +10,6 @@ use crate::geom::dbu::{Dbu, DbuArea};
 use crate::geom::point::Point;
 use crate::geom::rect::Rect;
 use crate::geom::region::{Edge, Region};
-use rayon::prelude::*;
 use rstar::{AABB, RTree, RTreeObject};
 use std::collections::{HashMap, HashSet};
 
@@ -134,7 +133,7 @@ impl<'a> Metal<'a> {
             .chunk_by(|&a, &b| shapes[a].owner == shapes[b].owner)
             .collect();
         let owners: Vec<OwnerGeometry> = groups
-            .par_iter()
+            .iter()
             .map(|group| owner_geometry(shapes, group))
             .collect();
         let mut rects = Vec::new();

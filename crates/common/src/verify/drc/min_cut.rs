@@ -11,7 +11,6 @@ use super::{Marker, Markers, Violation};
 use crate::db::indices::LayerId;
 use crate::db::library::LayerRef;
 use crate::db::rules::{CutApproach, MinimumCut};
-use rayon::prelude::*;
 
 /// Checks every maximal rectangle of every routing layer with rules.
 pub(super) fn check(model: &Model<'_>, rules: &Rules) -> Markers {
@@ -29,13 +28,13 @@ pub(super) fn check(model: &Model<'_>, rules: &Rules) -> Markers {
                 below: l.checked_sub(1).and_then(|c| model.cut.get(c)),
                 above: model.cut.get(layer.cut_above().index()),
             };
-            (0..metal.rects.len())
-                .into_par_iter()
-                .fold(Markers::default, |mut found, i| {
-                    check.check_rect(&metal.rects[i], &mut found);
+            metal
+                .rects
+                .iter()
+                .fold(Markers::default(), |mut found, rect| {
+                    check.check_rect(rect, &mut found);
                     found
                 })
-                .reduce(Markers::default, Markers::merge)
         })
         .fold(Markers::default(), Markers::merge)
 }

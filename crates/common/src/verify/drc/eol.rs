@@ -19,7 +19,6 @@ use crate::geom::dbu::Dbu;
 use crate::geom::point::Point;
 use crate::geom::rect::Rect;
 use crate::geom::region::{Edge, Heading};
-use rayon::prelude::*;
 
 /// Checks every boundary edge on every routing layer with end-of-line rules.
 pub(super) fn check(model: &Model<'_>, rules: &Rules) -> Markers {
@@ -34,13 +33,10 @@ pub(super) fn check(model: &Model<'_>, rules: &Rules) -> Markers {
                 layer: LayerId::new(l),
                 rules: &rules.metal[l].end_of_line,
             };
-            (0..metal.edges.len())
-                .into_par_iter()
-                .fold(Markers::default, |mut found, i| {
-                    check.check_edge(i, &mut found);
-                    found
-                })
-                .reduce(Markers::default, Markers::merge)
+            (0..metal.edges.len()).fold(Markers::default(), |mut found, i| {
+                check.check_edge(i, &mut found);
+                found
+            })
         })
         .fold(Markers::default(), Markers::merge)
 }

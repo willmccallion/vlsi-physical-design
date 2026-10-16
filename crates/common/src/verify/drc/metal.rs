@@ -11,7 +11,6 @@ use crate::db::rules::SpacingTable;
 use crate::geom::dbu::Dbu;
 use crate::geom::rect::Rect;
 use crate::geom::region::{Heading, Region};
-use rayon::prelude::*;
 
 /// Checks every pair of nearby maximal rectangles on every routing layer.
 pub(super) fn check(model: &Model<'_>, rules: &Rules) -> Markers {
@@ -28,13 +27,10 @@ pub(super) fn check(model: &Model<'_>, rules: &Rules) -> Markers {
                 layer_rules: &rules.metal[l],
                 hard_spacing_reach: rules.max_hard_spacing(LayerId::new(l)),
             };
-            (0..metal.rects.len())
-                .into_par_iter()
-                .fold(Markers::default, |mut found, i| {
-                    layer.check_rect(i, &mut found);
-                    found
-                })
-                .reduce(Markers::default, Markers::merge)
+            (0..metal.rects.len()).fold(Markers::default(), |mut found, i| {
+                layer.check_rect(i, &mut found);
+                found
+            })
         })
         .fold(Markers::default(), Markers::merge)
 }

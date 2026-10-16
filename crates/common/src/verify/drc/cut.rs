@@ -18,7 +18,6 @@ use crate::db::rules::{
 };
 use crate::geom::dbu::Dbu;
 use crate::geom::rect::Rect;
-use rayon::prelude::*;
 
 /// Checks the cuts of every cut layer.
 pub(super) fn check(model: &Model<'_>, rules: &[CutRules]) -> Markers {
@@ -36,13 +35,10 @@ pub(super) fn check(model: &Model<'_>, rules: &[CutRules]) -> Markers {
                 below: model.metal.get(layer.below().index()),
                 above: model.metal.get(layer.above().index()),
             };
-            (0..cut.rects.len())
-                .into_par_iter()
-                .fold(Markers::default, |mut found, i| {
-                    check.check_cut(i, &mut found);
-                    found
-                })
-                .reduce(Markers::default, Markers::merge)
+            (0..cut.rects.len()).fold(Markers::default(), |mut found, i| {
+                check.check_cut(i, &mut found);
+                found
+            })
         })
         .fold(Markers::default(), Markers::merge)
 }

@@ -8,7 +8,6 @@ use crate::db::indices::LayerId;
 use crate::db::library::LayerRef;
 use crate::geom::dbu::Dbu;
 use crate::geom::rect::Rect;
-use rayon::prelude::*;
 
 /// Checks every piece of metal on every routing layer.
 pub(super) fn check(model: &Model<'_>, rules: &Rules) -> Markers {
@@ -26,20 +25,18 @@ pub(super) fn check(model: &Model<'_>, rules: &Rules) -> Markers {
             };
             let pieces = metal
                 .polygons
-                .par_iter()
-                .fold(Markers::default, |mut found, piece| {
+                .iter()
+                .fold(Markers::default(), |mut found, piece| {
                     check.check_piece(piece, &mut found);
                     found
-                })
-                .reduce(Markers::default, Markers::merge);
+                });
             let rects = metal
                 .rects
-                .par_iter()
-                .fold(Markers::default, |mut found, rect| {
+                .iter()
+                .fold(Markers::default(), |mut found, rect| {
                     check.off_grid(rect, &mut found);
                     found
-                })
-                .reduce(Markers::default, Markers::merge);
+                });
             pieces.merge(rects)
         })
         .fold(Markers::default(), Markers::merge)
