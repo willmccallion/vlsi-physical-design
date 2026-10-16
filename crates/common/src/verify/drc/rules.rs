@@ -5,8 +5,8 @@ use crate::db::design::{NetlistDB, NonDefaultRule};
 use crate::db::indices::{LayerId, NonDefaultRuleId};
 use crate::db::library::Library;
 use crate::db::rules::{
-    CutSpacing, Lef58CutSpacing, MinimumCut, ParallelRunLengthTable, SpacingTable,
-    WidthRangeSpacing,
+    CutSpacing, EndOfLineSpacing, Lef58CutSpacing, MinimumCut, ParallelRunLengthTable,
+    SpacingTable, WidthRangeSpacing,
 };
 use crate::geom::dbu::{Dbu, DbuArea};
 
@@ -23,6 +23,8 @@ pub struct MetalRules {
     pub spacing: SpacingTable,
     /// Spacing for shapes in a width range.
     pub ranges: Vec<WidthRangeSpacing>,
+    /// Spacing at line ends.
+    pub end_of_line: Vec<EndOfLineSpacing>,
     /// Smallest legal area of a connected piece of metal.
     pub min_area: Option<DbuArea>,
     /// Cuts that vias to wide metal need.
@@ -143,6 +145,7 @@ impl Rules {
                     })
                 }),
                 ranges: l.rules.width_range_spacing.clone(),
+                end_of_line: l.rules.end_of_line.clone(),
                 min_area: l.rules.min_area,
                 minimum_cuts: l.rules.minimum_cuts.clone(),
                 min_enclosed_areas: l

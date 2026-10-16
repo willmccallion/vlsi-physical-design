@@ -1,8 +1,9 @@
 use super::*;
 use crate::db::indices::{CellId, CutLayerId, LayerId, NetId, NonDefaultRuleId};
 use crate::db::rules::{
-    CutApproach, CutSpacing, CutSpacingCondition, Lef58CutSpacing, Lef58CutSpacingCondition,
-    MinimumCut, ParallelRunLengthTable, SpacingTable, WidthRangeSpacing,
+    CutApproach, CutSpacing, CutSpacingCondition, EndOfLineSpacing, Lef58CutSpacing,
+    Lef58CutSpacingCondition, MinimumCut, ParallelEdge, ParallelRunLengthTable, SpacingTable,
+    WidthRangeSpacing,
 };
 use crate::geom::dbu::DbuArea;
 use crate::geom::point::Point;
@@ -34,6 +35,7 @@ fn metal(spacing: SpacingTable) -> MetalRules {
         min_area: None,
         minimum_cuts: Vec::new(),
         min_enclosed_areas: Vec::new(),
+        end_of_line: Vec::new(),
     }
 }
 
@@ -940,4 +942,155 @@ fn a_hard_nondefault_spacing_on_another_layer_changes_nothing() {
     f.route(M2, b, rect(0, 250, 1000, 350));
 
     assert!(f.check(&rules_with_hard_spacing(200)).violations.is_empty());
+}
+
+/// The rules of [`rules`] with an end-of-line rule on the first metal layer:
+/// spacing 200 at line ends narrower than 120, reaching 45 past the ends.
+fn rules_with_eol(parallel_edge: Option<ParallelEdge>) -> Rules {
+    let mut rules = rules(Vec::new());
+    rules.metal[0].end_of_line = vec![EndOfLineSpacing {
+        spacing: Dbu(200),
+        eol_width: Dbu(120),
+        within: Dbu(45),
+        parallel_edge,
+    }];
+    rules
+}
+
+#[test]
+fn a_line_end_too_close_to_metal_across_from_it_breaks_the_eol_rule() {
+    let mut f = Fixture::new();
+    let (a, b) = (f.a, f.b);
+    f.route(M1, a, rect(0, 0, 100, 1000));
+    f.route(M1, b, rect(0, -1150, 100, -150));
+
+    assert!(f.check(&rules(Vec::new())).violations.is_empty());
+    let report = f.check(&rules_with_eol(None));
+    assert_eq!(kinds(&report.violations), [Violation::EndOfLineSpacing]);
+    assert_eq!(report.violations[0].bbox, rect(0, -150, 100, 0));
+    assert_eq!(report.violations[0].owners, (a, b));
+}
+
+#[test]
+fn an_edge_as_wide_as_the_eol_width_is_no_line_end() {
+    let mut f = Fixture::new();
+    let (a, b) = (f.a, f.b);
+    f.route(M1, a, rect(0, 0, 120, 1000));
+    f.route(M1, b, rect(0, -1150, 120, -150));
+
+    assert!(f.check(&rules_with_eol(None)).violations.is_empty());
+}
+
+#[test]
+fn a_line_end_facing_metal_sideways_within_the_rule_reach_breaks_it() {
+    let mut f = Fixture::new();
+    let (a, b) = (f.a, f.b);
+    f.route(M1, a, rect(0, 0, 100, 1000));
+    f.route(M1, b, rect(140, -1150, 240, -150));
+
+    assert_eq!(
+        kinds(&f.check(&rules_with_eol(None)).violations),
+        [Violation::EndOfLineSpacing]
+    );
+    let mut far = Fixture::new();
+    far.route(M1, a, rect(0, 0, 100, 1000));
+    far.route(M1, b, rect(150, -1150, 250, -150));
+    assert!(far.check(&rules_with_eol(None)).violations.is_empty());
+}
+
+#[test]
+fn metal_in_the_gap_keeps_the_eol_rule_quiet() {
+    let mut f = Fixture::new();
+    let (a, b) = (f.a, f.b);
+    f.route(M1, a, rect(0, 0, 100, 1000));
+    f.route(M1, b, rect(0, -1150, 100, -150));
+    f.route(M1, f.obstruction, rect(0, -100, 100, -50));
+
+    let report = f.check(&rules_with_eol(None));
+
+    assert!(
+        !report
+            .violations
+            .iter()
+            .any(|m| m.violation == Violation::EndOfLineSpacing && m.owners == (a, b)),
+        "{:?}",
+        report.violations
+    );
+}
+
+#[test]
+fn line_ends_of_one_piece_do_not_face_each_other() {
+    let mut f = Fixture::new();
+    let a = f.a;
+    f.route(M1, a, rect(0, 0, 100, 1000));
+    f.route(M1, a, rect(300, 0, 400, 1000));
+    f.route(M1, a, rect(0, 900, 400, 1000));
+
+    assert!(f.check(&rules_with_eol(None)).violations.is_empty());
+}
+
+#[test]
+fn fixed_line_ends_facing_fixed_metal_are_left_alone() {
+    let mut f = Fixture::new();
+    let (a, b) = (f.a, f.b);
+    f.fix(M1, a, rect(0, 0, 100, 1000));
+    f.fix(M1, b, rect(0, -1150, 100, -150));
+
+    let report = f.check(&rules_with_eol(None));
+
+    assert!(report.violations.is_empty());
+    assert!(report.input.is_empty());
+}
+
+#[test]
+fn a_parallel_edge_clause_arms_the_rule_only_beside_a_neighbour() {
+    let parallel = Some(ParallelEdge {
+        spacing: Dbu(150),
+        within: Dbu(150),
+        two_edges: false,
+    });
+    let mut alone = Fixture::new();
+    let (a, b) = (alone.a, alone.b);
+    alone.route(M1, a, rect(0, 0, 100, 1000));
+    alone.route(M1, b, rect(0, -1150, 100, -150));
+    let mut beside = Fixture::new();
+    beside.route(M1, a, rect(0, 0, 100, 1000));
+    beside.route(M1, b, rect(0, -1150, 100, -150));
+    beside.route(M1, b, rect(-200, -300, -100, 500));
+
+    assert!(alone.check(&rules_with_eol(parallel)).violations.is_empty());
+    assert_eq!(
+        kinds(&beside.check(&rules_with_eol(parallel)).violations),
+        [Violation::EndOfLineSpacing]
+    );
+}
+
+#[test]
+fn two_edges_need_a_neighbour_beside_both_ends() {
+    let parallel = Some(ParallelEdge {
+        spacing: Dbu(150),
+        within: Dbu(150),
+        two_edges: true,
+    });
+    let mut one_side = Fixture::new();
+    let (a, b) = (one_side.a, one_side.b);
+    one_side.route(M1, a, rect(0, 0, 100, 1000));
+    one_side.route(M1, b, rect(0, -1150, 100, -150));
+    one_side.route(M1, b, rect(-200, -300, -100, 500));
+    let mut both_sides = Fixture::new();
+    both_sides.route(M1, a, rect(0, 0, 100, 1000));
+    both_sides.route(M1, b, rect(0, -1150, 100, -150));
+    both_sides.route(M1, b, rect(-200, -300, -100, 500));
+    both_sides.route(M1, b, rect(200, -400, 300, 0));
+
+    assert!(
+        one_side
+            .check(&rules_with_eol(parallel))
+            .violations
+            .is_empty()
+    );
+    assert_eq!(
+        kinds(&both_sides.check(&rules_with_eol(parallel)).violations),
+        [Violation::EndOfLineSpacing]
+    );
 }

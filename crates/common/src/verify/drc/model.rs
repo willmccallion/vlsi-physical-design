@@ -12,7 +12,7 @@ use crate::geom::rect::Rect;
 use crate::geom::region::{Edge, Region};
 use rayon::prelude::*;
 use rstar::{AABB, RTree, RTreeObject};
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 
 /// A maximal rectangle of one owner's metal on a layer, or one cut.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -29,12 +29,17 @@ impl GcRect {
     }
 }
 
-/// A boundary edge of one owner's metal on a layer.
+/// A boundary edge of one owner's metal on a layer, with its place in the
+/// boundary: the piece it bounds and the edges before and after it, as
+/// positions in the layer's edge list.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(super) struct GcEdge {
     pub edge: Edge,
     pub owner: OwnerIndex,
     pub fixed: bool,
+    pub piece: u32,
+    pub prev: u32,
+    pub next: u32,
 }
 
 /// One connected piece of an owner's metal on a layer that holds routed
@@ -56,6 +61,8 @@ struct OwnerGeometry {
     rects: Vec<GcRect>,
     edges: Vec<GcEdge>,
     polygons: Vec<GcPolygon>,
+    /// How many connected pieces the owner's metal falls into.
+    pieces: u32,
 }
 
 /// A box of the index and the position of what it bounds.
@@ -131,12 +138,20 @@ impl<'a> Metal<'a> {
             .map(|group| owner_geometry(shapes, group))
             .collect();
         let mut rects = Vec::new();
-        let mut edges = Vec::new();
+        let mut edges: Vec<GcEdge> = Vec::new();
         let mut polygons = Vec::new();
+        let mut pieces = 0;
         for geometry in owners {
+            let edge_base = u32::try_from(edges.len()).unwrap_or(u32::MAX);
             rects.extend(geometry.rects);
-            edges.extend(geometry.edges);
+            edges.extend(geometry.edges.into_iter().map(|e| GcEdge {
+                piece: e.piece + pieces,
+                prev: e.prev + edge_base,
+                next: e.next + edge_base,
+                ..e
+            }));
             polygons.extend(geometry.polygons);
+            pieces += geometry.pieces;
         }
         Self {
             rect_index: Index::new(rects.iter().map(|r| r.rect)),
@@ -160,7 +175,18 @@ impl<'a> Metal<'a> {
 
     /// The edges meeting `area`.
     pub fn edges_near(&self, area: &Rect<Dbu>) -> impl Iterator<Item = &GcEdge> + '_ {
-        self.edge_index.near(area).map(|i| &self.edges[i])
+        self.edge_indices_near(area).map(|i| &self.edges[i])
+    }
+
+    /// Positions of the edges meeting `area`.
+    pub fn edge_indices_near(&self, area: &Rect<Dbu>) -> impl Iterator<Item = usize> + '_ {
+        self.edge_index.near(area)
+    }
+
+    /// Whether any owner's metal lies strictly inside `area`.
+    pub fn has_metal_in(&self, area: &Rect<Dbu>) -> bool {
+        self.rects_near(area)
+            .any(|i| self.rects[i].rect.overlaps(area))
     }
 
     /// The part of `window` the fixed metal of `owner` covers.
@@ -231,13 +257,29 @@ fn owner_geometry(shapes: &[LayoutShape], group: &[usize]) -> OwnerGeometry {
     };
     for piece in all.components() {
         let first = geometry.edges.len();
+        let boundary = piece.edges();
+        let starting_at: HashMap<Point<Dbu>, usize> = boundary
+            .iter()
+            .enumerate()
+            .map(|(k, e)| (e.from, first + k))
+            .collect();
+        let ending_at: HashMap<Point<Dbu>, usize> = boundary
+            .iter()
+            .enumerate()
+            .map(|(k, e)| (e.to, first + k))
+            .collect();
+        let position = |i: usize| u32::try_from(i).unwrap_or(u32::MAX);
         geometry
             .edges
-            .extend(piece.edges().into_iter().map(|edge| GcEdge {
+            .extend(boundary.iter().enumerate().map(|(k, &edge)| GcEdge {
                 edge,
                 owner,
                 fixed: fixed_edges.contains(&edge),
+                piece: geometry.pieces,
+                prev: position(*ending_at.get(&edge.from).unwrap_or(&(first + k))),
+                next: position(*starting_at.get(&edge.to).unwrap_or(&(first + k))),
             }));
+        geometry.pieces += 1;
         let Some(bbox) = piece.bounding_box() else {
             continue;
         };

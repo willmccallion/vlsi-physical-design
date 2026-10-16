@@ -10,6 +10,7 @@
 //! avoided them.
 
 mod cut;
+mod eol;
 mod layout;
 mod metal;
 mod min_cut;
@@ -58,6 +59,8 @@ pub enum Violation {
     MinHole,
     /// Routed metal off the manufacturing grid.
     OffGrid,
+    /// A line end closer to facing metal than the end-of-line rule allows.
+    EndOfLineSpacing,
 }
 
 impl Violation {
@@ -76,6 +79,7 @@ impl Violation {
             Self::MinimumCut => "Minimum Cut",
             Self::MinHole => "Min Hole",
             Self::OffGrid => "Off Grid",
+            Self::EndOfLineSpacing => "EOL Spacing",
         }
     }
 }
@@ -227,6 +231,7 @@ pub fn check_drc(db: &NetlistDB) -> DrcReport {
 pub fn check(layout: &Layout, rules: &Rules) -> DrcReport {
     let model = Model::new(layout);
     let found = metal::check(&model, rules)
+        .merge(eol::check(&model, rules))
         .merge(cut::check(&model, &rules.cut))
         .merge(shape::check(&model, rules))
         .merge(min_cut::check(&model, rules));
