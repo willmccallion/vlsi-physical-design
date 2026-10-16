@@ -471,3 +471,20 @@ fn bookshelf_placement_written_as_pl_reads_back() {
 
     assert_eq!(reread.cells, db.cells);
 }
+
+#[test]
+fn obstructions_use_minimum_spacing_unless_the_lef_turns_it_off() {
+    let text = std::fs::read_to_string(fixture("tiny.lef"))
+        .unwrap()
+        .replacen("UNITS", "USEMINSPACING OBS OFF ;\n\nUNITS", 1);
+    let path =
+        std::env::temp_dir().join(format!("pare-min-spacing-obs-{}.lef", std::process::id()));
+    std::fs::write(&path, text).unwrap();
+    let units = def::read_units(&fixture("tiny.def")).unwrap();
+
+    let off = lef::parse_files(std::slice::from_ref(&path), units);
+    std::fs::remove_file(&path).unwrap();
+
+    assert!(tiny_library().rules.min_spacing_for_obstructions);
+    assert!(!off.unwrap().rules.min_spacing_for_obstructions);
+}

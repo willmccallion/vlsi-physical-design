@@ -392,14 +392,14 @@ pub struct CellEdgeSpacing {
 }
 
 /// Rules of the whole technology rather than one layer.
-#[derive(Clone, Debug, Default, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct LibraryRules {
     /// The grid every shape must lie on, if given.
     pub manufacturing_grid: Option<Dbu>,
     /// How spacing is measured diagonally.
     pub clearance_measure: ClearanceMeasure,
     /// Whether obstruction shapes use minimum spacing rather than width-based
-    /// spacing (`USEMINSPACING OBS ON`).
+    /// spacing (`USEMINSPACING OBS`, on unless the LEF turns it off).
     pub min_spacing_for_obstructions: bool,
     /// Via stacking limit.
     pub max_via_stack: Option<MaxViaStack>,
@@ -407,6 +407,19 @@ pub struct LibraryRules {
     pub same_net_spacing: Vec<SameNetSpacing>,
     /// Spacing between cell edges by edge type.
     pub cell_edge_spacing: Vec<CellEdgeSpacing>,
+}
+
+impl Default for LibraryRules {
+    fn default() -> Self {
+        Self {
+            manufacturing_grid: None,
+            clearance_measure: ClearanceMeasure::default(),
+            min_spacing_for_obstructions: true,
+            max_via_stack: None,
+            same_net_spacing: Vec::new(),
+            cell_edge_spacing: Vec::new(),
+        }
+    }
 }
 
 #[cfg(test)]
