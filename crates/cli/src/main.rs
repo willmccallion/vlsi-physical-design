@@ -223,7 +223,7 @@ fn run_placement(config: &Config, db: &mut NetlistDB, output_dir: &Path) -> anyh
         place_cells_and_io_pins(config, db, &zones, layers)?
     } else {
         let phase_start = Instant::now();
-        let model = global_placement(config, db, PlacementModel::from_db(db, &zones))?;
+        let model = global_placement(config, db, PlacementModel::from_db(db, &zones), Pass::Full)?;
         ui::phase_time(phase_start.elapsed().as_secs_f64());
         model
     };
@@ -296,6 +296,7 @@ fn place_cells_and_io_pins(
         config,
         db,
         PlacementModel::from_db_without_movable_io(db, zones),
+        Pass::SkipIo,
     )?;
     model.write_back(db);
     ui::phase_time(phase_start.elapsed().as_secs_f64());
@@ -313,9 +314,19 @@ fn place_cells_and_io_pins(
 
     let phase_start = Instant::now();
     ui::phase("Global Placement");
-    let model = global_placement(config, db, PlacementModel::from_db(db, zones))?;
+    let model = global_placement(config, db, PlacementModel::from_db(db, zones), Pass::Full)?;
     ui::phase_time(phase_start.elapsed().as_secs_f64());
     Ok(model)
+}
+
+/// Whether a global placement pass sees every connection.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Pass {
+    /// Before the I/O pins are placed: like `OpenROAD`'s skip-I/O mode,
+    /// without routability.
+    SkipIo,
+    /// With every connection in place.
+    Full,
 }
 
 /// Runs global placement on `model` and reports it; `db` supplies the
@@ -324,6 +335,7 @@ fn global_placement(
     config: &Config,
     db: &NetlistDB,
     mut model: PlacementModel,
+    pass: Pass,
 ) -> anyhow::Result<PlacementModel> {
     let gp = &config.global_placement;
 
@@ -357,7 +369,7 @@ fn global_placement(
     );
     ui::stat_row("Bin Grid:", &format!("{bins}x{bins}"), "", "");
 
-    let routability = if gp.routability_driven {
+    let routability = if gp.routability_driven && pass == Pass::Full {
         Some(routability_params(config, db)?)
     } else {
         None
