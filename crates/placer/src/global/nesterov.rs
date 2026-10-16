@@ -10,9 +10,12 @@
 //! on each field's own energy.
 
 use super::density::{Excess, Footprint};
-use super::routability::{CHECK_OVERFLOW, CongestionMap, Routability, SNAPSHOT_OVERFLOW, Verdict};
+use super::routability::{
+    CHECK_OVERFLOW, CongestionMap, Routability, SETTLE_FRACTION, SNAPSHOT_OVERFLOW, Verdict,
+};
 use super::wirelength::{Netlist, Wirelength};
 use super::{Field, GlobalParams, GlobalResult, Outcome, Progress, ZoneOutcome};
+use crate::model::CellKind;
 use crate::zones::Zone;
 use pare_common::geom::point::Point;
 use pare_common::geom::rect::Rect;
@@ -59,16 +62,26 @@ pub(super) struct Objects {
     pub(super) centers: Vec<Point<f64>>,
     /// Width and height of each object.
     pub(super) sizes: Vec<Point<f64>>,
+    /// The kind of each cell, the first objects.
+    pub(super) kinds: Vec<CellKind>,
+}
+
+impl Objects {
     /// How many of the objects are cells.
-    pub(super) cells: usize,
+    pub(super) const fn cells(&self) -> usize {
+        self.kinds.len()
+    }
 }
 
 /// The objective and the buffers to evaluate it.
 struct Objective<'a> {
     fields: &'a mut [Field],
     netlist: &'a Netlist,
+    die: Rect<f64>,
     /// The field of each object.
     field_of: Vec<usize>,
+    /// Whether each object is in play: a cell, or a filler not removed.
+    active: Vec<bool>,
     footprints: Vec<Footprint>,
     areas: Vec<f64>,
     pins: Vec<f64>,
@@ -273,26 +286,39 @@ impl<'a> Objective<'a> {
                 field_of[i] = k;
             }
         }
-        let footprints = objects
-            .sizes
-            .iter()
-            .map(|&s| fields[0].grid.footprint(s))
-            .collect();
-        Self {
+        let mut objective = Self {
+            die: *die,
             field_of,
-            footprints,
-            areas: objects.sizes.iter().map(|s| s.x * s.y).collect(),
+            active: Vec::new(),
+            footprints: Vec::new(),
+            areas: Vec::new(),
             pins: netlist.pin_counts(n),
-            bounds: objects
-                .sizes
-                .iter()
-                .map(|&s| center_bounds(die, s))
-                .collect(),
+            bounds: Vec::new(),
             fields,
             netlist,
             wirelength_grad: vec![Point::new(0.0, 0.0); n],
             density_grad: vec![Point::new(0.0, 0.0); n],
             scratch: Vec::new(),
+        };
+        objective.refresh(objects);
+        objective
+    }
+
+    /// Takes in the objects' sizes and the fillers each field keeps.
+    fn refresh(&mut self, objects: &Objects) {
+        let grid = &self.fields[0].grid;
+        self.footprints = objects.sizes.iter().map(|&s| grid.footprint(s)).collect();
+        self.areas = objects.sizes.iter().map(|s| s.x * s.y).collect();
+        self.bounds = objects
+            .sizes
+            .iter()
+            .map(|&s| center_bounds(&self.die, s))
+            .collect();
+        self.active = vec![false; objects.centers.len()];
+        for f in self.fields.iter() {
+            for i in f.cells.clone().chain(f.live_fillers()) {
+                self.active[i] = true;
+            }
         }
     }
 
@@ -308,7 +334,7 @@ impl<'a> Objective<'a> {
             .par_iter_mut()
             .map(|f| {
                 f.grid
-                    .update(centers, footprints, f.cells.clone(), f.fillers.clone())
+                    .update(centers, footprints, f.cells.clone(), f.live_fillers())
             })
             .collect();
         let fields: &[Field] = self.fields;
@@ -335,7 +361,8 @@ impl<'a> Objective<'a> {
     }
 
     /// The preconditioned gradient of wirelength plus each field's weighted
-    /// density energy, written to `out`; objects of frozen fields get none.
+    /// density energy, written to `out`; objects of frozen fields and
+    /// removed fillers get none.
     fn gradient(
         &mut self,
         centers: &[Point<f64>],
@@ -352,7 +379,7 @@ impl<'a> Objective<'a> {
             .collect();
         for (i, g) in out.iter_mut().enumerate() {
             let k = self.field_of[i];
-            if weights.frozen[k] {
+            if weights.frozen[k] || !self.active[i] {
                 *g = Point::new(0.0, 0.0);
                 continue;
             }
@@ -369,7 +396,7 @@ impl<'a> Objective<'a> {
         self.fields
             .iter()
             .map(|f| {
-                let objects = || f.cells.clone().chain(f.fillers.clone());
+                let objects = || f.cells.clone().chain(f.live_fillers());
                 let wirelength: f64 = objects().map(|i| l1(self.wirelength_grad[i])).sum();
                 let density: f64 = objects().map(|i| l1(self.density_grad[i])).sum();
                 (wirelength, density)
@@ -455,9 +482,35 @@ impl<'a> Objective<'a> {
         }
     }
 
-    /// Whether each object may move: those of fields not yet frozen.
+    /// Whether each object may move: those in play of fields not yet frozen.
     fn moving(&self, frozen: &[bool]) -> Vec<bool> {
-        self.field_of.iter().map(|&k| !frozen[k]).collect()
+        self.field_of
+            .iter()
+            .zip(&self.active)
+            .map(|(&k, &active)| active && !frozen[k])
+            .collect()
+    }
+
+    /// How far each field's objects in play moved from `before` to `after`:
+    /// the root mean square change of their coordinates.
+    fn displacements(&self, before: &[Point<f64>], after: &[Point<f64>]) -> Vec<f64> {
+        self.fields
+            .iter()
+            .map(|f| {
+                let mut sum = 0.0;
+                let mut count = 0;
+                for i in f.cells.clone().chain(f.live_fillers()) {
+                    let d = after[i] - before[i];
+                    sum = d.x.mul_add(d.x, d.y.mul_add(d.y, sum));
+                    count += 1;
+                }
+                if count == 0 {
+                    0.0
+                } else {
+                    (sum / (2 * count) as f64).sqrt()
+                }
+            })
+            .collect()
     }
 
     /// How each field ended, at the overflows of `eval`.
@@ -542,18 +595,76 @@ struct State {
     prev_hpwl: f64,
 }
 
-/// How one stretch of iterations ended.
-enum Phase {
-    /// Placement is finished.
-    Finished(GlobalResult),
-    /// Spreading reached the point where routability is checked.
-    Paused { iteration: usize, state: State },
+/// Each field's displacement in its last iteration and the largest it has
+/// had, which tell when placement has settled, as in `OpenROAD`.
+#[derive(Clone, Debug)]
+struct Settling {
+    last: Vec<f64>,
+    peak: Vec<f64>,
+}
+
+impl Settling {
+    fn new(fields: usize) -> Self {
+        Self {
+            last: vec![0.0; fields],
+            peak: vec![0.0; fields],
+        }
+    }
+
+    /// Records the `displacements` of the fields not `frozen`.
+    fn observe(&mut self, displacements: &[f64], frozen: &[bool]) {
+        for (k, &d) in displacements.iter().enumerate() {
+            if !frozen[k] {
+                self.last[k] = d;
+                self.peak[k] = self.peak[k].max(d);
+            }
+        }
+    }
+
+    /// Whether every field last moved at most [`SETTLE_FRACTION`] of its
+    /// peak.
+    fn settled(&self) -> bool {
+        self.last
+            .iter()
+            .zip(&self.peak)
+            .all(|(&d, &peak)| peak > 0.0 && d <= SETTLE_FRACTION * peak)
+    }
+}
+
+/// The state to resume from after routability changed object sizes: the
+/// `snapshot` for every field still moving, as `OpenROAD` does not revert a
+/// region that has converged, and the HPWL the penalty last saw.
+fn revert(snapshot: &State, current: &State, fields: &[Field]) -> State {
+    let mut s = snapshot.clone();
+    s.prev_hpwl = current.prev_hpwl;
+    for (k, f) in fields.iter().enumerate() {
+        if !current.weights.frozen[k] {
+            continue;
+        }
+        for i in f.cells.clone().chain(f.fillers.clone()) {
+            s.major[i] = current.major[i];
+            s.reference[i] = current.reference[i];
+        }
+        s.weights.frozen[k] = true;
+        s.weights.penalties[k] = current.weights.penalties[k];
+        if let (Some(to), Some(from)) = (
+            s.weights.schedule.as_mut(),
+            current.weights.schedule.as_ref(),
+        ) {
+            to.u[k] = from.u[k];
+        }
+    }
+    s
+}
+
+fn mean(values: &[f64]) -> f64 {
+    values.iter().sum::<f64>() / values.len().max(1) as f64
 }
 
 /// Minimizes wirelength plus density energy over the objects' centers,
-/// leaving the best placement found in `objects.centers`. With
-/// routability enabled, congestion is checked once cells have nearly
-/// spread, and placement resumes from a saved state after each inflation.
+/// leaving the placement in `objects.centers`. With routability enabled,
+/// congested standard cells grow as in `OpenROAD` once spreading has nearly
+/// finished and settled, and placement resumes from a snapshot.
 pub(super) fn minimize(
     objects: &mut Objects,
     die: &Rect<f64>,
@@ -563,7 +674,7 @@ pub(super) fn minimize(
     params: &GlobalParams,
     mut report: impl FnMut(&Progress),
 ) -> GlobalResult {
-    let Some(dim) = fields.first().map(|f| f.grid.dim()) else {
+    let Some(bin) = fields.first().map(|f| f.grid.bin()) else {
         let mut grad = vec![Point::new(0.0, 0.0); objects.centers.len()];
         let wirelength = netlist.gradient(&objects.centers, 1.0, &mut Vec::new(), &mut grad);
         return GlobalResult {
@@ -572,84 +683,21 @@ pub(super) fn minimize(
             overflow: 0.0,
             hpwl: wirelength.hpwl,
             congestion: Vec::new(),
+            final_congestion: None,
             zones: Vec::new(),
         };
     };
-    let mut routability = params.routability.map(|r| Routability::new(r, objects));
-    let mut saved: Option<State> = None;
-    let mut resume: Option<State> = None;
-    let mut first = 0;
-    loop {
-        let checking = routability.as_ref().is_some_and(Routability::active);
-        let phase = run(
-            objects,
-            die,
-            fields,
-            netlist,
-            site,
-            params,
-            &mut report,
-            Start {
-                first,
-                resume: resume.take(),
-                checking,
-            },
-            &mut saved,
-        );
-        match (phase, routability.as_mut(), params.routability) {
-            (Phase::Finished(mut result), r, _) => {
-                result.congestion = r.map(|r| std::mem::take(&mut r.rounds)).unwrap_or_default();
-                return result;
-            }
-            (Phase::Paused { iteration, state }, Some(r), Some(p)) => {
-                let map = CongestionMap::rudy(netlist, &objects.centers, die, dim, p.supply);
-                let verdict = r.check(iteration, &map, objects, fields);
-                resume = match verdict {
-                    Verdict::Resume => saved.clone().or(Some(state)),
-                    Verdict::Done => Some(state),
-                };
-                first = iteration + 1;
-            }
-            (Phase::Paused { iteration, state }, _, _) => {
-                resume = Some(state);
-                first = iteration + 1;
-            }
-        }
-    }
-}
-
-/// Where a stretch of iterations starts.
-struct Start {
-    first: usize,
-    resume: Option<State>,
-    checking: bool,
-}
-
-/// Runs iterations from `start` until placement converges, the iteration
-/// limit is reached, or, when `start.checking`, density overflow falls to
-/// [`CHECK_OVERFLOW`]; the state at [`SNAPSHOT_OVERFLOW`] is kept in `saved`.
-#[allow(clippy::too_many_arguments)]
-fn run(
-    objects: &mut Objects,
-    die: &Rect<f64>,
-    fields: &mut [Field],
-    netlist: &Netlist,
-    site: f64,
-    params: &GlobalParams,
-    report: &mut impl FnMut(&Progress),
-    start: Start,
-    saved: &mut Option<State>,
-) -> Phase {
-    let bin = fields[0].grid.bin();
     let reference_growth =
         REFERENCE_STRETCH_BINS * f64::midpoint(bin.x, bin.y) * netlist.len().max(1) as f64;
+    let mut routability = params
+        .routability
+        .clone()
+        .map(|r| Routability::new(r, objects, fields));
     let mut objective = Objective::new(objects, die, fields, netlist);
     let n = objects.centers.len();
     let mut grad = vec![Point::new(0.0, 0.0); n];
 
-    let mut s = if let Some(state) = start.resume {
-        restart(&mut objective, state, &mut grad, bin)
-    } else {
+    let mut s = {
         let mut major = objects.centers.clone();
         objective.clamp(&mut major);
         let gamma = gamma_for(1.0, bin);
@@ -669,14 +717,19 @@ fn run(
     };
     let mut eval = objective.gradient(&s.reference, s.gamma, &s.weights, &mut grad);
     let mut moving = objective.moving(&s.weights.frozen);
+    let mut settling = Settling::new(objective.fields.len());
+    let mut snapshot: Option<State> = None;
 
     let mut next_major = vec![Point::new(0.0, 0.0); n];
     let mut next_reference = vec![Point::new(0.0, 0.0); n];
     let mut next_grad = vec![Point::new(0.0, 0.0); n];
     let mut outcome = Outcome::IterationLimit;
-    let mut iterations = start.first;
+    let mut limit = params.max_iterations;
+    let mut refunded = 0;
+    let mut iterations = 0;
+    let mut k = 0;
 
-    for k in start.first..params.max_iterations {
+    while k < limit {
         iterations = k + 1;
         let a_next = f64::midpoint(1.0, (4.0 * s.a).mul_add(s.a, 1.0).sqrt());
         let momentum = (s.a - 1.0) / a_next;
@@ -717,6 +770,12 @@ fn run(
             outcome = Outcome::Diverged;
             break;
         }
+        if routability.is_some() {
+            settling.observe(
+                &objective.displacements(&s.reference, &next_reference),
+                &s.weights.frozen,
+            );
+        }
         std::mem::swap(&mut s.major, &mut next_major);
         std::mem::swap(&mut s.reference, &mut next_reference);
         std::mem::swap(&mut grad, &mut next_grad);
@@ -752,58 +811,51 @@ fn run(
             s.prev_hpwl = eval.wirelength.hpwl;
             s.gamma = gamma_for(eval.overflow, bin);
         }
-        if start.checking {
-            if saved.is_none() && eval.overflow <= SNAPSHOT_OVERFLOW {
-                *saved = Some(s.clone());
+        if let Some(r) = routability.as_mut() {
+            let overflow = mean(&eval.field_overflow);
+            // OpenROAD refunds without bound; the cap keeps a stalled spread finite.
+            if snapshot.is_some() && overflow > CHECK_OVERFLOW && refunded < params.max_iterations {
+                limit += 1;
+                refunded += 1;
             }
-            if eval.overflow <= CHECK_OVERFLOW {
+            if snapshot.is_none() && overflow <= SNAPSHOT_OVERFLOW {
+                snapshot = Some(s.clone());
+            }
+            if let Some(saved) = &snapshot
+                && r.active()
+                && overflow <= CHECK_OVERFLOW
+                && settling.settled()
+            {
                 objects.centers.copy_from_slice(&s.major);
-                return Phase::Paused {
-                    iteration: k,
-                    state: s,
-                };
+                let map = CongestionMap::rudy(netlist, objects, die, r.params());
+                if r.check(k, &map, objects, objective.fields) != Verdict::Done {
+                    s = revert(saved, &s, objective.fields);
+                    objective.refresh(objects);
+                    eval = objective.gradient(&s.reference, s.gamma, &s.weights, &mut grad);
+                    moving = objective.moving(&s.weights.frozen);
+                }
             }
         }
         if converged {
             outcome = Outcome::Converged;
             break;
         }
+        k += 1;
     }
 
     objects.centers.copy_from_slice(&s.major);
     let last = objective.evaluate(&s.major, s.gamma);
-    Phase::Finished(GlobalResult {
+    let final_congestion = routability
+        .as_ref()
+        .map(|r| CongestionMap::rudy(netlist, objects, die, r.params()).metric());
+    GlobalResult {
         outcome,
         iterations,
         overflow: last.overflow,
         hpwl: last.wirelength.hpwl,
-        congestion: Vec::new(),
+        congestion: routability.map(|r| r.rounds).unwrap_or_default(),
+        final_congestion,
         zones: objective.outcomes(&last),
-    })
-}
-
-/// `state` with momentum cleared and the step length estimated afresh, for
-/// resuming after object sizes changed.
-fn restart(
-    objective: &mut Objective<'_>,
-    state: State,
-    grad: &mut [Point<f64>],
-    bin: Point<f64>,
-) -> State {
-    let _ = objective.gradient(&state.major, state.gamma, &state.weights, grad);
-    let step = initial_step(
-        objective,
-        &state.major,
-        grad,
-        state.gamma,
-        &state.weights,
-        bin,
-    );
-    State {
-        reference: state.major.clone(),
-        step,
-        a: 1.0,
-        ..state
     }
 }
 

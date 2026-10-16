@@ -6,8 +6,8 @@
 //! of its die still packs to the target density instead of scattering.
 //! Nesterov's method minimizes the sum, raising the weight of density until
 //! the cell area above the target density falls below a threshold. With
-//! routability enabled, cells in bins whose estimated routing demand exceeds
-//! the tracks there are inflated along the way.
+//! routability enabled, standard cells in congested gcells are inflated
+//! along the way, as in `OpenROAD`.
 //!
 //! Fence regions are handled as in `DREAMPlace` 3.0: each zone's cells and
 //! fillers form an electrostatic system of their own, whose fixed charge
@@ -21,7 +21,7 @@ mod poisson;
 mod routability;
 mod wirelength;
 
-pub use routability::{CongestionRound, RoutabilityParams, TrackSupply};
+pub use routability::{CongestionRound, RoutabilityParams, RoutingTiles, wire_width};
 
 use crate::model::{PinAnchor, PlacementModel};
 use crate::zones::Zone;
@@ -90,6 +90,9 @@ pub struct GlobalResult {
     pub hpwl: f64,
     /// Each routability round, in order.
     pub congestion: Vec<CongestionRound>,
+    /// The congestion metric of the final placement, with routability
+    /// enabled.
+    pub final_congestion: Option<f64>,
     /// How each zone with cells ended.
     pub zones: Vec<ZoneOutcome>,
 }
@@ -121,7 +124,19 @@ pub(super) struct Field {
     cells: Range<usize>,
     /// Object indices of its fillers.
     fillers: Range<usize>,
+    /// How many of its fillers, from the first, are in play: routability
+    /// removes them from the last.
+    kept_fillers: usize,
+    /// Width and height of each filler.
+    filler: Point<f64>,
     utilization: f64,
+}
+
+impl Field {
+    /// Object indices of the fillers in play.
+    const fn live_fillers(&self) -> Range<usize> {
+        self.fillers.start..self.fillers.start + self.kept_fillers
+    }
 }
 
 /// How far above its cells' utilization a zone's target density is set
@@ -187,7 +202,7 @@ pub fn place(
     let mut objects = Objects {
         centers: initial_centers(model, &movable, &mut rng),
         sizes: movable.iter().map(|&i| model.sizes[i]).collect(),
-        cells: movable.len(),
+        kinds: movable.iter().map(|&i| model.kinds[i]).collect(),
     };
     let mut fields = build_fields(model, &movable, &fixed, params);
     for field in &mut fields {
@@ -199,6 +214,8 @@ pub fn place(
             objects.sizes.push(size);
         }
         field.fillers = first..objects.centers.len();
+        field.kept_fillers = count;
+        field.filler = size;
     }
     let netlist = build_netlist(model, &movable);
 
@@ -253,6 +270,8 @@ fn build_fields(
             area,
             cells: start..end,
             fillers: 0..0,
+            kept_fillers: 0,
+            filler: Point::new(0.0, 0.0),
             utilization,
         });
         start = end;
@@ -276,8 +295,8 @@ fn zone_target(requested: f64, utilization: f64) -> f64 {
 /// left after dropping the smallest and largest twentieth.
 fn filler_layout(cells: &[Point<f64>], free_area: f64, target: f64) -> (Point<f64>, usize) {
     let cell_area: f64 = cells.iter().map(|s| s.x * s.y).sum();
-    let filler_area = target.mul_add(free_area, -cell_area);
-    if cells.is_empty() || filler_area <= 0.0 {
+    let filler_area = target.mul_add(free_area, -cell_area).max(0.0);
+    if cells.is_empty() {
         return (Point::new(0.0, 0.0), 0);
     }
     let mut areas: Vec<f64> = cells.iter().map(|s| s.x * s.y).collect();
@@ -415,8 +434,9 @@ mod tests {
     fn a_full_design_gets_no_fillers() {
         let cells = vec![Point::new(2.0, 1.0); 10];
 
-        let (_, count) = filler_layout(&cells, 20.0, 0.9);
+        let (size, count) = filler_layout(&cells, 20.0, 0.9);
 
+        assert_eq!(size, Point::new(2.0, 1.0));
         assert_eq!(count, 0);
     }
 }

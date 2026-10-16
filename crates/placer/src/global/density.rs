@@ -183,11 +183,6 @@ impl DensityGrid {
         self.fixed.iter().map(|f| bin_area - f / self.target).sum()
     }
 
-    /// Bins per side.
-    pub(super) const fn dim(&self) -> usize {
-        self.bins.dim
-    }
-
     /// Width and height of one bin.
     pub(super) const fn bin(&self) -> Point<f64> {
         self.bins.size

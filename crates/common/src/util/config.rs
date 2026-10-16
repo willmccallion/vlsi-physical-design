@@ -56,11 +56,11 @@ pub struct GlobalPlacementConfig {
     /// Seed for the random initial placement.
     #[serde(default = "default_seed")]
     pub seed: u64,
-    /// Whether cells in bins whose estimated routing demand exceeds the
-    /// tracks there are inflated during global placement.
+    /// Whether standard cells in congested gcells are inflated during
+    /// global placement, as in `OpenROAD`.
     #[serde(default = "default_routability_driven")]
     pub routability_driven: bool,
-    /// Mean routing demand over supply of the most congested bins at which
+    /// Mean congestion of the most congested gcells below which
     /// routability-driven placement stops inflating cells.
     #[serde(default = "default_target_congestion")]
     pub target_congestion: f64,
@@ -234,7 +234,7 @@ const fn default_routability_driven() -> bool {
 }
 
 const fn default_target_congestion() -> f64 {
-    1.25
+    1.01
 }
 
 const fn default_gcell_tracks() -> u32 {

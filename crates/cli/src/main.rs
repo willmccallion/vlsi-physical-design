@@ -6,15 +6,17 @@
 use anyhow::Context;
 use clap::{Parser, Subcommand};
 use pare_common::db::design::{NetlistDB, PlacementStatus};
-use pare_common::db::indices::CellId;
+use pare_common::db::indices::{CellId, LayerId};
 use pare_common::db::parser::{bookshelf, def, lef};
 use pare_common::db::writer;
+use pare_common::geom::dbu::Dbu;
+use pare_common::geom::point::Point;
 use pare_common::util::config::{Config, Purpose};
 use pare_common::util::{logger, ui, visualization};
 use pare_common::verify::placement::{PlacementViolation, placement_violations};
 use pare_common::verify::routing::check_routing;
 use pare_placer::detailed;
-use pare_placer::global::{self, GlobalParams, Outcome, RoutabilityParams, TrackSupply};
+use pare_placer::global::{self, GlobalParams, Outcome, RoutabilityParams, RoutingTiles};
 use pare_placer::io::{self, IoLayers};
 use pare_placer::legalize::abacus;
 use pare_placer::model::PlacementModel;
@@ -356,11 +358,7 @@ fn global_placement(
     ui::stat_row("Bin Grid:", &format!("{bins}x{bins}"), "", "");
 
     let routability = if gp.routability_driven {
-        let layers = config.routing.layer_range(&db.library)?;
-        Some(RoutabilityParams {
-            supply: TrackSupply::from_db(db, layers, config.routing.global_capacity_reserve),
-            target_congestion: gp.target_congestion,
-        })
+        Some(routability_params(config, db)?)
     } else {
         None
     };
@@ -382,13 +380,16 @@ fn global_placement(
     for (k, round) in result.congestion.iter().enumerate() {
         ui::stat_row(
             &format!("Congestion {}:", k + 1),
-            &format!("{:.2} @ {}", round.congestion, round.iteration),
+            &format!("{:.4} @ {}", round.congestion, round.iteration),
             "Inflated:",
             &format!(
                 "{} cells, area x{:.2}, density {:.2}",
                 round.inflated, round.area_ratio, round.target_density
             ),
         );
+    }
+    if let Some(congestion) = result.final_congestion {
+        ui::stat_row("Final congestion:", &format!("{congestion:.4}"), "", "");
     }
     if result.zones.len() > 1 {
         for z in &result.zones {
@@ -420,6 +421,41 @@ fn global_placement(
     }
     ui::stat_row("HPWL (um):", &format!("{:.0}", model.hpwl()), "", "");
     Ok(model)
+}
+
+/// What routability-driven placement takes from the router: its gcells
+/// with the capacity they lose before placement, and the width RUDY gives a
+/// wire on its layers.
+fn routability_params(config: &Config, db: &NetlistDB) -> anyhow::Result<RoutabilityParams> {
+    let reduction = pare_router::capacity_reduction(db, &config.routing)?;
+    let units = db.dbu();
+    let layers = config.routing.layer_range(&db.library)?;
+    let pitches: Vec<f64> = (layers.start().index()..=layers.end().index())
+        .map(|l| {
+            let layer = db.library.layer(LayerId::new(l));
+            let pitch = layer.track_pitch();
+            if pitch > Dbu::ZERO {
+                units.to_microns(pitch)
+            } else {
+                units.to_microns(layer.width + layer.min_spacing)
+            }
+        })
+        .collect();
+    Ok(RoutabilityParams {
+        tiles: RoutingTiles {
+            origin: Point::new(
+                units.to_microns(reduction.origin.x),
+                units.to_microns(reduction.origin.y),
+            ),
+            size: units.to_microns(reduction.gcell),
+            nx: reduction.nx,
+            ny: reduction.ny,
+            capacity: reduction.capacity,
+            reduction: reduction.reduction,
+        },
+        wire_width: global::wire_width(&pitches),
+        target_congestion: config.global_placement.target_congestion,
+    })
 }
 
 fn path_str(path: &Path) -> anyhow::Result<String> {
