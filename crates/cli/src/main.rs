@@ -3,6 +3,8 @@
 //! Loads a LEF/DEF or Bookshelf design, places and routes it, checks the
 //! result and writes it out.
 
+mod report;
+
 use anyhow::Context;
 use clap::{Parser, Subcommand};
 use pare_common::db::design::{NetlistDB, PlacementStatus};
@@ -23,6 +25,7 @@ use pare_placer::io::{self, IoLayers};
 use pare_placer::legalize::abacus;
 use pare_placer::model::PlacementModel;
 use pare_placer::zones::{Zone, Zones};
+use report::{PlacementSummary, Report, RoutingSummary};
 use std::path::{Path, PathBuf};
 use std::time::Instant;
 
@@ -31,6 +34,9 @@ use std::time::Instant;
 struct Args {
     #[command(subcommand)]
     command: Commands,
+    /// Write a JSON report of the run (phases, results, checks, peak memory) here.
+    #[arg(long, global = true)]
+    report: Option<PathBuf>,
 }
 
 #[derive(Subcommand)]
@@ -95,12 +101,23 @@ fn resolve_config(name: &Path) -> anyhow::Result<PathBuf> {
     }
 }
 
-fn load_config(name: &Path) -> anyhow::Result<Config> {
+/// Reads the config, records it in the report and sizes the thread pool as
+/// it asks.
+fn load_config(name: &Path, report: &mut Report) -> anyhow::Result<Config> {
     let path = resolve_config(name)?;
     ui::header("Config", &path.display().to_string());
+    report.config = path.display().to_string();
     let text = std::fs::read_to_string(&path)
         .with_context(|| format!("cannot read config {}", path.display()))?;
-    toml::from_str(&text).with_context(|| format!("invalid config {}", path.display()))
+    let config: Config =
+        toml::from_str(&text).with_context(|| format!("invalid config {}", path.display()))?;
+    if let Some(threads) = config.threads {
+        rayon::ThreadPoolBuilder::new()
+            .num_threads(threads)
+            .build_global()
+            .context("cannot size the thread pool")?;
+    }
+    Ok(config)
 }
 
 fn main() -> anyhow::Result<()> {
@@ -109,9 +126,26 @@ fn main() -> anyhow::Result<()> {
     let start_time = Instant::now();
     ui::banner();
 
-    match args.command {
+    let mut report = Report::default();
+    let outcome = run(args.command, &mut report);
+    report.passed = outcome.is_ok();
+    report.wall_seconds = start_time.elapsed().as_secs_f64();
+    report.peak_rss_mb = report::peak_rss_mb();
+    if let Some(path) = &args.report {
+        report.write(path)?;
+        ui::wrote(&path_str(path)?);
+    }
+    outcome?;
+
+    ui::done(report.wall_seconds);
+    Ok(())
+}
+
+/// Runs one command, recording what it did in `report`.
+fn run(command: Commands, report: &mut Report) -> anyhow::Result<()> {
+    match command {
         Commands::Place { config: name } => {
-            let config = load_config(&name)?;
+            let config = load_config(&name, report)?;
             if config.purpose == Purpose::Routing {
                 anyhow::bail!(
                     "{} is a routing benchmark: its placement is part of the input",
@@ -119,13 +153,14 @@ fn main() -> anyhow::Result<()> {
                 );
             }
             let mut db = load_design(&config, None)?;
-            run_placement(&config, &mut db, &prepare_output_dir(&config)?)?;
+            report.design.clone_from(&db.name);
+            run_placement(&config, &mut db, &prepare_output_dir(&config)?, report)
         }
         Commands::Route {
             config: name,
             placement,
         } => {
-            let config = load_config(&name)?;
+            let config = load_config(&name, report)?;
             if config.purpose == Purpose::Placement {
                 anyhow::bail!(
                     "{} is a placement benchmark and is not routed",
@@ -133,32 +168,34 @@ fn main() -> anyhow::Result<()> {
                 );
             }
             let mut db = load_design(&config, placement.as_deref())?;
-            run_routing(&config, &mut db, &prepare_output_dir(&config)?)?;
+            report.design.clone_from(&db.name);
+            run_routing(&config, &mut db, &prepare_output_dir(&config)?, report)
         }
         Commands::Run { config } => {
-            let config = load_config(&config)?;
+            let config = load_config(&config, report)?;
             let mut db = load_design(&config, None)?;
+            report.design.clone_from(&db.name);
             let output_dir = prepare_output_dir(&config)?;
             if config.purpose != Purpose::Routing {
-                run_placement(&config, &mut db, &output_dir)?;
+                run_placement(&config, &mut db, &output_dir, report)?;
             }
             if config.purpose != Purpose::Placement {
-                run_routing(&config, &mut db, &output_dir)?;
+                run_routing(&config, &mut db, &output_dir, report)?;
             }
+            Ok(())
         }
         Commands::Check { config, placement } => {
-            let config = load_config(&config)?;
+            let config = load_config(&config, report)?;
             let db = load_design(&config, placement.as_deref())?;
-            let placement_ok = report_placement(&db);
-            let routing_ok = report_routing(&db);
+            report.design.clone_from(&db.name);
+            let placement_ok = report_placement(&db, report);
+            let routing_ok = report_routing(&db, report);
             if !(placement_ok && routing_ok) {
                 anyhow::bail!("{} failed its checks", db.name);
             }
+            Ok(())
         }
     }
-
-    ui::done(start_time.elapsed().as_secs_f64());
-    Ok(())
 }
 
 /// Reads the design named by the `[input]` section. `placement` replaces the
@@ -202,7 +239,12 @@ fn output_dir(config: &Config) -> PathBuf {
 }
 
 /// Global placement, I/O pin placement, legalization, checking and output.
-fn run_placement(config: &Config, db: &mut NetlistDB, output_dir: &Path) -> anyhow::Result<()> {
+fn run_placement(
+    config: &Config,
+    db: &mut NetlistDB,
+    output_dir: &Path,
+    report: &mut Report,
+) -> anyhow::Result<()> {
     let movable_io = io::movable_io_pins(db);
     let io_layers = if movable_io.is_empty() {
         None
@@ -222,11 +264,17 @@ fn run_placement(config: &Config, db: &mut NetlistDB, output_dir: &Path) -> anyh
     let zones = Zones::new(db)?;
     ui::section("Placement");
     let model = if let Some(layers) = io_layers {
-        place_cells_and_io_pins(config, db, &zones, layers)?
+        place_cells_and_io_pins(config, db, &zones, layers, report)?
     } else {
         let phase_start = Instant::now();
-        let model = global_placement(config, db, PlacementModel::from_db(db, &zones), Pass::Full)?;
-        ui::phase_time(phase_start.elapsed().as_secs_f64());
+        let model = global_placement(
+            config,
+            db,
+            PlacementModel::from_db(db, &zones),
+            Pass::Full,
+            report,
+        )?;
+        report.phase("global placement", phase_start);
         model
     };
     let movable_cells = model.movable.iter().filter(|&&m| m).count();
@@ -244,20 +292,25 @@ fn run_placement(config: &Config, db: &mut NetlistDB, output_dir: &Path) -> anyh
         "",
         "",
     );
-    ui::phase_time(phase_start.elapsed().as_secs_f64());
+    report.phase("legalization", phase_start);
 
     let phase_start = Instant::now();
     ui::phase("Detailed Placement");
     let result = detailed::improve(db, &zones, 3);
+    let hpwl = PlacementModel::from_db(db, &zones).hpwl();
     ui::stat_row(
         "Moves:",
         &result.moves.to_string(),
         "HPWL (um):",
-        &format!("{:.0}", PlacementModel::from_db(db, &zones).hpwl()),
+        &format!("{hpwl:.0}"),
     );
-    ui::phase_time(phase_start.elapsed().as_secs_f64());
+    report.phase("detailed placement", phase_start);
+    if let Some(summary) = &mut report.placement {
+        summary.hpwl_um = hpwl;
+        summary.detailed_moves = result.moves;
+    }
 
-    if !report_placement(db) {
+    if !report_placement(db, report) {
         anyhow::bail!("placement is not legal");
     }
 
@@ -279,7 +332,7 @@ fn run_placement(config: &Config, db: &mut NetlistDB, output_dir: &Path) -> anyh
         out
     };
     ui::wrote(&path_str(&placed)?);
-    ui::phase_time(phase_start.elapsed().as_secs_f64());
+    report.phase("placement output", phase_start);
     Ok(())
 }
 
@@ -291,6 +344,7 @@ fn place_cells_and_io_pins(
     db: &mut NetlistDB,
     zones: &Zones,
     layers: IoLayers,
+    report: &mut Report,
 ) -> anyhow::Result<PlacementModel> {
     let phase_start = Instant::now();
     ui::phase("Global Placement Without I/O");
@@ -299,9 +353,10 @@ fn place_cells_and_io_pins(
         db,
         PlacementModel::from_db_without_movable_io(db, zones),
         Pass::SkipIo,
+        report,
     )?;
     model.write_back(db);
-    ui::phase_time(phase_start.elapsed().as_secs_f64());
+    report.phase("global placement without I/O", phase_start);
 
     let phase_start = Instant::now();
     ui::phase("I/O Pin Placement");
@@ -312,12 +367,18 @@ fn place_cells_and_io_pins(
         "Free slots:",
         &placed.slots.to_string(),
     );
-    ui::phase_time(phase_start.elapsed().as_secs_f64());
+    report.phase("I/O pin placement", phase_start);
 
     let phase_start = Instant::now();
     ui::phase("Global Placement");
-    let model = global_placement(config, db, PlacementModel::from_db(db, zones), Pass::Full)?;
-    ui::phase_time(phase_start.elapsed().as_secs_f64());
+    let model = global_placement(
+        config,
+        db,
+        PlacementModel::from_db(db, zones),
+        Pass::Full,
+        report,
+    )?;
+    report.phase("global placement", phase_start);
     Ok(model)
 }
 
@@ -338,6 +399,7 @@ fn global_placement(
     db: &NetlistDB,
     mut model: PlacementModel,
     pass: Pass,
+    report: &mut Report,
 ) -> anyhow::Result<PlacementModel> {
     let gp = &config.global_placement;
 
@@ -433,7 +495,16 @@ fn global_placement(
             result.iterations
         ),
     }
-    ui::stat_row("HPWL (um):", &format!("{:.0}", model.hpwl()), "", "");
+    let hpwl = model.hpwl();
+    ui::stat_row("HPWL (um):", &format!("{hpwl:.0}"), "", "");
+    report.placement = Some(PlacementSummary {
+        cells: movable_cells,
+        nets: model.nets.len(),
+        iterations: result.iterations,
+        overflow: result.overflow,
+        hpwl_um: hpwl,
+        detailed_moves: 0,
+    });
     Ok(model)
 }
 
@@ -479,7 +550,12 @@ fn path_str(path: &Path) -> anyhow::Result<String> {
 }
 
 /// Routes every signal net, checks the result and writes it out.
-fn run_routing(config: &Config, db: &mut NetlistDB, output_dir: &Path) -> anyhow::Result<()> {
+fn run_routing(
+    config: &Config,
+    db: &mut NetlistDB,
+    output_dir: &Path,
+    report: &mut Report,
+) -> anyhow::Result<()> {
     let phase_start = Instant::now();
     ui::section("Routing");
     let summary = pare_router::route(db, &config.routing)?;
@@ -501,12 +577,19 @@ fn run_routing(config: &Config, db: &mut NetlistDB, output_dir: &Path) -> anyhow
         "",
         "",
     );
-    ui::phase_time(phase_start.elapsed().as_secs_f64());
+    report.phase("routing", phase_start);
+    report.routing = Some(RoutingSummary {
+        nets: summary.nets,
+        rounds: summary.rounds,
+        inaccessible: summary.inaccessible.len(),
+        incomplete: summary.incomplete.len(),
+        conflicted: summary.conflicted.len(),
+    });
 
     let phase_start = Instant::now();
     ui::phase("Verification");
-    let routing_ok = report_routing(db);
-    ui::phase_time(phase_start.elapsed().as_secs_f64());
+    let routing_ok = report_routing(db, report);
+    report.phase("verification", phase_start);
 
     let phase_start = Instant::now();
     ui::phase("Output");
@@ -516,7 +599,7 @@ fn run_routing(config: &Config, db: &mut NetlistDB, output_dir: &Path) -> anyhow
     let out = output_dir.join("routed.def");
     writer::def::write_file(db, &out).with_context(|| format!("cannot write {}", out.display()))?;
     ui::wrote(&path_str(&out)?);
-    ui::phase_time(phase_start.elapsed().as_secs_f64());
+    report.phase("routing output", phase_start);
 
     if !routing_ok {
         anyhow::bail!("routing has opens or design rule violations");
@@ -525,8 +608,9 @@ fn run_routing(config: &Config, db: &mut NetlistDB, output_dir: &Path) -> anyhow
 }
 
 /// Prints placement violations by kind; returns whether there were none.
-fn report_placement(db: &NetlistDB) -> bool {
+fn report_placement(db: &NetlistDB, report: &mut Report) -> bool {
     let violations = placement_violations(db);
+    report.checks.placement_violations = violations.len();
     if violations.is_empty() {
         ui::check("Placement is legal.");
         return true;
@@ -602,7 +686,7 @@ fn describe_violation(db: &NetlistDB, v: &PlacementViolation) -> String {
 
 /// Prints the connectivity and design rule check results; returns whether
 /// every net is connected and nothing routed breaks a rule.
-fn report_routing(db: &NetlistDB) -> bool {
+fn report_routing(db: &NetlistDB, run: &mut Report) -> bool {
     let report = check_routing(db);
     for open in &report.opens {
         log::debug!(
@@ -673,6 +757,19 @@ fn report_routing(db: &NetlistDB) -> bool {
             "",
         );
     }
+    let by_kind = |counts: Vec<(pare_common::verify::drc::Violation, usize)>| {
+        counts
+            .into_iter()
+            .map(|(kind, n)| (kind.name().to_string(), n))
+            .collect()
+    };
+    run.checks.opens = report.opens.len();
+    run.checks.wirelength_um = wirelength;
+    run.checks.vias = report.stats.vias;
+    run.checks.violations = by_kind(drc.counts());
+    run.checks.advisory = by_kind(drc.advisory_counts());
+    run.checks.from_placement = drc.placement.len();
+    run.checks.in_input = drc.input.len();
     if report.is_connected() && drc.violations.is_empty() {
         ui::check("Routing is connected and clean.");
         true
