@@ -119,19 +119,28 @@ pub fn route(db: &mut NetlistDB, config: &RoutingConfig) -> Result<RoutingSummar
         };
         let start = Instant::now();
         let first = dr.route_initial(&nets, costs);
-        ui::routing_table_header("DR");
+        ui::dr_table_header();
         let mut conflicted = dr.conflicted_nets(1.0);
-        ui::routing_iter(
-            "DR",
+        ui::dr_iter(
             0,
+            dr.marker_count(),
             conflicted.len(),
             first.pieces,
             costs.penalty / pitch,
             start.elapsed().as_millis(),
         );
         let mut scope = Scope::Conflicts;
+        let mut progress = Progress::new(dr.marker_count());
         for round in 1..=config.detailed_iterations {
             if conflicted.is_empty() {
+                break;
+            }
+            if progress.stalled() {
+                log::info!(
+                    "detailed routing stopped: no fewer than {} markers in the last {} rounds",
+                    progress.best,
+                    STALL_ROUNDS
+                );
                 break;
             }
             let start = Instant::now();
@@ -140,10 +149,11 @@ pub fn route(db: &mut NetlistDB, config: &RoutingConfig) -> Result<RoutingSummar
             let before = conflicted.len();
             conflicted = dr.conflicted_nets(1.0);
             scope = next_scope(scope, conflicted.len() < before);
+            progress.record(dr.marker_count());
             summary.rounds = round;
-            ui::routing_iter(
-                "DR",
+            ui::dr_iter(
                 round,
+                dr.marker_count(),
                 conflicted.len(),
                 repaired.pieces,
                 costs.penalty / pitch,
@@ -183,6 +193,38 @@ const fn next_scope(previous: Scope, improved: bool) -> Scope {
     match previous {
         Scope::Conflicts if !improved => Scope::NearConflicts,
         _ => Scope::Conflicts,
+    }
+}
+
+/// Rounds of detailed routing without fewer markers than the best so far
+/// after which the repair is given up as stalled.
+const STALL_ROUNDS: usize = 8;
+
+/// The best marker count of detailed routing and how long ago it was set.
+struct Progress {
+    best: usize,
+    since_best: usize,
+}
+
+impl Progress {
+    const fn new(markers: usize) -> Self {
+        Self {
+            best: markers,
+            since_best: 0,
+        }
+    }
+
+    const fn record(&mut self, markers: usize) {
+        if markers < self.best {
+            self.best = markers;
+            self.since_best = 0;
+        } else {
+            self.since_best += 1;
+        }
+    }
+
+    const fn stalled(&self) -> bool {
+        self.since_best >= STALL_ROUNDS
     }
 }
 

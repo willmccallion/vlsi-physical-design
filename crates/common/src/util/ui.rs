@@ -72,6 +72,33 @@ pub fn routing_table_header(phase: &str) {
     eprintln!("    {}", "-".repeat(2 + 8 + 10 * 4 + phase.len()).dim());
 }
 
+/// Prints the header of the detailed routing table: the design rule
+/// violations left after each round, the nets in them, and the pieces
+/// routed again.
+pub fn dr_table_header() {
+    eprintln!(
+        "\n    {}",
+        format!(
+            "{:<8} {:>10} {:>10} {:>10} {:>10} {:>10}",
+            "DR Iter", "Markers", "Nets", "Ripped", "Penalty", "Time"
+        )
+        .dim()
+    );
+    eprintln!("    {}", "-".repeat(8 + 11 * 5).dim());
+}
+
+/// Prints one detailed routing round.
+pub fn dr_iter(
+    iter: usize,
+    markers: usize,
+    nets: usize,
+    ripped: usize,
+    penalty: f64,
+    time_ms: u128,
+) {
+    eprintln!("    {iter:<8} {markers:>10} {nets:>10} {ripped:>10} {penalty:>10.1} {time_ms:>8}ms");
+}
+
 /// Prints a single routing iteration row.
 pub fn routing_iter(
     phase: &str,

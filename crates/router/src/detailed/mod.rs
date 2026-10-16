@@ -277,6 +277,11 @@ impl<'a> DetailedRouter<'a> {
         &self.markers
     }
 
+    /// How many violations the last round's judge found.
+    pub const fn marker_count(&self) -> usize {
+        self.markers.len()
+    }
+
     /// Logs every remaining violation at debug level.
     pub fn log_conflicts(&self) {
         for m in &self.markers {
