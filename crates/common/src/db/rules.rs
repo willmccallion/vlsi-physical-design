@@ -263,6 +263,28 @@ pub enum CutSpacingCondition {
     ParallelOverlap,
 }
 
+/// A cut spacing rule given as a `LEF57_SPACING` or `LEF58_SPACING` layer
+/// property. `OpenROAD` keeps these apart from the layer's `SPACING`
+/// statements and checks them differently, so the model does too.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Lef58CutSpacing {
+    /// The spacing.
+    pub spacing: Dbu,
+    /// Measured between cut centers rather than edges.
+    pub center_to_center: bool,
+    /// Applies only between cuts of the same net.
+    pub same_net: bool,
+    /// When the rule applies.
+    pub condition: Lef58CutSpacingCondition,
+}
+
+/// The condition under which a [`Lef58CutSpacing`] applies.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Lef58CutSpacingCondition {
+    /// Between cuts whose enclosing metal overlaps (`PARALLELOVERLAP`).
+    ParallelOverlap,
+}
+
 /// How far metal must extend past a cut (LEF cut layer `ENCLOSURE`).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Enclosure {
@@ -281,8 +303,10 @@ pub struct Enclosure {
 /// Rules on a cut layer.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct CutLayerRules {
-    /// Cut spacing rules.
+    /// Cut spacing rules from `SPACING` statements.
     pub spacings: Vec<CutSpacing>,
+    /// Cut spacing rules from `LEF57_SPACING` and `LEF58_SPACING` properties.
+    pub lef58_spacings: Vec<Lef58CutSpacing>,
     /// Metal enclosure rules.
     pub enclosures: Vec<Enclosure>,
 }

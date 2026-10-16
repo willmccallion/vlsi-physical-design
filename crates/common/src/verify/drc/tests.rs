@@ -1,8 +1,8 @@
 use super::*;
 use crate::db::indices::{CellId, CutLayerId, LayerId, NetId};
 use crate::db::rules::{
-    CutApproach, CutSpacing, CutSpacingCondition, MinimumCut, ParallelRunLengthTable, SpacingTable,
-    WidthRangeSpacing,
+    CutApproach, CutSpacing, CutSpacingCondition, Lef58CutSpacing, Lef58CutSpacingCondition,
+    MinimumCut, ParallelRunLengthTable, SpacingTable, WidthRangeSpacing,
 };
 use crate::geom::dbu::DbuArea;
 use crate::geom::point::Point;
@@ -55,10 +55,18 @@ fn rules(cut_spacings: Vec<CutSpacing>) -> Rules {
         cut: vec![CutRules {
             width: Some(Dbu(100)),
             spacings: cut_spacings,
+            lef58_spacings: Vec::new(),
         }],
         min_spacing_for_obstructions: true,
         manufacturing_grid: None,
     }
+}
+
+/// The rules of [`rules`] with cut spacing property rules as well.
+fn rules_with_properties(statements: Vec<CutSpacing>, properties: Vec<Lef58CutSpacing>) -> Rules {
+    let mut rules = rules(statements);
+    rules.cut[0].lef58_spacings = properties;
+    rules
 }
 
 fn cut_rule(spacing: i64) -> CutSpacing {
@@ -67,6 +75,15 @@ fn cut_rule(spacing: i64) -> CutSpacing {
         center_to_center: false,
         same_net: false,
         condition: CutSpacingCondition::Always,
+    }
+}
+
+fn parallel_overlap_property(spacing: i64) -> Lef58CutSpacing {
+    Lef58CutSpacing {
+        spacing: Dbu(spacing),
+        center_to_center: false,
+        same_net: false,
+        condition: Lef58CutSpacingCondition::ParallelOverlap,
     }
 }
 
@@ -444,6 +461,121 @@ fn cuts_on_shared_metal_need_no_parallel_overlap_spacing() {
         kinds(&apart.check(&rules(vec![rule])).violations),
         [Violation::CutSpacing]
     );
+}
+
+#[test]
+fn a_parallel_overlap_property_reaches_cuts_that_do_not_run_alongside() {
+    let statement = CutSpacing {
+        condition: CutSpacingCondition::ParallelOverlap,
+        ..cut_rule(100)
+    };
+    let mut f = Fixture::new();
+    let (a, b) = (f.a, f.b);
+    f.route(V1, a, rect(0, 0, 100, 100));
+    f.route(V1, b, rect(150, 150, 250, 250));
+
+    assert!(f.check(&rules(vec![statement])).violations.is_empty());
+    let report = f.check(&rules_with_properties(
+        Vec::new(),
+        vec![parallel_overlap_property(100)],
+    ));
+    assert_eq!(kinds(&report.violations), [Violation::CutSpacing]);
+    assert_eq!(report.violations[0].bbox, rect(100, 100, 150, 150));
+}
+
+#[test]
+fn touching_cuts_break_a_parallel_overlap_property_besides_shorting() {
+    let mut f = Fixture::new();
+    let (a, b) = (f.a, f.b);
+    f.route(V1, a, rect(0, 0, 100, 100));
+    f.route(V1, b, rect(100, 0, 200, 100));
+
+    let report = f.check(&rules_with_properties(
+        vec![cut_rule(100)],
+        vec![parallel_overlap_property(100)],
+    ));
+
+    assert_eq!(
+        kinds(&report.violations),
+        [Violation::CutShort, Violation::CutSpacing]
+    );
+}
+
+#[test]
+fn cuts_meeting_at_a_corner_only_short_under_a_parallel_overlap_property() {
+    let mut f = Fixture::new();
+    let (a, b) = (f.a, f.b);
+    f.route(V1, a, rect(0, 0, 100, 100));
+    f.route(V1, b, rect(100, 100, 200, 200));
+
+    let report = f.check(&rules_with_properties(
+        vec![cut_rule(100)],
+        vec![parallel_overlap_property(100)],
+    ));
+
+    assert_eq!(kinds(&report.violations), [Violation::CutShort]);
+}
+
+#[test]
+fn cuts_on_shared_metal_are_exempt_from_a_parallel_overlap_property() {
+    let rules = rules_with_properties(Vec::new(), vec![parallel_overlap_property(100)]);
+    let mut joined = Fixture::new();
+    let a = joined.a;
+    joined.route(V1, a, rect(0, 0, 100, 100));
+    joined.route(V1, a, rect(150, 0, 250, 100));
+    joined.route(M2, a, rect(0, 0, 250, 100));
+    let mut apart = Fixture::new();
+    apart.route(V1, a, rect(0, 0, 100, 100));
+    apart.route(V1, a, rect(150, 0, 250, 100));
+
+    assert!(joined.check(&rules).violations.is_empty());
+    assert_eq!(
+        kinds(&apart.check(&rules).violations),
+        [Violation::CutSpacing]
+    );
+}
+
+#[test]
+fn a_property_rule_is_checked_beside_the_spacing_statements() {
+    let rules = rules_with_properties(vec![cut_rule(100)], vec![parallel_overlap_property(130)]);
+    let mut wide = Fixture::new();
+    let (a, b) = (wide.a, wide.b);
+    wide.route(V1, a, rect(0, 0, 100, 100));
+    wide.route(V1, b, rect(220, 0, 320, 100));
+    let mut narrow = Fixture::new();
+    narrow.route(V1, a, rect(0, 0, 100, 100));
+    narrow.route(V1, b, rect(150, 0, 250, 100));
+
+    assert_eq!(
+        kinds(&wide.check(&rules).violations),
+        [Violation::CutSpacing]
+    );
+    let both = narrow.check(&rules).violations;
+    assert_eq!(kinds(&both), [Violation::CutSpacing, Violation::CutSpacing]);
+    assert_eq!(both[0].bbox, both[1].bbox);
+    assert_ne!(both[0].rule, both[1].rule);
+}
+
+#[test]
+fn a_same_net_property_rule_leaves_cuts_of_different_nets_alone() {
+    let same_net = Lef58CutSpacing {
+        same_net: true,
+        ..parallel_overlap_property(100)
+    };
+    let rules = rules_with_properties(Vec::new(), vec![same_net]);
+    let mut one_net = Fixture::new();
+    let (a, b) = (one_net.a, one_net.b);
+    one_net.route(V1, a, rect(0, 0, 100, 100));
+    one_net.route(V1, a, rect(150, 0, 250, 100));
+    let mut two_nets = Fixture::new();
+    two_nets.route(V1, a, rect(0, 0, 100, 100));
+    two_nets.route(V1, b, rect(150, 0, 250, 100));
+
+    assert_eq!(
+        kinds(&one_net.check(&rules).violations),
+        [Violation::CutSpacing]
+    );
+    assert!(two_nets.check(&rules).violations.is_empty());
 }
 
 #[test]

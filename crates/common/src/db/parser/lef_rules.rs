@@ -7,9 +7,9 @@
 use crate::db::parser::lexer::{Lexer, ParseError, Token};
 use crate::db::rules::{
     CellEdge, CellEdgeSpacing, CellSide, ConvexCornerSpacing, CutApproach, CutSpacing,
-    CutSpacingCondition, EdgeType, Enclosure, EndOfLineSpacing, MinEnclosedArea, MinStep,
-    MinimumCut, ParallelEdge, ParallelRunLengthTable, SpacingTable, TwoWidthsRow, TwoWidthsTable,
-    WidthRangeSpacing,
+    CutSpacingCondition, EdgeType, Enclosure, EndOfLineSpacing, Lef58CutSpacing,
+    Lef58CutSpacingCondition, MinEnclosedArea, MinStep, MinimumCut, ParallelEdge,
+    ParallelRunLengthTable, SpacingTable, TwoWidthsRow, TwoWidthsTable, WidthRangeSpacing,
 };
 use crate::geom::dbu::{Dbu, DbuArea, DbuPerMicron};
 
@@ -134,17 +134,7 @@ impl<'l, 'a> RuleReader<'l, 'a> {
     /// PARALLELOVERLAP] ;`
     pub(crate) fn cut_spacing(&mut self) -> Result<CutSpacing, ParseError> {
         let spacing = self.microns("cut spacing")?;
-        let mut center_to_center = false;
-        let mut same_net = false;
-        loop {
-            if self.lx.accept("CENTERTOCENTER") {
-                center_to_center = true;
-            } else if self.lx.accept("SAMENET") {
-                same_net = true;
-            } else {
-                break;
-            }
-        }
+        let (center_to_center, same_net) = self.cut_spacing_flags();
         let condition = if self.lx.accept("ADJACENTCUTS") {
             let cuts = self.count("adjacent cut count")?;
             self.lx.expect("WITHIN")?;
@@ -162,6 +152,39 @@ impl<'l, 'a> RuleReader<'l, 'a> {
             same_net,
             condition,
         })
+    }
+
+    /// `SPACING s [CENTERTOCENTER] [SAMENET] PARALLELOVERLAP ;` from a
+    /// `LEF57_SPACING` or `LEF58_SPACING` property.
+    pub(crate) fn lef58_cut_spacing(&mut self) -> Result<Lef58CutSpacing, ParseError> {
+        let spacing = self.microns("cut spacing")?;
+        let (center_to_center, same_net) = self.cut_spacing_flags();
+        if !self.lx.accept("PARALLELOVERLAP") {
+            return Err(self.unsupported("LEF58 cut SPACING"));
+        }
+        self.end("LEF58 cut SPACING")?;
+        Ok(Lef58CutSpacing {
+            spacing,
+            center_to_center,
+            same_net,
+            condition: Lef58CutSpacingCondition::ParallelOverlap,
+        })
+    }
+
+    /// The `CENTERTOCENTER` and `SAMENET` flags of a cut spacing rule, in
+    /// either order.
+    fn cut_spacing_flags(&mut self) -> (bool, bool) {
+        let mut center_to_center = false;
+        let mut same_net = false;
+        loop {
+            if self.lx.accept("CENTERTOCENTER") {
+                center_to_center = true;
+            } else if self.lx.accept("SAMENET") {
+                same_net = true;
+            } else {
+                return (center_to_center, same_net);
+            }
+        }
     }
 
     /// `ENCLOSURE [ABOVE|BELOW] o1 o2 [WIDTH w | LENGTH l] ;`

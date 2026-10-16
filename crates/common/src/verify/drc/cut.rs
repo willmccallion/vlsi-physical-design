@@ -1,9 +1,11 @@
 //! Shorts and spacing between the cuts of a layer, as `FlexGC` checks them.
 //!
-//! Every spacing rule of the layer is checked against every nearby cut,
-//! whatever its net, except that a rule for different nets leaves cuts of
-//! one net to the layer's same-net rule when it has one. Cuts that touch
-//! short whenever some rule reaches them.
+//! Every `SPACING` statement of the layer is checked against every nearby
+//! cut, whatever its net, except that a rule for different nets leaves cuts
+//! of one net to the layer's same-net rule when it has one. Cuts that touch
+//! short whenever some statement reaches them. The layer's `LEF57_SPACING`
+//! and `LEF58_SPACING` property rules are checked on their own afterwards,
+//! with no short case and no deference to a same-net statement.
 
 use super::layout::OwnerIndex;
 use super::model::{Cut, Facing, GcRect, Metal, Model};
@@ -11,7 +13,9 @@ use super::rules::CutRules;
 use super::{Marker, Markers, Violation};
 use crate::db::indices::CutLayerId;
 use crate::db::library::LayerRef;
-use crate::db::rules::{CutSpacing, CutSpacingCondition};
+use crate::db::rules::{
+    CutSpacing, CutSpacingCondition, Lef58CutSpacing, Lef58CutSpacingCondition,
+};
 use crate::geom::dbu::Dbu;
 use crate::geom::rect::Rect;
 use rayon::prelude::*;
@@ -57,6 +61,9 @@ impl LayerCheck<'_> {
     fn check_cut(&self, i: usize, found: &mut Markers) {
         for (k, rule) in self.rules.spacings.iter().enumerate() {
             self.check_rule(i, k, rule, found);
+        }
+        for (k, rule) in self.rules.lef58_spacings.iter().enumerate() {
+            self.check_lef58_rule(i, self.rules.spacings.len() + k, rule, found);
         }
     }
 
@@ -115,7 +122,7 @@ impl LayerCheck<'_> {
         let mut count: i64 = -1;
         for j in self.cut.near(&cut.rect.expand(within)) {
             let other = self.cut.rects[j];
-            if distance_sq(rule, &cut.rect, &other.rect) >= within_sq {
+            if distance_sq(rule.center_to_center, &cut.rect, &other.rect) >= within_sq {
                 continue;
             }
             if self.is_blockage(other.owner) && other.width() > cut_width {
@@ -141,18 +148,61 @@ impl LayerCheck<'_> {
         {
             return;
         }
-        if distance_sq(rule, &cut.rect, &other.rect) >= square(rule.spacing) {
+        if distance_sq(rule.center_to_center, &cut.rect, &other.rect) >= square(rule.spacing) {
             return;
         }
-        let marker = Marker::new(
+        found.add(
+            self.spacing_marker(k, facing, cut, other),
+            cut.fixed && other.fixed,
+        );
+    }
+
+    /// Checks cut `i` against the cuts near it under the property rule `k`.
+    ///
+    /// `FlexGC` measures a property rule's parallel run on the box between
+    /// the cuts without a sign, so every pair but two cuts meeting at a
+    /// corner has a run, and touching cuts get a spacing marker besides
+    /// their short.
+    fn check_lef58_rule(&self, i: usize, k: usize, rule: &Lef58CutSpacing, found: &mut Markers) {
+        let cut = self.cut.rects[i];
+        for j in self.cut.near(&cut.rect.expand(rule.spacing)) {
+            if j == i {
+                continue;
+            }
+            let other = self.cut.rects[j];
+            if rule.same_net && cut.owner != other.owner {
+                continue;
+            }
+            let facing = Facing::new(&cut.rect, &other.rect);
+            let exempt = match rule.condition {
+                Lef58CutSpacingCondition::ParallelOverlap => {
+                    let between = &facing.marker;
+                    (between.width() <= Dbu::ZERO && between.height() <= Dbu::ZERO)
+                        || self.share_metal(&cut, &other, between)
+                }
+            };
+            if exempt
+                || distance_sq(rule.center_to_center, &cut.rect, &other.rect)
+                    >= square(rule.spacing)
+            {
+                continue;
+            }
+            found.add(
+                self.spacing_marker(k, &facing, &cut, &other),
+                cut.fixed && other.fixed,
+            );
+        }
+    }
+
+    fn spacing_marker(&self, rule: usize, facing: &Facing, cut: &GcRect, other: &GcRect) -> Marker {
+        Marker::new(
             Violation::CutSpacing,
-            u16::try_from(k).unwrap_or(u16::MAX),
+            u16::try_from(rule).unwrap_or(u16::MAX),
             LayerRef::Cut(self.layer),
             facing.marker,
             cut.owner,
             other.owner,
-        );
-        found.add(marker, cut.fixed && other.fixed);
+        )
     }
 
     /// Whether metal of either cut's owner on the layer below or above
@@ -170,10 +220,10 @@ fn square(d: Dbu) -> i128 {
     i128::from(d.get()) * i128::from(d.get())
 }
 
-/// The squared distance between two cuts as `rule` measures it: between
+/// The squared distance between two cuts as a rule measures it: between
 /// centers or between edges.
-fn distance_sq(rule: &CutSpacing, a: &Rect<Dbu>, b: &Rect<Dbu>) -> i128 {
-    if rule.center_to_center {
+fn distance_sq(center_to_center: bool, a: &Rect<Dbu>, b: &Rect<Dbu>) -> i128 {
+    if center_to_center {
         let (ca, cb) = (a.center(), b.center());
         square(ca.x - cb.x) + square(ca.y - cb.y)
     } else {

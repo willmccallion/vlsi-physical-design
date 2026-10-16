@@ -3,7 +3,8 @@
 
 use crate::db::library::Library;
 use crate::db::rules::{
-    CutSpacing, MinimumCut, ParallelRunLengthTable, SpacingTable, WidthRangeSpacing,
+    CutSpacing, Lef58CutSpacing, MinimumCut, ParallelRunLengthTable, SpacingTable,
+    WidthRangeSpacing,
 };
 use crate::geom::dbu::{Dbu, DbuArea};
 
@@ -42,12 +43,15 @@ impl MetalRules {
 pub struct CutRules {
     /// Width of a cut, if given.
     pub width: Option<Dbu>,
-    /// Spacing rules between cuts.
+    /// Spacing rules between cuts from `SPACING` statements.
     pub spacings: Vec<CutSpacing>,
+    /// Spacing rules between cuts from `LEF57_SPACING` and `LEF58_SPACING`
+    /// properties, which `OpenROAD` checks on their own terms.
+    pub lef58_spacings: Vec<Lef58CutSpacing>,
 }
 
 impl CutRules {
-    /// Whether the layer has a rule for cuts of the same net.
+    /// Whether the layer has a `SPACING` statement for cuts of the same net.
     pub fn has_same_net_rule(&self) -> bool {
         self.spacings.iter().any(|s| s.same_net)
     }
@@ -100,6 +104,7 @@ impl Rules {
             .map(|c| CutRules {
                 width: c.width,
                 spacings: c.rules.spacings.clone(),
+                lef58_spacings: c.rules.lef58_spacings.clone(),
             })
             .collect();
         Self {

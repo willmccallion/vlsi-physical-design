@@ -445,7 +445,7 @@ impl<'a> LefParser<'a, '_> {
                 }
                 (LayerKind::Cut, "LEF57_SPACING" | "LEF58_SPACING") => {
                     while rules.next_keyword("SPACING")?.is_some() {
-                        cut.spacings.push(rules.cut_spacing()?);
+                        cut.lef58_spacings.push(rules.lef58_cut_spacing()?);
                     }
                 }
                 _ => self.warn(name, "layer PROPERTY"),

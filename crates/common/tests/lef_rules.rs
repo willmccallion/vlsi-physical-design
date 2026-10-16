@@ -8,8 +8,8 @@ use pare_common::db::library::{LayerRef, Library, SignalUse};
 use pare_common::db::parser::{def, lef};
 use pare_common::db::rules::{
     CellSide, ConvexCornerSpacing, CutApproach, CutSpacing, CutSpacingCondition, EdgeType,
-    EndOfLineSpacing, MinStep, MinimumCut, ParallelEdge, SpacingTable, TwoWidthsRow,
-    TwoWidthsTable, WidthRangeSpacing,
+    EndOfLineSpacing, Lef58CutSpacing, Lef58CutSpacingCondition, MinStep, MinimumCut, ParallelEdge,
+    SpacingTable, TwoWidthsRow, TwoWidthsTable, WidthRangeSpacing,
 };
 use pare_common::geom::dbu::{Dbu, DbuArea};
 use pare_common::geom::point::Point;
@@ -204,6 +204,49 @@ fn cut_spacing_counts_a_center_rule_as_its_value_less_the_cut_width() {
         }
     );
     assert_eq!(v2.rules.enclosures[0].side, Some(CutApproach::Below));
+}
+
+#[test]
+fn cut_spacing_properties_are_kept_apart_from_the_spacing_statements() {
+    let lib = library_with(
+        &[(
+            "LAYER V2\n  TYPE CUT ;\n  WIDTH 0.1 ;",
+            "LAYER V2\n  TYPE CUT ;\n  WIDTH 0.1 ;\n  SPACING 0.1 ;\n  \
+             PROPERTY LEF57_SPACING \"SPACING 0.13 CENTERTOCENTER PARALLELOVERLAP ;\" ;",
+        )],
+        "cut-property",
+    )
+    .unwrap();
+
+    let v2 = &lib.cut_layers[1];
+    assert_eq!(v2.rules.spacings.len(), 1);
+    assert_eq!(
+        v2.rules.lef58_spacings,
+        vec![Lef58CutSpacing {
+            spacing: Dbu(130),
+            center_to_center: true,
+            same_net: false,
+            condition: Lef58CutSpacingCondition::ParallelOverlap,
+        }]
+    );
+}
+
+#[test]
+fn cut_spacing_property_forms_the_model_cannot_hold_are_errors() {
+    let err = library_with(
+        &[(
+            "LAYER V2\n  TYPE CUT ;\n  WIDTH 0.1 ;",
+            "LAYER V2\n  TYPE CUT ;\n  WIDTH 0.1 ;\n  \
+             PROPERTY LEF58_SPACING \"SPACING 0.13 ADJACENTCUTS 3 WITHIN 0.2 ;\" ;",
+        )],
+        "cut-property-unsupported",
+    )
+    .unwrap_err();
+
+    assert!(
+        err.contains("unsupported LEF58 cut SPACING option 'ADJACENTCUTS'"),
+        "{err}"
+    );
 }
 
 #[test]
