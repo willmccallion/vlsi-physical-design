@@ -57,6 +57,7 @@ fn rules(cut_spacings: Vec<CutSpacing>) -> Rules {
             spacings: cut_spacings,
         }],
         min_spacing_for_obstructions: true,
+        manufacturing_grid: None,
     }
 }
 
@@ -678,4 +679,36 @@ fn a_hole_as_large_as_the_minimum_enclosed_area_is_legal() {
     rules.metal[0].min_enclosed_areas = vec![DbuArea(40_000)];
 
     assert!(f.check(&rules).violations.is_empty());
+}
+
+#[test]
+fn routed_metal_off_the_manufacturing_grid_violates_it() {
+    let mut f = Fixture::new();
+    let a = f.a;
+    f.route(M1, a, rect(0, 0, 1003, 100));
+    let rules = Rules {
+        manufacturing_grid: Some(Dbu(5)),
+        ..rules(Vec::new())
+    };
+
+    let report = f.check(&rules);
+
+    assert_eq!(kinds(&report.violations), [Violation::OffGrid]);
+    assert_eq!(report.violations[0].bbox, rect(0, 0, 1003, 100));
+}
+
+#[test]
+fn fixed_metal_off_the_manufacturing_grid_is_exempt() {
+    let mut f = Fixture::new();
+    let a = f.a;
+    f.fix(M1, a, rect(0, 0, 1003, 100));
+    let rules = Rules {
+        manufacturing_grid: Some(Dbu(5)),
+        ..rules(Vec::new())
+    };
+
+    let report = f.check(&rules);
+
+    assert!(report.violations.is_empty());
+    assert!(report.fixed.is_empty());
 }

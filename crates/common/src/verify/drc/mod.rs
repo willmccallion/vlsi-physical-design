@@ -55,6 +55,8 @@ pub enum Violation {
     MinimumCut,
     /// A hole in metal smaller than the layer's minimum enclosed area.
     MinHole,
+    /// Routed metal off the manufacturing grid.
+    OffGrid,
 }
 
 impl Violation {
@@ -72,6 +74,7 @@ impl Violation {
             Self::MinWidth => "Min Width",
             Self::MinimumCut => "Minimum Cut",
             Self::MinHole => "Min Hole",
+            Self::OffGrid => "Off Grid",
         }
     }
 }

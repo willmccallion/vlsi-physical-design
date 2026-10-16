@@ -63,6 +63,8 @@ pub struct Rules {
     /// Whether obstructions count as wires of their layer's default width
     /// when looking up spacing.
     pub min_spacing_for_obstructions: bool,
+    /// The grid every routed shape must lie on, if the library sets one.
+    pub manufacturing_grid: Option<Dbu>,
 }
 
 impl Rules {
@@ -104,6 +106,7 @@ impl Rules {
             metal,
             cut,
             min_spacing_for_obstructions: library.rules.min_spacing_for_obstructions,
+            manufacturing_grid: library.rules.manufacturing_grid,
         }
     }
 }

@@ -1,7 +1,7 @@
 //! Checks on each connected piece of an owner's metal alone, as `FlexGC`'s
 //! metal shape checks.
 
-use super::model::{GcPolygon, Metal, Model};
+use super::model::{GcPolygon, GcRect, Metal, Model};
 use super::rules::{MetalRules, Rules};
 use super::{Marker, Markers, Violation};
 use crate::db::indices::LayerId;
@@ -21,15 +21,25 @@ pub(super) fn check(model: &Model<'_>, rules: &Rules) -> Markers {
                 metal,
                 layer: LayerId::new(l),
                 rules: &rules.metal[l],
+                grid: rules.manufacturing_grid,
             };
-            metal
+            let pieces = metal
                 .polygons
                 .par_iter()
                 .fold(Markers::default, |mut found, piece| {
                     check.check_piece(piece, &mut found);
                     found
                 })
-                .reduce(Markers::default, Markers::merge)
+                .reduce(Markers::default, Markers::merge);
+            let rects = metal
+                .rects
+                .par_iter()
+                .fold(Markers::default, |mut found, rect| {
+                    check.off_grid(rect, &mut found);
+                    found
+                })
+                .reduce(Markers::default, Markers::merge);
+            pieces.merge(rects)
         })
         .fold(Markers::default(), Markers::merge)
 }
@@ -39,6 +49,7 @@ struct PieceCheck<'m> {
     metal: &'m Metal<'m>,
     layer: LayerId,
     rules: &'m MetalRules,
+    grid: Option<Dbu>,
 }
 
 impl PieceCheck<'_> {
@@ -103,6 +114,29 @@ impl PieceCheck<'_> {
                     found.add(self.marker(Violation::MinHole, rule, piece, bbox), false);
                 }
             }
+        }
+    }
+
+    /// A maximal rectangle with a side off the manufacturing grid is a
+    /// violation where it holds routed metal.
+    fn off_grid(&self, rect: &GcRect, found: &mut Markers) {
+        let Some(grid) = self.grid.filter(|g| g.get() > 0) else {
+            return;
+        };
+        let r = rect.rect;
+        let off = [r.min.x, r.min.y, r.max.x, r.max.y]
+            .iter()
+            .any(|v| v.get() % grid.get() != 0);
+        if off && self.metal.has_route_in(rect.owner, &r) {
+            let marker = Marker::new(
+                Violation::OffGrid,
+                0,
+                LayerRef::Routing(self.layer),
+                r,
+                rect.owner,
+                rect.owner,
+            );
+            found.add(marker, false);
         }
     }
 
