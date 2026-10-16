@@ -16,7 +16,7 @@ mod maze;
 mod pattern;
 mod steiner;
 
-use crate::occupancy::{Occupancy, TrackRef};
+use crate::occupancy::{FixedMetal, TrackRef};
 use crate::tech::RouteTech;
 use maze::route_tree;
 use pare_common::db::indices::{LayerId, NetId};
@@ -60,7 +60,7 @@ impl GlobalGrid {
     /// tracks crossing them less the `reserve` fraction.
     pub fn new(
         tech: &RouteTech,
-        occupancy: &Occupancy,
+        fixed: &(impl FixedMetal + Sync),
         die: Rect<Dbu>,
         gcell: Dbu,
         reserve: f64,
@@ -89,7 +89,7 @@ impl GlobalGrid {
         };
         let tracks: Vec<f64> = layers
             .par_iter()
-            .flat_map_iter(|&l| grid.layer_capacity(tech, occupancy, die, l))
+            .flat_map_iter(|&l| grid.layer_capacity(tech, fixed, die, l))
             .collect();
         grid.capacity = tracks
             .iter()
@@ -106,7 +106,7 @@ impl GlobalGrid {
     fn layer_capacity(
         &self,
         tech: &RouteTech,
-        occupancy: &Occupancy,
+        fixed: &impl FixedMetal,
         die: Rect<Dbu>,
         layer: LayerId,
     ) -> Vec<f64> {
@@ -139,7 +139,7 @@ impl GlobalGrid {
                 };
                 let boundary = along_origin + self.gcell * (i as i64 + 1);
                 let stretch = (centre(i), centre(i + 1));
-                cap[index] += usable_fraction(occupancy, track, boundary, stretch);
+                cap[index] += usable_fraction(fixed, track, boundary, stretch);
             }
         }
         cap
@@ -341,7 +341,7 @@ pub struct CapacityReduction {
 /// The fraction of `stretch` along `track` that a wire crossing `boundary`
 /// can use between the fixed metal on either side of it.
 fn usable_fraction(
-    occupancy: &Occupancy,
+    fixed: &impl FixedMetal,
     track: TrackRef,
     boundary: Dbu,
     stretch: (Dbu, Dbu),
@@ -351,14 +351,14 @@ fn usable_fraction(
         return 0.0;
     }
     let mut usable = (lo, hi);
-    for o in occupancy.fixed_within(track, lo, hi) {
-        if o.lo <= boundary && boundary <= o.hi {
+    for (start, end) in fixed.fixed_stretches(track, lo, hi) {
+        if start <= boundary && boundary <= end {
             return 0.0;
         }
-        if o.hi < boundary {
-            usable.0 = usable.0.max(o.hi);
+        if end < boundary {
+            usable.0 = usable.0.max(end);
         } else {
-            usable.1 = usable.1.min(o.lo);
+            usable.1 = usable.1.min(start);
         }
     }
     (usable.1 - usable.0).to_f64() / (hi - lo).to_f64()

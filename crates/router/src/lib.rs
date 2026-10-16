@@ -19,7 +19,7 @@ pub mod wiring;
 use detailed::{Costs, DetailedRouter, Scope, routable_nets};
 pub use global::CapacityReduction;
 use global::{GlobalGrid, GlobalNet, route_global};
-use occupancy::Occupancy;
+use occupancy::FixedTracks;
 use pare_common::db::design::{GCellGridDef, NetlistDB, PlacementStatus, RouteElem, TrackAxis};
 use pare_common::db::indices::NetId;
 use pare_common::db::library::Shape;
@@ -197,14 +197,12 @@ pub fn capacity_reduction(
 ) -> Result<CapacityReduction, RouteError> {
     check_reserve(config)?;
     let tech = RouteTech::new(db, config)?;
-    let gcell = gcell_size(&tech, config);
-    let mut occupancy = Occupancy::new(&tech, gcell);
-    occupancy.add_fixed(&tech, obstruction_shapes(db));
+    let fixed = FixedTracks::new(&tech, obstruction_shapes(db));
     let grid = GlobalGrid::new(
         &tech,
-        &occupancy,
+        &fixed,
         db.die_area,
-        gcell,
+        gcell_size(&tech, config),
         config.global_capacity_reserve,
     );
     Ok(grid.capacity_reduction(&tech))

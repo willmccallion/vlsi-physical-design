@@ -10,8 +10,10 @@ use pare_common::geom::point::Point;
 use pare_common::geom::rect::Rect;
 use pare_common::util::config::RoutingConfig;
 use pare_common::verify::routing::net_components;
+use pare_common::verify::shapes::fixed_shapes;
 use pare_router::access::Node;
-use pare_router::occupancy::{Occupancy, Origin, Owner, Slot};
+use pare_router::global::GlobalGrid;
+use pare_router::occupancy::{FixedTracks, Occupancy, Origin, Owner, Slot};
 use pare_router::tech::RouteTech;
 use pare_router::wiring::{Edge, NetRoute};
 use pare_router::{RouteError, capacity_reduction, route};
@@ -261,4 +263,22 @@ fn a_fixed_block_takes_the_tracks_its_obstruction_crosses() {
 
     assert!(reduction.reduction[1] >= 10.0, "{:?}", reduction.reduction);
     assert!(reduction.reduction[3] >= 10.0, "{:?}", reduction.reduction);
+}
+
+#[test]
+fn merged_fixed_stretches_give_the_capacity_the_occupancy_gives() {
+    let db = tiny();
+    let tech = RouteTech::new(&db, &RoutingConfig::default()).unwrap();
+    let gcell = tech.layer(tech.min_layer).pitch() * 15;
+    let mut occupancy = Occupancy::new(&tech, gcell);
+    occupancy.add_fixed(&tech, fixed_shapes(&db));
+    let fixed = FixedTracks::new(&tech, fixed_shapes(&db));
+
+    let from_occupancy = GlobalGrid::new(&tech, &occupancy, db.die_area, gcell, 0.3);
+    let from_stretches = GlobalGrid::new(&tech, &fixed, db.die_area, gcell, 0.3);
+
+    assert_eq!(
+        from_occupancy.capacity_reduction(&tech),
+        from_stretches.capacity_reduction(&tech)
+    );
 }

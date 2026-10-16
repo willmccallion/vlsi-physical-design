@@ -281,6 +281,123 @@ struct Track {
 
 /// Tracks whose wires `rect` could touch or crowd, and whether each runs
 /// through it.
+/// The stretch of one track that a shape blocks.
+#[derive(Clone, Copy, Debug)]
+struct Blocked {
+    track: u32,
+    /// Whether the track runs through the shape itself.
+    centered: bool,
+    lo: Dbu,
+    hi: Dbu,
+}
+
+/// The stretches of `lt`'s tracks that metal covering `rect` blocks: on
+/// every track a wire would come too close to it, its extent along the
+/// tracks widened by the extra spacing it needs.
+fn blocked_stretches<'t>(
+    lt: &'t LayerTech,
+    rect: &Rect<Dbu>,
+) -> impl Iterator<Item = Blocked> + use<'t> {
+    let (_, (lo, hi)) = lt.across_along_rect(rect);
+    let wider = lt.spacing_around(rect).1 - lt.spacing;
+    affected_tracks(lt, rect).map(move |(track, centered)| Blocked {
+        track,
+        centered,
+        lo: lo - wider,
+        hi: hi + wider,
+    })
+}
+
+/// Where fixed metal lies along each track.
+pub trait FixedMetal {
+    /// The stretches of fixed metal on `track` that overlap `(lo, hi)`.
+    fn fixed_stretches(
+        &self,
+        track: TrackRef,
+        lo: Dbu,
+        hi: Dbu,
+    ) -> impl Iterator<Item = (Dbu, Dbu)>;
+}
+
+impl FixedMetal for Occupancy {
+    fn fixed_stretches(
+        &self,
+        track: TrackRef,
+        lo: Dbu,
+        hi: Dbu,
+    ) -> impl Iterator<Item = (Dbu, Dbu)> {
+        self.fixed_within(track, lo, hi).map(|o| (o.lo, o.hi))
+    }
+}
+
+/// The fixed metal of every track as sorted, disjoint stretches: what
+/// global routing capacity needs of it, without the pieces one gcell long
+/// that [`Occupancy`] keeps for wiring.
+#[derive(Clone, Debug, Default)]
+pub struct FixedTracks {
+    stretches: Vec<Vec<Vec<(Dbu, Dbu)>>>,
+}
+
+impl FixedTracks {
+    /// The stretches `shapes` block on the layers `tech` routes, as
+    /// [`Occupancy::add_fixed`] would record them.
+    pub fn new(tech: &RouteTech, shapes: impl IntoIterator<Item = OwnedShape>) -> Self {
+        let mut stretches: Vec<Vec<Vec<(Dbu, Dbu)>>> = tech
+            .layers
+            .iter()
+            .map(|l| vec![Vec::new(); l.tracks.len()])
+            .collect();
+        for s in shapes {
+            let LayerRef::Routing(layer) = s.shape.layer else {
+                continue;
+            };
+            if !tech.routable(layer) {
+                continue;
+            }
+            for b in blocked_stretches(tech.layer(layer), &s.shape.rect) {
+                stretches[layer.index()][b.track as usize].push((b.lo, b.hi));
+            }
+        }
+        for track in stretches.iter_mut().flatten() {
+            merge_stretches(track);
+        }
+        Self { stretches }
+    }
+}
+
+impl FixedMetal for FixedTracks {
+    fn fixed_stretches(
+        &self,
+        track: TrackRef,
+        lo: Dbu,
+        hi: Dbu,
+    ) -> impl Iterator<Item = (Dbu, Dbu)> {
+        let list = self
+            .stretches
+            .get(track.layer.index())
+            .and_then(|l| l.get(track.track as usize))
+            .map_or(&[][..], Vec::as_slice);
+        let first = list.partition_point(|&(_, end)| end <= lo);
+        list[first..]
+            .iter()
+            .copied()
+            .take_while(move |&(start, _)| start < hi)
+    }
+}
+
+/// Sorts `stretches` and joins those that overlap or touch.
+fn merge_stretches(stretches: &mut Vec<(Dbu, Dbu)>) {
+    stretches.sort_unstable();
+    let mut merged: Vec<(Dbu, Dbu)> = Vec::with_capacity(stretches.len());
+    for &(lo, hi) in stretches.iter() {
+        match merged.last_mut() {
+            Some(last) if lo <= last.1 => last.1 = last.1.max(hi),
+            _ => merged.push((lo, hi)),
+        }
+    }
+    *stretches = merged;
+}
+
 pub(crate) fn affected_tracks<'t>(
     lt: &'t LayerTech,
     rect: &Rect<Dbu>,
@@ -406,34 +523,33 @@ impl Occupancy {
         owner: Owner,
         origin: Origin,
     ) -> Vec<TrackRef> {
-        let lt = tech.layer(layer);
-        let (_, (lo, hi)) = lt.across_along_rect(rect);
-        let wider = lt.spacing_around(rect).1 - lt.spacing;
-        let (lo, hi) = (lo - wider, hi + wider);
         let mut touched = Vec::new();
-        for (track, centered) in affected_tracks(lt, rect) {
-            let mut start = lo;
+        for blocked in blocked_stretches(tech.layer(layer), rect) {
+            let mut start = blocked.lo;
             loop {
-                let end = (start + self.chunk).min(hi);
+                let end = (start + self.chunk).min(blocked.hi);
                 let occupant = Occupant {
                     lo: start,
                     hi: end,
                     owner,
-                    centered,
+                    centered: blocked.centered,
                     origin,
                 };
                 let b = self.bucket(layer.index(), start);
-                let buckets = &mut self.tracks[layer.index()][track as usize].buckets;
+                let buckets = &mut self.tracks[layer.index()][blocked.track as usize].buckets;
                 if buckets.len() <= b {
                     buckets.resize_with(b + 1, Vec::new);
                 }
                 buckets[b].push(occupant);
-                if end >= hi {
+                if end >= blocked.hi {
                     break;
                 }
                 start = end;
             }
-            touched.push(TrackRef { layer, track });
+            touched.push(TrackRef {
+                layer,
+                track: blocked.track,
+            });
         }
         touched
     }
@@ -656,6 +772,39 @@ impl LocalOccupancy {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn overlapping_and_touching_stretches_merge() {
+        let mut stretches = vec![
+            (Dbu(50), Dbu(60)),
+            (Dbu(0), Dbu(10)),
+            (Dbu(10), Dbu(20)),
+            (Dbu(15), Dbu(30)),
+        ];
+
+        merge_stretches(&mut stretches);
+
+        assert_eq!(stretches, vec![(Dbu(0), Dbu(30)), (Dbu(50), Dbu(60))]);
+    }
+
+    #[test]
+    fn fixed_tracks_return_the_stretches_overlapping_a_range() {
+        let fixed = FixedTracks {
+            stretches: vec![vec![vec![
+                (Dbu(0), Dbu(30)),
+                (Dbu(50), Dbu(60)),
+                (Dbu(80), Dbu(90)),
+            ]]],
+        };
+        let track = TrackRef {
+            layer: LayerId(0),
+            track: 0,
+        };
+
+        let got: Vec<(Dbu, Dbu)> = fixed.fixed_stretches(track, Dbu(30), Dbu(80)).collect();
+
+        assert_eq!(got, vec![(Dbu(50), Dbu(60))]);
+    }
 
     fn rect(x0: i64, y0: i64, x1: i64, y1: i64) -> Rect<Dbu> {
         Rect::from_corners(Point::new(Dbu(x0), Dbu(y0)), Point::new(Dbu(x1), Dbu(y1)))
