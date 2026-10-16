@@ -212,7 +212,7 @@ fn cut_spacing_properties_are_kept_apart_from_the_spacing_statements() {
         &[(
             "LAYER V2\n  TYPE CUT ;\n  WIDTH 0.1 ;",
             "LAYER V2\n  TYPE CUT ;\n  WIDTH 0.1 ;\n  SPACING 0.1 ;\n  \
-             PROPERTY LEF57_SPACING \"SPACING 0.13 CENTERTOCENTER PARALLELOVERLAP ;\" ;",
+             PROPERTY LEF57_SPACING \"SPACING 0.13 PARALLELOVERLAP ;\" ;",
         )],
         "cut-property",
     )
@@ -224,11 +224,12 @@ fn cut_spacing_properties_are_kept_apart_from_the_spacing_statements() {
         v2.rules.lef58_spacings,
         vec![Lef58CutSpacing {
             spacing: Dbu(130),
-            center_to_center: true,
+            center_to_center: false,
             same_net: false,
             condition: Lef58CutSpacingCondition::ParallelOverlap,
         }]
     );
+    assert_eq!(v2.spacing, Some(Dbu(130)));
 }
 
 #[test]

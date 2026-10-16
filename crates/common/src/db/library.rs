@@ -2,8 +2,8 @@
 
 use crate::db::indices::{CutLayerId, LayerId, MacroId, MacroPinId, SiteId, ViaId};
 use crate::db::rules::{
-    CellEdge, CutLayerRules, CutSpacingCondition, LibraryRules, RoutingLayerRules, SpacingTable,
-    ViaRule,
+    CellEdge, CutLayerRules, CutSpacingCondition, Lef58CutSpacingCondition, LibraryRules,
+    RoutingLayerRules, SpacingTable, ViaRule,
 };
 use crate::geom::dbu::{Dbu, DbuPerMicron};
 use crate::geom::point::Point;
@@ -64,7 +64,8 @@ pub struct CutLayer {
     /// Edge-to-edge spacing every pair of cuts of different nets needs, if the
     /// layer has an unconditional rule; a center-to-center rule counts as its
     /// value less the cut width, which is exact along an axis and stricter
-    /// diagonally.
+    /// diagonally. A parallel-overlap property rule counts as unconditional,
+    /// since only cuts of one net can share the metal that exempts a pair.
     pub spacing: Option<Dbu>,
     /// All of the layer's cut spacing and enclosure rules.
     pub rules: CutLayerRules,
@@ -74,18 +75,24 @@ impl CutLayer {
     /// Derives [`CutLayer::spacing`] from the layer's unconditional
     /// different-net rules.
     pub fn unconditional_spacing(width: Option<Dbu>, rules: &CutLayerRules) -> Option<Dbu> {
-        rules
+        let edge_to_edge = |spacing: Dbu, center_to_center: bool| {
+            if center_to_center {
+                width.map(|w| spacing - w)
+            } else {
+                Some(spacing)
+            }
+        };
+        let statements = rules
             .spacings
             .iter()
             .filter(|r| !r.same_net && r.condition == CutSpacingCondition::Always)
-            .filter_map(|r| {
-                if r.center_to_center {
-                    width.map(|w| r.spacing - w)
-                } else {
-                    Some(r.spacing)
-                }
-            })
-            .max()
+            .filter_map(|r| edge_to_edge(r.spacing, r.center_to_center));
+        let properties = rules
+            .lef58_spacings
+            .iter()
+            .filter(|r| !r.same_net && r.condition == Lef58CutSpacingCondition::ParallelOverlap)
+            .filter_map(|r| edge_to_edge(r.spacing, r.center_to_center));
+        statements.chain(properties).max()
     }
 }
 
