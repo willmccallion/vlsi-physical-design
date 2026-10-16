@@ -503,3 +503,52 @@ fn a_piece_whose_fixed_metal_is_buried_still_needs_the_minimum_area() {
 
     assert_eq!(kinds(&report.violations), [Violation::MinArea]);
 }
+
+#[test]
+fn a_routed_wire_narrower_than_the_minimum_width_violates_it() {
+    let mut f = Fixture::new();
+    let a = f.a;
+    f.route(M1, a, rect(0, 0, 1000, 50));
+
+    let report = f.check(&rules(Vec::new()));
+
+    assert_eq!(kinds(&report.violations), [Violation::MinWidth]);
+    assert_eq!(report.violations[0].bbox, rect(0, 0, 1000, 50));
+}
+
+#[test]
+fn a_narrow_neck_between_wide_parts_violates_the_minimum_width() {
+    let mut f = Fixture::new();
+    let a = f.a;
+    f.route(M1, a, rect(0, 0, 200, 200));
+    f.route(M1, a, rect(200, 75, 400, 125));
+    f.route(M1, a, rect(400, 0, 600, 200));
+
+    let report = f.check(&rules(Vec::new()));
+
+    assert_eq!(kinds(&report.violations), [Violation::MinWidth]);
+    assert_eq!(report.violations[0].bbox, rect(200, 75, 400, 125));
+}
+
+#[test]
+fn a_narrow_slice_under_the_owners_fixed_metal_is_exempt_from_the_minimum_width() {
+    let mut f = Fixture::new();
+    let a = f.a;
+    f.fix(M1, a, rect(0, 0, 1000, 50));
+    f.route(M1, a, rect(0, 0, 200, 50));
+
+    assert!(f.check(&rules(Vec::new())).violations.is_empty());
+}
+
+#[test]
+fn a_narrow_slice_partly_over_fixed_metal_violates_the_minimum_width() {
+    let mut f = Fixture::new();
+    let a = f.a;
+    f.fix(M1, a, rect(0, 0, 500, 50));
+    f.route(M1, a, rect(400, 0, 1000, 50));
+
+    let report = f.check(&rules(Vec::new()));
+
+    assert_eq!(kinds(&report.violations), [Violation::MinWidth]);
+    assert_eq!(report.violations[0].bbox, rect(0, 0, 1000, 50));
+}

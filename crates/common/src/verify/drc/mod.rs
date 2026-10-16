@@ -48,6 +48,8 @@ pub enum Violation {
     CutSpacing,
     /// A connected piece of metal smaller than the layer's minimum area.
     MinArea,
+    /// Metal narrower than the layer's minimum width.
+    MinWidth,
 }
 
 impl Violation {
@@ -62,6 +64,7 @@ impl Violation {
             Self::SpacingRange => "SpacingRange",
             Self::CutSpacing => "Cut Spacing",
             Self::MinArea => "Min Area",
+            Self::MinWidth => "Min Width",
         }
     }
 }

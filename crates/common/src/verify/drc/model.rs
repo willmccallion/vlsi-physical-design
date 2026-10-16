@@ -37,10 +37,13 @@ pub(super) struct GcEdge {
     pub fixed: bool,
 }
 
-/// One connected piece of an owner's metal on a layer.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+/// One connected piece of an owner's metal on a layer that holds routed
+/// metal. Pieces of fixed metal alone are not kept: every `FlexGC` shape
+/// rule exempts them.
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub(super) struct GcPolygon {
     pub owner: OwnerIndex,
+    pub region: Region,
     pub bbox: Rect<Dbu>,
     pub area: DbuArea,
     pub has_fixed_edge: bool,
@@ -191,6 +194,12 @@ fn owner_geometry(shapes: &[LayoutShape], group: &[usize]) -> OwnerGeometry {
             .filter(|s| s.fixed)
             .map(|s| s.rect),
     );
+    let routed: Vec<Rect<Dbu>> = group
+        .iter()
+        .map(|&i| shapes[i])
+        .filter(|s| !s.fixed)
+        .map(|s| s.rect)
+        .collect();
     let fixed_rects: HashSet<Rect<Dbu>> = fixed.max_rectangles().into_iter().collect();
     let fixed_edges: HashSet<Edge> = fixed.edges().into_iter().collect();
     let mut geometry = OwnerGeometry {
@@ -214,12 +223,19 @@ fn owner_geometry(shapes: &[LayoutShape], group: &[usize]) -> OwnerGeometry {
                 owner,
                 fixed: fixed_edges.contains(&edge),
             }));
-        if let Some(bbox) = piece.bounding_box() {
+        let Some(bbox) = piece.bounding_box() else {
+            continue;
+        };
+        let holds_route = routed
+            .iter()
+            .any(|r| r.overlaps(&bbox) && piece.intersects_rect(r));
+        if holds_route {
             geometry.polygons.push(GcPolygon {
                 owner,
                 bbox,
                 area: piece.area(),
                 has_fixed_edge: geometry.edges[first..].iter().any(|e| e.fixed),
+                region: piece,
             });
         }
     }
