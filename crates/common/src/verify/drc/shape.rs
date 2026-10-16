@@ -3,7 +3,7 @@
 
 use super::model::{GcPolygon, GcRect, Metal, Model};
 use super::rules::{MetalRules, Rules};
-use super::{Marker, Markers, Violation};
+use super::{Marker, Markers, ThinPiece, Violation};
 use crate::db::indices::LayerId;
 use crate::db::library::LayerRef;
 use crate::geom::dbu::Dbu;
@@ -43,6 +43,39 @@ pub(super) fn check(model: &Model<'_>, rules: &Rules) -> Markers {
             pieces.merge(rects)
         })
         .fold(Markers::default(), Markers::merge)
+}
+
+/// Whether `piece` lies strictly inside `window`, so that nothing of it can
+/// have been cut off at the window's edge.
+fn whole(window: Option<Rect<Dbu>>, piece: &GcPolygon) -> bool {
+    window.is_none_or(|w| {
+        w.min.x < piece.bbox.min.x
+            && w.min.y < piece.bbox.min.y
+            && piece.bbox.max.x < w.max.x
+            && piece.bbox.max.y < w.max.y
+    })
+}
+
+/// Every piece below its layer's minimum area, without a fixed edge.
+pub(super) fn thin_pieces(model: &Model<'_>, rules: &Rules) -> Vec<ThinPiece> {
+    let mut thin = Vec::new();
+    for (l, metal) in model.metal.iter().enumerate() {
+        let Some(min_area) = rules.metal[l].min_area else {
+            continue;
+        };
+        for piece in &metal.polygons {
+            if piece.area < min_area && !piece.has_fixed_edge && whole(model.window, piece) {
+                thin.push(ThinPiece {
+                    owner: piece.owner,
+                    layer: LayerId::new(l),
+                    bbox: piece.bbox,
+                    area: piece.area,
+                    min_area,
+                });
+            }
+        }
+    }
+    thin
 }
 
 /// The shape checks of one routing layer.
@@ -95,13 +128,7 @@ impl PieceCheck<'_> {
         let Some(min_area) = self.rules.min_area else {
             return;
         };
-        let whole = self.window.is_none_or(|w| {
-            w.min.x < piece.bbox.min.x
-                && w.min.y < piece.bbox.min.y
-                && piece.bbox.max.x < w.max.x
-                && piece.bbox.max.y < w.max.y
-        });
-        if whole && piece.area < min_area && !piece.has_fixed_edge {
+        if whole(self.window, piece) && piece.area < min_area && !piece.has_fixed_edge {
             found.add(self.marker(Violation::MinArea, 0, piece, piece.bbox), false);
         }
     }

@@ -9,7 +9,7 @@
 //! of its pieces.
 
 use super::{DetailedRouter, Marker};
-use crate::wiring::{Edge, NetRoute, gap_fills};
+use crate::wiring::{Edge, NetRoute, Wiring, gap_fills, tidy_patches};
 use pare_common::db::design::RouteElem;
 use pare_common::db::indices::{CutLayerId, LayerId, NetId};
 use pare_common::db::library::LayerRef;
@@ -88,7 +88,7 @@ impl ShapeTiles {
 
     /// The shapes, as (layer, position on the layer), whose tiles meet
     /// `window`; some may lie outside it.
-    fn near(&self, window: &Rect<Dbu>) -> FxHashSet<(LayerRef, u32)> {
+    pub(super) fn near(&self, window: &Rect<Dbu>) -> FxHashSet<(LayerRef, u32)> {
         let (x0, x1, y0, y1) = self.span(window);
         let mut found = FxHashSet::default();
         for j in y0..=y1 {
@@ -109,12 +109,12 @@ pub(super) struct Judgment {
 }
 
 /// A net's wiring as a worker proposes it: its committed wiring without
-/// the edges the worker took out, with the edges it routed.
+/// what the worker took out, with what it routed.
 #[derive(Clone, Copy, Debug)]
 pub(super) struct Candidate<'e> {
     pub net: NetId,
-    pub without: &'e [Edge],
-    pub with: &'e [Edge],
+    pub without: &'e Wiring,
+    pub with: &'e Wiring,
 }
 
 impl DetailedRouter<'_> {
@@ -208,13 +208,16 @@ impl DetailedRouter<'_> {
     pub(super) fn as_committed(&self, c: &Candidate<'_>) -> NetRoute {
         let mut route = self.routes[c.net.index()].clone();
         if !c.without.is_empty() {
-            let gone: FxHashSet<Edge> = c.without.iter().copied().collect();
+            let gone: FxHashSet<Edge> = c.without.edges.iter().copied().collect();
             route.edges.retain(|e| !gone.contains(e));
+            route.patches.retain(|p| !c.without.patches.contains(p));
         }
-        route.edges.extend_from_slice(c.with);
+        route.edges.extend_from_slice(&c.with.edges);
+        route.patches.extend_from_slice(&c.with.patches);
         route.edges.extend(gap_fills(&route, self.db, self.tech));
         route.edges.sort_unstable();
         route.edges.dedup();
+        tidy_patches(&mut route.patches);
         route
     }
 }

@@ -9,6 +9,7 @@
 
 mod initial;
 mod judge;
+mod patch;
 mod region;
 
 pub use region::{RepairStats, Scope};
@@ -465,6 +466,7 @@ impl<'a> DetailedRouter<'a> {
         edges.dedup();
         Some(NetRoute {
             edges,
+            patches: Vec::new(),
             access: tree
                 .used
                 .iter()

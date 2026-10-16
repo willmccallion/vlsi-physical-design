@@ -70,10 +70,54 @@ pub fn path_edges(path: &[Node]) -> impl Iterator<Item = Edge> + '_ {
 pub struct NetRoute {
     /// Edges of the track graph it uses.
     pub edges: Vec<Edge>,
+    /// Metal added beyond its wires and vias.
+    pub patches: Vec<Patch>,
     /// The access point used at each pin it reaches.
     pub access: Vec<AccessPoint>,
     /// Whether every pin was connected.
     pub complete: bool,
+}
+
+/// A rectangle of metal added to a route beyond its wires and vias, written
+/// to DEF as a RECT: `TritonRoute`'s patch wire, which brings a piece of
+/// metal up to its layer's minimum area.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub struct Patch {
+    /// The layer.
+    pub layer: LayerId,
+    /// The metal.
+    pub rect: Rect<Dbu>,
+}
+
+impl Patch {
+    /// An order of patches by layer and position.
+    const fn sort_key(&self) -> (usize, Dbu, Dbu, Dbu, Dbu) {
+        let r = self.rect;
+        (self.layer.index(), r.min.x, r.min.y, r.max.x, r.max.y)
+    }
+}
+
+/// Wiring routed for part of a net: edges of the track graph and the
+/// patches on them.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct Wiring {
+    /// Edges of the track graph.
+    pub edges: Vec<Edge>,
+    /// Patches on them.
+    pub patches: Vec<Patch>,
+}
+
+impl Wiring {
+    /// Whether there is nothing here.
+    pub const fn is_empty(&self) -> bool {
+        self.edges.is_empty() && self.patches.is_empty()
+    }
+}
+
+/// Sorts `patches` and drops repeats.
+pub fn tidy_patches(patches: &mut Vec<Patch>) {
+    patches.sort_by_key(Patch::sort_key);
+    patches.dedup();
 }
 
 impl NetRoute {
@@ -120,6 +164,10 @@ impl NetRoute {
         for a in &self.access {
             out.extend(access_elems(tech, a));
         }
+        out.extend(self.patches.iter().map(|p| RouteElem::Patch {
+            layer: p.layer,
+            rect: p.rect,
+        }));
         out
     }
 

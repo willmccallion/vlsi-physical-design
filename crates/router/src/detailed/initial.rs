@@ -140,8 +140,8 @@ impl DetailedRouter<'_> {
         let mut changes = Changes::default();
         for ((_, pieces), routed) in batch.iter().zip(routed) {
             for (i, item) in routed.into_iter().enumerate() {
-                match item.edges {
-                    Some(edges) => changes.apply(item.net, item.removed, edges),
+                match item.wiring {
+                    Some(wiring) => changes.apply(item.net, item.removed, wiring),
                     None if i < pieces.len() => failed.push(item.net),
                     None => {}
                 }

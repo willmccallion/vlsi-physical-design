@@ -413,7 +413,7 @@ impl Search<'_> {
     /// Cost of other owners' metal that `rect` on `layer` would conflict with.
     /// Cost of other owners' metal that `rect` on `layer` would conflict
     /// with, plus the conflict history of the tracks it runs on.
-    fn conflict_cost(&self, layer: LayerId, rect: &Rect<Dbu>) -> f64 {
+    pub(crate) fn conflict_cost(&self, layer: LayerId, rect: &Rect<Dbu>) -> f64 {
         let mut cost = 0.0;
         for (_, o) in self
             .occupancy

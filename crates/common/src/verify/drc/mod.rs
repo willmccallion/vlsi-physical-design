@@ -30,8 +30,9 @@ pub use tile::{check_tiled, check_window};
 const TILE_HALOS: i64 = 32;
 
 use crate::db::design::NetlistDB;
+use crate::db::indices::LayerId;
 use crate::db::library::LayerRef;
-use crate::geom::dbu::Dbu;
+use crate::geom::dbu::{Dbu, DbuArea};
 use crate::geom::rect::Rect;
 use model::Model;
 use std::collections::HashSet;
@@ -287,6 +288,32 @@ pub fn check_drc(db: &NetlistDB) -> DrcReport {
             .collect(),
     );
     report
+}
+
+/// A connected piece of an owner's routed metal below its layer's minimum
+/// area, as the minimum area rule would mark it.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct ThinPiece {
+    /// Whose metal it is.
+    pub owner: OwnerIndex,
+    /// The layer.
+    pub layer: LayerId,
+    /// The box around it.
+    pub bbox: Rect<Dbu>,
+    /// Its area.
+    pub area: DbuArea,
+    /// The area its layer requires.
+    pub min_area: DbuArea,
+}
+
+/// Every piece of metal in `layout` short of its layer's minimum area.
+///
+/// A piece with a fixed edge is exempt. With a `window`, only the shapes
+/// meeting it are looked at, and a piece reaching the window's edge, which
+/// may be cut short there, is never reported.
+pub fn thin_pieces(layout: &Layout, rules: &Rules, window: Option<Rect<Dbu>>) -> Vec<ThinPiece> {
+    let model = window.map_or_else(|| Model::new(layout), |w| Model::in_window(layout, w));
+    shape::thin_pieces(&model, rules)
 }
 
 /// Checks every shape of `layout` against `rules` in one piece.

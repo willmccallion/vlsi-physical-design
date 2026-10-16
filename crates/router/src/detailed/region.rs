@@ -15,7 +15,7 @@ use super::judge::{Candidate, Judgment};
 use crate::access::Node;
 use crate::occupancy::{LocalOccupancy, Owner};
 use crate::search::{Costs, Guide, MAX_PENALTY, OwnVias, Search, WindowCache};
-use crate::wiring::{DisjointSets, Edge, NetRoute, path_edges};
+use crate::wiring::{DisjointSets, Edge, NetRoute, Patch, Wiring, path_edges, tidy_patches};
 use pare_common::db::indices::{CutLayerId, LayerId, NetId};
 use pare_common::db::library::LayerRef;
 use pare_common::geom::dbu::Dbu;
@@ -87,19 +87,19 @@ pub(super) struct Piece {
     pub(super) guide: Option<Guide>,
 }
 
-/// What a region worker did to one net: the edges it took out of the
-/// net's committed wiring, and the edges it routed, `None` when the net
+/// What a region worker did to one net: the wiring it took out of the
+/// net's committed wiring, and the wiring it routed, `None` when the net
 /// could not be connected.
 #[derive(Clone, Debug)]
 pub(super) struct Routed {
     pub(super) net: NetId,
-    pub(super) removed: Vec<Edge>,
-    pub(super) edges: Option<Vec<Edge>>,
+    pub(super) removed: Wiring,
+    pub(super) wiring: Option<Wiring>,
 }
 
 impl Routed {
     /// The net's wiring with `with` in place of what was taken out.
-    fn candidate<'e>(&'e self, with: &'e [Edge]) -> Candidate<'e> {
+    const fn candidate<'e>(&'e self, with: &'e Wiring) -> Candidate<'e> {
         Candidate {
             net: self.net,
             without: &self.removed,
@@ -110,7 +110,7 @@ impl Routed {
     /// The same work with its routing given up.
     fn undone(self) -> Self {
         Self {
-            edges: None,
+            wiring: None,
             ..self
         }
     }
@@ -120,7 +120,7 @@ impl Routed {
 #[derive(Debug)]
 struct Victim {
     net: NetId,
-    removed: Vec<Edge>,
+    removed: Wiring,
     /// What to route again, or `None` when the wiring taken out joined
     /// nothing and is simply dropped.
     piece: Option<Piece>,
@@ -131,7 +131,7 @@ struct Victim {
 struct Work<'p> {
     given: &'p [Piece],
     victims: Vec<Victim>,
-    results: Vec<Option<Vec<Edge>>>,
+    results: Vec<Option<Wiring>>,
     /// The victims as owners, whose shared wiring the search disregards.
     ripped: Vec<Owner>,
 }
@@ -170,8 +170,8 @@ impl<'p> Work<'p> {
 
     /// Adds a victim and returns its index; a victim with nothing to route
     /// counts as routed with no edges.
-    fn add_victim(&mut self, net: NetId, removed: Vec<Edge>, piece: Option<Piece>) -> usize {
-        self.results.push(piece.is_none().then(Vec::new));
+    fn add_victim(&mut self, net: NetId, removed: Wiring, piece: Option<Piece>) -> usize {
+        self.results.push(piece.is_none().then(Wiring::default));
         self.ripped.push(Owner::Net(net.0));
         self.victims.push(Victim {
             net,
@@ -186,36 +186,42 @@ impl<'p> Work<'p> {
         (0..self.len())
             .map(|i| Candidate {
                 net: self.net(i),
-                without: self
-                    .victims
-                    .get(i.wrapping_sub(self.given.len()))
-                    .map_or(&[][..], |v| v.removed.as_slice()),
-                with: self.results[i].as_deref().unwrap_or(&[]),
+                without: self.removed(i),
+                with: self.results[i].as_ref().unwrap_or(&NOTHING),
             })
             .collect()
     }
 
+    /// What was taken out of the net of piece `i`: nothing for a given
+    /// piece, whose wiring was carved before the worker ran.
+    fn removed(&self, i: usize) -> &Wiring {
+        self.victims
+            .get(i.wrapping_sub(self.given.len()))
+            .map_or(&NOTHING, |v| &v.removed)
+    }
+
     /// The work as done, with `results` as the wiring of each piece; a
     /// victim added after `results` were taken is left as it was.
-    fn into_routed(self, results: Vec<Option<Vec<Edge>>>) -> Vec<Routed> {
-        let given = self.given.len();
+    fn into_routed(self, results: Vec<Option<Wiring>>) -> Vec<Routed> {
         results
             .into_iter()
             .enumerate()
-            .map(|(i, edges)| Routed {
+            .map(|(i, wiring)| Routed {
                 net: self.net(i),
-                removed: if i < given {
-                    Vec::new()
-                } else {
-                    self.victims[i - given].removed.clone()
-                },
-                edges,
+                removed: self.removed(i).clone(),
+                wiring,
             })
             .collect()
     }
 }
 
-/// Edges to take out of and add to nets' committed wiring.
+/// No wiring at all.
+static NOTHING: Wiring = Wiring {
+    edges: Vec::new(),
+    patches: Vec::new(),
+};
+
+/// Wiring to take out of and add to nets' committed wiring.
 #[derive(Debug, Default)]
 pub(super) struct Changes {
     by_net: FxHashMap<NetId, Change>,
@@ -223,31 +229,32 @@ pub(super) struct Changes {
 
 #[derive(Debug, Default)]
 struct Change {
-    removed: FxHashSet<Edge>,
-    added: Vec<Edge>,
+    removed_edges: FxHashSet<Edge>,
+    removed_patches: Vec<Patch>,
+    added: Wiring,
 }
 
 impl Changes {
     /// Records that `removed` leaves `net`'s wiring and `added` joins it.
-    pub(super) fn apply(&mut self, net: NetId, removed: Vec<Edge>, added: Vec<Edge>) {
+    pub(super) fn apply(&mut self, net: NetId, removed: Wiring, added: Wiring) {
         let change = self.by_net.entry(net).or_default();
-        change.removed.extend(removed);
-        change.added.extend(added);
+        change.removed_edges.extend(removed.edges);
+        change.removed_patches.extend(removed.patches);
+        change.added.edges.extend(added.edges);
+        change.added.patches.extend(added.patches);
     }
 }
 
 /// The wiring `item`'s net had inside its region before the worker ran:
-/// the edges carved out of a given piece, or those taken from a victim.
+/// what was carved out of a given piece, or what was taken from a victim.
 fn wiring_before<'e>(
     item: &'e Routed,
     given: bool,
-    carved: &'e FxHashMap<(usize, NetId), Vec<Edge>>,
+    carved: &'e FxHashMap<(usize, NetId), Wiring>,
     region: usize,
-) -> &'e [Edge] {
+) -> &'e Wiring {
     if given {
-        carved
-            .get(&(region, item.net))
-            .map_or(&[][..], Vec::as_slice)
+        carved.get(&(region, item.net)).unwrap_or(&NOTHING)
     } else {
         &item.removed
     }
@@ -333,21 +340,19 @@ impl DetailedRouter<'_> {
             }
         }
         let mut pieces: Vec<Vec<Piece>> = (0..batch.len()).map(|_| Vec::new()).collect();
-        let mut removed: FxHashMap<(usize, NetId), Vec<Edge>> = FxHashMap::default();
+        let mut removed: FxHashMap<(usize, NetId), Wiring> = FxHashMap::default();
+        let mut carved = Changes::default();
         for (&net, regions) in &regions_of {
             let areas: Vec<Rect<Dbu>> = regions.iter().map(|&r| batch[r].0).collect();
-            let mut gone: FxHashSet<Edge> = FxHashSet::default();
             for (k, (inside, piece)) in self.carve(net, &areas).into_iter().enumerate() {
-                gone.extend(inside.iter().copied());
+                carved.apply(net, inside.clone(), Wiring::default());
                 let _ = removed.insert((regions[k], net), inside);
                 if let Some(piece) = piece {
                     pieces[regions[k]].push(piece);
                 }
             }
-            let mut route = self.routes[net.index()].clone();
-            route.edges.retain(|e| !gone.contains(e));
-            self.commit(net, &route);
         }
+        self.commit_changes(carved);
         let work: Vec<(Rect<Dbu>, Vec<Piece>)> =
             batch.iter().map(|(area, _)| *area).zip(pieces).collect();
 
@@ -367,7 +372,7 @@ impl DetailedRouter<'_> {
                     .enumerate()
                     .map(|(i, item)| {
                         let before = wiring_before(item, i < given, &removed, r);
-                        item.candidate(item.edges.as_deref().unwrap_or(before))
+                        item.candidate(item.wiring.as_ref().unwrap_or(before))
                     })
                     .collect();
                 let violations = |c: &[Candidate<'_>]| self.judge(area, c).findings.violations.len();
@@ -391,11 +396,11 @@ impl DetailedRouter<'_> {
         for (r, ((_, pieces), routed)) in work.iter().zip(routed).enumerate() {
             for (i, item) in routed.into_iter().enumerate() {
                 count += 1;
-                match item.edges {
-                    Some(edges) => changes.apply(item.net, item.removed, edges),
+                match item.wiring {
+                    Some(wiring) => changes.apply(item.net, item.removed, wiring),
                     None if i < pieces.len() => {
                         let restored = removed.get(&(r, item.net)).cloned().unwrap_or_default();
-                        changes.apply(item.net, Vec::new(), restored);
+                        changes.apply(item.net, Wiring::default(), restored);
                     }
                     None => {}
                 }
@@ -409,10 +414,15 @@ impl DetailedRouter<'_> {
     pub(super) fn commit_changes(&mut self, changes: Changes) {
         for (net, change) in changes.by_net {
             let mut route = self.routes[net.index()].clone();
-            route.edges.retain(|e| !change.removed.contains(e));
-            route.edges.extend(change.added);
+            route.edges.retain(|e| !change.removed_edges.contains(e));
+            route
+                .patches
+                .retain(|p| !change.removed_patches.contains(p));
+            route.edges.extend(change.added.edges);
+            route.patches.extend(change.added.patches);
             route.edges.sort_unstable();
             route.edges.dedup();
+            tidy_patches(&mut route.patches);
             self.commit(net, &route);
         }
     }
@@ -423,19 +433,27 @@ impl DetailedRouter<'_> {
     /// in more than one place. Judging connectivity by what is left outside
     /// all areas at once means that joining each area's groups restores every
     /// connection the removed edges made.
-    fn carve(&self, net: NetId, areas: &[Rect<Dbu>]) -> Vec<(Vec<Edge>, Option<Piece>)> {
+    fn carve(&self, net: NetId, areas: &[Rect<Dbu>]) -> Vec<(Wiring, Option<Piece>)> {
         let route = &self.routes[net.index()];
         let area_of = |n: Node| {
             let p = self.point(n);
             areas.iter().position(|a| contains_half_open(a, p))
         };
-        let mut removed: Vec<Vec<Edge>> = vec![Vec::new(); areas.len()];
+        let mut removed: Vec<Wiring> = vec![Wiring::default(); areas.len()];
         let mut kept: Vec<Edge> = Vec::new();
         for &e in &route.edges {
             let (a, b) = e.ends();
             match (area_of(a), area_of(b)) {
-                (Some(i), Some(j)) if i == j => removed[i].push(e),
+                (Some(i), Some(j)) if i == j => removed[i].edges.push(e),
                 _ => kept.push(e),
+            }
+        }
+        for &p in &route.patches {
+            let inside = areas
+                .iter()
+                .position(|a| contains_half_open(a, p.rect.center()));
+            if let Some(i) = inside {
+                removed[i].patches.push(p);
             }
         }
 
@@ -488,7 +506,7 @@ impl DetailedRouter<'_> {
     ) -> Vec<Routed> {
         let window = Rect::new(area.min, area.max - Point::new(Dbu(1), Dbu(1)));
         let mut work = Work::new(pieces);
-        let mut best: Option<(Score, Vec<Option<Vec<Edge>>>)> = None;
+        let mut best: Option<(Score, Vec<Option<Wiring>>)> = None;
         let mut overlay = LocalOccupancy::default();
         let mut todo: Vec<usize> = self.ordered(&work, (0..pieces.len()).collect());
         let mut penalty = costs.penalty;
@@ -517,18 +535,34 @@ impl DetailedRouter<'_> {
                 };
                 let own = self.vias_near(piece.net, area);
                 let groups = &piece.groups;
-                let result = if guided.guide.is_some() {
+                let edges = if guided.guide.is_some() {
                     self.connect_groups(&guided, groups, &window, own.clone())
                         .or_else(|| self.connect_groups(&free, groups, &window, own))
                 } else {
                     self.connect_groups(&free, groups, &window, own)
                 };
-                if let Some(edges) = &result {
-                    for (layer, rect) in self.edge_metal(edges) {
+                let result = edges.map(|edges| {
+                    let wiring = Wiring {
+                        edges,
+                        patches: Vec::new(),
+                    };
+                    let candidate = Candidate {
+                        net: piece.net,
+                        without: work.removed(i),
+                        with: &wiring,
+                    };
+                    let patches = self.min_area_patches(&candidate, area, &free);
+                    Wiring { patches, ..wiring }
+                });
+                if let Some(wiring) = &result {
+                    for (layer, rect) in self.edge_metal(&wiring.edges) {
                         overlay.add_rect(self.tech, layer, &rect, owner);
                     }
-                    for (cut, rect) in self.edge_cuts(edges) {
+                    for (cut, rect) in self.edge_cuts(&wiring.edges) {
                         overlay.add_cut(self.tech, cut, &rect, owner);
+                    }
+                    for p in &wiring.patches {
+                        overlay.add_rect(self.tech, p.layer, &p.rect, owner);
                     }
                 }
                 work.results[i] = result;
@@ -587,13 +621,19 @@ impl DetailedRouter<'_> {
             return None;
         }
         let route = &self.routes[net.index()];
-        let gone: FxHashSet<Edge> = inside.iter().copied().collect();
+        let gone: FxHashSet<Edge> = inside.edges.iter().copied().collect();
         let kept = NetRoute {
             edges: route
                 .edges
                 .iter()
                 .copied()
                 .filter(|e| !gone.contains(e))
+                .collect(),
+            patches: route
+                .patches
+                .iter()
+                .copied()
+                .filter(|p| !inside.patches.contains(p))
                 .collect(),
             access: route.access.clone(),
             ..NetRoute::default()
