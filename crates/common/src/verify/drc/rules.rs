@@ -24,6 +24,9 @@ pub struct MetalRules {
     pub min_area: Option<DbuArea>,
     /// Cuts that vias to wide metal need.
     pub minimum_cuts: Vec<MinimumCut>,
+    /// Smallest holes metal may enclose. `TritonRoute` skips rules limited
+    /// to narrow rings, so only those without a width are kept.
+    pub min_enclosed_areas: Vec<DbuArea>,
 }
 
 impl MetalRules {
@@ -80,6 +83,13 @@ impl Rules {
                 ranges: l.rules.width_range_spacing.clone(),
                 min_area: l.rules.min_area,
                 minimum_cuts: l.rules.minimum_cuts.clone(),
+                min_enclosed_areas: l
+                    .rules
+                    .min_enclosed_areas
+                    .iter()
+                    .filter(|r| r.width.is_none())
+                    .map(|r| r.area)
+                    .collect(),
             })
             .collect();
         let cut = library

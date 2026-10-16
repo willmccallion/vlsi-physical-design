@@ -45,6 +45,7 @@ impl PieceCheck<'_> {
     fn check_piece(&self, piece: &GcPolygon, found: &mut Markers) {
         self.min_width(piece, found);
         self.min_area(piece, found);
+        self.min_hole(piece, found);
     }
 
     /// Every horizontal slice of the piece must be at least the minimum
@@ -70,7 +71,7 @@ impl PieceCheck<'_> {
                 .fixed_within(piece.owner, &slice)
                 .covers_rect(&slice)
             {
-                found.add(self.marker(Violation::MinWidth, piece, slice), false);
+                found.add(self.marker(Violation::MinWidth, 0, piece, slice), false);
             }
         }
     }
@@ -81,14 +82,40 @@ impl PieceCheck<'_> {
             return;
         };
         if piece.area < min_area && !piece.has_fixed_edge {
-            found.add(self.marker(Violation::MinArea, piece, piece.bbox), false);
+            found.add(self.marker(Violation::MinArea, 0, piece, piece.bbox), false);
         }
     }
 
-    fn marker(&self, violation: Violation, piece: &GcPolygon, bbox: Rect<Dbu>) -> Marker {
+    /// Each hole of the piece must enclose at least the area of every
+    /// minimum enclosed area rule.
+    fn min_hole(&self, piece: &GcPolygon, found: &mut Markers) {
+        if self.rules.min_enclosed_areas.is_empty() {
+            return;
+        }
+        for hole in piece.region.holes() {
+            let Some(bbox) = hole.bounding_box() else {
+                continue;
+            };
+            let area = hole.area();
+            for (k, &min) in self.rules.min_enclosed_areas.iter().enumerate() {
+                if area < min {
+                    let rule = u16::try_from(k).unwrap_or(u16::MAX);
+                    found.add(self.marker(Violation::MinHole, rule, piece, bbox), false);
+                }
+            }
+        }
+    }
+
+    fn marker(
+        &self,
+        violation: Violation,
+        rule: u16,
+        piece: &GcPolygon,
+        bbox: Rect<Dbu>,
+    ) -> Marker {
         Marker::new(
             violation,
-            0,
+            rule,
             LayerRef::Routing(self.layer),
             bbox,
             piece.owner,

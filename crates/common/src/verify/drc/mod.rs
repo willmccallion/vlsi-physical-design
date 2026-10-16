@@ -53,6 +53,8 @@ pub enum Violation {
     MinWidth,
     /// A cut on metal wide enough for a minimum-cut rule.
     MinimumCut,
+    /// A hole in metal smaller than the layer's minimum enclosed area.
+    MinHole,
 }
 
 impl Violation {
@@ -69,6 +71,7 @@ impl Violation {
             Self::MinArea => "Min Area",
             Self::MinWidth => "Min Width",
             Self::MinimumCut => "Minimum Cut",
+            Self::MinHole => "Min Hole",
         }
     }
 }

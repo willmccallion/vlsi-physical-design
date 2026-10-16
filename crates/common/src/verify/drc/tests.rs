@@ -33,6 +33,7 @@ fn metal(spacing: SpacingTable) -> MetalRules {
         ranges: Vec::new(),
         min_area: None,
         minimum_cuts: Vec::new(),
+        min_enclosed_areas: Vec::new(),
     }
 }
 
@@ -645,4 +646,36 @@ fn with_a_length_a_cut_joined_to_the_wide_metal_within_the_distance_violates_it(
 
     assert_eq!(kinds(&report.violations), [Violation::MinimumCut]);
     assert_eq!(report.violations[0].bbox, rect(1000, 200, 1300, 300));
+}
+
+/// A routed ring of net 0 on the first metal layer around a 200 by 200 hole.
+fn route_ring(f: &mut Fixture) {
+    let a = f.a;
+    f.route(M1, a, rect(0, 0, 600, 200));
+    f.route(M1, a, rect(0, 400, 600, 600));
+    f.route(M1, a, rect(0, 0, 200, 600));
+    f.route(M1, a, rect(400, 0, 600, 600));
+}
+
+#[test]
+fn a_hole_smaller_than_the_minimum_enclosed_area_violates_it() {
+    let mut f = Fixture::new();
+    route_ring(&mut f);
+    let mut rules = rules(Vec::new());
+    rules.metal[0].min_enclosed_areas = vec![DbuArea(50_000)];
+
+    let report = f.check(&rules);
+
+    assert_eq!(kinds(&report.violations), [Violation::MinHole]);
+    assert_eq!(report.violations[0].bbox, rect(200, 200, 400, 400));
+}
+
+#[test]
+fn a_hole_as_large_as_the_minimum_enclosed_area_is_legal() {
+    let mut f = Fixture::new();
+    route_ring(&mut f);
+    let mut rules = rules(Vec::new());
+    rules.metal[0].min_enclosed_areas = vec![DbuArea(40_000)];
+
+    assert!(f.check(&rules).violations.is_empty());
 }
