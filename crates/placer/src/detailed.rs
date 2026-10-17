@@ -1146,10 +1146,10 @@ mod tests {
     }
 
     /// A 10 by 4 die with one row of 0.2-wide sites: horizontal M1 under
-    /// vertical M2 joined by a 0.1 cut via with a 0.1 by 0.18 M2 pad; master
-    /// R, 0.4 wide, with a 0.1-wide M1 pin ending 0.05 from its right edge;
-    /// master E, 0.4 wide, with an M2 pin along its left edge. A via on R's
-    /// pin breaks M2 spacing when E abuts R.
+    /// vertical M2 joined by a 0.1 cut via with 0.1 by 0.18 pads on both
+    /// layers; master R, 0.4 wide, with a 0.1-wide M1 pin ending 0.05 from
+    /// its right edge; master E, 0.4 wide, with an M2 pin along its left
+    /// edge. A via on R's pin breaks M2 spacing when E abuts R.
     fn access_design() -> (NetlistDB, Zones, PinAccess) {
         use pare_common::db::design::{TrackAxis, TrackDef};
         use pare_common::db::indices::{CutLayerId, MacroPinId};
@@ -1192,7 +1192,7 @@ mod tests {
                 shapes: vec![
                     Shape {
                         layer: LayerRef::Routing(m1),
-                        rect: rect(-90, -50, 90, 50),
+                        rect: rect(-50, -90, 50, 90),
                     },
                     Shape {
                         layer: LayerRef::Cut(v1),

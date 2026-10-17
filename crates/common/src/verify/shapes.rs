@@ -26,6 +26,9 @@ pub struct OwnedShape {
     pub shape: Shape,
     /// Its net, if any.
     pub owner: Owner,
+    /// Whether it is a cell obstruction or routing blockage rather than a pin
+    /// or wire, which spacing rules may take as default-width metal.
+    pub obstruction: bool,
 }
 
 /// The rectangle a default-width wire covers, extended by half its width
@@ -215,7 +218,16 @@ fn fixed_shapes_of(
     keep_io: impl Fn(&IoPin) -> bool,
 ) -> Vec<OwnedShape> {
     let mut out = Vec::new();
-    let fixed = |shape: Shape, owner: Owner| OwnedShape { shape, owner };
+    let fixed = |shape: Shape, owner: Owner| OwnedShape {
+        shape,
+        owner,
+        obstruction: false,
+    };
+    let blocker = |shape: Shape| OwnedShape {
+        shape,
+        owner: Owner::Obstacle,
+        obstruction: true,
+    };
 
     for i in 0..db.num_cells() {
         let id = CellId::new(i);
@@ -241,11 +253,7 @@ fn fixed_shapes_of(
             let owner = pin_net[k].map_or(Owner::Obstacle, Owner::Net);
             out.extend(mp.shapes.iter().map(|s| fixed(place(s), owner)));
         }
-        out.extend(
-            m.obstructions
-                .iter()
-                .map(|s| fixed(place(s), Owner::Obstacle)),
-        );
+        out.extend(m.obstructions.iter().map(|s| blocker(place(s))));
     }
 
     for p in db.io_pins.iter().filter(|p| keep_io(p)) {
@@ -272,11 +280,7 @@ fn fixed_shapes_of(
         }
     }
 
-    out.extend(
-        db.routing_blockages
-            .iter()
-            .map(|&s| fixed(s, Owner::Obstacle)),
-    );
+    out.extend(db.routing_blockages.iter().map(|&s| blocker(s)));
     out
 }
 
