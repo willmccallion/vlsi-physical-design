@@ -62,14 +62,27 @@ const SWAP_REACH: usize = 8;
 /// Moves every cell with a pin that fixed metal blocks to a spot where none
 /// of its pins is.
 ///
-/// The spot is the nearest along the cell's row, pushing the cells beside
-/// it by the least that keeps every pushed cell clear too; else the place
-/// of a nearby cell of the same width that is clear where this one stands;
-/// else a gap in a nearby row.
+/// Each row stretch holding such a cell is first re-placed in order by the
+/// least total displacement, within the shift reach of every cell, that
+/// leaves no pin blocked. A cell that stays blocked is then shifted to the
+/// nearest clear spot, pushing the cells beside it by the least that keeps
+/// every pushed cell clear too; else it takes the place of a nearby cell of
+/// the same width that is clear where this one stands; else a gap in a
+/// nearby row.
 pub fn free_blocked_pins(db: &mut NetlistDB, zones: &Zones, access: &PinAccess) -> AccessRepair {
     let mut dp = DetailedPlacer::new(db, zones, Some(access));
     let blocked_before = dp.count_blocked(db);
     let mut moved = 0;
+    for s in 0..dp.segments.len() {
+        let row = dp.segments[s].row;
+        let any_blocked = dp.segments[s]
+            .cells
+            .iter()
+            .any(|&c| dp.blocked_at(db, c, db.cells[c.index()].location, row) > 0);
+        if any_blocked {
+            moved += dp.free_segment(db, s).unwrap_or(0);
+        }
+    }
     for s in 0..dp.segments.len() {
         let mut i = 0;
         while i < dp.segments[s].cells.len() {
@@ -274,6 +287,75 @@ impl<'a> DetailedPlacer<'a> {
                 )
             })
             .sum()
+    }
+
+    /// Re-places the cells of segment `s`, in their order, at the positions
+    /// within the shift reach of each that leave no pin blocked and move
+    /// them least in total; returns how many moved, or `None` when no such
+    /// placement exists.
+    fn free_segment(&self, db: &mut NetlistDB, s: usize) -> Option<usize> {
+        let seg = &self.segments[s];
+        let row = &self.rows[seg.row];
+        let mut candidates: Vec<Vec<(Dbu, i64)>> = Vec::with_capacity(seg.cells.len());
+        for &c in &seg.cells {
+            let x = db.cells[c.index()].location.x;
+            let width = db.cell_size(c).x;
+            let spots: Vec<(Dbu, i64)> = (-MAX_SHIFT_SITES..=MAX_SHIFT_SITES)
+                .map(|k| x + row.site * k)
+                .filter(|&p| p >= seg.lo && p + width <= seg.hi)
+                .filter(|&p| self.blocked_at(db, c, Point::new(p, row.y), seg.row) == 0)
+                .map(|p| (p, (p - x).abs().get()))
+                .collect();
+            if spots.is_empty() {
+                return None;
+            }
+            candidates.push(spots);
+        }
+        let mut best: Vec<Vec<(i64, usize)>> = Vec::with_capacity(candidates.len());
+        best.push(candidates[0].iter().map(|&(_, cost)| (cost, 0)).collect());
+        for i in 1..candidates.len() {
+            let width_before = db.cell_size(seg.cells[i - 1]).x;
+            let mut prefix: Vec<(i64, usize)> = Vec::with_capacity(best[i - 1].len());
+            let mut low = (i64::MAX, 0);
+            for (j, &(cost, _)) in best[i - 1].iter().enumerate() {
+                if cost < low.0 {
+                    low = (cost, j);
+                }
+                prefix.push(low);
+            }
+            let before = &candidates[i - 1];
+            let here: Vec<(i64, usize)> = candidates[i]
+                .iter()
+                .map(|&(p, cost)| {
+                    let fits = before.partition_point(|&(q, _)| q + width_before <= p);
+                    match fits.checked_sub(1).map(|k| prefix[k]) {
+                        Some((total, j)) if total < i64::MAX => (total + cost, j),
+                        _ => (i64::MAX, 0),
+                    }
+                })
+                .collect();
+            best.push(here);
+        }
+        let last = best.len() - 1;
+        let (mut k, total) = best[last]
+            .iter()
+            .enumerate()
+            .map(|(k, &(total, _))| (k, total))
+            .min_by_key(|&(_, total)| total)?;
+        if total == i64::MAX {
+            return None;
+        }
+        let mut moved = 0;
+        for i in (0..=last).rev() {
+            let (p, _) = candidates[i][k];
+            let c = seg.cells[i];
+            if db.cells[c.index()].location.x != p {
+                db.cells[c.index()].location.x = p;
+                moved += 1;
+            }
+            k = best[i][k].1;
+        }
+        Some(moved)
     }
 
     /// Frees the pins of cell `i` of segment `s`: by the shortest shift
