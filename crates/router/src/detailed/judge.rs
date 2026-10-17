@@ -214,7 +214,9 @@ impl DetailedRouter<'_> {
         }
         route.edges.extend_from_slice(&c.with.edges);
         route.patches.extend_from_slice(&c.with.patches);
-        route.edges.extend(gap_fills(&route, self.db, self.tech));
+        route
+            .edges
+            .extend(gap_fills(&route, self.db, self.tech, c.net));
         route.edges.sort_unstable();
         route.edges.dedup();
         tidy_patches(&mut route.patches);

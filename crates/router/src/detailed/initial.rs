@@ -335,7 +335,7 @@ impl DetailedRouter<'_> {
             ..NetRoute::default()
         };
         route
-            .metal(self.db, self.tech)
+            .metal(self.db, self.tech, net)
             .into_iter()
             .filter(|(layer, _)| self.tech.routable(*layer))
             .any(|(layer, rect)| {

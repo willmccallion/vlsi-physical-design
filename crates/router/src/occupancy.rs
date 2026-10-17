@@ -3,10 +3,13 @@
 //! Every shape on a routable layer is recorded as an interval along each
 //! track whose wire it could short or come too close to: tracks whose
 //! centerline lies within the shape's extent widened by the spacing plus
-//! half a wire width. Two occupants of a track conflict when their
-//! intervals come within the layer spacing, unless both are intrusions
-//! from neighbouring tracks, which are checked on their own tracks. Long
-//! intervals are split into chunks so a query scans a short window.
+//! half a wire width. Each interval carries the spacing other metal must
+//! keep from it, the layer's or more for a wide shape or a net under a
+//! non-default rule. Two occupants of a track conflict when their
+//! intervals come within the larger of their spacings, unless both are
+//! intrusions from neighbouring tracks, which are checked on their own
+//! tracks. Long intervals are split into chunks so a query scans a short
+//! window.
 //!
 //! Via cuts are kept per cut layer as exact rectangles in square buckets.
 //! Two cuts of different owners conflict when they touch or their edges
@@ -15,9 +18,9 @@
 //! coarser buckets so they do not widen every query.
 
 use crate::tech::{CutTech, LayerTech, RouteTech};
-use pare_common::db::design::NetlistDB;
-use pare_common::db::indices::{CutLayerId, LayerId};
+use pare_common::db::indices::{CutLayerId, LayerId, NonDefaultRuleId};
 use pare_common::db::library::LayerRef;
+use pare_common::db::rules::SpacingTable;
 use pare_common::geom::dbu::Dbu;
 use pare_common::geom::point::Point;
 use pare_common::geom::rect::Rect;
@@ -57,6 +60,8 @@ pub struct Occupant {
     pub centered: bool,
     /// Whether rip-up removes it.
     pub origin: Origin,
+    /// The spacing other metal must keep from it along the track.
+    pub spacing: Dbu,
 }
 
 /// A track of a layer.
@@ -240,11 +245,7 @@ pub fn cuts_clash(a: &Rect<Dbu>, b: &Rect<Dbu>, spacing: Dbu) -> bool {
 
 /// Whether two shapes of one net on `layer` neither touch nor keep the
 /// layer's spacing.
-pub(crate) fn too_close(db: &NetlistDB, layer: LayerRef, a: &Rect<Dbu>, b: &Rect<Dbu>) -> bool {
-    let spacing = match layer {
-        LayerRef::Routing(l) => db.library.layer(l).min_spacing,
-        LayerRef::Cut(c) => db.library.cut_layers[c.index()].spacing.unwrap_or_default(),
-    };
+pub(crate) fn too_close(spacing: Dbu, a: &Rect<Dbu>, b: &Rect<Dbu>) -> bool {
     let d = gap_sq(a, b);
     let s = i128::from(spacing.get());
     d > 0 && d < s * s
@@ -268,6 +269,10 @@ pub struct Occupancy {
     tracks: Vec<Vec<Track>>,
     /// The along-track coordinate where each layer's first bucket starts.
     origins: Vec<Dbu>,
+    /// Each layer's minimum spacing.
+    min_spacing: Vec<Dbu>,
+    /// The largest spacing any occupant of each layer can carry.
+    reach: Vec<Dbu>,
     chunk: Dbu,
     cuts: Vec<CutLayer>,
 }
@@ -290,23 +295,35 @@ struct Blocked {
     centered: bool,
     lo: Dbu,
     hi: Dbu,
+    /// The spacing other metal must keep from the shape along the track.
+    spacing: Dbu,
 }
 
-/// The stretches of `lt`'s tracks that metal covering `rect` blocks: on
-/// every track a wire would come too close to it, its extent along the
-/// tracks widened by the extra spacing it needs.
+/// The stretches of `lt`'s tracks that metal covering `rect` blocks, with
+/// the spacing each must keep: on every track a wire would come too close
+/// to it, given `spacing`, the least spacing the shape's owner demands.
 fn blocked_stretches<'t>(
     lt: &'t LayerTech,
     rect: &Rect<Dbu>,
+    spacing: Dbu,
 ) -> impl Iterator<Item = Blocked> + use<'t> {
     let (_, (lo, hi)) = lt.across_along_rect(rect);
-    let wider = lt.spacing_around(rect).1 - lt.spacing;
-    affected_tracks(lt, rect).map(move |(track, centered)| Blocked {
+    let (across, along) = lt.spacing_around(rect);
+    affected_tracks(lt, rect, across.max(spacing)).map(move |(track, centered)| Blocked {
         track,
         centered,
-        lo: lo - wider,
-        hi: hi + wider,
+        lo,
+        hi,
+        spacing: along.max(spacing),
     })
+}
+
+/// The non-default rule `owner` follows.
+fn rule_of(tech: &RouteTech, owner: Owner) -> Option<NonDefaultRuleId> {
+    match owner {
+        Owner::Net(n) => tech.net_rule(n as usize),
+        Owner::Obstacle => None,
+    }
 }
 
 /// Where fixed metal lies along each track.
@@ -327,7 +344,13 @@ impl FixedMetal for Occupancy {
         lo: Dbu,
         hi: Dbu,
     ) -> impl Iterator<Item = (Dbu, Dbu)> {
-        self.fixed_within(track, lo, hi).map(|o| (o.lo, o.hi))
+        let l = track.layer.index();
+        let min = self.min_spacing[l];
+        let extra = self.reach[l] - min;
+        self.starting_within(track, lo - self.chunk - extra, hi + extra)
+            .filter(|o| o.origin == Origin::Fixed)
+            .map(move |o| (o.lo - (o.spacing - min), o.hi + (o.spacing - min)))
+            .filter(move |&(start, end)| start < hi && lo < end)
     }
 }
 
@@ -355,8 +378,14 @@ impl FixedTracks {
             if !tech.routable(layer) {
                 continue;
             }
-            for b in blocked_stretches(tech.layer(layer), &s.shape.rect) {
-                stretches[layer.index()][b.track as usize].push((b.lo, b.hi));
+            let lt = tech.layer(layer);
+            let rule = match s.owner {
+                shapes::Owner::Net(n) => tech.net_rule(n.index()),
+                shapes::Owner::Obstacle => None,
+            };
+            for b in blocked_stretches(lt, &s.shape.rect, tech.wire_spacing(rule, layer)) {
+                let extra = b.spacing - lt.spacing;
+                stretches[layer.index()][b.track as usize].push((b.lo - extra, b.hi + extra));
             }
         }
         for track in stretches.iter_mut().flatten() {
@@ -402,9 +431,10 @@ fn merge_stretches(stretches: &mut Vec<(Dbu, Dbu)>) {
 pub(crate) fn affected_tracks<'t>(
     lt: &'t LayerTech,
     rect: &Rect<Dbu>,
+    spacing: Dbu,
 ) -> impl Iterator<Item = (u32, bool)> + use<'t> {
     let ((a0, a1), _) = lt.across_along_rect(rect);
-    let reach = lt.spacing_around(rect).0 + lt.width / 2;
+    let reach = spacing + lt.width / 2;
     let range = lt.tracks_within(a0 - reach + Dbu(1), a1 + reach - Dbu(1));
     range.map(move |t| {
         let c = lt.tracks[t as usize];
@@ -425,6 +455,19 @@ impl Occupancy {
                 .layers
                 .iter()
                 .map(|l| l.cross.first().map_or(Dbu::ZERO, |c| c.at))
+                .collect(),
+            min_spacing: tech.layers.iter().map(|l| l.spacing).collect(),
+            reach: (0..tech.layers.len())
+                .map(|l| {
+                    let lt = &tech.layers[l];
+                    let table = lt
+                        .spacing_table
+                        .as_ref()
+                        .map_or(Dbu::ZERO, SpacingTable::max_spacing);
+                    tech.max_wire_spacing(LayerId::new(l))
+                        .max(table)
+                        .max(lt.spacing)
+                })
                 .collect(),
             chunk: chunk.max(Dbu(1)),
             cuts: tech.cuts.iter().map(|&c| CutLayer::new(c)).collect(),
@@ -507,7 +550,8 @@ impl Occupancy {
         origin: Origin,
     ) -> Vec<TrackRef> {
         let mut touched = Vec::new();
-        for blocked in blocked_stretches(tech.layer(layer), rect) {
+        let spacing = tech.wire_spacing(rule_of(tech, owner), layer);
+        for blocked in blocked_stretches(tech.layer(layer), rect, spacing) {
             let mut start = blocked.lo;
             loop {
                 let end = (start + self.chunk).min(blocked.hi);
@@ -517,6 +561,7 @@ impl Occupancy {
                     owner,
                     centered: blocked.centered,
                     origin,
+                    spacing: blocked.spacing,
                 };
                 let b = self.bucket(layer.index(), start);
                 let buckets = &mut self.tracks[layer.index()][blocked.track as usize].buckets;
@@ -553,8 +598,9 @@ impl Occupancy {
         }
     }
 
-    /// Occupants of other owners within `spacing` of `[lo, hi]` on a track.
-    /// Intrusions are skipped when the query is itself an intrusion.
+    /// Occupants of other owners on a track within the larger of `spacing`
+    /// and their own spacing of `[lo, hi]`. Intrusions are skipped when the
+    /// query is itself an intrusion.
     pub fn conflicts(
         &self,
         t: TrackRef,
@@ -564,19 +610,12 @@ impl Occupancy {
         owner: Owner,
         centered: bool,
     ) -> impl Iterator<Item = &Occupant> + use<'_> {
-        self.starting_within(t, lo - spacing - self.chunk, hi + spacing)
+        let reach = spacing.max(self.reach[t.layer.index()]);
+        self.starting_within(t, lo - reach - self.chunk, hi + reach)
             .filter(move |o| {
-                o.owner != owner
-                    && (centered || o.centered)
-                    && o.lo < hi + spacing
-                    && lo < o.hi + spacing
+                let s = spacing.max(o.spacing);
+                o.owner != owner && (centered || o.centered) && o.lo < hi + s && lo < o.hi + s
             })
-    }
-
-    /// Fixed metal and obstacles on a track that overlap `(lo, hi)`.
-    pub fn fixed_within(&self, t: TrackRef, lo: Dbu, hi: Dbu) -> impl Iterator<Item = &Occupant> {
-        self.starting_within(t, lo - self.chunk, hi)
-            .filter(move |o| o.origin == Origin::Fixed && o.lo < hi && lo < o.hi)
     }
 
     /// Owners of wiring on `layer` whose metal runs along a track inside
@@ -617,7 +656,8 @@ impl Occupancy {
         })
     }
 
-    /// The conflicts `rect` on `layer` would have, as (track, occupant) pairs.
+    /// The conflicts `rect` of `owner` on `layer` would have, as (track,
+    /// occupant) pairs.
     pub fn rect_conflicts<'a>(
         &'a self,
         tech: &'a RouteTech,
@@ -627,8 +667,8 @@ impl Occupancy {
     ) -> impl Iterator<Item = (TrackRef, &'a Occupant)> + use<'a> {
         let lt = tech.layer(layer);
         let (_, (lo, hi)) = lt.across_along_rect(rect);
-        let spacing = lt.spacing;
-        affected_tracks(lt, rect).flat_map(move |(track, centered)| {
+        let spacing = tech.wire_spacing(rule_of(tech, owner), layer);
+        affected_tracks(lt, rect, spacing).flat_map(move |(track, centered)| {
             let t = TrackRef { layer, track };
             self.conflicts(t, lo, hi, spacing, owner, centered)
                 .map(move |o| (t, o))
@@ -665,18 +705,21 @@ impl LocalOccupancy {
         owner: Owner,
         origin: Origin,
     ) {
-        let lt = tech.layer(layer);
-        let (_, (lo, hi)) = lt.across_along_rect(rect);
-        for (track, centered) in affected_tracks(lt, rect) {
+        let spacing = tech.wire_spacing(rule_of(tech, owner), layer);
+        for b in blocked_stretches(tech.layer(layer), rect, spacing) {
             self.tracks
-                .entry(TrackRef { layer, track })
+                .entry(TrackRef {
+                    layer,
+                    track: b.track,
+                })
                 .or_default()
                 .push(Occupant {
-                    lo,
-                    hi,
+                    lo: b.lo,
+                    hi: b.hi,
                     owner,
-                    centered,
+                    centered: b.centered,
                     origin,
+                    spacing: b.spacing,
                 });
         }
     }
@@ -735,7 +778,7 @@ impl LocalOccupancy {
             .flat_map(move |layer| layer.conflicts(rect, owner))
     }
 
-    /// The conflicts `rect` on `layer` would have here.
+    /// The conflicts `rect` of `owner` on `layer` would have here.
     pub fn rect_conflicts<'a>(
         &'a self,
         tech: &'a RouteTech,
@@ -745,18 +788,19 @@ impl LocalOccupancy {
     ) -> impl Iterator<Item = (TrackRef, &'a Occupant)> + use<'a> {
         let lt = tech.layer(layer);
         let (_, (lo, hi)) = lt.across_along_rect(rect);
-        let spacing = lt.spacing;
-        affected_tracks(lt, rect).flat_map(move |(track, centered)| {
+        let spacing = tech.wire_spacing(rule_of(tech, owner), layer);
+        affected_tracks(lt, rect, spacing).flat_map(move |(track, centered)| {
             let t = TrackRef { layer, track };
             self.tracks
                 .get(&t)
                 .into_iter()
                 .flatten()
                 .filter_map(move |o| {
+                    let s = spacing.max(o.spacing);
                     let clash = o.owner != owner
                         && (centered || o.centered)
-                        && o.lo < hi + spacing
-                        && lo < o.hi + spacing;
+                        && o.lo < hi + s
+                        && lo < o.hi + s;
                     clash.then_some((t, o))
                 })
         })

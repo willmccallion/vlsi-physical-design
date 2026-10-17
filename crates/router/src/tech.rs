@@ -7,8 +7,9 @@
 //! lands on a track of both layers it joins.
 
 use crate::RouteError;
+use pare_common::db::design::NonDefaultRule;
 use pare_common::db::design::{NetlistDB, TrackAxis};
-use pare_common::db::indices::{CutLayerId, LayerId, ViaId};
+use pare_common::db::indices::{CutLayerId, LayerId, NonDefaultRuleId, ViaId};
 use pare_common::db::library::{Direction, LayerRef};
 use pare_common::db::rules::SpacingTable;
 use pare_common::geom::dbu::Dbu;
@@ -147,6 +148,34 @@ impl CutTech {
     }
 }
 
+/// The wire width and spacing a non-default rule gives each routing layer.
+#[derive(Clone, Debug)]
+pub struct RuleTech {
+    /// Wire width per layer: the rule's, or the layer's where it is silent.
+    width: Vec<Dbu>,
+    /// Spacing other metal must keep per layer: the rule's where it sets one
+    /// and that is larger, else the layer's.
+    spacing: Vec<Dbu>,
+}
+
+impl RuleTech {
+    fn new(db: &NetlistDB, rule: &NonDefaultRule) -> Self {
+        let layers = &db.library.routing_layers;
+        let per_layer = |l: usize| rule.layers.iter().find(|x| x.layer.index() == l);
+        Self {
+            width: (0..layers.len())
+                .map(|l| per_layer(l).map_or(layers[l].width, |x| x.width))
+                .collect(),
+            spacing: (0..layers.len())
+                .map(|l| {
+                    let own = per_layer(l).and_then(|x| x.spacing).unwrap_or(Dbu::ZERO);
+                    own.max(layers[l].min_spacing)
+                })
+                .collect(),
+        }
+    }
+}
+
 /// Everything the router needs to know about the technology.
 #[derive(Clone, Debug)]
 pub struct RouteTech {
@@ -163,6 +192,10 @@ pub struct RouteTech {
     pub access_vias: Vec<Vec<ViaTech>>,
     /// Spacing rules of every cut layer, indexed by cut id.
     pub cuts: Vec<CutTech>,
+    /// Every non-default rule's widths and spacings, indexed by rule id.
+    rules: Vec<RuleTech>,
+    /// The non-default rule each net follows, indexed by net.
+    net_rules: Vec<Option<NonDefaultRuleId>>,
 }
 
 pub(crate) fn to_u32(i: usize) -> u32 {
@@ -251,7 +284,38 @@ impl RouteTech {
             vias,
             access_vias,
             cuts,
+            rules: db
+                .non_default_rules
+                .iter()
+                .map(|r| RuleTech::new(db, r))
+                .collect(),
+            net_rules: db.nets.iter().map(|n| n.non_default_rule).collect(),
         })
+    }
+
+    /// The non-default rule the net at index `net` follows, if any.
+    pub fn net_rule(&self, net: usize) -> Option<NonDefaultRuleId> {
+        self.net_rules.get(net).copied().flatten()
+    }
+
+    /// The width of wires on `layer` under `rule`.
+    pub fn wire_width(&self, rule: Option<NonDefaultRuleId>, layer: LayerId) -> Dbu {
+        rule.and_then(|r| self.rules.get(r.index()))
+            .map_or_else(|| self.layer(layer).width, |r| r.width[layer.index()])
+    }
+
+    /// The spacing other metal must keep from wires on `layer` under `rule`.
+    pub fn wire_spacing(&self, rule: Option<NonDefaultRuleId>, layer: LayerId) -> Dbu {
+        rule.and_then(|r| self.rules.get(r.index()))
+            .map_or_else(|| self.layer(layer).spacing, |r| r.spacing[layer.index()])
+    }
+
+    /// The largest spacing any rule asks of wires on `layer`.
+    pub fn max_wire_spacing(&self, layer: LayerId) -> Dbu {
+        self.rules
+            .iter()
+            .map(|r| r.spacing[layer.index()])
+            .fold(self.layer(layer).spacing, Dbu::max)
     }
 
     /// The layer data of `layer`.

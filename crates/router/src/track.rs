@@ -406,20 +406,27 @@ impl<'a> Costing<'a> {
         }
     }
 
-    fn metal(&self, track: u32, from: u32, to: u32) -> Option<Rect<Dbu>> {
-        wire_rect(
-            self.lt.point(track, from),
-            self.lt.point(track, to),
-            self.lt.width,
-        )
+    /// The wire of `net` from crossing `from` to `to` on `track`.
+    fn metal(&self, net: NetId, track: u32, from: u32, to: u32) -> Option<Rect<Dbu>> {
+        let width = self
+            .tech
+            .wire_width(self.tech.net_rule(net.index()), self.layer);
+        wire_rect(self.lt.point(track, from), self.lt.point(track, to), width)
+    }
+
+    /// The spacing `net`'s wires keep on this layer.
+    fn spacing(&self, net: NetId) -> Dbu {
+        self.tech
+            .wire_spacing(self.tech.net_rule(net.index()), self.layer)
     }
 
     /// Overlap of `rect` of `net` with fixed metal of other owners.
     fn fixed_overlap(&self, net: NetId, rect: &Rect<Dbu>) -> i64 {
         let (_, (lo, hi)) = self.lt.across_along_rect(rect);
+        let spacing = self.spacing(net);
         self.occupancy
             .rect_conflicts(self.tech, self.layer, rect, Owner::Net(net.0))
-            .map(|(_, o)| overlap(lo, hi, o.lo, o.hi, self.lt.spacing))
+            .map(|(_, o)| overlap(lo, hi, o.lo, o.hi, spacing.max(o.spacing)))
             .sum()
     }
 
@@ -430,17 +437,17 @@ impl<'a> Costing<'a> {
         placed: &Placed,
         neighbours: &[&Placed],
     ) -> Option<Cost> {
-        let rect = self.metal(track, ir.from, ir.to)?;
+        let rect = self.metal(ir.net, track, ir.from, ir.to)?;
         let (_, (lo, hi)) = self.lt.across_along_rect(&rect);
-        let spacing = self.lt.spacing;
+        let spacing = self.spacing(ir.net);
         let mut wires = 0;
-        for (t, _) in affected_tracks(self.lt, &rect) {
+        for (t, _) in affected_tracks(self.lt, &rect, spacing) {
             let spans = placed
                 .spans_on(t)
                 .or_else(|| neighbours.iter().find_map(|n| n.spans_on(t)));
             for s in spans.into_iter().flatten() {
                 if s.net != ir.net {
-                    wires += overlap(lo, hi, s.lo, s.hi, spacing);
+                    wires += overlap(lo, hi, s.lo, s.hi, spacing.max(self.spacing(s.net)));
                 }
             }
         }
@@ -470,7 +477,7 @@ impl<'a> Costing<'a> {
 
     fn place(&self, panel: &Panel, i: usize, track: u32, placed: &mut Placed) {
         let ir = &panel.iroutes[i];
-        if let Some(rect) = self.metal(track, ir.from, ir.to) {
+        if let Some(rect) = self.metal(ir.net, track, ir.from, ir.to) {
             let (_, (lo, hi)) = self.lt.across_along_rect(&rect);
             placed.put(
                 track,
@@ -529,7 +536,7 @@ impl<'a> Costing<'a> {
     /// metal.
     fn clear_pieces(&self, ir: &Iroute, track: u32) -> Vec<TrackWire> {
         let blocked = |cross: u32| {
-            self.metal(track, cross, cross + 1)
+            self.metal(ir.net, track, cross, cross + 1)
                 .is_none_or(|r| self.fixed_overlap(ir.net, &r) > 0)
         };
         clear_runs(ir.from, ir.to, blocked)

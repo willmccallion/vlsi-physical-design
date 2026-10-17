@@ -555,7 +555,7 @@ impl DetailedRouter<'_> {
                     Wiring { patches, ..wiring }
                 });
                 if let Some(wiring) = &result {
-                    for (layer, rect) in self.edge_metal(&wiring.edges) {
+                    for (layer, rect) in self.edge_metal(piece.net, &wiring.edges) {
                         overlay.add_rect(self.tech, layer, &rect, owner);
                     }
                     for (cut, rect) in self.edge_cuts(&wiring.edges) {
@@ -640,7 +640,7 @@ impl DetailedRouter<'_> {
         };
         let near = area.expand(self.halo);
         let owner = Owner::Net(net.0);
-        for (layer, rect) in kept.metal(self.db, self.tech) {
+        for (layer, rect) in kept.metal(self.db, self.tech, net) {
             if self.tech.routable(layer) && rect.touches(&near) {
                 overlay.keep_rect(self.tech, layer, &rect, owner);
             }
@@ -769,7 +769,7 @@ impl DetailedRouter<'_> {
     /// crowd.
     fn vias_near(&self, net: NetId, area: &Rect<Dbu>) -> OwnVias {
         let near = area.expand(self.gcell);
-        let mut own = OwnVias::new(self.db);
+        let mut own = OwnVias::new(self.db, self.tech, self.tech.net_rule(net.index()));
         for &(via, at) in &self.vias[net.index()] {
             if near.contains(at) {
                 own.add(via, at);
@@ -805,14 +805,18 @@ impl DetailedRouter<'_> {
         .cuts(self.db, self.tech)
     }
 
-    /// The metal of some edges on routable layers.
-    fn edge_metal(&self, edges: &[Edge]) -> Vec<(pare_common::db::indices::LayerId, Rect<Dbu>)> {
+    /// The metal of some edges of `net` on routable layers.
+    fn edge_metal(
+        &self,
+        net: NetId,
+        edges: &[Edge],
+    ) -> Vec<(pare_common::db::indices::LayerId, Rect<Dbu>)> {
         let route = NetRoute {
             edges: edges.to_vec(),
             ..NetRoute::default()
         };
         route
-            .metal(self.db, self.tech)
+            .metal(self.db, self.tech, net)
             .into_iter()
             .filter(|(layer, _)| self.tech.routable(*layer))
             .collect()

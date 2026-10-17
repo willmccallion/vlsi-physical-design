@@ -8,12 +8,12 @@
 use crate::access::{AccessPoint, Node};
 use crate::tech::RouteTech;
 use pare_common::db::design::{NetlistDB, RouteElem};
-use pare_common::db::indices::{CutLayerId, LayerId, ViaId};
+use pare_common::db::indices::{CutLayerId, LayerId, NetId, ViaId};
 use pare_common::db::library::LayerRef;
 use pare_common::geom::dbu::Dbu;
 use pare_common::geom::point::Point;
 use pare_common::geom::rect::Rect;
-use pare_common::verify::shapes::wire_rect;
+use pare_common::verify::shapes::route_elem_shapes;
 use rustc_hash::FxHashMap;
 use std::collections::BTreeMap;
 
@@ -184,10 +184,10 @@ impl NetRoute {
     }
 
     /// Its metal, by layer.
-    pub fn metal(&self, db: &NetlistDB, tech: &RouteTech) -> Vec<(LayerId, Rect<Dbu>)> {
+    pub fn metal(&self, db: &NetlistDB, tech: &RouteTech, net: NetId) -> Vec<(LayerId, Rect<Dbu>)> {
         self.elems(tech)
             .iter()
-            .flat_map(|e| elem_metal(db, e))
+            .flat_map(|e| elem_metal(db, net, e))
             .collect()
     }
 
@@ -243,10 +243,10 @@ impl DisjointSets {
     }
 }
 
-/// Wire edges joining pieces of `route` that lie along one track closer
-/// than the layer spacing without touching, a gap the spacing between
-/// shapes of one net forbids.
-pub fn gap_fills(route: &NetRoute, db: &NetlistDB, tech: &RouteTech) -> Vec<Edge> {
+/// Wire edges joining pieces of `route` of `net` that lie along one track
+/// closer than the net's spacing without touching, a gap the spacing
+/// between shapes of one net forbids.
+pub fn gap_fills(route: &NetRoute, db: &NetlistDB, tech: &RouteTech, net: NetId) -> Vec<Edge> {
     let mut lines: BTreeMap<(LayerId, u32), TrackLine> = BTreeMap::new();
     let nodes = route
         .edges
@@ -260,7 +260,7 @@ pub fn gap_fills(route: &NetRoute, db: &NetlistDB, tech: &RouteTech) -> Vec<Edge
             .crossings
             .push(n.cross);
     }
-    for (layer, rect) in route.metal(db, tech) {
+    for (layer, rect) in route.metal(db, tech, net) {
         if !tech.routable(layer) {
             continue;
         }
@@ -282,7 +282,8 @@ pub fn gap_fills(route: &NetRoute, db: &NetlistDB, tech: &RouteTech) -> Vec<Edge
     for ((layer, track), line) in lines {
         let lt = tech.layer(layer);
         let at = |c: u32| lt.cross[c as usize].at;
-        for (a, b) in line.narrow_gaps(lt.spacing) {
+        let spacing = tech.wire_spacing(tech.net_rule(net.index()), layer);
+        for (a, b) in line.narrow_gaps(spacing) {
             let from = line.crossings.iter().copied().filter(|&c| at(c) <= a).max();
             let to = line.crossings.iter().copied().filter(|&c| at(c) >= b).min();
             if let (Some(from), Some(to)) = (from, to) {
@@ -360,25 +361,16 @@ pub fn elem_cuts(db: &NetlistDB, elem: &RouteElem) -> Vec<(CutLayerId, Rect<Dbu>
     }
 }
 
-/// The metal of one piece of wiring on routing layers.
-pub fn elem_metal(db: &NetlistDB, elem: &RouteElem) -> Vec<(LayerId, Rect<Dbu>)> {
-    match *elem {
-        RouteElem::Wire { layer, from, to } => wire_rect(from, to, db.library.layer(layer).width)
-            .map(|r| (layer, r))
-            .into_iter()
-            .collect(),
-        RouteElem::Patch { layer, rect } => vec![(layer, rect)],
-        RouteElem::Via { via, at } => db
-            .library
-            .via(via)
-            .shapes
-            .iter()
-            .filter_map(|s| match s.layer {
-                LayerRef::Routing(l) => Some((l, s.rect.translate(at))),
-                LayerRef::Cut(_) => None,
-            })
-            .collect(),
-    }
+/// The metal of one piece of `net`'s wiring on routing layers, at the
+/// widths the net's rule gives it, as the checker sees it.
+pub fn elem_metal(db: &NetlistDB, net: NetId, elem: &RouteElem) -> Vec<(LayerId, Rect<Dbu>)> {
+    route_elem_shapes(db, net, elem)
+        .into_iter()
+        .filter_map(|s| match s.layer {
+            LayerRef::Routing(l) => Some((l, s.rect)),
+            LayerRef::Cut(_) => None,
+        })
+        .collect()
 }
 
 #[cfg(test)]

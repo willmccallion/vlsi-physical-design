@@ -27,7 +27,7 @@ use crate::wiring::{Edge, access_elems, elem_cuts, elem_metal, gap_fills, path_e
 use judge::ShapeTiles;
 use pare_common::db::design::NetlistDB;
 use pare_common::db::design::RouteElem;
-use pare_common::db::indices::{CutLayerId, LayerId, NetId, ViaId};
+use pare_common::db::indices::{CutLayerId, LayerId, NetId, NonDefaultRuleId, ViaId};
 use pare_common::db::library::LayerRef;
 use pare_common::geom::dbu::Dbu;
 use pare_common::geom::point::Point;
@@ -220,13 +220,16 @@ impl<'a> DetailedRouter<'a> {
     fn touches_any(&self, net: NetId, route: &NetRoute, nets: &FxHashSet<u32>) -> bool {
         let owner = Owner::Net(net.0);
         let listed = |o: Owner| matches!(o, Owner::Net(other) if nets.contains(&other));
-        let metal = route.metal(self.db, self.tech).iter().any(|(layer, rect)| {
-            self.tech.routable(*layer)
-                && self
-                    .occupancy
-                    .rect_conflicts(self.tech, *layer, rect, owner)
-                    .any(|(_, o)| listed(o.owner))
-        });
+        let metal = route
+            .metal(self.db, self.tech, net)
+            .iter()
+            .any(|(layer, rect)| {
+                self.tech.routable(*layer)
+                    && self
+                        .occupancy
+                        .rect_conflicts(self.tech, *layer, rect, owner)
+                        .any(|(_, o)| listed(o.owner))
+            });
         metal
             || route.cuts(self.db, self.tech).iter().any(|(cut, rect)| {
                 self.occupancy
@@ -239,7 +242,9 @@ impl<'a> DetailedRouter<'a> {
     /// along tracks filled.
     fn commit(&mut self, net: NetId, route: &NetRoute) {
         let mut route = route.clone();
-        route.edges.extend(gap_fills(&route, self.db, self.tech));
+        route
+            .edges
+            .extend(gap_fills(&route, self.db, self.tech, net));
         route.edges.sort_unstable();
         route.edges.dedup();
         let route = &route;
@@ -247,7 +252,7 @@ impl<'a> DetailedRouter<'a> {
         self.occupancy.remove_wiring(&previous, Owner::Net(net.0));
         let owner = Owner::Net(net.0);
         let mut touched = Vec::new();
-        for (layer, rect) in route.metal(self.db, self.tech) {
+        for (layer, rect) in route.metal(self.db, self.tech, net) {
             if self.tech.routable(layer) {
                 let tracks =
                     self.occupancy
@@ -506,7 +511,7 @@ impl<'a> DetailedRouter<'a> {
         }
         let first_sources: Vec<(Node, f64)> = terms.candidates(search, first_term);
         let guide = guide.filter(|_| terms.wires.is_empty());
-        let mut own = self.reserved_access_vias(terms);
+        let mut own = self.reserved_access_vias(terms, search.rule());
 
         for join in joins {
             let term = members[join.pin];
@@ -755,7 +760,7 @@ impl<'a> DetailedRouter<'a> {
             tree.insert(n, self.point(n));
         }
         let guide = guide.filter(|_| terms.wires.is_empty());
-        let mut own = self.reserved_access_vias(terms);
+        let mut own = self.reserved_access_vias(terms, search.rule());
         for sub in &subtrees {
             for (via, at) in sub.paths.iter().flat_map(|p| self.path_vias(p)) {
                 own.add(via, at);
@@ -815,8 +820,12 @@ impl<'a> DetailedRouter<'a> {
 
     /// The access vias of the pins among `terms` whose access point is
     /// reserved, as the start of a net's own vias.
-    fn reserved_access_vias(&self, terms: &Terminals<'_>) -> OwnVias {
-        let mut own = OwnVias::new(self.db);
+    fn reserved_access_vias(
+        &self,
+        terms: &Terminals<'_>,
+        rule: Option<NonDefaultRuleId>,
+    ) -> OwnVias {
+        let mut own = OwnVias::new(self.db, self.tech, rule);
         for choices in terms.pins {
             if let [a] = choices.as_slice() {
                 for &via in &a.vias {
@@ -1063,13 +1072,15 @@ fn reserve_accesses(
         })
         .collect();
     order.sort_unstable();
-    let mut reserved: Vec<OwnVias> = vec![OwnVias::new(db); access.len()];
+    let mut reserved: Vec<OwnVias> = (0..access.len())
+        .map(|n| OwnVias::new(db, tech, tech.net_rule(n)))
+        .collect();
     for (count, n, k) in order {
         let owner = Owner::Net(crate::tech::to_u32(n));
         let metal_of = |a: &AccessPoint| {
             access_elems(tech, a)
                 .iter()
-                .flat_map(|e| elem_metal(db, e))
+                .flat_map(|e| elem_metal(db, NetId::new(n), e))
                 .collect::<Vec<_>>()
         };
         let cuts_of = |a: &AccessPoint| {
@@ -1081,7 +1092,7 @@ fn reserve_accesses(
         let clear = access[n][k].iter().position(|a| {
             let leaves_room = footprint(tech, a)
                 .iter()
-                .all(|&(via, at)| reserved[n].crowded(db, via, at) == 0);
+                .all(|&(via, at)| reserved[n].crowded(db, tech, via, at) == 0);
             let metal_clear = metal_of(a).iter().all(|(layer, rect)| {
                 !tech.routable(*layer)
                     || occupancy

@@ -2,8 +2,10 @@
 
 #![allow(clippy::unwrap_used)]
 
-use pare_common::db::design::{NetlistDB, PlacementStatus, RouteElem};
-use pare_common::db::indices::{CutLayerId, LayerId, NetId};
+use pare_common::db::design::{
+    NetlistDB, NonDefaultLayer, NonDefaultRule, PlacementStatus, RouteElem,
+};
+use pare_common::db::indices::{CutLayerId, LayerId, NetId, NonDefaultRuleId};
 use pare_common::db::parser::{def, lef};
 use pare_common::geom::dbu::Dbu;
 use pare_common::geom::point::Point;
@@ -281,4 +283,109 @@ fn merged_fixed_stretches_give_the_capacity_the_occupancy_gives() {
         from_occupancy.capacity_reduction(&tech),
         from_stretches.capacity_reduction(&tech)
     );
+}
+
+/// The tiny design with net 0 under a rule doubling its width on M1 and
+/// asking 0.3 um of spacing there.
+fn tiny_with_wide_rule() -> NetlistDB {
+    let mut db = tiny();
+    db.non_default_rules.push(NonDefaultRule {
+        name: "DW".to_string(),
+        hard_spacing: true,
+        layers: vec![NonDefaultLayer {
+            layer: LayerId(0),
+            width: Dbu(200),
+            spacing: Some(Dbu(300)),
+            wire_extension: None,
+        }],
+        vias: Vec::new(),
+        via_rules: Vec::new(),
+        min_cuts: Vec::new(),
+    });
+    db.nets[0].non_default_rule = Some(NonDefaultRuleId::new(0));
+    db
+}
+
+#[test]
+fn a_rule_sets_the_width_and_spacing_of_its_nets_wires() {
+    let db = tiny_with_wide_rule();
+
+    let tech = RouteTech::new(&db, &RoutingConfig::default()).unwrap();
+
+    let rule = tech.net_rule(0);
+    assert_eq!(rule, Some(NonDefaultRuleId::new(0)));
+    assert_eq!(tech.wire_width(rule, LayerId(0)), Dbu(200));
+    assert_eq!(tech.wire_spacing(rule, LayerId(0)), Dbu(300));
+    assert_eq!(tech.wire_width(rule, LayerId(1)), Dbu(100));
+    assert_eq!(tech.wire_width(None, LayerId(0)), Dbu(100));
+    assert_eq!(tech.wire_spacing(None, LayerId(0)), Dbu(100));
+}
+
+#[test]
+fn a_wire_under_a_rule_keeps_other_tracks_at_the_rules_spacing() {
+    let db = tiny_with_wide_rule();
+    let tech = RouteTech::new(&db, &RoutingConfig::default()).unwrap();
+    let mut occupancy = Occupancy::new(&tech, Dbu(1000));
+    let m1 = LayerId(0);
+    let wide = Rect::new(
+        Point::new(Dbu(1000), Dbu(0)),
+        Point::new(Dbu(2000), Dbu(200)),
+    );
+    let _ = occupancy.add_rect(&tech, m1, &wide, Owner::Net(0), Origin::Wiring);
+    let two_tracks_up = Rect::new(
+        Point::new(Dbu(1000), Dbu(450)),
+        Point::new(Dbu(2000), Dbu(550)),
+    );
+
+    let conflicts = occupancy
+        .rect_conflicts(&tech, m1, &two_tracks_up, Owner::Net(1))
+        .count();
+
+    assert_eq!(conflicts, 1);
+}
+
+#[test]
+fn a_wire_without_a_rule_leaves_tracks_beyond_the_layer_spacing_alone() {
+    let db = tiny();
+    let tech = RouteTech::new(&db, &RoutingConfig::default()).unwrap();
+    let mut occupancy = Occupancy::new(&tech, Dbu(1000));
+    let m1 = LayerId(0);
+    let wire = Rect::new(
+        Point::new(Dbu(1000), Dbu(50)),
+        Point::new(Dbu(2000), Dbu(150)),
+    );
+    let _ = occupancy.add_rect(&tech, m1, &wire, Owner::Net(0), Origin::Wiring);
+    let two_tracks_up = Rect::new(
+        Point::new(Dbu(1000), Dbu(450)),
+        Point::new(Dbu(2000), Dbu(550)),
+    );
+
+    let conflicts = occupancy
+        .rect_conflicts(&tech, m1, &two_tracks_up, Owner::Net(1))
+        .count();
+
+    assert_eq!(conflicts, 0);
+}
+
+#[test]
+fn a_wire_under_a_rule_keeps_its_track_clear_for_the_rules_spacing() {
+    let db = tiny_with_wide_rule();
+    let tech = RouteTech::new(&db, &RoutingConfig::default()).unwrap();
+    let mut occupancy = Occupancy::new(&tech, Dbu(1000));
+    let m1 = LayerId(0);
+    let wide = Rect::new(
+        Point::new(Dbu(1000), Dbu(0)),
+        Point::new(Dbu(2000), Dbu(200)),
+    );
+    let _ = occupancy.add_rect(&tech, m1, &wide, Owner::Net(0), Origin::Wiring);
+    let further_along = Rect::new(
+        Point::new(Dbu(2150), Dbu(50)),
+        Point::new(Dbu(3000), Dbu(150)),
+    );
+
+    let conflicts = occupancy
+        .rect_conflicts(&tech, m1, &further_along, Owner::Net(1))
+        .count();
+
+    assert_eq!(conflicts, 1);
 }

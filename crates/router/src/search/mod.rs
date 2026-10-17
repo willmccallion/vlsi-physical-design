@@ -14,7 +14,7 @@ use crate::global::GCell;
 use crate::occupancy::{LocalOccupancy, Occupancy, Origin, Owner, TrackRef, too_close};
 use crate::tech::RouteTech;
 use pare_common::db::design::NetlistDB;
-use pare_common::db::indices::{CutLayerId, LayerId, ViaId};
+use pare_common::db::indices::{CutLayerId, LayerId, NonDefaultRuleId, ViaId};
 use pare_common::db::library::LayerRef;
 use pare_common::geom::dbu::Dbu;
 use pare_common::geom::point::Point;
@@ -208,13 +208,15 @@ type PlacedVia = (ViaId, Point<Dbu>);
 #[derive(Clone, Debug)]
 pub(crate) struct OwnVias {
     bucket: Dbu,
+    /// The non-default rule the net follows.
+    rule: Option<NonDefaultRuleId>,
     vias: FxHashMap<(i64, i64), Vec<PlacedVia>>,
 }
 
 impl OwnVias {
-    /// An empty set, bucketed so that any via that could crowd another lies
-    /// in a neighbouring bucket.
-    pub(crate) fn new(db: &NetlistDB) -> Self {
+    /// An empty set for a net under `rule`, bucketed so that any via that
+    /// could crowd another lies in a neighbouring bucket.
+    pub(crate) fn new(db: &NetlistDB, tech: &RouteTech, rule: Option<NonDefaultRuleId>) -> Self {
         let lib = &db.library;
         let widest = lib
             .vias
@@ -223,15 +225,14 @@ impl OwnVias {
             .map(|s| s.rect.width().max(s.rect.height()))
             .max()
             .unwrap_or_default();
-        let spacing = lib
-            .routing_layers
-            .iter()
-            .map(|l| l.min_spacing)
+        let spacing = (0..lib.routing_layers.len())
+            .map(|l| tech.wire_spacing(rule, LayerId::new(l)))
             .chain(lib.cut_layers.iter().filter_map(|c| c.spacing))
             .max()
             .unwrap_or_default();
         Self {
             bucket: (widest + spacing).max(Dbu(1)),
+            rule,
             vias: FxHashMap::default(),
         }
     }
@@ -249,9 +250,19 @@ impl OwnVias {
 
     /// How many of the vias `via` at `at` would crowd: their cuts or metal
     /// on a shared layer neither touch nor keep the spacing.
-    pub(crate) fn crowded(&self, db: &NetlistDB, via: ViaId, at: Point<Dbu>) -> usize {
+    pub(crate) fn crowded(
+        &self,
+        db: &NetlistDB,
+        tech: &RouteTech,
+        via: ViaId,
+        at: Point<Dbu>,
+    ) -> usize {
         let (x, y) = self.key(at);
         let shapes = &db.library.via(via).shapes;
+        let spacing = |layer: LayerRef| match layer {
+            LayerRef::Routing(l) => tech.wire_spacing(self.rule, l),
+            LayerRef::Cut(c) => db.library.cut_layers[c.index()].spacing.unwrap_or_default(),
+        };
         (x - 1..=x + 1)
             .flat_map(|bx| (y - 1..=y + 1).map(move |by| (bx, by)))
             .filter_map(|k| self.vias.get(&k))
@@ -261,7 +272,11 @@ impl OwnVias {
                 shapes.iter().any(|a| {
                     theirs.iter().any(|b| {
                         a.layer == b.layer
-                            && too_close(db, a.layer, &a.rect.translate(at), &b.rect.translate(p))
+                            && too_close(
+                                spacing(a.layer),
+                                &a.rect.translate(at),
+                                &b.rect.translate(p),
+                            )
                     })
                 })
             })
@@ -362,6 +377,24 @@ impl Search<'_> {
         self.tech.layer(n.layer).point(n.track, n.cross)
     }
 
+    /// The non-default rule the net being routed follows.
+    pub(crate) fn rule(&self) -> Option<NonDefaultRuleId> {
+        match self.owner {
+            Owner::Net(n) => self.tech.net_rule(n as usize),
+            Owner::Obstacle => None,
+        }
+    }
+
+    /// The width of the net's wires on `layer`.
+    pub(crate) fn width(&self, layer: LayerId) -> Dbu {
+        self.tech.wire_width(self.rule(), layer)
+    }
+
+    /// The spacing the net's metal on `layer` keeps from other metal.
+    fn spacing(&self, layer: LayerId) -> Dbu {
+        self.tech.wire_spacing(self.rule(), layer)
+    }
+
     /// Cost of using an access point: its stub, its vias, and any conflicts
     /// their metal would have on the routable layers.
     pub(crate) fn access_cost(&self, a: &AccessPoint) -> f64 {
@@ -441,8 +474,8 @@ impl Search<'_> {
 
     fn wire_cost(&self, layer: LayerId, a: Point<Dbu>, b: Point<Dbu>) -> f64 {
         let length = ((a.x - b.x).abs() + (a.y - b.y).abs()).to_f64();
-        let width = self.tech.layer(layer).width;
-        let conflict = wire_rect(a, b, width).map_or(0.0, |r| self.conflict_cost(layer, &r));
+        let conflict =
+            wire_rect(a, b, self.width(layer)).map_or(0.0, |r| self.conflict_cost(layer, &r));
         length + conflict
     }
 
@@ -465,7 +498,9 @@ impl Search<'_> {
     /// Cost of a via up from `bottom` at `at` crowding the net's own vias.
     fn own_via_cost(&self, bottom: LayerId, at: Point<Dbu>) -> f64 {
         let via = self.tech.via_above(bottom).via;
-        let crowded = self.own_vias.map_or(0, |own| own.crowded(self.db, via, at));
+        let crowded = self
+            .own_vias
+            .map_or(0, |own| own.crowded(self.db, self.tech, via, at));
         self.costs.penalty * crowded as f64
     }
 
@@ -492,7 +527,6 @@ impl Search<'_> {
     /// its metal while another via's metal could end short of it by less
     /// than the spacing.
     fn via_reach(&self, layer: LayerId, from: LayerId) -> Dbu {
-        let lt = self.tech.layer(layer);
         let (lo, hi) = self.pad_along(layer, from);
         let neighbours = [layer.index().checked_sub(1), Some(layer.index() + 1)];
         let widest = neighbours
@@ -506,7 +540,7 @@ impl Search<'_> {
             })
             .max()
             .unwrap_or_default();
-        let metal = (-lo).max(hi) + widest + lt.spacing;
+        let metal = (-lo).max(hi) + widest + self.spacing(layer);
         metal.max(self.cut_reach(layer, from))
     }
 
@@ -535,7 +569,7 @@ impl Search<'_> {
             let (a0, a1) = self.pad_along(layer, v.from);
             let (b0, b1) = self.pad_along(layer, to);
             let gap = (along + b0 - (at + a1)).max(at + a0 - (along + b1));
-            cuts || (gap > Dbu::ZERO && gap < self.tech.layer(layer).spacing)
+            cuts || (gap > Dbu::ZERO && gap < self.spacing(layer))
         })
     }
 

@@ -55,7 +55,7 @@ impl DetailedRouter<'_> {
             return None;
         }
         let lt = self.tech.layer(piece.layer);
-        let width = lt.width;
+        let width = search.width(piece.layer);
         let grid = self.rules.manufacturing_grid.map_or(1, |g| g.get().max(1));
         let deficit = piece.min_area.get() - piece.area.get();
         let length = round_up(round_up(deficit, width.get()) / width.get(), grid);
