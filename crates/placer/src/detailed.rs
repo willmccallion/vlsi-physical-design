@@ -17,12 +17,12 @@ use crate::rows::{
 };
 use crate::zones::{Zone, Zones, intersect};
 use pare_common::db::design::{NetlistDB, PinOwner};
-use pare_common::db::indices::{CellId, NetId};
+use pare_common::db::indices::{CellId, MacroId, NetId};
 use pare_common::geom::dbu::Dbu;
 use pare_common::geom::point::Point;
 use pare_common::geom::rect::Rect;
-use pare_common::verify::pin_access::PinAccess;
-use std::collections::HashMap;
+use pare_common::verify::pin_access::{Neighbour, PinAccess};
+use std::collections::{HashMap, HashSet};
 
 /// Nets with more pins than this do not count toward move costs.
 pub const MAX_NET_PINS: usize = 64;
@@ -59,8 +59,8 @@ const FREE_ROWS: usize = 3;
 /// Cells on either side a blocked cell may swap places with.
 const SWAP_REACH: usize = 8;
 
-/// Moves every cell with a pin that fixed metal blocks to a spot where none
-/// of its pins is.
+/// Moves every cell with a pin that fixed metal or a neighbouring cell's
+/// metal blocks to a spot where none of its pins is.
 ///
 /// Each row stretch holding such a cell is first re-placed in order by the
 /// least total displacement, within the shift reach of every cell, that
@@ -74,11 +74,10 @@ pub fn free_blocked_pins(db: &mut NetlistDB, zones: &Zones, access: &PinAccess) 
     let blocked_before = dp.count_blocked(db);
     let mut moved = 0;
     for s in 0..dp.segments.len() {
-        let row = dp.segments[s].row;
         let any_blocked = dp.segments[s]
             .cells
             .iter()
-            .any(|&c| dp.blocked_at(db, c, db.cells[c.index()].location, row) > 0);
+            .any(|&c| dp.blocked_now(db, c, s) > 0);
         if any_blocked {
             moved += dp.free_segment(db, s).unwrap_or(0);
         }
@@ -87,8 +86,7 @@ pub fn free_blocked_pins(db: &mut NetlistDB, zones: &Zones, access: &PinAccess) 
         let mut i = 0;
         while i < dp.segments[s].cells.len() {
             let cell = dp.segments[s].cells[i];
-            let at = db.cells[cell.index()].location;
-            if dp.blocked_at(db, cell, at, dp.segments[s].row) == 0 {
+            if dp.blocked_now(db, cell, s) == 0 {
                 i += 1;
                 continue;
             }
@@ -106,7 +104,7 @@ pub fn free_blocked_pins(db: &mut NetlistDB, zones: &Zones, access: &PinAccess) 
     if blocked_after > 0 && log::log_enabled!(log::Level::Debug) {
         for (&cell, &s) in &dp.segment_of {
             let at = db.cells[cell.index()].location;
-            let blocked = dp.blocked_at(db, cell, at, dp.segments[s].row);
+            let blocked = dp.blocked_now(db, cell, s);
             if blocked > 0 {
                 log::debug!(
                     "cell {} at ({}, {}) keeps {blocked} blocked pins",
@@ -181,6 +179,60 @@ struct DetailedPlacer<'a> {
     nets_of: Vec<Vec<NetId>>,
     /// Which spots block a pin, when the design has pins to check.
     access: Option<&'a PinAccess>,
+    /// The widest movable standard cell.
+    max_width: Dbu,
+}
+
+/// A cell standing at a point in a row, for checks of placements not yet
+/// made.
+type Placement = (CellId, Point<Dbu>, usize);
+
+/// Whether two cells of a row can stand at a given gap without either
+/// blocking a pin of the other, remembered per pair of masters and gap
+/// once it is known to hold, since nets can only exempt more.
+#[derive(Default)]
+struct PairCheck {
+    clear: HashSet<(MacroId, MacroId, Dbu)>,
+}
+
+impl PairCheck {
+    /// Whether `left` and `right`, each a cell and the X of its lower-left
+    /// corner in `row`, leave each other's pins free.
+    fn clear(
+        &mut self,
+        dp: &DetailedPlacer<'_>,
+        db: &NetlistDB,
+        row: usize,
+        left: (CellId, Dbu),
+        right: (CellId, Dbu),
+    ) -> bool {
+        let Some(access) = dp.access else {
+            return true;
+        };
+        let gap = right.1 - (left.1 + db.cell_size(left.0).x);
+        let key = (
+            db.cells[left.0.index()].macro_id,
+            db.cells[right.0.index()].macro_id,
+            gap,
+        );
+        if self.clear.contains(&key) {
+            return true;
+        }
+        let y = dp.rows[row].y;
+        let orient = dp.rows[row].orient;
+        let stand = |(cell, x): (CellId, Dbu)| Neighbour {
+            cell,
+            at: Point::new(x, y),
+            orient,
+        };
+        let (a, b) = (stand(left), stand(right));
+        let clear = access.blocked_pins_among(db, a.cell, a.at, orient, &[b]) == 0
+            && access.blocked_pins_among(db, b.cell, b.at, orient, &[a]) == 0;
+        if clear {
+            let _ = self.clear.insert(key);
+        }
+        clear
+    }
 }
 
 impl<'a> DetailedPlacer<'a> {
@@ -218,6 +270,11 @@ impl<'a> DetailedPlacer<'a> {
             row_segments.push((start, segments.len()));
         }
 
+        let max_width = std_cells
+            .iter()
+            .map(|&c| db.cell_size(c).x)
+            .max()
+            .unwrap_or(Dbu::ZERO);
         let mut segment_of = HashMap::new();
         for cell in std_cells {
             let at = db.cells[cell.index()].location;
@@ -265,27 +322,94 @@ impl<'a> DetailedPlacer<'a> {
                 .collect(),
             nets_of,
             access,
+            max_width,
         }
     }
 
-    /// Signal pins of `cell` that fixed metal would block at `at` in `row`.
-    fn blocked_at(&self, db: &NetlistDB, cell: CellId, at: Point<Dbu>, row: usize) -> usize {
-        self.access
-            .map_or(0, |a| a.blocked_pins(db, cell, at, self.rows[row].orient))
+    /// Signal pins of `cell` that fixed metal or the cells beside it would
+    /// block at `at` in `row`, with every cell of `moved` standing where it
+    /// says and none of `away` standing anywhere.
+    fn blocked_at(
+        &self,
+        db: &NetlistDB,
+        cell: CellId,
+        at: Point<Dbu>,
+        row: usize,
+        moved: &[Placement],
+        away: &[CellId],
+    ) -> usize {
+        let Some(access) = self.access else {
+            return 0;
+        };
+        let beside = self.beside(db, cell, at, row, moved, away);
+        access.blocked_pins_among(db, cell, at, self.rows[row].orient, &beside)
+    }
+
+    /// The cells whose metal can block a pin of `cell` standing at `at` in
+    /// `row`: those of the row within the check's reach, other than `cell`,
+    /// `away` and the ones `moved` names, which stand where `moved` says.
+    fn beside(
+        &self,
+        db: &NetlistDB,
+        cell: CellId,
+        at: Point<Dbu>,
+        row: usize,
+        moved: &[Placement],
+        away: &[CellId],
+    ) -> Vec<Neighbour> {
+        let reach = self.access.map_or(Dbu::ZERO, PinAccess::reach);
+        let lo = at.x - reach;
+        let hi = at.x + db.cell_size(cell).x + reach;
+        let elsewhere =
+            |c: CellId| c == cell || away.contains(&c) || moved.iter().any(|&(m, _, _)| m == c);
+        let (first, last) = self.row_segments[row];
+        let mut beside: Vec<Neighbour> = (first..last)
+            .flat_map(|s| {
+                let cells = &self.segments[s].cells;
+                let start = cells
+                    .partition_point(|&c| db.cells[c.index()].location.x + self.max_width <= lo);
+                cells[start..]
+                    .iter()
+                    .copied()
+                    .take_while(move |&c| db.cells[c.index()].location.x < hi)
+            })
+            .filter(|&c| !elsewhere(c) && db.cell_bbox(c).max.x > lo)
+            .map(|c| Neighbour {
+                cell: c,
+                at: db.cells[c.index()].location,
+                orient: db.cells[c.index()].orient,
+            })
+            .collect();
+        beside.extend(
+            moved
+                .iter()
+                .filter(|&&(m, p, r)| {
+                    m != cell
+                        && r == row
+                        && !away.contains(&m)
+                        && p.x < hi
+                        && p.x + db.cell_size(m).x > lo
+                })
+                .map(|&(m, p, r)| Neighbour {
+                    cell: m,
+                    at: p,
+                    orient: self.rows[r].orient,
+                }),
+        );
+        beside
+    }
+
+    /// Signal pins of `cell` blocked where it stands.
+    fn blocked_now(&self, db: &NetlistDB, cell: CellId, s: usize) -> usize {
+        let at = db.cells[cell.index()].location;
+        self.blocked_at(db, cell, at, self.segments[s].row, &[], &[])
     }
 
     /// Blocked signal pins over every movable standard cell.
     fn count_blocked(&self, db: &NetlistDB) -> usize {
         self.segment_of
             .iter()
-            .map(|(&cell, &s)| {
-                self.blocked_at(
-                    db,
-                    cell,
-                    db.cells[cell.index()].location,
-                    self.segments[s].row,
-                )
-            })
+            .map(|(&cell, &s)| self.blocked_now(db, cell, s))
             .sum()
     }
 
@@ -303,7 +427,9 @@ impl<'a> DetailedPlacer<'a> {
             let spots: Vec<(Dbu, i64)> = (-MAX_SHIFT_SITES..=MAX_SHIFT_SITES)
                 .map(|k| x + row.site * k)
                 .filter(|&p| p >= seg.lo && p + width <= seg.hi)
-                .filter(|&p| self.blocked_at(db, c, Point::new(p, row.y), seg.row) == 0)
+                .filter(|&p| {
+                    self.blocked_at(db, c, Point::new(p, row.y), seg.row, &[], &seg.cells) == 0
+                })
                 .map(|p| (p, (p - x).abs().get()))
                 .collect();
             if spots.is_empty() {
@@ -311,10 +437,13 @@ impl<'a> DetailedPlacer<'a> {
             }
             candidates.push(spots);
         }
+        let reach = self.access.map_or(Dbu::ZERO, PinAccess::reach);
+        let mut pairs = PairCheck::default();
         let mut best: Vec<Vec<(i64, usize)>> = Vec::with_capacity(candidates.len());
         best.push(candidates[0].iter().map(|&(_, cost)| (cost, 0)).collect());
         for i in 1..candidates.len() {
-            let width_before = db.cell_size(seg.cells[i - 1]).x;
+            let (prev, cur) = (seg.cells[i - 1], seg.cells[i]);
+            let width_before = db.cell_size(prev).x;
             let mut prefix: Vec<(i64, usize)> = Vec::with_capacity(best[i - 1].len());
             let mut low = (i64::MAX, 0);
             for (j, &(cost, _)) in best[i - 1].iter().enumerate() {
@@ -328,7 +457,13 @@ impl<'a> DetailedPlacer<'a> {
                 .iter()
                 .map(|&(p, cost)| {
                     let fits = before.partition_point(|&(q, _)| q + width_before <= p);
-                    match fits.checked_sub(1).map(|k| prefix[k]) {
+                    let far = before.partition_point(|&(q, _)| q + width_before + reach <= p);
+                    let distant = far.checked_sub(1).map(|k| prefix[k]);
+                    let near = (far..fits)
+                        .filter(|&k| best[i - 1][k].0 < i64::MAX)
+                        .filter(|&k| pairs.clear(self, db, seg.row, (prev, before[k].0), (cur, p)))
+                        .map(|k| (best[i - 1][k].0, k));
+                    match distant.into_iter().chain(near).min() {
                         Some((total, j)) if total < i64::MAX => (total + cost, j),
                         _ => (i64::MAX, 0),
                     }
@@ -477,8 +612,9 @@ impl<'a> DetailedPlacer<'a> {
             .filter(|&c| orientation_allowed(db, c, self.rows[row_here].orient))
             .find(|&c| {
                 let there = db.cells[c.index()].location;
-                self.blocked_at(db, cell, there, row_there) == 0
-                    && self.blocked_at(db, c, here, row_here) == 0
+                let swapped = [(cell, there, row_there), (c, here, row_here)];
+                self.blocked_at(db, cell, there, row_there, &swapped, &[]) == 0
+                    && self.blocked_at(db, c, here, row_here, &swapped, &[]) == 0
             })
     }
 
@@ -496,13 +632,10 @@ impl<'a> DetailedPlacer<'a> {
         let row = &self.rows[seg.row];
         let cell = seg.cells[i];
         let width = db.cell_size(cell).x;
-        if nx < seg.lo
-            || nx + width > seg.hi
-            || self.blocked_at(db, cell, Point::new(nx, row.y), seg.row) > 0
-        {
+        if nx < seg.lo || nx + width > seg.hi {
             return None;
         }
-        let mut moves = vec![(cell, Point::new(nx, row.y))];
+        let mut moves = vec![(cell, Point::new(nx, row.y), seg.row)];
         let mut bound = nx;
         for &c in seg.cells[..i].iter().rev() {
             let bbox = db.cell_bbox(c);
@@ -510,10 +643,10 @@ impl<'a> DetailedPlacer<'a> {
                 break;
             }
             let at = snap_down(bound - bbox.width(), row.x_min, row.site);
-            if at < seg.lo || self.blocked_at(db, c, Point::new(at, row.y), seg.row) > 0 {
+            if at < seg.lo {
                 return None;
             }
-            moves.push((c, Point::new(at, row.y)));
+            moves.push((c, Point::new(at, row.y), seg.row));
             bound = at;
         }
         let mut bound = nx + width;
@@ -523,15 +656,16 @@ impl<'a> DetailedPlacer<'a> {
                 break;
             }
             let at = snap_up(bound, row.x_min, row.site);
-            if at + bbox.width() > seg.hi
-                || self.blocked_at(db, c, Point::new(at, row.y), seg.row) > 0
-            {
+            if at + bbox.width() > seg.hi {
                 return None;
             }
-            moves.push((c, Point::new(at, row.y)));
+            moves.push((c, Point::new(at, row.y), seg.row));
             bound = at + bbox.width();
         }
-        Some(moves)
+        let clear = moves
+            .iter()
+            .all(|&(c, at, r)| self.blocked_at(db, c, at, r, &moves, &[]) == 0);
+        clear.then(|| moves.into_iter().map(|(c, at, _)| (c, at)).collect())
     }
 
     fn total_cost(&self, db: &NetlistDB) -> f64 {
@@ -571,7 +705,7 @@ impl<'a> DetailedPlacer<'a> {
     ) -> bool {
         if placements
             .iter()
-            .any(|&(c, at, row)| self.blocked_at(db, c, at, row) > 0)
+            .any(|&(c, at, row)| self.blocked_at(db, c, at, row, placements, &[]) > 0)
         {
             return false;
         }
@@ -757,7 +891,10 @@ impl<'a> DetailedPlacer<'a> {
             let mut x = lo;
             while x <= hi {
                 let closer = best.is_none_or(|b| (x - target).abs() < (b - target).abs());
-                if closer && self.blocked_at(db, cell, Point::new(x, row.y), row_index) == 0 {
+                let at = Point::new(x, row.y);
+                if closer
+                    && self.blocked_at(db, cell, at, row_index, &[(cell, at, row_index)], &[]) == 0
+                {
                     best = Some(x);
                 }
                 x += row.site;
@@ -961,6 +1098,174 @@ mod tests {
             let _ = db.connect_cell_pin(CellId::new(b), pin, net);
         }
         db
+    }
+
+    /// A 10 by 4 die with one row of 0.2-wide sites: horizontal M1 under
+    /// vertical M2 joined by a 0.1 cut via with a 0.1 by 0.18 M2 pad; master
+    /// R, 0.4 wide, with a 0.1-wide M1 pin ending 0.05 from its right edge;
+    /// master E, 0.4 wide, with an M2 pin along its left edge. A via on R's
+    /// pin breaks M2 spacing when E abuts R.
+    fn access_design() -> (NetlistDB, Zones, PinAccess) {
+        use pare_common::db::design::{TrackAxis, TrackDef};
+        use pare_common::db::indices::{CutLayerId, MacroPinId};
+        use pare_common::db::library::{CutLayer, ViaDef};
+        use pare_common::db::rules::CutLayerRules;
+
+        let layer = |name: &str, direction| RoutingLayer {
+            name: name.into(),
+            direction,
+            pitch_x: Dbu(200),
+            pitch_y: Dbu(200),
+            offset_x: None,
+            offset_y: None,
+            width: Dbu(100),
+            min_spacing: Dbu(100),
+            spacing_table: None,
+            rules: RoutingLayerRules::default(),
+        };
+        let rect = |x0, y0, x1, y1| Rect::new(pt(x0, y0), pt(x1, y1));
+        let mut lib = Library::new(DbuPerMicron::new(1000).unwrap());
+        let m1 = lib
+            .add_routing_layer(layer("M1", Direction::Horizontal))
+            .unwrap();
+        let v1 = lib
+            .add_cut_layer(CutLayer {
+                name: "V1".into(),
+                width: Some(Dbu(100)),
+                spacing: Some(Dbu(120)),
+                rules: CutLayerRules::default(),
+            })
+            .unwrap();
+        let m2 = lib
+            .add_routing_layer(layer("M2", Direction::Vertical))
+            .unwrap();
+        let _ = lib
+            .add_via(ViaDef {
+                name: "V12".into(),
+                is_default: true,
+                cut: v1,
+                shapes: vec![
+                    Shape {
+                        layer: LayerRef::Routing(m1),
+                        rect: rect(-90, -50, 90, 50),
+                    },
+                    Shape {
+                        layer: LayerRef::Cut(v1),
+                        rect: rect(-50, -50, 50, 50),
+                    },
+                    Shape {
+                        layer: LayerRef::Routing(m2),
+                        rect: rect(-50, -90, 50, 90),
+                    },
+                ],
+                from_def: false,
+            })
+            .unwrap();
+        let symmetry = Symmetry {
+            x: true,
+            y: true,
+            r90: false,
+        };
+        let site = lib
+            .add_site(Site {
+                name: "s".into(),
+                class: SiteClass::Core,
+                size: pt(200, 2000),
+                symmetry,
+            })
+            .unwrap();
+        let mut master = |name: &str, pin_layer, pin: Rect<Dbu>| {
+            let mut m = Macro::new(
+                name.into(),
+                MacroClass::Core(CoreKind::Regular),
+                pt(400, 2000),
+                symmetry,
+                Some(site),
+            );
+            let _ = m.add_pin(MacroPin {
+                name: "a".into(),
+                direction: PinDirection::Input,
+                signal_use: SignalUse::Signal,
+                shapes: vec![Shape {
+                    layer: LayerRef::Routing(pin_layer),
+                    rect: pin,
+                }],
+            });
+            lib.add_macro(m).unwrap()
+        };
+        let right_pin = master("R", m1, rect(250, 500, 350, 1500));
+        let edge_pin = master("E", m2, rect(0, 500, 150, 1500));
+        let mut db = NetlistDB::new("t".into(), lib);
+        db.die_area = rect(0, 0, 10_000, 4000);
+        db.tracks.push(TrackDef {
+            axis: TrackAxis::X,
+            start: Dbu(100),
+            count: 50,
+            step: Dbu(200),
+            layers: vec![m2],
+        });
+        db.tracks.push(TrackDef {
+            axis: TrackAxis::Y,
+            start: Dbu(0),
+            count: 21,
+            step: Dbu(200),
+            layers: vec![m1],
+        });
+        db.rows.push(Row {
+            name: "r".into(),
+            site: SiteId(0),
+            origin: pt(0, 0),
+            orient: Orientation::N,
+            num_x: 50,
+            num_y: 1,
+            step: pt(200, 0),
+        });
+        let r = db
+            .add_cell(
+                "r".into(),
+                right_pin,
+                pt(1000, 0),
+                Orientation::N,
+                PlacementStatus::Placed,
+            )
+            .unwrap();
+        let e = db
+            .add_cell(
+                "e".into(),
+                edge_pin,
+                pt(1400, 0),
+                Orientation::N,
+                PlacementStatus::Placed,
+            )
+            .unwrap();
+        for (cell, name) in [(r, "nr"), (e, "ne")] {
+            let net = db.net_or_insert(name);
+            let _ = db.connect_cell_pin(cell, MacroPinId(0), net);
+        }
+        let _ = CutLayerId(0);
+        let zones = Zones::new(&db).unwrap();
+        let access = PinAccess::new(&db, LayerId(1)).unwrap();
+        (db, zones, access)
+    }
+
+    #[test]
+    fn a_cell_blocking_its_neighbours_pin_is_moved_a_site_away() {
+        let (mut db, zones, access) = access_design();
+
+        let repair = free_blocked_pins(&mut db, &zones, &access);
+
+        assert_eq!(
+            (repair.blocked_before, repair.blocked_after),
+            (1, 0),
+            "{repair:?}"
+        );
+        let gap = db.cells[1].location.x - (db.cells[0].location.x + Dbu(400));
+        assert!(gap >= Dbu(200), "gap {gap:?}");
+        assert!(
+            placement_violations(&db).is_empty(),
+            "{:?}",
+            placement_violations(&db)
+        );
     }
 
     #[test]
