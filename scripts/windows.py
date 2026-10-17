@@ -5,11 +5,14 @@
 
 Windows are listed in scripts/windows.txt, one per line:
 
-    name  design  X0 Y0 X1 Y1  [partial]
+    name  design  X0 Y0 X1 Y1  [partial | boundary]
 
 `design` names a config in configs/<suite>/ whose [input] gives the LEF
 files; the window is cut from output/<design>/placed.def unless --placed
-names another DEF. Each window is cropped with scripts/crop.py into
+names another DEF. By default only nets wholly inside the box are kept;
+`partial` keeps crossing nets with their inside pins, `boundary` keeps them
+with a pin on the box edge for every outside pin, which gives the window
+the routing demand the crossing nets put on it. Each window is cropped with scripts/crop.py into
 output/windows/<name>/, routed with the release build of pare, and checked
 by PARE and, unless --no-openroad, by OpenROAD's drt::check_drc on one tile
 (the DEF's GCELLGRID rewritten to a single gcell, so no marker is split at a
@@ -51,7 +54,8 @@ def read_windows(names):
         name, design, box, flags = parts[0], parts[1], parts[2:6], parts[6:]
         if names and name not in names:
             continue
-        rows.append((name, design, [float(v) for v in box], "partial" in flags))
+        mode = "partial" if "partial" in flags else "boundary" if "boundary" in flags else "whole"
+        rows.append((name, design, [float(v) for v in box], mode))
     return rows
 
 
@@ -66,7 +70,7 @@ def one_tile(src, dst):
     dst.write_text(text)
 
 
-def run(name, design, box, partial, placed, rounds, openroad, replace):
+def run(name, design, box, mode, placed, rounds, openroad, replace):
     config_path = find_config(design)
     config = tomllib.loads(config_path.read_text())
     lefs = [str(ROOT / p) for p in config["input"]["lef_files"]]
@@ -76,7 +80,11 @@ def run(name, design, box, partial, placed, rounds, openroad, replace):
     d.mkdir(parents=True, exist_ok=True)
     in_def = d / "in.def"
     crop = [sys.executable, "-I", str(ROOT / "scripts" / "crop.py"), str(placed), cells_lef]
-    crop += [str(v) for v in box] + [str(in_def)] + (["--partial"] if partial else [])
+    crop += [str(v) for v in box] + [str(in_def)]
+    if mode == "partial":
+        crop.append("--partial")
+    elif mode == "boundary":
+        crop += ["--boundary-pins", "--tech-lef", lefs[0]]
     cropped = subprocess.run(crop, capture_output=True, text=True, check=True).stdout.strip()
 
     routing = dict(config.get("routing", {}))
@@ -151,8 +159,8 @@ def main():
         sys.exit("build first: cargo build --release")
     failed = 0
     print(f"{'window':14s} {'pare':>6s} {'openroad':>8s} {'gr':>6s} {'unresv':>6s} {'s':>6s} {'MB':>6s}  cropped")
-    for name, design, box, partial in read_windows(args.names):
-        r = run(name, design, box, partial, args.placed, args.rounds, not args.no_openroad, args.replace)
+    for name, design, box, mode in read_windows(args.names):
+        r = run(name, design, box, mode, args.placed, args.rounds, not args.no_openroad, args.replace)
         ored = "-" if r["openroad"] is None else str(r["openroad"])
         print(f"{r['name']:14s} {r['pare']:6d} {ored:>8s} {r['gr']:6d} {r['unreserved']:6d} {r['seconds']:6.0f} {r['rss_mb']:6d}  {r['cropped']}", flush=True)
         if r["pare"] != 0 or (r["openroad"] not in (None, 0)):

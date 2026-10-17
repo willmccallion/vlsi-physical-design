@@ -11,3 +11,5 @@ pci-stripe-pins   mgc_pci_bridge32_a    20  270  110  335
 # fft_a: the dense strip beside the left macros, and a row of abutting in01f01 cells
 fft-strip         mgc_fft_a              0  170   40  210
 fft-abutting      mgc_fft_a            790  232  800  242  partial
+# the same strip with the nets that leave it, as pins on the box edge
+fft-strip-load    mgc_fft_a              0  170   40  210  boundary
