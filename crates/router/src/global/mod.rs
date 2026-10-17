@@ -2,10 +2,10 @@
 //!
 //! Each routable layer gets a capacity on every gcell edge in its preferred
 //! direction: its tracks crossing that edge, each counted for the share of
-//! the edge that fixed metal leaves usable. A route demands a track on
-//! every edge its wires cross and, on the edges beside each of its vias,
-//! the share of a track the via's pad is expected to take from wires
-//! passing it. An edge
+//! the edge that fixed metal leaves usable. A route demands the tracks its
+//! wires take on every edge they cross, more for a net with a wider
+//! non-default rule, and on the edges beside each of its vias the share of
+//! a track the via's pad is expected to take from wires passing it. An edge
 //! costs its length, a logistic congestion term that rises as its usage
 //! nears capacity, its accumulated overflow history, and a penalty per unit
 //! of overflow that grows every round, as in `PathFinder`. Every net is
@@ -23,6 +23,7 @@ mod tracks;
 use crate::occupancy::{FixedMetal, TrackRef};
 use crate::tech::RouteTech;
 use maze::route_tree;
+use pare_common::db::design::NetlistDB;
 use pare_common::db::indices::{LayerId, NetId};
 use pare_common::db::library::Direction;
 use pare_common::geom::dbu::Dbu;
@@ -348,16 +349,19 @@ impl GlobalGrid {
         })
     }
 
-    /// Places or lifts the demand of a net's paths: one track on every edge
-    /// they cross, counting an edge the paths share once, and the via loss
-    /// of its layer on each edge beside a via that no wire of the net on
-    /// that layer crosses. The pad a terminal already holds as fixed metal
-    /// is not counted again.
+    /// Places or lifts the demand of a net's paths: its track demand on
+    /// every edge they cross, counting an edge the paths share once, and
+    /// the via loss of its layer on each edge beside a via that no wire of
+    /// the net on that layer crosses. The pad a terminal already holds as
+    /// fixed metal is not counted again.
     fn add_tree(&mut self, net: &GlobalNet, paths: &[Vec<GCell>], sign: Sign) {
         let mut edges: Vec<usize> = paths.iter().flat_map(|p| self.path_edges(p)).collect();
         edges.sort_unstable();
         edges.dedup();
-        let mut demands: Vec<(usize, Tracks)> = edges.iter().map(|&e| (e, Tracks::ONE)).collect();
+        let mut demands: Vec<(usize, Tracks)> = edges
+            .iter()
+            .map(|&e| (e, net.demand(self.layer_offset(self.cell_of(e).layer))))
+            .collect();
         for stack in via_stacks(paths) {
             for c in stack {
                 if net.terminals.contains(&c) {
@@ -421,9 +425,9 @@ impl GlobalGrid {
             .collect()
     }
 
-    /// Cost of one more net on edge `e`.
-    fn edge_cost(&self, e: usize, costs: GlobalCosts) -> f64 {
-        let excess = (self.usage[e] + Tracks::ONE - self.capacity[e]).to_f64();
+    /// Cost of `demand` more tracks on edge `e`.
+    fn edge_cost(&self, e: usize, demand: Tracks, costs: GlobalCosts) -> f64 {
+        let excess = (self.usage[e] + demand - self.capacity[e]).to_f64();
         let congestion = costs.congestion / (1.0 + (-CONGESTION_SLOPE * excess).exp());
         let overflow = costs.penalty * excess.max(0.0);
         1.0 + f64::from(self.history[e]) + congestion + overflow
@@ -656,13 +660,47 @@ impl RouteTree {
     }
 }
 
-/// A net to route globally: its pins' gcells.
+/// A net to route globally: its pins' gcells and what its wires take.
 #[derive(Clone, Debug)]
 pub struct GlobalNet {
     /// The net.
     pub net: NetId,
     /// One gcell per pin.
     pub terminals: Vec<GCell>,
+    /// Tracks one of its wires takes on each routable layer, lowest first.
+    pub demand: Vec<Tracks>,
+}
+
+impl GlobalNet {
+    /// Tracks a wire of the net takes on the layer at `offset` among the
+    /// routable layers.
+    fn demand(&self, offset: usize) -> Tracks {
+        self.demand.get(offset).copied().unwrap_or(Tracks::ONE)
+    }
+}
+
+/// Tracks a wire of `net` takes on each routable layer: one, or as many
+/// pitches as its non-default rule's width and spacing span.
+pub fn track_demand(db: &NetlistDB, tech: &RouteTech, net: NetId) -> Vec<Tracks> {
+    let rule = db.nets[net.index()]
+        .non_default_rule
+        .map(|r| &db.non_default_rules[r.index()]);
+    (tech.min_layer.index()..=tech.max_layer.index())
+        .map(|l| {
+            let layer = LayerId::new(l);
+            let lt = tech.layer(layer);
+            let Some(ndr) = rule.and_then(|r| r.layers.iter().find(|x| x.layer == layer)) else {
+                return Tracks::ONE;
+            };
+            let pitch = lt.pitch().get();
+            if pitch <= 0 {
+                return Tracks::ONE;
+            }
+            let span = (ndr.width + ndr.spacing.unwrap_or(lt.spacing)).get();
+            let tracks = (span + pitch - 1) / pitch;
+            Tracks::whole(u32::try_from(tracks.max(1)).unwrap_or(1))
+        })
+        .collect()
 }
 
 /// Routes `nets` and negotiates overflow for at most `rounds` rounds.
@@ -916,6 +954,7 @@ mod tests {
         GlobalNet {
             net: NetId::new(0),
             terminals,
+            demand: vec![Tracks::ONE; 2],
         }
     }
 
@@ -1046,5 +1085,21 @@ mod tests {
         grid.add_tree(&net, &paths, Sign::Remove);
 
         assert!(grid.usage.iter().all(|&u| u == Tracks::ZERO));
+    }
+
+    #[test]
+    fn a_wider_rule_demands_more_tracks_per_edge() {
+        let mut grid = grid();
+        let net = GlobalNet {
+            demand: vec![Tracks::whole(2); 2],
+            ..net(vec![at(1, 2, 5), at(1, 4, 5)])
+        };
+        let paths = vec![vec![at(1, 2, 5), at(1, 3, 5), at(1, 4, 5)]];
+
+        grid.add_tree(&net, &paths, Sign::Add);
+
+        assert_eq!(grid.usage[grid.edge(at(1, 2, 5))], Tracks::whole(2));
+        assert_eq!(grid.usage[grid.edge(at(1, 3, 5))], Tracks::whole(2));
+        assert_eq!(grid.overflow(), Tracks::ZERO);
     }
 }

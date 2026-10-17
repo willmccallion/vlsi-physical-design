@@ -18,7 +18,7 @@ pub mod wiring;
 
 use detailed::{Costs, DetailedRouter, Scope, routable_nets};
 pub use global::CapacityReduction;
-use global::{GlobalGrid, GlobalNet, route_global};
+use global::{GlobalGrid, GlobalNet, route_global, track_demand};
 use occupancy::FixedTracks;
 use pare_common::db::design::{GCellGridDef, NetlistDB, PlacementStatus, RouteElem, TrackAxis};
 use pare_common::db::indices::NetId;
@@ -95,6 +95,7 @@ pub fn route(db: &mut NetlistDB, config: &RoutingConfig) -> Result<RoutingSummar
                 Some(GlobalNet {
                     net,
                     terminals: dr.terminals(net, &grid)?,
+                    demand: track_demand(db, &tech, net),
                 })
             })
             .collect();

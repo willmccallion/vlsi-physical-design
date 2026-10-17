@@ -76,6 +76,7 @@ pub(super) fn route_pattern(
 
     let planner = Planner {
         grid,
+        net,
         costs,
         layers,
         base,
@@ -138,6 +139,7 @@ pub(super) fn route_pattern(
 /// What the dynamic program needs to price layers.
 struct Planner<'a> {
     grid: &'a GlobalGrid,
+    net: &'a GlobalNet,
     costs: GlobalCosts,
     layers: usize,
     base: usize,
@@ -173,6 +175,7 @@ impl Planner<'_> {
         } else {
             (from.1.min(to.1), from.1.max(to.1))
         };
+        let demand = self.net.demand(l);
         let cost = (lo..hi)
             .map(|k| {
                 let start = if horizontal {
@@ -188,7 +191,8 @@ impl Planner<'_> {
                         y: k,
                     }
                 };
-                self.grid.edge_cost(self.grid.edge(start), self.costs)
+                self.grid
+                    .edge_cost(self.grid.edge(start), demand, self.costs)
             })
             .sum();
         Some(cost)

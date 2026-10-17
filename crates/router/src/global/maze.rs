@@ -57,15 +57,23 @@ pub(super) fn route_tree(
         let path = loop {
             let w = window(&[target, terminals[join.parent]], margin, grid.nx, grid.ny);
             let sources = cells_in(&buckets, w);
+            let avoid = Query {
+                net,
+                costs,
+                blocked: Blocked::Avoid,
+            };
             if !sources.is_empty()
-                && let Some(p) = search(grid, &sources, target, w, costs, Blocked::Avoid)
+                && let Some(p) = search(grid, avoid, &sources, target, w)
             {
                 break p;
             }
             if w == full {
                 let all = cells_in(&buckets, full);
-                break search(grid, &all, target, full, costs, Blocked::Cross)
-                    .unwrap_or_else(|| vec![target]);
+                let cross = Query {
+                    blocked: Blocked::Cross,
+                    ..avoid
+                };
+                break search(grid, cross, &all, target, full).unwrap_or_else(|| vec![target]);
             }
             margin = margin.saturating_mul(4).max(1);
         };
@@ -179,27 +187,38 @@ enum Blocked {
     Cross,
 }
 
+/// What one search is for and how it prices the grid.
+#[derive(Clone, Copy)]
+struct Query<'a> {
+    net: &'a GlobalNet,
+    costs: GlobalCosts,
+    blocked: Blocked,
+}
+
 /// Cheapest path from any source to `target` inside the window.
 fn search(
     grid: &GlobalGrid,
+    query: Query<'_>,
     sources: &[GCell],
     target: GCell,
     win: (u16, u16, u16, u16),
-    costs: GlobalCosts,
-    blocked: Blocked,
 ) -> Option<Vec<GCell>> {
-    SEARCH.with_borrow_mut(|state| search_with(state, grid, sources, target, win, costs, blocked))
+    SEARCH.with_borrow_mut(|state| search_with(state, grid, query, sources, target, win))
 }
 
 fn search_with(
     state: &mut SearchState,
     grid: &GlobalGrid,
+    query: Query<'_>,
     sources: &[GCell],
     target: GCell,
     win: (u16, u16, u16, u16),
-    costs: GlobalCosts,
-    blocked: Blocked,
 ) -> Option<Vec<GCell>> {
+    let Query {
+        net,
+        costs,
+        blocked,
+    } = query;
     let passable = |e: usize| blocked == Blocked::Cross || !grid.blocked[e];
     let h = |c: GCell| {
         let layers = c.layer.index().abs_diff(target.layer.index()) as f64;
@@ -243,6 +262,7 @@ fn search_with(
                 });
             }
         };
+        let demand = net.demand(grid.layer_offset(cell.layer));
         let (x, y) = (cell.x, cell.y);
         match grid.direction(cell.layer) {
             Direction::Horizontal => {
@@ -250,11 +270,14 @@ fn search_with(
                     let next = GCell { x: x - 1, ..cell };
                     let e = grid.edge(next);
                     if passable(e) {
-                        push(next, grid.edge_cost(e, costs));
+                        push(next, grid.edge_cost(e, demand, costs));
                     }
                 }
                 if x < win.1 && passable(here) {
-                    push(GCell { x: x + 1, ..cell }, grid.edge_cost(here, costs));
+                    push(
+                        GCell { x: x + 1, ..cell },
+                        grid.edge_cost(here, demand, costs),
+                    );
                 }
             }
             Direction::Vertical => {
@@ -262,11 +285,14 @@ fn search_with(
                     let next = GCell { y: y - 1, ..cell };
                     let e = grid.edge(next);
                     if passable(e) {
-                        push(next, grid.edge_cost(e, costs));
+                        push(next, grid.edge_cost(e, demand, costs));
                     }
                 }
                 if y < win.3 && passable(here) {
-                    push(GCell { y: y + 1, ..cell }, grid.edge_cost(here, costs));
+                    push(
+                        GCell { y: y + 1, ..cell },
+                        grid.edge_cost(here, demand, costs),
+                    );
                 }
             }
         }
@@ -337,6 +363,7 @@ mod tests {
         GlobalNet {
             net: NetId::new(0),
             terminals: terminals.to_vec(),
+            demand: vec![Tracks::ONE; 2],
         }
     }
 
@@ -357,6 +384,10 @@ mod tests {
             .count()
     }
 
+    fn reaches(paths: &[Vec<GCell>], target: GCell) -> bool {
+        paths.iter().flatten().any(|&c| c == target)
+    }
+
     #[test]
     fn a_net_detours_around_a_blocked_wall_beyond_its_margin() {
         let mut grid = grid();
@@ -365,8 +396,7 @@ mod tests {
 
         let paths = route_tree(&grid, &net(&terminals), 1, COSTS);
 
-        let reached = paths.iter().flatten().any(|&c| c == terminals[1]);
-        assert!(reached);
+        assert!(reaches(&paths, terminals[1]));
         assert_eq!(crossed_blocked(&grid, &paths), 0);
     }
 
@@ -378,8 +408,33 @@ mod tests {
 
         let paths = route_tree(&grid, &net(&terminals), 1, COSTS);
 
-        let reached = paths.iter().flatten().any(|&c| c == terminals[1]);
-        assert!(reached);
+        assert!(reaches(&paths, terminals[1]));
         assert_eq!(crossed_blocked(&grid, &paths), 1);
+    }
+
+    #[test]
+    fn a_wider_net_pays_for_the_tracks_it_takes() {
+        let mut grid = grid();
+        for x in 2..7 {
+            let e = grid.edge(cell(1, x, 4));
+            grid.usage[e] = Tracks::whole(3);
+        }
+        let terminals = [cell(1, 2, 4), cell(1, 7, 4)];
+        let wide = GlobalNet {
+            demand: vec![Tracks::whole(2); 2],
+            ..net(&terminals)
+        };
+
+        let narrow_paths = route_tree(&grid, &net(&terminals), 2, COSTS);
+        let wide_paths = route_tree(&grid, &wide, 2, COSTS);
+
+        let on_row = |paths: &[Vec<GCell>]| {
+            paths
+                .iter()
+                .flatten()
+                .filter(|c| c.layer == LayerId::new(1) && c.y == 4)
+                .count()
+        };
+        assert!(on_row(&narrow_paths) > on_row(&wide_paths));
     }
 }
