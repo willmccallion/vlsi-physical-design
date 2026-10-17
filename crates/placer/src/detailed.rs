@@ -52,12 +52,19 @@ pub struct AccessRepair {
 /// Sites a blocked cell may be shifted by along its row to free its pins.
 const MAX_SHIFT_SITES: i64 = 40;
 
+/// Rows above and below its own a blocked cell may move into.
+const FREE_ROWS: usize = 3;
+
+/// Cells on either side a blocked cell may swap places with.
+const SWAP_REACH: usize = 8;
+
 /// Moves every cell with a pin that fixed metal blocks to a spot where none
 /// of its pins is.
 ///
 /// The spot is the nearest along the cell's row, pushing the cells beside
-/// it by the least that keeps every pushed cell clear too, or else a gap in
-/// a neighbouring row.
+/// it by the least that keeps every pushed cell clear too; else the place
+/// of a nearby cell of the same width that is clear where this one stands;
+/// else a gap in a nearby row.
 pub fn free_blocked_pins(db: &mut NetlistDB, zones: &Zones, access: &PinAccess) -> AccessRepair {
     let mut dp = DetailedPlacer::new(db, zones, Some(access));
     let blocked_before = dp.count_blocked(db);
@@ -269,8 +276,9 @@ impl<'a> DetailedPlacer<'a> {
     }
 
     /// Frees the pins of cell `i` of segment `s`: by the shortest shift
-    /// along the segment that leaves it and every cell it pushes clear, or
-    /// else into a gap of a neighbouring row.
+    /// along the segment that leaves it and every cell it pushes clear, else
+    /// by swapping with a nearby cell of its width that is clear where it
+    /// stands, else by moving into a gap of a nearby row.
     fn free_cell(&mut self, db: &mut NetlistDB, s: usize, i: usize) -> Freed {
         let cell = self.segments[s].cells[i];
         let row = self.segments[s].row;
@@ -288,13 +296,33 @@ impl<'a> DetailedPlacer<'a> {
         }
         let size = db.cell_size(cell);
         let zone = self.zone_of[cell.index()];
-        for other in [row.checked_sub(1), Some(row + 1)].into_iter().flatten() {
-            if other >= self.rows.len()
-                || self.rows[other].height != size.y
-                || !orientation_allowed(db, cell, self.rows[other].orient)
-            {
-                continue;
+        let rows_near: Vec<usize> = (0..=FREE_ROWS)
+            .flat_map(|d| [row.checked_sub(d), Some(row + d)])
+            .flatten()
+            .filter(|&r| {
+                r < self.rows.len()
+                    && self.rows[r].height == size.y
+                    && orientation_allowed(db, cell, self.rows[r].orient)
+            })
+            .collect();
+        for &other in &rows_near {
+            for t in self.row_segments[other].0..self.row_segments[other].1 {
+                if self.segments[t].zone != zone {
+                    continue;
+                }
+                if let Some(partner) = self.swap_partner(db, cell, s, t, x) {
+                    let here = db.cells[cell.index()].location;
+                    let there = db.cells[partner.index()].location;
+                    db.cells[cell.index()].location = there;
+                    db.cells[cell.index()].orient = self.rows[other].orient;
+                    db.cells[partner.index()].location = here;
+                    db.cells[partner.index()].orient = self.rows[row].orient;
+                    self.swap_entries(db, cell, s, partner, t);
+                    return Freed::Elsewhere;
+                }
             }
+        }
+        for &other in &rows_near {
             for t in self.row_segments[other].0..self.row_segments[other].1 {
                 if self.segments[t].zone != zone {
                     continue;
@@ -312,6 +340,35 @@ impl<'a> DetailedPlacer<'a> {
             }
         }
         Freed::Not
+    }
+
+    /// A cell of segment `t` near `x`, as wide as `cell` and of its zone,
+    /// that is clear where `cell` stands while `cell` is clear where it
+    /// stands, so that swapping them frees `cell` without blocking it.
+    fn swap_partner(
+        &self,
+        db: &NetlistDB,
+        cell: CellId,
+        s: usize,
+        t: usize,
+        x: Dbu,
+    ) -> Option<CellId> {
+        let width = db.cell_size(cell).x;
+        let here = db.cells[cell.index()].location;
+        let (row_here, row_there) = (self.segments[s].row, self.segments[t].row);
+        let cells = &self.segments[t].cells;
+        let k = cells.partition_point(|&c| db.cells[c.index()].location.x < x);
+        cells[k.saturating_sub(SWAP_REACH)..(k + SWAP_REACH).min(cells.len())]
+            .iter()
+            .copied()
+            .filter(|&c| c != cell && db.cell_size(c).x == width)
+            .filter(|&c| self.zone_of[c.index()] == self.zone_of[cell.index()])
+            .filter(|&c| orientation_allowed(db, c, self.rows[row_here].orient))
+            .find(|&c| {
+                let there = db.cells[c.index()].location;
+                self.blocked_at(db, cell, there, row_there) == 0
+                    && self.blocked_at(db, c, here, row_here) == 0
+            })
     }
 
     /// The moves that put cell `i` of segment `s` at `nx` and push the
