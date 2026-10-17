@@ -370,6 +370,7 @@ mod tests {
             ny,
             min_layer: LayerId::new(1),
             directions: vec![Direction::Horizontal, Direction::Vertical],
+            reserve: 0.0,
             capacity: vec![Tracks::whole(4); edges],
             blocked: vec![false; edges],
             via_blocked: vec![false; edges],

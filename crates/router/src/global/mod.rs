@@ -54,6 +54,8 @@ pub struct GlobalGrid {
     ny: u16,
     min_layer: LayerId,
     directions: Vec<Direction>,
+    /// Fraction of each edge's usable tracks held back from `capacity`.
+    reserve: f64,
     capacity: Vec<Tracks>,
     /// Edges no track crosses at all, which fixed metal blocks outright.
     blocked: Vec<bool>,
@@ -123,6 +125,7 @@ impl GlobalGrid {
             ny,
             min_layer: tech.min_layer,
             directions: layers.iter().map(|&l| tech.layer(l).direction).collect(),
+            reserve,
             capacity: Vec::new(),
             blocked: Vec::new(),
             via_blocked: Vec::new(),
@@ -211,6 +214,66 @@ impl GlobalGrid {
             tracks: cap,
             via_blocked: room.into_iter().map(|r| !r).collect(),
         }
+    }
+
+    /// Forgets every route's demand and the negotiation history, keeping
+    /// the capacities.
+    pub fn clear(&mut self) {
+        self.usage.fill(Tracks::ZERO);
+        self.history.fill(0.0);
+    }
+
+    /// Each gcell's congestion, row by row: the largest share of its
+    /// capacity the routes take on any routable layer, over both edges of
+    /// the gcell along that layer, as `OpenROAD`'s placer reads its global
+    /// router. A layer does not count in a gcell where fixed metal takes
+    /// [`IGNORED_BLOCKAGE`] of the tracks or more, or every one of them.
+    pub fn congestion(&self, tech: &RouteTech) -> Vec<f64> {
+        let (nx, ny) = (usize::from(self.nx), usize::from(self.ny));
+        let mut congestion = vec![0.0; nx * ny];
+        for l in self.layers() {
+            let layer = LayerId::new(l);
+            let direction = self.direction(layer);
+            let tracks = self.tracks_per_line(tech, layer);
+            for y in 0..ny {
+                for x in 0..nx {
+                    let (line, back, forward) = match direction {
+                        Direction::Horizontal => (
+                            y,
+                            x.checked_sub(1).map(|px| self.cell_index(layer, px, y)),
+                            (x + 1 < nx).then(|| self.cell_index(layer, x, y)),
+                        ),
+                        Direction::Vertical => (
+                            x,
+                            y.checked_sub(1).map(|py| self.cell_index(layer, x, py)),
+                            (y + 1 < ny).then(|| self.cell_index(layer, x, y)),
+                        ),
+                    };
+                    let ratio = [back, forward]
+                        .into_iter()
+                        .flatten()
+                        .filter_map(|e| self.edge_ratio(e, tracks[line]))
+                        .fold(0.0, f64::max);
+                    let at = &mut congestion[y * nx + x];
+                    *at = f64::max(*at, ratio);
+                }
+            }
+        }
+        congestion
+    }
+
+    /// Usage over capacity of edge `e`, or none when fixed metal leaves it
+    /// fewer than `1 - IGNORED_BLOCKAGE` of the `tracks` it would have.
+    fn edge_ratio(&self, e: usize, tracks: f64) -> Option<f64> {
+        let capacity = self.capacity[e].to_f64();
+        let available = tracks * (1.0 - self.reserve);
+        if capacity <= 0.0 || available <= 0.0 {
+            return None;
+        }
+        if (available - capacity) / available >= IGNORED_BLOCKAGE {
+            return None;
+        }
+        Some(self.usage[e].to_f64() / capacity)
     }
 
     /// Every gcell's [`CapacityReduction`] in the terms `FastRoute` reports
@@ -848,6 +911,12 @@ fn log_zero_capacity_crossings(grid: &GlobalGrid, routes: &GlobalRoutes) {
 /// Rounds without a new lowest overflow after which negotiation stops.
 const STALL_ROUNDS: usize = 8;
 
+/// Share of a gcell's tracks on a layer that fixed metal must take for the
+/// layer's congestion there to be left out of [`GlobalGrid::congestion`],
+/// since no placement changes what crosses it; `OpenROAD`'s
+/// `ignoreEdgeRatio`.
+const IGNORED_BLOCKAGE: f64 = 0.8;
+
 /// The round with the lowest overflow so far: its edge usage, and the
 /// routes of that round that later rounds have since replaced. Every other
 /// net still has the route it had then.
@@ -1021,6 +1090,7 @@ mod tests {
             ny,
             min_layer: LayerId::new(1),
             directions: vec![Direction::Horizontal, Direction::Vertical],
+            reserve: 0.0,
             capacity: vec![Tracks::whole(4); edges],
             blocked: vec![false; edges],
             via_blocked: vec![false; edges],
