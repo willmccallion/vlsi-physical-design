@@ -49,7 +49,8 @@ pub struct AccessRepair {
     pub moved: usize,
 }
 
-/// Sites a blocked cell may be shifted by along its row to free its pins.
+/// Sites a blocked cell may be shifted by along its row to free its pins,
+/// and how far along a row it may move or swap to do so.
 const MAX_SHIFT_SITES: i64 = 40;
 
 /// Rows above and below its own a blocked cell may move into.
@@ -287,6 +288,12 @@ impl<'a> DetailedPlacer<'a> {
         for k in 1..=MAX_SHIFT_SITES {
             for dir in [-1, 1] {
                 if let Some(moves) = self.shift_plan(db, s, i, x + site * (k * dir)) {
+                    log::trace!(
+                        "cell {} shifted {} sites with {} pushed",
+                        cell.index(),
+                        k * dir,
+                        moves.len() - 1
+                    );
                     for (c, at) in moves {
                         db.cells[c.index()].location = at;
                     }
@@ -296,6 +303,7 @@ impl<'a> DetailedPlacer<'a> {
         }
         let size = db.cell_size(cell);
         let zone = self.zone_of[cell.index()];
+        let reach = site * MAX_SHIFT_SITES;
         let rows_near: Vec<usize> = (0..=FREE_ROWS)
             .flat_map(|d| [row.checked_sub(d), Some(row + d)])
             .flatten()
@@ -310,9 +318,18 @@ impl<'a> DetailedPlacer<'a> {
                 if self.segments[t].zone != zone {
                     continue;
                 }
-                if let Some(partner) = self.swap_partner(db, cell, s, t, x) {
+                if let Some(partner) = self.swap_partner(db, cell, s, t, x, reach) {
                     let here = db.cells[cell.index()].location;
                     let there = db.cells[partner.index()].location;
+                    log::trace!(
+                        "cell {} at ({}, {}) swaps with {} at ({}, {})",
+                        cell.index(),
+                        here.x.get(),
+                        here.y.get(),
+                        partner.index(),
+                        there.x.get(),
+                        there.y.get()
+                    );
                     db.cells[cell.index()].location = there;
                     db.cells[cell.index()].orient = self.rows[other].orient;
                     db.cells[partner.index()].location = here;
@@ -330,8 +347,20 @@ impl<'a> DetailedPlacer<'a> {
                 let Some(gx) = self.gap_near(db, t, x, size.x) else {
                     continue;
                 };
+                if (gx - x).abs() > reach {
+                    continue;
+                }
                 let at = Point::new(gx, self.rows[other].y);
                 if self.blocked_at(db, cell, at, other) == 0 {
+                    let from = db.cells[cell.index()].location;
+                    log::trace!(
+                        "cell {} moves from ({}, {}) to a gap at ({}, {})",
+                        cell.index(),
+                        from.x.get(),
+                        from.y.get(),
+                        at.x.get(),
+                        at.y.get()
+                    );
                     db.cells[cell.index()].location = at;
                     db.cells[cell.index()].orient = self.rows[other].orient;
                     self.relocate(db, cell, s, t);
@@ -342,9 +371,10 @@ impl<'a> DetailedPlacer<'a> {
         Freed::Not
     }
 
-    /// A cell of segment `t` near `x`, as wide as `cell` and of its zone,
-    /// that is clear where `cell` stands while `cell` is clear where it
-    /// stands, so that swapping them frees `cell` without blocking it.
+    /// A cell of segment `t` within `reach` of `x`, as wide as `cell` and of
+    /// its zone, that is clear where `cell` stands while `cell` is clear
+    /// where it stands, so that swapping them frees `cell` without blocking
+    /// it.
     fn swap_partner(
         &self,
         db: &NetlistDB,
@@ -352,6 +382,7 @@ impl<'a> DetailedPlacer<'a> {
         s: usize,
         t: usize,
         x: Dbu,
+        reach: Dbu,
     ) -> Option<CellId> {
         let width = db.cell_size(cell).x;
         let here = db.cells[cell.index()].location;
@@ -362,6 +393,7 @@ impl<'a> DetailedPlacer<'a> {
             .iter()
             .copied()
             .filter(|&c| c != cell && db.cell_size(c).x == width)
+            .filter(|&c| (db.cells[c.index()].location.x - x).abs() <= reach)
             .filter(|&c| self.zone_of[c.index()] == self.zone_of[cell.index()])
             .filter(|&c| orientation_allowed(db, c, self.rows[row_here].orient))
             .find(|&c| {
