@@ -3,9 +3,10 @@
 //! pins it connects, widened only when the window holds no path. Edges that
 //! fixed metal blocks outright are never crossed and cells with no room for
 //! a via pad are never climbed into, so a net detours around a macro
-//! however far that takes it; only a pin no detour reaches crosses them.
+//! however far that takes it; only a pin no detour reaches crosses them,
+//! and then as few of them as possible.
 
-use super::{GCell, GlobalCosts, GlobalGrid, GlobalNet, window};
+use super::{BLOCKED_COST, GCell, GlobalCosts, GlobalGrid, GlobalNet, window};
 use crate::tree::connection_order;
 use pare_common::db::indices::LayerId;
 use pare_common::db::library::Direction;
@@ -222,6 +223,19 @@ fn search_with(
     } = query;
     let passable = |e: usize| blocked == Blocked::Cross || !grid.blocked[e];
     let climbable = |c: GCell| blocked == Blocked::Cross || !grid.via_blocked(c);
+    let edge_cost = |e: usize| {
+        let demand = net.demand(grid.layer_offset(grid.cell_of(e).layer));
+        let crossing = if grid.blocked[e] { BLOCKED_COST } else { 0.0 };
+        grid.edge_cost(e, demand, costs) + crossing
+    };
+    let climb_cost = |c: GCell| {
+        let crossing = if grid.via_blocked(c) {
+            BLOCKED_COST
+        } else {
+            0.0
+        };
+        costs.via + crossing
+    };
     let h = |c: GCell| {
         let layers = c.layer.index().abs_diff(target.layer.index()) as f64;
         let plane = f64::from(c.x.abs_diff(target.x) + c.y.abs_diff(target.y));
@@ -264,7 +278,6 @@ fn search_with(
                 });
             }
         };
-        let demand = net.demand(grid.layer_offset(cell.layer));
         let (x, y) = (cell.x, cell.y);
         match grid.direction(cell.layer) {
             Direction::Horizontal => {
@@ -272,14 +285,11 @@ fn search_with(
                     let next = GCell { x: x - 1, ..cell };
                     let e = grid.edge(next);
                     if passable(e) {
-                        push(next, grid.edge_cost(e, demand, costs));
+                        push(next, edge_cost(e));
                     }
                 }
                 if x < win.1 && passable(here) {
-                    push(
-                        GCell { x: x + 1, ..cell },
-                        grid.edge_cost(here, demand, costs),
-                    );
+                    push(GCell { x: x + 1, ..cell }, edge_cost(here));
                 }
             }
             Direction::Vertical => {
@@ -287,14 +297,11 @@ fn search_with(
                     let next = GCell { y: y - 1, ..cell };
                     let e = grid.edge(next);
                     if passable(e) {
-                        push(next, grid.edge_cost(e, demand, costs));
+                        push(next, edge_cost(e));
                     }
                 }
                 if y < win.3 && passable(here) {
-                    push(
-                        GCell { y: y + 1, ..cell },
-                        grid.edge_cost(here, demand, costs),
-                    );
+                    push(GCell { y: y + 1, ..cell }, edge_cost(here));
                 }
             }
         }
@@ -305,7 +312,7 @@ fn search_with(
                 ..cell
             };
             if climbable(next) {
-                push(next, costs.via);
+                push(next, climb_cost(next));
             }
         }
         if l < *grid.layers().end() {
@@ -314,7 +321,7 @@ fn search_with(
                 ..cell
             };
             if climbable(next) {
-                push(next, costs.via);
+                push(next, climb_cost(next));
             }
         }
     }
