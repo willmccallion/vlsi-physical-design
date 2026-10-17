@@ -131,13 +131,14 @@ impl LayerMetal {
         }
     }
 
-    /// Whether `shape` of `net` neither touches nor comes within the
-    /// required spacing of any fixed shape or shape of `extra` of another
-    /// net.
-    fn clear(&self, shape: &Rect<Dbu>, net: NetId, extra: &[Fixed]) -> bool {
+    /// Whether `shape`, of `net` if on one, neither touches nor comes within
+    /// the required spacing of any fixed shape or shape of `extra` of
+    /// another net.
+    fn clear(&self, shape: &Rect<Dbu>, net: Option<NetId>, extra: &[Fixed]) -> bool {
         let zone = shape.expand(self.reach);
-        let blocks =
-            |f: &Fixed| f.net != Some(net) && too_close(shape, &f.rect, self.required(shape, f));
+        let blocks = |f: &Fixed| {
+            (net.is_none() || f.net != net) && too_close(shape, &f.rect, self.required(shape, f))
+        };
         !self
             .fixed
             .locate_in_envelope_intersecting(envelope(&zone))
@@ -272,9 +273,11 @@ impl PinAccess {
         self.blocked_pins_among(db, cell, at, orient, &[])
     }
 
-    /// How many signal pins of `cell`, placed at `at` with `orient`, no via
-    /// can reach while `neighbours` stand where they are: their pins and
-    /// obstructions count like fixed metal.
+    /// How many signal pins of `cell`, placed at `at` with `orient`, are
+    /// blocked while `neighbours` stand where they are, their pins and
+    /// obstructions counting like fixed metal: a pin on a net that no via
+    /// can reach, or any signal pin whose own metal conflicts with other
+    /// metal.
     pub fn blocked_pins_among(
         &self,
         db: &NetlistDB,
@@ -286,15 +289,21 @@ impl PinAccess {
         let extra = self.neighbour_metal(db, neighbours);
         let c = &db.cells[cell.index()];
         let m = db.library.cell_macro(c.macro_id);
-        c.pins
+        let mut net_of = vec![None; m.pins.len()];
+        for &p in &c.pins {
+            let pin = &db.pins[p.index()];
+            if let PinOwner::Cell { pin: mp, .. } = pin.owner {
+                net_of[mp.index()] = Some(pin.net);
+            }
+        }
+        m.pins
             .iter()
-            .filter(|&&p| {
-                let pin = &db.pins[p.index()];
-                let PinOwner::Cell { pin: mp, .. } = pin.owner else {
-                    return false;
-                };
-                !db.nets[pin.net.index()].signal_use.is_supply()
-                    && self.pin_blocked(m, mp, pin.net, at, orient, &extra)
+            .enumerate()
+            .filter(|(_, pin)| !pin.signal_use.is_supply())
+            .filter(|&(k, _)| match net_of[k] {
+                Some(net) if db.nets[net.index()].signal_use.is_supply() => false,
+                Some(net) => self.pin_blocked(m, MacroPinId::new(k), Some(net), at, orient, &extra),
+                None => self.pin_blocked(m, MacroPinId::new(k), None, at, orient, &extra),
             })
             .count()
     }
@@ -356,14 +365,15 @@ impl PinAccess {
     }
 
     /// Whether the pin's metal on either layer conflicts with other metal,
-    /// or none of its shapes on the pin layer can be reached while it has
-    /// no clear metal on the routing layer. A pin with shapes on neither
-    /// layer is never blocked here.
+    /// or, for a pin on `net`, none of its shapes on the pin layer can be
+    /// reached while it has no clear metal on the routing layer. A pin on
+    /// no net needs no via. A pin with shapes on neither layer is never
+    /// blocked here.
     fn pin_blocked(
         &self,
         m: &Macro,
         mp: MacroPinId,
-        net: NetId,
+        net: Option<NetId>,
         at: Point<Dbu>,
         orient: Orientation,
         extra: &NeighbourMetal,
@@ -389,13 +399,13 @@ impl PinAccess {
                 }
             }
         }
-        conflict || (on_pin_layer && !reachable_below && !clear_above)
+        conflict || (net.is_some() && on_pin_layer && !reachable_below && !clear_above)
     }
 
     /// Whether some via with its cut inside `rect`, at a crossing of the two
     /// layers' tracks, has its lower metal inside `rect` and its upper metal
     /// clear of the metal of other nets.
-    fn reachable(&self, rect: &Rect<Dbu>, net: NetId, extra_above: &[Fixed]) -> bool {
+    fn reachable(&self, rect: &Rect<Dbu>, net: Option<NetId>, extra_above: &[Fixed]) -> bool {
         let (xs, ys) = if self.above_vertical {
             (&self.tracks_above, &self.tracks_pin)
         } else {
@@ -799,6 +809,32 @@ mod tests {
             0
         );
         assert_eq!(access.reach(), Dbu(190));
+    }
+
+    /// Master U placed at `x` with its M2 pin on no net.
+    fn blocked_unconnected(x: i64) -> usize {
+        let (mut db, _) = design();
+        let cell = db
+            .add_cell(
+                "u".into(),
+                MacroId(1),
+                pt(x, 0),
+                Orientation::N,
+                PlacementStatus::Placed,
+            )
+            .unwrap();
+        let access = PinAccess::new(&db, LayerId(1)).unwrap();
+        access.blocked_pins(&db, cell, pt(x, 0), Orientation::N)
+    }
+
+    #[test]
+    fn an_unconnected_pin_under_the_stripe_is_blocked() {
+        assert_eq!(blocked_unconnected(3800), 1);
+    }
+
+    #[test]
+    fn an_unconnected_pin_clear_of_the_stripe_is_free() {
+        assert_eq!(blocked_unconnected(1000), 0);
     }
 
     #[test]
