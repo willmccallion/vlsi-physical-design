@@ -88,6 +88,9 @@ pub struct CheckSummary {
     pub violations: BTreeMap<String, usize>,
     /// Advisory violations, by kind.
     pub advisory: BTreeMap<String, usize>,
+    /// Violations between routed metal inside a pin and the obstruction
+    /// covering that pin, which the library makes unavoidable.
+    pub pin_obstructions: usize,
     /// Violations among fixed metal that placement takes part in.
     pub from_placement: usize,
     /// Violations among fixed metal the input alone makes.

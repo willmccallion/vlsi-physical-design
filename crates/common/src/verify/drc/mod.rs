@@ -35,7 +35,7 @@ use crate::db::library::LayerRef;
 use crate::geom::dbu::{Dbu, DbuArea};
 use crate::geom::rect::Rect;
 use model::Model;
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 
 /// A kind of design rule violation.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
@@ -183,6 +183,10 @@ pub struct Findings {
     pub violations: Vec<Marker>,
     /// Violations of advisory rules involving routed metal.
     pub advisory: Vec<Marker>,
+    /// Violations between a net's routed metal inside one of its own pins
+    /// and the obstruction of the cell that covers that pin, which no
+    /// routing can avoid.
+    pub pin_obstruction: Vec<Marker>,
     /// Violations among fixed metal only that a placed cell or I/O pin
     /// takes part in.
     pub placement: Vec<Marker>,
@@ -196,6 +200,7 @@ impl Findings {
     pub fn merge(mut self, other: Self) -> Self {
         self.violations.extend(other.violations);
         self.advisory.extend(other.advisory);
+        self.pin_obstruction.extend(other.pin_obstruction);
         self.placement.extend(other.placement);
         self.input.extend(other.input);
         self
@@ -211,6 +216,10 @@ pub struct DrcReport {
     /// Violations of advisory rules involving routed metal, reported but
     /// not held against the routing.
     pub advisory: Vec<Marker>,
+    /// Violations between a net's routed metal inside one of its own pins
+    /// and the obstruction covering that pin, which the library makes
+    /// unavoidable and `OpenROAD` still reports.
+    pub pin_obstruction: Vec<Marker>,
     /// Violations among fixed metal only where a cell or I/O pin placement
     /// can move takes part, which placement could have avoided.
     pub placement: Vec<Marker>,
@@ -227,6 +236,7 @@ impl DrcReport {
         Self {
             violations: deduplicated(found.violations),
             advisory: deduplicated(found.advisory),
+            pin_obstruction: deduplicated(found.pin_obstruction),
             placement: deduplicated(found.placement),
             input: deduplicated(found.input),
             owners,
@@ -334,12 +344,15 @@ fn run_checks(model: &Model<'_>, rules: &Rules) -> Markers {
 }
 
 /// Sorts `found` into the report's classes: advisory kinds apart from the
-/// rest, and fixed-only markers by whether placement takes part in them.
+/// rest, markers of pins under their own cell's obstruction apart from
+/// what routing can fix, and fixed-only markers by whether placement takes
+/// part in them.
 fn classify(found: Markers, model: &Model<'_>) -> Findings {
-    let (advisory, violations): (Vec<Marker>, Vec<Marker>) = deduplicated(found.violations)
+    let (advisory, routed): (Vec<Marker>, Vec<Marker>) = deduplicated(found.violations)
         .into_iter()
         .partition(|m| m.violation.is_advisory());
-    let seen: HashSet<Marker> = violations.iter().copied().collect();
+    let (pin_obstruction, violations) = split_pin_obstructions(model, routed);
+    let seen: HashSet<Marker> = violations.iter().chain(&pin_obstruction).copied().collect();
     let (placement, input) = deduplicated(
         found
             .fixed
@@ -352,9 +365,53 @@ fn classify(found: Markers, model: &Model<'_>) -> Findings {
     Findings {
         violations,
         advisory,
+        pin_obstruction,
         placement,
         input,
     }
+}
+
+/// Splits off the routed markers between a net and a cell's obstruction
+/// that lie inside a fixed shape of that net on the marker's layer: the
+/// net's pin sits under the obstruction, so any metal reaching it breaks
+/// the rule.
+fn split_pin_obstructions(model: &Model<'_>, routed: Vec<Marker>) -> (Vec<Marker>, Vec<Marker>) {
+    let owners = model.layout.owners();
+    let net_of = |m: &Marker| match (owners[m.owners.0.index()], owners[m.owners.1.index()]) {
+        (Owner::Net(_), Owner::Obstruction(_)) => Some(m.owners.0),
+        (Owner::Obstruction(_), Owner::Net(_)) => Some(m.owners.1),
+        _ => None,
+    };
+    let candidates: Vec<(usize, OwnerIndex, usize)> = routed
+        .iter()
+        .enumerate()
+        .filter_map(|(i, m)| match m.layer {
+            LayerRef::Routing(l) => net_of(m).map(|n| (i, n, l.index())),
+            LayerRef::Cut(_) => None,
+        })
+        .collect();
+    if candidates.is_empty() {
+        return (Vec::new(), routed);
+    }
+    let wanted: HashSet<(OwnerIndex, usize)> = candidates.iter().map(|&(_, n, l)| (n, l)).collect();
+    let mut pins: HashMap<(OwnerIndex, usize), Vec<Rect<Dbu>>> = HashMap::new();
+    for &(_, l) in &wanted {
+        for s in model.layout.metal(l) {
+            if s.is_fixed() && wanted.contains(&(s.owner, l)) {
+                pins.entry((s.owner, l)).or_default().push(s.rect);
+            }
+        }
+    }
+    let mut under = vec![false; routed.len()];
+    for (i, n, l) in candidates {
+        under[i] = pins
+            .get(&(n, l))
+            .is_some_and(|rects| rects.iter().any(|r| r.encloses(&routed[i].bbox)));
+    }
+    let mut flagged = under.into_iter();
+    routed
+        .into_iter()
+        .partition(|_| flagged.next().unwrap_or(false))
 }
 
 /// Whether metal of a cell or I/O pin placement can move is part of the

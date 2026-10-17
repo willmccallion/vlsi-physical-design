@@ -746,6 +746,9 @@ fn report_routing(db: &NetlistDB, run: &mut Report) -> bool {
     for m in &drc.advisory {
         log::debug!("drc advisory: {}", describe_marker(db, &drc, m));
     }
+    for m in &drc.pin_obstruction {
+        log::debug!("drc pin in obstruction: {}", describe_marker(db, &drc, m));
+    }
     for m in &drc.placement {
         log::debug!("drc from placement: {}", describe_marker(db, &drc, m));
     }
@@ -763,6 +766,12 @@ fn report_routing(db: &NetlistDB, run: &mut Report) -> bool {
         &drc.input.len().to_string(),
         "Advisory:",
         &drc.advisory.len().to_string(),
+    );
+    ui::stat_row(
+        "Pins in obstructions:",
+        &drc.pin_obstruction.len().to_string(),
+        "",
+        "",
     );
     for (kind, count) in drc.counts() {
         ui::stat_row(&format!("  {}:", kind.name()), &count.to_string(), "", "");
@@ -786,6 +795,7 @@ fn report_routing(db: &NetlistDB, run: &mut Report) -> bool {
     run.checks.vias = report.stats.vias;
     run.checks.violations = by_kind(drc.counts());
     run.checks.advisory = by_kind(drc.advisory_counts());
+    run.checks.pin_obstructions = drc.pin_obstruction.len();
     run.checks.from_placement = drc.placement.len();
     run.checks.in_input = drc.input.len();
     if report.is_connected() && drc.violations.is_empty() {
