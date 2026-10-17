@@ -81,9 +81,24 @@ pub fn free_blocked_pins(db: &mut NetlistDB, zones: &Zones, access: &PinAccess) 
             }
         }
     }
+    let blocked_after = dp.count_blocked(db);
+    if blocked_after > 0 && log::log_enabled!(log::Level::Debug) {
+        for (&cell, &s) in &dp.segment_of {
+            let at = db.cells[cell.index()].location;
+            let blocked = dp.blocked_at(db, cell, at, dp.segments[s].row);
+            if blocked > 0 {
+                log::debug!(
+                    "cell {} at ({}, {}) keeps {blocked} blocked pins",
+                    db.cells[cell.index()].name,
+                    at.x.get(),
+                    at.y.get()
+                );
+            }
+        }
+    }
     AccessRepair {
         blocked_before,
-        blocked_after: dp.count_blocked(db),
+        blocked_after,
         moved,
     }
 }
