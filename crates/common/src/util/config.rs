@@ -75,12 +75,15 @@ pub struct GlobalPlacementConfig {
 #[derive(Clone, Copy, Debug, Default, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum CongestionEstimate {
-    /// Global routing of every net where the cells are, as `OpenROAD`'s
-    /// `-routability_use_grt`.
+    /// RUDY: each net's wire spread evenly over its bounding box, as
+    /// `OpenROAD` does by default.
     #[default]
-    GlobalRouter,
-    /// RUDY: each net's wire spread evenly over its bounding box.
     Rudy,
+    /// Global routing of every net where the cells are, as `OpenROAD`'s
+    /// `-routability_use_grt`. Its congestion readings run far above RUDY's,
+    /// and on designs with macro channels the inflation they drive has
+    /// destabilized placement; measure before relying on it.
+    GlobalRouter,
 }
 
 impl Default for GlobalPlacementConfig {

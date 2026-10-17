@@ -8,6 +8,7 @@ output_def = "output/mgc_pci_bridge32_a/placed.def"
 [global_placement]
 placer_max_iterations = 2000
 target_density = 0.384
+routability_driven = false
 
 [io_placement]
 enabled = false
