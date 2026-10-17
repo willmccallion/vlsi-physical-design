@@ -426,14 +426,11 @@ impl<'a> DetailedPlacer<'a> {
                 if self.segments[t].zone != zone {
                     continue;
                 }
-                let Some(gx) = self.gap_near(db, t, x, size.x) else {
+                let Some(gx) = self.clear_spot_near(db, t, cell, x, reach) else {
                     continue;
                 };
-                if (gx - x).abs() > reach {
-                    continue;
-                }
                 let at = Point::new(gx, self.rows[other].y);
-                if self.blocked_at(db, cell, at, other) == 0 {
+                {
                     let from = db.cells[cell.index()].location;
                     log::trace!(
                         "cell {} moves from ({}, {}) to a gap at ({}, {})",
@@ -703,37 +700,67 @@ impl<'a> DetailedPlacer<'a> {
         false
     }
 
-    /// A site-aligned X for a cell of `width` in a free gap of segment `s`,
-    /// as close as possible to `target`, looking only at the gaps between
-    /// the few cells nearest `target`.
-    fn gap_near(&self, db: &NetlistDB, s: usize, target: Dbu, width: Dbu) -> Option<Dbu> {
+    /// The free gaps of segment `s` between the few cells nearest `target`
+    /// that hold a cell of `width`, as the X range its left edge may take.
+    fn gaps_near(&self, db: &NetlistDB, s: usize, target: Dbu, width: Dbu) -> Vec<(Dbu, Dbu)> {
         const REACH: usize = 8;
         let seg = &self.segments[s];
-        let row = &self.rows[seg.row];
         let k = seg
             .cells
             .partition_point(|&c| db.cells[c.index()].location.x < target);
         let first = k.saturating_sub(REACH);
         let last = (k + REACH).min(seg.cells.len());
+        (first..=last)
+            .filter_map(|j| {
+                let gap_lo = if j == 0 {
+                    seg.lo
+                } else {
+                    db.cell_bbox(seg.cells[j - 1]).max.x
+                };
+                let gap_hi = if j == seg.cells.len() {
+                    seg.hi
+                } else {
+                    db.cells[seg.cells[j].index()].location.x
+                };
+                (gap_hi - gap_lo >= width).then_some((gap_lo, gap_hi - width))
+            })
+            .collect()
+    }
+
+    /// A site-aligned X for a cell of `width` in a free gap of segment `s`,
+    /// as close as possible to `target`.
+    fn gap_near(&self, db: &NetlistDB, s: usize, target: Dbu, width: Dbu) -> Option<Dbu> {
+        let row = &self.rows[self.segments[s].row];
+        self.gaps_near(db, s, target, width)
+            .into_iter()
+            .map(|(lo, hi)| snap_down(target.clamp(lo, hi), row.x_min, row.site).max(lo))
+            .min_by_key(|&x| (x - target).abs())
+    }
+
+    /// The site-aligned X nearest `target`, within `reach` of it, in a free
+    /// gap of segment `s` where none of `cell`'s pins is blocked.
+    fn clear_spot_near(
+        &self,
+        db: &NetlistDB,
+        s: usize,
+        cell: CellId,
+        target: Dbu,
+        reach: Dbu,
+    ) -> Option<Dbu> {
+        let row_index = self.segments[s].row;
+        let row = &self.rows[row_index];
+        let width = db.cell_size(cell).x;
         let mut best: Option<Dbu> = None;
-        for j in first..=last {
-            let gap_lo = if j == 0 {
-                seg.lo
-            } else {
-                db.cell_bbox(seg.cells[j - 1]).max.x
-            };
-            let gap_hi = if j == seg.cells.len() {
-                seg.hi
-            } else {
-                db.cells[seg.cells[j].index()].location.x
-            };
-            if gap_hi - gap_lo < width {
-                continue;
-            }
-            let x =
-                snap_down(target.clamp(gap_lo, gap_hi - width), row.x_min, row.site).max(gap_lo);
-            if best.is_none_or(|b| (x - target).abs() < (b - target).abs()) {
-                best = Some(x);
+        for (lo, hi) in self.gaps_near(db, s, target, width) {
+            let lo = snap_up(lo.max(target - reach), row.x_min, row.site);
+            let hi = snap_down(hi.min(target + reach), row.x_min, row.site);
+            let mut x = lo;
+            while x <= hi {
+                let closer = best.is_none_or(|b| (x - target).abs() < (b - target).abs());
+                if closer && self.blocked_at(db, cell, Point::new(x, row.y), row_index) == 0 {
+                    best = Some(x);
+                }
+                x += row.site;
             }
         }
         best
