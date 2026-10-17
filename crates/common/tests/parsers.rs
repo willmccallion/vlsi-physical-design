@@ -222,6 +222,19 @@ fn pin_positions_follow_the_cell_orientation() {
 }
 
 #[test]
+fn a_pin_position_at_another_location_moves_with_the_cell() {
+    let db = tiny_design();
+    let pin = cell_pin(&db, "u2", "A");
+    let cell = db.cells.iter().position(|c| c.name == "u2").unwrap();
+    let moved = db.cells[cell].location + pt(400, -2000);
+
+    assert_eq!(
+        db.pin_position_at(pin, moved),
+        db.pin_position(pin) + pt(400, -2000)
+    );
+}
+
+#[test]
 fn io_pin_shapes_rotate_about_the_pin_location() {
     let db = tiny_design();
 

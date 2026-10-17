@@ -600,14 +600,8 @@ impl NetlistDB {
     /// The design location of a connection's reference point.
     pub fn pin_position(&self, pin: PinId) -> Point<Dbu> {
         match self.pins[pin.index()].owner {
-            PinOwner::Cell { cell, pin } => {
-                let c = &self.cells[cell.index()];
-                let m = self.library.cell_macro(c.macro_id);
-                let local = m
-                    .pin(pin)
-                    .reference_point()
-                    .unwrap_or_else(|| Rect::new(Point::default(), m.size).center());
-                c.orient.place_point(local, m.size, c.location)
+            PinOwner::Cell { cell, .. } => {
+                self.pin_position_at(pin, self.cells[cell.index()].location)
             }
             PinOwner::Io(io) => {
                 let p = &self.io_pins[io.index()];
@@ -616,6 +610,43 @@ impl NetlistDB {
                     .reduce(|a, b| a.union(&b))
                     .map_or(p.location, |r| r.center())
             }
+        }
+    }
+
+    /// Where `pin` is with its cell's lower-left corner at `location`, or
+    /// where it is now for an I/O pin.
+    pub fn pin_position_at(&self, pin: PinId, location: Point<Dbu>) -> Point<Dbu> {
+        match self.pins[pin.index()].owner {
+            PinOwner::Cell { cell, pin } => {
+                let c = &self.cells[cell.index()];
+                let m = self.library.cell_macro(c.macro_id);
+                let local = m
+                    .pin(pin)
+                    .reference_point()
+                    .unwrap_or_else(|| Rect::new(Point::default(), m.size).center());
+                c.orient.place_point(local, m.size, location)
+            }
+            PinOwner::Io(_) => self.pin_position(pin),
+        }
+    }
+
+    /// The lowest routing layer `pin` has a shape on.
+    pub fn pin_reference_layer(&self, pin: PinId) -> Option<LayerId> {
+        match self.pins[pin.index()].owner {
+            PinOwner::Cell { cell, pin } => {
+                let c = &self.cells[cell.index()];
+                self.library
+                    .cell_macro(c.macro_id)
+                    .pin(pin)
+                    .reference_layer()
+            }
+            PinOwner::Io(io) => self.io_pins[io.index()]
+                .placed_shapes()
+                .filter_map(|s| match s.layer {
+                    LayerRef::Routing(layer) => Some(layer),
+                    LayerRef::Cut(_) => None,
+                })
+                .min(),
         }
     }
 

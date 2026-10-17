@@ -267,17 +267,21 @@ pub struct MacroPin {
 }
 
 impl MacroPin {
-    /// A point inside the pin used as its location for wirelength and routing:
-    /// the center of the largest shape on the lowest routing layer it uses.
-    pub fn reference_point(&self) -> Option<Point<Dbu>> {
-        let lowest = self
-            .shapes
+    /// The lowest routing layer the pin has a shape on.
+    pub fn reference_layer(&self) -> Option<LayerId> {
+        self.shapes
             .iter()
             .filter_map(|s| match s.layer {
                 LayerRef::Routing(layer) => Some(layer),
                 LayerRef::Cut(_) => None,
             })
-            .min()?;
+            .min()
+    }
+
+    /// A point inside the pin used as its location for wirelength and routing:
+    /// the center of the largest shape on the lowest routing layer it uses.
+    pub fn reference_point(&self) -> Option<Point<Dbu>> {
+        let lowest = self.reference_layer()?;
         self.shapes
             .iter()
             .filter(|s| s.layer == LayerRef::Routing(lowest))
