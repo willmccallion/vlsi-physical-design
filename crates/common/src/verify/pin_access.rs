@@ -5,8 +5,9 @@
 //! tracks, and whose metal on the routing layer keeps that layer's spacing
 //! from the fixed metal of every other owner there: power stripes,
 //! blockages, macro obstructions and other fixed pins. A pin with no such
-//! via is blocked, and placement must not leave a cell where one of its
-//! pins is.
+//! via is blocked, as is a pin whose own metal on the routing layer comes
+//! within that spacing of such fixed metal, and placement must not leave a
+//! cell where one of its pins is.
 
 use crate::db::design::{NetlistDB, PinOwner};
 use crate::db::indices::{CellId, CutLayerId, LayerId, MacroPinId, NetId};
@@ -53,6 +54,7 @@ struct ViaUp {
 #[derive(Debug)]
 pub struct PinAccess {
     pin_layer: LayerId,
+    above: LayerId,
     /// Coordinates across the routing layer of its tracks.
     tracks_above: Vec<Dbu>,
     /// Coordinates across the pin layer of its tracks.
@@ -105,6 +107,7 @@ impl PinAccess {
             .collect();
         Some(Self {
             pin_layer,
+            above,
             tracks_above: db.layer_tracks(above),
             tracks_pin: db.layer_tracks(pin_layer),
             above_vertical: lib.layer(above).direction == Direction::Vertical,
@@ -138,8 +141,10 @@ impl PinAccess {
             .count()
     }
 
-    /// Whether none of the pin's shapes on the pin layer can be reached.
-    /// A pin with no shape there is routed directly and never blocked here.
+    /// Whether the pin's metal on the routing layer conflicts with fixed
+    /// metal, or none of its shapes on the pin layer can be reached while
+    /// it has no clear metal on the routing layer. A pin with shapes on
+    /// neither layer is never blocked here.
     fn pin_blocked(
         &self,
         m: &Macro,
@@ -148,17 +153,24 @@ impl PinAccess {
         at: Point<Dbu>,
         orient: Orientation,
     ) -> bool {
+        let mut conflict_above = false;
+        let mut clear_above = false;
         let mut on_pin_layer = false;
+        let mut reachable_below = false;
         for s in &m.pins[mp.index()].shapes {
-            if s.layer != LayerRef::Routing(self.pin_layer) {
-                continue;
-            }
-            on_pin_layer = true;
-            if self.reachable(&orient.place_rect(&s.rect, m.size, at), net) {
-                return false;
+            let rect = orient.place_rect(&s.rect, m.size, at);
+            if s.layer == LayerRef::Routing(self.above) {
+                if self.clear(&rect, net) {
+                    clear_above = true;
+                } else {
+                    conflict_above = true;
+                }
+            } else if s.layer == LayerRef::Routing(self.pin_layer) {
+                on_pin_layer = true;
+                reachable_below |= self.reachable(&rect, net);
             }
         }
-        on_pin_layer
+        conflict_above || (on_pin_layer && !reachable_below && !clear_above)
     }
 
     /// Whether some via with its cut inside `rect`, at a crossing of the two
@@ -300,6 +312,23 @@ mod tests {
             }],
         });
         let m = lib.add_macro(m).unwrap();
+        let mut upper = Macro::new(
+            "U".into(),
+            MacroClass::Core(CoreKind::Regular),
+            pt(400, 2000),
+            symmetry,
+            Some(site),
+        );
+        let _ = upper.add_pin(MacroPin {
+            name: "a".into(),
+            direction: PinDirection::Input,
+            signal_use: SignalUse::Signal,
+            shapes: vec![Shape {
+                layer: LayerRef::Routing(m2),
+                rect: rect(50, 500, 150, 1500),
+            }],
+        });
+        let _ = lib.add_macro(upper).unwrap();
         let mut db = NetlistDB::new("t".into(), lib);
         db.die_area = rect(0, 0, 10_000, 4000);
         db.tracks.push(TrackDef {
@@ -374,6 +403,23 @@ mod tests {
     #[test]
     fn a_pin_far_from_the_stripe_is_free() {
         assert_eq!(blocked(1000), 0);
+    }
+
+    fn blocked_upper(x: i64) -> usize {
+        let (mut db, _) = design();
+        let cell = cell_at(&mut db, crate::db::indices::MacroId(1), x);
+        let access = PinAccess::new(&db, LayerId(1)).unwrap();
+        access.blocked_pins(&db, cell, pt(x, 0), Orientation::N)
+    }
+
+    #[test]
+    fn a_routing_layer_pin_within_spacing_of_the_stripe_is_blocked() {
+        assert_eq!(blocked_upper(3400), 1);
+    }
+
+    #[test]
+    fn a_routing_layer_pin_clear_of_the_stripe_is_free() {
+        assert_eq!(blocked_upper(3200), 0);
     }
 
     #[test]
