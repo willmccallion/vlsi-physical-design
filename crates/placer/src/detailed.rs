@@ -106,8 +106,16 @@ pub fn free_blocked_pins(db: &mut NetlistDB, zones: &Zones, access: &PinAccess) 
             let at = db.cells[cell.index()].location;
             let blocked = dp.blocked_now(db, cell, s);
             if blocked > 0 {
+                let beside: Vec<&str> = dp
+                    .beside(db, cell, at, dp.segments[s].row, &[], &[])
+                    .iter()
+                    .map(|n| db.cells[n.cell.index()].name.as_str())
+                    .collect();
+                let alone = dp
+                    .access
+                    .map_or(0, |a| a.blocked_pins(db, cell, at, db.cells[cell.index()].orient));
                 log::debug!(
-                    "cell {} at ({}, {}) keeps {blocked} blocked pins",
+                    "cell {} at ({}, {}) keeps {blocked} blocked pins ({alone} by fixed metal alone) beside {beside:?}",
                     db.cells[cell.index()].name,
                     at.x.get(),
                     at.y.get()
