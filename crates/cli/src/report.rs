@@ -54,6 +54,8 @@ pub struct PlacementSummary {
     pub hpwl_um: f64,
     /// Moves detailed placement kept.
     pub detailed_moves: usize,
+    /// Signal pins left where fixed metal blocks every via to them.
+    pub blocked_pins: usize,
 }
 
 /// What routing did.

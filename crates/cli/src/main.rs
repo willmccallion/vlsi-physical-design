@@ -17,6 +17,7 @@ use pare_common::geom::point::Point;
 use pare_common::util::config::{Config, Purpose};
 use pare_common::util::{logger, ui, visualization};
 use pare_common::verify::drc::{DrcReport, Marker, check_drc};
+use pare_common::verify::pin_access::PinAccess;
 use pare_common::verify::placement::{PlacementViolation, placement_violations};
 use pare_common::verify::routing::check_routing;
 use pare_placer::detailed;
@@ -286,6 +287,21 @@ fn run_placement(
     ui::phase("Legalization");
     abacus::legalize(db, &zones)?;
     ui::check(&format!("Legalized {movable_cells} cells"));
+    let access = config
+        .routing
+        .layer_range(&db.library)
+        .ok()
+        .and_then(|layers| PinAccess::new(db, *layers.start()));
+    let blocked_pins = access.as_ref().map_or(0, |access| {
+        let freed = detailed::free_blocked_pins(db, &zones, access);
+        ui::stat_row(
+            "Blocked pins:",
+            &format!("{} -> {}", freed.blocked_before, freed.blocked_after),
+            "Cells moved:",
+            &freed.moved.to_string(),
+        );
+        freed.blocked_after
+    });
     ui::stat_row(
         "HPWL (um):",
         &format!("{:.0}", PlacementModel::from_db(db, &zones).hpwl()),
@@ -296,7 +312,7 @@ fn run_placement(
 
     let phase_start = Instant::now();
     ui::phase("Detailed Placement");
-    let result = detailed::improve(db, &zones, 3);
+    let result = detailed::improve(db, &zones, 3, access.as_ref());
     let hpwl = PlacementModel::from_db(db, &zones).hpwl();
     ui::stat_row(
         "Moves:",
@@ -308,6 +324,7 @@ fn run_placement(
     if let Some(summary) = &mut report.placement {
         summary.hpwl_um = hpwl;
         summary.detailed_moves = result.moves;
+        summary.blocked_pins = blocked_pins;
     }
 
     if !report_placement(db, report) {
@@ -504,6 +521,7 @@ fn global_placement(
         overflow: result.overflow,
         hpwl_um: hpwl,
         detailed_moves: 0,
+        blocked_pins: 0,
     });
     Ok(model)
 }

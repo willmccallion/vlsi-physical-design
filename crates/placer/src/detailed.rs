@@ -7,7 +7,9 @@
 //! half-perimeter wirelength of the nets it touches. Nets with more than
 //! [`MAX_NET_PINS`] pins are left out of the cost, as is usual for
 //! high-fanout nets whose bounding box barely changes. Cells only move
-//! within the stretches of row their zone may use.
+//! within the stretches of row their zone may use, and never onto a spot
+//! where fixed metal would block a via to one of their pins; a pass before
+//! the first moves the cells legalization left on such spots.
 
 use crate::rows::{
     RowSpan, classify, expand_rows, fixed_obstacles, free_intervals, orientation_allowed,
@@ -19,6 +21,7 @@ use pare_common::db::indices::{CellId, NetId};
 use pare_common::geom::dbu::Dbu;
 use pare_common::geom::point::Point;
 use pare_common::geom::rect::Rect;
+use pare_common::verify::pin_access::PinAccess;
 use std::collections::HashMap;
 
 /// Nets with more pins than this do not count toward move costs.
@@ -35,9 +38,75 @@ pub struct DetailedResult {
     pub moves: usize,
 }
 
-/// Runs `passes` rounds of global swap and local reordering on a legal placement.
-pub fn improve(db: &mut NetlistDB, zones: &Zones, passes: usize) -> DetailedResult {
-    let mut dp = DetailedPlacer::new(db, zones);
+/// What freeing blocked pins did.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct AccessRepair {
+    /// Signal pins no via could reach before.
+    pub blocked_before: usize,
+    /// Signal pins no via can reach after.
+    pub blocked_after: usize,
+    /// Cells moved.
+    pub moved: usize,
+}
+
+/// Sites a blocked cell may be shifted by along its row to free its pins.
+const MAX_SHIFT_SITES: i64 = 40;
+
+/// Moves every cell with a pin that fixed metal blocks to a spot where none
+/// of its pins is.
+///
+/// The spot is the nearest along the cell's row, pushing the cells beside
+/// it by the least that keeps every pushed cell clear too, or else a gap in
+/// a neighbouring row.
+pub fn free_blocked_pins(db: &mut NetlistDB, zones: &Zones, access: &PinAccess) -> AccessRepair {
+    let mut dp = DetailedPlacer::new(db, zones, Some(access));
+    let blocked_before = dp.count_blocked(db);
+    let mut moved = 0;
+    for s in 0..dp.segments.len() {
+        let mut i = 0;
+        while i < dp.segments[s].cells.len() {
+            let cell = dp.segments[s].cells[i];
+            let at = db.cells[cell.index()].location;
+            if dp.blocked_at(db, cell, at, dp.segments[s].row) == 0 {
+                i += 1;
+                continue;
+            }
+            match dp.free_cell(db, s, i) {
+                Freed::InPlace => {
+                    moved += 1;
+                    i += 1;
+                }
+                Freed::Elsewhere => moved += 1,
+                Freed::Not => i += 1,
+            }
+        }
+    }
+    AccessRepair {
+        blocked_before,
+        blocked_after: dp.count_blocked(db),
+        moved,
+    }
+}
+
+/// How a blocked cell was freed, if it was.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Freed {
+    /// Shifted within its segment, which keeps its place in the order.
+    InPlace,
+    /// Moved to another segment.
+    Elsewhere,
+    Not,
+}
+
+/// Runs `passes` rounds of global swap and local reordering on a legal
+/// placement, never moving a cell onto a spot `access` says blocks a pin.
+pub fn improve(
+    db: &mut NetlistDB,
+    zones: &Zones,
+    passes: usize,
+    access: Option<&PinAccess>,
+) -> DetailedResult {
+    let mut dp = DetailedPlacer::new(db, zones, access);
     let hpwl_before = dp.total_cost(db);
     let mut moves = 0;
     for _ in 0..passes {
@@ -63,7 +132,7 @@ struct Segment {
     cells: Vec<CellId>,
 }
 
-struct DetailedPlacer {
+struct DetailedPlacer<'a> {
     rows: Vec<RowSpan>,
     segments: Vec<Segment>,
     /// For each row, the half-open range of its segments.
@@ -74,10 +143,12 @@ struct DetailedPlacer {
     zone_of: Vec<Zone>,
     /// For each cell, the cost nets it is on.
     nets_of: Vec<Vec<NetId>>,
+    /// Which spots block a pin, when the design has pins to check.
+    access: Option<&'a PinAccess>,
 }
 
-impl DetailedPlacer {
-    fn new(db: &NetlistDB, zones: &Zones) -> Self {
+impl<'a> DetailedPlacer<'a> {
+    fn new(db: &NetlistDB, zones: &Zones, access: Option<&'a PinAccess>) -> Self {
         let rows = expand_rows(db);
         let (macros, std_cells) = classify(db, &rows);
         let mut obstacles = fixed_obstacles(db);
@@ -157,7 +228,127 @@ impl DetailedPlacer {
                 .map(|i| zones.of(CellId::new(i)))
                 .collect(),
             nets_of,
+            access,
         }
+    }
+
+    /// Signal pins of `cell` that fixed metal would block at `at` in `row`.
+    fn blocked_at(&self, db: &NetlistDB, cell: CellId, at: Point<Dbu>, row: usize) -> usize {
+        self.access
+            .map_or(0, |a| a.blocked_pins(db, cell, at, self.rows[row].orient))
+    }
+
+    /// Blocked signal pins over every movable standard cell.
+    fn count_blocked(&self, db: &NetlistDB) -> usize {
+        self.segment_of
+            .iter()
+            .map(|(&cell, &s)| {
+                self.blocked_at(
+                    db,
+                    cell,
+                    db.cells[cell.index()].location,
+                    self.segments[s].row,
+                )
+            })
+            .sum()
+    }
+
+    /// Frees the pins of cell `i` of segment `s`: by the shortest shift
+    /// along the segment that leaves it and every cell it pushes clear, or
+    /// else into a gap of a neighbouring row.
+    fn free_cell(&mut self, db: &mut NetlistDB, s: usize, i: usize) -> Freed {
+        let cell = self.segments[s].cells[i];
+        let row = self.segments[s].row;
+        let site = self.rows[row].site;
+        let x = db.cells[cell.index()].location.x;
+        for k in 1..=MAX_SHIFT_SITES {
+            for dir in [-1, 1] {
+                if let Some(moves) = self.shift_plan(db, s, i, x + site * (k * dir)) {
+                    for (c, at) in moves {
+                        db.cells[c.index()].location = at;
+                    }
+                    return Freed::InPlace;
+                }
+            }
+        }
+        let size = db.cell_size(cell);
+        let zone = self.zone_of[cell.index()];
+        for other in [row.checked_sub(1), Some(row + 1)].into_iter().flatten() {
+            if other >= self.rows.len()
+                || self.rows[other].height != size.y
+                || !orientation_allowed(db, cell, self.rows[other].orient)
+            {
+                continue;
+            }
+            for t in self.row_segments[other].0..self.row_segments[other].1 {
+                if self.segments[t].zone != zone {
+                    continue;
+                }
+                let Some(gx) = self.gap_near(db, t, x, size.x) else {
+                    continue;
+                };
+                let at = Point::new(gx, self.rows[other].y);
+                if self.blocked_at(db, cell, at, other) == 0 {
+                    db.cells[cell.index()].location = at;
+                    db.cells[cell.index()].orient = self.rows[other].orient;
+                    self.relocate(db, cell, s, t);
+                    return Freed::Elsewhere;
+                }
+            }
+        }
+        Freed::Not
+    }
+
+    /// The moves that put cell `i` of segment `s` at `nx` and push the
+    /// cells it would overlap out of the way, or `None` when a pushed cell
+    /// would leave the segment or land where a pin is blocked.
+    fn shift_plan(
+        &self,
+        db: &NetlistDB,
+        s: usize,
+        i: usize,
+        nx: Dbu,
+    ) -> Option<Vec<(CellId, Point<Dbu>)>> {
+        let seg = &self.segments[s];
+        let row = &self.rows[seg.row];
+        let cell = seg.cells[i];
+        let width = db.cell_size(cell).x;
+        if nx < seg.lo
+            || nx + width > seg.hi
+            || self.blocked_at(db, cell, Point::new(nx, row.y), seg.row) > 0
+        {
+            return None;
+        }
+        let mut moves = vec![(cell, Point::new(nx, row.y))];
+        let mut bound = nx;
+        for &c in seg.cells[..i].iter().rev() {
+            let bbox = db.cell_bbox(c);
+            if bbox.max.x <= bound {
+                break;
+            }
+            let at = snap_down(bound - bbox.width(), row.x_min, row.site);
+            if at < seg.lo || self.blocked_at(db, c, Point::new(at, row.y), seg.row) > 0 {
+                return None;
+            }
+            moves.push((c, Point::new(at, row.y)));
+            bound = at;
+        }
+        let mut bound = nx + width;
+        for &c in &seg.cells[i + 1..] {
+            let bbox = db.cell_bbox(c);
+            if bbox.min.x >= bound {
+                break;
+            }
+            let at = snap_up(bound, row.x_min, row.site);
+            if at + bbox.width() > seg.hi
+                || self.blocked_at(db, c, Point::new(at, row.y), seg.row) > 0
+            {
+                return None;
+            }
+            moves.push((c, Point::new(at, row.y)));
+            bound = at + bbox.width();
+        }
+        Some(moves)
     }
 
     fn total_cost(&self, db: &NetlistDB) -> f64 {
@@ -188,13 +379,19 @@ impl DetailedPlacer {
     }
 
     /// Applies `placements`, keeping them if they lower the cost of the nets
-    /// on `cells`; returns whether they were kept.
+    /// on `cells` and block no pin; returns whether they were kept.
     fn try_move(
         &self,
         db: &mut NetlistDB,
         cells: &[CellId],
         placements: &[(CellId, Point<Dbu>, usize)],
     ) -> bool {
+        if placements
+            .iter()
+            .any(|&(c, at, row)| self.blocked_at(db, c, at, row) > 0)
+        {
+            return false;
+        }
         let nets = self.affected(cells);
         let before = Self::cost_of(db, &nets);
         let saved: Vec<_> = placements
@@ -478,7 +675,7 @@ mod tests {
 
     fn improve_zoned(db: &mut NetlistDB) -> DetailedResult {
         let zones = Zones::new(db).unwrap();
-        improve(db, &zones, 2)
+        improve(db, &zones, 2, None)
     }
 
     /// One 20-site row over a 200 x 100 die, with 20-wide one-pin cells.
