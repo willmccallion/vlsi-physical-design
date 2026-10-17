@@ -239,11 +239,9 @@ impl Progress {
     }
 }
 
-/// Every gcell's routing capacity and what global routing loses of it
-/// before any cell is placed.
-///
-/// The losses are the capacity reserve and the metal placement cannot move:
-/// that of fixed cells and I/O pins, special nets and routing blockages.
+/// Every gcell's routing capacity and what the metal placement cannot move
+/// takes of it: that of fixed cells and I/O pins, special nets and routing
+/// blockages.
 pub fn capacity_reduction(
     db: &NetlistDB,
     config: &RoutingConfig,

@@ -278,8 +278,9 @@ impl GlobalGrid {
 
     /// Every gcell's [`CapacityReduction`] in the terms `FastRoute` reports
     /// it to RUDY: each layer adds the tracks of the edge leaving the gcell
-    /// along its direction and the tracks that edge lost; the last gcell of a
-    /// row or column takes those of the edge before it.
+    /// along its direction and the tracks fixed metal costs that edge, before
+    /// the reserve; the last gcell of a row or column takes those of the edge
+    /// before it.
     pub fn capacity_reduction(&self, tech: &RouteTech) -> CapacityReduction {
         let (nx, ny) = (usize::from(self.nx), usize::from(self.ny));
         let mut capacity = vec![0.0; nx * ny];
@@ -301,7 +302,7 @@ impl GlobalGrid {
                         Direction::Horizontal => (y, self.cell_index(layer, x.min(along - 2), y)),
                         Direction::Vertical => (x, self.cell_index(layer, x, y.min(along - 2))),
                     };
-                    let usable = self.capacity[edge].to_f64();
+                    let usable = self.capacity[edge].to_f64() / (1.0 - self.reserve);
                     capacity[y * nx + x] += tracks[line];
                     reduction[y * nx + x] += (tracks[line] - usable).max(0.0);
                 }
@@ -538,8 +539,8 @@ impl GlobalGrid {
     }
 }
 
-/// Each gcell's routing capacity and the part of it obstructions and the
-/// capacity reserve take, in tracks summed over the layers, row by row.
+/// Each gcell's routing capacity and the part of it fixed metal takes, in
+/// tracks summed over the layers, row by row.
 #[derive(Clone, Debug, PartialEq)]
 pub struct CapacityReduction {
     /// Lower-left corner of the gcell grid.

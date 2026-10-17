@@ -244,7 +244,7 @@ fn every_track_through_a_gcell_counts_toward_its_capacity() {
 }
 
 #[test]
-fn the_capacity_reserve_counts_as_reduction() {
+fn the_capacity_reserve_does_not_count_as_reduction() {
     let db = tiny();
     let config = RoutingConfig {
         global_capacity_reserve: 0.5,
@@ -253,8 +253,9 @@ fn the_capacity_reserve_counts_as_reduction() {
 
     let reduction = capacity_reduction(&db, &config).unwrap();
 
-    assert!((reduction.reduction[0] - 11.0).abs() < 1e-9);
-    assert!((reduction.reduction[2] - 11.5).abs() < 1e-9);
+    assert_eq!(reduction.capacity, vec![22.0, 22.0, 23.0, 23.0]);
+    assert!(reduction.reduction[0].abs() < 1e-9);
+    assert!(reduction.reduction[2].abs() < 1e-9);
 }
 
 #[test]
