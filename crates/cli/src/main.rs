@@ -49,6 +49,10 @@ enum Commands {
     Place {
         /// Design name (e.g. 'ibex') or path to a TOML config.
         config: PathBuf,
+        /// Placed DEF, or Bookshelf `.pl`, to legalize and refine instead of
+        /// placing from scratch; global placement is skipped.
+        #[arg(long)]
+        from: Option<PathBuf>,
     },
     /// Route a placed design.
     Route {
@@ -57,6 +61,10 @@ enum Commands {
         /// Placed DEF, or Bookshelf `.pl`, to route instead of the config's input.
         #[arg(long)]
         placement: Option<PathBuf>,
+        /// Stop after global routing and track assignment, reporting their
+        /// result without routing in detail or writing a DEF.
+        #[arg(long)]
+        global_only: bool,
     },
     /// Place, route, or place and route a design, as its purpose says.
     Run {
@@ -148,7 +156,7 @@ fn main() -> anyhow::Result<()> {
 /// Runs one command, recording what it did in `report`.
 fn run(command: Commands, report: &mut Report) -> anyhow::Result<()> {
     match command {
-        Commands::Place { config: name } => {
+        Commands::Place { config: name, from } => {
             let config = load_config(&name, report)?;
             if config.purpose == Purpose::Routing {
                 anyhow::bail!(
@@ -156,13 +164,25 @@ fn run(command: Commands, report: &mut Report) -> anyhow::Result<()> {
                     name.display()
                 );
             }
-            let mut db = load_design(&config, None)?;
+            let mut db = load_design(&config, from.as_deref())?;
             report.design.clone_from(&db.name);
-            run_placement(&config, &mut db, &prepare_output_dir(&config)?, report)
+            let start = if from.is_some() {
+                PlacementStart::Given
+            } else {
+                PlacementStart::Scratch
+            };
+            run_placement(
+                &config,
+                &mut db,
+                &prepare_output_dir(&config)?,
+                start,
+                report,
+            )
         }
         Commands::Route {
             config: name,
             placement,
+            global_only,
         } => {
             let config = load_config(&name, report)?;
             if config.purpose == Purpose::Placement {
@@ -173,7 +193,18 @@ fn run(command: Commands, report: &mut Report) -> anyhow::Result<()> {
             }
             let mut db = load_design(&config, placement.as_deref())?;
             report.design.clone_from(&db.name);
-            run_routing(&config, &mut db, &prepare_output_dir(&config)?, report)
+            let stage = if global_only {
+                RouteStage::Global
+            } else {
+                RouteStage::Detailed
+            };
+            run_routing(
+                &config,
+                &mut db,
+                &prepare_output_dir(&config)?,
+                stage,
+                report,
+            )
         }
         Commands::Run { config } => {
             let config = load_config(&config, report)?;
@@ -181,10 +212,16 @@ fn run(command: Commands, report: &mut Report) -> anyhow::Result<()> {
             report.design.clone_from(&db.name);
             let output_dir = prepare_output_dir(&config)?;
             if config.purpose != Purpose::Routing {
-                run_placement(&config, &mut db, &output_dir, report)?;
+                run_placement(
+                    &config,
+                    &mut db,
+                    &output_dir,
+                    PlacementStart::Scratch,
+                    report,
+                )?;
             }
             if config.purpose != Purpose::Placement {
-                run_routing(&config, &mut db, &output_dir, report)?;
+                run_routing(&config, &mut db, &output_dir, RouteStage::Detailed, report)?;
             }
             Ok(())
         }
@@ -242,15 +279,35 @@ fn output_dir(config: &Config) -> PathBuf {
         .map_or_else(|| PathBuf::from("output"), Path::to_path_buf)
 }
 
+/// Where placement starts from.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum PlacementStart {
+    /// Global placement from a random start.
+    Scratch,
+    /// The positions the design already has, which are only legalized and
+    /// refined.
+    Given,
+}
+
+/// How far routing goes.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum RouteStage {
+    /// Global routing and track assignment only.
+    Global,
+    /// Through detailed routing, verification and output.
+    Detailed,
+}
+
 /// Global placement, I/O pin placement, legalization, checking and output.
 fn run_placement(
     config: &Config,
     db: &mut NetlistDB,
     output_dir: &Path,
+    start: PlacementStart,
     report: &mut Report,
 ) -> anyhow::Result<()> {
     let movable_io = io::movable_io_pins(db);
-    let io_layers = if movable_io.is_empty() {
+    let io_layers = if movable_io.is_empty() || start == PlacementStart::Given {
         None
     } else if config.io_placement.enabled {
         Some(IoLayers::from_config(&config.io_placement, &db.library)?)
@@ -267,7 +324,18 @@ fn run_placement(
 
     let zones = Zones::new(db)?;
     ui::section("Placement");
-    let model = if let Some(layers) = io_layers {
+    let model = if start == PlacementStart::Given {
+        let unplaced = db
+            .cells
+            .iter()
+            .filter(|c| c.status == PlacementStatus::Unplaced)
+            .count();
+        if unplaced > 0 {
+            anyhow::bail!("{unplaced} cells of the given placement are unplaced");
+        }
+        ui::check("Starting from the given placement");
+        PlacementModel::from_db(db, &zones)
+    } else if let Some(layers) = io_layers {
         place_cells_and_io_pins(config, db, &zones, layers, report)?
     } else {
         let phase_start = Instant::now();
@@ -651,10 +719,17 @@ fn run_routing(
     config: &Config,
     db: &mut NetlistDB,
     output_dir: &Path,
+    stage: RouteStage,
     report: &mut Report,
 ) -> anyhow::Result<()> {
     let phase_start = Instant::now();
     ui::section("Routing");
+    if stage == RouteStage::Global {
+        let summary = pare_router::route_global_only(db, &config.routing)?;
+        ui::stat_row("Nets:", &summary.nets.to_string(), "", "");
+        report.phase("global routing", phase_start);
+        return Ok(());
+    }
     let summary = pare_router::route(db, &config.routing)?;
     ui::stat_row(
         "Nets:",

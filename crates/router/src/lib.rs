@@ -52,20 +52,7 @@ pub struct RoutingSummary {
 
 /// Routes every signal net of `db` and stores the wiring in the design.
 pub fn route(db: &mut NetlistDB, config: &RoutingConfig) -> Result<RoutingSummary, RouteError> {
-    let mut unplaced = db
-        .cells
-        .iter()
-        .filter(|c| c.status == PlacementStatus::Unplaced);
-    if let Some(first) = unplaced.next() {
-        return Err(RouteError::UnplacedCells {
-            count: 1 + unplaced.count(),
-            first: first.name.clone(),
-        });
-    }
-    check_reserve(config)?;
-    if let Some(error) = overlapping_pins(db) {
-        return Err(error);
-    }
+    check_routable(db, config)?;
     let tech = RouteTech::new(db, config)?;
     let gcell = gcell_size(&tech, config);
     let pitch = tech.layer(tech.min_layer).pitch().to_f64();
@@ -76,50 +63,13 @@ pub fn route(db: &mut NetlistDB, config: &RoutingConfig) -> Result<RoutingSummar
     };
 
     let (routes, summary, gcells) = {
-        let start = Instant::now();
-        let mut dr = DetailedRouter::new(db, &tech, gcell);
-        let nets = routable_nets(db);
-        stage("Pin access:", start);
-
-        let start = Instant::now();
-        let mut grid = GlobalGrid::new(
-            &tech,
-            &dr.occupancy,
-            db.die_area,
-            gcell,
-            config.global_capacity_reserve,
-        );
-        stage("GCell grid:", start);
-        let start = Instant::now();
-        let global_nets: Vec<GlobalNet> = nets
-            .iter()
-            .filter_map(|&net| {
-                Some(GlobalNet {
-                    net,
-                    terminals: dr.terminals(net, &grid)?,
-                    demand: track_demand(db, &tech, net),
-                })
-            })
-            .collect();
-        let global = route_global(&mut grid, &global_nets, config.global_iterations);
+        let GlobalStage {
+            mut dr,
+            nets,
+            grid,
+            global,
+        } = global_stage(db, &tech, config, gcell);
         let (nx, ny) = grid.size();
-        stage("Global route:", start);
-        ui::stat_row(
-            "GCells:",
-            &format!("{nx}x{ny}"),
-            "GR overflow:",
-            &grid.overflow().rounded().to_string(),
-        );
-        ui::gr_layer_table_header();
-        for t in grid.layer_totals() {
-            ui::gr_layer_row(
-                &db.library.layer(t.layer).name,
-                t.direction,
-                t.capacity.rounded(),
-                t.usage.rounded(),
-                t.overflow.rounded(),
-            );
-        }
         let start = Instant::now();
         let wires = assign_tracks(&tech, &dr.occupancy, &grid, &global, &dr.pin_points());
         dr.set_guides(global, &grid);
@@ -197,6 +147,119 @@ pub fn route(db: &mut NetlistDB, config: &RoutingConfig) -> Result<RoutingSummar
         db.nets[n.index()].routing = elems;
     }
     Ok(summary)
+}
+
+/// Global routing and track assignment of every signal net of `db`, for
+/// measuring them on their own; the design is left as it is.
+pub fn route_global_only(
+    db: &NetlistDB,
+    config: &RoutingConfig,
+) -> Result<RoutingSummary, RouteError> {
+    check_routable(db, config)?;
+    let tech = RouteTech::new(db, config)?;
+    let gcell = gcell_size(&tech, config);
+    let GlobalStage {
+        dr,
+        nets,
+        grid,
+        global,
+        ..
+    } = global_stage(db, &tech, config, gcell);
+    let start = Instant::now();
+    let _ = assign_tracks(&tech, &dr.occupancy, &grid, &global, &dr.pin_points());
+    stage("Track assign:", start);
+    Ok(RoutingSummary {
+        nets: nets.len(),
+        inaccessible: dr.inaccessible_nets(),
+        ..RoutingSummary::default()
+    })
+}
+
+/// Why `db` cannot be routed under `config`, if it cannot.
+fn check_routable(db: &NetlistDB, config: &RoutingConfig) -> Result<(), RouteError> {
+    let mut unplaced = db
+        .cells
+        .iter()
+        .filter(|c| c.status == PlacementStatus::Unplaced);
+    if let Some(first) = unplaced.next() {
+        return Err(RouteError::UnplacedCells {
+            count: 1 + unplaced.count(),
+            first: first.name.clone(),
+        });
+    }
+    check_reserve(config)?;
+    if let Some(error) = overlapping_pins(db) {
+        return Err(error);
+    }
+    Ok(())
+}
+
+/// The detailed router with its pin access, the nets to route, and their
+/// global routes on the gcell grid.
+struct GlobalStage<'a> {
+    dr: DetailedRouter<'a>,
+    nets: Vec<NetId>,
+    grid: GlobalGrid,
+    global: global::GlobalRoutes,
+}
+
+/// Pin access, the gcell grid and global routing, reported stage by stage.
+fn global_stage<'a>(
+    db: &'a NetlistDB,
+    tech: &'a RouteTech,
+    config: &RoutingConfig,
+    gcell: Dbu,
+) -> GlobalStage<'a> {
+    let start = Instant::now();
+    let dr = DetailedRouter::new(db, tech, gcell);
+    let nets = routable_nets(db);
+    stage("Pin access:", start);
+
+    let start = Instant::now();
+    let mut grid = GlobalGrid::new(
+        tech,
+        &dr.occupancy,
+        db.die_area,
+        gcell,
+        config.global_capacity_reserve,
+    );
+    stage("GCell grid:", start);
+    let start = Instant::now();
+    let global_nets: Vec<GlobalNet> = nets
+        .iter()
+        .filter_map(|&net| {
+            Some(GlobalNet {
+                net,
+                terminals: dr.terminals(net, &grid)?,
+                demand: track_demand(db, tech, net),
+            })
+        })
+        .collect();
+    let global = route_global(&mut grid, &global_nets, config.global_iterations);
+    let (nx, ny) = grid.size();
+    stage("Global route:", start);
+    ui::stat_row(
+        "GCells:",
+        &format!("{nx}x{ny}"),
+        "GR overflow:",
+        &grid.overflow().rounded().to_string(),
+    );
+    ui::gr_layer_table_header();
+    for t in grid.layer_totals() {
+        ui::gr_layer_row(
+            &db.library.layer(t.layer).name,
+            t.direction,
+            t.capacity.rounded(),
+            t.usage.rounded(),
+            t.overflow.rounded(),
+        );
+    }
+    GlobalStage {
+        dr,
+        nets,
+        grid,
+        global,
+    }
 }
 
 /// The scope of the next repair pass: conflicts only, except for one pass
