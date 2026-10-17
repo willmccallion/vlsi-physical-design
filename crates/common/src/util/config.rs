@@ -124,7 +124,8 @@ pub struct RoutingConfig {
     #[serde(default = "default_global_iterations")]
     pub global_iterations: usize,
     /// Fraction of each gcell edge's tracks that global routing leaves for
-    /// detailed routing's vias, pin access and spacing, in `[0, 1)`.
+    /// what detailed routing needs beyond the wires and vias it plans: wire
+    /// ends, jogs and room to negotiate, in `[0, 1)`.
     #[serde(default = "default_global_capacity_reserve")]
     pub global_capacity_reserve: f64,
     /// Rip-up and reroute rounds of detailed routing.
@@ -248,7 +249,7 @@ const fn default_global_iterations() -> usize {
 }
 
 const fn default_global_capacity_reserve() -> f64 {
-    0.5
+    0.25
 }
 
 const fn default_detailed_iterations() -> usize {
