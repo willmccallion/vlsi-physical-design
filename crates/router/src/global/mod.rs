@@ -57,6 +57,8 @@ pub struct GlobalGrid {
     capacity: Vec<Tracks>,
     /// Edges no track crosses at all, which fixed metal blocks outright.
     blocked: Vec<bool>,
+    /// Cells where fixed metal leaves no track of the layer room for a via pad.
+    via_blocked: Vec<bool>,
     /// Per layer, the share of a track a via somewhere in a gcell is expected
     /// to take from each edge beside it.
     via_loss: Vec<Tracks>,
@@ -84,6 +86,14 @@ pub struct LayerTotals {
 enum Sign {
     Add,
     Remove,
+}
+
+/// What one layer's tracks and fixed metal give the grid.
+struct LayerResources {
+    /// Usable tracks across each edge.
+    tracks: Vec<f64>,
+    /// Cells with no room for a via pad on any track.
+    via_blocked: Vec<bool>,
 }
 
 impl GlobalGrid {
@@ -115,43 +125,61 @@ impl GlobalGrid {
             directions: layers.iter().map(|&l| tech.layer(l).direction).collect(),
             capacity: Vec::new(),
             blocked: Vec::new(),
+            via_blocked: Vec::new(),
             via_loss: layers.iter().map(|&l| via_loss(tech, l, gcell)).collect(),
             usage: vec![Tracks::ZERO; per_layer * layers.len()],
             history: vec![0.0; per_layer * layers.len()],
         };
-        let tracks: Vec<f64> = layers
+        let resources: Vec<LayerResources> = layers
             .par_iter()
-            .flat_map_iter(|&l| grid.layer_capacity(tech, fixed, die, l))
+            .map(|&l| grid.layer_resources(tech, fixed, die, l))
             .collect();
-        grid.capacity = tracks
+        grid.capacity = resources
             .iter()
+            .flat_map(|r| r.tracks.iter())
             .map(|&t| Tracks::from_f64(t * (1.0 - reserve)))
             .collect();
-        grid.blocked = tracks.iter().map(|&t| t <= 0.0).collect();
+        grid.blocked = resources
+            .iter()
+            .flat_map(|r| r.tracks.iter())
+            .map(|&t| t <= 0.0)
+            .collect();
+        grid.via_blocked = resources
+            .iter()
+            .flat_map(|r| r.via_blocked.iter().copied())
+            .collect();
         grid
     }
 
     /// Usable tracks across each preferred-direction edge of one layer, as
     /// in CUGR: each track counts for the fraction of the stretch between
     /// the centres of the edge's two gcells that fixed metal leaves usable,
-    /// and nothing when fixed metal crosses the boundary between them.
-    fn layer_capacity(
+    /// and nothing when fixed metal crosses the boundary between them. Also
+    /// which of the layer's cells leave no track a gap long enough for a
+    /// via pad.
+    fn layer_resources(
         &self,
         tech: &RouteTech,
         fixed: &impl FixedMetal,
         die: Rect<Dbu>,
         layer: LayerId,
-    ) -> Vec<f64> {
+    ) -> LayerResources {
         let lt = tech.layer(layer);
         let (nx, ny) = (usize::from(self.nx), usize::from(self.ny));
         let mut cap = vec![0.0; nx * ny];
+        let mut room = vec![false; nx * ny];
+        let pad = via_pad_along(tech, layer);
         let (along_origin, along_end, across_origin, along_cells) = match lt.direction {
             Direction::Horizontal => (self.origin.x, die.max.x, self.origin.y, nx),
             Direction::Vertical => (self.origin.y, die.max.y, self.origin.x, ny),
         };
-        let centre = |i: usize| {
+        let extent = |i: usize| {
             let start = along_origin + self.gcell * i as i64;
             let end = (start + self.gcell).min(along_end).max(start);
+            (start, end)
+        };
+        let centre = |i: usize| {
+            let (start, end) = extent(i);
             start + (end - start) / 2
         };
         for (t, &across) in lt.tracks.iter().enumerate() {
@@ -163,18 +191,26 @@ impl GlobalGrid {
                 layer,
                 track: crate::tech::to_u32(t),
             };
-            for i in 0..along_cells.saturating_sub(1) {
+            for i in 0..along_cells {
                 let index = match lt.direction {
                     Direction::Horizontal if row < ny => row * nx + i,
                     Direction::Vertical if row < nx => i * nx + row,
                     _ => continue,
                 };
-                let boundary = along_origin + self.gcell * (i as i64 + 1);
-                let stretch = (centre(i), centre(i + 1));
-                cap[index] += usable_fraction(fixed, track, boundary, stretch);
+                if has_gap(fixed, track, extent(i), pad) {
+                    room[index] = true;
+                }
+                if i + 1 < along_cells {
+                    let boundary = along_origin + self.gcell * (i as i64 + 1);
+                    let stretch = (centre(i), centre(i + 1));
+                    cap[index] += usable_fraction(fixed, track, boundary, stretch);
+                }
             }
         }
-        cap
+        LayerResources {
+            tracks: cap,
+            via_blocked: room.into_iter().map(|r| !r).collect(),
+        }
     }
 
     /// Every gcell's [`CapacityReduction`] in the terms `FastRoute` reports
@@ -309,6 +345,11 @@ impl GlobalGrid {
 
     const fn layers(&self) -> std::ops::RangeInclusive<usize> {
         self.min_layer.index()..=self.min_layer.index() + self.directions.len() - 1
+    }
+
+    /// Whether no via pad fits in cell `c` on its layer.
+    fn via_blocked(&self, c: GCell) -> bool {
+        self.via_blocked[self.edge(c)]
     }
 
     /// Whether a wire of `c`'s layer can leave `c` forward, and the edge it
@@ -478,6 +519,22 @@ fn usable_fraction(
     (usable.1 - usable.0).to_f64() / (hi - lo).to_f64()
 }
 
+/// Whether fixed metal leaves a gap of at least `length` on `track` within
+/// `extent`.
+fn has_gap(fixed: &impl FixedMetal, track: TrackRef, extent: (Dbu, Dbu), length: Dbu) -> bool {
+    let (lo, hi) = extent;
+    let mut taken: Vec<(Dbu, Dbu)> = fixed.fixed_stretches(track, lo, hi).collect();
+    taken.sort_unstable();
+    let mut free_from = lo;
+    for (start, end) in taken {
+        if start - free_from >= length {
+            return true;
+        }
+        free_from = free_from.max(end);
+    }
+    hi - free_from >= length
+}
+
 /// How far the pads of the vias touching `layer` reach along its tracks.
 fn via_pad_along(tech: &RouteTech, layer: LayerId) -> Dbu {
     let lt = tech.layer(layer);
@@ -556,6 +613,11 @@ pub struct GlobalCosts {
 
 /// Steepness, per track, of the logistic congestion cost around capacity.
 const CONGESTION_SLOPE: f64 = 1.0;
+
+/// Cost of an edge or via pad fixed metal blocks outright, in pattern
+/// routing: far above any detour, so a plan takes one only when no plan
+/// avoids it.
+const BLOCKED_COST: f64 = 1e12;
 
 /// Search margin, in gcells, around a net's first route's connections.
 const FIRST_MARGIN: u16 = 2;
@@ -944,6 +1006,7 @@ mod tests {
             directions: vec![Direction::Horizontal, Direction::Vertical],
             capacity: vec![Tracks::whole(4); edges],
             blocked: vec![false; edges],
+            via_blocked: vec![false; edges],
             via_loss: vec![Tracks::from_f64(0.1); 2],
             usage: vec![Tracks::ZERO; edges],
             history: vec![0.0; edges],
@@ -1034,6 +1097,7 @@ mod tests {
         let edges = grid.usage.len() / 2;
         grid.capacity.extend(vec![Tracks::whole(4); edges]);
         grid.blocked.extend(vec![false; edges]);
+        grid.via_blocked.extend(vec![false; edges]);
         grid.via_loss.push(Tracks::from_f64(0.1));
         grid.usage.extend(vec![Tracks::ZERO; edges]);
         grid.history.extend(vec![0.0; edges]);

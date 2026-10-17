@@ -5,11 +5,13 @@
 //! once by dynamic programming from the leaves up: a node's via stack spans
 //! its pins' layers and the layers its edges attach on, and costs the via
 //! cost per layer it climbs; a bend costs the vias between its two legs;
-//! every leg costs its gcell edges at the current congestion. The tree
-//! comes out as paths in the grid, each starting on the paths before it.
+//! every leg costs its gcell edges at the current congestion. Edges and
+//! via pads that fixed metal blocks outright cost so much that a plan takes
+//! them only when every plan must. The tree comes out as paths in the
+//! grid, each starting on the paths before it.
 
 use super::steiner::{Spot, steiner_tree};
-use super::{GCell, GlobalCosts, GlobalGrid, GlobalNet};
+use super::{BLOCKED_COST, GCell, GlobalCosts, GlobalGrid, GlobalNet};
 use pare_common::db::indices::LayerId;
 use pare_common::db::library::Direction;
 
@@ -87,7 +89,7 @@ pub(super) fn route_pattern(
         for &c in &children[v] {
             edge_best[c] = planner.edges(tree.nodes[c], tree.nodes[v], &node_best[c]);
         }
-        node_best[v] = planner.node(pins[v], &children[v], &edge_best);
+        node_best[v] = planner.node(tree.nodes[v], pins[v], &children[v], &edge_best);
     }
 
     let mut span = vec![(0, 0); tree.nodes.len()];
@@ -158,6 +160,26 @@ impl Planner<'_> {
         self.costs.via * a.abs_diff(b) as f64
     }
 
+    /// Cost of a via stack at `spot` between layers `a` and `b`: the via
+    /// cost per layer climbed, and the blocked cost for every layer whose
+    /// cell there has no room for a pad.
+    fn stack(&self, spot: Spot, a: usize, b: usize) -> f64 {
+        let (lo, hi) = (a.min(b), a.max(b));
+        if lo == hi {
+            return 0.0;
+        }
+        let blocked = (lo..=hi)
+            .filter(|&l| {
+                self.grid.via_blocked(GCell {
+                    layer: self.layer(l),
+                    x: spot.0,
+                    y: spot.1,
+                })
+            })
+            .count();
+        BLOCKED_COST.mul_add(blocked as f64, self.via(a, b))
+    }
+
     /// Cost of a leg on layer `l` from `from` to `to` along one row or
     /// column, or `None` if `l` runs the other way.
     fn leg(&self, l: usize, from: Spot, to: Spot) -> Option<f64> {
@@ -191,8 +213,12 @@ impl Planner<'_> {
                         y: k,
                     }
                 };
-                self.grid
-                    .edge_cost(self.grid.edge(start), demand, self.costs)
+                let e = self.grid.edge(start);
+                if self.grid.blocked[e] {
+                    BLOCKED_COST
+                } else {
+                    self.grid.edge_cost(e, demand, self.costs)
+                }
             })
             .sum();
         Some(cost)
@@ -223,7 +249,7 @@ impl Planner<'_> {
         if child == parent {
             for a in 0..self.layers {
                 for b in 0..self.layers {
-                    offer(b, a, self.via(a, b), Shape::Stacked);
+                    offer(b, a, self.stack(child, a, b), Shape::Stacked);
                 }
             }
         } else if child.0 == parent.0 || child.1 == parent.1 {
@@ -245,7 +271,7 @@ impl Planner<'_> {
                 for (a, ca) in first.iter().enumerate() {
                     for (b, cb) in second.iter().enumerate() {
                         if let (Some(ca), Some(cb)) = (ca, cb) {
-                            offer(b, a, ca + cb + self.via(a, b), shape);
+                            offer(b, a, ca + cb + self.stack(bend, a, b), shape);
                         }
                     }
                 }
@@ -255,9 +281,10 @@ impl Planner<'_> {
     }
 
     /// For each layer its parent edge may attach on, the cheapest via stack
-    /// joining a node's pins and its children's edges.
+    /// at `spot` joining a node's pins and its children's edges.
     fn node(
         &self,
+        spot: Spot,
         pins: Option<(usize, usize)>,
         children: &[usize],
         edge_best: &[Vec<Option<EdgeChoice>>],
@@ -268,7 +295,7 @@ impl Planner<'_> {
                 if pins.is_some_and(|(lo, hi)| lo < low || hi > high) {
                     continue;
                 }
-                let mut cost = self.via(low, high);
+                let mut cost = self.stack(spot, low, high);
                 let joined = children.iter().all(|&c| {
                     let cheapest = (low..=high)
                         .filter_map(|l| edge_best[c][l].map(|e| e.cost))

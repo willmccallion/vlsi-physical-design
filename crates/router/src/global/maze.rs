@@ -1,9 +1,9 @@
 //! Maze routing of one net through the 3D gcell grid: each pin joins the
 //! tree built so far by an A* search confined to a window around the two
 //! pins it connects, widened only when the window holds no path. Edges that
-//! fixed metal blocks outright are never crossed, so a net detours around a
-//! macro however far that takes it; only a pin no detour reaches crosses
-//! them.
+//! fixed metal blocks outright are never crossed and cells with no room for
+//! a via pad are never climbed into, so a net detours around a macro
+//! however far that takes it; only a pin no detour reaches crosses them.
 
 use super::{GCell, GlobalCosts, GlobalGrid, GlobalNet, window};
 use crate::tree::connection_order;
@@ -180,7 +180,8 @@ thread_local! {
     static SEARCH: std::cell::RefCell<SearchState> = std::cell::RefCell::new(SearchState::default());
 }
 
-/// Whether a search may cross edges that fixed metal blocks outright.
+/// Whether a search may cross edges and climb into cells that fixed metal
+/// blocks outright.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum Blocked {
     Avoid,
@@ -220,6 +221,7 @@ fn search_with(
         blocked,
     } = query;
     let passable = |e: usize| blocked == Blocked::Cross || !grid.blocked[e];
+    let climbable = |c: GCell| blocked == Blocked::Cross || !grid.via_blocked(c);
     let h = |c: GCell| {
         let layers = c.layer.index().abs_diff(target.layer.index()) as f64;
         let plane = f64::from(c.x.abs_diff(target.x) + c.y.abs_diff(target.y));
@@ -298,22 +300,22 @@ fn search_with(
         }
         let l = cell.layer.index();
         if l > *grid.layers().start() {
-            push(
-                GCell {
-                    layer: LayerId::new(l - 1),
-                    ..cell
-                },
-                costs.via,
-            );
+            let next = GCell {
+                layer: LayerId::new(l - 1),
+                ..cell
+            };
+            if climbable(next) {
+                push(next, costs.via);
+            }
         }
         if l < *grid.layers().end() {
-            push(
-                GCell {
-                    layer: LayerId::new(l + 1),
-                    ..cell
-                },
-                costs.via,
-            );
+            let next = GCell {
+                layer: LayerId::new(l + 1),
+                ..cell
+            };
+            if climbable(next) {
+                push(next, costs.via);
+            }
         }
     }
     None
@@ -345,6 +347,7 @@ mod tests {
             directions: vec![Direction::Horizontal, Direction::Vertical],
             capacity: vec![Tracks::whole(4); edges],
             blocked: vec![false; edges],
+            via_blocked: vec![false; edges],
             via_loss: vec![Tracks::ZERO; 2],
             usage: vec![Tracks::ZERO; edges],
             history: vec![0.0; edges],
@@ -410,6 +413,25 @@ mod tests {
 
         assert!(reaches(&paths, terminals[1]));
         assert_eq!(crossed_blocked(&grid, &paths), 1);
+    }
+
+    #[test]
+    fn a_net_never_climbs_into_a_cell_with_no_room_for_a_via() {
+        let mut grid = grid();
+        wall(&mut grid, 4, 0..=8);
+        for x in 0..=3 {
+            for y in 0..10 {
+                let i = grid.edge(cell(2, x, y));
+                grid.via_blocked[i] = true;
+            }
+        }
+        let terminals = [cell(1, 2, 4), cell(1, 7, 4)];
+
+        let paths = route_tree(&grid, &net(&terminals), 1, COSTS);
+
+        assert!(reaches(&paths, terminals[1]));
+        assert_eq!(crossed_blocked(&grid, &paths), 0);
+        assert!(paths.iter().flatten().all(|&c| !grid.via_blocked(c)));
     }
 
     #[test]
