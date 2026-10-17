@@ -104,6 +104,15 @@ impl RoutingTiles {
     }
 }
 
+/// Routing congestion over the gcells of [`RoutingTiles`] measured outside
+/// the placer, such as by a global router.
+pub trait CongestionEstimator {
+    /// The congestion of every gcell, row by row, with each of the model's
+    /// cells centered at its entry of `centers`, in microns: the share of
+    /// the routing capacity left to the gcell that its routes take.
+    fn congestion(&mut self, centers: &[Point<f64>]) -> Vec<f64>;
+}
+
 /// Settings for routability-driven placement.
 #[derive(Clone, Debug, PartialEq)]
 pub struct RoutabilityParams {
@@ -176,23 +185,41 @@ impl CongestionMap {
                 demand[idx] = (density * overlap).mul_add(1.0 / tile_area, demand[idx]);
             });
         }
+        let congestion = demand
+            .iter()
+            .enumerate()
+            .map(|(i, &d)| {
+                let available = 1.0 - t.blockage(i);
+                if available > 0.0 {
+                    d / available
+                } else {
+                    f64::INFINITY
+                }
+            })
+            .collect();
+        Self::over(congestion, objects, params)
+    }
+
+    /// The congestion a [`CongestionEstimator`] measured, over the gcells
+    /// of `params`.
+    pub(super) fn measured(
+        congestion: Vec<f64>,
+        objects: &Objects,
+        params: &RoutabilityParams,
+    ) -> Self {
+        Self::over(congestion, objects, params)
+    }
+
+    /// `congestion` over the gcells of `params`, acted on where a standard
+    /// cell of `objects` is centered and obstructions leave enough.
+    fn over(congestion: Vec<f64>, objects: &Objects, params: &RoutabilityParams) -> Self {
+        let t = &params.tiles;
         let mut map = Self {
             origin: t.origin,
             size: t.size,
             nx: t.nx,
             ny: t.ny,
-            congestion: demand
-                .iter()
-                .enumerate()
-                .map(|(i, &d)| {
-                    let available = 1.0 - t.blockage(i);
-                    if available > 0.0 {
-                        d / available
-                    } else {
-                        f64::INFINITY
-                    }
-                })
-                .collect(),
+            congestion,
             actionable: vec![false; t.nx * t.ny],
         };
         for i in 0..objects.cells() {
@@ -685,6 +712,21 @@ mod tests {
         congestion[3] = 1.0;
 
         assert!((map_of(congestion).metric() - f64::midpoint(2.0, 1.5)).abs() < 1e-12);
+    }
+
+    #[test]
+    fn measured_congestion_is_taken_as_given_where_the_placer_acts() {
+        let params = params(vec![0.0; 16]);
+        let objects = cells_at(&[Point::new(0.5, 0.5)]);
+        let mut congestion = vec![0.0; 16];
+        congestion[0] = 2.0;
+        congestion[5] = 2.0;
+
+        let map = CongestionMap::measured(congestion, &objects, &params);
+
+        assert!((map.inflation_at(Point::new(0.5, 0.5)) - MAX_INFLATION).abs() < 1e-12);
+        assert!((map.inflation_at(Point::new(1.5, 1.5)) - 1.0).abs() < 1e-12);
+        assert!((map.metric() - 2.0).abs() < 1e-12);
     }
 
     #[test]

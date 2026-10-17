@@ -14,18 +14,21 @@ use pare_common::db::parser::{bookshelf, def, lef};
 use pare_common::db::writer;
 use pare_common::geom::dbu::Dbu;
 use pare_common::geom::point::Point;
-use pare_common::util::config::{Config, Purpose};
+use pare_common::util::config::{Config, CongestionEstimate, Purpose};
 use pare_common::util::{logger, ui, visualization};
 use pare_common::verify::drc::{DrcReport, Marker, check_drc};
 use pare_common::verify::pin_access::PinAccess;
 use pare_common::verify::placement::{PlacementViolation, placement_violations};
 use pare_common::verify::routing::check_routing;
 use pare_placer::detailed;
-use pare_placer::global::{self, GlobalParams, Outcome, RoutabilityParams, RoutingTiles};
+use pare_placer::global::{
+    self, CongestionEstimator, GlobalParams, Outcome, RoutabilityParams, RoutingTiles,
+};
 use pare_placer::io::{self, IoLayers};
 use pare_placer::legalize::abacus;
 use pare_placer::model::PlacementModel;
 use pare_placer::zones::{Zone, Zones};
+use pare_router::{CapacityReduction, GlobalRouteEstimator};
 use report::{PlacementSummary, Report, RoutingSummary};
 use std::path::{Path, PathBuf};
 use std::time::Instant;
@@ -450,10 +453,11 @@ fn global_placement(
     );
     ui::stat_row("Bin Grid:", &format!("{bins}x{bins}"), "", "");
 
-    let routability = if gp.routability_driven && pass == Pass::Full {
-        Some(routability_params(config, db)?)
+    let (routability, mut estimator) = if gp.routability_driven && pass == Pass::Full {
+        let (params, estimator) = routability_setup(config, db)?;
+        (Some(params), estimator)
     } else {
-        None
+        (None, None)
     };
     let params = GlobalParams {
         target_density,
@@ -464,11 +468,18 @@ fn global_placement(
         routability,
     };
     ui::placement_table_header();
-    let result = global::place(&mut model, &params, |p| {
-        if p.iteration % 50 == 0 {
-            ui::placement_iter(p.iteration, p.hpwl, p.overflow, p.penalty, p.step);
-        }
-    });
+    let result = global::place(
+        &mut model,
+        &params,
+        estimator
+            .as_mut()
+            .map(|e| e as &mut dyn CongestionEstimator),
+        |p| {
+            if p.iteration % 50 == 0 {
+                ui::placement_iter(p.iteration, p.hpwl, p.overflow, p.penalty, p.step);
+            }
+        },
+    );
     eprintln!();
     for (k, round) in result.congestion.iter().enumerate() {
         ui::stat_row(
@@ -529,8 +540,76 @@ fn global_placement(
 /// What routability-driven placement takes from the router: its gcells
 /// with the capacity they lose before placement, and the width RUDY gives a
 /// wire on its layers.
-fn routability_params(config: &Config, db: &NetlistDB) -> anyhow::Result<RoutabilityParams> {
-    let reduction = pare_router::capacity_reduction(db, &config.routing)?;
+/// The routability settings of `config`, and the global-router estimator
+/// when congestion is to be measured that way.
+fn routability_setup<'a>(
+    config: &Config,
+    db: &'a NetlistDB,
+) -> anyhow::Result<(RoutabilityParams, Option<GlobalRouteCongestion<'a>>)> {
+    match config.global_placement.congestion_estimate {
+        CongestionEstimate::GlobalRouter => {
+            let estimator = GlobalRouteCongestion::new(db, config)?;
+            let params = routability_params(config, db, estimator.capacity_reduction())?;
+            Ok((params, Some(estimator)))
+        }
+        CongestionEstimate::Rudy => {
+            let reduction = pare_router::capacity_reduction(db, &config.routing)?;
+            Ok((routability_params(config, db, reduction)?, None))
+        }
+    }
+}
+
+/// Routing congestion from `pare_router`'s global router, measured where
+/// global placement has the cells.
+struct GlobalRouteCongestion<'a> {
+    db: &'a NetlistDB,
+    estimator: GlobalRouteEstimator<'a>,
+    /// Width and height of each cell, in microns.
+    sizes: Vec<Point<f64>>,
+}
+
+impl<'a> GlobalRouteCongestion<'a> {
+    fn new(db: &'a NetlistDB, config: &Config) -> anyhow::Result<Self> {
+        let units = db.dbu();
+        Ok(Self {
+            db,
+            estimator: GlobalRouteEstimator::new(db, &config.routing)?,
+            sizes: (0..db.num_cells())
+                .map(|i| {
+                    let size = db.cell_size(CellId::new(i));
+                    Point::new(units.to_microns(size.x), units.to_microns(size.y))
+                })
+                .collect(),
+        })
+    }
+
+    fn capacity_reduction(&self) -> CapacityReduction {
+        self.estimator.capacity_reduction()
+    }
+}
+
+impl CongestionEstimator for GlobalRouteCongestion<'_> {
+    fn congestion(&mut self, centers: &[Point<f64>]) -> Vec<f64> {
+        let units = self.db.dbu();
+        let locations: Vec<Point<Dbu>> = centers
+            .iter()
+            .zip(&self.sizes)
+            .map(|(c, size)| {
+                Point::new(
+                    units.to_dbu_rounded(size.x.mul_add(-0.5, c.x)),
+                    units.to_dbu_rounded(size.y.mul_add(-0.5, c.y)),
+                )
+            })
+            .collect();
+        self.estimator.congestion(&locations)
+    }
+}
+
+fn routability_params(
+    config: &Config,
+    db: &NetlistDB,
+    reduction: CapacityReduction,
+) -> anyhow::Result<RoutabilityParams> {
     let units = db.dbu();
     let layers = config.routing.layer_range(&db.library)?;
     let pitches: Vec<f64> = (layers.start().index()..=layers.end().index())

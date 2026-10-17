@@ -11,7 +11,8 @@
 
 use super::density::{Excess, Footprint};
 use super::routability::{
-    CHECK_OVERFLOW, CongestionMap, Routability, SETTLE_FRACTION, SNAPSHOT_OVERFLOW, Verdict,
+    CHECK_OVERFLOW, CongestionMap, Routability, RoutabilityParams, SETTLE_FRACTION,
+    SNAPSHOT_OVERFLOW, Verdict,
 };
 use super::wirelength::{Netlist, Wirelength};
 use super::{Field, GlobalParams, GlobalResult, Outcome, Progress, ZoneOutcome};
@@ -661,19 +662,32 @@ fn mean(values: &[f64]) -> f64 {
     values.iter().sum::<f64>() / values.len().max(1) as f64
 }
 
+/// What global placement spreads: the nets over the die, on rows of `site`
+/// wide sites.
+#[derive(Clone, Copy, Debug)]
+pub(super) struct Problem<'a> {
+    pub(super) netlist: &'a Netlist,
+    pub(super) die: Rect<f64>,
+    /// Width of the narrowest row site, in microns.
+    pub(super) site: f64,
+}
+
+/// Measures the congestion of every gcell where the objects are.
+pub(super) type Estimate<'a> = &'a mut dyn FnMut(&Objects) -> Vec<f64>;
+
 /// Minimizes wirelength plus density energy over the objects' centers,
 /// leaving the placement in `objects.centers`. With routability enabled,
 /// congested standard cells grow as in `OpenROAD` once spreading has nearly
 /// finished and settled, and placement resumes from a snapshot.
 pub(super) fn minimize(
     objects: &mut Objects,
-    die: &Rect<f64>,
     fields: &mut [Field],
-    netlist: &Netlist,
-    site: f64,
+    problem: &Problem<'_>,
     params: &GlobalParams,
+    mut estimate: Option<Estimate<'_>>,
     mut report: impl FnMut(&Progress),
 ) -> GlobalResult {
+    let Problem { netlist, die, site } = *problem;
     let Some(bin) = fields.first().map(|f| f.grid.bin()) else {
         let mut grad = vec![Point::new(0.0, 0.0); objects.centers.len()];
         let wirelength = netlist.gradient(&objects.centers, 1.0, &mut Vec::new(), &mut grad);
@@ -693,7 +707,7 @@ pub(super) fn minimize(
         .routability
         .clone()
         .map(|r| Routability::new(r, objects, fields));
-    let mut objective = Objective::new(objects, die, fields, netlist);
+    let mut objective = Objective::new(objects, &die, fields, netlist);
     let n = objects.centers.len();
     let mut grad = vec![Point::new(0.0, 0.0); n];
 
@@ -827,7 +841,7 @@ pub(super) fn minimize(
                 && settling.settled()
             {
                 objects.centers.copy_from_slice(&s.major);
-                let map = CongestionMap::rudy(netlist, objects, die, r.params());
+                let map = congestion_map(&mut estimate, netlist, objects, &die, r.params());
                 if r.check(k, &map, objects, objective.fields) != Verdict::Done {
                     refunded = 0;
                     s = revert(saved, &s, objective.fields);
@@ -848,7 +862,7 @@ pub(super) fn minimize(
     let last = objective.evaluate(&s.major, s.gamma);
     let final_congestion = routability
         .as_ref()
-        .map(|r| CongestionMap::rudy(netlist, objects, die, r.params()).metric());
+        .map(|r| congestion_map(&mut estimate, netlist, objects, &die, r.params()).metric());
     GlobalResult {
         outcome,
         iterations,
@@ -857,6 +871,21 @@ pub(super) fn minimize(
         congestion: routability.map(|r| r.rounds).unwrap_or_default(),
         final_congestion,
         zones: objective.outcomes(&last),
+    }
+}
+
+/// The congestion of `objects` where they are: what `estimate` measures,
+/// or RUDY without one.
+fn congestion_map(
+    estimate: &mut Option<Estimate<'_>>,
+    netlist: &Netlist,
+    objects: &Objects,
+    die: &Rect<f64>,
+    params: &RoutabilityParams,
+) -> CongestionMap {
+    match estimate {
+        Some(measure) => CongestionMap::measured(measure(objects), objects, params),
+        None => CongestionMap::rudy(netlist, objects, die, params),
     }
 }
 

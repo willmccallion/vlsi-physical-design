@@ -21,7 +21,9 @@ mod poisson;
 mod routability;
 mod wirelength;
 
-pub use routability::{CongestionRound, RoutabilityParams, RoutingTiles, wire_width};
+pub use routability::{
+    CongestionEstimator, CongestionRound, RoutabilityParams, RoutingTiles, wire_width,
+};
 
 use crate::model::{PinAnchor, PlacementModel};
 use crate::zones::Zone;
@@ -187,6 +189,7 @@ fn channel_pitch(rows: &[Rect<f64>]) -> Option<f64> {
 pub fn place(
     model: &mut PlacementModel,
     params: &GlobalParams,
+    estimator: Option<&mut dyn CongestionEstimator>,
     report: impl FnMut(&Progress),
 ) -> GlobalResult {
     let mut movable: Vec<usize> = (0..model.num_cells())
@@ -219,13 +222,29 @@ pub fn place(
     }
     let netlist = build_netlist(model, &movable);
 
+    let mut centers: Vec<Point<f64>> = (0..model.num_cells())
+        .map(|i| model.positions[i] + model.sizes[i] * 0.5)
+        .collect();
+    let movable_cells = &movable;
+    let mut estimate = estimator.map(|estimator| {
+        move |objects: &Objects| {
+            for (k, &i) in movable_cells.iter().enumerate() {
+                centers[i] = objects.centers[k];
+            }
+            estimator.congestion(&centers)
+        }
+    });
+    let problem = nesterov::Problem {
+        netlist: &netlist,
+        die: model.die,
+        site: model.site_width,
+    };
     let result = nesterov::minimize(
         &mut objects,
-        &model.die,
         &mut fields,
-        &netlist,
-        model.site_width,
+        &problem,
         params,
+        estimate.as_mut().map(|f| f as nesterov::Estimate<'_>),
         report,
     );
 

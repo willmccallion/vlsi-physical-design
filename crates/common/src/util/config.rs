@@ -66,6 +66,21 @@ pub struct GlobalPlacementConfig {
     /// routability-driven placement stops inflating cells.
     #[serde(default = "default_target_congestion")]
     pub target_congestion: f64,
+    /// How routability-driven placement measures congestion.
+    #[serde(default)]
+    pub congestion_estimate: CongestionEstimate,
+}
+
+/// How routability-driven placement measures routing congestion.
+#[derive(Clone, Copy, Debug, Default, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum CongestionEstimate {
+    /// Global routing of every net where the cells are, as `OpenROAD`'s
+    /// `-routability_use_grt`.
+    #[default]
+    GlobalRouter,
+    /// RUDY: each net's wire spread evenly over its bounding box.
+    Rudy,
 }
 
 impl Default for GlobalPlacementConfig {
@@ -78,6 +93,7 @@ impl Default for GlobalPlacementConfig {
             seed: default_seed(),
             routability_driven: default_routability_driven(),
             target_congestion: default_target_congestion(),
+            congestion_estimate: CongestionEstimate::default(),
         }
     }
 }
