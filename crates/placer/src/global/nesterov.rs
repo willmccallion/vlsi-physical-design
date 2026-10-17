@@ -813,7 +813,7 @@ pub(super) fn minimize(
         }
         if let Some(r) = routability.as_mut() {
             let overflow = mean(&eval.field_overflow);
-            // OpenROAD refunds without bound; the cap keeps a stalled spread finite.
+            // OpenROAD refunds without bound; the cap keeps one stalled spread finite.
             if snapshot.is_some() && overflow > CHECK_OVERFLOW && refunded < params.max_iterations {
                 limit += 1;
                 refunded += 1;
@@ -829,6 +829,7 @@ pub(super) fn minimize(
                 objects.centers.copy_from_slice(&s.major);
                 let map = CongestionMap::rudy(netlist, objects, die, r.params());
                 if r.check(k, &map, objects, objective.fields) != Verdict::Done {
+                    refunded = 0;
                     s = revert(saved, &s, objective.fields);
                     objective.refresh(objects);
                     eval = objective.gradient(&s.reference, s.gamma, &s.weights, &mut grad);
