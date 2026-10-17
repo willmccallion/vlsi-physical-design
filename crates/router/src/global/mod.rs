@@ -779,7 +779,7 @@ pub fn route_global(grid: &mut GlobalGrid, nets: &[GlobalNet], rounds: usize) ->
     let mut routes = GlobalRoutes::default();
     let mut margins = vec![FIRST_MARGIN; nets.len()];
     route_initial(grid, nets, costs, &mut routes);
-    let mut best = Snapshot::of(grid, &routes);
+    let mut best = Best::of(grid);
     let mut stalled = 0;
     for _ in 0..rounds {
         if best.overflow == Tracks::ZERO || stalled >= STALL_ROUNDS {
@@ -800,6 +800,7 @@ pub fn route_global(grid: &mut GlobalGrid, nets: &[GlobalNet], rounds: usize) ->
         for &i in &ripped {
             if let Some(tree) = routes.paths.remove(&nets[i].net) {
                 grid.add_tree(&nets[i], &tree, Sign::Remove);
+                best.shelve(nets[i].net, tree);
             }
             margins[i] = margins[i].saturating_add(MARGIN_STEP).min(MAX_MARGIN);
         }
@@ -814,15 +815,14 @@ pub fn route_global(grid: &mut GlobalGrid, nets: &[GlobalNet], rounds: usize) ->
             start.elapsed().as_secs_f64()
         );
         if grid.overflow() < best.overflow {
-            best = Snapshot::of(grid, &routes);
+            best = Best::of(grid);
             stalled = 0;
         } else {
             stalled += 1;
         }
     }
     if grid.overflow() > best.overflow {
-        grid.usage = best.usage;
-        routes = best.routes;
+        best.restore(grid, &mut routes);
     }
     log_zero_capacity_crossings(grid, &routes);
     routes
@@ -848,19 +848,36 @@ fn log_zero_capacity_crossings(grid: &GlobalGrid, routes: &GlobalRoutes) {
 /// Rounds without a new lowest overflow after which negotiation stops.
 const STALL_ROUNDS: usize = 8;
 
-/// The routes and edge usage of one round.
-struct Snapshot {
+/// The round with the lowest overflow so far: its edge usage, and the
+/// routes of that round that later rounds have since replaced. Every other
+/// net still has the route it had then.
+struct Best {
     overflow: Tracks,
     usage: Vec<Tracks>,
-    routes: GlobalRoutes,
+    shelved: FxHashMap<NetId, Vec<Vec<GCell>>>,
 }
 
-impl Snapshot {
-    fn of(grid: &GlobalGrid, routes: &GlobalRoutes) -> Self {
+impl Best {
+    /// Marks the grid's current routes as the best.
+    fn of(grid: &GlobalGrid) -> Self {
         Self {
             overflow: grid.overflow(),
             usage: grid.usage.clone(),
-            routes: routes.clone(),
+            shelved: FxHashMap::default(),
+        }
+    }
+
+    /// Keeps the route `net` had in the best round as it is ripped up, the
+    /// first time since that round.
+    fn shelve(&mut self, net: NetId, tree: Vec<Vec<GCell>>) {
+        let _ = self.shelved.entry(net).or_insert(tree);
+    }
+
+    /// Puts the best round's routes and usage back.
+    fn restore(self, grid: &mut GlobalGrid, routes: &mut GlobalRoutes) {
+        grid.usage = self.usage;
+        for (net, tree) in self.shelved {
+            let _ = routes.paths.insert(net, tree);
         }
     }
 }
