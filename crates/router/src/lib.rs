@@ -18,10 +18,12 @@ pub mod wiring;
 
 use detailed::{Costs, DetailedRouter, Scope, routable_nets};
 pub use global::CapacityReduction;
-use global::{GlobalGrid, GlobalNet, route_global, track_demand};
+use global::{GlobalGrid, GlobalNet, Tracks, route_global, track_demand};
 use occupancy::FixedTracks;
-use pare_common::db::design::{GCellGridDef, NetlistDB, PlacementStatus, RouteElem, TrackAxis};
-use pare_common::db::indices::NetId;
+use pare_common::db::design::{
+    GCellGridDef, NetlistDB, PinOwner, PlacementStatus, RouteElem, TrackAxis,
+};
+use pare_common::db::indices::{LayerId, NetId, PinId};
 use pare_common::db::library::Shape;
 use pare_common::geom::dbu::Dbu;
 use pare_common::geom::point::Point;
@@ -257,6 +259,111 @@ pub fn capacity_reduction(
         config.global_capacity_reserve,
     );
     Ok(grid.capacity_reduction(&tech))
+}
+
+/// Global routing of every signal net with the cells wherever placement
+/// has them at the moment, for measuring congestion while placing.
+///
+/// This is how `OpenROAD`'s placer runs its global router. The routes are
+/// negotiated for [`ESTIMATE_ROUNDS`] rounds, so that the congestion cheap
+/// detours remove does not count and what detailed routing would face does.
+#[derive(Debug)]
+pub struct GlobalRouteEstimator<'a> {
+    db: &'a NetlistDB,
+    tech: RouteTech,
+    grid: GlobalGrid,
+    nets: Vec<EstimatedNet>,
+    rounds: usize,
+}
+
+/// A net to route, with the layer each pin is reached on.
+#[derive(Debug)]
+struct EstimatedNet {
+    net: NetId,
+    pins: Vec<(PinId, LayerId)>,
+    demand: Vec<Tracks>,
+}
+
+impl<'a> GlobalRouteEstimator<'a> {
+    /// The estimator of `db` under `config`, over the gcell grid of
+    /// [`capacity_reduction`].
+    pub fn new(db: &'a NetlistDB, config: &RoutingConfig) -> Result<Self, RouteError> {
+        check_reserve(config)?;
+        let tech = RouteTech::new(db, config)?;
+        let fixed = FixedTracks::new(&tech, obstruction_shapes(db));
+        let grid = GlobalGrid::new(
+            &tech,
+            &fixed,
+            db.die_area,
+            gcell_size(&tech, config),
+            config.global_capacity_reserve,
+        );
+        let nets = routable_nets(db)
+            .into_iter()
+            .map(|net| EstimatedNet {
+                net,
+                pins: db.nets[net.index()]
+                    .pins
+                    .iter()
+                    .map(|&pin| (pin, terminal_layer(db, &tech, pin)))
+                    .collect(),
+                demand: track_demand(db, &tech, net),
+            })
+            .collect();
+        Ok(Self {
+            db,
+            tech,
+            grid,
+            nets,
+            rounds: config.global_iterations.min(ESTIMATE_ROUNDS),
+        })
+    }
+
+    /// The grid's capacities and what fixed metal takes of them.
+    pub fn capacity_reduction(&self) -> CapacityReduction {
+        self.grid.capacity_reduction(&self.tech)
+    }
+
+    /// Each gcell's congestion, row by row, once every net is routed with
+    /// each cell's lower-left corner at its entry of `locations`, which is
+    /// indexed like the design's cells.
+    pub fn congestion(&mut self, locations: &[Point<Dbu>]) -> Vec<f64> {
+        let nets: Vec<GlobalNet> = self
+            .nets
+            .iter()
+            .map(|n| GlobalNet {
+                net: n.net,
+                terminals: n
+                    .pins
+                    .iter()
+                    .map(|&(pin, layer)| {
+                        let at = match self.db.pins[pin.index()].owner {
+                            PinOwner::Cell { cell, .. } => {
+                                self.db.pin_position_at(pin, locations[cell.index()])
+                            }
+                            PinOwner::Io(_) => self.db.pin_position(pin),
+                        };
+                        self.grid.cell_at(layer, at)
+                    })
+                    .collect(),
+                demand: n.demand.clone(),
+            })
+            .collect();
+        self.grid.clear();
+        let _ = route_global(&mut self.grid, &nets, self.rounds);
+        self.grid.congestion(&self.tech)
+    }
+}
+
+/// Negotiation rounds of a congestion estimate: enough for the detours that
+/// cost little, after which the rounds grow expensive and move little.
+const ESTIMATE_ROUNDS: usize = 10;
+
+/// The routable layer global routing reaches `pin` on: the lowest layer
+/// the pin has a shape on, brought into the routable range.
+fn terminal_layer(db: &NetlistDB, tech: &RouteTech, pin: PinId) -> LayerId {
+    db.pin_reference_layer(pin)
+        .map_or(tech.min_layer, |l| l.clamp(tech.min_layer, tech.max_layer))
 }
 
 fn check_reserve(config: &RoutingConfig) -> Result<(), RouteError> {

@@ -14,11 +14,11 @@ use pare_common::util::config::RoutingConfig;
 use pare_common::verify::routing::net_components;
 use pare_common::verify::shapes::fixed_shapes;
 use pare_router::access::Node;
-use pare_router::global::GlobalGrid;
+use pare_router::global::{GCell, GlobalGrid, GlobalNet, route_global, track_demand};
 use pare_router::occupancy::{FixedTracks, Occupancy, Origin, Owner, Slot};
 use pare_router::tech::RouteTech;
 use pare_router::wiring::{Edge, NetRoute};
-use pare_router::{RouteError, capacity_reduction, route};
+use pare_router::{GlobalRouteEstimator, RouteError, capacity_reduction, route};
 use std::path::{Path, PathBuf};
 
 fn fixture(name: &str) -> PathBuf {
@@ -283,6 +283,67 @@ fn merged_fixed_stretches_give_the_capacity_the_occupancy_gives() {
     assert_eq!(
         from_occupancy.capacity_reduction(&tech),
         from_stretches.capacity_reduction(&tech)
+    );
+}
+
+#[test]
+fn gcell_congestion_follows_the_routed_edges_of_the_grid() {
+    let db = tiny();
+    let tech = RouteTech::new(&db, &no_reserve()).unwrap();
+    let gcell = tech.layer(tech.min_layer).pitch() * 5;
+    let fixed = FixedTracks::new(&tech, fixed_shapes(&db));
+    let mut grid = GlobalGrid::new(&tech, &fixed, db.die_area, gcell, 0.0);
+    let (nx, ny) = grid.size();
+    let layer = tech.min_layer;
+    let row = ny - 1;
+    let along = |x: u16| GCell { layer, x, y: row };
+    let net = GlobalNet {
+        net: NetId::new(0),
+        terminals: vec![along(0), along(2)],
+        demand: track_demand(&db, &tech, NetId::new(0)),
+    };
+
+    let _ = route_global(&mut grid, &[net], 0);
+    let congestion = grid.congestion(&tech);
+
+    assert_eq!(congestion.len(), usize::from(nx) * usize::from(ny));
+    let at = |x: u16| congestion[usize::from(row) * usize::from(nx) + usize::from(x)];
+    assert!(at(0) > 0.0 && at(1) > 0.0 && at(2) > 0.0, "{congestion:?}");
+    let on_row = |i: usize| i / usize::from(nx) == usize::from(row);
+    assert!(
+        congestion
+            .iter()
+            .enumerate()
+            .all(|(i, &c)| c == 0.0 || on_row(i)),
+        "{congestion:?}"
+    );
+}
+
+#[test]
+fn the_estimator_measures_congestion_where_the_given_locations_put_the_nets() {
+    let db = tiny();
+    let config = RoutingConfig {
+        gcell_tracks: 5,
+        ..no_reserve()
+    };
+    let mut estimator = GlobalRouteEstimator::new(&db, &config).unwrap();
+    let tiles = estimator.capacity_reduction();
+    let packed = vec![Point::new(Dbu(0), Dbu(0)); db.num_cells()];
+    let spread: Vec<Point<Dbu>> = (0..db.num_cells())
+        .map(|i| {
+            let far = Dbu(5000 * i64::from(u8::from(i % 2 == 1)));
+            Point::new(far, far)
+        })
+        .collect();
+
+    let packed_congestion = estimator.congestion(&packed);
+    let spread_congestion = estimator.congestion(&spread);
+
+    assert_eq!(packed_congestion.len(), tiles.nx * tiles.ny);
+    let congested = |map: &[f64]| map.iter().filter(|&&c| c > 0.0).count();
+    assert!(
+        congested(&spread_congestion) > congested(&packed_congestion),
+        "{packed_congestion:?} vs {spread_congestion:?}"
     );
 }
 
