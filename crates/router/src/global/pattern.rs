@@ -9,7 +9,7 @@
 //! comes out as paths in the grid, each starting on the paths before it.
 
 use super::steiner::{Spot, steiner_tree};
-use super::{GCell, GlobalCosts, GlobalGrid};
+use super::{GCell, GlobalCosts, GlobalGrid, GlobalNet};
 use pare_common::db::indices::LayerId;
 use pare_common::db::library::Direction;
 
@@ -45,12 +45,13 @@ struct NodeChoice {
     high: usize,
 }
 
-/// Paths of `terminals`' tree through `grid`, priced at `costs`.
+/// Paths of `net`'s tree through `grid`, priced at `costs`.
 pub(super) fn route_pattern(
     grid: &GlobalGrid,
-    terminals: &[GCell],
+    net: &GlobalNet,
     costs: GlobalCosts,
 ) -> Vec<Vec<GCell>> {
+    let terminals = &net.terminals;
     let mut spots: Vec<Spot> = terminals.iter().map(|c| (c.x, c.y)).collect();
     spots.sort_unstable();
     spots.dedup();

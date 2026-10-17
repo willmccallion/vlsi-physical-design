@@ -2,19 +2,23 @@
 //!
 //! Each routable layer gets a capacity on every gcell edge in its preferred
 //! direction: its tracks crossing that edge, each counted for the share of
-//! the edge that fixed metal leaves usable. An edge costs its length, a
-//! logistic congestion term that rises as its usage nears capacity, its
-//! accumulated overflow history, and a penalty per unit of overflow that
-//! grows every round, as in `PathFinder`. Every net is first routed along
-//! its Steiner tree by 3D pattern routing (`pattern`); then nets crossing
-//! overflowed edges are ripped up and rerouted by maze search (`maze`), each
-//! time in a search area grown around their pins so they can detour
-//! further, in parallel batches whose areas do not meet. The cells each net
-//! passes through become its guide for detailed routing.
+//! the edge that fixed metal leaves usable. A route demands a track on
+//! every edge its wires cross and, on the edges beside each of its vias,
+//! the share of a track the via's pad is expected to take from wires
+//! passing it. An edge
+//! costs its length, a logistic congestion term that rises as its usage
+//! nears capacity, its accumulated overflow history, and a penalty per unit
+//! of overflow that grows every round, as in `PathFinder`. Every net is
+//! first routed along its Steiner tree by 3D pattern routing (`pattern`);
+//! then nets crossing overflowed edges are ripped up and rerouted by maze
+//! search (`maze`), each time in a search area grown around their pins so
+//! they can detour further, in parallel batches whose areas do not meet.
+//! The cells each net passes through become its guide for detailed routing.
 
 mod maze;
 mod pattern;
 mod steiner;
+mod tracks;
 
 use crate::occupancy::{FixedMetal, TrackRef};
 use crate::tech::RouteTech;
@@ -27,6 +31,7 @@ use pare_common::geom::rect::Rect;
 use pattern::route_pattern;
 use rayon::prelude::*;
 use rustc_hash::FxHashMap;
+pub use tracks::Tracks;
 
 /// A gcell on a layer.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
@@ -48,10 +53,13 @@ pub struct GlobalGrid {
     ny: u16,
     min_layer: LayerId,
     directions: Vec<Direction>,
-    capacity: Vec<u16>,
+    capacity: Vec<Tracks>,
     /// Edges no track crosses at all, which fixed metal blocks outright.
     blocked: Vec<bool>,
-    usage: Vec<u16>,
+    /// Per layer, the share of a track a via somewhere in a gcell is expected
+    /// to take from each edge beside it.
+    via_loss: Vec<Tracks>,
+    usage: Vec<Tracks>,
     history: Vec<f32>,
 }
 
@@ -63,11 +71,18 @@ pub struct LayerTotals {
     /// Its preferred direction, which its edges run along.
     pub direction: Direction,
     /// Tracks the edges offer, after the reserve and fixed metal.
-    pub capacity: u64,
+    pub capacity: Tracks,
     /// Tracks the routes take.
-    pub usage: u64,
+    pub usage: Tracks,
     /// Usage above capacity.
-    pub overflow: u64,
+    pub overflow: Tracks,
+}
+
+/// Whether a route's demand is being placed on the grid or lifted from it.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Sign {
+    Add,
+    Remove,
 }
 
 impl GlobalGrid {
@@ -99,7 +114,8 @@ impl GlobalGrid {
             directions: layers.iter().map(|&l| tech.layer(l).direction).collect(),
             capacity: Vec::new(),
             blocked: Vec::new(),
-            usage: vec![0; per_layer * layers.len()],
+            via_loss: layers.iter().map(|&l| via_loss(tech, l, gcell)).collect(),
+            usage: vec![Tracks::ZERO; per_layer * layers.len()],
             history: vec![0.0; per_layer * layers.len()],
         };
         let tracks: Vec<f64> = layers
@@ -108,7 +124,7 @@ impl GlobalGrid {
             .collect();
         grid.capacity = tracks
             .iter()
-            .map(|&t| (t * (1.0 - reserve)).floor() as u16)
+            .map(|&t| Tracks::from_f64(t * (1.0 - reserve)))
             .collect();
         grid.blocked = tracks.iter().map(|&t| t <= 0.0).collect();
         grid
@@ -185,7 +201,7 @@ impl GlobalGrid {
                         Direction::Horizontal => (y, self.cell_index(layer, x.min(along - 2), y)),
                         Direction::Vertical => (x, self.cell_index(layer, x, y.min(along - 2))),
                     };
-                    let usable = f64::from(self.capacity[edge]);
+                    let usable = self.capacity[edge].to_f64();
                     capacity[y * nx + x] += tracks[line];
                     reduction[y * nx + x] += (tracks[line] - usable).max(0.0);
                 }
@@ -262,7 +278,8 @@ impl GlobalGrid {
         Rect::new(min, min + Point::new(self.gcell, self.gcell))
     }
 
-    /// Index of the edge leaving `c` forward in its layer's direction.
+    /// Index of the edge leaving `c` forward in its layer's direction, and
+    /// of `c` itself among the layer's cells.
     fn edge(&self, c: GCell) -> usize {
         let l = c.layer.index() - self.min_layer.index();
         let per_layer = usize::from(self.nx) * usize::from(self.ny);
@@ -284,8 +301,38 @@ impl GlobalGrid {
         self.directions[layer.index() - self.min_layer.index()]
     }
 
+    /// The position of `layer` among the routable layers.
+    const fn layer_offset(&self, layer: LayerId) -> usize {
+        layer.index() - self.min_layer.index()
+    }
+
     const fn layers(&self) -> std::ops::RangeInclusive<usize> {
         self.min_layer.index()..=self.min_layer.index() + self.directions.len() - 1
+    }
+
+    /// Whether a wire of `c`'s layer can leave `c` forward, and the edge it
+    /// takes.
+    fn forward_edge(&self, c: GCell) -> Option<usize> {
+        let last = match self.direction(c.layer) {
+            Direction::Horizontal => c.x + 1 >= self.nx,
+            Direction::Vertical => c.y + 1 >= self.ny,
+        };
+        (!last).then(|| self.edge(c))
+    }
+
+    /// The edge a wire of `c`'s layer enters `c` by from behind, if any.
+    fn backward_edge(&self, c: GCell) -> Option<usize> {
+        let behind = match self.direction(c.layer) {
+            Direction::Horizontal => GCell {
+                x: c.x.checked_sub(1)?,
+                ..c
+            },
+            Direction::Vertical => GCell {
+                y: c.y.checked_sub(1)?,
+                ..c
+            },
+        };
+        Some(self.edge(behind))
     }
 
     /// Edges a path uses: each step within a layer uses the edge leaving its
@@ -301,15 +348,37 @@ impl GlobalGrid {
         })
     }
 
-    /// Adds `delta` to the usage of every edge a net's paths use, counting
-    /// an edge its paths share once.
-    fn add_tree(&mut self, paths: &[Vec<GCell>], delta: i32) {
+    /// Places or lifts the demand of a net's paths: one track on every edge
+    /// they cross, counting an edge the paths share once, and the via loss
+    /// of its layer on each edge beside a via that no wire of the net on
+    /// that layer crosses. The pad a terminal already holds as fixed metal
+    /// is not counted again.
+    fn add_tree(&mut self, net: &GlobalNet, paths: &[Vec<GCell>], sign: Sign) {
         let mut edges: Vec<usize> = paths.iter().flat_map(|p| self.path_edges(p)).collect();
         edges.sort_unstable();
         edges.dedup();
-        for e in edges {
-            let u = i32::from(self.usage[e]) + delta;
-            self.usage[e] = u16::try_from(u.max(0)).unwrap_or(u16::MAX);
+        let mut demands: Vec<(usize, Tracks)> = edges.iter().map(|&e| (e, Tracks::ONE)).collect();
+        for stack in via_stacks(paths) {
+            for c in stack {
+                if net.terminals.contains(&c) {
+                    continue;
+                }
+                let loss = self.via_loss[self.layer_offset(c.layer)];
+                for e in [self.backward_edge(c), self.forward_edge(c)]
+                    .into_iter()
+                    .flatten()
+                {
+                    if edges.binary_search(&e).is_err() {
+                        demands.push((e, loss));
+                    }
+                }
+            }
+        }
+        for (e, t) in demands {
+            self.usage[e] = match sign {
+                Sign::Add => self.usage[e] + t,
+                Sign::Remove => self.usage[e].saturating_sub(t),
+            };
         }
     }
 
@@ -318,11 +387,11 @@ impl GlobalGrid {
     }
 
     /// Total usage above capacity over all edges.
-    pub fn overflow(&self) -> u64 {
+    pub fn overflow(&self) -> Tracks {
         self.usage
             .iter()
             .zip(&self.capacity)
-            .map(|(&u, &c)| u64::from(u.saturating_sub(c)))
+            .map(|(&u, &c)| u.saturating_sub(c))
             .sum()
     }
 
@@ -338,14 +407,14 @@ impl GlobalGrid {
                 let mut totals = LayerTotals {
                     layer: LayerId::new(self.min_layer.index() + l),
                     direction,
-                    capacity: 0,
-                    usage: 0,
-                    overflow: 0,
+                    capacity: Tracks::ZERO,
+                    usage: Tracks::ZERO,
+                    overflow: Tracks::ZERO,
                 };
                 for e in edges {
-                    totals.capacity += u64::from(self.capacity[e]);
-                    totals.usage += u64::from(self.usage[e]);
-                    totals.overflow += u64::from(self.usage[e].saturating_sub(self.capacity[e]));
+                    totals.capacity += self.capacity[e];
+                    totals.usage += self.usage[e];
+                    totals.overflow += self.usage[e].saturating_sub(self.capacity[e]);
                 }
                 totals
             })
@@ -354,7 +423,7 @@ impl GlobalGrid {
 
     /// Cost of one more net on edge `e`.
     fn edge_cost(&self, e: usize, costs: GlobalCosts) -> f64 {
-        let excess = f64::from(self.usage[e]) + 1.0 - f64::from(self.capacity[e]);
+        let excess = (self.usage[e] + Tracks::ONE - self.capacity[e]).to_f64();
         let congestion = costs.congestion / (1.0 + (-CONGESTION_SLOPE * excess).exp());
         let overflow = costs.penalty * excess.max(0.0);
         1.0 + f64::from(self.history[e]) + congestion + overflow
@@ -403,6 +472,71 @@ fn usable_fraction(
         }
     }
     (usable.1 - usable.0).to_f64() / (hi - lo).to_f64()
+}
+
+/// How far the pads of the vias touching `layer` reach along its tracks.
+fn via_pad_along(tech: &RouteTech, layer: LayerId) -> Dbu {
+    let lt = tech.layer(layer);
+    let along = |rect: &Rect<Dbu>| {
+        let (_, (b0, b1)) = lt.across_along_rect(rect);
+        b1 - b0
+    };
+    let from_below = layer
+        .index()
+        .checked_sub(1)
+        .and_then(|below| tech.vias.get(below))
+        .map(|v| along(&v.top));
+    let from_above = tech.vias.get(layer.index()).map(|v| along(&v.bottom));
+    from_below
+        .into_iter()
+        .chain(from_above)
+        .max()
+        .unwrap_or(lt.width)
+        .max(lt.width)
+}
+
+/// The share of a track a via somewhere in a gcell of `layer` is expected
+/// to take from each edge beside the gcell.
+///
+/// A via at a uniformly random position along the gcell blocks its pad and
+/// the spacing around it, and a wire crossing an edge can use the stretch
+/// between the two gcell centres only up to that blockage, as
+/// [`usable_fraction`] counts fixed metal. Averaged over the position, each
+/// adjacent edge loses an eighth of a track plus the blocked length over
+/// the gcell size.
+fn via_loss(tech: &RouteTech, layer: LayerId, gcell: Dbu) -> Tracks {
+    let lt = tech.layer(layer);
+    let blocked = via_pad_along(tech, layer) / 2 + lt.spacing;
+    let loss = 0.125 + blocked.to_f64() / gcell.to_f64();
+    Tracks::from_f64(loss.min(0.5))
+}
+
+/// The via stacks of a tree: for every column of cells on consecutive
+/// layers at one position, the cells a via pad lands on.
+fn via_stacks(paths: &[Vec<GCell>]) -> Vec<Vec<GCell>> {
+    let mut cells: Vec<GCell> = paths.iter().flatten().copied().collect();
+    cells.sort_unstable_by_key(|c| (c.x, c.y, c.layer));
+    cells.dedup();
+    let mut stacks = Vec::new();
+    let mut run: Vec<GCell> = Vec::new();
+    let mut flush = |run: &mut Vec<GCell>| {
+        if run.len() > 1 {
+            stacks.push(std::mem::take(run));
+        } else {
+            run.clear();
+        }
+    };
+    for c in cells {
+        let continues = run
+            .last()
+            .is_some_and(|p| p.x == c.x && p.y == c.y && p.layer.index() + 1 == c.layer.index());
+        if !continues {
+            flush(&mut run);
+        }
+        run.push(c);
+    }
+    flush(&mut run);
+    stacks
 }
 
 /// Search costs of global routing, in gcells.
@@ -548,12 +682,12 @@ pub fn route_global(grid: &mut GlobalGrid, nets: &[GlobalNet], rounds: usize) ->
     let mut best = Snapshot::of(grid, &routes);
     let mut stalled = 0;
     for _ in 0..rounds {
-        if best.overflow == 0 || stalled >= STALL_ROUNDS {
+        if best.overflow == Tracks::ZERO || stalled >= STALL_ROUNDS {
             break;
         }
         for e in 0..grid.usage.len() {
             let over = grid.usage[e].saturating_sub(grid.capacity[e]);
-            grid.history[e] += f32::from(over);
+            grid.history[e] += over.to_f64() as f32;
         }
         let mut ripped: Vec<usize> = (0..nets.len())
             .filter(|&i| {
@@ -565,7 +699,7 @@ pub fn route_global(grid: &mut GlobalGrid, nets: &[GlobalNet], rounds: usize) ->
             .collect();
         for &i in &ripped {
             if let Some(tree) = routes.paths.remove(&nets[i].net) {
-                grid.add_tree(&tree, -1);
+                grid.add_tree(&nets[i], &tree, Sign::Remove);
             }
             margins[i] = margins[i].saturating_add(MARGIN_STEP).min(MAX_MARGIN);
         }
@@ -576,7 +710,7 @@ pub fn route_global(grid: &mut GlobalGrid, nets: &[GlobalNet], rounds: usize) ->
         log::debug!(
             "global round: {} nets ripped, overflow {}, {:.1}s",
             ripped.len(),
-            grid.overflow(),
+            grid.overflow().rounded(),
             start.elapsed().as_secs_f64()
         );
         if grid.overflow() < best.overflow {
@@ -603,7 +737,7 @@ fn log_zero_capacity_crossings(grid: &GlobalGrid, routes: &GlobalRoutes) {
         let blocked = tree
             .iter()
             .flat_map(|p| grid.path_edges(p))
-            .filter(|&e| grid.capacity[e] == 0)
+            .filter(|&e| grid.capacity[e] == Tracks::ZERO)
             .count();
         if blocked > 0 {
             log::debug!("net {} crosses {blocked} zero-capacity edges", net.index());
@@ -616,8 +750,8 @@ const STALL_ROUNDS: usize = 8;
 
 /// The routes and edge usage of one round.
 struct Snapshot {
-    overflow: u64,
-    usage: Vec<u16>,
+    overflow: Tracks,
+    usage: Vec<Tracks>,
     routes: GlobalRoutes,
 }
 
@@ -680,10 +814,10 @@ fn route_disjoint(
         let shared: &GlobalGrid = grid;
         let found: Vec<(usize, Vec<Vec<GCell>>)> = batch
             .par_iter()
-            .map(|&i| (i, route_tree(shared, &nets[i].terminals, margins[i], costs)))
+            .map(|&i| (i, route_tree(shared, &nets[i], margins[i], costs)))
             .collect();
         for (i, tree) in found {
-            grid.add_tree(&tree, 1);
+            grid.add_tree(&nets[i], &tree, Sign::Add);
             let _ = routes.paths.insert(nets[i].net, tree);
         }
         pending = rest;
@@ -711,10 +845,10 @@ fn route_initial(
         let shared: &GlobalGrid = grid;
         let found: Vec<(usize, Vec<Vec<GCell>>)> = batch
             .par_iter()
-            .map(|&i| (i, route_pattern(shared, &nets[i].terminals, costs)))
+            .map(|&i| (i, route_pattern(shared, &nets[i], costs)))
             .collect();
         for (i, tree) in found {
-            grid.add_tree(&tree, 1);
+            grid.add_tree(&nets[i], &tree, Sign::Add);
             let _ = routes.paths.insert(nets[i].net, tree);
         }
     }
@@ -750,6 +884,41 @@ mod tests {
         }
     }
 
+    fn at(layer: usize, x: u16, y: u16) -> GCell {
+        GCell {
+            layer: LayerId::new(layer),
+            x,
+            y,
+        }
+    }
+
+    /// A 10x10 grid with a horizontal layer 1 over a vertical layer 2,
+    /// every edge holding 4 tracks and every via taking a tenth of one.
+    fn grid() -> GlobalGrid {
+        let (nx, ny) = (10, 10);
+        let edges = 2 * usize::from(nx) * usize::from(ny);
+        GlobalGrid {
+            origin: Point::new(Dbu(0), Dbu(0)),
+            gcell: Dbu(100),
+            nx,
+            ny,
+            min_layer: LayerId::new(1),
+            directions: vec![Direction::Horizontal, Direction::Vertical],
+            capacity: vec![Tracks::whole(4); edges],
+            blocked: vec![false; edges],
+            via_loss: vec![Tracks::from_f64(0.1); 2],
+            usage: vec![Tracks::ZERO; edges],
+            history: vec![0.0; edges],
+        }
+    }
+
+    fn net(terminals: Vec<GCell>) -> GlobalNet {
+        GlobalNet {
+            net: NetId::new(0),
+            terminals,
+        }
+    }
+
     #[test]
     fn branch_walks_from_one_cell_to_the_other_through_their_junction() {
         let paths = vec![
@@ -779,5 +948,103 @@ mod tests {
 
         assert_eq!(tree.branch(cell(1, 0), cell(5, 5)), None);
         assert_eq!(tree.branch(cell(1, 0), cell(9, 9)), None);
+    }
+
+    #[test]
+    fn a_wire_takes_one_track_on_each_edge_it_crosses() {
+        let mut grid = grid();
+        let net = net(vec![at(1, 2, 5), at(1, 5, 5)]);
+        let paths = vec![vec![at(1, 2, 5), at(1, 3, 5), at(1, 4, 5), at(1, 5, 5)]];
+
+        grid.add_tree(&net, &paths, Sign::Add);
+
+        for x in 2..5 {
+            assert_eq!(grid.usage[grid.edge(at(1, x, 5))], Tracks::ONE);
+        }
+        assert_eq!(grid.usage[grid.edge(at(1, 1, 5))], Tracks::ZERO);
+        assert_eq!(grid.usage[grid.edge(at(1, 5, 5))], Tracks::ZERO);
+    }
+
+    #[test]
+    fn a_via_costs_the_edges_beside_it_that_its_own_wire_does_not_cross() {
+        let mut grid = grid();
+        let net = net(vec![at(1, 2, 5), at(2, 5, 7)]);
+        let paths = vec![vec![
+            at(1, 2, 5),
+            at(1, 3, 5),
+            at(1, 4, 5),
+            at(1, 5, 5),
+            at(2, 5, 5),
+            at(2, 5, 6),
+            at(2, 5, 7),
+        ]];
+        let loss = Tracks::from_f64(0.1);
+
+        grid.add_tree(&net, &paths, Sign::Add);
+
+        assert_eq!(grid.usage[grid.edge(at(1, 4, 5))], Tracks::ONE);
+        assert_eq!(grid.usage[grid.edge(at(1, 5, 5))], loss);
+        assert_eq!(grid.usage[grid.edge(at(2, 5, 5))], Tracks::ONE);
+        assert_eq!(grid.usage[grid.edge(at(2, 5, 4))], loss);
+    }
+
+    #[test]
+    fn a_stack_through_a_layer_costs_both_edges_beside_it() {
+        let mut grid = grid();
+        grid.directions.push(Direction::Horizontal);
+        let edges = grid.usage.len() / 2;
+        grid.capacity.extend(vec![Tracks::whole(4); edges]);
+        grid.blocked.extend(vec![false; edges]);
+        grid.via_loss.push(Tracks::from_f64(0.1));
+        grid.usage.extend(vec![Tracks::ZERO; edges]);
+        grid.history.extend(vec![0.0; edges]);
+        let net = net(vec![at(1, 5, 5), at(3, 7, 5)]);
+        let paths = vec![vec![
+            at(1, 5, 5),
+            at(2, 5, 5),
+            at(3, 5, 5),
+            at(3, 6, 5),
+            at(3, 7, 5),
+        ]];
+        let loss = Tracks::from_f64(0.1);
+
+        grid.add_tree(&net, &paths, Sign::Add);
+
+        assert_eq!(grid.usage[grid.edge(at(2, 5, 4))], loss);
+        assert_eq!(grid.usage[grid.edge(at(2, 5, 5))], loss);
+        assert_eq!(grid.usage[grid.edge(at(3, 4, 5))], loss);
+        assert_eq!(grid.usage[grid.edge(at(3, 5, 5))], Tracks::ONE);
+    }
+
+    #[test]
+    fn a_terminal_pad_is_not_charged_again() {
+        let mut grid = grid();
+        let net = net(vec![at(1, 5, 5), at(2, 5, 7)]);
+        let paths = vec![vec![at(1, 5, 5), at(2, 5, 5), at(2, 5, 6), at(2, 5, 7)]];
+
+        grid.add_tree(&net, &paths, Sign::Add);
+
+        assert_eq!(grid.usage[grid.edge(at(1, 4, 5))], Tracks::ZERO);
+        assert_eq!(grid.usage[grid.edge(at(1, 5, 5))], Tracks::ZERO);
+    }
+
+    #[test]
+    fn removing_a_tree_restores_the_usage_exactly() {
+        let mut grid = grid();
+        let net = net(vec![at(1, 2, 5), at(2, 5, 7)]);
+        let paths = vec![vec![
+            at(1, 2, 5),
+            at(1, 3, 5),
+            at(1, 4, 5),
+            at(1, 5, 5),
+            at(2, 5, 5),
+            at(2, 5, 6),
+            at(2, 5, 7),
+        ]];
+
+        grid.add_tree(&net, &paths, Sign::Add);
+        grid.add_tree(&net, &paths, Sign::Remove);
+
+        assert!(grid.usage.iter().all(|&u| u == Tracks::ZERO));
     }
 }

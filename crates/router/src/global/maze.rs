@@ -5,7 +5,7 @@
 //! macro however far that takes it; only a pin no detour reaches crosses
 //! them.
 
-use super::{GCell, GlobalCosts, GlobalGrid, window};
+use super::{GCell, GlobalCosts, GlobalGrid, GlobalNet, window};
 use crate::tree::connection_order;
 use pare_common::db::indices::LayerId;
 use pare_common::db::library::Direction;
@@ -18,16 +18,16 @@ use std::collections::BinaryHeap;
 /// Edge, in gcells, of the buckets used to find tree cells near a connection.
 const BUCKET: u16 = 4;
 
-/// A tree through every terminal, as the paths that build it. Each
-/// connection searches the box around its two ends grown by `margin`, and
-/// a larger box only when that holds no path.
+/// A tree through every terminal of `net`, as the paths that build it.
+/// Each connection searches the box around its two ends grown by `margin`,
+/// and a larger box only when that holds no path.
 pub(super) fn route_tree(
     grid: &GlobalGrid,
-    terminals: &[GCell],
+    net: &GlobalNet,
     margin: u16,
     costs: GlobalCosts,
 ) -> Vec<Vec<GCell>> {
-    let mut terminals: Vec<GCell> = terminals.to_vec();
+    let mut terminals: Vec<GCell> = net.terminals.clone();
     terminals.sort_unstable();
     terminals.dedup();
     if terminals.is_empty() {
@@ -295,7 +295,9 @@ fn search_with(
 
 #[cfg(test)]
 mod tests {
+    use super::super::Tracks;
     use super::*;
+    use pare_common::db::indices::NetId;
 
     const COSTS: GlobalCosts = GlobalCosts {
         via: 1.0,
@@ -315,9 +317,10 @@ mod tests {
             ny,
             min_layer: LayerId::new(1),
             directions: vec![Direction::Horizontal, Direction::Vertical],
-            capacity: vec![4; edges],
+            capacity: vec![Tracks::whole(4); edges],
             blocked: vec![false; edges],
-            usage: vec![0; edges],
+            via_loss: vec![Tracks::ZERO; 2],
+            usage: vec![Tracks::ZERO; edges],
             history: vec![0.0; edges],
         }
     }
@@ -330,11 +333,18 @@ mod tests {
         }
     }
 
+    fn net(terminals: &[GCell]) -> GlobalNet {
+        GlobalNet {
+            net: NetId::new(0),
+            terminals: terminals.to_vec(),
+        }
+    }
+
     /// Blocks the horizontal edges from column `x` to `x + 1` in rows `rows`.
     fn wall(grid: &mut GlobalGrid, x: u16, rows: std::ops::RangeInclusive<u16>) {
         for y in rows {
             let e = grid.edge(cell(1, x, y));
-            grid.capacity[e] = 0;
+            grid.capacity[e] = Tracks::ZERO;
             grid.blocked[e] = true;
         }
     }
@@ -353,7 +363,7 @@ mod tests {
         wall(&mut grid, 4, 0..=8);
         let terminals = [cell(1, 2, 4), cell(1, 7, 4)];
 
-        let paths = route_tree(&grid, &terminals, 1, COSTS);
+        let paths = route_tree(&grid, &net(&terminals), 1, COSTS);
 
         let reached = paths.iter().flatten().any(|&c| c == terminals[1]);
         assert!(reached);
@@ -366,7 +376,7 @@ mod tests {
         wall(&mut grid, 4, 0..=9);
         let terminals = [cell(1, 2, 4), cell(1, 7, 4)];
 
-        let paths = route_tree(&grid, &terminals, 1, COSTS);
+        let paths = route_tree(&grid, &net(&terminals), 1, COSTS);
 
         let reached = paths.iter().flatten().any(|&c| c == terminals[1]);
         assert!(reached);

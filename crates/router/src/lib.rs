@@ -105,16 +105,16 @@ pub fn route(db: &mut NetlistDB, config: &RoutingConfig) -> Result<RoutingSummar
             "GCells:",
             &format!("{nx}x{ny}"),
             "GR overflow:",
-            &grid.overflow().to_string(),
+            &grid.overflow().rounded().to_string(),
         );
         ui::gr_layer_table_header();
         for t in grid.layer_totals() {
             ui::gr_layer_row(
                 &db.library.layer(t.layer).name,
                 t.direction,
-                t.capacity,
-                t.usage,
-                t.overflow,
+                t.capacity.rounded(),
+                t.usage.rounded(),
+                t.overflow.rounded(),
             );
         }
         let start = Instant::now();

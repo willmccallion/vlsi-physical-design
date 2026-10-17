@@ -251,8 +251,8 @@ fn the_capacity_reserve_counts_as_reduction() {
 
     let reduction = capacity_reduction(&db, &config).unwrap();
 
-    assert!((reduction.reduction[0] - 12.0).abs() < 1e-12);
-    assert!((reduction.reduction[2] - 12.0).abs() < 1e-12);
+    assert!((reduction.reduction[0] - 11.0).abs() < 1e-9);
+    assert!((reduction.reduction[2] - 11.5).abs() < 1e-9);
 }
 
 #[test]
