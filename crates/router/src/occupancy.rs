@@ -3,13 +3,14 @@
 //! Every shape on a routable layer is recorded as an interval along each
 //! track whose wire it could short or come too close to: tracks whose
 //! centerline lies within the shape's extent widened by the spacing plus
-//! half a wire width. Each interval carries the spacing other metal must
-//! keep from it, the layer's or more for a wide shape or a net under a
-//! non-default rule. Two occupants of a track conflict when their
-//! intervals come within the larger of their spacings, unless both are
-//! intrusions from neighbouring tracks, which are checked on their own
-//! tracks. Long intervals are split into chunks so a query scans a short
-//! window.
+//! half a wire width. Each interval carries its shape's width and whole
+//! extent and the spacing its owner's rule demands, so that a query is
+//! kept from it by what the layer's spacing table gives the two widths at
+//! their actual parallel run, as the checker measures it. Two occupants
+//! of a track conflict when their intervals come within that spacing,
+//! unless both are intrusions from neighbouring tracks, which are checked
+//! on their own tracks. Long intervals are split into chunks so a query
+//! scans a short window.
 //!
 //! Via cuts are kept per cut layer as exact rectangles in square buckets.
 //! Two cuts of different owners conflict when they touch or their edges
@@ -60,8 +61,52 @@ pub struct Occupant {
     pub centered: bool,
     /// Whether rip-up removes it.
     pub origin: Origin,
-    /// The spacing other metal must keep from it along the track.
-    pub spacing: Dbu,
+    /// The smaller side of the shape the occupant comes from.
+    pub width: Dbu,
+    /// The whole shape's extent along the track, beyond this chunk.
+    pub extent: (Dbu, Dbu),
+    /// The shape's extent across the tracks.
+    pub across: (Dbu, Dbu),
+    /// The spacing the owner's rule demands, at least the layer's.
+    pub hard: Dbu,
+}
+
+/// A layer's rules for how far apart two shapes side by side must stay.
+#[derive(Clone, Copy, Debug)]
+pub struct LayerSpacing<'a> {
+    width: Dbu,
+    spacing: Dbu,
+    table: Option<&'a SpacingTable>,
+}
+
+impl<'a> LayerSpacing<'a> {
+    /// The rules of `lt`.
+    pub const fn of(lt: &'a LayerTech) -> Self {
+        Self {
+            width: lt.width,
+            spacing: lt.spacing,
+            table: lt.spacing_table.as_ref(),
+        }
+    }
+
+    /// The spacing `query` must keep from occupant `o`: the layer's table
+    /// at the two widths and their parallel run, or the layer's spacing,
+    /// and never less than either owner's demand.
+    pub fn required(&self, o: &Occupant, query: Query) -> Dbu {
+        let table = self.table.map_or(self.spacing, |t| {
+            let run = query.hi.min(o.extent.1) - query.lo.max(o.extent.0);
+            t.spacing(o.width.max(self.width), query.width.max(self.width), run)
+        });
+        table.max(self.spacing).max(query.spacing).max(o.hard)
+    }
+
+    /// Whether `query` comes closer to `o` than the spacing they must keep,
+    /// measured along the track and across it separately.
+    pub fn too_close(&self, o: &Occupant, query: Query) -> bool {
+        let s = self.required(o, query);
+        let across = (query.across.0 - o.across.1).max(o.across.0 - query.across.1);
+        across < s && o.lo < query.hi + s && query.lo < o.hi + s
+    }
 }
 
 /// A track of a layer.
@@ -269,8 +314,12 @@ pub struct Occupancy {
     tracks: Vec<Vec<Track>>,
     /// The along-track coordinate where each layer's first bucket starts.
     origins: Vec<Dbu>,
+    /// Each layer's wire width.
+    widths: Vec<Dbu>,
     /// Each layer's minimum spacing.
     min_spacing: Vec<Dbu>,
+    /// Each layer's spacing table.
+    tables: Vec<Option<SpacingTable>>,
     /// The largest spacing any occupant of each layer can carry.
     reach: Vec<Dbu>,
     chunk: Dbu,
@@ -295,27 +344,56 @@ struct Blocked {
     centered: bool,
     lo: Dbu,
     hi: Dbu,
-    /// The spacing other metal must keep from the shape along the track.
-    spacing: Dbu,
+    /// The smaller side of the shape.
+    width: Dbu,
+    /// The shape's extent across the tracks.
+    across: (Dbu, Dbu),
+    /// The spacing the owner's rule demands.
+    hard: Dbu,
 }
 
-/// The stretches of `lt`'s tracks that metal covering `rect` blocks, with
-/// the spacing each must keep: on every track a wire would come too close
-/// to it, given `spacing`, the least spacing the shape's owner demands.
+impl Blocked {
+    /// The occupant for the chunk `[lo, hi]` of this stretch.
+    const fn occupant(&self, lo: Dbu, hi: Dbu, owner: Owner, origin: Origin) -> Occupant {
+        Occupant {
+            lo,
+            hi,
+            owner,
+            centered: self.centered,
+            origin,
+            width: self.width,
+            extent: (self.lo, self.hi),
+            across: self.across,
+            hard: self.hard,
+        }
+    }
+}
+
+/// The stretches of `lt`'s tracks that metal covering `rect` blocks: every
+/// track a wire alongside its whole length would come too close to, given
+/// `spacing`, the least spacing the shape's owner demands.
 fn blocked_stretches<'t>(
     lt: &'t LayerTech,
     rect: &Rect<Dbu>,
     spacing: Dbu,
 ) -> impl Iterator<Item = Blocked> + use<'t> {
-    let (_, (lo, hi)) = lt.across_along_rect(rect);
-    let (across, along) = lt.spacing_around(rect);
-    affected_tracks(lt, rect, across.max(spacing)).map(move |(track, centered)| Blocked {
+    let (across, (lo, hi)) = lt.across_along_rect(rect);
+    let reach = lt.spacing_around(rect).0.max(spacing);
+    let width = narrow_side(rect);
+    affected_tracks(lt, rect, reach).map(move |(track, centered)| Blocked {
         track,
         centered,
         lo,
         hi,
-        spacing: along.max(spacing),
+        width,
+        across,
+        hard: spacing,
     })
+}
+
+/// The smaller side of `rect`.
+fn narrow_side(rect: &Rect<Dbu>) -> Dbu {
+    rect.width().min(rect.height())
 }
 
 /// The non-default rule `owner` follows.
@@ -323,6 +401,35 @@ fn rule_of(tech: &RouteTech, owner: Owner) -> Option<NonDefaultRuleId> {
     match owner {
         Owner::Net(n) => tech.net_rule(n as usize),
         Owner::Obstacle => None,
+    }
+}
+
+/// A shape asking which occupants of a track it would come too close to.
+#[derive(Clone, Copy, Debug)]
+pub struct Query {
+    /// Start of its extent along the track.
+    pub lo: Dbu,
+    /// End of its extent along the track.
+    pub hi: Dbu,
+    /// Its extent across the tracks.
+    pub across: (Dbu, Dbu),
+    /// Its smaller side.
+    pub width: Dbu,
+    /// The spacing its owner's rule demands.
+    pub spacing: Dbu,
+}
+
+impl Query {
+    /// The query for `rect` on a layer, whose owner demands `spacing`.
+    pub fn of(lt: &LayerTech, rect: &Rect<Dbu>, spacing: Dbu) -> Self {
+        let (across, (lo, hi)) = lt.across_along_rect(rect);
+        Self {
+            lo,
+            hi,
+            across,
+            width: narrow_side(rect),
+            spacing,
+        }
     }
 }
 
@@ -347,9 +454,20 @@ impl FixedMetal for Occupancy {
         let l = track.layer.index();
         let min = self.min_spacing[l];
         let extra = self.reach[l] - min;
+        let rules = self.rules(track.layer);
         self.starting_within(track, lo - self.chunk - extra, hi + extra)
             .filter(|o| o.origin == Origin::Fixed)
-            .map(move |o| (o.lo - (o.spacing - min), o.hi + (o.spacing - min)))
+            .map(move |o| {
+                let wire = Query {
+                    lo,
+                    hi,
+                    across: o.across,
+                    width: rules.width,
+                    spacing: min,
+                };
+                let beside = rules.required(o, wire) - min;
+                (o.lo - beside, o.hi + beside)
+            })
             .filter(move |&(start, end)| start < hi && lo < end)
     }
 }
@@ -383,8 +501,9 @@ impl FixedTracks {
                 shapes::Owner::Net(n) => tech.net_rule(n.index()),
                 shapes::Owner::Obstacle => None,
             };
-            for b in blocked_stretches(lt, &s.shape.rect, tech.wire_spacing(rule, layer)) {
-                let extra = b.spacing - lt.spacing;
+            let spacing = tech.wire_spacing(rule, layer);
+            let extra = lt.spacing_around(&s.shape.rect).1.max(spacing) - lt.spacing;
+            for b in blocked_stretches(lt, &s.shape.rect, spacing) {
                 stretches[layer.index()][b.track as usize].push((b.lo - extra, b.hi + extra));
             }
         }
@@ -456,7 +575,13 @@ impl Occupancy {
                 .iter()
                 .map(|l| l.cross.first().map_or(Dbu::ZERO, |c| c.at))
                 .collect(),
+            widths: tech.layers.iter().map(|l| l.width).collect(),
             min_spacing: tech.layers.iter().map(|l| l.spacing).collect(),
+            tables: tech
+                .layers
+                .iter()
+                .map(|l| l.spacing_table.clone())
+                .collect(),
             reach: (0..tech.layers.len())
                 .map(|l| {
                     let lt = &tech.layers[l];
@@ -555,14 +680,7 @@ impl Occupancy {
             let mut start = blocked.lo;
             loop {
                 let end = (start + self.chunk).min(blocked.hi);
-                let occupant = Occupant {
-                    lo: start,
-                    hi: end,
-                    owner,
-                    centered: blocked.centered,
-                    origin,
-                    spacing: blocked.spacing,
-                };
+                let occupant = blocked.occupant(start, end, owner, origin);
                 let b = self.bucket(layer.index(), start);
                 let buckets = &mut self.tracks[layer.index()][blocked.track as usize].buckets;
                 if buckets.len() <= b {
@@ -598,23 +716,31 @@ impl Occupancy {
         }
     }
 
-    /// Occupants of other owners on a track within the larger of `spacing`
-    /// and their own spacing of `[lo, hi]`. Intrusions are skipped when the
-    /// query is itself an intrusion.
+    /// The spacing rules of `layer`.
+    fn rules(&self, layer: LayerId) -> LayerSpacing<'_> {
+        let l = layer.index();
+        LayerSpacing {
+            width: self.widths[l],
+            spacing: self.min_spacing[l],
+            table: self.tables[l].as_ref(),
+        }
+    }
+
+    /// Occupants of other owners on a track that `query` would come too
+    /// close to. Intrusions are skipped when the query is itself an
+    /// intrusion.
     pub fn conflicts(
         &self,
         t: TrackRef,
-        lo: Dbu,
-        hi: Dbu,
-        spacing: Dbu,
+        query: Query,
         owner: Owner,
         centered: bool,
     ) -> impl Iterator<Item = &Occupant> + use<'_> {
-        let reach = spacing.max(self.reach[t.layer.index()]);
-        self.starting_within(t, lo - reach - self.chunk, hi + reach)
+        let rules = self.rules(t.layer);
+        let reach = query.spacing.max(self.reach[t.layer.index()]);
+        self.starting_within(t, query.lo - reach - self.chunk, query.hi + reach)
             .filter(move |o| {
-                let s = spacing.max(o.spacing);
-                o.owner != owner && (centered || o.centered) && o.lo < hi + s && lo < o.hi + s
+                o.owner != owner && (centered || o.centered) && rules.too_close(o, query)
             })
     }
 
@@ -666,11 +792,10 @@ impl Occupancy {
         owner: Owner,
     ) -> impl Iterator<Item = (TrackRef, &'a Occupant)> + use<'a> {
         let lt = tech.layer(layer);
-        let (_, (lo, hi)) = lt.across_along_rect(rect);
-        let spacing = tech.wire_spacing(rule_of(tech, owner), layer);
-        affected_tracks(lt, rect, spacing).flat_map(move |(track, centered)| {
+        let query = Query::of(lt, rect, tech.wire_spacing(rule_of(tech, owner), layer));
+        affected_tracks(lt, rect, query.spacing).flat_map(move |(track, centered)| {
             let t = TrackRef { layer, track };
-            self.conflicts(t, lo, hi, spacing, owner, centered)
+            self.conflicts(t, query, owner, centered)
                 .map(move |o| (t, o))
         })
     }
@@ -713,14 +838,7 @@ impl LocalOccupancy {
                     track: b.track,
                 })
                 .or_default()
-                .push(Occupant {
-                    lo: b.lo,
-                    hi: b.hi,
-                    owner,
-                    centered: b.centered,
-                    origin,
-                    spacing: b.spacing,
-                });
+                .push(b.occupant(b.lo, b.hi, owner, origin));
         }
     }
 
@@ -787,20 +905,17 @@ impl LocalOccupancy {
         owner: Owner,
     ) -> impl Iterator<Item = (TrackRef, &'a Occupant)> + use<'a> {
         let lt = tech.layer(layer);
-        let (_, (lo, hi)) = lt.across_along_rect(rect);
-        let spacing = tech.wire_spacing(rule_of(tech, owner), layer);
-        affected_tracks(lt, rect, spacing).flat_map(move |(track, centered)| {
+        let rules = LayerSpacing::of(lt);
+        let query = Query::of(lt, rect, tech.wire_spacing(rule_of(tech, owner), layer));
+        affected_tracks(lt, rect, query.spacing).flat_map(move |(track, centered)| {
             let t = TrackRef { layer, track };
             self.tracks
                 .get(&t)
                 .into_iter()
                 .flatten()
                 .filter_map(move |o| {
-                    let s = spacing.max(o.spacing);
-                    let clash = o.owner != owner
-                        && (centered || o.centered)
-                        && o.lo < hi + s
-                        && lo < o.hi + s;
+                    let clash =
+                        o.owner != owner && (centered || o.centered) && rules.too_close(o, query);
                     clash.then_some((t, o))
                 })
         })

@@ -1109,8 +1109,19 @@ fn reserve_accesses(
         let chosen = match clear {
             Some(c) => c,
             None if count == 1 => 0,
-            None => continue,
+            None => {
+                log::debug!(
+                    "net {} pin {k}: none of {count} access points is clear, leaving the choice to routing",
+                    db.nets[n].name
+                );
+                continue;
+            }
         };
+        log::trace!(
+            "net {} pin {k}: reserved access point {chosen} of {count} at {:?}",
+            db.nets[n].name,
+            access[n][k][chosen].at
+        );
         for (layer, rect) in metal_of(&access[n][k][chosen]) {
             if tech.routable(layer) {
                 let _ = occupancy.add_rect(tech, layer, &rect, owner, Origin::Fixed);

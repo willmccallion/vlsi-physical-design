@@ -15,7 +15,7 @@
 
 use crate::access::Node;
 use crate::global::{GCell, GlobalGrid, GlobalRoutes};
-use crate::occupancy::{Occupancy, Owner, affected_tracks};
+use crate::occupancy::{LayerSpacing, Occupancy, Owner, Query, affected_tracks};
 use crate::tech::{LayerTech, RouteTech};
 use crate::wiring::Edge;
 use pare_common::db::indices::{LayerId, NetId};
@@ -422,11 +422,11 @@ impl<'a> Costing<'a> {
 
     /// Overlap of `rect` of `net` with fixed metal of other owners.
     fn fixed_overlap(&self, net: NetId, rect: &Rect<Dbu>) -> i64 {
-        let (_, (lo, hi)) = self.lt.across_along_rect(rect);
-        let spacing = self.spacing(net);
+        let query = Query::of(self.lt, rect, self.spacing(net));
+        let rules = LayerSpacing::of(self.lt);
         self.occupancy
             .rect_conflicts(self.tech, self.layer, rect, Owner::Net(net.0))
-            .map(|(_, o)| overlap(lo, hi, o.lo, o.hi, spacing.max(o.spacing)))
+            .map(|(_, o)| overlap(query.lo, query.hi, o.lo, o.hi, rules.required(o, query)))
             .sum()
     }
 
