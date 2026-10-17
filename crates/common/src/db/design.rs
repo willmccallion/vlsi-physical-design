@@ -4,7 +4,9 @@ use crate::db::indices::{
     CellId, CutLayerId, IoPinId, LayerId, MacroId, MacroPinId, NetId, NonDefaultRuleId, PinId,
     RegionId, SiteId, ViaId, ViaRuleId,
 };
-use crate::db::library::{DuplicateName, LayerRef, Library, Macro, PinDirection, Shape, SignalUse};
+use crate::db::library::{
+    Direction, DuplicateName, LayerRef, Library, Macro, PinDirection, Shape, SignalUse,
+};
 use crate::geom::dbu::{Dbu, DbuPerMicron};
 use crate::geom::orient::Orientation;
 use crate::geom::point::Point;
@@ -615,6 +617,40 @@ impl NetlistDB {
                     .map_or(p.location, |r| r.center())
             }
         }
+    }
+
+    /// The coordinates across `layer` of its routing tracks: those the
+    /// design's `TRACKS` statements give it, or else one per pitch from the
+    /// layer's offset, half a pitch in from the die edge by default.
+    pub fn layer_tracks(&self, layer: LayerId) -> Vec<Dbu> {
+        let l = self.library.layer(layer);
+        let axis = match l.direction {
+            Direction::Horizontal => TrackAxis::Y,
+            Direction::Vertical => TrackAxis::X,
+        };
+        let mut coords: Vec<Dbu> = self
+            .tracks
+            .iter()
+            .filter(|t| t.axis == axis && t.layers.contains(&layer))
+            .flat_map(TrackDef::coords)
+            .collect();
+        if coords.is_empty() {
+            let (lo, hi, offset) = match l.direction {
+                Direction::Horizontal => (self.die_area.min.y, self.die_area.max.y, l.offset_y),
+                Direction::Vertical => (self.die_area.min.x, self.die_area.max.x, l.offset_x),
+            };
+            let pitch = l.track_pitch();
+            if pitch > Dbu::ZERO {
+                let mut t = lo + offset.unwrap_or(pitch / 2);
+                while t < hi {
+                    coords.push(t);
+                    t += pitch;
+                }
+            }
+        }
+        coords.sort_unstable();
+        coords.dedup();
+        coords
     }
 
     /// A connection's geometry in design coordinates.

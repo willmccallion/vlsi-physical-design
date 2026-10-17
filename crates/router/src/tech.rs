@@ -7,8 +7,8 @@
 //! lands on a track of both layers it joins.
 
 use crate::RouteError;
+use pare_common::db::design::NetlistDB;
 use pare_common::db::design::NonDefaultRule;
-use pare_common::db::design::{NetlistDB, TrackAxis};
 use pare_common::db::indices::{CutLayerId, LayerId, NonDefaultRuleId, ViaId};
 use pare_common::db::library::{Direction, LayerRef};
 use pare_common::db::rules::SpacingTable;
@@ -211,7 +211,7 @@ impl RouteTech {
         let (min_layer, max_layer) = (*range.start(), *range.end());
 
         let tracks: Vec<Vec<Dbu>> = (0..count)
-            .map(|l| layer_tracks(db, LayerId::new(l)))
+            .map(|l| db.layer_tracks(LayerId::new(l)))
             .collect();
         let routable = min_layer.index()..=max_layer.index();
         if let Some(l) = routable.into_iter().find(|&l| tracks[l].is_empty()) {
@@ -340,39 +340,6 @@ fn merge_cross(a: Option<&Vec<Dbu>>, b: Option<&Vec<Dbu>>) -> Vec<Dbu> {
     all.sort_unstable();
     all.dedup();
     all
-}
-
-/// Track coordinates of a layer in its preferred direction, from DEF
-/// `TRACKS`, or from its LEF pitch and offset across the die if none are given.
-fn layer_tracks(db: &NetlistDB, layer: LayerId) -> Vec<Dbu> {
-    let l = db.library.layer(layer);
-    let axis = match l.direction {
-        Direction::Horizontal => TrackAxis::Y,
-        Direction::Vertical => TrackAxis::X,
-    };
-    let mut coords: Vec<Dbu> = db
-        .tracks
-        .iter()
-        .filter(|t| t.axis == axis && t.layers.contains(&layer))
-        .flat_map(pare_common::db::design::TrackDef::coords)
-        .collect();
-    if coords.is_empty() {
-        let (lo, hi, offset) = match l.direction {
-            Direction::Horizontal => (db.die_area.min.y, db.die_area.max.y, l.offset_y),
-            Direction::Vertical => (db.die_area.min.x, db.die_area.max.x, l.offset_x),
-        };
-        let pitch = l.track_pitch();
-        if pitch > Dbu::ZERO {
-            let mut t = lo + offset.unwrap_or(pitch / 2);
-            while t < hi {
-                coords.push(t);
-                t += pitch;
-            }
-        }
-    }
-    coords.sort_unstable();
-    coords.dedup();
-    coords
 }
 
 /// How far a metal rectangle reaches across a layer's tracks beyond a
