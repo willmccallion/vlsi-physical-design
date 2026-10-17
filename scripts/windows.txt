@@ -1,0 +1,13 @@
+# name            design               X0   Y0   X1   Y1   [partial]
+# pci_bridge32_a: standard-cell area away from the macros, growing boxes
+pci-20            mgc_pci_bridge32_a   100  150  120  170
+pci-40            mgc_pci_bridge32_a   100  150  140  190
+pci-80            mgc_pci_bridge32_a   100  150  180  230
+pci-160           mgc_pci_bridge32_a   100  100  260  260
+# the macro corner where h7 and h8 meet h6, and the pins under the stripes beside it
+pci-corner        mgc_pci_bridge32_a   220   90  260  130
+pci-pocket        mgc_pci_bridge32_a    20  185  170  335
+pci-stripe-pins   mgc_pci_bridge32_a    20  270  110  335
+# fft_a: the dense strip beside the left macros, and a row of abutting in01f01 cells
+fft-strip         mgc_fft_a              0  170   40  210
+fft-abutting      mgc_fft_a            790  232  800  242  partial
