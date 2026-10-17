@@ -193,6 +193,22 @@ impl Weights {
     /// Doubles the damping of large objects every [`DAMPING_PERIOD`]
     /// iterations once every field's overflow is under
     /// [`DAMPING_OVERFLOW`], up to [`MAX_DAMPING`].
+    /// Normalizes the schedule to `energies`, the fields' density energies
+    /// after their cells changed size, so that the same density is read as
+    /// it was before the change; every weight keeps its value.
+    fn renormalize(&mut self, energies: &[f64]) {
+        let Some(s) = self.schedule.as_mut() else {
+            return;
+        };
+        for (k, &energy) in energies.iter().enumerate() {
+            if self.frozen[k] || energy <= 0.0 {
+                continue;
+            }
+            s.precondition[k] = 1.0 / energy;
+            s.u[k] = self.penalties[k] / (QUADRATIC_COEFFICIENT + 1.0);
+        }
+    }
+
     fn damp(&mut self, iteration: usize, eval: &Evaluation) {
         let Some(s) = self.schedule.as_mut() else {
             return;
@@ -846,6 +862,8 @@ pub(super) fn minimize(
                     refunded = 0;
                     s = revert(saved, &s, objective.fields);
                     objective.refresh(objects);
+                    let resized = objective.evaluate(&s.reference, s.gamma);
+                    s.weights.renormalize(&resized.field_energy);
                     eval = objective.gradient(&s.reference, s.gamma, &s.weights, &mut grad);
                     moving = objective.moving(&s.weights.frozen);
                 }
@@ -1007,6 +1025,35 @@ mod tests {
         let expected = 3.0 * 1001.0;
         assert!((weights.multiplier(0, 1.0) - expected).abs() < 1e-9);
         assert!((weights.multiplier(0, 0.0) - 3.0).abs() < 1e-12);
+    }
+
+    #[test]
+    fn renormalizing_to_new_energies_keeps_every_weight() {
+        let mut weights = Weights {
+            penalties: vec![5.0, 7.0],
+            frozen: vec![false, true],
+            schedule: Some(Schedule {
+                precondition: vec![1.0, 1.0],
+                u: vec![0.01, 0.02],
+                step: 0.0,
+                cap: f64::MAX,
+                site: 1.0,
+                kinds: vec![Precondition::Weighted; 2],
+                damping: 1.0,
+            }),
+        };
+
+        weights.renormalize(&[4.0, 8.0]);
+        weights.update(&evaluation(vec![4.0, 8.0]), 1.05);
+
+        let s = weights.schedule.as_ref().unwrap();
+        assert!((s.precondition[0] - 0.25).abs() < 1e-12);
+        assert!(
+            (s.precondition[1] - 1.0).abs() < 1e-12,
+            "a frozen field keeps its scale"
+        );
+        assert!((weights.penalties[0] - 5.0).abs() < 1e-9, "{weights:?}");
+        assert!((weights.penalties[1] - 7.0).abs() < 1e-12);
     }
 
     #[test]
