@@ -15,7 +15,7 @@
 
 use crate::access::Node;
 use crate::global::{GCell, GlobalGrid, GlobalRoutes};
-use crate::occupancy::{LayerSpacing, Occupancy, Owner, Query, affected_tracks};
+use crate::occupancy::{LayerSpacing, Occupancy, Owner, Proximity, Query, affected_tracks};
 use crate::tech::{LayerTech, RouteTech};
 use crate::wiring::Edge;
 use pare_common::db::indices::{LayerId, NetId};
@@ -426,7 +426,11 @@ impl<'a> Costing<'a> {
         let rules = LayerSpacing::of(self.lt);
         self.occupancy
             .rect_conflicts(self.tech, self.layer, rect, Owner::Net(net.0))
-            .map(|(_, o)| overlap(query.lo, query.hi, o.lo, o.hi, rules.required(o, query)))
+            .filter(|c| c.proximity == Proximity::Within)
+            .map(|c| {
+                let o = c.occupant;
+                overlap(query.lo, query.hi, o.lo, o.hi, rules.required(o, query))
+            })
             .sum()
     }
 

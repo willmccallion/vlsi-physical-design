@@ -93,20 +93,52 @@ impl<'a> LayerSpacing<'a> {
     /// at the two widths and their parallel run, or the layer's spacing,
     /// and never less than either owner's demand.
     pub fn required(&self, o: &Occupant, query: Query) -> Dbu {
+        let run = query.hi.min(o.extent.1) - query.lo.max(o.extent.0);
+        self.required_at(o, query, run)
+    }
+
+    /// [`Self::required`] for a parallel run of `run`.
+    fn required_at(&self, o: &Occupant, query: Query, run: Dbu) -> Dbu {
         let table = self.table.map_or(self.spacing, |t| {
-            let run = query.hi.min(o.extent.1) - query.lo.max(o.extent.0);
             t.spacing(o.width.max(self.width), query.width.max(self.width), run)
         });
         table.max(self.spacing).max(query.spacing).max(o.hard)
     }
 
-    /// Whether `query` comes closer to `o` than the spacing they must keep,
-    /// measured along the track and across it separately.
-    pub fn too_close(&self, o: &Occupant, query: Query) -> bool {
-        let s = self.required(o, query);
+    /// How near `query` comes to `o`, measured along the track and across
+    /// it separately, or `None` when it keeps clear even of a run along the
+    /// occupant's whole length.
+    pub fn proximity(&self, o: &Occupant, query: Query) -> Option<Proximity> {
         let across = (query.across.0 - o.across.1).max(o.across.0 - query.across.1);
-        across < s && o.lo < query.hi + s && query.lo < o.hi + s
+        let near = |s: Dbu| across < s && o.lo < query.hi + s && query.lo < o.hi + s;
+        if near(self.required(o, query)) {
+            return Some(Proximity::Within);
+        }
+        near(self.required_at(o, query, o.extent.1 - o.extent.0)).then_some(Proximity::Alongside)
     }
+}
+
+/// How near a query comes to an occupant.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Proximity {
+    /// Within the spacing their widths and actual parallel run require: a
+    /// violation if both are made.
+    Within,
+    /// Clear by that measure, but within the spacing a wire running the
+    /// occupant's whole length would need: a wire step that may become a
+    /// violation as it goes on.
+    Alongside,
+}
+
+/// An occupant a query comes near, and how near.
+#[derive(Clone, Copy, Debug)]
+pub struct Conflict<'a> {
+    /// The track the occupant was met on.
+    pub track: TrackRef,
+    /// The occupant.
+    pub occupant: &'a Occupant,
+    /// How near the query comes to it.
+    pub proximity: Proximity,
 }
 
 /// A track of a layer.
@@ -726,8 +758,8 @@ impl Occupancy {
         }
     }
 
-    /// Occupants of other owners on a track that `query` would come too
-    /// close to. Intrusions are skipped when the query is itself an
+    /// Occupants of other owners on a track that `query` comes near, and
+    /// how near. Intrusions are skipped when the query is itself an
     /// intrusion.
     pub fn conflicts(
         &self,
@@ -735,12 +767,17 @@ impl Occupancy {
         query: Query,
         owner: Owner,
         centered: bool,
-    ) -> impl Iterator<Item = &Occupant> + use<'_> {
+    ) -> impl Iterator<Item = Conflict<'_>> + use<'_> {
         let rules = self.rules(t.layer);
         let reach = query.spacing.max(self.reach[t.layer.index()]);
         self.starting_within(t, query.lo - reach - self.chunk, query.hi + reach)
-            .filter(move |o| {
-                o.owner != owner && (centered || o.centered) && rules.too_close(o, query)
+            .filter(move |o| o.owner != owner && (centered || o.centered))
+            .filter_map(move |o| {
+                rules.proximity(o, query).map(|proximity| Conflict {
+                    track: t,
+                    occupant: o,
+                    proximity,
+                })
             })
     }
 
@@ -782,21 +819,18 @@ impl Occupancy {
         })
     }
 
-    /// The conflicts `rect` of `owner` on `layer` would have, as (track,
-    /// occupant) pairs.
+    /// The occupants `rect` of `owner` on `layer` comes near.
     pub fn rect_conflicts<'a>(
         &'a self,
         tech: &'a RouteTech,
         layer: LayerId,
         rect: &Rect<Dbu>,
         owner: Owner,
-    ) -> impl Iterator<Item = (TrackRef, &'a Occupant)> + use<'a> {
+    ) -> impl Iterator<Item = Conflict<'a>> + use<'a> {
         let lt = tech.layer(layer);
         let query = Query::of(lt, rect, tech.wire_spacing(rule_of(tech, owner), layer));
         affected_tracks(lt, rect, query.spacing).flat_map(move |(track, centered)| {
-            let t = TrackRef { layer, track };
-            self.conflicts(t, query, owner, centered)
-                .map(move |o| (t, o))
+            self.conflicts(TrackRef { layer, track }, query, owner, centered)
         })
     }
 }
@@ -896,14 +930,14 @@ impl LocalOccupancy {
             .flat_map(move |layer| layer.conflicts(rect, owner))
     }
 
-    /// The conflicts `rect` of `owner` on `layer` would have here.
+    /// The occupants here that `rect` of `owner` on `layer` comes near.
     pub fn rect_conflicts<'a>(
         &'a self,
         tech: &'a RouteTech,
         layer: LayerId,
         rect: &Rect<Dbu>,
         owner: Owner,
-    ) -> impl Iterator<Item = (TrackRef, &'a Occupant)> + use<'a> {
+    ) -> impl Iterator<Item = Conflict<'a>> + use<'a> {
         let lt = tech.layer(layer);
         let rules = LayerSpacing::of(lt);
         let query = Query::of(lt, rect, tech.wire_spacing(rule_of(tech, owner), layer));
@@ -913,10 +947,13 @@ impl LocalOccupancy {
                 .get(&t)
                 .into_iter()
                 .flatten()
+                .filter(move |o| o.owner != owner && (centered || o.centered))
                 .filter_map(move |o| {
-                    let clash =
-                        o.owner != owner && (centered || o.centered) && rules.too_close(o, query);
-                    clash.then_some((t, o))
+                    rules.proximity(o, query).map(|proximity| Conflict {
+                        track: t,
+                        occupant: o,
+                        proximity,
+                    })
                 })
         })
     }

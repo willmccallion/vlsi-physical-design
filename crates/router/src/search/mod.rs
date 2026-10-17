@@ -11,7 +11,7 @@ mod dense;
 
 use crate::access::{AccessPoint, Node};
 use crate::global::GCell;
-use crate::occupancy::{LocalOccupancy, Occupancy, Origin, Owner, TrackRef, too_close};
+use crate::occupancy::{LocalOccupancy, Occupancy, Origin, Owner, Proximity, TrackRef, too_close};
 use crate::tech::RouteTech;
 use pare_common::db::design::NetlistDB;
 use pare_common::db::indices::{CutLayerId, LayerId, NonDefaultRuleId, ViaId};
@@ -443,22 +443,38 @@ impl Search<'_> {
         cost
     }
 
-    /// Cost of other owners' metal that `rect` on `layer` would conflict with.
-    /// Cost of other owners' metal that `rect` on `layer` would conflict
-    /// with, plus the conflict history of the tracks it runs on.
+    /// Cost of other owners' metal that a whole shape `rect` on `layer`
+    /// would conflict with, plus the conflict history of the tracks it runs
+    /// on.
     pub(crate) fn conflict_cost(&self, layer: LayerId, rect: &Rect<Dbu>) -> f64 {
+        self.metal_cost(layer, rect, 0.0)
+    }
+
+    /// [`Self::conflict_cost`] for one step of a wire, which also pays
+    /// `alongside` for each shape it would violate the spacing of should
+    /// the wire go on alongside it, as `TritonRoute` prices fixed shapes.
+    fn step_conflict_cost(&self, layer: LayerId, rect: &Rect<Dbu>) -> f64 {
+        self.metal_cost(layer, rect, self.costs.penalty)
+    }
+
+    fn metal_cost(&self, layer: LayerId, rect: &Rect<Dbu>, alongside: f64) -> f64 {
         let mut cost = 0.0;
-        for (_, o) in self
+        for c in self
             .occupancy
             .rect_conflicts(self.tech, layer, rect, self.owner)
         {
-            cost += self.occupant_cost(o.owner, o.origin);
+            cost += match c.proximity {
+                Proximity::Within => self.occupant_cost(c.occupant.owner, c.occupant.origin),
+                Proximity::Alongside => alongside,
+            };
         }
         if let Some(overlay) = self.overlay {
-            let clashes = overlay
-                .rect_conflicts(self.tech, layer, rect, self.owner)
-                .count();
-            cost = self.costs.penalty.mul_add(clashes as f64, cost);
+            for c in overlay.rect_conflicts(self.tech, layer, rect, self.owner) {
+                cost += match c.proximity {
+                    Proximity::Within => self.costs.penalty,
+                    Proximity::Alongside => alongside,
+                };
+            }
         }
         let lt = self.tech.layer(layer);
         let ((a0, a1), (b0, b1)) = lt.across_along_rect(rect);
@@ -472,10 +488,20 @@ impl Search<'_> {
         cost
     }
 
+    /// Cost of a whole wire from `a` to `b`: its length and its conflicts.
     fn wire_cost(&self, layer: LayerId, a: Point<Dbu>, b: Point<Dbu>) -> f64 {
         let length = ((a.x - b.x).abs() + (a.y - b.y).abs()).to_f64();
         let conflict =
             wire_rect(a, b, self.width(layer)).map_or(0.0, |r| self.conflict_cost(layer, &r));
+        length + conflict
+    }
+
+    /// Cost of one step of a wire from `a` to `b`, which may go on alongside
+    /// what it meets.
+    fn step_cost(&self, layer: LayerId, a: Point<Dbu>, b: Point<Dbu>) -> f64 {
+        let length = ((a.x - b.x).abs() + (a.y - b.y).abs()).to_f64();
+        let conflict =
+            wire_rect(a, b, self.width(layer)).map_or(0.0, |r| self.step_conflict_cost(layer, &r));
         length + conflict
     }
 
@@ -813,7 +839,7 @@ impl StepCosts for FreshCosts {
         let lt = search.tech.layer(lower.layer);
         let a = lt.point(lower.track, lower.cross);
         let b = lt.point(lower.track, lower.cross + 1);
-        search.wire_cost(lower.layer, a, b)
+        search.step_cost(lower.layer, a, b)
     }
 
     fn via(&mut self, search: &Search<'_>, lower: Node) -> f64 {

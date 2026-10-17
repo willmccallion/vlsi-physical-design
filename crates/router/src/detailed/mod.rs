@@ -16,7 +16,7 @@ pub use region::{RepairStats, Scope};
 
 use crate::access::{AccessPoint, Node, access_points};
 use crate::global::{GCell, GlobalGrid, GlobalRoutes, RouteTree};
-use crate::occupancy::{Occupancy, Origin, Owner, Slot, TrackRef};
+use crate::occupancy::{Occupancy, Origin, Owner, Proximity, Slot, TrackRef};
 pub use crate::search::Costs;
 use crate::search::{GUIDE_SLACK_GCELLS, Guide, History, OwnVias, Search};
 use crate::tech::RouteTech;
@@ -228,7 +228,7 @@ impl<'a> DetailedRouter<'a> {
                     && self
                         .occupancy
                         .rect_conflicts(self.tech, *layer, rect, owner)
-                        .any(|(_, o)| listed(o.owner))
+                        .any(|c| c.proximity == Proximity::Within && listed(c.occupant.owner))
             });
         metal
             || route.cuts(self.db, self.tech).iter().any(|(cut, rect)| {
@@ -1097,8 +1097,7 @@ fn reserve_accesses(
                 !tech.routable(*layer)
                     || occupancy
                         .rect_conflicts(tech, *layer, rect, owner)
-                        .next()
-                        .is_none()
+                        .all(|c| c.proximity != Proximity::Within)
             });
             leaves_room
                 && metal_clear

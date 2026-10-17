@@ -10,7 +10,7 @@ use pare_common::util::config::RoutingConfig;
 use pare_common::verify::shapes::wire_rect;
 use pare_router::detailed::DetailedRouter;
 use pare_router::global::{GCell, GlobalGrid, GlobalRoutes};
-use pare_router::occupancy::Owner;
+use pare_router::occupancy::{Owner, Proximity};
 use pare_router::tech::RouteTech;
 use pare_router::track::{TrackWire, assign_tracks};
 use std::path::{Path, PathBuf};
@@ -78,7 +78,7 @@ fn a_wire_is_cut_where_it_would_cross_an_obstacle() {
         let metal = wire_rect(a, b, lt.width).unwrap();
         let blocked = occupancy
             .rect_conflicts(&tech, M3, &metal, Owner::Net(0))
-            .any(|(_, o)| o.owner == Owner::Obstacle);
+            .any(|c| c.proximity == Proximity::Within && c.occupant.owner == Owner::Obstacle);
         assert!(!blocked, "{w:?} crosses an obstacle");
         assert!(b.x < stripe_x, "{w:?} should stop before the stripe");
     }

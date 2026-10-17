@@ -341,7 +341,10 @@ impl DetailedRouter<'_> {
             .any(|(layer, rect)| {
                 self.occupancy
                     .rect_conflicts(self.tech, layer, &rect, owner)
-                    .any(|(_, o)| o.origin == crate::occupancy::Origin::Fixed)
+                    .any(|c| {
+                        c.proximity == crate::occupancy::Proximity::Within
+                            && c.occupant.origin == crate::occupancy::Origin::Fixed
+                    })
             })
     }
 }
