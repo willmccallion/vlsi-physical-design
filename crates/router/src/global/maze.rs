@@ -2,9 +2,10 @@
 //! tree built so far by an A* search confined to a window around the two
 //! pins it connects, widened only when the window holds no path. Edges that
 //! fixed metal blocks outright are never crossed and cells with no room for
-//! a via pad are never climbed into, so a net detours around a macro
-//! however far that takes it; only a pin no detour reaches crosses them,
-//! and then as few of them as possible.
+//! a via pad are never climbed into, except to leave or reach a terminal
+//! that sits in such a cell, so a net detours around a macro however far
+//! that takes it; only a pin no detour reaches crosses them elsewhere, and
+//! then as few of them as possible.
 
 use super::{BLOCKED_COST, GCell, GlobalCosts, GlobalGrid, GlobalNet, window};
 use crate::tree::connection_order;
@@ -221,8 +222,19 @@ fn search_with(
         costs,
         blocked,
     } = query;
-    let passable = |e: usize| blocked == Blocked::Cross || !grid.blocked[e];
-    let climbable = |c: GCell| blocked == Blocked::Cross || !grid.via_blocked(c);
+    let terminals: FxHashSet<usize> = sources
+        .iter()
+        .chain(std::iter::once(&target))
+        .map(|&c| grid.edge(c))
+        .collect();
+    let at_terminal =
+        |a: GCell, b: GCell| terminals.contains(&grid.edge(a)) || terminals.contains(&grid.edge(b));
+    let passable = |e: usize, from: GCell, to: GCell| {
+        blocked == Blocked::Cross || !grid.blocked[e] || at_terminal(from, to)
+    };
+    let climbable = |from: GCell, to: GCell| {
+        blocked == Blocked::Cross || !grid.via_blocked(to) || at_terminal(from, to)
+    };
     let edge_cost = |e: usize| {
         let demand = net.demand(grid.layer_offset(grid.cell_of(e).layer));
         let crossing = if grid.blocked[e] { BLOCKED_COST } else { 0.0 };
@@ -284,24 +296,30 @@ fn search_with(
                 if x > win.0 {
                     let next = GCell { x: x - 1, ..cell };
                     let e = grid.edge(next);
-                    if passable(e) {
+                    if passable(e, cell, next) {
                         push(next, edge_cost(e));
                     }
                 }
-                if x < win.1 && passable(here) {
-                    push(GCell { x: x + 1, ..cell }, edge_cost(here));
+                if x < win.1 {
+                    let next = GCell { x: x + 1, ..cell };
+                    if passable(here, cell, next) {
+                        push(next, edge_cost(here));
+                    }
                 }
             }
             Direction::Vertical => {
                 if y > win.2 {
                     let next = GCell { y: y - 1, ..cell };
                     let e = grid.edge(next);
-                    if passable(e) {
+                    if passable(e, cell, next) {
                         push(next, edge_cost(e));
                     }
                 }
-                if y < win.3 && passable(here) {
-                    push(GCell { y: y + 1, ..cell }, edge_cost(here));
+                if y < win.3 {
+                    let next = GCell { y: y + 1, ..cell };
+                    if passable(here, cell, next) {
+                        push(next, edge_cost(here));
+                    }
                 }
             }
         }
@@ -311,7 +329,7 @@ fn search_with(
                 layer: LayerId::new(l - 1),
                 ..cell
             };
-            if climbable(next) {
+            if climbable(cell, next) {
                 push(next, climb_cost(next));
             }
         }
@@ -320,7 +338,7 @@ fn search_with(
                 layer: LayerId::new(l + 1),
                 ..cell
             };
-            if climbable(next) {
+            if climbable(cell, next) {
                 push(next, climb_cost(next));
             }
         }
