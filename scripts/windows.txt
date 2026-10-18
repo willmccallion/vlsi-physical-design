@@ -15,3 +15,6 @@ fft-abutting      mgc_fft_a            790  232  800  242  partial
 fft-strip-load    mgc_fft_a              0  170   40  210  boundary
 # fft_a: where the channel between macro rows meets the right edge and its I/O pins
 fft-right-band    mgc_fft_a            720  400  800  440  boundary
+# superblue19: plain standard-cell area, and the channel between two macros
+sb19-cells        mgc_superblue19      600 1200  640 1240
+sb19-channel      mgc_superblue19      360  100  440  180
