@@ -28,7 +28,7 @@ use pare_common::db::library::Shape;
 use pare_common::geom::dbu::Dbu;
 use pare_common::geom::point::Point;
 use pare_common::util::config::{LayerRangeError, RoutingConfig};
-use pare_common::util::ui;
+use pare_common::util::{memory, ui};
 use pare_common::verify::shapes::obstruction_shapes;
 use search::MAX_PENALTY;
 use std::time::Instant;
@@ -503,11 +503,12 @@ fn shapes_touch(a: &[Shape], b: &[Shape]) -> bool {
 }
 
 fn stage(label: &str, start: Instant) {
+    let resident = memory::current_rss_mb().map_or_else(String::new, |mb| format!("{mb} MB"));
     ui::stat_row(
         label,
         &format!("{:.1}s", start.elapsed().as_secs_f64()),
-        "",
-        "",
+        "Resident:",
+        &resident,
     );
 }
 

@@ -116,31 +116,4 @@ impl Report {
     }
 }
 
-/// The peak resident memory of this process in megabytes, from the kernel's
-/// accounting where it is available.
-pub fn peak_rss_mb() -> Option<u64> {
-    let status = std::fs::read_to_string("/proc/self/status").ok()?;
-    vm_hwm_kb(&status).map(|kb| kb / 1024)
-}
-
-/// The `VmHWM` line of a `/proc/<pid>/status` text, in kilobytes.
-fn vm_hwm_kb(status: &str) -> Option<u64> {
-    status
-        .lines()
-        .find_map(|line| line.strip_prefix("VmHWM:"))
-        .and_then(|rest| rest.split_whitespace().next())
-        .and_then(|kb| kb.parse().ok())
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn the_peak_memory_line_of_a_status_file_is_read_in_kilobytes() {
-        let status = "Name:\tpare\nVmPeak:\t  123456 kB\nVmHWM:\t   98304 kB\nVmRSS:\t 1000 kB\n";
-
-        assert_eq!(vm_hwm_kb(status), Some(98_304));
-        assert_eq!(vm_hwm_kb("Name:\tpare\n"), None);
-    }
-}
+pub use pare_common::util::memory::peak_rss_mb;
