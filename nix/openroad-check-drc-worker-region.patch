@@ -1,0 +1,57 @@
+drt: filter check_drc markers by worker check region
+
+Upstream bug: https://github.com/The-OpenROAD-Project/OpenROAD/issues/11697
+Upstream fix: https://github.com/The-OpenROAD-Project/OpenROAD/pull/11698
+(the source changes of that pull request, without its tests, rebased onto
+the OpenROAD that nixpkgs pins here).
+
+check_drc runs one checking worker per tile of 7x7 gcells, loading routed
+objects within the tile grown by MTSAFEDIST. Routed vias are found by their
+whole bounding box and wires by their own, so a worker at a tile edge can
+load two vias of a net but not the wire joining them, and it reports a
+spacing violation between the via pads that the full design does not have.
+getDRCMarkers kept every worker's markers inside the requested box; this
+keeps only those inside the worker's own check region, as routing workers
+already do. See docs/openroad-check-drc-tiling.md for how it was found.
+
+diff -ru a/src/drt/src/gc/FlexGC.cpp b/src/drt/src/gc/FlexGC.cpp
+--- a/src/drt/src/gc/FlexGC.cpp
++++ b/src/drt/src/gc/FlexGC.cpp
+@@ -206,6 +206,11 @@
+   impl_->drcBox_ = in;
+ }
+ 
++const odb::Rect& FlexGCWorker::getDrcBox() const
++{
++  return impl_->drcBox_;
++}
++
+ const std::vector<std::unique_ptr<frMarker>>& FlexGCWorker::getMarkers() const
+ {
+   return impl_->markers_;
+diff -ru a/src/drt/src/gc/FlexGC.h b/src/drt/src/gc/FlexGC.h
+--- a/src/drt/src/gc/FlexGC.h
++++ b/src/drt/src/gc/FlexGC.h
+@@ -51,6 +51,7 @@
+   std::vector<std::unique_ptr<gcNet>>& getNets();
+   gcNet* getNet(frNet* net);
+   frDesign* getDesign() const;
++  const odb::Rect& getDrcBox() const;
+   const std::vector<std::unique_ptr<frMarker>>& getMarkers() const;
+   const std::vector<std::unique_ptr<drPatchWire>>& getPWires() const;
+   // others
+diff -ru a/src/drt/src/TritonRoute.cpp b/src/drt/src/TritonRoute.cpp
+--- a/src/drt/src/TritonRoute.cpp
++++ b/src/drt/src/TritonRoute.cpp
+@@ -1196,7 +1196,10 @@
+     for (const auto& worker : workers) {
+       for (auto& marker : worker->getMarkers()) {
+         odb::Rect bbox = marker->getBBox();
+-        if (!bbox.intersects(requiredDrcBox)) {
++        // Context shapes outside this worker's check region may be incomplete.
++        // Match the ownership filter used when routing workers commit markers.
++        if (!bbox.intersects(requiredDrcBox)
++            || !bbox.intersects(worker->getDrcBox())) {
+           continue;
+         }
+         auto layerNum = marker->getLayerNum();

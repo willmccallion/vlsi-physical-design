@@ -32,7 +32,10 @@
           packages = rustTools pkgs ++ [
             pkgs.python3
             # nixpkgs 26Q2 fails its own dbSta.report_cell_usage_file log test.
-            (pkgs.openroad.overrideAttrs { doCheck = false; })
+            (pkgs.openroad.overrideAttrs (old: {
+              doCheck = false;
+              patches = (old.patches or [ ]) ++ [ ./nix/openroad-check-drc-worker-region.patch ];
+            }))
           ];
         };
       });
