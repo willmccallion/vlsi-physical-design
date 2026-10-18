@@ -799,9 +799,6 @@ const MARGIN_STEP: u16 = 2;
 /// disjoint search areas to reroute in parallel.
 const MAX_MARGIN: u16 = 12;
 
-/// Growth of the overflow penalty per round.
-const PENALTY_GROWTH: f64 = 1.5;
-
 /// Global routes of all nets.
 #[derive(Clone, Debug, Default)]
 pub struct GlobalRoutes {
@@ -937,9 +934,16 @@ pub fn track_demand(db: &NetlistDB, tech: &RouteTech, net: NetId) -> Vec<Tracks>
 
 /// Routes `nets` and negotiates overflow for at most `rounds` rounds.
 ///
-/// Negotiation stops early once [`STALL_ROUNDS`] pass without a new lowest
-/// overflow. Returns the routes of the round with the lowest overflow, and
-/// leaves the grid's usage at theirs.
+/// The history of overflow on each edge grows every round. The overflow
+/// penalty grows by [`PENALTY_STEP`] after a round that lowers the overflow
+/// and shrinks by it after one that raises it: more pressure clears the
+/// last overflow of a routable design, while pressure that keeps growing
+/// on overflow that cannot be cleared drives nets into detours that
+/// overflow more than they relieve. Negotiation stops early once
+/// [`STALL_ROUNDS`] pass without lowering the overflow by
+/// [`MIN_PROGRESS`] of what it was when it last did. Returns the routes of
+/// the round with the lowest overflow, and leaves the grid's usage at
+/// theirs.
 pub fn route_global(grid: &mut GlobalGrid, nets: &[GlobalNet], rounds: usize) -> GlobalRoutes {
     let mut costs = GlobalCosts {
         via: 1.0,
@@ -950,6 +954,7 @@ pub fn route_global(grid: &mut GlobalGrid, nets: &[GlobalNet], rounds: usize) ->
     let mut margins = vec![FIRST_MARGIN; nets.len()];
     route_initial(grid, nets, costs, &mut routes);
     let mut best = Best::of(grid);
+    let mut progress_from = best.overflow;
     let mut stalled = 0;
     for _ in 0..rounds {
         if best.overflow == Tracks::ZERO || stalled >= STALL_ROUNDS {
@@ -975,7 +980,6 @@ pub fn route_global(grid: &mut GlobalGrid, nets: &[GlobalNet], rounds: usize) ->
             margins[i] = margins[i].saturating_add(MARGIN_STEP).min(MAX_MARGIN);
         }
         ripped.sort_by_key(|&i| (span(&nets[i].terminals), i));
-        costs.penalty *= PENALTY_GROWTH;
         let start = std::time::Instant::now();
         route_disjoint(grid, nets, &ripped, &margins, costs, &mut routes);
         log::debug!(
@@ -984,8 +988,15 @@ pub fn route_global(grid: &mut GlobalGrid, nets: &[GlobalNet], rounds: usize) ->
             grid.overflow().rounded(),
             start.elapsed().as_secs_f64()
         );
-        if grid.overflow() < best.overflow {
+        let overflow = grid.overflow();
+        if overflow < best.overflow {
+            costs.penalty *= PENALTY_STEP;
             best = Best::of(grid);
+        } else {
+            costs.penalty /= PENALTY_STEP;
+        }
+        if overflow.to_f64() <= progress_from.to_f64() * (1.0 - MIN_PROGRESS) {
+            progress_from = overflow;
             stalled = 0;
         } else {
             stalled += 1;
@@ -1055,8 +1066,16 @@ fn log_overflow_regions(grid: &GlobalGrid) {
 /// over.
 const OVERFLOW_REGION: u16 = 20;
 
-/// Rounds without a new lowest overflow after which negotiation stops.
-const STALL_ROUNDS: usize = 8;
+/// Rounds without enough progress after which negotiation stops.
+const STALL_ROUNDS: usize = 3;
+
+/// Share of the overflow a round must remove, against the overflow when
+/// it last made progress, to count as progress.
+const MIN_PROGRESS: f64 = 0.005;
+
+/// Factor the overflow penalty grows by after a round that lowers the
+/// overflow, and shrinks by after one that does not.
+const PENALTY_STEP: f64 = 1.5;
 
 /// Share of a gcell's tracks on a layer that fixed metal must take for the
 /// layer's congestion there to be left out of [`GlobalGrid::congestion`],
