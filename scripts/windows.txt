@@ -27,3 +27,5 @@ sb19-hot          mgc_superblue19      150  780  210  840  boundary
 # aes: the centre of its dense blob, where the last markers stay
 aes-hot           aes                  380  280  420  320  boundary
 aes-hot-whole     aes                  380  280  420  320
+# superblue19: a 400 um block of plain standard cells, for detailed routing at scale
+sb19-400          mgc_superblue19      300 1100  700 1500
