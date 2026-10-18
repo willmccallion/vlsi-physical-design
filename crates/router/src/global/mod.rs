@@ -11,10 +11,13 @@
 //! of overflow that grows every round, as in `PathFinder`. Every net is
 //! first routed along its Steiner tree by 3D pattern routing (`pattern`);
 //! then nets crossing overflowed edges are ripped up and rerouted by maze
-//! search (`maze`), each time in a search area grown around their pins so
-//! they can detour further, in parallel batches whose areas do not meet.
-//! The cells each net passes through become its guide for detailed routing.
+//! search (`maze`) in a search area grown around their pins and extended
+//! by a corridor that a search over the whole chip on coarse cells picks
+//! first (`coarse`), as in CUGR, so a net can detour as far as the free
+//! tracks call for, in parallel batches whose areas do not meet. The cells
+//! each net passes through become its guide for detailed routing.
 
+mod coarse;
 mod maze;
 mod pattern;
 mod steiner;
@@ -22,6 +25,7 @@ mod tracks;
 
 use crate::occupancy::{FixedMetal, TrackRef};
 use crate::tech::RouteTech;
+use coarse::{CoarseGrid, Corridor, SCALE};
 use maze::route_tree;
 use pare_common::db::design::NetlistDB;
 use pare_common::db::indices::{LayerId, NetId};
@@ -953,6 +957,7 @@ pub fn route_global(grid: &mut GlobalGrid, nets: &[GlobalNet], rounds: usize) ->
     let mut routes = GlobalRoutes::default();
     let mut margins = vec![FIRST_MARGIN; nets.len()];
     route_initial(grid, nets, costs, &mut routes);
+    let mut coarse = CoarseGrid::new(grid);
     let mut best = Best::of(grid);
     let mut progress_from = best.overflow;
     let mut stalled = 0;
@@ -981,7 +986,25 @@ pub fn route_global(grid: &mut GlobalGrid, nets: &[GlobalNet], rounds: usize) ->
         }
         ripped.sort_by_key(|&i| (span(&nets[i].terminals), i));
         let start = std::time::Instant::now();
-        route_disjoint(grid, nets, &ripped, &margins, costs, &mut routes);
+        coarse.refresh(grid);
+        for level in disjoint_levels(grid, nets, &ripped, &margins) {
+            let shared: &GlobalGrid = grid;
+            let corridors: Vec<Option<Corridor>> = level
+                .par_iter()
+                .map(|&i| coarse.plan(shared, &nets[i]))
+                .collect();
+            let reroute = Reroute {
+                which: &level,
+                margins: &margins,
+                corridors: &corridors,
+            };
+            route_disjoint(grid, nets, &reroute, costs, &mut routes);
+            let touched = touched_coarse_cells(
+                grid,
+                level.iter().filter_map(|&i| routes.paths.get(&nets[i].net)),
+            );
+            coarse.refresh_cells(grid, &touched);
+        }
         log::debug!(
             "global round: {} nets ripped, overflow {}, {:.1}s",
             ripped.len(),
@@ -1123,42 +1146,60 @@ fn span(cells: &[GCell]) -> u32 {
     u32::from(x1 - x0) + u32::from(y1 - y0)
 }
 
+/// Nets to reroute in one batch: their indices in the order to route them,
+/// with each net's search margin and the corridor planned for each.
+struct Reroute<'a> {
+    which: &'a [usize],
+    margins: &'a [u16],
+    /// Aligned with `which`.
+    corridors: &'a [Option<Corridor>],
+}
+
 /// Reroutes nets with the result of routing them one after another in the
 /// order of `which`, routing at once those whose search areas, grown by a
 /// gcell, share no block of [`BATCH_BLOCK`] gcells: each net waits only for
 /// the nets before it whose areas meet its own, so it sees the usage of
 /// every earlier net that could compete with it, while nets elsewhere keep
-/// the threads busy. A connection that finds no path in its area and
-/// searches a larger one may see usage other nets are changing there.
+/// the threads busy. A net's area is the window around its pins together
+/// with its corridor's cells. A connection that finds no path there and
+/// searches a larger window may see usage other nets are changing in it.
 fn route_disjoint(
     grid: &GlobalGrid,
     nets: &[GlobalNet],
-    which: &[usize],
-    margins: &[u16],
+    reroute: &Reroute<'_>,
     costs: GlobalCosts,
     routes: &mut GlobalRoutes,
 ) {
+    let Reroute {
+        which,
+        margins,
+        corridors,
+    } = *reroute;
     let blocks_x = usize::from(grid.nx.div_ceil(BATCH_BLOCK));
     let blocks_y = usize::from(grid.ny.div_ceil(BATCH_BLOCK));
     let mut last = vec![u32::MAX; blocks_x * blocks_y];
     let mut waits: Vec<AtomicU32> = Vec::with_capacity(which.len());
     let mut next: Vec<Vec<u32>> = vec![Vec::new(); which.len()];
     for (k, &i) in which.iter().enumerate() {
-        let (x0, x1, y0, y1) = window(
+        let area = window(
             &nets[i].terminals,
             margins[i].saturating_add(1),
             grid.nx,
             grid.ny,
         );
-        let block = |v: u16| usize::from(v / BATCH_BLOCK);
+        let mut blocks = blocks_of(area, blocks_x);
+        if let Some(corridor) = &corridors[k] {
+            blocks.extend(corridor_blocks(corridor, grid, blocks_x));
+        }
+        blocks.sort_unstable();
+        blocks.dedup();
         let mut before: Vec<u32> = Vec::new();
-        for y in block(y0)..=block(y1) {
-            for slot in &mut last[y * blocks_x + block(x0)..=y * blocks_x + block(x1)] {
-                if *slot != u32::MAX {
-                    before.push(*slot);
-                }
-                *slot = to_u32(k);
+        for b in blocks {
+            let slot = &mut last[b];
+            if *slot != u32::MAX {
+                before.push(*slot);
             }
+            *slot = to_u32(k);
         }
         before.sort_unstable();
         before.dedup();
@@ -1172,6 +1213,7 @@ fn route_disjoint(
         nets,
         which,
         margins,
+        corridors,
         costs,
         waits,
         next,
@@ -1190,7 +1232,36 @@ fn route_disjoint(
             let _ = routes.paths.insert(nets[which[k]].net, tree);
         }
     }
-    log::debug!("global reroute of {} nets", which.len());
+}
+
+/// The blocks of [`BATCH_BLOCK`] gcells a window of gcells meets.
+fn blocks_of((x0, x1, y0, y1): (u16, u16, u16, u16), blocks_x: usize) -> Vec<usize> {
+    let block = |v: u16| usize::from(v / BATCH_BLOCK);
+    let mut out = Vec::new();
+    for y in block(y0)..=block(y1) {
+        for x in block(x0)..=block(x1) {
+            out.push(y * blocks_x + x);
+        }
+    }
+    out
+}
+
+/// The blocks of [`BATCH_BLOCK`] gcells a corridor's cells meet, each cell
+/// grown by a gcell for the edges beside the gcells a route takes.
+fn corridor_blocks(corridor: &Corridor, grid: &GlobalGrid, blocks_x: usize) -> Vec<usize> {
+    corridor
+        .cells()
+        .iter()
+        .flat_map(|&(cx, cy)| {
+            let cell = (
+                (cx * SCALE).saturating_sub(1),
+                (cx * SCALE + SCALE).min(grid.nx - 1),
+                (cy * SCALE).saturating_sub(1),
+                (cy * SCALE + SCALE).min(grid.ny - 1),
+            );
+            blocks_of(cell, blocks_x)
+        })
+        .collect()
 }
 
 /// The nets [`route_disjoint`] reroutes, what each waits for and what it
@@ -1200,6 +1271,7 @@ struct Schedule<'a> {
     nets: &'a [GlobalNet],
     which: &'a [usize],
     margins: &'a [u16],
+    corridors: &'a [Option<Corridor>],
     costs: GlobalCosts,
     /// Earlier nets each one still waits for.
     waits: Vec<AtomicU32>,
@@ -1213,7 +1285,13 @@ impl Schedule<'_> {
     /// that was waiting only for it.
     fn run<'s>(&'s self, scope: &rayon::Scope<'s>, k: usize) {
         let i = self.which[k];
-        let tree = route_tree(self.grid, &self.nets[i], self.margins[i], self.costs);
+        let tree = route_tree(
+            self.grid,
+            &self.nets[i],
+            self.margins[i],
+            self.costs,
+            self.corridors[k].as_ref(),
+        );
         self.grid.add_tree(&self.nets[i], &tree, Sign::Add);
         let _ = self.trees[k].set(tree);
         for &later in &self.next[k] {
@@ -1232,6 +1310,63 @@ fn to_u32(v: usize) -> u32 {
 /// Edge, in gcells, of the blocks that keep the search areas of nets
 /// rerouted together apart.
 const BATCH_BLOCK: u16 = 4;
+
+/// Splits `ripped` into levels, keeping its order within each, whose nets'
+/// pin windows grown by their margins share no block of [`BATCH_BLOCK`]
+/// gcells: each net goes one level above the highest net before it that
+/// meets it. As CUGR's batches, a level's nets are planned at once against
+/// the coarse grid the levels before it left, so nets planned together
+/// start apart rather than all taking the same free corridor.
+fn disjoint_levels(
+    grid: &GlobalGrid,
+    nets: &[GlobalNet],
+    ripped: &[usize],
+    margins: &[u16],
+) -> Vec<Vec<usize>> {
+    let blocks_x = usize::from(grid.nx.div_ceil(BATCH_BLOCK));
+    let blocks_y = usize::from(grid.ny.div_ceil(BATCH_BLOCK));
+    let mut height = vec![0_usize; blocks_x * blocks_y];
+    let mut levels: Vec<Vec<usize>> = Vec::new();
+    for &i in ripped {
+        let area = window(
+            &nets[i].terminals,
+            margins[i].saturating_add(1),
+            grid.nx,
+            grid.ny,
+        );
+        let blocks = blocks_of(area, blocks_x);
+        let level = blocks.iter().map(|&b| height[b]).max().unwrap_or(0);
+        for &b in &blocks {
+            height[b] = level + 1;
+        }
+        if levels.len() <= level {
+            levels.resize_with(level + 1, Vec::new);
+        }
+        levels[level].push(i);
+    }
+    levels
+}
+
+/// The coarse cells whose free tracks routes through `trees` change: those
+/// of every gcell they pass and of the gcells beside it, whose edges they
+/// share.
+fn touched_coarse_cells<'a>(
+    grid: &GlobalGrid,
+    trees: impl Iterator<Item = &'a Vec<Vec<GCell>>>,
+) -> Vec<(u16, u16)> {
+    let mut cells: Vec<(u16, u16)> = trees
+        .flatten()
+        .flatten()
+        .flat_map(|c| {
+            let xs = c.x.saturating_sub(1)..=(c.x + 1).min(grid.nx - 1);
+            let ys = c.y.saturating_sub(1)..=(c.y + 1).min(grid.ny - 1);
+            ys.flat_map(move |y| xs.clone().map(move |x| (x / SCALE, y / SCALE)))
+        })
+        .collect();
+    cells.sort_unstable();
+    cells.dedup();
+    cells
+}
 
 /// Pattern-routes every net, shortest first, in parallel chunks, each
 /// against the usage left by the chunks before it. Nets in one chunk do not

@@ -1,12 +1,14 @@
 //! Maze routing of one net through the 3D gcell grid: each pin joins the
 //! tree built so far by an A* search confined to a window around the two
-//! pins it connects, widened only when the window holds no path. Edges that
+//! pins it connects, extended by the net's coarse corridor when it has one
+//! (`coarse`), and widened only when that holds no path. Edges that
 //! fixed metal blocks outright are never crossed and cells with no room for
 //! a via pad are never climbed into, except to leave or reach a terminal
 //! that sits in such a cell, so a net detours around a macro however far
 //! that takes it; only a pin no detour reaches crosses them elsewhere, and
 //! then as few of them as possible.
 
+use super::coarse::{Corridor, SCALE};
 use super::{BLOCKED_COST, GCell, GlobalCosts, GlobalGrid, GlobalNet, window};
 use crate::tree::connection_order;
 use pare_common::db::indices::LayerId;
@@ -21,13 +23,15 @@ use std::collections::BinaryHeap;
 const BUCKET: u16 = 4;
 
 /// A tree through every terminal of `net`, as the paths that build it.
-/// Each connection searches the box around its two ends grown by `margin`,
-/// and a larger box only when that holds no path.
+/// Each connection searches the box around its two ends grown by `margin`
+/// together with `corridor`, if given, and a larger box only when that
+/// holds no path.
 pub(super) fn route_tree(
     grid: &GlobalGrid,
     net: &GlobalNet,
     margin: u16,
     costs: GlobalCosts,
+    corridor: Option<&Corridor>,
 ) -> Vec<Vec<GCell>> {
     let mut terminals: Vec<GCell> = net.terminals.clone();
     terminals.sort_unstable();
@@ -48,43 +52,89 @@ pub(super) fn route_tree(
     let mut buckets: FxHashMap<(u16, u16), Vec<GCell>> = FxHashMap::default();
     add_cell(&mut tree, &mut buckets, terminals[first]);
     let mut paths = vec![vec![terminals[first]]];
-    let full = (0, grid.nx - 1, 0, grid.ny - 1);
+    let avoid = Query {
+        net,
+        costs,
+        blocked: Blocked::Avoid,
+        corridor: None,
+    };
 
     for join in joins {
         let target = terminals[join.pin];
         if tree.contains(&target) {
             continue;
         }
-        let mut margin = margin;
-        let path = loop {
-            let w = window(&[target, terminals[join.parent]], margin, grid.nx, grid.ny);
-            let sources = cells_in(&buckets, w);
-            let avoid = Query {
-                net,
-                costs,
-                blocked: Blocked::Avoid,
-            };
-            if !sources.is_empty()
-                && let Some(p) = search(grid, avoid, &sources, target, w)
-            {
-                break p;
-            }
-            if w == full {
-                let all = cells_in(&buckets, full);
-                let cross = Query {
-                    blocked: Blocked::Cross,
-                    ..avoid
-                };
-                break search(grid, cross, &all, target, full).unwrap_or_else(|| vec![target]);
-            }
-            margin = margin.saturating_mul(4).max(1);
-        };
+        let ends = [target, terminals[join.parent]];
+        let path = corridor
+            .and_then(|c| search_extended(grid, avoid, c, &buckets, ends, margin))
+            .unwrap_or_else(|| search_widening(grid, avoid, &buckets, ends, margin));
         for &c in &path {
             add_cell(&mut tree, &mut buckets, c);
         }
         paths.push(path);
     }
     paths
+}
+
+/// Cheapest path from the tree to the first of `ends` inside the box around
+/// both grown by `margin` or inside `corridor`, if they hold one.
+fn search_extended(
+    grid: &GlobalGrid,
+    query: Query<'_>,
+    corridor: &Corridor,
+    buckets: &FxHashMap<(u16, u16), Vec<GCell>>,
+    ends: [GCell; 2],
+    margin: u16,
+) -> Option<Vec<GCell>> {
+    let w = window(&ends, margin, grid.nx, grid.ny);
+    let c = corridor.window();
+    let span = (w.0.min(c.0), w.1.max(c.1), w.2.min(c.2), w.3.max(c.3));
+    let inside = |cell: &GCell| {
+        (w.0..=w.1).contains(&cell.x) && (w.2..=w.3).contains(&cell.y)
+            || corridor.allows(cell.x, cell.y)
+    };
+    let sources: Vec<GCell> = cells_in(buckets, span).into_iter().filter(inside).collect();
+    if sources.is_empty() {
+        return None;
+    }
+    let extended = Query {
+        corridor: Some(corridor),
+        ..query
+    };
+    search(grid, extended, &sources, ends[0], w)
+}
+
+/// Cheapest path from the tree to the first of `ends` inside the box around
+/// both grown by `margin`, growing the box fourfold while it holds no path,
+/// and across blocked edges once the whole grid holds none.
+fn search_widening(
+    grid: &GlobalGrid,
+    avoid: Query<'_>,
+    buckets: &FxHashMap<(u16, u16), Vec<GCell>>,
+    ends: [GCell; 2],
+    margin: u16,
+) -> Vec<GCell> {
+    let target = ends[0];
+    let full = (0, grid.nx - 1, 0, grid.ny - 1);
+    let mut margin = margin;
+    loop {
+        let w = window(&ends, margin, grid.nx, grid.ny);
+        let sources = cells_in(buckets, w);
+        if !sources.is_empty()
+            && let Some(p) = search(grid, avoid, &sources, target, w)
+        {
+            return p;
+        }
+        if w == full {
+            let all = cells_in(buckets, full);
+            let cross = Query {
+                blocked: Blocked::Cross,
+                ..avoid
+            };
+            return search(grid, cross, &all, target, full).unwrap_or_else(|| vec![target]);
+        }
+        margin = margin.saturating_mul(4).max(1);
+    }
 }
 
 fn add_cell(
@@ -198,15 +248,18 @@ enum Blocked {
     Cross,
 }
 
-/// What one search is for and how it prices the grid.
+/// What one search is for, how it prices the grid and where it may go.
 #[derive(Clone, Copy)]
 struct Query<'a> {
     net: &'a GlobalNet,
     costs: GlobalCosts,
     blocked: Blocked,
+    /// Coarse cells the search may use beyond its window, if any.
+    corridor: Option<&'a Corridor>,
 }
 
-/// Cheapest path from any source to `target` inside the window.
+/// Cheapest path from any source to `target` inside the window, or inside
+/// the query's corridor if it has one.
 fn search(
     grid: &GlobalGrid,
     query: Query<'_>,
@@ -229,6 +282,7 @@ fn search_with(
         net,
         costs,
         blocked,
+        corridor,
     } = query;
     let terminals: FxHashSet<usize> = sources
         .iter()
@@ -261,7 +315,7 @@ fn search_with(
         let plane = f64::from(c.x.abs_diff(target.x) + c.y.abs_diff(target.y));
         costs.via.mul_add(layers, plane)
     };
-    let local = Local::new(grid, win);
+    let local = Local::new(grid, win, corridor);
     state.reset(local.nodes());
     let mut heap = BinaryHeap::new();
     for &c in sources {
@@ -304,37 +358,26 @@ fn search_with(
             }
         };
         let (x, y) = (cell.x, cell.y);
-        match grid.direction(cell.layer) {
-            Direction::Horizontal => {
-                if x > win.0 {
-                    let next = GCell { x: x - 1, ..cell };
-                    let e = grid.edge(next);
-                    if passable(e, cell, next) {
-                        push(next, edge_cost(e));
-                    }
-                }
-                if x < win.1 {
-                    let next = GCell { x: x + 1, ..cell };
-                    if passable(here, cell, next) {
-                        push(next, edge_cost(here));
-                    }
-                }
+        let (behind, ahead) = match grid.direction(cell.layer) {
+            Direction::Horizontal => (
+                x.checked_sub(1).map(|x| GCell { x, ..cell }),
+                (x + 1 < grid.nx).then(|| GCell { x: x + 1, ..cell }),
+            ),
+            Direction::Vertical => (
+                y.checked_sub(1).map(|y| GCell { y, ..cell }),
+                (y + 1 < grid.ny).then(|| GCell { y: y + 1, ..cell }),
+            ),
+        };
+        if let Some(next) = behind.filter(|&n| local.contains(n)) {
+            let e = grid.edge(next);
+            if passable(e, cell, next) {
+                push(next, edge_cost(e));
             }
-            Direction::Vertical => {
-                if y > win.2 {
-                    let next = GCell { y: y - 1, ..cell };
-                    let e = grid.edge(next);
-                    if passable(e, cell, next) {
-                        push(next, edge_cost(e));
-                    }
-                }
-                if y < win.3 {
-                    let next = GCell { y: y + 1, ..cell };
-                    if passable(here, cell, next) {
-                        push(next, edge_cost(here));
-                    }
-                }
-            }
+        }
+        if let Some(next) = ahead.filter(|&n| local.contains(n))
+            && passable(here, cell, next)
+        {
+            push(next, edge_cost(here));
         }
         let l = cell.layer.index();
         if l > *grid.layers().start() {
@@ -364,55 +407,107 @@ fn search_with(
 /// grown for a search over most of the grid, is let go after it.
 const KEPT_SEARCH_NODES: usize = 1 << 20;
 
-/// The cells of a search window on every layer, numbered from zero.
+/// The cells a search may visit on every layer, numbered from zero: the
+/// gcells of a window, then those of the coarse cells of a corridor that
+/// extends it, numbered by whole coarse cells so that a long corridor needs
+/// no state for the gcells of its bounding box it leaves out.
 #[derive(Clone, Copy, Debug)]
-struct Local {
+struct Local<'a> {
     x0: u16,
     y0: u16,
-    width: usize,
-    height: usize,
+    x1: u16,
+    y1: u16,
+    corridor: Option<&'a Corridor>,
     layers: usize,
     first_layer: usize,
 }
 
-impl Local {
-    fn new(grid: &GlobalGrid, win: (u16, u16, u16, u16)) -> Self {
+/// Gcells in one coarse cell.
+const COARSE_CELLS: usize = SCALE as usize * SCALE as usize;
+
+impl<'a> Local<'a> {
+    fn new(grid: &GlobalGrid, win: (u16, u16, u16, u16), corridor: Option<&'a Corridor>) -> Self {
         Self {
             x0: win.0,
             y0: win.2,
-            width: usize::from(win.1 - win.0) + 1,
-            height: usize::from(win.3 - win.2) + 1,
+            x1: win.1,
+            y1: win.3,
+            corridor,
             layers: grid.layers().count(),
             first_layer: *grid.layers().start(),
         }
     }
 
-    const fn nodes(&self) -> usize {
-        self.width * self.height * self.layers
+    const fn width(&self) -> usize {
+        (self.x1 - self.x0) as usize + 1
+    }
+
+    const fn window_cells(&self) -> usize {
+        self.width() * ((self.y1 - self.y0) as usize + 1)
+    }
+
+    fn in_window(&self, c: GCell) -> bool {
+        (self.x0..=self.x1).contains(&c.x) && (self.y0..=self.y1).contains(&c.y)
+    }
+
+    fn nodes(&self) -> usize {
+        let beyond = self.corridor.map_or(0, |c| c.cells().len() * COARSE_CELLS);
+        (self.window_cells() + beyond) * self.layers
+    }
+
+    fn contains(&self, c: GCell) -> bool {
+        self.in_window(c)
+            || self
+                .corridor
+                .is_some_and(|corridor| corridor.allows(c.x, c.y))
     }
 
     fn index(&self, c: GCell) -> usize {
         let l = c.layer.index() - self.first_layer;
-        let x = usize::from(c.x - self.x0);
-        let y = usize::from(c.y - self.y0);
-        (l * self.height + y) * self.width + x
+        let plane = if self.in_window(c) {
+            usize::from(c.y - self.y0) * self.width() + usize::from(c.x - self.x0)
+        } else {
+            let slot = self
+                .corridor
+                .and_then(|corridor| corridor.slot(c.x, c.y))
+                .unwrap_or(0);
+            let within = usize::from(c.y % SCALE) * usize::from(SCALE) + usize::from(c.x % SCALE);
+            self.window_cells() + slot * COARSE_CELLS + within
+        };
+        plane * self.layers + l
     }
 
     fn cell(&self, index: usize) -> GCell {
-        let x = index % self.width;
-        let rest = index / self.width;
-        let y = rest % self.height;
-        let l = rest / self.height;
-        GCell {
-            layer: LayerId::new(l + self.first_layer),
-            x: self.x0 + u16::try_from(x).unwrap_or(0),
-            y: self.y0 + u16::try_from(y).unwrap_or(0),
-        }
+        let layer = LayerId::new(index % self.layers + self.first_layer);
+        let plane = index / self.layers;
+        let (x, y) = match plane.checked_sub(self.window_cells()) {
+            None => (
+                self.x0 + to_u16(plane % self.width()),
+                self.y0 + to_u16(plane / self.width()),
+            ),
+            Some(beyond) => {
+                let (cx, cy) = self
+                    .corridor
+                    .map_or((0, 0), |corridor| corridor.cells()[beyond / COARSE_CELLS]);
+                let within = beyond % COARSE_CELLS;
+                let s = usize::from(SCALE);
+                (
+                    cx * SCALE + to_u16(within % s),
+                    cy * SCALE + to_u16(within / s),
+                )
+            }
+        };
+        GCell { layer, x, y }
     }
+}
+
+fn to_u16(v: usize) -> u16 {
+    u16::try_from(v).unwrap_or(u16::MAX)
 }
 
 #[cfg(test)]
 mod tests {
+    use super::super::coarse::CoarseGrid;
     use super::super::{Tracks, Usage};
     use super::*;
     use pare_common::db::indices::NetId;
@@ -426,7 +521,11 @@ mod tests {
     /// A 10x10 grid with a horizontal layer 1 over a vertical layer 2,
     /// every edge holding 4 tracks.
     fn grid() -> GlobalGrid {
-        let (nx, ny) = (10, 10);
+        sized_grid(10, 10)
+    }
+
+    /// A `nx` by `ny` grid like [`grid`].
+    fn sized_grid(nx: u16, ny: u16) -> GlobalGrid {
         let edges = 2 * usize::from(nx) * usize::from(ny);
         GlobalGrid {
             origin: Point::new(Dbu(0), Dbu(0)),
@@ -488,7 +587,7 @@ mod tests {
         wall(&mut grid, 4, 0..=8);
         let terminals = [cell(1, 2, 4), cell(1, 7, 4)];
 
-        let paths = route_tree(&grid, &net(&terminals), 1, COSTS);
+        let paths = route_tree(&grid, &net(&terminals), 1, COSTS, None);
 
         assert!(reaches(&paths, terminals[1]));
         assert_eq!(crossed_blocked(&grid, &paths), 0);
@@ -500,7 +599,7 @@ mod tests {
         wall(&mut grid, 4, 0..=9);
         let terminals = [cell(1, 2, 4), cell(1, 7, 4)];
 
-        let paths = route_tree(&grid, &net(&terminals), 1, COSTS);
+        let paths = route_tree(&grid, &net(&terminals), 1, COSTS, None);
 
         assert!(reaches(&paths, terminals[1]));
         assert_eq!(crossed_blocked(&grid, &paths), 1);
@@ -518,11 +617,49 @@ mod tests {
         }
         let terminals = [cell(1, 2, 4), cell(1, 7, 4)];
 
-        let paths = route_tree(&grid, &net(&terminals), 1, COSTS);
+        let paths = route_tree(&grid, &net(&terminals), 1, COSTS, None);
 
         assert!(reaches(&paths, terminals[1]));
         assert_eq!(crossed_blocked(&grid, &paths), 0);
         assert!(paths.iter().flatten().all(|&c| !grid.via_blocked(c)));
+    }
+
+    #[test]
+    fn a_net_takes_the_detour_its_corridor_plans_beyond_its_margin() {
+        let mut grid = sized_grid(30, 30);
+        for x in 10..20 {
+            for y in 0..20 {
+                grid.usage.set(grid.edge(cell(1, x, y)), Tracks::whole(40));
+            }
+        }
+        let terminals = [cell(1, 2, 2), cell(1, 27, 2)];
+        let corridor = CoarseGrid::new(&grid)
+            .plan(&grid, &net(&terminals))
+            .unwrap();
+
+        let planned = route_tree(&grid, &net(&terminals), 1, COSTS, Some(&corridor));
+        let windowed = route_tree(&grid, &net(&terminals), 1, COSTS, None);
+
+        let highest = |paths: &[Vec<GCell>]| paths.iter().flatten().map(|c| c.y).max();
+        assert!(reaches(&planned, terminals[1]));
+        assert!(highest(&planned) >= Some(20));
+        assert!(highest(&windowed) < Some(20));
+    }
+
+    #[test]
+    fn a_net_whose_corridor_holds_no_path_is_still_routed() {
+        let mut grid = grid();
+        wall(&mut grid, 6, 0..=4);
+        let terminals = [cell(1, 1, 1), cell(1, 8, 1)];
+        let corridor = CoarseGrid::new(&grid)
+            .plan(&grid, &net(&terminals))
+            .unwrap();
+
+        let paths = route_tree(&grid, &net(&terminals), 1, COSTS, Some(&corridor));
+
+        assert!(!corridor.allows(6, 6));
+        assert!(reaches(&paths, terminals[1]));
+        assert_eq!(crossed_blocked(&grid, &paths), 0);
     }
 
     #[test]
@@ -538,8 +675,8 @@ mod tests {
             ..net(&terminals)
         };
 
-        let narrow_paths = route_tree(&grid, &net(&terminals), 2, COSTS);
-        let wide_paths = route_tree(&grid, &wide, 2, COSTS);
+        let narrow_paths = route_tree(&grid, &net(&terminals), 2, COSTS, None);
+        let wide_paths = route_tree(&grid, &wide, 2, COSTS, None);
 
         let on_row = |paths: &[Vec<GCell>]| {
             paths
