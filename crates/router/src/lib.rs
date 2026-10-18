@@ -18,7 +18,7 @@ pub mod wiring;
 
 use detailed::{Costs, DetailedRouter, Scope, routable_nets};
 pub use global::{CapacityReduction, TileTracks};
-use global::{GlobalGrid, GlobalNet, Tracks, route_global, track_demand};
+use global::{GCell, GlobalGrid, GlobalNet, Tracks, route_global, track_demand};
 use occupancy::FixedTracks;
 use pare_common::db::design::{
     GCellGridDef, NetlistDB, PinOwner, PlacementStatus, RouteElem, TrackAxis,
@@ -27,6 +27,7 @@ use pare_common::db::indices::{LayerId, NetId, PinId};
 use pare_common::db::library::Shape;
 use pare_common::geom::dbu::Dbu;
 use pare_common::geom::point::Point;
+use pare_common::geom::rect::Rect;
 use pare_common::util::config::{LayerRangeError, RoutingConfig};
 use pare_common::util::{memory, ui};
 use pare_common::verify::shapes::obstruction_shapes;
@@ -151,10 +152,7 @@ pub fn route(db: &mut NetlistDB, config: &RoutingConfig) -> Result<RoutingSummar
 
 /// Global routing and track assignment of every signal net of `db`, for
 /// measuring them on their own; the design is left as it is.
-pub fn route_global_only(
-    db: &NetlistDB,
-    config: &RoutingConfig,
-) -> Result<RoutingSummary, RouteError> {
+pub fn route_global_only(db: &NetlistDB, config: &RoutingConfig) -> Result<GlobalOnly, RouteError> {
     check_routable(db, config)?;
     let tech = RouteTech::new(db, config)?;
     let gcell = gcell_size(&tech, config);
@@ -168,11 +166,67 @@ pub fn route_global_only(
     let start = Instant::now();
     let _ = assign_tracks(&tech, &dr.occupancy, &grid, &global, &dr.pin_points());
     stage("Track assign:", start);
-    Ok(RoutingSummary {
-        nets: nets.len(),
-        inaccessible: dr.inaccessible_nets(),
-        ..RoutingSummary::default()
+    let mut guides: Vec<NetGuide> = global
+        .paths
+        .iter()
+        .map(|(&net, paths)| NetGuide {
+            net,
+            boxes: guide_boxes(&grid, paths, db.die_area),
+        })
+        .collect();
+    guides.sort_unstable_by_key(|g| g.net);
+    Ok(GlobalOnly {
+        summary: RoutingSummary {
+            nets: nets.len(),
+            inaccessible: dr.inaccessible_nets(),
+            ..RoutingSummary::default()
+        },
+        guides,
     })
+}
+
+/// What global routing alone gives: its summary and every routed net's
+/// global route as guides.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct GlobalOnly {
+    /// The nets routed and those with a pin no access point reaches.
+    pub summary: RoutingSummary,
+    /// Each routed net's guides, by net.
+    pub guides: Vec<NetGuide>,
+}
+
+/// A net's global route as the boxes of gcells it runs through on each
+/// layer, one box per run of gcells along a layer, as route guides give it.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct NetGuide {
+    /// The net.
+    pub net: NetId,
+    /// Layer and box of each run, clipped to the die.
+    pub boxes: Vec<(LayerId, Rect<Dbu>)>,
+}
+
+/// The boxes of each run of consecutive gcells on one layer along `paths`
+/// of `grid`, clipped to `die`, without repeats.
+fn guide_boxes(
+    grid: &GlobalGrid,
+    paths: &[Vec<GCell>],
+    die: Rect<Dbu>,
+) -> Vec<(LayerId, Rect<Dbu>)> {
+    let mut boxes: Vec<(LayerId, Rect<Dbu>)> = Vec::new();
+    for path in paths {
+        for run in path.chunk_by(|a, b| a.layer == b.layer) {
+            let area = run
+                .iter()
+                .map(|c| grid.cell_rect(c.x, c.y))
+                .reduce(|a, b| a.union(&b));
+            if let Some(clipped) = area.and_then(|a| a.intersection(&die)) {
+                boxes.push((run[0].layer, clipped));
+            }
+        }
+    }
+    boxes.sort_unstable_by_key(|&(l, r)| (l, r.min.x, r.min.y, r.max.x, r.max.y));
+    boxes.dedup();
+    boxes
 }
 
 /// Why `db` cannot be routed under `config`, if it cannot.

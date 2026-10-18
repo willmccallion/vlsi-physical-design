@@ -65,6 +65,10 @@ enum Commands {
         /// result without routing in detail or writing a DEF.
         #[arg(long)]
         global_only: bool,
+        /// With --global-only, write each net's global route to this file as
+        /// route guides in the ISPD 2018 format.
+        #[arg(long, requires = "global_only")]
+        guides: Option<PathBuf>,
     },
     /// Place, route, or place and route a design, as its purpose says.
     Run {
@@ -183,6 +187,7 @@ fn run(command: Commands, report: &mut Report) -> anyhow::Result<()> {
             config: name,
             placement,
             global_only,
+            guides,
         } => {
             let config = load_config(&name, report)?;
             if config.purpose == Purpose::Placement {
@@ -194,7 +199,7 @@ fn run(command: Commands, report: &mut Report) -> anyhow::Result<()> {
             let mut db = load_design(&config, placement.as_deref())?;
             report.design.clone_from(&db.name);
             let stage = if global_only {
-                RouteStage::Global
+                RouteStage::Global { guides }
             } else {
                 RouteStage::Detailed
             };
@@ -290,10 +295,11 @@ enum PlacementStart {
 }
 
 /// How far routing goes.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 enum RouteStage {
-    /// Global routing and track assignment only.
-    Global,
+    /// Global routing and track assignment only, writing the global routes
+    /// as guides to the file given.
+    Global { guides: Option<PathBuf> },
     /// Through detailed routing, verification and output.
     Detailed,
 }
@@ -699,6 +705,33 @@ fn routability_params(
     }
 }
 
+/// Writes `guides` to `path` in the ISPD 2018 route guide format: each net's
+/// name, then its boxes between parentheses, one `x0 y0 x1 y1 layer` a line.
+fn write_guides(
+    path: &Path,
+    db: &NetlistDB,
+    guides: &[pare_router::NetGuide],
+) -> anyhow::Result<()> {
+    use std::fmt::Write as _;
+    let mut out = String::new();
+    for guide in guides {
+        writeln!(out, "{}\n(", db.nets[guide.net.index()].name)?;
+        for (layer, r) in &guide.boxes {
+            writeln!(
+                out,
+                "{} {} {} {} {}",
+                r.min.x.get(),
+                r.min.y.get(),
+                r.max.x.get(),
+                r.max.y.get(),
+                db.library.layer(*layer).name
+            )?;
+        }
+        writeln!(out, ")")?;
+    }
+    std::fs::write(path, out).with_context(|| format!("writing {}", path.display()))
+}
+
 fn path_str(path: &Path) -> anyhow::Result<String> {
     path.to_str()
         .map(str::to_owned)
@@ -715,9 +748,13 @@ fn run_routing(
 ) -> anyhow::Result<()> {
     let phase_start = Instant::now();
     ui::section("Routing");
-    if stage == RouteStage::Global {
-        let summary = pare_router::route_global_only(db, &config.routing)?;
-        ui::stat_row("Nets:", &summary.nets.to_string(), "", "");
+    if let RouteStage::Global { guides } = stage {
+        let global = pare_router::route_global_only(db, &config.routing)?;
+        ui::stat_row("Nets:", &global.summary.nets.to_string(), "", "");
+        if let Some(path) = guides {
+            write_guides(&path, db, &global.guides)?;
+            ui::wrote(&path_str(&path)?);
+        }
         report.phase("global routing", phase_start);
         return Ok(());
     }
