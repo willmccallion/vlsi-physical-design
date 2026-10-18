@@ -279,10 +279,25 @@ class BoundaryPins:
                 for bl, (x0, y0, x1, y1) in self.blockers
             )
 
-        for tries in range(1, 400):
-            if not blocked(along):
-                break
-            along += step if tries % 2 else -step * tries
+        lo, hi = (self.by0, self.by1) if along_axis == "Y" else (self.bx0, self.bx1)
+        first = start + max(0, -(-(lo + half - start) // step)) * step
+        last = start + ((hi - half - start) // step) * step
+        if last < first:
+            return None
+        count = (last - first) // step + 1
+        nearest = min(max(round((along - first) / step), 0), count - 1)
+        free = next(
+            (
+                first + k * step
+                for d in range(count)
+                for k in sorted({nearest - d, nearest + d})
+                if 0 <= k < count and not blocked(first + k * step)
+            ),
+            None,
+        )
+        if free is None:
+            return None
+        along = free
         self.taken.add((layer, edge, along))
         px, py, w, h = rect(along)
         name = f"{net}_bp{len(self.pins)}"
