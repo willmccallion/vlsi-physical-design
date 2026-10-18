@@ -18,5 +18,9 @@ fft-right-band    mgc_fft_a            720  400  800  440  boundary
 # superblue19: plain standard-cell area, and the channel between two macros
 sb19-cells        mgc_superblue19      600 1200  640 1240
 sb19-channel      mgc_superblue19      360  100  440  180
+# the plain standard-cell window with the nets crossing it
+sb19-cells-load   mgc_superblue19      600 1200  640 1240  boundary
+sb19-load-10      mgc_superblue19      620 1215  630 1225  boundary
+sb19-load-20      mgc_superblue19      615 1210  635 1230  boundary
 # superblue19: one of the worst global routing regions, with its crossing demand
 sb19-hot          mgc_superblue19      150  780  210  840  boundary
