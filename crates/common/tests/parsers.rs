@@ -542,3 +542,15 @@ fn obstructions_use_minimum_spacing_unless_the_lef_turns_it_off() {
     assert!(tiny_library().rules.min_spacing_for_obstructions);
     assert!(!off.unwrap().rules.min_spacing_for_obstructions);
 }
+
+#[test]
+fn tracks_whose_wire_would_leave_the_die_are_not_routing_tracks() {
+    let mut db = tiny_design();
+    db.die_area = rect(0, 0, 3000, 6000);
+
+    let tracks = db.layer_tracks(LayerId(1));
+
+    assert_eq!(tracks.first(), Some(&Dbu(100)));
+    assert_eq!(tracks.last(), Some(&Dbu(2900)));
+    assert_eq!(tracks.len(), 15);
+}

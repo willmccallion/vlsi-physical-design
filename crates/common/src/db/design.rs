@@ -651,19 +651,27 @@ impl NetlistDB {
     }
 
     /// The coordinates across `layer` of its routing tracks: those the
-    /// design's `TRACKS` statements give it, or else one per pitch from the
-    /// layer's offset, half a pitch in from the die edge by default.
+    /// design's `TRACKS` statements give it whose wire lies inside the die,
+    /// or else one per pitch from the layer's offset, half a pitch in from
+    /// the die edge by default.
     pub fn layer_tracks(&self, layer: LayerId) -> Vec<Dbu> {
         let l = self.library.layer(layer);
         let axis = match l.direction {
             Direction::Horizontal => TrackAxis::Y,
             Direction::Vertical => TrackAxis::X,
         };
+        let (die_lo, die_hi) = match l.direction {
+            Direction::Horizontal => (self.die_area.min.y, self.die_area.max.y),
+            Direction::Vertical => (self.die_area.min.x, self.die_area.max.x),
+        };
+        let half_width = l.width / 2;
+        let wire_inside_die = |t: &Dbu| die_lo + half_width <= *t && *t + half_width <= die_hi;
         let mut coords: Vec<Dbu> = self
             .tracks
             .iter()
             .filter(|t| t.axis == axis && t.layers.contains(&layer))
             .flat_map(TrackDef::coords)
+            .filter(wire_inside_die)
             .collect();
         if coords.is_empty() {
             let (lo, hi, offset) = match l.direction {
