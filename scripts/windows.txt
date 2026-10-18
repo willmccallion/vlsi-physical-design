@@ -24,3 +24,6 @@ sb19-load-10      mgc_superblue19      620 1215  630 1225  boundary
 sb19-load-20      mgc_superblue19      615 1210  635 1230  boundary
 # superblue19: one of the worst global routing regions, with its crossing demand
 sb19-hot          mgc_superblue19      150  780  210  840  boundary
+# aes: the centre of its dense blob, where the last markers stay
+aes-hot           aes                  380  280  420  320  boundary
+aes-hot-whole     aes                  380  280  420  320

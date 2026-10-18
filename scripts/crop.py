@@ -50,6 +50,15 @@ def section(lines, name):
     return start, end
 
 
+def section_body(lines, name):
+    """The lines inside the DEF section `name`, none when it is absent."""
+    try:
+        start, end = section(lines, name)
+    except StopIteration:
+        return []
+    return lines[start + 1 : end]
+
+
 def pin_positions(lines, sizes, lef, units):
     """Absolute pin centers by (component, pin) and (PIN, name), from the DEF
     components and the LEF pin shapes (the shape's center, N orientation
@@ -101,8 +110,7 @@ def special_rects(lines, box):
     """The boxes of the special-net segments touching `box`, with their layer."""
     bx0, by0, bx1, by1 = box
     out = []
-    ss, se = section(lines, "SPECIALNETS")
-    for l in lines[ss + 1 : se]:
+    for l in section_body(lines, "SPECIALNETS"):
         m = re.match(r"\s*(?:\+ ROUTED|NEW)\s+(\S+) (\d+)(.*)", l)
         if not m:
             continue
@@ -492,7 +500,6 @@ def crop(src, lef_path, box, out, partial, boundary, tech_lef):
         io_pins.extend(boundary_pins.def_lines())
         io_kept.update(p[0] for p in boundary_pins.pins)
 
-    ss, se = section(lines, "SPECIALNETS")
     special, cur = [], None
 
     def flush_special():
@@ -502,7 +509,7 @@ def crop(src, lef_path, box, out, partial, boundary, tech_lef):
                 special.append(("  + ROUTED " if i == 0 else "  NEW ") + s)
             special[-1] += " ;"
 
-    for l in lines[ss + 1 : se]:
+    for l in section_body(lines, "SPECIALNETS"):
         if l.startswith("- "):
             flush_special()
             cur = {"head": l.rstrip(" ;"), "segs": []}
