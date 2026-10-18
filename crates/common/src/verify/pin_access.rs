@@ -199,6 +199,28 @@ impl LayerMetal {
             .any(|f| !holder.joins(f.holder) && too_close(shape, &f.rect, self.required(shape, f)))
     }
 
+    /// [`Self::clear`] for metal a via or wire would add: it may touch metal
+    /// it may join, but must keep the spacing from such metal it does not
+    /// touch, as the checker counts a narrower gap within one net.
+    fn clear_added(
+        &self,
+        shape: &Rect<Dbu>,
+        holder: Holder,
+        metal: &NeighbourMetal,
+        near: &[Fixed],
+    ) -> bool {
+        debug_assert!(
+            metal
+                .zone
+                .is_none_or(|z| z.encloses(&shape.expand(self.reach))),
+            "{shape:?} reaches beyond the fixed metal gathered for the check"
+        );
+        !near.iter().any(|f| {
+            let close = too_close(shape, &f.rect, self.required(shape, f));
+            close && !(holder.joins(f.holder) && f.rect.touches(shape))
+        })
+    }
+
     /// The fixed shapes of the layer meeting `zone`.
     fn near(&self, zone: &Rect<Dbu>) -> impl Iterator<Item = Fixed> + '_ {
         self.fixed
@@ -1036,7 +1058,9 @@ impl PinAccess {
             let bottom = (0..up.vias.len()).find_map(|k| {
                 let bottom = up.vias[k].bottom.translate(at);
                 (up.pad_clear(i, k, at, holder)
-                    && self.metal_above.clear(&bottom, holder, extra, &extra.above))
+                    && self
+                        .metal_above
+                        .clear_added(&bottom, holder, extra, &extra.above))
                 .then_some(bottom)
             });
             let _ = extra.landings.borrow_mut().insert(key, bottom);
@@ -1045,7 +1069,10 @@ impl PinAccess {
         let Some(bottom) = bottom else {
             return Ok(None);
         };
-        if !self.metal_above.clear(&wire, holder, extra, &extra.above) {
+        if !self
+            .metal_above
+            .clear_added(&wire, holder, extra, &extra.above)
+        {
             return Err(WireBlocked);
         }
         Ok(Some(wire.union(&bottom)))
@@ -1073,8 +1100,12 @@ impl PinAccess {
                     let at = Point::new(x, y);
                     let pad = via.pad.translate(at);
                     let bottom = via.bottom.translate(at);
-                    if !self.metal_below.clear(&bottom, holder, extra, &extra.below)
-                        || !self.metal_above.clear(&pad, holder, extra, &extra.above)
+                    if !self
+                        .metal_below
+                        .clear_added(&bottom, holder, extra, &extra.below)
+                        || !self
+                            .metal_above
+                            .clear_added(&pad, holder, extra, &extra.above)
                     {
                         return None;
                     }
@@ -1609,8 +1640,8 @@ mod tests {
     }
 
     #[test]
-    fn a_neighbours_pin_on_the_same_net_does_not_block() {
-        assert_eq!(blocked_beside(1400, true), 0);
+    fn a_pad_ending_short_of_a_neighbours_pin_on_its_net_blocks() {
+        assert_eq!(blocked_beside(1400, true), 1);
     }
 
     #[test]
