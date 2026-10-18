@@ -6,9 +6,9 @@ checked on its own in minutes.
 
 The box is in microns. The crop keeps the cells lying wholly inside the box,
 macros crossing its edge as FIXED, the I/O pins inside it, the nets whose
-pins are all among those, and the rows, tracks, vias, non-default rules and
-special-net segments clipped to the box. Region references are dropped, so
-fences do not constrain the window.
+pins are all among those, and the rows, tracks, vias, non-default rules,
+blockages and special-net segments clipped to the box. Region references
+are dropped, so fences do not constrain the window.
 
 A net with pins both inside and outside is dropped by default. With
 --partial it is kept with only its inside pins. With --boundary-pins it is
@@ -118,6 +118,33 @@ def special_rects(lines, box):
         if r[0] < bx1 and r[2] > bx0 and r[1] < by1 and r[3] > by0:
             out.append((layer, r))
     return out
+
+
+def clipped_blockages(lines, box):
+    """The BLOCKAGES section with each blockage's rectangles clipped to
+    `box`, dropping those that miss it."""
+    try:
+        start, end = section(lines, "BLOCKAGES")
+    except StopIteration:
+        return []
+    bx0, by0, bx1, by1 = box
+    text = " ".join(lines[start + 1 : end])
+    kept = []
+    for block in re.findall(r"-\s+(.*?);", text):
+        head = block.split("RECT")[0].split("POLYGON")[0].strip()
+        rects = []
+        for r in re.finditer(r"RECT \( (-?\d+) (-?\d+) \) \( (-?\d+) (-?\d+) \)", block):
+            x0, y0, x1, y1 = (int(v) for v in r.groups())
+            x0, x1 = sorted((x0, x1))
+            y0, y1 = sorted((y0, y1))
+            cx0, cy0, cx1, cy1 = max(x0, bx0), max(y0, by0), min(x1, bx1), min(y1, by1)
+            if cx0 < cx1 and cy0 < cy1:
+                rects.append(f"RECT ( {cx0} {cy0} ) ( {cx1} {cy1} )")
+        if rects:
+            kept.append(f"- {head} " + " ".join(rects) + " ;")
+    if not kept:
+        return []
+    return [f"BLOCKAGES {len(kept)} ;"] + kept + ["END BLOCKAGES", ""]
 
 
 def layer_directions(lef):
@@ -405,6 +432,7 @@ def crop(src, lef_path, box, out, partial, boundary, tech_lef):
             kept_sections += lines[a : b + 1] + [""]
         except StopIteration:
             pass
+    kept_sections += clipped_blockages(lines, (bx0, by0, bx1, by1))
 
     out_lines = head + [""] + kept_sections
     out_lines += [f"COMPONENTS {len(comps)} ;"] + comps + ["END COMPONENTS", ""]
