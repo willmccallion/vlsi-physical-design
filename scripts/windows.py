@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Route and check small windows of placed designs, each in a minute or two.
 
-    scripts/windows.py [NAME ...] [--placed DEF] [--replace] [--rounds N] [--no-openroad]
+    scripts/windows.py [NAME ...] [--placed DEF] [--guides FILE] [--replace] [--rounds N] [--no-openroad]
 
 Windows are listed in scripts/windows.txt, one per line:
 
@@ -12,7 +12,9 @@ files; the window is cut from output/<design>/placed.def unless --placed
 names another DEF. By default only nets wholly inside the box are kept;
 `partial` keeps crossing nets with their inside pins, `boundary` keeps them
 with a pin on the box edge for every outside pin, which gives the window
-the routing demand the crossing nets put on it. Each window is cropped with scripts/crop.py into
+the routing demand the crossing nets put on it; with --guides, the whole
+design's route guides put those pins where global routing crosses the box.
+Each window is cropped with scripts/crop.py into
 output/windows/<name>/, routed with the release build of pare, and checked
 by PARE and, unless --no-openroad, by OpenROAD's drt::check_drc on one tile
 (the DEF's GCELLGRID rewritten to a single gcell, so no marker is split at a
@@ -70,7 +72,7 @@ def one_tile(src, dst):
     dst.write_text(text)
 
 
-def run(name, design, box, mode, placed, rounds, openroad, replace):
+def run(name, design, box, mode, placed, rounds, openroad, replace, guides=None):
     config_path = find_config(design)
     config = tomllib.loads(config_path.read_text())
     lefs = [str(ROOT / p) for p in config["input"]["lef_files"]]
@@ -85,6 +87,8 @@ def run(name, design, box, mode, placed, rounds, openroad, replace):
         crop.append("--partial")
     elif mode == "boundary":
         crop += ["--boundary-pins", "--tech-lef", lefs[0]]
+        if guides:
+            crop += ["--guides", str(guides)]
     cropped = subprocess.run(crop, capture_output=True, text=True, check=True).stdout.strip()
 
     routing = dict(config.get("routing", {}))
@@ -151,6 +155,7 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("names", nargs="*")
     parser.add_argument("--placed", type=Path, help="placed DEF to crop instead of the design's output")
+    parser.add_argument("--guides", type=Path, help="route guides of the placed design, for boundary windows")
     parser.add_argument("--replace", action="store_true", help="legalize and refine the cropped placement first")
     parser.add_argument("--rounds", type=int, help="detailed routing rounds, overriding the config")
     parser.add_argument("--no-openroad", action="store_true")
@@ -160,7 +165,7 @@ def main():
     failed = 0
     print(f"{'window':14s} {'pare':>6s} {'openroad':>8s} {'gr':>6s} {'unresv':>6s} {'s':>6s} {'MB':>6s}  cropped")
     for name, design, box, mode in read_windows(args.names):
-        r = run(name, design, box, mode, args.placed, args.rounds, not args.no_openroad, args.replace)
+        r = run(name, design, box, mode, args.placed, args.rounds, not args.no_openroad, args.replace, args.guides)
         ored = "-" if r["openroad"] is None else str(r["openroad"])
         print(f"{r['name']:14s} {r['pare']:6d} {ored:>8s} {r['gr']:6d} {r['unreserved']:6d} {r['seconds']:6.0f} {r['rss_mb']:6d}  {r['cropped']}", flush=True)
         if r["pare"] != 0 or (r["openroad"] not in (None, 0)):

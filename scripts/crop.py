@@ -15,7 +15,11 @@ A net with pins both inside and outside is dropped by default. With
 kept with an I/O pin on each box edge its outside pins lie beyond, where the
 line from the inside pins toward those pins leaves the box, on a routing
 layer that runs across that edge and on a free track of it, so that the
-window carries the routing the crossing nets demand of it.
+window carries the routing the crossing nets demand of it. With --guides,
+the route guides of the whole design (`pare route --global-only --guides`)
+place those pins instead: one wherever a net's global route runs across the
+box edge, on the layer it runs on, so the window sees the crossings global
+routing chose.
 """
 
 import argparse
@@ -225,6 +229,55 @@ def layer_widths(lef, units):
     return out
 
 
+def read_guides(path, wanted):
+    """The route guides of the nets in `wanted` from an ISPD 2018 guide
+    file, as {net: [(layer, x0, y0, x1, y1)]}."""
+    out, net, boxes = {}, None, None
+    for line in open(path):
+        t = line.split()
+        if not t:
+            continue
+        if t[0] == "(":
+            boxes = []
+        elif t[0] == ")":
+            if net in wanted:
+                out[net] = boxes
+            net, boxes = None, None
+        elif len(t) == 1:
+            net = t[0]
+        elif len(t) == 5 and boxes is not None and net in wanted:
+            boxes.append((t[4], int(t[0]), int(t[1]), int(t[2]), int(t[3])))
+    return out
+
+
+def guide_crossings(boxes, box, horizontal):
+    """Where a net's guide runs across the edges of `box`: (edge, layer,
+    point) for each run on a layer whose direction crosses that edge and
+    reaches over it, at the middle of the part of the run along the edge."""
+    bx0, by0, bx1, by1 = box
+    out = set()
+    for layer, x0, y0, x1, y1 in boxes:
+        if layer in horizontal:
+            lo, hi = max(y0, by0), min(y1, by1)
+            if lo >= hi:
+                continue
+            y = (lo + hi) // 2
+            if x0 < bx0 < x1:
+                out.add(("left", layer, (bx0, y)))
+            if x0 < bx1 < x1:
+                out.add(("right", layer, (bx1, y)))
+        else:
+            lo, hi = max(x0, bx0), min(x1, bx1)
+            if lo >= hi:
+                continue
+            x = (lo + hi) // 2
+            if y0 < by0 < y1:
+                out.add(("bottom", layer, (x, by0)))
+            if y0 < by1 < y1:
+                out.add(("top", layer, (x, by1)))
+    return sorted(out)
+
+
 class BoundaryPins:
     """I/O pins on the box edges for nets that leave the box."""
 
@@ -286,17 +339,21 @@ class BoundaryPins:
         edge, t = best
         return edge, (ix + dx * t, iy + dy * t)
 
-    def add(self, net, edge, x, y, rule=None):
-        """A pin for `net` on `edge` at the point nearest (`x`, `y`), as wide
-        as the net's wires under `rule`, a {layer: (width, spacing)} of its
-        non-default rule, and as far from the other pins on the edge as the
-        wider spacing of the two needs; a default wire on the next track is
-        as far as the layer's own spacing needs."""
+    def add(self, net, edge, x, y, rule=None, layer=None):
+        """A pin for `net` on `edge` at the point nearest (`x`, `y`), on
+        `layer` or else the next of the layers running across the edge in
+        turn, as wide as the net's wires under `rule`, a {layer: (width,
+        spacing)} of its non-default rule, and as far from the other pins on
+        the edge as the wider spacing of the two needs; a default wire on the
+        next track is as far as the layer's own spacing needs."""
         layers = self.horizontal if edge in ("left", "right") else self.vertical
-        if not layers:
-            return
-        layer = layers[self.count % len(layers)]
-        self.count += 1
+        if layer is None:
+            if not layers:
+                return None
+            layer = layers[self.count % len(layers)]
+            self.count += 1
+        elif layer not in layers:
+            return None
         along_axis = "Y" if edge in ("left", "right") else "X"
         along = self.snap(layer, along_axis, y if along_axis == "Y" else x)
         start, step = self.tracks.get((layer, along_axis), (0, 200))
@@ -361,7 +418,7 @@ class BoundaryPins:
         return out
 
 
-def crop(src, lef_path, box, out, partial, boundary, tech_lef):
+def crop(src, lef_path, box, out, partial, boundary, tech_lef, guides_path=None):
     txt = open(src).read()
     units = int(re.search(r"UNITS DISTANCE MICRONS (\d+)", txt).group(1))
     bx0, by0, bx1, by1 = (int(round(v * units)) for v in box)
@@ -457,6 +514,16 @@ def crop(src, lef_path, box, out, partial, boundary, tech_lef):
     ns, ne = section(lines, "NETS")
     nets = []
     rules = nondefault_rules(lines)
+    guides = {}
+    if boundary and guides_path:
+        crossing = set()
+        for l in lines[ns + 1 : ne]:
+            if l.startswith("- "):
+                conns = re.findall(r"\( (\S+) (\S+) \)", l)
+                inside = [1 for c, p in conns if (c != "PIN" and c in kept) or (c == "PIN" and p in io_kept)]
+                if inside and len(inside) < len(conns):
+                    crossing.add(l.split()[1])
+        guides = read_guides(guides_path, crossing)
     for l in lines[ns + 1 : ne]:
         if not l.startswith("- "):
             continue
@@ -477,6 +544,19 @@ def crop(src, lef_path, box, out, partial, boundary, tech_lef):
             if not centers:
                 continue
             centroid = (sum(c[0] for c in centers) // len(centers), sum(c[1] for c in centers) // len(centers))
+            ndr = re.search(r"\+ NONDEFAULTRULE (\S+)", l)
+            rule = rules.get(ndr.group(1)) if ndr else None
+            crossings = guide_crossings(guides.get(net, []), (bx0, by0, bx1, by1), set(boundary_pins.horizontal))
+            if crossings:
+                added = [
+                    name
+                    for edge, layer, (x, y) in crossings
+                    if (name := boundary_pins.add(net, edge, x, y, rule, layer))
+                ]
+                if added:
+                    conns_text = "".join(f" ( {c} {p} )" for c, p in inside) + "".join(f" ( PIN {n} )" for n in added)
+                    nets.append(net_head + conns_text + net_tail)
+                    continue
             exits = {}
             for c, p in conns:
                 if (c, p) in inside:
@@ -489,8 +569,7 @@ def crop(src, lef_path, box, out, partial, boundary, tech_lef):
             for edge, points in exits.items():
                 x = sum(q[0] for q in points) / len(points)
                 y = sum(q[1] for q in points) / len(points)
-                ndr = re.search(r"\+ NONDEFAULTRULE (\S+)", l)
-                name = boundary_pins.add(net, edge, x, y, rules.get(ndr.group(1)) if ndr else None)
+                name = boundary_pins.add(net, edge, x, y, rule)
                 if name:
                     added.append(name)
             if added:
@@ -562,8 +641,9 @@ def main():
     parser.add_argument("--partial", action="store_true", help="keep nets with two or more pins inside, dropping the rest")
     parser.add_argument("--boundary-pins", action="store_true", help="keep crossing nets with a pin on the box edge per outside pin")
     parser.add_argument("--tech-lef", help="technology LEF, for the layer directions boundary pins need")
+    parser.add_argument("--guides", help="route guides of the whole design: boundary pins go where a net's guide crosses the box, on its layer")
     args = parser.parse_args()
-    crop(args.placed_def, args.cells_lef, args.box, args.out_def, args.partial, args.boundary_pins, args.tech_lef)
+    crop(args.placed_def, args.cells_lef, args.box, args.out_def, args.partial, args.boundary_pins, args.tech_lef, args.guides)
 
 
 if __name__ == "__main__":
