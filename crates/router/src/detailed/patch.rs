@@ -14,8 +14,9 @@ use pare_common::verify::drc::{Layout, Owner, ThinPiece, thin_pieces};
 impl DetailedRouter<'_> {
     /// Patches that bring every thin piece of the candidate's metal meeting
     /// `area` up to its layer's minimum area. Each patch extends the piece
-    /// along the layer's preferred direction from whichever end `search`
-    /// prices lower, as `TritonRoute` places its patch wires.
+    /// along the layer's preferred direction, as `TritonRoute` places its
+    /// patch wires, from one end or split between both, however `search`
+    /// prices lowest.
     pub(super) fn min_area_patches(
         &self,
         candidate: &Candidate<'_>,
@@ -48,8 +49,12 @@ impl DetailedRouter<'_> {
             .collect()
     }
 
-    /// The patch that brings `piece` up to its minimum area, on the side
-    /// the search prices lower; `None` on a layer the router cannot use.
+    /// The patch that brings `piece` up to its minimum area, as the search
+    /// prices lowest: laid along the layer's tracks at one end of the piece
+    /// or split between its two ends, or, where the track has no room for
+    /// it, grown across the tracks the same ways over the piece's length; the
+    /// box around the piece and the patch when split. `None` on a layer the
+    /// router cannot use.
     fn patch_for(&self, piece: &ThinPiece, search: &Search<'_>) -> Option<Patch> {
         if !self.tech.routable(piece.layer) {
             return None;
@@ -79,16 +84,39 @@ impl DetailedRouter<'_> {
                 Rect::new(Point::new(across.0, along.0), Point::new(across.1, along.1))
             }
         };
-        let low = rect((b0 - Dbu(length), b0));
-        let high = rect((b1, b1 + Dbu(length)));
         let cost = |r: &Rect<Dbu>| search.conflict_cost(piece.layer, r);
-        let chosen = if cost(&low) <= cost(&high) { low } else { high };
+        let split = |length: i64, low: i64, of: i64| {
+            let below = round_up(length * low / of, grid);
+            (below, length - below)
+        };
+        let along_tracks = PATCH_SPLITS.iter().map(|&(low, of)| {
+            let (below, above) = split(length, low, of);
+            rect((b0 - Dbu(below), b1 + Dbu(above)))
+        });
+        let run = (b1 - b0).get().max(1);
+        let breadth = round_up(round_up(deficit, run) / run, grid);
+        let across_tracks = PATCH_SPLITS.iter().map(|&(low, of)| {
+            let (below, above) = split(breadth, low, of);
+            let (c0, c1) = (a0 - Dbu(below), a1 + Dbu(above));
+            match lt.direction {
+                Direction::Horizontal => Rect::new(Point::new(b0, c0), Point::new(b1, c1)),
+                Direction::Vertical => Rect::new(Point::new(c0, b0), Point::new(c1, b1)),
+            }
+        });
+        let chosen = along_tracks
+            .chain(across_tracks)
+            .min_by(|a, b| cost(a).total_cmp(&cost(b)))?;
         Some(Patch {
             layer: piece.layer,
             rect: chosen,
         })
     }
 }
+
+/// How a patch's length may be split between the low and the high end of
+/// the piece it extends, as the share below over a whole: all at the low
+/// end first, then all at the high end, then splits between them.
+const PATCH_SPLITS: [(i64, i64); 5] = [(1, 1), (0, 1), (1, 2), (1, 4), (3, 4)];
 
 /// `value` rounded up to a multiple of `step`, which is positive.
 const fn round_up(value: i64, step: i64) -> i64 {
