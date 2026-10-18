@@ -889,6 +889,7 @@ pub fn route_global(grid: &mut GlobalGrid, nets: &[GlobalNet], rounds: usize) ->
         best.restore(grid, &mut routes);
     }
     log_zero_capacity_crossings(grid, &routes);
+    log_overflow_regions(grid);
     routes
 }
 
@@ -908,6 +909,45 @@ fn log_zero_capacity_crossings(grid: &GlobalGrid, routes: &GlobalRoutes) {
         }
     }
 }
+
+/// Logs, at debug level, the regions of [`OVERFLOW_REGION`] by
+/// [`OVERFLOW_REGION`] gcells holding the most overflow, with their share of
+/// the whole.
+fn log_overflow_regions(grid: &GlobalGrid) {
+    if !log::log_enabled!(log::Level::Debug) {
+        return;
+    }
+    let total = grid.overflow().to_f64();
+    if total <= 0.0 {
+        return;
+    }
+    let mut regions: FxHashMap<(u16, u16), f64> = FxHashMap::default();
+    for (e, (&used, &cap)) in grid.usage.iter().zip(&grid.capacity).enumerate() {
+        let over = used.saturating_sub(cap).to_f64();
+        if over > 0.0 {
+            let c = grid.cell_of(e);
+            *regions
+                .entry((c.x / OVERFLOW_REGION, c.y / OVERFLOW_REGION))
+                .or_default() += over;
+        }
+    }
+    let mut worst: Vec<((u16, u16), f64)> = regions.into_iter().collect();
+    worst.sort_by(|a, b| b.1.total_cmp(&a.1));
+    let side = grid.gcell * i64::from(OVERFLOW_REGION);
+    for ((x, y), over) in worst.into_iter().take(12) {
+        let at = grid.origin + Point::new(side * i64::from(x), side * i64::from(y));
+        log::debug!(
+            "GR overflow {over:.0} ({:.1}%) in the region at ({}, {})",
+            100.0 * over / total,
+            at.x.get(),
+            at.y.get()
+        );
+    }
+}
+
+/// Edge, in gcells, of the regions [`log_overflow_regions`] sums overflow
+/// over.
+const OVERFLOW_REGION: u16 = 20;
 
 /// Rounds without a new lowest overflow after which negotiation stops.
 const STALL_ROUNDS: usize = 8;
