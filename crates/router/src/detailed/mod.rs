@@ -78,8 +78,9 @@ impl<'a> DetailedRouter<'a> {
         let mut occupancy = Occupancy::new(tech, gcell);
         occupancy.add_fixed(tech, fixed_shapes(db));
         log::debug!(
-            "fixed shapes recorded in {:.1}s",
-            start.elapsed().as_secs_f64()
+            "fixed shapes recorded in {:.1}s, {} MB resident",
+            start.elapsed().as_secs_f64(),
+            pare_common::util::memory::current_rss_mb().unwrap_or(0)
         );
         let start = std::time::Instant::now();
         let mut access: Vec<Vec<Vec<AccessPoint>>> = (0..db.nets.len())
@@ -96,22 +97,25 @@ impl<'a> DetailedRouter<'a> {
             })
             .collect();
         log::debug!(
-            "access points found in {:.1}s",
-            start.elapsed().as_secs_f64()
+            "access points found in {:.1}s, {} MB resident",
+            start.elapsed().as_secs_f64(),
+            pare_common::util::memory::current_rss_mb().unwrap_or(0)
         );
         let start = std::time::Instant::now();
         reserve_accesses(db, tech, &mut access, &mut occupancy);
         log::debug!(
-            "access points reserved in {:.1}s",
-            start.elapsed().as_secs_f64()
+            "access points reserved in {:.1}s, {} MB resident",
+            start.elapsed().as_secs_f64(),
+            pare_common::util::memory::current_rss_mb().unwrap_or(0)
         );
         let start = std::time::Instant::now();
         let rules = Rules::from_design(db);
         let fixed = Layout::fixed_from_db(db);
         let fixed_tiles = ShapeTiles::new(&fixed, &db.die_area, gcell);
         log::debug!(
-            "fixed layout built for the judge in {:.1}s",
-            start.elapsed().as_secs_f64()
+            "fixed layout built for the judge in {:.1}s, {} MB resident",
+            start.elapsed().as_secs_f64(),
+            pare_common::util::memory::current_rss_mb().unwrap_or(0)
         );
         Self {
             db,
