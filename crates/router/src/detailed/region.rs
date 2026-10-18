@@ -17,11 +17,9 @@ use crate::occupancy::{LocalOccupancy, Owner};
 use crate::search::{Costs, Guide, MAX_PENALTY, OwnVias, Search, WindowCache};
 use crate::wiring::{DisjointSets, Edge, NetRoute, Patch, Wiring, path_edges, tidy_patches};
 use pare_common::db::indices::{CutLayerId, LayerId, NetId};
-use pare_common::db::library::LayerRef;
 use pare_common::geom::dbu::Dbu;
 use pare_common::geom::point::Point;
 use pare_common::geom::rect::Rect;
-use pare_common::verify::drc::Marker as DrcMarker;
 use rayon::prelude::*;
 use rustc_hash::{FxHashMap, FxHashSet};
 use std::collections::BTreeMap;
@@ -588,7 +586,6 @@ impl DetailedRouter<'_> {
             if round + 1 == LOCAL_ROUNDS {
                 break;
             }
-            self.price_markers(&judgment.findings.violations, &mut overlay);
             let reroute = self.to_reroute(&judgment, &mut avoided);
             let mut again: Vec<usize> = (0..work.len())
                 .filter(|&i| work.results[i].is_some() && reroute.contains(&work.net(i)))
@@ -750,21 +747,6 @@ impl DetailedRouter<'_> {
                 name(m.owners.0),
                 name(m.owners.1)
             );
-        }
-    }
-
-    /// Makes the search pay the conflict penalty wherever the judge found a
-    /// violation, so that the next route of a piece avoids the spot, as
-    /// `TritonRoute` adds marker costs.
-    fn price_markers(&self, markers: &[DrcMarker], overlay: &mut LocalOccupancy) {
-        for m in markers {
-            match m.layer {
-                LayerRef::Routing(layer) if self.tech.routable(layer) => {
-                    overlay.add_rect(self.tech, layer, &m.bbox, Owner::Obstacle);
-                }
-                LayerRef::Routing(_) => {}
-                LayerRef::Cut(cut) => overlay.add_cut(self.tech, cut, &m.bbox, Owner::Obstacle),
-            }
         }
     }
 
