@@ -181,6 +181,23 @@ def fully_blocked_layers(lines, box):
     return {layer for layer, rects in per_layer.items() if covers(rects, box)}
 
 
+def nondefault_rules(lines):
+    """Each non-default rule of the DEF as {layer: (width, spacing)} in DBU."""
+    try:
+        start, end = section(lines, "NONDEFAULTRULES")
+    except StopIteration:
+        return {}
+    rules, current = {}, None
+    for l in lines[start + 1 : end]:
+        m = re.match(r"\s*-\s+(\S+)", l)
+        if m:
+            current = rules.setdefault(m.group(1), {})
+        for layer, width, spacing in re.findall(r"LAYER (\S+)\s+WIDTH (\d+)\s+SPACING (\d+)", l):
+            if current is not None:
+                current[layer] = (int(width), int(spacing))
+    return rules
+
+
 def layer_directions(lef):
     """Routing layers in LEF order with their preferred direction."""
     out = []
@@ -233,7 +250,7 @@ class BoundaryPins:
             if m:
                 for layer in m.group(5).split():
                     self.tracks[(layer, m.group(1))] = (int(m.group(2)), int(m.group(4)))
-        self.taken = set()
+        self.placed = {}
         self.pins = []
         self.count = 0
 
@@ -261,8 +278,12 @@ class BoundaryPins:
         edge, t = best
         return edge, (ix + dx * t, iy + dy * t)
 
-    def add(self, net, edge, x, y):
-        """A pin for `net` on `edge` at the point nearest (`x`, `y`)."""
+    def add(self, net, edge, x, y, rule=None):
+        """A pin for `net` on `edge` at the point nearest (`x`, `y`), as wide
+        as the net's wires under `rule`, a {layer: (width, spacing)} of its
+        non-default rule, and as far from the other pins on the edge as the
+        wider spacing of the two needs; a default wire on the next track is
+        as far as the layer's own spacing needs."""
         layers = self.horizontal if edge in ("left", "right") else self.vertical
         if not layers:
             return
@@ -271,7 +292,8 @@ class BoundaryPins:
         along_axis = "Y" if edge in ("left", "right") else "X"
         along = self.snap(layer, along_axis, y if along_axis == "Y" else x)
         start, step = self.tracks.get((layer, along_axis), (0, 200))
-        width = self.widths.get(layer, 100)
+        default_width = self.widths.get(layer, 100)
+        width, spacing = (rule or {}).get(layer, (default_width, step - default_width))
         half = width // 2
 
         def rect(along):
@@ -283,10 +305,16 @@ class BoundaryPins:
                 return along - half, self.by0, width, BOUNDARY_PIN_LENGTH
             return along - half, self.by1 - BOUNDARY_PIN_LENGTH, width, BOUNDARY_PIN_LENGTH
 
+        def too_near_a_pin(along):
+            return any(
+                abs(along - other) - (width + other_width) / 2 < max(spacing, other_spacing)
+                for other, other_width, other_spacing in self.placed.get((layer, edge), [])
+            )
+
         def blocked(along):
             px, py, w, h = rect(along)
-            margin = width
-            return (layer, edge, along) in self.taken or any(
+            margin = max(width, spacing)
+            return too_near_a_pin(along) or any(
                 bl == layer and px - margin < x1 and px + w + margin > x0 and py - margin < y1 and py + h + margin > y0
                 for bl, (x0, y0, x1, y1) in self.blockers
             )
@@ -310,7 +338,7 @@ class BoundaryPins:
         if free is None:
             return None
         along = free
-        self.taken.add((layer, edge, along))
+        self.placed.setdefault((layer, edge), []).append((along, width, spacing))
         px, py, w, h = rect(along)
         name = f"{net}_bp{len(self.pins)}"
         self.pins.append((name, net, layer, px, py, w, h))
@@ -420,6 +448,7 @@ def crop(src, lef_path, box, out, partial, boundary, tech_lef):
 
     ns, ne = section(lines, "NETS")
     nets = []
+    rules = nondefault_rules(lines)
     for l in lines[ns + 1 : ne]:
         if not l.startswith("- "):
             continue
@@ -452,7 +481,8 @@ def crop(src, lef_path, box, out, partial, boundary, tech_lef):
             for edge, points in exits.items():
                 x = sum(q[0] for q in points) / len(points)
                 y = sum(q[1] for q in points) / len(points)
-                name = boundary_pins.add(net, edge, x, y)
+                ndr = re.search(r"\+ NONDEFAULTRULE (\S+)", l)
+                name = boundary_pins.add(net, edge, x, y, rules.get(ndr.group(1)) if ndr else None)
                 if name:
                     added.append(name)
             if added:
