@@ -30,6 +30,7 @@ use crate::verify::shapes::{Owner, obstruction_shapes};
 use rstar::{AABB, RTree, RTreeObject};
 use rustc_hash::FxHashMap;
 use std::cell::RefCell;
+use std::sync::OnceLock;
 
 /// A shape on one layer that a pin's via must keep clear of, and whose
 /// metal it is.
@@ -268,14 +269,25 @@ struct Escape {
     /// along the routing layer's.
     tracks: Vec<Dbu>,
     vias: Vec<ViaUp>,
+    metal: LayerMetal,
     /// How far along its track metal on the routing layer may run to a via.
     reach: Dbu,
     /// Whether the next layer's tracks run vertically.
     vertical: bool,
-    /// For each of the next layer's tracks and each via, where along the
-    /// track fixed metal blocks the via's upper pad.
-    pads: Vec<Vec<PadStretches>>,
+    /// Where the first chunk of via origins along every track starts.
+    chunk_origin: Dbu,
+    /// Length of a chunk of via origins along a track.
+    chunk: Dbu,
+    /// Chunks per track.
+    chunks: usize,
+    /// For each track and each chunk of it, once asked, where fixed metal
+    /// blocks each via's upper pad among the chunk's origins.
+    pads: Vec<OnceLock<Vec<PadStretches>>>,
 }
+
+/// Escape reaches of via origins along a track whose blocked pads are
+/// worked out together, the first time a check asks about one of them.
+const PAD_CHUNK_REACHES: i64 = 8;
 
 /// What fixed metal keeps a via's upper pad from a landing.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -356,44 +368,112 @@ impl PadStretches {
 }
 
 impl Escape {
-    /// For each of the next layer's `tracks` and each of `vias`, where
-    /// along the track `metal`'s fixed shapes block the via's upper pad.
-    fn pad_stretches(
-        metal: &LayerMetal,
-        tracks: &[Dbu],
-        vertical: bool,
-        vias: &[ViaUp],
-    ) -> Vec<Vec<PadStretches>> {
-        let across = |r: &Rect<Dbu>| {
-            if vertical {
-                (r.min.x, r.max.x)
-            } else {
-                (r.min.y, r.max.y)
-            }
+    fn new(db: &NetlistDB, next: LayerId, vias: Vec<ViaUp>, reach: Dbu) -> Self {
+        let tracks = db.layer_tracks(next);
+        let metal = LayerMetal::new(db, next);
+        let vertical = db.library.layer(next).direction == Direction::Vertical;
+        let (chunk_origin, extent) = if vertical {
+            (db.die_area.min.y, db.die_area.height())
+        } else {
+            (db.die_area.min.x, db.die_area.width())
         };
-        let mut pieces = vec![vec![Vec::new(); vias.len()]; tracks.len()];
-        for f in &metal.fixed {
-            let (a0, a1) = across(&f.rect);
-            for (k, via) in vias.iter().enumerate() {
-                let (p0, p1) = across(&via.pad);
-                let first = tracks.partition_point(|&t| t + p1 < a0 - metal.reach);
-                let last = tracks.partition_point(|&t| t + p0 <= a1 + metal.reach);
-                for t in first..last.max(first) {
-                    if let Some((lo, hi)) =
-                        Self::blocked_origins(metal, f, &via.pad, tracks[t], vertical)
-                    {
-                        pieces[t][k].push(PadStretch {
+        let chunk = (reach * PAD_CHUNK_REACHES).max(Dbu(1));
+        let chunks = usize::try_from((extent.get() + chunk.get() - 1) / chunk.get())
+            .unwrap_or(1)
+            .max(1);
+        Self {
+            pads: (0..tracks.len() * chunks)
+                .map(|_| OnceLock::new())
+                .collect(),
+            tracks,
+            vias,
+            metal,
+            reach,
+            vertical,
+            chunk_origin,
+            chunk,
+            chunks,
+        }
+    }
+
+    /// The chunk of via origins along a track that `along` falls in; the
+    /// first and last chunks also take the origins beyond the die.
+    fn chunk_of(&self, along: Dbu) -> usize {
+        let i = (along - self.chunk_origin)
+            .get()
+            .div_euclid(self.chunk.get());
+        usize::try_from(i).unwrap_or(0).min(self.chunks - 1)
+    }
+
+    /// What blocks via `k`'s upper pad with the via on track `t` at
+    /// `along`.
+    fn pad_block(&self, t: usize, k: usize, along: Dbu) -> PadBlock {
+        let c = self.chunk_of(along);
+        let pads = self.pads[t * self.chunks + c].get_or_init(|| self.chunk_stretches(t, c));
+        pads[k].at(along)
+    }
+
+    /// Where along track `t` fixed metal blocks each via's upper pad, for
+    /// every shape that can block a pad whose via stands in chunk `c`.
+    fn chunk_stretches(&self, t: usize, c: usize) -> Vec<PadStretches> {
+        let track = self.tracks[t];
+        let start = self.chunk_origin + self.chunk * i64::try_from(c).unwrap_or(i64::MAX);
+        let open = Dbu(i64::MAX / 4);
+        let lo = if c == 0 { -open } else { start };
+        let hi = if c + 1 == self.chunks {
+            open
+        } else {
+            start + self.chunk
+        };
+        let extent = |f: fn(&Rect<Dbu>) -> (Dbu, Dbu)| {
+            self.vias
+                .iter()
+                .map(|v| f(&v.pad))
+                .fold((Dbu::ZERO, Dbu::ZERO), |(a, b), (c, d)| {
+                    (a.min(c), b.max(d))
+                })
+        };
+        let (along_pad, across_pad) = if self.vertical {
+            (
+                extent(|r| (r.min.y, r.max.y)),
+                extent(|r| (r.min.x, r.max.x)),
+            )
+        } else {
+            (
+                extent(|r| (r.min.x, r.max.x)),
+                extent(|r| (r.min.y, r.max.y)),
+            )
+        };
+        let reach = self.metal.reach;
+        let (a0, a1) = (lo + along_pad.0 - reach, hi + along_pad.1 + reach);
+        let (b0, b1) = (track + across_pad.0 - reach, track + across_pad.1 + reach);
+        let zone = if self.vertical {
+            Rect::new(Point::new(b0, a0), Point::new(b1, a1))
+        } else {
+            Rect::new(Point::new(a0, b0), Point::new(a1, b1))
+        };
+        let near: Vec<&Fixed> = self
+            .metal
+            .fixed
+            .locate_in_envelope_intersecting(envelope(&zone))
+            .collect();
+        self.vias
+            .iter()
+            .map(|via| {
+                let pieces: Vec<PadStretch> = near
+                    .iter()
+                    .filter_map(|f| {
+                        let (lo, hi) =
+                            Self::blocked_origins(&self.metal, f, &via.pad, track, self.vertical)?;
+                        Some(PadStretch {
                             lo,
                             hi,
                             block: PadBlock::of(f.holder),
-                        });
-                    }
-                }
-            }
-        }
-        pieces
-            .into_iter()
-            .map(|per_via| per_via.iter().map(|p| PadStretches::merged(p)).collect())
+                        })
+                    })
+                    .collect();
+                PadStretches::merged(&pieces)
+            })
             .collect()
     }
 
@@ -447,7 +527,7 @@ impl Escape {
     /// its upper pad clear of fixed metal `holder` may not join.
     fn pad_clear(&self, t: usize, k: usize, at: Point<Dbu>, holder: Holder) -> bool {
         let along = if self.vertical { at.y } else { at.x };
-        match self.pads[t][k].at(along) {
+        match self.pad_block(t, k, along) {
             PadBlock::Clear => true,
             PadBlock::Net(by) => holder.net == Some(by),
             PadBlock::All => false,
@@ -511,17 +591,7 @@ impl PinAccess {
                         })
                     })
                     .collect();
-                let tracks = db.layer_tracks(next);
-                let metal = LayerMetal::new(db, next);
-                let vertical = lib.layer(next).direction == Direction::Vertical;
-                let pads = Escape::pad_stretches(&metal, &tracks, vertical, &vias);
-                Escape {
-                    tracks,
-                    vias,
-                    reach: escape_reach(db, above),
-                    vertical,
-                    pads,
-                }
+                Escape::new(db, next, vias, escape_reach(db, above))
             })
             .filter(|up| !up.vias.is_empty());
         Some(Self {
@@ -1624,7 +1694,11 @@ mod tests {
                 for x in (-1000..11000).step_by(7) {
                     let at = pt(x, track.get());
                     let direct = pad_block_directly(&metal, &via.pad.translate(at));
-                    assert_eq!(up.pads[t][k].at(Dbu(x)), direct, "track {t} via {k} x {x}");
+                    assert_eq!(
+                        up.pad_block(t, k, Dbu(x)),
+                        direct,
+                        "track {t} via {k} x {x}"
+                    );
                     let _ = seen.insert(direct == PadBlock::Clear);
                 }
             }
