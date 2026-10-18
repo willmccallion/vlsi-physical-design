@@ -100,12 +100,12 @@ impl ShapeTiles {
     }
 }
 
-/// What judging a region found: the markers inside it and the nets with
-/// a violation.
+/// What judging a region found: the markers inside it, and for each
+/// marker its two owners as nets, none for an owner that is not a net.
 #[derive(Debug, Default)]
 pub(super) struct Judgment {
     pub findings: Findings,
-    pub nets: FxHashSet<NetId>,
+    pub owners: Vec<[Option<NetId>; 2]>,
 }
 
 /// A net's wiring as a worker proposes it: its committed wiring without
@@ -128,16 +128,16 @@ impl DetailedRouter<'_> {
         let window = self.judge_window(area);
         let layout = self.window_layout(&window, candidates);
         let findings = check_window(&layout, &self.rules, *area, window);
-        let nets = findings
+        let net_of = |o: pare_common::verify::drc::OwnerIndex| match layout.owners()[o.index()] {
+            Owner::Net(n) => Some(n),
+            _ => None,
+        };
+        let owners: Vec<[Option<NetId>; 2]> = findings
             .violations
             .iter()
-            .flat_map(|m| [m.owners.0, m.owners.1])
-            .filter_map(|o| match layout.owners()[o.index()] {
-                Owner::Net(n) => Some(n),
-                _ => None,
-            })
+            .map(|m| [net_of(m.owners.0), net_of(m.owners.1)])
             .collect();
-        Judgment { findings, nets }
+        Judgment { findings, owners }
     }
 
     /// The layout of everything meeting `window`: the fixed shapes there,

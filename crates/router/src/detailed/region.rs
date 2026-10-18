@@ -32,6 +32,15 @@ pub(super) const REGION_GCELLS: i64 = 6;
 /// Local rip-up and reroute rounds within one region.
 const LOCAL_ROUNDS: usize = 6;
 
+/// Local rounds in a row a net under a non-default rule may keep its route
+/// while the nets it violates with are rerouted instead, as `TritonRoute`'s
+/// `NDR_NETS_RIPUP_HARDINESS`.
+const NDR_RIPUP_HARDINESS: u8 = 3;
+
+/// Routing priority of a net under a non-default rule over other nets, as
+/// `TritonRoute`'s `NDR_NETS_ABS_PRIORITY`: such nets route first.
+const NDR_PRIORITY: u8 = 2;
+
 /// One region's position in the region grid.
 pub(super) type RegionKey = (i64, i64);
 
@@ -510,6 +519,7 @@ impl DetailedRouter<'_> {
         let mut overlay = LocalOccupancy::default();
         let mut todo: Vec<usize> = self.ordered(&work, (0..pieces.len()).collect());
         let mut penalty = costs.penalty;
+        let mut avoided: FxHashMap<NetId, u8> = FxHashMap::default();
         for round in 0..LOCAL_ROUNDS {
             for &i in &todo {
                 let Some(piece) = work.piece(i) else {
@@ -579,11 +589,11 @@ impl DetailedRouter<'_> {
                 break;
             }
             self.price_markers(&judgment.findings.violations, &mut overlay);
+            let reroute = self.to_reroute(&judgment, &mut avoided);
             let mut again: Vec<usize> = (0..work.len())
-                .filter(|&i| work.results[i].is_some() && judgment.nets.contains(&work.net(i)))
+                .filter(|&i| work.results[i].is_some() && reroute.contains(&work.net(i)))
                 .collect();
-            let mut victims: Vec<NetId> = judgment
-                .nets
+            let mut victims: Vec<NetId> = reroute
                 .iter()
                 .copied()
                 .filter(|n| !work.holds(*n))
@@ -653,15 +663,63 @@ impl DetailedRouter<'_> {
         Some(work.add_victim(net, inside, piece))
     }
 
-    /// `indices` of `work` in the order to route them: smallest extent
-    /// first, since a short piece tied to its pins has few ways through,
-    /// while one passing through the region can shift to another track.
+    /// `indices` of `work` in the order to route them: nets of higher
+    /// [`Self::priority`] first, then smallest extent first, since a short
+    /// piece tied to its pins has few ways through, while one passing
+    /// through the region can shift to another track.
     fn ordered(&self, work: &Work<'_>, mut indices: Vec<usize>) -> Vec<usize> {
         indices.sort_by_cached_key(|&i| {
             let extent = work.piece(i).map_or(Dbu::ZERO, |p| self.extent(p));
-            (extent, work.net(i))
+            let net = work.net(i);
+            (std::cmp::Reverse(self.priority(net)), extent, net)
         });
         indices
+    }
+
+    /// How early `net` routes: [`NDR_PRIORITY`] under a non-default rule,
+    /// whose wider wires and spacing have the fewest ways through.
+    fn priority(&self, net: NetId) -> u8 {
+        if self.tech.net_rule(net.index()).is_some() {
+            NDR_PRIORITY
+        } else {
+            0
+        }
+    }
+
+    /// The nets to reroute after `judgment`: every net in a violation,
+    /// except that, as `TritonRoute` does, where a marker has more than one
+    /// owner a net under a non-default rule keeps its route while some other
+    /// net of the marker is rerouted, for up to [`NDR_RIPUP_HARDINESS`]
+    /// rounds in a row, counted in `avoided`.
+    fn to_reroute(
+        &self,
+        judgment: &Judgment,
+        avoided: &mut FxHashMap<NetId, u8>,
+    ) -> FxHashSet<NetId> {
+        let can_avoid = |n: NetId, avoided: &FxHashMap<NetId, u8>| {
+            self.priority(n) > 0 && avoided.get(&n).copied().unwrap_or(0) < NDR_RIPUP_HARDINESS
+        };
+        let mut reroute: FxHashSet<NetId> = FxHashSet::default();
+        let mut spared: FxHashSet<NetId> = FxHashSet::default();
+        for owners in &judgment.owners {
+            let several = owners[0] != owners[1];
+            let nets = owners.iter().flatten().copied();
+            let (keep, rip): (Vec<NetId>, Vec<NetId>) =
+                nets.partition(|&n| several && can_avoid(n, avoided));
+            if rip.is_empty() {
+                reroute.extend(keep);
+            } else {
+                reroute.extend(rip);
+                spared.extend(keep);
+            }
+        }
+        for n in spared.difference(&reroute) {
+            *avoided.entry(*n).or_default() += 1;
+        }
+        for n in &reroute {
+            let _ = avoided.remove(n);
+        }
+        reroute
     }
 
     /// Logs what the judge still holds against a region's pieces.
