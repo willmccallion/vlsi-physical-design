@@ -13,3 +13,5 @@ fft-strip         mgc_fft_a              0  170   40  210
 fft-abutting      mgc_fft_a            790  232  800  242  partial
 # the same strip with the nets that leave it, as pins on the box edge
 fft-strip-load    mgc_fft_a              0  170   40  210  boundary
+# fft_a: where the channel between macro rows meets the right edge and its I/O pins
+fft-right-band    mgc_fft_a            720  400  800  440  boundary
