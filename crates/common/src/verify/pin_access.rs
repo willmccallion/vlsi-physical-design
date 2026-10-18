@@ -27,7 +27,8 @@ use crate::geom::point::Point;
 use crate::geom::rect::Rect;
 use crate::verify::shapes::{Owner, obstruction_shapes};
 use rstar::{AABB, RTree, RTreeObject};
-use std::collections::HashMap;
+use rustc_hash::FxHashMap;
+use std::cell::RefCell;
 use std::sync::{Mutex, PoisonError};
 
 /// A shape on one layer that a pin's via must keep clear of, and the net it
@@ -77,12 +78,21 @@ pub struct Neighbour {
     pub orient: Orientation,
 }
 
-/// The metal of neighbouring cells, by layer.
+/// The metal of neighbouring cells, by layer, and what one check has found
+/// of the landings of vias up among it.
 #[derive(Debug, Default)]
 struct NeighbourMetal {
     above: Vec<Fixed>,
     below: Vec<Fixed>,
+    /// For each net, routing-layer track and landing on the next layer, the
+    /// lower pad of the first via up there whose pads both keep clear, or
+    /// `None` when none does.
+    landings: RefCell<FxHashMap<LandingKey, Option<Rect<Dbu>>>>,
 }
+
+/// A landing of a via up for one net: the net, the routing-layer track the
+/// via sits on, and the index of the next layer's track it lands on.
+type LandingKey = (Option<NetId>, Dbu, usize);
 
 /// The fixed metal of one layer and the spacing it demands.
 #[derive(Debug)]
@@ -137,16 +147,6 @@ impl LayerMetal {
             reach,
             default_width_obstructions: lib.rules.min_spacing_for_obstructions,
         }
-    }
-
-    /// The first fixed shape `shape` touches or comes within the required
-    /// spacing of, by its net.
-    fn blocker(&self, shape: &Rect<Dbu>) -> Blocking {
-        let zone = shape.expand(self.reach);
-        self.fixed
-            .locate_in_envelope_intersecting(envelope(&zone))
-            .find(|f| too_close(shape, &f.rect, self.required(shape, f)))
-            .map_or(Blocking::Clear, |f| Blocking::By(f.net))
     }
 
     /// Whether `shape`, of `net` if on one, neither touches nor comes within
@@ -235,44 +235,151 @@ pub struct PinAccess {
     up: Option<Escape>,
 }
 
-/// The vias from the routing layer to the next and that layer's metal,
-/// which metal on the routing layer must reach within [`Self::reach`].
+/// The vias from the routing layer to the next, which runs across it, and
+/// that layer's metal, which metal on the routing layer must reach within
+/// [`Self::reach`].
 #[derive(Debug)]
 struct Escape {
-    /// Coordinates across the next layer of its tracks.
+    /// Coordinates across the next layer of its tracks, which are positions
+    /// along the routing layer's.
     tracks: Vec<Dbu>,
     vias: Vec<ViaUp>,
     metal: LayerMetal,
     /// How far along its track metal on the routing layer may run to a via.
     reach: Dbu,
-    /// What fixed metal blocks each via's upper pad at a landing, once asked.
-    landings: Mutex<HashMap<(Dbu, Dbu, usize), Blocking>>,
+    /// Whether the next layer's tracks run vertically.
+    vertical: bool,
+    /// For each of the next layer's tracks, the merged stretches along it
+    /// where fixed metal comes near enough to block a via's upper pad; a
+    /// pad centered outside all of them is clear.
+    near: Vec<Vec<(Dbu, Dbu)>>,
+    /// What blocks each via's upper pad at a landing inside a near stretch,
+    /// once asked, by the landing's track, position along it and via.
+    checked: Mutex<FxHashMap<(usize, Dbu, usize), PadBlock>>,
 }
 
-/// What fixed metal a shape runs into.
+/// What fixed metal keeps a via's upper pad from a landing.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum Blocking {
+enum PadBlock {
     /// Nothing.
     Clear,
-    /// Metal of no net, or the net the metal belongs to.
-    By(Option<NetId>),
+    /// Only metal of this net, which a pad of the same net may meet.
+    Net(NetId),
+    /// Metal of no net or of several nets.
+    All,
 }
 
 impl Escape {
-    /// Whether via `k` landing at `at` keeps its upper pad clear of fixed
-    /// metal of nets other than `net`.
-    fn pad_clear(&self, k: usize, at: Point<Dbu>, net: Option<NetId>) -> bool {
-        let key = (at.x, at.y, k);
-        let blocker = *self
-            .landings
+    /// The stretches of each of the next layer's `tracks` near enough to
+    /// `metal`'s fixed shapes to block the upper pad of one of `vias`.
+    fn near_stretches(
+        metal: &LayerMetal,
+        tracks: &[Dbu],
+        vertical: bool,
+        vias: &[ViaUp],
+    ) -> Vec<Vec<(Dbu, Dbu)>> {
+        let split = |r: &Rect<Dbu>| {
+            if vertical {
+                ((r.min.x, r.max.x), (r.min.y, r.max.y))
+            } else {
+                ((r.min.y, r.max.y), (r.min.x, r.max.x))
+            }
+        };
+        let half = |f: fn(&Rect<Dbu>) -> (Dbu, Dbu)| {
+            vias.iter()
+                .map(|v| {
+                    let (lo, hi) = f(&v.pad);
+                    (-lo).max(hi)
+                })
+                .max()
+                .unwrap_or(Dbu::ZERO)
+        };
+        let across_half = half(if vertical {
+            |r: &Rect<Dbu>| (r.min.x, r.max.x)
+        } else {
+            |r: &Rect<Dbu>| (r.min.y, r.max.y)
+        });
+        let along_half = half(if vertical {
+            |r: &Rect<Dbu>| (r.min.y, r.max.y)
+        } else {
+            |r: &Rect<Dbu>| (r.min.x, r.max.x)
+        });
+        let across_margin = metal.reach + across_half;
+        let along_margin = metal.reach + along_half;
+        let mut near = vec![Vec::new(); tracks.len()];
+        for f in &metal.fixed {
+            let ((a0, a1), (b0, b1)) = split(&f.rect);
+            let first = tracks.partition_point(|&t| t < a0 - across_margin);
+            let last = tracks.partition_point(|&t| t <= a1 + across_margin);
+            for stretches in &mut near[first..last.max(first)] {
+                stretches.push((b0 - along_margin, b1 + along_margin));
+            }
+        }
+        for stretches in &mut near {
+            stretches.sort_unstable();
+            let mut merged: Vec<(Dbu, Dbu)> = Vec::with_capacity(stretches.len());
+            for &(lo, hi) in stretches.iter() {
+                match merged.last_mut() {
+                    Some(last) if lo <= last.1 => last.1 = last.1.max(hi),
+                    _ => merged.push((lo, hi)),
+                }
+            }
+            *stretches = merged;
+        }
+        near
+    }
+
+    /// Whether via `k` landing on the next layer's track `t` at `at` keeps
+    /// its upper pad clear of fixed metal of nets other than `net`.
+    fn pad_clear(&self, t: usize, k: usize, at: Point<Dbu>, net: Option<NetId>) -> bool {
+        let along = if self.vertical { at.y } else { at.x };
+        let stretches = &self.near[t];
+        let i = stretches.partition_point(|&(_, hi)| hi < along);
+        if stretches.get(i).is_none_or(|&(lo, _)| along < lo) {
+            return true;
+        }
+        let key = (t, along, k);
+        let known = self
+            .checked
             .lock()
             .unwrap_or_else(PoisonError::into_inner)
-            .entry(key)
-            .or_insert_with(|| self.metal.blocker(&self.vias[k].pad.translate(at)));
-        match blocker {
-            Blocking::Clear => true,
-            Blocking::By(by) => net.is_some() && by == net,
+            .get(&key)
+            .copied();
+        let block = known.unwrap_or_else(|| {
+            let block = self.pad_block(&self.vias[k].pad.translate(at));
+            let _ = self
+                .checked
+                .lock()
+                .unwrap_or_else(PoisonError::into_inner)
+                .insert(key, block);
+            block
+        });
+        match block {
+            PadBlock::Clear => true,
+            PadBlock::Net(by) => net == Some(by),
+            PadBlock::All => false,
         }
+    }
+
+    /// What fixed metal `pad` touches or comes within spacing of.
+    fn pad_block(&self, pad: &Rect<Dbu>) -> PadBlock {
+        let zone = pad.expand(self.metal.reach);
+        let mut block = PadBlock::Clear;
+        for f in self
+            .metal
+            .fixed
+            .locate_in_envelope_intersecting(envelope(&zone))
+        {
+            if !too_close(pad, &f.rect, self.metal.required(pad, f)) {
+                continue;
+            }
+            block = match (block, f.net) {
+                (PadBlock::Clear, Some(n)) => PadBlock::Net(n),
+                (PadBlock::Net(m), Some(n)) if m == n => PadBlock::Net(m),
+                _ => return PadBlock::All,
+            };
+        }
+        block
     }
 }
 
@@ -311,10 +418,11 @@ impl PinAccess {
             return None;
         }
         let next = LayerId::new(above.index() + 1);
-        let up = (next.index() < lib.routing_layers.len())
+        let crosses = |l: LayerId| lib.layer(l).direction != lib.layer(above).direction;
+        let up = (next.index() < lib.routing_layers.len() && crosses(next))
             .then(|| {
                 let cut_up = CutLayerId::new(above.index());
-                let vias = lib
+                let vias: Vec<ViaUp> = lib
                     .vias
                     .iter()
                     .filter(|v| v.cut == cut_up && !v.from_def)
@@ -331,12 +439,18 @@ impl PinAccess {
                         })
                     })
                     .collect();
+                let tracks = db.layer_tracks(next);
+                let metal = LayerMetal::new(db, next);
+                let vertical = lib.layer(next).direction == Direction::Vertical;
+                let near = Escape::near_stretches(&metal, &tracks, vertical, &vias);
                 Escape {
-                    tracks: db.layer_tracks(next),
+                    tracks,
                     vias,
-                    metal: LayerMetal::new(db, next),
+                    metal,
                     reach: escape_reach(db, above),
-                    landings: Mutex::new(HashMap::new()),
+                    vertical,
+                    near,
+                    checked: Mutex::new(FxHashMap::default()),
                 }
             })
             .filter(|up| !up.vias.is_empty());
@@ -573,7 +687,7 @@ impl PinAccess {
                 relied.push((self.above, rect));
                 if net.is_none() {
                     clear_above = true;
-                } else if let Some(run) = self.escapes(&rect, net, &extra.above) {
+                } else if let Some(run) = self.escapes(&rect, net, extra) {
                     relied.push((self.above, run));
                     clear_above = true;
                 }
@@ -584,7 +698,7 @@ impl PinAccess {
                 }
                 relied.push((self.pin_layer, rect));
                 if way_below.is_none() {
-                    way_below = self.reachable(&rect, net, &extra.above);
+                    way_below = self.reachable(&rect, net, extra);
                 }
             }
         }
@@ -596,73 +710,130 @@ impl PinAccess {
         Some(relied)
     }
 
-    /// The run on the routing layer by which metal `start` of `net` reaches
+    /// The metal on the routing layer by which metal `start` of `net` reaches
     /// a via up, within the escape reach along its track, whose metal on the
-    /// next layer is clear of fixed metal and whose run is clear of other
-    /// metal on the routing layer; `start` itself when there is no layer
-    /// above, `None` when no landing works. The nearest landings are tried
-    /// first.
+    /// next layer is clear of fixed metal and whose wire and lower pad are
+    /// clear of other metal on the routing layer, as the box around them;
+    /// `start` itself when there is no layer above, `None` when no landing
+    /// works.
+    ///
+    /// Landings are tried nearest first. The wire to a farther landing in one
+    /// direction holds the wire to every nearer one, so once a wire runs into
+    /// other metal no landing beyond it in that direction is tried.
     fn escapes(
         &self,
         start: &Rect<Dbu>,
         net: Option<NetId>,
-        extra_above: &[Fixed],
+        extra: &NeighbourMetal,
     ) -> Option<Rect<Dbu>> {
         let Some(up) = &self.up else {
             return Some(*start);
         };
-        let width = self.metal_above.width;
-        let along = |r: &Rect<Dbu>| {
-            if self.above_vertical {
-                (r.min.y, r.max.y)
-            } else {
-                (r.min.x, r.max.x)
-            }
+        let (lo, hi) = if self.above_vertical {
+            (start.min.y, start.max.y)
+        } else {
+            (start.min.x, start.max.x)
         };
-        let (lo, hi) = along(start);
         let (across_lo, across_hi) = if self.above_vertical {
             (start.min.x, start.max.x)
         } else {
             (start.min.y, start.max.y)
         };
-        let distance = |landing: Dbu| (lo - landing).max(landing - hi).max(Dbu::ZERO);
-        let mut landings: Vec<Dbu> = within(&up.tracks, lo - up.reach, hi + up.reach).collect();
-        landings.sort_by_key(|&landing| distance(landing));
+        let t = &up.tracks;
+        let first = t.partition_point(|&c| c < lo - up.reach);
+        let inside_lo = t.partition_point(|&c| c < lo);
+        let inside_hi = t.partition_point(|&c| c <= hi);
+        let last = t.partition_point(|&c| c <= hi + up.reach);
         for track in within(&self.tracks_above, across_lo, across_hi) {
-            for &landing in &landings {
-                let at = if self.above_vertical {
-                    Point::new(track, landing)
-                } else {
-                    Point::new(landing, track)
+            let landing = |i: usize| self.land(start, track, i, net, extra);
+            for i in inside_lo..inside_hi {
+                if let Ok(Some(run)) = landing(i) {
+                    return Some(run);
+                }
+            }
+            let mut above = inside_hi..last;
+            let mut below = (first..inside_lo).rev();
+            let (mut next_above, mut next_below) = (above.next(), below.next());
+            loop {
+                let pick_above = match (next_above, next_below) {
+                    (None, None) => break,
+                    (Some(_), None) => true,
+                    (None, Some(_)) => false,
+                    (Some(a), Some(b)) => t[a] - hi <= lo - t[b],
                 };
-                let clear_up = up.vias.iter().enumerate().find_map(|(k, via)| {
-                    if !up.pad_clear(k, at, net) {
-                        return None;
+                let (i, cursor_next): (usize, &mut Option<usize>) = if pick_above {
+                    (next_above.unwrap_or_default(), &mut next_above)
+                } else {
+                    (next_below.unwrap_or_default(), &mut next_below)
+                };
+                match landing(i) {
+                    Ok(Some(run)) => return Some(run),
+                    Ok(None) => {
+                        *cursor_next = if pick_above {
+                            above.next()
+                        } else {
+                            below.next()
+                        };
                     }
-                    let bottom = via.bottom.translate(at);
-                    let (b_lo, b_hi) = along(&bottom);
-                    let run = if self.above_vertical {
-                        Rect::new(
-                            Point::new(track - width / 2, lo.min(b_lo)),
-                            Point::new(track + width / 2, hi.max(b_hi)),
-                        )
-                    } else {
-                        Rect::new(
-                            Point::new(lo.min(b_lo), track - width / 2),
-                            Point::new(hi.max(b_hi), track + width / 2),
-                        )
-                    };
-                    let run = run.union(&bottom);
-                    self.metal_above
-                        .clear(&run, net, extra_above)
-                        .then_some(run)
-                });
-                if clear_up.is_some() {
-                    return clear_up;
+                    Err(WireBlocked) => *cursor_next = None,
                 }
             }
         }
         None
+    }
+
+    /// Whether a via up landing on the next layer's track `i`, where it
+    /// crosses the routing layer's track at `track`, carries `start` up: the
+    /// box around the wire from `start` to it and its lower pad when one of
+    /// the vias works, `Ok(None)` when none does, and [`WireBlocked`] when
+    /// some via's pads would fit but the wire itself runs into other metal.
+    /// The wire is only checked when the pads fit, so a landing blocked at
+    /// the pads never stops the search; what the pads meet is remembered in
+    /// `extra` for the rest of the check.
+    fn land(
+        &self,
+        start: &Rect<Dbu>,
+        track: Dbu,
+        i: usize,
+        net: Option<NetId>,
+        extra: &NeighbourMetal,
+    ) -> Result<Option<Rect<Dbu>>, WireBlocked> {
+        let Some(up) = &self.up else {
+            return Ok(Some(*start));
+        };
+        let landing = up.tracks[i];
+        let half = self.metal_above.width / 2;
+        let (at, wire) = if self.above_vertical {
+            let (lo, hi) = (start.min.y.min(landing), start.max.y.max(landing));
+            (
+                Point::new(track, landing),
+                Rect::new(Point::new(track - half, lo), Point::new(track + half, hi)),
+            )
+        } else {
+            let (lo, hi) = (start.min.x.min(landing), start.max.x.max(landing));
+            (
+                Point::new(landing, track),
+                Rect::new(Point::new(lo, track - half), Point::new(hi, track + half)),
+            )
+        };
+        let key = (net, track, i);
+        let known = extra.landings.borrow().get(&key).copied();
+        let bottom = known.unwrap_or_else(|| {
+            let bottom = (0..up.vias.len()).find_map(|k| {
+                let bottom = up.vias[k].bottom.translate(at);
+                (up.pad_clear(i, k, at, net) && self.metal_above.clear(&bottom, net, &extra.above))
+                    .then_some(bottom)
+            });
+            let _ = extra.landings.borrow_mut().insert(key, bottom);
+            bottom
+        });
+        let Some(bottom) = bottom else {
+            return Ok(None);
+        };
+        if !self.metal_above.clear(&wire, net, &extra.above) {
+            return Err(WireBlocked);
+        }
+        Ok(Some(wire.union(&bottom)))
     }
 
     /// The routing-layer metal of some via with its cut inside `rect`, at a
@@ -673,7 +844,7 @@ impl PinAccess {
         &self,
         rect: &Rect<Dbu>,
         net: Option<NetId>,
-        extra_above: &[Fixed],
+        extra: &NeighbourMetal,
     ) -> Option<Vec<Rect<Dbu>>> {
         let (xs, ys) = if self.above_vertical {
             (&self.tracks_above, &self.tracks_pin)
@@ -686,17 +857,21 @@ impl PinAccess {
                     let at = Point::new(x, y);
                     let pad = via.pad.translate(at);
                     if !rect.encloses(&via.bottom.translate(at))
-                        || !self.metal_above.clear(&pad, net, extra_above)
+                        || !self.metal_above.clear(&pad, net, &extra.above)
                     {
                         return None;
                     }
-                    let run = self.escapes(&pad, net, extra_above)?;
+                    let run = self.escapes(&pad, net, extra)?;
                     Some(vec![pad, run])
                 })
             })
         })
     }
 }
+
+/// A wire on the routing layer that runs into other metal.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+struct WireBlocked;
 
 /// How far along the routing layer a pin's metal may run to reach its via
 /// up: one row height, or ten of the layer's pitches for a design without

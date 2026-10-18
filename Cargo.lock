@@ -672,6 +672,7 @@ dependencies = [
  "log",
  "rayon",
  "rstar",
+ "rustc-hash",
  "serde",
  "thiserror",
  "toml",
