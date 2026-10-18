@@ -120,16 +120,17 @@ def special_rects(lines, box):
     return out
 
 
-def clipped_blockages(lines, box):
-    """The BLOCKAGES section with each blockage's rectangles clipped to
-    `box`, dropping those that miss it."""
+def blockages_in(lines, box):
+    """Each blockage of the BLOCKAGES section as its head (the text before
+    its shapes) with its rectangles clipped to `box`, dropping those that
+    miss it."""
     try:
         start, end = section(lines, "BLOCKAGES")
     except StopIteration:
         return []
     bx0, by0, bx1, by1 = box
     text = " ".join(lines[start + 1 : end])
-    kept = []
+    out = []
     for block in re.findall(r"-\s+(.*?);", text):
         head = block.split("RECT")[0].split("POLYGON")[0].strip()
         rects = []
@@ -139,12 +140,45 @@ def clipped_blockages(lines, box):
             y0, y1 = sorted((y0, y1))
             cx0, cy0, cx1, cy1 = max(x0, bx0), max(y0, by0), min(x1, bx1), min(y1, by1)
             if cx0 < cx1 and cy0 < cy1:
-                rects.append(f"RECT ( {cx0} {cy0} ) ( {cx1} {cy1} )")
+                rects.append((cx0, cy0, cx1, cy1))
         if rects:
-            kept.append(f"- {head} " + " ".join(rects) + " ;")
+            out.append((head, rects))
+    return out
+
+
+def clipped_blockages(lines, box):
+    """The BLOCKAGES section with each blockage's rectangles clipped to
+    `box`, dropping those that miss it."""
+    kept = [
+        f"- {head} " + " ".join(f"RECT ( {x0} {y0} ) ( {x1} {y1} )" for x0, y0, x1, y1 in rects) + " ;"
+        for head, rects in blockages_in(lines, box)
+    ]
     if not kept:
         return []
     return [f"BLOCKAGES {len(kept)} ;"] + kept + ["END BLOCKAGES", ""]
+
+
+def covers(rects, box):
+    """Whether the union of `rects` covers all of `box`."""
+    bx0, by0, bx1, by1 = box
+    xs = sorted({bx0, bx1} | {v for r in rects for v in (r[0], r[2]) if bx0 < v < bx1})
+    ys = sorted({by0, by1} | {v for r in rects for v in (r[1], r[3]) if by0 < v < by1})
+    for xa, xb in zip(xs, xs[1:]):
+        for ya, yb in zip(ys, ys[1:]):
+            cx, cy = (xa + xb) / 2, (ya + yb) / 2
+            if not any(r[0] <= cx <= r[2] and r[1] <= cy <= r[3] for r in rects):
+                return False
+    return True
+
+
+def fully_blocked_layers(lines, box):
+    """Layers that routing blockages cover across all of `box`."""
+    per_layer = {}
+    for head, rects in blockages_in(lines, box):
+        m = re.match(r"LAYER (\S+)", head)
+        if m:
+            per_layer.setdefault(m.group(1), []).extend(rects)
+    return {layer for layer, rects in per_layer.items() if covers(rects, box)}
 
 
 def layer_directions(lef):
@@ -160,6 +194,9 @@ class BoundaryPins:
     """I/O pins on the box edges for nets that leave the box."""
 
     def __init__(self, box, lef, lines, blockers, die, min_layer_index=1):
+        """Pins go on the routing layers from `min_layer_index` up to the
+        lowest one a blockage covers across the box: a via cannot pass a
+        layer blocked there, so a crossing net never reaches those above."""
         self.bx0, self.by0, self.bx1, self.by1 = box
         self.blockers = blockers
         dx0, dy0, dx1, dy1 = die
@@ -174,6 +211,9 @@ class BoundaryPins:
             if same
         }
         layers = layer_directions(lef)[min_layer_index:]
+        blocked = fully_blocked_layers(lines, box)
+        reachable = next((i for i, (n, _) in enumerate(layers) if n in blocked), len(layers))
+        layers = layers[:reachable]
         self.horizontal = [n for n, d in layers if d == "HORIZONTAL"]
         self.vertical = [n for n, d in layers if d == "VERTICAL"]
         self.tracks = {}
