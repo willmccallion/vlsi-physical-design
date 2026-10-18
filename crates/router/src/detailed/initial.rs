@@ -16,7 +16,7 @@ use super::region::{
 use super::{DetailedRouter, NetRoute};
 use crate::access::{AccessPoint, Node};
 use crate::global::GCell;
-use crate::search::{Costs, Guide};
+use crate::search::Costs;
 use crate::wiring::Edge;
 use pare_common::db::indices::NetId;
 use pare_common::db::library::Direction;
@@ -42,7 +42,6 @@ struct Plan {
 #[derive(Default)]
 struct Part {
     region: Option<RegionKey>,
-    cells: Vec<GCell>,
     groups: Vec<Vec<Node>>,
 }
 
@@ -209,7 +208,6 @@ impl DetailedRouter<'_> {
         for (i, &c) in cells.iter().enumerate() {
             let part = parts.entry(find(&mut sets, i)).or_default();
             part.region = Some(region_of(c));
-            part.cells.push(c);
         }
         let mut bridges = Vec::with_capacity(crossings.len());
         for (child, parent) in crossings {
@@ -250,15 +248,7 @@ impl DetailedRouter<'_> {
             if groups.len() < 2 {
                 continue;
             }
-            let guide = Guide::new(&part.cells, self.grid_origin, self.gcell, self.tech);
-            pieces.push((
-                region,
-                Piece {
-                    net,
-                    groups,
-                    guide: Some(guide),
-                },
-            ));
+            pieces.push((region, Piece { net, groups }));
         }
         Some(Plan {
             net,

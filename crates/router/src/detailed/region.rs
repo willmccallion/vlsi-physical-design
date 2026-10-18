@@ -14,7 +14,7 @@ use super::DetailedRouter;
 use super::judge::{Candidate, Judgment};
 use crate::access::Node;
 use crate::occupancy::{LocalOccupancy, Owner};
-use crate::search::{Costs, Guide, MAX_PENALTY, OwnVias, Search, WindowCache};
+use crate::search::{Costs, MAX_PENALTY, OwnVias, Search, WindowCache};
 use crate::wiring::{DisjointSets, Edge, NetRoute, Patch, Wiring, path_edges, tidy_patches};
 use pare_common::db::indices::{CutLayerId, LayerId, NetId};
 use pare_common::geom::dbu::Dbu;
@@ -89,9 +89,6 @@ pub(super) struct Piece {
     /// Groups of crossings that must be joined; each group is already
     /// connected outside the region or is one pin's access point.
     pub(super) groups: Vec<Vec<Node>>,
-    /// The cells the piece should keep to, if any; it may leave them when
-    /// they hold no way through.
-    pub(super) guide: Option<Guide>,
 }
 
 /// What a region worker did to one net: the wiring it took out of the
@@ -488,11 +485,7 @@ impl DetailedRouter<'_> {
                     groups.entry(sets.find(n)).or_default().push(n);
                 }
                 let groups: Vec<Vec<Node>> = groups.into_values().collect();
-                let piece = (groups.len() > 1).then_some(Piece {
-                    net,
-                    groups,
-                    guide: None,
-                });
+                let piece = (groups.len() > 1).then_some(Piece { net, groups });
                 (inside, piece)
             })
             .collect()
@@ -525,7 +518,7 @@ impl DetailedRouter<'_> {
                 };
                 let owner = Owner::Net(piece.net.0);
                 overlay.remove_owner(owner);
-                let guided = Search {
+                let search = Search {
                     db: self.db,
                     tech: self.tech,
                     occupancy: &self.occupancy,
@@ -533,22 +526,12 @@ impl DetailedRouter<'_> {
                     history: &self.history,
                     owner,
                     costs: Costs { penalty, ..costs },
-                    guide: piece.guide.as_ref(),
+                    guide: None,
                     own_vias: None,
                     ripped: &work.ripped,
                 };
-                let free = Search {
-                    guide: None,
-                    ..guided
-                };
                 let own = self.vias_near(piece.net, area);
-                let groups = &piece.groups;
-                let edges = if guided.guide.is_some() {
-                    self.connect_groups(&guided, groups, &window, own.clone())
-                        .or_else(|| self.connect_groups(&free, groups, &window, own))
-                } else {
-                    self.connect_groups(&free, groups, &window, own)
-                };
+                let edges = self.connect_groups(&search, &piece.groups, &window, own);
                 let result = edges.map(|edges| {
                     let wiring = Wiring {
                         edges,
@@ -559,7 +542,7 @@ impl DetailedRouter<'_> {
                         without: work.removed(i),
                         with: &wiring,
                     };
-                    let patches = self.min_area_patches(&candidate, area, &free);
+                    let patches = self.min_area_patches(&candidate, area, &search);
                     Wiring { patches, ..wiring }
                 });
                 if let Some(wiring) = &result {
