@@ -139,8 +139,9 @@ impl PartialOrd for Entry {
     }
 }
 
-/// A* state over every gcell of a grid, kept per thread between searches
-/// and cleared by bumping a generation stamp.
+/// A* state over the gcells of a search window, kept per thread between
+/// searches and cleared by bumping a generation stamp; nodes are numbered
+/// within the window, see [`Local`].
 #[derive(Debug, Default)]
 struct SearchState {
     cost: Vec<f64>,
@@ -175,6 +176,13 @@ impl SearchState {
         self.stamp[node] = self.generation;
         self.cost[node] = cost;
         self.parent[node] = parent;
+    }
+
+    /// Lets go of the state when it holds more than `nodes` nodes.
+    fn release_beyond(&mut self, nodes: usize) {
+        if self.stamp.len() > nodes {
+            *self = Self::default();
+        }
     }
 }
 
@@ -253,36 +261,41 @@ fn search_with(
         let plane = f64::from(c.x.abs_diff(target.x) + c.y.abs_diff(target.y));
         costs.via.mul_add(layers, plane)
     };
-    state.reset(grid.usage.len());
+    let local = Local::new(grid, win);
+    state.reset(local.nodes());
     let mut heap = BinaryHeap::new();
     for &c in sources {
-        state.set(grid.edge(c), 0.0, NO_PARENT);
+        state.set(local.index(c), 0.0, NO_PARENT);
         heap.push(Entry {
             f: h(c),
             g: 0.0,
             cell: c,
         });
     }
-    while let Some(Entry { g, cell, .. }) = heap.pop() {
+    let found = loop {
+        let Some(Entry { g, cell, .. }) = heap.pop() else {
+            break None;
+        };
         let here = grid.edge(cell);
-        if state.cost(here).is_some_and(|b| g > b) {
+        let at = local.index(cell);
+        if state.cost(at).is_some_and(|b| g > b) {
             continue;
         }
         if cell == target {
             let mut path = vec![cell];
-            let mut node = state.parent[here];
+            let mut node = state.parent[at];
             while node != NO_PARENT {
-                path.push(grid.cell_of(node as usize));
+                path.push(local.cell(node as usize));
                 node = state.parent[node as usize];
             }
             path.reverse();
-            return Some(path);
+            break Some(path);
         }
         let mut push = |next: GCell, step: f64| {
             let ng = g + step;
-            let index = grid.edge(next);
+            let index = local.index(next);
             if state.cost(index).is_none_or(|b| ng < b) {
-                state.set(index, ng, crate::tech::to_u32(here));
+                state.set(index, ng, crate::tech::to_u32(at));
                 heap.push(Entry {
                     f: ng + h(next),
                     g: ng,
@@ -342,8 +355,60 @@ fn search_with(
                 push(next, climb_cost(next));
             }
         }
+    };
+    state.release_beyond(KEPT_SEARCH_NODES);
+    found
+}
+
+/// Nodes of search state a thread keeps between searches; a larger state,
+/// grown for a search over most of the grid, is let go after it.
+const KEPT_SEARCH_NODES: usize = 1 << 20;
+
+/// The cells of a search window on every layer, numbered from zero.
+#[derive(Clone, Copy, Debug)]
+struct Local {
+    x0: u16,
+    y0: u16,
+    width: usize,
+    height: usize,
+    layers: usize,
+    first_layer: usize,
+}
+
+impl Local {
+    fn new(grid: &GlobalGrid, win: (u16, u16, u16, u16)) -> Self {
+        Self {
+            x0: win.0,
+            y0: win.2,
+            width: usize::from(win.1 - win.0) + 1,
+            height: usize::from(win.3 - win.2) + 1,
+            layers: grid.layers().count(),
+            first_layer: *grid.layers().start(),
+        }
     }
-    None
+
+    const fn nodes(&self) -> usize {
+        self.width * self.height * self.layers
+    }
+
+    fn index(&self, c: GCell) -> usize {
+        let l = c.layer.index() - self.first_layer;
+        let x = usize::from(c.x - self.x0);
+        let y = usize::from(c.y - self.y0);
+        (l * self.height + y) * self.width + x
+    }
+
+    fn cell(&self, index: usize) -> GCell {
+        let x = index % self.width;
+        let rest = index / self.width;
+        let y = rest % self.height;
+        let l = rest / self.height;
+        GCell {
+            layer: LayerId::new(l + self.first_layer),
+            x: self.x0 + u16::try_from(x).unwrap_or(0),
+            y: self.y0 + u16::try_from(y).unwrap_or(0),
+        }
+    }
 }
 
 #[cfg(test)]
