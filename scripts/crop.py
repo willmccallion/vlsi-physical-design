@@ -132,9 +132,20 @@ def layer_directions(lef):
 class BoundaryPins:
     """I/O pins on the box edges for nets that leave the box."""
 
-    def __init__(self, box, lef, lines, blockers, min_layer_index=1):
+    def __init__(self, box, lef, lines, blockers, die, min_layer_index=1):
         self.bx0, self.by0, self.bx1, self.by1 = box
         self.blockers = blockers
+        dx0, dy0, dx1, dy1 = die
+        self.die_edges = {
+            edge
+            for edge, same in (
+                ("left", self.bx0 <= dx0),
+                ("right", self.bx1 >= dx1),
+                ("bottom", self.by0 <= dy0),
+                ("top", self.by1 >= dy1),
+            )
+            if same
+        }
         layers = layer_directions(lef)[min_layer_index:]
         self.horizontal = [n for n, d in layers if d == "HORIZONTAL"]
         self.vertical = [n for n, d in layers if d == "VERTICAL"]
@@ -167,7 +178,7 @@ class BoundaryPins:
         ):
             if t is not None and 0 <= t <= 1 and (best is None or t < best[1]):
                 best = (edge, t)
-        if best is None:
+        if best is None or best[0] in self.die_edges:
             return None
         edge, t = best
         return edge, (ix + dx * t, iy + dy * t)
@@ -234,7 +245,9 @@ def crop(src, lef_path, box, out, partial, boundary, tech_lef):
         if tech_lef is None:
             sys.exit("--boundary-pins needs --tech-lef for the routing layers' directions")
         blockers = special_rects(lines, (bx0, by0, bx1, by1))
-        boundary_pins = BoundaryPins((bx0, by0, bx1, by1), open(tech_lef).read(), lines, blockers)
+        die = re.search(r"DIEAREA \( (-?\d+) (-?\d+) \) \( (-?\d+) (-?\d+) \)", txt)
+        die = tuple(int(v) for v in die.groups()) if die else (bx0, by0, bx1, by1)
+        boundary_pins = BoundaryPins((bx0, by0, bx1, by1), open(tech_lef).read(), lines, blockers, die)
 
     head = []
     for l in lines:
@@ -300,6 +313,16 @@ def crop(src, lef_path, box, out, partial, boundary, tech_lef):
         if l.strip():
             block.append(l)
     flush_pin()
+    if boundary_pins:
+        layer, rect = None, None
+        for l in io_pins:
+            m = re.search(r"LAYER (\S+) \( (-?\d+) (-?\d+) \) \( (-?\d+) (-?\d+) \)", l)
+            if m:
+                layer, rect = m.group(1), tuple(int(v) for v in m.groups()[1:])
+            m = re.search(r"PLACED \( (-?\d+) (-?\d+) \)", l)
+            if m and layer:
+                px, py = int(m.group(1)), int(m.group(2))
+                boundary_pins.blockers.append((layer, (px + rect[0], py + rect[1], px + rect[2], py + rect[3])))
 
     ns, ne = section(lines, "NETS")
     nets = []
