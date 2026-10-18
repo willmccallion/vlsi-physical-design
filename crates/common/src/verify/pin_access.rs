@@ -102,12 +102,16 @@ pub struct Neighbour {
     pub orient: Orientation,
 }
 
-/// The metal of neighbouring cells, by layer, and what one check has found
-/// of the landings of vias up among it.
+/// The metal one check of a cell's pins measures against, by layer: the
+/// fixed metal around the cell and the metal of the cells beside it, and
+/// what the check has found of the landings of vias up among it.
 #[derive(Debug, Default)]
 struct NeighbourMetal {
     above: Vec<Fixed>,
     below: Vec<Fixed>,
+    /// The area whose fixed metal the lists hold; every shape checked
+    /// against them, with its layer's spacing around it, lies inside.
+    zone: Option<Rect<Dbu>>,
     /// For each pin, routing-layer track and landing on the next layer, the
     /// lower pad of the first via up there whose pads both keep clear, or
     /// `None` when none does.
@@ -175,18 +179,31 @@ impl LayerMetal {
     }
 
     /// Whether `shape`, metal of `holder`, neither touches nor comes within
-    /// the required spacing of any fixed shape or shape of `extra` it may
-    /// not join.
-    fn clear(&self, shape: &Rect<Dbu>, holder: Holder, extra: &[Fixed]) -> bool {
-        let zone = shape.expand(self.reach);
-        let blocks = |f: &Fixed| {
-            !holder.joins(f.holder) && too_close(shape, &f.rect, self.required(shape, f))
-        };
-        !self
-            .fixed
-            .locate_in_envelope_intersecting(envelope(&zone))
-            .any(blocks)
-            && !extra.iter().any(blocks)
+    /// the required spacing of any shape of `metal`, which holds every
+    /// shape of the layer near it, that it may not join.
+    fn clear(
+        &self,
+        shape: &Rect<Dbu>,
+        holder: Holder,
+        metal: &NeighbourMetal,
+        near: &[Fixed],
+    ) -> bool {
+        debug_assert!(
+            metal
+                .zone
+                .is_none_or(|z| z.encloses(&shape.expand(self.reach))),
+            "{shape:?} reaches beyond the fixed metal gathered for the check"
+        );
+        !near
+            .iter()
+            .any(|f| !holder.joins(f.holder) && too_close(shape, &f.rect, self.required(shape, f)))
+    }
+
+    /// The fixed shapes of the layer meeting `zone`.
+    fn near(&self, zone: &Rect<Dbu>) -> impl Iterator<Item = Fixed> + '_ {
+        self.fixed
+            .locate_in_envelope_intersecting(envelope(zone))
+            .cloned()
     }
 
     /// The spacing `shape` and `other` need between them: the layer's
@@ -668,7 +685,31 @@ impl PinAccess {
         let mut all = Vec::with_capacity(neighbours.len() + 1);
         all.extend_from_slice(neighbours);
         all.push(Neighbour { cell, at, orient });
-        self.neighbour_metal(db, &all)
+        let mut metal = self.neighbour_metal(db, &all);
+        let size = db.library.cell_macro(db.cells[cell.index()].macro_id).size;
+        let outline =
+            orient.place_rect(&Rect::new(Point::new(Dbu::ZERO, Dbu::ZERO), size), size, at);
+        let zone = outline.expand(self.check_margin());
+        metal.above.extend(self.metal_above.near(&zone));
+        metal.below.extend(self.metal_below.near(&zone));
+        metal.zone = Some(zone);
+        metal
+    }
+
+    /// How far beyond a cell's outline the shapes one check of its pins
+    /// measures can reach: the escape along a track, the farthest any via's
+    /// metal reaches from its cut, and the largest spacing of either layer.
+    fn check_margin(&self) -> Dbu {
+        let farthest = |pads: &mut dyn Iterator<Item = &Rect<Dbu>>| {
+            pads.flat_map(|p| [-p.min.x, p.max.x, -p.min.y, p.max.y])
+                .max()
+                .unwrap_or(Dbu::ZERO)
+        };
+        let access = farthest(&mut self.vias.iter().flat_map(|v| [&v.pad, &v.bottom]));
+        let escape = self.up.as_ref().map_or(Dbu::ZERO, |up| {
+            up.reach + farthest(&mut up.vias.iter().map(|v| &v.bottom))
+        });
+        access + escape + self.metal_above.reach.max(self.metal_below.reach)
     }
 
     /// The metal every signal pin of `cell`, placed at `at` with `orient`
@@ -839,7 +880,7 @@ impl PinAccess {
         for s in &m.pins[mp.index()].shapes {
             let rect = orient.place_rect(&s.rect, m.size, at);
             if s.layer == LayerRef::Routing(self.above) {
-                if !self.metal_above.clear(&rect, holder, &extra.above) {
+                if !self.metal_above.clear(&rect, holder, extra, &extra.above) {
                     log::trace!(
                         "pin {} at {rect:?} meets other metal on its routing layer",
                         m.pins[mp.index()].name
@@ -855,7 +896,7 @@ impl PinAccess {
                 }
             } else if s.layer == LayerRef::Routing(self.pin_layer) {
                 on_pin_layer = true;
-                if !self.metal_below.clear(&rect, holder, &extra.below) {
+                if !self.metal_below.clear(&rect, holder, extra, &extra.below) {
                     log::trace!(
                         "pin {} at {rect:?} meets other metal on the pin layer",
                         m.pins[mp.index()].name
@@ -995,7 +1036,7 @@ impl PinAccess {
             let bottom = (0..up.vias.len()).find_map(|k| {
                 let bottom = up.vias[k].bottom.translate(at);
                 (up.pad_clear(i, k, at, holder)
-                    && self.metal_above.clear(&bottom, holder, &extra.above))
+                    && self.metal_above.clear(&bottom, holder, extra, &extra.above))
                 .then_some(bottom)
             });
             let _ = extra.landings.borrow_mut().insert(key, bottom);
@@ -1004,7 +1045,7 @@ impl PinAccess {
         let Some(bottom) = bottom else {
             return Ok(None);
         };
-        if !self.metal_above.clear(&wire, holder, &extra.above) {
+        if !self.metal_above.clear(&wire, holder, extra, &extra.above) {
             return Err(WireBlocked);
         }
         Ok(Some(wire.union(&bottom)))
@@ -1032,8 +1073,8 @@ impl PinAccess {
                     let at = Point::new(x, y);
                     let pad = via.pad.translate(at);
                     let bottom = via.bottom.translate(at);
-                    if !self.metal_below.clear(&bottom, holder, &extra.below)
-                        || !self.metal_above.clear(&pad, holder, &extra.above)
+                    if !self.metal_below.clear(&bottom, holder, extra, &extra.below)
+                        || !self.metal_above.clear(&pad, holder, extra, &extra.above)
                     {
                         return None;
                     }
