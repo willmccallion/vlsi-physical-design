@@ -2,14 +2,15 @@
 //!
 //! A pin below the routing layers is reached by a via whose cut lies inside
 //! the pin at a crossing of the pin layer's and the first routing layer's
-//! tracks, whose metal on the pin layer the pin encloses, and whose metal on
-//! the routing layer keeps that layer's spacing from the metal of every other
-//! owner there: power stripes, blockages, macro obstructions, other fixed
-//! pins, and the pins and obstructions of the cells placed beside it. A pin
-//! with no such via is blocked, as is a pin whose own metal on either layer
-//! comes within spacing of such metal, and placement must not leave a cell
-//! where one of its pins is. Spacing follows the layer's tables, as the
-//! design rule check reads them.
+//! tracks, and whose metal on both layers keeps that layer's spacing from
+//! the metal of every other owner there: power stripes, blockages, macro
+//! obstructions, other fixed pins, the other pins and obstructions of its
+//! own cell, and the pins and obstructions of the cells placed beside it.
+//! The via's metal may stick out of the pin. A pin with no such via is
+//! blocked, as is a pin whose own metal on either layer comes within
+//! spacing of such metal, and placement must not leave a cell where one of
+//! its pins is. Spacing follows the layer's tables, as the design rule check
+//! reads them.
 //!
 //! Metal on the routing layer, the pin's own or the via's, must also escape:
 //! run along its track, within a row height, to a clear via up to the next
@@ -31,15 +32,38 @@ use rustc_hash::FxHashMap;
 use std::cell::RefCell;
 use std::sync::{Mutex, PoisonError};
 
-/// A shape on one layer that a pin's via must keep clear of, and the net it
-/// belongs to, if any.
+/// A shape on one layer that a pin's via must keep clear of, and whose
+/// metal it is.
 #[derive(Clone, Debug)]
 struct Fixed {
     rect: Rect<Dbu>,
-    net: Option<NetId>,
+    holder: Holder,
     /// An obstruction or blockage, whose spacing may follow the layer's
     /// default width rather than its own.
     obstruction: bool,
+}
+
+/// Whose metal a shape is: its net, if on one, and for a pin of a cell
+/// placement can move, which pin, so that a pin on no net still knows its
+/// own metal.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+struct Holder {
+    net: Option<NetId>,
+    pin: Option<(CellId, MacroPinId)>,
+}
+
+impl Holder {
+    /// Fixed metal of `net`, or of no net.
+    const fn of_net(net: Option<NetId>) -> Self {
+        Self { net, pin: None }
+    }
+
+    /// Whether metal of `self` may touch metal of `other`: both are on one
+    /// net, or both are the same pin.
+    fn joins(self, other: Self) -> bool {
+        (self.net.is_some() && self.net == other.net)
+            || (self.pin.is_some() && self.pin == other.pin)
+    }
 }
 
 impl RTreeObject for Fixed {
@@ -84,15 +108,16 @@ pub struct Neighbour {
 struct NeighbourMetal {
     above: Vec<Fixed>,
     below: Vec<Fixed>,
-    /// For each net, routing-layer track and landing on the next layer, the
+    /// For each pin, routing-layer track and landing on the next layer, the
     /// lower pad of the first via up there whose pads both keep clear, or
     /// `None` when none does.
     landings: RefCell<FxHashMap<LandingKey, Option<Rect<Dbu>>>>,
 }
 
-/// A landing of a via up for one net: the net, the routing-layer track the
-/// via sits on, and the index of the next layer's track it lands on.
-type LandingKey = (Option<NetId>, Dbu, usize);
+/// A landing of a via up for one pin: whose metal it carries, the
+/// routing-layer track the via sits on, and the index of the next layer's
+/// track it lands on.
+type LandingKey = (Holder, Dbu, usize);
 
 /// The fixed metal of one layer and the spacing it demands.
 #[derive(Debug)]
@@ -118,10 +143,10 @@ impl LayerMetal {
             .filter(|s| s.shape.layer == LayerRef::Routing(layer))
             .map(|s| Fixed {
                 rect: s.shape.rect,
-                net: match s.owner {
+                holder: Holder::of_net(match s.owner {
                     Owner::Net(n) => Some(n),
                     Owner::Obstacle => None,
-                },
+                }),
                 obstruction: s.obstruction,
             })
             .collect();
@@ -149,13 +174,13 @@ impl LayerMetal {
         }
     }
 
-    /// Whether `shape`, of `net` if on one, neither touches nor comes within
-    /// the required spacing of any fixed shape or shape of `extra` of
-    /// another net.
-    fn clear(&self, shape: &Rect<Dbu>, net: Option<NetId>, extra: &[Fixed]) -> bool {
+    /// Whether `shape`, metal of `holder`, neither touches nor comes within
+    /// the required spacing of any fixed shape or shape of `extra` it may
+    /// not join.
+    fn clear(&self, shape: &Rect<Dbu>, holder: Holder, extra: &[Fixed]) -> bool {
         let zone = shape.expand(self.reach);
         let blocks = |f: &Fixed| {
-            (net.is_none() || f.net != net) && too_close(shape, &f.rect, self.required(shape, f))
+            !holder.joins(f.holder) && too_close(shape, &f.rect, self.required(shape, f))
         };
         !self
             .fixed
@@ -330,8 +355,8 @@ impl Escape {
     }
 
     /// Whether via `k` landing on the next layer's track `t` at `at` keeps
-    /// its upper pad clear of fixed metal of nets other than `net`.
-    fn pad_clear(&self, t: usize, k: usize, at: Point<Dbu>, net: Option<NetId>) -> bool {
+    /// its upper pad clear of fixed metal `holder` may not join.
+    fn pad_clear(&self, t: usize, k: usize, at: Point<Dbu>, holder: Holder) -> bool {
         let along = if self.vertical { at.y } else { at.x };
         let stretches = &self.near[t];
         let i = stretches.partition_point(|&(_, hi)| hi < along);
@@ -356,7 +381,7 @@ impl Escape {
         });
         match block {
             PadBlock::Clear => true,
-            PadBlock::Net(by) => net == Some(by),
+            PadBlock::Net(by) => holder.net == Some(by),
             PadBlock::All => false,
         }
     }
@@ -373,7 +398,7 @@ impl Escape {
             if !too_close(pad, &f.rect, self.metal.required(pad, f)) {
                 continue;
             }
-            block = match (block, f.net) {
+            block = match (block, f.holder.net) {
                 (PadBlock::Clear, Some(n)) => PadBlock::Net(n),
                 (PadBlock::Net(m), Some(n)) if m == n => PadBlock::Net(m),
                 _ => return PadBlock::All,
@@ -492,27 +517,43 @@ impl PinAccess {
         orient: Orientation,
         neighbours: &[Neighbour],
     ) -> usize {
-        let extra = self.neighbour_metal(db, neighbours);
+        let extra = self.cell_and_neighbour_metal(db, cell, at, orient, neighbours);
         let c = &db.cells[cell.index()];
         let m = db.library.cell_macro(c.macro_id);
-        let mut net_of = vec![None; m.pins.len()];
-        for &p in &c.pins {
-            let pin = &db.pins[p.index()];
-            if let PinOwner::Cell { pin: mp, .. } = pin.owner {
-                net_of[mp.index()] = Some(pin.net);
-            }
-        }
+        let net_of = pin_nets(db, cell);
         m.pins
             .iter()
             .enumerate()
             .filter(|(_, pin)| !pin.signal_use.is_supply())
             .filter(|&(k, _)| match net_of[k] {
                 Some(net) if db.nets[net.index()].signal_use.is_supply() => false,
-                net => self
-                    .pin_access(m, MacroPinId::new(k), net, at, orient, &extra)
-                    .is_none(),
+                net => {
+                    let mp = MacroPinId::new(k);
+                    let holder = Holder {
+                        net,
+                        pin: Some((cell, mp)),
+                    };
+                    self.pin_access(m, mp, holder, at, orient, &extra).is_none()
+                }
             })
             .count()
+    }
+
+    /// The metal of `neighbours` and of `cell` itself standing at `at` with
+    /// `orient`, whose other pins and obstructions a pin's vias must keep
+    /// clear of too.
+    fn cell_and_neighbour_metal(
+        &self,
+        db: &NetlistDB,
+        cell: CellId,
+        at: Point<Dbu>,
+        orient: Orientation,
+        neighbours: &[Neighbour],
+    ) -> NeighbourMetal {
+        let mut all = Vec::with_capacity(neighbours.len() + 1);
+        all.extend_from_slice(neighbours);
+        all.push(Neighbour { cell, at, orient });
+        self.neighbour_metal(db, &all)
     }
 
     /// The metal every signal pin of `cell`, placed at `at` with `orient`
@@ -528,16 +569,10 @@ impl PinAccess {
         orient: Orientation,
         neighbours: &[Neighbour],
     ) -> Option<Vec<(LayerId, Rect<Dbu>)>> {
-        let extra = self.neighbour_metal(db, neighbours);
+        let extra = self.cell_and_neighbour_metal(db, cell, at, orient, neighbours);
         let c = &db.cells[cell.index()];
         let m = db.library.cell_macro(c.macro_id);
-        let mut net_of = vec![None; m.pins.len()];
-        for &p in &c.pins {
-            let pin = &db.pins[p.index()];
-            if let PinOwner::Cell { pin: mp, .. } = pin.owner {
-                net_of[mp.index()] = Some(pin.net);
-            }
-        }
+        let net_of = pin_nets(db, cell);
         let mut relied = Vec::new();
         for (k, pin) in m.pins.iter().enumerate() {
             if pin.signal_use.is_supply() {
@@ -548,7 +583,12 @@ impl PinAccess {
             {
                 continue;
             }
-            relied.extend(self.pin_access(m, MacroPinId::new(k), net_of[k], at, orient, &extra)?);
+            let mp = MacroPinId::new(k);
+            let holder = Holder {
+                net: net_of[k],
+                pin: Some((cell, mp)),
+            };
+            relied.extend(self.pin_access(m, mp, holder, at, orient, &extra)?);
         }
         Some(relied)
     }
@@ -631,29 +671,32 @@ impl PinAccess {
                         .then_some(pin.net)
                 })
             };
-            let mut add =
-                |layer: LayerRef, rect: Rect<Dbu>, net: Option<NetId>, obstruction: bool| {
-                    let list = if layer == LayerRef::Routing(self.above) {
-                        &mut metal.above
-                    } else if layer == LayerRef::Routing(self.pin_layer) {
-                        &mut metal.below
-                    } else {
-                        return;
-                    };
-                    list.push(Fixed {
-                        rect,
-                        net,
-                        obstruction,
-                    });
+            let mut add = |layer: LayerRef, rect: Rect<Dbu>, holder: Holder, obstruction: bool| {
+                let list = if layer == LayerRef::Routing(self.above) {
+                    &mut metal.above
+                } else if layer == LayerRef::Routing(self.pin_layer) {
+                    &mut metal.below
+                } else {
+                    return;
                 };
+                list.push(Fixed {
+                    rect,
+                    holder,
+                    obstruction,
+                });
+            };
             for (k, pin) in m.pins.iter().enumerate() {
-                let net = net_of(MacroPinId::new(k));
+                let mp = MacroPinId::new(k);
+                let holder = Holder {
+                    net: net_of(mp),
+                    pin: Some((n.cell, mp)),
+                };
                 for s in &pin.shapes {
-                    add(s.layer, place(&s.rect), net, false);
+                    add(s.layer, place(&s.rect), holder, false);
                 }
             }
             for s in &m.obstructions {
-                add(s.layer, place(&s.rect), None, true);
+                add(s.layer, place(&s.rect), Holder::of_net(None), true);
             }
         }
         metal
@@ -661,15 +704,15 @@ impl PinAccess {
 
     /// The metal the pin's access relies on, by layer, or `None` when the
     /// pin is blocked: when its metal on either layer conflicts with other
-    /// metal, or, for a pin on `net`, none of its shapes on the pin layer
+    /// metal, or, for a pin on a net, none of its shapes on the pin layer
     /// can be reached while it has no clear metal on the routing layer that
     /// escapes. A pin on no net needs no via. A pin with shapes on neither
-    /// layer is never blocked here.
+    /// layer is never blocked here. `holder` is the pin's own.
     fn pin_access(
         &self,
         m: &Macro,
         mp: MacroPinId,
-        net: Option<NetId>,
+        holder: Holder,
         at: Point<Dbu>,
         orient: Orientation,
         extra: &NeighbourMetal,
@@ -681,36 +724,51 @@ impl PinAccess {
         for s in &m.pins[mp.index()].shapes {
             let rect = orient.place_rect(&s.rect, m.size, at);
             if s.layer == LayerRef::Routing(self.above) {
-                if !self.metal_above.clear(&rect, net, &extra.above) {
+                if !self.metal_above.clear(&rect, holder, &extra.above) {
+                    log::trace!(
+                        "pin {} at {rect:?} meets other metal on its routing layer",
+                        m.pins[mp.index()].name
+                    );
                     return None;
                 }
                 relied.push((self.above, rect));
-                if net.is_none() {
+                if holder.net.is_none() {
                     clear_above = true;
-                } else if let Some(run) = self.escapes(&rect, net, extra) {
+                } else if let Some(run) = self.escapes(&rect, holder, extra) {
                     relied.push((self.above, run));
                     clear_above = true;
                 }
             } else if s.layer == LayerRef::Routing(self.pin_layer) {
                 on_pin_layer = true;
-                if !self.metal_below.clear(&rect, net, &extra.below) {
+                if !self.metal_below.clear(&rect, holder, &extra.below) {
+                    log::trace!(
+                        "pin {} at {rect:?} meets other metal on the pin layer",
+                        m.pins[mp.index()].name
+                    );
                     return None;
                 }
                 relied.push((self.pin_layer, rect));
                 if way_below.is_none() {
-                    way_below = self.reachable(&rect, net, extra);
+                    way_below = self.reachable(&rect, holder, extra);
                 }
             }
         }
-        let needs_way_out = net.is_some() && (on_pin_layer || !clear_above);
+        let needs_way_out = holder.net.is_some() && (on_pin_layer || !clear_above);
         if needs_way_out && !clear_above {
-            let way = way_below?;
+            let Some(way) = way_below else {
+                log::trace!(
+                    "pin {} of a {} at {at:?} has no via up that escapes",
+                    m.pins[mp.index()].name,
+                    m.name
+                );
+                return None;
+            };
             relied.extend(way.into_iter().map(|r| (self.above, r)));
         }
         Some(relied)
     }
 
-    /// The metal on the routing layer by which metal `start` of `net` reaches
+    /// The metal on the routing layer by which metal `start` of `holder` reaches
     /// a via up, within the escape reach along its track, whose metal on the
     /// next layer is clear of fixed metal and whose wire and lower pad are
     /// clear of other metal on the routing layer, as the box around them;
@@ -723,7 +781,7 @@ impl PinAccess {
     fn escapes(
         &self,
         start: &Rect<Dbu>,
-        net: Option<NetId>,
+        holder: Holder,
         extra: &NeighbourMetal,
     ) -> Option<Rect<Dbu>> {
         let Some(up) = &self.up else {
@@ -745,7 +803,7 @@ impl PinAccess {
         let inside_hi = t.partition_point(|&c| c <= hi);
         let last = t.partition_point(|&c| c <= hi + up.reach);
         for track in within(&self.tracks_above, across_lo, across_hi) {
-            let landing = |i: usize| self.land(start, track, i, net, extra);
+            let landing = |i: usize| self.land(start, track, i, holder, extra);
             for i in inside_lo..inside_hi {
                 if let Ok(Some(run)) = landing(i) {
                     return Some(run);
@@ -795,7 +853,7 @@ impl PinAccess {
         start: &Rect<Dbu>,
         track: Dbu,
         i: usize,
-        net: Option<NetId>,
+        holder: Holder,
         extra: &NeighbourMetal,
     ) -> Result<Option<Rect<Dbu>>, WireBlocked> {
         let Some(up) = &self.up else {
@@ -816,13 +874,14 @@ impl PinAccess {
                 Rect::new(Point::new(lo, track - half), Point::new(hi, track + half)),
             )
         };
-        let key = (net, track, i);
+        let key = (holder, track, i);
         let known = extra.landings.borrow().get(&key).copied();
         let bottom = known.unwrap_or_else(|| {
             let bottom = (0..up.vias.len()).find_map(|k| {
                 let bottom = up.vias[k].bottom.translate(at);
-                (up.pad_clear(i, k, at, net) && self.metal_above.clear(&bottom, net, &extra.above))
-                    .then_some(bottom)
+                (up.pad_clear(i, k, at, holder)
+                    && self.metal_above.clear(&bottom, holder, &extra.above))
+                .then_some(bottom)
             });
             let _ = extra.landings.borrow_mut().insert(key, bottom);
             bottom
@@ -830,20 +889,21 @@ impl PinAccess {
         let Some(bottom) = bottom else {
             return Ok(None);
         };
-        if !self.metal_above.clear(&wire, net, &extra.above) {
+        if !self.metal_above.clear(&wire, holder, &extra.above) {
             return Err(WireBlocked);
         }
         Ok(Some(wire.union(&bottom)))
     }
 
     /// The routing-layer metal of some via with its cut inside `rect`, at a
-    /// crossing of the two layers' tracks, whose lower metal lies inside
-    /// `rect`, whose upper metal is clear of the metal of other nets and
-    /// escapes: the pad and the run it escapes by.
+    /// crossing of the two layers' tracks, whose lower metal keeps clear of
+    /// metal the pin may not join on the pin layer, whose upper metal does
+    /// the same on the routing layer and escapes: the pad and the run it
+    /// escapes by. The lower metal may stick out of the pin.
     fn reachable(
         &self,
         rect: &Rect<Dbu>,
-        net: Option<NetId>,
+        holder: Holder,
         extra: &NeighbourMetal,
     ) -> Option<Vec<Rect<Dbu>>> {
         let (xs, ys) = if self.above_vertical {
@@ -856,17 +916,32 @@ impl PinAccess {
                 within(ys, rect.min.y - via.cut.min.y, rect.max.y - via.cut.max.y).find_map(|y| {
                     let at = Point::new(x, y);
                     let pad = via.pad.translate(at);
-                    if !rect.encloses(&via.bottom.translate(at))
-                        || !self.metal_above.clear(&pad, net, &extra.above)
+                    let bottom = via.bottom.translate(at);
+                    if !self.metal_below.clear(&bottom, holder, &extra.below)
+                        || !self.metal_above.clear(&pad, holder, &extra.above)
                     {
                         return None;
                     }
-                    let run = self.escapes(&pad, net, extra)?;
+                    let run = self.escapes(&pad, holder, extra)?;
                     Some(vec![pad, run])
                 })
             })
         })
     }
+}
+
+/// The net of each pin of `cell`'s master, by pin index, where it is on one.
+fn pin_nets(db: &NetlistDB, cell: CellId) -> Vec<Option<NetId>> {
+    let c = &db.cells[cell.index()];
+    let m = db.library.cell_macro(c.macro_id);
+    let mut net_of = vec![None; m.pins.len()];
+    for &p in &c.pins {
+        let pin = &db.pins[p.index()];
+        if let PinOwner::Cell { pin: mp, .. } = pin.owner {
+            net_of[mp.index()] = Some(pin.net);
+        }
+    }
+    net_of
 }
 
 /// A wire on the routing layer that runs into other metal.
@@ -1215,11 +1290,72 @@ mod tests {
     }
 
     #[test]
-    fn a_via_whose_lower_metal_the_pin_cannot_enclose_does_not_reach_it() {
+    fn a_via_whose_lower_metal_sticks_out_of_the_pin_still_reaches_it() {
         let (mut db, m) = design();
-        db.library.vias.retain(|v| v.name == "V12");
+        db.library
+            .vias
+            .retain(|v| v.name == "V12" || v.name == "V23");
 
-        assert_eq!(blocked_in(&mut db, m, 1000), 1);
+        assert_eq!(blocked_in(&mut db, m, 1000), 0);
+    }
+
+    /// Master P, whose pin `a` is master C's and whose pin `b`, 0.1 wide,
+    /// stands 0.1 to its right, at (1.0, 0) with only the via `keep` up from
+    /// M1; how many of its pins are blocked.
+    fn blocked_pair(keep: &str) -> usize {
+        let (mut db, _) = design();
+        let symmetry = Symmetry {
+            x: true,
+            y: true,
+            r90: false,
+        };
+        let mut pair = Macro::new(
+            "P".into(),
+            MacroClass::Core(CoreKind::Regular),
+            pt(400, 2000),
+            symmetry,
+            Some(crate::db::indices::SiteId(0)),
+        );
+        for (name, x0) in [("a", 50), ("b", 250)] {
+            let _ = pair.add_pin(MacroPin {
+                name: name.into(),
+                direction: PinDirection::Input,
+                signal_use: SignalUse::Signal,
+                shapes: vec![Shape {
+                    layer: LayerRef::Routing(LayerId(0)),
+                    rect: rect(x0, 500, x0 + 100, 1500),
+                }],
+            });
+        }
+        let pair = db.library.add_macro(pair).unwrap();
+        db.library
+            .vias
+            .retain(|v| v.name == keep || v.name == "V23");
+        let cell = db
+            .add_cell(
+                "p".into(),
+                pair,
+                pt(1000, 0),
+                Orientation::N,
+                PlacementStatus::Placed,
+            )
+            .unwrap();
+        for (k, name) in [(0, "na"), (1, "nb")] {
+            let net = db.net_or_insert(name);
+            let _ = db.connect_cell_pin(cell, MacroPinId(k), net);
+        }
+        let access = PinAccess::new(&db, LayerId(1)).unwrap();
+        access.blocked_pins(&db, cell, pt(1000, 0), Orientation::N)
+    }
+
+    #[test]
+    fn a_via_pad_too_near_another_pin_of_its_cell_does_not_reach_the_pin() {
+        assert_eq!(blocked_pair("V12"), 2);
+    }
+
+    #[test]
+    fn a_via_pad_that_keeps_clear_of_the_cells_other_pins_reaches_the_pin() {
+        assert_eq!(blocked_pair("V12V"), 0);
     }
 
     fn cell_at(db: &mut NetlistDB, m: crate::db::indices::MacroId, x: i64) -> CellId {
