@@ -24,9 +24,9 @@ import sys
 
 ROW_FIELDS = 12
 
-# Boundary pins: layer by die edge, size along and across the edge in DBU.
+# Boundary pins: length into the box in DBU; across it they are as wide as
+# their layer's wires, so pins on neighbouring tracks keep the spacing.
 BOUNDARY_PIN_LENGTH = 400
-BOUNDARY_PIN_WIDTH = 100
 
 
 def macro_table(lef):
@@ -190,10 +190,20 @@ def layer_directions(lef):
     return out
 
 
+def layer_widths(lef, units):
+    """Each routing layer's wire width in DBU."""
+    out = {}
+    for m in re.finditer(r"LAYER (\S+)\s+TYPE\s+ROUTING\s*;(.*?)END \1", lef, re.S):
+        w = re.search(r"^\s*WIDTH\s+([\d.]+)\s*;", m.group(2), re.M)
+        if w:
+            out[m.group(1)] = int(round(float(w.group(1)) * units))
+    return out
+
+
 class BoundaryPins:
     """I/O pins on the box edges for nets that leave the box."""
 
-    def __init__(self, box, lef, lines, blockers, die, min_layer_index=1):
+    def __init__(self, box, lef, units, lines, blockers, die, min_layer_index=1):
         """Pins go on the routing layers from `min_layer_index` up to the
         lowest one a blockage covers across the box: a via cannot pass a
         layer blocked there, so a crossing net never reaches those above."""
@@ -210,6 +220,7 @@ class BoundaryPins:
             )
             if same
         }
+        self.widths = layer_widths(lef, units)
         layers = layer_directions(lef)[min_layer_index:]
         blocked = fully_blocked_layers(lines, box)
         reachable = next((i for i, (n, _) in enumerate(layers) if n in blocked), len(layers))
@@ -260,20 +271,21 @@ class BoundaryPins:
         along_axis = "Y" if edge in ("left", "right") else "X"
         along = self.snap(layer, along_axis, y if along_axis == "Y" else x)
         start, step = self.tracks.get((layer, along_axis), (0, 200))
-        half = BOUNDARY_PIN_WIDTH // 2
+        width = self.widths.get(layer, 100)
+        half = width // 2
 
         def rect(along):
             if edge == "left":
-                return self.bx0, along - half, BOUNDARY_PIN_LENGTH, BOUNDARY_PIN_WIDTH
+                return self.bx0, along - half, BOUNDARY_PIN_LENGTH, width
             if edge == "right":
-                return self.bx1 - BOUNDARY_PIN_LENGTH, along - half, BOUNDARY_PIN_LENGTH, BOUNDARY_PIN_WIDTH
+                return self.bx1 - BOUNDARY_PIN_LENGTH, along - half, BOUNDARY_PIN_LENGTH, width
             if edge == "bottom":
-                return along - half, self.by0, BOUNDARY_PIN_WIDTH, BOUNDARY_PIN_LENGTH
-            return along - half, self.by1 - BOUNDARY_PIN_LENGTH, BOUNDARY_PIN_WIDTH, BOUNDARY_PIN_LENGTH
+                return along - half, self.by0, width, BOUNDARY_PIN_LENGTH
+            return along - half, self.by1 - BOUNDARY_PIN_LENGTH, width, BOUNDARY_PIN_LENGTH
 
         def blocked(along):
             px, py, w, h = rect(along)
-            margin = BOUNDARY_PIN_WIDTH
+            margin = width
             return (layer, edge, along) in self.taken or any(
                 bl == layer and px - margin < x1 and px + w + margin > x0 and py - margin < y1 and py + h + margin > y0
                 for bl, (x0, y0, x1, y1) in self.blockers
@@ -329,7 +341,7 @@ def crop(src, lef_path, box, out, partial, boundary, tech_lef):
         blockers = special_rects(lines, (bx0, by0, bx1, by1))
         die = re.search(r"DIEAREA \( (-?\d+) (-?\d+) \) \( (-?\d+) (-?\d+) \)", txt)
         die = tuple(int(v) for v in die.groups()) if die else (bx0, by0, bx1, by1)
-        boundary_pins = BoundaryPins((bx0, by0, bx1, by1), open(tech_lef).read(), lines, blockers, die)
+        boundary_pins = BoundaryPins((bx0, by0, bx1, by1), open(tech_lef).read(), units, lines, blockers, die)
 
     head = []
     for l in lines:
