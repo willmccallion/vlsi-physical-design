@@ -3,11 +3,13 @@
 //! A pin on a routable layer is reached by any node of that layer inside
 //! one of its shapes. A pin below the lowest routable layer is reached
 //! through a stack of vias at a lowest-layer node. Any via defined on each
-//! cut may be used: the lowest one's metal must sit inside the pin, and all
-//! of the stack's metal must keep clear of the cell's other shapes. Among
-//! the vias that fit, the one sticking out least across the routable
-//! layer's tracks is chosen. Candidates are ordered by distance from the
-//! pin's reference point.
+//! cut may be used: the lowest one's cuts must sit on the pin, and all of
+//! the stack's metal must keep clear of the cell's other shapes. Every via
+//! that fits onto the pin gives a candidate of its own, since which one
+//! suits a pin depends on the vias its neighbours' pins take; the vias above
+//! it are those sticking out least across the routable layer's tracks.
+//! Candidates are ordered by distance from the pin's reference point, then
+//! by how far the lowest via sticks out across those tracks.
 //!
 //! When no crossing falls on a usable spot, the pin is touched at an
 //! off-crossing point on one of its tracks, and a short stub along that
@@ -47,8 +49,8 @@ pub struct AccessPoint {
     pub vias: Vec<ViaId>,
 }
 
-/// Most candidates kept per pin.
-const MAX_CANDIDATES: usize = 8;
+/// Most access nodes kept per pin, each with every via stack that fits.
+const MAX_CANDIDATE_NODES: usize = 8;
 
 /// Access candidates for a pin, best first; empty if none is legal.
 pub fn access_points(db: &NetlistDB, tech: &RouteTech, pin: PinId) -> Vec<AccessPoint> {
@@ -77,7 +79,7 @@ pub fn access_points(db: &NetlistDB, tech: &RouteTech, pin: PinId) -> Vec<Access
                     tech,
                     layer,
                     &shape.rect,
-                    |_| Some(Vec::new()),
+                    |_| vec![Vec::new()],
                     |a, stub| {
                         found.push((
                             (true, stub + manhattan(a.at, target)),
@@ -90,20 +92,23 @@ pub fn access_points(db: &NetlistDB, tech: &RouteTech, pin: PinId) -> Vec<Access
                 );
             }
         } else if layer < tech.min_layer {
-            let stack = |at: Point<Dbu>| via_stack(tech, layer, at, &shapes, &blockers);
+            let stacks = |at: Point<Dbu>| via_stacks(tech, layer, at, &shapes, &blockers);
             let on_grid = nodes_inside(tech, tech.min_layer, &shape.rect, |node, at| {
-                let Some(vias) = stack(at) else { return false };
-                let access = AccessPoint {
-                    node,
-                    at,
-                    pin_layer: layer,
-                    vias,
-                };
-                found.push(((false, manhattan(at, target)), access));
-                true
+                let fitting = stacks(at);
+                let any = !fitting.is_empty();
+                for vias in fitting {
+                    let access = AccessPoint {
+                        node,
+                        at,
+                        pin_layer: layer,
+                        vias,
+                    };
+                    found.push(((false, manhattan(at, target)), access));
+                }
+                any
             });
             if !on_grid {
-                stub_accesses(tech, tech.min_layer, &shape.rect, stack, |a, stub| {
+                stub_accesses(tech, tech.min_layer, &shape.rect, stacks, |a, stub| {
                     found.push((
                         (true, stub + manhattan(a.at, target)),
                         AccessPoint {
@@ -116,12 +121,27 @@ pub fn access_points(db: &NetlistDB, tech: &RouteTech, pin: PinId) -> Vec<Access
         }
     }
     found.sort_by_key(|(key, a)| (*key, a.node));
-    found.dedup_by_key(|(_, a)| a.node);
-    found
-        .into_iter()
-        .take(MAX_CANDIDATES)
-        .map(|(_, a)| a)
-        .collect()
+    best_per_node(found)
+}
+
+/// The candidates of the first [`MAX_CANDIDATE_NODES`] distinct nodes of
+/// `found`, which is in order of preference, each kept once.
+fn best_per_node(found: Vec<((bool, i64), AccessPoint)>) -> Vec<AccessPoint> {
+    let mut nodes: Vec<Node> = Vec::new();
+    let mut kept: Vec<AccessPoint> = Vec::new();
+    for (_, a) in found {
+        if kept.iter().any(|k| k.node == a.node && k.vias == a.vias) {
+            continue;
+        }
+        if !nodes.contains(&a.node) {
+            if nodes.len() == MAX_CANDIDATE_NODES {
+                continue;
+            }
+            nodes.push(a.node);
+        }
+        kept.push(a);
+    }
+    kept
 }
 
 /// Off-crossing accesses on each track of `layer` through `rect`: the point
@@ -131,7 +151,7 @@ fn stub_accesses(
     tech: &RouteTech,
     layer: LayerId,
     rect: &Rect<Dbu>,
-    stack: impl Fn(Point<Dbu>) -> Option<Vec<ViaId>>,
+    stacks: impl Fn(Point<Dbu>) -> Vec<Vec<ViaId>>,
     mut f: impl FnMut(AccessPoint, i64),
 ) {
     let lt = tech.layer(layer);
@@ -149,21 +169,24 @@ fn stub_accesses(
                     pare_common::db::library::Direction::Horizontal => Point::new(along, across),
                     pare_common::db::library::Direction::Vertical => Point::new(across, along),
                 };
-                if let Some(vias) = stack(at) {
+                let fitting = stacks(at);
+                if !fitting.is_empty() {
                     let node = Node {
                         layer,
                         track,
                         cross: to_u32(cross),
                     };
-                    f(
-                        AccessPoint {
-                            node,
-                            at,
-                            pin_layer: layer,
-                            vias,
-                        },
-                        (along - node_along).abs().get(),
-                    );
+                    for vias in fitting {
+                        f(
+                            AccessPoint {
+                                node,
+                                at,
+                                pin_layer: layer,
+                                vias,
+                            },
+                            (along - node_along).abs().get(),
+                        );
+                    }
                     break;
                 }
             }
@@ -227,36 +250,49 @@ fn clear_of(tech: &RouteTech, layer: LayerId, metal: &Rect<Dbu>, blockers: &[Sha
         .all(|s| s.layer != LayerRef::Routing(layer) || !s.rect.overlaps(&reach))
 }
 
-/// The vias, bottom first, that carry a pin on `from` up to the lowest
-/// routable layer at `at`, or `None` if no combination fits. The first via's
-/// cuts must lie on the pin; its metal may stick out of it, keeping clear of
-/// the cell's other shapes like every via's metal.
-fn via_stack(
+/// Every stack of vias, bottom first, that carries a pin on `from` up to
+/// the lowest routable layer at `at`: one for each via that fits onto the
+/// pin, topped by the first vias that fit above it. The lowest via's cuts
+/// must lie on the pin; its metal may stick out of it, keeping clear of the
+/// cell's other shapes like every via's metal.
+fn via_stacks(
     tech: &RouteTech,
     from: LayerId,
     at: Point<Dbu>,
     pin: &[Shape],
     blockers: &[Shape],
-) -> Option<Vec<ViaId>> {
-    let mut stack = Vec::new();
-    for l in from.index()..tech.min_layer.index() {
-        let below = LayerId::new(l);
-        let above = LayerId::new(l + 1);
-        let fits = |v: &ViaTech| {
-            let bottom = v.bottom.translate(at);
-            let top = v.top.translate(at);
-            let on_pin = below != from
-                || v.cuts.iter().all(|cut| {
-                    let cut = cut.translate(at);
-                    pin.iter()
-                        .any(|s| s.layer == LayerRef::Routing(from) && s.rect.encloses(&cut))
-                });
-            on_pin
-                && clear_of(tech, below, &bottom, blockers)
-                && clear_of(tech, above, &top, blockers)
-        };
-        let via = tech.access_vias[l].iter().find(|v| fits(v))?;
-        stack.push(via.via);
-    }
-    Some(stack)
+) -> Vec<Vec<ViaId>> {
+    let fits = |l: usize, v: &ViaTech| {
+        let (below, above) = (LayerId::new(l), LayerId::new(l + 1));
+        let bottom = v.bottom.translate(at);
+        let top = v.top.translate(at);
+        let on_pin = below != from
+            || v.cuts.iter().all(|cut| {
+                let cut = cut.translate(at);
+                pin.iter()
+                    .any(|s| s.layer == LayerRef::Routing(from) && s.rect.encloses(&cut))
+            });
+        on_pin && clear_of(tech, below, &bottom, blockers) && clear_of(tech, above, &top, blockers)
+    };
+    let first = from.index();
+    let upper: Option<Vec<ViaId>> = (first + 1..tech.min_layer.index())
+        .map(|l| {
+            tech.access_vias[l]
+                .iter()
+                .find(|v| fits(l, v))
+                .map(|v| v.via)
+        })
+        .collect();
+    let Some(upper) = upper else {
+        return Vec::new();
+    };
+    tech.access_vias[first]
+        .iter()
+        .filter(|v| fits(first, v))
+        .map(|v| {
+            std::iter::once(v.via)
+                .chain(upper.iter().copied())
+                .collect()
+        })
+        .collect()
 }
