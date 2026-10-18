@@ -413,7 +413,7 @@ impl Local {
 
 #[cfg(test)]
 mod tests {
-    use super::super::Tracks;
+    use super::super::{Tracks, Usage};
     use super::*;
     use pare_common::db::indices::NetId;
 
@@ -440,7 +440,7 @@ mod tests {
             blocked: vec![false; edges],
             via_blocked: vec![false; edges],
             via_loss: vec![Tracks::ZERO; 2],
-            usage: vec![Tracks::ZERO; edges],
+            usage: Usage::zeroed(edges),
             history: vec![0.0; edges],
         }
     }
@@ -530,7 +530,7 @@ mod tests {
         let mut grid = grid();
         for x in 2..7 {
             let e = grid.edge(cell(1, x, 4));
-            grid.usage[e] = Tracks::whole(3);
+            grid.usage.set(e, Tracks::whole(3));
         }
         let terminals = [cell(1, 2, 4), cell(1, 7, 4)];
         let wide = GlobalNet {

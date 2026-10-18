@@ -37,6 +37,16 @@ impl Tracks {
         u64::try_from((self.0 + Self::SCALE / 2).div_euclid(Self::SCALE)).unwrap_or(0)
     }
 
+    /// The fixed-point count, for storing in an atomic.
+    pub(crate) const fn raw(self) -> i64 {
+        self.0
+    }
+
+    /// The count a fixed-point value from [`Self::raw`] stands for.
+    pub(crate) const fn from_raw(raw: i64) -> Self {
+        Self(raw)
+    }
+
     /// `self - other`, or zero when `other` is the larger.
     #[must_use]
     pub const fn saturating_sub(self, other: Self) -> Self {

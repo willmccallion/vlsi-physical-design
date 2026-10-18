@@ -32,6 +32,8 @@ use pare_common::geom::rect::Rect;
 use pattern::route_pattern;
 use rayon::prelude::*;
 use rustc_hash::FxHashMap;
+use std::sync::OnceLock;
+use std::sync::atomic::{AtomicI64, AtomicU32, Ordering};
 pub use tracks::Tracks;
 
 /// A gcell on a layer.
@@ -64,8 +66,68 @@ pub struct GlobalGrid {
     /// Per layer, the share of a track a via somewhere in a gcell is expected
     /// to take from each edge beside it.
     via_loss: Vec<Tracks>,
-    usage: Vec<Tracks>,
+    usage: Usage,
     history: Vec<f32>,
+}
+
+/// Each edge's usage, which nets routed at the same time in disjoint areas
+/// add to and take from at once; whole adds and removes keep it exact.
+#[derive(Debug, Default)]
+pub(crate) struct Usage(Vec<AtomicI64>);
+
+impl Usage {
+    pub(crate) fn zeroed(edges: usize) -> Self {
+        Self((0..edges).map(|_| AtomicI64::new(0)).collect())
+    }
+
+    pub(crate) fn get(&self, e: usize) -> Tracks {
+        Tracks::from_raw(self.0[e].load(Ordering::Relaxed))
+    }
+
+    fn add(&self, e: usize, t: Tracks) {
+        let _ = self.0[e].fetch_add(t.raw(), Ordering::Relaxed);
+    }
+
+    /// Takes `t` from edge `e`, down to no usage at most.
+    fn remove(&self, e: usize, t: Tracks) {
+        let _ = self.0[e].fetch_update(Ordering::Relaxed, Ordering::Relaxed, |v| {
+            Some((v - t.raw()).max(0))
+        });
+    }
+
+    #[cfg(test)]
+    pub(crate) fn set(&mut self, e: usize, t: Tracks) {
+        *self.0[e].get_mut() = t.raw();
+    }
+
+    fn clear(&mut self) {
+        for u in &mut self.0 {
+            *u.get_mut() = 0;
+        }
+    }
+
+    pub(crate) const fn len(&self) -> usize {
+        self.0.len()
+    }
+
+    fn iter(&self) -> impl Iterator<Item = Tracks> + '_ {
+        (0..self.len()).map(|e| self.get(e))
+    }
+
+    fn snapshot(&self) -> Vec<Tracks> {
+        self.iter().collect()
+    }
+
+    fn restore(&mut self, from: &[Tracks]) {
+        for (u, t) in self.0.iter_mut().zip(from) {
+            *u.get_mut() = t.raw();
+        }
+    }
+
+    #[cfg(test)]
+    fn extend_zeroed(&mut self, edges: usize) {
+        self.0.extend((0..edges).map(|_| AtomicI64::new(0)));
+    }
 }
 
 /// One layer's routing resources and their use, summed over its edges.
@@ -130,7 +192,7 @@ impl GlobalGrid {
             blocked: Vec::new(),
             via_blocked: Vec::new(),
             via_loss: layers.iter().map(|&l| via_loss(tech, l, gcell)).collect(),
-            usage: vec![Tracks::ZERO; per_layer * layers.len()],
+            usage: Usage::zeroed(per_layer * layers.len()),
             history: vec![0.0; per_layer * layers.len()],
         };
         let resources: Vec<LayerResources> = layers
@@ -219,7 +281,7 @@ impl GlobalGrid {
     /// Forgets every route's demand and the negotiation history, keeping
     /// the capacities.
     pub fn clear(&mut self) {
-        self.usage.fill(Tracks::ZERO);
+        self.usage.clear();
         self.history.fill(0.0);
     }
 
@@ -273,7 +335,7 @@ impl GlobalGrid {
         if (available - capacity) / available >= IGNORED_BLOCKAGE {
             return None;
         }
-        Some(self.usage[e].to_f64() / capacity)
+        Some(self.usage.get(e).to_f64() / capacity)
     }
 
     /// Every gcell's [`CapacityReduction`] in the terms `FastRoute` reports
@@ -485,7 +547,7 @@ impl GlobalGrid {
     /// the via loss of its layer on each edge beside a via that no wire of
     /// the net on that layer crosses. The pad a terminal already holds as
     /// fixed metal is not counted again.
-    fn add_tree(&mut self, net: &GlobalNet, paths: &[Vec<GCell>], sign: Sign) {
+    fn add_tree(&self, net: &GlobalNet, paths: &[Vec<GCell>], sign: Sign) {
         let mut edges: Vec<usize> = paths.iter().flat_map(|p| self.path_edges(p)).collect();
         edges.sort_unstable();
         edges.dedup();
@@ -510,15 +572,15 @@ impl GlobalGrid {
             }
         }
         for (e, t) in demands {
-            self.usage[e] = match sign {
-                Sign::Add => self.usage[e] + t,
-                Sign::Remove => self.usage[e].saturating_sub(t),
-            };
+            match sign {
+                Sign::Add => self.usage.add(e, t),
+                Sign::Remove => self.usage.remove(e, t),
+            }
         }
     }
 
     fn overflowed(&self, e: usize) -> bool {
-        self.usage[e] > self.capacity[e]
+        self.usage.get(e) > self.capacity[e]
     }
 
     /// Total usage above capacity over all edges.
@@ -526,7 +588,7 @@ impl GlobalGrid {
         self.usage
             .iter()
             .zip(&self.capacity)
-            .map(|(&u, &c)| u.saturating_sub(c))
+            .map(|(u, &c)| u.saturating_sub(c))
             .sum()
     }
 
@@ -548,8 +610,8 @@ impl GlobalGrid {
                 };
                 for e in edges {
                     totals.capacity += self.capacity[e];
-                    totals.usage += self.usage[e];
-                    totals.overflow += self.usage[e].saturating_sub(self.capacity[e]);
+                    totals.usage += self.usage.get(e);
+                    totals.overflow += self.usage.get(e).saturating_sub(self.capacity[e]);
                 }
                 totals
             })
@@ -558,7 +620,7 @@ impl GlobalGrid {
 
     /// Cost of `demand` more tracks on edge `e`.
     fn edge_cost(&self, e: usize, demand: Tracks, costs: GlobalCosts) -> f64 {
-        let excess = (self.usage[e] + demand - self.capacity[e]).to_f64();
+        let excess = (self.usage.get(e) + demand - self.capacity[e]).to_f64();
         let congestion = costs.congestion / (1.0 + (-CONGESTION_SLOPE * excess).exp());
         let overflow = costs.penalty * excess.max(0.0);
         1.0 + f64::from(self.history[e]) + congestion + overflow
@@ -894,7 +956,7 @@ pub fn route_global(grid: &mut GlobalGrid, nets: &[GlobalNet], rounds: usize) ->
             break;
         }
         for e in 0..grid.usage.len() {
-            let over = grid.usage[e].saturating_sub(grid.capacity[e]);
+            let over = grid.usage.get(e).saturating_sub(grid.capacity[e]);
             grid.history[e] += over.to_f64() as f32;
         }
         let mut ripped: Vec<usize> = (0..nets.len())
@@ -966,7 +1028,7 @@ fn log_overflow_regions(grid: &GlobalGrid) {
         return;
     }
     let mut regions: FxHashMap<(u16, u16), f64> = FxHashMap::default();
-    for (e, (&used, &cap)) in grid.usage.iter().zip(&grid.capacity).enumerate() {
+    for (e, (used, &cap)) in grid.usage.iter().zip(&grid.capacity).enumerate() {
         let over = used.saturating_sub(cap).to_f64();
         if over > 0.0 {
             let c = grid.cell_of(e);
@@ -1016,7 +1078,7 @@ impl Best {
     fn of(grid: &GlobalGrid) -> Self {
         Self {
             overflow: grid.overflow(),
-            usage: grid.usage.clone(),
+            usage: grid.usage.snapshot(),
             shelved: FxHashMap::default(),
         }
     }
@@ -1029,7 +1091,7 @@ impl Best {
 
     /// Puts the best round's routes and usage back.
     fn restore(self, grid: &mut GlobalGrid, routes: &mut GlobalRoutes) {
-        grid.usage = self.usage;
+        grid.usage.restore(&self.usage);
         for (net, tree) in self.shelved {
             let _ = routes.paths.insert(net, tree);
         }
@@ -1042,11 +1104,15 @@ fn span(cells: &[GCell]) -> u32 {
     u32::from(x1 - x0) + u32::from(y1 - y0)
 }
 
-/// Reroutes nets in parallel batches whose search areas share no block of
-/// [`BATCH_BLOCK`] gcells, so every net sees the usage of every other net
-/// that could compete with it.
+/// Reroutes nets with the result of routing them one after another in the
+/// order of `which`, routing at once those whose search areas, grown by a
+/// gcell, share no block of [`BATCH_BLOCK`] gcells: each net waits only for
+/// the nets before it whose areas meet its own, so it sees the usage of
+/// every earlier net that could compete with it, while nets elsewhere keep
+/// the threads busy. A connection that finds no path in its area and
+/// searches a larger one may see usage other nets are changing there.
 fn route_disjoint(
-    grid: &mut GlobalGrid,
+    grid: &GlobalGrid,
     nets: &[GlobalNet],
     which: &[usize],
     margins: &[u16],
@@ -1055,45 +1121,93 @@ fn route_disjoint(
 ) {
     let blocks_x = usize::from(grid.nx.div_ceil(BATCH_BLOCK));
     let blocks_y = usize::from(grid.ny.div_ceil(BATCH_BLOCK));
-    let areas: Vec<(usize, usize, usize, usize)> = which
-        .iter()
-        .map(|&i| {
-            let w = window(&nets[i].terminals, margins[i], grid.nx, grid.ny);
-            let block = |v: u16| usize::from(v / BATCH_BLOCK);
-            (block(w.0), block(w.1), block(w.2), block(w.3))
-        })
-        .collect();
-    let mut pending: Vec<usize> = (0..which.len()).collect();
-    let mut stamp = vec![0u32; blocks_x * blocks_y];
-    let mut round = 0u32;
-    while !pending.is_empty() {
-        round += 1;
-        let mut batch = Vec::new();
-        let mut rest = Vec::new();
-        for k in pending {
-            let (x0, x1, y0, y1) = areas[k];
-            let free = (y0..=y1).all(|y| (x0..=x1).all(|x| stamp[y * blocks_x + x] != round));
-            if free {
-                for y in y0..=y1 {
-                    stamp[y * blocks_x + x0..=y * blocks_x + x1].fill(round);
+    let mut last = vec![u32::MAX; blocks_x * blocks_y];
+    let mut waits: Vec<AtomicU32> = Vec::with_capacity(which.len());
+    let mut next: Vec<Vec<u32>> = vec![Vec::new(); which.len()];
+    for (k, &i) in which.iter().enumerate() {
+        let (x0, x1, y0, y1) = window(
+            &nets[i].terminals,
+            margins[i].saturating_add(1),
+            grid.nx,
+            grid.ny,
+        );
+        let block = |v: u16| usize::from(v / BATCH_BLOCK);
+        let mut before: Vec<u32> = Vec::new();
+        for y in block(y0)..=block(y1) {
+            for slot in &mut last[y * blocks_x + block(x0)..=y * blocks_x + block(x1)] {
+                if *slot != u32::MAX {
+                    before.push(*slot);
                 }
-                batch.push(which[k]);
-            } else {
-                rest.push(k);
+                *slot = to_u32(k);
             }
         }
-        let shared: &GlobalGrid = grid;
-        let found: Vec<(usize, Vec<Vec<GCell>>)> = batch
-            .par_iter()
-            .map(|&i| (i, route_tree(shared, &nets[i], margins[i], costs)))
-            .collect();
-        for (i, tree) in found {
-            grid.add_tree(&nets[i], &tree, Sign::Add);
-            let _ = routes.paths.insert(nets[i].net, tree);
+        before.sort_unstable();
+        before.dedup();
+        for &p in &before {
+            next[p as usize].push(to_u32(k));
         }
-        pending = rest;
+        waits.push(AtomicU32::new(to_u32(before.len())));
     }
-    log::debug!("global reroute of {} nets in {round} batches", which.len());
+    let schedule = Schedule {
+        grid,
+        nets,
+        which,
+        margins,
+        costs,
+        waits,
+        next,
+        trees: (0..which.len()).map(|_| OnceLock::new()).collect(),
+    };
+    let shared = &schedule;
+    rayon::scope(|scope| {
+        for k in 0..which.len() {
+            if shared.waits[k].load(Ordering::Acquire) == 0 {
+                scope.spawn(move |scope| shared.run(scope, k));
+            }
+        }
+    });
+    for (k, tree) in schedule.trees.into_iter().enumerate() {
+        if let Some(tree) = tree.into_inner() {
+            let _ = routes.paths.insert(nets[which[k]].net, tree);
+        }
+    }
+    log::debug!("global reroute of {} nets", which.len());
+}
+
+/// The nets [`route_disjoint`] reroutes, what each waits for and what it
+/// found.
+struct Schedule<'a> {
+    grid: &'a GlobalGrid,
+    nets: &'a [GlobalNet],
+    which: &'a [usize],
+    margins: &'a [u16],
+    costs: GlobalCosts,
+    /// Earlier nets each one still waits for.
+    waits: Vec<AtomicU32>,
+    /// The later nets waiting for each one.
+    next: Vec<Vec<u32>>,
+    trees: Vec<OnceLock<Vec<Vec<GCell>>>>,
+}
+
+impl Schedule<'_> {
+    /// Routes the `k`th net, places its demand, and starts every later net
+    /// that was waiting only for it.
+    fn run<'s>(&'s self, scope: &rayon::Scope<'s>, k: usize) {
+        let i = self.which[k];
+        let tree = route_tree(self.grid, &self.nets[i], self.margins[i], self.costs);
+        self.grid.add_tree(&self.nets[i], &tree, Sign::Add);
+        let _ = self.trees[k].set(tree);
+        for &later in &self.next[k] {
+            let later = later as usize;
+            if self.waits[later].fetch_sub(1, Ordering::AcqRel) == 1 {
+                scope.spawn(move |scope| self.run(scope, later));
+            }
+        }
+    }
+}
+
+fn to_u32(v: usize) -> u32 {
+    u32::try_from(v).unwrap_or(u32::MAX)
 }
 
 /// Edge, in gcells, of the blocks that keep the search areas of nets
@@ -1104,7 +1218,7 @@ const BATCH_BLOCK: u16 = 4;
 /// against the usage left by the chunks before it. Nets in one chunk do not
 /// see each other; the rip-up rounds settle the overflow that causes.
 fn route_initial(
-    grid: &mut GlobalGrid,
+    grid: &GlobalGrid,
     nets: &[GlobalNet],
     costs: GlobalCosts,
     routes: &mut GlobalRoutes,
@@ -1180,7 +1294,7 @@ mod tests {
             blocked: vec![false; edges],
             via_blocked: vec![false; edges],
             via_loss: vec![Tracks::from_f64(0.1); 2],
-            usage: vec![Tracks::ZERO; edges],
+            usage: Usage::zeroed(edges),
             history: vec![0.0; edges],
         }
     }
@@ -1226,22 +1340,22 @@ mod tests {
 
     #[test]
     fn a_wire_takes_one_track_on_each_edge_it_crosses() {
-        let mut grid = grid();
+        let grid = grid();
         let net = net(vec![at(1, 2, 5), at(1, 5, 5)]);
         let paths = vec![vec![at(1, 2, 5), at(1, 3, 5), at(1, 4, 5), at(1, 5, 5)]];
 
         grid.add_tree(&net, &paths, Sign::Add);
 
         for x in 2..5 {
-            assert_eq!(grid.usage[grid.edge(at(1, x, 5))], Tracks::ONE);
+            assert_eq!(grid.usage.get(grid.edge(at(1, x, 5))), Tracks::ONE);
         }
-        assert_eq!(grid.usage[grid.edge(at(1, 1, 5))], Tracks::ZERO);
-        assert_eq!(grid.usage[grid.edge(at(1, 5, 5))], Tracks::ZERO);
+        assert_eq!(grid.usage.get(grid.edge(at(1, 1, 5))), Tracks::ZERO);
+        assert_eq!(grid.usage.get(grid.edge(at(1, 5, 5))), Tracks::ZERO);
     }
 
     #[test]
     fn a_via_costs_the_edges_beside_it_that_its_own_wire_does_not_cross() {
-        let mut grid = grid();
+        let grid = grid();
         let net = net(vec![at(1, 2, 5), at(2, 5, 7)]);
         let paths = vec![vec![
             at(1, 2, 5),
@@ -1256,10 +1370,10 @@ mod tests {
 
         grid.add_tree(&net, &paths, Sign::Add);
 
-        assert_eq!(grid.usage[grid.edge(at(1, 4, 5))], Tracks::ONE);
-        assert_eq!(grid.usage[grid.edge(at(1, 5, 5))], loss);
-        assert_eq!(grid.usage[grid.edge(at(2, 5, 5))], Tracks::ONE);
-        assert_eq!(grid.usage[grid.edge(at(2, 5, 4))], loss);
+        assert_eq!(grid.usage.get(grid.edge(at(1, 4, 5))), Tracks::ONE);
+        assert_eq!(grid.usage.get(grid.edge(at(1, 5, 5))), loss);
+        assert_eq!(grid.usage.get(grid.edge(at(2, 5, 5))), Tracks::ONE);
+        assert_eq!(grid.usage.get(grid.edge(at(2, 5, 4))), loss);
     }
 
     #[test]
@@ -1271,7 +1385,7 @@ mod tests {
         grid.blocked.extend(vec![false; edges]);
         grid.via_blocked.extend(vec![false; edges]);
         grid.via_loss.push(Tracks::from_f64(0.1));
-        grid.usage.extend(vec![Tracks::ZERO; edges]);
+        grid.usage.extend_zeroed(edges);
         grid.history.extend(vec![0.0; edges]);
         let net = net(vec![at(1, 5, 5), at(3, 7, 5)]);
         let paths = vec![vec![
@@ -1285,27 +1399,27 @@ mod tests {
 
         grid.add_tree(&net, &paths, Sign::Add);
 
-        assert_eq!(grid.usage[grid.edge(at(2, 5, 4))], loss);
-        assert_eq!(grid.usage[grid.edge(at(2, 5, 5))], loss);
-        assert_eq!(grid.usage[grid.edge(at(3, 4, 5))], loss);
-        assert_eq!(grid.usage[grid.edge(at(3, 5, 5))], Tracks::ONE);
+        assert_eq!(grid.usage.get(grid.edge(at(2, 5, 4))), loss);
+        assert_eq!(grid.usage.get(grid.edge(at(2, 5, 5))), loss);
+        assert_eq!(grid.usage.get(grid.edge(at(3, 4, 5))), loss);
+        assert_eq!(grid.usage.get(grid.edge(at(3, 5, 5))), Tracks::ONE);
     }
 
     #[test]
     fn a_terminal_pad_is_not_charged_again() {
-        let mut grid = grid();
+        let grid = grid();
         let net = net(vec![at(1, 5, 5), at(2, 5, 7)]);
         let paths = vec![vec![at(1, 5, 5), at(2, 5, 5), at(2, 5, 6), at(2, 5, 7)]];
 
         grid.add_tree(&net, &paths, Sign::Add);
 
-        assert_eq!(grid.usage[grid.edge(at(1, 4, 5))], Tracks::ZERO);
-        assert_eq!(grid.usage[grid.edge(at(1, 5, 5))], Tracks::ZERO);
+        assert_eq!(grid.usage.get(grid.edge(at(1, 4, 5))), Tracks::ZERO);
+        assert_eq!(grid.usage.get(grid.edge(at(1, 5, 5))), Tracks::ZERO);
     }
 
     #[test]
     fn removing_a_tree_restores_the_usage_exactly() {
-        let mut grid = grid();
+        let grid = grid();
         let net = net(vec![at(1, 2, 5), at(2, 5, 7)]);
         let paths = vec![vec![
             at(1, 2, 5),
@@ -1320,12 +1434,12 @@ mod tests {
         grid.add_tree(&net, &paths, Sign::Add);
         grid.add_tree(&net, &paths, Sign::Remove);
 
-        assert!(grid.usage.iter().all(|&u| u == Tracks::ZERO));
+        assert!(grid.usage.iter().all(|u| u == Tracks::ZERO));
     }
 
     #[test]
     fn a_wider_rule_demands_more_tracks_per_edge() {
-        let mut grid = grid();
+        let grid = grid();
         let net = GlobalNet {
             demand: vec![Tracks::whole(2); 2],
             ..net(vec![at(1, 2, 5), at(1, 4, 5)])
@@ -1334,8 +1448,8 @@ mod tests {
 
         grid.add_tree(&net, &paths, Sign::Add);
 
-        assert_eq!(grid.usage[grid.edge(at(1, 2, 5))], Tracks::whole(2));
-        assert_eq!(grid.usage[grid.edge(at(1, 3, 5))], Tracks::whole(2));
+        assert_eq!(grid.usage.get(grid.edge(at(1, 2, 5))), Tracks::whole(2));
+        assert_eq!(grid.usage.get(grid.edge(at(1, 3, 5))), Tracks::whole(2));
         assert_eq!(grid.overflow(), Tracks::ZERO);
     }
 }
