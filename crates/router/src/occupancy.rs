@@ -722,7 +722,9 @@ impl Occupancy {
                                 track: b.track,
                             });
                         }
-                        track.fixed.push(b.occupant(b.lo, b.hi, owner, Origin::Fixed));
+                        track
+                            .fixed
+                            .push(b.occupant(b.lo, b.hi, owner, Origin::Fixed));
                     }
                 }
                 LayerRef::Routing(_) => {}
