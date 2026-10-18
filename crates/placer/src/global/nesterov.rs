@@ -190,25 +190,27 @@ impl Weights {
         s.damping.mul_add(scaled, pins).max(1.0)
     }
 
-    /// Doubles the damping of large objects every [`DAMPING_PERIOD`]
-    /// iterations once every field's overflow is under
-    /// [`DAMPING_OVERFLOW`], up to [`MAX_DAMPING`].
-    /// Normalizes the schedule to `energies`, the fields' density energies
-    /// after their cells changed size, so that the same density is read as
-    /// it was before the change; every weight keeps its value.
-    fn renormalize(&mut self, energies: &[f64]) {
+    /// Rescales the schedule's energy reference of every field still moving
+    /// by `before` over `after`, the fields' density energies at one
+    /// placement before and after their cells changed size, so that the
+    /// schedule reads the same normalized energy there as it did before the
+    /// change and goes on as it would have. Nothing changes when the
+    /// energies are equal.
+    fn rescale_energy(&mut self, before: &[f64], after: &[f64]) {
         let Some(s) = self.schedule.as_mut() else {
             return;
         };
-        for (k, &energy) in energies.iter().enumerate() {
-            if self.frozen[k] || energy <= 0.0 {
+        for (k, (&b, &a)) in before.iter().zip(after).enumerate() {
+            if self.frozen[k] || b <= 0.0 || a <= 0.0 {
                 continue;
             }
-            s.precondition[k] = 1.0 / energy;
-            s.u[k] = self.penalties[k] / (QUADRATIC_COEFFICIENT + 1.0);
+            s.precondition[k] *= b / a;
         }
     }
 
+    /// Doubles the damping of large objects every [`DAMPING_PERIOD`]
+    /// iterations once every field's overflow is under
+    /// [`DAMPING_OVERFLOW`], up to [`MAX_DAMPING`].
     fn damp(&mut self, iteration: usize, eval: &Evaluation) {
         let Some(s) = self.schedule.as_mut() else {
             return;
@@ -612,6 +614,14 @@ struct State {
     prev_hpwl: f64,
 }
 
+/// The state routability resumes from, with each field's density energy
+/// there as the cells were sized when it was saved.
+#[derive(Clone, Debug)]
+struct Snapshot {
+    state: State,
+    energy: Vec<f64>,
+}
+
 /// Each field's displacement in its last iteration and the largest it has
 /// had, which tell when placement has settled, as in `OpenROAD`.
 #[derive(Clone, Debug)]
@@ -748,7 +758,7 @@ pub(super) fn minimize(
     let mut eval = objective.gradient(&s.reference, s.gamma, &s.weights, &mut grad);
     let mut moving = objective.moving(&s.weights.frozen);
     let mut settling = Settling::new(objective.fields.len());
-    let mut snapshot: Option<State> = None;
+    let mut snapshot: Option<Snapshot> = None;
 
     let mut next_major = vec![Point::new(0.0, 0.0); n];
     let mut next_reference = vec![Point::new(0.0, 0.0); n];
@@ -849,7 +859,10 @@ pub(super) fn minimize(
                 refunded += 1;
             }
             if snapshot.is_none() && overflow <= SNAPSHOT_OVERFLOW {
-                snapshot = Some(s.clone());
+                snapshot = Some(Snapshot {
+                    state: s.clone(),
+                    energy: eval.field_energy.clone(),
+                });
             }
             if let Some(saved) = &snapshot
                 && r.active()
@@ -860,10 +873,11 @@ pub(super) fn minimize(
                 let map = congestion_map(&mut estimate, netlist, objects, &die, r.params());
                 if r.check(k, &map, objects, objective.fields) != Verdict::Done {
                     refunded = 0;
-                    s = revert(saved, &s, objective.fields);
+                    s = revert(&saved.state, &s, objective.fields);
                     objective.refresh(objects);
                     let resized = objective.evaluate(&s.reference, s.gamma);
-                    s.weights.renormalize(&resized.field_energy);
+                    s.weights
+                        .rescale_energy(&saved.energy, &resized.field_energy);
                     eval = objective.gradient(&s.reference, s.gamma, &s.weights, &mut grad);
                     moving = objective.moving(&s.weights.frozen);
                 }
@@ -1027,33 +1041,55 @@ mod tests {
         assert!((weights.multiplier(0, 0.0) - 3.0).abs() < 1e-12);
     }
 
-    #[test]
-    fn renormalizing_to_new_energies_keeps_every_weight() {
-        let mut weights = Weights {
+    fn scheduled(frozen: Vec<bool>) -> Weights {
+        Weights {
             penalties: vec![5.0, 7.0],
-            frozen: vec![false, true],
+            frozen,
             schedule: Some(Schedule {
-                precondition: vec![1.0, 1.0],
+                precondition: vec![0.5, 0.25],
                 u: vec![0.01, 0.02],
-                step: 0.0,
+                step: 0.1,
                 cap: f64::MAX,
                 site: 1.0,
                 kinds: vec![Precondition::Weighted; 2],
                 damping: 1.0,
             }),
-        };
+        }
+    }
 
-        weights.renormalize(&[4.0, 8.0]);
-        weights.update(&evaluation(vec![4.0, 8.0]), 1.05);
+    #[test]
+    fn a_rescaled_schedule_reads_grown_energies_as_the_ungrown_ones() {
+        let mut plain = scheduled(vec![false, false]);
+        let mut grown = scheduled(vec![false, false]);
+
+        plain.update(&evaluation(vec![2.0, 4.0]), 1.05);
+        grown.rescale_energy(&[2.0, 4.0], &[6.0, 10.0]);
+        grown.update(&evaluation(vec![6.0, 10.0]), 1.05);
+
+        for (a, b) in plain.penalties.iter().zip(&grown.penalties) {
+            assert!((a - b).abs() < 1e-9 * a.abs(), "{plain:?} vs {grown:?}");
+        }
+    }
+
+    #[test]
+    fn rescaling_to_unchanged_energies_changes_nothing() {
+        let mut weights = scheduled(vec![false, false]);
+        let before = weights.schedule.as_ref().unwrap().precondition.clone();
+
+        weights.rescale_energy(&[2.0, 4.0], &[2.0, 4.0]);
+
+        assert_eq!(weights.schedule.as_ref().unwrap().precondition, before);
+    }
+
+    #[test]
+    fn a_frozen_field_keeps_its_energy_reference() {
+        let mut weights = scheduled(vec![false, true]);
+
+        weights.rescale_energy(&[2.0, 4.0], &[6.0, 10.0]);
 
         let s = weights.schedule.as_ref().unwrap();
-        assert!((s.precondition[0] - 0.25).abs() < 1e-12);
-        assert!(
-            (s.precondition[1] - 1.0).abs() < 1e-12,
-            "a frozen field keeps its scale"
-        );
-        assert!((weights.penalties[0] - 5.0).abs() < 1e-9, "{weights:?}");
-        assert!((weights.penalties[1] - 7.0).abs() < 1e-12);
+        assert!((s.precondition[0] - 0.5 / 3.0).abs() < 1e-12);
+        assert!((s.precondition[1] - 0.25).abs() < 1e-12);
     }
 
     #[test]
