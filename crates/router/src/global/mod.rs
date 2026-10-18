@@ -25,7 +25,7 @@ mod tracks;
 
 use crate::occupancy::{FixedMetal, TrackRef};
 use crate::tech::RouteTech;
-use coarse::{CoarseGrid, Corridor, SCALE};
+use coarse::{CoarseGrid, Corridor, Plan, SCALE};
 use maze::route_tree;
 use pare_common::db::design::NetlistDB;
 use pare_common::db::indices::{LayerId, NetId};
@@ -989,14 +989,14 @@ pub fn route_global(grid: &mut GlobalGrid, nets: &[GlobalNet], rounds: usize) ->
         coarse.refresh(grid);
         for level in disjoint_levels(grid, nets, &ripped, &margins) {
             let shared: &GlobalGrid = grid;
-            let corridors: Vec<Option<Corridor>> = level
+            let plans: Vec<Option<Plan>> = level
                 .par_iter()
                 .map(|&i| coarse.plan(shared, &nets[i]))
                 .collect();
             let reroute = Reroute {
                 which: &level,
                 margins: &margins,
-                corridors: &corridors,
+                plans: &plans,
             };
             route_disjoint(grid, nets, &reroute, costs, &mut routes);
             let touched = touched_coarse_cells(
@@ -1147,12 +1147,12 @@ fn span(cells: &[GCell]) -> u32 {
 }
 
 /// Nets to reroute in one batch: their indices in the order to route them,
-/// with each net's search margin and the corridor planned for each.
+/// with each net's search margin and the coarse plan made for each.
 struct Reroute<'a> {
     which: &'a [usize],
     margins: &'a [u16],
     /// Aligned with `which`.
-    corridors: &'a [Option<Corridor>],
+    plans: &'a [Option<Plan>],
 }
 
 /// Reroutes nets with the result of routing them one after another in the
@@ -1173,7 +1173,7 @@ fn route_disjoint(
     let Reroute {
         which,
         margins,
-        corridors,
+        plans,
     } = *reroute;
     let blocks_x = usize::from(grid.nx.div_ceil(BATCH_BLOCK));
     let blocks_y = usize::from(grid.ny.div_ceil(BATCH_BLOCK));
@@ -1188,8 +1188,8 @@ fn route_disjoint(
             grid.ny,
         );
         let mut blocks = blocks_of(area, blocks_x);
-        if let Some(corridor) = &corridors[k] {
-            blocks.extend(corridor_blocks(corridor, grid, blocks_x));
+        if let Some(plan) = &plans[k] {
+            blocks.extend(corridor_blocks(plan.corridor(), grid, blocks_x));
         }
         blocks.sort_unstable();
         blocks.dedup();
@@ -1213,7 +1213,7 @@ fn route_disjoint(
         nets,
         which,
         margins,
-        corridors,
+        plans,
         costs,
         waits,
         next,
@@ -1271,7 +1271,7 @@ struct Schedule<'a> {
     nets: &'a [GlobalNet],
     which: &'a [usize],
     margins: &'a [u16],
-    corridors: &'a [Option<Corridor>],
+    plans: &'a [Option<Plan>],
     costs: GlobalCosts,
     /// Earlier nets each one still waits for.
     waits: Vec<AtomicU32>,
@@ -1290,7 +1290,7 @@ impl Schedule<'_> {
             &self.nets[i],
             self.margins[i],
             self.costs,
-            self.corridors[k].as_ref(),
+            self.plans[k].as_ref(),
         );
         self.grid.add_tree(&self.nets[i], &tree, Sign::Add);
         let _ = self.trees[k].set(tree);

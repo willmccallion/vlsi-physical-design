@@ -9,7 +9,7 @@ use super::{GCell, GlobalGrid, GlobalNet};
 use pare_common::db::indices::LayerId;
 use pare_common::db::library::Direction;
 use rayon::prelude::*;
-use rustc_hash::FxHashSet;
+use rustc_hash::{FxHashMap, FxHashSet};
 use std::cell::RefCell;
 use std::collections::BinaryHeap;
 
@@ -112,13 +112,13 @@ impl CoarseGrid {
         }
     }
 
-    /// The corridor of coarse cells a reroute of `net` should keep to: the
-    /// cheapest coarse tree joining its terminals, found by CUGR's
-    /// multi-source Dijkstra search, which grows the tree from one terminal
-    /// and restarts from the whole tree at cost zero each time it reaches
-    /// another. None when its terminals share one coarse cell, which the
-    /// windowed search covers, or when fixed metal cuts one off.
-    pub(super) fn plan(&self, grid: &GlobalGrid, net: &GlobalNet) -> Option<Corridor> {
+    /// The plan of a reroute of `net`: the cheapest coarse tree joining its
+    /// terminals, found by CUGR's multi-source Dijkstra search, which grows
+    /// the tree from one terminal and restarts from the whole tree at cost
+    /// zero each time it reaches another. None when its terminals share one
+    /// coarse cell, which the windowed search covers, or when fixed metal
+    /// cuts one off.
+    pub(super) fn plan(&self, grid: &GlobalGrid, net: &GlobalNet) -> Option<Plan> {
         let mut pins: Vec<usize> = net.terminals.iter().map(|&c| self.node_of(c)).collect();
         pins.sort_unstable();
         pins.dedup();
@@ -126,9 +126,20 @@ impl CoarseGrid {
         if footprint.len() <= 1 {
             return None;
         }
-        let tree = PLAN.with_borrow_mut(|state| self.search(state, &pins))?;
-        let cells: FxHashSet<(u16, u16)> = tree.into_iter().map(|n| self.plane(n)).collect();
-        Some(Corridor::new(cells.into_iter().collect(), grid))
+        let nodes = PLAN.with_borrow_mut(|state| {
+            let tree = self.search(state, &pins)?;
+            Some(
+                tree.into_iter()
+                    .map(|n| (n, state.parent[n]))
+                    .collect::<Vec<(usize, u32)>>(),
+            )
+        })?;
+        let tree = CoarseTree::new(self, &nodes);
+        let cells: FxHashSet<(u16, u16)> = tree.cells.iter().copied().collect();
+        Some(Plan {
+            corridor: Corridor::new(cells.into_iter().collect(), grid),
+            tree,
+        })
     }
 
     fn search(&self, state: &mut PlanState, pins: &[usize]) -> Option<Vec<usize>> {
@@ -308,6 +319,119 @@ fn columns(grid: &GlobalGrid, x: u16) -> std::ops::Range<u16> {
 /// The gcell rows of coarse row `y`.
 fn rows(grid: &GlobalGrid, y: u16) -> std::ops::Range<u16> {
     y * SCALE..(y * SCALE + SCALE).min(grid.ny)
+}
+
+/// A net's coarse plan: the corridor of every coarse cell its coarse tree
+/// passes, which bounds what its reroute may touch, and the tree, whose
+/// path between two terminals is the detour planned for the connection
+/// between them.
+#[derive(Clone, Debug)]
+pub(super) struct Plan {
+    corridor: Corridor,
+    tree: CoarseTree,
+}
+
+impl Plan {
+    /// The coarse cells of the whole tree.
+    pub(super) const fn corridor(&self) -> &Corridor {
+        &self.corridor
+    }
+
+    /// The coarse cells on the tree's path between the coarse cells of
+    /// gcells `a` and `b`, if the tree holds both.
+    pub(super) fn between(&self, a: GCell, b: GCell, grid: &GlobalGrid) -> Option<Corridor> {
+        let mut x = *self.tree.index.get(&self.tree.node_of(a))? as usize;
+        let mut y = *self.tree.index.get(&self.tree.node_of(b))? as usize;
+        let (parent, depth) = (&self.tree.parent, &self.tree.depth);
+        let mut cells = Vec::new();
+        while depth[x] > depth[y] {
+            cells.push(self.tree.cells[x]);
+            x = parent[x] as usize;
+        }
+        while depth[y] > depth[x] {
+            cells.push(self.tree.cells[y]);
+            y = parent[y] as usize;
+        }
+        while x != y {
+            cells.push(self.tree.cells[x]);
+            cells.push(self.tree.cells[y]);
+            x = parent[x] as usize;
+            y = parent[y] as usize;
+        }
+        cells.push(self.tree.cells[x]);
+        cells.sort_unstable();
+        cells.dedup();
+        Some(Corridor::new(cells, grid))
+    }
+}
+
+/// A coarse tree as its nodes, each with its coarse cell, parent and depth.
+#[derive(Clone, Debug)]
+struct CoarseTree {
+    cells: Vec<(u16, u16)>,
+    /// Position of each node's parent, the root's being its own.
+    parent: Vec<u32>,
+    depth: Vec<u32>,
+    /// Position in the tree of each coarse grid node it holds.
+    index: FxHashMap<usize, u32>,
+    first_layer: usize,
+    nx: u16,
+    ny: u16,
+}
+
+impl CoarseTree {
+    /// The tree of `nodes`, coarse grid nodes of `coarse` each with its
+    /// parent among them or [`NO_PARENT`] at the root.
+    fn new(coarse: &CoarseGrid, nodes: &[(usize, u32)]) -> Self {
+        let index: FxHashMap<usize, u32> = nodes
+            .iter()
+            .enumerate()
+            .map(|(k, &(n, _))| (n, crate::tech::to_u32(k)))
+            .collect();
+        let parent: Vec<u32> = nodes
+            .iter()
+            .enumerate()
+            .map(|(k, &(_, p))| {
+                index
+                    .get(&(p as usize))
+                    .copied()
+                    .filter(|_| p != NO_PARENT)
+                    .unwrap_or_else(|| crate::tech::to_u32(k))
+            })
+            .collect();
+        let mut depth = vec![u32::MAX; nodes.len()];
+        for start in 0..nodes.len() {
+            let mut chain = Vec::new();
+            let mut k = start;
+            while depth[k] == u32::MAX && parent[k] as usize != k {
+                chain.push(k);
+                k = parent[k] as usize;
+            }
+            if depth[k] == u32::MAX {
+                depth[k] = 0;
+            }
+            let mut d = depth[k];
+            for &c in chain.iter().rev() {
+                d += 1;
+                depth[c] = d;
+            }
+        }
+        Self {
+            cells: nodes.iter().map(|&(n, _)| coarse.plane(n)).collect(),
+            parent,
+            depth,
+            index,
+            first_layer: coarse.first_layer,
+            nx: coarse.nx,
+            ny: coarse.ny,
+        }
+    }
+
+    fn node_of(&self, c: GCell) -> usize {
+        let l = c.layer.index() - self.first_layer;
+        (l * usize::from(self.ny) + usize::from(c.y / SCALE)) * usize::from(self.nx)
+            + usize::from(c.x / SCALE)
+    }
 }
 
 /// Free tracks a gcell has left on its layer: the mean over the edges it
@@ -563,11 +687,11 @@ mod tests {
         let grid = grid(30, 30);
         let terminals = [cell(1, 2, 2), cell(1, 27, 3), cell(2, 14, 28)];
 
-        let corridor = CoarseGrid::new(&grid)
+        let plan = CoarseGrid::new(&grid)
             .plan(&grid, &net(&terminals))
             .unwrap();
 
-        assert!(terminals.iter().all(|c| corridor.allows(c.x, c.y)));
+        assert!(terminals.iter().all(|c| plan.corridor().allows(c.x, c.y)));
     }
 
     #[test]
@@ -580,12 +704,12 @@ mod tests {
         }
         let terminals = [cell(1, 2, 2), cell(1, 37, 2)];
 
-        let corridor = CoarseGrid::new(&grid)
+        let plan = CoarseGrid::new(&grid)
             .plan(&grid, &net(&terminals))
             .unwrap();
 
-        assert!(corridor.allows(20, 27));
-        assert!(!corridor.allows(20, 2));
+        assert!(plan.corridor().allows(20, 27));
+        assert!(!plan.corridor().allows(20, 2));
     }
 
     #[test]
@@ -596,12 +720,27 @@ mod tests {
         }
         let terminals = [cell(1, 2, 2), cell(1, 37, 2)];
 
-        let corridor = CoarseGrid::new(&grid)
+        let plan = CoarseGrid::new(&grid)
             .plan(&grid, &net(&terminals))
             .unwrap();
 
-        assert!(corridor.allows(19, 27));
-        assert!(!corridor.allows(19, 2));
+        assert!(plan.corridor().allows(19, 27));
+        assert!(!plan.corridor().allows(19, 2));
+    }
+
+    #[test]
+    fn the_path_between_two_terminals_leaves_out_the_branch_to_a_third() {
+        let grid = grid(40, 40);
+        let terminals = [cell(1, 2, 2), cell(1, 37, 2), cell(2, 20, 37)];
+
+        let plan = CoarseGrid::new(&grid)
+            .plan(&grid, &net(&terminals))
+            .unwrap();
+        let path = plan.between(terminals[0], terminals[1], &grid).unwrap();
+
+        assert!(path.allows(2, 2) && path.allows(37, 2));
+        assert!(plan.corridor().allows(20, 37));
+        assert!(!path.allows(20, 37));
     }
 
     #[test]

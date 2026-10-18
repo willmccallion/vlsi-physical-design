@@ -8,7 +8,7 @@
 //! that takes it; only a pin no detour reaches crosses them elsewhere, and
 //! then as few of them as possible.
 
-use super::coarse::{Corridor, SCALE};
+use super::coarse::{Corridor, Plan, SCALE};
 use super::{BLOCKED_COST, GCell, GlobalCosts, GlobalGrid, GlobalNet, window};
 use crate::tree::connection_order;
 use pare_common::db::indices::LayerId;
@@ -24,14 +24,14 @@ const BUCKET: u16 = 4;
 
 /// A tree through every terminal of `net`, as the paths that build it.
 /// Each connection searches the box around its two ends grown by `margin`
-/// together with `corridor`, if given, and a larger box only when that
-/// holds no path.
+/// together with the path between them along the coarse tree of `plan`, if
+/// given, and a larger box only when that holds no path.
 pub(super) fn route_tree(
     grid: &GlobalGrid,
     net: &GlobalNet,
     margin: u16,
     costs: GlobalCosts,
-    corridor: Option<&Corridor>,
+    plan: Option<&Plan>,
 ) -> Vec<Vec<GCell>> {
     let mut terminals: Vec<GCell> = net.terminals.clone();
     terminals.sort_unstable();
@@ -65,8 +65,9 @@ pub(super) fn route_tree(
             continue;
         }
         let ends = [target, terminals[join.parent]];
-        let path = corridor
-            .and_then(|c| search_extended(grid, avoid, c, &buckets, ends, margin))
+        let path = plan
+            .and_then(|p| p.between(ends[0], ends[1], grid))
+            .and_then(|c| search_extended(grid, avoid, &c, &buckets, ends, margin))
             .unwrap_or_else(|| search_widening(grid, avoid, &buckets, ends, margin));
         for &c in &path {
             add_cell(&mut tree, &mut buckets, c);
@@ -633,11 +634,11 @@ mod tests {
             }
         }
         let terminals = [cell(1, 2, 2), cell(1, 27, 2)];
-        let corridor = CoarseGrid::new(&grid)
+        let plan = CoarseGrid::new(&grid)
             .plan(&grid, &net(&terminals))
             .unwrap();
 
-        let planned = route_tree(&grid, &net(&terminals), 1, COSTS, Some(&corridor));
+        let planned = route_tree(&grid, &net(&terminals), 1, COSTS, Some(&plan));
         let windowed = route_tree(&grid, &net(&terminals), 1, COSTS, None);
 
         let highest = |paths: &[Vec<GCell>]| paths.iter().flatten().map(|c| c.y).max();
@@ -651,13 +652,13 @@ mod tests {
         let mut grid = grid();
         wall(&mut grid, 6, 0..=4);
         let terminals = [cell(1, 1, 1), cell(1, 8, 1)];
-        let corridor = CoarseGrid::new(&grid)
+        let plan = CoarseGrid::new(&grid)
             .plan(&grid, &net(&terminals))
             .unwrap();
 
-        let paths = route_tree(&grid, &net(&terminals), 1, COSTS, Some(&corridor));
+        let paths = route_tree(&grid, &net(&terminals), 1, COSTS, Some(&plan));
 
-        assert!(!corridor.allows(6, 6));
+        assert!(!plan.corridor().allows(6, 6));
         assert!(reaches(&paths, terminals[1]));
         assert_eq!(crossed_blocked(&grid, &paths), 0);
     }
