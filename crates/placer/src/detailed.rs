@@ -109,7 +109,7 @@ pub fn free_blocked_pins(db: &mut NetlistDB, zones: &Zones, access: &PinAccess) 
             let blocked = dp.blocked_now(db, cell, s);
             if blocked > 0 {
                 let beside: Vec<&str> = dp
-                    .beside(db, cell, at, dp.segments[s].row, &[], &[])
+                    .beside(db, cell, at, dp.segments[s].row, &[], Absent::NONE)
                     .iter()
                     .map(|n| db.cells[n.cell.index()].name.as_str())
                     .collect();
@@ -201,6 +201,37 @@ struct DetailedPlacer<'a> {
 
 /// The metal a cell's pin access relies on, by layer.
 type Reliance = Vec<(LayerId, Rect<Dbu>)>;
+
+/// Cells a pin check takes as standing nowhere.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+struct Absent {
+    /// Every cell of this segment, which is being re-placed as a whole.
+    segment: Option<usize>,
+    /// This cell.
+    cell: Option<CellId>,
+}
+
+impl Absent {
+    const NONE: Self = Self {
+        segment: None,
+        cell: None,
+    };
+
+    const fn segment(s: usize) -> Self {
+        Self {
+            segment: Some(s),
+            cell: None,
+        }
+    }
+
+    /// These cells and `cell` too, which must not already name a cell.
+    const fn and(self, cell: CellId) -> Self {
+        Self {
+            cell: Some(cell),
+            ..self
+        }
+    }
+}
 
 /// What a cell's pin access relied on, and where the cell stood then.
 #[derive(Clone, Debug)]
@@ -387,7 +418,7 @@ impl<'a> DetailedPlacer<'a> {
         }
         let access = self.access?;
         let row = self.row_of(n.at.y);
-        let beside = self.beside(db, n.cell, n.at, row, &[], &[]);
+        let beside = self.beside(db, n.cell, n.at, row, &[], Absent::NONE);
         let found = access.reliance(db, n.cell, n.at, n.orient, &beside)?;
         let _ = self
             .reliance
@@ -406,7 +437,7 @@ impl<'a> DetailedPlacer<'a> {
 
     /// Signal pins of `cell` that fixed metal or the cells beside it would
     /// block at `at` in `row`, oriented as the row is, with every cell of
-    /// `moved` standing where it says and none of `away` standing anywhere.
+    /// `moved` standing where it says and none of `absent` standing anywhere.
     fn blocked_at(
         &self,
         db: &NetlistDB,
@@ -414,14 +445,14 @@ impl<'a> DetailedPlacer<'a> {
         at: Point<Dbu>,
         row: usize,
         moved: &[Placement],
-        away: &[CellId],
+        absent: Absent,
     ) -> usize {
         let who = Neighbour {
             cell,
             at,
             orient: self.rows[row].orient,
         };
-        self.blocked_in(db, who, row, moved, away)
+        self.blocked_in(db, who, row, moved, absent)
     }
 
     /// [`Self::blocked_at`] for `who`, standing and oriented as it says.
@@ -431,19 +462,19 @@ impl<'a> DetailedPlacer<'a> {
         who: Neighbour,
         row: usize,
         moved: &[Placement],
-        away: &[CellId],
+        absent: Absent,
     ) -> usize {
         let Some(access) = self.access else {
             return 0;
         };
-        let beside = self.beside(db, who.cell, who.at, row, moved, away);
+        let beside = self.beside(db, who.cell, who.at, row, moved, absent);
         access.blocked_pins_among(db, who.cell, who.at, who.orient, &beside)
     }
 
     /// The cells whose metal can block a pin of `cell` standing at `at` in
     /// `row`: those within the check's reach along the row, in that row and
     /// the rows the escape along a track can run through, other than `cell`,
-    /// `away` and the ones `moved` names, which stand where `moved` says.
+    /// `absent` and the ones `moved` names, which stand where `moved` says.
     fn beside(
         &self,
         db: &NetlistDB,
@@ -451,14 +482,21 @@ impl<'a> DetailedPlacer<'a> {
         at: Point<Dbu>,
         row: usize,
         moved: &[Placement],
-        away: &[CellId],
+        absent: Absent,
     ) -> Vec<Neighbour> {
         let reach = self.access.map_or(Dbu::ZERO, PinAccess::reach);
         let escape = self.access.map_or(Dbu::ZERO, PinAccess::escape_reach);
         let lo = at.x - reach;
         let hi = at.x + db.cell_size(cell).x + reach;
-        let elsewhere =
-            |c: CellId| c == cell || away.contains(&c) || moved.iter().any(|&(m, _, _)| m == c);
+        let elsewhere = |c: CellId| {
+            c == cell || absent.cell == Some(c) || moved.iter().any(|&(m, _, _)| m == c)
+        };
+        let gone = |c: CellId| {
+            absent.cell == Some(c)
+                || absent
+                    .segment
+                    .is_some_and(|s| self.segment_of.get(&c) == Some(&s))
+        };
         let y0 = self.rows[row].y - escape;
         let y1 = self.rows[row].y + self.rows[row].height + escape;
         let in_reach = |r: usize| self.rows[r].y < y1 && self.rows[r].y + self.rows[r].height > y0;
@@ -469,6 +507,7 @@ impl<'a> DetailedPlacer<'a> {
         let mut beside: Vec<Neighbour> = (first..last)
             .filter(|&r| in_reach(r))
             .flat_map(|r| self.row_segments[r].0..self.row_segments[r].1)
+            .filter(|&s| absent.segment != Some(s))
             .flat_map(|s| {
                 let cells = &self.segments[s].cells;
                 let start = cells
@@ -489,11 +528,7 @@ impl<'a> DetailedPlacer<'a> {
             moved
                 .iter()
                 .filter(|&&(m, p, r)| {
-                    m != cell
-                        && in_reach(r)
-                        && !away.contains(&m)
-                        && p.x < hi
-                        && p.x + db.cell_size(m).x > lo
+                    m != cell && in_reach(r) && !gone(m) && p.x < hi && p.x + db.cell_size(m).x > lo
                 })
                 .map(|&(m, p, r)| Neighbour {
                     cell: m,
@@ -507,7 +542,7 @@ impl<'a> DetailedPlacer<'a> {
     /// Pins a placement would leave blocked: those of `cell` standing at
     /// `at` in `row`, and those of the cells beside it there that it would
     /// newly block, with every cell of `moved` standing where it says and
-    /// none of `away` standing anywhere.
+    /// none of `absent` standing anywhere.
     fn blocked_around(
         &self,
         db: &NetlistDB,
@@ -515,12 +550,12 @@ impl<'a> DetailedPlacer<'a> {
         at: Point<Dbu>,
         row: usize,
         moved: &[Placement],
-        away: &[CellId],
+        absent: Absent,
     ) -> usize {
         let Some(access) = self.access else {
             return 0;
         };
-        let own = self.blocked_at(db, cell, at, row, moved, away);
+        let own = self.blocked_at(db, cell, at, row, moved, absent);
         if own > 0 {
             return own;
         }
@@ -533,10 +568,9 @@ impl<'a> DetailedPlacer<'a> {
             .iter()
             .flat_map(|&(c, p, r)| access.cell_metal(db, c, p, self.rows[r].orient))
             .collect();
-        let mut gone = away.to_vec();
-        gone.push(cell);
+        let gone = absent.and(cell);
         let disturbed: usize = self
-            .beside(db, cell, at, row, moved, away)
+            .beside(db, cell, at, row, moved, absent)
             .iter()
             .map(|n| {
                 let standing = !with_cell.iter().any(|&(m, _, _)| m == n.cell);
@@ -547,11 +581,11 @@ impl<'a> DetailedPlacer<'a> {
                     return 0;
                 }
                 let r = self.row_of(n.at.y);
-                let now = self.blocked_in(db, *n, r, &with_cell, away);
+                let now = self.blocked_in(db, *n, r, &with_cell, absent);
                 if now == 0 {
                     return 0;
                 }
-                let without = self.blocked_in(db, *n, r, moved, &gone);
+                let without = self.blocked_in(db, *n, r, moved, gone);
                 now.saturating_sub(without)
             })
             .sum();
@@ -561,7 +595,7 @@ impl<'a> DetailedPlacer<'a> {
     /// Signal pins of `cell` blocked where it stands.
     fn blocked_now(&self, db: &NetlistDB, cell: CellId, s: usize) -> usize {
         let at = db.cells[cell.index()].location;
-        self.blocked_at(db, cell, at, self.segments[s].row, &[], &[])
+        self.blocked_at(db, cell, at, self.segments[s].row, &[], Absent::NONE)
     }
 
     /// Blocked signal pins over every movable standard cell.
@@ -602,7 +636,14 @@ impl<'a> DetailedPlacer<'a> {
                 .map(|k| x + row.site * k)
                 .filter(|&p| p >= seg.lo && p + width <= seg.hi)
                 .filter(|&p| {
-                    self.blocked_around(db, c, Point::new(p, row.y), seg.row, &[], &seg.cells) == 0
+                    self.blocked_around(
+                        db,
+                        c,
+                        Point::new(p, row.y),
+                        seg.row,
+                        &[],
+                        Absent::segment(s),
+                    ) == 0
                 })
                 .map(|p| (p, (p - x).abs().get()))
                 .collect();
@@ -786,8 +827,8 @@ impl<'a> DetailedPlacer<'a> {
             .find(|&c| {
                 let there = db.cells[c.index()].location;
                 let swapped = [(cell, there, row_there), (c, here, row_here)];
-                self.blocked_around(db, cell, there, row_there, &swapped, &[]) == 0
-                    && self.blocked_around(db, c, here, row_here, &swapped, &[]) == 0
+                self.blocked_around(db, cell, there, row_there, &swapped, Absent::NONE) == 0
+                    && self.blocked_around(db, c, here, row_here, &swapped, Absent::NONE) == 0
             })
     }
 
@@ -837,7 +878,7 @@ impl<'a> DetailedPlacer<'a> {
         }
         let clear = moves
             .iter()
-            .all(|&(c, at, r)| self.blocked_around(db, c, at, r, &moves, &[]) == 0);
+            .all(|&(c, at, r)| self.blocked_around(db, c, at, r, &moves, Absent::NONE) == 0);
         clear.then(|| moves.into_iter().map(|(c, at, _)| (c, at)).collect())
     }
 
@@ -896,9 +937,9 @@ impl<'a> DetailedPlacer<'a> {
         }
         // Pin checks read the placement as it stands, so they run undone.
         let clear = improves
-            && !placements
-                .iter()
-                .any(|&(c, at, row)| self.blocked_around(db, c, at, row, placements, &[]) > 0);
+            && !placements.iter().any(|&(c, at, row)| {
+                self.blocked_around(db, c, at, row, placements, Absent::NONE) > 0
+            });
         if clear {
             apply(db);
             self.forget(placements.iter().map(|&(c, _, _)| c));
@@ -1070,8 +1111,14 @@ impl<'a> DetailedPlacer<'a> {
                 let closer = best.is_none_or(|b| (x - target).abs() < (b - target).abs());
                 let at = Point::new(x, row.y);
                 if closer
-                    && self.blocked_around(db, cell, at, row_index, &[(cell, at, row_index)], &[])
-                        == 0
+                    && self.blocked_around(
+                        db,
+                        cell,
+                        at,
+                        row_index,
+                        &[(cell, at, row_index)],
+                        Absent::NONE,
+                    ) == 0
                 {
                     best = Some(x);
                 }
