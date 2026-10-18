@@ -250,11 +250,23 @@ fn clear_of(tech: &RouteTech, layer: LayerId, metal: &Rect<Dbu>, blockers: &[Sha
         .all(|s| s.layer != LayerRef::Routing(layer) || !s.rect.overlaps(&reach))
 }
 
+/// Whether `pad` on `layer`, metal of the pin with shapes `pin`, keeps at
+/// least the layer spacing from every shape of the pin it does not touch: a
+/// pad sticking out of one part of a pin must not end just short of another
+/// part, which the checker counts as a spacing violation within the net.
+fn clear_of_own_pin(tech: &RouteTech, layer: LayerId, pad: &Rect<Dbu>, pin: &[Shape]) -> bool {
+    let reach = pad.expand(tech.layer(layer).spacing);
+    pin.iter()
+        .filter(|s| s.layer == LayerRef::Routing(layer))
+        .all(|s| s.rect.touches(pad) || !s.rect.overlaps(&reach))
+}
+
 /// Every stack of vias, bottom first, that carries a pin on `from` up to
 /// the lowest routable layer at `at`: one for each via that fits onto the
 /// pin, topped by the first vias that fit above it. The lowest via's cuts
 /// must lie on the pin; its metal may stick out of it, keeping clear of the
-/// cell's other shapes like every via's metal.
+/// cell's other shapes like every via's metal, and of the parts of the pin
+/// it does not touch.
 fn via_stacks(
     tech: &RouteTech,
     from: LayerId,
@@ -267,11 +279,11 @@ fn via_stacks(
         let bottom = v.bottom.translate(at);
         let top = v.top.translate(at);
         let on_pin = below != from
-            || v.cuts.iter().all(|cut| {
+            || (v.cuts.iter().all(|cut| {
                 let cut = cut.translate(at);
                 pin.iter()
                     .any(|s| s.layer == LayerRef::Routing(from) && s.rect.encloses(&cut))
-            });
+            }) && clear_of_own_pin(tech, below, &bottom, pin));
         on_pin && clear_of(tech, below, &bottom, blockers) && clear_of(tech, above, &top, blockers)
     };
     let first = from.index();
