@@ -22,7 +22,7 @@ mod routability;
 mod wirelength;
 
 pub use routability::{
-    CongestionEstimator, CongestionRound, RoutabilityParams, RoutingTiles, wire_width,
+    CongestionEstimator, CongestionRound, RoutabilityParams, RoutingTiles, TileTracks,
 };
 
 use crate::model::{PinAnchor, PlacementModel};

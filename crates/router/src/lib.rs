@@ -17,7 +17,7 @@ pub mod tree;
 pub mod wiring;
 
 use detailed::{Costs, DetailedRouter, Scope, routable_nets};
-pub use global::CapacityReduction;
+pub use global::{CapacityReduction, TileTracks};
 use global::{GlobalGrid, GlobalNet, Tracks, route_global, track_demand};
 use occupancy::FixedTracks;
 use pare_common::db::design::{

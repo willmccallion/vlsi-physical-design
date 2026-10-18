@@ -1,10 +1,12 @@
 //! Routability-driven placement as `OpenROAD`'s global placer does it.
 //!
-//! Routing demand is estimated with RUDY over the global router's gcells:
-//! each net lays wire of its half-perimeter length and [`wire_width`] evenly
-//! over its bounding box, and a gcell's congestion is the area that wire
-//! covers in it over the gcell's area, divided by the share of its routing
-//! capacity that obstructions and the router's reserve leave. Once spreading
+//! Routing demand is estimated with RUDY over the global router's gcells,
+//! per direction as `DREAMPlace` does: each net lays horizontal wire as long
+//! as its bounding box is wide and vertical wire as long as it is tall,
+//! each spread evenly over the box and weighted by [`risa_weight`], and a
+//! gcell's congestion is the larger of the two directions' share of track
+//! length that this wire and the obstructions take, leaving out a direction
+//! obstructions nearly fill there. Once spreading
 //! has nearly finished and settled, standard cells in congested gcells grow;
 //! their field removes fillers to make room and raises its target density by
 //! whatever the fillers cannot cover. Placement then resumes from an earlier,
@@ -34,12 +36,9 @@ pub(super) const CHECK_OVERFLOW: f64 = 0.3;
 /// fraction of the most any iteration has.
 pub(super) const SETTLE_FRACTION: f64 = 0.6;
 
-/// Multiple of the routing layers' harmonic mean pitch, spread over the
-/// layers, that a net's wire is taken to be wide.
-const WIRE_WIDTH_FACTOR: f64 = 1.25;
-
 /// Gcells with at least this share of their capacity blocked are neither
-/// measured nor acted on.
+/// measured nor acted on, and a direction with this share of its tracks
+/// blocked in a gcell is not measured there.
 const IGNORE_BLOCKAGE: f64 = 0.8;
 
 /// Congestion from which a gcell's cells grow.
@@ -74,8 +73,8 @@ const MAX_ROUNDS: usize = 50;
 /// metric.
 const TOP_FRACTIONS: [f64; 2] = [0.005, 0.01];
 
-/// The global router's gcells, with each one's routing capacity and the
-/// part of it obstructions and the router's reserve take.
+/// The global router's gcells, with each one's routing capacity in each
+/// direction and the part of it obstructions take.
 #[derive(Clone, Debug, PartialEq)]
 pub struct RoutingTiles {
     /// Lower-left corner of the grid.
@@ -86,21 +85,114 @@ pub struct RoutingTiles {
     pub nx: usize,
     /// Rows.
     pub ny: usize,
-    /// Tracks through each gcell, row by row.
+    /// Tracks of the horizontal layers.
+    pub horizontal: TileTracks,
+    /// Tracks of the vertical layers.
+    pub vertical: TileTracks,
+}
+
+/// Tracks of one direction through each gcell, row by row.
+#[derive(Clone, Debug, PartialEq)]
+pub struct TileTracks {
+    /// Tracks before any reduction.
     pub capacity: Vec<f64>,
-    /// Tracks of each gcell taken before placement, row by row.
+    /// Tracks taken before placement.
     pub reduction: Vec<f64>,
 }
 
-impl RoutingTiles {
-    /// The share of gcell `i`'s capacity that is taken, all of it when it
-    /// has none.
-    fn blockage(&self, i: usize) -> f64 {
+impl TileTracks {
+    /// The share of gcell `i`'s track length, `length` per track, that
+    /// `wire` and the reduction take together, as `DREAMPlace` counts
+    /// blockages as demand already there. None when obstructions take
+    /// [`IGNORE_BLOCKAGE`] of the tracks or more, as wire routes around
+    /// such a gcell rather than through it.
+    fn utilization(&self, i: usize, wire: f64, length: f64) -> Option<f64> {
         let capacity = self.capacity.get(i).copied().unwrap_or(0.0);
+        let taken = self.reduction.get(i).copied().unwrap_or(0.0);
+        (capacity > 0.0 && taken < IGNORE_BLOCKAGE * capacity)
+            .then(|| (wire + taken * length) / (capacity * length))
+    }
+}
+
+impl RoutingTiles {
+    /// The share of gcell `i`'s capacity over both directions that is
+    /// taken, all of it when it has none.
+    fn blockage(&self, i: usize) -> f64 {
+        let at = |v: &[f64]| v.get(i).copied().unwrap_or(0.0);
+        let capacity = at(&self.horizontal.capacity) + at(&self.vertical.capacity);
         if capacity <= 0.0 {
             return 1.0;
         }
-        (self.reduction.get(i).copied().unwrap_or(0.0) / capacity).min(1.0)
+        ((at(&self.horizontal.reduction) + at(&self.vertical.reduction)) / capacity).min(1.0)
+    }
+
+    /// The length of column or row `i` of an axis starting at `origin`,
+    /// clipped to `end`.
+    fn length(&self, i: usize, origin: f64, end: f64) -> f64 {
+        let start = (i as f64).mul_add(self.size, origin);
+        ((start + self.size).min(end) - start).max(0.0)
+    }
+
+    /// The column or row of each gcell `span` of an axis overlaps, with the
+    /// length of the overlap and the share of the span it holds. A span of
+    /// no length lies in the one gcell holding it, all of it there.
+    fn axis_shares(&self, (lo, hi): (f64, f64), origin: f64, end: f64, n: usize) -> Vec<AxisShare> {
+        let size = self.size;
+        let length = |i: usize| self.length(i, origin, end);
+        let cell = |v: f64| (((v - origin) / size).floor().max(0.0) as usize).min(n - 1);
+        if hi <= lo {
+            let i = cell(lo);
+            return vec![AxisShare {
+                index: i,
+                overlap: 0.0,
+                share: 1.0,
+            }];
+        }
+        (cell(lo)..=cell(hi))
+            .filter_map(|i| {
+                let start = (i as f64).mul_add(size, origin);
+                let overlap = hi.min(start + length(i)) - lo.max(start);
+                (overlap > 0.0).then(|| AxisShare {
+                    index: i,
+                    overlap,
+                    share: overlap / (hi - lo),
+                })
+            })
+            .collect()
+    }
+}
+
+/// Where a net's box meets one column or row of gcells.
+#[derive(Clone, Copy, Debug, PartialEq)]
+struct AxisShare {
+    index: usize,
+    /// Length of the box inside the column or row.
+    overlap: f64,
+    /// That length over the box's length, or 1 for a box of no length.
+    share: f64,
+}
+
+/// The wire a net with `pins` pins takes over the half perimeter of its
+/// box, from the wiring distribution map of RISA (Cheng, ICCAD 1994) as
+/// `DREAMPlace` uses it.
+const fn risa_weight(pins: usize) -> f64 {
+    match pins {
+        0..=3 => 1.0,
+        4 => 1.0828,
+        5 => 1.1536,
+        6 => 1.2206,
+        7 => 1.2823,
+        8 => 1.3385,
+        9 => 1.3991,
+        10 => 1.4493,
+        11..=15 => 1.6899,
+        16..=20 => 1.8924,
+        21..=25 => 2.0743,
+        26..=30 => 2.2334,
+        31..=35 => 2.3892,
+        36..=40 => 2.5356,
+        41..=45 => 2.6625,
+        _ => 2.7933,
     }
 }
 
@@ -118,21 +210,8 @@ pub trait CongestionEstimator {
 pub struct RoutabilityParams {
     /// Where congestion is measured, and what is left to route through.
     pub tiles: RoutingTiles,
-    /// Width of a net's wire; see [`wire_width`].
-    pub wire_width: f64,
     /// Congestion metric below which no more inflation is done.
     pub target_congestion: f64,
-}
-
-/// The width RUDY takes a net's wire to be: the harmonic mean of the
-/// routing layers' `pitches` spread over the layers, times 1.25.
-pub fn wire_width(pitches: &[f64]) -> f64 {
-    let inverse: f64 = pitches.iter().filter(|&&p| p > 0.0).map(|p| 1.0 / p).sum();
-    if inverse > 0.0 {
-        WIRE_WIDTH_FACTOR / inverse
-    } else {
-        0.0
-    }
 }
 
 /// One round of congestion measurement.
@@ -166,7 +245,9 @@ pub(super) struct CongestionMap {
 
 impl CongestionMap {
     /// RUDY congestion of `netlist` with `objects` where they are, over the
-    /// gcells of `params` clipped to `die`.
+    /// gcells of `params` clipped to `die`: in each gcell, the larger of the
+    /// horizontal and the vertical [`TileTracks::utilization`], or none
+    /// when neither is measured.
     pub(super) fn rudy(
         netlist: &Netlist,
         objects: &Objects,
@@ -174,27 +255,27 @@ impl CongestionMap {
         params: &RoutabilityParams,
     ) -> Self {
         let t = &params.tiles;
-        let mut demand = vec![0.0; t.nx * t.ny];
-        for (bbox, _) in netlist.bounding_boxes(&objects.centers) {
-            let area = bbox.width() * bbox.height();
-            if area <= 0.0 {
-                continue;
-            }
-            let density = (bbox.width() + bbox.height()) * params.wire_width / area;
-            for_each_tile(t, die, &bbox, |idx, overlap, tile_area| {
-                demand[idx] = (density * overlap).mul_add(1.0 / tile_area, demand[idx]);
-            });
-        }
-        let congestion = demand
-            .iter()
-            .enumerate()
-            .map(|(i, &d)| {
-                let available = 1.0 - t.blockage(i);
-                if available > 0.0 {
-                    d / available
-                } else {
-                    f64::INFINITY
+        let mut horizontal = vec![0.0; t.nx * t.ny];
+        let mut vertical = vec![0.0; t.nx * t.ny];
+        for (bbox, pins) in netlist.bounding_boxes(&objects.centers) {
+            let weight = risa_weight(pins);
+            let columns = t.axis_shares((bbox.min.x, bbox.max.x), t.origin.x, die.max.x, t.nx);
+            let rows = t.axis_shares((bbox.min.y, bbox.max.y), t.origin.y, die.max.y, t.ny);
+            for row in &rows {
+                for column in &columns {
+                    let idx = row.index * t.nx + column.index;
+                    horizontal[idx] = (weight * column.overlap).mul_add(row.share, horizontal[idx]);
+                    vertical[idx] = (weight * row.overlap).mul_add(column.share, vertical[idx]);
                 }
+            }
+        }
+        let congestion = (0..t.nx * t.ny)
+            .map(|i| {
+                let width = t.length(i % t.nx, t.origin.x, die.max.x);
+                let height = t.length(i / t.nx, t.origin.y, die.max.y);
+                let across = t.horizontal.utilization(i, horizontal[i], width);
+                let up = t.vertical.utilization(i, vertical[i], height);
+                across.into_iter().chain(up).fold(0.0, f64::max)
             })
             .collect();
         Self::over(congestion, objects, params)
@@ -280,34 +361,6 @@ impl CongestionMap {
             sorted[..count].iter().sum::<f64>() / count as f64
         };
         TOP_FRACTIONS.iter().map(|&f| top_mean(f)).sum::<f64>() / TOP_FRACTIONS.len() as f64
-    }
-}
-
-/// Calls `f` with the index, overlap area and area of each gcell of `t`,
-/// clipped to `die`, that `rect` covers.
-fn for_each_tile(
-    t: &RoutingTiles,
-    die: &Rect<f64>,
-    rect: &Rect<f64>,
-    mut f: impl FnMut(usize, f64, f64),
-) {
-    if t.size <= 0.0 {
-        return;
-    }
-    let span = |lo: f64, hi: f64, origin: f64, end: f64, n: usize| {
-        let first = ((lo - origin) / t.size).floor().max(0.0) as usize;
-        let last = (((hi - origin) / t.size).ceil().max(0.0) as usize).min(n);
-        (first..last).filter_map(move |i| {
-            let start = (i as f64).mul_add(t.size, origin);
-            let stop = (start + t.size).min(end);
-            let overlap = hi.min(stop) - lo.max(start);
-            (overlap > 0.0 && stop > start).then_some((i, overlap, stop - start))
-        })
-    };
-    for (y, oy, ty) in span(rect.min.y, rect.max.y, t.origin.y, die.max.y, t.ny) {
-        for (x, ox, tx) in span(rect.min.x, rect.max.x, t.origin.x, die.max.x, t.nx) {
-            f(y * t.nx + x, ox * oy, tx * ty);
-        }
     }
 }
 
@@ -583,18 +636,25 @@ mod tests {
         Rect::new(Point::new(0.0, 0.0), Point::new(side, side))
     }
 
-    /// A 4x4 grid of unit gcells of 10 tracks, `taken` of them reduced.
-    fn params(taken: Vec<f64>) -> RoutabilityParams {
+    /// A 4x4 grid of unit gcells of 5 tracks each way, `taken` of the 10
+    /// reduced, half in each direction.
+    fn params(taken: &[f64]) -> RoutabilityParams {
+        let half: Vec<f64> = taken.iter().map(|t| t / 2.0).collect();
         RoutabilityParams {
             tiles: RoutingTiles {
                 origin: Point::new(0.0, 0.0),
                 size: 1.0,
                 nx: 4,
                 ny: 4,
-                capacity: vec![10.0; 16],
-                reduction: taken,
+                horizontal: TileTracks {
+                    capacity: vec![5.0; 16],
+                    reduction: half.clone(),
+                },
+                vertical: TileTracks {
+                    capacity: vec![5.0; 16],
+                    reduction: half,
+                },
             },
-            wire_width: 0.1,
             target_congestion: 1.0,
         }
     }
@@ -640,42 +700,101 @@ mod tests {
     }
 
     #[test]
-    fn the_wire_width_is_the_harmonic_mean_pitch_over_the_layer_count() {
-        let width = wire_width(&[0.2, 0.2, 0.4]);
-
-        assert!((width - 1.25 / 12.5).abs() < 1e-12, "{width}");
-    }
-
-    #[test]
-    fn a_net_spreads_its_wire_area_evenly_over_its_box() {
+    fn a_net_spreads_its_wire_of_each_direction_evenly_over_its_box() {
         let netlist = two_pin(Point::new(0.5, 1.25), Point::new(3.5, 1.75));
 
-        let map = CongestionMap::rudy(&netlist, &cells_at(&[]), &die(4.0), &params(vec![0.0; 16]));
+        let map = CongestionMap::rudy(&netlist, &cells_at(&[]), &die(4.0), &params(&[0.0; 16]));
 
-        let per_area = 3.5 * 0.1 / 1.5;
-        assert!((map.congestion[5] - per_area * 0.5).abs() < 1e-12);
-        assert!((map.congestion[4] - per_area * 0.25).abs() < 1e-12);
+        assert!(
+            (map.congestion[5] - 1.0 / 5.0).abs() < 1e-12,
+            "{:?}",
+            map.congestion
+        );
+        assert!(
+            (map.congestion[4] - 0.5 / 5.0).abs() < 1e-12,
+            "{:?}",
+            map.congestion
+        );
         assert!(map.congestion[..4].iter().all(|&c| c == 0.0));
     }
 
     #[test]
-    fn a_net_whose_box_has_no_area_lays_no_wire() {
+    fn a_flat_net_lays_its_wire_along_its_row() {
         let netlist = two_pin(Point::new(0.5, 1.5), Point::new(2.5, 1.5));
 
-        let map = CongestionMap::rudy(&netlist, &cells_at(&[]), &die(4.0), &params(vec![0.0; 16]));
+        let map = CongestionMap::rudy(&netlist, &cells_at(&[]), &die(4.0), &params(&[0.0; 16]));
 
-        assert!(map.congestion.iter().all(|&c| c == 0.0));
+        let expected = [0.1, 0.2, 0.1, 0.0];
+        for (got, want) in map.congestion[4..8].iter().zip(expected) {
+            assert!((got - want).abs() < 1e-12, "{:?}", map.congestion);
+        }
+        assert!(map.congestion[8..].iter().all(|&c| c == 0.0));
     }
 
     #[test]
-    fn congestion_is_demand_over_the_capacity_left() {
+    fn the_direction_with_fewer_tracks_sets_the_congestion() {
+        let netlist = two_pin(Point::new(0.0, 0.0), Point::new(4.0, 4.0));
+        let mut params = params(&[0.0; 16]);
+        params.tiles.horizontal.capacity = vec![8.0; 16];
+        params.tiles.vertical.capacity = vec![2.0; 16];
+
+        let map = CongestionMap::rudy(&netlist, &cells_at(&[]), &die(4.0), &params);
+
+        assert!(
+            (map.congestion[0] - 0.25 / 2.0).abs() < 1e-12,
+            "{:?}",
+            map.congestion
+        );
+    }
+
+    #[test]
+    fn a_net_of_many_pins_lays_more_wire_than_its_half_perimeter() {
+        let mut netlist = Netlist::default();
+        let corners = [(0.0, 0.0), (4.0, 0.0), (0.0, 4.0), (4.0, 4.0), (2.0, 2.0)];
+        netlist.push(corners.map(|(x, y)| Terminal::Fixed(Point::new(x, y))), 1.0);
+
+        let map = CongestionMap::rudy(&netlist, &cells_at(&[]), &die(4.0), &params(&[0.0; 16]));
+
+        assert!(
+            (map.congestion[0] - 1.1536 * 0.25 / 5.0).abs() < 1e-12,
+            "{:?}",
+            map.congestion
+        );
+    }
+
+    #[test]
+    fn obstructions_count_as_demand_already_there() {
         let netlist = two_pin(Point::new(0.0, 0.0), Point::new(4.0, 4.0));
         let mut taken = vec![0.0; 16];
         taken[0] = 5.0;
 
-        let map = CongestionMap::rudy(&netlist, &cells_at(&[]), &die(4.0), &params(taken));
+        let map = CongestionMap::rudy(&netlist, &cells_at(&[]), &die(4.0), &params(&taken));
 
-        assert!((map.congestion[0] / map.congestion[2] - 2.0).abs() < 1e-12);
+        assert!(
+            (map.congestion[0] - (0.25 + 2.5) / 5.0).abs() < 1e-12,
+            "{:?}",
+            map.congestion
+        );
+        assert!(
+            (map.congestion[2] - 0.25 / 5.0).abs() < 1e-12,
+            "{:?}",
+            map.congestion
+        );
+    }
+
+    #[test]
+    fn a_direction_obstructions_nearly_fill_is_not_measured() {
+        let netlist = two_pin(Point::new(0.0, 0.0), Point::new(4.0, 4.0));
+        let mut params = params(&[0.0; 16]);
+        params.tiles.horizontal.reduction[0] = 4.5;
+
+        let map = CongestionMap::rudy(&netlist, &cells_at(&[]), &die(4.0), &params);
+
+        assert!(
+            (map.congestion[0] - 0.25 / 5.0).abs() < 1e-12,
+            "{:?}",
+            map.congestion
+        );
     }
 
     #[test]
@@ -689,15 +808,16 @@ mod tests {
         let mut taken = vec![0.0; 16];
         taken[1] = 8.0;
 
-        let map = CongestionMap::rudy(&Netlist::default(), &objects, &die(4.0), &params(taken));
+        let map = CongestionMap::rudy(&Netlist::default(), &objects, &die(4.0), &params(&taken));
 
         assert_eq!(map.actionable[..4], [true, false, false, false]);
     }
 
     #[test]
     fn a_gcell_without_capacity_is_fully_blocked() {
-        let mut tiles = params(vec![0.0; 16]).tiles;
-        tiles.capacity[3] = 0.0;
+        let mut tiles = params(&[0.0; 16]).tiles;
+        tiles.horizontal.capacity[3] = 0.0;
+        tiles.vertical.capacity[3] = 0.0;
 
         assert!((tiles.blockage(3) - 1.0).abs() < 1e-12);
         assert!(tiles.blockage(2).abs() < 1e-12);
@@ -716,7 +836,7 @@ mod tests {
 
     #[test]
     fn measured_congestion_is_taken_as_given_where_the_placer_acts() {
-        let params = params(vec![0.0; 16]);
+        let params = params(&[0.0; 16]);
         let objects = cells_at(&[Point::new(0.5, 0.5)]);
         let mut congestion = vec![0.0; 16];
         congestion[0] = 2.0;
@@ -773,8 +893,7 @@ mod tests {
     #[test]
     fn a_round_takes_at_most_a_sixth_of_the_growth_budget() {
         let objects = cells_at(&[Point::new(0.5, 0.5); 10]);
-        let routability =
-            Routability::new(params(vec![0.0; 16]), &objects, &[field(0..10, 10..10)]);
+        let routability = Routability::new(params(&[0.0; 16]), &objects, &[field(0..10, 10..10)]);
         let mut congestion = vec![0.0; 16];
         congestion[0] = 9.0;
 
@@ -789,7 +908,7 @@ mod tests {
     fn congestion_below_the_target_keeps_the_sizes_and_ends_routability() {
         let mut objects = cells_at(&[Point::new(0.5, 0.5)]);
         let mut fields = [field(0..1, 1..1)];
-        let mut routability = Routability::new(params(vec![0.0; 16]), &objects, &fields);
+        let mut routability = Routability::new(params(&[0.0; 16]), &objects, &fields);
 
         let verdict = routability.check(0, &map_of(vec![0.5; 16]), &mut objects, &mut fields);
 
@@ -801,7 +920,7 @@ mod tests {
     fn three_rounds_without_improvement_revert_to_the_least_congested_sizes() {
         let mut objects = cells_at(&[Point::new(0.5, 0.5)]);
         let mut fields = [field(0..1, 1..1)];
-        let mut routability = Routability::new(params(vec![0.0; 16]), &objects, &fields);
+        let mut routability = Routability::new(params(&[0.0; 16]), &objects, &fields);
         let mut congestion = vec![0.0; 16];
         congestion[0] = 1.2;
 

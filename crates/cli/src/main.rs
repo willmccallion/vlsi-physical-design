@@ -8,7 +8,7 @@ mod report;
 use anyhow::Context;
 use clap::{Parser, Subcommand};
 use pare_common::db::design::{NetlistDB, PlacementStatus};
-use pare_common::db::indices::{CellId, LayerId};
+use pare_common::db::indices::CellId;
 use pare_common::db::library::LayerRef;
 use pare_common::db::parser::{bookshelf, def, lef};
 use pare_common::db::writer;
@@ -22,7 +22,7 @@ use pare_common::verify::placement::{PlacementViolation, placement_violations};
 use pare_common::verify::routing::check_routing;
 use pare_placer::detailed;
 use pare_placer::global::{
-    self, CongestionEstimator, GlobalParams, Outcome, RoutabilityParams, RoutingTiles,
+    self, CongestionEstimator, GlobalParams, Outcome, RoutabilityParams, RoutingTiles, TileTracks,
 };
 use pare_placer::io::{self, IoLayers};
 use pare_placer::legalize::abacus;
@@ -617,12 +617,12 @@ fn routability_setup<'a>(
     match config.global_placement.congestion_estimate {
         CongestionEstimate::GlobalRouter => {
             let estimator = GlobalRouteCongestion::new(db, config)?;
-            let params = routability_params(config, db, estimator.capacity_reduction())?;
+            let params = routability_params(config, db, estimator.capacity_reduction());
             Ok((params, Some(estimator)))
         }
         CongestionEstimate::Rudy => {
             let reduction = pare_router::capacity_reduction(db, &config.routing)?;
-            Ok((routability_params(config, db, reduction)?, None))
+            Ok((routability_params(config, db, reduction), None))
         }
     }
 }
@@ -677,21 +677,13 @@ fn routability_params(
     config: &Config,
     db: &NetlistDB,
     reduction: CapacityReduction,
-) -> anyhow::Result<RoutabilityParams> {
+) -> RoutabilityParams {
     let units = db.dbu();
-    let layers = config.routing.layer_range(&db.library)?;
-    let pitches: Vec<f64> = (layers.start().index()..=layers.end().index())
-        .map(|l| {
-            let layer = db.library.layer(LayerId::new(l));
-            let pitch = layer.track_pitch();
-            if pitch > Dbu::ZERO {
-                units.to_microns(pitch)
-            } else {
-                units.to_microns(layer.width + layer.min_spacing)
-            }
-        })
-        .collect();
-    Ok(RoutabilityParams {
+    let tracks = |t: pare_router::TileTracks| TileTracks {
+        capacity: t.capacity,
+        reduction: t.reduction,
+    };
+    RoutabilityParams {
         tiles: RoutingTiles {
             origin: Point::new(
                 units.to_microns(reduction.origin.x),
@@ -700,12 +692,11 @@ fn routability_params(
             size: units.to_microns(reduction.gcell),
             nx: reduction.nx,
             ny: reduction.ny,
-            capacity: reduction.capacity,
-            reduction: reduction.reduction,
+            horizontal: tracks(reduction.horizontal),
+            vertical: tracks(reduction.vertical),
         },
-        wire_width: global::wire_width(&pitches),
         target_congestion: config.global_placement.target_congestion,
-    })
+    }
 }
 
 fn path_str(path: &Path) -> anyhow::Result<String> {

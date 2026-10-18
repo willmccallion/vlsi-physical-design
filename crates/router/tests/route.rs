@@ -6,6 +6,7 @@ use pare_common::db::design::{
     NetlistDB, NonDefaultLayer, NonDefaultRule, PlacementStatus, RouteElem,
 };
 use pare_common::db::indices::{CutLayerId, LayerId, NetId, NonDefaultRuleId};
+use pare_common::db::library::{LayerRef, Shape};
 use pare_common::db::parser::{def, lef};
 use pare_common::geom::dbu::Dbu;
 use pare_common::geom::point::Point;
@@ -238,9 +239,10 @@ fn every_track_through_a_gcell_counts_toward_its_capacity() {
     let reduction = capacity_reduction(&db, &no_reserve()).unwrap();
 
     assert_eq!((reduction.nx, reduction.ny), (2, 2));
-    assert_eq!(reduction.capacity, vec![22.0, 22.0, 23.0, 23.0]);
-    assert!(reduction.reduction[0].abs() < 1e-12);
-    assert!(reduction.reduction[2].abs() < 1e-12);
+    assert_eq!(reduction.horizontal.capacity, vec![7.0, 7.0, 8.0, 8.0]);
+    assert_eq!(reduction.vertical.capacity, vec![15.0; 4]);
+    assert!(reduction.horizontal.reduction[0].abs() < 1e-12);
+    assert!(reduction.vertical.reduction[2].abs() < 1e-12);
 }
 
 #[test]
@@ -253,9 +255,10 @@ fn the_capacity_reserve_does_not_count_as_reduction() {
 
     let reduction = capacity_reduction(&db, &config).unwrap();
 
-    assert_eq!(reduction.capacity, vec![22.0, 22.0, 23.0, 23.0]);
-    assert!(reduction.reduction[0].abs() < 1e-9);
-    assert!(reduction.reduction[2].abs() < 1e-9);
+    assert_eq!(reduction.horizontal.capacity, vec![7.0, 7.0, 8.0, 8.0]);
+    assert_eq!(reduction.vertical.capacity, vec![15.0; 4]);
+    assert!(reduction.horizontal.reduction[0].abs() < 1e-9);
+    assert!(reduction.vertical.reduction[2].abs() < 1e-9);
 }
 
 #[test]
@@ -264,8 +267,24 @@ fn a_fixed_block_takes_the_tracks_its_obstruction_crosses() {
 
     let reduction = capacity_reduction(&db, &no_reserve()).unwrap();
 
-    assert!(reduction.reduction[1] >= 10.0, "{:?}", reduction.reduction);
-    assert!(reduction.reduction[3] >= 10.0, "{:?}", reduction.reduction);
+    let taken = |i: usize| reduction.horizontal.reduction[i] + reduction.vertical.reduction[i];
+    assert!(taken(1) >= 10.0, "{reduction:?}");
+    assert!(taken(3) >= 10.0, "{reduction:?}");
+}
+
+#[test]
+fn a_layer_blocked_everywhere_cuts_off_the_layers_above_it() {
+    let mut db = tiny();
+    db.routing_blockages.push(Shape {
+        layer: LayerRef::Routing(LayerId(1)),
+        rect: db.die_area,
+    });
+
+    let reduction = capacity_reduction(&db, &no_reserve()).unwrap();
+
+    assert_eq!(reduction.horizontal.capacity, vec![0.0; 4]);
+    assert_eq!(reduction.vertical.capacity, vec![15.0; 4]);
+    assert_eq!(reduction.vertical.reduction, vec![15.0; 4]);
 }
 
 #[test]
