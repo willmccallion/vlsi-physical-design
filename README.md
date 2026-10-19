@@ -1,8 +1,47 @@
 # PARE — Placement And Routing Engine
 
-A digital IC placement and routing engine written in Rust, built from scratch: LEF/DEF and Bookshelf input, analytical global placement, and legalization. It reads real benchmarks up to 313k cells / 407k nets.
+A digital IC placement and routing engine written in Rust, built from scratch. It reads LEF/DEF and Bookshelf, places cells by electrostatic spreading, legalizes and refines the placement, routes every net globally and then on the design's tracks, and checks the result against the technology's design rules with a checker modelled on OpenROAD's.
 
-**Status:** routing is being rebuilt. The previous gcell router placed every net on gcell centers, which shorted almost every net (12,520 overlapping wire pairs between different nets on GCD alone), and its checker could not see those shorts. Both have been removed; global and track-level detailed routing are being rebuilt against a new width-aware checker. Placement is legal: OpenROAD's `check_placement` passes on every DEF benchmark.
+**Status:** PARE has placed and routed five Nangate45 designs, from gcd (563 nets) to leon3mp (407k nets), with zero design rule violations, judged both by its own checker and by OpenROAD's `check_drc` with a fix for one of its bugs applied (see below). Two other Nangate45 designs in that range, swerv (100k nets) and netcard (290k), are not clean yet, nor is any ISPD 2015 design. After those comes a synthesized design of more than a million cells.
+
+## Results
+
+Each design is placed from its floorplan and then routed by `pare run <design>`, except gcd, whose placement is part of the input. aes, ibex and jpeg are synthesized and floorplanned by OpenROAD-flow-scripts 26Q2, as its Nangate45 flow does them, at 32%, 50% and 81% utilization; leon3mp comes from OpenROAD's placer tests, at 59%. Routed DEFs are checked by OpenROAD 26Q2 `check_drc`.
+
+| Design | Cells | Nets | PARE violations | OpenROAD `check_drc` | Time | Peak memory |
+|---|---:|---:|---:|---:|---:|---:|
+| gcd | 676 | 563 | 0 | 0 | 1.0 s | 0.4 GiB |
+| aes | 13,108 | 12,965 | 0 | 0 | 40 s | 2.0 GiB |
+| ibex | 16,876 | 18,256 | 0 | 0 | 1 min 44 s | 2.1 GiB |
+| jpeg | 62,139 | 69,575 | 0 | 0 | 2 min 25 s | 4.3 GiB |
+| leon3mp | 312,529 | 406,912 | 0 | 0 | 30 min 11 s | 14.4 GiB |
+
+Measured on an Intel Core i7-14700K (28 threads) with 64 GB of memory, at commit `3dea951`. Time and memory cover the whole run, placement included.
+
+OpenROAD's `check_drc` has a bug that reports spacing violations between two vias of one net where its wire fills the gap ([#11697](https://github.com/The-OpenROAD-Project/OpenROAD/issues/11697)). The counts above come from OpenROAD with the proposed fix ([#11698](https://github.com/The-OpenROAD-Project/OpenROAD/pull/11698)) applied, which `nix develop .#eda` builds. Unpatched OpenROAD reports 0 on gcd, aes, ibex and jpeg and 2 on leon3mp, both same-net spacing markers of that kind; [docs/openroad-check-drc-tiling.md](docs/openroad-check-drc-tiling.md) has the evidence.
+
+<table>
+  <tr>
+    <td><img src="assets/aes-routed.png" alt="aes, routed"></td>
+    <td><img src="assets/ibex-routed.png" alt="ibex, routed"></td>
+  </tr>
+  <tr>
+    <td align="center">aes</td>
+    <td align="center">ibex</td>
+  </tr>
+  <tr>
+    <td><img src="assets/jpeg-routed.png" alt="jpeg, routed"></td>
+    <td><img src="assets/leon3mp-routed.png" alt="leon3mp, routed"></td>
+  </tr>
+  <tr>
+    <td align="center">jpeg</td>
+    <td align="center">leon3mp</td>
+  </tr>
+</table>
+
+At 32% utilization, aes's cells pack to a target density of 0.47 and gather into islands, as they do in OpenROAD's own placement of the same floorplan. Below, 10 × 10 µm of routed aes on metal1 to metal4, drawn at its true geometry by `pare view`:
+
+<p align="center"><img src="assets/aes-detail.png" alt="10 by 10 micron area of routed aes, metal1 to metal4" width="600"></p>
 
 ---
 
@@ -10,35 +49,49 @@ A digital IC placement and routing engine written in Rust, built from scratch: L
 
 ```mermaid
 flowchart TD
-    INPUT["LEF / DEF or Bookshelf input<br/>layers · vias · sites · macros · rows · tracks · nets"]
-    IO["Place unplaced I/O pins<br/>evenly around the die boundary"]
+    INPUT["LEF / DEF or Bookshelf input<br/>layers · vias · rules · sites · macros · rows · tracks · nets"]
+    IO["Place unplaced I/O pins on the die boundary<br/>matched to slots by wirelength after a first placement"]
 
-    subgraph GP["Global Placement (Nesterov Optimizer)"]
-        WL["Wirelength cost<br/>Weighted Average approximation<br/>smooth · differentiable HPWL"]
-        DENS["Density cost<br/>FFT Poisson solver<br/>electrostatic cell repulsion"]
-        OPT["Nesterov accelerated gradient descent<br/>min E = E_wirelength + λ·E_density"]
+    subgraph PL["Placement"]
+        GP["Global placement<br/>electrostatic density · Nesterov's method<br/>congestion-driven cell inflation"]
+        LEG["Legalization (Abacus)<br/>rows · sites · fence regions"]
+        DP["Detailed placement<br/>global swap · local reordering"]
     end
 
-    LEG["Legalization (Abacus)<br/>DEF rows · sites · row orientation"]
-    DP["Detailed placement<br/>global swap · local reordering"]
-    CHK["Placement check<br/>die · overlaps · rows · sites · orientation"]
-    OUT["Placed DEF (or Bookshelf .pl)"]
+    subgraph RT["Routing"]
+        PA["Pin access<br/>via stacks onto each pin"]
+        GR["Global routing (CUGR)<br/>Steiner trees · 3D pattern routing<br/>rip-up and reroute by maze, planned over the whole chip"]
+        TA["Track assignment"]
+        DR["Detailed routing (TritonRoute)<br/>region by region · negotiated repair<br/>judged by the design rule checker"]
+    end
 
-    INPUT --> IO --> GP --> LEG --> DP --> CHK --> OUT
-    WL & DENS --> OPT
+    CHK["Checks<br/>placement legality · opens · design rules"]
+    OUT["Placed and routed DEF"]
+
+    INPUT --> IO --> GP --> LEG --> DP --> PA --> GR --> TA --> DR --> CHK --> OUT
 ```
 
 ---
 
-## Placement: FFT-Accelerated Electrostatics
+## Placement
 
-Global placement minimizes two competing objectives simultaneously:
+Global placement follows ePlace and RePlAce. Cells are electric charges: the field of their density, found by solving Poisson's equation with FFTs, spreads them apart while a smooth weighted-average wirelength pulls connected cells together. Filler cells take up the whitespace, so a design that uses a small part of its die packs to the target density instead of scattering. Nesterov's method minimizes the sum, with its step predicted from the local Lipschitz constant, raising the density weight until the overflow falls below its target. With routability on, congestion is estimated as OpenROAD estimates it (RUDY), and cells in congested gcells are inflated along the way. Fence regions follow DREAMPlace 3.0: each region's cells form an electrostatic system of their own.
 
-**Wirelength** uses the Weighted Average (WA) smooth approximation of half-perimeter wirelength — differentiable everywhere, enabling gradient-based optimization. Per-net weights prioritize critical paths.
+Abacus legalization puts cells on rows and sites with the least displacement, inside their fence regions. Detailed placement then moves cells toward the median of their nets and reorders neighbours, keeping a move only if it shortens wirelength and never onto a spot where fixed metal would block a via to one of the cell's pins.
 
-**Density** is modeled as an electrostatic field: cells act as electric charges that repel each other when they overlap. The density distribution is gridded into an N×N bin map, then the Poisson equation is solved in frequency domain via FFT in O(N log N) — versus O(N²) for direct methods. The resulting repulsive force gradient pushes cells out of congested regions.
+## Routing
 
-**Nesterov's accelerated gradient descent** drives the iteration. Compared to vanilla gradient descent, the momentum term (aₖ = (1 + √(1 + 4aₖ₋₁²)) / 2) provides faster convergence on smooth near-convex problems like placement.
+**Pin access.** A pin on a routing layer is reached from any track crossing on its shapes; a pin below the lowest routing layer is reached by a stack of vias, each candidate stack keeping clear of the cell's other metal.
+
+**Global routing** follows CUGR on a 3D grid of gcells. Capacity comes from the tracks crossing each gcell edge, less what fixed metal blocks. Each net's rectilinear Steiner tree is pattern-routed with layers chosen by dynamic programming; overflowing nets are ripped up and maze-routed again, inside a corridor planned by a search over the whole chip on coarse cells so a net can detour as far as free tracks require.
+
+**Track assignment** puts each long straight run of a global route on a track of its panel.
+
+**Detailed routing** follows TritonRoute. A first pass routes every net region by region along its global route, then conflicts are repaired region by region: the nets in a region are ripped up and routed again by A* on the track graph, negotiating for space. Each step costs its length, plus a conflict cost per unit of length where it would short or crowd another net's wiring and a marker cost per unit of length where a violation was found lately, both rising round by round on TritonRoute's schedule. Marks go on the metal of each violation and fade as the region's nets are routed again. Whether a region's new wiring is kept is decided by the same design rule checker that judges the finished design.
+
+## Design rule checking
+
+The checker follows OpenROAD's (FlexGC): each net's shapes merge into polygons whose maximal rectangles and edges the rules examine. It checks shorts, metal spacing including spacing tables, end-of-line spacing, cut spacing, minimum area, width and hole, minimum cut and off-grid shapes; minimum step is reported as advisory and not counted. It checks the die in tiles so only one tile's geometry is built at a time, and violations made of fixed metal alone, which routing cannot fix, are reported apart.
 
 ---
 
@@ -62,23 +115,23 @@ Typed indices (`CellId`, `NetId`, `PinId`, `LayerId`, `MacroId`, …) keep table
 
 ## Known issues
 
-- **No routing.** See the status note above.
-- **Global placement quality is weak.** The density force ignores cell area, the step size is fixed and the wirelength smoothing is not annealed; on IBM10, IBM13 and IBM14 it does not spread cells at all. Detailed placement recovers much of the loss on the DEF designs (HPWL −70% on AES, −79% on ibex) but cannot fix a collapsed placement.
-- **Region constraints** (DEF `REGIONS`/`GROUPS`) are not honoured.
+- **ISPD 2015 designs do not route clean yet.** On mgc_pci_bridge32_a at commit `73d6db4`, 80 repair rounds left 1,986 violations, 1,811 of them in two 10 µm gaps between macros that block every metal layer, where the wires between the die's edge and its interior crowd through.
+- **swerv and netcard** have not been routed to zero violations with the current code yet.
+- **Nets under a nondefault rule** are routed and checked at their own widths and spacings, while OpenROAD reads routed wires at their layers' default widths, so the two checkers disagree on such nets: on pci's clock net at commit `73d6db4`, PARE reports 135 spacing violations that OpenROAD does not, and OpenROAD one that PARE does not.
 
 ---
 
 ## Usage
 
-**Requirements:** Rust stable and Python 3. `nix develop .#eda` provides OpenROAD for cross-checking results.
+**Requirements:** Rust stable and Python 3. `nix develop .#eda` provides OpenROAD, with the `check_drc` fix above, for cross-checking results, and the yosys that OpenROAD-flow-scripts 26Q2 pins; aes, ibex and jpeg are synthesized and floorplanned with them, so download those inside it.
 
-Benchmarks are downloaded by `scripts/download.py`, which also writes each design's config to `configs/<design>.toml`. Every design has a purpose, by what it was made to test: placement benchmarks are only placed, routing benchmarks (whose placement is part of the input) are only routed, and the rest are placed and then routed.
+Benchmarks are downloaded by `scripts/download.py`, which also writes each design's config to `configs/<suite>/<design>.toml`. Each design has a purpose that decides what `pare run` does with it: placement benchmarks are only placed, routing benchmarks (whose placement is part of the input) are only routed, and the rest are placed and then routed.
 
 | Suite | Designs | Purpose |
 |---|---|---|
 | `openroad` | gcd | routing |
-| `openroad` | aes, ibex (ORFS floorplans) | place and route |
-| `openroad` | jpeg, swerv, netcard, leon3mp (OpenROAD placer tests) | placement |
+| `openroad` | aes, ibex, jpeg (synthesized and floorplanned by OpenROAD-flow-scripts) | place and route |
+| `openroad` | swerv, netcard, leon3mp (OpenROAD placer tests) | place and route |
 | `ibm` | ibm01–ibm18 (Bookshelf) | placement |
 | `ispd2015` | 20 `mgc_*` designs, up to 1.3M nets | place and route |
 | `ispd2018`, `ispd2019` | `ispd18_test1`–`10`, `ispd19_test1`–`10` | routing |
@@ -93,4 +146,19 @@ cargo run --release -- route gcd            # routing only (refused for placemen
 cargo run --release -- check aes --placement output/aes/routed.def
 ```
 
-Images (`nesterov_placer.png` before legalization, `placed.png` after) and the placed DEF (or `placed.pl` for Bookshelf designs) are written to the output directory named in the config.
+The placed and routed DEFs and images of each stage are written to the output directory named in the config.
+
+### Looking inside a run
+
+```bash
+# Save the routing state after global routing, or after detailed round N, and resume from it later
+cargo run --release -- route aes --placement output/aes/placed.def --save-state aes.state --save-after 20
+cargo run --release -- route aes --placement output/aes/placed.def --resume aes.state
+
+# Log every route found for some nets, or in every region meeting a box (in microns), with its cost part by part
+cargo run --release -- route aes --placement output/aes/placed.def --trace-net _16807_ --trace-box 400 289 410 298
+
+# Draw one area at its true geometry, chosen nets highlighted and violations outlined and listed
+cargo run --release -- view aes --placement output/aes/routed.def --box 403 292 406.5 294.5 \
+    --net _16807_ --layer metal2 --layer metal3 --out pair.png
+```
