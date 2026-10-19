@@ -192,6 +192,22 @@ impl<'a> DetailedRouter<'a> {
         }
     }
 
+    /// Logs every pin that has no access point, with its net.
+    pub fn log_inaccessible_pins(&self) {
+        for (n, pins) in self.access.iter().enumerate() {
+            for (k, points) in pins.iter().enumerate() {
+                if points.is_empty() {
+                    let net = &self.db.nets[n];
+                    log::warn!(
+                        "no access to pin {} of net {}",
+                        self.db.pin_name(net.pins[k]),
+                        net.name
+                    );
+                }
+            }
+        }
+    }
+
     /// Nets that have a pin with no access point.
     pub fn inaccessible_nets(&self) -> Vec<NetId> {
         (0..self.access.len())

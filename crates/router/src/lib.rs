@@ -155,6 +155,7 @@ pub fn route_with(
         dr.set_guides(global, &grid);
         dr.set_track_wires(wires);
         stage("Track assign:", start);
+        dr.log_inaccessible_pins();
         let mut summary = RoutingSummary {
             nets: nets.len(),
             inaccessible: dr.inaccessible_nets(),
@@ -390,6 +391,7 @@ pub fn route_global_only(db: &NetlistDB, config: &RoutingConfig) -> Result<Globa
         })
         .collect();
     guides.sort_unstable_by_key(|g| g.net);
+    dr.log_inaccessible_pins();
     Ok(GlobalOnly {
         summary: RoutingSummary {
             nets: nets.len(),
