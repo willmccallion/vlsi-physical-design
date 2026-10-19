@@ -15,7 +15,7 @@ use super::judge::{Candidate, Judgment};
 use super::trace;
 use crate::access::Node;
 use crate::occupancy::{LocalOccupancy, Owner};
-use crate::search::{Costs, MAX_PENALTY, OwnVias, Search, WindowCache};
+use crate::search::{Costs, Marks, OwnVias, Search, WindowCache};
 use crate::wiring::{DisjointSets, Edge, NetRoute, Patch, Wiring, path_edges, tidy_patches};
 use pare_common::db::indices::{CutLayerId, LayerId, NetId};
 use pare_common::geom::dbu::Dbu;
@@ -81,6 +81,15 @@ impl RegionGrid {
 /// not touch.
 pub(super) const fn colour((rx, ry): RegionKey) -> i64 {
     rx.rem_euclid(2) + 2 * ry.rem_euclid(2)
+}
+
+/// One region a repair pass routes again: its area, the nets chosen
+/// there, and the indices of the last round's markers touching it.
+#[derive(Debug)]
+pub(super) struct RegionJob {
+    area: Rect<Dbu>,
+    nets: Vec<NetId>,
+    markers: Vec<usize>,
 }
 
 /// The part of a net a region worker routes again.
@@ -318,14 +327,19 @@ impl DetailedRouter<'_> {
             regions: regions.len(),
             pieces: 0,
         };
+        let touching = self.markers_by_region(&grid);
         for batch_colour in 0..4 {
-            let batch: Vec<(Rect<Dbu>, Vec<NetId>)> = regions
+            let batch: Vec<RegionJob> = regions
                 .iter()
                 .filter(|&(&k, _)| colour(k) == batch_colour)
                 .map(|(&k, nets)| {
                     let mut nets: Vec<NetId> = nets.iter().copied().collect();
                     nets.sort_unstable();
-                    (grid.area(k), nets)
+                    RegionJob {
+                        area: grid.area(k),
+                        nets,
+                        markers: touching.get(&k).cloned().unwrap_or_default(),
+                    }
                 })
                 .collect();
             stats.pieces += self.repair_batch(&batch, costs);
@@ -333,12 +347,81 @@ impl DetailedRouter<'_> {
         stats
     }
 
+    /// The indices of the last round's markers touching each region of
+    /// `grid`.
+    fn markers_by_region(&self, grid: &RegionGrid) -> FxHashMap<RegionKey, Vec<usize>> {
+        let mut touching: FxHashMap<RegionKey, Vec<usize>> = FxHashMap::default();
+        for (i, m) in self.markers().iter().enumerate() {
+            let (x0, y0) = grid.key(m.bbox.min);
+            let (x1, y1) = grid.key(m.bbox.max);
+            for ry in y0..=y1 {
+                for rx in x0..=x1 {
+                    touching.entry((rx, ry)).or_default().push(i);
+                }
+            }
+        }
+        touching
+    }
+
+    /// A worker's marks before it routes: those of the last round's
+    /// `markers` that touch `area`, on the wiring of their nets as it
+    /// stands, as `TritonRoute` seeds a worker's marker cost from the
+    /// markers in it.
+    fn seed_marks(&self, area: &Rect<Dbu>, markers: &[usize]) -> Marks {
+        let mut marks = Marks::default();
+        for &i in markers {
+            let m = &self.markers()[i];
+            let mut nets: Vec<NetId> = m.nets.iter().flatten().copied().collect();
+            nets.dedup();
+            let routes: Vec<(NetId, &NetRoute)> =
+                nets.iter().map(|&n| (n, &self.routes[n.index()])).collect();
+            self.mark_violation(&mut marks, area, m.layer, &m.bbox, &routes);
+        }
+        marks
+    }
+
+    /// Adds to `marks` the violations a local round's `judgment` found, on
+    /// the wiring of their nets as `work` proposes it.
+    fn mark_judgment(
+        &self,
+        marks: &mut Marks,
+        area: &Rect<Dbu>,
+        judgment: &Judgment,
+        work: &Work<'_>,
+    ) {
+        let candidates = work.candidates();
+        let mut proposed: FxHashMap<NetId, NetRoute> = FxHashMap::default();
+        for (m, owners) in judgment.findings.violations.iter().zip(&judgment.owners) {
+            let mut nets: Vec<NetId> = owners.iter().flatten().copied().collect();
+            nets.dedup();
+            for &n in &nets {
+                if let Some(c) = candidates.iter().find(|c| c.net == n) {
+                    let _ = proposed.entry(n).or_insert_with(|| self.as_committed(c));
+                }
+            }
+            let routes: Vec<(NetId, &NetRoute)> = nets
+                .iter()
+                .map(|&n| {
+                    (
+                        n,
+                        proposed.get(&n).unwrap_or_else(|| &self.routes[n.index()]),
+                    )
+                })
+                .collect();
+            self.mark_violation(marks, area, m.layer, &m.bbox, &routes);
+        }
+    }
+
     /// Repairs regions that do not touch each other; returns the number of
     /// pieces routed again.
-    fn repair_batch(&mut self, batch: &[(Rect<Dbu>, Vec<NetId>)], costs: Costs) -> usize {
+    fn repair_batch(&mut self, batch: &[RegionJob], costs: Costs) -> usize {
+        let seeds: Vec<Marks> = batch
+            .par_iter()
+            .map(|job| self.seed_marks(&job.area, &job.markers))
+            .collect();
         let mut regions_of: BTreeMap<NetId, Vec<usize>> = BTreeMap::new();
-        for (r, (_, nets)) in batch.iter().enumerate() {
-            for &net in nets {
+        for (r, job) in batch.iter().enumerate() {
+            for &net in &job.nets {
                 if self.routes[net.index()].complete {
                     regions_of.entry(net).or_default().push(r);
                 }
@@ -348,7 +431,7 @@ impl DetailedRouter<'_> {
         let mut removed: FxHashMap<(usize, NetId), Wiring> = FxHashMap::default();
         let mut carved = Changes::default();
         for (&net, regions) in &regions_of {
-            let areas: Vec<Rect<Dbu>> = regions.iter().map(|&r| batch[r].0).collect();
+            let areas: Vec<Rect<Dbu>> = regions.iter().map(|&r| batch[r].area).collect();
             for (k, (inside, piece)) in self.carve(net, &areas).into_iter().enumerate() {
                 carved.apply(net, inside.clone(), Wiring::default());
                 let _ = removed.insert((regions[k], net), inside);
@@ -359,13 +442,14 @@ impl DetailedRouter<'_> {
         }
         self.commit_changes(carved);
         let work: Vec<(Rect<Dbu>, Vec<Piece>)> =
-            batch.iter().map(|(area, _)| *area).zip(pieces).collect();
+            batch.iter().map(|job| job.area).zip(pieces).collect();
 
         let routed: Vec<Vec<Routed>> = work
             .par_iter()
+            .zip(seeds)
             .enumerate()
-            .map(|(r, (area, pieces))| {
-                let routed = self.route_region(area, pieces, costs);
+            .map(|(r, ((area, pieces), marks))| {
+                let routed = self.route_region(area, pieces, costs, marks);
                 let given = pieces.len();
                 let old: Vec<Candidate<'_>> = routed
                     .iter()
@@ -500,9 +584,13 @@ impl DetailedRouter<'_> {
             .collect()
     }
 
-    /// Routes a region's pieces, rerouting those still in conflict with a
-    /// growing penalty, and returns the wiring of the local round the judge
-    /// liked best, as `TritonRoute` keeps a worker's best iteration. A net
+    /// Routes a region's pieces, rerouting those still in conflict, and
+    /// returns the wiring of the local round the judge liked best, as
+    /// `TritonRoute` keeps a worker's best iteration. The costs stay the
+    /// round's throughout; what changes between local rounds are the
+    /// `marks`, which decay after every piece routed and gain the
+    /// violations each local round leaves, as a `TritonRoute` worker's
+    /// marker cost does. A net
     /// the judge finds in violation that is not among the pieces is ripped up
     /// inside the region too and routed again in the next local round, as
     /// `TritonRoute` queues the victims of a route; it comes back after the
@@ -512,13 +600,13 @@ impl DetailedRouter<'_> {
         area: &Rect<Dbu>,
         pieces: &[Piece],
         costs: Costs,
+        mut marks: Marks,
     ) -> Vec<Routed> {
         let window = Rect::new(area.min, area.max - Point::new(Dbu(1), Dbu(1)));
         let mut work = Work::new(pieces);
         let mut best: Option<(Score, Vec<Option<Wiring>>)> = None;
         let mut overlay = LocalOccupancy::default();
         let mut todo: Vec<usize> = self.ordered(&work, (0..pieces.len()).collect());
-        let mut penalty = costs.penalty;
         let mut avoided: FxHashMap<NetId, u8> = FxHashMap::default();
         for round in 0..LOCAL_ROUNDS {
             for &i in &todo {
@@ -532,9 +620,9 @@ impl DetailedRouter<'_> {
                     tech: self.tech,
                     occupancy: &self.occupancy,
                     overlay: Some(&overlay),
-                    history: &self.history,
+                    marks: &marks,
                     owner,
-                    costs: Costs { penalty, ..costs },
+                    costs,
                     guide: None,
                     own_vias: None,
                     ripped: &work.ripped,
@@ -569,6 +657,7 @@ impl DetailedRouter<'_> {
                     }
                 }
                 work.results[i] = result;
+                marks.decay(costs.decay);
             }
             let judgment = self.judge(area, &work.candidates());
             let score = Score {
@@ -593,6 +682,7 @@ impl DetailedRouter<'_> {
             if round + 1 == LOCAL_ROUNDS {
                 break;
             }
+            self.mark_judgment(&mut marks, area, &judgment, &work);
             let reroute = self.to_reroute(&judgment, &mut avoided);
             let mut again: Vec<usize> = (0..work.len())
                 .filter(|&i| work.results[i].is_some() && reroute.contains(&work.net(i)))
@@ -611,7 +701,6 @@ impl DetailedRouter<'_> {
             }
             todo = self.ordered(&work, again);
             self.log_judgment(area, round, &judgment);
-            penalty = (penalty * 2.0).min(MAX_PENALTY);
         }
         let kept = best.map_or_else(|| work.results.clone(), |(_, kept)| kept);
         work.into_routed(kept)

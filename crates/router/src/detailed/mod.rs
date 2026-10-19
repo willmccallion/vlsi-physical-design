@@ -9,18 +9,21 @@
 
 mod initial;
 mod judge;
+mod marking;
 mod patch;
 mod region;
+mod schedule;
 mod trace;
 
 pub use region::{RepairStats, Scope};
+pub use schedule::round_costs;
 pub use trace::Trace;
 
 use crate::access::{AccessPoint, Node, access_points};
 use crate::global::{GCell, GlobalGrid, GlobalRoutes, RouteTree};
-use crate::occupancy::{Occupancy, Origin, Owner, Proximity, Slot, TrackRef};
+use crate::occupancy::{Occupancy, Origin, Owner, Proximity, Slot};
 pub use crate::search::Costs;
-use crate::search::{GUIDE_SLACK_GCELLS, Guide, History, OwnVias, Search};
+use crate::search::{GUIDE_SLACK_GCELLS, Guide, Marks, OwnVias, Search};
 use crate::tech::RouteTech;
 use crate::track::TrackWire;
 use crate::tree::{connection_order, gap, hilbert_order};
@@ -29,7 +32,7 @@ use crate::wiring::{Edge, access_elems, elem_cuts, elem_metal, gap_fills, path_e
 use judge::ShapeTiles;
 use pare_common::db::design::NetlistDB;
 use pare_common::db::design::RouteElem;
-use pare_common::db::indices::{CutLayerId, LayerId, NetId, NonDefaultRuleId, ViaId};
+use pare_common::db::indices::{LayerId, NetId, NonDefaultRuleId, ViaId};
 use pare_common::db::library::LayerRef;
 use pare_common::geom::dbu::Dbu;
 use pare_common::geom::point::Point;
@@ -59,7 +62,6 @@ pub struct DetailedRouter<'a> {
     tech: &'a RouteTech,
     /// Occupancy of every track.
     pub occupancy: Occupancy,
-    history: History,
     access: Vec<Vec<Vec<AccessPoint>>>,
     routed: Vec<Vec<Slot>>,
     routes: Vec<NetRoute>,
@@ -137,7 +139,6 @@ impl<'a> DetailedRouter<'a> {
             db,
             tech,
             occupancy,
-            history: History::new(gcell / 4),
             access,
             routed: vec![Vec::new(); db.nets.len()],
             routes: vec![NetRoute::default(); db.nets.len()],
@@ -322,33 +323,14 @@ impl<'a> DetailedRouter<'a> {
         }
     }
 
-    /// Judges the whole design, records every violation in the history and
-    /// returns the nets involved.
-    pub fn conflicted_nets(&mut self, history_step: f64) -> Vec<NetId> {
-        let nets = self.rejudge();
-        let markers = std::mem::take(&mut self.markers);
-        for m in &markers {
-            self.trace_marker(m);
-            match m.layer {
-                LayerRef::Routing(layer) => {
-                    if let Some(track) = self.track_at(layer, m.at) {
-                        let along = self.tech.layer(layer).across_along(m.at).1;
-                        self.history.bump(track, along, history_step);
-                    }
-                }
-                LayerRef::Cut(cut) => self.bump_cut(cut, m.at, history_step),
-            }
-        }
-        self.markers = markers;
-        nets
-    }
-
-    /// Judges the whole design and returns the nets of its violations,
-    /// leaving the history as it is.
+    /// Judges the whole design and returns the nets of its violations.
     pub fn rejudge(&mut self) -> Vec<NetId> {
         let (markers, counts) = self.exact_markers();
         for (kind, count) in &counts {
             log::debug!("round markers: {} {}", kind.name(), count);
+        }
+        for m in &markers {
+            self.trace_marker(m);
         }
         let mut nets: Vec<NetId> = markers
             .iter()
@@ -365,23 +347,14 @@ impl<'a> DetailedRouter<'a> {
         self.trace = trace;
     }
 
-    /// The conflict history, by track and bucket along it.
-    pub fn history(&self) -> Vec<(TrackRef, i64, f64)> {
-        self.history.entries()
-    }
-
-    /// Puts saved routes and conflict history back, committing every route
-    /// as routing it would have.
+    /// Puts saved routes back, committing every route as routing it would
+    /// have.
     ///
     /// # Errors
     ///
     /// When a route has a node off the tracks of its layer or an access
     /// point pin access does not offer its net now.
-    pub fn restore(
-        &mut self,
-        routes: &[(NetId, NetRoute)],
-        history: &[(TrackRef, i64, f64)],
-    ) -> Result<(), RestoreRoutesError> {
+    pub fn restore(&mut self, routes: &[(NetId, NetRoute)]) -> Result<(), RestoreRoutesError> {
         for (net, route) in routes {
             let nodes = route.edges.iter().flat_map(|e| match *e {
                 Edge::Wire(n) => [n, n],
@@ -402,9 +375,6 @@ impl<'a> DetailedRouter<'a> {
         for (net, route) in routes {
             self.commit(*net, route);
         }
-        for &(track, bucket, amount) in history {
-            self.history.set(track, bucket, amount);
-        }
         Ok(())
     }
 
@@ -417,8 +387,7 @@ impl<'a> DetailedRouter<'a> {
         (n.track as usize) < lt.tracks.len() && (n.cross as usize) < lt.cross.len()
     }
 
-    /// Logs a violation of a traced net or in the traced area, where the
-    /// history it raises lies.
+    /// Logs a violation of a traced net or in the traced area.
     fn trace_marker(&self, m: &Marker) {
         let at = Rect::new(m.at, m.at);
         let traced =
@@ -433,36 +402,11 @@ impl<'a> DetailedRouter<'a> {
             .map(|n| self.db.nets[n.index()].name.clone())
             .collect();
         log::info!(
-            "trace marker {:?} at ({}, {}) between {}: history raised on the track through that point",
+            "trace marker {:?} at {} between {}",
             m.layer,
-            m.at.x.get(),
-            m.at.y.get(),
+            trace::region_text(&m.bbox),
             names.join(" and ")
         );
-    }
-
-    /// Adds history on the tracks of both layers a cut at `at` joins.
-    fn bump_cut(&mut self, cut: CutLayerId, at: Point<Dbu>, step: f64) {
-        for layer in [cut.below(), cut.above()] {
-            if let Some(track) = self.track_at(layer, at) {
-                let along = self.tech.layer(layer).across_along(at).1;
-                self.history.bump(track, along, step);
-            }
-        }
-    }
-
-    /// The track of `layer` running through `p`, if one does.
-    fn track_at(&self, layer: LayerId, p: Point<Dbu>) -> Option<TrackRef> {
-        if !self.tech.routable(layer) {
-            return None;
-        }
-        let lt = self.tech.layer(layer);
-        let across = lt.across_along(p).0;
-        let i = lt.tracks.binary_search(&across).ok()?;
-        Some(TrackRef {
-            layer,
-            track: crate::tech::to_u32(i),
-        })
     }
 
     /// Global routing terminals: the gcell of each pin's best access point.
@@ -540,12 +484,13 @@ impl<'a> DetailedRouter<'a> {
         let net_guide = self.guides[net.index()].as_ref();
         let guide =
             net_guide.map(|g| Guide::new(g.tree.cells(), self.grid_origin, self.gcell, self.tech));
+        let unmarked = Marks::default();
         let mut search = Search {
             db: self.db,
             tech: self.tech,
             occupancy: &self.occupancy,
             overlay: None,
-            history: &self.history,
+            marks: &unmarked,
             owner: Owner::Net(net.0),
             costs,
             guide: guide.as_ref(),
@@ -1037,6 +982,8 @@ fn closest_points(a: &Rect<Dbu>, b: &Rect<Dbu>) -> (Point<Dbu>, Point<Dbu>) {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 struct Marker {
     at: Point<Dbu>,
+    /// The violation's extent.
+    bbox: Rect<Dbu>,
     layer: LayerRef,
     nets: [Option<NetId>; 2],
 }

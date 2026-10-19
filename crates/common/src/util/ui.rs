@@ -103,14 +103,14 @@ pub fn gr_layer_row(layer: &str, direction: Direction, capacity: u64, usage: u64
 }
 
 /// Prints the header of the detailed routing table: the design rule
-/// violations left after each round, the nets in them, and the pieces
-/// routed again.
+/// violations left after each round, the nets in them, the pieces routed
+/// again, and the round's conflict cost per unit of length.
 pub fn dr_table_header() {
     eprintln!(
         "\n    {}",
         format!(
             "{:<8} {:>10} {:>10} {:>10} {:>10} {:>10}",
-            "DR Iter", "Markers", "Nets", "Ripped", "Penalty", "Time"
+            "DR Iter", "Markers", "Nets", "Ripped", "Conflict", "Time"
         )
         .dim()
     );
@@ -123,10 +123,12 @@ pub fn dr_iter(
     markers: usize,
     nets: usize,
     ripped: usize,
-    penalty: f64,
+    conflict: f64,
     time_ms: u128,
 ) {
-    eprintln!("    {iter:<8} {markers:>10} {nets:>10} {ripped:>10} {penalty:>10.1} {time_ms:>8}ms");
+    eprintln!(
+        "    {iter:<8} {markers:>10} {nets:>10} {ripped:>10} {conflict:>10.1} {time_ms:>8}ms"
+    );
 }
 
 /// Prints a single routing iteration row.

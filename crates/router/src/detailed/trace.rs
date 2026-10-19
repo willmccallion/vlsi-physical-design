@@ -1,7 +1,7 @@
 //! Logs of chosen nets or areas, detailed enough to see why routing does
 //! what it does there: each search's route with what it cost, part by part,
-//! how each region's result was judged and whether it was kept, and where
-//! violations raised the conflict history.
+//! how each region's result was judged and whether it was kept, and the
+//! violations found there.
 
 use crate::access::Node;
 use crate::occupancy::Owner;
@@ -121,21 +121,22 @@ pub(super) fn route_text(db: &NetlistDB, tech: &RouteTech, edges: &[Edge]) -> St
     out.trim_start().to_string()
 }
 
-/// An explanation as its total and its parts.
+/// An explanation as its total and its parts, and whose wiring it meets.
 pub(super) fn cost_text(db: &NetlistDB, e: &Explanation) -> String {
-    let mut conflicts = e.conflicts.clone();
-    conflicts.sort_by(|a, b| b.1.total_cmp(&a.1));
     let mut out = format!(
-        "{:.0} = length {:.0} + {} vias {:.0} + history {:.0} + own vias {:.0}",
+        "{:.0} = length {:.0} + {} vias {:.0} + conflicts {:.0} + markers {:.0} + obstacles {:.0} + own vias {:.0}",
         e.total(),
         e.length,
         e.vias,
         e.via_cost,
-        e.history,
+        e.conflict,
+        e.marker,
+        e.obstacle,
         e.own_vias
     );
-    for (owner, cost) in conflicts {
-        let _ = write!(out, " + {cost:.0} near {}", owner_text(db, owner));
+    if !e.met.is_empty() {
+        let names: Vec<String> = e.met.iter().map(|&o| owner_text(db, o)).collect();
+        let _ = write!(out, "; meets {}", names.join(", "));
     }
     out
 }

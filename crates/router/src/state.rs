@@ -1,17 +1,16 @@
 //! A routing run saved part way, to resume from.
 //!
 //! The state holds every net's global route and, once detailed routing has
-//! begun, every net's detailed route, the history of conflicts and how far
-//! the repair rounds had got, so that a resumed run goes on exactly as the
-//! saved one would have.
+//! begun, every net's detailed route and how far the repair rounds had got,
+//! so that a resumed run goes on exactly as the saved one would have: the
+//! next round's costs follow from its number, and its marks from the
+//! violations the routes have.
 //!
-//! The file is plain text, one record a line. Floating-point values are
-//! kept as the hexadecimal bits of the number so they read back exactly.
+//! The file is plain text, one record a line.
 
 use crate::access::{AccessPoint, Node};
 use crate::detailed::Scope;
 use crate::global::GCell;
-use crate::occupancy::TrackRef;
 use crate::wiring::{Edge, NetRoute, Patch};
 use pare_common::db::indices::{LayerId, ViaId};
 use pare_common::geom::dbu::Dbu;
@@ -47,8 +46,6 @@ pub(crate) struct GridShape {
 pub(crate) struct DetailedState {
     /// The round just finished; 0 is the first pass.
     pub round: usize,
-    /// The conflict penalty that round used.
-    pub penalty: f64,
     /// The scope the next round takes.
     pub scope: Scope,
     /// The fewest markers so far, and the rounds since that count was set.
@@ -56,8 +53,6 @@ pub(crate) struct DetailedState {
     pub since_best: usize,
     /// Each routed net's name and route.
     pub routes: Vec<(String, NetRoute)>,
-    /// Conflict history: track, bucket along it, amount.
-    pub history: Vec<(TrackRef, i64, f64)>,
 }
 
 /// Why a state file could not be read.
@@ -170,9 +165,8 @@ fn write_detailed(out: &mut impl Write, d: &DetailedState) -> io::Result<()> {
     };
     writeln!(
         out,
-        "detailed {} {:x} {scope} {} {} {}",
+        "detailed {} {scope} {} {} {}",
         d.round,
-        d.penalty.to_bits(),
         d.best,
         d.since_best,
         d.routes.len()
@@ -221,16 +215,6 @@ fn write_detailed(out: &mut impl Write, d: &DetailedState) -> io::Result<()> {
             writeln!(out)?;
         }
     }
-    writeln!(out, "history {}", d.history.len())?;
-    for (t, bucket, amount) in &d.history {
-        writeln!(
-            out,
-            "h {} {} {bucket} {:x}",
-            t.layer.index(),
-            t.track,
-            amount.to_bits()
-        )?;
-    }
     Ok(())
 }
 
@@ -244,7 +228,6 @@ fn parse_detailed(lines: &mut Lines<'_>, header: &str) -> Result<DetailedState, 
         return Err(head.error("expected a `detailed` line"));
     }
     let round: usize = head.int()?;
-    let penalty = head.bits()?;
     let scope = match head.word()?.as_str() {
         "conflicts" => Scope::Conflicts,
         "near" => Scope::NearConflicts,
@@ -311,27 +294,12 @@ fn parse_detailed(lines: &mut Lines<'_>, header: &str) -> Result<DetailedState, 
         }
         routes.push((name, route));
     }
-    let count: usize = lines.keyword("history")?.int()?;
-    let mut history = Vec::with_capacity(count);
-    for _ in 0..count {
-        let mut h = lines.keyword("h")?;
-        let track = TrackRef {
-            layer: LayerId::new(h.int()?),
-            track: h.int()?,
-        };
-        let bucket: i64 = h.int()?;
-        let amount = h.bits()?;
-        h.done()?;
-        history.push((track, bucket, amount));
-    }
     Ok(DetailedState {
         round,
-        penalty,
         scope,
         best,
         since_best,
         routes,
-        history,
     })
 }
 
@@ -424,13 +392,6 @@ impl Fields<'_> {
             .map_err(|_| self.error(&format!("`{word}` is not a valid number here")))
     }
 
-    fn bits(&mut self) -> Result<f64, StateParseError> {
-        let word = self.word()?;
-        u64::from_str_radix(&word, 16)
-            .map(f64::from_bits)
-            .map_err(|_| self.error(&format!("`{word}` is not a hexadecimal float")))
-    }
-
     fn node(&mut self) -> Result<Node, StateParseError> {
         Ok(Node {
             layer: LayerId::new(self.int()?),
@@ -514,19 +475,10 @@ mod tests {
             )],
             detailed: Some(DetailedState {
                 round: 7,
-                penalty: 0.1 + 0.2,
                 scope: Scope::NearConflicts,
                 best: 3,
                 since_best: 2,
                 routes: vec![("a".to_string(), route)],
-                history: vec![(
-                    TrackRef {
-                        layer: LayerId::new(2),
-                        track: 4,
-                    },
-                    -1,
-                    1.0 / 3.0,
-                )],
             }),
         }
     }

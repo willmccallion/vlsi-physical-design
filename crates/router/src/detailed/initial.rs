@@ -16,7 +16,7 @@ use super::region::{
 use super::{DetailedRouter, NetRoute};
 use crate::access::{AccessPoint, Node};
 use crate::global::GCell;
-use crate::search::Costs;
+use crate::search::{Costs, Marks};
 use crate::wiring::Edge;
 use pare_common::db::indices::NetId;
 use pare_common::db::library::Direction;
@@ -132,7 +132,7 @@ impl DetailedRouter<'_> {
 
         let routed: Vec<Vec<Routed>> = batch
             .par_iter()
-            .map(|(area, pieces)| self.route_region(area, pieces, costs))
+            .map(|(area, pieces)| self.route_region(area, pieces, costs, Marks::default()))
             .collect();
 
         let mut failed = Vec::new();

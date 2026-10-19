@@ -224,7 +224,8 @@ impl DetailedRouter<'_> {
     }
 }
 
-/// The repair marker of a checker marker: its center, layer and nets.
+/// The repair marker of a checker marker: its center, extent, layer and
+/// nets.
 fn marker_of(owners: &[Owner], m: &DrcMarker) -> Marker {
     let net = |o: pare_common::verify::drc::OwnerIndex| match owners[o.index()] {
         Owner::Net(n) => Some(n),
@@ -232,6 +233,7 @@ fn marker_of(owners: &[Owner], m: &DrcMarker) -> Marker {
     };
     Marker {
         at: m.bbox.center(),
+        bbox: m.bbox,
         layer: m.layer,
         nets: [net(m.owners.0), net(m.owners.1)],
     }

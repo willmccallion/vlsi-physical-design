@@ -84,7 +84,7 @@ impl DetailedRouter<'_> {
                 Rect::new(Point::new(across.0, along.0), Point::new(across.1, along.1))
             }
         };
-        let cost = |r: &Rect<Dbu>| search.conflict_cost(piece.layer, r);
+        let cost = |r: &Rect<Dbu>| search.shape_cost(piece.layer, r);
         let split = |length: i64, low: i64, of: i64| {
             let below = round_up(length * low / of, grid);
             (below, length - below)

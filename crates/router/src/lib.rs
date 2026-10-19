@@ -17,7 +17,7 @@ pub mod track;
 pub mod tree;
 pub mod wiring;
 
-use detailed::{Costs, DetailedRouter, RestoreRoutesError, Scope, routable_nets};
+use detailed::{DetailedRouter, RestoreRoutesError, Scope, round_costs, routable_nets};
 pub use global::{CapacityReduction, TileTracks};
 use global::{
     GCell, GlobalGrid, GlobalNet, GlobalRoutes, RestoreError, Tracks, restore_global, route_global,
@@ -36,7 +36,6 @@ use pare_common::util::config::{LayerRangeError, RoutingConfig};
 use pare_common::util::{memory, ui};
 use pare_common::verify::shapes::obstruction_shapes;
 use rustc_hash::FxHashMap;
-use search::MAX_PENALTY;
 use state::{DetailedState, GridShape};
 pub use state::{RouteState, StateParseError};
 use std::time::Instant;
@@ -132,12 +131,7 @@ pub fn route_with(
     check_routable(db, config)?;
     let tech = RouteTech::new(db, config)?;
     let gcell = gcell_size(&tech, config);
-    let pitch = tech.layer(tech.min_layer).pitch().to_f64();
-    let mut costs = Costs {
-        via: 4.0 * pitch,
-        penalty: 8.0 * pitch,
-        history: 4.0 * pitch,
-    };
+    let via = 4.0 * tech.layer(tech.min_layer).pitch().to_f64();
 
     let (routes, summary, gcells) = {
         let GlobalStage {
@@ -170,8 +164,7 @@ pub fn route_with(
         let resumed = session.resume.and_then(|s| s.detailed.as_ref());
         let (first_round, mut conflicted, mut scope, mut progress) = if let Some(saved) = resumed {
             let routes = named_routes(db, &saved.routes)?;
-            dr.restore(&routes, &saved.history)?;
-            costs.penalty = saved.penalty;
+            dr.restore(&routes)?;
             ui::dr_table_header();
             let conflicted = dr.rejudge();
             ui::dr_iter(
@@ -179,7 +172,7 @@ pub fn route_with(
                 dr.marker_count(),
                 conflicted.len(),
                 0,
-                costs.penalty / pitch,
+                round_costs(saved.round, via).conflict,
                 start.elapsed().as_millis(),
             );
             let progress = Progress {
@@ -188,15 +181,15 @@ pub fn route_with(
             };
             (saved.round + 1, conflicted, saved.scope, progress)
         } else {
-            let first = dr.route_initial(&nets, costs);
+            let first = dr.route_initial(&nets, round_costs(0, via));
             ui::dr_table_header();
-            let conflicted = dr.conflicted_nets(1.0);
+            let conflicted = dr.rejudge();
             ui::dr_iter(
                 0,
                 dr.marker_count(),
                 conflicted.len(),
                 first.pieces,
-                costs.penalty / pitch,
+                round_costs(0, via).conflict,
                 start.elapsed().as_millis(),
             );
             let progress = Progress::new(dr.marker_count());
@@ -211,7 +204,6 @@ pub fn route_with(
                     shape,
                     named_global.clone(),
                     0,
-                    costs,
                     scope,
                     &progress,
                 )
@@ -230,25 +222,23 @@ pub fn route_with(
                 break;
             }
             let start = Instant::now();
-            costs.penalty = (costs.penalty * 1.5).min(MAX_PENALTY);
+            let costs = round_costs(round, via);
             let repaired = dr.repair(costs, round, scope);
             let before = conflicted.len();
-            conflicted = dr.conflicted_nets(1.0);
+            conflicted = dr.rejudge();
             scope = next_scope(scope, conflicted.len() < before);
             progress.record(dr.marker_count());
             summary.rounds = round;
             session.save_at(SavePoint::Round(round), || {
                 let global = named_global.clone();
-                detailed_state(
-                    db, &dr, &nets, shape, global, round, costs, scope, &progress,
-                )
+                detailed_state(db, &dr, &nets, shape, global, round, scope, &progress)
             });
             ui::dr_iter(
                 round,
                 dr.marker_count(),
                 conflicted.len(),
                 repaired.pieces,
-                costs.penalty / pitch,
+                costs.conflict,
                 start.elapsed().as_millis(),
             );
         }
@@ -287,7 +277,6 @@ fn detailed_state(
     grid: GridShape,
     global: Option<Vec<(String, Vec<Vec<GCell>>)>>,
     round: usize,
-    costs: Costs,
     scope: Scope,
     progress: &Progress,
 ) -> RouteState {
@@ -306,12 +295,10 @@ fn detailed_state(
         global: global.unwrap_or_default(),
         detailed: Some(DetailedState {
             round,
-            penalty: costs.penalty,
             scope,
             best: progress.best,
             since_best: progress.since_best,
             routes,
-            history: dr.history(),
         }),
     }
 }

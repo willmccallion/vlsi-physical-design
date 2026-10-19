@@ -1,17 +1,23 @@
 //! The A* search over track crossings and what it costs.
 //!
-//! Costs are wirelength, a fixed via cost, a penalty for every piece of
-//! another net's wiring the new metal or cuts would short or crowd, and
-//! accumulated conflict history. Obstacles, and other nets' pins and
-//! reserved pin access, never move, so they cost so much that a route
-//! through one exists only when nothing else does. A guide limits the
-//! search to gcells near a net's global route.
+//! Every edge of the track graph costs as `TritonRoute` prices an edge of
+//! its grid graph: its length (a via counts as long as its cost), plus the
+//! round's conflict cost per unit of length if its metal or cuts would
+//! short or crowd another net's wiring, plus the round's marker cost per
+//! unit of length if it runs where a violation was marked lately.
+//! Obstacles, and other nets' pins and reserved pin access, never move, so
+//! they cost so much that a route through one exists only when nothing
+//! else does. A guide limits the search to gcells near a net's global
+//! route.
 
 mod dense;
+mod marks;
+
+pub(crate) use marks::Marks;
 
 use crate::access::{AccessPoint, Node};
 use crate::global::GCell;
-use crate::occupancy::{LocalOccupancy, Occupancy, Origin, Owner, Proximity, TrackRef, too_close};
+use crate::occupancy::{LocalOccupancy, Occupancy, Origin, Owner, Proximity, too_close};
 use crate::tech::RouteTech;
 use crate::wiring::Edge;
 use pare_common::db::design::NetlistDB;
@@ -27,10 +33,6 @@ use std::collections::BinaryHeap;
 /// Cost of crossing an obstacle or another net's fixed metal, in DBU of
 /// wirelength.
 const OBSTACLE_COST: f64 = 1e9;
-
-/// Highest conflict penalty, far below the cost of an obstacle so that a
-/// route never prefers fixed metal to wiring that can move.
-pub(crate) const MAX_PENALTY: f64 = OBSTACLE_COST * 1e-3;
 
 /// How hard one A* run tries.
 #[derive(Clone, Copy, Debug)]
@@ -54,34 +56,73 @@ const GREEDY: Effort = Effort {
     limit: 4_000_000,
 };
 
-/// Tunable costs of the search.
-#[derive(Clone, Copy, Debug)]
+/// The costs of one round of the search.
+#[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Costs {
-    /// Cost of one via, in DBU of wirelength.
+    /// Cost of one via, in DBU of wirelength; also its length when its
+    /// conflict and marker costs are reckoned.
     pub via: f64,
-    /// Cost per conflicting occupant this round.
-    pub penalty: f64,
-    /// Cost per unit of history at a location.
-    pub history: f64,
+    /// Cost per unit of length of an edge that conflicts with another net's
+    /// wiring.
+    pub conflict: f64,
+    /// Cost per unit of length of an edge that runs where a violation was
+    /// marked.
+    pub marker: f64,
+    /// Factor each marker counter is scaled by after every piece a worker
+    /// routes.
+    pub decay: f64,
 }
 
-/// Where the parts of a cost go: nowhere while searching, into an
-/// [`Explanation`] while tracing.
+/// What an edge's metal and cuts meet: fixed metal, and wiring that can
+/// move.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+struct Meets {
+    fixed: bool,
+    wiring: bool,
+}
+
+impl Meets {
+    /// Everything either meets.
+    const fn and(self, other: Self) -> Self {
+        Self {
+            fixed: self.fixed || other.fixed,
+            wiring: self.wiring || other.wiring,
+        }
+    }
+
+    const fn any(self) -> bool {
+        self.fixed || self.wiring
+    }
+}
+
+/// The cost of one edge of the graph, part by part.
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+struct Price {
+    length: f64,
+    conflict: f64,
+    marker: f64,
+    obstacle: f64,
+}
+
+impl Price {
+    fn total(self) -> f64 {
+        self.length + self.conflict + self.marker + self.obstacle
+    }
+}
+
+/// Where the owners an edge meets are told: nowhere while searching, into
+/// an [`Explanation`] while tracing.
 pub(crate) trait CostParts {
-    /// A part paid for coming near `owner`'s metal or cuts.
-    fn conflict(&mut self, owner: Owner, cost: f64);
-    /// A part paid for the conflict history of a track.
-    fn history(&mut self, cost: f64);
+    /// Notes that an edge's metal or cuts meet `owner`'s.
+    fn meets(&mut self, owner: Owner);
 }
 
-/// Costs summed without keeping their parts.
+/// Owners met, forgotten.
 struct Total;
 
 impl CostParts for Total {
     #[inline(always)]
-    fn conflict(&mut self, _: Owner, _: f64) {}
-    #[inline(always)]
-    fn history(&mut self, _: f64) {}
+    fn meets(&mut self, _: Owner) {}
 }
 
 /// What a route costs a search, part by part.
@@ -92,10 +133,14 @@ pub(crate) struct Explanation {
     /// Vias, and what they cost for being vias.
     pub vias: usize,
     pub via_cost: f64,
-    /// What coming near each other owner costs, largest first once sorted.
-    pub conflicts: Vec<(Owner, f64)>,
-    /// What the conflict history of the tracks used costs.
-    pub history: f64,
+    /// What conflicting with other nets' wiring costs.
+    pub conflict: f64,
+    /// Whose metal or cuts the route meets, in the order first met.
+    pub met: Vec<Owner>,
+    /// What running where violations were marked costs.
+    pub marker: f64,
+    /// What crossing fixed metal costs.
+    pub obstacle: f64,
     /// What crowding the net's own vias costs.
     pub own_vias: f64,
 }
@@ -103,73 +148,15 @@ pub(crate) struct Explanation {
 impl Explanation {
     /// The whole cost.
     pub fn total(&self) -> f64 {
-        let conflicts: f64 = self.conflicts.iter().map(|&(_, c)| c).sum();
-        self.length + self.via_cost + conflicts + self.history + self.own_vias
+        self.length + self.via_cost + self.conflict + self.marker + self.obstacle + self.own_vias
     }
 }
 
 impl CostParts for Explanation {
-    fn conflict(&mut self, owner: Owner, cost: f64) {
-        if cost == 0.0 {
-            return;
+    fn meets(&mut self, owner: Owner) {
+        if !self.met.contains(&owner) {
+            self.met.push(owner);
         }
-        match self.conflicts.iter_mut().find(|(o, _)| *o == owner) {
-            Some((_, c)) => *c += cost,
-            None => self.conflicts.push((owner, cost)),
-        }
-    }
-
-    fn history(&mut self, cost: f64) {
-        self.history += cost;
-    }
-}
-
-/// Accumulated conflict history, by track and coarse position along it.
-#[derive(Debug, Default)]
-pub struct History {
-    bucket: Dbu,
-    map: FxHashMap<(TrackRef, i64), f64>,
-}
-
-impl History {
-    pub(crate) fn new(bucket: Dbu) -> Self {
-        Self {
-            bucket: bucket.max(Dbu(1)),
-            map: FxHashMap::default(),
-        }
-    }
-
-    const fn key(&self, t: TrackRef, along: Dbu) -> (TrackRef, i64) {
-        (t, along.get().div_euclid(self.bucket.get()))
-    }
-
-    /// Total history of the buckets `[lo, hi]` overlaps on a track.
-    fn over(&self, t: TrackRef, lo: Dbu, hi: Dbu) -> f64 {
-        if self.map.is_empty() {
-            return 0.0;
-        }
-        let (_, first) = self.key(t, lo);
-        let (_, last) = self.key(t, hi);
-        (first..=last)
-            .map(|b| self.map.get(&(t, b)).copied().unwrap_or(0.0))
-            .sum()
-    }
-
-    pub(crate) fn bump(&mut self, t: TrackRef, along: Dbu, amount: f64) {
-        *self.map.entry(self.key(t, along)).or_insert(0.0) += amount;
-    }
-
-    /// Every bucket's amount, by track and bucket.
-    pub(crate) fn entries(&self) -> Vec<(TrackRef, i64, f64)> {
-        let mut out: Vec<(TrackRef, i64, f64)> =
-            self.map.iter().map(|(&(t, b), &a)| (t, b, a)).collect();
-        out.sort_unstable_by_key(|&(t, b, _)| (t, b));
-        out
-    }
-
-    /// Sets one bucket's amount, as [`Self::entries`] gave it.
-    pub(crate) fn set(&mut self, t: TrackRef, bucket: i64, amount: f64) {
-        let _ = self.map.insert((t, bucket), amount);
     }
 }
 
@@ -364,7 +351,8 @@ pub(crate) struct Search<'a> {
     pub(crate) tech: &'a RouteTech,
     pub(crate) occupancy: &'a Occupancy,
     pub(crate) overlay: Option<&'a LocalOccupancy>,
-    pub(crate) history: &'a History,
+    /// Where violations were marked lately.
+    pub(crate) marks: &'a Marks,
     pub(crate) owner: Owner,
     pub(crate) costs: Costs,
     pub(crate) guide: Option<&'a Guide>,
@@ -468,210 +456,222 @@ impl Search<'_> {
         self.tech.wire_spacing(self.rule(), layer)
     }
 
-    /// Cost of using an access point: its stub, its vias, and any conflicts
-    /// their metal would have on the routable layers.
+    /// Cost of using an access point: its stub and its vias, each priced
+    /// as an edge of the graph by what its metal and cuts meet.
     pub(crate) fn access_cost(&self, a: &AccessPoint) -> f64 {
         let node = self.point(a.node);
         let mut cost = if node == a.at {
             0.0
         } else {
-            self.wire_cost(a.node.layer, node, a.at)
+            self.wire_price(a.node.layer, node, a.at).total()
         };
         for &via in &a.vias {
-            cost += self.costs.via;
+            let mut meets = Meets::default();
             for s in &self.db.library.via(via).shapes {
                 let rect = s.rect.translate(a.at);
-                match s.layer {
+                meets = meets.and(match s.layer {
                     LayerRef::Routing(l) if self.tech.routable(l) => {
-                        cost += self.conflict_cost(l, &rect);
+                        self.metal_meets(l, &rect, false, &mut Total)
                     }
-                    LayerRef::Routing(_) => {}
-                    LayerRef::Cut(c) => cost += self.cut_cost(c, &rect),
-                }
+                    LayerRef::Routing(_) => Meets::default(),
+                    LayerRef::Cut(c) => self.cut_meets(c, &rect, &mut Total),
+                });
             }
+            cost += self.price(self.costs.via, meets, false).total();
         }
         cost
     }
 
-    /// Cost of conflicting with one occupant of the shared occupancy.
-    fn occupant_cost(&self, owner: Owner, origin: Origin) -> f64 {
+    /// Whether one occupant of the shared occupancy is fixed metal, wiring
+    /// that counts as a conflict, or wiring the worker is routing again.
+    fn occupant(&self, owner: Owner, origin: Origin) -> Meets {
         match (owner, origin) {
-            (Owner::Obstacle, _) | (Owner::Net(_), Origin::Fixed) => OBSTACLE_COST,
-            (Owner::Net(_), Origin::Wiring) if self.ripped.contains(&owner) => 0.0,
-            (Owner::Net(_), Origin::Wiring) => self.costs.penalty,
+            (Owner::Obstacle, _) | (Owner::Net(_), Origin::Fixed) => Meets {
+                fixed: true,
+                wiring: false,
+            },
+            (Owner::Net(_), Origin::Wiring) if self.ripped.contains(&owner) => Meets::default(),
+            (Owner::Net(_), Origin::Wiring) => Meets {
+                fixed: false,
+                wiring: true,
+            },
         }
     }
 
-    /// Cost of other owners' cuts that a cut at `rect` on `cut` would touch
-    /// or crowd.
-    fn cut_cost(&self, cut: CutLayerId, rect: &Rect<Dbu>) -> f64 {
-        self.cut_cost_into(cut, rect, &mut Total)
-    }
-
-    /// [`Self::cut_cost`], telling `parts` whom each part is paid to.
-    fn cut_cost_into(&self, cut: CutLayerId, rect: &Rect<Dbu>, parts: &mut impl CostParts) -> f64 {
-        let mut cost = 0.0;
+    /// What other owners' cuts a cut at `rect` on `cut` would touch or
+    /// crowd, telling `parts` whose they are.
+    fn cut_meets(&self, cut: CutLayerId, rect: &Rect<Dbu>, parts: &mut impl CostParts) -> Meets {
+        let mut meets = Meets::default();
         for o in self.occupancy.cut_conflicts(cut, rect, self.owner) {
-            let part = self.occupant_cost(o.owner, o.origin);
-            parts.conflict(o.owner, part);
-            cost += part;
+            let met = self.occupant(o.owner, o.origin);
+            if met.any() {
+                parts.meets(o.owner);
+            }
+            meets = meets.and(met);
         }
         if let Some(overlay) = self.overlay {
             for o in overlay.cut_conflicts(cut, rect, self.owner) {
-                parts.conflict(o.owner, self.costs.penalty);
-                cost += self.costs.penalty;
+                parts.meets(o.owner);
+                meets.wiring = true;
             }
         }
-        cost
+        meets
     }
 
-    /// Cost of other owners' metal that a whole shape `rect` on `layer`
-    /// would conflict with, plus the conflict history of the tracks it runs
-    /// on.
-    pub(crate) fn conflict_cost(&self, layer: LayerId, rect: &Rect<Dbu>) -> f64 {
-        self.metal_cost(layer, rect, 0.0)
-    }
-
-    /// [`Self::conflict_cost`] for one step of a wire, which also pays
-    /// `alongside` for each shape it would violate the spacing of should
-    /// the wire go on alongside it, as `TritonRoute` prices fixed shapes.
-    fn step_conflict_cost(&self, layer: LayerId, rect: &Rect<Dbu>) -> f64 {
-        self.metal_cost(layer, rect, self.costs.penalty)
-    }
-
-    fn metal_cost(&self, layer: LayerId, rect: &Rect<Dbu>, alongside: f64) -> f64 {
-        self.metal_cost_into(layer, rect, alongside, &mut Total)
-    }
-
-    /// [`Self::metal_cost`], telling `parts` whom each part is paid to.
-    fn metal_cost_into(
+    /// What other owners' metal a shape `rect` on `layer` would conflict
+    /// with, telling `parts` whose it is. With `alongside`, metal it would
+    /// violate the spacing of should a wire go on alongside it counts as a
+    /// conflict too, as for one step of a wire.
+    fn metal_meets(
         &self,
         layer: LayerId,
         rect: &Rect<Dbu>,
-        alongside: f64,
+        alongside: bool,
         parts: &mut impl CostParts,
-    ) -> f64 {
-        let mut cost = 0.0;
+    ) -> Meets {
+        let mut meets = Meets::default();
         for c in self
             .occupancy
             .rect_conflicts(self.tech, layer, rect, self.owner)
         {
-            let part = match c.proximity {
-                Proximity::Within => self.occupant_cost(c.occupant.owner, c.occupant.origin),
-                Proximity::Alongside => alongside,
+            let met = match c.proximity {
+                Proximity::Within => self.occupant(c.occupant.owner, c.occupant.origin),
+                Proximity::Alongside if alongside => Meets {
+                    fixed: false,
+                    wiring: true,
+                },
+                Proximity::Alongside => Meets::default(),
             };
-            parts.conflict(c.occupant.owner, part);
-            cost += part;
+            if met.any() {
+                parts.meets(c.occupant.owner);
+            }
+            meets = meets.and(met);
         }
         if let Some(overlay) = self.overlay {
             for c in overlay.rect_conflicts(self.tech, layer, rect, self.owner) {
-                let part = match c.proximity {
-                    Proximity::Within => self.costs.penalty,
-                    Proximity::Alongside => alongside,
-                };
-                parts.conflict(c.occupant.owner, part);
-                cost += part;
+                if c.proximity == Proximity::Within || alongside {
+                    parts.meets(c.occupant.owner);
+                    meets.wiring = true;
+                }
             }
         }
-        let lt = self.tech.layer(layer);
-        let ((a0, a1), (b0, b1)) = lt.across_along_rect(rect);
-        for track in lt.tracks_within(a0, a1) {
-            let t = TrackRef { layer, track };
-            let part = self.costs.history * self.history.over(t, b0, b1);
-            parts.history(part);
-            cost += part;
+        meets
+    }
+
+    /// The price of an edge of `length` that `meets` what it meets and runs
+    /// where a violation was marked if `marked`: its length, and the
+    /// round's conflict and marker costs per unit of it, as `TritonRoute`
+    /// prices an edge of its grid graph. Fixed metal costs an obstacle.
+    fn price(&self, length: f64, meets: Meets, marked: bool) -> Price {
+        Price {
+            length,
+            conflict: if meets.wiring {
+                self.costs.conflict * length
+            } else {
+                0.0
+            },
+            marker: if marked {
+                self.costs.marker * length
+            } else {
+                0.0
+            },
+            obstacle: if meets.fixed { OBSTACLE_COST } else { 0.0 },
         }
-        cost
+    }
+
+    /// What a shape `rect` on `layer` laid by itself, such as a patch,
+    /// would conflict with: an obstacle's cost for fixed metal, and the
+    /// conflict cost over the length it runs along its layer for wiring.
+    /// Its own length costs nothing, so that shapes of different extents
+    /// compare by their conflicts alone.
+    pub(crate) fn shape_cost(&self, layer: LayerId, rect: &Rect<Dbu>) -> f64 {
+        let (_, (b0, b1)) = self.tech.layer(layer).across_along_rect(rect);
+        let meets = self.metal_meets(layer, rect, false, &mut Total);
+        let price = self.price((b1 - b0).to_f64(), meets, false);
+        price.conflict + price.obstacle
+    }
+
+    /// Price of a whole wire from `a` to `b`, such as an access stub.
+    fn wire_price(&self, layer: LayerId, a: Point<Dbu>, b: Point<Dbu>) -> Price {
+        let length = ((a.x - b.x).abs() + (a.y - b.y).abs()).to_f64();
+        let meets = wire_rect(a, b, self.width(layer)).map_or_else(Meets::default, |r| {
+            self.metal_meets(layer, &r, false, &mut Total)
+        });
+        self.price(length, meets, false)
+    }
+
+    /// Price of the wire step from `lower` to the next crossing along its
+    /// track, telling `parts` whose metal it meets. It is marked when either
+    /// end is.
+    fn step_price(&self, lower: Node, parts: &mut impl CostParts) -> Price {
+        let upper = Node {
+            cross: lower.cross + 1,
+            ..lower
+        };
+        let (a, b) = (self.point(lower), self.point(upper));
+        let length = ((a.x - b.x).abs() + (a.y - b.y).abs()).to_f64();
+        let meets = wire_rect(a, b, self.width(lower.layer)).map_or_else(Meets::default, |r| {
+            self.metal_meets(lower.layer, &r, true, parts)
+        });
+        let marked = self.marks.planar(lower) || self.marks.planar(upper);
+        self.price(length, meets, marked)
+    }
+
+    /// Price of the via up from `lower`, apart from crowding the net's own
+    /// vias, telling `parts` whose metal and cuts it meets. A via is as long
+    /// as its cost.
+    fn via_price(&self, lower: Node, parts: &mut impl CostParts) -> Price {
+        let at = self.point(lower);
+        let via = self.tech.via_above(lower.layer);
+        let top = LayerId::new(lower.layer.index() + 1);
+        let mut meets = self
+            .metal_meets(lower.layer, &via.bottom.translate(at), false, parts)
+            .and(self.metal_meets(top, &via.top.translate(at), false, parts));
+        for c in &via.cuts {
+            meets = meets.and(self.cut_meets(lower.layer.cut_above(), &c.translate(at), parts));
+        }
+        self.price(self.costs.via, meets, self.marks.via(lower))
     }
 
     /// What routing `edges` costs this search, part by part: their length,
-    /// their vias, what each other owner's metal and cuts near them cost,
-    /// and the conflict history of their tracks.
+    /// their vias, their conflicts with whose metal and cuts, the marks they
+    /// run through, and crowding the net's own vias.
     pub(crate) fn explain(&self, edges: &[Edge]) -> Explanation {
         let mut parts = Explanation::default();
         for edge in edges {
-            match *edge {
+            let price = match *edge {
                 Edge::Wire(lower) => {
-                    let lt = self.tech.layer(lower.layer);
-                    let a = lt.point(lower.track, lower.cross);
-                    let b = lt.point(lower.track, lower.cross + 1);
-                    parts.length += ((a.x - b.x).abs() + (a.y - b.y).abs()).to_f64();
-                    if let Some(rect) = wire_rect(a, b, self.width(lower.layer)) {
-                        let _ = self.metal_cost_into(
-                            lower.layer,
-                            &rect,
-                            self.costs.penalty,
-                            &mut parts,
-                        );
-                    }
+                    let price = self.step_price(lower, &mut parts);
+                    parts.length += price.length;
+                    price
                 }
                 Edge::Via { lower, .. } => {
-                    let at = self.point(lower);
-                    let via = self.tech.via_above(lower.layer);
-                    let top = LayerId::new(lower.layer.index() + 1);
+                    let price = self.via_price(lower, &mut parts);
                     parts.vias += 1;
-                    parts.via_cost += self.costs.via;
-                    let _ = self.metal_cost_into(
-                        lower.layer,
-                        &via.bottom.translate(at),
-                        0.0,
-                        &mut parts,
-                    );
-                    let _ = self.metal_cost_into(top, &via.top.translate(at), 0.0, &mut parts);
-                    for c in &via.cuts {
-                        let _ = self.cut_cost_into(
-                            lower.layer.cut_above(),
-                            &c.translate(at),
-                            &mut parts,
-                        );
-                    }
-                    parts.own_vias += self.own_via_cost(lower.layer, at);
+                    parts.via_cost += price.length;
+                    parts.own_vias += self.own_via_cost(lower.layer, self.point(lower));
+                    price
                 }
-            }
+            };
+            parts.conflict += price.conflict;
+            parts.marker += price.marker;
+            parts.obstacle += price.obstacle;
         }
         parts
     }
 
-    /// Cost of a whole wire from `a` to `b`: its length and its conflicts.
-    fn wire_cost(&self, layer: LayerId, a: Point<Dbu>, b: Point<Dbu>) -> f64 {
-        let length = ((a.x - b.x).abs() + (a.y - b.y).abs()).to_f64();
-        let conflict =
-            wire_rect(a, b, self.width(layer)).map_or(0.0, |r| self.conflict_cost(layer, &r));
-        length + conflict
-    }
-
-    /// Cost of one step of a wire from `a` to `b`, which may go on alongside
-    /// what it meets.
-    fn step_cost(&self, layer: LayerId, a: Point<Dbu>, b: Point<Dbu>) -> f64 {
-        let length = ((a.x - b.x).abs() + (a.y - b.y).abs()).to_f64();
-        let conflict =
-            wire_rect(a, b, self.width(layer)).map_or(0.0, |r| self.step_conflict_cost(layer, &r));
-        length + conflict
-    }
-
-    /// Cost of a via up from `bottom` at `at`, apart from crowding the
-    /// net's own vias.
-    fn via_cost(&self, bottom: LayerId, at: Point<Dbu>) -> f64 {
-        let via = self.tech.via_above(bottom);
-        let top = LayerId::new(bottom.index() + 1);
-        let cuts: f64 = via
-            .cuts
-            .iter()
-            .map(|c| self.cut_cost(bottom.cut_above(), &c.translate(at)))
-            .sum();
-        self.costs.via
-            + self.conflict_cost(bottom, &via.bottom.translate(at))
-            + self.conflict_cost(top, &via.top.translate(at))
-            + cuts
-    }
-
-    /// Cost of a via up from `bottom` at `at` crowding the net's own vias.
+    /// Cost of a via up from `bottom` at `at` crowding the net's own vias:
+    /// a conflict over the via's length.
     fn own_via_cost(&self, bottom: LayerId, at: Point<Dbu>) -> f64 {
         let via = self.tech.via_above(bottom).via;
-        let crowded = self
+        let crowds = self
             .own_vias
-            .map_or(0, |own| own.crowded(self.db, self.tech, via, at));
-        self.costs.penalty * crowded as f64
+            .is_some_and(|own| own.crowded(self.db, self.tech, via, at) > 0);
+        if crowds {
+            self.costs.conflict * self.costs.via
+        } else {
+            0.0
+        }
     }
 
     pub(crate) fn allowed(&self, layer: LayerId, p: Point<Dbu>) -> bool {
@@ -980,22 +980,19 @@ struct FreshCosts;
 
 impl StepCosts for FreshCosts {
     fn wire(&mut self, search: &Search<'_>, lower: Node) -> f64 {
-        let lt = search.tech.layer(lower.layer);
-        let a = lt.point(lower.track, lower.cross);
-        let b = lt.point(lower.track, lower.cross + 1);
-        search.step_cost(lower.layer, a, b)
+        search.step_price(lower, &mut Total).total()
     }
 
     fn via(&mut self, search: &Search<'_>, lower: Node) -> f64 {
-        search.via_cost(lower.layer, search.point(lower))
+        search.via_price(lower, &mut Total).total()
     }
 }
 
 /// The searches of one window, sharing the costs of the steps they take.
 ///
 /// Step costs are kept between searches, so every search through one cache
-/// must see the same occupancy, overlay, history, owner and penalty; only
-/// the net's own vias, which [`Search::own_vias`] holds, may change.
+/// must see the same occupancy, overlay, marks, owner and costs; only the
+/// net's own vias, which [`Search::own_vias`] holds, may change.
 pub(crate) struct WindowCache {
     window: Rect<Dbu>,
     dense: Option<dense::Dense>,
@@ -1099,19 +1096,15 @@ mod tests {
         };
         let tech = RouteTech::new(&db, &config).unwrap();
         let occupancy = Occupancy::new(&tech, Dbu(1000));
-        let history = History::new(Dbu(1000));
+        let marks = Marks::default();
         let search = Search {
             db: &db,
             tech: &tech,
             occupancy: &occupancy,
             overlay: None,
-            history: &history,
+            marks: &marks,
             owner: Owner::Net(0),
-            costs: Costs {
-                via: 50.0,
-                penalty: 1000.0,
-                history: 0.0,
-            },
+            costs: COSTS,
             guide: None,
             own_vias: None,
             ripped: &[],
@@ -1137,5 +1130,164 @@ mod tests {
                 "a via returns after {run} of a {reach} reach: {path:?}"
             );
         }
+    }
+
+    const COSTS: Costs = Costs {
+        via: 50.0,
+        conflict: 8.0,
+        marker: 32.0,
+        decay: 0.95,
+    };
+
+    /// The tiny design on M1 and up, with another net's wire along M1's
+    /// track 1 from crossing 1 to crossing 3.
+    fn beside_a_wire(db: &NetlistDB) -> (RouteTech, Occupancy) {
+        let config = RoutingConfig {
+            min_layer: Some("M1".to_string()),
+            ..RoutingConfig::default()
+        };
+        let tech = RouteTech::new(db, &config).unwrap();
+        let lt = tech.layer(LayerId(0));
+        let other = wire_rect(lt.point(1, 1), lt.point(1, 3), lt.width).unwrap();
+        let mut occupancy = Occupancy::new(&tech, Dbu(1000));
+        let _ = occupancy.add_rect(&tech, LayerId(0), &other, Owner::Net(1), Origin::Wiring);
+        (tech, occupancy)
+    }
+
+    fn step(track: u32, cross: u32) -> Node {
+        Node {
+            layer: LayerId(0),
+            track,
+            cross,
+        }
+    }
+
+    fn step_length(tech: &RouteTech, lower: Node) -> f64 {
+        let lt = tech.layer(lower.layer);
+        let (a, b) = (
+            lt.point(lower.track, lower.cross),
+            lt.point(lower.track, lower.cross + 1),
+        );
+        ((a.x - b.x).abs() + (a.y - b.y).abs()).to_f64()
+    }
+
+    #[test]
+    fn a_step_over_another_nets_wire_pays_the_conflict_cost_per_unit_of_length() {
+        let db = tiny();
+        let (tech, occupancy) = beside_a_wire(&db);
+        let marks = Marks::default();
+        let search = Search {
+            db: &db,
+            tech: &tech,
+            occupancy: &occupancy,
+            overlay: None,
+            marks: &marks,
+            owner: Owner::Net(0),
+            costs: COSTS,
+            guide: None,
+            own_vias: None,
+            ripped: &[],
+        };
+        let lower = step(1, 1);
+        let length = step_length(&tech, lower);
+
+        let price = search.step_price(lower, &mut Total);
+
+        let (conflict, total) = (COSTS.conflict * length, (1.0 + COSTS.conflict) * length);
+        assert!((price.conflict - conflict).abs() < 1e-9, "{price:?}");
+        assert!((price.total() - total).abs() < 1e-9);
+    }
+
+    #[test]
+    fn a_step_over_wiring_being_routed_again_costs_only_its_length() {
+        let db = tiny();
+        let (tech, occupancy) = beside_a_wire(&db);
+        let marks = Marks::default();
+        let search = Search {
+            db: &db,
+            tech: &tech,
+            occupancy: &occupancy,
+            overlay: None,
+            marks: &marks,
+            owner: Owner::Net(0),
+            costs: COSTS,
+            guide: None,
+            own_vias: None,
+            ripped: &[Owner::Net(1)],
+        };
+        let lower = step(1, 1);
+
+        let price = search.step_price(lower, &mut Total);
+
+        assert!(
+            (price.total() - step_length(&tech, lower)).abs() < 1e-9,
+            "{price:?}"
+        );
+    }
+
+    #[test]
+    fn a_step_from_a_marked_crossing_pays_the_marker_cost_per_unit_of_length() {
+        let db = tiny();
+        let (tech, _) = beside_a_wire(&db);
+        let occupancy = Occupancy::new(&tech, Dbu(1000));
+        let mut marks = Marks::default();
+        marks.mark_planar(step(4, 2));
+        let search = Search {
+            db: &db,
+            tech: &tech,
+            occupancy: &occupancy,
+            overlay: None,
+            marks: &marks,
+            owner: Owner::Net(0),
+            costs: COSTS,
+            guide: None,
+            own_vias: None,
+            ripped: &[],
+        };
+        let (into, away) = (step(4, 1), step(4, 3));
+
+        let (into_mark, beyond) = (
+            search.step_price(into, &mut Total),
+            search.step_price(away, &mut Total),
+        );
+
+        let marker = COSTS.marker * step_length(&tech, into);
+        assert!((into_mark.marker - marker).abs() < 1e-9, "{into_mark:?}");
+        assert!(beyond.marker.abs() < 1e-9, "{beyond:?}");
+    }
+
+    #[test]
+    fn explaining_a_route_names_whose_wiring_it_meets_and_adds_up_to_its_cost() {
+        let db = tiny();
+        let (tech, occupancy) = beside_a_wire(&db);
+        let marks = Marks::default();
+        let search = Search {
+            db: &db,
+            tech: &tech,
+            occupancy: &occupancy,
+            overlay: None,
+            marks: &marks,
+            owner: Owner::Net(0),
+            costs: COSTS,
+            guide: None,
+            own_vias: None,
+            ripped: &[],
+        };
+        let edges = [Edge::Wire(step(1, 0)), Edge::Wire(step(1, 1))];
+        let paid: f64 = edges
+            .iter()
+            .map(|e| match *e {
+                Edge::Wire(n) => FreshCosts.wire(&search, n),
+                Edge::Via { lower, .. } => FreshCosts.via(&search, lower),
+            })
+            .sum();
+
+        let explanation = search.explain(&edges);
+
+        assert_eq!(explanation.met, vec![Owner::Net(1)]);
+        assert!(
+            (explanation.total() - paid).abs() < 1e-9,
+            "{explanation:?} against {paid}"
+        );
     }
 }
