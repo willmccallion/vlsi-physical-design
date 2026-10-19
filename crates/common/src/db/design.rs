@@ -650,6 +650,37 @@ impl NetlistDB {
         }
     }
 
+    /// The average distance between `layer`'s tracks in its preferred
+    /// direction, as `OpenROAD` reckons it (`getAverageTrackSpacing` of
+    /// `odb::dbTrackGrid`): the step of the design's one `TRACKS` pattern
+    /// for it, or with several, the span of all their tracks over how many
+    /// tracks there are, rounded up. The layer's pitch when the design gives
+    /// it no tracks.
+    pub fn average_track_spacing(&self, layer: LayerId) -> Dbu {
+        let l = self.library.layer(layer);
+        let axis = match l.direction {
+            Direction::Horizontal => TrackAxis::Y,
+            Direction::Vertical => TrackAxis::X,
+        };
+        let patterns: Vec<&TrackDef> = self
+            .tracks
+            .iter()
+            .filter(|t| t.axis == axis && t.layers.contains(&layer))
+            .collect();
+        match patterns.as_slice() {
+            [] => l.track_pitch(),
+            [one] => one.step,
+            several => {
+                let mut coords: Vec<Dbu> = several.iter().flat_map(|t| t.coords()).collect();
+                coords.sort_unstable();
+                coords.dedup();
+                let span = coords[coords.len() - 1] - coords[0];
+                let count = coords.len() as i64;
+                Dbu((span.get() + count - 1) / count)
+            }
+        }
+    }
+
     /// The coordinates across `layer` of its routing tracks: those the
     /// design's `TRACKS` statements give it whose wire lies inside the die,
     /// or else one per pitch from the layer's offset, half a pitch in from

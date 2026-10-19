@@ -746,10 +746,9 @@ fn check_reserve(config: &RoutingConfig) -> Result<(), RouteError> {
     }
 }
 
-/// The edge of a gcell: `config.gcell_tracks` pitches of the lowest
-/// routing layer.
+/// The edge of a gcell: `config.gcell_tracks` gcell pitches.
 fn gcell_size(tech: &RouteTech, config: &RoutingConfig) -> Dbu {
-    tech.layer(tech.min_layer).pitch() * i64::from(config.gcell_tracks.max(1))
+    tech.gcell_pitch * i64::from(config.gcell_tracks.max(1))
 }
 
 /// The DEF gcell grid of `nx` by `ny` gcells of edge `gcell` from `origin`.

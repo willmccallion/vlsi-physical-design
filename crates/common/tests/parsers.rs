@@ -2,7 +2,9 @@
 
 #![allow(clippy::unwrap_used)]
 
-use pare_common::db::design::{GCellGridDef, NetlistDB, PlacementStatus, RouteElem, TrackAxis};
+use pare_common::db::design::{
+    GCellGridDef, NetlistDB, PlacementStatus, RouteElem, TrackAxis, TrackDef,
+};
 use pare_common::db::indices::{CellId, CutLayerId, LayerId, PinId};
 use pare_common::db::library::{Direction, LayerRef, Library, MacroClass, Shape};
 use pare_common::db::parser::{bookshelf, def, lef};
@@ -553,4 +555,39 @@ fn tracks_whose_wire_would_leave_the_die_are_not_routing_tracks() {
     assert_eq!(tracks.first(), Some(&Dbu(100)));
     assert_eq!(tracks.last(), Some(&Dbu(2900)));
     assert_eq!(tracks.len(), 15);
+}
+
+/// The axis of the tracks layer 1 of the tiny design prefers.
+fn preferred_axis(db: &NetlistDB) -> TrackAxis {
+    match db.library.layer(LayerId(1)).direction {
+        Direction::Horizontal => TrackAxis::Y,
+        Direction::Vertical => TrackAxis::X,
+    }
+}
+
+fn pattern(axis: TrackAxis, start: i64, count: u32, step: i64) -> TrackDef {
+    TrackDef {
+        axis,
+        start: Dbu(start),
+        count,
+        step: Dbu(step),
+        layers: vec![LayerId(1)],
+    }
+}
+
+#[test]
+fn one_track_pattern_spaces_its_tracks_by_its_step() {
+    let mut db = tiny_design();
+    db.tracks = vec![pattern(preferred_axis(&db), 100, 10, 200)];
+
+    assert_eq!(db.average_track_spacing(LayerId(1)), Dbu(200));
+}
+
+#[test]
+fn several_track_patterns_space_their_tracks_by_span_over_count_rounded_up() {
+    let mut db = tiny_design();
+    let axis = preferred_axis(&db);
+    db.tracks = vec![pattern(axis, 0, 5, 200), pattern(axis, 100, 5, 200)];
+
+    assert_eq!(db.average_track_spacing(LayerId(1)), Dbu(90));
 }

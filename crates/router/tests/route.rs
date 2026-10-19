@@ -307,9 +307,15 @@ fn consecutive_wire_edges_become_one_wire() {
     );
 }
 
+/// Gcell pitches that cut the tiny design's 6000-unit die into two by two
+/// gcells: its gcell pitch is the 400-unit track spacing of M3, its highest
+/// routing layer.
+const TWO_BY_TWO: u32 = 8;
+
 fn no_reserve() -> RoutingConfig {
     RoutingConfig {
         global_capacity_reserve: 0.0,
+        gcell_tracks: TWO_BY_TWO,
         ..RoutingConfig::default()
     }
 }
@@ -321,8 +327,8 @@ fn every_track_through_a_gcell_counts_toward_its_capacity() {
     let reduction = capacity_reduction(&db, &no_reserve()).unwrap();
 
     assert_eq!((reduction.nx, reduction.ny), (2, 2));
-    assert_eq!(reduction.horizontal.capacity, vec![7.0, 7.0, 8.0, 8.0]);
-    assert_eq!(reduction.vertical.capacity, vec![15.0; 4]);
+    assert_eq!(reduction.horizontal.capacity, vec![8.0, 8.0, 7.0, 7.0]);
+    assert_eq!(reduction.vertical.capacity, vec![16.0, 14.0, 16.0, 14.0]);
     assert!(reduction.horizontal.reduction[0].abs() < 1e-12);
     assert!(reduction.vertical.reduction[2].abs() < 1e-12);
 }
@@ -332,13 +338,14 @@ fn the_capacity_reserve_does_not_count_as_reduction() {
     let db = tiny();
     let config = RoutingConfig {
         global_capacity_reserve: 0.5,
+        gcell_tracks: TWO_BY_TWO,
         ..RoutingConfig::default()
     };
 
     let reduction = capacity_reduction(&db, &config).unwrap();
 
-    assert_eq!(reduction.horizontal.capacity, vec![7.0, 7.0, 8.0, 8.0]);
-    assert_eq!(reduction.vertical.capacity, vec![15.0; 4]);
+    assert_eq!(reduction.horizontal.capacity, vec![8.0, 8.0, 7.0, 7.0]);
+    assert_eq!(reduction.vertical.capacity, vec![16.0, 14.0, 16.0, 14.0]);
     assert!(reduction.horizontal.reduction[0].abs() < 1e-9);
     assert!(reduction.vertical.reduction[2].abs() < 1e-9);
 }
@@ -365,8 +372,8 @@ fn a_layer_blocked_everywhere_cuts_off_the_layers_above_it() {
     let reduction = capacity_reduction(&db, &no_reserve()).unwrap();
 
     assert_eq!(reduction.horizontal.capacity, vec![0.0; 4]);
-    assert_eq!(reduction.vertical.capacity, vec![15.0; 4]);
-    assert_eq!(reduction.vertical.reduction, vec![15.0; 4]);
+    assert_eq!(reduction.vertical.capacity, vec![16.0, 14.0, 16.0, 14.0]);
+    assert_eq!(reduction.vertical.reduction, vec![16.0, 14.0, 16.0, 14.0]);
 }
 
 #[test]

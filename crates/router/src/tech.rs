@@ -196,6 +196,27 @@ pub struct RouteTech {
     rules: Vec<RuleTech>,
     /// The non-default rule each net follows, indexed by net.
     net_rules: Vec<Option<NonDefaultRuleId>>,
+    /// The track spacing a gcell's edge is a multiple of.
+    pub gcell_pitch: Dbu,
+}
+
+/// Routing layers whose track spacings choose the gcell pitch: the second
+/// to the fourth, counted from one.
+const GCELL_PITCH_LAYERS: usize = 4;
+
+/// The track spacing gcells are sized by, as `OpenROAD` sizes them
+/// (`getGCellTileSize` of `odb::dbBlock`): the middle of the second, third
+/// and fourth routing layers' average track spacings, or the highest
+/// routing layer's when that is below the fourth, each rounded down to an
+/// even number. `spacing` gives a layer's spacing by index from zero.
+fn gcell_pitch(spacing: impl Fn(usize) -> Dbu, max_layer: usize) -> Dbu {
+    let even = |s: Dbu| if s.get() % 2 == 0 { s } else { s - Dbu(1) };
+    if max_layer + 1 < GCELL_PITCH_LAYERS {
+        return even(spacing(max_layer));
+    }
+    let mut middle = [even(spacing(1)), even(spacing(2)), even(spacing(3))];
+    middle.sort_unstable();
+    middle[1]
 }
 
 pub(crate) fn to_u32(i: usize) -> u32 {
@@ -290,6 +311,10 @@ impl RouteTech {
                 .map(|r| RuleTech::new(db, r))
                 .collect(),
             net_rules: db.nets.iter().map(|n| n.non_default_rule).collect(),
+            gcell_pitch: gcell_pitch(
+                |l| db.average_track_spacing(LayerId::new(l)),
+                max_layer.index(),
+            ),
         })
     }
 
@@ -421,4 +446,34 @@ fn ranked_vias(db: &NetlistDB, cut: CutLayerId, layers: &[LayerTech], both: bool
     }
     ranked.sort_by_key(|(key, v)| (*key, v.via));
     ranked.into_iter().map(|(_, v)| v).collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn spacings(of: &[i64]) -> impl Fn(usize) -> Dbu + '_ {
+        |l| Dbu(of[l])
+    }
+
+    #[test]
+    fn gcells_are_sized_by_the_middle_spacing_of_the_second_to_fourth_layers() {
+        let pitch = gcell_pitch(spacings(&[280, 380, 280, 560, 560]), 4);
+
+        assert_eq!(pitch, Dbu(380));
+    }
+
+    #[test]
+    fn an_odd_track_spacing_is_rounded_down_to_an_even_one() {
+        let pitch = gcell_pitch(spacings(&[200, 401, 401, 401]), 3);
+
+        assert_eq!(pitch, Dbu(400));
+    }
+
+    #[test]
+    fn below_four_routing_layers_the_highest_layer_sizes_the_gcells() {
+        let pitch = gcell_pitch(spacings(&[200, 300, 500]), 2);
+
+        assert_eq!(pitch, Dbu(500));
+    }
 }

@@ -136,7 +136,8 @@ pub struct RoutingConfig {
     pub min_layer: Option<String>,
     /// Highest routing layer for signal wires; defaults to the top layer.
     pub max_layer: Option<String>,
-    /// Global routing cell edge, in tracks of the lowest routing layer.
+    /// Global routing cell edge, in gcell pitches: the middle track spacing
+    /// of the second to fourth routing layers, as `OpenROAD` sizes gcells.
     #[serde(default = "default_gcell_tracks")]
     pub gcell_tracks: u32,
     /// Rip-up and reroute rounds of global routing.
