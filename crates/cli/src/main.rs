@@ -22,13 +22,13 @@ use pare_common::verify::placement::{PlacementViolation, placement_violations};
 use pare_common::verify::routing::check_routing;
 use pare_placer::detailed;
 use pare_placer::global::{
-    self, CongestionEstimator, GlobalParams, Outcome, RoutabilityParams, RoutingTiles, TileTracks,
+    self, CongestionEstimator, GlobalParams, Outcome, RoutabilityParams, RoutingTiles,
 };
 use pare_placer::io::{self, IoLayers};
 use pare_placer::legalize::abacus;
 use pare_placer::model::PlacementModel;
 use pare_placer::zones::{Zone, Zones};
-use pare_router::{CapacityReduction, GlobalRouteEstimator};
+use pare_router::{CapacityReduction, GlobalRouteEstimator, RouteError};
 use report::{PlacementSummary, Report, RoutingSummary};
 use std::path::{Path, PathBuf};
 use std::time::Instant;
@@ -789,23 +789,21 @@ fn global_placement(
     Ok(model)
 }
 
-/// What routability-driven placement takes from the router: its gcells
-/// with the capacity they lose before placement, and the width RUDY gives a
-/// wire on its layers.
 /// The routability settings of `config`, and the global-router estimator
 /// when congestion is to be measured that way.
 fn routability_setup<'a>(
     config: &Config,
     db: &'a NetlistDB,
 ) -> anyhow::Result<(RoutabilityParams, Option<GlobalRouteCongestion<'a>>)> {
+    let adjustment = config.global_placement.routing_layer_adjustment;
     match config.global_placement.congestion_estimate {
         CongestionEstimate::GlobalRouter => {
             let estimator = GlobalRouteCongestion::new(db, config)?;
-            let params = routability_params(config, db, estimator.capacity_reduction());
-            Ok((params, Some(estimator)))
+            let reduction = estimator.capacity_reduction(adjustment)?;
+            Ok((routability_params(config, db, reduction), Some(estimator)))
         }
         CongestionEstimate::Rudy => {
-            let reduction = pare_router::capacity_reduction(db, &config.routing)?;
+            let reduction = pare_router::capacity_reduction(db, &config.routing, adjustment)?;
             Ok((routability_params(config, db, reduction), None))
         }
     }
@@ -835,8 +833,8 @@ impl<'a> GlobalRouteCongestion<'a> {
         })
     }
 
-    fn capacity_reduction(&self) -> CapacityReduction {
-        self.estimator.capacity_reduction()
+    fn capacity_reduction(&self, adjustment: f64) -> Result<CapacityReduction, RouteError> {
+        self.estimator.capacity_reduction(adjustment)
     }
 }
 
@@ -857,16 +855,15 @@ impl CongestionEstimator for GlobalRouteCongestion<'_> {
     }
 }
 
+/// What routability-driven placement takes from the router: its gcells
+/// with the capacity taken before placement, and the width RUDY gives a
+/// wire on its layers.
 fn routability_params(
     config: &Config,
     db: &NetlistDB,
     reduction: CapacityReduction,
 ) -> RoutabilityParams {
     let units = db.dbu();
-    let tracks = |t: pare_router::TileTracks| TileTracks {
-        capacity: t.capacity,
-        reduction: t.reduction,
-    };
     RoutabilityParams {
         tiles: RoutingTiles {
             origin: Point::new(
@@ -876,9 +873,10 @@ fn routability_params(
             size: units.to_microns(reduction.gcell),
             nx: reduction.nx,
             ny: reduction.ny,
-            horizontal: tracks(reduction.horizontal),
-            vertical: tracks(reduction.vertical),
+            capacity: reduction.capacity,
+            reduction: reduction.reduction,
         },
+        wire_width: units.to_microns(reduction.wire_width),
         target_congestion: config.global_placement.target_congestion,
     }
 }

@@ -21,7 +21,7 @@ use pare_router::tech::RouteTech;
 use pare_router::wiring::{Edge, NetRoute};
 use pare_router::{
     GlobalRouteEstimator, RouteError, RouteState, Save, SavePoint, Session, capacity_reduction,
-    route, route_with,
+    route, route_with, rudy_wire_width,
 };
 use std::path::{Path, PathBuf};
 
@@ -334,13 +334,12 @@ fn no_reserve() -> RoutingConfig {
 fn every_track_through_a_gcell_counts_toward_its_capacity() {
     let db = tiny();
 
-    let reduction = capacity_reduction(&db, &no_reserve()).unwrap();
+    let reduction = capacity_reduction(&db, &no_reserve(), 0.0).unwrap();
 
     assert_eq!((reduction.nx, reduction.ny), (2, 2));
-    assert_eq!(reduction.horizontal.capacity, vec![8.0, 8.0, 7.0, 7.0]);
-    assert_eq!(reduction.vertical.capacity, vec![16.0, 14.0, 16.0, 14.0]);
-    assert!(reduction.horizontal.reduction[0].abs() < 1e-12);
-    assert!(reduction.vertical.reduction[2].abs() < 1e-12);
+    assert_eq!(reduction.capacity, vec![24.0, 22.0, 23.0, 21.0]);
+    assert!(reduction.reduction[0].abs() < 1e-12);
+    assert!(reduction.reduction[2].abs() < 1e-12);
 }
 
 #[test]
@@ -352,38 +351,76 @@ fn the_capacity_reserve_does_not_count_as_reduction() {
         ..RoutingConfig::default()
     };
 
-    let reduction = capacity_reduction(&db, &config).unwrap();
+    let reduction = capacity_reduction(&db, &config, 0.0).unwrap();
 
-    assert_eq!(reduction.horizontal.capacity, vec![8.0, 8.0, 7.0, 7.0]);
-    assert_eq!(reduction.vertical.capacity, vec![16.0, 14.0, 16.0, 14.0]);
-    assert!(reduction.horizontal.reduction[0].abs() < 1e-9);
-    assert!(reduction.vertical.reduction[2].abs() < 1e-9);
+    assert_eq!(reduction.capacity, vec![24.0, 22.0, 23.0, 21.0]);
+    assert!(reduction.reduction[0].abs() < 1e-9);
+    assert!(reduction.reduction[2].abs() < 1e-9);
+}
+
+#[test]
+fn the_layer_adjustment_counts_as_reduction_rounded_as_openroad_rounds_it() {
+    let db = tiny();
+
+    let reduction = capacity_reduction(&db, &no_reserve(), 0.5).unwrap();
+
+    assert!(
+        (reduction.reduction[0] - (4.0 + 8.0)).abs() < 1e-9,
+        "{reduction:?}"
+    );
+    assert!(
+        (reduction.reduction[2] - (4.0 + 8.0)).abs() < 1e-9,
+        "{reduction:?}"
+    );
+}
+
+#[test]
+fn a_layer_adjustment_outside_zero_to_one_is_refused() {
+    let db = tiny();
+
+    let result = capacity_reduction(&db, &no_reserve(), 1.5);
+
+    assert!(matches!(result, Err(RouteError::LayerAdjustment(_))));
 }
 
 #[test]
 fn a_fixed_block_takes_the_tracks_its_obstruction_crosses() {
     let db = tiny();
 
-    let reduction = capacity_reduction(&db, &no_reserve()).unwrap();
+    let reduction = capacity_reduction(&db, &no_reserve(), 0.0).unwrap();
 
-    let taken = |i: usize| reduction.horizontal.reduction[i] + reduction.vertical.reduction[i];
-    assert!(taken(1) >= 10.0, "{reduction:?}");
-    assert!(taken(3) >= 10.0, "{reduction:?}");
+    assert!(reduction.reduction[1] >= 10.0, "{reduction:?}");
+    assert!(reduction.reduction[3] >= 10.0, "{reduction:?}");
 }
 
 #[test]
-fn a_layer_blocked_everywhere_cuts_off_the_layers_above_it() {
+fn a_layer_blocked_everywhere_counts_as_taken() {
     let mut db = tiny();
     db.routing_blockages.push(Shape {
         layer: LayerRef::Routing(LayerId(1)),
         rect: db.die_area,
     });
 
-    let reduction = capacity_reduction(&db, &no_reserve()).unwrap();
+    let reduction = capacity_reduction(&db, &no_reserve(), 0.0).unwrap();
 
-    assert_eq!(reduction.horizontal.capacity, vec![0.0; 4]);
-    assert_eq!(reduction.vertical.capacity, vec![16.0, 14.0, 16.0, 14.0]);
-    assert_eq!(reduction.vertical.reduction, vec![16.0, 14.0, 16.0, 14.0]);
+    assert_eq!(reduction.capacity, vec![24.0, 22.0, 23.0, 21.0]);
+    assert!(
+        (reduction.reduction[0] - 16.0).abs() < 1e-9,
+        "{reduction:?}"
+    );
+    assert!(
+        (reduction.reduction[2] - 16.0).abs() < 1e-9,
+        "{reduction:?}"
+    );
+}
+
+#[test]
+fn rudy_wires_are_as_wide_as_openroad_makes_them() {
+    let nangate45 = [380, 280, 560, 560, 560, 1600, 1600, 3200, 3200].map(Dbu);
+
+    let width = rudy_wire_width(&nangate45);
+
+    assert_eq!(width, Dbu(93));
 }
 
 #[test]
@@ -399,8 +436,8 @@ fn merged_fixed_stretches_give_the_capacity_the_occupancy_gives() {
     let from_stretches = GlobalGrid::new(&tech, &fixed, db.die_area, gcell, 0.3);
 
     assert_eq!(
-        from_occupancy.capacity_reduction(&tech),
-        from_stretches.capacity_reduction(&tech)
+        from_occupancy.capacity_reduction(&tech, 0.5, Dbu(100)),
+        from_stretches.capacity_reduction(&tech, 0.5, Dbu(100))
     );
 }
 
@@ -445,7 +482,7 @@ fn the_estimator_measures_congestion_where_the_given_locations_put_the_nets() {
         ..no_reserve()
     };
     let mut estimator = GlobalRouteEstimator::new(&db, &config).unwrap();
-    let tiles = estimator.capacity_reduction();
+    let tiles = estimator.capacity_reduction(0.0).unwrap();
     let packed = vec![Point::new(Dbu(0), Dbu(0)); db.num_cells()];
     let spread: Vec<Point<Dbu>> = (0..db.num_cells())
         .map(|i| {

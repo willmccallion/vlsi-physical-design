@@ -21,7 +21,7 @@ use detailed::{
     DetailedRouter, Flow, FlowState, RepairStats, RestoreRoutesError, RipUp, Scope, round_costs,
     round_strategy, routable_nets,
 };
-pub use global::{CapacityReduction, TileTracks};
+pub use global::{CapacityReduction, rudy_wire_width};
 use global::{
     GCell, GlobalGrid, GlobalNet, GlobalRoutes, RestoreError, Tracks, restore_global, route_global,
     track_demand,
@@ -594,14 +594,19 @@ const fn next_scope(previous: Scope, improved: bool) -> Scope {
     }
 }
 
-/// Every gcell's routing capacity and what the metal placement cannot move
-/// takes of it: that of fixed cells and I/O pins, special nets and routing
-/// blockages.
+/// Every gcell's routing capacity and what of it is taken before placement.
+///
+/// What is taken is the metal placement cannot move, that of fixed cells
+/// and I/O pins, special nets and routing blockages, and the `adjustment`
+/// share of each layer's capacity held back, as `OpenROAD`'s RUDY counts
+/// them.
 pub fn capacity_reduction(
     db: &NetlistDB,
     config: &RoutingConfig,
+    adjustment: f64,
 ) -> Result<CapacityReduction, RouteError> {
     check_reserve(config)?;
+    check_adjustment(adjustment)?;
     let tech = RouteTech::new(db, config)?;
     let fixed = FixedTracks::new(&tech, obstruction_shapes(db));
     let grid = GlobalGrid::new(
@@ -611,7 +616,23 @@ pub fn capacity_reduction(
         gcell_size(&tech, config),
         config.global_capacity_reserve,
     );
-    Ok(grid.capacity_reduction(&tech))
+    Ok(grid.capacity_reduction(&tech, adjustment, layers_wire_width(db, &tech)))
+}
+
+/// The RUDY wire width over the routing layers of `tech`, each at its LEF
+/// pitch, or its width plus spacing without one, as `OpenROAD` takes it.
+fn layers_wire_width(db: &NetlistDB, tech: &RouteTech) -> Dbu {
+    let pitches: Vec<Dbu> = (tech.min_layer.index()..=tech.max_layer.index())
+        .map(|l| {
+            let layer = &db.library.routing_layers[l];
+            if layer.pitch_x > Dbu::ZERO {
+                layer.pitch_x
+            } else {
+                layer.width + layer.min_spacing
+            }
+        })
+        .collect();
+    rudy_wire_width(&pitches)
 }
 
 /// Global routing of every signal net with the cells wherever placement
@@ -672,9 +693,14 @@ impl<'a> GlobalRouteEstimator<'a> {
         })
     }
 
-    /// The grid's capacities and what fixed metal takes of them.
-    pub fn capacity_reduction(&self) -> CapacityReduction {
-        self.grid.capacity_reduction(&self.tech)
+    /// The grid's capacities and what fixed metal and the `adjustment`
+    /// share of each layer's capacity take of them.
+    pub fn capacity_reduction(&self, adjustment: f64) -> Result<CapacityReduction, RouteError> {
+        check_adjustment(adjustment)?;
+        let wire_width = layers_wire_width(self.db, &self.tech);
+        Ok(self
+            .grid
+            .capacity_reduction(&self.tech, adjustment, wire_width))
     }
 
     /// Each gcell's congestion, row by row, once every net is routed with
@@ -724,6 +750,14 @@ fn check_reserve(config: &RoutingConfig) -> Result<(), RouteError> {
         Ok(())
     } else {
         Err(RouteError::CapacityReserve(config.global_capacity_reserve))
+    }
+}
+
+fn check_adjustment(adjustment: f64) -> Result<(), RouteError> {
+    if (0.0..=1.0).contains(&adjustment) {
+        Ok(())
+    } else {
+        Err(RouteError::LayerAdjustment(adjustment))
     }
 }
 
@@ -831,6 +865,9 @@ pub enum RouteError {
     /// The global capacity reserve is outside `[0, 1)`.
     #[error("global_capacity_reserve must be in [0, 1), got {0}")]
     CapacityReserve(f64),
+    /// The routing layer adjustment is outside `[0, 1]`.
+    #[error("routing_layer_adjustment must be in [0, 1], got {0}")]
+    LayerAdjustment(f64),
     /// The configured routing layers are unusable.
     #[error(transparent)]
     Layers(#[from] LayerRangeError),

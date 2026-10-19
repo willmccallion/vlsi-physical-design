@@ -343,19 +343,24 @@ impl GlobalGrid {
     }
 
     /// Every gcell's [`CapacityReduction`] in the terms `FastRoute` reports
-    /// it to RUDY: each reachable layer adds the tracks of the edge leaving
-    /// the gcell along its direction and the tracks fixed metal costs that
-    /// edge, before the reserve, to the totals of its direction; the last
-    /// gcell of a row or column takes those of the edge before it.
-    pub fn capacity_reduction(&self, tech: &RouteTech) -> CapacityReduction {
+    /// it to `OpenROAD`'s RUDY: each routing layer adds the tracks of the
+    /// edge leaving the gcell along its direction to the gcell's capacity,
+    /// and to its reduction the tracks fixed metal takes of that edge plus
+    /// the `adjustment` share of what is left, rounded as `OpenROAD`'s
+    /// `computeUserLayerAdjustments` rounds it. The last gcell of a row or
+    /// column takes the edge before it; `FastRoute` takes its capacity so
+    /// but reads its reduction from an edge that does not exist, which is
+    /// none.
+    pub fn capacity_reduction(
+        &self,
+        tech: &RouteTech,
+        adjustment: f64,
+        wire_width: Dbu,
+    ) -> CapacityReduction {
         let (nx, ny) = (usize::from(self.nx), usize::from(self.ny));
-        let mut horizontal = TileTracks::zeroed(nx * ny);
-        let mut vertical = TileTracks::zeroed(nx * ny);
-        let reachable = self.reachable_layers();
-        for (l, &reached) in self.layers().zip(&reachable) {
-            if !reached {
-                continue;
-            }
+        let mut capacity = vec![0.0; nx * ny];
+        let mut reduction = vec![0.0; nx * ny];
+        for l in self.layers() {
             let layer = LayerId::new(l);
             let direction = self.direction(layer);
             let along = match direction {
@@ -365,10 +370,6 @@ impl GlobalGrid {
             if along < 2 {
                 continue;
             }
-            let totals = match direction {
-                Direction::Horizontal => &mut horizontal,
-                Direction::Vertical => &mut vertical,
-            };
             let tracks = self.tracks_per_line(tech, layer);
             for y in 0..ny {
                 for x in 0..nx {
@@ -376,9 +377,10 @@ impl GlobalGrid {
                         Direction::Horizontal => (y, self.cell_index(layer, x.min(along - 2), y)),
                         Direction::Vertical => (x, self.cell_index(layer, x, y.min(along - 2))),
                     };
-                    let usable = self.capacity[edge].to_f64() / (1.0 - self.reserve);
-                    totals.capacity[y * nx + x] += tracks[line];
-                    totals.reduction[y * nx + x] += (tracks[line] - usable).max(0.0);
+                    let unblocked = self.capacity[edge].to_f64() / (1.0 - self.reserve);
+                    let left = adjusted_capacity(unblocked, adjustment);
+                    capacity[y * nx + x] += tracks[line];
+                    reduction[y * nx + x] += (tracks[line] - left).max(0.0);
                 }
             }
         }
@@ -387,27 +389,10 @@ impl GlobalGrid {
             gcell: self.gcell,
             nx,
             ny,
-            horizontal,
-            vertical,
+            capacity,
+            reduction,
+            wire_width,
         }
-    }
-
-    /// Whether a route can reach each layer, lowest first: the lowest can
-    /// be, and each one above it when the layer below it can be and some
-    /// gcell leaves room for a via pad on both, since a via up needs one.
-    /// A layer that fixed metal blocks everywhere, such as a die-wide
-    /// routing blockage, cuts off every layer above it.
-    fn reachable_layers(&self) -> Vec<bool> {
-        let per_layer = usize::from(self.nx) * usize::from(self.ny);
-        let has_room = |offset: usize, cell: usize| !self.via_blocked[offset * per_layer + cell];
-        let mut reachable = Vec::with_capacity(self.directions.len());
-        for offset in 0..self.directions.len() {
-            let reached = offset == 0
-                || (reachable[offset - 1]
-                    && (0..per_layer).any(|c| has_room(offset - 1, c) && has_room(offset, c)));
-            reachable.push(reached);
-        }
-        reachable
     }
 
     /// How many of `layer`'s tracks run through each row of gcells when it
@@ -631,8 +616,11 @@ impl GlobalGrid {
     }
 }
 
-/// Each gcell's routing capacity in each direction and the part of it fixed
-/// metal takes, in tracks summed over the layers a route can reach.
+/// What `OpenROAD`'s RUDY reads from its global router.
+///
+/// Each gcell's routing capacity and the part of it taken before placement,
+/// in tracks summed over the routing layers, with the width RUDY gives a
+/// wire.
 #[derive(Clone, Debug, PartialEq)]
 pub struct CapacityReduction {
     /// Lower-left corner of the gcell grid.
@@ -643,29 +631,48 @@ pub struct CapacityReduction {
     pub nx: usize,
     /// Rows.
     pub ny: usize,
-    /// Tracks of the horizontal layers.
-    pub horizontal: TileTracks,
-    /// Tracks of the vertical layers.
-    pub vertical: TileTracks,
-}
-
-/// Tracks of one direction through each gcell, row by row.
-#[derive(Clone, Debug, PartialEq)]
-pub struct TileTracks {
-    /// Tracks before any reduction.
+    /// Tracks through each gcell, row by row.
     pub capacity: Vec<f64>,
-    /// Tracks fixed metal takes.
+    /// Tracks of `capacity` that fixed metal and the layer adjustment take.
     pub reduction: Vec<f64>,
+    /// Width of a net's wire in RUDY; see [`rudy_wire_width`].
+    pub wire_width: Dbu,
 }
 
-impl TileTracks {
-    fn zeroed(gcells: usize) -> Self {
-        Self {
-            capacity: vec![0.0; gcells],
-            reduction: vec![0.0; gcells],
-        }
+/// The tracks an edge with `unblocked` tracks free of fixed metal keeps
+/// once `adjustment` of them is held back, as `OpenROAD`'s
+/// `computeUserLayerAdjustments`: rounded down, but at least one where
+/// any was and not all are held back.
+fn adjusted_capacity(unblocked: f64, adjustment: f64) -> f64 {
+    if adjustment == 0.0 {
+        return unblocked;
+    }
+    let kept = (unblocked * (1.0 - adjustment)).floor();
+    if unblocked > 0.0 && adjustment < 1.0 {
+        kept.max(1.0)
+    } else {
+        kept
     }
 }
+
+/// The width `OpenROAD`'s RUDY gives a net's wire over routing layers of
+/// `pitches`: their harmonic mean pitch over their number, times 1.25,
+/// truncated to a whole unit as `grt::Rudy` stores it.
+pub fn rudy_wire_width(pitches: &[Dbu]) -> Dbu {
+    let inverse: f64 = pitches
+        .iter()
+        .filter(|p| p.get() > 0)
+        .map(|p| 1.0 / p.to_f64())
+        .sum();
+    if inverse > 0.0 {
+        Dbu((1.25 / inverse).trunc() as i64)
+    } else {
+        Dbu(RUDY_DEFAULT_WIRE_WIDTH)
+    }
+}
+
+/// The wire width `grt::Rudy` keeps when no layer has a pitch.
+const RUDY_DEFAULT_WIRE_WIDTH: i64 = 100;
 
 /// The fraction of `stretch` along `track` that a wire crossing `boundary`
 /// can use between the fixed metal on either side of it.
@@ -1500,6 +1507,22 @@ fn window(cells: &[GCell], margin: u16, nx: u16, ny: u16) -> (u16, u16, u16, u16
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn an_adjusted_edge_keeps_at_least_one_of_its_tracks() {
+        assert!((adjusted_capacity(1.0, 0.5) - 1.0).abs() < 1e-12);
+        assert!((adjusted_capacity(7.0, 0.5) - 3.0).abs() < 1e-12);
+    }
+
+    #[test]
+    fn an_edge_held_back_entirely_keeps_none() {
+        assert!(adjusted_capacity(7.0, 1.0).abs() < 1e-12);
+    }
+
+    #[test]
+    fn no_adjustment_keeps_every_unblocked_track() {
+        assert!((adjusted_capacity(6.5, 0.0) - 6.5).abs() < 1e-12);
+    }
 
     fn cell(x: u16, y: u16) -> GCell {
         GCell {

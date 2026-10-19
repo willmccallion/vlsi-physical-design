@@ -70,6 +70,11 @@ pub struct GlobalPlacementConfig {
     /// How routability-driven placement measures congestion.
     #[serde(default)]
     pub congestion_estimate: CongestionEstimate,
+    /// Share of each routing layer's capacity that routability-driven
+    /// placement counts as taken, as `OpenROAD`'s RUDY counts
+    /// OpenROAD-flow-scripts' `ROUTING_LAYER_ADJUSTMENT`, in `[0, 1]`.
+    #[serde(default = "default_routing_layer_adjustment")]
+    pub routing_layer_adjustment: f64,
 }
 
 /// How routability-driven placement measures routing congestion.
@@ -98,6 +103,7 @@ impl Default for GlobalPlacementConfig {
             routability_driven: default_routability_driven(),
             target_congestion: default_target_congestion(),
             congestion_estimate: CongestionEstimate::default(),
+            routing_layer_adjustment: default_routing_layer_adjustment(),
         }
     }
 }
@@ -259,6 +265,12 @@ const fn default_routability_driven() -> bool {
 
 const fn default_target_congestion() -> f64 {
     1.01
+}
+
+/// OpenROAD-flow-scripts' default `ROUTING_LAYER_ADJUSTMENT`, which its
+/// Nangate45 platform keeps.
+const fn default_routing_layer_adjustment() -> f64 {
+    0.5
 }
 
 const fn default_gcell_tracks() -> u32 {

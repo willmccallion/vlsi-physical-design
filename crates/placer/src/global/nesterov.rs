@@ -916,8 +916,8 @@ fn congestion_map(
     params: &RoutabilityParams,
 ) -> CongestionMap {
     match estimate {
-        Some(measure) => CongestionMap::measured(measure(objects), objects, params),
-        None => CongestionMap::rudy(netlist, objects, die, params),
+        Some(measure) => CongestionMap::measured(measure(objects), params),
+        None => CongestionMap::rudy(netlist, &objects.centers, die, params),
     }
 }
 

@@ -25,6 +25,8 @@ pub(super) enum Terminal {
 pub(super) struct Netlist {
     nets: Vec<(Range<usize>, f64)>,
     terminals: Vec<Terminal>,
+    /// The box of each terminal's pin shapes, around the terminal.
+    extents: Vec<Rect<f64>>,
 }
 
 /// Wirelength at one placement.
@@ -37,12 +39,21 @@ pub(super) struct Wirelength {
 }
 
 impl Netlist {
-    /// Adds a net; nets with fewer than two terminals are left out.
-    pub(super) fn push(&mut self, terminals: impl IntoIterator<Item = Terminal>, weight: f64) {
+    /// Adds a net of `pins`, each a terminal with the box of its pin's
+    /// shapes around it; nets with fewer than two pins are left out.
+    pub(super) fn push(
+        &mut self,
+        pins: impl IntoIterator<Item = (Terminal, Rect<f64>)>,
+        weight: f64,
+    ) {
         let start = self.terminals.len();
-        self.terminals.extend(terminals);
+        for (terminal, extent) in pins {
+            self.terminals.push(terminal);
+            self.extents.push(extent);
+        }
         if self.terminals.len() - start < 2 {
             self.terminals.truncate(start);
+            self.extents.truncate(start);
             return;
         }
         self.nets.push((start..self.terminals.len(), weight));
@@ -64,23 +75,26 @@ impl Netlist {
         counts
     }
 
-    /// Each net's bounding box at `centers`, with its number of terminals.
-    pub(super) fn bounding_boxes<'a>(
+    /// Each net's box over its pins' shapes at `centers`, as `OpenROAD`'s
+    /// `dbNet::getTermBBox`.
+    pub(super) fn term_boxes<'a>(
         &'a self,
         centers: &'a [Point<f64>],
-    ) -> impl Iterator<Item = (Rect<f64>, usize)> + 'a {
-        self.nets.iter().map(move |(range, _)| {
-            let mut points = self.terminals[range.clone()]
+    ) -> impl Iterator<Item = Rect<f64>> + 'a {
+        self.nets.iter().filter_map(move |(range, _)| {
+            self.terminals[range.clone()]
                 .iter()
-                .map(|&t| position(t, centers));
-            let first = points.next().unwrap_or(Point::new(0.0, 0.0));
-            let bbox = points.fold(Rect::new(first, first), |r, p| {
-                Rect::new(
-                    Point::new(r.min.x.min(p.x), r.min.y.min(p.y)),
-                    Point::new(r.max.x.max(p.x), r.max.y.max(p.y)),
-                )
-            });
-            (bbox, range.len())
+                .zip(&self.extents[range.clone()])
+                .map(|(&t, e)| {
+                    let at = position(t, centers);
+                    Rect::new(at + e.min, at + e.max)
+                })
+                .reduce(|a, b| {
+                    Rect::new(
+                        Point::new(a.min.x.min(b.min.x), a.min.y.min(b.min.y)),
+                        Point::new(a.max.x.max(b.max.x), a.max.y.max(b.max.y)),
+                    )
+                })
         })
     }
 
@@ -197,18 +211,27 @@ fn net_axis(
 mod tests {
     use super::*;
 
-    fn object(index: usize) -> Terminal {
-        Terminal::Object {
+    fn object(index: usize) -> (Terminal, Rect<f64>) {
+        point(Terminal::Object {
             index,
             offset: Point::new(0.0, 0.0),
-        }
+        })
+    }
+
+    fn point(terminal: Terminal) -> (Terminal, Rect<f64>) {
+        let origin = Point::new(0.0, 0.0);
+        (terminal, Rect::new(origin, origin))
     }
 
     #[test]
     fn a_small_gamma_approaches_half_perimeter_wirelength() {
         let mut netlist = Netlist::default();
         netlist.push(
-            [object(0), object(1), Terminal::Fixed(Point::new(5.0, 1.0))],
+            [
+                object(0),
+                object(1),
+                point(Terminal::Fixed(Point::new(5.0, 1.0))),
+            ],
             1.0,
         );
         let centers = [Point::new(0.0, 0.0), Point::new(3.0, 4.0)];

@@ -21,9 +21,7 @@ mod poisson;
 mod routability;
 mod wirelength;
 
-pub use routability::{
-    CongestionEstimator, CongestionRound, RoutabilityParams, RoutingTiles, TileTracks,
-};
+pub use routability::{CongestionEstimator, CongestionRound, RoutabilityParams, RoutingTiles};
 
 use crate::model::{PinAnchor, PlacementModel};
 use crate::zones::Zone;
@@ -418,17 +416,20 @@ fn build_netlist(model: &PlacementModel, movable: &[usize]) -> Netlist {
     }
     let mut netlist = Netlist::default();
     for net in &model.nets {
-        let terminals = net.pins.iter().map(|pin| match *pin {
-            PinAnchor::Cell { cell, offset } => match object_of_cell[cell] {
-                Some(index) => Terminal::Object {
-                    index,
-                    offset: offset - model.sizes[cell] * 0.5,
+        let pins = net.pins.iter().map(|pin| {
+            let terminal = match pin.anchor {
+                PinAnchor::Cell { cell, offset } => match object_of_cell[cell] {
+                    Some(index) => Terminal::Object {
+                        index,
+                        offset: offset - model.sizes[cell] * 0.5,
+                    },
+                    None => Terminal::Fixed(model.positions[cell] + offset),
                 },
-                None => Terminal::Fixed(model.positions[cell] + offset),
-            },
-            PinAnchor::Fixed(p) => Terminal::Fixed(p),
+                PinAnchor::Fixed(p) => Terminal::Fixed(p),
+            };
+            (terminal, pin.extent)
         });
-        netlist.push(terminals, net.weight);
+        netlist.push(pins, net.weight);
     }
     netlist
 }

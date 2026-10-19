@@ -39,11 +39,20 @@ pub enum CellKind {
 /// Rows of height a cell must exceed to count as a macro.
 const MACRO_ROWS: i64 = 6;
 
+/// One connection of a net.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct ModelPin {
+    /// Where it sits.
+    pub anchor: PinAnchor,
+    /// The box of its pin's shapes, relative to where it sits.
+    pub extent: Rect<f64>,
+}
+
 /// A net as the placer sees it.
 #[derive(Clone, Debug, PartialEq)]
 pub struct ModelNet {
     /// Its connections.
-    pub pins: Vec<PinAnchor>,
+    pub pins: Vec<ModelPin>,
     /// Wirelength weight.
     pub weight: f64,
 }
@@ -128,7 +137,7 @@ impl PlacementModel {
                     .iter()
                     .filter_map(|&pin| {
                         let at = db.pin_position(pin);
-                        match db.pins[pin.index()].owner {
+                        let anchor = match db.pins[pin.index()].owner {
                             PinOwner::Cell { cell, .. } => Some(PinAnchor::Cell {
                                 cell: cell.index(),
                                 offset: um(at - db.cells[cell.index()].location),
@@ -136,7 +145,17 @@ impl PlacementModel {
                             PinOwner::Io(io) => (movable_io
                                 || !db.io_pins[io.index()].status.is_movable())
                             .then(|| PinAnchor::Fixed(um(at))),
-                        }
+                        }?;
+                        let extent = db
+                            .pin_shapes(pin)
+                            .into_iter()
+                            .map(|s| s.rect)
+                            .reduce(|a, b| a.union(&b))
+                            .map_or_else(
+                                || Rect::new(Point::default(), Point::default()),
+                                |r| Rect::new(um(r.min - at), um(r.max - at)),
+                            );
+                        Some(ModelPin { anchor, extent })
                     })
                     .collect(),
             })
@@ -242,7 +261,7 @@ impl PlacementModel {
                 let mut lo = Point::new(f64::INFINITY, f64::INFINITY);
                 let mut hi = Point::new(f64::NEG_INFINITY, f64::NEG_INFINITY);
                 for pin in &net.pins {
-                    let p = Self::pin_position(pin, &self.positions);
+                    let p = Self::pin_position(&pin.anchor, &self.positions);
                     lo = Point::new(lo.x.min(p.x), lo.y.min(p.y));
                     hi = Point::new(hi.x.max(p.x), hi.y.max(p.y));
                 }
