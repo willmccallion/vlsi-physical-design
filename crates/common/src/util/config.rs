@@ -44,7 +44,8 @@ pub enum Purpose {
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct GlobalPlacementConfig {
-    /// Target bin density; derived from utilization if unset.
+    /// Target bin density; derived from utilization as
+    /// `OpenROAD-flow-scripts` does if unset.
     pub target_density: Option<f64>,
     /// Bins per side of the density grid; derived from the cell count if unset.
     pub bin_dimension: Option<usize>,

@@ -689,7 +689,7 @@ fn global_placement(
         .unwrap_or_else(|| global::default_bins(&model));
     let target_density = gp
         .target_density
-        .unwrap_or_else(|| (utilization + 0.05).clamp(0.80, 1.0));
+        .unwrap_or_else(|| global::default_target_density(utilization));
 
     ui::stat_row(
         "Cells:",

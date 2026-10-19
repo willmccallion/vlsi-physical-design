@@ -149,6 +149,22 @@ const ZONE_DENSITY_MARGIN: f64 = 0.01;
 const MIN_BINS: usize = 16;
 const MAX_BINS: usize = 512;
 
+/// Share of the room left above a design's utilization that its default
+/// target density adds, as `OpenROAD-flow-scripts`' `PLACE_DENSITY_LB_ADDON`.
+const DENSITY_HEADROOM_SHARE: f64 = 0.2;
+
+/// The target density for a design whose movable cells fill `utilization`
+/// of the free area, as `OpenROAD-flow-scripts` sets it.
+///
+/// As its `place_density_with_lb_addon`, this is the utilization rounded up
+/// to a hundredth, as `OpenROAD` reports it, plus a fifth of the room left
+/// above it and a hundredth, at most one.
+pub fn default_target_density(utilization: f64) -> f64 {
+    let lower_bound = (utilization * 100.0).ceil() / 100.0;
+    let raised = (1.0 - lower_bound).mul_add(DENSITY_HEADROOM_SHARE, lower_bound);
+    (raised + 0.01).min(1.0)
+}
+
 /// Bins per side for `model`: about one per cell, but no shorter than the
 /// row pitch when channels separate the rows.
 ///
@@ -420,6 +436,21 @@ fn build_netlist(model: &PlacementModel, movable: &[usize]) -> Netlist {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_default_target_density_adds_a_fifth_of_the_headroom() {
+        assert!((default_target_density(0.65) - 0.73).abs() < 1e-9);
+    }
+
+    #[test]
+    fn the_default_target_density_starts_from_the_utilization_rounded_up() {
+        assert!((default_target_density(0.0836) - 0.282).abs() < 1e-9);
+    }
+
+    #[test]
+    fn the_default_target_density_is_at_most_one() {
+        assert!((default_target_density(0.995) - 1.0).abs() < f64::EPSILON);
+    }
 
     fn row(y: f64, height: f64) -> Rect<f64> {
         Rect::new(Point::new(0.0, y), Point::new(100.0, y + height))
