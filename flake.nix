@@ -23,14 +23,29 @@
         ];
     in
     {
-      devShells = forAllSystems (pkgs: {
+      devShells = forAllSystems (pkgs: let
+        yosys = pkgs.callPackage ./nix/yosys.nix { };
+        yosys-slang = pkgs.callPackage ./nix/yosys-slang.nix { inherit yosys; };
+        # Yosys with the slang frontend on its plugin path, as the flow runs it.
+        yosysWithSlang = pkgs.symlinkJoin {
+          name = "yosys-with-slang-${yosys.version}";
+          paths = [ yosys yosys-slang ];
+          nativeBuildInputs = [ pkgs.makeWrapper ];
+          postBuild = ''
+            wrapProgram $out/bin/yosys \
+              --set YOSYS_PLUGIN_PATH ${yosys-slang}/share/yosys/plugins
+          '';
+        };
+      in {
         default = pkgs.mkShell {
           packages = rustTools pkgs ++ [ pkgs.python3 ];
         };
         # OpenROAD is built from source, so it lives in its own shell.
         eda = pkgs.mkShell {
           packages = rustTools pkgs ++ [
-            pkgs.python3
+            yosysWithSlang
+            # OpenROAD-flow-scripts reads its variable defaults with PyYAML.
+            (pkgs.python3.withPackages (p: [ p.pyyaml ]))
             # nixpkgs 26Q2 fails its own dbSta.report_cell_usage_file log test.
             (pkgs.openroad.overrideAttrs (old: {
               doCheck = false;
