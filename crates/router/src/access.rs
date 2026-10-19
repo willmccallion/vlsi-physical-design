@@ -23,6 +23,7 @@ use pare_common::db::library::{LayerRef, Shape};
 use pare_common::geom::dbu::Dbu;
 use pare_common::geom::point::Point;
 use pare_common::geom::rect::Rect;
+use pare_common::geom::region::Region;
 
 /// A routing node: a crossing on one track of one layer.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
@@ -250,15 +251,30 @@ fn clear_of(tech: &RouteTech, layer: LayerId, metal: &Rect<Dbu>, blockers: &[Sha
         .all(|s| s.layer != LayerRef::Routing(layer) || !s.rect.overlaps(&reach))
 }
 
-/// Whether `pad` on `layer`, metal of the pin with shapes `pin`, keeps at
-/// least the layer spacing from every shape of the pin it does not touch: a
-/// pad sticking out of one part of a pin must not end just short of another
-/// part, which the checker counts as a spacing violation within the net.
+/// Whether `pad` on `layer`, metal of the pin with shapes `pin`, leaves no
+/// gap narrower than the layer spacing within the pin's metal.
 fn clear_of_own_pin(tech: &RouteTech, layer: LayerId, pad: &Rect<Dbu>, pin: &[Shape]) -> bool {
-    let reach = pad.expand(tech.layer(layer).spacing);
-    pin.iter()
+    let pin_metal: Vec<Rect<Dbu>> = pin
+        .iter()
         .filter(|s| s.layer == LayerRef::Routing(layer))
-        .all(|s| s.rect.touches(pad) || !s.rect.overlaps(&reach))
+        .map(|s| s.rect)
+        .collect();
+    pad_clear_of_pin_metal(pad, &pin_metal, tech.layer(layer).spacing)
+}
+
+/// Whether every part of `pad` sticking out of `pin_metal` touches each
+/// rectangle of it within `spacing` or keeps `spacing` from it: a part
+/// ending just short of the pin is a spacing violation within the net,
+/// while a part inside the pin adds no metal at all.
+fn pad_clear_of_pin_metal(pad: &Rect<Dbu>, pin_metal: &[Rect<Dbu>], spacing: Dbu) -> bool {
+    let outside =
+        Region::from_rects([*pad]).difference(&Region::from_rects(pin_metal.iter().copied()));
+    outside.max_rectangles().iter().all(|part| {
+        let reach = part.expand(spacing);
+        pin_metal
+            .iter()
+            .all(|r| r.touches(part) || !r.overlaps(&reach))
+    })
 }
 
 /// Every stack of vias, bottom first, that carries a pin on `from` up to
@@ -266,7 +282,7 @@ fn clear_of_own_pin(tech: &RouteTech, layer: LayerId, pad: &Rect<Dbu>, pin: &[Sh
 /// pin, topped by the first vias that fit above it. The lowest via's cuts
 /// must lie on the pin; its metal may stick out of it, keeping clear of the
 /// cell's other shapes like every via's metal, and of the parts of the pin
-/// it does not touch.
+/// the part sticking out does not touch.
 fn via_stacks(
     tech: &RouteTech,
     from: LayerId,
@@ -307,4 +323,47 @@ fn via_stacks(
                 .collect()
         })
         .collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn rect(x0: i64, y0: i64, x1: i64, y1: i64) -> Rect<Dbu> {
+        Rect::new(Point::new(Dbu(x0), Dbu(y0)), Point::new(Dbu(x1), Dbu(y1)))
+    }
+
+    /// Nangate45 `DFFS_X1` pin QN in 2000ths of a micron: a tab across a bar.
+    fn tab_and_bar() -> [Rect<Dbu>; 2] {
+        [rect(6390, 1120, 6720, 1400), rect(6390, 370, 6530, 1850)]
+    }
+
+    const METAL1_SPACING: Dbu = Dbu(130);
+
+    #[test]
+    fn a_pad_inside_one_part_of_a_pin_is_clear_of_its_other_parts() {
+        let pad = rect(6580, 1120, 6720, 1400);
+
+        let clear = pad_clear_of_pin_metal(&pad, &tab_and_bar(), METAL1_SPACING);
+
+        assert!(clear);
+    }
+
+    #[test]
+    fn a_pad_ending_just_short_of_another_part_of_its_pin_is_not_clear() {
+        let pad = rect(6580, 1260, 6720, 1540);
+
+        let clear = pad_clear_of_pin_metal(&pad, &tab_and_bar(), METAL1_SPACING);
+
+        assert!(!clear);
+    }
+
+    #[test]
+    fn a_pad_sticking_out_far_from_the_rest_of_its_pin_is_clear() {
+        let pad = rect(6580, 1120, 6860, 1400);
+
+        let clear = pad_clear_of_pin_metal(&pad, &tab_and_bar(), METAL1_SPACING);
+
+        assert!(clear);
+    }
 }
