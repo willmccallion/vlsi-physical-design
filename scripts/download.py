@@ -15,10 +15,15 @@ Usage:
 
 Designs land in inputs/<suite>/<design>/, technology files shared by a
 suite in inputs/tech/, and configs in configs/<suite>/<design>.toml.
+
+aes, ibex and jpeg are synthesized and floorplanned by OpenROAD-flow-scripts
+26Q2, with the yosys and OpenROAD of `nix develop .#eda`, so download them
+inside that shell.
 """
 import argparse
 import os
 import shutil
+import subprocess
 import sys
 import tarfile
 import tempfile
@@ -27,9 +32,36 @@ import urllib.request
 OPENROAD = "https://raw.githubusercontent.com/The-OpenROAD-Project/OpenROAD/master"
 IBM = "http://vlsicad.eecs.umich.edu/BK/Slots/cache/er.cs.ucla.edu/benchmarks/ibm-place/files"
 ISPD = "https://www.ispd.cc/contests"
+ORFS = "https://github.com/The-OpenROAD-Project/OpenROAD-flow-scripts.git"
+ORFS_TAG = "26Q2"
+ORFS_DIR = f"inputs/orfs/OpenROAD-flow-scripts-{ORFS_TAG}"
 
 NANGATE45_LEF = "inputs/tech/nangate45/Nangate45.lef"
 NANGATE45_IO = {"horizontal_layer": "metal5", "vertical_layer": "metal6"}
+ORFS_NANGATE45 = f"{ORFS_DIR}/flow/platforms/nangate45/lef"
+ORFS_NANGATE45_LEF = [
+    f"{ORFS_NANGATE45}/NangateOpenCellLibrary.tech.lef",
+    f"{ORFS_NANGATE45}/NangateOpenCellLibrary.macro.mod.lef",
+]
+
+
+def orfs(nickname, sources, about, io=None, io_enabled=None):
+    """A Nangate45 design that OpenROAD-flow-scripts synthesizes from its
+    `sources` under flow/designs/src and floorplans: die, rows, tracks, tap
+    cells, power grid, and the I/O pins only where its floorplan gives
+    them."""
+    return {
+        "suite": "openroad",
+        "purpose": "place_and_route",
+        "about": about,
+        "orfs": nickname,
+        "orfs_sources": sources,
+        "lef": ORFS_NANGATE45_LEF,
+        "def": f"{nickname}_orfs.def",
+        "io": io,
+        "io_enabled": io_enabled,
+        "placer_iterations": 2000,
+    }
 
 
 def openroad(def_path, purpose, about, def_name=None, io=None, placer_iterations=2000):
@@ -101,22 +133,22 @@ DESIGNS = {
         "GCD, ~500 nets, placed (OpenROAD global router test)",
         placer_iterations=1000,
     ),
-    "aes": openroad(
-        "src/gpl/test/design/nangate45/aes_cipher_top/aes_cipher_top.def",
-        "place_and_route",
-        "AES cipher, ~19k nets, ORFS floorplan with fixed pins",
+    "aes": orfs(
+        "aes",
+        ["aes"],
+        "AES cipher, ~13k nets, ORFS 26Q2 synthesis and floorplan (32% utilization)",
+        io_enabled=False,
     ),
-    "ibex": openroad(
-        "src/gpl/test/design/nangate45/ibex_core/ibex_core.def",
-        "place_and_route",
-        "Ibex RISC-V core, ~31k nets, ORFS floorplan with fixed pins",
-        def_name="ibex.def",
+    "ibex": orfs(
+        "ibex",
+        ["ibex_sv"],
+        "Ibex RISC-V core, ORFS 26Q2 synthesis and floorplan (50% utilization)",
+        io=NANGATE45_IO,
     ),
-    "jpeg": openroad(
-        "src/gpl/test/medium03.def",
-        "place_and_route",
-        "JPEG encoder, ~93k nets (OpenROAD placer test)",
-        def_name="jpeg.def",
+    "jpeg": orfs(
+        "jpeg",
+        ["jpeg"],
+        "JPEG encoder, ORFS 26Q2 synthesis and floorplan (80% utilization)",
         io=NANGATE45_IO,
     ),
     "swerv": openroad(
@@ -200,11 +232,60 @@ def extract(archive, member_prefix, dest, keep):
             tar.extract(m, dest, filter="data")
 
 
+def orfs_checkout():
+    """OpenROAD-flow-scripts at ORFS_TAG, with only what synthesizing and
+    floorplanning the Nangate45 designs here reads."""
+    if not os.path.exists(f"{ORFS_DIR}/.git"):
+        os.makedirs(os.path.dirname(ORFS_DIR), exist_ok=True)
+        subprocess.run(
+            ["git", "clone", "--quiet", "--depth", "1", "--filter=blob:none", "--sparse",
+             "--branch", ORFS_TAG, ORFS, ORFS_DIR],
+            check=True,
+        )
+    sources = sorted({s for d in DESIGNS.values() for s in d.get("orfs_sources", [])})
+    subprocess.run(
+        ["git", "-C", ORFS_DIR, "sparse-checkout", "set", "flow/scripts", "flow/util",
+         "flow/platforms/common", "flow/platforms/nangate45", "flow/designs/nangate45"]
+        + [f"flow/designs/src/{s}" for s in sources],
+        check=True,
+    )
+
+
+def orfs_floorplan(name, dest):
+    """Synthesizes and floorplans design `name` with OpenROAD-flow-scripts
+    and writes the floorplan as a DEF into `dest`."""
+    d = DESIGNS[name]
+    out = f"{dest}/{d['def']}"
+    if os.path.exists(out):
+        print(f"    have {out}")
+        return
+    tools = {t: shutil.which(t) for t in ("yosys", "openroad")}
+    missing = [t for t, path in tools.items() if path is None]
+    if missing:
+        sys.exit(f"{name} needs {' and '.join(missing)}: run inside `nix develop .#eda`")
+    orfs_checkout()
+    subprocess.run(
+        ["make", "-C", f"{ORFS_DIR}/flow",
+         f"DESIGN_CONFIG=./designs/nangate45/{d['orfs']}/config.mk",
+         f"YOSYS_EXE={tools['yosys']}", f"OPENROAD_EXE={tools['openroad']}", "floorplan"],
+        check=True,
+    )
+    os.makedirs(dest, exist_ok=True)
+    odb = f"{ORFS_DIR}/flow/results/nangate45/{d['orfs']}/base/2_floorplan.odb"
+    subprocess.run(
+        [tools["openroad"], "-no_init", "-no_splash", "-exit", "scripts/odb_to_def.tcl"],
+        env={**os.environ, "ODB_IN": odb, "DEF_OUT": out},
+        check=True,
+    )
+
+
 def download(name, cache):
     d = DESIGNS[name]
     dest = design_dir(name)
     print(f"[{name}] {d['about']}")
-    if d["suite"] == "openroad":
+    if d.get("orfs"):
+        orfs_floorplan(name, dest)
+    elif d["suite"] == "openroad":
         fetch(f"{OPENROAD}/test/Nangate45/Nangate45.lef", NANGATE45_LEF)
         for file, url in d["files"].items():
             fetch(url, f"{dest}/{file}")

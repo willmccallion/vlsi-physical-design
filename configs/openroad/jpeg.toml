@@ -1,8 +1,8 @@
 purpose = "place_and_route"
 
 [input]
-lef_files = ["inputs/tech/nangate45/Nangate45.lef"]
-def_file = "inputs/openroad/jpeg/jpeg.def"
+lef_files = ["inputs/orfs/OpenROAD-flow-scripts-26Q2/flow/platforms/nangate45/lef/NangateOpenCellLibrary.tech.lef", "inputs/orfs/OpenROAD-flow-scripts-26Q2/flow/platforms/nangate45/lef/NangateOpenCellLibrary.macro.mod.lef"]
+def_file = "inputs/openroad/jpeg/jpeg_orfs.def"
 output_def = "output/jpeg/placed.def"
 
 [global_placement]
