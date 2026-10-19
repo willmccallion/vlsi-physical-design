@@ -65,6 +65,17 @@ pub struct Session<'a> {
     pub resume: Option<&'a RouteState>,
     /// When to save the run's state, and what to hand it to.
     pub save: Option<Save<'a>>,
+    /// The nets and area whose detailed routing to log in detail.
+    pub trace: TraceRequest,
+}
+
+/// Nets, by name, and an area whose detailed routing to log in detail.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct TraceRequest {
+    /// Nets to trace wherever they are routed.
+    pub nets: Vec<String>,
+    /// An area whose regions to trace with every net in them.
+    pub area: Option<Rect<Dbu>>,
 }
 
 /// When a run saves its state and what it hands the state to.
@@ -144,6 +155,7 @@ pub fn route_with(
             global: named_global.clone().unwrap_or_default(),
             detailed: None,
         });
+        dr.set_trace(trace_of(db, &session.trace)?);
         let start = Instant::now();
         let wires = assign_tracks(&tech, &dr.occupancy, &grid, &global, &dr.pin_points());
         dr.set_guides(global, &grid);
@@ -302,6 +314,21 @@ fn detailed_state(
             history: dr.history(),
         }),
     }
+}
+
+/// The trace `request` asks for, with its nets found by name.
+fn trace_of(db: &NetlistDB, request: &TraceRequest) -> Result<detailed::Trace, RouteError> {
+    let ids = net_ids(db);
+    let nets = request
+        .nets
+        .iter()
+        .map(|name| {
+            ids.get(name.as_str())
+                .copied()
+                .ok_or_else(|| RouteError::TraceNet(name.clone()))
+        })
+        .collect::<Result<Vec<NetId>, _>>()?;
+    Ok(detailed::Trace::new(nets, request.area))
 }
 
 /// Every globally routed net's name with the paths of its tree, by name.
@@ -855,6 +882,9 @@ pub enum RouteError {
     /// A saved state names a net the design does not have.
     #[error("the route state names net '{0}', which the design does not have")]
     StateNet(String),
+    /// A net to trace is not in the design.
+    #[error("no net '{0}' to trace")]
+    TraceNet(String),
     /// Saved global routes do not fit the design as it is placed now.
     #[error(transparent)]
     GlobalRestore(#[from] RestoreError),

@@ -95,11 +95,11 @@ fn route_saving(point: SavePoint) -> (Vec<Vec<RouteElem>>, RouteState) {
     let mut saved = None;
     let mut write = |state: &RouteState| saved = Some(state.clone());
     let session = Session {
-        resume: None,
         save: Some(Save {
             after: point,
             write: &mut write,
         }),
+        ..Session::default()
     };
     let _ = route_with(&mut db, &config, session).unwrap();
     let wiring = db.nets.iter().map(|n| n.routing.clone()).collect();
@@ -111,7 +111,7 @@ fn route_resuming(state: &RouteState) -> Vec<Vec<RouteElem>> {
     let (mut db, config) = placed_tiny();
     let session = Session {
         resume: Some(state),
-        save: None,
+        ..Session::default()
     };
     let _ = route_with(&mut db, &config, session).unwrap();
     db.nets.iter().map(|n| n.routing.clone()).collect()
@@ -148,7 +148,7 @@ fn a_state_of_another_design_is_refused() {
         &config,
         Session {
             resume: Some(&state),
-            save: None,
+            ..Session::default()
         },
     );
 

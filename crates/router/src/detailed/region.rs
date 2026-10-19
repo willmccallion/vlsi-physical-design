@@ -12,6 +12,7 @@
 
 use super::DetailedRouter;
 use super::judge::{Candidate, Judgment};
+use super::trace;
 use crate::access::Node;
 use crate::occupancy::{LocalOccupancy, Owner};
 use crate::search::{Costs, MAX_PENALTY, OwnVias, Search, WindowCache};
@@ -381,6 +382,14 @@ impl DetailedRouter<'_> {
                     .collect();
                 let violations = |c: &[Candidate<'_>]| self.judge(area, c).findings.violations.len();
                 let (after, before) = (violations(&new), violations(&old));
+                let traced = self.trace.wants_region(area, routed.iter().map(|item| item.net));
+                if traced {
+                    log::info!(
+                        "trace region {}: {} with {after} violations against {before} before",
+                        trace::region_text(area),
+                        if after > before { "new wiring rejected" } else { "new wiring kept" }
+                    );
+                }
                 if after > before {
                     log::trace!(
                         "region ({}, {})-({}, {}): new wiring rejected, {after} violations against {before}",
@@ -532,6 +541,9 @@ impl DetailedRouter<'_> {
                 };
                 let own = self.vias_near(piece.net, area);
                 let edges = self.connect_groups(&search, &piece.groups, &window, own);
+                if self.trace.wants(piece.net, area) {
+                    self.trace_piece(area, round, piece.net, &search, edges.as_deref());
+                }
                 let result = edges.map(|edges| {
                     let wiring = Wiring {
                         edges,
@@ -563,8 +575,20 @@ impl DetailedRouter<'_> {
                 unconnected: work.results.iter().filter(|r| r.is_none()).count(),
                 violations: judgment.findings.violations.len(),
             };
+            let traced = self
+                .trace
+                .wants_region(area, (0..work.len()).map(|i| work.net(i)));
+            if traced {
+                self.trace_judgment(area, round, &score, &judgment);
+            }
             if best.as_ref().is_none_or(|(b, _)| score < *b) {
                 best = Some((score, work.results.clone()));
+                if traced {
+                    log::info!(
+                        "trace region {} local {round} is the best so far",
+                        trace::region_text(area)
+                    );
+                }
             }
             if round + 1 == LOCAL_ROUNDS {
                 break;
@@ -700,6 +724,52 @@ impl DetailedRouter<'_> {
             let _ = avoided.remove(n);
         }
         reroute
+    }
+
+    /// Logs a traced piece's route and what it cost the search.
+    fn trace_piece(
+        &self,
+        area: &Rect<Dbu>,
+        round: usize,
+        net: NetId,
+        search: &Search<'_>,
+        edges: Option<&[Edge]>,
+    ) {
+        let name = &self.db.nets[net.index()].name;
+        let region = trace::region_text(area);
+        let Some(edges) = edges else {
+            log::info!("trace region {region} local {round}: {name} found no route");
+            return;
+        };
+        let cost = trace::cost_text(self.db, &search.explain(edges));
+        log::info!(
+            "trace region {region} local {round}: {name} routed {} | cost {cost}",
+            trace::route_text(self.db, self.tech, edges)
+        );
+    }
+
+    /// Logs a traced region's judgment after a local round.
+    fn trace_judgment(&self, area: &Rect<Dbu>, round: usize, score: &Score, judgment: &Judgment) {
+        let name = |o: pare_common::verify::drc::OwnerIndex| match self.fixed.owners()[o.index()] {
+            pare_common::verify::drc::Owner::Net(n) => self.db.nets[n.index()].name.clone(),
+            other => format!("{other:?}"),
+        };
+        log::info!(
+            "trace region {} local {round}: {} violations, {} pieces unconnected",
+            trace::region_text(area),
+            score.violations,
+            score.unconnected
+        );
+        for m in &judgment.findings.violations {
+            log::info!(
+                "trace     {} on {:?} at {} between {} and {}",
+                m.violation.name(),
+                m.layer,
+                trace::region_text(&m.bbox),
+                name(m.owners.0),
+                name(m.owners.1)
+            );
+        }
     }
 
     /// Logs what the judge still holds against a region's pieces.

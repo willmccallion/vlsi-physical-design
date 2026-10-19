@@ -13,6 +13,7 @@ use crate::access::{AccessPoint, Node};
 use crate::global::GCell;
 use crate::occupancy::{LocalOccupancy, Occupancy, Origin, Owner, Proximity, TrackRef, too_close};
 use crate::tech::RouteTech;
+use crate::wiring::Edge;
 use pare_common::db::design::NetlistDB;
 use pare_common::db::indices::{CutLayerId, LayerId, NonDefaultRuleId, ViaId};
 use pare_common::db::library::LayerRef;
@@ -62,6 +63,65 @@ pub struct Costs {
     pub penalty: f64,
     /// Cost per unit of history at a location.
     pub history: f64,
+}
+
+/// Where the parts of a cost go: nowhere while searching, into an
+/// [`Explanation`] while tracing.
+pub(crate) trait CostParts {
+    /// A part paid for coming near `owner`'s metal or cuts.
+    fn conflict(&mut self, owner: Owner, cost: f64);
+    /// A part paid for the conflict history of a track.
+    fn history(&mut self, cost: f64);
+}
+
+/// Costs summed without keeping their parts.
+struct Total;
+
+impl CostParts for Total {
+    #[inline(always)]
+    fn conflict(&mut self, _: Owner, _: f64) {}
+    #[inline(always)]
+    fn history(&mut self, _: f64) {}
+}
+
+/// What a route costs a search, part by part.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub(crate) struct Explanation {
+    /// Wire length, in database units.
+    pub length: f64,
+    /// Vias, and what they cost for being vias.
+    pub vias: usize,
+    pub via_cost: f64,
+    /// What coming near each other owner costs, largest first once sorted.
+    pub conflicts: Vec<(Owner, f64)>,
+    /// What the conflict history of the tracks used costs.
+    pub history: f64,
+    /// What crowding the net's own vias costs.
+    pub own_vias: f64,
+}
+
+impl Explanation {
+    /// The whole cost.
+    pub fn total(&self) -> f64 {
+        let conflicts: f64 = self.conflicts.iter().map(|&(_, c)| c).sum();
+        self.length + self.via_cost + conflicts + self.history + self.own_vias
+    }
+}
+
+impl CostParts for Explanation {
+    fn conflict(&mut self, owner: Owner, cost: f64) {
+        if cost == 0.0 {
+            return;
+        }
+        match self.conflicts.iter_mut().find(|(o, _)| *o == owner) {
+            Some((_, c)) => *c += cost,
+            None => self.conflicts.push((owner, cost)),
+        }
+    }
+
+    fn history(&mut self, cost: f64) {
+        self.history += cost;
+    }
 }
 
 /// Accumulated conflict history, by track and coarse position along it.
@@ -445,13 +505,22 @@ impl Search<'_> {
     /// Cost of other owners' cuts that a cut at `rect` on `cut` would touch
     /// or crowd.
     fn cut_cost(&self, cut: CutLayerId, rect: &Rect<Dbu>) -> f64 {
+        self.cut_cost_into(cut, rect, &mut Total)
+    }
+
+    /// [`Self::cut_cost`], telling `parts` whom each part is paid to.
+    fn cut_cost_into(&self, cut: CutLayerId, rect: &Rect<Dbu>, parts: &mut impl CostParts) -> f64 {
         let mut cost = 0.0;
         for o in self.occupancy.cut_conflicts(cut, rect, self.owner) {
-            cost += self.occupant_cost(o.owner, o.origin);
+            let part = self.occupant_cost(o.owner, o.origin);
+            parts.conflict(o.owner, part);
+            cost += part;
         }
         if let Some(overlay) = self.overlay {
-            let clashes = overlay.cut_conflicts(cut, rect, self.owner).count();
-            cost = self.costs.penalty.mul_add(clashes as f64, cost);
+            for o in overlay.cut_conflicts(cut, rect, self.owner) {
+                parts.conflict(o.owner, self.costs.penalty);
+                cost += self.costs.penalty;
+            }
         }
         cost
     }
@@ -471,34 +540,96 @@ impl Search<'_> {
     }
 
     fn metal_cost(&self, layer: LayerId, rect: &Rect<Dbu>, alongside: f64) -> f64 {
+        self.metal_cost_into(layer, rect, alongside, &mut Total)
+    }
+
+    /// [`Self::metal_cost`], telling `parts` whom each part is paid to.
+    fn metal_cost_into(
+        &self,
+        layer: LayerId,
+        rect: &Rect<Dbu>,
+        alongside: f64,
+        parts: &mut impl CostParts,
+    ) -> f64 {
         let mut cost = 0.0;
         for c in self
             .occupancy
             .rect_conflicts(self.tech, layer, rect, self.owner)
         {
-            cost += match c.proximity {
+            let part = match c.proximity {
                 Proximity::Within => self.occupant_cost(c.occupant.owner, c.occupant.origin),
                 Proximity::Alongside => alongside,
             };
+            parts.conflict(c.occupant.owner, part);
+            cost += part;
         }
         if let Some(overlay) = self.overlay {
             for c in overlay.rect_conflicts(self.tech, layer, rect, self.owner) {
-                cost += match c.proximity {
+                let part = match c.proximity {
                     Proximity::Within => self.costs.penalty,
                     Proximity::Alongside => alongside,
                 };
+                parts.conflict(c.occupant.owner, part);
+                cost += part;
             }
         }
         let lt = self.tech.layer(layer);
         let ((a0, a1), (b0, b1)) = lt.across_along_rect(rect);
         for track in lt.tracks_within(a0, a1) {
             let t = TrackRef { layer, track };
-            cost = self
-                .costs
-                .history
-                .mul_add(self.history.over(t, b0, b1), cost);
+            let part = self.costs.history * self.history.over(t, b0, b1);
+            parts.history(part);
+            cost += part;
         }
         cost
+    }
+
+    /// What routing `edges` costs this search, part by part: their length,
+    /// their vias, what each other owner's metal and cuts near them cost,
+    /// and the conflict history of their tracks.
+    pub(crate) fn explain(&self, edges: &[Edge]) -> Explanation {
+        let mut parts = Explanation::default();
+        for edge in edges {
+            match *edge {
+                Edge::Wire(lower) => {
+                    let lt = self.tech.layer(lower.layer);
+                    let a = lt.point(lower.track, lower.cross);
+                    let b = lt.point(lower.track, lower.cross + 1);
+                    parts.length += ((a.x - b.x).abs() + (a.y - b.y).abs()).to_f64();
+                    if let Some(rect) = wire_rect(a, b, self.width(lower.layer)) {
+                        let _ = self.metal_cost_into(
+                            lower.layer,
+                            &rect,
+                            self.costs.penalty,
+                            &mut parts,
+                        );
+                    }
+                }
+                Edge::Via { lower, .. } => {
+                    let at = self.point(lower);
+                    let via = self.tech.via_above(lower.layer);
+                    let top = LayerId::new(lower.layer.index() + 1);
+                    parts.vias += 1;
+                    parts.via_cost += self.costs.via;
+                    let _ = self.metal_cost_into(
+                        lower.layer,
+                        &via.bottom.translate(at),
+                        0.0,
+                        &mut parts,
+                    );
+                    let _ = self.metal_cost_into(top, &via.top.translate(at), 0.0, &mut parts);
+                    for c in &via.cuts {
+                        let _ = self.cut_cost_into(
+                            lower.layer.cut_above(),
+                            &c.translate(at),
+                            &mut parts,
+                        );
+                    }
+                    parts.own_vias += self.own_via_cost(lower.layer, at);
+                }
+            }
+        }
+        parts
     }
 
     /// Cost of a whole wire from `a` to `b`: its length and its conflicts.

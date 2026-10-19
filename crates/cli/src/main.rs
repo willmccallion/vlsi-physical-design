@@ -80,6 +80,14 @@ enum Commands {
         /// placement, skipping what it holds.
         #[arg(long, conflicts_with = "global_only")]
         resume: Option<PathBuf>,
+        /// Log this net's detailed routing in detail: each route found with
+        /// what it cost, each region judgment and its violations. Repeatable.
+        #[arg(long = "trace-net", conflicts_with = "global_only")]
+        trace_nets: Vec<String>,
+        /// Log detailed routing in detail in every region meeting this box,
+        /// given in microns as X0 Y0 X1 Y1.
+        #[arg(long, num_args = 4, value_names = ["X0", "Y0", "X1", "Y1"], conflicts_with = "global_only")]
+        trace_box: Option<Vec<f64>>,
     },
     /// Place, route, or place and route a design, as its purpose says.
     Run {
@@ -202,6 +210,8 @@ fn run(command: Commands, report: &mut Report) -> anyhow::Result<()> {
             save_state,
             save_after,
             resume,
+            trace_nets,
+            trace_box,
         } => {
             let config = load_config(&name, report)?;
             if config.purpose == Purpose::Placement {
@@ -215,10 +225,21 @@ fn run(command: Commands, report: &mut Report) -> anyhow::Result<()> {
             let stage = if global_only {
                 RouteStage::Global { guides }
             } else {
+                let units = db.dbu();
+                let area = trace_box.map(|b| {
+                    let at = |x: f64, y: f64| {
+                        Point::new(units.to_dbu_rounded(x), units.to_dbu_rounded(y))
+                    };
+                    pare_common::geom::rect::Rect::new(at(b[0], b[1]), at(b[2], b[3]))
+                });
                 RouteStage::Detailed(StateFiles {
                     save: save_state
                         .map(|path| (path, save_after.unwrap_or(pare_router::SavePoint::Global))),
                     resume,
+                    trace: pare_router::TraceRequest {
+                        nets: trace_nets,
+                        area,
+                    },
                 })
             };
             run_routing(
@@ -328,6 +349,7 @@ enum RouteStage {
 struct StateFiles {
     save: Option<(PathBuf, pare_router::SavePoint)>,
     resume: Option<PathBuf>,
+    trace: pare_router::TraceRequest,
 }
 
 /// A `--save-after` value: `global` or a detailed round number.
@@ -833,6 +855,7 @@ fn run_routing(
                 after,
                 write: &mut write,
             }),
+            trace: files.trace.clone(),
         };
         pare_router::route_with(db, &config.routing, session)?
     };

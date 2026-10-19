@@ -11,8 +11,10 @@ mod initial;
 mod judge;
 mod patch;
 mod region;
+mod trace;
 
 pub use region::{RepairStats, Scope};
+pub use trace::Trace;
 
 use crate::access::{AccessPoint, Node, access_points};
 use crate::global::{GCell, GlobalGrid, GlobalRoutes, RouteTree};
@@ -80,6 +82,8 @@ pub struct DetailedRouter<'a> {
     elems: Vec<Vec<RouteElem>>,
     /// Every violation found by the last round's judge.
     markers: Vec<Marker>,
+    /// What to log in detail.
+    trace: Trace,
 }
 
 impl<'a> DetailedRouter<'a> {
@@ -149,6 +153,7 @@ impl<'a> DetailedRouter<'a> {
             fixed_tiles,
             elems: vec![Vec::new(); db.nets.len()],
             markers: Vec::new(),
+            trace: Trace::default(),
         }
     }
 
@@ -323,6 +328,7 @@ impl<'a> DetailedRouter<'a> {
         let nets = self.rejudge();
         let markers = std::mem::take(&mut self.markers);
         for m in &markers {
+            self.trace_marker(m);
             match m.layer {
                 LayerRef::Routing(layer) => {
                     if let Some(track) = self.track_at(layer, m.at) {
@@ -352,6 +358,11 @@ impl<'a> DetailedRouter<'a> {
         nets.dedup();
         self.markers = markers;
         nets
+    }
+
+    /// Logs what `trace` asks for from now on.
+    pub fn set_trace(&mut self, trace: Trace) {
+        self.trace = trace;
     }
 
     /// The conflict history, by track and bucket along it.
@@ -404,6 +415,30 @@ impl<'a> DetailedRouter<'a> {
         }
         let lt = self.tech.layer(n.layer);
         (n.track as usize) < lt.tracks.len() && (n.cross as usize) < lt.cross.len()
+    }
+
+    /// Logs a violation of a traced net or in the traced area, where the
+    /// history it raises lies.
+    fn trace_marker(&self, m: &Marker) {
+        let at = Rect::new(m.at, m.at);
+        let traced =
+            m.nets.iter().flatten().any(|&n| self.trace.wants(n, &at)) || self.trace.meets(&at);
+        if !traced {
+            return;
+        }
+        let names: Vec<String> = m
+            .nets
+            .iter()
+            .flatten()
+            .map(|n| self.db.nets[n.index()].name.clone())
+            .collect();
+        log::info!(
+            "trace marker {:?} at ({}, {}) between {}: history raised on the track through that point",
+            m.layer,
+            m.at.x.get(),
+            m.at.y.get(),
+            names.join(" and ")
+        );
     }
 
     /// Adds history on the tracks of both layers a cut at `at` joins.
