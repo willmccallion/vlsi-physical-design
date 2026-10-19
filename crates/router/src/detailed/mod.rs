@@ -38,6 +38,18 @@ use rayon::prelude::*;
 use rustc_hash::{FxHashMap, FxHashSet};
 use std::collections::VecDeque;
 
+/// Why saved detailed routes cannot be put back.
+#[derive(Clone, Debug, PartialEq, Eq, thiserror::Error)]
+pub enum RestoreRoutesError {
+    /// A saved route of the net uses a node that is not a track crossing.
+    #[error("the saved route of net {} leaves the tracks", .0.index())]
+    OffTracks(NetId),
+    /// A saved route of the net reaches a pin by an access point pin access
+    /// does not offer, as when the placement or pin access has changed.
+    #[error("the saved route of net {} uses an access point no longer offered", .0.index())]
+    Access(NetId),
+}
+
 /// State shared by all detailed routing rounds.
 #[derive(Debug)]
 pub struct DetailedRouter<'a> {
@@ -308,11 +320,8 @@ impl<'a> DetailedRouter<'a> {
     /// Judges the whole design, records every violation in the history and
     /// returns the nets involved.
     pub fn conflicted_nets(&mut self, history_step: f64) -> Vec<NetId> {
-        let (markers, counts) = self.exact_markers();
-        for (kind, count) in &counts {
-            log::debug!("round markers: {} {}", kind.name(), count);
-        }
-        let mut nets = FxHashSet::default();
+        let nets = self.rejudge();
+        let markers = std::mem::take(&mut self.markers);
         for m in &markers {
             match m.layer {
                 LayerRef::Routing(layer) => {
@@ -323,12 +332,78 @@ impl<'a> DetailedRouter<'a> {
                 }
                 LayerRef::Cut(cut) => self.bump_cut(cut, m.at, history_step),
             }
-            nets.extend(m.nets.iter().flatten().copied());
         }
         self.markers = markers;
-        let mut out: Vec<NetId> = nets.into_iter().collect();
-        out.sort_unstable();
-        out
+        nets
+    }
+
+    /// Judges the whole design and returns the nets of its violations,
+    /// leaving the history as it is.
+    pub fn rejudge(&mut self) -> Vec<NetId> {
+        let (markers, counts) = self.exact_markers();
+        for (kind, count) in &counts {
+            log::debug!("round markers: {} {}", kind.name(), count);
+        }
+        let mut nets: Vec<NetId> = markers
+            .iter()
+            .flat_map(|m| m.nets.iter().flatten().copied())
+            .collect();
+        nets.sort_unstable();
+        nets.dedup();
+        self.markers = markers;
+        nets
+    }
+
+    /// The conflict history, by track and bucket along it.
+    pub fn history(&self) -> Vec<(TrackRef, i64, f64)> {
+        self.history.entries()
+    }
+
+    /// Puts saved routes and conflict history back, committing every route
+    /// as routing it would have.
+    ///
+    /// # Errors
+    ///
+    /// When a route has a node off the tracks of its layer or an access
+    /// point pin access does not offer its net now.
+    pub fn restore(
+        &mut self,
+        routes: &[(NetId, NetRoute)],
+        history: &[(TrackRef, i64, f64)],
+    ) -> Result<(), RestoreRoutesError> {
+        for (net, route) in routes {
+            let nodes = route.edges.iter().flat_map(|e| match *e {
+                Edge::Wire(n) => [n, n],
+                Edge::Via { lower, upper } => [lower, upper],
+            });
+            if !nodes
+                .chain(route.access.iter().map(|a| a.node))
+                .all(|n| self.on_tracks(n))
+            {
+                return Err(RestoreRoutesError::OffTracks(*net));
+            }
+            let offered =
+                |a: &AccessPoint| self.access[net.index()].iter().flatten().any(|o| o == a);
+            if !route.access.iter().all(offered) {
+                return Err(RestoreRoutesError::Access(*net));
+            }
+        }
+        for (net, route) in routes {
+            self.commit(*net, route);
+        }
+        for &(track, bucket, amount) in history {
+            self.history.set(track, bucket, amount);
+        }
+        Ok(())
+    }
+
+    /// Whether `n` is a crossing of a routable layer's tracks.
+    fn on_tracks(&self, n: Node) -> bool {
+        if !self.tech.routable(n.layer) {
+            return false;
+        }
+        let lt = self.tech.layer(n.layer);
+        (n.track as usize) < lt.tracks.len() && (n.cross as usize) < lt.cross.len()
     }
 
     /// Adds history on the tracks of both layers a cut at `at` joins.

@@ -11,14 +11,18 @@ pub mod detailed;
 pub mod global;
 pub mod occupancy;
 mod search;
+pub mod state;
 pub mod tech;
 pub mod track;
 pub mod tree;
 pub mod wiring;
 
-use detailed::{Costs, DetailedRouter, Scope, routable_nets};
+use detailed::{Costs, DetailedRouter, RestoreRoutesError, Scope, routable_nets};
 pub use global::{CapacityReduction, TileTracks};
-use global::{GCell, GlobalGrid, GlobalNet, Tracks, route_global, track_demand};
+use global::{
+    GCell, GlobalGrid, GlobalNet, GlobalRoutes, RestoreError, Tracks, restore_global, route_global,
+    track_demand,
+};
 use occupancy::FixedTracks;
 use pare_common::db::design::{
     GCellGridDef, NetlistDB, PinOwner, PlacementStatus, RouteElem, TrackAxis,
@@ -31,7 +35,10 @@ use pare_common::geom::rect::Rect;
 use pare_common::util::config::{LayerRangeError, RoutingConfig};
 use pare_common::util::{memory, ui};
 use pare_common::verify::shapes::obstruction_shapes;
+use rustc_hash::FxHashMap;
 use search::MAX_PENALTY;
+use state::{DetailedState, GridShape};
+pub use state::{RouteState, StateParseError};
 use std::time::Instant;
 use tech::RouteTech;
 use track::assign_tracks;
@@ -51,8 +58,66 @@ pub struct RoutingSummary {
     pub conflicted: Vec<NetId>,
 }
 
+/// Where a routing run resumes from and when it saves its state.
+#[derive(Debug, Default)]
+pub struct Session<'a> {
+    /// A state saved by an earlier run on the same design, to go on from.
+    pub resume: Option<&'a RouteState>,
+    /// When to save the run's state, and what to hand it to.
+    pub save: Option<Save<'a>>,
+}
+
+/// When a run saves its state and what it hands the state to.
+pub struct Save<'a> {
+    /// The point of the run after which to save.
+    pub after: SavePoint,
+    /// Takes the state once that point is reached.
+    pub write: &'a mut dyn FnMut(&RouteState),
+}
+
+impl std::fmt::Debug for Save<'_> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Save")
+            .field("after", &self.after)
+            .finish_non_exhaustive()
+    }
+}
+
+/// A point of a routing run after which its state can be saved.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum SavePoint {
+    /// Global routing.
+    Global,
+    /// A detailed round; 0 is the first pass.
+    Round(usize),
+}
+
+impl Session<'_> {
+    /// Hands the state `build` makes to the save, if it is due after `point`.
+    fn save_at(&mut self, point: SavePoint, build: impl FnOnce() -> RouteState) {
+        if let Some(save) = self.save.as_mut()
+            && save.after == point
+        {
+            (save.write)(&build());
+        }
+    }
+}
+
 /// Routes every signal net of `db` and stores the wiring in the design.
 pub fn route(db: &mut NetlistDB, config: &RoutingConfig) -> Result<RoutingSummary, RouteError> {
+    route_with(db, config, Session::default())
+}
+
+/// Routes every signal net of `db` as [`route`] does, resuming from and
+/// saving state as `session` says.
+///
+/// A run resumed from a state saved after a detailed round goes on from
+/// the round after it exactly as the run that saved it would have.
+pub fn route_with(
+    db: &mut NetlistDB,
+    config: &RoutingConfig,
+    mut session: Session<'_>,
+) -> Result<RoutingSummary, RouteError> {
     check_routable(db, config)?;
     let tech = RouteTech::new(db, config)?;
     let gcell = gcell_size(&tech, config);
@@ -69,8 +134,16 @@ pub fn route(db: &mut NetlistDB, config: &RoutingConfig) -> Result<RoutingSummar
             nets,
             grid,
             global,
-        } = global_stage(db, &tech, config, gcell);
+        } = global_stage(db, &tech, config, gcell, session.resume)?;
         let (nx, ny) = grid.size();
+        let named_global = session.save.is_some().then(|| named_global(db, &global));
+        let shape = grid_shape(&tech, &grid);
+        session.save_at(SavePoint::Global, || RouteState {
+            design: db.name.clone(),
+            grid: shape,
+            global: named_global.clone().unwrap_or_default(),
+            detailed: None,
+        });
         let start = Instant::now();
         let wires = assign_tracks(&tech, &dr.occupancy, &grid, &global, &dr.pin_points());
         dr.set_guides(global, &grid);
@@ -82,20 +155,57 @@ pub fn route(db: &mut NetlistDB, config: &RoutingConfig) -> Result<RoutingSummar
             ..RoutingSummary::default()
         };
         let start = Instant::now();
-        let first = dr.route_initial(&nets, costs);
-        ui::dr_table_header();
-        let mut conflicted = dr.conflicted_nets(1.0);
-        ui::dr_iter(
-            0,
-            dr.marker_count(),
-            conflicted.len(),
-            first.pieces,
-            costs.penalty / pitch,
-            start.elapsed().as_millis(),
-        );
-        let mut scope = Scope::Conflicts;
-        let mut progress = Progress::new(dr.marker_count());
-        for round in 1..=config.detailed_iterations {
+        let resumed = session.resume.and_then(|s| s.detailed.as_ref());
+        let (first_round, mut conflicted, mut scope, mut progress) = if let Some(saved) = resumed {
+            let routes = named_routes(db, &saved.routes)?;
+            dr.restore(&routes, &saved.history)?;
+            costs.penalty = saved.penalty;
+            ui::dr_table_header();
+            let conflicted = dr.rejudge();
+            ui::dr_iter(
+                saved.round,
+                dr.marker_count(),
+                conflicted.len(),
+                0,
+                costs.penalty / pitch,
+                start.elapsed().as_millis(),
+            );
+            let progress = Progress {
+                best: saved.best,
+                since_best: saved.since_best,
+            };
+            (saved.round + 1, conflicted, saved.scope, progress)
+        } else {
+            let first = dr.route_initial(&nets, costs);
+            ui::dr_table_header();
+            let conflicted = dr.conflicted_nets(1.0);
+            ui::dr_iter(
+                0,
+                dr.marker_count(),
+                conflicted.len(),
+                first.pieces,
+                costs.penalty / pitch,
+                start.elapsed().as_millis(),
+            );
+            let progress = Progress::new(dr.marker_count());
+            (1, conflicted, Scope::Conflicts, progress)
+        };
+        if first_round == 1 {
+            session.save_at(SavePoint::Round(0), || {
+                detailed_state(
+                    db,
+                    &dr,
+                    &nets,
+                    shape,
+                    named_global.clone(),
+                    0,
+                    costs,
+                    scope,
+                    &progress,
+                )
+            });
+        }
+        for round in first_round..=config.detailed_iterations {
             if conflicted.is_empty() {
                 break;
             }
@@ -115,6 +225,12 @@ pub fn route(db: &mut NetlistDB, config: &RoutingConfig) -> Result<RoutingSummar
             scope = next_scope(scope, conflicted.len() < before);
             progress.record(dr.marker_count());
             summary.rounds = round;
+            session.save_at(SavePoint::Round(round), || {
+                let global = named_global.clone();
+                detailed_state(
+                    db, &dr, &nets, shape, global, round, costs, scope, &progress,
+                )
+            });
             ui::dr_iter(
                 round,
                 dr.marker_count(),
@@ -150,6 +266,91 @@ pub fn route(db: &mut NetlistDB, config: &RoutingConfig) -> Result<RoutingSummar
     Ok(summary)
 }
 
+/// The state of a run saved after detailed round `round`.
+#[allow(clippy::too_many_arguments)]
+fn detailed_state(
+    db: &NetlistDB,
+    dr: &DetailedRouter<'_>,
+    nets: &[NetId],
+    grid: GridShape,
+    global: Option<Vec<(String, Vec<Vec<GCell>>)>>,
+    round: usize,
+    costs: Costs,
+    scope: Scope,
+    progress: &Progress,
+) -> RouteState {
+    let routes = nets
+        .iter()
+        .map(|&n| {
+            (
+                db.nets[n.index()].name.clone(),
+                dr.routes()[n.index()].clone(),
+            )
+        })
+        .collect();
+    RouteState {
+        design: db.name.clone(),
+        grid,
+        global: global.unwrap_or_default(),
+        detailed: Some(DetailedState {
+            round,
+            penalty: costs.penalty,
+            scope,
+            best: progress.best,
+            since_best: progress.since_best,
+            routes,
+            history: dr.history(),
+        }),
+    }
+}
+
+/// Every globally routed net's name with the paths of its tree, by name.
+fn named_global(db: &NetlistDB, global: &GlobalRoutes) -> Vec<(String, Vec<Vec<GCell>>)> {
+    let mut out: Vec<(String, Vec<Vec<GCell>>)> = global
+        .paths
+        .iter()
+        .map(|(n, paths)| (db.nets[n.index()].name.clone(), paths.clone()))
+        .collect();
+    out.sort_unstable_by(|a, b| a.0.cmp(&b.0));
+    out
+}
+
+/// The shape of `grid` as a saved state records it.
+const fn grid_shape(tech: &RouteTech, grid: &GlobalGrid) -> GridShape {
+    let (nx, ny) = grid.size();
+    GridShape {
+        gcell: grid.gcell(),
+        nx,
+        ny,
+        min_layer: tech.min_layer,
+        max_layer: tech.max_layer,
+    }
+}
+
+/// The nets `routes` name, with their routes.
+fn named_routes(
+    db: &NetlistDB,
+    routes: &[(String, wiring::NetRoute)],
+) -> Result<Vec<(NetId, wiring::NetRoute)>, RouteError> {
+    let ids = net_ids(db);
+    routes
+        .iter()
+        .map(|(name, route)| {
+            ids.get(name.as_str())
+                .map(|&n| (n, route.clone()))
+                .ok_or_else(|| RouteError::StateNet(name.clone()))
+        })
+        .collect()
+}
+
+fn net_ids(db: &NetlistDB) -> FxHashMap<&str, NetId> {
+    db.nets
+        .iter()
+        .enumerate()
+        .map(|(i, n)| (n.name.as_str(), NetId::new(i)))
+        .collect()
+}
+
 /// Global routing and track assignment of every signal net of `db`, for
 /// measuring them on their own; the design is left as it is.
 pub fn route_global_only(db: &NetlistDB, config: &RoutingConfig) -> Result<GlobalOnly, RouteError> {
@@ -162,7 +363,7 @@ pub fn route_global_only(db: &NetlistDB, config: &RoutingConfig) -> Result<Globa
         grid,
         global,
         ..
-    } = global_stage(db, &tech, config, gcell);
+    } = global_stage(db, &tech, config, gcell, None)?;
     let start = Instant::now();
     let _ = assign_tracks(&tech, &dr.occupancy, &grid, &global, &dr.pin_points());
     stage("Track assign:", start);
@@ -257,13 +458,15 @@ struct GlobalStage<'a> {
     global: global::GlobalRoutes,
 }
 
-/// Pin access, the gcell grid and global routing, reported stage by stage.
+/// Pin access, the gcell grid and global routing, or the global routes of
+/// `resume`, reported stage by stage.
 fn global_stage<'a>(
     db: &'a NetlistDB,
     tech: &'a RouteTech,
     config: &RoutingConfig,
     gcell: Dbu,
-) -> GlobalStage<'a> {
+    resume: Option<&RouteState>,
+) -> Result<GlobalStage<'a>, RouteError> {
     let start = Instant::now();
     let dr = DetailedRouter::new(db, tech, gcell);
     let nets = routable_nets(db);
@@ -289,9 +492,19 @@ fn global_stage<'a>(
             })
         })
         .collect();
-    let global = route_global(&mut grid, &global_nets, config.global_iterations);
+    let global = match resume {
+        Some(state) => restored_global(db, tech, &mut grid, &global_nets, state)?,
+        None => route_global(&mut grid, &global_nets, config.global_iterations),
+    };
     let (nx, ny) = grid.size();
-    stage("Global route:", start);
+    stage(
+        if resume.is_some() {
+            "Global restored:"
+        } else {
+            "Global route:"
+        },
+        start,
+    );
     ui::stat_row(
         "GCells:",
         &format!("{nx}x{ny}"),
@@ -308,12 +521,40 @@ fn global_stage<'a>(
             t.overflow.rounded(),
         );
     }
-    GlobalStage {
+    Ok(GlobalStage {
         dr,
         nets,
         grid,
         global,
+    })
+}
+
+/// The global routes `state` saved, put back on `grid` once the state is
+/// known to be of this design and grid.
+fn restored_global(
+    db: &NetlistDB,
+    tech: &RouteTech,
+    grid: &mut GlobalGrid,
+    nets: &[GlobalNet],
+    state: &RouteState,
+) -> Result<GlobalRoutes, RouteError> {
+    if state.design != db.name {
+        return Err(RouteError::StateDesign(state.design.clone()));
     }
+    if state.grid != grid_shape(tech, grid) {
+        return Err(RouteError::StateGrid);
+    }
+    let ids = net_ids(db);
+    let saved = state
+        .global
+        .iter()
+        .map(|(name, paths)| {
+            ids.get(name.as_str())
+                .map(|&net| (net, paths.clone()))
+                .ok_or_else(|| RouteError::StateNet(name.clone()))
+        })
+        .collect::<Result<Vec<_>, _>>()?;
+    Ok(restore_global(grid, nets, saved)?)
 }
 
 /// The scope of the next repair pass: conflicts only, except for one pass
@@ -605,4 +846,19 @@ pub enum RouteError {
     /// No usable via is defined through a cut layer.
     #[error("no via is defined through cut layer '{0}'")]
     NoVia(String),
+    /// A saved state is of another design.
+    #[error("the route state was saved for design '{0}'")]
+    StateDesign(String),
+    /// A saved state was routed on another gcell grid or layer range.
+    #[error("the route state was saved on another gcell grid or layer range")]
+    StateGrid,
+    /// A saved state names a net the design does not have.
+    #[error("the route state names net '{0}', which the design does not have")]
+    StateNet(String),
+    /// Saved global routes do not fit the design as it is placed now.
+    #[error(transparent)]
+    GlobalRestore(#[from] RestoreError),
+    /// Saved detailed routes do not fit the design as it is placed now.
+    #[error(transparent)]
+    DetailedRestore(#[from] RestoreRoutesError),
 }

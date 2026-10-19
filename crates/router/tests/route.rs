@@ -19,7 +19,10 @@ use pare_router::global::{GCell, GlobalGrid, GlobalNet, route_global, track_dema
 use pare_router::occupancy::{FixedTracks, Occupancy, Origin, Owner, Slot};
 use pare_router::tech::RouteTech;
 use pare_router::wiring::{Edge, NetRoute};
-use pare_router::{GlobalRouteEstimator, RouteError, capacity_reduction, route};
+use pare_router::{
+    GlobalRouteEstimator, RouteError, RouteState, Save, SavePoint, Session, capacity_reduction,
+    route, route_with,
+};
 use std::path::{Path, PathBuf};
 
 fn fixture(name: &str) -> PathBuf {
@@ -71,6 +74,85 @@ fn nets_crossing_many_regions_are_routed_connected() {
     for n in 0..db.nets.len() {
         assert_eq!(net_components(&db, NetId::new(n)), 1, "net {n}");
     }
+}
+
+/// The fixture with its two unplaced cells placed, and a config that cuts
+/// it into many gcells.
+fn placed_tiny() -> (NetlistDB, RoutingConfig) {
+    let mut db = tiny();
+    place(&mut db, "u5", Point::new(Dbu(2000), Dbu(4000)));
+    place(&mut db, "u6", Point::new(Dbu(3000), Dbu(4000)));
+    let config = RoutingConfig {
+        gcell_tracks: 3,
+        ..RoutingConfig::default()
+    };
+    (db, config)
+}
+
+/// Routes the placed fixture, saving its state after `point`.
+fn route_saving(point: SavePoint) -> (Vec<Vec<RouteElem>>, RouteState) {
+    let (mut db, config) = placed_tiny();
+    let mut saved = None;
+    let mut write = |state: &RouteState| saved = Some(state.clone());
+    let session = Session {
+        resume: None,
+        save: Some(Save {
+            after: point,
+            write: &mut write,
+        }),
+    };
+    let _ = route_with(&mut db, &config, session).unwrap();
+    let wiring = db.nets.iter().map(|n| n.routing.clone()).collect();
+    (wiring, saved.unwrap())
+}
+
+/// Routes the placed fixture from `state`.
+fn route_resuming(state: &RouteState) -> Vec<Vec<RouteElem>> {
+    let (mut db, config) = placed_tiny();
+    let session = Session {
+        resume: Some(state),
+        save: None,
+    };
+    let _ = route_with(&mut db, &config, session).unwrap();
+    db.nets.iter().map(|n| n.routing.clone()).collect()
+}
+
+#[test]
+fn a_run_resumed_after_global_routing_routes_as_the_run_that_saved_it() {
+    let (straight, state) = route_saving(SavePoint::Global);
+
+    let resumed = route_resuming(&state);
+
+    assert!(!state.has_detailed());
+    assert_eq!(resumed, straight);
+}
+
+#[test]
+fn a_run_resumed_after_the_first_pass_routes_as_the_run_that_saved_it() {
+    let (straight, state) = route_saving(SavePoint::Round(0));
+
+    let resumed = route_resuming(&state);
+
+    assert_eq!(state.round(), Some(0));
+    assert_eq!(resumed, straight);
+}
+
+#[test]
+fn a_state_of_another_design_is_refused() {
+    let (_, state) = route_saving(SavePoint::Global);
+    let (mut db, config) = placed_tiny();
+    db.name = "other".to_string();
+
+    let result = route_with(
+        &mut db,
+        &config,
+        Session {
+            resume: Some(&state),
+            save: None,
+        },
+    );
+
+    assert!(matches!(result, Err(RouteError::StateDesign(_))));
 }
 
 #[test]

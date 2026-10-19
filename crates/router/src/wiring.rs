@@ -66,7 +66,7 @@ pub fn path_edges(path: &[Node]) -> impl Iterator<Item = Edge> + '_ {
 }
 
 /// The routing of one net.
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct NetRoute {
     /// Edges of the track graph it uses.
     pub edges: Vec<Edge>,

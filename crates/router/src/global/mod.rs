@@ -35,7 +35,7 @@ use pare_common::geom::point::Point;
 use pare_common::geom::rect::Rect;
 use pattern::route_pattern;
 use rayon::prelude::*;
-use rustc_hash::FxHashMap;
+use rustc_hash::{FxHashMap, FxHashSet};
 use std::sync::OnceLock;
 use std::sync::atomic::{AtomicI64, AtomicU32, Ordering};
 pub use tracks::Tracks;
@@ -934,6 +934,92 @@ pub fn track_demand(db: &NetlistDB, tech: &RouteTech, net: NetId) -> Vec<Tracks>
             Tracks::whole(u32::try_from(tracks.max(1)).unwrap_or(1))
         })
         .collect()
+}
+
+/// Why saved global routes cannot be put back on a grid.
+#[derive(Clone, Debug, PartialEq, Eq, thiserror::Error)]
+pub enum RestoreError {
+    /// A net to route has no saved route.
+    #[error("no saved global route for net {}", .0.index())]
+    Missing(NetId),
+    /// A saved route is for a net that is not routed.
+    #[error("net {} has a saved global route but is not routed", .0.index())]
+    Unrouted(NetId),
+    /// A saved path leaves the grid or steps between gcells that are not
+    /// neighbours along a layer or one layer apart.
+    #[error("the saved global route of net {} has a step off the grid", .0.index())]
+    OffGrid(NetId),
+    /// A saved path after the first does not start on the paths before it.
+    #[error("the saved global route of net {} is not one tree", .0.index())]
+    Disconnected(NetId),
+    /// A pin of the net lies off its saved route, as when the placement or
+    /// pin access has changed since it was saved.
+    #[error("the saved global route of net {} misses one of its pins", .0.index())]
+    Unreached(NetId),
+}
+
+impl GlobalGrid {
+    /// Whether a saved path is a walk on this grid: every gcell inside it
+    /// and every step to the next gcell along the layer or to the same gcell
+    /// one layer up or down.
+    fn is_walk(&self, path: &[GCell]) -> bool {
+        let inside =
+            |c: &GCell| self.layers().contains(&c.layer.index()) && c.x < self.nx && c.y < self.ny;
+        path.iter().all(inside)
+            && path.windows(2).all(|w| {
+                let (a, b) = (w[0], w[1]);
+                if a.layer == b.layer {
+                    let (dx, dy) = (a.x.abs_diff(b.x), a.y.abs_diff(b.y));
+                    match self.direction(a.layer) {
+                        Direction::Horizontal => dx == 1 && dy == 0,
+                        Direction::Vertical => dx == 0 && dy == 1,
+                    }
+                } else {
+                    a.x == b.x && a.y == b.y && a.layer.index().abs_diff(b.layer.index()) == 1
+                }
+            })
+    }
+}
+
+/// Puts saved global routes back on `grid` for `nets`, which must be
+/// exactly the nets saved, placing their demand as routing them would have.
+///
+/// # Errors
+///
+/// When a net lacks a saved route or has one it should not, or a saved
+/// route is not a tree on the grid through every one of the net's pins.
+pub fn restore_global(
+    grid: &mut GlobalGrid,
+    nets: &[GlobalNet],
+    saved: Vec<(NetId, Vec<Vec<GCell>>)>,
+) -> Result<GlobalRoutes, RestoreError> {
+    let wanted: FxHashSet<NetId> = nets.iter().map(|n| n.net).collect();
+    if let Some(&(net, _)) = saved.iter().find(|(n, _)| !wanted.contains(n)) {
+        return Err(RestoreError::Unrouted(net));
+    }
+    let mut saved: FxHashMap<NetId, Vec<Vec<GCell>>> = saved.into_iter().collect();
+    let mut routes = GlobalRoutes::default();
+    for net in nets {
+        let tree = saved
+            .remove(&net.net)
+            .ok_or(RestoreError::Missing(net.net))?;
+        if !tree.iter().all(|p| grid.is_walk(p)) {
+            return Err(RestoreError::OffGrid(net.net));
+        }
+        let mut cells: FxHashSet<GCell> = FxHashSet::default();
+        for (k, path) in tree.iter().enumerate() {
+            if k > 0 && !path.first().is_some_and(|c| cells.contains(c)) {
+                return Err(RestoreError::Disconnected(net.net));
+            }
+            cells.extend(path.iter().copied());
+        }
+        if !net.terminals.iter().all(|t| cells.contains(t)) {
+            return Err(RestoreError::Unreached(net.net));
+        }
+        grid.add_tree(net, &tree, Sign::Add);
+        let _ = routes.paths.insert(net.net, tree);
+    }
+    Ok(routes)
 }
 
 /// Routes `nets` and negotiates overflow for at most `rounds` rounds.

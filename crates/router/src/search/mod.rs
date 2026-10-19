@@ -98,6 +98,19 @@ impl History {
     pub(crate) fn bump(&mut self, t: TrackRef, along: Dbu, amount: f64) {
         *self.map.entry(self.key(t, along)).or_insert(0.0) += amount;
     }
+
+    /// Every bucket's amount, by track and bucket.
+    pub(crate) fn entries(&self) -> Vec<(TrackRef, i64, f64)> {
+        let mut out: Vec<(TrackRef, i64, f64)> =
+            self.map.iter().map(|(&(t, b), &a)| (t, b, a)).collect();
+        out.sort_unstable_by_key(|&(t, b, _)| (t, b));
+        out
+    }
+
+    /// Sets one bucket's amount, as [`Self::entries`] gave it.
+    pub(crate) fn set(&mut self, t: TrackRef, bucket: i64, amount: f64) {
+        let _ = self.map.insert((t, bucket), amount);
+    }
 }
 
 /// Gcells around each global route cell a net's detailed route may use.

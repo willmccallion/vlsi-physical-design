@@ -69,6 +69,17 @@ enum Commands {
         /// route guides in the ISPD 2018 format.
         #[arg(long, requires = "global_only")]
         guides: Option<PathBuf>,
+        /// Save the run's state to this file, to resume from with --resume.
+        #[arg(long, conflicts_with = "global_only")]
+        save_state: Option<PathBuf>,
+        /// When to save the state: `global` (after global routing, the
+        /// default) or a detailed round, 0 being the first pass.
+        #[arg(long, requires = "save_state", value_parser = parse_save_point)]
+        save_after: Option<pare_router::SavePoint>,
+        /// Resume from a state saved by --save-state on the same design and
+        /// placement, skipping what it holds.
+        #[arg(long, conflicts_with = "global_only")]
+        resume: Option<PathBuf>,
     },
     /// Place, route, or place and route a design, as its purpose says.
     Run {
@@ -188,6 +199,9 @@ fn run(command: Commands, report: &mut Report) -> anyhow::Result<()> {
             placement,
             global_only,
             guides,
+            save_state,
+            save_after,
+            resume,
         } => {
             let config = load_config(&name, report)?;
             if config.purpose == Purpose::Placement {
@@ -201,7 +215,11 @@ fn run(command: Commands, report: &mut Report) -> anyhow::Result<()> {
             let stage = if global_only {
                 RouteStage::Global { guides }
             } else {
-                RouteStage::Detailed
+                RouteStage::Detailed(StateFiles {
+                    save: save_state
+                        .map(|path| (path, save_after.unwrap_or(pare_router::SavePoint::Global))),
+                    resume,
+                })
             };
             run_routing(
                 &config,
@@ -226,7 +244,8 @@ fn run(command: Commands, report: &mut Report) -> anyhow::Result<()> {
                 )?;
             }
             if config.purpose != Purpose::Placement {
-                run_routing(&config, &mut db, &output_dir, RouteStage::Detailed, report)?;
+                let stage = RouteStage::Detailed(StateFiles::default());
+                run_routing(&config, &mut db, &output_dir, stage, report)?;
             }
             Ok(())
         }
@@ -301,7 +320,43 @@ enum RouteStage {
     /// as guides to the file given.
     Global { guides: Option<PathBuf> },
     /// Through detailed routing, verification and output.
-    Detailed,
+    Detailed(StateFiles),
+}
+
+/// Where a run saves its state and when, and the state it resumes from.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+struct StateFiles {
+    save: Option<(PathBuf, pare_router::SavePoint)>,
+    resume: Option<PathBuf>,
+}
+
+/// A `--save-after` value: `global` or a detailed round number.
+fn parse_save_point(text: &str) -> Result<pare_router::SavePoint, String> {
+    if text == "global" {
+        return Ok(pare_router::SavePoint::Global);
+    }
+    text.parse()
+        .map(pare_router::SavePoint::Round)
+        .map_err(|_| format!("expected `global` or a round number, got `{text}`"))
+}
+
+/// Reads a route state saved by `--save-state`.
+fn read_state(path: &Path) -> anyhow::Result<pare_router::RouteState> {
+    let text =
+        std::fs::read_to_string(path).with_context(|| format!("reading {}", path.display()))?;
+    pare_router::RouteState::parse(&text).with_context(|| format!("reading {}", path.display()))
+}
+
+/// Writes a route state where `--save-state` asked.
+fn write_state(path: &Path, state: &pare_router::RouteState) -> anyhow::Result<()> {
+    use std::io::Write as _;
+    let file =
+        std::fs::File::create(path).with_context(|| format!("writing {}", path.display()))?;
+    let mut out = std::io::BufWriter::new(file);
+    state
+        .write(&mut out)
+        .and_then(|()| out.flush())
+        .with_context(|| format!("writing {}", path.display()))
 }
 
 /// Global placement, I/O pin placement, legalization, checking and output.
@@ -748,17 +803,42 @@ fn run_routing(
 ) -> anyhow::Result<()> {
     let phase_start = Instant::now();
     ui::section("Routing");
-    if let RouteStage::Global { guides } = stage {
-        let global = pare_router::route_global_only(db, &config.routing)?;
-        ui::stat_row("Nets:", &global.summary.nets.to_string(), "", "");
-        if let Some(path) = guides {
-            write_guides(&path, db, &global.guides)?;
-            ui::wrote(&path_str(&path)?);
+    let files = match stage {
+        RouteStage::Global { guides } => {
+            let global = pare_router::route_global_only(db, &config.routing)?;
+            ui::stat_row("Nets:", &global.summary.nets.to_string(), "", "");
+            if let Some(path) = guides {
+                write_guides(&path, db, &global.guides)?;
+                ui::wrote(&path_str(&path)?);
+            }
+            report.phase("global routing", phase_start);
+            return Ok(());
         }
-        report.phase("global routing", phase_start);
-        return Ok(());
+        RouteStage::Detailed(files) => files,
+    };
+    let resume = files.resume.as_deref().map(read_state).transpose()?;
+    let mut save_error = None;
+    let summary = {
+        let mut write = |state: &pare_router::RouteState| {
+            if let Some((path, _)) = &files.save {
+                match write_state(path, state) {
+                    Ok(()) => ui::wrote(&path.display().to_string()),
+                    Err(e) => save_error = Some(e),
+                }
+            }
+        };
+        let session = pare_router::Session {
+            resume: resume.as_ref(),
+            save: files.save.as_ref().map(|&(_, after)| pare_router::Save {
+                after,
+                write: &mut write,
+            }),
+        };
+        pare_router::route_with(db, &config.routing, session)?
+    };
+    if let Some(e) = save_error {
+        return Err(e);
     }
-    let summary = pare_router::route(db, &config.routing)?;
     ui::stat_row(
         "Nets:",
         &summary.nets.to_string(),
