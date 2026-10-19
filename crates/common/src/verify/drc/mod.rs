@@ -30,7 +30,7 @@ pub use tile::{check_tiled, check_window};
 const TILE_HALOS: i64 = 32;
 
 use crate::db::design::NetlistDB;
-use crate::db::indices::LayerId;
+use crate::db::indices::{CutLayerId, LayerId};
 use crate::db::library::LayerRef;
 use crate::geom::dbu::{Dbu, DbuArea};
 use crate::geom::rect::Rect;
@@ -275,6 +275,25 @@ fn counts(markers: &[Marker]) -> Vec<(Violation, usize)> {
         }
     }
     out
+}
+
+/// Checks the shapes of `layout` near `area` and reports the markers whose
+/// lower-left corner lies in `area`, for looking at one spot of a design.
+pub fn check_area(layout: &Layout, rules: &Rules, area: Rect<Dbu>) -> DrcReport {
+    let window = area.expand(rules.max_reach() * 2);
+    let mut near = Layout::with_owners_of(layout);
+    for l in 0..layout.metal_layers() {
+        for s in layout.metal(l).iter().filter(|s| s.rect.touches(&window)) {
+            near.add_shape(LayerRef::Routing(LayerId::new(l)), s);
+        }
+    }
+    for c in 0..layout.cut_layers() {
+        for s in layout.cut(c).iter().filter(|s| s.rect.touches(&window)) {
+            near.add_shape(LayerRef::Cut(CutLayerId::new(c)), s);
+        }
+    }
+    let found = check_window(&near, rules, area, window);
+    DrcReport::from_findings(found, layout.owners().to_vec())
 }
 
 /// Checks every shape of `db` against the rules of its library and its
