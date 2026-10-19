@@ -10,9 +10,9 @@
 //! the region grid shifts between passes so a conflict on one region's edge
 //! falls inside another's.
 
-use super::DetailedRouter;
 use super::judge::{Candidate, Judgment};
 use super::trace;
+use super::{DetailedRouter, Marker};
 use crate::access::Node;
 use crate::occupancy::{LocalOccupancy, Owner};
 use crate::search::{Costs, Marks, OwnVias, Search, WindowCache};
@@ -99,6 +99,28 @@ pub(super) struct Piece {
     /// Groups of crossings that must be joined; each group is already
     /// connected outside the region or is one pin's access point.
     pub(super) groups: Vec<Vec<Node>>,
+}
+
+/// The violations in a worker's area with its nets' wiring as it was and
+/// as the worker left it.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(super) struct Verdict {
+    pub(super) before: usize,
+    pub(super) after: usize,
+}
+
+impl Verdict {
+    /// Whether the new wiring is worse and is not kept, as `TritonRoute`
+    /// keeps a worker's result unless it has more markers than it began
+    /// with.
+    pub(super) const fn rejected(self) -> bool {
+        self.after > self.before
+    }
+
+    /// Whether the new wiring has fewer violations.
+    pub(super) const fn improved(self) -> bool {
+        self.after < self.before
+    }
 }
 
 /// What a region worker did to one net: the wiring it took out of the
@@ -297,6 +319,8 @@ pub struct RepairStats {
     pub regions: usize,
     /// Net pieces routed again.
     pub pieces: usize,
+    /// Regions whose new wiring has fewer violations than the old.
+    pub improved: usize,
 }
 
 impl DetailedRouter<'_> {
@@ -304,28 +328,14 @@ impl DetailedRouter<'_> {
     /// region grid shifted by a third of a region per `pass`.
     pub fn repair(&mut self, costs: Costs, pass: usize, scope: Scope) -> RepairStats {
         let grid = RegionGrid::of_pass(self, pass);
-        let key = |p: Point<Dbu>| grid.key(p);
         let mut regions: BTreeMap<RegionKey, FxHashSet<NetId>> = BTreeMap::new();
-        match scope {
-            Scope::Conflicts => {
-                for m in self.markers() {
-                    let nets = regions.entry(key(m.at)).or_default();
-                    nets.extend(m.nets.iter().flatten());
-                }
-            }
-            Scope::NearConflicts => {
-                let reach = self.tech.layer(self.tech.min_layer).pitch() * NEAR_TRACKS;
-                for m in self.markers() {
-                    let near = self.nets_near(m.at, reach);
-                    let nets = regions.entry(key(m.at)).or_default();
-                    nets.extend(m.nets.iter().flatten());
-                    nets.extend(near);
-                }
-            }
+        for m in self.markers() {
+            let nets = self.nets_of(m, scope);
+            regions.entry(grid.key(m.at)).or_default().extend(nets);
         }
         let mut stats = RepairStats {
             regions: regions.len(),
-            pieces: 0,
+            ..RepairStats::default()
         };
         let touching = self.markers_by_region(&grid);
         for batch_colour in 0..4 {
@@ -342,9 +352,23 @@ impl DetailedRouter<'_> {
                     }
                 })
                 .collect();
-            stats.pieces += self.repair_batch(&batch, costs);
+            let done = self.repair_batch(&batch, costs);
+            stats.pieces += done.pieces;
+            stats.improved += done.improved;
         }
         stats
+    }
+
+    /// The nets `scope` rips up for marker `m`.
+    pub(super) fn nets_of(&self, m: &Marker, scope: Scope) -> Vec<NetId> {
+        let mut nets: Vec<NetId> = m.nets.iter().flatten().copied().collect();
+        if scope == Scope::NearConflicts {
+            let reach = self.tech.layer(self.tech.min_layer).pitch() * NEAR_TRACKS;
+            nets.extend(self.nets_near(m.at, reach));
+        }
+        nets.sort_unstable();
+        nets.dedup();
+        nets
     }
 
     /// The indices of the last round's markers touching each region of
@@ -367,7 +391,7 @@ impl DetailedRouter<'_> {
     /// `markers` that touch `area`, on the wiring of their nets as it
     /// stands, as `TritonRoute` seeds a worker's marker cost from the
     /// markers in it.
-    fn seed_marks(&self, area: &Rect<Dbu>, markers: &[usize]) -> Marks {
+    pub(super) fn seed_marks(&self, area: &Rect<Dbu>, markers: &[usize]) -> Marks {
         let mut marks = Marks::default();
         for &i in markers {
             let m = &self.markers()[i];
@@ -412,9 +436,9 @@ impl DetailedRouter<'_> {
         }
     }
 
-    /// Repairs regions that do not touch each other; returns the number of
-    /// pieces routed again.
-    fn repair_batch(&mut self, batch: &[RegionJob], costs: Costs) -> usize {
+    /// Repairs regions that do not touch each other; returns the pieces
+    /// routed again and the regions improved.
+    fn repair_batch(&mut self, batch: &[RegionJob], costs: Costs) -> RepairStats {
         let seeds: Vec<Marks> = batch
             .par_iter()
             .map(|job| self.seed_marks(&job.area, &job.markers))
@@ -444,55 +468,29 @@ impl DetailedRouter<'_> {
         let work: Vec<(Rect<Dbu>, Vec<Piece>)> =
             batch.iter().map(|job| job.area).zip(pieces).collect();
 
-        let routed: Vec<Vec<Routed>> = work
+        let routed: Vec<(Vec<Routed>, Verdict)> = work
             .par_iter()
             .zip(seeds)
             .enumerate()
             .map(|(r, ((area, pieces), marks))| {
                 let routed = self.route_region(area, pieces, costs, marks);
                 let given = pieces.len();
-                let old: Vec<Candidate<'_>> = routed
-                    .iter()
-                    .enumerate()
-                    .map(|(i, item)| item.candidate(wiring_before(item, i < given, &removed, r)))
-                    .collect();
-                let new: Vec<Candidate<'_>> = routed
-                    .iter()
-                    .enumerate()
-                    .map(|(i, item)| {
-                        let before = wiring_before(item, i < given, &removed, r);
-                        item.candidate(item.wiring.as_ref().unwrap_or(before))
-                    })
-                    .collect();
-                let violations = |c: &[Candidate<'_>]| self.judge(area, c).findings.violations.len();
-                let (after, before) = (violations(&new), violations(&old));
-                let traced = self.trace.wants_region(area, routed.iter().map(|item| item.net));
-                if traced {
-                    log::info!(
-                        "trace region {}: {} with {after} violations against {before} before",
-                        trace::region_text(area),
-                        if after > before { "new wiring rejected" } else { "new wiring kept" }
-                    );
+                let verdict = self.judge_change(area, &routed, |i, item| {
+                    wiring_before(item, i < given, &removed, r)
+                });
+                if verdict.rejected() {
+                    return (routed.into_iter().map(Routed::undone).collect(), verdict);
                 }
-                if after > before {
-                    log::trace!(
-                        "region ({}, {})-({}, {}): new wiring rejected, {after} violations against {before}",
-                        area.min.x.get(),
-                        area.min.y.get(),
-                        area.max.x.get(),
-                        area.max.y.get()
-                    );
-                    return routed.into_iter().map(Routed::undone).collect();
-                }
-                routed
+                (routed, verdict)
             })
             .collect();
 
-        let mut count = 0;
+        let mut stats = RepairStats::default();
         let mut changes = Changes::default();
-        for (r, ((_, pieces), routed)) in work.iter().zip(routed).enumerate() {
+        for (r, ((_, pieces), (routed, verdict))) in work.iter().zip(routed).enumerate() {
+            stats.improved += usize::from(verdict.improved());
             for (i, item) in routed.into_iter().enumerate() {
-                count += 1;
+                stats.pieces += 1;
                 match item.wiring {
                     Some(wiring) => changes.apply(item.net, item.removed, wiring),
                     None if i < pieces.len() => {
@@ -504,7 +502,60 @@ impl DetailedRouter<'_> {
             }
         }
         self.commit_changes(changes);
-        count
+        stats
+    }
+
+    /// Judges a worker's `routed` work in `area` against the wiring its
+    /// nets had there before, `before_of` each item; logs the verdict for
+    /// traced regions.
+    pub(super) fn judge_change<'w>(
+        &self,
+        area: &Rect<Dbu>,
+        routed: &'w [Routed],
+        before_of: impl Fn(usize, &'w Routed) -> &'w Wiring,
+    ) -> Verdict {
+        let old: Vec<Candidate<'_>> = routed
+            .iter()
+            .enumerate()
+            .map(|(i, item)| item.candidate(before_of(i, item)))
+            .collect();
+        let new: Vec<Candidate<'_>> = routed
+            .iter()
+            .enumerate()
+            .map(|(i, item)| {
+                item.candidate(item.wiring.as_ref().unwrap_or_else(|| before_of(i, item)))
+            })
+            .collect();
+        let violations = |c: &[Candidate<'_>]| self.judge(area, c).findings.violations.len();
+        let verdict = Verdict {
+            before: violations(&old),
+            after: violations(&new),
+        };
+        let (after, before) = (verdict.after, verdict.before);
+        let outcome = if verdict.rejected() {
+            "new wiring rejected"
+        } else {
+            "new wiring kept"
+        };
+        if self
+            .trace
+            .wants_region(area, routed.iter().map(|item| item.net))
+        {
+            log::info!(
+                "trace region {}: {outcome} with {after} violations against {before} before",
+                trace::region_text(area),
+            );
+        }
+        if verdict.rejected() {
+            log::trace!(
+                "region ({}, {})-({}, {}): {outcome}, {after} violations against {before}",
+                area.min.x.get(),
+                area.min.y.get(),
+                area.max.x.get(),
+                area.max.y.get()
+            );
+        }
+        verdict
     }
 
     /// Commits every net's wiring with `changes` made to it.
@@ -600,13 +651,26 @@ impl DetailedRouter<'_> {
         area: &Rect<Dbu>,
         pieces: &[Piece],
         costs: Costs,
+        marks: Marks,
+    ) -> Vec<Routed> {
+        let work = Work::new(pieces);
+        let todo = self.ordered(&work, (0..pieces.len()).collect());
+        self.negotiate(area, work, LocalOccupancy::default(), todo, costs, marks)
+    }
+
+    /// The local rounds of a region worker, starting with the pieces of
+    /// `work` at `todo` and `overlay` holding what was ripped up.
+    fn negotiate(
+        &self,
+        area: &Rect<Dbu>,
+        mut work: Work<'_>,
+        mut overlay: LocalOccupancy,
+        mut todo: Vec<usize>,
+        costs: Costs,
         mut marks: Marks,
     ) -> Vec<Routed> {
         let window = Rect::new(area.min, area.max - Point::new(Dbu(1), Dbu(1)));
-        let mut work = Work::new(pieces);
         let mut best: Option<(Score, Vec<Option<Wiring>>)> = None;
-        let mut overlay = LocalOccupancy::default();
-        let mut todo: Vec<usize> = self.ordered(&work, (0..pieces.len()).collect());
         let mut avoided: FxHashMap<NetId, u8> = FxHashMap::default();
         for round in 0..LOCAL_ROUNDS {
             for &i in &todo {

@@ -79,7 +79,7 @@ impl DetailedRouter<'_> {
 
         let mut stats = RepairStats {
             regions: regions.len(),
-            pieces: 0,
+            ..RepairStats::default()
         };
         let mut failed: FxHashSet<NetId> = FxHashSet::default();
         for batch_colour in 0..4 {
