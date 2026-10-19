@@ -17,7 +17,10 @@ pub mod track;
 pub mod tree;
 pub mod wiring;
 
-use detailed::{DetailedRouter, RestoreRoutesError, Scope, round_costs, routable_nets};
+use detailed::{
+    DetailedRouter, Flow, FlowState, RepairStats, RestoreRoutesError, RipUp, Scope, round_costs,
+    round_strategy, routable_nets,
+};
 pub use global::{CapacityReduction, TileTracks};
 use global::{
     GCell, GlobalGrid, GlobalNet, GlobalRoutes, RestoreError, Tracks, restore_global, route_global,
@@ -163,7 +166,7 @@ pub fn route_with(
         };
         let start = Instant::now();
         let resumed = session.resume.and_then(|s| s.detailed.as_ref());
-        let (first_round, mut conflicted, mut scope, mut progress) = if let Some(saved) = resumed {
+        let (first_round, mut conflicted, mut scope, mut flows) = if let Some(saved) = resumed {
             let routes = named_routes(db, &saved.routes)?;
             dr.restore(&routes)?;
             ui::dr_table_header();
@@ -174,27 +177,26 @@ pub fn route_with(
                 conflicted.len(),
                 0,
                 round_costs(saved.round, via).conflict,
+                saved.flow.name(),
                 start.elapsed().as_millis(),
             );
-            let progress = Progress {
-                best: saved.best,
-                since_best: saved.since_best,
-            };
-            (saved.round + 1, conflicted, saved.scope, progress)
+            let flows = FlowState::after(saved.round, saved.flow, saved.effective);
+            (saved.round + 1, conflicted, saved.scope, flows)
         } else {
             let first = dr.route_initial(&nets, round_costs(0, via));
             ui::dr_table_header();
             let conflicted = dr.rejudge();
+            let flows = FlowState::after_first_pass();
             ui::dr_iter(
                 0,
                 dr.marker_count(),
                 conflicted.len(),
                 first.pieces,
                 round_costs(0, via).conflict,
+                flows.current().name(),
                 start.elapsed().as_millis(),
             );
-            let progress = Progress::new(dr.marker_count());
-            (1, conflicted, Scope::Conflicts, progress)
+            (1, conflicted, Scope::Conflicts, flows)
         };
         if first_round == 1 {
             session.save_at(SavePoint::Round(0), || {
@@ -206,7 +208,7 @@ pub fn route_with(
                     named_global.clone(),
                     0,
                     scope,
-                    &progress,
+                    &flows,
                 )
             });
         }
@@ -214,25 +216,33 @@ pub fn route_with(
             if conflicted.is_empty() {
                 break;
             }
-            if progress.stalled() {
-                log::info!(
-                    "detailed routing stopped: no fewer than {} markers in the last {} rounds",
-                    progress.best,
-                    STALL_ROUNDS
-                );
-                break;
-            }
             let start = Instant::now();
             let costs = round_costs(round, via);
-            let repaired = dr.repair(costs, round, scope);
-            let before = conflicted.len();
-            conflicted = dr.rejudge();
-            scope = next_scope(scope, conflicted.len() < before);
-            progress.record(dr.marker_count());
+            let flow = flows.next(round, dr.marker_count());
+            let tile_scope = match round_strategy(round).ripup {
+                RipUp::NearDrc => Scope::NearConflicts,
+                RipUp::Drc | RipUp::All => Scope::Conflicts,
+            };
+            let repaired = match flow {
+                Flow::Regular => dr.repair(costs, round, scope),
+                Flow::Guides => dr.repair_guides(tile_scope, costs),
+                Flow::Stubborn => dr.repair_stubborn(tile_scope, costs),
+                Flow::Skip => RepairStats::default(),
+            };
+            if matches!(flow, Flow::Guides | Flow::Stubborn) {
+                flows.set_effective(repaired.improved > 0);
+            }
+            if flow != Flow::Skip {
+                let before = conflicted.len();
+                conflicted = dr.rejudge();
+                if flow == Flow::Regular {
+                    scope = next_scope(scope, conflicted.len() < before);
+                }
+            }
             summary.rounds = round;
             session.save_at(SavePoint::Round(round), || {
                 let global = named_global.clone();
-                detailed_state(db, &dr, &nets, shape, global, round, scope, &progress)
+                detailed_state(db, &dr, &nets, shape, global, round, scope, &flows)
             });
             ui::dr_iter(
                 round,
@@ -240,6 +250,7 @@ pub fn route_with(
                 conflicted.len(),
                 repaired.pieces,
                 costs.conflict,
+                flow.name(),
                 start.elapsed().as_millis(),
             );
         }
@@ -279,7 +290,7 @@ fn detailed_state(
     global: Option<Vec<(String, Vec<Vec<GCell>>)>>,
     round: usize,
     scope: Scope,
-    progress: &Progress,
+    flows: &FlowState,
 ) -> RouteState {
     let routes = nets
         .iter()
@@ -297,8 +308,8 @@ fn detailed_state(
         detailed: Some(DetailedState {
             round,
             scope,
-            best: progress.best,
-            since_best: progress.since_best,
+            flow: flows.current(),
+            effective: flows.last_effective(),
             routes,
         }),
     }
@@ -580,38 +591,6 @@ const fn next_scope(previous: Scope, improved: bool) -> Scope {
     match previous {
         Scope::Conflicts if !improved => Scope::NearConflicts,
         _ => Scope::Conflicts,
-    }
-}
-
-/// Rounds of detailed routing without fewer markers than the best so far
-/// after which the repair is given up as stalled.
-const STALL_ROUNDS: usize = 8;
-
-/// The best marker count of detailed routing and how long ago it was set.
-struct Progress {
-    best: usize,
-    since_best: usize,
-}
-
-impl Progress {
-    const fn new(markers: usize) -> Self {
-        Self {
-            best: markers,
-            since_best: 0,
-        }
-    }
-
-    const fn record(&mut self, markers: usize) {
-        if markers < self.best {
-            self.best = markers;
-            self.since_best = 0;
-        } else {
-            self.since_best += 1;
-        }
-    }
-
-    const fn stalled(&self) -> bool {
-        self.since_best >= STALL_ROUNDS
     }
 }
 

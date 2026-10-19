@@ -3,13 +3,13 @@
 //! The state holds every net's global route and, once detailed routing has
 //! begun, every net's detailed route and how far the repair rounds had got,
 //! so that a resumed run goes on exactly as the saved one would have: the
-//! next round's costs follow from its number, and its marks from the
-//! violations the routes have.
+//! next round's costs follow from its number, its flow from the last
+//! round's, and its marks from the violations the routes have.
 //!
 //! The file is plain text, one record a line.
 
 use crate::access::{AccessPoint, Node};
-use crate::detailed::Scope;
+use crate::detailed::{Flow, Scope};
 use crate::global::GCell;
 use crate::wiring::{Edge, NetRoute, Patch};
 use pare_common::db::indices::{LayerId, ViaId};
@@ -48,9 +48,11 @@ pub(crate) struct DetailedState {
     pub round: usize,
     /// The scope the next round takes.
     pub scope: Scope,
-    /// The fewest markers so far, and the rounds since that count was set.
-    pub best: usize,
-    pub since_best: usize,
+    /// The flow the round took.
+    pub flow: Flow,
+    /// Whether the last guides or stubborn round reduced any worker's
+    /// violations.
+    pub effective: bool,
     /// Each routed net's name and route.
     pub routes: Vec<(String, NetRoute)>,
 }
@@ -167,8 +169,8 @@ fn write_detailed(out: &mut impl Write, d: &DetailedState) -> io::Result<()> {
         out,
         "detailed {} {scope} {} {} {}",
         d.round,
-        d.best,
-        d.since_best,
+        d.flow.name(),
+        u8::from(d.effective),
         d.routes.len()
     )?;
     for (name, route) in &d.routes {
@@ -233,8 +235,14 @@ fn parse_detailed(lines: &mut Lines<'_>, header: &str) -> Result<DetailedState, 
         "near" => Scope::NearConflicts,
         other => return Err(head.error(&format!("unknown scope `{other}`"))),
     };
-    let best: usize = head.int()?;
-    let since_best: usize = head.int()?;
+    let flow_name = head.word()?;
+    let flow = Flow::from_name(&flow_name)
+        .ok_or_else(|| head.error(&format!("unknown flow `{flow_name}`")))?;
+    let effective = match head.int::<u8>()? {
+        0 => false,
+        1 => true,
+        _ => return Err(head.error("effectiveness must be 0 or 1")),
+    };
     let count: usize = head.int()?;
     head.done()?;
     let mut routes = Vec::with_capacity(count);
@@ -297,8 +305,8 @@ fn parse_detailed(lines: &mut Lines<'_>, header: &str) -> Result<DetailedState, 
     Ok(DetailedState {
         round,
         scope,
-        best,
-        since_best,
+        flow,
+        effective,
         routes,
     })
 }
@@ -476,8 +484,8 @@ mod tests {
             detailed: Some(DetailedState {
                 round: 7,
                 scope: Scope::NearConflicts,
-                best: 3,
-                since_best: 2,
+                flow: Flow::Stubborn,
+                effective: false,
                 routes: vec![("a".to_string(), route)],
             }),
         }

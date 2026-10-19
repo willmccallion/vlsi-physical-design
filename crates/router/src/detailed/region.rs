@@ -658,6 +658,27 @@ impl DetailedRouter<'_> {
         self.negotiate(area, work, LocalOccupancy::default(), todo, costs, marks)
     }
 
+    /// Routes `nets` again inside `area` as [`Self::route_region`] routes
+    /// pieces, ripping each up first in the worker's own view only, as it
+    /// rips up victims: the committed wiring stays as it is, so workers on
+    /// overlapping areas can run side by side.
+    pub(super) fn route_ripping(
+        &self,
+        area: &Rect<Dbu>,
+        nets: &[NetId],
+        costs: Costs,
+        marks: Marks,
+    ) -> Vec<Routed> {
+        let mut work = Work::new(&[]);
+        let mut overlay = LocalOccupancy::default();
+        let ripped: Vec<usize> = nets
+            .iter()
+            .filter_map(|&net| self.rip_victim(net, area, &mut work, &mut overlay))
+            .collect();
+        let todo = self.ordered(&work, ripped);
+        self.negotiate(area, work, overlay, todo, costs, marks)
+    }
+
     /// The local rounds of a region worker, starting with the pieces of
     /// `work` at `todo` and `overlay` holding what was ripped up.
     fn negotiate(

@@ -2,21 +2,26 @@
 //!
 //! The first pass routes every net region by region along its global route
 //! (`initial`); conflicts left over are repaired region by region
-//! (`region`). A net the regions cannot route is routed whole instead: a
+//! (`region`), and once they are few, over the global routes of their nets
+//! and on tiles around them (`tiles`), as `flow` decides round by round. A
+//! net the regions cannot route is routed whole instead: a
 //! tree grown through its track wires and its pins' access points, joining
 //! the nearest remaining terminal each time with a multi-source A* search
 //! inside its global route.
 
+mod flow;
 mod initial;
 mod judge;
 mod marking;
 mod patch;
 mod region;
 mod schedule;
+mod tiles;
 mod trace;
 
+pub use flow::{Flow, FlowState};
 pub use region::{RepairStats, Scope};
-pub use schedule::round_costs;
+pub use schedule::{RipUp, round_costs, round_strategy};
 pub use trace::Trace;
 
 use crate::access::{AccessPoint, Node, access_points};

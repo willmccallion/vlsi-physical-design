@@ -109,12 +109,12 @@ pub fn dr_table_header() {
     eprintln!(
         "\n    {}",
         format!(
-            "{:<8} {:>10} {:>10} {:>10} {:>10} {:>10}",
-            "DR Iter", "Markers", "Nets", "Ripped", "Conflict", "Time"
+            "{:<8} {:>10} {:>10} {:>10} {:>10} {:>10} {:>10}",
+            "DR Iter", "Markers", "Nets", "Ripped", "Conflict", "Flow", "Time"
         )
         .dim()
     );
-    eprintln!("    {}", "-".repeat(8 + 11 * 5).dim());
+    eprintln!("    {}", "-".repeat(8 + 11 * 6).dim());
 }
 
 /// Prints one detailed routing round.
@@ -124,10 +124,11 @@ pub fn dr_iter(
     nets: usize,
     ripped: usize,
     conflict: f64,
+    flow: &str,
     time_ms: u128,
 ) {
     eprintln!(
-        "    {iter:<8} {markers:>10} {nets:>10} {ripped:>10} {conflict:>10.1} {time_ms:>8}ms"
+        "    {iter:<8} {markers:>10} {nets:>10} {ripped:>10} {conflict:>10.1} {flow:>10} {time_ms:>8}ms"
     );
 }
 

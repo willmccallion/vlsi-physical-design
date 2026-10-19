@@ -60,13 +60,7 @@ fn place(db: &mut NetlistDB, name: &str, at: Point<Dbu>) {
 
 #[test]
 fn nets_crossing_many_regions_are_routed_connected() {
-    let mut db = tiny();
-    place(&mut db, "u5", Point::new(Dbu(2000), Dbu(4000)));
-    place(&mut db, "u6", Point::new(Dbu(3000), Dbu(4000)));
-    let config = RoutingConfig {
-        gcell_tracks: 3,
-        ..RoutingConfig::default()
-    };
+    let (mut db, config) = placed_tiny();
 
     let summary = route(&mut db, &config).unwrap();
 
@@ -76,6 +70,11 @@ fn nets_crossing_many_regions_are_routed_connected() {
     }
 }
 
+/// Detailed rounds the placed fixture is routed for: enough to pass
+/// through the regular, guides, stubborn and skipped rounds, since some of
+/// its violations never clear.
+const TINY_ROUNDS: usize = 12;
+
 /// The fixture with its two unplaced cells placed, and a config that cuts
 /// it into many gcells.
 fn placed_tiny() -> (NetlistDB, RoutingConfig) {
@@ -84,6 +83,7 @@ fn placed_tiny() -> (NetlistDB, RoutingConfig) {
     place(&mut db, "u6", Point::new(Dbu(3000), Dbu(4000)));
     let config = RoutingConfig {
         gcell_tracks: 3,
+        detailed_iterations: TINY_ROUNDS,
         ..RoutingConfig::default()
     };
     (db, config)
@@ -134,6 +134,16 @@ fn a_run_resumed_after_the_first_pass_routes_as_the_run_that_saved_it() {
     let resumed = route_resuming(&state);
 
     assert_eq!(state.round(), Some(0));
+    assert_eq!(resumed, straight);
+}
+
+#[test]
+fn a_run_resumed_after_a_stubborn_round_routes_as_the_run_that_saved_it() {
+    let (straight, state) = route_saving(SavePoint::Round(4));
+
+    let resumed = route_resuming(&state);
+
+    assert_eq!(state.round(), Some(4));
     assert_eq!(resumed, straight);
 }
 
