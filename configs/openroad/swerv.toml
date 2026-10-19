@@ -1,4 +1,4 @@
-purpose = "placement"
+purpose = "place_and_route"
 
 [input]
 lef_files = ["inputs/tech/nangate45/Nangate45.lef"]
