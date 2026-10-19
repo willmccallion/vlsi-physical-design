@@ -273,8 +273,9 @@ const fn default_global_capacity_reserve() -> f64 {
     0.25
 }
 
+/// `TritonRoute`'s `END_ITERATION`, past the last row of its cost schedule.
 const fn default_detailed_iterations() -> usize {
-    40
+    80
 }
 
 const fn default_num_layers() -> usize {
