@@ -1080,29 +1080,43 @@ pub fn route_global(grid: &mut GlobalGrid, nets: &[GlobalNet], rounds: usize) ->
         ripped.sort_by_key(|&i| (span(&nets[i].terminals), i));
         let start = std::time::Instant::now();
         coarse.refresh(grid);
-        for level in disjoint_levels(grid, nets, &ripped, &margins) {
+        let levels = disjoint_levels(grid, nets, &ripped, &margins);
+        let mut spent = RoundTimes::default();
+        for level in &levels {
             let shared: &GlobalGrid = grid;
+            let planning = std::time::Instant::now();
             let plans: Vec<Option<Plan>> = level
                 .par_iter()
                 .map(|&i| coarse.plan(shared, &nets[i]))
                 .collect();
+            spent.planning += planning.elapsed().as_secs_f64();
             let reroute = Reroute {
-                which: &level,
+                which: level,
                 margins: &margins,
                 plans: &plans,
             };
+            let routing = std::time::Instant::now();
             route_disjoint(grid, nets, &reroute, costs, &mut routes);
+            spent.routing += routing.elapsed().as_secs_f64();
+            let refreshing = std::time::Instant::now();
             let touched = touched_coarse_cells(
                 grid,
                 level.iter().filter_map(|&i| routes.paths.get(&nets[i].net)),
             );
             coarse.refresh_cells(grid, &touched);
+            spent.refreshing += refreshing.elapsed().as_secs_f64();
         }
         log::debug!(
-            "global round: {} nets ripped, overflow {}, {:.1}s",
+            "global round: {} nets ripped in {} levels (largest {}), overflow {}, {:.1}s: \
+             {:.1}s planning, {:.1}s routing, {:.1}s refreshing",
             ripped.len(),
+            levels.len(),
+            levels.iter().map(Vec::len).max().unwrap_or(0),
             grid.overflow().rounded(),
-            start.elapsed().as_secs_f64()
+            start.elapsed().as_secs_f64(),
+            spent.planning,
+            spent.routing,
+            spent.refreshing
         );
         let overflow = grid.overflow();
         if overflow < best.overflow {
@@ -1398,6 +1412,14 @@ impl Schedule<'_> {
 
 fn to_u32(v: usize) -> u32 {
     u32::try_from(v).unwrap_or(u32::MAX)
+}
+
+/// Seconds one rip-up round spends in each of its steps.
+#[derive(Debug, Default)]
+struct RoundTimes {
+    planning: f64,
+    routing: f64,
+    refreshing: f64,
 }
 
 /// Edge, in gcells, of the blocks that keep the search areas of nets
