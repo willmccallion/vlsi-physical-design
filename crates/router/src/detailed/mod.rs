@@ -106,16 +106,29 @@ impl<'a> DetailedRouter<'a> {
             pare_common::util::memory::current_rss_mb().unwrap_or(0)
         );
         let start = std::time::Instant::now();
+        let rules = Rules::from_design(db);
+        let fixed = Layout::fixed_from_db(db);
+        let fixed_tiles = ShapeTiles::new(&fixed, &db.die_area, gcell);
+        log::debug!(
+            "fixed layout built for the judge in {:.1}s, {} MB resident",
+            start.elapsed().as_secs_f64(),
+            pare_common::util::memory::current_rss_mb().unwrap_or(0)
+        );
+        let start = std::time::Instant::now();
         let mut access: Vec<Vec<Vec<AccessPoint>>> = (0..db.nets.len())
             .into_par_iter()
             .map(|n| {
-                if !is_signal_net(db, NetId::new(n)) {
+                let net = NetId::new(n);
+                if !is_signal_net(db, net) {
                     return Vec::new();
                 }
+                let clean = |layer: LayerId, metal: &Rect<Dbu>| {
+                    judge::wiring_is_clean(&fixed, &fixed_tiles, &rules, net, layer, metal)
+                };
                 db.nets[n]
                     .pins
                     .iter()
-                    .map(|&p| access_points(db, tech, p))
+                    .map(|&p| access_points(db, tech, p, &clean))
                     .collect()
             })
             .collect();
@@ -128,15 +141,6 @@ impl<'a> DetailedRouter<'a> {
         reserve_accesses(db, tech, &mut access, &mut occupancy);
         log::debug!(
             "access points reserved in {:.1}s, {} MB resident",
-            start.elapsed().as_secs_f64(),
-            pare_common::util::memory::current_rss_mb().unwrap_or(0)
-        );
-        let start = std::time::Instant::now();
-        let rules = Rules::from_design(db);
-        let fixed = Layout::fixed_from_db(db);
-        let fixed_tiles = ShapeTiles::new(&fixed, &db.die_area, gcell);
-        log::debug!(
-            "fixed layout built for the judge in {:.1}s, {} MB resident",
             start.elapsed().as_secs_f64(),
             pare_common::util::memory::current_rss_mb().unwrap_or(0)
         );

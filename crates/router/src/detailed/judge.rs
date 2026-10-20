@@ -17,7 +17,8 @@ use pare_common::geom::dbu::Dbu;
 use pare_common::geom::point::Point;
 use pare_common::geom::rect::Rect;
 use pare_common::verify::drc::{
-    Findings, Layout, Marker as DrcMarker, Owner, Violation, check_tiled, check_window,
+    Findings, Layout, Marker as DrcMarker, Origin, Owner, Rules, Violation, check_tiled,
+    check_window,
 };
 use rustc_hash::FxHashSet;
 
@@ -98,6 +99,35 @@ impl ShapeTiles {
         }
         found
     }
+}
+
+/// Whether wiring of `net` covering `metal` on `layer`, among the fixed
+/// shapes of `fixed` that `tiles` finds near it, breaks no design rule.
+pub(super) fn wiring_is_clean(
+    fixed: &Layout,
+    tiles: &ShapeTiles,
+    rules: &Rules,
+    net: NetId,
+    layer: LayerId,
+    metal: &Rect<Dbu>,
+) -> bool {
+    let core = metal.expand(rules.max_reach());
+    let window = core.expand(rules.max_reach());
+    let mut layout = Layout::with_owners_of(fixed);
+    for (layer, i) in tiles.near(&window) {
+        let shape = match layer {
+            LayerRef::Routing(l) => &fixed.metal(l.index())[i as usize],
+            LayerRef::Cut(c) => &fixed.cut(c.index())[i as usize],
+        };
+        if shape.rect.touches(&window) {
+            layout.add_shape(layer, shape);
+        }
+    }
+    let owner = layout.owner(Owner::Net(net), false);
+    layout.add(LayerRef::Routing(layer), owner, *metal, Origin::Routing);
+    check_window(&layout, rules, core, window)
+        .violations
+        .is_empty()
 }
 
 /// What judging a region found: the markers inside it, and for each
