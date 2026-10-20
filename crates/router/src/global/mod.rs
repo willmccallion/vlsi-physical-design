@@ -14,8 +14,10 @@
 //! search (`maze`) in a search area grown around their pins and extended
 //! by a corridor that a search over the whole chip on coarse cells picks
 //! first (`coarse`), as in CUGR, so a net can detour as far as the free
-//! tracks call for, in parallel batches whose areas do not meet. The cells
-//! each net passes through become its guide for detailed routing.
+//! tracks call for. As in CUGR, nets are planned in parallel batches whose
+//! pin boxes do not meet, then rerouted in order, each seeing every earlier
+//! net it could meet. The cells each net passes through become its guide
+//! for detailed routing.
 
 mod coarse;
 mod maze;
@@ -1080,7 +1082,7 @@ pub fn route_global(grid: &mut GlobalGrid, nets: &[GlobalNet], rounds: usize) ->
         ripped.sort_by_key(|&i| (span(&nets[i].terminals), i));
         let start = std::time::Instant::now();
         coarse.refresh(grid);
-        let levels = disjoint_levels(grid, nets, &ripped, &margins);
+        let levels = disjoint_levels(grid, nets, &ripped);
         let mut spent = RoundTimes::default();
         for level in &levels {
             let shared: &GlobalGrid = grid;
@@ -1423,33 +1425,23 @@ struct RoundTimes {
     refreshing: f64,
 }
 
-/// Edge, in gcells, of the blocks that keep the search areas of nets
-/// rerouted together apart.
+/// Edge, in gcells, of the blocks in which the pin boxes and search areas
+/// of nets rerouted together are compared.
 const BATCH_BLOCK: u16 = 4;
 
 /// Splits `ripped` into levels, keeping its order within each, whose nets'
-/// pin windows grown by their margins share no block of [`BATCH_BLOCK`]
-/// gcells: each net goes one level above the highest net before it that
-/// meets it. As CUGR's batches, a level's nets are planned at once against
-/// the coarse grid the levels before it left, so nets planned together
-/// start apart rather than all taking the same free corridor.
-fn disjoint_levels(
-    grid: &GlobalGrid,
-    nets: &[GlobalNet],
-    ripped: &[usize],
-    margins: &[u16],
-) -> Vec<Vec<usize>> {
+/// pin boxes share no block of [`BATCH_BLOCK`] gcells: each net goes one
+/// level above the highest net before it that meets it. As CUGR's batches
+/// of nets whose boxes do not overlap, a level's nets are planned at once
+/// against the coarse grid the levels before it left, so nets planned
+/// together start apart rather than all taking the same free corridor.
+fn disjoint_levels(grid: &GlobalGrid, nets: &[GlobalNet], ripped: &[usize]) -> Vec<Vec<usize>> {
     let blocks_x = usize::from(grid.nx.div_ceil(BATCH_BLOCK));
     let blocks_y = usize::from(grid.ny.div_ceil(BATCH_BLOCK));
     let mut height = vec![0_usize; blocks_x * blocks_y];
     let mut levels: Vec<Vec<usize>> = Vec::new();
     for &i in ripped {
-        let area = window(
-            &nets[i].terminals,
-            margins[i].saturating_add(1),
-            grid.nx,
-            grid.ny,
-        );
+        let area = window(&nets[i].terminals, 0, grid.nx, grid.ny);
         let blocks = blocks_of(area, blocks_x);
         let level = blocks.iter().map(|&b| height[b]).max().unwrap_or(0);
         for &b in &blocks {
@@ -1671,6 +1663,30 @@ mod tests {
             assert_eq!(routes.paths, expected.paths);
             assert!(serial.usage.iter().eq(parallel.usage.iter()));
         }
+    }
+
+    #[test]
+    fn nets_whose_pin_boxes_are_apart_are_rerouted_together() {
+        let nets = [
+            net(vec![cell(0, 0), cell(1, 1)]),
+            net(vec![cell(8, 8), cell(9, 9)]),
+        ];
+
+        let levels = disjoint_levels(&grid(), &nets, &[0, 1]);
+
+        assert_eq!(levels, vec![vec![0, 1]]);
+    }
+
+    #[test]
+    fn nets_whose_pin_boxes_share_a_block_are_rerouted_one_after_the_other() {
+        let nets = [
+            net(vec![cell(0, 0), cell(2, 2)]),
+            net(vec![cell(1, 1), cell(3, 3)]),
+        ];
+
+        let levels = disjoint_levels(&grid(), &nets, &[0, 1]);
+
+        assert_eq!(levels, vec![vec![0], vec![1]]);
     }
 
     #[test]
