@@ -11,6 +11,7 @@ use pare_common::geom::point::Point;
 use pare_common::geom::rect::Rect;
 use pare_common::util::config::RoutingConfig;
 use pare_router::access::{AccessPoint, Node, access_points};
+use pare_router::shared_access::SharedAccess;
 use pare_router::tech::RouteTech;
 use std::path::{Path, PathBuf};
 
@@ -162,4 +163,27 @@ fn a_pin_with_no_clean_access_keeps_its_crossings() {
     let none_clean = access_points(&db, &tech, pin, &|_, _| false);
 
     assert_eq!(none_clean, unjudged);
+}
+
+#[test]
+fn shared_candidates_equal_those_found_for_each_pin() {
+    let db = tiny();
+    let tech = RouteTech::new(&db, &RoutingConfig::default()).unwrap();
+    let shared = SharedAccess::new(&db, &tech);
+    let cell_pins = db.cells.iter().flat_map(|c| c.pins.iter().copied());
+
+    let mut compared = 0;
+    for pin in cell_pins {
+        if let Some(derived) = shared.candidates(&db, pin) {
+            assert_eq!(
+                derived,
+                access_points(&db, &tech, pin, &|_, _| true),
+                "{pin:?}"
+            );
+            assert_eq!(shared.count(&db, pin), Some(derived.len()));
+            compared += 1;
+        }
+    }
+
+    assert!(compared > 0);
 }

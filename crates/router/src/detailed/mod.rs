@@ -30,6 +30,7 @@ use crate::occupancy::{Occupancy, Origin, Owner, Proximity, Slot};
 use crate::runs::EdgeSet;
 pub use crate::search::Costs;
 use crate::search::{GUIDE_SLACK_GCELLS, Guide, Marks, OwnVias, Search};
+use crate::shared_access::SharedAccess;
 use crate::tech::RouteTech;
 use crate::track::TrackWire;
 use crate::tree::{connection_order, gap, hilbert_order};
@@ -116,7 +117,8 @@ impl<'a> DetailedRouter<'a> {
             pare_common::util::memory::current_rss_mb().unwrap_or(0)
         );
         let start = std::time::Instant::now();
-        let mut access: Vec<Vec<Vec<AccessPoint>>> = (0..db.nets.len())
+        let shared = SharedAccess::new(db, tech);
+        let own: Vec<Vec<Option<Vec<AccessPoint>>>> = (0..db.nets.len())
             .into_par_iter()
             .map(|n| {
                 let net = NetId::new(n);
@@ -129,17 +131,24 @@ impl<'a> DetailedRouter<'a> {
                 db.nets[n]
                     .pins
                     .iter()
-                    .map(|&p| access_points(db, tech, p, &clean))
+                    .map(|&p| {
+                        shared
+                            .count(db, p)
+                            .is_none()
+                            .then(|| access_points(db, tech, p, &clean))
+                    })
                     .collect()
             })
             .collect();
         log::debug!(
-            "access points found in {:.1}s, {} MB resident",
+            "access points found in {:.1}s for {} kinds of cell, {} MB resident",
             start.elapsed().as_secs_f64(),
+            shared.kinds(),
             pare_common::util::memory::current_rss_mb().unwrap_or(0)
         );
         let start = std::time::Instant::now();
-        reserve_accesses(db, tech, &mut access, &mut occupancy);
+        let access = reserve_accesses(db, tech, &shared, &own, &mut occupancy);
+        drop(own);
         log::debug!(
             "access points reserved in {:.1}s, {} MB resident",
             start.elapsed().as_secs_f64(),
@@ -1138,24 +1147,37 @@ impl TreeIndex {
 fn reserve_accesses(
     db: &NetlistDB,
     tech: &RouteTech,
-    access: &mut [Vec<Vec<AccessPoint>>],
+    shared: &SharedAccess,
+    own: &[Vec<Option<Vec<AccessPoint>>>],
     occupancy: &mut Occupancy,
-) {
-    let mut order: Vec<(usize, usize, usize)> = access
+) -> Vec<Vec<Vec<AccessPoint>>> {
+    let count_of = |n: usize, k: usize| match &own[n][k] {
+        Some(c) => c.len(),
+        None => shared.count(db, db.nets[n].pins[k]).unwrap_or(0),
+    };
+    let candidates_of = |n: usize, k: usize| match &own[n][k] {
+        Some(c) => c.clone(),
+        None => shared
+            .candidates(db, db.nets[n].pins[k])
+            .unwrap_or_default(),
+    };
+    let mut access: Vec<Vec<Vec<AccessPoint>>> = own
+        .iter()
+        .map(|pins| vec![Vec::new(); pins.len()])
+        .collect();
+    let mut order: Vec<(usize, usize, usize)> = own
         .iter()
         .enumerate()
-        .flat_map(|(n, pins)| {
-            pins.iter()
-                .enumerate()
-                .filter(|(_, c)| !c.is_empty())
-                .map(move |(k, c)| (c.len(), n, k))
-        })
+        .flat_map(|(n, pins)| (0..pins.len()).map(move |k| (n, k)))
+        .map(|(n, k)| (count_of(n, k), n, k))
+        .filter(|&(count, _, _)| count > 0)
         .collect();
     order.sort_unstable();
-    let mut reserved: Vec<OwnVias> = (0..access.len())
+    let mut reserved: Vec<OwnVias> = (0..own.len())
         .map(|n| OwnVias::new(db, tech, tech.net_rule(n)))
         .collect();
     for (count, n, k) in order {
+        access[n][k] = candidates_of(n, k);
         let owner = Owner::Net(crate::tech::to_u32(n));
         let metal_of = |a: &AccessPoint| {
             access_elems(tech, a)
@@ -1215,6 +1237,7 @@ fn reserve_accesses(
         }
         access[n][k] = vec![picked];
     }
+    access
 }
 
 /// The vias an access point commits its net to: its via stack, and the via

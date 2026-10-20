@@ -12,6 +12,7 @@ pub mod global;
 pub mod occupancy;
 pub mod runs;
 mod search;
+pub mod shared_access;
 pub mod state;
 pub mod tech;
 pub mod track;
