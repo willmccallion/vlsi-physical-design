@@ -7,7 +7,7 @@
 
 use crate::access::{AccessPoint, Node};
 use crate::runs::EdgeSet;
-use crate::tech::RouteTech;
+use crate::tech::{LayerTech, RouteTech};
 use pare_common::db::design::{NetlistDB, RouteElem};
 use pare_common::db::indices::{CutLayerId, LayerId, NetId, ViaId};
 use pare_common::db::library::LayerRef;
@@ -225,20 +225,12 @@ impl DisjointSets {
 /// Wire edges joining pieces of `route` of `net` that lie along one track
 /// closer than the net's spacing without touching, a gap the spacing
 /// between shapes of one net forbids.
+///
+/// Each piece of metal belongs to the track nearest its middle. Only on a
+/// track with such a gap are the crossings the route uses looked up, from
+/// its runs, its vias and its access points there.
 pub fn gap_fills(route: &NetRoute, db: &NetlistDB, tech: &RouteTech, net: NetId) -> Vec<Edge> {
-    let mut lines: BTreeMap<(LayerId, u32), TrackLine> = BTreeMap::new();
-    let nodes = route
-        .edges
-        .iter()
-        .flat_map(|e| <[Node; 2]>::from(e.ends()))
-        .chain(route.access.iter().map(|a| a.node));
-    for n in nodes {
-        lines
-            .entry((n.layer, n.track))
-            .or_default()
-            .crossings
-            .push(n.cross);
-    }
+    let mut metal: BTreeMap<(LayerId, u32), Vec<(Dbu, Dbu)>> = BTreeMap::new();
     for (layer, rect) in route.metal(db, tech, net) {
         if !tech.routable(layer) {
             continue;
@@ -250,21 +242,21 @@ pub fn gap_fills(route: &NetRoute, db: &NetlistDB, tech: &RouteTech, net: NetId)
             .tracks_within(a0, a1)
             .min_by_key(|&t| (lt.tracks[t as usize] - centre).abs());
         if let Some(track) = track {
-            lines
-                .entry((layer, track))
-                .or_default()
-                .metal
-                .push((b0, b1));
+            metal.entry((layer, track)).or_default().push((b0, b1));
         }
     }
     let mut fills = Vec::new();
-    for ((layer, track), line) in lines {
-        let lt = tech.layer(layer);
-        let at = |c: u32| lt.cross[c as usize].at;
+    for ((layer, track), spans) in metal {
         let spacing = tech.wire_spacing(tech.net_rule(net.index()), layer);
-        for (a, b) in line.narrow_gaps(spacing) {
-            let from = line.crossings.iter().copied().filter(|&c| at(c) <= a).max();
-            let to = line.crossings.iter().copied().filter(|&c| at(c) >= b).min();
+        let gaps = narrow_gaps(spans, spacing);
+        if gaps.is_empty() {
+            continue;
+        }
+        let used = UsedCrossings::of(route, layer, track);
+        let lt = tech.layer(layer);
+        for (a, b) in gaps {
+            let from = used.last_at_or_before(lt, a);
+            let to = used.first_at_or_after(lt, b);
             if let (Some(from), Some(to)) = (from, to) {
                 fills.extend((from..to).map(|cross| {
                     Edge::Wire(Node {
@@ -279,32 +271,78 @@ pub fn gap_fills(route: &NetRoute, db: &NetlistDB, tech: &RouteTech, net: NetId)
     fills
 }
 
-/// A net's metal along one track and the crossings it uses there.
-#[derive(Debug, Default)]
-struct TrackLine {
-    metal: Vec<(Dbu, Dbu)>,
-    crossings: Vec<u32>,
+/// The gaps between the merged `spans` of metal along a track that are
+/// wider than zero but narrower than `spacing`, as the end of one piece and
+/// the start of the next.
+fn narrow_gaps(mut spans: Vec<(Dbu, Dbu)>, spacing: Dbu) -> Vec<(Dbu, Dbu)> {
+    spans.sort_unstable();
+    let mut merged: Vec<(Dbu, Dbu)> = Vec::new();
+    for (lo, hi) in spans {
+        match merged.last_mut() {
+            Some(last) if lo <= last.1 => last.1 = last.1.max(hi),
+            _ => merged.push((lo, hi)),
+        }
+    }
+    merged
+        .windows(2)
+        .filter(|w| w[1].0 - w[0].1 < spacing)
+        .map(|w| (w[0].1, w[1].0))
+        .collect()
 }
 
-impl TrackLine {
-    /// The gaps between its pieces of metal that are wider than zero but
-    /// narrower than `spacing`, as the end of one piece and the start of
-    /// the next.
-    fn narrow_gaps(&self, spacing: Dbu) -> Vec<(Dbu, Dbu)> {
-        let mut spans = self.metal.clone();
-        spans.sort_unstable();
-        let mut merged: Vec<(Dbu, Dbu)> = Vec::new();
-        for (lo, hi) in spans {
-            match merged.last_mut() {
-                Some(last) if lo <= last.1 => last.1 = last.1.max(hi),
-                _ => merged.push((lo, hi)),
-            }
-        }
-        merged
-            .windows(2)
-            .filter(|w| w[1].0 - w[0].1 < spacing)
-            .map(|w| (w[0].1, w[1].0))
-            .collect()
+/// The crossings a route uses on one track: stretches of consecutive
+/// crossings its runs cover, and single crossings its vias and access
+/// points stand on.
+#[derive(Debug, Default)]
+struct UsedCrossings {
+    stretches: Vec<(u32, u32)>,
+    single: Vec<u32>,
+}
+
+impl UsedCrossings {
+    fn of(route: &NetRoute, layer: LayerId, track: u32) -> Self {
+        let runs = route.edges.runs();
+        let first = runs.partition_point(|r| (r.layer, r.track) < (layer, track));
+        let stretches = runs[first..]
+            .iter()
+            .take_while(|r| r.layer == layer && r.track == track)
+            .map(|r| (r.from, r.to))
+            .collect();
+        let on_track = |n: Node| n.layer == layer && n.track == track;
+        let single = route
+            .edges
+            .vias()
+            .iter()
+            .flat_map(|&pair| <[Node; 2]>::from(pair))
+            .chain(route.access.iter().map(|a| a.node))
+            .filter(|&n| on_track(n))
+            .map(|n| n.cross)
+            .collect();
+        Self { stretches, single }
+    }
+
+    /// The last used crossing at or before `along`.
+    fn last_at_or_before(&self, lt: &LayerTech, along: Dbu) -> Option<u32> {
+        let at = |c: u32| lt.cross[c as usize].at;
+        let k = lt.cross.partition_point(|c| c.at <= along);
+        let in_stretches = self.stretches.iter().filter_map(|&(from, to)| {
+            let last = u32::try_from(k).ok()?.checked_sub(1)?;
+            (last >= from).then(|| last.min(to))
+        });
+        let singles = self.single.iter().copied().filter(|&c| at(c) <= along);
+        in_stretches.chain(singles).max()
+    }
+
+    /// The first used crossing at or after `along`.
+    fn first_at_or_after(&self, lt: &LayerTech, along: Dbu) -> Option<u32> {
+        let at = |c: u32| lt.cross[c as usize].at;
+        let k = u32::try_from(lt.cross.partition_point(|c| c.at < along)).ok();
+        let in_stretches = self.stretches.iter().filter_map(|&(from, to)| {
+            let first = k?;
+            (first <= to).then(|| first.max(from))
+        });
+        let singles = self.single.iter().copied().filter(|&c| at(c) >= along);
+        in_stretches.chain(singles).min()
     }
 }
 
@@ -382,17 +420,14 @@ mod tests {
 
     #[test]
     fn only_gaps_narrower_than_the_spacing_are_reported() {
-        let line = TrackLine {
-            metal: vec![
-                (Dbu(0), Dbu(100)),
-                (Dbu(150), Dbu(300)),
-                (Dbu(280), Dbu(400)),
-                (Dbu(600), Dbu(700)),
-            ],
-            crossings: Vec::new(),
-        };
+        let spans = vec![
+            (Dbu(0), Dbu(100)),
+            (Dbu(150), Dbu(300)),
+            (Dbu(280), Dbu(400)),
+            (Dbu(600), Dbu(700)),
+        ];
 
-        assert_eq!(line.narrow_gaps(Dbu(70)), [(Dbu(100), Dbu(150))]);
+        assert_eq!(narrow_gaps(spans, Dbu(70)), [(Dbu(100), Dbu(150))]);
     }
 
     #[test]
