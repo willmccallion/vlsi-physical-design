@@ -454,9 +454,15 @@ impl DetailedRouter<'_> {
         let mut pieces: Vec<Vec<Piece>> = (0..batch.len()).map(|_| Vec::new()).collect();
         let mut removed: FxHashMap<(usize, NetId), Wiring> = FxHashMap::default();
         let mut carved = Changes::default();
-        for (&net, regions) in &regions_of {
-            let areas: Vec<Rect<Dbu>> = regions.iter().map(|&r| batch[r].area).collect();
-            for (k, (inside, piece)) in self.carve(net, &areas).into_iter().enumerate() {
+        let carvings: Vec<Vec<(Wiring, Option<Piece>)>> = regions_of
+            .par_iter()
+            .map(|(&net, regions)| {
+                let areas: Vec<Rect<Dbu>> = regions.iter().map(|&r| batch[r].area).collect();
+                self.carve(net, &areas)
+            })
+            .collect();
+        for ((&net, regions), carving) in regions_of.iter().zip(carvings) {
+            for (k, (inside, piece)) in carving.into_iter().enumerate() {
                 carved.apply(net, inside.clone(), Wiring::default());
                 let _ = removed.insert((regions[k], net), inside);
                 if let Some(piece) = piece {
@@ -560,17 +566,22 @@ impl DetailedRouter<'_> {
 
     /// Commits every net's wiring with `changes` made to it.
     pub(super) fn commit_changes(&mut self, changes: Changes) {
-        for (net, change) in changes.by_net {
-            let mut route = self.routes[net.index()].clone();
-            route.edges.retain(|e| !change.removed_edges.contains(&e));
-            route
-                .patches
-                .retain(|p| !change.removed_patches.contains(p));
-            route.edges.extend(change.added.edges);
-            route.patches.extend(change.added.patches);
-            tidy_patches(&mut route.patches);
-            self.commit(net, &route);
-        }
+        let changes: Vec<(NetId, Change)> = changes.by_net.into_iter().collect();
+        let routes: Vec<(NetId, NetRoute)> = changes
+            .into_par_iter()
+            .map(|(net, change)| {
+                let mut route = self.routes[net.index()].clone();
+                route.edges.retain(|e| !change.removed_edges.contains(&e));
+                route
+                    .patches
+                    .retain(|p| !change.removed_patches.contains(p));
+                route.edges.extend(change.added.edges);
+                route.patches.extend(change.added.patches);
+                tidy_patches(&mut route.patches);
+                (net, route)
+            })
+            .collect();
+        self.commit_all(routes);
     }
 
     /// Splits `net`'s edges inside each of `areas`, which do not touch, off

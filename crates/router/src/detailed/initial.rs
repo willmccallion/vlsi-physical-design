@@ -66,12 +66,18 @@ impl DetailedRouter<'_> {
         }
         let mut regions: BTreeMap<RegionKey, Vec<Piece>> = BTreeMap::new();
         let mut finished: Vec<(NetId, Vec<AccessPoint>)> = Vec::with_capacity(plans.len());
+        let skeletons: Vec<(NetId, NetRoute)> = plans
+            .par_iter()
+            .map(|plan| {
+                let route = NetRoute {
+                    edges: self.skeleton(plan.net, &plan.bridges, &grid),
+                    ..NetRoute::default()
+                };
+                (plan.net, route)
+            })
+            .collect();
+        self.commit_all(skeletons);
         for plan in plans {
-            let route = NetRoute {
-                edges: self.skeleton(plan.net, &plan.bridges, &grid),
-                ..NetRoute::default()
-            };
-            self.commit(plan.net, &route);
             for (key, piece) in plan.pieces {
                 regions.entry(key).or_default().push(piece);
             }
@@ -92,17 +98,19 @@ impl DetailedRouter<'_> {
             failed.extend(self.route_batch(&batch, costs));
         }
 
+        let mut last: Vec<(NetId, NetRoute)> = Vec::with_capacity(finished.len());
         for (net, access) in finished {
             if failed.contains(&net) {
-                self.commit(net, &NetRoute::default());
+                last.push((net, NetRoute::default()));
                 whole.push(net);
                 continue;
             }
             let mut route = self.routes[net.index()].clone();
             route.access = access;
             route.complete = true;
-            self.commit(net, &route);
+            last.push((net, route));
         }
+        self.commit_all(last);
         log::debug!(
             "first pass: {} pieces in {} regions, {} nets routed whole",
             stats.pieces,
@@ -125,11 +133,15 @@ impl DetailedRouter<'_> {
                 areas_of.entry(piece.net).or_default().push(*area);
             }
         }
-        for (&net, areas) in &areas_of {
-            let mut route = self.routes[net.index()].clone();
-            route.edges.retain(|e| !self.inside_one(e, areas));
-            self.commit(net, &route);
-        }
+        let taken_out: Vec<(NetId, NetRoute)> = areas_of
+            .par_iter()
+            .map(|(&net, areas)| {
+                let mut route = self.routes[net.index()].clone();
+                route.edges.retain(|e| !self.inside_one(e, areas));
+                (net, route)
+            })
+            .collect();
+        self.commit_all(taken_out);
 
         let routed: Vec<Vec<Routed>> = batch
             .par_iter()

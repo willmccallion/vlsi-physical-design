@@ -62,6 +62,21 @@ pub enum RestoreRoutesError {
     Access(NetId),
 }
 
+/// How many nets' commits are worked out in parallel at a time, which
+/// bounds the memory their wiring takes while they wait to be recorded.
+const COMMIT_CHUNK: usize = 4096;
+
+/// A net's commit worked out and waiting to be recorded.
+#[derive(Debug)]
+struct PreparedCommit {
+    net: NetId,
+    route: NetRoute,
+    elems: Vec<RouteElem>,
+    metal: Vec<(LayerId, Rect<Dbu>)>,
+    cuts: Vec<(pare_common::db::indices::CutLayerId, Rect<Dbu>)>,
+    vias: Vec<(ViaId, Point<Dbu>)>,
+}
+
 /// State shared by all detailed routing rounds.
 #[derive(Debug)]
 pub struct DetailedRouter<'a> {
@@ -196,16 +211,17 @@ impl<'a> DetailedRouter<'a> {
         for w in wires {
             self.wires[w.net.index()].push(w);
         }
-        for n in 0..self.wires.len() {
-            if self.wires[n].is_empty() {
-                continue;
-            }
-            let route = NetRoute {
-                edges: EdgeSet::from_runs(self.wires[n].iter().map(|w| w.run())),
-                ..NetRoute::default()
-            };
-            self.commit(NetId::new(n), &route);
-        }
+        let routes: Vec<(NetId, NetRoute)> = (0..self.wires.len())
+            .filter(|&n| !self.wires[n].is_empty())
+            .map(|n| {
+                let route = NetRoute {
+                    edges: EdgeSet::from_runs(self.wires[n].iter().map(|w| w.run())),
+                    ..NetRoute::default()
+                };
+                (NetId::new(n), route)
+            })
+            .collect();
+        self.commit_all(routes);
     }
 
     /// Logs every pin that has no access point, with its net.
@@ -295,33 +311,85 @@ impl<'a> DetailedRouter<'a> {
     /// Replaces a net's recorded routing with `route`, its narrow gaps
     /// along tracks filled.
     fn commit(&mut self, net: NetId, route: &NetRoute) {
-        let mut route = route.clone();
+        let prepared = self.prepare_commit(net, route.clone());
+        self.apply_commit(prepared);
+    }
+
+    /// Commits each net's route of `routes`, in their order: what each
+    /// changes is worked out for many nets at once in parallel, then
+    /// recorded one net after another as [`Self::commit`] records it.
+    fn commit_all(&mut self, routes: Vec<(NetId, NetRoute)>) {
+        let mut routes = routes.into_iter();
+        loop {
+            let chunk: Vec<(NetId, NetRoute)> = routes.by_ref().take(COMMIT_CHUNK).collect();
+            if chunk.is_empty() {
+                break;
+            }
+            let prepared: Vec<PreparedCommit> = chunk
+                .into_par_iter()
+                .map(|(net, route)| self.prepare_commit(net, route))
+                .collect();
+            for p in prepared {
+                self.apply_commit(p);
+            }
+        }
+    }
+
+    /// What committing `route` for `net` records, worked out without
+    /// changing anything: the route with its narrow gaps filled, and its
+    /// wiring, metal, cuts and vias.
+    fn prepare_commit(&self, net: NetId, mut route: NetRoute) -> PreparedCommit {
         route
             .edges
             .extend(gap_fills(&route, self.db, self.tech, net));
-        let route = &route;
-        let previous = std::mem::take(&mut self.routed[net.index()]);
-        self.occupancy.remove_wiring(&previous, Owner::Net(net.0));
-        let owner = Owner::Net(net.0);
-        let mut touched = Vec::new();
-        for (layer, rect) in route.metal(self.db, self.tech, net) {
-            if self.tech.routable(layer) {
-                let tracks =
-                    self.occupancy
-                        .add_rect(self.tech, layer, &rect, owner, Origin::Wiring);
-                touched.extend(tracks.into_iter().map(Slot::Track));
-            }
+        let elems = route.elems(self.tech);
+        let metal = elems
+            .iter()
+            .flat_map(|e| elem_metal(self.db, net, e))
+            .filter(|(layer, _)| self.tech.routable(*layer))
+            .collect();
+        let cuts = elems.iter().flat_map(|e| elem_cuts(self.db, e)).collect();
+        let vias = elems
+            .iter()
+            .filter_map(|e| match *e {
+                RouteElem::Via { via, at } => Some((via, at)),
+                RouteElem::Wire { .. } | RouteElem::Patch { .. } => None,
+            })
+            .collect();
+        PreparedCommit {
+            net,
+            route,
+            elems,
+            metal,
+            cuts,
+            vias,
         }
-        for (cut, rect) in route.cuts(self.db, self.tech) {
-            let bucket = self.occupancy.add_cut(cut, &rect, owner, Origin::Wiring);
+    }
+
+    /// Records a prepared commit: takes the net's previous wiring out of
+    /// the occupancy and puts the new one in.
+    fn apply_commit(&mut self, p: PreparedCommit) {
+        let net = p.net;
+        let owner = Owner::Net(net.0);
+        let previous = std::mem::take(&mut self.routed[net.index()]);
+        self.occupancy.remove_wiring(&previous, owner);
+        let mut touched = Vec::new();
+        for (layer, rect) in &p.metal {
+            let tracks = self
+                .occupancy
+                .add_rect(self.tech, *layer, rect, owner, Origin::Wiring);
+            touched.extend(tracks.into_iter().map(Slot::Track));
+        }
+        for (cut, rect) in &p.cuts {
+            let bucket = self.occupancy.add_cut(*cut, rect, owner, Origin::Wiring);
             touched.push(Slot::Cut(bucket));
         }
         touched.sort_unstable();
         touched.dedup();
         self.routed[net.index()] = touched;
-        self.vias[net.index()] = route.vias(self.tech);
-        self.elems[net.index()] = route.elems(self.tech);
-        self.routes[net.index()] = route.clone();
+        self.vias[net.index()] = p.vias;
+        self.elems[net.index()] = p.elems;
+        self.routes[net.index()] = p.route;
     }
 
     /// The current routing of every net.
@@ -402,9 +470,7 @@ impl<'a> DetailedRouter<'a> {
                 return Err(RestoreRoutesError::Access(*net));
             }
         }
-        for (net, route) in routes {
-            self.commit(*net, route);
-        }
+        self.commit_all(routes.to_vec());
         Ok(())
     }
 
