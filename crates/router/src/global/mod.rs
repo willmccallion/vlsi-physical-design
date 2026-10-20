@@ -28,7 +28,7 @@ mod tracks;
 use crate::occupancy::{FixedMetal, TrackRef};
 use crate::tech::RouteTech;
 use coarse::{CoarseGrid, Corridor, Plan, SCALE};
-use maze::route_tree;
+use maze::{OutgrowsArea, route_tree, route_tree_within};
 use pare_common::db::design::NetlistDB;
 use pare_common::db::indices::{LayerId, NetId};
 use pare_common::db::library::Direction;
@@ -1270,8 +1270,10 @@ struct Reroute<'a> {
 /// the nets before it whose areas meet its own, so it sees the usage of
 /// every earlier net that could compete with it, while nets elsewhere keep
 /// the threads busy. A net's area is the window around its pins together
-/// with its corridor's cells. A connection that finds no path there and
-/// searches a larger window may see usage other nets are changing in it.
+/// with its corridor's cells. A net with a connection that has no path
+/// there is routed again after the others, in order, with its search free
+/// to widen, so no search reads usage that a net routed at the same time
+/// changes and every run gives the same routes.
 fn route_disjoint(
     grid: &GlobalGrid,
     nets: &[GlobalNet],
@@ -1279,6 +1281,52 @@ fn route_disjoint(
     costs: GlobalCosts,
     routes: &mut GlobalRoutes,
 ) {
+    let Reroute {
+        which,
+        margins,
+        plans,
+    } = *reroute;
+    let (waits, next) = dependencies(grid, nets, reroute);
+    let ready: Vec<usize> = (0..which.len())
+        .filter(|&k| waits[k].load(Ordering::Relaxed) == 0)
+        .collect();
+    let schedule = Schedule {
+        grid,
+        nets,
+        which,
+        margins,
+        plans,
+        costs,
+        waits,
+        next,
+        trees: (0..which.len()).map(|_| OnceLock::new()).collect(),
+    };
+    let shared = &schedule;
+    rayon::scope(|scope| {
+        for k in ready {
+            scope.spawn(move |scope| shared.run(scope, k));
+        }
+    });
+    for (k, tree) in schedule.trees.into_iter().enumerate() {
+        let i = which[k];
+        let tree = if let Some(Ok(tree)) = tree.into_inner() {
+            tree
+        } else {
+            let tree = route_tree(grid, &nets[i], margins[i], costs, plans[k].as_ref());
+            grid.add_tree(&nets[i], &tree, Sign::Add);
+            tree
+        };
+        let _ = routes.paths.insert(nets[i].net, tree);
+    }
+}
+
+/// For each net of `reroute`, how many earlier nets its search area meets,
+/// and for each, the later nets whose areas meet its own.
+fn dependencies(
+    grid: &GlobalGrid,
+    nets: &[GlobalNet],
+    reroute: &Reroute<'_>,
+) -> (Vec<AtomicU32>, Vec<Vec<u32>>) {
     let Reroute {
         which,
         margins,
@@ -1317,31 +1365,7 @@ fn route_disjoint(
         }
         waits.push(AtomicU32::new(to_u32(before.len())));
     }
-    let ready: Vec<usize> = (0..which.len())
-        .filter(|&k| waits[k].load(Ordering::Relaxed) == 0)
-        .collect();
-    let schedule = Schedule {
-        grid,
-        nets,
-        which,
-        margins,
-        plans,
-        costs,
-        waits,
-        next,
-        trees: (0..which.len()).map(|_| OnceLock::new()).collect(),
-    };
-    let shared = &schedule;
-    rayon::scope(|scope| {
-        for k in ready {
-            scope.spawn(move |scope| shared.run(scope, k));
-        }
-    });
-    for (k, tree) in schedule.trees.into_iter().enumerate() {
-        if let Some(tree) = tree.into_inner() {
-            let _ = routes.paths.insert(nets[which[k]].net, tree);
-        }
-    }
+    (waits, next)
 }
 
 /// The blocks of [`BATCH_BLOCK`] gcells a window of gcells meets.
@@ -1387,22 +1411,25 @@ struct Schedule<'a> {
     waits: Vec<AtomicU32>,
     /// The later nets waiting for each one.
     next: Vec<Vec<u32>>,
-    trees: Vec<OnceLock<Vec<Vec<GCell>>>>,
+    trees: Vec<OnceLock<Result<Vec<Vec<GCell>>, OutgrowsArea>>>,
 }
 
 impl Schedule<'_> {
-    /// Routes the `k`th net, places its demand, and starts every later net
+    /// Routes the `k`th net inside its area and places its demand, or leaves
+    /// it for later when its area holds no route, then starts every later net
     /// that was waiting only for it.
     fn run<'s>(&'s self, scope: &rayon::Scope<'s>, k: usize) {
         let i = self.which[k];
-        let tree = route_tree(
+        let tree = route_tree_within(
             self.grid,
             &self.nets[i],
             self.margins[i],
             self.costs,
             self.plans[k].as_ref(),
         );
-        self.grid.add_tree(&self.nets[i], &tree, Sign::Add);
+        if let Ok(tree) = &tree {
+            self.grid.add_tree(&self.nets[i], tree, Sign::Add);
+        }
         let _ = self.trees[k].set(tree);
         for &later in &self.next[k] {
             let later = later as usize;
@@ -1599,6 +1626,15 @@ mod tests {
         }
     }
 
+    /// Blocks the horizontal edges from column `x` to `x + 1` in rows `rows`.
+    fn wall(grid: &mut GlobalGrid, x: u16, rows: std::ops::RangeInclusive<u16>) {
+        for y in rows {
+            let e = grid.edge(cell(x, y));
+            grid.capacity[e] = Tracks::ZERO;
+            grid.blocked[e] = true;
+        }
+    }
+
     /// Routes `order` one net after another, each seeing all before it.
     fn route_in_order(grid: &GlobalGrid, nets: &[GlobalNet], order: &[usize]) -> GlobalRoutes {
         let mut routes = GlobalRoutes::default();
@@ -1622,6 +1658,30 @@ mod tests {
         let mut routes = GlobalRoutes::default();
         route_disjoint(grid, nets, &reroute, COSTS, &mut routes);
         routes
+    }
+
+    /// Nets crossing the grid in neighbouring rows, so that every one
+    /// meets the area of the ones before it.
+    fn crowded_nets() -> Vec<GlobalNet> {
+        (0..6)
+            .map(|k| numbered(k, vec![cell(0, 3 + k as u16 % 3), cell(9, 4)]))
+            .collect()
+    }
+
+    #[test]
+    fn nets_rerouted_together_take_the_routes_of_rerouting_them_in_order() {
+        let mut serial = grid();
+        serial.capacity.fill(Tracks::whole(2));
+        let mut parallel = grid();
+        parallel.capacity.fill(Tracks::whole(2));
+        let nets = crowded_nets();
+        let order: Vec<usize> = (0..nets.len()).collect();
+
+        let expected = route_in_order(&serial, &nets, &order);
+        let routes = route_level(&parallel, &nets, &order);
+
+        assert_eq!(routes.paths, expected.paths);
+        assert!(serial.usage.iter().eq(parallel.usage.iter()));
     }
 
     /// Many short nets along a 40 by 40 grid, in chains of nets that meet
@@ -1663,6 +1723,33 @@ mod tests {
             assert_eq!(routes.paths, expected.paths);
             assert!(serial.usage.iter().eq(parallel.usage.iter()));
         }
+    }
+
+    /// A grid walled across at column 4 but for rows 0 and 9, the gap in
+    /// row 0 holding one track.
+    fn two_gaps() -> GlobalGrid {
+        let mut grid = grid();
+        wall(&mut grid, 4, 1..=8);
+        let gap = grid.edge(cell(4, 0));
+        grid.capacity[gap] = Tracks::ONE;
+        grid
+    }
+
+    #[test]
+    fn a_net_whose_area_holds_no_route_is_rerouted_after_the_others() {
+        let serial = two_gaps();
+        let parallel = two_gaps();
+        let wide = GlobalNet {
+            demand: vec![Tracks::whole(2); 2],
+            ..numbered(1, vec![cell(1, 0), cell(8, 0)])
+        };
+        let nets = vec![numbered(0, vec![cell(2, 3), cell(7, 5)]), wide];
+
+        let expected = route_in_order(&serial, &nets, &[1, 0]);
+        let routes = route_level(&parallel, &nets, &[0, 1]);
+
+        assert_eq!(routes.paths, expected.paths);
+        assert!(serial.usage.iter().eq(parallel.usage.iter()));
     }
 
     #[test]

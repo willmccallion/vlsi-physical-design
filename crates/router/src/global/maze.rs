@@ -18,9 +18,13 @@ use pare_common::geom::point::Point;
 use pare_common::geom::rect::Rect;
 use rustc_hash::{FxHashMap, FxHashSet};
 use std::collections::BinaryHeap;
+use std::convert::Infallible;
 
 /// Edge, in gcells, of the buckets used to find tree cells near a connection.
 const BUCKET: u16 = 4;
+
+/// The cells of a tree by the bucket of [`BUCKET`] gcells holding them.
+type Buckets = FxHashMap<(u16, u16), Vec<GCell>>;
 
 /// A tree through every terminal of `net`, as the paths that build it.
 /// Each connection searches the box around its two ends grown by `margin`
@@ -33,11 +37,48 @@ pub(super) fn route_tree(
     costs: GlobalCosts,
     plan: Option<&Plan>,
 ) -> Vec<Vec<GCell>> {
+    let Ok(paths) = grow_tree(grid, net, margin, costs, plan, |avoid, buckets, ends| {
+        Ok::<_, Infallible>(search_widening(grid, avoid, buckets, ends, margin))
+    });
+    paths
+}
+
+/// A connection of a net had no path inside the box around its ends grown
+/// by the net's margin, nor along its planned coarse path.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(super) struct OutgrowsArea;
+
+/// As [`route_tree`], but every search stays inside the box around its
+/// connection's ends grown by `margin` and the coarse path planned for it,
+/// so it reads the grid nowhere else; fails when a connection has no path
+/// there.
+pub(super) fn route_tree_within(
+    grid: &GlobalGrid,
+    net: &GlobalNet,
+    margin: u16,
+    costs: GlobalCosts,
+    plan: Option<&Plan>,
+) -> Result<Vec<Vec<GCell>>, OutgrowsArea> {
+    grow_tree(grid, net, margin, costs, plan, |avoid, buckets, ends| {
+        search_window(grid, avoid, buckets, ends, margin).ok_or(OutgrowsArea)
+    })
+}
+
+/// Joins each terminal of `net` to the tree built so far, along the coarse
+/// path `plan` gives the connection when that holds one, else by `connect`.
+fn grow_tree<E>(
+    grid: &GlobalGrid,
+    net: &GlobalNet,
+    margin: u16,
+    costs: GlobalCosts,
+    plan: Option<&Plan>,
+    connect: impl Fn(Query<'_>, &Buckets, [GCell; 2]) -> Result<Vec<GCell>, E>,
+) -> Result<Vec<Vec<GCell>>, E> {
     let mut terminals: Vec<GCell> = net.terminals.clone();
     terminals.sort_unstable();
     terminals.dedup();
     if terminals.is_empty() {
-        return Vec::new();
+        return Ok(Vec::new());
     }
     let points: Vec<Rect<Dbu>> = terminals
         .iter()
@@ -49,7 +90,7 @@ pub(super) fn route_tree(
     let (first, joins) = connection_order(&points);
 
     let mut tree: FxHashSet<GCell> = FxHashSet::default();
-    let mut buckets: FxHashMap<(u16, u16), Vec<GCell>> = FxHashMap::default();
+    let mut buckets: Buckets = FxHashMap::default();
     add_cell(&mut tree, &mut buckets, terminals[first]);
     let mut paths = vec![vec![terminals[first]]];
     let avoid = Query {
@@ -65,16 +106,19 @@ pub(super) fn route_tree(
             continue;
         }
         let ends = [target, terminals[join.parent]];
-        let path = plan
+        let planned = plan
             .and_then(|p| p.between(ends[0], ends[1], grid))
-            .and_then(|c| search_extended(grid, avoid, &c, &buckets, ends, margin))
-            .unwrap_or_else(|| search_widening(grid, avoid, &buckets, ends, margin));
+            .and_then(|c| search_extended(grid, avoid, &c, &buckets, ends, margin));
+        let path = match planned {
+            Some(path) => path,
+            None => connect(avoid, &buckets, ends)?,
+        };
         for &c in &path {
             add_cell(&mut tree, &mut buckets, c);
         }
         paths.push(path);
     }
-    paths
+    Ok(paths)
 }
 
 /// Cheapest path from the tree to the first of `ends` inside the box around
@@ -83,7 +127,7 @@ fn search_extended(
     grid: &GlobalGrid,
     query: Query<'_>,
     corridor: &Corridor,
-    buckets: &FxHashMap<(u16, u16), Vec<GCell>>,
+    buckets: &Buckets,
     ends: [GCell; 2],
     margin: u16,
 ) -> Option<Vec<GCell>> {
@@ -111,7 +155,7 @@ fn search_extended(
 fn search_widening(
     grid: &GlobalGrid,
     avoid: Query<'_>,
-    buckets: &FxHashMap<(u16, u16), Vec<GCell>>,
+    buckets: &Buckets,
     ends: [GCell; 2],
     margin: u16,
 ) -> Vec<GCell> {
@@ -119,14 +163,10 @@ fn search_widening(
     let full = (0, grid.nx - 1, 0, grid.ny - 1);
     let mut margin = margin;
     loop {
-        let w = window(&ends, margin, grid.nx, grid.ny);
-        let sources = cells_in(buckets, w);
-        if !sources.is_empty()
-            && let Some(p) = search(grid, avoid, &sources, target, w)
-        {
+        if let Some(p) = search_window(grid, avoid, buckets, ends, margin) {
             return p;
         }
-        if w == full {
+        if window(&ends, margin, grid.nx, grid.ny) == full {
             let all = cells_in(buckets, full);
             let cross = Query {
                 blocked: Blocked::Cross,
@@ -138,11 +178,24 @@ fn search_widening(
     }
 }
 
-fn add_cell(
-    tree: &mut FxHashSet<GCell>,
-    buckets: &mut FxHashMap<(u16, u16), Vec<GCell>>,
-    c: GCell,
-) {
+/// Cheapest path from the tree to the first of `ends` inside the box around
+/// both grown by `margin`, if it holds one.
+fn search_window(
+    grid: &GlobalGrid,
+    query: Query<'_>,
+    buckets: &Buckets,
+    ends: [GCell; 2],
+    margin: u16,
+) -> Option<Vec<GCell>> {
+    let w = window(&ends, margin, grid.nx, grid.ny);
+    let sources = cells_in(buckets, w);
+    if sources.is_empty() {
+        return None;
+    }
+    search(grid, query, &sources, ends[0], w)
+}
+
+fn add_cell(tree: &mut FxHashSet<GCell>, buckets: &mut Buckets, c: GCell) {
     if tree.insert(c) {
         buckets
             .entry((c.x / BUCKET, c.y / BUCKET))
@@ -152,7 +205,7 @@ fn add_cell(
 }
 
 /// Tree cells inside a window.
-fn cells_in(buckets: &FxHashMap<(u16, u16), Vec<GCell>>, w: (u16, u16, u16, u16)) -> Vec<GCell> {
+fn cells_in(buckets: &Buckets, w: (u16, u16, u16, u16)) -> Vec<GCell> {
     let mut out = Vec::new();
     for bx in w.0 / BUCKET..=w.1 / BUCKET {
         for by in w.2 / BUCKET..=w.3 / BUCKET {
@@ -645,6 +698,31 @@ mod tests {
         assert!(reaches(&planned, terminals[1]));
         assert!(highest(&planned) >= Some(20));
         assert!(highest(&windowed) < Some(20));
+    }
+
+    #[test]
+    fn a_net_kept_inside_its_area_fails_where_only_a_wider_detour_reaches() {
+        let mut grid = grid();
+        wall(&mut grid, 4, 0..=8);
+        let terminals = [cell(1, 2, 4), cell(1, 7, 4)];
+
+        let within = route_tree_within(&grid, &net(&terminals), 1, COSTS, None);
+
+        assert_eq!(within, Err(OutgrowsArea));
+    }
+
+    #[test]
+    fn a_net_kept_inside_its_area_takes_the_route_found_there() {
+        let mut grid = grid();
+        wall(&mut grid, 4, 0..=2);
+        let terminals = [cell(1, 2, 4), cell(2, 7, 1), cell(1, 5, 6)];
+
+        let within = route_tree_within(&grid, &net(&terminals), 1, COSTS, None);
+
+        assert_eq!(
+            within,
+            Ok(route_tree(&grid, &net(&terminals), 1, COSTS, None))
+        );
     }
 
     #[test]
