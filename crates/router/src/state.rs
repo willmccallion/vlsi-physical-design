@@ -11,6 +11,7 @@
 use crate::access::{AccessPoint, Node};
 use crate::detailed::{Flow, Scope};
 use crate::global::GCell;
+use crate::runs::{EdgeSet, Run};
 use crate::wiring::{Edge, NetRoute, Patch};
 use pare_common::db::indices::{LayerId, ViaId};
 use pare_common::geom::dbu::Dbu;
@@ -178,17 +179,15 @@ fn write_detailed(out: &mut impl Write, d: &DetailedState) -> io::Result<()> {
             out,
             "r {name} {} {} {} {}",
             u8::from(route.complete),
-            route.edges.len(),
+            route.edges.runs().len() + route.edges.vias().len(),
             route.patches.len(),
             route.access.len()
         )?;
-        for e in &route.edges {
-            match *e {
-                Edge::Wire(n) => writeln!(out, "w {}", node_text(n))?,
-                Edge::Via { lower, upper } => {
-                    writeln!(out, "v {} {}", node_text(lower), node_text(upper))?;
-                }
-            }
+        for run in route.edges.runs() {
+            writeln!(out, "s {} {}", node_text(run.node(run.from)), run.to)?;
+        }
+        for &(lower, upper) in route.edges.vias() {
+            writeln!(out, "v {} {}", node_text(lower), node_text(upper))?;
         }
         for p in &route.patches {
             let r = p.rect;
@@ -260,20 +259,36 @@ fn parse_detailed(lines: &mut Lines<'_>, header: &str) -> Result<DetailedState, 
             complete,
             ..NetRoute::default()
         };
+        let mut runs = Vec::new();
+        let mut steps = Vec::new();
         for _ in 0..edges {
             let line = lines.next_line()?;
             let mut e = lines.fields(line);
-            let edge = match e.word()?.as_str() {
-                "w" => Edge::Wire(e.node()?),
-                "v" => Edge::Via {
+            match e.word()?.as_str() {
+                "s" => {
+                    let first = e.node()?;
+                    let to: u32 = e.int()?;
+                    if to <= first.cross {
+                        return Err(e.error("a run must end after its first crossing"));
+                    }
+                    runs.push(Run {
+                        layer: first.layer,
+                        track: first.track,
+                        from: first.cross,
+                        to,
+                    });
+                }
+                "w" => steps.push(Edge::Wire(e.node()?)),
+                "v" => steps.push(Edge::Via {
                     lower: e.node()?,
                     upper: e.node()?,
-                },
+                }),
                 other => return Err(e.error(&format!("unknown edge `{other}`"))),
-            };
+            }
             e.done()?;
-            route.edges.push(edge);
         }
+        route.edges = EdgeSet::from_runs(runs);
+        route.edges.extend(steps);
         for _ in 0..patches {
             let mut p = lines.keyword("p")?;
             let layer = LayerId::new(p.int()?);
@@ -438,13 +453,16 @@ mod tests {
 
     fn state() -> RouteState {
         let route = NetRoute {
-            edges: vec![
+            edges: [
                 Edge::Wire(node(2, 4, 7)),
+                Edge::Wire(node(2, 4, 8)),
                 Edge::Via {
                     lower: node(2, 4, 8),
                     upper: node(3, 9, 1),
                 },
-            ],
+            ]
+            .into_iter()
+            .collect(),
             patches: vec![Patch {
                 layer: LayerId::new(2),
                 rect: Rect::new(Point::new(Dbu(-5), Dbu(10)), Point::new(Dbu(15), Dbu(40))),

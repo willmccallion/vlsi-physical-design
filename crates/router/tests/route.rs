@@ -296,11 +296,13 @@ fn consecutive_wire_edges_become_one_wire() {
         cross,
     };
     let route = NetRoute {
-        edges: vec![
+        edges: [
             Edge::Wire(node(2)),
             Edge::Wire(node(0)),
             Edge::Wire(node(1)),
-        ],
+        ]
+        .into_iter()
+        .collect(),
         ..NetRoute::default()
     };
 

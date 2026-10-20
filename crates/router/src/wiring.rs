@@ -6,6 +6,7 @@
 //! becomes metal and DEF wiring by merging consecutive steps along a track.
 
 use crate::access::{AccessPoint, Node};
+use crate::runs::EdgeSet;
 use crate::tech::RouteTech;
 use pare_common::db::design::{NetlistDB, RouteElem};
 use pare_common::db::indices::{CutLayerId, LayerId, NetId, ViaId};
@@ -69,7 +70,7 @@ pub fn path_edges(path: &[Node]) -> impl Iterator<Item = Edge> + '_ {
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct NetRoute {
     /// Edges of the track graph it uses.
-    pub edges: Vec<Edge>,
+    pub edges: EdgeSet,
     /// Metal added beyond its wires and vias.
     pub patches: Vec<Patch>,
     /// The access point used at each pin it reaches.
@@ -125,42 +126,20 @@ impl NetRoute {
     /// the stub and via stack of every access point.
     pub fn elems(&self, tech: &RouteTech) -> Vec<RouteElem> {
         let point = |n: Node| tech.layer(n.layer).point(n.track, n.cross);
-        let mut wires: Vec<Node> = Vec::new();
-        let mut out = Vec::new();
-        for &e in &self.edges {
-            match e {
-                Edge::Wire(n) => wires.push(n),
-                Edge::Via { lower, .. } => out.push(RouteElem::Via {
-                    via: tech.via_above(lower.layer).via,
-                    at: point(lower),
-                }),
-            }
-        }
-        wires.sort_unstable();
-        wires.dedup();
-        let mut i = 0;
-        while i < wires.len() {
-            let start = wires[i];
-            let mut end = start;
-            while i + 1 < wires.len()
-                && wires[i + 1].layer == end.layer
-                && wires[i + 1].track == end.track
-                && wires[i + 1].cross == end.cross + 1
-            {
-                i += 1;
-                end = wires[i];
-            }
-            let last = Node {
-                cross: end.cross + 1,
-                ..end
-            };
-            out.push(RouteElem::Wire {
-                layer: start.layer,
-                from: point(start),
-                to: point(last),
-            });
-            i += 1;
-        }
+        let mut out: Vec<RouteElem> = self
+            .edges
+            .vias()
+            .iter()
+            .map(|&(lower, _)| RouteElem::Via {
+                via: tech.via_above(lower.layer).via,
+                at: point(lower),
+            })
+            .collect();
+        out.extend(self.edges.runs().iter().map(|run| RouteElem::Wire {
+            layer: run.layer,
+            from: point(run.node(run.from)),
+            to: point(run.node(run.to)),
+        }));
         for a in &self.access {
             out.extend(access_elems(tech, a));
         }
@@ -174,7 +153,7 @@ impl NetRoute {
     /// Whether its edges join the access points of all its pins.
     pub fn is_connected(&self) -> bool {
         let mut sets = DisjointSets::default();
-        for e in &self.edges {
+        for e in self.edges.iter() {
             let (a, b) = e.ends();
             sets.union(a, b);
         }

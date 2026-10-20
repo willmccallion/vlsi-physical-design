@@ -27,6 +27,7 @@ pub use trace::Trace;
 use crate::access::{AccessPoint, Node, access_points};
 use crate::global::{GCell, GlobalGrid, GlobalRoutes, RouteTree};
 use crate::occupancy::{Occupancy, Origin, Owner, Proximity, Slot};
+use crate::runs::EdgeSet;
 pub use crate::search::Costs;
 use crate::search::{GUIDE_SLACK_GCELLS, Guide, Marks, OwnVias, Search};
 use crate::tech::RouteTech;
@@ -190,11 +191,8 @@ impl<'a> DetailedRouter<'a> {
             if self.wires[n].is_empty() {
                 continue;
             }
-            let mut edges: Vec<Edge> = self.wires[n].iter().flat_map(|w| w.edges()).collect();
-            edges.sort_unstable();
-            edges.dedup();
             let route = NetRoute {
-                edges,
+                edges: EdgeSet::from_runs(self.wires[n].iter().map(|w| w.run())),
                 ..NetRoute::default()
             };
             self.commit(NetId::new(n), &route);
@@ -292,8 +290,6 @@ impl<'a> DetailedRouter<'a> {
         route
             .edges
             .extend(gap_fills(&route, self.db, self.tech, net));
-        route.edges.sort_unstable();
-        route.edges.dedup();
         let route = &route;
         let previous = std::mem::take(&mut self.routed[net.index()]);
         self.occupancy.remove_wiring(&previous, Owner::Net(net.0));
@@ -381,7 +377,7 @@ impl<'a> DetailedRouter<'a> {
     /// point pin access does not offer its net now.
     pub fn restore(&mut self, routes: &[(NetId, NetRoute)]) -> Result<(), RestoreRoutesError> {
         for (net, route) in routes {
-            let nodes = route.edges.iter().flat_map(|e| match *e {
+            let nodes = route.edges.iter().flat_map(|e| match e {
                 Edge::Wire(n) => [n, n],
                 Edge::Via { lower, upper } => [lower, upper],
             });
@@ -554,10 +550,8 @@ impl<'a> DetailedRouter<'a> {
         } else {
             self.grow(search, terms, &all, window, guide)?
         };
-        let mut edges: Vec<Edge> = tree.paths.iter().flat_map(|p| path_edges(p)).collect();
-        edges.extend(terms.wires.iter().flat_map(|w| w.edges()));
-        edges.sort_unstable();
-        edges.dedup();
+        let mut edges: EdgeSet = tree.paths.iter().flat_map(|p| path_edges(p)).collect();
+        edges.union(&EdgeSet::from_runs(terms.wires.iter().map(|w| w.run())));
         Some(NetRoute {
             edges,
             patches: Vec::new(),

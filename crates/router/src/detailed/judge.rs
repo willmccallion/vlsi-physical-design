@@ -9,7 +9,8 @@
 //! of its pieces.
 
 use super::{DetailedRouter, Marker};
-use crate::wiring::{Edge, NetRoute, Wiring, gap_fills, tidy_patches};
+use crate::runs::EdgeSet;
+use crate::wiring::{NetRoute, Wiring, gap_fills, tidy_patches};
 use pare_common::db::design::RouteElem;
 use pare_common::db::indices::{CutLayerId, LayerId, NetId};
 use pare_common::db::library::LayerRef;
@@ -238,17 +239,15 @@ impl DetailedRouter<'_> {
     pub(super) fn as_committed(&self, c: &Candidate<'_>) -> NetRoute {
         let mut route = self.routes[c.net.index()].clone();
         if !c.without.is_empty() {
-            let gone: FxHashSet<Edge> = c.without.edges.iter().copied().collect();
-            route.edges.retain(|e| !gone.contains(e));
+            let gone: EdgeSet = c.without.edges.iter().copied().collect();
+            route.edges.subtract(&gone);
             route.patches.retain(|p| !c.without.patches.contains(p));
         }
-        route.edges.extend_from_slice(&c.with.edges);
+        route.edges.extend(c.with.edges.iter().copied());
         route.patches.extend_from_slice(&c.with.patches);
         route
             .edges
             .extend(gap_fills(&route, self.db, self.tech, c.net));
-        route.edges.sort_unstable();
-        route.edges.dedup();
         tidy_patches(&mut route.patches);
         route
     }

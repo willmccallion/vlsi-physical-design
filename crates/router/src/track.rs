@@ -16,6 +16,7 @@
 use crate::access::Node;
 use crate::global::{GCell, GlobalGrid, GlobalRoutes};
 use crate::occupancy::{LayerSpacing, Occupancy, Owner, Proximity, Query, affected_tracks};
+use crate::runs::Run;
 use crate::tech::{LayerTech, RouteTech};
 use crate::wiring::Edge;
 use pare_common::db::indices::{LayerId, NetId};
@@ -62,6 +63,16 @@ impl TrackWire {
     /// The track graph edges it uses.
     pub fn edges(self) -> impl Iterator<Item = Edge> {
         (self.from..self.to).map(move |cross| Edge::Wire(self.node(cross)))
+    }
+
+    /// Its wire as one run along its track.
+    pub const fn run(self) -> Run {
+        Run {
+            layer: self.layer,
+            track: self.track,
+            from: self.from,
+            to: self.to,
+        }
     }
 
     const fn node(self, cross: u32) -> Node {

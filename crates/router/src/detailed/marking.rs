@@ -66,7 +66,7 @@ impl DetailedRouter<'_> {
         let mut steps: Vec<(u32, u32)> = route
             .edges
             .iter()
-            .filter_map(|e| match *e {
+            .filter_map(|e| match e {
                 Edge::Wire(n) if n.layer == layer => Some(n),
                 _ => None,
             })
@@ -162,7 +162,7 @@ impl DetailedRouter<'_> {
                 }
             }
         };
-        let first = route.edges.iter().find_map(|e| match *e {
+        let first = route.edges.iter().find_map(|e| match e {
             Edge::Via { lower, .. }
                 if contains_half_open(area, self.point(lower)) && meets(lower) =>
             {

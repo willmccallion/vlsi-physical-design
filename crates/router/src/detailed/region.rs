@@ -562,14 +562,12 @@ impl DetailedRouter<'_> {
     pub(super) fn commit_changes(&mut self, changes: Changes) {
         for (net, change) in changes.by_net {
             let mut route = self.routes[net.index()].clone();
-            route.edges.retain(|e| !change.removed_edges.contains(e));
+            route.edges.retain(|e| !change.removed_edges.contains(&e));
             route
                 .patches
                 .retain(|p| !change.removed_patches.contains(p));
             route.edges.extend(change.added.edges);
             route.patches.extend(change.added.patches);
-            route.edges.sort_unstable();
-            route.edges.dedup();
             tidy_patches(&mut route.patches);
             self.commit(net, &route);
         }
@@ -589,7 +587,7 @@ impl DetailedRouter<'_> {
         };
         let mut removed: Vec<Wiring> = vec![Wiring::default(); areas.len()];
         let mut kept: Vec<Edge> = Vec::new();
-        for &e in &route.edges {
+        for e in route.edges.iter() {
             let (a, b) = e.ends();
             match (area_of(a), area_of(b)) {
                 (Some(i), Some(j)) if i == j => removed[i].edges.push(e),
@@ -809,14 +807,10 @@ impl DetailedRouter<'_> {
             return None;
         }
         let route = &self.routes[net.index()];
-        let gone: FxHashSet<Edge> = inside.edges.iter().copied().collect();
+        let mut edges = route.edges.clone();
+        edges.subtract(&inside.edges.iter().copied().collect());
         let kept = NetRoute {
-            edges: route
-                .edges
-                .iter()
-                .copied()
-                .filter(|e| !gone.contains(e))
-                .collect(),
+            edges,
             patches: route
                 .patches
                 .iter()
@@ -1066,7 +1060,7 @@ impl DetailedRouter<'_> {
     /// The cuts of some edges.
     fn edge_cuts(&self, edges: &[Edge]) -> Vec<(CutLayerId, Rect<Dbu>)> {
         NetRoute {
-            edges: edges.to_vec(),
+            edges: edges.iter().copied().collect(),
             ..NetRoute::default()
         }
         .cuts(self.db, self.tech)
@@ -1079,7 +1073,7 @@ impl DetailedRouter<'_> {
         edges: &[Edge],
     ) -> Vec<(pare_common::db::indices::LayerId, Rect<Dbu>)> {
         let route = NetRoute {
-            edges: edges.to_vec(),
+            edges: edges.iter().copied().collect(),
             ..NetRoute::default()
         };
         route

@@ -16,6 +16,7 @@ use super::region::{
 use super::{DetailedRouter, NetRoute};
 use crate::access::{AccessPoint, Node};
 use crate::global::GCell;
+use crate::runs::EdgeSet;
 use crate::search::{Costs, Marks};
 use crate::wiring::Edge;
 use pare_common::db::indices::NetId;
@@ -126,7 +127,7 @@ impl DetailedRouter<'_> {
         }
         for (&net, areas) in &areas_of {
             let mut route = self.routes[net.index()].clone();
-            route.edges.retain(|e| !self.inside_one(*e, areas));
+            route.edges.retain(|e| !self.inside_one(e, areas));
             self.commit(net, &route);
         }
 
@@ -162,9 +163,9 @@ impl DetailedRouter<'_> {
     /// The wiring a net starts the pass with: its bridges, and its track
     /// wires inside each region, which stand for its wiring there until the
     /// region is routed.
-    fn skeleton(&self, net: NetId, bridges: &[Edge], grid: &RegionGrid) -> Vec<Edge> {
+    fn skeleton(&self, net: NetId, bridges: &[Edge], grid: &RegionGrid) -> EdgeSet {
         let region_of = |n: Node| grid.key(self.point(n));
-        let mut edges: Vec<Edge> = self.wires[net.index()]
+        self.wires[net.index()]
             .iter()
             .flat_map(|w| w.edges())
             .filter(|e| {
@@ -172,10 +173,7 @@ impl DetailedRouter<'_> {
                 region_of(a) == region_of(b)
             })
             .chain(bridges.iter().copied())
-            .collect();
-        edges.sort_unstable();
-        edges.dedup();
-        edges
+            .collect()
     }
 
     /// Splits a net's global route into pieces by region, or `None` when it
@@ -321,7 +319,7 @@ impl DetailedRouter<'_> {
     fn blocked_by_fixed(&self, net: NetId, edge: Edge) -> bool {
         let owner = crate::occupancy::Owner::Net(net.0);
         let route = NetRoute {
-            edges: vec![edge],
+            edges: std::iter::once(edge).collect(),
             ..NetRoute::default()
         };
         route
