@@ -1,0 +1,12 @@
+purpose = "place_and_route"
+
+[input]
+lef_files = ["inputs/orfs/OpenROAD-flow-scripts-26Q2/flow/platforms/nangate45/lef/NangateOpenCellLibrary.tech.lef", "inputs/orfs/OpenROAD-flow-scripts-26Q2/flow/platforms/nangate45/lef/NangateOpenCellLibrary.macro.mod.lef", "inputs/orfs/OpenROAD-flow-scripts-26Q2/flow/platforms/nangate45/lef/fakeram45_256x48.lef", "inputs/orfs/OpenROAD-flow-scripts-26Q2/flow/platforms/nangate45/lef/fakeram45_32x32.lef", "inputs/orfs/OpenROAD-flow-scripts-26Q2/flow/platforms/nangate45/lef/fakeram45_64x124.lef", "inputs/orfs/OpenROAD-flow-scripts-26Q2/flow/platforms/nangate45/lef/fakeram45_512x64.lef", "inputs/orfs/OpenROAD-flow-scripts-26Q2/flow/platforms/nangate45/lef/fakeram45_64x62.lef", "inputs/orfs/OpenROAD-flow-scripts-26Q2/flow/platforms/nangate45/lef/fakeram45_128x116.lef"]
+def_file = "inputs/openroad/bp_quad/bp_quad_orfs.def"
+output_def = "output/bp_quad/placed.def"
+
+[global_placement]
+placer_max_iterations = 2000
+
+[io_placement]
+enabled = false

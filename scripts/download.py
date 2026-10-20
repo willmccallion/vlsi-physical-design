@@ -45,21 +45,24 @@ ORFS_NANGATE45_LEF = [
 ]
 
 
-def orfs(nickname, sources, about, io=None, io_enabled=None):
+def orfs(nickname, sources, about, io=None, io_enabled=None, macros=(), orfs_pins=False):
     """A Nangate45 design that OpenROAD-flow-scripts synthesizes from its
     `sources` under flow/designs/src and floorplans: die, rows, tracks, tap
-    cells, power grid, and the I/O pins only where its floorplan gives
-    them."""
+    cells, power grid, the `macros` it places, and the I/O pins only where
+    its floorplan gives them. With `orfs_pins`, the I/O pins are those its
+    own pin placement puts within the design's I/O constraints, after its
+    first global placement."""
     return {
         "suite": "openroad",
         "purpose": "place_and_route",
         "about": about,
         "orfs": nickname,
         "orfs_sources": sources,
-        "lef": ORFS_NANGATE45_LEF,
+        "orfs_pins": orfs_pins,
+        "lef": ORFS_NANGATE45_LEF + [f"{ORFS_NANGATE45}/{m}.lef" for m in macros],
         "def": f"{nickname}_orfs.def",
         "io": io,
-        "io_enabled": io_enabled,
+        "io_enabled": False if orfs_pins else io_enabled,
         "placer_iterations": 2000,
     }
 
@@ -150,6 +153,27 @@ DESIGNS = {
         ["jpeg"],
         "JPEG encoder, ORFS 26Q2 synthesis and floorplan (80% utilization)",
         io=NANGATE45_IO,
+    ),
+    "ariane133": orfs(
+        "ariane133",
+        ["ariane133"],
+        "Ariane RISC-V core, ~176k cells and 132 fakeram45 SRAM macros, ORFS 26Q2 synthesis and floorplan",
+        macros=["fakeram45_256x16"],
+        orfs_pins=True,
+    ),
+    "bp_quad": orfs(
+        "bp_quad",
+        ["bp_quad"],
+        "BlackParrot quad-core chip, ~1.24M cells, 1.43M nets and 220 fakeram45 SRAM macros, ORFS 26Q2 synthesis and floorplan",
+        macros=[
+            "fakeram45_256x48",
+            "fakeram45_32x32",
+            "fakeram45_64x124",
+            "fakeram45_512x64",
+            "fakeram45_64x62",
+            "fakeram45_128x116",
+        ],
+        orfs_pins=True,
     ),
     "swerv": openroad(
         "src/gpl/test/medium04.def",
@@ -264,17 +288,21 @@ def orfs_floorplan(name, dest):
     if missing:
         sys.exit(f"{name} needs {' and '.join(missing)}: run inside `nix develop .#eda`")
     orfs_checkout()
+    results = f"results/nangate45/{d['orfs']}/base"
+    targets = ["floorplan"] + (["3_2_place_iop"] if d["orfs_pins"] else [])
     subprocess.run(
         ["make", "-C", f"{ORFS_DIR}/flow",
          f"DESIGN_CONFIG=./designs/nangate45/{d['orfs']}/config.mk",
-         f"YOSYS_EXE={tools['yosys']}", f"OPENROAD_EXE={tools['openroad']}", "floorplan"],
+         f"YOSYS_EXE={tools['yosys']}", f"OPENROAD_EXE={tools['openroad']}"] + targets,
         check=True,
     )
     os.makedirs(dest, exist_ok=True)
-    odb = f"{ORFS_DIR}/flow/results/nangate45/{d['orfs']}/base/2_floorplan.odb"
+    env = {**os.environ, "ODB_IN": f"{ORFS_DIR}/flow/{results}/2_floorplan.odb", "DEF_OUT": out}
+    if d["orfs_pins"]:
+        env["PINS_TCL"] = f"{ORFS_DIR}/flow/{results}/3_2_place_iop.tcl"
     subprocess.run(
         [tools["openroad"], "-no_init", "-no_splash", "-exit", "scripts/odb_to_def.tcl"],
-        env={**os.environ, "ODB_IN": odb, "DEF_OUT": out},
+        env=env,
         check=True,
     )
 
