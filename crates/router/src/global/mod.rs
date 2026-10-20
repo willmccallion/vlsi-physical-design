@@ -1315,6 +1315,9 @@ fn route_disjoint(
         }
         waits.push(AtomicU32::new(to_u32(before.len())));
     }
+    let ready: Vec<usize> = (0..which.len())
+        .filter(|&k| waits[k].load(Ordering::Relaxed) == 0)
+        .collect();
     let schedule = Schedule {
         grid,
         nets,
@@ -1328,10 +1331,8 @@ fn route_disjoint(
     };
     let shared = &schedule;
     rayon::scope(|scope| {
-        for k in 0..which.len() {
-            if shared.waits[k].load(Ordering::Acquire) == 0 {
-                scope.spawn(move |scope| shared.run(scope, k));
-            }
+        for k in ready {
+            scope.spawn(move |scope| shared.run(scope, k));
         }
     });
     for (k, tree) in schedule.trees.into_iter().enumerate() {
@@ -1589,6 +1590,86 @@ mod tests {
             net: NetId::new(0),
             terminals,
             demand: vec![Tracks::ONE; 2],
+        }
+    }
+
+    const COSTS: GlobalCosts = GlobalCosts {
+        via: 1.0,
+        congestion: 1.0,
+        penalty: 1.0,
+    };
+
+    /// Net `id` through `terminals`, one track wide.
+    fn numbered(id: usize, terminals: Vec<GCell>) -> GlobalNet {
+        GlobalNet {
+            net: NetId::new(id),
+            ..net(terminals)
+        }
+    }
+
+    /// Routes `order` one net after another, each seeing all before it.
+    fn route_in_order(grid: &GlobalGrid, nets: &[GlobalNet], order: &[usize]) -> GlobalRoutes {
+        let mut routes = GlobalRoutes::default();
+        for &i in order {
+            let tree = route_tree(grid, &nets[i], 1, COSTS, None);
+            grid.add_tree(&nets[i], &tree, Sign::Add);
+            let _ = routes.paths.insert(nets[i].net, tree);
+        }
+        routes
+    }
+
+    /// Routes `which` as one level with [`route_disjoint`].
+    fn route_level(grid: &GlobalGrid, nets: &[GlobalNet], which: &[usize]) -> GlobalRoutes {
+        let margins = vec![1; nets.len()];
+        let plans = vec![None; which.len()];
+        let reroute = Reroute {
+            which,
+            margins: &margins,
+            plans: &plans,
+        };
+        let mut routes = GlobalRoutes::default();
+        route_disjoint(grid, nets, &reroute, COSTS, &mut routes);
+        routes
+    }
+
+    /// Many short nets along a 40 by 40 grid, in chains of nets that meet
+    /// and between chains that do not.
+    fn chained_nets() -> (GlobalGrid, Vec<GlobalNet>) {
+        let n = 40;
+        let edges = 2 * usize::from(n) * usize::from(n);
+        let grid = GlobalGrid {
+            nx: n,
+            ny: n,
+            capacity: vec![Tracks::whole(2); edges],
+            blocked: vec![false; edges],
+            via_blocked: vec![false; edges],
+            usage: Usage::zeroed(edges),
+            history: vec![0.0; edges],
+            ..grid()
+        };
+        let mut nets = Vec::new();
+        for row in (0..n).step_by(10) {
+            for k in 0..30 {
+                let x = k % 10;
+                let id = nets.len();
+                nets.push(numbered(id, vec![cell(x, row + 1), cell(x + 20, row + 2)]));
+            }
+        }
+        (grid, nets)
+    }
+
+    #[test]
+    fn every_net_rerouted_together_is_routed_once_as_in_order() {
+        let (serial, nets) = chained_nets();
+        let order: Vec<usize> = (0..nets.len()).collect();
+        let expected = route_in_order(&serial, &nets, &order);
+
+        for _ in 0..20 {
+            let (parallel, _) = chained_nets();
+            let routes = route_level(&parallel, &nets, &order);
+
+            assert_eq!(routes.paths, expected.paths);
+            assert!(serial.usage.iter().eq(parallel.usage.iter()));
         }
     }
 
