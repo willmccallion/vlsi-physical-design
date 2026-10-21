@@ -3,7 +3,9 @@
 //! over the whole chip on cells of [`SCALE`] by [`SCALE`] gcells, priced by
 //! how few free tracks they have left, picks the corridor its route keeps
 //! to. A net can then detour as far as the free tracks call for, while the
-//! fine search stays inside a band a coarse cell wide.
+//! fine search stays inside a band a coarse cell wide. CUGR's multi-source
+//! Dijkstra search is made an A* toward the pins still to join, which finds
+//! trees just as cheap while visiting far fewer cells of a long net.
 
 use super::{GCell, GlobalGrid, GlobalNet};
 use pare_common::db::indices::LayerId;
@@ -35,6 +37,9 @@ pub(super) struct CoarseGrid {
     open: Vec<bool>,
     /// Whether some gcell of each node has room for a via pad.
     climbable: Vec<bool>,
+    /// The lowest price any node can have: no node has more free tracks
+    /// than the widest gcell edge holds.
+    min_price: f64,
 }
 
 impl CoarseGrid {
@@ -47,6 +52,7 @@ impl CoarseGrid {
             .layers()
             .map(|l| grid.direction(LayerId::new(l)))
             .collect();
+        let widest = grid.capacity.iter().map(|c| c.to_f64()).fold(0.0, f64::max);
         let mut coarse = Self {
             nx,
             ny,
@@ -55,6 +61,7 @@ impl CoarseGrid {
             free: Vec::new(),
             open: Vec::new(),
             climbable: Vec::new(),
+            min_price: 1.0 / widest.max(MIN_FREE),
         };
         let nodes = coarse.nodes();
         coarse.open = (0..nodes)
@@ -113,11 +120,11 @@ impl CoarseGrid {
     }
 
     /// The plan of a reroute of `net`: the cheapest coarse tree joining its
-    /// terminals, found by CUGR's multi-source Dijkstra search, which grows
-    /// the tree from one terminal and restarts from the whole tree at cost
-    /// zero each time it reaches another. None when its terminals share one
-    /// coarse cell, which the windowed search covers, or when fixed metal
-    /// cuts one off.
+    /// terminals, found by CUGR's multi-source search, which grows the tree
+    /// from one terminal and restarts from the whole tree at cost zero each
+    /// time it reaches another. None when its terminals share one coarse
+    /// cell, which the windowed search covers, or when fixed metal cuts one
+    /// off.
     pub(super) fn plan(&self, grid: &GlobalGrid, net: &GlobalNet) -> Option<Plan> {
         let mut pins: Vec<usize> = net.terminals.iter().map(|&c| self.node_of(c)).collect();
         pins.sort_unstable();
@@ -126,14 +133,7 @@ impl CoarseGrid {
         if footprint.len() <= 1 {
             return None;
         }
-        let nodes = PLAN.with_borrow_mut(|state| {
-            let tree = self.search(state, &pins)?;
-            Some(
-                tree.into_iter()
-                    .map(|n| (n, state.parent[n]))
-                    .collect::<Vec<(usize, u32)>>(),
-            )
-        })?;
+        let nodes = self.tree_nodes(&pins, self.min_price)?;
         let tree = CoarseTree::new(self, &nodes);
         let cells: FxHashSet<(u16, u16)> = tree.cells.iter().copied().collect();
         Some(Plan {
@@ -142,30 +142,59 @@ impl CoarseGrid {
         })
     }
 
-    fn search(&self, state: &mut PlanState, pins: &[usize]) -> Option<Vec<usize>> {
+    /// The nodes of the cheapest coarse tree joining `pins`, each with its
+    /// parent, searched as if no node could cost less than `floor`; none
+    /// when fixed metal cuts a pin off.
+    fn tree_nodes(&self, pins: &[usize], floor: f64) -> Option<Vec<(usize, u32)>> {
+        PLAN.with_borrow_mut(|state| {
+            let tree = self.search(state, pins, floor)?;
+            Some(tree.into_iter().map(|n| (n, state.parent[n])).collect())
+        })
+    }
+
+    /// Grows the tree from the first of `pins`, each time along the cheapest
+    /// path to the nearest pin it does not hold, by A* toward the box of
+    /// those pins. The box only shrinks, so an estimate only rises: a queued
+    /// node whose estimate rose since is queued again with it rather than
+    /// expanded, which keeps every path the cheapest.
+    fn search(&self, state: &mut PlanState, pins: &[usize], floor: f64) -> Option<Vec<usize>> {
         state.reset(self.nodes());
         let is_pin = |n: usize| pins.binary_search(&n).is_ok();
         let mut tree: FxHashSet<usize> = FxHashSet::default();
         let mut heap = BinaryHeap::new();
         let first = pins[0];
         let _ = tree.insert(first);
+        let mut remaining = pins.len() - 1;
+        let mut toward = Toward::new(self, pins, &tree, remaining, floor);
         state.set(first, 0.0, NO_PARENT);
         heap.push(Visit {
+            key: toward.estimate(self, first),
             cost: 0.0,
             node: first,
         });
-        let mut remaining = pins.len() - 1;
         while remaining > 0 {
             let reached = loop {
-                let Visit { cost, node } = heap.pop()?;
+                let Visit { key, cost, node } = heap.pop()?;
                 if state.cost(node).is_some_and(|best| cost > best) {
+                    continue;
+                }
+                let risen = cost + toward.estimate(self, node);
+                if risen > key {
+                    heap.push(Visit {
+                        key: risen,
+                        cost,
+                        node,
+                    });
                     continue;
                 }
                 if is_pin(node) && !tree.contains(&node) {
                     break node;
                 }
-                self.relax(state, &mut heap, node, cost, is_pin);
+                self.relax(state, &mut heap, node, cost, is_pin, |n| {
+                    toward.estimate(self, n)
+                });
             };
+            let mut joined = Vec::new();
             let mut node = reached;
             while !tree.contains(&node) {
                 let _ = tree.insert(node);
@@ -174,11 +203,19 @@ impl CoarseGrid {
                 }
                 let parent = state.parent[node];
                 state.set(node, 0.0, parent);
-                heap.push(Visit { cost: 0.0, node });
+                joined.push(node);
                 if parent == NO_PARENT {
                     break;
                 }
                 node = parent as usize;
+            }
+            toward.narrow(self, pins, &tree, remaining);
+            for node in joined {
+                heap.push(Visit {
+                    key: toward.estimate(self, node),
+                    cost: 0.0,
+                    node,
+                });
             }
         }
         Some(tree.into_iter().collect())
@@ -191,12 +228,14 @@ impl CoarseGrid {
         node: usize,
         cost: f64,
         is_pin: impl Fn(usize) -> bool,
+        estimate: impl Fn(usize) -> f64,
     ) {
         let mut push = |next: usize, step: f64| {
             let reach = cost + step;
             if state.cost(next).is_none_or(|best| reach < best) {
                 state.set(next, reach, crate::tech::to_u32(node));
                 heap.push(Visit {
+                    key: reach + estimate(next),
                     cost: reach,
                     node: next,
                 });
@@ -538,8 +577,11 @@ impl Corridor {
     }
 }
 
+/// A node queued at `cost` from the tree, ordered by `key`, its cost plus
+/// the estimate of what remains.
 #[derive(Clone, Copy, PartialEq)]
 struct Visit {
+    key: f64,
     cost: f64,
     node: usize,
 }
@@ -549,8 +591,8 @@ impl Eq for Visit {}
 impl Ord for Visit {
     fn cmp(&self, other: &Self) -> std::cmp::Ordering {
         other
-            .cost
-            .total_cmp(&self.cost)
+            .key
+            .total_cmp(&self.key)
             .then_with(|| self.node.cmp(&other.node))
     }
 }
@@ -561,7 +603,82 @@ impl PartialOrd for Visit {
     }
 }
 
-/// Dijkstra state over the coarse grid, kept per thread between plans and
+/// What the A* of a coarse plan aims at: the box around the pins the tree
+/// does not hold yet, on the plane and across layers. It is found again only
+/// once their number has halved, since a box around more of them still
+/// never overestimates, so a net of many pins costs no more to aim.
+#[derive(Clone, Copy, Debug)]
+struct Toward {
+    x: (u16, u16),
+    y: (u16, u16),
+    layers: (usize, usize),
+    /// Pins outside the tree when the box was found.
+    counted: usize,
+    /// The lowest price a node can have.
+    floor: f64,
+}
+
+impl Toward {
+    fn new(
+        coarse: &CoarseGrid,
+        pins: &[usize],
+        tree: &FxHashSet<usize>,
+        remaining: usize,
+        floor: f64,
+    ) -> Self {
+        let mut aim = Self {
+            x: (u16::MAX, 0),
+            y: (u16::MAX, 0),
+            layers: (usize::MAX, 0),
+            counted: remaining,
+            floor,
+        };
+        for &pin in pins.iter().filter(|p| !tree.contains(p)) {
+            let (l, x, y) = coarse.position(pin);
+            aim.x = (aim.x.0.min(x), aim.x.1.max(x));
+            aim.y = (aim.y.0.min(y), aim.y.1.max(y));
+            aim.layers = (aim.layers.0.min(l), aim.layers.1.max(l));
+        }
+        aim
+    }
+
+    /// Finds the box again once the pins outside the tree have halved.
+    fn narrow(
+        &mut self,
+        coarse: &CoarseGrid,
+        pins: &[usize],
+        tree: &FxHashSet<usize>,
+        remaining: usize,
+    ) {
+        if remaining > 0 && 2 * remaining <= self.counted {
+            *self = Self::new(coarse, pins, tree, remaining, self.floor);
+        }
+    }
+
+    /// A lower bound on the cost from `node` to the nearest pin outside the
+    /// tree: every step toward the box along a layer passes two nodes
+    /// [`SCALE`] gcells apart, and every change of layer two nodes.
+    fn estimate(&self, coarse: &CoarseGrid, node: usize) -> f64 {
+        let (l, x, y) = coarse.position(node);
+        let planar = outside(x, self.x) + outside(y, self.y);
+        let climbs = outside(l, self.layers);
+        let steps = (2.0 * f64::from(SCALE)).mul_add(f64::from(planar), 2.0 * climbs as f64);
+        self.floor * steps
+    }
+}
+
+/// How far `v` lies outside the range from `lo` to `hi`.
+fn outside<T: Ord + std::ops::Sub<Output = T> + Default>(v: T, (lo, hi): (T, T)) -> T {
+    if v < lo {
+        lo - v
+    } else if v > hi {
+        v - hi
+    } else {
+        T::default()
+    }
+}
+
+/// Search state over the coarse grid, kept per thread between plans and
 /// cleared by bumping a generation stamp.
 #[derive(Debug, Default)]
 struct PlanState {
@@ -680,6 +797,78 @@ mod tests {
 
         assert!(!coarse.open[coarse.index(0, 0, 0)]);
         assert!(coarse.open[coarse.index(0, 0, 1)]);
+    }
+
+    /// A 60 by 45 grid whose edges are used unevenly, so that no two paths
+    /// cost the same.
+    fn uneven_grid() -> GlobalGrid {
+        let mut grid = grid(60, 45);
+        for e in 0..grid.usage.len() {
+            let used = (e * 7919 % 37) as f64 / 10.0;
+            grid.usage.set(e, Tracks::from_f64(used));
+        }
+        grid
+    }
+
+    /// The cost of the coarse tree of `nodes`, each with its parent, as the
+    /// search prices each step.
+    fn tree_cost(coarse: &CoarseGrid, nodes: &[(usize, u32)]) -> f64 {
+        nodes
+            .iter()
+            .filter(|&&(_, parent)| parent != NO_PARENT)
+            .map(|&(node, parent)| {
+                let parent = parent as usize;
+                let both = coarse.price(node) + coarse.price(parent);
+                if coarse.position(node).0 == coarse.position(parent).0 {
+                    f64::from(SCALE) * both
+                } else {
+                    both
+                }
+            })
+            .sum()
+    }
+
+    fn pins_of(coarse: &CoarseGrid, terminals: &[GCell]) -> Vec<usize> {
+        let mut pins: Vec<usize> = terminals.iter().map(|&c| coarse.node_of(c)).collect();
+        pins.sort_unstable();
+        pins.dedup();
+        pins
+    }
+
+    #[test]
+    fn a_tree_aimed_at_its_pins_costs_as_little_as_one_searched_unaimed() {
+        let grid = uneven_grid();
+        let coarse = CoarseGrid::new(&grid);
+        let nets = [
+            pins_of(&coarse, &[cell(1, 2, 3), cell(2, 57, 41)]),
+            pins_of(&coarse, &[cell(1, 50, 2), cell(2, 4, 40), cell(1, 30, 22)]),
+            pins_of(
+                &coarse,
+                &[
+                    cell(2, 10, 10),
+                    cell(1, 55, 12),
+                    cell(1, 12, 43),
+                    cell(2, 40, 30),
+                    cell(1, 28, 5),
+                ],
+            ),
+        ];
+
+        let costs: Vec<(f64, f64)> = nets
+            .iter()
+            .map(|pins| {
+                let aimed = coarse.tree_nodes(pins, coarse.min_price).unwrap();
+                let unaimed = coarse.tree_nodes(pins, 0.0).unwrap();
+                (tree_cost(&coarse, &aimed), tree_cost(&coarse, &unaimed))
+            })
+            .collect();
+
+        for (aimed, unaimed) in costs {
+            assert!(
+                (aimed - unaimed).abs() <= 1e-9 * unaimed,
+                "{aimed} vs {unaimed}"
+            );
+        }
     }
 
     #[test]
