@@ -125,6 +125,7 @@ Typed indices (`CellId`, `NetId`, `PinId`, `LayerId`, `MacroId`, …) keep table
 ## Known issues
 
 - **ISPD 2015 designs do not route clean yet.** On mgc_pci_bridge32_a at commit `73d6db4`, 80 repair rounds left 1,986 violations, 1,811 of them in two 10 µm gaps between macros that block every metal layer, where the wires between the die's edge and its interior crowd through.
+- **ISPD 2018 and 2019 designs do not route clean yet.** They load, and ISPD 2018's rules are the ones the checker enforces, but no design of either suite has been taken to a clean result; ISPD 2019's corner spacing and cut enclosure rules are parsed and not enforced.
 - **Nets under a nondefault rule** are routed and checked at their own widths and spacings, while OpenROAD reads routed wires at their layers' default widths, so the two checkers disagree on such nets: on pci's clock net at commit `73d6db4`, PARE reports 135 spacing violations that OpenROAD does not, and OpenROAD one that PARE does not.
 
 ---
@@ -141,8 +142,8 @@ Benchmarks are downloaded by `scripts/download.py`, which also writes each desig
 | `openroad` | aes, ibex, jpeg, ariane133, bp_quad (synthesized and floorplanned by OpenROAD-flow-scripts) | place and route |
 | `openroad` | swerv, netcard, leon3mp (OpenROAD placer tests) | place and route |
 | `ibm` | ibm01–ibm18 (Bookshelf) | placement |
-| `ispd2015` | 20 `mgc_*` designs, up to 1.3M nets | place and route |
-| `ispd2018`, `ispd2019` | `ispd18_test1`–`10`, `ispd19_test1`–`10` | routing |
+| `ispd2015` | 20 `mgc_*` designs, up to 1.3M nets | place and route; none routed clean yet, see Known issues |
+| `ispd2018`, `ispd2019` | `ispd18_test1`–`10`, `ispd19_test1`–`10` | routing; none routed clean yet, see Known issues |
 
 ```bash
 python3 scripts/download.py --list          # every design and its purpose
