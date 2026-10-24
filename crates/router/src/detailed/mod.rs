@@ -74,7 +74,8 @@ struct PreparedCommit {
     elems: Vec<RouteElem>,
     metal: Vec<(LayerId, Rect<Dbu>)>,
     cuts: Vec<(pare_common::db::indices::CutLayerId, Rect<Dbu>)>,
-    vias: Vec<(ViaId, Point<Dbu>)>,
+    /// Where the net's wiring before this commit is recorded.
+    previous: Vec<Slot>,
 }
 
 /// State shared by all detailed routing rounds.
@@ -85,9 +86,7 @@ pub struct DetailedRouter<'a> {
     /// Occupancy of every track.
     pub occupancy: Occupancy,
     access: Vec<Vec<Vec<AccessPoint>>>,
-    routed: Vec<Vec<Slot>>,
     routes: Vec<NetRoute>,
-    vias: Vec<Vec<(ViaId, Point<Dbu>)>>,
     window_margin: Dbu,
     gcell: Dbu,
     grid_origin: Point<Dbu>,
@@ -174,9 +173,7 @@ impl<'a> DetailedRouter<'a> {
             tech,
             occupancy,
             access,
-            routed: vec![Vec::new(); db.nets.len()],
             routes: vec![NetRoute::default(); db.nets.len()],
-            vias: vec![Vec::new(); db.nets.len()],
             window_margin: gcell * 4,
             gcell,
             grid_origin: db.die_area.min,
@@ -317,13 +314,19 @@ impl<'a> DetailedRouter<'a> {
 
     /// Commits each net's route of `routes`, in their order: what each
     /// changes is worked out for many nets at once in parallel, then
-    /// recorded one net after another as [`Self::commit`] records it.
+    /// recorded one net after another as [`Self::commit`] records it; a
+    /// chunk of them ends before a net it already holds, so that each is
+    /// worked out from the wiring the commits before it left.
     fn commit_all(&mut self, routes: Vec<(NetId, NetRoute)>) {
-        let mut routes = routes.into_iter();
-        loop {
-            let chunk: Vec<(NetId, NetRoute)> = routes.by_ref().take(COMMIT_CHUNK).collect();
-            if chunk.is_empty() {
-                break;
+        let mut routes = routes.into_iter().peekable();
+        while routes.peek().is_some() {
+            let mut held: FxHashSet<NetId> = FxHashSet::default();
+            let mut chunk: Vec<(NetId, NetRoute)> = Vec::new();
+            while chunk.len() < COMMIT_CHUNK
+                && let Some(next) = routes.next_if(|(net, _)| !held.contains(net))
+            {
+                let _ = held.insert(next.0);
+                chunk.push(next);
             }
             let prepared: Vec<PreparedCommit> = chunk
                 .into_par_iter()
@@ -336,8 +339,8 @@ impl<'a> DetailedRouter<'a> {
     }
 
     /// What committing `route` for `net` records, worked out without
-    /// changing anything: the route with its narrow gaps filled, and its
-    /// wiring, metal, cuts and vias.
+    /// changing anything: the route with its narrow gaps filled, its
+    /// wiring, metal and cuts, and where its present wiring is recorded.
     fn prepare_commit(&self, net: NetId, mut route: NetRoute) -> PreparedCommit {
         route
             .edges
@@ -349,21 +352,41 @@ impl<'a> DetailedRouter<'a> {
             .filter(|(layer, _)| self.tech.routable(*layer))
             .collect();
         let cuts = elems.iter().flat_map(|e| elem_cuts(self.db, e)).collect();
-        let vias = elems
-            .iter()
-            .filter_map(|e| match *e {
-                RouteElem::Via { via, at } => Some((via, at)),
-                RouteElem::Wire { .. } | RouteElem::Patch { .. } => None,
-            })
-            .collect();
         PreparedCommit {
             net,
             route,
             elems,
             metal,
             cuts,
-            vias,
+            previous: self.wiring_slots(net),
         }
+    }
+
+    /// The routable metal of the wiring `net` has now.
+    fn wiring_metal(&self, net: NetId) -> Vec<(LayerId, Rect<Dbu>)> {
+        self.elems[net.index()]
+            .iter()
+            .flat_map(|e| elem_metal(self.db, net, e))
+            .filter(|(layer, _)| self.tech.routable(*layer))
+            .collect()
+    }
+
+    /// Where the wiring `net` has now is recorded in the occupancy.
+    fn wiring_slots(&self, net: NetId) -> Vec<Slot> {
+        let cuts: Vec<_> = self.elems[net.index()]
+            .iter()
+            .flat_map(|e| elem_cuts(self.db, e))
+            .collect();
+        self.occupancy
+            .slots_of(self.tech, Owner::Net(net.0), &self.wiring_metal(net), &cuts)
+    }
+
+    /// The vias of the wiring `net` has now.
+    fn wiring_vias(&self, net: NetId) -> impl Iterator<Item = (ViaId, Point<Dbu>)> + '_ {
+        self.elems[net.index()].iter().filter_map(|e| match *e {
+            RouteElem::Via { via, at } => Some((via, at)),
+            RouteElem::Wire { .. } | RouteElem::Patch { .. } => None,
+        })
     }
 
     /// Records a prepared commit: takes the net's previous wiring out of
@@ -371,23 +394,14 @@ impl<'a> DetailedRouter<'a> {
     fn apply_commit(&mut self, p: PreparedCommit) {
         let net = p.net;
         let owner = Owner::Net(net.0);
-        let previous = std::mem::take(&mut self.routed[net.index()]);
-        self.occupancy.remove_wiring(&previous, owner);
-        let mut touched = Vec::new();
+        self.occupancy.remove_wiring(&p.previous, owner);
         for (layer, rect) in &p.metal {
-            let tracks = self
-                .occupancy
+            self.occupancy
                 .add_rect(self.tech, *layer, rect, owner, Origin::Wiring);
-            touched.extend(tracks.into_iter().map(Slot::Track));
         }
         for (cut, rect) in &p.cuts {
-            let bucket = self.occupancy.add_cut(*cut, rect, owner, Origin::Wiring);
-            touched.push(Slot::Cut(bucket));
+            self.occupancy.add_cut(*cut, rect, owner, Origin::Wiring);
         }
-        touched.sort_unstable();
-        touched.dedup();
-        self.routed[net.index()] = touched;
-        self.vias[net.index()] = p.vias;
         self.elems[net.index()] = p.elems;
         self.routes[net.index()] = p.route;
     }
@@ -1291,11 +1305,11 @@ fn reserve_accesses(
         );
         for (layer, rect) in metal_of(&access[n][k][chosen]) {
             if tech.routable(layer) {
-                let _ = occupancy.add_rect(tech, layer, &rect, owner, Origin::Fixed);
+                occupancy.add_rect(tech, layer, &rect, owner, Origin::Fixed);
             }
         }
         for (cut, rect) in cuts_of(&access[n][k][chosen]) {
-            let _ = occupancy.add_cut(cut, &rect, owner, Origin::Fixed);
+            occupancy.add_cut(cut, &rect, owner, Origin::Fixed);
         }
         let picked = access[n][k].swap_remove(chosen);
         for (via, at) in footprint(tech, &picked) {

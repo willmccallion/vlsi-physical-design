@@ -235,17 +235,26 @@ impl CutLayer {
         side.get() <= self.rules.max_half.get() * 2
     }
 
-    fn add(&mut self, cut: CutOccupant) -> CutBucket {
-        if self.is_small(&cut.rect) {
-            let key = self.key(cut.rect.center());
-            self.buckets.entry(key).or_default().push(cut);
-            return CutBucket::Small(key);
+    /// Where a cut at `rect` is filed.
+    fn bucket_of(&self, rect: &Rect<Dbu>) -> CutBucket {
+        if self.is_small(rect) {
+            return CutBucket::Small(self.key(rect.center()));
         }
-        let (min, max) = (self.large_key(cut.rect.min), self.large_key(cut.rect.max));
-        for key in keys_between(min, max) {
-            self.large.entry(key).or_default().push(cut);
+        CutBucket::Large {
+            min: self.large_key(rect.min),
+            max: self.large_key(rect.max),
         }
-        CutBucket::Large { min, max }
+    }
+
+    fn add(&mut self, cut: CutOccupant) {
+        match self.bucket_of(&cut.rect) {
+            CutBucket::Small(key) => self.buckets.entry(key).or_default().push(cut),
+            CutBucket::Large { min, max } => {
+                for key in keys_between(min, max) {
+                    self.large.entry(key).or_default().push(cut);
+                }
+            }
+        }
     }
 
     /// Keeps only the cuts in `bucket` that `keep` accepts.
@@ -675,20 +684,13 @@ impl Occupancy {
         self.tracks[t.layer.index()][t.track as usize].meeting(lo, hi, self.chunk)
     }
 
-    /// Records a cut on `cut` for `owner`; returns where it was put.
-    pub fn add_cut(
-        &mut self,
-        cut: CutLayerId,
-        rect: &Rect<Dbu>,
-        owner: Owner,
-        origin: Origin,
-    ) -> CutRef {
-        let bucket = self.cuts[cut.index()].add(CutOccupant {
+    /// Records a cut on `cut` for `owner`.
+    pub fn add_cut(&mut self, cut: CutLayerId, rect: &Rect<Dbu>, owner: Owner, origin: Origin) {
+        self.cuts[cut.index()].add(CutOccupant {
             rect: *rect,
             owner,
             origin,
         });
-        CutRef { cut, bucket }
     }
 
     /// Cuts of owners other than `owner` that a cut at `rect` on `cut` would
@@ -729,7 +731,7 @@ impl Occupancy {
                 }
                 LayerRef::Routing(_) => {}
                 LayerRef::Cut(cut) => {
-                    let _ = self.add_cut(cut, &s.shape.rect, owner, Origin::Fixed);
+                    self.add_cut(cut, &s.shape.rect, owner, Origin::Fixed);
                 }
             }
         }
@@ -739,7 +741,7 @@ impl Occupancy {
     }
 
     /// Records `rect` on `layer` for `owner`, in pieces no longer than a
-    /// chunk; returns the tracks touched.
+    /// chunk.
     pub fn add_rect(
         &mut self,
         tech: &RouteTech,
@@ -747,8 +749,7 @@ impl Occupancy {
         rect: &Rect<Dbu>,
         owner: Owner,
         origin: Origin,
-    ) -> Vec<TrackRef> {
-        let mut touched = Vec::new();
+    ) {
         let spacing = tech.wire_spacing(rule_of(tech, owner), layer);
         for blocked in blocked_stretches(tech.layer(layer), rect, spacing) {
             let track = &mut self.tracks[layer.index()][blocked.track as usize];
@@ -761,12 +762,37 @@ impl Occupancy {
                 }
                 start = end;
             }
-            touched.push(TrackRef {
-                layer,
-                track: blocked.track,
-            });
         }
-        touched
+    }
+
+    /// The slots [`Self::add_rect`] and [`Self::add_cut`] record the `metal`
+    /// and `cuts` of `owner` in, sorted and each once.
+    pub fn slots_of(
+        &self,
+        tech: &RouteTech,
+        owner: Owner,
+        metal: &[(LayerId, Rect<Dbu>)],
+        cuts: &[(CutLayerId, Rect<Dbu>)],
+    ) -> Vec<Slot> {
+        let tracks = metal.iter().flat_map(|(layer, rect)| {
+            let spacing = tech.wire_spacing(rule_of(tech, owner), *layer);
+            blocked_stretches(tech.layer(*layer), rect, spacing).map(|b| {
+                Slot::Track(TrackRef {
+                    layer: *layer,
+                    track: b.track,
+                })
+            })
+        });
+        let buckets = cuts.iter().map(|(cut, rect)| {
+            Slot::Cut(CutRef {
+                cut: *cut,
+                bucket: self.cuts[cut.index()].bucket_of(rect),
+            })
+        });
+        let mut slots: Vec<Slot> = tracks.chain(buckets).collect();
+        slots.sort_unstable();
+        slots.dedup();
+        slots
     }
 
     /// Removes the wiring of `owner` from the given slots, keeping its
@@ -926,8 +952,7 @@ impl LocalOccupancy {
         owner: Owner,
         origin: Origin,
     ) {
-        let _ = self
-            .cuts
+        self.cuts
             .entry(cut)
             .or_insert_with(|| CutLayer::new(tech.cuts[cut.index()]))
             .add(CutOccupant {
@@ -1051,7 +1076,7 @@ mod tests {
     #[test]
     fn a_cut_beside_the_far_edge_of_a_large_obstruction_conflicts_with_it() {
         let mut cuts = layer();
-        let _ = cuts.add(cut(
+        cuts.add(cut(
             rect(0, 0, 300_000, 40_000),
             Owner::Obstacle,
             Origin::Fixed,
@@ -1071,7 +1096,7 @@ mod tests {
     #[test]
     fn a_large_shape_is_reported_once_however_many_buckets_a_query_spans() {
         let mut cuts = layer();
-        let _ = cuts.add(cut(
+        cuts.add(cut(
             rect(0, 0, 300_000, 40_000),
             Owner::Obstacle,
             Origin::Fixed,
@@ -1087,15 +1112,17 @@ mod tests {
     #[test]
     fn removing_wiring_keeps_fixed_cuts_in_both_tiers() {
         let mut cuts = layer();
-        let wire = cuts.add(cut(rect(0, 0, 100, 100), Owner::Net(1), Origin::Wiring));
-        let pad = cuts.add(cut(rect(0, 0, 100, 100), Owner::Net(1), Origin::Fixed));
-        let big = cuts.add(cut(
-            rect(1000, 0, 60_000, 500),
-            Owner::Net(1),
-            Origin::Wiring,
-        ));
+        let shapes = [
+            cut(rect(0, 0, 100, 100), Owner::Net(1), Origin::Wiring),
+            cut(rect(0, 0, 100, 100), Owner::Net(1), Origin::Fixed),
+            cut(rect(1000, 0, 60_000, 500), Owner::Net(1), Origin::Wiring),
+        ];
+        let buckets: Vec<CutBucket> = shapes.iter().map(|c| cuts.bucket_of(&c.rect)).collect();
+        for shape in shapes {
+            cuts.add(shape);
+        }
 
-        for bucket in [wire, pad, big] {
+        for bucket in buckets {
             cuts.retain_in(bucket, |o| {
                 o.owner != Owner::Net(1) || o.origin == Origin::Fixed
             });
@@ -1108,8 +1135,8 @@ mod tests {
     #[test]
     fn every_cut_is_listed_once() {
         let mut cuts = layer();
-        let _ = cuts.add(cut(rect(0, 0, 100, 100), Owner::Net(1), Origin::Wiring));
-        let _ = cuts.add(cut(
+        cuts.add(cut(rect(0, 0, 100, 100), Owner::Net(1), Origin::Wiring));
+        cuts.add(cut(
             rect(-60_000, -60_000, 60_000, 60_000),
             Owner::Obstacle,
             Origin::Fixed,

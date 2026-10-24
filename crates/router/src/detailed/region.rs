@@ -1042,7 +1042,7 @@ impl DetailedRouter<'_> {
     fn vias_near(&self, net: NetId, area: &Rect<Dbu>) -> OwnVias {
         let near = area.expand(self.gcell);
         let mut own = OwnVias::new(self.db, self.tech, self.tech.net_rule(net.index()));
-        for &(via, at) in &self.vias[net.index()] {
+        for (via, at) in self.wiring_vias(net) {
             if near.contains(at) {
                 own.add(via, at);
             }

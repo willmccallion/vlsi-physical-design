@@ -16,7 +16,7 @@ use pare_common::verify::routing::net_components;
 use pare_common::verify::shapes::fixed_shapes;
 use pare_router::access::Node;
 use pare_router::global::{GCell, GlobalGrid, GlobalNet, route_global, track_demand};
-use pare_router::occupancy::{FixedTracks, Occupancy, Origin, Owner, Slot};
+use pare_router::occupancy::{FixedTracks, Occupancy, Origin, Owner};
 use pare_router::tech::RouteTech;
 use pare_router::wiring::{Edge, NetRoute};
 use pare_router::{
@@ -175,9 +175,9 @@ fn removing_a_nets_wiring_keeps_its_fixed_metal() {
     let pin = around(tech.layer(layer).point(0, 0));
     let wire = around(tech.layer(layer).point(0, 20));
     let owner = Owner::Net(0);
-    let mut tracks = occupancy.add_rect(&tech, layer, &pin, owner, Origin::Fixed);
-    tracks.extend(occupancy.add_rect(&tech, layer, &wire, owner, Origin::Wiring));
-    let slots: Vec<Slot> = tracks.into_iter().map(Slot::Track).collect();
+    occupancy.add_rect(&tech, layer, &pin, owner, Origin::Fixed);
+    occupancy.add_rect(&tech, layer, &wire, owner, Origin::Wiring);
+    let slots = occupancy.slots_of(&tech, owner, &[(layer, pin), (layer, wire)], &[]);
 
     occupancy.remove_wiring(&slots, owner);
 
@@ -204,7 +204,7 @@ fn cuts_of_different_nets_conflict_within_the_cut_spacing() {
             Point::new(Dbu(x + 100), Dbu(y + 100)),
         )
     };
-    let _ = occupancy.add_cut(v1, &cut(0, 0), Owner::Net(0), Origin::Wiring);
+    occupancy.add_cut(v1, &cut(0, 0), Owner::Net(0), Origin::Wiring);
 
     let close = occupancy
         .cut_conflicts(v1, &cut(210, 0), Owner::Net(1))
@@ -235,10 +235,11 @@ fn removing_a_nets_wiring_keeps_its_fixed_cuts() {
         )
     };
     let owner = Owner::Net(0);
-    let fixed = occupancy.add_cut(v1, &cut(0), owner, Origin::Fixed);
-    let wired = occupancy.add_cut(v1, &cut(5000), owner, Origin::Wiring);
+    occupancy.add_cut(v1, &cut(0), owner, Origin::Fixed);
+    occupancy.add_cut(v1, &cut(5000), owner, Origin::Wiring);
+    let slots = occupancy.slots_of(&tech, owner, &[], &[(v1, cut(0)), (v1, cut(5000))]);
 
-    occupancy.remove_wiring(&[Slot::Cut(fixed), Slot::Cut(wired)], owner);
+    occupancy.remove_wiring(&slots, owner);
 
     let other = Owner::Net(1);
     assert_eq!(occupancy.cut_conflicts(v1, &cut(150), other).count(), 1);
@@ -550,7 +551,7 @@ fn a_wire_under_a_rule_keeps_other_tracks_at_the_rules_spacing() {
         Point::new(Dbu(1000), Dbu(0)),
         Point::new(Dbu(2000), Dbu(200)),
     );
-    let _ = occupancy.add_rect(&tech, m1, &wide, Owner::Net(0), Origin::Wiring);
+    occupancy.add_rect(&tech, m1, &wide, Owner::Net(0), Origin::Wiring);
     let two_tracks_up = Rect::new(
         Point::new(Dbu(1000), Dbu(450)),
         Point::new(Dbu(2000), Dbu(550)),
@@ -573,7 +574,7 @@ fn a_wire_without_a_rule_leaves_tracks_beyond_the_layer_spacing_alone() {
         Point::new(Dbu(1000), Dbu(50)),
         Point::new(Dbu(2000), Dbu(150)),
     );
-    let _ = occupancy.add_rect(&tech, m1, &wire, Owner::Net(0), Origin::Wiring);
+    occupancy.add_rect(&tech, m1, &wire, Owner::Net(0), Origin::Wiring);
     let two_tracks_up = Rect::new(
         Point::new(Dbu(1000), Dbu(450)),
         Point::new(Dbu(2000), Dbu(550)),
@@ -596,7 +597,7 @@ fn a_wire_under_a_rule_keeps_its_track_clear_for_the_rules_spacing() {
         Point::new(Dbu(1000), Dbu(0)),
         Point::new(Dbu(2000), Dbu(200)),
     );
-    let _ = occupancy.add_rect(&tech, m1, &wide, Owner::Net(0), Origin::Wiring);
+    occupancy.add_rect(&tech, m1, &wide, Owner::Net(0), Origin::Wiring);
     let further_along = Rect::new(
         Point::new(Dbu(2150), Dbu(50)),
         Point::new(Dbu(3000), Dbu(150)),

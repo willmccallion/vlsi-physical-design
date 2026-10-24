@@ -1150,7 +1150,7 @@ mod tests {
         let lt = tech.layer(LayerId(0));
         let other = wire_rect(lt.point(1, 1), lt.point(1, 3), lt.width).unwrap();
         let mut occupancy = Occupancy::new(&tech, Dbu(1000));
-        let _ = occupancy.add_rect(&tech, LayerId(0), &other, Owner::Net(1), Origin::Wiring);
+        occupancy.add_rect(&tech, LayerId(0), &other, Owner::Net(1), Origin::Wiring);
         (tech, occupancy)
     }
 
