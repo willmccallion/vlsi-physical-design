@@ -621,13 +621,15 @@ mod tests {
         let map = CongestionMap::rudy(&netlist, &[], &die(4.0), &params(&[0.0; 16]));
 
         let density = (3.0 + 0.5) * 0.1 / (3.0 * 0.5);
+        let half = density * 0.5;
+        let quarter = density * 0.25;
         assert!(
-            (map.congestion[5] - density * 0.5).abs() < 1e-12,
+            (map.congestion[5] - half).abs() < 1e-12,
             "{:?}",
             map.congestion
         );
         assert!(
-            (map.congestion[4] - density * 0.25).abs() < 1e-12,
+            (map.congestion[4] - quarter).abs() < 1e-12,
             "{:?}",
             map.congestion
         );

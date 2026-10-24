@@ -87,8 +87,8 @@ pub fn read_placement(db: &mut NetlistDB, path: &Path) -> Result<(), ParseError>
         let cell = db
             .cell_id(name)
             .ok_or_else(|| err(format!("unknown node '{name}'")))?;
-        let x = number(x, units).map_err(&err)?;
-        let y = number(y, units).map_err(&err)?;
+        let x = number(x, units).map_err(err)?;
+        let y = number(y, units).map_err(err)?;
         let mut orient = Orientation::N;
         let mut fixed = false;
         for (i, word) in rest.iter().enumerate() {
@@ -277,8 +277,8 @@ fn read_nodes(path: &Path, units: DbuPerMicron) -> Result<Vec<Node>, ParseError>
             Ok(Node {
                 name: (*name).to_string(),
                 size: Point::new(
-                    number(w, units).map_err(&err)?,
-                    number(h, units).map_err(&err)?,
+                    number(w, units).map_err(err)?,
+                    number(h, units).map_err(err)?,
                 ),
                 terminal: rest.iter().any(|w| w.starts_with("terminal")),
             })
@@ -339,8 +339,8 @@ fn read_nets(
         };
         let offset = match parts.as_slice() {
             [_, _, ":", dx, dy, ..] => Point::new(
-                number(dx, units).map_err(&err)?,
-                number(dy, units).map_err(&err)?,
+                number(dx, units).map_err(err)?,
+                number(dy, units).map_err(err)?,
             ),
             _ => Point::default(),
         };
@@ -434,7 +434,7 @@ fn read_scl(path: &Path, units: DbuPerMicron) -> Result<Scl, ParseError> {
             let text = parts
                 .get(i)
                 .ok_or_else(|| err(format!("missing value for {}", parts[0])))?;
-            number(text, units).map_err(&err)
+            number(text, units).map_err(err)
         };
         match parts[0] {
             "CoreRow" => {

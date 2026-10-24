@@ -96,7 +96,7 @@ impl Usage {
 
     /// Takes `t` from edge `e`, down to no usage at most.
     fn remove(&self, e: usize, t: Tracks) {
-        let _ = self.0[e].fetch_update(Ordering::Relaxed, Ordering::Relaxed, |v| {
+        let _ = self.0[e].try_update(Ordering::Relaxed, Ordering::Relaxed, |v| {
             Some((v - t.raw()).max(0))
         });
     }
