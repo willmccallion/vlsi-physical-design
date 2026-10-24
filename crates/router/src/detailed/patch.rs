@@ -30,7 +30,7 @@ impl DetailedRouter<'_> {
             return Vec::new();
         };
         let window = self.judge_window(area);
-        let elems = self.as_committed(candidate).elems(self.tech);
+        let elems = self.as_committed(candidate, &window).elems(self.tech);
         let mut layout = Layout::with_owners_of(&self.fixed);
         for (layer, i) in self.fixed_tiles.near(&window) {
             let shape = match layer {

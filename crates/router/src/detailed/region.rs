@@ -414,13 +414,16 @@ impl DetailedRouter<'_> {
         work: &Work<'_>,
     ) {
         let candidates = work.candidates();
+        let window = self.judge_window(area);
         let mut proposed: FxHashMap<NetId, NetRoute> = FxHashMap::default();
         for (m, owners) in judgment.findings.violations.iter().zip(&judgment.owners) {
             let mut nets: Vec<NetId> = owners.iter().flatten().copied().collect();
             nets.dedup();
             for &n in &nets {
                 if let Some(c) = candidates.iter().find(|c| c.net == n) {
-                    let _ = proposed.entry(n).or_insert_with(|| self.as_committed(c));
+                    let _ = proposed
+                        .entry(n)
+                        .or_insert_with(|| self.as_committed(c, &window));
                 }
             }
             let routes: Vec<(NetId, &NetRoute)> = nets

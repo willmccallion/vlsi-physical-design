@@ -6,7 +6,7 @@
 //! becomes metal and DEF wiring by merging consecutive steps along a track.
 
 use crate::access::{AccessPoint, Node};
-use crate::runs::EdgeSet;
+use crate::runs::{EdgeSet, Run};
 use crate::tech::{LayerTech, RouteTech};
 use pare_common::db::design::{NetlistDB, RouteElem};
 use pare_common::db::indices::{CutLayerId, LayerId, NetId, ViaId};
@@ -122,6 +122,46 @@ pub fn tidy_patches(patches: &mut Vec<Patch>) {
 }
 
 impl NetRoute {
+    /// The part of it at `area`: the wire edges whose stretch along their
+    /// track meets it, the vias, access points and patches in it.
+    #[must_use]
+    pub fn near(&self, tech: &RouteTech, area: &Rect<Dbu>) -> Self {
+        let point = |n: Node| tech.layer(n.layer).point(n.track, n.cross);
+        let clip = |run: Run| {
+            let lt = tech.layer(run.layer);
+            let ((a0, a1), (b0, b1)) = lt.across_along_rect(area);
+            if !lt.tracks_within(a0, a1).contains(&run.track) {
+                return None;
+            }
+            let crosses = lt.cross_within(b0, b1);
+            let from = run.from.max(crosses.start.saturating_sub(1));
+            let to = run.to.min(crosses.end);
+            (from < to).then_some(Run { from, to, ..run })
+        };
+        Self {
+            edges: self
+                .edges
+                .clipped(clip, |&(lower, _)| area.contains(point(lower))),
+            patches: self
+                .patches
+                .iter()
+                .copied()
+                .filter(|p| p.rect.touches(area))
+                .collect(),
+            access: self
+                .access
+                .iter()
+                .filter(|a| {
+                    Rect::new(a.at, a.at)
+                        .union(&Rect::new(point(a.node), point(a.node)))
+                        .touches(area)
+                })
+                .cloned()
+                .collect(),
+            complete: self.complete,
+        }
+    }
+
     /// Its wiring for the design: runs of wire along each track, vias, and
     /// the stub and via stack of every access point.
     pub fn elems(&self, tech: &RouteTech) -> Vec<RouteElem> {

@@ -224,7 +224,7 @@ impl DetailedRouter<'_> {
             }
         }
         for c in candidates {
-            let elems: Vec<RouteElem> = self.as_committed(c).elems(self.tech);
+            let elems: Vec<RouteElem> = self.as_committed(c, window).elems(self.tech);
             layout.add_wiring(self.db, c.net, &elems, Some(window));
         }
         layout
@@ -273,10 +273,11 @@ impl DetailedRouter<'_> {
             .reduce_with(|a, b| a.union(&b))
     }
 
-    /// The route a candidate stands for, with the gaps along its tracks
-    /// filled as committing it does, so that it is judged as it will be kept.
-    pub(super) fn as_committed(&self, c: &Candidate<'_>) -> NetRoute {
-        let mut route = self.routes[c.net.index()].clone();
+    /// The route a candidate stands for near `window`, with the gaps along
+    /// its tracks filled as committing it does, so that it is judged there as
+    /// it will be kept; only its wiring within a halo of `window` is built.
+    pub(super) fn as_committed(&self, c: &Candidate<'_>, window: &Rect<Dbu>) -> NetRoute {
+        let mut route = self.routes[c.net.index()].near(self.tech, &window.expand(self.halo));
         if !c.without.is_empty() {
             let gone: EdgeSet = c.without.edges.iter().copied().collect();
             route.edges.subtract(&gone);

@@ -17,6 +17,7 @@ use pare_common::verify::shapes::fixed_shapes;
 use pare_router::access::Node;
 use pare_router::global::{GCell, GlobalGrid, GlobalNet, route_global, track_demand};
 use pare_router::occupancy::{FixedTracks, Occupancy, Origin, Owner};
+use pare_router::runs::{EdgeSet, Run};
 use pare_router::tech::RouteTech;
 use pare_router::wiring::{Edge, NetRoute};
 use pare_router::{
@@ -608,4 +609,67 @@ fn a_wire_under_a_rule_keeps_its_track_clear_for_the_rules_spacing() {
         .count();
 
     assert_eq!(conflicts, 1);
+}
+
+/// A route of one straight run of `crosses` crossings along track 0 of
+/// `layer`, with a via up from its first crossing.
+fn straight_route(tech: &RouteTech, layer: LayerId, crosses: u32) -> NetRoute {
+    let node = |cross| Node {
+        layer,
+        track: 0,
+        cross,
+    };
+    let above = Node {
+        layer: LayerId(layer.0 + 1),
+        ..node(0)
+    };
+    let mut edges = EdgeSet::from_runs([Run {
+        layer,
+        track: 0,
+        from: 0,
+        to: crosses,
+    }]);
+    edges.extend([Edge::Via {
+        lower: node(0),
+        upper: above,
+    }]);
+    assert!(tech.layer(layer).cross.len() > crosses as usize);
+    NetRoute {
+        edges,
+        ..NetRoute::default()
+    }
+}
+
+#[test]
+fn a_route_near_an_area_keeps_the_stretch_of_a_long_run_meeting_it() {
+    let db = tiny();
+    let tech = RouteTech::new(&db, &RoutingConfig::default()).unwrap();
+    let layer = LayerId(1);
+    let lt = tech.layer(layer);
+    let route = straight_route(&tech, layer, 20);
+    let area = Rect::new(lt.point(0, 8), lt.point(0, 11));
+
+    let near = route.near(&tech, &area);
+
+    let expected = Run {
+        layer,
+        track: 0,
+        from: 7,
+        to: 12,
+    };
+    assert_eq!(near.edges.runs(), &[expected]);
+}
+
+#[test]
+fn a_route_near_an_area_drops_the_vias_outside_it() {
+    let db = tiny();
+    let tech = RouteTech::new(&db, &RoutingConfig::default()).unwrap();
+    let layer = LayerId(1);
+    let lt = tech.layer(layer);
+    let route = straight_route(&tech, layer, 20);
+    assert_eq!(route.edges.vias().len(), 1);
+
+    let near = route.near(&tech, &Rect::new(lt.point(0, 8), lt.point(0, 11)));
+
+    assert!(near.edges.vias().is_empty());
 }

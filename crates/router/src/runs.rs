@@ -151,6 +151,20 @@ impl EdgeSet {
             .retain(|&(lower, upper)| keep(Edge::Via { lower, upper }));
     }
 
+    /// The set of the part of each run `clip` keeps, which must lie within
+    /// the run, and the vias `keep_via` accepts.
+    #[must_use]
+    pub fn clipped(
+        &self,
+        clip: impl FnMut(Run) -> Option<Run>,
+        keep_via: impl FnMut(&(Node, Node)) -> bool,
+    ) -> Self {
+        Self {
+            runs: self.runs.iter().copied().filter_map(clip).collect(),
+            vias: self.vias.iter().copied().filter(keep_via).collect(),
+        }
+    }
+
     /// Its runs of wire, sorted by layer, track and first crossing.
     pub fn runs(&self) -> &[Run] {
         &self.runs
