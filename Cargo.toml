@@ -10,7 +10,7 @@ resolver = "2"
 [workspace.package]
 description = "PARE — Placement And Routing Engine: a digital IC physical design tool written in Rust"
 license = "MIT OR Apache-2.0"
-repository = "https://github.com/will/vlsi-physical-design"
+repository = "https://github.com/willmccallion/vlsi-physical-design"
 readme = "README.md"
 keywords = ["vlsi", "eda", "placement", "routing", "physical-design"]
 categories = ["science", "algorithms", "simulation"]
