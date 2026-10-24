@@ -2,24 +2,27 @@
 
 A digital IC placement and routing engine written in Rust, built from scratch. It reads LEF/DEF and Bookshelf, places cells by electrostatic spreading, legalizes and refines the placement, routes every net globally and then on the design's tracks, and checks the result against the technology's design rules with a checker modelled on OpenROAD's.
 
-**Status:** PARE has placed and routed six Nangate45 designs, from gcd (563 nets) to bp_quad, a BlackParrot quad-core chip of 1.24 million cells and 1.43 million nets, with zero design rule violations, judged both by its own checker and by OpenROAD's `check_drc` with a fix for one of its bugs applied (see below). Two other Nangate45 designs in that range, swerv (100k nets) and netcard (290k), are not clean yet, nor is any ISPD 2015 design.
+**Status:** PARE has placed and routed nine Nangate45 designs, from gcd (563 nets) to bp_quad, a BlackParrot quad-core chip of 1.24 million cells and 1.24 million nets, with zero design rule violations, judged both by its own checker and by OpenROAD's `check_drc` with a fix for one of its bugs applied (see below). No ISPD 2015 design is clean yet.
 
 ## Results
 
-Each design is placed from its floorplan and then routed by `pare run <design>`, except gcd, whose placement is part of the input. aes, ibex and jpeg are synthesized and floorplanned by OpenROAD-flow-scripts 26Q2, as its Nangate45 flow does them, at 32%, 50% and 81% utilization; leon3mp comes from OpenROAD's placer tests, at 59%. bp_quad, with 220 fakeram45 SRAM macros on a 3.6 × 3.6 mm die, is synthesized and floorplanned by OpenROAD-flow-scripts 26Q2 too. Routed DEFs are checked by OpenROAD 26Q2 `check_drc`.
+Each design is placed from its floorplan and then routed by `pare run <design>`, except gcd, whose placement is part of the input. aes, ibex and jpeg are synthesized and floorplanned by OpenROAD-flow-scripts 26Q2, as its Nangate45 flow does them, at 32%, 50% and 81% utilization; swerv, netcard and leon3mp come from OpenROAD's placer tests, at 10%, 60% and 59%. ariane133, with 132 fakeram45 SRAM macros, and bp_quad, with 220 on a 3.6 × 3.6 mm die, are synthesized and floorplanned by OpenROAD-flow-scripts 26Q2 too, at 32% and 22%. Nets counts the signal nets with two or more pins, the ones there are to route. Routed DEFs are checked by OpenROAD 26Q2 `check_drc`.
 
 | Design | Cells | Nets | PARE violations | OpenROAD `check_drc` | Time | Peak memory |
 |---|---:|---:|---:|---:|---:|---:|
-| gcd | 676 | 563 | 0 | 0 | 1.0 s | 0.4 GiB |
-| aes | 13,108 | 12,965 | 0 | 0 | 40 s | 2.0 GiB |
-| ibex | 16,876 | 18,256 | 0 | 0 | 1 min 44 s | 2.1 GiB |
-| jpeg | 62,139 | 69,575 | 0 | 0 | 2 min 25 s | 4.3 GiB |
-| leon3mp | 312,529 | 406,912 | 0 | 0 | 30 min 11 s | 14.4 GiB |
-| bp_quad | 1,241,520 | 1,425,327 | 0 | 0 | 1 h 10 min 46 s | 23.1 GiB |
+| gcd | 676 | 563 | 0 | 0 | 0.8 s | 0.5 GiB |
+| aes | 13,108 | 12,965 | 0 | 0 | 34 s | 1.9 GiB |
+| ibex | 16,876 | 18,256 | 0 | 0 | 1 min 35 s | 2.3 GiB |
+| jpeg | 62,139 | 69,575 | 0 | 0 | 2 min 1 s | 4.1 GiB |
+| swerv | 135,119 | 130,357 | 0 | 0 | 4 min 50 s | 4.7 GiB |
+| ariane133 | 175,699 | 179,067 | 0 | 0 | 12 min 38 s | 6.1 GiB |
+| netcard | 274,700 | 290,334 | 0 | 0 | 1 h 7 min 37 s | 9.3 GiB |
+| leon3mp | 312,529 | 406,912 | 0 | 0 | 18 min 28 s | 9.1 GiB |
+| bp_quad | 1,241,520 | 1,244,956 | 0 | 0 | 1 h 10 min 46 s | 23.1 GiB |
 
-Measured on an Intel Core i7-14700K (28 threads) with 64 GB of memory, at commit `3dea951`, and bp_quad at commit `dc60d69`. Time and memory cover the whole run, placement included.
+Measured on an Intel Core i7-14700K (28 threads) with 64 GB of memory, at commit `dc60d69`. Time and memory cover the whole run, placement included.
 
-OpenROAD's `check_drc` has a bug that reports spacing violations between two vias of one net where its wire fills the gap ([#11697](https://github.com/The-OpenROAD-Project/OpenROAD/issues/11697)). The counts above come from OpenROAD with the proposed fix ([#11698](https://github.com/The-OpenROAD-Project/OpenROAD/pull/11698)) applied, which `nix develop .#eda` builds. Unpatched OpenROAD reports 0 on gcd, aes, ibex and jpeg, 2 on leon3mp and 4 on bp_quad, all spacing markers within one net like those; [docs/openroad-check-drc-tiling.md](docs/openroad-check-drc-tiling.md) has the evidence.
+OpenROAD's `check_drc` has a bug that reports spacing violations between two vias of one net where its wire fills the gap ([#11697](https://github.com/The-OpenROAD-Project/OpenROAD/issues/11697)). The counts above come from OpenROAD with the proposed fix ([#11698](https://github.com/The-OpenROAD-Project/OpenROAD/pull/11698)) applied, which `nix develop .#eda` builds. Unpatched OpenROAD reports 0 on gcd, aes, ibex and jpeg, 4 on swerv, 1 on ariane133, 3 on netcard, 1 on leon3mp and 4 on bp_quad, all spacing markers within one net like those; [docs/openroad-check-drc-tiling.md](docs/openroad-check-drc-tiling.md) has the evidence.
 
 <table>
   <tr>
@@ -117,21 +120,20 @@ Typed indices (`CellId`, `NetId`, `PinId`, `LayerId`, `MacroId`, …) keep table
 ## Known issues
 
 - **ISPD 2015 designs do not route clean yet.** On mgc_pci_bridge32_a at commit `73d6db4`, 80 repair rounds left 1,986 violations, 1,811 of them in two 10 µm gaps between macros that block every metal layer, where the wires between the die's edge and its interior crowd through.
-- **swerv and netcard** have not been routed to zero violations with the current code yet.
 - **Nets under a nondefault rule** are routed and checked at their own widths and spacings, while OpenROAD reads routed wires at their layers' default widths, so the two checkers disagree on such nets: on pci's clock net at commit `73d6db4`, PARE reports 135 spacing violations that OpenROAD does not, and OpenROAD one that PARE does not.
 
 ---
 
 ## Usage
 
-**Requirements:** Rust stable and Python 3. `nix develop .#eda` provides OpenROAD, with the `check_drc` fix above, for cross-checking results, and the yosys that OpenROAD-flow-scripts 26Q2 pins; aes, ibex and jpeg are synthesized and floorplanned with them, so download those inside it.
+**Requirements:** Rust stable and Python 3. `nix develop .#eda` provides OpenROAD, with the `check_drc` fix above, for cross-checking results, and the yosys that OpenROAD-flow-scripts 26Q2 pins; aes, ibex, jpeg, ariane133 and bp_quad are synthesized and floorplanned with them, so download those inside it.
 
 Benchmarks are downloaded by `scripts/download.py`, which also writes each design's config to `configs/<suite>/<design>.toml`. Each design has a purpose that decides what `pare run` does with it: placement benchmarks are only placed, routing benchmarks (whose placement is part of the input) are only routed, and the rest are placed and then routed.
 
 | Suite | Designs | Purpose |
 |---|---|---|
 | `openroad` | gcd | routing |
-| `openroad` | aes, ibex, jpeg (synthesized and floorplanned by OpenROAD-flow-scripts) | place and route |
+| `openroad` | aes, ibex, jpeg, ariane133, bp_quad (synthesized and floorplanned by OpenROAD-flow-scripts) | place and route |
 | `openroad` | swerv, netcard, leon3mp (OpenROAD placer tests) | place and route |
 | `ibm` | ibm01–ibm18 (Bookshelf) | placement |
 | `ispd2015` | 20 `mgc_*` designs, up to 1.3M nets | place and route |
@@ -191,7 +193,7 @@ PARE is written from scratch in Rust. The methods it follows come from the paper
 **Tools**
 
 - T. Ajayi et al., "Toward an Open-Source Digital Flow: First Learnings from the OpenROAD Project", DAC 2019. [OpenROAD](https://github.com/The-OpenROAD-Project/OpenROAD) 26Q2 is the reference implementation (`gpl`, `grt`, `drt`) and provides `check_drc`.
-- [OpenROAD-flow-scripts](https://github.com/The-OpenROAD-Project/OpenROAD-flow-scripts) 26Q2, with [Yosys](https://github.com/YosysHQ/yosys), synthesizes and floorplans aes, ibex and jpeg, and sets the Nangate45 defaults PARE follows.
+- [OpenROAD-flow-scripts](https://github.com/The-OpenROAD-Project/OpenROAD-flow-scripts) 26Q2, with [Yosys](https://github.com/YosysHQ/yosys), synthesizes and floorplans aes, ibex, jpeg, ariane133 and bp_quad, and sets the Nangate45 defaults PARE follows.
 
 **Benchmarks and formats**
 
