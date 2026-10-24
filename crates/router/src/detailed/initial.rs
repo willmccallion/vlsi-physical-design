@@ -189,8 +189,8 @@ impl DetailedRouter<'_> {
     }
 
     /// Splits a net's global route into pieces by region, or `None` when it
-    /// has no global route, a pin without access, or a boundary crossing no
-    /// bridge fits.
+    /// has no global route, a pin without access, or a boundary crossing
+    /// that is not one step along its layer's direction.
     fn plan(&self, net: NetId, grid: &RegionGrid) -> Option<Plan> {
         let guide = self.guides[net.index()].as_ref()?;
         let tree = &guide.tree;
@@ -276,7 +276,9 @@ impl DetailedRouter<'_> {
     /// A wire edge across the boundary between neighbouring gcells `a` and
     /// `b` of one layer: on the track of the net's track wire through it if
     /// there is one, else on the track nearest the middle of their row that
-    /// no fixed metal blocks there.
+    /// no fixed metal blocks there, else on the track nearest the middle.
+    /// As `TritonRoute`'s boundary pins, a bridge is kept even where fixed
+    /// metal blocks it; later passes, on shifted regions, route it again.
     fn bridge(&self, net: NetId, a: GCell, b: GCell) -> Option<Edge> {
         let layer = a.layer;
         let lt = self.tech.layer(layer);
@@ -315,7 +317,7 @@ impl DetailedRouter<'_> {
         let middle = row_start + self.gcell / 2;
         let mut tracks: Vec<u32> = row.collect();
         tracks.sort_by_key(|&t| ((lt.tracks[t as usize] - middle).abs(), t));
-        tracks
+        let candidates: Vec<Edge> = tracks
             .into_iter()
             .map(|track| {
                 Edge::Wire(Node {
@@ -324,7 +326,12 @@ impl DetailedRouter<'_> {
                     cross: before,
                 })
             })
+            .collect();
+        candidates
+            .iter()
+            .copied()
             .find(|&e| !self.blocked_by_fixed(net, e))
+            .or_else(|| candidates.first().copied())
     }
 
     /// Whether fixed metal of another owner conflicts with an edge's wire.
