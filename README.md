@@ -2,11 +2,11 @@
 
 A digital IC placement and routing engine written in Rust, built from scratch. It reads LEF/DEF and Bookshelf, places cells by electrostatic spreading, legalizes and refines the placement, routes every net globally and then on the design's tracks, and checks the result against the technology's design rules with a checker modelled on OpenROAD's.
 
-**Status:** PARE has placed and routed five Nangate45 designs, from gcd (563 nets) to leon3mp (407k nets), with zero design rule violations, judged both by its own checker and by OpenROAD's `check_drc` with a fix for one of its bugs applied (see below). Two other Nangate45 designs in that range, swerv (100k nets) and netcard (290k), are not clean yet, nor is any ISPD 2015 design. After those comes a synthesized design of more than a million cells.
+**Status:** PARE has placed and routed six Nangate45 designs, from gcd (563 nets) to bp_quad, a BlackParrot quad-core chip of 1.24 million cells and 1.43 million nets, with zero design rule violations, judged both by its own checker and by OpenROAD's `check_drc` with a fix for one of its bugs applied (see below). Two other Nangate45 designs in that range, swerv (100k nets) and netcard (290k), are not clean yet, nor is any ISPD 2015 design.
 
 ## Results
 
-Each design is placed from its floorplan and then routed by `pare run <design>`, except gcd, whose placement is part of the input. aes, ibex and jpeg are synthesized and floorplanned by OpenROAD-flow-scripts 26Q2, as its Nangate45 flow does them, at 32%, 50% and 81% utilization; leon3mp comes from OpenROAD's placer tests, at 59%. Routed DEFs are checked by OpenROAD 26Q2 `check_drc`.
+Each design is placed from its floorplan and then routed by `pare run <design>`, except gcd, whose placement is part of the input. aes, ibex and jpeg are synthesized and floorplanned by OpenROAD-flow-scripts 26Q2, as its Nangate45 flow does them, at 32%, 50% and 81% utilization; leon3mp comes from OpenROAD's placer tests, at 59%. bp_quad, with 220 fakeram45 SRAM macros on a 3.6 × 3.6 mm die, is synthesized and floorplanned by OpenROAD-flow-scripts 26Q2 too. Routed DEFs are checked by OpenROAD 26Q2 `check_drc`.
 
 | Design | Cells | Nets | PARE violations | OpenROAD `check_drc` | Time | Peak memory |
 |---|---:|---:|---:|---:|---:|---:|
@@ -15,10 +15,11 @@ Each design is placed from its floorplan and then routed by `pare run <design>`,
 | ibex | 16,876 | 18,256 | 0 | 0 | 1 min 44 s | 2.1 GiB |
 | jpeg | 62,139 | 69,575 | 0 | 0 | 2 min 25 s | 4.3 GiB |
 | leon3mp | 312,529 | 406,912 | 0 | 0 | 30 min 11 s | 14.4 GiB |
+| bp_quad | 1,241,520 | 1,425,327 | 0 | 0 | 1 h 10 min 46 s | 23.1 GiB |
 
-Measured on an Intel Core i7-14700K (28 threads) with 64 GB of memory, at commit `3dea951`. Time and memory cover the whole run, placement included.
+Measured on an Intel Core i7-14700K (28 threads) with 64 GB of memory, at commit `3dea951`, and bp_quad at commit `dc60d69`. Time and memory cover the whole run, placement included.
 
-OpenROAD's `check_drc` has a bug that reports spacing violations between two vias of one net where its wire fills the gap ([#11697](https://github.com/The-OpenROAD-Project/OpenROAD/issues/11697)). The counts above come from OpenROAD with the proposed fix ([#11698](https://github.com/The-OpenROAD-Project/OpenROAD/pull/11698)) applied, which `nix develop .#eda` builds. Unpatched OpenROAD reports 0 on gcd, aes, ibex and jpeg and 2 on leon3mp, both same-net spacing markers of that kind; [docs/openroad-check-drc-tiling.md](docs/openroad-check-drc-tiling.md) has the evidence.
+OpenROAD's `check_drc` has a bug that reports spacing violations between two vias of one net where its wire fills the gap ([#11697](https://github.com/The-OpenROAD-Project/OpenROAD/issues/11697)). The counts above come from OpenROAD with the proposed fix ([#11698](https://github.com/The-OpenROAD-Project/OpenROAD/pull/11698)) applied, which `nix develop .#eda` builds. Unpatched OpenROAD reports 0 on gcd, aes, ibex and jpeg, 2 on leon3mp and 4 on bp_quad, all spacing markers within one net like those; [docs/openroad-check-drc-tiling.md](docs/openroad-check-drc-tiling.md) has the evidence.
 
 <table>
   <tr>
