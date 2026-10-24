@@ -317,6 +317,7 @@ fn consecutive_wire_edges_become_one_wire() {
             layer: LayerId(1),
             from: lt.point(0, 0),
             to: lt.point(0, 3),
+            extensions: (None, None),
         }]
     );
 }

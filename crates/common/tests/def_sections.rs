@@ -3,7 +3,7 @@
 
 #![allow(clippy::unwrap_used)]
 
-use pare_common::db::design::{NetlistDB, RegionKind};
+use pare_common::db::design::{NetlistDB, RegionKind, RouteElem};
 use pare_common::db::indices::{CutLayerId, RegionId};
 use pare_common::db::library::{LayerRef, Library};
 use pare_common::db::parser::{def, lef};
@@ -66,6 +66,43 @@ fn special_net_rects_and_wire_extensions_are_kept() {
     assert_eq!(vdd.rects.len(), 1);
     assert_eq!(vdd.rects[0].rect, rect(0, 0, 300, 100));
     assert_eq!(vdd.rects[0].shape, None);
+}
+
+#[test]
+fn regular_wire_end_extensions_stay_on_their_wire_ends() {
+    let db = design_with(&[(
+        "  + ROUTED M1 ( 2500 1000 ) ( 2700 * ) M1M2\n  NEW M2 ( 2700 1000 ) ( 2700 3500 ) M2M3\n  \
+         NEW M3 ( 2700 3500 ) ( 5000 3500 ) ;",
+        "  + ROUTED M1 ( 2500 1000 30 ) ( 2700 * 0 ) M1M2 ( 2700 3500 ) M2M3 ( 5000 * 0 ) ;",
+    )])
+    .unwrap();
+
+    let n3 = &db.nets[db.net_id("n3").unwrap().index()];
+    let extensions: Vec<_> = n3
+        .routing
+        .iter()
+        .filter_map(|e| match *e {
+            RouteElem::Wire { extensions, .. } => Some(extensions),
+            RouteElem::Via { .. } | RouteElem::Patch { .. } => None,
+        })
+        .collect();
+    assert_eq!(
+        extensions,
+        [
+            (Some(Dbu(30)), Some(Dbu(0))),
+            (None, None),
+            (None, Some(Dbu(0))),
+        ]
+    );
+    let mut text = Vec::new();
+    writer::def::write(&db, &mut text).unwrap();
+    let reread = def::parse_str(
+        &String::from_utf8(text).unwrap(),
+        Path::new("written.def"),
+        tiny_library(),
+    )
+    .unwrap();
+    assert_eq!(reread.nets, db.nets);
 }
 
 #[test]

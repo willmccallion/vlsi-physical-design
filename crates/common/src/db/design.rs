@@ -274,8 +274,9 @@ pub struct Pin {
 /// A piece of regular net wiring.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum RouteElem {
-    /// A default-width wire between two points on one layer; both ends extend
-    /// by half the wire width, as DEF specifies for regular wiring.
+    /// A default-width wire between two points on one layer. Each end
+    /// extends past its point by half the wire width, as DEF specifies for
+    /// regular wiring, unless the path gives that end an extension.
     Wire {
         /// Layer of the wire.
         layer: LayerId,
@@ -283,6 +284,9 @@ pub enum RouteElem {
         from: Point<Dbu>,
         /// The other end of the centerline.
         to: Point<Dbu>,
+        /// How far the wire extends past `from` and past `to` where the DEF
+        /// path says so.
+        extensions: (Option<Dbu>, Option<Dbu>),
     },
     /// A via instance centered at a point.
     Via {

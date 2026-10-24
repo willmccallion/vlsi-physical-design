@@ -34,16 +34,38 @@ pub struct OwnedShape {
 /// The rectangle a default-width wire covers, extended by half its width
 /// past each end, or `None` if the wire is not horizontal or vertical.
 pub fn wire_rect(from: Point<Dbu>, to: Point<Dbu>, width: Dbu) -> Option<Rect<Dbu>> {
+    let half = width / 2;
+    wire_rect_with_ends(from, to, width, half, half)
+}
+
+/// The rectangle a wire of `width` covers, extended past `from` by
+/// `from_extension` and past `to` by `to_extension`; `None` for a diagonal
+/// wire.
+pub fn wire_rect_with_ends(
+    from: Point<Dbu>,
+    to: Point<Dbu>,
+    width: Dbu,
+    from_extension: Dbu,
+    to_extension: Dbu,
+) -> Option<Rect<Dbu>> {
     if from.x != to.x && from.y != to.y {
         return None;
     }
     let lo = width / 2;
     let hi = width - lo;
+    let from_is_min = from.x <= to.x && from.y <= to.y;
+    let (at_min, at_max) = if from_is_min {
+        (from_extension, to_extension)
+    } else {
+        (to_extension, from_extension)
+    };
     let r = Rect::from_corners(from, to);
-    Some(Rect::new(
-        Point::new(r.min.x - lo, r.min.y - lo),
-        Point::new(r.max.x + hi, r.max.y + hi),
-    ))
+    let (dx, dy) = if from.y == to.y {
+        (Point::new(at_min, lo), Point::new(at_max, hi))
+    } else {
+        (Point::new(lo, at_min), Point::new(hi, at_max))
+    };
+    Some(Rect::new(r.min - dx, r.max + dy))
 }
 
 /// The nondefault rule the wires of `net` follow, if any.
@@ -62,35 +84,37 @@ pub fn wire_width(db: &NetlistDB, net: NetId, layer: LayerId) -> Dbu {
 }
 
 /// The rectangle a wire of `net` covers: its width on the layer, extended
-/// past each end by half that width or by the nondefault rule's extension.
+/// past each end as the path says, else by half that width or by the
+/// nondefault rule's extension.
 fn wire_shape(
     db: &NetlistDB,
     net: NetId,
     layer: LayerId,
     from: Point<Dbu>,
     to: Point<Dbu>,
+    extensions: (Option<Dbu>, Option<Dbu>),
 ) -> Option<Rect<Dbu>> {
-    if from.x != to.x && from.y != to.y {
-        return None;
-    }
     let rule = rule_of(db, net).and_then(|r| r.layers.iter().find(|l| l.layer == layer));
     let width = rule.map_or_else(|| db.library.layer(layer).width, |l| l.width);
-    let lo = width / 2;
-    let hi = width - lo;
-    let ext = rule.and_then(|l| l.wire_extension).unwrap_or(lo);
-    let r = Rect::from_corners(from, to);
-    let (dx, dy) = if from.y == to.y {
-        (Point::new(ext, lo), Point::new(ext, hi))
-    } else {
-        (Point::new(lo, ext), Point::new(hi, ext))
-    };
-    Some(Rect::new(r.min - dx, r.max + dy))
+    let default = rule.and_then(|l| l.wire_extension).unwrap_or(width / 2);
+    wire_rect_with_ends(
+        from,
+        to,
+        width,
+        extensions.0.unwrap_or(default),
+        extensions.1.unwrap_or(default),
+    )
 }
 
 /// The shapes of one routing element of `net`; empty for a diagonal wire.
 pub fn route_elem_shapes(db: &NetlistDB, net: NetId, elem: &RouteElem) -> Vec<Shape> {
     match *elem {
-        RouteElem::Wire { layer, from, to } => wire_shape(db, net, layer, from, to)
+        RouteElem::Wire {
+            layer,
+            from,
+            to,
+            extensions,
+        } => wire_shape(db, net, layer, from, to, extensions)
             .map(|rect| Shape {
                 layer: LayerRef::Routing(layer),
                 rect,
@@ -106,13 +130,28 @@ pub fn route_elem_shapes(db: &NetlistDB, net: NetId, elem: &RouteElem) -> Vec<Sh
 /// nondefault rule says.
 pub fn default_width_shapes(db: &NetlistDB, elem: &RouteElem) -> Vec<Shape> {
     match *elem {
-        RouteElem::Wire { layer, from, to } => wire_rect(from, to, db.library.layer(layer).width)
-            .map(|rect| Shape {
-                layer: LayerRef::Routing(layer),
-                rect,
-            })
-            .into_iter()
-            .collect(),
+        RouteElem::Wire {
+            layer,
+            from,
+            to,
+            extensions,
+        } => {
+            let width = db.library.layer(layer).width;
+            let half = width / 2;
+            wire_rect_with_ends(
+                from,
+                to,
+                width,
+                extensions.0.unwrap_or(half),
+                extensions.1.unwrap_or(half),
+            )
+        }
+        .map(|rect| Shape {
+            layer: LayerRef::Routing(layer),
+            rect,
+        })
+        .into_iter()
+        .collect(),
         RouteElem::Via { via, at } => db
             .library
             .via(via)
@@ -303,6 +342,17 @@ mod tests {
             extensions: (Dbu::ZERO, Dbu::ZERO),
             shape: shape.map(str::to_string),
         }
+    }
+
+    #[test]
+    fn a_wire_end_extends_by_its_own_extension_whichever_way_the_wire_runs() {
+        let at = |x, y| Point::new(Dbu(x), Dbu(y));
+
+        let forward = wire_rect_with_ends(at(0, 0), at(1000, 0), Dbu(100), Dbu(0), Dbu(30));
+        let backward = wire_rect_with_ends(at(1000, 0), at(0, 0), Dbu(100), Dbu(30), Dbu(0));
+
+        assert_eq!(forward, Some(rect(0, -50, 1030, 50)));
+        assert_eq!(backward, forward);
     }
 
     #[test]

@@ -270,7 +270,8 @@ fn def_regular_wiring_switches_layers_at_vias() {
             RouteElem::Wire {
                 layer: LayerId(0),
                 from: pt(2500, 1000),
-                to: pt(2700, 1000)
+                to: pt(2700, 1000),
+                extensions: (None, None),
             },
             RouteElem::Via {
                 via: m1m2,
@@ -279,7 +280,8 @@ fn def_regular_wiring_switches_layers_at_vias() {
             RouteElem::Wire {
                 layer: LayerId(1),
                 from: pt(2700, 1000),
-                to: pt(2700, 3500)
+                to: pt(2700, 3500),
+                extensions: (None, None),
             },
             RouteElem::Via {
                 via: m2m3,
@@ -288,7 +290,8 @@ fn def_regular_wiring_switches_layers_at_vias() {
             RouteElem::Wire {
                 layer: LayerId(2),
                 from: pt(2700, 3500),
-                to: pt(5000, 3500)
+                to: pt(5000, 3500),
+                extensions: (None, None),
             },
         ]
     );

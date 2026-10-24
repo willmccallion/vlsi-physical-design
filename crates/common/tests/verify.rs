@@ -41,7 +41,12 @@ fn empty_design() -> NetlistDB {
 }
 
 const fn wire(layer: LayerId, from: Point<Dbu>, to: Point<Dbu>) -> RouteElem {
-    RouteElem::Wire { layer, from, to }
+    RouteElem::Wire {
+        layer,
+        from,
+        to,
+        extensions: (None, None),
+    }
 }
 
 fn via(db: &NetlistDB, cut: u8, at: Point<Dbu>) -> RouteElem {

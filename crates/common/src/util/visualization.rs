@@ -102,7 +102,9 @@ pub fn draw_routed_design(db: &NetlistDB, filename: &str, width: u32, height: u3
         .iter()
         .flat_map(|n| n.routing.iter())
         .filter_map(|e| match *e {
-            RouteElem::Wire { layer, from, to } => Some((layer, from, to)),
+            RouteElem::Wire {
+                layer, from, to, ..
+            } => Some((layer, from, to)),
             RouteElem::Via { .. } | RouteElem::Patch { .. } => None,
         })
         .collect();

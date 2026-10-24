@@ -91,7 +91,12 @@ fn pt(p: Point<Dbu>) -> String {
     format!("( {} {} )", p.x, p.y)
 }
 
-/// A path point, with its end extension when it has one.
+/// A regular wiring point, with its end extension when the path gives one.
+fn wire_point(p: Point<Dbu>, extension: Option<Dbu>) -> String {
+    extension.map_or_else(|| pt(p), |e| format!("( {} {} {e} )", p.x, p.y))
+}
+
+/// A special wiring point, with its end extension when it has one.
 fn path_point(p: Point<Dbu>, extension: Dbu) -> String {
     if extension == Dbu::ZERO {
         pt(p)
@@ -349,13 +354,18 @@ fn write_nets(db: &NetlistDB, out: &mut impl Write) -> io::Result<()> {
         let mut keyword = "+ ROUTED";
         for elem in &net.routing {
             match *elem {
-                RouteElem::Wire { layer, from, to } => {
+                RouteElem::Wire {
+                    layer,
+                    from,
+                    to,
+                    extensions: (from_extension, to_extension),
+                } => {
                     let _ = write!(
                         line,
                         "\n  {keyword} {} {} {}",
                         lib.layer(layer).name,
-                        pt(from),
-                        pt(to)
+                        wire_point(from, from_extension),
+                        wire_point(to, to_extension)
                     );
                 }
                 RouteElem::Via { via, at } => {

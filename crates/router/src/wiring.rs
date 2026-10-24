@@ -179,6 +179,7 @@ impl NetRoute {
             layer: run.layer,
             from: point(run.node(run.from)),
             to: point(run.node(run.to)),
+            extensions: (None, None),
         }));
         for a in &self.access {
             out.extend(access_elems(tech, a));
@@ -395,6 +396,7 @@ pub fn access_elems(tech: &RouteTech, a: &AccessPoint) -> Vec<RouteElem> {
             layer: a.node.layer,
             from: node,
             to: a.at,
+            extensions: (None, None),
         });
     }
     out.extend(a.vias.iter().map(|&via| RouteElem::Via { via, at: a.at }));

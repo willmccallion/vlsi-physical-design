@@ -1023,26 +1023,20 @@ impl<'a> DefParser<'a> {
     fn net_wiring(&mut self, net: NetId) -> Result<(), ParseError> {
         loop {
             let mut layer = self.routing_layer()?;
-            let mut prev: Option<Point<Dbu>> = None;
+            let mut prev: Option<(Point<Dbu>, Option<Dbu>)> = None;
             while let Some(t) = self.lx.peek() {
                 match t.text {
                     "(" => {
-                        let line = self.lx.line();
-                        let (p, extension) = self.path_point(prev)?;
-                        if extension.is_some() {
-                            return Err(self.lx.error(
-                                line,
-                                "end extensions on regular wiring are not supported",
-                            ));
-                        }
-                        if let Some(from) = prev {
+                        let (p, extension) = self.path_point(prev.map(|(at, _)| at))?;
+                        if let Some((from, from_extension)) = prev {
                             self.db.nets[net.index()].routing.push(RouteElem::Wire {
                                 layer,
                                 from,
                                 to: p,
+                                extensions: (from_extension, extension),
                             });
                         }
-                        prev = Some(p);
+                        prev = Some((p, extension));
                     }
                     "NEW" | "+" | ";" => break,
                     "TAPER" => {
@@ -1054,8 +1048,9 @@ impl<'a> DefParser<'a> {
                     }
                     "RECT" => {
                         let _ = self.lx.next_token();
-                        let at =
-                            prev.ok_or_else(|| self.lx.error(t.line, "RECT before any point"))?;
+                        let at = prev
+                            .map(|(at, _)| at)
+                            .ok_or_else(|| self.lx.error(t.line, "RECT before any point"))?;
                         let rect = self.patch_rect(at)?;
                         self.db.nets[net.index()]
                             .routing
@@ -1067,8 +1062,9 @@ impl<'a> DefParser<'a> {
                     _ => {
                         let t = self.lx.expect_token("via name")?;
                         let via = self.via_id(t.line, t.text)?;
-                        let at =
-                            prev.ok_or_else(|| self.lx.error(t.line, "via before any point"))?;
+                        let at = prev
+                            .map(|(at, _)| at)
+                            .ok_or_else(|| self.lx.error(t.line, "via before any point"))?;
                         let def = self.db.library.via(via);
                         layer = if def.bottom() == layer {
                             def.top()
@@ -1083,6 +1079,7 @@ impl<'a> DefParser<'a> {
                         self.db.nets[net.index()]
                             .routing
                             .push(RouteElem::Via { via, at });
+                        prev = Some((at, None));
                     }
                 }
             }
