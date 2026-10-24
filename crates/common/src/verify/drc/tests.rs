@@ -1226,3 +1226,35 @@ fn tiles_smaller_than_the_rules_reach_still_find_everything() {
         check(&layout, &rules)
     );
 }
+
+/// The shapes of `layout` meeting `window`, under its owners.
+fn shapes_meeting(layout: &Layout, window: &Rect<Dbu>) -> Layout {
+    let mut near = Layout::with_owners_of(layout);
+    for l in 0..layout.metal_layers() {
+        for s in layout.metal(l).iter().filter(|s| s.rect.touches(window)) {
+            near.add_shape(LayerRef::Routing(LayerId::new(l)), s);
+        }
+    }
+    for c in 0..layout.cut_layers() {
+        for s in layout.cut(c).iter().filter(|s| s.rect.touches(window)) {
+            near.add_shape(LayerRef::Cut(CutLayerId::new(c)), s);
+        }
+    }
+    near
+}
+
+#[test]
+fn building_tiles_when_checked_finds_what_bucketing_them_finds() {
+    let (layout, rules) = scattered_scene();
+    let bounds = layout.bounds().expect("the scene has shapes");
+
+    let lazy = check_tiles_lazily(
+        bounds,
+        layout.owners().to_vec(),
+        &rules,
+        (Dbu(1000), Dbu(500)),
+        |window| shapes_meeting(&layout, window),
+    );
+
+    assert_eq!(lazy, check_tiled(&layout, &rules, Dbu(1000), Dbu(500)));
+}

@@ -243,6 +243,16 @@ impl Layout {
         self.cut.get(layer).map_or(&[], Vec::as_slice)
     }
 
+    /// The box around every shape, or `None` when there are none.
+    pub fn bounds(&self) -> Option<Rect<Dbu>> {
+        self.metal
+            .iter()
+            .chain(&self.cut)
+            .flatten()
+            .map(|s| s.rect)
+            .reduce(|a, b| a.union(&b))
+    }
+
     /// Number of routing layers.
     pub const fn metal_layers(&self) -> usize {
         self.metal.len()

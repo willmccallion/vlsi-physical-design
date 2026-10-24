@@ -123,7 +123,7 @@ impl<'a> DetailedRouter<'a> {
         );
         let start = std::time::Instant::now();
         let rules = Rules::from_design(db);
-        let fixed = Layout::fixed_from_db(db);
+        let fixed = judge::fixed_layout(db);
         let fixed_tiles = ShapeTiles::new(&fixed, &db.die_area, gcell);
         log::debug!(
             "fixed layout built for the judge in {:.1}s, {} MB resident",

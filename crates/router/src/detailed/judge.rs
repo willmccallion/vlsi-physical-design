@@ -11,16 +11,18 @@
 use super::{DetailedRouter, Marker};
 use crate::runs::EdgeSet;
 use crate::wiring::{NetRoute, Wiring, gap_fills, tidy_patches};
-use pare_common::db::design::RouteElem;
+use pare_common::db::design::{NetlistDB, RouteElem};
 use pare_common::db::indices::{CutLayerId, LayerId, NetId};
 use pare_common::db::library::LayerRef;
 use pare_common::geom::dbu::Dbu;
 use pare_common::geom::point::Point;
 use pare_common::geom::rect::Rect;
 use pare_common::verify::drc::{
-    Findings, Layout, Marker as DrcMarker, Origin, Owner, Rules, Violation, check_tiled,
+    Findings, Layout, Marker as DrcMarker, Origin, Owner, Rules, Violation, check_tiles_lazily,
     check_window,
 };
+use pare_common::verify::shapes::route_elem_shapes;
+use rayon::prelude::*;
 use rustc_hash::FxHashSet;
 
 /// How many halos wide a tile of the whole-design check is.
@@ -148,6 +150,17 @@ pub(super) struct Candidate<'e> {
     pub with: &'e Wiring,
 }
 
+/// The fixed shapes of the design, with every net an owner in net order
+/// as adding all wiring would make them, so that the layouts of windows
+/// share its owners instead of each extending a copy.
+pub(super) fn fixed_layout(db: &NetlistDB) -> Layout {
+    let mut layout = Layout::fixed_from_db(db);
+    for (n, net) in db.nets.iter().enumerate() {
+        let _ = layout.owner(Owner::Net(NetId::new(n)), net.signal_use.is_supply());
+    }
+    layout
+}
+
 impl DetailedRouter<'_> {
     /// The window a region is judged from: the region grown by the halo.
     pub(super) fn judge_window(&self, area: &Rect<Dbu>) -> Rect<Dbu> {
@@ -218,20 +231,46 @@ impl DetailedRouter<'_> {
     }
 
     /// Every violation of the current wiring, as markers for repair, with
-    /// how many there are of each kind.
+    /// how many there are of each kind; as `TritonRoute`'s checker, each tile
+    /// is built from the shapes near it only when it is checked.
     pub(super) fn exact_markers(&self) -> (Vec<Marker>, Vec<(Violation, usize)>) {
-        let mut layout = self.fixed.clone();
-        for (n, elems) in self.elems.iter().enumerate() {
-            layout.add_wiring(self.db, NetId::new(n), elems, None);
-        }
-        let report = check_tiled(&layout, &self.rules, self.halo * TILE_HALOS, self.halo);
+        let Some(bounds) = self
+            .wiring_bounds()
+            .into_iter()
+            .chain(self.fixed.bounds())
+            .reduce(|a, b| a.union(&b))
+        else {
+            return (Vec::new(), Vec::new());
+        };
+        let report = check_tiles_lazily(
+            bounds,
+            self.fixed.owners().to_vec(),
+            &self.rules,
+            (self.halo * TILE_HALOS, self.halo),
+            |window| self.window_layout(window, &[]),
+        );
         let counts = report.counts();
-        let markers = report
+        let markers: Vec<Marker> = report
             .violations
             .iter()
             .map(|m| marker_of(&report.owners, m))
             .collect();
         (markers, counts)
+    }
+
+    /// The box around every shape of every net's wiring.
+    fn wiring_bounds(&self) -> Option<Rect<Dbu>> {
+        self.elems
+            .par_iter()
+            .enumerate()
+            .filter_map(|(n, elems)| {
+                elems
+                    .iter()
+                    .flat_map(|e| route_elem_shapes(self.db, NetId::new(n), e))
+                    .map(|s| s.rect)
+                    .reduce(|a, b| a.union(&b))
+            })
+            .reduce_with(|a, b| a.union(&b))
     }
 
     /// The route a candidate stands for, with the gaps along its tracks

@@ -24,7 +24,7 @@ mod tile;
 
 pub use layout::{Layout, LayoutShape, Origin, Owner, OwnerIndex};
 pub use rules::{CutRules, MetalRules, NonDefaultRules, Rules};
-pub use tile::{check_tiled, check_window};
+pub use tile::{check_tiled, check_tiles_lazily, check_window};
 
 /// How many halos wide a tile of [`check_drc`] is.
 const TILE_HALOS: i64 = 32;

@@ -11,7 +11,7 @@
 //! thread, since a tile or a router's region is small and the checks of
 //! many of them run at once.
 
-use super::layout::{Layout, LayoutShape};
+use super::layout::{Layout, LayoutShape, Owner};
 use super::model::Model;
 use super::rules::Rules;
 use super::{DrcReport, Findings, Marker, classify, run_checks};
@@ -25,7 +25,7 @@ use rayon::prelude::*;
 /// Checks `layout` in square tiles of `core` a side, each seeing `halo`
 /// beyond its edges.
 pub fn check_tiled(layout: &Layout, rules: &Rules, core: Dbu, halo: Dbu) -> DrcReport {
-    let Some(grid) = Grid::over(layout, core) else {
+    let Some(grid) = layout.bounds().map(|b| Grid::from_bounds(b, core)) else {
         return DrcReport {
             owners: layout.owners().to_vec(),
             ..DrcReport::default()
@@ -36,8 +36,34 @@ pub fn check_tiled(layout: &Layout, rules: &Rules, core: Dbu, halo: Dbu) -> DrcR
         .into_par_iter()
         .map(|tile| check_window(&tile.layout, rules, tile.core, tile.window))
         .collect();
+    merged_report(found, layout.owners().to_vec())
+}
+
+/// Checks the tiles of `core` a side over `bounds` as [`check_tiled`] does.
+///
+/// Each tile's layout is built only when it is checked: `layout_of` gives
+/// the shapes meeting a window, with owner indices into `owners`.
+pub fn check_tiles_lazily(
+    bounds: Rect<Dbu>,
+    owners: Vec<Owner>,
+    rules: &Rules,
+    (core, halo): (Dbu, Dbu),
+    layout_of: impl Fn(&Rect<Dbu>) -> Layout + Sync,
+) -> DrcReport {
+    let grid = Grid::from_bounds(bounds, core);
+    let found: Vec<Findings> = (0..grid.nx * grid.ny)
+        .into_par_iter()
+        .map(|k| {
+            let (core, window) = grid.tile_area(k, halo);
+            check_window(&layout_of(&window), rules, core, window)
+        })
+        .collect();
+    merged_report(found, owners)
+}
+
+fn merged_report(found: Vec<Findings>, owners: Vec<Owner>) -> DrcReport {
     let merged = found.into_iter().fold(Findings::default(), Findings::merge);
-    DrcReport::from_findings(merged, layout.owners().to_vec())
+    DrcReport::from_findings(merged, owners)
 }
 
 /// Checks the shapes of `layout`, which are those meeting `window`, and
@@ -71,32 +97,34 @@ struct Grid {
 }
 
 impl Grid {
-    /// The grid of `core`-sized tiles covering every shape of `layout`, or
-    /// `None` when there is nothing to check.
-    fn over(layout: &Layout, core: Dbu) -> Option<Self> {
-        let bounds = all_shapes(layout)
-            .map(|s| s.rect)
-            .reduce(|a, b| a.union(&b))?;
+    /// The grid of `core`-sized tiles covering `bounds`.
+    fn from_bounds(bounds: Rect<Dbu>, core: Dbu) -> Self {
         let core = core.max(Dbu(1));
         let count = |span: Dbu| usize::try_from(span.get() / core.get() + 1).unwrap_or(1);
-        Some(Self {
+        Self {
             origin: bounds.min,
             core,
             nx: count(bounds.width()),
             ny: count(bounds.height()),
-        })
+        }
+    }
+
+    /// The core of tile `k` and its window, the core grown by `halo`.
+    fn tile_area(&self, k: usize, halo: Dbu) -> (Rect<Dbu>, Rect<Dbu>) {
+        let (i, j) = (k % self.nx, k / self.nx);
+        let min = self.origin + Point::new(self.core * i as i64, self.core * j as i64);
+        let core = Rect::new(min, min + Point::new(self.core, self.core));
+        (core, core.expand(halo))
     }
 
     /// The tiles, each holding the shapes that meet its window.
     fn bucket(&self, layout: &Layout, halo: Dbu) -> Vec<Tile> {
         let mut tiles: Vec<Tile> = (0..self.nx * self.ny)
             .map(|k| {
-                let (i, j) = (k % self.nx, k / self.nx);
-                let min = self.origin + Point::new(self.core * i as i64, self.core * j as i64);
-                let core = Rect::new(min, min + Point::new(self.core, self.core));
+                let (core, window) = self.tile_area(k, halo);
                 Tile {
                     core,
-                    window: core.expand(halo),
+                    window,
                     layout: Layout::with_owners_of(layout),
                 }
             })
@@ -150,10 +178,4 @@ struct Tile {
     core: Rect<Dbu>,
     window: Rect<Dbu>,
     layout: Layout,
-}
-
-fn all_shapes(layout: &Layout) -> impl Iterator<Item = &LayoutShape> {
-    (0..layout.metal_layers())
-        .flat_map(move |l| layout.metal(l).iter())
-        .chain((0..layout.cut_layers()).flat_map(move |c| layout.cut(c).iter()))
 }
