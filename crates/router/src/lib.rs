@@ -643,7 +643,7 @@ fn layers_wire_width(db: &NetlistDB, tech: &RouteTech) -> Dbu {
 /// has them at the moment, for measuring congestion while placing.
 ///
 /// This is how `OpenROAD`'s placer runs its global router. The routes are
-/// negotiated for [`ESTIMATE_ROUNDS`] rounds, so that the congestion cheap
+/// negotiated for `ESTIMATE_ROUNDS` rounds, so that the congestion cheap
 /// detours remove does not count and what detailed routing would face does.
 #[derive(Debug)]
 pub struct GlobalRouteEstimator<'a> {

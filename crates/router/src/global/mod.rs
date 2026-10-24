@@ -295,7 +295,7 @@ impl GlobalGrid {
     /// capacity the routes take on any routable layer, over both edges of
     /// the gcell along that layer, as `OpenROAD`'s placer reads its global
     /// router. A layer does not count in a gcell where fixed metal takes
-    /// [`IGNORED_BLOCKAGE`] of the tracks or more, or every one of them.
+    /// `IGNORED_BLOCKAGE` of the tracks or more, or every one of them.
     pub fn congestion(&self, tech: &RouteTech) -> Vec<f64> {
         let (nx, ny) = (usize::from(self.nx), usize::from(self.ny));
         let mut congestion = vec![0.0; nx * ny];
@@ -1034,13 +1034,13 @@ pub fn restore_global(
 /// Routes `nets` and negotiates overflow for at most `rounds` rounds.
 ///
 /// The history of overflow on each edge grows every round. The overflow
-/// penalty grows by [`PENALTY_STEP`] after a round that lowers the overflow
+/// penalty grows by `PENALTY_STEP` after a round that lowers the overflow
 /// and shrinks by it after one that raises it: more pressure clears the
 /// last overflow of a routable design, while pressure that keeps growing
 /// on overflow that cannot be cleared drives nets into detours that
 /// overflow more than they relieve. Negotiation stops early once
-/// [`STALL_ROUNDS`] pass without lowering the overflow by
-/// [`MIN_PROGRESS`] of what it was when it last did. Returns the routes of
+/// `STALL_ROUNDS` pass without lowering the overflow by
+/// `MIN_PROGRESS` of what it was when it last did. Returns the routes of
 /// the round with the lowest overflow, and leaves the grid's usage at
 /// theirs.
 pub fn route_global(grid: &mut GlobalGrid, nets: &[GlobalNet], rounds: usize) -> GlobalRoutes {

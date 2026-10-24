@@ -302,7 +302,7 @@ pub enum Scope {
     /// The nets of each conflict, in the region holding it.
     Conflicts,
     /// The nets of each conflict and every net with wiring within
-    /// [`NEAR_TRACKS`] tracks of it, in the region holding it, so that
+    /// `NEAR_TRACKS` tracks of it, in the region holding it, so that
     /// wiring hemming a conflict in can move aside, as `TritonRoute`'s
     /// near-violation rip-up does.
     NearConflicts,

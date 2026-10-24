@@ -297,7 +297,7 @@ impl DetailedRouter<'_> {
 
     /// Routes again, on tiles around each cluster of violations, the nets
     /// `scope` selects there, each tile with every mix of the conflict and
-    /// marker costs times [`COST_FACTORS`], keeping per cluster the result
+    /// marker costs times `COST_FACTORS`, keeping per cluster the result
     /// with the fewest violations.
     pub fn repair_stubborn(&mut self, scope: Scope, costs: Costs) -> RepairStats {
         let limit = self.gcell_limit();
