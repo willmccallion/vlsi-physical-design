@@ -8,19 +8,19 @@ A digital IC placement and routing engine written in Rust, built from scratch. I
 
 ## Results
 
-Each design is placed from its floorplan and then routed by `pare run <design>`, except gcd, whose placement is part of the input. aes, ibex and jpeg are synthesized and floorplanned by OpenROAD-flow-scripts 26Q2, as its Nangate45 flow does them, at 32%, 50% and 81% utilization; swerv, netcard and leon3mp come from OpenROAD's placer tests, at 10%, 60% and 59%. ariane133, with 132 fakeram45 SRAM macros, and bp_quad, with 220 on a 3.6 × 3.6 mm die, are synthesized and floorplanned by OpenROAD-flow-scripts 26Q2 too, at 32% and 22%. Nets counts the signal nets with two or more pins, the ones there are to route. Routed DEFs are checked by OpenROAD 26Q2 `check_drc`.
+Each design is placed from its floorplan and then routed by `pare run <design>`, except gcd, whose placement is part of the input. aes, ibex and jpeg are synthesized and floorplanned by OpenROAD-flow-scripts 26Q2, as its Nangate45 flow does them, at 32%, 50% and 81% utilization; swerv, netcard and leon3mp come from OpenROAD's placer tests, at 10%, 60% and 59%. ariane133, with 132 fakeram45 SRAM macros, and bp_quad, with 220 on a 3.6 × 3.6 mm die, are synthesized and floorplanned by OpenROAD-flow-scripts 26Q2 too, at 32% and 22%. Nets counts the signal nets with two or more pins, the ones there are to route; wirelength is the length of all their routed wires along the centreline. Routed DEFs are checked by OpenROAD 26Q2 `check_drc`.
 
-| Design | Cells | Nets | PARE violations | OpenROAD `check_drc` | Time | Peak memory |
-|---|---:|---:|---:|---:|---:|---:|
-| gcd | 676 | 563 | 0 | 0 | 0.8 s | 0.5 GiB |
-| aes | 13,108 | 12,965 | 0 | 0 | 34 s | 1.9 GiB |
-| ibex | 16,876 | 18,256 | 0 | 0 | 1 min 35 s | 2.3 GiB |
-| jpeg | 62,139 | 69,575 | 0 | 0 | 2 min 1 s | 4.1 GiB |
-| swerv | 135,119 | 130,357 | 0 | 0 | 4 min 50 s | 4.7 GiB |
-| ariane133 | 175,699 | 179,067 | 0 | 0 | 12 min 38 s | 6.1 GiB |
-| netcard | 274,700 | 290,334 | 0 | 0 | 1 h 7 min 37 s | 9.3 GiB |
-| leon3mp | 312,529 | 406,912 | 0 | 0 | 18 min 28 s | 9.1 GiB |
-| bp_quad | 1,241,520 | 1,244,956 | 0 | 0 | 1 h 10 min 46 s | 23.1 GiB |
+| Design | Cells | Nets | Wirelength | Vias | PARE violations | OpenROAD `check_drc` | Time | Peak memory |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|
+| gcd | 676 | 563 | 7.5 mm | 3,934 | 0 | 0 | 0.8 s | 0.5 GiB |
+| aes | 13,108 | 12,965 | 227 mm | 150,724 | 0 | 0 | 34 s | 1.9 GiB |
+| ibex | 16,876 | 18,256 | 383 mm | 195,167 | 0 | 0 | 1 min 35 s | 2.3 GiB |
+| jpeg | 62,139 | 69,575 | 1,036 mm | 578,571 | 0 | 0 | 2 min 1 s | 4.1 GiB |
+| swerv | 135,119 | 130,357 | 5,422 mm | 1,520,105 | 0 | 0 | 4 min 50 s | 4.7 GiB |
+| ariane133 | 175,699 | 179,067 | 7,504 mm | 2,109,089 | 0 | 0 | 12 min 38 s | 6.1 GiB |
+| netcard | 274,700 | 290,334 | 10,647 mm | 3,538,026 | 0 | 0 | 1 h 7 min 37 s | 9.3 GiB |
+| leon3mp | 312,529 | 406,912 | 8,522 mm | 4,214,878 | 0 | 0 | 18 min 28 s | 9.1 GiB |
+| bp_quad | 1,241,520 | 1,244,956 | 52,411 mm | 13,885,998 | 0 | 0 | 1 h 10 min 46 s | 23.1 GiB |
 
 Measured on an Intel Core i7-14700K (28 threads) with 64 GB of memory, at commit `dc60d69`. Time and memory cover the whole run, placement included.
 
