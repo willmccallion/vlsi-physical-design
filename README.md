@@ -1,5 +1,7 @@
 # PARE — Placement And Routing Engine
 
+[![CI](https://github.com/willmccallion/vlsi-physical-design/actions/workflows/ci.yml/badge.svg)](https://github.com/willmccallion/vlsi-physical-design/actions/workflows/ci.yml)
+
 A digital IC placement and routing engine written in Rust, built from scratch. It reads LEF/DEF and Bookshelf, places cells by electrostatic spreading, legalizes and refines the placement, routes every net globally and then on the design's tracks, and checks the result against the technology's design rules with a checker modelled on OpenROAD's.
 
 **Status:** PARE has placed and routed nine Nangate45 designs, from gcd (563 nets) to bp_quad, a BlackParrot quad-core chip of 1.24 million cells and 1.24 million nets, with zero design rule violations, judged both by its own checker and by OpenROAD's `check_drc` with a fix for one of its bugs applied (see below). No ISPD 2015 design is clean yet.
