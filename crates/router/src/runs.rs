@@ -65,6 +65,11 @@ pub struct EdgeSet {
 }
 
 impl EdgeSet {
+    /// Bytes its vectors hold on the heap.
+    pub const fn heap_bytes(&self) -> usize {
+        self.runs.capacity() * size_of::<Run>() + self.vias.capacity() * size_of::<(Node, Node)>()
+    }
+
     /// The set of the wire edges of `runs`.
     pub fn from_runs(runs: impl IntoIterator<Item = Run>) -> Self {
         let mut set = Self {

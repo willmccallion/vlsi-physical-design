@@ -185,7 +185,9 @@ pub fn route_with(
             let flows = FlowState::after(saved.round, saved.flow, saved.effective);
             (saved.round + 1, conflicted, saved.scope, flows)
         } else {
+            dr.log_footprint("track assignment");
             let first = dr.route_initial(&nets, round_costs(0, via));
+            dr.log_footprint("first pass");
             ui::dr_table_header();
             let conflicted = dr.rejudge();
             let flows = FlowState::after_first_pass();

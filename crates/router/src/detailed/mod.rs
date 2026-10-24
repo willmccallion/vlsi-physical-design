@@ -35,7 +35,7 @@ use crate::tech::RouteTech;
 use crate::track::TrackWire;
 use crate::tree::{connection_order, gap, hilbert_order};
 pub use crate::wiring::NetRoute;
-use crate::wiring::{Edge, access_elems, elem_cuts, elem_metal, gap_fills, path_edges};
+use crate::wiring::{Edge, Patch, access_elems, elem_cuts, elem_metal, gap_fills, path_edges};
 use judge::ShapeTiles;
 use pare_common::db::design::NetlistDB;
 use pare_common::db::design::RouteElem;
@@ -109,7 +109,46 @@ pub struct DetailedRouter<'a> {
     trace: Trace,
 }
 
+/// Bytes the vectors of `nested` hold on the heap, with their headers.
+fn nested_bytes<T>(nested: &[Vec<T>]) -> usize {
+    nested
+        .iter()
+        .map(|v| v.capacity() * size_of::<T>())
+        .sum::<usize>()
+        + size_of_val(nested)
+}
+
 impl<'a> DetailedRouter<'a> {
+    /// Logs the megabytes each record of the wiring holds.
+    pub(crate) fn log_footprint(&self, stage: &str) {
+        if !log::log_enabled!(log::Level::Debug) {
+            return;
+        }
+        let mb = |bytes: usize| bytes / (1 << 20);
+        let routes: usize = self
+            .routes
+            .iter()
+            .map(|r| {
+                r.edges.heap_bytes()
+                    + r.patches.capacity() * size_of::<Patch>()
+                    + r.access.capacity() * size_of::<AccessPoint>()
+            })
+            .sum();
+        let (fixed, added, cuts) = self.occupancy.heap_bytes();
+        log::debug!(
+            "{stage} footprint: routes {} MB, elems {} MB, wires {} MB, \
+             access {} MB, occupancy fixed {} MB, added {} MB, cuts {} MB, {} MB resident",
+            mb(routes + self.routes.len() * size_of::<NetRoute>()),
+            mb(nested_bytes(&self.elems)),
+            mb(nested_bytes(&self.wires)),
+            mb(nested_bytes(&self.access)),
+            mb(fixed),
+            mb(added),
+            mb(cuts),
+            pare_common::util::memory::current_rss_mb().unwrap_or(0)
+        );
+    }
+
     /// Prepares routing: computes pin access and records obstacles, pins
     /// and fixed cuts.
     pub fn new(db: &'a NetlistDB, tech: &'a RouteTech, gcell: Dbu) -> Self {

@@ -646,6 +646,26 @@ pub(crate) fn affected_tracks<'t>(
 }
 
 impl Occupancy {
+    /// Bytes held by the fixed occupants of every track, by the occupants
+    /// added since, and by the cut occupants.
+    pub fn heap_bytes(&self) -> (usize, usize, usize) {
+        let tracks = self.tracks.iter().flatten();
+        let fixed = tracks
+            .clone()
+            .map(|t| t.fixed.capacity() * size_of::<Occupant>() + t.fixed_reach.capacity() * 8)
+            .sum();
+        let added = tracks
+            .map(|t| t.added.capacity() * size_of::<Occupant>())
+            .sum();
+        let cuts = self
+            .cuts
+            .iter()
+            .flat_map(|c| c.buckets.values().chain(c.large.values()))
+            .map(|v| v.capacity() * size_of::<CutOccupant>())
+            .sum();
+        (fixed, added, cuts)
+    }
+
     /// Empty occupancy for every layer; metal added after the fixed metal is
     /// split into pieces no longer than `chunk`.
     pub fn new(tech: &RouteTech, chunk: Dbu) -> Self {
