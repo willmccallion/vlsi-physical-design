@@ -167,7 +167,7 @@ fn a_gap_as_wide_as_the_spacing_is_legal() {
     f.route(M1, a, rect(0, 0, 1000, 100));
     f.route(M1, b, rect(0, 200, 1000, 300));
 
-    assert!(f.check(&rules(Vec::new())).violations.is_empty());
+    assert_eq!(f.check(&rules(Vec::new())).violations, []);
 }
 
 #[test]
@@ -184,7 +184,7 @@ fn diagonal_neighbours_are_measured_corner_to_corner() {
         kinds(&near.check(&rules(Vec::new())).violations),
         [Violation::MetalSpacing]
     );
-    assert!(far.check(&rules(Vec::new())).violations.is_empty());
+    assert_eq!(far.check(&rules(Vec::new())).violations, []);
 }
 
 #[test]
@@ -196,7 +196,7 @@ fn violations_of_fixed_metal_alone_are_reported_apart() {
 
     let report = f.check(&rules(Vec::new()));
 
-    assert!(report.violations.is_empty());
+    assert_eq!(report.violations, []);
     assert_eq!(kinds(&report.input), [Violation::Short]);
 }
 
@@ -233,7 +233,7 @@ fn an_ell_of_one_net_is_legal() {
     f.route(M1, a, rect(0, 0, 1000, 100));
     f.route(M1, a, rect(0, 0, 100, 1000));
 
-    assert!(f.check(&rules(Vec::new())).violations.is_empty());
+    assert_eq!(f.check(&rules(Vec::new())).violations, []);
 }
 
 #[test]
@@ -262,7 +262,7 @@ fn a_longer_parallel_run_needs_more_spacing() {
     long_run.route(M1, a, rect(0, 0, 600, 100));
     long_run.route(M1, b, rect(0, 220, 600, 320));
 
-    assert!(short_run.check(&rules).violations.is_empty());
+    assert_eq!(short_run.check(&rules).violations, []);
     assert_eq!(
         kinds(&long_run.check(&rules).violations),
         [Violation::MetalSpacing]
@@ -280,7 +280,7 @@ fn an_obstruction_counts_as_a_default_width_wire_when_the_library_says_so() {
     f.fix(M1, obstruction, rect(0, 0, 1000, 1000));
     f.route(M1, a, rect(0, 1150, 1000, 1250));
 
-    assert!(f.check(&wide_needs_more).violations.is_empty());
+    assert_eq!(f.check(&wide_needs_more).violations, []);
     assert_eq!(
         kinds(&f.check(&by_width).violations),
         [Violation::MetalSpacing]
@@ -366,7 +366,7 @@ fn a_routed_cut_on_a_fixed_cut_of_its_owner_counts_as_fixed() {
 
     let report = f.check(&rules(vec![cut_rule(100)]));
 
-    assert!(report.violations.is_empty());
+    assert_eq!(report.violations, []);
     assert_eq!(kinds(&report.input), [Violation::CutShort]);
 }
 
@@ -377,7 +377,7 @@ fn a_cut_layer_without_spacing_rules_checks_nothing() {
     f.route(V1, a, rect(0, 0, 100, 100));
     f.route(V1, b, rect(50, 0, 150, 100));
 
-    assert!(f.check(&rules(Vec::new())).violations.is_empty());
+    assert_eq!(f.check(&rules(Vec::new())).violations, []);
 }
 
 #[test]
@@ -398,7 +398,7 @@ fn center_to_center_spacing_is_measured_between_centers() {
         kinds(&near.check(&rules(vec![rule])).violations),
         [Violation::CutSpacing]
     );
-    assert!(far.check(&rules(vec![rule])).violations.is_empty());
+    assert_eq!(far.check(&rules(vec![rule])).violations, []);
 }
 
 #[test]
@@ -416,7 +416,7 @@ fn cuts_of_one_net_follow_the_same_net_rule_when_there_is_one() {
     two_nets.route(V1, a, rect(0, 0, 100, 100));
     two_nets.route(V1, b, rect(200, 0, 300, 100));
 
-    assert!(one_net.check(&both).violations.is_empty());
+    assert_eq!(one_net.check(&both).violations, []);
     assert_eq!(
         kinds(&one_net.check(&rules(vec![cut_rule(150)])).violations),
         [Violation::CutSpacing]
@@ -445,8 +445,8 @@ fn an_adjacent_cuts_rule_needs_enough_close_neighbours() {
     crowd.route(V1, b, rect(250, 0, 350, 100));
     crowd.route(V1, b, rect(0, 250, 100, 350));
 
-    assert!(pair.check(&rules(vec![rule])).violations.is_empty());
-    assert!(!crowd.check(&rules(vec![rule])).violations.is_empty());
+    assert_eq!(pair.check(&rules(vec![rule])).violations, []);
+    assert_ne!(crowd.check(&rules(vec![rule])).violations, []);
 }
 
 #[test]
@@ -464,7 +464,7 @@ fn cuts_on_shared_metal_need_no_parallel_overlap_spacing() {
     apart.route(V1, a, rect(0, 0, 100, 100));
     apart.route(V1, a, rect(150, 0, 250, 100));
 
-    assert!(joined.check(&rules(vec![rule])).violations.is_empty());
+    assert_eq!(joined.check(&rules(vec![rule])).violations, []);
     assert_eq!(
         kinds(&apart.check(&rules(vec![rule])).violations),
         [Violation::CutSpacing]
@@ -482,7 +482,7 @@ fn a_parallel_overlap_property_reaches_cuts_that_do_not_run_alongside() {
     f.route(V1, a, rect(0, 0, 100, 100));
     f.route(V1, b, rect(150, 150, 250, 250));
 
-    assert!(f.check(&rules(vec![statement])).violations.is_empty());
+    assert_eq!(f.check(&rules(vec![statement])).violations, []);
     let report = f.check(&rules_with_properties(
         Vec::new(),
         vec![parallel_overlap_property(100)],
@@ -536,7 +536,7 @@ fn cuts_on_shared_metal_are_exempt_from_a_parallel_overlap_property() {
     apart.route(V1, a, rect(0, 0, 100, 100));
     apart.route(V1, a, rect(150, 0, 250, 100));
 
-    assert!(joined.check(&rules).violations.is_empty());
+    assert_eq!(joined.check(&rules).violations, []);
     assert_eq!(
         kinds(&apart.check(&rules).violations),
         [Violation::CutSpacing]
@@ -583,7 +583,7 @@ fn a_same_net_property_rule_leaves_cuts_of_different_nets_alone() {
         kinds(&one_net.check(&rules).violations),
         [Violation::CutSpacing]
     );
-    assert!(two_nets.check(&rules).violations.is_empty());
+    assert_eq!(two_nets.check(&rules).violations, []);
 }
 
 #[test]
@@ -605,7 +605,7 @@ fn a_piece_as_large_as_the_minimum_area_is_legal() {
     let a = f.a;
     f.route(M1, a, rect(0, 0, 100, 200));
 
-    assert!(f.check(&rules_with_min_area(20_000)).violations.is_empty());
+    assert_eq!(f.check(&rules_with_min_area(20_000)).violations, []);
 }
 
 #[test]
@@ -632,8 +632,8 @@ fn a_piece_with_an_edge_of_fixed_metal_is_exempt_from_the_minimum_area() {
 
     let report = f.check(&rules_with_min_area(20_000));
 
-    assert!(report.violations.is_empty());
-    assert!(report.input.is_empty());
+    assert_eq!(report.violations, []);
+    assert_eq!(report.input, []);
 }
 
 #[test]
@@ -681,7 +681,7 @@ fn a_narrow_slice_under_the_owners_fixed_metal_is_exempt_from_the_minimum_width(
     f.fix(M1, a, rect(0, 0, 1000, 50));
     f.route(M1, a, rect(0, 0, 200, 50));
 
-    assert!(f.check(&rules(Vec::new())).violations.is_empty());
+    assert_eq!(f.check(&rules(Vec::new())).violations, []);
 }
 
 #[test]
@@ -735,10 +735,10 @@ fn a_cut_on_metal_narrower_than_the_rule_width_is_legal() {
     f.route(M1, a, rect(0, 0, 1000, 300));
     f.route(V1, a, rect(100, 100, 200, 200));
 
-    assert!(
+    assert_eq!(
         f.check(&rules_with_minimum_cut(minimum_cut(400)))
-            .violations
-            .is_empty()
+            .violations,
+        []
     );
 }
 
@@ -754,7 +754,7 @@ fn a_minimum_cut_rule_from_above_ignores_cuts_below() {
         ..minimum_cut(400)
     }];
 
-    assert!(f.check(&rules).violations.is_empty());
+    assert_eq!(f.check(&rules).violations, []);
 }
 
 #[test]
@@ -768,7 +768,7 @@ fn with_a_length_a_cut_inside_the_wide_metal_is_exempt() {
         ..minimum_cut(400)
     };
 
-    assert!(f.check(&rules_with_minimum_cut(rule)).violations.is_empty());
+    assert_eq!(f.check(&rules_with_minimum_cut(rule)).violations, []);
 }
 
 #[test]
@@ -818,7 +818,7 @@ fn a_hole_as_large_as_the_minimum_enclosed_area_is_legal() {
     let mut rules = rules(Vec::new());
     rules.metal[0].min_enclosed_areas = vec![DbuArea(40_000)];
 
-    assert!(f.check(&rules).violations.is_empty());
+    assert_eq!(f.check(&rules).violations, []);
 }
 
 #[test]
@@ -851,8 +851,8 @@ fn fixed_metal_off_the_manufacturing_grid_is_exempt() {
 
     let report = f.check(&rules);
 
-    assert!(report.violations.is_empty());
-    assert!(report.input.is_empty());
+    assert_eq!(report.violations, []);
+    assert_eq!(report.input, []);
 }
 
 #[test]
@@ -864,9 +864,9 @@ fn fixed_metal_a_placed_cell_takes_part_in_is_a_placement_defect() {
 
     let report = f.check(&rules(Vec::new()));
 
-    assert!(report.violations.is_empty());
+    assert_eq!(report.violations, []);
     assert_eq!(kinds(&report.placement), [Violation::Short]);
-    assert!(report.input.is_empty());
+    assert_eq!(report.input, []);
 }
 
 #[test]
@@ -879,7 +879,7 @@ fn placed_cuts_touching_input_cuts_are_a_placement_defect() {
     let report = f.check(&rules(vec![cut_rule(100)]));
 
     assert_eq!(kinds(&report.placement), [Violation::CutShort]);
-    assert!(report.input.is_empty());
+    assert_eq!(report.input, []);
 }
 
 #[test]
@@ -893,7 +893,7 @@ fn placed_metal_near_a_fixed_only_violation_but_not_in_it_leaves_it_an_input_def
     let report = f.check(&rules(Vec::new()));
 
     assert_eq!(kinds(&report.input), [Violation::MetalSpacing]);
-    assert!(report.placement.is_empty());
+    assert_eq!(report.placement, []);
 }
 
 /// The rules of [`rules`] with one nondefault rule whose hard spacing on the
@@ -914,7 +914,7 @@ fn a_hard_nondefault_spacing_widens_the_gap_a_net_needs() {
     f.route(M1, a, rect(0, 0, 1000, 100));
     f.route(M1, b, rect(0, 250, 1000, 350));
 
-    assert!(f.check(&rules(Vec::new())).violations.is_empty());
+    assert_eq!(f.check(&rules(Vec::new())).violations, []);
     let report = f.check(&rules_with_hard_spacing(200));
     assert_eq!(kinds(&report.violations), [Violation::MetalSpacing]);
     assert_eq!(report.violations[0].bbox, rect(0, 100, 1000, 250));
@@ -942,7 +942,7 @@ fn a_hard_nondefault_spacing_on_another_layer_changes_nothing() {
     f.route(M2, a, rect(0, 0, 1000, 100));
     f.route(M2, b, rect(0, 250, 1000, 350));
 
-    assert!(f.check(&rules_with_hard_spacing(200)).violations.is_empty());
+    assert_eq!(f.check(&rules_with_hard_spacing(200)).violations, []);
 }
 
 /// The rules of [`rules`] with an end-of-line rule on the first metal layer:
@@ -965,7 +965,7 @@ fn a_line_end_too_close_to_metal_across_from_it_breaks_the_eol_rule() {
     f.route(M1, a, rect(0, 0, 100, 1000));
     f.route(M1, b, rect(0, -1150, 100, -150));
 
-    assert!(f.check(&rules(Vec::new())).violations.is_empty());
+    assert_eq!(f.check(&rules(Vec::new())).violations, []);
     let report = f.check(&rules_with_eol(None));
     assert_eq!(kinds(&report.violations), [Violation::EndOfLineSpacing]);
     assert_eq!(report.violations[0].bbox, rect(0, -150, 100, 0));
@@ -979,7 +979,7 @@ fn an_edge_as_wide_as_the_eol_width_is_no_line_end() {
     f.route(M1, a, rect(0, 0, 120, 1000));
     f.route(M1, b, rect(0, -1150, 120, -150));
 
-    assert!(f.check(&rules_with_eol(None)).violations.is_empty());
+    assert_eq!(f.check(&rules_with_eol(None)).violations, []);
 }
 
 #[test]
@@ -996,7 +996,7 @@ fn a_line_end_facing_metal_sideways_within_the_rule_reach_breaks_it() {
     let mut far = Fixture::new();
     far.route(M1, a, rect(0, 0, 100, 1000));
     far.route(M1, b, rect(150, -1150, 250, -150));
-    assert!(far.check(&rules_with_eol(None)).violations.is_empty());
+    assert_eq!(far.check(&rules_with_eol(None)).violations, []);
 }
 
 #[test]
@@ -1027,7 +1027,7 @@ fn line_ends_of_one_piece_do_not_face_each_other() {
     f.route(M1, a, rect(300, 0, 400, 1000));
     f.route(M1, a, rect(0, 900, 400, 1000));
 
-    assert!(f.check(&rules_with_eol(None)).violations.is_empty());
+    assert_eq!(f.check(&rules_with_eol(None)).violations, []);
 }
 
 #[test]
@@ -1039,8 +1039,8 @@ fn fixed_line_ends_facing_fixed_metal_are_left_alone() {
 
     let report = f.check(&rules_with_eol(None));
 
-    assert!(report.violations.is_empty());
-    assert!(report.input.is_empty());
+    assert_eq!(report.violations, []);
+    assert_eq!(report.input, []);
 }
 
 #[test]
@@ -1059,7 +1059,7 @@ fn a_parallel_edge_clause_arms_the_rule_only_beside_a_neighbour() {
     beside.route(M1, b, rect(0, -1150, 100, -150));
     beside.route(M1, b, rect(-200, -300, -100, 500));
 
-    assert!(alone.check(&rules_with_eol(parallel)).violations.is_empty());
+    assert_eq!(alone.check(&rules_with_eol(parallel)).violations, []);
     assert_eq!(
         kinds(&beside.check(&rules_with_eol(parallel)).violations),
         [Violation::EndOfLineSpacing]
@@ -1084,12 +1084,7 @@ fn two_edges_need_a_neighbour_beside_both_ends() {
     both_sides.route(M1, b, rect(-200, -300, -100, 500));
     both_sides.route(M1, b, rect(200, -400, 300, 0));
 
-    assert!(
-        one_side
-            .check(&rules_with_eol(parallel))
-            .violations
-            .is_empty()
-    );
+    assert_eq!(one_side.check(&rules_with_eol(parallel)).violations, []);
     assert_eq!(
         kinds(&both_sides.check(&rules_with_eol(parallel)).violations),
         [Violation::EndOfLineSpacing]
@@ -1127,11 +1122,7 @@ fn a_single_short_edge_is_allowed_with_max_edges_one() {
     f.route(M1, a, rect(0, 0, 300, 100));
     f.route(M1, a, rect(0, 100, 250, 200));
 
-    assert!(
-        f.check(&rules_with_min_step(60, Some(1)))
-            .advisory
-            .is_empty()
-    );
+    assert_eq!(f.check(&rules_with_min_step(60, Some(1))).advisory, []);
 }
 
 #[test]
@@ -1156,7 +1147,7 @@ fn steps_of_fixed_metal_alone_are_left_alone() {
 
     let report = f.check(&rules_with_min_step(60, Some(1)));
 
-    assert!(report.advisory.is_empty());
+    assert_eq!(report.advisory, []);
 }
 
 #[test]
@@ -1166,7 +1157,7 @@ fn a_loop_with_a_single_long_edge_is_not_checked_for_steps() {
     f.route(M1, a, rect(0, 0, 300, 50));
     f.route(M1, a, rect(0, 50, 50, 100));
 
-    assert!(f.check(&rules_with_min_step(260, None)).advisory.is_empty());
+    assert_eq!(f.check(&rules_with_min_step(260, None)).advisory, []);
     assert_eq!(
         kinds(&f.check(&rules_with_min_step(60, None)).advisory),
         [Violation::MinStep, Violation::MinStep]

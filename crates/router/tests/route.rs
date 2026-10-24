@@ -671,5 +671,5 @@ fn a_route_near_an_area_drops_the_vias_outside_it() {
 
     let near = route.near(&tech, &Rect::new(lt.point(0, 8), lt.point(0, 11)));
 
-    assert!(near.edges.vias().is_empty());
+    assert_eq!(near.edges.vias(), []);
 }

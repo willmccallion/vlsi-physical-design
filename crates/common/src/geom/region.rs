@@ -941,7 +941,7 @@ mod tests {
             rect(0, 2, 2, 3),
         ]);
 
-        assert!(notched.holes().is_empty());
+        assert_eq!(notched.holes(), []);
     }
 
     #[test]

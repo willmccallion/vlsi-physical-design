@@ -412,7 +412,7 @@ mod tests {
             "{:?}",
             db.cells[0].location
         );
-        assert!(placement_violations(&db).is_empty());
+        assert_eq!(placement_violations(&db), []);
     }
 
     #[test]
@@ -427,7 +427,7 @@ mod tests {
             "{:?}",
             db.cells[0].location
         );
-        assert!(placement_violations(&db).is_empty());
+        assert_eq!(placement_violations(&db), []);
     }
 
     #[test]
@@ -483,7 +483,7 @@ mod tests {
         legalize_zoned(&mut db).unwrap();
 
         assert_eq!(db.cells[0].location, pt(40, 0));
-        assert!(placement_violations(&db).is_empty());
+        assert_eq!(placement_violations(&db), []);
     }
 
     #[test]

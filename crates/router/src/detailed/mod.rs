@@ -1415,6 +1415,6 @@ mod tests {
     fn a_short_corridor_has_no_waypoints() {
         let cells: Vec<GCell> = (0..=5).map(|x| cell(2, x, 0)).collect();
 
-        assert!(waypoints(&cells, 4).is_empty());
+        assert_eq!(waypoints(&cells, 4), []);
     }
 }

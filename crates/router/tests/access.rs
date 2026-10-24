@@ -89,7 +89,7 @@ fn an_io_pin_on_a_routable_layer_is_reached_on_its_own_layer() {
 
     let points = access_points(&db, &tech, pin, &|_, _| true);
 
-    assert!(!points.is_empty());
+    assert_ne!(points, []);
     assert!(
         points
             .iter()
@@ -132,7 +132,7 @@ fn crossings_whose_wire_end_is_not_clean_are_dropped() {
 
     let points = access_points(&db, &tech, pin, &|_, m: &Rect<Dbu>| !m.contains(unclean));
 
-    assert!(!points.is_empty());
+    assert_ne!(points, []);
     assert!(points.iter().all(|a| a.at != unclean), "{points:?}");
 }
 
@@ -146,7 +146,7 @@ fn a_pin_with_no_clean_crossing_inside_is_reached_from_a_crossing_beyond_its_end
 
     let points = access_points(&db, &tech, pin, &reaches_below);
 
-    assert!(!points.is_empty());
+    assert_ne!(points, []);
     for a in &points {
         let node = tech.layer(a.node.layer).point(a.node.track, a.node.cross);
         assert!(node.y < bottom && a.at.y == bottom, "{a:?}");

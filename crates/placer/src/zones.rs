@@ -248,7 +248,7 @@ mod tests {
 
         let got = inside(&fence, Dbu(0), Dbu(1000), Dbu(0), Dbu(1000));
 
-        assert!(got.is_empty());
+        assert_eq!(got, []);
     }
 
     #[test]

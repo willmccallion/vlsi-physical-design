@@ -125,7 +125,7 @@ fn a_wire_along_the_pin_layer_connects_the_pins_it_crosses() {
     let net = two_inverters_on_a_net(&mut db);
     db.nets[net.index()].routing = vec![wire(M1, pt(100, 500), pt(1100, 500))];
 
-    assert!(check_routing(&db).opens.is_empty());
+    assert_eq!(check_routing(&db).opens, []);
 }
 
 #[test]
@@ -339,7 +339,7 @@ fn a_fence_member_inside_its_fence_is_legal() {
     let u1 = cell(&db, "u1");
     add_region(&mut db, RegionKind::Fence, &[rect(0, 0, 1000, 2000)], &[u1]);
 
-    assert!(region_violations(&db).is_empty());
+    assert_eq!(region_violations(&db), []);
 }
 
 #[test]
@@ -349,7 +349,7 @@ fn a_fence_member_spanning_two_abutting_rectangles_is_inside() {
     let rects = [rect(0, 0, 400, 2000), rect(400, 0, 1000, 2000)];
     add_region(&mut db, RegionKind::Fence, &rects, &[u1]);
 
-    assert!(region_violations(&db).is_empty());
+    assert_eq!(region_violations(&db), []);
 }
 
 #[test]
@@ -392,7 +392,7 @@ fn a_guide_region_constrains_nothing() {
         &[u1],
     );
 
-    assert!(region_violations(&db).is_empty());
+    assert_eq!(region_violations(&db), []);
 }
 
 #[test]
@@ -414,7 +414,7 @@ fn a_cell_outside_every_fence_may_overlap_an_inclusive_region() {
         &[],
     );
 
-    assert!(region_violations(&db).is_empty());
+    assert_eq!(region_violations(&db), []);
 }
 
 #[test]
@@ -422,5 +422,5 @@ fn a_cell_abutting_a_fence_does_not_overlap_it() {
     let mut db = tiny_placed();
     add_region(&mut db, RegionKind::Fence, &[rect(600, 0, 900, 2000)], &[]);
 
-    assert!(region_violations(&db).is_empty());
+    assert_eq!(region_violations(&db), []);
 }

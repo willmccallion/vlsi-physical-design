@@ -70,7 +70,7 @@ fn a_wire_is_cut_where_it_would_cross_an_obstacle() {
 
     let (tech, wires) = assign(&db, vec![along_m3_row_0(1, 2)]);
 
-    assert!(!wires.is_empty());
+    assert_ne!(wires, []);
     let lt = tech.layer(M3);
     let stripe_x = Dbu(5000);
     for w in &wires {
