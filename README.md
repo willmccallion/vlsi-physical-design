@@ -26,6 +26,9 @@ Measured on an Intel Core i7-14700K (28 threads) with 64 GB of memory, at commit
 
 OpenROAD's `check_drc` has a bug that reports spacing violations between two vias of one net where its wire fills the gap ([#11697](https://github.com/The-OpenROAD-Project/OpenROAD/issues/11697)). The counts above come from OpenROAD with the proposed fix ([#11698](https://github.com/The-OpenROAD-Project/OpenROAD/pull/11698)) applied, which `nix develop .#eda` builds. Unpatched OpenROAD reports 0 on gcd, aes, ibex and jpeg, 4 on swerv, 1 on ariane133, 3 on netcard, 1 on leon3mp and 4 on bp_quad, all spacing markers within one net like those; [docs/openroad-check-drc-tiling.md](docs/openroad-check-drc-tiling.md) has the evidence.
 
+<p align="center"><img src="assets/bp_quad-routed.png" alt="bp_quad, routed" width="800"></p>
+<p align="center">bp_quad: 1.24 million cells and 220 SRAM macros on a 3.6 × 3.6 mm die, routed.</p>
+
 <table>
   <tr>
     <td><img src="assets/aes-routed.png" alt="aes, routed"></td>
