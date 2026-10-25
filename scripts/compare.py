@@ -12,7 +12,9 @@ and JSON report, OpenROAD's routed DEF and logs, both check_drc reports,
 both `pare check` reports and both timing logs. OpenROAD runs in the eda
 shell (`nix develop .#eda`), with the check_drc fix the README describes.
 Timing needs the design's OpenROAD-flow-scripts constraint, so it is
-reported for the designs that flow synthesized.
+reported for the designs that flow synthesized. The table's slacks are those
+of the paths the clocks constrain; summary.json has every path group, the
+recovery checks of an unbuffered reset among them.
 """
 
 import argparse
@@ -182,13 +184,18 @@ def pare_check(design, side):
     )
 
 
-def timing(design, side):
-    if orfs_design(design) is None:
-        return None
+def liberty_files(design):
+    """The platform's library and the design's additional ones."""
     libs = [str(PLATFORM / "lib/NangateOpenCellLibrary_typical.lib")]
     additional = orfs_variable(design, "ADDITIONAL_LIBS")
     if additional:
         libs.extend(additional.split())
+    return libs
+
+
+def timing(design, side):
+    if orfs_design(design) is None:
+        return None
     out = design_dir(design)
     print(f"{design}: timing of {side}", flush=True)
     return run(
@@ -196,7 +203,7 @@ def timing(design, side):
         out / f"{side}.timing.log",
         env={
             "TIMING_LEF": " ".join(lef_files(design)),
-            "TIMING_LIB": " ".join(libs),
+            "TIMING_LIB": " ".join(liberty_files(design)),
             "TIMING_DEF": str(routed_def(design, side)),
             "TIMING_SDC": orfs_variable(design, "SDC_FILE"),
             "TIMING_RCX": str(PLATFORM / "rcx_patterns.rules"),
@@ -240,13 +247,37 @@ def result(design, side):
         r["openroad_violations"] = int(m.group(1)) if m else None
     timing_log = out / f"{side}.timing.log"
     if timing_log.exists():
-        text = timing_log.read_text(errors="replace")
-        for key, pattern in (
-            ("wns_ns", r"wns max (-?[\d.]+)"),
-            ("tns_ns", r"tns max (-?[\d.]+)"),
-        ):
-            m = re.search(pattern, text)
-            r[key] = float(m.group(1)) if m else None
+        r.update(slacks(timing_log.read_text(errors="replace")))
+    return r
+
+
+def slacks(timing_log):
+    """The worst and total negative slack over all paths, per path group, and
+    over the groups of the clocks alone."""
+    r = {}
+    for key, pattern in (
+        ("wns_all_ns", r"wns max (-?[\d.]+)"),
+        ("tns_all_ns", r"tns max (-?[\d.]+)"),
+    ):
+        m = re.search(pattern, timing_log)
+        r[key] = float(m.group(1)) if m else None
+    groups = {}
+    for m in re.finditer(
+        r"^group \{(.+)\} (clock|other) wns (-?[\d.]+) tns (-?[\d.]+) failing (\d+)$",
+        timing_log,
+        re.MULTILINE,
+    ):
+        groups[m.group(1)] = {
+            "clock": m.group(2) == "clock",
+            "wns_ns": float(m.group(3)),
+            "tns_ns": float(m.group(4)),
+            "failing": int(m.group(5)),
+        }
+    r["groups"] = groups
+    clocked = [g for g in groups.values() if g["clock"]]
+    if clocked:
+        r["wns_ns"] = min(g["wns_ns"] for g in clocked)
+        r["tns_ns"] = sum(g["tns_ns"] for g in clocked)
     return r
 
 
