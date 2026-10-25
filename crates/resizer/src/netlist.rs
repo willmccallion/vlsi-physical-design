@@ -135,11 +135,25 @@ impl<'a> Netlist<'a> {
         )
     }
 
-    /// Where a pin is: the reference point of an instance pin, the center
-    /// of a design pin.
+    /// Where a pin is, as `odb` places it: the mean of the centers of an
+    /// instance pin's shapes, the center of a design pin's first shape.
     #[must_use]
     pub fn pin_location(&self, pin: PinId) -> Point<Dbu> {
-        self.db.pin_position(pin)
+        let shapes = self.db.pin_shapes(pin);
+        if shapes.is_empty() {
+            return self.db.pin_position(pin);
+        }
+        if matches!(self.db.pins[pin.index()].owner, PinOwner::Io(_)) {
+            return shapes[0].rect.center();
+        }
+        let n = shapes.len() as i64;
+        let (sx, sy) = shapes.iter().fold((0i64, 0i64), |(sx, sy), s| {
+            (
+                sx + s.rect.min.x.get() + s.rect.max.x.get(),
+                sy + s.rect.min.y.get() + s.rect.max.y.get(),
+            )
+        });
+        Point::new(Dbu(sx / (2 * n)), Dbu(sy / (2 * n)))
     }
 
     /// The pin of `instance` for Liberty port `port`, if connected.
@@ -282,21 +296,26 @@ impl Constants {
         }
     }
 
-    /// The level a pin holds.
+    /// The level a pin holds; pins added since the search are unknown.
     #[must_use]
     pub fn level(&self, pin: PinId) -> Logic {
-        self.level[pin.index()]
+        self.level
+            .get(pin.index())
+            .copied()
+            .unwrap_or(Logic::Unknown)
     }
 
     /// Whether a pin holds a constant.
     #[must_use]
     pub fn is_constant(&self, pin: PinId) -> bool {
-        self.level[pin.index()].is_constant()
+        self.level(pin).is_constant()
     }
 
     /// Whether the arc from `from_port` to `to_port` of `instance` can
-    /// switch its output, given the constants on its other pins: false
-    /// where `OpenSTA` disables the arc.
+    /// switch its output, given the constants on its pins: false where
+    /// `OpenSTA` finds the arc's timing sense to be none, because the input
+    /// is constant, the output's function reads the input but no longer
+    /// depends on it, or a tristate enable is held low.
     #[must_use]
     pub fn arc_enabled(
         &self,
@@ -308,11 +327,26 @@ impl Constants {
         let Some((_, cell)) = netlist.link.cell(netlist.db, instance) else {
             return true;
         };
+        if netlist
+            .pin_of_port(instance, from_port)
+            .is_some_and(|pin| self.is_constant(pin))
+        {
+            return false;
+        }
         let Some(function) = &cell.ports[to_port].function else {
             return true;
         };
+        let from_name = cell.ports[from_port].name.as_str();
+        if !function.ports().contains(&from_name) {
+            return true;
+        }
         let port_level = netlist.port_levels(instance, &self.level);
-        function.depends_on(&cell.ports[from_port].name, &port_level)
+        if let Some(enable) = &cell.ports[to_port].three_state
+            && enable.eval(&port_level) == Logic::Zero
+        {
+            return false;
+        }
+        function.depends_on(from_name, &port_level)
     }
 }
 
@@ -384,10 +418,10 @@ impl ClockNetwork {
         Ok(Self { clock, sources })
     }
 
-    /// Whether a pin carries a clock.
+    /// Whether a pin carries a clock; pins added since the search do not.
     #[must_use]
     pub fn is_clock(&self, pin: PinId) -> bool {
-        self.clock[pin.index()]
+        self.clock.get(pin.index()).copied().unwrap_or(false)
     }
 
     /// The pins the clocks enter at.

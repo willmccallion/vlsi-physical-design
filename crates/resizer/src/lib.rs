@@ -4,8 +4,12 @@
 //! pin's slew and every driver's load are within the library's limits.
 
 pub mod buffers;
+pub mod dmp;
+pub mod graph;
 pub mod library;
 pub mod netlist;
+pub mod parasitics;
+pub mod steiner;
 
 pub use buffers::{BufferError, PortBuffers, buffer_ports, remove_buffers};
 pub use library::{BufferSet, Link, LinkError};
