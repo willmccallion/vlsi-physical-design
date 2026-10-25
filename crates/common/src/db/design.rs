@@ -431,6 +431,32 @@ pub struct NetlistDB {
     io_pin_by_name: HashMap<String, IoPinId>,
 }
 
+/// Why an edit of the netlist was refused.
+#[derive(Clone, Debug, PartialEq, Eq, thiserror::Error)]
+pub enum EditError {
+    /// A net to remove still connects something that stays.
+    #[error("net '{0}' still has connections")]
+    NetInUse(String),
+}
+
+/// The new index of each kept entry, with the dropped ones left at their old
+/// index, which nothing reads.
+fn renumber(dropped: &[bool]) -> Vec<usize> {
+    let mut next = 0;
+    dropped
+        .iter()
+        .enumerate()
+        .map(|(i, &drop)| {
+            if drop {
+                i
+            } else {
+                next += 1;
+                next - 1
+            }
+        })
+        .collect()
+}
+
 impl NetlistDB {
     /// Creates an empty design over a library.
     pub fn new(name: String, library: Library) -> Self {
@@ -566,6 +592,150 @@ impl NetlistDB {
             pin,
         });
         Ok(id)
+    }
+
+    /// Adds a signal net with no connections.
+    pub fn add_net(&mut self, name: &str) -> Result<NetId, DuplicateName> {
+        if self.net_by_name.contains_key(name) {
+            return Err(DuplicateName {
+                kind: "net",
+                name: name.to_string(),
+            });
+        }
+        Ok(self.net_or_insert(name))
+    }
+
+    /// Renames a net.
+    pub fn rename_net(&mut self, net: NetId, name: String) -> Result<(), DuplicateName> {
+        if self.nets[net.index()].name == name {
+            return Ok(());
+        }
+        if self.net_by_name.contains_key(&name) {
+            return Err(DuplicateName { kind: "net", name });
+        }
+        let old = std::mem::replace(&mut self.nets[net.index()].name, name.clone());
+        let _ = self.net_by_name.remove(&old);
+        let _ = self.net_by_name.insert(name, net);
+        Ok(())
+    }
+
+    /// Moves a connection to another net.
+    pub fn move_pin(&mut self, pin: PinId, to: NetId) {
+        let from = self.pins[pin.index()].net;
+        if from == to {
+            return;
+        }
+        self.nets[from.index()].pins.retain(|&p| p != pin);
+        self.nets[to.index()].pins.push(pin);
+        self.pins[pin.index()].net = to;
+        if let PinOwner::Io(io) = self.pins[pin.index()].owner {
+            self.io_pins[io.index()].net = to;
+        }
+    }
+
+    /// Removes instances with their connections, and nets that have none
+    /// left, renumbering what remains: every [`CellId`], [`NetId`] and
+    /// [`PinId`] held before is stale afterwards.
+    pub fn remove(&mut self, cells: &[CellId], nets: &[NetId]) -> Result<(), EditError> {
+        let mut drop_cell = vec![false; self.cells.len()];
+        for &c in cells {
+            drop_cell[c.index()] = true;
+        }
+        let mut drop_net = vec![false; self.nets.len()];
+        for &n in nets {
+            drop_net[n.index()] = true;
+        }
+        for (i, net) in self.nets.iter().enumerate() {
+            let left = net
+                .pins
+                .iter()
+                .filter(|&&p| match self.pins[p.index()].owner {
+                    PinOwner::Cell { cell, .. } => !drop_cell[cell.index()],
+                    PinOwner::Io(_) => true,
+                })
+                .count();
+            if drop_net[i] && left > 0 {
+                return Err(EditError::NetInUse(net.name.clone()));
+            }
+        }
+        let cell_map = renumber(&drop_cell);
+        let net_map = renumber(&drop_net);
+        let drop_pin: Vec<bool> = self
+            .pins
+            .iter()
+            .map(|p| match p.owner {
+                PinOwner::Cell { cell, .. } => drop_cell[cell.index()],
+                PinOwner::Io(_) => false,
+            })
+            .collect();
+        let pin_map = renumber(&drop_pin);
+        let remap_pins = |pins: &mut Vec<PinId>| {
+            pins.retain(|p| !drop_pin[p.index()]);
+            for p in pins.iter_mut() {
+                *p = PinId::new(pin_map[p.index()]);
+            }
+        };
+
+        let cells = std::mem::take(&mut self.cells);
+        let mut kept = Vec::with_capacity(cells.len());
+        for (i, mut cell) in cells.into_iter().enumerate() {
+            if drop_cell[i] {
+                continue;
+            }
+            remap_pins(&mut cell.pins);
+            kept.push(cell);
+        }
+        self.cells = kept;
+
+        let nets = std::mem::take(&mut self.nets);
+        let mut kept = Vec::with_capacity(nets.len());
+        for (i, mut net) in nets.into_iter().enumerate() {
+            if drop_net[i] {
+                continue;
+            }
+            remap_pins(&mut net.pins);
+            kept.push(net);
+        }
+        self.nets = kept;
+
+        let pins = std::mem::take(&mut self.pins);
+        let mut kept = Vec::with_capacity(pins.len());
+        for (i, mut pin) in pins.into_iter().enumerate() {
+            if drop_pin[i] {
+                continue;
+            }
+            pin.net = NetId::new(net_map[pin.net.index()]);
+            if let PinOwner::Cell {
+                cell,
+                pin: macro_pin,
+            } = pin.owner
+            {
+                pin.owner = PinOwner::Cell {
+                    cell: CellId::new(cell_map[cell.index()]),
+                    pin: macro_pin,
+                };
+            }
+            kept.push(pin);
+        }
+        self.pins = kept;
+
+        for io in &mut self.io_pins {
+            io.net = NetId::new(net_map[io.net.index()]);
+            io.pin = PinId::new(pin_map[io.pin.index()]);
+        }
+        self.cell_by_name = self
+            .cells
+            .iter()
+            .enumerate()
+            .map(|(i, c)| (c.name.clone(), CellId::new(i)))
+            .collect();
+        self.net_by_name = self
+            .nets
+            .iter()
+            .enumerate()
+            .map(|(i, n)| (n.name.clone(), NetId::new(i)))
+            .collect();
+        Ok(())
     }
 
     /// Looks up an instance by name.
