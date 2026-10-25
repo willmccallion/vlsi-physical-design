@@ -244,6 +244,16 @@ impl TimingGraph {
     }
 
     /// Re-estimates a net's parasitics after its pins or their positions
+    /// changed, leaving the slews that depend on them to a later
+    /// propagation from the net's drivers.
+    pub fn parasitics_invalid(&mut self, netlist: &Netlist<'_>, clocks: &ClockNetwork, net: NetId) {
+        if net.index() >= self.parasitics.len() || netlist.db.pins.len() > self.slew.len() {
+            self.grow(netlist);
+        }
+        self.parasitics[net.index()] = estimate_net(netlist, clocks, net, &self.rc);
+    }
+
+    /// Re-estimates a net's parasitics after its pins or their positions
     /// changed, and finds the slews and delays that depend on them again;
     /// returns every driver whose delays were found again.
     pub fn update_net(

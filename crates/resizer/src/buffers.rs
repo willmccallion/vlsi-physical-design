@@ -119,7 +119,7 @@ pub fn remove_buffers(db: &mut NetlistDB, link: &Link<'_>) -> Result<usize, Buff
         .filter(|(_, r)| **r)
         .map(|(i, _)| NetId::new(i))
         .collect();
-    db.remove(&cells, &nets)?;
+    let _ = db.remove(&cells, &nets)?;
     for (survivor, name) in renames {
         if let Some(net) = db.net_id(&survivor)
             && db.net_id(&name).is_none()

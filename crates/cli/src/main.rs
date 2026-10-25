@@ -29,10 +29,12 @@ use pare_placer::io::{self, IoLayers};
 use pare_placer::legalize::abacus;
 use pare_placer::model::PlacementModel;
 use pare_placer::zones::{Zone, Zones};
-use pare_resizer::graph::TimingGraph;
+
 use pare_resizer::parasitics::WireRc;
-use pare_resizer::repair::Context as RepairContext;
-use pare_resizer::{ClockNetwork, Constants, Link, Namer, Netlist, RepairOptions, Repairer};
+use pare_resizer::resizer::Context as RepairContext;
+use pare_resizer::{
+    ClockNetwork, Constants, Link, Namer, Netlist, RepairOptions, Repairer, Resizer,
+};
 use pare_router::{CapacityReduction, GlobalRouteEstimator, RouteError};
 use report::{NetlistSummary, PlacementSummary, Report, RoutingSummary};
 use std::path::{Path, PathBuf};
@@ -754,29 +756,30 @@ fn repair_design(
     let phase_start = Instant::now();
     ui::phase("Design Repair");
     let link = Link::new(db, &repair.liberty, &netlist_config.dont_use)?;
-    let (constants, clocks, graph) = {
+    let (constants, clocks) = {
         let netlist = Netlist::new(db, &link);
         let constants = Constants::find(&netlist);
         let clocks = ClockNetwork::from_ports(&netlist, &netlist_config.clock_ports, &constants)?;
-        let rc = WireRc::per_micron(resistance, capacitance, layer_id);
-        let graph = TimingGraph::new(&netlist, &clocks, &constants, rc);
-        (constants, clocks, graph)
+        (constants, clocks)
     };
+    let rc = WireRc::per_micron(resistance, capacitance, layer_id);
     let buffers = link.find_buffers(db)?;
     let context = RepairContext {
         link: &link,
         clocks: &clocks,
         constants: &constants,
     };
-    let repairer = Repairer::new(
+    let mut resizer = Resizer::new(
         db,
         context,
-        graph,
+        rc,
         buffers,
         &mut repair.namer,
         RepairOptions::default(),
+        None,
     )?;
-    let done = repairer.repair_design()?;
+    let done = Repairer::new(&mut resizer).repair_design()?;
+    let _ = resizer.finish()?;
     ui::stat_row(
         "Slew violations:",
         &done.slew_violations.to_string(),
