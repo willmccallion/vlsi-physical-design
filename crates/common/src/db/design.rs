@@ -61,6 +61,10 @@ pub struct Cell {
     pub region: Option<RegionId>,
     /// Net connections on this instance.
     pub pins: Vec<PinId>,
+    /// Whether the instance has been taken off its nets and only awaits
+    /// [`NetlistDB::remove`]; its pins keep their nets so it can be put
+    /// back.
+    pub retired: bool,
 }
 
 /// How a region constrains the cells assigned to it.
@@ -449,6 +453,18 @@ pub enum EditError {
     },
 }
 
+/// Where every entry went when [`NetlistDB::remove`] compacted the design:
+/// its new id, or none for a dropped one.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct Renumbering {
+    /// By old cell id.
+    pub cells: Vec<Option<CellId>>,
+    /// By old net id.
+    pub nets: Vec<Option<NetId>>,
+    /// By old pin id.
+    pub pins: Vec<Option<PinId>>,
+}
+
 /// The new index of each kept entry, with the dropped ones left at their old
 /// index, which nothing reads.
 fn renumber(dropped: &[bool]) -> Vec<usize> {
@@ -532,8 +548,35 @@ impl NetlistDB {
             status,
             region: None,
             pins: Vec::new(),
+            retired: false,
         });
         Ok(id)
+    }
+
+    /// Takes `cell` off its nets without removing it, so that the edit can
+    /// be undone with [`NetlistDB::unretire_cell`]; nothing changes for a
+    /// cell already retired.
+    pub fn retire_cell(&mut self, cell: CellId) {
+        if self.cells[cell.index()].retired {
+            return;
+        }
+        for &pin in &self.cells[cell.index()].pins {
+            let net = self.pins[pin.index()].net;
+            self.nets[net.index()].pins.retain(|&p| p != pin);
+        }
+        self.cells[cell.index()].retired = true;
+    }
+
+    /// Puts a retired cell back on the nets its pins kept.
+    pub fn unretire_cell(&mut self, cell: CellId) {
+        if !self.cells[cell.index()].retired {
+            return;
+        }
+        for &pin in &self.cells[cell.index()].pins {
+            let net = self.pins[pin.index()].net;
+            self.nets[net.index()].pins.push(pin);
+        }
+        self.cells[cell.index()].retired = false;
     }
 
     /// Returns the net with this name, creating it if needed.
@@ -680,11 +723,12 @@ impl NetlistDB {
         }
     }
 
-    /// Removes instances with their connections, and nets that have none
-    /// left, renumbering what remains: every [`CellId`], [`NetId`] and
-    /// [`PinId`] held before is stale afterwards.
-    pub fn remove(&mut self, cells: &[CellId], nets: &[NetId]) -> Result<(), EditError> {
-        let mut drop_cell = vec![false; self.cells.len()];
+    /// Removes instances with their connections, every retired instance
+    /// too, and nets that have none left, renumbering what remains: every
+    /// [`CellId`], [`NetId`] and [`PinId`] held before is stale afterwards,
+    /// and the returned maps say where each went.
+    pub fn remove(&mut self, cells: &[CellId], nets: &[NetId]) -> Result<Renumbering, EditError> {
+        let mut drop_cell: Vec<bool> = self.cells.iter().map(|c| c.retired).collect();
         for &c in cells {
             drop_cell[c.index()] = true;
         }
@@ -782,7 +826,27 @@ impl NetlistDB {
             .enumerate()
             .map(|(i, n)| (n.name.clone(), NetId::new(i)))
             .collect();
-        Ok(())
+        let kept = |dropped: &[bool], map: &[usize]| {
+            dropped
+                .iter()
+                .zip(map)
+                .map(|(&drop, &new)| (!drop).then_some(new))
+                .collect::<Vec<_>>()
+        };
+        Ok(Renumbering {
+            cells: kept(&drop_cell, &cell_map)
+                .into_iter()
+                .map(|i| i.map(CellId::new))
+                .collect(),
+            nets: kept(&drop_net, &net_map)
+                .into_iter()
+                .map(|i| i.map(NetId::new))
+                .collect(),
+            pins: kept(&drop_pin, &pin_map)
+                .into_iter()
+                .map(|i| i.map(PinId::new))
+                .collect(),
+        })
     }
 
     /// Looks up an instance by name.

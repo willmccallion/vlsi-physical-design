@@ -113,7 +113,7 @@ fn removing_cells_drops_their_connections_and_renumbers() {
     let pins_before = db.pins.len();
     let removed_pins = db.cells[u1.index()].pins.len() + db.cells[u5.index()].pins.len();
 
-    db.remove(&[u1, u5], &[]).unwrap();
+    let _ = db.remove(&[u1, u5], &[]).unwrap();
 
     assert_eq!(db.cells.len(), cells_before - 2);
     assert_eq!(db.pins.len(), pins_before - removed_pins);
@@ -141,13 +141,60 @@ fn a_net_is_removed_only_once_nothing_connects_to_it() {
         db.move_pin(pin, n2);
     }
     let nets_before = db.nets.len();
-    db.remove(&[u1], &[n1]).unwrap();
+    let _ = db.remove(&[u1], &[n1]).unwrap();
 
     assert_eq!(db.nets.len(), nets_before - 1);
     assert_eq!(db.net_id("n1"), None);
     assert_eq!(
         net_pins(&db, "n2"),
         vec!["u2/A", "u2/Y", "u3/A", "u3/B", "u4/A"]
+    );
+    assert_consistent(&db);
+}
+
+#[test]
+fn a_retired_cell_leaves_its_nets_and_comes_back() {
+    let mut db = tiny_design();
+    let u1 = db.cell_id("u1").unwrap();
+
+    db.retire_cell(u1);
+
+    assert!(db.cells[u1.index()].retired);
+    assert_eq!(net_pins(&db, "in"), vec!["PIN in"]);
+    assert_eq!(net_pins(&db, "n1"), vec!["u2/A", "u3/A"]);
+    assert_eq!(db.cells[u1.index()].pins.len(), 2);
+
+    db.unretire_cell(u1);
+
+    assert!(!db.cells[u1.index()].retired);
+    assert_eq!(net_pins(&db, "in"), vec!["PIN in", "u1/A"]);
+    assert_eq!(net_pins(&db, "n1"), vec!["u1/Y", "u2/A", "u3/A"]);
+    assert_consistent(&db);
+}
+
+#[test]
+fn removal_drops_retired_cells_and_maps_the_survivors() {
+    let mut db = tiny_design();
+    let u1 = db.cell_id("u1").unwrap();
+    let u5 = db.cell_id("u5").unwrap();
+    let u7 = db.cell_id("u7").unwrap();
+    let u7_pin = db.cells[u7.index()].pins[0];
+    let n3 = db.net_id("n3").unwrap();
+    db.retire_cell(u5);
+
+    let map = db.remove(&[u1], &[]).unwrap();
+
+    assert_eq!(db.cell_id("u5"), None);
+    assert_eq!(map.cells[u1.index()], None);
+    assert_eq!(map.cells[u5.index()], None);
+    let new_u7 = map.cells[u7.index()].unwrap();
+    assert_eq!(db.cells[new_u7.index()].name, "u7");
+    let new_pin = map.pins[u7_pin.index()].unwrap();
+    assert!(db.cells[new_u7.index()].pins.contains(&new_pin));
+    assert_eq!(db.nets[map.nets[n3.index()].unwrap().index()].name, "n3");
+    assert_eq!(
+        net_pins(&db, "n3"),
+        vec!["ram0/D", "u3/Y", "u4/B", "u6/A", "u7/A"]
     );
     assert_consistent(&db);
 }
