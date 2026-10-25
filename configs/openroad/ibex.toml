@@ -3,6 +3,7 @@ purpose = "place_and_route"
 [input]
 lef_files = ["inputs/orfs/OpenROAD-flow-scripts-26Q2/flow/platforms/nangate45/lef/NangateOpenCellLibrary.tech.lef", "inputs/orfs/OpenROAD-flow-scripts-26Q2/flow/platforms/nangate45/lef/NangateOpenCellLibrary.macro.mod.lef"]
 liberty_files = ["inputs/orfs/OpenROAD-flow-scripts-26Q2/flow/platforms/nangate45/lib/NangateOpenCellLibrary_typical.lib"]
+sdc_file = "inputs/orfs/OpenROAD-flow-scripts-26Q2/flow/designs/nangate45/ibex/constraint.sdc"
 def_file = "inputs/openroad/ibex/ibex_orfs.def"
 output_def = "output/ibex/placed.def"
 
@@ -18,4 +19,3 @@ signal_layer = "metal3"
 wire_resistance_ohm_per_um = 3.57728
 wire_capacitance_ff_per_um = 0.103981
 dont_use = ["TAPCELL_X1", "FILLCELL_X1", "AOI211_X1", "OAI211_X1"]
-clock_ports = ["clk_i"]

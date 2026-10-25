@@ -60,19 +60,19 @@ def orfs(
     nickname,
     sources,
     about,
-    clocks,
     io=None,
     io_enabled=None,
     macros=(),
     orfs_pins=False,
+    sdc="constraint.sdc",
 ):
     """A Nangate45 design that OpenROAD-flow-scripts synthesizes from its
     `sources` under flow/designs/src and floorplans: die, rows, tracks, tap
     cells, power grid, the `macros` it places, and the I/O pins only where
     its floorplan gives them. With `orfs_pins`, the I/O pins are those its
     own pin placement puts within the design's I/O constraints, after its
-    first global placement. `clocks` names the ports its constraints define
-    clocks on."""
+    first global placement. `sdc` is its constraints file under the flow's
+    design directory."""
     return {
         "suite": "openroad",
         "purpose": "place_and_route",
@@ -83,7 +83,7 @@ def orfs(
         "lef": ORFS_NANGATE45_LEF + [f"{ORFS_NANGATE45}/{m}.lef" for m in macros],
         "liberty": [f"{ORFS_NANGATE45_LIB}/NangateOpenCellLibrary_typical.lib"]
         + [f"{ORFS_NANGATE45_LIB}/{m}.lib" for m in macros],
-        "clocks": clocks,
+        "sdc": f"{ORFS_DIR}/flow/designs/nangate45/{nickname}/{sdc}",
         "def": f"{nickname}_orfs.def",
         "io": io,
         "io_enabled": False if orfs_pins else io_enabled,
@@ -164,36 +164,32 @@ DESIGNS = {
         "aes",
         ["aes"],
         "AES cipher, ~13k nets, ORFS 26Q2 synthesis and floorplan (32% utilization)",
-        ["clk"],
         io_enabled=False,
     ),
     "ibex": orfs(
         "ibex",
         ["ibex_sv"],
         "Ibex RISC-V core, ORFS 26Q2 synthesis and floorplan (50% utilization)",
-        ["clk_i"],
         io=NANGATE45_IO,
     ),
     "jpeg": orfs(
         "jpeg",
         ["jpeg"],
         "JPEG encoder, ORFS 26Q2 synthesis and floorplan (80% utilization)",
-        ["clk"],
         io=NANGATE45_IO,
     ),
     "ariane133": orfs(
         "ariane133",
         ["ariane133"],
         "Ariane RISC-V core, ~176k cells and 132 fakeram45 SRAM macros, ORFS 26Q2 synthesis and floorplan",
-        ["clk_i"],
         macros=["fakeram45_256x16"],
         orfs_pins=True,
+        sdc="ariane.sdc",
     ),
     "bp_quad": orfs(
         "bp_quad",
         ["bp_quad"],
         "BlackParrot quad-core chip, ~1.24M cells, 1.43M nets and 220 fakeram45 SRAM macros, ORFS 26Q2 synthesis and floorplan",
-        ["p_bsg_tag_clk_i", "p_clk_A_i", "p_clk_B_i"],
         macros=[
             "fakeram45_256x48",
             "fakeram45_32x32",
@@ -203,6 +199,7 @@ DESIGNS = {
             "fakeram45_128x116",
         ],
         orfs_pins=True,
+        sdc="bsg_chip.sdc",
     ),
     "swerv": openroad(
         "src/gpl/test/medium04.def",
@@ -438,6 +435,8 @@ def config_text(name):
         lines.append(f"lef_files = {toml_list(lefs)}")
         if d.get("liberty"):
             lines.append(f"liberty_files = {toml_list(d['liberty'])}")
+        if d.get("sdc"):
+            lines.append(f'sdc_file = "{d["sdc"]}"')
         lines.append(f'def_file = "{dest}/{d["def"]}"')
     lines.append(f'output_def = "output/{name}/placed.def"')
     if d["purpose"] != "routing":
@@ -457,7 +456,6 @@ def config_text(name):
         lines += ["", "[netlist]"]
         lines += [f"{k} = {json.dumps(v)}" for k, v in ORFS_NANGATE45_WIRE.items()]
         lines.append(f"dont_use = {toml_list(ORFS_NANGATE45_DONT_USE)}")
-        lines.append(f"clock_ports = {toml_list(d['clocks'])}")
     return "\n".join(lines) + "\n"
 
 

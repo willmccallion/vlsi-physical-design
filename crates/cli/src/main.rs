@@ -11,7 +11,8 @@ use pare_common::db::design::{NetlistDB, PlacementStatus};
 use pare_common::db::indices::CellId;
 use pare_common::db::liberty::Liberty;
 use pare_common::db::library::LayerRef;
-use pare_common::db::parser::{bookshelf, def, lef, liberty};
+use pare_common::db::parser::{bookshelf, def, lef, liberty, sdc};
+use pare_common::db::sdc::Sdc;
 use pare_common::db::writer;
 use pare_common::geom::dbu::Dbu;
 use pare_common::geom::point::Point;
@@ -33,10 +34,11 @@ use pare_placer::zones::{Zone, Zones};
 use pare_resizer::parasitics::WireRc;
 use pare_resizer::resizer::Context as RepairContext;
 use pare_resizer::{
-    ClockNetwork, Constants, Link, Namer, Netlist, RepairOptions, Repairer, Resizer,
+    ClockNetwork, Constants, Link, Namer, Netlist, RepairOptions, Repairer, Resizer, SetupOptions,
+    repair_setup,
 };
 use pare_router::{CapacityReduction, GlobalRouteEstimator, RouteError};
-use report::{NetlistSummary, PlacementSummary, Report, RoutingSummary};
+use report::{NetlistSummary, PlacementSummary, Report, RoutingSummary, TimingSummary};
 use std::path::{Path, PathBuf};
 use std::time::Instant;
 
@@ -648,8 +650,32 @@ fn load_liberty(paths: &[String]) -> anyhow::Result<Liberty> {
 /// What the netlist steps before placement leave for the repair after it.
 struct NetlistRepair {
     liberty: Liberty,
+    sdc: Option<Sdc>,
     namer: Namer,
     summary: NetlistSummary,
+}
+
+/// The pins the clocks reach: those the SDC file's clocks enter at when
+/// the input names one, else those `[netlist] clock_ports` names.
+fn clock_network(
+    netlist: &Netlist<'_>,
+    config: &Config,
+    sdc: Option<&Sdc>,
+    constants: &Constants,
+) -> anyhow::Result<ClockNetwork> {
+    match sdc {
+        Some(sdc) => {
+            if !config.netlist.clock_ports.is_empty() {
+                anyhow::bail!("[netlist] clock_ports must be empty when [input] sdc_file is set");
+            }
+            Ok(ClockNetwork::from_sdc(netlist, sdc, constants))
+        }
+        None => Ok(ClockNetwork::from_ports(
+            netlist,
+            &config.netlist.clock_ports,
+            constants,
+        )?),
+    }
 }
 
 /// Strips the buffers synthesis left and buffers the ports, as
@@ -664,6 +690,13 @@ fn repair_netlist(
         return Ok(None);
     }
     let liberty = load_liberty(&config.input.liberty_files)?;
+    let sdc = match &config.input.sdc_file {
+        Some(path) => {
+            ui::header("Input", path);
+            Some(sdc::parse_file(Path::new(path), db, &liberty)?)
+        }
+        None => None,
+    };
     let link = Link::new(db, &liberty, &config.netlist.dont_use)?;
     ui::section("Netlist");
     let mut namer = Namer::new();
@@ -687,8 +720,7 @@ fn repair_netlist(
         let (constants, clocks) = {
             let netlist = Netlist::new(db, &link);
             let constants = Constants::find(&netlist);
-            let clocks =
-                ClockNetwork::from_ports(&netlist, &config.netlist.clock_ports, &constants)?;
+            let clocks = clock_network(&netlist, config, sdc.as_ref(), &constants)?;
             (constants, clocks)
         };
         let buffers = link.find_buffers(db)?;
@@ -722,6 +754,7 @@ fn repair_netlist(
     });
     Ok(Some(NetlistRepair {
         liberty,
+        sdc,
         namer,
         summary,
     }))
@@ -759,7 +792,7 @@ fn repair_design(
     let (constants, clocks) = {
         let netlist = Netlist::new(db, &link);
         let constants = Constants::find(&netlist);
-        let clocks = ClockNetwork::from_ports(&netlist, &netlist_config.clock_ports, &constants)?;
+        let clocks = clock_network(&netlist, config, repair.sdc.as_ref(), &constants)?;
         (constants, clocks)
     };
     let rc = WireRc::per_micron(resistance, capacitance, layer_id);
@@ -776,10 +809,9 @@ fn repair_design(
         buffers,
         &mut repair.namer,
         RepairOptions::default(),
-        None,
+        repair.sdc.as_ref(),
     )?;
     let done = Repairer::new(&mut resizer).repair_design()?;
-    let _ = resizer.finish()?;
     ui::stat_row(
         "Slew violations:",
         &done.slew_violations.to_string(),
@@ -796,7 +828,7 @@ fn repair_design(
         "Nets repaired:",
         &done.repaired_nets.to_string(),
         "Cells:",
-        &db.cells.len().to_string(),
+        &resizer.netlist().db.cells.len().to_string(),
     );
     repair.summary.slew_violations = done.slew_violations;
     repair.summary.cap_violations = done.cap_violations;
@@ -815,6 +847,101 @@ fn repair_design(
         repeaters: done.inserted,
     });
     report.phase("design repair", phase_start);
+    repair_timing(config, &mut resizer, report)?;
+    let _ = resizer.finish()?;
+    Ok(())
+}
+
+/// Repairs the paths failing setup, as `OpenROAD-flow-scripts` runs
+/// `repair_timing` after placement, when the input has constraints.
+fn repair_timing(
+    config: &Config,
+    resizer: &mut Resizer<'_>,
+    report: &mut Report,
+) -> anyhow::Result<()> {
+    if !config.netlist.repair_timing || resizer.sta().is_none() {
+        return Ok(());
+    }
+    let phase_start = Instant::now();
+    ui::phase("Timing Repair");
+    ui::timing_table_header();
+    let summary = {
+        let mut show = |progress: &pare_resizer::SetupProgress| {
+            let iter = progress
+                .iteration
+                .map_or_else(|| "final".to_string(), |i| i.to_string());
+            let worst = progress.worst.as_deref().unwrap_or("");
+            ui::timing_iter(&ui::TimingRow {
+                iter: &iter,
+                removed: progress.removed,
+                resized: progress.resized,
+                inserted: progress.inserted,
+                cloned: progress.cloned,
+                swaps: progress.swapped,
+                area_change_percent: progress.area_change_percent,
+                wns_ns: progress.wns * 1e9,
+                tns_ns: progress.tns * 1e9,
+                failing: progress.failing,
+                worst,
+            });
+        };
+        repair_setup(resizer, SetupOptions::default(), &mut show)?
+    };
+    eprintln!();
+    ui::stat_row(
+        "WNS (ns):",
+        &format!(
+            "{:.3} -> {:.3}",
+            summary.wns_before * 1e9,
+            summary.wns_after * 1e9
+        ),
+        "TNS (ns):",
+        &format!(
+            "{:.1} -> {:.1}",
+            summary.tns_before * 1e9,
+            summary.tns_after * 1e9
+        ),
+    );
+    ui::stat_row(
+        "Failing endpoints:",
+        &format!("{} -> {}", summary.failing_before, summary.failing_after),
+        "Iterations:",
+        &summary.iterations.to_string(),
+    );
+    ui::stat_row(
+        "Removed:",
+        &summary.removed.to_string(),
+        "Resized:",
+        &summary.resized.to_string(),
+    );
+    ui::stat_row(
+        "Inserted:",
+        &summary.inserted.to_string(),
+        "Cloned:",
+        &summary.cloned.to_string(),
+    );
+    ui::stat_row(
+        "Pin swaps:",
+        &summary.swapped.to_string(),
+        "Area:",
+        &format!("{:+.1}%", summary.area_change_percent),
+    );
+    report.timing = Some(TimingSummary {
+        failing_before: summary.failing_before,
+        failing_after: summary.failing_after,
+        wns_before_ns: summary.wns_before * 1e9,
+        wns_after_ns: summary.wns_after * 1e9,
+        tns_before_ns: summary.tns_before * 1e9,
+        tns_after_ns: summary.tns_after * 1e9,
+        removed: summary.removed,
+        resized: summary.resized,
+        inserted: summary.inserted,
+        cloned: summary.cloned,
+        swapped: summary.swapped,
+        iterations: summary.iterations,
+        area_change_percent: summary.area_change_percent,
+    });
+    report.phase("timing repair", phase_start);
     Ok(())
 }
 

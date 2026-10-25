@@ -34,6 +34,7 @@ pub struct Config {
 /// runs when the input names Liberty files, and not otherwise.
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
+#[allow(clippy::struct_excessive_bools)] // each is an independent on/off switch in the TOML
 pub struct NetlistConfig {
     /// Whether the buffers synthesis left are removed before placement.
     #[serde(default = "default_enabled")]
@@ -45,6 +46,10 @@ pub struct NetlistConfig {
     /// placement until slews and loads meet the library's limits.
     #[serde(default = "default_enabled")]
     pub repair_design: bool,
+    /// Whether the paths failing setup are repaired after design repair,
+    /// when the input names an SDC file.
+    #[serde(default = "default_enabled")]
+    pub repair_timing: bool,
     /// The routing layer signal wires are estimated on.
     pub signal_layer: Option<String>,
     /// Resistance of that layer's wire, in ohms per micron.
@@ -55,7 +60,8 @@ pub struct NetlistConfig {
     /// marks.
     #[serde(default)]
     pub dont_use: Vec<String>,
-    /// The I/O pins clocks enter at, which repair leaves alone.
+    /// The I/O pins clocks enter at, which repair leaves alone; only
+    /// without an SDC file, which names the clocks itself.
     #[serde(default)]
     pub clock_ports: Vec<String>,
 }
@@ -66,6 +72,7 @@ impl Default for NetlistConfig {
             remove_buffers: default_enabled(),
             buffer_ports: default_enabled(),
             repair_design: default_enabled(),
+            repair_timing: default_enabled(),
             signal_layer: None,
             wire_resistance_ohm_per_um: None,
             wire_capacitance_ff_per_um: None,
@@ -274,6 +281,8 @@ pub struct InputConfig {
     /// Liberty files; netlist repair runs when there are any.
     #[serde(default)]
     pub liberty_files: Vec<String>,
+    /// SDC timing constraints; timing repair runs when set.
+    pub sdc_file: Option<String>,
     /// DEF design.
     #[serde(default)]
     pub def_file: String,
@@ -294,6 +303,7 @@ impl Default for InputConfig {
         Self {
             lef_files: Vec::new(),
             liberty_files: Vec::new(),
+            sdc_file: None,
             def_file: String::new(),
             output_def: default_output_def(),
             bookshelf_aux_file: None,

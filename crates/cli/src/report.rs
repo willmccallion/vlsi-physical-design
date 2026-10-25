@@ -18,6 +18,8 @@ pub struct Report {
     pub phases: Vec<Phase>,
     /// Netlist repair results, when the run repaired the netlist.
     pub netlist: Option<NetlistSummary>,
+    /// Timing repair results, when the run had constraints.
+    pub timing: Option<TimingSummary>,
     /// Placement results, when the run placed.
     pub placement: Option<PlacementSummary>,
     /// Routing results, when the run routed.
@@ -62,6 +64,37 @@ pub struct NetlistSummary {
     pub resized: usize,
     /// Repeaters repair inserted.
     pub repeaters: usize,
+}
+
+/// What setup repair did, with slacks in nanoseconds.
+#[derive(Debug, Default, Serialize)]
+pub struct TimingSummary {
+    /// Endpoints failing setup before repair.
+    pub failing_before: usize,
+    /// Endpoints failing setup after repair.
+    pub failing_after: usize,
+    /// Worst setup slack before repair.
+    pub wns_before_ns: f64,
+    /// Worst setup slack after repair.
+    pub wns_after_ns: f64,
+    /// Total negative setup slack before repair.
+    pub tns_before_ns: f64,
+    /// Total negative setup slack after repair.
+    pub tns_after_ns: f64,
+    /// Buffers repair removed.
+    pub removed: usize,
+    /// Gates repair resized.
+    pub resized: usize,
+    /// Buffers repair inserted.
+    pub inserted: usize,
+    /// Gates repair cloned.
+    pub cloned: usize,
+    /// Input pins repair swapped.
+    pub swapped: usize,
+    /// Repair iterations.
+    pub iterations: usize,
+    /// Cell area change, as a percentage.
+    pub area_change_percent: f64,
 }
 
 /// What placement did.

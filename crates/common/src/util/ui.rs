@@ -152,6 +152,76 @@ pub fn routing_iter(
     );
 }
 
+/// Prints the header of the timing repair table: the moves made so far,
+/// the area change, the worst and total negative slack, the endpoints
+/// still failing and the worst of them.
+pub fn timing_table_header() {
+    eprintln!(
+        "\n    {}",
+        format!(
+            "{:<6} {:>7} {:>7} {:>8} {:>6} {:>5} {:>7} {:>8} {:>9} {:>6}  {}",
+            "Iter",
+            "Removed",
+            "Resized",
+            "Inserted",
+            "Cloned",
+            "Swaps",
+            "Area",
+            "WNS",
+            "TNS",
+            "Viol",
+            "Worst"
+        )
+        .dim()
+    );
+    eprintln!("    {}", "-".repeat(96).dim());
+}
+
+/// One row of the timing repair table; slacks in nanoseconds.
+#[derive(Clone, Copy, Debug)]
+pub struct TimingRow<'a> {
+    /// The iteration, or a label for the final row.
+    pub iter: &'a str,
+    /// Buffers removed so far.
+    pub removed: usize,
+    /// Gates resized so far.
+    pub resized: usize,
+    /// Buffers inserted so far.
+    pub inserted: usize,
+    /// Gates cloned so far.
+    pub cloned: usize,
+    /// Pins swapped so far.
+    pub swaps: usize,
+    /// Cell area change since the start, as a percentage.
+    pub area_change_percent: f64,
+    /// Worst slack.
+    pub wns_ns: f64,
+    /// Total negative slack.
+    pub tns_ns: f64,
+    /// Endpoints still failing.
+    pub failing: usize,
+    /// The worst endpoint.
+    pub worst: &'a str,
+}
+
+/// Prints one timing repair progress row.
+pub fn timing_iter(row: &TimingRow<'_>) {
+    eprintln!(
+        "    {:<6} {:>7} {:>7} {:>8} {:>6} {:>5} {:>6.1}% {:>8.3} {:>9.1} {:>6}  {}",
+        row.iter,
+        row.removed,
+        row.resized,
+        row.inserted,
+        row.cloned,
+        row.swaps,
+        row.area_change_percent,
+        row.wns_ns,
+        row.tns_ns,
+        row.failing,
+        row.worst
+    );
+}
+
 /// Prints a green PASS line.
 pub fn check(msg: &str) {
     eprintln!("  {} {}", "PASS".green().bold(), msg);

@@ -3,6 +3,7 @@ purpose = "place_and_route"
 [input]
 lef_files = ["inputs/orfs/OpenROAD-flow-scripts-26Q2/flow/platforms/nangate45/lef/NangateOpenCellLibrary.tech.lef", "inputs/orfs/OpenROAD-flow-scripts-26Q2/flow/platforms/nangate45/lef/NangateOpenCellLibrary.macro.mod.lef", "inputs/orfs/OpenROAD-flow-scripts-26Q2/flow/platforms/nangate45/lef/fakeram45_256x48.lef", "inputs/orfs/OpenROAD-flow-scripts-26Q2/flow/platforms/nangate45/lef/fakeram45_32x32.lef", "inputs/orfs/OpenROAD-flow-scripts-26Q2/flow/platforms/nangate45/lef/fakeram45_64x124.lef", "inputs/orfs/OpenROAD-flow-scripts-26Q2/flow/platforms/nangate45/lef/fakeram45_512x64.lef", "inputs/orfs/OpenROAD-flow-scripts-26Q2/flow/platforms/nangate45/lef/fakeram45_64x62.lef", "inputs/orfs/OpenROAD-flow-scripts-26Q2/flow/platforms/nangate45/lef/fakeram45_128x116.lef"]
 liberty_files = ["inputs/orfs/OpenROAD-flow-scripts-26Q2/flow/platforms/nangate45/lib/NangateOpenCellLibrary_typical.lib", "inputs/orfs/OpenROAD-flow-scripts-26Q2/flow/platforms/nangate45/lib/fakeram45_256x48.lib", "inputs/orfs/OpenROAD-flow-scripts-26Q2/flow/platforms/nangate45/lib/fakeram45_32x32.lib", "inputs/orfs/OpenROAD-flow-scripts-26Q2/flow/platforms/nangate45/lib/fakeram45_64x124.lib", "inputs/orfs/OpenROAD-flow-scripts-26Q2/flow/platforms/nangate45/lib/fakeram45_512x64.lib", "inputs/orfs/OpenROAD-flow-scripts-26Q2/flow/platforms/nangate45/lib/fakeram45_64x62.lib", "inputs/orfs/OpenROAD-flow-scripts-26Q2/flow/platforms/nangate45/lib/fakeram45_128x116.lib"]
+sdc_file = "inputs/orfs/OpenROAD-flow-scripts-26Q2/flow/designs/nangate45/bp_quad/bsg_chip.sdc"
 def_file = "inputs/openroad/bp_quad/bp_quad_orfs.def"
 output_def = "output/bp_quad/placed.def"
 
@@ -17,4 +18,3 @@ signal_layer = "metal3"
 wire_resistance_ohm_per_um = 3.57728
 wire_capacitance_ff_per_um = 0.103981
 dont_use = ["TAPCELL_X1", "FILLCELL_X1", "AOI211_X1", "OAI211_X1"]
-clock_ports = ["p_bsg_tag_clk_i", "p_clk_A_i", "p_clk_B_i"]
