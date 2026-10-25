@@ -2,8 +2,9 @@
 //!
 //! Reads a library's units, thresholds, defaults, table templates and cells
 //! into a [`Liberty`], scaling every time, capacitance and resistance to SI
-//! units. Power, leakage and wire-load data are skipped. Buses and bundles
-//! are refused, since a model without them would be wrong.
+//! units. Buses expand to one pin per bit. Power, leakage and wire-load data
+//! are skipped. Bundles are refused, since a model without them would be
+//! wrong.
 
 use crate::db::liberty::{
     ArcRole, Axis, AxisVariable, ClockGatePin, Defaults, Edge, EdgeValues, FuncExpr, LibCell,
@@ -50,6 +51,7 @@ struct Lexer<'a> {
     pos: usize,
     line: usize,
     path: &'a Path,
+    pushed_back: Option<(Tok<'a>, usize)>,
 }
 
 impl<'a> Lexer<'a> {
@@ -59,7 +61,13 @@ impl<'a> Lexer<'a> {
             pos: 0,
             line: 1,
             path,
+            pushed_back: None,
         }
+    }
+
+    /// Returns a token so the next call to `next` yields it again.
+    const fn push_back(&mut self, tok: Tok<'a>, line: usize) {
+        self.pushed_back = Some((tok, line));
     }
 
     fn error(&self, line: usize, message: String) -> ParseError {
@@ -104,6 +112,9 @@ impl<'a> Lexer<'a> {
     }
 
     fn next(&mut self) -> Result<Option<(Tok<'a>, usize)>, ParseError> {
+        if let Some(pushed) = self.pushed_back.take() {
+            return Ok(Some(pushed));
+        }
         self.skip_blanks()?;
         let line = self.line;
         let rest = self.rest();
@@ -257,6 +268,15 @@ fn parse_statement<'a>(
                     });
                     Ok(())
                 }
+                Some((Tok::RBrace, l)) => {
+                    into.attrs.push(Attr {
+                        name: word,
+                        values: args,
+                        line,
+                    });
+                    lx.push_back(Tok::RBrace, l);
+                    Ok(())
+                }
                 Some((tok, l)) => {
                     Err(lx.error(l, format!("unexpected {tok:?} after '{word}(...)'")))
                 }
@@ -300,11 +320,30 @@ struct Template {
     indices: Vec<Option<Vec<f64>>>,
 }
 
+/// A `type` group: the bits of a bus.
+#[derive(Clone, Debug)]
+struct BusType {
+    bit_from: i64,
+    bit_to: i64,
+}
+
+impl BusType {
+    /// The bit indices in declaration order.
+    fn bits(&self) -> Vec<i64> {
+        if self.bit_from >= self.bit_to {
+            (self.bit_to..=self.bit_from).rev().collect()
+        } else {
+            (self.bit_from..=self.bit_to).collect()
+        }
+    }
+}
+
 struct Interpreter {
     path: PathBuf,
     units: Units,
     defaults: Defaults,
     templates: HashMap<String, Template>,
+    bus_types: HashMap<String, BusType>,
 }
 
 impl Interpreter {
@@ -317,6 +356,7 @@ impl Interpreter {
             },
             defaults: Defaults::default(),
             templates: HashMap::new(),
+            bus_types: HashMap::new(),
         }
     }
 
@@ -376,6 +416,10 @@ impl Interpreter {
         for template in group.groups_named("lu_table_template") {
             let (name, t) = self.template(template)?;
             let _ = self.templates.insert(name, t);
+        }
+        for bus_type in group.groups_named("type") {
+            let (name, t) = self.bus_type(bus_type)?;
+            let _ = self.bus_types.insert(name, t);
         }
         for cell in group.groups_named("cell") {
             let parsed = self.cell(cell)?;
@@ -499,6 +543,32 @@ impl Interpreter {
         Ok((name, Template { variables, indices }))
     }
 
+    fn bus_type(&self, group: &Group<'_>) -> Result<(String, BusType), ParseError> {
+        let name = group
+            .args
+            .first()
+            .ok_or_else(|| self.error(group.line, "type without a name".into()))?
+            .0
+            .to_string();
+        let bit = |attr: &str| -> Result<i64, ParseError> {
+            let a = group
+                .attr(attr)
+                .ok_or_else(|| self.error(group.line, format!("type '{name}' lacks {attr}")))?;
+            let text = a.values.first().map_or("", |v| v.0);
+            text.trim().parse().map_err(|_| {
+                self.error(
+                    a.line,
+                    format!("type '{name}' has a non-integer {attr} '{text}'"),
+                )
+            })
+        };
+        let bus_type = BusType {
+            bit_from: bit("bit_from")?,
+            bit_to: bit("bit_to")?,
+        };
+        Ok((name, bus_type))
+    }
+
     fn axis_values(&self, attr: &Attr<'_>, variable: AxisVariable) -> Result<Vec<f64>, ParseError> {
         let scale = match variable {
             AxisVariable::InputTransition => self.units.time,
@@ -538,13 +608,11 @@ impl Interpreter {
             .ok_or_else(|| self.error(group.line, "cell without a name".into()))?
             .0
             .to_string();
-        for unsupported in ["bus", "bundle"] {
-            if let Some(g) = group.groups_named(unsupported).next() {
-                return Err(self.error(
-                    g.line,
-                    format!("cell '{name}' has a '{unsupported}' group, which is not supported"),
-                ));
-            }
+        if let Some(g) = group.groups_named("bundle").next() {
+            return Err(self.error(
+                g.line,
+                format!("cell '{name}' has a 'bundle' group, which is not supported"),
+            ));
         }
         let mut cell = LibCell {
             name,
@@ -572,6 +640,25 @@ impl Interpreter {
                 cell.ports.push(self.port(pin, arg.0)?);
             }
         }
+        let mut bus_bits: Vec<(&Group<'_>, Vec<String>)> = Vec::new();
+        for bus in group.groups_named("bus") {
+            let bits = self.bus_bits(bus, &cell.name)?;
+            for bit in &bits {
+                let overriding = bus
+                    .groups_named("pin")
+                    .find(|g| g.args.iter().any(|a| a.0 == bit));
+                let mut port = self.port(bus, bit)?;
+                if let Some(g) = overriding {
+                    let own = self.port(g, bit)?;
+                    port.capacitance = own.capacitance;
+                    port.max_capacitance = own.max_capacitance.or(port.max_capacitance);
+                    port.max_transition = own.max_transition.or(port.max_transition);
+                    port.function = own.function.or(port.function);
+                }
+                cell.ports.push(port);
+            }
+            bus_bits.push((bus, bits));
+        }
         for pin in group.groups_named("pin") {
             for arg in &pin.args {
                 let to = cell
@@ -579,6 +666,24 @@ impl Interpreter {
                     .ok_or_else(|| self.error(pin.line, format!("pin '{}' vanished", arg.0)))?;
                 for timing in pin.groups_named("timing") {
                     self.timing(&mut cell, to, timing)?;
+                }
+            }
+        }
+        for (bus, bits) in bus_bits {
+            for bit in &bits {
+                let to = cell
+                    .port(bit)
+                    .ok_or_else(|| self.error(bus.line, format!("bus bit '{bit}' vanished")))?;
+                for timing in bus.groups_named("timing") {
+                    self.timing(&mut cell, to, timing)?;
+                }
+                for pin in bus
+                    .groups_named("pin")
+                    .filter(|g| g.args.iter().any(|a| a.0 == bit))
+                {
+                    for timing in pin.groups_named("timing") {
+                        self.timing(&mut cell, to, timing)?;
+                    }
                 }
             }
         }
@@ -591,6 +696,32 @@ impl Interpreter {
             }
         }
         Ok(cell)
+    }
+
+    /// The bit pins a `bus` group declares, named `bus[bit]`.
+    fn bus_bits(&self, bus: &Group<'_>, cell: &str) -> Result<Vec<String>, ParseError> {
+        let name = bus
+            .args
+            .first()
+            .ok_or_else(|| self.error(bus.line, format!("cell '{cell}' has a bus without a name")))?
+            .0;
+        let type_name = bus.attr_text("bus_type").ok_or_else(|| {
+            self.error(
+                bus.line,
+                format!("bus '{name}' of '{cell}' has no bus_type"),
+            )
+        })?;
+        let bus_type = self.bus_types.get(type_name).ok_or_else(|| {
+            self.error(
+                bus.line,
+                format!("bus '{name}' of '{cell}' has unknown type '{type_name}'"),
+            )
+        })?;
+        Ok(bus_type
+            .bits()
+            .iter()
+            .map(|i| format!("{name}[{i}]"))
+            .collect())
     }
 
     fn port(&self, group: &Group<'_>, name: &str) -> Result<LibPort, ParseError> {
@@ -725,7 +856,10 @@ impl Interpreter {
             let from = cell.port(related_name).ok_or_else(|| {
                 self.error(
                     related.line,
-                    format!("cell '{}' has no pin '{related_name}'", cell.name),
+                    format!(
+                        "cell '{}' has no pin '{related_name}'; a related bus is not supported",
+                        cell.name
+                    ),
                 )
             })?;
             cell.arc_sets.push(TimingArcSet {
@@ -1048,9 +1182,66 @@ library (tiny) {
     }
 
     #[test]
-    fn a_bus_group_is_refused() {
-        let src = "library (x) { cell (c) { bus (b) { } } }";
+    fn buses_expand_to_bit_pins_with_the_bus_attributes_and_arcs() {
+        let src = r#"
+library (ram) {
+  time_unit : "1ns";
+  capacitive_load_unit (1,ff);
+  type (DATA) { base_type : array ; data_type : bit ; bit_width : 2; bit_from : 1; bit_to : 0 ; }
+  lu_table_template (slew_t) { variable_1 : total_output_net_capacitance; index_1 ("5.0, 500.0"); }
+  cell(mem) {
+    area : 10;
+    pin(clk) { direction : input; capacitance : 25.0; clock : true;
+      internal_power() { rise_power(scalar) { values ("1.0") } } }
+    bus(rd_out) {
+      bus_type : DATA;
+      direction : output;
+      max_capacitance : 500.0;
+      timing() {
+        related_pin : "clk" ;
+        timing_type : rising_edge;
+        cell_rise(scalar) { values ("0.204"); }
+        cell_fall(scalar) { values ("0.204"); }
+        rise_transition(slew_t) { index_1 ("5.0, 500.0"); values ("0.009, 0.227") }
+        fall_transition(slew_t) { values ("0.009, 0.227") }
+      }
+    }
+    bus(addr_in) {
+      bus_type : DATA;
+      direction : input;
+      capacitance : 5.0;
+      timing() { related_pin : clk; timing_type : setup_rising ; rise_constraint(scalar) { values ("0.05"); } }
+    }
+  }
+}
+"#;
+        let lib = parse_str(src, Path::new("ram.lib")).unwrap();
+        let mem = lib.cell(lib.cell_id("mem").unwrap());
+        let names: Vec<&str> = mem.ports.iter().map(|p| p.name.as_str()).collect();
+        assert_eq!(
+            names,
+            vec!["clk", "rd_out[1]", "rd_out[0]", "addr_in[1]", "addr_in[0]"]
+        );
+        let out = &mem.ports[mem.port("rd_out[0]").unwrap()];
+        assert_eq!(out.direction, PortDirection::Output);
+        assert!((out.max_capacitance.unwrap() - 500e-15).abs() < 1e-27);
+        let addr = &mem.ports[mem.port("addr_in[1]").unwrap()];
+        assert!((addr.capacitance.rise - 5e-15).abs() < 1e-28);
+        let clk_to_q: Vec<&TimingArcSet> = mem
+            .arc_sets
+            .iter()
+            .filter(|s| s.role == ArcRole::RegClkToQ)
+            .collect();
+        assert_eq!(clk_to_q.len(), 2);
+        let arc = &clk_to_q[0].arcs[0];
+        assert!((arc.gate_delay(0.0, 500e-15).1 - 0.227e-9).abs() < 1e-14);
+        assert!(mem.arc_sets.iter().any(|s| s.role == ArcRole::Check));
+    }
+
+    #[test]
+    fn a_bundle_group_is_refused() {
+        let src = "library (x) { cell (c) { bundle (b) { } } }";
         let err = parse_str(src, Path::new("x.lib")).unwrap_err();
-        assert!(err.to_string().contains("bus"));
+        assert!(err.to_string().contains("bundle"));
     }
 }
