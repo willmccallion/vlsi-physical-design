@@ -192,9 +192,18 @@ impl TimingGraph {
         self.slew[pin.index()] = [both, both];
     }
 
-    /// Drops every annotation.
-    pub fn clear_annotations(&mut self) {
+    /// Drops every annotation and returns the pins that held one; their
+    /// slews stay at the annotated value until found again.
+    pub fn clear_annotations(&mut self) -> Vec<PinId> {
+        let annotated: Vec<PinId> = self
+            .annotated
+            .iter()
+            .enumerate()
+            .filter(|(_, a)| a.is_some())
+            .map(|(i, _)| PinId::new(i))
+            .collect();
         self.annotated.fill(None);
+        annotated
     }
 
     /// The estimated parasitics of a net, if it has any.
@@ -271,33 +280,53 @@ impl TimingGraph {
     }
 
     /// Finds the slews and delays again from `drivers` onward, following
-    /// changes through the fanout; returns every driver visited, in rising
-    /// level order.
+    /// changes through the fanout; returns every driver visited, in the
+    /// order first visited.
+    ///
+    /// Drivers are taken in level order, but a driver whose input slew
+    /// changes after it was timed is timed again: edits leave the levels of
+    /// pins they add or move stale until the graph is levelized again, and
+    /// a single pass in stale order would keep stale slews downstream.
+    /// Arcs levelization cut, and latch arcs once a latch was visited, are
+    /// not followed, so the walk ends.
     pub fn propagate_from(
         &mut self,
         netlist: &Netlist<'_>,
         clocks: &ClockNetwork,
         drivers: &[PinId],
     ) -> Vec<PinId> {
-        let mut queue: BinaryHeap<std::cmp::Reverse<(u32, usize)>> = drivers
-            .iter()
-            .map(|&d| std::cmp::Reverse((self.level[d.index()], d.index())))
-            .collect();
-        let mut seen = vec![false; netlist.db.pins.len()];
+        let n = netlist.db.pins.len();
+        let mut queue: BinaryHeap<std::cmp::Reverse<(u32, usize)>> = BinaryHeap::new();
+        let mut queued = vec![false; n];
+        let mut visited_once = vec![false; n];
+        for &driver in drivers {
+            if !queued[driver.index()] {
+                queued[driver.index()] = true;
+                queue.push(std::cmp::Reverse((
+                    self.level[driver.index()],
+                    driver.index(),
+                )));
+            }
+        }
         let mut visited = Vec::new();
         while let Some(std::cmp::Reverse((_, index))) = queue.pop() {
-            if seen[index] {
-                continue;
-            }
-            seen[index] = true;
+            queued[index] = false;
             let driver = PinId::new(index);
-            visited.push(driver);
+            if !visited_once[index] {
+                visited_once[index] = true;
+                visited.push(driver);
+            }
             let changed = self.find_driver_slews(netlist, clocks, driver);
             for load in changed {
-                for next in self.drivers_fed_by(netlist, load) {
-                    if !seen[next.index()] {
-                        queue.push(std::cmp::Reverse((self.level[next.index()], next.index())));
+                for (next, through_latch) in self.successor_drivers(netlist, load) {
+                    if self.is_loop_arc(load, next)
+                        || (through_latch && visited_once[next.index()])
+                        || queued[next.index()]
+                    {
+                        continue;
                     }
+                    queued[next.index()] = true;
+                    queue.push(std::cmp::Reverse((self.level[next.index()], next.index())));
                 }
             }
         }
@@ -341,8 +370,10 @@ impl TimingGraph {
         }
     }
 
-    /// Notes that `cell` changed master: its pins keep their ids, so only
-    /// the slews and delays around it need finding again; returns every
+    /// Notes that `cell` changed master: its pins keep their ids but move
+    /// with the new master's pin shapes, so the parasitics of every net on
+    /// it are estimated again, as `OpenROAD`'s `replaceCell` invalidates
+    /// them, and the slews and delays around it found again; returns every
     /// driver whose delays were found again.
     pub fn update_cell(
         &mut self,
@@ -353,8 +384,12 @@ impl TimingGraph {
         let db = netlist.db;
         let mut drivers = Vec::new();
         for &pin in &db.cells[cell.index()].pins {
+            let net = db.pins[pin.index()].net;
+            if netlist.is_load(pin) || netlist.is_driver(pin) {
+                self.parasitics_invalid(netlist, clocks, net);
+            }
             if netlist.is_load(pin) {
-                drivers.extend(netlist.drivers(db.pins[pin.index()].net));
+                drivers.extend(netlist.drivers(net));
             }
             if netlist.is_driver(pin) {
                 drivers.push(pin);
@@ -374,6 +409,25 @@ impl TimingGraph {
 
     /// The drivers of the cell `load` belongs to that an arc from `load`
     /// reaches.
+    /// The drivers of `load`'s cell with an arc from it, and whether that
+    /// arc passes through a latch.
+    fn successor_drivers(&self, netlist: &Netlist<'_>, load: PinId) -> Vec<(PinId, bool)> {
+        let db = netlist.db;
+        let PinOwner::Cell { cell, .. } = db.pins[load.index()].owner else {
+            return Vec::new();
+        };
+        db.cells[cell.index()]
+            .pins
+            .iter()
+            .copied()
+            .filter(|&out| netlist.is_driver(out))
+            .filter_map(|out| {
+                let arc = self.in_arcs[out.index()].iter().find(|a| a.from == load)?;
+                Some((out, arc.through_latch))
+            })
+            .collect()
+    }
+
     pub(crate) fn drivers_fed_by(&self, netlist: &Netlist<'_>, load: PinId) -> Vec<PinId> {
         let db = netlist.db;
         let PinOwner::Cell { cell, .. } = db.pins[load.index()].owner else {

@@ -89,7 +89,7 @@ impl<'r, 'a> Repairer<'r, 'a> {
         for driver in drivers.into_iter().rev() {
             self.repair_driver(driver)?;
         }
-        self.resizer.graph.clear_annotations();
+        self.resizer.clear_slew_annotations();
         Ok(self.summary)
     }
 

@@ -454,6 +454,28 @@ impl<'a> Resizer<'a> {
         }
     }
 
+    /// Drops the slew annotations and finds the slews they held fixed
+    /// again, with everything downstream, as `OpenROAD` invalidates its
+    /// delays once design repair's annotations come off.
+    pub fn clear_slew_annotations(&mut self) {
+        let annotated = self.graph.clear_annotations();
+        let mut drivers: Vec<PinId> = Vec::new();
+        {
+            let netlist = Netlist::new(self.db, self.link);
+            for pin in annotated {
+                if netlist.is_driver(pin) {
+                    drivers.push(pin);
+                }
+                if netlist.is_load(pin) {
+                    drivers.extend(netlist.drivers(self.db.pins[pin.index()].net));
+                }
+            }
+        }
+        drivers.sort_unstable();
+        drivers.dedup();
+        self.propagate(&drivers);
+    }
+
     /// Finds slews, delays and timing again from `drivers` on.
     fn propagate(&mut self, drivers: &[PinId]) {
         let netlist = Netlist::new(self.db, self.link);
