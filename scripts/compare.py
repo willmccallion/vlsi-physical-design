@@ -317,15 +317,17 @@ def timing(design, out, side):
     )
 
 
-def compare(mode, design):
+def compare(mode, design, skip_openroad=False):
     out = design_dir(mode, design)
     out.mkdir(parents=True, exist_ok=True)
     if mode == "route":
         route_with_pare(design, out)
-        route_with_openroad(design, out)
+        if not skip_openroad:
+            route_with_openroad(design, out)
     else:
         run_pare(design, out)
-        flow_with_openroad(design, out)
+        if not skip_openroad:
+            flow_with_openroad(design, out)
     for side in SIDES:
         if routed_def(out, side).exists():
             check_drc(design, out, side)
@@ -382,6 +384,8 @@ def orfs_report(design):
         "flow_report_wns_ns": m.get("finish__timing__setup__ws"),
         "flow_report_tns_ns": m.get("finish__timing__setup__tns"),
         "flow_report_cells": m.get("finish__design__instance__count"),
+        "flow_report_max_slew_violations": m.get("finish__timing__drv__max_slew"),
+        "flow_report_max_cap_violations": m.get("finish__timing__drv__max_cap"),
     }
 
 
@@ -402,6 +406,11 @@ def result(mode, design, side):
         r.update(orfs_report(design))
     else:
         r["wall"], r["rss_kb"] = time_and_memory(out / f"{side}.log")
+    report = out / "pare.json"
+    if side == "pare" and report.exists():
+        netlist = json.loads(report.read_text()).get("netlist")
+        if netlist:
+            r["netlist"] = netlist
     def_file = routed_def(out, side)
     if def_file.exists():
         r["cells"] = cells(def_file)
@@ -445,6 +454,10 @@ def slacks(timing_log):
             "failing": int(m.group(5)),
         }
     r["groups"] = groups
+    drv = re.search(r"^drv max_slew (\d+) max_cap (\d+)$", timing_log, re.MULTILINE)
+    if drv:
+        r["max_slew_violations"] = int(drv.group(1))
+        r["max_cap_violations"] = int(drv.group(2))
     clocked = [g for g in groups.values() if g["clock"]]
     if clocked:
         r["wns_ns"] = min(g["wns_ns"] for g in clocked)
@@ -458,8 +471,8 @@ def cell(value, fmt="{}"):
 
 def table(results):
     lines = [
-        "| Design | Tool | Cells | Wirelength | Vias | PARE violations | OpenROAD `check_drc` | WNS | TNS | Time | Peak memory |",
-        "|---|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|",
+        "| Design | Tool | Cells | Wirelength | Vias | PARE violations | OpenROAD `check_drc` | Slew / cap violations | WNS | TNS | Time | Peak memory |",
+        "|---|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|",
     ]
     for r in results:
         pare_check = cell(r.get("pare_violations"))
@@ -470,6 +483,7 @@ def table(results):
             f"| {cell(r.get('cells'), '{:,}')} "
             f"| {cell(r.get('wirelength_um'), '{:,.0f} µm')} | {cell(r.get('vias'), '{:,}')} "
             f"| {pare_check} | {cell(r.get('openroad_violations'))} "
+            f"| {cell(r.get('max_slew_violations'))} / {cell(r.get('max_cap_violations'))} "
             f"| {cell(r.get('wns_ns'), '{:.2f} ns')} | {cell(r.get('tns_ns'), '{:.1f} ns')} "
             f"| {cell(r.get('wall'))} | {cell(None if r.get('rss_kb') is None else r['rss_kb'] / 2**20, '{:.1f} GiB')} |"
         )
@@ -493,6 +507,11 @@ def main():
     parser.add_argument(
         "--table", action="store_true", help="only tabulate earlier runs"
     )
+    parser.add_argument(
+        "--skip-openroad",
+        action="store_true",
+        help="keep OpenROAD's earlier result for each design and run only PARE, then judge both",
+    )
     args = parser.parse_args()
     mode = "flow" if args.flow else "route"
     if not args.table:
@@ -501,7 +520,7 @@ def main():
                 f"{PARE.relative_to(ROOT)} is missing: cargo build --release first"
             )
         for design in args.designs:
-            compare(mode, design)
+            compare(mode, design, args.skip_openroad)
     results = [result(mode, d, side) for d in args.designs for side in SIDES]
     summary = ROOT / "output/compare" / mode / "summary.json"
     summary.parent.mkdir(parents=True, exist_ok=True)

@@ -2,7 +2,8 @@
 # flow: parasitics extracted from the wires with the platform's RCX rules, then
 # the worst and total negative slack, over all paths and per path group, so the
 # paths a clock constrains can be read apart from the recovery checks of an
-# unbuffered reset. Clocks stay ideal, as PARE builds no clock tree.
+# unbuffered reset, and how many pins break their slew or load limit. Clocks
+# stay ideal, as PARE builds no clock tree.
 #
 #   TIMING_LEF="tech.lef cells.lef" TIMING_LIB="cells.lib" TIMING_DEF=output/aes/routed.def \
 #     TIMING_SDC=constraint.sdc TIMING_RCX=rcx_patterns.rules TIMING_DIR=cmp/aes \
@@ -27,6 +28,7 @@ read_spef $spef
 
 report_wns
 report_tns
+puts "drv max_slew [sta::max_slew_violation_count] max_cap [sta::max_capacitance_violation_count]"
 report_worst_slack -max
 report_worst_slack -min
 report_clock_min_period
