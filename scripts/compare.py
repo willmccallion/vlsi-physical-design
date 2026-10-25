@@ -21,9 +21,8 @@ import os
 import re
 import subprocess
 import sys
-from pathlib import Path
-
 import tomllib
+from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
 ORFS = ROOT / "inputs/orfs/OpenROAD-flow-scripts-26Q2/flow"
@@ -90,7 +89,9 @@ def run(cmd, log, env=None):
             check=False,
         )
     if result.returncode != 0:
-        print(f"  failed ({result.returncode}), see {log.relative_to(ROOT)}")
+        print(
+            f"  failed ({result.returncode}), see {log.relative_to(ROOT)}", flush=True
+        )
     return result.returncode == 0
 
 
@@ -100,7 +101,7 @@ def route_with_pare(design):
     config["input"]["output_dir"] = str(out)
     route_config = out / "pare.toml"
     route_config.write_text(toml_text(config))
-    print(f"{design}: PARE routing")
+    print(f"{design}: PARE routing", flush=True)
     return run(
         [
             str(PARE),
@@ -130,7 +131,7 @@ def toml_text(config):
 
 def route_with_openroad(design):
     out = design_dir(design)
-    print(f"{design}: OpenROAD routing")
+    print(f"{design}: OpenROAD routing", flush=True)
     return run(
         [
             "openroad",
@@ -152,7 +153,7 @@ def route_with_openroad(design):
 
 def check_drc(design, side):
     out = design_dir(design)
-    print(f"{design}: OpenROAD check_drc of {side}")
+    print(f"{design}: OpenROAD check_drc of {side}", flush=True)
     return run(
         ["openroad", "-no_init", "-no_splash", "-exit", "scripts/openroad_drc.tcl"],
         out / f"{side}.drc.log",
@@ -166,7 +167,7 @@ def check_drc(design, side):
 
 def pare_check(design, side):
     out = design_dir(design)
-    print(f"{design}: pare check of {side}")
+    print(f"{design}: pare check of {side}", flush=True)
     return run(
         [
             str(PARE),
@@ -189,7 +190,7 @@ def timing(design, side):
     if additional:
         libs.extend(additional.split())
     out = design_dir(design)
-    print(f"{design}: timing of {side}")
+    print(f"{design}: timing of {side}", flush=True)
     return run(
         ["openroad", "-no_init", "-no_splash", "-exit", "scripts/openroad_timing.tcl"],
         out / f"{side}.timing.log",
