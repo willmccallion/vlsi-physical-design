@@ -86,7 +86,7 @@ impl Rebuffer {
     /// Characterizes the buffers the search may insert, as `Rebuffer::init`
     /// and `initOnCorner`.
     pub fn new(resizer: &Resizer<'_>) -> Result<Self, RepairError> {
-        let max_wire_length = find_max_wire_length(resizer);
+        let max_wire_length = max_wire_length(resizer);
         let mut sizes: Vec<BufferSize> = find_fast_buffers(resizer)
             .into_iter()
             .map(|cell| buffer_size(resizer, cell))
@@ -1588,11 +1588,12 @@ fn outmatched(resizer: &Resizer<'_>, worse: LibCellId, better: LibCellId, r_max:
     true
 }
 
-/// The wire length beyond which a buffer is worth inserting: the shortest,
-/// over the repair buffers, at which one buffer driving the wire whole is
-/// slower than two each driving half, as `findMaxWireLength`; in database
+/// The wire length beyond which a buffer is worth inserting, in database
 /// units.
-fn find_max_wire_length(resizer: &Resizer<'_>) -> i64 {
+///
+/// The shortest, over the repair buffers, at which one buffer driving the
+/// wire whole is slower than two each driving half, as `findMaxWireLength`.
+pub fn max_wire_length(resizer: &Resizer<'_>) -> i64 {
     let rc = resizer.graph.wire_rc();
     if rc.resistance <= 0.0 {
         return i64::MAX;

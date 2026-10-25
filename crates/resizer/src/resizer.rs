@@ -5,6 +5,7 @@
 //! not pay off can be taken back.
 
 use crate::bnet::LoadModel;
+use crate::fuzzy;
 use crate::graph::TimingGraph;
 use crate::library::{BufferSet, Link};
 use crate::netlist::{ClockNetwork, Constants, Namer, Netlist};
@@ -12,14 +13,14 @@ use crate::parasitics::WireRc;
 use crate::sta::Sta;
 use pare_common::db::design::{EditError, NetlistDB, PinOwner, PlacementStatus};
 use pare_common::db::indices::{CellId, MacroId, MacroPinId, NetId, PinId};
-use pare_common::db::liberty::{ArcRole, Edge, EdgeValues, LibCell, LibCellId, LibPort};
+use pare_common::db::liberty::{ArcRole, Edge, EdgeValues, LibCell, LibCellId, LibPort, MinMax};
 use pare_common::db::library::DuplicateName;
 use pare_common::db::sdc::Sdc;
 use pare_common::geom::dbu::Dbu;
 use pare_common::geom::orient::Orientation;
 use pare_common::geom::point::Point;
 use rustc_hash::FxHashSet;
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 
 /// The load a buffer's target slew is measured at, in multiples of its
 /// input capacitance, as `OpenROAD`'s `tgt_slew_load_cap_factor`.
@@ -214,6 +215,37 @@ impl<'a> Resizer<'a> {
     #[must_use]
     pub const fn inserted_buffers(&self) -> usize {
         self.inserted_buffers
+    }
+
+    /// Sets the longest wire design repair allows, in database units; zero
+    /// for no limit.
+    pub const fn set_max_wire_length(&mut self, length: i64) {
+        self.options.max_wire_length = length;
+    }
+
+    /// The setup slack of every net at its driver, as `OpenROAD`'s
+    /// `findResizeSlacks1` collects them for timing-driven placement:
+    /// constant, clock and special nets left out. Needs timing.
+    #[must_use]
+    pub fn driver_net_slacks(&self) -> Vec<(NetId, f64)> {
+        let Some(sta) = self.sta.as_ref() else {
+            return Vec::new();
+        };
+        let netlist = self.netlist();
+        let mut slack_of: HashMap<NetId, f64> = HashMap::new();
+        for driver in self.graph.drivers_by_level(&netlist).into_iter().rev() {
+            let net = self.db.pins[driver.index()].net;
+            if netlist.is_special(net)
+                || self.constants.is_constant(driver)
+                || self.clocks.is_clock(driver)
+            {
+                continue;
+            }
+            let _ = slack_of.insert(net, sta.slack(driver, MinMax::Max));
+        }
+        let mut slacks: Vec<(NetId, f64)> = slack_of.into_iter().collect();
+        slacks.sort_by(|a, b| a.1.total_cmp(&b.1).then_with(|| a.0.cmp(&b.0)));
+        slacks
     }
 
     /// Drops every retired cell and emptied net from the design and ends
@@ -859,6 +891,41 @@ fn hierarchy_depth(name: &str) -> usize {
     name.matches('/').count()
 }
 
+/// Share of the nets, from the worst slack up, that timing-driven
+/// placement weights, as `OpenROAD`'s `worst_slack_nets_percent`.
+pub const WORST_SLACK_NETS_SHARE: f64 = 0.1;
+
+/// The wirelength weights timing-driven placement gives nets for their
+/// `slacks`, sorted worst first, as `OpenROAD`'s `TimingBase` does.
+///
+/// Over the worst [`WORST_SLACK_NETS_SHARE`] of them, the weight runs from
+/// `weight_max` at the worst slack down to one at the best; nets at or
+/// above that best keep a weight of one and are left out. Empty when no
+/// net has a finite slack.
+#[must_use]
+pub fn timing_net_weights(slacks: &[(NetId, f64)], weight_max: f64) -> Vec<(NetId, f64)> {
+    let Some(&(_, slack_min)) = slacks.first() else {
+        return Vec::new();
+    };
+    if slack_min.is_infinite() {
+        return Vec::new();
+    }
+    let worst = ((slacks.len() as f64) * WORST_SLACK_NETS_SHARE).ceil() as usize;
+    let slack_max = slacks[worst.clamp(1, slacks.len()) - 1].1;
+    slacks
+        .iter()
+        .filter(|(_, slack)| *slack < slack_max)
+        .map(|&(net, slack)| {
+            let weight = if fuzzy::equal(slack_max, slack_min) {
+                1.0
+            } else {
+                ((weight_max - 1.0) * (slack_max - slack) / (slack_max - slack_min)) + 1.0
+            };
+            (net, weight)
+        })
+        .collect()
+}
+
 /// The transition limit at an input pin: its own, else, as `OpenROAD`
 /// fixes up for libraries like Nangate45, the library default meant for
 /// outputs; infinite without either.
@@ -1070,5 +1137,53 @@ pub fn buffer_delays(cell: &LibCell, slews: &EdgeValues, load_cap: f64) -> EdgeV
     EdgeValues {
         rise: delays.rise.max(0.0),
         fall: delays.fall.max(0.0),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn slacks(values: &[f64]) -> Vec<(NetId, f64)> {
+        values
+            .iter()
+            .enumerate()
+            .map(|(i, &v)| (NetId::new(i), v))
+            .collect()
+    }
+
+    #[test]
+    fn the_worst_tenth_of_the_nets_is_weighted_from_the_maximum_down_to_one() {
+        let mut values = vec![1.0; 17];
+        values[0] = -2.0;
+        values[1] = -1.0;
+        let weights = timing_net_weights(&slacks(&values), 5.0);
+
+        assert_eq!(weights.len(), 1);
+        assert_eq!(weights[0].0, NetId::new(0));
+        assert!((weights[0].1 - 5.0).abs() < 1e-12);
+    }
+
+    #[test]
+    fn weights_fall_linearly_with_slack() {
+        let mut values = vec![1.0; 30];
+        values[0] = -3.0;
+        values[1] = -2.0;
+        values[2] = -1.0;
+        let weights = timing_net_weights(&slacks(&values), 5.0);
+
+        assert_eq!(weights.len(), 2);
+        assert!((weights[0].1 - 5.0).abs() < 1e-12);
+        assert!((weights[1].1 - 3.0).abs() < 1e-12);
+    }
+
+    #[test]
+    fn equal_slacks_and_infinite_ones_give_no_weights() {
+        assert_eq!(timing_net_weights(&slacks(&[0.5, 0.5, 0.5]), 5.0).len(), 0);
+        assert_eq!(
+            timing_net_weights(&slacks(&[f64::INFINITY, f64::INFINITY]), 5.0).len(),
+            0
+        );
+        assert_eq!(timing_net_weights(&[], 5.0).len(), 0);
     }
 }
