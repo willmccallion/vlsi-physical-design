@@ -16,6 +16,8 @@ pub struct Report {
     pub config: String,
     /// Wall time of each phase, in order.
     pub phases: Vec<Phase>,
+    /// Netlist repair results, when the run repaired the netlist.
+    pub netlist: Option<NetlistSummary>,
     /// Placement results, when the run placed.
     pub placement: Option<PlacementSummary>,
     /// Routing results, when the run routed.
@@ -37,6 +39,19 @@ pub struct Phase {
     pub name: String,
     /// Its wall time in seconds.
     pub seconds: f64,
+}
+
+/// What netlist repair did.
+#[derive(Debug, Default, Serialize)]
+pub struct NetlistSummary {
+    /// Buffers from synthesis removed before placement.
+    pub buffers_removed: usize,
+    /// Buffers added after input ports.
+    pub input_buffers: usize,
+    /// Buffers added before output ports.
+    pub output_buffers: usize,
+    /// The buffer cell the ports got.
+    pub buffer_cell: String,
 }
 
 /// What placement did.

@@ -22,9 +22,47 @@ pub struct Config {
     /// Routing parameters.
     #[serde(default)]
     pub routing: RoutingConfig,
+    /// Netlist repair around placement.
+    #[serde(default)]
+    pub netlist: NetlistConfig,
     /// Input and output files.
     #[serde(default)]
     pub input: InputConfig,
+}
+
+/// Netlist repair around placement, as OpenROAD-flow-scripts runs it. It
+/// runs when the input names Liberty files, and not otherwise.
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct NetlistConfig {
+    /// Whether the buffers synthesis left are removed before placement.
+    #[serde(default = "default_enabled")]
+    pub remove_buffers: bool,
+    /// Whether every port gets a buffer before placement.
+    #[serde(default = "default_enabled")]
+    pub buffer_ports: bool,
+    /// Cells repair neither inserts nor swaps to, beyond those the library
+    /// marks.
+    #[serde(default)]
+    pub dont_use: Vec<String>,
+    /// The I/O pins clocks enter at, which repair leaves alone.
+    #[serde(default)]
+    pub clock_ports: Vec<String>,
+}
+
+impl Default for NetlistConfig {
+    fn default() -> Self {
+        Self {
+            remove_buffers: default_enabled(),
+            buffer_ports: default_enabled(),
+            dont_use: Vec::new(),
+            clock_ports: Vec::new(),
+        }
+    }
+}
+
+const fn default_enabled() -> bool {
+    true
 }
 
 /// What a design is a benchmark of, which decides what running it does.
@@ -219,6 +257,9 @@ pub struct InputConfig {
     /// LEF files, technology first.
     #[serde(default)]
     pub lef_files: Vec<String>,
+    /// Liberty files; netlist repair runs when there are any.
+    #[serde(default)]
+    pub liberty_files: Vec<String>,
     /// DEF design.
     #[serde(default)]
     pub def_file: String,
@@ -238,6 +279,7 @@ impl Default for InputConfig {
     fn default() -> Self {
         Self {
             lef_files: Vec::new(),
+            liberty_files: Vec::new(),
             def_file: String::new(),
             output_def: default_output_def(),
             bookshelf_aux_file: None,

@@ -730,6 +730,15 @@ impl Liberty {
         Ok(id)
     }
 
+    /// Takes the cells of another library into this one, which keeps its
+    /// own thresholds and defaults; returns the name of a cell both have.
+    pub fn absorb(&mut self, other: Self) -> Result<(), String> {
+        for cell in other.cells {
+            let _ = self.add_cell(cell)?;
+        }
+        Ok(())
+    }
+
     /// The cell named `name`.
     #[must_use]
     pub fn cell_id(&self, name: &str) -> Option<LibCellId> {

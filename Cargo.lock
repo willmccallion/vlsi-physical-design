@@ -655,6 +655,7 @@ dependencies = [
  "log",
  "pare-common",
  "pare-placer",
+ "pare-resizer",
  "pare-router",
  "rayon",
  "serde",
@@ -688,6 +689,16 @@ dependencies = [
  "rand 0.8.5",
  "rayon",
  "rustfft",
+ "thiserror",
+]
+
+[[package]]
+name = "pare-resizer"
+version = "0.1.0"
+dependencies = [
+ "log",
+ "pare-common",
+ "rustc-hash",
  "thiserror",
 ]
 

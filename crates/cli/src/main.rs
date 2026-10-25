@@ -9,8 +9,9 @@ use anyhow::Context;
 use clap::{Parser, Subcommand};
 use pare_common::db::design::{NetlistDB, PlacementStatus};
 use pare_common::db::indices::CellId;
+use pare_common::db::liberty::Liberty;
 use pare_common::db::library::LayerRef;
-use pare_common::db::parser::{bookshelf, def, lef};
+use pare_common::db::parser::{bookshelf, def, lef, liberty};
 use pare_common::db::writer;
 use pare_common::geom::dbu::Dbu;
 use pare_common::geom::point::Point;
@@ -28,8 +29,9 @@ use pare_placer::io::{self, IoLayers};
 use pare_placer::legalize::abacus;
 use pare_placer::model::PlacementModel;
 use pare_placer::zones::{Zone, Zones};
+use pare_resizer::{ClockNetwork, Constants, Link, Namer, Netlist};
 use pare_router::{CapacityReduction, GlobalRouteEstimator, RouteError};
-use report::{PlacementSummary, Report, RoutingSummary};
+use report::{NetlistSummary, PlacementSummary, Report, RoutingSummary};
 use std::path::{Path, PathBuf};
 use std::time::Instant;
 
@@ -490,6 +492,9 @@ fn run_placement(
     start: PlacementStart,
     report: &mut Report,
 ) -> anyhow::Result<()> {
+    if start == PlacementStart::Scratch {
+        repair_netlist(config, db, report)?;
+    }
     let movable_io = io::movable_io_pins(db);
     let io_layers = if movable_io.is_empty() || start == PlacementStart::Given {
         None
@@ -605,6 +610,83 @@ fn run_placement(
     };
     ui::wrote(&path_str(&placed)?);
     report.phase("placement output", phase_start);
+    Ok(())
+}
+
+/// Reads the Liberty files, the first one's thresholds and defaults
+/// standing for all.
+fn load_liberty(paths: &[String]) -> anyhow::Result<Liberty> {
+    let mut merged: Option<Liberty> = None;
+    for path in paths {
+        ui::header("Input", path);
+        let lib = liberty::parse_file(Path::new(path))?;
+        match &mut merged {
+            None => merged = Some(lib),
+            Some(first) => first
+                .absorb(lib)
+                .map_err(|name| anyhow::anyhow!("cell '{name}' is in two Liberty files"))?,
+        }
+    }
+    merged.context("no Liberty files")
+}
+
+/// Strips the buffers synthesis left and buffers the ports, as
+/// OpenROAD-flow-scripts does before placing, when the config names Liberty
+/// files.
+fn repair_netlist(config: &Config, db: &mut NetlistDB, report: &mut Report) -> anyhow::Result<()> {
+    if config.input.liberty_files.is_empty() {
+        return Ok(());
+    }
+    let liberty = load_liberty(&config.input.liberty_files)?;
+    let link = Link::new(db, &liberty, &config.netlist.dont_use)?;
+    ui::section("Netlist");
+    let mut summary = NetlistSummary::default();
+    if config.netlist.remove_buffers {
+        let phase_start = Instant::now();
+        ui::phase("Buffer Removal");
+        let before = db.cells.len();
+        summary.buffers_removed = pare_resizer::remove_buffers(db, &link)?;
+        ui::stat_row(
+            "Removed:",
+            &summary.buffers_removed.to_string(),
+            "Cells:",
+            &format!("{before} -> {}", db.cells.len()),
+        );
+        report.phase("buffer removal", phase_start);
+    }
+    if config.netlist.buffer_ports {
+        let phase_start = Instant::now();
+        ui::phase("Port Buffering");
+        let (constants, clocks) = {
+            let netlist = Netlist::new(db, &link);
+            let constants = Constants::find(&netlist);
+            let clocks = ClockNetwork::find(&netlist, &config.netlist.clock_ports, &constants)?;
+            (constants, clocks)
+        };
+        let buffers = link.find_buffers(db)?;
+        let mut namer = Namer::new();
+        let done =
+            pare_resizer::buffer_ports(db, &link, &buffers, &clocks, &constants, &mut namer)?;
+        summary.input_buffers = done.inputs;
+        summary.output_buffers = done.outputs;
+        summary
+            .buffer_cell
+            .clone_from(&liberty.cell(buffers.lowest_drive).name);
+        ui::stat_row(
+            "Input buffers:",
+            &done.inputs.to_string(),
+            "Output buffers:",
+            &done.outputs.to_string(),
+        );
+        ui::stat_row(
+            "Buffer:",
+            &summary.buffer_cell,
+            "Clock pins:",
+            &clocks.sources().len().to_string(),
+        );
+        report.phase("port buffering", phase_start);
+    }
+    report.netlist = Some(summary);
     Ok(())
 }
 
