@@ -11,7 +11,7 @@ use super::lexer::{ParseError, read_file};
 use crate::db::design::NetlistDB;
 use crate::db::indices::IoPinId;
 use crate::db::liberty::{Edge, Liberty, LibraryUnits, MinMax};
-use crate::db::library::PinDirection;
+use crate::db::library::{PinDirection, SignalUse};
 use crate::db::sdc::{
     Clock, ClockEdge, ClockId, FalsePath, MultiCyclePath, PathSpec, PortDelay, RiseFallMinMax, Sdc,
 };
@@ -434,7 +434,9 @@ impl Interpreter<'_> {
                     }
                     _ => matches!(p.direction, PinDirection::Output | PinDirection::Inout),
                 };
-                wanted && !(no_clocks && self.sdc.clock_at(IoPinId::new(*i)).is_some())
+                wanted
+                    && !matches!(p.signal_use, SignalUse::Power | SignalUse::Ground)
+                    && !(no_clocks && self.sdc.clock_at(IoPinId::new(*i)).is_some())
             })
             .map(|(_, p)| Object::Port(p.name.clone()).encode())
             .collect();
@@ -1510,7 +1512,7 @@ impl ExprParser {
 mod tests {
     use super::*;
     use crate::db::design::PlacementStatus;
-    use crate::db::library::{Library, SignalUse};
+    use crate::db::library::Library;
     use crate::geom::dbu::{Dbu, DbuPerMicron};
     use crate::geom::orient::Orientation;
     use crate::geom::point::Point;
@@ -1524,6 +1526,7 @@ mod tests {
             ("key[1]", PinDirection::Input),
             ("out[0]", PinDirection::Output),
             ("io", PinDirection::Inout),
+            ("VDD", PinDirection::Inout),
         ] {
             let net = db.add_net(name).unwrap();
             let _ = db
@@ -1531,7 +1534,11 @@ mod tests {
                     name.into(),
                     net,
                     direction,
-                    SignalUse::Signal,
+                    if name == "VDD" {
+                        SignalUse::Power
+                    } else {
+                        SignalUse::Signal
+                    },
                     Vec::new(),
                     Point::new(Dbu(0), Dbu(0)),
                     Orientation::N,
@@ -1590,6 +1597,8 @@ set_output_delay [expr $clk_period * $clk_io_pct] -clock $clk_name [all_outputs]
         assert!(sdc.input_delays.contains_key(&port(&db, "io")));
         assert!(sdc.output_delays.contains_key(&port(&db, "io")));
         assert!(sdc.output_delays.contains_key(&port(&db, "out[0]")));
+        assert!(!sdc.input_delays.contains_key(&port(&db, "VDD")));
+        assert!(!sdc.output_delays.contains_key(&port(&db, "VDD")));
     }
 
     #[test]
