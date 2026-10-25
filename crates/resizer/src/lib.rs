@@ -11,6 +11,7 @@ pub mod graph;
 pub mod library;
 pub mod netlist;
 pub mod parasitics;
+pub mod rebuffer;
 pub mod repair;
 pub mod resizer;
 pub mod sta;
