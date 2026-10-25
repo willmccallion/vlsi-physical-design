@@ -8,21 +8,21 @@ A digital IC placement and routing engine written in Rust, built from scratch. I
 
 ## Results
 
-Each design is placed from its floorplan and then routed by `pare run <design>`, except gcd, whose placement is part of the input. aes, ibex and jpeg are synthesized and floorplanned by OpenROAD-flow-scripts 26Q2, as its Nangate45 flow does them, at 32%, 50% and 81% utilization; swerv, netcard and leon3mp come from OpenROAD's placer tests, at 10%, 60% and 59%. ariane133, with 132 fakeram45 SRAM macros, and bp_quad, with 220 on a 3.6 × 3.6 mm die, are synthesized and floorplanned by OpenROAD-flow-scripts 26Q2 too, at 32% and 22%. Nets counts the signal nets with two or more pins, the ones there are to route; wirelength is the length of all their routed wires along the centreline. Routed DEFs are checked by OpenROAD 26Q2 `check_drc`.
+Each design is placed from its floorplan and then routed by `pare run <design>`, except gcd, whose placement is part of the input. aes, ibex and jpeg are synthesized and floorplanned by OpenROAD-flow-scripts 26Q2, as its Nangate45 flow does them, at 32%, 50% and 81% utilization; swerv, netcard and leon3mp come from OpenROAD's placer tests, at 10%, 60% and 59%. ariane133, with 132 fakeram45 SRAM macros, and bp_quad, with 220 on a 3.6 × 3.6 mm die, are synthesized and floorplanned by OpenROAD-flow-scripts 26Q2 too, at 32% and 22%. The four synthesized designs run with the netlist repair of the Netlist repair section, so their cell counts include the buffers it adds and leave out the ones it removes. Nets counts the signal nets with two or more pins, the ones there are to route; wirelength is the length of all their routed wires along the centreline. Routed DEFs are checked by OpenROAD 26Q2 `check_drc`.
 
 | Design | Cells | Nets | Wirelength | Vias | PARE violations | OpenROAD `check_drc` | Time | Peak memory |
 |---|---:|---:|---:|---:|---:|---:|---:|---:|
 | gcd | 676 | 563 | 7.5 mm | 3,934 | 0 | 0 | 0.8 s | 0.5 GiB |
-| aes | 13,108 | 12,965 | 227 mm | 150,724 | 0 | 0 | 34 s | 1.9 GiB |
-| ibex | 16,876 | 18,256 | 375 mm | 188,822 | 0 | 0 | 34 s | 2.2 GiB |
-| jpeg | 62,139 | 69,575 | 1,036 mm | 578,571 | 0 | 0 | 2 min 1 s | 4.1 GiB |
+| aes | 13,740 | 13,597 | 229 mm | 155,940 | 0 | 0 | 40 s | 1.8 GiB |
+| ibex | 16,022 | 17,402 | 292 mm | 174,008 | 0 | 0 | 45 s | 2.2 GiB |
+| jpeg | 59,281 | 66,717 | 534 mm | 495,715 | 0 | 0 | 2 min 4 s | 3.8 GiB |
 | swerv | 135,119 | 130,357 | 5,422 mm | 1,520,105 | 0 | 0 | 4 min 50 s | 4.7 GiB |
-| ariane133 | 175,699 | 179,067 | 7,504 mm | 2,109,089 | 0 | 0 | 12 min 38 s | 6.1 GiB |
+| ariane133 | 163,514 | 166,882 | 5,786 mm | 1,890,352 | 0 | 0 | 7 min 31 s | 6.4 GiB |
 | netcard | 274,700 | 290,334 | 10,647 mm | 3,538,026 | 0 | 0 | 1 h 7 min 37 s | 9.3 GiB |
 | leon3mp | 312,529 | 406,912 | 8,522 mm | 4,214,878 | 0 | 0 | 18 min 28 s | 9.1 GiB |
 | bp_quad | 1,241,520 | 1,244,956 | 52,411 mm | 13,885,998 | 0 | 0 | 1 h 10 min 46 s | 23.1 GiB |
 
-Measured on an Intel Core i7-14700K (28 threads) with 64 GB of memory, at commit `dc60d69`; ibex at `6370079`, which sizes the placer's density bins as OpenROAD does and lets ibex's global placement converge. Time and memory cover the whole run, placement included.
+Measured on an Intel Core i7-14700K (28 threads) with 64 GB of memory: aes, ibex, jpeg and ariane133 at commit `e2c2c9f`, with netlist repair, and the rest at `dc60d69`, before it. Time and memory cover the whole run, netlist repair and placement included.
 
 OpenROAD's `check_drc` has a bug that reports spacing violations between two vias of one net where its wire fills the gap ([#11697](https://github.com/The-OpenROAD-Project/OpenROAD/issues/11697)). The counts above come from OpenROAD with the proposed fix ([#11698](https://github.com/The-OpenROAD-Project/OpenROAD/pull/11698)) applied, which `nix develop .#eda` builds. Unpatched OpenROAD reports 0 on gcd, aes, ibex and jpeg, 4 on swerv, 1 on ariane133, 3 on netcard, 1 on leon3mp and 4 on bp_quad, all spacing markers within one net like those; [docs/openroad-check-drc-tiling.md](docs/openroad-check-drc-tiling.md) has the evidence.
 
@@ -77,10 +77,26 @@ On ibex and ariane133 the worst path of both routings is not a clocked path but 
 
 ### Whole flows
 
-`scripts/compare.py --flow` starts both tools from the same floorplan. PARE places and routes it as `pare run` does, with the netlist as synthesized. OpenROAD-flow-scripts runs its own stages as its Makefile orders them: it removes the buffers synthesis inserted and buffers the ports, places the I/O pins after a first global placement, places timing- and routability-driven, buffers and resizes with `repair_design`, legalizes, builds the clock tree and repairs timing, and routes with antenna repair. Its result is another netlist, with the buffers and clock tree it chose, so it closes timing where PARE's unrepaired netlist cannot; the figures that compare are the wires, the vias, the violations and the cost.
+`scripts/compare.py --flow` starts both tools from the same floorplan. PARE runs as `pare run` does: it removes the buffers synthesis inserted, buffers the ports, places, repairs slews and loads, legalizes and routes. OpenROAD-flow-scripts runs its own stages as its Makefile orders them: the same buffer removal and port buffering, I/O pin placement after a first global placement, timing- and routability-driven placement, `repair_design`, legalization, clock tree synthesis with `repair_timing`, and routing with antenna repair. Slew and capacitance violations are OpenSTA's counts on each routed design with its extracted parasitics, clocks ideal.
 
-| Design | Tool | Cells | Wirelength | Vias | PARE violations | OpenROAD `check_drc` | WNS | TNS | Time | Peak memory |
-|---|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|
+| Design | Tool | Cells | Wirelength | Vias | PARE violations | OpenROAD `check_drc` | Slew / cap violations | WNS | TNS | Time | Peak memory |
+|---|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|
+| aes | PARE | 13,740 | 229.0 mm | 155,940 | 0 | 0 | 0 / 21 | -0.75 ns | -84.6 ns | 40 s | 1.8 GiB |
+| aes | OpenROAD | 15,960 | 242.5 mm | 125,873 | 0 | 0 | 0 / 0 | 0.00 ns | 0.0 ns | 1 min 54 s | 2.6 GiB |
+| ibex | PARE | 16,022 | 292.1 mm | 174,008 | 0 | 0 | 0 / 43 | -0.71 ns | -391.2 ns | 45 s | 2.2 GiB |
+| ibex | OpenROAD | 17,290 | 276.9 mm | 130,664 | 0 | 0 | 0 / 0 | 0.00 ns | 0.0 ns | 2 min 15 s | 2.8 GiB |
+| jpeg | PARE | 59,281 | 533.9 mm | 495,715 | 0 | 0 | 0 / 2 | -2.07 ns | -4,121.2 ns | 2 min 4 s | 3.8 GiB |
+| jpeg | OpenROAD | 66,257 | 565.3 mm | 385,250 | 0 | 0 | 0 / 0 | -0.12 ns | -45.8 ns | 7 min 34 s | 3.7 GiB |
+| ariane133 | PARE | 163,514 | 5,785.8 mm | 1,890,352 | 0 | 0 | 73 / 78 | -1.70 ns | -4,557.6 ns | 7 min 31 s | 6.4 GiB |
+| ariane133 | OpenROAD | 180,740 | 6,748.8 mm | 1,398,910 | 0 | 0 | 72 / 6 | -0.37 ns | -668.1 ns | 34 min 53 s | 10.4 GiB |
+
+PARE at commit `e2c2c9f`. OpenROAD-flow-scripts' time is its stages from the floorplan to the routed design added up, and its memory the largest of theirs, as its own logs report them; with propagated clocks, its own final report gives WNS of -0.01, -0.02, -0.13 and -0.66 ns.
+
+Both tools now prepare the netlist alike: each strips 0, 1,458, 3,062 and 17,491 synthesis buffers from aes, ibex, jpeg and ariane133 and adds 387, 249, 45 and 436 port buffers, the same counts to the cell. PARE's repair then resizes 96, 177, 27 and 2,328 drivers and inserts 245, 355, 159 and 4,870 repeaters. On that footing PARE's routed wire is 6% shorter than the flow's on aes and jpeg and 14% shorter on ariane133, and 5% longer on ibex; its vias are 24 to 35% more, from the wrong-way jogs OpenROAD's router allows itself; and it is 2.9 to 4.6 times faster. Before this step PARE's wire was 83% longer than the flow's on jpeg and 11% on ariane133.
+
+Timing is where the flow's remaining stages tell. PARE's repair holds every slew and load to its limit but does not shorten delay: a net of a few thousand loads becomes a chain of repeaters along its Steiner tree, and on jpeg the enable net goes through eight BUF_X32 stages in 2.4 ns on the worst path, so its WNS worsens from -1.24 ns to -2.07 ns while its wire halves. The flow's `repair_timing` rebuilds such trees for delay, its placement is timing-driven and its clock tree is real; PARE has none of the three. The capacitance violations left on PARE's side are drivers repaired at their global-placement positions with the metal3 estimate that legalization and routing then changed; OpenROAD's final report lists 457 slew and 41 capacitance violations of its own on ariane133 with propagated clocks.
+
+---|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|
 | aes | PARE | 13,108 | 227.2 mm | 150,724 | 0 | 0 | -2.19 ns | -395.7 ns | 34 s | 1.9 GiB |
 | aes | OpenROAD | 15,960 | 242.5 mm | 125,873 | 0 | 0 | 0.00 ns | 0.0 ns | 1 min 54 s | 2.6 GiB |
 | ibex | PARE | 16,876 | 374.9 mm | 188,822 | 0 | 0 | -0.82 ns | -679.1 ns | 36 s | 2.1 GiB |
@@ -101,10 +117,12 @@ The flow stripped 0, 1,458, 3,062 and 17,491 synthesis buffers from aes, ibex, j
 ```mermaid
 flowchart TD
     INPUT["LEF / DEF or Bookshelf input<br/>layers · vias · rules · sites · macros · rows · tracks · nets"]
+    NL["Netlist preparation (with a Liberty library)<br/>remove the buffers synthesis left · buffer the ports"]
     IO["Place unplaced I/O pins on the die boundary<br/>matched to slots by wirelength after a first placement"]
 
     subgraph PL["Placement"]
         GP["Global placement<br/>electrostatic density · Nesterov's method<br/>congestion-driven cell inflation"]
+        RD["Design repair<br/>slews from estimated parasitics · resize drivers · insert repeaters"]
         LEG["Legalization (Abacus)<br/>rows · sites · fence regions"]
         DP["Detailed placement<br/>global swap · local reordering"]
     end
@@ -119,7 +137,7 @@ flowchart TD
     CHK["Checks<br/>placement legality · opens · design rules"]
     OUT["Placed and routed DEF"]
 
-    INPUT --> IO --> GP --> LEG --> DP --> PA --> GR --> TA --> DR --> CHK --> OUT
+    INPUT --> NL --> IO --> GP --> RD --> LEG --> DP --> PA --> GR --> TA --> DR --> CHK --> OUT
 ```
 
 ---
@@ -129,6 +147,10 @@ flowchart TD
 Global placement follows ePlace and RePlAce. Cells are electric charges: the field of their density, found by solving Poisson's equation with FFTs, spreads them apart while a smooth weighted-average wirelength pulls connected cells together. Filler cells take up the whitespace, so a design that uses a small part of its die packs to the target density instead of scattering. Nesterov's method minimizes the sum, with its step predicted from the local Lipschitz constant, raising the density weight until the overflow falls below its target. With routability on, congestion is estimated as OpenROAD estimates it (RUDY), and cells in congested gcells are inflated along the way. Fence regions follow DREAMPlace 3.0: each region's cells form an electrostatic system of their own.
 
 Abacus legalization puts cells on rows and sites with the least displacement, inside their fence regions. Detailed placement then moves cells toward the median of their nets and reorders neighbours, keeping a move only if it shortens wirelength and never onto a spot where fixed metal would block a via to one of the cell's pins.
+
+## Netlist repair
+
+With a Liberty library in its config, PARE does to the netlist what OpenROAD-flow-scripts does around placement, following OpenROAD's resizer. Before placing, it removes the buffers synthesis inserted, merging each one's nets, and puts the weakest buffer after every input port and before every output port. After global placement, `repair_design` runs: every pin's slew is found as OpenSTA finds it, from a Prim-Dijkstra Steiner tree over each net carrying the signal layer's resistance and capacitance, reduced for each driver to a pi model with an Elmore delay to every load, and the Dartu-Menezes-Pileggi effective-capacitance fit against the library's delay tables. Drivers are then visited from the outputs back to the inputs: one whose slew breaks its limit takes the smallest equivalent size that meets it, and where a load's slew, a driver's capacitance or a wire's length still breaks a limit, repeaters go in along the Steiner tree, splitting wires and isolating branches as the Elmore estimate asks. Where OpenROAD's Prim-Dijkstra tree crosses itself it falls back to FLUTE, which PARE does not have, so such nets keep their Prim-Dijkstra tree. On ibex the slews this model gives agree with OpenSTA's to a median 0.01% over every driver and the loads to 0.001%, and after repair OpenSTA finds no slew violation left on the placed aes, ibex or jpeg. Clocks are left as they are: PARE builds no clock tree and repairs no setup or hold paths.
 
 ## Routing
 
@@ -168,7 +190,9 @@ Typed indices (`CellId`, `NetId`, `PinId`, `LayerId`, `MacroId`, …) keep table
 
 - **ISPD 2015 designs do not route clean yet.** On mgc_pci_bridge32_a at commit `73d6db4`, 80 repair rounds left 1,986 violations, 1,811 of them in two 10 µm gaps between macros that block every metal layer, where the wires between the die's edge and its interior crowd through.
 - **ISPD 2018 and 2019 designs do not route clean yet.** They load, and ISPD 2018's rules are the ones the checker enforces, but no design of either suite has been taken to a clean result; ISPD 2019's corner spacing and cut enclosure rules are parsed and not enforced.
-- **Very high fanout nets** come out longer and with more vias than OpenROAD routes them: ariane133's reset, an input port driving 20,618 flops, takes 16% more wire and 33% more vias in PARE's routing and is slower to its farthest flop, see PARE versus OpenROAD.
+- **Timing is not repaired.** Netlist repair holds slews and loads to the library's limits but nothing shortens delay, so a high-fanout net becomes a chain of repeaters and the worst paths of jpeg and ariane133 get slower with the repair than without it (WNS -2.07 ns against -1.24 ns on jpeg), see Whole flows. Timing-driven placement, `repair_timing` and clock tree synthesis are the stages still missing.
+- **Some drivers still break their capacitance limit after routing**: 21, 43, 2 and 78 on aes, ibex, jpeg and ariane133 by OpenSTA's count on the extracted parasitics, where the repair's estimate at the global placement was within the limit.
+- **Very high fanout nets** come out longer and with more vias than OpenROAD routes them: on the netlist as synthesized, ariane133's reset, an input port driving 20,618 flops, takes 16% more wire and 33% more vias in PARE's routing and is slower to its farthest flop, see PARE versus OpenROAD.
 - **Nets under a nondefault rule** are routed and checked at their own widths and spacings, while OpenROAD reads routed wires at their layers' default widths, so the two checkers disagree on such nets: on pci's clock net at commit `73d6db4`, PARE reports 135 spacing violations that OpenROAD does not, and OpenROAD one that PARE does not.
 
 ---
@@ -199,10 +223,11 @@ cargo run --release -- check aes --placement output/aes/routed.def
 
 python3 scripts/compare.py aes ibex           # route the PARE placement with PARE and with OpenROAD, check and time both
 python3 scripts/compare.py --flow aes ibex    # PARE's whole run against OpenROAD-flow-scripts' whole flow from the floorplan
+python3 scripts/compare.py --flow --skip-openroad aes   # rerun PARE's side only, against the flow's earlier result
 python3 scripts/net_report.py ibex rst_ni     # one net in both routings: wire per layer, vias, Elmore delay to its loads
 ```
 
-The placed and routed DEFs and images of each stage are written to the output directory named in the config.
+The placed and routed DEFs and images of each stage are written to the output directory named in the config. A config that names `liberty_files` under `[input]` gets the netlist repair of the Netlist repair section, with its clock ports, cells not to use and the signal layer's wire RC under `[netlist]`; `scripts/download.py` writes them for the OpenROAD-flow-scripts designs from the platform's settings.
 
 ### Looking inside a run
 
@@ -235,6 +260,12 @@ PARE is written from scratch in Rust. The methods it follows come from the paper
 - P. Spindler and F. M. Johannes, "Fast and Accurate Routing Demand Estimation for Efficient Routability-driven Placement", DATE 2007. RUDY congestion estimate.
 - P. Spindler, U. Schlichtmann and F. M. Johannes, "Abacus: Fast Legalization of Standard Cell Circuits with Minimal Movement", ISPD 2008.
 - M. Pan, N. Viswanathan and C. Chu, "An Efficient and Effective Detailed Placement Algorithm", ICCAD 2005. Global swap and local reordering.
+
+**Netlist repair**
+
+- F. Dartu, N. Menezes and L. T. Pileggi, "Performance Computation for Precharacterized CMOS Gates with RC Loads", IEEE TCAD 15(5), 1996. The effective-capacitance delay calculation, as OpenSTA's `dmp_ceff_elmore`.
+- C. J. Alpert, T. C. Hu, J. H. Huang, A. B. Kahng and D. Karger, "Prim-Dijkstra Tradeoffs for Improved Performance-Driven Routing Tree Design", IEEE TCAD 14(7), 1995. The Steiner trees the parasitics are estimated on, as OpenROAD's `stt`.
+- OpenROAD's resizer (`src/rsz`) is the reference for `remove_buffers`, `buffer_ports` and `repair_design`, and OpenSTA (`src/sta`) for the slew limits, the pi-model reduction and the delay calculation PARE reproduces.
 
 **Routing and checking**
 
