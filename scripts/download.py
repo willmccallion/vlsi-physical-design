@@ -20,7 +20,9 @@ aes, ibex and jpeg are synthesized and floorplanned by OpenROAD-flow-scripts
 26Q2, with the yosys and OpenROAD of `nix develop .#eda`, so download them
 inside that shell.
 """
+
 import argparse
+import json
 import os
 import shutil
 import subprocess
@@ -39,19 +41,38 @@ ORFS_DIR = f"inputs/orfs/OpenROAD-flow-scripts-{ORFS_TAG}"
 NANGATE45_LEF = "inputs/tech/nangate45/Nangate45.lef"
 NANGATE45_IO = {"horizontal_layer": "metal5", "vertical_layer": "metal6"}
 ORFS_NANGATE45 = f"{ORFS_DIR}/flow/platforms/nangate45/lef"
+ORFS_NANGATE45_LIB = f"{ORFS_DIR}/flow/platforms/nangate45/lib"
+# The platform's config.mk and setRC.tcl: cells the flow never uses, and the
+# signal wire RC of metal3 in ohms and femtofarads per micron.
+ORFS_NANGATE45_DONT_USE = ["TAPCELL_X1", "FILLCELL_X1", "AOI211_X1", "OAI211_X1"]
+ORFS_NANGATE45_WIRE = {
+    "signal_layer": "metal3",
+    "wire_resistance_ohm_per_um": 3.57728,
+    "wire_capacitance_ff_per_um": 0.103981,
+}
 ORFS_NANGATE45_LEF = [
     f"{ORFS_NANGATE45}/NangateOpenCellLibrary.tech.lef",
     f"{ORFS_NANGATE45}/NangateOpenCellLibrary.macro.mod.lef",
 ]
 
 
-def orfs(nickname, sources, about, io=None, io_enabled=None, macros=(), orfs_pins=False):
+def orfs(
+    nickname,
+    sources,
+    about,
+    clocks,
+    io=None,
+    io_enabled=None,
+    macros=(),
+    orfs_pins=False,
+):
     """A Nangate45 design that OpenROAD-flow-scripts synthesizes from its
     `sources` under flow/designs/src and floorplans: die, rows, tracks, tap
     cells, power grid, the `macros` it places, and the I/O pins only where
     its floorplan gives them. With `orfs_pins`, the I/O pins are those its
     own pin placement puts within the design's I/O constraints, after its
-    first global placement."""
+    first global placement. `clocks` names the ports its constraints define
+    clocks on."""
     return {
         "suite": "openroad",
         "purpose": "place_and_route",
@@ -60,6 +81,9 @@ def orfs(nickname, sources, about, io=None, io_enabled=None, macros=(), orfs_pin
         "orfs_sources": sources,
         "orfs_pins": orfs_pins,
         "lef": ORFS_NANGATE45_LEF + [f"{ORFS_NANGATE45}/{m}.lef" for m in macros],
+        "liberty": [f"{ORFS_NANGATE45_LIB}/NangateOpenCellLibrary_typical.lib"]
+        + [f"{ORFS_NANGATE45_LIB}/{m}.lib" for m in macros],
+        "clocks": clocks,
         "def": f"{nickname}_orfs.def",
         "io": io,
         "io_enabled": False if orfs_pins else io_enabled,
@@ -140,24 +164,28 @@ DESIGNS = {
         "aes",
         ["aes"],
         "AES cipher, ~13k nets, ORFS 26Q2 synthesis and floorplan (32% utilization)",
+        ["clk"],
         io_enabled=False,
     ),
     "ibex": orfs(
         "ibex",
         ["ibex_sv"],
         "Ibex RISC-V core, ORFS 26Q2 synthesis and floorplan (50% utilization)",
+        ["clk_i"],
         io=NANGATE45_IO,
     ),
     "jpeg": orfs(
         "jpeg",
         ["jpeg"],
         "JPEG encoder, ORFS 26Q2 synthesis and floorplan (80% utilization)",
+        ["clk"],
         io=NANGATE45_IO,
     ),
     "ariane133": orfs(
         "ariane133",
         ["ariane133"],
         "Ariane RISC-V core, ~176k cells and 132 fakeram45 SRAM macros, ORFS 26Q2 synthesis and floorplan",
+        ["clk_i"],
         macros=["fakeram45_256x16"],
         orfs_pins=True,
     ),
@@ -165,6 +193,7 @@ DESIGNS = {
         "bp_quad",
         ["bp_quad"],
         "BlackParrot quad-core chip, ~1.24M cells, 1.43M nets and 220 fakeram45 SRAM macros, ORFS 26Q2 synthesis and floorplan",
+        ["p_bsg_tag_clk_i", "p_clk_A_i", "p_clk_B_i"],
         macros=[
             "fakeram45_256x48",
             "fakeram45_32x32",
@@ -200,17 +229,29 @@ DESIGNS = {
 for _n in range(1, 19):
     DESIGNS[f"ibm{_n:02d}"] = ibm(f"{_n:02d}", num_layers=10 if _n == 18 else None)
 for _name, _util in [
-    ("mgc_des_perf_1", 0.906), ("mgc_des_perf_a", 0.429), ("mgc_des_perf_b", 0.497),
-    ("mgc_edit_dist_a", 0.455), ("mgc_fft_1", 0.835), ("mgc_fft_2", 0.65),
-    ("mgc_fft_a", 0.5), ("mgc_fft_b", 0.6), ("mgc_matrix_mult_1", 0.802),
-    ("mgc_matrix_mult_a", 0.6), ("mgc_matrix_mult_b", 0.6), ("mgc_pci_bridge32_a", 0.384),
-    ("mgc_pci_bridge32_b", 0.143), ("mgc_superblue11_a", 0.65), ("mgc_superblue12", 0.65),
+    ("mgc_des_perf_1", 0.906),
+    ("mgc_des_perf_a", 0.429),
+    ("mgc_des_perf_b", 0.497),
+    ("mgc_edit_dist_a", 0.455),
+    ("mgc_fft_1", 0.835),
+    ("mgc_fft_2", 0.65),
+    ("mgc_fft_a", 0.5),
+    ("mgc_fft_b", 0.6),
+    ("mgc_matrix_mult_1", 0.802),
+    ("mgc_matrix_mult_a", 0.6),
+    ("mgc_matrix_mult_b", 0.6),
+    ("mgc_pci_bridge32_a", 0.384),
+    ("mgc_pci_bridge32_b", 0.143),
+    ("mgc_superblue11_a", 0.65),
+    ("mgc_superblue12", 0.65),
     ("mgc_superblue16_a", 0.55),
 ]:
     DESIGNS[_name] = ispd2015(_name, _util)
 for _name, _util in [
-    ("mgc_matrix_mult_2", 0.8), ("mgc_matrix_mult_c", 0.6),
-    ("mgc_superblue14", 0.56), ("mgc_superblue19", 0.53),
+    ("mgc_matrix_mult_2", 0.8),
+    ("mgc_matrix_mult_c", 0.6),
+    ("mgc_superblue14", 0.56),
+    ("mgc_superblue19", 0.53),
 ]:
     DESIGNS[_name] = ispd2015(_name, _util, hidden=True)
 for _year in (18, 19):
@@ -262,14 +303,35 @@ def orfs_checkout():
     if not os.path.exists(f"{ORFS_DIR}/.git"):
         os.makedirs(os.path.dirname(ORFS_DIR), exist_ok=True)
         subprocess.run(
-            ["git", "clone", "--quiet", "--depth", "1", "--filter=blob:none", "--sparse",
-             "--branch", ORFS_TAG, ORFS, ORFS_DIR],
+            [
+                "git",
+                "clone",
+                "--quiet",
+                "--depth",
+                "1",
+                "--filter=blob:none",
+                "--sparse",
+                "--branch",
+                ORFS_TAG,
+                ORFS,
+                ORFS_DIR,
+            ],
             check=True,
         )
     sources = sorted({s for d in DESIGNS.values() for s in d.get("orfs_sources", [])})
     subprocess.run(
-        ["git", "-C", ORFS_DIR, "sparse-checkout", "set", "flow/scripts", "flow/util",
-         "flow/platforms/common", "flow/platforms/nangate45", "flow/designs/nangate45"]
+        [
+            "git",
+            "-C",
+            ORFS_DIR,
+            "sparse-checkout",
+            "set",
+            "flow/scripts",
+            "flow/util",
+            "flow/platforms/common",
+            "flow/platforms/nangate45",
+            "flow/designs/nangate45",
+        ]
         + [f"flow/designs/src/{s}" for s in sources],
         check=True,
     )
@@ -286,22 +348,40 @@ def orfs_floorplan(name, dest):
     tools = {t: shutil.which(t) for t in ("yosys", "openroad")}
     missing = [t for t, path in tools.items() if path is None]
     if missing:
-        sys.exit(f"{name} needs {' and '.join(missing)}: run inside `nix develop .#eda`")
+        sys.exit(
+            f"{name} needs {' and '.join(missing)}: run inside `nix develop .#eda`"
+        )
     orfs_checkout()
     results = f"results/nangate45/{d['orfs']}/base"
     targets = ["floorplan"] + (["3_2_place_iop"] if d["orfs_pins"] else [])
     subprocess.run(
-        ["make", "-C", f"{ORFS_DIR}/flow",
-         f"DESIGN_CONFIG=./designs/nangate45/{d['orfs']}/config.mk",
-         f"YOSYS_EXE={tools['yosys']}", f"OPENROAD_EXE={tools['openroad']}"] + targets,
+        [
+            "make",
+            "-C",
+            f"{ORFS_DIR}/flow",
+            f"DESIGN_CONFIG=./designs/nangate45/{d['orfs']}/config.mk",
+            f"YOSYS_EXE={tools['yosys']}",
+            f"OPENROAD_EXE={tools['openroad']}",
+        ]
+        + targets,
         check=True,
     )
     os.makedirs(dest, exist_ok=True)
-    env = {**os.environ, "ODB_IN": f"{ORFS_DIR}/flow/{results}/2_floorplan.odb", "DEF_OUT": out}
+    env = {
+        **os.environ,
+        "ODB_IN": f"{ORFS_DIR}/flow/{results}/2_floorplan.odb",
+        "DEF_OUT": out,
+    }
     if d["orfs_pins"]:
         env["PINS_TCL"] = f"{ORFS_DIR}/flow/{results}/3_2_place_iop.tcl"
     subprocess.run(
-        [tools["openroad"], "-no_init", "-no_splash", "-exit", "scripts/odb_to_def.tcl"],
+        [
+            tools["openroad"],
+            "-no_init",
+            "-no_splash",
+            "-exit",
+            "scripts/odb_to_def.tcl",
+        ],
         env=env,
         check=True,
     )
@@ -356,10 +436,16 @@ def config_text(name):
     else:
         lefs = d["lef"] if "lef" in d else [f"{dest}/{f}" for f in d["lef_names"]]
         lines.append(f"lef_files = {toml_list(lefs)}")
+        if d.get("liberty"):
+            lines.append(f"liberty_files = {toml_list(d['liberty'])}")
         lines.append(f'def_file = "{dest}/{d["def"]}"')
     lines.append(f'output_def = "output/{name}/placed.def"')
     if d["purpose"] != "routing":
-        lines += ["", "[global_placement]", f"placer_max_iterations = {d['placer_iterations']}"]
+        lines += [
+            "",
+            "[global_placement]",
+            f"placer_max_iterations = {d['placer_iterations']}",
+        ]
         if d.get("target_density") is not None:
             lines.append(f"target_density = {d['target_density']}")
     if d.get("io"):
@@ -367,6 +453,11 @@ def config_text(name):
         lines += [f'{k} = "{v}"' for k, v in d["io"].items()]
     if d.get("io_enabled") is False:
         lines += ["", "[io_placement]", "enabled = false"]
+    if d.get("liberty"):
+        lines += ["", "[netlist]"]
+        lines += [f"{k} = {json.dumps(v)}" for k, v in ORFS_NANGATE45_WIRE.items()]
+        lines.append(f"dont_use = {toml_list(ORFS_NANGATE45_DONT_USE)}")
+        lines.append(f"clock_ports = {toml_list(d['clocks'])}")
     return "\n".join(lines) + "\n"
 
 
@@ -396,10 +487,14 @@ def resolve(targets):
 
 
 def main():
-    parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    parser = argparse.ArgumentParser(
+        description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
+    )
     parser.add_argument("targets", nargs="*", help="designs, suites, or 'all'")
     parser.add_argument("--list", action="store_true", help="list designs by suite")
-    parser.add_argument("--configs", action="store_true", help="write every config without downloading")
+    parser.add_argument(
+        "--configs", action="store_true", help="write every config without downloading"
+    )
     args = parser.parse_args()
 
     if args.list:
