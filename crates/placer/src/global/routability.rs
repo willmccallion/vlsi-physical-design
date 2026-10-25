@@ -17,9 +17,9 @@
 //! pass, the sizes revert to those of the round that measured least
 //! congestion.
 
-use super::Field;
-use super::nesterov::Objects;
+use super::nesterov::{Objects, remap_fields};
 use super::wirelength::Netlist;
+use super::{Field, Remap};
 use crate::model::CellKind;
 use pare_common::geom::point::Point;
 use pare_common::geom::rect::Rect;
@@ -347,6 +347,33 @@ impl Routability {
 
     pub(super) const fn active(&self) -> bool {
         !self.done
+    }
+
+    /// Carries the budget and the record of the least congested round to
+    /// the objects and fields of a rebuilt setup: the area a repair added
+    /// counts as if it had been there from the start.
+    pub(super) fn remap(&mut self, remap: &Remap, objects: &Objects, fields: &[Field]) {
+        self.original_area += remap.added_area;
+        self.initial_cell_area += remap.added_area;
+        self.grown = remap_fields(&self.grown, &remap.old_field_of_new, 0.0);
+        if let Some(m) = self.minimum.as_mut() {
+            m.sizes = (0..objects.cells())
+                .map(|i| remap.old_of_new[i].map_or(objects.sizes[i], |k| m.sizes[k]))
+                .collect();
+            m.targets = remap
+                .old_field_of_new
+                .iter()
+                .zip(fields)
+                .map(|(o, f)| o.map_or(f.grid.target(), |k| m.targets[k]))
+                .collect();
+            m.kept_fillers = remap
+                .old_field_of_new
+                .iter()
+                .zip(fields)
+                .map(|(o, f)| o.map_or(f.kept_fillers, |k| m.kept_fillers[k]))
+                .collect();
+            m.grown = remap_fields(&m.grown, &remap.old_field_of_new, 0.0);
+        }
     }
 
     pub(super) const fn params(&self) -> &RoutabilityParams {

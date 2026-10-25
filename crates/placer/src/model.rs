@@ -8,7 +8,7 @@
 use crate::rows::expand_rows;
 use crate::zones::{Zone, Zones};
 use pare_common::db::design::{NetlistDB, PinOwner, PlacementStatus};
-use pare_common::db::indices::CellId;
+use pare_common::db::indices::{CellId, NetId};
 use pare_common::geom::dbu::Dbu;
 use pare_common::geom::point::Point;
 use pare_common::geom::rect::Rect;
@@ -51,6 +51,8 @@ pub struct ModelPin {
 /// A net as the placer sees it.
 #[derive(Clone, Debug, PartialEq)]
 pub struct ModelNet {
+    /// The net in the database.
+    pub net: NetId,
     /// Its connections.
     pub pins: Vec<ModelPin>,
     /// Wirelength weight.
@@ -129,8 +131,10 @@ impl PlacementModel {
         let nets = db
             .nets
             .iter()
-            .filter(|n| !n.signal_use.is_supply())
-            .map(|n| ModelNet {
+            .enumerate()
+            .filter(|(_, n)| !n.signal_use.is_supply())
+            .map(|(i, n)| ModelNet {
+                net: NetId::new(i),
                 weight: n.weight,
                 pins: n
                     .pins

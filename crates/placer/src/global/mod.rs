@@ -31,6 +31,7 @@ use pare_common::geom::point::Point;
 use pare_common::geom::rect::Rect;
 use rand::rngs::StdRng;
 use rand::{Rng, SeedableRng};
+use std::convert::Infallible;
 use std::ops::Range;
 use wirelength::{Netlist, Terminal};
 
@@ -49,6 +50,51 @@ pub struct GlobalParams {
     pub seed: u64,
     /// Inflation of cells in routing-congested bins, if enabled.
     pub routability: Option<RoutabilityParams>,
+    /// Repair of the design for timing along the way, if enabled.
+    pub timing: Option<TimingParams>,
+}
+
+/// When timing-driven placement repairs the design, as `OpenROAD`'s
+/// `timing_driven_net_reweight_overflow`.
+#[derive(Clone, Debug, PartialEq)]
+pub struct TimingParams {
+    /// Overflows at which the design is repaired and its nets reweighted,
+    /// each once, as the overflow falls below it.
+    pub overflows: Vec<f64>,
+}
+
+/// The design after a timing-driven repair: the model to go on with, and
+/// where each cell of the model before went.
+#[derive(Debug)]
+pub struct Reweighted {
+    /// The repaired design, its nets weighted for timing.
+    pub model: PlacementModel,
+    /// For each cell of the model before the repair, its index in the new
+    /// model, or none if the repair removed it.
+    pub cell_map: Vec<Option<usize>>,
+}
+
+/// What repairs the design between iterations of timing-driven placement.
+pub trait TimingDriver {
+    /// What a repair can fail with.
+    type Error;
+
+    /// Repairs the design at the positions of `model` and weights its nets
+    /// for timing; none turns timing-driven placement off for the rest of
+    /// the run.
+    fn repair(&mut self, model: &PlacementModel) -> Result<Option<Reweighted>, Self::Error>;
+}
+
+/// The driver of a run without timing-driven placement: it never repairs.
+#[derive(Clone, Copy, Debug, Default)]
+pub struct NoTiming;
+
+impl TimingDriver for NoTiming {
+    type Error = Infallible;
+
+    fn repair(&mut self, _: &PlacementModel) -> Result<Option<Reweighted>, Infallible> {
+        Ok(None)
+    }
 }
 
 /// One iteration's state.
@@ -95,6 +141,8 @@ pub struct GlobalResult {
     pub final_congestion: Option<f64>,
     /// How each zone with cells ended.
     pub zones: Vec<ZoneOutcome>,
+    /// Timing-driven repairs made along the way.
+    pub timing_rounds: usize,
 }
 
 /// How the cells of one zone were spread.
@@ -221,72 +269,247 @@ fn channel_pitch(rows: &[Rect<f64>]) -> Option<f64> {
 
 /// Places the movable cells of `model`, calling `report` after every
 /// iteration.
-pub fn place(
+///
+/// With `timing`, the design is repaired and its nets reweighted at the
+/// overflows `params.timing` names; the model then changes to the repaired
+/// design.
+pub fn place<D: TimingDriver>(
     model: &mut PlacementModel,
     params: &GlobalParams,
     estimator: Option<&mut dyn CongestionEstimator>,
+    timing: Option<&mut D>,
     report: impl FnMut(&Progress),
-) -> GlobalResult {
+) -> Result<GlobalResult, D::Error> {
+    let mut rng = StdRng::seed_from_u64(params.seed);
+    let setup = Setup::new(model, params, &mut rng);
+    let probe = estimator.map(|estimator| Probe::new(estimator, model));
+    nesterov::minimize(model, setup, params, probe, timing, &mut rng, report)
+}
+
+/// What a run works on, built from one model: the objects, their fields
+/// and the nets between them.
+struct Setup {
+    objects: Objects,
+    fields: Vec<Field>,
+    netlist: Netlist,
+    /// The model cell of each object that is a cell.
+    movable: Vec<usize>,
+    /// Each cell object's size in the model, before any inflation.
+    model_sizes: Vec<Point<f64>>,
+}
+
+/// How the objects of a rebuilt setup continue those of the one before.
+struct Remap {
+    /// For each new object, the old object it continues.
+    old_of_new: Vec<Option<usize>>,
+    /// For each new field, the old field of the same zone.
+    old_field_of_new: Vec<Option<usize>>,
+    /// Cell area the new objects add over the old ones.
+    added_area: f64,
+}
+
+impl Setup {
+    fn new(model: &PlacementModel, params: &GlobalParams, rng: &mut StdRng) -> Self {
+        let movable = movable_cells(model);
+        let fixed = fixed_rects(model);
+        let mut objects = Objects {
+            centers: initial_centers(model, &movable, rng),
+            sizes: movable.iter().map(|&i| model.sizes[i]).collect(),
+            kinds: movable.iter().map(|&i| model.kinds[i]).collect(),
+        };
+        let mut fields = build_fields(model, &movable, &fixed, params);
+        for field in &mut fields {
+            add_fillers(field, &mut objects, rng);
+        }
+        Self {
+            netlist: build_netlist(model, &movable),
+            model_sizes: objects.sizes.clone(),
+            objects,
+            fields,
+            movable,
+        }
+    }
+
+    /// The setup for `model`, the design after a repair, continuing this
+    /// one: cells the repair kept keep their objects, with their sizes
+    /// unless the repair changed them, each field keeps its fillers and
+    /// its target density rises by the area its cells gained over the
+    /// free area, as `OpenROAD` raises it; new cells start where the
+    /// repair put them.
+    fn rebuild(
+        &self,
+        model: &PlacementModel,
+        cell_map: &[Option<usize>],
+        params: &GlobalParams,
+        rng: &mut StdRng,
+    ) -> (Self, Remap) {
+        let movable = movable_cells(model);
+        let fixed = fixed_rects(model);
+        let mut old_object_of_old_cell = vec![None; cell_map.len()];
+        for (k, &i) in self.movable.iter().enumerate() {
+            old_object_of_old_cell[i] = Some(k);
+        }
+        let mut old_object_of_new_cell = vec![None; model.num_cells()];
+        for (i, &new) in cell_map.iter().enumerate() {
+            if let (Some(j), Some(k)) = (new, old_object_of_old_cell[i]) {
+                old_object_of_new_cell[j] = Some(k);
+            }
+        }
+        let mut objects = Objects {
+            centers: Vec::with_capacity(movable.len()),
+            sizes: Vec::with_capacity(movable.len()),
+            kinds: movable.iter().map(|&i| model.kinds[i]).collect(),
+        };
+        let mut old_of_new = Vec::with_capacity(movable.len());
+        let area = |size: Point<f64>| size.x * size.y;
+        let mut added_area = 0.0;
+        for &i in &movable {
+            let size = model.sizes[i];
+            match old_object_of_new_cell[i] {
+                Some(k) if self.model_sizes[k] == size => {
+                    objects.centers.push(self.objects.centers[k]);
+                    objects.sizes.push(self.objects.sizes[k]);
+                    old_of_new.push(Some(k));
+                }
+                Some(k) => {
+                    objects.centers.push(self.objects.centers[k]);
+                    objects.sizes.push(size);
+                    old_of_new.push(Some(k));
+                    added_area += area(size) - area(self.model_sizes[k]);
+                }
+                None => {
+                    objects.centers.push(model.positions[i] + size * 0.5);
+                    objects.sizes.push(size);
+                    old_of_new.push(None);
+                    added_area += area(size);
+                }
+            }
+        }
+        let model_sizes = objects.sizes.clone();
+        for (k, &i) in self.movable.iter().enumerate() {
+            if cell_map[i].is_none() {
+                added_area -= area(self.model_sizes[k]);
+            }
+        }
+        let mut fields = build_fields(model, &movable, &fixed, params);
+        let mut old_field_of_new = Vec::with_capacity(fields.len());
+        for field in &mut fields {
+            let old = self.fields.iter().position(|f| f.zone == field.zone);
+            old_field_of_new.push(old);
+            let Some(old) = old.map(|o| &self.fields[o]) else {
+                add_fillers(field, &mut objects, rng);
+                old_of_new.extend(field.fillers.clone().map(|_| None));
+                continue;
+            };
+            let first = objects.centers.len();
+            for k in old.fillers.clone() {
+                objects.centers.push(self.objects.centers[k]);
+                objects.sizes.push(self.objects.sizes[k]);
+                old_of_new.push(Some(k));
+            }
+            field.fillers = first..objects.centers.len();
+            field.kept_fillers = old.kept_fillers;
+            field.filler = old.filler;
+            let cell_area = |objects: &Objects, cells: &Range<usize>| -> f64 {
+                cells
+                    .clone()
+                    .map(|i| objects.sizes[i].x * objects.sizes[i].y)
+                    .sum()
+            };
+            let gained = cell_area(&objects, &field.cells) - cell_area(&self.objects, &old.cells);
+            let free = field.grid.free_area();
+            if free > 0.0 {
+                let target = old.grid.target() + gained / free;
+                if target > 1.0 {
+                    log::warn!(
+                        "timing-driven repair raised a field's target density to {target:.3}"
+                    );
+                }
+                field.grid.set_target(target);
+                field.utilization = cell_area(&objects, &field.cells) / free;
+            }
+        }
+        let setup = Self {
+            netlist: build_netlist(model, &movable),
+            model_sizes,
+            objects,
+            fields,
+            movable,
+        };
+        let remap = Remap {
+            old_of_new,
+            old_field_of_new,
+            added_area,
+        };
+        (setup, remap)
+    }
+}
+
+/// The model's movable cells, grouped by zone.
+fn movable_cells(model: &PlacementModel) -> Vec<usize> {
     let mut movable: Vec<usize> = (0..model.num_cells())
         .filter(|&i| model.movable[i])
         .collect();
     movable.sort_by_key(|&i| (model.zone_of[i], i));
-    let fixed: Vec<Rect<f64>> = (0..model.num_cells())
+    movable
+}
+
+/// The boxes of the model's fixed cells.
+fn fixed_rects(model: &PlacementModel) -> Vec<Rect<f64>> {
+    (0..model.num_cells())
         .filter(|&i| !model.movable[i])
         .map(|i| Rect::new(model.positions[i], model.positions[i] + model.sizes[i]))
-        .collect();
+        .collect()
+}
 
-    let mut rng = StdRng::seed_from_u64(params.seed);
-    let mut objects = Objects {
-        centers: initial_centers(model, &movable, &mut rng),
-        sizes: movable.iter().map(|&i| model.sizes[i]).collect(),
-        kinds: movable.iter().map(|&i| model.kinds[i]).collect(),
-    };
-    let mut fields = build_fields(model, &movable, &fixed, params);
-    for field in &mut fields {
-        let cells = &objects.sizes[field.cells.clone()];
-        let (size, count) = filler_layout(cells, field.grid.free_area(), field.grid.target());
-        let first = objects.centers.len();
-        for _ in 0..count {
-            objects.centers.push(random_point(&field.area, &mut rng));
-            objects.sizes.push(size);
-        }
-        field.fillers = first..objects.centers.len();
-        field.kept_fillers = count;
-        field.filler = size;
+/// Gives `field` the fillers that bring its free area to its target
+/// density, as new objects scattered over its area.
+fn add_fillers(field: &mut Field, objects: &mut Objects, rng: &mut StdRng) {
+    let cells = &objects.sizes[field.cells.clone()];
+    let (size, count) = filler_layout(cells, field.grid.free_area(), field.grid.target());
+    let first = objects.centers.len();
+    for _ in 0..count {
+        objects.centers.push(random_point(&field.area, rng));
+        objects.sizes.push(size);
     }
-    let netlist = build_netlist(model, &movable);
+    field.fillers = first..objects.centers.len();
+    field.kept_fillers = count;
+    field.filler = size;
+}
 
-    let mut centers: Vec<Point<f64>> = (0..model.num_cells())
-        .map(|i| model.positions[i] + model.sizes[i] * 0.5)
-        .collect();
-    let movable_cells = &movable;
-    let mut estimate = estimator.map(|estimator| {
-        move |objects: &Objects| {
-            for (k, &i) in movable_cells.iter().enumerate() {
-                centers[i] = objects.centers[k];
-            }
-            estimator.congestion(&centers)
-        }
-    });
-    let problem = nesterov::Problem {
-        netlist: &netlist,
-        die: model.die,
-        site: model.site_width,
-    };
-    let result = nesterov::minimize(
-        &mut objects,
-        &mut fields,
-        &problem,
-        params,
-        estimate.as_mut().map(|f| f as nesterov::Estimate<'_>),
-        report,
-    );
+/// Measures congestion where the objects are, through an estimator that
+/// sees every cell of the model.
+struct Probe<'a> {
+    estimator: &'a mut dyn CongestionEstimator,
+    /// The center of every cell of the model.
+    centers: Vec<Point<f64>>,
+}
 
-    for (k, &i) in movable.iter().enumerate() {
-        model.positions[i] = objects.centers[k] - model.sizes[i] * 0.5;
+impl<'a> Probe<'a> {
+    fn new(estimator: &'a mut dyn CongestionEstimator, model: &PlacementModel) -> Self {
+        let mut probe = Self {
+            estimator,
+            centers: Vec::new(),
+        };
+        probe.refresh(model);
+        probe
     }
-    result
+
+    /// Takes in the cells of `model`.
+    fn refresh(&mut self, model: &PlacementModel) {
+        self.centers = (0..model.num_cells())
+            .map(|i| model.positions[i] + model.sizes[i] * 0.5)
+            .collect();
+    }
+
+    /// The congestion of every gcell with the cell objects where
+    /// `objects` has them.
+    fn measure(&mut self, objects: &Objects, movable: &[usize]) -> Vec<f64> {
+        for (k, &i) in movable.iter().enumerate() {
+            self.centers[i] = objects.centers[k];
+        }
+        self.estimator.congestion(&self.centers)
+    }
 }
 
 /// One field for each zone with movable cells, over the cells of
