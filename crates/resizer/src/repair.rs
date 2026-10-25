@@ -96,23 +96,12 @@ impl<'r, 'a> Repairer<'r, 'a> {
     /// Holds every violating input slew at its limit so the repair of one
     /// driver does not upsize the next, as `OpenROAD`'s forward pass.
     fn annotate_violating_loads(&mut self) {
+        let annotated = self.resizer.annotate_violating_input_slews();
         let netlist = self.resizer.netlist();
-        let loads = self.resizer.graph.loads_by_level(&netlist);
-        let mut annotations = Vec::new();
-        for load in loads {
-            let Some(port) = netlist.lib_port(load) else {
-                continue;
-            };
-            let limit = self.resizer.max_input_slew(port);
-            if self.resizer.graph.slew(load).max() > limit {
-                annotations.push((load, limit));
-                let net = self.resizer.db.pins[load.index()].net;
-                self.load_slew_violation_drivers
-                    .extend(netlist.drivers(net));
-            }
-        }
-        for (load, limit) in annotations {
-            self.resizer.graph.annotate_slew(load, limit);
+        for load in annotated {
+            let net = self.resizer.db.pins[load.index()].net;
+            self.load_slew_violation_drivers
+                .extend(netlist.drivers(net));
         }
     }
 

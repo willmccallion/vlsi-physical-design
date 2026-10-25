@@ -233,10 +233,32 @@ impl<'a> Resizer<'a> {
     /// for outputs; infinite without either.
     #[must_use]
     pub fn max_input_slew(&self, port: &LibPort) -> f64 {
-        port.max_transition
-            .filter(|&l| l != 0.0)
-            .or(self.link.liberty.defaults.max_transition)
-            .unwrap_or(f64::INFINITY)
+        max_input_slew(self.link, port)
+    }
+
+    /// Holds every input slew over its limit at that limit, each before
+    /// anything downstream of it is timed, as `OpenROAD`'s `repairDesign`
+    /// forward pass, and brings the timing up to date; returns the pins
+    /// held.
+    pub fn annotate_violating_input_slews(&mut self) -> Vec<PinId> {
+        let (annotated, mut dirty) = {
+            let netlist = Netlist::new(self.db, self.link);
+            let link = self.link;
+            let limit_of =
+                |pin: PinId| netlist.lib_port(pin).map(|port| max_input_slew(link, port));
+            self.graph
+                .sweep_annotating(&netlist, self.clocks, &limit_of)
+        };
+        let netlist = Netlist::new(self.db, self.link);
+        for &(load, _) in &annotated {
+            dirty.extend(self.graph.drivers_fed_by(&netlist, load));
+        }
+        dirty.sort_unstable();
+        dirty.dedup();
+        if let Some(sta) = &mut self.sta {
+            sta.update(&netlist, &self.graph, self.clocks, &dirty);
+        }
+        annotated.into_iter().map(|(load, _)| load).collect()
     }
 
     /// A slew limit less the margin kept in hand.
@@ -835,6 +857,16 @@ impl LoadModel for Resizer<'_> {
 /// How many levels of hierarchy a name has: one more than its dividers.
 fn hierarchy_depth(name: &str) -> usize {
     name.matches('/').count()
+}
+
+/// The transition limit at an input pin: its own, else, as `OpenROAD`
+/// fixes up for libraries like Nangate45, the library default meant for
+/// outputs; infinite without either.
+fn max_input_slew(link: &Link<'_>, port: &LibPort) -> f64 {
+    port.max_transition
+        .filter(|&l| l != 0.0)
+        .or(link.liberty.defaults.max_transition)
+        .unwrap_or(f64::INFINITY)
 }
 
 /// The factor between a driver's resistance times its load and the slew

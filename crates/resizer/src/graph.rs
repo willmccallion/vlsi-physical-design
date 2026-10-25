@@ -443,6 +443,42 @@ impl TimingGraph {
             .collect()
     }
 
+    /// Finds every driver's slews in level order, holding each load whose
+    /// slew `limit_of` says it breaks at that limit before anything
+    /// downstream of it is found, as `OpenROAD`'s `repairDesign` forward
+    /// pass; returns the loads held with their limits, and the drivers
+    /// whose slews changed.
+    pub fn sweep_annotating(
+        &mut self,
+        netlist: &Netlist<'_>,
+        clocks: &ClockNetwork,
+        limit_of: &dyn Fn(PinId) -> Option<f64>,
+    ) -> (Vec<(PinId, f64)>, Vec<PinId>) {
+        let mut annotated = Vec::new();
+        let mut changed = Vec::new();
+        for driver in self.drivers_by_level(netlist) {
+            let before = self.slew[driver.index()];
+            let _ = self.find_driver_slews(netlist, clocks, driver);
+            if self.slew[driver.index()] != before {
+                changed.push(driver);
+            }
+            let net = netlist.db.pins[driver.index()].net;
+            for load in netlist.loads(net).filter(|&p| p != driver) {
+                if self.annotated[load.index()].is_some() {
+                    continue;
+                }
+                let Some(limit) = limit_of(load) else {
+                    continue;
+                };
+                if self.slew[load.index()][MinMax::Max.index()].max() > limit {
+                    self.annotate_slew(load, limit);
+                    annotated.push((load, limit));
+                }
+            }
+        }
+        (annotated, changed)
+    }
+
     fn find_all_slews(&mut self, netlist: &Netlist<'_>, clocks: &ClockNetwork) {
         let mut order: Vec<PinId> = (0..netlist.db.pins.len())
             .map(PinId::new)
