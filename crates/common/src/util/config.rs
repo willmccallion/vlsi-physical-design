@@ -134,6 +134,20 @@ pub struct GlobalPlacementConfig {
     /// OpenROAD-flow-scripts' `ROUTING_LAYER_ADJUSTMENT`, in `[0, 1]`.
     #[serde(default = "default_routing_layer_adjustment")]
     pub routing_layer_adjustment: f64,
+    /// Whether the design is repaired and its critical nets weighted
+    /// during global placement, as `OpenROAD`'s timing-driven mode, when
+    /// the input has an SDC file.
+    #[serde(default = "default_enabled")]
+    pub timing_driven: bool,
+    /// The overflows at which timing-driven placement repairs the design,
+    /// each once as the overflow falls below it, as `OpenROAD`'s
+    /// `timing_driven_net_reweight_overflow`.
+    #[serde(default = "default_timing_driven_overflows")]
+    pub timing_driven_overflows: Vec<f64>,
+    /// The wirelength weight the net of worst slack gets, as `OpenROAD`'s
+    /// `timing_driven_net_weight_max`.
+    #[serde(default = "default_timing_net_weight_max")]
+    pub timing_net_weight_max: f64,
 }
 
 /// How routability-driven placement measures routing congestion.
@@ -163,6 +177,9 @@ impl Default for GlobalPlacementConfig {
             target_congestion: default_target_congestion(),
             congestion_estimate: CongestionEstimate::default(),
             routing_layer_adjustment: default_routing_layer_adjustment(),
+            timing_driven: default_enabled(),
+            timing_driven_overflows: default_timing_driven_overflows(),
+            timing_net_weight_max: default_timing_net_weight_max(),
         }
     }
 }
@@ -323,6 +340,14 @@ const fn default_target_overflow() -> f64 {
 
 const fn default_seed() -> u64 {
     1
+}
+
+fn default_timing_driven_overflows() -> Vec<f64> {
+    vec![0.64, 0.20]
+}
+
+const fn default_timing_net_weight_max() -> f64 {
+    5.0
 }
 
 const fn default_routability_driven() -> bool {

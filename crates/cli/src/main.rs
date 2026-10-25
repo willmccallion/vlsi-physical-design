@@ -8,8 +8,8 @@ mod report;
 use anyhow::Context;
 use clap::{Parser, Subcommand};
 use pare_common::db::design::{NetlistDB, PlacementStatus};
-use pare_common::db::indices::CellId;
-use pare_common::db::liberty::Liberty;
+use pare_common::db::indices::{CellId, NetId};
+use pare_common::db::liberty::{Liberty, MinMax};
 use pare_common::db::library::LayerRef;
 use pare_common::db::parser::{bookshelf, def, lef, liberty, sdc};
 use pare_common::db::sdc::Sdc;
@@ -24,7 +24,8 @@ use pare_common::verify::placement::{PlacementViolation, placement_violations};
 use pare_common::verify::routing::check_routing;
 use pare_placer::detailed;
 use pare_placer::global::{
-    self, CongestionEstimator, GlobalParams, Outcome, RoutabilityParams, RoutingTiles,
+    self, CongestionEstimator, GlobalParams, Outcome, Reweighted, RoutabilityParams, RoutingTiles,
+    TimingDriver, TimingParams,
 };
 use pare_placer::io::{self, IoLayers};
 use pare_placer::legalize::abacus;
@@ -34,8 +35,8 @@ use pare_placer::zones::{Zone, Zones};
 use pare_resizer::parasitics::WireRc;
 use pare_resizer::resizer::Context as RepairContext;
 use pare_resizer::{
-    ClockNetwork, Constants, Link, Namer, Netlist, RepairOptions, Repairer, Resizer, SetupOptions,
-    repair_setup,
+    ClockNetwork, Constants, Link, Namer, Netlist, Rebuffer, RepairOptions, Repairer, Resizer,
+    SetupOptions, repair_setup, timing_net_weights,
 };
 use pare_router::{CapacityReduction, GlobalRouteEstimator, RouteError};
 use report::{NetlistSummary, PlacementSummary, Report, RoutingSummary, TimingSummary};
@@ -534,7 +535,7 @@ fn run_placement(
         ui::check("Starting from the given placement");
         PlacementModel::from_db(db, &zones)
     } else if let Some(layers) = io_layers {
-        place_cells_and_io_pins(config, db, &zones, layers, report)?
+        place_cells_and_io_pins(config, db, &zones, layers, repair.as_mut(), report)?
     } else {
         let phase_start = Instant::now();
         let model = global_placement(
@@ -542,6 +543,7 @@ fn run_placement(
             db,
             PlacementModel::from_db(db, &zones),
             Pass::Full,
+            repair.as_mut(),
             report,
         )?;
         report.phase("global placement", phase_start);
@@ -773,19 +775,7 @@ fn repair_design(
         return Ok(());
     }
     let netlist_config = &config.netlist;
-    let (Some(layer), Some(resistance), Some(capacitance)) = (
-        &netlist_config.signal_layer,
-        netlist_config.wire_resistance_ohm_per_um,
-        netlist_config.wire_capacitance_ff_per_um,
-    ) else {
-        anyhow::bail!(
-            "[netlist] repair_design needs signal_layer, wire_resistance_ohm_per_um and wire_capacitance_ff_per_um"
-        );
-    };
-    let layer_id = db
-        .library
-        .routing_layer_id(layer)
-        .with_context(|| format!("unknown signal layer '{layer}'"))?;
+    let rc = wire_rc(config, db)?;
     let phase_start = Instant::now();
     ui::phase("Design Repair");
     let link = Link::new(db, &repair.liberty, &netlist_config.dont_use)?;
@@ -795,7 +785,6 @@ fn repair_design(
         let clocks = clock_network(&netlist, config, repair.sdc.as_ref(), &constants)?;
         (constants, clocks)
     };
-    let rc = WireRc::per_micron(resistance, capacitance, layer_id);
     let buffers = link.find_buffers(db)?;
     let context = RepairContext {
         link: &link,
@@ -953,6 +942,7 @@ fn place_cells_and_io_pins(
     db: &mut NetlistDB,
     zones: &Zones,
     layers: IoLayers,
+    repair: Option<&mut NetlistRepair>,
     report: &mut Report,
 ) -> anyhow::Result<PlacementModel> {
     let phase_start = Instant::now();
@@ -962,6 +952,7 @@ fn place_cells_and_io_pins(
         db,
         PlacementModel::from_db_without_movable_io(db, zones),
         Pass::SkipIo,
+        None,
         report,
     )?;
     model.write_back(db);
@@ -985,6 +976,7 @@ fn place_cells_and_io_pins(
         db,
         PlacementModel::from_db(db, zones),
         Pass::Full,
+        repair,
         report,
     )?;
     report.phase("global placement", phase_start);
@@ -1002,15 +994,28 @@ enum Pass {
 }
 
 /// Runs global placement on `model` and reports it; `db` supplies the
-/// routing resources for routability-driven placement.
+/// routing resources for routability-driven placement and, with `repair`
+/// and an SDC file, is repaired along the way for timing-driven placement.
 fn global_placement(
     config: &Config,
-    db: &NetlistDB,
+    db: &mut NetlistDB,
     mut model: PlacementModel,
     pass: Pass,
+    repair: Option<&mut NetlistRepair>,
     report: &mut Report,
 ) -> anyhow::Result<PlacementModel> {
     let gp = &config.global_placement;
+    let timing = repair.filter(|r| pass == Pass::Full && gp.timing_driven && r.sdc.is_some());
+    if timing.is_some()
+        && gp.routability_driven
+        && gp.congestion_estimate == CongestionEstimate::GlobalRouter
+    {
+        anyhow::bail!(
+            "timing-driven placement changes the netlist as it goes, which the global-router \
+             congestion estimate cannot follow: set congestion_estimate = \"rudy\" or \
+             timing_driven = false"
+        );
+    }
 
     let movable_area: f64 = model
         .sizes
@@ -1055,20 +1060,39 @@ fn global_placement(
         bins,
         seed: gp.seed,
         routability,
+        timing: timing.as_ref().map(|_| TimingParams {
+            overflows: gp.timing_driven_overflows.clone(),
+        }),
     };
     ui::placement_table_header();
-    let result = global::place(
-        &mut model,
-        &params,
-        estimator
-            .as_mut()
-            .map(|e| e as &mut dyn CongestionEstimator),
-        |p| {
-            if p.iteration % 50 == 0 {
-                ui::placement_iter(p.iteration, p.hpwl, p.overflow, p.penalty, p.step);
-            }
-        },
-    );
+    let show = |p: &global::Progress| {
+        if p.iteration.is_multiple_of(50) {
+            ui::placement_iter(p.iteration, p.hpwl, p.overflow, p.penalty, p.step);
+        }
+    };
+    let result = if let Some(repair) = timing {
+        drop(estimator);
+        let rc = wire_rc(config, db)?;
+        let mut driver = TimingPlacement {
+            config,
+            db,
+            repair,
+            rc,
+            rounds: 0,
+        };
+        global::place(&mut model, &params, None, Some(&mut driver), show)?
+    } else {
+        let Ok(result) = global::place::<global::NoTiming>(
+            &mut model,
+            &params,
+            estimator
+                .as_mut()
+                .map(|e| e as &mut dyn CongestionEstimator),
+            None,
+            show,
+        );
+        result
+    };
     eprintln!();
     for (k, round) in result.congestion.iter().enumerate() {
         ui::stat_row(
@@ -1122,8 +1146,144 @@ fn global_placement(
         hpwl_um: hpwl,
         detailed_moves: 0,
         blocked_pins: 0,
+        timing_rounds: result.timing_rounds,
     });
     Ok(model)
+}
+
+/// The signal wire's resistance and capacitance per micron from the
+/// netlist config, on its signal layer.
+fn wire_rc(config: &Config, db: &NetlistDB) -> anyhow::Result<WireRc> {
+    let netlist_config = &config.netlist;
+    let (Some(layer), Some(resistance), Some(capacitance)) = (
+        &netlist_config.signal_layer,
+        netlist_config.wire_resistance_ohm_per_um,
+        netlist_config.wire_capacitance_ff_per_um,
+    ) else {
+        anyhow::bail!(
+            "[netlist] repair needs signal_layer, wire_resistance_ohm_per_um and wire_capacitance_ff_per_um"
+        );
+    };
+    let layer_id = db
+        .library
+        .routing_layer_id(layer)
+        .with_context(|| format!("unknown signal layer '{layer}'"))?;
+    Ok(WireRc::per_micron(resistance, capacitance, layer_id))
+}
+
+/// Repairs the design between iterations of timing-driven global
+/// placement, as `OpenROAD`'s resizer does for its placer: `repair_design`
+/// with the buffers' wire length limit, every net rebuffered for timing,
+/// and the worst tenth of the nets weighted by their slack.
+struct TimingPlacement<'a> {
+    config: &'a Config,
+    db: &'a mut NetlistDB,
+    repair: &'a mut NetlistRepair,
+    rc: WireRc,
+    rounds: usize,
+}
+
+impl TimingDriver for TimingPlacement<'_> {
+    type Error = anyhow::Error;
+
+    fn repair(&mut self, model: &PlacementModel) -> anyhow::Result<Option<Reweighted>> {
+        self.rounds += 1;
+        model.write_back(self.db);
+        let sdc = self
+            .repair
+            .sdc
+            .as_ref()
+            .context("timing-driven placement needs an SDC file")?;
+        let link = Link::new(self.db, &self.repair.liberty, &self.config.netlist.dont_use)?;
+        let (constants, clocks) = {
+            let netlist = Netlist::new(self.db, &link);
+            let constants = Constants::find(&netlist);
+            let clocks = ClockNetwork::from_sdc(&netlist, sdc, &constants);
+            (constants, clocks)
+        };
+        let buffers = link.find_buffers(self.db)?;
+        let context = RepairContext {
+            link: &link,
+            clocks: &clocks,
+            constants: &constants,
+        };
+        let cells_before = self.db.cells.len();
+        let mut resizer = Resizer::new(
+            self.db,
+            context,
+            self.rc,
+            buffers,
+            &mut self.repair.namer,
+            RepairOptions::default(),
+            Some(sdc),
+        )?;
+        let area_before = resizer.design_area();
+        let wns_before = resizer
+            .sta()
+            .map_or(f64::INFINITY, |sta| sta.worst_slack(MinMax::Max).0);
+        resizer.set_max_wire_length(pare_resizer::rebuffer::max_wire_length(&resizer));
+        let done = Repairer::new(&mut resizer).repair_design()?;
+        let mut rebuffer = Rebuffer::new(&resizer)?;
+        rebuffer.fully_rebuffer(&mut resizer)?;
+        let slacks = resizer.driver_net_slacks();
+        let weights =
+            timing_net_weights(&slacks, self.config.global_placement.timing_net_weight_max);
+        let area_after = resizer.design_area();
+        let wns_after = resizer
+            .sta()
+            .map_or(f64::INFINITY, |sta| sta.worst_slack(MinMax::Max).0);
+        let renumbering = resizer.finish()?;
+        let area_change = if area_before > 0.0 {
+            (area_after - area_before) / area_before * 100.0
+        } else {
+            0.0
+        };
+        ui::stat_row(
+            &format!("Timing round {}:", self.rounds),
+            &format!("WNS {:.3} -> {:.3} ns", wns_before * 1e9, wns_after * 1e9),
+            "Area:",
+            &format!("{area_change:+.2}%"),
+        );
+        ui::stat_row(
+            "Repair:",
+            &format!("{} resized, {} repeaters", done.resized, done.inserted),
+            "Rebuffer:",
+            &format!(
+                "{} removed, {} inserted",
+                rebuffer.removed, rebuffer.inserted
+            ),
+        );
+        ui::stat_row(
+            "Weighted nets:",
+            &format!("{} of {}", weights.len(), slacks.len()),
+            "Cells:",
+            &format!("{cells_before} -> {}", self.db.cells.len()),
+        );
+        if weights.is_empty() {
+            log::warn!("timing-driven placement found no net slacks; it stops here");
+            return Ok(None);
+        }
+        let zones = Zones::new(self.db)?;
+        let mut new_model = PlacementModel::from_db(self.db, &zones);
+        let weight_of: std::collections::HashMap<NetId, f64> = weights
+            .into_iter()
+            .filter_map(|(net, weight)| renumbering.nets[net.index()].map(|new| (new, weight)))
+            .collect();
+        for net in &mut new_model.nets {
+            if let Some(weight) = weight_of.get(&net.net) {
+                net.weight *= weight;
+            }
+        }
+        let cell_map = renumbering
+            .cells
+            .iter()
+            .map(|c| c.map(CellId::index))
+            .collect();
+        Ok(Some(Reweighted {
+            model: new_model,
+            cell_map,
+        }))
+    }
 }
 
 /// The routability settings of `config`, and the global-router estimator

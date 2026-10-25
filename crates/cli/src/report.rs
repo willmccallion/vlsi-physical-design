@@ -114,6 +114,8 @@ pub struct PlacementSummary {
     pub detailed_moves: usize,
     /// Signal pins left where fixed metal blocks every via to them.
     pub blocked_pins: usize,
+    /// Timing-driven repairs made during global placement.
+    pub timing_rounds: usize,
 }
 
 /// What routing did.
