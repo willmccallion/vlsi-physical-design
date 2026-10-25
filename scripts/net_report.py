@@ -1,15 +1,16 @@
 #!/usr/bin/env python3
-"""How each router routed one net of a compared design, and how slow it is.
+"""How each tool routed one net of a compared design, and how slow it is.
 
 Usage:
-    python3 scripts/net_report.py ibex rst_ni
+    python3 scripts/net_report.py ibex rst_ni          # the two routings of PARE's placement
+    python3 scripts/net_report.py --flow ibex rst_ni   # the two whole flows' results
 
-For both routings in output/compare/<design>/ it reports the net's wirelength
-per layer and its vias from the routed DEF, and the Elmore delay from its
-driver to its loads over the parasitics the timing run extracted, with the
-loads' pin capacitances from the liberty files. The Elmore delay is the
-first-moment estimate, not the timer's, but it is computed the same way for
-both routings.
+For both results in output/compare/route/<design>/ (or flow/) it reports the
+net's wirelength per layer and its vias from the routed DEF, and the Elmore
+delay from its driver to its loads over the parasitics the timing run
+extracted, with the loads' pin capacitances from the liberty files. The
+Elmore delay is the first-moment estimate, not the timer's, but it is
+computed the same way for both results.
 """
 
 import re
@@ -158,8 +159,8 @@ def elmore_delays(spef_file, net, pin_caps):
     return [delay[load] for load in loads if load in delay], len(loads)
 
 
-def report(design, side, net, pin_caps):
-    length, vias, segments = routed_wires(compare.routed_def(design, side), net)
+def report(out, design, side, net, pin_caps):
+    length, vias, segments = routed_wires(compare.routed_def(out, side), net)
     total = sum(length.values())
     print(f"{design} {net} routed by {'PARE' if side == 'pare' else 'OpenROAD'}:")
     print(f"  {total:,.0f} um of wire, {vias:,} vias, {segments:,} segments")
@@ -167,7 +168,7 @@ def report(design, side, net, pin_caps):
         print(
             f"    {layer:<8} {length[layer]:>10,.0f} um  {100 * length[layer] / total:5.1f}%"
         )
-    spef = compare.design_dir(design) / f"{compare.routed_def(design, side).stem}.spef"
+    spef = out / f"{compare.routed_def(out, side).stem}.spef"
     if not spef.exists():
         return
     delays, loads = elmore_delays(spef, net, pin_caps)
@@ -179,12 +180,16 @@ def report(design, side, net, pin_caps):
 
 
 def main():
-    if len(sys.argv) != 3:
+    args = sys.argv[1:]
+    mode = "flow" if "--flow" in args else "route"
+    args = [a for a in args if a != "--flow"]
+    if len(args) != 2:
         sys.exit(__doc__)
-    design, net = sys.argv[1:]
+    design, net = args
+    out = compare.design_dir(mode, design)
     pin_caps = pin_capacitances(compare.liberty_files(design))
     for side in compare.SIDES:
-        report(design, side, net, pin_caps)
+        report(out, design, side, net, pin_caps)
 
 
 if __name__ == "__main__":
