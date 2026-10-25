@@ -9,8 +9,10 @@ pub mod graph;
 pub mod library;
 pub mod netlist;
 pub mod parasitics;
+pub mod repair;
 pub mod steiner;
 
 pub use buffers::{BufferError, PortBuffers, buffer_ports, remove_buffers};
 pub use library::{BufferSet, Link, LinkError};
 pub use netlist::{ClockNetwork, Constants, Namer, Netlist, NetlistError};
+pub use repair::{Context, RepairError, RepairOptions, RepairSummary, Repairer};

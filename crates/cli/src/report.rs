@@ -52,6 +52,16 @@ pub struct NetlistSummary {
     pub output_buffers: usize,
     /// The buffer cell the ports got.
     pub buffer_cell: String,
+    /// Drivers whose own or whose loads' slew broke a limit after placement.
+    pub slew_violations: usize,
+    /// Drivers whose load broke their capacitance limit after placement.
+    pub cap_violations: usize,
+    /// Nets repair changed.
+    pub repaired_nets: usize,
+    /// Instances repair resized.
+    pub resized: usize,
+    /// Repeaters repair inserted.
+    pub repeaters: usize,
 }
 
 /// What placement did.

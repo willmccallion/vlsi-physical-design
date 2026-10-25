@@ -41,6 +41,16 @@ pub struct NetlistConfig {
     /// Whether every port gets a buffer before placement.
     #[serde(default = "default_enabled")]
     pub buffer_ports: bool,
+    /// Whether drivers are resized and repeaters inserted after global
+    /// placement until slews and loads meet the library's limits.
+    #[serde(default = "default_enabled")]
+    pub repair_design: bool,
+    /// The routing layer signal wires are estimated on.
+    pub signal_layer: Option<String>,
+    /// Resistance of that layer's wire, in ohms per micron.
+    pub wire_resistance_ohm_per_um: Option<f64>,
+    /// Capacitance of that layer's wire, in femtofarads per micron.
+    pub wire_capacitance_ff_per_um: Option<f64>,
     /// Cells repair neither inserts nor swaps to, beyond those the library
     /// marks.
     #[serde(default)]
@@ -55,6 +65,10 @@ impl Default for NetlistConfig {
         Self {
             remove_buffers: default_enabled(),
             buffer_ports: default_enabled(),
+            repair_design: default_enabled(),
+            signal_layer: None,
+            wire_resistance_ohm_per_um: None,
+            wire_capacitance_ff_per_um: None,
             dont_use: Vec::new(),
             clock_ports: Vec::new(),
         }

@@ -29,7 +29,10 @@ use pare_placer::io::{self, IoLayers};
 use pare_placer::legalize::abacus;
 use pare_placer::model::PlacementModel;
 use pare_placer::zones::{Zone, Zones};
-use pare_resizer::{ClockNetwork, Constants, Link, Namer, Netlist};
+use pare_resizer::graph::TimingGraph;
+use pare_resizer::parasitics::WireRc;
+use pare_resizer::repair::Context as RepairContext;
+use pare_resizer::{ClockNetwork, Constants, Link, Namer, Netlist, RepairOptions, Repairer};
 use pare_router::{CapacityReduction, GlobalRouteEstimator, RouteError};
 use report::{NetlistSummary, PlacementSummary, Report, RoutingSummary};
 use std::path::{Path, PathBuf};
@@ -492,9 +495,11 @@ fn run_placement(
     start: PlacementStart,
     report: &mut Report,
 ) -> anyhow::Result<()> {
-    if start == PlacementStart::Scratch {
-        repair_netlist(config, db, report)?;
-    }
+    let mut repair = if start == PlacementStart::Scratch {
+        repair_netlist(config, db, report)?
+    } else {
+        None
+    };
     let movable_io = io::movable_io_pins(db);
     let io_layers = if movable_io.is_empty() || start == PlacementStart::Given {
         None
@@ -538,8 +543,16 @@ fn run_placement(
         report.phase("global placement", phase_start);
         model
     };
-    let movable_cells = model.movable.iter().filter(|&&m| m).count();
     model.write_back(db);
+    if let Some(repair) = &mut repair {
+        repair_design(config, db, repair, report)?;
+    }
+    let zones = Zones::new(db)?;
+    let movable_cells = db
+        .cells
+        .iter()
+        .filter(|c| !matches!(c.status, PlacementStatus::Fixed | PlacementStatus::Cover))
+        .count();
     let global_png = output_dir.join("nesterov_placer.png");
     visualization::draw_placement(db, &path_str(&global_png)?, 1000, 1000);
 
@@ -630,16 +643,28 @@ fn load_liberty(paths: &[String]) -> anyhow::Result<Liberty> {
     merged.context("no Liberty files")
 }
 
+/// What the netlist steps before placement leave for the repair after it.
+struct NetlistRepair {
+    liberty: Liberty,
+    namer: Namer,
+    summary: NetlistSummary,
+}
+
 /// Strips the buffers synthesis left and buffers the ports, as
 /// OpenROAD-flow-scripts does before placing, when the config names Liberty
 /// files.
-fn repair_netlist(config: &Config, db: &mut NetlistDB, report: &mut Report) -> anyhow::Result<()> {
+fn repair_netlist(
+    config: &Config,
+    db: &mut NetlistDB,
+    report: &mut Report,
+) -> anyhow::Result<Option<NetlistRepair>> {
     if config.input.liberty_files.is_empty() {
-        return Ok(());
+        return Ok(None);
     }
     let liberty = load_liberty(&config.input.liberty_files)?;
     let link = Link::new(db, &liberty, &config.netlist.dont_use)?;
     ui::section("Netlist");
+    let mut namer = Namer::new();
     let mut summary = NetlistSummary::default();
     if config.netlist.remove_buffers {
         let phase_start = Instant::now();
@@ -664,7 +689,6 @@ fn repair_netlist(config: &Config, db: &mut NetlistDB, report: &mut Report) -> a
             (constants, clocks)
         };
         let buffers = link.find_buffers(db)?;
-        let mut namer = Namer::new();
         let done =
             pare_resizer::buffer_ports(db, &link, &buffers, &clocks, &constants, &mut namer)?;
         summary.input_buffers = done.inputs;
@@ -686,7 +710,107 @@ fn repair_netlist(config: &Config, db: &mut NetlistDB, report: &mut Report) -> a
         );
         report.phase("port buffering", phase_start);
     }
-    report.netlist = Some(summary);
+    report.netlist = Some(NetlistSummary {
+        buffers_removed: summary.buffers_removed,
+        input_buffers: summary.input_buffers,
+        output_buffers: summary.output_buffers,
+        buffer_cell: summary.buffer_cell.clone(),
+        ..NetlistSummary::default()
+    });
+    Ok(Some(NetlistRepair {
+        liberty,
+        namer,
+        summary,
+    }))
+}
+
+/// Resizes drivers and inserts repeaters where the placed netlist breaks
+/// the library's slew or load limits, as OpenROAD-flow-scripts'
+/// `repair_design` does after global placement.
+fn repair_design(
+    config: &Config,
+    db: &mut NetlistDB,
+    repair: &mut NetlistRepair,
+    report: &mut Report,
+) -> anyhow::Result<()> {
+    if !config.netlist.repair_design {
+        return Ok(());
+    }
+    let netlist_config = &config.netlist;
+    let (Some(layer), Some(resistance), Some(capacitance)) = (
+        &netlist_config.signal_layer,
+        netlist_config.wire_resistance_ohm_per_um,
+        netlist_config.wire_capacitance_ff_per_um,
+    ) else {
+        anyhow::bail!(
+            "[netlist] repair_design needs signal_layer, wire_resistance_ohm_per_um and wire_capacitance_ff_per_um"
+        );
+    };
+    let layer_id = db
+        .library
+        .routing_layer_id(layer)
+        .with_context(|| format!("unknown signal layer '{layer}'"))?;
+    let phase_start = Instant::now();
+    ui::phase("Design Repair");
+    let link = Link::new(db, &repair.liberty, &netlist_config.dont_use)?;
+    let (constants, clocks, graph) = {
+        let netlist = Netlist::new(db, &link);
+        let constants = Constants::find(&netlist);
+        let clocks = ClockNetwork::find(&netlist, &netlist_config.clock_ports, &constants)?;
+        let rc = WireRc::per_micron(resistance, capacitance, layer_id);
+        let graph = TimingGraph::new(&netlist, &clocks, &constants, rc);
+        (constants, clocks, graph)
+    };
+    let buffers = link.find_buffers(db)?;
+    let context = RepairContext {
+        link: &link,
+        clocks: &clocks,
+        constants: &constants,
+    };
+    let repairer = Repairer::new(
+        db,
+        context,
+        graph,
+        buffers,
+        &mut repair.namer,
+        RepairOptions::default(),
+    )?;
+    let done = repairer.repair_design()?;
+    ui::stat_row(
+        "Slew violations:",
+        &done.slew_violations.to_string(),
+        "Cap violations:",
+        &done.cap_violations.to_string(),
+    );
+    ui::stat_row(
+        "Resized:",
+        &done.resized.to_string(),
+        "Repeaters:",
+        &done.inserted.to_string(),
+    );
+    ui::stat_row(
+        "Nets repaired:",
+        &done.repaired_nets.to_string(),
+        "Cells:",
+        &db.cells.len().to_string(),
+    );
+    repair.summary.slew_violations = done.slew_violations;
+    repair.summary.cap_violations = done.cap_violations;
+    repair.summary.repaired_nets = done.repaired_nets;
+    repair.summary.resized = done.resized;
+    repair.summary.repeaters = done.inserted;
+    report.netlist = Some(NetlistSummary {
+        buffers_removed: repair.summary.buffers_removed,
+        input_buffers: repair.summary.input_buffers,
+        output_buffers: repair.summary.output_buffers,
+        buffer_cell: repair.summary.buffer_cell.clone(),
+        slew_violations: done.slew_violations,
+        cap_violations: done.cap_violations,
+        repaired_nets: done.repaired_nets,
+        resized: done.resized,
+        repeaters: done.inserted,
+    });
+    report.phase("design repair", phase_start);
     Ok(())
 }
 

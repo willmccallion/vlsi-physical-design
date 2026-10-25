@@ -437,6 +437,16 @@ pub enum EditError {
     /// A net to remove still connects something that stays.
     #[error("net '{0}' still has connections")]
     NetInUse(String),
+    /// A replacement master lacks a pin the instance connects.
+    #[error("master '{master}' has no pin '{pin}' for instance '{cell}'")]
+    MissingPin {
+        /// The instance.
+        cell: String,
+        /// The replacement master.
+        master: String,
+        /// The pin it lacks.
+        pin: String,
+    },
 }
 
 /// The new index of each kept entry, with the dropped ones left at their old
@@ -616,6 +626,43 @@ impl NetlistDB {
         let old = std::mem::replace(&mut self.nets[net.index()].name, name.clone());
         let _ = self.net_by_name.remove(&old);
         let _ = self.net_by_name.insert(name, net);
+        Ok(())
+    }
+
+    /// Gives an instance another master with the same pin names, keeping
+    /// its connections and position.
+    pub fn replace_master(&mut self, cell: CellId, master: MacroId) -> Result<(), EditError> {
+        let old = self.cells[cell.index()].macro_id;
+        if old == master {
+            return Ok(());
+        }
+        let new_pins: Vec<(PinId, MacroPinId)> = self.cells[cell.index()]
+            .pins
+            .iter()
+            .map(|&pin| {
+                let PinOwner::Cell { pin: old_pin, .. } = self.pins[pin.index()].owner else {
+                    return Err(EditError::MissingPin {
+                        cell: self.cells[cell.index()].name.clone(),
+                        master: self.library.cell_macro(master).name.clone(),
+                        pin: String::new(),
+                    });
+                };
+                let name = &self.library.cell_macro(old).pin(old_pin).name;
+                self.library
+                    .cell_macro(master)
+                    .pin_id(name)
+                    .map(|new_pin| (pin, new_pin))
+                    .ok_or_else(|| EditError::MissingPin {
+                        cell: self.cells[cell.index()].name.clone(),
+                        master: self.library.cell_macro(master).name.clone(),
+                        pin: name.clone(),
+                    })
+            })
+            .collect::<Result<_, _>>()?;
+        for (pin, new_pin) in new_pins {
+            self.pins[pin.index()].owner = PinOwner::Cell { cell, pin: new_pin };
+        }
+        self.cells[cell.index()].macro_id = master;
         Ok(())
     }
 
