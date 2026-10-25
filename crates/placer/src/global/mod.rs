@@ -163,25 +163,46 @@ pub fn default_target_density(utilization: f64) -> f64 {
     (raised + 0.01).min(1.0)
 }
 
-/// Bins per side for `model`: about one per cell, but no shorter than the
-/// row pitch when channels separate the rows.
+/// Bins per side for `model`: sized for the average cell at the target
+/// density, as `OpenROAD` sizes them, but no shorter than the row pitch when
+/// channels separate the rows.
 ///
 /// Each bin then averages rows and channels, so cells may cross a channel
 /// to a less crowded row instead of facing a wall of blocked bins;
 /// legalization moves them into the rows.
-pub fn default_bins(model: &PlacementModel) -> usize {
-    let cells = model.movable.iter().filter(|&&m| m).count();
-    let by_cells = ((cells as f64).sqrt().ceil() as usize)
-        .next_power_of_two()
-        .clamp(64, MAX_BINS);
+pub fn default_bins(model: &PlacementModel, target_density: f64) -> usize {
+    let movable = (0..model.num_cells()).filter(|&i| model.movable[i]);
+    let (area, count) = movable.fold((0.0, 0usize), |(area, count), i| {
+        (model.sizes[i].x.mul_add(model.sizes[i].y, area), count + 1)
+    });
+    let average = if count == 0 { 0.0 } else { area / count as f64 };
+    let by_area = bins_for_cell_area(model.die.area(), average, target_density);
     match channel_pitch(&model.rows) {
         Some(pitch) => {
             let rows = (model.die.height() / pitch).floor().max(1.0) as usize;
             let by_pitch = 1usize << rows.ilog2();
-            by_cells.min(by_pitch).max(MIN_BINS)
+            by_area.min(by_pitch).max(MIN_BINS)
         }
-        None => by_cells,
+        None => by_area,
     }
+}
+
+/// The largest power of two whose square of bins is at most the number of
+/// bins of the ideal area: an average cell's area over the target density,
+/// so that a bin holds about one cell's worth of charge and the smoothing of
+/// a cell over its bins reaches its neighbours. Bins of a quarter of that
+/// area leave a placement at a loose utilization lumpy at the bin scale,
+/// with an overflow floor the placer cannot get under.
+fn bins_for_cell_area(die_area: f64, average_cell_area: f64, target_density: f64) -> usize {
+    if average_cell_area <= 0.0 || target_density <= 0.0 {
+        return MIN_BINS;
+    }
+    let ideal_bins = die_area / (average_cell_area / target_density);
+    let mut bins = MIN_BINS;
+    while bins < MAX_BINS && ((2 * bins) as f64).powi(2) <= ideal_bins {
+        bins *= 2;
+    }
+    bins
 }
 
 /// The distance between consecutive rows, if the rows are separated by
@@ -437,6 +458,33 @@ fn build_netlist(model: &PlacementModel, movable: &[usize]) -> Netlist {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn bins_hold_about_one_average_cell_at_the_target_density() {
+        // ibex in Nangate45: a 239 by 239 micron die, cells of 1.98 square
+        // microns on average, placed at 0.65. OpenROAD picks 128 bins a side.
+        let bins = bins_for_cell_area(57_358.0, 1.983, 0.65);
+
+        assert_eq!(bins, 128);
+    }
+
+    #[test]
+    fn bins_double_once_a_quarter_of_the_ideal_count_is_reached() {
+        let four_squares = 4.0 * 128.0 * 128.0;
+
+        let one_short = bins_for_cell_area(four_squares - 1.0, 1.0, 1.0);
+        let exact = bins_for_cell_area(four_squares, 1.0, 1.0);
+
+        assert_eq!(one_short, 128);
+        assert_eq!(exact, 256);
+    }
+
+    #[test]
+    fn bins_stay_within_the_grid_limits() {
+        assert_eq!(bins_for_cell_area(1.0, 100.0, 0.5), MIN_BINS);
+        assert_eq!(bins_for_cell_area(1e12, 1.0, 1.0), MAX_BINS);
+        assert_eq!(bins_for_cell_area(1e6, 0.0, 0.5), MIN_BINS);
+    }
 
     #[test]
     fn the_default_target_density_adds_a_fifth_of_the_headroom() {

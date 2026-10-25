@@ -684,12 +684,12 @@ fn global_placement(
         .sum();
     let movable_cells = model.movable.iter().filter(|&&m| m).count();
     let utilization = movable_area / model.free_area();
-    let bins = gp
-        .bin_dimension
-        .unwrap_or_else(|| global::default_bins(&model));
     let target_density = gp
         .target_density
         .unwrap_or_else(|| global::default_target_density(utilization));
+    let bins = gp
+        .bin_dimension
+        .unwrap_or_else(|| global::default_bins(&model, target_density));
 
     ui::stat_row(
         "Cells:",
