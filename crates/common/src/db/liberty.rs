@@ -22,7 +22,7 @@ impl LibCellId {
 }
 
 /// A rising or falling transition.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub enum Edge {
     /// Low to high.
     Rise,
@@ -137,8 +137,78 @@ pub enum AxisVariable {
     OutputCapacitance,
     /// The capacitance on a related output, in farads.
     RelatedOutputCapacitance,
-    /// A quantity delay lookups do not vary: a check or power axis.
+    /// The slew at the clock pin of a check, in seconds.
+    RelatedPinTransition,
+    /// The slew at the constrained pin of a check, in seconds.
+    ConstrainedPinTransition,
+    /// A quantity lookups do not vary: a power axis.
     Other,
+}
+
+/// The quantities a lookup may vary along the axes of a table.
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub struct TableInputs {
+    /// The slew at a delay arc's input, in seconds.
+    pub in_slew: f64,
+    /// The load a delay arc drives, in farads.
+    pub load_cap: f64,
+    /// The load on a related output, in farads.
+    pub related_cap: f64,
+    /// The slew at a check's clock pin, in seconds.
+    pub related_slew: f64,
+    /// The slew at a check's constrained pin, in seconds.
+    pub constrained_slew: f64,
+}
+
+/// Which end of a range of delays an analysis looks at: the late one for
+/// setup checks, the early one for hold checks.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum MinMax {
+    /// The early side: the smallest delays, which hold checks fear.
+    Min,
+    /// The late side: the largest delays, which setup checks fear.
+    Max,
+}
+
+impl MinMax {
+    /// Both sides, min first.
+    pub const BOTH: [Self; 2] = [Self::Min, Self::Max];
+
+    /// Index into a pair of per-side values, min first.
+    #[must_use]
+    pub const fn index(self) -> usize {
+        match self {
+            Self::Min => 0,
+            Self::Max => 1,
+        }
+    }
+
+    /// The value nothing beats on this side, which a search starts from.
+    #[must_use]
+    pub const fn init_value(self) -> f64 {
+        match self {
+            Self::Min => f64::INFINITY,
+            Self::Max => f64::NEG_INFINITY,
+        }
+    }
+
+    /// Whether `a` is further toward this side than `b`.
+    #[must_use]
+    pub fn beats(self, a: f64, b: f64) -> bool {
+        match self {
+            Self::Min => a < b,
+            Self::Max => a > b,
+        }
+    }
+
+    /// The other side.
+    #[must_use]
+    pub const fn opposite(self) -> Self {
+        match self {
+            Self::Min => Self::Max,
+            Self::Max => Self::Min,
+        }
+    }
 }
 
 /// One axis of a lookup table.
@@ -166,11 +236,13 @@ impl Axis {
     }
 
     /// The value the lookup takes along this axis.
-    const fn pick(&self, in_slew: f64, load_cap: f64, related_cap: f64) -> f64 {
+    const fn pick(&self, inputs: &TableInputs) -> f64 {
         match self.variable {
-            AxisVariable::InputTransition => in_slew,
-            AxisVariable::OutputCapacitance => load_cap,
-            AxisVariable::RelatedOutputCapacitance => related_cap,
+            AxisVariable::InputTransition => inputs.in_slew,
+            AxisVariable::OutputCapacitance => inputs.load_cap,
+            AxisVariable::RelatedOutputCapacitance => inputs.related_cap,
+            AxisVariable::RelatedPinTransition => inputs.related_slew,
+            AxisVariable::ConstrainedPinTransition => inputs.constrained_slew,
             AxisVariable::Other => 0.0,
         }
     }
@@ -232,11 +304,30 @@ impl Table {
     /// vary one.
     #[must_use]
     pub fn lookup_with_related(&self, in_slew: f64, load_cap: f64, related_cap: f64) -> f64 {
-        let coordinates: Vec<f64> = self
-            .axes
-            .iter()
-            .map(|a| a.pick(in_slew, load_cap, related_cap))
-            .collect();
+        self.lookup_inputs(&TableInputs {
+            in_slew,
+            load_cap,
+            related_cap,
+            ..TableInputs::default()
+        })
+    }
+
+    /// A check table's value at the slews of its clock and constrained
+    /// pins, as `OpenSTA`'s check table model finds it.
+    #[must_use]
+    pub fn check_value(&self, related_slew: f64, constrained_slew: f64) -> f64 {
+        self.lookup_inputs(&TableInputs {
+            related_slew,
+            constrained_slew,
+            ..TableInputs::default()
+        })
+    }
+
+    /// The table's value at `inputs`, each axis taking the quantity it
+    /// varies.
+    #[must_use]
+    pub fn lookup_inputs(&self, inputs: &TableInputs) -> f64 {
+        let coordinates: Vec<f64> = self.axes.iter().map(|a| a.pick(inputs)).collect();
         self.interpolate(&coordinates)
     }
 
@@ -294,7 +385,17 @@ pub enum ArcRole {
     TristateEnable,
     /// A tristate enable turning the output off.
     TristateDisable,
-    /// A constraint between two pins rather than a delay.
+    /// Data must settle this long before the clock edge.
+    Setup,
+    /// Data must hold this long after the clock edge.
+    Hold,
+    /// An asynchronous control must release this long before the clock
+    /// edge.
+    Recovery,
+    /// An asynchronous control must stay asserted this long after the
+    /// clock edge.
+    Removal,
+    /// Another constraint between two pins, such as a minimum pulse width.
     Check,
 }
 
@@ -302,7 +403,28 @@ impl ArcRole {
     /// Whether the arc carries a delay rather than constraining one.
     #[must_use]
     pub const fn is_delay(self) -> bool {
-        !matches!(self, Self::Check)
+        !self.is_check()
+    }
+
+    /// Whether the arc constrains a delay rather than carrying one.
+    #[must_use]
+    pub const fn is_check(self) -> bool {
+        matches!(
+            self,
+            Self::Setup | Self::Hold | Self::Recovery | Self::Removal | Self::Check
+        )
+    }
+
+    /// Which side of the delays a check constrains: the late side for
+    /// setup and recovery, the early side for hold and removal; none for
+    /// a delay or a check timing does not search.
+    #[must_use]
+    pub const fn check_side(self) -> Option<MinMax> {
+        match self {
+            Self::Setup | Self::Recovery => Some(MinMax::Max),
+            Self::Hold | Self::Removal => Some(MinMax::Min),
+            _ => None,
+        }
     }
 
     /// Whether `OpenSTA` searches timing through the arc by default:
@@ -327,20 +449,31 @@ pub enum TimingSense {
     NonUnate,
 }
 
-/// One edge pair of a timing arc with its delay and output slew tables.
+/// One edge pair of a timing arc with its delay and output slew tables,
+/// or for a check its constraint.
 #[derive(Clone, Debug, PartialEq)]
 pub struct TimingArc {
-    /// The edge at the arc's input.
+    /// The edge at the arc's input: the clock edge of a check.
     pub from_edge: Edge,
-    /// The edge at its output.
+    /// The edge at its output: the constrained pin's edge of a check.
     pub to_edge: Edge,
-    /// Delay from input to output, in seconds.
+    /// Delay from input to output, in seconds, or the time a check
+    /// demands between its pins.
     pub delay: Option<Table>,
-    /// Transition time at the output, in seconds.
+    /// Transition time at the output, in seconds; none for a check.
     pub slew: Option<Table>,
 }
 
 impl TimingArc {
+    /// The time a check demands at the slews of its clock and constrained
+    /// pins; zero for a check without a table.
+    #[must_use]
+    pub fn check_value(&self, related_slew: f64, constrained_slew: f64) -> f64 {
+        self.delay
+            .as_ref()
+            .map_or(0.0, |t| t.check_value(related_slew, constrained_slew))
+    }
+
     /// Delay and output slew at an input slew and load, as `OpenSTA`'s
     /// gate table model gives them: zero for a missing table, and the slew
     /// never negative.
@@ -697,6 +830,8 @@ impl LibCell {
 pub struct Liberty {
     /// Library name.
     pub name: String,
+    /// The units the file declared, which constraints are written in.
+    pub units: LibraryUnits,
     /// Its voltage thresholds.
     pub thresholds: Thresholds,
     /// Values pins fall back on.
@@ -706,12 +841,33 @@ pub struct Liberty {
     cell_by_name: HashMap<String, LibCellId>,
 }
 
+/// The units a library declares, as multiples of SI units.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct LibraryUnits {
+    /// Seconds per time unit.
+    pub time: f64,
+    /// Farads per capacitance unit.
+    pub capacitance: f64,
+}
+
+impl Default for LibraryUnits {
+    /// Nanoseconds and picofarads, which Liberty assumes when a file
+    /// declares nothing.
+    fn default() -> Self {
+        Self {
+            time: 1e-9,
+            capacitance: 1e-12,
+        }
+    }
+}
+
 impl Liberty {
     /// An empty library.
     #[must_use]
     pub fn new(name: String) -> Self {
         Self {
             name,
+            units: LibraryUnits::default(),
             thresholds: Thresholds::default(),
             defaults: Defaults::default(),
             cells: Vec::new(),

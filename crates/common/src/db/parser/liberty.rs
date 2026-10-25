@@ -8,8 +8,8 @@
 
 use crate::db::liberty::{
     ArcRole, Axis, AxisVariable, ClockGatePin, Defaults, Edge, EdgeValues, FuncExpr, LibCell,
-    LibPort, Liberty, PortDirection, Sequential, SequentialKind, Statetable, Table, TimingArc,
-    TimingArcSet, TimingSense,
+    LibPort, Liberty, LibraryUnits, PortDirection, Sequential, SequentialKind, Statetable, Table,
+    TimingArc, TimingArcSet, TimingSense,
 };
 use crate::db::parser::lexer::{ParseError, read_file};
 use std::collections::HashMap;
@@ -410,6 +410,10 @@ impl Interpreter {
         let name = group.args.first().map_or("library", |v| v.0).to_string();
         let mut lib = Liberty::new(name);
         self.units = self.read_units(group)?;
+        lib.units = LibraryUnits {
+            time: self.units.time,
+            capacitance: self.units.capacitance,
+        };
         lib.thresholds = self.thresholds(group)?;
         self.defaults = self.defaults(group)?;
         lib.defaults = self.defaults;
@@ -571,7 +575,9 @@ impl Interpreter {
 
     fn axis_values(&self, attr: &Attr<'_>, variable: AxisVariable) -> Result<Vec<f64>, ParseError> {
         let scale = match variable {
-            AxisVariable::InputTransition => self.units.time,
+            AxisVariable::InputTransition
+            | AxisVariable::RelatedPinTransition
+            | AxisVariable::ConstrainedPinTransition => self.units.time,
             AxisVariable::OutputCapacitance | AxisVariable::RelatedOutputCapacitance => {
                 self.units.capacitance
             }
@@ -787,25 +793,31 @@ impl Interpreter {
             _ => TimingSense::NonUnate,
         };
         let when = self.function_attr(group, "when")?;
-        let tables = if role.is_delay() {
-            [
+        let table_names: &[(&str, Edge, bool)] = if role.is_delay() {
+            &[
                 ("cell_rise", Edge::Rise, true),
                 ("cell_fall", Edge::Fall, true),
                 ("rise_transition", Edge::Rise, false),
                 ("fall_transition", Edge::Fall, false),
             ]
-            .into_iter()
-            .map(|(name, edge, is_delay)| {
+        } else if role.check_side().is_some() {
+            &[
+                ("rise_constraint", Edge::Rise, true),
+                ("fall_constraint", Edge::Fall, true),
+            ]
+        } else {
+            &[]
+        };
+        let tables = table_names
+            .iter()
+            .map(|&(name, edge, is_delay)| {
                 group
                     .groups_named(name)
                     .next()
                     .map(|g| self.table(g).map(|t| (edge, is_delay, t)))
                     .transpose()
             })
-            .collect::<Result<Vec<_>, _>>()?
-        } else {
-            Vec::new()
-        };
+            .collect::<Result<Vec<_>, _>>()?;
         let table_for = |edge: Edge, is_delay: bool| -> Option<Table> {
             tables
                 .iter()
@@ -847,6 +859,17 @@ impl Interpreter {
                     delay,
                     slew,
                 });
+            }
+        } else if let (Some(clock_edge), Some(_)) = (from_edge, role.check_side()) {
+            for to_e in Edge::BOTH {
+                if let Some(constraint) = table_for(to_e, true) {
+                    arcs.push(TimingArc {
+                        from_edge: clock_edge,
+                        to_edge: to_e,
+                        delay: Some(constraint),
+                        slew: None,
+                    });
+                }
             }
         }
         let related = group
@@ -1016,6 +1039,8 @@ fn axis_variable(name: &str) -> AxisVariable {
         "input_net_transition" | "input_transition_time" => AxisVariable::InputTransition,
         "total_output_net_capacitance" => AxisVariable::OutputCapacitance,
         "related_out_total_output_net_capacitance" => AxisVariable::RelatedOutputCapacitance,
+        "related_pin_transition" => AxisVariable::RelatedPinTransition,
+        "constrained_pin_transition" => AxisVariable::ConstrainedPinTransition,
         _ => AxisVariable::Other,
     }
 }
@@ -1036,6 +1061,14 @@ fn arc_role(timing_type: &str) -> (ArcRole, Option<Edge>, Option<Edge>) {
         "three_state_disable" => (ArcRole::TristateDisable, None, None),
         "three_state_disable_rise" => (ArcRole::TristateDisable, None, Some(Edge::Rise)),
         "three_state_disable_fall" => (ArcRole::TristateDisable, None, Some(Edge::Fall)),
+        "setup_rising" => (ArcRole::Setup, Some(Edge::Rise), None),
+        "setup_falling" => (ArcRole::Setup, Some(Edge::Fall), None),
+        "hold_rising" => (ArcRole::Hold, Some(Edge::Rise), None),
+        "hold_falling" => (ArcRole::Hold, Some(Edge::Fall), None),
+        "recovery_rising" => (ArcRole::Recovery, Some(Edge::Rise), None),
+        "recovery_falling" => (ArcRole::Recovery, Some(Edge::Fall), None),
+        "removal_rising" => (ArcRole::Removal, Some(Edge::Rise), None),
+        "removal_falling" => (ArcRole::Removal, Some(Edge::Fall), None),
         _ => (ArcRole::Check, None, None),
     }
 }
@@ -1063,6 +1096,12 @@ library (tiny) {
     variable_2 : total_output_net_capacitance;
     index_1 ("0.1, 0.2");
     index_2 ("1.0, 2.0");
+  }
+  lu_table_template (C2) {
+    variable_1 : related_pin_transition;
+    variable_2 : constrained_pin_transition;
+    index_1 ("0.1, 0.2");
+    index_2 ("0.1, 0.2");
   }
   cell (BUF_X1) {
     area : 0.798;
@@ -1103,7 +1142,7 @@ library (tiny) {
     }
     pin (D) { direction : input; capacitance : 1.1;
       timing () { related_pin : "CK"; timing_type : setup_rising;
-        rise_constraint(T2) { values ("1,2,3,4"); } } }
+        rise_constraint(C2) { values ("1,2,3,4"); } } }
     pin (CK) { direction : input; clock : true; capacitance : 0.9; }
     pin (Q) { direction : output; function : "IQ";
       timing () { related_pin : "CK"; timing_type : rising_edge;
@@ -1161,7 +1200,19 @@ library (tiny) {
         assert_eq!(dff.sequentials[0].output, "IQ");
         assert_eq!(dff.sequentials[0].output_inv.as_deref(), Some("IQN"));
         assert!(dff.ports[dff.port("CK").unwrap()].is_clock);
-        assert!(dff.arc_sets.iter().any(|s| s.role == ArcRole::Check));
+        let setup = dff
+            .arc_sets
+            .iter()
+            .find(|s| s.role == ArcRole::Setup)
+            .unwrap();
+        assert_eq!(dff.ports[setup.from].name, "CK");
+        assert_eq!(dff.ports[setup.to].name, "D");
+        assert_eq!(setup.arcs.len(), 1);
+        assert_eq!(setup.arcs[0].from_edge, Edge::Rise);
+        assert_eq!(setup.arcs[0].to_edge, Edge::Rise);
+        assert!((setup.arcs[0].check_value(0.1e-9, 0.2e-9) - 2e-9).abs() < 1e-20);
+        assert!((lib.units.time - 1e-9).abs() < 1e-24);
+        assert!((lib.units.capacitance - 1e-15).abs() < 1e-30);
         let q = dff
             .arc_sets
             .iter()
@@ -1235,7 +1286,7 @@ library (ram) {
         assert_eq!(clk_to_q.len(), 2);
         let arc = &clk_to_q[0].arcs[0];
         assert!((arc.gate_delay(0.0, 500e-15).1 - 0.227e-9).abs() < 1e-14);
-        assert!(mem.arc_sets.iter().any(|s| s.role == ArcRole::Check));
+        assert!(mem.arc_sets.iter().any(|s| s.role == ArcRole::Setup));
     }
 
     #[test]
