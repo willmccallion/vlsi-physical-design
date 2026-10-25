@@ -344,7 +344,7 @@ impl<'a> Repairer<'a> {
                     if self.summary.inserted > before {
                         let netlist = Netlist::new(self.db, self.link);
                         self.graph.grow(&netlist);
-                        self.graph.update_net(&netlist, self.clocks, net);
+                        let _ = self.graph.update_net(&netlist, self.clocks, net);
                     }
                 }
             }
@@ -514,7 +514,7 @@ impl<'a> Repairer<'a> {
         }
         self.db.replace_master(cell, master)?;
         let netlist = Netlist::new(self.db, self.link);
-        self.graph.update_cell(&netlist, self.clocks, cell);
+        let _ = self.graph.update_cell(&netlist, self.clocks, cell);
         Ok(true)
     }
 
@@ -883,7 +883,7 @@ impl<'a> Repairer<'a> {
         {
             let netlist = Netlist::new(self.db, self.link);
             self.graph.grow(&netlist);
-            self.graph.update_net(&netlist, self.clocks, new_net);
+            let _ = self.graph.update_net(&netlist, self.clocks, new_net);
         }
         let _ = self.resize_to_target_slew(output)?;
         let sized = self.link.cell(self.db, cell).map_or(buffer, |(id, _)| id);

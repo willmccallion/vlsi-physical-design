@@ -685,7 +685,8 @@ fn repair_netlist(
         let (constants, clocks) = {
             let netlist = Netlist::new(db, &link);
             let constants = Constants::find(&netlist);
-            let clocks = ClockNetwork::find(&netlist, &config.netlist.clock_ports, &constants)?;
+            let clocks =
+                ClockNetwork::from_ports(&netlist, &config.netlist.clock_ports, &constants)?;
             (constants, clocks)
         };
         let buffers = link.find_buffers(db)?;
@@ -756,7 +757,7 @@ fn repair_design(
     let (constants, clocks, graph) = {
         let netlist = Netlist::new(db, &link);
         let constants = Constants::find(&netlist);
-        let clocks = ClockNetwork::find(&netlist, &netlist_config.clock_ports, &constants)?;
+        let clocks = ClockNetwork::from_ports(&netlist, &netlist_config.clock_ports, &constants)?;
         let rc = WireRc::per_micron(resistance, capacitance, layer_id);
         let graph = TimingGraph::new(&netlist, &clocks, &constants, rc);
         (constants, clocks, graph)

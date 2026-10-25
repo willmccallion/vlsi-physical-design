@@ -4,9 +4,10 @@
 
 use crate::library::Link;
 use pare_common::db::design::{NetlistDB, PinOwner};
-use pare_common::db::indices::{CellId, NetId, PinId};
+use pare_common::db::indices::{CellId, IoPinId, NetId, PinId};
 use pare_common::db::liberty::{ArcRole, ClockGatePin, FuncExpr, LibPort, Logic};
 use pare_common::db::library::{PinDirection, SignalUse};
+use pare_common::db::sdc::{ClockId, Sdc};
 use pare_common::geom::dbu::Dbu;
 use pare_common::geom::point::Point;
 use std::collections::VecDeque;
@@ -42,10 +43,23 @@ impl<'a> Netlist<'a> {
         Some(&self.link.liberty.cell(cell).ports[port])
     }
 
+    /// Whether a pin belongs to a retired instance, which timing no longer
+    /// sees.
+    #[must_use]
+    pub fn is_retired(&self, pin: PinId) -> bool {
+        match self.db.pins[pin.index()].owner {
+            PinOwner::Cell { cell, .. } => self.db.cells[cell.index()].retired,
+            PinOwner::Io(_) => false,
+        }
+    }
+
     /// Whether a pin drives its net: an output of an instance or an input
     /// of the design.
     #[must_use]
     pub fn is_driver(&self, pin: PinId) -> bool {
+        if self.is_retired(pin) {
+            return false;
+        }
         match self.db.pins[pin.index()].owner {
             PinOwner::Cell {
                 cell,
@@ -70,6 +84,9 @@ impl<'a> Netlist<'a> {
     /// output of the design.
     #[must_use]
     pub fn is_load(&self, pin: PinId) -> bool {
+        if self.is_retired(pin) {
+            return false;
+        }
         match self.db.pins[pin.index()].owner {
             PinOwner::Cell {
                 cell,
@@ -350,78 +367,116 @@ impl Constants {
     }
 }
 
-/// The pins a clock reaches from its source through wires and combinational
-/// arcs, as `OpenSTA`'s clock network.
+/// The pins each clock reaches from its sources through wires and
+/// combinational arcs, as `OpenSTA`'s clock network.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ClockNetwork {
-    clock: Vec<bool>,
+    clocks_of: Vec<Vec<ClockId>>,
     sources: Vec<PinId>,
 }
 
 impl ClockNetwork {
-    /// Finds the pins the clocks entering at `clock_ports` reach.
-    pub fn find(
+    /// Finds the pins the clocks entering at `clock_ports` reach, each
+    /// port a clock of its own, for a design without constraints.
+    pub fn from_ports(
         netlist: &Netlist<'_>,
         clock_ports: &[String],
         constants: &Constants,
     ) -> Result<Self, NetlistError> {
         let db = netlist.db;
-        let mut sources = Vec::new();
-        for name in clock_ports {
+        let mut clocks = Vec::new();
+        for (i, name) in clock_ports.iter().enumerate() {
             let io = db
                 .io_pin_id(name)
                 .ok_or_else(|| NetlistError::UnknownClockPort(name.clone()))?;
-            sources.push(db.io_pins[io.index()].pin);
+            clocks.push((ClockId(i as u32), vec![io]));
         }
-        let mut clock = vec![false; db.pins.len()];
-        let mut queue: VecDeque<PinId> = VecDeque::new();
-        for &pin in &sources {
-            clock[pin.index()] = true;
-            queue.push_back(pin);
-        }
-        while let Some(pin) = queue.pop_front() {
-            if netlist.is_driver(pin) {
-                let net = db.pins[pin.index()].net;
-                for load in netlist.loads(net) {
-                    if !clock[load.index()] && !sources.contains(&load) {
-                        clock[load.index()] = true;
-                        queue.push_back(load);
+        Ok(Self::find(netlist, &clocks, constants))
+    }
+
+    /// Finds the pins the clocks of `sdc` reach.
+    #[must_use]
+    pub fn from_sdc(netlist: &Netlist<'_>, sdc: &Sdc, constants: &Constants) -> Self {
+        let clocks: Vec<(ClockId, Vec<IoPinId>)> = sdc
+            .clocks
+            .iter()
+            .enumerate()
+            .map(|(i, c)| (ClockId(i as u32), c.sources.clone()))
+            .collect();
+        Self::find(netlist, &clocks, constants)
+    }
+
+    fn find(
+        netlist: &Netlist<'_>,
+        clocks: &[(ClockId, Vec<IoPinId>)],
+        constants: &Constants,
+    ) -> Self {
+        let db = netlist.db;
+        let mut clocks_of: Vec<Vec<ClockId>> = vec![Vec::new(); db.pins.len()];
+        let mut sources = Vec::new();
+        let all_sources: Vec<PinId> = clocks
+            .iter()
+            .flat_map(|(_, ports)| ports.iter().map(|io| db.io_pins[io.index()].pin))
+            .collect();
+        for (clock, ports) in clocks {
+            let mut queue: VecDeque<PinId> = VecDeque::new();
+            for io in ports {
+                let pin = db.io_pins[io.index()].pin;
+                sources.push(pin);
+                clocks_of[pin.index()].push(*clock);
+                queue.push_back(pin);
+            }
+            let reach =
+                |clocks_of: &mut Vec<Vec<ClockId>>, queue: &mut VecDeque<PinId>, next: PinId| {
+                    if !clocks_of[next.index()].contains(clock) && !all_sources.contains(&next) {
+                        clocks_of[next.index()].push(*clock);
+                        queue.push_back(next);
+                    }
+                };
+            while let Some(pin) = queue.pop_front() {
+                if netlist.is_driver(pin) {
+                    let net = db.pins[pin.index()].net;
+                    for load in netlist.loads(net) {
+                        reach(&mut clocks_of, &mut queue, load);
                     }
                 }
-            }
-            let PinOwner::Cell { cell, .. } = db.pins[pin.index()].owner else {
-                continue;
-            };
-            if !netlist.is_load(pin) {
-                continue;
-            }
-            let Some((lib, from_port)) = netlist.link.pin_port(db, pin) else {
-                continue;
-            };
-            let lib_cell = netlist.link.liberty.cell(lib);
-            for set in &lib_cell.arc_sets {
-                if set.from != from_port || set.role != ArcRole::Combinational {
-                    continue;
-                }
-                if !constants.arc_enabled(netlist, cell, set.from, set.to) {
-                    continue;
-                }
-                let Some(out) = netlist.pin_of_port(cell, set.to) else {
+                let PinOwner::Cell { cell, .. } = db.pins[pin.index()].owner else {
                     continue;
                 };
-                if !clock[out.index()] && !sources.contains(&out) {
-                    clock[out.index()] = true;
-                    queue.push_back(out);
+                if !netlist.is_load(pin) {
+                    continue;
+                }
+                let Some((lib, from_port)) = netlist.link.pin_port(db, pin) else {
+                    continue;
+                };
+                let lib_cell = netlist.link.liberty.cell(lib);
+                for set in &lib_cell.arc_sets {
+                    if set.from != from_port || set.role != ArcRole::Combinational {
+                        continue;
+                    }
+                    if !constants.arc_enabled(netlist, cell, set.from, set.to) {
+                        continue;
+                    }
+                    let Some(out) = netlist.pin_of_port(cell, set.to) else {
+                        continue;
+                    };
+                    reach(&mut clocks_of, &mut queue, out);
                 }
             }
         }
-        Ok(Self { clock, sources })
+        Self { clocks_of, sources }
     }
 
     /// Whether a pin carries a clock; pins added since the search do not.
     #[must_use]
     pub fn is_clock(&self, pin: PinId) -> bool {
-        self.clock.get(pin.index()).copied().unwrap_or(false)
+        !self.clocks_of(pin).is_empty()
+    }
+
+    /// The clocks reaching a pin.
+    #[must_use]
+    pub fn clocks_of(&self, pin: PinId) -> &[ClockId] {
+        self.clocks_of.get(pin.index()).map_or(&[], Vec::as_slice)
     }
 
     /// The pins the clocks enter at.
