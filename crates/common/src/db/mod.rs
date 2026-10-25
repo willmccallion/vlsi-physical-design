@@ -2,6 +2,7 @@
 
 pub mod design;
 pub mod indices;
+pub mod liberty;
 pub mod library;
 pub mod parser;
 pub mod rules;
