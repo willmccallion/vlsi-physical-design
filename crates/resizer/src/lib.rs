@@ -9,6 +9,7 @@ pub mod dmp;
 pub mod fuzzy;
 pub mod gated;
 pub mod graph;
+pub mod hold;
 pub mod library;
 pub mod moves;
 pub mod netlist;
@@ -21,6 +22,7 @@ pub mod sta;
 pub mod steiner;
 
 pub use buffers::{BufferError, PortBuffers, buffer_ports, remove_buffers};
+pub use hold::{HoldOptions, HoldSummary, repair_hold};
 pub use library::{BufferSet, Link, LinkError};
 pub use netlist::{ClockNetwork, Constants, Namer, Netlist, NetlistError};
 pub use rebuffer::Rebuffer;

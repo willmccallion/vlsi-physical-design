@@ -44,6 +44,9 @@ pub enum RepairError {
     /// A cell to insert lacks the pins it needs.
     #[error("cell '{0}' has no usable pins")]
     MissingPins(String),
+    /// A repair that needs timing ran without constraints.
+    #[error("the repair needs timing constraints")]
+    NoTiming,
     /// The library's slew thresholds give an unusable shape factor.
     #[error("the slew thresholds give an RC shape factor of {0:.3e}, outside 0.1 to 10")]
     ShapeFactor(f64),
