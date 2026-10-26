@@ -5,6 +5,7 @@
 
 pub mod bnet;
 pub mod buffers;
+pub mod clock_inverters;
 pub mod dmp;
 pub mod fuzzy;
 pub mod gated;
@@ -22,6 +23,7 @@ pub mod sta;
 pub mod steiner;
 
 pub use buffers::{BufferError, PortBuffers, buffer_ports, remove_buffers};
+pub use clock_inverters::{ClockInverterRepair, repair_clock_inverters};
 pub use hold::{HoldOptions, HoldSummary, repair_hold};
 pub use library::{BufferSet, Link, LinkError};
 pub use netlist::{ClockNetwork, Constants, Namer, Netlist, NetlistError};
