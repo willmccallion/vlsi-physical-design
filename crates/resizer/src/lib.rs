@@ -7,6 +7,7 @@ pub mod bnet;
 pub mod buffers;
 pub mod dmp;
 pub mod fuzzy;
+pub mod gated;
 pub mod graph;
 pub mod library;
 pub mod moves;

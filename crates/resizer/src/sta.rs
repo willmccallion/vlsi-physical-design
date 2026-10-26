@@ -11,6 +11,7 @@
 //! paths through them.
 
 use crate::fuzzy;
+use crate::gated::{GatedEnable, gated_enables};
 use crate::graph::TimingGraph;
 use crate::netlist::{ClockNetwork, Constants, Netlist};
 use pare_common::db::design::PinOwner;
@@ -190,6 +191,9 @@ impl Path {
 struct Accounting {
     setup_required: f64,
     hold_required: f64,
+    /// For a gated clock's hold check, made against the trailing edge in
+    /// the cycle of the setup check rather than the one before.
+    gated_hold_required: f64,
     /// For a latch whose enable is the capturing edge: when the latch opens
     /// before the closing edge the data must beat.
     latch_setup_required: f64,
@@ -198,11 +202,22 @@ struct Accounting {
     latch_cycles: (i64, i64),
 }
 
+/// Which check a capture is for, since a gated clock's hold check lands on
+/// a different cycle.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Check {
+    /// A register's, a latch's or an output's.
+    Ordinary,
+    /// A gated clock enable's.
+    GatedClock,
+}
+
 impl Accounting {
-    const fn required(&self, side: MinMax) -> f64 {
-        match side {
-            MinMax::Max => self.setup_required,
-            MinMax::Min => self.hold_required,
+    const fn required(&self, side: MinMax, check: Check) -> f64 {
+        match (side, check) {
+            (MinMax::Max, _) => self.setup_required,
+            (MinMax::Min, Check::Ordinary) => self.hold_required,
+            (MinMax::Min, Check::GatedClock) => self.gated_hold_required,
         }
     }
 }
@@ -251,6 +266,8 @@ pub struct Sta {
     accountings: FxHashMap<(ClockEdge, ClockEdge), Accounting>,
     exception_ports: FxHashSet<IoPinId>,
     latches: FxHashMap<CellId, Latch>,
+    /// The enables of gated clocks, checked against their gate's clock.
+    gated: FxHashMap<PinId, GatedEnable>,
 }
 
 impl Sta {
@@ -287,6 +304,7 @@ impl Sta {
             accountings: FxHashMap::default(),
             exception_ports,
             latches: find_latches(netlist, constants),
+            gated: gated_enables(netlist, clocks),
         };
         sta.find_endpoints(netlist, clocks);
         let all: Vec<PinId> = (0..n).map(PinId::new).collect();
@@ -383,7 +401,7 @@ impl Sta {
                     })
                 }
             };
-            if is_end {
+            if is_end || self.gated.contains_key(&pin) {
                 self.is_endpoint[i] = true;
                 self.endpoints.push(pin);
             }
@@ -1121,6 +1139,11 @@ impl Sta {
                 }
             }
             PinOwner::Cell { cell, .. } => {
+                if let Some(&gate) = self.gated.get(&pin) {
+                    for (side, value) in self.gated_requireds(tag, launch, entry, gate) {
+                        tighten(side, value);
+                    }
+                }
                 let Some((lib, port)) = netlist.link.pin_port(db, pin) else {
                     return [None, None];
                 };
@@ -1191,6 +1214,44 @@ impl Sta {
         required
     }
 
+    /// The required times of a gated clock's enable, as `OpenSTA`'s
+    /// `PathEndGatedClock` with no clock gating margin set: on each side,
+    /// the clock's edge at the gate's clock input that the check is made
+    /// against, in the launching edge's frame.
+    fn gated_requireds(
+        &mut self,
+        tag: Tag,
+        launch: ClockEdge,
+        entry: &Entry,
+        gate: GatedEnable,
+    ) -> Vec<(MinMax, f64)> {
+        let mut out = Vec::new();
+        for side in MinMax::BOTH {
+            if entry.arrival[side.index()].is_none() {
+                continue;
+            }
+            let clock_edge = gate.active.check_edge(side);
+            let targets: Vec<ClockEdge> = self
+                .entries(gate.clock, clock_edge)
+                .iter()
+                .filter_map(|e| {
+                    let t = self.tags[e.tag.index()];
+                    t.is_clock.then_some(t.launch).flatten()
+                })
+                .collect();
+            for target in targets {
+                let to = PathEnd::Clock(target.clock);
+                if self.is_false(tag, to, Some(target.clock), side) {
+                    continue;
+                }
+                let required =
+                    self.capture_arrival(tag, launch, target, to, side, Check::GatedClock);
+                out.push((side, required));
+            }
+        }
+        out
+    }
+
     /// Whether an exception drops the check on `side` of a path with `tag`
     /// into `to`.
     fn is_false(&self, tag: Tag, to: PathEnd, to_clock: Option<ClockId>, side: MinMax) -> bool {
@@ -1241,8 +1302,21 @@ impl Sta {
         to: PathEnd,
         side: MinMax,
     ) -> f64 {
+        self.capture_arrival(tag, launch, target, to, side, Check::Ordinary)
+    }
+
+    /// [`Self::target_arrival`] for a given kind of check.
+    fn capture_arrival(
+        &mut self,
+        tag: Tag,
+        launch: ClockEdge,
+        target: ClockEdge,
+        to: PathEnd,
+        side: MinMax,
+        check: Check,
+    ) -> f64 {
         let accounting = self.accounting(launch, target);
-        let clock_time = accounting.required(side);
+        let clock_time = accounting.required(side, check);
         let uncertainty = self.sdc.clock(target.clock).uncertainty(side);
         let uncertainty = match side {
             MinMax::Max => -uncertainty,
@@ -1479,6 +1553,7 @@ fn cycle_accounting(sdc: &Sdc, launch: ClockEdge, target: ClockEdge) -> Accounti
     let mut accounting = Accounting {
         setup_required: 0.0,
         hold_required: 0.0,
+        gated_hold_required: 0.0,
         latch_setup_required: 0.0,
         latch_cycles: (0, 0),
     };
@@ -1501,6 +1576,7 @@ fn cycle_accounting(sdc: &Sdc, launch: ClockEdge, target: ClockEdge) -> Accounti
     };
     let mut setup_delay = f64::INFINITY;
     let mut hold_delay = f64::INFINITY;
+    let mut gated_hold_delay = f64::INFINITY;
     let mut latch_delay = f64::INFINITY;
     let mut tgt_past_src = false;
     let mut src_past_tgt = false;
@@ -1548,6 +1624,13 @@ fn cycle_accounting(sdc: &Sdc, launch: ClockEdge, target: ClockEdge) -> Accounti
                     accounting.hold_required = tgt_time - src_cycle_start;
                 }
             }
+            if fuzzy::less_equal(tgt_opposite, src_time) {
+                let delay = src_time - tgt_time;
+                if fuzzy::less(delay, gated_hold_delay) {
+                    gated_hold_delay = delay;
+                    accounting.gated_hold_required = tgt_time - src_cycle_start;
+                }
+            }
             src_cycle += 1;
         }
         tgt_cycle += 1;
@@ -1589,6 +1672,20 @@ mod tests {
 
         assert!((acct.setup_required - 2e-9).abs() < 1e-20);
         assert!(acct.hold_required.abs() < 1e-20);
+    }
+
+    #[test]
+    fn a_gated_clocks_hold_check_is_the_trailing_edge_of_the_same_cycle() {
+        let sdc = Sdc {
+            clocks: vec![clock("clk", 2e-9, 0.0, 1e-9)],
+            ..Sdc::default()
+        };
+
+        let acct = cycle_accounting(&sdc, edge(0, Edge::Rise), edge(0, Edge::Fall));
+
+        assert!((acct.gated_hold_required - 1e-9).abs() < 1e-20);
+        assert!((acct.required(MinMax::Min, Check::GatedClock) - 1e-9).abs() < 1e-20);
+        assert!((acct.required(MinMax::Min, Check::Ordinary) + 1e-9).abs() < 1e-20);
     }
 
     #[test]
