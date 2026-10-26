@@ -43,12 +43,15 @@ NANGATE45_IO = {"horizontal_layer": "metal5", "vertical_layer": "metal6"}
 ORFS_NANGATE45 = f"{ORFS_DIR}/flow/platforms/nangate45/lef"
 ORFS_NANGATE45_LIB = f"{ORFS_DIR}/flow/platforms/nangate45/lib"
 # The platform's config.mk and setRC.tcl: cells the flow never uses, and the
-# signal wire RC of metal3 in ohms and femtofarads per micron.
+# signal and clock wire RC of metal3 and metal5 in ohms and femtofarads per micron.
 ORFS_NANGATE45_DONT_USE = ["TAPCELL_X1", "FILLCELL_X1", "AOI211_X1", "OAI211_X1"]
 ORFS_NANGATE45_WIRE = {
     "signal_layer": "metal3",
     "wire_resistance_ohm_per_um": 3.57728,
     "wire_capacitance_ff_per_um": 0.103981,
+    "clock_layer": "metal5",
+    "clock_wire_resistance_ohm_per_um": 1.49065,
+    "clock_wire_capacitance_ff_per_um": 0.109256,
 }
 ORFS_NANGATE45_LEF = [
     f"{ORFS_NANGATE45}/NangateOpenCellLibrary.tech.lef",

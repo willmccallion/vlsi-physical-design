@@ -18,4 +18,7 @@ vertical_layer = "metal6"
 signal_layer = "metal3"
 wire_resistance_ohm_per_um = 3.57728
 wire_capacitance_ff_per_um = 0.103981
+clock_layer = "metal5"
+clock_wire_resistance_ohm_per_um = 1.49065
+clock_wire_capacitance_ff_per_um = 0.109256
 dont_use = ["TAPCELL_X1", "FILLCELL_X1", "AOI211_X1", "OAI211_X1"]
