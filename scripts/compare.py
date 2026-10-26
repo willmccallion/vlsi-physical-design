@@ -299,21 +299,25 @@ def pare_check(design, out, side):
     )
 
 
-def timing(design, out, side):
+def timing(design, out, side, propagated):
+    """Times the routed design; `propagated` for designs with clock trees."""
     if orfs_design(design) is None:
         return None
     print(f"{design}: timing of {side}", flush=True)
+    env = {
+        "TIMING_LEF": " ".join(lef_files(design)),
+        "TIMING_LIB": " ".join(liberty_files(design)),
+        "TIMING_DEF": str(routed_def(out, side)),
+        "TIMING_SDC": orfs_variable(design, "SDC_FILE"),
+        "TIMING_RCX": str(PLATFORM / "rcx_patterns.rules"),
+        "TIMING_DIR": str(out),
+    }
+    if propagated:
+        env["TIMING_PROPAGATED"] = "1"
     return run(
         ["openroad", "-no_init", "-no_splash", "-exit", "scripts/openroad_timing.tcl"],
         out / f"{side}.timing.log",
-        env={
-            "TIMING_LEF": " ".join(lef_files(design)),
-            "TIMING_LIB": " ".join(liberty_files(design)),
-            "TIMING_DEF": str(routed_def(out, side)),
-            "TIMING_SDC": orfs_variable(design, "SDC_FILE"),
-            "TIMING_RCX": str(PLATFORM / "rcx_patterns.rules"),
-            "TIMING_DIR": str(out),
-        },
+        env=env,
     )
 
 
@@ -332,7 +336,7 @@ def compare(mode, design, skip_openroad=False):
         if routed_def(out, side).exists():
             check_drc(design, out, side)
             pare_check(design, out, side)
-            timing(design, out, side)
+            timing(design, out, side, propagated=mode == "flow")
 
 
 def time_and_memory(log):

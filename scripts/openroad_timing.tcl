@@ -2,8 +2,9 @@
 # flow: parasitics extracted from the wires with the platform's RCX rules, then
 # the worst and total negative slack, over all paths and per path group, so the
 # paths a clock constrains can be read apart from the recovery checks of an
-# unbuffered reset, and how many pins break their slew or load limit. Clocks
-# stay ideal, as PARE builds no clock tree.
+# unbuffered reset, and how many pins break their slew or load limit. With
+# TIMING_PROPAGATED set the clocks are propagated through the designs' clock
+# trees; otherwise they stay ideal, for netlists without one.
 #
 #   TIMING_LEF="tech.lef cells.lef" TIMING_LIB="cells.lib" TIMING_DEF=output/aes/routed.def \
 #     TIMING_SDC=constraint.sdc TIMING_RCX=rcx_patterns.rules TIMING_DIR=cmp/aes \
@@ -19,6 +20,9 @@ foreach lib $::env(TIMING_LIB) {
 }
 read_def $::env(TIMING_DEF)
 read_sdc $::env(TIMING_SDC)
+if {[info exists ::env(TIMING_PROPAGATED)]} {
+  set_propagated_clock [all_clocks]
+}
 
 define_process_corner -ext_model_index 0 X
 extract_parasitics -ext_model_file $::env(TIMING_RCX)
