@@ -54,6 +54,11 @@ pub struct NetlistConfig {
     /// input names an SDC file, and the clocks propagated through them.
     #[serde(default = "default_enabled")]
     pub clock_tree: bool,
+    /// Whether the design and timing are repaired again after global
+    /// routing, on the parasitics of the global routes, when the input
+    /// names an SDC file.
+    #[serde(default = "default_enabled")]
+    pub repair_on_global_routes: bool,
     /// The routing layer signal wires are estimated on.
     pub signal_layer: Option<String>,
     /// Resistance of that layer's wire, in ohms per micron.
@@ -117,6 +122,7 @@ impl Default for NetlistConfig {
             repair_design: default_enabled(),
             repair_timing: default_enabled(),
             clock_tree: default_enabled(),
+            repair_on_global_routes: default_enabled(),
             signal_layer: None,
             wire_resistance_ohm_per_um: None,
             wire_capacitance_ff_per_um: None,

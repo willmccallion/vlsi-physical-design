@@ -22,6 +22,9 @@ pub struct Report {
     pub clock_tree: Option<ClockTreeSummary>,
     /// Timing repair results, when the run had constraints.
     pub timing: Option<TimingSummary>,
+    /// Repair results on the global routes' parasitics, when the run
+    /// repaired after global routing.
+    pub global_route_repair: Option<GlobalRouteRepairSummary>,
     /// Placement results, when the run placed.
     pub placement: Option<PlacementSummary>,
     /// Routing results, when the run routed.
@@ -87,6 +90,23 @@ pub struct ClockTreeSummary {
     pub clock_net_repeaters: usize,
     /// Delay buffers inserted to balance the trees' latencies.
     pub delay_buffers: usize,
+}
+
+/// What design and timing repair did on the global routes' parasitics.
+#[derive(Debug, Default, Serialize)]
+pub struct GlobalRouteRepairSummary {
+    /// Drivers breaking a slew limit.
+    pub slew_violations: usize,
+    /// Drivers breaking a load limit.
+    pub cap_violations: usize,
+    /// Nets design repair changed.
+    pub repaired_nets: usize,
+    /// Gates design repair resized.
+    pub resized: usize,
+    /// Repeaters design repair inserted.
+    pub repeaters: usize,
+    /// What timing repair did.
+    pub timing: Option<TimingSummary>,
 }
 
 /// What setup repair did, with slacks in nanoseconds.

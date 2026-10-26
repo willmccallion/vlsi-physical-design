@@ -32,16 +32,21 @@ use pare_placer::legalize::abacus;
 use pare_placer::model::PlacementModel;
 use pare_placer::zones::{Zone, Zones};
 
+use pare_common::db::global_route::RouteSource;
 use pare_cts::{CtsInput, CtsOptions, balance_latencies};
+use pare_placer::legalize::site::SiteGrid;
 use pare_resizer::parasitics::WireRc;
 use pare_resizer::resizer::Context as RepairContext;
+use pare_resizer::resizer::GlobalRouting;
+use pare_resizer::route_parasitics::RouteRc;
 use pare_resizer::{
     ClockNetwork, Constants, HoldOptions, Link, Namer, Netlist, Rebuffer, RepairOptions, Repairer,
     Resizer, SetupOptions, repair_clock_inverters, repair_hold, repair_setup, timing_net_weights,
 };
-use pare_router::{CapacityReduction, GlobalRouteEstimator, RouteError};
+use pare_router::{CapacityReduction, GlobalRouteEstimator, GlobalSession, RouteError};
 use report::{
-    ClockTreeSummary, NetlistSummary, PlacementSummary, Report, RoutingSummary, TimingSummary,
+    ClockTreeSummary, GlobalRouteRepairSummary, NetlistSummary, PlacementSummary, Report,
+    RoutingSummary, TimingSummary,
 };
 use rustc_hash::FxHashMap;
 use std::path::{Path, PathBuf};
@@ -233,13 +238,14 @@ fn run(command: Commands, report: &mut Report) -> anyhow::Result<()> {
             } else {
                 PlacementStart::Scratch
             };
-            run_placement(
+            let _ = run_placement(
                 &config,
                 &mut db,
                 &prepare_output_dir(&config)?,
                 start,
                 report,
-            )
+            )?;
+            Ok(())
         }
         Commands::Route {
             config: name,
@@ -286,6 +292,7 @@ fn run(command: Commands, report: &mut Report) -> anyhow::Result<()> {
                 &mut db,
                 &prepare_output_dir(&config)?,
                 stage,
+                None,
                 report,
             )
         }
@@ -294,18 +301,26 @@ fn run(command: Commands, report: &mut Report) -> anyhow::Result<()> {
             let mut db = load_design(&config, None)?;
             report.design.clone_from(&db.name);
             let output_dir = prepare_output_dir(&config)?;
-            if config.purpose != Purpose::Routing {
+            let repair = if config.purpose == Purpose::Routing {
+                None
+            } else {
                 run_placement(
                     &config,
                     &mut db,
                     &output_dir,
                     PlacementStart::Scratch,
                     report,
-                )?;
-            }
+                )?
+            };
             if config.purpose != Purpose::Placement {
+                let global = match repair {
+                    Some(mut repair) => {
+                        global_route_with_repair(&config, &mut db, &mut repair, report)?
+                    }
+                    None => None,
+                };
                 let stage = RouteStage::Detailed(StateFiles::default());
-                run_routing(&config, &mut db, &output_dir, stage, report)?;
+                run_routing(&config, &mut db, &output_dir, stage, global, report)?;
             }
             Ok(())
         }
@@ -503,7 +518,7 @@ fn run_placement(
     output_dir: &Path,
     start: PlacementStart,
     report: &mut Report,
-) -> anyhow::Result<()> {
+) -> anyhow::Result<Option<NetlistRepair>> {
     let mut repair = if start == PlacementStart::Scratch {
         repair_netlist(config, db, report)?
     } else {
@@ -658,7 +673,7 @@ fn run_placement(
     };
     ui::wrote(&path_str(&placed)?);
     report.phase("placement output", phase_start);
-    Ok(())
+    Ok(repair)
 }
 
 /// Reads the Liberty files, the first one's thresholds and defaults
@@ -831,24 +846,7 @@ fn repair_design(
         repair.sdc.as_ref(),
     )?;
     let done = Repairer::new(&mut resizer).repair_design()?;
-    ui::stat_row(
-        "Slew violations:",
-        &done.slew_violations.to_string(),
-        "Cap violations:",
-        &done.cap_violations.to_string(),
-    );
-    ui::stat_row(
-        "Resized:",
-        &done.resized.to_string(),
-        "Repeaters:",
-        &done.inserted.to_string(),
-    );
-    ui::stat_row(
-        "Nets repaired:",
-        &done.repaired_nets.to_string(),
-        "Cells:",
-        &resizer.netlist().db.cells.len().to_string(),
-    );
+    show_design_repair(&done, resizer.netlist().db.cells.len());
     repair.summary.slew_violations = done.slew_violations;
     repair.summary.cap_violations = done.cap_violations;
     repair.summary.repaired_nets = done.repaired_nets;
@@ -868,6 +866,209 @@ fn repair_design(
     report.phase("design repair", phase_start);
     let _ = resizer.finish()?;
     Ok(())
+}
+
+/// Shows what design repair found and did.
+fn show_design_repair(done: &pare_resizer::RepairSummary, cells: usize) {
+    ui::stat_row(
+        "Slew violations:",
+        &done.slew_violations.to_string(),
+        "Cap violations:",
+        &done.cap_violations.to_string(),
+    );
+    ui::stat_row(
+        "Resized:",
+        &done.resized.to_string(),
+        "Repeaters:",
+        &done.inserted.to_string(),
+    );
+    ui::stat_row(
+        "Nets repaired:",
+        &done.repaired_nets.to_string(),
+        "Cells:",
+        &cells.to_string(),
+    );
+}
+
+/// Global routing with design and timing repair on its parasitics, as
+/// OpenROAD-flow-scripts' global route stage does it.
+///
+/// After `estimate_parasitics -global_routing` come `repair_design` and
+/// detailed placement, then `repair_timing` and detailed placement again;
+/// the nets of every cell an edit or detailed placement moves are routed
+/// again. None when the run has no constraints or the repair is off.
+fn global_route_with_repair(
+    config: &Config,
+    db: &mut NetlistDB,
+    repair: &mut NetlistRepair,
+    report: &mut Report,
+) -> anyhow::Result<Option<GlobalSession>> {
+    let Some(sdc) = repair.sdc.as_ref() else {
+        return Ok(None);
+    };
+    if !config.netlist.repair_on_global_routes {
+        return Ok(None);
+    }
+    ui::section("Global Routing");
+    let phase_start = Instant::now();
+    ui::phase("Global Route");
+    let mut session = GlobalSession::new(db, &config.routing)?;
+    report.phase("global routing", phase_start);
+    let rc = wire_rc(config, db)?;
+    let route_rc = route_rc(config, db)?;
+    let sites = SiteGrid::new(db).context("the design has no core rows to legalize on")?;
+    let legalize = |db: &mut NetlistDB, cell: CellId| sites.legalize(db, cell);
+    let mut summary = GlobalRouteRepairSummary::default();
+    for step in [RepairStep::Design, RepairStep::Timing] {
+        let enabled = match step {
+            RepairStep::Design => config.netlist.repair_design,
+            RepairStep::Timing => config.netlist.repair_timing,
+        };
+        if !enabled {
+            continue;
+        }
+        let phase_start = Instant::now();
+        let link = Link::new(db, &repair.liberty, &config.netlist.dont_use)?;
+        let (constants, clocks) = {
+            let netlist = Netlist::new(db, &link);
+            let constants = Constants::find(&netlist);
+            let clocks = ClockNetwork::from_sdc(&netlist, sdc, &constants);
+            (constants, clocks)
+        };
+        let buffers = link.find_buffers(db)?;
+        let context = RepairContext {
+            link: &link,
+            clocks: &clocks,
+            constants: &constants,
+            clock_rc: clock_wire_rc(config, db)?,
+        };
+        let routes = GlobalRouting {
+            source: &mut session,
+            rc: route_rc.clone(),
+            legalize: &legalize,
+        };
+        let mut resizer = Resizer::on_global_routes(
+            db,
+            context,
+            rc,
+            buffers,
+            &mut repair.namer,
+            RepairOptions::default(),
+            Some(sdc),
+            routes,
+        )?;
+        match step {
+            RepairStep::Design => {
+                ui::phase("Design Repair");
+                let done = Repairer::new(&mut resizer).repair_design()?;
+                show_design_repair(&done, resizer.netlist().db.cells.len());
+                summary.slew_violations = done.slew_violations;
+                summary.cap_violations = done.cap_violations;
+                summary.repaired_nets = done.repaired_nets;
+                summary.resized = done.resized;
+                summary.repeaters = done.inserted;
+            }
+            RepairStep::Timing => {
+                ui::phase("Timing Repair");
+                summary.timing = Some(timing_repair_on(&mut resizer, &repair.liberty)?);
+            }
+        }
+        let renumbering = resizer.finish()?;
+        session.renumber(&renumbering);
+        report.phase(step.phase_name(), phase_start);
+        legalize_and_reroute(db, &mut session, report)?;
+    }
+    report.global_route_repair = Some(summary);
+    Ok(Some(session))
+}
+
+/// The repairs the global route stage makes, in order.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum RepairStep {
+    Design,
+    Timing,
+}
+
+impl RepairStep {
+    const fn phase_name(self) -> &'static str {
+        match self {
+            Self::Design => "design repair on global routes",
+            Self::Timing => "timing repair on global routes",
+        }
+    }
+}
+
+/// Detailed placement after a repair, as OpenROAD-flow-scripts runs
+/// `detailed_placement` between `global_route -start_incremental` and
+/// `-end_incremental`: the nets of every cell it moves are routed again.
+fn legalize_and_reroute(
+    db: &mut NetlistDB,
+    session: &mut GlobalSession,
+    report: &mut Report,
+) -> anyhow::Result<()> {
+    let phase_start = Instant::now();
+    ui::phase("Legalization");
+    let before: Vec<_> = db.cells.iter().map(|c| (c.location, c.orient)).collect();
+    abacus::legalize(db, &Zones::new(db)?)?;
+    let mut moved_nets: Vec<NetId> = db
+        .cells
+        .iter()
+        .zip(&before)
+        .filter(|(c, was)| (c.location, c.orient) != **was)
+        .flat_map(|(c, _)| c.pins.iter().map(|&p| db.pins[p.index()].net))
+        .collect();
+    moved_nets.sort_unstable();
+    moved_nets.dedup();
+    let moved = db
+        .cells
+        .iter()
+        .zip(&before)
+        .filter(|(c, was)| (c.location, c.orient) != **was)
+        .count();
+    session.update(db, &moved_nets);
+    ui::stat_row(
+        "Cells moved:",
+        &moved.to_string(),
+        "Nets updated:",
+        &moved_nets.len().to_string(),
+    );
+    report.phase("legalization on global routes", phase_start);
+    Ok(())
+}
+
+/// Each routing layer's and cut layer's resistance and capacitance from
+/// the netlist config, for the global routes' parasitics.
+fn route_rc(config: &Config, db: &NetlistDB) -> anyhow::Result<RouteRc> {
+    let lib = &db.library;
+    let layers = config
+        .netlist
+        .layer_rc
+        .iter()
+        .map(|l| {
+            let id = lib
+                .routing_layer_id(&l.layer)
+                .with_context(|| format!("[netlist] layer_rc names unknown layer '{}'", l.layer))?;
+            let rc = WireRc::per_micron(l.resistance_ohm_per_um, l.capacitance_ff_per_um, id);
+            Ok((id, rc.resistance, rc.capacitance))
+        })
+        .collect::<anyhow::Result<Vec<_>>>()?;
+    let vias = config
+        .netlist
+        .via_rc
+        .iter()
+        .map(|v| {
+            let cut = lib
+                .cut_layers
+                .iter()
+                .position(|c| c.name == v.layer)
+                .with_context(|| {
+                    format!("[netlist] via_rc names unknown cut layer '{}'", v.layer)
+                })?;
+            Ok((cut, v.resistance_ohm))
+        })
+        .collect::<anyhow::Result<Vec<_>>>()?;
+    let min_layer = *config.routing.layer_range(lib)?.start();
+    Ok(RouteRc::new(lib, &layers, &vias, min_layer))
 }
 
 /// Builds the clock trees on the detailed placement and propagates the
@@ -1062,6 +1263,15 @@ fn repair_timing(
         RepairOptions::default(),
         Some(sdc),
     )?;
+    report.timing = Some(timing_repair_on(&mut resizer, &repair.liberty)?);
+    let _ = resizer.finish()?;
+    report.phase("timing repair", phase_start);
+    Ok(true)
+}
+
+/// Repairs setup and then hold, as `repair_timing` does without
+/// `-setup` or `-hold`, showing each iteration and what changed.
+fn timing_repair_on(resizer: &mut Resizer<'_>, liberty: &Liberty) -> anyhow::Result<TimingSummary> {
     ui::timing_table_header();
     let summary = {
         let mut show = |progress: &pare_resizer::SetupProgress| {
@@ -1083,10 +1293,9 @@ fn repair_timing(
                 worst,
             });
         };
-        repair_setup(&mut resizer, SetupOptions::default(), &mut show)?
+        repair_setup(resizer, SetupOptions::default(), &mut show)?
     };
-    let hold = repair_hold(&mut resizer, &HoldOptions::default())?;
-    let _ = resizer.finish()?;
+    let hold = repair_hold(resizer, &HoldOptions::default())?;
     eprintln!();
     ui::stat_row(
         "WNS (ns):",
@@ -1141,9 +1350,9 @@ fn repair_timing(
         &hold.inserted.to_string(),
         "Hold buffer:",
         hold.buffer
-            .map_or("none", |b| repair.liberty.cell(b).name.as_str()),
+            .map_or("none", |b| liberty.cell(b).name.as_str()),
     );
-    report.timing = Some(TimingSummary {
+    Ok(TimingSummary {
         failing_before: summary.failing_before,
         failing_after: summary.failing_after,
         wns_before_ns: summary.wns_before * 1e9,
@@ -1162,9 +1371,7 @@ fn repair_timing(
         hold_wns_before_ns: hold.wns_before * 1e9,
         hold_wns_after_ns: hold.wns_after * 1e9,
         hold_buffers: hold.inserted,
-    });
-    report.phase("timing repair", phase_start);
-    Ok(true)
+    })
 }
 
 /// Global placement without the movable I/O pins, I/O pin placement for
@@ -1681,6 +1888,7 @@ fn run_routing(
     db: &mut NetlistDB,
     output_dir: &Path,
     stage: RouteStage,
+    global: Option<GlobalSession>,
     report: &mut Report,
 ) -> anyhow::Result<()> {
     let phase_start = Instant::now();
@@ -1717,7 +1925,10 @@ fn run_routing(
             }),
             trace: files.trace.clone(),
         };
-        pare_router::route_with(db, &config.routing, session)?
+        match global {
+            Some(global) => pare_router::route_on(db, &config.routing, global, session)?,
+            None => pare_router::route_with(db, &config.routing, session)?,
+        }
     };
     if let Some(e) = save_error {
         return Err(e);
