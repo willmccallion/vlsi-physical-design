@@ -95,6 +95,16 @@ pub struct TimingSummary {
     pub iterations: usize,
     /// Cell area change, as a percentage.
     pub area_change_percent: f64,
+    /// Endpoints failing hold before hold repair.
+    pub hold_failing_before: usize,
+    /// Endpoints failing hold after it.
+    pub hold_failing_after: usize,
+    /// Worst hold slack before hold repair.
+    pub hold_wns_before_ns: f64,
+    /// Worst hold slack after it.
+    pub hold_wns_after_ns: f64,
+    /// Hold buffers inserted.
+    pub hold_buffers: usize,
 }
 
 /// What placement did.

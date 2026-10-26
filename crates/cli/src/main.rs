@@ -35,8 +35,8 @@ use pare_placer::zones::{Zone, Zones};
 use pare_resizer::parasitics::WireRc;
 use pare_resizer::resizer::Context as RepairContext;
 use pare_resizer::{
-    ClockNetwork, Constants, Link, Namer, Netlist, Rebuffer, RepairOptions, Repairer, Resizer,
-    SetupOptions, repair_setup, timing_net_weights,
+    ClockNetwork, Constants, HoldOptions, Link, Namer, Netlist, Rebuffer, RepairOptions, Repairer,
+    Resizer, SetupOptions, repair_hold, repair_setup, timing_net_weights,
 };
 use pare_router::{CapacityReduction, GlobalRouteEstimator, RouteError};
 use report::{NetlistSummary, PlacementSummary, Report, RoutingSummary, TimingSummary};
@@ -854,7 +854,7 @@ fn repair_design(
     Ok(())
 }
 
-/// Repairs the paths failing setup on the legalized placement, as
+/// Repairs the paths failing setup and then hold on the legalized placement, as
 /// `OpenROAD-flow-scripts` runs `repair_timing` after detailed placement,
 /// when the input has constraints; returns whether it ran.
 fn repair_timing(
@@ -917,6 +917,7 @@ fn repair_timing(
         };
         repair_setup(&mut resizer, SetupOptions::default(), &mut show)?
     };
+    let hold = repair_hold(&mut resizer, &HoldOptions::default())?;
     let _ = resizer.finish()?;
     eprintln!();
     ui::stat_row(
@@ -957,6 +958,23 @@ fn repair_timing(
         "Area:",
         &format!("{:+.1}%", summary.area_change_percent),
     );
+    ui::stat_row(
+        "Hold WNS (ns):",
+        &format!(
+            "{:.3} -> {:.3}",
+            hold.wns_before * 1e9,
+            hold.wns_after * 1e9
+        ),
+        "Hold failing:",
+        &format!("{} -> {}", hold.failing_before, hold.failing_after),
+    );
+    ui::stat_row(
+        "Hold buffers:",
+        &hold.inserted.to_string(),
+        "Hold buffer:",
+        hold.buffer
+            .map_or("none", |b| repair.liberty.cell(b).name.as_str()),
+    );
     report.timing = Some(TimingSummary {
         failing_before: summary.failing_before,
         failing_after: summary.failing_after,
@@ -971,6 +989,11 @@ fn repair_timing(
         swapped: summary.swapped,
         iterations: summary.iterations,
         area_change_percent: summary.area_change_percent,
+        hold_failing_before: hold.failing_before,
+        hold_failing_after: hold.failing_after,
+        hold_wns_before_ns: hold.wns_before * 1e9,
+        hold_wns_after_ns: hold.wns_after * 1e9,
+        hold_buffers: hold.inserted,
     });
     report.phase("timing repair", phase_start);
     Ok(true)
