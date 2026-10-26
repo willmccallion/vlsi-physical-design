@@ -1570,16 +1570,16 @@ fn load_limit_by_driver_slew(resizer: &Resizer<'_>, cell: LibCellId) -> f64 {
 
 /// The wire a buffer can drive before its load's slew limit is reached, in
 /// database units, as `wireLengthLimitImpliedByLoadSlew`.
+// The quadratic keeps OpenROAD's grouping so it can be checked against it.
+#[allow(clippy::suboptimal_flops)]
 fn wire_length_limit_by_load_slew(resizer: &Resizer<'_>, size: &BufferSize) -> i64 {
     let rc = resizer.graph.wire_rc();
     let dbu = resizer.db.dbu().get() as f64;
     let max_slew = margined(size.input_max_slew, SLEW_MARGIN);
     let a = rc.resistance * rc.capacitance;
-    let b = size
-        .input_cap
-        .mul_add(rc.resistance, size.drive_resistance * rc.capacitance);
+    let b = rc.resistance * size.input_cap + size.drive_resistance * rc.capacitance;
     let c = size.drive_resistance * size.input_cap - max_slew / ELMORE_SKEW_FACTOR;
-    let discriminant = (4.0 * a).mul_add(-c, b * b);
+    let discriminant = b * b - 4.0 * a * c;
     if discriminant < 0.0 || a <= 0.0 {
         return i64::MAX;
     }
@@ -1590,7 +1590,7 @@ fn wire_length_limit_by_load_slew(resizer: &Resizer<'_>, size: &BufferSize) -> i
     if meters <= 0.0 {
         return 1;
     }
-    (meters * 1e6 * dbu) as i64
+    meters_to_dbu(meters, dbu).max(1)
 }
 
 /// The wire a buffer can drive before its load limit is reached, as
@@ -1613,7 +1613,7 @@ fn wire_length_limit_by_max_cap(resizer: &Resizer<'_>, size: &BufferSize) -> i64
     }
     let dbu = resizer.db.dbu().get() as f64;
     let slack = margined(limit, CAP_MARGIN) - size.input_cap;
-    ((slack / rc.capacitance) * 1e6 * dbu).max(0.0) as i64
+    meters_to_dbu((slack / rc.capacitance).max(0.0), dbu)
 }
 
 /// `meters` in database units, rounded and kept within an `int`, as
