@@ -1613,7 +1613,7 @@ pub fn max_wire_length(resizer: &Resizer<'_>) -> i64 {
     if !shortest.is_finite() {
         return i64::MAX;
     }
-    (shortest * 1e6 * dbu) as i64
+    (shortest * 1e6 * dbu).round() as i64
 }
 
 /// `findMaxWireLength` for one buffer, in meters.
@@ -1624,19 +1624,19 @@ fn buffer_max_wire_length(resizer: &Resizer<'_>, buffer: LibCellId) -> f64 {
     };
     let rc = resizer.graph.wire_rc();
     let drive = lib.drive_resistance(output);
-    let load_cap = lib.ports[input].capacitance();
     let delay = |length: f64| -> f64 {
         let resistance = length * rc.resistance;
         let capacitance = length * rc.capacitance;
-        let model = PiModel {
-            c2: capacitance / 2.0,
-            rpi: resistance,
-            c1: capacitance / 2.0 + load_cap,
-        };
-        let elmore = resistance * (capacitance / 2.0 + load_cap);
         let mut worst = f64::NEG_INFINITY;
         for set in lib.delay_arc_sets_to(output) {
             for arc in &set.arcs {
+                let load_cap = lib.ports[input].capacitance.get(arc.to_edge);
+                let model = PiModel {
+                    c2: capacitance / 2.0,
+                    rpi: resistance,
+                    c1: capacitance / 2.0 + load_cap,
+                };
+                let elmore = resistance * (capacitance / 2.0 + load_cap);
                 let result = dmp::gate_delay(
                     arc,
                     &resizer.link.liberty.thresholds,
