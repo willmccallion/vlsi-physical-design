@@ -86,9 +86,11 @@ impl<'r, 'a> Repairer<'r, 'a> {
             let netlist = self.resizer.netlist();
             self.resizer.graph.drivers_by_level(&netlist)
         };
+        self.resizer.defer_timing();
         for driver in drivers.into_iter().rev() {
             self.repair_driver(driver)?;
         }
+        self.resizer.resume_timing();
         self.resizer.clear_slew_annotations();
         Ok(self.summary)
     }
@@ -191,7 +193,9 @@ impl<'r, 'a> Repairer<'r, 'a> {
                 }
                 if repair_cap || repair_load_slew || repair_wire {
                     repaired = true;
+                    self.resizer.batch_edits();
                     let _ = self.repair_tree(&tree, driver, max_cap)?;
+                    self.resizer.flush();
                 }
             }
         }

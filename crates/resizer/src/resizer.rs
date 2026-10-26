@@ -144,6 +144,16 @@ pub struct Resizer<'a> {
     /// Drivers whose timing is to be found again at the next flush, while
     /// edits are batched.
     pending: Option<Vec<PinId>>,
+    /// Nets whose parasitics are to be estimated again at the next flush,
+    /// while edits are batched.
+    pending_nets: Vec<NetId>,
+    /// How many nets the design had when the batch began: the batch's own
+    /// edits read the nets it adds, so those are estimated as they change.
+    nets_before_batch: usize,
+    /// Whether the timing analysis is left behind the graph until
+    /// [`Resizer::resume_timing`], with the drivers it has yet to take in.
+    timing_deferred: bool,
+    stale_timing: Vec<PinId>,
 }
 
 impl<'a> Resizer<'a> {
@@ -194,25 +204,73 @@ impl<'a> Resizer<'a> {
             resized_multi_output: HashSet::new(),
             inserted_buffers: 0,
             pending: None,
+            pending_nets: Vec::new(),
+            nets_before_batch: 0,
+            timing_deferred: false,
+            stale_timing: Vec::new(),
         })
     }
 
-    /// Holds back the timing updates of the edits that follow until
-    /// [`Resizer::flush`], so that a run of edits is propagated once.
+    /// Holds back the parasitics and timing updates of the edits that
+    /// follow until [`Resizer::flush`], so that a run of edits on a net is
+    /// estimated and propagated once; nets the batch adds are still
+    /// estimated as they change, since the batch's own edits read them.
     pub fn batch_edits(&mut self) {
         if self.pending.is_none() {
             self.pending = Some(Vec::new());
+            self.nets_before_batch = self.db.nets.len();
         }
     }
 
-    /// Finds the timing again after the edits batched so far and ends the
-    /// batch.
+    /// Estimates the nets and finds the timing again after the edits
+    /// batched so far, and ends the batch.
     pub fn flush(&mut self) {
-        if let Some(mut drivers) = self.pending.take() {
-            drivers.sort_unstable();
-            drivers.dedup();
-            self.propagate(&drivers);
+        let Some(mut drivers) = self.pending.take() else {
+            return;
+        };
+        let mut nets = std::mem::take(&mut self.pending_nets);
+        nets.sort_unstable();
+        nets.dedup();
+        {
+            let netlist = Netlist::new(self.db, self.link);
+            for net in nets {
+                self.graph.parasitics_invalid(&netlist, self.clocks, net);
+            }
         }
+        drivers.sort_unstable();
+        drivers.dedup();
+        self.propagate(&drivers);
+    }
+
+    /// Leaves the timing analysis behind the graph until
+    /// [`Resizer::resume_timing`], for a run of edits that reads slews but
+    /// no timing, as `OpenSTA` leaves arrivals until they are asked for.
+    pub const fn defer_timing(&mut self) {
+        self.timing_deferred = true;
+    }
+
+    /// Brings the timing analysis up to date with every edit made while it
+    /// was deferred.
+    pub fn resume_timing(&mut self) {
+        self.timing_deferred = false;
+        let mut stale = std::mem::take(&mut self.stale_timing);
+        stale.sort_unstable();
+        stale.dedup();
+        if let Some(sta) = &mut self.sta {
+            let netlist = Netlist::new(self.db, self.link);
+            sta.update(&netlist, &self.graph, self.clocks, &stale);
+        }
+    }
+
+    /// Estimates a net's parasitics again, or holds that for the flush
+    /// while edits are batched and the net is older than the batch.
+    fn invalidate_parasitics(&mut self, net: NetId) {
+        if self.pending.is_some() && net.index() < self.nets_before_batch {
+            self.pending_nets.push(net);
+            return;
+        }
+        let netlist = Netlist::new(self.db, self.link);
+        self.graph.parasitics_invalid(&netlist, self.clocks, net);
     }
 
     /// A view of the design as it stands.
@@ -221,9 +279,15 @@ impl<'a> Resizer<'a> {
         Netlist::new(self.db, self.link)
     }
 
-    /// The timing analysis, if constraints were given.
+    /// The timing analysis, if constraints were given; not to be read while
+    /// edits are batched or the timing is deferred, when it is behind the
+    /// design.
     #[must_use]
-    pub const fn sta(&self) -> Option<&Sta> {
+    pub fn sta(&self) -> Option<&Sta> {
+        debug_assert!(
+            self.pending.is_none() && !self.timing_deferred,
+            "timing read while edits are batched or timing is deferred"
+        );
         self.sta.as_ref()
     }
 
@@ -561,30 +625,30 @@ impl<'a> Resizer<'a> {
         }
         let netlist = Netlist::new(self.db, self.link);
         let dirty = self.graph.propagate_from(&netlist, self.clocks, drivers);
-        if let Some(sta) = &mut self.sta {
+        if self.timing_deferred {
+            self.stale_timing.extend(dirty);
+        } else if let Some(sta) = &mut self.sta {
             sta.update(&netlist, &self.graph, self.clocks, &dirty);
         }
     }
 
     /// Re-estimates a net and everything timed through it.
     pub fn update_net(&mut self, net: NetId) {
-        let drivers: Vec<PinId> = {
-            let netlist = Netlist::new(self.db, self.link);
-            self.graph.parasitics_invalid(&netlist, self.clocks, net);
-            netlist.drivers(net).collect()
-        };
+        self.invalidate_parasitics(net);
+        let drivers: Vec<PinId> = self.netlist().drivers(net).collect();
         self.propagate(&drivers);
     }
 
     /// Re-estimates the nets around a cell whose master changed.
     pub fn update_cell(&mut self, cell: CellId) {
-        let drivers: Vec<PinId> = {
+        let (nets, drivers) = {
             let netlist = Netlist::new(self.db, self.link);
+            let mut nets = Vec::new();
             let mut drivers = Vec::new();
             for &pin in &self.db.cells[cell.index()].pins {
                 let net = self.db.pins[pin.index()].net;
                 if netlist.is_load(pin) || netlist.is_driver(pin) {
-                    self.graph.parasitics_invalid(&netlist, self.clocks, net);
+                    nets.push(net);
                 }
                 if netlist.is_load(pin) {
                     drivers.extend(netlist.drivers(net));
@@ -593,8 +657,11 @@ impl<'a> Resizer<'a> {
                     drivers.push(pin);
                 }
             }
-            drivers
+            (nets, drivers)
         };
+        for net in nets {
+            self.invalidate_parasitics(net);
+        }
         self.propagate(&drivers);
     }
 
@@ -702,10 +769,9 @@ impl<'a> Resizer<'a> {
         {
             let netlist = Netlist::new(self.db, self.link);
             self.graph.grow(&netlist);
-            self.graph.parasitics_invalid(&netlist, self.clocks, net);
-            self.graph
-                .parasitics_invalid(&netlist, self.clocks, new_net);
         }
+        self.invalidate_parasitics(net);
+        self.invalidate_parasitics(new_net);
         let mut drivers: Vec<PinId> = self.netlist().drivers(net).collect();
         drivers.push(output);
         self.propagate(&drivers);
@@ -760,13 +826,8 @@ impl<'a> Resizer<'a> {
             });
         }
         self.dead_nets.push(removed);
-        {
-            let netlist = Netlist::new(self.db, self.link);
-            self.graph
-                .parasitics_invalid(&netlist, self.clocks, survivor);
-            self.graph
-                .parasitics_invalid(&netlist, self.clocks, removed);
-        }
+        self.invalidate_parasitics(survivor);
+        self.invalidate_parasitics(removed);
         let drivers: Vec<PinId> = self.netlist().drivers(survivor).collect();
         self.propagate(&drivers);
         Ok(survivor)
