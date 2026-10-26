@@ -5,7 +5,7 @@ use crate::db::indices::{
     RegionId, SiteId, ViaId, ViaRuleId,
 };
 use crate::db::library::{
-    Direction, DuplicateName, LayerRef, Library, Macro, PinDirection, Shape, SignalUse,
+    Direction, DuplicateName, LayerRef, Library, Macro, PinDirection, Shape, SignalUse, SiteClass,
 };
 use crate::geom::dbu::{Dbu, DbuPerMicron};
 use crate::geom::orient::Orientation;
@@ -880,6 +880,17 @@ impl NetlistDB {
     pub fn cell_bbox(&self, cell: CellId) -> Rect<Dbu> {
         let c = &self.cells[cell.index()];
         Rect::new(c.location, c.location + self.cell_size(cell))
+    }
+
+    /// The core area as `OpenDB` reads it from a DEF: the box around the
+    /// rows not made of pad sites, or the die area without such rows.
+    pub fn core_area(&self) -> Rect<Dbu> {
+        self.rows
+            .iter()
+            .filter(|row| self.library.site(row.site).class != SiteClass::Pad)
+            .map(|row| row.bbox(&self.library))
+            .reduce(|a, b| a.union(&b))
+            .unwrap_or(self.die_area)
     }
 
     /// The design location of a connection's reference point.
