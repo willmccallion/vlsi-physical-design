@@ -18,6 +18,7 @@ pub mod parasitics;
 pub mod rebuffer;
 pub mod repair;
 pub mod resizer;
+pub mod route_parasitics;
 pub mod setup;
 pub mod sta;
 pub mod steiner;

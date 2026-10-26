@@ -4,14 +4,16 @@
 //! repair sizes against, and a journal of edits so that a repair which did
 //! not pay off can be taken back.
 
-use crate::bnet::LoadModel;
+use crate::bnet::{LoadModel, TreeRc};
 use crate::fuzzy;
-use crate::graph::TimingGraph;
+use crate::graph::{Estimator, TimingGraph};
 use crate::library::{BufferSet, Link};
 use crate::netlist::{ClockNetwork, Constants, Namer, Netlist};
 use crate::parasitics::WireRc;
+use crate::route_parasitics::RouteRc;
 use crate::sta::Sta;
 use pare_common::db::design::{EditError, NetlistDB, PinOwner, PlacementStatus};
+use pare_common::db::global_route::RouteSource;
 use pare_common::db::indices::{CellId, MacroId, MacroPinId, NetId, PinId};
 use pare_common::db::liberty::{ArcRole, Edge, EdgeValues, LibCell, LibCellId, LibPort, MinMax};
 use pare_common::db::library::DuplicateName;
@@ -73,6 +75,26 @@ impl Default for RepairOptions {
     }
 }
 
+/// Global routes a session's parasitics follow, as after `estimate_parasitics
+/// -global_routing`.
+pub struct GlobalRouting<'a> {
+    /// The routes, rerouted as edits change the nets.
+    pub source: &'a mut dyn RouteSource,
+    /// Each layer's resistance and capacitance.
+    pub rc: RouteRc,
+    /// Moves a cell to a legal site, as `Opendp::legalCellPos`, which every
+    /// resized or inserted cell gets.
+    pub legalize: &'a dyn Fn(&mut NetlistDB, CellId),
+}
+
+impl std::fmt::Debug for GlobalRouting<'_> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("GlobalRouting")
+            .field("rc", &self.rc)
+            .finish_non_exhaustive()
+    }
+}
+
 /// What repair reads about the design besides the netlist itself.
 #[derive(Clone, Copy, Debug)]
 pub struct Context<'a> {
@@ -85,6 +107,14 @@ pub struct Context<'a> {
     /// The wire RC clock nets are estimated with, as `set_wire_rc -clock`
     /// sets it; without one, clock nets carry their pins' load alone.
     pub clock_rc: Option<WireRc>,
+}
+
+/// The estimator for a session's parasitics: along the global routes when
+/// it has them, from the placement otherwise.
+fn estimator<'r>(routes: Option<&'r GlobalRouting<'_>>) -> Estimator<'r> {
+    routes.map_or(Estimator::Placement, |r| {
+        Estimator::Routes(&*r.source, &r.rc)
+    })
 }
 
 /// Target slews and the load each cell meets them at, as `OpenROAD`'s
@@ -101,6 +131,7 @@ pub struct Targets {
 #[derive(Clone, Debug, PartialEq, Eq)]
 enum Edit {
     Master { cell: CellId, old: MacroId },
+    Moved { cell: CellId, from: Point<Dbu> },
     MovedPin { pin: PinId, from: NetId },
     NewCell(CellId),
     NewNet(NetId),
@@ -160,6 +191,7 @@ pub struct Resizer<'a> {
     /// [`Resizer::resume_timing`], with the drivers it has yet to take in.
     timing_deferred: bool,
     stale_timing: Vec<PinId>,
+    routes: Option<GlobalRouting<'a>>,
 }
 
 impl<'a> Resizer<'a> {
@@ -173,6 +205,36 @@ impl<'a> Resizer<'a> {
         namer: &'a mut Namer,
         options: RepairOptions,
         sdc: Option<&Sdc>,
+    ) -> Result<Self, RepairError> {
+        Self::build(db, context, rc, buffers, namer, options, sdc, None)
+    }
+
+    /// Prepares a session as [`Resizer::new`] does, with every net's
+    /// parasitics along its global route, rerouted as edits change it.
+    #[allow(clippy::too_many_arguments)]
+    pub fn on_global_routes(
+        db: &'a mut NetlistDB,
+        context: Context<'a>,
+        rc: WireRc,
+        buffers: BufferSet,
+        namer: &'a mut Namer,
+        options: RepairOptions,
+        sdc: Option<&Sdc>,
+        routes: GlobalRouting<'a>,
+    ) -> Result<Self, RepairError> {
+        Self::build(db, context, rc, buffers, namer, options, sdc, Some(routes))
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn build(
+        db: &'a mut NetlistDB,
+        context: Context<'a>,
+        rc: WireRc,
+        buffers: BufferSet,
+        namer: &'a mut Namer,
+        options: RepairOptions,
+        sdc: Option<&Sdc>,
+        routes: Option<GlobalRouting<'a>>,
     ) -> Result<Self, RepairError> {
         let Context {
             link,
@@ -189,7 +251,14 @@ impl<'a> Resizer<'a> {
         let targets = find_targets(link, &buffers);
         let (graph, sta) = {
             let netlist = Netlist::new(db, link);
-            let graph = TimingGraph::new(&netlist, clocks, constants, rc, clock_rc);
+            let graph = TimingGraph::new(
+                &netlist,
+                clocks,
+                constants,
+                rc,
+                clock_rc,
+                estimator(routes.as_ref()),
+            );
             let sta = sdc.map(|sdc| Sta::new(&netlist, &graph, clocks, constants, sdc));
             (graph, sta)
         };
@@ -215,7 +284,48 @@ impl<'a> Resizer<'a> {
             nets_before_batch: 0,
             timing_deferred: false,
             stale_timing: Vec::new(),
+            routes,
         })
+    }
+
+    /// The wire and via RC buffering trees take.
+    #[must_use]
+    pub fn tree_rc(&self) -> TreeRc<'_> {
+        TreeRc {
+            signal: self.graph.wire_rc(),
+            layers: self.routes.as_ref().map(|r| &r.rc),
+            dbu: self.db.dbu().get() as f64,
+        }
+    }
+
+    /// Estimates `nets` again, rerouting them first when the parasitics
+    /// follow global routes, as `EstimateParasitics::updateParasitics`.
+    fn estimate_nets(&mut self, nets: &[NetId]) {
+        if let Some(routes) = &mut self.routes {
+            routes.source.update(self.db, nets);
+        }
+        let netlist = Netlist::new(self.db, self.link);
+        for &net in nets {
+            self.graph.parasitics_invalid(
+                &netlist,
+                self.clocks,
+                net,
+                estimator(self.routes.as_ref()),
+            );
+        }
+    }
+
+    /// Moves `cell` to a legal site when the parasitics follow global
+    /// routes, as `OpenROAD`'s resizer does after resizing or inserting.
+    fn legalize_for_routes(&mut self, cell: CellId) {
+        let Some(routes) = &self.routes else {
+            return;
+        };
+        let from = self.db.cells[cell.index()].location;
+        (routes.legalize)(self.db, cell);
+        if self.db.cells[cell.index()].location != from {
+            self.record(Edit::Moved { cell, from });
+        }
     }
 
     /// Holds back the parasitics and timing updates of the edits that
@@ -238,12 +348,7 @@ impl<'a> Resizer<'a> {
         let mut nets = std::mem::take(&mut self.pending_nets);
         nets.sort_unstable();
         nets.dedup();
-        {
-            let netlist = Netlist::new(self.db, self.link);
-            for net in nets {
-                self.graph.parasitics_invalid(&netlist, self.clocks, net);
-            }
-        }
+        self.estimate_nets(&nets);
         drivers.sort_unstable();
         drivers.dedup();
         self.propagate(&drivers);
@@ -276,8 +381,7 @@ impl<'a> Resizer<'a> {
             self.pending_nets.push(net);
             return;
         }
-        let netlist = Netlist::new(self.db, self.link);
-        self.graph.parasitics_invalid(&netlist, self.clocks, net);
+        self.estimate_nets(&[net]);
     }
 
     /// A view of the design as it stands.
@@ -557,6 +661,12 @@ impl<'a> Resizer<'a> {
                         let _ = nets.insert(self.db.pins[pin.index()].net);
                     }
                 }
+                Edit::Moved { cell, from } => {
+                    self.db.cells[cell.index()].location = from;
+                    for &pin in &self.db.cells[cell.index()].pins {
+                        let _ = nets.insert(self.db.pins[pin.index()].net);
+                    }
+                }
                 Edit::MovedPin { pin, from } => {
                     let _ = nets.insert(self.db.pins[pin.index()].net);
                     let _ = nets.insert(from);
@@ -578,12 +688,17 @@ impl<'a> Resizer<'a> {
                 Edit::Renamed { net, old } => self.db.rename_net(net, old)?,
             }
         }
-        let mut dirty = Vec::new();
         {
             let netlist = Netlist::new(self.db, self.link);
             self.graph.grow(&netlist);
+        }
+        let mut nets: Vec<NetId> = nets.into_iter().collect();
+        nets.sort_unstable();
+        self.estimate_nets(&nets);
+        let mut dirty = Vec::new();
+        {
+            let netlist = Netlist::new(self.db, self.link);
             for net in nets {
-                self.graph.parasitics_invalid(&netlist, self.clocks, net);
                 dirty.extend(netlist.drivers(net));
             }
             for cell in cells {
@@ -691,6 +806,7 @@ impl<'a> Resizer<'a> {
         }
         self.db.replace_master(cell, master)?;
         self.record(Edit::Master { cell, old });
+        self.legalize_for_routes(cell);
         self.update_cell(cell);
         Ok(true)
     }
@@ -723,6 +839,7 @@ impl<'a> Resizer<'a> {
             .db
             .add_cell(name, master, at, Orientation::N, PlacementStatus::Placed)?;
         self.record(Edit::NewCell(id));
+        self.legalize_for_routes(id);
         Ok(id)
     }
 

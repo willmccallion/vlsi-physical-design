@@ -15,7 +15,7 @@ use crate::fuzzy;
 use crate::resizer::{RepairError, Resizer, buffer_delays};
 use crate::sta::Via;
 use pare_common::db::design::PinOwner;
-use pare_common::db::indices::{CellId, NetId, PinId};
+use pare_common::db::indices::{CellId, LayerId, NetId, PinId};
 use pare_common::db::liberty::{ArcRole, Edge, LibCellId, MinMax};
 use pare_common::geom::dbu::Dbu;
 use pare_common::geom::point::Point;
@@ -74,6 +74,7 @@ struct DriverTiming {
 #[derive(Debug)]
 pub struct Rebuffer {
     sizes: Vec<BufferSize>,
+    max_wire_length: i64,
     wire_length_step: i64,
     driver: Option<Driver>,
     /// Buffers taken out while rebuffering whole designs.
@@ -100,11 +101,52 @@ impl Rebuffer {
             .min(wire_length_limit_by_max_cap(resizer, smallest));
         Ok(Self {
             sizes,
+            max_wire_length,
             wire_length_step: wire_length_step.max(1),
             driver: None,
             removed: 0,
             inserted: 0,
         })
+    }
+
+    /// The wire step on `layer`, as `wireLengthStepForLayer`: the step of
+    /// the signal wire RC without a layer or without the layer's RC, else
+    /// the least of the longest wire repair allows and the wire the smallest
+    /// buffer drives within its load's slew and its own load limit on the
+    /// layer's RC.
+    fn wire_length_step_on(&self, resizer: &Resizer<'_>, layer: Option<LayerId>) -> i64 {
+        let (res, cap) = resizer.tree_rc().wire(layer);
+        if layer.is_none() || cap <= 0.0 || res <= 0.0 {
+            return self.wire_length_step;
+        }
+        let Some(smallest) = self.sizes.first() else {
+            return self.wire_length_step;
+        };
+        let dbu = resizer.db.dbu().get() as f64;
+        let lib = resizer.link.liberty.cell(smallest.cell);
+        let cap_limit = lib.buffer_ports().and_then(|(_, output)| {
+            resizer
+                .link
+                .liberty
+                .capacitance_limit(lib, &lib.ports[output])
+        });
+        let cap_length = cap_limit.map_or(i64::MAX, |limit| {
+            let slack = margined(limit, CAP_MARGIN) - smallest.input_cap;
+            meters_to_dbu(slack / cap, dbu).max(0)
+        });
+        let max_slew = margined(smallest.input_max_slew, SLEW_MARGIN);
+        let a = res * cap;
+        let b = res * smallest.input_cap + smallest.drive_resistance * cap;
+        let c = smallest.drive_resistance * smallest.input_cap - max_slew / ELMORE_SKEW_FACTOR;
+        let discriminant = b * b - 4.0 * a * c;
+        let mut slew_length = i64::MAX;
+        if discriminant >= 0.0 {
+            let meters = (-b + discriminant.sqrt()) / (2.0 * a);
+            if meters > 0.0 && meters <= 1.0 {
+                slew_length = meters_to_dbu(meters, dbu);
+            }
+        }
+        self.max_wire_length.min(slew_length).min(cap_length).max(1)
     }
 
     /// Rebuffers the net `driver` drives for timing, as
@@ -323,9 +365,17 @@ impl Rebuffer {
                 let right = self.annotate_loads(resizer, right, driver, arrival_paths);
                 Bnet::junction(node.at, left, right)
             }
-            Kind::Wire { to } => {
+            Kind::Wire { to, layer } => {
                 let to = self.annotate_loads(resizer, to, driver, arrival_paths);
-                wire(resizer, node.at, to)
+                wire(resizer, node.at, *layer, to)
+            }
+            Kind::Via {
+                to,
+                layer,
+                to_layer,
+            } => {
+                let to = self.annotate_loads(resizer, to, driver, arrival_paths);
+                Bnet::via(node.at, *layer, *to_layer, to, &resizer.tree_rc())
             }
             Kind::Buffer { cell, to } => {
                 let to = self.annotate_loads(resizer, to, driver, arrival_paths);
@@ -344,7 +394,18 @@ impl Rebuffer {
                 self.retime(resizer, left),
                 self.retime(resizer, right),
             ),
-            Kind::Wire { to } => wire(resizer, node.at, self.retime(resizer, to)),
+            Kind::Wire { to, layer } => wire(resizer, node.at, *layer, self.retime(resizer, to)),
+            Kind::Via {
+                to,
+                layer,
+                to_layer,
+            } => Bnet::via(
+                node.at,
+                *layer,
+                *to_layer,
+                self.retime(resizer, to),
+                &resizer.tree_rc(),
+            ),
             Kind::Buffer { cell, to } => {
                 self.buffer_node(resizer, node.at, *cell, self.retime(resizer, to))
             }
@@ -535,31 +596,32 @@ impl Rebuffer {
                 let right_options = self.timing_options(resizer, right, allow_rewrite);
                 self.junction_options(resizer, node, &left_options, &right_options, allow_rewrite)
             }
-            Kind::Wire { to } | Kind::Buffer { to, .. } => {
+            Kind::Wire { to, .. } | Kind::Via { to, .. } | Kind::Buffer { to, .. } => {
                 let under = to.under_wires_and_buffers();
                 let options = self.timing_options(resizer, &under, allow_rewrite);
-                self.wire_options(resizer, node, &under, options)
+                self.wire_options(resizer, node, &under, node.wire_layer_below(), options)
             }
         }
     }
 
-    /// Options for a wire from `node` down to `under`: long wires are
-    /// walked in steps of the wire length limit with buffers offered at
-    /// each step, short ones get buffers at either end.
+    /// Options for a wire on `layer` from `node` down to `under`: long
+    /// wires are walked in steps of the layer's wire length limit with
+    /// buffers offered at each step, short ones get buffers at either end.
     fn wire_options(
         &self,
         resizer: &Resizer<'_>,
         node: &Bnet,
         under: &Bnet,
+        layer: Option<LayerId>,
         mut options: Vec<BnetPtr>,
     ) -> Vec<BnetPtr> {
         let mut location = under.at;
         let full_length = bnet::manhattan(node.at, location);
-        let step = self.wire_length_step;
+        let step = self.wire_length_step_on(resizer, layer);
         if full_length <= step / 2 {
             let mut near: Vec<BnetPtr> = options
                 .iter()
-                .map(|o| wire(resizer, node.at, Rc::clone(o)))
+                .map(|o| wire(resizer, node.at, layer, Rc::clone(o)))
                 .collect();
             self.insert_buffer_options(resizer, &mut near, 0, None);
             if near.is_empty() {
@@ -567,7 +629,7 @@ impl Rebuffer {
                 self.insert_buffer_options(resizer, &mut far, full_length, None);
                 near = far
                     .iter()
-                    .map(|o| wire(resizer, node.at, Rc::clone(o)))
+                    .map(|o| wire(resizer, node.at, layer, Rc::clone(o)))
                     .collect();
                 self.insert_buffer_options(resizer, &mut near, 0, None);
             }
@@ -589,7 +651,7 @@ impl Rebuffer {
             let remaining = bnet::manhattan(node.at, location);
             options = options
                 .iter()
-                .map(|o| wire(resizer, location, Rc::clone(o)))
+                .map(|o| wire(resizer, location, layer, Rc::clone(o)))
                 .collect();
             self.insert_buffer_options(resizer, &mut options, remaining.min(step), None);
             if options.is_empty() {
@@ -718,10 +780,10 @@ impl Rebuffer {
         let aux1 = aux1.under_wires_and_buffers();
         let aux2 = aux2.under_wires_and_buffers();
         let crit2 = crit2.under_wires_and_buffers();
-        let in1 = wire(resizer, node.at, aux1);
-        let in2 = wire(resizer, node.at, aux2);
-        let junction1 = wire(resizer, node.at, Bnet::junction(node.at, in1, in2));
-        let in3 = wire(resizer, node.at, crit2);
+        let in1 = wire(resizer, node.at, None, aux1);
+        let in2 = wire(resizer, node.at, None, aux2);
+        let junction1 = wire(resizer, node.at, None, Bnet::junction(node.at, in1, in2));
+        let in3 = wire(resizer, node.at, None, crit2);
         for size in &self.sizes {
             if fuzzy::greater_equal(size.input_cap + in3.cap, best_cap)
                 || fuzzy::greater_equal(size.input_cap + in3.cap, left.cap + right.cap)
@@ -963,17 +1025,26 @@ impl Rebuffer {
     ) -> Vec<BnetPtr> {
         match &node.kind {
             Kind::Load { .. } => vec![Rc::clone(node)],
+            Kind::Via {
+                to,
+                layer,
+                to_layer,
+            } => self
+                .area_options(resizer, to, slack_target, alpha, upstream_wire)
+                .into_iter()
+                .map(|o| Bnet::via(node.at, *layer, *to_layer, o, &resizer.tree_rc()))
+                .collect(),
             Kind::Wire { .. } | Kind::Buffer { .. } => {
                 let inner = match &node.kind {
                     Kind::Buffer { to, .. } => Rc::clone(to),
                     _ => Rc::clone(node),
                 };
-                let mut options = if let Kind::Wire { to } = &inner.kind {
+                let mut options = if let Kind::Wire { to, layer } = &inner.kind {
                     let options =
                         self.area_options(resizer, to, slack_target, alpha, inner.length());
                     options
                         .into_iter()
-                        .map(|o| wire(resizer, inner.at, o))
+                        .map(|o| wire(resizer, inner.at, *layer, o))
                         .collect()
                 } else {
                     self.area_options(resizer, &inner, slack_target, alpha, 0)
@@ -1031,9 +1102,23 @@ impl Rebuffer {
 
     fn import_node(&self, resizer: &Resizer<'_>, node: &BnetPtr) -> Option<BnetPtr> {
         match &node.kind {
-            Kind::Wire { to } => {
+            Kind::Wire { to, layer } => {
                 let inner = self.import_node(resizer, to)?;
-                Some(wire(resizer, node.at, inner))
+                Some(wire(resizer, node.at, *layer, inner))
+            }
+            Kind::Via {
+                to,
+                layer,
+                to_layer,
+            } => {
+                let inner = self.import_node(resizer, to)?;
+                Some(Bnet::via(
+                    node.at,
+                    *layer,
+                    *to_layer,
+                    inner,
+                    &resizer.tree_rc(),
+                ))
             }
             Kind::Junction { left, right } => {
                 let left = self.import_node(resizer, left)?;
@@ -1095,7 +1180,7 @@ fn export_node(
 ) -> Result<Vec<PinId>, RepairError> {
     match &node.kind {
         Kind::Load { pin } => Ok(vec![*pin]),
-        Kind::Wire { to } => export_node(resizer, to, base, count),
+        Kind::Wire { to, .. } | Kind::Via { to, .. } => export_node(resizer, to, base, count),
         Kind::Junction { left, right } => {
             let mut loads = export_node(resizer, left, base, count)?;
             loads.extend(export_node(resizer, right, base, count)?);
@@ -1120,12 +1205,7 @@ fn export_node(
 fn resteiner(resizer: &Resizer<'_>, tree: &BnetPtr) -> Option<BnetPtr> {
     let mut sinks = Vec::new();
     collect_sinks(tree, &mut sinks);
-    bnet::over_subtrees(
-        tree.at,
-        &sinks,
-        &resizer.graph.wire_rc(),
-        resizer.db.dbu().get() as f64,
-    )
+    bnet::over_subtrees(tree.at, &sinks, &resizer.tree_rc())
 }
 
 /// The tree of `driver`'s net over its estimated parasitics.
@@ -1133,23 +1213,13 @@ fn make_tree(resizer: &Resizer<'_>, driver: PinId) -> Option<BnetPtr> {
     let net = resizer.db.pins[driver.index()].net;
     let netlist = resizer.netlist();
     let parasitics = resizer.graph.parasitics(net)?;
-    bnet::from_parasitics(
-        &netlist,
-        parasitics,
-        driver,
-        &resizer.graph.wire_rc(),
-        resizer,
-    )
+    bnet::from_parasitics(&netlist, parasitics, driver, &resizer.tree_rc(), resizer)
 }
 
-/// A wire node from `at` down to `to` at the session's wire RC.
-fn wire(resizer: &Resizer<'_>, at: Point<Dbu>, to: BnetPtr) -> BnetPtr {
-    Bnet::wire(
-        at,
-        to,
-        &resizer.graph.wire_rc(),
-        resizer.db.dbu().get() as f64,
-    )
+/// A wire node from `at` down to `to` on `layer`, or at the signal wire
+/// RC without one.
+fn wire(resizer: &Resizer<'_>, at: Point<Dbu>, layer: Option<LayerId>, to: BnetPtr) -> BnetPtr {
+    Bnet::wire(at, to, layer, &resizer.tree_rc())
 }
 
 /// The worst delay of `size` over `edges` at `load_cap`, as
@@ -1220,10 +1290,25 @@ fn prune_cap_against_area(options: &mut Vec<BnetPtr>) {
 fn with_arrivals(node: &BnetPtr, arrival: Fixed) -> BnetPtr {
     let rebuilt = match &node.kind {
         Kind::Load { .. } => Rc::clone(node),
-        Kind::Wire { to } => {
+        Kind::Wire { to, layer } => {
             let to = with_arrivals(to, arrival + node.delay);
             Rc::new(Bnet {
-                kind: Kind::Wire { to },
+                kind: Kind::Wire { to, layer: *layer },
+                ..**node
+            })
+        }
+        Kind::Via {
+            to,
+            layer,
+            to_layer,
+        } => {
+            let to = with_arrivals(to, arrival + node.delay);
+            Rc::new(Bnet {
+                kind: Kind::Via {
+                    to,
+                    layer: *layer,
+                    to_layer: *to_layer,
+                },
                 ..**node
             })
         }
@@ -1252,7 +1337,9 @@ fn critical_path_delay(root: &Bnet) -> Fixed {
     fn worst_load_slack(node: &Bnet) -> Fixed {
         match &node.kind {
             Kind::Load { .. } => node.slack,
-            Kind::Wire { to } | Kind::Buffer { to, .. } => worst_load_slack(to),
+            Kind::Wire { to, .. } | Kind::Via { to, .. } | Kind::Buffer { to, .. } => {
+                worst_load_slack(to)
+            }
             Kind::Junction { left, right } => worst_load_slack(left).min(worst_load_slack(right)),
         }
     }
@@ -1264,9 +1351,22 @@ fn strip_buffers(node: &BnetPtr) -> BnetPtr {
     match &node.kind {
         Kind::Load { .. } => Rc::clone(node),
         Kind::Buffer { to, .. } => strip_buffers(to),
-        Kind::Wire { to } => Rc::new(Bnet {
+        Kind::Wire { to, layer } => Rc::new(Bnet {
             kind: Kind::Wire {
                 to: strip_buffers(to),
+                layer: *layer,
+            },
+            ..**node
+        }),
+        Kind::Via {
+            to,
+            layer,
+            to_layer,
+        } => Rc::new(Bnet {
+            kind: Kind::Via {
+                to: strip_buffers(to),
+                layer: *layer,
+                to_layer: *to_layer,
             },
             ..**node
         }),
@@ -1285,7 +1385,7 @@ fn strip_buffers(node: &BnetPtr) -> BnetPtr {
 fn collect_sinks(node: &BnetPtr, sinks: &mut Vec<BnetPtr>) {
     match &node.kind {
         Kind::Load { .. } | Kind::Buffer { .. } => sinks.push(Rc::clone(node)),
-        Kind::Wire { to } => collect_sinks(to, sinks),
+        Kind::Wire { to, .. } | Kind::Via { to, .. } => collect_sinks(to, sinks),
         Kind::Junction { left, right } => {
             collect_sinks(left, sinks);
             collect_sinks(right, sinks);
@@ -1514,6 +1614,12 @@ fn wire_length_limit_by_max_cap(resizer: &Resizer<'_>, size: &BufferSize) -> i64
     let dbu = resizer.db.dbu().get() as f64;
     let slack = margined(limit, CAP_MARGIN) - size.input_cap;
     ((slack / rc.capacitance) * 1e6 * dbu).max(0.0) as i64
+}
+
+/// `meters` in database units, rounded and kept within an `int`, as
+/// `Resizer::metersToDbu`.
+fn meters_to_dbu(meters: f64, dbu: f64) -> i64 {
+    i64::from(((meters * dbu * 1e6).round() as i64 as i32) & i32::MAX)
 }
 
 /// The buffers worth inserting for speed: of the repair buffers by rising

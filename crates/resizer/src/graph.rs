@@ -9,7 +9,9 @@ use crate::dmp::{self, PiModel};
 use crate::fuzzy;
 use crate::netlist::{ClockNetwork, Constants, Netlist};
 use crate::parasitics::{NetParasitics, PiElmore, WireRc};
+use crate::route_parasitics::RouteRc;
 use pare_common::db::design::PinOwner;
+use pare_common::db::global_route::RouteSource;
 use pare_common::db::indices::{CellId, NetId, PinId};
 use pare_common::db::liberty::{
     ArcRole, Edge, EdgeValues, FuncExpr, LibCell, MinMax, SequentialKind, TimingArcSet,
@@ -49,6 +51,16 @@ pub struct ArcDelay {
     pub delay: [f64; 2],
 }
 
+/// Where the graph's nets get their parasitics.
+#[derive(Clone, Copy)]
+pub(crate) enum Estimator<'r> {
+    /// Steiner trees over the pins' positions, as `estimate_parasitics
+    /// -placement`.
+    Placement,
+    /// Global routes, as `estimate_parasitics -global_routing`.
+    Routes(&'r dyn RouteSource, &'r RouteRc),
+}
+
 /// Slews and delays over the design, kept current as repair edits it.
 ///
 /// Each is held for both sides of the delay range, as `OpenSTA` keeps one
@@ -71,18 +83,28 @@ pub struct TimingGraph {
 impl TimingGraph {
     /// Levelizes `netlist` and finds every pin's slew.
     #[must_use]
-    pub fn new(
+    pub(crate) fn new(
         netlist: &Netlist<'_>,
         clocks: &ClockNetwork,
         constants: &Constants,
         rc: WireRc,
         clock_rc: Option<WireRc>,
+        estimator: Estimator<'_>,
     ) -> Self {
         let db = netlist.db;
         let in_arcs = in_arcs(netlist, constants);
         let (level, loop_arcs) = levelize(netlist, &in_arcs);
         let parasitics = (0..db.nets.len())
-            .map(|n| estimate_net(netlist, clocks, NetId::new(n), &rc, clock_rc.as_ref()))
+            .map(|n| {
+                estimate_net(
+                    netlist,
+                    clocks,
+                    NetId::new(n),
+                    &rc,
+                    clock_rc.as_ref(),
+                    estimator,
+                )
+            })
             .collect();
         let mut graph = Self {
             level,
@@ -260,12 +282,24 @@ impl TimingGraph {
     /// Re-estimates a net's parasitics after its pins or their positions
     /// changed, leaving the slews that depend on them to a later
     /// propagation from the net's drivers.
-    pub fn parasitics_invalid(&mut self, netlist: &Netlist<'_>, clocks: &ClockNetwork, net: NetId) {
+    pub(crate) fn parasitics_invalid(
+        &mut self,
+        netlist: &Netlist<'_>,
+        clocks: &ClockNetwork,
+        net: NetId,
+        estimator: Estimator<'_>,
+    ) {
         if net.index() >= self.parasitics.len() || netlist.db.pins.len() > self.slew.len() {
             self.grow(netlist);
         }
-        self.parasitics[net.index()] =
-            estimate_net(netlist, clocks, net, &self.rc, self.clock_rc.as_ref());
+        self.parasitics[net.index()] = estimate_net(
+            netlist,
+            clocks,
+            net,
+            &self.rc,
+            self.clock_rc.as_ref(),
+            estimator,
+        );
     }
 
     /// Finds the slews and delays again from `drivers` onward, following
@@ -660,9 +694,9 @@ pub fn pin_capacitance(netlist: &Netlist<'_>, pin: PinId, edge: Edge) -> f64 {
         .map_or(0.0, |port| port.capacitance.get(edge))
 }
 
-/// The parasitics of a net, or none for a net of fewer than two pins or one
-/// an ideal clock drives.
-/// A net's estimated parasitics, as `OpenROAD`'s `estimate_parasitics
+/// A net's estimated parasitics. From global routes, as `OpenROAD`'s
+/// `estimate_parasitics -global_routing` makes them: along the net's route,
+/// none without one. From the placement, as `estimate_parasitics
 /// -placement` makes them: none for a special net or behind an ideal
 /// clock, the clock wire RC on a non-leaf clock net when there is one, and
 /// the signal wire RC elsewhere.
@@ -672,7 +706,12 @@ fn estimate_net(
     net: NetId,
     rc: &WireRc,
     clock_rc: Option<&WireRc>,
+    estimator: Estimator<'_>,
 ) -> Option<NetParasitics> {
+    if let Estimator::Routes(source, route_rc) = estimator {
+        let route = source.route(netlist.db, net)?;
+        return Some(NetParasitics::from_route(netlist.db, net, route, route_rc));
+    }
     if netlist.is_special(net) || netlist.drivers(net).any(|d| clocks.carries_ideal_clock(d)) {
         return None;
     }

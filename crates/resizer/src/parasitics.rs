@@ -8,6 +8,7 @@
 
 use crate::netlist::Netlist;
 use crate::steiner::{self, SteinerTree};
+use pare_common::db::global_route::NetRoute;
 use pare_common::db::indices::{LayerId, NetId, PinId};
 use pare_common::db::liberty::Edge;
 use pare_common::geom::dbu::Dbu;
@@ -66,13 +67,25 @@ impl PiElmore {
     }
 }
 
+/// What a net's wires follow.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum WireShape {
+    /// A Steiner tree over the pins' positions.
+    Steiner {
+        /// The tree.
+        tree: SteinerTree,
+        /// The pins at each terminal of the tree.
+        terminal_pins: Vec<Vec<PinId>>,
+    },
+    /// The net's global route.
+    Route(NetRoute),
+}
+
 /// The RC network of one net.
 #[derive(Clone, Debug, PartialEq)]
 pub struct NetParasitics {
-    /// The Steiner tree the wires follow.
-    pub tree: SteinerTree,
-    /// The pins at each terminal of the tree.
-    pub terminal_pins: Vec<Vec<PinId>>,
+    /// What the wires follow.
+    pub shape: WireShape,
     node_count: usize,
     resistors: Vec<(usize, usize, f64)>,
     wire_cap: Vec<f64>,
@@ -152,13 +165,51 @@ impl NetParasitics {
             pin_node.push((pin, pin_node_index));
         }
         Some(Self {
-            tree,
-            terminal_pins,
+            shape: WireShape::Steiner {
+                tree,
+                terminal_pins,
+            },
             node_count,
             resistors,
             wire_cap,
             pin_node,
         })
+    }
+
+    /// A network of `node_count` nodes from its resistors, each node's
+    /// wire capacitance and the node of each pin.
+    pub(crate) const fn from_network(
+        shape: WireShape,
+        node_count: usize,
+        resistors: Vec<(usize, usize, f64)>,
+        wire_cap: Vec<f64>,
+        pin_node: Vec<(PinId, usize)>,
+    ) -> Self {
+        Self {
+            shape,
+            node_count,
+            resistors,
+            wire_cap,
+            pin_node,
+        }
+    }
+
+    /// The resistors: the nodes at each end and ohms.
+    #[must_use]
+    pub fn resistors(&self) -> &[(usize, usize, f64)] {
+        &self.resistors
+    }
+
+    /// The wire capacitance at each node, in farads.
+    #[must_use]
+    pub fn node_caps(&self) -> &[f64] {
+        &self.wire_cap
+    }
+
+    /// The node of each pin.
+    #[must_use]
+    pub fn pin_nodes(&self) -> &[(PinId, usize)] {
+        &self.pin_node
     }
 
     /// The pin at each node, where a node is a pin's.
@@ -269,24 +320,6 @@ impl NetParasitics {
         }
         downstream[node] = cap;
         (y1, y2, y3)
-    }
-
-    /// The longest wire from the tree's root to any terminal, in database
-    /// units.
-    #[must_use]
-    pub fn max_load_wire_length(&self) -> i64 {
-        let children = self.tree.children();
-        let mut longest = 0;
-        let mut stack = vec![(self.tree.root, 0i64)];
-        while let Some((node, length)) = stack.pop() {
-            longest = longest.max(length);
-            for &child in &children[node] {
-                let (a, b) = (self.tree.nodes[node], self.tree.nodes[child]);
-                let edge = (a.x.get() - b.x.get()).abs() + (a.y.get() - b.y.get()).abs();
-                stack.push((child, length + edge));
-            }
-        }
-        longest
     }
 }
 

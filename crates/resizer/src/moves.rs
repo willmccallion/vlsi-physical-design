@@ -10,7 +10,7 @@ use crate::rebuffer::{Rebuffer, can_remove_buffer};
 use crate::resizer::{RepairError, Resizer, buffer_delays, gate_delays};
 use crate::sta::Path;
 use pare_common::db::design::PinOwner;
-use pare_common::db::indices::{CellId, NetId, PinId};
+use pare_common::db::indices::{CellId, LayerId, NetId, PinId};
 use pare_common::db::liberty::{
     Edge, EdgeValues, FuncExpr, LibCell, LibCellId, LibPort, Logic, MinMax,
 };
@@ -1021,13 +1021,7 @@ fn tree_of(resizer: &Resizer<'_>, driver: PinId) -> Option<BnetPtr> {
     let net = resizer.db.pins[driver.index()].net;
     let netlist = resizer.netlist();
     let parasitics = resizer.graph.parasitics(net)?;
-    bnet::from_parasitics(
-        &netlist,
-        parasitics,
-        driver,
-        &resizer.graph.wire_rc(),
-        resizer,
-    )
+    bnet::from_parasitics(&netlist, parasitics, driver, &resizer.tree_rc(), resizer)
 }
 
 /// `outer` with the load `at_load` replaced by `inner`, joined by a wire
@@ -1039,26 +1033,21 @@ fn stitch(
     at_load: PinId,
     inner: &BnetPtr,
 ) -> Option<BnetPtr> {
+    let rc = resizer.tree_rc();
     match &outer.kind {
-        Kind::Load { pin } if *pin == at_load => Some(if outer.at == inner.at {
-            Rc::clone(inner)
-        } else {
-            Bnet::wire(
-                outer.at,
-                Rc::clone(inner),
-                &resizer.graph.wire_rc(),
-                resizer.db.dbu().get() as f64,
-            )
-        }),
+        Kind::Load { pin } if *pin == at_load => Some(join_at_load(outer, inner, &rc)),
         Kind::Load { .. } => None,
-        Kind::Wire { to } => {
+        Kind::Wire { to, layer } => {
             let to = stitch(resizer, to, at_load, inner)?;
-            Some(Bnet::wire(
-                outer.at,
-                to,
-                &resizer.graph.wire_rc(),
-                resizer.db.dbu().get() as f64,
-            ))
+            Some(Bnet::wire(outer.at, to, *layer, &rc))
+        }
+        Kind::Via {
+            to,
+            layer,
+            to_layer,
+        } => {
+            let to = stitch(resizer, to, at_load, inner)?;
+            Some(Bnet::via(outer.at, *layer, *to_layer, to, &rc))
         }
         Kind::Buffer { .. } => None,
         Kind::Junction { left, right } => {
@@ -1074,6 +1063,44 @@ fn stitch(
     }
 }
 
+/// `inner` hung where the load `outer` was: as it is at the same point and
+/// layer, by a wire on the load's layer, or through vias and a wire from
+/// the layer `inner` starts on; as it is when either layer is unknown.
+fn join_at_load(outer: &BnetPtr, inner: &BnetPtr, rc: &bnet::TreeRc<'_>) -> BnetPtr {
+    let (in_layer, out_layer) = (outer.layer(), inner.layer());
+    if in_layer == out_layer {
+        return if outer.at == inner.at {
+            Rc::clone(inner)
+        } else {
+            Bnet::wire(outer.at, Rc::clone(inner), in_layer, rc)
+        };
+    }
+    let (Some(in_layer), Some(out_layer)) = (in_layer, out_layer) else {
+        return Rc::clone(inner);
+    };
+    let mut joined = Rc::clone(inner);
+    let mut layer = out_layer.index();
+    while layer != in_layer.index() {
+        let next = if in_layer.index() > layer {
+            layer + 1
+        } else {
+            layer - 1
+        };
+        joined = Bnet::via(
+            inner.at,
+            LayerId::new(layer),
+            LayerId::new(next),
+            joined,
+            rc,
+        );
+        layer = next;
+    }
+    if outer.at != inner.at {
+        joined = Bnet::wire(outer.at, joined, Some(in_layer), rc);
+    }
+    joined
+}
+
 /// The slew at each load of a tree from the driver's slew, degraded along
 /// the wires by their Elmore delay times the slew shape factor, as
 /// `Resizer::estimateSlewsInTree`.
@@ -1081,13 +1108,20 @@ fn slews_in_tree(resizer: &Resizer<'_>, driver_slew: f64, tree: &Bnet) -> Vec<(P
     fn walk(resizer: &Resizer<'_>, node: &Bnet, upstream: f64, out: &mut Vec<(PinId, f64)>) {
         match &node.kind {
             Kind::Load { pin } => out.push((*pin, upstream)),
-            Kind::Wire { to } => {
-                let rc = resizer.graph.wire_rc();
+            Kind::Wire { to, layer } => {
+                let (res, cap) = resizer.tree_rc().wire(*layer);
                 let meters = node.length() as f64 / resizer.db.dbu().get() as f64 * 1e-6;
-                let degradation = meters
-                    * rc.resistance
-                    * (to.cap + meters * rc.capacitance / 2.0)
-                    * resizer.slew_rc_factor;
+                let degradation =
+                    meters * res * (to.cap + meters * cap / 2.0) * resizer.slew_rc_factor;
+                walk(resizer, to, upstream + degradation, out);
+            }
+            Kind::Via {
+                to,
+                layer,
+                to_layer,
+            } => {
+                let r_via = resizer.tree_rc().via(*layer, *to_layer);
+                let degradation = r_via * to.cap * resizer.slew_rc_factor;
                 walk(resizer, to, upstream + degradation, out);
             }
             Kind::Junction { left, right } => {

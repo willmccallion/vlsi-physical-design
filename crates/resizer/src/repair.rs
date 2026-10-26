@@ -48,6 +48,8 @@ enum Checks {
 /// What decides where a wire is split for a repeater.
 #[derive(Clone, Copy, Debug)]
 struct SplitInput {
+    wire_res: f64,
+    wire_cap: f64,
     length: i64,
     wire_length: i64,
     wire_length_ref: i64,
@@ -233,7 +235,7 @@ impl<'r, 'a> Repairer<'r, 'a> {
                         &netlist,
                         p,
                         driver,
-                        &self.resizer.graph.wire_rc(),
+                        &self.resizer.tree_rc(),
                         self.resizer,
                     )
                 })
@@ -450,10 +452,40 @@ impl<'r, 'a> Repairer<'r, 'a> {
             Kind::Junction { left, right } => {
                 self.repair_junction(tree.at, left, right, driver, max_cap, r_drvr)
             }
-            Kind::Wire { to } | Kind::Buffer { to, .. } => {
-                self.repair_wire(tree.at, to, driver, max_cap, r_drvr)
+            Kind::Wire { to, layer } => {
+                let rc = self.resizer.tree_rc().wire(*layer);
+                self.repair_wire(tree.at, to, rc, driver, max_cap, r_drvr)
+            }
+            Kind::Buffer { to, .. } => {
+                let rc = self.resizer.tree_rc().wire(None);
+                self.repair_wire(tree.at, to, rc, driver, max_cap, r_drvr)
+            }
+            Kind::Via {
+                to,
+                layer,
+                to_layer,
+            } => {
+                let r_via = self.resizer.tree_rc().via(*layer, *to_layer);
+                self.repair_via(to, r_via, driver, max_cap, r_drvr)
             }
         }
+    }
+
+    /// `RepairDesign::repairNetVia`: the subtree's load, with its slew
+    /// limit lowered by the slew the via's resistance adds.
+    // The slew estimate keeps OpenROAD's grouping so it can be checked.
+    #[allow(clippy::suboptimal_flops)]
+    fn repair_via(
+        &mut self,
+        to: &BnetPtr,
+        r_via: f64,
+        driver: PinId,
+        max_cap: f64,
+        r_drvr: f64,
+    ) -> Result<Branch, RepairError> {
+        let mut branch = self.repair_branch(to, driver, max_cap, r_drvr)?;
+        branch.max_load_slew -= r_via * branch.cap * self.resizer.slew_rc_factor;
+        Ok(branch)
     }
 
     /// A load: its pin's capacitance, fanout load and slew limit, as
@@ -556,6 +588,7 @@ impl<'r, 'a> Repairer<'r, 'a> {
         &mut self,
         from: Point<Dbu>,
         to: &BnetPtr,
+        (wire_res, wire_cap): (f64, f64),
         driver: PinId,
         max_cap: f64,
         r_drvr: f64,
@@ -563,8 +596,6 @@ impl<'r, 'a> Repairer<'r, 'a> {
         let mut branch = self.repair_branch(to, driver, max_cap, r_drvr)?;
         let to_loc = to.at;
         let dbu = self.resizer.db.dbu().get() as f64;
-        let rc = self.resizer.graph.wire_rc();
-        let (wire_res, wire_cap) = (rc.resistance, rc.capacitance);
         let factor = self.resizer.slew_rc_factor;
         let max_length = self.resizer.options.max_wire_length;
         let meters = |l: i64| l as f64 / dbu * 1e-6;
@@ -600,6 +631,8 @@ impl<'r, 'a> Repairer<'r, 'a> {
             || load_slew > max_load_slew_margined
         {
             let split_length = self.split_length(SplitInput {
+                wire_res,
+                wire_cap,
                 length,
                 wire_length,
                 wire_length_ref,
@@ -665,8 +698,7 @@ impl<'r, 'a> Repairer<'r, 'a> {
     fn split_length(&self, input: SplitInput) -> i64 {
         let dbu = self.resizer.db.dbu().get() as f64;
         let to_dbu = |m: f64| i64::from(((m * dbu * 1e6).round() as i64 as i32) & i32::MAX);
-        let rc = self.resizer.graph.wire_rc();
-        let (wire_res, wire_cap) = (rc.resistance, rc.capacitance);
+        let (wire_res, wire_cap) = (input.wire_res, input.wire_cap);
         let max_length = self.resizer.options.max_wire_length;
         let mut split = if max_length > 0 && input.wire_length > max_length {
             (max_length - input.wire_length_ref)
