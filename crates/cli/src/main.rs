@@ -605,6 +605,20 @@ fn run_placement(
         summary.detailed_moves = result.moves;
         summary.blocked_pins = blocked_pins;
     }
+    if let Some(repair) = &mut repair
+        && repair_timing(config, db, repair, report)?
+    {
+        let zones = Zones::new(db)?;
+        let phase_start = Instant::now();
+        ui::phase("Legalization");
+        abacus::legalize(db, &zones)?;
+        let hpwl = PlacementModel::from_db(db, &zones).hpwl();
+        ui::stat_row("HPWL (um):", &format!("{hpwl:.0}"), "", "");
+        report.phase("legalization after timing repair", phase_start);
+        if let Some(summary) = &mut report.placement {
+            summary.hpwl_um = hpwl;
+        }
+    }
 
     if !report_placement(db, report) {
         anyhow::bail!("placement is not legal");
@@ -836,23 +850,50 @@ fn repair_design(
         repeaters: done.inserted,
     });
     report.phase("design repair", phase_start);
-    repair_timing(config, &mut resizer, report)?;
     let _ = resizer.finish()?;
     Ok(())
 }
 
-/// Repairs the paths failing setup, as `OpenROAD-flow-scripts` runs
-/// `repair_timing` after placement, when the input has constraints.
+/// Repairs the paths failing setup on the legalized placement, as
+/// `OpenROAD-flow-scripts` runs `repair_timing` after detailed placement,
+/// when the input has constraints; returns whether it ran.
 fn repair_timing(
     config: &Config,
-    resizer: &mut Resizer<'_>,
+    db: &mut NetlistDB,
+    repair: &mut NetlistRepair,
     report: &mut Report,
-) -> anyhow::Result<()> {
-    if !config.netlist.repair_timing || resizer.sta().is_none() {
-        return Ok(());
+) -> anyhow::Result<bool> {
+    let Some(sdc) = repair.sdc.as_ref() else {
+        return Ok(false);
+    };
+    if !config.netlist.repair_timing {
+        return Ok(false);
     }
+    let rc = wire_rc(config, db)?;
     let phase_start = Instant::now();
     ui::phase("Timing Repair");
+    let link = Link::new(db, &repair.liberty, &config.netlist.dont_use)?;
+    let (constants, clocks) = {
+        let netlist = Netlist::new(db, &link);
+        let constants = Constants::find(&netlist);
+        let clocks = ClockNetwork::from_sdc(&netlist, sdc, &constants);
+        (constants, clocks)
+    };
+    let buffers = link.find_buffers(db)?;
+    let context = RepairContext {
+        link: &link,
+        clocks: &clocks,
+        constants: &constants,
+    };
+    let mut resizer = Resizer::new(
+        db,
+        context,
+        rc,
+        buffers,
+        &mut repair.namer,
+        RepairOptions::default(),
+        Some(sdc),
+    )?;
     ui::timing_table_header();
     let summary = {
         let mut show = |progress: &pare_resizer::SetupProgress| {
@@ -874,8 +915,9 @@ fn repair_timing(
                 worst,
             });
         };
-        repair_setup(resizer, SetupOptions::default(), &mut show)?
+        repair_setup(&mut resizer, SetupOptions::default(), &mut show)?
     };
+    let _ = resizer.finish()?;
     eprintln!();
     ui::stat_row(
         "WNS (ns):",
@@ -931,7 +973,7 @@ fn repair_timing(
         area_change_percent: summary.area_change_percent,
     });
     report.phase("timing repair", phase_start);
-    Ok(())
+    Ok(true)
 }
 
 /// Global placement without the movable I/O pins, I/O pin placement for
@@ -1187,6 +1229,7 @@ impl TimingDriver for TimingPlacement<'_> {
     type Error = anyhow::Error;
 
     fn repair(&mut self, model: &PlacementModel) -> anyhow::Result<Option<Reweighted>> {
+        let round_start = Instant::now();
         self.rounds += 1;
         model.write_back(self.db);
         let sdc = self
@@ -1258,6 +1301,12 @@ impl TimingDriver for TimingPlacement<'_> {
             &format!("{} of {}", weights.len(), slacks.len()),
             "Cells:",
             &format!("{cells_before} -> {}", self.db.cells.len()),
+        );
+        ui::stat_row(
+            "Round time:",
+            &format!("{:.1}s", round_start.elapsed().as_secs_f64()),
+            "",
+            "",
         );
         if weights.is_empty() {
             log::warn!("timing-driven placement found no net slacks; it stops here");
