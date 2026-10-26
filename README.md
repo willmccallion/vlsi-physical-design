@@ -4,7 +4,7 @@
 
 A digital IC placement and routing engine written in Rust, built from scratch. It reads LEF/DEF and Bookshelf, places cells by electrostatic spreading, legalizes and refines the placement, routes every net globally and then on the design's tracks, and checks the result against the technology's design rules with a checker modelled on OpenROAD's.
 
-**Status:** PARE has placed and routed nine Nangate45 designs, from gcd (563 nets) to bp_quad, a BlackParrot quad-core chip of 1.24 million cells and 1.24 million nets, with zero design rule violations, judged both by its own checker and by OpenROAD's `check_drc` with a fix for one of its bugs applied (see below). Routing the same placements, OpenROAD's own router uses 3 to 5% less wire and PARE is 4 to 8 times faster (see PARE versus OpenROAD). From the same floorplans, PARE's whole flow, with timing-driven placement and setup repair, ends within 0.1 ns of OpenROAD-flow-scripts' worst slack on aes, ibex and jpeg and ahead of it on ariane133, clocks ideal, in 30 to 40% of the time (see Whole flows). No ISPD 2015 design is clean yet.
+**Status:** PARE has placed and routed nine Nangate45 designs, from gcd (563 nets) to bp_quad, a BlackParrot quad-core chip of 1.24 million cells and 1.24 million nets, with zero design rule violations, judged both by its own checker and by OpenROAD's `check_drc` with a fix for one of its bugs applied (see below). Routing the same placements, OpenROAD's own router uses 3 to 5% less wire and PARE is 4 to 8 times faster (see PARE versus OpenROAD). From the same floorplans, PARE's whole flow, with timing-driven placement and setup repair, ends within 0.1 ns of OpenROAD-flow-scripts' worst slack on aes, ibex and jpeg and ahead of it on ariane133, clocks ideal, in a quarter to two fifths of the time (see Whole flows). No ISPD 2015 design is clean yet.
 
 ## Results
 
@@ -13,16 +13,16 @@ Each design is placed from its floorplan and then routed by `pare run <design>`,
 | Design | Cells | Nets | Wirelength | Vias | PARE violations | OpenROAD `check_drc` | Time | Peak memory |
 |---|---:|---:|---:|---:|---:|---:|---:|---:|
 | gcd | 676 | 563 | 7.5 mm | 3,934 | 0 | 0 | 0.8 s | 0.5 GiB |
-| aes | 16,474 | 16,331 | 269 mm | 174,176 | 0 | 0 | 48 s | 1.9 GiB |
-| ibex | 16,608 | 17,988 | 309 mm | 180,036 | 0 | 0 | 49 s | 2.1 GiB |
-| jpeg | 65,052 | 72,488 | 590 mm | 531,819 | 0 | 0 | 2 min 39 s | 4.2 GiB |
+| aes | 16,476 | 16,333 | 268 mm | 174,676 | 0 | 0 | 44 s | 2.0 GiB |
+| ibex | 16,608 | 17,988 | 309 mm | 179,635 | 0 | 0 | 41 s | 2.2 GiB |
+| jpeg | 65,044 | 72,480 | 588 mm | 531,488 | 0 | 0 | 1 min 42 s | 4.0 GiB |
 | swerv | 135,119 | 130,357 | 5,422 mm | 1,520,105 | 0 | 0 | 4 min 50 s | 4.7 GiB |
-| ariane133 | 174,582 | 177,950 | 6,350 mm | 2,019,142 | 0 | 0 | 10 min 32 s | 6.3 GiB |
+| ariane133 | 174,589 | 177,957 | 6,344 mm | 2,020,206 | 0 | 0 | 9 min 55 s | 6.3 GiB |
 | netcard | 274,700 | 290,334 | 10,647 mm | 3,538,026 | 0 | 0 | 1 h 7 min 37 s | 9.3 GiB |
 | leon3mp | 312,529 | 406,912 | 8,522 mm | 4,214,878 | 0 | 0 | 18 min 28 s | 9.1 GiB |
 | bp_quad | 1,241,520 | 1,244,956 | 52,411 mm | 13,885,998 | 0 | 0 | 1 h 10 min 46 s | 23.1 GiB |
 
-Measured on an Intel Core i7-14700K (28 threads) with 64 GB of memory: aes, ibex, jpeg and ariane133 at commit `1926dfc`, with netlist repair and timing-driven placement, and the rest at `dc60d69`, before either. Time and memory cover the whole run, netlist repair and placement included.
+Measured on an Intel Core i7-14700K (28 threads) with 64 GB of memory: aes, ibex, jpeg and ariane133 at commit `3c12a9f`, with netlist repair and timing-driven placement, and the rest at `dc60d69`, before either. Time and memory cover the whole run, netlist repair and placement included.
 
 OpenROAD's `check_drc` has a bug that reports spacing violations between two vias of one net where its wire fills the gap ([#11697](https://github.com/The-OpenROAD-Project/OpenROAD/issues/11697)). The counts above come from OpenROAD with the proposed fix ([#11698](https://github.com/The-OpenROAD-Project/OpenROAD/pull/11698)) applied, which `nix develop .#eda` builds. Unpatched OpenROAD reports 0 on gcd, aes, ibex and jpeg, 4 on swerv, 1 on ariane133, 3 on netcard, 1 on leon3mp and 4 on bp_quad, all spacing markers within one net like those; [docs/openroad-check-drc-tiling.md](docs/openroad-check-drc-tiling.md) has the evidence.
 
@@ -81,20 +81,20 @@ On ibex and ariane133 the worst path of both routings is not a clocked path but 
 
 | Design | Tool | Cells | Wirelength | Vias | PARE violations | OpenROAD `check_drc` | Slew / cap violations | WNS | TNS | Time | Peak memory |
 |---|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|
-| aes | PARE | 16,474 | 268.7 mm | 174,176 | 0 | 0 | 0 / 0 | -0.04 ns | -0.3 ns | 48 s | 1.9 GiB |
+| aes | PARE | 16,476 | 268.4 mm | 174,676 | 0 | 0 | 0 / 0 | -0.03 ns | -0.3 ns | 44 s | 2.0 GiB |
 | aes | OpenROAD | 15,960 | 242.5 mm | 125,873 | 0 | 0 | 0 / 0 | 0.00 ns | 0.0 ns | 1 min 54 s | 2.6 GiB |
-| ibex | PARE | 16,608 | 309.3 mm | 180,036 | 0 | 0 | 0 / 5 | -0.09 ns | -10.0 ns | 49 s | 2.1 GiB |
+| ibex | PARE | 16,608 | 308.9 mm | 179,635 | 0 | 0 | 0 / 3 | -0.08 ns | -12.5 ns | 41 s | 2.2 GiB |
 | ibex | OpenROAD | 17,290 | 276.9 mm | 130,664 | 0 | 0 | 0 / 0 | 0.00 ns | 0.0 ns | 2 min 15 s | 2.8 GiB |
-| jpeg | PARE | 65,052 | 589.8 mm | 531,819 | 0 | 0 | 0 / 1 | -0.19 ns | -83.5 ns | 2 min 39 s | 4.2 GiB |
+| jpeg | PARE | 65,044 | 588.4 mm | 531,488 | 0 | 0 | 0 / 1 | -0.22 ns | -94.5 ns | 1 min 42 s | 4.0 GiB |
 | jpeg | OpenROAD | 66,257 | 565.3 mm | 385,250 | 0 | 0 | 0 / 0 | -0.12 ns | -45.8 ns | 7 min 34 s | 3.7 GiB |
-| ariane133 | PARE | 174,582 | 6,350.4 mm | 2,019,142 | 0 | 0 | 72 / 43 | -0.26 ns | -286.8 ns | 10 min 32 s | 6.3 GiB |
+| ariane133 | PARE | 174,589 | 6,344.0 mm | 2,020,206 | 0 | 0 | 72 / 40 | -0.27 ns | -347.2 ns | 9 min 55 s | 6.3 GiB |
 | ariane133 | OpenROAD | 180,740 | 6,748.8 mm | 1,398,910 | 0 | 0 | 72 / 6 | -0.37 ns | -668.1 ns | 34 min 53 s | 10.4 GiB |
 
-PARE at commit `1926dfc`. OpenROAD-flow-scripts' time is its stages from the floorplan to the routed design added up, and its memory the largest of theirs, as its own logs report them; with propagated clocks, its own final report gives WNS of -0.01, -0.02, -0.13 and -0.66 ns.
+PARE at commit `3c12a9f`. OpenROAD-flow-scripts' time is its stages from the floorplan to the routed design added up, and its memory the largest of theirs, as its own logs report them; with propagated clocks, its own final report gives WNS of -0.01, -0.02, -0.13 and -0.66 ns.
 
-Both tools prepare the netlist alike: each strips 0, 1,458, 3,062 and 17,491 synthesis buffers from aes, ibex, jpeg and ariane133 and adds 387, 249, 45 and 436 port buffers, the same counts to the cell. PARE's placement then makes its two timing-driven repairs, of 5, 6, 13 and 101 seconds and 5, 4, 9 and 58 seconds on the four designs, after which its `repair_design` finds 1, 1, 1 and 36 violations left and its setup repair after detailed placement takes aes from 15 failing endpoints to none, ibex from 71 to none, jpeg from 729 to 707 and ariane133 from 3,235 to 3,101. PARE's routed wire is 11%, 12% and 4% longer than the flow's on aes, ibex and jpeg and 6% shorter on ariane133, with 38 to 44% more vias from the wrong-way jogs OpenROAD's router allows itself; its runs take 2.4 to 3.3 times less wall time than the flow's stages, and less memory on three of the four designs.
+Both tools prepare the netlist alike: each strips 0, 1,458, 3,062 and 17,491 synthesis buffers from aes, ibex, jpeg and ariane133 and adds 387, 249, 45 and 436 port buffers, the same counts to the cell. PARE's placement then makes its two timing-driven repairs, of 5, 6, 13 and 101 seconds and 5, 4, 9 and 58 seconds on the four designs, after which its `repair_design` finds 1, 1, 1 and 36 violations left and its setup repair after detailed placement takes aes from 13 failing endpoints to none, ibex from 152 to none, jpeg from 729 to 711 and ariane133 from 3,220 to 2,892. PARE's routed wire is 11%, 12% and 4% longer than the flow's on aes, ibex and jpeg and 6% shorter on ariane133, with 38 to 44% more vias from the wrong-way jogs OpenROAD's router allows itself; its runs take 2.6 to 4.5 times less wall time than the flow's stages, and less memory on three of the four designs.
 
-On the routed designs, with parasitics extracted from the wires and clocks ideal, PARE's worst slack is -0.04, -0.09, -0.19 and -0.26 ns against the flow's 0.00, 0.00, -0.12 and -0.37 ns, and its total negative slack -0.3, -10.0, -83.5 and -286.8 ns against 0.0, 0.0, -45.8 and -668.1 ns: within 0.1 ns of the flow on aes, ibex and jpeg and ahead of it on ariane133. Before timing-driven placement and setup repair PARE's worst slacks were -0.75, -0.71, -2.07 and -1.70 ns, see the table below. The flow's clock tree is real and PARE's clocks ideal, so PARE's numbers leave out the clock skew the flow pays for; with propagated clocks the flow's own final report gives -0.01, -0.02, -0.13 and -0.66 ns. The capacitance violations left on PARE's side are drivers repaired at their placement positions with the metal3 estimate that routing then changed, and the 72 slew violations on ariane133 are in the flow's result too.
+On the routed designs, with parasitics extracted from the wires and clocks ideal, PARE's worst slack is -0.03, -0.08, -0.22 and -0.27 ns against the flow's 0.00, 0.00, -0.12 and -0.37 ns, and its total negative slack -0.3, -12.5, -94.5 and -347.2 ns against 0.0, 0.0, -45.8 and -668.1 ns: within 0.1 ns of the flow on aes, ibex and jpeg and ahead of it on ariane133. Before timing-driven placement and setup repair PARE's worst slacks were -0.75, -0.71, -2.07 and -1.70 ns, see the table below. The flow's clock tree is real and PARE's clocks ideal, so PARE's numbers leave out the clock skew the flow pays for; with propagated clocks the flow's own final report gives -0.01, -0.02, -0.13 and -0.66 ns. The capacitance violations left on PARE's side are drivers repaired at their placement positions with the metal3 estimate that routing then changed, and the 72 slew violations on ariane133 are in the flow's result too.
 
 Before any of the netlist work, at commit `06cc695`, the same flows gave:
 
@@ -198,7 +198,7 @@ Typed indices (`CellId`, `NetId`, `PinId`, `LayerId`, `MacroId`, …) keep table
 - **ISPD 2015 designs do not route clean yet.** On mgc_pci_bridge32_a at commit `73d6db4`, 80 repair rounds left 1,986 violations, 1,811 of them in two 10 µm gaps between macros that block every metal layer, where the wires between the die's edge and its interior crowd through.
 - **ISPD 2018 and 2019 designs do not route clean yet.** They load, and ISPD 2018's rules are the ones the checker enforces, but no design of either suite has been taken to a clean result; ISPD 2019's corner spacing and cut enclosure rules are parsed and not enforced.
 - **Clocks are ideal and hold is not repaired.** PARE builds no clock tree, so every clock arrives everywhere at once and the flow's clock-tree stage has no counterpart; `repair_timing` repairs setup only, and the clock-gating checks OpenSTA makes on gated clocks are not modelled. Timing-driven placement changes the netlist as it goes, which the global-router congestion estimate cannot follow, so it needs the default RUDY estimate.
-- **Some drivers still break their capacitance limit after routing**: 0, 5, 1 and 43 on aes, ibex, jpeg and ariane133 by OpenSTA's count on the extracted parasitics, where the repair's estimate at placement was within the limit; the 72 slew violations on ariane133 are in OpenROAD-flow-scripts' result too.
+- **Some drivers still break their capacitance limit after routing**: 0, 3, 1 and 40 on aes, ibex, jpeg and ariane133 by OpenSTA's count on the extracted parasitics, where the repair's estimate at placement was within the limit; the 72 slew violations on ariane133 are in OpenROAD-flow-scripts' result too.
 - **Very high fanout nets** come out longer and with more vias than OpenROAD routes them: on the netlist as synthesized, ariane133's reset, an input port driving 20,618 flops, takes 16% more wire and 33% more vias in PARE's routing and is slower to its farthest flop, see PARE versus OpenROAD.
 - **Nets under a nondefault rule** are routed and checked at their own widths and spacings, while OpenROAD reads routed wires at their layers' default widths, so the two checkers disagree on such nets: on pci's clock net at commit `73d6db4`, PARE reports 135 spacing violations that OpenROAD does not, and OpenROAD one that PARE does not.
 
