@@ -200,7 +200,12 @@ impl<'a> DetailedRouter<'a> {
             pare_common::util::memory::current_rss_mb().unwrap_or(0)
         );
         let start = std::time::Instant::now();
-        let access = reserve_accesses(db, tech, &shared, &own, &mut occupancy);
+        let fixed_view = FixedView {
+            layout: &fixed,
+            tiles: &fixed_tiles,
+            bucket: gcell,
+        };
+        let access = reserve_accesses(db, tech, &shared, &own, &mut occupancy, &fixed_view);
         drop(own);
         log::debug!(
             "access points reserved in {:.1}s, {} MB resident",
@@ -1254,6 +1259,60 @@ impl TreeIndex {
     }
 }
 
+/// The fixed shapes of the design as access reservation sees them, for the
+/// metal below the routable layers that the occupancy does not hold.
+struct FixedView<'f> {
+    layout: &'f Layout,
+    tiles: &'f ShapeTiles,
+    /// Side of the buckets reserved pads below the routable layers are
+    /// kept in.
+    bucket: Dbu,
+}
+
+/// A pad below the routable layers: its layer, metal and net.
+type LowPad = (LayerId, Rect<Dbu>, u32);
+
+/// The pads below the routable layers that reserved access points put
+/// down, by bucket.
+struct LowPads {
+    bucket: i64,
+    pads: FxHashMap<(i64, i64), Vec<LowPad>>,
+}
+
+impl LowPads {
+    fn new(bucket: Dbu) -> Self {
+        Self {
+            bucket: bucket.get().max(1),
+            pads: FxHashMap::default(),
+        }
+    }
+
+    fn keys(&self, r: &Rect<Dbu>) -> impl Iterator<Item = (i64, i64)> + use<> {
+        let b = self.bucket;
+        let (x0, x1) = (r.min.x.get().div_euclid(b), r.max.x.get().div_euclid(b));
+        let (y0, y1) = (r.min.y.get().div_euclid(b), r.max.y.get().div_euclid(b));
+        (x0..=x1).flat_map(move |x| (y0..=y1).map(move |y| (x, y)))
+    }
+
+    fn add(&mut self, layer: LayerId, rect: Rect<Dbu>, net: u32) {
+        for key in self.keys(&rect) {
+            self.pads.entry(key).or_default().push((layer, rect, net));
+        }
+    }
+
+    /// Whether `rect` on `layer`, of `net`, keeps `spacing` from every pad
+    /// of another net.
+    fn clear(&self, layer: LayerId, rect: &Rect<Dbu>, net: u32, spacing: Dbu) -> bool {
+        let reach = rect.expand(spacing);
+        self.keys(&reach).all(|key| {
+            self.pads.get(&key).is_none_or(|pads| {
+                pads.iter()
+                    .all(|(l, r, n)| *l != layer || *n == net || !r.overlaps(&reach))
+            })
+        })
+    }
+}
+
 /// Chooses one access point per pin and records its metal as the net's
 /// own, so other nets keep clear of it from the start; the chosen point
 /// becomes the pin's only one.
@@ -1261,14 +1320,20 @@ impl TreeIndex {
 /// Pins with the fewest candidates choose first, each taking its best
 /// candidate that clashes with nothing recorded before it and whose vias,
 /// counting the via up from its node, leave room for those of the net's
-/// pins that chose earlier. A pin with no such candidate keeps all of
-/// them, except that a pin with a single one still records it.
+/// pins that chose earlier. Below the routable layers, which the occupancy
+/// does not hold, a candidate's pads must keep the layer's spacing from
+/// the fixed shapes of other owners, those of neighbouring cells among
+/// them, and from the pads other nets reserved there, as `TritonRoute`'s
+/// pin access weighs a cell's access vias against its neighbours. A pin
+/// with no such candidate keeps all of them, except that a pin with a
+/// single one still records it.
 fn reserve_accesses(
     db: &NetlistDB,
     tech: &RouteTech,
     shared: &SharedAccess,
     own: &[Vec<Option<Vec<AccessPoint>>>],
     occupancy: &mut Occupancy,
+    fixed: &FixedView<'_>,
 ) -> Vec<Vec<Vec<AccessPoint>>> {
     let count_of = |n: usize, k: usize| match &own[n][k] {
         Some(c) => c.len(),
@@ -1295,6 +1360,7 @@ fn reserve_accesses(
     let mut reserved: Vec<OwnVias> = (0..own.len())
         .map(|n| OwnVias::new(db, tech, tech.net_rule(n)))
         .collect();
+    let mut low_pads = LowPads::new(fixed.bucket);
     for (count, n, k) in order {
         access[n][k] = candidates_of(n, k);
         let owner = Owner::Net(crate::tech::to_u32(n));
@@ -1320,8 +1386,25 @@ fn reserve_accesses(
                         .rect_conflicts(tech, *layer, rect, owner)
                         .all(|c| c.proximity != Proximity::Within)
             });
+            let net = crate::tech::to_u32(n);
+            let low_clear = metal_of(a).iter().all(|(layer, rect)| {
+                if tech.routable(*layer) {
+                    return true;
+                }
+                let spacing = tech.layer(*layer).spacing;
+                low_pads.clear(*layer, rect, net, spacing)
+                    && judge::clear_of_fixed(
+                        fixed.layout,
+                        fixed.tiles,
+                        NetId::new(n),
+                        *layer,
+                        rect,
+                        spacing,
+                    )
+            });
             leaves_room
                 && metal_clear
+                && low_clear
                 && cuts_of(a)
                     .iter()
                     .all(|(cut, rect)| occupancy.cut_conflicts(*cut, rect, owner).next().is_none())
@@ -1345,6 +1428,8 @@ fn reserve_accesses(
         for (layer, rect) in metal_of(&access[n][k][chosen]) {
             if tech.routable(layer) {
                 occupancy.add_rect(tech, layer, &rect, owner, Origin::Fixed);
+            } else {
+                low_pads.add(layer, rect, crate::tech::to_u32(n));
             }
         }
         for (cut, rect) in cuts_of(&access[n][k][chosen]) {
@@ -1409,6 +1494,43 @@ mod tests {
         let stops = waypoints(&cells, 4);
 
         assert_eq!(stops, [5, 9]);
+    }
+
+    fn rect(x0: i64, y0: i64, x1: i64, y1: i64) -> Rect<Dbu> {
+        Rect::new(Point::new(Dbu(x0), Dbu(y0)), Point::new(Dbu(x1), Dbu(y1)))
+    }
+
+    #[test]
+    fn a_pad_closer_than_the_spacing_to_another_nets_pad_is_not_clear() {
+        let mut pads = LowPads::new(Dbu(1000));
+        pads.add(LayerId::new(0), rect(0, 0, 140, 70), 1);
+
+        let near = rect(260, 0, 400, 70);
+        let far = rect(270, 0, 410, 70);
+
+        assert!(!pads.clear(LayerId::new(0), &near, 2, Dbu(130)));
+        assert!(pads.clear(LayerId::new(0), &far, 2, Dbu(130)));
+    }
+
+    #[test]
+    fn a_pad_is_clear_of_its_own_nets_pads_and_other_layers() {
+        let mut pads = LowPads::new(Dbu(1000));
+        pads.add(LayerId::new(0), rect(0, 0, 140, 70), 1);
+
+        let touching = rect(140, 0, 280, 70);
+
+        assert!(pads.clear(LayerId::new(0), &touching, 1, Dbu(130)));
+        assert!(pads.clear(LayerId::new(1), &touching, 2, Dbu(130)));
+    }
+
+    #[test]
+    fn pads_are_found_across_bucket_edges() {
+        let mut pads = LowPads::new(Dbu(100));
+        pads.add(LayerId::new(0), rect(150, 150, 190, 190), 1);
+
+        let across = rect(220, 150, 260, 190);
+
+        assert!(!pads.clear(LayerId::new(0), &across, 2, Dbu(65)));
     }
 
     #[test]

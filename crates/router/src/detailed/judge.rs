@@ -133,6 +133,28 @@ pub(super) fn wiring_is_clean(
         .is_empty()
 }
 
+/// Whether `metal` of `net` on `layer` keeps `spacing` from every fixed
+/// shape of another owner there, as pin access keeps a via's pads clear of
+/// its cell's other shapes: the shapes of neighbouring cells count too.
+pub(super) fn clear_of_fixed(
+    fixed: &Layout,
+    tiles: &ShapeTiles,
+    net: NetId,
+    layer: LayerId,
+    metal: &Rect<Dbu>,
+    spacing: Dbu,
+) -> bool {
+    let own = fixed.owner_index(Owner::Net(net));
+    let reach = metal.expand(spacing);
+    tiles.near(&reach).into_iter().all(|(l, i)| {
+        if l != LayerRef::Routing(layer) {
+            return true;
+        }
+        let shape = &fixed.metal(layer.index())[i as usize];
+        Some(shape.owner) == own || !shape.rect.overlaps(&reach)
+    })
+}
+
 /// What judging a region found: the markers inside it, and for each
 /// marker its two owners as nets, none for an owner that is not a net.
 #[derive(Debug, Default)]
