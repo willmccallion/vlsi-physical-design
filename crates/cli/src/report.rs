@@ -18,6 +18,8 @@ pub struct Report {
     pub phases: Vec<Phase>,
     /// Netlist repair results, when the run repaired the netlist.
     pub netlist: Option<NetlistSummary>,
+    /// Clock tree synthesis results, when the run built clock trees.
+    pub clock_tree: Option<ClockTreeSummary>,
     /// Timing repair results, when the run had constraints.
     pub timing: Option<TimingSummary>,
     /// Placement results, when the run placed.
@@ -64,6 +66,27 @@ pub struct NetlistSummary {
     pub resized: usize,
     /// Repeaters repair inserted.
     pub repeaters: usize,
+}
+
+/// What clock tree synthesis did.
+#[derive(Debug, Default, Serialize)]
+pub struct ClockTreeSummary {
+    /// Clock nets a tree was built for.
+    pub trees: usize,
+    /// Sinks the trees reach.
+    pub sinks: usize,
+    /// Clock buffers inserted.
+    pub buffers: usize,
+    /// Dummy loads inserted.
+    pub dummies: usize,
+    /// Clock gates cloned.
+    pub cloned_gates: usize,
+    /// Clock inverters cloned at their loads.
+    pub cloned_inverters: usize,
+    /// Repeaters inserted on long clock nets.
+    pub clock_net_repeaters: usize,
+    /// Delay buffers inserted to balance the trees' latencies.
+    pub delay_buffers: usize,
 }
 
 /// What setup repair did, with slacks in nanoseconds.

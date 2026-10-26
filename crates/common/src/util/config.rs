@@ -50,6 +50,10 @@ pub struct NetlistConfig {
     /// when the input names an SDC file.
     #[serde(default = "default_enabled")]
     pub repair_timing: bool,
+    /// Whether clock trees are built after detailed placement, when the
+    /// input names an SDC file, and the clocks propagated through them.
+    #[serde(default = "default_enabled")]
+    pub clock_tree: bool,
     /// The routing layer signal wires are estimated on.
     pub signal_layer: Option<String>,
     /// Resistance of that layer's wire, in ohms per micron.
@@ -57,7 +61,8 @@ pub struct NetlistConfig {
     /// Capacitance of that layer's wire, in femtofarads per micron.
     pub wire_capacitance_ff_per_um: Option<f64>,
     /// The routing layer clock wires are estimated on, as `set_wire_rc
-    /// -clock` sets it; clock nets carry their pins' load alone without it.
+    /// -clock` sets it, which clock trees need; without it the nets
+    /// between clock buffers are estimated as signal wires.
     pub clock_layer: Option<String>,
     /// Resistance of the clock layer's wire, in ohms per micron.
     pub clock_wire_resistance_ohm_per_um: Option<f64>,
@@ -80,6 +85,7 @@ impl Default for NetlistConfig {
             buffer_ports: default_enabled(),
             repair_design: default_enabled(),
             repair_timing: default_enabled(),
+            clock_tree: default_enabled(),
             signal_layer: None,
             wire_resistance_ohm_per_um: None,
             wire_capacitance_ff_per_um: None,

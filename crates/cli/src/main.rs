@@ -8,7 +8,7 @@ mod report;
 use anyhow::Context;
 use clap::{Parser, Subcommand};
 use pare_common::db::design::{NetlistDB, PlacementStatus};
-use pare_common::db::indices::{CellId, NetId};
+use pare_common::db::indices::{CellId, NetId, PinId};
 use pare_common::db::liberty::{Liberty, MinMax};
 use pare_common::db::library::LayerRef;
 use pare_common::db::parser::{bookshelf, def, lef, liberty, sdc};
@@ -32,14 +32,18 @@ use pare_placer::legalize::abacus;
 use pare_placer::model::PlacementModel;
 use pare_placer::zones::{Zone, Zones};
 
+use pare_cts::{CtsInput, CtsOptions, balance_latencies};
 use pare_resizer::parasitics::WireRc;
 use pare_resizer::resizer::Context as RepairContext;
 use pare_resizer::{
     ClockNetwork, Constants, HoldOptions, Link, Namer, Netlist, Rebuffer, RepairOptions, Repairer,
-    Resizer, SetupOptions, repair_hold, repair_setup, timing_net_weights,
+    Resizer, SetupOptions, repair_clock_inverters, repair_hold, repair_setup, timing_net_weights,
 };
 use pare_router::{CapacityReduction, GlobalRouteEstimator, RouteError};
-use report::{NetlistSummary, PlacementSummary, Report, RoutingSummary, TimingSummary};
+use report::{
+    ClockTreeSummary, NetlistSummary, PlacementSummary, Report, RoutingSummary, TimingSummary,
+};
+use rustc_hash::FxHashMap;
 use std::path::{Path, PathBuf};
 use std::time::Instant;
 
@@ -606,6 +610,17 @@ fn run_placement(
         summary.blocked_pins = blocked_pins;
     }
     if let Some(repair) = &mut repair
+        && clock_tree_synthesis(config, db, repair, report)?
+    {
+        let zones = Zones::new(db)?;
+        let phase_start = Instant::now();
+        ui::phase("Legalization");
+        abacus::legalize(db, &zones)?;
+        let hpwl = PlacementModel::from_db(db, &zones).hpwl();
+        ui::stat_row("HPWL (um):", &format!("{hpwl:.0}"), "", "");
+        report.phase("legalization after clock tree synthesis", phase_start);
+    }
+    if let Some(repair) = &mut repair
         && repair_timing(config, db, repair, report)?
     {
         let zones = Zones::new(db)?;
@@ -853,6 +868,157 @@ fn repair_design(
     report.phase("design repair", phase_start);
     let _ = resizer.finish()?;
     Ok(())
+}
+
+/// Builds the clock trees on the detailed placement and propagates the
+/// clocks through them, as `OpenROAD-flow-scripts`' clock tree stage runs
+/// `repair_clock_inverters` and `clock_tree_synthesis -sink_clustering_enable
+/// -repair_clock_nets`, when the input has constraints; returns whether it
+/// ran.
+fn clock_tree_synthesis(
+    config: &Config,
+    db: &mut NetlistDB,
+    repair: &mut NetlistRepair,
+    report: &mut Report,
+) -> anyhow::Result<bool> {
+    if repair.sdc.is_none() || !config.netlist.clock_tree {
+        return Ok(false);
+    }
+    let rc = wire_rc(config, db)?;
+    let clock_rc = clock_wire_rc(config, db)?
+        .context("[netlist] clock trees need clock_layer and its wire RC")?;
+    let phase_start = Instant::now();
+    ui::phase("Clock Tree Synthesis");
+    let link = Link::new(db, &repair.liberty, &config.netlist.dont_use)?;
+    let networks = |db: &NetlistDB, sdc: &Sdc| {
+        let netlist = Netlist::new(db, &link);
+        let constants = Constants::find(&netlist);
+        let clocks = ClockNetwork::from_sdc(&netlist, sdc, &constants);
+        (constants, clocks)
+    };
+    let mut summary = ClockTreeSummary::default();
+    {
+        let sdc = repair.sdc.as_ref().context("constraints")?;
+        let (_, clocks) = networks(db, sdc);
+        let inverters = repair_clock_inverters(db, &link, &clocks, &mut repair.namer)?;
+        summary.cloned_inverters = inverters.inverters;
+    }
+    let max_wire_length = {
+        let sdc = repair.sdc.as_ref().context("constraints")?;
+        let (constants, clocks) = networks(db, sdc);
+        let context = RepairContext {
+            link: &link,
+            clocks: &clocks,
+            constants: &constants,
+            clock_rc: Some(clock_rc),
+        };
+        let buffers = link.find_buffers(db)?;
+        let resizer = Resizer::new(
+            db,
+            context,
+            rc,
+            buffers,
+            &mut repair.namer,
+            RepairOptions::default(),
+            None,
+        )?;
+        pare_resizer::rebuffer::max_wire_length(&resizer)
+    };
+    let trees = {
+        let sdc = repair.sdc.as_ref().context("constraints")?;
+        let (_, clocks) = networks(db, sdc);
+        let input = CtsInput {
+            link: &link,
+            sdc,
+            clocks: &clocks,
+            signal_rc: rc,
+            clock_rc,
+            max_wire_length,
+            options: CtsOptions::default(),
+        };
+        pare_cts::synthesize(db, &input)?
+    };
+    let sdc = repair.sdc.as_mut().context("constraints")?;
+    for clock in &mut sdc.clocks {
+        clock.propagated = true;
+    }
+    let sdc = repair.sdc.as_ref().context("constraints")?;
+    {
+        let (constants, clocks) = networks(db, sdc);
+        let context = RepairContext {
+            link: &link,
+            clocks: &clocks,
+            constants: &constants,
+            clock_rc: Some(clock_rc),
+        };
+        let buffers = link.find_buffers(db)?;
+        let mut resizer = Resizer::new(
+            db,
+            context,
+            rc,
+            buffers,
+            &mut repair.namer,
+            RepairOptions::default(),
+            None,
+        )?;
+        let done = Repairer::new(&mut resizer)
+            .repair_clock_nets(trees.clock_buffers(), max_wire_length)?;
+        summary.clock_net_repeaters = done.inserted;
+        let _ = resizer.finish()?;
+    }
+    let arrivals: FxHashMap<PinId, f64> = {
+        let (constants, clocks) = networks(db, sdc);
+        let context = RepairContext {
+            link: &link,
+            clocks: &clocks,
+            constants: &constants,
+            clock_rc: Some(clock_rc),
+        };
+        let buffers = link.find_buffers(db)?;
+        let pins = db.pins.len();
+        let resizer = Resizer::new(
+            db,
+            context,
+            rc,
+            buffers,
+            &mut repair.namer,
+            RepairOptions::default(),
+            Some(sdc),
+        )?;
+        let sta = resizer.sta().context("timing")?;
+        (0..pins)
+            .map(PinId::new)
+            .filter_map(|p| sta.clock_rise_arrival(p).map(|a| (p, a)))
+            .collect()
+    };
+    summary.delay_buffers = balance_latencies(db, &link, &trees, &|p| arrivals.get(&p).copied())?;
+    let cts = &trees.summary;
+    summary.trees = cts.trees;
+    summary.sinks = cts.sinks;
+    summary.buffers = cts.buffers;
+    summary.dummies = cts.dummies;
+    summary.cloned_gates = cts.clones;
+    ui::stat_row(
+        "Clock trees:",
+        &summary.trees.to_string(),
+        "Sinks:",
+        &summary.sinks.to_string(),
+    );
+    ui::stat_row(
+        "Buffers:",
+        &format!("{} {}", summary.buffers, cts.root_buffer),
+        "Dummy loads:",
+        &summary.dummies.to_string(),
+    );
+    ui::stat_row(
+        "Clock net repeaters:",
+        &summary.clock_net_repeaters.to_string(),
+        "Delay buffers:",
+        &summary.delay_buffers.to_string(),
+    );
+    report.clock_tree = Some(summary);
+    report.phase("clock tree synthesis", phase_start);
+    Ok(true)
 }
 
 /// Repairs the paths failing setup and then hold on the legalized placement, as
