@@ -553,6 +553,9 @@ impl<'a> Resizer<'a> {
                 Edit::Master { cell, old } => {
                     self.db.replace_master(cell, old)?;
                     let _ = cells.insert(cell);
+                    for &pin in &self.db.cells[cell.index()].pins {
+                        let _ = nets.insert(self.db.pins[pin.index()].net);
+                    }
                 }
                 Edit::MovedPin { pin, from } => {
                     let _ = nets.insert(self.db.pins[pin.index()].net);
