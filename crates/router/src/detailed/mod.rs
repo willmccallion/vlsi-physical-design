@@ -39,7 +39,7 @@ use crate::wiring::{Edge, Patch, access_elems, elem_cuts, elem_metal, gap_fills,
 use judge::ShapeTiles;
 use pare_common::db::design::NetlistDB;
 use pare_common::db::design::RouteElem;
-use pare_common::db::indices::{LayerId, NetId, NonDefaultRuleId, ViaId};
+use pare_common::db::indices::{LayerId, NetId, NonDefaultRuleId, PinId, ViaId};
 use pare_common::db::library::LayerRef;
 use pare_common::geom::dbu::Dbu;
 use pare_common::geom::point::Point;
@@ -107,6 +107,54 @@ pub struct DetailedRouter<'a> {
     markers: Vec<Marker>,
     /// What to log in detail.
     trace: Trace,
+}
+
+/// Where a pin meets global routing: the gcell of its access point and the
+/// layer of the pin shape that point reaches.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct PinTerminal {
+    /// The pin.
+    pub pin: PinId,
+    /// The gcell, on the layer the access point's wire starts on.
+    pub cell: GCell,
+    /// The layer of the pin shape reached.
+    pub pin_layer: LayerId,
+}
+
+impl PinTerminal {
+    /// The terminal access point `a` gives `pin`.
+    pub(crate) fn of(pin: PinId, a: &AccessPoint, tech: &RouteTech, grid: &GlobalGrid) -> Self {
+        let p = tech.layer(a.node.layer).point(a.node.track, a.node.cross);
+        Self {
+            pin,
+            cell: grid.cell_at(a.node.layer, p),
+            pin_layer: a.pin_layer,
+        }
+    }
+}
+
+/// The rules and fixed shapes the wiring of an access point is judged
+/// against.
+#[derive(Debug)]
+pub struct PinJudge {
+    rules: Rules,
+    fixed: Layout,
+    fixed_tiles: ShapeTiles,
+}
+
+impl PinJudge {
+    /// Whether `metal` of `net` on `layer` breaks no rule against the fixed
+    /// shapes.
+    pub fn clean(&self, net: NetId, layer: LayerId, metal: &Rect<Dbu>) -> bool {
+        judge::wiring_is_clean(
+            &self.fixed,
+            &self.fixed_tiles,
+            &self.rules,
+            net,
+            layer,
+            metal,
+        )
+    }
 }
 
 /// Bytes the vectors of `nested` hold on the heap, with their headers.
@@ -576,6 +624,30 @@ impl<'a> DetailedRouter<'a> {
                 Some(grid.cell_at(a.node.layer, p))
             })
             .collect()
+    }
+
+    /// Each pin of `net` with the gcell of its best access point and the
+    /// layer of the pin shape that point reaches; none when a pin has no
+    /// access point.
+    pub fn pin_terminals(&self, net: NetId, grid: &GlobalGrid) -> Option<Vec<PinTerminal>> {
+        self.access[net.index()]
+            .iter()
+            .zip(&self.db.nets[net.index()].pins)
+            .map(|(c, &pin)| {
+                let a = c.first()?;
+                Some(PinTerminal::of(pin, a, self.tech, grid))
+            })
+            .collect()
+    }
+
+    /// The design rules and fixed shapes access points are judged against,
+    /// kept once routing is over.
+    pub(crate) fn into_pin_judge(self) -> PinJudge {
+        PinJudge {
+            rules: self.rules,
+            fixed: self.fixed,
+            fixed_tiles: self.fixed_tiles,
+        }
     }
 
     /// Restricts each net's detailed route to its global route.

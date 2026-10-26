@@ -12,6 +12,7 @@ pub mod global;
 pub mod occupancy;
 pub mod runs;
 mod search;
+pub mod session;
 pub mod shared_access;
 pub mod state;
 pub mod tech;
@@ -40,7 +41,8 @@ use pare_common::geom::rect::Rect;
 use pare_common::util::config::{LayerRangeError, RoutingConfig};
 use pare_common::util::{memory, ui};
 use pare_common::verify::shapes::obstruction_shapes;
-use rustc_hash::FxHashMap;
+use rustc_hash::{FxHashMap, FxHashSet};
+pub use session::GlobalSession;
 use state::{DetailedState, GridShape};
 pub use state::{RouteState, StateParseError};
 use std::time::Instant;
@@ -136,18 +138,86 @@ pub fn route_with(
     check_routable(db, config)?;
     let tech = RouteTech::new(db, config)?;
     let gcell = gcell_size(&tech, config);
-    let via = 4.0 * tech.layer(tech.min_layer).pitch().to_f64();
-
     let (routes, summary, gcells) = {
-        let GlobalStage {
-            mut dr,
-            nets,
-            grid,
-            global,
-        } = global_stage(db, &tech, config, gcell, session.resume)?;
+        let routed = global_stage(db, &tech, config, gcell, session.resume)?;
+        route_detailed(db, &tech, config, gcell, routed, &mut session)?
+    };
+    write_wiring(db, routes, gcells);
+    Ok(summary)
+}
+
+/// Routes every signal net of `db` in detail along the global routes of
+/// `global`, which follow the design as repair left it.
+///
+/// A net whose route misses one of its pins' gcells now is routed globally
+/// again first.
+///
+/// # Errors
+///
+/// When `db` cannot be routed under `config`, or a saved state cannot be
+/// written.
+pub fn route_on(
+    db: &mut NetlistDB,
+    config: &RoutingConfig,
+    global: GlobalSession,
+    mut session: Session<'_>,
+) -> Result<RoutingSummary, RouteError> {
+    check_routable(db, config)?;
+    let (tech, grid, routes, routed) = global.into_parts();
+    let gcell = gcell_size(&tech, config);
+    let (routes, summary, gcells) = {
+        let settled = settled_stage(db, &tech, config, gcell, grid, routes, routed);
+        route_detailed(db, &tech, config, gcell, settled, &mut session)?
+    };
+    write_wiring(db, routes, gcells);
+    Ok(summary)
+}
+
+/// Puts the detailed routes and the gcell grid they were routed on into
+/// `db`.
+fn write_wiring(
+    db: &mut NetlistDB,
+    routes: Vec<(NetId, Vec<RouteElem>)>,
+    gcells: Vec<GCellGridDef>,
+) {
+    db.gcell_grid = gcells;
+    for net in &mut db.nets {
+        net.routing.clear();
+    }
+    for (n, elems) in routes {
+        db.nets[n.index()].routing = elems;
+    }
+}
+
+/// Each routed net's wiring, with the summary and the gcell grid routed on.
+type DetailedResult = (
+    Vec<(NetId, Vec<RouteElem>)>,
+    RoutingSummary,
+    Vec<GCellGridDef>,
+);
+
+/// Track assignment and detailed routing over the global routes of
+/// `routed`, saving state as `session` says.
+#[allow(clippy::too_many_lines)]
+fn route_detailed(
+    db: &NetlistDB,
+    tech: &RouteTech,
+    config: &RoutingConfig,
+    gcell: Dbu,
+    routed: GlobalStage<'_>,
+    session: &mut Session<'_>,
+) -> Result<DetailedResult, RouteError> {
+    let via = 4.0 * tech.layer(tech.min_layer).pitch().to_f64();
+    let GlobalStage {
+        mut dr,
+        nets,
+        grid,
+        global,
+    } = routed;
+    {
         let (nx, ny) = grid.size();
         let named_global = session.save.is_some().then(|| named_global(db, &global));
-        let shape = grid_shape(&tech, &grid);
+        let shape = grid_shape(tech, &grid);
         session.save_at(SavePoint::Global, || RouteState {
             design: db.name.clone(),
             grid: shape,
@@ -156,7 +226,7 @@ pub fn route_with(
         });
         dr.set_trace(trace_of(db, &session.trace)?);
         let start = Instant::now();
-        let wires = assign_tracks(&tech, &dr.occupancy, &grid, &global, &dr.pin_points());
+        let wires = assign_tracks(tech, &dr.occupancy, &grid, &global, &dr.pin_points());
         dr.set_guides(global, &grid);
         dr.set_track_wires(wires);
         stage("Track assign:", start);
@@ -270,18 +340,10 @@ pub fn route_with(
             .collect();
         let wiring: Vec<(NetId, Vec<RouteElem>)> = nets
             .iter()
-            .map(|&n| (n, dr.routes()[n.index()].elems(&tech)))
+            .map(|&n| (n, dr.routes()[n.index()].elems(tech)))
             .collect();
-        (wiring, summary, gcell_grid(db.die_area.min, gcell, nx, ny))
-    };
-    db.gcell_grid = gcells;
-    for net in &mut db.nets {
-        net.routing.clear();
+        Ok((wiring, summary, gcell_grid(db.die_area.min, gcell, nx, ny)))
     }
-    for (n, elems) in routes {
-        db.nets[n.index()].routing = elems;
-    }
-    Ok(summary)
 }
 
 /// The state of a run saved after detailed round `round`.
@@ -558,6 +620,80 @@ fn global_stage<'a>(
         grid,
         global,
     })
+}
+
+/// Pin access found afresh, with the global routes a session kept: a net
+/// keeps its route while the route reaches the gcell of each of its pins'
+/// access points now, and is routed again otherwise; routes of nets no
+/// longer routed are lifted.
+fn settled_stage<'a>(
+    db: &'a NetlistDB,
+    tech: &'a RouteTech,
+    config: &RoutingConfig,
+    gcell: Dbu,
+    mut grid: GlobalGrid,
+    mut global: GlobalRoutes,
+    mut routed: FxHashMap<NetId, GlobalNet>,
+) -> GlobalStage<'a> {
+    let start = Instant::now();
+    let dr = DetailedRouter::new(db, tech, gcell);
+    let nets = routable_nets(db);
+    stage("Pin access:", start);
+    let start = Instant::now();
+    let mut dirty = Vec::new();
+    let mut kept = FxHashSet::default();
+    for &net in &nets {
+        let Some(terminals) = dr.terminals(net, &grid) else {
+            continue;
+        };
+        let fresh = GlobalNet {
+            net,
+            terminals,
+            demand: global::track_demand(db, tech, net),
+        };
+        let old = routed.remove(&net);
+        let tree = global.paths.remove(&net);
+        match (old, tree) {
+            (Some(old), Some(tree)) if reaches(&tree, &fresh.terminals) => {
+                grid.lift(&old, &tree);
+                grid.place(&fresh, &tree);
+                let _ = global.paths.insert(net, tree);
+                let _ = kept.insert(net);
+            }
+            (old, tree) => {
+                if let (Some(old), Some(tree)) = (old, tree) {
+                    grid.lift(&old, &tree);
+                }
+                dirty.push(fresh);
+            }
+        }
+    }
+    for (net, old) in routed {
+        if let Some(tree) = global.paths.remove(&net) {
+            grid.lift(&old, &tree);
+        }
+    }
+    let rerouted = global::reroute(&mut grid, &dirty, config.global_iterations);
+    global.paths.extend(rerouted.paths);
+    stage("Global settled:", start);
+    ui::stat_row(
+        "Routes kept:",
+        &kept.len().to_string(),
+        "Routed again:",
+        &dirty.len().to_string(),
+    );
+    GlobalStage {
+        dr,
+        nets,
+        grid,
+        global,
+    }
+}
+
+/// Whether a tree's cells include every terminal.
+fn reaches(tree: &[Vec<GCell>], terminals: &[GCell]) -> bool {
+    let cells: FxHashSet<GCell> = tree.iter().flatten().copied().collect();
+    terminals.iter().all(|t| cells.contains(t))
 }
 
 /// The global routes `state` saved, put back on `grid` once the state is

@@ -452,6 +452,17 @@ impl GlobalGrid {
         }
     }
 
+    /// The center of a gcell, as `OpenROAD`'s global router places route
+    /// points: half a gcell into it, whatever part of it the die holds.
+    pub fn cell_center(&self, c: GCell) -> Point<Dbu> {
+        let half = Dbu(self.gcell.get() / 2);
+        self.origin
+            + Point::new(
+                self.gcell * i64::from(c.x) + half,
+                self.gcell * i64::from(c.y) + half,
+            )
+    }
+
     /// The area of a gcell.
     pub fn cell_rect(&self, x: u16, y: u16) -> Rect<Dbu> {
         let min = self.origin + Point::new(self.gcell * i64::from(x), self.gcell * i64::from(y));
@@ -568,6 +579,16 @@ impl GlobalGrid {
                 Sign::Remove => self.usage.remove(e, t),
             }
         }
+    }
+
+    /// Places the demand of a net's paths.
+    pub(crate) fn place(&self, net: &GlobalNet, paths: &[Vec<GCell>]) {
+        self.add_tree(net, paths, Sign::Add);
+    }
+
+    /// Lifts the demand of a net's paths, as [`Self::place`] put it.
+    pub(crate) fn lift(&self, net: &GlobalNet, paths: &[Vec<GCell>]) {
+        self.add_tree(net, paths, Sign::Remove);
     }
 
     fn overflowed(&self, e: usize) -> bool {
@@ -1044,14 +1065,48 @@ pub fn restore_global(
 /// the round with the lowest overflow, and leaves the grid's usage at
 /// theirs.
 pub fn route_global(grid: &mut GlobalGrid, nets: &[GlobalNet], rounds: usize) -> GlobalRoutes {
-    let mut costs = GlobalCosts {
-        via: 1.0,
-        congestion: 1.0,
-        penalty: 1.0,
-    };
     let mut routes = GlobalRoutes::default();
+    route_initial(grid, nets, FIRST_COSTS, &mut routes);
+    negotiate(grid, nets, &mut routes, rounds);
+    log_zero_capacity_crossings(grid, &routes);
+    log_overflow_regions(grid);
+    routes
+}
+
+/// Routes `nets` against the usage `grid` already holds for every other
+/// net, as an incremental global router does after edits.
+///
+/// Pattern routing comes first; then, if any of them crosses an overflowed
+/// edge, they alone are ripped up and rerouted for at most `rounds` rounds,
+/// as [`route_global`] negotiates.
+pub fn reroute(grid: &mut GlobalGrid, nets: &[GlobalNet], rounds: usize) -> GlobalRoutes {
+    let mut routes = GlobalRoutes::default();
+    route_initial(grid, nets, FIRST_COSTS, &mut routes);
+    let crosses_overflow = nets.iter().any(|n| {
+        routes.paths.get(&n.net).is_some_and(|tree| {
+            tree.iter()
+                .any(|p| grid.path_edges(p).any(|e| grid.overflowed(e)))
+        })
+    });
+    if crosses_overflow {
+        negotiate(grid, nets, &mut routes, rounds);
+    }
+    routes
+}
+
+/// The costs of the first routing of a net.
+const FIRST_COSTS: GlobalCosts = GlobalCosts {
+    via: 1.0,
+    congestion: 1.0,
+    penalty: 1.0,
+};
+
+/// Rips up and reroutes the nets of `nets` that cross overflowed edges, for
+/// at most `rounds` rounds, as [`route_global`] describes; leaves the routes
+/// and the grid's usage at the round with the lowest overflow.
+fn negotiate(grid: &mut GlobalGrid, nets: &[GlobalNet], routes: &mut GlobalRoutes, rounds: usize) {
+    let mut costs = FIRST_COSTS;
     let mut margins = vec![FIRST_MARGIN; nets.len()];
-    route_initial(grid, nets, costs, &mut routes);
     let mut coarse = CoarseGrid::new(grid);
     let mut best = Best::of(grid);
     let mut progress_from = best.overflow;
@@ -1098,7 +1153,7 @@ pub fn route_global(grid: &mut GlobalGrid, nets: &[GlobalNet], rounds: usize) ->
                 plans: &plans,
             };
             let routing = std::time::Instant::now();
-            route_disjoint(grid, nets, &reroute, costs, &mut routes);
+            route_disjoint(grid, nets, &reroute, costs, routes);
             spent.routing += routing.elapsed().as_secs_f64();
             let refreshing = std::time::Instant::now();
             let touched = touched_coarse_cells(
@@ -1135,11 +1190,8 @@ pub fn route_global(grid: &mut GlobalGrid, nets: &[GlobalNet], rounds: usize) ->
         }
     }
     if grid.overflow() > best.overflow {
-        best.restore(grid, &mut routes);
+        best.restore(grid, routes);
     }
-    log_zero_capacity_crossings(grid, &routes);
-    log_overflow_regions(grid);
-    routes
 }
 
 /// Logs, at debug level, every net whose route uses edges without capacity.
