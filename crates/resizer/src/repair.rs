@@ -566,8 +566,8 @@ impl<'r, 'a> Repairer<'r, 'a> {
             } else {
                 buf_dist / length as f64
             };
-            let buf_x = to_x + (d * (from_x - to_x) as f64) as i64;
-            let buf_y = to_y + (d * (from_y - to_y) as f64) as i64;
+            let buf_x = (to_x as f64 + d * (from_x - to_x) as f64) as i64;
+            let buf_y = (to_y as f64 + d * (from_y - to_y) as f64) as i64;
             let at = Point::new(Dbu(buf_x), Dbu(buf_y));
             let mut leaf = Branch {
                 cap: ref_cap,
@@ -610,7 +610,7 @@ impl<'r, 'a> Repairer<'r, 'a> {
     #[allow(clippy::suboptimal_flops, clippy::suspicious_operation_groupings)]
     fn split_length(&self, input: SplitInput) -> i64 {
         let dbu = self.resizer.db.dbu().get() as f64;
-        let to_dbu = |m: f64| (m * dbu * 1e6) as i64;
+        let to_dbu = |m: f64| i64::from(((m * dbu * 1e6).round() as i64 as i32) & i32::MAX);
         let rc = self.resizer.graph.wire_rc();
         let (wire_res, wire_cap) = (rc.resistance, rc.capacitance);
         let max_length = self.resizer.options.max_wire_length;
@@ -625,23 +625,29 @@ impl<'r, 'a> Repairer<'r, 'a> {
             split = split.min(to_dbu((input.max_cap - input.ref_cap) / wire_cap).max(0));
         }
         if input.load_slew > input.max_load_slew_margined {
-            let a = wire_res * wire_cap / 2.0;
-            let b = input.r_drvr * wire_cap + wire_res * input.ref_cap;
-            let c = input.r_drvr * input.ref_cap
-                - input.max_load_slew_margined / self.resizer.slew_rc_factor;
-            let l = if a > 1e-12 {
+            // `OpenROAD` solves the quadratic in single precision.
+            let a = (wire_res * wire_cap / 2.0) as f32;
+            let b = (input.r_drvr * wire_cap + wire_res * input.ref_cap) as f32;
+            let c = (input.r_drvr * input.ref_cap
+                - input.max_load_slew_margined / self.resizer.slew_rc_factor)
+                as f32;
+            let l = if f64::from(a) > 1e-12 {
                 let discriminant = b * b - 4.0 * a * c;
                 if discriminant >= 0.0 {
                     (-b + discriminant.sqrt()) / (2.0 * a)
                 } else {
                     0.0
                 }
-            } else if b > 1e-12 {
+            } else if f64::from(b) > 1e-12 {
                 -c / b
             } else {
                 0.0
             };
-            split = if l >= 0.0 { split.min(to_dbu(l)) } else { 0 };
+            split = if l >= 0.0 {
+                split.min(to_dbu(f64::from(l)))
+            } else {
+                0
+            };
         }
         split
     }
