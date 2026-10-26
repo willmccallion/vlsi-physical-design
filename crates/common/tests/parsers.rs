@@ -85,6 +85,27 @@ fn lef_routing_layers_carry_direction_pitch_offset_width_and_spacing() {
 }
 
 #[test]
+fn lef_layers_carry_their_resistance_and_capacitance() {
+    let lib = tiny_library();
+
+    let m1 = &lib.layer(LayerId(0)).electrical;
+    let m2 = &lib.layer(LayerId(1)).electrical;
+    assert_eq!(m1.resistance_per_square, Some(0.38));
+    assert_eq!(m1.capacitance_per_area, Some(7.7161e-05));
+    assert_eq!(m1.edge_capacitance, Some(2.7365e-05));
+    assert_eq!(
+        (
+            m2.resistance_per_square,
+            m2.capacitance_per_area,
+            m2.edge_capacitance
+        ),
+        (Some(0.25), None, None)
+    );
+    assert_eq!(lib.cut_layers[0].resistance, Some(5.0));
+    assert_eq!(lib.cut_layers[1].resistance, None);
+}
+
+#[test]
 fn lef_min_spacing_comes_from_plain_spacing_or_the_first_table_entry() {
     let lib = tiny_library();
 

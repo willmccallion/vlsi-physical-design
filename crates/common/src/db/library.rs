@@ -20,7 +20,7 @@ pub enum Direction {
 }
 
 /// A metal layer that carries wires.
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct RoutingLayer {
     /// LEF layer name.
     pub name: String,
@@ -42,6 +42,19 @@ pub struct RoutingLayer {
     pub spacing_table: Option<SpacingTable>,
     /// Further rules on the layer's shapes.
     pub rules: RoutingLayerRules,
+    /// Its resistance and capacitance, as the LEF gives them.
+    pub electrical: LayerElectrical,
+}
+
+/// A routing layer's resistance and capacitance from the LEF, in its units.
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub struct LayerElectrical {
+    /// Ohms per square (`RESISTANCE RPERSQ`).
+    pub resistance_per_square: Option<f64>,
+    /// Picofarads per square micron (`CAPACITANCE CPERSQDIST`).
+    pub capacitance_per_area: Option<f64>,
+    /// Picofarads per micron of edge (`EDGECAPACITANCE`).
+    pub edge_capacitance: Option<f64>,
 }
 
 impl RoutingLayer {
@@ -55,7 +68,7 @@ impl RoutingLayer {
 }
 
 /// A via cut layer between two routing layers.
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct CutLayer {
     /// LEF layer name.
     pub name: String,
@@ -69,6 +82,8 @@ pub struct CutLayer {
     pub spacing: Option<Dbu>,
     /// All of the layer's cut spacing and enclosure rules.
     pub rules: CutLayerRules,
+    /// Resistance of one cut in ohms (`RESISTANCE`), if given.
+    pub resistance: Option<f64>,
 }
 
 impl CutLayer {
@@ -392,7 +407,7 @@ impl ViaDef {
 }
 
 /// All technology and cell master data of a design.
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct Library {
     /// Database units per micron every value here is expressed in.
     pub dbu_per_micron: DbuPerMicron,

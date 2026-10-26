@@ -1236,8 +1236,8 @@ mod tests {
     use pare_common::db::design::{PlacementStatus, Region, RegionKind, Row};
     use pare_common::db::indices::{LayerId, RegionId, SiteId};
     use pare_common::db::library::{
-        CoreKind, Direction, LayerRef, Library, Macro, MacroClass, MacroPin, PinDirection,
-        RoutingLayer, Shape, SignalUse, Site, SiteClass, Symmetry,
+        CoreKind, Direction, LayerElectrical, LayerRef, Library, Macro, MacroClass, MacroPin,
+        PinDirection, RoutingLayer, Shape, SignalUse, Site, SiteClass, Symmetry,
     };
     use pare_common::db::rules::RoutingLayerRules;
     use pare_common::geom::dbu::DbuPerMicron;
@@ -1273,6 +1273,7 @@ mod tests {
                 min_spacing: Dbu(4),
                 spacing_table: None,
                 rules: RoutingLayerRules::default(),
+                electrical: LayerElectrical::default(),
             })
             .unwrap();
         let site = lib
@@ -1347,6 +1348,7 @@ mod tests {
             min_spacing: Dbu(100),
             spacing_table: None,
             rules: RoutingLayerRules::default(),
+            electrical: LayerElectrical::default(),
         };
         let rect = |x0, y0, x1, y1| Rect::new(pt(x0, y0), pt(x1, y1));
         let mut lib = Library::new(DbuPerMicron::new(1000).unwrap());
@@ -1359,6 +1361,7 @@ mod tests {
                 width: Some(Dbu(100)),
                 spacing: Some(Dbu(120)),
                 rules: CutLayerRules::default(),
+                resistance: None,
             })
             .unwrap();
         let m2 = lib

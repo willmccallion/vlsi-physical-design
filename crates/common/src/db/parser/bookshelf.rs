@@ -10,8 +10,8 @@
 use crate::db::design::{NetlistDB, PlacementStatus, Row, TrackAxis, TrackDef};
 use crate::db::indices::{CellId, LayerId, MacroId, MacroPinId, SiteId};
 use crate::db::library::{
-    CoreKind, CutLayer, Direction, LayerRef, Library, Macro, MacroClass, MacroPin, PinDirection,
-    RoutingLayer, Shape, SignalUse, Site, SiteClass, Symmetry, ViaDef,
+    CoreKind, CutLayer, Direction, LayerElectrical, LayerRef, Library, Macro, MacroClass, MacroPin,
+    PinDirection, RoutingLayer, Shape, SignalUse, Site, SiteClass, Symmetry, ViaDef,
 };
 use crate::db::parser::lexer::{ParseError, read_file};
 use crate::db::rules::{CutLayerRules, RoutingLayerRules};
@@ -150,6 +150,7 @@ pub fn synthesize_layer_stack(
                     width: Some(width),
                     spacing: Some(width),
                     rules: CutLayerRules::default(),
+                    resistance: None,
                 })
                 .map_err(|e| e.to_string())?;
             let shapes = vec![
@@ -193,6 +194,7 @@ pub fn synthesize_layer_stack(
                 min_spacing: pitch - width,
                 spacing_table: None,
                 rules: RoutingLayerRules::default(),
+                electrical: LayerElectrical::default(),
             })
             .map_err(|e| e.to_string())?;
     }

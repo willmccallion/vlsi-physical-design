@@ -8,8 +8,8 @@
 
 use crate::db::indices::LayerId;
 use crate::db::library::{
-    CoreKind, CutLayer, Direction, LayerRef, Library, Macro, MacroClass, MacroPin, PinDirection,
-    RoutingLayer, Shape, SignalUse, Site, SiteClass, Symmetry, ViaDef,
+    CoreKind, CutLayer, Direction, LayerElectrical, LayerRef, Library, Macro, MacroClass, MacroPin,
+    PinDirection, RoutingLayer, Shape, SignalUse, Site, SiteClass, Symmetry, ViaDef,
 };
 use crate::db::parser::lef_rules::{RoutingSpacing, RuleReader};
 use crate::db::parser::lexer::{Lexer, ParseError, Token, read_file};
@@ -257,6 +257,8 @@ impl<'a> LefParser<'a, '_> {
         let mut spacing_table = None;
         let mut routing = RoutingLayerRules::default();
         let mut cut = CutLayerRules::default();
+        let mut electrical = LayerElectrical::default();
+        let mut cut_resistance = None;
 
         loop {
             let t = self.lx.expect_token(&format!("'END {name}'"))?;
@@ -328,6 +330,28 @@ impl<'a> LefParser<'a, '_> {
                     let rule = self.rules().minimum_cut()?;
                     routing.minimum_cuts.push(rule);
                 }
+                (LayerKind::Routing, "RESISTANCE") => {
+                    if self.lx.accept("RPERSQ") {
+                        electrical.resistance_per_square =
+                            Some(self.lx.number::<f64>("resistance")?);
+                    }
+                    self.lx.skip_statement()?;
+                }
+                (LayerKind::Routing, "CAPACITANCE") => {
+                    if self.lx.accept("CPERSQDIST") {
+                        electrical.capacitance_per_area =
+                            Some(self.lx.number::<f64>("capacitance")?);
+                    }
+                    self.lx.skip_statement()?;
+                }
+                (LayerKind::Routing, "EDGECAPACITANCE") => {
+                    electrical.edge_capacitance = Some(self.lx.number::<f64>("edge capacitance")?);
+                    self.lx.skip_statement()?;
+                }
+                (LayerKind::Cut, "RESISTANCE") => {
+                    cut_resistance = Some(self.lx.number::<f64>("cut resistance")?);
+                    self.lx.skip_statement()?;
+                }
                 (LayerKind::Cut, "SPACING") => {
                     let rule = self.rules().cut_spacing()?;
                     cut.spacings.push(rule);
@@ -366,6 +390,7 @@ impl<'a> LefParser<'a, '_> {
                         min_spacing,
                         spacing_table,
                         rules: routing,
+                        electrical,
                     })
                     .map_err(|e| self.lx.error(line, e.to_string()))?;
             }
@@ -378,6 +403,7 @@ impl<'a> LefParser<'a, '_> {
                         width,
                         spacing: CutLayer::unconditional_spacing(width, &cut),
                         rules: cut,
+                        resistance: cut_resistance,
                     })
                     .map_err(|e| self.lx.error(line, e.to_string()))?;
             }

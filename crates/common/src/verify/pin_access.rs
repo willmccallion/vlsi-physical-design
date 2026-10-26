@@ -1235,6 +1235,7 @@ mod tests {
             min_spacing: Dbu(100),
             spacing_table: None,
             rules: RoutingLayerRules::default(),
+            electrical: crate::db::library::LayerElectrical::default(),
         }
     }
 
@@ -1276,6 +1277,7 @@ mod tests {
                 width: Some(Dbu(100)),
                 spacing: Some(Dbu(120)),
                 rules: CutLayerRules::default(),
+                resistance: None,
             })
             .unwrap();
         let m2 = lib
@@ -1290,6 +1292,7 @@ mod tests {
                 width: Some(Dbu(100)),
                 spacing: Some(Dbu(120)),
                 rules: CutLayerRules::default(),
+                resistance: None,
             })
             .unwrap();
         let m3 = lib
