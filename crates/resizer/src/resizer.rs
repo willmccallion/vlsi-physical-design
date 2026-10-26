@@ -1107,9 +1107,10 @@ fn arc_target_load(arc: &pare_common::db::liberty::TimingArc, in_slew: f64, out_
 }
 
 /// The worst delay and slew per output edge over the delay arcs into
-/// `port` at `load_cap`, each arc fed the slew of its input port from
-/// `input_slews` or, failing that, the target slews, as
-/// `Resizer::gateDelays`.
+/// `port` at `load_cap`, as `Resizer::gateDelays`.
+///
+/// Each arc is fed the slew of its input port from `input_slews` or,
+/// failing that, the target slews.
 #[must_use]
 pub fn gate_delays(
     cell: &LibCell,
