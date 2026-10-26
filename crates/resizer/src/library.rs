@@ -5,7 +5,7 @@
 use pare_common::db::design::{NetlistDB, PinOwner};
 use pare_common::db::indices::{CellId, MacroId, PinId, SiteId};
 use pare_common::db::liberty::{LibCell, LibCellId, Liberty};
-use pare_common::db::library::{CoreKind, MacroClass};
+use pare_common::db::library::{CoreKind, MacroClass, PinDirection, SignalUse};
 use std::collections::HashMap;
 
 /// Why the library could not be joined to the design.
@@ -281,6 +281,63 @@ impl<'a> Link<'a> {
             cells: chosen,
             lowest_drive,
         })
+    }
+}
+
+impl Link<'_> {
+    /// Whether a cell may go into a clock tree, as `OpenROAD`'s
+    /// `isClockCellCandidate`: one that may be used and is no
+    /// power-management cell.
+    #[must_use]
+    pub fn is_clock_cell_candidate(&self, cell: LibCellId) -> bool {
+        let lib = self.liberty.cell(cell);
+        !self.dont_use(cell) && !lib.is_power_cell
+    }
+
+    /// The buffers clock trees are built from, as `OpenROAD`'s
+    /// `inferClockBufferList`: of the candidate buffers with a master, in
+    /// library order, those the library marks as clock cells, else those
+    /// with a LEF clock input, else those named `CLKBUF`, else those named
+    /// `BUF`, else all of them.
+    #[must_use]
+    pub fn infer_clock_buffers(&self, db: &NetlistDB) -> Vec<LibCellId> {
+        let candidates: Vec<LibCellId> = (0..self.liberty.cells.len())
+            .map(|i| LibCellId(i as u32))
+            .filter(|&id| {
+                self.liberty.cell(id).is_buffer()
+                    && self.is_link_cell(id)
+                    && self.is_clock_cell_candidate(id)
+            })
+            .collect();
+        let has_clock_input =
+            |id: LibCellId| {
+                self.macro_of(id).is_some_and(|m| {
+                    db.library.cell_macro(m).pins.iter().any(|p| {
+                        p.direction == PinDirection::Input && p.signal_use == SignalUse::Clock
+                    })
+                })
+            };
+        let named = |id: LibCellId, pattern: &str| {
+            self.liberty
+                .cell(id)
+                .name
+                .to_ascii_uppercase()
+                .contains(pattern)
+        };
+        let tiers: [&dyn Fn(LibCellId) -> bool; 4] = [
+            &|id| self.liberty.cell(id).is_clock_cell,
+            &has_clock_input,
+            &|id| named(id, "CLKBUF"),
+            &|id| named(id, "BUF"),
+        ];
+        for tier in tiers {
+            let chosen: Vec<LibCellId> =
+                candidates.iter().copied().filter(|&id| tier(id)).collect();
+            if !chosen.is_empty() {
+                return chosen;
+            }
+        }
+        candidates
     }
 }
 
