@@ -253,7 +253,7 @@ impl Interpreter<'_> {
             "puts" | "current_design" | "group_path" | "set_units_checked" => Ok(String::new()),
             "set_units" => self.set_units(rest, line),
             "get_ports" => self.get_ports(rest, line),
-            "get_cells" => self.get_cells(rest, line),
+            "get_cells" => Ok(self.get_cells(rest, line)),
             "get_clocks" => self.get_clocks(rest, line),
             "all_clocks" => Ok(join_list(
                 &self
@@ -384,23 +384,28 @@ impl Interpreter<'_> {
     }
 
     /// `get_cells`: the instances named, exactly or by glob; hierarchy is
-    /// flat here, so `-hierarchical` changes nothing.
-    fn get_cells(&self, args: &[String], line: usize) -> Result<String, ParseError> {
+    /// flat here, so `-hierarchical` changes nothing. A pattern matching
+    /// nothing names nothing, with a warning unless `-quiet`, as `OpenSTA`
+    /// treats it: constraints often name instances synthesis renamed.
+    fn get_cells(&self, args: &[String], line: usize) -> String {
         let parsed = parse_args(args);
         let mut names = Vec::new();
         for pattern in parsed.positional.iter().flat_map(|p| split_list(p)) {
             let matched = self.cells_matching(&pattern);
             if matched.is_empty() && !parsed.flag("-quiet") {
-                return Err(self.error(line, format!("no instance matches '{pattern}'")));
+                log::warn!(
+                    "{}:{line}: no instance matches '{pattern}'",
+                    self.path.display()
+                );
             }
             names.extend(matched);
         }
-        Ok(join_list(
+        join_list(
             &names
                 .into_iter()
                 .map(|n| Object::Cell(n).encode())
                 .collect::<Vec<_>>(),
-        ))
+        )
     }
 
     fn cells_matching(&self, pattern: &str) -> Vec<String> {
@@ -1864,23 +1869,16 @@ set_output_delay [expr $clk_period * $clk_io_pct] -clock $clk_name [all_outputs]
     }
 
     #[test]
-    fn get_cells_of_nothing_is_an_error_unless_quiet() {
-        let design = design();
-        let liberty = liberty();
-        let missing = parse_str(
-            "set_timing_derate -early 0.9 [get_cells nothing]\n",
-            Path::new("test.sdc"),
-            &design,
-            &liberty,
+    fn get_cells_of_nothing_names_nothing() {
+        let sdc = parse(
+            "create_clock -name clk -period 1 [get_ports clk]\n\
+             set_timing_derate -early 0.9 [get_cells nothing]\n",
         );
-        assert!(missing.is_err());
+        let db = design();
+        let cell = db.cell_id("core/mem/macro_mem").unwrap();
 
-        let quiet = parse_str(
-            "set x [get_cells -quiet nothing]\n",
-            Path::new("test.sdc"),
-            &design,
-            &liberty,
-        );
-        assert!(quiet.is_ok());
+        assert!(sdc.cell_derates.is_empty());
+        assert!((sdc.cell_derate(Some(cell), MinMax::Min) - 1.0).abs() < 1e-12);
+        assert!((sdc.derating.cell[MinMax::Min.index()] - 1.0).abs() < 1e-12);
     }
 }
