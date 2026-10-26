@@ -1387,6 +1387,40 @@ mod tests {
     }
 
     #[test]
+    fn timing_thresholds_fire_once_each_from_the_largest_down() {
+        let thresholds = [0.64, 0.20];
+        let mut fired = [false, false];
+
+        assert!(!timing_due(&thresholds, &mut fired, 0.70));
+        assert!(timing_due(&thresholds, &mut fired, 0.63));
+        assert_eq!(fired, [true, false]);
+        assert!(!timing_due(&thresholds, &mut fired, 0.50));
+        assert!(timing_due(&thresholds, &mut fired, 0.19));
+        assert_eq!(fired, [true, true]);
+        assert!(!timing_due(&thresholds, &mut fired, 0.05));
+    }
+
+    #[test]
+    fn an_overflow_under_every_threshold_fires_them_all_at_once() {
+        let thresholds = [0.20, 0.64];
+        let mut fired = [false, false];
+
+        assert!(timing_due(&thresholds, &mut fired, 0.10));
+        assert_eq!(fired, [true, true]);
+    }
+
+    #[test]
+    fn remapped_weights_carry_fields_by_their_old_index() {
+        let mut weights = Weights::eplace(vec![2.0, 4.0]);
+        weights.frozen[1] = true;
+
+        weights.remap(&[Some(1), None, Some(0)]);
+
+        assert_eq!(weights.penalties, vec![4.0, 3.0, 2.0]);
+        assert_eq!(weights.frozen, vec![true, false, false]);
+    }
+
+    #[test]
     fn a_large_object_is_kept_centered_on_a_small_die() {
         let die = Rect::new(Point::new(0.0, 0.0), Point::new(10.0, 10.0));
 
