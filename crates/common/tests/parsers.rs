@@ -5,9 +5,10 @@
 use pare_common::db::design::{
     GCellGridDef, NetlistDB, PlacementStatus, RouteElem, TrackAxis, TrackDef,
 };
+use pare_common::db::global_route::{RoutePoint, RouteSegment};
 use pare_common::db::indices::{CellId, CutLayerId, LayerId, PinId};
 use pare_common::db::library::{Direction, LayerRef, Library, MacroClass, Shape};
-use pare_common::db::parser::{bookshelf, def, lef};
+use pare_common::db::parser::{bookshelf, def, lef, segments};
 use pare_common::db::rules::SpacingTable;
 use pare_common::db::writer;
 use pare_common::geom::dbu::{Dbu, DbuPerMicron};
@@ -103,6 +104,41 @@ fn lef_layers_carry_their_resistance_and_capacitance() {
     );
     assert_eq!(lib.cut_layers[0].resistance, Some(5.0));
     assert_eq!(lib.cut_layers[1].resistance, None);
+}
+
+#[test]
+fn global_route_segments_read_back_as_written() {
+    let db = tiny_design();
+    let net = db.net_id("n1").unwrap();
+    let point = |x, y, layer| RoutePoint {
+        at: pt(x, y),
+        layer: LayerId(layer),
+    };
+    let segments = vec![
+        RouteSegment {
+            from: point(1000, 1000, 0),
+            to: point(1000, 1000, 1),
+        },
+        RouteSegment {
+            from: point(1000, 1000, 1),
+            to: point(1000, 3000, 1),
+        },
+    ];
+    let mut text = Vec::new();
+
+    writer::segments::write(&db, &[(net, &segments)], &mut text).unwrap();
+    let read = segments::parse_str(
+        std::str::from_utf8(&text).unwrap(),
+        Path::new("n1.segs"),
+        &db,
+    )
+    .unwrap();
+
+    assert_eq!(
+        std::str::from_utf8(&text).unwrap(),
+        "n1\n(\n1000 1000 M1 1000 1000 M2\n1000 1000 M2 1000 3000 M2\n)\n"
+    );
+    assert_eq!(read, vec![(net, segments)]);
 }
 
 #[test]
