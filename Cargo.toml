@@ -4,6 +4,7 @@ members = [
     "crates/placer",
     "crates/router",
     "crates/resizer",
+    "crates/cts",
     "crates/cli",
 ]
 resolver = "2"

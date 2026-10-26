@@ -681,6 +681,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "pare-cts"
+version = "0.1.0"
+dependencies = [
+ "log",
+ "pare-common",
+ "pare-resizer",
+ "rustc-hash",
+ "thiserror",
+]
+
+[[package]]
 name = "pare-placer"
 version = "0.1.0"
 dependencies = [
