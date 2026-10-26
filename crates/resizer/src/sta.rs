@@ -748,7 +748,7 @@ impl Sta {
         edge: Edge,
     ) -> Vec<Entry> {
         let mut entries: Vec<Entry> = Vec::new();
-        let derate = self.sdc.derating.cell;
+        let derate = self.cell_derates(netlist, driver);
         let latch = match netlist.db.pins[driver.index()].owner {
             PinOwner::Cell { cell, .. } => self.latches.get(&cell).copied(),
             PinOwner::Io(_) => None,
@@ -1004,6 +1004,17 @@ impl Sta {
         changed
     }
 
+    /// The factors the delays of the arcs into `driver` are scaled by, for
+    /// the early and late sides: its instance's own derate where set, else
+    /// the design's.
+    fn cell_derates(&self, netlist: &Netlist<'_>, driver: PinId) -> [f64; 2] {
+        let cell = match netlist.db.pins[driver.index()].owner {
+            PinOwner::Cell { cell, .. } => Some(cell),
+            PinOwner::Io(_) => None,
+        };
+        MinMax::BOTH.map(|side| self.sdc.cell_derate(cell, side))
+    }
+
     /// The required times a pin's fanout imposes for one tag.
     fn fanout_requireds(
         &self,
@@ -1037,11 +1048,11 @@ impl Sta {
             }
         }
         if netlist.is_load(pin) {
-            let derate = self.sdc.derating.cell;
             for driver in graph.drivers_fed_by(netlist, pin) {
                 if graph.is_loop_arc(pin, driver) {
                     continue;
                 }
+                let derate = self.cell_derates(netlist, driver);
                 for arc in graph.arc_delays(driver) {
                     if arc.arc.from != pin || arc.from_edge != edge || arc.arc.through_latch {
                         continue;

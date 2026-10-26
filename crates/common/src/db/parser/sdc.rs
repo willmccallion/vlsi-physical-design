@@ -9,7 +9,7 @@
 
 use super::lexer::{ParseError, read_file};
 use crate::db::design::NetlistDB;
-use crate::db::indices::IoPinId;
+use crate::db::indices::{CellId, IoPinId};
 use crate::db::liberty::{Edge, Liberty, LibraryUnits, MinMax};
 use crate::db::library::{PinDirection, SignalUse};
 use crate::db::sdc::{
@@ -50,16 +50,19 @@ pub fn parse_str(
 enum Object {
     Clock(String),
     Port(String),
+    Cell(String),
 }
 
 impl Object {
     const CLOCK_PREFIX: &'static str = "_sta_clock:";
     const PORT_PREFIX: &'static str = "_sta_port:";
+    const CELL_PREFIX: &'static str = "_sta_cell:";
 
     fn encode(&self) -> String {
         match self {
             Self::Clock(name) => format!("{}{name}", Self::CLOCK_PREFIX),
             Self::Port(name) => format!("{}{name}", Self::PORT_PREFIX),
+            Self::Cell(name) => format!("{}{name}", Self::CELL_PREFIX),
         }
     }
 
@@ -69,6 +72,10 @@ impl Object {
             .or_else(|| {
                 word.strip_prefix(Self::PORT_PREFIX)
                     .map(|n| Self::Port(n.to_string()))
+            })
+            .or_else(|| {
+                word.strip_prefix(Self::CELL_PREFIX)
+                    .map(|n| Self::Cell(n.to_string()))
             })
     }
 }
@@ -246,6 +253,7 @@ impl Interpreter<'_> {
             "puts" | "current_design" | "group_path" | "set_units_checked" => Ok(String::new()),
             "set_units" => self.set_units(rest, line),
             "get_ports" => self.get_ports(rest, line),
+            "get_cells" => self.get_cells(rest, line),
             "get_clocks" => self.get_clocks(rest, line),
             "all_clocks" => Ok(join_list(
                 &self
@@ -375,6 +383,66 @@ impl Interpreter<'_> {
         ))
     }
 
+    /// `get_cells`: the instances named, exactly or by glob; hierarchy is
+    /// flat here, so `-hierarchical` changes nothing.
+    fn get_cells(&self, args: &[String], line: usize) -> Result<String, ParseError> {
+        let parsed = parse_args(args);
+        let mut names = Vec::new();
+        for pattern in parsed.positional.iter().flat_map(|p| split_list(p)) {
+            let matched = self.cells_matching(&pattern);
+            if matched.is_empty() && !parsed.flag("-quiet") {
+                return Err(self.error(line, format!("no instance matches '{pattern}'")));
+            }
+            names.extend(matched);
+        }
+        Ok(join_list(
+            &names
+                .into_iter()
+                .map(|n| Object::Cell(n).encode())
+                .collect::<Vec<_>>(),
+        ))
+    }
+
+    fn cells_matching(&self, pattern: &str) -> Vec<String> {
+        if self.db.cell_id(pattern).is_some() {
+            return vec![pattern.to_string()];
+        }
+        self.db
+            .cells
+            .iter()
+            .filter(|c| glob_matches(pattern, &c.name))
+            .map(|c| c.name.clone())
+            .collect()
+    }
+
+    /// The instances a word names: `get_cells` results, or names to match.
+    fn cells_of(&self, word: &str, line: usize) -> Result<Vec<CellId>, ParseError> {
+        let mut cells = Vec::new();
+        for item in split_list(word) {
+            let names = match Object::decode(&item) {
+                Some(Object::Cell(name)) => vec![name],
+                Some(Object::Port(name) | Object::Clock(name)) => {
+                    return Err(self.error(line, format!("'{name}' is not an instance")));
+                }
+                None => {
+                    let matched = self.cells_matching(&item);
+                    if matched.is_empty() {
+                        return Err(self.error(line, format!("no instance matches '{item}'")));
+                    }
+                    matched
+                }
+            };
+            for name in names {
+                let id = self
+                    .db
+                    .cell_id(&name)
+                    .ok_or_else(|| self.error(line, format!("no instance '{name}'")))?;
+                cells.push(id);
+            }
+        }
+        Ok(cells)
+    }
+
     fn ports_matching(&self, pattern: &str) -> Vec<String> {
         if self.db.io_pin_id(pattern).is_some() {
             return vec![pattern.to_string()];
@@ -450,8 +518,8 @@ impl Interpreter<'_> {
         for item in split_list(word) {
             let names = match Object::decode(&item) {
                 Some(Object::Port(name)) => vec![name],
-                Some(Object::Clock(name)) => {
-                    return Err(self.error(line, format!("'{name}' is a clock, not a port")));
+                Some(Object::Clock(name) | Object::Cell(name)) => {
+                    return Err(self.error(line, format!("'{name}' is not a port")));
                 }
                 None => {
                     let matched = self.ports_matching(&item);
@@ -478,8 +546,8 @@ impl Interpreter<'_> {
         for item in split_list(word) {
             let name = match Object::decode(&item) {
                 Some(Object::Clock(name)) => name,
-                Some(Object::Port(name)) => {
-                    return Err(self.error(line, format!("'{name}' is a port, not a clock")));
+                Some(Object::Port(name) | Object::Cell(name)) => {
+                    return Err(self.error(line, format!("'{name}' is not a clock")));
                 }
                 None => item,
             };
@@ -505,6 +573,14 @@ impl Interpreter<'_> {
             match Object::decode(&item) {
                 Some(Object::Clock(name)) => clocks.extend(self.clocks_of(&name, line)?),
                 Some(Object::Port(name)) => ports.extend(self.ports_of(&name, line)?),
+                Some(Object::Cell(name)) => {
+                    return Err(self.error(
+                        line,
+                        format!(
+                            "'{name}' is an instance; paths through instances are not supported"
+                        ),
+                    ));
+                }
                 None => match self.sdc.clock_id(&item) {
                     Some(id) => clocks.push(id),
                     None => ports.extend(self.ports_of(&item, line)?),
@@ -834,8 +910,15 @@ impl Interpreter<'_> {
 
     fn set_timing_derate(&mut self, args: &[String], line: usize) -> Result<String, ParseError> {
         let parsed = parse_args(args);
-        let [factor_text] = parsed.positional.as_slice() else {
-            return Err(self.error(line, "set_timing_derate on objects is not supported"));
+        let (factor_text, objects) = match parsed.positional.as_slice() {
+            [factor] => (factor, None),
+            [factor, objects] => (factor, Some(objects)),
+            _ => {
+                return Err(self.error(
+                    line,
+                    "set_timing_derate wants a factor and at most one object list",
+                ));
+            }
         };
         let factor: f64 = factor_text
             .parse()
@@ -858,6 +941,22 @@ impl Interpreter<'_> {
         };
         if parsed.flag("-cell_check") {
             return Err(self.error(line, "set_timing_derate -cell_check is not supported"));
+        }
+        if let Some(objects) = objects {
+            let cells = self.cells_of(objects, line)?;
+            if net && !cell {
+                return Err(self.error(
+                    line,
+                    "set_timing_derate -net_delay on instances is not supported",
+                ));
+            }
+            for id in cells {
+                let derate = self.sdc.cell_derates.entry(id).or_default();
+                for &side in &sides {
+                    derate.cell[side.index()] = Some(factor);
+                }
+            }
+            return Ok(String::new());
         }
         for side in sides {
             if cell {
@@ -1512,13 +1611,32 @@ impl ExprParser {
 mod tests {
     use super::*;
     use crate::db::design::PlacementStatus;
-    use crate::db::library::Library;
+    use crate::db::library::{Library, Macro, MacroClass, Symmetry};
     use crate::geom::dbu::{Dbu, DbuPerMicron};
     use crate::geom::orient::Orientation;
     use crate::geom::point::Point;
 
     fn design() -> NetlistDB {
-        let mut db = NetlistDB::new("top".into(), Library::new(DbuPerMicron::new(2000).unwrap()));
+        let mut library = Library::new(DbuPerMicron::new(2000).unwrap());
+        let sram = library
+            .add_macro(Macro::new(
+                "fakeram".into(),
+                MacroClass::Block,
+                Point::new(Dbu(2000), Dbu(2000)),
+                Symmetry::default(),
+                None,
+            ))
+            .unwrap();
+        let mut db = NetlistDB::new("top".into(), library);
+        let _ = db
+            .add_cell(
+                "core/mem/macro_mem".into(),
+                sram,
+                Point::new(Dbu(0), Dbu(0)),
+                Orientation::N,
+                PlacementStatus::Placed,
+            )
+            .unwrap();
         for (name, direction) in [
             ("clk", PinDirection::Input),
             ("rst_n", PinDirection::Input),
@@ -1722,5 +1840,47 @@ set_output_delay [expr $clk_period * $clk_io_pct] -clock $clk_name [all_outputs]
         assert!(glob_matches("key*", "key[0]"));
         assert!(!glob_matches("key?", "key[0]"));
         assert!(glob_matches("k?y[0]", "key[0]"));
+    }
+
+    #[test]
+    fn get_cells_names_instances_exactly_or_by_glob() {
+        let sdc = parse(
+            "create_clock -name clk -period 1 [get_ports clk]\n\
+             set_timing_derate -early -cell_delay 0.97 [get_cells {core/mem/macro_mem}]\n",
+        );
+        let db = design();
+        let cell = db.cell_id("core/mem/macro_mem").unwrap();
+
+        assert!((sdc.cell_derate(Some(cell), MinMax::Min) - 0.97).abs() < 1e-12);
+        assert!((sdc.cell_derate(Some(cell), MinMax::Max) - 1.0).abs() < 1e-12);
+        assert!((sdc.cell_derate(None, MinMax::Min) - 1.0).abs() < 1e-12);
+
+        let globbed = parse(
+            "create_clock -name clk -period 1 [get_ports clk]\n\
+             set_timing_derate -late 1.05 [get_cells core/*]\n",
+        );
+        assert!((globbed.cell_derate(Some(cell), MinMax::Max) - 1.05).abs() < 1e-12);
+        assert!((globbed.derating.cell[MinMax::Max.index()] - 1.0).abs() < 1e-12);
+    }
+
+    #[test]
+    fn get_cells_of_nothing_is_an_error_unless_quiet() {
+        let design = design();
+        let liberty = liberty();
+        let missing = parse_str(
+            "set_timing_derate -early 0.9 [get_cells nothing]\n",
+            Path::new("test.sdc"),
+            &design,
+            &liberty,
+        );
+        assert!(missing.is_err());
+
+        let quiet = parse_str(
+            "set x [get_cells -quiet nothing]\n",
+            Path::new("test.sdc"),
+            &design,
+            &liberty,
+        );
+        assert!(quiet.is_ok());
     }
 }

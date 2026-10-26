@@ -6,7 +6,7 @@
 //! library's units, which `OpenSTA` reads constraints in whatever
 //! `set_units` says.
 
-use crate::db::indices::IoPinId;
+use crate::db::indices::{CellId, IoPinId};
 use crate::db::liberty::{Edge, MinMax};
 use std::collections::HashMap;
 
@@ -222,6 +222,14 @@ impl Default for Derating {
     }
 }
 
+/// The cell delay factors `set_timing_derate` sets on one instance, for
+/// the early and late sides, where set.
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub struct CellDerating {
+    /// The factor on each side, if set.
+    pub cell: [Option<f64>; 2],
+}
+
 /// Limits applied to every pin of the design.
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub struct DesignLimits {
@@ -246,8 +254,10 @@ pub struct Sdc {
     pub false_paths: Vec<FalsePath>,
     /// Paths given other cycle counts.
     pub multicycle_paths: Vec<MultiCyclePath>,
-    /// Delay derating.
+    /// Delay derating of the whole design.
     pub derating: Derating,
+    /// Delay derating of single instances, over the design's.
+    pub cell_derates: HashMap<CellId, CellDerating>,
     /// Design-wide limits.
     pub limits: DesignLimits,
     /// Capacitance outside the design on its output ports, in farads.
@@ -276,6 +286,16 @@ impl Sdc {
     #[must_use]
     pub fn edge_time(&self, edge: ClockEdge) -> f64 {
         self.clock(edge.clock).edge_time(edge.edge)
+    }
+
+    /// The factor the cell delays of `cell` are scaled by on `side`: the
+    /// instance's own where set, else the design's.
+    #[must_use]
+    pub fn cell_derate(&self, cell: Option<CellId>, side: MinMax) -> f64 {
+        let design = self.derating.cell[side.index()];
+        cell.and_then(|c| self.cell_derates.get(&c))
+            .and_then(|d| d.cell[side.index()])
+            .unwrap_or(design)
     }
 
     /// The clock entering at `port`, if one does.
