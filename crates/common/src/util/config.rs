@@ -68,6 +68,15 @@ pub struct NetlistConfig {
     pub clock_wire_resistance_ohm_per_um: Option<f64>,
     /// Capacitance of the clock layer's wire, in femtofarads per micron.
     pub clock_wire_capacitance_ff_per_um: Option<f64>,
+    /// Wire resistance and capacitance per routing layer, as the platform's
+    /// `set_layer_rc -layer` gives them, which global-route parasitics use;
+    /// a layer left out takes its LEF values.
+    #[serde(default)]
+    pub layer_rc: Vec<LayerRcConfig>,
+    /// Resistance of one cut per cut layer, as `set_layer_rc -via` gives
+    /// it; a layer left out takes its LEF value.
+    #[serde(default)]
+    pub via_rc: Vec<ViaRcConfig>,
     /// Cells repair neither inserts nor swaps to, beyond those the library
     /// marks.
     #[serde(default)]
@@ -76,6 +85,28 @@ pub struct NetlistConfig {
     /// without an SDC file, which names the clocks itself.
     #[serde(default)]
     pub clock_ports: Vec<String>,
+}
+
+/// One routing layer's wire resistance and capacitance per length.
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct LayerRcConfig {
+    /// The routing layer's name.
+    pub layer: String,
+    /// Ohms per micron.
+    pub resistance_ohm_per_um: f64,
+    /// Femtofarads per micron.
+    pub capacitance_ff_per_um: f64,
+}
+
+/// One cut layer's resistance per cut.
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ViaRcConfig {
+    /// The cut layer's name.
+    pub layer: String,
+    /// Ohms per cut.
+    pub resistance_ohm: f64,
 }
 
 impl Default for NetlistConfig {
@@ -92,6 +123,8 @@ impl Default for NetlistConfig {
             clock_layer: None,
             clock_wire_resistance_ohm_per_um: None,
             clock_wire_capacitance_ff_per_um: None,
+            layer_rc: Vec::new(),
+            via_rc: Vec::new(),
             dont_use: Vec::new(),
             clock_ports: Vec::new(),
         }

@@ -21,3 +21,15 @@ clock_layer = "metal5"
 clock_wire_resistance_ohm_per_um = 1.49065
 clock_wire_capacitance_ff_per_um = 0.109256
 dont_use = ["TAPCELL_X1", "FILLCELL_X1", "AOI211_X1", "OAI211_X1"]
+layer_rc = [
+  { layer = "metal1", resistance_ohm_per_um = 5.4286, capacitance_ff_per_um = 0.0741819 },
+  { layer = "metal2", resistance_ohm_per_um = 3.70635, capacitance_ff_per_um = 0.0833611 },
+  { layer = "metal3", resistance_ohm_per_um = 3.57728, capacitance_ff_per_um = 0.103981 },
+  { layer = "metal4", resistance_ohm_per_um = 1.47397, capacitance_ff_per_um = 0.11915 },
+  { layer = "metal5", resistance_ohm_per_um = 1.49065, capacitance_ff_per_um = 0.109256 },
+  { layer = "metal6", resistance_ohm_per_um = 1.50265, capacitance_ff_per_um = 0.114168 },
+  { layer = "metal7", resistance_ohm_per_um = 0.264082, capacitance_ff_per_um = 0.117491 },
+  { layer = "metal8", resistance_ohm_per_um = 0.189296, capacitance_ff_per_um = 0.0945346 },
+  { layer = "metal9", resistance_ohm_per_um = 0.034286, capacitance_ff_per_um = 0.106091 },
+  { layer = "metal10", resistance_ohm_per_um = 0.038654, capacitance_ff_per_um = 0.737095 },
+]

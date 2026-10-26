@@ -53,6 +53,19 @@ ORFS_NANGATE45_WIRE = {
     "clock_wire_resistance_ohm_per_um": 1.49065,
     "clock_wire_capacitance_ff_per_um": 0.109256,
 }
+# Its setRC.tcl's set_layer_rc per routing layer, in ohms and femtofarads per micron.
+ORFS_NANGATE45_LAYER_RC = [
+    ("metal1", 5.4286, 0.0741819),
+    ("metal2", 3.70635, 0.0833611),
+    ("metal3", 3.57728, 0.103981),
+    ("metal4", 1.47397, 0.11915),
+    ("metal5", 1.49065, 0.109256),
+    ("metal6", 1.50265, 0.114168),
+    ("metal7", 0.264082, 0.117491),
+    ("metal8", 0.189296, 0.0945346),
+    ("metal9", 0.034286, 0.106091),
+    ("metal10", 0.038654, 0.737095),
+]
 ORFS_NANGATE45_LEF = [
     f"{ORFS_NANGATE45}/NangateOpenCellLibrary.tech.lef",
     f"{ORFS_NANGATE45}/NangateOpenCellLibrary.macro.mod.lef",
@@ -459,6 +472,12 @@ def config_text(name):
         lines += ["", "[netlist]"]
         lines += [f"{k} = {json.dumps(v)}" for k, v in ORFS_NANGATE45_WIRE.items()]
         lines.append(f"dont_use = {toml_list(ORFS_NANGATE45_DONT_USE)}")
+        lines.append("layer_rc = [")
+        lines += [
+            f'  {{ layer = "{layer}", resistance_ohm_per_um = {r}, capacitance_ff_per_um = {c} }},'
+            for layer, r, c in ORFS_NANGATE45_LAYER_RC
+        ]
+        lines.append("]")
     return "\n".join(lines) + "\n"
 
 

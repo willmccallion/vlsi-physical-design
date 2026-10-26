@@ -173,15 +173,25 @@ def pare_config(design, out):
     return path
 
 
+def toml_value(value):
+    """A config value as TOML: scalars and arrays as JSON writes them, and
+    tables inline."""
+    if isinstance(value, dict):
+        return "{ " + ", ".join(f"{k} = {toml_value(v)}" for k, v in value.items()) + " }"
+    if isinstance(value, list):
+        return "[" + ", ".join(toml_value(v) for v in value) + "]"
+    return json.dumps(value)
+
+
 def toml_text(config):
-    """The config as TOML: tables of scalar keys, as `pare` reads them."""
+    """The config as TOML: tables of keys, as `pare` reads them."""
     lines = [f"purpose = {json.dumps(config['purpose'])}", ""]
     for table, values in config.items():
         if not isinstance(values, dict):
             continue
         lines.append(f"[{table}]")
         for key, value in values.items():
-            lines.append(f"{key} = {json.dumps(value)}")
+            lines.append(f"{key} = {toml_value(value)}")
         lines.append("")
     return "\n".join(lines)
 
