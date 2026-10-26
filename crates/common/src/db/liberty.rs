@@ -577,6 +577,8 @@ pub struct LibPort {
     pub max_capacitance: Option<f64>,
     /// Largest transition allowed at it, in seconds.
     pub max_transition: Option<f64>,
+    /// Largest fanout it may drive.
+    pub max_fanout: Option<f64>,
     /// Its fanout load.
     pub fanout_load: Option<f64>,
     /// The logic it carries, for an output.
@@ -662,6 +664,7 @@ pub struct Statetable {
 
 /// A cell of the library.
 #[derive(Clone, Debug, PartialEq)]
+#[allow(clippy::struct_excessive_bools)] // each mirrors an independent Liberty attribute
 pub struct LibCell {
     /// Cell name.
     pub name: String,
@@ -673,9 +676,14 @@ pub struct LibCell {
     pub dont_touch: bool,
     /// Whether it is an integrated clock gate.
     pub is_clock_gate: bool,
+    /// Whether the library marks it for clock trees (`is_clock_cell`).
+    pub is_clock_cell: bool,
     /// Which library it came from: zero for the one it is in, else the
     /// number of the library absorbed.
     pub library: usize,
+    /// Whether it is a power-management cell (`always_on`,
+    /// `is_isolation_cell` or `is_level_shifter`), which clock trees avoid.
+    pub is_power_cell: bool,
     /// Its footprint class, when given.
     pub footprint: Option<String>,
     /// Signal pins.
@@ -736,6 +744,15 @@ impl LibCell {
             matches!(&self.ports[output].function, Some(FuncExpr::Not(inner))
                 if matches!(inner.as_ref(), FuncExpr::Port(p) if *p == self.ports[input].name))
         })
+    }
+
+    /// Whether `port` clocks a register or opens a latch, as `OpenSTA`'s
+    /// `isRegClk`: a clock-to-output or enable-to-output arc starts there.
+    #[must_use]
+    pub fn is_register_clock(&self, port: usize) -> bool {
+        self.arc_sets
+            .iter()
+            .any(|s| s.from == port && matches!(s.role, ArcRole::RegClkToQ | ArcRole::LatchEnToQ))
     }
 
     /// Whether the cell holds state.
@@ -1416,6 +1433,7 @@ mod tests {
             },
             max_capacitance: None,
             max_transition: None,
+            max_fanout: None,
             fanout_load: None,
             function: function.map(|f| FuncExpr::parse(f).unwrap()),
             three_state: None,
@@ -1431,6 +1449,8 @@ mod tests {
             dont_use: false,
             dont_touch: false,
             is_clock_gate: false,
+            is_clock_cell: false,
+            is_power_cell: false,
             library: 0,
             footprint: None,
             ports,

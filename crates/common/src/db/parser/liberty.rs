@@ -626,7 +626,11 @@ impl Interpreter {
             dont_use: Self::bool_attr(group, "dont_use"),
             dont_touch: Self::bool_attr(group, "dont_touch"),
             is_clock_gate: group.attr("clock_gating_integrated_cell").is_some(),
+            is_clock_cell: Self::bool_attr(group, "is_clock_cell"),
             library: 0,
+            is_power_cell: Self::bool_attr(group, "always_on")
+                || Self::bool_attr(group, "is_isolation_cell")
+                || Self::bool_attr(group, "is_level_shifter"),
             footprint: group.attr_text("cell_footprint").map(str::to_string),
             ports: Vec::new(),
             pg_pins: group
@@ -660,6 +664,7 @@ impl Interpreter {
                     port.capacitance = own.capacitance;
                     port.max_capacitance = own.max_capacitance.or(port.max_capacitance);
                     port.max_transition = own.max_transition.or(port.max_transition);
+                    port.max_fanout = own.max_fanout.or(port.max_fanout);
                     port.function = own.function.or(port.function);
                 }
                 cell.ports.push(port);
@@ -777,6 +782,7 @@ impl Interpreter {
             max_transition: self
                 .number_attr(group, "max_transition")?
                 .map(|v| v * self.units.time),
+            max_fanout: self.number_attr(group, "max_fanout")?,
             fanout_load: self.number_attr(group, "fanout_load")?,
             function: self.function_attr(group, "function")?,
             three_state: self.function_attr(group, "three_state")?,
