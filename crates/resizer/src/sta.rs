@@ -487,6 +487,22 @@ impl Sta {
             .reduce(|a, b| if side.beats(b, a) { b } else { a })
     }
 
+    /// The late arrival of a clock's rising edge at a pin of its network,
+    /// as `TritonCTS` reads it from the first such clock path: the pin's
+    /// rising transitions first.
+    #[must_use]
+    pub fn clock_rise_arrival(&self, pin: PinId) -> Option<f64> {
+        Edge::BOTH.iter().find_map(|&edge| {
+            self.entries(pin, edge).iter().find_map(|e| {
+                let tag = self.tags[e.tag.index()];
+                let rising = tag.launch.is_some_and(|l| l.edge == Edge::Rise);
+                (tag.is_clock && rising)
+                    .then_some(e.arrival[MinMax::Max.index()])
+                    .flatten()
+            })
+        })
+    }
+
     /// The required time at a pin for `edge` on `side`, over the tags;
     /// none where nothing constrains it.
     #[must_use]
