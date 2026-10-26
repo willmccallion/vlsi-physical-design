@@ -381,8 +381,8 @@ impl HoldRepair<'_> {
         let netlist = resizer.netlist();
         let net = netlist.db.pins[output.index()].net;
         netlist.loads(net).filter(|&l| l != output).all(|load| {
-            netlist.lib_port(load).is_none_or(|port| {
-                let limit = resizer.max_input_slew(port);
+            netlist.lib_cell_port(load).is_none_or(|(cell, port)| {
+                let limit = resizer.max_input_slew(cell, port);
                 !limit.is_finite() || in_hand(resizer.graph().slew(load).max(), limit)
             })
         })

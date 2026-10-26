@@ -1404,14 +1404,14 @@ fn buffer_size(resizer: &Resizer<'_>, cell: LibCellId) -> Result<BufferSize, Rep
     let cap_limit = resizer
         .link
         .liberty
-        .capacitance_limit(&lib.ports[output])
+        .capacitance_limit(lib, &lib.ports[output])
         .map_or(f64::INFINITY, |l| margined(l, CAP_MARGIN));
     let margined_max_cap = cap_limit.min(load_limit_by_driver_slew(resizer, cell));
     Ok(BufferSize {
         cell,
         input_cap: lib.ports[input].capacitance(),
-        input_fanout: resizer.link.liberty.fanout_load(&lib.ports[input]),
-        input_max_slew: resizer.max_input_slew(&lib.ports[input]),
+        input_fanout: resizer.link.liberty.fanout_load(lib, &lib.ports[input]),
+        input_max_slew: resizer.max_input_slew(lib, &lib.ports[input]),
         output_cap: lib.ports[output].capacitance(),
         area: lib.area,
         intrinsic_delay: Fixed::from_seconds(intrinsic),
@@ -1427,11 +1427,11 @@ fn load_limit_by_driver_slew(resizer: &Resizer<'_>, cell: LibCellId) -> f64 {
     let Some((input, output)) = lib.buffer_ports() else {
         return f64::INFINITY;
     };
-    let Some(max_slew) = resizer.link.liberty.slew_limit(&lib.ports[output]) else {
+    let Some(max_slew) = resizer.link.liberty.slew_limit(lib, &lib.ports[output]) else {
         return f64::INFINITY;
     };
     let max_slew = margined(max_slew, SLEW_MARGIN);
-    let in_slew = margined(resizer.max_input_slew(&lib.ports[input]), SLEW_MARGIN);
+    let in_slew = margined(resizer.max_input_slew(lib, &lib.ports[input]), SLEW_MARGIN);
     let objective = |load: f64| -> f64 {
         lib.delay_arc_sets_to(output)
             .flat_map(|s| s.arcs.iter())
@@ -1500,7 +1500,11 @@ fn wire_length_limit_by_max_cap(resizer: &Resizer<'_>, size: &BufferSize) -> i64
     let Some((_, output)) = lib.buffer_ports() else {
         return i64::MAX;
     };
-    let Some(limit) = resizer.link.liberty.capacitance_limit(&lib.ports[output]) else {
+    let Some(limit) = resizer
+        .link
+        .liberty
+        .capacitance_limit(lib, &lib.ports[output])
+    else {
         return i64::MAX;
     };
     let rc = resizer.graph.wire_rc();
@@ -1554,7 +1558,7 @@ fn outmatched(resizer: &Resizer<'_>, worse: LibCellId, better: LibCellId, r_max:
     };
     let extra_input = (b.ports[b_in].capacitance() - w.ports[w_in].capacitance()).max(0.0);
     let penalty = r_max * extra_input;
-    let limit = liberty.capacitance_limit(&w.ports[w_out]).unwrap_or(0.0);
+    let limit = liberty.capacitance_limit(w, &w.ports[w_out]).unwrap_or(0.0);
     let mut points: Vec<f64> = Vec::new();
     for cell in [w, b] {
         let Some((input, output)) = cell.buffer_ports() else {

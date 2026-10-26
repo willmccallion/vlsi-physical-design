@@ -673,6 +673,9 @@ pub struct LibCell {
     pub dont_touch: bool,
     /// Whether it is an integrated clock gate.
     pub is_clock_gate: bool,
+    /// Which library it came from: zero for the one it is in, else the
+    /// number of the library absorbed.
+    pub library: usize,
     /// Its footprint class, when given.
     pub footprint: Option<String>,
     /// Signal pins.
@@ -852,6 +855,9 @@ pub struct Liberty {
     /// The cells.
     pub cells: Vec<LibCell>,
     cell_by_name: HashMap<String, LibCellId>,
+    /// The defaults of each library absorbed, in order; a cell's
+    /// [`LibCell::library`] counts from one into them.
+    absorbed_defaults: Vec<Defaults>,
 }
 
 /// The units a library declares, as multiples of SI units.
@@ -885,6 +891,7 @@ impl Liberty {
             defaults: Defaults::default(),
             cells: Vec::new(),
             cell_by_name: HashMap::new(),
+            absorbed_defaults: Vec::new(),
         }
     }
 
@@ -900,12 +907,27 @@ impl Liberty {
     }
 
     /// Takes the cells of another library into this one, which keeps its
-    /// own thresholds and defaults; returns the name of a cell both have.
+    /// own thresholds, while each absorbed cell keeps its library's
+    /// defaults; returns the name of a cell both have.
     pub fn absorb(&mut self, other: Self) -> Result<(), String> {
-        for cell in other.cells {
+        let base = self.absorbed_defaults.len() + 1;
+        self.absorbed_defaults.push(other.defaults);
+        self.absorbed_defaults.extend(other.absorbed_defaults);
+        for mut cell in other.cells {
+            cell.library += base;
             let _ = self.add_cell(cell)?;
         }
         Ok(())
+    }
+
+    /// The defaults of the library `cell` came from, as `OpenSTA` takes
+    /// a pin's fallbacks from its own library.
+    #[must_use]
+    pub fn cell_defaults(&self, cell: &LibCell) -> &Defaults {
+        match cell.library {
+            0 => &self.defaults,
+            n => self.absorbed_defaults.get(n - 1).unwrap_or(&self.defaults),
+        }
     }
 
     /// The cell named `name`.
@@ -920,33 +942,34 @@ impl Liberty {
         &self.cells[id.index()]
     }
 
-    /// The transition limit `OpenSTA` applies at a pin: the pin's own, else
-    /// for an output the library default. `None` where nothing limits it.
+    /// The transition limit `OpenSTA` applies at a pin of `cell`: the
+    /// pin's own, else for an output its library's default. `None` where
+    /// nothing limits it.
     #[must_use]
-    pub const fn slew_limit(&self, port: &LibPort) -> Option<f64> {
+    pub fn slew_limit(&self, cell: &LibCell, port: &LibPort) -> Option<f64> {
         match port.max_transition {
             Some(limit) => Some(limit),
-            None if port.is_output() => self.defaults.max_transition,
+            None if port.is_output() => self.cell_defaults(cell).max_transition,
             None => None,
         }
     }
 
-    /// The load limit `OpenSTA` applies at an output pin: the pin's own,
-    /// else the library default.
+    /// The load limit `OpenSTA` applies at an output pin of `cell`: the
+    /// pin's own, else its library's default.
     #[must_use]
-    pub const fn capacitance_limit(&self, port: &LibPort) -> Option<f64> {
+    pub fn capacitance_limit(&self, cell: &LibCell, port: &LibPort) -> Option<f64> {
         match port.max_capacitance {
             Some(limit) => Some(limit),
-            None if port.is_output() => self.defaults.max_capacitance,
+            None if port.is_output() => self.cell_defaults(cell).max_capacitance,
             None => None,
         }
     }
 
-    /// A pin's fanout load: its own, else the library default, else zero.
+    /// A pin's fanout load: its own, else its library's default, else zero.
     #[must_use]
-    pub fn fanout_load(&self, port: &LibPort) -> f64 {
+    pub fn fanout_load(&self, cell: &LibCell, port: &LibPort) -> f64 {
         port.fanout_load
-            .or(self.defaults.fanout_load)
+            .or_else(|| self.cell_defaults(cell).fanout_load)
             .unwrap_or(0.0)
     }
 }
@@ -1408,6 +1431,7 @@ mod tests {
             dont_use: false,
             dont_touch: false,
             is_clock_gate: false,
+            library: 0,
             footprint: None,
             ports,
             pg_pins: vec!["VDD".into(), "VSS".into()],

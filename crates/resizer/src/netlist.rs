@@ -5,7 +5,7 @@
 use crate::library::Link;
 use pare_common::db::design::{NetlistDB, PinOwner};
 use pare_common::db::indices::{CellId, IoPinId, NetId, PinId};
-use pare_common::db::liberty::{ArcRole, ClockGatePin, FuncExpr, LibPort, Logic};
+use pare_common::db::liberty::{ArcRole, ClockGatePin, FuncExpr, LibCell, LibPort, Logic};
 use pare_common::db::library::{PinDirection, SignalUse};
 use pare_common::db::sdc::{ClockId, Sdc};
 use pare_common::geom::dbu::Dbu;
@@ -39,8 +39,15 @@ impl<'a> Netlist<'a> {
     /// The Liberty port of an instance pin.
     #[must_use]
     pub fn lib_port(&self, pin: PinId) -> Option<&'a LibPort> {
+        self.lib_cell_port(pin).map(|(_, port)| port)
+    }
+
+    /// The Liberty cell and port of an instance pin.
+    #[must_use]
+    pub fn lib_cell_port(&self, pin: PinId) -> Option<(&'a LibCell, &'a LibPort)> {
         let (cell, port) = self.link.pin_port(self.db, pin)?;
-        Some(&self.link.liberty.cell(cell).ports[port])
+        let lib = self.link.liberty.cell(cell);
+        Some((lib, &lib.ports[port]))
     }
 
     /// Whether a pin belongs to a retired instance, which timing no longer

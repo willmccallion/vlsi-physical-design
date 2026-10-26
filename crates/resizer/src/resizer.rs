@@ -357,8 +357,8 @@ impl<'a> Resizer<'a> {
     /// fixes up for libraries like Nangate45, the library default meant
     /// for outputs; infinite without either.
     #[must_use]
-    pub fn max_input_slew(&self, port: &LibPort) -> f64 {
-        max_input_slew(self.link, port)
+    pub fn max_input_slew(&self, cell: &LibCell, port: &LibPort) -> f64 {
+        max_input_slew(self.link, cell, port)
     }
 
     /// Holds every input slew over its limit at that limit, each before
@@ -369,8 +369,11 @@ impl<'a> Resizer<'a> {
         let (annotated, mut dirty) = {
             let netlist = Netlist::new(self.db, self.link);
             let link = self.link;
-            let limit_of =
-                |pin: PinId| netlist.lib_port(pin).map(|port| max_input_slew(link, port));
+            let limit_of = |pin: PinId| {
+                netlist
+                    .lib_cell_port(pin)
+                    .map(|(cell, port)| max_input_slew(link, cell, port))
+            };
             self.graph
                 .sweep_annotating(&netlist, self.clocks, &limit_of)
         };
@@ -403,8 +406,8 @@ impl<'a> Resizer<'a> {
     pub fn driver_slew_limit(&self, driver: PinId) -> Option<f64> {
         let netlist = self.netlist();
         let own = netlist
-            .lib_port(driver)
-            .and_then(|p| self.link.liberty.slew_limit(p));
+            .lib_cell_port(driver)
+            .and_then(|(c, p)| self.link.liberty.slew_limit(c, p));
         let design = self
             .sta
             .as_ref()
@@ -420,8 +423,8 @@ impl<'a> Resizer<'a> {
     pub fn cap_limit(&self, driver: PinId) -> Option<f64> {
         let netlist = self.netlist();
         let own = netlist
-            .lib_port(driver)
-            .and_then(|p| self.link.liberty.capacitance_limit(p));
+            .lib_cell_port(driver)
+            .and_then(|(c, p)| self.link.liberty.capacitance_limit(c, p));
         let design = self
             .sta
             .as_ref()
@@ -984,12 +987,12 @@ impl LoadModel for Resizer<'_> {
     fn load(&self, pin: PinId) -> (f64, f64, f64) {
         let netlist = self.netlist();
         netlist
-            .lib_port(pin)
-            .map_or((0.0, 0.0, f64::INFINITY), |port| {
+            .lib_cell_port(pin)
+            .map_or((0.0, 0.0, f64::INFINITY), |(cell, port)| {
                 (
                     port.capacitance(),
-                    self.link.liberty.fanout_load(port),
-                    self.max_input_slew(port),
+                    self.link.liberty.fanout_load(cell, port),
+                    self.max_input_slew(cell, port),
                 )
             })
     }
@@ -1038,10 +1041,10 @@ pub fn timing_net_weights(slacks: &[(NetId, f64)], weight_max: f64) -> Vec<(NetI
 /// The transition limit at an input pin: its own, else, as `OpenROAD`
 /// fixes up for libraries like Nangate45, the library default meant for
 /// outputs; infinite without either.
-fn max_input_slew(link: &Link<'_>, port: &LibPort) -> f64 {
+fn max_input_slew(link: &Link<'_>, cell: &LibCell, port: &LibPort) -> f64 {
     port.max_transition
         .filter(|&l| l != 0.0)
-        .or(link.liberty.defaults.max_transition)
+        .or_else(|| link.liberty.cell_defaults(cell).max_transition)
         .unwrap_or(f64::INFINITY)
 }
 

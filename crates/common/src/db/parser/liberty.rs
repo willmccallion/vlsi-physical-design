@@ -626,6 +626,7 @@ impl Interpreter {
             dont_use: Self::bool_attr(group, "dont_use"),
             dont_touch: Self::bool_attr(group, "dont_touch"),
             is_clock_gate: group.attr("clock_gating_integrated_cell").is_some(),
+            library: 0,
             footprint: group.attr_text("cell_footprint").map(str::to_string),
             ports: Vec::new(),
             pg_pins: group

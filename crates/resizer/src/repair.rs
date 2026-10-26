@@ -221,7 +221,7 @@ impl<'r, 'a> Repairer<'r, 'a> {
         let netlist = self.resizer.netlist();
         let net = self.resizer.db.pins[driver.index()].net;
         netlist.loads(net).filter(|&p| p != driver).any(|load| {
-            let Some(port) = netlist.lib_port(load) else {
+            let Some((cell, port)) = netlist.lib_cell_port(load) else {
                 return false;
             };
             let slew = self.resizer.graph.slew(load).max();
@@ -231,7 +231,7 @@ impl<'r, 'a> Repairer<'r, 'a> {
                     .resizer
                     .link
                     .liberty
-                    .defaults
+                    .cell_defaults(cell)
                     .max_transition
                     .is_some_and(|limit| slew > limit),
             }
@@ -274,7 +274,12 @@ impl<'r, 'a> Repairer<'r, 'a> {
                 continue;
             };
             let mut violation = 0.0;
-            if let Some(limit) = self.resizer.link.liberty.slew_limit(&size_cell.ports[port]) {
+            if let Some(limit) = self
+                .resizer
+                .link
+                .liberty
+                .slew_limit(size_cell, &size_cell.ports[port])
+            {
                 let limit = self.resizer.margined_slew(limit);
                 for set in size_cell.arc_sets.iter().filter(|s| s.to == port) {
                     if !matches!(
@@ -672,8 +677,12 @@ impl<'r, 'a> Repairer<'r, 'a> {
         let in_lib_port = &sized_cell.ports[sized_in];
         branch.loads = vec![inserted.input];
         branch.cap = in_lib_port.capacitance();
-        branch.fanout = self.resizer.link.liberty.fanout_load(in_lib_port);
-        branch.max_load_slew = self.resizer.max_input_slew(in_lib_port);
+        branch.fanout = self
+            .resizer
+            .link
+            .liberty
+            .fanout_load(sized_cell, in_lib_port);
+        branch.max_load_slew = self.resizer.max_input_slew(sized_cell, in_lib_port);
         Ok(true)
     }
 }

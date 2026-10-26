@@ -648,7 +648,7 @@ fn half_driving_power_cell(resizer: &Resizer<'_>, lib: LibCellId) -> Option<LibC
         c.ports
             .iter()
             .filter(|p| p.is_output())
-            .find_map(|p| liberty.capacitance_limit(p))
+            .find_map(|p| liberty.capacitance_limit(c, p))
             .unwrap_or(0.0)
     };
     let target = 0.5 * max_load(lib);
