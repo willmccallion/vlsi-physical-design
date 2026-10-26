@@ -14,6 +14,7 @@ use pare_common::db::indices::{CellId, NetId, PinId};
 use pare_common::db::liberty::{
     ArcRole, Edge, EdgeValues, FuncExpr, LibCell, MinMax, SequentialKind, TimingArcSet,
 };
+use pare_common::db::library::{MacroClass, SignalUse};
 use std::collections::{BinaryHeap, VecDeque};
 
 /// The slew `OpenSTA` seeds a root with: an input port without a declared
@@ -661,8 +662,10 @@ pub fn pin_capacitance(netlist: &Netlist<'_>, pin: PinId, edge: Edge) -> f64 {
 
 /// The parasitics of a net, or none for a net of fewer than two pins or one
 /// an ideal clock drives.
-/// A net's estimated parasitics: on the clock wire RC for a net a clock
-/// drives, none for such a net without one, and none for a special net.
+/// A net's estimated parasitics, as `OpenROAD`'s `estimate_parasitics
+/// -placement` makes them: none for a special net or behind an ideal
+/// clock, the clock wire RC on a non-leaf clock net when there is one, and
+/// the signal wire RC elsewhere.
 fn estimate_net(
     netlist: &Netlist<'_>,
     clocks: &ClockNetwork,
@@ -670,13 +673,34 @@ fn estimate_net(
     rc: &WireRc,
     clock_rc: Option<&WireRc>,
 ) -> Option<NetParasitics> {
-    if netlist.is_special(net) {
+    if netlist.is_special(net) || netlist.drivers(net).any(|d| clocks.carries_ideal_clock(d)) {
         return None;
     }
-    if netlist.drivers(net).any(|d| clocks.is_clock(d)) {
-        return clock_rc.and_then(|clock| NetParasitics::estimate(netlist, net, clock));
+    let wire = match clock_rc {
+        Some(clock) if is_non_leaf_clock(netlist, net) => clock,
+        _ => rc,
+    };
+    NetParasitics::estimate(netlist, net, wire)
+}
+
+/// Whether a net is marked as a clock and clocks no register or pad
+/// directly, as the global router's `isNonLeafClock`; pads are told by
+/// their LEF class.
+fn is_non_leaf_clock(netlist: &Netlist<'_>, net: NetId) -> bool {
+    let db = netlist.db;
+    if db.nets[net.index()].signal_use != SignalUse::Clock {
+        return false;
     }
-    NetParasitics::estimate(netlist, net, rc)
+    !db.nets[net.index()].pins.iter().any(|&pin| {
+        let PinOwner::Cell { cell, .. } = db.pins[pin.index()].owner else {
+            return false;
+        };
+        let Some((lib, port)) = netlist.link.pin_port(db, pin) else {
+            return false;
+        };
+        netlist.link.liberty.cell(lib).is_register_clock(port)
+            || db.cell_macro(cell).class == MacroClass::Pad
+    })
 }
 
 /// The arcs `OpenSTA` searches into each driver: the delay arcs it does not

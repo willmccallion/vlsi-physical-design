@@ -494,6 +494,16 @@ impl ClockNetwork {
         self.clocks_of.get(pin.index()).map_or(&[], Vec::as_slice)
     }
 
+    /// Whether an ideal clock reaches a pin, as `OpenSTA`'s
+    /// `isIdealClock`: one not propagated, wherever the pin is in its
+    /// network, its source included.
+    #[must_use]
+    pub fn carries_ideal_clock(&self, pin: PinId) -> bool {
+        self.clocks_of(pin)
+            .iter()
+            .any(|c| !self.propagated.get(c.index()).copied().unwrap_or(false))
+    }
+
     /// Whether a clock pin takes its clock at the edge time, ideally,
     /// rather than through the network's delays: when any clock reaching it
     /// is ideal, or it is where a clock enters.
