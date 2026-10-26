@@ -248,6 +248,9 @@ impl Axis {
     }
 }
 
+/// Axes a Liberty table may have: `variable_1` to `variable_3`.
+const MAX_AXES: usize = 3;
+
 /// A lookup table of up to three axes, its values in row-major order with
 /// the first axis outermost.
 #[derive(Clone, Debug, PartialEq)]
@@ -327,29 +330,31 @@ impl Table {
     /// varies.
     #[must_use]
     pub fn lookup_inputs(&self, inputs: &TableInputs) -> f64 {
-        let coordinates: Vec<f64> = self.axes.iter().map(|a| a.pick(inputs)).collect();
-        self.interpolate(&coordinates)
+        let mut coordinates = [0.0; MAX_AXES];
+        for (c, axis) in coordinates.iter_mut().zip(&self.axes) {
+            *c = axis.pick(inputs);
+        }
+        self.interpolate(&coordinates[..self.axes.len().min(MAX_AXES)])
     }
 
     fn interpolate(&self, coordinates: &[f64]) -> f64 {
-        let mut lower = Vec::with_capacity(self.axes.len());
-        let mut fraction = Vec::with_capacity(self.axes.len());
-        for (axis, &x) in self.axes.iter().zip(coordinates) {
+        let axes = &self.axes[..coordinates.len()];
+        let mut lower = [0usize; MAX_AXES];
+        let mut fraction = [0.0; MAX_AXES];
+        for (k, (axis, &x)) in axes.iter().zip(coordinates).enumerate() {
             if axis.values.len() <= 1 {
-                lower.push(0);
-                fraction.push(0.0);
                 continue;
             }
             let i = axis.lower_index(x);
             let (x0, x1) = (axis.values[i], axis.values[i + 1]);
-            lower.push(i);
-            fraction.push((x - x0) / (x1 - x0));
+            lower[k] = i;
+            fraction[k] = (x - x0) / (x1 - x0);
         }
         let mut sum = 0.0;
-        for corner in 0..(1usize << self.axes.len()) {
+        for corner in 0..(1usize << axes.len()) {
             let mut weight = 1.0;
             let mut index = 0;
-            for (k, axis) in self.axes.iter().enumerate() {
+            for (k, axis) in axes.iter().enumerate() {
                 let high = (corner >> k) & 1 == 1;
                 let (i, t) = (lower[k], fraction[k]);
                 let (point, w) = if axis.values.len() <= 1 {

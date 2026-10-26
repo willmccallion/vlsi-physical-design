@@ -96,7 +96,17 @@ const fn unconstrained(required: f64) -> bool {
 /// Whether two pairs of times differ at all, bit for bit, which is what a
 /// change worth propagating means.
 fn differ(a: [f64; 2], b: [f64; 2]) -> bool {
-    a.map(f64::to_bits) != b.map(f64::to_bits)
+    a.iter().zip(&b).any(|(&x, &y)| !same_time(x, y))
+}
+
+/// Whether two times, either possibly infinite, are equal within
+/// `OpenSTA`'s tolerance, so that a change too small to matter does not
+/// propagate through the graph.
+fn same_time(a: f64, b: f64) -> bool {
+    if a.is_infinite() || b.is_infinite() {
+        return a.to_bits() == b.to_bits();
+    }
+    fuzzy::equal(a, b)
 }
 
 /// Whether `candidate` is a tighter required time than `held` on `side`.
@@ -648,11 +658,18 @@ impl Sta {
                 entry.required = old.required;
             }
         }
+        let same_arrival = |o: &Entry, f: &Entry| {
+            o.arrival.iter().zip(&f.arrival).all(|(x, y)| match (x, y) {
+                (Some(x), Some(y)) => same_time(*x, *y),
+                (None, None) => true,
+                _ => false,
+            })
+        };
         let changed = slot.len() != fresh.len()
             || slot
                 .iter()
                 .zip(&fresh)
-                .any(|(o, f)| o.tag != f.tag || o.arrival != f.arrival);
+                .any(|(o, f)| o.tag != f.tag || !same_arrival(o, f));
         if changed || slot.iter().zip(&fresh).any(|(o, f)| o.prev != f.prev) {
             *slot = fresh;
         }

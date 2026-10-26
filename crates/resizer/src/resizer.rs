@@ -141,6 +141,9 @@ pub struct Resizer<'a> {
     dead_nets: Vec<NetId>,
     resized_multi_output: HashSet<CellId>,
     inserted_buffers: usize,
+    /// Drivers whose timing is to be found again at the next flush, while
+    /// edits are batched.
+    pending: Option<Vec<PinId>>,
 }
 
 impl<'a> Resizer<'a> {
@@ -190,7 +193,26 @@ impl<'a> Resizer<'a> {
             dead_nets: Vec::new(),
             resized_multi_output: HashSet::new(),
             inserted_buffers: 0,
+            pending: None,
         })
+    }
+
+    /// Holds back the timing updates of the edits that follow until
+    /// [`Resizer::flush`], so that a run of edits is propagated once.
+    pub fn batch_edits(&mut self) {
+        if self.pending.is_none() {
+            self.pending = Some(Vec::new());
+        }
+    }
+
+    /// Finds the timing again after the edits batched so far and ends the
+    /// batch.
+    pub fn flush(&mut self) {
+        if let Some(mut drivers) = self.pending.take() {
+            drivers.sort_unstable();
+            drivers.dedup();
+            self.propagate(&drivers);
+        }
     }
 
     /// A view of the design as it stands.
@@ -530,8 +552,13 @@ impl<'a> Resizer<'a> {
         self.propagate(&drivers);
     }
 
-    /// Finds slews, delays and timing again from `drivers` on.
+    /// Finds slews, delays and timing again from `drivers` on, or holds
+    /// them for the flush while edits are batched.
     fn propagate(&mut self, drivers: &[PinId]) {
+        if let Some(pending) = self.pending.as_mut() {
+            pending.extend_from_slice(drivers);
+            return;
+        }
         let netlist = Netlist::new(self.db, self.link);
         let dirty = self.graph.propagate_from(&netlist, self.clocks, drivers);
         if let Some(sta) = &mut self.sta {
@@ -541,20 +568,34 @@ impl<'a> Resizer<'a> {
 
     /// Re-estimates a net and everything timed through it.
     pub fn update_net(&mut self, net: NetId) {
-        let netlist = Netlist::new(self.db, self.link);
-        let dirty = self.graph.update_net(&netlist, self.clocks, net);
-        if let Some(sta) = &mut self.sta {
-            sta.update(&netlist, &self.graph, self.clocks, &dirty);
-        }
+        let drivers: Vec<PinId> = {
+            let netlist = Netlist::new(self.db, self.link);
+            self.graph.parasitics_invalid(&netlist, self.clocks, net);
+            netlist.drivers(net).collect()
+        };
+        self.propagate(&drivers);
     }
 
     /// Re-estimates the nets around a cell whose master changed.
     pub fn update_cell(&mut self, cell: CellId) {
-        let netlist = Netlist::new(self.db, self.link);
-        let dirty = self.graph.update_cell(&netlist, self.clocks, cell);
-        if let Some(sta) = &mut self.sta {
-            sta.update(&netlist, &self.graph, self.clocks, &dirty);
-        }
+        let drivers: Vec<PinId> = {
+            let netlist = Netlist::new(self.db, self.link);
+            let mut drivers = Vec::new();
+            for &pin in &self.db.cells[cell.index()].pins {
+                let net = self.db.pins[pin.index()].net;
+                if netlist.is_load(pin) || netlist.is_driver(pin) {
+                    self.graph.parasitics_invalid(&netlist, self.clocks, net);
+                }
+                if netlist.is_load(pin) {
+                    drivers.extend(netlist.drivers(net));
+                }
+                if netlist.is_driver(pin) {
+                    drivers.push(pin);
+                }
+            }
+            drivers
+        };
+        self.propagate(&drivers);
     }
 
     /// Gives `cell` the master of `size` and refreshes the timing around

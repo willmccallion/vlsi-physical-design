@@ -6,6 +6,7 @@
 //! delay calculation finds them from the estimated parasitics.
 
 use crate::dmp::{self, PiModel};
+use crate::fuzzy;
 use crate::netlist::{ClockNetwork, Constants, Netlist};
 use crate::parasitics::{NetParasitics, PiElmore, WireRc};
 use pare_common::db::design::PinOwner;
@@ -262,23 +263,6 @@ impl TimingGraph {
         self.parasitics[net.index()] = estimate_net(netlist, clocks, net, &self.rc);
     }
 
-    /// Re-estimates a net's parasitics after its pins or their positions
-    /// changed, and finds the slews and delays that depend on them again;
-    /// returns every driver whose delays were found again.
-    pub fn update_net(
-        &mut self,
-        netlist: &Netlist<'_>,
-        clocks: &ClockNetwork,
-        net: NetId,
-    ) -> Vec<PinId> {
-        if net.index() >= self.parasitics.len() || netlist.db.pins.len() > self.slew.len() {
-            self.grow(netlist);
-        }
-        self.parasitics[net.index()] = estimate_net(netlist, clocks, net, &self.rc);
-        let drivers: Vec<PinId> = netlist.drivers(net).collect();
-        self.propagate_from(netlist, clocks, &drivers)
-    }
-
     /// Finds the slews and delays again from `drivers` onward, following
     /// changes through the fanout; returns every driver visited, in the
     /// order first visited.
@@ -368,34 +352,6 @@ impl TimingGraph {
         while self.parasitics.len() < db.nets.len() {
             self.parasitics.push(None);
         }
-    }
-
-    /// Notes that `cell` changed master: its pins keep their ids but move
-    /// with the new master's pin shapes, so the parasitics of every net on
-    /// it are estimated again, as `OpenROAD`'s `replaceCell` invalidates
-    /// them, and the slews and delays around it found again; returns every
-    /// driver whose delays were found again.
-    pub fn update_cell(
-        &mut self,
-        netlist: &Netlist<'_>,
-        clocks: &ClockNetwork,
-        cell: CellId,
-    ) -> Vec<PinId> {
-        let db = netlist.db;
-        let mut drivers = Vec::new();
-        for &pin in &db.cells[cell.index()].pins {
-            let net = db.pins[pin.index()].net;
-            if netlist.is_load(pin) || netlist.is_driver(pin) {
-                self.parasitics_invalid(netlist, clocks, net);
-            }
-            if netlist.is_load(pin) {
-                drivers.extend(netlist.drivers(net));
-            }
-            if netlist.is_driver(pin) {
-                drivers.push(pin);
-            }
-        }
-        self.propagate_from(netlist, clocks, &drivers)
     }
 
     /// Finds every pin's level again after the netlist changed shape, as
@@ -592,13 +548,21 @@ impl TimingGraph {
             if self.annotated[load.index()].is_some() {
                 continue;
             }
-            if self.slew[load.index()] != slews {
+            if !same_slews(&self.slew[load.index()], &slews) {
                 self.slew[load.index()] = slews;
                 changed.push(load);
             }
         }
         changed
     }
+}
+
+/// Whether two sided slews are equal within `OpenSTA`'s tolerance, so a
+/// change too small to matter stops propagating.
+fn same_slews(a: &[EdgeValues; 2], b: &[EdgeValues; 2]) -> bool {
+    a.iter()
+        .zip(b)
+        .all(|(x, y)| fuzzy::equal(x.rise, y.rise) && fuzzy::equal(x.fall, y.fall))
 }
 
 /// Values for both edges merged over a driver's arcs on one side: the

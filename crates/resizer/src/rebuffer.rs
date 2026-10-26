@@ -230,6 +230,7 @@ impl Rebuffer {
                 continue;
             }
             let old_buffers = collect_imported_buffers(resizer, driver, &original);
+            resizer.batch_edits();
             self.inserted += export_tree(resizer, &area_tree, "place")?;
             for buffer in old_buffers {
                 if !resizer.db.cells[buffer.index()].retired {
@@ -237,6 +238,7 @@ impl Rebuffer {
                     self.removed += 1;
                 }
             }
+            resizer.flush();
         }
         Ok(())
     }
