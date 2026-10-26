@@ -26,6 +26,7 @@ use crate::geom::dbu::Dbu;
 use crate::geom::orient::Orientation;
 use crate::geom::point::Point;
 use crate::geom::rect::Rect;
+use crate::geom::region::Region;
 use crate::verify::shapes::{Owner, obstruction_shapes};
 use rstar::{AABB, RTree, RTreeObject};
 use rustc_hash::FxHashMap;
@@ -201,7 +202,8 @@ impl LayerMetal {
 
     /// [`Self::clear`] for metal a via or wire would add: it may touch metal
     /// it may join, but must keep the spacing from such metal it does not
-    /// touch, as the checker counts a narrower gap within one net.
+    /// touch, as the checker counts a narrower gap within one net, unless
+    /// metal it may join fills the gap, where the merged metal has none.
     fn clear_added(
         &self,
         shape: &Rect<Dbu>,
@@ -216,8 +218,13 @@ impl LayerMetal {
             "{shape:?} reaches beyond the fixed metal gathered for the check"
         );
         !near.iter().any(|f| {
-            let close = too_close(shape, &f.rect, self.required(shape, f));
-            close && !(holder.joins(f.holder) && f.rect.touches(shape))
+            if !too_close(shape, &f.rect, self.required(shape, f)) {
+                return false;
+            }
+            if !holder.joins(f.holder) {
+                return true;
+            }
+            !f.rect.touches(shape) && !gap_filled(shape, &f.rect, holder, near)
         })
     }
 
@@ -253,6 +260,40 @@ impl LayerMetal {
         }
         required
     }
+}
+
+/// Whether metal `holder` may join fills the gap between `a` and `b`: the
+/// box between them across their parallel run, or between their nearest
+/// corners when they have none.
+fn gap_filled(a: &Rect<Dbu>, b: &Rect<Dbu>, holder: Holder, near: &[Fixed]) -> bool {
+    let gap = gap_between(a, b);
+    let joining: Vec<Rect<Dbu>> = near
+        .iter()
+        .filter(|f| holder.joins(f.holder) && f.rect.touches(&gap))
+        .map(|f| f.rect)
+        .collect();
+    if joining.iter().any(|r| r.encloses(&gap)) {
+        return true;
+    }
+    Region::from_rects(joining).covers_rect(&gap)
+}
+
+/// The box between two rectangles that do not touch: across the axis they
+/// are apart in, over the stretch they share along the other, or between
+/// their nearest corners when they share none.
+fn gap_between(a: &Rect<Dbu>, b: &Rect<Dbu>) -> Rect<Dbu> {
+    let span = |lo_a: Dbu, hi_a: Dbu, lo_b: Dbu, hi_b: Dbu| {
+        if hi_a <= lo_b {
+            (hi_a, lo_b)
+        } else if hi_b <= lo_a {
+            (hi_b, lo_a)
+        } else {
+            (lo_a.max(lo_b), hi_a.min(hi_b))
+        }
+    };
+    let (x0, x1) = span(a.min.x, a.max.x, b.min.x, b.max.x);
+    let (y0, y1) = span(a.min.y, a.max.y, b.min.y, b.max.y);
+    Rect::new(Point::new(x0, y0), Point::new(x1, y1))
 }
 
 /// How far two rectangles run side by side: their overlap along the axis
@@ -1451,6 +1492,69 @@ mod tests {
         let cell = cell_at(db, m, x);
         let access = PinAccess::new(db, LayerId(1)).unwrap();
         access.blocked_pins(db, cell, pt(x, 0), Orientation::N)
+    }
+
+    fn of_net(net: usize, r: Rect<Dbu>) -> Fixed {
+        Fixed {
+            rect: r,
+            holder: Holder::of_net(Some(NetId::new(net))),
+            obstruction: false,
+        }
+    }
+
+    #[test]
+    fn the_gap_between_side_by_side_rectangles_spans_their_shared_stretch() {
+        let gap = gap_between(&rect(100, 600, 240, 880), &rect(0, 400, 240, 540));
+
+        assert_eq!(gap, rect(100, 540, 240, 600));
+    }
+
+    #[test]
+    fn the_gap_between_diagonal_rectangles_is_the_box_between_their_corners() {
+        let gap = gap_between(&rect(0, 0, 100, 100), &rect(150, 130, 300, 300));
+
+        assert_eq!(gap, rect(100, 100, 150, 130));
+    }
+
+    #[test]
+    fn a_pad_inside_its_pin_has_no_gap_to_the_pins_other_bar() {
+        // XOR2_X1's pin A: a vertical bar and a horizontal bar meeting it,
+        // with a via pad on the vertical bar 0.03 um above the horizontal.
+        let net = Holder::of_net(Some(NetId::new(7)));
+        let vertical = of_net(7, rect(100, 400, 240, 950));
+        let horizontal = of_net(7, rect(-950, 400, 240, 540));
+        let pad = rect(100, 600, 240, 880);
+
+        assert!(gap_filled(
+            &pad,
+            &horizontal.rect,
+            net,
+            &[vertical, horizontal.clone()]
+        ));
+    }
+
+    #[test]
+    fn a_gap_to_the_same_net_that_nothing_fills_stays_a_gap() {
+        let net = Holder::of_net(Some(NetId::new(7)));
+        let other = of_net(7, rect(0, 400, 240, 540));
+        let pad = rect(100, 600, 240, 880);
+
+        assert!(!gap_filled(
+            &pad,
+            &other.rect,
+            net,
+            std::slice::from_ref(&other)
+        ));
+    }
+
+    #[test]
+    fn another_nets_metal_does_not_fill_a_gap() {
+        let net = Holder::of_net(Some(NetId::new(7)));
+        let mine = of_net(7, rect(0, 400, 240, 540));
+        let theirs = of_net(8, rect(100, 400, 240, 950));
+        let pad = rect(100, 600, 240, 880);
+
+        assert!(!gap_filled(&pad, &mine.rect, net, &[mine.clone(), theirs]));
     }
 
     #[test]
