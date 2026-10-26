@@ -56,6 +56,13 @@ pub struct NetlistConfig {
     pub wire_resistance_ohm_per_um: Option<f64>,
     /// Capacitance of that layer's wire, in femtofarads per micron.
     pub wire_capacitance_ff_per_um: Option<f64>,
+    /// The routing layer clock wires are estimated on, as `set_wire_rc
+    /// -clock` sets it; clock nets carry their pins' load alone without it.
+    pub clock_layer: Option<String>,
+    /// Resistance of the clock layer's wire, in ohms per micron.
+    pub clock_wire_resistance_ohm_per_um: Option<f64>,
+    /// Capacitance of the clock layer's wire, in femtofarads per micron.
+    pub clock_wire_capacitance_ff_per_um: Option<f64>,
     /// Cells repair neither inserts nor swaps to, beyond those the library
     /// marks.
     #[serde(default)]
@@ -76,6 +83,9 @@ impl Default for NetlistConfig {
             signal_layer: None,
             wire_resistance_ohm_per_um: None,
             wire_capacitance_ff_per_um: None,
+            clock_layer: None,
+            clock_wire_resistance_ohm_per_um: None,
+            clock_wire_capacitance_ff_per_um: None,
             dont_use: Vec::new(),
             clock_ports: Vec::new(),
         }

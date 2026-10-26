@@ -268,6 +268,30 @@ pub struct Sta {
     latches: FxHashMap<CellId, Latch>,
     /// The enables of gated clocks, checked against their gate's clock.
     gated: FxHashMap<PinId, GatedEnable>,
+    /// Whether each pin is in a propagated clock's network, below where the
+    /// clock enters, so its clock arrives through the network's delays.
+    propagated: Vec<bool>,
+}
+
+/// A clock edge a check captures with, and how late it arrives at the
+/// check's clock pin beyond the edge's own time on each side: zero for an
+/// ideal clock, its network's delay for a propagated one.
+#[derive(Clone, Copy, Debug)]
+struct Capture {
+    edge: ClockEdge,
+    latency: [f64; 2],
+}
+
+impl Capture {
+    /// The latency a check on `side` captures with: the early arrival for
+    /// setup and the late one for hold, as `OpenSTA` takes the capturing
+    /// clock path on the side opposite the check.
+    const fn latency(&self, side: MinMax) -> f64 {
+        match side {
+            MinMax::Max => self.latency[0],
+            MinMax::Min => self.latency[1],
+        }
+    }
 }
 
 impl Sta {
@@ -305,6 +329,9 @@ impl Sta {
             exception_ports,
             latches: find_latches(netlist, constants),
             gated: gated_enables(netlist, clocks),
+            propagated: (0..n)
+                .map(|p| clocks.is_propagated(PinId::new(p)))
+                .collect(),
         };
         sta.find_endpoints(netlist, clocks);
         let all: Vec<PinId> = (0..n).map(PinId::new).collect();
@@ -343,6 +370,7 @@ impl Sta {
         self.entries.resize(2 * n, Vec::new());
         self.is_endpoint.resize(n, false);
         self.end_slack.resize(n, [f64::INFINITY; 2]);
+        self.propagated.resize(n, false);
     }
 
     /// The constraints an analysis runs under.
@@ -636,8 +664,10 @@ impl Sta {
         }
         let mut changed = false;
         for edge in Edge::BOTH {
-            let fresh = if clocks.is_clock(pin) {
+            let fresh = if clocks.is_ideal(pin) {
                 self.clock_seeds(clocks, pin, edge)
+            } else if clocks.is_propagated(pin) {
+                self.network_arrivals(netlist, graph, pin, edge)
             } else if let PinOwner::Io(io) = netlist.db.pins[pin.index()].owner
                 && is_driver
             {
@@ -757,6 +787,55 @@ impl Sta {
         entries
     }
 
+    /// The clock arrivals at a pin of a propagated clock's network, through
+    /// the delays of the cells and wires on the way from where the clock
+    /// enters; data arriving there is not carried on, as at an ideal clock.
+    fn network_arrivals(
+        &mut self,
+        netlist: &Netlist<'_>,
+        graph: &TimingGraph,
+        pin: PinId,
+        edge: Edge,
+    ) -> Vec<Entry> {
+        let all = if netlist.is_driver(pin) {
+            self.driver_arrivals(netlist, graph, pin, edge)
+        } else {
+            self.load_arrivals(netlist, graph, pin, edge)
+        };
+        all.into_iter()
+            .filter(|e| self.tags[e.tag.index()].is_clock)
+            .collect()
+    }
+
+    /// The clock edges arriving at clock pin `pin` on `edge`, each with its
+    /// latency there.
+    fn captures(&self, pin: PinId, edge: Edge) -> Vec<Capture> {
+        self.entries(pin, edge)
+            .iter()
+            .filter_map(|e| {
+                let t = self.tags[e.tag.index()];
+                let launch = t.launch.filter(|_| t.is_clock)?;
+                let time = self.sdc.edge_time(launch);
+                let latency = e.arrival.map(|a| a.map_or(0.0, |a| a - time));
+                Some(Capture {
+                    edge: launch,
+                    latency,
+                })
+            })
+            .collect()
+    }
+
+    /// The transition at a check's clock pin that its margin is read at:
+    /// zero for an ideal clock, as `OpenSTA` takes an ideal clock's slew,
+    /// and the clock's own slew on the check's side for a propagated one.
+    fn clock_slew(&self, graph: &TimingGraph, pin: PinId, edge: Edge, side: MinMax) -> f64 {
+        if self.propagated.get(pin.index()).copied().unwrap_or(false) {
+            graph.slew_side(pin, side).get(edge)
+        } else {
+            0.0
+        }
+    }
+
     /// The arrivals at a cell output from the arcs into it.
     fn driver_arrivals(
         &mut self,
@@ -783,8 +862,17 @@ impl Sta {
                 continue;
             }
             let from_entries: Vec<Entry> = self.entries(arc.arc.from, arc.from_edge).to_vec();
+            let in_network = self
+                .propagated
+                .get(driver.index())
+                .copied()
+                .unwrap_or(false);
             for from in from_entries {
-                let tag = self.data_tag(from.tag);
+                let tag = if in_network {
+                    from.tag
+                } else {
+                    self.data_tag(from.tag)
+                };
                 for side in MinMax::BOTH {
                     let Some(arrival) = from.arrival[side.index()] else {
                         continue;
@@ -882,22 +970,17 @@ impl Sta {
         let Some(launch) = tag.launch else {
             return Vec::new();
         };
-        let enables: Vec<ClockEdge> = self
-            .entries(latch.enable, latch.open_edge)
-            .iter()
-            .filter_map(|e| {
-                let t = self.tags[e.tag.index()];
-                t.is_clock.then_some(t.launch).flatten()
-            })
-            .collect();
-        let margin = latch_margin(netlist, graph, latch, side);
+        let enables = self.captures(latch.enable, latch.open_edge);
+        let related = self.clock_slew(graph, latch.enable, opposite(latch.open_edge), side);
+        let margin = latch_margin(netlist, graph, latch, side, related);
         let mut departures = Vec::new();
-        for enable in enables {
+        for capture in enables {
+            let enable = capture.edge;
             let to = PathEnd::Clock(enable.clock);
             if self.is_false(tag, to, Some(enable.clock), MinMax::Max) {
                 continue;
             }
-            let timing = self.latch_timing(tag, launch, enable, to, arrival, margin);
+            let timing = self.latch_timing(tag, launch, capture, to, arrival, margin);
             if fuzzy::greater(timing.borrow, 0.0) {
                 let q_tag = self.intern(Tag {
                     launch: Some(enable),
@@ -917,15 +1000,19 @@ impl Sta {
         &mut self,
         tag: Tag,
         launch: ClockEdge,
-        enable: ClockEdge,
+        capture: Capture,
         to: PathEnd,
         arrival: f64,
         margin: f64,
     ) -> LatchTiming {
+        let enable = capture.edge;
         let accounting = self.accounting(launch, enable);
         let open_uncertainty = -self.sdc.clock(enable.clock).uncertainty(MinMax::Max);
         let adjustment = self.multicycle_adjustment(tag, launch, enable, to, MinMax::Max);
-        let enable_arrival = accounting.latch_setup_required + open_uncertainty + adjustment;
+        let enable_arrival = accounting.latch_setup_required
+            + open_uncertainty
+            + adjustment
+            + capture.latency(MinMax::Max);
         if fuzzy::less_equal(arrival, enable_arrival) {
             return LatchTiming {
                 required: enable_arrival,
@@ -1175,31 +1262,26 @@ impl Sta {
                         if arc.to_edge != edge {
                             continue;
                         }
-                        let margin = arc.check_value(0.0, data_slew);
+                        let clock_slew = self.clock_slew(graph, clock_pin, arc.from_edge, side);
+                        let margin = arc.check_value(clock_slew, data_slew);
                         let is_latch_setup = latch.is_some() && set.role == ArcRole::Setup;
                         let clock_edge = if is_latch_setup {
                             opposite(arc.from_edge)
                         } else {
                             arc.from_edge
                         };
-                        let targets: Vec<ClockEdge> = self
-                            .entries(clock_pin, clock_edge)
-                            .iter()
-                            .filter_map(|e| {
-                                let t = self.tags[e.tag.index()];
-                                t.is_clock.then_some(t.launch).flatten()
-                            })
-                            .collect();
-                        for target in targets {
+                        for capture in self.captures(clock_pin, clock_edge) {
+                            let target = capture.edge;
                             let to = PathEnd::Clock(target.clock);
                             if self.is_false(tag, to, Some(target.clock), side) {
                                 continue;
                             }
                             let value = if is_latch_setup {
-                                self.latch_timing(tag, launch, target, to, arrival, margin)
+                                self.latch_timing(tag, launch, capture, to, arrival, margin)
                                     .required
                             } else {
-                                let base = self.target_arrival(tag, launch, target, to, side);
+                                let base = self.target_arrival(tag, launch, target, to, side)
+                                    + capture.latency(side);
                                 match side {
                                     MinMax::Max => base - margin,
                                     MinMax::Min => base + margin,
@@ -1231,21 +1313,15 @@ impl Sta {
                 continue;
             }
             let clock_edge = gate.active.check_edge(side);
-            let targets: Vec<ClockEdge> = self
-                .entries(gate.clock, clock_edge)
-                .iter()
-                .filter_map(|e| {
-                    let t = self.tags[e.tag.index()];
-                    t.is_clock.then_some(t.launch).flatten()
-                })
-                .collect();
-            for target in targets {
+            for capture in self.captures(gate.clock, clock_edge) {
+                let target = capture.edge;
                 let to = PathEnd::Clock(target.clock);
                 if self.is_false(tag, to, Some(target.clock), side) {
                     continue;
                 }
                 let required =
-                    self.capture_arrival(tag, launch, target, to, side, Check::GatedClock);
+                    self.capture_arrival(tag, launch, target, to, side, Check::GatedClock)
+                        + capture.latency(side);
                 out.push((side, required));
             }
         }
@@ -1401,7 +1477,13 @@ impl Sta {
 
 /// The setup a latch's data pin demands before the closing edge, on
 /// `side`'s slew, over its setup arcs.
-fn latch_margin(netlist: &Netlist<'_>, graph: &TimingGraph, latch: Latch, side: MinMax) -> f64 {
+fn latch_margin(
+    netlist: &Netlist<'_>,
+    graph: &TimingGraph,
+    latch: Latch,
+    side: MinMax,
+    clock_slew: f64,
+) -> f64 {
     let db = netlist.db;
     let Some((lib, port)) = netlist.link.pin_port(db, latch.data) else {
         return 0.0;
@@ -1415,7 +1497,7 @@ fn latch_margin(netlist: &Netlist<'_>, graph: &TimingGraph, latch: Latch, side: 
         .iter()
         .filter(|set| set.to == port && set.role == ArcRole::Setup)
         .flat_map(|set| set.arcs.iter())
-        .map(|arc| arc.check_value(0.0, slews.get(arc.to_edge)))
+        .map(|arc| arc.check_value(clock_slew, slews.get(arc.to_edge)))
         .fold(0.0, f64::max)
 }
 
@@ -1651,6 +1733,7 @@ mod tests {
             fall,
             sources: Vec::new(),
             uncertainty: [None, None],
+            propagated: false,
         }
     }
 

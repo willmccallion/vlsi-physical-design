@@ -804,6 +804,7 @@ fn repair_design(
         link: &link,
         clocks: &clocks,
         constants: &constants,
+        clock_rc: clock_wire_rc(config, db)?,
     };
     let mut resizer = Resizer::new(
         db,
@@ -884,6 +885,7 @@ fn repair_timing(
         link: &link,
         clocks: &clocks,
         constants: &constants,
+        clock_rc: clock_wire_rc(config, db)?,
     };
     let mut resizer = Resizer::new(
         db,
@@ -1236,6 +1238,29 @@ fn wire_rc(config: &Config, db: &NetlistDB) -> anyhow::Result<WireRc> {
     Ok(WireRc::per_micron(resistance, capacitance, layer_id))
 }
 
+/// The clock wire's resistance and capacitance per micron from the netlist
+/// config, on its clock layer, when the config names one.
+fn clock_wire_rc(config: &Config, db: &NetlistDB) -> anyhow::Result<Option<WireRc>> {
+    let netlist_config = &config.netlist;
+    let (Some(layer), Some(resistance), Some(capacitance)) = (
+        &netlist_config.clock_layer,
+        netlist_config.clock_wire_resistance_ohm_per_um,
+        netlist_config.clock_wire_capacitance_ff_per_um,
+    ) else {
+        if netlist_config.clock_layer.is_some() {
+            anyhow::bail!(
+                "[netlist] clock_layer needs clock_wire_resistance_ohm_per_um and clock_wire_capacitance_ff_per_um"
+            );
+        }
+        return Ok(None);
+    };
+    let layer_id = db
+        .library
+        .routing_layer_id(layer)
+        .with_context(|| format!("unknown clock layer '{layer}'"))?;
+    Ok(Some(WireRc::per_micron(resistance, capacitance, layer_id)))
+}
+
 /// Repairs the design between iterations of timing-driven global
 /// placement, as `OpenROAD`'s resizer does for its placer: `repair_design`
 /// with the buffers' wire length limit, every net rebuffered for timing,
@@ -1272,6 +1297,7 @@ impl TimingDriver for TimingPlacement<'_> {
             link: &link,
             clocks: &clocks,
             constants: &constants,
+            clock_rc: clock_wire_rc(self.config, self.db)?,
         };
         let cells_before = self.db.cells.len();
         let mut resizer = Resizer::new(

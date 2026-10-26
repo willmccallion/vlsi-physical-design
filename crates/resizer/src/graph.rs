@@ -64,6 +64,7 @@ pub struct TimingGraph {
     wire_delay: Vec<[EdgeValues; 2]>,
     parasitics: Vec<Option<NetParasitics>>,
     rc: WireRc,
+    clock_rc: Option<WireRc>,
 }
 
 impl TimingGraph {
@@ -74,12 +75,13 @@ impl TimingGraph {
         clocks: &ClockNetwork,
         constants: &Constants,
         rc: WireRc,
+        clock_rc: Option<WireRc>,
     ) -> Self {
         let db = netlist.db;
         let in_arcs = in_arcs(netlist, constants);
         let (level, loop_arcs) = levelize(netlist, &in_arcs);
         let parasitics = (0..db.nets.len())
-            .map(|n| estimate_net(netlist, clocks, NetId::new(n), &rc))
+            .map(|n| estimate_net(netlist, clocks, NetId::new(n), &rc, clock_rc.as_ref()))
             .collect();
         let mut graph = Self {
             level,
@@ -91,6 +93,7 @@ impl TimingGraph {
             wire_delay: vec![[EdgeValues::default(); 2]; db.pins.len()],
             parasitics,
             rc,
+            clock_rc,
         };
         graph.find_all_slews(netlist, clocks);
         graph
@@ -260,7 +263,8 @@ impl TimingGraph {
         if net.index() >= self.parasitics.len() || netlist.db.pins.len() > self.slew.len() {
             self.grow(netlist);
         }
-        self.parasitics[net.index()] = estimate_net(netlist, clocks, net, &self.rc);
+        self.parasitics[net.index()] =
+            estimate_net(netlist, clocks, net, &self.rc, self.clock_rc.as_ref());
     }
 
     /// Finds the slews and delays again from `drivers` onward, following
@@ -435,6 +439,41 @@ impl TimingGraph {
         (annotated, changed)
     }
 
+    /// The slews and wire delays at the loads of a driver without arcs, an
+    /// input port with no driving cell, which switches at `root` slew with
+    /// no resistance: the wire's Elmore delay to each load at the input
+    /// threshold, and the slew it adds, as `OpenSTA`'s `inputPortDelay`.
+    fn ideal_driver_loads(
+        &self,
+        netlist: &Netlist<'_>,
+        driver: PinId,
+        loads: &[PinId],
+        root: EdgeValues,
+    ) -> Vec<([EdgeValues; 2], [EdgeValues; 2])> {
+        let t = &netlist.link.liberty.thresholds;
+        let mut out = vec![([root, root], [EdgeValues::default(); 2]); loads.len()];
+        for edge in Edge::BOTH {
+            let Some(pi) = self.pi_elmore(netlist, driver, edge) else {
+                continue;
+            };
+            let delay_factor = -(1.0 - t.input.get(edge)).ln();
+            let slew_factor = ((1.0 - t.slew_lower.get(edge)) / (1.0 - t.slew_upper.get(edge)))
+                .ln()
+                / t.slew_derate;
+            for (i, &load) in loads.iter().enumerate() {
+                let Some(elmore) = pi.elmore.iter().find(|(l, _)| *l == load).map(|(_, e)| *e)
+                else {
+                    continue;
+                };
+                for side in 0..2 {
+                    out[i].0[side].set(edge, elmore.mul_add(slew_factor, root.get(edge)));
+                    out[i].1[side].set(edge, elmore * delay_factor);
+                }
+            }
+        }
+        out
+    }
+
     fn find_all_slews(&mut self, netlist: &Netlist<'_>, clocks: &ClockNetwork) {
         let mut order: Vec<PinId> = (0..netlist.db.pins.len())
             .map(PinId::new)
@@ -489,7 +528,7 @@ impl TimingGraph {
                     );
                     let mut delay = [0.0; 2];
                     for side in MinMax::BOTH {
-                        let in_slew = if set.role == ArcRole::RegClkToQ && clocks.is_clock(arc.from)
+                        let in_slew = if set.role == ArcRole::RegClkToQ && clocks.is_ideal(arc.from)
                         {
                             0.0
                         } else {
@@ -537,14 +576,21 @@ impl TimingGraph {
             self.slew[driver.index()] = drvr_slew;
         }
         self.arc_delays[driver.index()] = arc_delays;
+        let ideal = if any_arc {
+            None
+        } else {
+            Some(self.ideal_driver_loads(netlist, driver, &loads, root))
+        };
         let mut changed = Vec::new();
         for (i, &load) in loads.iter().enumerate() {
-            let slews = if any_arc {
-                load_slews[i].map(Merged::values)
-            } else {
-                [root, root]
+            let (slews, delays) = match &ideal {
+                Some(ideal) => ideal[i],
+                None => (
+                    load_slews[i].map(Merged::values),
+                    load_delays[i].map(Merged::values),
+                ),
             };
-            self.wire_delay[load.index()] = load_delays[i].map(Merged::values);
+            self.wire_delay[load.index()] = delays;
             if self.annotated[load.index()].is_some() {
                 continue;
             }
@@ -615,14 +661,20 @@ pub fn pin_capacitance(netlist: &Netlist<'_>, pin: PinId, edge: Edge) -> f64 {
 
 /// The parasitics of a net, or none for a net of fewer than two pins or one
 /// an ideal clock drives.
+/// A net's estimated parasitics: on the clock wire RC for a net a clock
+/// drives, none for such a net without one, and none for a special net.
 fn estimate_net(
     netlist: &Netlist<'_>,
     clocks: &ClockNetwork,
     net: NetId,
     rc: &WireRc,
+    clock_rc: Option<&WireRc>,
 ) -> Option<NetParasitics> {
-    if netlist.is_special(net) || netlist.drivers(net).any(|d| clocks.is_clock(d)) {
+    if netlist.is_special(net) {
         return None;
+    }
+    if netlist.drivers(net).any(|d| clocks.is_clock(d)) {
+        return clock_rc.and_then(|clock| NetParasitics::estimate(netlist, net, clock));
     }
     NetParasitics::estimate(netlist, net, rc)
 }

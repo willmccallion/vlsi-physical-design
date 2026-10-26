@@ -82,6 +82,9 @@ pub struct Context<'a> {
     pub clocks: &'a ClockNetwork,
     /// The constant pins, which repair leaves alone.
     pub constants: &'a Constants,
+    /// The wire RC clock nets are estimated with, as `set_wire_rc -clock`
+    /// sets it; without one, clock nets carry their pins' load alone.
+    pub clock_rc: Option<WireRc>,
 }
 
 /// Target slews and the load each cell meets them at, as `OpenROAD`'s
@@ -175,6 +178,7 @@ impl<'a> Resizer<'a> {
             link,
             clocks,
             constants,
+            clock_rc,
         } = context;
         let slew_rc_factor = slew_rc_factor(link)?;
         let r_strongest_buffer = buffers
@@ -185,7 +189,7 @@ impl<'a> Resizer<'a> {
         let targets = find_targets(link, &buffers);
         let (graph, sta) = {
             let netlist = Netlist::new(db, link);
-            let graph = TimingGraph::new(&netlist, clocks, constants, rc);
+            let graph = TimingGraph::new(&netlist, clocks, constants, rc, clock_rc);
             let sta = sdc.map(|sdc| Sta::new(&netlist, &graph, clocks, constants, sdc));
             (graph, sta)
         };

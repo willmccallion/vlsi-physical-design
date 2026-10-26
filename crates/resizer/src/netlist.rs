@@ -373,6 +373,8 @@ impl Constants {
 pub struct ClockNetwork {
     clocks_of: Vec<Vec<ClockId>>,
     sources: Vec<PinId>,
+    /// Whether each clock is propagated, by clock id.
+    propagated: Vec<bool>,
 }
 
 impl ClockNetwork {
@@ -403,7 +405,9 @@ impl ClockNetwork {
             .enumerate()
             .map(|(i, c)| (ClockId(i as u32), c.sources.clone()))
             .collect();
-        Self::find(netlist, &clocks, constants)
+        let mut network = Self::find(netlist, &clocks, constants);
+        network.propagated = sdc.clocks.iter().map(|c| c.propagated).collect();
+        network
     }
 
     fn find(
@@ -464,7 +468,11 @@ impl ClockNetwork {
                 }
             }
         }
-        Self { clocks_of, sources }
+        Self {
+            clocks_of,
+            sources,
+            propagated: vec![false; clocks.len()],
+        }
     }
 
     /// Whether a pin carries a clock; pins added since the search do not.
@@ -477,6 +485,25 @@ impl ClockNetwork {
     #[must_use]
     pub fn clocks_of(&self, pin: PinId) -> &[ClockId] {
         self.clocks_of.get(pin.index()).map_or(&[], Vec::as_slice)
+    }
+
+    /// Whether a clock pin takes its clock at the edge time, ideally,
+    /// rather than through the network's delays: when any clock reaching it
+    /// is ideal, or it is where a clock enters.
+    #[must_use]
+    pub fn is_ideal(&self, pin: PinId) -> bool {
+        self.is_clock(pin)
+            && (self.sources.contains(&pin)
+                || self
+                    .clocks_of(pin)
+                    .iter()
+                    .any(|c| !self.propagated.get(c.index()).copied().unwrap_or(false)))
+    }
+
+    /// Whether a clock pin's clocks arrive through the network's delays.
+    #[must_use]
+    pub fn is_propagated(&self, pin: PinId) -> bool {
+        self.is_clock(pin) && !self.is_ideal(pin)
     }
 
     /// The pins the clocks enter at.

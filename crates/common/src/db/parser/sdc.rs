@@ -278,8 +278,8 @@ impl Interpreter<'_> {
             }
             "set_load" => self.set_load(rest, line),
             "set_input_transition" => self.set_input_transition(rest, line),
+            "set_propagated_clock" => self.set_propagated_clock(rest, line),
             "set_driving_cell"
-            | "set_propagated_clock"
             | "set_clock_latency"
             | "set_clock_transition"
             | "set_disable_timing"
@@ -653,6 +653,7 @@ impl Interpreter<'_> {
                 fall,
                 sources,
                 uncertainty: [None, None],
+                propagated: false,
             };
             return Ok(String::new());
         }
@@ -668,6 +669,7 @@ impl Interpreter<'_> {
             fall,
             sources,
             uncertainty: [None, None],
+            propagated: false,
         });
         Ok(String::new())
     }
@@ -757,6 +759,19 @@ impl Interpreter<'_> {
             } else {
                 entry.delays.set(&edges, &sides, delay);
             }
+        }
+        Ok(String::new())
+    }
+
+    /// `set_propagated_clock` on clocks; on ports or pins, which `OpenSTA`
+    /// also takes, it is not supported.
+    fn set_propagated_clock(&mut self, args: &[String], line: usize) -> Result<String, ParseError> {
+        let parsed = parse_args(args);
+        let [objects] = parsed.positional.as_slice() else {
+            return Err(self.error(line, "set_propagated_clock wants one object list"));
+        };
+        for clock in self.clocks_of(objects, line)? {
+            self.sdc.clocks[clock.index()].propagated = true;
         }
         Ok(String::new())
     }
@@ -1845,6 +1860,16 @@ set_output_delay [expr $clk_period * $clk_io_pct] -clock $clk_name [all_outputs]
         assert!(glob_matches("key*", "key[0]"));
         assert!(!glob_matches("key?", "key[0]"));
         assert!(glob_matches("k?y[0]", "key[0]"));
+    }
+
+    #[test]
+    fn set_propagated_clock_marks_the_clocks_named() {
+        let sdc = parse(
+            "create_clock -name clk -period 1 [get_ports clk]\n\
+             set_propagated_clock [get_clocks {clk}]\n",
+        );
+
+        assert!(sdc.clocks[0].propagated);
     }
 
     #[test]

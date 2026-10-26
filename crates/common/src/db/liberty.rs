@@ -68,6 +68,14 @@ impl EdgeValues {
     pub const fn max(&self) -> f64 {
         self.rise.max(self.fall)
     }
+
+    /// Sets the value for `edge`.
+    pub const fn set(&mut self, edge: Edge, value: f64) {
+        match edge {
+            Edge::Rise => self.rise = value,
+            Edge::Fall => self.fall = value,
+        }
+    }
 }
 
 /// The voltage thresholds a library measures transitions against, as

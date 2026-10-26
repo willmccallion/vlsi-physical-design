@@ -91,6 +91,9 @@ pub struct Clock {
     pub sources: Vec<IoPinId>,
     /// Setup (late) and hold (early) uncertainty, in seconds, where set.
     pub uncertainty: [Option<f64>; 2],
+    /// Whether it arrives through its network's delays rather than
+    /// everywhere at once, as `set_propagated_clock` makes it.
+    pub propagated: bool,
 }
 
 impl Clock {
