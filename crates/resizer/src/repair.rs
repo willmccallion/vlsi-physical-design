@@ -36,6 +36,15 @@ pub struct RepairSummary {
     pub inserted: usize,
 }
 
+/// Which limits a net's repair checks.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Checks {
+    /// Slews, loads and wire length.
+    All,
+    /// Wire length alone, as clock nets are repaired.
+    LengthOnly,
+}
+
 /// What decides where a wire is split for a repeater.
 #[derive(Clone, Copy, Debug)]
 struct SplitInput {
@@ -120,11 +129,53 @@ impl<'r, 'a> Repairer<'r, 'a> {
         if skip {
             return Ok(());
         }
-        self.repair_net(net, driver)
+        self.repair_net(net, driver, Checks::All)
+    }
+
+    /// Buffers every clock net with a wire longer than `max_length`
+    /// database units, its slews and loads left unchecked and its driver
+    /// unsized, with margins of zero and the strongest of `clock_buffers`
+    /// standing for the strongest buffer, as `RepairDesign::repairClkNets`
+    /// runs `repairNet` over the drivers of the clock network.
+    pub fn repair_clock_nets(
+        mut self,
+        clock_buffers: &[LibCellId],
+        max_length: i64,
+    ) -> Result<RepairSummary, RepairError> {
+        let saved_options = self.resizer.options;
+        let saved_strongest = self.resizer.r_strongest_buffer;
+        self.resizer.options.slew_margin = 0.0;
+        self.resizer.options.cap_margin = 0.0;
+        self.resizer.options.max_wire_length = max_length;
+        self.resizer.r_strongest_buffer = clock_buffers
+            .iter()
+            .map(|&b| self.resizer.link.buffer_drive_resistance(b))
+            .fold(f64::MAX, f64::min);
+        let drivers: Vec<PinId> = {
+            let netlist = self.resizer.netlist();
+            (0..self.resizer.db.pins.len())
+                .map(PinId::new)
+                .filter(|&p| {
+                    self.resizer.clocks.is_clock(p)
+                        && netlist.is_driver(p)
+                        && !netlist.is_special(self.resizer.db.pins[p.index()].net)
+                })
+                .collect()
+        };
+        self.resizer.defer_timing();
+        let result = drivers.into_iter().try_for_each(|driver| {
+            let net = self.resizer.db.pins[driver.index()].net;
+            self.repair_net(net, driver, Checks::LengthOnly)
+        });
+        self.resizer.resume_timing();
+        self.resizer.options = saved_options;
+        self.resizer.r_strongest_buffer = saved_strongest;
+        result?;
+        Ok(self.summary)
     }
 
     /// `RepairDesign::repairNet` for one driver.
-    fn repair_net(&mut self, net: NetId, driver: PinId) -> Result<(), RepairError> {
+    fn repair_net(&mut self, net: NetId, driver: PinId, checks: Checks) -> Result<(), RepairError> {
         let mut repaired = false;
         let mut max_cap = f64::INFINITY;
         let mut repair_cap = false;
@@ -132,8 +183,10 @@ impl<'r, 'a> Repairer<'r, 'a> {
 
         let tristate = self.resizer.is_tristate_driver(driver);
         let (slew, limit) = self.driver_slew_check(driver);
+        let check_limits = checks == Checks::All;
         let mut slew_violation = false;
-        if let Some(limit) = limit
+        if check_limits
+            && let Some(limit) = limit
             && slew > limit
         {
             slew_violation = true;
@@ -148,7 +201,8 @@ impl<'r, 'a> Repairer<'r, 'a> {
                 repair_cap = true;
             }
         }
-        if !tristate
+        if check_limits
+            && !tristate
             && (self.loads_violate_slew(driver)
                 || self.load_slew_violation_drivers.contains(&driver))
         {
@@ -159,7 +213,7 @@ impl<'r, 'a> Repairer<'r, 'a> {
             self.summary.slew_violations += 1;
         }
 
-        if !tristate {
+        if check_limits && !tristate {
             let cap = self.resizer.load_cap(driver);
             if let Some(limit) = self.resizer.cap_limit(driver) {
                 let margined = self.resizer.margined_cap(limit);
