@@ -29,6 +29,8 @@ use pare_placer::global::{
 };
 use pare_placer::io::{self, IoLayers};
 use pare_placer::legalize::Legalization;
+use pare_placer::legalize::opendp::improve::improve_placement;
+use pare_placer::legalize::opendp::mirror::optimize_mirroring;
 use pare_placer::model::PlacementModel;
 use pare_placer::zones::{Zone, Zones};
 
@@ -51,6 +53,10 @@ use report::{
 use rustc_hash::FxHashMap;
 use std::path::{Path, PathBuf};
 use std::time::Instant;
+
+/// How far `improve_placement` may move a cell, in row heights across and
+/// rows up or down: OpenROAD-flow-scripts' `DPO_MAX_DISPLACEMENT`.
+const IMPROVE_MAX_DISPLACEMENT: (i64, i64) = (5, 1);
 
 #[derive(Parser)]
 #[command(author, version, about = "PARE -- Placement And Routing Engine", long_about = None)]
@@ -583,7 +589,7 @@ fn run_placement(
 
     let phase_start = Instant::now();
     ui::phase("Legalization");
-    legalize(db, &zones)?;
+    let legalization = legalize(db, &zones)?;
     ui::check(&format!("Legalized {movable_cells} cells"));
     let access = config
         .routing
@@ -610,18 +616,31 @@ fn run_placement(
 
     let phase_start = Instant::now();
     ui::phase("Detailed Placement");
-    let result = detailed::improve(db, &zones, 3, access.as_ref());
+    let before: Vec<_> = db.cells.iter().map(|c| (c.location, c.orient)).collect();
+    if let Legalization::DetailedPlacement(_) = legalization {
+        let _ = improve_placement(db, IMPROVE_MAX_DISPLACEMENT)?;
+        let mirrored = optimize_mirroring(db);
+        ui::stat_row("Mirrored:", &mirrored.to_string(), "", "");
+    } else {
+        let _ = detailed::improve(db, &zones, 3, access.as_ref());
+    }
+    let changed = db
+        .cells
+        .iter()
+        .zip(&before)
+        .filter(|&(c, &b)| (c.location, c.orient) != b)
+        .count();
     let hpwl = PlacementModel::from_db(db, &zones).hpwl();
     ui::stat_row(
-        "Moves:",
-        &result.moves.to_string(),
+        "Cells changed:",
+        &changed.to_string(),
         "HPWL (um):",
         &format!("{hpwl:.0}"),
     );
     report.phase("detailed placement", phase_start);
     if let Some(summary) = &mut report.placement {
         summary.hpwl_um = hpwl;
-        summary.detailed_moves = result.moves;
+        summary.detailed_moves = changed;
         summary.blocked_pins = blocked_pins;
     }
     if let Some(repair) = &mut repair
@@ -630,7 +649,7 @@ fn run_placement(
         let zones = Zones::new(db)?;
         let phase_start = Instant::now();
         ui::phase("Legalization");
-        legalize(db, &zones)?;
+        let _ = legalize(db, &zones)?;
         let hpwl = PlacementModel::from_db(db, &zones).hpwl();
         ui::stat_row("HPWL (um):", &format!("{hpwl:.0}"), "", "");
         report.phase("legalization after clock tree synthesis", phase_start);
@@ -641,7 +660,7 @@ fn run_placement(
         let zones = Zones::new(db)?;
         let phase_start = Instant::now();
         ui::phase("Legalization");
-        legalize(db, &zones)?;
+        let _ = legalize(db, &zones)?;
         let hpwl = PlacementModel::from_db(db, &zones).hpwl();
         ui::stat_row("HPWL (um):", &format!("{hpwl:.0}"), "", "");
         report.phase("legalization after timing repair", phase_start);
@@ -678,8 +697,9 @@ fn run_placement(
 
 /// Legalizes the placement as OpenROAD-flow-scripts' `detailed_placement`
 /// does, showing how far the cells moved.
-fn legalize(db: &mut NetlistDB, zones: &Zones) -> anyhow::Result<()> {
-    if let Legalization::DetailedPlacement(done) = pare_placer::legalize::legalize(db, zones)? {
+fn legalize(db: &mut NetlistDB, zones: &Zones) -> anyhow::Result<Legalization> {
+    let legalization = pare_placer::legalize::legalize(db, zones)?;
+    if let Legalization::DetailedPlacement(done) = legalization {
         let um = |d: Dbu| d.get() as f64 / f64::from(db.dbu().get());
         ui::stat_row(
             "Displacement (um):",
@@ -688,7 +708,7 @@ fn legalize(db: &mut NetlistDB, zones: &Zones) -> anyhow::Result<()> {
             &format!("{:.1}", um(done.max_displacement)),
         );
     }
-    Ok(())
+    Ok(legalization)
 }
 
 /// Reads the Liberty files, the first one's thresholds and defaults
@@ -1024,7 +1044,7 @@ fn legalize_and_reroute(
     let phase_start = Instant::now();
     ui::phase("Legalization");
     let before: Vec<_> = db.cells.iter().map(|c| (c.location, c.orient)).collect();
-    legalize(db, &Zones::new(db)?)?;
+    let _ = legalize(db, &Zones::new(db)?)?;
     let mut moved_nets: Vec<NetId> = db
         .cells
         .iter()

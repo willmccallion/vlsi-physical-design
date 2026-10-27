@@ -163,7 +163,7 @@ pub struct PlacementSummary {
     pub overflow: f64,
     /// Half-perimeter wirelength after detailed placement, in microns.
     pub hpwl_um: f64,
-    /// Moves detailed placement kept.
+    /// Cells detailed placement moved or turned.
     pub detailed_moves: usize,
     /// Signal pins left where fixed metal blocks every via to them.
     pub blocked_pins: usize,
