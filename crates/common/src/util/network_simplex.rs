@@ -1,6 +1,7 @@
-//! LEMON's network simplex as `TritonCTS` runs it, so that the clustering's
-//! flows, ties included, come out as they do there: a `ListDigraph`, whose
-//! nodes and arcs iterate last-created first, its arcs mixed into the
+//! LEMON's network simplex as `TritonCTS` and `OpenDP` run it.
+//!
+//! Their flows, ties included, come out as they do there: a `ListDigraph`,
+//! whose nodes and arcs iterate last-created first, its arcs mixed into the
 //! simplex's order, `int` flows and costs with their wrapping arithmetic,
 //! equality supplies, and the block search pivot rule.
 
@@ -15,16 +16,20 @@ const ART_COST: i32 = i32::MAX / 2 + 1;
 
 /// An arc as it was added.
 #[derive(Clone, Copy, Debug)]
-pub(crate) struct Arc {
+pub struct Arc {
+    /// The node the arc leaves, in the order the nodes were added.
     pub source: usize,
+    /// The node the arc enters.
     pub target: usize,
+    /// The most flow the arc carries; none is the least.
     pub capacity: i32,
+    /// The cost of a unit of flow along it.
     pub cost: i32,
 }
 
 /// The flow on each arc, in the order the arcs were added, after the
 /// simplex sends `supply` from `source` to `target` over `node_count` nodes.
-pub(crate) fn min_cost_flow(
+pub fn min_cost_flow(
     node_count: usize,
     arcs: &[Arc],
     source: usize,

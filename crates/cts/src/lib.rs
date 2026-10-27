@@ -9,7 +9,6 @@ mod htree;
 mod kmeans;
 mod latency;
 pub mod options;
-mod simplex;
 mod sink_clustering;
 pub mod techchar;
 mod triton;

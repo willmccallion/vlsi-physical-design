@@ -9,7 +9,7 @@
 //! among equally cheap ones the simplex's own choice, so the simplex is
 //! run as LEMON runs it.
 
-use crate::simplex::{Arc, min_cost_flow};
+use pare_common::util::network_simplex::{Arc, min_cost_flow};
 
 const MAX_DIST: f32 = 5200.0;
 
