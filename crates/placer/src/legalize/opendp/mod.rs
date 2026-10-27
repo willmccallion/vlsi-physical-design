@@ -17,6 +17,7 @@
 
 mod cpp;
 mod groups;
+pub mod improve;
 pub mod mirror;
 
 use pare_common::db::design::{NetlistDB, PinOwner, PlacementStatus};
@@ -1039,24 +1040,29 @@ impl Placer {
     /// Puts a cell at `(x, y)` in its row's orientation, as
     /// `Opendp::placeCell`.
     fn place_cell(&mut self, n: usize, x: i64, y: i64) {
-        let left = x * self.site_width;
+        self.paint_pixels(n, x, y);
+        let orient = self.site_orientation(x, y, self.nodes[n].site);
         let bottom = self.row_y(y);
+        let node = &mut self.nodes[n];
+        node.left = x * self.site_width;
+        node.bottom = bottom;
+        node.placed = true;
+        if let Some(orient) = orient {
+            node.orient = orient;
+        }
+    }
+
+    /// Marks the sites a cell covers from `(x, y)` as its own, as
+    /// `Grid::paintPixel`.
+    fn paint_pixels(&mut self, n: usize, x: i64, y: i64) {
         let x_end = x + self.grid_width(&self.nodes[n]);
-        let y_end = self.end_y(bottom + self.nodes[n].height);
+        let y_end = self.end_y(self.row_y(y) + self.nodes[n].height);
         for gx in x..x_end {
             for gy in y..y_end {
                 if let Some(p) = self.pixel_mut(gx, gy) {
                     p.cell = u32::try_from(n).unwrap_or(NO_CELL);
                 }
             }
-        }
-        let orient = self.site_orientation(x, y, self.nodes[n].site);
-        let node = &mut self.nodes[n];
-        node.left = left;
-        node.bottom = bottom;
-        node.placed = true;
-        if let Some(orient) = orient {
-            node.orient = orient;
         }
     }
 
@@ -1066,6 +1072,14 @@ impl Placer {
         if node.fixed || !node.placed {
             return;
         }
+        self.erase_pixels(n);
+        self.nodes[n].placed = false;
+        self.nodes[n].hold = false;
+    }
+
+    /// Frees the sites a cell holds where it stands, as `Grid::erasePixel`.
+    fn erase_pixels(&mut self, n: usize) {
+        let node = &self.nodes[n];
         let rect = Rect::new(
             Point::new(Dbu(node.left), Dbu(node.bottom)),
             Point::new(Dbu(node.left + node.width), Dbu(node.bottom + node.height)),
@@ -1081,8 +1095,6 @@ impl Placer {
                 }
             }
         }
-        self.nodes[n].placed = false;
-        self.nodes[n].hold = false;
     }
 
     /// The grid cells wholly inside a rectangle, as `Grid::gridWithin`.

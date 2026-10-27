@@ -1,5 +1,6 @@
 //! Detailed placement on the tiny fixture design, against the positions
-//! `OpenROAD`'s `detailed_placement` gives the same inputs: three rows of 0.2
+//! `OpenROAD`'s `detailed_placement`, `improve_placement -max_displacement
+//! {5 1}` and `optimize_mirroring` give the same inputs: three rows of 0.2
 //! um sites, 2 um high, a fixed NAND2 at (2, 0) and a 2 by 4 um RAM fixed at
 //! (4, 0); the library has no one-site cell, so no one-site gaps are left.
 
@@ -10,6 +11,8 @@ use pare_common::db::parser::{def, lef};
 use pare_common::geom::dbu::Dbu;
 use pare_common::geom::orient::Orientation;
 use pare_common::geom::point::Point;
+use pare_placer::legalize::opendp::improve::improve_placement;
+use pare_placer::legalize::opendp::mirror::optimize_mirroring;
 use pare_placer::legalize::opendp::{DetailedPlacementError, detailed_placement};
 use std::path::{Path, PathBuf};
 
@@ -130,4 +133,81 @@ fn a_design_too_full_for_its_rows_fails_naming_the_cells_left_out() {
     let result = detailed_placement(&mut db);
 
     assert!(matches!(result, Err(DetailedPlacementError::Failed(names)) if !names.is_empty()));
+}
+
+/// The places `OpenROAD` starts improvement from in the tests below.
+const SCATTERED: [(i64, i64); 6] = [
+    (0, 4000),
+    (3000, 0),
+    (600, 2000),
+    (2600, 4000),
+    (200, 2000),
+    (3400, 4000),
+];
+
+fn legalized(start: &[(i64, i64)]) -> NetlistDB {
+    let mut db = tiny_with(start);
+    let _ = detailed_placement(&mut db).unwrap();
+    db
+}
+
+#[test]
+fn improvement_pulls_cells_to_their_nets_as_openroad_does() {
+    let mut db = legalized(&[(1000, 1000); 6]);
+
+    let improvement = improve_placement(&mut db, (5, 1)).unwrap();
+
+    assert!(improvement.hpwl_after < improvement.hpwl_before);
+    assert_eq!(
+        places(&db),
+        vec![
+            (1600, 2000, Orientation::FS),
+            (2600, 0, Orientation::N),
+            (3400, 0, Orientation::N),
+            (3600, 4000, Orientation::N),
+            (2400, 4000, Orientation::N),
+            (3000, 0, Orientation::N),
+        ]
+    );
+}
+
+#[test]
+fn improvement_from_scattered_cells_matches_openroad() {
+    let mut db = legalized(&SCATTERED);
+
+    let _ = improve_placement(&mut db, (5, 1)).unwrap();
+
+    assert_eq!(
+        places(&db),
+        vec![
+            (1200, 2000, Orientation::FS),
+            (1600, 0, Orientation::N),
+            (2600, 0, Orientation::N),
+            (2400, 2000, Orientation::FS),
+            (2400, 4000, Orientation::N),
+            (3400, 4000, Orientation::N),
+        ]
+    );
+}
+
+#[test]
+fn mirroring_turns_the_cells_openroad_turns() {
+    let mut db = legalized(&SCATTERED);
+    let _ = improve_placement(&mut db, (5, 1)).unwrap();
+
+    let mirrored = optimize_mirroring(&mut db);
+
+    assert_eq!(mirrored, 3);
+    let orients: Vec<Orientation> = places(&db).iter().map(|p| p.2).collect();
+    assert_eq!(
+        orients,
+        vec![
+            Orientation::FS,
+            Orientation::N,
+            Orientation::N,
+            Orientation::S,
+            Orientation::FN,
+            Orientation::FN,
+        ]
+    );
 }
