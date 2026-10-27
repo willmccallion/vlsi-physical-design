@@ -17,6 +17,7 @@
 
 mod cpp;
 mod groups;
+pub mod mirror;
 
 use pare_common::db::design::{NetlistDB, PinOwner, PlacementStatus};
 use pare_common::db::indices::{CellId, SiteId};
