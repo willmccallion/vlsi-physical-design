@@ -315,6 +315,7 @@ fn add_region(db: &mut NetlistDB, kind: RegionKind, rects: &[Rect<Dbu>], members
         name: format!("r{}", id.index()),
         rects: rects.to_vec(),
         kind,
+        group_order: None,
     });
     for &c in members {
         db.cells[c.index()].region = Some(id);

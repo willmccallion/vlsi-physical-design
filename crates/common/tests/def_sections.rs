@@ -195,6 +195,32 @@ fn groups_assign_matching_components_to_their_region() {
 }
 
 #[test]
+fn group_members_are_ranked_as_opendb_lists_them() {
+    let db = design_with(&[
+        (
+            "COMPONENTS 8 ;",
+            "REGIONS 2 ;\n- left ( 0 0 ) ( 6000 4000 ) ;\n- right ( 3000 0 ) ( 6000 6000 ) ;\n\
+             END REGIONS\n\nCOMPONENTS 8 ;",
+        ),
+        (
+            "END NETS",
+            "END NETS\n\nGROUPS 2 ;\n- g2 ram0 + REGION right ;\n- g u7 u1 u* + REGION left ;\n\
+             END GROUPS",
+        ),
+    ])
+    .unwrap();
+
+    let rank = |name: &str| db.cells[db.cell_id(name).unwrap().index()].group_rank;
+    let ranks: Vec<u32> = ["u7", "u6", "u5", "u4", "u3", "u2", "u1"]
+        .iter()
+        .map(|n| rank(n))
+        .collect();
+    assert_eq!(ranks, [0, 1, 2, 3, 4, 5, 6]);
+    assert_eq!(db.regions[0].group_order, Some(1));
+    assert_eq!(db.regions[1].group_order, Some(0));
+}
+
+#[test]
 fn groups_may_come_before_the_regions_and_components_they_name() {
     let db = design_with(&[(
         "COMPONENTS 8 ;",

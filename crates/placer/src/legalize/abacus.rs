@@ -394,6 +394,7 @@ mod tests {
             name: "f".into(),
             rects: vec![Rect::new(pt(0, 0), pt(50, 200))],
             kind: RegionKind::Fence,
+            group_order: None,
         });
         for &m in members {
             db.cells[m].region = Some(RegionId(0));

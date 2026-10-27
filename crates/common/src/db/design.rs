@@ -59,6 +59,10 @@ pub struct Cell {
     pub status: PlacementStatus,
     /// The region the instance is constrained to, if any.
     pub region: Option<RegionId>,
+    /// Where the instance stands among its region group's members as
+    /// `OpenDB` lists them, first at 0: pattern by pattern, the last added
+    /// first; members given their region directly come after.
+    pub group_rank: u32,
     /// Net connections on this instance.
     pub pins: Vec<PinId>,
     /// Whether the instance has been taken off its nets and only awaits
@@ -98,6 +102,9 @@ pub struct Region {
     pub rects: Vec<Rect<Dbu>>,
     /// How it constrains its cells.
     pub kind: RegionKind,
+    /// The position among the DEF's `GROUPS` entries of the first group
+    /// that names the region, if one does.
+    pub group_order: Option<usize>,
 }
 
 /// A metal layer's width and spacing under a non-default rule.
@@ -547,6 +554,7 @@ impl NetlistDB {
             orient,
             status,
             region: None,
+            group_rank: 0,
             pins: Vec::new(),
             retired: false,
         });

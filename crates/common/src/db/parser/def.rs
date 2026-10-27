@@ -1225,7 +1225,12 @@ impl<'a> DefParser<'a> {
         if self.region_by_name.insert(name.clone(), id).is_some() {
             return Err(self.lx.error(line, format!("duplicate region '{name}'")));
         }
-        self.db.regions.push(Region { name, rects, kind });
+        self.db.regions.push(Region {
+            name,
+            rects,
+            kind,
+            group_order: None,
+        });
         Ok(())
     }
 
@@ -1270,14 +1275,27 @@ impl<'a> DefParser<'a> {
     fn assign_regions(&mut self) -> Result<(), ParseError> {
         for (cell, t) in std::mem::take(&mut self.component_regions) {
             let region = self.region_id(t)?;
-            self.db.cells[cell.index()].region = Some(region);
+            let c = &mut self.db.cells[cell.index()];
+            c.region = Some(region);
+            c.group_rank = u32::MAX;
         }
-        for group in std::mem::take(&mut self.groups) {
+        for (order, group) in std::mem::take(&mut self.groups).into_iter().enumerate() {
             let Some(region) = group.region else {
                 continue;
             };
             let region = self.region_id(region)?;
-            for cell in self.group_members(&group)? {
+            let _ = self.db.regions[region.index()]
+                .group_order
+                .get_or_insert(order);
+            let added = self.group_members(&group)?;
+            let mut seen = std::collections::HashSet::new();
+            let listed: Vec<CellId> = added
+                .iter()
+                .rev()
+                .copied()
+                .filter(|&c| seen.insert(c))
+                .collect();
+            for (rank, cell) in listed.into_iter().enumerate() {
                 let c = &mut self.db.cells[cell.index()];
                 if c.region.is_some_and(|r| r != region) {
                     return Err(self.lx.error(
@@ -1286,6 +1304,7 @@ impl<'a> DefParser<'a> {
                     ));
                 }
                 c.region = Some(region);
+                c.group_rank = u32::try_from(rank).unwrap_or(u32::MAX);
             }
         }
         Ok(())
