@@ -28,7 +28,7 @@ use pare_placer::global::{
     TimingDriver, TimingParams,
 };
 use pare_placer::io::{self, IoLayers};
-use pare_placer::legalize::abacus;
+use pare_placer::legalize::Legalization;
 use pare_placer::model::PlacementModel;
 use pare_placer::zones::{Zone, Zones};
 
@@ -583,7 +583,7 @@ fn run_placement(
 
     let phase_start = Instant::now();
     ui::phase("Legalization");
-    abacus::legalize(db, &zones)?;
+    legalize(db, &zones)?;
     ui::check(&format!("Legalized {movable_cells} cells"));
     let access = config
         .routing
@@ -630,7 +630,7 @@ fn run_placement(
         let zones = Zones::new(db)?;
         let phase_start = Instant::now();
         ui::phase("Legalization");
-        abacus::legalize(db, &zones)?;
+        legalize(db, &zones)?;
         let hpwl = PlacementModel::from_db(db, &zones).hpwl();
         ui::stat_row("HPWL (um):", &format!("{hpwl:.0}"), "", "");
         report.phase("legalization after clock tree synthesis", phase_start);
@@ -641,7 +641,7 @@ fn run_placement(
         let zones = Zones::new(db)?;
         let phase_start = Instant::now();
         ui::phase("Legalization");
-        abacus::legalize(db, &zones)?;
+        legalize(db, &zones)?;
         let hpwl = PlacementModel::from_db(db, &zones).hpwl();
         ui::stat_row("HPWL (um):", &format!("{hpwl:.0}"), "", "");
         report.phase("legalization after timing repair", phase_start);
@@ -674,6 +674,21 @@ fn run_placement(
     ui::wrote(&path_str(&placed)?);
     report.phase("placement output", phase_start);
     Ok(repair)
+}
+
+/// Legalizes the placement as OpenROAD-flow-scripts' `detailed_placement`
+/// does, showing how far the cells moved.
+fn legalize(db: &mut NetlistDB, zones: &Zones) -> anyhow::Result<()> {
+    if let Legalization::DetailedPlacement(done) = pare_placer::legalize::legalize(db, zones)? {
+        let um = |d: Dbu| d.get() as f64 / f64::from(db.dbu().get());
+        ui::stat_row(
+            "Displacement (um):",
+            &format!("{:.0}", um(done.total_displacement)),
+            "Max (um):",
+            &format!("{:.1}", um(done.max_displacement)),
+        );
+    }
+    Ok(())
 }
 
 /// Reads the Liberty files, the first one's thresholds and defaults
@@ -1009,7 +1024,7 @@ fn legalize_and_reroute(
     let phase_start = Instant::now();
     ui::phase("Legalization");
     let before: Vec<_> = db.cells.iter().map(|c| (c.location, c.orient)).collect();
-    abacus::legalize(db, &Zones::new(db)?)?;
+    legalize(db, &Zones::new(db)?)?;
     let mut moved_nets: Vec<NetId> = db
         .cells
         .iter()
