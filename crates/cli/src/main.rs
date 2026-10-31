@@ -1493,7 +1493,7 @@ fn global_placement(
     }
 
     let movable_area: f64 = model
-        .sizes
+        .density_sizes
         .iter()
         .zip(&model.movable)
         .filter(|(_, m)| **m)

@@ -221,7 +221,12 @@ pub fn default_target_density(utilization: f64) -> f64 {
 pub fn default_bins(model: &PlacementModel, target_density: f64) -> usize {
     let movable = (0..model.num_cells()).filter(|&i| model.movable[i]);
     let (area, count) = movable.fold((0.0, 0usize), |(area, count), i| {
-        (model.sizes[i].x.mul_add(model.sizes[i].y, area), count + 1)
+        (
+            model.density_sizes[i]
+                .x
+                .mul_add(model.density_sizes[i].y, area),
+            count + 1,
+        )
     });
     let average = if count == 0 { 0.0 } else { area / count as f64 };
     let by_area = bins_for_cell_area(model.die.area(), average, target_density);
@@ -314,7 +319,7 @@ impl Setup {
         let fixed = fixed_rects(model);
         let mut objects = Objects {
             centers: initial_centers(model, &movable, rng),
-            sizes: movable.iter().map(|&i| model.sizes[i]).collect(),
+            sizes: movable.iter().map(|&i| model.density_sizes[i]).collect(),
             kinds: movable.iter().map(|&i| model.kinds[i]).collect(),
         };
         let mut fields = build_fields(model, &movable, &fixed, params);
@@ -323,7 +328,7 @@ impl Setup {
         }
         Self {
             netlist: build_netlist(model, &movable),
-            model_sizes: objects.sizes.clone(),
+            model_sizes: movable.iter().map(|&i| model.sizes[i]).collect(),
             objects,
             fields,
             movable,
@@ -385,7 +390,7 @@ impl Setup {
                 }
             }
         }
-        let model_sizes = objects.sizes.clone();
+        let model_sizes = movable.iter().map(|&i| model.sizes[i]).collect();
         for (k, &i) in self.movable.iter().enumerate() {
             if cell_map[i].is_none() {
                 added_area -= area(self.model_sizes[k]);
@@ -532,7 +537,7 @@ fn build_fields(
             DensityGrid::new(&model.die, params.bins, params.target_density, &area, fixed);
         let cell_area: f64 = movable[start..end]
             .iter()
-            .map(|&i| model.sizes[i].x * model.sizes[i].y)
+            .map(|&i| model.density_sizes[i].x * model.density_sizes[i].y)
             .sum();
         let free = grid.free_area();
         let utilization = if free > 0.0 {

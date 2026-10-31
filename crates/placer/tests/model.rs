@@ -59,3 +59,39 @@ fn a_core_cell_six_rows_high_is_standard() {
 
     assert_eq!(kind_of(&db, "u1"), CellKind::Standard);
 }
+
+#[test]
+fn a_movable_cell_of_two_signal_pins_keeps_its_size_in_the_density() {
+    let db = tiny();
+    let model = PlacementModel::from_db(&db, &Zones::new(&db).unwrap());
+    let inv = db.cells.iter().position(|c| c.name == "u1").unwrap();
+
+    assert_eq!(model.density_sizes[inv], model.sizes[inv]);
+}
+
+#[test]
+fn a_fixed_cell_keeps_its_size_in_the_density() {
+    let db = tiny();
+    let model = PlacementModel::from_db(&db, &Zones::new(&db).unwrap());
+    let fixed = db.cells.iter().position(|c| c.name == "u3").unwrap();
+
+    assert_eq!(model.density_sizes[fixed], model.sizes[fixed]);
+}
+
+#[test]
+fn a_movable_cell_of_three_signal_pins_scales_toward_the_average_pin_density() {
+    let mut db = tiny();
+    let inv = db
+        .library
+        .macros
+        .iter_mut()
+        .find(|m| m.name == "INV")
+        .unwrap();
+    inv.size.x = inv.size.x * 2;
+    let model = PlacementModel::from_db(&db, &Zones::new(&db).unwrap());
+    let nand = db.cells.iter().position(|c| c.name == "u4").unwrap();
+
+    let scale = model.density_sizes[nand].x / model.sizes[nand].x;
+
+    assert!(scale > 1.0 && scale <= 1.2, "{scale}");
+}

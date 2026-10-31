@@ -78,6 +78,10 @@ pub struct PlacementModel {
     pub rows: Vec<Rect<f64>>,
     /// Width and height of each cell as placed.
     pub sizes: Vec<Point<f64>>,
+    /// Width and height of each cell in the density, about its center: its
+    /// size, scaled to the design's average pin density for a movable cell
+    /// of three signal pins or more.
+    pub density_sizes: Vec<Point<f64>>,
     /// Whether the placer may move each cell.
     pub movable: Vec<bool>,
     /// Whether each cell is a standard cell or a macro.
@@ -93,6 +97,44 @@ pub struct PlacementModel {
     /// Width of the narrowest row site, one micron for a design without
     /// rows.
     pub site_width: f64,
+}
+
+/// Each cell's size in the density, as `OpenROAD`'s `PlacerBaseCommon`
+/// extends instances by pin density: a movable cell of three signal pins or
+/// more is scaled toward the area that holds its pins at the average density
+/// of the movable cells, by no more than 1.2 nor less than 0.95.
+#[allow(clippy::cast_possible_truncation, clippy::cast_precision_loss)] // as gpl's casts
+fn pin_density_sizes(db: &NetlistDB) -> Vec<Point<Dbu>> {
+    let signal_pins = |i: usize| {
+        let pins = &db.cell_macro(CellId::new(i)).pins;
+        pins.iter().filter(|p| !p.signal_use.is_supply()).count()
+    };
+    let area = |s: Point<Dbu>| s.x.get() * s.y.get();
+    let (mut total_pins, mut movable_area) = (0, 0);
+    for i in 0..db.num_cells() {
+        if db.cells[i].status.is_movable() {
+            total_pins += signal_pins(i);
+            movable_area += area(db.cell_size(CellId::new(i)));
+        }
+    }
+    let average = if movable_area > 0 {
+        total_pins as f64 / movable_area as f64
+    } else {
+        0.0
+    };
+    (0..db.num_cells())
+        .map(|i| {
+            let size = db.cell_size(CellId::new(i));
+            let pins = signal_pins(i);
+            if !db.cells[i].status.is_movable() || pins <= 2 || average <= 0.0 || area(size) == 0 {
+                return size;
+            }
+            let target = pins as f64 / average;
+            let scale = (target / area(size) as f64).sqrt().clamp(0.95, 1.2);
+            let scaled = |side: Dbu| Dbu((side.get() as f64 * scale) as i64 / 2 * 2);
+            Point::new(scaled(size.x), scaled(size.y))
+        })
+        .collect()
 }
 
 /// The kind of every cell of `db`, given the height of the shortest row.
@@ -202,6 +244,7 @@ impl PlacementModel {
             sizes: (0..db.num_cells())
                 .map(|i| um(db.cell_size(CellId::new(i))))
                 .collect(),
+            density_sizes: pin_density_sizes(db).into_iter().map(um).collect(),
             movable: db.cells.iter().map(|c| c.status.is_movable()).collect(),
             kinds: cell_kinds(db, spans.iter().map(|r| r.height).min()),
             positions: db.cells.iter().map(|c| um(c.location)).collect(),
