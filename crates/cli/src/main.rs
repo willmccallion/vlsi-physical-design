@@ -525,11 +525,6 @@ fn run_placement(
     start: PlacementStart,
     report: &mut Report,
 ) -> anyhow::Result<Option<NetlistRepair>> {
-    let mut repair = if start == PlacementStart::Scratch {
-        repair_netlist(config, db, report)?
-    } else {
-        None
-    };
     let movable_io = io::movable_io_pins(db);
     let io_layers = if movable_io.is_empty() || start == PlacementStart::Given {
         None
@@ -543,6 +538,15 @@ fn run_placement(
         if unplaced > 0 {
             anyhow::bail!("I/O pin placement is disabled but {unplaced} I/O pins are unplaced");
         }
+        None
+    };
+    if let Some(layers) = io_layers {
+        ui::section("Pin Placement");
+        place_io_pins_by_cells(config, db, &Zones::new(db)?, layers, report)?;
+    }
+    let mut repair = if start == PlacementStart::Scratch {
+        repair_netlist(config, db, report)?
+    } else {
         None
     };
 
@@ -559,8 +563,6 @@ fn run_placement(
         }
         ui::check("Starting from the given placement");
         PlacementModel::from_db(db, &zones)
-    } else if let Some(layers) = io_layers {
-        place_cells_and_io_pins(config, db, &zones, layers, repair.as_mut(), report)?
     } else {
         let phase_start = Instant::now();
         let model = global_placement(
@@ -1409,17 +1411,16 @@ fn timing_repair_on(resizer: &mut Resizer<'_>, liberty: &Liberty) -> anyhow::Res
     })
 }
 
-/// Global placement without the movable I/O pins, I/O pin placement for
-/// the cells' positions, then global placement again with the pins, as
-/// `OpenROAD`'s flow does.
-fn place_cells_and_io_pins(
+/// Global placement without the movable I/O pins, then I/O pin placement
+/// for the cells' positions, as OpenROAD-flow-scripts does before it touches
+/// the netlist.
+fn place_io_pins_by_cells(
     config: &Config,
     db: &mut NetlistDB,
     zones: &Zones,
     layers: IoLayers,
-    repair: Option<&mut NetlistRepair>,
     report: &mut Report,
-) -> anyhow::Result<PlacementModel> {
+) -> anyhow::Result<()> {
     let phase_start = Instant::now();
     ui::phase("Global Placement Without I/O");
     let model = global_placement(
@@ -1443,19 +1444,7 @@ fn place_cells_and_io_pins(
         &placed.slots.to_string(),
     );
     report.phase("I/O pin placement", phase_start);
-
-    let phase_start = Instant::now();
-    ui::phase("Global Placement");
-    let model = global_placement(
-        config,
-        db,
-        PlacementModel::from_db(db, zones),
-        Pass::Full,
-        repair,
-        report,
-    )?;
-    report.phase("global placement", phase_start);
-    Ok(model)
+    Ok(())
 }
 
 /// Whether a global placement pass sees every connection.
