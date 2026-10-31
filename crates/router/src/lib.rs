@@ -737,16 +737,16 @@ const fn next_scope(previous: Scope, improved: bool) -> Scope {
 /// Every gcell's routing capacity and what of it is taken before placement.
 ///
 /// What is taken is the metal placement cannot move, that of fixed cells
-/// and I/O pins, special nets and routing blockages, and the `adjustment`
-/// share of each layer's capacity held back, as `OpenROAD`'s RUDY counts
-/// them.
+/// and I/O pins, special nets and routing blockages, and each layer's share
+/// of `adjustments`, by layer index, held back, none for a layer past its
+/// end, as `OpenROAD`'s RUDY counts them.
 pub fn capacity_reduction(
     db: &NetlistDB,
     config: &RoutingConfig,
-    adjustment: f64,
+    adjustments: &[f64],
 ) -> Result<CapacityReduction, RouteError> {
     check_reserve(config)?;
-    check_adjustment(adjustment)?;
+    check_adjustments(adjustments)?;
     let tech = RouteTech::new(db, config)?;
     let fixed = FixedTracks::new(&tech, obstruction_shapes(db));
     let grid = GlobalGrid::new(
@@ -756,7 +756,7 @@ pub fn capacity_reduction(
         gcell_size(&tech, config),
         config.global_capacity_reserve,
     );
-    Ok(grid.capacity_reduction(&tech, adjustment, layers_wire_width(db, &tech)))
+    Ok(grid.capacity_reduction(&tech, adjustments, layers_wire_width(db, &tech)))
 }
 
 /// The RUDY wire width over the routing layers of `tech`, each at its LEF
@@ -833,14 +833,14 @@ impl<'a> GlobalRouteEstimator<'a> {
         })
     }
 
-    /// The grid's capacities and what fixed metal and the `adjustment`
-    /// share of each layer's capacity take of them.
-    pub fn capacity_reduction(&self, adjustment: f64) -> Result<CapacityReduction, RouteError> {
-        check_adjustment(adjustment)?;
+    /// The grid's capacities and what fixed metal and each layer's share
+    /// of `adjustments`, by layer index, take of them.
+    pub fn capacity_reduction(&self, adjustments: &[f64]) -> Result<CapacityReduction, RouteError> {
+        check_adjustments(adjustments)?;
         let wire_width = layers_wire_width(self.db, &self.tech);
         Ok(self
             .grid
-            .capacity_reduction(&self.tech, adjustment, wire_width))
+            .capacity_reduction(&self.tech, adjustments, wire_width))
     }
 
     /// Each gcell's congestion, row by row, once every net is routed with
@@ -893,11 +893,10 @@ fn check_reserve(config: &RoutingConfig) -> Result<(), RouteError> {
     }
 }
 
-fn check_adjustment(adjustment: f64) -> Result<(), RouteError> {
-    if (0.0..=1.0).contains(&adjustment) {
-        Ok(())
-    } else {
-        Err(RouteError::LayerAdjustment(adjustment))
+fn check_adjustments(adjustments: &[f64]) -> Result<(), RouteError> {
+    match adjustments.iter().find(|a| !(0.0..=1.0).contains(*a)) {
+        Some(&adjustment) => Err(RouteError::LayerAdjustment(adjustment)),
+        None => Ok(()),
     }
 }
 

@@ -1798,18 +1798,33 @@ fn routability_setup<'a>(
     config: &Config,
     db: &'a NetlistDB,
 ) -> anyhow::Result<(RoutabilityParams, Option<GlobalRouteCongestion<'a>>)> {
-    let adjustment = config.global_placement.routing_layer_adjustment;
+    let adjustment = layer_adjustments(config, db)?;
     match config.global_placement.congestion_estimate {
         CongestionEstimate::GlobalRouter => {
             let estimator = GlobalRouteCongestion::new(db, config)?;
-            let reduction = estimator.capacity_reduction(adjustment)?;
+            let reduction = estimator.capacity_reduction(&adjustment)?;
             Ok((routability_params(config, db, reduction), Some(estimator)))
         }
         CongestionEstimate::Rudy => {
-            let reduction = pare_router::capacity_reduction(db, &config.routing, adjustment)?;
+            let reduction = pare_router::capacity_reduction(db, &config.routing, &adjustment)?;
             Ok((routability_params(config, db, reduction), None))
         }
     }
+}
+
+/// The share of each routing layer's capacity held back, by layer index.
+fn layer_adjustments(config: &Config, db: &NetlistDB) -> anyhow::Result<Vec<f64>> {
+    let gp = &config.global_placement;
+    let layers = &db.library.routing_layers;
+    let mut adjustments = vec![gp.routing_layer_adjustment; layers.len()];
+    for entry in &gp.layer_adjustments {
+        let index = layers
+            .iter()
+            .position(|l| l.name == entry.layer)
+            .with_context(|| format!("no routing layer named {}", entry.layer))?;
+        adjustments[index] = entry.adjustment;
+    }
+    Ok(adjustments)
 }
 
 /// Routing congestion from `pare_router`'s global router, measured where
@@ -1836,8 +1851,8 @@ impl<'a> GlobalRouteCongestion<'a> {
         })
     }
 
-    fn capacity_reduction(&self, adjustment: f64) -> Result<CapacityReduction, RouteError> {
-        self.estimator.capacity_reduction(adjustment)
+    fn capacity_reduction(&self, adjustments: &[f64]) -> Result<CapacityReduction, RouteError> {
+        self.estimator.capacity_reduction(adjustments)
     }
 }
 

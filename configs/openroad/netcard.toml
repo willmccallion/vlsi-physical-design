@@ -7,6 +7,18 @@ output_def = "output/netcard/placed.def"
 
 [global_placement]
 placer_max_iterations = 2000
+routing_layer_adjustment = 0.0
+layer_adjustments = [
+  { layer = "metal2", adjustment = 0.5 },
+  { layer = "metal3", adjustment = 0.5 },
+  { layer = "metal4", adjustment = 0.25 },
+  { layer = "metal5", adjustment = 0.25 },
+  { layer = "metal6", adjustment = 0.25 },
+  { layer = "metal7", adjustment = 0.25 },
+  { layer = "metal8", adjustment = 0.25 },
+  { layer = "metal9", adjustment = 0.25 },
+  { layer = "metal10", adjustment = 0.25 },
+]
 
 [io_placement]
 horizontal_layer = "metal5"

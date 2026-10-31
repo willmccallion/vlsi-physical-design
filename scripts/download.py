@@ -53,6 +53,10 @@ ORFS_NANGATE45_WIRE = {
     "clock_wire_resistance_ohm_per_um": 1.49065,
     "clock_wire_capacitance_ff_per_um": 0.109256,
 }
+# Its fastroute.tcl's set_global_routing_layer_adjustment per routing layer.
+ORFS_NANGATE45_LAYER_ADJUSTMENT = [("metal2", 0.5), ("metal3", 0.5)] + [
+    (f"metal{i}", 0.25) for i in range(4, 11)
+]
 # Its setRC.tcl's set_layer_rc per routing layer, in ohms and femtofarads per micron.
 ORFS_NANGATE45_LAYER_RC = [
     ("metal1", 5.4286, 0.0741819),
@@ -463,6 +467,13 @@ def config_text(name):
         ]
         if d.get("target_density") is not None:
             lines.append(f"target_density = {d['target_density']}")
+        lines.append("routing_layer_adjustment = 0.0")
+        lines.append("layer_adjustments = [")
+        lines += [
+            f'  {{ layer = "{layer}", adjustment = {a} }},'
+            for layer, a in ORFS_NANGATE45_LAYER_ADJUSTMENT
+        ]
+        lines.append("]")
     if d.get("io"):
         lines += ["", "[io_placement]"]
         lines += [f'{k} = "{v}"' for k, v in d["io"].items()]

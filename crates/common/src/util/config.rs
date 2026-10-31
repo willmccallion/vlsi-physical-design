@@ -92,6 +92,16 @@ pub struct NetlistConfig {
     pub clock_ports: Vec<String>,
 }
 
+/// The share of one routing layer's capacity held back.
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct LayerAdjustmentConfig {
+    /// The routing layer's name.
+    pub layer: String,
+    /// The share, in `[0, 1]`.
+    pub adjustment: f64,
+}
+
 /// One routing layer's wire resistance and capacitance per length.
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -189,6 +199,10 @@ pub struct GlobalPlacementConfig {
     /// OpenROAD-flow-scripts' `ROUTING_LAYER_ADJUSTMENT`, in `[0, 1]`.
     #[serde(default = "default_routing_layer_adjustment")]
     pub routing_layer_adjustment: f64,
+    /// The share for particular layers, as a platform's `fastroute.tcl`
+    /// sets them with `set_global_routing_layer_adjustment`.
+    #[serde(default)]
+    pub layer_adjustments: Vec<LayerAdjustmentConfig>,
     /// Whether the design is repaired and its critical nets weighted
     /// during global placement, as `OpenROAD`'s timing-driven mode, when
     /// the input has an SDC file.
@@ -232,6 +246,7 @@ impl Default for GlobalPlacementConfig {
             target_congestion: default_target_congestion(),
             congestion_estimate: CongestionEstimate::default(),
             routing_layer_adjustment: default_routing_layer_adjustment(),
+            layer_adjustments: Vec::new(),
             timing_driven: default_enabled(),
             timing_driven_overflows: default_timing_driven_overflows(),
             timing_net_weight_max: default_timing_net_weight_max(),

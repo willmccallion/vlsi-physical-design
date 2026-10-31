@@ -356,7 +356,7 @@ impl GlobalGrid {
     pub fn capacity_reduction(
         &self,
         tech: &RouteTech,
-        adjustment: f64,
+        adjustments: &[f64],
         wire_width: Dbu,
     ) -> CapacityReduction {
         let (nx, ny) = (usize::from(self.nx), usize::from(self.ny));
@@ -373,6 +373,7 @@ impl GlobalGrid {
                 continue;
             }
             let tracks = self.tracks_per_line(tech, layer);
+            let adjustment = adjustments.get(layer.index()).copied().unwrap_or(0.0);
             for y in 0..ny {
                 for x in 0..nx {
                     let (line, edge) = match direction {
