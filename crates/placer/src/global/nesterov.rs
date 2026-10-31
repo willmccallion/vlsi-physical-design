@@ -591,11 +591,12 @@ fn center_bounds(die: &Rect<f64>, size: Point<f64>) -> Rect<f64> {
 }
 
 /// Smoothing length of the wirelength model for an overflow: wide while
-/// cells overlap heavily, close to exact once they have spread.
+/// cells overlap heavily, close to exact once they have spread. The four
+/// bins are `OpenROAD`'s `initWireLengthCoef` of 0.25, ePlace's being eight.
 fn gamma_for(overflow: f64, bin: Point<f64>) -> f64 {
     let tau = overflow.clamp(0.1, 1.0);
     let exponent = (20.0_f64 / 9.0).mul_add(tau, -11.0 / 9.0);
-    8.0 * f64::midpoint(bin.x, bin.y) * 10f64.powf(exponent)
+    4.0 * f64::midpoint(bin.x, bin.y) * 10f64.powf(exponent)
 }
 
 /// How much to scale the density penalty after HPWL changed by `delta`,
@@ -1250,12 +1251,12 @@ mod tests {
     use super::*;
 
     #[test]
-    fn gamma_shrinks_from_eighty_bins_to_under_one_as_overflow_falls() {
+    fn gamma_shrinks_from_forty_bins_to_under_one_as_overflow_falls() {
         let bin = Point::new(2.0, 2.0);
 
-        assert!((gamma_for(1.0, bin) - 160.0).abs() < 1e-9);
-        assert!((gamma_for(0.1, bin) - 1.6).abs() < 1e-9);
-        assert!((gamma_for(0.01, bin) - 1.6).abs() < 1e-9);
+        assert!((gamma_for(1.0, bin) - 80.0).abs() < 1e-9);
+        assert!((gamma_for(0.1, bin) - 0.8).abs() < 1e-9);
+        assert!((gamma_for(0.01, bin) - 0.8).abs() < 1e-9);
     }
 
     #[test]
