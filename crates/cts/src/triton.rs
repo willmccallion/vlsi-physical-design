@@ -188,21 +188,10 @@ fn pin_position(db: &NetlistDB, pin: PinId) -> (i64, i64) {
     (x / n, y / n)
 }
 
-/// A pin's position as `dbITerm::getAvgXY` takes it: the mean of its
-/// shapes' corners, in double precision, truncated.
+/// A pin's position as `dbITerm::getAvgXY` takes it.
 pub(crate) fn avg_xy(db: &NetlistDB, pin: PinId) -> (i64, i64) {
-    let shapes = db.pin_shapes(pin);
-    if shapes.is_empty() {
-        let p = db.pin_position(pin);
-        return (p.x.get(), p.y.get());
-    }
-    let (mut x, mut y) = (0.0_f64, 0.0_f64);
-    for s in &shapes {
-        x += (s.rect.min.x.get() + s.rect.max.x.get()) as f64;
-        y += (s.rect.min.y.get() + s.rect.max.y.get()) as f64;
-    }
-    let n = (2 * shapes.len()) as f64;
-    ((x / n) as i32 as i64, (y / n) as i32 as i64)
+    let at = db.average_pin_position(pin);
+    (at.x.get(), at.y.get())
 }
 
 /// The cell pins of a net in the order `OpenDB` lists them after reading

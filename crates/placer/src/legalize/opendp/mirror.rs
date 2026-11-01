@@ -24,32 +24,13 @@ fn bounds_hpwl(bounds: Bounds) -> i64 {
     bounds.map_or(0, |(x0, y0, x1, y1)| (x1 - x0) + (y1 - y0))
 }
 
-/// Where a pin is, as `dbITerm::getAvgXY` for cell pins: the mean of the
-/// centers of its shapes, truncated; the cell's center for a pin without
-/// shapes, as `dbNet::getTermBBox` falls back to; the center of an I/O
-/// pin's box. `None` for an unplaced I/O pin.
-#[allow(clippy::cast_possible_truncation, clippy::cast_precision_loss)] // as OpenDB's int()
+/// Where a pin is, as `dbITerm::getAvgXY` for cell pins and the center of
+/// an I/O pin's box. `None` for an unplaced I/O pin.
 fn pin_location(db: &NetlistDB, pin: PinId) -> Option<(i64, i64)> {
     match db.pins[pin.index()].owner {
-        PinOwner::Cell { cell, pin } => {
-            let c = &db.cells[cell.index()];
-            let m = db.cell_macro(cell);
-            let shapes = &m.pin(pin).shapes;
-            if shapes.is_empty() {
-                let b = db.cell_bbox(cell);
-                return Some((
-                    b.min.x.get().midpoint(b.max.x.get()),
-                    b.min.y.get().midpoint(b.max.y.get()),
-                ));
-            }
-            let (mut xx, mut yy) = (0.0, 0.0);
-            for s in shapes {
-                let r = c.orient.place_rect(&s.rect, m.size, c.location);
-                xx += (r.min.x.get() + r.max.x.get()) as f64;
-                yy += (r.min.y.get() + r.max.y.get()) as f64;
-            }
-            let count = (2 * shapes.len()) as f64;
-            Some(((xx / count) as i64, (yy / count) as i64))
+        PinOwner::Cell { .. } => {
+            let at = db.average_pin_position(pin);
+            Some((at.x.get(), at.y.get()))
         }
         PinOwner::Io(io) => {
             let io = &db.io_pins[io.index()];

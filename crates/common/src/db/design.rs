@@ -1075,6 +1075,23 @@ impl NetlistDB {
         }
     }
 
+    /// Where `pin` is as `dbITerm::getAvgXY` takes it: the mean of its
+    /// shapes' corners, truncated; [`Self::pin_position`] without shapes.
+    #[allow(clippy::cast_possible_truncation, clippy::cast_precision_loss)] // as OpenDB's int()
+    pub fn average_pin_position(&self, pin: PinId) -> Point<Dbu> {
+        let shapes = self.pin_shapes(pin);
+        if shapes.is_empty() {
+            return self.pin_position(pin);
+        }
+        let (mut x, mut y) = (0.0_f64, 0.0_f64);
+        for s in &shapes {
+            x += (s.rect.min.x.get() + s.rect.max.x.get()) as f64;
+            y += (s.rect.min.y.get() + s.rect.max.y.get()) as f64;
+        }
+        let corners = (2 * shapes.len()) as f64;
+        Point::new(Dbu((x / corners) as i64), Dbu((y / corners) as i64))
+    }
+
     /// A readable name for a connection, such as `u1/A` or `PIN clk`.
     pub fn pin_name(&self, pin: PinId) -> String {
         match self.pins[pin.index()].owner {
