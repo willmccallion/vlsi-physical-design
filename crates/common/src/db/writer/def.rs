@@ -1,6 +1,6 @@
 //! DEF writer.
 
-use crate::db::design::{NetlistDB, PinOwner, RouteElem, SpecialRect};
+use crate::db::design::{BlockageKind, NetlistDB, PinOwner, RouteElem, SpecialRect};
 use crate::db::library::{LayerRef, Library};
 use crate::geom::dbu::Dbu;
 use crate::geom::point::Point;
@@ -254,8 +254,18 @@ fn write_blockages(db: &NetlistDB, out: &mut impl Write) -> io::Result<()> {
             pt(s.rect.max)
         )?;
     }
-    for r in &db.placement_blockages {
-        writeln!(out, "- PLACEMENT RECT {} {} ;", pt(r.min), pt(r.max))?;
+    for b in &db.placement_blockages {
+        let kind = match b.kind {
+            BlockageKind::Hard => String::new(),
+            BlockageKind::Soft => "+ SOFT ".to_owned(),
+            BlockageKind::Partial(density) => format!("+ PARTIAL {density} "),
+        };
+        writeln!(
+            out,
+            "- PLACEMENT {kind}RECT {} {} ;",
+            pt(b.rect.min),
+            pt(b.rect.max)
+        )?;
     }
     writeln!(out, "END BLOCKAGES")
 }

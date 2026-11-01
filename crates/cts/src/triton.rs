@@ -1173,7 +1173,7 @@ fn merge_blockages(db: &NetlistDB, bloat: (i64, i64)) -> (Vec<Rect<Dbu>>, f64) {
             rects.push(bbox);
         }
     }
-    rects.extend(db.placement_blockages.iter().copied());
+    rects.extend(db.hard_placement_blockages());
     let diameter = (2 * max_dx.max(max_dy)) as f64 / f64::from(db.dbu().get() as i32);
     let grown: Vec<Rect<Dbu>> = rects
         .iter()

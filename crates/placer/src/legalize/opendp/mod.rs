@@ -428,8 +428,8 @@ impl Placer {
                 }
             }
         }
-        for blockage in &db.placement_blockages {
-            let (x0, y0, x1, y1) = self.covering(&self.relative(*blockage));
+        for blockage in db.hard_placement_blockages() {
+            let (x0, y0, x1, y1) = self.covering(&self.relative(blockage));
             for y in y0.max(0)..y1.min(self.row_count) {
                 for x in x0.max(0)..x1.min(self.row_site_count) {
                     if let Some(p) = self.pixel_mut(x, y) {

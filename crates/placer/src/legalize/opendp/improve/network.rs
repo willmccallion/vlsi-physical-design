@@ -79,8 +79,7 @@ impl Network {
             node_pins: vec![Vec::new(); cells],
             edges: Vec::new(),
             blockages: db
-                .placement_blockages
-                .iter()
+                .hard_placement_blockages()
                 .map(|b| Rect::new(b.min - core.min, b.max - core.min))
                 .collect(),
         };

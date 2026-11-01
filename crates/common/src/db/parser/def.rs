@@ -7,8 +7,9 @@
 //! parser does not know is skipped with a warning, once per keyword and file.
 
 use crate::db::design::{
-    GCellGridDef, NetlistDB, NonDefaultLayer, NonDefaultRule, PlacementStatus, Region, RegionKind,
-    RouteElem, Row, SpecialNet, SpecialRect, SpecialWire, TrackAxis, TrackDef,
+    BlockageKind, GCellGridDef, NetlistDB, NonDefaultLayer, NonDefaultRule, PlacementBlockage,
+    PlacementStatus, Region, RegionKind, RouteElem, Row, SpecialNet, SpecialRect, SpecialWire,
+    TrackAxis, TrackDef,
 };
 use crate::db::indices::{CellId, LayerId, NetId, NonDefaultRuleId, RegionId, ViaId, ViaRuleId};
 use crate::db::library::{LayerRef, Library, PinDirection, Shape, SignalUse, ViaDef};
@@ -272,6 +273,39 @@ impl<'a> DefParser<'a> {
         {
             let _ = self.lx.next_token();
         }
+    }
+
+    /// Skips a blockage option, whose arguments end at the next option or
+    /// at the blockage's shapes.
+    fn skip_blockage_option(&mut self) {
+        while self
+            .lx
+            .peek()
+            .is_some_and(|t| !matches!(t.text, "+" | ";" | "RECT" | "POLYGON"))
+        {
+            let _ = self.lx.next_token();
+        }
+    }
+
+    /// Reads a placement blockage's options. As in `OpenDB`, a maximum
+    /// density outside 0 to 100 is ignored.
+    fn placement_blockage_kind(&mut self) -> Result<BlockageKind, ParseError> {
+        let mut kind = BlockageKind::Hard;
+        while self.lx.accept("+") {
+            match self.word("blockage option")? {
+                "SOFT" => kind = BlockageKind::Soft,
+                "PARTIAL" => {
+                    let density: f64 = self.lx.number("maximum density")?;
+                    if (0.0..=100.0).contains(&density) {
+                        kind = BlockageKind::Partial(density);
+                    } else {
+                        log::warn!("Ignoring the blockage maximum density {density}");
+                    }
+                }
+                _ => self.skip_blockage_option(),
+            }
+        }
+        Ok(kind)
     }
 
     fn skip_section(&mut self, name: &str) -> Result<(), ParseError> {
@@ -722,7 +756,7 @@ impl<'a> DefParser<'a> {
             "LAYER" => {
                 let layer = self.any_layer()?;
                 while self.lx.accept("+") {
-                    self.skip_option();
+                    self.skip_blockage_option();
                 }
                 while self.lx.accept("RECT") {
                     let rect = self.rect()?;
@@ -730,19 +764,12 @@ impl<'a> DefParser<'a> {
                 }
             }
             "PLACEMENT" => {
-                let mut hard = true;
-                while self.lx.accept("+") {
-                    let opt = self.word("blockage option")?;
-                    hard &= opt != "SOFT" && opt != "PARTIAL";
-                    self.skip_option();
-                }
+                let kind = self.placement_blockage_kind()?;
                 while self.lx.accept("RECT") {
                     let rect = self.rect()?;
-                    if hard {
-                        self.db.placement_blockages.push(rect);
-                    } else {
-                        log::warn!("Ignoring a soft or partial placement blockage at {rect:?}");
-                    }
+                    self.db
+                        .placement_blockages
+                        .push(PlacementBlockage { rect, kind });
                 }
             }
             other => {

@@ -3,7 +3,7 @@
 
 #![allow(clippy::unwrap_used)]
 
-use pare_common::db::design::{NetlistDB, RegionKind, RouteElem};
+use pare_common::db::design::{BlockageKind, NetlistDB, PlacementBlockage, RegionKind, RouteElem};
 use pare_common::db::indices::{CutLayerId, RegionId};
 use pare_common::db::library::{LayerRef, Library};
 use pare_common::db::parser::{def, lef};
@@ -293,6 +293,62 @@ fn non_default_rules_attach_to_their_nets() {
     assert_eq!(rule.min_cuts, [(CutLayerId(0), 2)]);
     let n2 = &db.nets[db.net_id("n2").unwrap().index()];
     assert!(n2.non_default_rule.is_some());
+}
+
+const BLOCKAGES: &str = "BLOCKAGES 4 ;\n\
+     - PLACEMENT RECT ( 0 0 ) ( 100 100 ) ;\n\
+     - PLACEMENT + SOFT + COMPONENT ram0 RECT ( 100 0 ) ( 200 100 ) ;\n\
+     - PLACEMENT + PARTIAL 40 RECT ( 200 0 ) ( 300 100 ) ;\n\
+     - LAYER M2 + COMPONENT ram0 RECT ( 300 0 ) ( 400 100 ) ;\n\
+     END BLOCKAGES\nCOMPONENTS 8 ;";
+
+#[test]
+fn blockages_keep_their_rectangles_past_their_options() {
+    let db = design_with(&[("COMPONENTS 8 ;", BLOCKAGES)]).unwrap();
+
+    assert_eq!(
+        db.placement_blockages,
+        [
+            PlacementBlockage {
+                rect: rect(0, 0, 100, 100),
+                kind: BlockageKind::Hard,
+            },
+            PlacementBlockage {
+                rect: rect(100, 0, 200, 100),
+                kind: BlockageKind::Soft,
+            },
+            PlacementBlockage {
+                rect: rect(200, 0, 300, 100),
+                kind: BlockageKind::Partial(40.0),
+            },
+        ]
+    );
+    assert_eq!(db.routing_blockages.len(), 1);
+}
+
+#[test]
+fn detailed_placement_may_use_only_soft_blockages() {
+    let db = design_with(&[("COMPONENTS 8 ;", BLOCKAGES)]).unwrap();
+
+    let hard: Vec<_> = db.hard_placement_blockages().collect();
+
+    assert_eq!(hard, [rect(0, 0, 100, 100), rect(200, 0, 300, 100)]);
+}
+
+#[test]
+fn blockage_kinds_are_written_and_read_back_unchanged() {
+    let db = design_with(&[("COMPONENTS 8 ;", BLOCKAGES)]).unwrap();
+
+    let mut text = Vec::new();
+    writer::def::write(&db, &mut text).unwrap();
+    let reread = def::parse_str(
+        &String::from_utf8(text).unwrap(),
+        Path::new("written.def"),
+        tiny_library(),
+    )
+    .unwrap();
+
+    assert_eq!(reread, db);
 }
 
 #[test]

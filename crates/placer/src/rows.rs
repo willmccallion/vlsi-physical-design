@@ -94,7 +94,7 @@ pub(crate) fn fixed_obstacles(db: &NetlistDB) -> Vec<Rect<Dbu>> {
         .filter(|&i| !db.cells[i].status.is_movable())
         .map(|i| db.cell_bbox(CellId::new(i)))
         .collect();
-    out.extend(db.placement_blockages.iter().copied());
+    out.extend(db.hard_placement_blockages());
     out
 }
 

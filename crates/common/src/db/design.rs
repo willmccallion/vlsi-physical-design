@@ -404,6 +404,27 @@ pub struct SpecialRect {
     pub shape: Option<String>,
 }
 
+/// How a placement blockage keeps cells out.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum BlockageKind {
+    /// No cell may sit in it.
+    Hard,
+    /// Global placement keeps out of it; detailed placement may use it.
+    Soft,
+    /// No cell may sit in it, but global placement counts this percent of
+    /// its sites as free.
+    Partial(f64),
+}
+
+/// An area cells keep out of.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct PlacementBlockage {
+    /// The area.
+    pub rect: Rect<Dbu>,
+    /// How it keeps cells out.
+    pub kind: BlockageKind,
+}
+
 /// The complete design database.
 #[derive(Clone, Debug, PartialEq)]
 pub struct NetlistDB {
@@ -431,8 +452,8 @@ pub struct NetlistDB {
     pub special_nets: Vec<SpecialNet>,
     /// Areas no wire may use, per layer.
     pub routing_blockages: Vec<Shape>,
-    /// Areas no cell may be placed in.
-    pub placement_blockages: Vec<Rect<Dbu>>,
+    /// Areas cells keep out of.
+    pub placement_blockages: Vec<PlacementBlockage>,
     /// Placement regions.
     pub regions: Vec<Region>,
     /// Non-default routing rules.
@@ -491,6 +512,14 @@ fn renumber(dropped: &[bool]) -> Vec<usize> {
 }
 
 impl NetlistDB {
+    /// The areas no cell may sit in once legal.
+    pub fn hard_placement_blockages(&self) -> impl Iterator<Item = Rect<Dbu>> + '_ {
+        self.placement_blockages
+            .iter()
+            .filter(|b| b.kind != BlockageKind::Soft)
+            .map(|b| b.rect)
+    }
+
     /// Creates an empty design over a library.
     pub fn new(name: String, library: Library) -> Self {
         Self {

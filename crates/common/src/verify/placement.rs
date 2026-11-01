@@ -52,7 +52,7 @@ pub fn placement_violations(db: &NetlistDB) -> Vec<PlacementViolation> {
         if !db.die_area.encloses(&bbox) {
             violations.push(PlacementViolation::OutsideDie(id));
         }
-        if db.placement_blockages.iter().any(|b| b.overlaps(&bbox)) {
+        if db.hard_placement_blockages().any(|b| b.overlaps(&bbox)) {
             violations.push(PlacementViolation::InBlockage(id));
         }
         if matches!(db.cell_macro(id).class, MacroClass::Core(_)) {
