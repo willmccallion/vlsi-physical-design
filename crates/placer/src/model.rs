@@ -5,7 +5,7 @@
 //! units on exit. Supply nets are left out: they connect almost every cell
 //! and would only pull everything together.
 
-use crate::rows::expand_rows;
+use crate::rows::{blocked_stretches, expand_rows, free_intervals};
 use crate::zones::{Zone, Zones};
 use pare_common::db::design::{NetlistDB, PinOwner, PlacementStatus};
 use pare_common::db::indices::{CellId, NetId};
@@ -90,7 +90,8 @@ pub struct PlacementModel {
     pub positions: Vec<Point<f64>>,
     /// Signal nets with at least two connections.
     pub nets: Vec<ModelNet>,
-    /// Every zone's stretches of row: each fence, then the space outside.
+    /// Every zone's stretches of row, without what global placement keeps
+    /// out of: each fence, then the space outside.
     pub zones: Vec<ZoneRows>,
     /// For each cell, the index of its zone in `zones`.
     pub zone_of: Vec<usize>,
@@ -215,6 +216,7 @@ impl PlacementModel {
             .iter()
             .map(|r| um_rect(r.x_min, r.x_max, r.y, r.y + r.height))
             .collect();
+        let blocked = blocked_stretches(db, &spans);
         let zone_rows = zones
             .all()
             .map(|zone| {
@@ -226,11 +228,13 @@ impl PlacementModel {
                 } else {
                     spans
                         .iter()
-                        .flat_map(|r| {
+                        .zip(&blocked)
+                        .flat_map(|(r, stretches)| {
                             let (y0, y1) = (r.y, r.y + r.height);
                             zones
                                 .intervals(zone, r.x_min, r.x_max, y0, y1)
                                 .into_iter()
+                                .flat_map(move |(a, b)| free_intervals(stretches, a, b, y0, y1))
                                 .map(move |(a, b)| um_rect(a, b, y0, y1))
                         })
                         .collect()
@@ -275,22 +279,22 @@ impl PlacementModel {
         }
     }
 
-    /// Area of the rows not covered by fixed cells, or of the die for a
-    /// design without rows.
+    /// Area of the zones' rows not covered by fixed cells, or of the die for
+    /// a design without rows.
     pub fn free_area(&self) -> f64 {
         if self.rows.is_empty() {
             return self.die.area();
         }
-        let rows: f64 = self.rows.iter().map(Rect::area).sum();
-        let tallest = self.rows.iter().map(Rect::height).fold(0.0, f64::max);
+        let mut open: Vec<&Rect<f64>> = self.zones.iter().flat_map(|z| &z.rects).collect();
+        open.sort_by(|a, b| a.min.y.total_cmp(&b.min.y));
+        let rows: f64 = open.iter().map(|r| r.area()).sum();
+        let tallest = open.iter().map(|r| r.height()).fold(0.0, f64::max);
         let fixed: f64 = (0..self.num_cells())
             .filter(|&i| !self.movable[i])
             .map(|i| {
                 let cell = Rect::new(self.positions[i], self.positions[i] + self.sizes[i]);
-                let first = self
-                    .rows
-                    .partition_point(|r| r.min.y + tallest <= cell.min.y);
-                self.rows[first..]
+                let first = open.partition_point(|r| r.min.y + tallest <= cell.min.y);
+                open[first..]
                     .iter()
                     .take_while(|r| r.min.y < cell.max.y)
                     .map(|r| overlap_area(r, &cell))

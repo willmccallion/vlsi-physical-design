@@ -2,9 +2,11 @@
 
 #![allow(clippy::unwrap_used)]
 
-use pare_common::db::design::NetlistDB;
+use pare_common::db::design::{BlockageKind, NetlistDB, PlacementBlockage};
 use pare_common::db::parser::{def, lef};
 use pare_common::geom::dbu::Dbu;
+use pare_common::geom::point::Point;
+use pare_common::geom::rect::Rect;
 use pare_placer::model::{CellKind, PlacementModel};
 use pare_placer::zones::Zones;
 use std::path::{Path, PathBuf};
@@ -94,4 +96,26 @@ fn a_movable_cell_of_three_signal_pins_scales_toward_the_average_pin_density() {
     let scale = model.density_sizes[nand].x / model.sizes[nand].x;
 
     assert!(scale > 1.0 && scale <= 1.2, "{scale}");
+}
+
+#[test]
+fn global_placement_keeps_out_of_a_soft_blockage() {
+    let open = tiny();
+    let before = PlacementModel::from_db(&open, &Zones::new(&open).unwrap());
+    let row = before.rows[0];
+    let mut db = tiny();
+    let dbu = |microns: f64| db.dbu().to_dbu_rounded(microns);
+    let rect = Rect::new(
+        Point::new(dbu(row.min.x), dbu(row.min.y)),
+        Point::new(dbu(row.max.x), dbu(row.max.y)),
+    );
+    db.placement_blockages.push(PlacementBlockage {
+        rect,
+        kind: BlockageKind::Soft,
+    });
+
+    let after = PlacementModel::from_db(&db, &Zones::new(&db).unwrap());
+
+    assert_eq!(after.zones[0].rects.len(), before.zones[0].rects.len() - 1);
+    assert!(after.free_area() < before.free_area());
 }

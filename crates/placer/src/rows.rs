@@ -1,11 +1,12 @@
 //! Placement rows split into single-height spans, and helpers for fitting
 //! cells into them.
 
-use pare_common::db::design::NetlistDB;
+use pare_common::db::design::{BlockageKind, NetlistDB};
 use pare_common::db::indices::CellId;
 use pare_common::db::library::MacroClass;
 use pare_common::geom::dbu::Dbu;
 use pare_common::geom::orient::Orientation;
+use pare_common::geom::point::Point;
 use pare_common::geom::rect::Rect;
 
 /// One single-height row of sites.
@@ -98,6 +99,94 @@ pub(crate) fn fixed_obstacles(db: &NetlistDB) -> Vec<Rect<Dbu>> {
     out
 }
 
+/// Which sites of a blockage global placement blocks, as
+/// `PlacerBase::initInstsForUnusableSites` walks them: the first, then each
+/// one while the share blocked so far is at most `blocked_share`.
+struct SitePattern {
+    blocked_share: f32,
+    visited: u32,
+    blocked: u32,
+}
+
+impl SitePattern {
+    #[allow(clippy::cast_possible_truncation, clippy::cast_precision_loss)] // as gpl's floats
+    fn new(kind: BlockageKind) -> Self {
+        let max_density = match kind {
+            BlockageKind::Hard | BlockageKind::Soft => 0.0,
+            BlockageKind::Partial(density) => density as f32,
+        };
+        Self {
+            blocked_share: (100.0 - max_density) / 100.0,
+            visited: 0,
+            blocked: 0,
+        }
+    }
+
+    const fn blocks_every_site(&self) -> bool {
+        self.blocked_share >= 1.0
+    }
+
+    #[allow(clippy::cast_precision_loss)] // as gpl's floats
+    fn next_site_is_blocked(&mut self) -> bool {
+        let blocked =
+            self.visited == 0 || self.blocked as f32 / self.visited as f32 <= self.blocked_share;
+        self.visited += 1;
+        self.blocked += u32::from(blocked);
+        blocked
+    }
+
+    /// The stretches of the sites `[x0, x1)` of `row` this pattern blocks.
+    fn stretches(&mut self, row: &RowSpan, x0: Dbu, x1: Dbu) -> Vec<Rect<Dbu>> {
+        let stretch =
+            |a: Dbu, b: Dbu| Rect::new(Point::new(a, row.y), Point::new(b, row.y + row.height));
+        if self.blocks_every_site() {
+            return vec![stretch(x0, x1)];
+        }
+        let mut out = Vec::new();
+        let mut run = None;
+        let mut x = x0;
+        while x < x1 {
+            let blocked = self.next_site_is_blocked();
+            match (blocked, run) {
+                (true, None) => run = Some(x),
+                (false, Some(start)) => {
+                    out.push(stretch(start, x));
+                    run = None;
+                }
+                _ => {}
+            }
+            x += row.site;
+        }
+        if let Some(start) = run {
+            out.push(stretch(start, x1));
+        }
+        out
+    }
+}
+
+/// The stretches of each of `rows` global placement keeps out of: the sites
+/// any placement blockage touches, soft ones included, as `gpl` fills them
+/// with dummy instances.
+pub(crate) fn blocked_stretches(db: &NetlistDB, rows: &[RowSpan]) -> Vec<Vec<Rect<Dbu>>> {
+    let mut blocked = vec![Vec::new(); rows.len()];
+    for blockage in &db.placement_blockages {
+        let b = blockage.rect;
+        let mut pattern = SitePattern::new(blockage.kind);
+        let first = rows.partition_point(|r| r.y + r.height <= b.min.y);
+        for (k, row) in rows.iter().enumerate().skip(first) {
+            if row.y >= b.max.y {
+                break;
+            }
+            let x0 = snap_down(b.min.x.max(row.x_min), row.x_min, row.site);
+            let x1 = snap_up(b.max.x.min(row.x_max), row.x_min, row.site);
+            if x0 < x1 {
+                blocked[k].extend(pattern.stretches(row, x0, x1));
+            }
+        }
+    }
+    blocked
+}
+
 /// Free X intervals of `[lo, hi)` not covered by any obstacle overlapping the
 /// open band `(y0, y1)`.
 pub(crate) fn free_intervals(
@@ -186,6 +275,33 @@ pub(crate) fn orientation_allowed(db: &NetlistDB, cell: CellId, row: Orientation
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn blocked_widths(kind: BlockageKind, sites: i64) -> Vec<(i64, i64)> {
+        let row = span(0, 0, 200 * sites);
+        SitePattern::new(kind)
+            .stretches(&row, Dbu::ZERO, row.x_max)
+            .iter()
+            .map(|r| (r.min.x.get(), r.max.x.get()))
+            .collect()
+    }
+
+    #[test]
+    fn a_soft_blockage_blocks_its_whole_stretch_at_once() {
+        assert_eq!(blocked_widths(BlockageKind::Soft, 4), [(0, 800)]);
+    }
+
+    #[test]
+    fn a_partial_blockage_blocks_every_other_site_at_half_density() {
+        assert_eq!(
+            blocked_widths(BlockageKind::Partial(50.0), 4),
+            [(0, 200), (400, 600)]
+        );
+    }
+
+    #[test]
+    fn a_partial_blockage_of_full_density_still_blocks_its_first_site() {
+        assert_eq!(blocked_widths(BlockageKind::Partial(100.0), 3), [(0, 200)]);
+    }
 
     fn span(y: i64, x_min: i64, x_max: i64) -> RowSpan {
         RowSpan {
