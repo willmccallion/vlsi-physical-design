@@ -57,6 +57,42 @@ pub struct AccessPoint {
 /// Most access nodes kept per pin, each with every via stack that fits.
 const MAX_CANDIDATE_NODES: usize = 8;
 
+/// The box around the other points of `points`, for each of them; `None`
+/// when there are no others.
+pub fn fellow_boxes(points: &[Point<Dbu>]) -> Vec<Option<Rect<Dbu>>> {
+    let grown = |seen: Option<Rect<Dbu>>, p: Point<Dbu>| {
+        let point = Rect::new(p, p);
+        Some(seen.map_or(point, |b: Rect<Dbu>| b.union(&point)))
+    };
+    let mut boxes = vec![None; points.len()];
+    for i in 1..points.len() {
+        boxes[i] = grown(boxes[i - 1], points[i - 1]);
+    }
+    let mut after = None;
+    for i in (0..points.len()).rev() {
+        boxes[i] = match (boxes[i], after) {
+            (Some(before), Some(rest)) => Some(before.union(&rest)),
+            (before, rest) => before.or(rest),
+        };
+        after = grown(after, points[i]);
+    }
+    boxes
+}
+
+/// Puts the candidates nearest `fellows`, the box of the net's other pins,
+/// first, so a pin is entered from the side its net leaves. The sort keeps
+/// the order of equals.
+pub fn order_toward(candidates: &mut [AccessPoint], fellows: &Rect<Dbu>) {
+    candidates.sort_by_key(|a| distance_outside(a.at, fellows));
+}
+
+/// The Manhattan distance from `p` to `area`, zero inside it.
+fn distance_outside(p: Point<Dbu>, area: &Rect<Dbu>) -> Dbu {
+    let across = (area.min.x - p.x).max(p.x - area.max.x).max(Dbu::ZERO);
+    let along = (area.min.y - p.y).max(p.y - area.max.y).max(Dbu::ZERO);
+    across + along
+}
+
 /// Access candidates for a pin, best first; empty if none is legal.
 ///
 /// On a routable layer, `clean` judges the metal a wire end leaves on a
@@ -431,6 +467,33 @@ mod tests {
     }
 
     const METAL1_SPACING: Dbu = Dbu(130);
+
+    fn at(x: i64, y: i64) -> Point<Dbu> {
+        Point::new(Dbu(x), Dbu(y))
+    }
+
+    #[test]
+    fn fellow_boxes_leave_each_point_out() {
+        let boxes = fellow_boxes(&[at(0, 0), at(10, 5), at(4, 20)]);
+
+        assert_eq!(boxes[0], Some(rect(4, 5, 10, 20)));
+        assert_eq!(boxes[1], Some(rect(0, 0, 4, 20)));
+        assert_eq!(boxes[2], Some(rect(0, 0, 10, 5)));
+    }
+
+    #[test]
+    fn a_lone_point_has_no_fellows() {
+        assert_eq!(fellow_boxes(&[at(3, 4)]), vec![None]);
+    }
+
+    #[test]
+    fn distance_outside_is_zero_inside_and_manhattan_beyond() {
+        let area = rect(10, 10, 20, 20);
+
+        assert_eq!(distance_outside(at(15, 20), &area), Dbu::ZERO);
+        assert_eq!(distance_outside(at(5, 15), &area), Dbu(5));
+        assert_eq!(distance_outside(at(23, 4), &area), Dbu(9));
+    }
 
     #[test]
     fn a_pad_inside_one_part_of_a_pin_is_clear_of_its_other_parts() {

@@ -24,7 +24,7 @@ pub use region::{RepairStats, Scope};
 pub use schedule::{RipUp, round_costs, round_strategy};
 pub use trace::Trace;
 
-use crate::access::{AccessPoint, Node, access_points};
+use crate::access::{AccessPoint, Node, access_points, fellow_boxes, order_toward};
 use crate::global::{GCell, GlobalGrid, GlobalRoutes, RouteTree};
 use crate::occupancy::{Occupancy, Origin, Owner, Proximity, Slot};
 use crate::runs::EdgeSet;
@@ -1389,8 +1389,9 @@ impl LowPads {
 /// own, so other nets keep clear of it from the start; the chosen point
 /// becomes the pin's only one.
 ///
-/// Pins with the fewest candidates choose first, each taking its best
-/// candidate that clashes with nothing recorded before it and whose vias,
+/// Pins with the fewest candidates choose first, each taking the candidate
+/// nearest the net's other pins that clashes with nothing recorded before
+/// it and whose vias,
 /// counting the via up from its node, leave room for those of the net's
 /// pins that chose earlier. Below the routable layers, which the occupancy
 /// does not hold, a candidate's pads must keep the layer's spacing from
@@ -1411,11 +1412,32 @@ fn reserve_accesses(
         Some(c) => c.len(),
         None => shared.count(db, db.nets[n].pins[k]).unwrap_or(0),
     };
-    let candidates_of = |n: usize, k: usize| match &own[n][k] {
-        Some(c) => c.clone(),
-        None => shared
-            .candidates(db, db.nets[n].pins[k])
-            .unwrap_or_default(),
+    let fellows: Vec<Vec<Option<Rect<Dbu>>>> = own
+        .iter()
+        .enumerate()
+        .map(|(n, pins)| {
+            if pins.is_empty() {
+                return Vec::new();
+            }
+            let points: Vec<Point<Dbu>> = db.nets[n]
+                .pins
+                .iter()
+                .map(|&p| db.pin_position(p))
+                .collect();
+            fellow_boxes(&points)
+        })
+        .collect();
+    let candidates_of = |n: usize, k: usize| {
+        let mut candidates = match &own[n][k] {
+            Some(c) => c.clone(),
+            None => shared
+                .candidates(db, db.nets[n].pins[k])
+                .unwrap_or_default(),
+        };
+        if let Some(fellows) = &fellows[n][k] {
+            order_toward(&mut candidates, fellows);
+        }
+        candidates
     };
     let mut access: Vec<Vec<Vec<AccessPoint>>> = own
         .iter()

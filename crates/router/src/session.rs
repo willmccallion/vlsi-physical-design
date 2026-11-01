@@ -5,7 +5,7 @@
 //! gcell, and its route is handed out as segments between gcell centers
 //! with where each pin meets them.
 
-use crate::access::access_points;
+use crate::access::{access_points, fellow_boxes, order_toward};
 use crate::detailed::{PinJudge, PinTerminal};
 use crate::global::{GCell, GlobalGrid, GlobalNet, GlobalRoutes, reroute, track_demand};
 use crate::tech::RouteTech;
@@ -19,6 +19,7 @@ use pare_common::db::library::LayerRef;
 use pare_common::geom::dbu::Dbu;
 use pare_common::geom::orient::Orientation;
 use pare_common::geom::point::Point;
+use pare_common::geom::rect::Rect;
 use pare_common::util::config::RoutingConfig;
 use pare_common::verify::shapes::is_signal_net;
 use rustc_hash::{FxHashMap, FxHashSet};
@@ -153,15 +154,25 @@ impl GlobalSession {
     }
 
     /// The terminal of `pin` on `net`: as global routing found it while
-    /// its cell stays as it was, else from the pin's best access point now.
-    fn terminal(&self, db: &NetlistDB, net: NetId, pin: PinId) -> Option<PinTerminal> {
+    /// its cell stays as it was, else from the pin's best access point now,
+    /// the one nearest `fellows`, the box of the net's other pins.
+    fn terminal(
+        &self,
+        db: &NetlistDB,
+        net: NetId,
+        pin: PinId,
+        fellows: Option<&Rect<Dbu>>,
+    ) -> Option<PinTerminal> {
         if self.unchanged(db, pin)
             && let Some(&terminal) = self.initial.get(&pin)
         {
             return Some(terminal);
         }
         let clean = |layer: LayerId, metal: &_| self.judge.clean(net, layer, metal);
-        let candidates = access_points(db, &self.tech, pin, &clean);
+        let mut candidates = access_points(db, &self.tech, pin, &clean);
+        if let Some(fellows) = fellows {
+            order_toward(&mut candidates, fellows);
+        }
         let best = candidates.first()?;
         Some(PinTerminal::of(pin, best, &self.tech, &self.grid))
     }
@@ -185,10 +196,11 @@ impl GlobalSession {
         if !is_signal_net(db, net) {
             return None;
         }
-        db.nets[net.index()]
-            .pins
-            .iter()
-            .map(|&pin| self.terminal(db, net, pin))
+        let pins = &db.nets[net.index()].pins;
+        let points: Vec<Point<Dbu>> = pins.iter().map(|&p| db.pin_position(p)).collect();
+        pins.iter()
+            .zip(fellow_boxes(&points))
+            .map(|(&pin, fellows)| self.terminal(db, net, pin, fellows.as_ref()))
             .collect()
     }
 
