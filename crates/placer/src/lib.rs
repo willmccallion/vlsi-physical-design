@@ -7,5 +7,6 @@ pub mod global;
 pub mod io;
 pub mod legalize;
 pub mod model;
+mod munkres;
 pub mod rows;
 pub mod zones;

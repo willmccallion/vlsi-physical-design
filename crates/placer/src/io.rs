@@ -3,16 +3,18 @@
 //!
 //! Every edge offers slots on one layer whose wires cross it: the vertical
 //! layer on the top and bottom edges, the horizontal one on the left and
-//! right. Slots lie every other track, clear of the corners and of fixed
-//! metal there. Each pin goes to the section of slots whose middle makes
-//! its net shortest, or the next best one with room, and the pins of each
-//! section are then matched to its slots by the Hungarian method, so that
-//! together their nets' half-perimeter wirelength is least. Fixed pins stay
-//! where they are and keep their slots.
+//! right. Slots lie every other track, clear of the corners, and run around
+//! the die from the bottom left, counterclockwise; those on fixed metal or
+//! a macro at the edge count as blocked. Each pin goes to the section of
+//! slots whose middle makes its net shortest, or the next best one with
+//! room, and the pins of each section are then matched to its free slots by
+//! the Hungarian method, so that together their nets' half-perimeter
+//! wirelength is least. Fixed pins stay where they are and keep their slots.
 
-use pare_common::db::design::{IoPin, NetlistDB, PinOwner, PlacementStatus};
-use pare_common::db::indices::{IoPinId, LayerId};
-use pare_common::db::library::{Direction, LayerRef, Library, Shape};
+use crate::munkres::min_cost_assignment;
+use pare_common::db::design::{IoPin, NetlistDB, PinOwner, PlacementStatus, TrackAxis, TrackDef};
+use pare_common::db::indices::{CellId, IoPinId, LayerId};
+use pare_common::db::library::{Direction, LayerRef, Library, MacroClass, Shape};
 use pare_common::geom::dbu::Dbu;
 use pare_common::geom::orient::Orientation;
 use pare_common::geom::point::Point;
@@ -185,22 +187,32 @@ struct Slot {
     edge: Edge,
     layer: LayerId,
     at: Point<Dbu>,
+    blocked: bool,
 }
 
 /// Neighbouring slots of one edge that pins are first assigned to.
 #[derive(Debug)]
 struct Section {
     slots: Vec<Slot>,
+    free_slots: usize,
     pins: Vec<IoPinId>,
 }
 
 impl Section {
+    fn new(slots: &[Slot]) -> Self {
+        Self {
+            slots: slots.to_vec(),
+            free_slots: slots.iter().filter(|s| !s.blocked).count(),
+            pins: Vec::new(),
+        }
+    }
+
     fn middle(&self) -> Point<Dbu> {
-        self.slots[self.slots.len() / 2].at
+        self.slots[(self.slots.len() - 1) / 2].at
     }
 
     const fn has_room(&self) -> bool {
-        self.pins.len() < self.slots.len()
+        self.pins.len() < self.free_slots
     }
 }
 
@@ -222,11 +234,12 @@ pub fn place_io_pins(
     if pins.is_empty() {
         return Ok(IoPlacement { pins: 0, slots: 0 });
     }
-    let slots = free_slots(db, layers)?;
-    if slots.len() < pins.len() {
+    let slots = boundary_slots(db, layers)?;
+    let free_slots = slots.iter().filter(|s| !s.blocked).count();
+    if free_slots < pins.len() {
         return Err(IoPlacementError::TooFewSlots {
             pins: pins.len(),
-            slots: slots.len(),
+            slots: free_slots,
         });
     }
     let boxes: Vec<Option<Rect<Dbu>>> = pins.iter().map(|&p| net_box(db, p)).collect();
@@ -237,7 +250,7 @@ pub fn place_io_pins(
         let chosen = order.into_iter().find(|&s| sections[s].has_room()).ok_or(
             IoPlacementError::TooFewSlots {
                 pins: pins.len(),
-                slots: slots.len(),
+                slots: free_slots,
             },
         )?;
         sections[chosen].pins.push(pin);
@@ -246,23 +259,7 @@ pub fn place_io_pins(
     let box_of = |pin: IoPinId| pins.binary_search(&pin).ok().and_then(|k| boxes[k]);
     let placed: Vec<(IoPinId, Slot)> = sections
         .par_iter()
-        .flat_map_iter(|section| {
-            let costs: Vec<Vec<i64>> = section
-                .pins
-                .iter()
-                .map(|&pin| {
-                    let net = box_of(pin);
-                    section.slots.iter().map(|s| hpwl_with(net, s.at)).collect()
-                })
-                .collect();
-            let assignment = min_cost_assignment(&costs);
-            section
-                .pins
-                .iter()
-                .zip(assignment)
-                .map(|(&pin, slot)| (pin, section.slots[slot]))
-                .collect::<Vec<_>>()
-        })
+        .flat_map_iter(|section| match_to_slots(section, &box_of))
         .collect();
 
     for (pin, slot) in placed {
@@ -278,8 +275,36 @@ pub fn place_io_pins(
     }
     Ok(IoPlacement {
         pins: pins.len(),
-        slots: slots.len(),
+        slots: free_slots,
     })
+}
+
+/// The section's pins matched to its free slots, as `HungarianMatching`.
+fn match_to_slots(
+    section: &Section,
+    box_of: &impl Fn(IoPinId) -> Option<Rect<Dbu>>,
+) -> Vec<(IoPinId, Slot)> {
+    let free: Vec<Slot> = section
+        .slots
+        .iter()
+        .filter(|s| !s.blocked)
+        .copied()
+        .collect();
+    let costs: Vec<Vec<i64>> = free
+        .iter()
+        .map(|s| {
+            section
+                .pins
+                .iter()
+                .map(|&pin| hpwl_with(box_of(pin), s.at))
+                .collect()
+        })
+        .collect();
+    min_cost_assignment(&costs)
+        .into_iter()
+        .zip(free)
+        .filter_map(|(pin, slot)| Some((section.pins[pin?], slot)))
+        .collect()
 }
 
 /// Half-perimeter of `net` grown to take in `p`; a net with nothing else
@@ -291,40 +316,49 @@ fn hpwl_with(net: Option<Rect<Dbu>>, p: Point<Dbu>) -> i64 {
     })
 }
 
-/// The box around the other connections of a pin's net that do not move
-/// with it: its cells' pins and its fixed I/O pins.
+/// The box around the cell pins on a pin's net, where `IOPlacer::initNetlist`
+/// takes them.
 fn net_box(db: &NetlistDB, pin: IoPinId) -> Option<Rect<Dbu>> {
     let net = db.io_pins[pin.index()].net;
     db.nets[net.index()]
         .pins
         .iter()
-        .filter(|&&p| match db.pins[p.index()].owner {
-            PinOwner::Cell { .. } => true,
-            PinOwner::Io(io) => !db.io_pins[io.index()].status.is_movable(),
-        })
+        .filter(|&&p| matches!(db.pins[p.index()].owner, PinOwner::Cell { .. }))
         .map(|&p| {
-            let at = db.pin_position(p);
+            let at = db.average_pin_position(p);
             Rect::new(at, at)
         })
         .reduce(|a, b| a.union(&b))
 }
 
-/// Splits each edge's slots, in order along it, into sections.
+/// Splits each edge's slots, in order along it, into sections, as
+/// `IOPlacer::findSections`, which leaves out the last slot of an edge where
+/// it would make a section alone.
 fn sections(slots: &[Slot]) -> Vec<Section> {
     let mut out = Vec::new();
     for edge in Edge::ALL {
         let on_edge: Vec<Slot> = slots.iter().copied().filter(|s| s.edge == edge).collect();
-        out.extend(on_edge.chunks(SLOTS_PER_SECTION).map(|chunk| Section {
-            slots: chunk.to_vec(),
-            pins: Vec::new(),
-        }));
+        let Some(last) = on_edge.len().checked_sub(1) else {
+            continue;
+        };
+        let mut begin = 0;
+        loop {
+            let end = (begin + SLOTS_PER_SECTION - 1).min(last);
+            out.push(Section::new(&on_edge[begin..=end]));
+            begin = end + 1;
+            if begin >= last {
+                break;
+            }
+        }
     }
     out
 }
 
-/// Every slot of every edge that fixed metal leaves free.
-fn free_slots(db: &NetlistDB, layers: IoLayers) -> Result<Vec<Slot>, IoPlacementError> {
+/// Every slot of every edge, blocked where fixed metal or a macro at the
+/// edge is in the way.
+fn boundary_slots(db: &NetlistDB, layers: IoLayers) -> Result<Vec<Slot>, IoPlacementError> {
     let blockages = fixed_shapes_keeping_io(db, |p: &IoPin| !p.status.is_movable());
+    let macros = macro_stretches(db);
     let mut out = Vec::new();
     for edge in Edge::ALL {
         let layer = if edge.runs_horizontally() {
@@ -341,7 +375,7 @@ fn free_slots(db: &NetlistDB, layers: IoLayers) -> Result<Vec<Slot>, IoPlacement
             .collect();
         for at in edge_positions(db, layer, edge, size)? {
             let pin = size.rect(edge, at);
-            let blocked = on_layer.iter().any(|r| {
+            let on_metal = on_layer.iter().any(|r| {
                 let width = r.width().min(r.height()).max(size.half_width * 2);
                 let spacing = rules
                     .spacing_table
@@ -352,12 +386,51 @@ fn free_slots(db: &NetlistDB, layers: IoLayers) -> Result<Vec<Slot>, IoPlacement
                     .max(rules.min_spacing);
                 too_close(&pin, r, spacing)
             });
-            if !blocked {
-                out.push(Slot { edge, layer, at });
-            }
+            let along = if edge.runs_horizontally() { at.x } else { at.y };
+            let on_macro = macros
+                .iter()
+                .any(|&(e, lo, hi)| e == edge && lo < along && along < hi);
+            out.push(Slot {
+                edge,
+                layer,
+                at,
+                blocked: on_metal || on_macro,
+            });
         }
     }
     Ok(out)
+}
+
+/// The stretches of each edge that placed macros reach, as
+/// `IOPlacer::getBlockedRegionsFromMacros`.
+fn macro_stretches(db: &NetlistDB) -> Vec<(Edge, Dbu, Dbu)> {
+    (0..db.cells.len())
+        .map(CellId::new)
+        .filter(|&id| {
+            db.cell_macro(id).class == MacroClass::Block
+                && db.cells[id.index()].status != PlacementStatus::Unplaced
+        })
+        .filter_map(|id| db.die_area.intersection(&db.cell_bbox(id)))
+        .flat_map(|reached| stretches_on_die_edges(db.die_area, reached))
+        .collect()
+}
+
+/// The stretches of the die's edges that `b`, inside it, touches.
+fn stretches_on_die_edges(die: Rect<Dbu>, b: Rect<Dbu>) -> Vec<(Edge, Dbu, Dbu)> {
+    let mut out = Vec::new();
+    if b.min.y == die.min.y {
+        out.push((Edge::Bottom, b.min.x, b.max.x));
+    }
+    if b.max.y == die.max.y {
+        out.push((Edge::Top, b.min.x, b.max.x));
+    }
+    if b.min.x == die.min.x {
+        out.push((Edge::Left, b.min.y, b.max.y));
+    }
+    if b.max.x == die.max.x {
+        out.push((Edge::Right, b.min.y, b.max.y));
+    }
+    out
 }
 
 /// Whether two rectangles overlap or come closer than `spacing`.
@@ -371,9 +444,8 @@ fn too_close(a: &Rect<Dbu>, b: &Rect<Dbu>, spacing: Dbu) -> bool {
     dx * dx + dy * dy < s * s
 }
 
-/// Slot positions on `edge`: every [`SLOT_TRACKS`]th track of `layer`, or
-/// further apart if pins that close would break the spacing, leaving the
-/// pin inside the die and the corners free.
+/// Slot positions on `edge`, in `OpenROAD`'s order along it: rightward on
+/// the bottom, up the right, leftward on the top and down the left.
 fn edge_positions(
     db: &NetlistDB,
     layer: LayerId,
@@ -382,32 +454,39 @@ fn edge_positions(
 ) -> Result<Vec<Point<Dbu>>, IoPlacementError> {
     let die = db.die_area;
     let axis = if edge.runs_horizontally() {
-        pare_common::db::design::TrackAxis::X
+        TrackAxis::X
     } else {
-        pare_common::db::design::TrackAxis::Y
+        TrackAxis::Y
     };
-    let tracks = db
-        .tracks
-        .iter()
-        .find(|t| t.axis == axis && t.layers.contains(&layer))
-        .ok_or_else(|| IoPlacementError::NoTracks(db.library.layer(layer).name.clone()))?;
     let (lo, hi, fixed) = match edge {
         Edge::Bottom => (die.min.x, die.max.x, die.min.y),
         Edge::Top => (die.min.x, die.max.x, die.max.y),
         Edge::Left => (die.min.y, die.max.y, die.min.x),
         Edge::Right => (die.min.y, die.max.y, die.max.x),
     };
-    let max_corner = db.dbu().to_dbu(MAX_CORNER_MICRONS).unwrap_or(Dbu::ZERO);
-    let corner = (tracks.step * CORNER_TRACKS).min(max_corner);
-    let from = lo + size.half_width + corner;
-    let to = hi - size.half_width - corner;
-    let apart = (size.half_width * 2 + db.library.layer(layer).min_spacing).get();
-    let step = tracks.step.get().max(1);
-    let slot_tracks = SLOT_TRACKS.max((apart + step - 1) / step);
-    let out = tracks
-        .coords()
-        .step_by(usize::try_from(slot_tracks).unwrap_or(1))
-        .filter(|&c| from <= c && c <= to)
+    let reach = SlotReach {
+        lo: lo + size.half_width,
+        hi: hi - size.half_width,
+        apart: (size.half_width * 2 + db.library.layer(layer).min_spacing).get(),
+        max_corner: db.dbu().to_dbu(MAX_CORNER_MICRONS).unwrap_or(Dbu::ZERO),
+    };
+    let patterns: Vec<&TrackDef> = db
+        .tracks
+        .iter()
+        .filter(|t| t.axis == axis && t.layers.contains(&layer))
+        .collect();
+    if patterns.is_empty() {
+        return Err(IoPlacementError::NoTracks(
+            db.library.layer(layer).name.clone(),
+        ));
+    }
+    let mut coords: Vec<Dbu> = patterns.iter().flat_map(|t| reach.slots_of(t)).collect();
+    coords.sort_unstable();
+    if matches!(edge, Edge::Top | Edge::Left) {
+        coords.reverse();
+    }
+    Ok(coords
+        .into_iter()
         .map(|c| {
             if edge.runs_horizontally() {
                 Point::new(c, fixed)
@@ -415,136 +494,127 @@ fn edge_positions(
                 Point::new(fixed, c)
             }
         })
-        .collect();
-    Ok(out)
+        .collect())
 }
 
-/// The column assigned to each row of `costs` so that the total is least,
-/// by the Hungarian method with potentials; every row gets a distinct
-/// column, so there must be at least as many columns as rows.
-fn min_cost_assignment(costs: &[Vec<i64>]) -> Vec<usize> {
-    const INFINITE: i64 = i64::MAX / 4;
-    let rows = costs.len();
-    let cols = costs.first().map_or(0, Vec::len);
-    if rows == 0 {
-        return Vec::new();
+/// Where along an edge a layer's pins may sit.
+#[derive(Clone, Copy, Debug)]
+struct SlotReach {
+    lo: Dbu,
+    hi: Dbu,
+    apart: i64,
+    max_corner: Dbu,
+}
+
+impl SlotReach {
+    /// One track pattern's slots: every [`SLOT_TRACKS`]th track, or further
+    /// apart if pins that close would break the spacing, counted out from
+    /// the pattern's start and clear of the corners, as
+    /// `IOPlacer::findLayerSlots`.
+    fn slots_of(self, tracks: &TrackDef) -> Vec<Dbu> {
+        let step = tracks.step.get().max(1);
+        let slot_tracks = SLOT_TRACKS.max((self.apart + step - 1) / step);
+        let between = slot_tracks * step;
+        let corner = (tracks.step * CORNER_TRACKS).min(self.max_corner).get();
+        let clear = ceil_div(corner, between);
+        let start = tracks.start.get();
+        let first = ceil_div(self.lo.get() - start, between).max(0) + clear;
+        let last = (i64::from(tracks.count) - 1).min((self.hi.get() - start) / between) - clear;
+        (first..=last).map(|i| Dbu(start + i * between)).collect()
     }
-    let mut row_potential = vec![0_i64; rows + 1];
-    let mut col_potential = vec![0_i64; cols + 1];
-    let mut matched_row = vec![0_usize; cols + 1];
-    let mut previous = vec![0_usize; cols + 1];
-    for row in 1..=rows {
-        matched_row[0] = row;
-        let mut col = 0;
-        let mut slack = vec![INFINITE; cols + 1];
-        let mut done = vec![false; cols + 1];
-        loop {
-            done[col] = true;
-            let r = matched_row[col];
-            let mut delta = INFINITE;
-            let mut next = 0;
-            for c in 1..=cols {
-                if done[c] {
-                    continue;
-                }
-                let reduced = costs[r - 1][c - 1] - row_potential[r] - col_potential[c];
-                if reduced < slack[c] {
-                    slack[c] = reduced;
-                    previous[c] = col;
-                }
-                if slack[c] < delta {
-                    delta = slack[c];
-                    next = c;
-                }
-            }
-            for c in 0..=cols {
-                if done[c] {
-                    row_potential[matched_row[c]] += delta;
-                    col_potential[c] -= delta;
-                } else {
-                    slack[c] -= delta;
-                }
-            }
-            col = next;
-            if matched_row[col] == 0 {
-                break;
-            }
-        }
-        while col != 0 {
-            let before = previous[col];
-            matched_row[col] = matched_row[before];
-            col = before;
-        }
-    }
-    let mut out = vec![0; rows];
-    for c in 1..=cols {
-        if matched_row[c] != 0 {
-            out[matched_row[c] - 1] = c - 1;
-        }
-    }
-    out
+}
+
+const fn ceil_div(value: i64, by: i64) -> i64 {
+    -(-value).div_euclid(by)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
 
-    fn total(costs: &[Vec<i64>], assignment: &[usize]) -> i64 {
-        assignment
+    fn slot_row(count: usize) -> Vec<Slot> {
+        (0..count)
+            .map(|i| Slot {
+                edge: Edge::Bottom,
+                layer: LayerId::new(0),
+                at: Point::new(Dbu(i64::try_from(i).unwrap()), Dbu::ZERO),
+                blocked: false,
+            })
+            .collect()
+    }
+
+    fn section_lengths(count: usize) -> Vec<usize> {
+        sections(&slot_row(count))
             .iter()
-            .enumerate()
-            .map(|(r, &c)| costs[r][c])
-            .sum()
+            .map(|s| s.slots.len())
+            .collect()
     }
 
     #[test]
-    fn assignment_finds_the_cheapest_matching() {
-        let costs = vec![vec![4, 1, 3], vec![2, 0, 5], vec![3, 2, 2]];
-
-        let assignment = min_cost_assignment(&costs);
-
-        assert_eq!(total(&costs, &assignment), 5);
+    fn sections_split_an_edge_every_two_hundred_slots() {
+        assert_eq!(section_lengths(428), vec![200, 200, 28]);
     }
 
     #[test]
-    fn assignment_gives_fewer_rows_distinct_columns() {
-        let costs = vec![vec![7, 1, 1, 9], vec![7, 1, 2, 9]];
-
-        let assignment = min_cost_assignment(&costs);
-
-        assert_ne!(assignment[0], assignment[1]);
-        assert_eq!(total(&costs, &assignment), 2);
+    fn sections_leave_out_a_last_slot_that_would_be_alone() {
+        assert_eq!(section_lengths(201), vec![200]);
     }
 
     #[test]
-    fn assignment_matches_brute_force_on_small_matrices() {
-        let mut seed = 12_345_u64;
-        let mut next = || {
-            seed = seed.wrapping_mul(6_364_136_223_846_793_005).wrapping_add(1);
-            i64::try_from(seed >> 54).unwrap()
+    fn a_blocked_slot_takes_up_a_section_but_offers_no_room() {
+        let mut slots = slot_row(3);
+        slots[1].blocked = true;
+
+        let section = Section::new(&slots);
+
+        assert_eq!(section.slots.len(), 3);
+        assert_eq!(section.free_slots, 2);
+        assert_eq!(section.middle().x, Dbu(1));
+    }
+
+    #[test]
+    fn slots_count_from_the_track_start_past_the_die_edge_and_corner() {
+        let tracks = TrackDef {
+            axis: TrackAxis::X,
+            start: Dbu(70),
+            count: 100,
+            step: Dbu(100),
+            layers: Vec::new(),
         };
-        for _ in 0..50 {
-            let costs: Vec<Vec<i64>> = (0..4).map(|_| (0..5).map(|_| next()).collect()).collect();
+        let reach = SlotReach {
+            lo: Dbu(70),
+            hi: Dbu(9930),
+            apart: 180,
+            max_corner: Dbu(2000),
+        };
 
-            let best = brute_force(&costs, 0, &mut [false; 5]);
+        let slots = reach.slots_of(&tracks);
 
-            assert_eq!(total(&costs, &min_cost_assignment(&costs)), best);
-        }
+        assert_eq!(slots.first(), Some(&Dbu(1670)));
+        assert_eq!(slots.last(), Some(&Dbu(8270)));
+        assert_eq!(slots[1] - slots[0], Dbu(200));
     }
 
-    fn brute_force(costs: &[Vec<i64>], row: usize, used: &mut [bool; 5]) -> i64 {
-        if row == costs.len() {
-            return 0;
-        }
-        let mut best = i64::MAX;
-        for c in 0..5 {
-            if !used[c] {
-                used[c] = true;
-                best = best.min(costs[row][c] + brute_force(costs, row + 1, used));
-                used[c] = false;
-            }
-        }
-        best
+    #[test]
+    fn a_box_on_two_edges_reaches_both_stretches() {
+        let die = Rect::new(
+            Point::new(Dbu::ZERO, Dbu::ZERO),
+            Point::new(Dbu(1000), Dbu(1000)),
+        );
+        let corner = Rect::new(
+            Point::new(Dbu(600), Dbu::ZERO),
+            Point::new(Dbu(1000), Dbu(300)),
+        );
+
+        let stretches = stretches_on_die_edges(die, corner);
+
+        assert_eq!(
+            stretches,
+            vec![
+                (Edge::Bottom, Dbu(600), Dbu(1000)),
+                (Edge::Right, Dbu::ZERO, Dbu(300)),
+            ]
+        );
     }
 
     #[test]
