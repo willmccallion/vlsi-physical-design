@@ -9,6 +9,7 @@ output_def = "output/bp_quad/placed.def"
 
 [global_placement]
 placer_max_iterations = 2000
+target_density = 0.3
 routing_layer_adjustment = 0.0
 layer_adjustments = [
   { layer = "metal2", adjustment = 0.5 },

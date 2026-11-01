@@ -42,6 +42,7 @@ NANGATE45_LEF = "inputs/tech/nangate45/Nangate45.lef"
 NANGATE45_IO = {"horizontal_layer": "metal5", "vertical_layer": "metal6"}
 ORFS_NANGATE45 = f"{ORFS_DIR}/flow/platforms/nangate45/lef"
 ORFS_NANGATE45_LIB = f"{ORFS_DIR}/flow/platforms/nangate45/lib"
+ORFS_NANGATE45_PLACE_DENSITY = 0.3
 # The platform's config.mk and setRC.tcl: cells the flow never uses, and the
 # signal and clock wire RC of metal3 and metal5 in ohms and femtofarads per micron.
 ORFS_NANGATE45_DONT_USE = ["TAPCELL_X1", "FILLCELL_X1", "AOI211_X1", "OAI211_X1"]
@@ -85,6 +86,7 @@ def orfs(
     macros=(),
     orfs_pins=False,
     sdc="constraint.sdc",
+    place_density=None,
 ):
     """A Nangate45 design that OpenROAD-flow-scripts synthesizes from its
     `sources` under flow/designs/src and floorplans: die, rows, tracks, tap
@@ -92,7 +94,8 @@ def orfs(
     its floorplan gives them. With `orfs_pins`, the I/O pins are those its
     own pin placement puts within the design's I/O constraints, after its
     first global placement. `sdc` is its constraints file under the flow's
-    design directory."""
+    design directory. `place_density` is its PLACE_DENSITY, for a design
+    without PLACE_DENSITY_LB_ADDON."""
     return {
         "suite": "openroad",
         "purpose": "place_and_route",
@@ -108,6 +111,7 @@ def orfs(
         "io": io,
         "io_enabled": False if orfs_pins else io_enabled,
         "placer_iterations": 2000,
+        "target_density": place_density,
     }
 
 
@@ -205,6 +209,7 @@ DESIGNS = {
         macros=["fakeram45_256x16"],
         orfs_pins=True,
         sdc="ariane.sdc",
+        place_density=ORFS_NANGATE45_PLACE_DENSITY,
     ),
     "bp_quad": orfs(
         "bp_quad",
@@ -220,6 +225,7 @@ DESIGNS = {
         ],
         orfs_pins=True,
         sdc="bsg_chip.sdc",
+        place_density=ORFS_NANGATE45_PLACE_DENSITY,
     ),
     "swerv": openroad(
         "src/gpl/test/medium04.def",
