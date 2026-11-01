@@ -168,6 +168,12 @@ fn best_per_node(found: Vec<((bool, i64), AccessPoint)>) -> Vec<AccessPoint> {
     kept
 }
 
+/// The middle of a span rounded down to the manufacturing grid, as
+/// `FlexPA::genAPCentered` places a centered access point.
+const fn middle_on_grid(low: Dbu, high: Dbu, grid: Dbu) -> Dbu {
+    Dbu(low.midpoint(high).get() / grid.get() * grid.get())
+}
+
 /// Off-crossing accesses on each track of `layer` through `rect`: the point
 /// inside the rectangle nearest a crossing where `stack` finds vias, joined
 /// to that crossing. Calls `f` with the access and its stub length.
@@ -180,7 +186,7 @@ fn stub_accesses(
 ) {
     let lt = tech.layer(layer);
     let ((a0, a1), (b0, b1)) = lt.across_along_rect(rect);
-    let center = b0.midpoint(b1);
+    let center = middle_on_grid(b0, b1, tech.manufacturing_grid);
     let k = lt.cross.partition_point(|c| c.at < center);
     let nearest = [k.checked_sub(1), (k < lt.cross.len()).then_some(k)];
     for track in lt.tracks_within(a0, a1) {
@@ -493,6 +499,16 @@ mod tests {
         assert_eq!(distance_outside(at(15, 20), &area), Dbu::ZERO);
         assert_eq!(distance_outside(at(5, 15), &area), Dbu(5));
         assert_eq!(distance_outside(at(23, 4), &area), Dbu(9));
+    }
+
+    #[test]
+    fn the_middle_of_a_span_is_rounded_down_to_the_manufacturing_grid() {
+        assert_eq!(middle_on_grid(Dbu(100), Dbu(130), Dbu(10)), Dbu(110));
+    }
+
+    #[test]
+    fn the_middle_of_a_span_on_the_grid_stays_put() {
+        assert_eq!(middle_on_grid(Dbu(100), Dbu(140), Dbu(10)), Dbu(120));
     }
 
     #[test]

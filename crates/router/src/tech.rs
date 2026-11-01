@@ -198,6 +198,8 @@ pub struct RouteTech {
     net_rules: Vec<Option<NonDefaultRuleId>>,
     /// The track spacing a gcell's edge is a multiple of.
     pub gcell_pitch: Dbu,
+    /// The step every wire end must fall on, one without a stated grid.
+    pub manufacturing_grid: Dbu,
 }
 
 /// Routing layers whose track spacings choose the gcell pitch: the second
@@ -315,6 +317,11 @@ impl RouteTech {
                 |l| db.average_track_spacing(LayerId::new(l)),
                 max_layer.index(),
             ),
+            manufacturing_grid: lib
+                .rules
+                .manufacturing_grid
+                .filter(|g| g.get() > 0)
+                .unwrap_or(Dbu(1)),
         })
     }
 
