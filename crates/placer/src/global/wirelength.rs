@@ -59,11 +59,6 @@ impl Netlist {
         self.nets.push((start..self.terminals.len(), weight));
     }
 
-    /// Number of nets.
-    pub(super) const fn len(&self) -> usize {
-        self.nets.len()
-    }
-
     /// Number of terminals on each of `objects` objects.
     pub(super) fn pin_counts(&self, objects: usize) -> Vec<f64> {
         let mut counts = vec![0.0; objects];

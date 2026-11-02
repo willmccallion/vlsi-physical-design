@@ -21,6 +21,7 @@ use super::{
 };
 use crate::model::{CellKind, PlacementModel};
 use crate::zones::Zone;
+use pare_common::geom::dbu::Dbu;
 use pare_common::geom::point::Point;
 use pare_common::geom::rect::Rect;
 use rand::rngs::StdRng;
@@ -33,10 +34,15 @@ const INITIAL_PENALTY: f64 = 8e-5;
 /// Per-iteration bounds on how much the density penalty may change.
 const PENALTY_GROWTH: (f64, f64) = (0.95, 1.05);
 
-/// Bins every net would have to stretch by in one iteration for the
-/// density penalty to stop growing; large, so that it only throttles
-/// runaway spreading.
-const REFERENCE_STRETCH_BINS: f64 = 2.0;
+/// The growth in wirelength over one iteration at which the density penalty
+/// holds steady, `gpl`'s default `-reference_hpwl`.
+const REFERENCE_HPWL: Dbu = Dbu(446_000_000);
+
+/// Overflow below which the penalty's highest growth is lowered, once.
+const HOLD_GROWTH_OVERFLOW: f64 = 0.35;
+
+/// What that lowers the highest growth by.
+const HOLD_GROWTH_FACTOR: f64 = 0.99;
 
 /// Times one iteration may shorten its step before accepting it.
 const MAX_BACKTRACKS: usize = 10;
@@ -600,13 +606,37 @@ fn gamma_for(overflow: f64, bin: Point<f64>) -> f64 {
 }
 
 /// How much to scale the density penalty after HPWL changed by `delta`,
-/// against a `reference` change at which it holds steady.
-fn penalty_growth(delta: f64, reference: f64) -> f64 {
-    let (lo, hi) = PENALTY_GROWTH;
+/// against a `reference` change at which it holds steady, as `getPhiCoef`.
+fn penalty_growth(delta: f64, reference: f64, highest: f64) -> f64 {
     if delta < 0.0 {
-        hi
+        highest
     } else {
-        hi.powf(1.0 - delta / reference).max(lo)
+        highest.powf(1.0 - delta / reference).max(PENALTY_GROWTH.0)
+    }
+}
+
+/// The highest growth of the density penalty over a run.
+#[derive(Clone, Copy, Debug, PartialEq)]
+struct GrowthLimit {
+    highest: f64,
+    held: bool,
+}
+
+impl GrowthLimit {
+    const fn new() -> Self {
+        Self {
+            highest: PENALTY_GROWTH.1,
+            held: false,
+        }
+    }
+
+    /// Lowers the limit the first time `overflow` falls far enough, as
+    /// `nesterovAdjustPhi`. A revert to a snapshot keeps it lowered.
+    fn observe(&mut self, overflow: f64) {
+        if !self.held && overflow < HOLD_GROWTH_OVERFLOW {
+            self.held = true;
+            self.highest *= HOLD_GROWTH_FACTOR;
+        }
     }
 }
 
@@ -738,6 +768,9 @@ struct Run {
     routability: Option<Routability>,
     limit: usize,
     refunded: usize,
+    /// The wirelength growth at which the density penalty holds steady.
+    reference_hpwl: f64,
+    growth_limit: GrowthLimit,
     iterations: usize,
     k: usize,
     outcome: Outcome,
@@ -786,7 +819,7 @@ pub(super) fn minimize<D: TimingDriver>(
             timing_rounds: 0,
         });
     };
-    let mut run = Run::new(&setup, params);
+    let mut run = Run::new(&setup, params, model.units.to_microns(REFERENCE_HPWL));
     loop {
         let flow = {
             let Setup {
@@ -862,7 +895,7 @@ fn write_positions(model: &mut PlacementModel, setup: &Setup) {
 }
 
 impl Run {
-    fn new(setup: &Setup, params: &GlobalParams) -> Self {
+    fn new(setup: &Setup, params: &GlobalParams, reference_hpwl: f64) -> Self {
         let n = setup.objects.centers.len();
         let zero = vec![Point::new(0.0, 0.0); n];
         Self {
@@ -879,6 +912,8 @@ impl Run {
                 .map(|r| Routability::new(r, &setup.objects, &setup.fields)),
             limit: params.max_iterations,
             refunded: 0,
+            reference_hpwl,
+            growth_limit: GrowthLimit::new(),
             iterations: 0,
             k: 0,
             outcome: Outcome::IterationLimit,
@@ -943,8 +978,6 @@ impl Run {
         site: f64,
         report: &mut impl FnMut(&Progress),
     ) -> Flow {
-        let reference_growth =
-            REFERENCE_STRETCH_BINS * f64::midpoint(bin.x, bin.y) * netlist.len().max(1) as f64;
         let mut s = match self.s.take() {
             Some(s) => s,
             None => initial_state(objective, objects, bin, site, &mut self.grad),
@@ -1049,7 +1082,12 @@ impl Run {
             s.weights.damp(self.k, &eval);
             let converged = s.weights.frozen.iter().all(|&f| f);
             if !converged {
-                let growth = penalty_growth(eval.wirelength.hpwl - s.prev_hpwl, reference_growth);
+                let growth = penalty_growth(
+                    eval.wirelength.hpwl - s.prev_hpwl,
+                    self.reference_hpwl,
+                    self.growth_limit.highest,
+                );
+                self.growth_limit.observe(eval.overflow);
                 s.weights.update(&eval, growth);
                 s.prev_hpwl = eval.wirelength.hpwl;
                 s.gamma = gamma_for(eval.overflow, bin);
@@ -1261,9 +1299,24 @@ mod tests {
 
     #[test]
     fn the_penalty_grows_fastest_while_hpwl_falls() {
-        assert!((penalty_growth(-1.0, 100.0) - 1.05).abs() < 1e-12);
-        assert!((penalty_growth(100.0, 100.0) - 1.0).abs() < 1e-12);
-        assert!((penalty_growth(1e9, 100.0) - 0.95).abs() < 1e-12);
+        assert!((penalty_growth(-1.0, 100.0, 1.05) - 1.05).abs() < 1e-12);
+        assert!((penalty_growth(100.0, 100.0, 1.05) - 1.0).abs() < 1e-12);
+        assert!((penalty_growth(1e9, 100.0, 1.05) - 0.95).abs() < 1e-12);
+    }
+
+    #[test]
+    fn the_growth_limit_is_lowered_once_as_overflow_falls() {
+        let mut limit = GrowthLimit::new();
+
+        limit.observe(0.5);
+        let before = limit.highest;
+        limit.observe(0.3);
+        let after = limit.highest;
+        limit.observe(0.2);
+
+        assert!((before - 1.05).abs() < 1e-12);
+        assert!((after - 1.0395).abs() < 1e-12);
+        assert!((limit.highest - after).abs() < 1e-12);
     }
 
     fn evaluation(field_energy: Vec<f64>) -> Evaluation {

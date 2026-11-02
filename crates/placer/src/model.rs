@@ -9,7 +9,7 @@ use crate::rows::{blocked_stretches, expand_rows, free_intervals};
 use crate::zones::{Zone, Zones};
 use pare_common::db::design::{NetlistDB, PinOwner, PlacementStatus};
 use pare_common::db::indices::{CellId, NetId};
-use pare_common::geom::dbu::Dbu;
+use pare_common::geom::dbu::{Dbu, DbuPerMicron};
 use pare_common::geom::point::Point;
 use pare_common::geom::rect::Rect;
 
@@ -98,6 +98,8 @@ pub struct PlacementModel {
     /// Width of the narrowest row site, one micron for a design without
     /// rows.
     pub site_width: f64,
+    /// The design's database units.
+    pub units: DbuPerMicron,
 }
 
 /// Each cell's size in the density, as `OpenROAD`'s `PlacerBaseCommon`
@@ -243,6 +245,7 @@ impl PlacementModel {
             })
             .collect();
         Self {
+            units,
             die: Rect::new(um(db.die_area.min), um(db.die_area.max)),
             rows,
             sizes: (0..db.num_cells())
