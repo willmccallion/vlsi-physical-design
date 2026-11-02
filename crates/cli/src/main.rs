@@ -1521,6 +1521,10 @@ fn global_placement(
         target_density,
         target_overflow: gp.target_overflow,
         max_iterations: gp.placer_max_iterations,
+        initial_rounds: match pass {
+            Pass::SkipIo => 0,
+            Pass::Full => global::INITIAL_PLACE_ROUNDS,
+        },
         bins,
         seed: gp.seed,
         routability,

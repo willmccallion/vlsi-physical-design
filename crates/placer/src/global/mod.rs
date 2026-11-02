@@ -16,11 +16,13 @@
 //! point; wirelength couples them all.
 
 mod density;
+mod initial;
 mod nesterov;
 mod poisson;
 mod routability;
 mod wirelength;
 
+pub use initial::INITIAL_PLACE_ROUNDS;
 pub use routability::{CongestionEstimator, CongestionRound, RoutabilityParams, RoutingTiles};
 
 use crate::model::{PinAnchor, PlacementModel};
@@ -44,6 +46,9 @@ pub struct GlobalParams {
     pub target_overflow: f64,
     /// Iteration limit.
     pub max_iterations: usize,
+    /// Most rounds of `gpl`'s bound-to-bound initial placement; with none,
+    /// cells start at the centers of their regions.
+    pub initial_rounds: usize,
     /// Bins per side of the density grid.
     pub bins: usize,
     /// Seed for the initial placement.
@@ -317,8 +322,9 @@ impl Setup {
     fn new(model: &PlacementModel, params: &GlobalParams, rng: &mut StdRng) -> Self {
         let movable = movable_cells(model);
         let fixed = fixed_rects(model);
+        let netlist = build_netlist(model, &movable);
         let mut objects = Objects {
-            centers: initial_centers(model, &movable, rng),
+            centers: initial_centers(model, &movable, &netlist, params.initial_rounds, rng),
             sizes: movable.iter().map(|&i| model.density_sizes[i]).collect(),
             kinds: movable.iter().map(|&i| model.kinds[i]).collect(),
         };
@@ -327,7 +333,7 @@ impl Setup {
             add_fillers(field, &mut objects, rng);
         }
         Self {
-            netlist: build_netlist(model, &movable),
+            netlist,
             model_sizes: movable.iter().map(|&i| model.sizes[i]).collect(),
             objects,
             fields,
@@ -613,27 +619,53 @@ fn zone_area(model: &PlacementModel, k: usize) -> Vec<Rect<f64>> {
         .map_or_else(|| placeable_area(model), |z| z.rects.clone())
 }
 
-/// Cell centers in a small random cluster at the middle of the rows.
-fn initial_centers(model: &PlacementModel, movable: &[usize], rng: &mut StdRng) -> Vec<Point<f64>> {
-    let placeable = placeable_area(model);
-    let lo = placeable.iter().fold(model.die.max, |p, r| {
-        Point::new(p.x.min(r.min.x), p.y.min(r.min.y))
-    });
-    let hi = placeable.iter().fold(model.die.min, |p, r| {
-        Point::new(p.x.max(r.max.x), p.y.max(r.max.y))
-    });
-    let area = Rect::new(lo, hi);
-    let mid = Point::new(f64::midpoint(lo.x, hi.x), f64::midpoint(lo.y, hi.y));
-    let spread = Point::new(area.width() * 0.005, area.height() * 0.005);
-    movable
+/// Where the movable cells start, as `gpl` starts them: at the center of
+/// their fence or of the core, moved by up to `rounds` rounds of initial
+/// placement over `netlist`, each then shifted at random by up to a micron
+/// on each axis.
+fn initial_centers(
+    model: &PlacementModel,
+    movable: &[usize],
+    netlist: &Netlist,
+    rounds: usize,
+    rng: &mut StdRng,
+) -> Vec<Point<f64>> {
+    let core = bounding_box(&placeable_area(model));
+    let bounds: Vec<Rect<f64>> = movable
         .iter()
-        .map(|_| {
+        .map(|&i| match model.zones.get(model.zone_of[i]) {
+            Some(zone) if matches!(zone.zone, Zone::Fence(_)) => bounding_box(&zone.rects),
+            _ => core,
+        })
+        .collect();
+    let mut centers: Vec<Point<f64>> = bounds
+        .iter()
+        .map(|b| {
             Point::new(
-                rng.gen_range(-1.0..=1.0_f64).mul_add(spread.x, mid.x),
-                rng.gen_range(-1.0..=1.0_f64).mul_add(spread.y, mid.y),
+                f64::midpoint(b.min.x, b.max.x),
+                f64::midpoint(b.min.y, b.max.y),
             )
         })
-        .collect()
+        .collect();
+    let min_diff = model.units.to_microns(initial::MIN_DIFF_LENGTH);
+    initial::place(netlist, &mut centers, core, &bounds, rounds, min_diff);
+    for center in &mut centers {
+        *center += Point::new(rng.gen_range(-1.0..1.0), rng.gen_range(-1.0..1.0));
+    }
+    centers
+}
+
+fn bounding_box(rects: &[Rect<f64>]) -> Rect<f64> {
+    rects
+        .iter()
+        .copied()
+        .reduce(|a, b| {
+            Rect::new(
+                Point::new(a.min.x.min(b.min.x), a.min.y.min(b.min.y)),
+                Point::new(a.max.x.max(b.max.x), a.max.y.max(b.max.y)),
+            )
+        })
+        .unwrap_or_default()
 }
 
 /// A uniformly random point in the union of disjoint `rects`.

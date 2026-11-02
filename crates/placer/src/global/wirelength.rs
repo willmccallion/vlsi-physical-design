@@ -61,6 +61,13 @@ impl Netlist {
         self.nets.push((start..self.terminals.len(), weight));
     }
 
+    /// The terminals of each net, in the order they were pushed.
+    pub(super) fn nets(&self) -> impl Iterator<Item = &[Terminal]> + '_ {
+        self.nets
+            .iter()
+            .map(|(range, _)| &self.terminals[range.clone()])
+    }
+
     /// Number of terminals on each of `objects` objects.
     pub(super) fn pin_counts(&self, objects: usize) -> Vec<f64> {
         let mut counts = vec![0.0; objects];
@@ -149,7 +156,8 @@ impl Netlist {
     }
 }
 
-fn position(t: Terminal, centers: &[Point<f64>]) -> Point<f64> {
+/// Where terminal `t` is with its objects at `centers`.
+pub(super) fn position(t: Terminal, centers: &[Point<f64>]) -> Point<f64> {
     match t {
         Terminal::Object { index, offset } => centers[index] + offset,
         Terminal::Fixed(p) => p,
