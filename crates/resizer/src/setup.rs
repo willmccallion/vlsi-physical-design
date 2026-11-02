@@ -204,7 +204,7 @@ pub fn repair_setup(
         report,
     )?;
     if !repair.options.skip_last_gasp {
-        repair.last_gasp(tns_before, &mut prev_tns, report)?;
+        repair.last_gasp(tns_before, report)?;
     }
     let progress = repair.progress(None);
     report(&progress);
@@ -423,11 +423,11 @@ impl Repair<'_, '_> {
     }
 
     /// `repairSetup_LastGasp`: sizing only, kept only when both worst and
-    /// total slack improve.
+    /// total slack improve. The rate of repair is judged from the last kept
+    /// move's total, so the phase ends soon after moves stop landing often.
     fn last_gasp(
         &mut self,
         initial_tns: f64,
-        prev_tns: &mut f64,
         report: &mut dyn FnMut(&SetupProgress),
     ) -> Result<(), SetupError> {
         let sequence = std::mem::replace(
@@ -444,7 +444,7 @@ impl Repair<'_, '_> {
         let mut threshold = FIX_RATE_THRESHOLD;
         let mut prev_termination = false;
         let (mut prev_worst, _) = self.worst();
-        let mut local_prev_tns = current_tns;
+        let mut prev_tns = current_tns;
         for (end_index, &(first_end, _)) in violating.iter().enumerate() {
             let end_index = end_index + 1;
             self.fallback = false;
@@ -456,7 +456,7 @@ impl Repair<'_, '_> {
             let mut pass = 1;
             while pass <= LAST_GASP_PASSES {
                 self.iteration += 1;
-                if self.terminate(initial_tns, prev_tns, &mut threshold) {
+                if self.terminate(initial_tns, &mut prev_tns, &mut threshold) {
                     if prev_termination {
                         two_terminations = true;
                     } else {
@@ -491,10 +491,10 @@ impl Repair<'_, '_> {
                 let (current_worst, worst_vertex) = self.worst();
                 current_tns = self.tns();
                 let wns_improved = fuzzy::greater_equal(current_worst, prev_worst);
-                let tns_improved = fuzzy::greater_equal(current_tns, local_prev_tns);
+                let tns_improved = fuzzy::greater_equal(current_tns, prev_tns);
                 if wns_improved && tns_improved {
                     prev_worst = current_worst;
-                    local_prev_tns = current_tns;
+                    prev_tns = current_tns;
                     self.journal_end();
                     if pass < LAST_GASP_PASSES {
                         self.journal_begin();
