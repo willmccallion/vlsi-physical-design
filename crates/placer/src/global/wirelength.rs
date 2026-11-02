@@ -34,7 +34,8 @@ pub(super) struct Netlist {
 pub(super) struct Wirelength {
     /// The weighted-average estimate.
     pub(super) smooth: f64,
-    /// Exact half-perimeter wirelength.
+    /// Exact half-perimeter wirelength, without net weights, as
+    /// `OpenROAD`'s `NesterovBaseCommon::getHpwl`.
     pub(super) hpwl: f64,
 }
 
@@ -127,7 +128,7 @@ impl Netlist {
                 }
                 Wirelength {
                     smooth: (x.smooth + y.smooth) * weight,
-                    hpwl: (x.hpwl + y.hpwl) * weight,
+                    hpwl: x.hpwl + y.hpwl,
                 }
             })
             .collect::<Vec<Wirelength>>()
@@ -236,6 +237,19 @@ mod tests {
 
         assert!((wl.hpwl - 9.0).abs() < 1e-12);
         assert!((wl.smooth - 9.0).abs() < 1e-6);
+    }
+
+    #[test]
+    fn net_weights_scale_the_smooth_length_but_not_the_half_perimeter() {
+        let mut netlist = Netlist::default();
+        netlist.push([object(0), object(1)], 3.0);
+        let centers = [Point::new(0.0, 0.0), Point::new(3.0, 4.0)];
+        let mut grads = [Point::new(0.0, 0.0); 2];
+
+        let wl = netlist.gradient(&centers, 0.01, &mut Vec::new(), &mut grads);
+
+        assert!((wl.hpwl - 7.0).abs() < 1e-12);
+        assert!((wl.smooth - 21.0).abs() < 1e-6);
     }
 
     #[test]
