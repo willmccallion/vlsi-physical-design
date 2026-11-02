@@ -162,11 +162,7 @@ impl TimingGraph {
             .map(PinId::new)
             .filter(|&p| netlist.is_driver(p))
             .collect();
-        drivers.sort_by(|&a, &b| {
-            self.level[a.index()]
-                .cmp(&self.level[b.index()])
-                .then_with(|| netlist.db.pin_name(a).cmp(&netlist.db.pin_name(b)))
-        });
+        drivers.sort_by_cached_key(|&p| (self.level[p.index()], netlist.db.pin_name(p)));
         drivers
     }
 
@@ -180,11 +176,7 @@ impl TimingGraph {
                     && netlist.is_load(p)
             })
             .collect();
-        loads.sort_by(|&a, &b| {
-            self.level[a.index()]
-                .cmp(&self.level[b.index()])
-                .then_with(|| netlist.db.pin_name(a).cmp(&netlist.db.pin_name(b)))
-        });
+        loads.sort_by_cached_key(|&p| (self.level[p.index()], netlist.db.pin_name(p)));
         loads
     }
 
