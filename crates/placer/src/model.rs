@@ -307,7 +307,8 @@ impl PlacementModel {
         rows - fixed
     }
 
-    /// Half-perimeter wirelength of all nets at the current positions.
+    /// Half-perimeter wirelength of all nets at the current positions,
+    /// without net weights.
     pub fn hpwl(&self) -> f64 {
         self.nets
             .iter()
@@ -319,7 +320,7 @@ impl PlacementModel {
                     lo = Point::new(lo.x.min(p.x), lo.y.min(p.y));
                     hi = Point::new(hi.x.max(p.x), hi.y.max(p.y));
                 }
-                net.weight * ((hi.x - lo.x) + (hi.y - lo.y))
+                (hi.x - lo.x) + (hi.y - lo.y)
             })
             .sum()
     }
