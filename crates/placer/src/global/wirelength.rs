@@ -25,8 +25,9 @@ pub(super) enum Terminal {
 pub(super) struct Netlist {
     nets: Vec<(Range<usize>, f64)>,
     terminals: Vec<Terminal>,
-    /// The box of each terminal's pin shapes, around the terminal.
-    extents: Vec<Rect<f64>>,
+    /// Where `OpenROAD`'s `dbITerm::getAvgXY` puts each terminal's pin,
+    /// relative to the terminal.
+    averages: Vec<Point<f64>>,
 }
 
 /// Wirelength at one placement.
@@ -40,21 +41,21 @@ pub(super) struct Wirelength {
 }
 
 impl Netlist {
-    /// Adds a net of `pins`, each a terminal with the box of its pin's
-    /// shapes around it; nets with fewer than two pins are left out.
+    /// Adds a net of `pins`, each a terminal with its pin's average point
+    /// relative to it; nets with fewer than two pins are left out.
     pub(super) fn push(
         &mut self,
-        pins: impl IntoIterator<Item = (Terminal, Rect<f64>)>,
+        pins: impl IntoIterator<Item = (Terminal, Point<f64>)>,
         weight: f64,
     ) {
         let start = self.terminals.len();
-        for (terminal, extent) in pins {
+        for (terminal, average) in pins {
             self.terminals.push(terminal);
-            self.extents.push(extent);
+            self.averages.push(average);
         }
         if self.terminals.len() - start < 2 {
             self.terminals.truncate(start);
-            self.extents.truncate(start);
+            self.averages.truncate(start);
             return;
         }
         self.nets.push((start..self.terminals.len(), weight));
@@ -71,8 +72,8 @@ impl Netlist {
         counts
     }
 
-    /// Each net's box over its pins' shapes at `centers`, as `OpenROAD`'s
-    /// `dbNet::getTermBBox`.
+    /// Each net's box over its pins' average points at `centers`, as
+    /// `OpenROAD`'s `dbNet::getTermBBox`.
     pub(super) fn term_boxes<'a>(
         &'a self,
         centers: &'a [Point<f64>],
@@ -80,10 +81,10 @@ impl Netlist {
         self.nets.iter().filter_map(move |(range, _)| {
             self.terminals[range.clone()]
                 .iter()
-                .zip(&self.extents[range.clone()])
-                .map(|(&t, e)| {
-                    let at = position(t, centers);
-                    Rect::new(at + e.min, at + e.max)
+                .zip(&self.averages[range.clone()])
+                .map(|(&t, &average)| {
+                    let at = position(t, centers) + average;
+                    Rect::new(at, at)
                 })
                 .reduce(|a, b| {
                     Rect::new(
@@ -207,16 +208,15 @@ fn net_axis(
 mod tests {
     use super::*;
 
-    fn object(index: usize) -> (Terminal, Rect<f64>) {
+    fn object(index: usize) -> (Terminal, Point<f64>) {
         point(Terminal::Object {
             index,
             offset: Point::new(0.0, 0.0),
         })
     }
 
-    fn point(terminal: Terminal) -> (Terminal, Rect<f64>) {
-        let origin = Point::new(0.0, 0.0);
-        (terminal, Rect::new(origin, origin))
+    fn point(terminal: Terminal) -> (Terminal, Point<f64>) {
+        (terminal, Point::new(0.0, 0.0))
     }
 
     #[test]

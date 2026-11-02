@@ -44,8 +44,10 @@ const MACRO_ROWS: i64 = 6;
 pub struct ModelPin {
     /// Where it sits.
     pub anchor: PinAnchor,
-    /// The box of its pin's shapes, relative to where it sits.
-    pub extent: Rect<f64>,
+    /// Where `OpenROAD`'s `dbITerm::getAvgXY` puts it, relative to where it
+    /// sits: the mean of its shapes' centers for a cell pin, and none for an
+    /// I/O pin, which sits at the center of its shapes.
+    pub average: Point<f64>,
 }
 
 /// A net as the placer sees it.
@@ -186,25 +188,23 @@ impl PlacementModel {
                     .iter()
                     .filter_map(|&pin| {
                         let at = db.pin_position(pin);
-                        let anchor = match db.pins[pin.index()].owner {
-                            PinOwner::Cell { cell, .. } => Some(PinAnchor::Cell {
-                                cell: cell.index(),
-                                offset: um(at - db.cells[cell.index()].location),
-                            }),
-                            PinOwner::Io(io) => (movable_io
-                                || !db.io_pins[io.index()].status.is_movable())
-                            .then(|| PinAnchor::Fixed(um(at))),
-                        }?;
-                        let extent = db
-                            .pin_shapes(pin)
-                            .into_iter()
-                            .map(|s| s.rect)
-                            .reduce(|a, b| a.union(&b))
-                            .map_or_else(
-                                || Rect::new(Point::default(), Point::default()),
-                                |r| Rect::new(um(r.min - at), um(r.max - at)),
-                            );
-                        Some(ModelPin { anchor, extent })
+                        let (anchor, average) = match db.pins[pin.index()].owner {
+                            PinOwner::Cell { cell, .. } => (
+                                PinAnchor::Cell {
+                                    cell: cell.index(),
+                                    offset: um(at - db.cells[cell.index()].location),
+                                },
+                                um(db.average_pin_position(pin) - at),
+                            ),
+                            PinOwner::Io(io) => {
+                                let fixed = !db.io_pins[io.index()].status.is_movable();
+                                if !(movable_io || fixed) {
+                                    return None;
+                                }
+                                (PinAnchor::Fixed(um(at)), Point::default())
+                            }
+                        };
+                        Some(ModelPin { anchor, average })
                     })
                     .collect(),
             })

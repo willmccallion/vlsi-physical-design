@@ -676,7 +676,7 @@ fn build_netlist(model: &PlacementModel, movable: &[usize]) -> Netlist {
                 },
                 PinAnchor::Fixed(p) => Terminal::Fixed(p),
             };
-            (terminal, pin.extent)
+            (terminal, pin.average)
         });
         netlist.push(pins, net.weight);
     }

@@ -3,10 +3,10 @@
 //! Routing demand is estimated with RUDY as `OpenROAD`'s `grt::Rudy` does
 //! it over the global router's gcells: each net lays wire of its
 //! half-perimeter length and [`RoutabilityParams::wire_width`] evenly over
-//! the box of its pins' shapes, and a gcell's congestion is the area that
-//! wire covers in it over its area, plus the share of its routing capacity
-//! taken before placement by fixed metal and the layer adjustment. Once
-//! spreading has nearly finished and settled, standard cells in congested
+//! the box of its pins' average points, and a gcell's congestion is the
+//! area that wire covers in it over its area, plus the share of its routing
+//! capacity taken before placement by fixed metal and the layer adjustment.
+//! Once spreading has nearly finished and settled, standard cells in congested
 //! gcells grow; their field removes fillers to make room and raises its
 //! target density by whatever the fillers cannot cover. Placement then
 //! resumes from an earlier, less spread snapshot so the grown cells push
@@ -189,7 +189,7 @@ pub(super) struct CongestionMap {
 impl CongestionMap {
     /// RUDY congestion of `netlist` with its objects centered at `centers`,
     /// over the gcells of `params` clipped to `die`, as `OpenROAD`'s
-    /// `grt::Rudy` measures it: a net whose pins' shapes have a box of no
+    /// `grt::Rudy` measures it: a net whose pins' points have a box of no
     /// area lays no wire.
     pub(super) fn rudy(
         netlist: &Netlist,
@@ -610,16 +610,16 @@ mod tests {
         }
     }
 
-    /// A pin at `at` whose shapes reach `half` around it each way.
-    fn pin(at: Point<f64>, half: f64) -> (Terminal, Rect<f64>) {
-        let reach = Point::new(half, half);
-        (
-            Terminal::Fixed(at),
-            Rect::new(Point::new(0.0, 0.0) - reach, reach),
-        )
+    /// A pin at `at` whose average point is `average` away from it.
+    fn pin(at: Point<f64>, average: Point<f64>) -> (Terminal, Point<f64>) {
+        (Terminal::Fixed(at), average)
     }
 
-    fn two_pin(a: (Terminal, Rect<f64>), b: (Terminal, Rect<f64>)) -> Netlist {
+    fn at(x: f64, y: f64) -> (Terminal, Point<f64>) {
+        pin(Point::new(x, y), Point::new(0.0, 0.0))
+    }
+
+    fn two_pin(a: (Terminal, Point<f64>), b: (Terminal, Point<f64>)) -> Netlist {
         let mut netlist = Netlist::default();
         netlist.push([a, b], 1.0);
         netlist
@@ -640,10 +640,7 @@ mod tests {
 
     #[test]
     fn a_net_spreads_its_wire_area_evenly_over_its_box() {
-        let netlist = two_pin(
-            pin(Point::new(0.5, 1.25), 0.0),
-            pin(Point::new(3.5, 1.75), 0.0),
-        );
+        let netlist = two_pin(at(0.5, 1.25), at(3.5, 1.75));
 
         let map = CongestionMap::rudy(&netlist, &[], &die(4.0), &params(&[0.0; 16]));
 
@@ -665,10 +662,7 @@ mod tests {
 
     #[test]
     fn a_net_whose_pin_points_line_up_lays_no_wire() {
-        let netlist = two_pin(
-            pin(Point::new(0.5, 1.5), 0.0),
-            pin(Point::new(2.5, 1.5), 0.0),
-        );
+        let netlist = two_pin(at(0.5, 1.5), at(2.5, 1.5));
 
         let map = CongestionMap::rudy(&netlist, &[], &die(4.0), &params(&[0.0; 16]));
 
@@ -680,15 +674,15 @@ mod tests {
     }
 
     #[test]
-    fn a_nets_box_spans_its_pins_shapes() {
+    fn a_nets_box_spans_its_pins_average_points() {
         let netlist = two_pin(
-            pin(Point::new(0.5, 1.5), 0.25),
-            pin(Point::new(2.5, 1.5), 0.25),
+            at(0.5, 1.5),
+            pin(Point::new(2.5, 1.5), Point::new(0.0, 0.5)),
         );
 
         let map = CongestionMap::rudy(&netlist, &[], &die(4.0), &params(&[0.0; 16]));
 
-        let wire_area = (2.5 + 0.5) * 0.1;
+        let wire_area = (2.0 + 0.5) * 0.1;
         let laid: f64 = map.congestion.iter().sum();
         assert!((laid - wire_area).abs() < 1e-12, "{:?}", map.congestion);
         assert!(map.congestion[4..7].iter().all(|&c| c > 0.0));
@@ -698,10 +692,7 @@ mod tests {
     fn capacity_taken_before_placement_adds_its_share() {
         let mut taken = vec![0.0; 16];
         taken[0] = 5.0;
-        let netlist = two_pin(
-            pin(Point::new(0.0, 0.0), 0.0),
-            pin(Point::new(4.0, 4.0), 0.0),
-        );
+        let netlist = two_pin(at(0.0, 0.0), at(4.0, 4.0));
 
         let map = CongestionMap::rudy(&netlist, &[], &die(4.0), &params(&taken));
 
@@ -731,10 +722,7 @@ mod tests {
 
     #[test]
     fn a_gcell_the_die_cuts_short_spreads_wire_over_its_own_area() {
-        let netlist = two_pin(
-            pin(Point::new(3.0, 0.0), 0.0),
-            pin(Point::new(3.5, 1.0), 0.0),
-        );
+        let netlist = two_pin(at(3.0, 0.0), at(3.5, 1.0));
 
         let map = CongestionMap::rudy(&netlist, &[], &die(3.5), &params(&[0.0; 16]));
 
