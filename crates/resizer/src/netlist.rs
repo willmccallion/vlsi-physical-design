@@ -192,21 +192,23 @@ impl<'a> Netlist<'a> {
             .find(|&p| matches!(self.db.pins[p.index()].owner, PinOwner::Cell { pin, .. } if pin.index() == macro_pin))
     }
 
-    /// The level of each pin of `instance` by Liberty port name, from
-    /// `levels`.
+    /// The level of each pin of `instance` by Liberty port name, as
+    /// `levels` holds them now.
     fn port_levels(&self, instance: CellId, levels: &[Logic]) -> impl Fn(&str) -> Logic + '_ {
-        let cell = self.db.cells[instance.index()].clone();
+        let pins: Vec<(PinId, Logic)> = self.db.cells[instance.index()]
+            .pins
+            .iter()
+            .map(|&p| (p, levels[p.index()]))
+            .collect();
         let link = self.link;
         let db = self.db;
-        let levels: Vec<Logic> = levels.to_vec();
         move |name: &str| {
-            cell.pins
-                .iter()
-                .find(|&&p| {
+            pins.iter()
+                .find(|&&(p, _)| {
                     link.pin_port(db, p)
                         .is_some_and(|(c, port)| link.liberty.cell(c).ports[port].name == name)
                 })
-                .map_or(Logic::Unknown, |&p| levels[p.index()])
+                .map_or(Logic::Unknown, |&(_, level)| level)
         }
     }
 }
