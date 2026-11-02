@@ -12,12 +12,14 @@
 use crate::bnet::{self, Bnet, BnetPtr, BufferSize, Fixed, Kind, SlackEdges};
 use crate::dmp::{self, PiModel};
 use crate::fuzzy;
-use crate::resizer::{RepairError, Resizer, buffer_delays};
+use crate::library::{BufferSet, Link};
+use crate::parasitics::WireRc;
+use crate::resizer::{RepairError, Resizer, buffer_delays, find_targets};
 use crate::sta::Via;
 use pare_common::db::design::PinOwner;
 use pare_common::db::indices::{CellId, LayerId, NetId, PinId};
-use pare_common::db::liberty::{ArcRole, Edge, LibCellId, MinMax};
-use pare_common::geom::dbu::Dbu;
+use pare_common::db::liberty::{ArcRole, Edge, EdgeValues, LibCellId, MinMax};
+use pare_common::geom::dbu::{Dbu, DbuPerMicron};
 use pare_common::geom::point::Point;
 use std::rc::Rc;
 
@@ -1706,14 +1708,41 @@ fn outmatched(resizer: &Resizer<'_>, worse: LibCellId, better: LibCellId, r_max:
 /// The shortest, over the repair buffers, at which one buffer driving the
 /// wire whole is slower than two each driving half, as `findMaxWireLength`.
 pub fn max_wire_length(resizer: &Resizer<'_>) -> i64 {
-    let rc = resizer.graph.wire_rc();
+    wire_length_limit(
+        resizer.link,
+        &resizer.buffers,
+        &resizer.targets.slews,
+        resizer.graph.wire_rc(),
+        resizer.db.dbu(),
+    )
+}
+
+/// `max_wire_length` for `buffers` of `link` on wire of `rc`, without a
+/// design: the limit depends on nothing else.
+pub fn max_wire_length_of(
+    link: &Link<'_>,
+    buffers: &BufferSet,
+    rc: WireRc,
+    dbu: DbuPerMicron,
+) -> i64 {
+    let targets = find_targets(link, buffers);
+    wire_length_limit(link, buffers, &targets.slews, rc, dbu)
+}
+
+fn wire_length_limit(
+    link: &Link<'_>,
+    buffers: &BufferSet,
+    slews: &EdgeValues,
+    rc: WireRc,
+    dbu: DbuPerMicron,
+) -> i64 {
     if rc.resistance <= 0.0 {
         return i64::MAX;
     }
-    let dbu = resizer.db.dbu().get() as f64;
+    let dbu = dbu.get() as f64;
     let mut shortest = f64::INFINITY;
-    for &buffer in &resizer.buffers.cells {
-        let meters = buffer_max_wire_length(resizer, buffer);
+    for &buffer in &buffers.cells {
+        let meters = buffer_max_wire_length(link, buffer, slews, rc);
         shortest = shortest.min(meters);
     }
     if !shortest.is_finite() {
@@ -1723,12 +1752,16 @@ pub fn max_wire_length(resizer: &Resizer<'_>) -> i64 {
 }
 
 /// `findMaxWireLength` for one buffer, in meters.
-fn buffer_max_wire_length(resizer: &Resizer<'_>, buffer: LibCellId) -> f64 {
-    let lib = resizer.link.liberty.cell(buffer);
+fn buffer_max_wire_length(
+    link: &Link<'_>,
+    buffer: LibCellId,
+    slews: &EdgeValues,
+    rc: WireRc,
+) -> f64 {
+    let lib = link.liberty.cell(buffer);
     let Some((input, output)) = lib.buffer_ports() else {
         return f64::INFINITY;
     };
-    let rc = resizer.graph.wire_rc();
     let drive = lib.drive_resistance(output);
     let delay = |length: f64| -> f64 {
         let resistance = length * rc.resistance;
@@ -1745,8 +1778,8 @@ fn buffer_max_wire_length(resizer: &Resizer<'_>, buffer: LibCellId) -> f64 {
                 let elmore = resistance * (capacitance / 2.0 + load_cap);
                 let result = dmp::gate_delay(
                     arc,
-                    &resizer.link.liberty.thresholds,
-                    resizer.targets.slews.get(arc.from_edge),
+                    &link.liberty.thresholds,
+                    slews.get(arc.from_edge),
                     model,
                 );
                 let (wire_delay, _) = result.load_delay_slew(elmore);

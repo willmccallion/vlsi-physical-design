@@ -1141,27 +1141,8 @@ fn clock_tree_synthesis(
         let inverters = repair_clock_inverters(db, &link, &clocks, &mut repair.namer)?;
         summary.cloned_inverters = inverters.inverters;
     }
-    let max_wire_length = {
-        let sdc = repair.sdc.as_ref().context("constraints")?;
-        let (constants, clocks) = networks(db, sdc);
-        let context = RepairContext {
-            link: &link,
-            clocks: &clocks,
-            constants: &constants,
-            clock_rc: Some(clock_rc),
-        };
-        let buffers = link.find_buffers(db)?;
-        let resizer = Resizer::new(
-            db,
-            context,
-            rc,
-            buffers,
-            &mut repair.namer,
-            RepairOptions::default(),
-            None,
-        )?;
-        pare_resizer::rebuffer::max_wire_length(&resizer)
-    };
+    let max_wire_length =
+        pare_resizer::rebuffer::max_wire_length_of(&link, &link.find_buffers(db)?, rc, db.dbu());
     let trees = {
         let sdc = repair.sdc.as_ref().context("constraints")?;
         let (_, clocks) = networks(db, sdc);

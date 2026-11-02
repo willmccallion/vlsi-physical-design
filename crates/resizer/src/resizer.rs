@@ -1191,7 +1191,7 @@ fn slew_rc_factor(link: &Link<'_>) -> Result<f64, RepairError> {
 
 /// Target slews from the buffers and the load each usable cell meets them
 /// at, as `Resizer::findBufferTargetSlews` and `findTargetLoads`.
-fn find_targets(link: &Link<'_>, buffers: &BufferSet) -> Targets {
+pub(crate) fn find_targets(link: &Link<'_>, buffers: &BufferSet) -> Targets {
     let liberty = link.liberty;
     let mut sums = EdgeValues::default();
     let mut counts = [0usize; 2];
