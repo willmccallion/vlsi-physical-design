@@ -437,7 +437,8 @@ impl<'a> DetailedRouter<'a> {
         route
             .edges
             .extend(gap_fills(&route, self.db, self.tech, net));
-        let elems = route.elems(self.tech);
+        let mut elems = route.elems(self.tech);
+        elems.shrink_to_fit();
         let metal = elems
             .iter()
             .flat_map(|e| elem_metal(self.db, net, e))

@@ -771,6 +771,21 @@ impl Occupancy {
         }
     }
 
+    /// Frees the room each track and cut bucket has grown beyond what it
+    /// holds.
+    pub fn shrink_to_fit(&mut self) {
+        for track in self.tracks.iter_mut().flatten() {
+            track.added.shrink_to_fit();
+        }
+        for list in self
+            .cuts
+            .iter_mut()
+            .flat_map(|c| c.buckets.values_mut().chain(c.large.values_mut()))
+        {
+            list.shrink_to_fit();
+        }
+    }
+
     /// Occupants of a track whose stretch meets `[lo, hi]`.
     fn meeting(&self, t: TrackRef, lo: Dbu, hi: Dbu) -> impl Iterator<Item = &Occupant> {
         self.tracks[t.layer.index()][t.track as usize].meeting(lo, hi, self.chunk)

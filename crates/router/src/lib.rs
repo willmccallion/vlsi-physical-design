@@ -241,6 +241,7 @@ fn route_detailed(
         let (first_round, mut conflicted, mut scope, mut flows) = if let Some(saved) = resumed {
             let routes = named_routes(db, &saved.routes)?;
             dr.restore(&routes)?;
+            dr.occupancy.shrink_to_fit();
             ui::dr_table_header();
             let conflicted = dr.rejudge();
             ui::dr_iter(
@@ -257,6 +258,7 @@ fn route_detailed(
         } else {
             dr.log_footprint("track assignment");
             let first = dr.route_initial(&nets, round_costs(0, via));
+            dr.occupancy.shrink_to_fit();
             dr.log_footprint("first pass");
             ui::dr_table_header();
             let conflicted = dr.rejudge();
