@@ -20,6 +20,10 @@ jobs:
           toolchain: ${{ steps.toolchain.outputs.channel }}
           components: rustfmt, clippy
       - uses: Swatinem/rust-cache@v2
+      - name: Configs are what download.py writes
+        run: |
+          python3 scripts/download.py --configs
+          git diff --exit-code configs
       - run: cargo fmt --all --check
       - run: cargo clippy --workspace --all-targets --locked -- -D warnings
       - run: cargo test --workspace --locked
