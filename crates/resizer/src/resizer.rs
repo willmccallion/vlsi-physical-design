@@ -1144,18 +1144,39 @@ pub fn timing_net_weights(slacks: &[(NetId, f64)], weight_max: f64) -> Vec<(NetI
     }
     let worst = ((slacks.len() as f64) * WORST_SLACK_NETS_SHARE).ceil() as usize;
     let slack_max = slacks[worst.clamp(1, slacks.len()) - 1].1;
+    let scale = WeightScale {
+        slack_min,
+        slack_max,
+        weight_max,
+    };
     slacks
         .iter()
         .filter(|(_, slack)| *slack < slack_max)
-        .map(|&(net, slack)| {
-            let weight = if fuzzy::equal(slack_max, slack_min) {
-                1.0
-            } else {
-                ((weight_max - 1.0) * (slack_max - slack) / (slack_max - slack_min)) + 1.0
-            };
-            (net, weight)
-        })
+        .map(|&(net, slack)| (net, scale.weight(slack)))
         .collect()
+}
+
+/// Net weights falling linearly from `weight_max` at `slack_min` to one at
+/// `slack_max`.
+struct WeightScale {
+    slack_min: f64,
+    slack_max: f64,
+    weight_max: f64,
+}
+
+impl WeightScale {
+    /// The weight at `slack`. An unbounded `slack_max` gives every finite
+    /// slack `weight_max`, as `OpenSTA`'s finite `INF` does in `gpl`.
+    fn weight(&self, slack: f64) -> f64 {
+        if fuzzy::equal(self.slack_max, self.slack_min) {
+            return 1.0;
+        }
+        if self.slack_max.is_infinite() {
+            return self.weight_max;
+        }
+        ((self.weight_max - 1.0) * (self.slack_max - slack) / (self.slack_max - self.slack_min))
+            + 1.0
+    }
 }
 
 /// The transition limit at an input pin: its own, else, as `OpenROAD`
@@ -1418,5 +1439,15 @@ mod tests {
             0
         );
         assert_eq!(timing_net_weights(&[], 5.0).len(), 0);
+    }
+
+    #[test]
+    fn finite_slacks_take_the_maximum_weight_when_the_worst_tenth_reaches_infinity() {
+        let mut values = vec![f64::INFINITY; 20];
+        values[0] = -0.3;
+
+        let weights = timing_net_weights(&slacks(&values), 5.0);
+
+        assert_eq!(weights, vec![(NetId::new(0), 5.0)]);
     }
 }
