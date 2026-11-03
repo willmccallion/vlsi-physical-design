@@ -9,7 +9,7 @@
 //! quadratic density penalty whose weights take normalized subgradient steps
 //! on each field's own energy.
 
-use super::density::{Excess, Footprint};
+use super::density::{Charge, Excess, Footprint};
 use super::routability::{
     CHECK_OVERFLOW, CongestionMap, Routability, RoutabilityParams, SETTLE_FRACTION,
     SNAPSHOT_OVERFLOW, Verdict,
@@ -353,7 +353,12 @@ impl<'a> Objective<'a> {
     /// Takes in the objects' sizes and the fillers each field keeps.
     fn refresh(&mut self, objects: &Objects) {
         let grid = &self.fields[0].grid;
-        self.footprints = objects.sizes.iter().map(|&s| grid.footprint(s)).collect();
+        self.footprints = objects
+            .sizes
+            .iter()
+            .enumerate()
+            .map(|(i, &size)| grid.footprint(size, charge_of(objects.kinds.get(i))))
+            .collect();
         self.areas = objects.sizes.iter().map(|s| s.x * s.y).collect();
         self.bounds = objects
             .sizes
@@ -578,6 +583,15 @@ impl<'a> Objective<'a> {
         for (c, b) in centers.iter_mut().zip(&self.bounds) {
             *c = Point::new(c.x.clamp(b.min.x, b.max.x), c.y.clamp(b.min.y, b.max.y));
         }
+    }
+}
+
+/// How much of an object's area its bins count: a movable macro's only to
+/// the target density; a filler, which has no kind, all of it.
+const fn charge_of(kind: Option<&CellKind>) -> Charge {
+    match kind {
+        Some(CellKind::Macro) => Charge::AtTarget,
+        Some(CellKind::Standard) | None => Charge::Whole,
     }
 }
 

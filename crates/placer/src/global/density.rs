@@ -37,12 +37,21 @@ impl Excess {
     }
 }
 
-/// How an object spreads its charge: half its smoothed size, and the
-/// density at which it is spread.
+/// How an object spreads its charge: half its smoothed size, the density
+/// at which it is spread, and how much of that charge the bins count.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub(super) struct Footprint {
     half: Point<f64>,
     density: f64,
+    charge: Charge,
+}
+
+/// How much of an object's area the bins count: all of it, or for a
+/// movable macro only the target density's share, as `gpl` deposits it.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(super) enum Charge {
+    Whole,
+    AtTarget,
 }
 
 /// The geometry of a square grid of bins.
@@ -188,13 +197,14 @@ impl DensityGrid {
         self.bins.size
     }
 
-    /// The footprint of an object of `size`.
-    pub(super) fn footprint(&self, size: Point<f64>) -> Footprint {
+    /// The footprint of an object of `size` whose bins count `charge`.
+    pub(super) fn footprint(&self, size: Point<f64>, charge: Charge) -> Footprint {
         let w = size.x.max(SQRT_2 * self.bins.size.x);
         let h = size.y.max(SQRT_2 * self.bins.size.y);
         Footprint {
             half: Point::new(w / 2.0, h / 2.0),
             density: (size.x * size.y) / (w * h),
+            charge,
         }
     }
 
@@ -213,8 +223,9 @@ impl DensityGrid {
         for i in cells {
             let f = footprints[i];
             let rect = Rect::new(centers[i] - f.half, centers[i] + f.half);
-            self.bins.spread(&rect, f.density, &mut self.cells);
-            self.bins.spread(&rect, f.density, &mut self.total);
+            let density = self.deposited_density(&f);
+            self.bins.spread(&rect, density, &mut self.cells);
+            self.bins.spread(&rect, density, &mut self.total);
         }
         for i in fillers {
             let f = footprints[i];
@@ -251,6 +262,14 @@ impl DensityGrid {
             over,
             cells: cell_area,
             energy,
+        }
+    }
+
+    /// The density at which the bins count an object's charge.
+    fn deposited_density(&self, f: &Footprint) -> f64 {
+        match f.charge {
+            Charge::Whole => f.density,
+            Charge::AtTarget => f.density * self.target,
         }
     }
 
@@ -323,7 +342,7 @@ mod tests {
     fn a_small_object_spreads_its_area_over_a_wider_footprint() {
         let grid = DensityGrid::new(&die(8.0, 8.0), 8, 1.0, &[], &[]);
 
-        let f = grid.footprint(Point::new(0.5, 0.5));
+        let f = grid.footprint(Point::new(0.5, 0.5), Charge::Whole);
 
         let w = 2.0 * f.half.x;
         let h = 2.0 * f.half.y;
@@ -334,7 +353,7 @@ mod tests {
     #[test]
     fn overflow_is_cell_area_above_the_target_over_all_cell_area() {
         let mut grid = DensityGrid::new(&die(4.0, 4.0), 4, 0.5, &[], &[]);
-        let f = grid.footprint(Point::new(2.0, 2.0));
+        let f = grid.footprint(Point::new(2.0, 2.0), Charge::Whole);
 
         let excess = grid.update(&[Point::new(1.0, 1.0)], &[f], 0..1, 1..1);
 
@@ -372,13 +391,24 @@ mod tests {
     #[test]
     fn the_field_pushes_an_object_away_from_a_crowd() {
         let mut grid = DensityGrid::new(&die(16.0, 16.0), 16, 0.5, &[], &[]);
-        let crowd = grid.footprint(Point::new(4.0, 4.0));
-        let probe = grid.footprint(Point::new(1.0, 1.0));
+        let crowd = grid.footprint(Point::new(4.0, 4.0), Charge::Whole);
+        let probe = grid.footprint(Point::new(1.0, 1.0), Charge::Whole);
         let centers = [Point::new(8.0, 8.0), Point::new(11.0, 8.0)];
         let _ = grid.update(&centers, &[crowd, probe], 0..2, 2..2);
 
         let probe_grad = grid.gradient_at(centers[1], &probe);
 
         assert!(probe_grad.x < 0.0, "{probe_grad:?}");
+    }
+
+    #[test]
+    fn a_movable_macro_fills_its_bins_only_to_the_target_density() {
+        let mut grid = DensityGrid::new(&die(4.0, 4.0), 2, 0.5, &[], &[]);
+        let block = grid.footprint(Point::new(4.0, 4.0), Charge::AtTarget);
+
+        let excess = grid.update(&[Point::new(2.0, 2.0)], &[block], 0..1, 1..1);
+
+        assert!(excess.over.abs() < 1e-12, "{excess:?}");
+        assert!((excess.cells - 8.0).abs() < 1e-12, "{excess:?}");
     }
 }
