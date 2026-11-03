@@ -283,7 +283,7 @@ impl Cts<'_> {
 
     fn input_cap(&self, db: &NetlistDB, pin: PinId) -> f32 {
         self.link.pin_port(db, pin).map_or(0.0, |(lib, port)| {
-            self.link.liberty.cell(lib).ports[port].capacitance() as f32
+            self.link.liberty.cell(lib).ports[port].capacitance().get() as f32
         })
     }
 
@@ -1102,8 +1102,9 @@ impl Cts<'_> {
 
 fn dummy_input_cap(liberty: &pare_common::db::liberty::Liberty, cell: LibCellId) -> f32 {
     let lib = liberty.cell(cell);
-    lib.buffer_ports()
-        .map_or(0.0, |(input, _)| lib.ports[input].capacitance() as f32)
+    lib.buffer_ports().map_or(0.0, |(input, _)| {
+        lib.ports[input].capacitance().get() as f32
+    })
 }
 
 /// `OpenSTA`'s `fuzzyEqual` on single-precision values.

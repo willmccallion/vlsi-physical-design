@@ -16,6 +16,7 @@ use pare_common::db::library::PinDirection;
 use pare_common::geom::dbu::Dbu;
 use pare_common::geom::orient::Orientation;
 use pare_common::geom::point::Point as DbPoint;
+use pare_common::units::{Farads, Seconds};
 use pare_resizer::Link;
 use std::collections::BTreeMap;
 
@@ -237,7 +238,7 @@ impl Balancer<'_> {
         let Some((input, output)) = lib.buffer_ports() else {
             return 0.0;
         };
-        let load = lib.ports[input].capacitance.rise + extra;
+        let load = Farads::new(lib.ports[input].capacitance.rise.get() + extra);
         let mut worst = 0.0_f32;
         for set in lib.delay_arc_sets_to(output).filter(|s| s.from == input) {
             for arc in set
@@ -251,8 +252,8 @@ impl Balancer<'_> {
                 let mut in_slew = 0.0_f32;
                 let mut d = 0.0_f32;
                 for _ in 0..3 {
-                    d = delay.lookup(f64::from(in_slew), load) as f32;
-                    in_slew = slew.lookup(f64::from(in_slew), load) as f32;
+                    d = delay.lookup(Seconds::new(f64::from(in_slew)), load).get() as f32;
+                    in_slew = slew.lookup(Seconds::new(f64::from(in_slew)), load).get() as f32;
                 }
                 worst = worst.max(d);
             }

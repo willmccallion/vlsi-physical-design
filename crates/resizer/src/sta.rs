@@ -16,8 +16,9 @@ use crate::graph::TimingGraph;
 use crate::netlist::{ClockNetwork, Constants, Netlist};
 use pare_common::db::design::PinOwner;
 use pare_common::db::indices::{CellId, IoPinId, PinId};
-use pare_common::db::liberty::{ArcRole, Edge, FuncExpr, Logic, MinMax, SequentialKind};
+use pare_common::db::liberty::{ArcRole, Edge, FuncExpr, Logic, MinMax, SequentialKind, TimingArc};
 use pare_common::db::sdc::{ClockEdge, ClockId, MultiCyclePath, PathEnd, Sdc};
+use pare_common::units::Seconds;
 use rustc_hash::{FxHashMap, FxHashSet};
 use std::cmp::Reverse;
 use std::collections::BinaryHeap;
@@ -769,7 +770,7 @@ impl Sta {
         let mut entries = Vec::new();
         for &clock in clocks.clocks_of(pin) {
             let launch = ClockEdge { clock, edge };
-            let time = self.sdc.edge_time(launch);
+            let time = self.sdc.edge_time(launch).get();
             let tag = self.intern(Tag {
                 launch: Some(launch),
                 from_port: None,
@@ -810,9 +811,9 @@ impl Sta {
                 from_port,
                 is_clock: false,
             });
-            let edge_time = self.sdc.edge_time(delay.reference);
+            let edge_time = self.sdc.edge_time(delay.reference).get();
             let arrival =
-                MinMax::BOTH.map(|side| delay.delays.get(edge, side).map(|d| edge_time + d));
+                MinMax::BOTH.map(|side| delay.delays.get(edge, side).map(|d| edge_time + d.get()));
             if arrival.iter().all(Option::is_none) {
                 continue;
             }
@@ -854,7 +855,7 @@ impl Sta {
             .filter_map(|e| {
                 let t = self.tags[e.tag.index()];
                 let launch = t.launch.filter(|_| t.is_clock)?;
-                let time = self.sdc.edge_time(launch);
+                let time = self.sdc.edge_time(launch).get();
                 let latency = e.arrival.map(|a| a.map_or(0.0, |a| a - time));
                 Some(Capture {
                     edge: launch,
@@ -1046,7 +1047,7 @@ impl Sta {
     ) -> LatchTiming {
         let enable = capture.edge;
         let accounting = self.accounting(launch, enable);
-        let open_uncertainty = -self.sdc.clock(enable.clock).uncertainty(MinMax::Max);
+        let open_uncertainty = -self.sdc.clock(enable.clock).uncertainty(MinMax::Max).get();
         let adjustment = self.multicycle_adjustment(tag, launch, enable, to, MinMax::Max);
         let enable_arrival = accounting.latch_setup_required
             + open_uncertainty
@@ -1060,9 +1061,10 @@ impl Sta {
             };
         }
         let clock = self.sdc.clock(enable.clock);
-        let mut width = clock.edge_time(opposite(enable.edge)) - clock.edge_time(enable.edge);
+        let mut width =
+            clock.edge_time(opposite(enable.edge)).get() - clock.edge_time(enable.edge).get();
         if width < 0.0 {
-            width += clock.period;
+            width += clock.period.get();
         }
         let max_borrow = width - margin;
         let mut borrow = arrival - enable_arrival;
@@ -1074,8 +1076,8 @@ impl Sta {
         };
         let (src_cycle, tgt_cycle) = accounting.latch_cycles;
         let shift = (src_cycle as f64).mul_add(
-            self.sdc.clock(launch.clock).period,
-            -(tgt_cycle as f64) * clock.period,
+            self.sdc.clock(launch.clock).period.get(),
+            -(tgt_cycle as f64) * clock.period.get(),
         );
         LatchTiming {
             required,
@@ -1263,7 +1265,7 @@ impl Sta {
                             continue;
                         }
                         let base = self.target_arrival(tag, launch, target, to, side);
-                        tighten(side, base - margin);
+                        tighten(side, base - margin.get());
                     }
                 }
             }
@@ -1305,7 +1307,7 @@ impl Sta {
                             continue;
                         }
                         let clock_slew = self.clock_slew(graph, clock_pin, arc.from_edge, side);
-                        let margin = arc.check_value(clock_slew, data_slew);
+                        let margin = check_value(arc, clock_slew, data_slew);
                         let is_latch_setup = latch.is_some() && set.role == ArcRole::Setup;
                         let clock_edge = if is_latch_setup {
                             opposite(arc.from_edge)
@@ -1435,7 +1437,7 @@ impl Sta {
     ) -> f64 {
         let accounting = self.accounting(launch, target);
         let clock_time = accounting.required(side, check);
-        let uncertainty = self.sdc.clock(target.clock).uncertainty(side);
+        let uncertainty = self.sdc.clock(target.clock).uncertainty(side).get();
         let uncertainty = match side {
             MinMax::Max => -uncertainty,
             MinMax::Min => uncertainty,
@@ -1459,7 +1461,7 @@ impl Sta {
             } else {
                 launch.clock
             };
-            self.sdc.clock(clock).period
+            self.sdc.clock(clock).period.get()
         };
         let setup_cycles =
             |mcp: &MultiCyclePath| f64::from(mcp.multiplier(MinMax::Max) - 1) * period(mcp);
@@ -1541,8 +1543,14 @@ fn latch_margin(
         .iter()
         .filter(|set| set.to == port && set.role == ArcRole::Setup)
         .flat_map(|set| set.arcs.iter())
-        .map(|arc| arc.check_value(clock_slew, slews.get(arc.to_edge)))
+        .map(|arc| check_value(arc, clock_slew, slews.get(arc.to_edge)))
         .fold(0.0, f64::max)
+}
+
+/// The time a check arc demands at its clock and data slews.
+fn check_value(arc: &TimingArc, clock_slew: f64, data_slew: f64) -> f64 {
+    arc.check_value(Seconds::new(clock_slew), Seconds::new(data_slew))
+        .get()
 }
 
 const fn opposite(edge: Edge) -> Edge {
@@ -1676,11 +1684,11 @@ fn predecessors(netlist: &Netlist<'_>, graph: &TimingGraph, pin: PinId) -> Vec<P
 fn cycle_accounting(sdc: &Sdc, launch: ClockEdge, target: ClockEdge) -> Accounting {
     let src_clock = sdc.clock(launch.clock);
     let tgt_clock = sdc.clock(target.clock);
-    let src_period = src_clock.period;
-    let tgt_period = tgt_clock.period;
-    let src_edge_time = src_clock.edge_time(launch.edge);
-    let tgt_edge_time = tgt_clock.edge_time(target.edge);
-    let tgt_opposite_time = tgt_clock.edge_time(opposite(target.edge));
+    let src_period = src_clock.period.get();
+    let tgt_period = tgt_clock.period.get();
+    let src_edge_time = src_clock.edge_time(launch.edge).get();
+    let tgt_edge_time = tgt_clock.edge_time(target.edge).get();
+    let tgt_opposite_time = tgt_clock.edge_time(opposite(target.edge)).get();
     let mut accounting = Accounting {
         setup_required: 0.0,
         hold_required: 0.0,
@@ -1785,9 +1793,9 @@ mod tests {
     fn clock(name: &str, period: f64, rise: f64, fall: f64) -> Clock {
         Clock {
             name: name.into(),
-            period,
-            rise,
-            fall,
+            period: Seconds::new(period),
+            rise: Seconds::new(rise),
+            fall: Seconds::new(fall),
             sources: Vec::new(),
             uncertainty: [None, None],
             propagated: false,

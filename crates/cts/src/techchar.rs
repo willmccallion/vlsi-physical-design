@@ -403,7 +403,7 @@ fn plan(setup: &CharSetup<'_>) -> Result<Plan, CtsError> {
             .max_capacitance
             .or_else(|| liberty.cell_defaults(cell).max_capacitance)
             .ok_or_else(|| CtsError::NoMaxCapacitance(cell.name.clone()))?
-            as f32;
+            .get() as f32;
         if max_cap >= max_buffer_cap {
             max_buffer_cap = max_cap;
             char_buffer = Some((index, master));
@@ -432,15 +432,17 @@ fn plan(setup: &CharSetup<'_>) -> Result<Plan, CtsError> {
         .max_transition
         .or(cell.ports[input].max_transition)
         .or_else(|| liberty.cell_defaults(cell).max_transition)
-        .ok_or_else(|| CtsError::NoMaxSlew(cell.name.clone()))? as f32;
+        .ok_or_else(|| CtsError::NoMaxSlew(cell.name.clone()))?
+        .get() as f32;
     let max_cap = cell.ports[output]
         .max_capacitance
         .or_else(|| liberty.cell_defaults(cell).max_capacitance)
-        .ok_or_else(|| CtsError::NoMaxCapacitance(cell.name.clone()))? as f32;
+        .ok_or_else(|| CtsError::NoMaxCapacitance(cell.name.clone()))?
+        .get() as f32;
     let sink = liberty.cell(setup.sink_buffer);
     let sink_buffer_input_cap =
         sink.buffer_ports()
-            .map_or(0.0, |(input, _)| sink.ports[input].capacitance()) as f32;
+            .map_or(0.0, |(input, _)| sink.ports[input].capacitance().get()) as f32;
     let slew_step = max_slew / SLEW_STEPS as f32;
     let cap_step = max_cap / CAP_STEPS as f32;
     let (slews, loads) = if axis_slews.is_empty() && axis_loads.is_empty() {
@@ -723,7 +725,7 @@ impl Chain<'_> {
                 let pin_cap = self.config.get(i + 1).map_or(0.0, |&next| {
                     let next_cell = self.liberty.cell(self.masters[next]);
                     next_cell.buffer_ports().map_or(0.0, |(next_input, _)| {
-                        next_cell.ports[next_input].capacitance.get(edge) as f32
+                        next_cell.ports[next_input].capacitance.get(edge).get() as f32
                     })
                 });
                 let model = PiModel {
@@ -771,7 +773,7 @@ impl Chain<'_> {
             let cell = self.liberty.cell(self.masters[self.config[0]]);
             let first_pin_cap = cell
                 .buffer_ports()
-                .map_or(0.0, |(input, _)| cell.ports[input].capacitance())
+                .map_or(0.0, |(input, _)| cell.ports[input].capacitance().get())
                 as f32;
             (f64::from(first_pin_cap) + f64::from(first_length) * self.wire.cap) as f32
         };

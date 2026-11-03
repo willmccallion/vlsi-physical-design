@@ -11,6 +11,7 @@
 #![allow(clippy::suboptimal_flops, clippy::suspicious_operation_groupings)]
 
 use pare_common::db::liberty::{Thresholds, TimingArc};
+use pare_common::units::{Farads, Seconds};
 
 const DRIVER_PARAM_TOL: f64 = 0.01;
 const VTH_TIME_TOL: f64 = 0.01;
@@ -102,7 +103,10 @@ struct Common<'a> {
 impl Common<'_> {
     /// Table delay and slew at a capacitive load.
     fn table(&self, load: f64) -> (f64, f64) {
-        self.arc.gate_delay(self.in_slew, load)
+        let (delay, slew) = self
+            .arc
+            .gate_delay(Seconds::new(self.in_slew), Farads::new(load));
+        (delay.get(), slew.get())
     }
 
     /// The driver's resistance implied by the delay tables' slope with
@@ -830,15 +834,19 @@ mod tests {
             to_edge: Edge::Rise,
             delay: Some(Table {
                 axes: axes.clone(),
-                values: vec![
+                values: [
                     15e-12, 30e-12, 120e-12, 20e-12, 35e-12, 125e-12, 40e-12, 55e-12, 145e-12,
-                ],
+                ]
+                .map(Seconds::new)
+                .to_vec(),
             }),
             slew: Some(Table {
                 axes,
-                values: vec![
+                values: [
                     4e-12, 15e-12, 100e-12, 5e-12, 16e-12, 101e-12, 10e-12, 20e-12, 105e-12,
-                ],
+                ]
+                .map(Seconds::new)
+                .to_vec(),
             }),
         }
     }
@@ -860,7 +868,8 @@ mod tests {
             c1: 0.0,
         };
         let result = gate_delay(&arc, &Thresholds::default(), 10e-12, pi);
-        let (delay, slew) = arc.gate_delay(10e-12, 20e-15);
+        let (delay, slew) = arc.gate_delay(Seconds::new(10e-12), Farads::new(20e-15));
+        let (delay, slew) = (delay.get(), slew.get());
         assert!((result.delay - delay).abs() < 1e-18);
         assert!((result.slew - slew).abs() < 1e-18);
         assert!((result.ceff - 20e-15).abs() < 1e-30);
@@ -878,7 +887,10 @@ mod tests {
         let result = gate_delay(&arc, &Thresholds::default(), 10e-12, pi);
         assert!(result.ceff < 45e-15);
         assert!(result.ceff > 5e-15);
-        let (lumped_delay, _) = arc.gate_delay(10e-12, 45e-15);
+        let lumped_delay = arc
+            .gate_delay(Seconds::new(10e-12), Farads::new(45e-15))
+            .0
+            .get();
         assert!(result.delay < lumped_delay);
         let (wire_delay, load_slew) = result.load_delay_slew(40e-12);
         assert!(wire_delay > 0.0);

@@ -11,6 +11,7 @@ use crate::sta::{Path, Sta, Via};
 use pare_common::db::design::PinOwner;
 use pare_common::db::indices::PinId;
 use pare_common::db::liberty::MinMax;
+use pare_common::units::{Farads, Seconds};
 
 /// Passes an endpoint may go on failing to improve before its best state
 /// is restored.
@@ -596,7 +597,7 @@ impl Repair<'_, '_> {
             .arcs
             .iter()
             .filter(|a| a.from_edge == prev.edge && a.to_edge == point.edge)
-            .map(|a| a.gate_delay(0.0, 0.0).0)
+            .map(|a| a.gate_delay(Seconds::ZERO, Farads::ZERO).0.get())
             .fold(0.0, f64::max);
         let delay = self
             .resizer

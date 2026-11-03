@@ -12,6 +12,7 @@ use crate::db::liberty::{
     TimingArc, TimingArcSet, TimingSense,
 };
 use crate::db::parser::lexer::{ParseError, read_file};
+use crate::units::{Farads, Seconds};
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
@@ -307,13 +308,6 @@ fn parse_args<'a>(
     }
 }
 
-/// Scale factors from the file's units to SI.
-#[derive(Clone, Copy, Debug)]
-struct Units {
-    time: f64,
-    capacitance: f64,
-}
-
 #[derive(Clone, Debug)]
 struct Template {
     variables: Vec<AxisVariable>,
@@ -340,7 +334,7 @@ impl BusType {
 
 struct Interpreter {
     path: PathBuf,
-    units: Units,
+    units: LibraryUnits,
     defaults: Defaults,
     templates: HashMap<String, Template>,
     bus_types: HashMap<String, BusType>,
@@ -350,10 +344,7 @@ impl Interpreter {
     fn new(path: &Path) -> Self {
         Self {
             path: path.to_path_buf(),
-            units: Units {
-                time: 1e-9,
-                capacitance: 1e-12,
-            },
+            units: LibraryUnits::default(),
             defaults: Defaults::default(),
             templates: HashMap::new(),
             bus_types: HashMap::new(),
@@ -410,10 +401,7 @@ impl Interpreter {
         let name = group.args.first().map_or("library", |v| v.0).to_string();
         let mut lib = Liberty::new(name);
         self.units = self.read_units(group)?;
-        lib.units = LibraryUnits {
-            time: self.units.time,
-            capacitance: self.units.capacitance,
-        };
+        lib.units = self.units;
         lib.thresholds = self.thresholds(group)?;
         self.defaults = self.defaults(group)?;
         lib.defaults = self.defaults;
@@ -435,7 +423,7 @@ impl Interpreter {
         Ok(lib)
     }
 
-    fn read_units(&self, group: &Group<'_>) -> Result<Units, ParseError> {
+    fn read_units(&self, group: &Group<'_>) -> Result<LibraryUnits, ParseError> {
         let mut units = self.units;
         if let Some(attr) = group.attr("time_unit") {
             let text = attr.values.first().map_or("", |v| v.0);
@@ -449,6 +437,7 @@ impl Interpreter {
                     ("s", 1.0),
                 ],
             )
+            .map(Seconds::new)
             .ok_or_else(|| self.error(attr.line, format!("unknown time unit '{text}'")))?;
         }
         if let Some(attr) = group.attr("capacitive_load_unit") {
@@ -473,7 +462,7 @@ impl Interpreter {
                     );
                 }
             };
-            units.capacitance = scale * factor;
+            units.capacitance = Farads::new(scale * factor);
         }
         Ok(units)
     }
@@ -577,9 +566,9 @@ impl Interpreter {
         let scale = match variable {
             AxisVariable::InputTransition
             | AxisVariable::RelatedPinTransition
-            | AxisVariable::ConstrainedPinTransition => self.units.time,
+            | AxisVariable::ConstrainedPinTransition => self.units.time.get(),
             AxisVariable::OutputCapacitance | AxisVariable::RelatedOutputCapacitance => {
-                self.units.capacitance
+                self.units.capacitance.get()
             }
             AxisVariable::Other => 1.0,
         };
@@ -795,10 +784,7 @@ impl Interpreter {
         let mut port = LibPort {
             name: name.to_string(),
             direction,
-            capacitance: EdgeValues {
-                rise: default_cap,
-                fall: default_cap,
-            },
+            capacitance: EdgeValues::both(default_cap),
             max_capacitance: None,
             max_transition: None,
             max_fanout: None,
@@ -977,7 +963,7 @@ impl Interpreter {
         let values_attr = group
             .attr("values")
             .ok_or_else(|| self.error(group.line, format!("'{}' has no values", group.name)))?;
-        let values: Vec<f64> = self
+        let values: Vec<Seconds> = self
             .numbers(values_attr)?
             .into_iter()
             .map(|v| v * self.units.time)
@@ -1274,6 +1260,7 @@ fn arc_role(timing_type: &str) -> ArcKind {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::units::{Farads, Seconds};
 
     const LIB: &str = r#"
 /* a comment */
@@ -1358,11 +1345,11 @@ library (tiny) {
         let lib = tiny();
         let buf = lib.cell(lib.cell_id("BUF_X1").unwrap());
         let a = &buf.ports[buf.port("A").unwrap()];
-        assert!((a.capacitance.rise - 0.9e-15).abs() < 1e-30);
-        assert!((a.capacitance.fall - 0.8e-15).abs() < 1e-30);
+        assert!((a.capacitance.rise.get() - 0.9e-15).abs() < 1e-30);
+        assert!((a.capacitance.fall.get() - 0.8e-15).abs() < 1e-30);
         let z = &buf.ports[buf.port("Z").unwrap()];
-        assert!((z.max_capacitance.unwrap() - 60e-15).abs() < 1e-28);
-        assert!((lib.defaults.max_transition.unwrap() - 0.5e-9).abs() < 1e-22);
+        assert!((z.max_capacitance.unwrap().get() - 60e-15).abs() < 1e-28);
+        assert!((lib.defaults.max_transition.unwrap().get() - 0.5e-9).abs() < 1e-22);
         assert!((lib.thresholds.slew_lower.rise - 0.3).abs() < 1e-12);
     }
 
@@ -1385,7 +1372,9 @@ library (tiny) {
         };
         assert!(close(&delay.axes[0].values, &[0.1e-9, 0.3e-9]));
         assert!(close(&delay.axes[1].values, &[1e-15, 2e-15]));
-        assert!((delay.lookup(0.1e-9, 2e-15) - 0.020e-9).abs() < 1e-20);
+        assert!(
+            (delay.lookup(Seconds::new(0.1e-9), Farads::new(2e-15)).get() - 0.020e-9).abs() < 1e-20
+        );
         assert!(rise.slew.is_some());
     }
 
@@ -1408,9 +1397,16 @@ library (tiny) {
         assert_eq!(setup.arcs.len(), 1);
         assert_eq!(setup.arcs[0].from_edge, Edge::Rise);
         assert_eq!(setup.arcs[0].to_edge, Edge::Rise);
-        assert!((setup.arcs[0].check_value(0.1e-9, 0.2e-9) - 2e-9).abs() < 1e-20);
-        assert!((lib.units.time - 1e-9).abs() < 1e-24);
-        assert!((lib.units.capacitance - 1e-15).abs() < 1e-30);
+        assert!(
+            (setup.arcs[0]
+                .check_value(Seconds::new(0.1e-9), Seconds::new(0.2e-9))
+                .get()
+                - 2e-9)
+                .abs()
+                < 1e-20
+        );
+        assert!((lib.units.time.get() - 1e-9).abs() < 1e-24);
+        assert!((lib.units.capacitance.get() - 1e-15).abs() < 1e-30);
         let q = dff
             .arc_sets
             .iter()
@@ -1473,9 +1469,9 @@ library (ram) {
         );
         let out = &mem.ports[mem.port("rd_out[0]").unwrap()];
         assert_eq!(out.direction, PortDirection::Output);
-        assert!((out.max_capacitance.unwrap() - 500e-15).abs() < 1e-27);
+        assert!((out.max_capacitance.unwrap().get() - 500e-15).abs() < 1e-27);
         let addr = &mem.ports[mem.port("addr_in[1]").unwrap()];
-        assert!((addr.capacitance.rise - 5e-15).abs() < 1e-28);
+        assert!((addr.capacitance.rise.get() - 5e-15).abs() < 1e-28);
         let clk_to_q: Vec<&TimingArcSet> = mem
             .arc_sets
             .iter()
@@ -1483,7 +1479,14 @@ library (ram) {
             .collect();
         assert_eq!(clk_to_q.len(), 2);
         let arc = &clk_to_q[0].arcs[0];
-        assert!((arc.gate_delay(0.0, 500e-15).1 - 0.227e-9).abs() < 1e-14);
+        assert!(
+            (arc.gate_delay(Seconds::new(0.0), Farads::new(500e-15))
+                .1
+                .get()
+                - 0.227e-9)
+                .abs()
+                < 1e-14
+        );
         assert!(mem.arc_sets.iter().any(|s| s.role == ArcRole::Setup));
     }
 
@@ -1520,9 +1523,12 @@ library (ram) {{
 
         let bit = mem_port(&lib, "d[1]");
 
-        assert!((bit.capacitance.rise - 5e-15).abs() < 1e-28, "{bit:?}");
         assert!(
-            (bit.max_transition.unwrap() - 0.3e-9).abs() < 1e-20,
+            (bit.capacitance.rise.get() - 5e-15).abs() < 1e-28,
+            "{bit:?}"
+        );
+        assert!(
+            (bit.max_transition.unwrap().get() - 0.3e-9).abs() < 1e-20,
             "{bit:?}"
         );
     }
@@ -1534,7 +1540,10 @@ library (ram) {{
         let bit = mem_port(&lib, "d[0]");
 
         assert_eq!(bit.direction, PortDirection::Input);
-        assert!((bit.capacitance.rise - 7e-15).abs() < 1e-28, "{bit:?}");
+        assert!(
+            (bit.capacitance.rise.get() - 7e-15).abs() < 1e-28,
+            "{bit:?}"
+        );
     }
 
     #[test]

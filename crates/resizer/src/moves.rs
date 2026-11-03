@@ -17,6 +17,7 @@ use pare_common::db::liberty::{
 };
 use pare_common::geom::dbu::Dbu;
 use pare_common::geom::point::Point;
+use pare_common::units::{Farads, Seconds};
 use rustc_hash::{FxHashMap, FxHashSet};
 use std::rc::Rc;
 
@@ -214,7 +215,7 @@ impl Moves {
             .prev_driver
             .and_then(|p| resizer.link.pin_port(resizer.db, p))
             .map_or(0.0, |(lib, port)| {
-                resizer.link.liberty.cell(lib).drive_resistance(port)
+                resizer.link.liberty.cell(lib).drive_resistance(port).get()
             });
         let load_cap = resizer.load_cap(site.driver);
         let Some(upsize) = upsize_cell(resizer, site.lib, in_port, site.port, load_cap, prev_drive)
@@ -512,7 +513,7 @@ impl Moves {
         let Some((in_port, _)) = lib.buffer_ports() else {
             return Ok(false);
         };
-        let buffer_in_cap = lib.ports[in_port].capacitance();
+        let buffer_in_cap = lib.ports[in_port].capacitance().get();
         let buffer_load = resizer.load_cap(site.driver);
         if let Some(limit) = resizer.cap_limit(prev_driver)
             && limit > 0.0
@@ -592,12 +593,16 @@ fn upsize_cell(
     });
     let drive = cell.drive_resistance(drvr_port);
     let (delays, _) = gate_delays(cell, drvr_port, load_cap, &resizer.targets.slews, None);
-    let delay = prev_drive.mul_add(cell.ports[in_port].capacitance(), delays.max().max(0.0));
+    let delay = prev_drive.mul_add(
+        cell.ports[in_port].capacitance().get(),
+        delays.max().max(0.0),
+    );
     for (id, c_in, c_out) in candidates {
         let c = liberty.cell(id);
         let c_drive = c.drive_resistance(c_out);
         let (c_delays, _) = gate_delays(c, c_out, load_cap, &resizer.targets.slews, None);
-        let c_delay = prev_drive.mul_add(c.ports[c_in].capacitance(), c_delays.max().max(0.0));
+        let c_delay =
+            prev_drive.mul_add(c.ports[c_in].capacitance().get(), c_delays.max().max(0.0));
         if c_drive < drive && c_delay < delay {
             return Some(id);
         }
@@ -605,12 +610,17 @@ fn upsize_cell(
     None
 }
 
+/// The larger of a pin's edge capacitances, in farads.
+fn port_capacitance(cell: &LibCell, port: usize) -> f64 {
+    cell.ports[port].capacitance().get()
+}
+
 /// The largest intrinsic delay of the arcs into `port`, as
 /// `LibertyPort::intrinsicDelay`.
 fn intrinsic_delay(cell: &LibCell, port: usize) -> f64 {
     cell.delay_arc_sets_to(port)
         .flat_map(|s| s.arcs.iter())
-        .map(|a| a.gate_delay(0.0, 0.0).0)
+        .map(|a| a.gate_delay(Seconds::ZERO, Farads::ZERO).0.get())
         .filter(|&d| d > 0.0)
         .fold(0.0, f64::max)
 }
@@ -639,7 +649,7 @@ fn half_driving_power_cell(resizer: &Resizer<'_, Sta>, lib: LibCellId) -> Option
             .iter()
             .filter(|p| p.is_output())
             .find_map(|p| liberty.capacitance_limit(c, p))
-            .unwrap_or(0.0)
+            .map_or(0.0, Farads::get)
     };
     let target = 0.5 * max_load(lib);
     let mut closest: Option<(f64, LibCellId)> = None;
@@ -746,7 +756,7 @@ fn swap_candidate(
     drvr_port: usize,
     equivalent: &[usize],
     load_cap: f64,
-    input_slews: &[(String, EdgeValues)],
+    input_slews: &[(String, EdgeValues<f64>)],
 ) -> Option<usize> {
     let mut base_delay = f64::NEG_INFINITY;
     let mut port_delays: FxHashMap<usize, f64> = FxHashMap::default();
@@ -760,7 +770,10 @@ fn swap_candidate(
                     || resizer.targets.slews.get(arc.from_edge),
                     |(_, s)| s.get(arc.from_edge),
                 );
-            let (delay, _) = arc.gate_delay(in_slew, load_cap);
+            let delay = arc
+                .gate_delay(Seconds::new(in_slew), Farads::new(load_cap))
+                .0
+                .get();
             if set.from == input {
                 base_delay = base_delay.max(delay);
             } else {
@@ -820,7 +833,7 @@ fn estimated_slack_ok(
         &resizer.targets.slews,
         Some(&prev_input_slews),
     );
-    let new_load = old_load + resizer.load_cap(site.driver) - buffer.ports[in_port].capacitance();
+    let new_load = old_load + resizer.load_cap(site.driver) - port_capacitance(buffer, in_port);
     let (new_delay, new_slew) = gate_delays(
         prev,
         prev_port,
@@ -904,8 +917,8 @@ fn estimated_slack_ok(
 fn input_slew_impact_ok(
     resizer: &Resizer<'_, Sta>,
     cell: CellId,
-    old: EdgeValues,
-    new: EdgeValues,
+    old: EdgeValues<f64>,
+    new: EdgeValues<f64>,
     adjust: f64,
     margin: f64,
     accept_if_improves: bool,
@@ -927,7 +940,7 @@ fn input_slew_impact_ok(
             return false;
         };
         let load_cap = resizer.load_cap(pin);
-        let slews_of = |slew: EdgeValues| -> Vec<(String, EdgeValues)> {
+        let slews_of = |slew: EdgeValues<f64>| -> Vec<(String, EdgeValues<f64>)> {
             c.ports.iter().map(|p| (p.name.clone(), slew)).collect()
         };
         let (old_delay, _) = gate_delays(
