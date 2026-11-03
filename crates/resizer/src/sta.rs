@@ -1435,23 +1435,25 @@ impl Sta {
         to: PathEnd,
         side: MinMax,
     ) -> f64 {
-        let Some(mcp) = self.multicycle(tag, to, Some(target.clock), side) else {
-            return 0.0;
-        };
-        let period = |use_end: bool| {
-            let clock = if use_end { target.clock } else { launch.clock };
+        let period = |mcp: &MultiCyclePath| {
+            let clock = if mcp.use_end_clock {
+                target.clock
+            } else {
+                launch.clock
+            };
             self.sdc.clock(clock).period
         };
+        let setup_cycles =
+            |mcp: &MultiCyclePath| f64::from(mcp.multiplier(MinMax::Max) - 1) * period(mcp);
+        let setup = self.multicycle(tag, to, Some(target.clock), MinMax::Max);
         match side {
-            MinMax::Max => f64::from(mcp.multiplier(MinMax::Max) - 1) * period(mcp.use_end_clock),
+            MinMax::Max => setup.map_or(0.0, setup_cycles),
             MinMax::Min => {
-                let setup = self.multicycle(tag, to, Some(target.clock), MinMax::Max);
-                let hold_term = f64::from(mcp.multiplier(MinMax::Min)) * period(mcp.use_end_clock);
-                match setup {
-                    Some(setup) => f64::from(setup.multiplier(MinMax::Max) - 1)
-                        .mul_add(period(setup.use_end_clock), -hold_term),
-                    None => -hold_term,
-                }
+                let hold = self.multicycle(tag, to, Some(target.clock), MinMax::Min);
+                let hold_cycles = hold.map_or(0.0, |mcp| {
+                    f64::from(mcp.multiplier(MinMax::Min)) * period(mcp)
+                });
+                setup.map_or(0.0, setup_cycles) - hold_cycles
             }
         }
     }
@@ -1872,16 +1874,37 @@ mod tests {
         def::parse_str(text, Path::new("dangle.def"), library).unwrap()
     }
 
-    #[test]
-    fn an_input_port_on_nothing_keeps_the_negative_of_its_input_delay_as_slack() {
-        let db = dangling_port_design();
+    /// Two flops on one clock, the first launching into the second.
+    fn flop_to_flop_design() -> NetlistDB {
+        let text = "VERSION 5.8 ;\nDIVIDERCHAR \"/\" ;\nBUSBITCHARS \"[]\" ;\nDESIGN pair ;\n\
+            UNITS DISTANCE MICRONS 2000 ;\nDIEAREA ( 0 0 ) ( 40000 40000 ) ;\n\
+            COMPONENTS 2 ;\n- f1 DFF_X1 + PLACED ( 2000 2800 ) N ;\n\
+            - f2 DFF_X1 + PLACED ( 12000 2800 ) N ;\nEND COMPONENTS\n\
+            PINS 2 ;\n- clk + NET clk + DIRECTION INPUT ;\n- in + NET in + DIRECTION INPUT ;\n\
+            END PINS\nNETS 3 ;\n- clk ( PIN clk ) ( f1 CK ) ( f2 CK ) ;\n- in ( PIN in ) ( f1 D ) ;\n\
+            - q ( f1 Q ) ( f2 D ) ;\nEND NETS\nEND DESIGN\n";
+        let units = DbuPerMicron::new(2000).unwrap();
+        let library = lef::parse_files(&[fixture("cts", "clock.lef")], units).unwrap();
+        def::parse_str(text, Path::new("pair.def"), library).unwrap()
+    }
+
+    fn cell_pin(db: &NetlistDB, name: &str) -> PinId {
+        let (cell, _) = name.split_once('/').unwrap();
+        db.cells[db.cell_id(cell).unwrap().index()]
+            .pins
+            .iter()
+            .copied()
+            .find(|&pin| db.pin_name(pin) == name)
+            .unwrap()
+    }
+
+    /// The slack at `pin` on `side` with the design timed under `constraints`
+    /// and wires without resistance or capacitance.
+    fn slack_under(db: &NetlistDB, constraints: &str, pin: PinId, side: MinMax) -> f64 {
         let lib = liberty::parse_file(&fixture("cts", "clock.lib")).unwrap();
-        let constraints = "create_clock -name clk -period 2.2 [get_ports clk]\n\
-            set_input_delay 0.44 -clock clk [get_ports in]\n\
-            set_input_delay 0.44 -clock clk [get_ports boot]\n";
-        let sdc = sdc::parse_str(constraints, Path::new("dangle.sdc"), &db, &lib).unwrap();
-        let link = Link::new(&db, &lib, &[]).unwrap();
-        let netlist = Netlist::new(&db, &link);
+        let sdc = sdc::parse_str(constraints, Path::new("test.sdc"), db, &lib).unwrap();
+        let link = Link::new(db, &lib, &[]).unwrap();
+        let netlist = Netlist::new(db, &link);
         let constants = Constants::find(&netlist);
         let clocks = ClockNetwork::from_sdc(&netlist, &sdc, &constants);
         let rc = WireRc {
@@ -1897,12 +1920,38 @@ mod tests {
             None,
             Estimator::Placement,
         );
+        Sta::new(&netlist, &graph, &clocks, &constants, &sdc).slack(pin, side)
+    }
+
+    #[test]
+    fn an_input_port_on_nothing_keeps_the_negative_of_its_input_delay_as_slack() {
+        let db = dangling_port_design();
+        let constraints = "create_clock -name clk -period 2.2 [get_ports clk]\n\
+            set_input_delay 0.44 -clock clk [get_ports in]\n\
+            set_input_delay 0.44 -clock clk [get_ports boot]\n";
         let boot = db.io_pins[db.io_pin_id("boot").unwrap().index()].pin;
 
-        let sta = Sta::new(&netlist, &graph, &clocks, &constants, &sdc);
+        let slack = slack_under(&db, constraints, boot, MinMax::Max);
 
-        let slack = sta.slack(boot, MinMax::Max);
         assert!((slack + 0.44e-9).abs() < 1e-15, "{slack}");
+    }
+
+    #[test]
+    fn a_setup_multicycle_moves_the_hold_check_by_the_extra_cycles() {
+        let db = flop_to_flop_design();
+        let clock = "create_clock -name clk -period 2.2 [get_ports clk]\n";
+        let multicycle = format!(
+            "{clock}set_multicycle_path 3 -setup -from [get_clocks clk] -to [get_clocks clk]\n"
+        );
+        let d = cell_pin(&db, "f2/D");
+
+        let single = slack_under(&db, clock, d, MinMax::Min);
+        let tripled = slack_under(&db, &multicycle, d, MinMax::Min);
+
+        assert!(
+            (single - tripled - 4.4e-9).abs() < 1e-15,
+            "{single} vs {tripled}"
+        );
     }
 
     #[test]
