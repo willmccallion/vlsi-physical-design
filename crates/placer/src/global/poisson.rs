@@ -1,7 +1,10 @@
-//! The electrostatic potential of a density map, with zero-flux edges.
+//! The electrostatic potential and field of a density map, with zero-flux
+//! edges.
 //!
 //! Mirroring the grid to 2N×2N makes it even, so a periodic 2D FFT solve
-//! gives the Neumann (cosine transform) solution.
+//! gives the Neumann (cosine transform) solution. The field is the spectral
+//! derivative of the potential, as `gpl`'s FFT takes it, not a difference
+//! of neighboring bins, which would weaken the field of fine detail.
 
 use rustfft::num_complex::Complex;
 use rustfft::{Fft, FftPlanner};
@@ -16,6 +19,7 @@ pub(super) struct PoissonSolver {
     inverse: Arc<dyn Fft<f64>>,
     scratch: Vec<Complex<f64>>,
     transposed: Vec<Complex<f64>>,
+    field: Vec<Complex<f64>>,
 }
 
 impl std::fmt::Debug for PoissonSolver {
@@ -39,11 +43,19 @@ impl PoissonSolver {
             inverse: planner.plan_fft_inverse(mirrored),
             scratch: vec![Complex::default(); mirrored * mirrored],
             transposed: vec![Complex::default(); mirrored * mirrored],
+            field: vec![Complex::default(); mirrored * mirrored],
         }
     }
 
-    /// Writes the potential of `density`, both row-major, into `potential`.
-    pub(super) fn solve(&mut self, density: &[f64], potential: &mut [f64]) {
+    /// Writes the potential of `density` and its field `-∇φ`, all
+    /// row-major, into `potential`, `field_x` and `field_y`.
+    pub(super) fn solve(
+        &mut self,
+        density: &[f64],
+        potential: &mut [f64],
+        field_x: &mut [f64],
+        field_y: &mut [f64],
+    ) {
         let dim = self.dim;
         let dim2 = 2 * dim;
         for y in 0..dim {
@@ -67,25 +79,52 @@ impl PoissonSolver {
                 let ky = angular_frequency(v, dim2) / bin_h;
                 let eigenvalue = kx.mul_add(kx, ky * ky);
                 let idx = u * dim2 + v;
-                self.transposed[idx] = if eigenvalue > 0.0 {
+                let phi = if eigenvalue > 0.0 {
                     self.transposed[idx] / eigenvalue
                 } else {
                     Complex::new(0.0, 0.0)
                 };
+                self.transposed[idx] = phi;
+                // -i·kx·φ in the real part and -i·ky·φ in the imaginary one.
+                self.field[idx] = phi * Complex::new(ky, -kx);
             }
         }
 
-        self.inverse.process(&mut self.transposed);
-        transpose(&self.transposed, &mut self.scratch, dim2);
-        self.inverse.process(&mut self.scratch);
-
         let norm = 1.0 / (dim2 * dim2) as f64;
+        self.inverse_2d(Spectrum::Potential);
         for y in 0..dim {
             for x in 0..dim {
                 potential[y * dim + x] = self.scratch[y * dim2 + x].re * norm;
             }
         }
+        self.inverse_2d(Spectrum::Field);
+        for y in 0..dim {
+            for x in 0..dim {
+                let e = self.scratch[y * dim2 + x] * norm;
+                field_x[y * dim + x] = e.re;
+                field_y[y * dim + x] = e.im;
+            }
+        }
     }
+
+    /// Inverts one transposed spectrum into `scratch`, row-major.
+    fn inverse_2d(&mut self, spectrum: Spectrum) {
+        let dim2 = 2 * self.dim;
+        let transformed = match spectrum {
+            Spectrum::Potential => &mut self.transposed,
+            Spectrum::Field => &mut self.field,
+        };
+        self.inverse.process(transformed);
+        transpose(transformed, &mut self.scratch, dim2);
+        self.inverse.process(&mut self.scratch);
+    }
+}
+
+/// Which of the solver's spectra to invert.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Spectrum {
+    Potential,
+    Field,
 }
 
 /// Angular frequency of DFT bin `k` out of `n`, with bins above `n / 2`
@@ -123,11 +162,30 @@ mod tests {
         density
     }
 
-    fn solve(density: &[f64], dim: usize, bin: (f64, f64)) -> Vec<f64> {
+    struct Solution {
+        potential: Vec<f64>,
+        field_x: Vec<f64>,
+        field_y: Vec<f64>,
+    }
+
+    fn solve_all(density: &[f64], dim: usize, bin: (f64, f64)) -> Solution {
         let mut solver = PoissonSolver::new(dim, bin.0, bin.1);
-        let mut potential = vec![0.0; dim * dim];
-        solver.solve(density, &mut potential);
-        potential
+        let mut solution = Solution {
+            potential: vec![0.0; dim * dim],
+            field_x: vec![0.0; dim * dim],
+            field_y: vec![0.0; dim * dim],
+        };
+        solver.solve(
+            density,
+            &mut solution.potential,
+            &mut solution.field_x,
+            &mut solution.field_y,
+        );
+        solution
+    }
+
+    fn solve(density: &[f64], dim: usize, bin: (f64, f64)) -> Vec<f64> {
+        solve_all(density, dim, bin).potential
     }
 
     fn assert_solves_cosine_mode(dim: usize, a: usize, b: usize, bin: (f64, f64)) {
@@ -166,6 +224,31 @@ mod tests {
     #[test]
     fn potential_scales_each_axis_by_its_bin_size() {
         assert_solves_cosine_mode(16, 3, 2, (2.5, 0.5));
+    }
+
+    #[test]
+    fn the_field_is_the_exact_derivative_of_a_cosine_mode_even_at_high_frequency() {
+        let (dim, a, b, bin) = (16, 13, 3, (2.0, 0.5));
+        let density = cosine_mode(dim, a, b);
+        let wa = PI * a as f64 / dim as f64 / bin.0;
+        let wb = PI * b as f64 / dim as f64 / bin.1;
+        let eigenvalue = wa.mul_add(wa, wb * wb);
+
+        let solution = solve_all(&density, dim, bin);
+
+        for y in 0..dim {
+            for x in 0..dim {
+                let (px, py) = (
+                    PI * a as f64 * (x as f64 + 0.5) / dim as f64,
+                    PI * b as f64 * (y as f64 + 0.5) / dim as f64,
+                );
+                let ex = wa * px.sin() * py.cos() / eigenvalue;
+                let ey = wb * px.cos() * py.sin() / eigenvalue;
+                let idx = y * dim + x;
+                assert!((solution.field_x[idx] - ex).abs() < 1e-9, "x at ({x}, {y})");
+                assert!((solution.field_y[idx] - ey).abs() < 1e-9, "y at ({x}, {y})");
+            }
+        }
     }
 
     #[test]

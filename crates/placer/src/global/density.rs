@@ -224,8 +224,12 @@ impl DensityGrid {
 
         let bin_area = self.bins.area();
         let density: Vec<f64> = self.total.iter().map(|a| a / bin_area).collect();
-        self.solver.solve(&density, &mut self.potential);
-        self.compute_field();
+        self.solver.solve(
+            &density,
+            &mut self.potential,
+            &mut self.field_x,
+            &mut self.field_y,
+        );
 
         let energy: f64 = self
             .total
@@ -251,24 +255,6 @@ impl DensityGrid {
             over,
             cells: cell_area,
             energy,
-        }
-    }
-
-    /// The field `-∇φ` at each bin, by central differences with mirrored edges.
-    fn compute_field(&mut self) {
-        let dim = self.bins.dim;
-        let bin = self.bins.size;
-        let phi = &self.potential;
-        for y in 0..dim {
-            for x in 0..dim {
-                let idx = y * dim + x;
-                let left = phi[if x > 0 { idx - 1 } else { idx }];
-                let right = phi[if x + 1 < dim { idx + 1 } else { idx }];
-                let down = phi[if y > 0 { idx - dim } else { idx }];
-                let up = phi[if y + 1 < dim { idx + dim } else { idx }];
-                self.field_x[idx] = -(right - left) / (2.0 * bin.x);
-                self.field_y[idx] = -(up - down) / (2.0 * bin.y);
-            }
         }
     }
 
