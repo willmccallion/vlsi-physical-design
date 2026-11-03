@@ -1,6 +1,7 @@
 //! DEF writer.
 
-use crate::db::design::{BlockageKind, NetlistDB, PinOwner, RouteElem, SpecialRect};
+use crate::db::design::{BlockageKind, Cell, NetlistDB, PinOwner, RouteElem, SpecialRect};
+use crate::db::indices::{CellId, RegionId};
 use crate::db::library::{LayerRef, Library};
 use crate::geom::dbu::Dbu;
 use crate::geom::point::Point;
@@ -84,6 +85,7 @@ pub fn write(db: &NetlistDB, out: &mut impl Write) -> io::Result<()> {
     write_blockages(db, out)?;
     write_special_nets(db, out)?;
     write_nets(db, out)?;
+    write_groups(db, out)?;
     writeln!(out, "END DESIGN")
 }
 
@@ -200,12 +202,62 @@ fn write_components(db: &NetlistDB, out: &mut impl Write) -> io::Result<()> {
         if let Some(kw) = c.status.def_keyword() {
             write!(out, " + {kw} {} {}", pt(c.location), c.orient)?;
         }
-        if let Some(r) = c.region {
+        if let Some(r) = c.region
+            && !is_listed_in_group(db, c)
+        {
             write!(out, " + REGION {}", db.regions[r.index()].name)?;
         }
         writeln!(out, " ;")?;
     }
     writeln!(out, "END COMPONENTS")
+}
+
+/// Whether a cell's region comes from a group, which [`write_groups`]
+/// lists it in, rather than from its own `+ REGION`.
+fn is_listed_in_group(db: &NetlistDB, cell: &Cell) -> bool {
+    cell.group_rank != u32::MAX
+        && cell
+            .region
+            .is_some_and(|r| db.regions[r.index()].group_order.is_some())
+}
+
+/// One group for each region a DEF group named, in the groups' order and
+/// named after the region, so that reading them back orders the regions
+/// and their members as before.
+fn write_groups(db: &NetlistDB, out: &mut impl Write) -> io::Result<()> {
+    let mut grouped: Vec<RegionId> = (0..db.regions.len())
+        .map(RegionId::new)
+        .filter(|r| db.regions[r.index()].group_order.is_some())
+        .collect();
+    if grouped.is_empty() {
+        return Ok(());
+    }
+    grouped.sort_by_key(|r| db.regions[r.index()].group_order);
+    writeln!(out, "GROUPS {} ;", grouped.len())?;
+    for region in grouped {
+        let name = &db.regions[region.index()].name;
+        write!(out, "- {name}")?;
+        for cell in members_last_listed_first(db, region) {
+            write!(out, " {}", db.cells[cell.index()].name)?;
+        }
+        writeln!(out, " + REGION {name} ;")?;
+    }
+    writeln!(out, "END GROUPS")
+}
+
+/// A region's group members in reverse of the order `OpenDP` takes them,
+/// since a group's last member is ranked first when read.
+fn members_last_listed_first(db: &NetlistDB, region: RegionId) -> Vec<CellId> {
+    let mut members: Vec<CellId> = (0..db.cells.len())
+        .map(CellId::new)
+        .filter(|c| {
+            let cell = &db.cells[c.index()];
+            cell.region == Some(region) && is_listed_in_group(db, cell)
+        })
+        .collect();
+    members.sort_by_key(|c| (db.cells[c.index()].group_rank, std::cmp::Reverse(*c)));
+    members.reverse();
+    members
 }
 
 fn write_pins(db: &NetlistDB, out: &mut impl Write) -> io::Result<()> {

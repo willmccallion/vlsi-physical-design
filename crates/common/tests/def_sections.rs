@@ -221,6 +221,78 @@ fn group_members_are_ranked_as_opendb_lists_them() {
 }
 
 #[test]
+fn groups_are_written_and_read_back_unchanged() {
+    let db = design_with(&[
+        (
+            "COMPONENTS 8 ;",
+            "REGIONS 2 ;\n- left ( 0 0 ) ( 6000 4000 ) ;\n- right ( 3000 0 ) ( 6000 6000 ) ;\n\
+             END REGIONS\n\nCOMPONENTS 8 ;",
+        ),
+        (
+            "END NETS",
+            "END NETS\n\nGROUPS 2 ;\n- g2 ram0 + REGION right ;\n- g u7 u1 u* + REGION left ;\n\
+             END GROUPS",
+        ),
+    ])
+    .unwrap();
+
+    let mut text = Vec::new();
+    writer::def::write(&db, &mut text).unwrap();
+    let reread = def::parse_str(
+        &String::from_utf8(text).unwrap(),
+        Path::new("written.def"),
+        tiny_library(),
+    )
+    .unwrap();
+
+    assert_eq!(reread, db);
+}
+
+/// A region's members in the order `OpenDP` takes them: by rank, then the
+/// later cell first.
+fn group_order_of(db: &NetlistDB, region: RegionId) -> Vec<String> {
+    let mut members: Vec<usize> = (0..db.cells.len())
+        .filter(|&i| db.cells[i].region == Some(region))
+        .collect();
+    members.sort_by_key(|&i| (db.cells[i].group_rank, std::cmp::Reverse(i)));
+    members
+        .into_iter()
+        .map(|i| db.cells[i].name.clone())
+        .collect()
+}
+
+#[test]
+fn members_of_two_groups_on_one_region_keep_their_order_when_written() {
+    let db = design_with(&[
+        (
+            "COMPONENTS 8 ;",
+            "REGIONS 1 ;\n- left ( 0 0 ) ( 6000 4000 ) ;\nEND REGIONS\n\nCOMPONENTS 8 ;",
+        ),
+        (
+            "END NETS",
+            "END NETS\n\nGROUPS 2 ;\n- g1 u2 u3 + REGION left ;\n- g2 u1 + REGION left ;\n\
+             END GROUPS",
+        ),
+    ])
+    .unwrap();
+
+    let mut text = Vec::new();
+    writer::def::write(&db, &mut text).unwrap();
+    let reread = def::parse_str(
+        &String::from_utf8(text).unwrap(),
+        Path::new("written.def"),
+        tiny_library(),
+    )
+    .unwrap();
+
+    assert_eq!(group_order_of(&db, RegionId(0)), ["u3", "u1", "u2"]);
+    assert_eq!(
+        group_order_of(&reread, RegionId(0)),
+        group_order_of(&db, RegionId(0))
+    );
+}
+
+#[test]
 fn groups_may_come_before_the_regions_and_components_they_name() {
     let db = design_with(&[(
         "COMPONENTS 8 ;",
