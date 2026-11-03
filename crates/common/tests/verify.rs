@@ -8,6 +8,7 @@ use pare_common::db::design::{
 use pare_common::db::indices::{CellId, CutLayerId, LayerId, NetId, NonDefaultRuleId, RegionId};
 use pare_common::db::library::LayerRef;
 use pare_common::db::parser::{def, lef};
+use pare_common::db::rules::EndOfLineSpacing;
 use pare_common::geom::dbu::{Dbu, DbuArea, DbuPerMicron};
 use pare_common::geom::orient::Orientation;
 use pare_common::geom::point::Point;
@@ -249,6 +250,54 @@ fn nondefault_wires_must_meet_the_minimum_area_at_the_default_width_too() {
     assert_eq!(
         report.violations[0].bbox,
         Rect::new(pt(950, 950), pt(1050, 1350))
+    );
+}
+
+#[test]
+fn nondefault_wires_that_merge_at_their_width_are_spaced_at_the_default_width() {
+    let mut db = empty_design();
+    let net = db.net_or_insert("n");
+    double_width_rule(&mut db, net, None);
+    db.nets[net.index()].routing = vec![
+        wire(M2, pt(1000, 1000), pt(1000, 3000)),
+        wire(M2, pt(1190, 1000), pt(1190, 3000)),
+    ];
+
+    let report = check_drc(&db);
+
+    let spacing: Vec<_> = report
+        .violations
+        .iter()
+        .filter(|m| m.violation == Violation::MetalSpacing)
+        .collect();
+    assert_eq!(spacing.len(), 1, "{:?}", report.violations);
+    assert_eq!(spacing[0].owners.0, spacing[0].owners.1);
+}
+
+#[test]
+fn a_nondefault_wire_end_is_held_to_the_end_of_line_rule_at_the_default_width() {
+    let mut db = empty_design();
+    db.library.routing_layers[M2.index()].rules.end_of_line = vec![EndOfLineSpacing {
+        spacing: Dbu(150),
+        eol_width: Dbu(150),
+        within: Dbu(50),
+        parallel_edge: None,
+    }];
+    let net = db.net_or_insert("n");
+    double_width_rule(&mut db, net, None);
+    db.nets[net.index()].routing = vec![wire(M2, pt(1000, 1000), pt(1000, 2000))];
+    let other = db.net_or_insert("m");
+    db.nets[other.index()].routing = vec![wire(M2, pt(800, 2220), pt(1200, 2220))];
+
+    let report = check_drc(&db);
+
+    assert!(
+        report
+            .violations
+            .iter()
+            .any(|m| m.violation == Violation::EndOfLineSpacing),
+        "{:?}",
+        report.violations
     );
 }
 

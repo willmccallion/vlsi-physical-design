@@ -290,23 +290,65 @@ pub fn check_area(layout: &Layout, rules: &Rules, area: Rect<Dbu>) -> DrcReport 
 /// nondefault rules, tile by tile.
 ///
 /// `OpenROAD` reads every wire at its layer's default width, so the wiring
-/// of nets under a nondefault rule must also meet the shape rules at that
-/// width, and is checked for them a second time that way.
+/// of nets under a nondefault rule is checked a second time that way, for
+/// the violations a narrower wire can make.
 pub fn check_drc(db: &NetlistDB) -> DrcReport {
     let layout = Layout::from_db(db);
     let rules = Rules::from_design(db);
     let halo = rules.max_reach() * 2;
     let mut report = check_tiled(&layout, &rules, halo * TILE_HALOS, halo);
-    let default_width = Layout::default_width_view_of_rule_nets(db, &layout);
-    let found = shape::check(&Model::new(&default_width), &rules);
-    report.violations = deduplicated(
-        report
-            .violations
-            .into_iter()
-            .chain(found.violations)
-            .collect(),
+    if !has_rule_wiring(db) {
+        return report;
+    }
+    let narrow = check_tiled(
+        &Layout::as_openroad_reads(db, &layout),
+        &rules,
+        halo * TILE_HALOS,
+        halo,
     );
+    add_made_by_narrowing(&mut report.violations, narrow.violations, &layout);
+    add_made_by_narrowing(&mut report.advisory, narrow.advisory, &layout);
     report
+}
+
+/// Adds to `markers` those of `narrow`, found with nondefault rule wiring
+/// drawn at default width, that only the narrower wiring makes.
+fn add_made_by_narrowing(markers: &mut Vec<Marker>, narrow: Vec<Marker>, layout: &Layout) {
+    let made = narrow
+        .into_iter()
+        .filter(|m| narrowing_rule_wiring_makes(m, layout));
+    *markers = deduplicated(std::mem::take(markers).into_iter().chain(made).collect());
+}
+
+/// Whether some net under a nondefault rule is routed.
+fn has_rule_wiring(db: &NetlistDB) -> bool {
+    db.nets
+        .iter()
+        .any(|n| n.non_default_rule.is_some() && !n.routing.is_empty())
+}
+
+/// Whether `marker` is of a kind that drawing a nondefault rule net's wires
+/// narrower can make: a line end, a shape rule of the net's own metal, or
+/// spacing between pieces of that one net. Shorts and spacing to other
+/// owners only shrink, so the check at the rule's width already has them.
+fn narrowing_rule_wiring_makes(marker: &Marker, layout: &Layout) -> bool {
+    let (a, b) = marker.owners;
+    let ruled = |o: OwnerIndex| layout.non_default_rule(o).is_some();
+    match marker.violation {
+        Violation::EndOfLineSpacing
+        | Violation::NonSufficientMetal
+        | Violation::MinArea
+        | Violation::MinWidth
+        | Violation::MinHole
+        | Violation::MinStep
+        | Violation::OffGrid => ruled(a) || ruled(b),
+        Violation::MetalSpacing | Violation::SpacingTableTw | Violation::SpacingRange => {
+            a == b && ruled(a)
+        }
+        Violation::Short | Violation::CutShort | Violation::CutSpacing | Violation::MinimumCut => {
+            false
+        }
+    }
 }
 
 /// A connected piece of an owner's routed metal below its layer's minimum

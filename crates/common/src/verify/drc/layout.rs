@@ -345,27 +345,27 @@ impl Layout {
         }
     }
 
-    /// The nets of `db` under a nondefault rule as `OpenROAD` reads them:
-    /// their wiring at the layers' default widths, with their pins, under
-    /// the owners of `layout`.
-    pub fn default_width_view_of_rule_nets(db: &NetlistDB, layout: &Self) -> Self {
+    /// `layout`, the layout of `db`, as `OpenROAD` reads it: the wiring of
+    /// nets under a nondefault rule at the layers' default widths, and every
+    /// owner under the default rules. Its owners are those of `layout`.
+    pub fn as_openroad_reads(db: &NetlistDB, layout: &Self) -> Self {
         let mut view = Self::with_owners_of(layout);
+        Arc::make_mut(&mut view.owners).rule_of.fill(None);
+        let is_rule_wiring = |s: &LayoutShape| {
+            s.origin == Origin::Routing && layout.non_default_rule(s.owner).is_some()
+        };
+        for (from, to) in layout.metal.iter().zip(&mut view.metal) {
+            to.extend(from.iter().filter(|s| !is_rule_wiring(s)));
+        }
+        for (from, to) in layout.cut.iter().zip(&mut view.cut) {
+            to.extend(from.iter().filter(|s| !is_rule_wiring(s)));
+        }
         for (i, net) in db.nets.iter().enumerate() {
-            if net.non_default_rule.is_none() || net.routing.is_empty() {
-                continue;
-            }
-            let id = NetId::new(i);
-            let Some(owner) = layout.owner_index(Owner::Net(id)) else {
+            let Some(owner) = layout.owner_index(Owner::Net(NetId::new(i))) else {
                 continue;
             };
-            for &pin in &net.pins {
-                let origin = match db.pins[pin.index()].owner {
-                    PinOwner::Cell { cell, .. } => Origin::of_placed(db.cells[cell.index()].status),
-                    PinOwner::Io(io) => Origin::of_placed(db.io_pins[io.index()].status),
-                };
-                for s in db.pin_shapes(pin) {
-                    view.add(s.layer, owner, s.rect, origin);
-                }
+            if layout.non_default_rule(owner).is_none() {
+                continue;
             }
             for elem in &net.routing {
                 for s in default_width_shapes(db, elem) {

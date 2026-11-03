@@ -215,7 +215,7 @@ Typed indices (`CellId`, `NetId`, `PinId`, `LayerId`, `MacroId`, …) keep table
 - **Clock nets are routed on every layer.** OpenROAD-flow-scripts keeps them to metal4 and above (`set_routing_layers -clock metal4-metal10`).
 - **Antenna rules are not checked.** PARE skips the LEF's antenna statements; OpenROAD-flow-scripts checks the global routes for antenna violations and repairs them with diodes (it finds none on ibex).
 - **Very high fanout nets** come out longer and with more vias than OpenROAD routes them: on the netlist as synthesized, ariane133's reset, an input port driving 20,618 flops, takes 16% more wire and 33% more vias in PARE's routing and is slower to its farthest flop, see PARE versus OpenROAD.
-- **Nets under a nondefault rule** are routed and checked at their own widths and spacings, while OpenROAD reads routed wires at their layers' default widths, so the two checkers disagree on such nets: on pci's clock net at commit `73d6db4`, PARE reports 135 spacing violations that OpenROAD does not, and OpenROAD one that PARE does not.
+- **Nets under a nondefault rule** are routed at their own widths and spacings and checked both that way and as OpenROAD reads routed wires, at their layers' default widths, where narrower wire can break end-of-line, same-net spacing and shape rules. The router does not yet keep to that second reading. On pci's clock net at commit `73d6db4`, before the second check, PARE reported 135 spacing violations that OpenROAD did not, and OpenROAD one same-net spacing violation, seen only at the default width, that PARE did not; not measured since.
 
 ---
 
