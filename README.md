@@ -249,7 +249,7 @@ python3 scripts/compare.py --flow --skip-openroad aes   # rerun PARE's side only
 python3 scripts/net_report.py ibex rst_ni     # one net in both routings: wire per layer, vias, Elmore delay to its loads
 ```
 
-The placed and routed DEFs and images of each stage are written to the output directory named in the config. A config that names `liberty_files` under `[input]` gets the netlist repair of the Netlist repair and timing section, with the cells not to use and the signal layer's wire RC under `[netlist]`; one that names an `sdc_file` too is timed, placed timing-driven and has its setup paths repaired, with `timing_driven` under `[global_placement]` and `repair_timing` under `[netlist]` to turn either off. `scripts/download.py` writes them for the OpenROAD-flow-scripts designs from the platform's settings and the flow's constraint files.
+The placed and routed DEFs and images of each stage are written to the output directory named in the config. A config that names `liberty_files` under `[input]` gets the netlist repair of the Netlist repair and timing section, with the cells not to use and the signal wire's layer and RC (`signal_wire`) under `[netlist]`; one that names an `sdc_file` too is timed, placed timing-driven and has its setup paths repaired, with `timing_driven` under `[global_placement]` and `repair_timing` under `[netlist]` to turn either off. `scripts/download.py` writes them for the OpenROAD-flow-scripts designs from the platform's settings and the flow's constraint files.
 
 ### Looking inside a run
 

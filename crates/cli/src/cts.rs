@@ -27,8 +27,7 @@ pub(crate) fn clock_tree_synthesis(
         return Ok(false);
     }
     let rc = wire_rc(config, db)?;
-    let clock_rc = clock_wire_rc(config, db)?
-        .context("[netlist] clock trees need clock_layer and its wire RC")?;
+    let clock_rc = clock_wire_rc(config, db)?.context("[netlist] clock trees need clock_wire")?;
     let phase_start = Instant::now();
     ui::phase("Clock Tree Synthesis");
     let link = Link::new(db, &repair.liberty, &config.netlist.dont_use)?;

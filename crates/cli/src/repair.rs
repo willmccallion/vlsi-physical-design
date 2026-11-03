@@ -6,7 +6,7 @@ use pare_common::db::design::NetlistDB;
 use pare_common::db::liberty::Liberty;
 use pare_common::db::parser::{liberty, sdc};
 use pare_common::db::sdc::Sdc;
-use pare_common::util::config::Config;
+use pare_common::util::config::{Config, LayerRcConfig};
 use pare_common::util::ui;
 
 use crate::report::{NetlistSummary, Report, TimingSummary};
@@ -416,44 +416,35 @@ pub(crate) fn timing_repair_on(
 }
 
 /// The signal wire's resistance and capacitance per micron from the
-/// netlist config, on its signal layer.
+/// netlist config, on its layer.
 pub(crate) fn wire_rc(config: &Config, db: &NetlistDB) -> anyhow::Result<WireRc> {
-    let netlist_config = &config.netlist;
-    let (Some(layer), Some(resistance), Some(capacitance)) = (
-        &netlist_config.signal_layer,
-        netlist_config.wire_resistance_ohm_per_um,
-        netlist_config.wire_capacitance_ff_per_um,
-    ) else {
-        anyhow::bail!(
-            "[netlist] repair needs signal_layer, wire_resistance_ohm_per_um and wire_capacitance_ff_per_um"
-        );
-    };
-    let layer_id = db
-        .library
-        .routing_layer_id(layer)
-        .with_context(|| format!("unknown signal layer '{layer}'"))?;
-    Ok(WireRc::per_micron(resistance, capacitance, layer_id))
+    let wire = config
+        .netlist
+        .signal_wire
+        .as_ref()
+        .context("[netlist] repair needs signal_wire")?;
+    layer_wire_rc(wire, db).context("[netlist] signal_wire")
 }
 
 /// The clock wire's resistance and capacitance per micron from the netlist
-/// config, on its clock layer, when the config names one.
+/// config, on its layer, when the config has one.
 pub(crate) fn clock_wire_rc(config: &Config, db: &NetlistDB) -> anyhow::Result<Option<WireRc>> {
-    let netlist_config = &config.netlist;
-    let (Some(layer), Some(resistance), Some(capacitance)) = (
-        &netlist_config.clock_layer,
-        netlist_config.clock_wire_resistance_ohm_per_um,
-        netlist_config.clock_wire_capacitance_ff_per_um,
-    ) else {
-        if netlist_config.clock_layer.is_some() {
-            anyhow::bail!(
-                "[netlist] clock_layer needs clock_wire_resistance_ohm_per_um and clock_wire_capacitance_ff_per_um"
-            );
-        }
-        return Ok(None);
-    };
-    let layer_id = db
+    config
+        .netlist
+        .clock_wire
+        .as_ref()
+        .map(|wire| layer_wire_rc(wire, db).context("[netlist] clock_wire"))
+        .transpose()
+}
+
+fn layer_wire_rc(wire: &LayerRcConfig, db: &NetlistDB) -> anyhow::Result<WireRc> {
+    let layer = db
         .library
-        .routing_layer_id(layer)
-        .with_context(|| format!("unknown clock layer '{layer}'"))?;
-    Ok(Some(WireRc::per_micron(resistance, capacitance, layer_id)))
+        .routing_layer_id(&wire.layer)
+        .with_context(|| format!("unknown routing layer '{}'", wire.layer))?;
+    Ok(WireRc::per_micron(
+        wire.resistance_ohm_per_um,
+        wire.capacitance_ff_per_um,
+        layer,
+    ))
 }

@@ -51,3 +51,29 @@ fn unknown_keys_are_rejected() {
 
     assert!(parsed.is_err());
 }
+
+#[test]
+fn a_wire_is_read_as_its_layer_and_rc() {
+    let parsed = parse(
+        "[netlist]\nsignal_wire = { layer = \"metal3\", resistance_ohm_per_um = 3.5, capacitance_ff_per_um = 0.1 }\n",
+    )
+    .unwrap();
+
+    let wire = parsed.netlist.signal_wire.unwrap();
+    assert_eq!(
+        (
+            wire.layer.as_str(),
+            wire.resistance_ohm_per_um,
+            wire.capacitance_ff_per_um
+        ),
+        ("metal3", 3.5, 0.1)
+    );
+}
+
+#[test]
+fn a_wire_without_its_capacitance_is_rejected() {
+    let parsed =
+        parse("[netlist]\nclock_wire = { layer = \"metal5\", resistance_ohm_per_um = 1.5 }\n");
+
+    assert!(parsed.is_err());
+}

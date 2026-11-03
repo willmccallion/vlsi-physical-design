@@ -22,7 +22,6 @@ inside that shell.
 """
 
 import argparse
-import json
 import os
 import shutil
 import subprocess
@@ -46,14 +45,8 @@ ORFS_NANGATE45_PLACE_DENSITY = 0.3
 # The platform's config.mk and setRC.tcl: cells the flow never uses, and the
 # signal and clock wire RC of metal3 and metal5 in ohms and femtofarads per micron.
 ORFS_NANGATE45_DONT_USE = ["TAPCELL_X1", "FILLCELL_X1", "AOI211_X1", "OAI211_X1"]
-ORFS_NANGATE45_WIRE = {
-    "signal_layer": "metal3",
-    "wire_resistance_ohm_per_um": 3.57728,
-    "wire_capacitance_ff_per_um": 0.103981,
-    "clock_layer": "metal5",
-    "clock_wire_resistance_ohm_per_um": 1.49065,
-    "clock_wire_capacitance_ff_per_um": 0.109256,
-}
+ORFS_NANGATE45_SIGNAL_WIRE = ("metal3", 3.57728, 0.103981)
+ORFS_NANGATE45_CLOCK_WIRE = ("metal5", 1.49065, 0.109256)
 # Its fastroute.tcl's set_global_routing_layer_adjustment per routing layer.
 ORFS_NANGATE45_LAYER_ADJUSTMENT = [("metal2", 0.5), ("metal3", 0.5)] + [
     (f"metal{i}", 0.25) for i in range(4, 11)
@@ -447,6 +440,13 @@ def toml_list(values):
     return "[" + ", ".join(f'"{v}"' for v in values) + "]"
 
 
+def layer_rc_table(layer, resistance_ohm_per_um, capacitance_ff_per_um):
+    return (
+        f'{{ layer = "{layer}", resistance_ohm_per_um = {resistance_ohm_per_um}, '
+        f"capacitance_ff_per_um = {capacitance_ff_per_um} }}"
+    )
+
+
 def on_nangate45(design):
     return design["suite"] == "openroad"
 
@@ -492,13 +492,11 @@ def config_text(name):
         lines += ["", "[io_placement]", "enabled = false"]
     if d.get("liberty"):
         lines += ["", "[netlist]"]
-        lines += [f"{k} = {json.dumps(v)}" for k, v in ORFS_NANGATE45_WIRE.items()]
+        lines.append(f"signal_wire = {layer_rc_table(*ORFS_NANGATE45_SIGNAL_WIRE)}")
+        lines.append(f"clock_wire = {layer_rc_table(*ORFS_NANGATE45_CLOCK_WIRE)}")
         lines.append(f"dont_use = {toml_list(ORFS_NANGATE45_DONT_USE)}")
         lines.append("layer_rc = [")
-        lines += [
-            f'  {{ layer = "{layer}", resistance_ohm_per_um = {r}, capacitance_ff_per_um = {c} }},'
-            for layer, r, c in ORFS_NANGATE45_LAYER_RC
-        ]
+        lines += [f"  {layer_rc_table(*rc)}," for rc in ORFS_NANGATE45_LAYER_RC]
         lines.append("]")
     return "\n".join(lines) + "\n"
 

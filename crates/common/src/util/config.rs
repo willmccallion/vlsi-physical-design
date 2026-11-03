@@ -59,20 +59,13 @@ pub struct NetlistConfig {
     /// names an SDC file.
     #[serde(default = "default_enabled")]
     pub repair_on_global_routes: bool,
-    /// The routing layer signal wires are estimated on.
-    pub signal_layer: Option<String>,
-    /// Resistance of that layer's wire, in ohms per micron.
-    pub wire_resistance_ohm_per_um: Option<f64>,
-    /// Capacitance of that layer's wire, in femtofarads per micron.
-    pub wire_capacitance_ff_per_um: Option<f64>,
-    /// The routing layer clock wires are estimated on, as `set_wire_rc
-    /// -clock` sets it, which clock trees need; without it the nets
+    /// The layer and wire RC signal wires are estimated with, as
+    /// `set_wire_rc -signal` sets them, which repair needs.
+    pub signal_wire: Option<LayerRcConfig>,
+    /// The layer and wire RC clock wires are estimated with, as `set_wire_rc
+    /// -clock` sets them, which clock trees need; without it the nets
     /// between clock buffers are estimated as signal wires.
-    pub clock_layer: Option<String>,
-    /// Resistance of the clock layer's wire, in ohms per micron.
-    pub clock_wire_resistance_ohm_per_um: Option<f64>,
-    /// Capacitance of the clock layer's wire, in femtofarads per micron.
-    pub clock_wire_capacitance_ff_per_um: Option<f64>,
+    pub clock_wire: Option<LayerRcConfig>,
     /// Wire resistance and capacitance per routing layer, as the platform's
     /// `set_layer_rc -layer` gives them, which global-route parasitics use;
     /// a layer left out takes its LEF values.
@@ -133,12 +126,8 @@ impl Default for NetlistConfig {
             repair_timing: default_enabled(),
             clock_tree: default_enabled(),
             repair_on_global_routes: default_enabled(),
-            signal_layer: None,
-            wire_resistance_ohm_per_um: None,
-            wire_capacitance_ff_per_um: None,
-            clock_layer: None,
-            clock_wire_resistance_ohm_per_um: None,
-            clock_wire_capacitance_ff_per_um: None,
+            signal_wire: None,
+            clock_wire: None,
             layer_rc: Vec::new(),
             via_rc: Vec::new(),
             dont_use: Vec::new(),
