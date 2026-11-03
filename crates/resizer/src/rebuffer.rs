@@ -9,7 +9,7 @@
 // The Elmore slew estimates keep OpenROAD's grouping so they can be checked.
 #![allow(clippy::suboptimal_flops)]
 
-use crate::bnet::{self, Bnet, BnetPtr, BufferSize, Fixed, Kind, SlackEdges};
+use crate::bnet::{self, Bnet, BnetPtr, BufferSize, Fixed, Kind, Metrics, SlackEdges};
 use crate::dmp::{self, PiModel};
 use crate::fuzzy;
 use crate::library::{BufferSet, Link, is_logic_std_cell};
@@ -820,142 +820,32 @@ impl Rebuffer {
         let Some(strong) = self.sizes.last().copied() else {
             return;
         };
-        let (area_oriented, threshold, envelope) = match area {
-            Some((threshold, exemplar)) => (
-                true,
-                threshold,
-                Some(exemplar.metrics().with_slack(threshold)),
-            ),
-            None => (false, Fixed::ZERO, None),
-        };
-        let mut assured = !area_oriented;
-        let mut best_area = f64::INFINITY;
-        let mut best_slack = -Fixed::INF;
-        let mut new_options: Vec<BnetPtr> = Vec::with_capacity(options.len() * 2);
+        let mut frontier = Frontier::new(area, options.len() * 2);
         let mut at = 0usize;
-        let sizes = self.sizes.clone();
-        for size in &sizes {
+        for size in &self.sizes {
             while at < options.len() && options[at].cap <= size.input_cap {
-                let option = &options[at];
-                let keep = if area_oriented {
-                    fuzzy::less(option.area, best_area) && option.slack >= threshold
-                } else {
-                    option.slack > best_slack
-                } && can_drive(resizer, &strong, option, next_segment);
-                if keep {
-                    if let Some(envelope) = &envelope
-                        && !assured
-                        && option.fits(envelope)
-                    {
-                        assured = true;
-                    }
-                    best_slack = option.slack;
-                    best_area = option.area;
-                    new_options.push(Rc::clone(option));
-                }
+                frontier.offer(resizer, &strong, &options[at], next_segment);
                 at += 1;
             }
-            let start = if new_options.is_empty() && at == options.len() && at > 0 {
+            let start = if frontier.kept.is_empty() && at == options.len() && at > 0 {
                 at - 1
             } else {
                 at
             };
-            let mut load_option: Option<(BnetPtr, Fixed)> = None;
-            for option in &options[start..] {
-                let promising = if area_oriented {
-                    option.slack - size.intrinsic_delay >= threshold
-                        && fuzzy::less(option.area + size.area, best_area)
-                } else {
-                    option.slack - size.intrinsic_delay > best_slack
-                };
-                if !promising || !can_drive(resizer, size, option, 0) {
-                    continue;
-                }
-                let delay = buffer_delay(
-                    resizer,
-                    size,
-                    option.slack_edges,
-                    option.cap + size.output_cap,
-                );
-                let slack = option.slack - delay;
-                let better = if area_oriented {
-                    slack >= threshold
-                } else {
-                    slack > best_slack
-                };
-                if better {
-                    load_option = Some((Rc::clone(option), delay));
-                    best_slack = slack;
-                    best_area = option.area + size.area;
-                }
-            }
-            if let Some((option, delay)) = load_option {
-                let buffered = Bnet::buffer(option.at, size, option, delay);
-                if let Some(envelope) = &envelope
-                    && !assured
-                    && buffered.fits(envelope)
-                {
-                    assured = true;
-                }
-                new_options.push(buffered);
+            if let Some((option, delay)) = frontier.best_buffered(resizer, size, &options[start..])
+            {
+                frontier.push(Bnet::buffer(option.at, size, option, delay));
             }
         }
-        while at < options.len() {
-            let option = &options[at];
-            let keep = if area_oriented {
-                fuzzy::less(option.area, best_area) && option.slack >= threshold
-            } else {
-                option.slack > best_slack
-            } && can_drive(resizer, &strong, option, next_segment);
-            if keep {
-                if let Some(envelope) = &envelope
-                    && !assured
-                    && option.fits(envelope)
-                {
-                    assured = true;
-                }
-                best_slack = option.slack;
-                best_area = option.area;
-                new_options.push(Rc::clone(option));
-            }
-            at += 1;
+        for option in &options[at..] {
+            frontier.offer(resizer, &strong, option, next_segment);
         }
-        if !assured
+        if !frontier.assured
             && let Some((threshold, exemplar)) = area
-            && let Some(envelope) = &envelope
+            && let Some(envelope) = &frontier.envelope
         {
-            let fallback = match &exemplar.kind {
-                Kind::Buffer { cell, .. } => {
-                    let size = sizes.iter().find(|s| s.cell == *cell).copied();
-                    let mut best: Option<(f64, BnetPtr)> = None;
-                    if let Some(size) = size {
-                        for option in options.iter() {
-                            if best.as_ref().is_some_and(|(a, _)| option.area >= *a) {
-                                continue;
-                            }
-                            let delay = buffer_delay(
-                                resizer,
-                                &size,
-                                option.slack_edges,
-                                option.cap + size.output_cap,
-                            );
-                            if can_drive(resizer, &size, option, 0)
-                                && option.slack - delay >= threshold
-                            {
-                                let buffered =
-                                    Bnet::buffer(option.at, &size, Rc::clone(option), delay);
-                                if buffered.fits(envelope) {
-                                    best = Some((option.area, buffered));
-                                }
-                            }
-                        }
-                    }
-                    best.map(|(_, b)| b)
-                }
-                _ => options.iter().find(|o| o.fits(envelope)).map(Rc::clone),
-            };
-            match fallback {
-                Some(option) => insert_assured(&mut new_options, option),
+            match assured_fallback(resizer, &self.sizes, options, threshold, exemplar, envelope) {
+                Some(option) => insert_assured(&mut frontier.kept, option),
                 None => log::warn!(
                     "rebuffering {}: area recovery cannot reproduce the timing solution",
                     resizer
@@ -964,7 +854,7 @@ impl Rebuffer {
                 ),
             }
         }
-        *options = new_options;
+        *options = frontier.kept;
     }
 
     /// Trades buffers for area while every node keeps at least a share
@@ -1223,6 +1113,139 @@ fn wire(
     to: BnetPtr,
 ) -> BnetPtr {
     Bnet::wire(at, to, layer, &resizer.tree_rc())
+}
+
+/// What a pass of `insert_buffer_options` keeps: the options so far, the
+/// best slack and area among them, and whether one meets the envelope of
+/// the solution area recovery must reproduce.
+struct Frontier {
+    /// The slack every kept option must reach when recovering area.
+    area_threshold: Option<Fixed>,
+    envelope: Option<Metrics>,
+    assured: bool,
+    best_area: f64,
+    best_slack: Fixed,
+    kept: Vec<BnetPtr>,
+}
+
+impl Frontier {
+    fn new(area: Option<(Fixed, &Bnet)>, capacity: usize) -> Self {
+        Self {
+            area_threshold: area.map(|(threshold, _)| threshold),
+            envelope: area.map(|(threshold, exemplar)| exemplar.metrics().with_slack(threshold)),
+            assured: area.is_none(),
+            best_area: f64::INFINITY,
+            best_slack: -Fixed::INF,
+            kept: Vec::with_capacity(capacity),
+        }
+    }
+
+    /// Whether an option of `slack` and `area` is worth more than those kept.
+    fn improves(&self, slack: Fixed, area: f64) -> bool {
+        match self.area_threshold {
+            Some(threshold) => fuzzy::less(area, self.best_area) && slack >= threshold,
+            None => slack > self.best_slack,
+        }
+    }
+
+    /// Keeps `option` as it is if it improves on those kept and the strongest
+    /// buffer could drive it.
+    fn offer(
+        &mut self,
+        resizer: &Resizer<'_, Sta>,
+        strong: &BufferSize,
+        option: &BnetPtr,
+        next_segment: i64,
+    ) {
+        if self.improves(option.slack, option.area)
+            && can_drive(resizer, strong, option, next_segment)
+        {
+            self.best_slack = option.slack;
+            self.best_area = option.area;
+            self.push(Rc::clone(option));
+        }
+    }
+
+    /// The option `size` buffers best, with that buffer's delay, raising
+    /// the best slack and area to the buffered option's.
+    fn best_buffered(
+        &mut self,
+        resizer: &Resizer<'_, Sta>,
+        size: &BufferSize,
+        options: &[BnetPtr],
+    ) -> Option<(BnetPtr, Fixed)> {
+        let mut best = None;
+        for option in options {
+            if !self.improves(option.slack - size.intrinsic_delay, option.area + size.area)
+                || !can_drive(resizer, size, option, 0)
+            {
+                continue;
+            }
+            let delay = buffer_delay(
+                resizer,
+                size,
+                option.slack_edges,
+                option.cap + size.output_cap,
+            );
+            let slack = option.slack - delay;
+            let better = match self.area_threshold {
+                Some(threshold) => slack >= threshold,
+                None => slack > self.best_slack,
+            };
+            if better {
+                best = Some((Rc::clone(option), delay));
+                self.best_slack = slack;
+                self.best_area = option.area + size.area;
+            }
+        }
+        best
+    }
+
+    fn push(&mut self, option: BnetPtr) {
+        if let Some(envelope) = &self.envelope
+            && !self.assured
+            && option.fits(envelope)
+        {
+            self.assured = true;
+        }
+        self.kept.push(option);
+    }
+}
+
+/// An option that meets `envelope` when none kept does: the cheapest
+/// buffered by the exemplar's buffer at no less than `threshold`, or for an
+/// unbuffered exemplar the first option within it.
+fn assured_fallback(
+    resizer: &Resizer<'_, Sta>,
+    sizes: &[BufferSize],
+    options: &[BnetPtr],
+    threshold: Fixed,
+    exemplar: &Bnet,
+    envelope: &Metrics,
+) -> Option<BnetPtr> {
+    let Kind::Buffer { cell, .. } = &exemplar.kind else {
+        return options.iter().find(|o| o.fits(envelope)).map(Rc::clone);
+    };
+    let size = sizes.iter().find(|s| s.cell == *cell).copied()?;
+    let mut best: Option<(f64, BnetPtr)> = None;
+    for option in options {
+        if best.as_ref().is_some_and(|(a, _)| option.area >= *a) {
+            continue;
+        }
+        let delay = buffer_delay(
+            resizer,
+            &size,
+            option.slack_edges,
+            option.cap + size.output_cap,
+        );
+        if can_drive(resizer, &size, option, 0) && option.slack - delay >= threshold {
+            let buffered = Bnet::buffer(option.at, &size, Rc::clone(option), delay);
+            if buffered.fits(envelope) {
+                best = Some((option.area, buffered));
+            }
+        }
+    }
+    best.map(|(_, b)| b)
 }
 
 /// The worst delay of `size` over `edges` at `load_cap`, as
