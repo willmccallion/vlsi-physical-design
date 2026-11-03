@@ -596,6 +596,7 @@ mod tests {
     use super::super::{Tracks, Usage};
     use super::*;
     use pare_common::db::indices::NetId;
+    use pare_common::util::config::CapacityReserve;
 
     const COSTS: GlobalCosts = GlobalCosts {
         via: 1.0,
@@ -619,7 +620,7 @@ mod tests {
             ny,
             min_layer: LayerId::new(1),
             directions: vec![Direction::Horizontal, Direction::Vertical],
-            reserve: 0.0,
+            reserve: CapacityReserve::NONE,
             capacity: vec![Tracks::whole(4); edges],
             blocked: vec![false; edges],
             via_blocked: vec![false; edges],

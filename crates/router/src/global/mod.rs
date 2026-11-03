@@ -35,6 +35,7 @@ use pare_common::db::library::Direction;
 use pare_common::geom::dbu::Dbu;
 use pare_common::geom::point::Point;
 use pare_common::geom::rect::Rect;
+use pare_common::util::config::{CapacityReserve, Share};
 use pattern::route_pattern;
 use rayon::prelude::*;
 use rustc_hash::{FxHashMap, FxHashSet};
@@ -62,8 +63,8 @@ pub struct GlobalGrid {
     ny: u16,
     min_layer: LayerId,
     directions: Vec<Direction>,
-    /// Fraction of each edge's usable tracks held back from `capacity`.
-    reserve: f64,
+    /// Share of each edge's usable tracks held back from `capacity`.
+    reserve: CapacityReserve,
     capacity: Vec<Tracks>,
     /// Edges no track crosses at all, which fixed metal blocks outright.
     blocked: Vec<bool>,
@@ -174,7 +175,7 @@ impl GlobalGrid {
         fixed: &(impl FixedMetal + Sync),
         die: Rect<Dbu>,
         gcell: Dbu,
-        reserve: f64,
+        reserve: CapacityReserve,
     ) -> Self {
         let span = |extent: Dbu| {
             u16::try_from((extent.get() + gcell.get() - 1) / gcell.get())
@@ -208,7 +209,7 @@ impl GlobalGrid {
         grid.capacity = resources
             .iter()
             .flat_map(|r| r.tracks.iter())
-            .map(|&t| Tracks::from_f64(t * (1.0 - reserve)))
+            .map(|&t| Tracks::from_f64(t * reserve.left()))
             .collect();
         grid.blocked = resources
             .iter()
@@ -334,7 +335,7 @@ impl GlobalGrid {
     /// fewer than `1 - IGNORED_BLOCKAGE` of the `tracks` it would have.
     fn edge_ratio(&self, e: usize, tracks: f64) -> Option<f64> {
         let capacity = self.capacity[e].to_f64();
-        let available = tracks * (1.0 - self.reserve);
+        let available = tracks * self.reserve.left();
         if capacity <= 0.0 || available <= 0.0 {
             return None;
         }
@@ -356,7 +357,7 @@ impl GlobalGrid {
     pub fn capacity_reduction(
         &self,
         tech: &RouteTech,
-        adjustments: &[f64],
+        adjustments: &[Share],
         wire_width: Dbu,
     ) -> CapacityReduction {
         let (nx, ny) = (usize::from(self.nx), usize::from(self.ny));
@@ -373,14 +374,17 @@ impl GlobalGrid {
                 continue;
             }
             let tracks = self.tracks_per_line(tech, layer);
-            let adjustment = adjustments.get(layer.index()).copied().unwrap_or(0.0);
+            let adjustment = adjustments
+                .get(layer.index())
+                .copied()
+                .map_or(0.0, Share::get);
             for y in 0..ny {
                 for x in 0..nx {
                     let (line, edge) = match direction {
                         Direction::Horizontal => (y, self.cell_index(layer, x.min(along - 2), y)),
                         Direction::Vertical => (x, self.cell_index(layer, x, y.min(along - 2))),
                     };
-                    let unblocked = self.capacity[edge].to_f64() / (1.0 - self.reserve);
+                    let unblocked = self.capacity[edge].to_f64() / self.reserve.left();
                     let left = adjusted_capacity(unblocked, adjustment);
                     capacity[y * nx + x] += tracks[line];
                     reduction[y * nx + x] += (tracks[line] - left).max(0.0);
@@ -1647,7 +1651,7 @@ mod tests {
             ny,
             min_layer: LayerId::new(1),
             directions: vec![Direction::Horizontal, Direction::Vertical],
-            reserve: 0.0,
+            reserve: CapacityReserve::NONE,
             capacity: vec![Tracks::whole(4); edges],
             blocked: vec![false; edges],
             via_blocked: vec![false; edges],

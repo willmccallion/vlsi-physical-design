@@ -38,7 +38,7 @@ use pare_common::db::library::Shape;
 use pare_common::geom::dbu::Dbu;
 use pare_common::geom::point::Point;
 use pare_common::geom::rect::Rect;
-use pare_common::util::config::{LayerRangeError, RoutingConfig};
+use pare_common::util::config::{LayerRangeError, RoutingConfig, Share};
 use pare_common::util::{memory, ui};
 use pare_common::verify::shapes::obstruction_shapes;
 use rustc_hash::{FxHashMap, FxHashSet};
@@ -140,7 +140,7 @@ pub fn route_with(
     config: &RoutingConfig,
     mut session: Session<'_>,
 ) -> Result<RoutingSummary, RouteError> {
-    check_routable(db, config)?;
+    check_routable(db)?;
     let tech = RouteTech::new(db, config)?;
     let gcell = gcell_size(&tech, config);
     let (routes, summary, gcells) = {
@@ -167,7 +167,7 @@ pub fn route_on(
     global: GlobalSession,
     mut session: Session<'_>,
 ) -> Result<RoutingSummary, RouteError> {
-    check_routable(db, config)?;
+    check_routable(db)?;
     let (tech, grid, routes, routed) = global.into_parts();
     let gcell = gcell_size(&tech, config);
     let (routes, summary, gcells) = {
@@ -502,7 +502,7 @@ fn net_ids(db: &NetlistDB) -> FxHashMap<&str, NetId> {
 /// Global routing and track assignment of every signal net of `db`, for
 /// measuring them on their own; the design is left as it is.
 pub fn route_global_only(db: &NetlistDB, config: &RoutingConfig) -> Result<GlobalOnly, RouteError> {
-    check_routable(db, config)?;
+    check_routable(db)?;
     let tech = RouteTech::new(db, config)?;
     let gcell = gcell_size(&tech, config);
     let GlobalStage {
@@ -579,8 +579,8 @@ fn guide_boxes(
     boxes
 }
 
-/// Why `db` cannot be routed under `config`, if it cannot.
-fn check_routable(db: &NetlistDB, config: &RoutingConfig) -> Result<(), RouteError> {
+/// Why `db` cannot be routed, if it cannot.
+fn check_routable(db: &NetlistDB) -> Result<(), RouteError> {
     let mut unplaced = db
         .cells
         .iter()
@@ -591,7 +591,6 @@ fn check_routable(db: &NetlistDB, config: &RoutingConfig) -> Result<(), RouteErr
             first: first.name.clone(),
         });
     }
-    check_reserve(config)?;
     if let Some(error) = overlapping_pins(db) {
         return Err(error);
     }
@@ -799,10 +798,8 @@ const fn next_scope(previous: Scope, improved: bool) -> Scope {
 pub fn capacity_reduction(
     db: &NetlistDB,
     config: &RoutingConfig,
-    adjustments: &[f64],
+    adjustments: &[Share],
 ) -> Result<CapacityReduction, RouteError> {
-    check_reserve(config)?;
-    check_adjustments(adjustments)?;
     let tech = RouteTech::new(db, config)?;
     let fixed = FixedTracks::new(&tech, obstruction_shapes(db));
     let grid = GlobalGrid::new(
@@ -858,7 +855,6 @@ impl<'a> GlobalRouteEstimator<'a> {
     /// The estimator of `db` under `config`, over the gcell grid of
     /// [`capacity_reduction`].
     pub fn new(db: &'a NetlistDB, config: &RoutingConfig) -> Result<Self, RouteError> {
-        check_reserve(config)?;
         let tech = RouteTech::new(db, config)?;
         let fixed = FixedTracks::new(&tech, obstruction_shapes(db));
         let grid = GlobalGrid::new(
@@ -891,12 +887,11 @@ impl<'a> GlobalRouteEstimator<'a> {
 
     /// The grid's capacities and what fixed metal and each layer's share
     /// of `adjustments`, by layer index, take of them.
-    pub fn capacity_reduction(&self, adjustments: &[f64]) -> Result<CapacityReduction, RouteError> {
-        check_adjustments(adjustments)?;
+    #[must_use]
+    pub fn capacity_reduction(&self, adjustments: &[Share]) -> CapacityReduction {
         let wire_width = layers_wire_width(self.db, &self.tech);
-        Ok(self
-            .grid
-            .capacity_reduction(&self.tech, adjustments, wire_width))
+        self.grid
+            .capacity_reduction(&self.tech, adjustments, wire_width)
     }
 
     /// Each gcell's congestion, row by row, once every net is routed with
@@ -941,24 +936,9 @@ fn terminal_layer(db: &NetlistDB, tech: &RouteTech, pin: PinId) -> LayerId {
         .map_or(tech.min_layer, |l| l.clamp(tech.min_layer, tech.max_layer))
 }
 
-fn check_reserve(config: &RoutingConfig) -> Result<(), RouteError> {
-    if (0.0..1.0).contains(&config.global_capacity_reserve) {
-        Ok(())
-    } else {
-        Err(RouteError::CapacityReserve(config.global_capacity_reserve))
-    }
-}
-
-fn check_adjustments(adjustments: &[f64]) -> Result<(), RouteError> {
-    match adjustments.iter().find(|a| !(0.0..=1.0).contains(*a)) {
-        Some(&adjustment) => Err(RouteError::LayerAdjustment(adjustment)),
-        None => Ok(()),
-    }
-}
-
 /// The edge of a gcell: `config.gcell_tracks` gcell pitches.
 fn gcell_size(tech: &RouteTech, config: &RoutingConfig) -> Dbu {
-    tech.gcell_pitch * i64::from(config.gcell_tracks.max(1))
+    tech.gcell_pitch * i64::from(config.gcell_tracks.get())
 }
 
 /// The DEF gcell grid of `nx` by `ny` gcells of edge `gcell` from `origin`.
@@ -1031,7 +1011,7 @@ fn stage(label: &str, start: Instant) {
 }
 
 /// Why routing could not run.
-#[derive(Debug, thiserror::Error, PartialEq)]
+#[derive(Debug, thiserror::Error, PartialEq, Eq)]
 pub enum RouteError {
     /// The design has cells without a location.
     #[error("{count} cells are unplaced, starting with '{first}'")]
@@ -1057,12 +1037,6 @@ pub enum RouteError {
         /// Two of its nets whose pins overlap.
         nets: (String, String),
     },
-    /// The global capacity reserve is outside `[0, 1)`.
-    #[error("global_capacity_reserve must be in [0, 1), got {0}")]
-    CapacityReserve(f64),
-    /// The routing layer adjustment is outside `[0, 1]`.
-    #[error("routing_layer_adjustment must be in [0, 1], got {0}")]
-    LayerAdjustment(f64),
     /// The configured routing layers are unusable.
     #[error(transparent)]
     Layers(#[from] LayerRangeError),

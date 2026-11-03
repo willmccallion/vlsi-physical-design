@@ -15,7 +15,9 @@ use pare_common::db::liberty::MinMax;
 use pare_common::db::writer;
 use pare_common::geom::dbu::Dbu;
 use pare_common::geom::point::Point;
-use pare_common::util::config::{Config, CongestionEstimate, GlobalPlacementConfig};
+use pare_common::util::config::{
+    Config, CongestionEstimate, GlobalPlacementConfig, Share, TargetDensity,
+};
 use pare_common::util::{ui, visualization};
 use pare_common::verify::pin_access::PinAccess;
 use pare_placer::detailed;
@@ -31,7 +33,8 @@ use pare_placer::model::PlacementModel;
 use pare_placer::zones::{Zone, Zones};
 use pare_resizer::parasitics::WireRc;
 use pare_resizer::{Link, Rebuffer, RepairOptions, Repairer, Resizer, timing_net_weights};
-use pare_router::{CapacityReduction, GlobalRouteEstimator, RouteError};
+use pare_router::{CapacityReduction, GlobalRouteEstimator};
+use std::num::NonZeroUsize;
 use std::path::{Path, PathBuf};
 use std::time::Instant;
 
@@ -382,7 +385,7 @@ fn global_placement(
     };
     let params = GlobalParams {
         target_density: density.target,
-        target_overflow: gp.target_overflow,
+        target_overflow: gp.target_overflow.get(),
         max_iterations: gp.placer_max_iterations,
         initial_rounds: match pass {
             Pass::SkipIo => 0,
@@ -392,7 +395,12 @@ fn global_placement(
         seed: gp.seed,
         routability,
         timing: timing.as_ref().map(|_| TimingParams {
-            overflows: gp.timing_driven_overflows.clone(),
+            overflows: gp
+                .timing_driven_overflows
+                .iter()
+                .copied()
+                .map(Share::get)
+                .collect(),
         }),
     };
     ui::placement_table_header();
@@ -461,12 +469,13 @@ impl Density {
             .sum();
         let movable_cells = model.movable.iter().filter(|&&m| m).count();
         let utilization = movable_area / model.free_area();
-        let target = gp
-            .target_density
-            .unwrap_or_else(|| global::default_target_density(utilization));
+        let target = gp.target_density.map_or_else(
+            || global::default_target_density(utilization),
+            TargetDensity::get,
+        );
         let bins = gp
             .bin_dimension
-            .unwrap_or_else(|| global::default_bins(model, target));
+            .map_or_else(|| global::default_bins(model, target), NonZeroUsize::get);
         ui::stat_row(
             "Cells:",
             &movable_cells.to_string(),
@@ -661,7 +670,7 @@ fn routability_setup<'a>(
     match config.global_placement.congestion_estimate {
         CongestionEstimate::GlobalRouter => {
             let estimator = GlobalRouteCongestion::new(db, config)?;
-            let reduction = estimator.capacity_reduction(&adjustment)?;
+            let reduction = estimator.capacity_reduction(&adjustment);
             Ok((routability_params(config, db, reduction), Some(estimator)))
         }
         CongestionEstimate::Rudy => {
@@ -672,7 +681,7 @@ fn routability_setup<'a>(
 }
 
 /// The share of each routing layer's capacity held back, by layer index.
-fn layer_adjustments(config: &Config, db: &NetlistDB) -> anyhow::Result<Vec<f64>> {
+fn layer_adjustments(config: &Config, db: &NetlistDB) -> anyhow::Result<Vec<Share>> {
     let gp = &config.global_placement;
     let layers = &db.library.routing_layers;
     let mut adjustments = vec![gp.routing_layer_adjustment; layers.len()];
@@ -710,7 +719,7 @@ impl<'a> GlobalRouteCongestion<'a> {
         })
     }
 
-    fn capacity_reduction(&self, adjustments: &[f64]) -> Result<CapacityReduction, RouteError> {
+    fn capacity_reduction(&self, adjustments: &[Share]) -> CapacityReduction {
         self.estimator.capacity_reduction(adjustments)
     }
 }

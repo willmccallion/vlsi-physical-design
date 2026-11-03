@@ -11,7 +11,7 @@ use pare_common::db::parser::{def, lef};
 use pare_common::geom::dbu::Dbu;
 use pare_common::geom::point::Point;
 use pare_common::geom::rect::Rect;
-use pare_common::util::config::RoutingConfig;
+use pare_common::util::config::{CapacityReserve, RoutingConfig, Share};
 use pare_common::verify::routing::net_components;
 use pare_common::verify::shapes::fixed_shapes;
 use pare_router::access::Node;
@@ -24,6 +24,7 @@ use pare_router::{
     GlobalRouteEstimator, RouteError, RouteState, Save, SavePoint, Session, capacity_reduction,
     route, route_with, rudy_wire_width,
 };
+use std::num::NonZeroU32;
 use std::path::{Path, PathBuf};
 
 fn fixture(name: &str) -> PathBuf {
@@ -83,7 +84,7 @@ fn placed_tiny() -> (NetlistDB, RoutingConfig) {
     place(&mut db, "u5", Point::new(Dbu(2000), Dbu(4000)));
     place(&mut db, "u6", Point::new(Dbu(3000), Dbu(4000)));
     let config = RoutingConfig {
-        gcell_tracks: 3,
+        gcell_tracks: NonZeroU32::new(3).unwrap(),
         detailed_iterations: TINY_ROUNDS,
         ..RoutingConfig::default()
     };
@@ -402,11 +403,19 @@ fn consecutive_wire_edges_become_one_wire() {
 /// Gcell pitches that cut the tiny design's 6000-unit die into two by two
 /// gcells: its gcell pitch is the 400-unit track spacing of M3, its highest
 /// routing layer.
-const TWO_BY_TWO: u32 = 8;
+const TWO_BY_TWO: NonZeroU32 = NonZeroU32::new(8).unwrap();
+
+const fn share(value: f64) -> Share {
+    Share::new(value).unwrap()
+}
+
+const fn reserve(value: f64) -> CapacityReserve {
+    CapacityReserve::new(value).unwrap()
+}
 
 fn no_reserve() -> RoutingConfig {
     RoutingConfig {
-        global_capacity_reserve: 0.0,
+        global_capacity_reserve: CapacityReserve::NONE,
         gcell_tracks: TWO_BY_TWO,
         ..RoutingConfig::default()
     }
@@ -428,7 +437,7 @@ fn every_track_through_a_gcell_counts_toward_its_capacity() {
 fn the_capacity_reserve_does_not_count_as_reduction() {
     let db = tiny();
     let config = RoutingConfig {
-        global_capacity_reserve: 0.5,
+        global_capacity_reserve: reserve(0.5),
         gcell_tracks: TWO_BY_TWO,
         ..RoutingConfig::default()
     };
@@ -444,7 +453,7 @@ fn the_capacity_reserve_does_not_count_as_reduction() {
 fn the_layer_adjustment_counts_as_reduction_rounded_as_openroad_rounds_it() {
     let db = tiny();
 
-    let reduction = capacity_reduction(&db, &no_reserve(), &[0.5; 10]).unwrap();
+    let reduction = capacity_reduction(&db, &no_reserve(), &[share(0.5); 10]).unwrap();
 
     assert!(
         (reduction.reduction[0] - (4.0 + 8.0)).abs() < 1e-9,
@@ -459,21 +468,12 @@ fn the_layer_adjustment_counts_as_reduction_rounded_as_openroad_rounds_it() {
 #[test]
 fn each_layer_counts_only_its_own_adjustment() {
     let db = tiny();
-    let all = capacity_reduction(&db, &no_reserve(), &[0.5; 10]).unwrap();
+    let all = capacity_reduction(&db, &no_reserve(), &[share(0.5); 10]).unwrap();
 
-    let one_layer = capacity_reduction(&db, &no_reserve(), &[0.0, 0.5]).unwrap();
+    let one_layer = capacity_reduction(&db, &no_reserve(), &[share(0.0), share(0.5)]).unwrap();
 
     assert!(one_layer.reduction[0] > 0.0, "{one_layer:?}");
     assert!(one_layer.reduction[0] < all.reduction[0], "{one_layer:?}");
-}
-
-#[test]
-fn a_layer_adjustment_outside_zero_to_one_is_refused() {
-    let db = tiny();
-
-    let result = capacity_reduction(&db, &no_reserve(), &[1.5]);
-
-    assert!(matches!(result, Err(RouteError::LayerAdjustment(_))));
 }
 
 #[test]
@@ -525,12 +525,12 @@ fn merged_fixed_stretches_give_the_capacity_the_occupancy_gives() {
     occupancy.add_fixed(&tech, fixed_shapes(&db));
     let fixed = FixedTracks::new(&tech, fixed_shapes(&db));
 
-    let from_occupancy = GlobalGrid::new(&tech, &occupancy, db.die_area, gcell, 0.3);
-    let from_stretches = GlobalGrid::new(&tech, &fixed, db.die_area, gcell, 0.3);
+    let from_occupancy = GlobalGrid::new(&tech, &occupancy, db.die_area, gcell, reserve(0.3));
+    let from_stretches = GlobalGrid::new(&tech, &fixed, db.die_area, gcell, reserve(0.3));
 
     assert_eq!(
-        from_occupancy.capacity_reduction(&tech, &[0.5; 10], Dbu(100)),
-        from_stretches.capacity_reduction(&tech, &[0.5; 10], Dbu(100))
+        from_occupancy.capacity_reduction(&tech, &[share(0.5); 10], Dbu(100)),
+        from_stretches.capacity_reduction(&tech, &[share(0.5); 10], Dbu(100))
     );
 }
 
@@ -540,7 +540,7 @@ fn gcell_congestion_follows_the_routed_edges_of_the_grid() {
     let tech = RouteTech::new(&db, &no_reserve()).unwrap();
     let gcell = tech.layer(tech.min_layer).pitch() * 5;
     let fixed = FixedTracks::new(&tech, fixed_shapes(&db));
-    let mut grid = GlobalGrid::new(&tech, &fixed, db.die_area, gcell, 0.0);
+    let mut grid = GlobalGrid::new(&tech, &fixed, db.die_area, gcell, CapacityReserve::NONE);
     let (nx, ny) = grid.size();
     let layer = tech.min_layer;
     let row = ny - 1;
@@ -571,11 +571,11 @@ fn gcell_congestion_follows_the_routed_edges_of_the_grid() {
 fn the_estimator_measures_congestion_where_the_given_locations_put_the_nets() {
     let db = tiny();
     let config = RoutingConfig {
-        gcell_tracks: 5,
+        gcell_tracks: NonZeroU32::new(5).unwrap(),
         ..no_reserve()
     };
     let mut estimator = GlobalRouteEstimator::new(&db, &config).unwrap();
-    let tiles = estimator.capacity_reduction(&[]).unwrap();
+    let tiles = estimator.capacity_reduction(&[]);
     let packed = vec![Point::new(Dbu(0), Dbu(0)); db.num_cells()];
     let spread: Vec<Point<Dbu>> = (0..db.num_cells())
         .map(|i| {
