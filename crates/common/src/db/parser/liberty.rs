@@ -651,25 +651,13 @@ impl Interpreter {
                 cell.ports.push(self.port(pin, arg.0)?);
             }
         }
-        let mut bus_bits: Vec<(&Group<'_>, Vec<String>)> = Vec::new();
-        for bus in group.groups_named("bus") {
-            let bits = self.bus_bits(bus, &cell.name)?;
-            for bit in &bits {
-                let overriding = bus
-                    .groups_named("pin")
-                    .find(|g| g.args.iter().any(|a| a.0 == bit));
-                let mut port = self.port(bus, bit)?;
-                if let Some(g) = overriding {
-                    let own = self.port(g, bit)?;
-                    port.capacitance = own.capacitance;
-                    port.max_capacitance = own.max_capacitance.or(port.max_capacitance);
-                    port.max_transition = own.max_transition.or(port.max_transition);
-                    port.max_fanout = own.max_fanout.or(port.max_fanout);
-                    port.function = own.function.or(port.function);
-                }
-                cell.ports.push(port);
+        let mut buses = Vec::new();
+        for group in group.groups_named("bus") {
+            let bus = self.bus(group, &cell.name)?;
+            for bit in &bus.bits {
+                cell.ports.push(self.bus_bit_port(&bus, bit)?);
             }
-            bus_bits.push((bus, bits));
+            buses.push(bus);
         }
         for pin in group.groups_named("pin") {
             for arg in &pin.args {
@@ -681,18 +669,15 @@ impl Interpreter {
                 }
             }
         }
-        for (bus, bits) in bus_bits {
-            for bit in &bits {
-                let to = cell
-                    .port(bit)
-                    .ok_or_else(|| self.error(bus.line, format!("bus bit '{bit}' vanished")))?;
-                for timing in bus.groups_named("timing") {
+        for bus in &buses {
+            for bit in &bus.bits {
+                let to = cell.port(bit).ok_or_else(|| {
+                    self.error(bus.group.line, format!("bus bit '{bit}' vanished"))
+                })?;
+                for timing in bus.group.groups_named("timing") {
                     self.timing(&mut cell, to, timing)?;
                 }
-                for pin in bus
-                    .groups_named("pin")
-                    .filter(|g| g.args.iter().any(|a| a.0 == bit))
-                {
+                for pin in bus.pins_naming(bit) {
                     for timing in pin.groups_named("timing") {
                         self.timing(&mut cell, to, timing)?;
                     }
@@ -710,13 +695,32 @@ impl Interpreter {
         Ok(cell)
     }
 
-    /// The bit pins a `bus` group declares, named `bus[bit]`.
-    fn bus_bits(&self, bus: &Group<'_>, cell: &str) -> Result<Vec<String>, ParseError> {
-        let name = bus
+    /// A `bus` group's bits and the pin groups within it.
+    fn bus<'g, 'a>(&self, group: &'g Group<'a>, cell: &str) -> Result<Bus<'g, 'a>, ParseError> {
+        let name = group
             .args
             .first()
-            .ok_or_else(|| self.error(bus.line, format!("cell '{cell}' has a bus without a name")))?
+            .ok_or_else(|| {
+                self.error(
+                    group.line,
+                    format!("cell '{cell}' has a bus without a name"),
+                )
+            })?
             .0;
+        let bits = self.bus_bits(group, name, cell)?;
+        let sub_pins = group
+            .groups_named("pin")
+            .map(|pin| Ok((pin, self.sub_pin_bits(pin, name, &bits)?)))
+            .collect::<Result<_, ParseError>>()?;
+        Ok(Bus {
+            group,
+            bits,
+            sub_pins,
+        })
+    }
+
+    /// The bit pins bus `name` declares, named `name[bit]`.
+    fn bus_bits(&self, bus: &Group<'_>, name: &str, cell: &str) -> Result<Vec<String>, ParseError> {
         let type_name = bus.attr_text("bus_type").ok_or_else(|| {
             self.error(
                 bus.line,
@@ -736,59 +740,139 @@ impl Interpreter {
             .collect())
     }
 
-    fn port(&self, group: &Group<'_>, name: &str) -> Result<LibPort, ParseError> {
-        let direction = match group.attr_text("direction") {
-            Some("input") => PortDirection::Input,
-            Some("output") => PortDirection::Output,
-            Some("inout") => PortDirection::Inout,
-            Some("internal") => PortDirection::Internal,
-            Some(other) => {
-                return Err(self.error(group.line, format!("pin '{name}' has direction '{other}'")));
+    /// The bits of bus `bus` a pin group within it names: by each argument
+    /// one bit, a range `bus[from:to]` from `from` to `to`, or the whole
+    /// bus, as `OpenSTA`'s `PortNameBitIterator` reads them.
+    fn sub_pin_bits(
+        &self,
+        pin: &Group<'_>,
+        bus: &str,
+        bits: &[String],
+    ) -> Result<Vec<String>, ParseError> {
+        let mut named = Vec::new();
+        for arg in pin.args.iter().map(|a| a.0) {
+            if arg == bus {
+                named.extend(bits.iter().cloned());
+                continue;
             }
-            None => return Err(self.error(group.line, format!("pin '{name}' has no direction"))),
-        };
-        let cap = self.units.capacitance;
+            let expanded = match bit_range(arg) {
+                Some((base, from, to)) if base == bus => range_bits(base, from, to),
+                _ => vec![arg.to_string()],
+            };
+            for bit in expanded {
+                if !bits.contains(&bit) {
+                    return Err(
+                        self.error(pin.line, format!("pin '{bit}' is not a bit of bus '{bus}'"))
+                    );
+                }
+                named.push(bit);
+            }
+        }
+        Ok(named)
+    }
+
+    /// A bus bit's pin: the bus's, with what pin groups within the bus
+    /// state about the bit in their place, as `OpenSTA` reads it.
+    fn bus_bit_port(&self, bus: &Bus<'_, '_>, bit: &str) -> Result<LibPort, ParseError> {
+        let mut port = self.port(bus.group, bit)?;
+        for pin in bus.pins_naming(bit) {
+            if let Some(direction) = self.direction(pin, bit)? {
+                port.direction = direction;
+            }
+            self.read_port_attributes(pin, &mut port)?;
+        }
+        Ok(port)
+    }
+
+    fn port(&self, group: &Group<'_>, name: &str) -> Result<LibPort, ParseError> {
+        let direction = self
+            .direction(group, name)?
+            .ok_or_else(|| self.error(group.line, format!("pin '{name}' has no direction")))?;
         let default_cap = match direction {
             PortDirection::Input | PortDirection::Inout => self.defaults.input_pin_cap,
             PortDirection::Output | PortDirection::Internal => self.defaults.output_pin_cap,
         };
+        let mut port = LibPort {
+            name: name.to_string(),
+            direction,
+            capacitance: EdgeValues {
+                rise: default_cap,
+                fall: default_cap,
+            },
+            max_capacitance: None,
+            max_transition: None,
+            max_fanout: None,
+            fanout_load: None,
+            function: None,
+            three_state: None,
+            is_clock: false,
+            clock_gate: ClockGatePin::None,
+        };
+        self.read_port_attributes(group, &mut port)?;
+        Ok(port)
+    }
+
+    /// The direction a pin group states, if it states one.
+    fn direction(
+        &self,
+        group: &Group<'_>,
+        name: &str,
+    ) -> Result<Option<PortDirection>, ParseError> {
+        match group.attr_text("direction") {
+            Some("input") => Ok(Some(PortDirection::Input)),
+            Some("output") => Ok(Some(PortDirection::Output)),
+            Some("inout") => Ok(Some(PortDirection::Inout)),
+            Some("internal") => Ok(Some(PortDirection::Internal)),
+            Some(other) => {
+                Err(self.error(group.line, format!("pin '{name}' has direction '{other}'")))
+            }
+            None => Ok(None),
+        }
+    }
+
+    /// Sets on `port` what `group` states about it, leaving the rest.
+    fn read_port_attributes(
+        &self,
+        group: &Group<'_>,
+        port: &mut LibPort,
+    ) -> Result<(), ParseError> {
+        let cap = self.units.capacitance;
         let both = self.number_attr(group, "capacitance")?.map(|v| v * cap);
         let rise = self
             .number_attr(group, "rise_capacitance")?
-            .map(|v| v * cap)
-            .or(both)
-            .unwrap_or(default_cap);
+            .map(|v| v * cap);
         let fall = self
             .number_attr(group, "fall_capacitance")?
+            .map(|v| v * cap);
+        if let Some(rise) = rise.or(both) {
+            port.capacitance.rise = rise;
+        }
+        if let Some(fall) = fall.or(both) {
+            port.capacitance.fall = fall;
+        }
+        port.max_capacitance = self
+            .number_attr(group, "max_capacitance")?
             .map(|v| v * cap)
-            .or(both)
-            .unwrap_or(default_cap);
-        let clock_gate = if Self::bool_attr(group, "clock_gate_clock_pin") {
-            ClockGatePin::Clock
-        } else if Self::bool_attr(group, "clock_gate_enable_pin") {
-            ClockGatePin::Enable
-        } else if Self::bool_attr(group, "clock_gate_test_pin") {
-            ClockGatePin::Test
-        } else if Self::bool_attr(group, "clock_gate_out_pin") {
-            ClockGatePin::Out
-        } else {
-            ClockGatePin::None
-        };
-        Ok(LibPort {
-            name: name.to_string(),
-            direction,
-            capacitance: EdgeValues { rise, fall },
-            max_capacitance: self.number_attr(group, "max_capacitance")?.map(|v| v * cap),
-            max_transition: self
-                .number_attr(group, "max_transition")?
-                .map(|v| v * self.units.time),
-            max_fanout: self.number_attr(group, "max_fanout")?,
-            fanout_load: self.number_attr(group, "fanout_load")?,
-            function: self.function_attr(group, "function")?,
-            three_state: self.function_attr(group, "three_state")?,
-            is_clock: Self::bool_attr(group, "clock"),
-            clock_gate,
-        })
+            .or(port.max_capacitance);
+        port.max_transition = self
+            .number_attr(group, "max_transition")?
+            .map(|v| v * self.units.time)
+            .or(port.max_transition);
+        port.max_fanout = self.number_attr(group, "max_fanout")?.or(port.max_fanout);
+        port.fanout_load = self.number_attr(group, "fanout_load")?.or(port.fanout_load);
+        if let Some(function) = self.function_attr(group, "function")? {
+            port.function = Some(function);
+        }
+        if let Some(three_state) = self.function_attr(group, "three_state")? {
+            port.three_state = Some(three_state);
+        }
+        if group.attr("clock").is_some() {
+            port.is_clock = Self::bool_attr(group, "clock");
+        }
+        if let Some(gate) = clock_gate_pin(group) {
+            port.clock_gate = gate;
+        }
+        Ok(())
     }
 
     fn timing(&self, cell: &mut LibCell, to: usize, group: &Group<'_>) -> Result<(), ParseError> {
@@ -1054,6 +1138,54 @@ fn axis_variable(name: &str) -> AxisVariable {
 
 /// The role a `timing_type` names, with the input edge it fixes for a clock
 /// and the output edge it restricts to, where it does.
+/// A `bus` group: its bits, and each pin group within it with the bits it
+/// names.
+struct Bus<'g, 'a> {
+    group: &'g Group<'a>,
+    bits: Vec<String>,
+    sub_pins: Vec<(&'g Group<'a>, Vec<String>)>,
+}
+
+impl<'g, 'a> Bus<'g, 'a> {
+    /// The pin groups within the bus that name `bit`.
+    fn pins_naming<'s>(&'s self, bit: &'s str) -> impl Iterator<Item = &'g Group<'a>> + 's {
+        self.sub_pins
+            .iter()
+            .filter(move |(_, bits)| bits.iter().any(|b| b == bit))
+            .map(|&(pin, _)| pin)
+    }
+}
+
+/// The bus and ends of a range name `bus[from:to]`.
+fn bit_range(name: &str) -> Option<(&str, i64, i64)> {
+    let (base, rest) = name.split_once('[')?;
+    let (from, to) = rest.strip_suffix(']')?.split_once(':')?;
+    Some((base, from.trim().parse().ok()?, to.trim().parse().ok()?))
+}
+
+/// The bit names of `bus` from `from` to `to`, either way round.
+fn range_bits(bus: &str, from: i64, to: i64) -> Vec<String> {
+    let indices: Vec<i64> = if from <= to {
+        (from..=to).collect()
+    } else {
+        (to..=from).rev().collect()
+    };
+    indices.iter().map(|i| format!("{bus}[{i}]")).collect()
+}
+
+/// The part a pin group gives its pin in an integrated clock gate, if any.
+fn clock_gate_pin(group: &Group<'_>) -> Option<ClockGatePin> {
+    [
+        ("clock_gate_clock_pin", ClockGatePin::Clock),
+        ("clock_gate_enable_pin", ClockGatePin::Enable),
+        ("clock_gate_test_pin", ClockGatePin::Test),
+        ("clock_gate_out_pin", ClockGatePin::Out),
+    ]
+    .into_iter()
+    .find(|&(name, _)| Interpreter::bool_attr(group, name))
+    .map(|(_, gate)| gate)
+}
+
 fn arc_role(timing_type: &str) -> (ArcRole, Option<Edge>, Option<Edge>) {
     match timing_type {
         "combinational" => (ArcRole::Combinational, None, None),
@@ -1294,6 +1426,80 @@ library (ram) {
         let arc = &clk_to_q[0].arcs[0];
         assert!((arc.gate_delay(0.0, 500e-15).1 - 0.227e-9).abs() < 1e-14);
         assert!(mem.arc_sets.iter().any(|s| s.role == ArcRole::Setup));
+    }
+
+    /// A library with cell `mem`: a clock `clk`, and the 2-bit buses `d` and
+    /// `q`, whose groups hold `d_body` and `q_body` after their type and
+    /// direction.
+    fn bus_library(d_body: &str, q_body: &str) -> Result<Liberty, ParseError> {
+        let src = format!(
+            r#"
+library (ram) {{
+  time_unit : "1ns";
+  capacitive_load_unit (1,ff);
+  type (DATA) {{ base_type : array ; data_type : bit ; bit_width : 2; bit_from : 1; bit_to : 0 ; }}
+  cell(mem) {{
+    pin(clk) {{ direction : input; capacitance : 1.0; clock : true; }}
+    bus(d) {{ bus_type : DATA; direction : input; capacitance : 5.0; {d_body} }}
+    bus(q) {{ bus_type : DATA; direction : output; {q_body} }}
+  }}
+}}
+"#
+        );
+        parse_str(&src, Path::new("ram.lib"))
+    }
+
+    fn mem_port<'l>(lib: &'l Liberty, name: &str) -> &'l LibPort {
+        let mem = lib.cell(lib.cell_id("mem").unwrap());
+        &mem.ports[mem.port(name).unwrap()]
+    }
+
+    #[test]
+    fn a_bus_bit_keeps_the_bus_capacitance_its_own_pin_group_leaves_out() {
+        let lib =
+            bus_library("pin(d[1]) { direction : input; max_transition : 0.3; }", "").unwrap();
+
+        let bit = mem_port(&lib, "d[1]");
+
+        assert!((bit.capacitance.rise - 5e-15).abs() < 1e-28, "{bit:?}");
+        assert!(
+            (bit.max_transition.unwrap() - 0.3e-9).abs() < 1e-20,
+            "{bit:?}"
+        );
+    }
+
+    #[test]
+    fn a_bus_bit_pin_group_without_a_direction_takes_the_bus_direction() {
+        let lib = bus_library("pin(d[0]) { capacitance : 7.0; }", "").unwrap();
+
+        let bit = mem_port(&lib, "d[0]");
+
+        assert_eq!(bit.direction, PortDirection::Input);
+        assert!((bit.capacitance.rise - 7e-15).abs() < 1e-28, "{bit:?}");
+    }
+
+    #[test]
+    fn a_pin_group_over_a_range_of_bus_bits_gives_each_bit_its_arcs() {
+        let timing = r#"pin("q[1:0]") { timing() { related_pin : "clk"; timing_type : rising_edge;
+            cell_rise(scalar) { values ("0.2"); } cell_fall(scalar) { values ("0.2"); } } }"#;
+        let lib = bus_library("", timing).unwrap();
+        let mem = lib.cell(lib.cell_id("mem").unwrap());
+
+        let driven: Vec<&str> = mem
+            .arc_sets
+            .iter()
+            .filter(|s| s.role == ArcRole::RegClkToQ)
+            .map(|s| mem.ports[s.to].name.as_str())
+            .collect();
+
+        assert_eq!(driven, ["q[1]", "q[0]"]);
+    }
+
+    #[test]
+    fn a_pin_group_naming_a_bit_outside_its_bus_is_refused() {
+        let err = bus_library("pin(d[2]) { capacitance : 7.0; }", "").unwrap_err();
+
+        assert!(err.to_string().contains("not a bit of bus 'd'"), "{err}");
     }
 
     #[test]
