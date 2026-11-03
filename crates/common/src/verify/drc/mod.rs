@@ -252,16 +252,6 @@ impl DrcReport {
     pub fn advisory_counts(&self) -> Vec<(Violation, usize)> {
         counts(&self.advisory)
     }
-
-    /// How many fixed-only violations placement takes part in, by kind.
-    pub fn placement_counts(&self) -> Vec<(Violation, usize)> {
-        counts(&self.placement)
-    }
-
-    /// How many fixed-only violations the input alone makes, by kind.
-    pub fn input_counts(&self) -> Vec<(Violation, usize)> {
-        counts(&self.input)
-    }
 }
 
 fn counts(markers: &[Marker]) -> Vec<(Violation, usize)> {

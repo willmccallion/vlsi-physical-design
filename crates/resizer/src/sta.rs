@@ -453,15 +453,6 @@ impl Sta {
         self.is_endpoint.get(pin.index()).copied().unwrap_or(false)
     }
 
-    /// An endpoint's slack from its own checks on `side`, infinite for a
-    /// pin that is not one.
-    #[must_use]
-    pub fn endpoint_slack(&self, pin: PinId, side: MinMax) -> f64 {
-        self.end_slack
-            .get(pin.index())
-            .map_or(f64::INFINITY, |s| s[side.index()])
-    }
-
     /// A pin's slack on `side`: the least over its edges and tags, as
     /// `OpenSTA`'s vertex slack; infinite where nothing constrains it.
     #[must_use]

@@ -819,31 +819,6 @@ impl LibCell {
             .fold(0.0, f64::max)
     }
 
-    /// The drive resistance of the first output pin, as `OpenSTA`'s
-    /// `cellDriveResistance`; zero for a cell without an output.
-    #[must_use]
-    pub fn output_drive_resistance(&self) -> f64 {
-        self.ports
-            .iter()
-            .position(LibPort::is_output)
-            .map_or(0.0, |p| self.drive_resistance(p))
-    }
-
-    /// The mean capacitance of the input pins; `None` without inputs.
-    #[must_use]
-    pub fn mean_input_capacitance(&self) -> Option<f64> {
-        let inputs: Vec<f64> = self
-            .ports
-            .iter()
-            .filter(|p| p.direction == PortDirection::Input)
-            .map(LibPort::capacitance)
-            .collect();
-        if inputs.is_empty() {
-            return None;
-        }
-        Some(inputs.iter().sum::<f64>() / inputs.len() as f64)
-    }
-
     /// Whether any pin has a function.
     #[must_use]
     pub fn has_functions(&self) -> bool {

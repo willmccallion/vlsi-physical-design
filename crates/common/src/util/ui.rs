@@ -60,19 +60,6 @@ pub fn placement_iter(iter: usize, hpwl: f64, overflow: f64, penalty: f64, step:
     eprintln!("    {iter:<8} {hpwl:>12.0} {overflow:>12.4} {penalty:>12.3e} {step:>10.3e}");
 }
 
-/// Prints the header row for routing iteration table.
-pub fn routing_table_header(phase: &str) {
-    eprintln!(
-        "\n    {}",
-        format!(
-            "{} {:<8} {:>10} {:>10} {:>10} {:>10}",
-            phase, "Iter", "Overflow", "Ripped", "Penalty", "Time"
-        )
-        .dim()
-    );
-    eprintln!("    {}", "-".repeat(2 + 8 + 10 * 4 + phase.len()).dim());
-}
-
 /// Prints the header of the global routing table: each layer's resources,
 /// the demand on them and the overflow, as `OpenROAD` reports them.
 pub fn gr_layer_table_header() {
@@ -129,26 +116,6 @@ pub fn dr_iter(
 ) {
     eprintln!(
         "    {iter:<8} {markers:>10} {nets:>10} {ripped:>10} {conflict:>10.1} {flow:>10} {time_ms:>8}ms"
-    );
-}
-
-/// Prints a single routing iteration row.
-pub fn routing_iter(
-    phase: &str,
-    iter: usize,
-    overflow: usize,
-    ripped: usize,
-    penalty: f64,
-    time_ms: u128,
-) {
-    eprintln!(
-        "    {}{:<8} {:>10} {:>10} {:>10.1} {:>8}ms",
-        " ".repeat(phase.len() + 1),
-        iter,
-        overflow,
-        ripped,
-        penalty,
-        time_ms
     );
 }
 
@@ -252,11 +219,5 @@ pub fn done(elapsed_secs: f64) {
 /// Prints a carriage-return progress line (overwrites current line).
 pub fn progress(label: &str, cur: usize, total: usize) {
     eprint!("\r  {} {}/{}\x1b[K", label.cyan(), cur, total);
-    let _ = std::io::Write::flush(&mut std::io::stderr());
-}
-
-/// Clears the progress line.
-pub fn progress_clear() {
-    eprint!("\r\x1b[K");
     let _ = std::io::Write::flush(&mut std::io::stderr());
 }

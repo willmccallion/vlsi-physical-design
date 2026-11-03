@@ -166,20 +166,6 @@ impl TimingGraph {
         drivers
     }
 
-    /// The instance input pins by rising level and then name.
-    #[must_use]
-    pub fn loads_by_level(&self, netlist: &Netlist<'_>) -> Vec<PinId> {
-        let mut loads: Vec<PinId> = (0..netlist.db.pins.len())
-            .map(PinId::new)
-            .filter(|&p| {
-                matches!(netlist.db.pins[p.index()].owner, PinOwner::Cell { .. })
-                    && netlist.is_load(p)
-            })
-            .collect();
-        loads.sort_by_cached_key(|&p| (self.level[p.index()], netlist.db.pin_name(p)));
-        loads
-    }
-
     /// A pin's level.
     #[must_use]
     pub fn level(&self, pin: PinId) -> u32 {
@@ -383,15 +369,6 @@ impl TimingGraph {
         while self.parasitics.len() < db.nets.len() {
             self.parasitics.push(None);
         }
-    }
-
-    /// Finds every pin's level again after the netlist changed shape, as
-    /// `OpenSTA` relevelizes once a search finds the ordering stale.
-    pub fn relevelize(&mut self, netlist: &Netlist<'_>) {
-        self.grow(netlist);
-        let (level, loop_arcs) = levelize(netlist, &self.in_arcs);
-        self.level = level;
-        self.loop_arcs = loop_arcs;
     }
 
     /// The drivers of the cell `load` belongs to that an arc from `load`

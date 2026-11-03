@@ -554,11 +554,6 @@ impl NetlistDB {
         self.cells.len()
     }
 
-    /// Number of signal nets.
-    pub const fn num_nets(&self) -> usize {
-        self.nets.len()
-    }
-
     /// Adds an instance.
     pub fn add_cell(
         &mut self,
