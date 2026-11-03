@@ -59,7 +59,6 @@ cast_possible_wrap = "allow"
 cast_lossless = "allow"
 
 # These fire on reasonable code patterns in this codebase
-too_many_lines = "allow"
 missing_errors_doc = "allow"
 missing_panics_doc = "allow"
 redundant_pub_crate = "allow"
