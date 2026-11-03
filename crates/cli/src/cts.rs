@@ -68,7 +68,6 @@ pub(crate) fn clock_tree_synthesis(
             networks.buffers.clone(),
             &mut repair.namer,
             RepairOptions::default(),
-            None,
         )?;
         let done = Repairer::new(&mut resizer)
             .repair_clock_nets(trees.clock_buffers(), max_wire_length)?;
@@ -78,16 +77,16 @@ pub(crate) fn clock_tree_synthesis(
     let arrivals: FxHashMap<PinId, f64> = {
         let networks = Networks::find(db, &link, config, Some(sdc))?;
         let pins = db.pins.len();
-        let resizer = Resizer::new(
+        let resizer = Resizer::timed(
             db,
             networks.context(&link, Some(clock_rc)),
             rc,
             networks.buffers.clone(),
             &mut repair.namer,
             RepairOptions::default(),
-            Some(sdc),
+            sdc,
         )?;
-        let sta = resizer.sta().context("timing")?;
+        let sta = resizer.sta();
         (0..pins)
             .map(PinId::new)
             .filter_map(|p| sta.clock_rise_arrival(p).map(|a| (p, a)))

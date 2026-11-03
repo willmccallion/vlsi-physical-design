@@ -14,7 +14,7 @@ use pare_resizer::parasitics::WireRc;
 use pare_resizer::resizer::Context as RepairContext;
 use pare_resizer::{
     BufferSet, ClockNetwork, Constants, HoldOptions, Link, Namer, Netlist, RepairOptions, Repairer,
-    Resizer, SetupOptions, repair_hold, repair_setup,
+    Resizer, SetupOptions, Sta, Timing, repair_hold, repair_setup,
 };
 use std::path::Path;
 use std::time::Instant;
@@ -208,18 +208,17 @@ pub(crate) fn repair_design(
     ui::phase("Design Repair");
     let link = Link::new(db, &repair.liberty, &netlist_config.dont_use)?;
     let networks = Networks::find(db, &link, config, repair.sdc.as_ref())?;
-    let clock_rc = clock_wire_rc(config, db)?;
-    let mut resizer = Resizer::new(
-        db,
-        networks.context(&link, clock_rc),
-        rc,
-        networks.buffers.clone(),
-        &mut repair.namer,
-        RepairOptions::default(),
-        repair.sdc.as_ref(),
-    )?;
-    let done = Repairer::new(&mut resizer).repair_design()?;
-    show_design_repair(&done, resizer.netlist().db.cells.len());
+    let context = networks.context(&link, clock_wire_rc(config, db)?);
+    let buffers = networks.buffers.clone();
+    let namer = &mut repair.namer;
+    let options = RepairOptions::default();
+    let done = match repair.sdc.as_ref() {
+        Some(sdc) => {
+            let resizer = Resizer::timed(db, context, rc, buffers, namer, options, sdc)?;
+            repair_design_on(resizer)?
+        }
+        None => repair_design_on(Resizer::new(db, context, rc, buffers, namer, options)?)?,
+    };
     repair.summary.slew_violations = done.slew_violations;
     repair.summary.cap_violations = done.cap_violations;
     repair.summary.repaired_nets = done.repaired_nets;
@@ -237,8 +236,17 @@ pub(crate) fn repair_design(
         repeaters: done.inserted,
     });
     report.phase("design repair", phase_start);
-    let _ = resizer.finish()?;
     Ok(())
+}
+
+/// Runs design repair over the session and ends it.
+fn repair_design_on<T: Timing>(
+    mut resizer: Resizer<'_, T>,
+) -> anyhow::Result<pare_resizer::RepairSummary> {
+    let done = Repairer::new(&mut resizer).repair_design()?;
+    show_design_repair(&done, resizer.netlist().db.cells.len());
+    let _ = resizer.finish()?;
+    Ok(done)
 }
 
 /// Shows what design repair found and did.
@@ -284,14 +292,14 @@ pub(crate) fn repair_timing(
     let link = Link::new(db, &repair.liberty, &config.netlist.dont_use)?;
     let networks = Networks::find(db, &link, config, Some(sdc))?;
     let clock_rc = clock_wire_rc(config, db)?;
-    let mut resizer = Resizer::new(
+    let mut resizer = Resizer::timed(
         db,
         networks.context(&link, clock_rc),
         rc,
         networks.buffers.clone(),
         &mut repair.namer,
         RepairOptions::default(),
-        Some(sdc),
+        sdc,
     )?;
     report.timing = Some(timing_repair_on(&mut resizer, &repair.liberty)?);
     let _ = resizer.finish()?;
@@ -302,7 +310,7 @@ pub(crate) fn repair_timing(
 /// Repairs setup and then hold, as `repair_timing` does without
 /// `-setup` or `-hold`, showing each iteration and what changed.
 pub(crate) fn timing_repair_on(
-    resizer: &mut Resizer<'_>,
+    resizer: &mut Resizer<'_, Sta>,
     liberty: &Liberty,
 ) -> anyhow::Result<TimingSummary> {
     ui::timing_table_header();

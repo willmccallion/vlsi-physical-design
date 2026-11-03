@@ -8,7 +8,7 @@ use crate::bnet::{self, Bnet, BnetPtr, Kind};
 use crate::fuzzy;
 use crate::rebuffer::{Rebuffer, can_remove_buffer};
 use crate::resizer::{RepairError, Resizer, buffer_delays, gate_delays};
-use crate::sta::Path;
+use crate::sta::{Path, Sta};
 use pare_common::db::design::PinOwner;
 use pare_common::db::indices::{CellId, LayerId, NetId, PinId};
 use pare_common::db::liberty::{
@@ -183,7 +183,7 @@ struct Site {
 
 impl Moves {
     /// Prepares the moves over the session.
-    pub fn new(resizer: &Resizer<'_>) -> Result<Self, RepairError> {
+    pub fn new(resizer: &Resizer<'_, Sta>) -> Result<Self, RepairError> {
         Ok(Self {
             log: MoveLog::default(),
             rebuffer: Rebuffer::new(resizer)?,
@@ -195,7 +195,7 @@ impl Moves {
     /// design changed.
     pub fn try_move(
         &mut self,
-        resizer: &mut Resizer<'_>,
+        resizer: &mut Resizer<'_, Sta>,
         kind: MoveKind,
         path: &Path,
         index: usize,
@@ -220,7 +220,11 @@ impl Moves {
 
     /// `SizeUpMove`: the weakest stronger size that is also faster with
     /// its extra input load on the previous driver.
-    fn size_up(&mut self, resizer: &mut Resizer<'_>, site: &Site) -> Result<bool, RepairError> {
+    fn size_up(
+        &mut self,
+        resizer: &mut Resizer<'_, Sta>,
+        site: &Site,
+    ) -> Result<bool, RepairError> {
         if !resizer.is_editable(site.cell) {
             return Ok(false);
         }
@@ -255,7 +259,7 @@ impl Moves {
     /// buffer or inverter takes the driver's size.
     fn size_up_match(
         &mut self,
-        resizer: &mut Resizer<'_>,
+        resizer: &mut Resizer<'_, Sta>,
         site: &Site,
     ) -> Result<bool, RepairError> {
         let Some(prev_driver) = site.prev_driver else {
@@ -299,7 +303,7 @@ impl Moves {
 
     /// `SwapPinsMove`: moves the critical input to an equivalent, faster
     /// pin of the same gate.
-    fn swap_pins(&mut self, resizer: &mut Resizer<'_>, site: &Site) -> bool {
+    fn swap_pins(&mut self, resizer: &mut Resizer<'_, Sta>, site: &Site) -> bool {
         if self.log.has_moves(MoveKind::SwapPins, site.cell) {
             return false;
         }
@@ -355,7 +359,7 @@ impl Moves {
     }
 
     /// `BufferMove`: rebuffers a net of modest fanout.
-    fn buffer(&mut self, resizer: &mut Resizer<'_>, site: &Site) -> Result<bool, RepairError> {
+    fn buffer(&mut self, resizer: &mut Resizer<'_, Sta>, site: &Site) -> Result<bool, RepairError> {
         let fanout = resizer.fanout(site.driver);
         if fanout <= 1 || fanout >= REBUFFER_MAX_FANOUT || !resizer.ok_to_buffer_net(site.driver) {
             return Ok(false);
@@ -370,7 +374,11 @@ impl Moves {
 
     /// `CloneMove`: a second copy of a single-output gate takes the half of
     /// its loads with the most slack to spare.
-    fn clone_gate(&mut self, resizer: &mut Resizer<'_>, site: &Site) -> Result<bool, RepairError> {
+    fn clone_gate(
+        &mut self,
+        resizer: &mut Resizer<'_, Sta>,
+        site: &Site,
+    ) -> Result<bool, RepairError> {
         if resizer.fanout(site.driver) <= SPLIT_LOAD_MIN_FANOUT
             || !resizer.ok_to_buffer_net(site.driver)
             || self.log.has_pending(MoveKind::Buffer, site.cell)
@@ -379,9 +387,7 @@ impl Moves {
         {
             return Ok(false);
         }
-        let Some(sta) = resizer.sta() else {
-            return Ok(false);
-        };
+        let sta = resizer.sta();
         let net = resizer.db.pins[site.driver.index()].net;
         let driver_slack = sta.slack_edge(site.driver, site.edge, MinMax::Max);
         let mut fanouts: Vec<(f64, String, PinId)> = resizer
@@ -450,15 +456,17 @@ impl Moves {
 
     /// `SplitLoadMove`: the half of the loads with the most slack to spare
     /// move behind a buffer at the driver.
-    fn split_load(&mut self, resizer: &mut Resizer<'_>, site: &Site) -> Result<bool, RepairError> {
+    fn split_load(
+        &mut self,
+        resizer: &mut Resizer<'_, Sta>,
+        site: &Site,
+    ) -> Result<bool, RepairError> {
         if resizer.fanout(site.driver) <= SPLIT_LOAD_MIN_FANOUT
             || !resizer.ok_to_buffer_net(site.driver)
         {
             return Ok(false);
         }
-        let Some(sta) = resizer.sta() else {
-            return Ok(false);
-        };
+        let sta = resizer.sta();
         let net = resizer.db.pins[site.driver.index()].net;
         let driver_slack = sta.slack(site.driver, MinMax::Max);
         let mut fanouts: Vec<(f64, String, PinId)> = resizer
@@ -493,7 +501,7 @@ impl Moves {
     /// take the loads without hurting the paths through them.
     fn unbuffer(
         &mut self,
-        resizer: &mut Resizer<'_>,
+        resizer: &mut Resizer<'_, Sta>,
         site: &Site,
         margin: f64,
     ) -> Result<bool, RepairError> {
@@ -549,7 +557,7 @@ impl Moves {
 }
 
 /// Where the driver at `index` of `path` sits.
-fn site(resizer: &Resizer<'_>, path: &Path, index: usize) -> Option<Site> {
+fn site(resizer: &Resizer<'_, Sta>, path: &Path, index: usize) -> Option<Site> {
     let point = path.points.get(index)?;
     let PinOwner::Cell { cell, .. } = resizer.db.pins[point.pin.index()].owner else {
         return None;
@@ -573,7 +581,7 @@ fn site(resizer: &Resizer<'_>, path: &Path, index: usize) -> Option<Site> {
 /// load on the previous driver, settles sooner than the present one, as
 /// `BaseMove::upsizeCell`.
 fn upsize_cell(
-    resizer: &Resizer<'_>,
+    resizer: &Resizer<'_, Sta>,
     lib: LibCellId,
     in_port: usize,
     drvr_port: usize,
@@ -631,7 +639,11 @@ fn intrinsic_delay(cell: &LibCell, port: usize) -> f64 {
 
 /// Whether an instance is a single-output gate without state, as
 /// `Resizer::isSingleOutputCombinational`.
-fn is_single_output_combinational(resizer: &Resizer<'_>, cell: CellId, lib: LibCellId) -> bool {
+fn is_single_output_combinational(
+    resizer: &Resizer<'_, Sta>,
+    cell: CellId,
+    lib: LibCellId,
+) -> bool {
     let c = resizer.link.liberty.cell(lib);
     resizer.link.is_logic_std_cell(resizer.db, cell)
         && !c.is_clock_gate
@@ -641,7 +653,7 @@ fn is_single_output_combinational(resizer: &Resizer<'_>, cell: CellId, lib: LibC
 
 /// The usable size of `lib` whose load limit is nearest half of its own,
 /// as `Resizer::halfDrivingPowerCell`.
-fn half_driving_power_cell(resizer: &Resizer<'_>, lib: LibCellId) -> Option<LibCellId> {
+fn half_driving_power_cell(resizer: &Resizer<'_, Sta>, lib: LibCellId) -> Option<LibCellId> {
     let liberty = resizer.link.liberty;
     let max_load = |id: LibCellId| -> f64 {
         let c = liberty.cell(id);
@@ -750,7 +762,7 @@ fn ports_equivalent(
 /// present slews, if faster than the critical input's, as
 /// `SwapPinsMove::findSwapPinCandidate`.
 fn swap_candidate(
-    resizer: &Resizer<'_>,
+    resizer: &Resizer<'_, Sta>,
     cell: &LibCell,
     input: usize,
     drvr_port: usize,
@@ -799,16 +811,14 @@ fn swap_candidate(
 /// leaves every path through its loads and the previous driver's other
 /// loads no worse, by estimated slews and delays.
 fn estimated_slack_ok(
-    resizer: &Resizer<'_>,
+    resizer: &Resizer<'_, Sta>,
     site: &Site,
     buffer_input: PinId,
     prev_driver: PinId,
     prev_edge: Edge,
     margin: f64,
 ) -> bool {
-    let Some(sta) = resizer.sta() else {
-        return false;
-    };
+    let sta = resizer.sta();
     let PinOwner::Cell {
         cell: prev_cell, ..
     } = resizer.db.pins[prev_driver.index()].owner
@@ -914,7 +924,7 @@ fn estimated_slack_ok(
 /// keeps its slack when its input slews change from `old` to `new` and
 /// its arrival shifts by `adjust`.
 fn input_slew_impact_ok(
-    resizer: &Resizer<'_>,
+    resizer: &Resizer<'_, Sta>,
     cell: CellId,
     old: EdgeValues,
     new: EdgeValues,
@@ -922,9 +932,7 @@ fn input_slew_impact_ok(
     margin: f64,
     accept_if_improves: bool,
 ) -> bool {
-    let Some(sta) = resizer.sta() else {
-        return false;
-    };
+    let sta = resizer.sta();
     let Some((lib, c)) = resizer.link.cell(resizer.db, cell) else {
         return false;
     };
@@ -975,7 +983,7 @@ fn input_slew_impact_ok(
 /// how far the estimate is from the slews timing found, as
 /// `Resizer::estimateSlewsAfterBufferRemoval`.
 fn slews_after_removal(
-    resizer: &Resizer<'_>,
+    resizer: &Resizer<'_, Sta>,
     prev_driver: PinId,
     buffer_output: PinId,
     buffer_input: PinId,
@@ -1017,7 +1025,7 @@ fn slews_after_removal(
 }
 
 /// The tree of the net `driver` drives.
-fn tree_of(resizer: &Resizer<'_>, driver: PinId) -> Option<BnetPtr> {
+fn tree_of(resizer: &Resizer<'_, Sta>, driver: PinId) -> Option<BnetPtr> {
     let net = resizer.db.pins[driver.index()].net;
     let netlist = resizer.netlist();
     let parasitics = resizer.graph.parasitics(net)?;
@@ -1028,7 +1036,7 @@ fn tree_of(resizer: &Resizer<'_>, driver: PinId) -> Option<BnetPtr> {
 /// where their points differ, as `Resizer::stitchTrees`; none when the
 /// load is not in the tree.
 fn stitch(
-    resizer: &Resizer<'_>,
+    resizer: &Resizer<'_, Sta>,
     outer: &BnetPtr,
     at_load: PinId,
     inner: &BnetPtr,
@@ -1104,8 +1112,8 @@ fn join_at_load(outer: &BnetPtr, inner: &BnetPtr, rc: &bnet::TreeRc<'_>) -> Bnet
 /// The slew at each load of a tree from the driver's slew, degraded along
 /// the wires by their Elmore delay times the slew shape factor, as
 /// `Resizer::estimateSlewsInTree`.
-fn slews_in_tree(resizer: &Resizer<'_>, driver_slew: f64, tree: &Bnet) -> Vec<(PinId, f64)> {
-    fn walk(resizer: &Resizer<'_>, node: &Bnet, upstream: f64, out: &mut Vec<(PinId, f64)>) {
+fn slews_in_tree(resizer: &Resizer<'_, Sta>, driver_slew: f64, tree: &Bnet) -> Vec<(PinId, f64)> {
+    fn walk(resizer: &Resizer<'_, Sta>, node: &Bnet, upstream: f64, out: &mut Vec<(PinId, f64)>) {
         match &node.kind {
             Kind::Load { pin } => out.push((*pin, upstream)),
             Kind::Wire { to, layer } => {

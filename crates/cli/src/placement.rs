@@ -480,19 +480,17 @@ impl TimingDriver for TimingPlacement<'_> {
         let networks = Networks::find(self.db, &link, self.config, Some(sdc))?;
         let clock_rc = clock_wire_rc(self.config, self.db)?;
         let cells_before = self.db.cells.len();
-        let mut resizer = Resizer::new(
+        let mut resizer = Resizer::timed(
             self.db,
             networks.context(&link, clock_rc),
             self.rc,
             networks.buffers.clone(),
             &mut self.repair.namer,
             RepairOptions::default(),
-            Some(sdc),
+            sdc,
         )?;
         let area_before = resizer.design_area();
-        let wns_before = resizer
-            .sta()
-            .map_or(f64::INFINITY, |sta| sta.worst_slack(MinMax::Max).0);
+        let wns_before = resizer.sta().worst_slack(MinMax::Max).0;
         resizer.set_max_wire_length(pare_resizer::rebuffer::max_wire_length(&resizer));
         let done = Repairer::new(&mut resizer).repair_design()?;
         let mut rebuffer = Rebuffer::new(&resizer)?;
@@ -506,9 +504,7 @@ impl TimingDriver for TimingPlacement<'_> {
             weights.iter().map(|w| w.1).fold(1.0, f64::max)
         );
         let area_after = resizer.design_area();
-        let wns_after = resizer
-            .sta()
-            .map_or(f64::INFINITY, |sta| sta.worst_slack(MinMax::Max).0);
+        let wns_after = resizer.sta().worst_slack(MinMax::Max).0;
         let renumbering = resizer.finish()?;
         let area_change = if area_before > 0.0 {
             (area_after - area_before) / area_before * 100.0

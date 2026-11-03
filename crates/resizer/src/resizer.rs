@@ -46,9 +46,6 @@ pub enum RepairError {
     /// A cell to insert lacks the pins it needs.
     #[error("cell '{0}' has no usable pins")]
     MissingPins(String),
-    /// A repair that needs timing ran without constraints.
-    #[error("the repair needs timing constraints")]
-    NoTiming,
     /// The library's slew thresholds give an unusable shape factor.
     #[error("the slew thresholds give an RC shape factor of {0:.3e}, outside 0.1 to 10")]
     ShapeFactor(f64),
@@ -159,15 +156,48 @@ pub struct InsertedBuffer {
     pub net: NetId,
 }
 
-/// The state of a repair session.
+/// Where a session keeps its timing analysis: [`Untimed`] for none, or the
+/// [`Sta`] itself, which every edit keeps up to date.
+pub trait Timing: std::fmt::Debug {
+    /// The analysis, if the session has one.
+    fn analysis(&self) -> Option<&Sta>;
+    /// The analysis to bring up to date, if the session has one.
+    fn analysis_mut(&mut self) -> Option<&mut Sta>;
+}
+
+/// No timing analysis: a session given no constraints.
+#[derive(Clone, Copy, Debug, Default)]
+pub struct Untimed;
+
+impl Timing for Untimed {
+    fn analysis(&self) -> Option<&Sta> {
+        None
+    }
+
+    fn analysis_mut(&mut self) -> Option<&mut Sta> {
+        None
+    }
+}
+
+impl Timing for Sta {
+    fn analysis(&self) -> Option<&Sta> {
+        Some(self)
+    }
+
+    fn analysis_mut(&mut self) -> Option<&mut Sta> {
+        Some(self)
+    }
+}
+
+/// The state of a repair session, timed when `T` is an [`Sta`].
 #[derive(Debug)]
-pub struct Resizer<'a> {
+pub struct Resizer<'a, T: Timing = Untimed> {
     pub(crate) db: &'a mut NetlistDB,
     pub(crate) link: &'a Link<'a>,
     pub(crate) clocks: &'a ClockNetwork,
     pub(crate) constants: &'a Constants,
     pub(crate) graph: TimingGraph,
-    pub(crate) sta: Option<Sta>,
+    timing: T,
     pub(crate) buffers: BufferSet,
     pub(crate) targets: Targets,
     pub(crate) namer: &'a mut Namer,
@@ -195,8 +225,8 @@ pub struct Resizer<'a> {
 }
 
 impl<'a> Resizer<'a> {
-    /// Prepares a session over `db`: estimates every net's parasitics and
-    /// slews, and with `sdc` its timing too.
+    /// Prepares a session over `db` without timing: estimates every net's
+    /// parasitics and slews.
     pub fn new(
         db: &'a mut NetlistDB,
         context: Context<'a>,
@@ -204,12 +234,45 @@ impl<'a> Resizer<'a> {
         buffers: BufferSet,
         namer: &'a mut Namer,
         options: RepairOptions,
-        sdc: Option<&Sdc>,
     ) -> Result<Self, RepairError> {
-        Self::build(db, context, rc, buffers, namer, options, sdc, None)
+        let session = Session {
+            db,
+            context,
+            rc,
+            buffers,
+            namer,
+            options,
+            routes: None,
+        };
+        Self::build(session, |_, _| Untimed)
+    }
+}
+
+impl<'a> Resizer<'a, Sta> {
+    /// Prepares a session over `db` as [`Resizer::new`] does, timed under
+    /// `sdc`.
+    pub fn timed(
+        db: &'a mut NetlistDB,
+        context: Context<'a>,
+        rc: WireRc,
+        buffers: BufferSet,
+        namer: &'a mut Namer,
+        options: RepairOptions,
+        sdc: &Sdc,
+    ) -> Result<Self, RepairError> {
+        let session = Session {
+            db,
+            context,
+            rc,
+            buffers,
+            namer,
+            options,
+            routes: None,
+        };
+        Self::build_timed(session, sdc)
     }
 
-    /// Prepares a session as [`Resizer::new`] does, with every net's
+    /// Prepares a timed session as [`Resizer::timed`] does, with every net's
     /// parasitics along its global route, rerouted as edits change it.
     #[allow(clippy::too_many_arguments)]
     pub fn on_global_routes(
@@ -219,23 +282,90 @@ impl<'a> Resizer<'a> {
         buffers: BufferSet,
         namer: &'a mut Namer,
         options: RepairOptions,
-        sdc: Option<&Sdc>,
+        sdc: &Sdc,
         routes: GlobalRouting<'a>,
     ) -> Result<Self, RepairError> {
-        Self::build(db, context, rc, buffers, namer, options, sdc, Some(routes))
+        let session = Session {
+            db,
+            context,
+            rc,
+            buffers,
+            namer,
+            options,
+            routes: Some(routes),
+        };
+        Self::build_timed(session, sdc)
     }
 
-    #[allow(clippy::too_many_arguments)]
+    fn build_timed(session: Session<'a>, sdc: &Sdc) -> Result<Self, RepairError> {
+        let (clocks, constants) = (session.context.clocks, session.context.constants);
+        Self::build(session, |netlist, graph| {
+            Sta::new(netlist, graph, clocks, constants, sdc)
+        })
+    }
+
+    /// The timing analysis; not to be read while edits are batched or the
+    /// timing is deferred, when it is behind the design.
+    #[must_use]
+    pub fn sta(&self) -> &Sta {
+        debug_assert!(
+            self.pending.is_none() && !self.timing_deferred,
+            "timing read while edits are batched or timing is deferred"
+        );
+        &self.timing
+    }
+
+    /// The setup slack of every net at its driver, as `OpenROAD`'s
+    /// `findResizeSlacks1` collects them for timing-driven placement:
+    /// constant, clock and special nets left out.
+    #[must_use]
+    pub fn driver_net_slacks(&self) -> Vec<(NetId, f64)> {
+        let sta = self.sta();
+        let netlist = self.netlist();
+        let mut slack_of: HashMap<NetId, f64> = HashMap::new();
+        for driver in self.graph.drivers_by_level(&netlist).into_iter().rev() {
+            let net = self.db.pins[driver.index()].net;
+            if netlist.is_special(net)
+                || self.constants.is_constant(driver)
+                || self.clocks.is_clock(driver)
+            {
+                continue;
+            }
+            let _ = slack_of.insert(net, sta.slack(driver, MinMax::Max));
+        }
+        let mut slacks: Vec<(NetId, f64)> = slack_of.into_iter().collect();
+        slacks.sort_by(|a, b| a.1.total_cmp(&b.1).then_with(|| a.0.cmp(&b.0)));
+        slacks
+    }
+}
+
+/// What a session is built from.
+struct Session<'a> {
+    db: &'a mut NetlistDB,
+    context: Context<'a>,
+    rc: WireRc,
+    buffers: BufferSet,
+    namer: &'a mut Namer,
+    options: RepairOptions,
+    routes: Option<GlobalRouting<'a>>,
+}
+
+impl<'a, T: Timing> Resizer<'a, T> {
+    /// Estimates every net's parasitics and slews, and times the design
+    /// as `timing` does once the graph is built.
     fn build(
-        db: &'a mut NetlistDB,
-        context: Context<'a>,
-        rc: WireRc,
-        buffers: BufferSet,
-        namer: &'a mut Namer,
-        options: RepairOptions,
-        sdc: Option<&Sdc>,
-        routes: Option<GlobalRouting<'a>>,
+        session: Session<'a>,
+        timing: impl FnOnce(&Netlist<'_>, &TimingGraph) -> T,
     ) -> Result<Self, RepairError> {
+        let Session {
+            db,
+            context,
+            rc,
+            buffers,
+            namer,
+            options,
+            routes,
+        } = session;
         let Context {
             link,
             clocks,
@@ -249,7 +379,7 @@ impl<'a> Resizer<'a> {
             .map(|&b| link.buffer_drive_resistance(b))
             .fold(f64::MAX, f64::min);
         let targets = find_targets(link, &buffers);
-        let (graph, sta) = {
+        let (graph, timing) = {
             let netlist = Netlist::new(db, link);
             let graph = TimingGraph::new(
                 &netlist,
@@ -259,8 +389,8 @@ impl<'a> Resizer<'a> {
                 clock_rc,
                 estimator(routes.as_ref()),
             );
-            let sta = sdc.map(|sdc| Sta::new(&netlist, &graph, clocks, constants, sdc));
-            (graph, sta)
+            let timing = timing(&netlist, &graph);
+            (graph, timing)
         };
         Ok(Self {
             db,
@@ -268,7 +398,7 @@ impl<'a> Resizer<'a> {
             clocks,
             constants,
             graph,
-            sta,
+            timing,
             buffers,
             targets,
             namer,
@@ -368,7 +498,7 @@ impl<'a> Resizer<'a> {
         let mut stale = std::mem::take(&mut self.stale_timing);
         stale.sort_unstable();
         stale.dedup();
-        if let Some(sta) = &mut self.sta {
+        if let Some(sta) = self.timing.analysis_mut() {
             let netlist = Netlist::new(self.db, self.link);
             sta.update(&netlist, &self.graph, self.clocks, &stale);
         }
@@ -390,18 +520,6 @@ impl<'a> Resizer<'a> {
         Netlist::new(self.db, self.link)
     }
 
-    /// The timing analysis, if constraints were given; not to be read while
-    /// edits are batched or the timing is deferred, when it is behind the
-    /// design.
-    #[must_use]
-    pub fn sta(&self) -> Option<&Sta> {
-        debug_assert!(
-            self.pending.is_none() && !self.timing_deferred,
-            "timing read while edits are batched or timing is deferred"
-        );
-        self.sta.as_ref()
-    }
-
     /// The timing graph.
     #[must_use]
     pub const fn graph(&self) -> &TimingGraph {
@@ -418,31 +536,6 @@ impl<'a> Resizer<'a> {
     /// for no limit.
     pub const fn set_max_wire_length(&mut self, length: i64) {
         self.options.max_wire_length = length;
-    }
-
-    /// The setup slack of every net at its driver, as `OpenROAD`'s
-    /// `findResizeSlacks1` collects them for timing-driven placement:
-    /// constant, clock and special nets left out. Needs timing.
-    #[must_use]
-    pub fn driver_net_slacks(&self) -> Vec<(NetId, f64)> {
-        let Some(sta) = self.sta.as_ref() else {
-            return Vec::new();
-        };
-        let netlist = self.netlist();
-        let mut slack_of: HashMap<NetId, f64> = HashMap::new();
-        for driver in self.graph.drivers_by_level(&netlist).into_iter().rev() {
-            let net = self.db.pins[driver.index()].net;
-            if netlist.is_special(net)
-                || self.constants.is_constant(driver)
-                || self.clocks.is_clock(driver)
-            {
-                continue;
-            }
-            let _ = slack_of.insert(net, sta.slack(driver, MinMax::Max));
-        }
-        let mut slacks: Vec<(NetId, f64)> = slack_of.into_iter().collect();
-        slacks.sort_by(|a, b| a.1.total_cmp(&b.1).then_with(|| a.0.cmp(&b.0)));
-        slacks
     }
 
     /// Drops every retired cell and emptied net from the design and ends
@@ -487,7 +580,7 @@ impl<'a> Resizer<'a> {
         }
         dirty.sort_unstable();
         dirty.dedup();
-        if let Some(sta) = &mut self.sta {
+        if let Some(sta) = self.timing.analysis_mut() {
             sta.update(&netlist, &self.graph, self.clocks, &dirty);
         }
         annotated.into_iter().map(|(load, _)| load).collect()
@@ -513,8 +606,8 @@ impl<'a> Resizer<'a> {
             .lib_cell_port(driver)
             .and_then(|(c, p)| self.link.liberty.slew_limit(c, p));
         let design = self
-            .sta
-            .as_ref()
+            .timing
+            .analysis()
             .and_then(|s| s.sdc().limits.max_transition);
         match (own, design) {
             (Some(a), Some(b)) => Some(a.min(b)),
@@ -530,8 +623,8 @@ impl<'a> Resizer<'a> {
             .lib_cell_port(driver)
             .and_then(|(c, p)| self.link.liberty.capacitance_limit(c, p));
         let design = self
-            .sta
-            .as_ref()
+            .timing
+            .analysis()
             .and_then(|s| s.sdc().limits.max_capacitance);
         match (own, design) {
             (Some(a), Some(b)) => Some(a.min(b)),
@@ -542,7 +635,9 @@ impl<'a> Resizer<'a> {
     /// The fanout limit on every driver, if the constraints set one.
     #[must_use]
     pub fn fanout_limit(&self) -> Option<f64> {
-        self.sta.as_ref().and_then(|s| s.sdc().limits.max_fanout)
+        self.timing
+            .analysis()
+            .and_then(|s| s.sdc().limits.max_fanout)
     }
 
     /// The load a driver sees.
@@ -755,7 +850,7 @@ impl<'a> Resizer<'a> {
         let dirty = self.graph.propagate_from(&netlist, self.clocks, drivers);
         if self.timing_deferred {
             self.stale_timing.extend(dirty);
-        } else if let Some(sta) = &mut self.sta {
+        } else if let Some(sta) = self.timing.analysis_mut() {
             sta.update(&netlist, &self.graph, self.clocks, &dirty);
         }
     }
@@ -1103,7 +1198,7 @@ impl<'a> Resizer<'a> {
     }
 }
 
-impl LoadModel for Resizer<'_> {
+impl<T: Timing> LoadModel for Resizer<'_, T> {
     fn load(&self, pin: PinId) -> (f64, f64, f64) {
         let netlist = self.netlist();
         netlist

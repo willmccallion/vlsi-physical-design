@@ -124,7 +124,7 @@ pub(crate) fn global_route_with_repair(
             networks.buffers.clone(),
             &mut repair.namer,
             RepairOptions::default(),
-            Some(sdc),
+            sdc,
             routes,
         )?;
         match step {

@@ -7,7 +7,7 @@
 use crate::fuzzy;
 use crate::moves::{MoveKind, Moves};
 use crate::resizer::{RepairError, Resizer};
-use crate::sta::{Path, Via};
+use crate::sta::{Path, Sta, Via};
 use pare_common::db::design::PinOwner;
 use pare_common::db::indices::PinId;
 use pare_common::db::liberty::MinMax;
@@ -133,20 +133,9 @@ pub struct SetupSummary {
     pub area_change_percent: f64,
 }
 
-/// Why setup repair could not run.
-#[derive(Clone, Debug, PartialEq, thiserror::Error)]
-pub enum SetupError {
-    /// The session has no timing analysis to repair against.
-    #[error("setup repair needs timing constraints")]
-    NoTiming,
-    /// An edit failed.
-    #[error(transparent)]
-    Repair(#[from] RepairError),
-}
-
 /// The repair in progress.
 struct Repair<'r, 'a> {
-    resizer: &'r mut Resizer<'a>,
+    resizer: &'r mut Resizer<'a, Sta>,
     moves: Moves,
     options: SetupOptions,
     initial_area: f64,
@@ -159,13 +148,10 @@ struct Repair<'r, 'a> {
 /// Repairs the setup violations of the session's design, reporting
 /// progress through `report`.
 pub fn repair_setup(
-    resizer: &mut Resizer<'_>,
+    resizer: &mut Resizer<'_, Sta>,
     options: SetupOptions,
     report: &mut dyn FnMut(&SetupProgress),
-) -> Result<SetupSummary, SetupError> {
-    if resizer.sta().is_none() {
-        return Err(SetupError::NoTiming);
-    }
+) -> Result<SetupSummary, RepairError> {
     let moves = Moves::new(resizer)?;
     let initial_area = resizer.design_area();
     let mut repair = Repair {
@@ -224,17 +210,10 @@ pub fn repair_setup(
 }
 
 impl Repair<'_, '_> {
-    fn sta(&self) -> &crate::sta::Sta {
-        // Checked once at entry; the analysis stays for the session.
-        self.resizer
-            .sta()
-            .unwrap_or_else(|| unreachable!("setup repair runs with timing"))
-    }
-
     /// The endpoints below the margin, worst first, as
     /// `ViolatorCollector::collectViolatingEndpoints`.
     fn violating_endpoints(&self) -> Vec<(PinId, f64)> {
-        let sta = self.sta();
+        let sta = self.resizer.sta();
         let mut ends: Vec<(PinId, f64)> = sta
             .endpoints()
             .iter()
@@ -246,11 +225,11 @@ impl Repair<'_, '_> {
     }
 
     fn worst(&self) -> (f64, Option<PinId>) {
-        self.sta().worst_slack(MinMax::Max)
+        self.resizer.sta().worst_slack(MinMax::Max)
     }
 
     fn tns(&self) -> f64 {
-        self.sta().total_negative_slack(MinMax::Max)
+        self.resizer.sta().total_negative_slack(MinMax::Max)
     }
 
     fn progress(&self, iteration: Option<usize>) -> SetupProgress {
@@ -320,7 +299,7 @@ impl Repair<'_, '_> {
         initial_tns: f64,
         prev_tns: &mut f64,
         report: &mut dyn FnMut(&SetupProgress),
-    ) -> Result<(), SetupError> {
+    ) -> Result<(), RepairError> {
         self.min_violation = -violating[violating.len() - 1].1;
         self.max_violation = -violating[0].1;
         let mut threshold = FIX_RATE_THRESHOLD;
@@ -333,7 +312,7 @@ impl Repair<'_, '_> {
             }
             self.fallback = false;
             let mut end = first_end;
-            let mut end_slack = self.sta().slack(end, MinMax::Max);
+            let mut end_slack = self.resizer.sta().slack(end, MinMax::Max);
             let (mut worst_slack, _) = self.worst();
             let mut prev_end_slack = end_slack;
             let mut prev_worst_slack = worst_slack;
@@ -379,7 +358,7 @@ impl Repair<'_, '_> {
                     journal_open = false;
                     break;
                 }
-                end_slack = self.sta().slack(end, MinMax::Max);
+                end_slack = self.resizer.sta().slack(end, MinMax::Max);
                 let (new_worst, worst_vertex) = self.worst();
                 worst_slack = new_worst;
                 let better = fuzzy::greater(worst_slack, prev_worst_slack)
@@ -429,7 +408,7 @@ impl Repair<'_, '_> {
         &mut self,
         initial_tns: f64,
         report: &mut dyn FnMut(&SetupProgress),
-    ) -> Result<(), SetupError> {
+    ) -> Result<(), RepairError> {
         let sequence = std::mem::replace(
             &mut self.options.sequence,
             vec![MoveKind::SizeUpMatch, MoveKind::SizeUp, MoveKind::SwapPins],
@@ -449,7 +428,7 @@ impl Repair<'_, '_> {
             let end_index = end_index + 1;
             self.fallback = false;
             let mut end = first_end;
-            let mut end_slack = self.sta().slack(end, MinMax::Max);
+            let mut end_slack = self.resizer.sta().slack(end, MinMax::Max);
             let mut two_terminations = false;
             self.journal_begin();
             let mut journal_open = true;
@@ -487,7 +466,7 @@ impl Repair<'_, '_> {
                     journal_open = false;
                     break;
                 }
-                end_slack = self.sta().slack(end, MinMax::Max);
+                end_slack = self.resizer.sta().slack(end, MinMax::Max);
                 let (current_worst, worst_vertex) = self.worst();
                 current_tns = self.tns();
                 let wns_improved = fuzzy::greater_equal(current_worst, prev_worst);
@@ -536,7 +515,9 @@ impl Repair<'_, '_> {
     ) -> Result<bool, RepairError> {
         let path = {
             let netlist = self.resizer.netlist();
-            self.sta().worst_slack_path(&netlist, end, MinMax::Max)
+            self.resizer
+                .sta()
+                .worst_slack_path(&netlist, end, MinMax::Max)
         };
         let Some(path) = path else {
             return Ok(false);

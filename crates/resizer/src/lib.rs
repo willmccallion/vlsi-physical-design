@@ -30,6 +30,8 @@ pub use library::{BufferSet, Link, LinkError};
 pub use netlist::{ClockNetwork, Constants, Namer, Netlist, NetlistError};
 pub use rebuffer::Rebuffer;
 pub use repair::{RepairSummary, Repairer};
-pub use resizer::{Context, RepairError, RepairOptions, Resizer, timing_net_weights};
-pub use setup::{SetupError, SetupOptions, SetupProgress, SetupSummary, repair_setup};
+pub use resizer::{
+    Context, RepairError, RepairOptions, Resizer, Timing, Untimed, timing_net_weights,
+};
+pub use setup::{SetupOptions, SetupProgress, SetupSummary, repair_setup};
 pub use sta::{Path, PathPoint, Sta, Tag, Via};

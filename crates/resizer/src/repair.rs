@@ -7,7 +7,7 @@
 //! estimate of every load's slew is within its limit.
 
 use crate::bnet::{self, BnetPtr, Kind};
-use crate::resizer::{RepairError, Resizer, gate_slew};
+use crate::resizer::{RepairError, Resizer, Timing, gate_slew};
 use pare_common::db::design::PinOwner;
 use pare_common::db::indices::{NetId, PinId};
 use pare_common::db::liberty::{ArcRole, LibCellId};
@@ -73,15 +73,15 @@ struct Branch {
 
 /// The design repair in progress.
 #[derive(Debug)]
-pub struct Repairer<'r, 'a> {
-    resizer: &'r mut Resizer<'a>,
+pub struct Repairer<'r, 'a, T: Timing> {
+    resizer: &'r mut Resizer<'a, T>,
     summary: RepairSummary,
     load_slew_violation_drivers: HashSet<PinId>,
 }
 
-impl<'r, 'a> Repairer<'r, 'a> {
+impl<'r, 'a, T: Timing> Repairer<'r, 'a, T> {
     /// Prepares a design repair over the session.
-    pub fn new(resizer: &'r mut Resizer<'a>) -> Self {
+    pub fn new(resizer: &'r mut Resizer<'a, T>) -> Self {
         Self {
             resizer,
             summary: RepairSummary::default(),

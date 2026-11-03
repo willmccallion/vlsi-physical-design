@@ -15,7 +15,7 @@ use crate::fuzzy;
 use crate::library::{BufferSet, Link};
 use crate::parasitics::WireRc;
 use crate::resizer::{RepairError, Resizer, buffer_delays, find_targets};
-use crate::sta::Via;
+use crate::sta::{Sta, Via};
 use pare_common::db::design::PinOwner;
 use pare_common::db::indices::{CellId, LayerId, NetId, PinId};
 use pare_common::db::liberty::{ArcRole, Edge, EdgeValues, LibCellId, MinMax};
@@ -88,7 +88,7 @@ pub struct Rebuffer {
 impl Rebuffer {
     /// Characterizes the buffers the search may insert, as `Rebuffer::init`
     /// and `initOnCorner`.
-    pub fn new(resizer: &Resizer<'_>) -> Result<Self, RepairError> {
+    pub fn new(resizer: &Resizer<'_, Sta>) -> Result<Self, RepairError> {
         let max_wire_length = max_wire_length(resizer);
         let mut sizes: Vec<BufferSize> = find_fast_buffers(resizer)
             .into_iter()
@@ -116,7 +116,7 @@ impl Rebuffer {
     /// the least of the longest wire repair allows and the wire the smallest
     /// buffer drives within its load's slew and its own load limit on the
     /// layer's RC.
-    fn wire_length_step_on(&self, resizer: &Resizer<'_>, layer: Option<LayerId>) -> i64 {
+    fn wire_length_step_on(&self, resizer: &Resizer<'_, Sta>, layer: Option<LayerId>) -> i64 {
         let (res, cap) = resizer.tree_rc().wire(layer);
         if layer.is_none() || cap <= 0.0 || res <= 0.0 {
             return self.wire_length_step;
@@ -155,7 +155,7 @@ impl Rebuffer {
     /// `Rebuffer::rebufferPin`; returns how many buffers went in.
     pub fn rebuffer_pin(
         &mut self,
-        resizer: &mut Resizer<'_>,
+        resizer: &mut Resizer<'_, Sta>,
         driver: PinId,
     ) -> Result<usize, RepairError> {
         let PinOwner::Cell { .. } = resizer.db.pins[driver.index()].owner else {
@@ -194,7 +194,7 @@ impl Rebuffer {
 
     /// Strips the buffers from every net and buffers it again for timing,
     /// as `Rebuffer::fullyRebuffer` does for timing-driven placement.
-    pub fn fully_rebuffer(&mut self, resizer: &mut Resizer<'_>) -> Result<(), RepairError> {
+    pub fn fully_rebuffer(&mut self, resizer: &mut Resizer<'_, Sta>) -> Result<(), RepairError> {
         let drivers: Vec<PinId> = {
             let netlist = resizer.netlist();
             let mut drivers = resizer.graph.drivers_by_level(&netlist);
@@ -227,9 +227,7 @@ impl Rebuffer {
             };
             let original = self.annotate_load_slacks(resizer, &original, driver);
             let slack = self.slack_at_driver(resizer, &original).to_seconds();
-            let sta_slack = resizer
-                .sta()
-                .map_or(f64::INFINITY, |sta| sta.slack(driver, MinMax::Max));
+            let sta_slack = resizer.sta().slack(driver, MinMax::Max);
             let slack_error = slack - sta_slack;
             let unbuffered = resteiner(resizer, &strip_buffers(&original));
             let Some(mut timing_tree) = unbuffered.clone() else {
@@ -288,7 +286,7 @@ impl Rebuffer {
     }
 
     /// Notes the driver at hand: its fanout and slew limits, as `setPin`.
-    fn set_driver(&mut self, resizer: &Resizer<'_>, pin: PinId) {
+    fn set_driver(&mut self, resizer: &Resizer<'_, Sta>, pin: PinId) {
         let (cell, port) = resizer
             .link
             .pin_port(resizer.db, pin)
@@ -312,7 +310,7 @@ impl Rebuffer {
     /// then times every node up from the loads, as `annotateTiming`.
     fn annotate_load_slacks(
         &mut self,
-        resizer: &Resizer<'_>,
+        resizer: &Resizer<'_, Sta>,
         tree: &BnetPtr,
         driver: PinId,
     ) -> BnetPtr {
@@ -326,16 +324,14 @@ impl Rebuffer {
 
     fn annotate_loads(
         &self,
-        resizer: &Resizer<'_>,
+        resizer: &Resizer<'_, Sta>,
         node: &BnetPtr,
         driver: PinId,
         arrival_paths: &mut [Option<DriverPoint>; 2],
     ) -> BnetPtr {
         match &node.kind {
             Kind::Load { pin } => {
-                let Some(sta) = resizer.sta() else {
-                    return node.with_slack(Fixed::INF, None);
-                };
+                let sta = resizer.sta();
                 let netlist = resizer.netlist();
                 let Some(path) = sta.worst_slack_path(&netlist, *pin, MinMax::Max) else {
                     return node.with_slack(Fixed::INF, None);
@@ -388,7 +384,7 @@ impl Rebuffer {
 
     /// Rebuilds a tree so every node's slack, capacitance and delay follow
     /// from its children, as `annotateTiming`.
-    fn retime(&self, resizer: &Resizer<'_>, node: &BnetPtr) -> BnetPtr {
+    fn retime(&self, resizer: &Resizer<'_, Sta>, node: &BnetPtr) -> BnetPtr {
         match &node.kind {
             Kind::Load { .. } => Rc::clone(node),
             Kind::Junction { left, right } => Bnet::junction(
@@ -417,7 +413,7 @@ impl Rebuffer {
     /// A buffer node of `cell` at `at` driving `to`, timed at the load.
     fn buffer_node(
         &self,
-        resizer: &Resizer<'_>,
+        resizer: &Resizer<'_, Sta>,
         at: Point<Dbu>,
         cell: LibCellId,
         to: BnetPtr,
@@ -447,7 +443,7 @@ impl Rebuffer {
     /// The driver's gate delay, slack correction and slew for a tree, as
     /// `drvrPinTiming`: the gate timed again at the tree's load, and the
     /// correction the arrival at the driver would take from that.
-    fn driver_timing(&self, resizer: &Resizer<'_>, tree: &Bnet) -> DriverTiming {
+    fn driver_timing(&self, resizer: &Resizer<'_, Sta>, tree: &Bnet) -> DriverTiming {
         let Some(driver) = &self.driver else {
             return DriverTiming {
                 delay: 0.0,
@@ -505,7 +501,7 @@ impl Rebuffer {
             }
             let prev_arrival = resizer
                 .sta()
-                .and_then(|sta| sta.arrival(from_pin, from_edge, MinMax::Max))
+                .arrival(from_pin, from_edge, MinMax::Max)
                 .unwrap_or(0.0);
             let rf_correction = point.arrival - (prev_arrival + rf_delay);
             delay = f64::max(delay, rf_delay);
@@ -523,13 +519,13 @@ impl Rebuffer {
     }
 
     /// The tree's slack as the driver sees it.
-    fn slack_at_driver(&self, resizer: &Resizer<'_>, tree: &Bnet) -> Fixed {
+    fn slack_at_driver(&self, resizer: &Resizer<'_, Sta>, tree: &Bnet) -> Fixed {
         tree.slack + Fixed::from_seconds(self.driver_timing(resizer, tree).correction)
     }
 
     /// Whether the driver's slew keeps every load of the tree within its
     /// limit by the Elmore estimate, as `loadSlewSatisfactory`.
-    fn load_slew_satisfactory(&self, resizer: &Resizer<'_>, tree: &Bnet) -> bool {
+    fn load_slew_satisfactory(&self, resizer: &Resizer<'_, Sta>, tree: &Bnet) -> bool {
         let Some(driver) = &self.driver else {
             return true;
         };
@@ -546,7 +542,7 @@ impl Rebuffer {
 
     /// The slack of a candidate tree at the driver, or none when the driver
     /// could not drive it, as `evaluateOption`.
-    fn evaluate_option(&mut self, resizer: &Resizer<'_>, option: &Bnet) -> Option<Fixed> {
+    fn evaluate_option(&mut self, resizer: &Resizer<'_, Sta>, option: &Bnet) -> Option<Fixed> {
         let timing = self.driver_timing(resizer, option);
         let slack = option.slack + Fixed::from_seconds(timing.correction);
         if !self.load_slew_satisfactory(resizer, option) {
@@ -565,7 +561,7 @@ impl Rebuffer {
     /// the most slack at the driver.
     fn buffer_for_timing(
         &mut self,
-        resizer: &Resizer<'_>,
+        resizer: &Resizer<'_, Sta>,
         tree: &BnetPtr,
         allow_rewrite: bool,
     ) -> Option<BnetPtr> {
@@ -587,7 +583,7 @@ impl Rebuffer {
 
     fn timing_options(
         &self,
-        resizer: &Resizer<'_>,
+        resizer: &Resizer<'_, Sta>,
         node: &BnetPtr,
         allow_rewrite: bool,
     ) -> Vec<BnetPtr> {
@@ -611,7 +607,7 @@ impl Rebuffer {
     /// buffers offered at each step, short ones get buffers at either end.
     fn wire_options(
         &self,
-        resizer: &Resizer<'_>,
+        resizer: &Resizer<'_, Sta>,
         node: &Bnet,
         under: &Bnet,
         layer: Option<LayerId>,
@@ -674,7 +670,7 @@ impl Rebuffer {
     /// most slack down, keeping the pairs that lower the capacitance.
     fn junction_options(
         &self,
-        resizer: &Resizer<'_>,
+        resizer: &Resizer<'_, Sta>,
         node: &Bnet,
         left: &[BnetPtr],
         right: &[BnetPtr],
@@ -752,7 +748,7 @@ impl Rebuffer {
     /// critical half of the critical side, as `attemptTopologyRewrite`.
     fn rewrite_topology(
         &self,
-        resizer: &Resizer<'_>,
+        resizer: &Resizer<'_, Sta>,
         node: &Bnet,
         left: &BnetPtr,
         right: &BnetPtr,
@@ -813,7 +809,7 @@ impl Rebuffer {
     /// no less than a slack threshold), as `insertBufferOptions`.
     fn insert_buffer_options(
         &self,
-        resizer: &Resizer<'_>,
+        resizer: &Resizer<'_, Sta>,
         options: &mut Vec<BnetPtr>,
         next_segment: i64,
         area: Option<(Fixed, &Bnet)>,
@@ -976,7 +972,7 @@ impl Rebuffer {
     /// `recoverArea`.
     fn recover_area(
         &mut self,
-        resizer: &Resizer<'_>,
+        resizer: &Resizer<'_, Sta>,
         root: &BnetPtr,
         slack_target: Fixed,
         alpha: f64,
@@ -1019,7 +1015,7 @@ impl Rebuffer {
 
     fn area_options(
         &self,
-        resizer: &Resizer<'_>,
+        resizer: &Resizer<'_, Sta>,
         node: &BnetPtr,
         slack_target: Fixed,
         alpha: f64,
@@ -1097,12 +1093,12 @@ impl Rebuffer {
 
     /// The tree of `driver`'s net with the removable buffers under it
     /// folded in as buffer nodes, as `importBufferTree`.
-    fn import_buffer_tree(&self, resizer: &Resizer<'_>, driver: PinId) -> Option<BnetPtr> {
+    fn import_buffer_tree(&self, resizer: &Resizer<'_, Sta>, driver: PinId) -> Option<BnetPtr> {
         let tree = make_tree(resizer, driver)?;
         self.import_node(resizer, &tree)
     }
 
-    fn import_node(&self, resizer: &Resizer<'_>, node: &BnetPtr) -> Option<BnetPtr> {
+    fn import_node(&self, resizer: &Resizer<'_, Sta>, node: &BnetPtr) -> Option<BnetPtr> {
         match &node.kind {
             Kind::Wire { to, layer } => {
                 let inner = self.import_node(resizer, to)?;
@@ -1163,7 +1159,7 @@ impl Rebuffer {
 /// Puts the buffers of a chosen tree into the design, bottom up, as
 /// `exportBufferTree`; returns how many went in.
 fn export_tree(
-    resizer: &mut Resizer<'_>,
+    resizer: &mut Resizer<'_, Sta>,
     tree: &BnetPtr,
     base: &str,
 ) -> Result<usize, RepairError> {
@@ -1175,7 +1171,7 @@ fn export_tree(
 /// Inserts the buffers under `node` and returns the pins its parent
 /// drives.
 fn export_node(
-    resizer: &mut Resizer<'_>,
+    resizer: &mut Resizer<'_, Sta>,
     node: &BnetPtr,
     base: &str,
     count: &mut usize,
@@ -1204,14 +1200,14 @@ fn export_node(
 
 /// A fresh Steiner tree over the loads of `tree` from its top, as
 /// `resteiner`; none when it has no loads.
-fn resteiner(resizer: &Resizer<'_>, tree: &BnetPtr) -> Option<BnetPtr> {
+fn resteiner(resizer: &Resizer<'_, Sta>, tree: &BnetPtr) -> Option<BnetPtr> {
     let mut sinks = Vec::new();
     collect_sinks(tree, &mut sinks);
     bnet::over_subtrees(tree.at, &sinks, &resizer.tree_rc())
 }
 
 /// The tree of `driver`'s net over its estimated parasitics.
-fn make_tree(resizer: &Resizer<'_>, driver: PinId) -> Option<BnetPtr> {
+fn make_tree(resizer: &Resizer<'_, Sta>, driver: PinId) -> Option<BnetPtr> {
     let net = resizer.db.pins[driver.index()].net;
     let netlist = resizer.netlist();
     let parasitics = resizer.graph.parasitics(net)?;
@@ -1220,14 +1216,19 @@ fn make_tree(resizer: &Resizer<'_>, driver: PinId) -> Option<BnetPtr> {
 
 /// A wire node from `at` down to `to` on `layer`, or at the signal wire
 /// RC without one.
-fn wire(resizer: &Resizer<'_>, at: Point<Dbu>, layer: Option<LayerId>, to: BnetPtr) -> BnetPtr {
+fn wire(
+    resizer: &Resizer<'_, Sta>,
+    at: Point<Dbu>,
+    layer: Option<LayerId>,
+    to: BnetPtr,
+) -> BnetPtr {
     Bnet::wire(at, to, layer, &resizer.tree_rc())
 }
 
 /// The worst delay of `size` over `edges` at `load_cap`, as
 /// `Rebuffer::bufferDelay`; zero without edges.
 fn buffer_delay(
-    resizer: &Resizer<'_>,
+    resizer: &Resizer<'_, Sta>,
     size: &BufferSize,
     edges: Option<SlackEdges>,
     load_cap: f64,
@@ -1246,7 +1247,7 @@ fn buffer_delay(
 
 /// Whether `size` can drive `tree` plus `extra_wire` of wire within its
 /// slew and load limits, as `bufferSizeCanDriveLoad`.
-fn can_drive(resizer: &Resizer<'_>, size: &BufferSize, tree: &Bnet, extra_wire: i64) -> bool {
+fn can_drive(resizer: &Resizer<'_, Sta>, size: &BufferSize, tree: &Bnet, extra_wire: i64) -> bool {
     let rc = resizer.graph.wire_rc();
     let dbu = resizer.db.dbu().get() as f64;
     let extra_cap = extra_wire as f64 / dbu * 1e-6 * rc.capacitance + size.output_cap;
@@ -1398,7 +1399,11 @@ fn collect_sinks(node: &BnetPtr, sinks: &mut Vec<BnetPtr>) {
 /// The buffers downstream of `driver` that `imported` did not keep as
 /// loads: those to remove once the net is rebuffered, as
 /// `collectImportedTreeBufferInstances`.
-fn collect_imported_buffers(resizer: &Resizer<'_>, driver: PinId, imported: &Bnet) -> Vec<CellId> {
+fn collect_imported_buffers(
+    resizer: &Resizer<'_, Sta>,
+    driver: PinId,
+    imported: &Bnet,
+) -> Vec<CellId> {
     let kept: rustc_hash::FxHashSet<PinId> = imported.loads().into_iter().collect();
     let netlist = resizer.netlist();
     let mut buffers = Vec::new();
@@ -1429,7 +1434,7 @@ fn collect_imported_buffers(resizer: &Resizer<'_>, driver: PinId, imported: &Bne
 
 /// Whether a buffer sits directly on a port's net with nothing else, as
 /// `isPortBuffer`.
-fn is_port_buffer(resizer: &Resizer<'_>, cell: CellId) -> bool {
+fn is_port_buffer(resizer: &Resizer<'_, Sta>, cell: CellId) -> bool {
     let netlist = resizer.netlist();
     resizer.db.cells[cell.index()].pins.iter().any(|&pin| {
         let net = resizer.db.pins[pin.index()].net;
@@ -1444,7 +1449,7 @@ fn is_port_buffer(resizer: &Resizer<'_>, cell: CellId) -> bool {
 
 /// Whether a buffer may be taken out: a plain standard cell with both its
 /// nets free of ports that constraints name, as `canRemoveBuffer`.
-pub(crate) fn can_remove_buffer(resizer: &Resizer<'_>, cell: CellId) -> bool {
+pub(crate) fn can_remove_buffer(resizer: &Resizer<'_, Sta>, cell: CellId) -> bool {
     let Some((_, lib)) = resizer.link.cell(resizer.db, cell) else {
         return false;
     };
@@ -1458,9 +1463,7 @@ pub(crate) fn can_remove_buffer(resizer: &Resizer<'_>, cell: CellId) -> bool {
     let in_net = resizer.db.pins[in_pin.index()].net;
     let out_net = resizer.db.pins[out_pin.index()].net;
     let constrained = |net: NetId| {
-        let Some(sta) = resizer.sta() else {
-            return false;
-        };
+        let sta = resizer.sta();
         resizer.db.nets[net.index()].pins.iter().any(|&p| {
             matches!(resizer.db.pins[p.index()].owner, PinOwner::Io(io)
                 if sta.sdc().input_delays.contains_key(&io)
@@ -1478,7 +1481,7 @@ pub(crate) fn can_remove_buffer(resizer: &Resizer<'_>, cell: CellId) -> bool {
 }
 
 /// Whether a net reaches an output port of the design.
-fn has_top_level_output(resizer: &Resizer<'_>, net: NetId) -> bool {
+fn has_top_level_output(resizer: &Resizer<'_, Sta>, net: NetId) -> bool {
     resizer.db.nets[net.index()].pins.iter().any(|&p| {
         matches!(resizer.db.pins[p.index()].owner, PinOwner::Io(io)
             if matches!(resizer.db.io_pins[io.index()].direction,
@@ -1492,7 +1495,7 @@ fn margined(limit: f64, percent: f64) -> f64 {
 
 /// What a buffer presents and can drive, as `BufferSize` with
 /// `characterizeBufferLimits`.
-fn buffer_size(resizer: &Resizer<'_>, cell: LibCellId) -> Result<BufferSize, RepairError> {
+fn buffer_size(resizer: &Resizer<'_, Sta>, cell: LibCellId) -> Result<BufferSize, RepairError> {
     let lib = resizer.link.liberty.cell(cell);
     let (input, output) = lib
         .buffer_ports()
@@ -1524,7 +1527,7 @@ fn buffer_size(resizer: &Resizer<'_>, cell: LibCellId) -> Result<BufferSize, Rep
 
 /// The load at which a buffer's own slew reaches its limit, by bisection,
 /// as `findBufferLoadLimitImpliedByDriverSlew`.
-fn load_limit_by_driver_slew(resizer: &Resizer<'_>, cell: LibCellId) -> f64 {
+fn load_limit_by_driver_slew(resizer: &Resizer<'_, Sta>, cell: LibCellId) -> f64 {
     let lib = resizer.link.liberty.cell(cell);
     let Some((input, output)) = lib.buffer_ports() else {
         return f64::INFINITY;
@@ -1574,7 +1577,7 @@ fn load_limit_by_driver_slew(resizer: &Resizer<'_>, cell: LibCellId) -> f64 {
 /// database units, as `wireLengthLimitImpliedByLoadSlew`.
 // The quadratic keeps OpenROAD's grouping so it can be checked against it.
 #[allow(clippy::suboptimal_flops)]
-fn wire_length_limit_by_load_slew(resizer: &Resizer<'_>, size: &BufferSize) -> i64 {
+fn wire_length_limit_by_load_slew(resizer: &Resizer<'_, Sta>, size: &BufferSize) -> i64 {
     let rc = resizer.graph.wire_rc();
     let dbu = resizer.db.dbu().get() as f64;
     let max_slew = margined(size.input_max_slew, SLEW_MARGIN);
@@ -1597,7 +1600,7 @@ fn wire_length_limit_by_load_slew(resizer: &Resizer<'_>, size: &BufferSize) -> i
 
 /// The wire a buffer can drive before its load limit is reached, as
 /// `wireLengthLimitImpliedByMaxCap`.
-fn wire_length_limit_by_max_cap(resizer: &Resizer<'_>, size: &BufferSize) -> i64 {
+fn wire_length_limit_by_max_cap(resizer: &Resizer<'_, Sta>, size: &BufferSize) -> i64 {
     let lib = resizer.link.liberty.cell(size.cell);
     let Some((_, output)) = lib.buffer_ports() else {
         return i64::MAX;
@@ -1627,7 +1630,7 @@ fn meters_to_dbu(meters: f64, dbu: f64) -> i64 {
 /// The buffers worth inserting for speed: of the repair buffers by rising
 /// input capacitance, those no other buffer beats at every load, as
 /// `findFastBuffers`.
-fn find_fast_buffers(resizer: &Resizer<'_>) -> Vec<LibCellId> {
+fn find_fast_buffers(resizer: &Resizer<'_, Sta>) -> Vec<LibCellId> {
     let input_cap = |cell: LibCellId| resizer.link.buffer_input_capacitance(cell);
     let mut by_input: Vec<LibCellId> = resizer.buffers.cells.clone();
     by_input.sort_by(|&a, &b| input_cap(a).total_cmp(&input_cap(b)));
@@ -1658,7 +1661,7 @@ fn find_fast_buffers(resizer: &Resizer<'_>) -> Vec<LibCellId> {
 /// Whether `better` is at least as fast as `worse` at every load either
 /// table covers, once its extra input capacitance is charged against it,
 /// as `bufferSizeOutmatched`.
-fn outmatched(resizer: &Resizer<'_>, worse: LibCellId, better: LibCellId, r_max: f64) -> bool {
+fn outmatched(resizer: &Resizer<'_, Sta>, worse: LibCellId, better: LibCellId, r_max: f64) -> bool {
     let liberty = resizer.link.liberty;
     let (w, b) = (liberty.cell(worse), liberty.cell(better));
     let (Some((w_in, w_out)), Some((b_in, _))) = (w.buffer_ports(), b.buffer_ports()) else {
@@ -1707,7 +1710,7 @@ fn outmatched(resizer: &Resizer<'_>, worse: LibCellId, better: LibCellId, r_max:
 ///
 /// The shortest, over the repair buffers, at which one buffer driving the
 /// wire whole is slower than two each driving half, as `findMaxWireLength`.
-pub fn max_wire_length(resizer: &Resizer<'_>) -> i64 {
+pub fn max_wire_length(resizer: &Resizer<'_, Sta>) -> i64 {
     wire_length_limit(
         resizer.link,
         &resizer.buffers,
