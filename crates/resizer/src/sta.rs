@@ -89,6 +89,11 @@ impl Entry {
 /// on the late side.
 const REQUIRED_INIT: [f64; 2] = [f64::NEG_INFINITY, f64::INFINITY];
 
+/// The required time of a pin `OpenSTA`'s required search never reaches,
+/// one with neither fanin nor fanout such as an unconnected input port:
+/// the zero its paths start with, so a late arrival leaves negative slack.
+const REQUIRED_UNREACHED: [f64; 2] = [0.0, 0.0];
+
 /// Whether a required time is the unconstrained one.
 const fn unconstrained(required: f64) -> bool {
     required.is_infinite()
@@ -1093,11 +1098,14 @@ impl Sta {
     /// stores them; true when they changed.
     fn visit_requireds(&mut self, netlist: &Netlist<'_>, graph: &TimingGraph, pin: PinId) -> bool {
         let mut changed = false;
+        let unreached = is_isolated(netlist, graph, pin);
         for edge in Edge::BOTH {
             let entries = self.entries(pin, edge).to_vec();
             for (k, entry) in entries.iter().enumerate() {
                 let required = if self.tags[entry.tag.index()].is_clock {
                     REQUIRED_INIT
+                } else if unreached {
+                    REQUIRED_UNREACHED
                 } else {
                     let mut required = self.fanout_requireds(netlist, graph, pin, edge, entry.tag);
                     if self.is_endpoint(pin) {
@@ -1617,6 +1625,11 @@ fn successors(netlist: &Netlist<'_>, graph: &TimingGraph, pin: PinId) -> Vec<Pin
     next
 }
 
+/// Whether timing neither reaches `pin` from another pin nor leaves it.
+fn is_isolated(netlist: &Netlist<'_>, graph: &TimingGraph, pin: PinId) -> bool {
+    predecessors(netlist, graph, pin).is_empty() && successors(netlist, graph, pin).is_empty()
+}
+
 /// The pins timing comes from into `pin`.
 fn predecessors(netlist: &Netlist<'_>, graph: &TimingGraph, pin: PinId) -> Vec<PinId> {
     let mut prev = Vec::new();
@@ -1739,7 +1752,15 @@ fn cycle_accounting(sdc: &Sdc, launch: ClockEdge, target: ClockEdge) -> Accounti
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::graph::Estimator;
+    use crate::library::Link;
+    use crate::parasitics::WireRc;
+    use pare_common::db::design::NetlistDB;
+    use pare_common::db::indices::LayerId;
+    use pare_common::db::parser::{def, lef, liberty, sdc};
     use pare_common::db::sdc::Clock;
+    use pare_common::geom::dbu::DbuPerMicron;
+    use std::path::{Path, PathBuf};
 
     fn clock(name: &str, period: f64, rise: f64, fall: f64) -> Clock {
         Clock {
@@ -1827,6 +1848,61 @@ mod tests {
 
         assert!((acct.setup_required - 1e-9).abs() < 1e-20);
         assert!(acct.hold_required.abs() < 1e-20);
+    }
+
+    fn fixture(crate_name: &str, name: &str) -> PathBuf {
+        Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("..")
+            .join(crate_name)
+            .join("tests/fixtures")
+            .join(name)
+    }
+
+    /// A flop clocked and fed from ports, beside an input port on nothing.
+    fn dangling_port_design() -> NetlistDB {
+        let text = "VERSION 5.8 ;\nDIVIDERCHAR \"/\" ;\nBUSBITCHARS \"[]\" ;\nDESIGN dangle ;\n\
+            UNITS DISTANCE MICRONS 2000 ;\nDIEAREA ( 0 0 ) ( 40000 40000 ) ;\n\
+            COMPONENTS 1 ;\n- f DFF_X1 + PLACED ( 2000 2800 ) N ;\nEND COMPONENTS\n\
+            PINS 3 ;\n- clk + NET clk + DIRECTION INPUT ;\n- in + NET in + DIRECTION INPUT ;\n\
+            - boot + NET boot + DIRECTION INPUT ;\nEND PINS\n\
+            NETS 3 ;\n- clk ( PIN clk ) ( f CK ) ;\n- in ( PIN in ) ( f D ) ;\n\
+            - boot ( PIN boot ) ;\nEND NETS\nEND DESIGN\n";
+        let units = DbuPerMicron::new(2000).unwrap();
+        let library = lef::parse_files(&[fixture("cts", "clock.lef")], units).unwrap();
+        def::parse_str(text, Path::new("dangle.def"), library).unwrap()
+    }
+
+    #[test]
+    fn an_input_port_on_nothing_keeps_the_negative_of_its_input_delay_as_slack() {
+        let db = dangling_port_design();
+        let lib = liberty::parse_file(&fixture("cts", "clock.lib")).unwrap();
+        let constraints = "create_clock -name clk -period 2.2 [get_ports clk]\n\
+            set_input_delay 0.44 -clock clk [get_ports in]\n\
+            set_input_delay 0.44 -clock clk [get_ports boot]\n";
+        let sdc = sdc::parse_str(constraints, Path::new("dangle.sdc"), &db, &lib).unwrap();
+        let link = Link::new(&db, &lib, &[]).unwrap();
+        let netlist = Netlist::new(&db, &link);
+        let constants = Constants::find(&netlist);
+        let clocks = ClockNetwork::from_sdc(&netlist, &sdc, &constants);
+        let rc = WireRc {
+            resistance: 0.0,
+            capacitance: 0.0,
+            layer: LayerId(1),
+        };
+        let graph = TimingGraph::new(
+            &netlist,
+            &clocks,
+            &constants,
+            rc,
+            None,
+            Estimator::Placement,
+        );
+        let boot = db.io_pins[db.io_pin_id("boot").unwrap().index()].pin;
+
+        let sta = Sta::new(&netlist, &graph, &clocks, &constants, &sdc);
+
+        let slack = sta.slack(boot, MinMax::Max);
+        assert!((slack + 0.44e-9).abs() < 1e-15, "{slack}");
     }
 
     #[test]
