@@ -81,7 +81,14 @@ fn reorder_segments(imp: &mut Improver, marks: &mut EdgeMarks) {
                 let left_limit = istrt
                     .checked_sub(1)
                     .map_or(seg.min_x, |p| imp.right(cells[p]).max(seg.min_x));
-                reorder_window(imp, marks, s, istrt, istop, left_limit, right_limit);
+                let window = Window {
+                    segment: s,
+                    first: istrt,
+                    last: istop,
+                    left_limit,
+                    right_limit,
+                };
+                reorder_window(imp, marks, &window);
                 i += 1;
             }
         }
@@ -104,30 +111,69 @@ fn sort_segment(imp: &mut Improver, s: usize, start: usize, end: usize) {
     imp.cells_in_seg[s] = cells;
 }
 
+/// A run of a segment's cells, `first` to `last` in its order, and the
+/// gap they may use.
+struct Window {
+    segment: usize,
+    first: usize,
+    last: usize,
+    left_limit: i64,
+    right_limit: i64,
+}
+
 /// Tries every order of the window's cells, spaced evenly in its gap, and
 /// keeps the cheapest legal one, as `DetailedReorderer::reorder` of a
 /// window.
-fn reorder_window(
-    imp: &mut Improver,
-    marks: &mut EdgeMarks,
-    s: usize,
-    jstrt: usize,
-    jstop: usize,
-    left_limit: i64,
-    right_limit: i64,
-) {
-    let window: Vec<usize> = imp.cells_in_seg[s][jstrt..=jstop].to_vec();
-    let size = window.len();
-    let original: Vec<i64> = window.iter().map(|&n| imp.left(n)).collect();
-    let width: Vec<i64> = window.iter().map(|&n| imp.width(n)).collect();
-    let total_width: i64 = width.iter().sum();
-    let span = right_limit - left_limit;
-    if span < total_width {
+fn reorder_window(imp: &mut Improver, marks: &mut EdgeMarks, w: &Window) {
+    let cells: Vec<usize> = imp.cells_in_seg[w.segment][w.first..=w.last].to_vec();
+    let original: Vec<i64> = cells.iter().map(|&n| imp.left(n)).collect();
+    let width: Vec<i64> = cells.iter().map(|&n| imp.width(n)).collect();
+    let site_width = imp.arch.rows[0].site_width;
+    let Some(pads) = even_padding(&width, w.right_limit - w.left_limit, site_width) else {
         return;
+    };
+    let orig_cost = cost(imp, marks, &cells);
+    let Some(best) = cheapest_order(imp, marks, &cells, &width, &pads, w.left_limit, orig_cost)
+    else {
+        place_at(imp, &cells, &original);
+        return;
+    };
+    place_at(imp, &cells, &best);
+    sort_segment(imp, w.segment, w.first, w.last + 1);
+    let realigned = realign(imp, w);
+    let ordered = imp.cells_in_seg[w.segment][w.first..=w.last].to_vec();
+    let failed = match realigned {
+        None => true,
+        Some(shifted) => {
+            (shifted && cost(imp, marks, &ordered) >= orig_cost)
+                || ordered.iter().any(|&n| imp.has_placement_violation(n))
+        }
+    };
+    if failed {
+        let lefts: Vec<i64> = ordered
+            .iter()
+            .map(|&n| {
+                cells
+                    .iter()
+                    .position(|&c| c == n)
+                    .map_or_else(|| imp.left(n), |i| original[i])
+            })
+            .collect();
+        place_at(imp, &ordered, &lefts);
+        sort_segment(imp, w.segment, w.first, w.last + 1);
+    }
+}
+
+/// The site padding left and right of each cell that spreads cells of
+/// `width` evenly over `span`; none when they do not fit.
+fn even_padding(width: &[i64], span: i64, site_width: i64) -> Option<(Vec<i64>, Vec<i64>)> {
+    let size = width.len();
+    let total_width: i64 = width.iter().sum();
+    if span < total_width {
+        return None;
     }
     let size_i64 = i64::try_from(size).unwrap_or(1);
     let space_per_cell = (span - total_width) / size_i64;
-    let site_width = imp.arch.rows[0].site_width;
     let sites_per_cell = space_per_cell / site_width;
     let sites_right = sites_per_cell >> 1;
     let sites_left = sites_per_cell - sites_right;
@@ -143,10 +189,22 @@ fn reorder_window(
             left_pad[i] += sites_left * site_width;
         }
     }
-    if span < total_width + padding {
-        return;
-    }
-    let orig_cost = cost(imp, marks, &window);
+    (span >= total_width + padding).then_some((left_pad, right_pad))
+}
+
+/// The left edges of the cheapest order of `cells` packed from
+/// `left_limit` with `pads`, each cell within reach of where it started,
+/// if one costs less than `orig_cost`.
+fn cheapest_order(
+    imp: &mut Improver,
+    marks: &mut EdgeMarks,
+    cells: &[usize],
+    width: &[i64],
+    (left_pad, right_pad): &(Vec<i64>, Vec<i64>),
+    left_limit: i64,
+    orig_cost: f64,
+) -> Option<Vec<i64>> {
+    let size = cells.len();
     let mut best_cost = orig_cost;
     let mut best: Option<Vec<i64>> = None;
     let mut order: Vec<usize> = (0..size).collect();
@@ -155,7 +213,7 @@ fn reorder_window(
         let mut within_reach = true;
         let mut x = left_limit;
         for &ix in &order {
-            let n = window[ix];
+            let n = cells[ix];
             x += left_pad[ix];
             positions[ix] = x;
             imp.erase(n);
@@ -168,31 +226,26 @@ fn reorder_window(
             }
         }
         if within_reach {
-            let c = cost(imp, marks, &window);
+            let c = cost(imp, marks, cells);
             if c < best_cost {
                 best = Some(positions.clone());
                 best_cost = c;
             }
         }
         if !next_permutation(&mut order) {
-            break;
+            return best;
         }
     }
-    let Some(best) = best else {
-        place_at(imp, &window, &original);
-        return;
-    };
-    place_at(imp, &window, &best);
-    sort_segment(imp, s, jstrt, jstop + 1);
-    let mut failed = false;
+}
+
+/// Aligns the window's cells, left to right, to legal sites within reach;
+/// whether any moved, or none when one cannot be aligned.
+fn realign(imp: &mut Improver, w: &Window) -> Option<bool> {
     let mut shifted = false;
-    let mut left = left_limit;
-    for i in jstrt..=jstop {
-        let n = imp.cells_in_seg[s][i];
-        let Some(x) = imp.align(n, imp.left(n), left, right_limit) else {
-            failed = true;
-            break;
-        };
+    let mut left = w.left_limit;
+    for i in w.first..=w.last {
+        let n = imp.cells_in_seg[w.segment][i];
+        let x = imp.align(n, imp.left(n), left, w.right_limit)?;
         shifted |= x != imp.left(n);
         imp.erase(n);
         let bottom = imp.bottom(n);
@@ -200,30 +253,10 @@ fn reorder_window(
         imp.paint(n);
         left = imp.right(n);
         if (imp.left(n) - imp.orig(n).0).abs() > imp.max_displacement.0 {
-            failed = true;
-            break;
+            return None;
         }
     }
-    let ordered = imp.cells_in_seg[s][jstrt..=jstop].to_vec();
-    if !failed && shifted && cost(imp, marks, &ordered) >= orig_cost {
-        failed = true;
-    }
-    if !failed {
-        failed = ordered.iter().any(|&n| imp.has_placement_violation(n));
-    }
-    if failed {
-        let lefts: Vec<i64> = ordered
-            .iter()
-            .map(|&n| {
-                window
-                    .iter()
-                    .position(|&w| w == n)
-                    .map_or_else(|| imp.left(n), |i| original[i])
-            })
-            .collect();
-        place_at(imp, &ordered, &lefts);
-        sort_segment(imp, s, jstrt, jstop + 1);
-    }
+    Some(shifted)
 }
 
 /// Moves each cell to its left edge, keeping its row.
