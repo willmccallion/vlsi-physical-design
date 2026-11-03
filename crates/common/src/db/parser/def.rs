@@ -1,0 +1,1559 @@
+//! DEF (Design Exchange Format) parser.
+//!
+//! Reads the die area, rows, tracks, vias, non-default rules, regions,
+//! components, pins, blockages, special nets, nets and groups of a design on
+//! top of a [`Library`] built from LEF. Sections and options that carry
+//! nothing placement or routing uses are skipped by name; anything else the
+//! parser does not know is skipped with a warning, once per keyword and file.
+
+use crate::db::design::{
+    BlockageKind, GCellGridDef, NetlistDB, NonDefaultLayer, NonDefaultRule, PlacementBlockage,
+    PlacementStatus, Region, RegionKind, RouteElem, Row, SpecialNet, SpecialRect, SpecialWire,
+    TrackAxis, TrackDef,
+};
+use crate::db::indices::{CellId, LayerId, NetId, NonDefaultRuleId, RegionId, ViaId, ViaRuleId};
+use crate::db::library::{LayerRef, Library, PinDirection, Shape, SignalUse, ViaDef};
+use crate::db::parser::lef::{parse_pin_direction, parse_signal_use, via_from_shapes};
+use crate::db::parser::lexer::{Lexer, ParseError, Token, read_file};
+use crate::geom::dbu::{Dbu, DbuPerMicron};
+use crate::geom::orient::Orientation;
+use crate::geom::point::Point;
+use crate::geom::rect::Rect;
+use std::collections::{HashMap, HashSet};
+use std::path::Path;
+
+/// Top-level statements and sections that carry nothing placement or
+/// routing uses.
+const TOP_IGNORED: &[&str] = &[
+    "VERSION",
+    "DIVIDERCHAR",
+    "BUSBITCHARS",
+    "TECHNOLOGY",
+    "HISTORY",
+    "NAMESCASESENSITIVE",
+];
+const SECTIONS_IGNORED: &[&str] = &["PROPERTYDEFINITIONS", "SCANCHAINS", "PINPROPERTIES"];
+const COMPONENT_IGNORED: &[&str] = &[
+    "SOURCE",
+    "WEIGHT",
+    "PROPERTY",
+    "EEQMASTER",
+    "GENERATE",
+    "FOREIGN",
+    "MASKSHIFT",
+];
+const PIN_IGNORED: &[&str] = &[
+    "SPECIAL",
+    "NETEXPR",
+    "SUPPLYSENSITIVITY",
+    "GROUNDSENSITIVITY",
+];
+const NET_IGNORED: &[&str] = &[
+    "SOURCE",
+    "PROPERTY",
+    "ORIGINAL",
+    "PATTERN",
+    "ESTCAP",
+    "FIXEDBUMP",
+    "FREQUENCY",
+    "XTALK",
+    "WEIGHT",
+    "VOLTAGE",
+];
+
+/// Reads the `UNITS DISTANCE MICRONS` value of a DEF file.
+///
+/// LEF geometry must be converted at this resolution, so this runs before
+/// the LEF files are parsed.
+pub fn read_units(path: &Path) -> Result<DbuPerMicron, ParseError> {
+    let src = read_file(path)?;
+    let mut lx = Lexer::new(&src, path);
+    while let Some(t) = lx.next_token() {
+        match t.text {
+            "UNITS" => {
+                lx.expect("DISTANCE")?;
+                lx.expect("MICRONS")?;
+                let line = lx.line();
+                let value: u32 = lx.number("database units per micron")?;
+                return DbuPerMicron::new(value)
+                    .ok_or_else(|| lx.error(line, "UNITS DISTANCE MICRONS must be positive"));
+            }
+            "COMPONENTS" | "NETS" | "PINS" => break,
+            _ => {}
+        }
+    }
+    Err(lx.error(
+        1,
+        "no UNITS DISTANCE MICRONS statement before the design body",
+    ))
+}
+
+/// Parses a DEF file into a design over `library`.
+pub fn parse(path: &Path, library: Library) -> Result<NetlistDB, ParseError> {
+    parse_str(&read_file(path)?, path, library)
+}
+
+/// Parses DEF text into a design over `library`; `path` is used in errors.
+pub fn parse_str(src: &str, path: &Path, library: Library) -> Result<NetlistDB, ParseError> {
+    let mut parser = DefParser {
+        lx: Lexer::new(src, path),
+        db: NetlistDB::new(String::new(), library),
+        pending_io: Vec::new(),
+        pending_by_name: HashMap::new(),
+        region_by_name: HashMap::new(),
+        rule_by_name: HashMap::new(),
+        component_regions: Vec::new(),
+        groups: Vec::new(),
+        warned: HashSet::new(),
+    };
+    parser.parse()?;
+    parser.connect_remaining_io_pins()?;
+    parser.assign_regions()?;
+    Ok(parser.db)
+}
+
+/// An I/O pin read from `PINS` but not yet connected, so that connection
+/// order follows the `NETS` section.
+struct PendingIo {
+    line: usize,
+    name: String,
+    net: String,
+    direction: PinDirection,
+    signal_use: SignalUse,
+    shapes: Vec<Shape>,
+    placement: Placement,
+}
+
+struct DefParser<'a> {
+    lx: Lexer<'a>,
+    db: NetlistDB,
+    pending_io: Vec<Option<PendingIo>>,
+    pending_by_name: HashMap<String, usize>,
+    region_by_name: HashMap<String, RegionId>,
+    rule_by_name: HashMap<String, NonDefaultRuleId>,
+    component_regions: Vec<(CellId, Token<'a>)>,
+    groups: Vec<PendingGroup<'a>>,
+    warned: HashSet<(&'static str, &'a str)>,
+}
+
+/// A `GROUPS` entry, resolved once every component and region is known,
+/// since DEF files do not always list `REGIONS` and `COMPONENTS` first.
+struct PendingGroup<'a> {
+    line: usize,
+    name: &'a str,
+    patterns: Vec<Token<'a>>,
+    region: Option<Token<'a>>,
+}
+
+impl<'a> DefParser<'a> {
+    fn parse(&mut self) -> Result<(), ParseError> {
+        while let Some(t) = self.lx.next_token() {
+            match t.text {
+                "DESIGN" => {
+                    self.db.name = self.word("design name")?.to_string();
+                    self.lx.expect(";")?;
+                }
+                "UNITS" => self.units()?,
+                "DIEAREA" => self.die_area()?,
+                "ROW" => self.row()?,
+                "TRACKS" => self.tracks()?,
+                "GCELLGRID" => self.gcell_grid()?,
+                "VIAS" => self.section("VIAS", Self::def_via)?,
+                "COMPONENTS" => self.section("COMPONENTS", Self::component)?,
+                "PINS" => self.section("PINS", Self::io_pin)?,
+                "BLOCKAGES" => self.section("BLOCKAGES", Self::blockage)?,
+                "SPECIALNETS" => self.section("SPECIALNETS", Self::special_net)?,
+                "NETS" => self.section("NETS", Self::net)?,
+                "NONDEFAULTRULES" => self.section("NONDEFAULTRULES", Self::non_default_rule)?,
+                "REGIONS" => self.section("REGIONS", Self::region)?,
+                "GROUPS" => self.section("GROUPS", Self::group)?,
+                "BEGINEXT" => {
+                    self.warn(t, "extension");
+                    while self.lx.expect_token("'ENDEXT'")?.text != "ENDEXT" {}
+                }
+                "END" => {
+                    self.lx.expect("DESIGN")?;
+                    return Ok(());
+                }
+                kw if SECTIONS_IGNORED.contains(&kw) => self.skip_section(kw)?,
+                kw if TOP_IGNORED.contains(&kw) => self.lx.skip_statement()?,
+                "STYLES" | "FILLS" | "SLOTS" | "COMPONENTMASKSHIFT" => {
+                    self.warn(t, "section");
+                    self.skip_section(t.text)?;
+                }
+                _ => {
+                    self.warn(t, "design");
+                    self.lx.skip_statement()?;
+                }
+            }
+        }
+        Ok(())
+    }
+
+    /// Warns once per file about a statement or option that is not read.
+    fn warn(&mut self, t: Token<'a>, context: &'static str) {
+        if self.warned.insert((context, t.text)) {
+            log::warn!(
+                "{}:{}: ignoring {context} '{}'",
+                self.lx.path().display(),
+                t.line,
+                t.text
+            );
+        }
+    }
+
+    /// Skips an option, warning unless it is one that carries nothing used.
+    fn skip_listed_option(&mut self, t: Token<'a>, ignored: &[&str], context: &'static str) {
+        if !(ignored.contains(&t.text) || t.text.starts_with("ANTENNA")) {
+            self.warn(t, context);
+        }
+        self.skip_option();
+    }
+
+    fn word(&mut self, what: &str) -> Result<&'a str, ParseError> {
+        Ok(self.lx.expect_token(what)?.text)
+    }
+
+    fn dbu(&mut self, what: &str) -> Result<Dbu, ParseError> {
+        Ok(Dbu(self.lx.number(what)?))
+    }
+
+    fn point(&mut self) -> Result<Point<Dbu>, ParseError> {
+        self.lx.expect("(")?;
+        let x = self.dbu("x coordinate")?;
+        let y = self.dbu("y coordinate")?;
+        self.lx.expect(")")?;
+        Ok(Point::new(x, y))
+    }
+
+    fn rect(&mut self) -> Result<Rect<Dbu>, ParseError> {
+        let a = self.point()?;
+        let b = self.point()?;
+        Ok(Rect::from_corners(a, b))
+    }
+
+    fn orientation(&mut self) -> Result<Orientation, ParseError> {
+        let t = self.lx.expect_token("orientation")?;
+        t.text
+            .parse()
+            .map_err(|e: crate::geom::orient::UnknownOrientation| {
+                self.lx.error(t.line, e.to_string())
+            })
+    }
+
+    fn routing_layer(&mut self) -> Result<LayerId, ParseError> {
+        let t = self.lx.expect_token("layer name")?;
+        self.db.library.routing_layer_id(t.text).ok_or_else(|| {
+            self.lx
+                .error(t.line, format!("unknown routing layer '{}'", t.text))
+        })
+    }
+
+    fn any_layer(&mut self) -> Result<LayerRef, ParseError> {
+        let t = self.lx.expect_token("layer name")?;
+        self.db
+            .library
+            .layer_ref(t.text)
+            .ok_or_else(|| self.lx.error(t.line, format!("unknown layer '{}'", t.text)))
+    }
+
+    fn via_id(&self, line: usize, name: &str) -> Result<ViaId, ParseError> {
+        self.db
+            .library
+            .via_id(name)
+            .ok_or_else(|| self.lx.error(line, format!("unknown via '{name}'")))
+    }
+
+    /// Skips the rest of a `+ KEYWORD ...` option.
+    fn skip_option(&mut self) {
+        while self
+            .lx
+            .peek()
+            .is_some_and(|t| t.text != "+" && t.text != ";")
+        {
+            let _ = self.lx.next_token();
+        }
+    }
+
+    /// Skips a blockage option, whose arguments end at the next option or
+    /// at the blockage's shapes.
+    fn skip_blockage_option(&mut self) {
+        while self
+            .lx
+            .peek()
+            .is_some_and(|t| !matches!(t.text, "+" | ";" | "RECT" | "POLYGON"))
+        {
+            let _ = self.lx.next_token();
+        }
+    }
+
+    /// Reads a placement blockage's options. As in `OpenDB`, a maximum
+    /// density outside 0 to 100 is ignored.
+    fn placement_blockage_kind(&mut self) -> Result<BlockageKind, ParseError> {
+        let mut kind = BlockageKind::Hard;
+        while self.lx.accept("+") {
+            match self.word("blockage option")? {
+                "SOFT" => kind = BlockageKind::Soft,
+                "PARTIAL" => {
+                    let density: f64 = self.lx.number("maximum density")?;
+                    if (0.0..=100.0).contains(&density) {
+                        kind = BlockageKind::Partial(density);
+                    } else {
+                        log::warn!("Ignoring the blockage maximum density {density}");
+                    }
+                }
+                _ => self.skip_blockage_option(),
+            }
+        }
+        Ok(kind)
+    }
+
+    fn skip_section(&mut self, name: &str) -> Result<(), ParseError> {
+        loop {
+            if self.lx.expect_token(&format!("'END {name}'"))?.text == "END" && self.lx.accept(name)
+            {
+                return Ok(());
+            }
+        }
+    }
+
+    /// Parses `n ; - item ... ; ... END name` with `item` handling each entry.
+    fn section(
+        &mut self,
+        name: &str,
+        mut item: impl FnMut(&mut Self) -> Result<(), ParseError>,
+    ) -> Result<(), ParseError> {
+        let _count: u64 = self.lx.number("item count")?;
+        self.lx.expect(";")?;
+        loop {
+            let t = self.lx.expect_token(&format!("'END {name}'"))?;
+            match t.text {
+                "-" => item(self)?,
+                "END" => {
+                    self.lx.expect(name)?;
+                    return Ok(());
+                }
+                other => {
+                    return Err(self.lx.error(
+                        t.line,
+                        format!("expected '-' or 'END {name}', found '{other}'"),
+                    ));
+                }
+            }
+        }
+    }
+
+    fn units(&mut self) -> Result<(), ParseError> {
+        let line = self.lx.line();
+        self.lx.expect("DISTANCE")?;
+        self.lx.expect("MICRONS")?;
+        let value: u32 = self.lx.number("database units per micron")?;
+        self.lx.expect(";")?;
+        let lib = self.db.library.dbu_per_micron.get();
+        if value != lib {
+            return Err(self.lx.error(
+                line,
+                format!("DEF uses {value} units per micron but the library was built at {lib}"),
+            ));
+        }
+        Ok(())
+    }
+
+    fn die_area(&mut self) -> Result<(), ParseError> {
+        let line = self.lx.line();
+        let mut points = Vec::new();
+        while !self.lx.accept(";") {
+            points.push(self.point()?);
+        }
+        let [a, b] = points[..] else {
+            return Err(self
+                .lx
+                .error(line, "only rectangular DIEAREA (two points) is supported"));
+        };
+        self.db.die_area = Rect::from_corners(a, b);
+        Ok(())
+    }
+
+    fn row(&mut self) -> Result<(), ParseError> {
+        let line = self.lx.line();
+        let name = self.word("row name")?.to_string();
+        let site_name = self.word("site name")?;
+        let site = self
+            .db
+            .library
+            .site_id(site_name)
+            .ok_or_else(|| self.lx.error(line, format!("unknown site '{site_name}'")))?;
+        let x = self.dbu("row x")?;
+        let y = self.dbu("row y")?;
+        let orient = self.orientation()?;
+        let size = orient.oriented_size(self.db.library.site(site).size);
+        let (mut num_x, mut num_y) = (1, 1);
+        let mut step = size;
+        if self.lx.accept("DO") {
+            num_x = self.lx.number("site count")?;
+            self.lx.expect("BY")?;
+            num_y = self.lx.number("site count")?;
+            if self.lx.accept("STEP") {
+                step = Point::new(self.dbu("step x")?, self.dbu("step y")?);
+            }
+        }
+        self.skip_to_semicolon()?;
+        self.db.rows.push(Row {
+            name,
+            site,
+            origin: Point::new(x, y),
+            orient,
+            num_x,
+            num_y,
+            step,
+        });
+        Ok(())
+    }
+
+    fn skip_to_semicolon(&mut self) -> Result<(), ParseError> {
+        while !self.lx.accept(";") {
+            let _ = self.lx.expect_token("';'")?;
+        }
+        Ok(())
+    }
+
+    fn axis(&mut self) -> Result<TrackAxis, ParseError> {
+        let t = self.lx.expect_token("axis")?;
+        match t.text {
+            "X" => Ok(TrackAxis::X),
+            "Y" => Ok(TrackAxis::Y),
+            other => Err(self.lx.error(t.line, format!("unknown axis '{other}'"))),
+        }
+    }
+
+    fn gcell_grid(&mut self) -> Result<(), ParseError> {
+        let axis = self.axis()?;
+        let start = self.dbu("gcell grid start")?;
+        self.lx.expect("DO")?;
+        let count = self.lx.number("gcell grid count")?;
+        self.lx.expect("STEP")?;
+        let step = self.dbu("gcell grid step")?;
+        self.lx.expect(";")?;
+        self.db.gcell_grid.push(GCellGridDef {
+            axis,
+            start,
+            count,
+            step,
+        });
+        Ok(())
+    }
+
+    fn tracks(&mut self) -> Result<(), ParseError> {
+        let axis = self.axis()?;
+        let start = self.dbu("track start")?;
+        self.lx.expect("DO")?;
+        let count = self.lx.number("track count")?;
+        self.lx.expect("STEP")?;
+        let step = self.dbu("track step")?;
+        if self.lx.accept("MASK") {
+            let _ = self.word("mask number")?;
+            let _ = self.lx.accept("SAMEMASK");
+        }
+        let mut layers = Vec::new();
+        if self.lx.accept("LAYER") {
+            while !self.lx.accept(";") {
+                layers.push(self.routing_layer()?);
+            }
+        } else {
+            self.lx.expect(";")?;
+        }
+        self.db.tracks.push(TrackDef {
+            axis,
+            start,
+            count,
+            step,
+            layers,
+        });
+        Ok(())
+    }
+
+    fn def_via(&mut self) -> Result<(), ParseError> {
+        let line = self.lx.line();
+        let name = self.word("via name")?;
+        let mut shapes = Vec::new();
+        let mut rule = ViaRuleParams::default();
+        while self.lx.accept("+") {
+            let t = self.lx.expect_token("via option")?;
+            match t.text {
+                "RECT" => {
+                    let layer = self.any_layer()?;
+                    if self.lx.accept("+") {
+                        self.lx.expect("MASK")?;
+                        let _ = self.word("mask number")?;
+                    }
+                    let rect = self.rect()?;
+                    shapes.push(Shape { layer, rect });
+                }
+                "VIARULE" => {
+                    let _ = self.word("via rule name")?;
+                    rule.used = true;
+                }
+                "CUTSIZE" => rule.cut_size = self.dbu_pair("cut size")?,
+                "LAYERS" => {
+                    let (cut, bottom, top) = self.via_rule_layers(name, t.line)?;
+                    rule.cut = Some(cut);
+                    rule.bottom = Some(bottom);
+                    rule.top = Some(top);
+                }
+                "CUTSPACING" => rule.cut_spacing = self.dbu_pair("cut spacing")?,
+                "ENCLOSURE" => {
+                    rule.bottom_enclosure = self.dbu_pair("enclosure")?;
+                    rule.top_enclosure = self.dbu_pair("enclosure")?;
+                }
+                "ROWCOL" => {
+                    rule.rows = self.lx.number("row count")?;
+                    rule.cols = self.lx.number("column count")?;
+                }
+                "ORIGIN" => rule.origin = self.dbu_pair("origin")?,
+                "PATTERN" => {
+                    let p = self.lx.expect_token("cut pattern")?;
+                    rule.pattern = Some(p.text.to_string());
+                }
+                "OFFSET" => {
+                    rule.bottom_offset = self.dbu_pair("offset")?;
+                    rule.top_offset = self.dbu_pair("offset")?;
+                }
+                other => {
+                    return Err(self.lx.error(
+                        t.line,
+                        format!("via '{name}': unsupported option '{other}'"),
+                    ));
+                }
+            }
+        }
+        self.lx.expect(";")?;
+        if rule.used {
+            let generated = rule
+                .shapes()
+                .map_err(|m| self.lx.error(line, format!("via '{name}': {m}")))?;
+            shapes.extend(generated);
+        }
+        let via = via_from_shapes(name, false, shapes, true).map_err(|m| self.lx.error(line, m))?;
+        self.add_def_via(via, line)
+    }
+
+    /// The cut and the metal below and above it that a via rule's
+    /// `+ LAYERS`, in any order, names.
+    fn via_rule_layers(
+        &mut self,
+        name: &str,
+        line: usize,
+    ) -> Result<(LayerRef, LayerId, LayerId), ParseError> {
+        let layers = [self.any_layer()?, self.any_layer()?, self.any_layer()?];
+        let (cuts, metals): (Vec<LayerRef>, Vec<LayerRef>) =
+            layers.iter().partition(|l| matches!(l, LayerRef::Cut(_)));
+        let mut metals: Vec<LayerId> = metals
+            .into_iter()
+            .filter_map(|l| match l {
+                LayerRef::Routing(id) => Some(id),
+                LayerRef::Cut(_) => None,
+            })
+            .collect();
+        metals.sort();
+        let (&[cut], &[bottom, top]) = (cuts.as_slice(), metals.as_slice()) else {
+            return Err(self.lx.error(
+                line,
+                format!("via '{name}': + LAYERS needs one cut and two metal layers"),
+            ));
+        };
+        let LayerRef::Cut(cut_id) = cut else {
+            return Err(self.lx.error(line, "cut layer expected"));
+        };
+        if (bottom, top) != (cut_id.below(), cut_id.above()) {
+            return Err(self.lx.error(
+                line,
+                format!("via '{name}': + LAYERS names metal its cut does not touch"),
+            ));
+        }
+        Ok((cut, bottom, top))
+    }
+
+    /// Adds a via the DEF defines, unless the LEF already has one of its
+    /// name, which `OpenROAD` keeps.
+    fn add_def_via(&mut self, via: ViaDef, line: usize) -> Result<(), ParseError> {
+        let name = via.name.as_str();
+        if let Some(existing) = self.db.library.via_id(name) {
+            if !same_geometry(self.db.library.via(existing), &via) {
+                log::warn!(
+                    "{}:{line}: via '{name}' differs from the LEF via of the same name; \
+                     using the LEF via, as OpenROAD does",
+                    self.lx.path().display()
+                );
+            }
+            return Ok(());
+        }
+        let _ = self
+            .db
+            .library
+            .add_via(via)
+            .map_err(|e| self.lx.error(line, e.to_string()))?;
+        Ok(())
+    }
+
+    fn dbu_pair(&mut self, what: &str) -> Result<Point<Dbu>, ParseError> {
+        Ok(Point::new(self.dbu(what)?, self.dbu(what)?))
+    }
+
+    /// Reads the rest of `+ PLACED|FIXED|COVER ( x y ) orient` or `+ UNPLACED`.
+    fn placement(&mut self, keyword: &str) -> Result<Placement, ParseError> {
+        let status = match keyword {
+            "PLACED" => PlacementStatus::Placed,
+            "FIXED" => PlacementStatus::Fixed,
+            "COVER" => PlacementStatus::Cover,
+            _ => return Ok(Placement::default()),
+        };
+        let location = self.point()?;
+        let orient = self.orientation()?;
+        Ok(Placement {
+            status,
+            location,
+            orient,
+        })
+    }
+
+    fn component(&mut self) -> Result<(), ParseError> {
+        let line = self.lx.line();
+        let name = self.word("component name")?.to_string();
+        let macro_name = self.word("macro name")?;
+        let macro_id = self.db.library.macro_id(macro_name).ok_or_else(|| {
+            self.lx.error(
+                line,
+                format!("component '{name}' uses macro '{macro_name}', which no LEF defines"),
+            )
+        })?;
+        let mut placement = Placement::default();
+        let mut region = None;
+        while self.lx.accept("+") {
+            let t = self.lx.expect_token("component option")?;
+            match t.text {
+                "PLACED" | "FIXED" | "COVER" | "UNPLACED" => placement = self.placement(t.text)?,
+                "REGION" => region = Some(self.lx.expect_token("region name")?),
+                "HALO" | "ROUTEHALO" => {
+                    return Err(self.lx.error(
+                        t.line,
+                        format!("component '{name}': + {} is not supported", t.text),
+                    ));
+                }
+                _ => self.skip_listed_option(t, COMPONENT_IGNORED, "component option"),
+            }
+        }
+        self.lx.expect(";")?;
+        let cell = self
+            .db
+            .add_cell(
+                name,
+                macro_id,
+                placement.location,
+                placement.orient,
+                placement.status,
+            )
+            .map_err(|e| self.lx.error(line, e.to_string()))?;
+        if let Some(region) = region {
+            self.component_regions.push((cell, region));
+        }
+        Ok(())
+    }
+
+    fn region_id(&self, t: Token<'a>) -> Result<RegionId, ParseError> {
+        self.region_by_name.get(t.text).copied().ok_or_else(|| {
+            self.lx
+                .error(t.line, format!("unknown region '{}'", t.text))
+        })
+    }
+
+    fn io_pin(&mut self) -> Result<(), ParseError> {
+        let line = self.lx.line();
+        let name = self.word("pin name")?.to_string();
+        let mut net = None;
+        let mut direction = PinDirection::default();
+        let mut signal_use = SignalUse::Signal;
+        let mut shapes = Vec::new();
+        let mut placement = Placement::default();
+        let mut ports = 0;
+        while self.lx.accept("+") {
+            let t = self.lx.expect_token("pin option")?;
+            match t.text {
+                "NET" => net = Some(self.word("net name")?),
+                "DIRECTION" => {
+                    let word = self.word("direction")?;
+                    direction = parse_pin_direction(word).ok_or_else(|| {
+                        self.lx.error(t.line, format!("unknown direction '{word}'"))
+                    })?;
+                }
+                "USE" => {
+                    let word = self.word("use")?;
+                    signal_use = parse_signal_use(word)
+                        .ok_or_else(|| self.lx.error(t.line, format!("unknown use '{word}'")))?;
+                }
+                "PORT" => {
+                    ports += 1;
+                    if ports > 1 {
+                        return Err(self.lx.error(
+                            t.line,
+                            format!("pin '{name}': multiple PORTs are not supported"),
+                        ));
+                    }
+                }
+                "LAYER" => {
+                    let layer = self.any_layer()?;
+                    while self.lx.peek().is_some_and(|t| t.text != "(") {
+                        let _ = self.lx.next_token();
+                    }
+                    let rect = self.rect()?;
+                    shapes.push(Shape { layer, rect });
+                }
+                "PLACED" | "FIXED" | "COVER" | "UNPLACED" => placement = self.placement(t.text)?,
+                "POLYGON" | "VIA" => {
+                    return Err(self.lx.error(
+                        t.line,
+                        format!("pin '{name}': {} geometry is not supported", t.text),
+                    ));
+                }
+                _ => self.skip_listed_option(t, PIN_IGNORED, "pin option"),
+            }
+        }
+        self.lx.expect(";")?;
+        let net = net.ok_or_else(|| self.lx.error(line, format!("pin '{name}' has no NET")))?;
+        if self.pending_by_name.contains_key(&name) || self.db.io_pin_id(&name).is_some() {
+            return Err(self.lx.error(line, format!("duplicate pin '{name}'")));
+        }
+        let _ = self
+            .pending_by_name
+            .insert(name.clone(), self.pending_io.len());
+        self.pending_io.push(Some(PendingIo {
+            line,
+            name,
+            net: net.to_string(),
+            direction,
+            signal_use,
+            shapes,
+            placement,
+        }));
+        Ok(())
+    }
+
+    fn connect_io_pin(&mut self, pending: PendingIo) -> Result<(), ParseError> {
+        let net = self.db.net_or_insert(&pending.net);
+        if pending.signal_use.is_supply() {
+            self.db.nets[net.index()].signal_use = pending.signal_use;
+        }
+        let line = pending.line;
+        let _ = self
+            .db
+            .add_io_pin(
+                pending.name,
+                net,
+                pending.direction,
+                pending.signal_use,
+                pending.shapes,
+                pending.placement.location,
+                pending.placement.orient,
+                pending.placement.status,
+            )
+            .map_err(|e| self.lx.error(line, e.to_string()))?;
+        Ok(())
+    }
+
+    /// Connects pins that no `NETS` entry mentioned, in `PINS` order.
+    fn connect_remaining_io_pins(&mut self) -> Result<(), ParseError> {
+        let pending = std::mem::take(&mut self.pending_io);
+        for p in pending.into_iter().flatten() {
+            self.connect_io_pin(p)?;
+        }
+        Ok(())
+    }
+
+    fn blockage(&mut self) -> Result<(), ParseError> {
+        let t = self.lx.expect_token("blockage kind")?;
+        match t.text {
+            "LAYER" => {
+                let layer = self.any_layer()?;
+                while self.lx.accept("+") {
+                    self.skip_blockage_option();
+                }
+                while self.lx.accept("RECT") {
+                    let rect = self.rect()?;
+                    self.db.routing_blockages.push(Shape { layer, rect });
+                }
+            }
+            "PLACEMENT" => {
+                let kind = self.placement_blockage_kind()?;
+                while self.lx.accept("RECT") {
+                    let rect = self.rect()?;
+                    self.db
+                        .placement_blockages
+                        .push(PlacementBlockage { rect, kind });
+                }
+            }
+            other => {
+                return Err(self
+                    .lx
+                    .error(t.line, format!("unknown blockage kind '{other}'")));
+            }
+        }
+        if let Some(t) = self.lx.peek()
+            && t.text == "POLYGON"
+        {
+            return Err(self.lx.error(t.line, "POLYGON blockages are not supported"));
+        }
+        self.lx.expect(";")
+    }
+
+    /// Reads a path point `( x y [ext] )`, where `*` repeats the previous
+    /// coordinate, with the wire end extension if one is given.
+    fn path_point(
+        &mut self,
+        prev: Option<Point<Dbu>>,
+    ) -> Result<(Point<Dbu>, Option<Dbu>), ParseError> {
+        self.lx.expect("(")?;
+        let x = self.path_coord(prev.map(|p| p.x))?;
+        let y = self.path_coord(prev.map(|p| p.y))?;
+        let extension = if self.lx.accept(")") {
+            None
+        } else {
+            let ext = self.dbu("wire end extension")?;
+            self.lx.expect(")")?;
+            Some(ext)
+        };
+        Ok((Point::new(x, y), extension))
+    }
+
+    /// `( dx1 dy1 dx2 dy2 )`: the corners of a wiring patch, offset from the
+    /// current point `at`.
+    fn patch_rect(&mut self, at: Point<Dbu>) -> Result<Rect<Dbu>, ParseError> {
+        self.lx.expect("(")?;
+        let dx1 = self.dbu("patch corner")?;
+        let dy1 = self.dbu("patch corner")?;
+        let dx2 = self.dbu("patch corner")?;
+        let dy2 = self.dbu("patch corner")?;
+        self.lx.expect(")")?;
+        Ok(Rect::from_corners(
+            at + Point::new(dx1, dy1),
+            at + Point::new(dx2, dy2),
+        ))
+    }
+
+    fn path_coord(&mut self, prev: Option<Dbu>) -> Result<Dbu, ParseError> {
+        let t = self.lx.expect_token("coordinate")?;
+        if t.text == "*" {
+            return prev.ok_or_else(|| self.lx.error(t.line, "'*' with no previous point"));
+        }
+        t.text.parse().map(Dbu).map_err(|_| {
+            self.lx
+                .error(t.line, format!("expected a coordinate, found '{}'", t.text))
+        })
+    }
+
+    fn special_net(&mut self) -> Result<(), ParseError> {
+        let name = self.word("net name")?.to_string();
+        let mut connections = Vec::new();
+        while self.lx.accept("(") {
+            let owner = self.word("component name")?.to_string();
+            let pin = self.word("pin name")?.to_string();
+            while self.lx.expect_token("')'")?.text != ")" {}
+            connections.push((owner, pin));
+        }
+        let mut net = SpecialNet {
+            name,
+            signal_use: SignalUse::Signal,
+            connections,
+            wires: Vec::new(),
+            rects: Vec::new(),
+            vias: Vec::new(),
+        };
+        let mut rect_shape: Option<String> = None;
+        while self.lx.accept("+") {
+            let t = self.lx.expect_token("special net option")?;
+            match t.text {
+                "USE" => {
+                    let word = self.word("use")?;
+                    net.signal_use = parse_signal_use(word)
+                        .ok_or_else(|| self.lx.error(t.line, format!("unknown use '{word}'")))?;
+                }
+                "ROUTED" | "FIXED" | "COVER" | "SHIELD" => {
+                    if t.text == "SHIELD" {
+                        let _ = self.word("shielded net")?;
+                    }
+                    self.special_wiring(&mut net)?;
+                }
+                "SHAPE" => rect_shape = Some(self.word("shape")?.to_string()),
+                "RECT" => {
+                    let layer = self.any_layer()?;
+                    if self.lx.accept("+") {
+                        self.lx.expect("MASK")?;
+                        let _ = self.word("mask number")?;
+                    }
+                    let rect = self.rect()?;
+                    net.rects.push(SpecialRect {
+                        layer,
+                        rect,
+                        shape: rect_shape.clone(),
+                    });
+                }
+                "POLYGON" | "VIA" => {
+                    return Err(self.lx.error(
+                        t.line,
+                        format!("special net '{}': + {} is not supported", net.name, t.text),
+                    ));
+                }
+                _ => self.skip_listed_option(t, NET_IGNORED, "special net option"),
+            }
+        }
+        self.lx.expect(";")?;
+        self.db.special_nets.push(net);
+        Ok(())
+    }
+
+    /// Reads `layer width [+ SHAPE s] [+ STYLE n] path [NEW layer width ...]*`.
+    fn special_wiring(&mut self, net: &mut SpecialNet) -> Result<(), ParseError> {
+        loop {
+            let layer = self.routing_layer()?;
+            let width = self.dbu("wire width")?;
+            let mut shape = None;
+            while self.lx.accept("+") {
+                let t = self.lx.expect_token("wire option")?;
+                match t.text {
+                    "SHAPE" => shape = Some(self.word("shape")?.to_string()),
+                    "STYLE" | "MASK" => {
+                        let _ = self.word("value")?;
+                    }
+                    other => {
+                        return Err(self
+                            .lx
+                            .error(t.line, format!("unsupported special wire option '{other}'")));
+                    }
+                }
+            }
+            let mut prev: Option<Point<Dbu>> = None;
+            let mut prev_extension = Dbu::ZERO;
+            while let Some(t) = self.lx.peek() {
+                match t.text {
+                    "(" => {
+                        let (p, extension) = self.path_point(prev)?;
+                        let extension = extension.unwrap_or(Dbu::ZERO);
+                        if let Some(from) = prev {
+                            net.wires.push(SpecialWire {
+                                layer,
+                                width,
+                                from,
+                                to: p,
+                                extensions: (prev_extension, extension),
+                                shape: shape.clone(),
+                            });
+                        }
+                        prev = Some(p);
+                        prev_extension = extension;
+                    }
+                    "NEW" | "+" | ";" => break,
+                    _ => {
+                        let t = self.lx.expect_token("via name")?;
+                        let via = self.via_id(t.line, t.text)?;
+                        let at =
+                            prev.ok_or_else(|| self.lx.error(t.line, "via before any point"))?;
+                        if self.lx.peek().is_some_and(|n| n.text == "DO") {
+                            return Err(self
+                                .lx
+                                .error(t.line, "via arrays (DO ... BY) are not supported"));
+                        }
+                        net.vias.push((via, at));
+                    }
+                }
+            }
+            if !self.lx.accept("NEW") {
+                return Ok(());
+            }
+        }
+    }
+
+    fn net(&mut self) -> Result<(), ParseError> {
+        let name = self.word("net name")?;
+        let net = self.db.net_or_insert(name);
+        while self.lx.accept("(") {
+            self.net_connection(net)?;
+        }
+        while self.lx.accept("+") {
+            let t = self.lx.expect_token("net option")?;
+            match t.text {
+                "USE" => {
+                    let word = self.word("use")?;
+                    self.db.nets[net.index()].signal_use = parse_signal_use(word)
+                        .ok_or_else(|| self.lx.error(t.line, format!("unknown use '{word}'")))?;
+                }
+                "WEIGHT" => self.db.nets[net.index()].weight = self.lx.number("net weight")?,
+                "ROUTED" | "FIXED" | "COVER" | "NOSHIELD" => self.net_wiring(net)?,
+                "NONDEFAULTRULE" => {
+                    let r = self.lx.expect_token("rule name")?;
+                    let rule = self.rule_by_name.get(r.text).copied().ok_or_else(|| {
+                        self.lx
+                            .error(r.line, format!("unknown non-default rule '{}'", r.text))
+                    })?;
+                    self.db.nets[net.index()].non_default_rule = Some(rule);
+                }
+                _ => self.skip_listed_option(t, NET_IGNORED, "net option"),
+            }
+        }
+        self.lx.expect(";")
+    }
+
+    fn net_connection(&mut self, net: NetId) -> Result<(), ParseError> {
+        let line = self.lx.line();
+        let owner = self.word("component name")?;
+        let pin_name = self.word("pin name")?;
+        while self.lx.expect_token("')'")?.text != ")" {}
+        let net_name = self.db.nets[net.index()].name.clone();
+        if owner == "PIN" {
+            let pending = self
+                .pending_by_name
+                .get(pin_name)
+                .and_then(|&i| self.pending_io[i].take())
+                .ok_or_else(|| {
+                    self.lx.error(
+                        line,
+                        format!(
+                            "net '{net_name}' uses unknown or already connected pin '{pin_name}'"
+                        ),
+                    )
+                })?;
+            if pending.net != net_name {
+                return Err(self.lx.error(
+                    line,
+                    format!(
+                        "pin '{pin_name}' is on net '{}', not '{net_name}'",
+                        pending.net
+                    ),
+                ));
+            }
+            return self.connect_io_pin(pending);
+        }
+        if owner == "*" {
+            return Err(self.lx.error(
+                line,
+                format!("net '{net_name}': '*' connections are not supported"),
+            ));
+        }
+        let cell = self.db.cell_id(owner).ok_or_else(|| {
+            self.lx.error(
+                line,
+                format!("net '{net_name}' uses unknown component '{owner}'"),
+            )
+        })?;
+        let m = self.db.cell_macro(cell);
+        let pin = m.pin_id(pin_name).ok_or_else(|| {
+            self.lx.error(
+                line,
+                format!(
+                    "net '{net_name}' uses pin '{pin_name}', which macro '{}' does not have",
+                    m.name
+                ),
+            )
+        })?;
+        if m.pin(pin).reference_point().is_none() {
+            return Err(self.lx.error(
+                line,
+                format!(
+                    "net '{net_name}' uses pin {owner}/{pin_name}, which has no routing geometry"
+                ),
+            ));
+        }
+        if let Some(existing) = self.db.cell_pin(cell, pin) {
+            let other = &self.db.nets[self.db.pins[existing.index()].net.index()].name;
+            return Err(self.lx.error(
+                line,
+                format!(
+                    "net '{net_name}' uses {owner}/{pin_name}, which is already on net '{other}'"
+                ),
+            ));
+        }
+        let _ = self.db.connect_cell_pin(cell, pin, net);
+        Ok(())
+    }
+
+    /// Reads regular wiring: `layer path [NEW layer path]*`.
+    fn net_wiring(&mut self, net: NetId) -> Result<(), ParseError> {
+        loop {
+            let mut layer = self.routing_layer()?;
+            let mut prev: Option<(Point<Dbu>, Option<Dbu>)> = None;
+            while let Some(t) = self.lx.peek() {
+                match t.text {
+                    "(" => {
+                        let (p, extension) = self.path_point(prev.map(|(at, _)| at))?;
+                        if let Some((from, from_extension)) = prev {
+                            self.db.nets[net.index()].routing.push(RouteElem::Wire {
+                                layer,
+                                from,
+                                to: p,
+                                extensions: (from_extension, extension),
+                            });
+                        }
+                        prev = Some((p, extension));
+                    }
+                    "NEW" | "+" | ";" => break,
+                    "TAPER" => {
+                        let _ = self.lx.next_token();
+                    }
+                    "TAPERRULE" | "STYLE" | "MASK" => {
+                        let _ = self.lx.next_token();
+                        let _ = self.word("value")?;
+                    }
+                    "RECT" => {
+                        let _ = self.lx.next_token();
+                        let at = prev
+                            .map(|(at, _)| at)
+                            .ok_or_else(|| self.lx.error(t.line, "RECT before any point"))?;
+                        let rect = self.patch_rect(at)?;
+                        self.db.nets[net.index()]
+                            .routing
+                            .push(RouteElem::Patch { layer, rect });
+                    }
+                    "VIRTUAL" => {
+                        return Err(self.lx.error(t.line, "VIRTUAL wiring is not supported"));
+                    }
+                    _ => {
+                        let t = self.lx.expect_token("via name")?;
+                        let via = self.via_id(t.line, t.text)?;
+                        let at = prev
+                            .map(|(at, _)| at)
+                            .ok_or_else(|| self.lx.error(t.line, "via before any point"))?;
+                        let def = self.db.library.via(via);
+                        layer = if def.bottom() == layer {
+                            def.top()
+                        } else if def.top() == layer {
+                            def.bottom()
+                        } else {
+                            return Err(self.lx.error(
+                                t.line,
+                                format!("via '{}' does not touch the current wiring layer", t.text),
+                            ));
+                        };
+                        self.db.nets[net.index()]
+                            .routing
+                            .push(RouteElem::Via { via, at });
+                        prev = Some((at, None));
+                    }
+                }
+            }
+            if !self.lx.accept("NEW") {
+                return Ok(());
+            }
+        }
+    }
+
+    /// `- name [+ HARDSPACING] {+ LAYER l WIDTH w [SPACING s] [WIREEXT e]}
+    /// {+ VIA v} {+ VIARULE r} {+ MINCUTS cut n} ;`
+    fn non_default_rule(&mut self) -> Result<(), ParseError> {
+        let line = self.lx.line();
+        let name = self.word("rule name")?.to_string();
+        let mut rule = NonDefaultRule {
+            name,
+            hard_spacing: false,
+            layers: Vec::new(),
+            vias: Vec::new(),
+            via_rules: Vec::new(),
+            min_cuts: Vec::new(),
+        };
+        while self.lx.accept("+") {
+            let t = self.lx.expect_token("non-default rule option")?;
+            match t.text {
+                "HARDSPACING" => rule.hard_spacing = true,
+                "LAYER" => rule.layers.push(self.non_default_layer()?),
+                "VIA" => {
+                    let v = self.lx.expect_token("via name")?;
+                    rule.vias.push(self.via_id(v.line, v.text)?);
+                }
+                "VIARULE" => {
+                    let v = self.lx.expect_token("via rule name")?;
+                    let id = self
+                        .db
+                        .library
+                        .via_rules
+                        .iter()
+                        .position(|r| r.name == v.text)
+                        .ok_or_else(|| {
+                            self.lx
+                                .error(v.line, format!("unknown via rule '{}'", v.text))
+                        })?;
+                    rule.via_rules.push(ViaRuleId::new(id));
+                }
+                "MINCUTS" => {
+                    let cut = match self.any_layer()? {
+                        LayerRef::Cut(c) => c,
+                        LayerRef::Routing(_) => {
+                            return Err(self.lx.error(t.line, "MINCUTS needs a cut layer"));
+                        }
+                    };
+                    let cuts = self.lx.number("cut count")?;
+                    rule.min_cuts.push((cut, cuts));
+                }
+                "PROPERTY" => self.skip_option(),
+                other => {
+                    return Err(self.lx.error(
+                        t.line,
+                        format!(
+                            "non-default rule '{}': unsupported option '{other}'",
+                            rule.name
+                        ),
+                    ));
+                }
+            }
+        }
+        self.lx.expect(";")?;
+        let id = NonDefaultRuleId::new(self.db.non_default_rules.len());
+        if self.rule_by_name.insert(rule.name.clone(), id).is_some() {
+            return Err(self
+                .lx
+                .error(line, format!("duplicate non-default rule '{}'", rule.name)));
+        }
+        self.db.non_default_rules.push(rule);
+        Ok(())
+    }
+
+    fn non_default_layer(&mut self) -> Result<NonDefaultLayer, ParseError> {
+        let layer = self.routing_layer()?;
+        self.lx.expect("WIDTH")?;
+        let width = self.dbu("rule width")?;
+        let mut spacing = None;
+        let mut wire_extension = None;
+        loop {
+            if self.lx.accept("SPACING") {
+                spacing = Some(self.dbu("rule spacing")?);
+            } else if self.lx.accept("WIREEXT") {
+                wire_extension = Some(self.dbu("wire extension")?);
+            } else if let Some(t) = self.lx.peek()
+                && t.text == "DIAGWIDTH"
+            {
+                return Err(self.lx.error(t.line, "DIAGWIDTH is not supported"));
+            } else {
+                break;
+            }
+        }
+        Ok(NonDefaultLayer {
+            layer,
+            width,
+            spacing,
+            wire_extension,
+        })
+    }
+
+    /// `- name pt pt [pt pt ...] [+ TYPE {FENCE|GUIDE}] [+ PROPERTY ...] ;`
+    fn region(&mut self) -> Result<(), ParseError> {
+        let line = self.lx.line();
+        let name = self.word("region name")?.to_string();
+        let mut rects = Vec::new();
+        while self.lx.peek().is_some_and(|t| t.text == "(") {
+            rects.push(self.rect()?);
+        }
+        let mut kind = RegionKind::Inclusive;
+        while self.lx.accept("+") {
+            let t = self.lx.expect_token("region option")?;
+            match t.text {
+                "TYPE" => {
+                    let k = self.lx.expect_token("region type")?;
+                    kind = match k.text {
+                        "FENCE" => RegionKind::Fence,
+                        "GUIDE" => RegionKind::Guide,
+                        other => {
+                            return Err(self
+                                .lx
+                                .error(k.line, format!("unknown region type '{other}'")));
+                        }
+                    };
+                }
+                "PROPERTY" => self.skip_option(),
+                other => {
+                    return Err(self
+                        .lx
+                        .error(t.line, format!("region '{name}': unknown option '{other}'")));
+                }
+            }
+        }
+        self.lx.expect(";")?;
+        if rects.is_empty() {
+            return Err(self.lx.error(line, format!("region '{name}' has no area")));
+        }
+        let id = RegionId::new(self.db.regions.len());
+        if self.region_by_name.insert(name.clone(), id).is_some() {
+            return Err(self.lx.error(line, format!("duplicate region '{name}'")));
+        }
+        self.db.regions.push(Region {
+            name,
+            rects,
+            kind,
+            group_order: None,
+        });
+        Ok(())
+    }
+
+    /// `- name compNamePattern ... [+ REGION r] [+ PROPERTY ...] ;`
+    fn group(&mut self) -> Result<(), ParseError> {
+        let line = self.lx.line();
+        let name = self.word("group name")?;
+        let mut patterns = Vec::new();
+        while self
+            .lx
+            .peek()
+            .is_some_and(|t| t.text != "+" && t.text != ";")
+        {
+            patterns.push(self.lx.expect_token("component pattern")?);
+        }
+        let mut region = None;
+        while self.lx.accept("+") {
+            let t = self.lx.expect_token("group option")?;
+            match t.text {
+                "REGION" => region = Some(self.lx.expect_token("region name")?),
+                "PROPERTY" => self.skip_option(),
+                other => {
+                    return Err(self.lx.error(
+                        t.line,
+                        format!("group '{name}': unsupported option '{other}'"),
+                    ));
+                }
+            }
+        }
+        self.lx.expect(";")?;
+        self.groups.push(PendingGroup {
+            line,
+            name,
+            patterns,
+            region,
+        });
+        Ok(())
+    }
+
+    /// Assigns components their region, from their own `+ REGION` and then
+    /// from every group with a region, rejecting a component given two.
+    fn assign_regions(&mut self) -> Result<(), ParseError> {
+        for (cell, t) in std::mem::take(&mut self.component_regions) {
+            let region = self.region_id(t)?;
+            let c = &mut self.db.cells[cell.index()];
+            c.region = Some(region);
+            c.group_rank = u32::MAX;
+        }
+        for (order, group) in std::mem::take(&mut self.groups).into_iter().enumerate() {
+            let Some(region) = group.region else {
+                continue;
+            };
+            let region = self.region_id(region)?;
+            let _ = self.db.regions[region.index()]
+                .group_order
+                .get_or_insert(order);
+            let added = self.group_members(&group)?;
+            let mut seen = std::collections::HashSet::new();
+            let listed: Vec<CellId> = added
+                .iter()
+                .rev()
+                .copied()
+                .filter(|&c| seen.insert(c))
+                .collect();
+            for (rank, cell) in listed.into_iter().enumerate() {
+                let c = &mut self.db.cells[cell.index()];
+                if c.region.is_some_and(|r| r != region) {
+                    return Err(self.lx.error(
+                        group.line,
+                        format!("component '{}' is assigned to two regions", c.name),
+                    ));
+                }
+                c.region = Some(region);
+                c.group_rank = u32::try_from(rank).unwrap_or(u32::MAX);
+            }
+        }
+        Ok(())
+    }
+
+    fn group_members(&self, group: &PendingGroup<'a>) -> Result<Vec<CellId>, ParseError> {
+        let mut members = Vec::new();
+        for p in &group.patterns {
+            if p.text.contains('*') {
+                members.extend(
+                    (0..self.db.num_cells())
+                        .filter(|&i| matches_pattern(p.text, &self.db.cells[i].name))
+                        .map(CellId::new),
+                );
+            } else {
+                members.push(self.db.cell_id(p.text).ok_or_else(|| {
+                    self.lx.error(
+                        p.line,
+                        format!(
+                            "group '{}' names unknown component '{}'",
+                            group.name, p.text
+                        ),
+                    )
+                })?);
+            }
+        }
+        Ok(members)
+    }
+}
+
+/// Where and how a component or pin is placed.
+#[derive(Default)]
+struct Placement {
+    status: PlacementStatus,
+    location: Point<Dbu>,
+    orient: Orientation,
+}
+
+/// Parameters of a DEF via generated from a `VIARULE`.
+#[derive(Default)]
+struct ViaRuleParams {
+    used: bool,
+    cut_size: Point<Dbu>,
+    bottom: Option<LayerId>,
+    cut: Option<LayerRef>,
+    top: Option<LayerId>,
+    cut_spacing: Point<Dbu>,
+    bottom_enclosure: Point<Dbu>,
+    top_enclosure: Point<Dbu>,
+    rows: i64,
+    cols: i64,
+    origin: Point<Dbu>,
+    bottom_offset: Point<Dbu>,
+    top_offset: Point<Dbu>,
+    pattern: Option<String>,
+}
+
+impl ViaRuleParams {
+    /// The cut array and its enclosing metal, centered on the via origin.
+    fn shapes(&self) -> Result<Vec<Shape>, String> {
+        let (Some(bottom), Some(cut), Some(top)) = (self.bottom, self.cut, self.top) else {
+            return Err("a VIARULE via needs + LAYERS".into());
+        };
+        let rows = self.rows.max(1);
+        let cols = self.cols.max(1);
+        let present = match &self.pattern {
+            Some(p) => cut_pattern(p, rows as usize, cols as usize)?,
+            None => vec![vec![true; cols as usize]; rows as usize],
+        };
+        let array = Point::new(
+            self.cut_size.x * cols + self.cut_spacing.x * (cols - 1),
+            self.cut_size.y * rows + self.cut_spacing.y * (rows - 1),
+        );
+        let lo = Point::new(Dbu(-(array.x.0 / 2)), Dbu(-(array.y.0 / 2)));
+        let array_rect = Rect::new(lo, lo + array);
+
+        let mut shapes = Vec::new();
+        for r in 0..rows {
+            for c in 0..cols {
+                if !present[r as usize][c as usize] {
+                    continue;
+                }
+                let min = lo
+                    + Point::new(
+                        (self.cut_size.x + self.cut_spacing.x) * c,
+                        (self.cut_size.y + self.cut_spacing.y) * r,
+                    );
+                shapes.push(Shape {
+                    layer: cut,
+                    rect: Rect::new(min, min + self.cut_size).translate(self.origin),
+                });
+            }
+        }
+        let enclose = |enc: Point<Dbu>, offset: Point<Dbu>| {
+            Rect::new(array_rect.min - enc, array_rect.max + enc).translate(self.origin + offset)
+        };
+        shapes.push(Shape {
+            layer: LayerRef::Routing(bottom),
+            rect: enclose(self.bottom_enclosure, self.bottom_offset),
+        });
+        shapes.push(Shape {
+            layer: LayerRef::Routing(top),
+            rect: enclose(self.top_enclosure, self.top_offset),
+        });
+        Ok(shapes)
+    }
+}
+
+/// Decodes a DEF via `PATTERN` into which cuts are present, by row from the
+/// bottom and column from the left. Each row is `numRows_rowDefinition`,
+/// where the row definition is hex digits of four cuts each, most
+/// significant first, `R` followed by a count and a digit repeating that
+/// digit; bits past the column count are ignored. A trailing `_MR` or `_MC`
+/// only selects mask colouring.
+fn cut_pattern(pattern: &str, rows: usize, cols: usize) -> Result<Vec<Vec<bool>>, String> {
+    let body = pattern
+        .strip_suffix("_MR")
+        .or_else(|| pattern.strip_suffix("_MC"))
+        .unwrap_or(pattern);
+    let parts: Vec<&str> = body.split('_').collect();
+    if !parts.len().is_multiple_of(2) {
+        return Err(format!(
+            "cut pattern '{pattern}' is not numRows_rowDefinition pairs"
+        ));
+    }
+    let mut out = Vec::with_capacity(rows);
+    for pair in parts.chunks(2) {
+        let repeat = usize::from_str_radix(pair[0], 16)
+            .map_err(|_| format!("cut pattern '{pattern}': bad row count '{}'", pair[0]))?;
+        let row = cut_pattern_row(pair[1], cols)
+            .ok_or_else(|| format!("cut pattern '{pattern}': bad row '{}'", pair[1]))?;
+        out.extend(std::iter::repeat_n(row, repeat));
+    }
+    if out.len() != rows {
+        return Err(format!(
+            "cut pattern '{pattern}' defines {} rows, but the via has {rows}",
+            out.len()
+        ));
+    }
+    Ok(out)
+}
+
+fn cut_pattern_row(definition: &str, cols: usize) -> Option<Vec<bool>> {
+    let mut digits = Vec::new();
+    let mut chars = definition.chars();
+    while let Some(c) = chars.next() {
+        if c == 'R' {
+            let count = chars.next()?.to_digit(16)?;
+            let digit = chars.next()?.to_digit(16)?;
+            digits.extend(std::iter::repeat_n(digit, count as usize));
+        } else {
+            digits.push(c.to_digit(16)?);
+        }
+    }
+    let bits: Vec<bool> = digits
+        .iter()
+        .flat_map(|d| (0..4).rev().map(move |b| d >> b & 1 == 1))
+        .collect();
+    (bits.len() >= cols).then(|| bits[..cols].to_vec())
+}
+
+/// Whether a component name matches a DEF pattern, where `*` matches any
+/// run of characters.
+fn matches_pattern(pattern: &str, name: &str) -> bool {
+    let mut pieces = pattern.split('*');
+    let Some(first) = pieces.next() else {
+        return name.is_empty();
+    };
+    let Some(mut rest) = name.strip_prefix(first) else {
+        return false;
+    };
+    let pieces: Vec<&str> = pieces.collect();
+    let Some((last, middle)) = pieces.split_last() else {
+        return rest.is_empty();
+    };
+    for piece in middle {
+        match rest.find(piece) {
+            Some(at) => rest = &rest[at + piece.len()..],
+            None => return false,
+        }
+    }
+    rest.len() >= last.len() && rest.ends_with(last)
+}
+
+/// Whether two vias have the same cut and the same shapes, in any order.
+fn same_geometry(a: &ViaDef, b: &ViaDef) -> bool {
+    if a.cut != b.cut || a.shapes.len() != b.shapes.len() {
+        return false;
+    }
+    let mut unmatched: Vec<&Shape> = b.shapes.iter().collect();
+    a.shapes.iter().all(|s| {
+        unmatched
+            .iter()
+            .position(|t| *t == s)
+            .map(|i| unmatched.swap_remove(i))
+            .is_some()
+    })
+}

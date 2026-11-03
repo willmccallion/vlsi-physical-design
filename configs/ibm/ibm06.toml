@@ -1,0 +1,8 @@
+purpose = "placement"
+
+[input]
+bookshelf_aux_file = "inputs/ibm/ibm06/ibm06.aux"
+output_def = "output/ibm06/placed.def"
+
+[global_placement]
+placer_max_iterations = 2000

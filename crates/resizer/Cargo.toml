@@ -1,0 +1,19 @@
+[package]
+name = "pare-resizer"
+version = "0.1.0"
+edition = "2024"
+description = "PARE — Placement And Routing Engine: netlist repair with buffers and gate sizes"
+license.workspace = true
+repository.workspace = true
+readme.workspace = true
+keywords.workspace = true
+categories.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+pare-common = { path = "../common" }
+log = "0.4"
+thiserror = "2.0"
+rustc-hash = "2.1"

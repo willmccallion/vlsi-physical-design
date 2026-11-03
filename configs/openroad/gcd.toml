@@ -1,0 +1,6 @@
+purpose = "routing"
+
+[input]
+lef_files = ["inputs/tech/nangate45/Nangate45.lef"]
+def_file = "inputs/openroad/gcd/gcd.def"
+output_def = "output/gcd/placed.def"

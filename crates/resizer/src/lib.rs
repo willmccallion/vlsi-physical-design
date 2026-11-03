@@ -1,0 +1,37 @@
+//! Netlist repair as `OpenROAD`'s resizer does it before and after placement:
+//! stripping the buffers synthesis left, buffering the ports, and once the
+//! cells have positions, sizing drivers and inserting repeaters until every
+//! pin's slew and every driver's load are within the library's limits.
+
+pub mod bnet;
+pub mod buffers;
+pub mod clock_inverters;
+pub mod dmp;
+pub mod fuzzy;
+pub mod gated;
+pub mod graph;
+pub mod hold;
+pub mod library;
+pub mod moves;
+pub mod netlist;
+pub mod parasitics;
+pub mod rebuffer;
+pub mod repair;
+pub mod resizer;
+pub mod route_parasitics;
+pub mod setup;
+pub mod sta;
+pub mod steiner;
+
+pub use buffers::{BufferError, PortBuffers, buffer_ports, remove_buffers};
+pub use clock_inverters::{ClockInverterRepair, repair_clock_inverters};
+pub use hold::{HoldOptions, HoldSummary, repair_hold};
+pub use library::{BufferSet, Link, LinkError};
+pub use netlist::{ClockNetwork, Constants, Namer, Netlist, NetlistError};
+pub use rebuffer::Rebuffer;
+pub use repair::{RepairSummary, Repairer};
+pub use resizer::{
+    Context, RepairError, RepairOptions, Resizer, Timing, Untimed, timing_net_weights,
+};
+pub use setup::{SetupOptions, SetupProgress, SetupSummary, repair_setup};
+pub use sta::{Path, PathPoint, Slack, Sta, Tag, Via};

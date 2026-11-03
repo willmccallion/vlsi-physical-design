@@ -1,0 +1,29 @@
+[package]
+name = "pare"
+version = "0.1.0"
+edition = "2024"
+description = "PARE — Placement And Routing Engine: CLI entry point"
+license.workspace = true
+repository.workspace = true
+readme.workspace = true
+keywords.workspace = true
+categories.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+pare-common = { path = "../common" }
+pare-placer = { path = "../placer" }
+pare-router = { path = "../router" }
+pare-resizer = { path = "../resizer" }
+pare-cts = { path = "../cts" }
+rustc-hash = "2.1"
+clap = { version = "4.5", features = ["derive"] }
+toml = "0.8"
+env_logger = "0.11"
+log = "0.4"
+anyhow = "1.0"
+rayon = "1.10"
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"

@@ -1,0 +1,31 @@
+# name            design               X0   Y0   X1   Y1   [partial]
+# pci_bridge32_a: standard-cell area away from the macros, growing boxes
+pci-20            mgc_pci_bridge32_a   100  150  120  170
+pci-40            mgc_pci_bridge32_a   100  150  140  190
+pci-80            mgc_pci_bridge32_a   100  150  180  230
+pci-160           mgc_pci_bridge32_a   100  100  260  260
+# the macro corner where h7 and h8 meet h6, and the pins under the stripes beside it
+pci-corner        mgc_pci_bridge32_a   220   90  260  130
+pci-pocket        mgc_pci_bridge32_a    20  185  170  335
+pci-stripe-pins   mgc_pci_bridge32_a    20  270  110  335
+# fft_a: the dense strip beside the left macros, and a row of abutting in01f01 cells
+fft-strip         mgc_fft_a              0  170   40  210
+fft-abutting      mgc_fft_a            790  232  800  242  partial
+# the same strip with the nets that leave it, as pins on the box edge
+fft-strip-load    mgc_fft_a              0  170   40  210  boundary
+# fft_a: where the channel between macro rows meets the right edge and its I/O pins
+fft-right-band    mgc_fft_a            720  400  800  440  boundary
+# superblue19: plain standard-cell area, and the channel between two macros
+sb19-cells        mgc_superblue19      600 1200  640 1240
+sb19-channel      mgc_superblue19      360  100  440  180
+# the plain standard-cell window with the nets crossing it
+sb19-cells-load   mgc_superblue19      600 1200  640 1240  boundary
+sb19-load-10      mgc_superblue19      620 1215  630 1225  boundary
+sb19-load-20      mgc_superblue19      615 1210  635 1230  boundary
+# superblue19: one of the worst global routing regions, with its crossing demand
+sb19-hot          mgc_superblue19      150  780  210  840  boundary
+# aes: the centre of its dense blob, where the last markers stay
+aes-hot           aes                  380  280  420  320  boundary
+aes-hot-whole     aes                  380  280  420  320
+# superblue19: a 400 um block of plain standard cells, for detailed routing at scale
+sb19-400          mgc_superblue19      300 1100  700 1500

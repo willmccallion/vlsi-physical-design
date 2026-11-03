@@ -1,0 +1,132 @@
+/* The cells of the clock tree synthesis tests. */
+library (clock_cells) {
+  delay_model : table_lookup ;
+  time_unit : "1ns" ;
+  voltage_unit : "1V" ;
+  current_unit : "1mA" ;
+  pulling_resistance_unit : "1kohm" ;
+  capacitive_load_unit (1,ff) ;
+  slew_derate_from_library : 1.0 ;
+  slew_lower_threshold_pct_rise : 30.0 ;
+  slew_upper_threshold_pct_rise : 70.0 ;
+  slew_lower_threshold_pct_fall : 30.0 ;
+  slew_upper_threshold_pct_fall : 70.0 ;
+  input_threshold_pct_rise : 50.0 ;
+  input_threshold_pct_fall : 50.0 ;
+  output_threshold_pct_rise : 50.0 ;
+  output_threshold_pct_fall : 50.0 ;
+  default_max_transition : 0.2 ;
+  lu_table_template (delay_t) {
+    variable_1 : input_net_transition ;
+    variable_2 : total_output_net_capacitance ;
+    index_1 ("0.005, 0.2") ;
+    index_2 ("1.0, 100.0") ;
+  }
+  lu_table_template (check_t) {
+    variable_1 : related_pin_transition ;
+    variable_2 : constrained_pin_transition ;
+    index_1 ("0.005, 0.2") ;
+    index_2 ("0.005, 0.2") ;
+  }
+  cell (CLKBUF_X3) {
+    area : 1.33 ;
+    pin (A) {
+      direction : input ;
+      capacitance : 1.4 ;
+    }
+    pin (Z) {
+      direction : output ;
+      function : "A" ;
+      max_capacitance : 180.0 ;
+      timing () {
+        related_pin : "A" ;
+        timing_sense : positive_unate ;
+        cell_rise (delay_t) { values ("0.02, 0.08", "0.03, 0.09") ; }
+        cell_fall (delay_t) { values ("0.02, 0.08", "0.03, 0.09") ; }
+        rise_transition (delay_t) { values ("0.006, 0.12", "0.02, 0.13") ; }
+        fall_transition (delay_t) { values ("0.006, 0.12", "0.02, 0.13") ; }
+      }
+    }
+  }
+  cell (BUF_X1) {
+    area : 0.8 ;
+    pin (A) {
+      direction : input ;
+      capacitance : 0.97 ;
+    }
+    pin (Z) {
+      direction : output ;
+      function : "A" ;
+      max_capacitance : 60.0 ;
+      timing () {
+        related_pin : "A" ;
+        timing_sense : positive_unate ;
+        cell_rise (delay_t) { values ("0.03, 0.30", "0.04, 0.31") ; }
+        cell_fall (delay_t) { values ("0.03, 0.30", "0.04, 0.31") ; }
+        rise_transition (delay_t) { values ("0.01, 0.40", "0.02, 0.41") ; }
+        fall_transition (delay_t) { values ("0.01, 0.40", "0.02, 0.41") ; }
+      }
+    }
+  }
+  cell (INV_X1) {
+    area : 0.53 ;
+    pin (A) {
+      direction : input ;
+      capacitance : 1.6 ;
+    }
+    pin (ZN) {
+      direction : output ;
+      function : "!A" ;
+      max_capacitance : 60.0 ;
+      timing () {
+        related_pin : "A" ;
+        timing_sense : negative_unate ;
+        cell_rise (delay_t) { values ("0.01, 0.25", "0.02, 0.26") ; }
+        cell_fall (delay_t) { values ("0.01, 0.25", "0.02, 0.26") ; }
+        rise_transition (delay_t) { values ("0.008, 0.35", "0.02, 0.36") ; }
+        fall_transition (delay_t) { values ("0.008, 0.35", "0.02, 0.36") ; }
+      }
+    }
+  }
+  cell (DFF_X1) {
+    area : 4.5 ;
+    ff ("IQ", "IQN") {
+      next_state : "D" ;
+      clocked_on : "CK" ;
+    }
+    pin (D) {
+      direction : input ;
+      capacitance : 1.1 ;
+      timing () {
+        related_pin : "CK" ;
+        timing_type : setup_rising ;
+        rise_constraint (check_t) { values ("0.03, 0.05", "0.03, 0.05") ; }
+        fall_constraint (check_t) { values ("0.03, 0.05", "0.03, 0.05") ; }
+      }
+      timing () {
+        related_pin : "CK" ;
+        timing_type : hold_rising ;
+        rise_constraint (check_t) { values ("0.01, 0.02", "0.01, 0.02") ; }
+        fall_constraint (check_t) { values ("0.01, 0.02", "0.01, 0.02") ; }
+      }
+    }
+    pin (CK) {
+      direction : input ;
+      clock : true ;
+      capacitance : 0.95 ;
+    }
+    pin (Q) {
+      direction : output ;
+      function : "IQ" ;
+      max_capacitance : 60.0 ;
+      timing () {
+        related_pin : "CK" ;
+        timing_type : rising_edge ;
+        cell_rise (delay_t) { values ("0.08, 0.3", "0.09, 0.31") ; }
+        cell_fall (delay_t) { values ("0.08, 0.3", "0.09, 0.31") ; }
+        rise_transition (delay_t) { values ("0.01, 0.4", "0.02, 0.41") ; }
+        fall_transition (delay_t) { values ("0.01, 0.4", "0.02, 0.41") ; }
+      }
+    }
+  }
+}

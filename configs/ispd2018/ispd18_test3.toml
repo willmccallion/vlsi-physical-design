@@ -1,0 +1,6 @@
+purpose = "routing"
+
+[input]
+lef_files = ["inputs/ispd2018/ispd18_test3/ispd18_test3.input.lef"]
+def_file = "inputs/ispd2018/ispd18_test3/ispd18_test3.input.def"
+output_def = "output/ispd18_test3/placed.def"

@@ -1,0 +1,10 @@
+UCLA nodes 1.0
+# four cells and one terminal
+
+NumNodes : 5
+NumTerminals : 1
+	a0	4	16
+	a1	6	16
+	a2	4	16
+	a3	8	32
+	p0	2	2	terminal
