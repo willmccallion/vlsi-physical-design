@@ -3,7 +3,6 @@
 //! where that shortens its nets and breaks no placement rule.
 
 use super::{Improver, SKIP_NETS_LARGER_THAN};
-use pare_common::db::library::Symmetry;
 use pare_common::geom::orient::Orientation;
 
 pub(super) fn run(imp: &mut Improver) {
@@ -33,7 +32,7 @@ fn orient_cells(imp: &mut Improver) -> usize {
             orient_single_row_cell(imp, n, row)
         } else {
             row + imp.rows_spanned(n) <= imp.arch.rows.len()
-                && legal_symmetry(imp.grid.nodes[n].symmetry, imp.grid.nodes[n].orient)
+                && imp.grid.nodes[n].symmetry.allows(imp.grid.nodes[n].orient)
         };
         if !oriented {
             problems += 1;
@@ -49,31 +48,18 @@ fn orient_single_row_cell(imp: &mut Improver, n: usize, row: usize) -> bool {
     let symmetry = imp.grid.nodes[n].symmetry;
     let cell = imp.grid.nodes[n].orient;
     let to = match (imp.arch.rows[row].orient, cell) {
-        (N | FN, N | FN) | (FS | S, FS | S) => return legal_symmetry(symmetry, cell),
+        (N | FN, N | FN) | (FS | S, FS | S) => return symmetry.allows(cell),
         (N | FN, FS) => N,
         (N | FN, S) => FN,
         (FS | S, N) => FS,
         (FS | S, FN) => S,
         _ => return false,
     };
-    if !legal_symmetry(symmetry, to) {
+    if !symmetry.allows(to) {
         return false;
     }
     imp.orient_node(n, to);
     true
-}
-
-/// Whether a master's symmetry allows an orientation, as
-/// `DetailedOrient::isLegalSym`.
-const fn legal_symmetry(symmetry: Symmetry, orient: Orientation) -> bool {
-    match orient {
-        Orientation::N => true,
-        Orientation::FS => symmetry.x,
-        Orientation::FN => symmetry.y,
-        Orientation::S => symmetry.x && symmetry.y,
-        Orientation::W | Orientation::E => symmetry.r90,
-        Orientation::FW | Orientation::FE => symmetry.r90 && symmetry.x && symmetry.y,
-    }
 }
 
 /// Mirrors single-row cells about their vertical axis where the rows allow

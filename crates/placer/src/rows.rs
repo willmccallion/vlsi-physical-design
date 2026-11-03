@@ -260,18 +260,6 @@ pub(crate) fn squared(d: Dbu) -> i128 {
     i128::from(d.get()) * i128::from(d.get())
 }
 
-/// Whether a cell may take this row orientation given its symmetry.
-pub(crate) fn orientation_allowed(db: &NetlistDB, cell: CellId, row: Orientation) -> bool {
-    let symmetry = db.cell_macro(cell).symmetry;
-    match row {
-        Orientation::N => true,
-        Orientation::FS => symmetry.x,
-        Orientation::FN => symmetry.y,
-        Orientation::S => symmetry.x && symmetry.y,
-        _ => false,
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;

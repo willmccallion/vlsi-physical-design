@@ -6,6 +6,7 @@ use crate::db::rules::{
     RoutingLayerRules, SpacingTable, ViaRule,
 };
 use crate::geom::dbu::{Dbu, DbuPerMicron};
+use crate::geom::orient::Orientation;
 use crate::geom::point::Point;
 use crate::geom::rect::Rect;
 use std::collections::HashMap;
@@ -138,6 +139,22 @@ pub struct Symmetry {
     pub y: bool,
     /// May be rotated by 90 degrees.
     pub r90: bool,
+}
+
+impl Symmetry {
+    /// Whether a master of this symmetry may take `orient`, as `OpenDP`'s
+    /// `checkMasterSym`.
+    #[must_use]
+    pub const fn allows(self, orient: Orientation) -> bool {
+        match orient {
+            Orientation::N => true,
+            Orientation::FS => self.x,
+            Orientation::FN => self.y,
+            Orientation::S => self.x && self.y,
+            Orientation::W | Orientation::E => self.r90,
+            Orientation::FW | Orientation::FE => self.r90 && self.x && self.y,
+        }
+    }
 }
 
 /// What a placement site is for.

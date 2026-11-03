@@ -5,7 +5,6 @@
 use pare_common::db::design::{NetlistDB, PinOwner, PlacementStatus};
 use pare_common::db::indices::{CellId, NetId, PinId};
 use pare_common::db::library::MacroClass;
-use pare_common::geom::orient::Orientation;
 
 /// Nets with more cell pins than this are left as they are.
 const MAX_CELL_PINS: usize = 100;
@@ -104,7 +103,7 @@ pub fn optimize_mirroring(db: &mut NetlistDB) -> usize {
         let before = nets_hpwl(&nets, &ignored, &boxes);
         let saved: Vec<Bounds> = nets.iter().map(|n| boxes[n.index()]).collect();
         let orient = db.cells[cell.index()].orient;
-        db.cells[cell.index()].orient = mirror_y(orient);
+        db.cells[cell.index()].orient = orient.mirrored_about_y();
         for net in &nets {
             if !ignored[net.index()] {
                 boxes[net.index()] = term_bounds(db, *net);
@@ -184,18 +183,4 @@ fn nets_hpwl(nets: &[NetId], ignored: &[bool], boxes: &[Bounds]) -> i64 {
         .filter(|n| !ignored[n.index()])
         .map(|n| bounds_hpwl(boxes[n.index()]))
         .sum()
-}
-
-/// The orientation mirrored about the vertical axis, as `orientMirrorY`.
-const fn mirror_y(orient: Orientation) -> Orientation {
-    match orient {
-        Orientation::N => Orientation::FN,
-        Orientation::FS => Orientation::S,
-        Orientation::FN => Orientation::N,
-        Orientation::S => Orientation::FS,
-        Orientation::W => Orientation::FW,
-        Orientation::FW => Orientation::W,
-        Orientation::E => Orientation::FE,
-        Orientation::FE => Orientation::E,
-    }
 }

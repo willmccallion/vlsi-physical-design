@@ -58,6 +58,22 @@ impl Orientation {
         }
     }
 
+    /// The orientation mirrored about the vertical axis, as `OpenDP`'s
+    /// `orientMirrorY`.
+    #[must_use]
+    pub const fn mirrored_about_y(self) -> Self {
+        match self {
+            Self::N => Self::FN,
+            Self::FN => Self::N,
+            Self::S => Self::FS,
+            Self::FS => Self::S,
+            Self::E => Self::FE,
+            Self::FE => Self::E,
+            Self::W => Self::FW,
+            Self::FW => Self::W,
+        }
+    }
+
     /// Whether the orientation swaps width and height.
     pub const fn is_rotated_quarter(self) -> bool {
         matches!(self, Self::E | Self::W | Self::FE | Self::FW)

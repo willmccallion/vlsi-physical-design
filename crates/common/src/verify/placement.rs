@@ -5,7 +5,6 @@ use crate::db::design::{NetlistDB, PlacementStatus, RegionKind};
 use crate::db::indices::CellId;
 use crate::db::library::MacroClass;
 use crate::geom::dbu::Dbu;
-use crate::geom::orient::Orientation;
 use crate::geom::rect::Rect;
 use std::collections::HashMap;
 
@@ -113,25 +112,11 @@ impl RowIndex {
             return Some(PlacementViolation::OffSite(id));
         }
         let orient = db.cells[id.index()].orient;
-        let mirrored_ok = db.cell_macro(id).symmetry.y && orient == flip_y(row.orient);
+        let mirrored_ok = db.cell_macro(id).symmetry.y && orient == row.orient.mirrored_about_y();
         if orient != row.orient && !mirrored_ok {
             return Some(PlacementViolation::WrongOrientation(id));
         }
         None
-    }
-}
-
-/// The orientation mirrored about the Y axis.
-const fn flip_y(o: Orientation) -> Orientation {
-    match o {
-        Orientation::N => Orientation::FN,
-        Orientation::FN => Orientation::N,
-        Orientation::S => Orientation::FS,
-        Orientation::FS => Orientation::S,
-        Orientation::E => Orientation::FE,
-        Orientation::FE => Orientation::E,
-        Orientation::W => Orientation::FW,
-        Orientation::FW => Orientation::W,
     }
 }
 

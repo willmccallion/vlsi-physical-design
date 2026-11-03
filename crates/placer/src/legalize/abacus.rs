@@ -15,8 +15,8 @@ use pare_common::geom::point::Point;
 use pare_common::geom::rect::Rect;
 
 use crate::rows::{
-    RowSpan, classify, expand_rows, fixed_obstacles, free_intervals, orientation_allowed,
-    rows_outward, snap_down, snap_up, squared,
+    RowSpan, classify, expand_rows, fixed_obstacles, free_intervals, rows_outward, snap_down,
+    snap_up, squared,
 };
 use crate::zones::{Zone, Zones, intersect};
 
@@ -294,7 +294,7 @@ fn place_cell(
         if best.is_some_and(|(cost, _)| dy >= cost) {
             break;
         }
-        if row.height != size.y || !orientation_allowed(db, cell, row.orient) {
+        if row.height != size.y || !db.cell_macro(cell).symmetry.allows(row.orient) {
             continue;
         }
         let width = snap_up(size.x, Dbu::ZERO, row.site);

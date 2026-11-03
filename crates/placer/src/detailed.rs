@@ -12,8 +12,7 @@
 //! the first moves the cells legalization left on such spots.
 
 use crate::rows::{
-    RowSpan, classify, expand_rows, fixed_obstacles, free_intervals, orientation_allowed,
-    snap_down, snap_up,
+    RowSpan, classify, expand_rows, fixed_obstacles, free_intervals, snap_down, snap_up,
 };
 use crate::zones::{Zone, Zones, intersect};
 use pare_common::db::design::{NetlistDB, PinOwner};
@@ -739,7 +738,7 @@ impl<'a> DetailedPlacer<'a> {
             .filter(|&r| {
                 r < self.rows.len()
                     && self.rows[r].height == size.y
-                    && orientation_allowed(db, cell, self.rows[r].orient)
+                    && db.cell_macro(cell).symmetry.allows(self.rows[r].orient)
             })
             .collect();
         for &other in &rows_near {
@@ -823,7 +822,7 @@ impl<'a> DetailedPlacer<'a> {
             .filter(|&c| c != cell && db.cell_size(c).x == width)
             .filter(|&c| (db.cells[c.index()].location.x - x).abs() <= reach)
             .filter(|&c| self.zone_of[c.index()] == self.zone_of[cell.index()])
-            .filter(|&c| orientation_allowed(db, c, self.rows[row_here].orient))
+            .filter(|&c| db.cell_macro(c).symmetry.allows(self.rows[row_here].orient))
             .find(|&c| {
                 let there = db.cells[c.index()].location;
                 let swapped = [(cell, there, row_there), (c, here, row_here)];
@@ -1011,7 +1010,7 @@ impl<'a> DetailedPlacer<'a> {
 
         for row in [r, r.saturating_sub(1), (r + 1).min(self.rows.len() - 1)] {
             if self.rows[row].height != size.y
-                || !orientation_allowed(db, cell, self.rows[row].orient)
+                || !db.cell_macro(cell).symmetry.allows(self.rows[row].orient)
             {
                 continue;
             }
@@ -1034,7 +1033,10 @@ impl<'a> DetailedPlacer<'a> {
                     let other_at = db.cells[other.index()].location;
                     let other_row = self.segments[from].row;
                     if self.zone_of[other.index()] != self.segments[from].zone
-                        || !orientation_allowed(db, other, self.rows[other_row].orient)
+                        || !db
+                            .cell_macro(other)
+                            .symmetry
+                            .allows(self.rows[other_row].orient)
                     {
                         continue;
                     }
