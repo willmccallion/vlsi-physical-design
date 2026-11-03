@@ -15,13 +15,13 @@ use pare_common::db::liberty::MinMax;
 use pare_common::db::writer;
 use pare_common::geom::dbu::Dbu;
 use pare_common::geom::point::Point;
-use pare_common::util::config::{Config, CongestionEstimate};
+use pare_common::util::config::{Config, CongestionEstimate, GlobalPlacementConfig};
 use pare_common::util::{ui, visualization};
 use pare_common::verify::pin_access::PinAccess;
 use pare_placer::detailed;
 use pare_placer::global::{
-    self, CongestionEstimator, GlobalParams, Outcome, Reweighted, RoutabilityParams, RoutingTiles,
-    TimingDriver, TimingParams,
+    self, CongestionEstimator, GlobalParams, GlobalResult, Outcome, Reweighted, RoutabilityParams,
+    RoutingTiles, TimingDriver, TimingParams,
 };
 use pare_placer::io::{self, IoLayers};
 use pare_placer::legalize::Legalization;
@@ -57,22 +57,7 @@ pub(crate) fn run_placement(
     start: PlacementStart,
     report: &mut Report,
 ) -> anyhow::Result<Option<NetlistRepair>> {
-    let movable_io = io::movable_io_pins(db);
-    let io_layers = if movable_io.is_empty() || start == PlacementStart::Given {
-        None
-    } else if config.io_placement.enabled {
-        Some(IoLayers::from_config(&config.io_placement, &db.library)?)
-    } else {
-        let unplaced = movable_io
-            .iter()
-            .filter(|&&p| db.io_pins[p.index()].status == PlacementStatus::Unplaced)
-            .count();
-        if unplaced > 0 {
-            anyhow::bail!("I/O pin placement is disabled but {unplaced} I/O pins are unplaced");
-        }
-        None
-    };
-    if let Some(layers) = io_layers {
+    if let Some(layers) = io_layers_to_place(config, db, start)? {
         ui::section("Pin Placement");
         place_io_pins_by_cells(config, db, &Zones::new(db)?, layers, report)?;
     }
@@ -81,10 +66,75 @@ pub(crate) fn run_placement(
     } else {
         None
     };
-
-    let zones = Zones::new(db)?;
     ui::section("Placement");
-    let model = if start == PlacementStart::Given {
+    let model = starting_placement(config, db, start, repair.as_mut(), report)?;
+    model.write_back(db);
+    if let Some(repair) = &mut repair {
+        repair_design(config, db, repair, report)?;
+    }
+    let global_png = output_dir.join("nesterov_placer.png");
+    visualization::draw_placement(db, &path_str(&global_png)?, 1000, 1000);
+    let (legalization, access, blocked_pins) = legalize_with_pin_access(config, db, report)?;
+    detailed_placement(db, legalization, access.as_ref(), blocked_pins, report)?;
+    if let Some(repair) = &mut repair
+        && clock_tree_synthesis(config, db, repair, report)?
+    {
+        let _ = legalize_again(db, report, "legalization after clock tree synthesis")?;
+    }
+    if let Some(repair) = &mut repair
+        && repair_timing(config, db, repair, report)?
+    {
+        let hpwl = legalize_again(db, report, "legalization after timing repair")?;
+        if let Some(summary) = &mut report.placement {
+            summary.hpwl_um = hpwl;
+        }
+    }
+    if !report_placement(db, report) {
+        anyhow::bail!("placement is not legal");
+    }
+    write_placement(config, db, output_dir, &global_png, report)?;
+    Ok(repair)
+}
+
+/// The layers to place the movable I/O pins on, when they are placed;
+/// none when there are none, the placement is given, or placing them is
+/// turned off and every one already has a place.
+fn io_layers_to_place(
+    config: &Config,
+    db: &NetlistDB,
+    start: PlacementStart,
+) -> anyhow::Result<Option<IoLayers>> {
+    let movable_io = io::movable_io_pins(db);
+    if movable_io.is_empty() || start == PlacementStart::Given {
+        return Ok(None);
+    }
+    if config.io_placement.enabled {
+        return Ok(Some(IoLayers::from_config(
+            &config.io_placement,
+            &db.library,
+        )?));
+    }
+    let unplaced = movable_io
+        .iter()
+        .filter(|&&p| db.io_pins[p.index()].status == PlacementStatus::Unplaced)
+        .count();
+    if unplaced > 0 {
+        anyhow::bail!("I/O pin placement is disabled but {unplaced} I/O pins are unplaced");
+    }
+    Ok(None)
+}
+
+/// The placement to legalize: the given one, which must place every cell,
+/// or a global placement from scratch.
+fn starting_placement(
+    config: &Config,
+    db: &mut NetlistDB,
+    start: PlacementStart,
+    repair: Option<&mut NetlistRepair>,
+    report: &mut Report,
+) -> anyhow::Result<PlacementModel> {
+    let zones = Zones::new(db)?;
+    if start == PlacementStart::Given {
         let unplaced = db
             .cells
             .iter()
@@ -94,33 +144,35 @@ pub(crate) fn run_placement(
             anyhow::bail!("{unplaced} cells of the given placement are unplaced");
         }
         ui::check("Starting from the given placement");
-        PlacementModel::from_db(db, &zones)
-    } else {
-        let phase_start = Instant::now();
-        let model = global_placement(
-            config,
-            db,
-            PlacementModel::from_db(db, &zones),
-            Pass::Full,
-            repair.as_mut(),
-            report,
-        )?;
-        report.phase("global placement", phase_start);
-        model
-    };
-    model.write_back(db);
-    if let Some(repair) = &mut repair {
-        repair_design(config, db, repair, report)?;
+        return Ok(PlacementModel::from_db(db, &zones));
     }
+    let phase_start = Instant::now();
+    let model = global_placement(
+        config,
+        db,
+        PlacementModel::from_db(db, &zones),
+        Pass::Full,
+        repair,
+        report,
+    )?;
+    report.phase("global placement", phase_start);
+    Ok(model)
+}
+
+/// Legalizes the global placement and frees the pins it left blocked;
+/// returns how it legalized, the pin access it used and the pins still
+/// blocked.
+fn legalize_with_pin_access(
+    config: &Config,
+    db: &mut NetlistDB,
+    report: &mut Report,
+) -> anyhow::Result<(Legalization, Option<PinAccess>, usize)> {
     let zones = Zones::new(db)?;
     let movable_cells = db
         .cells
         .iter()
         .filter(|c| !matches!(c.status, PlacementStatus::Fixed | PlacementStatus::Cover))
         .count();
-    let global_png = output_dir.join("nesterov_placer.png");
-    visualization::draw_placement(db, &path_str(&global_png)?, 1000, 1000);
-
     let phase_start = Instant::now();
     ui::phase("Legalization");
     let legalization = legalize(db, &zones)?;
@@ -146,7 +198,20 @@ pub(crate) fn run_placement(
         "",
     );
     report.phase("legalization", phase_start);
+    Ok((legalization, access, blocked_pins))
+}
 
+/// Improves the legal placement, as OpenROAD-flow-scripts'
+/// `improve_placement` and `optimize_mirroring` do after `OpenDP`, or with
+/// PARE's own detailed placer otherwise.
+fn detailed_placement(
+    db: &mut NetlistDB,
+    legalization: Legalization,
+    access: Option<&PinAccess>,
+    blocked_pins: usize,
+    report: &mut Report,
+) -> anyhow::Result<()> {
+    let zones = Zones::new(db)?;
     let phase_start = Instant::now();
     ui::phase("Detailed Placement");
     let before: Vec<_> = db.cells.iter().map(|c| (c.location, c.orient)).collect();
@@ -155,7 +220,7 @@ pub(crate) fn run_placement(
         let mirrored = optimize_mirroring(db);
         ui::stat_row("Mirrored:", &mirrored.to_string(), "", "");
     } else {
-        let _ = detailed::improve(db, &zones, 3, access.as_ref());
+        let _ = detailed::improve(db, &zones, 3, access);
     }
     let changed = db
         .cells
@@ -176,39 +241,34 @@ pub(crate) fn run_placement(
         summary.detailed_moves = changed;
         summary.blocked_pins = blocked_pins;
     }
-    if let Some(repair) = &mut repair
-        && clock_tree_synthesis(config, db, repair, report)?
-    {
-        let zones = Zones::new(db)?;
-        let phase_start = Instant::now();
-        ui::phase("Legalization");
-        let _ = legalize(db, &zones)?;
-        let hpwl = PlacementModel::from_db(db, &zones).hpwl();
-        ui::stat_row("HPWL (um):", &format!("{hpwl:.0}"), "", "");
-        report.phase("legalization after clock tree synthesis", phase_start);
-    }
-    if let Some(repair) = &mut repair
-        && repair_timing(config, db, repair, report)?
-    {
-        let zones = Zones::new(db)?;
-        let phase_start = Instant::now();
-        ui::phase("Legalization");
-        let _ = legalize(db, &zones)?;
-        let hpwl = PlacementModel::from_db(db, &zones).hpwl();
-        ui::stat_row("HPWL (um):", &format!("{hpwl:.0}"), "", "");
-        report.phase("legalization after timing repair", phase_start);
-        if let Some(summary) = &mut report.placement {
-            summary.hpwl_um = hpwl;
-        }
-    }
+    Ok(())
+}
 
-    if !report_placement(db, report) {
-        anyhow::bail!("placement is not legal");
-    }
+/// Legalizes the placement again after a step that added or moved cells,
+/// reporting it as `phase`; returns its half-perimeter wirelength.
+fn legalize_again(db: &mut NetlistDB, report: &mut Report, phase: &str) -> anyhow::Result<f64> {
+    let zones = Zones::new(db)?;
+    let phase_start = Instant::now();
+    ui::phase("Legalization");
+    let _ = legalize(db, &zones)?;
+    let hpwl = PlacementModel::from_db(db, &zones).hpwl();
+    ui::stat_row("HPWL (um):", &format!("{hpwl:.0}"), "", "");
+    report.phase(phase, phase_start);
+    Ok(hpwl)
+}
 
+/// Draws the placement and writes it where the config says, as DEF or, for
+/// a Bookshelf input, as a `.pl` file.
+fn write_placement(
+    config: &Config,
+    db: &NetlistDB,
+    output_dir: &Path,
+    global_png: &Path,
+    report: &mut Report,
+) -> anyhow::Result<()> {
     let phase_start = Instant::now();
     ui::phase("Output");
-    ui::wrote(&path_str(&global_png)?);
+    ui::wrote(&path_str(global_png)?);
     let placed_png = output_dir.join("placed.png");
     visualization::draw_placement(db, &path_str(&placed_png)?, 1000, 1000);
     ui::wrote(&path_str(&placed_png)?);
@@ -225,7 +285,7 @@ pub(crate) fn run_placement(
     };
     ui::wrote(&path_str(&placed)?);
     report.phase("placement output", phase_start);
-    Ok(repair)
+    Ok(())
 }
 
 /// Legalizes the placement as OpenROAD-flow-scripts' `detailed_placement`
@@ -313,37 +373,7 @@ fn global_placement(
              timing_driven = false"
         );
     }
-
-    let movable_area: f64 = model
-        .density_sizes
-        .iter()
-        .zip(&model.movable)
-        .filter(|(_, m)| **m)
-        .map(|(s, _)| s.x * s.y)
-        .sum();
-    let movable_cells = model.movable.iter().filter(|&&m| m).count();
-    let utilization = movable_area / model.free_area();
-    let target_density = gp
-        .target_density
-        .unwrap_or_else(|| global::default_target_density(utilization));
-    let bins = gp
-        .bin_dimension
-        .unwrap_or_else(|| global::default_bins(&model, target_density));
-
-    ui::stat_row(
-        "Cells:",
-        &movable_cells.to_string(),
-        "Nets:",
-        &model.nets.len().to_string(),
-    );
-    ui::stat_row(
-        "Utilization:",
-        &format!("{:.2}%", utilization * 100.0),
-        "Target Density:",
-        &format!("{target_density:.2}"),
-    );
-    ui::stat_row("Bin Grid:", &format!("{bins}x{bins}"), "", "");
-
+    let density = Density::of(&model, gp);
     let (routability, mut estimator) = if gp.routability_driven && pass == Pass::Full {
         let (params, estimator) = routability_setup(config, db)?;
         (Some(params), estimator)
@@ -351,14 +381,14 @@ fn global_placement(
         (None, None)
     };
     let params = GlobalParams {
-        target_density,
+        target_density: density.target,
         target_overflow: gp.target_overflow,
         max_iterations: gp.placer_max_iterations,
         initial_rounds: match pass {
             Pass::SkipIo => 0,
             Pass::Full => global::INITIAL_PLACE_ROUNDS,
         },
-        bins,
+        bins: density.bins,
         seed: gp.seed,
         routability,
         timing: timing.as_ref().map(|_| TimingParams {
@@ -395,6 +425,72 @@ fn global_placement(
         result
     };
     eprintln!();
+    show_global_result(db, &result)?;
+    let hpwl = model.hpwl();
+    ui::stat_row("HPWL (um):", &format!("{hpwl:.0}"), "", "");
+    report.placement = Some(PlacementSummary {
+        cells: density.movable_cells,
+        nets: model.nets.len(),
+        iterations: result.iterations,
+        overflow: result.overflow,
+        hpwl_um: hpwl,
+        detailed_moves: 0,
+        blocked_pins: 0,
+        timing_rounds: result.timing_rounds,
+    });
+    Ok(model)
+}
+
+/// How densely global placement packs `model`: its movable cells, their
+/// utilization of the free area, the target density and the bins.
+struct Density {
+    movable_cells: usize,
+    target: f64,
+    bins: usize,
+}
+
+impl Density {
+    /// The density `gp` sets or derives for `model`, shown as it is found.
+    fn of(model: &PlacementModel, gp: &GlobalPlacementConfig) -> Self {
+        let movable_area: f64 = model
+            .density_sizes
+            .iter()
+            .zip(&model.movable)
+            .filter(|(_, m)| **m)
+            .map(|(s, _)| s.x * s.y)
+            .sum();
+        let movable_cells = model.movable.iter().filter(|&&m| m).count();
+        let utilization = movable_area / model.free_area();
+        let target = gp
+            .target_density
+            .unwrap_or_else(|| global::default_target_density(utilization));
+        let bins = gp
+            .bin_dimension
+            .unwrap_or_else(|| global::default_bins(model, target));
+        ui::stat_row(
+            "Cells:",
+            &movable_cells.to_string(),
+            "Nets:",
+            &model.nets.len().to_string(),
+        );
+        ui::stat_row(
+            "Utilization:",
+            &format!("{:.2}%", utilization * 100.0),
+            "Target Density:",
+            &format!("{target:.2}"),
+        );
+        ui::stat_row("Bin Grid:", &format!("{bins}x{bins}"), "", "");
+        Self {
+            movable_cells,
+            target,
+            bins,
+        }
+    }
+}
+
+/// Shows the congestion rounds, the zones and how global placement ended;
+/// an error when it diverged.
+fn show_global_result(db: &NetlistDB, result: &GlobalResult) -> anyhow::Result<()> {
     for (k, round) in result.congestion.iter().enumerate() {
         ui::stat_row(
             &format!("Congestion {}:", k + 1),
@@ -437,19 +533,7 @@ fn global_placement(
             result.iterations
         ),
     }
-    let hpwl = model.hpwl();
-    ui::stat_row("HPWL (um):", &format!("{hpwl:.0}"), "", "");
-    report.placement = Some(PlacementSummary {
-        cells: movable_cells,
-        nets: model.nets.len(),
-        iterations: result.iterations,
-        overflow: result.overflow,
-        hpwl_um: hpwl,
-        detailed_moves: 0,
-        blocked_pins: 0,
-        timing_rounds: result.timing_rounds,
-    });
-    Ok(model)
+    Ok(())
 }
 
 /// Repairs the design between iterations of timing-driven global

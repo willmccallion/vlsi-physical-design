@@ -21,6 +21,7 @@ use anyhow::Context;
 use clap::{Parser, Subcommand};
 use pare_common::db::design::NetlistDB;
 use pare_common::db::parser::{bookshelf, def, lef};
+use pare_common::geom::dbu::DbuPerMicron;
 use pare_common::geom::point::Point;
 use pare_common::util::config::{Config, Purpose};
 use pare_common::util::{logger, ui};
@@ -50,40 +51,7 @@ enum Commands {
         from: Option<PathBuf>,
     },
     /// Route a placed design.
-    Route {
-        /// Design name (e.g. 'gcd') or path to a TOML config.
-        config: PathBuf,
-        /// Placed DEF, or Bookshelf `.pl`, to route instead of the config's input.
-        #[arg(long)]
-        placement: Option<PathBuf>,
-        /// Stop after global routing and track assignment, reporting their
-        /// result without routing in detail or writing a DEF.
-        #[arg(long)]
-        global_only: bool,
-        /// With --global-only, write each net's global route to this file as
-        /// route guides in the ISPD 2018 format.
-        #[arg(long, requires = "global_only")]
-        guides: Option<PathBuf>,
-        /// Save the run's state to this file, to resume from with --resume.
-        #[arg(long, conflicts_with = "global_only")]
-        save_state: Option<PathBuf>,
-        /// When to save the state: `global` (after global routing, the
-        /// default) or a detailed round, 0 being the first pass.
-        #[arg(long, requires = "save_state", value_parser = parse_save_point)]
-        save_after: Option<pare_router::SavePoint>,
-        /// Resume from a state saved by --save-state on the same design and
-        /// placement, skipping what it holds.
-        #[arg(long, conflicts_with = "global_only")]
-        resume: Option<PathBuf>,
-        /// Log this net's detailed routing in detail: each route found with
-        /// what it cost, each region judgment and its violations. Repeatable.
-        #[arg(long = "trace-net", conflicts_with = "global_only")]
-        trace_nets: Vec<String>,
-        /// Log detailed routing in detail in every region meeting this box,
-        /// given in microns as X0 Y0 X1 Y1.
-        #[arg(long, num_args = 4, value_names = ["X0", "Y0", "X1", "Y1"], conflicts_with = "global_only")]
-        trace_box: Option<Vec<f64>>,
-    },
+    Route(RouteArgs),
     /// Place, route, or place and route a design, as its purpose says.
     Run {
         /// Design name (e.g. 'ibex') or path to a TOML config.
@@ -122,6 +90,43 @@ enum Commands {
         #[arg(long, default_value_t = 1600)]
         size: u32,
     },
+}
+
+/// What the `route` command takes.
+#[derive(clap::Args)]
+struct RouteArgs {
+    /// Design name (e.g. 'gcd') or path to a TOML config.
+    config: PathBuf,
+    /// Placed DEF, or Bookshelf `.pl`, to route instead of the config's input.
+    #[arg(long)]
+    placement: Option<PathBuf>,
+    /// Stop after global routing and track assignment, reporting their
+    /// result without routing in detail or writing a DEF.
+    #[arg(long)]
+    global_only: bool,
+    /// With --global-only, write each net's global route to this file as
+    /// route guides in the ISPD 2018 format.
+    #[arg(long, requires = "global_only")]
+    guides: Option<PathBuf>,
+    /// Save the run's state to this file, to resume from with --resume.
+    #[arg(long, conflicts_with = "global_only")]
+    save_state: Option<PathBuf>,
+    /// When to save the state: `global` (after global routing, the
+    /// default) or a detailed round, 0 being the first pass.
+    #[arg(long, requires = "save_state", value_parser = parse_save_point)]
+    save_after: Option<pare_router::SavePoint>,
+    /// Resume from a state saved by --save-state on the same design and
+    /// placement, skipping what it holds.
+    #[arg(long, conflicts_with = "global_only")]
+    resume: Option<PathBuf>,
+    /// Log this net's detailed routing in detail: each route found with
+    /// what it cost, each region judgment and its violations. Repeatable.
+    #[arg(long = "trace-net", conflicts_with = "global_only")]
+    trace_nets: Vec<String>,
+    /// Log detailed routing in detail in every region meeting this box,
+    /// given in microns as X0 Y0 X1 Y1.
+    #[arg(long, num_args = 4, value_names = ["X0", "Y0", "X1", "Y1"], conflicts_with = "global_only")]
+    trace_box: Option<Vec<f64>>,
 }
 
 /// Resolves a config argument to a file path.
@@ -199,118 +204,10 @@ fn main() -> anyhow::Result<()> {
 /// Runs one command, recording what it did in `report`.
 fn run(command: Commands, report: &mut Report) -> anyhow::Result<()> {
     match command {
-        Commands::Place { config: name, from } => {
-            let config = load_config(&name, report)?;
-            if config.purpose == Purpose::Routing {
-                anyhow::bail!(
-                    "{} is a routing benchmark: its placement is part of the input",
-                    name.display()
-                );
-            }
-            let mut db = load_design(&config, from.as_deref())?;
-            report.design.clone_from(&db.name);
-            let start = if from.is_some() {
-                PlacementStart::Given
-            } else {
-                PlacementStart::Scratch
-            };
-            let _ = run_placement(
-                &config,
-                &mut db,
-                &prepare_output_dir(&config)?,
-                start,
-                report,
-            )?;
-            Ok(())
-        }
-        Commands::Route {
-            config: name,
-            placement,
-            global_only,
-            guides,
-            save_state,
-            save_after,
-            resume,
-            trace_nets,
-            trace_box,
-        } => {
-            let config = load_config(&name, report)?;
-            if config.purpose == Purpose::Placement {
-                anyhow::bail!(
-                    "{} is a placement benchmark and is not routed",
-                    name.display()
-                );
-            }
-            let mut db = load_design(&config, placement.as_deref())?;
-            report.design.clone_from(&db.name);
-            let stage = if global_only {
-                RouteStage::Global { guides }
-            } else {
-                let units = db.dbu();
-                let area = trace_box.map(|b| {
-                    let at = |x: f64, y: f64| {
-                        Point::new(units.to_dbu_rounded(x), units.to_dbu_rounded(y))
-                    };
-                    pare_common::geom::rect::Rect::new(at(b[0], b[1]), at(b[2], b[3]))
-                });
-                RouteStage::Detailed(StateFiles {
-                    save: save_state
-                        .map(|path| (path, save_after.unwrap_or(pare_router::SavePoint::Global))),
-                    resume,
-                    trace: pare_router::TraceRequest {
-                        nets: trace_nets,
-                        area,
-                    },
-                })
-            };
-            run_routing(
-                &config,
-                &mut db,
-                &prepare_output_dir(&config)?,
-                stage,
-                None,
-                report,
-            )
-        }
-        Commands::Run { config } => {
-            let config = load_config(&config, report)?;
-            let mut db = load_design(&config, None)?;
-            report.design.clone_from(&db.name);
-            let output_dir = prepare_output_dir(&config)?;
-            let repair = if config.purpose == Purpose::Routing {
-                None
-            } else {
-                run_placement(
-                    &config,
-                    &mut db,
-                    &output_dir,
-                    PlacementStart::Scratch,
-                    report,
-                )?
-            };
-            if config.purpose != Purpose::Placement {
-                let global = match repair {
-                    Some(mut repair) => {
-                        global_route_with_repair(&config, &mut db, &mut repair, report)?
-                    }
-                    None => None,
-                };
-                let stage = RouteStage::Detailed(StateFiles::default());
-                run_routing(&config, &mut db, &output_dir, stage, global, report)?;
-            }
-            Ok(())
-        }
-        Commands::Check { config, placement } => {
-            let config = load_config(&config, report)?;
-            let db = load_design(&config, placement.as_deref())?;
-            report.design.clone_from(&db.name);
-            let placement_ok = report_placement(&db, report);
-            let routing_ok = report_routing(&db, report);
-            if !(placement_ok && routing_ok) {
-                anyhow::bail!("{} failed its checks", db.name);
-            }
-            Ok(())
-        }
+        Commands::Place { config, from } => place(&config, from.as_deref(), report),
+        Commands::Route(args) => route(args, report),
+        Commands::Run { config } => place_and_route(&config, report),
+        Commands::Check { config, placement } => check(&config, placement.as_deref(), report),
         Commands::View {
             config,
             placement,
@@ -325,6 +222,123 @@ fn run(command: Commands, report: &mut Report) -> anyhow::Result<()> {
             view_area(&db, &area, &nets, &layers, &out, size)
         }
     }
+}
+
+/// The `place` command: places the design `name` from scratch, or refines
+/// the placement `from`.
+fn place(name: &Path, from: Option<&Path>, report: &mut Report) -> anyhow::Result<()> {
+    let config = load_config(name, report)?;
+    if config.purpose == Purpose::Routing {
+        anyhow::bail!(
+            "{} is a routing benchmark: its placement is part of the input",
+            name.display()
+        );
+    }
+    let mut db = load_design(&config, from)?;
+    report.design.clone_from(&db.name);
+    let start = if from.is_some() {
+        PlacementStart::Given
+    } else {
+        PlacementStart::Scratch
+    };
+    let _ = run_placement(
+        &config,
+        &mut db,
+        &prepare_output_dir(&config)?,
+        start,
+        report,
+    )?;
+    Ok(())
+}
+
+/// The `route` command.
+fn route(args: RouteArgs, report: &mut Report) -> anyhow::Result<()> {
+    let config = load_config(&args.config, report)?;
+    if config.purpose == Purpose::Placement {
+        anyhow::bail!(
+            "{} is a placement benchmark and is not routed",
+            args.config.display()
+        );
+    }
+    let mut db = load_design(&config, args.placement.as_deref())?;
+    report.design.clone_from(&db.name);
+    let stage = route_stage(args, db.dbu());
+    run_routing(
+        &config,
+        &mut db,
+        &prepare_output_dir(&config)?,
+        stage,
+        None,
+        report,
+    )
+}
+
+/// The routing `args` ask for, with the trace box in database `units`.
+fn route_stage(args: RouteArgs, units: DbuPerMicron) -> RouteStage {
+    if args.global_only {
+        return RouteStage::Global {
+            guides: args.guides,
+        };
+    }
+    let area = args.trace_box.map(|b| {
+        let at = |x: f64, y: f64| Point::new(units.to_dbu_rounded(x), units.to_dbu_rounded(y));
+        pare_common::geom::rect::Rect::new(at(b[0], b[1]), at(b[2], b[3]))
+    });
+    RouteStage::Detailed(StateFiles {
+        save: args.save_state.map(|path| {
+            (
+                path,
+                args.save_after.unwrap_or(pare_router::SavePoint::Global),
+            )
+        }),
+        resume: args.resume,
+        trace: pare_router::TraceRequest {
+            nets: args.trace_nets,
+            area,
+        },
+    })
+}
+
+/// The `run` command: places and routes the design `name` as its purpose
+/// says.
+fn place_and_route(name: &Path, report: &mut Report) -> anyhow::Result<()> {
+    let config = load_config(name, report)?;
+    let mut db = load_design(&config, None)?;
+    report.design.clone_from(&db.name);
+    let output_dir = prepare_output_dir(&config)?;
+    let repair = if config.purpose == Purpose::Routing {
+        None
+    } else {
+        run_placement(
+            &config,
+            &mut db,
+            &output_dir,
+            PlacementStart::Scratch,
+            report,
+        )?
+    };
+    if config.purpose == Purpose::Placement {
+        return Ok(());
+    }
+    let global = match repair {
+        Some(mut repair) => global_route_with_repair(&config, &mut db, &mut repair, report)?,
+        None => None,
+    };
+    let stage = RouteStage::Detailed(StateFiles::default());
+    run_routing(&config, &mut db, &output_dir, stage, global, report)
+}
+
+/// The `check` command.
+fn check(name: &Path, placement: Option<&Path>, report: &mut Report) -> anyhow::Result<()> {
+    let config = load_config(name, report)?;
+    let db = load_design(&config, placement)?;
+    report.design.clone_from(&db.name);
+    let placement_ok = report_placement(&db, report);
+    let routing_ok = report_routing(&db, report);
+    if !(placement_ok && routing_ok) {
+        anyhow::bail!("{} failed its checks", db.name);
+    }
+    Ok(())
 }
 
 /// Reads the design named by the `[input]` section. `placement` replaces the
