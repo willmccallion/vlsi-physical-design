@@ -8,6 +8,7 @@
 
 use crate::db::indices::{CellId, IoPinId};
 use crate::db::liberty::{Edge, MinMax};
+use crate::units::{Farads, Seconds};
 use std::collections::HashMap;
 
 /// A clock's index in [`Sdc::clocks`].
@@ -31,22 +32,22 @@ pub struct ClockEdge {
     pub edge: Edge,
 }
 
-/// Values for each edge and each side of the delay range: the shape of a
+/// Times for each edge and each side of the delay range: the shape of a
 /// port delay or an input slew, which the commands set piecewise.
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub struct RiseFallMinMax {
-    values: [[Option<f64>; 2]; 2],
+    values: [[Option<Seconds>; 2]; 2],
 }
 
 impl RiseFallMinMax {
     /// The value for `edge` on `side`, if set.
     #[must_use]
-    pub const fn get(&self, edge: Edge, side: MinMax) -> Option<f64> {
+    pub const fn get(&self, edge: Edge, side: MinMax) -> Option<Seconds> {
         self.values[edge.index()][side.index()]
     }
 
     /// Sets the value for every edge in `edges` and every side in `sides`.
-    pub fn set(&mut self, edges: &[Edge], sides: &[MinMax], value: f64) {
+    pub fn set(&mut self, edges: &[Edge], sides: &[MinMax], value: Seconds) {
         for &edge in edges {
             for &side in sides {
                 self.values[edge.index()][side.index()] = Some(value);
@@ -57,7 +58,7 @@ impl RiseFallMinMax {
     /// Keeps the more pessimistic of the value held and `value`: the
     /// larger on the late side, the smaller on the early side, as
     /// `OpenSTA` merges an added delay.
-    pub fn merge(&mut self, edges: &[Edge], sides: &[MinMax], value: f64) {
+    pub fn merge(&mut self, edges: &[Edge], sides: &[MinMax], value: Seconds) {
         for &edge in edges {
             for &side in sides {
                 let slot = &mut self.values[edge.index()][side.index()];
@@ -81,16 +82,16 @@ impl RiseFallMinMax {
 pub struct Clock {
     /// Its name.
     pub name: String,
-    /// Its period, in seconds.
-    pub period: f64,
-    /// When within the period it rises and falls, in seconds.
-    pub rise: f64,
+    /// Its period.
+    pub period: Seconds,
+    /// When within the period it rises and falls.
+    pub rise: Seconds,
     /// See [`Clock::rise`].
-    pub fall: f64,
+    pub fall: Seconds,
     /// The ports it enters at.
     pub sources: Vec<IoPinId>,
-    /// Setup (late) and hold (early) uncertainty, in seconds, where set.
-    pub uncertainty: [Option<f64>; 2],
+    /// Setup (late) and hold (early) uncertainty, where set.
+    pub uncertainty: [Option<Seconds>; 2],
     /// Whether it arrives through its network's delays rather than
     /// everywhere at once, as `set_propagated_clock` makes it.
     pub propagated: bool,
@@ -99,7 +100,7 @@ pub struct Clock {
 impl Clock {
     /// When the clock's `edge` happens within its first period.
     #[must_use]
-    pub const fn edge_time(&self, edge: Edge) -> f64 {
+    pub const fn edge_time(&self, edge: Edge) -> Seconds {
         match edge {
             Edge::Rise => self.rise,
             Edge::Fall => self.fall,
@@ -108,8 +109,8 @@ impl Clock {
 
     /// The uncertainty applied to checks on `side`; zero where none is set.
     #[must_use]
-    pub fn uncertainty(&self, side: MinMax) -> f64 {
-        self.uncertainty[side.index()].unwrap_or(0.0)
+    pub fn uncertainty(&self, side: MinMax) -> Seconds {
+        self.uncertainty[side.index()].unwrap_or(Seconds::ZERO)
     }
 }
 
@@ -238,10 +239,10 @@ pub struct CellDerating {
 pub struct DesignLimits {
     /// Largest fanout a driver may have.
     pub max_fanout: Option<f64>,
-    /// Largest transition time, in seconds.
-    pub max_transition: Option<f64>,
-    /// Largest load, in farads.
-    pub max_capacitance: Option<f64>,
+    /// Largest transition time.
+    pub max_transition: Option<Seconds>,
+    /// Largest load.
+    pub max_capacitance: Option<Farads>,
 }
 
 /// The constraints of a design.
@@ -263,9 +264,9 @@ pub struct Sdc {
     pub cell_derates: HashMap<CellId, CellDerating>,
     /// Design-wide limits.
     pub limits: DesignLimits,
-    /// Capacitance outside the design on its output ports, in farads.
-    pub port_loads: HashMap<IoPinId, f64>,
-    /// Transition times at input ports, in seconds.
+    /// Capacitance outside the design on its output ports.
+    pub port_loads: HashMap<IoPinId, Farads>,
+    /// Transition times at input ports.
     pub input_slews: HashMap<IoPinId, RiseFallMinMax>,
 }
 
@@ -287,7 +288,7 @@ impl Sdc {
 
     /// When `edge` happens within its clock's first period.
     #[must_use]
-    pub fn edge_time(&self, edge: ClockEdge) -> f64 {
+    pub fn edge_time(&self, edge: ClockEdge) -> Seconds {
         self.clock(edge.clock).edge_time(edge.edge)
     }
 

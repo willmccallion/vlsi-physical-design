@@ -6,6 +6,7 @@
 //! them up, interpolating linearly between the two nearest axis points and
 //! extrapolating from the end pair outside the axis.
 
+use crate::units::{Farads, Ohms, Seconds};
 use std::collections::HashMap;
 use std::fmt;
 
@@ -45,32 +46,35 @@ impl Edge {
 }
 
 /// A value for each edge.
-#[derive(Clone, Copy, Debug, Default, PartialEq)]
-pub struct EdgeValues {
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct EdgeValues<T> {
     /// For a rising edge.
-    pub rise: f64,
+    pub rise: T,
     /// For a falling edge.
-    pub fall: f64,
+    pub fall: T,
 }
 
-impl EdgeValues {
+impl<T: Copy> EdgeValues<T> {
+    /// `value` for both edges.
+    #[must_use]
+    pub const fn both(value: T) -> Self {
+        Self {
+            rise: value,
+            fall: value,
+        }
+    }
+
     /// The value for `edge`.
     #[must_use]
-    pub const fn get(&self, edge: Edge) -> f64 {
+    pub const fn get(&self, edge: Edge) -> T {
         match edge {
             Edge::Rise => self.rise,
             Edge::Fall => self.fall,
         }
     }
 
-    /// The larger of the two.
-    #[must_use]
-    pub const fn max(&self) -> f64 {
-        self.rise.max(self.fall)
-    }
-
     /// Sets the value for `edge`.
-    pub const fn set(&mut self, edge: Edge, value: f64) {
+    pub const fn set(&mut self, edge: Edge, value: T) {
         match edge {
             Edge::Rise => self.rise = value,
             Edge::Fall => self.fall = value,
@@ -78,19 +82,33 @@ impl EdgeValues {
     }
 }
 
+macro_rules! impl_edge_max {
+    ($($value:ty),*) => {$(
+        impl EdgeValues<$value> {
+            /// The larger of the two.
+            #[must_use]
+            pub const fn max(&self) -> $value {
+                self.rise.max(self.fall)
+            }
+        }
+    )*};
+}
+
+impl_edge_max!(f64, Seconds, Farads);
+
 /// The voltage thresholds a library measures transitions against, as
 /// fractions of the supply, and the derating between its tables' slews and
 /// measured ones.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Thresholds {
     /// Where a transition's slew measurement starts.
-    pub slew_lower: EdgeValues,
+    pub slew_lower: EdgeValues<f64>,
     /// Where a transition's slew measurement ends.
-    pub slew_upper: EdgeValues,
+    pub slew_upper: EdgeValues<f64>,
     /// Where an input is taken to switch.
-    pub input: EdgeValues,
+    pub input: EdgeValues<f64>,
     /// Where an output is taken to switch.
-    pub output: EdgeValues,
+    pub output: EdgeValues<f64>,
     /// Table slews over measured slews.
     pub slew_derate: f64,
 }
@@ -122,18 +140,18 @@ impl Default for Thresholds {
 /// Library-wide defaults that apply where a pin gives no value.
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub struct Defaults {
-    /// Largest transition time allowed at an output pin, in seconds.
-    pub max_transition: Option<f64>,
-    /// Largest load an output pin may drive, in farads.
-    pub max_capacitance: Option<f64>,
+    /// Largest transition time allowed at an output pin.
+    pub max_transition: Option<Seconds>,
+    /// Largest load an output pin may drive.
+    pub max_capacitance: Option<Farads>,
     /// Largest fanout an output pin may drive.
     pub max_fanout: Option<f64>,
     /// Fanout load of an input pin.
     pub fanout_load: Option<f64>,
-    /// Capacitance of an input pin without one, in farads.
-    pub input_pin_cap: f64,
-    /// Capacitance of an output pin without one, in farads.
-    pub output_pin_cap: f64,
+    /// Capacitance of an input pin without one.
+    pub input_pin_cap: Farads,
+    /// Capacitance of an output pin without one.
+    pub output_pin_cap: Farads,
 }
 
 /// What a table axis varies.
@@ -156,16 +174,16 @@ pub enum AxisVariable {
 /// The quantities a lookup may vary along the axes of a table.
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub(crate) struct TableInputs {
-    /// The slew at a delay arc's input, in seconds.
-    pub in_slew: f64,
-    /// The load a delay arc drives, in farads.
-    pub load_cap: f64,
-    /// The load on a related output, in farads.
-    pub related_cap: f64,
-    /// The slew at a check's clock pin, in seconds.
-    pub related_slew: f64,
-    /// The slew at a check's constrained pin, in seconds.
-    pub constrained_slew: f64,
+    /// The slew at a delay arc's input.
+    pub in_slew: Seconds,
+    /// The load a delay arc drives.
+    pub load_cap: Farads,
+    /// The load on a related output.
+    pub related_cap: Farads,
+    /// The slew at a check's clock pin.
+    pub related_slew: Seconds,
+    /// The slew at a check's constrained pin.
+    pub constrained_slew: Seconds,
 }
 
 /// Which end of a range of delays an analysis looks at: the late one for
@@ -191,18 +209,18 @@ impl MinMax {
         }
     }
 
-    /// The value nothing beats on this side, which a search starts from.
+    /// The time nothing beats on this side, which a search starts from.
     #[must_use]
-    pub const fn init_value(self) -> f64 {
+    pub const fn init_value(self) -> Seconds {
         match self {
-            Self::Min => f64::INFINITY,
-            Self::Max => f64::NEG_INFINITY,
+            Self::Min => Seconds::new(f64::INFINITY),
+            Self::Max => Seconds::new(f64::NEG_INFINITY),
         }
     }
 
     /// Whether `a` is further toward this side than `b`.
     #[must_use]
-    pub fn beats(self, a: f64, b: f64) -> bool {
+    pub fn beats<T: PartialOrd + Copy>(self, a: T, b: T) -> bool {
         match self {
             Self::Min => a < b,
             Self::Max => a > b,
@@ -224,7 +242,8 @@ impl MinMax {
 pub struct Axis {
     /// What the axis varies.
     pub variable: AxisVariable,
-    /// Its points, ascending, in SI units.
+    /// Its points, ascending, in the SI unit of what it varies: seconds
+    /// or farads.
     pub values: Vec<f64>,
 }
 
@@ -243,14 +262,15 @@ impl Axis {
         self.values.partition_point(|&v| v <= value) - 1
     }
 
-    /// The value the lookup takes along this axis.
+    /// The value the lookup takes along this axis, in the unit of its
+    /// points.
     const fn pick(&self, inputs: &TableInputs) -> f64 {
         match self.variable {
-            AxisVariable::InputTransition => inputs.in_slew,
-            AxisVariable::OutputCapacitance => inputs.load_cap,
-            AxisVariable::RelatedOutputCapacitance => inputs.related_cap,
-            AxisVariable::RelatedPinTransition => inputs.related_slew,
-            AxisVariable::ConstrainedPinTransition => inputs.constrained_slew,
+            AxisVariable::InputTransition => inputs.in_slew.get(),
+            AxisVariable::OutputCapacitance => inputs.load_cap.get(),
+            AxisVariable::RelatedOutputCapacitance => inputs.related_cap.get(),
+            AxisVariable::RelatedPinTransition => inputs.related_slew.get(),
+            AxisVariable::ConstrainedPinTransition => inputs.constrained_slew.get(),
             AxisVariable::Other => 0.0,
         }
     }
@@ -259,14 +279,14 @@ impl Axis {
 /// Axes a Liberty table may have: `variable_1` to `variable_3`.
 const MAX_AXES: usize = 3;
 
-/// A lookup table of up to three axes, its values in row-major order with
-/// the first axis outermost.
+/// A lookup table of times over up to three axes, its values in row-major
+/// order with the first axis outermost.
 #[derive(Clone, Debug, PartialEq)]
 pub struct Table {
     /// The axes, outermost first; none for a scalar.
     pub axes: Vec<Axis>,
-    /// The values, in SI units.
-    pub values: Vec<f64>,
+    /// The values.
+    pub values: Vec<Seconds>,
 }
 
 impl Table {
@@ -280,32 +300,38 @@ impl Table {
     /// The largest point of the first axis varying output capacitance, if
     /// any.
     #[must_use]
-    pub(crate) fn max_capacitance_point(&self) -> Option<f64> {
+    pub(crate) fn max_capacitance_point(&self) -> Option<Farads> {
         self.axes
             .iter()
             .find(|a| a.variable == AxisVariable::OutputCapacitance)
             .and_then(|a| a.values.last().copied())
+            .map(Farads::new)
     }
 
     /// Every point of every axis varying output capacitance.
-    pub fn capacitance_points(&self) -> impl Iterator<Item = f64> + '_ {
+    pub fn capacitance_points(&self) -> impl Iterator<Item = Farads> + '_ {
         self.axes
             .iter()
             .filter(|a| a.variable == AxisVariable::OutputCapacitance)
-            .flat_map(|a| a.values.iter().copied())
+            .flat_map(|a| a.values.iter().copied().map(Farads::new))
     }
 
     /// The table's value at an input slew and load, interpolated and
     /// extrapolated linearly along each axis as `OpenSTA` does.
     #[must_use]
-    pub fn lookup(&self, in_slew: f64, load_cap: f64) -> f64 {
-        self.lookup_with_related(in_slew, load_cap, 0.0)
+    pub fn lookup(&self, in_slew: Seconds, load_cap: Farads) -> Seconds {
+        self.lookup_with_related(in_slew, load_cap, Farads::ZERO)
     }
 
     /// [`Table::lookup`] with a related output capacitance for tables that
     /// vary one.
     #[must_use]
-    pub(crate) fn lookup_with_related(&self, in_slew: f64, load_cap: f64, related_cap: f64) -> f64 {
+    pub(crate) fn lookup_with_related(
+        &self,
+        in_slew: Seconds,
+        load_cap: Farads,
+        related_cap: Farads,
+    ) -> Seconds {
         self.lookup_inputs(&TableInputs {
             in_slew,
             load_cap,
@@ -317,7 +343,7 @@ impl Table {
     /// A check table's value at the slews of its clock and constrained
     /// pins, as `OpenSTA`'s check table model finds it.
     #[must_use]
-    pub fn check_value(&self, related_slew: f64, constrained_slew: f64) -> f64 {
+    pub fn check_value(&self, related_slew: Seconds, constrained_slew: Seconds) -> Seconds {
         self.lookup_inputs(&TableInputs {
             related_slew,
             constrained_slew,
@@ -328,7 +354,7 @@ impl Table {
     /// The table's value at `inputs`, each axis taking the quantity it
     /// varies.
     #[must_use]
-    pub(crate) fn lookup_inputs(&self, inputs: &TableInputs) -> f64 {
+    pub(crate) fn lookup_inputs(&self, inputs: &TableInputs) -> Seconds {
         let mut coordinates = [0.0; MAX_AXES];
         for (c, axis) in coordinates.iter_mut().zip(&self.axes) {
             *c = axis.pick(inputs);
@@ -336,7 +362,7 @@ impl Table {
         self.interpolate(&coordinates[..self.axes.len().min(MAX_AXES)])
     }
 
-    fn interpolate(&self, coordinates: &[f64]) -> f64 {
+    fn interpolate(&self, coordinates: &[f64]) -> Seconds {
         let axes = &self.axes[..coordinates.len()];
         let mut lower = [0usize; MAX_AXES];
         let mut fraction = [0.0; MAX_AXES];
@@ -367,10 +393,10 @@ impl Table {
                 index = index * axis.values.len() + point;
             }
             if weight != 0.0 {
-                sum = weight.mul_add(self.values[index], sum);
+                sum = weight.mul_add(self.values[index].get(), sum);
             }
         }
-        sum
+        Seconds::new(sum)
     }
 }
 
@@ -501,10 +527,10 @@ pub struct TimingArc {
     pub from_edge: Edge,
     /// The edge at its output: the constrained pin's edge of a check.
     pub to_edge: Edge,
-    /// Delay from input to output, in seconds, or the time a check
-    /// demands between its pins.
+    /// Delay from input to output, or the time a check demands between
+    /// its pins.
     pub delay: Option<Table>,
-    /// Transition time at the output, in seconds; none for a check.
+    /// Transition time at the output; none for a check.
     pub slew: Option<Table>,
 }
 
@@ -512,25 +538,24 @@ impl TimingArc {
     /// The time a check demands at the slews of its clock and constrained
     /// pins; zero for a check without a table.
     #[must_use]
-    pub fn check_value(&self, related_slew: f64, constrained_slew: f64) -> f64 {
-        self.delay
-            .as_ref()
-            .map_or(0.0, |t| t.check_value(related_slew, constrained_slew))
+    pub fn check_value(&self, related_slew: Seconds, constrained_slew: Seconds) -> Seconds {
+        self.delay.as_ref().map_or(Seconds::ZERO, |t| {
+            t.check_value(related_slew, constrained_slew)
+        })
     }
 
     /// Delay and output slew at an input slew and load, as `OpenSTA`'s
     /// gate table model gives them: zero for a missing table, and the slew
     /// never negative.
     #[must_use]
-    pub fn gate_delay(&self, in_slew: f64, load_cap: f64) -> (f64, f64) {
+    pub fn gate_delay(&self, in_slew: Seconds, load_cap: Farads) -> (Seconds, Seconds) {
         let delay = self
             .delay
             .as_ref()
-            .map_or(0.0, |t| t.lookup(in_slew, load_cap));
-        let slew = self
-            .slew
-            .as_ref()
-            .map_or(0.0, |t| t.lookup(in_slew, load_cap).max(0.0));
+            .map_or(Seconds::ZERO, |t| t.lookup(in_slew, load_cap));
+        let slew = self.slew.as_ref().map_or(Seconds::ZERO, |t| {
+            t.lookup(in_slew, load_cap).max(Seconds::ZERO)
+        });
         (delay, slew)
     }
 
@@ -538,14 +563,14 @@ impl TimingArc {
     /// slew, over that load: `OpenSTA`'s approximation of the drive
     /// resistance. Zero without a load-dependent slew table.
     #[must_use]
-    pub fn drive_resistance(&self) -> f64 {
+    pub fn drive_resistance(&self) -> Ohms {
         let Some(table) = &self.slew else {
-            return 0.0;
+            return Ohms::ZERO;
         };
         let Some(cap) = table.max_capacitance_point() else {
-            return 0.0;
+            return Ohms::ZERO;
         };
-        table.lookup(0.0, cap).max(0.0) / cap
+        table.lookup(Seconds::ZERO, cap).max(Seconds::ZERO) / cap
     }
 }
 
@@ -602,12 +627,12 @@ pub struct LibPort {
     pub name: String,
     /// Which way it carries signals.
     pub direction: PortDirection,
-    /// Its capacitance for each edge, in farads.
-    pub capacitance: EdgeValues,
-    /// Largest load it may drive, in farads.
-    pub max_capacitance: Option<f64>,
-    /// Largest transition allowed at it, in seconds.
-    pub max_transition: Option<f64>,
+    /// Its capacitance for each edge.
+    pub capacitance: EdgeValues<Farads>,
+    /// Largest load it may drive.
+    pub max_capacitance: Option<Farads>,
+    /// Largest transition allowed at it.
+    pub max_transition: Option<Seconds>,
     /// Largest fanout it may drive.
     pub max_fanout: Option<f64>,
     /// Its fanout load.
@@ -625,7 +650,7 @@ pub struct LibPort {
 impl LibPort {
     /// The larger of the pin's edge capacitances.
     #[must_use]
-    pub const fn capacitance(&self) -> f64 {
+    pub const fn capacitance(&self) -> Farads {
         self.capacitance.max()
     }
 
@@ -802,12 +827,12 @@ impl LibCell {
     /// The largest drive resistance over the delay arcs into `port`, as
     /// `OpenSTA`'s `driveResistance`; zero when no arc gives one.
     #[must_use]
-    pub fn drive_resistance(&self, port: usize) -> f64 {
+    pub fn drive_resistance(&self, port: usize) -> Ohms {
         self.delay_arc_sets_to(port)
             .flat_map(|s| s.arcs.iter())
             .map(TimingArc::drive_resistance)
-            .filter(|&r| r > 0.0)
-            .fold(0.0, f64::max)
+            .filter(|&r| r > Ohms::ZERO)
+            .fold(Ohms::ZERO, Ohms::max)
     }
 
     /// Whether any pin has a function.
@@ -883,13 +908,13 @@ pub struct Liberty {
     absorbed_defaults: Vec<Defaults>,
 }
 
-/// The units a library declares, as multiples of SI units.
+/// The units a library declares.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct LibraryUnits {
-    /// Seconds per time unit.
-    pub time: f64,
-    /// Farads per capacitance unit.
-    pub capacitance: f64,
+    /// One time unit.
+    pub time: Seconds,
+    /// One capacitance unit.
+    pub capacitance: Farads,
 }
 
 impl Default for LibraryUnits {
@@ -897,8 +922,8 @@ impl Default for LibraryUnits {
     /// declares nothing.
     fn default() -> Self {
         Self {
-            time: 1e-9,
-            capacitance: 1e-12,
+            time: Seconds::new(1e-9),
+            capacitance: Farads::new(1e-12),
         }
     }
 }
@@ -969,7 +994,7 @@ impl Liberty {
     /// pin's own, else for an output its library's default. `None` where
     /// nothing limits it.
     #[must_use]
-    pub fn slew_limit(&self, cell: &LibCell, port: &LibPort) -> Option<f64> {
+    pub fn slew_limit(&self, cell: &LibCell, port: &LibPort) -> Option<Seconds> {
         match port.max_transition {
             Some(limit) => Some(limit),
             None if port.is_output() => self.cell_defaults(cell).max_transition,
@@ -980,7 +1005,7 @@ impl Liberty {
     /// The load limit `OpenSTA` applies at an output pin of `cell`: the
     /// pin's own, else its library's default.
     #[must_use]
-    pub fn capacitance_limit(&self, cell: &LibCell, port: &LibPort) -> Option<f64> {
+    pub fn capacitance_limit(&self, cell: &LibCell, port: &LibPort) -> Option<Farads> {
         match port.max_capacitance {
             Some(limit) => Some(limit),
             None if port.is_output() => self.cell_defaults(cell).max_capacitance,
@@ -1366,6 +1391,10 @@ impl FuncParser<'_> {
 mod tests {
     use super::*;
 
+    fn times(values: &[f64]) -> Vec<Seconds> {
+        values.iter().copied().map(Seconds::new).collect()
+    }
+
     fn table_7x7_like() -> Table {
         Table {
             axes: vec![
@@ -1378,23 +1407,23 @@ mod tests {
                     values: vec![10.0, 20.0],
                 },
             ],
-            values: vec![0.0, 10.0, 1.0, 11.0, 3.0, 13.0],
+            values: times(&[0.0, 10.0, 1.0, 11.0, 3.0, 13.0]),
         }
     }
 
     #[test]
     fn lookup_interpolates_bilinearly_inside_the_axes() {
         let t = table_7x7_like();
-        assert!((t.lookup(1.5, 15.0) - 5.5).abs() < 1e-12);
-        assert!((t.lookup(3.0, 10.0) - 2.0).abs() < 1e-12);
+        assert!((t.lookup(Seconds::new(1.5), Farads::new(15.0)).get() - 5.5).abs() < 1e-12);
+        assert!((t.lookup(Seconds::new(3.0), Farads::new(10.0)).get() - 2.0).abs() < 1e-12);
     }
 
     #[test]
     fn lookup_extrapolates_from_the_end_pairs_outside_the_axes() {
         let t = table_7x7_like();
-        assert!((t.lookup(0.0, 10.0) - (-1.0)).abs() < 1e-12);
-        assert!((t.lookup(6.0, 10.0) - 5.0).abs() < 1e-12);
-        assert!((t.lookup(1.0, 30.0) - 20.0).abs() < 1e-12);
+        assert!((t.lookup(Seconds::new(0.0), Farads::new(10.0)).get() - (-1.0)).abs() < 1e-12);
+        assert!((t.lookup(Seconds::new(6.0), Farads::new(10.0)).get() - 5.0).abs() < 1e-12);
+        assert!((t.lookup(Seconds::new(1.0), Farads::new(30.0)).get() - 20.0).abs() < 1e-12);
     }
 
     #[test]
@@ -1404,14 +1433,14 @@ mod tests {
                 variable: AxisVariable::OutputCapacitance,
                 values: vec![5.0],
             }],
-            values: vec![7.0],
+            values: times(&[7.0]),
         };
-        assert!((t.lookup(0.0, 99.0) - 7.0).abs() < 1e-12);
+        assert!((t.lookup(Seconds::new(0.0), Farads::new(99.0)).get() - 7.0).abs() < 1e-12);
         let scalar = Table {
             axes: Vec::new(),
-            values: vec![2.5],
+            values: times(&[2.5]),
         };
-        assert!((scalar.lookup(1.0, 1.0) - 2.5).abs() < 1e-12);
+        assert!((scalar.lookup(Seconds::new(1.0), Farads::new(1.0)).get() - 2.5).abs() < 1e-12);
     }
 
     #[test]
@@ -1468,10 +1497,7 @@ mod tests {
         LibPort {
             name: name.into(),
             direction,
-            capacitance: EdgeValues {
-                rise: 1e-15,
-                fall: 1e-15,
-            },
+            capacitance: EdgeValues::both(Farads::new(1e-15)),
             max_capacitance: None,
             max_transition: None,
             max_fanout: None,
@@ -1574,10 +1600,10 @@ mod tests {
                         values: vec![1.0, 4.0],
                     },
                 ],
-                values: vec![1.0, 8.0, 2.0, 9.0],
+                values: times(&[1.0, 8.0, 2.0, 9.0]),
             }),
         };
-        assert!((arc.drive_resistance() - 2.0).abs() < 1e-12);
+        assert!((arc.drive_resistance().get() - 2.0).abs() < 1e-12);
     }
 
     fn sense(function: &str, port: &str) -> Option<TimingSense> {

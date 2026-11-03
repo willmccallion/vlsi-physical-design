@@ -21,6 +21,7 @@ use pare_common::db::indices::{CellId, LayerId, NetId, PinId};
 use pare_common::db::liberty::{ArcRole, Edge, EdgeValues, LibCellId, MinMax};
 use pare_common::geom::dbu::{Dbu, DbuPerMicron};
 use pare_common::geom::point::Point;
+use pare_common::units::{Farads, Seconds};
 use std::rc::Rc;
 
 /// Margin kept in hand on slew limits while rebuffering, in percent.
@@ -131,6 +132,7 @@ impl Rebuffer {
                 .link
                 .liberty
                 .capacitance_limit(lib, &lib.ports[output])
+                .map(Farads::get)
         });
         let cap_length = cap_limit.map_or(i64::MAX, |limit| {
             let slack = margined(limit, CAP_MARGIN) - smallest.input_cap;
@@ -459,7 +461,7 @@ impl Rebuffer {
             };
         };
         let cell = resizer.link.liberty.cell(driver.cell);
-        let out_cap = cell.ports[driver.port].capacitance();
+        let out_cap = cell.ports[driver.port].capacitance().get();
         let mut delay = 0.0;
         let mut correction = f64::INFINITY;
         let mut slew = 0.0;
@@ -534,7 +536,8 @@ impl Rebuffer {
             .link
             .liberty
             .cell(driver.cell)
-            .drive_resistance(driver.port);
+            .drive_resistance(driver.port)
+            .get();
         let meters = tree.max_load_wire_length() as f64 / resizer.db.dbu().get() as f64 * 1e-6;
         let load_slew = (r_drvr + meters * rc.resistance) * tree.cap * ELMORE_SKEW_FACTOR;
         load_slew <= margined(tree.max_load_slew, SLEW_MARGIN)
@@ -1526,25 +1529,25 @@ fn buffer_size(resizer: &Resizer<'_, Sta>, cell: LibCellId) -> Result<BufferSize
     let intrinsic = lib
         .delay_arc_sets_to(output)
         .flat_map(|s| s.arcs.iter())
-        .map(|a| a.gate_delay(0.0, 0.0).0)
+        .map(|a| a.gate_delay(Seconds::ZERO, Farads::ZERO).0.get())
         .filter(|&d| d > 0.0)
         .fold(0.0, f64::max);
     let cap_limit = resizer
         .link
         .liberty
         .capacitance_limit(lib, &lib.ports[output])
-        .map_or(f64::INFINITY, |l| margined(l, CAP_MARGIN));
+        .map_or(f64::INFINITY, |l| margined(l.get(), CAP_MARGIN));
     let margined_max_cap = cap_limit.min(load_limit_by_driver_slew(resizer, cell));
     Ok(BufferSize {
         cell,
-        input_cap: lib.ports[input].capacitance(),
+        input_cap: lib.ports[input].capacitance().get(),
         input_fanout: resizer.link.liberty.fanout_load(lib, &lib.ports[input]),
         input_max_slew: resizer.max_input_slew(lib, &lib.ports[input]),
-        output_cap: lib.ports[output].capacitance(),
+        output_cap: lib.ports[output].capacitance().get(),
         area: lib.area,
         intrinsic_delay: Fixed::from_seconds(intrinsic),
         margined_max_cap,
-        drive_resistance: lib.drive_resistance(output),
+        drive_resistance: lib.drive_resistance(output).get(),
     })
 }
 
@@ -1558,16 +1561,20 @@ fn load_limit_by_driver_slew(resizer: &Resizer<'_, Sta>, cell: LibCellId) -> f64
     let Some(max_slew) = resizer.link.liberty.slew_limit(lib, &lib.ports[output]) else {
         return f64::INFINITY;
     };
-    let max_slew = margined(max_slew, SLEW_MARGIN);
+    let max_slew = margined(max_slew.get(), SLEW_MARGIN);
     let in_slew = margined(resizer.max_input_slew(lib, &lib.ports[input]), SLEW_MARGIN);
     let objective = |load: f64| -> f64 {
         lib.delay_arc_sets_to(output)
             .flat_map(|s| s.arcs.iter())
-            .map(|a| a.gate_delay(in_slew, load).1)
+            .map(|a| {
+                a.gate_delay(Seconds::new(in_slew), Farads::new(load))
+                    .1
+                    .get()
+            })
             .fold(f64::NEG_INFINITY, f64::max)
             - max_slew
     };
-    let drive = lib.drive_resistance(output);
+    let drive = lib.drive_resistance(output).get();
     if drive == 0.0 {
         return f64::INFINITY;
     }
@@ -1640,7 +1647,7 @@ fn wire_length_limit_by_max_cap(resizer: &Resizer<'_, Sta>, size: &BufferSize) -
         return i64::MAX;
     }
     let dbu = resizer.db.dbu().get() as f64;
-    let slack = margined(limit, CAP_MARGIN) - size.input_cap;
+    let slack = margined(limit.get(), CAP_MARGIN) - size.input_cap;
     meters_to_dbu((slack / rc.capacitance).max(0.0), dbu)
 }
 
@@ -1690,9 +1697,12 @@ fn outmatched(resizer: &Resizer<'_, Sta>, worse: LibCellId, better: LibCellId, r
     let (Some((w_in, w_out)), Some((b_in, _))) = (w.buffer_ports(), b.buffer_ports()) else {
         return false;
     };
-    let extra_input = (b.ports[b_in].capacitance() - w.ports[w_in].capacitance()).max(0.0);
+    let extra_input =
+        (b.ports[b_in].capacitance().get() - w.ports[w_in].capacitance().get()).max(0.0);
     let penalty = r_max * extra_input;
-    let limit = liberty.capacitance_limit(w, &w.ports[w_out]).unwrap_or(0.0);
+    let limit = liberty
+        .capacitance_limit(w, &w.ports[w_out])
+        .map_or(0.0, Farads::get);
     let mut points: Vec<f64> = Vec::new();
     for cell in [w, b] {
         let Some((input, output)) = cell.buffer_ports() else {
@@ -1705,7 +1715,7 @@ fn outmatched(resizer: &Resizer<'_, Sta>, worse: LibCellId, better: LibCellId, r
         {
             for arc in &set.arcs {
                 if let Some(table) = &arc.delay {
-                    points.extend(table.capacitance_points());
+                    points.extend(table.capacitance_points().map(Farads::get));
                 }
             }
         }
@@ -1715,7 +1725,11 @@ fn outmatched(resizer: &Resizer<'_, Sta>, worse: LibCellId, better: LibCellId, r
     }
     points.sort_by(f64::total_cmp);
     points.dedup();
-    let cutoff = w.ports[w_in].capacitance().min(b.ports[b_in].capacitance()) * 20.0;
+    let cutoff = w.ports[w_in]
+        .capacitance()
+        .get()
+        .min(b.ports[b_in].capacitance().get())
+        * 20.0;
     for p in points {
         if (limit == 0.0 || p <= limit) && p < cutoff {
             let bd = resizer.buffer_delay(better, p);
@@ -1758,7 +1772,7 @@ pub fn max_wire_length_of(
 fn wire_length_limit(
     link: &Link<'_>,
     buffers: &BufferSet,
-    slews: &EdgeValues,
+    slews: &EdgeValues<f64>,
     rc: WireRc,
     dbu: DbuPerMicron,
 ) -> i64 {
@@ -1781,21 +1795,21 @@ fn wire_length_limit(
 fn buffer_max_wire_length(
     link: &Link<'_>,
     buffer: LibCellId,
-    slews: &EdgeValues,
+    slews: &EdgeValues<f64>,
     rc: WireRc,
 ) -> f64 {
     let lib = link.liberty.cell(buffer);
     let Some((input, output)) = lib.buffer_ports() else {
         return f64::INFINITY;
     };
-    let drive = lib.drive_resistance(output);
+    let drive = lib.drive_resistance(output).get();
     let delay = |length: f64| -> f64 {
         let resistance = length * rc.resistance;
         let capacitance = length * rc.capacitance;
         let mut worst = f64::NEG_INFINITY;
         for set in lib.delay_arc_sets_to(output) {
             for arc in &set.arcs {
-                let load_cap = lib.ports[input].capacitance.get(arc.to_edge);
+                let load_cap = lib.ports[input].capacitance.get(arc.to_edge).get();
                 let model = PiModel {
                     c2: capacitance / 2.0,
                     rpi: resistance,

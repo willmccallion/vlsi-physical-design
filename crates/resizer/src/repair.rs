@@ -13,6 +13,7 @@ use pare_common::db::indices::{NetId, PinId};
 use pare_common::db::liberty::{ArcRole, LibCellId};
 use pare_common::geom::dbu::Dbu;
 use pare_common::geom::point::Point;
+use pare_common::units::{Farads, Seconds};
 use std::collections::HashSet;
 
 /// How far short of the computed split a repeater is placed, as
@@ -281,15 +282,15 @@ impl<'r, 'a, T: Timing> Repairer<'r, 'a, T> {
                 return false;
             };
             let slew = self.resizer.graph.slew(load).max();
-            match port.max_transition.filter(|&l| l != 0.0) {
-                Some(limit) => slew > self.resizer.margined_slew(limit),
+            match port.max_transition.filter(|&l| l != Seconds::ZERO) {
+                Some(limit) => slew > self.resizer.margined_slew(limit.get()),
                 None => self
                     .resizer
                     .link
                     .liberty
                     .cell_defaults(cell)
                     .max_transition
-                    .is_some_and(|limit| slew > limit),
+                    .is_some_and(|limit| slew > limit.get()),
             }
         })
     }
@@ -336,7 +337,7 @@ impl<'r, 'a, T: Timing> Repairer<'r, 'a, T> {
                 .liberty
                 .slew_limit(size_cell, &size_cell.ports[port])
             {
-                let limit = self.resizer.margined_slew(limit);
+                let limit = self.resizer.margined_slew(limit.get());
                 for set in size_cell.arc_sets.iter().filter(|s| s.to == port) {
                     if !matches!(
                         set.role,
@@ -359,7 +360,10 @@ impl<'r, 'a, T: Timing> Repairer<'r, 'a, T> {
                                 }
                             },
                         );
-                        let (_, arc_slew) = arc.gate_delay(in_slew, load_cap);
+                        let arc_slew = arc
+                            .gate_delay(Seconds::new(in_slew), Farads::new(load_cap))
+                            .1
+                            .get();
                         if arc_slew > limit {
                             violation = f64::max(violation, arc_slew - limit);
                         }
@@ -390,7 +394,7 @@ impl<'r, 'a, T: Timing> Repairer<'r, 'a, T> {
     fn slew_load_cap(&self, driver: PinId, slew: f64) -> Option<f64> {
         let (lib_id, port) = self.resizer.link.pin_port(self.resizer.db, driver)?;
         let cell = self.resizer.link.liberty.cell(lib_id);
-        let drive_res = cell.drive_resistance(port);
+        let drive_res = cell.drive_resistance(port).get();
         if drive_res == 0.0 {
             return Some(f64::INFINITY);
         }
@@ -434,7 +438,12 @@ impl<'r, 'a, T: Timing> Repairer<'r, 'a, T> {
             .link
             .pin_port(self.resizer.db, driver)
             .map_or(0.0, |(lib, port)| {
-                self.resizer.link.liberty.cell(lib).drive_resistance(port)
+                self.resizer
+                    .link
+                    .liberty
+                    .cell(lib)
+                    .drive_resistance(port)
+                    .get()
             });
         let r_drvr = own.max(self.resizer.r_strongest_buffer);
         self.repair_branch(tree, driver, max_cap, r_drvr)
@@ -768,7 +777,7 @@ impl<'r, 'a, T: Timing> Repairer<'r, 'a, T> {
             .ok_or_else(|| RepairError::MissingPins(sized_cell.name.clone()))?;
         let in_lib_port = &sized_cell.ports[sized_in];
         branch.loads = vec![inserted.input];
-        branch.cap = in_lib_port.capacitance();
+        branch.cap = in_lib_port.capacitance().get();
         branch.fanout = self
             .resizer
             .link

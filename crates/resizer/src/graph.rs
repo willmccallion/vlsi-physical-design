@@ -61,6 +61,9 @@ pub(crate) enum Estimator<'r> {
     Routes(&'r dyn RouteSource, &'r RouteRc),
 }
 
+/// A value for each edge on each side of the delay range, min first.
+type PerSide = [EdgeValues<f64>; 2];
+
 /// Slews and delays over the design, kept current as repair edits it.
 ///
 /// Each is held for both sides of the delay range, as `OpenSTA` keeps one
@@ -71,10 +74,10 @@ pub(crate) struct TimingGraph {
     level: Vec<u32>,
     in_arcs: Vec<Vec<InArc>>,
     loop_arcs: rustc_hash::FxHashSet<(PinId, PinId)>,
-    slew: Vec<[EdgeValues; 2]>,
+    slew: Vec<PerSide>,
     annotated: Vec<Option<f64>>,
     arc_delays: Vec<Vec<ArcDelay>>,
-    wire_delay: Vec<[EdgeValues; 2]>,
+    wire_delay: Vec<PerSide>,
     parasitics: Vec<Option<NetParasitics>>,
     rc: WireRc,
     clock_rc: Option<WireRc>,
@@ -174,13 +177,13 @@ impl TimingGraph {
 
     /// A pin's late-side slews, which the slew limits are checked against.
     #[must_use]
-    pub fn slew(&self, pin: PinId) -> EdgeValues {
+    pub fn slew(&self, pin: PinId) -> EdgeValues<f64> {
         self.slew_side(pin, MinMax::Max)
     }
 
     /// A pin's slews on `side`.
     #[must_use]
-    pub(crate) fn slew_side(&self, pin: PinId, side: MinMax) -> EdgeValues {
+    pub(crate) fn slew_side(&self, pin: PinId, side: MinMax) -> EdgeValues<f64> {
         self.slew
             .get(pin.index())
             .map_or_else(EdgeValues::default, |s| s[side.index()])
@@ -457,8 +460,8 @@ impl TimingGraph {
         netlist: &Netlist<'_>,
         driver: PinId,
         loads: &[PinId],
-        root: EdgeValues,
-    ) -> Vec<([EdgeValues; 2], [EdgeValues; 2])> {
+        root: EdgeValues<f64>,
+    ) -> Vec<(PerSide, PerSide)> {
         let t = &netlist.link.liberty.thresholds;
         let mut out = vec![([root, root], [EdgeValues::default(); 2]); loads.len()];
         for edge in Edge::BOTH {
@@ -639,7 +642,7 @@ struct DriverDelays {
 
 /// Whether two sided slews are equal within `OpenSTA`'s tolerance, so a
 /// change too small to matter stops propagating.
-fn same_slews(a: &[EdgeValues; 2], b: &[EdgeValues; 2]) -> bool {
+fn same_slews(a: &PerSide, b: &PerSide) -> bool {
     a.iter()
         .zip(b)
         .all(|(x, y)| fuzzy::equal(x.rise, y.rise) && fuzzy::equal(x.fall, y.fall))
@@ -657,7 +660,7 @@ struct Merged {
 
 impl Merged {
     const fn new(side: MinMax) -> Self {
-        let init = side.init_value();
+        let init = side.init_value().get();
         Self {
             side,
             rise: init,
@@ -675,7 +678,7 @@ impl Merged {
         }
     }
 
-    fn values(self) -> EdgeValues {
+    fn values(self) -> EdgeValues<f64> {
         let settle = |v: f64| if v.is_finite() { v } else { 0.0 };
         EdgeValues {
             rise: settle(self.rise),
@@ -690,7 +693,7 @@ impl Merged {
 pub(crate) fn pin_capacitance(netlist: &Netlist<'_>, pin: PinId, edge: Edge) -> f64 {
     netlist
         .lib_port(pin)
-        .map_or(0.0, |port| port.capacitance.get(edge))
+        .map_or(0.0, |port| port.capacitance.get(edge).get())
 }
 
 /// A net's estimated parasitics. From global routes, as `OpenROAD`'s

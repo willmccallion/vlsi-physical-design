@@ -16,6 +16,7 @@ use crate::db::library::{PinDirection, SignalUse};
 use crate::db::sdc::{
     Clock, ClockEdge, ClockId, FalsePath, MultiCyclePath, PathSpec, PortDelay, RiseFallMinMax, Sdc,
 };
+use crate::units::Seconds;
 use std::collections::HashMap;
 use std::path::Path;
 
@@ -352,8 +353,8 @@ impl Interpreter<'_> {
     fn set_units(&self, args: &[String], line: usize) -> Result<String, ParseError> {
         let parsed = self.options(args, &SET_UNITS, line)?;
         let checks: [(&str, f64, &str); 2] = [
-            ("-time", self.units.time, "s"),
-            ("-capacitance", self.units.capacitance, "f"),
+            ("-time", self.units.time.get(), "s"),
+            ("-capacitance", self.units.capacitance.get(), "f"),
         ];
         for (key, library_scale, suffix) in checks {
             if let Some(value) = parsed.key(key) {
@@ -608,7 +609,7 @@ impl Interpreter<'_> {
         Ok((clocks, ports))
     }
 
-    fn time(&self, text: &str, line: usize, what: &str) -> Result<f64, ParseError> {
+    fn time(&self, text: &str, line: usize, what: &str) -> Result<Seconds, ParseError> {
         let value: f64 = text
             .trim()
             .parse()
@@ -627,7 +628,7 @@ impl Interpreter<'_> {
             .key("-period")
             .ok_or_else(|| self.error(line, "create_clock without -period"))?;
         let period = self.time(period_text, line, "-period")?;
-        if period <= 0.0 {
+        if period <= Seconds::ZERO {
             return Err(self.error(line, "create_clock -period must be positive"));
         }
         let name = if let Some(name) = parsed.key("-name") {
@@ -654,7 +655,7 @@ impl Interpreter<'_> {
                 }
                 (rise, fall)
             }
-            None => (0.0, period / 2.0),
+            None => (Seconds::ZERO, period / 2.0),
         };
         if !parsed.flag("-add")
             && let Some(existing) = self.sdc.clock_id(&name)
@@ -1749,6 +1750,7 @@ mod tests {
     use crate::geom::dbu::{Dbu, DbuPerMicron};
     use crate::geom::orient::Orientation;
     use crate::geom::point::Point;
+    use crate::units::Farads;
 
     fn design() -> NetlistDB {
         let mut library = Library::new(DbuPerMicron::new(2000).unwrap());
@@ -1803,8 +1805,8 @@ mod tests {
 
     fn liberty() -> Liberty {
         let mut lib = Liberty::new("lib".into());
-        lib.units.time = 1e-9;
-        lib.units.capacitance = 1e-15;
+        lib.units.time = Seconds::new(1e-9);
+        lib.units.capacitance = Farads::new(1e-15);
         lib
     }
 
@@ -1837,14 +1839,14 @@ set_output_delay [expr $clk_period * $clk_io_pct] -clock $clk_name [all_outputs]
         assert_eq!(sdc.clocks.len(), 1);
         let clock = &sdc.clocks[0];
         assert_eq!(clock.name, "core_clock");
-        assert!((clock.period - 2.2e-9).abs() < 1e-20);
-        assert!((clock.fall - 1.1e-9).abs() < 1e-20);
+        assert!((clock.period.get() - 2.2e-9).abs() < 1e-20);
+        assert!((clock.fall.get() - 1.1e-9).abs() < 1e-20);
         assert_eq!(clock.sources, vec![port(&db, "clk")]);
         assert!(!sdc.input_delays.contains_key(&port(&db, "clk")));
         let delay = &sdc.input_delays[&port(&db, "key[1]")];
         assert_eq!(delay.len(), 1);
         assert_eq!(delay[0].reference.edge, Edge::Rise);
-        let value = delay[0].delays.get(Edge::Fall, MinMax::Min).unwrap();
+        let value = delay[0].delays.get(Edge::Fall, MinMax::Min).unwrap().get();
         assert!((value - 0.44e-9).abs() < 1e-18);
         assert!(sdc.input_delays.contains_key(&port(&db, "io")));
         assert!(sdc.output_delays.contains_key(&port(&db, "io")));
@@ -1861,9 +1863,9 @@ set_output_delay [expr $clk_period * $clk_io_pct] -clock $clk_name [all_outputs]
              create_clock -name b -period [expr ($p + 1.0) / 2] -waveform [list 0 [expr $p/2]] [get_ports rst_n]\n",
         );
 
-        assert!((sdc.clocks[0].period - 1e-9).abs() < 1e-20);
-        assert!((sdc.clocks[1].period - 2e-9).abs() < 1e-20);
-        assert!((sdc.clocks[1].fall - 1e-9).abs() < 1e-20);
+        assert!((sdc.clocks[0].period.get() - 1e-9).abs() < 1e-20);
+        assert!((sdc.clocks[1].period.get() - 2e-9).abs() < 1e-20);
+        assert!((sdc.clocks[1].fall.get() - 1e-9).abs() < 1e-20);
     }
 
     #[test]
@@ -1883,13 +1885,13 @@ set_output_delay [expr $clk_period * $clk_io_pct] -clock $clk_name [all_outputs]
             .iter()
             .find(|d| d.reference.edge == Edge::Rise)
             .unwrap();
-        assert!((rise.delays.get(Edge::Rise, MinMax::Max).unwrap() - 0.5e-9).abs() < 1e-20);
-        assert!((rise.delays.get(Edge::Rise, MinMax::Min).unwrap() - 0.1e-9).abs() < 1e-20);
+        assert!((rise.delays.get(Edge::Rise, MinMax::Max).unwrap().get() - 0.5e-9).abs() < 1e-20);
+        assert!((rise.delays.get(Edge::Rise, MinMax::Min).unwrap().get() - 0.1e-9).abs() < 1e-20);
         let fall = delays
             .iter()
             .find(|d| d.reference.edge == Edge::Fall)
             .unwrap();
-        assert!((fall.delays.get(Edge::Rise, MinMax::Max).unwrap() - 0.7e-9).abs() < 1e-20);
+        assert!((fall.delays.get(Edge::Rise, MinMax::Max).unwrap().get() - 0.7e-9).abs() < 1e-20);
     }
 
     #[test]
@@ -1908,7 +1910,8 @@ set_output_delay [expr $clk_period * $clk_io_pct] -clock $clk_name [all_outputs]
              set_load 3 [get_ports {out[0]}]\n",
         );
 
-        let close = |got: Option<f64>, want: f64| got.is_some_and(|g| (g - want).abs() < 1e-20);
+        let close =
+            |got: Option<Seconds>, want: f64| got.is_some_and(|g| (g.get() - want).abs() < 1e-20);
         assert!(close(sdc.clocks[0].uncertainty[0], 0.15e-9));
         assert!(close(sdc.clocks[0].uncertainty[1], 0.15e-9));
         assert!(close(sdc.clocks[1].uncertainty[0], 0.05e-9));
@@ -1928,7 +1931,7 @@ set_output_delay [expr $clk_period * $clk_io_pct] -clock $clk_name [all_outputs]
         assert!((sdc.derating.cell[MinMax::Min.index()] - 0.95).abs() < 1e-12);
         assert!((sdc.derating.net[MinMax::Max.index()] - 1.0).abs() < 1e-12);
         assert_eq!(sdc.limits.max_fanout, Some(20.0));
-        assert!((sdc.port_loads[&port(&db, "out[0]")] - 3e-15).abs() < 1e-30);
+        assert!((sdc.port_loads[&port(&db, "out[0]")].get() - 3e-15).abs() < 1e-30);
     }
 
     #[test]

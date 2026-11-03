@@ -163,7 +163,7 @@ impl<'a> Link<'a> {
     pub(crate) fn buffer_drive_resistance(&self, buffer: LibCellId) -> f64 {
         let cell = self.liberty.cell(buffer);
         cell.buffer_ports()
-            .map_or(0.0, |(_, output)| cell.drive_resistance(output))
+            .map_or(0.0, |(_, output)| cell.drive_resistance(output).get())
     }
 
     /// Capacitance of a buffer's input.
@@ -171,7 +171,7 @@ impl<'a> Link<'a> {
     pub(crate) fn buffer_input_capacitance(&self, buffer: LibCellId) -> f64 {
         let cell = self.liberty.cell(buffer);
         cell.buffer_ports()
-            .map_or(0.0, |(input, _)| cell.ports[input].capacitance())
+            .map_or(0.0, |(input, _)| cell.ports[input].capacitance().get())
     }
 
     /// The buffers to insert, as `OpenROAD`'s `findBuffers` chooses them:

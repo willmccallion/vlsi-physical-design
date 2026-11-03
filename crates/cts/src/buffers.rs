@@ -5,6 +5,7 @@
 use crate::CtsError;
 use pare_common::db::design::NetlistDB;
 use pare_common::db::liberty::{LibCellId, Liberty};
+use pare_common::units::Farads;
 use pare_resizer::Link;
 use pare_resizer::parasitics::WireRc;
 
@@ -81,7 +82,7 @@ fn best_max_cap_buffer(
             .buffer_ports()
             .ok_or_else(|| CtsError::NotABuffer(cell.name.clone()))?;
         let area = cell.area as f32;
-        let limit = cell.ports[output].max_capacitance.map(|c| c as f32);
+        let limit = cell.ports[output].max_capacitance.map(|c| c.get() as f32);
         if let Some(max_cap) = limit
             && max_cap * MAX_CAP_DERATE > total_cap
             && area < best_area
@@ -103,7 +104,7 @@ fn max_cap_limit(liberty: &Liberty, buffer: LibCellId) -> f32 {
     let cell = liberty.cell(buffer);
     cell.buffer_ports()
         .and_then(|(_, output)| cell.ports[output].max_capacitance)
-        .unwrap_or(0.0) as f32
+        .map_or(0.0, Farads::get) as f32
 }
 
 /// The buffers to characterize, as `TechChar::trimSortBufferList`: for an

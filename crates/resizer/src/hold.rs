@@ -196,7 +196,11 @@ fn hold_delay(resizer: &Resizer<'_, Sta>, cell: LibCellId) -> f64 {
     let Some((input, _)) = lib.buffer_ports() else {
         return 0.0;
     };
-    let delays = buffer_delays(lib, &resizer.targets.slews, lib.ports[input].capacitance());
+    let delays = buffer_delays(
+        lib,
+        &resizer.targets.slews,
+        lib.ports[input].capacitance().get(),
+    );
     delays.rise.min(delays.fall)
 }
 
@@ -291,7 +295,7 @@ impl HoldRepair<'_> {
                 loads.push(load);
                 slacks.merge(resizer, load);
             } else if let Some(port) = netlist.lib_port(load) {
-                excluded_cap += port.capacitance();
+                excluded_cap += port.capacitance().get();
             }
         }
         if loads.is_empty() {
