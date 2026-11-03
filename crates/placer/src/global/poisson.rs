@@ -11,12 +11,15 @@ use rustfft::{Fft, FftPlanner};
 use std::f64::consts::PI;
 use std::sync::Arc;
 
-/// Solves `-∇²φ = ρ` on one square grid of bins, reusing its buffers.
+/// Solves `-∇²φ = ρ` on one grid of bins, reusing its buffers.
 pub(super) struct PoissonSolver {
-    dim: usize,
+    cols: usize,
+    rows: usize,
     bin: (f64, f64),
-    forward: Arc<dyn Fft<f64>>,
-    inverse: Arc<dyn Fft<f64>>,
+    forward_x: Arc<dyn Fft<f64>>,
+    forward_y: Arc<dyn Fft<f64>>,
+    inverse_x: Arc<dyn Fft<f64>>,
+    inverse_y: Arc<dyn Fft<f64>>,
     scratch: Vec<Complex<f64>>,
     transposed: Vec<Complex<f64>>,
     field: Vec<Complex<f64>>,
@@ -25,25 +28,29 @@ pub(super) struct PoissonSolver {
 impl std::fmt::Debug for PoissonSolver {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("PoissonSolver")
-            .field("dim", &self.dim)
+            .field("cols", &self.cols)
+            .field("rows", &self.rows)
             .field("bin", &self.bin)
             .finish_non_exhaustive()
     }
 }
 
 impl PoissonSolver {
-    /// A solver for `dim`×`dim` bins of the given width and height.
-    pub(super) fn new(dim: usize, bin_width: f64, bin_height: f64) -> Self {
+    /// A solver for `cols`×`rows` bins of the given width and height.
+    pub(super) fn new(cols: usize, rows: usize, bin_width: f64, bin_height: f64) -> Self {
         let mut planner = FftPlanner::new();
-        let mirrored = 2 * dim;
+        let mirrored = 4 * cols * rows;
         Self {
-            dim,
+            cols,
+            rows,
             bin: (bin_width, bin_height),
-            forward: planner.plan_fft_forward(mirrored),
-            inverse: planner.plan_fft_inverse(mirrored),
-            scratch: vec![Complex::default(); mirrored * mirrored],
-            transposed: vec![Complex::default(); mirrored * mirrored],
-            field: vec![Complex::default(); mirrored * mirrored],
+            forward_x: planner.plan_fft_forward(2 * cols),
+            forward_y: planner.plan_fft_forward(2 * rows),
+            inverse_x: planner.plan_fft_inverse(2 * cols),
+            inverse_y: planner.plan_fft_inverse(2 * rows),
+            scratch: vec![Complex::default(); mirrored],
+            transposed: vec![Complex::default(); mirrored],
+            field: vec![Complex::default(); mirrored],
         }
     }
 
@@ -56,29 +63,29 @@ impl PoissonSolver {
         field_x: &mut [f64],
         field_y: &mut [f64],
     ) {
-        let dim = self.dim;
-        let dim2 = 2 * dim;
-        for y in 0..dim {
-            for x in 0..dim {
-                let val = Complex::new(density[y * dim + x], 0.0);
-                self.scratch[y * dim2 + x] = val;
-                self.scratch[y * dim2 + (dim2 - 1 - x)] = val;
-                self.scratch[(dim2 - 1 - y) * dim2 + x] = val;
-                self.scratch[(dim2 - 1 - y) * dim2 + (dim2 - 1 - x)] = val;
+        let (cols, rows) = (self.cols, self.rows);
+        let (width, height) = (2 * cols, 2 * rows);
+        for y in 0..rows {
+            for x in 0..cols {
+                let val = Complex::new(density[y * cols + x], 0.0);
+                self.scratch[y * width + x] = val;
+                self.scratch[y * width + (width - 1 - x)] = val;
+                self.scratch[(height - 1 - y) * width + x] = val;
+                self.scratch[(height - 1 - y) * width + (width - 1 - x)] = val;
             }
         }
 
-        self.forward.process(&mut self.scratch);
-        transpose(&self.scratch, &mut self.transposed, dim2);
-        self.forward.process(&mut self.transposed);
+        self.forward_x.process(&mut self.scratch);
+        transpose(&self.scratch, &mut self.transposed, height, width);
+        self.forward_y.process(&mut self.transposed);
 
         let (bin_w, bin_h) = self.bin;
-        for u in 0..dim2 {
-            let kx = angular_frequency(u, dim2) / bin_w;
-            for v in 0..dim2 {
-                let ky = angular_frequency(v, dim2) / bin_h;
+        for u in 0..width {
+            let kx = angular_frequency(u, width) / bin_w;
+            for v in 0..height {
+                let ky = angular_frequency(v, height) / bin_h;
                 let eigenvalue = kx.mul_add(kx, ky * ky);
-                let idx = u * dim2 + v;
+                let idx = u * height + v;
                 let phi = if eigenvalue > 0.0 {
                     self.transposed[idx] / eigenvalue
                 } else {
@@ -90,33 +97,33 @@ impl PoissonSolver {
             }
         }
 
-        let norm = 1.0 / (dim2 * dim2) as f64;
+        let norm = 1.0 / (width * height) as f64;
         self.inverse_2d(Spectrum::Potential);
-        for y in 0..dim {
-            for x in 0..dim {
-                potential[y * dim + x] = self.scratch[y * dim2 + x].re * norm;
+        for y in 0..rows {
+            for x in 0..cols {
+                potential[y * cols + x] = self.scratch[y * width + x].re * norm;
             }
         }
         self.inverse_2d(Spectrum::Field);
-        for y in 0..dim {
-            for x in 0..dim {
-                let e = self.scratch[y * dim2 + x] * norm;
-                field_x[y * dim + x] = e.re;
-                field_y[y * dim + x] = e.im;
+        for y in 0..rows {
+            for x in 0..cols {
+                let e = self.scratch[y * width + x] * norm;
+                field_x[y * cols + x] = e.re;
+                field_y[y * cols + x] = e.im;
             }
         }
     }
 
     /// Inverts one transposed spectrum into `scratch`, row-major.
     fn inverse_2d(&mut self, spectrum: Spectrum) {
-        let dim2 = 2 * self.dim;
+        let (width, height) = (2 * self.cols, 2 * self.rows);
         let transformed = match spectrum {
             Spectrum::Potential => &mut self.transposed,
             Spectrum::Field => &mut self.field,
         };
-        self.inverse.process(transformed);
-        transpose(transformed, &mut self.scratch, dim2);
-        self.inverse.process(&mut self.scratch);
+        self.inverse_y.process(transformed);
+        transpose(transformed, &mut self.scratch, width, height);
+        self.inverse_x.process(&mut self.scratch);
     }
 }
 
@@ -138,10 +145,11 @@ fn angular_frequency(k: usize, n: usize) -> f64 {
     2.0 * PI * signed / n as f64
 }
 
-fn transpose(src: &[Complex<f64>], dst: &mut [Complex<f64>], n: usize) {
-    for r in 0..n {
-        for c in 0..n {
-            dst[c * n + r] = src[r * n + c];
+/// Writes the `rows`×`cols` row-major `src` into `dst` column by column.
+fn transpose(src: &[Complex<f64>], dst: &mut [Complex<f64>], rows: usize, cols: usize) {
+    for r in 0..rows {
+        for c in 0..cols {
+            dst[c * rows + r] = src[r * cols + c];
         }
     }
 }
@@ -150,16 +158,47 @@ fn transpose(src: &[Complex<f64>], dst: &mut [Complex<f64>], n: usize) {
 mod tests {
     use super::*;
 
-    fn cosine_mode(dim: usize, a: usize, b: usize) -> Vec<f64> {
-        let mut density = vec![0.0; dim * dim];
-        for y in 0..dim {
-            for x in 0..dim {
-                let cx = (PI * a as f64 * (x as f64 + 0.5) / dim as f64).cos();
-                let cy = (PI * b as f64 * (y as f64 + 0.5) / dim as f64).cos();
-                density[y * dim + x] = cx * cy;
+    /// A grid of `cols`×`rows` bins.
+    #[derive(Clone, Copy)]
+    struct Grid {
+        cols: usize,
+        rows: usize,
+        bin: (f64, f64),
+    }
+
+    const fn square(dim: usize, bin: (f64, f64)) -> Grid {
+        Grid {
+            cols: dim,
+            rows: dim,
+            bin,
+        }
+    }
+
+    /// The phases of mode (`a`, `b`) at the center of bin (`x`, `y`).
+    fn phases(grid: Grid, a: usize, b: usize, x: usize, y: usize) -> (f64, f64) {
+        (
+            PI * a as f64 * (x as f64 + 0.5) / grid.cols as f64,
+            PI * b as f64 * (y as f64 + 0.5) / grid.rows as f64,
+        )
+    }
+
+    fn cosine_mode(grid: Grid, a: usize, b: usize) -> Vec<f64> {
+        let mut density = vec![0.0; grid.cols * grid.rows];
+        for y in 0..grid.rows {
+            for x in 0..grid.cols {
+                let (px, py) = phases(grid, a, b, x, y);
+                density[y * grid.cols + x] = px.cos() * py.cos();
             }
         }
         density
+    }
+
+    /// The wavenumbers of mode (`a`, `b`).
+    fn wavenumbers(grid: Grid, a: usize, b: usize) -> (f64, f64) {
+        (
+            PI * a as f64 / grid.cols as f64 / grid.bin.0,
+            PI * b as f64 / grid.rows as f64 / grid.bin.1,
+        )
     }
 
     struct Solution {
@@ -168,12 +207,13 @@ mod tests {
         field_y: Vec<f64>,
     }
 
-    fn solve_all(density: &[f64], dim: usize, bin: (f64, f64)) -> Solution {
-        let mut solver = PoissonSolver::new(dim, bin.0, bin.1);
+    fn solve_all(density: &[f64], grid: Grid) -> Solution {
+        let mut solver = PoissonSolver::new(grid.cols, grid.rows, grid.bin.0, grid.bin.1);
+        let n = grid.cols * grid.rows;
         let mut solution = Solution {
-            potential: vec![0.0; dim * dim],
-            field_x: vec![0.0; dim * dim],
-            field_y: vec![0.0; dim * dim],
+            potential: vec![0.0; n],
+            field_x: vec![0.0; n],
+            field_y: vec![0.0; n],
         };
         solver.solve(
             density,
@@ -184,17 +224,12 @@ mod tests {
         solution
     }
 
-    fn solve(density: &[f64], dim: usize, bin: (f64, f64)) -> Vec<f64> {
-        solve_all(density, dim, bin).potential
-    }
-
-    fn assert_solves_cosine_mode(dim: usize, a: usize, b: usize, bin: (f64, f64)) {
-        let density = cosine_mode(dim, a, b);
-        let wa = PI * a as f64 / dim as f64 / bin.0;
-        let wb = PI * b as f64 / dim as f64 / bin.1;
+    fn assert_solves_cosine_mode(grid: Grid, a: usize, b: usize) {
+        let density = cosine_mode(grid, a, b);
+        let (wa, wb) = wavenumbers(grid, a, b);
         let eigenvalue = wa.mul_add(wa, wb * wb);
 
-        let potential = solve(&density, dim, bin);
+        let potential = solve_all(&density, grid).potential;
 
         for (phi, rho) in potential.iter().zip(&density) {
             assert!(
@@ -205,46 +240,19 @@ mod tests {
         }
     }
 
-    #[test]
-    fn potential_of_a_cosine_mode_is_the_mode_over_its_eigenvalue() {
-        assert_solves_cosine_mode(16, 1, 2, (1.0, 1.0));
-    }
-
-    #[test]
-    fn potential_distinguishes_x_and_y_frequencies() {
-        assert_solves_cosine_mode(16, 5, 0, (1.0, 1.0));
-        assert_solves_cosine_mode(16, 0, 5, (1.0, 1.0));
-    }
-
-    #[test]
-    fn potential_of_high_frequency_modes_uses_negative_frequencies() {
-        assert_solves_cosine_mode(16, 15, 11, (1.0, 1.0));
-    }
-
-    #[test]
-    fn potential_scales_each_axis_by_its_bin_size() {
-        assert_solves_cosine_mode(16, 3, 2, (2.5, 0.5));
-    }
-
-    #[test]
-    fn the_field_is_the_exact_derivative_of_a_cosine_mode_even_at_high_frequency() {
-        let (dim, a, b, bin) = (16, 13, 3, (2.0, 0.5));
-        let density = cosine_mode(dim, a, b);
-        let wa = PI * a as f64 / dim as f64 / bin.0;
-        let wb = PI * b as f64 / dim as f64 / bin.1;
+    fn assert_field_derives_cosine_mode(grid: Grid, a: usize, b: usize) {
+        let density = cosine_mode(grid, a, b);
+        let (wa, wb) = wavenumbers(grid, a, b);
         let eigenvalue = wa.mul_add(wa, wb * wb);
 
-        let solution = solve_all(&density, dim, bin);
+        let solution = solve_all(&density, grid);
 
-        for y in 0..dim {
-            for x in 0..dim {
-                let (px, py) = (
-                    PI * a as f64 * (x as f64 + 0.5) / dim as f64,
-                    PI * b as f64 * (y as f64 + 0.5) / dim as f64,
-                );
+        for y in 0..grid.rows {
+            for x in 0..grid.cols {
+                let (px, py) = phases(grid, a, b, x, y);
                 let ex = wa * px.sin() * py.cos() / eigenvalue;
                 let ey = wb * px.cos() * py.sin() / eigenvalue;
-                let idx = y * dim + x;
+                let idx = y * grid.cols + x;
                 assert!((solution.field_x[idx] - ex).abs() < 1e-9, "x at ({x}, {y})");
                 assert!((solution.field_y[idx] - ey).abs() < 1e-9, "y at ({x}, {y})");
             }
@@ -252,8 +260,56 @@ mod tests {
     }
 
     #[test]
+    fn potential_of_a_cosine_mode_is_the_mode_over_its_eigenvalue() {
+        assert_solves_cosine_mode(square(16, (1.0, 1.0)), 1, 2);
+    }
+
+    #[test]
+    fn potential_distinguishes_x_and_y_frequencies() {
+        assert_solves_cosine_mode(square(16, (1.0, 1.0)), 5, 0);
+        assert_solves_cosine_mode(square(16, (1.0, 1.0)), 0, 5);
+    }
+
+    #[test]
+    fn potential_of_high_frequency_modes_uses_negative_frequencies() {
+        assert_solves_cosine_mode(square(16, (1.0, 1.0)), 15, 11);
+    }
+
+    #[test]
+    fn potential_scales_each_axis_by_its_bin_size() {
+        assert_solves_cosine_mode(square(16, (2.5, 0.5)), 3, 2);
+    }
+
+    #[test]
+    fn potential_of_a_grid_with_more_columns_than_rows_keeps_each_axis_apart() {
+        let grid = Grid {
+            cols: 16,
+            rows: 4,
+            bin: (1.0, 2.0),
+        };
+
+        assert_solves_cosine_mode(grid, 11, 3);
+    }
+
+    #[test]
+    fn the_field_is_the_exact_derivative_of_a_cosine_mode_even_at_high_frequency() {
+        assert_field_derives_cosine_mode(square(16, (2.0, 0.5)), 13, 3);
+    }
+
+    #[test]
+    fn the_field_of_a_grid_with_more_rows_than_columns_keeps_each_axis_apart() {
+        let grid = Grid {
+            cols: 4,
+            rows: 16,
+            bin: (2.0, 1.0),
+        };
+
+        assert_field_derives_cosine_mode(grid, 3, 11);
+    }
+
+    #[test]
     fn uniform_density_produces_no_potential() {
-        let potential = solve(&[0.25; 64], 8, (1.0, 1.0));
+        let potential = solve_all(&[0.25; 64], square(8, (1.0, 1.0))).potential;
 
         assert!(potential.iter().all(|phi| phi.abs() < 1e-12));
     }

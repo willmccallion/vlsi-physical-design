@@ -9,7 +9,7 @@
 //! quadratic density penalty whose weights take normalized subgradient steps
 //! on each field's own energy.
 
-use super::density::{Excess, Footprint};
+use super::density::{DensityGrid, Excess, Footprint};
 use super::routability::{
     CHECK_OVERFLOW, CongestionMap, Routability, RoutabilityParams, SETTLE_FRACTION,
     SNAPSHOT_OVERFLOW, Verdict,
@@ -318,7 +318,7 @@ fn norm(v: &[f64]) -> f64 {
 }
 
 impl<'a> Objective<'a> {
-    /// `fields` must not be empty; they all share one bin grid.
+    /// `fields` must not be empty.
     fn new(
         objects: &Objects,
         die: &Rect<f64>,
@@ -350,15 +350,27 @@ impl<'a> Objective<'a> {
         objective
     }
 
-    /// Takes in the objects' sizes and the fillers each field keeps.
+    /// Takes in the objects' sizes and the fillers each field keeps: each
+    /// object's footprint in its field's grid, kept inside that grid as
+    /// `gpl` keeps a cell's density footprint inside its region.
     fn refresh(&mut self, objects: &Objects) {
-        let grid = &self.fields[0].grid;
-        self.footprints = objects.sizes.iter().map(|&s| grid.footprint(s)).collect();
-        self.areas = objects.sizes.iter().map(|s| s.x * s.y).collect();
-        self.bounds = objects
+        let grids: Vec<&DensityGrid> = self
+            .field_of
+            .iter()
+            .map(|&k| &self.fields[k].grid)
+            .collect();
+        self.footprints = objects
             .sizes
             .iter()
-            .map(|&s| center_bounds(&self.die, s))
+            .zip(&grids)
+            .map(|(&s, grid)| grid.footprint(s))
+            .collect();
+        self.areas = objects.sizes.iter().map(|s| s.x * s.y).collect();
+        self.bounds = self
+            .footprints
+            .iter()
+            .zip(&grids)
+            .map(|(f, grid)| center_bounds(&grid.region(), f.size()))
             .collect();
         self.active = vec![false; objects.centers.len()];
         for f in self.fields.iter() {
@@ -581,14 +593,14 @@ impl<'a> Objective<'a> {
     }
 }
 
-/// The range of centers that keep an object of `size` inside `die`.
-fn center_bounds(die: &Rect<f64>, size: Point<f64>) -> Rect<f64> {
+/// The range of centers that keep an object of `size` inside `region`.
+fn center_bounds(region: &Rect<f64>, size: Point<f64>) -> Rect<f64> {
     let half = size * 0.5;
-    let lo = die.min + half;
-    let hi = die.max - half;
+    let lo = region.min + half;
+    let hi = region.max - half;
     let mid = Point::new(
-        f64::midpoint(die.min.x, die.max.x),
-        f64::midpoint(die.min.y, die.max.y),
+        f64::midpoint(region.min.x, region.max.x),
+        f64::midpoint(region.min.y, region.max.y),
     );
     Rect::new(
         Point::new(lo.x.min(mid.x), lo.y.min(mid.y)),
@@ -802,7 +814,12 @@ pub(super) fn minimize<D: TimingDriver>(
 ) -> Result<GlobalResult, D::Error> {
     let die = model.die;
     let site = model.site_width;
-    let Some(bin) = setup.fields.first().map(|f| f.grid.bin()) else {
+    let top_level = setup
+        .fields
+        .iter()
+        .find(|f| f.zone == Zone::Outside)
+        .or_else(|| setup.fields.first());
+    let Some(bin) = top_level.map(|f| f.grid.bin()) else {
         let mut grad = vec![Point::new(0.0, 0.0); setup.objects.centers.len()];
         let wirelength =
             setup

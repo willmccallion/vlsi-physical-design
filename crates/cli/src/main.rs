@@ -24,8 +24,8 @@ use pare_common::verify::placement::{PlacementViolation, placement_violations};
 use pare_common::verify::routing::check_routing;
 use pare_placer::detailed;
 use pare_placer::global::{
-    self, CongestionEstimator, GlobalParams, Outcome, Reweighted, RoutabilityParams, RoutingTiles,
-    Start, TimingDriver, TimingParams,
+    self, BinCount, CongestionEstimator, GlobalParams, Outcome, Reweighted, RoutabilityParams,
+    RoutingTiles, Start, TimingDriver, TimingParams,
 };
 use pare_placer::io::{self, IoLayers};
 use pare_placer::legalize::Legalization;
@@ -1474,9 +1474,8 @@ fn global_placement(
     let target_density = gp
         .target_density
         .unwrap_or_else(|| global::default_target_density(utilization));
-    let bins = gp
-        .bin_dimension
-        .unwrap_or_else(|| global::default_bins(&model, target_density));
+    let configured_bins = gp.bin_dimension.map(BinCount::square);
+    let bins = configured_bins.unwrap_or_else(|| global::default_bins(&model, target_density));
 
     ui::stat_row(
         "Cells:",
@@ -1490,7 +1489,7 @@ fn global_placement(
         "Target Density:",
         &format!("{target_density:.2}"),
     );
-    ui::stat_row("Bin Grid:", &format!("{bins}x{bins}"), "", "");
+    ui::stat_row("Bin Grid:", &format!("{}x{}", bins.x, bins.y), "", "");
 
     let (routability, mut estimator) = if gp.routability_driven && pass == Pass::Full {
         let (params, estimator) = routability_setup(config, db)?;
@@ -1510,7 +1509,7 @@ fn global_placement(
             Pass::SkipIo => Start::Placed,
             Pass::Full => Start::Center,
         },
-        bins,
+        bins: configured_bins,
         seed: gp.seed,
         routability,
         timing: timing.as_ref().map(|_| TimingParams {

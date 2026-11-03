@@ -51,14 +51,32 @@ pub struct GlobalParams {
     pub initial_rounds: usize,
     /// Where cells start before initial placement.
     pub start: Start,
-    /// Bins per side of the density grid.
-    pub bins: usize,
+    /// Bins of every density grid; with none, each zone's grid is sized as
+    /// `gpl` sizes it.
+    pub bins: Option<BinCount>,
     /// Seed for the initial placement.
     pub seed: u64,
     /// Inflation of cells in routing-congested bins, if enabled.
     pub routability: Option<RoutabilityParams>,
     /// Repair of the design for timing along the way, if enabled.
     pub timing: Option<TimingParams>,
+}
+
+/// Bins along each side of a density grid.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct BinCount {
+    /// Columns.
+    pub x: usize,
+    /// Rows.
+    pub y: usize,
+}
+
+impl BinCount {
+    /// As many columns as rows.
+    #[must_use]
+    pub const fn square(n: usize) -> Self {
+        Self { x: n, y: n }
+    }
 }
 
 /// Where movable cells start before initial placement, as `gpl` chooses
@@ -209,9 +227,12 @@ impl Field {
 /// when the requested target is lower, so that it can still be met.
 const ZONE_DENSITY_MARGIN: f64 = 0.01;
 
-/// Fewest and most bins per side of the density grid.
-const MIN_BINS: usize = 16;
-const MAX_BINS: usize = 512;
+/// Fewest bins per side of a density grid over rows separated by channels.
+const MIN_CHANNEL_BINS: usize = 16;
+
+/// The largest power of two whose square `gpl` tries as a bin count; past
+/// it, it settles on twice that.
+const MAX_GPL_BINS: i64 = 1024;
 
 /// Share of the room left above a design's utilization that its default
 /// target density adds, as `OpenROAD-flow-scripts`' `PLACE_DENSITY_LB_ADDON`.
@@ -229,51 +250,99 @@ pub fn default_target_density(utilization: f64) -> f64 {
     (raised + 0.01).min(1.0)
 }
 
-/// Bins per side for `model`: sized for the average cell at the target
-/// density, as `OpenROAD` sizes them, but no shorter than the row pitch when
-/// channels separate the rows.
+/// Bins for the grid of `model`'s cells outside every fence, at
+/// `target_density`: as `gpl` counts them, but no shorter than the row
+/// pitch when channels separate the rows.
+#[must_use]
+pub fn default_bins(model: &PlacementModel, target_density: f64) -> BinCount {
+    let outside: Vec<usize> = (0..model.num_cells())
+        .filter(|&i| model.movable[i] && model_zone(model, i) == Some(Zone::Outside))
+        .collect();
+    zone_bins(model, &core(model), &outside, target_density)
+}
+
+fn model_zone(model: &PlacementModel, cell: usize) -> Option<Zone> {
+    model.zones.get(model.zone_of[cell]).map(|z| z.zone)
+}
+
+/// Bins for a zone's grid over `region`, holding the movable `cells` at
+/// `target_density`: as `gpl` counts them, but no shorter than the row
+/// pitch when channels separate the rows.
 ///
 /// Each bin then averages rows and channels, so cells may cross a channel
 /// to a less crowded row instead of facing a wall of blocked bins;
 /// legalization moves them into the rows.
-pub fn default_bins(model: &PlacementModel, target_density: f64) -> usize {
-    let movable = (0..model.num_cells()).filter(|&i| model.movable[i]);
-    let (area, count) = movable.fold((0.0, 0usize), |(area, count), i| {
-        (
-            model.density_sizes[i]
-                .x
-                .mul_add(model.density_sizes[i].y, area),
-            count + 1,
-        )
-    });
-    let average = if count == 0 { 0.0 } else { area / count as f64 };
-    let by_area = bins_for_cell_area(model.die.area(), average, target_density);
+fn zone_bins(
+    model: &PlacementModel,
+    region: &Rect<f64>,
+    cells: &[usize],
+    target_density: f64,
+) -> BinCount {
+    let dbu = |microns: f64| model.units.to_dbu_rounded(microns).get();
+    let areas: Vec<i64> = cells
+        .iter()
+        .map(|&i| dbu(model.density_sizes[i].x) * dbu(model.density_sizes[i].y))
+        .collect();
+    let by_area = gpl_bins(
+        dbu(region.width()),
+        dbu(region.height()),
+        &areas,
+        target_density,
+    );
     match channel_pitch(&model.rows) {
         Some(pitch) => {
-            let rows = (model.die.height() / pitch).floor().max(1.0) as usize;
+            let rows = (region.height() / pitch).floor().max(1.0) as usize;
             let by_pitch = 1usize << rows.ilog2();
-            by_area.min(by_pitch).max(MIN_BINS)
+            BinCount {
+                x: by_area.x.min(by_pitch).max(MIN_CHANNEL_BINS),
+                y: by_area.y.min(by_pitch).max(MIN_CHANNEL_BINS),
+            }
         }
         None => by_area,
     }
 }
 
-/// The largest power of two whose square of bins is at most the number of
-/// bins of the ideal area: an average cell's area over the target density,
-/// so that a bin holds about one cell's worth of charge and the smoothing of
-/// a cell over its bins reaches its neighbours. Bins of a quarter of that
-/// area leave a placement at a loose utilization lumpy at the bin scale,
-/// with an overflow floor the placer cannot get under.
-fn bins_for_cell_area(die_area: f64, average_cell_area: f64, target_density: f64) -> usize {
-    if average_cell_area <= 0.0 || target_density <= 0.0 {
-        return MIN_BINS;
+/// `gpl`'s bin count for a region `width` by `height` holding cells of
+/// `areas`, all in database units: the smallest power of two `n` from 2
+/// whose `n` by `n` times the aspect ratio bins number at least a quarter
+/// of the ideal count, the region's area over the average cell's at the
+/// target density. The longer side takes the aspect ratio, rounded down to
+/// a power of two.
+fn gpl_bins(width: i64, height: i64, areas: &[i64], target_density: f64) -> BinCount {
+    let average = if areas.is_empty() {
+        0
+    } else {
+        areas.iter().sum::<i64>() / areas.len() as i64
+    };
+    let ideal_bin_area = if target_density == 0.0 {
+        0
+    } else {
+        (average as f32 / target_density as f32).round() as i64
+    };
+    let ideal = if ideal_bin_area == 0 {
+        0
+    } else {
+        width * height / ideal_bin_area
     }
-    let ideal_bins = die_area / (average_cell_area / target_density);
-    let mut bins = MIN_BINS;
-    while bins < MAX_BINS && ((2 * bins) as f64).powi(2) <= ideal_bins {
-        bins *= 2;
+    .max(4);
+    let ratio = 1i64
+        << (width.max(height) / width.min(height).max(1))
+            .max(1)
+            .ilog2();
+    let mut n = 2;
+    while n <= MAX_GPL_BINS {
+        let bins = n * n * ratio;
+        if (n == 2 || bins <= ideal) && 4 * bins > ideal {
+            break;
+        }
+        n *= 2;
     }
-    bins
+    let (short, long) = (n as usize, (n * ratio) as usize);
+    if width > height {
+        BinCount { x: long, y: short }
+    } else {
+        BinCount { x: short, y: long }
+    }
 }
 
 /// The distance between consecutive rows, if the rows are separated by
@@ -552,8 +621,14 @@ fn build_fields(
             continue;
         }
         let area = zone_area(model, k);
-        let mut grid =
-            DensityGrid::new(&model.die, params.bins, params.target_density, &area, fixed);
+        let region = match zone.zone {
+            Zone::Fence(_) => bounding_box(&area),
+            Zone::Outside => core(model),
+        };
+        let bins = params.bins.unwrap_or_else(|| {
+            zone_bins(model, &region, &movable[start..end], params.target_density)
+        });
+        let mut grid = DensityGrid::new(&region, bins, params.target_density, &area, fixed);
         let cell_area: f64 = movable[start..end]
             .iter()
             .map(|&i| model.density_sizes[i].x * model.density_sizes[i].y)
@@ -615,6 +690,12 @@ fn filler_layout(cells: &[Point<f64>], free_area: f64, target: f64) -> (Point<f6
     (size, (filler_area / mean_area) as usize)
 }
 
+/// The bounding box of the rows, as `OpenROAD`'s core area, or the die for
+/// a design without rows.
+fn core(model: &PlacementModel) -> Rect<f64> {
+    bounding_box(&placeable_area(model))
+}
+
 /// The rows, or the whole die for a design without rows.
 fn placeable_area(model: &PlacementModel) -> Vec<Rect<f64>> {
     if model.rows.is_empty() {
@@ -642,7 +723,7 @@ fn initial_centers(
     params: &GlobalParams,
     rng: &mut StdRng,
 ) -> Vec<Point<f64>> {
-    let core = bounding_box(&placeable_area(model));
+    let core = core(model);
     let fences: Vec<Option<Rect<f64>>> = movable
         .iter()
         .map(|&i| match model.zones.get(model.zone_of[i]) {
@@ -767,7 +848,7 @@ mod tests {
             max_iterations: 0,
             initial_rounds: 0,
             start,
-            bins: 4,
+            bins: None,
             seed: 0,
             routability: None,
             timing: None,
@@ -797,7 +878,7 @@ mod tests {
     #[test]
     fn a_placed_cell_starts_at_the_core_center_when_cells_start_centered() {
         let model = tiny_model();
-        let core_center = center_of(&bounding_box(&placeable_area(&model)));
+        let core_center = center_of(&core(&model));
 
         let start = first_cell_start(&model, Start::Center);
 
@@ -806,29 +887,41 @@ mod tests {
 
     #[test]
     fn bins_hold_about_one_average_cell_at_the_target_density() {
-        // ibex in Nangate45: a 239 by 239 micron die, cells of 1.98 square
-        // microns on average, placed at 0.65. OpenROAD picks 128 bins a side.
-        let bins = bins_for_cell_area(57_358.0, 1.983, 0.65);
+        // jpeg in Nangate45 without its I/O pins: a core of 668,800 by 666,400
+        // units, cells of 1.560 square microns on average, placed at 0.906.
+        // OpenROAD counts 64,711 ideal bins and picks 128 a side.
+        let bins = gpl_bins(668_800, 666_400, &[6_239_859], 0.906);
 
-        assert_eq!(bins, 128);
+        assert_eq!(bins, BinCount::square(128));
     }
 
     #[test]
-    fn bins_double_once_a_quarter_of_the_ideal_count_is_reached() {
-        let four_squares = 4.0 * 128.0 * 128.0;
+    fn bins_double_once_the_ideal_count_reaches_four_times_their_square() {
+        let one_short = gpl_bins(255, 256, &[1], 1.0);
+        let exact = gpl_bins(256, 256, &[1], 1.0);
 
-        let one_short = bins_for_cell_area(four_squares - 1.0, 1.0, 1.0);
-        let exact = bins_for_cell_area(four_squares, 1.0, 1.0);
-
-        assert_eq!(one_short, 128);
-        assert_eq!(exact, 256);
+        assert_eq!(one_short, BinCount::square(128));
+        assert_eq!(exact, BinCount::square(256));
     }
 
     #[test]
-    fn bins_stay_within_the_grid_limits() {
-        assert_eq!(bins_for_cell_area(1.0, 100.0, 0.5), MIN_BINS);
-        assert_eq!(bins_for_cell_area(1e12, 1.0, 1.0), MAX_BINS);
-        assert_eq!(bins_for_cell_area(1e6, 0.0, 0.5), MIN_BINS);
+    fn a_region_smaller_than_a_cell_gets_two_bins_a_side() {
+        assert_eq!(gpl_bins(10, 10, &[100], 0.5), BinCount::square(2));
+        assert_eq!(gpl_bins(10, 10, &[], 0.5), BinCount::square(2));
+    }
+
+    #[test]
+    fn bins_stop_doubling_past_1024_a_side() {
+        assert_eq!(
+            gpl_bins(1 << 20, 1 << 20, &[1], 1.0),
+            BinCount::square(2048)
+        );
+    }
+
+    #[test]
+    fn a_wide_region_gets_more_columns_by_its_aspect_ratio() {
+        assert_eq!(gpl_bins(400, 100, &[1], 1.0), BinCount { x: 256, y: 64 });
+        assert_eq!(gpl_bins(100, 400, &[1], 1.0), BinCount { x: 64, y: 256 });
     }
 
     #[test]

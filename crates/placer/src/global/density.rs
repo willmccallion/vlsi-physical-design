@@ -8,6 +8,7 @@
 //! that never moves, scaled by the target density so a fully blocked bin is
 //! exactly full.
 
+use super::BinCount;
 use super::poisson::PoissonSolver;
 use pare_common::geom::point::Point;
 use pare_common::geom::rect::Rect;
@@ -45,10 +46,17 @@ pub(super) struct Footprint {
     density: f64,
 }
 
-/// The geometry of a square grid of bins.
+impl Footprint {
+    /// The smoothed size.
+    pub(super) fn size(&self) -> Point<f64> {
+        self.half * 2.0
+    }
+}
+
+/// The geometry of a grid of bins.
 #[derive(Clone, Copy, Debug, PartialEq)]
 struct Bins {
-    dim: usize,
+    count: BinCount,
     origin: Point<f64>,
     size: Point<f64>,
 }
@@ -61,8 +69,9 @@ impl Bins {
     /// The columns and rows `rect` covers, each with the length of overlap.
     #[allow(clippy::type_complexity)]
     fn under(&self, rect: &Rect<f64>) -> Option<(Vec<(usize, f64)>, Vec<(usize, f64)>)> {
-        let cols = overlaps(rect.min.x, rect.max.x, self.origin.x, self.size.x, self.dim);
-        let rows = overlaps(rect.min.y, rect.max.y, self.origin.y, self.size.y, self.dim);
+        let (nx, ny) = (self.count.x, self.count.y);
+        let cols = overlaps(rect.min.x, rect.max.x, self.origin.x, self.size.x, nx);
+        let rows = overlaps(rect.min.y, rect.max.y, self.origin.y, self.size.y, ny);
         (!cols.is_empty() && !rows.is_empty()).then_some((cols, rows))
     }
 
@@ -73,14 +82,14 @@ impl Bins {
         };
         for (r, oy) in rows {
             for &(c, ox) in &cols {
-                let idx = r * self.dim + c;
+                let idx = r * self.count.x + c;
                 map[idx] = (ox * oy).mul_add(density, map[idx]);
             }
         }
     }
 }
 
-/// The bin grid over the die and its electrostatic state.
+/// The bin grid over a region and its electrostatic state.
 #[derive(Debug)]
 pub(super) struct DensityGrid {
     bins: Bins,
@@ -95,30 +104,34 @@ pub(super) struct DensityGrid {
 }
 
 impl DensityGrid {
-    /// A `dim`×`dim` grid over `die`. Area outside `placeable` and under
-    /// `fixed` is blocked.
+    /// A grid of `count` bins over `region`. Area outside `placeable` and
+    /// under `fixed` is blocked.
     pub(super) fn new(
-        die: &Rect<f64>,
-        dim: usize,
+        region: &Rect<f64>,
+        count: BinCount,
         target: f64,
         placeable: &[Rect<f64>],
         fixed: &[Rect<f64>],
     ) -> Self {
-        let bin = Point::new(die.width() / dim as f64, die.height() / dim as f64);
+        let bin = Point::new(
+            region.width() / count.x as f64,
+            region.height() / count.y as f64,
+        );
+        let n = count.x * count.y;
         let mut grid = Self {
             bins: Bins {
-                dim,
-                origin: die.min,
+                count,
+                origin: region.min,
                 size: bin,
             },
             target,
-            fixed: vec![0.0; dim * dim],
-            cells: vec![0.0; dim * dim],
-            total: vec![0.0; dim * dim],
-            potential: vec![0.0; dim * dim],
-            field_x: vec![0.0; dim * dim],
-            field_y: vec![0.0; dim * dim],
-            solver: PoissonSolver::new(dim, bin.x, bin.y),
+            fixed: vec![0.0; n],
+            cells: vec![0.0; n],
+            total: vec![0.0; n],
+            potential: vec![0.0; n],
+            field_x: vec![0.0; n],
+            field_y: vec![0.0; n],
+            solver: PoissonSolver::new(count.x, count.y, bin.x, bin.y),
         };
         grid.fixed = grid.blocked_area(placeable, fixed);
         for a in &mut grid.fixed {
@@ -133,17 +146,13 @@ impl DensityGrid {
     /// overlap each other, nor fixed ones each other.
     fn blocked_area(&self, placeable: &[Rect<f64>], fixed: &[Rect<f64>]) -> Vec<f64> {
         let bin_area = self.bins.area();
-        let die = Rect::new(
-            self.bins.origin,
-            self.bins.origin + self.bins.size * self.bins.dim as f64,
-        );
-        let whole_die = [die];
+        let whole_die = [self.region()];
         let placeable = if placeable.is_empty() {
             &whole_die[..]
         } else {
             placeable
         };
-        let mut open = vec![0.0; self.bins.dim * self.bins.dim];
+        let mut open = vec![0.0; self.bins.count.x * self.bins.count.y];
         for r in placeable {
             self.bins.spread(r, 1.0, &mut open);
         }
@@ -177,7 +186,7 @@ impl DensityGrid {
         self.target = target;
     }
 
-    /// Area cells may use: the die less blocked area.
+    /// Area cells may use: the region less blocked area.
     pub(super) fn free_area(&self) -> f64 {
         let bin_area = self.bins.area();
         self.fixed.iter().map(|f| bin_area - f / self.target).sum()
@@ -186,6 +195,15 @@ impl DensityGrid {
     /// Width and height of one bin.
     pub(super) const fn bin(&self) -> Point<f64> {
         self.bins.size
+    }
+
+    /// The rectangle the bins cover.
+    pub(super) fn region(&self) -> Rect<f64> {
+        let extent = Point::new(
+            self.bins.size.x * self.bins.count.x as f64,
+            self.bins.size.y * self.bins.count.y as f64,
+        );
+        Rect::new(self.bins.origin, self.bins.origin + extent)
     }
 
     /// The footprint of an object of `size`.
@@ -267,7 +285,7 @@ impl DensityGrid {
             for (r, oy) in rows {
                 for &(col, ox) in &cols {
                     let q = ox * oy * f.density;
-                    let idx = r * self.bins.dim + col;
+                    let idx = r * self.bins.count.x + col;
                     force.x = q.mul_add(self.field_x[idx], force.x);
                     force.y = q.mul_add(self.field_y[idx], force.y);
                 }
@@ -307,7 +325,7 @@ mod tests {
 
     #[test]
     fn a_small_object_spreads_its_area_over_a_wider_footprint() {
-        let grid = DensityGrid::new(&die(8.0, 8.0), 8, 1.0, &[], &[]);
+        let grid = DensityGrid::new(&die(8.0, 8.0), BinCount::square(8), 1.0, &[], &[]);
 
         let f = grid.footprint(Point::new(0.5, 0.5));
 
@@ -319,7 +337,7 @@ mod tests {
 
     #[test]
     fn overflow_is_cell_area_above_the_target_over_all_cell_area() {
-        let mut grid = DensityGrid::new(&die(4.0, 4.0), 4, 0.5, &[], &[]);
+        let mut grid = DensityGrid::new(&die(4.0, 4.0), BinCount::square(4), 0.5, &[], &[]);
         let f = grid.footprint(Point::new(2.0, 2.0));
 
         let excess = grid.update(&[Point::new(1.0, 1.0)], &[f], 0..1, 1..1);
@@ -330,7 +348,7 @@ mod tests {
     #[test]
     fn area_outside_rows_counts_as_fixed_charge() {
         let rows = [Rect::new(Point::new(0.0, 0.0), Point::new(4.0, 2.0))];
-        let grid = DensityGrid::new(&die(4.0, 4.0), 2, 0.8, &rows, &[]);
+        let grid = DensityGrid::new(&die(4.0, 4.0), BinCount::square(2), 0.8, &rows, &[]);
 
         assert_eq!(grid.fixed, [0.0, 0.0, 0.8 * 4.0, 0.8 * 4.0]);
     }
@@ -340,7 +358,7 @@ mod tests {
         let rows = [Rect::new(Point::new(0.0, 0.0), Point::new(4.0, 2.0))];
         let fixed = [Rect::new(Point::new(0.0, 2.0), Point::new(4.0, 4.0))];
 
-        let grid = DensityGrid::new(&die(4.0, 4.0), 2, 0.8, &rows, &fixed);
+        let grid = DensityGrid::new(&die(4.0, 4.0), BinCount::square(2), 0.8, &rows, &fixed);
 
         assert_eq!(grid.fixed, [0.0, 0.0, 0.8 * 4.0, 0.8 * 4.0]);
     }
@@ -350,14 +368,14 @@ mod tests {
         let rows = [Rect::new(Point::new(0.0, 0.0), Point::new(4.0, 2.0))];
         let fixed = [Rect::new(Point::new(0.0, 1.0), Point::new(2.0, 3.0))];
 
-        let grid = DensityGrid::new(&die(4.0, 4.0), 2, 1.0, &rows, &fixed);
+        let grid = DensityGrid::new(&die(4.0, 4.0), BinCount::square(2), 1.0, &rows, &fixed);
 
         assert_eq!(grid.fixed, [2.0, 0.0, 4.0, 4.0]);
     }
 
     #[test]
     fn the_field_pushes_an_object_away_from_a_crowd() {
-        let mut grid = DensityGrid::new(&die(16.0, 16.0), 16, 0.5, &[], &[]);
+        let mut grid = DensityGrid::new(&die(16.0, 16.0), BinCount::square(16), 0.5, &[], &[]);
         let crowd = grid.footprint(Point::new(4.0, 4.0));
         let probe = grid.footprint(Point::new(1.0, 1.0));
         let centers = [Point::new(8.0, 8.0), Point::new(11.0, 8.0)];

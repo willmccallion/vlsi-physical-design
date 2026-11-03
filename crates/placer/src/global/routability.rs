@@ -565,6 +565,7 @@ fn remove_fillers(objects: &Objects, field: &mut Field, added: f64) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::global::BinCount;
     use crate::global::density::DensityGrid;
     use crate::global::wirelength::Terminal;
     use crate::zones::Zone;
@@ -628,7 +629,7 @@ mod tests {
     fn field(cells: std::ops::Range<usize>, fillers: std::ops::Range<usize>) -> Field {
         Field {
             zone: Zone::Outside,
-            grid: DensityGrid::new(&die(4.0), 4, 0.5, &[], &[]),
+            grid: DensityGrid::new(&die(4.0), BinCount::square(4), 0.5, &[], &[]),
             area: vec![die(4.0)],
             cells,
             kept_fillers: fillers.len(),

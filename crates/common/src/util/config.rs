@@ -171,7 +171,8 @@ pub struct GlobalPlacementConfig {
     /// Target bin density; derived from utilization as
     /// `OpenROAD-flow-scripts` does if unset.
     pub target_density: Option<f64>,
-    /// Bins per side of the density grid; derived from the cell count if unset.
+    /// Bins per side of every density grid; sized for each zone as
+    /// `OpenROAD` sizes it if unset.
     pub bin_dimension: Option<usize>,
     /// Iteration limit.
     #[serde(default = "default_placer_max_iterations")]
