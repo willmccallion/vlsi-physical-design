@@ -1,6 +1,8 @@
-//! Clock inverters cloned next to each of their loads, as `OpenROAD`'s
-//! `repair_clock_inverters` does before clock tree synthesis so that the
-//! tree reaches the registers rather than one inverter they share.
+//! Clock inverters cloned next to each of their loads.
+//!
+//! `OpenROAD`'s `repair_clock_inverters` does this before clock tree
+//! synthesis so that the tree reaches the registers rather than one
+//! inverter they share.
 
 use crate::library::Link;
 use crate::netlist::{ClockNetwork, Namer, Netlist};

@@ -29,8 +29,9 @@ struct Node {
 }
 
 /// Puts delay buffers in front of the faster trees of every clock that
-/// drives more than one tree; `arrival` gives the late arrival of a clock's
-/// rising edge at a pin. Returns how many buffers were inserted.
+/// drives more than one tree, returning how many it inserted.
+///
+/// `arrival` gives the late arrival of a clock's rising edge at a pin.
 pub fn balance_latencies(
     db: &mut NetlistDB,
     link: &Link<'_>,
