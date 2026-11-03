@@ -1,6 +1,7 @@
-//! `OpenDP`'s `optimize_mirroring`: cells with a pin on the edge of one of
-//! their nets' bounding boxes are mirrored about their vertical axis where
-//! that does not lengthen their nets.
+//! `OpenDP`'s `optimize_mirroring`: cells mirrored about their vertical axis.
+//!
+//! Cells with a pin on the edge of one of their nets' bounding boxes are
+//! mirrored where that does not lengthen their nets and their master allows it.
 
 use pare_common::db::design::{NetlistDB, PinOwner, PlacementStatus};
 use pare_common::db::indices::{CellId, NetId, PinId};
@@ -145,10 +146,7 @@ fn mirror_candidates(
             else {
                 continue;
             };
-            let c = &db.cells[cell.index()];
-            let movable_core = matches!(db.cell_macro(cell).class, MacroClass::Core(_))
-                && !matches!(c.status, PlacementStatus::Fixed | PlacementStatus::Cover);
-            if !movable_core
+            if !may_mirror(db, cell)
                 || seen[cell.index()]
                 || db.cell_macro(cell).pin(macro_pin).shapes.is_empty()
             {
@@ -164,6 +162,17 @@ fn mirror_candidates(
         }
     }
     candidates
+}
+
+/// Whether `cell` is a movable core cell whose master may be mirrored
+/// about the vertical axis. `OpenDP` mirrors without asking the master,
+/// leaving an orientation its own legalizer refuses.
+fn may_mirror(db: &NetlistDB, cell: CellId) -> bool {
+    let c = &db.cells[cell.index()];
+    let master = db.cell_macro(cell);
+    matches!(master.class, MacroClass::Core(_))
+        && !matches!(c.status, PlacementStatus::Fixed | PlacementStatus::Cover)
+        && master.symmetry.allows(c.orient.mirrored_about_y())
 }
 
 /// The nets of a cell's pins, once per pin, as `dbInst::getITerms` lists

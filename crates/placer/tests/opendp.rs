@@ -191,6 +191,21 @@ fn improvement_from_scattered_cells_matches_openroad() {
 }
 
 #[test]
+fn mirroring_leaves_cells_whose_master_may_not_be_mirrored() {
+    let mut db = legalized(&SCATTERED);
+    let _ = improve_placement(&mut db, (5, 1)).unwrap();
+    for m in &mut db.library.macros {
+        m.symmetry.y = false;
+    }
+    let before = places(&db);
+
+    let mirrored = optimize_mirroring(&mut db);
+
+    assert_eq!(mirrored, 0);
+    assert_eq!(places(&db), before);
+}
+
+#[test]
 fn mirroring_turns_the_cells_openroad_turns() {
     let mut db = legalized(&SCATTERED);
     let _ = improve_placement(&mut db, (5, 1)).unwrap();
