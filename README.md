@@ -221,7 +221,7 @@ Typed indices (`CellId`, `NetId`, `PinId`, `LayerId`, `MacroId`, …) keep table
 
 ## Usage
 
-**Requirements:** Rust 1.99.0, which `rust-toolchain.toml` pins, and Python 3. `nix develop .#eda` provides OpenROAD, with the `check_drc` fix above, for cross-checking results, and the yosys that OpenROAD-flow-scripts 26Q2 pins; aes, ibex, jpeg, ariane133 and bp_quad are synthesized and floorplanned with them, so download those inside it.
+**Requirements:** Rust 1.98.1, the version the flake's dev shell provides and `rust-toolchain.toml` pins, and Python 3. `nix develop .#eda` provides OpenROAD, with the `check_drc` fix above, for cross-checking results, and the yosys that OpenROAD-flow-scripts 26Q2 pins; aes, ibex, jpeg, ariane133 and bp_quad are synthesized and floorplanned with them, so download those inside it.
 
 Benchmarks are downloaded by `scripts/download.py`, which also writes each design's config to `configs/<suite>/<design>.toml`. Each design has a purpose that decides what `pare run` does with it: placement benchmarks are only placed, routing benchmarks (whose placement is part of the input) are only routed, and the rest are placed and then routed.
 
