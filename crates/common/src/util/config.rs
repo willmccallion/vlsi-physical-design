@@ -3,6 +3,7 @@
 use crate::db::indices::LayerId;
 use crate::db::library::Library;
 use serde::Deserialize;
+use std::num::{NonZeroU32, NonZeroUsize};
 use std::ops::RangeInclusive;
 
 /// A run configuration. Unknown keys are rejected so typos do not pass silently.
@@ -91,8 +92,8 @@ pub struct NetlistConfig {
 pub struct LayerAdjustmentConfig {
     /// The routing layer's name.
     pub layer: String,
-    /// The share, in `[0, 1]`.
-    pub adjustment: f64,
+    /// The share.
+    pub adjustment: Share,
 }
 
 /// One routing layer's wire resistance and capacitance per length.
@@ -140,6 +141,70 @@ const fn default_enabled() -> bool {
     true
 }
 
+/// A config value outside the range its key allows.
+#[derive(Debug, thiserror::Error, PartialEq)]
+#[error("{value} is outside {range}")]
+pub struct OutOfRange {
+    value: f64,
+    range: &'static str,
+}
+
+macro_rules! define_bounded {
+    ($(#[$doc:meta])* $name:ident in $range:literal if |$v:ident| $holds:expr) => {
+        $(#[$doc])*
+        #[derive(Clone, Copy, Debug, PartialEq, PartialOrd, Deserialize)]
+        #[serde(try_from = "f64")]
+        pub struct $name(f64);
+
+        impl $name {
+            #[doc = concat!("`", stringify!($v), "`, if it lies in `", $range, "`.")]
+            #[must_use]
+            pub const fn new($v: f64) -> Option<Self> {
+                if $holds { Some(Self($v)) } else { None }
+            }
+
+            /// The value.
+            #[must_use]
+            pub const fn get(self) -> f64 {
+                self.0
+            }
+        }
+
+        impl TryFrom<f64> for $name {
+            type Error = OutOfRange;
+
+            fn try_from(value: f64) -> Result<Self, OutOfRange> {
+                Self::new(value).ok_or(OutOfRange { value, range: $range })
+            }
+        }
+    };
+}
+
+define_bounded!(
+    /// A share of a whole.
+    Share in "[0, 1]" if |share| share >= 0.0 && share <= 1.0
+);
+define_bounded!(
+    /// The density global placement spreads cell area to.
+    TargetDensity in "(0, 1]" if |density| density > 0.0 && density <= 1.0
+);
+define_bounded!(
+    /// The share of each gcell edge's tracks global routing holds back;
+    /// holding back all of them would leave nothing to route on.
+    CapacityReserve in "[0, 1)" if |reserve| reserve >= 0.0 && reserve < 1.0
+);
+
+impl CapacityReserve {
+    /// Holding back nothing.
+    pub const NONE: Self = Self(0.0);
+
+    /// The share of the tracks left to route on, which is never zero.
+    #[must_use]
+    pub const fn left(self) -> f64 {
+        1.0 - self.0
+    }
+}
+
 /// What a design is a benchmark of, which decides what running it does.
 #[derive(Clone, Copy, Debug, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
@@ -159,16 +224,16 @@ pub enum Purpose {
 pub struct GlobalPlacementConfig {
     /// Target bin density; derived from utilization as
     /// `OpenROAD-flow-scripts` does if unset.
-    pub target_density: Option<f64>,
+    pub target_density: Option<TargetDensity>,
     /// Bins per side of the density grid; derived from the cell count if unset.
-    pub bin_dimension: Option<usize>,
+    pub bin_dimension: Option<NonZeroUsize>,
     /// Iteration limit.
     #[serde(default = "default_placer_max_iterations")]
     pub placer_max_iterations: usize,
     /// Cell area above the target density, as a fraction of all cell area,
     /// at which global placement stops.
     #[serde(default = "default_target_overflow")]
-    pub target_overflow: f64,
+    pub target_overflow: Share,
     /// Seed for the random initial placement.
     #[serde(default = "default_seed")]
     pub seed: u64,
@@ -185,9 +250,9 @@ pub struct GlobalPlacementConfig {
     pub congestion_estimate: CongestionEstimate,
     /// Share of each routing layer's capacity that routability-driven
     /// placement counts as taken, as `OpenROAD`'s RUDY counts
-    /// OpenROAD-flow-scripts' `ROUTING_LAYER_ADJUSTMENT`, in `[0, 1]`.
+    /// OpenROAD-flow-scripts' `ROUTING_LAYER_ADJUSTMENT`.
     #[serde(default = "default_routing_layer_adjustment")]
-    pub routing_layer_adjustment: f64,
+    pub routing_layer_adjustment: Share,
     /// The share for particular layers, as a platform's `fastroute.tcl`
     /// sets them with `set_global_routing_layer_adjustment`.
     #[serde(default)]
@@ -201,7 +266,7 @@ pub struct GlobalPlacementConfig {
     /// each once as the overflow falls below it, as `OpenROAD`'s
     /// `timing_driven_net_reweight_overflow`.
     #[serde(default = "default_timing_driven_overflows")]
-    pub timing_driven_overflows: Vec<f64>,
+    pub timing_driven_overflows: Vec<Share>,
     /// The wirelength weight the net of worst slack gets, as `OpenROAD`'s
     /// `timing_driven_net_weight_max`.
     #[serde(default = "default_timing_net_weight_max")]
@@ -281,15 +346,15 @@ pub struct RoutingConfig {
     /// Global routing cell edge, in gcell pitches: the middle track spacing
     /// of the second to fourth routing layers, as `OpenROAD` sizes gcells.
     #[serde(default = "default_gcell_tracks")]
-    pub gcell_tracks: u32,
+    pub gcell_tracks: NonZeroU32,
     /// Rip-up and reroute rounds of global routing.
     #[serde(default = "default_global_iterations")]
     pub global_iterations: usize,
     /// Fraction of each gcell edge's tracks that global routing leaves for
     /// what detailed routing needs beyond the wires and vias it plans: wire
-    /// ends, jogs and room to negotiate, in `[0, 1)`.
+    /// ends, jogs and room to negotiate.
     #[serde(default = "default_global_capacity_reserve")]
-    pub global_capacity_reserve: f64,
+    pub global_capacity_reserve: CapacityReserve,
     /// Rip-up and reroute rounds of detailed routing.
     #[serde(default = "default_detailed_iterations")]
     pub detailed_iterations: usize,
@@ -404,16 +469,16 @@ const fn default_placer_max_iterations() -> usize {
     2000
 }
 
-const fn default_target_overflow() -> f64 {
-    0.1
+const fn default_target_overflow() -> Share {
+    Share(0.1)
 }
 
 const fn default_seed() -> u64 {
     1
 }
 
-fn default_timing_driven_overflows() -> Vec<f64> {
-    vec![0.64, 0.20]
+fn default_timing_driven_overflows() -> Vec<Share> {
+    vec![Share(0.64), Share(0.20)]
 }
 
 const fn default_timing_net_weight_max() -> f64 {
@@ -430,20 +495,24 @@ const fn default_target_congestion() -> f64 {
 
 /// OpenROAD-flow-scripts' default `ROUTING_LAYER_ADJUSTMENT`, which its
 /// Nangate45 platform keeps.
-const fn default_routing_layer_adjustment() -> f64 {
-    0.5
+const fn default_routing_layer_adjustment() -> Share {
+    Share(0.5)
 }
 
-const fn default_gcell_tracks() -> u32 {
-    15
+const fn default_gcell_tracks() -> NonZeroU32 {
+    const TRACKS: NonZeroU32 = match NonZeroU32::new(15) {
+        Some(tracks) => tracks,
+        None => panic!("the default gcell edge is nonzero"),
+    };
+    TRACKS
 }
 
 const fn default_global_iterations() -> usize {
     50
 }
 
-const fn default_global_capacity_reserve() -> f64 {
-    0.25
+const fn default_global_capacity_reserve() -> CapacityReserve {
+    CapacityReserve(0.25)
 }
 
 /// `TritonRoute`'s last iteration, the last row of its schedule, where its

@@ -727,6 +727,7 @@ mod tests {
     use pare_common::db::indices::NetId;
     use pare_common::geom::dbu::Dbu;
     use pare_common::geom::point::Point;
+    use pare_common::util::config::CapacityReserve;
 
     /// A `nx` by `ny` grid with a horizontal layer 1 over a vertical layer
     /// 2, every edge holding 4 tracks.
@@ -739,7 +740,7 @@ mod tests {
             ny,
             min_layer: LayerId::new(1),
             directions: vec![Direction::Horizontal, Direction::Vertical],
-            reserve: 0.0,
+            reserve: CapacityReserve::NONE,
             capacity: vec![Tracks::whole(4); edges],
             blocked: vec![false; edges],
             via_blocked: vec![false; edges],

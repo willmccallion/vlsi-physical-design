@@ -48,7 +48,7 @@ impl GlobalSession {
     ///
     /// When `db` cannot be routed under `config`.
     pub fn new(db: &NetlistDB, config: &RoutingConfig) -> Result<Self, RouteError> {
-        check_routable(db, config)?;
+        check_routable(db)?;
         let tech = RouteTech::new(db, config)?;
         let gcell = gcell_size(&tech, config);
         let (grid, routes, nets, judge) = {

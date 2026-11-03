@@ -6,7 +6,7 @@ use pare_common::db::design::NetlistDB;
 use pare_common::db::indices::{LayerId, NetId};
 use pare_common::db::parser::{def, lef};
 use pare_common::geom::dbu::Dbu;
-use pare_common::util::config::RoutingConfig;
+use pare_common::util::config::{CapacityReserve, RoutingConfig};
 use pare_common::verify::shapes::wire_rect;
 use pare_router::detailed::DetailedRouter;
 use pare_router::global::{GCell, GlobalGrid, GlobalRoutes};
@@ -38,7 +38,13 @@ fn along_m3_row_0(from: u16, to: u16) -> Vec<GCell> {
 fn assign(db: &NetlistDB, paths: Vec<Vec<GCell>>) -> (RouteTech, Vec<TrackWire>) {
     let tech = RouteTech::new(db, &RoutingConfig::default()).unwrap();
     let dr = DetailedRouter::new(db, &tech, GCELL);
-    let grid = GlobalGrid::new(&tech, &dr.occupancy, db.die_area, GCELL, 0.0);
+    let grid = GlobalGrid::new(
+        &tech,
+        &dr.occupancy,
+        db.die_area,
+        GCELL,
+        CapacityReserve::NONE,
+    );
     let routes = GlobalRoutes {
         paths: paths
             .into_iter()
