@@ -46,7 +46,7 @@ pub struct SetupOptions {
     /// Moves a pass may make on the worst path.
     pub max_repairs_per_pass: usize,
     /// The moves tried on each driver, in order.
-    pub sequence: Vec<MoveKind>,
+    pub(crate) sequence: Vec<MoveKind>,
     /// Whether the last gasp of sizing is skipped.
     pub skip_last_gasp: bool,
 }

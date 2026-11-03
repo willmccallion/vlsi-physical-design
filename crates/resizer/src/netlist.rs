@@ -38,13 +38,13 @@ impl<'a> Netlist<'a> {
 
     /// The Liberty port of an instance pin.
     #[must_use]
-    pub fn lib_port(&self, pin: PinId) -> Option<&'a LibPort> {
+    pub(crate) fn lib_port(&self, pin: PinId) -> Option<&'a LibPort> {
         self.lib_cell_port(pin).map(|(_, port)| port)
     }
 
     /// The Liberty cell and port of an instance pin.
     #[must_use]
-    pub fn lib_cell_port(&self, pin: PinId) -> Option<(&'a LibCell, &'a LibPort)> {
+    pub(crate) fn lib_cell_port(&self, pin: PinId) -> Option<(&'a LibCell, &'a LibPort)> {
         let (cell, port) = self.link.pin_port(self.db, pin)?;
         let lib = self.link.liberty.cell(cell);
         Some((lib, &lib.ports[port]))
@@ -53,7 +53,7 @@ impl<'a> Netlist<'a> {
     /// Whether a pin belongs to a retired instance, which timing no longer
     /// sees.
     #[must_use]
-    pub fn is_retired(&self, pin: PinId) -> bool {
+    pub(crate) fn is_retired(&self, pin: PinId) -> bool {
         match self.db.pins[pin.index()].owner {
             PinOwner::Cell { cell, .. } => self.db.cells[cell.index()].retired,
             PinOwner::Io(_) => false,
@@ -63,7 +63,7 @@ impl<'a> Netlist<'a> {
     /// Whether a pin drives its net: an output of an instance or an input
     /// of the design.
     #[must_use]
-    pub fn is_driver(&self, pin: PinId) -> bool {
+    pub(crate) fn is_driver(&self, pin: PinId) -> bool {
         if self.is_retired(pin) {
             return false;
         }
@@ -90,7 +90,7 @@ impl<'a> Netlist<'a> {
     /// Whether a pin is driven by its net: an input of an instance or an
     /// output of the design.
     #[must_use]
-    pub fn is_load(&self, pin: PinId) -> bool {
+    pub(crate) fn is_load(&self, pin: PinId) -> bool {
         if self.is_retired(pin) {
             return false;
         }
@@ -134,7 +134,7 @@ impl<'a> Netlist<'a> {
 
     /// Whether `net` connects to a pin of the design.
     #[must_use]
-    pub fn has_port(&self, net: NetId) -> bool {
+    pub(crate) fn has_port(&self, net: NetId) -> bool {
         self.db.nets[net.index()]
             .pins
             .iter()
@@ -143,7 +143,7 @@ impl<'a> Netlist<'a> {
 
     /// Whether `net` connects to a pin of an instance.
     #[must_use]
-    pub fn has_instance_pins(&self, net: NetId) -> bool {
+    pub(crate) fn has_instance_pins(&self, net: NetId) -> bool {
         self.db.nets[net.index()]
             .pins
             .iter()
@@ -152,7 +152,7 @@ impl<'a> Netlist<'a> {
 
     /// Whether `net` carries power or ground, which repair leaves alone.
     #[must_use]
-    pub fn is_special(&self, net: NetId) -> bool {
+    pub(crate) fn is_special(&self, net: NetId) -> bool {
         matches!(
             self.db.nets[net.index()].signal_use,
             SignalUse::Power | SignalUse::Ground
@@ -182,7 +182,7 @@ impl<'a> Netlist<'a> {
 
     /// The pin of `instance` for Liberty port `port`, if connected.
     #[must_use]
-    pub fn pin_of_port(&self, instance: CellId, port: usize) -> Option<PinId> {
+    pub(crate) fn pin_of_port(&self, instance: CellId, port: usize) -> Option<PinId> {
         let (lib, _) = self.link.cell(self.db, instance)?;
         let macro_pin = self.link.macro_pin_of_port(lib, port)?;
         self.db.cells[instance.index()]
@@ -343,7 +343,7 @@ impl Constants {
     /// is constant, the output's function reads the input but no longer
     /// depends on it, or a tristate enable is held low.
     #[must_use]
-    pub fn arc_enabled(
+    pub(crate) fn arc_enabled(
         &self,
         netlist: &Netlist<'_>,
         instance: CellId,
@@ -500,7 +500,7 @@ impl ClockNetwork {
     /// `isIdealClock`: one not propagated, wherever the pin is in its
     /// network, its source included.
     #[must_use]
-    pub fn carries_ideal_clock(&self, pin: PinId) -> bool {
+    pub(crate) fn carries_ideal_clock(&self, pin: PinId) -> bool {
         self.clocks_of(pin)
             .iter()
             .any(|c| !self.propagated.get(c.index()).copied().unwrap_or(false))
@@ -510,7 +510,7 @@ impl ClockNetwork {
     /// rather than through the network's delays: when any clock reaching it
     /// is ideal, or it is where a clock enters.
     #[must_use]
-    pub fn is_ideal(&self, pin: PinId) -> bool {
+    pub(crate) fn is_ideal(&self, pin: PinId) -> bool {
         self.is_clock(pin)
             && (self.sources.contains(&pin)
                 || self
@@ -521,7 +521,7 @@ impl ClockNetwork {
 
     /// Whether a clock pin's clocks arrive through the network's delays.
     #[must_use]
-    pub fn is_propagated(&self, pin: PinId) -> bool {
+    pub(crate) fn is_propagated(&self, pin: PinId) -> bool {
         self.is_clock(pin) && !self.is_ideal(pin)
     }
 
@@ -573,7 +573,7 @@ impl Namer {
     }
 
     /// `name` itself when no net has it, else `name` with the next count.
-    pub fn net_if_needed(&mut self, db: &NetlistDB, name: &str) -> String {
+    pub(crate) fn net_if_needed(&mut self, db: &NetlistDB, name: &str) -> String {
         if db.net_id(name).is_none() {
             return name.to_string();
         }

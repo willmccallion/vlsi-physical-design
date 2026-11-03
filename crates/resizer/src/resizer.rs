@@ -7,7 +7,7 @@
 use crate::bnet::{LoadModel, TreeRc};
 use crate::fuzzy;
 use crate::graph::{Estimator, TimingGraph};
-use crate::library::{BufferSet, Link};
+use crate::library::{BufferSet, Link, is_logic_std_cell};
 use crate::netlist::{ClockNetwork, Constants, Namer, Netlist};
 use crate::parasitics::WireRc;
 use crate::route_parasitics::RouteRc;
@@ -117,7 +117,7 @@ fn estimator<'r>(routes: Option<&'r GlobalRouting<'_>>) -> Estimator<'r> {
 /// Target slews and the load each cell meets them at, as `OpenROAD`'s
 /// `tgt_slews_` and `target_load_map_`.
 #[derive(Clone, Debug)]
-pub struct Targets {
+pub(crate) struct Targets {
     /// The slews repair sizes toward, per edge.
     pub slews: EdgeValues,
     /// The load at which each Liberty cell reaches them.
@@ -145,7 +145,7 @@ struct Journal {
 
 /// A buffer newly inserted before some loads.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub struct InsertedBuffer {
+pub(crate) struct InsertedBuffer {
     /// The instance.
     pub cell: CellId,
     /// Its input pin, on the loads' old net.
@@ -424,7 +424,7 @@ impl<'a, T: Timing> Resizer<'a, T> {
 
     /// The wire and via RC buffering trees take.
     #[must_use]
-    pub fn tree_rc(&self) -> TreeRc<'_> {
+    pub(crate) fn tree_rc(&self) -> TreeRc<'_> {
         TreeRc {
             signal: self.graph.wire_rc(),
             layers: self.routes.as_ref().map(|r| &r.rc),
@@ -466,7 +466,7 @@ impl<'a, T: Timing> Resizer<'a, T> {
     /// follow until [`Resizer::flush`], so that a run of edits on a net is
     /// estimated and propagated once; nets the batch adds are still
     /// estimated as they change, since the batch's own edits read them.
-    pub fn batch_edits(&mut self) {
+    pub(crate) fn batch_edits(&mut self) {
         if self.pending.is_none() {
             self.pending = Some(Vec::new());
             self.nets_before_batch = self.db.nets.len();
@@ -491,13 +491,13 @@ impl<'a, T: Timing> Resizer<'a, T> {
     /// Leaves the timing analysis behind the graph until
     /// [`Resizer::resume_timing`], for a run of edits that reads slews but
     /// no timing, as `OpenSTA` leaves arrivals until they are asked for.
-    pub const fn defer_timing(&mut self) {
+    pub(crate) const fn defer_timing(&mut self) {
         self.timing_deferred = true;
     }
 
     /// Brings the timing analysis up to date with every edit made while it
     /// was deferred.
-    pub fn resume_timing(&mut self) {
+    pub(crate) fn resume_timing(&mut self) {
         self.timing_deferred = false;
         let mut stale = std::mem::take(&mut self.stale_timing);
         stale.sort_unstable();
@@ -526,14 +526,8 @@ impl<'a, T: Timing> Resizer<'a, T> {
 
     /// The timing graph.
     #[must_use]
-    pub const fn graph(&self) -> &TimingGraph {
+    pub(crate) const fn graph(&self) -> &TimingGraph {
         &self.graph
-    }
-
-    /// Buffers inserted so far in the session.
-    #[must_use]
-    pub const fn inserted_buffers(&self) -> usize {
-        self.inserted_buffers
     }
 
     /// Sets the longest wire design repair allows, in database units; zero
@@ -558,7 +552,7 @@ impl<'a, T: Timing> Resizer<'a, T> {
     /// fixes up for libraries like Nangate45, the library default meant
     /// for outputs; infinite without either.
     #[must_use]
-    pub fn max_input_slew(&self, cell: &LibCell, port: &LibPort) -> f64 {
+    pub(crate) fn max_input_slew(&self, cell: &LibCell, port: &LibPort) -> f64 {
         max_input_slew(self.link, cell, port)
     }
 
@@ -566,7 +560,7 @@ impl<'a, T: Timing> Resizer<'a, T> {
     /// anything downstream of it is timed, as `OpenROAD`'s `repairDesign`
     /// forward pass, and brings the timing up to date; returns the pins
     /// held.
-    pub fn annotate_violating_input_slews(&mut self) -> Vec<PinId> {
+    pub(crate) fn annotate_violating_input_slews(&mut self) -> Vec<PinId> {
         let (annotated, mut dirty) = {
             let netlist = Netlist::new(self.db, self.link);
             let link = self.link;
@@ -592,19 +586,19 @@ impl<'a, T: Timing> Resizer<'a, T> {
 
     /// A slew limit less the margin kept in hand.
     #[must_use]
-    pub fn margined_slew(&self, limit: f64) -> f64 {
+    pub(crate) fn margined_slew(&self, limit: f64) -> f64 {
         limit * (1.0 - self.options.slew_margin / 100.0)
     }
 
     /// A load limit less the margin kept in hand.
     #[must_use]
-    pub fn margined_cap(&self, limit: f64) -> f64 {
+    pub(crate) fn margined_cap(&self, limit: f64) -> f64 {
         limit * (1.0 - self.options.cap_margin / 100.0)
     }
 
     /// The slew limit at a driver, if any applies, as `OpenSTA` finds it.
     #[must_use]
-    pub fn driver_slew_limit(&self, driver: PinId) -> Option<f64> {
+    pub(crate) fn driver_slew_limit(&self, driver: PinId) -> Option<f64> {
         let netlist = self.netlist();
         let own = netlist
             .lib_cell_port(driver)
@@ -621,7 +615,7 @@ impl<'a, T: Timing> Resizer<'a, T> {
 
     /// The load limit at a driver, if any applies.
     #[must_use]
-    pub fn cap_limit(&self, driver: PinId) -> Option<f64> {
+    pub(crate) fn cap_limit(&self, driver: PinId) -> Option<f64> {
         let netlist = self.netlist();
         let own = netlist
             .lib_cell_port(driver)
@@ -660,7 +654,7 @@ impl<'a, T: Timing> Resizer<'a, T> {
 
     /// Whether a pin drives through a tristate output.
     #[must_use]
-    pub fn is_tristate_driver(&self, driver: PinId) -> bool {
+    pub(crate) fn is_tristate_driver(&self, driver: PinId) -> bool {
         self.netlist()
             .lib_port(driver)
             .is_some_and(|p| p.three_state.is_some())
@@ -669,17 +663,17 @@ impl<'a, T: Timing> Resizer<'a, T> {
     /// Whether an instance may be resized or removed: a plain standard
     /// cell the library does not protect.
     #[must_use]
-    pub fn is_editable(&self, cell: CellId) -> bool {
+    pub(crate) fn is_editable(&self, cell: CellId) -> bool {
         self.link
             .cell(self.db, cell)
             .is_some_and(|(_, lib)| !lib.dont_touch)
-            && self.link.is_logic_std_cell(self.db, cell)
+            && is_logic_std_cell(self.db, cell)
     }
 
     /// Whether a net may be buffered, as `Resizer::okToBufferNet`: not
     /// driven by a tristate, not a supply.
     #[must_use]
-    pub fn ok_to_buffer_net(&self, driver: PinId) -> bool {
+    pub(crate) fn ok_to_buffer_net(&self, driver: PinId) -> bool {
         let net = self.db.pins[driver.index()].net;
         !self.is_tristate_driver(driver) && !self.netlist().is_special(net)
     }
@@ -696,20 +690,6 @@ impl<'a, T: Timing> Resizer<'a, T> {
                 Some((port.name.clone(), self.graph.slew(pin)))
             })
             .collect()
-    }
-
-    /// The worst delay and slew per output edge of `cell`'s port at
-    /// `load_cap`, from the given input slews by port name or the target
-    /// slews without, as `Resizer::gateDelays`.
-    #[must_use]
-    pub fn gate_delays(
-        &self,
-        cell: &LibCell,
-        port: usize,
-        load_cap: f64,
-        input_slews: Option<&[(String, EdgeValues)]>,
-    ) -> (EdgeValues, EdgeValues) {
-        gate_delays(cell, port, load_cap, &self.targets.slews, input_slews)
     }
 
     /// The worst delay of a buffer or inverter at `load_cap` from the
@@ -733,20 +713,20 @@ impl<'a, T: Timing> Resizer<'a, T> {
     }
 
     /// Starts recording edits, as `journalBegin`.
-    pub fn journal_begin(&mut self) {
+    pub(crate) fn journal_begin(&mut self) {
         self.journal.recording = true;
         self.journal.edits.clear();
     }
 
     /// Keeps the edits since the mark, as `journalEnd`.
-    pub fn journal_end(&mut self) {
+    pub(crate) fn journal_end(&mut self) {
         self.journal.recording = false;
         self.journal.edits.clear();
     }
 
     /// Takes back every edit since the mark and brings the timing up to
     /// date, as `journalRestore`.
-    pub fn journal_restore(&mut self) -> Result<(), RepairError> {
+    pub(crate) fn journal_restore(&mut self) -> Result<(), RepairError> {
         self.journal.recording = false;
         let edits = std::mem::take(&mut self.journal.edits);
         let mut nets: FxHashSet<NetId> = FxHashSet::default();
@@ -824,7 +804,7 @@ impl<'a, T: Timing> Resizer<'a, T> {
     /// Drops the slew annotations and finds the slews they held fixed
     /// again, with everything downstream, as `OpenROAD` invalidates its
     /// delays once design repair's annotations come off.
-    pub fn clear_slew_annotations(&mut self) {
+    pub(crate) fn clear_slew_annotations(&mut self) {
         let annotated = self.graph.clear_annotations();
         let mut drivers: Vec<PinId> = Vec::new();
         {
@@ -860,14 +840,14 @@ impl<'a, T: Timing> Resizer<'a, T> {
     }
 
     /// Re-estimates a net and everything timed through it.
-    pub fn update_net(&mut self, net: NetId) {
+    pub(crate) fn update_net(&mut self, net: NetId) {
         self.invalidate_parasitics(net);
         let drivers: Vec<PinId> = self.netlist().drivers(net).collect();
         self.propagate(&drivers);
     }
 
     /// Re-estimates the nets around a cell whose master changed.
-    pub fn update_cell(&mut self, cell: CellId) {
+    pub(crate) fn update_cell(&mut self, cell: CellId) {
         let (nets, drivers) = {
             let netlist = Netlist::new(self.db, self.link);
             let mut nets = Vec::new();
@@ -894,7 +874,11 @@ impl<'a, T: Timing> Resizer<'a, T> {
 
     /// Gives `cell` the master of `size` and refreshes the timing around
     /// it; returns whether it changed.
-    pub fn replace_cell(&mut self, cell: CellId, size: LibCellId) -> Result<bool, RepairError> {
+    pub(crate) fn replace_cell(
+        &mut self,
+        cell: CellId,
+        size: LibCellId,
+    ) -> Result<bool, RepairError> {
         let master = self
             .link
             .macro_of(size)
@@ -922,7 +906,7 @@ impl<'a, T: Timing> Resizer<'a, T> {
 
     /// Adds an instance of `cell` at `at`, named from `base`, recording
     /// it; its pins are connected by the caller.
-    pub fn make_instance(
+    pub(crate) fn make_instance(
         &mut self,
         cell: LibCellId,
         at: Point<Dbu>,
@@ -944,7 +928,7 @@ impl<'a, T: Timing> Resizer<'a, T> {
 
     /// Adds a net named from `base` with the signal use of `like`,
     /// recording it.
-    pub fn make_net(&mut self, base: &str, like: NetId) -> Result<NetId, RepairError> {
+    pub(crate) fn make_net(&mut self, base: &str, like: NetId) -> Result<NetId, RepairError> {
         let name = self.namer.net(self.db, base);
         let net = self.db.add_net(&name)?;
         self.db.nets[net.index()].signal_use = self.db.nets[like.index()].signal_use;
@@ -971,7 +955,7 @@ impl<'a, T: Timing> Resizer<'a, T> {
     /// move to a new net the buffer drives, as `Resizer::insertBufferBeforeLoads`;
     /// the instance is named from `base`. The timing around both nets is
     /// refreshed.
-    pub fn insert_buffer_before_loads(
+    pub(crate) fn insert_buffer_before_loads(
         &mut self,
         net: NetId,
         loads: &[PinId],
@@ -1016,7 +1000,7 @@ impl<'a, T: Timing> Resizer<'a, T> {
     /// only the output net reaches a port, and the survivor takes the
     /// removed net's name when that name is deeper in the hierarchy, as
     /// `UnbufferMove::removeBuffer`. Returns the surviving net.
-    pub fn remove_buffer(&mut self, buffer: CellId) -> Result<NetId, RepairError> {
+    pub(crate) fn remove_buffer(&mut self, buffer: CellId) -> Result<NetId, RepairError> {
         let (in_pin, out_pin) = self
             .buffer_pins(buffer)
             .ok_or_else(|| RepairError::MissingPins(self.db.cells[buffer.index()].name.clone()))?;
@@ -1064,7 +1048,7 @@ impl<'a, T: Timing> Resizer<'a, T> {
 
     /// The input and output pins of a buffer instance.
     #[must_use]
-    pub fn buffer_pins(&self, buffer: CellId) -> Option<(PinId, PinId)> {
+    pub(crate) fn buffer_pins(&self, buffer: CellId) -> Option<(PinId, PinId)> {
         let (lib_id, lib) = self.link.cell(self.db, buffer)?;
         let (in_port, out_port) = lib.buffer_ports()?;
         let netlist = Netlist::new(self.db, self.link);
@@ -1078,7 +1062,7 @@ impl<'a, T: Timing> Resizer<'a, T> {
     /// Sizes the cell driving `driver` to the size whose target load is
     /// nearest its load, as `Resizer::resizeToTargetSlew`; returns whether
     /// the cell changed.
-    pub fn resize_to_target_slew(&mut self, driver: PinId) -> Result<bool, RepairError> {
+    pub(crate) fn resize_to_target_slew(&mut self, driver: PinId) -> Result<bool, RepairError> {
         let (cell, lib_id, load_cap, revisiting) = {
             let PinOwner::Cell { cell, .. } = self.db.pins[driver.index()].owner else {
                 return Ok(false);
@@ -1108,7 +1092,12 @@ impl<'a, T: Timing> Resizer<'a, T> {
     /// `load_cap`, buffers and inverters also preferring the faster, as
     /// `Resizer::findTargetCell`.
     #[must_use]
-    pub fn find_target_cell(&self, cell: LibCellId, load_cap: f64, revisiting: bool) -> LibCellId {
+    pub(crate) fn find_target_cell(
+        &self,
+        cell: LibCellId,
+        load_cap: f64,
+        revisiting: bool,
+    ) -> LibCellId {
         let candidates = self.link.swappable_cells(cell);
         if candidates.is_empty() {
             return cell;
@@ -1150,7 +1139,7 @@ impl<'a, T: Timing> Resizer<'a, T> {
     /// Whether giving `cell` the master `replacement` keeps every driver
     /// of its inputs within its load limit, as `BaseMove::checkMaxCapViolation`.
     #[must_use]
-    pub fn replacement_keeps_loads(&self, cell: CellId, replacement: LibCellId) -> bool {
+    pub(crate) fn replacement_keeps_loads(&self, cell: CellId, replacement: LibCellId) -> bool {
         let netlist = self.netlist();
         let Some((_, current)) = self.link.cell(self.db, cell) else {
             return true;
@@ -1186,7 +1175,7 @@ impl<'a, T: Timing> Resizer<'a, T> {
     /// Whether `driver` can take `delta` more load: within its limit, or
     /// no worse when already over it, as `BaseMove::checkMaxCapOK`.
     #[must_use]
-    pub fn cap_ok(&self, driver: PinId, delta: f64) -> bool {
+    pub(crate) fn cap_ok(&self, driver: PinId, delta: f64) -> bool {
         let Some(limit) = self.cap_limit(driver) else {
             return true;
         };
@@ -1424,7 +1413,7 @@ fn arc_target_load(arc: &pare_common::db::liberty::TimingArc, in_slew: f64, out_
 /// Each arc is fed the slew of its input port from `input_slews` or,
 /// failing that, the target slews.
 #[must_use]
-pub fn gate_delays(
+pub(crate) fn gate_delays(
     cell: &LibCell,
     port: usize,
     load_cap: f64,
@@ -1464,7 +1453,7 @@ pub fn gate_delays(
 /// The worst slew over the delay arcs into `port` at `load_cap` from the
 /// target input slews.
 #[must_use]
-pub fn gate_slew(cell: &LibCell, port: usize, slews: &EdgeValues, load_cap: f64) -> f64 {
+pub(crate) fn gate_slew(cell: &LibCell, port: usize, slews: &EdgeValues, load_cap: f64) -> f64 {
     let (_, out) = gate_delays(cell, port, load_cap, slews, None);
     out.rise.max(out.fall).max(0.0)
 }
@@ -1483,7 +1472,7 @@ pub fn buffer_delay(cell: &LibCell, slews: &EdgeValues, load_cap: f64) -> f64 {
 /// The worst delay per edge of a buffer at `load_cap`, as
 /// `Resizer::bufferDelays`.
 #[must_use]
-pub fn buffer_delays(cell: &LibCell, slews: &EdgeValues, load_cap: f64) -> EdgeValues {
+pub(crate) fn buffer_delays(cell: &LibCell, slews: &EdgeValues, load_cap: f64) -> EdgeValues {
     let Some((_, output)) = cell.buffer_ports() else {
         return EdgeValues::default();
     };

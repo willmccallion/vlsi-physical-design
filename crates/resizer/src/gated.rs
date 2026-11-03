@@ -14,7 +14,7 @@ use rustc_hash::FxHashMap;
 
 /// The clock value at which a gate passes its clock through.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum ActiveValue {
+pub(crate) enum ActiveValue {
     /// The gate passes the clock while the enable is high, as an AND.
     One,
     /// The gate passes the clock while the enable is low, as an OR.
@@ -47,7 +47,7 @@ impl ActiveValue {
 
 /// A gated clock's enable: the gate's clock input and its active value.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub struct GatedEnable {
+pub(crate) struct GatedEnable {
     /// The gate's clock input.
     pub clock: PinId,
     /// The value at which the gate passes the clock.
@@ -61,7 +61,7 @@ pub struct GatedEnable {
 /// whose operands is the clock or its negation and another of which reads
 /// the enable.
 #[must_use]
-pub fn gating(func: &FuncExpr, enable: &str, clock: &str) -> Option<ActiveValue> {
+pub(crate) fn gating(func: &FuncExpr, enable: &str, clock: &str) -> Option<ActiveValue> {
     let mut root = func;
     while let FuncExpr::Not(inner) = root {
         root = inner;
@@ -135,7 +135,7 @@ fn ports(expr: &FuncExpr, out: &mut Vec<String>) {
 /// combinational arc to an output in it whose function gates a clock input
 /// of the same cell with it.
 #[must_use]
-pub fn gated_enables(
+pub(crate) fn gated_enables(
     netlist: &Netlist<'_>,
     clocks: &ClockNetwork,
 ) -> FxHashMap<PinId, GatedEnable> {

@@ -35,7 +35,7 @@ impl Fixed {
     /// `seconds` rounded toward zero to femtoseconds, saturating at the
     /// infinities.
     #[must_use]
-    pub fn from_seconds(seconds: f64) -> Self {
+    pub(crate) fn from_seconds(seconds: f64) -> Self {
         if seconds >= Self::INF.to_seconds() {
             return Self::INF;
         }
@@ -47,13 +47,13 @@ impl Fixed {
 
     /// The time in seconds.
     #[must_use]
-    pub fn to_seconds(self) -> f64 {
+    pub(crate) fn to_seconds(self) -> f64 {
         self.0 as f64 / Self::FEMTOSECONDS_PER_SECOND
     }
 
     /// `a + t (b - a)`.
     #[must_use]
-    pub fn lerp(a: Self, b: Self, t: f64) -> Self {
+    pub(crate) fn lerp(a: Self, b: Self, t: f64) -> Self {
         if t >= 1.0 {
             return b;
         }
@@ -85,7 +85,7 @@ impl std::ops::Neg for Fixed {
 /// Which edges a subtree's slack was taken over, as `OpenROAD`'s
 /// `slackTransition`: none until a load has been timed.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum SlackEdges {
+pub(crate) enum SlackEdges {
     /// One edge.
     One(Edge),
     /// Both.
@@ -158,7 +158,7 @@ pub enum Kind {
 }
 
 /// A shared node.
-pub type BnetPtr = Rc<Bnet>;
+pub(crate) type BnetPtr = Rc<Bnet>;
 
 /// One node of a buffered net with what the search knows about the
 /// subtree under it.
@@ -179,7 +179,7 @@ pub struct Bnet {
     /// The slack at the node's point for the subtree's loads.
     pub slack: Fixed,
     /// Which edges the slack covers.
-    pub slack_edges: Option<SlackEdges>,
+    pub(crate) slack_edges: Option<SlackEdges>,
     /// The delay from this node to the subtree's top.
     pub delay: Fixed,
     /// The arrival at this node, set while recovering area.
@@ -206,7 +206,7 @@ impl Bnet {
 
     /// Two subtrees joined at `at`, with the slack the tighter of theirs.
     #[must_use]
-    pub fn junction(at: Point<Dbu>, left: BnetPtr, right: BnetPtr) -> BnetPtr {
+    pub(crate) fn junction(at: Point<Dbu>, left: BnetPtr, right: BnetPtr) -> BnetPtr {
         Rc::new(Self {
             cap: left.cap + right.cap,
             fanout: left.fanout + right.fanout,
@@ -281,7 +281,7 @@ impl Bnet {
 
     /// A buffer at `at` driving the subtree, presenting its own input.
     #[must_use]
-    pub fn buffer(at: Point<Dbu>, size: &BufferSize, to: BnetPtr, delay: Fixed) -> BnetPtr {
+    pub(crate) fn buffer(at: Point<Dbu>, size: &BufferSize, to: BnetPtr, delay: Fixed) -> BnetPtr {
         Rc::new(Self {
             cap: size.input_cap,
             fanout: size.input_fanout,
@@ -301,7 +301,7 @@ impl Bnet {
 
     /// The same node with another slack and edges.
     #[must_use]
-    pub fn with_slack(&self, slack: Fixed, edges: Option<SlackEdges>) -> BnetPtr {
+    pub(crate) fn with_slack(&self, slack: Fixed, edges: Option<SlackEdges>) -> BnetPtr {
         Rc::new(Self {
             slack,
             slack_edges: edges,
@@ -312,7 +312,7 @@ impl Bnet {
 
     /// The same node with another arrival.
     #[must_use]
-    pub fn with_arrival(&self, arrival_delay: Fixed) -> BnetPtr {
+    pub(crate) fn with_arrival(&self, arrival_delay: Fixed) -> BnetPtr {
         Rc::new(Self {
             arrival_delay,
             kind: self.kind.clone(),
@@ -364,17 +364,6 @@ impl Bnet {
         }
     }
 
-    /// How many buffers the subtree holds.
-    #[must_use]
-    pub fn buffer_count(&self) -> usize {
-        match &self.kind {
-            Kind::Buffer { to, .. } => to.buffer_count() + 1,
-            Kind::Wire { to, .. } | Kind::Via { to, .. } => to.buffer_count(),
-            Kind::Junction { left, right } => left.buffer_count() + right.buffer_count(),
-            Kind::Load { .. } => 0,
-        }
-    }
-
     /// The load pins under the subtree.
     #[must_use]
     pub fn loads(&self) -> Vec<PinId> {
@@ -399,7 +388,7 @@ impl Bnet {
     /// The measures a replacement subtree must match or beat, as
     /// `OpenROAD`'s `Metrics`.
     #[must_use]
-    pub fn metrics(&self) -> Metrics {
+    pub(crate) fn metrics(&self) -> Metrics {
         Metrics {
             max_load_wire_length: self.max_load_wire_length(),
             slack: self.slack,
@@ -411,7 +400,7 @@ impl Bnet {
 
     /// Whether the subtree is no worse than `target` in every measure.
     #[must_use]
-    pub fn fits(&self, target: &Metrics) -> bool {
+    pub(crate) fn fits(&self, target: &Metrics) -> bool {
         self.max_load_wire_length() <= target.max_load_wire_length
             && self.slack >= target.slack
             && crate::fuzzy::less_equal(self.cap, target.cap)
@@ -421,7 +410,7 @@ impl Bnet {
 
     /// The node under any wires and vias, as `stripWireOnBnet`.
     #[must_use]
-    pub fn under_wires(self: &BnetPtr) -> BnetPtr {
+    pub(crate) fn under_wires(self: &BnetPtr) -> BnetPtr {
         let mut node = Rc::clone(self);
         while let Kind::Wire { to, .. } | Kind::Via { to, .. } = &node.kind {
             node = Rc::clone(to);
@@ -432,7 +421,7 @@ impl Bnet {
     /// The node under any wires, vias and buffers, as
     /// `stripWiresAndBuffersOnBnet`.
     #[must_use]
-    pub fn under_wires_and_buffers(self: &BnetPtr) -> BnetPtr {
+    pub(crate) fn under_wires_and_buffers(self: &BnetPtr) -> BnetPtr {
         let mut node = Rc::clone(self);
         loop {
             match &node.kind {
@@ -448,7 +437,7 @@ impl Bnet {
     /// buffers, as the rebuffer's `findWireLayer`: none when a load or
     /// junction comes first or the wire is at the signal wire RC.
     #[must_use]
-    pub fn wire_layer_below(&self) -> Option<LayerId> {
+    pub(crate) fn wire_layer_below(&self) -> Option<LayerId> {
         let mut node = self;
         loop {
             match &node.kind {
@@ -463,7 +452,7 @@ impl Bnet {
 /// A buffer the search may insert, with what its input presents and what
 /// its output can drive, as `OpenROAD`'s `BufferSize`.
 #[derive(Clone, Copy, Debug, PartialEq)]
-pub struct BufferSize {
+pub(crate) struct BufferSize {
     /// The cell.
     pub cell: LibCellId,
     /// Its input capacitance, in farads.
@@ -486,7 +475,7 @@ pub struct BufferSize {
 
 /// The measures of a subtree.
 #[derive(Clone, Copy, Debug, PartialEq)]
-pub struct Metrics {
+pub(crate) struct Metrics {
     /// See [`Bnet::max_load_wire_length`].
     pub max_load_wire_length: i64,
     /// See [`Bnet::slack`].
@@ -502,7 +491,7 @@ pub struct Metrics {
 impl Metrics {
     /// The same measures with another slack.
     #[must_use]
-    pub const fn with_slack(self, slack: Fixed) -> Self {
+    pub(crate) const fn with_slack(self, slack: Fixed) -> Self {
         Self { slack, ..self }
     }
 }
@@ -716,7 +705,11 @@ impl RouteWalk<'_, '_> {
 /// points, as `Resizer::makeBufferedNetSteinerOverBnets`; none without
 /// sinks.
 #[must_use]
-pub fn over_subtrees(root: Point<Dbu>, sinks: &[BnetPtr], rc: &TreeRc<'_>) -> Option<BnetPtr> {
+pub(crate) fn over_subtrees(
+    root: Point<Dbu>,
+    sinks: &[BnetPtr],
+    rc: &TreeRc<'_>,
+) -> Option<BnetPtr> {
     if sinks.is_empty() {
         return None;
     }

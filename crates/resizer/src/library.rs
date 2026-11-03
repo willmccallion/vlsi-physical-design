@@ -89,7 +89,7 @@ impl<'a> Link<'a> {
 
     /// The Liberty cell of a master.
     #[must_use]
-    pub fn cell_of_macro(&self, master: MacroId) -> Option<LibCellId> {
+    pub(crate) fn cell_of_macro(&self, master: MacroId) -> Option<LibCellId> {
         self.cell_of_macro[master.index()]
     }
 
@@ -143,21 +143,11 @@ impl<'a> Link<'a> {
             .position(|p| *p == Some(port))
     }
 
-    /// Whether an instance is a plain standard cell, as `OpenROAD`'s
-    /// `isLogicStdCell`: its master is of class `CORE` with no subclass.
-    #[must_use]
-    pub fn is_logic_std_cell(&self, db: &NetlistDB, instance: CellId) -> bool {
-        matches!(
-            db.cell_macro(instance).class,
-            MacroClass::Core(CoreKind::Regular)
-        )
-    }
-
     /// The cells an instance of `cell` may be swapped for, itself included,
     /// as `OpenROAD`'s `getSwappableCells`: the equivalent cells that have
     /// a master and may be used, or just the cell when it has no class.
     #[must_use]
-    pub fn swappable_cells(&self, cell: LibCellId) -> Vec<LibCellId> {
+    pub(crate) fn swappable_cells(&self, cell: LibCellId) -> Vec<LibCellId> {
         let Some(class) = self.class_of[cell.index()] else {
             return vec![cell];
         };
@@ -170,7 +160,7 @@ impl<'a> Link<'a> {
 
     /// Drive resistance of a buffer's output.
     #[must_use]
-    pub fn buffer_drive_resistance(&self, buffer: LibCellId) -> f64 {
+    pub(crate) fn buffer_drive_resistance(&self, buffer: LibCellId) -> f64 {
         let cell = self.liberty.cell(buffer);
         cell.buffer_ports()
             .map_or(0.0, |(_, output)| cell.drive_resistance(output))
@@ -178,7 +168,7 @@ impl<'a> Link<'a> {
 
     /// Capacitance of a buffer's input.
     #[must_use]
-    pub fn buffer_input_capacitance(&self, buffer: LibCellId) -> f64 {
+    pub(crate) fn buffer_input_capacitance(&self, buffer: LibCellId) -> f64 {
         let cell = self.liberty.cell(buffer);
         cell.buffer_ports()
             .map_or(0.0, |(input, _)| cell.ports[input].capacitance())
@@ -377,4 +367,13 @@ fn equivalence_classes(
         candidates.push(i);
     }
     (class_of, classes)
+}
+
+/// Whether an instance is a plain standard cell, as `OpenROAD`'s
+/// `isLogicStdCell`: its master is of class `CORE` with no subclass.
+pub(crate) fn is_logic_std_cell(db: &NetlistDB, instance: CellId) -> bool {
+    matches!(
+        db.cell_macro(instance).class,
+        MacroClass::Core(CoreKind::Regular)
+    )
 }

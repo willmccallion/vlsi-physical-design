@@ -46,7 +46,7 @@ impl Slack {
 
     /// Whether something constrains the pin.
     #[must_use]
-    pub const fn is_constrained(self) -> bool {
+    pub(crate) const fn is_constrained(self) -> bool {
         self.0.is_finite()
     }
 }
@@ -65,7 +65,7 @@ pub struct Tag {
 
 /// Index of a tag in the analysis.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
-pub struct TagId(u32);
+pub(crate) struct TagId(u32);
 
 impl TagId {
     const fn index(self) -> usize {
@@ -331,7 +331,7 @@ impl Capture {
 impl Sta {
     /// Times `netlist` from the delays in `graph` under `sdc`.
     #[must_use]
-    pub fn new(
+    pub(crate) fn new(
         netlist: &Netlist<'_>,
         graph: &TimingGraph,
         clocks: &ClockNetwork,
@@ -376,7 +376,7 @@ impl Sta {
 
     /// Brings the timing up to date after the delays of `dirty_drivers`
     /// changed, as `graph` reports them.
-    pub fn update(
+    pub(crate) fn update(
         &mut self,
         netlist: &Netlist<'_>,
         graph: &TimingGraph,
@@ -411,12 +411,6 @@ impl Sta {
     #[must_use]
     pub const fn sdc(&self) -> &Sdc {
         &self.sdc
-    }
-
-    /// The tag with this id.
-    #[must_use]
-    pub fn tag(&self, id: TagId) -> Tag {
-        self.tags[id.index()]
     }
 
     fn intern(&mut self, tag: Tag) -> TagId {
@@ -478,7 +472,7 @@ impl Sta {
 
     /// Whether timing ends at a pin.
     #[must_use]
-    pub fn is_endpoint(&self, pin: PinId) -> bool {
+    pub(crate) fn is_endpoint(&self, pin: PinId) -> bool {
         self.is_endpoint.get(pin.index()).copied().unwrap_or(false)
     }
 
@@ -496,7 +490,7 @@ impl Sta {
 
     /// A pin's slack for one edge on `side`.
     #[must_use]
-    pub fn slack_edge(&self, pin: PinId, edge: Edge, side: MinMax) -> Slack {
+    pub(crate) fn slack_edge(&self, pin: PinId, edge: Edge, side: MinMax) -> Slack {
         Slack(
             self.entries(pin, edge)
                 .iter()
@@ -545,7 +539,7 @@ impl Sta {
 
     /// The sum of the negative endpoint slacks on `side`.
     #[must_use]
-    pub const fn total_negative_slack(&self, side: MinMax) -> f64 {
+    pub(crate) const fn total_negative_slack(&self, side: MinMax) -> f64 {
         self.tns[side.index()]
     }
 
@@ -579,7 +573,7 @@ impl Sta {
     /// The path of least slack ending at `end` on `side`, as `OpenSTA`'s
     /// `vertexWorstSlackPath`; none when nothing constrains the pin.
     #[must_use]
-    pub fn worst_slack_path(
+    pub(crate) fn worst_slack_path(
         &self,
         netlist: &Netlist<'_>,
         end: PinId,

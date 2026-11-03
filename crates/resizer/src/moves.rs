@@ -6,6 +6,7 @@
 
 use crate::bnet::{self, Bnet, BnetPtr, Kind};
 use crate::fuzzy;
+use crate::library::is_logic_std_cell;
 use crate::rebuffer::{Rebuffer, can_remove_buffer};
 use crate::resizer::{RepairError, Resizer, buffer_delays, gate_delays};
 use crate::sta::{Path, Sta};
@@ -37,7 +38,7 @@ const SLACK_DEGRADE_RATIO_LIMIT: f64 = 0.1;
 
 /// A kind of move.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
-pub enum MoveKind {
+pub(crate) enum MoveKind {
     /// Take a buffer out.
     Unbuffer,
     /// Size a gate up.
@@ -55,31 +56,6 @@ pub enum MoveKind {
 }
 
 impl MoveKind {
-    /// Every kind, in a fixed order.
-    pub const ALL: [Self; 7] = [
-        Self::Unbuffer,
-        Self::SizeUp,
-        Self::SizeUpMatch,
-        Self::SwapPins,
-        Self::Buffer,
-        Self::Clone,
-        Self::SplitLoad,
-    ];
-
-    /// `OpenROAD`'s name for the move.
-    #[must_use]
-    pub const fn name(self) -> &'static str {
-        match self {
-            Self::Unbuffer => "UnbufferMove",
-            Self::SizeUp => "SizeUpMove",
-            Self::SizeUpMatch => "SizeUpMatchMove",
-            Self::SwapPins => "SwapPinsMove",
-            Self::Buffer => "BufferMove",
-            Self::Clone => "CloneMove",
-            Self::SplitLoad => "SplitLoadMove",
-        }
-    }
-
     const fn index(self) -> usize {
         match self {
             Self::Unbuffer => 0,
@@ -104,7 +80,7 @@ struct Tally {
 
 /// The moves made so far, per kind, as `OpenROAD` counts them.
 #[derive(Clone, Debug, Default)]
-pub struct MoveLog {
+pub(crate) struct MoveLog {
     tallies: [Tally; 7],
 }
 
@@ -118,13 +94,13 @@ impl MoveLog {
 
     /// Whether a move of `kind` ever touched `cell`.
     #[must_use]
-    pub fn has_moves(&self, kind: MoveKind, cell: CellId) -> bool {
+    pub(crate) fn has_moves(&self, kind: MoveKind, cell: CellId) -> bool {
         self.tallies[kind.index()].all_cells.contains(&cell)
     }
 
     /// Whether a move of `kind` touched `cell` since the last commit.
     #[must_use]
-    pub fn has_pending(&self, kind: MoveKind, cell: CellId) -> bool {
+    pub(crate) fn has_pending(&self, kind: MoveKind, cell: CellId) -> bool {
         self.tallies[kind.index()].pending_cells.contains(&cell)
     }
 
@@ -160,7 +136,7 @@ impl MoveLog {
 
 /// The move set with what it remembers between moves.
 #[derive(Debug)]
-pub struct Moves {
+pub(crate) struct Moves {
     /// The moves made.
     pub log: MoveLog,
     /// The rebuffering search.
@@ -647,7 +623,7 @@ fn is_single_output_combinational(
     lib: LibCellId,
 ) -> bool {
     let c = resizer.link.liberty.cell(lib);
-    resizer.link.is_logic_std_cell(resizer.db, cell)
+    is_logic_std_cell(resizer.db, cell)
         && !c.is_clock_gate
         && c.sequentials.is_empty()
         && c.ports.iter().filter(|p| p.is_output()).count() == 1

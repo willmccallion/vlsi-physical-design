@@ -88,7 +88,7 @@ impl RouteRc {
     /// `below`: `set_layer_rc -via`'s or else the LEF's, as
     /// `BufferedNet::viaResistance` adds them up.
     #[must_use]
-    pub fn via_resistance(&self, below: LayerId) -> f64 {
+    pub(crate) fn via_resistance(&self, below: LayerId) -> f64 {
         let cut = below.index();
         match self.via.get(cut) {
             Some(&r) if r != 0.0 => r,

@@ -44,7 +44,7 @@ impl WireRc {
 /// The pi model `OpenSTA` reduces a driver's network to, with the Elmore
 /// delay to each load.
 #[derive(Clone, Debug, PartialEq)]
-pub struct PiElmore {
+pub(crate) struct PiElmore {
     /// Capacitance nearest the driver, in farads.
     pub c2: f64,
     /// Resistance between the two capacitances, in ohms.
@@ -69,7 +69,7 @@ impl PiElmore {
 
 /// What a net's wires follow.
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub enum WireShape {
+pub(crate) enum WireShape {
     /// A Steiner tree over the pins' positions.
     Steiner {
         /// The tree.
@@ -85,7 +85,7 @@ pub enum WireShape {
 #[derive(Clone, Debug, PartialEq)]
 pub struct NetParasitics {
     /// What the wires follow.
-    pub shape: WireShape,
+    pub(crate) shape: WireShape,
     node_count: usize,
     resistors: Vec<(usize, usize, f64)>,
     wire_cap: Vec<f64>,
@@ -234,7 +234,7 @@ impl NetParasitics {
     /// Reduces the network seen from `driver` for `edge`, with each load
     /// pin's capacitance from `pin_cap`, as `OpenSTA`'s `reduceToPiElmore`.
     #[must_use]
-    pub fn pi_elmore(
+    pub(crate) fn pi_elmore(
         &self,
         netlist: &Netlist<'_>,
         driver: PinId,

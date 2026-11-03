@@ -25,7 +25,7 @@ const ROOT_SLEW: f64 = 0.0;
 
 /// An arc into a driver: from which pin of its cell, through which set.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub struct InArc {
+pub(crate) struct InArc {
     /// The input pin the arc starts at.
     pub from: PinId,
     /// Index of the timing group in the cell's arc sets.
@@ -39,7 +39,7 @@ pub struct InArc {
 /// The delay of one edge pair of an arc into a driver, at the driver's
 /// load, as `OpenSTA`'s graph holds arc delays.
 #[derive(Clone, Copy, Debug, PartialEq)]
-pub struct ArcDelay {
+pub(crate) struct ArcDelay {
     /// The arc.
     pub arc: InArc,
     /// The edge at the arc's input.
@@ -67,7 +67,7 @@ pub(crate) enum Estimator<'r> {
 /// delay calculation per side: the early side takes the smallest slew and
 /// delay over a driver's arcs, the late side the largest.
 #[derive(Clone, Debug)]
-pub struct TimingGraph {
+pub(crate) struct TimingGraph {
     level: Vec<u32>,
     in_arcs: Vec<Vec<InArc>>,
     loop_arcs: rustc_hash::FxHashSet<(PinId, PinId)>,
@@ -124,7 +124,7 @@ impl TimingGraph {
 
     /// The arcs timing searches into a driver.
     #[must_use]
-    pub fn in_arcs(&self, driver: PinId) -> &[InArc] {
+    pub(crate) fn in_arcs(&self, driver: PinId) -> &[InArc] {
         self.in_arcs.get(driver.index()).map_or(&[], Vec::as_slice)
     }
 
@@ -132,13 +132,13 @@ impl TimingGraph {
     /// which timing does not search through, as `OpenSTA` disables loop
     /// edges.
     #[must_use]
-    pub fn is_loop_arc(&self, from: PinId, to: PinId) -> bool {
+    pub(crate) fn is_loop_arc(&self, from: PinId, to: PinId) -> bool {
         self.loop_arcs.contains(&(from, to))
     }
 
     /// The delays of the arcs into a driver at its present load.
     #[must_use]
-    pub fn arc_delays(&self, driver: PinId) -> &[ArcDelay] {
+    pub(crate) fn arc_delays(&self, driver: PinId) -> &[ArcDelay] {
         self.arc_delays
             .get(driver.index())
             .map_or(&[], Vec::as_slice)
@@ -157,7 +157,7 @@ impl TimingGraph {
     /// The pins driving nets, by rising level and then name, as `OpenROAD`
     /// orders the drivers it repairs.
     #[must_use]
-    pub fn drivers_by_level(&self, netlist: &Netlist<'_>) -> Vec<PinId> {
+    pub(crate) fn drivers_by_level(&self, netlist: &Netlist<'_>) -> Vec<PinId> {
         let mut drivers: Vec<PinId> = (0..netlist.db.pins.len())
             .map(PinId::new)
             .filter(|&p| netlist.is_driver(p))
@@ -180,7 +180,7 @@ impl TimingGraph {
 
     /// A pin's slews on `side`.
     #[must_use]
-    pub fn slew_side(&self, pin: PinId, side: MinMax) -> EdgeValues {
+    pub(crate) fn slew_side(&self, pin: PinId, side: MinMax) -> EdgeValues {
         self.slew
             .get(pin.index())
             .map_or_else(EdgeValues::default, |s| s[side.index()])
@@ -188,7 +188,7 @@ impl TimingGraph {
 
     /// Holds a pin's slew at `slew` for both edges and sides until cleared,
     /// as `OpenSTA`'s annotated slews.
-    pub fn annotate_slew(&mut self, pin: PinId, slew: f64) {
+    pub(crate) fn annotate_slew(&mut self, pin: PinId, slew: f64) {
         self.annotated[pin.index()] = Some(slew);
         let both = EdgeValues {
             rise: slew,
@@ -199,7 +199,7 @@ impl TimingGraph {
 
     /// Drops every annotation and returns the pins that held one; their
     /// slews stay at the annotated value until found again.
-    pub fn clear_annotations(&mut self) -> Vec<PinId> {
+    pub(crate) fn clear_annotations(&mut self) -> Vec<PinId> {
         let annotated: Vec<PinId> = self
             .annotated
             .iter()
@@ -225,7 +225,12 @@ impl TimingGraph {
 
     /// The pi model and Elmore delays `driver` sees for `edge`.
     #[must_use]
-    pub fn pi_elmore(&self, netlist: &Netlist<'_>, driver: PinId, edge: Edge) -> Option<PiElmore> {
+    pub(crate) fn pi_elmore(
+        &self,
+        netlist: &Netlist<'_>,
+        driver: PinId,
+        edge: Edge,
+    ) -> Option<PiElmore> {
         let net = netlist.db.pins[driver.index()].net;
         self.parasitics[net.index()].as_ref().and_then(|p| {
             p.pi_elmore(netlist, driver, edge, &|pin, e| {
@@ -290,7 +295,7 @@ impl TimingGraph {
     /// a single pass in stale order would keep stale slews downstream.
     /// Arcs levelization cut, and latch arcs once a latch was visited, are
     /// not followed, so the walk ends.
-    pub fn propagate_from(
+    pub(crate) fn propagate_from(
         &mut self,
         netlist: &Netlist<'_>,
         clocks: &ClockNetwork,
@@ -412,7 +417,7 @@ impl TimingGraph {
     /// downstream of it is found, as `OpenROAD`'s `repairDesign` forward
     /// pass; returns the loads held with their limits, and the drivers
     /// whose slews changed.
-    pub fn sweep_annotating(
+    pub(crate) fn sweep_annotating(
         &mut self,
         netlist: &Netlist<'_>,
         clocks: &ClockNetwork,
@@ -657,7 +662,7 @@ impl Merged {
 /// A load pin's capacitance for `edge`: its Liberty value, or none for a
 /// design pin without a declared load.
 #[must_use]
-pub fn pin_capacitance(netlist: &Netlist<'_>, pin: PinId, edge: Edge) -> f64 {
+pub(crate) fn pin_capacitance(netlist: &Netlist<'_>, pin: PinId, edge: Edge) -> f64 {
     netlist
         .lib_port(pin)
         .map_or(0.0, |port| port.capacitance.get(edge))

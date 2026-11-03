@@ -1,7 +1,7 @@
 //! Buffers removed before placement and added around the ports, as
 //! `OpenROAD`'s `remove_buffers` and `buffer_ports` do.
 
-use crate::library::{BufferSet, Link};
+use crate::library::{BufferSet, Link, is_logic_std_cell};
 use crate::netlist::{ClockNetwork, Constants, Namer, Netlist};
 use pare_common::db::design::{EditError, NetlistDB, PinOwner, PlacementStatus};
 use pare_common::db::indices::{CellId, IoPinId, MacroPinId, NetId, PinId};
@@ -44,7 +44,7 @@ pub fn remove_buffers(db: &mut NetlistDB, link: &Link<'_>) -> Result<usize, Buff
         let Some((_, lib)) = link.cell(db, instance) else {
             continue;
         };
-        if !link.is_logic_std_cell(db, instance) || !lib.is_buffer() || lib.dont_touch {
+        if !is_logic_std_cell(db, instance) || !lib.is_buffer() || lib.dont_touch {
             continue;
         }
         if db.cells[i].status == PlacementStatus::Fixed {

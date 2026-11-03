@@ -12,7 +12,7 @@
 use crate::bnet::{self, Bnet, BnetPtr, BufferSize, Fixed, Kind, SlackEdges};
 use crate::dmp::{self, PiModel};
 use crate::fuzzy;
-use crate::library::{BufferSet, Link};
+use crate::library::{BufferSet, Link, is_logic_std_cell};
 use crate::parasitics::WireRc;
 use crate::resizer::{RepairError, Resizer, buffer_delays, find_targets};
 use crate::sta::{Sta, Via};
@@ -153,7 +153,7 @@ impl Rebuffer {
 
     /// Rebuffers the net `driver` drives for timing, as
     /// `Rebuffer::rebufferPin`; returns how many buffers went in.
-    pub fn rebuffer_pin(
+    pub(crate) fn rebuffer_pin(
         &mut self,
         resizer: &mut Resizer<'_, Sta>,
         driver: PinId,
@@ -211,7 +211,7 @@ impl Rebuffer {
                     && !resizer.constants.is_constant(driver)
                     && !resizer.is_tristate_driver(driver)
                     && (!lib.is_buffer()
-                        || !resizer.link.is_logic_std_cell(resizer.db, cell)
+                        || !is_logic_std_cell(resizer.db, cell)
                         || is_port_buffer(resizer, cell))
             });
             drivers.reverse();
@@ -1140,7 +1140,7 @@ impl Rebuffer {
                     .is_some_and(pare_common::db::liberty::LibPort::is_input);
                 if !lib.is_buffer()
                     || !is_input
-                    || !resizer.link.is_logic_std_cell(resizer.db, cell)
+                    || !is_logic_std_cell(resizer.db, cell)
                     || is_port_buffer(resizer, cell)
                     || !can_remove_buffer(resizer, cell)
                 {

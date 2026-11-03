@@ -38,19 +38,19 @@ pub fn less(a: f64, b: f64) -> bool {
 
 /// Whether `a` is less than or within tolerance of `b`.
 #[must_use]
-pub fn less_equal(a: f64, b: f64) -> bool {
+pub(crate) fn less_equal(a: f64, b: f64) -> bool {
     a < b || equal(a, b)
 }
 
 /// Whether `a` is greater than `b` by more than the tolerance.
 #[must_use]
-pub fn greater(a: f64, b: f64) -> bool {
+pub(crate) fn greater(a: f64, b: f64) -> bool {
     a > b && !equal(a, b)
 }
 
 /// Whether `a` is greater than or within tolerance of `b`.
 #[must_use]
-pub fn greater_equal(a: f64, b: f64) -> bool {
+pub(crate) fn greater_equal(a: f64, b: f64) -> bool {
     a > b || equal(a, b)
 }
 

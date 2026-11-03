@@ -397,7 +397,7 @@ fn split_high_degree_nodes(graph: &mut Graph) {
 /// as `OpenROAD`'s `checkTree`; trees of over a hundred terminals pass
 /// unchecked, as they will be buffered anyway.
 #[must_use]
-pub fn is_valid(tree: &SteinerTree) -> bool {
+pub(crate) fn is_valid(tree: &SteinerTree) -> bool {
     if tree.terminals > 100 {
         return true;
     }
