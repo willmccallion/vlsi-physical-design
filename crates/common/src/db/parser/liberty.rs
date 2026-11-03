@@ -878,10 +878,11 @@ impl Interpreter {
     fn timing(&self, cell: &mut LibCell, to: usize, group: &Group<'_>) -> Result<(), ParseError> {
         let timing_type = group.attr_text("timing_type").unwrap_or("combinational");
         let (role, from_edge, to_edge) = arc_role(timing_type);
-        let sense = match group.attr_text("timing_sense") {
-            Some("positive_unate") => TimingSense::PositiveUnate,
-            Some("negative_unate") => TimingSense::NegativeUnate,
-            _ => TimingSense::NonUnate,
+        let stated_sense = match group.attr_text("timing_sense") {
+            Some("positive_unate") => Some(TimingSense::PositiveUnate),
+            Some("negative_unate") => Some(TimingSense::NegativeUnate),
+            Some("non_unate") => Some(TimingSense::NonUnate),
+            _ => None,
         };
         let when = self.function_attr(group, "when")?;
         let table_names: &[(&str, Edge, bool)] = if role.is_delay() {
@@ -916,53 +917,56 @@ impl Interpreter {
                 .find(|(e, d, _)| *e == edge && *d == is_delay)
                 .map(|(_, _, t)| t.clone())
         };
-        let mut arcs = Vec::new();
-        if role.is_delay() {
-            let pairs: Vec<(Edge, Edge)> = match (role, from_edge, sense) {
-                (ArcRole::RegClkToQ | ArcRole::LatchEnToQ, Some(f), _) => {
-                    vec![(f, Edge::Rise), (f, Edge::Fall)]
-                }
-                (_, _, TimingSense::PositiveUnate) => {
-                    vec![(Edge::Rise, Edge::Rise), (Edge::Fall, Edge::Fall)]
-                }
-                (_, _, TimingSense::NegativeUnate) => {
-                    vec![(Edge::Rise, Edge::Fall), (Edge::Fall, Edge::Rise)]
-                }
-                (_, _, TimingSense::NonUnate) => vec![
-                    (Edge::Rise, Edge::Rise),
-                    (Edge::Fall, Edge::Rise),
-                    (Edge::Rise, Edge::Fall),
-                    (Edge::Fall, Edge::Fall),
-                ],
-            };
-            for (from, to_e) in pairs {
-                if to_edge.is_some_and(|restricted| restricted != to_e) {
-                    continue;
-                }
-                let delay = table_for(to_e, true);
-                let slew = table_for(to_e, false);
-                if delay.is_none() && slew.is_none() {
-                    continue;
-                }
-                arcs.push(TimingArc {
-                    from_edge: from,
-                    to_edge: to_e,
-                    delay,
-                    slew,
-                });
-            }
-        } else if let (Some(clock_edge), Some(_)) = (from_edge, role.check_side()) {
-            for to_e in Edge::BOTH {
-                if let Some(constraint) = table_for(to_e, true) {
+        let arcs_for = |sense: TimingSense| {
+            let mut arcs = Vec::new();
+            if role.is_delay() {
+                let pairs: Vec<(Edge, Edge)> = match (role, from_edge, sense) {
+                    (ArcRole::RegClkToQ | ArcRole::LatchEnToQ, Some(f), _) => {
+                        vec![(f, Edge::Rise), (f, Edge::Fall)]
+                    }
+                    (_, _, TimingSense::PositiveUnate) => {
+                        vec![(Edge::Rise, Edge::Rise), (Edge::Fall, Edge::Fall)]
+                    }
+                    (_, _, TimingSense::NegativeUnate) => {
+                        vec![(Edge::Rise, Edge::Fall), (Edge::Fall, Edge::Rise)]
+                    }
+                    (_, _, TimingSense::NonUnate) => vec![
+                        (Edge::Rise, Edge::Rise),
+                        (Edge::Fall, Edge::Rise),
+                        (Edge::Rise, Edge::Fall),
+                        (Edge::Fall, Edge::Fall),
+                    ],
+                };
+                for (from, to_e) in pairs {
+                    if to_edge.is_some_and(|restricted| restricted != to_e) {
+                        continue;
+                    }
+                    let delay = table_for(to_e, true);
+                    let slew = table_for(to_e, false);
+                    if delay.is_none() && slew.is_none() {
+                        continue;
+                    }
                     arcs.push(TimingArc {
-                        from_edge: clock_edge,
+                        from_edge: from,
                         to_edge: to_e,
-                        delay: Some(constraint),
-                        slew: None,
+                        delay,
+                        slew,
                     });
                 }
+            } else if let (Some(clock_edge), Some(_)) = (from_edge, role.check_side()) {
+                for to_e in Edge::BOTH {
+                    if let Some(constraint) = table_for(to_e, true) {
+                        arcs.push(TimingArc {
+                            from_edge: clock_edge,
+                            to_edge: to_e,
+                            delay: Some(constraint),
+                            slew: None,
+                        });
+                    }
+                }
             }
-        }
+            arcs
+        };
         let related = group
             .attr("related_pin")
             .ok_or_else(|| self.error(group.line, "timing group without related_pin".into()))?;
@@ -976,13 +980,16 @@ impl Interpreter {
                     ),
                 )
             })?;
+            let sense = stated_sense
+                .or_else(|| inferred_sense(&cell.ports[to], role, related_name))
+                .unwrap_or(TimingSense::NonUnate);
             cell.arc_sets.push(TimingArcSet {
                 from,
                 to,
                 role,
                 sense,
                 when: when.clone(),
-                arcs: arcs.clone(),
+                arcs: arcs_for(sense),
             });
         }
         Ok(())
@@ -1138,6 +1145,20 @@ fn axis_variable(name: &str) -> AxisVariable {
 
 /// The role a `timing_type` names, with the input edge it fixes for a clock
 /// and the output edge it restricts to, where it does.
+/// The sense of an arc from `from` that its timing group leaves out, as
+/// `OpenSTA` finds it: from the output's function for a combinational arc,
+/// from its `three_state` condition for a tristate one.
+fn inferred_sense(to: &LibPort, role: ArcRole, from: &str) -> Option<TimingSense> {
+    match role {
+        ArcRole::Combinational => to.function.as_ref()?.port_timing_sense(from),
+        ArcRole::TristateEnable => {
+            Some(to.three_state.as_ref()?.port_timing_sense(from)?.opposite())
+        }
+        ArcRole::TristateDisable => to.three_state.as_ref()?.port_timing_sense(from),
+        _ => None,
+    }
+}
+
 /// A `bus` group: its bits, and each pin group within it with the bits it
 /// names.
 struct Bus<'g, 'a> {
@@ -1500,6 +1521,50 @@ library (ram) {{
         let err = bus_library("pin(d[2]) { capacitance : 7.0; }", "").unwrap_err();
 
         assert!(err.to_string().contains("not a bit of bus 'd'"), "{err}");
+    }
+
+    /// The arc sets of cell `c`, whose output `Z` has `output_body` and
+    /// is timed from inputs `A`, `B` and `EN` by `timing_body`.
+    fn sensed_cell(output_body: &str, timing_body: &str) -> LibCell {
+        let src = format!(
+            r#"
+library (x) {{
+  time_unit : "1ns";
+  capacitive_load_unit (1,ff);
+  cell (c) {{
+    pin (A) {{ direction : input; capacitance : 1.0; }}
+    pin (B) {{ direction : input; capacitance : 1.0; }}
+    pin (EN) {{ direction : input; capacitance : 1.0; }}
+    pin (Z) {{ direction : output; {output_body}
+      timing () {{ {timing_body}
+        cell_rise(scalar) {{ values ("0.1"); }} cell_fall(scalar) {{ values ("0.1"); }} }} }}
+  }}
+}}
+"#
+        );
+        let lib = parse_str(&src, Path::new("x.lib")).unwrap();
+        lib.cells[0].clone()
+    }
+
+    #[test]
+    fn a_missing_timing_sense_is_inferred_from_the_output_function() {
+        let cell = sensed_cell(r#"function : "!(A & B)";"#, r#"related_pin : "A";"#);
+
+        let set = &cell.arc_sets[0];
+        let edges: Vec<(Edge, Edge)> = set.arcs.iter().map(|a| (a.from_edge, a.to_edge)).collect();
+
+        assert_eq!(set.sense, TimingSense::NegativeUnate);
+        assert_eq!(edges, [(Edge::Rise, Edge::Fall), (Edge::Fall, Edge::Rise)]);
+    }
+
+    #[test]
+    fn a_missing_tristate_enable_sense_is_the_opposite_of_the_three_state_condition() {
+        let cell = sensed_cell(
+            r#"function : "A"; three_state : "!EN";"#,
+            r#"related_pin : "EN"; timing_type : three_state_enable;"#,
+        );
+
+        assert_eq!(cell.arc_sets[0].sense, TimingSense::PositiveUnate);
     }
 
     #[test]

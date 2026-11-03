@@ -462,6 +462,46 @@ pub enum TimingSense {
     NonUnate,
 }
 
+impl TimingSense {
+    /// The sense of the inverted output.
+    #[must_use]
+    pub const fn opposite(self) -> Self {
+        match self {
+            Self::PositiveUnate => Self::NegativeUnate,
+            Self::NegativeUnate => Self::PositiveUnate,
+            Self::NonUnate => Self::NonUnate,
+        }
+    }
+}
+
+/// How an expression follows one pin, with `OpenSTA`'s two ways of having no
+/// sense: the pin does not decide it, or the form does not tell.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum PortSense {
+    Sense(TimingSense),
+    Independent,
+    Unknown,
+}
+
+impl PortSense {
+    const fn opposite(self) -> Self {
+        match self {
+            Self::Sense(sense) => Self::Sense(sense.opposite()),
+            other => other,
+        }
+    }
+
+    /// The sense of a conjunction or disjunction of two parts.
+    fn combine(a: Self, b: Self) -> Self {
+        match (a, b) {
+            _ if a == b => a,
+            (Self::Sense(_), Self::Sense(_)) => Self::Sense(TimingSense::NonUnate),
+            (Self::Independent | Self::Unknown, other)
+            | (other, Self::Independent | Self::Unknown) => other,
+        }
+    }
+}
+
 /// One edge pair of a timing arc with its delay and output slew tables,
 /// or for a check its constraint.
 #[derive(Clone, Debug, PartialEq)]
@@ -1146,6 +1186,37 @@ impl FuncExpr {
         }
     }
 
+    /// How the expression follows `port`, as `OpenSTA`'s `portTimingSense`
+    /// reads it from the expression's form; none for a pin it does not read
+    /// or a form that does not tell.
+    #[must_use]
+    pub fn port_timing_sense(&self, port: &str) -> Option<TimingSense> {
+        match self.port_sense(port) {
+            PortSense::Sense(sense) => Some(sense),
+            PortSense::Independent | PortSense::Unknown => None,
+        }
+    }
+
+    fn port_sense(&self, port: &str) -> PortSense {
+        match self {
+            Self::Zero | Self::One => PortSense::Independent,
+            Self::Port(p) if p == port => PortSense::Sense(TimingSense::PositiveUnate),
+            Self::Port(_) => PortSense::Independent,
+            Self::Not(e) => e.port_sense(port).opposite(),
+            Self::And(a, b) | Self::Or(a, b) => {
+                PortSense::combine(a.port_sense(port), b.port_sense(port))
+            }
+            Self::Xor(a, b) => {
+                let decided = |s: PortSense| matches!(s, PortSense::Sense(_));
+                if decided(a.port_sense(port)) || decided(b.port_sense(port)) {
+                    PortSense::Sense(TimingSense::NonUnate)
+                } else {
+                    PortSense::Unknown
+                }
+            }
+        }
+    }
+
     /// The expression's level given each pin's level.
     pub fn eval(&self, level: &impl Fn(&str) -> Logic) -> Logic {
         match self {
@@ -1537,5 +1608,30 @@ mod tests {
             }),
         };
         assert!((arc.drive_resistance() - 2.0).abs() < 1e-12);
+    }
+
+    fn sense(function: &str, port: &str) -> Option<TimingSense> {
+        FuncExpr::parse(function).unwrap().port_timing_sense(port)
+    }
+
+    #[test]
+    fn an_inverted_conjunction_is_negative_unate_in_each_input() {
+        assert_eq!(sense("!(A & B)", "A"), Some(TimingSense::NegativeUnate));
+        assert_eq!(sense("!(A & B)", "B"), Some(TimingSense::NegativeUnate));
+    }
+
+    #[test]
+    fn a_pin_read_both_ways_or_through_an_xor_is_non_unate() {
+        assert_eq!(
+            sense("(S & B) | (A & !S)", "S"),
+            Some(TimingSense::NonUnate)
+        );
+        assert_eq!(sense("A ^ B", "B"), Some(TimingSense::NonUnate));
+    }
+
+    #[test]
+    fn a_pin_the_function_does_not_read_has_no_sense() {
+        assert_eq!(sense("A & B", "C"), None);
+        assert_eq!(sense("A | (B & 1)", "B"), Some(TimingSense::PositiveUnate));
     }
 }
