@@ -343,6 +343,17 @@ impl RoutingConfig {
         }
         Ok(min..=max)
     }
+
+    /// The lowest layer signal wires may use, the start of
+    /// [`Self::layer_range`]; none for a library without routing layers,
+    /// such as a placement benchmark's.
+    pub fn lowest_signal_layer(&self, lib: &Library) -> Result<Option<LayerId>, LayerRangeError> {
+        match self.layer_range(lib) {
+            Ok(layers) => Ok(Some(*layers.start())),
+            Err(LayerRangeError::NoLayers) => Ok(None),
+            Err(e) => Err(e),
+        }
+    }
 }
 
 impl Default for RoutingConfig {

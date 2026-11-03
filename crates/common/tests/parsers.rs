@@ -15,6 +15,7 @@ use pare_common::geom::dbu::{Dbu, DbuPerMicron};
 use pare_common::geom::orient::Orientation;
 use pare_common::geom::point::Point;
 use pare_common::geom::rect::Rect;
+use pare_common::util::config::{LayerRangeError, RoutingConfig};
 use std::path::{Path, PathBuf};
 
 fn fixture(name: &str) -> PathBuf {
@@ -651,4 +652,32 @@ fn several_track_patterns_space_their_tracks_by_span_over_count_rounded_up() {
     db.tracks = vec![pattern(axis, 0, 5, 200), pattern(axis, 100, 5, 200)];
 
     assert_eq!(db.average_track_spacing(LayerId(1)), Dbu(90));
+}
+
+#[test]
+fn a_library_without_routing_layers_has_no_lowest_signal_layer() {
+    let lib = Library::new(DbuPerMicron::new(1000).unwrap());
+
+    let layer = RoutingConfig::default().lowest_signal_layer(&lib);
+
+    assert_eq!(layer, Ok(None));
+}
+
+#[test]
+fn a_misnamed_lowest_routing_layer_is_an_error_not_a_missing_layer() {
+    let config = RoutingConfig {
+        min_layer: Some("metal2".into()),
+        ..RoutingConfig::default()
+    };
+
+    let layer = config.lowest_signal_layer(&tiny_library());
+
+    assert_eq!(layer, Err(LayerRangeError::Unknown("metal2".into())));
+}
+
+#[test]
+fn the_lowest_signal_layer_defaults_to_the_second() {
+    let layer = RoutingConfig::default().lowest_signal_layer(&tiny_library());
+
+    assert_eq!(layer, Ok(Some(LayerId(1))));
 }

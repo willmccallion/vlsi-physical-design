@@ -595,9 +595,8 @@ fn run_placement(
     ui::check(&format!("Legalized {movable_cells} cells"));
     let access = config
         .routing
-        .layer_range(&db.library)
-        .ok()
-        .and_then(|layers| PinAccess::new(db, *layers.start()));
+        .lowest_signal_layer(&db.library)?
+        .and_then(|layer| PinAccess::new(db, layer));
     let blocked_pins = access.as_ref().map_or(0, |access| {
         let freed = detailed::free_blocked_pins(db, &zones, access);
         ui::stat_row(
