@@ -1,0 +1,677 @@
+//! Placement: global placement with its timing and routability drivers,
+//! legalization and detailed placement.
+
+use crate::checks::report_placement;
+use crate::cts::clock_tree_synthesis;
+use crate::path_str;
+use crate::repair::{
+    NetlistRepair, Networks, clock_wire_rc, repair_design, repair_netlist, repair_timing, wire_rc,
+};
+use crate::report::{PlacementSummary, Report};
+use anyhow::Context;
+use pare_common::db::design::{NetlistDB, PlacementStatus};
+use pare_common::db::indices::{CellId, NetId};
+use pare_common::db::liberty::MinMax;
+use pare_common::db::writer;
+use pare_common::geom::dbu::Dbu;
+use pare_common::geom::point::Point;
+use pare_common::util::config::{Config, CongestionEstimate};
+use pare_common::util::{ui, visualization};
+use pare_common::verify::pin_access::PinAccess;
+use pare_placer::detailed;
+use pare_placer::global::{
+    self, CongestionEstimator, GlobalParams, Outcome, Reweighted, RoutabilityParams, RoutingTiles,
+    TimingDriver, TimingParams,
+};
+use pare_placer::io::{self, IoLayers};
+use pare_placer::legalize::Legalization;
+use pare_placer::legalize::opendp::improve::improve_placement;
+use pare_placer::legalize::opendp::mirror::optimize_mirroring;
+use pare_placer::model::PlacementModel;
+use pare_placer::zones::{Zone, Zones};
+use pare_resizer::parasitics::WireRc;
+use pare_resizer::{Link, Rebuffer, RepairOptions, Repairer, Resizer, timing_net_weights};
+use pare_router::{CapacityReduction, GlobalRouteEstimator, RouteError};
+use std::path::{Path, PathBuf};
+use std::time::Instant;
+
+/// How far `improve_placement` may move a cell, in row heights across and
+/// rows up or down: OpenROAD-flow-scripts' `DPO_MAX_DISPLACEMENT`.
+const IMPROVE_MAX_DISPLACEMENT: (i64, i64) = (5, 1);
+
+/// Where placement starts from.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum PlacementStart {
+    /// Global placement from a random start.
+    Scratch,
+    /// The positions the design already has, which are only legalized and
+    /// refined.
+    Given,
+}
+
+/// Global placement, I/O pin placement, legalization, checking and output.
+pub(crate) fn run_placement(
+    config: &Config,
+    db: &mut NetlistDB,
+    output_dir: &Path,
+    start: PlacementStart,
+    report: &mut Report,
+) -> anyhow::Result<Option<NetlistRepair>> {
+    let movable_io = io::movable_io_pins(db);
+    let io_layers = if movable_io.is_empty() || start == PlacementStart::Given {
+        None
+    } else if config.io_placement.enabled {
+        Some(IoLayers::from_config(&config.io_placement, &db.library)?)
+    } else {
+        let unplaced = movable_io
+            .iter()
+            .filter(|&&p| db.io_pins[p.index()].status == PlacementStatus::Unplaced)
+            .count();
+        if unplaced > 0 {
+            anyhow::bail!("I/O pin placement is disabled but {unplaced} I/O pins are unplaced");
+        }
+        None
+    };
+    if let Some(layers) = io_layers {
+        ui::section("Pin Placement");
+        place_io_pins_by_cells(config, db, &Zones::new(db)?, layers, report)?;
+    }
+    let mut repair = if start == PlacementStart::Scratch {
+        repair_netlist(config, db, report)?
+    } else {
+        None
+    };
+
+    let zones = Zones::new(db)?;
+    ui::section("Placement");
+    let model = if start == PlacementStart::Given {
+        let unplaced = db
+            .cells
+            .iter()
+            .filter(|c| c.status == PlacementStatus::Unplaced)
+            .count();
+        if unplaced > 0 {
+            anyhow::bail!("{unplaced} cells of the given placement are unplaced");
+        }
+        ui::check("Starting from the given placement");
+        PlacementModel::from_db(db, &zones)
+    } else {
+        let phase_start = Instant::now();
+        let model = global_placement(
+            config,
+            db,
+            PlacementModel::from_db(db, &zones),
+            Pass::Full,
+            repair.as_mut(),
+            report,
+        )?;
+        report.phase("global placement", phase_start);
+        model
+    };
+    model.write_back(db);
+    if let Some(repair) = &mut repair {
+        repair_design(config, db, repair, report)?;
+    }
+    let zones = Zones::new(db)?;
+    let movable_cells = db
+        .cells
+        .iter()
+        .filter(|c| !matches!(c.status, PlacementStatus::Fixed | PlacementStatus::Cover))
+        .count();
+    let global_png = output_dir.join("nesterov_placer.png");
+    visualization::draw_placement(db, &path_str(&global_png)?, 1000, 1000);
+
+    let phase_start = Instant::now();
+    ui::phase("Legalization");
+    let legalization = legalize(db, &zones)?;
+    ui::check(&format!("Legalized {movable_cells} cells"));
+    let access = config
+        .routing
+        .lowest_signal_layer(&db.library)?
+        .and_then(|layer| PinAccess::new(db, layer));
+    let blocked_pins = access.as_ref().map_or(0, |access| {
+        let freed = detailed::free_blocked_pins(db, &zones, access);
+        ui::stat_row(
+            "Blocked pins:",
+            &format!("{} -> {}", freed.blocked_before, freed.blocked_after),
+            "Cells moved:",
+            &freed.moved.to_string(),
+        );
+        freed.blocked_after
+    });
+    ui::stat_row(
+        "HPWL (um):",
+        &format!("{:.0}", PlacementModel::from_db(db, &zones).hpwl()),
+        "",
+        "",
+    );
+    report.phase("legalization", phase_start);
+
+    let phase_start = Instant::now();
+    ui::phase("Detailed Placement");
+    let before: Vec<_> = db.cells.iter().map(|c| (c.location, c.orient)).collect();
+    if let Legalization::DetailedPlacement(_) = legalization {
+        let _ = improve_placement(db, IMPROVE_MAX_DISPLACEMENT)?;
+        let mirrored = optimize_mirroring(db);
+        ui::stat_row("Mirrored:", &mirrored.to_string(), "", "");
+    } else {
+        let _ = detailed::improve(db, &zones, 3, access.as_ref());
+    }
+    let changed = db
+        .cells
+        .iter()
+        .zip(&before)
+        .filter(|&(c, &b)| (c.location, c.orient) != b)
+        .count();
+    let hpwl = PlacementModel::from_db(db, &zones).hpwl();
+    ui::stat_row(
+        "Cells changed:",
+        &changed.to_string(),
+        "HPWL (um):",
+        &format!("{hpwl:.0}"),
+    );
+    report.phase("detailed placement", phase_start);
+    if let Some(summary) = &mut report.placement {
+        summary.hpwl_um = hpwl;
+        summary.detailed_moves = changed;
+        summary.blocked_pins = blocked_pins;
+    }
+    if let Some(repair) = &mut repair
+        && clock_tree_synthesis(config, db, repair, report)?
+    {
+        let zones = Zones::new(db)?;
+        let phase_start = Instant::now();
+        ui::phase("Legalization");
+        let _ = legalize(db, &zones)?;
+        let hpwl = PlacementModel::from_db(db, &zones).hpwl();
+        ui::stat_row("HPWL (um):", &format!("{hpwl:.0}"), "", "");
+        report.phase("legalization after clock tree synthesis", phase_start);
+    }
+    if let Some(repair) = &mut repair
+        && repair_timing(config, db, repair, report)?
+    {
+        let zones = Zones::new(db)?;
+        let phase_start = Instant::now();
+        ui::phase("Legalization");
+        let _ = legalize(db, &zones)?;
+        let hpwl = PlacementModel::from_db(db, &zones).hpwl();
+        ui::stat_row("HPWL (um):", &format!("{hpwl:.0}"), "", "");
+        report.phase("legalization after timing repair", phase_start);
+        if let Some(summary) = &mut report.placement {
+            summary.hpwl_um = hpwl;
+        }
+    }
+
+    if !report_placement(db, report) {
+        anyhow::bail!("placement is not legal");
+    }
+
+    let phase_start = Instant::now();
+    ui::phase("Output");
+    ui::wrote(&path_str(&global_png)?);
+    let placed_png = output_dir.join("placed.png");
+    visualization::draw_placement(db, &path_str(&placed_png)?, 1000, 1000);
+    ui::wrote(&path_str(&placed_png)?);
+    let placed = if config.input.bookshelf_aux_file.is_some() {
+        let pl = output_dir.join("placed.pl");
+        writer::bookshelf::write_pl(db, &pl)
+            .with_context(|| format!("cannot write {}", pl.display()))?;
+        pl
+    } else {
+        let out = PathBuf::from(&config.input.output_def);
+        writer::def::write_file(db, &out)
+            .with_context(|| format!("cannot write {}", out.display()))?;
+        out
+    };
+    ui::wrote(&path_str(&placed)?);
+    report.phase("placement output", phase_start);
+    Ok(repair)
+}
+
+/// Legalizes the placement as OpenROAD-flow-scripts' `detailed_placement`
+/// does, showing how far the cells moved.
+pub(crate) fn legalize(db: &mut NetlistDB, zones: &Zones) -> anyhow::Result<Legalization> {
+    let legalization = pare_placer::legalize::legalize(db, zones)?;
+    if let Legalization::DetailedPlacement(done) = legalization {
+        let um = |d: Dbu| d.get() as f64 / f64::from(db.dbu().get());
+        ui::stat_row(
+            "Displacement (um):",
+            &format!("{:.0}", um(done.total_displacement)),
+            "Max (um):",
+            &format!("{:.1}", um(done.max_displacement)),
+        );
+    }
+    Ok(legalization)
+}
+
+/// Global placement without the movable I/O pins, then I/O pin placement
+/// for the cells' positions, as OpenROAD-flow-scripts does before it touches
+/// the netlist.
+fn place_io_pins_by_cells(
+    config: &Config,
+    db: &mut NetlistDB,
+    zones: &Zones,
+    layers: IoLayers,
+    report: &mut Report,
+) -> anyhow::Result<()> {
+    let phase_start = Instant::now();
+    ui::phase("Global Placement Without I/O");
+    let model = global_placement(
+        config,
+        db,
+        PlacementModel::from_db_without_movable_io(db, zones),
+        Pass::SkipIo,
+        None,
+        report,
+    )?;
+    model.write_back(db);
+    report.phase("global placement without I/O", phase_start);
+
+    let phase_start = Instant::now();
+    ui::phase("I/O Pin Placement");
+    let placed = io::place_io_pins(db, layers)?;
+    ui::stat_row(
+        "Pins:",
+        &placed.pins.to_string(),
+        "Free slots:",
+        &placed.slots.to_string(),
+    );
+    report.phase("I/O pin placement", phase_start);
+    Ok(())
+}
+
+/// Whether a global placement pass sees every connection.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Pass {
+    /// Before the I/O pins are placed: like `OpenROAD`'s skip-I/O mode,
+    /// without routability.
+    SkipIo,
+    /// With every connection in place.
+    Full,
+}
+
+/// Runs global placement on `model` and reports it; `db` supplies the
+/// routing resources for routability-driven placement and, with `repair`
+/// and an SDC file, is repaired along the way for timing-driven placement.
+fn global_placement(
+    config: &Config,
+    db: &mut NetlistDB,
+    mut model: PlacementModel,
+    pass: Pass,
+    repair: Option<&mut NetlistRepair>,
+    report: &mut Report,
+) -> anyhow::Result<PlacementModel> {
+    let gp = &config.global_placement;
+    let timing = repair.filter(|r| pass == Pass::Full && gp.timing_driven && r.sdc.is_some());
+    if timing.is_some()
+        && gp.routability_driven
+        && gp.congestion_estimate == CongestionEstimate::GlobalRouter
+    {
+        anyhow::bail!(
+            "timing-driven placement changes the netlist as it goes, which the global-router \
+             congestion estimate cannot follow: set congestion_estimate = \"rudy\" or \
+             timing_driven = false"
+        );
+    }
+
+    let movable_area: f64 = model
+        .density_sizes
+        .iter()
+        .zip(&model.movable)
+        .filter(|(_, m)| **m)
+        .map(|(s, _)| s.x * s.y)
+        .sum();
+    let movable_cells = model.movable.iter().filter(|&&m| m).count();
+    let utilization = movable_area / model.free_area();
+    let target_density = gp
+        .target_density
+        .unwrap_or_else(|| global::default_target_density(utilization));
+    let bins = gp
+        .bin_dimension
+        .unwrap_or_else(|| global::default_bins(&model, target_density));
+
+    ui::stat_row(
+        "Cells:",
+        &movable_cells.to_string(),
+        "Nets:",
+        &model.nets.len().to_string(),
+    );
+    ui::stat_row(
+        "Utilization:",
+        &format!("{:.2}%", utilization * 100.0),
+        "Target Density:",
+        &format!("{target_density:.2}"),
+    );
+    ui::stat_row("Bin Grid:", &format!("{bins}x{bins}"), "", "");
+
+    let (routability, mut estimator) = if gp.routability_driven && pass == Pass::Full {
+        let (params, estimator) = routability_setup(config, db)?;
+        (Some(params), estimator)
+    } else {
+        (None, None)
+    };
+    let params = GlobalParams {
+        target_density,
+        target_overflow: gp.target_overflow,
+        max_iterations: gp.placer_max_iterations,
+        initial_rounds: match pass {
+            Pass::SkipIo => 0,
+            Pass::Full => global::INITIAL_PLACE_ROUNDS,
+        },
+        bins,
+        seed: gp.seed,
+        routability,
+        timing: timing.as_ref().map(|_| TimingParams {
+            overflows: gp.timing_driven_overflows.clone(),
+        }),
+    };
+    ui::placement_table_header();
+    let show = |p: &global::Progress| {
+        if p.iteration.is_multiple_of(50) {
+            ui::placement_iter(p.iteration, p.hpwl, p.overflow, p.penalty, p.step);
+        }
+    };
+    let result = if let Some(repair) = timing {
+        drop(estimator);
+        let rc = wire_rc(config, db)?;
+        let mut driver = TimingPlacement {
+            config,
+            db,
+            repair,
+            rc,
+            rounds: 0,
+        };
+        global::place(&mut model, &params, None, Some(&mut driver), show)?
+    } else {
+        let Ok(result) = global::place::<global::NoTiming>(
+            &mut model,
+            &params,
+            estimator
+                .as_mut()
+                .map(|e| e as &mut dyn CongestionEstimator),
+            None,
+            show,
+        );
+        result
+    };
+    eprintln!();
+    for (k, round) in result.congestion.iter().enumerate() {
+        ui::stat_row(
+            &format!("Congestion {}:", k + 1),
+            &format!("{:.4} @ {}", round.congestion, round.iteration),
+            "Inflated:",
+            &format!(
+                "{} cells, area x{:.2}, density {:.2}",
+                round.inflated, round.area_ratio, round.target_density
+            ),
+        );
+    }
+    if let Some(congestion) = result.final_congestion {
+        ui::stat_row("Final congestion:", &format!("{congestion:.4}"), "", "");
+    }
+    if result.zones.len() > 1 {
+        for z in &result.zones {
+            let name = match z.zone {
+                Zone::Fence(r) => db.regions[r.index()].name.as_str(),
+                Zone::Outside => "outside fences",
+            };
+            ui::stat_row(
+                &format!("Zone {name}:"),
+                &format!("{} cells, util {:.3}", z.cells, z.utilization),
+                "Target / ovfl:",
+                &format!("{:.3} / {:.3}", z.target, z.overflow),
+            );
+        }
+    }
+    match result.outcome {
+        Outcome::Converged => ui::check(&format!(
+            "Converged at iteration {} (overflow {:.3})",
+            result.iterations, result.overflow
+        )),
+        Outcome::IterationLimit => log::warn!(
+            "Stopped at the iteration limit with overflow {:.3}",
+            result.overflow
+        ),
+        Outcome::Diverged => anyhow::bail!(
+            "global placement diverged after {} iterations",
+            result.iterations
+        ),
+    }
+    let hpwl = model.hpwl();
+    ui::stat_row("HPWL (um):", &format!("{hpwl:.0}"), "", "");
+    report.placement = Some(PlacementSummary {
+        cells: movable_cells,
+        nets: model.nets.len(),
+        iterations: result.iterations,
+        overflow: result.overflow,
+        hpwl_um: hpwl,
+        detailed_moves: 0,
+        blocked_pins: 0,
+        timing_rounds: result.timing_rounds,
+    });
+    Ok(model)
+}
+
+/// Repairs the design between iterations of timing-driven global
+/// placement, as `OpenROAD`'s resizer does for its placer: `repair_design`
+/// with the buffers' wire length limit, every net rebuffered for timing,
+/// and the worst tenth of the nets weighted by their slack.
+struct TimingPlacement<'a> {
+    config: &'a Config,
+    db: &'a mut NetlistDB,
+    repair: &'a mut NetlistRepair,
+    rc: WireRc,
+    rounds: usize,
+}
+
+impl TimingDriver for TimingPlacement<'_> {
+    type Error = anyhow::Error;
+
+    fn repair(&mut self, model: &PlacementModel) -> anyhow::Result<Option<Reweighted>> {
+        let round_start = Instant::now();
+        self.rounds += 1;
+        model.write_back(self.db);
+        let sdc = self
+            .repair
+            .sdc
+            .as_ref()
+            .context("timing-driven placement needs an SDC file")?;
+        let link = Link::new(self.db, &self.repair.liberty, &self.config.netlist.dont_use)?;
+        let networks = Networks::find(self.db, &link, self.config, Some(sdc))?;
+        let clock_rc = clock_wire_rc(self.config, self.db)?;
+        let cells_before = self.db.cells.len();
+        let mut resizer = Resizer::new(
+            self.db,
+            networks.context(&link, clock_rc),
+            self.rc,
+            networks.buffers.clone(),
+            &mut self.repair.namer,
+            RepairOptions::default(),
+            Some(sdc),
+        )?;
+        let area_before = resizer.design_area();
+        let wns_before = resizer
+            .sta()
+            .map_or(f64::INFINITY, |sta| sta.worst_slack(MinMax::Max).0);
+        resizer.set_max_wire_length(pare_resizer::rebuffer::max_wire_length(&resizer));
+        let done = Repairer::new(&mut resizer).repair_design()?;
+        let mut rebuffer = Rebuffer::new(&resizer)?;
+        rebuffer.fully_rebuffer(&mut resizer)?;
+        let slacks = resizer.driver_net_slacks();
+        let weights =
+            timing_net_weights(&slacks, self.config.global_placement.timing_net_weight_max);
+        log::debug!(
+            "timing weights: worst net slack {:.4} ns, largest weight {:.4}",
+            slacks.first().map_or(f64::INFINITY, |s| s.1 * 1e9),
+            weights.iter().map(|w| w.1).fold(1.0, f64::max)
+        );
+        let area_after = resizer.design_area();
+        let wns_after = resizer
+            .sta()
+            .map_or(f64::INFINITY, |sta| sta.worst_slack(MinMax::Max).0);
+        let renumbering = resizer.finish()?;
+        let area_change = if area_before > 0.0 {
+            (area_after - area_before) / area_before * 100.0
+        } else {
+            0.0
+        };
+        ui::stat_row(
+            &format!("Timing round {}:", self.rounds),
+            &format!("WNS {:.3} -> {:.3} ns", wns_before * 1e9, wns_after * 1e9),
+            "Area:",
+            &format!("{area_change:+.2}%"),
+        );
+        ui::stat_row(
+            "Repair:",
+            &format!("{} resized, {} repeaters", done.resized, done.inserted),
+            "Rebuffer:",
+            &format!(
+                "{} removed, {} inserted",
+                rebuffer.removed, rebuffer.inserted
+            ),
+        );
+        ui::stat_row(
+            "Weighted nets:",
+            &format!("{} of {}", weights.len(), slacks.len()),
+            "Cells:",
+            &format!("{cells_before} -> {}", self.db.cells.len()),
+        );
+        ui::stat_row(
+            "Round time:",
+            &format!("{:.1}s", round_start.elapsed().as_secs_f64()),
+            "",
+            "",
+        );
+        if weights.is_empty() {
+            log::warn!("timing-driven placement found no net slacks; it stops here");
+            return Ok(None);
+        }
+        let zones = Zones::new(self.db)?;
+        let mut new_model = PlacementModel::from_db(self.db, &zones);
+        let weight_of: std::collections::HashMap<NetId, f64> = weights
+            .into_iter()
+            .filter_map(|(net, weight)| renumbering.nets[net.index()].map(|new| (new, weight)))
+            .collect();
+        for net in &mut new_model.nets {
+            if let Some(weight) = weight_of.get(&net.net) {
+                net.weight *= weight;
+            }
+        }
+        let cell_map = renumbering
+            .cells
+            .iter()
+            .map(|c| c.map(CellId::index))
+            .collect();
+        Ok(Some(Reweighted {
+            model: new_model,
+            cell_map,
+        }))
+    }
+}
+
+/// The routability settings of `config`, and the global-router estimator
+/// when congestion is to be measured that way.
+fn routability_setup<'a>(
+    config: &Config,
+    db: &'a NetlistDB,
+) -> anyhow::Result<(RoutabilityParams, Option<GlobalRouteCongestion<'a>>)> {
+    let adjustment = layer_adjustments(config, db)?;
+    match config.global_placement.congestion_estimate {
+        CongestionEstimate::GlobalRouter => {
+            let estimator = GlobalRouteCongestion::new(db, config)?;
+            let reduction = estimator.capacity_reduction(&adjustment)?;
+            Ok((routability_params(config, db, reduction), Some(estimator)))
+        }
+        CongestionEstimate::Rudy => {
+            let reduction = pare_router::capacity_reduction(db, &config.routing, &adjustment)?;
+            Ok((routability_params(config, db, reduction), None))
+        }
+    }
+}
+
+/// The share of each routing layer's capacity held back, by layer index.
+fn layer_adjustments(config: &Config, db: &NetlistDB) -> anyhow::Result<Vec<f64>> {
+    let gp = &config.global_placement;
+    let layers = &db.library.routing_layers;
+    let mut adjustments = vec![gp.routing_layer_adjustment; layers.len()];
+    for entry in &gp.layer_adjustments {
+        let index = layers
+            .iter()
+            .position(|l| l.name == entry.layer)
+            .with_context(|| format!("no routing layer named {}", entry.layer))?;
+        adjustments[index] = entry.adjustment;
+    }
+    Ok(adjustments)
+}
+
+/// Routing congestion from `pare_router`'s global router, measured where
+/// global placement has the cells.
+struct GlobalRouteCongestion<'a> {
+    db: &'a NetlistDB,
+    estimator: GlobalRouteEstimator<'a>,
+    /// Width and height of each cell, in microns.
+    sizes: Vec<Point<f64>>,
+}
+
+impl<'a> GlobalRouteCongestion<'a> {
+    fn new(db: &'a NetlistDB, config: &Config) -> anyhow::Result<Self> {
+        let units = db.dbu();
+        Ok(Self {
+            db,
+            estimator: GlobalRouteEstimator::new(db, &config.routing)?,
+            sizes: (0..db.num_cells())
+                .map(|i| {
+                    let size = db.cell_size(CellId::new(i));
+                    Point::new(units.to_microns(size.x), units.to_microns(size.y))
+                })
+                .collect(),
+        })
+    }
+
+    fn capacity_reduction(&self, adjustments: &[f64]) -> Result<CapacityReduction, RouteError> {
+        self.estimator.capacity_reduction(adjustments)
+    }
+}
+
+impl CongestionEstimator for GlobalRouteCongestion<'_> {
+    fn congestion(&mut self, centers: &[Point<f64>]) -> Vec<f64> {
+        let units = self.db.dbu();
+        let locations: Vec<Point<Dbu>> = centers
+            .iter()
+            .zip(&self.sizes)
+            .map(|(c, size)| {
+                Point::new(
+                    units.to_dbu_rounded(size.x.mul_add(-0.5, c.x)),
+                    units.to_dbu_rounded(size.y.mul_add(-0.5, c.y)),
+                )
+            })
+            .collect();
+        self.estimator.congestion(&locations)
+    }
+}
+
+/// What routability-driven placement takes from the router: its gcells
+/// with the capacity taken before placement, and the width RUDY gives a
+/// wire on its layers.
+fn routability_params(
+    config: &Config,
+    db: &NetlistDB,
+    reduction: CapacityReduction,
+) -> RoutabilityParams {
+    let units = db.dbu();
+    RoutabilityParams {
+        tiles: RoutingTiles {
+            origin: Point::new(
+                units.to_microns(reduction.origin.x),
+                units.to_microns(reduction.origin.y),
+            ),
+            size: units.to_microns(reduction.gcell),
+            nx: reduction.nx,
+            ny: reduction.ny,
+            capacity: reduction.capacity,
+            reduction: reduction.reduction,
+        },
+        wire_width: units.to_microns(reduction.wire_width),
+        target_congestion: config.global_placement.target_congestion,
+    }
+}
