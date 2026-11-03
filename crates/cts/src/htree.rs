@@ -500,6 +500,32 @@ impl Builder {
         max_diameter: f32,
         size: u32,
     ) {
+        self.index_sinks();
+        if sinks.len() <= self.min_clustering_sinks() || !ctx.settings.sink_clustering {
+            self.top_level_sinks_clustered = sinks.to_vec();
+            return;
+        }
+        let solution = self.cluster_sinks(ctx, tech, sinks, max_diameter, size);
+        let mut new_locations = Vec::with_capacity(solution.len());
+        let mut count = 0;
+        for cluster in &solution {
+            if cluster.len() == 1 {
+                new_locations.push(sinks[cluster[0]]);
+            }
+            if cluster.len() > 1 {
+                new_locations.push(self.add_leaf_buffer(ctx, sinks, cluster, count));
+            }
+            count += 1;
+        }
+        self.top_level_sinks_clustered = new_locations;
+        if count > 0 {
+            self.tree_buf_levels += 1;
+        }
+    }
+
+    /// Records each sink by its location in wire segment units, and its
+    /// insertion delay where it has one.
+    fn index_sinks(&mut self) {
         let unit = self.wire_segment_unit as f32;
         for i in 0..self.clock.sinks.len() {
             let s = &self.clock.sinks[i];
@@ -517,10 +543,19 @@ impl Builder {
                     .insert(location.key(), delay / self.unit());
             }
         }
-        if sinks.len() <= self.min_clustering_sinks() || !ctx.settings.sink_clustering {
-            self.top_level_sinks_clustered = sinks.to_vec();
-            return;
-        }
+    }
+
+    /// The clusters of `sinks` that sink clustering finds, each a list of
+    /// sink indices, trying the sizes and diameters the settings give.
+    fn cluster_sinks(
+        &self,
+        ctx: &TreeContext<'_>,
+        tech: &TechChar,
+        sinks: &[(f32, f32)],
+        max_diameter: f32,
+        size: u32,
+    ) -> Vec<Vec<usize>> {
+        let unit = self.wire_segment_unit as f32;
         let is_macro = self.tree_type == TreeType::Macro;
         let use_max_cap = !is_macro && ctx.settings.sink_clustering_use_max_cap;
         let mut matching = SinkClustering::new(
@@ -567,56 +602,51 @@ impl Builder {
                 }
             }
         }
-        let solution = matching.solution().to_vec();
-        let mut new_locations = Vec::with_capacity(solution.len());
-        let mut count = 0;
-        for cluster in &solution {
-            if cluster.len() == 1 {
-                new_locations.push(sinks[cluster[0]]);
+        matching.solution().to_vec()
+    }
+
+    /// Puts leaf buffer `count` at the legalized center of the sinks of
+    /// `cluster`, driving them; returns where it went.
+    fn add_leaf_buffer(
+        &mut self,
+        ctx: &TreeContext<'_>,
+        sinks: &[(f32, f32)],
+        cluster: &[usize],
+        count: usize,
+    ) -> (f32, f32) {
+        let mut members = Vec::with_capacity(cluster.len());
+        let (mut x_sum, mut y_sum) = (0.0_f32, 0.0_f32);
+        for &idx in cluster {
+            let point = Point::from_f32(sinks[idx]);
+            x_sum += sinks[idx].0;
+            y_sum += sinks[idx].1;
+            if let Some(&inst) = self.location_to_sink.get(&point.key()) {
+                members.push(inst);
             }
-            if cluster.len() > 1 {
-                let mut members = Vec::with_capacity(cluster.len());
-                let (mut x_sum, mut y_sum) = (0.0_f32, 0.0_f32);
-                for &idx in cluster {
-                    let point = Point::from_f32(sinks[idx]);
-                    x_sum += sinks[idx].0;
-                    y_sum += sinks[idx].1;
-                    if let Some(&inst) = self.location_to_sink.get(&point.key()) {
-                        members.push(inst);
-                    }
-                }
-                let n = cluster.len() as f32;
-                let center = Point::new(f64::from(x_sum / n), f64::from(y_sum / n));
-                let legal = self.legalize_one_buffer(ctx, center, ctx.sink_buffer);
-                self.commit_move(center, legal);
-                let location = (
-                    (legal.x * self.unit()) as i32 as i64,
-                    (legal.y * self.unit()) as i32 as i64,
-                );
-                let buffer = self.clock.add_buffer(
-                    &format!("clkbuf_leaf_{count}"),
-                    ctx.sink_buffer,
-                    location,
-                );
-                let _ = self.first_level_sink_drivers.insert(buffer);
-                let subnet = self.clock.add_subnet(&format!("clknet_leaf_{count}"));
-                self.clock.subnets[subnet].add(buffer);
-                for member in members {
-                    self.clock.subnets[subnet].add(member);
-                }
-                self.clock.subnets[subnet].leaf = true;
-                let point = (legal.x as f32, legal.y as f32);
-                new_locations.push(point);
-                let _ = self
-                    .location_to_sink
-                    .insert(Point::from_f32(point).key(), buffer);
-            }
-            count += 1;
         }
-        self.top_level_sinks_clustered = new_locations;
-        if count > 0 {
-            self.tree_buf_levels += 1;
+        let n = cluster.len() as f32;
+        let center = Point::new(f64::from(x_sum / n), f64::from(y_sum / n));
+        let legal = self.legalize_one_buffer(ctx, center, ctx.sink_buffer);
+        self.commit_move(center, legal);
+        let location = (
+            (legal.x * self.unit()) as i32 as i64,
+            (legal.y * self.unit()) as i32 as i64,
+        );
+        let buffer =
+            self.clock
+                .add_buffer(&format!("clkbuf_leaf_{count}"), ctx.sink_buffer, location);
+        let _ = self.first_level_sink_drivers.insert(buffer);
+        let subnet = self.clock.add_subnet(&format!("clknet_leaf_{count}"));
+        self.clock.subnets[subnet].add(buffer);
+        for member in members {
+            self.clock.subnets[subnet].add(member);
         }
+        self.clock.subnets[subnet].leaf = true;
+        let point = (legal.x as f32, legal.y as f32);
+        let _ = self
+            .location_to_sink
+            .insert(Point::from_f32(point).key(), buffer);
+        point
     }
 
     /// Picks the wire segments of a level's branches, as
@@ -978,92 +1008,19 @@ impl Builder {
         sinks: &[Point],
         direction: Direction,
     ) -> Point {
-        let (px, py) = (parent.x, parent.y);
-        let l50 = target * 0.5;
-        let l25 = target * 0.25;
-        let l75 = target * 0.75;
-        let mut candidates: Vec<Point> = match direction {
-            Direction::North => vec![
-                Point::new(px, py + target),
-                Point::new(px + l50, py + l50),
-                Point::new(px - l50, py + l50),
-                Point::new(px + l25, py + l75),
-                Point::new(px - l25, py + l75),
-            ],
-            Direction::East => vec![
-                Point::new(px + target, py),
-                Point::new(px + l50, py + l50),
-                Point::new(px + l50, py - l50),
-                Point::new(px + l75, py + l25),
-                Point::new(px + l75, py - l25),
-            ],
-            Direction::South => vec![
-                Point::new(px, py - target),
-                Point::new(px + l50, py - l50),
-                Point::new(px - l50, py - l50),
-                Point::new(px + l25, py - l75),
-                Point::new(px - l25, py - l75),
-            ],
-            Direction::West => vec![
-                Point::new(px - target, py),
-                Point::new(px - l50, py - l50),
-                Point::new(px - l50, py + l50),
-                Point::new(px - l75, py - l25),
-                Point::new(px - l75, py + l25),
-            ],
-        };
-        let straight = match direction {
-            Direction::North => Point::new(px, py + target),
-            Direction::East => Point::new(px + target, py),
-            Direction::South => Point::new(px, py - target),
-            Direction::West => Point::new(px - target, py),
-        };
-        if let Some([x1, y1, x2, y2]) = Self::find_blockage(ctx, straight, self.unit()) {
-            let along = match direction {
-                Direction::North => [
-                    Point::new(-target - py + px + y1, y1),
-                    Point::new(-target - py + px + y1, target + py + px - y1),
-                ],
-                Direction::East => [
-                    Point::new(x1, target + py + px - x1),
-                    Point::new(x1, -target + py - px + x1),
-                ],
-                Direction::South => [
-                    Point::new(-target + py + px - y2, y2),
-                    Point::new(target - py + px + y2, y2),
-                ],
-                Direction::West => [
-                    Point::new(x2, target + py - px + x2),
-                    Point::new(x2, -target + py + px - x2),
-                ],
-            };
-            candidates.extend(along);
+        let mut candidates = arc_candidates(parent, target, direction);
+        let straight = candidates[0];
+        if let Some(blockage) = Self::find_blockage(ctx, straight, self.unit()) {
+            candidates.extend(along_blockage(parent, target, blockage, direction));
         }
-        let (bx, by) = (branch.x, branch.y);
         let (w, h) = self.buffer_size(ctx, ctx.root_buffer);
-        let (min_x, min_y) = (10.0 * w, 10.0 * h);
-        let x_plus = bx + min_x;
-        let x_minus = bx - min_x;
-        let y_plus = by + min_y;
-        let y_minus = by - min_y;
-        match direction {
-            Direction::South => {
-                candidates.push(Point::new(x_plus, py - target + (px - x_plus).abs()));
-                candidates.push(Point::new(x_minus, py - target + (px - x_minus).abs()));
-            }
-            Direction::North => {
-                candidates.push(Point::new(x_plus, py + target - (px - x_plus).abs()));
-                candidates.push(Point::new(x_minus, py + target - (px - x_minus).abs()));
-            }
-            Direction::West => {
-                candidates.push(Point::new(px - target + (py - y_plus).abs(), y_plus));
-                candidates.push(Point::new(px - target + (py - y_minus).abs(), y_minus));
-            }
-            Direction::East => {
-                candidates.push(Point::new(px + target - (py - y_plus).abs(), y_plus));
-                candidates.push(Point::new(px + target - (py - y_minus).abs(), y_minus));
-            }
-        }
+        candidates.extend(beside_branch(
+            parent,
+            branch,
+            target,
+            (10.0 * w, 10.0 * h),
+            direction,
+        ));
         let mut best = None;
         let mut best_cost = f64::MAX;
         for c in candidates {
@@ -1439,5 +1396,107 @@ impl SegmentBuilder {
         self.driving = tree.clock.add_subnet(&format!("{}_leaf", self.net_prefix));
         tree.clock.subnets[self.driving].add(buffer);
         self.levels += 1;
+    }
+}
+
+/// The points at distance `target` from `parent` toward `direction`:
+/// straight ahead, then half and quarter of the way across to each side.
+fn arc_candidates(parent: Point, target: f64, direction: Direction) -> Vec<Point> {
+    let (px, py) = (parent.x, parent.y);
+    let l50 = target * 0.5;
+    let l25 = target * 0.25;
+    let l75 = target * 0.75;
+    match direction {
+        Direction::North => vec![
+            Point::new(px, py + target),
+            Point::new(px + l50, py + l50),
+            Point::new(px - l50, py + l50),
+            Point::new(px + l25, py + l75),
+            Point::new(px - l25, py + l75),
+        ],
+        Direction::East => vec![
+            Point::new(px + target, py),
+            Point::new(px + l50, py + l50),
+            Point::new(px + l50, py - l50),
+            Point::new(px + l75, py + l25),
+            Point::new(px + l75, py - l25),
+        ],
+        Direction::South => vec![
+            Point::new(px, py - target),
+            Point::new(px + l50, py - l50),
+            Point::new(px - l50, py - l50),
+            Point::new(px + l25, py - l75),
+            Point::new(px - l25, py - l75),
+        ],
+        Direction::West => vec![
+            Point::new(px - target, py),
+            Point::new(px - l50, py - l50),
+            Point::new(px - l50, py + l50),
+            Point::new(px - l75, py - l25),
+            Point::new(px - l75, py + l25),
+        ],
+    }
+}
+
+/// The two points at distance `target` from `parent` along the side of
+/// `[x1, y1, x2, y2]` facing it.
+fn along_blockage(
+    parent: Point,
+    target: f64,
+    [x1, y1, x2, y2]: [f64; 4],
+    direction: Direction,
+) -> [Point; 2] {
+    let (px, py) = (parent.x, parent.y);
+    match direction {
+        Direction::North => [
+            Point::new(-target - py + px + y1, y1),
+            Point::new(-target - py + px + y1, target + py + px - y1),
+        ],
+        Direction::East => [
+            Point::new(x1, target + py + px - x1),
+            Point::new(x1, -target + py - px + x1),
+        ],
+        Direction::South => [
+            Point::new(-target + py + px - y2, y2),
+            Point::new(target - py + px + y2, y2),
+        ],
+        Direction::West => [
+            Point::new(x2, target + py - px + x2),
+            Point::new(x2, -target + py + px - x2),
+        ],
+    }
+}
+
+/// The two points at distance `target` from `parent` that lie `margin`
+/// to either side of `branch`, across `direction`.
+fn beside_branch(
+    parent: Point,
+    branch: Point,
+    target: f64,
+    (min_x, min_y): (f64, f64),
+    direction: Direction,
+) -> [Point; 2] {
+    let (px, py) = (parent.x, parent.y);
+    let x_plus = branch.x + min_x;
+    let x_minus = branch.x - min_x;
+    let y_plus = branch.y + min_y;
+    let y_minus = branch.y - min_y;
+    match direction {
+        Direction::South => [
+            Point::new(x_plus, py - target + (px - x_plus).abs()),
+            Point::new(x_minus, py - target + (px - x_minus).abs()),
+        ],
+        Direction::North => [
+            Point::new(x_plus, py + target - (px - x_plus).abs()),
+            Point::new(x_minus, py + target - (px - x_minus).abs()),
+        ],
+        Direction::West => [
+            Point::new(px - target + (py - y_plus).abs(), y_plus),
+            Point::new(px - target + (py - y_minus).abs(), y_minus),
+        ],
+        Direction::East => [
+            Point::new(px + target - (py - y_plus).abs(), y_plus),
+            Point::new(px + target - (py - y_minus).abs(), y_minus),
+        ],
     }
 }

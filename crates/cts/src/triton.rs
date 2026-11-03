@@ -263,6 +263,19 @@ pub(crate) fn is_sink(link: &Link<'_>, db: &NetlistDB, pin: PinId) -> bool {
         .is_some_and(|(_, port)| link.liberty.cell(lib).is_register_clock(port))
 }
 
+/// The loads a tree's buffers drive and should drive, for dummy loading.
+#[derive(Default)]
+struct BufferLoads {
+    /// The subnet each buffer drives.
+    driven_subnet: FxHashMap<InstRef, usize>,
+    /// The input capacitance each buffer drives.
+    output: FxHashMap<InstRef, f32>,
+    /// The heaviest load among each buffer's siblings.
+    ideal: FxHashMap<InstRef, f32>,
+    /// Whether some buffer drives less than its ideal.
+    unbalanced: bool,
+}
+
 impl Cts<'_> {
     fn is_sink(&self, db: &NetlistDB, pin: PinId) -> bool {
         is_sink(self.link, db, pin)
@@ -927,66 +940,25 @@ impl Cts<'_> {
     /// Loads each buffer up to the heaviest load among its siblings with a
     /// dummy cell, as `TritonCTS::writeDummyLoadsToDb`.
     fn write_dummy_loads(&mut self, db: &mut NetlistDB, index: usize) -> Result<usize, CtsError> {
-        let liberty = self.link.liberty;
-        let first_input_cap = |cts: &Self, db: &NetlistDB, inst: &crate::clock::ClockInst| -> f32 {
-            let pin = if inst.kind == InstKind::Buffer {
-                inst.cell.and_then(|c| first_input(db, c))
-            } else {
-                inst.input_pin
-            };
-            pin.map_or(0.0, |p| cts.input_cap(db, p))
-        };
-        let clock = &self.builders[index].clock;
-        let mut driver_subnet: FxHashMap<InstRef, usize> = FxHashMap::default();
-        let mut output_caps: FxHashMap<InstRef, f32> = FxHashMap::default();
-        for (s, subnet) in clock.subnets.iter().enumerate() {
-            let _ = driver_subnet.insert(subnet.driver(), s);
-            let total: f32 = subnet
-                .sinks()
-                .iter()
-                .map(|&i| first_input_cap(self, db, clock.inst(i)))
-                .sum();
-            let _ = output_caps.insert(subnet.driver(), total);
-        }
-        let mut need = false;
-        let mut ideal: FxHashMap<InstRef, f32> = FxHashMap::default();
-        for subnet in &clock.subnets {
-            let mut max_cap = f32::MIN_POSITIVE;
-            for &i in subnet.sinks() {
-                if let InstRef::Buffer(_) = i {
-                    let cap = output_caps.get(&i).copied().unwrap_or(0.0);
-                    if cap > max_cap {
-                        max_cap = cap;
-                    }
-                }
-            }
-            for &i in subnet.sinks() {
-                if let InstRef::Buffer(_) = i {
-                    let _ = ideal.insert(i, max_cap);
-                    if !sta_fuzzy_equal(output_caps.get(&i).copied().unwrap_or(0.0), max_cap) {
-                        need = true;
-                    }
-                }
-            }
-        }
-        if !need {
+        let loads = self.buffer_loads(db, index);
+        if !loads.unbalanced {
             return Ok(0);
         }
         let candidates = self.dummy_candidates();
         let mut inserted = 0;
-        let subnet_count = clock.subnets.len();
+        let subnet_count = self.builders[index].clock.subnets.len();
         for s in 0..subnet_count {
             let sinks: Vec<InstRef> = self.builders[index].clock.subnets[s].sinks().to_vec();
             for inst in sinks {
                 let InstRef::Buffer(b) = inst else {
                     continue;
                 };
-                let output = output_caps.get(&inst).copied().unwrap_or(0.0);
-                let target = ideal.get(&inst).copied().unwrap_or(0.0);
+                let output = loads.output.get(&inst).copied().unwrap_or(0.0);
+                let target = loads.ideal.get(&inst).copied().unwrap_or(0.0);
                 if sta_fuzzy_equal(output, target) {
                     continue;
                 }
-                let Some(&own) = driver_subnet.get(&inst) else {
+                let Some(&own) = loads.driven_subnet.get(&inst) else {
                     continue;
                 };
                 if self.builders[index].clock.subnets[own].sinks().len()
@@ -994,6 +966,7 @@ impl Cts<'_> {
                 {
                     continue;
                 }
+                let liberty = self.link.liberty;
                 let delta = target - output;
                 let Some(&dummy) = candidates.iter().min_by(|&&a, &&b| {
                     let da = (dummy_input_cap(liberty, a) - delta).abs();
@@ -1002,32 +975,91 @@ impl Cts<'_> {
                 }) else {
                     continue;
                 };
-                let location = self.builders[index].clock.buffers[b].location;
-                let name = format!("clkload{}", self.dummy_index);
-                self.dummy_index += 1;
-                let cell = self.make_buffer(db, dummy, &name, location)?;
-                let Some(net) = self.builders[index].clock.subnets[own].net else {
-                    continue;
-                };
-                let lib = liberty.cell(dummy);
-                let (in_port, _) = lib
-                    .buffer_ports()
-                    .ok_or_else(|| CtsError::NotABuffer(lib.name.clone()))?;
-                let pin = self
-                    .link
-                    .macro_pin_of_port(dummy, in_port)
-                    .map(MacroPinId::new)
-                    .ok_or_else(|| CtsError::NotABuffer(lib.name.clone()))?;
-                let input = db.connect_cell_pin(cell, pin, net);
-                let clock = &mut self.builders[index].clock;
-                let dummy_ref = clock.add_buffer(&name, dummy, location);
-                clock.inst_mut(dummy_ref).cell = Some(cell);
-                clock.inst_mut(dummy_ref).input_pin = Some(input);
-                clock.subnets[own].add(dummy_ref);
-                inserted += 1;
+                if self.add_dummy_load(db, index, (b, own), dummy)? {
+                    inserted += 1;
+                }
             }
         }
         Ok(inserted)
+    }
+
+    /// The load each buffer of tree `index` drives, the load it should, the
+    /// heaviest among its siblings, and the subnet it drives.
+    fn buffer_loads(&self, db: &NetlistDB, index: usize) -> BufferLoads {
+        let first_input_cap = |inst: &crate::clock::ClockInst| -> f32 {
+            let pin = if inst.kind == InstKind::Buffer {
+                inst.cell.and_then(|c| first_input(db, c))
+            } else {
+                inst.input_pin
+            };
+            pin.map_or(0.0, |p| self.input_cap(db, p))
+        };
+        let clock = &self.builders[index].clock;
+        let mut loads = BufferLoads::default();
+        for (s, subnet) in clock.subnets.iter().enumerate() {
+            let _ = loads.driven_subnet.insert(subnet.driver(), s);
+            let total: f32 = subnet
+                .sinks()
+                .iter()
+                .map(|&i| first_input_cap(clock.inst(i)))
+                .sum();
+            let _ = loads.output.insert(subnet.driver(), total);
+        }
+        for subnet in &clock.subnets {
+            let mut max_cap = f32::MIN_POSITIVE;
+            for &i in subnet.sinks() {
+                if let InstRef::Buffer(_) = i {
+                    let cap = loads.output.get(&i).copied().unwrap_or(0.0);
+                    if cap > max_cap {
+                        max_cap = cap;
+                    }
+                }
+            }
+            for &i in subnet.sinks() {
+                if let InstRef::Buffer(_) = i {
+                    let _ = loads.ideal.insert(i, max_cap);
+                    if !sta_fuzzy_equal(loads.output.get(&i).copied().unwrap_or(0.0), max_cap) {
+                        loads.unbalanced = true;
+                    }
+                }
+            }
+        }
+        loads
+    }
+
+    /// Puts a `dummy` cell at buffer `b` of tree `index`, loading the
+    /// subnet `own` it drives; whether that subnet had a net to load.
+    fn add_dummy_load(
+        &mut self,
+        db: &mut NetlistDB,
+        index: usize,
+        (b, own): (usize, usize),
+        dummy: LibCellId,
+    ) -> Result<bool, CtsError> {
+        let liberty = self.link.liberty;
+        let location = self.builders[index].clock.buffers[b].location;
+        let name = format!("clkload{}", self.dummy_index);
+        self.dummy_index += 1;
+        let cell = self.make_buffer(db, dummy, &name, location)?;
+        let Some(net) = self.builders[index].clock.subnets[own].net else {
+            return Ok(false);
+        };
+        let lib = liberty.cell(dummy);
+        let (in_port, _) = lib
+            .buffer_ports()
+            .ok_or_else(|| CtsError::NotABuffer(lib.name.clone()))?;
+        let pin = self
+            .link
+            .macro_pin_of_port(dummy, in_port)
+            .map(MacroPinId::new)
+            .ok_or_else(|| CtsError::NotABuffer(lib.name.clone()))?;
+        let input = db.connect_cell_pin(cell, pin, net);
+        let clock = &mut self.builders[index].clock;
+        let dummy_ref = clock.add_buffer(&name, dummy, location);
+        clock.inst_mut(dummy_ref).cell = Some(cell);
+        clock.inst_mut(dummy_ref).input_pin = Some(input);
+        clock.subnets[own].add(dummy_ref);
+        Ok(true)
     }
 
     /// The cells dummy loads are made of, by increasing input capacitance,
