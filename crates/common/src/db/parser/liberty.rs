@@ -1214,7 +1214,8 @@ fn arc_role(timing_type: &str) -> (ArcRole, Option<Edge>, Option<Edge>) {
         "combinational_fall" => (ArcRole::Combinational, None, Some(Edge::Fall)),
         "rising_edge" => (ArcRole::RegClkToQ, Some(Edge::Rise), None),
         "falling_edge" => (ArcRole::RegClkToQ, Some(Edge::Fall), None),
-        "clear" | "preset" => (ArcRole::RegSetClr, None, None),
+        "clear" => (ArcRole::RegSetClr, None, Some(Edge::Fall)),
+        "preset" => (ArcRole::RegSetClr, None, Some(Edge::Rise)),
         "three_state_enable" => (ArcRole::TristateEnable, None, None),
         "three_state_enable_rise" => (ArcRole::TristateEnable, None, Some(Edge::Rise)),
         "three_state_enable_fall" => (ArcRole::TristateEnable, None, Some(Edge::Fall)),
@@ -1565,6 +1566,38 @@ library (x) {{
         );
 
         assert_eq!(cell.arc_sets[0].sense, TimingSense::PositiveUnate);
+    }
+
+    #[test]
+    fn a_clear_arc_only_ever_drives_its_output_low() {
+        let cell = sensed_cell(
+            r#"function : "A";"#,
+            r#"related_pin : "B"; timing_type : clear; timing_sense : positive_unate;"#,
+        );
+
+        let edges: Vec<(Edge, Edge)> = cell.arc_sets[0]
+            .arcs
+            .iter()
+            .map(|a| (a.from_edge, a.to_edge))
+            .collect();
+
+        assert_eq!(edges, [(Edge::Fall, Edge::Fall)]);
+    }
+
+    #[test]
+    fn a_preset_arc_only_ever_drives_its_output_high() {
+        let cell = sensed_cell(
+            r#"function : "A";"#,
+            r#"related_pin : "B"; timing_type : preset; timing_sense : negative_unate;"#,
+        );
+
+        let edges: Vec<(Edge, Edge)> = cell.arc_sets[0]
+            .arcs
+            .iter()
+            .map(|a| (a.from_edge, a.to_edge))
+            .collect();
+
+        assert_eq!(edges, [(Edge::Fall, Edge::Rise)]);
     }
 
     #[test]
