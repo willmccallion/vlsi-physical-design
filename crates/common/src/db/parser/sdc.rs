@@ -3,9 +3,10 @@
 //! SDC is Tcl, so this is a small Tcl interpreter: it splits commands and
 //! words, substitutes variables and bracketed commands, evaluates `expr`,
 //! and runs the constraint commands against the design, resolving port and
-//! clock names as it goes. Commands outside the subset below are errors
-//! rather than silently dropped. As `OpenSTA` reads them, times are in the
-//! library's time unit whatever `set_units` says.
+//! clock names as it goes. Commands outside the subset below, and options
+//! a command does not take or support, are errors rather than silently
+//! dropped. As `OpenSTA` reads them, times are in the library's time unit
+//! whatever `set_units` says.
 
 use super::lexer::{ParseError, read_file};
 use crate::db::design::NetlistDB;
@@ -166,6 +167,11 @@ struct Interpreter<'a> {
 }
 
 impl Interpreter<'_> {
+    /// `args` split by the command's `options`.
+    fn options(&self, args: &[String], options: &Options, line: usize) -> Result<Args, ParseError> {
+        parse_args(args, options).map_err(|message| self.error(line, message))
+    }
+
     fn error(&self, line: usize, message: impl Into<String>) -> ParseError {
         ParseError::Syntax {
             path: self.path.to_path_buf(),
@@ -253,7 +259,7 @@ impl Interpreter<'_> {
             "puts" | "current_design" | "group_path" | "set_units_checked" => Ok(String::new()),
             "set_units" => self.set_units(rest, line),
             "get_ports" => self.get_ports(rest, line),
-            "get_cells" => Ok(self.get_cells(rest, line)),
+            "get_cells" => self.get_cells(rest, line),
             "get_clocks" => self.get_clocks(rest, line),
             "all_clocks" => Ok(join_list(
                 &self
@@ -344,7 +350,7 @@ impl Interpreter<'_> {
     /// `set_units` only checks against the library's units, as `OpenSTA`
     /// does: values keep the library's scale either way.
     fn set_units(&self, args: &[String], line: usize) -> Result<String, ParseError> {
-        let parsed = parse_args(args);
+        let parsed = self.options(args, &SET_UNITS, line)?;
         let checks: [(&str, f64, &str); 2] = [
             ("-time", self.units.time, "s"),
             ("-capacitance", self.units.capacitance, "f"),
@@ -366,7 +372,7 @@ impl Interpreter<'_> {
     }
 
     fn get_ports(&self, args: &[String], line: usize) -> Result<String, ParseError> {
-        let parsed = parse_args(args);
+        let parsed = self.options(args, &GET_PORTS, line)?;
         let mut names = Vec::new();
         for pattern in parsed.positional.iter().flat_map(|p| split_list(p)) {
             let matched = self.ports_matching(&pattern);
@@ -387,8 +393,8 @@ impl Interpreter<'_> {
     /// flat here, so `-hierarchical` changes nothing. A pattern matching
     /// nothing names nothing, with a warning unless `-quiet`, as `OpenSTA`
     /// treats it: constraints often name instances synthesis renamed.
-    fn get_cells(&self, args: &[String], line: usize) -> String {
-        let parsed = parse_args(args);
+    fn get_cells(&self, args: &[String], line: usize) -> Result<String, ParseError> {
+        let parsed = self.options(args, &GET_CELLS, line)?;
         let mut names = Vec::new();
         for pattern in parsed.positional.iter().flat_map(|p| split_list(p)) {
             let matched = self.cells_matching(&pattern);
@@ -400,12 +406,12 @@ impl Interpreter<'_> {
             }
             names.extend(matched);
         }
-        join_list(
+        Ok(join_list(
             &names
                 .into_iter()
                 .map(|n| Object::Cell(n).encode())
                 .collect::<Vec<_>>(),
-        )
+        ))
     }
 
     fn cells_matching(&self, pattern: &str) -> Vec<String> {
@@ -461,7 +467,7 @@ impl Interpreter<'_> {
     }
 
     fn get_clocks(&self, args: &[String], line: usize) -> Result<String, ParseError> {
-        let parsed = parse_args(args);
+        let parsed = self.options(args, &GET_CLOCKS, line)?;
         let mut names = Vec::new();
         for pattern in parsed.positional.iter().flat_map(|p| split_list(p)) {
             let matched: Vec<String> = self
@@ -490,7 +496,14 @@ impl Interpreter<'_> {
         line: usize,
         direction: PinDirection,
     ) -> Result<String, ParseError> {
-        let parsed = parse_args(args);
+        let parsed = self.options(
+            args,
+            match direction {
+                PinDirection::Input => &ALL_INPUTS,
+                _ => &ALL_OUTPUTS,
+            },
+            line,
+        )?;
         let no_clocks = parsed.flag("-no_clocks");
         if !parsed.positional.is_empty() {
             return Err(self.error(line, "all_inputs and all_outputs take no arguments"));
@@ -604,7 +617,7 @@ impl Interpreter<'_> {
     }
 
     fn create_clock(&mut self, args: &[String], line: usize) -> Result<String, ParseError> {
-        let parsed = parse_args(args);
+        let parsed = self.options(args, &CREATE_CLOCK, line)?;
         let sources = match parsed.positional.as_slice() {
             [] => Vec::new(),
             [ports] => self.ports_of(ports, line)?,
@@ -680,13 +693,10 @@ impl Interpreter<'_> {
         line: usize,
         direction: PinDirection,
     ) -> Result<String, ParseError> {
-        let parsed = parse_args(args);
+        let parsed = self.options(args, &PORT_DELAY, line)?;
         let [delay_text, ports_text] = parsed.positional.as_slice() else {
             return Err(self.error(line, "a port delay wants a delay and a port list"));
         };
-        if parsed.key("-reference_pin").is_some() {
-            return Err(self.error(line, "-reference_pin is not supported"));
-        }
         let delay = self.time(delay_text, line, "delay")?;
         let clock_name = parsed
             .key("-clock")
@@ -766,7 +776,7 @@ impl Interpreter<'_> {
     /// `set_propagated_clock` on clocks; on ports or pins, which `OpenSTA`
     /// also takes, it is not supported.
     fn set_propagated_clock(&mut self, args: &[String], line: usize) -> Result<String, ParseError> {
-        let parsed = parse_args(args);
+        let parsed = self.options(args, &SET_PROPAGATED_CLOCK, line)?;
         let [objects] = parsed.positional.as_slice() else {
             return Err(self.error(line, "set_propagated_clock wants one object list"));
         };
@@ -781,14 +791,7 @@ impl Interpreter<'_> {
         args: &[String],
         line: usize,
     ) -> Result<String, ParseError> {
-        let parsed = parse_args(args);
-        if parsed
-            .keys
-            .keys()
-            .any(|k| k.ends_with("from") || k.ends_with("to"))
-        {
-            return Err(self.error(line, "inter-clock uncertainty is not supported"));
-        }
+        let parsed = self.options(args, &SET_CLOCK_UNCERTAINTY, line)?;
         let [value_text, clocks_text] = parsed.positional.as_slice() else {
             return Err(self.error(line, "set_clock_uncertainty wants a value and a clock list"));
         };
@@ -803,17 +806,6 @@ impl Interpreter<'_> {
     }
 
     fn path_spec(&self, parsed: &Args, line: usize) -> Result<PathSpec, ParseError> {
-        for key in [
-            "-rise_from",
-            "-fall_from",
-            "-rise_to",
-            "-fall_to",
-            "-through",
-        ] {
-            if parsed.key(key).is_some() {
-                return Err(self.error(line, format!("{key} is not supported")));
-            }
-        }
         let mut spec = PathSpec::default();
         if let Some(from) = parsed.key("-from") {
             (spec.from_clocks, spec.from_ports) = self.path_ends(from, line)?;
@@ -825,7 +817,7 @@ impl Interpreter<'_> {
     }
 
     fn set_false_path(&mut self, args: &[String], line: usize) -> Result<String, ParseError> {
-        let parsed = parse_args(args);
+        let parsed = self.options(args, &SET_FALSE_PATH, line)?;
         let paths = self.path_spec(&parsed, line)?;
         if paths == PathSpec::default() {
             return Err(self.error(line, "set_false_path wants -from or -to"));
@@ -838,7 +830,7 @@ impl Interpreter<'_> {
     }
 
     fn set_multicycle_path(&mut self, args: &[String], line: usize) -> Result<String, ParseError> {
-        let parsed = parse_args(args);
+        let parsed = self.options(args, &SET_MULTICYCLE_PATH, line)?;
         let [multiplier_text] = parsed.positional.as_slice() else {
             return Err(self.error(line, "set_multicycle_path wants one path multiplier"));
         };
@@ -929,7 +921,7 @@ impl Interpreter<'_> {
     }
 
     fn set_timing_derate(&mut self, args: &[String], line: usize) -> Result<String, ParseError> {
-        let parsed = parse_args(args);
+        let parsed = self.options(args, &SET_TIMING_DERATE, line)?;
         let (factor_text, objects) = match parsed.positional.as_slice() {
             [factor] => (factor, None),
             [factor, objects] => (factor, Some(objects)),
@@ -943,25 +935,15 @@ impl Interpreter<'_> {
         let factor: f64 = factor_text
             .parse()
             .map_err(|_| self.error(line, format!("derate '{factor_text}' is not a number")))?;
-        if parsed.flag("-rise") || parsed.flag("-fall") {
-            return Err(self.error(line, "set_timing_derate -rise/-fall is not supported"));
-        }
         let sides: Vec<MinMax> = match (parsed.flag("-early"), parsed.flag("-late")) {
             (true, false) => vec![MinMax::Min],
             (false, true) => vec![MinMax::Max],
             _ => vec![MinMax::Min, MinMax::Max],
         };
-        let (cell, net) = match (
-            parsed.flag("-cell_delay"),
-            parsed.flag("-net_delay"),
-            parsed.flag("-cell_check"),
-        ) {
-            (false, false, false) => (true, true),
-            (cell, net, _) => (cell, net),
+        let (cell, net) = match (parsed.flag("-cell_delay"), parsed.flag("-net_delay")) {
+            (false, false) => (true, true),
+            picked => picked,
         };
-        if parsed.flag("-cell_check") {
-            return Err(self.error(line, "set_timing_derate -cell_check is not supported"));
-        }
         if let Some(objects) = objects {
             let cells = self.cells_of(objects, line)?;
             if net && !cell {
@@ -995,7 +977,7 @@ impl Interpreter<'_> {
         args: &[String],
         line: usize,
     ) -> Result<String, ParseError> {
-        let parsed = parse_args(args);
+        let parsed = self.options(args, &SET_DESIGN_LIMIT, line)?;
         let [value_text, rest @ ..] = parsed.positional.as_slice() else {
             return Err(self.error(line, format!("{command} wants a value")));
         };
@@ -1019,13 +1001,10 @@ impl Interpreter<'_> {
     }
 
     fn set_load(&mut self, args: &[String], line: usize) -> Result<String, ParseError> {
-        let parsed = parse_args(args);
+        let parsed = self.options(args, &SET_LOAD, line)?;
         let [value_text, ports_text] = parsed.positional.as_slice() else {
             return Err(self.error(line, "set_load wants a value and a port list"));
         };
-        if parsed.flag("-wire_load") {
-            return Err(self.error(line, "set_load -wire_load is not supported"));
-        }
         let value: f64 = value_text
             .parse()
             .map_err(|_| self.error(line, format!("load '{value_text}' is not a number")))?;
@@ -1039,7 +1018,7 @@ impl Interpreter<'_> {
     }
 
     fn set_input_transition(&mut self, args: &[String], line: usize) -> Result<String, ParseError> {
-        let parsed = parse_args(args);
+        let parsed = self.options(args, &SET_INPUT_TRANSITION, line)?;
         let [value_text, ports_text] = parsed.positional.as_slice() else {
             return Err(self.error(line, "set_input_transition wants a value and a port list"));
         };
@@ -1092,60 +1071,195 @@ fn setup_hold_side(parsed: &Args) -> Option<MinMax> {
     }
 }
 
-/// Keys that take a value, so that the word after them is not a flag or a
-/// positional argument.
-const KEYS_WITH_VALUES: &[&str] = &[
-    "-name",
-    "-period",
-    "-waveform",
-    "-comment",
-    "-clock",
-    "-reference_pin",
-    "-from",
-    "-to",
+/// The options a command takes, as `OpenSTA` defines them: flags, keys
+/// that take a value, and options this reader rejects as not supported
+/// because ignoring them would change what the constraint means.
+struct Options {
+    flags: &'static [&'static str],
+    keys: &'static [&'static str],
+    unsupported: &'static [&'static str],
+}
+
+const PATH_UNSUPPORTED: &[&str] = &[
+    "-rise",
+    "-fall",
+    "-reset_path",
     "-rise_from",
     "-fall_from",
+    "-through",
+    "-rise_through",
+    "-fall_through",
     "-rise_to",
     "-fall_to",
-    "-through",
-    "-group",
-    "-time",
-    "-capacitance",
-    "-resistance",
-    "-voltage",
-    "-current",
-    "-power",
-    "-distance",
-    "-of_objects",
-    "-filter",
-    "-lib_cell",
-    "-pin",
-    "-library",
 ];
 
-fn parse_args(args: &[String]) -> Args {
+const OBJECT_QUERY_UNSUPPORTED: &[&str] = &["-regexp", "-nocase", "-filter", "-of_objects"];
+
+const SET_UNITS: Options = Options {
+    flags: &[],
+    keys: &[
+        "-time",
+        "-capacitance",
+        "-resistance",
+        "-voltage",
+        "-current",
+        "-power",
+        "-distance",
+    ],
+    unsupported: &[],
+};
+
+const GET_PORTS: Options = Options {
+    flags: &["-quiet"],
+    keys: &[],
+    unsupported: OBJECT_QUERY_UNSUPPORTED,
+};
+
+/// Hierarchy is flat here, so `-hierarchical` changes nothing.
+const GET_CELLS: Options = Options {
+    flags: &["-quiet", "-hierarchical"],
+    keys: &[],
+    unsupported: &["-regexp", "-nocase", "-filter", "-of_objects", "-hsc"],
+};
+
+const GET_CLOCKS: Options = Options {
+    flags: &["-quiet"],
+    keys: &[],
+    unsupported: &["-regexp", "-nocase", "-filter"],
+};
+
+const ALL_INPUTS: Options = Options {
+    flags: &["-no_clocks"],
+    keys: &[],
+    unsupported: &[],
+};
+
+const ALL_OUTPUTS: Options = Options {
+    flags: &[],
+    keys: &[],
+    unsupported: &[],
+};
+
+const CREATE_CLOCK: Options = Options {
+    flags: &["-add"],
+    keys: &["-name", "-period", "-waveform", "-comment"],
+    unsupported: &[],
+};
+
+const PORT_DELAY: Options = Options {
+    flags: &[
+        "-rise",
+        "-fall",
+        "-max",
+        "-min",
+        "-clock_fall",
+        "-add_delay",
+    ],
+    keys: &["-clock"],
+    unsupported: &[
+        "-reference_pin",
+        "-source_latency_included",
+        "-network_latency_included",
+    ],
+};
+
+const SET_PROPAGATED_CLOCK: Options = Options {
+    flags: &[],
+    keys: &[],
+    unsupported: &[],
+};
+
+/// `-rise` and `-fall` only pick the edge of an inter-clock `-to`.
+const SET_CLOCK_UNCERTAINTY: Options = Options {
+    flags: &["-setup", "-hold", "-rise", "-fall"],
+    keys: &[],
+    unsupported: &[
+        "-from",
+        "-rise_from",
+        "-fall_from",
+        "-to",
+        "-rise_to",
+        "-fall_to",
+    ],
+};
+
+const SET_FALSE_PATH: Options = Options {
+    flags: &["-setup", "-hold"],
+    keys: &["-from", "-to", "-comment"],
+    unsupported: PATH_UNSUPPORTED,
+};
+
+const SET_MULTICYCLE_PATH: Options = Options {
+    flags: &["-setup", "-hold", "-start", "-end"],
+    keys: &["-from", "-to", "-comment"],
+    unsupported: PATH_UNSUPPORTED,
+};
+
+const SET_TIMING_DERATE: Options = Options {
+    flags: &["-early", "-late", "-cell_delay", "-net_delay"],
+    keys: &[],
+    unsupported: &["-rise", "-fall", "-clock", "-data", "-cell_check"],
+};
+
+const SET_DESIGN_LIMIT: Options = Options {
+    flags: &[],
+    keys: &[],
+    unsupported: &["-clock_path", "-data_path", "-rise", "-fall"],
+};
+
+/// `-pin_load` is the default.
+const SET_LOAD: Options = Options {
+    flags: &["-pin_load"],
+    keys: &[],
+    unsupported: &[
+        "-rise",
+        "-fall",
+        "-min",
+        "-max",
+        "-subtract_pin_load",
+        "-wire_load",
+    ],
+};
+
+const SET_INPUT_TRANSITION: Options = Options {
+    flags: &["-rise", "-fall", "-min", "-max"],
+    keys: &[],
+    unsupported: &[],
+};
+
+/// Whether `word` is an option rather than a value; `-1.5` is a number.
+fn is_option(word: &str) -> bool {
+    word.len() > 1
+        && word.starts_with('-')
+        && !word[1..].starts_with(|c: char| c.is_ascii_digit() || c == '.')
+}
+
+/// Splits a command's arguments by its `options`, refusing any option it
+/// does not take or that is not supported.
+fn parse_args(args: &[String], options: &Options) -> Result<Args, String> {
     let mut parsed = Args::default();
-    let mut i = 0;
-    while i < args.len() {
-        let word = &args[i];
-        if word.starts_with('-')
-            && word.len() > 1
-            && !word[1..].starts_with(|c: char| c.is_ascii_digit())
-        {
-            if KEYS_WITH_VALUES.contains(&word.as_str()) {
-                let value = args.get(i + 1).cloned().unwrap_or_default();
-                let _ = parsed.keys.insert(word.clone(), value);
-                i += 2;
-            } else {
-                parsed.flags.push(word.clone());
-                i += 1;
-            }
-        } else {
+    let mut words = args.iter();
+    while let Some(word) = words.next() {
+        if !is_option(word) {
             parsed.positional.push(word.clone());
-            i += 1;
+            continue;
+        }
+        let name = word.as_str();
+        if options.unsupported.contains(&name) {
+            return Err(format!("{name} is not supported"));
+        }
+        if options.flags.contains(&name) {
+            parsed.flags.push(word.clone());
+        } else if options.keys.contains(&name) {
+            let value = words
+                .next()
+                .ok_or_else(|| format!("{name} wants a value"))?;
+            let _ = parsed.keys.insert(word.clone(), value.clone());
+        } else {
+            return Err(format!("unknown option {name}"));
         }
     }
-    parsed
+    Ok(parsed)
 }
 
 /// The scale of a unit like `ps` or `1ns` with the given base suffix.
@@ -1905,5 +2019,52 @@ set_output_delay [expr $clk_period * $clk_io_pct] -clock $clk_name [all_outputs]
         assert!(sdc.cell_derates.is_empty());
         assert!((sdc.cell_derate(Some(cell), MinMax::Min) - 1.0).abs() < 1e-12);
         assert!((sdc.derating.cell[MinMax::Min.index()] - 1.0).abs() < 1e-12);
+    }
+
+    fn parse_error(text: &str) -> String {
+        parse_str(text, Path::new("t.sdc"), &design(), &liberty())
+            .unwrap_err()
+            .to_string()
+    }
+
+    #[test]
+    fn a_derate_of_clock_paths_is_refused_rather_than_read_as_a_global_one() {
+        let error = parse_error("set_timing_derate -clock -early 0.95\n");
+
+        assert!(error.contains("-clock is not supported"), "{error}");
+    }
+
+    #[test]
+    fn a_false_path_through_an_edge_is_refused_rather_than_widened() {
+        let error = parse_error(
+            "create_clock -name a -period 2 [get_ports clk]\n\
+             set_false_path -rise_through [get_ports rst_n] -to [get_clocks a]\n",
+        );
+
+        assert!(error.contains("-rise_through is not supported"), "{error}");
+    }
+
+    #[test]
+    fn an_option_a_command_does_not_take_is_an_error() {
+        let error = parse_error("create_clock -nme a -period 2 [get_ports clk]\n");
+
+        assert!(error.contains("unknown option -nme"), "{error}");
+    }
+
+    #[test]
+    fn a_key_without_its_value_is_an_error() {
+        let error = parse_error("create_clock -name a [get_ports clk] -period\n");
+
+        assert!(error.contains("-period wants a value"), "{error}");
+    }
+
+    #[test]
+    fn a_negative_number_is_a_value_not_an_option() {
+        let sdc = parse(
+            "create_clock -name a -period 2 [get_ports clk]\n\
+             set_input_delay -0.5 -clock a [get_ports rst_n]\n",
+        );
+
+        assert_eq!(sdc.input_delays.len(), 1);
     }
 }
