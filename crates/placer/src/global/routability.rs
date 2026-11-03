@@ -357,6 +357,12 @@ impl Routability {
         self.initial_cell_area += remap.added_area;
         self.grown = remap_fields(&self.grown, &remap.old_field_of_new, 0.0);
         if let Some(m) = self.minimum.as_mut() {
+            // NOTE: gpl quirk kept: gpl's resizeGCell leaves minRcCellSize_ alone, so a
+            // cell a timing round resized keeps its pre-repair size in this record. If
+            // routability later reverts to this round, an upsized cell's density
+            // footprint is too small and a downsized one's too large, misplacing its
+            // area until placement ends. It needs a timing round between this record
+            // and the revert, which the ORFS runs seen so far never have.
             m.sizes = (0..objects.cells())
                 .map(|i| remap.old_of_new[i].map_or(objects.sizes[i], |k| m.sizes[k]))
                 .collect();

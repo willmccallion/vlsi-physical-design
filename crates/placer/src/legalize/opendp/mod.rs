@@ -748,14 +748,14 @@ impl Placer {
     }
 
     /// A point clamped into the core and rounded onto the site grid and a
-    /// row, as `Opendp::legalPt` with a point, except that `OpenDP` bounds
-    /// the core-relative y by the core's absolute top.
+    /// row, as `Opendp::legalPt` with a point.
     fn legal_pt(&self, node: &Node, at: (i64, i64)) -> (i64, i64) {
         let core_x = at.0.clamp(
             0,
             (self.row_site_count * self.site_width - node.width).max(0),
         );
         let column = div_round(core_x, self.site_width);
+        // NOTE: diverges from OpenDP, which bounds this by the core's absolute top.
         let core_y =
             at.1.clamp(0, (self.core.height().get() - node.height).max(0));
         (column * self.site_width, self.row_y(self.round_y(core_y)))

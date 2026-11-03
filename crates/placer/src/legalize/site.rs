@@ -168,12 +168,12 @@ impl SiteGrid {
     }
 
     /// The point inside the core, on the site grid and on a row edge, as
-    /// `legalPt` with a point, except that `OpenDP` bounds the core-relative
-    /// y by the core's absolute top and so can land a cell above the rows.
+    /// `legalPt` with a point.
     fn legal_point(&self, at: (i64, i64), width: i64, height: i64) -> (i64, i64) {
         let core_x =
             at.0.clamp(0, (self.sites_per_row * self.site - width).max(0));
         let column = (core_x as f64 / self.site as f64).round() as i64;
+        // NOTE: diverges from OpenDP, which bounds this by the core's absolute top.
         let core_y = at.1.clamp(0, (self.core.height().get() - height).max(0));
         (column * self.site, self.row_edge(self.round_row(core_y)))
     }

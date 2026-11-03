@@ -165,13 +165,13 @@ fn mirror_candidates(
 }
 
 /// Whether `cell` is a movable core cell whose master may be mirrored
-/// about the vertical axis. `OpenDP` mirrors without asking the master,
-/// leaving an orientation its own legalizer refuses.
+/// about the vertical axis.
 fn may_mirror(db: &NetlistDB, cell: CellId) -> bool {
     let c = &db.cells[cell.index()];
     let master = db.cell_macro(cell);
     matches!(master.class, MacroClass::Core(_))
         && !matches!(c.status, PlacementStatus::Fixed | PlacementStatus::Cover)
+        // NOTE: diverges from OpenDP, which mirrors without asking the master.
         && master.symmetry.allows(c.orient.mirrored_about_y())
 }
 
