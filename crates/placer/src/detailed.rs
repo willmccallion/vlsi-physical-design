@@ -1328,18 +1328,8 @@ mod tests {
         db
     }
 
-    /// A 10 by 4 die with one row of 0.2-wide sites: horizontal M1 under
-    /// vertical M2 joined by a 0.1 cut via with 0.1 by 0.18 pads on both
-    /// layers; master R, 0.4 wide, with a 0.1-wide M1 pin ending 0.05 from
-    /// its right edge; master E, 0.4 wide, with an M2 pin along its left
-    /// edge. A via on R's pin breaks M2 spacing when E abuts R.
-    fn access_design() -> (NetlistDB, Zones, PinAccess) {
-        use pare_common::db::design::{TrackAxis, TrackDef};
-        use pare_common::db::indices::{CutLayerId, MacroPinId};
-        use pare_common::db::library::{CutLayer, ViaDef};
-        use pare_common::db::rules::CutLayerRules;
-
-        let layer = |name: &str, direction| RoutingLayer {
+    fn access_layer(name: &str, direction: Direction) -> RoutingLayer {
+        RoutingLayer {
             name: name.into(),
             direction,
             pitch_x: Dbu(200),
@@ -1351,11 +1341,21 @@ mod tests {
             spacing_table: None,
             rules: RoutingLayerRules::default(),
             electrical: LayerElectrical::default(),
-        };
-        let rect = |x0, y0, x1, y1| Rect::new(pt(x0, y0), pt(x1, y1));
+        }
+    }
+
+    fn rect(x0: i64, y0: i64, x1: i64, y1: i64) -> Rect<Dbu> {
+        Rect::new(pt(x0, y0), pt(x1, y1))
+    }
+
+    /// The library of [`access_design`], with its masters R and E.
+    fn access_library() -> (Library, MacroId, MacroId) {
+        use pare_common::db::library::{CutLayer, ViaDef};
+        use pare_common::db::rules::CutLayerRules;
+
         let mut lib = Library::new(DbuPerMicron::new(1000).unwrap());
         let m1 = lib
-            .add_routing_layer(layer("M1", Direction::Horizontal))
+            .add_routing_layer(access_layer("M1", Direction::Horizontal))
             .unwrap();
         let v1 = lib
             .add_cut_layer(CutLayer {
@@ -1367,26 +1367,24 @@ mod tests {
             })
             .unwrap();
         let m2 = lib
-            .add_routing_layer(layer("M2", Direction::Vertical))
+            .add_routing_layer(access_layer("M2", Direction::Vertical))
             .unwrap();
+        let pad = |layer| Shape {
+            layer,
+            rect: rect(-50, -90, 50, 90),
+        };
         let _ = lib
             .add_via(ViaDef {
                 name: "V12".into(),
                 is_default: true,
                 cut: v1,
                 shapes: vec![
-                    Shape {
-                        layer: LayerRef::Routing(m1),
-                        rect: rect(-50, -90, 50, 90),
-                    },
+                    pad(LayerRef::Routing(m1)),
                     Shape {
                         layer: LayerRef::Cut(v1),
                         rect: rect(-50, -50, 50, 50),
                     },
-                    Shape {
-                        layer: LayerRef::Routing(m2),
-                        rect: rect(-50, -90, 50, 90),
-                    },
+                    pad(LayerRef::Routing(m2)),
                 ],
                 from_def: false,
             })
@@ -1425,22 +1423,30 @@ mod tests {
         };
         let right_pin = master("R", m1, rect(250, 500, 350, 1500));
         let edge_pin = master("E", m2, rect(0, 500, 150, 1500));
+        (lib, right_pin, edge_pin)
+    }
+
+    /// A 10 by 4 die with one row of 0.2-wide sites: horizontal M1 under
+    /// vertical M2 joined by a 0.1 cut via with 0.1 by 0.18 pads on both
+    /// layers; master R, 0.4 wide, with a 0.1-wide M1 pin ending 0.05 from
+    /// its right edge; master E, 0.4 wide, with an M2 pin along its left
+    /// edge. A via on R's pin breaks M2 spacing when E abuts R.
+    fn access_design() -> (NetlistDB, Zones, PinAccess) {
+        use pare_common::db::design::{TrackAxis, TrackDef};
+        use pare_common::db::indices::MacroPinId;
+
+        let (lib, right_pin, edge_pin) = access_library();
         let mut db = NetlistDB::new("t".into(), lib);
         db.die_area = rect(0, 0, 10_000, 4000);
-        db.tracks.push(TrackDef {
-            axis: TrackAxis::X,
-            start: Dbu(100),
-            count: 50,
-            step: Dbu(200),
-            layers: vec![m2],
-        });
-        db.tracks.push(TrackDef {
-            axis: TrackAxis::Y,
-            start: Dbu(0),
-            count: 21,
-            step: Dbu(200),
-            layers: vec![m1],
-        });
+        for (axis, start, count, layer) in [(TrackAxis::X, 100, 50, 1), (TrackAxis::Y, 0, 21, 0)] {
+            db.tracks.push(TrackDef {
+                axis,
+                start: Dbu(start),
+                count,
+                step: Dbu(200),
+                layers: vec![LayerId(layer)],
+            });
+        }
         db.rows.push(Row {
             name: "r".into(),
             site: SiteId(0),
@@ -1450,29 +1456,19 @@ mod tests {
             num_y: 1,
             step: pt(200, 0),
         });
-        let r = db
-            .add_cell(
-                "r".into(),
-                right_pin,
-                pt(1000, 0),
-                Orientation::N,
-                PlacementStatus::Placed,
-            )
-            .unwrap();
-        let e = db
-            .add_cell(
-                "e".into(),
-                edge_pin,
-                pt(1400, 0),
-                Orientation::N,
-                PlacementStatus::Placed,
-            )
-            .unwrap();
-        for (cell, name) in [(r, "nr"), (e, "ne")] {
-            let net = db.net_or_insert(name);
+        for (name, master, x, net) in [("r", right_pin, 1000, "nr"), ("e", edge_pin, 1400, "ne")] {
+            let cell = db
+                .add_cell(
+                    name.into(),
+                    master,
+                    pt(x, 0),
+                    Orientation::N,
+                    PlacementStatus::Placed,
+                )
+                .unwrap();
+            let net = db.net_or_insert(net);
             let _ = db.connect_cell_pin(cell, MacroPinId(0), net);
         }
-        let _ = CutLayerId(0);
         let zones = Zones::new(&db).unwrap();
         let access = PinAccess::new(&db, LayerId(1)).unwrap();
         (db, zones, access)
