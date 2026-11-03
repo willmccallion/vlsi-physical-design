@@ -42,8 +42,9 @@ use pare_resizer::resizer::Context as RepairContext;
 use pare_resizer::resizer::GlobalRouting;
 use pare_resizer::route_parasitics::RouteRc;
 use pare_resizer::{
-    ClockNetwork, Constants, HoldOptions, Link, Namer, Netlist, Rebuffer, RepairOptions, Repairer,
-    Resizer, SetupOptions, repair_clock_inverters, repair_hold, repair_setup, timing_net_weights,
+    BufferSet, ClockNetwork, Constants, HoldOptions, Link, Namer, Netlist, Rebuffer, RepairOptions,
+    Repairer, Resizer, SetupOptions, repair_clock_inverters, repair_hold, repair_setup,
+    timing_net_weights,
 };
 use pare_router::{CapacityReduction, GlobalRouteEstimator, GlobalSession, RouteError};
 use report::{
@@ -760,6 +761,47 @@ fn clock_network(
     }
 }
 
+/// What a repair works around: the design's constant pins and clock
+/// network, and the buffers it may insert.
+struct Networks {
+    constants: Constants,
+    clocks: ClockNetwork,
+    buffers: BufferSet,
+}
+
+impl Networks {
+    /// The networks of `db` as it stands, linked by `link`.
+    fn find(
+        db: &NetlistDB,
+        link: &Link<'_>,
+        config: &Config,
+        sdc: Option<&Sdc>,
+    ) -> anyhow::Result<Self> {
+        let netlist = Netlist::new(db, link);
+        let constants = Constants::find(&netlist);
+        let clocks = clock_network(&netlist, config, sdc, &constants)?;
+        Ok(Self {
+            constants,
+            clocks,
+            buffers: link.find_buffers(db)?,
+        })
+    }
+
+    /// The context a resizer session over these networks takes.
+    const fn context<'a>(
+        &'a self,
+        link: &'a Link<'a>,
+        clock_rc: Option<WireRc>,
+    ) -> RepairContext<'a> {
+        RepairContext {
+            link,
+            clocks: &self.clocks,
+            constants: &self.constants,
+            clock_rc,
+        }
+    }
+}
+
 /// Strips the buffers synthesis left and buffers the ports, as
 /// OpenROAD-flow-scripts does before placing, when the config names Liberty
 /// files.
@@ -799,20 +841,20 @@ fn repair_netlist(
     if config.netlist.buffer_ports {
         let phase_start = Instant::now();
         ui::phase("Port Buffering");
-        let (constants, clocks) = {
-            let netlist = Netlist::new(db, &link);
-            let constants = Constants::find(&netlist);
-            let clocks = clock_network(&netlist, config, sdc.as_ref(), &constants)?;
-            (constants, clocks)
-        };
-        let buffers = link.find_buffers(db)?;
-        let done =
-            pare_resizer::buffer_ports(db, &link, &buffers, &clocks, &constants, &mut namer)?;
+        let networks = Networks::find(db, &link, config, sdc.as_ref())?;
+        let done = pare_resizer::buffer_ports(
+            db,
+            &link,
+            &networks.buffers,
+            &networks.clocks,
+            &networks.constants,
+            &mut namer,
+        )?;
         summary.input_buffers = done.inputs;
         summary.output_buffers = done.outputs;
         summary
             .buffer_cell
-            .clone_from(&liberty.cell(buffers.lowest_drive).name);
+            .clone_from(&liberty.cell(networks.buffers.lowest_drive).name);
         ui::stat_row(
             "Input buffers:",
             &done.inputs.to_string(),
@@ -823,7 +865,7 @@ fn repair_netlist(
             "Buffer:",
             &summary.buffer_cell,
             "Clock pins:",
-            &clocks.sources().len().to_string(),
+            &networks.clocks.sources().len().to_string(),
         );
         report.phase("port buffering", phase_start);
     }
@@ -859,24 +901,13 @@ fn repair_design(
     let phase_start = Instant::now();
     ui::phase("Design Repair");
     let link = Link::new(db, &repair.liberty, &netlist_config.dont_use)?;
-    let (constants, clocks) = {
-        let netlist = Netlist::new(db, &link);
-        let constants = Constants::find(&netlist);
-        let clocks = clock_network(&netlist, config, repair.sdc.as_ref(), &constants)?;
-        (constants, clocks)
-    };
-    let buffers = link.find_buffers(db)?;
-    let context = RepairContext {
-        link: &link,
-        clocks: &clocks,
-        constants: &constants,
-        clock_rc: clock_wire_rc(config, db)?,
-    };
+    let networks = Networks::find(db, &link, config, repair.sdc.as_ref())?;
+    let clock_rc = clock_wire_rc(config, db)?;
     let mut resizer = Resizer::new(
         db,
-        context,
+        networks.context(&link, clock_rc),
         rc,
-        buffers,
+        networks.buffers.clone(),
         &mut repair.namer,
         RepairOptions::default(),
         repair.sdc.as_ref(),
@@ -965,19 +996,8 @@ fn global_route_with_repair(
         }
         let phase_start = Instant::now();
         let link = Link::new(db, &repair.liberty, &config.netlist.dont_use)?;
-        let (constants, clocks) = {
-            let netlist = Netlist::new(db, &link);
-            let constants = Constants::find(&netlist);
-            let clocks = ClockNetwork::from_sdc(&netlist, sdc, &constants);
-            (constants, clocks)
-        };
-        let buffers = link.find_buffers(db)?;
-        let context = RepairContext {
-            link: &link,
-            clocks: &clocks,
-            constants: &constants,
-            clock_rc: clock_wire_rc(config, db)?,
-        };
+        let networks = Networks::find(db, &link, config, Some(sdc))?;
+        let clock_rc = clock_wire_rc(config, db)?;
         let routes = GlobalRouting {
             source: &mut session,
             rc: route_rc.clone(),
@@ -985,9 +1005,9 @@ fn global_route_with_repair(
         };
         let mut resizer = Resizer::on_global_routes(
             db,
-            context,
+            networks.context(&link, clock_rc),
             rc,
-            buffers,
+            networks.buffers.clone(),
             &mut repair.namer,
             RepairOptions::default(),
             Some(sdc),
@@ -1127,28 +1147,21 @@ fn clock_tree_synthesis(
     let phase_start = Instant::now();
     ui::phase("Clock Tree Synthesis");
     let link = Link::new(db, &repair.liberty, &config.netlist.dont_use)?;
-    let networks = |db: &NetlistDB, sdc: &Sdc| {
-        let netlist = Netlist::new(db, &link);
-        let constants = Constants::find(&netlist);
-        let clocks = ClockNetwork::from_sdc(&netlist, sdc, &constants);
-        (constants, clocks)
-    };
     let mut summary = ClockTreeSummary::default();
     {
-        let sdc = repair.sdc.as_ref().context("constraints")?;
-        let (_, clocks) = networks(db, sdc);
-        let inverters = repair_clock_inverters(db, &link, &clocks, &mut repair.namer)?;
+        let networks = Networks::find(db, &link, config, repair.sdc.as_ref())?;
+        let inverters = repair_clock_inverters(db, &link, &networks.clocks, &mut repair.namer)?;
         summary.cloned_inverters = inverters.inverters;
     }
     let max_wire_length =
         pare_resizer::rebuffer::max_wire_length_of(&link, &link.find_buffers(db)?, rc, db.dbu());
     let trees = {
         let sdc = repair.sdc.as_ref().context("constraints")?;
-        let (_, clocks) = networks(db, sdc);
+        let networks = Networks::find(db, &link, config, Some(sdc))?;
         let input = CtsInput {
             link: &link,
             sdc,
-            clocks: &clocks,
+            clocks: &networks.clocks,
             signal_rc: rc,
             clock_rc,
             max_wire_length,
@@ -1162,19 +1175,12 @@ fn clock_tree_synthesis(
     }
     let sdc = repair.sdc.as_ref().context("constraints")?;
     {
-        let (constants, clocks) = networks(db, sdc);
-        let context = RepairContext {
-            link: &link,
-            clocks: &clocks,
-            constants: &constants,
-            clock_rc: Some(clock_rc),
-        };
-        let buffers = link.find_buffers(db)?;
+        let networks = Networks::find(db, &link, config, Some(sdc))?;
         let mut resizer = Resizer::new(
             db,
-            context,
+            networks.context(&link, Some(clock_rc)),
             rc,
-            buffers,
+            networks.buffers.clone(),
             &mut repair.namer,
             RepairOptions::default(),
             None,
@@ -1185,20 +1191,13 @@ fn clock_tree_synthesis(
         let _ = resizer.finish()?;
     }
     let arrivals: FxHashMap<PinId, f64> = {
-        let (constants, clocks) = networks(db, sdc);
-        let context = RepairContext {
-            link: &link,
-            clocks: &clocks,
-            constants: &constants,
-            clock_rc: Some(clock_rc),
-        };
-        let buffers = link.find_buffers(db)?;
+        let networks = Networks::find(db, &link, config, Some(sdc))?;
         let pins = db.pins.len();
         let resizer = Resizer::new(
             db,
-            context,
+            networks.context(&link, Some(clock_rc)),
             rc,
-            buffers,
+            networks.buffers.clone(),
             &mut repair.namer,
             RepairOptions::default(),
             Some(sdc),
@@ -1258,24 +1257,13 @@ fn repair_timing(
     let phase_start = Instant::now();
     ui::phase("Timing Repair");
     let link = Link::new(db, &repair.liberty, &config.netlist.dont_use)?;
-    let (constants, clocks) = {
-        let netlist = Netlist::new(db, &link);
-        let constants = Constants::find(&netlist);
-        let clocks = ClockNetwork::from_sdc(&netlist, sdc, &constants);
-        (constants, clocks)
-    };
-    let buffers = link.find_buffers(db)?;
-    let context = RepairContext {
-        link: &link,
-        clocks: &clocks,
-        constants: &constants,
-        clock_rc: clock_wire_rc(config, db)?,
-    };
+    let networks = Networks::find(db, &link, config, Some(sdc))?;
+    let clock_rc = clock_wire_rc(config, db)?;
     let mut resizer = Resizer::new(
         db,
-        context,
+        networks.context(&link, clock_rc),
         rc,
-        buffers,
+        networks.buffers.clone(),
         &mut repair.namer,
         RepairOptions::default(),
         Some(sdc),
@@ -1667,25 +1655,14 @@ impl TimingDriver for TimingPlacement<'_> {
             .as_ref()
             .context("timing-driven placement needs an SDC file")?;
         let link = Link::new(self.db, &self.repair.liberty, &self.config.netlist.dont_use)?;
-        let (constants, clocks) = {
-            let netlist = Netlist::new(self.db, &link);
-            let constants = Constants::find(&netlist);
-            let clocks = ClockNetwork::from_sdc(&netlist, sdc, &constants);
-            (constants, clocks)
-        };
-        let buffers = link.find_buffers(self.db)?;
-        let context = RepairContext {
-            link: &link,
-            clocks: &clocks,
-            constants: &constants,
-            clock_rc: clock_wire_rc(self.config, self.db)?,
-        };
+        let networks = Networks::find(self.db, &link, self.config, Some(sdc))?;
+        let clock_rc = clock_wire_rc(self.config, self.db)?;
         let cells_before = self.db.cells.len();
         let mut resizer = Resizer::new(
             self.db,
-            context,
+            networks.context(&link, clock_rc),
             self.rc,
-            buffers,
+            networks.buffers.clone(),
             &mut self.repair.namer,
             RepairOptions::default(),
             Some(sdc),
