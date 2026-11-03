@@ -47,13 +47,35 @@ pub enum Origin {
     Wiring,
 }
 
+/// A coordinate or length held in 32 bits, halving the occupancy's records;
+/// [`RouteTech::new`] rejects a die too large for it.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
+struct Dbu32(i32);
+
+impl Dbu32 {
+    fn of(d: Dbu) -> Self {
+        let saturated = if d.get() < 0 { i32::MIN } else { i32::MAX };
+        Self(i32::try_from(d.get()).unwrap_or(saturated))
+    }
+
+    fn pair((a, b): (Dbu, Dbu)) -> (Self, Self) {
+        (Self::of(a), Self::of(b))
+    }
+
+    const fn get(self) -> Dbu {
+        Dbu(self.0 as i64)
+    }
+}
+
 /// One interval on a track.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Occupant {
-    /// Start of the metal along the track.
-    pub lo: Dbu,
-    /// End of the metal along the track.
-    pub hi: Dbu,
+    lo: Dbu32,
+    hi: Dbu32,
+    width: Dbu32,
+    extent: (Dbu32, Dbu32),
+    across: (Dbu32, Dbu32),
+    hard: Dbu32,
     /// Who it belongs to.
     pub owner: Owner,
     /// Whether the metal covers this track's centerline, rather than
@@ -61,14 +83,40 @@ pub struct Occupant {
     pub centered: bool,
     /// Whether rip-up removes it.
     pub origin: Origin,
+}
+
+impl Occupant {
+    /// Start of the metal along the track.
+    #[must_use]
+    pub const fn lo(&self) -> Dbu {
+        self.lo.get()
+    }
+
+    /// End of the metal along the track.
+    #[must_use]
+    pub const fn hi(&self) -> Dbu {
+        self.hi.get()
+    }
+
     /// The smaller side of the shape the occupant comes from.
-    pub width: Dbu,
+    const fn width(&self) -> Dbu {
+        self.width.get()
+    }
+
     /// The whole shape's extent along the track, beyond this chunk.
-    pub extent: (Dbu, Dbu),
+    const fn extent(&self) -> (Dbu, Dbu) {
+        (self.extent.0.get(), self.extent.1.get())
+    }
+
     /// The shape's extent across the tracks.
-    pub across: (Dbu, Dbu),
+    const fn across(&self) -> (Dbu, Dbu) {
+        (self.across.0.get(), self.across.1.get())
+    }
+
     /// The spacing the owner's rule demands, at least the layer's.
-    pub hard: Dbu,
+    const fn hard(&self) -> Dbu {
+        self.hard.get()
+    }
 }
 
 /// A layer's rules for how far apart two shapes side by side must stay.
@@ -93,28 +141,31 @@ impl<'a> LayerSpacing<'a> {
     /// at the two widths and their parallel run, or the layer's spacing,
     /// and never less than either owner's demand.
     pub fn required(&self, o: &Occupant, query: Query) -> Dbu {
-        let run = query.hi.min(o.extent.1) - query.lo.max(o.extent.0);
+        let (start, end) = o.extent();
+        let run = query.hi.min(end) - query.lo.max(start);
         self.required_at(o, query, run)
     }
 
     /// [`Self::required`] for a parallel run of `run`.
     fn required_at(&self, o: &Occupant, query: Query, run: Dbu) -> Dbu {
         let table = self.table.map_or(self.spacing, |t| {
-            t.spacing(o.width.max(self.width), query.width.max(self.width), run)
+            t.spacing(o.width().max(self.width), query.width.max(self.width), run)
         });
-        table.max(self.spacing).max(query.spacing).max(o.hard)
+        table.max(self.spacing).max(query.spacing).max(o.hard())
     }
 
     /// How near `query` comes to `o`, measured along the track and across
     /// it separately, or `None` when it keeps clear even of a run along the
     /// occupant's whole length.
     pub fn proximity(&self, o: &Occupant, query: Query) -> Option<Proximity> {
-        let across = (query.across.0 - o.across.1).max(o.across.0 - query.across.1);
-        let near = |s: Dbu| across < s && o.lo < query.hi + s && query.lo < o.hi + s;
+        let (a0, a1) = o.across();
+        let across = (query.across.0 - a1).max(a0 - query.across.1);
+        let near = |s: Dbu| across < s && o.lo() < query.hi + s && query.lo < o.hi() + s;
         if near(self.required(o, query)) {
             return Some(Proximity::Within);
         }
-        near(self.required_at(o, query, o.extent.1 - o.extent.0)).then_some(Proximity::Alongside)
+        let (start, end) = o.extent();
+        near(self.required_at(o, query, end - start)).then_some(Proximity::Alongside)
     }
 }
 
@@ -153,12 +204,32 @@ pub struct TrackRef {
 /// One via cut.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct CutOccupant {
-    /// The cut's extent.
-    pub rect: Rect<Dbu>,
+    min: (Dbu32, Dbu32),
+    max: (Dbu32, Dbu32),
     /// Who it belongs to.
     pub owner: Owner,
     /// Whether rip-up removes it.
     pub origin: Origin,
+}
+
+impl CutOccupant {
+    fn new(rect: &Rect<Dbu>, owner: Owner, origin: Origin) -> Self {
+        Self {
+            min: (Dbu32::of(rect.min.x), Dbu32::of(rect.min.y)),
+            max: (Dbu32::of(rect.max.x), Dbu32::of(rect.max.y)),
+            owner,
+            origin,
+        }
+    }
+
+    /// The cut's extent.
+    #[must_use]
+    pub const fn rect(&self) -> Rect<Dbu> {
+        Rect::new(
+            Point::new(self.min.0.get(), self.min.1.get()),
+            Point::new(self.max.0.get(), self.max.1.get()),
+        )
+    }
 }
 
 /// Where a cut is filed on its layer.
@@ -247,7 +318,7 @@ impl CutLayer {
     }
 
     fn add(&mut self, cut: CutOccupant) {
-        match self.bucket_of(&cut.rect) {
+        match self.bucket_of(&cut.rect()) {
             CutBucket::Small(key) => self.buckets.entry(key).or_default().push(cut),
             CutBucket::Large { min, max } => {
                 for key in keys_between(min, max) {
@@ -288,20 +359,21 @@ impl CutLayer {
             .filter_map(move |k| self.large.get(&k).map(|list| (k, list)))
             .flat_map(move |(k, list)| {
                 list.iter().filter(move |c| {
-                    let first = self.large_key(c.rect.min);
+                    let first = self.large_key(c.rect().min);
                     (first.0.max(q0.0), first.1.max(q0.1)) == k
                 })
             });
         small
             .chain(large)
-            .filter(move |c| c.owner != owner && cuts_clash(&rect, &c.rect, spacing))
+            .filter(move |c| c.owner != owner && cuts_clash(&rect, &c.rect(), spacing))
     }
 
     /// Every cut once: each large shape is taken from its first bucket.
     #[cfg(test)]
     fn all(&self) -> impl Iterator<Item = &CutOccupant> + '_ {
         let large = self.large.iter().flat_map(move |(&k, list)| {
-            list.iter().filter(move |c| self.large_key(c.rect.min) == k)
+            list.iter()
+                .filter(move |c| self.large_key(c.rect().min) == k)
         });
         self.buckets.values().flatten().chain(large)
     }
@@ -387,7 +459,7 @@ impl Track {
             .fixed
             .iter()
             .map(|o| {
-                furthest = furthest.max(o.hi);
+                furthest = furthest.max(o.hi());
                 furthest
             })
             .collect();
@@ -399,13 +471,13 @@ impl Track {
         let first = self.fixed_reach.partition_point(|&end| end < lo);
         let fixed = self.fixed[first..]
             .iter()
-            .take_while(move |o| o.lo <= hi)
-            .filter(move |o| o.hi >= lo);
-        let start = self.added.partition_point(|o| o.lo < lo - chunk);
+            .take_while(move |o| o.lo() <= hi)
+            .filter(move |o| o.hi() >= lo);
+        let start = self.added.partition_point(|o| o.lo() < lo - chunk);
         let added = self.added[start..]
             .iter()
-            .take_while(move |o| o.lo <= hi)
-            .filter(move |o| o.hi >= lo);
+            .take_while(move |o| o.lo() <= hi)
+            .filter(move |o| o.hi() >= lo);
         fixed.chain(added)
     }
 
@@ -438,17 +510,17 @@ struct Blocked {
 
 impl Blocked {
     /// The occupant for the chunk `[lo, hi]` of this stretch.
-    const fn occupant(&self, lo: Dbu, hi: Dbu, owner: Owner, origin: Origin) -> Occupant {
+    fn occupant(&self, lo: Dbu, hi: Dbu, owner: Owner, origin: Origin) -> Occupant {
         Occupant {
-            lo,
-            hi,
+            lo: Dbu32::of(lo),
+            hi: Dbu32::of(hi),
+            width: Dbu32::of(self.width),
+            extent: Dbu32::pair((self.lo, self.hi)),
+            across: Dbu32::pair(self.across),
+            hard: Dbu32::of(self.hard),
             owner,
             centered: self.centered,
             origin,
-            width: self.width,
-            extent: (self.lo, self.hi),
-            across: self.across,
-            hard: self.hard,
         }
     }
 }
@@ -545,12 +617,12 @@ impl FixedMetal for Occupancy {
                 let wire = Query {
                     lo,
                     hi,
-                    across: o.across,
+                    across: o.across(),
                     width: rules.width,
                     spacing: min,
                 };
                 let beside = rules.required(o, wire) - min;
-                (o.lo - beside, o.hi + beside)
+                (o.lo() - beside, o.hi() + beside)
             })
             .filter(move |&(start, end)| start < hi && lo < end)
     }
@@ -706,11 +778,7 @@ impl Occupancy {
 
     /// Records a cut on `cut` for `owner`.
     pub fn add_cut(&mut self, cut: CutLayerId, rect: &Rect<Dbu>, owner: Owner, origin: Origin) {
-        self.cuts[cut.index()].add(CutOccupant {
-            rect: *rect,
-            owner,
-            origin,
-        });
+        self.cuts[cut.index()].add(CutOccupant::new(rect, owner, origin));
     }
 
     /// Cuts of owners other than `owner` that a cut at `rect` on `cut` would
@@ -975,11 +1043,7 @@ impl LocalOccupancy {
         self.cuts
             .entry(cut)
             .or_insert_with(|| CutLayer::new(tech.cuts[cut.index()]))
-            .add(CutOccupant {
-                rect: *rect,
-                owner,
-                origin,
-            });
+            .add(CutOccupant::new(rect, owner, origin));
     }
 
     /// Forgets the wiring routed here for `owner`, keeping what stays.
@@ -1086,11 +1150,7 @@ mod tests {
     }
 
     fn cut(rect: Rect<Dbu>, owner: Owner, origin: Origin) -> CutOccupant {
-        CutOccupant {
-            rect,
-            owner,
-            origin,
-        }
+        CutOccupant::new(&rect, owner, origin)
     }
 
     #[test]
@@ -1137,7 +1197,7 @@ mod tests {
             cut(rect(0, 0, 100, 100), Owner::Net(1), Origin::Fixed),
             cut(rect(1000, 0, 60_000, 500), Owner::Net(1), Origin::Wiring),
         ];
-        let buckets: Vec<CutBucket> = shapes.iter().map(|c| cuts.bucket_of(&c.rect)).collect();
+        let buckets: Vec<CutBucket> = shapes.iter().map(|c| cuts.bucket_of(&c.rect())).collect();
         for shape in shapes {
             cuts.add(shape);
         }
@@ -1150,6 +1210,21 @@ mod tests {
 
         assert_eq!(cuts.all().count(), 1);
         assert_eq!(cuts.all().next().map(|c| c.origin), Some(Origin::Fixed));
+    }
+
+    #[test]
+    fn occupancy_records_hold_coordinates_in_32_bits() {
+        assert_eq!(size_of::<Occupant>(), 44);
+        assert_eq!(size_of::<CutOccupant>(), 28);
+    }
+
+    #[test]
+    fn a_cut_keeps_its_rectangle() {
+        let r = rect(-1_000, 2_000, 3_000, 4_000);
+
+        let kept = cut(r, Owner::Net(1), Origin::Wiring).rect();
+
+        assert_eq!(kept, r);
     }
 
     #[test]

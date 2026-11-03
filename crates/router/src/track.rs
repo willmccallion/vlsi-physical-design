@@ -440,7 +440,7 @@ impl<'a> Costing<'a> {
             .filter(|c| c.proximity == Proximity::Within)
             .map(|c| {
                 let o = c.occupant;
-                overlap(query.lo, query.hi, o.lo, o.hi, rules.required(o, query))
+                overlap(query.lo, query.hi, o.lo(), o.hi(), rules.required(o, query))
             })
             .sum()
     }

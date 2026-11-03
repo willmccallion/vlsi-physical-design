@@ -221,6 +221,21 @@ fn gcell_pitch(spacing: impl Fn(usize) -> Dbu, max_layer: usize) -> Dbu {
     middle[1]
 }
 
+/// How far from the origin, in database units, the die may reach: half the
+/// 32-bit range the occupancy stores, leaving room for shapes and spacing
+/// beyond the die's edges.
+pub const MAX_DIE_REACH: i64 = 1 << 30;
+
+/// How far the farthest corner of `die` lies from the origin along either
+/// axis.
+fn reach_from_origin(die: &Rect<Dbu>) -> i64 {
+    [die.min.x, die.min.y, die.max.x, die.max.y]
+        .iter()
+        .map(|c| c.get().abs())
+        .max()
+        .unwrap_or(0)
+}
+
 pub(crate) fn to_u32(i: usize) -> u32 {
     u32::try_from(i).unwrap_or(u32::MAX)
 }
@@ -228,6 +243,10 @@ pub(crate) fn to_u32(i: usize) -> u32 {
 impl RouteTech {
     /// Builds the routing technology of `db`.
     pub fn new(db: &NetlistDB, config: &RoutingConfig) -> Result<Self, RouteError> {
+        let reach = reach_from_origin(&db.die_area);
+        if reach > MAX_DIE_REACH {
+            return Err(RouteError::DieTooLarge(reach));
+        }
         let lib = &db.library;
         let count = lib.routing_layers.len();
         let range = config.layer_range(lib)?;

@@ -46,7 +46,7 @@ pub use session::GlobalSession;
 use state::{DetailedState, GridShape};
 pub use state::{RouteState, StateParseError};
 use std::time::Instant;
-use tech::RouteTech;
+use tech::{MAX_DIE_REACH, RouteTech};
 use track::assign_tracks;
 
 /// What routing achieved.
@@ -1016,6 +1016,12 @@ pub enum RouteError {
     /// No usable via is defined through a cut layer.
     #[error("no via is defined through cut layer '{0}'")]
     NoVia(String),
+    /// The die reaches further from the origin than the router's 32-bit
+    /// occupancy coordinates allow.
+    #[error(
+        "the die reaches {0} database units from the origin, beyond the router's limit of {MAX_DIE_REACH}"
+    )]
+    DieTooLarge(i64),
     /// A saved state is of another design.
     #[error("the route state was saved for design '{0}'")]
     StateDesign(String),
