@@ -1702,6 +1702,11 @@ impl TimingDriver for TimingPlacement<'_> {
         let slacks = resizer.driver_net_slacks();
         let weights =
             timing_net_weights(&slacks, self.config.global_placement.timing_net_weight_max);
+        log::debug!(
+            "timing weights: worst net slack {:.4} ns, largest weight {:.4}",
+            slacks.first().map_or(f64::INFINITY, |s| s.1 * 1e9),
+            weights.iter().map(|w| w.1).fold(1.0, f64::max)
+        );
         let area_after = resizer.design_area();
         let wns_after = resizer
             .sta()
