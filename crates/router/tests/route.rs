@@ -149,6 +149,46 @@ fn a_run_resumed_after_a_stubborn_round_routes_as_the_run_that_saved_it() {
 }
 
 #[test]
+fn a_state_with_a_wire_past_the_end_of_its_track_is_refused() {
+    let (_, state) = route_saving(SavePoint::Round(0));
+    let (mut db, config) = placed_tiny();
+    let tech = RouteTech::new(&db, &config).unwrap();
+    let mut text = Vec::new();
+    state.write(&mut text).unwrap();
+    let text = String::from_utf8(text).unwrap();
+    let mut tampered = false;
+    let lines: Vec<String> = text
+        .lines()
+        .map(|line| {
+            let words: Vec<&str> = line.split(' ').collect();
+            if tampered || words[0] != "s" {
+                return line.to_string();
+            }
+            tampered = true;
+            let layer = LayerId::new(words[1].parse().unwrap());
+            let past_end = tech.layer(layer).cross.len();
+            format!("s {} {} {} {past_end}", words[1], words[2], words[3])
+        })
+        .collect();
+    let bad = RouteState::parse(&(lines.join("\n") + "\n")).unwrap();
+
+    let result = route_with(
+        &mut db,
+        &config,
+        Session {
+            resume: Some(&bad),
+            ..Session::default()
+        },
+    );
+
+    assert!(tampered);
+    assert!(
+        matches!(result, Err(RouteError::DetailedRestore(_))),
+        "{result:?}"
+    );
+}
+
+#[test]
 fn a_state_of_another_design_is_refused() {
     let (_, state) = route_saving(SavePoint::Global);
     let (mut db, config) = placed_tiny();

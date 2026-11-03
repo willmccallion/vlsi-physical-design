@@ -561,10 +561,7 @@ impl<'a> DetailedRouter<'a> {
     /// point pin access does not offer its net now.
     pub fn restore(&mut self, routes: &[(NetId, NetRoute)]) -> Result<(), RestoreRoutesError> {
         for (net, route) in routes {
-            let nodes = route.edges.iter().flat_map(|e| match e {
-                Edge::Wire(n) => [n, n],
-                Edge::Via { lower, upper } => [lower, upper],
-            });
+            let nodes = route.edges.iter().flat_map(|e| <[Node; 2]>::from(e.ends()));
             if !nodes
                 .chain(route.access.iter().map(|a| a.node))
                 .all(|n| self.on_tracks(n))
