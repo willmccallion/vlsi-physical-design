@@ -72,6 +72,16 @@ fn a_movable_cell_of_two_signal_pins_keeps_its_size_in_the_density() {
 }
 
 #[test]
+fn only_cells_given_a_location_count_as_placed() {
+    let db = tiny();
+    let model = PlacementModel::from_db(&db, &Zones::new(&db).unwrap());
+    let placed = |name: &str| model.placed[db.cells.iter().position(|c| c.name == name).unwrap()];
+
+    assert!(placed("u1") && placed("u3"));
+    assert!(!placed("u5") && !placed("u6"));
+}
+
+#[test]
 fn a_fixed_cell_keeps_its_size_in_the_density() {
     let db = tiny();
     let model = PlacementModel::from_db(&db, &Zones::new(&db).unwrap());

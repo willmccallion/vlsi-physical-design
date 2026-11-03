@@ -86,6 +86,8 @@ pub struct PlacementModel {
     pub density_sizes: Vec<Point<f64>>,
     /// Whether the placer may move each cell.
     pub movable: Vec<bool>,
+    /// Whether each cell came with a location.
+    pub placed: Vec<bool>,
     /// Whether each cell is a standard cell or a macro.
     pub kinds: Vec<CellKind>,
     /// Lower-left corner of each cell.
@@ -253,6 +255,11 @@ impl PlacementModel {
                 .collect(),
             density_sizes: pin_density_sizes(db).into_iter().map(um).collect(),
             movable: db.cells.iter().map(|c| c.status.is_movable()).collect(),
+            placed: db
+                .cells
+                .iter()
+                .map(|c| c.status != PlacementStatus::Unplaced)
+                .collect(),
             kinds: cell_kinds(db, spans.iter().map(|r| r.height).min()),
             positions: db.cells.iter().map(|c| um(c.location)).collect(),
             nets,

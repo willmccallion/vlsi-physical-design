@@ -25,7 +25,7 @@ use pare_common::verify::routing::check_routing;
 use pare_placer::detailed;
 use pare_placer::global::{
     self, CongestionEstimator, GlobalParams, Outcome, Reweighted, RoutabilityParams, RoutingTiles,
-    TimingDriver, TimingParams,
+    Start, TimingDriver, TimingParams,
 };
 use pare_placer::io::{self, IoLayers};
 use pare_placer::legalize::Legalization;
@@ -1505,6 +1505,10 @@ fn global_placement(
         initial_rounds: match pass {
             Pass::SkipIo => 0,
             Pass::Full => global::INITIAL_PLACE_ROUNDS,
+        },
+        start: match pass {
+            Pass::SkipIo => Start::Placed,
+            Pass::Full => Start::Center,
         },
         bins,
         seed: gp.seed,

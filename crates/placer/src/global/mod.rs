@@ -47,8 +47,10 @@ pub struct GlobalParams {
     /// Iteration limit.
     pub max_iterations: usize,
     /// Most rounds of `gpl`'s bound-to-bound initial placement; with none,
-    /// cells start at the centers of their regions.
+    /// cells stay where they start.
     pub initial_rounds: usize,
+    /// Where cells start before initial placement.
+    pub start: Start,
     /// Bins per side of the density grid.
     pub bins: usize,
     /// Seed for the initial placement.
@@ -57,6 +59,17 @@ pub struct GlobalParams {
     pub routability: Option<RoutabilityParams>,
     /// Repair of the design for timing along the way, if enabled.
     pub timing: Option<TimingParams>,
+}
+
+/// Where movable cells start before initial placement, as `gpl` chooses
+/// with `forceCenterInitialPlace`.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Start {
+    /// At the center of their fence or of the core.
+    Center,
+    /// A cell that came placed at its own center, unless it is in a fence;
+    /// the rest at the center of their fence or of the core.
+    Placed,
 }
 
 /// When timing-driven placement repairs the design, as `OpenROAD`'s
@@ -324,7 +337,7 @@ impl Setup {
         let fixed = fixed_rects(model);
         let netlist = build_netlist(model, &movable);
         let mut objects = Objects {
-            centers: initial_centers(model, &movable, &netlist, params.initial_rounds, rng),
+            centers: initial_centers(model, &movable, &netlist, params, rng),
             sizes: movable.iter().map(|&i| model.density_sizes[i]).collect(),
             kinds: movable.iter().map(|&i| model.kinds[i]).collect(),
         };
@@ -619,40 +632,56 @@ fn zone_area(model: &PlacementModel, k: usize) -> Vec<Rect<f64>> {
         .map_or_else(|| placeable_area(model), |z| z.rects.clone())
 }
 
-/// Where the movable cells start, as `gpl` starts them: at the center of
-/// their fence or of the core, moved by up to `rounds` rounds of initial
-/// placement over `netlist`, each then shifted at random by up to a micron
-/// on each axis.
+/// Where the movable cells start, as `gpl` starts them: from `params.start`,
+/// moved by up to `params.initial_rounds` rounds of initial placement over
+/// `netlist`, each then shifted at random by up to a micron on each axis.
 fn initial_centers(
     model: &PlacementModel,
     movable: &[usize],
     netlist: &Netlist,
-    rounds: usize,
+    params: &GlobalParams,
     rng: &mut StdRng,
 ) -> Vec<Point<f64>> {
     let core = bounding_box(&placeable_area(model));
-    let bounds: Vec<Rect<f64>> = movable
+    let fences: Vec<Option<Rect<f64>>> = movable
         .iter()
         .map(|&i| match model.zones.get(model.zone_of[i]) {
-            Some(zone) if matches!(zone.zone, Zone::Fence(_)) => bounding_box(&zone.rects),
-            _ => core,
+            Some(zone) if matches!(zone.zone, Zone::Fence(_)) => Some(bounding_box(&zone.rects)),
+            _ => None,
         })
         .collect();
-    let mut centers: Vec<Point<f64>> = bounds
+    let mut centers: Vec<Point<f64>> = movable
         .iter()
-        .map(|b| {
-            Point::new(
-                f64::midpoint(b.min.x, b.max.x),
-                f64::midpoint(b.min.y, b.max.y),
-            )
+        .zip(&fences)
+        .map(|(&i, fence)| match fence {
+            Some(fence) => center_of(fence),
+            None if params.start == Start::Placed && model.placed[i] => {
+                model.positions[i] + model.sizes[i] * 0.5
+            }
+            None => center_of(&core),
         })
         .collect();
+    let bounds: Vec<Rect<f64>> = fences.iter().map(|f| f.unwrap_or(core)).collect();
     let min_diff = model.units.to_microns(initial::MIN_DIFF_LENGTH);
-    initial::place(netlist, &mut centers, core, &bounds, rounds, min_diff);
+    initial::place(
+        netlist,
+        &mut centers,
+        core,
+        &bounds,
+        params.initial_rounds,
+        min_diff,
+    );
     for center in &mut centers {
         *center += Point::new(rng.gen_range(-1.0..1.0), rng.gen_range(-1.0..1.0));
     }
     centers
+}
+
+const fn center_of(rect: &Rect<f64>) -> Point<f64> {
+    Point::new(
+        f64::midpoint(rect.min.x, rect.max.x),
+        f64::midpoint(rect.min.y, rect.max.y),
+    )
 }
 
 fn bounding_box(rects: &[Rect<f64>]) -> Rect<f64> {
@@ -718,6 +747,62 @@ fn build_netlist(model: &PlacementModel, movable: &[usize]) -> Netlist {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::zones::Zones;
+    use pare_common::db::parser::{def, lef};
+    use std::path::Path;
+
+    fn tiny_model() -> PlacementModel {
+        let fixtures = Path::new(env!("CARGO_MANIFEST_DIR")).join("../common/tests/fixtures");
+        let units = def::read_units(&fixtures.join("tiny.def")).unwrap();
+        let library = lef::parse_files(&[fixtures.join("tiny.lef")], units).unwrap();
+        let db = def::parse(&fixtures.join("tiny.def"), library).unwrap();
+        PlacementModel::from_db(&db, &Zones::new(&db).unwrap())
+    }
+
+    /// Where the fixture's first cell, placed in it, starts from `start`.
+    fn first_cell_start(model: &PlacementModel, start: Start) -> Point<f64> {
+        let params = GlobalParams {
+            target_density: 0.7,
+            target_overflow: 0.1,
+            max_iterations: 0,
+            initial_rounds: 0,
+            start,
+            bins: 4,
+            seed: 0,
+            routability: None,
+            timing: None,
+        };
+        let movable = movable_cells(model);
+        let netlist = build_netlist(model, &movable);
+        let mut rng = StdRng::seed_from_u64(0);
+        let centers = initial_centers(model, &movable, &netlist, &params, &mut rng);
+        centers[movable.iter().position(|&i| i == 0).unwrap()]
+    }
+
+    fn within_a_micron(a: Point<f64>, b: Point<f64>) -> bool {
+        (a.x - b.x).abs() <= 1.0 && (a.y - b.y).abs() <= 1.0
+    }
+
+    #[test]
+    fn a_placed_cell_starts_at_its_own_center_when_placed_cells_keep_their_place() {
+        let model = tiny_model();
+        let own_center = model.positions[0] + model.sizes[0] * 0.5;
+
+        let start = first_cell_start(&model, Start::Placed);
+
+        assert!(model.placed[0]);
+        assert!(within_a_micron(start, own_center), "{start:?}");
+    }
+
+    #[test]
+    fn a_placed_cell_starts_at_the_core_center_when_cells_start_centered() {
+        let model = tiny_model();
+        let core_center = center_of(&bounding_box(&placeable_area(&model)));
+
+        let start = first_cell_start(&model, Start::Center);
+
+        assert!(within_a_micron(start, core_center), "{start:?}");
+    }
 
     #[test]
     fn bins_hold_about_one_average_cell_at_the_target_density() {
