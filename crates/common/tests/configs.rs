@@ -1,4 +1,4 @@
-//! Every shipped run configuration must parse.
+//! Every shipped run configuration must parse, and malformed ones must not.
 
 #![allow(clippy::unwrap_used)]
 
@@ -33,9 +33,21 @@ fn every_design_config_parses() {
     }
 }
 
+/// `body` after the one key every config needs.
+fn parse(body: &str) -> Result<Config, toml::de::Error> {
+    toml::from_str(&format!("purpose = \"place_and_route\"\n{body}"))
+}
+
+#[test]
+fn a_config_of_only_its_purpose_parses() {
+    let parsed = parse("");
+
+    assert!(parsed.is_ok(), "{:?}", parsed.err());
+}
+
 #[test]
 fn unknown_keys_are_rejected() {
-    let parsed: Result<Config, _> = toml::from_str("[global_placement]\ntarget_densty = 0.7\n");
+    let parsed = parse("[global_placement]\ntarget_densty = 0.7\n");
 
     assert!(parsed.is_err());
 }
