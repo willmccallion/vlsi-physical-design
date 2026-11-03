@@ -447,6 +447,10 @@ def toml_list(values):
     return "[" + ", ".join(f'"{v}"' for v in values) + "]"
 
 
+def on_nangate45(design):
+    return design["suite"] == "openroad"
+
+
 def config_text(name):
     """The run config of a design."""
     d = DESIGNS[name]
@@ -473,13 +477,14 @@ def config_text(name):
         ]
         if d.get("target_density") is not None:
             lines.append(f"target_density = {d['target_density']}")
-        lines.append("routing_layer_adjustment = 0.0")
-        lines.append("layer_adjustments = [")
-        lines += [
-            f'  {{ layer = "{layer}", adjustment = {a} }},'
-            for layer, a in ORFS_NANGATE45_LAYER_ADJUSTMENT
-        ]
-        lines.append("]")
+        if on_nangate45(d):
+            lines.append("routing_layer_adjustment = 0.0")
+            lines.append("layer_adjustments = [")
+            lines += [
+                f'  {{ layer = "{layer}", adjustment = {a} }},'
+                for layer, a in ORFS_NANGATE45_LAYER_ADJUSTMENT
+            ]
+            lines.append("]")
     if d.get("io"):
         lines += ["", "[io_placement]"]
         lines += [f'{k} = "{v}"' for k, v in d["io"].items()]
