@@ -2,5 +2,6 @@
 
 pub mod db;
 pub mod geom;
+pub mod units;
 pub mod util;
 pub mod verify;
