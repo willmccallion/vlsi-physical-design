@@ -14,7 +14,7 @@ const MAX_CAP_DERATE: f32 = 0.01;
 
 /// The buffers of a clock tree.
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub struct ClockBuffers {
+pub(crate) struct ClockBuffers {
     /// Every clock buffer, in library order.
     pub all: Vec<LibCellId>,
     /// The buffer at each tree's root and along its trunk.
@@ -29,7 +29,11 @@ impl ClockBuffers {
     /// Infers the clock buffers and picks the root and sink buffers for
     /// wires as long as the core with signal wire RC `signal_rc`, as
     /// `TritonCTS::setupCharacterization` with no buffers given.
-    pub fn infer(link: &Link<'_>, db: &NetlistDB, signal_rc: &WireRc) -> Result<Self, CtsError> {
+    pub(crate) fn infer(
+        link: &Link<'_>,
+        db: &NetlistDB,
+        signal_rc: &WireRc,
+    ) -> Result<Self, CtsError> {
         let all = link.infer_clock_buffers(db);
         if all.is_empty() {
             return Err(CtsError::NoBuffers);

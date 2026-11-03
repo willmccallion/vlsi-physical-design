@@ -121,7 +121,7 @@ impl Occupant {
 
 /// A layer's rules for how far apart two shapes side by side must stay.
 #[derive(Clone, Copy, Debug)]
-pub struct LayerSpacing<'a> {
+pub(crate) struct LayerSpacing<'a> {
     width: Dbu,
     spacing: Dbu,
     table: Option<&'a SpacingTable>,
@@ -391,7 +391,7 @@ fn keys_between(min: (i64, i64), max: (i64, i64)) -> impl Iterator<Item = (i64, 
 }
 
 /// Whether two cuts touch or their edges are closer than `spacing`.
-pub fn cuts_clash(a: &Rect<Dbu>, b: &Rect<Dbu>, spacing: Dbu) -> bool {
+pub(crate) fn cuts_clash(a: &Rect<Dbu>, b: &Rect<Dbu>, spacing: Dbu) -> bool {
     let gap = |lo_a: Dbu, hi_a: Dbu, lo_b: Dbu, hi_b: Dbu| {
         i128::from((lo_a - hi_b).max(lo_b - hi_a).max(Dbu::ZERO).get())
     };
@@ -720,7 +720,7 @@ pub(crate) fn affected_tracks<'t>(
 impl Occupancy {
     /// Bytes held by the fixed occupants of every track, by the occupants
     /// added since, and by the cut occupants.
-    pub fn heap_bytes(&self) -> (usize, usize, usize) {
+    pub(crate) fn heap_bytes(&self) -> (usize, usize, usize) {
         let tracks = self.tracks.iter().flatten();
         let fixed = tracks
             .clone()
@@ -773,7 +773,7 @@ impl Occupancy {
 
     /// Frees the room each track and cut bucket has grown beyond what it
     /// holds.
-    pub fn shrink_to_fit(&mut self) {
+    pub(crate) fn shrink_to_fit(&mut self) {
         for track in self.tracks.iter_mut().flatten() {
             track.added.shrink_to_fit();
         }
@@ -947,7 +947,7 @@ impl Occupancy {
 
     /// Owners of wiring on `layer` whose metal runs along a track inside
     /// `rect`.
-    pub fn wiring_owners_in<'a>(
+    pub(crate) fn wiring_owners_in<'a>(
         &'a self,
         tech: &'a RouteTech,
         layer: LayerId,
@@ -964,7 +964,7 @@ impl Occupancy {
 
     /// Owners with metal of any origin running along a track inside `rect`
     /// on `layer`: nets whose wiring or reserved pin access lies there.
-    pub fn owners_in<'a>(
+    pub(crate) fn owners_in<'a>(
         &'a self,
         tech: &'a RouteTech,
         layer: LayerId,
@@ -998,7 +998,7 @@ impl Occupancy {
 /// A small, separately owned occupancy layered over the shared one, for a
 /// worker that routes several nets in sequence while others run in parallel.
 #[derive(Clone, Debug, Default)]
-pub struct LocalOccupancy {
+pub(crate) struct LocalOccupancy {
     tracks: FxHashMap<TrackRef, Vec<Occupant>>,
     cuts: FxHashMap<CutLayerId, CutLayer>,
 }
@@ -1012,7 +1012,13 @@ impl LocalOccupancy {
     /// Records `rect` on `layer` as wiring of `owner` that stays when the
     /// owner is routed again here: wiring of a net ripped up in this worker
     /// that lies beyond the worker's reach.
-    pub fn keep_rect(&mut self, tech: &RouteTech, layer: LayerId, rect: &Rect<Dbu>, owner: Owner) {
+    pub(crate) fn keep_rect(
+        &mut self,
+        tech: &RouteTech,
+        layer: LayerId,
+        rect: &Rect<Dbu>,
+        owner: Owner,
+    ) {
         self.record_rect(tech, layer, rect, owner, Origin::Fixed);
     }
 
@@ -1043,7 +1049,13 @@ impl LocalOccupancy {
 
     /// Records a cut on `cut` of `owner` that stays when the owner is routed
     /// again here.
-    pub fn keep_cut(&mut self, tech: &RouteTech, cut: CutLayerId, rect: &Rect<Dbu>, owner: Owner) {
+    pub(crate) fn keep_cut(
+        &mut self,
+        tech: &RouteTech,
+        cut: CutLayerId,
+        rect: &Rect<Dbu>,
+        owner: Owner,
+    ) {
         self.record_cut(tech, cut, rect, owner, Origin::Fixed);
     }
 
@@ -1062,7 +1074,7 @@ impl LocalOccupancy {
     }
 
     /// Forgets the wiring routed here for `owner`, keeping what stays.
-    pub fn remove_owner(&mut self, owner: Owner) {
+    pub(crate) fn remove_owner(&mut self, owner: Owner) {
         for list in self.tracks.values_mut() {
             list.retain(|o| o.owner != owner || o.origin == Origin::Fixed);
         }

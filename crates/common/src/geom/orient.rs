@@ -75,7 +75,7 @@ impl Orientation {
     }
 
     /// Whether the orientation swaps width and height.
-    pub const fn is_rotated_quarter(self) -> bool {
+    pub(crate) const fn is_rotated_quarter(self) -> bool {
         matches!(self, Self::E | Self::W | Self::FE | Self::FW)
     }
 
@@ -96,7 +96,7 @@ impl Orientation {
     }
 
     /// Rotates or mirrors a rectangle about the origin.
-    pub fn apply_rect(self, r: &Rect<Dbu>) -> Rect<Dbu> {
+    pub(crate) fn apply_rect(self, r: &Rect<Dbu>) -> Rect<Dbu> {
         Rect::from_corners(self.apply(r.min), self.apply(r.max))
     }
 
@@ -119,7 +119,12 @@ impl Orientation {
     }
 
     /// Maps a point in macro coordinates to placed coordinates.
-    pub fn place_point(self, p: Point<Dbu>, size: Point<Dbu>, location: Point<Dbu>) -> Point<Dbu> {
+    pub(crate) fn place_point(
+        self,
+        p: Point<Dbu>,
+        size: Point<Dbu>,
+        location: Point<Dbu>,
+    ) -> Point<Dbu> {
         let body = self.apply_rect(&Rect::new(Point::default(), size));
         self.apply(p) + location - body.min
     }

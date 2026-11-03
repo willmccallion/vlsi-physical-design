@@ -60,7 +60,7 @@ impl LayerTech {
     }
 
     /// Splits a point into (across, along) coordinates for this layer.
-    pub const fn across_along(&self, p: Point<Dbu>) -> (Dbu, Dbu) {
+    pub(crate) const fn across_along(&self, p: Point<Dbu>) -> (Dbu, Dbu) {
         match self.direction {
             Direction::Horizontal => (p.y, p.x),
             Direction::Vertical => (p.x, p.y),
@@ -150,7 +150,7 @@ impl CutTech {
 
 /// The wire width and spacing a non-default rule gives each routing layer.
 #[derive(Clone, Debug)]
-pub struct RuleTech {
+pub(crate) struct RuleTech {
     /// Wire width per layer: the rule's, or the layer's where it is silent.
     width: Vec<Dbu>,
     /// Spacing other metal must keep per layer: the rule's where it sets one
@@ -224,7 +224,7 @@ fn gcell_pitch(spacing: impl Fn(usize) -> Dbu, max_layer: usize) -> Dbu {
 /// How far from the origin, in database units, the die may reach: half the
 /// 32-bit range the occupancy stores, leaving room for shapes and spacing
 /// beyond the die's edges.
-pub const MAX_DIE_REACH: i64 = 1 << 30;
+pub(crate) const MAX_DIE_REACH: i64 = 1 << 30;
 
 /// How far the farthest corner of `die` lies from the origin along either
 /// axis.
@@ -362,7 +362,7 @@ impl RouteTech {
     }
 
     /// The largest spacing any rule asks of wires on `layer`.
-    pub fn max_wire_spacing(&self, layer: LayerId) -> Dbu {
+    pub(crate) fn max_wire_spacing(&self, layer: LayerId) -> Dbu {
         self.rules
             .iter()
             .map(|r| r.spacing[layer.index()])
@@ -375,7 +375,7 @@ impl RouteTech {
     }
 
     /// The via between `layer` and the layer above it.
-    pub fn via_above(&self, layer: LayerId) -> &ViaTech {
+    pub(crate) fn via_above(&self, layer: LayerId) -> &ViaTech {
         &self.vias[layer.index()]
     }
 

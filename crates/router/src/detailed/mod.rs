@@ -112,7 +112,7 @@ pub struct DetailedRouter<'a> {
 /// Where a pin meets global routing: the gcell of its access point and the
 /// layer of the pin shape that point reaches.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub struct PinTerminal {
+pub(crate) struct PinTerminal {
     /// The pin.
     pub pin: PinId,
     /// The gcell, on the layer the access point's wire starts on.
@@ -136,7 +136,7 @@ impl PinTerminal {
 /// The rules and fixed shapes the wiring of an access point is judged
 /// against.
 #[derive(Debug)]
-pub struct PinJudge {
+pub(crate) struct PinJudge {
     rules: Rules,
     fixed: Layout,
     fixed_tiles: ShapeTiles,
@@ -283,7 +283,7 @@ impl<'a> DetailedRouter<'a> {
 
     /// Where each pin of each net is reached: the point of its best access
     /// point, by net.
-    pub fn pin_points(&self) -> Vec<Vec<Point<Dbu>>> {
+    pub(crate) fn pin_points(&self) -> Vec<Vec<Point<Dbu>>> {
         self.access
             .iter()
             .map(|pins| {
@@ -296,7 +296,7 @@ impl<'a> DetailedRouter<'a> {
 
     /// Records the wires of track assignment as their nets' first wiring;
     /// routing then joins each net's pins through them.
-    pub fn set_track_wires(&mut self, wires: Vec<TrackWire>) {
+    pub(crate) fn set_track_wires(&mut self, wires: Vec<TrackWire>) {
         for w in wires {
             self.wires[w.net.index()].push(w);
         }
@@ -314,7 +314,7 @@ impl<'a> DetailedRouter<'a> {
     }
 
     /// Logs every pin that has no access point, with its net.
-    pub fn log_inaccessible_pins(&self) {
+    pub(crate) fn log_inaccessible_pins(&self) {
         for (n, pins) in self.access.iter().enumerate() {
             for (k, points) in pins.iter().enumerate() {
                 if points.is_empty() {
@@ -330,7 +330,7 @@ impl<'a> DetailedRouter<'a> {
     }
 
     /// Nets that have a pin with no access point.
-    pub fn inaccessible_nets(&self) -> Vec<NetId> {
+    pub(crate) fn inaccessible_nets(&self) -> Vec<NetId> {
         (0..self.access.len())
             .filter(|&n| self.access[n].iter().any(Vec::is_empty))
             .map(NetId::new)
@@ -510,12 +510,12 @@ impl<'a> DetailedRouter<'a> {
     }
 
     /// How many violations the last round's judge found.
-    pub const fn marker_count(&self) -> usize {
+    pub(crate) const fn marker_count(&self) -> usize {
         self.markers.len()
     }
 
     /// Logs every remaining violation at debug level.
-    pub fn log_conflicts(&self) {
+    pub(crate) fn log_conflicts(&self) {
         for m in &self.markers {
             log::debug!(
                 "violation at ({}, {}) on {:?} between {:?} and {:?}",
@@ -529,7 +529,7 @@ impl<'a> DetailedRouter<'a> {
     }
 
     /// Judges the whole design and returns the nets of its violations.
-    pub fn rejudge(&mut self) -> Vec<NetId> {
+    pub(crate) fn rejudge(&mut self) -> Vec<NetId> {
         let (markers, counts) = self.exact_markers();
         for (kind, count) in &counts {
             log::debug!("round markers: {} {}", kind.name(), count);
@@ -548,7 +548,7 @@ impl<'a> DetailedRouter<'a> {
     }
 
     /// Logs what `trace` asks for from now on.
-    pub fn set_trace(&mut self, trace: Trace) {
+    pub(crate) fn set_trace(&mut self, trace: Trace) {
         self.trace = trace;
     }
 
@@ -559,7 +559,10 @@ impl<'a> DetailedRouter<'a> {
     ///
     /// When a route has a node off the tracks of its layer or an access
     /// point pin access does not offer its net now.
-    pub fn restore(&mut self, routes: &[(NetId, NetRoute)]) -> Result<(), RestoreRoutesError> {
+    pub(crate) fn restore(
+        &mut self,
+        routes: &[(NetId, NetRoute)],
+    ) -> Result<(), RestoreRoutesError> {
         for (net, route) in routes {
             let nodes = route.edges.iter().flat_map(|e| <[Node; 2]>::from(e.ends()));
             if !nodes
@@ -627,7 +630,7 @@ impl<'a> DetailedRouter<'a> {
     /// Each pin of `net` with the gcell of its best access point and the
     /// layer of the pin shape that point reaches; none when a pin has no
     /// access point.
-    pub fn pin_terminals(&self, net: NetId, grid: &GlobalGrid) -> Option<Vec<PinTerminal>> {
+    pub(crate) fn pin_terminals(&self, net: NetId, grid: &GlobalGrid) -> Option<Vec<PinTerminal>> {
         self.access[net.index()]
             .iter()
             .zip(&self.db.nets[net.index()].pins)
@@ -649,7 +652,7 @@ impl<'a> DetailedRouter<'a> {
     }
 
     /// Restricts each net's detailed route to its global route.
-    pub fn set_guides(&mut self, routes: GlobalRoutes, grid: &GlobalGrid) {
+    pub(crate) fn set_guides(&mut self, routes: GlobalRoutes, grid: &GlobalGrid) {
         for (net, paths) in routes.paths {
             let tree = RouteTree::new(&paths);
             let bbox = tree
@@ -1545,7 +1548,7 @@ fn footprint(tech: &RouteTech, a: &AccessPoint) -> Vec<(ViaId, Point<Dbu>)> {
 }
 
 /// Signal nets with at least two pins, shortest bounding box first.
-pub fn routable_nets(db: &NetlistDB) -> Vec<NetId> {
+pub(crate) fn routable_nets(db: &NetlistDB) -> Vec<NetId> {
     let mut nets: Vec<(i64, NetId)> = (0..db.nets.len())
         .map(NetId::new)
         .filter(|&n| is_signal_net(db, n))

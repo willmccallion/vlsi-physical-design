@@ -34,7 +34,7 @@ impl PlacementStatus {
     }
 
     /// The DEF keyword, or `None` for unplaced.
-    pub const fn def_keyword(self) -> Option<&'static str> {
+    pub(crate) const fn def_keyword(self) -> Option<&'static str> {
         match self {
             Self::Unplaced => None,
             Self::Placed => Some("PLACED"),
@@ -84,7 +84,7 @@ pub enum RegionKind {
 
 impl RegionKind {
     /// The DEF `TYPE` keyword, or `None` for an inclusive region.
-    pub const fn def_keyword(self) -> Option<&'static str> {
+    pub(crate) const fn def_keyword(self) -> Option<&'static str> {
         match self {
             Self::Inclusive => None,
             Self::Fence => Some("FENCE"),
@@ -653,7 +653,7 @@ impl NetlistDB {
 
     /// Adds an I/O pin and connects it to its net.
     #[allow(clippy::too_many_arguments)]
-    pub fn add_io_pin(
+    pub(crate) fn add_io_pin(
         &mut self,
         name: String,
         net: NetId,

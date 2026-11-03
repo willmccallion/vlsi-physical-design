@@ -243,7 +243,7 @@ impl Builder {
     }
 
     /// Whether the tree drives no other tree, as `TreeBuilder::isLeafTree`.
-    pub fn is_leaf_tree(&self) -> bool {
+    pub(crate) fn is_leaf_tree(&self) -> bool {
         if self.tree_type == TreeType::Macro {
             return self.children.len() == 1;
         }
@@ -256,7 +256,7 @@ impl Builder {
 
     /// The distance between two points plus the insertion delays at them,
     /// as `TreeBuilder::computeDist`.
-    pub fn compute_dist(&self, a: Point, b: Point) -> f64 {
+    pub(crate) fn compute_dist(&self, a: Point, b: Point) -> f64 {
         a.dist(b) + self.insertion_delay(a) + self.insertion_delay(b)
     }
 
@@ -348,7 +348,12 @@ impl Builder {
 
     /// Legalizes a buffer and moves it off any sink or leaf buffer it
     /// lands on, as `HTreeBuilder::legalizeOneBuffer`.
-    pub fn legalize_one_buffer(&self, ctx: &TreeContext<'_>, p: Point, buffer: LibCellId) -> Point {
+    pub(crate) fn legalize_one_buffer(
+        &self,
+        ctx: &TreeContext<'_>,
+        p: Point,
+        buffer: LibCellId,
+    ) -> Point {
         let legal = self.legalize_in_blockages(ctx, p, buffer);
         let mut resolved = legal;
         let mut jitter = 0;

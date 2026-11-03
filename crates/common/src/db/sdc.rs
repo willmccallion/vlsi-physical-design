@@ -272,7 +272,7 @@ pub struct Sdc {
 impl Sdc {
     /// The clock named `name`.
     #[must_use]
-    pub fn clock_id(&self, name: &str) -> Option<ClockId> {
+    pub(crate) fn clock_id(&self, name: &str) -> Option<ClockId> {
         self.clocks
             .iter()
             .position(|c| c.name == name)

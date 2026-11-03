@@ -594,7 +594,7 @@ fn global_stage<'a>(
         })
         .collect();
     let global = match resume {
-        Some(state) => restored_global(db, tech, &mut grid, &global_nets, state)?,
+        Some(state) => restored_global(db, tech, &grid, &global_nets, state)?,
         None => route_global(&mut grid, &global_nets, config.global_iterations),
     };
     let (nx, ny) = grid.size();
@@ -709,7 +709,7 @@ fn reaches(tree: &[Vec<GCell>], terminals: &[GCell]) -> bool {
 fn restored_global(
     db: &NetlistDB,
     tech: &RouteTech,
-    grid: &mut GlobalGrid,
+    grid: &GlobalGrid,
     nets: &[GlobalNet],
     state: &RouteState,
 ) -> Result<GlobalRoutes, RouteError> {

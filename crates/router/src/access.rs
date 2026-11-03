@@ -59,7 +59,7 @@ const MAX_CANDIDATE_NODES: usize = 8;
 
 /// The box around the other points of `points`, for each of them; `None`
 /// when there are no others.
-pub fn fellow_boxes(points: &[Point<Dbu>]) -> Vec<Option<Rect<Dbu>>> {
+pub(crate) fn fellow_boxes(points: &[Point<Dbu>]) -> Vec<Option<Rect<Dbu>>> {
     let grown = |seen: Option<Rect<Dbu>>, p: Point<Dbu>| {
         let point = Rect::new(p, p);
         Some(seen.map_or(point, |b: Rect<Dbu>| b.union(&point)))
@@ -82,7 +82,7 @@ pub fn fellow_boxes(points: &[Point<Dbu>]) -> Vec<Option<Rect<Dbu>>> {
 /// Puts the candidates nearest `fellows`, the box of the net's other pins,
 /// first, so a pin is entered from the side its net leaves. The sort keeps
 /// the order of equals.
-pub fn order_toward(candidates: &mut [AccessPoint], fellows: &Rect<Dbu>) {
+pub(crate) fn order_toward(candidates: &mut [AccessPoint], fellows: &Rect<Dbu>) {
     candidates.sort_by_key(|a| distance_outside(a.at, fellows));
 }
 

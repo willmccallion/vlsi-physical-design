@@ -170,7 +170,7 @@ impl DbuPerMicron {
 
     /// Converts square microns to square DBU, failing if the value is not a
     /// whole number of square DBU.
-    pub fn to_dbu_area(self, square_microns: f64) -> Result<DbuArea, OffGrid> {
+    pub(crate) fn to_dbu_area(self, square_microns: f64) -> Result<DbuArea, OffGrid> {
         let per = f64::from(self.0);
         let scaled = square_microns * per * per;
         let rounded = scaled.round();

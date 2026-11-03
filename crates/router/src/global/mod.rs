@@ -138,7 +138,7 @@ impl Usage {
 
 /// One layer's routing resources and their use, summed over its edges.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub struct LayerTotals {
+pub(crate) struct LayerTotals {
     /// The layer.
     pub layer: LayerId,
     /// Its preferred direction, which its edges run along.
@@ -455,7 +455,7 @@ impl GlobalGrid {
 
     /// The center of a gcell, as `OpenROAD`'s global router places route
     /// points: half a gcell into it, whatever part of it the die holds.
-    pub fn cell_center(&self, c: GCell) -> Point<Dbu> {
+    pub(crate) fn cell_center(&self, c: GCell) -> Point<Dbu> {
         let half = Dbu(self.gcell.get() / 2);
         self.origin
             + Point::new(
@@ -465,7 +465,7 @@ impl GlobalGrid {
     }
 
     /// The area of a gcell.
-    pub fn cell_rect(&self, x: u16, y: u16) -> Rect<Dbu> {
+    pub(crate) fn cell_rect(&self, x: u16, y: u16) -> Rect<Dbu> {
         let min = self.origin + Point::new(self.gcell * i64::from(x), self.gcell * i64::from(y));
         Rect::new(min, min + Point::new(self.gcell, self.gcell))
     }
@@ -607,7 +607,7 @@ impl GlobalGrid {
 
     /// Capacity, usage and overflow summed over each layer's edges, lowest
     /// routing layer first.
-    pub fn layer_totals(&self) -> Vec<LayerTotals> {
+    pub(crate) fn layer_totals(&self) -> Vec<LayerTotals> {
         let per_layer = usize::from(self.nx) * usize::from(self.ny);
         self.directions
             .iter()
@@ -807,7 +807,7 @@ fn via_stacks(paths: &[Vec<GCell>]) -> Vec<Vec<GCell>> {
 
 /// Search costs of global routing, in gcells.
 #[derive(Clone, Copy, Debug)]
-pub struct GlobalCosts {
+pub(crate) struct GlobalCosts {
     /// Cost of changing layer.
     pub via: f64,
     /// Cost of an edge used to capacity, approached smoothly from below.
@@ -844,7 +844,7 @@ pub struct GlobalRoutes {
 /// A net's global route as a tree over its gcells, for finding the cells
 /// that join two of them.
 #[derive(Clone, Debug, Default)]
-pub struct RouteTree {
+pub(crate) struct RouteTree {
     index: FxHashMap<GCell, usize>,
     cells: Vec<GCell>,
     parent: Vec<usize>,
@@ -890,7 +890,7 @@ impl RouteTree {
 
     /// Every link of the tree as (cell, parent) positions in
     /// [`Self::cells`]; the root of each separate tree is left out.
-    pub fn links(&self) -> impl Iterator<Item = (usize, usize)> + '_ {
+    pub(crate) fn links(&self) -> impl Iterator<Item = (usize, usize)> + '_ {
         self.parent
             .iter()
             .enumerate()
@@ -1019,8 +1019,8 @@ impl GlobalGrid {
 ///
 /// When a net lacks a saved route or has one it should not, or a saved
 /// route is not a tree on the grid through every one of the net's pins.
-pub fn restore_global(
-    grid: &mut GlobalGrid,
+pub(crate) fn restore_global(
+    grid: &GlobalGrid,
     nets: &[GlobalNet],
     saved: Vec<(NetId, Vec<Vec<GCell>>)>,
 ) -> Result<GlobalRoutes, RestoreError> {

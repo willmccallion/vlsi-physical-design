@@ -77,7 +77,7 @@ impl Zones {
     }
 
     /// Whether the design has any fence.
-    pub const fn has_fences(&self) -> bool {
+    pub(crate) const fn has_fences(&self) -> bool {
         !self.fences.is_empty()
     }
 
@@ -94,7 +94,7 @@ impl Zones {
     }
 
     /// The rectangles of a fence, or nothing for the space outside them.
-    pub fn fence_rects(&self, zone: Zone) -> &[Rect<Dbu>] {
+    pub(crate) fn fence_rects(&self, zone: Zone) -> &[Rect<Dbu>] {
         match zone {
             Zone::Fence(r) => self
                 .fences

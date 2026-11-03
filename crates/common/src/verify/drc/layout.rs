@@ -37,7 +37,7 @@ pub enum Owner {
 impl Owner {
     /// Whether the owner is an obstruction or blockage rather than metal
     /// that carries a signal.
-    pub const fn is_blockage(self) -> bool {
+    pub(crate) const fn is_blockage(self) -> bool {
         matches!(self, Self::Obstruction(_) | Self::Blockage(_))
     }
 
@@ -93,7 +93,7 @@ impl Origin {
     }
 
     /// The origin of a cell or I/O pin with placement status `status`.
-    pub const fn of_placed(status: PlacementStatus) -> Self {
+    pub(crate) const fn of_placed(status: PlacementStatus) -> Self {
         if status.is_movable() {
             Self::Placement
         } else {
@@ -178,7 +178,7 @@ impl Layout {
     }
 
     /// Puts `owner`'s shapes under nondefault rule `rule`.
-    pub fn set_non_default_rule(&mut self, owner: OwnerIndex, rule: NonDefaultRuleId) {
+    pub(crate) fn set_non_default_rule(&mut self, owner: OwnerIndex, rule: NonDefaultRuleId) {
         if let Some(slot) = Arc::make_mut(&mut self.owners)
             .rule_of
             .get_mut(owner.index())
@@ -348,7 +348,7 @@ impl Layout {
     /// `layout`, the layout of `db`, as `OpenROAD` reads it: the wiring of
     /// nets under a nondefault rule at the layers' default widths, and every
     /// owner under the default rules. Its owners are those of `layout`.
-    pub fn as_openroad_reads(db: &NetlistDB, layout: &Self) -> Self {
+    pub(crate) fn as_openroad_reads(db: &NetlistDB, layout: &Self) -> Self {
         let mut view = Self::with_owners_of(layout);
         Arc::make_mut(&mut view.owners).rule_of.fill(None);
         let is_rule_wiring = |s: &LayoutShape| {

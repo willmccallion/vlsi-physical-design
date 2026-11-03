@@ -51,7 +51,7 @@ impl SinkClustering {
         }
     }
 
-    pub fn add_point(&mut self, x: f64, y: f64, cap: f32) {
+    pub(crate) fn add_point(&mut self, x: f64, y: f64, cap: f32) {
         self.points.push(Point::new(x, y));
         self.caps.push(cap);
     }

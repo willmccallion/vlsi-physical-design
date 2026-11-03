@@ -280,7 +280,7 @@ struct Outcome {
 impl DetailedRouter<'_> {
     /// Routes again, over the global routes of the nets in each violation,
     /// the nets `scope` selects there.
-    pub fn repair_guides(&mut self, scope: Scope, costs: Costs) -> RepairStats {
+    pub(crate) fn repair_guides(&mut self, scope: Scope, costs: Costs) -> RepairStats {
         let mut boxes = Vec::new();
         for m in self.markers() {
             for net in m.nets.iter().flatten() {
@@ -299,7 +299,7 @@ impl DetailedRouter<'_> {
     /// `scope` selects there, each tile with every mix of the conflict and
     /// marker costs times `COST_FACTORS`, keeping per cluster the result
     /// with the fewest violations.
-    pub fn repair_stubborn(&mut self, scope: Scope, costs: Costs) -> RepairStats {
+    pub(crate) fn repair_stubborn(&mut self, scope: Scope, costs: Costs) -> RepairStats {
         let limit = self.gcell_limit();
         let boxes = self
             .markers()

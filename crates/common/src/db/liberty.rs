@@ -155,7 +155,7 @@ pub enum AxisVariable {
 
 /// The quantities a lookup may vary along the axes of a table.
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
-pub struct TableInputs {
+pub(crate) struct TableInputs {
     /// The slew at a delay arc's input, in seconds.
     pub in_slew: f64,
     /// The load a delay arc drives, in farads.
@@ -270,18 +270,9 @@ pub struct Table {
 }
 
 impl Table {
-    /// A table of one value.
-    #[must_use]
-    pub fn scalar(value: f64) -> Self {
-        Self {
-            axes: Vec::new(),
-            values: vec![value],
-        }
-    }
-
     /// Whether the table has the axes and values it claims.
     #[must_use]
-    pub fn is_consistent(&self) -> bool {
+    pub(crate) fn is_consistent(&self) -> bool {
         let expected: usize = self.axes.iter().map(|a| a.values.len()).product();
         !self.values.is_empty() && self.values.len() == expected && self.axes.len() <= 3
     }
@@ -289,7 +280,7 @@ impl Table {
     /// The largest point of the first axis varying output capacitance, if
     /// any.
     #[must_use]
-    pub fn max_capacitance_point(&self) -> Option<f64> {
+    pub(crate) fn max_capacitance_point(&self) -> Option<f64> {
         self.axes
             .iter()
             .find(|a| a.variable == AxisVariable::OutputCapacitance)
@@ -314,7 +305,7 @@ impl Table {
     /// [`Table::lookup`] with a related output capacitance for tables that
     /// vary one.
     #[must_use]
-    pub fn lookup_with_related(&self, in_slew: f64, load_cap: f64, related_cap: f64) -> f64 {
+    pub(crate) fn lookup_with_related(&self, in_slew: f64, load_cap: f64, related_cap: f64) -> f64 {
         self.lookup_inputs(&TableInputs {
             in_slew,
             load_cap,
@@ -337,7 +328,7 @@ impl Table {
     /// The table's value at `inputs`, each axis taking the quantity it
     /// varies.
     #[must_use]
-    pub fn lookup_inputs(&self, inputs: &TableInputs) -> f64 {
+    pub(crate) fn lookup_inputs(&self, inputs: &TableInputs) -> f64 {
         let mut coordinates = [0.0; MAX_AXES];
         for (c, axis) in coordinates.iter_mut().zip(&self.axes) {
             *c = axis.pick(inputs);
@@ -415,13 +406,13 @@ pub enum ArcRole {
 impl ArcRole {
     /// Whether the arc carries a delay rather than constraining one.
     #[must_use]
-    pub const fn is_delay(self) -> bool {
+    pub(crate) const fn is_delay(self) -> bool {
         !self.is_check()
     }
 
     /// Whether the arc constrains a delay rather than carrying one.
     #[must_use]
-    pub const fn is_check(self) -> bool {
+    pub(crate) const fn is_check(self) -> bool {
         matches!(
             self,
             Self::Setup | Self::Hold | Self::Recovery | Self::Removal | Self::Check
@@ -821,7 +812,7 @@ impl LibCell {
 
     /// Whether any pin has a function.
     #[must_use]
-    pub fn has_functions(&self) -> bool {
+    pub(crate) fn has_functions(&self) -> bool {
         self.ports.iter().any(|p| p.function.is_some())
     }
 
@@ -1107,14 +1098,14 @@ impl FuncExpr {
     /// Whether two expressions have the same shape, as `OpenSTA`'s
     /// `FuncExpr::equiv`.
     #[must_use]
-    pub fn equiv(&self, other: &Self) -> bool {
+    pub(crate) fn equiv(&self, other: &Self) -> bool {
         self == other
     }
 
     /// [`FuncExpr::equiv`] over optional expressions, two absences being
     /// equivalent.
     #[must_use]
-    pub fn equiv_opt(a: Option<&Self>, b: Option<&Self>) -> bool {
+    pub(crate) fn equiv_opt(a: Option<&Self>, b: Option<&Self>) -> bool {
         match (a, b) {
             (None, None) => true,
             (Some(a), Some(b)) => a.equiv(b),
@@ -1165,7 +1156,7 @@ impl FuncExpr {
     /// reads it from the expression's form; none for a pin it does not read
     /// or a form that does not tell.
     #[must_use]
-    pub fn port_timing_sense(&self, port: &str) -> Option<TimingSense> {
+    pub(crate) fn port_timing_sense(&self, port: &str) -> Option<TimingSense> {
         match self.port_sense(port) {
             PortSense::Sense(sense) => Some(sense),
             PortSense::Independent | PortSense::Unknown => None,
@@ -1416,7 +1407,11 @@ mod tests {
             values: vec![7.0],
         };
         assert!((t.lookup(0.0, 99.0) - 7.0).abs() < 1e-12);
-        assert!((Table::scalar(2.5).lookup(1.0, 1.0) - 2.5).abs() < 1e-12);
+        let scalar = Table {
+            axes: Vec::new(),
+            values: vec![2.5],
+        };
+        assert!((scalar.lookup(1.0, 1.0) - 2.5).abs() < 1e-12);
     }
 
     #[test]

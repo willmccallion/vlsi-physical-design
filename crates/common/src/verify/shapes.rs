@@ -41,7 +41,7 @@ pub fn wire_rect(from: Point<Dbu>, to: Point<Dbu>, width: Dbu) -> Option<Rect<Db
 /// The rectangle a wire of `width` covers, extended past `from` by
 /// `from_extension` and past `to` by `to_extension`; `None` for a diagonal
 /// wire.
-pub fn wire_rect_with_ends(
+pub(crate) fn wire_rect_with_ends(
     from: Point<Dbu>,
     to: Point<Dbu>,
     width: Dbu,
@@ -128,7 +128,7 @@ pub fn route_elem_shapes(db: &NetlistDB, net: NetId, elem: &RouteElem) -> Vec<Sh
 /// The shapes of one routing element with every wire at its layer's default
 /// width, which is how `OpenROAD` reads routed wiring whatever the net's
 /// nondefault rule says.
-pub fn default_width_shapes(db: &NetlistDB, elem: &RouteElem) -> Vec<Shape> {
+pub(crate) fn default_width_shapes(db: &NetlistDB, elem: &RouteElem) -> Vec<Shape> {
     match *elem {
         RouteElem::Wire {
             layer,
@@ -174,7 +174,7 @@ pub fn default_width_shapes(db: &NetlistDB, elem: &RouteElem) -> Vec<Shape> {
 /// Every wire and `RECT` is a path along its centerline, and one without a
 /// `SHAPE` grows by half its width at both ends. A `RECT` odd in both
 /// dimensions, which `OpenDB` drops, stays as written.
-pub fn special_net_metal(net: &SpecialNet) -> impl Iterator<Item = Shape> + '_ {
+pub(crate) fn special_net_metal(net: &SpecialNet) -> impl Iterator<Item = Shape> + '_ {
     let wires = net.wires.iter().map(|w| Shape {
         layer: LayerRef::Routing(w.layer),
         rect: special_wire_box(w),

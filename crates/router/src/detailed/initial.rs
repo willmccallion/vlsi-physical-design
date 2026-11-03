@@ -50,7 +50,7 @@ impl DetailedRouter<'_> {
     /// Routes `nets` region by region from their global routes and track
     /// assignment; a net that cannot be split into regions, or whose piece
     /// in some region cannot be connected, is routed whole instead.
-    pub fn route_initial(&mut self, nets: &[NetId], costs: Costs) -> RepairStats {
+    pub(crate) fn route_initial(&mut self, nets: &[NetId], costs: Costs) -> RepairStats {
         let grid = RegionGrid::of_pass(self, 0);
         let planned: Vec<Result<Plan, NetId>> = nets
             .par_iter()

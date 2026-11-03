@@ -168,28 +168,28 @@ impl<'a> Metal<'a> {
     }
 
     /// Positions of the maximal rectangles meeting `area`.
-    pub fn rects_near(&self, area: &Rect<Dbu>) -> impl Iterator<Item = usize> + '_ {
+    pub(crate) fn rects_near(&self, area: &Rect<Dbu>) -> impl Iterator<Item = usize> + '_ {
         self.rect_index.near(area)
     }
 
     /// The edges meeting `area`.
-    pub fn edges_near(&self, area: &Rect<Dbu>) -> impl Iterator<Item = &GcEdge> + '_ {
+    pub(crate) fn edges_near(&self, area: &Rect<Dbu>) -> impl Iterator<Item = &GcEdge> + '_ {
         self.edge_indices_near(area).map(|i| &self.edges[i])
     }
 
     /// Positions of the edges meeting `area`.
-    pub fn edge_indices_near(&self, area: &Rect<Dbu>) -> impl Iterator<Item = usize> + '_ {
+    pub(crate) fn edge_indices_near(&self, area: &Rect<Dbu>) -> impl Iterator<Item = usize> + '_ {
         self.edge_index.near(area)
     }
 
     /// Whether any owner's metal lies strictly inside `area`.
-    pub fn has_metal_in(&self, area: &Rect<Dbu>) -> bool {
+    pub(crate) fn has_metal_in(&self, area: &Rect<Dbu>) -> bool {
         self.rects_near(area)
             .any(|i| self.rects[i].rect.overlaps(area))
     }
 
     /// The part of `window` the fixed metal of `owner` covers.
-    pub fn fixed_within(&self, owner: OwnerIndex, window: &Rect<Dbu>) -> Region {
+    pub(crate) fn fixed_within(&self, owner: OwnerIndex, window: &Rect<Dbu>) -> Region {
         Region::from_rects(
             self.shape_index
                 .near(window)
@@ -200,7 +200,7 @@ impl<'a> Metal<'a> {
     }
 
     /// Whether routed metal of `owner` shares area with `area`.
-    pub fn has_route_in(&self, owner: OwnerIndex, area: &Rect<Dbu>) -> bool {
+    pub(crate) fn has_route_in(&self, owner: OwnerIndex, area: &Rect<Dbu>) -> bool {
         self.shape_index
             .near(area)
             .map(|i| self.shapes[i])
@@ -209,7 +209,11 @@ impl<'a> Metal<'a> {
 
     /// Whether metal that placement put there, of either of `owners`, meets
     /// `area`.
-    pub fn placed_metal_meets(&self, owners: (OwnerIndex, OwnerIndex), area: &Rect<Dbu>) -> bool {
+    pub(crate) fn placed_metal_meets(
+        &self,
+        owners: (OwnerIndex, OwnerIndex),
+        area: &Rect<Dbu>,
+    ) -> bool {
         placed_shape_meets(self.shapes, self.shape_index.near(area), owners)
     }
 }
@@ -335,7 +339,11 @@ impl<'a> Cut<'a> {
 
     /// Whether a cut that placement put there, of either of `owners`, meets
     /// `area`.
-    pub fn placed_cut_meets(&self, owners: (OwnerIndex, OwnerIndex), area: &Rect<Dbu>) -> bool {
+    pub(crate) fn placed_cut_meets(
+        &self,
+        owners: (OwnerIndex, OwnerIndex),
+        area: &Rect<Dbu>,
+    ) -> bool {
         placed_shape_meets(self.shapes, self.index.near(area), owners)
     }
 }
@@ -420,7 +428,7 @@ impl Facing {
     }
 
     /// The longer run.
-    pub fn prl(&self) -> Dbu {
+    pub(crate) fn prl(&self) -> Dbu {
         self.prl_x.max(self.prl_y)
     }
 }

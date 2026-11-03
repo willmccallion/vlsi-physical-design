@@ -15,7 +15,7 @@ impl Tracks {
     pub const ZERO: Self = Self(0);
 
     /// One whole track.
-    pub const ONE: Self = Self(Self::SCALE);
+    pub(crate) const ONE: Self = Self(Self::SCALE);
 
     /// `n` whole tracks.
     pub const fn whole(n: u32) -> Self {
@@ -23,7 +23,7 @@ impl Tracks {
     }
 
     /// The nearest representable count to `tracks`.
-    pub fn from_f64(tracks: f64) -> Self {
+    pub(crate) fn from_f64(tracks: f64) -> Self {
         Self((tracks * Self::SCALE as f64).round() as i64)
     }
 

@@ -62,7 +62,7 @@ impl Edge {
 }
 
 /// The edges along a path of crossings, each a neighbour of the last.
-pub fn path_edges(path: &[Node]) -> impl Iterator<Item = Edge> + '_ {
+pub(crate) fn path_edges(path: &[Node]) -> impl Iterator<Item = Edge> + '_ {
     path.windows(2).filter_map(|w| Edge::between(w[0], w[1]))
 }
 
@@ -116,7 +116,7 @@ impl Wiring {
 }
 
 /// Sorts `patches` and drops repeats.
-pub fn tidy_patches(patches: &mut Vec<Patch>) {
+pub(crate) fn tidy_patches(patches: &mut Vec<Patch>) {
     patches.sort_by_key(Patch::sort_key);
     patches.dedup();
 }
@@ -270,7 +270,12 @@ impl DisjointSets {
 /// Each piece of metal belongs to the track nearest its middle. Only on a
 /// track with such a gap are the crossings the route uses looked up, from
 /// its runs, its vias and its access points there.
-pub fn gap_fills(route: &NetRoute, db: &NetlistDB, tech: &RouteTech, net: NetId) -> Vec<Edge> {
+pub(crate) fn gap_fills(
+    route: &NetRoute,
+    db: &NetlistDB,
+    tech: &RouteTech,
+    net: NetId,
+) -> Vec<Edge> {
     let mut metal: BTreeMap<(LayerId, u32), Vec<(Dbu, Dbu)>> = BTreeMap::new();
     for (layer, rect) in route.metal(db, tech, net) {
         if !tech.routable(layer) {
@@ -388,7 +393,7 @@ impl UsedCrossings {
 }
 
 /// The stub and via stack joining an access point's node to its pin.
-pub fn access_elems(tech: &RouteTech, a: &AccessPoint) -> Vec<RouteElem> {
+pub(crate) fn access_elems(tech: &RouteTech, a: &AccessPoint) -> Vec<RouteElem> {
     let node = tech.layer(a.node.layer).point(a.node.track, a.node.cross);
     let mut out = Vec::new();
     if node != a.at {
@@ -404,7 +409,7 @@ pub fn access_elems(tech: &RouteTech, a: &AccessPoint) -> Vec<RouteElem> {
 }
 
 /// The cuts of one piece of wiring.
-pub fn elem_cuts(db: &NetlistDB, elem: &RouteElem) -> Vec<(CutLayerId, Rect<Dbu>)> {
+pub(crate) fn elem_cuts(db: &NetlistDB, elem: &RouteElem) -> Vec<(CutLayerId, Rect<Dbu>)> {
     match *elem {
         RouteElem::Wire { .. } | RouteElem::Patch { .. } => Vec::new(),
         RouteElem::Via { via, at } => db
@@ -422,7 +427,11 @@ pub fn elem_cuts(db: &NetlistDB, elem: &RouteElem) -> Vec<(CutLayerId, Rect<Dbu>
 
 /// The metal of one piece of `net`'s wiring on routing layers, at the
 /// widths the net's rule gives it, as the checker sees it.
-pub fn elem_metal(db: &NetlistDB, net: NetId, elem: &RouteElem) -> Vec<(LayerId, Rect<Dbu>)> {
+pub(crate) fn elem_metal(
+    db: &NetlistDB,
+    net: NetId,
+    elem: &RouteElem,
+) -> Vec<(LayerId, Rect<Dbu>)> {
     route_elem_shapes(db, net, elem)
         .into_iter()
         .filter_map(|s| match s.layer {

@@ -76,7 +76,7 @@ impl Violation {
     /// Whether the kind is reported for information only and does not
     /// decide whether a routing passes: the minimum step rule, which
     /// `OpenROAD` never checks when the LEF gives it as a property.
-    pub const fn is_advisory(self) -> bool {
+    pub(crate) const fn is_advisory(self) -> bool {
         matches!(self, Self::MinStep)
     }
 

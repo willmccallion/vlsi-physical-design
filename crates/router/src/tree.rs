@@ -25,7 +25,7 @@ pub struct Join {
 }
 
 /// The first pin and the joins that connect the rest, in order.
-pub fn connection_order(pins: &[Rect<Dbu>]) -> (usize, Vec<Join>) {
+pub(crate) fn connection_order(pins: &[Rect<Dbu>]) -> (usize, Vec<Join>) {
     if pins.len() <= PRIM_LIMIT {
         prim(pins)
     } else {
@@ -99,7 +99,7 @@ fn hilbert(mut x: u32, mut y: u32) -> u64 {
 
 /// Indices of `points` in the order a Hilbert curve over their bounding box
 /// visits them, so that neighbours in the order are close together.
-pub fn hilbert_order(points: &[Point<Dbu>]) -> Vec<usize> {
+pub(crate) fn hilbert_order(points: &[Point<Dbu>]) -> Vec<usize> {
     let min_x = points.iter().map(|p| p.x).min().unwrap_or_default();
     let min_y = points.iter().map(|p| p.y).min().unwrap_or_default();
     let span = span(points);

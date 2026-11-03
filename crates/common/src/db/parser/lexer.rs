@@ -32,7 +32,7 @@ pub enum ParseError {
 }
 
 /// Reads a whole input file.
-pub fn read_file(path: &Path) -> Result<String, ParseError> {
+pub(crate) fn read_file(path: &Path) -> Result<String, ParseError> {
     std::fs::read_to_string(path).map_err(|source| ParseError::Io {
         path: path.to_path_buf(),
         source,
@@ -41,7 +41,7 @@ pub fn read_file(path: &Path) -> Result<String, ParseError> {
 
 /// One word of input and the line it started on.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub struct Token<'a> {
+pub(crate) struct Token<'a> {
     /// The word, without surrounding quotes.
     pub text: &'a str,
     /// One-based line number.
@@ -50,7 +50,7 @@ pub struct Token<'a> {
 
 /// A stream of tokens over one file.
 #[derive(Debug)]
-pub struct Lexer<'a> {
+pub(crate) struct Lexer<'a> {
     src: &'a str,
     pos: usize,
     line: usize,
@@ -74,7 +74,7 @@ impl<'a> Lexer<'a> {
 
     /// Creates a lexer over text that starts at `line` of `path`, such as the
     /// contents of a quoted LEF property value.
-    pub const fn starting_at(src: &'a str, path: &'a Path, line: usize) -> Self {
+    pub(crate) const fn starting_at(src: &'a str, path: &'a Path, line: usize) -> Self {
         Self {
             src,
             pos: 0,
@@ -113,19 +113,19 @@ impl<'a> Lexer<'a> {
     }
 
     /// Consumes and returns the next token, or `None` at end of input.
-    pub fn next_token(&mut self) -> Option<Token<'a>> {
+    pub(crate) fn next_token(&mut self) -> Option<Token<'a>> {
         self.peeked.take().or_else(|| self.scan())
     }
 
     /// Consumes the next token, failing at end of input.
-    pub fn expect_token(&mut self, what: &str) -> Result<Token<'a>, ParseError> {
+    pub(crate) fn expect_token(&mut self, what: &str) -> Result<Token<'a>, ParseError> {
         let line = self.line;
         self.next_token()
             .ok_or_else(|| self.error(line, format!("unexpected end of file, expected {what}")))
     }
 
     /// Consumes the next token and checks that it is `keyword`.
-    pub fn expect(&mut self, keyword: &str) -> Result<(), ParseError> {
+    pub(crate) fn expect(&mut self, keyword: &str) -> Result<(), ParseError> {
         let t = self.expect_token(&format!("'{keyword}'"))?;
         if t.text == keyword {
             Ok(())
@@ -153,7 +153,7 @@ impl<'a> Lexer<'a> {
     }
 
     /// Consumes tokens up to and including the next `;`.
-    pub fn skip_statement(&mut self) -> Result<(), ParseError> {
+    pub(crate) fn skip_statement(&mut self) -> Result<(), ParseError> {
         while self.expect_token("';'")?.text != ";" {}
         Ok(())
     }

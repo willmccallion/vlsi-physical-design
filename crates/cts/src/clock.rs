@@ -93,7 +93,7 @@ impl Clock {
         }
     }
 
-    pub fn add_sink(&mut self, sink: ClockSink) {
+    pub(crate) fn add_sink(&mut self, sink: ClockSink) {
         self.sinks.push(ClockInst {
             name: sink.name,
             master: None,
@@ -110,7 +110,12 @@ impl Clock {
 
     /// Adds a buffer named `name` plus the net's name, as
     /// `Clock::addClockBuffer`.
-    pub fn add_buffer(&mut self, name: &str, master: LibCellId, location: DbuPoint) -> InstRef {
+    pub(crate) fn add_buffer(
+        &mut self,
+        name: &str,
+        master: LibCellId,
+        location: DbuPoint,
+    ) -> InstRef {
         let full = format!("{name}_{}", self.net_name);
         let inst = InstRef::Buffer(self.buffers.len());
         let _ = self.by_name.insert(full.clone(), inst);
@@ -130,7 +135,7 @@ impl Clock {
     }
 
     /// Adds a subnet named `name` plus the net's name.
-    pub fn add_subnet(&mut self, name: &str) -> usize {
+    pub(crate) fn add_subnet(&mut self, name: &str) -> usize {
         self.subnets.push(SubNet {
             name: format!("{name}_{}", self.net_name),
             insts: Vec::new(),
@@ -141,14 +146,14 @@ impl Clock {
         self.subnets.len() - 1
     }
 
-    pub fn inst(&self, inst: InstRef) -> &ClockInst {
+    pub(crate) fn inst(&self, inst: InstRef) -> &ClockInst {
         match inst {
             InstRef::Sink(i) => &self.sinks[i],
             InstRef::Buffer(i) => &self.buffers[i],
         }
     }
 
-    pub fn inst_mut(&mut self, inst: InstRef) -> &mut ClockInst {
+    pub(crate) fn inst_mut(&mut self, inst: InstRef) -> &mut ClockInst {
         match inst {
             InstRef::Sink(i) => &mut self.sinks[i],
             InstRef::Buffer(i) => &mut self.buffers[i],
@@ -157,7 +162,7 @@ impl Clock {
 
     /// The box around the sinks with the outer hundredth on each side left
     /// out, as `Clock::computeSinkRegion`.
-    pub fn sink_region(&self) -> (DbuPoint, DbuPoint) {
+    pub(crate) fn sink_region(&self) -> (DbuPoint, DbuPoint) {
         let mut xs: Vec<i64> = self.sinks.iter().map(|s| s.location.0).collect();
         let mut ys: Vec<i64> = self.sinks.iter().map(|s| s.location.1).collect();
         xs.sort_unstable();

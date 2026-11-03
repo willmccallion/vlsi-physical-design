@@ -31,7 +31,7 @@ const MAX_NORMALIZED: u32 = (1 << NUM_BITS_PER_FIELD) - 1;
 /// table's length unit and the other quantities in steps of the
 /// characterization; the narrow fields keep `TritonCTS`'s.
 #[derive(Clone, Debug, PartialEq)]
-pub struct WireSegment {
+pub(crate) struct WireSegment {
     /// Length, in length units.
     pub length: u8,
     /// Load at the far end, in capacitance steps.
@@ -59,14 +59,14 @@ pub struct WireSegment {
 impl WireSegment {
     /// Whether any buffer sits along the segment.
     #[must_use]
-    pub const fn is_buffered(&self) -> bool {
+    pub(crate) const fn is_buffered(&self) -> bool {
         !self.buffer_locations.is_empty()
     }
 }
 
 /// What the characterization is built from.
 #[derive(Clone, Copy, Debug)]
-pub struct CharSetup<'a> {
+pub(crate) struct CharSetup<'a> {
     /// The library link.
     pub link: &'a Link<'a>,
     /// The design, for the buffers' masters.
@@ -81,7 +81,7 @@ pub struct CharSetup<'a> {
 
 /// The characterization table.
 #[derive(Clone, Debug)]
-pub struct TechChar {
+pub(crate) struct TechChar {
     segments: Vec<WireSegment>,
     by_key: FxHashMap<u32, Vec<usize>>,
     min_segment_length: u32,
@@ -289,26 +289,21 @@ impl TechChar {
 
     /// The segments of a length, load and output slew, in table order.
     #[must_use]
-    pub fn segments_with(&self, length: u32, load: u32, output_slew: u32) -> &[usize] {
+    pub(crate) fn segments_with(&self, length: u32, load: u32, output_slew: u32) -> &[usize] {
         self.by_key
             .get(&key(length, load, output_slew))
             .map_or(&[], Vec::as_slice)
     }
 
-    /// Every segment index, in table order.
-    pub const fn indices(&self) -> std::ops::Range<usize> {
-        0..self.segments.len()
-    }
-
     /// The shortest characterized length, in length units.
     #[must_use]
-    pub const fn min_segment_length(&self) -> u32 {
+    pub(crate) const fn min_segment_length(&self) -> u32 {
         self.min_segment_length
     }
 
     /// The longest characterized length, in length units.
     #[must_use]
-    pub const fn max_segment_length(&self) -> u32 {
+    pub(crate) const fn max_segment_length(&self) -> u32 {
         self.max_segment_length
     }
 
@@ -326,38 +321,38 @@ impl TechChar {
 
     /// The smallest normalized input capacitance of any segment.
     #[must_use]
-    pub const fn actual_min_input_cap(&self) -> u32 {
+    pub(crate) const fn actual_min_input_cap(&self) -> u32 {
         self.actual_min_input_cap
     }
 
     /// The length unit, in database units.
     #[must_use]
-    pub const fn length_unit(&self) -> u32 {
+    pub(crate) const fn length_unit(&self) -> u32 {
         self.length_unit
     }
 
     /// The wire length each characterization step adds, in database units.
     #[must_use]
-    pub const fn char_unit(&self) -> u32 {
+    pub(crate) const fn char_unit(&self) -> u32 {
         self.char_unit
     }
 
     /// Clock wire capacitance per database unit, in farads.
     #[must_use]
-    pub const fn cap_per_dbu(&self) -> f64 {
+    pub(crate) const fn cap_per_dbu(&self) -> f64 {
         self.cap_per_dbu
     }
 
     /// Input capacitance of the sink buffer, in farads.
     #[must_use]
-    pub const fn sink_buffer_input_cap(&self) -> f32 {
+    pub(crate) const fn sink_buffer_input_cap(&self) -> f32 {
         self.sink_buffer_input_cap
     }
 
     /// Copies every segment of `length` as a segment of `fake_length`, for
     /// sink regions shorter than the shortest characterized wire, as
     /// `TechChar::createFakeEntries`.
-    pub fn create_fake_entries(&mut self, length: u32, fake_length: u32) {
+    pub(crate) fn create_fake_entries(&mut self, length: u32, fake_length: u32) {
         if length == fake_length {
             return;
         }

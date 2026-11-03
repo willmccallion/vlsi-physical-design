@@ -65,7 +65,7 @@ impl FlowState {
     }
 
     /// The state after the first pass, which rips up every net.
-    pub fn after_first_pass() -> Self {
+    pub(crate) fn after_first_pass() -> Self {
         Self::after(0, Flow::Regular, true)
     }
 
@@ -87,7 +87,7 @@ impl FlowState {
 
     /// Records whether a guides or stubborn round reduced any worker's
     /// violations.
-    pub const fn set_effective(&mut self, effective: bool) {
+    pub(crate) const fn set_effective(&mut self, effective: bool) {
         self.last_effective = effective;
     }
 
@@ -97,7 +97,7 @@ impl FlowState {
     }
 
     /// Whether the last guides or stubborn round was effective.
-    pub const fn last_effective(&self) -> bool {
+    pub(crate) const fn last_effective(&self) -> bool {
         self.last_effective
     }
 }

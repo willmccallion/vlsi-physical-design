@@ -90,7 +90,7 @@ pub struct CutLayer {
 impl CutLayer {
     /// Derives [`CutLayer::spacing`] from the layer's unconditional
     /// different-net rules.
-    pub fn unconditional_spacing(width: Option<Dbu>, rules: &CutLayerRules) -> Option<Dbu> {
+    pub(crate) fn unconditional_spacing(width: Option<Dbu>, rules: &CutLayerRules) -> Option<Dbu> {
         let edge_to_edge = |spacing: Dbu, center_to_center: bool| {
             if center_to_center {
                 width.map(|w| spacing - w)
@@ -300,7 +300,7 @@ pub struct MacroPin {
 
 impl MacroPin {
     /// The lowest routing layer the pin has a shape on.
-    pub fn reference_layer(&self) -> Option<LayerId> {
+    pub(crate) fn reference_layer(&self) -> Option<LayerId> {
         self.shapes
             .iter()
             .filter_map(|s| match s.layer {
@@ -577,7 +577,7 @@ impl Library {
     }
 
     /// The name of a routing or cut layer.
-    pub fn layer_name(&self, layer: LayerRef) -> &str {
+    pub(crate) fn layer_name(&self, layer: LayerRef) -> &str {
         match layer {
             LayerRef::Routing(id) => &self.routing_layers[id.index()].name,
             LayerRef::Cut(id) => &self.cut_layers[id.index()].name,

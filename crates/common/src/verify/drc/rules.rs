@@ -58,7 +58,7 @@ pub struct CutRules {
 
 impl CutRules {
     /// Whether the layer has a `SPACING` statement for cuts of the same net.
-    pub fn has_same_net_rule(&self) -> bool {
+    pub(crate) fn has_same_net_rule(&self) -> bool {
         self.spacings.iter().any(|s| s.same_net)
     }
 }
@@ -124,7 +124,7 @@ impl Rules {
     }
 
     /// The most hard spacing any nondefault rule asks of its wires on `layer`.
-    pub fn max_hard_spacing(&self, layer: LayerId) -> Dbu {
+    pub(crate) fn max_hard_spacing(&self, layer: LayerId) -> Dbu {
         self.non_default
             .iter()
             .filter_map(|n| n.hard_spacing.get(layer.index()).copied().flatten())
@@ -163,7 +163,7 @@ impl Rules {
     }
 
     /// The rules of `library`, with no nondefault rules.
-    pub fn from_library(library: &Library) -> Self {
+    pub(crate) fn from_library(library: &Library) -> Self {
         let metal = library
             .routing_layers
             .iter()

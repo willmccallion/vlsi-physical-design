@@ -66,7 +66,7 @@ pub struct EdgeSet {
 
 impl EdgeSet {
     /// Bytes its vectors hold on the heap.
-    pub const fn heap_bytes(&self) -> usize {
+    pub(crate) const fn heap_bytes(&self) -> usize {
         self.runs.capacity() * size_of::<Run>() + self.vias.capacity() * size_of::<(Node, Node)>()
     }
 
@@ -119,7 +119,7 @@ impl EdgeSet {
     }
 
     /// Removes every edge of `other` from the set.
-    pub fn subtract(&mut self, other: &Self) {
+    pub(crate) fn subtract(&mut self, other: &Self) {
         if !other.runs.is_empty() {
             self.runs = runs_without(&self.runs, &other.runs);
         }
