@@ -844,17 +844,15 @@ pub(super) fn minimize<D: TimingDriver>(
                 ..
             } = &mut setup;
             let mut objective = Objective::new(objects, &die, fields, netlist);
-            run.resume(
-                &mut objective,
-                objects,
+            let mut context = StretchContext {
                 netlist,
                 movable,
-                &mut probe,
+                probe: &mut probe,
                 params,
                 bin,
                 site,
-                &mut report,
-            )
+            };
+            run.resume(&mut objective, objects, &mut context, &mut report)
         };
         if flow == Flow::Done {
             break;
@@ -979,22 +977,23 @@ impl Run {
 
     /// Iterates until the run is over or a timing-driven repair is due,
     /// leaving the placement in `objects.centers`.
-    #[allow(clippy::too_many_arguments)] // the setup's parts are borrowed apart from the objective
     fn resume(
         &mut self,
         objective: &mut Objective<'_>,
         objects: &mut Objects,
-        netlist: &Netlist,
-        movable: &[usize],
-        probe: &mut Option<Probe<'_>>,
-        params: &GlobalParams,
-        bin: Point<f64>,
-        site: f64,
+        context: &mut StretchContext<'_, '_>,
         report: &mut impl FnMut(&Progress),
     ) -> Flow {
+        let params = context.params;
         let mut s = match self.s.take() {
             Some(s) => s,
-            None => initial_state(objective, objects, bin, site, &mut self.grad),
+            None => initial_state(
+                objective,
+                objects,
+                context.bin,
+                context.site,
+                &mut self.grad,
+            ),
         };
         let mut eval = objective.gradient(&s.reference, s.gamma, &s.weights, &mut self.grad);
         if self.rebuilt {
@@ -1015,44 +1014,8 @@ impl Run {
             self.iterations = self.k + 1;
             let a_next = f64::midpoint(1.0, (4.0 * s.a).mul_add(s.a, 1.0).sqrt());
             let momentum = (s.a - 1.0) / a_next;
-            let mut next_eval = eval.clone();
-            let mut next_step = s.step;
-            for attempt in 0..=MAX_BACKTRACKS {
-                for (i, &moves) in moving.iter().enumerate() {
-                    self.next_major[i] = if moves {
-                        s.reference[i] - self.grad[i] * s.step
-                    } else {
-                        s.major[i]
-                    };
-                }
-                objective.clamp(&mut self.next_major);
-                for (i, &moves) in moving.iter().enumerate() {
-                    self.next_reference[i] = if moves {
-                        self.next_major[i] + (self.next_major[i] - s.major[i]) * momentum
-                    } else {
-                        s.major[i]
-                    };
-                }
-                objective.clamp(&mut self.next_reference);
-                next_eval = objective.gradient(
-                    &self.next_reference,
-                    s.gamma,
-                    &s.weights,
-                    &mut self.next_grad,
-                );
-                let moved = distance(&self.next_reference, &s.reference);
-                let changed = distance(&self.next_grad, &self.grad);
-                next_step = if changed > 0.0 {
-                    moved / changed
-                } else {
-                    s.step
-                };
-                if next_step >= 0.95 * s.step || attempt == MAX_BACKTRACKS {
-                    break;
-                }
-                s.step = next_step;
-            }
-
+            let (next_eval, next_step) =
+                self.backtrack(objective, &mut s, &eval, &moving, momentum);
             if !(next_step.is_finite()
                 && all_finite(&self.next_major)
                 && all_finite(&self.next_grad))
@@ -1083,84 +1046,22 @@ impl Run {
             if self.k.is_multiple_of(50) && log::log_enabled!(log::Level::Debug) {
                 s.weights.log(self.k, &eval);
             }
-            let mut froze = false;
-            for (frozen, &overflow) in s.weights.frozen.iter_mut().zip(&eval.field_overflow) {
-                if !*frozen && overflow <= params.target_overflow {
-                    *frozen = true;
-                    froze = true;
-                }
-            }
-            if froze {
+            if freeze_spread_fields(&mut s, &eval, params.target_overflow) {
                 moving = objective.moving(&s.weights.frozen);
             }
             s.weights.damp(self.k, &eval);
             let converged = s.weights.frozen.iter().all(|&f| f);
             if !converged {
-                let growth = penalty_growth(
-                    eval.wirelength.hpwl - s.prev_hpwl,
-                    self.reference_hpwl,
-                    self.growth_limit.highest,
-                );
-                self.growth_limit.observe(eval.overflow);
-                s.weights.update(&eval, growth);
-                s.prev_hpwl = eval.wirelength.hpwl;
-                s.gamma = gamma_for(eval.overflow, bin);
+                self.grow_penalty(&mut s, &eval, context.bin);
             }
             let overflow = mean(&eval.field_overflow);
-            if let Some(r) = self.routability.as_mut() {
-                // OpenROAD refunds without bound; the cap keeps one stalled spread finite.
-                if self.snapshot.is_some()
-                    && overflow > CHECK_OVERFLOW
-                    && self.refunded < params.max_iterations
-                {
-                    self.limit += 1;
-                    self.refunded += 1;
-                }
-                if self.snapshot.is_none() && overflow <= SNAPSHOT_OVERFLOW {
-                    self.snapshot = Some(Snapshot {
-                        state: s.clone(),
-                        energy: eval.field_energy.clone(),
-                    });
-                }
-                if let Some(saved) = &self.snapshot
-                    && r.active()
-                    && overflow <= CHECK_OVERFLOW
-                    && self.settling.settled()
-                {
-                    objects.centers.copy_from_slice(&s.major);
-                    let map = congestion_map(
-                        probe,
-                        netlist,
-                        objects,
-                        movable,
-                        &objective.die,
-                        r.params(),
-                    );
-                    if r.check(self.k, &map, objects, objective.fields) != Verdict::Done {
-                        self.refunded = 0;
-                        s = revert(&saved.state, &s, objective.fields);
-                        objective.refresh(objects);
-                        let resized = objective.evaluate(&s.reference, s.gamma);
-                        s.weights
-                            .rescale_energy(&saved.energy, &resized.field_energy);
-                        eval =
-                            objective.gradient(&s.reference, s.gamma, &s.weights, &mut self.grad);
-                        moving = objective.moving(&s.weights.frozen);
-                    }
-                }
+            if self.check_routability(objective, objects, context, &mut s, &eval) {
+                eval = objective.gradient(&s.reference, s.gamma, &s.weights, &mut self.grad);
+                moving = objective.moving(&s.weights.frozen);
             }
-            if self.timing_on
-                && let Some(timing) = &params.timing
-            {
-                let routability_pending = self.snapshot.is_some()
-                    && self.routability.as_ref().is_some_and(Routability::active)
-                    && overflow > CHECK_OVERFLOW;
-                if !routability_pending
-                    && timing_due(&timing.overflows, &mut self.timing_fired, overflow)
-                {
-                    self.k += 1;
-                    break Flow::Timing;
-                }
+            if self.timing_round_due(params, overflow) {
+                self.k += 1;
+                break Flow::Timing;
             }
             if converged {
                 self.outcome = Outcome::Converged;
@@ -1171,17 +1072,195 @@ impl Run {
 
         objects.centers.copy_from_slice(&s.major);
         if flow == Flow::Done {
-            let last = objective.evaluate(&s.major, s.gamma);
-            let final_congestion = self.routability.as_ref().map(|r| {
-                congestion_map(probe, netlist, objects, movable, &objective.die, r.params())
-                    .metric()
-            });
-            let zones = objective.outcomes(&last);
-            self.last = Some((last, final_congestion, zones));
+            self.record_last(objective, objects, context, &s);
         }
         self.s = Some(s);
         flow
     }
+
+    /// Takes the next step from `s`, shortening it while the step the new
+    /// gradients suggest falls short of it; returns the new evaluation and
+    /// that suggested step, leaving the new positions and gradients in the
+    /// run's `next_` buffers.
+    fn backtrack(
+        &mut self,
+        objective: &mut Objective<'_>,
+        s: &mut State,
+        eval: &Evaluation,
+        moving: &[bool],
+        momentum: f64,
+    ) -> (Evaluation, f64) {
+        let mut next_eval = eval.clone();
+        let mut next_step = s.step;
+        for attempt in 0..=MAX_BACKTRACKS {
+            for (i, &moves) in moving.iter().enumerate() {
+                self.next_major[i] = if moves {
+                    s.reference[i] - self.grad[i] * s.step
+                } else {
+                    s.major[i]
+                };
+            }
+            objective.clamp(&mut self.next_major);
+            for (i, &moves) in moving.iter().enumerate() {
+                self.next_reference[i] = if moves {
+                    self.next_major[i] + (self.next_major[i] - s.major[i]) * momentum
+                } else {
+                    s.major[i]
+                };
+            }
+            objective.clamp(&mut self.next_reference);
+            next_eval = objective.gradient(
+                &self.next_reference,
+                s.gamma,
+                &s.weights,
+                &mut self.next_grad,
+            );
+            let moved = distance(&self.next_reference, &s.reference);
+            let changed = distance(&self.next_grad, &self.grad);
+            next_step = if changed > 0.0 {
+                moved / changed
+            } else {
+                s.step
+            };
+            if next_step >= 0.95 * s.step || attempt == MAX_BACKTRACKS {
+                break;
+            }
+            s.step = next_step;
+        }
+        (next_eval, next_step)
+    }
+
+    /// Raises the density penalty by the wirelength's growth since the
+    /// last iteration, and the wirelength smoothing with the overflow.
+    fn grow_penalty(&mut self, s: &mut State, eval: &Evaluation, bin: Point<f64>) {
+        let growth = penalty_growth(
+            eval.wirelength.hpwl - s.prev_hpwl,
+            self.reference_hpwl,
+            self.growth_limit.highest,
+        );
+        self.growth_limit.observe(eval.overflow);
+        s.weights.update(eval, growth);
+        s.prev_hpwl = eval.wirelength.hpwl;
+        s.gamma = gamma_for(eval.overflow, bin);
+    }
+
+    /// Takes the snapshot, extends the iteration limit while routability
+    /// waits, and once placement has spread and settled measures the
+    /// congestion; returns whether it grew cells and went back to the
+    /// snapshot, so `s` needs its gradients again.
+    fn check_routability(
+        &mut self,
+        objective: &mut Objective<'_>,
+        objects: &mut Objects,
+        context: &mut StretchContext<'_, '_>,
+        s: &mut State,
+        eval: &Evaluation,
+    ) -> bool {
+        let Some(r) = self.routability.as_mut() else {
+            return false;
+        };
+        let overflow = mean(&eval.field_overflow);
+        // OpenROAD refunds without bound; the cap keeps one stalled spread finite.
+        if self.snapshot.is_some()
+            && overflow > CHECK_OVERFLOW
+            && self.refunded < context.params.max_iterations
+        {
+            self.limit += 1;
+            self.refunded += 1;
+        }
+        if self.snapshot.is_none() && overflow <= SNAPSHOT_OVERFLOW {
+            self.snapshot = Some(Snapshot {
+                state: s.clone(),
+                energy: eval.field_energy.clone(),
+            });
+        }
+        let Some(saved) = &self.snapshot else {
+            return false;
+        };
+        if !(r.active() && overflow <= CHECK_OVERFLOW && self.settling.settled()) {
+            return false;
+        }
+        objects.centers.copy_from_slice(&s.major);
+        let map = congestion_map(
+            context.probe,
+            context.netlist,
+            objects,
+            context.movable,
+            &objective.die,
+            r.params(),
+        );
+        if r.check(self.k, &map, objects, objective.fields) == Verdict::Done {
+            return false;
+        }
+        self.refunded = 0;
+        *s = revert(&saved.state, s, objective.fields);
+        objective.refresh(objects);
+        let resized = objective.evaluate(&s.reference, s.gamma);
+        s.weights
+            .rescale_energy(&saved.energy, &resized.field_energy);
+        true
+    }
+
+    /// Whether a timing-driven repair is due at `overflow`, routability
+    /// first finishing any check it waits on.
+    fn timing_round_due(&mut self, params: &GlobalParams, overflow: f64) -> bool {
+        let Some(timing) = params.timing.as_ref().filter(|_| self.timing_on) else {
+            return false;
+        };
+        let routability_pending = self.snapshot.is_some()
+            && self.routability.as_ref().is_some_and(Routability::active)
+            && overflow > CHECK_OVERFLOW;
+        !routability_pending && timing_due(&timing.overflows, &mut self.timing_fired, overflow)
+    }
+
+    /// Keeps the final placement's evaluation, congestion and zone outcomes.
+    fn record_last(
+        &mut self,
+        objective: &mut Objective<'_>,
+        objects: &Objects,
+        context: &mut StretchContext<'_, '_>,
+        s: &State,
+    ) {
+        let last = objective.evaluate(&s.major, s.gamma);
+        let final_congestion = self.routability.as_ref().map(|r| {
+            congestion_map(
+                context.probe,
+                context.netlist,
+                objects,
+                context.movable,
+                &objective.die,
+                r.params(),
+            )
+            .metric()
+        });
+        let zones = objective.outcomes(&last);
+        self.last = Some((last, final_congestion, zones));
+    }
+}
+
+/// What a stretch of iterations reads besides the objective: the netlist
+/// and movable cells routability measures, the probe it measures with, the
+/// run's parameters, the bin size and the site width.
+struct StretchContext<'a, 'p> {
+    netlist: &'a Netlist,
+    movable: &'a [usize],
+    probe: &'a mut Option<Probe<'p>>,
+    params: &'a GlobalParams,
+    bin: Point<f64>,
+    site: f64,
+}
+
+/// Freezes each field whose overflow has fallen to `target`; returns
+/// whether any froze.
+fn freeze_spread_fields(s: &mut State, eval: &Evaluation, target: f64) -> bool {
+    let mut froze = false;
+    for (frozen, &overflow) in s.weights.frozen.iter_mut().zip(&eval.field_overflow) {
+        if !*frozen && overflow <= target {
+            *frozen = true;
+            froze = true;
+        }
+    }
+    froze
 }
 
 /// The state to start from: the weights scaled to the first gradients and
