@@ -14,7 +14,7 @@ use pare_common::db::design::PinOwner;
 use pare_common::db::global_route::RouteSource;
 use pare_common::db::indices::{CellId, NetId, PinId};
 use pare_common::db::liberty::{
-    ArcRole, Edge, EdgeValues, FuncExpr, LibCell, MinMax, SequentialKind, TimingArcSet,
+    ArcRole, Edge, EdgeValues, FuncExpr, MinMax, SequentialKind, TimingArcSet,
 };
 use pare_common::db::library::{MacroClass, SignalUse};
 use std::collections::{BinaryHeap, VecDeque};
@@ -503,89 +503,23 @@ impl TimingGraph {
         clocks: &ClockNetwork,
         driver: PinId,
     ) -> Vec<PinId> {
-        let db = netlist.db;
-        let net = db.pins[driver.index()].net;
+        let net = netlist.db.pins[driver.index()].net;
         let loads: Vec<PinId> = netlist.loads(net).filter(|&p| p != driver).collect();
-        let mut drvr_slew = [Merged::new(MinMax::Min), Merged::new(MinMax::Max)];
-        let mut load_slews: Vec<[Merged; 2]> = vec![drvr_slew; loads.len()];
-        let mut load_delays: Vec<[Merged; 2]> = vec![drvr_slew; loads.len()];
-        let mut arc_delays = Vec::new();
-        let arcs = self.in_arcs[driver.index()].clone();
-        let cell_arcs: Option<(&LibCell, CellId)> = match db.pins[driver.index()].owner {
-            PinOwner::Cell { cell, .. } => netlist.link.cell(db, cell).map(|(_, lib)| (lib, cell)),
-            PinOwner::Io(_) => None,
-        };
-        let mut any_arc = false;
-        if let Some((lib, _)) = cell_arcs {
-            for arc in &arcs {
-                let set: &TimingArcSet = &lib.arc_sets[arc.set];
-                for timing_arc in &set.arcs {
-                    any_arc = true;
-                    let edge = timing_arc.to_edge;
-                    let pi = self.pi_elmore(netlist, driver, edge);
-                    let model = pi.as_ref().map_or_else(
-                        || PiModel {
-                            c2: self.load_cap_for(netlist, driver, edge),
-                            rpi: 0.0,
-                            c1: 0.0,
-                        },
-                        |p| PiModel {
-                            c2: p.c2,
-                            rpi: p.rpi,
-                            c1: p.c1,
-                        },
-                    );
-                    let mut delay = [0.0; 2];
-                    for side in MinMax::BOTH {
-                        let in_slew = if set.role == ArcRole::RegClkToQ && clocks.is_ideal(arc.from)
-                        {
-                            0.0
-                        } else {
-                            self.slew[arc.from.index()][side.index()].get(timing_arc.from_edge)
-                        };
-                        let result = dmp::gate_delay(
-                            timing_arc,
-                            &netlist.link.liberty.thresholds,
-                            in_slew,
-                            model,
-                        );
-                        delay[side.index()] = result.delay;
-                        drvr_slew[side.index()].take(edge, result.slew);
-                        for (i, &load) in loads.iter().enumerate() {
-                            let elmore = pi
-                                .as_ref()
-                                .and_then(|p| {
-                                    p.elmore.iter().find(|(l, _)| *l == load).map(|(_, e)| *e)
-                                })
-                                .unwrap_or(0.0);
-                            let (load_delay, load_slew) = result.load_delay_slew(elmore);
-                            load_slews[i][side.index()].take(edge, load_slew);
-                            load_delays[i][side.index()].take(edge, load_delay);
-                        }
-                    }
-                    arc_delays.push(ArcDelay {
-                        arc: *arc,
-                        from_edge: timing_arc.from_edge,
-                        to_edge: edge,
-                        delay,
-                    });
-                }
-            }
-        }
+        let found = self.driver_delays(netlist, clocks, driver, &loads);
         let root = EdgeValues {
             rise: ROOT_SLEW,
             fall: ROOT_SLEW,
         };
-        let drvr_slew = if any_arc {
-            drvr_slew.map(Merged::values)
+        let drvr_slew = if found.any_arc {
+            found.driver_slew.map(Merged::values)
         } else {
             [root, root]
         };
         if self.annotated[driver.index()].is_none() {
             self.slew[driver.index()] = drvr_slew;
         }
-        self.arc_delays[driver.index()] = arc_delays;
-        let ideal = if any_arc {
+        self.arc_delays[driver.index()] = found.arc_delays;
+        let ideal = if found.any_arc {
             None
         } else {
             Some(self.ideal_driver_loads(netlist, driver, &loads, root))
@@ -595,8 +529,8 @@ impl TimingGraph {
             let (slews, delays) = match &ideal {
                 Some(ideal) => ideal[i],
                 None => (
-                    load_slews[i].map(Merged::values),
-                    load_delays[i].map(Merged::values),
+                    found.load_slews[i].map(Merged::values),
+                    found.load_delays[i].map(Merged::values),
                 ),
             };
             self.wire_delay[load.index()] = delays;
@@ -610,6 +544,97 @@ impl TimingGraph {
         }
         changed
     }
+
+    /// The delays of every arc into `driver` and the slews and wire delays
+    /// they give it and its `loads`, merged over the arcs.
+    fn driver_delays(
+        &self,
+        netlist: &Netlist<'_>,
+        clocks: &ClockNetwork,
+        driver: PinId,
+        loads: &[PinId],
+    ) -> DriverDelays {
+        let db = netlist.db;
+        let unset = [Merged::new(MinMax::Min), Merged::new(MinMax::Max)];
+        let mut found = DriverDelays {
+            driver_slew: unset,
+            load_slews: vec![unset; loads.len()],
+            load_delays: vec![unset; loads.len()],
+            arc_delays: Vec::new(),
+            any_arc: false,
+        };
+        let PinOwner::Cell { cell, .. } = db.pins[driver.index()].owner else {
+            return found;
+        };
+        let Some((_, lib)) = netlist.link.cell(db, cell) else {
+            return found;
+        };
+        for arc in &self.in_arcs[driver.index()] {
+            let set: &TimingArcSet = &lib.arc_sets[arc.set];
+            for timing_arc in &set.arcs {
+                found.any_arc = true;
+                let edge = timing_arc.to_edge;
+                let pi = self.pi_elmore(netlist, driver, edge);
+                let model = pi.as_ref().map_or_else(
+                    || PiModel {
+                        c2: self.load_cap_for(netlist, driver, edge),
+                        rpi: 0.0,
+                        c1: 0.0,
+                    },
+                    |p| PiModel {
+                        c2: p.c2,
+                        rpi: p.rpi,
+                        c1: p.c1,
+                    },
+                );
+                let mut delay = [0.0; 2];
+                for side in MinMax::BOTH {
+                    let in_slew = if set.role == ArcRole::RegClkToQ && clocks.is_ideal(arc.from) {
+                        0.0
+                    } else {
+                        self.slew[arc.from.index()][side.index()].get(timing_arc.from_edge)
+                    };
+                    let result = dmp::gate_delay(
+                        timing_arc,
+                        &netlist.link.liberty.thresholds,
+                        in_slew,
+                        model,
+                    );
+                    delay[side.index()] = result.delay;
+                    found.driver_slew[side.index()].take(edge, result.slew);
+                    for (i, &load) in loads.iter().enumerate() {
+                        let elmore = pi
+                            .as_ref()
+                            .and_then(|p| {
+                                p.elmore.iter().find(|(l, _)| *l == load).map(|(_, e)| *e)
+                            })
+                            .unwrap_or(0.0);
+                        let (load_delay, load_slew) = result.load_delay_slew(elmore);
+                        found.load_slews[i][side.index()].take(edge, load_slew);
+                        found.load_delays[i][side.index()].take(edge, load_delay);
+                    }
+                }
+                found.arc_delays.push(ArcDelay {
+                    arc: *arc,
+                    from_edge: timing_arc.from_edge,
+                    to_edge: edge,
+                    delay,
+                });
+            }
+        }
+        found
+    }
+}
+
+/// What the arcs into a driver give it: its slew and its loads' slews and
+/// wire delays on each side, merged over the arcs, and each arc's delays.
+struct DriverDelays {
+    driver_slew: [Merged; 2],
+    load_slews: Vec<[Merged; 2]>,
+    load_delays: Vec<[Merged; 2]>,
+    arc_delays: Vec<ArcDelay>,
+    /// Whether any arc reached the driver; one without is ideal.
+    any_arc: bool,
 }
 
 /// Whether two sided slews are equal within `OpenSTA`'s tolerance, so a

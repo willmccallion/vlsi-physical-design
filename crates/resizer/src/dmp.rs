@@ -409,38 +409,144 @@ fn initial_params(common: &Common<'_>, rd: f64, ceff: f64) -> Params {
 /// The full pi model fit, as `DmpPi`.
 fn pi_model(common: &Common<'_>, rd: f64, pi: PiModel) -> GateDelay {
     let PiModel { c2, rpi, c1 } = pi;
-    let z1 = 1.0 / (rpi * c1);
-    let k0 = 1.0 / (rd * c2);
-    let a = rpi * rd * c1 * c2;
-    let b = rd * (c1 + c2) + rpi * c1;
-    let sqrt = (b * b - 4.0 * a).sqrt();
-    let p1 = (b + sqrt) / (2.0 * a);
-    let p2 = (b - sqrt) / (2.0 * a);
-    let p1p2 = p1 * p2;
-    let k2 = z1 / p1p2;
-    let k1 = (1.0 - k2 * (p1 + p2)) / p1p2;
-    let k4 = (k1 * p1 + k2) / (p2 - p1);
-    let k3 = -k1 - k4;
-    let z = (c1 + c2) / (rpi * c1 * c2);
-    let big_a = z / p1p2;
-    let big_b = (z - p1) / (p1 * (p1 - p2));
-    let big_d = (z - p2) / (p2 * (p2 - p1));
-    let response = Response::Pi {
-        p1,
-        p2,
-        k0,
-        k1,
-        k2,
-        k3,
-        k4,
+    let poles = PiPoles::new(rd, pi);
+    let equations = |x: &[f64; 3], fvec: &mut [f64; 3], fjac: &mut [[f64; 3]; 3]| {
+        poles.equations(common, rd, pi, x, fvec, fjac)
     };
+    let solve = |start: f64| -> Result<Params, DmpError> {
+        let init = initial_params(common, rd, start);
+        let mut x = [init.t0, init.dt, start];
+        newton_raphson::<3>(&mut x, &equations)?;
+        Ok(Params {
+            t0: x[0],
+            dt: x[1],
+            ceff: x[2],
+        })
+    };
+    let Ok(params) = solve(c2 + c1).or_else(|_| solve(c2)) else {
+        return lumped(common, c1 + c2);
+    };
+    let ceff = params.ceff;
+    let (table_delay, table_slew) = common.table(ceff);
+    let mut fit = Fit {
+        t0: params.t0,
+        dt: params.dt,
+        vth: common.vth,
+        vl: common.vl,
+        vh: common.vh,
+        slew_derate: common.slew_derate,
+        vo_delay: 0.0,
+        vo_upper_bound: params.t0 + params.dt + (c1 + c2) * (rd + rpi) * 2.0,
+        response: poles.response(),
+    };
+    match fit.driver_delay_slew() {
+        Ok((vo_delay, vo_slew)) => {
+            fit.vo_delay = vo_delay;
+            GateDelay {
+                delay: table_delay,
+                slew: vo_slew,
+                ceff,
+                model: LoadModel::Fitted(fit),
+            }
+        }
+        Err(DmpError) => GateDelay {
+            delay: table_delay,
+            slew: table_slew,
+            ceff,
+            model: LoadModel::Lumped,
+        },
+    }
+}
 
-    let eqns = |x: &[f64; 3],
-                fvec: &mut [f64; 3],
-                fjac: &mut [[f64; 3]; 3]|
-     -> Result<(), DmpError> {
+/// The table delay and slew at a lumped `ceff`.
+fn lumped(common: &Common<'_>, ceff: f64) -> GateDelay {
+    let (delay, slew) = common.table(ceff);
+    GateDelay {
+        delay,
+        slew,
+        ceff,
+        model: LoadModel::Lumped,
+    }
+}
+
+/// The poles and residues of a driver of resistance `rd` into a pi load,
+/// as `DmpPi::init`.
+struct PiPoles {
+    p1: f64,
+    p2: f64,
+    k0: f64,
+    k1: f64,
+    k2: f64,
+    k3: f64,
+    k4: f64,
+    big_a: f64,
+    big_b: f64,
+    big_d: f64,
+}
+
+impl PiPoles {
+    fn new(rd: f64, pi: PiModel) -> Self {
+        let PiModel { c2, rpi, c1 } = pi;
+        let z1 = 1.0 / (rpi * c1);
+        let k0 = 1.0 / (rd * c2);
+        let a = rpi * rd * c1 * c2;
+        let b = rd * (c1 + c2) + rpi * c1;
+        let sqrt = (b * b - 4.0 * a).sqrt();
+        let p1 = (b + sqrt) / (2.0 * a);
+        let p2 = (b - sqrt) / (2.0 * a);
+        let p1p2 = p1 * p2;
+        let k2 = z1 / p1p2;
+        let k1 = (1.0 - k2 * (p1 + p2)) / p1p2;
+        let k4 = (k1 * p1 + k2) / (p2 - p1);
+        let k3 = -k1 - k4;
+        let z = (c1 + c2) / (rpi * c1 * c2);
+        Self {
+            p1,
+            p2,
+            k0,
+            k1,
+            k2,
+            k3,
+            k4,
+            big_a: z / p1p2,
+            big_b: (z - p1) / (p1 * (p1 - p2)),
+            big_d: (z - p2) / (p2 * (p2 - p1)),
+        }
+    }
+
+    const fn response(&self) -> Response {
+        Response::Pi {
+            p1: self.p1,
+            p2: self.p2,
+            k0: self.k0,
+            k1: self.k1,
+            k2: self.k2,
+            k3: self.k3,
+            k4: self.k4,
+        }
+    }
+
+    /// The fit's equations and their Jacobian at `x = [t0, dt, ceff]`, as
+    /// `DmpPi::evalDmpEqns`.
+    fn equations(
+        &self,
+        common: &Common<'_>,
+        rd: f64,
+        pi: PiModel,
+        x: &[f64; 3],
+        fvec: &mut [f64; 3],
+        fjac: &mut [[f64; 3]; 3],
+    ) -> Result<(), DmpError> {
+        let Self {
+            p1,
+            p2,
+            big_a,
+            big_b,
+            big_d,
+            ..
+        } = *self;
         let [t0, dt, ceff] = *x;
-        if ceff < 0.0 || ceff > c1 + c2 || dt <= 0.0 {
+        if ceff < 0.0 || ceff > pi.c1 + pi.c2 || dt <= 0.0 {
             return Err(DmpError);
         }
         let (t_vth, t_vl, slew) = common.gate_delays(ceff);
@@ -477,57 +583,6 @@ fn pi_model(common: &Common<'_>, rd: f64, pi: PiModel) -> GateDelay {
         fjac[0] = dy(t_vl, t0, dt, rd, ceff);
         fjac[1] = dy(t_vth, t0, dt, rd, ceff);
         Ok(())
-    };
-    let solve = |start: f64| -> Result<Params, DmpError> {
-        let init = initial_params(common, rd, start);
-        let mut x = [init.t0, init.dt, start];
-        newton_raphson::<3>(&mut x, &eqns)?;
-        Ok(Params {
-            t0: x[0],
-            dt: x[1],
-            ceff: x[2],
-        })
-    };
-
-    let Ok(params) = solve(c2 + c1).or_else(|_| solve(c2)) else {
-        let ceff = c1 + c2;
-        let (delay, slew) = common.table(ceff);
-        return GateDelay {
-            delay,
-            slew,
-            ceff,
-            model: LoadModel::Lumped,
-        };
-    };
-    let ceff = params.ceff;
-    let (table_delay, table_slew) = common.table(ceff);
-    let mut fit = Fit {
-        t0: params.t0,
-        dt: params.dt,
-        vth: common.vth,
-        vl: common.vl,
-        vh: common.vh,
-        slew_derate: common.slew_derate,
-        vo_delay: 0.0,
-        vo_upper_bound: params.t0 + params.dt + (c1 + c2) * (rd + rpi) * 2.0,
-        response,
-    };
-    match fit.driver_delay_slew() {
-        Ok((vo_delay, vo_slew)) => {
-            fit.vo_delay = vo_delay;
-            GateDelay {
-                delay: table_delay,
-                slew: vo_slew,
-                ceff,
-                model: LoadModel::Fitted(fit),
-            }
-        }
-        Err(DmpError) => GateDelay {
-            delay: table_delay,
-            slew: table_slew,
-            ceff,
-            model: LoadModel::Lumped,
-        },
     }
 }
 
