@@ -57,3 +57,18 @@ fn a_cell_past_the_core_is_brought_inside() {
         Some(Point::new(Dbu(5600), Dbu(4000)))
     );
 }
+
+#[test]
+fn a_cell_near_the_top_of_a_raised_core_stays_on_its_top_row() {
+    let mut db = tiny_design();
+    for row in &mut db.rows {
+        row.origin.y += Dbu(2000);
+    }
+    let u1 = db.cell_id("u1").unwrap();
+    db.cells[u1.index()].location = Point::new(Dbu(1000), Dbu(7900));
+    let grid = SiteGrid::new(&db).unwrap();
+
+    let legal = grid.legal_position(&db, u1);
+
+    assert_eq!(legal, Some(Point::new(Dbu(1000), Dbu(6000))));
+}
