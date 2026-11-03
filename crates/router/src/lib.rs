@@ -274,6 +274,7 @@ fn route_detailed(
             );
             (1, conflicted, Scope::Conflicts, flows)
         };
+        summary.rounds = first_round - 1;
         if first_round == 1 {
             session.save_at(SavePoint::Round(0), || {
                 detailed_state(

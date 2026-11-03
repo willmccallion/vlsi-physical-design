@@ -149,6 +149,24 @@ fn a_run_resumed_after_a_stubborn_round_routes_as_the_run_that_saved_it() {
 }
 
 #[test]
+fn a_run_resumed_after_its_last_round_counts_the_rounds_before_it() {
+    let (_, state) = route_saving(SavePoint::Round(TINY_ROUNDS));
+    let (mut db, config) = placed_tiny();
+
+    let summary = route_with(
+        &mut db,
+        &config,
+        Session {
+            resume: Some(&state),
+            ..Session::default()
+        },
+    )
+    .unwrap();
+
+    assert_eq!(summary.rounds, TINY_ROUNDS);
+}
+
+#[test]
 fn a_state_with_a_wire_past_the_end_of_its_track_is_refused() {
     let (_, state) = route_saving(SavePoint::Round(0));
     let (mut db, config) = placed_tiny();
