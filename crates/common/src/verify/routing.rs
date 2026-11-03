@@ -57,15 +57,25 @@ pub fn check_routing(db: &NetlistDB) -> RoutingReport {
     }
 }
 
-/// Whether metal or cut shapes on these layers can conduct into each other.
-fn layers_connect(a: LayerRef, b: LayerRef) -> bool {
-    match (a, b) {
-        (LayerRef::Routing(x), LayerRef::Routing(y)) => x == y,
-        (LayerRef::Cut(x), LayerRef::Cut(y)) => x == y,
+/// Whether two shapes conduct into each other: on one layer they must
+/// overlap or share an edge of some length, and a cut must overlap the
+/// metal above or below it. Shapes meeting at a point never conduct.
+fn shapes_connect(a: &Shape, b: &Shape) -> bool {
+    match (a.layer, b.layer) {
+        (LayerRef::Routing(x), LayerRef::Routing(y)) if x == y => shares_a_side(a, b),
+        (LayerRef::Cut(x), LayerRef::Cut(y)) if x == y => shares_a_side(a, b),
         (LayerRef::Cut(c), LayerRef::Routing(m)) | (LayerRef::Routing(m), LayerRef::Cut(c)) => {
-            m == c.below() || m == c.above()
+            (m == c.below() || m == c.above()) && a.rect.overlaps(&b.rect)
         }
+        _ => false,
     }
+}
+
+/// Whether the shapes overlap or abut along more than a point.
+fn shares_a_side(a: &Shape, b: &Shape) -> bool {
+    a.rect
+        .intersection(&b.rect)
+        .is_some_and(|common| common.width() > Dbu::ZERO || common.height() > Dbu::ZERO)
 }
 
 const fn find(parent: &mut [usize], mut x: usize) -> usize {
@@ -122,7 +132,7 @@ pub fn net_components(db: &NetlistDB, net: NetId) -> usize {
             if rb.rect.min.x > ra.rect.max.x {
                 break;
             }
-            if layers_connect(ra.layer, rb.layer) && ra.rect.touches(&rb.rect) {
+            if shapes_connect(&ra, &rb) {
                 union(&mut parent, a, b);
             }
         }

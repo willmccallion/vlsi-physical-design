@@ -133,6 +133,40 @@ fn a_wire_along_the_pin_layer_connects_the_pins_it_crosses() {
     assert_eq!(check_routing(&db).opens, []);
 }
 
+const fn patch(layer: LayerId, min: Point<Dbu>, max: Point<Dbu>) -> RouteElem {
+    RouteElem::Patch {
+        layer,
+        rect: Rect::new(min, max),
+    }
+}
+
+#[test]
+fn metal_meeting_only_at_a_corner_does_not_connect() {
+    let mut db = empty_design();
+    let net = two_inverters_on_a_net(&mut db);
+    db.nets[net.index()].routing = vec![
+        patch(M1, pt(100, 450), pt(600, 550)),
+        patch(M1, pt(600, 550), pt(1100, 650)),
+    ];
+
+    let opens = check_routing(&db).opens;
+
+    assert_eq!(opens.len(), 1);
+    assert_eq!(opens[0].components, 2);
+}
+
+#[test]
+fn metal_sharing_a_length_of_edge_connects() {
+    let mut db = empty_design();
+    let net = two_inverters_on_a_net(&mut db);
+    db.nets[net.index()].routing = vec![
+        patch(M1, pt(100, 450), pt(600, 550)),
+        patch(M1, pt(600, 500), pt(1100, 650)),
+    ];
+
+    assert_eq!(check_routing(&db).opens, []);
+}
+
 #[test]
 fn wiring_stats_count_wrong_way_wires_and_vias() {
     let mut db = empty_design();
