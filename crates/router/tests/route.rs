@@ -167,6 +167,25 @@ fn a_run_resumed_after_its_last_round_counts_the_rounds_before_it() {
 }
 
 #[test]
+fn a_save_point_the_run_never_reaches_saves_nothing_and_says_so() {
+    let (mut db, config) = placed_tiny();
+    let mut saved = false;
+    let mut write = |_: &RouteState| saved = true;
+    let session = Session {
+        save: Some(Save {
+            after: SavePoint::Round(TINY_ROUNDS + 1),
+            write: &mut write,
+        }),
+        ..Session::default()
+    };
+
+    let summary = route_with(&mut db, &config, session).unwrap();
+
+    assert!(!saved);
+    assert!(!summary.state_saved);
+}
+
+#[test]
 fn a_state_with_a_wire_past_the_end_of_its_track_is_refused() {
     let (_, state) = route_saving(SavePoint::Round(0));
     let (mut db, config) = placed_tiny();

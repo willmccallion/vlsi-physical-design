@@ -62,6 +62,9 @@ pub struct RoutingSummary {
     pub rounds: usize,
     /// Nets still in conflict when negotiation stopped.
     pub conflicted: Vec<NetId>,
+    /// Whether the run reached its session's save point and handed over its
+    /// state; false without a save point.
+    pub state_saved: bool,
 }
 
 /// Where a routing run resumes from and when it saves its state.
@@ -110,13 +113,14 @@ pub enum SavePoint {
 }
 
 impl Session<'_> {
-    /// Hands the state `build` makes to the save, if it is due after `point`.
-    fn save_at(&mut self, point: SavePoint, build: impl FnOnce() -> RouteState) {
-        if let Some(save) = self.save.as_mut()
-            && save.after == point
-        {
-            (save.write)(&build());
-        }
+    /// Hands the state `build` makes to the save, if it is due after
+    /// `point`, returning whether it was.
+    fn save_at(&mut self, point: SavePoint, build: impl FnOnce() -> RouteState) -> bool {
+        let Some(save) = self.save.as_mut().filter(|s| s.after == point) else {
+            return false;
+        };
+        (save.write)(&build());
+        true
     }
 }
 
@@ -218,7 +222,7 @@ fn route_detailed(
         let (nx, ny) = grid.size();
         let named_global = session.save.is_some().then(|| named_global(db, &global));
         let shape = grid_shape(tech, &grid);
-        session.save_at(SavePoint::Global, || RouteState {
+        let mut state_saved = session.save_at(SavePoint::Global, || RouteState {
             design: db.name.clone(),
             grid: shape,
             global: named_global.clone().unwrap_or_default(),
@@ -276,7 +280,7 @@ fn route_detailed(
         };
         summary.rounds = first_round - 1;
         if first_round == 1 {
-            session.save_at(SavePoint::Round(0), || {
+            state_saved |= session.save_at(SavePoint::Round(0), || {
                 detailed_state(
                     db,
                     &dr,
@@ -317,7 +321,7 @@ fn route_detailed(
                 }
             }
             summary.rounds = round;
-            session.save_at(SavePoint::Round(round), || {
+            state_saved |= session.save_at(SavePoint::Round(round), || {
                 let global = named_global.clone();
                 detailed_state(db, &dr, &nets, shape, global, round, scope, &flows)
             });
@@ -333,6 +337,7 @@ fn route_detailed(
         }
         dr.log_conflicts();
         summary.conflicted = conflicted;
+        summary.state_saved = state_saved;
         summary.incomplete = nets
             .iter()
             .copied()

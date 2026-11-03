@@ -1962,6 +1962,14 @@ fn run_routing(
     if let Some(e) = save_error {
         return Err(e);
     }
+    if let Some((path, after)) = &files.save
+        && !summary.state_saved
+    {
+        log::warn!(
+            "routing ended before {after:?}, so no state was saved to {}",
+            path.display()
+        );
+    }
     ui::stat_row(
         "Nets:",
         &summary.nets.to_string(),
