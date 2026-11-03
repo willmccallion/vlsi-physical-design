@@ -238,8 +238,8 @@ impl TechChar {
     pub fn new(setup: &CharSetup<'_>) -> Result<Self, CtsError> {
         let liberty = setup.link.liberty;
         let plan = plan(setup)?;
-        let cap_per_dbu = setup.clock_rc.capacitance * 1e-6 / setup.db.dbu().get() as f64;
-        let res_per_dbu = setup.clock_rc.resistance * 1e-6 / setup.db.dbu().get() as f64;
+        let cap_per_dbu = setup.clock_rc.capacitance.get() * 1e-6 / setup.db.dbu().get() as f64;
+        let res_per_dbu = setup.clock_rc.resistance.get() * 1e-6 / setup.db.dbu().get() as f64;
         let wire = WirePerDbu {
             res: res_per_dbu,
             cap: cap_per_dbu,

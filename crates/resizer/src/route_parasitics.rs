@@ -16,44 +16,45 @@ use pare_common::db::global_route::{NetRoute, RoutePoint};
 use pare_common::db::indices::{LayerId, NetId};
 use pare_common::db::library::Library;
 use pare_common::geom::dbu::Dbu;
+use pare_common::units::{FaradsPerMeter, Ohms, OhmsPerMeter};
 use rustc_hash::FxHashMap;
 
 /// The resistance and capacitance of each layer that global route
 /// parasitics use.
 #[derive(Clone, Debug, PartialEq)]
 pub struct RouteRc {
-    /// Per routing layer, `set_layer_rc`'s ohms and farads per meter, zero
-    /// where not given.
-    layer: Vec<(f64, f64)>,
+    /// Per routing layer, `set_layer_rc`'s resistance and capacitance per
+    /// length, zero where not given.
+    layer: Vec<(OhmsPerMeter, FaradsPerMeter)>,
     /// Per routing layer, the same from the LEF, as `OpenROAD` falls back.
-    lef_layer: Vec<(f64, f64)>,
+    lef_layer: Vec<(OhmsPerMeter, FaradsPerMeter)>,
     width: Vec<Dbu>,
-    /// Per cut layer, `set_layer_rc -via`'s ohms, zero where not given.
-    via: Vec<f64>,
-    /// Per cut layer, the LEF's ohms per cut.
-    lef_via: Vec<f64>,
+    /// Per cut layer, `set_layer_rc -via`'s resistance, zero where not given.
+    via: Vec<Ohms>,
+    /// Per cut layer, the LEF's resistance per cut.
+    lef_via: Vec<Ohms>,
     min_layer: LayerId,
     dbu_per_micron: f64,
 }
 
 impl RouteRc {
     /// The layer values of `library`, overridden per routing layer by
-    /// `layers` (ohms and farads per meter) and per cut layer by `vias`
-    /// (ohms); wires below `min_layer` are left out, as the global router
-    /// does not route there.
+    /// `layers` and per cut layer by `vias`; wires below `min_layer` are
+    /// left out, as the global router does not route there.
     #[must_use]
     pub fn new(
         library: &Library,
-        layers: &[(LayerId, f64, f64)],
-        vias: &[(usize, f64)],
+        layers: &[(LayerId, OhmsPerMeter, FaradsPerMeter)],
+        vias: &[(usize, Ohms)],
         min_layer: LayerId,
     ) -> Self {
         let dbu_per_micron = f64::from(library.dbu_per_micron.get());
-        let mut layer = vec![(0.0, 0.0); library.routing_layers.len()];
+        let mut layer =
+            vec![(OhmsPerMeter::ZERO, FaradsPerMeter::ZERO); library.routing_layers.len()];
         for &(id, r, c) in layers {
             layer[id.index()] = (r, c);
         }
-        let mut via = vec![0.0; library.cut_layers.len()];
+        let mut via = vec![Ohms::ZERO; library.cut_layers.len()];
         for &(cut, r) in vias {
             via[cut] = r;
         }
@@ -70,17 +71,17 @@ impl RouteRc {
             lef_via: library
                 .cut_layers
                 .iter()
-                .map(|c| c.resistance.unwrap_or(0.0))
+                .map(|c| Ohms::new(c.resistance.unwrap_or(0.0)))
                 .collect(),
             min_layer,
             dbu_per_micron,
         }
     }
 
-    /// `set_layer_rc`'s ohms and farads per meter for a routing layer, zero
-    /// where not given, as `EstimateParasitics::layerRC`.
+    /// `set_layer_rc`'s resistance and capacitance per length for a routing
+    /// layer, zero where not given, as `EstimateParasitics::layerRC`.
     #[must_use]
-    pub fn layer_rc(&self, layer: LayerId) -> (f64, f64) {
+    pub fn layer_rc(&self, layer: LayerId) -> (OhmsPerMeter, FaradsPerMeter) {
         self.layer[layer.index()]
     }
 
@@ -88,11 +89,11 @@ impl RouteRc {
     /// `below`: `set_layer_rc -via`'s or else the LEF's, as
     /// `BufferedNet::viaResistance` adds them up.
     #[must_use]
-    pub(crate) fn via_resistance(&self, below: LayerId) -> f64 {
+    pub(crate) fn via_resistance(&self, below: LayerId) -> Ohms {
         let cut = below.index();
         match self.via.get(cut) {
-            Some(&r) if r != 0.0 => r,
-            _ => self.lef_via.get(cut).copied().unwrap_or(0.0),
+            Some(&r) if r != Ohms::ZERO => r,
+            _ => self.lef_via.get(cut).copied().unwrap_or(Ohms::ZERO),
         }
     }
 
@@ -101,8 +102,10 @@ impl RouteRc {
     /// as `MakeWireParasitics::layerRC`.
     #[allow(clippy::cast_possible_truncation)] // OpenROAD returns them in single precision
     fn wire(&self, length: Dbu, layer: LayerId, ndr_width: Option<Dbu>) -> (f32, f32) {
-        let (mut r_per_meter, mut cap_per_meter) = self.layer[layer.index()];
+        let (r, c) = self.layer[layer.index()];
+        let (mut r_per_meter, mut cap_per_meter) = (r.get(), c.get());
         let (lef_r, lef_c) = self.lef_layer[layer.index()];
+        let (lef_r, lef_c) = (lef_r.get(), lef_c.get());
         if r_per_meter == 0.0 {
             r_per_meter = lef_r;
         }
@@ -124,18 +127,18 @@ impl RouteRc {
     /// above, as `MakeWireParasitics::getCutLayerRes` for one cut.
     #[allow(clippy::cast_possible_truncation)] // OpenROAD returns it in single precision
     fn cut(&self, below: LayerId) -> f32 {
-        self.via_resistance(below) as f32
+        self.via_resistance(below).get() as f32
     }
 }
 
-/// A routing layer's ohms and farads per meter from its LEF values, as
-/// `MakeWireParasitics::layerRC` falls back to them.
+/// A routing layer's resistance and capacitance per length from its LEF
+/// values, as `MakeWireParasitics::layerRC` falls back to them.
 #[allow(clippy::cast_possible_truncation)] // OpenROAD holds them in single precision
 fn lef_layer_rc(
     width: Dbu,
     electrical: &pare_common::db::library::LayerElectrical,
     dbu_per_micron: f64,
-) -> (f64, f64) {
+) -> (OhmsPerMeter, FaradsPerMeter) {
     let width_microns = (width.get() as f64 / dbu_per_micron) as f32;
     let res_ohm_per_micron =
         (electrical.resistance_per_square.unwrap_or(0.0) / f64::from(width_microns)) as f32;
@@ -143,8 +146,8 @@ fn lef_layer_rc(
         * electrical.capacitance_per_area.unwrap_or(0.0)
         + 2.0 * electrical.edge_capacitance.unwrap_or(0.0)) as f32;
     (
-        1e6 * f64::from(res_ohm_per_micron),
-        1e6 * 1e-12 * f64::from(cap_pf_per_micron),
+        OhmsPerMeter::new(1e6 * f64::from(res_ohm_per_micron)),
+        FaradsPerMeter::new(1e6 * 1e-12 * f64::from(cap_pf_per_micron)),
     )
 }
 

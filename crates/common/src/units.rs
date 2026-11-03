@@ -165,7 +165,22 @@ define_quantity!(
     Ohms
 );
 
+define_quantity!(
+    /// A length, in meters.
+    Meters
+);
+define_quantity!(
+    /// A wire's resistance per length, in ohms per meter.
+    OhmsPerMeter
+);
+define_quantity!(
+    /// A wire's capacitance per length, in farads per meter.
+    FaradsPerMeter
+);
+
 define_product!(Ohms * Farads = Seconds);
+define_product!(OhmsPerMeter * Meters = Ohms);
+define_product!(FaradsPerMeter * Meters = Farads);
 
 const NANOS_PER_SECOND: f64 = 1e9;
 const PICOS_PER_UNIT: f64 = 1e12;

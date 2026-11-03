@@ -462,19 +462,19 @@ impl<'r, 'a, T: Timing> Repairer<'r, 'a, T> {
                 self.repair_junction(tree.at, left, right, driver, max_cap, r_drvr)
             }
             Kind::Wire { to, layer } => {
-                let rc = self.resizer.tree_rc().wire(*layer);
-                self.repair_wire(tree.at, to, rc, driver, max_cap, r_drvr)
+                let (r, c) = self.resizer.tree_rc().wire(*layer);
+                self.repair_wire(tree.at, to, (r.get(), c.get()), driver, max_cap, r_drvr)
             }
             Kind::Buffer { to, .. } => {
-                let rc = self.resizer.tree_rc().wire(None);
-                self.repair_wire(tree.at, to, rc, driver, max_cap, r_drvr)
+                let (r, c) = self.resizer.tree_rc().wire(None);
+                self.repair_wire(tree.at, to, (r.get(), c.get()), driver, max_cap, r_drvr)
             }
             Kind::Via {
                 to,
                 layer,
                 to_layer,
             } => {
-                let r_via = self.resizer.tree_rc().via(*layer, *to_layer);
+                let r_via = self.resizer.tree_rc().via(*layer, *to_layer).get();
                 self.repair_via(to, r_via, driver, max_cap, r_drvr)
             }
         }

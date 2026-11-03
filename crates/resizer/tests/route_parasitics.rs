@@ -9,11 +9,20 @@ use pare_common::db::indices::{LayerId, NetId, NonDefaultRuleId, PinId};
 use pare_common::db::parser::{def, lef, liberty};
 use pare_common::geom::dbu::{Dbu, DbuPerMicron};
 use pare_common::geom::point::Point;
+use pare_common::units::{FaradsPerMeter, OhmsPerMeter};
 use pare_resizer::bnet::{self, Kind, LoadModel, TreeRc};
 use pare_resizer::parasitics::{NetParasitics, WireRc};
 use pare_resizer::route_parasitics::RouteRc;
 use pare_resizer::{Link, Netlist};
 use std::path::{Path, PathBuf};
+
+const fn per_meter_ohms(value: f64) -> OhmsPerMeter {
+    OhmsPerMeter::new(value)
+}
+
+const fn per_meter_farads(value: f64) -> FaradsPerMeter {
+    FaradsPerMeter::new(value)
+}
 
 fn fixture(crate_name: &str, name: &str) -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR"))
@@ -101,7 +110,7 @@ fn route_segments_become_resistors_with_half_their_capacitance_at_each_end() {
     let net = db.net_id("n1").unwrap();
     let rc = RouteRc::new(
         &db.library,
-        &[(LayerId(1), 2.0e6, 1.0e-10)],
+        &[(LayerId(1), per_meter_ohms(2.0e6), per_meter_farads(1.0e-10))],
         &[],
         LayerId(1),
     );
@@ -171,7 +180,7 @@ fn a_wider_non_default_rule_lowers_the_wire_resistance() {
     db.nets[net.index()].non_default_rule = Some(NonDefaultRuleId::new(0));
     let rc = RouteRc::new(
         &db.library,
-        &[(LayerId(1), 2.0e6, 1.0e-10)],
+        &[(LayerId(1), per_meter_ohms(2.0e6), per_meter_farads(1.0e-10))],
         &[],
         LayerId(1),
     );
@@ -236,7 +245,10 @@ fn a_route_tree_climbs_by_vias_and_runs_wires_on_the_route_layers() {
     };
     let route_rc = RouteRc::new(
         &db.library,
-        &[(LayerId(1), 2.0e6, 1.0e-10), (LayerId(2), 1.0e6, 1.0e-10)],
+        &[
+            (LayerId(1), per_meter_ohms(2.0e6), per_meter_farads(1.0e-10)),
+            (LayerId(2), per_meter_ohms(1.0e6), per_meter_farads(1.0e-10)),
+        ],
         &[],
         LayerId(1),
     );

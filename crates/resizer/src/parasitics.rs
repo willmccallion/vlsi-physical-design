@@ -13,18 +13,19 @@ use pare_common::db::indices::{LayerId, NetId, PinId};
 use pare_common::db::liberty::Edge;
 use pare_common::geom::dbu::Dbu;
 use pare_common::geom::point::Point;
+use pare_common::units::{FaradsPerMeter, Meters, OhmsPerMeter};
 
 /// The resistance `OpenROAD` gives a zero-length connection so the network
 /// stays joined, in ohms.
 const JOIN_RESISTANCE: f64 = 1.0e-3;
 
-/// Resistance and capacitance per meter of signal wire.
+/// Resistance and capacitance per length of signal wire.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct WireRc {
-    /// Ohms per meter.
-    pub resistance: f64,
-    /// Farads per meter.
-    pub capacitance: f64,
+    /// Resistance per length.
+    pub resistance: OhmsPerMeter,
+    /// Capacitance per length.
+    pub capacitance: FaradsPerMeter,
     /// The routing layer signal wires stand on.
     pub layer: LayerId,
 }
@@ -34,8 +35,8 @@ impl WireRc {
     #[must_use]
     pub fn per_micron(ohm_per_um: f64, ff_per_um: f64, layer: LayerId) -> Self {
         Self {
-            resistance: ohm_per_um * 1e6,
-            capacitance: ff_per_um * 1e-15 * 1e6,
+            resistance: OhmsPerMeter::new(ohm_per_um * 1e6),
+            capacitance: FaradsPerMeter::new(ff_per_um * 1e-15 * 1e6),
             layer,
         }
     }
@@ -135,9 +136,9 @@ impl NetParasitics {
                 resistors.push((node, parent, JOIN_RESISTANCE));
                 continue;
             }
-            let length = length_dbu as f64 / dbu * 1e-6;
-            let cap = length * rc.capacitance;
-            let res = length * rc.resistance;
+            let length = Meters::new(length_dbu as f64 / dbu * 1e-6);
+            let cap = (length * rc.capacitance).get();
+            let res = (length * rc.resistance).get();
             wire_cap[node] += cap / 2.0;
             wire_cap[parent] += cap / 2.0;
             resistors.push((node, parent, res));

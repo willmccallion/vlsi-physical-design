@@ -119,6 +119,7 @@ impl Rebuffer {
     /// layer's RC.
     fn wire_length_step_on(&self, resizer: &Resizer<'_, Sta>, layer: Option<LayerId>) -> i64 {
         let (res, cap) = resizer.tree_rc().wire(layer);
+        let (res, cap) = (res.get(), cap.get());
         if layer.is_none() || cap <= 0.0 || res <= 0.0 {
             return self.wire_length_step;
         }
@@ -539,7 +540,7 @@ impl Rebuffer {
             .drive_resistance(driver.port)
             .get();
         let meters = tree.max_load_wire_length() as f64 / resizer.db.dbu().get() as f64 * 1e-6;
-        let load_slew = (r_drvr + meters * rc.resistance) * tree.cap * ELMORE_SKEW_FACTOR;
+        let load_slew = (r_drvr + meters * rc.resistance.get()) * tree.cap * ELMORE_SKEW_FACTOR;
         load_slew <= margined(tree.max_load_slew, SLEW_MARGIN)
     }
 
@@ -1276,9 +1277,9 @@ fn buffer_delay(
 fn can_drive(resizer: &Resizer<'_, Sta>, size: &BufferSize, tree: &Bnet, extra_wire: i64) -> bool {
     let rc = resizer.graph.wire_rc();
     let dbu = resizer.db.dbu().get() as f64;
-    let extra_cap = extra_wire as f64 / dbu * 1e-6 * rc.capacitance + size.output_cap;
+    let extra_cap = extra_wire as f64 / dbu * 1e-6 * rc.capacitance.get() + size.output_cap;
     let wire_meters = (tree.max_load_wire_length() + extra_wire) as f64 / dbu * 1e-6;
-    let load_slew = (size.drive_resistance + wire_meters * rc.resistance)
+    let load_slew = (size.drive_resistance + wire_meters * rc.resistance.get())
         * (tree.cap + extra_cap)
         * ELMORE_SKEW_FACTOR;
     load_slew <= margined(tree.max_load_slew, SLEW_MARGIN)
@@ -1611,8 +1612,8 @@ fn wire_length_limit_by_load_slew(resizer: &Resizer<'_, Sta>, size: &BufferSize)
     let rc = resizer.graph.wire_rc();
     let dbu = resizer.db.dbu().get() as f64;
     let max_slew = margined(size.input_max_slew, SLEW_MARGIN);
-    let a = rc.resistance * rc.capacitance;
-    let b = rc.resistance * size.input_cap + size.drive_resistance * rc.capacitance;
+    let a = rc.resistance.get() * rc.capacitance.get();
+    let b = rc.resistance.get() * size.input_cap + size.drive_resistance * rc.capacitance.get();
     let c = size.drive_resistance * size.input_cap - max_slew / ELMORE_SKEW_FACTOR;
     let discriminant = b * b - 4.0 * a * c;
     if discriminant < 0.0 || a <= 0.0 {
@@ -1643,12 +1644,12 @@ fn wire_length_limit_by_max_cap(resizer: &Resizer<'_, Sta>, size: &BufferSize) -
         return i64::MAX;
     };
     let rc = resizer.graph.wire_rc();
-    if rc.capacitance <= 0.0 {
+    if rc.capacitance.get() <= 0.0 {
         return i64::MAX;
     }
     let dbu = resizer.db.dbu().get() as f64;
     let slack = margined(limit.get(), CAP_MARGIN) - size.input_cap;
-    meters_to_dbu((slack / rc.capacitance).max(0.0), dbu)
+    meters_to_dbu((slack / rc.capacitance.get()).max(0.0), dbu)
 }
 
 /// `meters` in database units, rounded and kept within an `int`, as
@@ -1776,7 +1777,7 @@ fn wire_length_limit(
     rc: WireRc,
     dbu: DbuPerMicron,
 ) -> i64 {
-    if rc.resistance <= 0.0 {
+    if rc.resistance.get() <= 0.0 {
         return i64::MAX;
     }
     let dbu = dbu.get() as f64;
@@ -1804,8 +1805,8 @@ fn buffer_max_wire_length(
     };
     let drive = lib.drive_resistance(output).get();
     let delay = |length: f64| -> f64 {
-        let resistance = length * rc.resistance;
-        let capacitance = length * rc.capacitance;
+        let resistance = length * rc.resistance.get();
+        let capacitance = length * rc.capacitance.get();
         let mut worst = f64::NEG_INFINITY;
         for set in lib.delay_arc_sets_to(output) {
             for arc in &set.arcs {
@@ -1830,7 +1831,7 @@ fn buffer_max_wire_length(
     };
     let diff = |length: f64| delay(length) - 2.0 * delay(length / 2.0);
     let mut low = 0.0;
-    let mut high = drive / rc.resistance;
+    let mut high = drive / rc.resistance.get();
     if !high.is_finite() || high <= 0.0 {
         return f64::INFINITY;
     }

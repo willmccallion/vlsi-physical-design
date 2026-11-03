@@ -16,6 +16,7 @@ use pare_common::db::indices::{LayerId, PinId};
 use pare_common::db::liberty::{Edge, LibCellId};
 use pare_common::geom::dbu::Dbu;
 use pare_common::geom::point::Point;
+use pare_common::units::{FaradsPerMeter, Meters, Ohms, OhmsPerMeter};
 use rustc_hash::FxHashMap;
 use std::collections::HashSet;
 use std::rc::Rc;
@@ -226,10 +227,10 @@ impl Bnet {
     #[must_use]
     pub fn wire(at: Point<Dbu>, to: BnetPtr, layer: Option<LayerId>, rc: &TreeRc<'_>) -> BnetPtr {
         let length = manhattan(at, to.at);
-        let meters = length as f64 / rc.dbu * 1e-6;
+        let meters = Meters::new(length as f64 / rc.dbu * 1e-6);
         let (res_per_meter, cap_per_meter) = rc.wire(layer);
-        let resistance = meters * res_per_meter;
-        let capacitance = meters * cap_per_meter;
+        let resistance = (meters * res_per_meter).get();
+        let capacitance = (meters * cap_per_meter).get();
         let delay = if length == 0 {
             Fixed::ZERO
         } else {
@@ -260,7 +261,7 @@ impl Bnet {
         to: BnetPtr,
         rc: &TreeRc<'_>,
     ) -> BnetPtr {
-        let delay = Fixed::from_seconds(rc.via(layer, to_layer) * to.cap);
+        let delay = Fixed::from_seconds(rc.via(layer, to_layer).get() * to.cap);
         Rc::new(Self {
             cap: to.cap,
             fanout: to.fanout,
@@ -521,21 +522,25 @@ pub struct TreeRc<'a> {
 }
 
 impl TreeRc<'_> {
-    /// Ohms and farads per meter of wire on `layer`, or at the signal wire
-    /// RC without one; zero for a layer `set_layer_rc` left out.
+    /// Resistance and capacitance per length of wire on `layer`, or at the
+    /// signal wire RC without one; zero for a layer `set_layer_rc` left out.
     #[must_use]
-    pub fn wire(&self, layer: Option<LayerId>) -> (f64, f64) {
+    pub fn wire(&self, layer: Option<LayerId>) -> (OhmsPerMeter, FaradsPerMeter) {
         match layer {
             None => (self.signal.resistance, self.signal.capacitance),
-            Some(layer) => self.layers.map_or((0.0, 0.0), |l| l.layer_rc(layer)),
+            Some(layer) => self
+                .layers
+                .map_or((OhmsPerMeter::ZERO, FaradsPerMeter::ZERO), |l| {
+                    l.layer_rc(layer)
+                }),
         }
     }
 
     /// The resistance of the cuts from routing layer `a` to `b`.
     #[must_use]
-    pub fn via(&self, a: LayerId, b: LayerId) -> f64 {
+    pub fn via(&self, a: LayerId, b: LayerId) -> Ohms {
         let Some(layers) = self.layers else {
-            return 0.0;
+            return Ohms::ZERO;
         };
         (a.index().min(b.index())..a.index().max(b.index()))
             .map(|cut| layers.via_resistance(LayerId::new(cut)))
