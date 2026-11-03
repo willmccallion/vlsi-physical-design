@@ -169,7 +169,7 @@ fn lef_parallel_run_spacing_tables_are_read_whole() {
 }
 
 #[test]
-fn spacing_grows_only_once_both_width_and_run_reach_their_thresholds() {
+fn spacing_grows_only_once_both_width_and_run_exceed_their_thresholds() {
     let table = tiny_library().routing_layers[1]
         .spacing_table
         .clone()
@@ -177,7 +177,8 @@ fn spacing_grows_only_once_both_width_and_run_reach_their_thresholds() {
 
     assert_eq!(table.spacing(Dbu(100), Dbu(100), Dbu(900)), Dbu(110));
     assert_eq!(table.spacing(Dbu(300), Dbu(100), Dbu(500)), Dbu(110));
-    assert_eq!(table.spacing(Dbu(100), Dbu(300), Dbu(501)), Dbu(200));
+    assert_eq!(table.spacing(Dbu(100), Dbu(300), Dbu(501)), Dbu(110));
+    assert_eq!(table.spacing(Dbu(100), Dbu(301), Dbu(501)), Dbu(200));
     assert_eq!(table.spacing(Dbu(400), Dbu(100), Dbu(-50)), Dbu(110));
     assert_eq!(table.max_spacing(), Dbu(200));
 }

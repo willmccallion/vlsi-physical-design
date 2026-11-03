@@ -62,14 +62,10 @@ pub struct ParallelRunLengthTable {
 
 impl ParallelRunLengthTable {
     /// The spacing two shapes need when the wider is `width` wide and they
-    /// run side by side for `run`. A width threshold applies from its value
-    /// up, a run length one only beyond it, as `OpenROAD` reads the table.
+    /// run side by side for `run`. Each threshold applies only beyond its
+    /// value, as `OpenROAD`'s `getV55RowIdx` and `getV55ColIdx` read the table.
     pub fn spacing(&self, width: Dbu, run: Dbu) -> Dbu {
-        let row = self
-            .rows
-            .iter()
-            .rposition(|(w, _)| *w <= width)
-            .unwrap_or(0);
+        let row = self.rows.iter().rposition(|(w, _)| *w < width).unwrap_or(0);
         let column = self.run_lengths.iter().rposition(|&r| r < run).unwrap_or(0);
         self.rows
             .get(row)
@@ -487,6 +483,32 @@ mod tests {
         let table = two_widths();
 
         assert_eq!(table.spacing(Dbu(300), Dbu(10), Dbu(-40)), Dbu(50));
+    }
+
+    fn parallel_run_length() -> ParallelRunLengthTable {
+        ParallelRunLengthTable {
+            run_lengths: vec![Dbu(0), Dbu(600)],
+            rows: vec![
+                (Dbu(0), vec![Dbu(140), Dbu(140)]),
+                (Dbu(180), vec![Dbu(140), Dbu(180)]),
+            ],
+        }
+    }
+
+    #[test]
+    fn parallel_run_length_rows_apply_only_to_shapes_wider_than_their_width() {
+        let table = parallel_run_length();
+
+        assert_eq!(table.spacing(Dbu(180), Dbu(1000)), Dbu(140));
+        assert_eq!(table.spacing(Dbu(181), Dbu(1000)), Dbu(180));
+    }
+
+    #[test]
+    fn parallel_run_length_columns_apply_only_to_longer_runs() {
+        let table = parallel_run_length();
+
+        assert_eq!(table.spacing(Dbu(200), Dbu(600)), Dbu(140));
+        assert_eq!(table.spacing(Dbu(200), Dbu(601)), Dbu(180));
     }
 
     #[test]
