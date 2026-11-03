@@ -1207,10 +1207,10 @@ fn within(tracks: &[Dbu], lo: Dbu, hi: Dbu) -> impl Iterator<Item = Dbu> + Clone
 mod tests {
     use super::*;
     use crate::db::design::{PlacementStatus, SpecialNet, SpecialWire, TrackAxis, TrackDef};
-    use crate::db::indices::{MacroId, MacroPinId};
+    use crate::db::indices::{CutLayerId, MacroId, MacroPinId, SiteId};
     use crate::db::library::{
-        CoreKind, CutLayer, Library, MacroClass, MacroPin, PinDirection, RoutingLayer, Shape,
-        SignalUse, Site, SiteClass, Symmetry, ViaDef,
+        CoreKind, CutLayer, Library, Macro, MacroClass, MacroPin, PinDirection, RoutingLayer,
+        Shape, SignalUse, Site, SiteClass, Symmetry, ViaDef,
     };
     use crate::db::rules::{CutLayerRules, ParallelRunLengthTable, RoutingLayerRules};
     use crate::geom::dbu::DbuPerMicron;
@@ -1258,6 +1258,87 @@ mod tests {
         design_full(stripe_x, table, rail_y, None)
     }
 
+    fn cut_layer(name: &str) -> CutLayer {
+        CutLayer {
+            name: name.into(),
+            width: Some(Dbu(100)),
+            spacing: Some(Dbu(120)),
+            rules: CutLayerRules::default(),
+            resistance: None,
+        }
+    }
+
+    /// A default via through `cut` with a 0.1 cut and the given pads below
+    /// and above.
+    fn via(name: &str, cut: CutLayerId, below: Shape, above: Shape) -> ViaDef {
+        ViaDef {
+            name: name.into(),
+            is_default: true,
+            cut,
+            shapes: vec![
+                below,
+                Shape {
+                    layer: LayerRef::Cut(cut),
+                    rect: rect(-50, -50, 50, 50),
+                },
+                above,
+            ],
+            from_def: false,
+        }
+    }
+
+    const fn metal(layer: LayerId, rect: Rect<Dbu>) -> Shape {
+        Shape {
+            layer: LayerRef::Routing(layer),
+            rect,
+        }
+    }
+
+    /// A 0.4 by 2.0 core master on `site` with one pin of `shape`.
+    fn one_pin_master(name: &str, site: SiteId, pin: MacroPin) -> Macro {
+        let symmetry = Symmetry {
+            x: true,
+            y: true,
+            r90: false,
+        };
+        let mut m = Macro::new(
+            name.into(),
+            MacroClass::Core(CoreKind::Regular),
+            pt(400, 2000),
+            symmetry,
+            Some(site),
+        );
+        let _ = m.add_pin(pin);
+        m
+    }
+
+    fn pin(name: &str, direction: PinDirection, shape: Shape) -> MacroPin {
+        MacroPin {
+            name: name.into(),
+            direction,
+            signal_use: SignalUse::Signal,
+            shapes: vec![shape],
+        }
+    }
+
+    /// A ground wire of `width` on `layer` from `from` to `to`.
+    fn ground_wire(
+        layer: LayerId,
+        width: i64,
+        from: Point<Dbu>,
+        to: Point<Dbu>,
+        shape: &str,
+    ) -> SpecialWire {
+        SpecialWire {
+            layer,
+            width: Dbu(width),
+            from,
+            to,
+            extensions: (Dbu::ZERO, Dbu::ZERO),
+            shape: Some(shape.into()),
+        }
+    }
+
     /// [`design_with`] plus a horizontal M3 over M2, joined by a 0.1 cut via
     /// with 0.1 by 0.18 pads, and a 6.0-wide M3 ground stripe along
     /// y = `m3_stripe_y` when given.
@@ -1271,163 +1352,64 @@ mod tests {
         let m1 = lib
             .add_routing_layer(layer("M1", Direction::Horizontal))
             .unwrap();
-        let v1 = lib
-            .add_cut_layer(CutLayer {
-                name: "V1".into(),
-                width: Some(Dbu(100)),
-                spacing: Some(Dbu(120)),
-                rules: CutLayerRules::default(),
-                resistance: None,
-            })
-            .unwrap();
+        let v1 = lib.add_cut_layer(cut_layer("V1")).unwrap();
         let m2 = lib
             .add_routing_layer(RoutingLayer {
                 spacing_table: table,
                 ..layer("M2", Direction::Vertical)
             })
             .unwrap();
-        let v2 = lib
-            .add_cut_layer(CutLayer {
-                name: "V2".into(),
-                width: Some(Dbu(100)),
-                spacing: Some(Dbu(120)),
-                rules: CutLayerRules::default(),
-                resistance: None,
-            })
-            .unwrap();
+        let v2 = lib.add_cut_layer(cut_layer("V2")).unwrap();
         let m3 = lib
             .add_routing_layer(layer("M3", Direction::Horizontal))
             .unwrap();
-        let _ = lib
-            .add_via(ViaDef {
-                name: "V23".into(),
-                is_default: true,
-                cut: v2,
-                shapes: vec![
-                    Shape {
-                        layer: LayerRef::Routing(m2),
-                        rect: rect(-50, -90, 50, 90),
-                    },
-                    Shape {
-                        layer: LayerRef::Cut(v2),
-                        rect: rect(-50, -50, 50, 50),
-                    },
-                    Shape {
-                        layer: LayerRef::Routing(m3),
-                        rect: rect(-90, -50, 90, 50),
-                    },
-                ],
-                from_def: false,
-            })
-            .unwrap();
-        for (name, bottom) in [
-            ("V12", rect(-90, -50, 90, 50)),
-            ("V12V", rect(-50, -90, 50, 90)),
+        let tall = rect(-50, -90, 50, 90);
+        let wide = rect(-90, -50, 90, 50);
+        for v in [
+            via("V23", v2, metal(m2, tall), metal(m3, wide)),
+            via("V12", v1, metal(m1, wide), metal(m2, tall)),
+            ViaDef {
+                is_default: false,
+                ..via("V12V", v1, metal(m1, tall), metal(m2, tall))
+            },
         ] {
-            let _ = lib
-                .add_via(ViaDef {
-                    name: name.into(),
-                    is_default: name == "V12",
-                    cut: v1,
-                    shapes: vec![
-                        Shape {
-                            layer: LayerRef::Routing(m1),
-                            rect: bottom,
-                        },
-                        Shape {
-                            layer: LayerRef::Cut(v1),
-                            rect: rect(-50, -50, 50, 50),
-                        },
-                        Shape {
-                            layer: LayerRef::Routing(m2),
-                            rect: rect(-50, -90, 50, 90),
-                        },
-                    ],
-                    from_def: false,
-                })
-                .unwrap();
+            let _ = lib.add_via(v).unwrap();
         }
-        let symmetry = Symmetry {
-            x: true,
-            y: true,
-            r90: false,
-        };
         let site = lib
             .add_site(Site {
                 name: "s".into(),
                 class: SiteClass::Core,
                 size: pt(200, 2000),
-                symmetry,
+                symmetry: Symmetry {
+                    x: true,
+                    y: true,
+                    r90: false,
+                },
             })
             .unwrap();
-        let mut m = Macro::new(
-            "C".into(),
-            MacroClass::Core(CoreKind::Regular),
-            pt(400, 2000),
-            symmetry,
-            Some(site),
-        );
-        let _ = m.add_pin(MacroPin {
-            name: "a".into(),
-            direction: PinDirection::Input,
-            signal_use: SignalUse::Signal,
-            shapes: vec![Shape {
-                layer: LayerRef::Routing(m1),
-                rect: rect(50, 500, 150, 1500),
-            }],
-        });
-        let m = lib.add_macro(m).unwrap();
-        let mut upper = Macro::new(
-            "U".into(),
-            MacroClass::Core(CoreKind::Regular),
-            pt(400, 2000),
-            symmetry,
-            Some(site),
-        );
-        let _ = upper.add_pin(MacroPin {
-            name: "a".into(),
-            direction: PinDirection::Input,
-            signal_use: SignalUse::Signal,
-            shapes: vec![Shape {
-                layer: LayerRef::Routing(m2),
-                rect: rect(50, 500, 150, 1500),
-            }],
-        });
-        let _ = lib.add_macro(upper).unwrap();
-        let mut right = Macro::new(
-            "R".into(),
-            MacroClass::Core(CoreKind::Regular),
-            pt(400, 2000),
-            symmetry,
-            Some(site),
-        );
-        let _ = right.add_pin(MacroPin {
-            name: "a".into(),
-            direction: PinDirection::Input,
-            signal_use: SignalUse::Signal,
-            shapes: vec![Shape {
-                layer: LayerRef::Routing(m1),
-                rect: rect(250, 500, 350, 1500),
-            }],
-        });
-        let _ = lib.add_macro(right).unwrap();
-        let mut edge = Macro::new(
-            "E".into(),
-            MacroClass::Core(CoreKind::Regular),
-            pt(400, 2000),
-            symmetry,
-            Some(site),
-        );
-        let _ = edge.add_pin(MacroPin {
-            name: "o".into(),
-            direction: PinDirection::Output,
-            signal_use: SignalUse::Signal,
-            shapes: vec![Shape {
-                layer: LayerRef::Routing(m2),
-                rect: rect(0, 500, 150, 1500),
-            }],
-        });
-        let _ = lib.add_macro(edge).unwrap();
+        let input = |layer, rect| pin("a", PinDirection::Input, metal(layer, rect));
+        let m = lib
+            .add_macro(one_pin_master(
+                "C",
+                site,
+                input(m1, rect(50, 500, 150, 1500)),
+            ))
+            .unwrap();
+        for master in [
+            one_pin_master("U", site, input(m2, rect(50, 500, 150, 1500))),
+            one_pin_master("R", site, input(m1, rect(250, 500, 350, 1500))),
+            one_pin_master(
+                "E",
+                site,
+                pin(
+                    "o",
+                    PinDirection::Output,
+                    metal(m2, rect(0, 500, 150, 1500)),
+                ),
+            ),
+        ] {
+            let _ = lib.add_macro(master).unwrap();
+        }
         let mut db = NetlistDB::new("t".into(), lib);
         db.die_area = rect(0, 0, 10_000, 4000);
         db.tracks.push(TrackDef {
@@ -1444,34 +1426,15 @@ mod tests {
             step: Dbu(200),
             layers: vec![m1, m3],
         });
-        let mut wires = vec![SpecialWire {
-            layer: m2,
-            width: Dbu(580),
-            from: pt(stripe_x, 0),
-            to: pt(stripe_x, 4000),
-            extensions: (Dbu::ZERO, Dbu::ZERO),
-            shape: Some("STRIPE".into()),
-        }];
-        if let Some(y) = rail_y {
-            wires.push(SpecialWire {
-                layer: m1,
-                width: Dbu(100),
-                from: pt(0, y),
-                to: pt(10_000, y),
-                extensions: (Dbu::ZERO, Dbu::ZERO),
-                shape: Some("FOLLOWPIN".into()),
-            });
-        }
-        if let Some(y) = m3_stripe_y {
-            wires.push(SpecialWire {
-                layer: m3,
-                width: Dbu(6000),
-                from: pt(0, y),
-                to: pt(10_000, y),
-                extensions: (Dbu::ZERO, Dbu::ZERO),
-                shape: Some("STRIPE".into()),
-            });
-        }
+        let mut wires = vec![ground_wire(
+            m2,
+            580,
+            pt(stripe_x, 0),
+            pt(stripe_x, 4000),
+            "STRIPE",
+        )];
+        wires.extend(rail_y.map(|y| ground_wire(m1, 100, pt(0, y), pt(10_000, y), "FOLLOWPIN")));
+        wires.extend(m3_stripe_y.map(|y| ground_wire(m3, 6000, pt(0, y), pt(10_000, y), "STRIPE")));
         db.special_nets.push(SpecialNet {
             name: "vss".into(),
             signal_use: SignalUse::Ground,

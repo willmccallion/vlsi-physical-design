@@ -15,7 +15,7 @@ use crate::db::parser::lef_rules::{RoutingSpacing, RuleReader};
 use crate::db::parser::lexer::{Lexer, ParseError, Token, read_file};
 use crate::db::rules::{
     CellEdge, ClearanceMeasure, CutLayerRules, MaxViaStack, RoutingLayerRules, SameNetSpacing,
-    ViaRule, ViaRuleMetal,
+    SpacingTable, ViaRule, ViaRuleMetal,
 };
 use crate::geom::dbu::{Dbu, DbuPerMicron};
 use crate::geom::point::Point;
@@ -108,6 +108,59 @@ struct ViaRuleLayer {
     width_range: Option<(Dbu, Dbu)>,
     cut_rect: Option<Rect<Dbu>>,
     cut_pitch: Option<Point<Dbu>>,
+}
+
+/// What a `LAYER` block states, before its kind decides which of it counts.
+#[derive(Default)]
+struct LayerStatements {
+    direction: Option<Direction>,
+    pitch: Option<(Dbu, Dbu)>,
+    offset: Option<(Dbu, Dbu)>,
+    width: Option<Dbu>,
+    spacings: Vec<Dbu>,
+    spacing_table: Option<SpacingTable>,
+    routing: RoutingLayerRules,
+    cut: CutLayerRules,
+    electrical: LayerElectrical,
+    cut_resistance: Option<f64>,
+}
+
+impl LayerStatements {
+    /// The routing layer `name` they describe, or the first required
+    /// statement it lacks.
+    fn routing_layer(self, name: &str) -> Result<RoutingLayer, &'static str> {
+        let direction = self.direction.ok_or("DIRECTION")?;
+        let (pitch_x, pitch_y) = self.pitch.ok_or("PITCH")?;
+        Ok(RoutingLayer {
+            name: name.to_string(),
+            direction,
+            pitch_x,
+            pitch_y,
+            offset_x: self.offset.map(|o| o.0),
+            offset_y: self.offset.map(|o| o.1),
+            width: self.width.ok_or("WIDTH")?,
+            min_spacing: self
+                .spacings
+                .iter()
+                .copied()
+                .min()
+                .ok_or("SPACING or SPACINGTABLE")?,
+            spacing_table: self.spacing_table,
+            rules: self.routing,
+            electrical: self.electrical,
+        })
+    }
+
+    /// The cut layer `name` they describe.
+    fn cut_layer(self, name: &str) -> CutLayer {
+        CutLayer {
+            name: name.to_string(),
+            width: self.width,
+            spacing: CutLayer::unconditional_spacing(self.width, &self.cut),
+            rules: self.cut,
+            resistance: self.cut_resistance,
+        }
+    }
 }
 
 struct LefParser<'a, 'l> {
@@ -248,23 +301,45 @@ impl<'a> LefParser<'a, '_> {
     fn layer(&mut self) -> Result<(), ParseError> {
         let line = self.lx.line();
         let name = self.word("layer name")?;
-        let mut kind = None;
-        let mut direction = None;
-        let mut pitch = None;
-        let mut offset = None;
-        let mut width = None;
-        let mut spacings = Vec::new();
-        let mut spacing_table = None;
-        let mut routing = RoutingLayerRules::default();
-        let mut cut = CutLayerRules::default();
-        let mut electrical = LayerElectrical::default();
-        let mut cut_resistance = None;
+        let (kind, statements) = self.layer_statements(name)?;
+        let missing = |what: &str| self.lx.error(line, format!("layer '{name}' has no {what}"));
+        match kind {
+            Some(LayerKind::Routing) => {
+                let layer = statements.routing_layer(name).map_err(missing)?;
+                self.stack(StackKind::Routing, name, line)?;
+                let _ = self
+                    .lib
+                    .add_routing_layer(layer)
+                    .map_err(|e| self.lx.error(line, e.to_string()))?;
+            }
+            Some(LayerKind::Cut) => {
+                self.stack(StackKind::Cut, name, line)?;
+                let _ = self
+                    .lib
+                    .add_cut_layer(statements.cut_layer(name))
+                    .map_err(|e| self.lx.error(line, e.to_string()))?;
+            }
+            Some(LayerKind::Ignored) => {
+                let _ = self.ignored_layers.insert(name.to_string());
+            }
+            None => return Err(missing("TYPE")),
+        }
+        Ok(())
+    }
 
+    /// The statements of layer `name` up to its `END`, with the kind its
+    /// `TYPE` gives, which must come first.
+    fn layer_statements(
+        &mut self,
+        name: &str,
+    ) -> Result<(Option<LayerKind>, LayerStatements), ParseError> {
+        let mut kind = None;
+        let mut statements = LayerStatements::default();
         loop {
             let t = self.lx.expect_token(&format!("'END {name}'"))?;
             if t.text == "END" {
                 self.end_block(name)?;
-                break;
+                return Ok((kind, statements));
             }
             if t.text == "TYPE" {
                 kind = Some(self.layer_kind()?);
@@ -278,139 +353,105 @@ impl<'a> LefParser<'a, '_> {
             match (kind, t.text) {
                 (LayerKind::Ignored, _) => self.lx.skip_statement()?,
                 (_, "WIDTH") => {
-                    width = Some(self.microns("width")?);
+                    statements.width = Some(self.microns("width")?);
                     self.lx.expect(";")?;
                 }
-                (_, "PROPERTY") => self.layer_properties(kind, &mut routing, &mut cut)?,
-                (LayerKind::Routing, "DIRECTION") => {
-                    direction = Some(match self.word("direction")? {
-                        "HORIZONTAL" => Direction::Horizontal,
-                        "VERTICAL" => Direction::Vertical,
-                        other => {
-                            return Err(self
-                                .lx
-                                .error(t.line, format!("unknown direction '{other}'")));
-                        }
-                    });
-                    self.lx.expect(";")?;
+                (_, "PROPERTY") => {
+                    self.layer_properties(kind, &mut statements.routing, &mut statements.cut)?;
                 }
-                (LayerKind::Routing, "PITCH") => pitch = Some(self.one_or_two()?),
-                (LayerKind::Routing, "OFFSET") => offset = Some(self.one_or_two()?),
-                (LayerKind::Routing, "SPACING") => match self.rules().routing_spacing()? {
-                    RoutingSpacing::Plain(s) => spacings.push(s),
-                    RoutingSpacing::WidthRange(r) => routing.width_range_spacing.push(r),
-                    RoutingSpacing::EndOfLine(r) => routing.end_of_line.push(r),
-                },
-                (LayerKind::Routing, "SPACINGTABLE") => {
-                    let table = self.rules().spacing_table()?;
-                    spacings.push(table.min_spacing());
-                    spacing_table = Some(table);
-                }
-                (LayerKind::Routing, "MINWIDTH") => {
-                    routing.min_width = Some(self.microns("minimum width")?);
-                    self.lx.expect(";")?;
-                }
-                (LayerKind::Routing, "MAXWIDTH") => {
-                    routing.max_width = Some(self.microns("maximum width")?);
-                    self.lx.expect(";")?;
-                }
-                (LayerKind::Routing, "AREA") => {
-                    routing.min_area = Some(self.rules().area("minimum area")?);
-                    self.lx.expect(";")?;
-                }
-                (LayerKind::Routing, "MINENCLOSEDAREA") => {
-                    let rule = self.rules().min_enclosed_area()?;
-                    routing.min_enclosed_areas.push(rule);
-                }
-                (LayerKind::Routing, "MINSTEP") => {
-                    let rule = self.rules().min_step()?;
-                    routing.min_steps.push(rule);
-                }
-                (LayerKind::Routing, "MINIMUMCUT") => {
-                    let rule = self.rules().minimum_cut()?;
-                    routing.minimum_cuts.push(rule);
-                }
-                (LayerKind::Routing, "RESISTANCE") => {
-                    if self.lx.accept("RPERSQ") {
-                        electrical.resistance_per_square =
-                            Some(self.lx.number::<f64>("resistance")?);
-                    }
-                    self.lx.skip_statement()?;
-                }
-                (LayerKind::Routing, "CAPACITANCE") => {
-                    if self.lx.accept("CPERSQDIST") {
-                        electrical.capacitance_per_area =
-                            Some(self.lx.number::<f64>("capacitance")?);
-                    }
-                    self.lx.skip_statement()?;
-                }
-                (LayerKind::Routing, "EDGECAPACITANCE") => {
-                    electrical.edge_capacitance = Some(self.lx.number::<f64>("edge capacitance")?);
-                    self.lx.skip_statement()?;
-                }
-                (LayerKind::Cut, "RESISTANCE") => {
-                    cut_resistance = Some(self.lx.number::<f64>("cut resistance")?);
-                    self.lx.skip_statement()?;
-                }
-                (LayerKind::Cut, "SPACING") => {
-                    let rule = self.rules().cut_spacing()?;
-                    cut.spacings.push(rule);
-                }
-                (LayerKind::Cut, "ENCLOSURE") => {
-                    let rule = self.rules().enclosure()?;
-                    cut.enclosures.push(rule);
-                }
-                (_, kw) if is_ignored(LAYER_IGNORED, kw) => self.lx.skip_statement()?,
-                _ => self.skip_unknown(t, "layer")?,
+                (LayerKind::Routing, _) => self.routing_layer_statement(t, &mut statements)?,
+                (LayerKind::Cut, _) => self.cut_layer_statement(t, &mut statements)?,
             }
         }
+    }
 
-        let missing = |what: &str| self.lx.error(line, format!("layer '{name}' has no {what}"));
-        match kind {
-            Some(LayerKind::Routing) => {
-                let direction = direction.ok_or_else(|| missing("DIRECTION"))?;
-                let (pitch_x, pitch_y) = pitch.ok_or_else(|| missing("PITCH"))?;
-                let width = width.ok_or_else(|| missing("WIDTH"))?;
-                let min_spacing = spacings
-                    .iter()
-                    .copied()
-                    .min()
-                    .ok_or_else(|| missing("SPACING or SPACINGTABLE"))?;
-                self.stack(StackKind::Routing, name, line)?;
-                let _ = self
-                    .lib
-                    .add_routing_layer(RoutingLayer {
-                        name: name.to_string(),
-                        direction,
-                        pitch_x,
-                        pitch_y,
-                        offset_x: offset.map(|o| o.0),
-                        offset_y: offset.map(|o| o.1),
-                        width,
-                        min_spacing,
-                        spacing_table,
-                        rules: routing,
-                        electrical,
-                    })
-                    .map_err(|e| self.lx.error(line, e.to_string()))?;
+    /// Reads a statement only a routing layer has.
+    fn routing_layer_statement(
+        &mut self,
+        t: Token<'a>,
+        statements: &mut LayerStatements,
+    ) -> Result<(), ParseError> {
+        let routing = &mut statements.routing;
+        let electrical = &mut statements.electrical;
+        match t.text {
+            "DIRECTION" => {
+                statements.direction = Some(match self.word("direction")? {
+                    "HORIZONTAL" => Direction::Horizontal,
+                    "VERTICAL" => Direction::Vertical,
+                    other => {
+                        return Err(self
+                            .lx
+                            .error(t.line, format!("unknown direction '{other}'")));
+                    }
+                });
+                self.lx.expect(";")?;
             }
-            Some(LayerKind::Cut) => {
-                self.stack(StackKind::Cut, name, line)?;
-                let _ = self
-                    .lib
-                    .add_cut_layer(CutLayer {
-                        name: name.to_string(),
-                        width,
-                        spacing: CutLayer::unconditional_spacing(width, &cut),
-                        rules: cut,
-                        resistance: cut_resistance,
-                    })
-                    .map_err(|e| self.lx.error(line, e.to_string()))?;
+            "PITCH" => statements.pitch = Some(self.one_or_two()?),
+            "OFFSET" => statements.offset = Some(self.one_or_two()?),
+            "SPACING" => match self.rules().routing_spacing()? {
+                RoutingSpacing::Plain(s) => statements.spacings.push(s),
+                RoutingSpacing::WidthRange(r) => routing.width_range_spacing.push(r),
+                RoutingSpacing::EndOfLine(r) => routing.end_of_line.push(r),
+            },
+            "SPACINGTABLE" => {
+                let table = self.rules().spacing_table()?;
+                statements.spacings.push(table.min_spacing());
+                statements.spacing_table = Some(table);
             }
-            Some(LayerKind::Ignored) => {
-                let _ = self.ignored_layers.insert(name.to_string());
+            "MINWIDTH" => {
+                routing.min_width = Some(self.microns("minimum width")?);
+                self.lx.expect(";")?;
             }
-            None => return Err(missing("TYPE")),
+            "MAXWIDTH" => {
+                routing.max_width = Some(self.microns("maximum width")?);
+                self.lx.expect(";")?;
+            }
+            "AREA" => {
+                routing.min_area = Some(self.rules().area("minimum area")?);
+                self.lx.expect(";")?;
+            }
+            "MINENCLOSEDAREA" => routing
+                .min_enclosed_areas
+                .push(self.rules().min_enclosed_area()?),
+            "MINSTEP" => routing.min_steps.push(self.rules().min_step()?),
+            "MINIMUMCUT" => routing.minimum_cuts.push(self.rules().minimum_cut()?),
+            "RESISTANCE" => {
+                if self.lx.accept("RPERSQ") {
+                    electrical.resistance_per_square = Some(self.lx.number::<f64>("resistance")?);
+                }
+                self.lx.skip_statement()?;
+            }
+            "CAPACITANCE" => {
+                if self.lx.accept("CPERSQDIST") {
+                    electrical.capacitance_per_area = Some(self.lx.number::<f64>("capacitance")?);
+                }
+                self.lx.skip_statement()?;
+            }
+            "EDGECAPACITANCE" => {
+                electrical.edge_capacitance = Some(self.lx.number::<f64>("edge capacitance")?);
+                self.lx.skip_statement()?;
+            }
+            kw if is_ignored(LAYER_IGNORED, kw) => self.lx.skip_statement()?,
+            _ => self.skip_unknown(t, "layer")?,
+        }
+        Ok(())
+    }
+
+    /// Reads a statement only a cut layer has.
+    fn cut_layer_statement(
+        &mut self,
+        t: Token<'a>,
+        statements: &mut LayerStatements,
+    ) -> Result<(), ParseError> {
+        match t.text {
+            "RESISTANCE" => {
+                statements.cut_resistance = Some(self.lx.number::<f64>("cut resistance")?);
+                self.lx.skip_statement()?;
+            }
+            "SPACING" => statements.cut.spacings.push(self.rules().cut_spacing()?),
+            "ENCLOSURE" => statements.cut.enclosures.push(self.rules().enclosure()?),
+            kw if is_ignored(LAYER_IGNORED, kw) => self.lx.skip_statement()?,
+            _ => self.skip_unknown(t, "layer")?,
         }
         Ok(())
     }
