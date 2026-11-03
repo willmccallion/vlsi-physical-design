@@ -332,50 +332,14 @@ fn search_with(
     target: GCell,
     win: (u16, u16, u16, u16),
 ) -> Option<Vec<GCell>> {
-    let Query {
-        net,
-        costs,
-        blocked,
-        corridor,
-    } = query;
-    let terminals: FxHashSet<usize> = sources
-        .iter()
-        .chain(std::iter::once(&target))
-        .map(|&c| grid.edge(c))
-        .collect();
-    let at_terminal =
-        |a: GCell, b: GCell| terminals.contains(&grid.edge(a)) || terminals.contains(&grid.edge(b));
-    let passable = |e: usize, from: GCell, to: GCell| {
-        blocked == Blocked::Cross || !grid.blocked[e] || at_terminal(from, to)
-    };
-    let climbable = |from: GCell, to: GCell| {
-        blocked == Blocked::Cross || !grid.via_blocked(to) || at_terminal(from, to)
-    };
-    let edge_cost = |e: usize| {
-        let demand = net.demand(grid.layer_offset(grid.cell_of(e).layer));
-        let crossing = if grid.blocked[e] { BLOCKED_COST } else { 0.0 };
-        grid.edge_cost(e, demand, costs) + crossing
-    };
-    let climb_cost = |c: GCell| {
-        let crossing = if grid.via_blocked(c) {
-            BLOCKED_COST
-        } else {
-            0.0
-        };
-        costs.via + crossing
-    };
-    let h = |c: GCell| {
-        let layers = c.layer.index().abs_diff(target.layer.index()) as f64;
-        let plane = f64::from(c.x.abs_diff(target.x) + c.y.abs_diff(target.y));
-        costs.via.mul_add(layers, plane)
-    };
-    let local = Local::new(grid, win, corridor);
+    let rules = MoveRules::new(grid, query, sources, target);
+    let local = Local::new(grid, win, query.corridor);
     state.reset(local.nodes());
     let mut heap = BinaryHeap::new();
     for &c in sources {
         state.set(local.index(c), 0.0, NO_PARENT);
         heap.push(Entry {
-            f: h(c),
+            f: rules.estimate(c),
             g: 0.0,
             cell: c,
         });
@@ -384,33 +348,111 @@ fn search_with(
         let Some(Entry { g, cell, .. }) = heap.pop() else {
             break None;
         };
-        let here = grid.edge(cell);
         let at = local.index(cell);
         if state.cost(at).is_some_and(|b| g > b) {
             continue;
         }
         if cell == target {
-            let mut path = vec![cell];
-            let mut node = state.parent[at];
-            while node != NO_PARENT {
-                path.push(local.cell(node as usize));
-                node = state.parent[node as usize];
-            }
-            path.reverse();
-            break Some(path);
+            break Some(traced_path(state, &local, at, cell));
         }
-        let mut push = |next: GCell, step: f64| {
+        for (next, step) in rules.moves_from(cell, &local).into_iter().flatten() {
             let ng = g + step;
             let index = local.index(next);
             if state.cost(index).is_none_or(|b| ng < b) {
                 state.set(index, ng, crate::tech::to_u32(at));
                 heap.push(Entry {
-                    f: ng + h(next),
+                    f: ng + rules.estimate(next),
                     g: ng,
                     cell: next,
                 });
             }
+        }
+    };
+    state.release_beyond(KEPT_SEARCH_NODES);
+    found
+}
+
+/// The path to `cell`, at node `at`, back through its parents to a source.
+fn traced_path(state: &SearchState, local: &Local<'_>, at: usize, cell: GCell) -> Vec<GCell> {
+    let mut path = vec![cell];
+    let mut node = state.parent[at];
+    while node != NO_PARENT {
+        path.push(local.cell(node as usize));
+        node = state.parent[node as usize];
+    }
+    path.reverse();
+    path
+}
+
+/// Which moves one search may make and what each costs.
+struct MoveRules<'a> {
+    grid: &'a GlobalGrid,
+    net: &'a GlobalNet,
+    costs: GlobalCosts,
+    blocked: Blocked,
+    /// The edges of the sources and the target, which blocked metal never
+    /// shuts.
+    terminals: FxHashSet<usize>,
+    target: GCell,
+}
+
+impl<'a> MoveRules<'a> {
+    fn new(grid: &'a GlobalGrid, query: Query<'a>, sources: &[GCell], target: GCell) -> Self {
+        let terminals = sources
+            .iter()
+            .chain(std::iter::once(&target))
+            .map(|&c| grid.edge(c))
+            .collect();
+        Self {
+            grid,
+            net: query.net,
+            costs: query.costs,
+            blocked: query.blocked,
+            terminals,
+            target,
+        }
+    }
+
+    fn at_terminal(&self, a: GCell, b: GCell) -> bool {
+        self.terminals.contains(&self.grid.edge(a)) || self.terminals.contains(&self.grid.edge(b))
+    }
+
+    fn passable(&self, e: usize, from: GCell, to: GCell) -> bool {
+        self.blocked == Blocked::Cross || !self.grid.blocked[e] || self.at_terminal(from, to)
+    }
+
+    fn climbable(&self, from: GCell, to: GCell) -> bool {
+        self.blocked == Blocked::Cross || !self.grid.via_blocked(to) || self.at_terminal(from, to)
+    }
+
+    fn edge_cost(&self, e: usize) -> f64 {
+        let grid = self.grid;
+        let demand = self.net.demand(grid.layer_offset(grid.cell_of(e).layer));
+        let crossing = if grid.blocked[e] { BLOCKED_COST } else { 0.0 };
+        grid.edge_cost(e, demand, self.costs) + crossing
+    }
+
+    fn climb_cost(&self, c: GCell) -> f64 {
+        let crossing = if self.grid.via_blocked(c) {
+            BLOCKED_COST
+        } else {
+            0.0
         };
+        self.costs.via + crossing
+    }
+
+    /// The least cost from `c` to the target: its distance in the plane
+    /// and a via per layer between.
+    fn estimate(&self, c: GCell) -> f64 {
+        let layers = c.layer.index().abs_diff(self.target.layer.index()) as f64;
+        let plane = f64::from(c.x.abs_diff(self.target.x) + c.y.abs_diff(self.target.y));
+        self.costs.via.mul_add(layers, plane)
+    }
+
+    /// The cells one move from `cell` within `local` with what each move
+    /// costs: back and ahead along the layer's direction, then down and up.
+    fn moves_from(&self, cell: GCell, local: &Local<'_>) -> [Option<(GCell, f64)>; 4] {
+        let grid = self.grid;
         let (x, y) = (cell.x, cell.y);
         let (behind, ahead) = match grid.direction(cell.layer) {
             Direction::Horizontal => (
@@ -422,39 +464,28 @@ fn search_with(
                 (y + 1 < grid.ny).then(|| GCell { y: y + 1, ..cell }),
             ),
         };
-        if let Some(next) = behind.filter(|&n| local.contains(n)) {
+        let back = behind.filter(|&n| local.contains(n)).and_then(|next| {
             let e = grid.edge(next);
-            if passable(e, cell, next) {
-                push(next, edge_cost(e));
-            }
-        }
-        if let Some(next) = ahead.filter(|&n| local.contains(n))
-            && passable(here, cell, next)
-        {
-            push(next, edge_cost(here));
-        }
+            self.passable(e, cell, next)
+                .then(|| (next, self.edge_cost(e)))
+        });
+        let here = grid.edge(cell);
+        let forth = ahead
+            .filter(|&n| local.contains(n) && self.passable(here, cell, n))
+            .map(|next| (next, self.edge_cost(here)));
         let l = cell.layer.index();
-        if l > *grid.layers().start() {
+        let climb = |layer: usize| {
             let next = GCell {
-                layer: LayerId::new(l - 1),
+                layer: LayerId::new(layer),
                 ..cell
             };
-            if climbable(cell, next) {
-                push(next, climb_cost(next));
-            }
-        }
-        if l < *grid.layers().end() {
-            let next = GCell {
-                layer: LayerId::new(l + 1),
-                ..cell
-            };
-            if climbable(cell, next) {
-                push(next, climb_cost(next));
-            }
-        }
-    };
-    state.release_beyond(KEPT_SEARCH_NODES);
-    found
+            self.climbable(cell, next)
+                .then(|| (next, self.climb_cost(next)))
+        };
+        let down = (l > *grid.layers().start()).then(|| climb(l - 1)).flatten();
+        let up = (l < *grid.layers().end()).then(|| climb(l + 1)).flatten();
+        [back, forth, down, up]
+    }
 }
 
 /// Nodes of search state a thread keeps between searches; a larger state,

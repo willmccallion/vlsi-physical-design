@@ -39,7 +39,7 @@ use crate::wiring::{Edge, Patch, access_elems, elem_cuts, elem_metal, gap_fills,
 use judge::ShapeTiles;
 use pare_common::db::design::NetlistDB;
 use pare_common::db::design::RouteElem;
-use pare_common::db::indices::{LayerId, NetId, NonDefaultRuleId, PinId, ViaId};
+use pare_common::db::indices::{CutLayerId, LayerId, NetId, NonDefaultRuleId, PinId, ViaId};
 use pare_common::db::library::LayerRef;
 use pare_common::geom::dbu::Dbu;
 use pare_common::geom::point::Point;
@@ -1409,25 +1409,7 @@ fn reserve_accesses(
     occupancy: &mut Occupancy,
     fixed: &FixedView<'_>,
 ) -> Vec<Vec<Vec<AccessPoint>>> {
-    let count_of = |n: usize, k: usize| match &own[n][k] {
-        Some(c) => c.len(),
-        None => shared.count(db, db.nets[n].pins[k]).unwrap_or(0),
-    };
-    let fellows: Vec<Vec<Option<Rect<Dbu>>>> = own
-        .iter()
-        .enumerate()
-        .map(|(n, pins)| {
-            if pins.is_empty() {
-                return Vec::new();
-            }
-            let points: Vec<Point<Dbu>> = db.nets[n]
-                .pins
-                .iter()
-                .map(|&p| db.pin_position(p))
-                .collect();
-            fellow_boxes(&points)
-        })
-        .collect();
+    let fellows = fellow_boxes_of_nets(db, own);
     let candidates_of = |n: usize, k: usize| {
         let mut candidates = match &own[n][k] {
             Some(c) => c.clone(),
@@ -1444,66 +1426,21 @@ fn reserve_accesses(
         .iter()
         .map(|pins| vec![Vec::new(); pins.len()])
         .collect();
-    let mut order: Vec<(usize, usize, usize)> = own
-        .iter()
-        .enumerate()
-        .flat_map(|(n, pins)| (0..pins.len()).map(move |k| (n, k)))
-        .map(|(n, k)| (count_of(n, k), n, k))
-        .filter(|&(count, _, _)| count > 0)
-        .collect();
-    order.sort_unstable();
-    let mut reserved: Vec<OwnVias> = (0..own.len())
-        .map(|n| OwnVias::new(db, tech, tech.net_rule(n)))
-        .collect();
-    let mut low_pads = LowPads::new(fixed.bucket);
-    for (count, n, k) in order {
+    let mut reservations = Reservations {
+        db,
+        tech,
+        occupancy,
+        fixed,
+        low_pads: LowPads::new(fixed.bucket),
+        vias: (0..own.len())
+            .map(|n| OwnVias::new(db, tech, tech.net_rule(n)))
+            .collect(),
+    };
+    for (count, n, k) in reservation_order(db, shared, own) {
         access[n][k] = candidates_of(n, k);
-        let owner = Owner::Net(crate::tech::to_u32(n));
-        let metal_of = |a: &AccessPoint| {
-            access_elems(tech, a)
-                .iter()
-                .flat_map(|e| elem_metal(db, NetId::new(n), e))
-                .collect::<Vec<_>>()
-        };
-        let cuts_of = |a: &AccessPoint| {
-            access_elems(tech, a)
-                .iter()
-                .flat_map(|e| elem_cuts(db, e))
-                .collect::<Vec<_>>()
-        };
-        let clear = access[n][k].iter().position(|a| {
-            let leaves_room = footprint(tech, a)
-                .iter()
-                .all(|&(via, at)| reserved[n].crowded(db, tech, via, at) == 0);
-            let metal_clear = metal_of(a).iter().all(|(layer, rect)| {
-                !tech.routable(*layer)
-                    || occupancy
-                        .rect_conflicts(tech, *layer, rect, owner)
-                        .all(|c| c.proximity != Proximity::Within)
-            });
-            let net = crate::tech::to_u32(n);
-            let low_clear = metal_of(a).iter().all(|(layer, rect)| {
-                if tech.routable(*layer) {
-                    return true;
-                }
-                let spacing = tech.layer(*layer).spacing;
-                low_pads.clear(*layer, rect, net, spacing)
-                    && judge::clear_of_fixed(
-                        fixed.layout,
-                        fixed.tiles,
-                        NetId::new(n),
-                        *layer,
-                        rect,
-                        spacing,
-                    )
-            });
-            leaves_room
-                && metal_clear
-                && low_clear
-                && cuts_of(a)
-                    .iter()
-                    .all(|(cut, rect)| occupancy.cut_conflicts(*cut, rect, owner).next().is_none())
-        });
+        let clear = access[n][k]
+            .iter()
+            .position(|a| reservations.is_clear(n, a));
         let chosen = match clear {
             Some(c) => c,
             None if count == 1 => 0,
@@ -1520,23 +1457,146 @@ fn reserve_accesses(
             db.nets[n].name,
             access[n][k][chosen].at
         );
-        for (layer, rect) in metal_of(&access[n][k][chosen]) {
-            if tech.routable(layer) {
-                occupancy.add_rect(tech, layer, &rect, owner, Origin::Fixed);
-            } else {
-                low_pads.add(layer, rect, crate::tech::to_u32(n));
-            }
-        }
-        for (cut, rect) in cuts_of(&access[n][k][chosen]) {
-            occupancy.add_cut(cut, &rect, owner, Origin::Fixed);
-        }
         let picked = access[n][k].swap_remove(chosen);
-        for (via, at) in footprint(tech, &picked) {
-            reserved[n].add(via, at);
-        }
+        reservations.reserve(n, &picked);
         access[n][k] = vec![picked];
     }
     access
+}
+
+/// For each pin of each net with candidates, the box of the net's other
+/// pins that its candidates are ordered toward.
+fn fellow_boxes_of_nets(
+    db: &NetlistDB,
+    own: &[Vec<Option<Vec<AccessPoint>>>],
+) -> Vec<Vec<Option<Rect<Dbu>>>> {
+    own.iter()
+        .enumerate()
+        .map(|(n, pins)| {
+            if pins.is_empty() {
+                return Vec::new();
+            }
+            let points: Vec<Point<Dbu>> = db.nets[n]
+                .pins
+                .iter()
+                .map(|&p| db.pin_position(p))
+                .collect();
+            fellow_boxes(&points)
+        })
+        .collect()
+}
+
+/// The pins with candidates as `(count, net, pin)`, those with the fewest
+/// candidates first.
+fn reservation_order(
+    db: &NetlistDB,
+    shared: &SharedAccess,
+    own: &[Vec<Option<Vec<AccessPoint>>>],
+) -> Vec<(usize, usize, usize)> {
+    let count_of = |n: usize, k: usize| match &own[n][k] {
+        Some(c) => c.len(),
+        None => shared.count(db, db.nets[n].pins[k]).unwrap_or(0),
+    };
+    let mut order: Vec<(usize, usize, usize)> = own
+        .iter()
+        .enumerate()
+        .flat_map(|(n, pins)| (0..pins.len()).map(move |k| (n, k)))
+        .map(|(n, k)| (count_of(n, k), n, k))
+        .filter(|&(count, _, _)| count > 0)
+        .collect();
+    order.sort_unstable();
+    order
+}
+
+/// The access points reserved so far: their metal and cuts in the
+/// occupancy or, below the routable layers, among the low pads, and each
+/// net's vias.
+struct Reservations<'r, 'f> {
+    db: &'r NetlistDB,
+    tech: &'r RouteTech,
+    occupancy: &'r mut Occupancy,
+    fixed: &'r FixedView<'f>,
+    low_pads: LowPads,
+    vias: Vec<OwnVias>,
+}
+
+impl Reservations<'_, '_> {
+    fn metal_of(&self, n: usize, a: &AccessPoint) -> Vec<(LayerId, Rect<Dbu>)> {
+        access_elems(self.tech, a)
+            .iter()
+            .flat_map(|e| elem_metal(self.db, NetId::new(n), e))
+            .collect()
+    }
+
+    fn cuts_of(&self, a: &AccessPoint) -> Vec<(CutLayerId, Rect<Dbu>)> {
+        access_elems(self.tech, a)
+            .iter()
+            .flat_map(|e| elem_cuts(self.db, e))
+            .collect()
+    }
+
+    /// Whether net `n` can take `a`: its vias leave room for those its
+    /// pins chose earlier, and its metal and cuts are clear of every
+    /// reservation and, below the routable layers, of fixed shapes.
+    fn is_clear(&self, n: usize, a: &AccessPoint) -> bool {
+        let (db, tech) = (self.db, self.tech);
+        let owner = Owner::Net(crate::tech::to_u32(n));
+        let leaves_room = footprint(tech, a)
+            .iter()
+            .all(|&(via, at)| self.vias[n].crowded(db, tech, via, at) == 0);
+        let metal = self.metal_of(n, a);
+        let metal_clear = metal.iter().all(|(layer, rect)| {
+            !tech.routable(*layer)
+                || self
+                    .occupancy
+                    .rect_conflicts(tech, *layer, rect, owner)
+                    .all(|c| c.proximity != Proximity::Within)
+        });
+        let low_clear = metal.iter().all(|(layer, rect)| {
+            if tech.routable(*layer) {
+                return true;
+            }
+            let spacing = tech.layer(*layer).spacing;
+            self.low_pads
+                .clear(*layer, rect, crate::tech::to_u32(n), spacing)
+                && judge::clear_of_fixed(
+                    self.fixed.layout,
+                    self.fixed.tiles,
+                    NetId::new(n),
+                    *layer,
+                    rect,
+                    spacing,
+                )
+        });
+        leaves_room
+            && metal_clear
+            && low_clear
+            && self.cuts_of(a).iter().all(|(cut, rect)| {
+                self.occupancy
+                    .cut_conflicts(*cut, rect, owner)
+                    .next()
+                    .is_none()
+            })
+    }
+
+    /// Reserves `a` for net `n`.
+    fn reserve(&mut self, n: usize, a: &AccessPoint) {
+        let owner = Owner::Net(crate::tech::to_u32(n));
+        for (layer, rect) in self.metal_of(n, a) {
+            if self.tech.routable(layer) {
+                self.occupancy
+                    .add_rect(self.tech, layer, &rect, owner, Origin::Fixed);
+            } else {
+                self.low_pads.add(layer, rect, crate::tech::to_u32(n));
+            }
+        }
+        for (cut, rect) in self.cuts_of(a) {
+            self.occupancy.add_cut(cut, &rect, owner, Origin::Fixed);
+        }
+        for (via, at) in footprint(self.tech, a) {
+            self.vias[n].add(via, at);
+        }
+    }
 }
 
 /// The vias an access point commits its net to: its via stack, and the via

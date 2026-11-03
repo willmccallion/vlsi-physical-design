@@ -42,6 +42,7 @@ use pare_common::util::config::{LayerRangeError, RoutingConfig};
 use pare_common::util::{memory, ui};
 use pare_common::verify::shapes::obstruction_shapes;
 use rustc_hash::{FxHashMap, FxHashSet};
+use search::Costs;
 pub use session::GlobalSession;
 use state::{DetailedState, GridShape};
 pub use state::{RouteState, StateParseError};
@@ -202,7 +203,6 @@ type DetailedResult = (
 
 /// Track assignment and detailed routing over the global routes of
 /// `routed`, saving state as `session` says.
-#[allow(clippy::too_many_lines)]
 fn route_detailed(
     db: &NetlistDB,
     tech: &RouteTech,
@@ -218,174 +218,222 @@ fn route_detailed(
         grid,
         global,
     } = routed;
-    {
-        let (nx, ny) = grid.size();
-        let named_global = session.save.is_some().then(|| named_global(db, &global));
-        let shape = grid_shape(tech, &grid);
-        let mut state_saved = session.save_at(SavePoint::Global, || RouteState {
-            design: db.name.clone(),
-            grid: shape,
-            global: named_global.clone().unwrap_or_default(),
-            detailed: None,
+    let (nx, ny) = grid.size();
+    let saver = StateSaver {
+        db,
+        nets: &nets,
+        grid: grid_shape(tech, &grid),
+        global: session.save.is_some().then(|| named_global(db, &global)),
+    };
+    let mut state_saved = session.save_at(SavePoint::Global, || saver.global_state());
+    dr.set_trace(trace_of(db, &session.trace)?);
+    let start = Instant::now();
+    let wires = assign_tracks(tech, &dr.occupancy, &grid, &global, &dr.pin_points());
+    dr.set_guides(global, &grid);
+    dr.set_track_wires(wires);
+    stage("Track assign:", start);
+    dr.log_inaccessible_pins();
+    let mut summary = RoutingSummary {
+        nets: nets.len(),
+        inaccessible: dr.inaccessible_nets(),
+        ..RoutingSummary::default()
+    };
+    let mut negotiation = match session.resume.and_then(|s| s.detailed.as_ref()) {
+        Some(saved) => Negotiation::resumed(&mut dr, db, saved, via)?,
+        None => Negotiation::after_first_pass(&mut dr, &nets, via),
+    };
+    summary.rounds = negotiation.first_round - 1;
+    if negotiation.first_round == 1 {
+        state_saved |= session.save_at(SavePoint::Round(0), || {
+            saver.detailed_state(&dr, 0, &negotiation)
         });
-        dr.set_trace(trace_of(db, &session.trace)?);
-        let start = Instant::now();
-        let wires = assign_tracks(tech, &dr.occupancy, &grid, &global, &dr.pin_points());
-        dr.set_guides(global, &grid);
-        dr.set_track_wires(wires);
-        stage("Track assign:", start);
-        dr.log_inaccessible_pins();
-        let mut summary = RoutingSummary {
-            nets: nets.len(),
-            inaccessible: dr.inaccessible_nets(),
-            ..RoutingSummary::default()
-        };
-        let start = Instant::now();
-        let resumed = session.resume.and_then(|s| s.detailed.as_ref());
-        let (first_round, mut conflicted, mut scope, mut flows) = if let Some(saved) = resumed {
-            let routes = named_routes(db, &saved.routes)?;
-            dr.restore(&routes)?;
-            dr.occupancy.shrink_to_fit();
-            ui::dr_table_header();
-            let conflicted = dr.rejudge();
-            ui::dr_iter(
-                saved.round,
-                dr.marker_count(),
-                conflicted.len(),
-                0,
-                round_costs(saved.round, via).conflict,
-                saved.flow.name(),
-                start.elapsed().as_millis(),
-            );
-            let flows = FlowState::after(saved.round, saved.flow, saved.effective);
-            (saved.round + 1, conflicted, saved.scope, flows)
-        } else {
-            dr.log_footprint("track assignment");
-            let first = dr.route_initial(&nets, round_costs(0, via));
-            dr.occupancy.shrink_to_fit();
-            dr.log_footprint("first pass");
-            ui::dr_table_header();
-            let conflicted = dr.rejudge();
-            let flows = FlowState::after_first_pass();
-            ui::dr_iter(
-                0,
-                dr.marker_count(),
-                conflicted.len(),
-                first.pieces,
-                round_costs(0, via).conflict,
-                flows.current().name(),
-                start.elapsed().as_millis(),
-            );
-            (1, conflicted, Scope::Conflicts, flows)
-        };
-        summary.rounds = first_round - 1;
-        if first_round == 1 {
-            state_saved |= session.save_at(SavePoint::Round(0), || {
-                detailed_state(
-                    db,
-                    &dr,
-                    &nets,
-                    shape,
-                    named_global.clone(),
-                    0,
-                    scope,
-                    &flows,
-                )
-            });
+    }
+    for round in negotiation.first_round..=config.detailed_iterations {
+        if negotiation.conflicted.is_empty() {
+            break;
         }
-        for round in first_round..=config.detailed_iterations {
-            if conflicted.is_empty() {
-                break;
-            }
-            let start = Instant::now();
-            let costs = round_costs(round, via);
-            let flow = flows.next(round, dr.marker_count());
-            let tile_scope = match round_strategy(round).ripup {
-                RipUp::NearDrc => Scope::NearConflicts,
-                RipUp::Drc | RipUp::All => Scope::Conflicts,
-            };
-            let repaired = match flow {
-                Flow::Regular => dr.repair(costs, round, scope),
-                Flow::Guides => dr.repair_guides(tile_scope, costs),
-                Flow::Stubborn => dr.repair_stubborn(tile_scope, costs),
-                Flow::Skip => RepairStats::default(),
-            };
-            if matches!(flow, Flow::Guides | Flow::Stubborn) {
-                flows.set_effective(repaired.improved > 0);
-            }
-            if flow != Flow::Skip {
-                let before = conflicted.len();
-                conflicted = dr.rejudge();
-                if flow == Flow::Regular {
-                    scope = next_scope(scope, conflicted.len() < before);
-                }
-            }
-            summary.rounds = round;
-            state_saved |= session.save_at(SavePoint::Round(round), || {
-                let global = named_global.clone();
-                detailed_state(db, &dr, &nets, shape, global, round, scope, &flows)
-            });
-            ui::dr_iter(
-                round,
-                dr.marker_count(),
-                conflicted.len(),
-                repaired.pieces,
-                costs.conflict,
-                flow.name(),
-                start.elapsed().as_millis(),
-            );
+        let start = Instant::now();
+        let costs = round_costs(round, via);
+        let (flow, repaired) = negotiation.round(&mut dr, round, costs);
+        summary.rounds = round;
+        state_saved |= session.save_at(SavePoint::Round(round), || {
+            saver.detailed_state(&dr, round, &negotiation)
+        });
+        ui::dr_iter(
+            round,
+            dr.marker_count(),
+            negotiation.conflicted.len(),
+            repaired.pieces,
+            costs.conflict,
+            flow.name(),
+            start.elapsed().as_millis(),
+        );
+    }
+    dr.log_conflicts();
+    summary.conflicted = negotiation.conflicted;
+    summary.state_saved = state_saved;
+    summary.incomplete = nets
+        .iter()
+        .copied()
+        .filter(|n| {
+            let route = &dr.routes()[n.index()];
+            !(route.complete && route.is_connected())
+        })
+        .collect();
+    let wiring: Vec<(NetId, Vec<RouteElem>)> = nets
+        .iter()
+        .map(|&n| (n, dr.routes()[n.index()].elems(tech)))
+        .collect();
+    Ok((wiring, summary, gcell_grid(db.die_area.min, gcell, nx, ny)))
+}
+
+/// Where detailed routing's negotiation stands: the next round, the nets
+/// in conflict, the scope of the next regular round and the flows.
+struct Negotiation {
+    first_round: usize,
+    conflicted: Vec<NetId>,
+    scope: Scope,
+    flows: FlowState,
+}
+
+impl Negotiation {
+    /// Resumes from the routes saved after round `saved.round`.
+    fn resumed(
+        dr: &mut DetailedRouter<'_>,
+        db: &NetlistDB,
+        saved: &DetailedState,
+        via: f64,
+    ) -> Result<Self, RouteError> {
+        let start = Instant::now();
+        let routes = named_routes(db, &saved.routes)?;
+        dr.restore(&routes)?;
+        dr.occupancy.shrink_to_fit();
+        ui::dr_table_header();
+        let conflicted = dr.rejudge();
+        ui::dr_iter(
+            saved.round,
+            dr.marker_count(),
+            conflicted.len(),
+            0,
+            round_costs(saved.round, via).conflict,
+            saved.flow.name(),
+            start.elapsed().as_millis(),
+        );
+        Ok(Self {
+            first_round: saved.round + 1,
+            conflicted,
+            scope: saved.scope,
+            flows: FlowState::after(saved.round, saved.flow, saved.effective),
+        })
+    }
+
+    /// Routes `nets` for the first time.
+    fn after_first_pass(dr: &mut DetailedRouter<'_>, nets: &[NetId], via: f64) -> Self {
+        let start = Instant::now();
+        dr.log_footprint("track assignment");
+        let first = dr.route_initial(nets, round_costs(0, via));
+        dr.occupancy.shrink_to_fit();
+        dr.log_footprint("first pass");
+        ui::dr_table_header();
+        let conflicted = dr.rejudge();
+        let flows = FlowState::after_first_pass();
+        ui::dr_iter(
+            0,
+            dr.marker_count(),
+            conflicted.len(),
+            first.pieces,
+            round_costs(0, via).conflict,
+            flows.current().name(),
+            start.elapsed().as_millis(),
+        );
+        Self {
+            first_round: 1,
+            conflicted,
+            scope: Scope::Conflicts,
+            flows,
         }
-        dr.log_conflicts();
-        summary.conflicted = conflicted;
-        summary.state_saved = state_saved;
-        summary.incomplete = nets
-            .iter()
-            .copied()
-            .filter(|n| {
-                let route = &dr.routes()[n.index()];
-                !(route.complete && route.is_connected())
-            })
-            .collect();
-        let wiring: Vec<(NetId, Vec<RouteElem>)> = nets
-            .iter()
-            .map(|&n| (n, dr.routes()[n.index()].elems(tech)))
-            .collect();
-        Ok((wiring, summary, gcell_grid(db.die_area.min, gcell, nx, ny)))
+    }
+
+    /// Runs round `round` at `costs`, returning the flow it took and what
+    /// its repair did.
+    fn round(
+        &mut self,
+        dr: &mut DetailedRouter<'_>,
+        round: usize,
+        costs: Costs,
+    ) -> (Flow, RepairStats) {
+        let flow = self.flows.next(round, dr.marker_count());
+        let tile_scope = match round_strategy(round).ripup {
+            RipUp::NearDrc => Scope::NearConflicts,
+            RipUp::Drc | RipUp::All => Scope::Conflicts,
+        };
+        let repaired = match flow {
+            Flow::Regular => dr.repair(costs, round, self.scope),
+            Flow::Guides => dr.repair_guides(tile_scope, costs),
+            Flow::Stubborn => dr.repair_stubborn(tile_scope, costs),
+            Flow::Skip => RepairStats::default(),
+        };
+        if matches!(flow, Flow::Guides | Flow::Stubborn) {
+            self.flows.set_effective(repaired.improved > 0);
+        }
+        if flow != Flow::Skip {
+            let before = self.conflicted.len();
+            self.conflicted = dr.rejudge();
+            if flow == Flow::Regular {
+                self.scope = next_scope(self.scope, self.conflicted.len() < before);
+            }
+        }
+        (flow, repaired)
     }
 }
 
-/// The state of a run saved after detailed round `round`.
-#[allow(clippy::too_many_arguments)]
-fn detailed_state(
-    db: &NetlistDB,
-    dr: &DetailedRouter<'_>,
-    nets: &[NetId],
+/// What a saved state names: the design, its routed nets, the gcell grid
+/// and, when a save is due, the global routes by net name.
+struct StateSaver<'a> {
+    db: &'a NetlistDB,
+    nets: &'a [NetId],
     grid: GridShape,
     global: Option<Vec<(String, Vec<Vec<GCell>>)>>,
-    round: usize,
-    scope: Scope,
-    flows: &FlowState,
-) -> RouteState {
-    let routes = nets
-        .iter()
-        .map(|&n| {
-            (
-                db.nets[n.index()].name.clone(),
-                dr.routes()[n.index()].clone(),
-            )
-        })
-        .collect();
-    RouteState {
-        design: db.name.clone(),
-        grid,
-        global: global.unwrap_or_default(),
-        detailed: Some(DetailedState {
-            round,
-            scope,
-            flow: flows.current(),
-            effective: flows.last_effective(),
-            routes,
-        }),
+}
+
+impl StateSaver<'_> {
+    /// The state of a run saved after global routing.
+    fn global_state(&self) -> RouteState {
+        RouteState {
+            design: self.db.name.clone(),
+            grid: self.grid,
+            global: self.global.clone().unwrap_or_default(),
+            detailed: None,
+        }
+    }
+
+    /// The state of a run saved after detailed round `round`.
+    fn detailed_state(
+        &self,
+        dr: &DetailedRouter<'_>,
+        round: usize,
+        negotiation: &Negotiation,
+    ) -> RouteState {
+        let routes = self
+            .nets
+            .iter()
+            .map(|&n| {
+                (
+                    self.db.nets[n.index()].name.clone(),
+                    dr.routes()[n.index()].clone(),
+                )
+            })
+            .collect();
+        RouteState {
+            detailed: Some(DetailedState {
+                round,
+                scope: negotiation.scope,
+                flow: negotiation.flows.current(),
+                effective: negotiation.flows.last_effective(),
+                routes,
+            }),
+            ..self.global_state()
+        }
     }
 }
 
