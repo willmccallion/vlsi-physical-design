@@ -75,6 +75,15 @@ struct Simplex {
     delta: i32,
 }
 
+/// The leaving arc's subtree root's thread links and size as they were
+/// before the pivot.
+#[derive(Clone, Copy)]
+struct OldSubtree {
+    rev_thread: usize,
+    succ_num: i32,
+    last_succ: usize,
+}
+
 impl Simplex {
     fn new(node_count: usize, arcs: &[Arc]) -> Self {
         let node_num = node_count;
@@ -341,95 +350,121 @@ impl Simplex {
         }
     }
 
-    #[allow(clippy::too_many_lines)]
+    /// Rehangs the spanning tree on the entering arc, as LEMON's
+    /// `updateTreeStructure`.
     fn update_tree_structure(&mut self) {
-        let (u_in, v_in, u_out) = (self.u_in, self.v_in, self.u_out);
-        let old_rev_thread = self.rev_thread[u_out];
-        let old_succ_num = self.succ_num[u_out];
-        let old_last_succ = self.last_succ[u_out];
+        let u_out = self.u_out;
+        let old = OldSubtree {
+            rev_thread: self.rev_thread[u_out],
+            succ_num: self.succ_num[u_out],
+            last_succ: self.last_succ[u_out],
+        };
         let v_out = self.up(u_out);
-        if u_in == u_out {
-            self.parent[u_in] = v_in as i64;
-            self.pred[u_in] = self.in_arc;
-            self.pred_dir[u_in] = if u_in == self.source[self.in_arc] {
-                DIR_UP
-            } else {
-                DIR_DOWN
-            };
-            if self.thread[v_in] != u_out {
-                let mut after = self.thread[old_last_succ];
-                self.thread[old_rev_thread] = after;
-                self.rev_thread[after] = old_rev_thread;
-                after = self.thread[v_in];
-                self.thread[v_in] = u_out;
-                self.rev_thread[u_out] = v_in;
-                self.thread[old_last_succ] = after;
-                self.rev_thread[after] = old_last_succ;
-            }
+        if self.u_in == u_out {
+            self.rehang_leaving_root(old);
         } else {
-            let thread_continue = if old_rev_thread == v_in {
-                self.thread[old_last_succ]
-            } else {
-                self.thread[v_in]
-            };
-            let mut stem = u_in;
-            let mut par_stem = v_in;
-            let mut last = self.last_succ[u_in];
-            let mut after = self.thread[last];
-            self.thread[v_in] = u_in;
-            self.dirty_revs.clear();
-            self.dirty_revs.push(v_in);
-            while stem != u_out {
-                let next_stem = self.up(stem);
-                self.thread[last] = next_stem;
-                self.dirty_revs.push(last);
-                let before = self.rev_thread[stem];
-                self.thread[before] = after;
-                self.rev_thread[after] = before;
-                self.parent[stem] = par_stem as i64;
-                par_stem = stem;
-                stem = next_stem;
-                last = if self.last_succ[stem] == self.last_succ[par_stem] {
-                    self.rev_thread[par_stem]
-                } else {
-                    self.last_succ[stem]
-                };
-                after = self.thread[last];
-            }
-            self.parent[u_out] = par_stem as i64;
-            self.thread[last] = thread_continue;
-            self.rev_thread[thread_continue] = last;
-            self.last_succ[u_out] = last;
-            if old_rev_thread != v_in {
-                self.thread[old_rev_thread] = after;
-                self.rev_thread[after] = old_rev_thread;
-            }
-            for i in 0..self.dirty_revs.len() {
-                let u = self.dirty_revs[i];
-                let t = self.thread[u];
-                self.rev_thread[t] = u;
-            }
-            let mut tmp_sc = 0_i32;
-            let tmp_ls = self.last_succ[u_out];
-            let mut u = u_out;
-            while u != u_in {
-                let p = self.up(u);
-                self.pred[u] = self.pred[p];
-                self.pred_dir[u] = -self.pred_dir[p];
-                tmp_sc += self.succ_num[u] - self.succ_num[p];
-                self.succ_num[u] = tmp_sc;
-                self.last_succ[p] = tmp_ls;
-                u = p;
-            }
-            self.pred[u_in] = self.in_arc;
-            self.pred_dir[u_in] = if u_in == self.source[self.in_arc] {
-                DIR_UP
-            } else {
-                DIR_DOWN
-            };
-            self.succ_num[u_in] = old_succ_num;
+            self.reverse_stem(old);
         }
-        let join = self.join;
+        self.update_last_succ(v_out, old);
+        self.update_succ_num(v_out, old.succ_num);
+    }
+
+    /// Hangs the leaving arc's subtree root, which is the entering arc's
+    /// end, from the entering arc's other end.
+    fn rehang_leaving_root(&mut self, old: OldSubtree) {
+        let (u_in, v_in, u_out) = (self.u_in, self.v_in, self.u_out);
+        self.parent[u_in] = v_in as i64;
+        self.pred[u_in] = self.in_arc;
+        self.pred_dir[u_in] = self.entering_direction();
+        if self.thread[v_in] != u_out {
+            let mut after = self.thread[old.last_succ];
+            self.thread[old.rev_thread] = after;
+            self.rev_thread[after] = old.rev_thread;
+            after = self.thread[v_in];
+            self.thread[v_in] = u_out;
+            self.rev_thread[u_out] = v_in;
+            self.thread[old.last_succ] = after;
+            self.rev_thread[after] = old.last_succ;
+        }
+    }
+
+    /// Reverses the stem from the entering arc's end up to the leaving
+    /// arc's subtree root, rethreading it and moving each node's
+    /// predecessor arc and subtree size one step down the stem.
+    fn reverse_stem(&mut self, old: OldSubtree) {
+        let (u_in, v_in, u_out) = (self.u_in, self.v_in, self.u_out);
+        let thread_continue = if old.rev_thread == v_in {
+            self.thread[old.last_succ]
+        } else {
+            self.thread[v_in]
+        };
+        let mut stem = u_in;
+        let mut par_stem = v_in;
+        let mut last = self.last_succ[u_in];
+        let mut after = self.thread[last];
+        self.thread[v_in] = u_in;
+        self.dirty_revs.clear();
+        self.dirty_revs.push(v_in);
+        while stem != u_out {
+            let next_stem = self.up(stem);
+            self.thread[last] = next_stem;
+            self.dirty_revs.push(last);
+            let before = self.rev_thread[stem];
+            self.thread[before] = after;
+            self.rev_thread[after] = before;
+            self.parent[stem] = par_stem as i64;
+            par_stem = stem;
+            stem = next_stem;
+            last = if self.last_succ[stem] == self.last_succ[par_stem] {
+                self.rev_thread[par_stem]
+            } else {
+                self.last_succ[stem]
+            };
+            after = self.thread[last];
+        }
+        self.parent[u_out] = par_stem as i64;
+        self.thread[last] = thread_continue;
+        self.rev_thread[thread_continue] = last;
+        self.last_succ[u_out] = last;
+        if old.rev_thread != v_in {
+            self.thread[old.rev_thread] = after;
+            self.rev_thread[after] = old.rev_thread;
+        }
+        for i in 0..self.dirty_revs.len() {
+            let u = self.dirty_revs[i];
+            let t = self.thread[u];
+            self.rev_thread[t] = u;
+        }
+        let mut tmp_sc = 0_i32;
+        let tmp_ls = self.last_succ[u_out];
+        let mut u = u_out;
+        while u != u_in {
+            let p = self.up(u);
+            self.pred[u] = self.pred[p];
+            self.pred_dir[u] = -self.pred_dir[p];
+            tmp_sc += self.succ_num[u] - self.succ_num[p];
+            self.succ_num[u] = tmp_sc;
+            self.last_succ[p] = tmp_ls;
+            u = p;
+        }
+        self.pred[u_in] = self.in_arc;
+        self.pred_dir[u_in] = self.entering_direction();
+        self.succ_num[u_in] = old.succ_num;
+    }
+
+    /// The direction of the entering arc seen from its end `u_in`.
+    fn entering_direction(&self) -> i32 {
+        if self.u_in == self.source[self.in_arc] {
+            DIR_UP
+        } else {
+            DIR_DOWN
+        }
+    }
+
+    /// Updates the last successors above the entering arc's other end and
+    /// above the leaving arc, up to their join.
+    fn update_last_succ(&mut self, v_out: usize, old: OldSubtree) {
+        let (v_in, u_out, join) = (self.v_in, self.u_out, self.join);
         let up_limit_out = if self.last_succ[join] == v_in {
             join as i64
         } else {
@@ -441,27 +476,32 @@ impl Simplex {
             self.last_succ[u as usize] = last_succ_out;
             u = self.parent[u as usize];
         }
-        if join != old_rev_thread && v_in != old_rev_thread {
-            let mut u = v_out as i64;
-            while u != up_limit_out && self.last_succ[u as usize] == old_last_succ {
-                self.last_succ[u as usize] = old_rev_thread;
-                u = self.parent[u as usize];
-            }
-        } else if last_succ_out != old_last_succ {
-            let mut u = v_out as i64;
-            while u != up_limit_out && self.last_succ[u as usize] == old_last_succ {
-                self.last_succ[u as usize] = last_succ_out;
-                u = self.parent[u as usize];
-            }
+        let replacement = if join != old.rev_thread && v_in != old.rev_thread {
+            old.rev_thread
+        } else if last_succ_out != old.last_succ {
+            last_succ_out
+        } else {
+            return;
+        };
+        let mut u = v_out as i64;
+        while u != up_limit_out && self.last_succ[u as usize] == old.last_succ {
+            self.last_succ[u as usize] = replacement;
+            u = self.parent[u as usize];
         }
-        let mut u = v_in;
+    }
+
+    /// Moves the subtree's size from the leaving side to the entering side
+    /// up to the join.
+    fn update_succ_num(&mut self, v_out: usize, moved: i32) {
+        let join = self.join;
+        let mut u = self.v_in;
         while u != join {
-            self.succ_num[u] += old_succ_num;
+            self.succ_num[u] += moved;
             u = self.up(u);
         }
         let mut u = v_out;
         while u != join {
-            self.succ_num[u] -= old_succ_num;
+            self.succ_num[u] -= moved;
             u = self.up(u);
         }
     }
