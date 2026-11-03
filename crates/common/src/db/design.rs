@@ -493,6 +493,27 @@ pub struct Renumbering {
     pub pins: Vec<Option<PinId>>,
 }
 
+/// Keeps the items `dropped` does not flag, each after `update`.
+fn retain_kept<T>(items: &mut Vec<T>, dropped: &[bool], mut update: impl FnMut(&mut T)) {
+    let all = std::mem::take(items);
+    items.reserve(all.len());
+    for (mut item, &drop) in all.into_iter().zip(dropped) {
+        if !drop {
+            update(&mut item);
+            items.push(item);
+        }
+    }
+}
+
+/// Each old index's new id, none for those `dropped`.
+fn new_ids<T>(dropped: &[bool], map: &[usize], id: impl Fn(usize) -> T) -> Vec<Option<T>> {
+    dropped
+        .iter()
+        .zip(map)
+        .map(|(&drop, &new)| (!drop).then(|| id(new)))
+        .collect()
+}
+
 /// The new index of each kept entry, with the dropped ones left at their old
 /// index, which nothing reads.
 fn renumber(dropped: &[bool]) -> Vec<usize> {
@@ -770,6 +791,60 @@ impl NetlistDB {
     /// [`CellId`], [`NetId`] and [`PinId`] held before is stale afterwards,
     /// and the returned maps say where each went.
     pub fn remove(&mut self, cells: &[CellId], nets: &[NetId]) -> Result<Renumbering, EditError> {
+        let (drop_cell, drop_net) = self.dropped(cells, nets)?;
+        let drop_pin: Vec<bool> = self
+            .pins
+            .iter()
+            .map(|p| match p.owner {
+                PinOwner::Cell { cell, .. } => drop_cell[cell.index()],
+                PinOwner::Io(_) => false,
+            })
+            .collect();
+        let cell_map = renumber(&drop_cell);
+        let net_map = renumber(&drop_net);
+        let pin_map = renumber(&drop_pin);
+        let remap_pins = |pins: &mut Vec<PinId>| {
+            pins.retain(|p| !drop_pin[p.index()]);
+            for p in pins.iter_mut() {
+                *p = PinId::new(pin_map[p.index()]);
+            }
+        };
+        retain_kept(&mut self.cells, &drop_cell, |cell| {
+            remap_pins(&mut cell.pins);
+        });
+        retain_kept(&mut self.nets, &drop_net, |net| remap_pins(&mut net.pins));
+        retain_kept(&mut self.pins, &drop_pin, |pin| {
+            pin.net = NetId::new(net_map[pin.net.index()]);
+            if let PinOwner::Cell {
+                cell,
+                pin: macro_pin,
+            } = pin.owner
+            {
+                pin.owner = PinOwner::Cell {
+                    cell: CellId::new(cell_map[cell.index()]),
+                    pin: macro_pin,
+                };
+            }
+        });
+        for io in &mut self.io_pins {
+            io.net = NetId::new(net_map[io.net.index()]);
+            io.pin = PinId::new(pin_map[io.pin.index()]);
+        }
+        self.reindex_names();
+        Ok(Renumbering {
+            cells: new_ids(&drop_cell, &cell_map, CellId::new),
+            nets: new_ids(&drop_net, &net_map, NetId::new),
+            pins: new_ids(&drop_pin, &pin_map, PinId::new),
+        })
+    }
+
+    /// Which instances and nets [`Self::remove`] drops: those named and the
+    /// retired instances; an error for a named net something still uses.
+    fn dropped(
+        &self,
+        cells: &[CellId],
+        nets: &[NetId],
+    ) -> Result<(Vec<bool>, Vec<bool>), EditError> {
         let mut drop_cell: Vec<bool> = self.cells.iter().map(|c| c.retired).collect();
         for &c in cells {
             drop_cell[c.index()] = true;
@@ -791,71 +866,11 @@ impl NetlistDB {
                 return Err(EditError::NetInUse(net.name.clone()));
             }
         }
-        let cell_map = renumber(&drop_cell);
-        let net_map = renumber(&drop_net);
-        let drop_pin: Vec<bool> = self
-            .pins
-            .iter()
-            .map(|p| match p.owner {
-                PinOwner::Cell { cell, .. } => drop_cell[cell.index()],
-                PinOwner::Io(_) => false,
-            })
-            .collect();
-        let pin_map = renumber(&drop_pin);
-        let remap_pins = |pins: &mut Vec<PinId>| {
-            pins.retain(|p| !drop_pin[p.index()]);
-            for p in pins.iter_mut() {
-                *p = PinId::new(pin_map[p.index()]);
-            }
-        };
+        Ok((drop_cell, drop_net))
+    }
 
-        let cells = std::mem::take(&mut self.cells);
-        let mut kept = Vec::with_capacity(cells.len());
-        for (i, mut cell) in cells.into_iter().enumerate() {
-            if drop_cell[i] {
-                continue;
-            }
-            remap_pins(&mut cell.pins);
-            kept.push(cell);
-        }
-        self.cells = kept;
-
-        let nets = std::mem::take(&mut self.nets);
-        let mut kept = Vec::with_capacity(nets.len());
-        for (i, mut net) in nets.into_iter().enumerate() {
-            if drop_net[i] {
-                continue;
-            }
-            remap_pins(&mut net.pins);
-            kept.push(net);
-        }
-        self.nets = kept;
-
-        let pins = std::mem::take(&mut self.pins);
-        let mut kept = Vec::with_capacity(pins.len());
-        for (i, mut pin) in pins.into_iter().enumerate() {
-            if drop_pin[i] {
-                continue;
-            }
-            pin.net = NetId::new(net_map[pin.net.index()]);
-            if let PinOwner::Cell {
-                cell,
-                pin: macro_pin,
-            } = pin.owner
-            {
-                pin.owner = PinOwner::Cell {
-                    cell: CellId::new(cell_map[cell.index()]),
-                    pin: macro_pin,
-                };
-            }
-            kept.push(pin);
-        }
-        self.pins = kept;
-
-        for io in &mut self.io_pins {
-            io.net = NetId::new(net_map[io.net.index()]);
-            io.pin = PinId::new(pin_map[io.pin.index()]);
-        }
+    /// Finds every instance and net by name again after renumbering.
+    fn reindex_names(&mut self) {
         self.cell_by_name = self
             .cells
             .iter()
@@ -868,27 +883,6 @@ impl NetlistDB {
             .enumerate()
             .map(|(i, n)| (n.name.clone(), NetId::new(i)))
             .collect();
-        let kept = |dropped: &[bool], map: &[usize]| {
-            dropped
-                .iter()
-                .zip(map)
-                .map(|(&drop, &new)| (!drop).then_some(new))
-                .collect::<Vec<_>>()
-        };
-        Ok(Renumbering {
-            cells: kept(&drop_cell, &cell_map)
-                .into_iter()
-                .map(|i| i.map(CellId::new))
-                .collect(),
-            nets: kept(&drop_net, &net_map)
-                .into_iter()
-                .map(|i| i.map(NetId::new))
-                .collect(),
-            pins: kept(&drop_pin, &pin_map)
-                .into_iter()
-                .map(|i| i.map(PinId::new))
-                .collect(),
-        })
     }
 
     /// Looks up an instance by name.

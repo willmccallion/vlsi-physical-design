@@ -495,32 +495,7 @@ impl<'a> DefParser<'a> {
                 }
                 "CUTSIZE" => rule.cut_size = self.dbu_pair("cut size")?,
                 "LAYERS" => {
-                    let layers = [self.any_layer()?, self.any_layer()?, self.any_layer()?];
-                    let (cuts, metals): (Vec<LayerRef>, Vec<LayerRef>) =
-                        layers.iter().partition(|l| matches!(l, LayerRef::Cut(_)));
-                    let mut metals: Vec<LayerId> = metals
-                        .into_iter()
-                        .filter_map(|l| match l {
-                            LayerRef::Routing(id) => Some(id),
-                            LayerRef::Cut(_) => None,
-                        })
-                        .collect();
-                    metals.sort();
-                    let (&[cut], &[bottom, top]) = (cuts.as_slice(), metals.as_slice()) else {
-                        return Err(self.lx.error(
-                            t.line,
-                            format!("via '{name}': + LAYERS needs one cut and two metal layers"),
-                        ));
-                    };
-                    let LayerRef::Cut(cut_id) = cut else {
-                        return Err(self.lx.error(t.line, "cut layer expected"));
-                    };
-                    if (bottom, top) != (cut_id.below(), cut_id.above()) {
-                        return Err(self.lx.error(
-                            t.line,
-                            format!("via '{name}': + LAYERS names metal its cut does not touch"),
-                        ));
-                    }
+                    let (cut, bottom, top) = self.via_rule_layers(name, t.line)?;
                     rule.cut = Some(cut);
                     rule.bottom = Some(bottom);
                     rule.top = Some(top);
@@ -559,6 +534,49 @@ impl<'a> DefParser<'a> {
             shapes.extend(generated);
         }
         let via = via_from_shapes(name, false, shapes, true).map_err(|m| self.lx.error(line, m))?;
+        self.add_def_via(via, line)
+    }
+
+    /// The cut and the metal below and above it that a via rule's
+    /// `+ LAYERS`, in any order, names.
+    fn via_rule_layers(
+        &mut self,
+        name: &str,
+        line: usize,
+    ) -> Result<(LayerRef, LayerId, LayerId), ParseError> {
+        let layers = [self.any_layer()?, self.any_layer()?, self.any_layer()?];
+        let (cuts, metals): (Vec<LayerRef>, Vec<LayerRef>) =
+            layers.iter().partition(|l| matches!(l, LayerRef::Cut(_)));
+        let mut metals: Vec<LayerId> = metals
+            .into_iter()
+            .filter_map(|l| match l {
+                LayerRef::Routing(id) => Some(id),
+                LayerRef::Cut(_) => None,
+            })
+            .collect();
+        metals.sort();
+        let (&[cut], &[bottom, top]) = (cuts.as_slice(), metals.as_slice()) else {
+            return Err(self.lx.error(
+                line,
+                format!("via '{name}': + LAYERS needs one cut and two metal layers"),
+            ));
+        };
+        let LayerRef::Cut(cut_id) = cut else {
+            return Err(self.lx.error(line, "cut layer expected"));
+        };
+        if (bottom, top) != (cut_id.below(), cut_id.above()) {
+            return Err(self.lx.error(
+                line,
+                format!("via '{name}': + LAYERS names metal its cut does not touch"),
+            ));
+        }
+        Ok((cut, bottom, top))
+    }
+
+    /// Adds a via the DEF defines, unless the LEF already has one of its
+    /// name, which `OpenROAD` keeps.
+    fn add_def_via(&mut self, via: ViaDef, line: usize) -> Result<(), ParseError> {
+        let name = via.name.as_str();
         if let Some(existing) = self.db.library.via_id(name) {
             if !same_geometry(self.db.library.via(existing), &via) {
                 log::warn!(

@@ -876,97 +876,10 @@ impl Interpreter {
     }
 
     fn timing(&self, cell: &mut LibCell, to: usize, group: &Group<'_>) -> Result<(), ParseError> {
-        let timing_type = group.attr_text("timing_type").unwrap_or("combinational");
-        let (role, from_edge, to_edge) = arc_role(timing_type);
-        let stated_sense = match group.attr_text("timing_sense") {
-            Some("positive_unate") => Some(TimingSense::PositiveUnate),
-            Some("negative_unate") => Some(TimingSense::NegativeUnate),
-            Some("non_unate") => Some(TimingSense::NonUnate),
-            _ => None,
-        };
+        let kind = arc_role(group.attr_text("timing_type").unwrap_or("combinational"));
+        let stated_sense = stated_sense(group);
         let when = self.function_attr(group, "when")?;
-        let table_names: &[(&str, Edge, bool)] = if role.is_delay() {
-            &[
-                ("cell_rise", Edge::Rise, true),
-                ("cell_fall", Edge::Fall, true),
-                ("rise_transition", Edge::Rise, false),
-                ("fall_transition", Edge::Fall, false),
-            ]
-        } else if role.check_side().is_some() {
-            &[
-                ("rise_constraint", Edge::Rise, true),
-                ("fall_constraint", Edge::Fall, true),
-            ]
-        } else {
-            &[]
-        };
-        let tables = table_names
-            .iter()
-            .map(|&(name, edge, is_delay)| {
-                group
-                    .groups_named(name)
-                    .next()
-                    .map(|g| self.table(g).map(|t| (edge, is_delay, t)))
-                    .transpose()
-            })
-            .collect::<Result<Vec<_>, _>>()?;
-        let table_for = |edge: Edge, is_delay: bool| -> Option<Table> {
-            tables
-                .iter()
-                .flatten()
-                .find(|(e, d, _)| *e == edge && *d == is_delay)
-                .map(|(_, _, t)| t.clone())
-        };
-        let arcs_for = |sense: TimingSense| {
-            let mut arcs = Vec::new();
-            if role.is_delay() {
-                let pairs: Vec<(Edge, Edge)> = match (role, from_edge, sense) {
-                    (ArcRole::RegClkToQ | ArcRole::LatchEnToQ, Some(f), _) => {
-                        vec![(f, Edge::Rise), (f, Edge::Fall)]
-                    }
-                    (_, _, TimingSense::PositiveUnate) => {
-                        vec![(Edge::Rise, Edge::Rise), (Edge::Fall, Edge::Fall)]
-                    }
-                    (_, _, TimingSense::NegativeUnate) => {
-                        vec![(Edge::Rise, Edge::Fall), (Edge::Fall, Edge::Rise)]
-                    }
-                    (_, _, TimingSense::NonUnate) => vec![
-                        (Edge::Rise, Edge::Rise),
-                        (Edge::Fall, Edge::Rise),
-                        (Edge::Rise, Edge::Fall),
-                        (Edge::Fall, Edge::Fall),
-                    ],
-                };
-                for (from, to_e) in pairs {
-                    if to_edge.is_some_and(|restricted| restricted != to_e) {
-                        continue;
-                    }
-                    let delay = table_for(to_e, true);
-                    let slew = table_for(to_e, false);
-                    if delay.is_none() && slew.is_none() {
-                        continue;
-                    }
-                    arcs.push(TimingArc {
-                        from_edge: from,
-                        to_edge: to_e,
-                        delay,
-                        slew,
-                    });
-                }
-            } else if let (Some(clock_edge), Some(_)) = (from_edge, role.check_side()) {
-                for to_e in Edge::BOTH {
-                    if let Some(constraint) = table_for(to_e, true) {
-                        arcs.push(TimingArc {
-                            from_edge: clock_edge,
-                            to_edge: to_e,
-                            delay: Some(constraint),
-                            slew: None,
-                        });
-                    }
-                }
-            }
-            arcs
-        };
+        let tables = self.arc_tables(group, kind.role)?;
         let related = group
             .attr("related_pin")
             .ok_or_else(|| self.error(group.line, "timing group without related_pin".into()))?;
@@ -981,18 +894,49 @@ impl Interpreter {
                 )
             })?;
             let sense = stated_sense
-                .or_else(|| inferred_sense(&cell.ports[to], role, related_name))
+                .or_else(|| inferred_sense(&cell.ports[to], kind.role, related_name))
                 .unwrap_or(TimingSense::NonUnate);
             cell.arc_sets.push(TimingArcSet {
                 from,
                 to,
-                role,
+                role: kind.role,
                 sense,
                 when: when.clone(),
-                arcs: arcs_for(sense),
+                arcs: timing_arcs(kind, sense, &tables),
             });
         }
         Ok(())
+    }
+
+    /// The delay and slew tables, or the constraint tables of a check, a
+    /// timing group of `role` gives.
+    fn arc_tables(&self, group: &Group<'_>, role: ArcRole) -> Result<ArcTables, ParseError> {
+        let names: &[(&str, Edge, bool)] = if role.is_delay() {
+            &[
+                ("cell_rise", Edge::Rise, true),
+                ("cell_fall", Edge::Fall, true),
+                ("rise_transition", Edge::Rise, false),
+                ("fall_transition", Edge::Fall, false),
+            ]
+        } else if role.check_side().is_some() {
+            &[
+                ("rise_constraint", Edge::Rise, true),
+                ("fall_constraint", Edge::Fall, true),
+            ]
+        } else {
+            &[]
+        };
+        let tables = names
+            .iter()
+            .map(|&(name, edge, is_delay)| {
+                group
+                    .groups_named(name)
+                    .next()
+                    .map(|g| self.table(g).map(|t| (edge, is_delay, t)))
+                    .transpose()
+            })
+            .collect::<Result<Vec<_>, _>>()?;
+        Ok(ArcTables(tables.into_iter().flatten().collect()))
     }
 
     fn table(&self, group: &Group<'_>) -> Result<Table, ParseError> {
@@ -1143,8 +1087,6 @@ fn axis_variable(name: &str) -> AxisVariable {
     }
 }
 
-/// The role a `timing_type` names, with the input edge it fixes for a clock
-/// and the output edge it restricts to, where it does.
 /// The sense of an arc from `from` that its timing group leaves out, as
 /// `OpenSTA` finds it: from the output's function for a combinational arc,
 /// from its `three_state` condition for a tristate one.
@@ -1207,8 +1149,98 @@ fn clock_gate_pin(group: &Group<'_>) -> Option<ClockGatePin> {
     .map(|(_, gate)| gate)
 }
 
-fn arc_role(timing_type: &str) -> (ArcRole, Option<Edge>, Option<Edge>) {
-    match timing_type {
+/// What a timing group's `timing_type` makes of its arcs: their role, the
+/// edge a clock or enable launches them on and the one output edge they
+/// are restricted to, if any.
+#[derive(Clone, Copy)]
+struct ArcKind {
+    role: ArcRole,
+    from_edge: Option<Edge>,
+    to_edge: Option<Edge>,
+}
+
+/// The tables a timing group gives, each with its output edge and whether
+/// it is a delay (or constraint) table rather than a slew table.
+struct ArcTables(Vec<(Edge, bool, Table)>);
+
+impl ArcTables {
+    fn get(&self, edge: Edge, is_delay: bool) -> Option<Table> {
+        self.0
+            .iter()
+            .find(|(e, d, _)| *e == edge && *d == is_delay)
+            .map(|(_, _, t)| t.clone())
+    }
+}
+
+/// The sense a timing group states, if it states one.
+fn stated_sense(group: &Group<'_>) -> Option<TimingSense> {
+    match group.attr_text("timing_sense") {
+        Some("positive_unate") => Some(TimingSense::PositiveUnate),
+        Some("negative_unate") => Some(TimingSense::NegativeUnate),
+        Some("non_unate") => Some(TimingSense::NonUnate),
+        _ => None,
+    }
+}
+
+/// The arcs of a timing group of `kind` and `sense` over its `tables`.
+fn timing_arcs(kind: ArcKind, sense: TimingSense, tables: &ArcTables) -> Vec<TimingArc> {
+    if kind.role.is_delay() {
+        return delay_edge_pairs(kind, sense)
+            .into_iter()
+            .filter(|&(_, to)| kind.to_edge.is_none_or(|restricted| restricted == to))
+            .filter_map(|(from, to)| {
+                let delay = tables.get(to, true);
+                let slew = tables.get(to, false);
+                (delay.is_some() || slew.is_some()).then_some(TimingArc {
+                    from_edge: from,
+                    to_edge: to,
+                    delay,
+                    slew,
+                })
+            })
+            .collect();
+    }
+    let (Some(clock_edge), Some(_)) = (kind.from_edge, kind.role.check_side()) else {
+        return Vec::new();
+    };
+    Edge::BOTH
+        .into_iter()
+        .filter_map(|to| {
+            tables.get(to, true).map(|constraint| TimingArc {
+                from_edge: clock_edge,
+                to_edge: to,
+                delay: Some(constraint),
+                slew: None,
+            })
+        })
+        .collect()
+}
+
+/// The input and output edges a delay arc of `kind` and `sense` joins.
+fn delay_edge_pairs(kind: ArcKind, sense: TimingSense) -> Vec<(Edge, Edge)> {
+    match (kind.role, kind.from_edge, sense) {
+        (ArcRole::RegClkToQ | ArcRole::LatchEnToQ, Some(f), _) => {
+            vec![(f, Edge::Rise), (f, Edge::Fall)]
+        }
+        (_, _, TimingSense::PositiveUnate) => {
+            vec![(Edge::Rise, Edge::Rise), (Edge::Fall, Edge::Fall)]
+        }
+        (_, _, TimingSense::NegativeUnate) => {
+            vec![(Edge::Rise, Edge::Fall), (Edge::Fall, Edge::Rise)]
+        }
+        (_, _, TimingSense::NonUnate) => vec![
+            (Edge::Rise, Edge::Rise),
+            (Edge::Fall, Edge::Rise),
+            (Edge::Rise, Edge::Fall),
+            (Edge::Fall, Edge::Fall),
+        ],
+    }
+}
+
+/// The role a `timing_type` names, with the input edge it fixes for a clock
+/// and the output edge it restricts to, where it does.
+fn arc_role(timing_type: &str) -> ArcKind {
+    let (role, from_edge, to_edge) = match timing_type {
         "combinational" => (ArcRole::Combinational, None, None),
         "combinational_rise" => (ArcRole::Combinational, None, Some(Edge::Rise)),
         "combinational_fall" => (ArcRole::Combinational, None, Some(Edge::Fall)),
@@ -1231,6 +1263,11 @@ fn arc_role(timing_type: &str) -> (ArcRole, Option<Edge>, Option<Edge>) {
         "removal_rising" => (ArcRole::Removal, Some(Edge::Rise), None),
         "removal_falling" => (ArcRole::Removal, Some(Edge::Fall), None),
         _ => (ArcRole::Check, None, None),
+    };
+    ArcKind {
+        role,
+        from_edge,
+        to_edge,
     }
 }
 
