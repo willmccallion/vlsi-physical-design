@@ -12,6 +12,7 @@ use pare_common::db::design::NetlistDB;
 use pare_common::db::global_route::RouteSource;
 use pare_common::db::indices::{CellId, NetId};
 use pare_common::db::writer;
+use pare_common::units::Ohms;
 use pare_common::util::config::Config;
 use pare_common::util::{ui, visualization};
 use pare_placer::legalize::site::SiteGrid;
@@ -234,7 +235,7 @@ fn route_rc(config: &Config, db: &NetlistDB) -> anyhow::Result<RouteRc> {
                 .with_context(|| {
                     format!("[netlist] via_rc names unknown cut layer '{}'", v.layer)
                 })?;
-            Ok((cut, v.resistance_ohm))
+            Ok((cut, Ohms::new(v.resistance_ohm)))
         })
         .collect::<anyhow::Result<Vec<_>>>()?;
     let min_layer = *config.routing.layer_range(lib)?.start();

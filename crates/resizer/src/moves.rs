@@ -1109,6 +1109,7 @@ fn slews_in_tree(resizer: &Resizer<'_, Sta>, driver_slew: f64, tree: &Bnet) -> V
             Kind::Load { pin } => out.push((*pin, upstream)),
             Kind::Wire { to, layer } => {
                 let (res, cap) = resizer.tree_rc().wire(*layer);
+                let (res, cap) = (res.get(), cap.get());
                 let meters = node.length() as f64 / resizer.db.dbu().get() as f64 * 1e-6;
                 let degradation =
                     meters * res * (to.cap + meters * cap / 2.0) * resizer.slew_rc_factor;
@@ -1119,7 +1120,7 @@ fn slews_in_tree(resizer: &Resizer<'_, Sta>, driver_slew: f64, tree: &Bnet) -> V
                 layer,
                 to_layer,
             } => {
-                let r_via = resizer.tree_rc().via(*layer, *to_layer);
+                let r_via = resizer.tree_rc().via(*layer, *to_layer).get();
                 let degradation = r_via * to.cap * resizer.slew_rc_factor;
                 walk(resizer, to, upstream + degradation, out);
             }

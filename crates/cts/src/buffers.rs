@@ -43,7 +43,7 @@ impl ClockBuffers {
         let core = db.core_area();
         let dbu = db.dbu().get() as f32;
         let core_length = (core.width().get().max(core.height().get()) as f32) / dbu;
-        let wire_cap_per_um = (signal_rc.capacitance * 1e-6) as f32;
+        let wire_cap_per_um = (signal_rc.capacitance.get() * 1e-6) as f32;
         let root = if all.len() == 1 {
             all[0]
         } else {

@@ -1788,6 +1788,7 @@ mod tests {
     use pare_common::db::parser::{def, lef, liberty, sdc};
     use pare_common::db::sdc::Clock;
     use pare_common::geom::dbu::DbuPerMicron;
+    use pare_common::units::{FaradsPerMeter, OhmsPerMeter};
     use std::path::{Path, PathBuf};
 
     fn clock(name: &str, period: f64, rise: f64, fall: f64) -> Clock {
@@ -1934,8 +1935,8 @@ mod tests {
         let constants = Constants::find(&netlist);
         let clocks = ClockNetwork::from_sdc(&netlist, &sdc, &constants);
         let rc = WireRc {
-            resistance: 0.0,
-            capacitance: 0.0,
+            resistance: OhmsPerMeter::ZERO,
+            capacitance: FaradsPerMeter::ZERO,
             layer: LayerId(1),
         };
         let graph = TimingGraph::new(
