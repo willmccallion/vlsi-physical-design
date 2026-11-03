@@ -227,7 +227,7 @@ impl Rebuffer {
             };
             let original = self.annotate_load_slacks(resizer, &original, driver);
             let slack = self.slack_at_driver(resizer, &original).to_seconds();
-            let sta_slack = resizer.sta().slack(driver, MinMax::Max);
+            let sta_slack = resizer.sta().slack(driver, MinMax::Max).seconds();
             let slack_error = slack - sta_slack;
             let unbuffered = resteiner(resizer, &strip_buffers(&original));
             let Some(mut timing_tree) = unbuffered.clone() else {

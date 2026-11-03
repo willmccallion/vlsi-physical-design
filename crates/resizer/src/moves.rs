@@ -389,13 +389,15 @@ impl Moves {
         }
         let sta = resizer.sta();
         let net = resizer.db.pins[site.driver.index()].net;
-        let driver_slack = sta.slack_edge(site.driver, site.edge, MinMax::Max);
+        let driver_slack = sta
+            .slack_edge(site.driver, site.edge, MinMax::Max)
+            .seconds();
         let mut fanouts: Vec<(f64, String, PinId)> = resizer
             .netlist()
             .loads(net)
             .filter(|&l| l != site.driver)
             .map(|load| {
-                let slack = sta.slack_edge(load, site.edge, MinMax::Max);
+                let slack = sta.slack_edge(load, site.edge, MinMax::Max).seconds();
                 (slack - driver_slack, resizer.db.pin_name(load), load)
             })
             .collect();
@@ -468,13 +470,13 @@ impl Moves {
         }
         let sta = resizer.sta();
         let net = resizer.db.pins[site.driver.index()].net;
-        let driver_slack = sta.slack(site.driver, MinMax::Max);
+        let driver_slack = sta.slack(site.driver, MinMax::Max).seconds();
         let mut fanouts: Vec<(f64, String, PinId)> = resizer
             .netlist()
             .loads(net)
             .filter(|&l| l != site.driver)
             .map(|load| {
-                let slack = sta.slack_edge(load, site.edge, MinMax::Max);
+                let slack = sta.slack_edge(load, site.edge, MinMax::Max).seconds();
                 (slack - driver_slack, resizer.db.pin_name(load), load)
             })
             .collect();
@@ -895,7 +897,7 @@ fn estimated_slack_ok(
         if side == prev_driver || side == buffer_input {
             continue;
         }
-        let old_slack = sta.slack(side, MinMax::Max);
+        let old_slack = sta.slack(side, MinMax::Max).seconds();
         let new_slack = old_slack - delay_degrade - margin;
         if new_slack < 0.0 {
             let degrade = old_slack - new_slack;
@@ -967,7 +969,7 @@ fn input_slew_impact_ok(
             Some(&slews_of(new)),
         );
         let delay_diff = (new_delay.rise - old_delay.rise).max(new_delay.fall - old_delay.fall);
-        let old_slack = sta.slack(pin, MinMax::Max) - margin;
+        let old_slack = sta.slack(pin, MinMax::Max).seconds() - margin;
         let new_slack = old_slack - delay_diff - adjust - margin;
         if (accept_if_improves && fuzzy::greater(old_slack, new_slack))
             || (!accept_if_improves && new_slack < 0.0)

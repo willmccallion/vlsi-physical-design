@@ -89,14 +89,14 @@ pub fn repair_hold(
     let sta = resizer.sta();
     let mut ends: Vec<PinId> = sta.endpoints().to_vec();
     ends.sort_unstable();
-    let (setup_wns_before, _) = sta.worst_slack(MinMax::Max);
+    let setup_wns_before = sta.worst_slack(MinMax::Max).0.seconds();
     let mut summary = HoldSummary {
         setup_wns_before,
         ..HoldSummary::default()
     };
     let (mut failures, mut worst) = hold_violations(resizer, &ends, options.hold_margin);
     summary.failing_before = failures.len();
-    summary.wns_before = sta.worst_slack(MinMax::Min).0;
+    summary.wns_before = sta.worst_slack(MinMax::Min).0.seconds();
     let Some(buffer) = hold_buffer(resizer) else {
         summary.failing_after = failures.len();
         summary.wns_after = summary.wns_before;
@@ -124,7 +124,8 @@ pub fn repair_hold(
         let sta = resizer.sta();
         failures.sort_by(|&a, &b| {
             sta.slack(a, MinMax::Min)
-                .total_cmp(&sta.slack(b, MinMax::Min))
+                .seconds()
+                .total_cmp(&sta.slack(b, MinMax::Min).seconds())
                 .then(a.cmp(&b))
         });
         for &end in &failures {
@@ -139,8 +140,8 @@ pub fn repair_hold(
     }
     let sta = resizer.sta();
     summary.failing_after = failures.len();
-    summary.wns_after = sta.worst_slack(MinMax::Min).0;
-    summary.setup_wns_after = sta.worst_slack(MinMax::Max).0;
+    summary.wns_after = sta.worst_slack(MinMax::Min).0.seconds();
+    summary.setup_wns_after = sta.worst_slack(MinMax::Max).0.seconds();
     summary.inserted = repair.inserted;
     summary.resized = repair.resized;
     Ok(summary)
@@ -153,7 +154,7 @@ fn hold_violations(resizer: &Resizer<'_, Sta>, ends: &[PinId], margin: f64) -> (
     let mut worst = f64::INFINITY;
     let mut failing = Vec::new();
     for &end in ends {
-        let slack = sta.slack(end, MinMax::Min);
+        let slack = sta.slack(end, MinMax::Min).seconds();
         if !resizer.clocks.is_clock(end) && slack < margin {
             worst = worst.min(slack);
             failing.push(end);
@@ -219,8 +220,8 @@ impl Slacks {
         let sta = resizer.sta();
         for edge in Edge::BOTH {
             let i = edge.index();
-            self.early[i] = self.early[i].min(sta.slack_edge(pin, edge, MinMax::Min));
-            self.late[i] = self.late[i].max(sta.slack_edge(pin, edge, MinMax::Max));
+            self.early[i] = self.early[i].min(sta.slack_edge(pin, edge, MinMax::Min).seconds());
+            self.late[i] = self.late[i].max(sta.slack_edge(pin, edge, MinMax::Max).seconds());
         }
     }
 }
@@ -286,7 +287,7 @@ impl HoldRepair<'_> {
             if netlist.is_retired(load) {
                 continue;
             }
-            if sta.slack(load, MinMax::Min) < self.options.hold_margin {
+            if sta.slack(load, MinMax::Min).seconds() < self.options.hold_margin {
                 loads.push(load);
                 slacks.merge(resizer, load);
             } else if let Some(port) = netlist.lib_port(load) {
@@ -320,14 +321,14 @@ impl HoldRepair<'_> {
         at: Point<Dbu>,
     ) -> Result<(), RepairError> {
         resizer.journal_begin();
-        let setup_before = resizer.sta().worst_slack(MinMax::Max).0;
+        let setup_before = resizer.sta().worst_slack(MinMax::Max).0.seconds();
         let slew_before = resizer.graph().slew(driver).max();
         let net = resizer.netlist().db.pins[driver.index()].net;
         let inserted = resizer.insert_buffer_before_loads(net, loads, self.buffer, at, "hold")?;
         let resized = !Self::load_in_hand(resizer, inserted.output)
             && resizer.resize_to_target_slew(inserted.output)?;
         let slew_after = resizer.graph().slew(driver).max();
-        let setup_after = resizer.sta().worst_slack(MinMax::Max).0;
+        let setup_after = resizer.sta().worst_slack(MinMax::Max).0.seconds();
         let growth = if slew_before > 0.0 {
             slew_after / slew_before
         } else {

@@ -217,7 +217,7 @@ impl Repair<'_, '_> {
         let mut ends: Vec<(PinId, f64)> = sta
             .endpoints()
             .iter()
-            .map(|&end| (end, sta.slack(end, MinMax::Max)))
+            .map(|&end| (end, sta.slack(end, MinMax::Max).seconds()))
             .filter(|&(_, slack)| fuzzy::less(slack, self.options.margin))
             .collect();
         ends.sort_by(|a, b| a.1.total_cmp(&b.1));
@@ -225,7 +225,8 @@ impl Repair<'_, '_> {
     }
 
     fn worst(&self) -> (f64, Option<PinId>) {
-        self.resizer.sta().worst_slack(MinMax::Max)
+        let (slack, end) = self.resizer.sta().worst_slack(MinMax::Max);
+        (slack.seconds(), end)
     }
 
     fn tns(&self) -> f64 {
@@ -312,7 +313,7 @@ impl Repair<'_, '_> {
             }
             self.fallback = false;
             let mut end = first_end;
-            let mut end_slack = self.resizer.sta().slack(end, MinMax::Max);
+            let mut end_slack = self.resizer.sta().slack(end, MinMax::Max).seconds();
             let (mut worst_slack, _) = self.worst();
             let mut prev_end_slack = end_slack;
             let mut prev_worst_slack = worst_slack;
@@ -358,7 +359,7 @@ impl Repair<'_, '_> {
                     journal_open = false;
                     break;
                 }
-                end_slack = self.resizer.sta().slack(end, MinMax::Max);
+                end_slack = self.resizer.sta().slack(end, MinMax::Max).seconds();
                 let (new_worst, worst_vertex) = self.worst();
                 worst_slack = new_worst;
                 let better = fuzzy::greater(worst_slack, prev_worst_slack)
@@ -428,7 +429,7 @@ impl Repair<'_, '_> {
             let end_index = end_index + 1;
             self.fallback = false;
             let mut end = first_end;
-            let mut end_slack = self.resizer.sta().slack(end, MinMax::Max);
+            let mut end_slack = self.resizer.sta().slack(end, MinMax::Max).seconds();
             let mut two_terminations = false;
             self.journal_begin();
             let mut journal_open = true;
@@ -466,7 +467,7 @@ impl Repair<'_, '_> {
                     journal_open = false;
                     break;
                 }
-                end_slack = self.resizer.sta().slack(end, MinMax::Max);
+                end_slack = self.resizer.sta().slack(end, MinMax::Max).seconds();
                 let (current_worst, worst_vertex) = self.worst();
                 current_tns = self.tns();
                 let wns_improved = fuzzy::greater_equal(current_worst, prev_worst);

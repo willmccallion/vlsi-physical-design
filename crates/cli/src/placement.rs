@@ -490,7 +490,7 @@ impl TimingDriver for TimingPlacement<'_> {
             sdc,
         )?;
         let area_before = resizer.design_area();
-        let wns_before = resizer.sta().worst_slack(MinMax::Max).0;
+        let wns_before = resizer.sta().worst_slack(MinMax::Max).0.seconds();
         resizer.set_max_wire_length(pare_resizer::rebuffer::max_wire_length(&resizer));
         let done = Repairer::new(&mut resizer).repair_design()?;
         let mut rebuffer = Rebuffer::new(&resizer)?;
@@ -500,11 +500,13 @@ impl TimingDriver for TimingPlacement<'_> {
             timing_net_weights(&slacks, self.config.global_placement.timing_net_weight_max);
         log::debug!(
             "timing weights: worst net slack {:.4} ns, largest weight {:.4}",
-            slacks.first().map_or(f64::INFINITY, |s| s.1 * 1e9),
+            slacks
+                .first()
+                .map_or(f64::INFINITY, |s| s.1.seconds() * 1e9),
             weights.iter().map(|w| w.1).fold(1.0, f64::max)
         );
         let area_after = resizer.design_area();
-        let wns_after = resizer.sta().worst_slack(MinMax::Max).0;
+        let wns_after = resizer.sta().worst_slack(MinMax::Max).0.seconds();
         let renumbering = resizer.finish()?;
         let area_change = if area_before > 0.0 {
             (area_after - area_before) / area_before * 100.0

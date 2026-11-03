@@ -22,6 +22,35 @@ use rustc_hash::{FxHashMap, FxHashSet};
 use std::cmp::Reverse;
 use std::collections::BinaryHeap;
 
+/// A slack in seconds as `OpenSTA` keeps it: [`Slack::UNCONSTRAINED`]
+/// where nothing constrains the pin, which `OpenSTA` holds as its finite
+/// `INF` and so orders after every real slack.
+#[derive(Clone, Copy, Debug, PartialEq, PartialOrd)]
+pub struct Slack(f64);
+
+impl Slack {
+    /// The slack of a pin nothing constrains.
+    pub const UNCONSTRAINED: Self = Self(f64::INFINITY);
+
+    /// The slack of `seconds`.
+    #[must_use]
+    pub const fn new(seconds: f64) -> Self {
+        Self(seconds)
+    }
+
+    /// The slack in seconds, infinite where nothing constrains the pin.
+    #[must_use]
+    pub const fn seconds(self) -> f64 {
+        self.0
+    }
+
+    /// Whether something constrains the pin.
+    #[must_use]
+    pub const fn is_constrained(self) -> bool {
+        self.0.is_finite()
+    }
+}
+
 /// What distinguishes the paths that reach a pin, as `OpenSTA`'s tags.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub struct Tag {
@@ -267,7 +296,7 @@ pub struct Sta {
     /// Each endpoint pin's slack from its own checks, per side.
     end_slack: Vec<[f64; 2]>,
     tns: [f64; 2],
-    worst: [Option<(f64, Option<PinId>)>; 2],
+    worst: [Option<(Slack, Option<PinId>)>; 2],
     accountings: FxHashMap<(ClockEdge, ClockEdge), Accounting>,
     exception_ports: FxHashSet<IoPinId>,
     latches: FxHashMap<CellId, Latch>,
@@ -454,22 +483,26 @@ impl Sta {
     }
 
     /// A pin's slack on `side`: the least over its edges and tags, as
-    /// `OpenSTA`'s vertex slack; infinite where nothing constrains it.
+    /// `OpenSTA`'s vertex slack.
     #[must_use]
-    pub fn slack(&self, pin: PinId, side: MinMax) -> f64 {
-        Edge::BOTH
-            .iter()
-            .map(|&edge| self.slack_edge(pin, edge, side))
-            .fold(f64::INFINITY, f64::min)
+    pub fn slack(&self, pin: PinId, side: MinMax) -> Slack {
+        Slack(
+            Edge::BOTH
+                .iter()
+                .map(|&edge| self.slack_edge(pin, edge, side).0)
+                .fold(f64::INFINITY, f64::min),
+        )
     }
 
     /// A pin's slack for one edge on `side`.
     #[must_use]
-    pub fn slack_edge(&self, pin: PinId, edge: Edge, side: MinMax) -> f64 {
-        self.entries(pin, edge)
-            .iter()
-            .map(|e| e.slack(side))
-            .fold(f64::INFINITY, f64::min)
+    pub fn slack_edge(&self, pin: PinId, edge: Edge, side: MinMax) -> Slack {
+        Slack(
+            self.entries(pin, edge)
+                .iter()
+                .map(|e| e.slack(side))
+                .fold(f64::INFINITY, f64::min),
+        )
     }
 
     /// The arrival at a pin for `edge` on `side`: the latest on the late
@@ -518,13 +551,13 @@ impl Sta {
 
     /// The least endpoint slack on `side` and its endpoint.
     #[must_use]
-    pub fn worst_slack(&self, side: MinMax) -> (f64, Option<PinId>) {
+    pub fn worst_slack(&self, side: MinMax) -> (Slack, Option<PinId>) {
         if let Some(worst) = self.worst[side.index()] {
             return worst;
         }
-        let mut worst = (f64::INFINITY, None);
+        let mut worst = (Slack::UNCONSTRAINED, None);
         for &end in &self.endpoints {
-            let slack = self.end_slack[end.index()][side.index()];
+            let slack = Slack(self.end_slack[end.index()][side.index()]);
             if slack < worst.0 {
                 worst = (slack, Some(end));
             }
@@ -1911,7 +1944,9 @@ mod tests {
             None,
             Estimator::Placement,
         );
-        Sta::new(&netlist, &graph, &clocks, &constants, &sdc).slack(pin, side)
+        Sta::new(&netlist, &graph, &clocks, &constants, &sdc)
+            .slack(pin, side)
+            .seconds()
     }
 
     #[test]

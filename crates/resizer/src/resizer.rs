@@ -11,7 +11,7 @@ use crate::library::{BufferSet, Link};
 use crate::netlist::{ClockNetwork, Constants, Namer, Netlist};
 use crate::parasitics::WireRc;
 use crate::route_parasitics::RouteRc;
-use crate::sta::Sta;
+use crate::sta::{Slack, Sta};
 use pare_common::db::design::{EditError, NetlistDB, PinOwner, PlacementStatus};
 use pare_common::db::global_route::RouteSource;
 use pare_common::db::indices::{CellId, MacroId, MacroPinId, NetId, PinId};
@@ -319,10 +319,10 @@ impl<'a> Resizer<'a, Sta> {
     /// `findResizeSlacks1` collects them for timing-driven placement:
     /// constant, clock and special nets left out.
     #[must_use]
-    pub fn driver_net_slacks(&self) -> Vec<(NetId, f64)> {
+    pub fn driver_net_slacks(&self) -> Vec<(NetId, Slack)> {
         let sta = self.sta();
         let netlist = self.netlist();
-        let mut slack_of: HashMap<NetId, f64> = HashMap::new();
+        let mut slack_of: HashMap<NetId, Slack> = HashMap::new();
         for driver in self.graph.drivers_by_level(&netlist).into_iter().rev() {
             let net = self.db.pins[driver.index()].net;
             if netlist.is_special(net)
@@ -333,8 +333,12 @@ impl<'a> Resizer<'a, Sta> {
             }
             let _ = slack_of.insert(net, sta.slack(driver, MinMax::Max));
         }
-        let mut slacks: Vec<(NetId, f64)> = slack_of.into_iter().collect();
-        slacks.sort_by(|a, b| a.1.total_cmp(&b.1).then_with(|| a.0.cmp(&b.0)));
+        let mut slacks: Vec<(NetId, Slack)> = slack_of.into_iter().collect();
+        slacks.sort_by(|a, b| {
+            a.1.seconds()
+                .total_cmp(&b.1.seconds())
+                .then_with(|| a.0.cmp(&b.0))
+        });
         slacks
     }
 }
@@ -1228,19 +1232,19 @@ pub const WORST_SLACK_NETS_SHARE: f64 = 0.1;
 /// Over the worst [`WORST_SLACK_NETS_SHARE`] of them, the weight runs from
 /// `weight_max` at the worst slack down to one at the best; nets at or
 /// above that best keep a weight of one and are left out. Empty when no
-/// net has a finite slack.
+/// net is constrained.
 #[must_use]
-pub fn timing_net_weights(slacks: &[(NetId, f64)], weight_max: f64) -> Vec<(NetId, f64)> {
+pub fn timing_net_weights(slacks: &[(NetId, Slack)], weight_max: f64) -> Vec<(NetId, f64)> {
     let Some(&(_, slack_min)) = slacks.first() else {
         return Vec::new();
     };
-    if slack_min.is_infinite() {
+    if !slack_min.is_constrained() {
         return Vec::new();
     }
     let worst = ((slacks.len() as f64) * WORST_SLACK_NETS_SHARE).ceil() as usize;
     let slack_max = slacks[worst.clamp(1, slacks.len()) - 1].1;
     let scale = WeightScale {
-        slack_min,
+        slack_min: slack_min.seconds(),
         slack_max,
         weight_max,
     };
@@ -1251,26 +1255,27 @@ pub fn timing_net_weights(slacks: &[(NetId, f64)], weight_max: f64) -> Vec<(NetI
         .collect()
 }
 
-/// Net weights falling linearly from `weight_max` at `slack_min` to one at
-/// `slack_max`.
+/// Net weights falling linearly from `weight_max` at `slack_min`, in
+/// seconds, to one at `slack_max`.
 struct WeightScale {
     slack_min: f64,
-    slack_max: f64,
+    slack_max: Slack,
     weight_max: f64,
 }
 
 impl WeightScale {
-    /// The weight at `slack`. An unbounded `slack_max` gives every finite
-    /// slack `weight_max`, as `OpenSTA`'s finite `INF` does in `gpl`.
-    fn weight(&self, slack: f64) -> f64 {
-        if fuzzy::equal(self.slack_max, self.slack_min) {
+    /// The weight at `slack`. An unconstrained `slack_max` gives every
+    /// constrained slack `weight_max`, as `OpenSTA`'s finite `INF` does in
+    /// `gpl`.
+    fn weight(&self, slack: Slack) -> f64 {
+        let max = self.slack_max.seconds();
+        if fuzzy::equal(max, self.slack_min) {
             return 1.0;
         }
-        if self.slack_max.is_infinite() {
+        if !self.slack_max.is_constrained() {
             return self.weight_max;
         }
-        ((self.weight_max - 1.0) * (self.slack_max - slack) / (self.slack_max - self.slack_min))
-            + 1.0
+        ((self.weight_max - 1.0) * (max - slack.seconds()) / (max - self.slack_min)) + 1.0
     }
 }
 
@@ -1493,11 +1498,11 @@ pub fn buffer_delays(cell: &LibCell, slews: &EdgeValues, load_cap: f64) -> EdgeV
 mod tests {
     use super::*;
 
-    fn slacks(values: &[f64]) -> Vec<(NetId, f64)> {
+    fn slacks(values: &[f64]) -> Vec<(NetId, Slack)> {
         values
             .iter()
             .enumerate()
-            .map(|(i, &v)| (NetId::new(i), v))
+            .map(|(i, &v)| (NetId::new(i), Slack::new(v)))
             .collect()
     }
 
