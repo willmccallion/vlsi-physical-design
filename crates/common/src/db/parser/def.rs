@@ -1042,6 +1042,15 @@ impl<'a> DefParser<'a> {
                 ),
             ));
         }
+        if let Some(existing) = self.db.cell_pin(cell, pin) {
+            let other = &self.db.nets[self.db.pins[existing.index()].net.index()].name;
+            return Err(self.lx.error(
+                line,
+                format!(
+                    "net '{net_name}' uses {owner}/{pin_name}, which is already on net '{other}'"
+                ),
+            ));
+        }
         let _ = self.db.connect_cell_pin(cell, pin, net);
         Ok(())
     }

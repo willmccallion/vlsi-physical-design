@@ -634,6 +634,16 @@ impl NetlistDB {
         id
     }
 
+    /// The connection of an instance's macro pin, if it has one.
+    #[must_use]
+    pub fn cell_pin(&self, cell: CellId, macro_pin: MacroPinId) -> Option<PinId> {
+        self.cells[cell.index()]
+            .pins
+            .iter()
+            .copied()
+            .find(|p| matches!(self.pins[p.index()].owner, PinOwner::Cell { pin, .. } if pin == macro_pin))
+    }
+
     /// Connects a pin of an instance to a net.
     pub fn connect_cell_pin(&mut self, cell: CellId, pin: MacroPinId, net: NetId) -> PinId {
         let id = PinId::new(self.pins.len());

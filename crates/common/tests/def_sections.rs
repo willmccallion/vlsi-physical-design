@@ -293,6 +293,18 @@ fn members_of_two_groups_on_one_region_keep_their_order_when_written() {
 }
 
 #[test]
+fn a_component_pin_on_two_nets_is_refused() {
+    let error = design_with(&[(
+        "- out ( u4 Y ) ( PIN out ) ;",
+        "- out ( u4 Y ) ( PIN out ) ( u1 A ) ;",
+    )])
+    .unwrap_err();
+
+    assert!(error.contains("u1/A"), "{error}");
+    assert!(error.contains("already on net 'in'"), "{error}");
+}
+
+#[test]
 fn groups_may_come_before_the_regions_and_components_they_name() {
     let db = design_with(&[(
         "COMPONENTS 8 ;",
