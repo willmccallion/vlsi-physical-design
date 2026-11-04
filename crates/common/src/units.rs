@@ -221,16 +221,8 @@ define_product!(OhmsPerMeter * Meters = Ohms);
 define_product!(FaradsPerMeter * Meters = Farads);
 
 const NANOS_PER_SECOND: f64 = 1e9;
-const PICOS_PER_UNIT: f64 = 1e12;
-const FEMTOS_PER_UNIT: f64 = 1e15;
 
 impl Seconds {
-    /// `ns` nanoseconds.
-    #[must_use]
-    pub const fn from_nanos(ns: f64) -> Self {
-        Self(ns * 1e-9)
-    }
-
     /// The time in nanoseconds, as reports give it.
     #[must_use]
     pub const fn nanos(self) -> f64 {
@@ -246,40 +238,20 @@ impl Meters {
     }
 }
 
-impl Farads {
-    /// `ff` femtofarads.
-    #[must_use]
-    pub const fn from_femto(ff: f64) -> Self {
-        Self(ff * 1e-15)
-    }
-
-    /// The capacitance in femtofarads, as reports give it.
-    #[must_use]
-    pub const fn femto(self) -> f64 {
-        self.0 * FEMTOS_PER_UNIT
-    }
-
-    /// The capacitance in picofarads, as reports give it.
-    #[must_use]
-    pub const fn pico(self) -> f64 {
-        self.0 * PICOS_PER_UNIT
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
 
     #[test]
     fn a_resistance_driving_a_capacitance_gives_a_time() {
-        let tau = Ohms::new(1e3) * Farads::from_femto(2.0);
+        let tau = Ohms::new(1e3) * Farads::new(2e-15);
 
         assert!((tau.nanos() - 2e-3).abs() < 1e-15);
     }
 
     #[test]
     fn a_time_over_a_capacitance_gives_a_resistance() {
-        let resistance = Seconds::from_nanos(1.0) / Farads::from_femto(10.0);
+        let resistance = Seconds::new(1e-9) / Farads::new(10e-15);
 
         assert!((resistance.get() - 1e5).abs() < 1e-6);
     }
@@ -293,7 +265,7 @@ mod tests {
 
     #[test]
     fn two_quantities_of_one_kind_divide_to_a_plain_ratio() {
-        let ratio = Seconds::from_nanos(3.0) / Seconds::from_nanos(2.0);
+        let ratio = Seconds::new(3e-9) / Seconds::new(2e-9);
 
         assert!((ratio - 1.5).abs() < 1e-12);
     }
