@@ -231,6 +231,22 @@ impl Seconds {
     }
 }
 
+impl OhmsPerMeter {
+    /// Ohms per database unit, at `dbu_per_micron` of them to a micron.
+    #[must_use]
+    pub fn per_dbu(self, dbu_per_micron: DbuPerMicron) -> f64 {
+        self.0 * 1e-6 / f64::from(dbu_per_micron.get())
+    }
+}
+
+impl FaradsPerMeter {
+    /// Farads per database unit, at `dbu_per_micron` of them to a micron.
+    #[must_use]
+    pub fn per_dbu(self, dbu_per_micron: DbuPerMicron) -> f64 {
+        self.0 * 1e-6 / f64::from(dbu_per_micron.get())
+    }
+}
+
 impl Meters {
     /// `length` at `dbu_per_micron` database units to a micron.
     #[must_use]
@@ -255,6 +271,17 @@ mod tests {
         let resistance = Seconds::new(1e-9) / Farads::new(10e-15);
 
         assert!((resistance.get() - 1e5).abs() < 1e-6);
+    }
+
+    #[test]
+    fn a_wire_per_meter_converts_to_per_database_unit() {
+        let dbu = DbuPerMicron::new(2000).unwrap();
+
+        let res = OhmsPerMeter::new(4e6).per_dbu(dbu);
+        let cap = FaradsPerMeter::new(2e-10).per_dbu(dbu);
+
+        assert!((res - 2e-3).abs() < 1e-15);
+        assert!((cap - 1e-19).abs() < 1e-30);
     }
 
     #[test]
