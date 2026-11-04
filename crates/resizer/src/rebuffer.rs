@@ -1880,6 +1880,38 @@ mod tests {
     }
 
     #[test]
+    fn rebuffering_sees_every_load_of_a_net_when_two_share_a_place() {
+        let mut db = design(
+            "VERSION 5.8 ;\nDIVIDERCHAR \"/\" ;\nBUSBITCHARS \"[]\" ;\nDESIGN fork ;\n\
+             UNITS DISTANCE MICRONS 2000 ;\nDIEAREA ( 0 0 ) ( 80000 40000 ) ;\n\
+             COMPONENTS 4 ;\n- f1 DFF_X1 + PLACED ( 2000 2800 ) N ;\n\
+             - b1 BUF_X1 + PLACED ( 30000 2800 ) N ;\n- b2 BUF_X1 + PLACED ( 30000 2800 ) N ;\n\
+             - b3 BUF_X1 + PLACED ( 50000 2800 ) N ;\nEND COMPONENTS\n\
+             PINS 1 ;\n- clk + NET clk + DIRECTION INPUT ;\nEND PINS\n\
+             NETS 2 ;\n- clk ( PIN clk ) ( f1 CK ) ;\n\
+             - q ( f1 Q ) ( b1 A ) ( b2 A ) ( b3 A ) ;\nEND NETS\nEND DESIGN\n",
+        );
+        let q = pin(&db, "f1/Q");
+        let clock = "create_clock -name clk -period 0.5 [get_ports clk]\n";
+
+        with_timed_session(&mut db, clock, |resizer| {
+            let tree = make_tree(resizer, q).unwrap();
+            let mut sinks = Vec::new();
+            collect_sinks(&tree, &mut sinks);
+            let mut names: Vec<String> = sinks
+                .iter()
+                .filter_map(|s| match s.kind {
+                    Kind::Load { pin } => Some(resizer.db.pin_name(pin)),
+                    _ => None,
+                })
+                .collect();
+            names.sort();
+
+            assert_eq!(names, ["b1/A", "b2/A", "b3/A"]);
+        });
+    }
+
+    #[test]
     fn a_flop_on_a_propagated_clock_is_rebuffered_from_its_clock_pin_slew() {
         let mut db = buffered_clock_pair();
         let q = pin(&db, "f1/Q");

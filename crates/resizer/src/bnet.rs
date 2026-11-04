@@ -599,18 +599,25 @@ fn from_steiner(
     loads: &dyn LoadModel,
 ) -> Option<BnetPtr> {
     let children = tree.children();
-    let mut visited: HashSet<(i64, i64)> = HashSet::new();
+    let mut pins_at: FxHashMap<(i64, i64), Vec<PinId>> = FxHashMap::default();
+    for (node, pins) in terminal_pins.iter().enumerate().take(tree.terminals) {
+        let at = tree.nodes[node];
+        pins_at
+            .entry((at.x.get(), at.y.get()))
+            .or_default()
+            .extend(pins);
+    }
     let mut leaves_at = |node: usize| -> Vec<BnetPtr> {
         if node >= tree.terminals {
             return Vec::new();
         }
         let at = tree.nodes[node];
-        if !visited.insert((at.x.get(), at.y.get())) {
+        // The first terminal at a place takes every pin there, as
+        // makeBufferedNetFromTree takes all of SteinerTree::pins.
+        let Some(pins) = pins_at.remove(&(at.x.get(), at.y.get())) else {
             return Vec::new();
-        }
-        terminal_pins[node]
-            .iter()
-            .copied()
+        };
+        pins.into_iter()
             .filter(|&pin| pin != driver && netlist.is_load(pin))
             .map(|pin| Bnet::load(at, pin, loads.load(pin)))
             .collect()
