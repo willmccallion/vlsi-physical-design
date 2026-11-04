@@ -429,6 +429,12 @@ pub struct RoutingConfig {
     pub min_layer: Option<String>,
     /// Highest routing layer for signal wires; defaults to the top layer.
     pub max_layer: Option<String>,
+    /// Lowest routing layer for the wires of clock nets that clock no
+    /// register, as `set_routing_layers -clock` sets it; defaults to
+    /// `min_layer`.
+    pub clock_min_layer: Option<String>,
+    /// Highest routing layer for those clock nets; defaults to `max_layer`.
+    pub clock_max_layer: Option<String>,
     /// Global routing cell edge, in gcell pitches: the middle track spacing
     /// of the second to fourth routing layers, as `OpenROAD` sizes gcells.
     #[serde(default = "default_gcell_tracks")]
@@ -458,6 +464,10 @@ pub enum LayerRangeError {
     /// The minimum routing layer is above the maximum.
     #[error("the minimum routing layer is above the maximum")]
     Empty,
+    /// Clock wires may use a layer signal wires may not, which the router
+    /// does not support.
+    #[error("the clock routing layers reach outside the signal routing layers")]
+    ClockOutsideSignal,
 }
 
 impl RoutingConfig {
@@ -470,18 +480,33 @@ impl RoutingConfig {
             .len()
             .checked_sub(1)
             .ok_or(LayerRangeError::NoLayers)?;
-        let resolve = |name: &Option<String>, default: usize| match name {
-            None => Ok(LayerId::new(default)),
-            Some(n) => lib
-                .routing_layer_id(n)
-                .ok_or_else(|| LayerRangeError::Unknown(n.clone())),
-        };
-        let min = resolve(&self.min_layer, top.min(1))?;
-        let max = resolve(&self.max_layer, top)?;
-        if min > max {
-            return Err(LayerRangeError::Empty);
+        let defaults = LayerId::new(top.min(1))..=LayerId::new(top);
+        named_range(
+            lib,
+            self.min_layer.as_deref(),
+            self.max_layer.as_deref(),
+            defaults,
+        )
+    }
+
+    /// The layers the wires of clock nets that clock no register may use:
+    /// `clock_min_layer` up to `clock_max_layer`, each by default the end
+    /// of [`Self::layer_range`], within which they must lie.
+    pub fn clock_layer_range(
+        &self,
+        lib: &Library,
+    ) -> Result<RangeInclusive<LayerId>, LayerRangeError> {
+        let signal = self.layer_range(lib)?;
+        let clock = named_range(
+            lib,
+            self.clock_min_layer.as_deref(),
+            self.clock_max_layer.as_deref(),
+            signal.clone(),
+        )?;
+        if clock.start() < signal.start() || clock.end() > signal.end() {
+            return Err(LayerRangeError::ClockOutsideSignal);
         }
-        Ok(min..=max)
+        Ok(clock)
     }
 
     /// The lowest layer signal wires may use, the start of
@@ -496,11 +521,35 @@ impl RoutingConfig {
     }
 }
 
+/// The routing layers from `min` to `max`, each by name, or the end of
+/// `defaults` when not given.
+fn named_range(
+    lib: &Library,
+    min: Option<&str>,
+    max: Option<&str>,
+    defaults: RangeInclusive<LayerId>,
+) -> Result<RangeInclusive<LayerId>, LayerRangeError> {
+    let resolve = |name: Option<&str>, default: LayerId| match name {
+        None => Ok(default),
+        Some(n) => lib
+            .routing_layer_id(n)
+            .ok_or_else(|| LayerRangeError::Unknown(n.to_string())),
+    };
+    let low = resolve(min, *defaults.start())?;
+    let high = resolve(max, *defaults.end())?;
+    if low > high {
+        return Err(LayerRangeError::Empty);
+    }
+    Ok(low..=high)
+}
+
 impl Default for RoutingConfig {
     fn default() -> Self {
         Self {
             min_layer: None,
             max_layer: None,
+            clock_min_layer: None,
+            clock_max_layer: None,
             gcell_tracks: default_gcell_tracks(),
             global_iterations: default_global_iterations(),
             global_capacity_reserve: default_global_capacity_reserve(),

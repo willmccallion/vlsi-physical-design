@@ -709,6 +709,68 @@ fn a_misnamed_lowest_routing_layer_is_an_error_not_a_missing_layer() {
 }
 
 #[test]
+fn clock_layers_default_to_the_signal_layers() {
+    let config = RoutingConfig {
+        min_layer: Some("M2".into()),
+        ..RoutingConfig::default()
+    };
+
+    let layers = config.clock_layer_range(&tiny_library());
+
+    assert_eq!(layers, Ok(LayerId(1)..=LayerId(2)));
+}
+
+#[test]
+fn a_raised_lowest_clock_layer_keeps_the_signal_top() {
+    let config = RoutingConfig {
+        clock_min_layer: Some("M3".into()),
+        ..RoutingConfig::default()
+    };
+
+    let layers = config.clock_layer_range(&tiny_library());
+
+    assert_eq!(layers, Ok(LayerId(2)..=LayerId(2)));
+}
+
+#[test]
+fn clock_layers_that_cross_are_refused() {
+    let config = RoutingConfig {
+        clock_min_layer: Some("M3".into()),
+        clock_max_layer: Some("M2".into()),
+        ..RoutingConfig::default()
+    };
+
+    let layers = config.clock_layer_range(&tiny_library());
+
+    assert_eq!(layers, Err(LayerRangeError::Empty));
+}
+
+#[test]
+fn clock_layers_below_the_signal_layers_are_refused() {
+    let config = RoutingConfig {
+        min_layer: Some("M2".into()),
+        clock_min_layer: Some("M1".into()),
+        ..RoutingConfig::default()
+    };
+
+    let layers = config.clock_layer_range(&tiny_library());
+
+    assert_eq!(layers, Err(LayerRangeError::ClockOutsideSignal));
+}
+
+#[test]
+fn a_misnamed_clock_layer_is_an_error() {
+    let config = RoutingConfig {
+        clock_min_layer: Some("metal4".into()),
+        ..RoutingConfig::default()
+    };
+
+    let layers = config.clock_layer_range(&tiny_library());
+
+    assert_eq!(layers, Err(LayerRangeError::Unknown("metal4".into())));
+}
+
+#[test]
 fn the_lowest_signal_layer_defaults_to_the_second() {
     let layer = RoutingConfig::default().lowest_signal_layer(&tiny_library());
 
