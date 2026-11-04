@@ -570,7 +570,6 @@ fn upsize_cell(
     let in_name = &cell.ports[in_port].name;
     let out_name = &cell.ports[drvr_port].name;
     let mut candidates: Vec<(LibCellId, usize, usize)> = resizer
-        .link
         .swappable_cells(lib)
         .into_iter()
         .filter_map(|id| {
@@ -653,7 +652,7 @@ fn half_driving_power_cell(resizer: &Resizer<'_, Sta>, lib: LibCellId) -> Option
     };
     let target = 0.5 * max_load(lib);
     let mut closest: Option<(Farads, LibCellId)> = None;
-    for candidate in resizer.link.swappable_cells(lib) {
+    for candidate in resizer.swappable_cells(lib) {
         let limit = max_load(candidate);
         let diff = (limit - target).abs();
         if fuzzy::zero(diff) {

@@ -6,7 +6,7 @@ use pare_common::db::design::{NetlistDB, PinOwner};
 use pare_common::db::indices::{CellId, MacroId, PinId, SiteId};
 use pare_common::db::liberty::{LibCell, LibCellId, LibPort, Liberty};
 use pare_common::db::library::{CoreKind, MacroClass, PinDirection, SignalUse};
-use pare_common::units::{Farads, Ohms};
+use pare_common::units::{Farads, Ohms, Watts};
 use std::collections::HashMap;
 
 /// Why the library could not be joined to the design.
@@ -41,6 +41,56 @@ pub struct Link<'a> {
     dont_use: Vec<bool>,
     class_of: Vec<Option<usize>>,
     classes: Vec<Vec<LibCellId>>,
+    master_area: Vec<Option<i64>>,
+}
+
+/// How much one sizing step may grow a cell, as `set_opt_config`'s
+/// `-sizing_area_limit` and `-sizing_leakage_limit`: a size more than the
+/// ratio times the present one's area or leakage is not offered.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub(crate) struct SizingLimits {
+    area: Option<f64>,
+    leakage: Option<f64>,
+}
+
+/// A cell's measures the sizing limits compare.
+#[derive(Clone, Copy, Debug, PartialEq)]
+struct CellMeasures {
+    /// Its master's area, in square database units.
+    area: Option<i64>,
+    /// Its leakage power.
+    leakage: Option<Watts>,
+}
+
+impl SizingLimits {
+    /// `OpenROAD`'s defaults: at most four times the area and the leakage.
+    pub(crate) const OPENROAD: Self = Self {
+        area: Some(4.0),
+        leakage: Some(4.0),
+    };
+
+    /// No limits, as `repairClkNets` lifts them for clock buffers.
+    pub(crate) const NONE: Self = Self {
+        area: None,
+        leakage: None,
+    };
+
+    /// Whether a cell measuring `from` may be sized to one measuring `to`,
+    /// as `Resizer::getSwappableCells` filters; a missing measure passes.
+    fn allows(self, from: CellMeasures, to: CellMeasures) -> bool {
+        let area_ok = match (self.area, from.area, to.area) {
+            (Some(limit), Some(from), Some(to)) if from != 0 => to as f64 / from as f64 <= limit,
+            _ => true,
+        };
+        let leakage_ok = match (self.leakage, from.leakage, to.leakage) {
+            (Some(limit), Some(from), Some(to)) => {
+                let ratio = to / from;
+                ratio.is_nan() || ratio <= limit
+            }
+            _ => true,
+        };
+        area_ok && leakage_ok
+    }
 }
 
 impl<'a> Link<'a> {
@@ -77,6 +127,15 @@ impl<'a> Link<'a> {
             );
         }
         let (class_of, classes) = equivalence_classes(liberty, &dont_use_flags);
+        let master_area = macro_of_cell
+            .iter()
+            .map(|m| {
+                m.map(|m| {
+                    let size = db.library.macros[m.index()].size;
+                    size.x.get() * size.y.get()
+                })
+            })
+            .collect();
         Ok(Self {
             liberty,
             cell_of_macro,
@@ -85,6 +144,7 @@ impl<'a> Link<'a> {
             dont_use: dont_use_flags,
             class_of,
             classes,
+            master_area,
         })
     }
 
@@ -146,17 +206,27 @@ impl<'a> Link<'a> {
 
     /// The cells an instance of `cell` may be swapped for, itself included,
     /// as `OpenROAD`'s `getSwappableCells`: the equivalent cells that have
-    /// a master and may be used, or just the cell when it has no class.
+    /// a master, may be used and are within `limits` of `cell`, or just the
+    /// cell when it has no class.
     #[must_use]
-    pub(crate) fn swappable_cells(&self, cell: LibCellId) -> Vec<LibCellId> {
+    pub(crate) fn swappable_cells(&self, cell: LibCellId, limits: SizingLimits) -> Vec<LibCellId> {
         let Some(class) = self.class_of[cell.index()] else {
             return vec![cell];
         };
+        let from = self.measures(cell);
         self.classes[class]
             .iter()
             .copied()
             .filter(|&c| !self.dont_use(c) && self.is_link_cell(c))
+            .filter(|&c| limits.allows(from, self.measures(c)))
             .collect()
+    }
+
+    fn measures(&self, cell: LibCellId) -> CellMeasures {
+        CellMeasures {
+            area: self.master_area[cell.index()],
+            leakage: cell_leakage(self.liberty.cell(cell)),
+        }
     }
 
     /// Drive resistance of a buffer's output.
@@ -332,6 +402,16 @@ impl Link<'_> {
     }
 }
 
+/// A cell's leakage, as `Resizer::cellLeakage`: its `cell_leakage_power`,
+/// else the mean of its per-state leakages.
+fn cell_leakage(cell: &LibCell) -> Option<Watts> {
+    if cell.leakage.is_some() || cell.state_leakages.is_empty() {
+        return cell.leakage;
+    }
+    let total: Watts = cell.state_leakages.iter().copied().sum();
+    Some(total / cell.state_leakages.len() as f64)
+}
+
 /// Whether a buffer is meant for clock trees: `OpenROAD`'s default test,
 /// `CLKBUF` in its name.
 fn is_clock_buffer(cell: &LibCell) -> bool {
@@ -427,6 +507,73 @@ mod tests {
                {cells} }}"
         );
         parse_str(&src, Path::new("t.lib")).unwrap()
+    }
+
+    fn measures(area: i64, leakage_nw: f64) -> CellMeasures {
+        CellMeasures {
+            area: Some(area),
+            leakage: Some(Watts::new(leakage_nw * 1e-9)),
+        }
+    }
+
+    #[test]
+    fn a_size_over_four_times_the_leakage_is_not_offered() {
+        let buf_x1 = measures(798, 21.438_247);
+        let buf_x4 = measures(1862, 86.121_805);
+
+        assert!(!SizingLimits::OPENROAD.allows(buf_x1, buf_x4));
+    }
+
+    #[test]
+    fn a_size_just_under_four_times_the_leakage_is_offered() {
+        let oai21_x1 = measures(1064, 22.619_394);
+        let oai21_x4 = measures(2660, 90.477_187);
+
+        assert!(SizingLimits::OPENROAD.allows(oai21_x1, oai21_x4));
+    }
+
+    #[test]
+    fn a_size_over_four_times_the_area_is_not_offered_and_four_times_is() {
+        let small = measures(100, 1.0);
+
+        assert!(SizingLimits::OPENROAD.allows(small, measures(400, 1.0)));
+        assert!(!SizingLimits::OPENROAD.allows(small, measures(401, 1.0)));
+    }
+
+    #[test]
+    fn missing_or_zero_measures_and_lifted_limits_offer_every_size() {
+        let none = CellMeasures {
+            area: None,
+            leakage: None,
+        };
+        let big = measures(10_000, 1000.0);
+
+        assert!(SizingLimits::OPENROAD.allows(none, big));
+        assert!(SizingLimits::OPENROAD.allows(measures(0, 0.0), measures(0, 0.0)));
+        assert!(SizingLimits::NONE.allows(measures(1, 1.0), big));
+    }
+
+    #[test]
+    fn any_leakage_over_a_leakless_size_is_not_offered() {
+        assert!(!SizingLimits::OPENROAD.allows(measures(1, 0.0), measures(1, 1.0)));
+    }
+
+    fn leaky(body: &str) -> LibCell {
+        let src = format!(
+            "library (t) {{ leakage_power_unit : \"1nW\";
+               cell (c) {{ {body} pin (A) {{ direction : input; capacitance : 1.0; }} }} }}"
+        );
+        parse_str(&src, Path::new("t.lib")).unwrap().cells[0].clone()
+    }
+
+    #[test]
+    fn leakage_is_the_cell_value_else_the_mean_over_states_else_unknown() {
+        let stated = leaky("cell_leakage_power : 5.0; leakage_power () { value : 9.0; }");
+        let by_state = leaky("leakage_power () { value : 2.0; } leakage_power () { value : 4.0; }");
+
+        assert_eq!(cell_leakage(&stated), Some(Watts::new(5.0e-9)));
+        assert!((cell_leakage(&by_state).unwrap().get() - 3.0e-9).abs() < 1e-20);
+        assert_eq!(cell_leakage(&leaky("")), None);
     }
 
     #[test]

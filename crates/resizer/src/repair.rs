@@ -7,6 +7,7 @@
 //! estimate of every load's slew is within its limit.
 
 use crate::bnet::{self, BnetPtr, Kind};
+use crate::library::SizingLimits;
 use crate::resizer::{RepairError, Resizer, Timing, gate_slew};
 use pare_common::db::design::PinOwner;
 use pare_common::db::indices::{NetId, PinId};
@@ -150,6 +151,7 @@ impl<'r, 'a, T: Timing> Repairer<'r, 'a, T> {
         self.resizer.options.slew_margin = 0.0;
         self.resizer.options.cap_margin = 0.0;
         self.resizer.options.max_wire_length = max_length;
+        self.resizer.options.sizing_limits = SizingLimits::NONE;
         self.resizer.r_strongest_buffer = clock_buffers
             .iter()
             .map(|&b| self.resizer.link.buffer_drive_resistance(b))
@@ -317,7 +319,7 @@ impl<'r, 'a, T: Timing> Repairer<'r, 'a, T> {
                 lib_id,
                 lib.ports[port].name.clone(),
                 self.resizer.load_cap(driver),
-                self.resizer.link.swappable_cells(lib_id),
+                self.resizer.swappable_cells(lib_id),
             )
         };
         if candidates.is_empty() {

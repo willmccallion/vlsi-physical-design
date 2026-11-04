@@ -7,7 +7,7 @@
 use crate::bnet::{LoadModel, PinLoad, TreeRc};
 use crate::fuzzy;
 use crate::graph::{Estimator, TimingGraph};
-use crate::library::{BufferSet, Link, is_logic_std_cell};
+use crate::library::{BufferSet, Link, SizingLimits, is_logic_std_cell};
 use crate::netlist::{ClockNetwork, Constants, Namer, Netlist};
 use crate::parasitics::WireRc;
 use crate::route_parasitics::RouteRc;
@@ -61,6 +61,8 @@ pub struct RepairOptions {
     pub cap_margin: f64,
     /// Longest wire allowed, in database units; zero for no limit.
     pub max_wire_length: i64,
+    /// How much one sizing step may grow a cell.
+    pub(crate) sizing_limits: SizingLimits,
 }
 
 impl Default for RepairOptions {
@@ -69,6 +71,7 @@ impl Default for RepairOptions {
             slew_margin: 0.0,
             cap_margin: 0.0,
             max_wire_length: 0,
+            sizing_limits: SizingLimits::OPENROAD,
         }
     }
 }
@@ -1060,6 +1063,13 @@ impl<'a, T: Timing> Resizer<'a, T> {
         ))
     }
 
+    /// The cells an instance of `cell` may be sized to, within the sizing
+    /// limits in force.
+    #[must_use]
+    pub(crate) fn swappable_cells(&self, cell: LibCellId) -> Vec<LibCellId> {
+        self.link.swappable_cells(cell, self.options.sizing_limits)
+    }
+
     /// Sizes the cell driving `driver` to the size whose target load is
     /// nearest its load, as `Resizer::resizeToTargetSlew`; returns whether
     /// the cell changed.
@@ -1099,7 +1109,7 @@ impl<'a, T: Timing> Resizer<'a, T> {
         load_cap: Farads,
         revisiting: bool,
     ) -> LibCellId {
-        let candidates = self.link.swappable_cells(cell);
+        let candidates = self.swappable_cells(cell);
         if candidates.is_empty() {
             return cell;
         }
