@@ -521,7 +521,13 @@ impl Moves {
                 return Ok(false);
             }
         }
-        if !estimated_slack_ok(resizer, site, input, prev_driver, prev_edge, margin) {
+        let removal = Removal {
+            buffer: *site,
+            input,
+            prev_driver,
+            prev_edge,
+        };
+        if !estimated_slack_ok(resizer, &removal, margin) {
             return Ok(false);
         }
         if !can_remove_buffer(resizer, site.cell) {
@@ -796,32 +802,76 @@ fn swap_candidate(
     chosen
 }
 
-/// `BaseMove::estimatedSlackOK`: whether taking the buffer at `site` out
-/// leaves every path through its loads and the previous driver's other
-/// loads no worse, by estimated slews and delays.
-fn estimated_slack_ok(
-    resizer: &Resizer<'_, Sta>,
-    site: &Site,
-    buffer_input: PinId,
+/// A buffer to take out: its site, its input pin, and the driver before it
+/// with the edge that driver's output takes.
+#[derive(Clone, Copy, Debug)]
+struct Removal {
+    buffer: Site,
+    input: PinId,
     prev_driver: PinId,
     prev_edge: Edge,
+}
+
+/// How taking a buffer out changes the driver before it.
+#[derive(Clone, Copy, Debug)]
+struct DriverChange {
+    old_slew: EdgeValues<Seconds>,
+    new_slew: EdgeValues<Seconds>,
+    /// How much later the driver's output arrives with the buffer's loads.
+    delay_degrade: Seconds,
+    /// The buffer's own delay, which the paths through it no longer pay.
+    delay_improve: Seconds,
+}
+
+/// A change to a cell's input slews and arrival, and the rule its outputs'
+/// slacks are held to.
+#[derive(Clone, Copy, Debug)]
+struct SlewImpact {
+    old: EdgeValues<Seconds>,
+    new: EdgeValues<Seconds>,
+    /// How much later the inputs arrive.
+    adjust: Seconds,
     margin: Seconds,
-) -> bool {
-    let sta = resizer.sta();
+    rule: SlackRule,
+}
+
+/// What an output's estimated slack must keep, as
+/// `estimateInputSlewImpact`'s `accept_if_slack_improves`.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum SlackRule {
+    /// It may not get worse.
+    NoWorse,
+    /// It may not go negative.
+    NonNegative,
+}
+
+/// `BaseMove::estimatedSlackOK`: whether taking the buffer out leaves every
+/// path through its loads and the previous driver's other loads no worse,
+/// by estimated slews and delays.
+fn estimated_slack_ok(resizer: &Resizer<'_, Sta>, removal: &Removal, margin: Seconds) -> bool {
+    let Some(change) = driver_change(resizer, removal) else {
+        return false;
+    };
+    buffer_loads_ok(resizer, removal, &change, margin)
+        && side_loads_ok(resizer, removal, &change, margin)
+}
+
+/// How the previous driver's delay and slew change when it drives the
+/// buffer's loads too; none when its cell or the buffer's cannot be
+/// looked up, or the new load breaks its limit.
+fn driver_change(resizer: &Resizer<'_, Sta>, removal: &Removal) -> Option<DriverChange> {
+    let site = &removal.buffer;
+    let prev_driver = removal.prev_driver;
     let PinOwner::Cell {
         cell: prev_cell, ..
     } = resizer.db.pins[prev_driver.index()].owner
     else {
-        return false;
+        return None;
     };
-    let Some((prev_lib, prev_port)) = resizer.link.pin_port(resizer.db, prev_driver) else {
-        return false;
-    };
+    let (prev_lib, prev_port) = resizer.link.pin_port(resizer.db, prev_driver)?;
     let prev = resizer.link.liberty.cell(prev_lib);
     let buffer = resizer.link.liberty.cell(site.lib);
-    let Some((in_port, _)) = buffer.buffer_ports() else {
-        return false;
-    };
+    let (in_port, _) = buffer.buffer_ports()?;
     let prev_input_slews = resizer.input_slews(prev_cell);
     let old_load = resizer.load_cap(prev_driver);
     let (old_delay, old_slew) = gate_delays(
@@ -840,65 +890,86 @@ fn estimated_slack_ok(
         Some(&prev_input_slews),
     );
     if !resizer.cap_ok(prev_driver, new_load - old_load) {
-        return false;
+        return None;
     }
-    let delay_degrade = new_delay.get(prev_edge) - old_delay.get(prev_edge);
     let buffer_out_delays = buffer_delays(
         buffer,
         &resizer.targets.slews,
         resizer.load_cap(site.driver),
     );
-    let delay_improve = buffer_out_delays.get(site.edge);
+    Some(DriverChange {
+        old_slew,
+        new_slew,
+        delay_degrade: new_delay.get(removal.prev_edge) - old_delay.get(removal.prev_edge),
+        delay_improve: buffer_out_delays.get(site.edge),
+    })
+}
+
+/// Whether every load the buffer drove keeps its outputs' slacks, driven
+/// at the slews the previous driver would give it.
+fn buffer_loads_ok(
+    resizer: &Resizer<'_, Sta>,
+    removal: &Removal,
+    change: &DriverChange,
+    margin: Seconds,
+) -> bool {
     let Some(load_slews) = slews_after_removal(
         resizer,
-        prev_driver,
-        site.driver,
-        buffer_input,
-        new_slew.get(prev_edge),
+        removal.prev_driver,
+        removal.buffer.driver,
+        removal.input,
+        change.new_slew.get(removal.prev_edge),
     ) else {
         return false;
     };
-    for (load, slew) in load_slews {
+    load_slews.into_iter().all(|(load, slew)| {
         let PinOwner::Cell { cell, .. } = resizer.db.pins[load.index()].owner else {
-            continue;
+            return true;
         };
-        let old = resizer.graph.slew(load);
-        let new = EdgeValues::both(slew);
-        if !input_slew_impact_ok(
-            resizer,
-            cell,
-            old,
-            new,
-            delay_degrade - delay_improve,
+        let impact = SlewImpact {
+            old: resizer.graph.slew(load),
+            new: EdgeValues::both(slew),
+            adjust: change.delay_degrade - change.delay_improve,
             margin,
-            true,
-        ) {
-            return false;
-        }
-    }
-    let input_net = resizer.db.pins[prev_driver.index()].net;
-    for &side in &resizer.db.nets[input_net.index()].pins {
-        if side == prev_driver || side == buffer_input {
-            continue;
-        }
+            rule: SlackRule::NoWorse,
+        };
+        input_slew_impact_ok(resizer, cell, &impact)
+    })
+}
+
+/// Whether the previous driver's other loads keep their slacks as its
+/// output arrives later and slower.
+fn side_loads_ok(
+    resizer: &Resizer<'_, Sta>,
+    removal: &Removal,
+    change: &DriverChange,
+    margin: Seconds,
+) -> bool {
+    let sta = resizer.sta();
+    let input_net = resizer.db.pins[removal.prev_driver.index()].net;
+    let sides = resizer.db.nets[input_net.index()]
+        .pins
+        .iter()
+        .copied()
+        .filter(|&p| p != removal.prev_driver && p != removal.input);
+    for side in sides {
         let old_slack = sta.slack(side, MinMax::Max).time();
-        let new_slack = old_slack - delay_degrade - margin;
+        let new_slack = old_slack - change.delay_degrade - margin;
         if new_slack < Seconds::ZERO {
             let degrade = old_slack - new_slack;
             if old_slack >= Seconds::ZERO || degrade > SLACK_DEGRADE_RATIO_LIMIT * old_slack.abs() {
                 return false;
             }
         }
+        let impact = SlewImpact {
+            old: change.old_slew,
+            new: change.new_slew,
+            adjust: change.delay_degrade,
+            margin,
+            rule: SlackRule::NonNegative,
+        };
         if let PinOwner::Cell { cell, .. } = resizer.db.pins[side.index()].owner
-            && !input_slew_impact_ok(
-                resizer,
-                cell,
-                old_slew,
-                new_slew,
-                delay_degrade,
-                margin,
-                false,
-            )
+            && !input_slew_impact_ok(resizer, cell, &impact)
         {
             return false;
         }
@@ -907,22 +978,13 @@ fn estimated_slack_ok(
 }
 
 /// `BaseMove::estimateInputSlewImpact`: whether every output of `cell`
-/// keeps its slack when its input slews change from `old` to `new` and
-/// its arrival shifts by `adjust`.
-fn input_slew_impact_ok(
-    resizer: &Resizer<'_, Sta>,
-    cell: CellId,
-    old: EdgeValues<Seconds>,
-    new: EdgeValues<Seconds>,
-    adjust: Seconds,
-    margin: Seconds,
-    accept_if_improves: bool,
-) -> bool {
+/// keeps its slack under `impact`'s rule when its input slews and arrival
+/// change as `impact` says.
+fn input_slew_impact_ok(resizer: &Resizer<'_, Sta>, cell: CellId, impact: &SlewImpact) -> bool {
     let sta = resizer.sta();
-    let Some((lib, c)) = resizer.link.cell(resizer.db, cell) else {
+    let Some((_, lib_cell)) = resizer.link.cell(resizer.db, cell) else {
         return false;
     };
-    let _ = lib;
     let netlist = resizer.netlist();
     for &pin in &resizer.db.cells[cell.index()].pins {
         let Some(port) = netlist.lib_port(pin) else {
@@ -936,28 +998,34 @@ fn input_slew_impact_ok(
         };
         let load_cap = resizer.load_cap(pin);
         let slews_of = |slew: EdgeValues<Seconds>| -> Vec<(String, EdgeValues<Seconds>)> {
-            c.ports.iter().map(|p| (p.name.clone(), slew)).collect()
+            lib_cell
+                .ports
+                .iter()
+                .map(|p| (p.name.clone(), slew))
+                .collect()
         };
         let (old_delay, _) = gate_delays(
-            c,
+            lib_cell,
             port_index,
             load_cap,
             &resizer.targets.slews,
-            Some(&slews_of(old)),
+            Some(&slews_of(impact.old)),
         );
         let (new_delay, _) = gate_delays(
-            c,
+            lib_cell,
             port_index,
             load_cap,
             &resizer.targets.slews,
-            Some(&slews_of(new)),
+            Some(&slews_of(impact.new)),
         );
         let delay_diff = (new_delay.rise - old_delay.rise).max(new_delay.fall - old_delay.fall);
-        let old_slack = sta.slack(pin, MinMax::Max).time() - margin;
-        let new_slack = old_slack - delay_diff - adjust - margin;
-        if (accept_if_improves && fuzzy::greater(old_slack, new_slack))
-            || (!accept_if_improves && new_slack < Seconds::ZERO)
-        {
+        let old_slack = sta.slack(pin, MinMax::Max).time() - impact.margin;
+        let new_slack = old_slack - delay_diff - impact.adjust - impact.margin;
+        let breaks = match impact.rule {
+            SlackRule::NoWorse => fuzzy::greater(old_slack, new_slack),
+            SlackRule::NonNegative => new_slack < Seconds::ZERO,
+        };
+        if breaks {
             return false;
         }
     }
