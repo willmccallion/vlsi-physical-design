@@ -6,7 +6,7 @@ use pare_common::db::design::NetlistDB;
 use pare_common::db::liberty::Liberty;
 use pare_common::db::parser::{liberty, sdc};
 use pare_common::db::sdc::Sdc;
-use pare_common::util::config::{Config, LayerRcConfig};
+use pare_common::util::config::{Config, LayerRcConfig, NetlistConfig};
 use pare_common::util::ui;
 
 use crate::report::{NetlistSummary, Report, TimingSummary};
@@ -39,6 +39,7 @@ fn load_liberty(paths: &[String]) -> anyhow::Result<Liberty> {
 /// What the netlist steps before placement leave for the repair after it.
 pub(crate) struct NetlistRepair {
     pub(crate) liberty: Liberty,
+    pub(crate) wires: Wires,
     pub(crate) sdc: Option<Sdc>,
     pub(crate) namer: Namer,
     pub(crate) summary: NetlistSummary,
@@ -119,6 +120,7 @@ pub(crate) fn repair_netlist(
     if config.input.liberty_files.is_empty() {
         return Ok(None);
     }
+    let wires = Wires::from_config(&config.netlist, db)?;
     let liberty = load_liberty(&config.input.liberty_files)?;
     let sdc = match &config.input.sdc_file {
         Some(path) => {
@@ -184,6 +186,7 @@ pub(crate) fn repair_netlist(
     });
     Ok(Some(NetlistRepair {
         liberty,
+        wires,
         sdc,
         namer,
         summary,
@@ -202,17 +205,14 @@ pub(crate) fn repair_design(
     if !config.netlist.repair_design {
         return Ok(());
     }
-    let netlist_config = &config.netlist;
-    let rc = wire_rc(config, db)?;
     let phase_start = Instant::now();
     ui::phase("Design Repair");
-    let link = Link::new(db, &repair.liberty, &netlist_config.dont_use)?;
+    let link = Link::new(db, &repair.liberty, &config.netlist.dont_use)?;
     let networks = Networks::find(db, &link, config, repair.sdc.as_ref())?;
-    let clock_rc = clock_wire_rc(config, db)?;
     let inputs = SessionInputs {
         db,
-        context: networks.context(&link, clock_rc),
-        rc,
+        context: networks.context(&link, repair.wires.clock),
+        rc: repair.wires.signal,
         buffers: networks.buffers.clone(),
         namer: &mut repair.namer,
     };
@@ -287,16 +287,14 @@ pub(crate) fn repair_timing(
     if !config.netlist.repair_timing {
         return Ok(false);
     }
-    let rc = wire_rc(config, db)?;
     let phase_start = Instant::now();
     ui::phase("Timing Repair");
     let link = Link::new(db, &repair.liberty, &config.netlist.dont_use)?;
     let networks = Networks::find(db, &link, config, Some(sdc))?;
-    let clock_rc = clock_wire_rc(config, db)?;
     let inputs = SessionInputs {
         db,
-        context: networks.context(&link, clock_rc),
-        rc,
+        context: networks.context(&link, repair.wires.clock),
+        rc: repair.wires.signal,
         buffers: networks.buffers.clone(),
         namer: &mut repair.namer,
     };
@@ -415,26 +413,31 @@ pub(crate) fn timing_repair_on(
     })
 }
 
-/// The signal wire's resistance and capacitance per micron from the
-/// netlist config, on its layer.
-pub(crate) fn wire_rc(config: &Config, db: &NetlistDB) -> anyhow::Result<WireRc> {
-    let wire = config
-        .netlist
-        .signal_wire
-        .as_ref()
-        .context("[netlist] repair needs signal_wire")?;
-    layer_wire_rc(wire, db).context("[netlist] signal_wire")
+/// The wires repair estimates parasitics with, as `set_wire_rc` sets them.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub(crate) struct Wires {
+    /// The signal wire, as `set_wire_rc -signal`.
+    pub(crate) signal: WireRc,
+    /// The clock wire, as `set_wire_rc -clock`, when the config has one.
+    pub(crate) clock: Option<WireRc>,
 }
 
-/// The clock wire's resistance and capacitance per micron from the netlist
-/// config, on its layer, when the config has one.
-pub(crate) fn clock_wire_rc(config: &Config, db: &NetlistDB) -> anyhow::Result<Option<WireRc>> {
-    config
-        .netlist
-        .clock_wire
-        .as_ref()
-        .map(|wire| layer_wire_rc(wire, db).context("[netlist] clock_wire"))
-        .transpose()
+impl Wires {
+    /// The wires the netlist config names, on their layers of `db`.
+    fn from_config(config: &NetlistConfig, db: &NetlistDB) -> anyhow::Result<Self> {
+        let signal = config
+            .signal_wire
+            .as_ref()
+            .context("[netlist] repair needs signal_wire")?;
+        Ok(Self {
+            signal: layer_wire_rc(signal, db).context("[netlist] signal_wire")?,
+            clock: config
+                .clock_wire
+                .as_ref()
+                .map(|wire| layer_wire_rc(wire, db).context("[netlist] clock_wire"))
+                .transpose()?,
+        })
+    }
 }
 
 fn layer_wire_rc(wire: &LayerRcConfig, db: &NetlistDB) -> anyhow::Result<WireRc> {
@@ -447,4 +450,86 @@ fn layer_wire_rc(wire: &LayerRcConfig, db: &NetlistDB) -> anyhow::Result<WireRc>
         wire.capacitance_ff_per_um,
         layer,
     ))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use pare_common::db::parser::{def, lef};
+    use std::path::PathBuf;
+
+    fn tiny() -> NetlistDB {
+        let fixture = |name: &str| {
+            PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+                .join("../common/tests/fixtures")
+                .join(name)
+        };
+        let units = def::read_units(&fixture("tiny.def")).unwrap();
+        let library = lef::parse_files(&[fixture("tiny.lef")], units).unwrap();
+        def::parse(&fixture("tiny.def"), library).unwrap()
+    }
+
+    fn wire(layer: &str) -> LayerRcConfig {
+        LayerRcConfig {
+            layer: layer.to_string(),
+            resistance_ohm_per_um: 2.0,
+            capacitance_ff_per_um: 0.5,
+        }
+    }
+
+    #[test]
+    fn wires_take_their_layers_and_rc_from_the_config() {
+        let db = tiny();
+        let config = NetlistConfig {
+            signal_wire: Some(wire("M1")),
+            clock_wire: Some(wire("M1")),
+            ..NetlistConfig::default()
+        };
+
+        let wires = Wires::from_config(&config, &db).unwrap();
+
+        let m1 = WireRc::per_micron(2.0, 0.5, db.library.routing_layer_id("M1").unwrap());
+        assert_eq!(
+            wires,
+            Wires {
+                signal: m1,
+                clock: Some(m1)
+            }
+        );
+    }
+
+    #[test]
+    fn wires_without_a_clock_wire_estimate_clocks_as_signals() {
+        let config = NetlistConfig {
+            signal_wire: Some(wire("M1")),
+            ..NetlistConfig::default()
+        };
+
+        let wires = Wires::from_config(&config, &tiny()).unwrap();
+
+        assert_eq!(wires.clock, None);
+    }
+
+    #[test]
+    fn wires_need_a_signal_wire() {
+        let error = Wires::from_config(&NetlistConfig::default(), &tiny()).unwrap_err();
+
+        assert_eq!(error.to_string(), "[netlist] repair needs signal_wire");
+    }
+
+    #[test]
+    fn a_wire_on_an_unknown_layer_names_the_layer() {
+        let config = NetlistConfig {
+            signal_wire: Some(wire("M1")),
+            clock_wire: Some(wire("M9")),
+            ..NetlistConfig::default()
+        };
+
+        let error = Wires::from_config(&config, &tiny()).unwrap_err();
+
+        assert_eq!(
+            format!("{error:#}"),
+            "[netlist] clock_wire: unknown routing layer 'M9'"
+        );
+    }
 }
