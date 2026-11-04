@@ -169,13 +169,10 @@ fn hold_violations(
 }
 
 /// The buffer with the most hold delay per area, or a smaller one within
-/// [`BUFFER_METRIC_MARGIN`] of it, as `findHoldBuffer`; the library here
-/// has no delay cells, sites or threshold voltages to prefer among.
+/// [`BUFFER_METRIC_MARGIN`] of it, as `findHoldBuffer`.
 fn hold_buffer(resizer: &Resizer<'_, Sta>) -> Option<LibCellId> {
     let liberty = resizer.link.liberty;
-    let mut scored: Vec<(Seconds, LibCellId)> = resizer
-        .buffers
-        .cells
+    let mut scored: Vec<(Seconds, LibCellId)> = hold_buffer_candidates(resizer)
         .iter()
         .filter_map(|&cell| {
             let lib = liberty.cell(cell);
@@ -192,6 +189,56 @@ fn hold_buffer(resizer: &Resizer<'_, Sta>) -> Option<LibCellId> {
         }
     }
     Some(best)
+}
+
+/// The buffers a hold buffer is chosen from, as `filterHoldBuffers` over
+/// `getBufferList`: every usable buffer, clock buffers too, since
+/// `Resizer::repairHold` lets them in for libraries without delay cells;
+/// those on the shortest site, and delay cells alone when the library has
+/// any, each preference dropped when nothing meets it. The library model
+/// has no threshold voltages to match.
+fn hold_buffer_candidates(resizer: &Resizer<'_, Sta>) -> Vec<LibCellId> {
+    let link = resizer.link;
+    let library = &resizer.db.library;
+    let buffers: Vec<LibCellId> = (0..link.liberty.cells.len())
+        .map(|i| LibCellId(i as u32))
+        .filter(|&id| {
+            let cell = link.liberty.cell(id);
+            cell.is_buffer() && !cell.is_power_cell && !link.dont_use(id) && link.is_link_cell(id)
+        })
+        .collect();
+    let site_of = |id: LibCellId| link.macro_of(id).and_then(|m| library.cell_macro(m).site);
+    let shortest_site = buffers
+        .iter()
+        .filter_map(|&id| site_of(id))
+        .min_by_key(|&site| library.site(site).size.y);
+    let delay_footprint = |id: LibCellId| {
+        link.liberty
+            .cell(id)
+            .footprint
+            .as_deref()
+            .is_some_and(is_delay_cell)
+    };
+    let has_delay_cells = buffers.iter().any(|&id| delay_footprint(id));
+    let is_delay = |id: LibCellId| !has_delay_cells || delay_footprint(id);
+    let on_site_delay: Vec<LibCellId> = buffers
+        .iter()
+        .copied()
+        .filter(|&id| site_of(id) == shortest_site && is_delay(id))
+        .collect();
+    if !on_site_delay.is_empty() {
+        return on_site_delay;
+    }
+    let delay: Vec<LibCellId> = buffers.iter().copied().filter(|&id| is_delay(id)).collect();
+    if delay.is_empty() { buffers } else { delay }
+}
+
+/// Whether a footprint names a delay cell, as `RepairHold`'s
+/// `isDelayCell` reads the ones current libraries use.
+fn is_delay_cell(footprint: &str) -> bool {
+    ["DEL", "DLY", "dlygate"]
+        .iter()
+        .any(|mark| footprint.contains(mark))
 }
 
 /// A buffer's delay driving its own input, the lesser of its edges, as
@@ -391,4 +438,35 @@ const fn midpoint(a: Point<Dbu>, b: Point<Dbu>) -> Point<Dbu> {
 /// Whether `value` leaves [`SLACK_LIMIT_RATIO`] of `limit` in hand.
 fn in_hand<Q: Quantity>(value: Q, limit: Q) -> bool {
     (limit.base() - value.base()) / limit.base() >= SLACK_LIMIT_RATIO
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::testing::{cells, clock_cells_source, design, with_timed_session};
+
+    #[test]
+    fn a_clock_buffer_with_the_most_hold_delay_per_area_is_the_hold_buffer() {
+        let mut db = design(
+            "VERSION 5.8 ;\nDIVIDERCHAR \"/\" ;\nBUSBITCHARS \"[]\" ;\nDESIGN pair ;\n\
+             UNITS DISTANCE MICRONS 2000 ;\nDIEAREA ( 0 0 ) ( 40000 40000 ) ;\n\
+             COMPONENTS 2 ;\n- f1 DFF_X1 + PLACED ( 2000 2800 ) N ;\n\
+             - f2 DFF_X1 + PLACED ( 12000 2800 ) N ;\nEND COMPONENTS\n\
+             PINS 1 ;\n- clk + NET clk + DIRECTION INPUT ;\nEND PINS\n\
+             NETS 2 ;\n- clk ( PIN clk ) ( f1 CK ) ( f2 CK ) ;\n- q ( f1 Q ) ( f2 D ) ;\n\
+             END NETS\nEND DESIGN\n",
+        );
+        let slow_clock_buffer = clock_cells_source().replace(
+            "values (\"0.02, 0.08\", \"0.03, 0.09\")",
+            "values (\"0.5, 0.6\", \"0.5, 0.6\")",
+        );
+        let lib = cells(&slow_clock_buffer);
+        let clock = "create_clock -name clk -period 1.0 [get_ports clk]\n";
+
+        with_timed_session(&mut db, &lib, clock, |resizer| {
+            let chosen = hold_buffer(resizer).map(|c| resizer.link.liberty.cell(c).name.clone());
+
+            assert_eq!(chosen.as_deref(), Some("CLKBUF_X3"));
+        });
+    }
 }
