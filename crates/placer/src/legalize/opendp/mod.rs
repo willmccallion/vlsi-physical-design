@@ -1265,16 +1265,16 @@ fn enclosed_holes(rows: &[Rect<Dbu>]) -> Vec<Rect<Dbu>> {
             })
         })
         .collect();
-    let mut component = vec![usize::MAX; nx * ny];
+    let mut visited = vec![false; nx * ny];
     let mut holes = Vec::new();
     for start in 0..nx * ny {
-        if covered[start] || component[start] != usize::MAX {
+        if covered[start] || visited[start] {
             continue;
         }
         let mut stack = vec![start];
         let mut members = Vec::new();
         let mut touches_edge = false;
-        component[start] = start;
+        visited[start] = true;
         while let Some(k) = stack.pop() {
             members.push(k);
             let (i, j) = (k % nx, k / nx);
@@ -1288,8 +1288,8 @@ fn enclosed_holes(rows: &[Rect<Dbu>]) -> Vec<Rect<Dbu>> {
                 (j + 1 < ny).then(|| k + nx),
             ];
             for next in neighbours.into_iter().flatten() {
-                if !covered[next] && component[next] == usize::MAX {
-                    component[next] = start;
+                if !covered[next] && !visited[next] {
+                    visited[next] = true;
                     stack.push(next);
                 }
             }

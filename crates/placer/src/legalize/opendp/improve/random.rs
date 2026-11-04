@@ -32,11 +32,6 @@ pub(super) fn run(
 
 /// One pass of random trials, returning the share of the cost it saved,
 /// as `DetailedRandom::go`.
-#[allow(
-    clippy::cast_possible_truncation,
-    clippy::cast_precision_loss,
-    clippy::cast_sign_loss
-)] // attempt counts as OpenDP's
 fn go(imp: &mut Improver, objective: &mut Hpwl, moves_per_candidate: f64) -> Result<f64> {
     let mut candidates = imp.movable_cells();
     if candidates.is_empty() {
