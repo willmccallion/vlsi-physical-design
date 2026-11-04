@@ -153,7 +153,7 @@ pub struct GlobalResult {
 /// How the cells of one zone were spread.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct ZoneOutcome {
-    /// The zone.
+    /// The zone whose cells were spread.
     pub zone: Zone,
     /// Its movable cells.
     pub cells: usize,

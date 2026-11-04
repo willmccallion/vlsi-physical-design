@@ -64,7 +64,7 @@ pub struct ModelNet {
 /// The stretches of row the cells of one zone may use.
 #[derive(Clone, Debug, PartialEq)]
 pub struct ZoneRows {
-    /// The zone.
+    /// The zone whose cells the rows hold.
     pub zone: Zone,
     /// Its stretches of row, each one row high; the zone's whole area for a
     /// design without rows.
