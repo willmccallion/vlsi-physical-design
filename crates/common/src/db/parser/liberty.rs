@@ -962,28 +962,28 @@ impl Interpreter {
     /// The delay and slew tables, or the constraint tables of a check, a
     /// timing group of `role` gives.
     fn arc_tables(&self, group: &Group<'_>, role: ArcRole) -> Result<ArcTables, ParseError> {
-        let names: &[(&str, Edge, bool)] = if role.is_delay() {
+        let names: &[(&str, Edge, TableKind)] = if role.is_delay() {
             &[
-                ("cell_rise", Edge::Rise, true),
-                ("cell_fall", Edge::Fall, true),
-                ("rise_transition", Edge::Rise, false),
-                ("fall_transition", Edge::Fall, false),
+                ("cell_rise", Edge::Rise, TableKind::Delay),
+                ("cell_fall", Edge::Fall, TableKind::Delay),
+                ("rise_transition", Edge::Rise, TableKind::Slew),
+                ("fall_transition", Edge::Fall, TableKind::Slew),
             ]
         } else if role.check_side().is_some() {
             &[
-                ("rise_constraint", Edge::Rise, true),
-                ("fall_constraint", Edge::Fall, true),
+                ("rise_constraint", Edge::Rise, TableKind::Delay),
+                ("fall_constraint", Edge::Fall, TableKind::Delay),
             ]
         } else {
             &[]
         };
         let tables = names
             .iter()
-            .map(|&(name, edge, is_delay)| {
+            .map(|&(name, edge, kind)| {
                 group
                     .groups_named(name)
                     .next()
-                    .map(|g| self.table(g).map(|t| (edge, is_delay, t)))
+                    .map(|g| self.table(g).map(|t| (edge, kind, t)))
                     .transpose()
             })
             .collect::<Result<Vec<_>, _>>()?;
@@ -1210,15 +1210,23 @@ struct ArcKind {
     to_edge: Option<Edge>,
 }
 
-/// The tables a timing group gives, each with its output edge and whether
-/// it is a delay (or constraint) table rather than a slew table.
-struct ArcTables(Vec<(Edge, bool, Table)>);
+/// The tables a timing group gives, each with its output edge and kind.
+struct ArcTables(Vec<(Edge, TableKind, Table)>);
+
+/// What a timing group's table gives an arc.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum TableKind {
+    /// Its delay, or a check's constraint.
+    Delay,
+    /// The slew it leaves.
+    Slew,
+}
 
 impl ArcTables {
-    fn get(&self, edge: Edge, is_delay: bool) -> Option<Table> {
+    fn get(&self, edge: Edge, kind: TableKind) -> Option<Table> {
         self.0
             .iter()
-            .find(|(e, d, _)| *e == edge && *d == is_delay)
+            .find(|(e, k, _)| *e == edge && *k == kind)
             .map(|(_, _, t)| t.clone())
     }
 }
@@ -1240,8 +1248,8 @@ fn timing_arcs(kind: ArcKind, sense: TimingSense, tables: &ArcTables) -> Vec<Tim
             .into_iter()
             .filter(|&(_, to)| kind.to_edge.is_none_or(|restricted| restricted == to))
             .filter_map(|(from, to)| {
-                let delay = tables.get(to, true);
-                let slew = tables.get(to, false);
+                let delay = tables.get(to, TableKind::Delay);
+                let slew = tables.get(to, TableKind::Slew);
                 (delay.is_some() || slew.is_some()).then_some(TimingArc {
                     from_edge: from,
                     to_edge: to,
@@ -1257,12 +1265,14 @@ fn timing_arcs(kind: ArcKind, sense: TimingSense, tables: &ArcTables) -> Vec<Tim
     Edge::BOTH
         .into_iter()
         .filter_map(|to| {
-            tables.get(to, true).map(|constraint| TimingArc {
-                from_edge: clock_edge,
-                to_edge: to,
-                delay: Some(constraint),
-                slew: None,
-            })
+            tables
+                .get(to, TableKind::Delay)
+                .map(|constraint| TimingArc {
+                    from_edge: clock_edge,
+                    to_edge: to,
+                    delay: Some(constraint),
+                    slew: None,
+                })
         })
         .collect()
 }
