@@ -26,7 +26,7 @@ impl ClockId {
 /// One edge of a clock's waveform.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub struct ClockEdge {
-    /// The clock.
+    /// The clock whose waveform the edge is of.
     pub clock: ClockId,
     /// Which edge.
     pub edge: Edge,
@@ -80,13 +80,13 @@ impl RiseFallMinMax {
 /// A clock entering the design.
 #[derive(Clone, Debug, PartialEq)]
 pub struct Clock {
-    /// Its name.
+    /// The name constraints refer to it by.
     pub name: String,
-    /// Its period.
+    /// The time from one rising edge to the next.
     pub period: Seconds,
-    /// When within the period it rises and falls.
+    /// When within the period it rises.
     pub rise: Seconds,
-    /// See [`Clock::rise`].
+    /// When within the period it falls.
     pub fall: Seconds,
     /// The ports it enters at.
     pub sources: Vec<IoPinId>,
@@ -176,7 +176,7 @@ pub enum PathEnd {
 pub struct FalsePath {
     /// Which checks it drops; none for both.
     pub side: Option<MinMax>,
-    /// The paths.
+    /// The paths it applies to.
     pub paths: PathSpec,
 }
 
@@ -191,7 +191,7 @@ pub struct MultiCyclePath {
     /// Whether the cycles are counted in the capturing clock's period
     /// rather than the launching clock's.
     pub use_end_clock: bool,
-    /// The paths.
+    /// The paths it applies to.
     pub paths: PathSpec,
 }
 

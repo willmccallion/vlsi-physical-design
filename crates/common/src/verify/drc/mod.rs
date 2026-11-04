@@ -108,7 +108,7 @@ pub struct Marker {
     pub violation: Violation,
     /// Which of the layer's rules of that kind it breaks.
     pub rule: u16,
-    /// The layer.
+    /// The layer the violation is on.
     pub layer: LayerRef,
     /// Where it is.
     pub bbox: Rect<Dbu>,
@@ -376,11 +376,11 @@ fn narrowing_rule_wiring_makes(marker: &Marker, layout: &Layout) -> bool {
 pub struct ThinPiece {
     /// Whose metal it is.
     pub owner: OwnerIndex,
-    /// The layer.
+    /// The metal layer it is on.
     pub layer: LayerId,
     /// The box around it.
     pub bbox: Rect<Dbu>,
-    /// Its area.
+    /// Its area, below the layer's minimum.
     pub area: DbuArea,
     /// The area its layer requires.
     pub min_area: DbuArea,

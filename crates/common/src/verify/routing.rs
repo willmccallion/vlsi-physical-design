@@ -12,7 +12,7 @@ use std::collections::HashSet;
 /// A signal net whose pins are not all connected.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Open {
-    /// The net.
+    /// The net left open.
     pub net: NetId,
     /// How many separate groups its pins fall into.
     pub components: usize,

@@ -107,7 +107,7 @@ impl Origin {
 pub struct LayoutShape {
     /// Whose it is.
     pub owner: OwnerIndex,
-    /// The rectangle.
+    /// Where it lies on the layer whose shapes it is among.
     pub rect: Rect<Dbu>,
     /// Where it comes from.
     pub origin: Origin,

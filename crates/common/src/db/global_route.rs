@@ -45,7 +45,7 @@ impl RouteSegment {
 /// `PinGridLocation`.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct PinGridLocation {
-    /// The pin.
+    /// The pin the route reaches.
     pub pin: PinId,
     /// The pin's own position, which the wire to the route starts from.
     pub at: Point<Dbu>,

@@ -297,7 +297,7 @@ const MAX_AXES: usize = 3;
 pub struct Table {
     /// The axes, outermost first; none for a scalar.
     pub axes: Vec<Axis>,
-    /// The values.
+    /// One value per point of the axes, the last axis varying fastest.
     pub values: Vec<Seconds>,
 }
 
@@ -947,7 +947,7 @@ pub struct Liberty {
     pub thresholds: Thresholds,
     /// Values pins fall back on.
     pub defaults: Defaults,
-    /// The cells.
+    /// Its cells, indexed by [`LibCellId`].
     pub cells: Vec<LibCell>,
     cell_by_name: HashMap<String, LibCellId>,
     /// The defaults of each library absorbed, in order; a cell's
