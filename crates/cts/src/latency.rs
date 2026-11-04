@@ -404,18 +404,14 @@ impl Balancer<'_> {
             let name = format!("delaybuf_{}_{clock_name}", self.index);
             let net_name = format!("delaynet_{}_{clock_name}", self.index);
             self.index += 1;
-            let cell = db
-                .add_cell(
-                    name,
-                    master,
-                    location,
-                    Orientation::N,
-                    PlacementStatus::Placed,
-                )
-                .map_err(|e| CtsError::Edit(e.to_string()))?;
-            let net = db
-                .add_net(&net_name)
-                .map_err(|e| CtsError::Edit(e.to_string()))?;
+            let cell = db.add_cell(
+                name,
+                master,
+                location,
+                Orientation::N,
+                PlacementStatus::Placed,
+            )?;
+            let net = db.add_net(&net_name)?;
             db.nets[net.index()].signal_use = db.nets[driving.index()].signal_use;
             db.nets[net.index()].non_default_rule = db.nets[driving.index()].non_default_rule;
             let input = db.connect_cell_pin(cell, in_pin, driving);

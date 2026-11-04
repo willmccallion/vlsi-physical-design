@@ -3,14 +3,15 @@
 
 #![allow(clippy::unwrap_used, clippy::expect_used)]
 
-use pare_common::db::design::{NetlistDB, PinOwner};
+use pare_common::db::design::{NetlistDB, PinOwner, PlacementStatus};
 use pare_common::db::indices::{NetId, PinId};
 use pare_common::db::liberty::Liberty;
-use pare_common::db::library::SignalUse;
+use pare_common::db::library::{DuplicateName, SignalUse};
 use pare_common::db::parser::{def, lef, liberty, sdc};
 use pare_common::db::sdc::Sdc;
 use pare_common::geom::dbu::DbuPerMicron;
-use pare_cts::{CtsInput, CtsOptions, CtsSummary, synthesize};
+use pare_common::geom::orient::Orientation;
+use pare_cts::{CtsError, CtsInput, CtsOptions, CtsSummary, synthesize};
 use pare_resizer::parasitics::WireRc;
 use pare_resizer::{ClockNetwork, Constants, Link, Namer, Netlist, repair_clock_inverters};
 use std::fmt::Write as _;
@@ -230,6 +231,44 @@ fn the_root_net_gets_the_clock_rule_of_doubled_spacing() {
         Some(rule)
     );
     assert_eq!(db.nets[root.index()].signal_use, SignalUse::Clock);
+}
+
+#[test]
+fn a_tree_whose_buffer_name_is_taken_is_refused_with_that_name() {
+    let (mut db, lib, constraints) = load(16, 16, false);
+    let ff0 = db.cell_id("ff0").unwrap();
+    let master = db.cells[ff0.index()].macro_id;
+    let location = db.cells[ff0.index()].location;
+    let _ = db
+        .add_cell(
+            "clkbuf_0_clk".to_string(),
+            master,
+            location,
+            Orientation::N,
+            PlacementStatus::Placed,
+        )
+        .unwrap();
+    let link = Link::new(&db, &lib, &[]).unwrap();
+    let clocks = clock_network(&db, &link, &constraints);
+    let input = CtsInput {
+        link: &link,
+        sdc: &constraints,
+        clocks: &clocks,
+        signal_rc: wire(&db, "metal2", 3.5, 0.1),
+        clock_rc: wire(&db, "metal3", 1.5, 0.11),
+        max_wire_length: 0,
+        options: CtsOptions::default(),
+    };
+
+    let refused = synthesize(&mut db, &input).err();
+
+    assert_eq!(
+        refused,
+        Some(CtsError::Edit(DuplicateName {
+            kind: "component",
+            name: "clkbuf_0_clk".to_string(),
+        }))
+    );
 }
 
 #[test]

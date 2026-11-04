@@ -417,7 +417,7 @@ impl Cts<'_> {
         parent: Option<usize>,
     ) -> Result<Option<usize>, CtsError> {
         let net_name = db.nets[net.index()].name.clone();
-        let mut clock = Clock::new(&net_name, sdc_name);
+        let mut clock = Clock::new(net, &net_name, sdc_name);
         clock.driver_pin = db.nets[net.index()]
             .pins
             .iter()
@@ -468,24 +468,22 @@ impl Cts<'_> {
                 return Ok(None);
             }
             self.summary.sinks += clock.sinks.len();
-            clock.net = Some(net);
             return Ok(Some(self.add_builder(clock, input_net, parent)));
         }
         for &pin in &macro_sinks {
             clock.add_sink(self.sink(db, pin));
         }
         self.summary.sinks += clock.sinks.len();
-        clock.net = Some(net);
         let first = self.add_builder(clock, input_net, parent);
         self.builders[first].tree_type = TreeType::Macro;
         let (regs_net, top_buffer) =
             self.fork_register_network(db, net, &net_name, sdc_name, &register_sinks)?;
-        let mut regs_clock = Clock::new(&db.nets[regs_net.index()].name.clone(), sdc_name);
+        let mut regs_clock =
+            Clock::new(regs_net, &db.nets[regs_net.index()].name.clone(), sdc_name);
         for &pin in &register_sinks {
             regs_clock.add_sink(self.sink(db, pin));
         }
         self.summary.sinks += regs_clock.sinks.len();
-        regs_clock.net = Some(regs_net);
         let second = self.add_builder(regs_clock, input_net, Some(first));
         let builder = &mut self.builders[second];
         builder.tree_type = TreeType::Register;
@@ -505,9 +503,7 @@ impl Cts<'_> {
         sinks: &[PinId],
     ) -> Result<(NetId, String), CtsError> {
         let regs_name = format!("{net_name}_regs");
-        let regs = db
-            .add_net(&regs_name)
-            .map_err(|e| CtsError::Edit(e.to_string()))?;
+        let regs = db.add_net(&regs_name)?;
         db.nets[regs.index()].signal_use = SignalUse::Clock;
         for &pin in sinks {
             db.move_pin(pin, regs);
@@ -531,14 +527,14 @@ impl Cts<'_> {
             .link
             .macro_of(buffer)
             .ok_or_else(|| CtsError::NoMaster(self.link.liberty.cell(buffer).name.clone()))?;
-        db.add_cell(
+        let cell = db.add_cell(
             name.to_string(),
             master,
             DbPoint::new(Dbu(at.0), Dbu(at.1)),
             Orientation::N,
             PlacementStatus::Placed,
-        )
-        .map_err(|e| CtsError::Edit(e.to_string()))
+        )?;
+        Ok(cell)
     }
 
     /// Connects a new buffer's input and output.
@@ -696,22 +692,18 @@ impl Cts<'_> {
                 gate
             } else {
                 clones += 1;
-                let clone_net = db
-                    .add_net(&format!("clonenet_{clones}_{net_name}"))
-                    .map_err(|e| CtsError::Edit(e.to_string()))?;
+                let clone_net = db.add_net(&format!("clonenet_{clones}_{net_name}"))?;
                 db.nets[clone_net.index()].signal_use = SignalUse::Clock;
                 let _ = self.clock_nets.insert(clone_net);
                 let master = db.cells[gate.index()].macro_id;
                 let at = db.cells[gate.index()].location;
-                let cell = db
-                    .add_cell(
-                        format!("clone_{clones}_{gate_name}"),
-                        master,
-                        at,
-                        Orientation::N,
-                        PlacementStatus::Placed,
-                    )
-                    .map_err(|e| CtsError::Edit(e.to_string()))?;
+                let cell = db.add_cell(
+                    format!("clone_{clones}_{gate_name}"),
+                    master,
+                    at,
+                    Orientation::N,
+                    PlacementStatus::Placed,
+                )?;
                 let connections: Vec<(MacroPinId, NetId)> = db.cells[gate.index()]
                     .pins
                     .iter()
@@ -825,10 +817,7 @@ impl Cts<'_> {
 
     /// Creates a tree's buffers and nets, as `TritonCTS::writeClockNetsToDb`.
     fn write_clock_nets(&mut self, db: &mut NetlistDB, index: usize) -> Result<(), CtsError> {
-        let top_net = self.builders[index]
-            .clock
-            .net
-            .ok_or_else(|| CtsError::Edit("clock tree without a net".into()))?;
+        let top_net = self.builders[index].clock.net;
         let is_register = self.builders[index].tree_type == TreeType::Register;
         let regs_buffer = is_register
             .then(|| db.cell_id(&self.builders[index].top_buffer_name))
@@ -849,9 +838,7 @@ impl Cts<'_> {
         let mut nets = Vec::with_capacity(subnet_count);
         for s in 0..subnet_count {
             let name = self.builders[index].clock.subnets[s].name.clone();
-            let net = db
-                .add_net(&name)
-                .map_err(|e| CtsError::Edit(e.to_string()))?;
+            let net = db.add_net(&name)?;
             db.nets[net.index()].signal_use = SignalUse::Clock;
             self.builders[index].clock.subnets[s].net = Some(net);
             nets.push(net);
@@ -917,10 +904,8 @@ impl Cts<'_> {
             NdrStrategy::Full => levels,
         };
         let mut applied = Vec::new();
-        if targets.contains(&0)
-            && let Some(net) = clock.net
-        {
-            applied.push(net);
+        if targets.contains(&0) {
+            applied.push(clock.net);
         }
         for subnet in &clock.subnets {
             if !subnet.leaf

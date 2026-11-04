@@ -72,21 +72,21 @@ pub(crate) struct Clock {
     pub sinks: Vec<ClockInst>,
     pub buffers: Vec<ClockInst>,
     pub subnets: Vec<SubNet>,
-    pub net: Option<NetId>,
+    pub net: NetId,
     pub driver_pin: Option<PinId>,
     pub max_level: usize,
     by_name: FxHashMap<String, InstRef>,
 }
 
 impl Clock {
-    pub fn new(net_name: &str, sdc_name: &str) -> Self {
+    pub fn new(net: NetId, net_name: &str, sdc_name: &str) -> Self {
         Self {
             net_name: escape_slashes(net_name),
             sdc_name: sdc_name.to_string(),
             sinks: Vec::new(),
             buffers: Vec::new(),
             subnets: Vec::new(),
-            net: None,
+            net,
             driver_pin: None,
             max_level: 0,
             by_name: FxHashMap::default(),
