@@ -21,8 +21,8 @@ use pare_router::runs::{EdgeSet, Run};
 use pare_router::tech::RouteTech;
 use pare_router::wiring::{Edge, NetRoute};
 use pare_router::{
-    GlobalRouteEstimator, RouteError, RouteState, Save, SavePoint, Session, capacity_reduction,
-    route, route_with, rudy_wire_width,
+    GlobalRouteEstimator, RouteError, RouteState, Save, SaveError, SavePoint, Session,
+    capacity_reduction, route, route_with, rudy_wire_width,
 };
 use std::num::NonZeroU32;
 use std::path::{Path, PathBuf};
@@ -95,7 +95,10 @@ fn placed_tiny() -> (NetlistDB, RoutingConfig) {
 fn route_saving(point: SavePoint) -> (Vec<Vec<RouteElem>>, RouteState) {
     let (mut db, config) = placed_tiny();
     let mut saved = None;
-    let mut write = |state: &RouteState| saved = Some(state.clone());
+    let mut write = |state: &RouteState| {
+        saved = Some(state.clone());
+        Ok(())
+    };
     let session = Session {
         save: Some(Save {
             after: point,
@@ -168,10 +171,33 @@ fn a_run_resumed_after_its_last_round_counts_the_rounds_before_it() {
 }
 
 #[test]
+fn a_save_that_fails_stops_the_run_with_its_error() {
+    let (mut db, config) = placed_tiny();
+    let mut write = |_: &RouteState| Err(SaveError("disk full".to_string()));
+    let session = Session {
+        save: Some(Save {
+            after: SavePoint::Global,
+            write: &mut write,
+        }),
+        ..Session::default()
+    };
+
+    let result = route_with(&mut db, &config, session);
+
+    assert_eq!(
+        result.map(|_| ()),
+        Err(RouteError::Save(SaveError("disk full".to_string())))
+    );
+}
+
+#[test]
 fn a_save_point_the_run_never_reaches_saves_nothing_and_says_so() {
     let (mut db, config) = placed_tiny();
     let mut saved = false;
-    let mut write = |_: &RouteState| saved = true;
+    let mut write = |_: &RouteState| {
+        saved = true;
+        Ok(())
+    };
     let session = Session {
         save: Some(Save {
             after: SavePoint::Round(TINY_ROUNDS + 1),

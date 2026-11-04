@@ -283,15 +283,14 @@ pub(crate) fn run_routing(
         RouteStage::Detailed(files) => files,
     };
     let resume = files.resume.as_deref().map(read_state).transpose()?;
-    let mut save_error = None;
     let summary = {
         let mut write = |state: &pare_router::RouteState| {
-            if let Some((path, _)) = &files.save {
-                match write_state(path, state) {
-                    Ok(()) => ui::wrote(path),
-                    Err(e) => save_error = Some(e),
-                }
-            }
+            let Some((path, _)) = &files.save else {
+                return Ok(());
+            };
+            write_state(path, state).map_err(|e| pare_router::SaveError(format!("{e:#}")))?;
+            ui::wrote(path);
+            Ok(())
         };
         let session = pare_router::Session {
             resume: resume.as_ref(),
@@ -306,9 +305,6 @@ pub(crate) fn run_routing(
             None => pare_router::route_with(db, &config.routing, session)?,
         }
     };
-    if let Some(e) = save_error {
-        return Err(e);
-    }
     if let Some((path, after)) = &files.save
         && !summary.state_saved
     {
