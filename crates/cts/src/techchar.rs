@@ -9,6 +9,7 @@
 #![allow(clippy::suboptimal_flops)]
 
 use crate::CtsError;
+use crate::capacitance::Farads32;
 use pare_common::db::design::NetlistDB;
 use pare_common::db::liberty::{AxisVariable, Edge, LibCell, LibCellId, Liberty, Thresholds};
 use pare_common::units::{Farads, Ohms, Seconds};
@@ -121,7 +122,7 @@ pub(crate) struct TechChar {
     length_unit: u32,
     char_unit: u32,
     cap_per_dbu: f64,
-    sink_buffer_input_cap: f32,
+    sink_buffer_input_cap: Farads32,
     wire_delay_rate: Option<WireDelayRate>,
 }
 
@@ -260,7 +261,7 @@ struct Plan {
     cap_step: f32,
     slews: Vec<f32>,
     loads: Vec<f32>,
-    sink_buffer_input_cap: f32,
+    sink_buffer_input_cap: Farads32,
 }
 
 impl TechChar {
@@ -383,7 +384,7 @@ impl TechChar {
 
     /// Input capacitance of the sink buffer, in farads.
     #[must_use]
-    pub(crate) const fn sink_buffer_input_cap(&self) -> f32 {
+    pub(crate) const fn sink_buffer_input_cap(&self) -> Farads32 {
         self.sink_buffer_input_cap
     }
 
@@ -478,9 +479,9 @@ fn plan(setup: &CharSetup<'_>) -> Result<Plan, CtsError> {
         .ok_or_else(|| CtsError::NoMaxCapacitance(cell.name.clone()))?
         .get() as f32;
     let sink = liberty.cell(setup.sink_buffer);
-    let sink_buffer_input_cap =
-        sink.buffer_ports()
-            .map_or(0.0, |(input, _)| sink.ports[input].capacitance().get()) as f32;
+    let sink_buffer_input_cap = sink.buffer_ports().map_or(Farads32::ZERO, |(input, _)| {
+        Farads32::of(sink.ports[input].capacitance())
+    });
     let slew_step = max_slew / SLEW_STEPS as f32;
     let cap_step = max_cap / CAP_STEPS as f32;
     let (slews, loads) = if axis_slews.is_empty() && axis_loads.is_empty() {

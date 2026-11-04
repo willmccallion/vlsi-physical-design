@@ -12,6 +12,7 @@
 // The arithmetic keeps TritonCTS's operations, whose rounding fusing would change.
 #![allow(clippy::suboptimal_flops)]
 
+use crate::capacitance::Farads32;
 use crate::clock::{Clock, InstRef};
 use crate::kmeans::Clustering;
 use crate::options::{
@@ -591,14 +592,11 @@ impl Builder {
     ) -> Vec<Vec<usize>> {
         let unit = self.wire_segment_unit as f32;
         let is_macro = self.tree_type == TreeType::Macro;
-        let mut matching = SinkClustering::new(
-            !is_macro,
-            tech.cap_per_dbu(),
-            f64::from(tech.sink_buffer_input_cap()),
-        );
+        let mut matching =
+            SinkClustering::new(!is_macro, tech.cap_per_dbu(), tech.sink_buffer_input_cap());
         for (i, &(x, y)) in sinks.iter().enumerate() {
             let cap = self.clock.sinks[i].input_cap;
-            let cap = if cap == 0.0 {
+            let cap = if cap == Farads32::ZERO {
                 tech.sink_buffer_input_cap()
             } else {
                 cap

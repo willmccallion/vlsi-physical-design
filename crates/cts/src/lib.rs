@@ -6,6 +6,7 @@
 use pare_common::db::library::DuplicateName;
 
 pub mod buffers;
+mod capacitance;
 mod clock;
 mod htree;
 mod kmeans;

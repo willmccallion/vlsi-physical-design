@@ -6,6 +6,7 @@
 
 use crate::CtsError;
 use crate::buffers::{ClockBuffers, fanout_limit};
+use crate::capacitance::Farads32;
 use crate::clock::{Clock, ClockSink, InstKind, InstRef};
 use crate::htree::{Builder, TreeContext, TreeType};
 use crate::options::{CtsOptions, MACRO_MAX_DIAMETER, MAX_LEAF_SINKS, NdrStrategy, Settings};
@@ -14,7 +15,7 @@ use pare_common::db::design::{
     NetlistDB, NonDefaultLayer, NonDefaultRule, PinOwner, PlacementStatus,
 };
 use pare_common::db::indices::{CellId, LayerId, MacroPinId, NetId, NonDefaultRuleId, PinId};
-use pare_common::db::liberty::{Edge, LibCellId, MinMax};
+use pare_common::db::liberty::{Edge, LibCellId, Liberty, MinMax};
 use pare_common::db::library::{MacroClass, PinDirection, SignalUse};
 use pare_common::db::sdc::Sdc;
 use pare_common::geom::dbu::Dbu;
@@ -282,9 +283,9 @@ struct BufferLoads {
     /// The subnet each buffer drives.
     driven_subnet: FxHashMap<InstRef, usize>,
     /// The input capacitance each buffer drives.
-    output: FxHashMap<InstRef, f32>,
+    output: FxHashMap<InstRef, Farads32>,
     /// The heaviest load among each buffer's siblings.
-    ideal: FxHashMap<InstRef, f32>,
+    ideal: FxHashMap<InstRef, Farads32>,
     /// Whether some buffer drives less than its ideal.
     unbalanced: bool,
 }
@@ -294,10 +295,12 @@ impl Cts<'_> {
         is_sink(self.link, db, pin)
     }
 
-    fn input_cap(&self, db: &NetlistDB, pin: PinId) -> f32 {
-        self.link.pin_port(db, pin).map_or(0.0, |(lib, port)| {
-            self.link.liberty.cell(lib).ports[port].capacitance().get() as f32
-        })
+    fn input_cap(&self, db: &NetlistDB, pin: PinId) -> Farads32 {
+        self.link
+            .pin_port(db, pin)
+            .map_or(Farads32::ZERO, |(lib, port)| {
+                Farads32::of(self.link.liberty.cell(lib).ports[port].capacitance())
+            })
     }
 
     /// The output of a clock-network cell other than `input` whose net
@@ -934,8 +937,8 @@ impl Cts<'_> {
                 let InstRef::Buffer(b) = inst else {
                     continue;
                 };
-                let output = loads.output.get(&inst).copied().unwrap_or(0.0);
-                let target = loads.ideal.get(&inst).copied().unwrap_or(0.0);
+                let output = loads.output.get(&inst).copied().unwrap_or_default();
+                let target = loads.ideal.get(&inst).copied().unwrap_or_default();
                 if sta_fuzzy_equal(output, target) {
                     continue;
                 }
@@ -953,7 +956,7 @@ impl Cts<'_> {
                 let Some(&dummy) = candidates.iter().min_by(|&&a, &&b| {
                     let da = (dummy_input_cap(liberty, a) - delta).abs();
                     let db_ = (dummy_input_cap(liberty, b) - delta).abs();
-                    da.total_cmp(&db_)
+                    da.total_cmp(db_)
                 }) else {
                     continue;
                 };
@@ -968,19 +971,19 @@ impl Cts<'_> {
     /// The load each buffer of tree `index` drives, the load it should, the
     /// heaviest among its siblings, and the subnet it drives.
     fn buffer_loads(&self, db: &NetlistDB, index: usize) -> BufferLoads {
-        let first_input_cap = |inst: &crate::clock::ClockInst| -> f32 {
+        let first_input_cap = |inst: &crate::clock::ClockInst| -> Farads32 {
             let pin = if inst.kind == InstKind::Buffer {
                 inst.cell.and_then(|c| first_input(db, c))
             } else {
                 inst.input_pin
             };
-            pin.map_or(0.0, |p| self.input_cap(db, p))
+            pin.map_or(Farads32::ZERO, |p| self.input_cap(db, p))
         };
         let clock = &self.builders[index].clock;
         let mut loads = BufferLoads::default();
         for (s, subnet) in clock.subnets.iter().enumerate() {
             let _ = loads.driven_subnet.insert(subnet.driver(), s);
-            let total: f32 = subnet
+            let total: Farads32 = subnet
                 .sinks()
                 .iter()
                 .map(|&i| first_input_cap(clock.inst(i)))
@@ -988,10 +991,10 @@ impl Cts<'_> {
             let _ = loads.output.insert(subnet.driver(), total);
         }
         for subnet in &clock.subnets {
-            let mut max_cap = f32::MIN_POSITIVE;
+            let mut max_cap = Farads32::MIN_POSITIVE;
             for &i in subnet.sinks() {
                 if let InstRef::Buffer(_) = i {
-                    let cap = loads.output.get(&i).copied().unwrap_or(0.0);
+                    let cap = loads.output.get(&i).copied().unwrap_or_default();
                     if cap > max_cap {
                         max_cap = cap;
                     }
@@ -1000,7 +1003,8 @@ impl Cts<'_> {
             for &i in subnet.sinks() {
                 if let InstRef::Buffer(_) = i {
                     let _ = loads.ideal.insert(i, max_cap);
-                    if !sta_fuzzy_equal(loads.output.get(&i).copied().unwrap_or(0.0), max_cap) {
+                    if !sta_fuzzy_equal(loads.output.get(&i).copied().unwrap_or_default(), max_cap)
+                    {
                         loads.unbalanced = true;
                     }
                 }
@@ -1077,21 +1081,23 @@ impl Cts<'_> {
             .unwrap_or(inverters);
         candidates.extend(chosen);
         candidates
-            .sort_by(|&a, &b| dummy_input_cap(liberty, a).total_cmp(&dummy_input_cap(liberty, b)));
+            .sort_by(|&a, &b| dummy_input_cap(liberty, a).total_cmp(dummy_input_cap(liberty, b)));
         candidates
     }
 }
 
-fn dummy_input_cap(liberty: &pare_common::db::liberty::Liberty, cell: LibCellId) -> f32 {
+/// The input capacitance of a dummy load cell, zero for a cell that is no
+/// buffer or inverter.
+fn dummy_input_cap(liberty: &Liberty, cell: LibCellId) -> Farads32 {
     let lib = liberty.cell(cell);
-    lib.buffer_ports().map_or(0.0, |(input, _)| {
-        lib.ports[input].capacitance().get() as f32
+    lib.buffer_ports().map_or(Farads32::ZERO, |(input, _)| {
+        Farads32::of(lib.ports[input].capacitance())
     })
 }
 
-/// `OpenSTA`'s `fuzzyEqual` on single-precision values.
-fn sta_fuzzy_equal(a: f32, b: f32) -> bool {
-    pare_resizer::fuzzy::equal(f64::from(a), f64::from(b))
+/// `OpenSTA`'s `fuzzyEqual` on single-precision loads.
+fn sta_fuzzy_equal(a: Farads32, b: Farads32) -> bool {
+    pare_resizer::fuzzy::equal(f64::from(a.get()), f64::from(b.get()))
 }
 
 /// The center of the box around some pins' average positions, as
