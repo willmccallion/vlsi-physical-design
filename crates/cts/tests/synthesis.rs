@@ -10,7 +10,7 @@ use pare_common::db::library::SignalUse;
 use pare_common::db::parser::{def, lef, liberty, sdc};
 use pare_common::db::sdc::Sdc;
 use pare_common::geom::dbu::DbuPerMicron;
-use pare_cts::{CtsInput, CtsOptions, synthesize};
+use pare_cts::{CtsInput, CtsOptions, CtsSummary, synthesize};
 use pare_resizer::parasitics::WireRc;
 use pare_resizer::{ClockNetwork, Constants, Link, Namer, Netlist, repair_clock_inverters};
 use std::fmt::Write as _;
@@ -71,7 +71,20 @@ fn design(columns: usize, rows: usize, inverter: bool) -> String {
     text
 }
 
+/// The clock constraint of every generated design.
+const CLOCK: &str = "create_clock -name core_clock -period 1.0 [get_ports clk]\n";
+
 fn load(columns: usize, rows: usize, inverter: bool) -> (NetlistDB, Liberty, Sdc) {
+    load_constrained(columns, rows, inverter, CLOCK)
+}
+
+/// The generated design under the constraints `sdc_text`.
+fn load_constrained(
+    columns: usize,
+    rows: usize,
+    inverter: bool,
+    sdc_text: &str,
+) -> (NetlistDB, Liberty, Sdc) {
     let units = DbuPerMicron::new(2000).unwrap();
     let library = lef::parse_files(&[fixture("clock.lef")], units).unwrap();
     let db = def::parse_str(
@@ -81,13 +94,7 @@ fn load(columns: usize, rows: usize, inverter: bool) -> (NetlistDB, Liberty, Sdc
     )
     .unwrap();
     let lib = liberty::parse_file(&fixture("clock.lib")).unwrap();
-    let constraints = sdc::parse_str(
-        "create_clock -name core_clock -period 1.0 [get_ports clk]\n",
-        Path::new("grid.sdc"),
-        &db,
-        &lib,
-    )
-    .unwrap();
+    let constraints = sdc::parse_str(sdc_text, Path::new("grid.sdc"), &db, &lib).unwrap();
     (db, lib, constraints)
 }
 
@@ -242,4 +249,111 @@ fn each_load_of_a_clock_inverter_gets_its_own_copy() {
         assert_eq!(db.nets[net.index()].pins.len(), 2);
         assert!(driver_cell(&db, net).unwrap().starts_with("clkinv_"));
     }
+}
+
+/// Checks `actual` against the golden file `name`, or writes it there when
+/// `PARE_BLESS` is set, for pinning down whole results.
+fn assert_golden(name: &str, actual: &str) {
+    let path = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("tests/golden")
+        .join(name);
+    if std::env::var_os("PARE_BLESS").is_some() {
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        std::fs::write(&path, actual).unwrap();
+        return;
+    }
+    let expected = std::fs::read_to_string(&path).unwrap_or_else(|e| {
+        panic!("{}: {e}; PARE_BLESS=1 writes it", path.display());
+    });
+    if let Some((line, (want, got))) = expected
+        .lines()
+        .zip(actual.lines())
+        .enumerate()
+        .find(|(_, (want, got))| want != got)
+    {
+        panic!(
+            "{} differs at line {}:\n  golden: {want}\n  now:    {got}",
+            path.display(),
+            line + 1
+        );
+    }
+    assert_eq!(
+        expected.lines().count(),
+        actual.lines().count(),
+        "{} differs in length",
+        path.display()
+    );
+}
+
+/// Every cell clock tree synthesis added, where it put it, and every clock
+/// net with its rule, driver and loads, as text to pin a run down.
+fn clock_trees_text(db: &NetlistDB, first_added: usize, summary: &CtsSummary) -> String {
+    let mut text = format!("{summary:#?}\n");
+    for cell in &db.cells[first_added..] {
+        let _ = writeln!(
+            text,
+            "cell {} {} {} {} {:?}",
+            cell.name,
+            db.library.macros[cell.macro_id.index()].name,
+            cell.location.x.get(),
+            cell.location.y.get(),
+            cell.orient
+        );
+    }
+    let mut nets: Vec<&pare_common::db::design::Net> = db
+        .nets
+        .iter()
+        .filter(|n| n.signal_use == SignalUse::Clock)
+        .collect();
+    nets.sort_by(|a, b| a.name.cmp(&b.name));
+    for net in nets {
+        let rule = net
+            .non_default_rule
+            .map_or("-", |r| db.non_default_rules[r.index()].name.as_str());
+        let mut pins: Vec<String> = net.pins.iter().map(|&p| db.pin_name(p)).collect();
+        pins.sort();
+        let _ = writeln!(text, "net {} {rule} {}", net.name, pins.join(" "));
+    }
+    text
+}
+
+/// Synthesizes the trees of a 24 by 24 grid of flops under `sdc_text`
+/// with wires of at most `max_wire_length`, as text.
+fn synthesized_grid(sdc_text: &str, max_wire_length: i64) -> String {
+    let (mut db, lib, constraints) = load_constrained(24, 24, false, sdc_text);
+    let link = Link::new(&db, &lib, &[]).unwrap();
+    let clocks = clock_network(&db, &link, &constraints);
+    let input = CtsInput {
+        link: &link,
+        sdc: &constraints,
+        clocks: &clocks,
+        signal_rc: wire(&db, "metal2", 3.5, 0.1),
+        clock_rc: wire(&db, "metal3", 1.5, 0.11),
+        max_wire_length,
+        options: CtsOptions::default(),
+    };
+    let first_added = db.cells.len();
+
+    let trees = synthesize(&mut db, &input).unwrap();
+
+    clock_trees_text(&db, first_added, &trees.summary)
+}
+
+#[test]
+fn a_grid_of_clustered_flops_gets_the_trees_it_always_has() {
+    assert_golden("grid_24x24.txt", &synthesized_grid(CLOCK, 0));
+}
+
+#[test]
+fn a_grid_under_a_fanout_limit_gets_the_trees_it_always_has() {
+    let sdc = format!("{CLOCK}set_max_fanout 10 [current_design]\n");
+    assert_golden("grid_24x24_fanout_10.txt", &synthesized_grid(&sdc, 0));
+}
+
+#[test]
+fn a_grid_under_a_wire_length_limit_gets_the_trees_it_always_has() {
+    assert_golden(
+        "grid_24x24_wire_100um.txt",
+        &synthesized_grid(CLOCK, 200_000),
+    );
 }
