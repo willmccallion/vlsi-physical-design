@@ -272,7 +272,6 @@ fn place_at(imp: &mut Improver, cells: &[usize], lefts: &[i64]) {
 /// The horizontal span of the cells' nets, each net once, or the largest
 /// cost if one of them breaks a placement rule, as
 /// `DetailedReorderer::cost`.
-#[allow(clippy::cast_precision_loss)] // as OpenDP's double
 fn cost(imp: &Improver, marks: &mut EdgeMarks, cells: &[usize]) -> f64 {
     marks.traversal += 1;
     let mut cost = 0.0;

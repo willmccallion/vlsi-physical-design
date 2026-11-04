@@ -155,7 +155,6 @@ fn others_box(imp: &Improver, edge: &[usize], n: usize) -> Option<(i64, i64, i64
 }
 
 /// The cell's center and its optimal region, unless it is already there.
-#[allow(clippy::cast_precision_loss)] // as OpenDP's doubles
 fn region_elsewhere(imp: &Improver, n: usize) -> Option<(i64, i64, i64, i64)> {
     let yi = imp.bottom(n) as f64 + 0.5 * imp.height(n) as f64;
     let xi = imp.left(n) as f64 + 0.5 * imp.width(n) as f64;
@@ -166,7 +165,6 @@ fn region_elsewhere(imp: &Improver, n: usize) -> Option<(i64, i64, i64, i64)> {
 
 /// The left edge and bottom that center the cell in a box, as
 /// `std::floor(0.5 * (min + max) - 0.5 * size)`.
-#[allow(clippy::cast_possible_truncation, clippy::cast_precision_loss)] // as OpenDP's int casts
 fn centered(min: i64, max: i64, size: i64) -> i64 {
     (0.5 * (min + max) as f64 - 0.5 * size as f64).floor() as i64
 }
@@ -224,7 +222,6 @@ const fn clip_to_reach(lo: i64, hi: i64, at: i64, reach: i64) -> (i64, i64) {
 
 /// A move or else a swap of the cell one or two rows toward its optimal
 /// region, picked at random, as `DetailedVerticalSwap::generate`.
-#[allow(clippy::cast_possible_truncation, clippy::cast_precision_loss)] // as OpenDP's int casts
 fn vertical_trial(imp: &mut Improver, n: usize) -> Result<bool> {
     let yi = imp.bottom(n) as f64 + 0.5 * imp.height(n) as f64;
     let Some((x0, y0, x1, y1)) = region_elsewhere(imp, n) else {

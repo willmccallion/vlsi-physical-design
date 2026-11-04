@@ -108,7 +108,6 @@ pub struct PlacementModel {
 /// extends instances by pin density: a movable cell of three signal pins or
 /// more is scaled toward the area that holds its pins at the average density
 /// of the movable cells, by no more than 1.2 nor less than 0.95.
-#[allow(clippy::cast_possible_truncation, clippy::cast_precision_loss)] // as gpl's casts
 fn pin_density_sizes(db: &NetlistDB) -> Vec<Point<Dbu>> {
     let signal_pins = |i: usize| {
         let pins = &db.cell_macro(CellId::new(i)).pins;

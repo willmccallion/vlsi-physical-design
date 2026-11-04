@@ -1076,7 +1076,7 @@ impl NetlistDB {
 
     /// Where `pin` is as `dbITerm::getAvgXY` takes it: the mean of its
     /// shapes' corners, truncated; [`Self::pin_position`] without shapes.
-    #[allow(clippy::cast_possible_truncation, clippy::cast_precision_loss)] // as OpenDB's int()
+    // Truncates as OpenDB's int() does.
     pub fn average_pin_position(&self, pin: PinId) -> Point<Dbu> {
         let shapes = self.pin_shapes(pin);
         if shapes.is_empty() {

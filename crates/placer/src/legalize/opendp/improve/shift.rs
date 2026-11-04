@@ -86,7 +86,6 @@ fn ordered_without_cycles(imp: &Improver, cells: &[usize]) -> bool {
 
 /// Clumps each segment's cells between stand-ins pinned to its ends,
 /// as `ShiftLegalizer::shift` and `ShiftLegalizer::clump`.
-#[allow(clippy::cast_possible_truncation, clippy::cast_precision_loss)] // positions are dbu
 fn shift(imp: &mut Improver, cells: &[usize]) -> Result<()> {
     let nodes = imp.net.node_count();
     let segs = imp.segments.len();

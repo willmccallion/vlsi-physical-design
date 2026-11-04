@@ -100,7 +100,7 @@ impl RouteRc {
     /// The resistance and capacitance of `length` of wire on `layer`, its
     /// resistance divided by how much wider `ndr_width` is than the layer's,
     /// as `MakeWireParasitics::layerRC`.
-    #[allow(clippy::cast_possible_truncation)] // OpenROAD returns them in single precision
+    // OpenROAD returns them in single precision.
     fn wire(&self, length: Dbu, layer: LayerId, ndr_width: Option<Dbu>) -> (f32, f32) {
         let (r, c) = self.layer[layer.index()];
         let (mut r_per_meter, mut cap_per_meter) = (r.get(), c.get());
@@ -125,7 +125,7 @@ impl RouteRc {
 
     /// The resistance of the via from routing layer `below` to the one
     /// above, as `MakeWireParasitics::getCutLayerRes` for one cut.
-    #[allow(clippy::cast_possible_truncation)] // OpenROAD returns it in single precision
+    // OpenROAD returns it in single precision.
     fn cut(&self, below: LayerId) -> f32 {
         self.via_resistance(below).get() as f32
     }
@@ -133,7 +133,7 @@ impl RouteRc {
 
 /// A routing layer's resistance and capacitance per length from its LEF
 /// values, as `MakeWireParasitics::layerRC` falls back to them.
-#[allow(clippy::cast_possible_truncation)] // OpenROAD holds them in single precision
+// OpenROAD holds them in single precision.
 fn lef_layer_rc(
     width: Dbu,
     electrical: &pare_common::db::library::LayerElectrical,

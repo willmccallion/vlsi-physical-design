@@ -298,7 +298,6 @@ impl Improver {
     /// right_limit)` nearest their targets by `OpenDP`'s dynamic program,
     /// whose first cell always takes the first site, as
     /// `DetailedMgr::shift`.
-    #[allow(clippy::cast_precision_loss)] // costs are OpenDP's doubles
     fn shift(
         &self,
         cells: &[usize],
@@ -616,7 +615,7 @@ impl Improver {
 }
 
 /// `originX + (xj - originX / spacing) * spacing` in C++ `int` arithmetic.
-#[allow(clippy::cast_possible_truncation)] // wraps as OpenDP's int does
+// Wraps as OpenDP's int does.
 fn misaligned_site(xj: i64, origin: i64, spacing: i64) -> i64 {
     let site = (xj - origin / spacing) as i32;
     i64::from((origin as i32).wrapping_add(site.wrapping_mul(spacing as i32)))

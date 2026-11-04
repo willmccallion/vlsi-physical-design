@@ -109,7 +109,7 @@ struct SitePattern {
 }
 
 impl SitePattern {
-    #[allow(clippy::cast_possible_truncation, clippy::cast_precision_loss)] // as gpl's floats
+    // In single precision, as gpl's floats.
     fn new(kind: BlockageKind) -> Self {
         let max_density = match kind {
             BlockageKind::Hard | BlockageKind::Soft => 0.0,
@@ -126,7 +126,7 @@ impl SitePattern {
         self.blocked_share >= 1.0
     }
 
-    #[allow(clippy::cast_precision_loss)] // as gpl's floats
+    // In single precision, as gpl's floats.
     fn next_site_is_blocked(&mut self) -> bool {
         let blocked =
             self.visited == 0 || self.blocked as f32 / self.visited as f32 <= self.blocked_share;
