@@ -78,7 +78,7 @@ impl Placer {
                         && node_of[i] != usize::MAX
                 })
                 .collect();
-            members.sort_by_key(|&i| (db.cells[i].group_rank, std::cmp::Reverse(i)));
+            members.sort_by_key(|&i| (db.cells[i].region_member_order(), std::cmp::Reverse(i)));
             let mut cells = Vec::with_capacity(members.len());
             for i in members {
                 let n = node_of[i];

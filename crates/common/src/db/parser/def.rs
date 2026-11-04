@@ -1332,7 +1332,7 @@ impl<'a> DefParser<'a> {
             let region = self.region_id(t)?;
             let c = &mut self.db.cells[cell.index()];
             c.region = Some(region);
-            c.group_rank = u32::MAX;
+            c.group_rank = None;
         }
         for (order, group) in std::mem::take(&mut self.groups).into_iter().enumerate() {
             let Some(region) = group.region else {
@@ -1359,7 +1359,7 @@ impl<'a> DefParser<'a> {
                     ));
                 }
                 c.region = Some(region);
-                c.group_rank = u32::try_from(rank).unwrap_or(u32::MAX);
+                c.group_rank = Some(rank);
             }
         }
         Ok(())

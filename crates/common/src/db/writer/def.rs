@@ -215,7 +215,7 @@ fn write_components(db: &NetlistDB, out: &mut impl Write) -> io::Result<()> {
 /// Whether a cell's region comes from a group, which [`write_groups`]
 /// lists it in, rather than from its own `+ REGION`.
 fn is_listed_in_group(db: &NetlistDB, cell: &Cell) -> bool {
-    cell.group_rank != u32::MAX
+    cell.group_rank.is_some()
         && cell
             .region
             .is_some_and(|r| db.regions[r.index()].group_order.is_some())
@@ -255,7 +255,12 @@ fn members_last_listed_first(db: &NetlistDB, region: RegionId) -> Vec<CellId> {
             cell.region == Some(region) && is_listed_in_group(db, cell)
         })
         .collect();
-    members.sort_by_key(|c| (db.cells[c.index()].group_rank, std::cmp::Reverse(*c)));
+    members.sort_by_key(|c| {
+        (
+            db.cells[c.index()].region_member_order(),
+            std::cmp::Reverse(*c),
+        )
+    });
     members.reverse();
     members
 }

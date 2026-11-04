@@ -61,14 +61,23 @@ pub struct Cell {
     pub region: Option<RegionId>,
     /// Where the instance stands among its region group's members as
     /// `OpenDB` lists them, first at 0: pattern by pattern, the last added
-    /// first; members given their region directly come after.
-    pub group_rank: u32,
+    /// first; none for an instance given its region directly.
+    pub group_rank: Option<usize>,
     /// Net connections on this instance.
     pub pins: Vec<PinId>,
     /// Whether the instance has been taken off its nets and only awaits
     /// [`NetlistDB::remove`]; its pins keep their nets so it can be put
     /// back.
     pub retired: bool,
+}
+
+impl Cell {
+    /// Its place in the order `OpenDB` lists its region's members: group
+    /// members by rank, then those given the region directly.
+    #[must_use]
+    pub const fn region_member_order(&self) -> (bool, Option<usize>) {
+        (self.group_rank.is_none(), self.group_rank)
+    }
 }
 
 /// How a region constrains the cells assigned to it.
@@ -599,7 +608,7 @@ impl NetlistDB {
             orient,
             status,
             region: None,
-            group_rank: 0,
+            group_rank: None,
             pins: Vec::new(),
             retired: false,
         });
