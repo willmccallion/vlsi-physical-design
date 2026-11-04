@@ -92,9 +92,14 @@ pub struct TraceRequest {
 pub struct Save<'a> {
     /// The point of the run after which to save.
     pub after: SavePoint,
-    /// Takes the state once that point is reached.
-    pub write: &'a mut dyn FnMut(&RouteState),
+    /// Takes the state once that point is reached; an error stops the run.
+    pub write: &'a mut dyn FnMut(&RouteState) -> Result<(), SaveError>,
 }
+
+/// Why a run's state could not be saved, as its saver reports it.
+#[derive(Debug, thiserror::Error, PartialEq, Eq)]
+#[error("{0}")]
+pub struct SaveError(pub String);
 
 impl std::fmt::Debug for Save<'_> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -116,12 +121,16 @@ pub enum SavePoint {
 impl Session<'_> {
     /// Hands the state `build` makes to the save, if it is due after
     /// `point`, returning whether it was.
-    fn save_at(&mut self, point: SavePoint, build: impl FnOnce() -> RouteState) -> bool {
+    fn save_at(
+        &mut self,
+        point: SavePoint,
+        build: impl FnOnce() -> RouteState,
+    ) -> Result<bool, SaveError> {
         let Some(save) = self.save.as_mut().filter(|s| s.after == point) else {
-            return false;
+            return Ok(false);
         };
-        (save.write)(&build());
-        true
+        (save.write)(&build())?;
+        Ok(true)
     }
 }
 
@@ -225,7 +234,7 @@ fn route_detailed(
         grid: grid_shape(tech, &grid),
         global: session.save.is_some().then(|| named_global(db, &global)),
     };
-    let mut state_saved = session.save_at(SavePoint::Global, || saver.global_state());
+    let mut state_saved = session.save_at(SavePoint::Global, || saver.global_state())?;
     dr.set_trace(trace_of(db, &session.trace)?);
     let start = Instant::now();
     let wires = assign_tracks(tech, &dr.occupancy, &grid, &global, &dr.pin_points());
@@ -246,7 +255,7 @@ fn route_detailed(
     if negotiation.first_round == 1 {
         state_saved |= session.save_at(SavePoint::Round(0), || {
             saver.detailed_state(&dr, 0, &negotiation)
-        });
+        })?;
     }
     for round in negotiation.first_round..=config.detailed_iterations {
         if negotiation.conflicted.is_empty() {
@@ -258,7 +267,7 @@ fn route_detailed(
         summary.rounds = round;
         state_saved |= session.save_at(SavePoint::Round(round), || {
             saver.detailed_state(&dr, round, &negotiation)
-        });
+        })?;
         ui::dr_iter(
             round,
             dr.marker_count(),
@@ -1070,4 +1079,7 @@ pub enum RouteError {
     /// Saved detailed routes do not fit the design as it is placed now.
     #[error(transparent)]
     DetailedRestore(#[from] RestoreRoutesError),
+    /// The run's state could not be saved.
+    #[error("cannot save the route state: {0}")]
+    Save(#[from] SaveError),
 }
