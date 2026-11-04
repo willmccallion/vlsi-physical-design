@@ -14,7 +14,7 @@ use crate::steiner::{self, SteinerTree};
 use pare_common::db::global_route::{NetRoute, RoutePoint};
 use pare_common::db::indices::{LayerId, PinId};
 use pare_common::db::liberty::{Edge, LibCellId};
-use pare_common::geom::dbu::Dbu;
+use pare_common::geom::dbu::{Dbu, DbuPerMicron};
 use pare_common::geom::point::Point;
 use pare_common::units::{Farads, FaradsPerMeter, Meters, Ohms, OhmsPerMeter, Seconds};
 use rustc_hash::FxHashMap;
@@ -227,7 +227,7 @@ impl Bnet {
     #[must_use]
     pub fn wire(at: Point<Dbu>, to: BnetPtr, layer: Option<LayerId>, rc: &TreeRc<'_>) -> BnetPtr {
         let length = manhattan(at, to.at);
-        let meters = Meters::from_dbu(length, rc.dbu);
+        let meters = Meters::from_dbu(Dbu(length), rc.dbu);
         let (res_per_meter, cap_per_meter) = rc.wire(layer);
         let resistance = meters * res_per_meter;
         let capacitance = meters * cap_per_meter;
@@ -538,7 +538,7 @@ pub struct TreeRc<'a> {
     /// Each layer's, for wires and vias along global routes.
     pub layers: Option<&'a RouteRc>,
     /// Database units per micron.
-    pub dbu: f64,
+    pub dbu: DbuPerMicron,
 }
 
 impl TreeRc<'_> {
@@ -830,7 +830,7 @@ mod tests {
         let tree_rc = TreeRc {
             signal: rc,
             layers: None,
-            dbu: 2000.0,
+            dbu: DbuPerMicron::new(2000).unwrap(),
         };
 
         let wire = Bnet::wire(Point::new(Dbu(0), Dbu(0)), load, None, &tree_rc);

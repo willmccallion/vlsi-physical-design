@@ -15,7 +15,7 @@ use pare_common::db::design::NetlistDB;
 use pare_common::db::global_route::{NetRoute, RoutePoint};
 use pare_common::db::indices::{LayerId, NetId};
 use pare_common::db::library::Library;
-use pare_common::geom::dbu::Dbu;
+use pare_common::geom::dbu::{Dbu, DbuPerMicron};
 use pare_common::units::{FaradsPerMeter, Ohms, OhmsPerMeter};
 use rustc_hash::FxHashMap;
 
@@ -34,7 +34,7 @@ pub struct RouteRc {
     /// Per cut layer, the LEF's resistance per cut.
     lef_via: Vec<Ohms>,
     min_layer: LayerId,
-    dbu_per_micron: f64,
+    dbu_per_micron: DbuPerMicron,
 }
 
 impl RouteRc {
@@ -48,7 +48,7 @@ impl RouteRc {
         vias: &[(usize, Ohms)],
         min_layer: LayerId,
     ) -> Self {
-        let dbu_per_micron = f64::from(library.dbu_per_micron.get());
+        let dbu_per_micron = library.dbu_per_micron;
         let mut layer =
             vec![(OhmsPerMeter::ZERO, FaradsPerMeter::ZERO); library.routing_layers.len()];
         for &(id, r, c) in layers {
@@ -116,7 +116,7 @@ impl RouteRc {
             let ratio = width.get() as f32 / self.width[layer.index()].get() as f32;
             r_per_meter /= f64::from(ratio);
         }
-        let meters = (length.get() as f64 / (self.dbu_per_micron * 1e6)) as f32;
+        let meters = (length.to_f64() / (f64::from(self.dbu_per_micron.get()) * 1e6)) as f32;
         (
             (r_per_meter * f64::from(meters)) as f32,
             (cap_per_meter * f64::from(meters)) as f32,
@@ -137,9 +137,9 @@ impl RouteRc {
 fn lef_layer_rc(
     width: Dbu,
     electrical: &pare_common::db::library::LayerElectrical,
-    dbu_per_micron: f64,
+    dbu_per_micron: DbuPerMicron,
 ) -> (OhmsPerMeter, FaradsPerMeter) {
-    let width_microns = (width.get() as f64 / dbu_per_micron) as f32;
+    let width_microns = dbu_per_micron.to_microns(width) as f32;
     let res_ohm_per_micron =
         (electrical.resistance_per_square.unwrap_or(0.0) / f64::from(width_microns)) as f32;
     let cap_pf_per_micron = (f64::from(width_microns)
