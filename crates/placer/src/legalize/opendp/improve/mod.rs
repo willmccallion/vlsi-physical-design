@@ -338,14 +338,13 @@ impl Improver {
 
     /// A draw below `limit`, as `DetailedMgr::getRandom`.
     fn random(&mut self, limit: usize) -> usize {
-        let limit = u32::try_from(limit).unwrap_or(u32::MAX);
-        usize::try_from(self.rng.next_u32() % limit).unwrap_or(0)
+        (self.rng.next_u32() % limit as u32) as usize
     }
 
     /// `Utility::random_shuffle` with the improver's generator.
     fn shuffle(&mut self, nodes: &mut [usize]) {
         for i in 1..nodes.len() {
-            let r = usize::try_from(self.rng.next_u32()).unwrap_or(0) % (i + 1);
+            let r = self.rng.next_u32() as usize % (i + 1);
             nodes.swap(i, r);
         }
     }

@@ -198,7 +198,7 @@ impl Improver {
             let (xmin, xmax) = (rect.min.x.get(), rect.max.x.get());
             let (ymin, ymax) = (rect.min.y.get(), rect.max.y.get());
             for (r, row) in rows.iter().enumerate() {
-                let lb = self.arch.min_y + i64::try_from(r).unwrap_or(0) * height;
+                let lb = self.arch.min_y + r as i64 * height;
                 if ymax < lb + height || ymin > lb {
                     continue;
                 }
@@ -266,7 +266,7 @@ impl Improver {
         };
         let rows = self.arch.rows.len();
         for offset in 1..=rows {
-            let vert = i64::try_from(offset).unwrap_or(0) * self.arch.rows[0].height;
+            let vert = offset as i64 * self.arch.rows[0].height;
             if let Some(below) = row.checked_sub(offset)
                 && within(vert, best1, best2)
             {
@@ -503,14 +503,14 @@ impl Improver {
             if self.cell_segs[n].is_empty() {
                 continue;
             }
-            let spanned = usize::try_from(self.height(n) / height).unwrap_or(0);
+            let spanned = (self.height(n) / height) as usize;
             if self.cell_segs[n].len() != spanned {
                 return Err(ImprovementError::Internal(
                     "Reverse cell map incorrectly sized.",
                 ));
             }
             let first = (self.bottom(n) - self.arch.min_y) / height;
-            for r in first..first + i64::try_from(spanned).unwrap_or(0) {
+            for r in first..first + spanned as i64 {
                 let Some(row) = usize::try_from(r).ok().and_then(|r| self.arch.rows.get(r)) else {
                     problems += 1;
                     continue;
@@ -527,11 +527,11 @@ impl Improver {
     /// as `DetailedMgr::isInsideABlockage`.
     fn inside_blockage(&self, n: usize, position: i64) -> bool {
         let first = &self.arch.rows[0];
-        let last = i64::try_from(self.arch.rows.len()).unwrap_or(0) - 1;
+        let last = self.arch.rows.len() as i64 - 1;
         let start = ((self.bottom(n) - first.bottom) / first.height).max(0);
         let end = ((self.top(n) - first.bottom) / first.height).min(last);
         (start..end).any(|r| {
-            let row = &self.blockages[usize::try_from(r).unwrap_or(0)];
+            let row = &self.blockages[r as usize];
             let at = row.partition_point(|b| b.max_x < position);
             row.get(at)
                 .is_some_and(|b| position >= b.min_x && position <= b.max_x)

@@ -153,7 +153,7 @@ impl Arch {
     /// `Architecture::getCellHeightInRows`.
     pub(super) fn rows_spanned(&self, height: i64) -> usize {
         let rows = (height as f64 / self.rows[0].height as f64).round();
-        usize::try_from(rows as i64).unwrap_or(0)
+        rows as usize
     }
 
     /// The row whose bottom is nearest `y`, the lower on a tie, as

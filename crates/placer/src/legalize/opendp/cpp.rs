@@ -19,7 +19,7 @@ impl Mt19937 {
             let previous = state[i - 1];
             state[i] = 1_812_433_253u32
                 .wrapping_mul(previous ^ (previous >> 30))
-                .wrapping_add(u32::try_from(i).unwrap_or(0));
+                .wrapping_add(i as u32);
         }
         Self { state, index: 624 }
     }

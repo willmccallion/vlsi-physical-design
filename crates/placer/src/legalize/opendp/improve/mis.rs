@@ -141,7 +141,7 @@ impl Bins {
             bin.clear();
         }
         self.bin_of.fill(None);
-        let last = |dim: usize| i32::try_from(dim).unwrap_or(i32::MAX) - 1;
+        let last = |dim: usize| dim as i32 - 1;
         for &n in candidates {
             let y = imp.bottom(n) as f64 + 0.5 * imp.height(n) as f64;
             let x = imp.left(n) as f64 + 0.5 * imp.width(n) as f64;
@@ -151,10 +151,7 @@ impl Bins {
             let i = (((x - imp.arch.min_x as f64) / self.step.0) as i32)
                 .min(last(self.dim.0))
                 .max(0);
-            let bin = self.index(
-                usize::try_from(i).unwrap_or(0),
-                usize::try_from(j).unwrap_or(0),
-            );
+            let bin = self.index(i as usize, j as usize);
             self.nodes[bin].push(n);
             self.bin_of[n] = Some(bin);
         }
@@ -286,7 +283,7 @@ fn solve_match(imp: &mut Improver, nodes: &[usize]) -> Result<()> {
             });
         }
     }
-    let count_i32 = i32::try_from(count).unwrap_or(i32::MAX);
+    let count_i32 = count as i32;
     let flow = min_cost_flow(2 * count + 2, &arcs, supply, demand, count_i32);
     let mut journal = Vec::new();
     for &(arc, i, j) in assignment.iter().rev() {
