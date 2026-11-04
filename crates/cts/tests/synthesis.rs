@@ -11,6 +11,7 @@ use pare_common::db::parser::{def, lef, liberty, sdc};
 use pare_common::db::sdc::Sdc;
 use pare_common::geom::dbu::DbuPerMicron;
 use pare_common::geom::orient::Orientation;
+use pare_common::testing;
 use pare_common::units::Seconds;
 use pare_cts::{CtsError, CtsInput, CtsOptions, CtsSummary, balance_latencies, synthesize};
 use pare_resizer::parasitics::WireRc;
@@ -425,37 +426,12 @@ fn each_load_of_a_clock_inverter_gets_its_own_copy() {
     }
 }
 
-/// Checks `actual` against the golden file `name`, or writes it there when
-/// `PARE_BLESS` is set, for pinning down whole results.
+/// Checks `actual` against the golden file `name` of this crate.
 fn assert_golden(name: &str, actual: &str) {
-    let path = Path::new(env!("CARGO_MANIFEST_DIR"))
-        .join("tests/golden")
-        .join(name);
-    if std::env::var_os("PARE_BLESS").is_some() {
-        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
-        std::fs::write(&path, actual).unwrap();
-        return;
-    }
-    let expected = std::fs::read_to_string(&path).unwrap_or_else(|e| {
-        panic!("{}: {e}; PARE_BLESS=1 writes it", path.display());
-    });
-    if let Some((line, (want, got))) = expected
-        .lines()
-        .zip(actual.lines())
-        .enumerate()
-        .find(|(_, (want, got))| want != got)
-    {
-        panic!(
-            "{} differs at line {}:\n  golden: {want}\n  now:    {got}",
-            path.display(),
-            line + 1
-        );
-    }
-    assert_eq!(
-        expected.lines().count(),
-        actual.lines().count(),
-        "{} differs in length",
-        path.display()
+    testing::assert_golden(
+        &Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/golden"),
+        name,
+        actual,
     );
 }
 
