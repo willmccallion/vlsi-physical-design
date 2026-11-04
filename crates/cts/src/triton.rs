@@ -14,13 +14,14 @@ use pare_common::db::design::{
     NetlistDB, NonDefaultLayer, NonDefaultRule, PinOwner, PlacementStatus,
 };
 use pare_common::db::indices::{CellId, LayerId, MacroPinId, NetId, NonDefaultRuleId, PinId};
-use pare_common::db::liberty::LibCellId;
+use pare_common::db::liberty::{Edge, LibCellId, MinMax};
 use pare_common::db::library::{MacroClass, PinDirection, SignalUse};
 use pare_common::db::sdc::Sdc;
 use pare_common::geom::dbu::Dbu;
 use pare_common::geom::orient::Orientation;
 use pare_common::geom::point::Point as DbPoint;
 use pare_common::geom::rect::Rect;
+use pare_common::units::Seconds;
 use pare_resizer::parasitics::WireRc;
 use pare_resizer::steiner::{DEFAULT_ALPHA, prim_dijkstra};
 use pare_resizer::{ClockNetwork, Link};
@@ -383,15 +384,34 @@ impl Cts<'_> {
     }
 
     /// The sink record of a clock pin.
-    /// The sink record of a clock pin; its insertion delay is zero, as
-    /// the libraries' clock tree path tables are not read.
     fn sink(&self, db: &NetlistDB, pin: PinId) -> ClockSink {
         ClockSink {
             name: db.pin_name(pin),
             location: pin_position(db, pin),
             pin,
             input_cap: self.input_cap(db, pin),
-            insertion_delay: 0.0,
+            insertion_delay: self.insertion_delay(db, pin),
+        }
+    }
+
+    /// The delay through the clock tree inside the cell of `pin`, as
+    /// `TritonCTS::computeInsertionDelay` takes it from Liberty: the mean
+    /// of the latest rising and falling delays at zero input slew, or the
+    /// one there is; zero when insertion delays are off.
+    fn insertion_delay(&self, db: &NetlistDB, pin: PinId) -> Seconds {
+        if !self.settings.insertion_delay {
+            return Seconds::ZERO;
+        }
+        let Some((lib, port)) = self.link.pin_port(db, pin) else {
+            return Seconds::ZERO;
+        };
+        let port = &self.link.liberty.cell(lib).ports[port];
+        let [rise, fall] =
+            Edge::BOTH.map(|edge| port.clock_tree_delay(Seconds::ZERO, edge, MinMax::Max));
+        if rise != Seconds::ZERO && fall != Seconds::ZERO {
+            (rise + fall) / 2.0
+        } else {
+            rise + fall
         }
     }
 
@@ -449,7 +469,8 @@ impl Cts<'_> {
                     .and_then(|p| pin_direction(db, p))
                     .is_some_and(|(c, _, _)| is_block(db, c));
             }
-            if non_sink_macro || is_block(db, cell) {
+            let has_insertion_delay = self.insertion_delay(db, pin) != Seconds::ZERO;
+            if has_insertion_delay || non_sink_macro || is_block(db, cell) {
                 macro_sinks.push(pin);
             } else {
                 register_sinks.push(pin);

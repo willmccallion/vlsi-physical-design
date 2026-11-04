@@ -233,6 +233,63 @@ fn the_root_net_gets_the_clock_rule_of_doubled_spacing() {
     assert_eq!(db.nets[root.index()].signal_use, SignalUse::Clock);
 }
 
+/// The 16 by 16 grid with its first `slow` flops alternately of
+/// `DFF_SLOW` and `DFF_SLOWER`, whose clock pins lead into 0.2 and 0.6 ns
+/// of clock tree of their own, synthesized with insertion delays on or off.
+fn synthesized_with_slow_flops(slow: usize, insertion_delay: bool) -> (NetlistDB, CtsSummary) {
+    let (db, lib, constraints) = load(16, 16, false);
+    let mut text = design(16, 16, false);
+    for i in 0..slow {
+        let master = if i % 2 == 0 { "DFF_SLOW" } else { "DFF_SLOWER" };
+        text = text.replace(&format!("- ff{i} DFF_X1 "), &format!("- ff{i} {master} "));
+    }
+    let mut db = def::parse_str(&text, Path::new("grid.def"), db.library).unwrap();
+    let link = Link::new(&db, &lib, &[]).unwrap();
+    let clocks = clock_network(&db, &link, &constraints);
+    let input = CtsInput {
+        link: &link,
+        sdc: &constraints,
+        clocks: &clocks,
+        signal_rc: wire(&db, "metal2", 3.5, 0.1),
+        clock_rc: wire(&db, "metal3", 1.5, 0.11),
+        max_wire_length: 0,
+        options: CtsOptions {
+            insertion_delay,
+            ..CtsOptions::default()
+        },
+    };
+
+    let trees = synthesize(&mut db, &input).unwrap();
+
+    (db, trees.summary)
+}
+
+#[test]
+fn sinks_with_insertion_delay_get_a_tree_apart_from_the_registers() {
+    let (_, summary) = synthesized_with_slow_flops(24, true);
+
+    assert_eq!(summary.trees, 2);
+    assert_eq!(summary.sinks, 256);
+}
+
+#[test]
+fn without_insertion_delays_every_flop_shares_one_tree() {
+    let (_, summary) = synthesized_with_slow_flops(24, false);
+
+    assert_eq!(summary.trees, 1);
+}
+
+#[test]
+fn a_grid_with_slow_flops_gets_the_trees_it_always_has() {
+    let first_added = 256;
+    let (db, summary) = synthesized_with_slow_flops(24, true);
+
+    assert_golden(
+        "grid_16x16_slow_24.txt",
+        &clock_trees_text(&db, first_added, &summary),
+    );
+}
+
 #[test]
 fn a_tree_whose_buffer_name_is_taken_is_refused_with_that_name() {
     let (mut db, lib, constraints) = load(16, 16, false);
