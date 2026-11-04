@@ -355,14 +355,47 @@ impl Setup {
         rng: &mut StdRng,
     ) -> (Self, Remap) {
         let movable = movable_cells(model);
-        let fixed = fixed_rects(model);
-        let mut old_object_of_old_cell = vec![None; cell_map.len()];
-        for (k, &i) in self.movable.iter().enumerate() {
-            old_object_of_old_cell[i] = Some(k);
+        let (mut objects, mut old_of_new, added_area) =
+            self.continued_cells(model, &movable, cell_map);
+        let mut fields = build_fields(model, &movable, &fixed_rects(model), params);
+        let mut old_field_of_new = Vec::with_capacity(fields.len());
+        for field in &mut fields {
+            let old = self.fields.iter().position(|f| f.zone == field.zone);
+            old_field_of_new.push(old);
+            if let Some(old) = old {
+                self.continue_field(field, old, &mut objects, &mut old_of_new);
+            } else {
+                add_fillers(field, &mut objects, rng);
+                old_of_new.extend(field.fillers.clone().map(|_| None));
+            }
         }
+        let setup = Self {
+            netlist: build_netlist(model, &movable),
+            model_sizes: movable.iter().map(|&i| model.sizes[i]).collect(),
+            objects,
+            fields,
+            movable,
+        };
+        let remap = Remap {
+            old_of_new,
+            old_field_of_new,
+            added_area,
+        };
+        (setup, remap)
+    }
+
+    /// The objects of the `movable` cells of `model`, each continuing the
+    /// object of the cell `cell_map` says it was, with the old object each
+    /// continues and the cell area the repair added.
+    fn continued_cells(
+        &self,
+        model: &PlacementModel,
+        movable: &[usize],
+        cell_map: &[Option<usize>],
+    ) -> (Objects, Vec<Option<usize>>, f64) {
         let mut old_object_of_new_cell = vec![None; model.num_cells()];
-        for (i, &new) in cell_map.iter().enumerate() {
-            if let (Some(j), Some(k)) = (new, old_object_of_old_cell[i]) {
+        for (k, &i) in self.movable.iter().enumerate() {
+            if let Some(j) = cell_map[i] {
                 old_object_of_new_cell[j] = Some(k);
             }
         }
@@ -374,7 +407,10 @@ impl Setup {
         let mut old_of_new = Vec::with_capacity(movable.len());
         let area = |size: Point<f64>| size.x * size.y;
         let mut added_area = 0.0;
-        for &i in &movable {
+        for &i in movable {
+            // NOTE: gpl quirk kept: a resized or new cell takes its plain
+            // size, without the pin density scaling the first placement
+            // gave it, as resizeGCell and createCbkGCell read the instance.
             let size = model.sizes[i];
             match old_object_of_new_cell[i] {
                 Some(k) if self.model_sizes[k] == size => {
@@ -396,63 +432,50 @@ impl Setup {
                 }
             }
         }
-        let model_sizes = movable.iter().map(|&i| model.sizes[i]).collect();
         for (k, &i) in self.movable.iter().enumerate() {
             if cell_map[i].is_none() {
                 added_area -= area(self.model_sizes[k]);
             }
         }
-        let mut fields = build_fields(model, &movable, &fixed, params);
-        let mut old_field_of_new = Vec::with_capacity(fields.len());
-        for field in &mut fields {
-            let old = self.fields.iter().position(|f| f.zone == field.zone);
-            old_field_of_new.push(old);
-            let Some(old) = old.map(|o| &self.fields[o]) else {
-                add_fillers(field, &mut objects, rng);
-                old_of_new.extend(field.fillers.clone().map(|_| None));
-                continue;
-            };
-            let first = objects.centers.len();
-            for k in old.fillers.clone() {
-                objects.centers.push(self.objects.centers[k]);
-                objects.sizes.push(self.objects.sizes[k]);
-                old_of_new.push(Some(k));
-            }
-            field.fillers = first..objects.centers.len();
-            field.kept_fillers = old.kept_fillers;
-            field.filler = old.filler;
-            let cell_area = |objects: &Objects, cells: &Range<usize>| -> f64 {
-                cells
-                    .clone()
-                    .map(|i| objects.sizes[i].x * objects.sizes[i].y)
-                    .sum()
-            };
-            let gained = cell_area(&objects, &field.cells) - cell_area(&self.objects, &old.cells);
-            let free = field.grid.free_area();
-            if free > 0.0 {
-                let target = old.grid.target() + gained / free;
-                if target > 1.0 {
-                    log::warn!(
-                        "timing-driven repair raised a field's target density to {target:.3}"
-                    );
-                }
-                field.grid.set_target(target);
-                field.utilization = cell_area(&objects, &field.cells) / free;
-            }
+        (objects, old_of_new, added_area)
+    }
+
+    /// Carries the fillers of old field `old` into `field`, its zone's
+    /// field after the repair, and raises its target density by the area
+    /// its cells gained over its free area.
+    fn continue_field(
+        &self,
+        field: &mut Field,
+        old: usize,
+        objects: &mut Objects,
+        old_of_new: &mut Vec<Option<usize>>,
+    ) {
+        let old = &self.fields[old];
+        let first = objects.centers.len();
+        for k in old.fillers.clone() {
+            objects.centers.push(self.objects.centers[k]);
+            objects.sizes.push(self.objects.sizes[k]);
+            old_of_new.push(Some(k));
         }
-        let setup = Self {
-            netlist: build_netlist(model, &movable),
-            model_sizes,
-            objects,
-            fields,
-            movable,
+        field.fillers = first..objects.centers.len();
+        field.kept_fillers = old.kept_fillers;
+        field.filler = old.filler;
+        let cell_area = |objects: &Objects, cells: &Range<usize>| -> f64 {
+            cells
+                .clone()
+                .map(|i| objects.sizes[i].x * objects.sizes[i].y)
+                .sum()
         };
-        let remap = Remap {
-            old_of_new,
-            old_field_of_new,
-            added_area,
-        };
-        (setup, remap)
+        let gained = cell_area(objects, &field.cells) - cell_area(&self.objects, &old.cells);
+        let free = field.grid.free_area();
+        if free > 0.0 {
+            let target = old.grid.target() + gained / free;
+            if target > 1.0 {
+                log::warn!("timing-driven repair raised a field's target density to {target:.3}");
+            }
+            field.grid.set_target(target);
+            field.utilization = cell_area(objects, &field.cells) / free;
+        }
     }
 }
 
