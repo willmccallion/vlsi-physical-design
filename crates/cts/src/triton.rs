@@ -1022,14 +1022,14 @@ impl Cts<'_> {
         (b, own): (usize, usize),
         dummy: LibCellId,
     ) -> Result<bool, CtsError> {
+        let Some(net) = self.builders[index].clock.subnets[own].net else {
+            return Ok(false);
+        };
         let liberty = self.link.liberty;
         let location = self.builders[index].clock.buffers[b].location;
         let name = format!("clkload{}", self.dummy_index);
         self.dummy_index += 1;
         let cell = self.make_buffer(db, dummy, &name, location)?;
-        let Some(net) = self.builders[index].clock.subnets[own].net else {
-            return Ok(false);
-        };
         let lib = liberty.cell(dummy);
         let (in_port, _) = lib
             .buffer_ports()
