@@ -8,7 +8,7 @@ use crate::CtsError;
 use crate::buffers::{ClockBuffers, fanout_limit};
 use crate::clock::{Clock, ClockSink, InstKind, InstRef};
 use crate::htree::{Builder, TreeContext, TreeType};
-use crate::options::{CtsOptions, NdrStrategy, Settings};
+use crate::options::{CtsOptions, MACRO_MAX_DIAMETER, MAX_LEAF_SINKS, NdrStrategy, Settings};
 use crate::techchar::{CharSetup, TechChar};
 use pare_common::db::design::{
     NetlistDB, NonDefaultLayer, NonDefaultRule, PinOwner, PlacementStatus,
@@ -100,14 +100,14 @@ pub fn synthesize(db: &mut NetlistDB, input: &CtsInput<'_>) -> Result<ClockTrees
     let sink_fanout = fanout_limit(liberty, buffers.sink, design_fanout);
     let root_fanout = fanout_limit(liberty, buffers.root, design_fanout);
     if let Some(root) = root_fanout
-        && settings.num_max_leaf_sinks > root
+        && MAX_LEAF_SINKS > root
     {
-        settings.max_fanout = root;
+        settings.max_fanout = Some(root);
     }
     if let Some(sink) = sink_fanout {
         settings.limit_sink_clustering_sizes(sink);
-        if sink < settings.max_fanout {
-            settings.max_fanout = sink;
+        if settings.max_fanout.is_some_and(|max| sink < max) {
+            settings.max_fanout = Some(sink);
         }
     }
     settings.max_wire_length = input.max_wire_length;
@@ -790,9 +790,8 @@ impl Cts<'_> {
             ((root_h as f64 / unit) * unit / 2.0).ceil() as i64,
         );
         let (blockages, macro_diameter) = merge_blockages(db, bloat);
-        if macro_diameter > 0.0 && !self.settings.macro_max_diameter_set {
-            self.settings.macro_max_diameter = macro_diameter.max(self.settings.macro_max_diameter);
-            self.settings.macro_max_diameter_set = true;
+        if macro_diameter > 0.0 && self.settings.macro_max_diameter.is_none() {
+            self.settings.macro_max_diameter = Some(macro_diameter.max(MACRO_MAX_DIAMETER));
         }
         let mut builders = std::mem::take(&mut self.builders);
         {
@@ -961,9 +960,10 @@ impl Cts<'_> {
                 let Some(&own) = loads.driven_subnet.get(&inst) else {
                     continue;
                 };
-                if self.builders[index].clock.subnets[own].sinks().len()
-                    == self.settings.max_fanout as usize
-                {
+                // NOTE: TritonCTS compares with its zero for no limit, so
+                // without one only a sinkless subnet is passed over.
+                let full = self.settings.max_fanout.map_or(0, |f| f as usize);
+                if self.builders[index].clock.subnets[own].sinks().len() == full {
                     continue;
                 }
                 let liberty = self.link.liberty;

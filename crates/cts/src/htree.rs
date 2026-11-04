@@ -14,7 +14,11 @@
 
 use crate::clock::{Clock, InstRef};
 use crate::kmeans::Clustering;
-use crate::options::Settings;
+use crate::options::{
+    CLOCK_TREE_MAX_DEPTH, CLUSTERING_CAPACITY, CLUSTERING_POWER,
+    FANOUT_LIMITED_CLUSTERING_CAPACITY, MACRO_SINK_CLUSTERING_SIZE, MAX_DIAMETER, MAX_LEAF_SINKS,
+    MAX_SLEW, SINK_CLUSTERING_SIZE, Settings,
+};
 use crate::sink_clustering::SinkClustering;
 use crate::techchar::TechChar;
 use pare_common::db::liberty::LibCellId;
@@ -22,10 +26,21 @@ use pare_common::geom::dbu::Dbu;
 use pare_common::geom::rect::Rect;
 use rustc_hash::{FxHashMap, FxHashSet};
 
+/// The fewest register sinks a tree clusters under leaf buffers, as
+/// `HTreeBuilder`'s `min_clustering_sinks_`.
 const MIN_CLUSTERING_SINKS: usize = 200;
+/// The fewest macro sinks a tree clusters, as `HTreeBuilder`'s
+/// `min_clustering_macro_sinks_`.
 const MIN_CLUSTERING_MACRO_SINKS: usize = 10;
+/// The cluster diameters tried, in microns, as `CtsOptions`' default
+/// `sinkClusteringDiameters`.
 const CLUSTER_DIAMETERS: [u32; 3] = [50, 100, 200];
+/// How far a segment search widens its slew and load match before giving
+/// up, as `HTreeBuilder::computeMinDelaySegment` stops.
 const MAX_TOLERANCE: u32 = 10;
+/// Rounds of capacitated k-means splitting a branch's sinks, as
+/// `HTreeBuilder::refineBranchingPointsWithClustering` runs it.
+const KMEANS_ROUNDS: u32 = 5;
 
 /// A position in the tree's length unit.
 #[derive(Clone, Copy, Debug, Default)]
@@ -312,9 +327,6 @@ impl Builder {
     /// Moves a buffer inside a blockage to the free spot beside it nearest
     /// to where it was, as `TreeBuilder::legalizeOneBuffer`.
     fn legalize_in_blockages(&self, ctx: &TreeContext<'_>, p: Point, buffer: LibCellId) -> Point {
-        if !ctx.settings.obstruction_aware {
-            return p;
-        }
         let Some([x1, y1, x2, y2]) = Self::find_blockage(ctx, p, self.unit()) else {
             return p;
         };
@@ -369,25 +381,16 @@ impl Builder {
         self.min_input_cap = tech.actual_min_input_cap();
         self.min_length_sink_region = tech.min_segment_length() * 2;
         self.init_sink_region(ctx, tech);
-        for level in 1..=ctx.settings.clock_tree_max_depth {
+        for level in 1..=CLOCK_TREE_MAX_DEPTH {
             let per_region = self.sinks_per_sub_region(ctx, level);
             let (width, height) = self.sub_region_size(level);
             let min_length = f64::from(self.min_length_sink_region);
             if width < min_length || height < min_length {
-                if ctx.settings.fake_lut_entries {
-                    tech.create_fake_entries(self.min_length_sink_region, 1);
-                    self.min_length_sink_region = 1;
-                } else {
-                    break;
-                }
+                tech.create_fake_entries(self.min_length_sink_region, 1);
+                self.min_length_sink_region = 1;
             }
             self.level_topology(ctx, tech, level, width, height);
-            let limit = if ctx.settings.max_fanout > 0 {
-                ctx.settings.max_fanout
-            } else {
-                ctx.settings.num_max_leaf_sinks
-            };
-            if per_region < limit {
+            if per_region < ctx.settings.max_fanout.unwrap_or(MAX_LEAF_SINKS) {
                 break;
             }
         }
@@ -397,9 +400,7 @@ impl Builder {
             return;
         }
         self.clock.max_level = self.topologies.len();
-        if ctx.settings.obstruction_aware {
-            self.legalize(ctx);
-        }
+        self.legalize(ctx);
         self.create_clock_subnets(ctx, tech);
     }
 
@@ -448,11 +449,11 @@ impl Builder {
         self.wire_segment_unit = tech.length_unit() as i32;
         let (diameter, size) = if self.tree_type == TreeType::Macro {
             (
-                ctx.settings.macro_max_diameter,
-                ctx.settings.macro_sink_clustering_size,
+                ctx.settings.macro_max_diameter(),
+                MACRO_SINK_CLUSTERING_SIZE,
             )
         } else {
-            (ctx.settings.max_diameter, ctx.settings.sink_clustering_size)
+            (MAX_DIAMETER, SINK_CLUSTERING_SIZE)
         };
         let unit = self.wire_segment_unit as f32;
         let sinks: Vec<(f32, f32)> = self
@@ -557,9 +558,8 @@ impl Builder {
     ) -> Vec<Vec<usize>> {
         let unit = self.wire_segment_unit as f32;
         let is_macro = self.tree_type == TreeType::Macro;
-        let use_max_cap = !is_macro && ctx.settings.sink_clustering_use_max_cap;
         let mut matching = SinkClustering::new(
-            use_max_cap,
+            !is_macro,
             tech.cap_per_dbu(),
             f64::from(tech.sink_buffer_input_cap()),
         );
@@ -573,7 +573,7 @@ impl Builder {
             matching.add_point(f64::from(x), f64::from(y), cap);
         }
         let (diameter_set, size_set) = if is_macro {
-            (ctx.settings.macro_max_diameter_set, true)
+            (ctx.settings.macro_max_diameter.is_some(), true)
         } else {
             (false, false)
         };
@@ -588,7 +588,7 @@ impl Builder {
                 }
             }
             (true, false) => {
-                for &d in &ctx.settings.sink_clustering_diameters {
+                for d in CLUSTER_DIAMETERS {
                     let diameter = d as f32 * dbu / unit;
                     matching.run(size as usize, diameter, unit_i, &dist);
                 }
@@ -676,7 +676,7 @@ impl Builder {
             input_slew = previous.output_slew;
             curr_wl = previous.curr_wl;
         }
-        let slew_threshold = ctx.settings.max_slew;
+        let slew_threshold = MAX_SLEW;
         let wirelength_threshold = if ctx.settings.max_wire_length == 0 {
             (slew_threshold * tech.max_segment_length()) as i32
         } else {
@@ -755,7 +755,7 @@ impl Builder {
             let a = topology.add_point(low, None);
             let b = topology.add_point(high, None);
             let sinks = self.top_level_sinks_clustered.clone();
-            refine_with_clustering(ctx, topology, level, a, b, root, &sinks);
+            refine_with_clustering(ctx, topology, a, b, root, &sinks);
             return;
         }
         let parent = &self.topologies[level as usize - 2];
@@ -775,7 +775,7 @@ impl Builder {
             let (low, high) = spread(root, topology.length);
             let a = topology.add_point(low, Some(idx));
             let b = topology.add_point(high, Some(idx));
-            refine_with_clustering(ctx, topology, level, a, b, root, &sinks);
+            refine_with_clustering(ctx, topology, a, b, root, &sinks);
         }
     }
 
@@ -1177,7 +1177,6 @@ fn scale_position(p: Point, parent: Point, length: f64, scale: f64) -> Point {
 fn refine_with_clustering(
     ctx: &TreeContext<'_>,
     topology: &mut LevelTopology,
-    level: u32,
     a: usize,
     b: usize,
     root: Point,
@@ -1187,16 +1186,15 @@ fn refine_with_clustering(
     let pa = topology.points[a];
     let pb = topology.points[b];
     let mut means = [(pa.x as f32, pa.y as f32), (pb.x as f32, pb.y as f32)];
-    let cap = if ctx.settings.max_fanout > 0 {
-        (sinks.len() as f64 * 0.5) as usize
+    let share = if ctx.settings.max_fanout.is_some() {
+        FANOUT_LIMITED_CLUSTERING_CAPACITY
     } else {
-        (sinks.len() as f64 * ctx.settings.clustering_capacity) as usize
+        CLUSTERING_CAPACITY
     };
-    engine.run(cap, 5, ctx.settings.clustering_power, &mut means);
-    if (ctx.settings.num_static_layers as i64) - i64::from(level) < 0 {
-        topology.points[a] = Point::from_f32(means[0]);
-        topology.points[b] = Point::from_f32(means[1]);
-    }
+    let cap = (sinks.len() as f64 * share) as usize;
+    engine.run(cap, KMEANS_ROUNDS, CLUSTERING_POWER, &mut means);
+    topology.points[a] = Point::from_f32(means[0]);
+    topology.points[b] = Point::from_f32(means[1]);
     for (cluster, members) in engine.clusters().iter().enumerate() {
         let branch = if cluster == 0 { a } else { b };
         for &s in members {
