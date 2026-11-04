@@ -308,13 +308,13 @@ impl Moves {
         let load_cap = resizer.load_cap(site.driver);
         let input_slews = resizer.input_slews(site.cell);
         let Some(swap_port) = swap_candidate(
-            resizer,
             lib,
             in_port,
             site.port,
             &equivalent,
             load_cap,
             &input_slews,
+            &resizer.targets.slews,
         ) else {
             return false;
         };
@@ -747,16 +747,16 @@ fn ports_equivalent(
 }
 
 /// The equivalent input whose arcs into `drvr_port` are fastest at the
-/// present slews, if faster than the critical input's, as
-/// `SwapPinsMove::findSwapPinCandidate`.
+/// present slews, or at `target_slews` where an input has none, if faster
+/// than the critical input's, as `SwapPinsMove::findSwapPinCandidate`.
 fn swap_candidate(
-    resizer: &Resizer<'_, Sta>,
     cell: &LibCell,
     input: usize,
     drvr_port: usize,
     equivalent: &[usize],
     load_cap: Farads,
     input_slews: &[(String, EdgeValues<Seconds>)],
+    target_slews: &EdgeValues<Seconds>,
 ) -> Option<usize> {
     let mut base_delay = -Seconds::INFINITY;
     let mut port_delays: FxHashMap<usize, Seconds> = FxHashMap::default();
@@ -767,13 +767,15 @@ fn swap_candidate(
                 .iter()
                 .find(|(n, _)| n == from_name)
                 .map_or_else(
-                    || resizer.targets.slews.get(arc.from_edge),
+                    || target_slews.get(arc.from_edge),
                     |(_, s)| s.get(arc.from_edge),
                 );
             let delay = arc.gate_delay(in_slew, load_cap).0;
             if set.from == input {
                 base_delay = base_delay.max(delay);
             } else {
+                // NOTE: SwapPinsMove stores this max under port_delays[input_port],
+                // a slip that judges every other input by its first arc alone.
                 let slot = port_delays.entry(set.from).or_insert(-Seconds::INFINITY);
                 *slot = slot.max(delay);
             }
@@ -1136,4 +1138,64 @@ fn slews_in_tree(
     let mut out = Vec::new();
     walk(resizer, tree, driver_slew, &mut out);
     out
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use pare_common::db::parser::liberty::parse_str;
+    use std::path::Path;
+
+    /// An AND gate whose inputs reach `ZN` with the given rise and fall
+    /// delays, in nanoseconds.
+    fn and2(a1: (f64, f64), a2: (f64, f64)) -> LibCell {
+        let timing = |pin: &str, (rise, fall): (f64, f64)| {
+            format!(
+                "timing () {{ related_pin : \"{pin}\"; timing_sense : positive_unate;
+                   cell_rise(scalar) {{ values (\"{rise}\"); }}
+                   cell_fall(scalar) {{ values (\"{fall}\"); }} }}"
+            )
+        };
+        let src = format!(
+            "library (t) {{ time_unit : \"1ns\"; capacitive_load_unit (1,ff);
+               cell (AND2_X1) {{
+                 pin (A1) {{ direction : input; capacitance : 1.0; }}
+                 pin (A2) {{ direction : input; capacitance : 1.0; }}
+                 pin (ZN) {{ direction : output; function : \"(A1 & A2)\"; {} {} }}
+               }} }}",
+            timing("A1", a1),
+            timing("A2", a2)
+        );
+        let lib = parse_str(&src, Path::new("t.lib")).unwrap();
+        lib.cells[0].clone()
+    }
+
+    fn candidate(cell: &LibCell) -> Option<usize> {
+        let slews = EdgeValues {
+            rise: Seconds::ZERO,
+            fall: Seconds::ZERO,
+        };
+        swap_candidate(cell, 0, 2, &[1], Farads::ZERO, &[], &slews)
+    }
+
+    #[test]
+    fn another_input_is_judged_by_its_slowest_arc_not_its_first() {
+        let cell = and2((0.05, 0.05), (0.03, 0.08));
+
+        assert_eq!(candidate(&cell), None);
+    }
+
+    #[test]
+    fn another_input_faster_on_every_arc_is_taken() {
+        let cell = and2((0.05, 0.05), (0.04, 0.03));
+
+        assert_eq!(candidate(&cell), Some(1));
+    }
+
+    #[test]
+    fn the_critical_input_is_judged_by_its_slowest_arc() {
+        let cell = and2((0.02, 0.06), (0.05, 0.05));
+
+        assert_eq!(candidate(&cell), Some(1));
+    }
 }
