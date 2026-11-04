@@ -3,7 +3,7 @@
 use crate::library::Link;
 use crate::netlist::{ClockNetwork, Constants, Namer, Netlist};
 use crate::parasitics::WireRc;
-use crate::resizer::{Context, RepairOptions, Resizer};
+use crate::resizer::{Context, Resizer, SessionInputs};
 use crate::sta::Sta;
 use pare_common::db::design::NetlistDB;
 use pare_common::db::indices::{LayerId, PinId};
@@ -76,15 +76,13 @@ pub(crate) fn with_timed_session(
         clock_rc: None,
     };
     let mut namer = Namer::new();
-    let mut resizer = Resizer::timed(
+    let inputs = SessionInputs {
         db,
         context,
         rc,
         buffers,
-        &mut namer,
-        RepairOptions::default(),
-        &constraints,
-    )
-    .unwrap();
+        namer: &mut namer,
+    };
+    let mut resizer = Resizer::timed(inputs, &constraints).unwrap();
     test(&mut resizer);
 }

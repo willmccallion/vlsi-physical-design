@@ -33,7 +33,7 @@ pub use netlist::{ClockNetwork, Constants, Namer, Netlist, NetlistError};
 pub use rebuffer::Rebuffer;
 pub use repair::{RepairSummary, Repairer};
 pub use resizer::{
-    Context, RepairError, RepairOptions, Resizer, Timing, Untimed, timing_net_weights,
+    Context, RepairError, Resizer, SessionInputs, Timing, Untimed, timing_net_weights,
 };
 pub use setup::{SetupOptions, SetupProgress, SetupSummary, repair_setup};
 pub use sta::{Path, PathPoint, Slack, Sta, Tag, Via};

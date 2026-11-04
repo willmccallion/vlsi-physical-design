@@ -20,7 +20,7 @@ use pare_placer::zones::Zones;
 use pare_resizer::parasitics::WireRc;
 use pare_resizer::resizer::GlobalRouting;
 use pare_resizer::route_parasitics::RouteRc;
-use pare_resizer::{Link, RepairOptions, Repairer, Resizer};
+use pare_resizer::{Link, Repairer, Resizer, SessionInputs};
 use pare_router::GlobalSession;
 use std::path::{Path, PathBuf};
 use std::time::Instant;
@@ -118,16 +118,14 @@ pub(crate) fn global_route_with_repair(
             rc: route_rc.clone(),
             legalize: &legalize,
         };
-        let mut resizer = Resizer::on_global_routes(
+        let inputs = SessionInputs {
             db,
-            networks.context(&link, clock_rc),
+            context: networks.context(&link, clock_rc),
             rc,
-            networks.buffers.clone(),
-            &mut repair.namer,
-            RepairOptions::default(),
-            sdc,
-            routes,
-        )?;
+            buffers: networks.buffers.clone(),
+            namer: &mut repair.namer,
+        };
+        let mut resizer = Resizer::on_global_routes(inputs, sdc, routes)?;
         match step {
             RepairStep::Design => {
                 ui::phase("Design Repair");
