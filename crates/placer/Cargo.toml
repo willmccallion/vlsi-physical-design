@@ -19,3 +19,6 @@ log = "0.4"
 thiserror = "2.0"
 rand = "0.8"
 rayon = "1.10"
+
+[dev-dependencies]
+pare-common = { path = "../common", features = ["testing"] }
