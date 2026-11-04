@@ -13,8 +13,8 @@ use crate::report::{NetlistSummary, Report, TimingSummary};
 use pare_resizer::parasitics::WireRc;
 use pare_resizer::resizer::Context as RepairContext;
 use pare_resizer::{
-    BufferSet, ClockNetwork, Constants, HoldOptions, Link, Namer, Netlist, RepairOptions, Repairer,
-    Resizer, SetupOptions, Sta, Timing, repair_hold, repair_setup,
+    BufferSet, ClockNetwork, Constants, HoldOptions, Link, Namer, Netlist, Repairer, Resizer,
+    SessionInputs, SetupOptions, Sta, Timing, repair_hold, repair_setup,
 };
 use std::path::Path;
 use std::time::Instant;
@@ -208,16 +208,17 @@ pub(crate) fn repair_design(
     ui::phase("Design Repair");
     let link = Link::new(db, &repair.liberty, &netlist_config.dont_use)?;
     let networks = Networks::find(db, &link, config, repair.sdc.as_ref())?;
-    let context = networks.context(&link, clock_wire_rc(config, db)?);
-    let buffers = networks.buffers.clone();
-    let namer = &mut repair.namer;
-    let options = RepairOptions::default();
+    let clock_rc = clock_wire_rc(config, db)?;
+    let inputs = SessionInputs {
+        db,
+        context: networks.context(&link, clock_rc),
+        rc,
+        buffers: networks.buffers.clone(),
+        namer: &mut repair.namer,
+    };
     let done = match repair.sdc.as_ref() {
-        Some(sdc) => {
-            let resizer = Resizer::timed(db, context, rc, buffers, namer, options, sdc)?;
-            repair_design_on(resizer)?
-        }
-        None => repair_design_on(Resizer::new(db, context, rc, buffers, namer, options)?)?,
+        Some(sdc) => repair_design_on(Resizer::timed(inputs, sdc)?)?,
+        None => repair_design_on(Resizer::new(inputs)?)?,
     };
     repair.summary.slew_violations = done.slew_violations;
     repair.summary.cap_violations = done.cap_violations;
@@ -292,15 +293,14 @@ pub(crate) fn repair_timing(
     let link = Link::new(db, &repair.liberty, &config.netlist.dont_use)?;
     let networks = Networks::find(db, &link, config, Some(sdc))?;
     let clock_rc = clock_wire_rc(config, db)?;
-    let mut resizer = Resizer::timed(
+    let inputs = SessionInputs {
         db,
-        networks.context(&link, clock_rc),
+        context: networks.context(&link, clock_rc),
         rc,
-        networks.buffers.clone(),
-        &mut repair.namer,
-        RepairOptions::default(),
-        sdc,
-    )?;
+        buffers: networks.buffers.clone(),
+        namer: &mut repair.namer,
+    };
+    let mut resizer = Resizer::timed(inputs, sdc)?;
     report.timing = Some(timing_repair_on(&mut resizer, &repair.liberty)?);
     let _ = resizer.finish()?;
     report.phase("timing repair", phase_start);

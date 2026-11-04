@@ -54,13 +54,13 @@ pub enum RepairError {
 
 /// Margins and limits for repair.
 #[derive(Clone, Copy, Debug, PartialEq)]
-pub struct RepairOptions {
+pub(crate) struct RepairOptions {
     /// Percentage of each slew limit kept in hand.
-    pub slew_margin: f64,
+    pub(crate) slew_margin: f64,
     /// Percentage of each capacitance limit kept in hand.
-    pub cap_margin: f64,
+    pub(crate) cap_margin: f64,
     /// Longest wire allowed, in database units; zero for no limit.
-    pub max_wire_length: i64,
+    pub(crate) max_wire_length: i64,
     /// How much one sizing step may grow a cell.
     pub(crate) sizing_limits: SizingLimits,
 }
@@ -193,6 +193,23 @@ impl Timing for Sta {
     }
 }
 
+/// What a repair session works on: the design and what it reads about it,
+/// the signal wire it estimates with, the buffers it may insert and the
+/// namer of the cells and nets it adds.
+#[derive(Debug)]
+pub struct SessionInputs<'a> {
+    /// The design repair edits.
+    pub db: &'a mut NetlistDB,
+    /// What repair reads about the design besides the netlist.
+    pub context: Context<'a>,
+    /// The wire RC signal nets are estimated with, as `set_wire_rc -signal`.
+    pub rc: WireRc,
+    /// The buffers repair may insert.
+    pub buffers: BufferSet,
+    /// Names the cells and nets repair adds.
+    pub namer: &'a mut Namer,
+}
+
 /// The state of a repair session, timed when `T` is an [`Sta`].
 #[derive(Debug)]
 pub struct Resizer<'a, T: Timing = Untimed> {
@@ -229,81 +246,37 @@ pub struct Resizer<'a, T: Timing = Untimed> {
 }
 
 impl<'a> Resizer<'a> {
-    /// Prepares a session over `db` without timing: estimates every net's
-    /// parasitics and slews.
-    pub fn new(
-        db: &'a mut NetlistDB,
-        context: Context<'a>,
-        rc: WireRc,
-        buffers: BufferSet,
-        namer: &'a mut Namer,
-        options: RepairOptions,
-    ) -> Result<Self, RepairError> {
-        let session = Session {
-            db,
-            context,
-            rc,
-            buffers,
-            namer,
-            options,
-            routes: None,
-        };
-        Self::build(session, |_, _| Untimed)
+    /// Prepares a session over `inputs` without timing: estimates every
+    /// net's parasitics and slews.
+    pub fn new(inputs: SessionInputs<'a>) -> Result<Self, RepairError> {
+        Self::build(inputs, None, |_, _| Untimed)
     }
 }
 
 impl<'a> Resizer<'a, Sta> {
-    /// Prepares a session over `db` as [`Resizer::new`] does, timed under
-    /// `sdc`.
-    pub fn timed(
-        db: &'a mut NetlistDB,
-        context: Context<'a>,
-        rc: WireRc,
-        buffers: BufferSet,
-        namer: &'a mut Namer,
-        options: RepairOptions,
-        sdc: &Sdc,
-    ) -> Result<Self, RepairError> {
-        let session = Session {
-            db,
-            context,
-            rc,
-            buffers,
-            namer,
-            options,
-            routes: None,
-        };
-        Self::build_timed(session, sdc)
+    /// Prepares a session over `inputs` as [`Resizer::new`] does, timed
+    /// under `sdc`.
+    pub fn timed(inputs: SessionInputs<'a>, sdc: &Sdc) -> Result<Self, RepairError> {
+        Self::build_timed(inputs, None, sdc)
     }
 
     /// Prepares a timed session as [`Resizer::timed`] does, with every net's
     /// parasitics along its global route, rerouted as edits change it.
-    #[allow(clippy::too_many_arguments)]
     pub fn on_global_routes(
-        db: &'a mut NetlistDB,
-        context: Context<'a>,
-        rc: WireRc,
-        buffers: BufferSet,
-        namer: &'a mut Namer,
-        options: RepairOptions,
+        inputs: SessionInputs<'a>,
         sdc: &Sdc,
         routes: GlobalRouting<'a>,
     ) -> Result<Self, RepairError> {
-        let session = Session {
-            db,
-            context,
-            rc,
-            buffers,
-            namer,
-            options,
-            routes: Some(routes),
-        };
-        Self::build_timed(session, sdc)
+        Self::build_timed(inputs, Some(routes), sdc)
     }
 
-    fn build_timed(session: Session<'a>, sdc: &Sdc) -> Result<Self, RepairError> {
-        let (clocks, constants) = (session.context.clocks, session.context.constants);
-        Self::build(session, |netlist, graph| {
+    fn build_timed(
+        inputs: SessionInputs<'a>,
+        routes: Option<GlobalRouting<'a>>,
+        sdc: &Sdc,
+    ) -> Result<Self, RepairError> {
+        let (clocks, constants) = (inputs.context.clocks, inputs.context.constants);
+        Self::build(inputs, routes, |netlist, graph| {
             Sta::new(netlist, graph, clocks, constants, sdc)
         })
     }
@@ -347,33 +320,21 @@ impl<'a> Resizer<'a, Sta> {
     }
 }
 
-/// What a session is built from.
-struct Session<'a> {
-    db: &'a mut NetlistDB,
-    context: Context<'a>,
-    rc: WireRc,
-    buffers: BufferSet,
-    namer: &'a mut Namer,
-    options: RepairOptions,
-    routes: Option<GlobalRouting<'a>>,
-}
-
 impl<'a, T: Timing> Resizer<'a, T> {
     /// Estimates every net's parasitics and slews, and times the design
     /// as `timing` does once the graph is built.
     fn build(
-        session: Session<'a>,
+        inputs: SessionInputs<'a>,
+        routes: Option<GlobalRouting<'a>>,
         timing: impl FnOnce(&Netlist<'_>, &TimingGraph) -> T,
     ) -> Result<Self, RepairError> {
-        let Session {
+        let SessionInputs {
             db,
             context,
             rc,
             buffers,
             namer,
-            options,
-            routes,
-        } = session;
+        } = inputs;
         let Context {
             link,
             clocks,
@@ -410,7 +371,7 @@ impl<'a, T: Timing> Resizer<'a, T> {
             buffers,
             targets,
             namer,
-            options,
+            options: RepairOptions::default(),
             slew_rc_factor,
             r_strongest_buffer,
             journal: Journal::default(),

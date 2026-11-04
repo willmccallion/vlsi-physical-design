@@ -32,7 +32,7 @@ use pare_placer::legalize::opendp::mirror::optimize_mirroring;
 use pare_placer::model::PlacementModel;
 use pare_placer::zones::{Zone, Zones};
 use pare_resizer::parasitics::WireRc;
-use pare_resizer::{Link, Rebuffer, RepairOptions, Repairer, Resizer, timing_net_weights};
+use pare_resizer::{Link, Rebuffer, Repairer, Resizer, SessionInputs, timing_net_weights};
 use pare_router::{CapacityReduction, GlobalRouteEstimator};
 use std::num::NonZeroUsize;
 use std::path::{Path, PathBuf};
@@ -573,15 +573,14 @@ impl TimingDriver for TimingPlacement<'_> {
         let networks = Networks::find(self.db, &link, self.config, Some(sdc))?;
         let clock_rc = clock_wire_rc(self.config, self.db)?;
         let cells_before = self.db.cells.len();
-        let mut resizer = Resizer::timed(
-            self.db,
-            networks.context(&link, clock_rc),
-            self.rc,
-            networks.buffers.clone(),
-            &mut self.repair.namer,
-            RepairOptions::default(),
-            sdc,
-        )?;
+        let inputs = SessionInputs {
+            db: self.db,
+            context: networks.context(&link, clock_rc),
+            rc: self.rc,
+            buffers: networks.buffers.clone(),
+            namer: &mut self.repair.namer,
+        };
+        let mut resizer = Resizer::timed(inputs, sdc)?;
         let area_before = resizer.design_area();
         let wns_before = resizer.sta().worst_slack(MinMax::Max).0.time();
         resizer.set_max_wire_length(pare_resizer::rebuffer::max_wire_length(&resizer));

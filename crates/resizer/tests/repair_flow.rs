@@ -11,8 +11,8 @@ use pare_common::testing;
 use pare_common::units::Seconds;
 use pare_resizer::parasitics::WireRc;
 use pare_resizer::{
-    ClockNetwork, Constants, Context, HoldOptions, Link, Namer, Netlist, RepairOptions, Repairer,
-    Resizer, SetupOptions, repair_hold, repair_setup,
+    ClockNetwork, Constants, Context, HoldOptions, Link, Namer, Netlist, Repairer, Resizer,
+    SessionInputs, SetupOptions, repair_hold, repair_setup,
 };
 use std::fmt::Write as _;
 use std::path::{Path, PathBuf};
@@ -160,16 +160,14 @@ fn repairing_design_setup_and_hold_gives_what_it_always_has() {
         clock_rc: None,
     };
     let mut namer = Namer::new();
-    let mut resizer = Resizer::timed(
-        &mut db,
+    let inputs = SessionInputs {
+        db: &mut db,
         context,
         rc,
         buffers,
-        &mut namer,
-        RepairOptions::default(),
-        &constraints,
-    )
-    .unwrap();
+        namer: &mut namer,
+    };
+    let mut resizer = Resizer::timed(inputs, &constraints).unwrap();
 
     let design = Repairer::new(&mut resizer).repair_design().unwrap();
     let setup = repair_setup(&mut resizer, SetupOptions::default(), &mut |_| {}).unwrap();

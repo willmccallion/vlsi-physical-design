@@ -9,7 +9,7 @@ use pare_common::units::Seconds;
 use pare_common::util::config::Config;
 use pare_common::util::ui;
 use pare_cts::{CtsInput, CtsOptions, balance_latencies};
-use pare_resizer::{Link, RepairOptions, Repairer, Resizer, repair_clock_inverters};
+use pare_resizer::{Link, Repairer, Resizer, SessionInputs, repair_clock_inverters};
 use rustc_hash::FxHashMap;
 use std::time::Instant;
 
@@ -61,14 +61,13 @@ pub(crate) fn clock_tree_synthesis(
     let sdc = repair.sdc.as_ref().context("constraints")?;
     {
         let networks = Networks::find(db, &link, config, Some(sdc))?;
-        let mut resizer = Resizer::new(
+        let mut resizer = Resizer::new(SessionInputs {
             db,
-            networks.context(&link, Some(clock_rc)),
+            context: networks.context(&link, Some(clock_rc)),
             rc,
-            networks.buffers.clone(),
-            &mut repair.namer,
-            RepairOptions::default(),
-        )?;
+            buffers: networks.buffers.clone(),
+            namer: &mut repair.namer,
+        })?;
         let done = Repairer::new(&mut resizer)
             .repair_clock_nets(trees.clock_buffers(), max_wire_length)?;
         summary.clock_net_repeaters = done.inserted;
@@ -77,15 +76,14 @@ pub(crate) fn clock_tree_synthesis(
     let arrivals: FxHashMap<PinId, Seconds> = {
         let networks = Networks::find(db, &link, config, Some(sdc))?;
         let pins = db.pins.len();
-        let resizer = Resizer::timed(
+        let inputs = SessionInputs {
             db,
-            networks.context(&link, Some(clock_rc)),
+            context: networks.context(&link, Some(clock_rc)),
             rc,
-            networks.buffers.clone(),
-            &mut repair.namer,
-            RepairOptions::default(),
-            sdc,
-        )?;
+            buffers: networks.buffers.clone(),
+            namer: &mut repair.namer,
+        };
+        let resizer = Resizer::timed(inputs, sdc)?;
         let sta = resizer.sta();
         (0..pins)
             .map(PinId::new)
