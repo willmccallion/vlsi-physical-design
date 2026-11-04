@@ -309,25 +309,49 @@ impl Default for GlobalPlacementConfig {
 }
 
 /// Placement of top-level I/O pins that are not fixed.
-#[derive(Debug, Deserialize)]
-#[serde(deny_unknown_fields)]
+#[derive(Debug, Default, Deserialize)]
+#[serde(try_from = "IoPlacementTable")]
 pub struct IoPlacementConfig {
-    /// Whether placement moves unplaced and placed (not fixed) I/O pins.
-    #[serde(default = "default_enabled")]
-    pub enabled: bool,
-    /// Horizontal routing layer for pins on the left and right edges.
-    pub horizontal_layer: Option<String>,
-    /// Vertical routing layer for pins on the top and bottom edges.
-    pub vertical_layer: Option<String>,
+    /// The layers unplaced and placed (not fixed) pins are placed on; without
+    /// them, placed pins keep their places and none may be unplaced.
+    pub layers: Option<IoLayerNames>,
 }
 
-impl Default for IoPlacementConfig {
-    fn default() -> Self {
-        Self {
-            enabled: default_enabled(),
-            horizontal_layer: None,
-            vertical_layer: None,
-        }
+/// The routing layers I/O pins are placed on, by name.
+#[derive(Debug, PartialEq, Eq)]
+pub struct IoLayerNames {
+    /// Horizontal routing layer for pins on the left and right edges.
+    pub horizontal: String,
+    /// Vertical routing layer for pins on the top and bottom edges.
+    pub vertical: String,
+}
+
+/// The `[io_placement]` table as written.
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct IoPlacementTable {
+    horizontal_layer: Option<String>,
+    vertical_layer: Option<String>,
+}
+
+/// An `[io_placement]` table naming one pin layer without the other.
+#[derive(Debug, PartialEq, Eq, thiserror::Error)]
+#[error("[io_placement] needs both horizontal_layer and vertical_layer, or neither")]
+pub struct OneIoLayer;
+
+impl TryFrom<IoPlacementTable> for IoPlacementConfig {
+    type Error = OneIoLayer;
+
+    fn try_from(table: IoPlacementTable) -> Result<Self, OneIoLayer> {
+        let layers = match (table.horizontal_layer, table.vertical_layer) {
+            (Some(horizontal), Some(vertical)) => Some(IoLayerNames {
+                horizontal,
+                vertical,
+            }),
+            (None, None) => None,
+            _ => return Err(OneIoLayer),
+        };
+        Ok(Self { layers })
     }
 }
 

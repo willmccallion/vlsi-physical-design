@@ -106,9 +106,6 @@ def run(name, design, box, mode, placed, rounds, openroad, replace, guides=None)
         "[global_placement]",
         "routability_driven = false",
         "",
-        "[io_placement]",
-        "enabled = false",
-        "",
         "[routing]",
     ] + [f"{k} = {repr(v).replace(chr(39), chr(34))}" for k, v in routing.items()]
     (d / "window.toml").write_text("\n".join(toml) + "\n")

@@ -19,7 +19,7 @@ use pare_common::geom::dbu::Dbu;
 use pare_common::geom::orient::Orientation;
 use pare_common::geom::point::Point;
 use pare_common::geom::rect::Rect;
-use pare_common::util::config::IoPlacementConfig;
+use pare_common::util::config::IoLayerNames;
 use pare_common::verify::shapes::fixed_shapes_keeping_io;
 use rayon::prelude::*;
 
@@ -38,16 +38,6 @@ const MAX_CORNER_MICRONS: f64 = 1.0;
 /// Why pins could not be placed.
 #[derive(Debug, thiserror::Error, PartialEq, Eq)]
 pub enum IoPlacementError {
-    /// No layer is configured for one direction.
-    #[error(
-        "io_placement.{key} is not set; it names the routing layer for pins on the {edges} edges"
-    )]
-    LayerNotSet {
-        /// The missing configuration key.
-        key: &'static str,
-        /// The edges that layer serves.
-        edges: &'static str,
-    },
     /// A configured layer is not a routing layer.
     #[error("unknown routing layer '{0}'")]
     UnknownLayer(String),
@@ -82,15 +72,9 @@ pub struct IoLayers {
 }
 
 impl IoLayers {
-    /// The configured layers, checked against the library.
-    pub fn from_config(
-        config: &IoPlacementConfig,
-        lib: &Library,
-    ) -> Result<Self, IoPlacementError> {
-        let resolve = |name: &Option<String>, key, edges, direction| {
-            let name = name
-                .as_deref()
-                .ok_or(IoPlacementError::LayerNotSet { key, edges })?;
+    /// The layers `names` names, checked against the library.
+    pub fn from_names(names: &IoLayerNames, lib: &Library) -> Result<Self, IoPlacementError> {
+        let resolve = |name: &str, direction| {
             let id = lib
                 .routing_layer_id(name)
                 .ok_or_else(|| IoPlacementError::UnknownLayer(name.to_string()))?;
@@ -106,18 +90,8 @@ impl IoLayers {
             Ok(id)
         };
         Ok(Self {
-            horizontal: resolve(
-                &config.horizontal_layer,
-                "horizontal_layer",
-                "left and right",
-                Direction::Horizontal,
-            )?,
-            vertical: resolve(
-                &config.vertical_layer,
-                "vertical_layer",
-                "top and bottom",
-                Direction::Vertical,
-            )?,
+            horizontal: resolve(&names.horizontal, Direction::Horizontal)?,
+            vertical: resolve(&names.vertical, Direction::Vertical)?,
         })
     }
 }

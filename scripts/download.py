@@ -75,7 +75,6 @@ def orfs(
     sources,
     about,
     io=None,
-    io_enabled=None,
     macros=(),
     orfs_pins=False,
     sdc="constraint.sdc",
@@ -102,7 +101,6 @@ def orfs(
         "sdc": f"{ORFS_DIR}/flow/designs/nangate45/{nickname}/{sdc}",
         "def": f"{nickname}_orfs.def",
         "io": io,
-        "io_enabled": False if orfs_pins else io_enabled,
         "placer_iterations": 2000,
         "target_density": place_density,
     }
@@ -151,8 +149,6 @@ def ispd2015(name, max_utilization, hidden=False):
         "def": "floorplan.def",
         "placer_iterations": 2000,
         "target_density": max_utilization,
-        # The contest forbids moving I/O pins, though the floorplans mark them PLACED.
-        "io_enabled": False,
     }
 
 
@@ -181,7 +177,6 @@ DESIGNS = {
         "aes",
         ["aes"],
         "AES cipher, ~13k nets, ORFS 26Q2 synthesis and floorplan (32% utilization)",
-        io_enabled=False,
     ),
     "ibex": orfs(
         "ibex",
@@ -488,8 +483,6 @@ def config_text(name):
     if d.get("io"):
         lines += ["", "[io_placement]"]
         lines += [f'{k} = "{v}"' for k, v in d["io"].items()]
-    if d.get("io_enabled") is False:
-        lines += ["", "[io_placement]", "enabled = false"]
     if d.get("liberty"):
         lines += ["", "[netlist]"]
         lines.append(f"signal_wire = {layer_rc_table(*ORFS_NANGATE45_SIGNAL_WIRE)}")
