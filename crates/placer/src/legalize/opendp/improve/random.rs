@@ -66,7 +66,6 @@ fn go(imp: &mut Improver, objective: &mut Hpwl, moves_per_candidate: f64) -> Res
 
 /// A move or else a swap of a random cell to a random spot nearby, as
 /// `RandomGenerator::generate`.
-#[allow(clippy::cast_possible_truncation, clippy::cast_precision_loss)] // as OpenDP's int casts
 fn random_trial(imp: &mut Improver, candidates: &[usize]) -> Result<bool> {
     let arch = &imp.arch;
     let ydim = arch.rows.len();

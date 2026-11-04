@@ -283,7 +283,6 @@ impl Improver {
     /// The nearest stack of segments, one per row, a multi-row cell can
     /// take, preferring one it fits, as
     /// `DetailedMgr::findClosestSpanOfSegments`.
-    #[allow(clippy::cast_precision_loss)] // distances compared as OpenDP's doubles
     fn closest_span_of_segments(&self, n: usize) -> Result<Option<Vec<usize>>> {
         let spanned = self.rows_spanned(n);
         if spanned <= 1 {

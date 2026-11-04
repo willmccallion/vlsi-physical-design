@@ -51,7 +51,6 @@ pub(super) fn run(imp: &mut Improver, passes: usize, tolerance: f64) -> Result<(
 
 /// Whether a pass changed the wirelength by no more than `tolerance` of
 /// it, as each pass's stopping test.
-#[allow(clippy::cast_precision_loss)] // as OpenDP's doubles
 pub(super) fn converged(last: i64, current: i64, tolerance: f64) -> bool {
     last == 0 || (current - last).abs() as f64 / last as f64 <= tolerance
 }
@@ -137,7 +136,6 @@ impl Bins {
     }
 
     /// Bins the cells by center, as `DetailedMis::populateGrid`.
-    #[allow(clippy::cast_possible_truncation, clippy::cast_precision_loss)] // as OpenDP's casts
     fn populate(&mut self, imp: &Improver, candidates: &[usize]) {
         for bin in &mut self.nodes {
             bin.clear();
@@ -242,7 +240,6 @@ fn gather_neighbours(
 
 /// Reassigns the cells to each other's spots by a minimum-cost matching,
 /// undoing it if it breaks a placement rule, as `DetailedMis::solveMatch`.
-#[allow(clippy::cast_possible_truncation, clippy::cast_precision_loss)] // costs as OpenDP's
 fn solve_match(imp: &mut Improver, nodes: &[usize]) -> Result<()> {
     if nodes.len() <= 1 {
         return Ok(());

@@ -65,7 +65,6 @@ fn orient_single_row_cell(imp: &mut Improver, n: usize, row: usize) -> bool {
 /// Mirrors single-row cells about their vertical axis where the rows allow
 /// it and it shortens their nets' horizontal spans, as
 /// `DetailedOrient::flipCells`.
-#[allow(clippy::cast_precision_loss)] // as OpenDP's doubles
 fn flip_cells(imp: &mut Improver) {
     let mut marks = vec![0_usize; imp.net.edges.len()];
     let mut traversal = 0;

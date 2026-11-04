@@ -151,7 +151,6 @@ impl Arch {
 
     /// How many rows a cell of this height spans, as
     /// `Architecture::getCellHeightInRows`.
-    #[allow(clippy::cast_possible_truncation, clippy::cast_precision_loss)] // rows fit
     pub(super) fn rows_spanned(&self, height: i64) -> usize {
         let rows = (height as f64 / self.rows[0].height as f64).round();
         usize::try_from(rows as i64).unwrap_or(0)
