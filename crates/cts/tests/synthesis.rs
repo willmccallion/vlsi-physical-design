@@ -11,7 +11,8 @@ use pare_common::db::parser::{def, lef, liberty, sdc};
 use pare_common::db::sdc::Sdc;
 use pare_common::geom::dbu::DbuPerMicron;
 use pare_common::geom::orient::Orientation;
-use pare_cts::{CtsError, CtsInput, CtsOptions, CtsSummary, synthesize};
+use pare_common::units::Seconds;
+use pare_cts::{CtsError, CtsInput, CtsOptions, CtsSummary, balance_latencies, synthesize};
 use pare_resizer::parasitics::WireRc;
 use pare_resizer::{ClockNetwork, Constants, Link, Namer, Netlist, repair_clock_inverters};
 use std::fmt::Write as _;
@@ -287,6 +288,84 @@ fn a_grid_with_slow_flops_gets_the_trees_it_always_has() {
     assert_golden(
         "grid_16x16_slow_24.txt",
         &clock_trees_text(&db, first_added, &summary),
+    );
+}
+
+/// The 16 by 16 grid clocked through the gate `clkgate`, an `AND2_X1`.
+fn gated_grid() -> (NetlistDB, Liberty, Sdc) {
+    let (db, lib, _) = load(16, 16, true);
+    let text = design(16, 16, true)
+        .replace("- clkinv INV_X1 ", "- clkgate AND2_X1 ")
+        .replace("( clkinv A )", "( clkgate A )")
+        .replace("( clkinv ZN )", "( clkgate Z )");
+    let db = def::parse_str(&text, Path::new("grid.def"), db.library).unwrap();
+    let constraints = sdc::parse_str(CLOCK, Path::new("grid.sdc"), &db, &lib).unwrap();
+    (db, lib, constraints)
+}
+
+#[test]
+fn a_clock_gate_driving_far_apart_flops_is_cloned_as_it_always_is() {
+    let (mut db, lib, constraints) = gated_grid();
+    let link = Link::new(&db, &lib, &[]).unwrap();
+    let clocks = clock_network(&db, &link, &constraints);
+    let input = CtsInput {
+        link: &link,
+        sdc: &constraints,
+        clocks: &clocks,
+        signal_rc: wire(&db, "metal2", 3.5, 0.1),
+        clock_rc: wire(&db, "metal3", 1.5, 0.11),
+        max_wire_length: 23_000,
+        options: CtsOptions::default(),
+    };
+    let first_added = db.cells.len();
+
+    let trees = synthesize(&mut db, &input).unwrap();
+
+    assert!(trees.summary.clones > 0, "{:?}", trees.summary);
+    assert_golden(
+        "gated_grid_16x16_column_clusters.txt",
+        &clock_trees_text(&db, first_added, &trees.summary),
+    );
+}
+
+#[test]
+fn the_faster_tree_of_a_clock_is_delayed_as_it_always_is() {
+    let (db, lib, constraints) = load(16, 16, false);
+    let mut text = design(16, 16, false);
+    for i in 0..24 {
+        let master = if i % 2 == 0 { "DFF_SLOW" } else { "DFF_SLOWER" };
+        text = text.replace(&format!("- ff{i} DFF_X1 "), &format!("- ff{i} {master} "));
+    }
+    let mut db = def::parse_str(&text, Path::new("grid.def"), db.library).unwrap();
+    let link = Link::new(&db, &lib, &[]).unwrap();
+    let clocks = clock_network(&db, &link, &constraints);
+    let input = CtsInput {
+        link: &link,
+        sdc: &constraints,
+        clocks: &clocks,
+        signal_rc: wire(&db, "metal2", 3.5, 0.1),
+        clock_rc: wire(&db, "metal3", 1.5, 0.11),
+        max_wire_length: 0,
+        options: CtsOptions::default(),
+    };
+    let first_added = db.cells.len();
+    let trees = synthesize(&mut db, &input).unwrap();
+    let port = db.pin_position(db.io_pins[0].pin);
+    let arrivals: Vec<Seconds> = (0..db.pins.len())
+        .map(|p| {
+            let at = db.pin_position(PinId::new(p));
+            let away = (at.x - port.x).get().abs() + (at.y - port.y).get().abs();
+            Seconds::new(away as f64 * 1e-15)
+        })
+        .collect();
+
+    let inserted =
+        balance_latencies(&mut db, &link, &trees, &|p| Some(arrivals[p.index()])).unwrap();
+
+    assert!(inserted > 0);
+    assert_golden(
+        "slow_grid_16x16_balanced.txt",
+        &clock_trees_text(&db, first_added, &trees.summary),
     );
 }
 

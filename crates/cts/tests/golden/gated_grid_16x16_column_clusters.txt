@@ -1,0 +1,145 @@
+CtsSummary {
+    trees: 17,
+    sinks: 272,
+    buffers: 51,
+    nets: 51,
+    dummies: 0,
+    clones: 15,
+    ndr_nets: 34,
+    root_buffer: "CLKBUF_X3",
+    sink_buffer: "CLKBUF_X3",
+}
+cell clone_1_clkgate AND2_X1 337200 171000 N
+cell clone_2_clkgate AND2_X1 360760 171000 N
+cell clone_3_clkgate AND2_X1 313260 171000 N
+cell clone_4_clkgate AND2_X1 289700 171000 N
+cell clone_5_clkgate AND2_X1 265760 171000 N
+cell clone_6_clkgate AND2_X1 242200 171000 N
+cell clone_7_clkgate AND2_X1 218260 171000 N
+cell clone_8_clkgate AND2_X1 194700 171000 N
+cell clone_9_clkgate AND2_X1 170760 171000 N
+cell clone_10_clkgate AND2_X1 147200 171000 N
+cell clone_11_clkgate AND2_X1 123260 171000 N
+cell clone_12_clkgate AND2_X1 99700 171000 N
+cell clone_13_clkgate AND2_X1 75760 171000 N
+cell clone_14_clkgate AND2_X1 52200 171000 N
+cell clone_15_clkgate AND2_X1 28260 171000 N
+cell clkbuf_0_clk CLKBUF_X3 183030 172000 N
+cell clkbuf_1_0__f_clk CLKBUF_X3 99029 171999 N
+cell clkbuf_1_1__f_clk CLKBUF_X3 267030 171999 N
+cell clkbuf_0_clonenet_15_clk_n CLKBUF_X3 28260 171000 N
+cell clkbuf_1_0__f_clonenet_15_clk_n CLKBUF_X3 28260 87000 N
+cell clkbuf_1_1__f_clonenet_15_clk_n CLKBUF_X3 28260 254999 N
+cell clkbuf_0_clonenet_14_clk_n CLKBUF_X3 52200 171000 N
+cell clkbuf_1_0__f_clonenet_14_clk_n CLKBUF_X3 52199 87000 N
+cell clkbuf_1_1__f_clonenet_14_clk_n CLKBUF_X3 52199 254999 N
+cell clkbuf_0_clonenet_13_clk_n CLKBUF_X3 75760 171000 N
+cell clkbuf_1_0__f_clonenet_13_clk_n CLKBUF_X3 75759 87000 N
+cell clkbuf_1_1__f_clonenet_13_clk_n CLKBUF_X3 75759 254999 N
+cell clkbuf_0_clonenet_12_clk_n CLKBUF_X3 99700 171000 N
+cell clkbuf_1_0__f_clonenet_12_clk_n CLKBUF_X3 99700 87000 N
+cell clkbuf_1_1__f_clonenet_12_clk_n CLKBUF_X3 99700 254999 N
+cell clkbuf_0_clonenet_11_clk_n CLKBUF_X3 123260 171000 N
+cell clkbuf_1_0__f_clonenet_11_clk_n CLKBUF_X3 123260 87000 N
+cell clkbuf_1_1__f_clonenet_11_clk_n CLKBUF_X3 123260 254999 N
+cell clkbuf_0_clonenet_10_clk_n CLKBUF_X3 147200 171000 N
+cell clkbuf_1_0__f_clonenet_10_clk_n CLKBUF_X3 147200 87000 N
+cell clkbuf_1_1__f_clonenet_10_clk_n CLKBUF_X3 147200 254999 N
+cell clkbuf_0_clonenet_9_clk_n CLKBUF_X3 170760 171000 N
+cell clkbuf_1_0__f_clonenet_9_clk_n CLKBUF_X3 170759 87000 N
+cell clkbuf_1_1__f_clonenet_9_clk_n CLKBUF_X3 170759 254999 N
+cell clkbuf_0_clonenet_8_clk_n CLKBUF_X3 194700 171000 N
+cell clkbuf_1_0__f_clonenet_8_clk_n CLKBUF_X3 194699 87000 N
+cell clkbuf_1_1__f_clonenet_8_clk_n CLKBUF_X3 194699 254999 N
+cell clkbuf_0_clonenet_7_clk_n CLKBUF_X3 218260 171000 N
+cell clkbuf_1_0__f_clonenet_7_clk_n CLKBUF_X3 218259 87000 N
+cell clkbuf_1_1__f_clonenet_7_clk_n CLKBUF_X3 218259 254999 N
+cell clkbuf_0_clonenet_6_clk_n CLKBUF_X3 242200 171000 N
+cell clkbuf_1_0__f_clonenet_6_clk_n CLKBUF_X3 242200 87000 N
+cell clkbuf_1_1__f_clonenet_6_clk_n CLKBUF_X3 242200 254999 N
+cell clkbuf_0_clonenet_5_clk_n CLKBUF_X3 265760 171000 N
+cell clkbuf_1_0__f_clonenet_5_clk_n CLKBUF_X3 265759 87000 N
+cell clkbuf_1_1__f_clonenet_5_clk_n CLKBUF_X3 265759 254999 N
+cell clkbuf_0_clonenet_4_clk_n CLKBUF_X3 289700 171000 N
+cell clkbuf_1_0__f_clonenet_4_clk_n CLKBUF_X3 289700 87000 N
+cell clkbuf_1_1__f_clonenet_4_clk_n CLKBUF_X3 289700 254999 N
+cell clkbuf_0_clonenet_3_clk_n CLKBUF_X3 313260 171000 N
+cell clkbuf_1_0__f_clonenet_3_clk_n CLKBUF_X3 313260 87000 N
+cell clkbuf_1_1__f_clonenet_3_clk_n CLKBUF_X3 313260 254999 N
+cell clkbuf_0_clonenet_2_clk_n CLKBUF_X3 360760 171000 N
+cell clkbuf_1_0__f_clonenet_2_clk_n CLKBUF_X3 360760 87000 N
+cell clkbuf_1_1__f_clonenet_2_clk_n CLKBUF_X3 360760 254999 N
+cell clkbuf_0_clonenet_1_clk_n CLKBUF_X3 337200 171000 N
+cell clkbuf_1_0__f_clonenet_1_clk_n CLKBUF_X3 337199 87000 N
+cell clkbuf_1_1__f_clonenet_1_clk_n CLKBUF_X3 337199 254999 N
+cell clkbuf_0_clk_n CLKBUF_X3 4700 171000 N
+cell clkbuf_1_0__f_clk_n CLKBUF_X3 4700 87000 N
+cell clkbuf_1_1__f_clk_n CLKBUF_X3 4700 254999 N
+net clk CTS_NDR_0 PIN clk clkbuf_0_clk/A
+net clk_n CTS_NDR_16 clkbuf_0_clk_n/A clkgate/Z
+net clknet_0_clk CTS_NDR_0 clkbuf_0_clk/Z clkbuf_1_0__f_clk/A clkbuf_1_1__f_clk/A
+net clknet_0_clk_n CTS_NDR_16 clkbuf_0_clk_n/Z clkbuf_1_0__f_clk_n/A clkbuf_1_1__f_clk_n/A
+net clknet_0_clonenet_10_clk_n CTS_NDR_6 clkbuf_0_clonenet_10_clk_n/Z clkbuf_1_0__f_clonenet_10_clk_n/A clkbuf_1_1__f_clonenet_10_clk_n/A
+net clknet_0_clonenet_11_clk_n CTS_NDR_5 clkbuf_0_clonenet_11_clk_n/Z clkbuf_1_0__f_clonenet_11_clk_n/A clkbuf_1_1__f_clonenet_11_clk_n/A
+net clknet_0_clonenet_12_clk_n CTS_NDR_4 clkbuf_0_clonenet_12_clk_n/Z clkbuf_1_0__f_clonenet_12_clk_n/A clkbuf_1_1__f_clonenet_12_clk_n/A
+net clknet_0_clonenet_13_clk_n CTS_NDR_3 clkbuf_0_clonenet_13_clk_n/Z clkbuf_1_0__f_clonenet_13_clk_n/A clkbuf_1_1__f_clonenet_13_clk_n/A
+net clknet_0_clonenet_14_clk_n CTS_NDR_2 clkbuf_0_clonenet_14_clk_n/Z clkbuf_1_0__f_clonenet_14_clk_n/A clkbuf_1_1__f_clonenet_14_clk_n/A
+net clknet_0_clonenet_15_clk_n CTS_NDR_1 clkbuf_0_clonenet_15_clk_n/Z clkbuf_1_0__f_clonenet_15_clk_n/A clkbuf_1_1__f_clonenet_15_clk_n/A
+net clknet_0_clonenet_1_clk_n CTS_NDR_15 clkbuf_0_clonenet_1_clk_n/Z clkbuf_1_0__f_clonenet_1_clk_n/A clkbuf_1_1__f_clonenet_1_clk_n/A
+net clknet_0_clonenet_2_clk_n CTS_NDR_14 clkbuf_0_clonenet_2_clk_n/Z clkbuf_1_0__f_clonenet_2_clk_n/A clkbuf_1_1__f_clonenet_2_clk_n/A
+net clknet_0_clonenet_3_clk_n CTS_NDR_13 clkbuf_0_clonenet_3_clk_n/Z clkbuf_1_0__f_clonenet_3_clk_n/A clkbuf_1_1__f_clonenet_3_clk_n/A
+net clknet_0_clonenet_4_clk_n CTS_NDR_12 clkbuf_0_clonenet_4_clk_n/Z clkbuf_1_0__f_clonenet_4_clk_n/A clkbuf_1_1__f_clonenet_4_clk_n/A
+net clknet_0_clonenet_5_clk_n CTS_NDR_11 clkbuf_0_clonenet_5_clk_n/Z clkbuf_1_0__f_clonenet_5_clk_n/A clkbuf_1_1__f_clonenet_5_clk_n/A
+net clknet_0_clonenet_6_clk_n CTS_NDR_10 clkbuf_0_clonenet_6_clk_n/Z clkbuf_1_0__f_clonenet_6_clk_n/A clkbuf_1_1__f_clonenet_6_clk_n/A
+net clknet_0_clonenet_7_clk_n CTS_NDR_9 clkbuf_0_clonenet_7_clk_n/Z clkbuf_1_0__f_clonenet_7_clk_n/A clkbuf_1_1__f_clonenet_7_clk_n/A
+net clknet_0_clonenet_8_clk_n CTS_NDR_8 clkbuf_0_clonenet_8_clk_n/Z clkbuf_1_0__f_clonenet_8_clk_n/A clkbuf_1_1__f_clonenet_8_clk_n/A
+net clknet_0_clonenet_9_clk_n CTS_NDR_7 clkbuf_0_clonenet_9_clk_n/Z clkbuf_1_0__f_clonenet_9_clk_n/A clkbuf_1_1__f_clonenet_9_clk_n/A
+net clknet_1_0__leaf_clk - clkbuf_1_0__f_clk/Z clkgate/A clone_10_clkgate/A clone_11_clkgate/A clone_12_clkgate/A clone_13_clkgate/A clone_14_clkgate/A clone_15_clkgate/A clone_9_clkgate/A
+net clknet_1_0__leaf_clk_n - clkbuf_1_0__f_clk_n/Z ff0/CK ff112/CK ff16/CK ff32/CK ff48/CK ff64/CK ff80/CK ff96/CK
+net clknet_1_0__leaf_clonenet_10_clk_n - clkbuf_1_0__f_clonenet_10_clk_n/Z ff102/CK ff118/CK ff22/CK ff38/CK ff54/CK ff6/CK ff70/CK ff86/CK
+net clknet_1_0__leaf_clonenet_11_clk_n - clkbuf_1_0__f_clonenet_11_clk_n/Z ff101/CK ff117/CK ff21/CK ff37/CK ff5/CK ff53/CK ff69/CK ff85/CK
+net clknet_1_0__leaf_clonenet_12_clk_n - clkbuf_1_0__f_clonenet_12_clk_n/Z ff100/CK ff116/CK ff20/CK ff36/CK ff4/CK ff52/CK ff68/CK ff84/CK
+net clknet_1_0__leaf_clonenet_13_clk_n - clkbuf_1_0__f_clonenet_13_clk_n/Z ff115/CK ff19/CK ff3/CK ff35/CK ff51/CK ff67/CK ff83/CK ff99/CK
+net clknet_1_0__leaf_clonenet_14_clk_n - clkbuf_1_0__f_clonenet_14_clk_n/Z ff114/CK ff18/CK ff2/CK ff34/CK ff50/CK ff66/CK ff82/CK ff98/CK
+net clknet_1_0__leaf_clonenet_15_clk_n - clkbuf_1_0__f_clonenet_15_clk_n/Z ff1/CK ff113/CK ff17/CK ff33/CK ff49/CK ff65/CK ff81/CK ff97/CK
+net clknet_1_0__leaf_clonenet_1_clk_n - clkbuf_1_0__f_clonenet_1_clk_n/Z ff110/CK ff126/CK ff14/CK ff30/CK ff46/CK ff62/CK ff78/CK ff94/CK
+net clknet_1_0__leaf_clonenet_2_clk_n - clkbuf_1_0__f_clonenet_2_clk_n/Z ff111/CK ff127/CK ff15/CK ff31/CK ff47/CK ff63/CK ff79/CK ff95/CK
+net clknet_1_0__leaf_clonenet_3_clk_n - clkbuf_1_0__f_clonenet_3_clk_n/Z ff109/CK ff125/CK ff13/CK ff29/CK ff45/CK ff61/CK ff77/CK ff93/CK
+net clknet_1_0__leaf_clonenet_4_clk_n - clkbuf_1_0__f_clonenet_4_clk_n/Z ff108/CK ff12/CK ff124/CK ff28/CK ff44/CK ff60/CK ff76/CK ff92/CK
+net clknet_1_0__leaf_clonenet_5_clk_n - clkbuf_1_0__f_clonenet_5_clk_n/Z ff107/CK ff11/CK ff123/CK ff27/CK ff43/CK ff59/CK ff75/CK ff91/CK
+net clknet_1_0__leaf_clonenet_6_clk_n - clkbuf_1_0__f_clonenet_6_clk_n/Z ff10/CK ff106/CK ff122/CK ff26/CK ff42/CK ff58/CK ff74/CK ff90/CK
+net clknet_1_0__leaf_clonenet_7_clk_n - clkbuf_1_0__f_clonenet_7_clk_n/Z ff105/CK ff121/CK ff25/CK ff41/CK ff57/CK ff73/CK ff89/CK ff9/CK
+net clknet_1_0__leaf_clonenet_8_clk_n - clkbuf_1_0__f_clonenet_8_clk_n/Z ff104/CK ff120/CK ff24/CK ff40/CK ff56/CK ff72/CK ff8/CK ff88/CK
+net clknet_1_0__leaf_clonenet_9_clk_n - clkbuf_1_0__f_clonenet_9_clk_n/Z ff103/CK ff119/CK ff23/CK ff39/CK ff55/CK ff7/CK ff71/CK ff87/CK
+net clknet_1_1__leaf_clk - clkbuf_1_1__f_clk/Z clone_1_clkgate/A clone_2_clkgate/A clone_3_clkgate/A clone_4_clkgate/A clone_5_clkgate/A clone_6_clkgate/A clone_7_clkgate/A clone_8_clkgate/A
+net clknet_1_1__leaf_clk_n - clkbuf_1_1__f_clk_n/Z ff128/CK ff144/CK ff160/CK ff176/CK ff192/CK ff208/CK ff224/CK ff240/CK
+net clknet_1_1__leaf_clonenet_10_clk_n - clkbuf_1_1__f_clonenet_10_clk_n/Z ff134/CK ff150/CK ff166/CK ff182/CK ff198/CK ff214/CK ff230/CK ff246/CK
+net clknet_1_1__leaf_clonenet_11_clk_n - clkbuf_1_1__f_clonenet_11_clk_n/Z ff133/CK ff149/CK ff165/CK ff181/CK ff197/CK ff213/CK ff229/CK ff245/CK
+net clknet_1_1__leaf_clonenet_12_clk_n - clkbuf_1_1__f_clonenet_12_clk_n/Z ff132/CK ff148/CK ff164/CK ff180/CK ff196/CK ff212/CK ff228/CK ff244/CK
+net clknet_1_1__leaf_clonenet_13_clk_n - clkbuf_1_1__f_clonenet_13_clk_n/Z ff131/CK ff147/CK ff163/CK ff179/CK ff195/CK ff211/CK ff227/CK ff243/CK
+net clknet_1_1__leaf_clonenet_14_clk_n - clkbuf_1_1__f_clonenet_14_clk_n/Z ff130/CK ff146/CK ff162/CK ff178/CK ff194/CK ff210/CK ff226/CK ff242/CK
+net clknet_1_1__leaf_clonenet_15_clk_n - clkbuf_1_1__f_clonenet_15_clk_n/Z ff129/CK ff145/CK ff161/CK ff177/CK ff193/CK ff209/CK ff225/CK ff241/CK
+net clknet_1_1__leaf_clonenet_1_clk_n - clkbuf_1_1__f_clonenet_1_clk_n/Z ff142/CK ff158/CK ff174/CK ff190/CK ff206/CK ff222/CK ff238/CK ff254/CK
+net clknet_1_1__leaf_clonenet_2_clk_n - clkbuf_1_1__f_clonenet_2_clk_n/Z ff143/CK ff159/CK ff175/CK ff191/CK ff207/CK ff223/CK ff239/CK ff255/CK
+net clknet_1_1__leaf_clonenet_3_clk_n - clkbuf_1_1__f_clonenet_3_clk_n/Z ff141/CK ff157/CK ff173/CK ff189/CK ff205/CK ff221/CK ff237/CK ff253/CK
+net clknet_1_1__leaf_clonenet_4_clk_n - clkbuf_1_1__f_clonenet_4_clk_n/Z ff140/CK ff156/CK ff172/CK ff188/CK ff204/CK ff220/CK ff236/CK ff252/CK
+net clknet_1_1__leaf_clonenet_5_clk_n - clkbuf_1_1__f_clonenet_5_clk_n/Z ff139/CK ff155/CK ff171/CK ff187/CK ff203/CK ff219/CK ff235/CK ff251/CK
+net clknet_1_1__leaf_clonenet_6_clk_n - clkbuf_1_1__f_clonenet_6_clk_n/Z ff138/CK ff154/CK ff170/CK ff186/CK ff202/CK ff218/CK ff234/CK ff250/CK
+net clknet_1_1__leaf_clonenet_7_clk_n - clkbuf_1_1__f_clonenet_7_clk_n/Z ff137/CK ff153/CK ff169/CK ff185/CK ff201/CK ff217/CK ff233/CK ff249/CK
+net clknet_1_1__leaf_clonenet_8_clk_n - clkbuf_1_1__f_clonenet_8_clk_n/Z ff136/CK ff152/CK ff168/CK ff184/CK ff200/CK ff216/CK ff232/CK ff248/CK
+net clknet_1_1__leaf_clonenet_9_clk_n - clkbuf_1_1__f_clonenet_9_clk_n/Z ff135/CK ff151/CK ff167/CK ff183/CK ff199/CK ff215/CK ff231/CK ff247/CK
+net clonenet_10_clk_n CTS_NDR_6 clkbuf_0_clonenet_10_clk_n/A clone_10_clkgate/Z
+net clonenet_11_clk_n CTS_NDR_5 clkbuf_0_clonenet_11_clk_n/A clone_11_clkgate/Z
+net clonenet_12_clk_n CTS_NDR_4 clkbuf_0_clonenet_12_clk_n/A clone_12_clkgate/Z
+net clonenet_13_clk_n CTS_NDR_3 clkbuf_0_clonenet_13_clk_n/A clone_13_clkgate/Z
+net clonenet_14_clk_n CTS_NDR_2 clkbuf_0_clonenet_14_clk_n/A clone_14_clkgate/Z
+net clonenet_15_clk_n CTS_NDR_1 clkbuf_0_clonenet_15_clk_n/A clone_15_clkgate/Z
+net clonenet_1_clk_n CTS_NDR_15 clkbuf_0_clonenet_1_clk_n/A clone_1_clkgate/Z
+net clonenet_2_clk_n CTS_NDR_14 clkbuf_0_clonenet_2_clk_n/A clone_2_clkgate/Z
+net clonenet_3_clk_n CTS_NDR_13 clkbuf_0_clonenet_3_clk_n/A clone_3_clkgate/Z
+net clonenet_4_clk_n CTS_NDR_12 clkbuf_0_clonenet_4_clk_n/A clone_4_clkgate/Z
+net clonenet_5_clk_n CTS_NDR_11 clkbuf_0_clonenet_5_clk_n/A clone_5_clkgate/Z
+net clonenet_6_clk_n CTS_NDR_10 clkbuf_0_clonenet_6_clk_n/A clone_6_clkgate/Z
+net clonenet_7_clk_n CTS_NDR_9 clkbuf_0_clonenet_7_clk_n/A clone_7_clkgate/Z
+net clonenet_8_clk_n CTS_NDR_8 clkbuf_0_clonenet_8_clk_n/A clone_8_clkgate/Z
+net clonenet_9_clk_n CTS_NDR_7 clkbuf_0_clonenet_9_clk_n/A clone_9_clkgate/Z
