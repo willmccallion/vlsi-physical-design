@@ -13,7 +13,7 @@ use pare_common::db::indices::{NetId, PinId};
 use pare_common::db::liberty::{ArcRole, LibCellId};
 use pare_common::geom::dbu::Dbu;
 use pare_common::geom::point::Point;
-use pare_common::units::{Farads, Seconds};
+use pare_common::units::{Farads, FaradsPerMeter, Meters, Ohms, OhmsPerMeter, Seconds};
 use std::collections::HashSet;
 
 /// How far short of the computed split a repeater is placed, as
@@ -49,25 +49,25 @@ enum Checks {
 /// What decides where a wire is split for a repeater.
 #[derive(Clone, Copy, Debug)]
 struct SplitInput {
-    wire_res: f64,
-    wire_cap: f64,
+    wire_res: OhmsPerMeter,
+    wire_cap: FaradsPerMeter,
     length: i64,
     wire_length: i64,
     wire_length_ref: i64,
-    load_cap: f64,
-    ref_cap: f64,
-    max_cap: f64,
-    load_slew: f64,
-    max_load_slew_margined: f64,
-    r_drvr: f64,
+    load_cap: Farads,
+    ref_cap: Farads,
+    max_cap: Farads,
+    load_slew: Seconds,
+    max_load_slew_margined: Seconds,
+    r_drvr: Ohms,
 }
 
 /// What a repaired branch presents to its parent.
 #[derive(Clone, Debug)]
 struct Branch {
-    cap: f64,
+    cap: Farads,
     fanout: f64,
-    max_load_slew: f64,
+    max_load_slew: Seconds,
     wire_length: i64,
     loads: Vec<PinId>,
 }
@@ -153,7 +153,7 @@ impl<'r, 'a, T: Timing> Repairer<'r, 'a, T> {
         self.resizer.r_strongest_buffer = clock_buffers
             .iter()
             .map(|&b| self.resizer.link.buffer_drive_resistance(b))
-            .fold(f64::MAX, f64::min);
+            .fold(Ohms::new(f64::MAX), Ohms::min);
         let drivers: Vec<PinId> = {
             let netlist = self.resizer.netlist();
             (0..self.resizer.db.pins.len())
@@ -180,7 +180,7 @@ impl<'r, 'a, T: Timing> Repairer<'r, 'a, T> {
     /// `RepairDesign::repairNet` for one driver.
     fn repair_net(&mut self, net: NetId, driver: PinId, checks: Checks) -> Result<(), RepairError> {
         let mut repaired = false;
-        let mut max_cap = f64::INFINITY;
+        let mut max_cap = Farads::INFINITY;
         let mut repair_cap = false;
         let mut repair_load_slew = false;
 
@@ -263,7 +263,7 @@ impl<'r, 'a, T: Timing> Repairer<'r, 'a, T> {
     }
 
     /// The driver's slew and its margined limit, if one applies.
-    fn driver_slew_check(&self, driver: PinId) -> (f64, Option<f64>) {
+    fn driver_slew_check(&self, driver: PinId) -> (Seconds, Option<Seconds>) {
         let slew = self.resizer.graph.slew(driver).max();
         let limit = self
             .resizer
@@ -283,14 +283,14 @@ impl<'r, 'a, T: Timing> Repairer<'r, 'a, T> {
             };
             let slew = self.resizer.graph.slew(load).max();
             match port.max_transition.filter(|&l| l != Seconds::ZERO) {
-                Some(limit) => slew > self.resizer.margined_slew(limit.get()),
+                Some(limit) => slew > self.resizer.margined_slew(limit),
                 None => self
                     .resizer
                     .link
                     .liberty
                     .cell_defaults(cell)
                     .max_transition
-                    .is_some_and(|limit| slew > limit.get()),
+                    .is_some_and(|limit| slew > limit),
             }
         })
     }
@@ -324,20 +324,20 @@ impl<'r, 'a, T: Timing> Repairer<'r, 'a, T> {
             return Ok(false);
         }
         let input_slews = self.resizer.input_slews(cell);
-        let mut sizes: Vec<(f64, f64, LibCellId)> = Vec::new();
+        let mut sizes: Vec<(Seconds, f64, LibCellId)> = Vec::new();
         for size in candidates {
             let size_cell = self.resizer.link.liberty.cell(size);
             let Some(port) = size_cell.port(&port_name) else {
                 continue;
             };
-            let mut violation = 0.0;
+            let mut violation = Seconds::ZERO;
             if let Some(limit) = self
                 .resizer
                 .link
                 .liberty
                 .slew_limit(size_cell, &size_cell.ports[port])
             {
-                let limit = self.resizer.margined_slew(limit.get());
+                let limit = self.resizer.margined_slew(limit);
                 for set in size_cell.arc_sets.iter().filter(|s| s.to == port) {
                     if !matches!(
                         set.role,
@@ -351,21 +351,18 @@ impl<'r, 'a, T: Timing> Repairer<'r, 'a, T> {
                     let from_name = &size_cell.ports[set.from].name;
                     for arc in &set.arcs {
                         let in_slew = input_slews.iter().find(|(n, _)| n == from_name).map_or(
-                            0.0,
+                            Seconds::ZERO,
                             |(_, s)| {
                                 if set.role == ArcRole::RegClkToQ {
-                                    0.0
+                                    Seconds::ZERO
                                 } else {
                                     s.get(arc.from_edge)
                                 }
                             },
                         );
-                        let arc_slew = arc
-                            .gate_delay(Seconds::new(in_slew), Farads::new(load_cap))
-                            .1
-                            .get();
+                        let arc_slew = arc.gate_delay(in_slew, load_cap).1;
                         if arc_slew > limit {
-                            violation = f64::max(violation, arc_slew - limit);
+                            violation = violation.max(arc_slew - limit);
                         }
                     }
                 }
@@ -373,7 +370,7 @@ impl<'r, 'a, T: Timing> Repairer<'r, 'a, T> {
             sizes.push((violation, size_cell.area, size));
         }
         sizes.sort_by(|a, b| {
-            if a.0 == 0.0 && b.0 == 0.0 {
+            if a.0 == Seconds::ZERO && b.0 == Seconds::ZERO {
                 a.1.total_cmp(&b.1)
             } else {
                 a.0.total_cmp(&b.0)
@@ -391,17 +388,17 @@ impl<'r, 'a, T: Timing> Repairer<'r, 'a, T> {
     /// The load at which the driver's slew would equal `slew`, by binary
     /// search over the gate tables at the target input slews, as
     /// `RepairDesign::findSlewLoadCap`.
-    fn slew_load_cap(&self, driver: PinId, slew: f64) -> Option<f64> {
+    fn slew_load_cap(&self, driver: PinId, slew: Seconds) -> Option<Farads> {
         let (lib_id, port) = self.resizer.link.pin_port(self.resizer.db, driver)?;
         let cell = self.resizer.link.liberty.cell(lib_id);
-        let drive_res = cell.drive_resistance(port).get();
-        if drive_res == 0.0 {
-            return Some(f64::INFINITY);
+        let drive_res = cell.drive_resistance(port);
+        if drive_res == Ohms::ZERO {
+            return Some(Farads::INFINITY);
         }
         let slews = &self.resizer.targets.slews;
-        let diff = |cap: f64| gate_slew(cell, port, slews, cap) - slew;
+        let diff = |cap: f64| (gate_slew(cell, port, slews, Farads::new(cap)) - slew).get();
         let mut cap1 = 0.0;
-        let mut cap2 = slew / drive_res * 2.0;
+        let mut cap2 = (slew / drive_res * 2.0).get();
         let tol = 0.01;
         let mut diff1 = diff(cap2);
         let mut iterations = 0;
@@ -422,7 +419,7 @@ impl<'r, 'a, T: Timing> Repairer<'r, 'a, T> {
                 }
             }
         }
-        Some(cap1)
+        Some(Farads::new(cap1))
     }
 
     /// Repairs a buffered tree bottom up, as `RepairDesign::repairNet` over
@@ -431,19 +428,14 @@ impl<'r, 'a, T: Timing> Repairer<'r, 'a, T> {
         &mut self,
         tree: &BnetPtr,
         driver: PinId,
-        max_cap: f64,
+        max_cap: Farads,
     ) -> Result<Branch, RepairError> {
         let own = self
             .resizer
             .link
             .pin_port(self.resizer.db, driver)
-            .map_or(0.0, |(lib, port)| {
-                self.resizer
-                    .link
-                    .liberty
-                    .cell(lib)
-                    .drive_resistance(port)
-                    .get()
+            .map_or(Ohms::ZERO, |(lib, port)| {
+                self.resizer.link.liberty.cell(lib).drive_resistance(port)
             });
         let r_drvr = own.max(self.resizer.r_strongest_buffer);
         self.repair_branch(tree, driver, max_cap, r_drvr)
@@ -453,8 +445,8 @@ impl<'r, 'a, T: Timing> Repairer<'r, 'a, T> {
         &mut self,
         tree: &BnetPtr,
         driver: PinId,
-        max_cap: f64,
-        r_drvr: f64,
+        max_cap: Farads,
+        r_drvr: Ohms,
     ) -> Result<Branch, RepairError> {
         match &tree.kind {
             Kind::Load { pin } => Ok(self.load_branch(*pin)),
@@ -463,18 +455,18 @@ impl<'r, 'a, T: Timing> Repairer<'r, 'a, T> {
             }
             Kind::Wire { to, layer } => {
                 let (r, c) = self.resizer.tree_rc().wire(*layer);
-                self.repair_wire(tree.at, to, (r.get(), c.get()), driver, max_cap, r_drvr)
+                self.repair_wire(tree.at, to, (r, c), driver, max_cap, r_drvr)
             }
             Kind::Buffer { to, .. } => {
                 let (r, c) = self.resizer.tree_rc().wire(None);
-                self.repair_wire(tree.at, to, (r.get(), c.get()), driver, max_cap, r_drvr)
+                self.repair_wire(tree.at, to, (r, c), driver, max_cap, r_drvr)
             }
             Kind::Via {
                 to,
                 layer,
                 to_layer,
             } => {
-                let r_via = self.resizer.tree_rc().via(*layer, *to_layer).get();
+                let r_via = self.resizer.tree_rc().via(*layer, *to_layer);
                 self.repair_via(to, r_via, driver, max_cap, r_drvr)
             }
         }
@@ -487,10 +479,10 @@ impl<'r, 'a, T: Timing> Repairer<'r, 'a, T> {
     fn repair_via(
         &mut self,
         to: &BnetPtr,
-        r_via: f64,
+        r_via: Ohms,
         driver: PinId,
-        max_cap: f64,
-        r_drvr: f64,
+        max_cap: Farads,
+        r_drvr: Ohms,
     ) -> Result<Branch, RepairError> {
         let mut branch = self.repair_branch(to, driver, max_cap, r_drvr)?;
         branch.max_load_slew -= r_via * branch.cap * self.resizer.slew_rc_factor;
@@ -500,11 +492,11 @@ impl<'r, 'a, T: Timing> Repairer<'r, 'a, T> {
     /// A load: its pin's capacitance, fanout load and slew limit, as
     /// `OpenROAD`'s `BufferedNet` of type load.
     fn load_branch(&self, pin: PinId) -> Branch {
-        let (cap, fanout, max_load_slew) = bnet::LoadModel::load(self.resizer, pin);
+        let load = bnet::LoadModel::load(self.resizer, pin);
         Branch {
-            cap,
-            fanout,
-            max_load_slew,
+            cap: load.cap,
+            fanout: load.fanout,
+            max_load_slew: load.max_slew,
             wire_length: 0,
             loads: vec![pin],
         }
@@ -519,8 +511,8 @@ impl<'r, 'a, T: Timing> Repairer<'r, 'a, T> {
         left: &BnetPtr,
         right: &BnetPtr,
         driver: PinId,
-        max_cap: f64,
-        r_drvr: f64,
+        max_cap: Farads,
+        r_drvr: Ohms,
     ) -> Result<Branch, RepairError> {
         let mut left = self.repair_branch(left, driver, max_cap, r_drvr)?;
         let mut right = self.repair_branch(right, driver, max_cap, r_drvr)?;
@@ -597,23 +589,23 @@ impl<'r, 'a, T: Timing> Repairer<'r, 'a, T> {
         &mut self,
         from: Point<Dbu>,
         to: &BnetPtr,
-        (wire_res, wire_cap): (f64, f64),
+        (wire_res, wire_cap): (OhmsPerMeter, FaradsPerMeter),
         driver: PinId,
-        max_cap: f64,
-        r_drvr: f64,
+        max_cap: Farads,
+        r_drvr: Ohms,
     ) -> Result<Branch, RepairError> {
         let mut branch = self.repair_branch(to, driver, max_cap, r_drvr)?;
         let to_loc = to.at;
         let dbu = self.resizer.db.dbu().get() as f64;
         let factor = self.resizer.slew_rc_factor;
         let max_length = self.resizer.options.max_wire_length;
-        let meters = |l: i64| l as f64 / dbu * 1e-6;
-        let elmore_slew = |length: i64, ref_cap: f64| {
+        let meters = |l: i64| Meters::from_dbu(l, dbu);
+        let elmore_slew = |length: i64, ref_cap: Farads| {
             let r_wire = meters(length) * wire_res;
             let c_wire = meters(length) * wire_cap;
             (r_drvr * (c_wire + ref_cap) + r_wire * ref_cap + r_wire * c_wire / 2.0) * factor
         };
-        let wire_drop = |length: i64, ref_cap: f64| {
+        let wire_drop = |length: i64, ref_cap: Farads| {
             let r_wire = meters(length) * wire_res;
             let c_wire = meters(length) * wire_cap;
             r_wire * (c_wire / 2.0 + ref_cap) * factor
@@ -636,7 +628,7 @@ impl<'r, 'a, T: Timing> Repairer<'r, 'a, T> {
         branch.max_load_slew = max_load_slew - wire_drop(length, ref_cap);
 
         while (max_length > 0 && wire_length > max_length)
-            || (wire_cap > 0.0 && max_cap > 0.0 && load_cap > max_cap)
+            || (wire_cap > FaradsPerMeter::ZERO && max_cap > Farads::ZERO && load_cap > max_cap)
             || load_slew > max_load_slew_margined
         {
             let split_length = self.split_length(SplitInput {
@@ -707,7 +699,17 @@ impl<'r, 'a, T: Timing> Repairer<'r, 'a, T> {
     fn split_length(&self, input: SplitInput) -> i64 {
         let dbu = self.resizer.db.dbu().get() as f64;
         let to_dbu = |m: f64| i64::from(((m * dbu * 1e6).round() as i64 as i32) & i32::MAX);
-        let (wire_res, wire_cap) = (input.wire_res, input.wire_cap);
+        let (wire_res, wire_cap) = (input.wire_res.get(), input.wire_cap.get());
+        let (load_cap, ref_cap, max_cap) = (
+            input.load_cap.get(),
+            input.ref_cap.get(),
+            input.max_cap.get(),
+        );
+        let (r_drvr, load_slew, max_load_slew) = (
+            input.r_drvr.get(),
+            input.load_slew.get(),
+            input.max_load_slew_margined.get(),
+        );
         let max_length = self.resizer.options.max_wire_length;
         let mut split = if max_length > 0 && input.wire_length > max_length {
             (max_length - input.wire_length_ref)
@@ -716,16 +718,14 @@ impl<'r, 'a, T: Timing> Repairer<'r, 'a, T> {
         } else {
             i64::MAX
         };
-        if wire_cap > 0.0 && input.load_cap > input.max_cap {
-            split = split.min(to_dbu((input.max_cap - input.ref_cap) / wire_cap).max(0));
+        if wire_cap > 0.0 && load_cap > max_cap {
+            split = split.min(to_dbu((max_cap - ref_cap) / wire_cap).max(0));
         }
-        if input.load_slew > input.max_load_slew_margined {
+        if load_slew > max_load_slew {
             // `OpenROAD` solves the quadratic in single precision.
             let a = (wire_res * wire_cap / 2.0) as f32;
-            let b = (input.r_drvr * wire_cap + wire_res * input.ref_cap) as f32;
-            let c = (input.r_drvr * input.ref_cap
-                - input.max_load_slew_margined / self.resizer.slew_rc_factor)
-                as f32;
+            let b = (r_drvr * wire_cap + wire_res * ref_cap) as f32;
+            let c = (r_drvr * ref_cap - max_load_slew / self.resizer.slew_rc_factor) as f32;
             let l = if f64::from(a) > 1e-12 {
                 let discriminant = b * b - 4.0 * a * c;
                 if discriminant >= 0.0 {
@@ -777,7 +777,7 @@ impl<'r, 'a, T: Timing> Repairer<'r, 'a, T> {
             .ok_or_else(|| RepairError::MissingPins(sized_cell.name.clone()))?;
         let in_lib_port = &sized_cell.ports[sized_in];
         branch.loads = vec![inserted.input];
-        branch.cap = in_lib_port.capacitance().get();
+        branch.cap = in_lib_port.capacitance();
         branch.fanout = self
             .resizer
             .link

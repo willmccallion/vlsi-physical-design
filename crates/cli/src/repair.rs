@@ -328,8 +328,8 @@ pub(crate) fn timing_repair_on(
                 cloned: progress.cloned,
                 swaps: progress.swapped,
                 area_change_percent: progress.area_change_percent,
-                wns_ns: progress.wns * 1e9,
-                tns_ns: progress.tns * 1e9,
+                wns_ns: progress.wns.nanos(),
+                tns_ns: progress.tns.nanos(),
                 failing: progress.failing,
                 worst,
             });
@@ -342,14 +342,14 @@ pub(crate) fn timing_repair_on(
         "WNS (ns):",
         &format!(
             "{:.3} -> {:.3}",
-            summary.wns_before * 1e9,
-            summary.wns_after * 1e9
+            summary.wns_before.nanos(),
+            summary.wns_after.nanos()
         ),
         "TNS (ns):",
         &format!(
             "{:.1} -> {:.1}",
-            summary.tns_before * 1e9,
-            summary.tns_after * 1e9
+            summary.tns_before.nanos(),
+            summary.tns_after.nanos()
         ),
     );
     ui::stat_row(
@@ -380,8 +380,8 @@ pub(crate) fn timing_repair_on(
         "Hold WNS (ns):",
         &format!(
             "{:.3} -> {:.3}",
-            hold.wns_before * 1e9,
-            hold.wns_after * 1e9
+            hold.wns_before.nanos(),
+            hold.wns_after.nanos()
         ),
         "Hold failing:",
         &format!("{} -> {}", hold.failing_before, hold.failing_after),
@@ -396,10 +396,10 @@ pub(crate) fn timing_repair_on(
     Ok(TimingSummary {
         failing_before: summary.failing_before,
         failing_after: summary.failing_after,
-        wns_before_ns: summary.wns_before * 1e9,
-        wns_after_ns: summary.wns_after * 1e9,
-        tns_before_ns: summary.tns_before * 1e9,
-        tns_after_ns: summary.tns_after * 1e9,
+        wns_before_ns: summary.wns_before.nanos(),
+        wns_after_ns: summary.wns_after.nanos(),
+        tns_before_ns: summary.tns_before.nanos(),
+        tns_after_ns: summary.tns_after.nanos(),
         removed: summary.removed,
         resized: summary.resized,
         inserted: summary.inserted,
@@ -409,8 +409,8 @@ pub(crate) fn timing_repair_on(
         area_change_percent: summary.area_change_percent,
         hold_failing_before: hold.failing_before,
         hold_failing_after: hold.failing_after,
-        hold_wns_before_ns: hold.wns_before * 1e9,
-        hold_wns_after_ns: hold.wns_after * 1e9,
+        hold_wns_before_ns: hold.wns_before.nanos(),
+        hold_wns_after_ns: hold.wns_after.nanos(),
         hold_buffers: hold.inserted,
     })
 }

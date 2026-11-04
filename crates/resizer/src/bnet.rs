@@ -16,7 +16,7 @@ use pare_common::db::indices::{LayerId, PinId};
 use pare_common::db::liberty::{Edge, LibCellId};
 use pare_common::geom::dbu::Dbu;
 use pare_common::geom::point::Point;
-use pare_common::units::{FaradsPerMeter, Meters, Ohms, OhmsPerMeter};
+use pare_common::units::{Farads, FaradsPerMeter, Meters, Ohms, OhmsPerMeter, Seconds};
 use rustc_hash::FxHashMap;
 use std::collections::HashSet;
 use std::rc::Rc;
@@ -36,20 +36,20 @@ impl Fixed {
     /// `seconds` rounded toward zero to femtoseconds, saturating at the
     /// infinities.
     #[must_use]
-    pub(crate) fn from_seconds(seconds: f64) -> Self {
+    pub(crate) fn from_seconds(seconds: Seconds) -> Self {
         if seconds >= Self::INF.to_seconds() {
             return Self::INF;
         }
         if seconds <= -Self::INF.to_seconds() {
             return -Self::INF;
         }
-        Self((seconds * Self::FEMTOSECONDS_PER_SECOND) as i64)
+        Self((seconds.get() * Self::FEMTOSECONDS_PER_SECOND) as i64)
     }
 
-    /// The time in seconds.
+    /// The time it holds.
     #[must_use]
-    pub(crate) fn to_seconds(self) -> f64 {
-        self.0 as f64 / Self::FEMTOSECONDS_PER_SECOND
+    pub(crate) fn to_seconds(self) -> Seconds {
+        Seconds::new(self.0 as f64 / Self::FEMTOSECONDS_PER_SECOND)
     }
 
     /// `a + t (b - a)`.
@@ -169,12 +169,12 @@ pub struct Bnet {
     pub kind: Kind,
     /// Where it sits.
     pub at: Point<Dbu>,
-    /// The capacitance the subtree presents, in farads.
-    pub cap: f64,
+    /// The capacitance the subtree presents.
+    pub cap: Farads,
     /// The fanout the subtree presents.
     pub fanout: f64,
-    /// The tightest slew limit among the subtree's loads, in seconds.
-    pub max_load_slew: f64,
+    /// The tightest slew limit among the subtree's loads.
+    pub max_load_slew: Seconds,
     /// The area of the buffers in the subtree.
     pub area: f64,
     /// The slack at the node's point for the subtree's loads.
@@ -190,13 +190,13 @@ pub struct Bnet {
 impl Bnet {
     /// A load node.
     #[must_use]
-    pub fn load(at: Point<Dbu>, pin: PinId, cap: f64, fanout: f64, max_load_slew: f64) -> BnetPtr {
+    pub fn load(at: Point<Dbu>, pin: PinId, load: PinLoad) -> BnetPtr {
         Rc::new(Self {
             kind: Kind::Load { pin },
             at,
-            cap,
-            fanout,
-            max_load_slew,
+            cap: load.cap,
+            fanout: load.fanout,
+            max_load_slew: load.max_slew,
             area: 0.0,
             slack: Fixed::ZERO,
             slack_edges: None,
@@ -227,10 +227,10 @@ impl Bnet {
     #[must_use]
     pub fn wire(at: Point<Dbu>, to: BnetPtr, layer: Option<LayerId>, rc: &TreeRc<'_>) -> BnetPtr {
         let length = manhattan(at, to.at);
-        let meters = Meters::new(length as f64 / rc.dbu * 1e-6);
+        let meters = Meters::from_dbu(length, rc.dbu);
         let (res_per_meter, cap_per_meter) = rc.wire(layer);
-        let resistance = (meters * res_per_meter).get();
-        let capacitance = (meters * cap_per_meter).get();
+        let resistance = meters * res_per_meter;
+        let capacitance = meters * cap_per_meter;
         let delay = if length == 0 {
             Fixed::ZERO
         } else {
@@ -261,7 +261,7 @@ impl Bnet {
         to: BnetPtr,
         rc: &TreeRc<'_>,
     ) -> BnetPtr {
-        let delay = Fixed::from_seconds(rc.via(layer, to_layer).get() * to.cap);
+        let delay = Fixed::from_seconds(rc.via(layer, to_layer) * to.cap);
         Rc::new(Self {
             cap: to.cap,
             fanout: to.fanout,
@@ -456,22 +456,22 @@ impl Bnet {
 pub(crate) struct BufferSize {
     /// The cell.
     pub cell: LibCellId,
-    /// Its input capacitance, in farads.
-    pub input_cap: f64,
+    /// Its input capacitance.
+    pub input_cap: Farads,
     /// Its input's fanout load.
     pub input_fanout: f64,
-    /// Its input's slew limit, in seconds.
-    pub input_max_slew: f64,
-    /// Its output's capacitance, in farads.
-    pub output_cap: f64,
+    /// Its input's slew limit.
+    pub input_max_slew: Seconds,
+    /// Its output's capacitance.
+    pub output_cap: Farads,
     /// Its area.
     pub area: f64,
     /// Its delay with no load and no input slew.
     pub intrinsic_delay: Fixed,
     /// The largest load it may drive within its limits.
-    pub margined_max_cap: f64,
-    /// Its drive resistance, in ohms.
-    pub drive_resistance: f64,
+    pub margined_max_cap: Farads,
+    /// Its drive resistance.
+    pub drive_resistance: Ohms,
 }
 
 /// The measures of a subtree.
@@ -482,9 +482,9 @@ pub(crate) struct Metrics {
     /// See [`Bnet::slack`].
     pub slack: Fixed,
     /// See [`Bnet::cap`].
-    pub cap: f64,
+    pub cap: Farads,
     /// See [`Bnet::max_load_slew`].
-    pub max_load_slew: f64,
+    pub max_load_slew: Seconds,
     /// See [`Bnet::fanout`].
     pub fanout: f64,
 }
@@ -497,10 +497,30 @@ impl Metrics {
     }
 }
 
+/// What a load pin presents to the tree it is in.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct PinLoad {
+    /// Its capacitance.
+    pub cap: Farads,
+    /// Its fanout load.
+    pub fanout: f64,
+    /// Its slew limit.
+    pub max_slew: Seconds,
+}
+
+impl PinLoad {
+    /// What a pin without a Liberty port presents: nothing, without limit.
+    pub const NONE: Self = Self {
+        cap: Farads::ZERO,
+        fanout: 0.0,
+        max_slew: Seconds::INFINITY,
+    };
+}
+
 /// What a load pin presents, as the tree needs it.
 pub trait LoadModel {
-    /// Capacitance, fanout load and slew limit of a load pin.
-    fn load(&self, pin: PinId) -> (f64, f64, f64);
+    /// What `pin` presents.
+    fn load(&self, pin: PinId) -> PinLoad;
 }
 
 /// Manhattan distance in database units.
@@ -592,10 +612,7 @@ fn from_steiner(
             .iter()
             .copied()
             .filter(|&pin| pin != driver && netlist.is_load(pin))
-            .map(|pin| {
-                let (cap, fanout, max_slew) = loads.load(pin);
-                Bnet::load(at, pin, cap, fanout, max_slew)
-            })
+            .map(|pin| Bnet::load(at, pin, loads.load(pin)))
             .collect()
     };
     build(tree, &children, None, tree.root, &mut leaves_at, rc)
@@ -677,10 +694,9 @@ impl RouteWalk<'_, '_> {
         let mut built: Option<BnetPtr> = None;
         for &pin in self.pins_at.get(&to).map_or(&[][..], Vec::as_slice) {
             if self.netlist.is_load(pin) {
-                let (cap, fanout, max_slew) = self.loads.load(pin);
                 built = Some(join(
                     built,
-                    Bnet::load(to.at, pin, cap, fanout, max_slew),
+                    Bnet::load(to.at, pin, self.loads.load(pin)),
                     to.at,
                 ));
             }
@@ -774,13 +790,21 @@ fn join(existing: Option<BnetPtr>, next: BnetPtr, at: Point<Dbu>) -> BnetPtr {
 mod tests {
     use super::*;
 
+    fn pin_load(cap: f64, max_slew: f64) -> PinLoad {
+        PinLoad {
+            cap: Farads::new(cap),
+            fanout: 1.0,
+            max_slew: Seconds::new(max_slew),
+        }
+    }
+
     #[test]
     fn fixed_delays_round_to_femtoseconds_and_saturate() {
-        assert_eq!(Fixed::from_seconds(1.5e-12), Fixed(1500));
-        assert_eq!(Fixed::from_seconds(1e3), Fixed::INF);
-        assert_eq!(Fixed::from_seconds(-1e3), -Fixed::INF);
+        assert_eq!(Fixed::from_seconds(Seconds::new(1.5e-12)), Fixed(1500));
+        assert_eq!(Fixed::from_seconds(Seconds::new(1e3)), Fixed::INF);
+        assert_eq!(Fixed::from_seconds(Seconds::new(-1e3)), -Fixed::INF);
         assert_eq!(Fixed::lerp(Fixed(0), Fixed(100), 0.25), Fixed(25));
-        assert!((Fixed(2000).to_seconds() - 2e-12).abs() < 1e-24);
+        assert!((Fixed(2000).to_seconds() - Seconds::new(2e-12)).abs() < Seconds::new(1e-24));
     }
 
     #[test]
@@ -789,11 +813,12 @@ mod tests {
         let load = Bnet::load(
             Point::new(Dbu(2000), Dbu(0)),
             PinId::new(0),
-            1e-15,
-            1.0,
-            1e-9,
+            pin_load(1e-15, 1e-9),
         );
-        let load = load.with_slack(Fixed::from_seconds(1e-9), Some(SlackEdges::One(Edge::Rise)));
+        let load = load.with_slack(
+            Fixed::from_seconds(Seconds::new(1e-9)),
+            Some(SlackEdges::One(Edge::Rise)),
+        );
 
         let tree_rc = TreeRc {
             signal: rc,
@@ -805,7 +830,7 @@ mod tests {
 
         // One micron of wire: 1 ohm and 1 fF; delay = 1 * (0.5 fF + 1 fF).
         assert_eq!(wire.length(), 2000);
-        assert!((wire.cap - 2e-15).abs() < 1e-30);
+        assert!((wire.cap - Farads::new(2e-15)).abs() < Farads::new(1e-30));
         assert_eq!(wire.delay, Fixed(1));
         assert_eq!(wire.slack, Fixed(1_000_000 - 1));
         assert_eq!(wire.max_load_wire_length(), 2000);
@@ -813,16 +838,24 @@ mod tests {
 
     #[test]
     fn a_junction_combines_its_sides() {
-        let a = Bnet::load(Point::new(Dbu(0), Dbu(0)), PinId::new(0), 1e-15, 1.0, 2e-9)
-            .with_slack(Fixed(10), Some(SlackEdges::One(Edge::Rise)));
-        let b = Bnet::load(Point::new(Dbu(0), Dbu(0)), PinId::new(1), 2e-15, 1.0, 1e-9)
-            .with_slack(Fixed(5), Some(SlackEdges::One(Edge::Fall)));
+        let a = Bnet::load(
+            Point::new(Dbu(0), Dbu(0)),
+            PinId::new(0),
+            pin_load(1e-15, 2e-9),
+        )
+        .with_slack(Fixed(10), Some(SlackEdges::One(Edge::Rise)));
+        let b = Bnet::load(
+            Point::new(Dbu(0), Dbu(0)),
+            PinId::new(1),
+            pin_load(2e-15, 1e-9),
+        )
+        .with_slack(Fixed(5), Some(SlackEdges::One(Edge::Fall)));
 
         let junction = Bnet::junction(Point::new(Dbu(0), Dbu(0)), a, b);
 
-        assert!((junction.cap - 3e-15).abs() < 1e-30);
+        assert!((junction.cap - Farads::new(3e-15)).abs() < Farads::new(1e-30));
         assert!((junction.fanout - 2.0).abs() < 1e-12);
-        assert!((junction.max_load_slew - 1e-9).abs() < 1e-24);
+        assert!((junction.max_load_slew - Seconds::new(1e-9)).abs() < Seconds::new(1e-24));
         assert_eq!(junction.slack, Fixed(5));
         assert_eq!(junction.slack_edges, Some(SlackEdges::Both));
         assert_eq!(junction.loads(), vec![PinId::new(0), PinId::new(1)]);

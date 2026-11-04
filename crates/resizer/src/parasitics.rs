@@ -6,6 +6,7 @@
 //! each driver to a pi model and an Elmore delay to every load, as `OpenSTA`
 //! reduces it.
 
+use crate::dmp::PiModel;
 use crate::netlist::Netlist;
 use crate::steiner::{self, SteinerTree};
 use pare_common::db::global_route::NetRoute;
@@ -13,7 +14,7 @@ use pare_common::db::indices::{LayerId, NetId, PinId};
 use pare_common::db::liberty::Edge;
 use pare_common::geom::dbu::Dbu;
 use pare_common::geom::point::Point;
-use pare_common::units::{FaradsPerMeter, Meters, OhmsPerMeter};
+use pare_common::units::{Farads, FaradsPerMeter, Meters, Ohms, OhmsPerMeter, Seconds};
 
 /// The resistance `OpenROAD` gives a zero-length connection so the network
 /// stays joined, in ohms.
@@ -46,25 +47,44 @@ impl WireRc {
 /// delay to each load.
 #[derive(Clone, Debug, PartialEq)]
 pub(crate) struct PiElmore {
-    /// Capacitance nearest the driver, in farads.
-    pub c2: f64,
-    /// Resistance between the two capacitances, in ohms.
-    pub rpi: f64,
-    /// Capacitance beyond it, in farads.
-    pub c1: f64,
-    /// Every load pin with its Elmore delay from the driver, in seconds.
-    pub elmore: Vec<(PinId, f64)>,
-    /// Capacitance of the wire alone, in farads.
-    pub wire_cap: f64,
-    /// Capacitance of the load pins alone, in farads.
-    pub pin_cap: f64,
+    /// Capacitance nearest the driver.
+    pub c2: Farads,
+    /// Resistance between the two capacitances.
+    pub rpi: Ohms,
+    /// Capacitance beyond it.
+    pub c1: Farads,
+    /// Every load pin with its Elmore delay from the driver.
+    pub elmore: Vec<(PinId, Seconds)>,
+    /// Capacitance of the wire alone.
+    pub wire_cap: Farads,
+    /// Capacitance of the load pins alone.
+    pub pin_cap: Farads,
 }
 
 impl PiElmore {
     /// The load the driver sees: pins and wire together.
     #[must_use]
-    pub fn load_cap(&self) -> f64 {
+    pub fn load_cap(&self) -> Farads {
         self.wire_cap + self.pin_cap
+    }
+
+    /// The pi model the driver's delay is fitted to.
+    #[must_use]
+    pub const fn model(&self) -> PiModel {
+        PiModel {
+            c2: self.c2,
+            rpi: self.rpi,
+            c1: self.c1,
+        }
+    }
+
+    /// The Elmore delay to `load`, zero for a pin it does not reach.
+    #[must_use]
+    pub fn elmore_to(&self, load: PinId) -> Seconds {
+        self.elmore
+            .iter()
+            .find(|(pin, _)| *pin == load)
+            .map_or(Seconds::ZERO, |&(_, delay)| delay)
     }
 }
 
@@ -136,7 +156,7 @@ impl NetParasitics {
                 resistors.push((node, parent, JOIN_RESISTANCE));
                 continue;
             }
-            let length = Meters::new(length_dbu as f64 / dbu * 1e-6);
+            let length = Meters::from_dbu(length_dbu, dbu);
             let cap = (length * rc.capacitance).get();
             let res = (length * rc.resistance).get();
             wire_cap[node] += cap / 2.0;
@@ -240,7 +260,7 @@ impl NetParasitics {
         netlist: &Netlist<'_>,
         driver: PinId,
         edge: Edge,
-        pin_cap: &dyn Fn(PinId, Edge) -> f64,
+        pin_cap: &dyn Fn(PinId, Edge) -> Farads,
     ) -> Option<PiElmore> {
         let &(_, root) = self.pin_node.iter().find(|&&(p, _)| p == driver)?;
         let pins = self.pins_by_node();
@@ -248,7 +268,7 @@ impl NetParasitics {
         let load_cap_at = |node: usize| -> f64 {
             pins[node]
                 .filter(|&p| p != driver && netlist.is_load(p))
-                .map_or(0.0, |p| pin_cap(p, edge))
+                .map_or(0.0, |p| pin_cap(p, edge).get())
         };
         let mut downstream = vec![0.0; self.node_count];
         let mut visited = vec![false; self.node_count];
@@ -282,12 +302,15 @@ impl NetParasitics {
         let wire_cap: f64 = self.wire_cap.iter().sum();
         let pin_cap_total: f64 = (0..self.node_count).map(load_cap_at).sum();
         Some(PiElmore {
-            c2,
-            rpi,
-            c1,
-            elmore,
-            wire_cap,
-            pin_cap: pin_cap_total,
+            c2: Farads::new(c2),
+            rpi: Ohms::new(rpi),
+            c1: Farads::new(c1),
+            elmore: elmore
+                .into_iter()
+                .map(|(pin, delay)| (pin, Seconds::new(delay)))
+                .collect(),
+            wire_cap: Farads::new(wire_cap),
+            pin_cap: Farads::new(pin_cap_total),
         })
     }
 

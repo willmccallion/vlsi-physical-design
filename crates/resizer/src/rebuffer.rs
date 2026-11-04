@@ -21,7 +21,8 @@ use pare_common::db::indices::{CellId, LayerId, NetId, PinId};
 use pare_common::db::liberty::{ArcRole, Edge, EdgeValues, LibCellId, MinMax};
 use pare_common::geom::dbu::{Dbu, DbuPerMicron};
 use pare_common::geom::point::Point;
-use pare_common::units::{Farads, Seconds};
+use pare_common::units::{Farads, FaradsPerMeter, Meters, Ohms, OhmsPerMeter, Seconds};
+use std::ops::Mul;
 use std::rc::Rc;
 
 /// Margin kept in hand on slew limits while rebuffering, in percent.
@@ -47,7 +48,7 @@ const AREA_ROUNDS: usize = 5;
 /// arrival paths for each edge.
 #[derive(Clone, Copy, Debug, PartialEq)]
 struct DriverPoint {
-    arrival: f64,
+    arrival: Seconds,
     /// The input the data came through and the arc set, or none for a
     /// start such as an input port.
     from: Option<(PinId, Edge, usize)>,
@@ -60,17 +61,17 @@ struct Driver {
     cell: LibCellId,
     port: usize,
     fanout_limit: f64,
-    max_slew: f64,
-    load_high_water_mark: f64,
+    max_slew: Seconds,
+    load_high_water_mark: Farads,
     arrival_paths: [Option<DriverPoint>; 2],
 }
 
 /// The delay, slack correction and slew at the driver for a tree.
 #[derive(Clone, Copy, Debug, PartialEq)]
 struct DriverTiming {
-    delay: f64,
-    correction: f64,
-    slew: f64,
+    delay: Seconds,
+    correction: Seconds,
+    slew: Seconds,
 }
 
 /// The rebuffering search with the buffers it may use.
@@ -128,21 +129,22 @@ impl Rebuffer {
         };
         let dbu = resizer.db.dbu().get() as f64;
         let lib = resizer.link.liberty.cell(smallest.cell);
+        let input_cap = smallest.input_cap.get();
+        let drive_resistance = smallest.drive_resistance.get();
         let cap_limit = lib.buffer_ports().and_then(|(_, output)| {
             resizer
                 .link
                 .liberty
                 .capacitance_limit(lib, &lib.ports[output])
-                .map(Farads::get)
         });
         let cap_length = cap_limit.map_or(i64::MAX, |limit| {
-            let slack = margined(limit, CAP_MARGIN) - smallest.input_cap;
+            let slack = margined(limit, CAP_MARGIN).get() - input_cap;
             meters_to_dbu(slack / cap, dbu).max(0)
         });
-        let max_slew = margined(smallest.input_max_slew, SLEW_MARGIN);
+        let max_slew = margined(smallest.input_max_slew, SLEW_MARGIN).get();
         let a = res * cap;
-        let b = res * smallest.input_cap + smallest.drive_resistance * cap;
-        let c = smallest.drive_resistance * smallest.input_cap - max_slew / ELMORE_SKEW_FACTOR;
+        let b = res * input_cap + drive_resistance * cap;
+        let c = drive_resistance * input_cap - max_slew / ELMORE_SKEW_FACTOR;
         let discriminant = b * b - 4.0 * a * c;
         let mut slew_length = i64::MAX;
         if discriminant >= 0.0 {
@@ -180,8 +182,9 @@ impl Rebuffer {
             }
         }
         let timing = self.driver_timing(resizer, &tree);
-        let relaxation =
-            (timing.delay.max(0.0) + critical_path_delay(&tree).to_seconds()) * RELAXATION_FACTOR;
+        let relaxation = (timing.delay.max(Seconds::ZERO)
+            + critical_path_delay(&tree).to_seconds())
+            * RELAXATION_FACTOR;
         let target = self.slack_at_driver(resizer, &tree) - Fixed::from_seconds(relaxation);
         for round in 0..AREA_ROUNDS {
             let alpha = (round + 1) as f64 / AREA_ROUNDS as f64;
@@ -230,7 +233,7 @@ impl Rebuffer {
             };
             let original = self.annotate_load_slacks(resizer, &original, driver);
             let slack = self.slack_at_driver(resizer, &original).to_seconds();
-            let sta_slack = resizer.sta().slack(driver, MinMax::Max).seconds();
+            let sta_slack = resizer.sta().slack(driver, MinMax::Max).time();
             let slack_error = slack - sta_slack;
             let unbuffered = resteiner(resizer, &strip_buffers(&original));
             let Some(mut timing_tree) = unbuffered.clone() else {
@@ -251,10 +254,11 @@ impl Rebuffer {
             let timing = self.driver_timing(resizer, &timing_tree);
             let target = if timing_tree.slack_edges.is_some() {
                 let relaxation = (self.slack_at_driver(resizer, &timing_tree).to_seconds()
-                    - slack_error.min(0.0))
-                .max(0.0)
+                    - slack_error.min(Seconds::ZERO))
+                .max(Seconds::ZERO)
                     / 4.0
-                    + (timing.delay.max(0.0) + critical_path_delay(&timing_tree).to_seconds())
+                    + (timing.delay.max(Seconds::ZERO)
+                        + critical_path_delay(&timing_tree).to_seconds())
                         * RELAXATION_FACTOR;
                 self.slack_at_driver(resizer, &timing_tree) - Fixed::from_seconds(relaxation)
             } else {
@@ -296,14 +300,14 @@ impl Rebuffer {
             .unwrap_or((LibCellId(0), 0));
         let max_slew = resizer
             .driver_slew_limit(pin)
-            .map_or(f64::INFINITY, |l| margined(l, SLEW_MARGIN));
+            .map_or(Seconds::INFINITY, |l| margined(l, SLEW_MARGIN));
         self.driver = Some(Driver {
             pin,
             cell,
             port,
             fanout_limit: resizer.fanout_limit().unwrap_or(f64::INFINITY),
             max_slew,
-            load_high_water_mark: 0.0,
+            load_high_water_mark: Farads::ZERO,
             arrival_paths: [None, None],
         });
     }
@@ -429,14 +433,14 @@ impl Rebuffer {
             .unwrap_or_else(|| {
                 buffer_size(resizer, cell).unwrap_or(BufferSize {
                     cell,
-                    input_cap: 0.0,
+                    input_cap: Farads::ZERO,
                     input_fanout: 0.0,
-                    input_max_slew: f64::INFINITY,
-                    output_cap: 0.0,
+                    input_max_slew: Seconds::INFINITY,
+                    output_cap: Farads::ZERO,
                     area: 0.0,
                     intrinsic_delay: Fixed::ZERO,
-                    margined_max_cap: f64::INFINITY,
-                    drive_resistance: 0.0,
+                    margined_max_cap: Farads::INFINITY,
+                    drive_resistance: Ohms::ZERO,
                 })
             });
         let delay = buffer_delay(resizer, &size, to.slack_edges, to.cap + size.output_cap);
@@ -449,41 +453,41 @@ impl Rebuffer {
     fn driver_timing(&self, resizer: &Resizer<'_, Sta>, tree: &Bnet) -> DriverTiming {
         let Some(driver) = &self.driver else {
             return DriverTiming {
-                delay: 0.0,
-                correction: 0.0,
-                slew: 0.0,
+                delay: Seconds::ZERO,
+                correction: Seconds::ZERO,
+                slew: Seconds::ZERO,
             };
         };
         let Some(edges) = tree.slack_edges else {
             return DriverTiming {
-                delay: 0.0,
-                correction: 0.0,
-                slew: 0.0,
+                delay: Seconds::ZERO,
+                correction: Seconds::ZERO,
+                slew: Seconds::ZERO,
             };
         };
         let cell = resizer.link.liberty.cell(driver.cell);
-        let out_cap = cell.ports[driver.port].capacitance().get();
-        let mut delay = 0.0;
-        let mut correction = f64::INFINITY;
-        let mut slew = 0.0;
+        let out_cap = cell.ports[driver.port].capacitance();
+        let mut delay = Seconds::ZERO;
+        let mut correction = Seconds::INFINITY;
+        let mut slew = Seconds::ZERO;
         for &edge in edges.edges() {
             let Some(point) = driver.arrival_paths[edge.index()] else {
                 continue;
             };
             let Some((from_pin, from_edge, set)) = point.from else {
-                correction = correction.min(0.0);
+                correction = correction.min(Seconds::ZERO);
                 continue;
             };
             let arc_set = &cell.arc_sets[set];
             let in_slew = if arc_set.role == ArcRole::RegClkToQ && resizer.clocks.is_clock(from_pin)
             {
-                0.0
+                Seconds::ZERO
             } else {
                 resizer.graph.slew(from_pin).get(from_edge)
             };
             let load = tree.cap + out_cap;
-            let mut rf_delay = 0.0;
-            let mut rf_slew = 0.0;
+            let mut rf_delay = Seconds::ZERO;
+            let mut rf_slew = Seconds::ZERO;
             for arc in arc_set
                 .arcs
                 .iter()
@@ -495,24 +499,24 @@ impl Rebuffer {
                     in_slew,
                     PiModel {
                         c2: load,
-                        rpi: 0.0,
-                        c1: 0.0,
+                        rpi: Ohms::ZERO,
+                        c1: Farads::ZERO,
                     },
                 );
-                rf_delay = f64::max(rf_delay, result.delay);
-                rf_slew = f64::max(rf_slew, result.slew);
+                rf_delay = rf_delay.max(result.delay);
+                rf_slew = rf_slew.max(result.slew);
             }
             let prev_arrival = resizer
                 .sta()
                 .arrival(from_pin, from_edge, MinMax::Max)
-                .unwrap_or(0.0);
+                .unwrap_or(Seconds::ZERO);
             let rf_correction = point.arrival - (prev_arrival + rf_delay);
-            delay = f64::max(delay, rf_delay);
+            delay = delay.max(rf_delay);
             correction = correction.min(rf_correction);
-            slew = f64::max(slew, rf_slew);
+            slew = slew.max(rf_slew);
         }
-        if correction == f64::INFINITY {
-            correction = 0.0;
+        if correction == Seconds::INFINITY {
+            correction = Seconds::ZERO;
         }
         DriverTiming {
             delay,
@@ -537,10 +541,9 @@ impl Rebuffer {
             .link
             .liberty
             .cell(driver.cell)
-            .drive_resistance(driver.port)
-            .get();
-        let meters = tree.max_load_wire_length() as f64 / resizer.db.dbu().get() as f64 * 1e-6;
-        let load_slew = (r_drvr + meters * rc.resistance.get()) * tree.cap * ELMORE_SKEW_FACTOR;
+            .drive_resistance(driver.port);
+        let meters = Meters::from_dbu(tree.max_load_wire_length(), resizer.db.dbu().get() as f64);
+        let load_slew = (r_drvr + meters * rc.resistance) * tree.cap * ELMORE_SKEW_FACTOR;
         load_slew <= margined(tree.max_load_slew, SLEW_MARGIN)
     }
 
@@ -685,7 +688,7 @@ impl Rebuffer {
             .as_ref()
             .map_or(f64::INFINITY, |d| d.fanout_limit);
         let mut options = Vec::with_capacity(left.len().max(right.len()));
-        let mut best_cap = f64::INFINITY;
+        let mut best_cap = Farads::INFINITY;
         let (mut li, mut ri) = (left.len(), right.len());
         if li == 0 || ri == 0 {
             return options;
@@ -756,7 +759,7 @@ impl Rebuffer {
         node: &Bnet,
         left: &BnetPtr,
         right: &BnetPtr,
-        best_cap: f64,
+        best_cap: Farads,
     ) -> Option<BnetPtr> {
         let junction_slack = left.slack.min(right.slack);
         let (critical, aux1) = if left.slack < right.slack {
@@ -1258,7 +1261,7 @@ fn buffer_delay(
     resizer: &Resizer<'_, Sta>,
     size: &BufferSize,
     edges: Option<SlackEdges>,
-    load_cap: f64,
+    load_cap: Farads,
 ) -> Fixed {
     let Some(edges) = edges else {
         return Fixed::ZERO;
@@ -1277,9 +1280,9 @@ fn buffer_delay(
 fn can_drive(resizer: &Resizer<'_, Sta>, size: &BufferSize, tree: &Bnet, extra_wire: i64) -> bool {
     let rc = resizer.graph.wire_rc();
     let dbu = resizer.db.dbu().get() as f64;
-    let extra_cap = extra_wire as f64 / dbu * 1e-6 * rc.capacitance.get() + size.output_cap;
-    let wire_meters = (tree.max_load_wire_length() + extra_wire) as f64 / dbu * 1e-6;
-    let load_slew = (size.drive_resistance + wire_meters * rc.resistance.get())
+    let extra_cap = Meters::from_dbu(extra_wire, dbu) * rc.capacitance + size.output_cap;
+    let wire_meters = Meters::from_dbu(tree.max_load_wire_length() + extra_wire, dbu);
+    let load_slew = (size.drive_resistance + wire_meters * rc.resistance)
         * (tree.cap + extra_cap)
         * ELMORE_SKEW_FACTOR;
     load_slew <= margined(tree.max_load_slew, SLEW_MARGIN)
@@ -1516,7 +1519,7 @@ fn has_top_level_output(resizer: &Resizer<'_, Sta>, net: NetId) -> bool {
     })
 }
 
-fn margined(limit: f64, percent: f64) -> f64 {
+fn margined<Q: Mul<f64, Output = Q>>(limit: Q, percent: f64) -> Q {
     limit * (1.0 - percent / 100.0)
 }
 
@@ -1530,54 +1533,50 @@ fn buffer_size(resizer: &Resizer<'_, Sta>, cell: LibCellId) -> Result<BufferSize
     let intrinsic = lib
         .delay_arc_sets_to(output)
         .flat_map(|s| s.arcs.iter())
-        .map(|a| a.gate_delay(Seconds::ZERO, Farads::ZERO).0.get())
-        .filter(|&d| d > 0.0)
-        .fold(0.0, f64::max);
+        .map(|a| a.gate_delay(Seconds::ZERO, Farads::ZERO).0)
+        .filter(|&d| d > Seconds::ZERO)
+        .fold(Seconds::ZERO, Seconds::max);
     let cap_limit = resizer
         .link
         .liberty
         .capacitance_limit(lib, &lib.ports[output])
-        .map_or(f64::INFINITY, |l| margined(l.get(), CAP_MARGIN));
+        .map_or(Farads::INFINITY, |l| margined(l, CAP_MARGIN));
     let margined_max_cap = cap_limit.min(load_limit_by_driver_slew(resizer, cell));
     Ok(BufferSize {
         cell,
-        input_cap: lib.ports[input].capacitance().get(),
+        input_cap: lib.ports[input].capacitance(),
         input_fanout: resizer.link.liberty.fanout_load(lib, &lib.ports[input]),
         input_max_slew: resizer.max_input_slew(lib, &lib.ports[input]),
-        output_cap: lib.ports[output].capacitance().get(),
+        output_cap: lib.ports[output].capacitance(),
         area: lib.area,
         intrinsic_delay: Fixed::from_seconds(intrinsic),
         margined_max_cap,
-        drive_resistance: lib.drive_resistance(output).get(),
+        drive_resistance: lib.drive_resistance(output),
     })
 }
 
 /// The load at which a buffer's own slew reaches its limit, by bisection,
 /// as `findBufferLoadLimitImpliedByDriverSlew`.
-fn load_limit_by_driver_slew(resizer: &Resizer<'_, Sta>, cell: LibCellId) -> f64 {
+fn load_limit_by_driver_slew(resizer: &Resizer<'_, Sta>, cell: LibCellId) -> Farads {
     let lib = resizer.link.liberty.cell(cell);
     let Some((input, output)) = lib.buffer_ports() else {
-        return f64::INFINITY;
+        return Farads::INFINITY;
     };
     let Some(max_slew) = resizer.link.liberty.slew_limit(lib, &lib.ports[output]) else {
-        return f64::INFINITY;
+        return Farads::INFINITY;
     };
-    let max_slew = margined(max_slew.get(), SLEW_MARGIN);
+    let max_slew = margined(max_slew, SLEW_MARGIN).get();
     let in_slew = margined(resizer.max_input_slew(lib, &lib.ports[input]), SLEW_MARGIN);
     let objective = |load: f64| -> f64 {
         lib.delay_arc_sets_to(output)
             .flat_map(|s| s.arcs.iter())
-            .map(|a| {
-                a.gate_delay(Seconds::new(in_slew), Farads::new(load))
-                    .1
-                    .get()
-            })
+            .map(|a| a.gate_delay(in_slew, Farads::new(load)).1.get())
             .fold(f64::NEG_INFINITY, f64::max)
             - max_slew
     };
     let drive = lib.drive_resistance(output).get();
     if drive == 0.0 {
-        return f64::INFINITY;
+        return Farads::INFINITY;
     }
     let mut cap1 = 0.0;
     let mut cap2 = max_slew / drive * 2.0;
@@ -1601,7 +1600,7 @@ fn load_limit_by_driver_slew(resizer: &Resizer<'_, Sta>, cell: LibCellId) -> f64
             }
         }
     }
-    cap1
+    Farads::new(cap1)
 }
 
 /// The wire a buffer can drive before its load's slew limit is reached, in
@@ -1611,10 +1610,12 @@ fn load_limit_by_driver_slew(resizer: &Resizer<'_, Sta>, cell: LibCellId) -> f64
 fn wire_length_limit_by_load_slew(resizer: &Resizer<'_, Sta>, size: &BufferSize) -> i64 {
     let rc = resizer.graph.wire_rc();
     let dbu = resizer.db.dbu().get() as f64;
-    let max_slew = margined(size.input_max_slew, SLEW_MARGIN);
-    let a = rc.resistance.get() * rc.capacitance.get();
-    let b = rc.resistance.get() * size.input_cap + size.drive_resistance * rc.capacitance.get();
-    let c = size.drive_resistance * size.input_cap - max_slew / ELMORE_SKEW_FACTOR;
+    let (res, cap) = (rc.resistance.get(), rc.capacitance.get());
+    let (input_cap, drive_resistance) = (size.input_cap.get(), size.drive_resistance.get());
+    let max_slew = margined(size.input_max_slew, SLEW_MARGIN).get();
+    let a = res * cap;
+    let b = res * input_cap + drive_resistance * cap;
+    let c = drive_resistance * input_cap - max_slew / ELMORE_SKEW_FACTOR;
     let discriminant = b * b - 4.0 * a * c;
     if discriminant < 0.0 || a <= 0.0 {
         return i64::MAX;
@@ -1644,12 +1645,12 @@ fn wire_length_limit_by_max_cap(resizer: &Resizer<'_, Sta>, size: &BufferSize) -
         return i64::MAX;
     };
     let rc = resizer.graph.wire_rc();
-    if rc.capacitance.get() <= 0.0 {
+    if rc.capacitance <= FaradsPerMeter::ZERO {
         return i64::MAX;
     }
     let dbu = resizer.db.dbu().get() as f64;
-    let slack = margined(limit.get(), CAP_MARGIN) - size.input_cap;
-    meters_to_dbu((slack / rc.capacitance.get()).max(0.0), dbu)
+    let slack = margined(limit, CAP_MARGIN) - size.input_cap;
+    meters_to_dbu((slack / rc.capacitance).get().max(0.0), dbu)
 }
 
 /// `meters` in database units, rounded and kept within an `int`, as
@@ -1692,19 +1693,23 @@ fn find_fast_buffers(resizer: &Resizer<'_, Sta>) -> Vec<LibCellId> {
 /// Whether `better` is at least as fast as `worse` at every load either
 /// table covers, once its extra input capacitance is charged against it,
 /// as `bufferSizeOutmatched`.
-fn outmatched(resizer: &Resizer<'_, Sta>, worse: LibCellId, better: LibCellId, r_max: f64) -> bool {
+fn outmatched(
+    resizer: &Resizer<'_, Sta>,
+    worse: LibCellId,
+    better: LibCellId,
+    r_max: Ohms,
+) -> bool {
     let liberty = resizer.link.liberty;
     let (w, b) = (liberty.cell(worse), liberty.cell(better));
     let (Some((w_in, w_out)), Some((b_in, _))) = (w.buffer_ports(), b.buffer_ports()) else {
         return false;
     };
-    let extra_input =
-        (b.ports[b_in].capacitance().get() - w.ports[w_in].capacitance().get()).max(0.0);
+    let extra_input = (b.ports[b_in].capacitance() - w.ports[w_in].capacitance()).max(Farads::ZERO);
     let penalty = r_max * extra_input;
     let limit = liberty
         .capacitance_limit(w, &w.ports[w_out])
-        .map_or(0.0, Farads::get);
-    let mut points: Vec<f64> = Vec::new();
+        .unwrap_or(Farads::ZERO);
+    let mut points: Vec<Farads> = Vec::new();
     for cell in [w, b] {
         let Some((input, output)) = cell.buffer_ports() else {
             continue;
@@ -1716,7 +1721,7 @@ fn outmatched(resizer: &Resizer<'_, Sta>, worse: LibCellId, better: LibCellId, r
         {
             for arc in &set.arcs {
                 if let Some(table) = &arc.delay {
-                    points.extend(table.capacitance_points().map(Farads::get));
+                    points.extend(table.capacitance_points());
                 }
             }
         }
@@ -1724,15 +1729,11 @@ fn outmatched(resizer: &Resizer<'_, Sta>, worse: LibCellId, better: LibCellId, r
     if points.is_empty() {
         return false;
     }
-    points.sort_by(f64::total_cmp);
+    points.sort_by(Farads::total_cmp);
     points.dedup();
-    let cutoff = w.ports[w_in]
-        .capacitance()
-        .get()
-        .min(b.ports[b_in].capacitance().get())
-        * 20.0;
+    let cutoff = w.ports[w_in].capacitance().min(b.ports[b_in].capacitance()) * 20.0;
     for p in points {
-        if (limit == 0.0 || p <= limit) && p < cutoff {
+        if (limit == Farads::ZERO || p <= limit) && p < cutoff {
             let bd = resizer.buffer_delay(better, p);
             let wd = resizer.buffer_delay(worse, p);
             if bd + penalty > wd {
@@ -1773,15 +1774,15 @@ pub fn max_wire_length_of(
 fn wire_length_limit(
     link: &Link<'_>,
     buffers: &BufferSet,
-    slews: &EdgeValues<f64>,
+    slews: &EdgeValues<Seconds>,
     rc: WireRc,
     dbu: DbuPerMicron,
 ) -> i64 {
-    if rc.resistance.get() <= 0.0 {
+    if rc.resistance <= OhmsPerMeter::ZERO {
         return i64::MAX;
     }
     let dbu = dbu.get() as f64;
-    let mut shortest = f64::INFINITY;
+    let mut shortest = Meters::INFINITY;
     for &buffer in &buffers.cells {
         let meters = buffer_max_wire_length(link, buffer, slews, rc);
         shortest = shortest.min(meters);
@@ -1789,28 +1790,29 @@ fn wire_length_limit(
     if !shortest.is_finite() {
         return i64::MAX;
     }
-    (shortest * 1e6 * dbu).round() as i64
+    (shortest.get() * 1e6 * dbu).round() as i64
 }
 
-/// `findMaxWireLength` for one buffer, in meters.
+/// `findMaxWireLength` for one buffer.
 fn buffer_max_wire_length(
     link: &Link<'_>,
     buffer: LibCellId,
-    slews: &EdgeValues<f64>,
+    slews: &EdgeValues<Seconds>,
     rc: WireRc,
-) -> f64 {
+) -> Meters {
     let lib = link.liberty.cell(buffer);
     let Some((input, output)) = lib.buffer_ports() else {
-        return f64::INFINITY;
+        return Meters::INFINITY;
     };
-    let drive = lib.drive_resistance(output).get();
+    let drive = lib.drive_resistance(output);
     let delay = |length: f64| -> f64 {
-        let resistance = length * rc.resistance.get();
-        let capacitance = length * rc.capacitance.get();
-        let mut worst = f64::NEG_INFINITY;
+        let length = Meters::new(length);
+        let resistance = length * rc.resistance;
+        let capacitance = length * rc.capacitance;
+        let mut worst = -Seconds::INFINITY;
         for set in lib.delay_arc_sets_to(output) {
             for arc in &set.arcs {
-                let load_cap = lib.ports[input].capacitance.get(arc.to_edge).get();
+                let load_cap = lib.ports[input].capacitance.get(arc.to_edge);
                 let model = PiModel {
                     c2: capacitance / 2.0,
                     rpi: resistance,
@@ -1827,13 +1829,13 @@ fn buffer_max_wire_length(
                 worst = worst.max(result.delay + wire_delay);
             }
         }
-        worst
+        worst.get()
     };
     let diff = |length: f64| delay(length) - 2.0 * delay(length / 2.0);
     let mut low = 0.0;
-    let mut high = drive / rc.resistance.get();
+    let mut high = (drive / rc.resistance).get();
     if !high.is_finite() || high <= 0.0 {
-        return f64::INFINITY;
+        return Meters::INFINITY;
     }
     let tol = 0.01;
     let mut diff_high = diff(high);
@@ -1854,5 +1856,5 @@ fn buffer_max_wire_length(
             }
         }
     }
-    low
+    Meters::new(low)
 }

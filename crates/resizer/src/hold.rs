@@ -13,6 +13,7 @@ use pare_common::db::indices::PinId;
 use pare_common::db::liberty::{Edge, LibCellId, MinMax};
 use pare_common::geom::dbu::Dbu;
 use pare_common::geom::point::Point;
+use pare_common::units::{Farads, Quantity, Seconds};
 
 /// How close a hold buffer's delay per area may come to the best's for the
 /// smaller of the two to be chosen.
@@ -32,10 +33,10 @@ const MIN_BUFFER_BUDGET: usize = 100;
 /// How hold repair runs, as `repair_timing -hold` takes it.
 #[derive(Clone, Debug, PartialEq)]
 pub struct HoldOptions {
-    /// Setup slack every endpoint should keep, in seconds.
-    pub setup_margin: f64,
-    /// Hold slack every endpoint should reach, in seconds.
-    pub hold_margin: f64,
+    /// Setup slack every endpoint should keep.
+    pub setup_margin: Seconds,
+    /// Hold slack every endpoint should reach.
+    pub hold_margin: Seconds,
     /// Whether a hold fix may break setup.
     pub allow_setup_violations: bool,
     /// The most hold buffers, as a share of the instances.
@@ -48,8 +49,8 @@ impl Default for HoldOptions {
     /// `OpenROAD`'s defaults.
     fn default() -> Self {
         Self {
-            setup_margin: 0.0,
-            hold_margin: 0.0,
+            setup_margin: Seconds::ZERO,
+            hold_margin: Seconds::ZERO,
             allow_setup_violations: false,
             max_buffer_share: 0.2,
             max_passes: 10_000,
@@ -64,14 +65,14 @@ pub struct HoldSummary {
     pub failing_before: usize,
     /// Endpoints failing hold at the end.
     pub failing_after: usize,
-    /// Worst hold slack at the start, in seconds.
-    pub wns_before: f64,
+    /// Worst hold slack at the start.
+    pub wns_before: Seconds,
     /// Worst hold slack at the end.
-    pub wns_after: f64,
+    pub wns_after: Seconds,
     /// Worst setup slack at the start.
-    pub setup_wns_before: f64,
+    pub setup_wns_before: Seconds,
     /// Worst setup slack at the end.
-    pub setup_wns_after: f64,
+    pub setup_wns_after: Seconds,
     /// Hold buffers inserted.
     pub inserted: usize,
     /// Of them, resized to their load.
@@ -89,14 +90,14 @@ pub fn repair_hold(
     let sta = resizer.sta();
     let mut ends: Vec<PinId> = sta.endpoints().to_vec();
     ends.sort_unstable();
-    let setup_wns_before = sta.worst_slack(MinMax::Max).0.seconds();
+    let setup_wns_before = sta.worst_slack(MinMax::Max).0.time();
     let mut summary = HoldSummary {
         setup_wns_before,
         ..HoldSummary::default()
     };
     let (mut failures, mut worst) = hold_violations(resizer, &ends, options.hold_margin);
     summary.failing_before = failures.len();
-    summary.wns_before = sta.worst_slack(MinMax::Min).0.seconds();
+    summary.wns_before = sta.worst_slack(MinMax::Min).0.time();
     let Some(buffer) = hold_buffer(resizer) else {
         summary.failing_after = failures.len();
         summary.wns_after = summary.wns_before;
@@ -124,8 +125,8 @@ pub fn repair_hold(
         let sta = resizer.sta();
         failures.sort_by(|&a, &b| {
             sta.slack(a, MinMax::Min)
-                .seconds()
-                .total_cmp(&sta.slack(b, MinMax::Min).seconds())
+                .time()
+                .total_cmp(&sta.slack(b, MinMax::Min).time())
                 .then(a.cmp(&b))
         });
         for &end in &failures {
@@ -140,8 +141,8 @@ pub fn repair_hold(
     }
     let sta = resizer.sta();
     summary.failing_after = failures.len();
-    summary.wns_after = sta.worst_slack(MinMax::Min).0.seconds();
-    summary.setup_wns_after = sta.worst_slack(MinMax::Max).0.seconds();
+    summary.wns_after = sta.worst_slack(MinMax::Min).0.time();
+    summary.setup_wns_after = sta.worst_slack(MinMax::Max).0.time();
     summary.inserted = repair.inserted;
     summary.resized = repair.resized;
     Ok(summary)
@@ -149,12 +150,16 @@ pub fn repair_hold(
 
 /// The endpoints whose hold slack is below `margin`, clock pins aside, and
 /// the worst of their slacks, as `findHoldViolations`.
-fn hold_violations(resizer: &Resizer<'_, Sta>, ends: &[PinId], margin: f64) -> (Vec<PinId>, f64) {
+fn hold_violations(
+    resizer: &Resizer<'_, Sta>,
+    ends: &[PinId],
+    margin: Seconds,
+) -> (Vec<PinId>, Seconds) {
     let sta = resizer.sta();
-    let mut worst = f64::INFINITY;
+    let mut worst = Seconds::INFINITY;
     let mut failing = Vec::new();
     for &end in ends {
-        let slack = sta.slack(end, MinMax::Min).seconds();
+        let slack = sta.slack(end, MinMax::Min).time();
         if !resizer.clocks.is_clock(end) && slack < margin {
             worst = worst.min(slack);
             failing.push(end);
@@ -168,7 +173,7 @@ fn hold_violations(resizer: &Resizer<'_, Sta>, ends: &[PinId], margin: f64) -> (
 /// has no delay cells, sites or threshold voltages to prefer among.
 fn hold_buffer(resizer: &Resizer<'_, Sta>) -> Option<LibCellId> {
     let liberty = resizer.link.liberty;
-    let mut scored: Vec<(f64, LibCellId)> = resizer
+    let mut scored: Vec<(Seconds, LibCellId)> = resizer
         .buffers
         .cells
         .iter()
@@ -191,16 +196,12 @@ fn hold_buffer(resizer: &Resizer<'_, Sta>) -> Option<LibCellId> {
 
 /// A buffer's delay driving its own input, the lesser of its edges, as
 /// `bufferHoldDelay`.
-fn hold_delay(resizer: &Resizer<'_, Sta>, cell: LibCellId) -> f64 {
+fn hold_delay(resizer: &Resizer<'_, Sta>, cell: LibCellId) -> Seconds {
     let lib = resizer.link.liberty.cell(cell);
     let Some((input, _)) = lib.buffer_ports() else {
-        return 0.0;
+        return Seconds::ZERO;
     };
-    let delays = buffer_delays(
-        lib,
-        &resizer.targets.slews,
-        lib.ports[input].capacitance().get(),
-    );
+    let delays = buffer_delays(lib, &resizer.targets.slews, lib.ports[input].capacitance());
     delays.rise.min(delays.fall)
 }
 
@@ -208,15 +209,15 @@ fn hold_delay(resizer: &Resizer<'_, Sta>, cell: LibCellId) -> f64 {
 /// them: the least early slack and the greatest late one.
 #[derive(Clone, Copy, Debug)]
 struct Slacks {
-    early: [f64; 2],
-    late: [f64; 2],
+    early: [Seconds; 2],
+    late: [Seconds; 2],
 }
 
 impl Slacks {
     const fn new() -> Self {
         Self {
-            early: [f64::INFINITY; 2],
-            late: [f64::NEG_INFINITY; 2],
+            early: [Seconds::INFINITY; 2],
+            late: [Seconds::new(f64::NEG_INFINITY); 2],
         }
     }
 
@@ -224,8 +225,8 @@ impl Slacks {
         let sta = resizer.sta();
         for edge in Edge::BOTH {
             let i = edge.index();
-            self.early[i] = self.early[i].min(sta.slack_edge(pin, edge, MinMax::Min).seconds());
-            self.late[i] = self.late[i].max(sta.slack_edge(pin, edge, MinMax::Max).seconds());
+            self.early[i] = self.early[i].min(sta.slack_edge(pin, edge, MinMax::Min).time());
+            self.late[i] = self.late[i].max(sta.slack_edge(pin, edge, MinMax::Max).time());
         }
     }
 }
@@ -286,22 +287,22 @@ impl HoldRepair<'_> {
         let net = netlist.db.pins[driver.index()].net;
         let mut loads = Vec::new();
         let mut slacks = Slacks::new();
-        let mut excluded_cap = 0.0;
+        let mut excluded_cap = Farads::ZERO;
         for load in netlist.loads(net).filter(|&l| l != driver) {
             if netlist.is_retired(load) {
                 continue;
             }
-            if sta.slack(load, MinMax::Min).seconds() < self.options.hold_margin {
+            if sta.slack(load, MinMax::Min).time() < self.options.hold_margin {
                 loads.push(load);
                 slacks.merge(resizer, load);
             } else if let Some(port) = netlist.lib_port(load) {
-                excluded_cap += port.capacitance().get();
+                excluded_cap += port.capacitance();
             }
         }
         if loads.is_empty() {
             return None;
         }
-        let load_cap = (resizer.load_cap(driver) - excluded_cap).max(0.0);
+        let load_cap = (resizer.load_cap(driver) - excluded_cap).max(Farads::ZERO);
         let lib = resizer.link.liberty.cell(self.buffer);
         let delays = buffer_delays(lib, &resizer.targets.slews, load_cap);
         let o = self.options;
@@ -325,15 +326,15 @@ impl HoldRepair<'_> {
         at: Point<Dbu>,
     ) -> Result<(), RepairError> {
         resizer.journal_begin();
-        let setup_before = resizer.sta().worst_slack(MinMax::Max).0.seconds();
+        let setup_before = resizer.sta().worst_slack(MinMax::Max).0.time();
         let slew_before = resizer.graph().slew(driver).max();
         let net = resizer.netlist().db.pins[driver.index()].net;
         let inserted = resizer.insert_buffer_before_loads(net, loads, self.buffer, at, "hold")?;
         let resized = !Self::load_in_hand(resizer, inserted.output)
             && resizer.resize_to_target_slew(inserted.output)?;
         let slew_after = resizer.graph().slew(driver).max();
-        let setup_after = resizer.sta().worst_slack(MinMax::Max).0.seconds();
-        let growth = if slew_before > 0.0 {
+        let setup_after = resizer.sta().worst_slack(MinMax::Max).0.time();
+        let growth = if slew_before > Seconds::ZERO {
             slew_after / slew_before
         } else {
             1.0
@@ -357,15 +358,14 @@ impl HoldRepair<'_> {
     /// slew and load slew limits in hand, so it can stay at the smallest
     /// size, as `checkMaxSlewCap`.
     fn load_in_hand(resizer: &Resizer<'_, Sta>, output: PinId) -> bool {
-        let in_hand = |value: f64, limit: f64| (limit - value) / limit >= SLACK_LIMIT_RATIO;
         if let Some(limit) = resizer.cap_limit(output)
-            && limit > 0.0
+            && limit > Farads::ZERO
             && !in_hand(resizer.load_cap(output), limit)
         {
             return false;
         }
         if let Some(limit) = resizer.driver_slew_limit(output)
-            && limit > 0.0
+            && limit > Seconds::ZERO
             && !in_hand(resizer.graph().slew(output).max(), limit)
         {
             return false;
@@ -386,4 +386,9 @@ const fn midpoint(a: Point<Dbu>, b: Point<Dbu>) -> Point<Dbu> {
         Dbu(i64::midpoint(a.x.get(), b.x.get())),
         Dbu(i64::midpoint(a.y.get(), b.y.get())),
     )
+}
+
+/// Whether `value` leaves [`SLACK_LIMIT_RATIO`] of `limit` in hand.
+fn in_hand<Q: Quantity>(value: Q, limit: Q) -> bool {
+    (limit.base() - value.base()) / limit.base() >= SLACK_LIMIT_RATIO
 }

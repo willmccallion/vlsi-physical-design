@@ -1,6 +1,8 @@
 //! Comparisons of times with the tolerance `OpenSTA` uses, so that two
 //! delays computed by different routes count as equal.
 
+use pare_common::units::Quantity;
+
 /// Values closer to zero than this are zero.
 const ZERO_TOLERANCE: f64 = 1e-15;
 
@@ -8,10 +10,14 @@ const ZERO_TOLERANCE: f64 = 1e-15;
 const RELATIVE_TOLERANCE: f64 = 1e-6;
 
 /// Whether two times are equal within tolerance.
+#[must_use]
+pub fn equal<Q: Quantity>(a: Q, b: Q) -> bool {
+    equal_base(a.base(), b.base())
+}
+
 // Exact equality is the first test, as OpenSTA's; the tolerances follow.
 #[allow(clippy::float_cmp)]
-#[must_use]
-pub fn equal(a: f64, b: f64) -> bool {
+fn equal_base(a: f64, b: f64) -> bool {
     if a == b {
         return true;
     }
@@ -26,32 +32,37 @@ pub fn equal(a: f64, b: f64) -> bool {
 
 /// Whether a time is zero within tolerance.
 #[must_use]
-pub fn zero(a: f64) -> bool {
+pub fn zero<Q: Quantity>(a: Q) -> bool {
+    let a = a.base();
     a == 0.0 || a.abs() < ZERO_TOLERANCE
 }
 
 /// Whether `a` is less than `b` by more than the tolerance.
 #[must_use]
-pub fn less(a: f64, b: f64) -> bool {
-    a < b && !equal(a, b)
+pub fn less<Q: Quantity>(a: Q, b: Q) -> bool {
+    let (a, b) = (a.base(), b.base());
+    a < b && !equal_base(a, b)
 }
 
 /// Whether `a` is less than or within tolerance of `b`.
 #[must_use]
-pub(crate) fn less_equal(a: f64, b: f64) -> bool {
-    a < b || equal(a, b)
+pub(crate) fn less_equal<Q: Quantity>(a: Q, b: Q) -> bool {
+    let (a, b) = (a.base(), b.base());
+    a < b || equal_base(a, b)
 }
 
 /// Whether `a` is greater than `b` by more than the tolerance.
 #[must_use]
-pub(crate) fn greater(a: f64, b: f64) -> bool {
-    a > b && !equal(a, b)
+pub(crate) fn greater<Q: Quantity>(a: Q, b: Q) -> bool {
+    let (a, b) = (a.base(), b.base());
+    a > b && !equal_base(a, b)
 }
 
 /// Whether `a` is greater than or within tolerance of `b`.
 #[must_use]
-pub(crate) fn greater_equal(a: f64, b: f64) -> bool {
-    a > b || equal(a, b)
+pub(crate) fn greater_equal<Q: Quantity>(a: Q, b: Q) -> bool {
+    let (a, b) = (a.base(), b.base());
+    a > b || equal_base(a, b)
 }
 
 #[cfg(test)]
