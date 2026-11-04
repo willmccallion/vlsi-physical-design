@@ -3,6 +3,8 @@
 //! from a characterization of the clock wire reaches the clusters, and the
 //! tree is written into the design with dummy loads balancing its levels.
 
+use pare_common::db::library::DuplicateName;
+
 pub mod buffers;
 mod clock;
 mod htree;
@@ -44,7 +46,7 @@ pub enum CtsError {
     /// Two clocks enter on the same net.
     #[error("clock '{0}' overlaps a previous clock")]
     OverlappingClock(String),
-    /// An edit of the design failed.
+    /// A cell or net to add has the name of one already there.
     #[error("cannot edit the design: {0}")]
-    Edit(String),
+    Edit(#[from] DuplicateName),
 }
