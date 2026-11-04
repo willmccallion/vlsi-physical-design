@@ -239,7 +239,7 @@ pub struct GlobalPlacementConfig {
     pub seed: u64,
     /// Whether standard cells in congested gcells are inflated during
     /// global placement, as in `OpenROAD`.
-    #[serde(default = "default_routability_driven")]
+    #[serde(default = "default_enabled")]
     pub routability_driven: bool,
     /// Mean congestion of the most congested gcells below which
     /// routability-driven placement stops inflating cells.
@@ -296,7 +296,7 @@ impl Default for GlobalPlacementConfig {
             placer_max_iterations: default_placer_max_iterations(),
             target_overflow: default_target_overflow(),
             seed: default_seed(),
-            routability_driven: default_routability_driven(),
+            routability_driven: default_enabled(),
             target_congestion: default_target_congestion(),
             congestion_estimate: CongestionEstimate::default(),
             routing_layer_adjustment: default_routing_layer_adjustment(),
@@ -313,7 +313,7 @@ impl Default for GlobalPlacementConfig {
 #[serde(deny_unknown_fields)]
 pub struct IoPlacementConfig {
     /// Whether placement moves unplaced and placed (not fixed) I/O pins.
-    #[serde(default = "default_io_placement_enabled")]
+    #[serde(default = "default_enabled")]
     pub enabled: bool,
     /// Horizontal routing layer for pins on the left and right edges.
     pub horizontal_layer: Option<String>,
@@ -324,15 +324,11 @@ pub struct IoPlacementConfig {
 impl Default for IoPlacementConfig {
     fn default() -> Self {
         Self {
-            enabled: default_io_placement_enabled(),
+            enabled: default_enabled(),
             horizontal_layer: None,
             vertical_layer: None,
         }
     }
-}
-
-const fn default_io_placement_enabled() -> bool {
-    true
 }
 
 /// Parameters of the global and detailed router.
@@ -483,10 +479,6 @@ fn default_timing_driven_overflows() -> Vec<Share> {
 
 const fn default_timing_net_weight_max() -> f64 {
     5.0
-}
-
-const fn default_routability_driven() -> bool {
-    true
 }
 
 const fn default_target_congestion() -> f64 {
