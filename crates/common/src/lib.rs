@@ -2,6 +2,8 @@
 
 pub mod db;
 pub mod geom;
+#[cfg(feature = "testing")]
+pub mod testing;
 pub mod units;
 pub mod util;
 pub mod verify;
