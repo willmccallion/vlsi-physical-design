@@ -47,6 +47,8 @@ ORFS_NANGATE45_PLACE_DENSITY = 0.3
 ORFS_NANGATE45_DONT_USE = ["TAPCELL_X1", "FILLCELL_X1", "AOI211_X1", "OAI211_X1"]
 ORFS_NANGATE45_SIGNAL_WIRE = ("metal3", 3.57728, 0.103981)
 ORFS_NANGATE45_CLOCK_WIRE = ("metal5", 1.49065, 0.109256)
+# Its config.mk's MIN_CLK_ROUTING_LAYER, the lowest layer for clock trunks.
+ORFS_NANGATE45_CLOCK_MIN_LAYER = "metal4"
 # Its fastroute.tcl's set_global_routing_layer_adjustment per routing layer.
 ORFS_NANGATE45_LAYER_ADJUSTMENT = [("metal2", 0.5), ("metal3", 0.5)] + [
     (f"metal{i}", 0.25) for i in range(4, 11)
@@ -491,6 +493,8 @@ def config_text(name):
         lines.append("layer_rc = [")
         lines += [f"  {layer_rc_table(*rc)}," for rc in ORFS_NANGATE45_LAYER_RC]
         lines.append("]")
+    if on_nangate45(d) and d["purpose"] != "placement":
+        lines += ["", "[routing]", f'clock_min_layer = "{ORFS_NANGATE45_CLOCK_MIN_LAYER}"']
     return "\n".join(lines) + "\n"
 
 
