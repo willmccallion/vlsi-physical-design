@@ -712,6 +712,11 @@ impl Interpreter {
                 || Self::bool_attr(group, "is_isolation_cell")
                 || Self::bool_attr(group, "is_level_shifter"),
             is_isolation_cell: Self::bool_attr(group, "is_isolation_cell"),
+            // OpenSTA reads `is_pad`, then `pad_cell` over it.
+            is_pad: group
+                .attr_text("pad_cell")
+                .or_else(|| group.attr_text("is_pad"))
+                .is_some_and(|v| v.eq_ignore_ascii_case("true")),
             footprint: group.attr_text("cell_footprint").map(str::to_string),
             user_function_class: group.attr_text("user_function_class").map(str::to_string),
             ports: IdVec::new(),
@@ -1903,6 +1908,18 @@ library (tiny) {
                 name: "x".to_string(),
             })
         );
+    }
+
+    #[test]
+    fn a_pad_cell_is_one_by_either_attribute_and_pad_cell_has_the_last_word() {
+        let src = "library (x) { \
+            cell (plain) { } \
+            cell (by_pad_cell) { pad_cell : true; } \
+            cell (by_is_pad) { is_pad : true; } \
+            cell (overruled) { is_pad : true; pad_cell : false; } }";
+        let lib = parse_str(src, Path::new("x.lib")).unwrap();
+        let pads: Vec<bool> = lib.cells.iter().map(|c| c.is_pad).collect();
+        assert_eq!(pads, vec![false, true, true, false]);
     }
 
     #[test]

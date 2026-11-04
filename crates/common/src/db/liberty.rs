@@ -865,6 +865,8 @@ pub struct LibCell {
     /// Whether it is an isolation cell (`is_isolation_cell`), whose inputs
     /// are never swapped.
     pub is_isolation_cell: bool,
+    /// Whether it is a pad cell (`pad_cell` or `is_pad`).
+    pub is_pad: bool,
     /// Its footprint class, when given.
     pub footprint: Option<String>,
     /// The class sizing keeps it within (`user_function_class`), when
@@ -1715,6 +1717,7 @@ mod tests {
             is_clock_cell: false,
             is_power_cell: false,
             is_isolation_cell: false,
+            is_pad: false,
             library: 0,
             footprint: None,
             user_function_class: None,
