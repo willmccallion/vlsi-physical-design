@@ -89,9 +89,11 @@ impl GlobalSession {
         })
     }
 
-    /// The technology, grid, routes and routed nets, for detailed routing.
+    /// The technology, with each net's rule as `db` has it now, grid,
+    /// routes and routed nets, for detailed routing.
     pub(crate) fn into_parts(
         self,
+        db: &NetlistDB,
     ) -> (
         RouteTech,
         GlobalGrid,
@@ -103,7 +105,9 @@ impl GlobalSession {
             .into_iter()
             .map(|(net, (global_net, _))| (net, global_net))
             .collect();
-        (self.tech, self.grid, self.routes, nets)
+        let mut tech = self.tech;
+        tech.follow_net_rules(db);
+        (tech, self.grid, self.routes, nets)
     }
 
     /// Follows the design's renumbering after cells and nets were removed:
@@ -423,6 +427,10 @@ fn straight_runs(links: &[(GCell, GCell)], terminals: &[PinTerminal]) -> Vec<(GC
 #[cfg(test)]
 mod tests {
     use super::*;
+    use pare_common::db::design::{NonDefaultLayer, NonDefaultRule, PlacementStatus};
+    use pare_common::db::indices::NonDefaultRuleId;
+    use pare_common::db::parser::{def, lef};
+    use std::path::{Path, PathBuf};
 
     const fn cell(layer: u8, x: u16, y: u16) -> GCell {
         GCell {
@@ -465,6 +473,62 @@ mod tests {
             .collect();
         out.sort_unstable();
         out
+    }
+
+    fn fixture(name: &str) -> PathBuf {
+        Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../common/tests/fixtures")
+            .join(name)
+    }
+
+    /// The tiny design placed, with a one-pin net `spare` on `u7` ahead of
+    /// `out`, which follows a wide rule.
+    fn tiny_with_a_rule_after_a_spare_net() -> NetlistDB {
+        let text = std::fs::read_to_string(fixture("tiny.def"))
+            .unwrap()
+            .replace("NETS 5 ;", "NETS 6 ;")
+            .replace("- out (", "- spare ( u7 Y ) ;\n- out (");
+        let units = def::read_units(&fixture("tiny.def")).unwrap();
+        let library = lef::parse_files(&[fixture("tiny.lef")], units).unwrap();
+        let mut db = def::parse_str(&text, Path::new("tiny.def"), library).unwrap();
+        for (name, x) in [("u5", 2000), ("u6", 3000)] {
+            let cell = db.cells.iter_mut().find(|c| c.name == name).unwrap();
+            cell.location = Point::new(Dbu(x), Dbu(4000));
+            cell.status = PlacementStatus::Placed;
+        }
+        db.non_default_rules.push(NonDefaultRule {
+            name: "DW".to_string(),
+            hard_spacing: true,
+            layers: vec![NonDefaultLayer {
+                layer: LayerId(0),
+                width: Dbu(200),
+                spacing: Some(Dbu(300)),
+                wire_extension: None,
+            }],
+            vias: Vec::new(),
+            via_rules: Vec::new(),
+            min_cuts: Vec::new(),
+        });
+        let out = db.net_id("out").unwrap();
+        db.nets[out.index()].non_default_rule = Some(NonDefaultRuleId::new(0));
+        db
+    }
+
+    #[test]
+    fn detailed_routing_takes_each_nets_rule_as_it_is_after_renumbering() {
+        let mut db = tiny_with_a_rule_after_a_spare_net();
+        let config = RoutingConfig::default();
+        let mut session = GlobalSession::new(&db, &config).unwrap();
+        let u7 = db.cell_id("u7").unwrap();
+        let spare = db.net_id("spare").unwrap();
+        let renumbering = db.remove(&[u7], &[spare]).unwrap();
+        session.renumber(&renumbering);
+
+        let (tech, ..) = session.into_parts(&db);
+
+        let rules: Vec<_> = (0..db.nets.len()).map(|n| tech.net_rule(n)).collect();
+        let wanted: Vec<_> = db.nets.iter().map(|n| n.non_default_rule).collect();
+        assert_eq!(rules, wanted);
     }
 
     #[test]
