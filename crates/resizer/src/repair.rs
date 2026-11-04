@@ -38,6 +38,16 @@ pub struct RepairSummary {
     pub inserted: usize,
 }
 
+/// What a driver's net needs buffered for, once the driver is sized.
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+struct NetNeeds {
+    /// The load to buffer the net down to, when its load or its driver's
+    /// slew breaks a limit.
+    max_cap: Option<Farads>,
+    /// Whether a load's slew breaks its limit.
+    load_slew: bool,
+}
+
 /// Which limits a net's repair checks.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum Checks {
@@ -179,19 +189,45 @@ impl<'r, 'a, T: Timing> Repairer<'r, 'a, T> {
         Ok(self.summary)
     }
 
-    /// `RepairDesign::repairNet` for one driver.
+    /// `RepairDesign::repairNet` for one driver: its own slew repaired by
+    /// sizing, then its net buffered where loads, load slews or wire
+    /// lengths still break their limits.
     fn repair_net(&mut self, net: NetId, driver: PinId, checks: Checks) -> Result<(), RepairError> {
-        let mut repaired = false;
-        let mut max_cap = Farads::INFINITY;
-        let mut repair_cap = false;
-        let mut repair_load_slew = false;
-
         let tristate = self.resizer.is_tristate_driver(driver);
-        let (slew, limit) = self.driver_slew_check(driver);
-        let check_limits = checks == Checks::All;
+        let needs = match checks {
+            Checks::All => self.check_limits(driver)?,
+            Checks::LengthOnly => NetNeeds::default(),
+        };
+        if tristate {
+            return Ok(());
+        }
+        let Some(tree) = self.driver_tree(net, driver) else {
+            return Ok(());
+        };
+        let max_length = self.resizer.options.max_wire_length;
+        let too_long = max_length > 0 && tree.max_load_wire_length() > max_length;
+        if too_long {
+            self.summary.length_violations += 1;
+        }
+        if needs.max_cap.is_none() && !needs.load_slew && !too_long {
+            return Ok(());
+        }
+        self.resizer.batch_edits();
+        let _ = self.repair_tree(&tree, driver, needs.max_cap.unwrap_or(Farads::INFINITY))?;
+        self.resizer.flush();
+        self.summary.repaired_nets += 1;
+        Ok(())
+    }
+
+    /// Checks the driver's slew, resizing it when the slew is over its
+    /// limit, then, unless it is a tristate driver, its loads' slews and its
+    /// load, counting each violation; returns what buffering its net needs.
+    fn check_limits(&mut self, driver: PinId) -> Result<NetNeeds, RepairError> {
+        let tristate = self.resizer.is_tristate_driver(driver);
+        let mut needs = NetNeeds::default();
         let mut slew_violation = false;
-        if check_limits
-            && let Some(limit) = limit
+        let (slew, limit) = self.driver_slew_check(driver);
+        if let Some(limit) = limit
             && slew > limit
         {
             slew_violation = true;
@@ -199,69 +235,41 @@ impl<'r, 'a, T: Timing> Repairer<'r, 'a, T> {
                 self.summary.resized += 1;
             }
             let (slew_after, _) = self.driver_slew_check(driver);
-            if slew_after > limit
-                && let Some(cap) = self.slew_load_cap(driver, limit)
-            {
-                max_cap = cap;
-                repair_cap = true;
+            if slew_after > limit {
+                needs.max_cap = self.slew_load_cap(driver, limit);
             }
         }
-        if check_limits
-            && !tristate
+        if !tristate
             && (self.loads_violate_slew(driver)
                 || self.load_slew_violation_drivers.contains(&driver))
         {
             slew_violation = true;
-            repair_load_slew = true;
+            needs.load_slew = true;
         }
         if slew_violation {
             self.summary.slew_violations += 1;
         }
-
-        if check_limits && !tristate {
-            let cap = self.resizer.load_cap(driver);
-            if let Some(limit) = self.resizer.cap_limit(driver) {
-                let margined = self.resizer.margined_cap(limit);
-                if cap > margined {
-                    max_cap = margined;
-                    repair_cap = true;
-                    self.summary.cap_violations += 1;
-                }
+        if !tristate && let Some(limit) = self.resizer.cap_limit(driver) {
+            let margined = self.resizer.margined_cap(limit);
+            if self.resizer.load_cap(driver) > margined {
+                needs.max_cap = Some(margined);
+                self.summary.cap_violations += 1;
             }
         }
+        Ok(needs)
+    }
 
-        if !tristate {
-            let tree = {
-                let netlist = self.resizer.netlist();
-                self.resizer.graph.parasitics(net).and_then(|p| {
-                    bnet::from_parasitics(
-                        &netlist,
-                        p,
-                        driver,
-                        &self.resizer.tree_rc(),
-                        self.resizer,
-                    )
-                })
-            };
-            if let Some(tree) = tree {
-                let wire_length = tree.max_load_wire_length();
-                let max_length = self.resizer.options.max_wire_length;
-                let repair_wire = max_length > 0 && wire_length > max_length;
-                if repair_wire {
-                    self.summary.length_violations += 1;
-                }
-                if repair_cap || repair_load_slew || repair_wire {
-                    repaired = true;
-                    self.resizer.batch_edits();
-                    let _ = self.repair_tree(&tree, driver, max_cap)?;
-                    self.resizer.flush();
-                }
-            }
-        }
-        if repaired {
-            self.summary.repaired_nets += 1;
-        }
-        Ok(())
+    /// The buffering tree of the driver's net, from its parasitics.
+    fn driver_tree(&self, net: NetId, driver: PinId) -> Option<BnetPtr> {
+        let netlist = self.resizer.netlist();
+        let parasitics = self.resizer.graph.parasitics(net)?;
+        bnet::from_parasitics(
+            &netlist,
+            parasitics,
+            driver,
+            &self.resizer.tree_rc(),
+            self.resizer,
+        )
     }
 
     /// The driver's slew and its margined limit, if one applies.
