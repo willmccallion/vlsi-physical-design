@@ -11,7 +11,7 @@ use crate::db::design::{NetlistDB, PlacementStatus, Row, TrackAxis, TrackDef};
 use crate::db::indices::{CellId, LayerId, MacroId, MacroPinId, SiteId};
 use crate::db::library::{
     CoreKind, CutLayer, Direction, LayerElectrical, LayerRef, Library, Macro, MacroClass, MacroPin,
-    PinDirection, RoutingLayer, Shape, SignalUse, Site, SiteClass, Symmetry, ViaDef,
+    PinDirection, RoutingLayer, Shape, SignalUse, Site, SiteClass, Symmetry, ViaDef, ViaSource,
 };
 use crate::db::parser::lexer::{ParseError, read_file};
 use crate::db::rules::{CutLayerRules, RoutingLayerRules};
@@ -170,10 +170,9 @@ pub fn synthesize_layer_stack(
             let _ = library
                 .add_via(ViaDef {
                     name: format!("VIA{i}{}", i + 1),
-                    is_default: true,
                     cut,
                     shapes,
-                    from_def: false,
+                    source: ViaSource::LefDefault,
                 })
                 .map_err(|e| e.to_string())?;
         }
