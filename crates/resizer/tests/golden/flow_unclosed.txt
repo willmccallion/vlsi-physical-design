@@ -6,6 +6,7 @@ RepairSummary {
     resized: 1,
     inserted: 2,
 }
+reported (iteration, failing): [(Some(1), 32), (Some(10), 32), (Some(20), 31), (Some(30), 31), (Some(40), 31), (Some(50), 31), (Some(60), 32), (Some(70), 32), (Some(80), 31), (Some(90), 31), (Some(100), 31), (Some(110), 31), (None, 31)]
 SetupSummary {
     failing_before: 32,
     failing_after: 31,

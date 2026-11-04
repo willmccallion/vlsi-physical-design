@@ -173,7 +173,11 @@ fn repaired(period_ns: f64) -> String {
     let mut resizer = Resizer::timed(inputs, &constraints).unwrap();
 
     let design = Repairer::new(&mut resizer).repair_design().unwrap();
-    let setup = repair_setup(&mut resizer, SetupOptions::default(), &mut |_| {}).unwrap();
+    let mut reports = Vec::new();
+    let setup = repair_setup(&mut resizer, SetupOptions::default(), &mut |progress| {
+        reports.push((progress.iteration, progress.failing));
+    })
+    .unwrap();
     let hold = repair_hold(
         &mut resizer,
         &HoldOptions {
@@ -184,7 +188,10 @@ fn repaired(period_ns: f64) -> String {
     .unwrap();
     let _ = resizer.finish().unwrap();
 
-    format!("{design:#?}\n{setup:#?}\n{hold:#?}\n{}", cells_text(&db))
+    format!(
+        "{design:#?}\nreported (iteration, failing): {reports:?}\n{setup:#?}\n{hold:#?}\n{}",
+        cells_text(&db)
+    )
 }
 
 fn assert_golden(name: &str, actual: &str) {
