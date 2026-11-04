@@ -259,7 +259,7 @@ fn a_route_tree_climbs_by_vias_and_runs_wires_on_the_route_layers() {
     let rc = TreeRc {
         signal: WireRc::per_micron(3.0, 0.1, LayerId(2)),
         layers: Some(&route_rc),
-        dbu: 2000.0,
+        dbu: DbuPerMicron::new(2000).unwrap(),
     };
     let parasitics = NetParasitics::from_route(&db, net, route, &route_rc);
 

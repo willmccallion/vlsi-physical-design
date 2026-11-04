@@ -8,11 +8,11 @@
 
 use crate::bnet::{self, BnetPtr, Kind};
 use crate::library::SizingLimits;
-use crate::resizer::{RepairError, Resizer, Timing, gate_slew};
+use crate::resizer::{RepairError, Resizer, Timing, gate_slew, meters_to_dbu};
 use pare_common::db::design::PinOwner;
 use pare_common::db::indices::{NetId, PinId};
 use pare_common::db::liberty::{ArcRole, EdgeValues, LibCellId};
-use pare_common::geom::dbu::Dbu;
+use pare_common::geom::dbu::{Dbu, DbuPerMicron};
 use pare_common::geom::point::Point;
 use pare_common::units::{Farads, FaradsPerMeter, Meters, Ohms, OhmsPerMeter, Seconds};
 use std::collections::HashSet;
@@ -81,12 +81,12 @@ struct DriverWire {
     cap: FaradsPerMeter,
     r_drvr: Ohms,
     slew_rc_factor: f64,
-    dbu_per_micron: f64,
+    dbu_per_micron: DbuPerMicron,
 }
 
 impl DriverWire {
     fn meters(&self, length: i64) -> Meters {
-        Meters::from_dbu(length, self.dbu_per_micron)
+        Meters::from_dbu(Dbu(length), self.dbu_per_micron)
     }
 
     /// The load at the driver of `length` of wire with `ref_cap` beyond it.
@@ -681,7 +681,7 @@ impl<'r, 'a, T: Timing> Repairer<'r, 'a, T> {
             cap,
             r_drvr,
             slew_rc_factor: self.resizer.slew_rc_factor,
-            dbu_per_micron: self.resizer.db.dbu().get() as f64,
+            dbu_per_micron: self.resizer.db.dbu(),
         };
         let length = from.manhattan(to.at).get();
         let mut rest = WireRest {
@@ -771,8 +771,8 @@ impl<'r, 'a, T: Timing> Repairer<'r, 'a, T> {
     // The slew estimates keep OpenROAD's grouping so they can be checked.
     #[allow(clippy::suboptimal_flops, clippy::suspicious_operation_groupings)]
     fn split_length(&self, input: SplitInput) -> i64 {
-        let dbu = self.resizer.db.dbu().get() as f64;
-        let to_dbu = |m: f64| i64::from(((m * dbu * 1e6).round() as i64 as i32) & i32::MAX);
+        let dbu = self.resizer.db.dbu();
+        let to_dbu = |m: f64| meters_to_dbu(Meters::new(m), dbu).get();
         let (wire_res, wire_cap) = (input.wire_res.get(), input.wire_cap.get());
         let (load_cap, ref_cap, max_cap) = (
             input.load_cap.get(),
