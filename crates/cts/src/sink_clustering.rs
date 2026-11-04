@@ -8,6 +8,7 @@
 #![allow(clippy::suboptimal_flops)]
 
 use crate::htree::Point;
+use crate::techchar::SegmentLength;
 
 /// How much load a leaf buffer may drive, as a multiple of its own input
 /// capacitance, as `kMaxCapFactor`.
@@ -19,6 +20,7 @@ const MAX_CAP_FACTOR: f64 = 10.0;
 pub(crate) struct SinkClustering {
     points: Vec<Point>,
     caps: Vec<f32>,
+    insertion_lengths: Vec<SegmentLength>,
     order: Vec<(f64, usize)>,
     best_solution: Vec<Vec<usize>>,
     best_cost: f64,
@@ -30,6 +32,8 @@ pub(crate) struct SinkClustering {
     first_run: bool,
     x_span: f64,
     y_span: f64,
+    /// The length that maps to one unit of the normalized square.
+    span: f64,
 }
 
 impl SinkClustering {
@@ -37,6 +41,7 @@ impl SinkClustering {
         Self {
             points: Vec::new(),
             caps: Vec::new(),
+            insertion_lengths: Vec::new(),
             order: Vec::new(),
             best_solution: Vec::new(),
             best_cost: f64::MAX,
@@ -48,12 +53,17 @@ impl SinkClustering {
             first_run: true,
             x_span: 0.0,
             y_span: 0.0,
+            span: 1.0,
         }
     }
 
-    pub(crate) fn add_point(&mut self, x: f64, y: f64, cap: f32) {
+    /// Adds a sink at (`x`, `y`) in wire segment units with input
+    /// capacitance `cap`, standing for `insertion` more clock wire beyond
+    /// its pin.
+    pub(crate) fn add_point(&mut self, x: f64, y: f64, cap: f32, insertion: SegmentLength) {
         self.points.push(Point::new(x, y));
         self.caps.push(cap);
+        self.insertion_lengths.push(insertion);
     }
 
     /// The best clusters found so far, as indices of the points added.
@@ -63,14 +73,8 @@ impl SinkClustering {
 
     /// Tries clusters of up to `group_size` sinks no wider than
     /// `max_diameter` length units, the tree's length unit being
-    /// `scale_factor` database units, with `dist` the tree's distance.
-    pub fn run(
-        &mut self,
-        group_size: usize,
-        max_diameter: f32,
-        scale_factor: i32,
-        dist: &dyn Fn(Point, Point) -> f64,
-    ) {
+    /// `scale_factor` database units.
+    pub fn run(&mut self, group_size: usize, max_diameter: f32, scale_factor: i32) {
         self.normalize_points(max_diameter, scale_factor);
         if self.first_run {
             self.order = self
@@ -82,7 +86,7 @@ impl SinkClustering {
             self.order
                 .sort_by(|a, b| a.0.total_cmp(&b.0).then(a.1.cmp(&b.1)));
         }
-        self.find_best_matching(group_size, dist);
+        self.find_best_matching(group_size);
         self.first_run = false;
     }
 
@@ -113,14 +117,14 @@ impl SinkClustering {
                 *p = Point::new(x, y);
             }
         }
-        let span = match (self.x_span == 0.0, self.y_span == 0.0) {
+        self.span = match (self.x_span == 0.0, self.y_span == 0.0) {
             (true, true) => 1.0,
             (true, false) => self.y_span,
             (false, true) => self.x_span,
             (false, false) => self.x_span.min(self.y_span),
         };
-        self.max_internal_diameter = (f64::from(max_diameter) / span) as f32;
-        self.cap_per_unit = (self.cap_per_dbu * f64::from(scale_factor) * span) as f32;
+        self.max_internal_diameter = (f64::from(max_diameter) / self.span) as f32;
+        self.cap_per_unit = (self.cap_per_dbu * f64::from(scale_factor) * self.span) as f32;
     }
 
     fn limit_exceeded(&self, size: usize, cost: f64, cap_cost: f64, size_limit: usize) -> bool {
@@ -130,23 +134,35 @@ impl SinkClustering {
         size >= size_limit || cost > f64::from(self.max_internal_diameter)
     }
 
+    /// The distance between points `a` and `b` in the normalized square,
+    /// with the clock wire their sinks stand for, as
+    /// `TreeBuilder::computeDist` measures it.
+    fn distance(&self, a: usize, b: usize) -> f64 {
+        // NOTE: diverges from TritonCTS, whose SinkClustering hands the
+        // normalized points to HTreeBuilder::computeDist, which looks the
+        // insertion delays up by unnormalized location and so never finds
+        // them; PARE adds each sink's length, normalized like the diameter.
+        let insertion = self.insertion_lengths[a].get() + self.insertion_lengths[b].get();
+        self.points[a].dist(self.points[b]) + insertion / self.span
+    }
+
     /// Cuts the curve order into clusters starting at each offset below
     /// `group_size`, as `SinkClustering::findBestMatching`.
-    fn find_best_matching(&mut self, group_size: usize, dist: &dyn Fn(Point, Point) -> f64) {
+    fn find_best_matching(&mut self, group_size: usize) {
         let mut runs: Vec<Run> = (0..group_size).map(|_| Run::default()).collect();
         let n = self.order.len();
         for i in 0..n {
             for (j, run) in runs.iter_mut().enumerate() {
                 if i + j < n {
                     let idx = self.order[i + j].1;
-                    self.extend(run, idx, group_size, dist);
+                    self.extend(run, idx, group_size);
                 }
             }
         }
         for i in 0..group_size.min(n) {
             let idx = self.order[i].1;
             for run in runs.iter_mut().skip(i + 1) {
-                self.extend(run, idx, group_size, dist);
+                self.extend(run, idx, group_size);
             }
         }
         let mut best = None;
@@ -163,22 +179,15 @@ impl SinkClustering {
 
     /// Adds point `idx` to the open cluster of `run`, closing it first if
     /// the point would break its limits.
-    fn extend(
-        &self,
-        run: &mut Run,
-        idx: usize,
-        group_size: usize,
-        dist: &dyn Fn(Point, Point) -> f64,
-    ) {
+    fn extend(&self, run: &mut Run, idx: usize, group_size: usize) {
         if run.clusters.is_empty() {
             run.clusters.push(Vec::new());
         }
-        let p = self.points[idx];
         let open = run.clusters.last().map_or(&[][..], Vec::as_slice);
         let mut distance_cost = 0.0_f64;
         let mut cap_cost = f64::from(self.caps[idx]);
         for &other in open {
-            let cost = dist(p, self.points[other]);
+            let cost = self.distance(idx, other);
             if self.use_max_cap {
                 cap_cost += cost * f64::from(self.cap_per_unit) + f64::from(self.caps[other]);
             }

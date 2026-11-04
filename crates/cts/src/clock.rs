@@ -3,6 +3,7 @@
 
 use pare_common::db::indices::{CellId, NetId, PinId};
 use pare_common::db::liberty::LibCellId;
+use pare_common::units::Seconds;
 use rustc_hash::FxHashMap;
 
 /// A point in database units.
@@ -27,8 +28,8 @@ pub(crate) struct ClockInst {
     /// The buffer's instance once it exists.
     pub cell: Option<CellId>,
     pub input_cap: f32,
-    /// Insertion delay as a wire length in database units.
-    pub insertion_delay: f64,
+    /// The delay through a sink's own clock tree; zero for a buffer.
+    pub insertion_delay: Seconds,
     pub output_cap: f32,
     pub ideal_output_cap: f32,
 }
@@ -127,7 +128,7 @@ impl Clock {
             input_pin: None,
             cell: None,
             input_cap: 0.0,
-            insertion_delay: 0.0,
+            insertion_delay: Seconds::ZERO,
             output_cap: 0.0,
             ideal_output_cap: 0.0,
         });
@@ -183,7 +184,8 @@ pub(crate) struct ClockSink {
     pub location: DbuPoint,
     pub pin: PinId,
     pub input_cap: f32,
-    pub insertion_delay: f64,
+    /// The delay through the sink's own clock tree.
+    pub insertion_delay: Seconds,
 }
 
 /// A name with each `/` escaped by a backslash, as `OpenSTA`'s

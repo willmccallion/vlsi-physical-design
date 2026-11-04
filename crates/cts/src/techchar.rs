@@ -24,6 +24,9 @@ const CAP_STEPS: usize = 20;
 const WIRELENGTH_ITERATIONS: u32 = 4;
 const NUM_BITS_PER_FIELD: u32 = 10;
 const MAX_NORMALIZED: u32 = (1 << NUM_BITS_PER_FIELD) - 1;
+/// Steps of a segment's delay per slew step, as
+/// `TechChar::characterizationPostProcess` normalizes delays.
+const DELAY_STEPS_PER_SLEW_STEP: f32 = 5.0;
 
 /// One characterized stretch of clock wire.
 ///
@@ -65,6 +68,31 @@ impl WireSegment {
     }
 }
 
+/// A length along clock wire in the characterization's length unit, the
+/// unit the H-tree measures its distances in.
+#[derive(Clone, Copy, Debug, Default, PartialEq, PartialOrd)]
+pub(crate) struct SegmentLength(f64);
+
+impl SegmentLength {
+    /// The length in length units.
+    #[must_use]
+    pub(crate) const fn get(self) -> f64 {
+        self.0
+    }
+}
+
+/// The delay one length unit of the tree's own buffered clock wire adds.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub(crate) struct WireDelayRate(Seconds);
+
+impl WireDelayRate {
+    /// The length of clock wire that delays the clock by `delay`.
+    #[must_use]
+    pub(crate) fn length_of(self, delay: Seconds) -> SegmentLength {
+        SegmentLength(delay / self.0)
+    }
+}
+
 /// What the characterization is built from.
 #[derive(Clone, Copy, Debug)]
 pub(crate) struct CharSetup<'a> {
@@ -94,6 +122,7 @@ pub(crate) struct TechChar {
     char_unit: u32,
     cap_per_dbu: f64,
     sink_buffer_input_cap: f32,
+    wire_delay_rate: Option<WireDelayRate>,
 }
 
 /// One buffered-wire pattern: the wire before each buffer and after the
@@ -324,6 +353,14 @@ impl TechChar {
     #[must_use]
     pub(crate) const fn actual_min_input_cap(&self) -> u32 {
         self.actual_min_input_cap
+    }
+
+    /// The least delay per length unit among the buffered segments that
+    /// keep their slew, the rate at which a long run of the tree's own wire
+    /// delays the clock; none when no buffered segment keeps its slew.
+    #[must_use]
+    pub(crate) const fn wire_delay_rate(&self) -> Option<WireDelayRate> {
+        self.wire_delay_rate
     }
 
     /// The length unit, in database units.
@@ -821,7 +858,7 @@ fn post_process(measurements: &[Measured], plan: &Plan) -> (Vec<Normalized>, All
         let wirelength = bounds
             .wirelength
             .normalize(m.wirelength, plan.char_unit as f32) as f32;
-        let pin_arrival = (m.pin_arrival / (plan.slew_step / 5.0)).ceil();
+        let pin_arrival = (m.pin_arrival / (plan.slew_step / DELAY_STEPS_PER_SLEW_STEP)).ceil();
         let topology = m
             .topology
             .iter()
@@ -869,6 +906,7 @@ fn compile(
         char_unit: plan.char_unit,
         cap_per_dbu,
         sink_buffer_input_cap: plan.sink_buffer_input_cap,
+        wire_delay_rate: None,
     };
     let limits = [
         table.min_segment_length,
@@ -924,5 +962,78 @@ fn compile(
         }
         table.push(segment);
     }
+    table.wire_delay_rate = least_wire_delay_rate(&table.segments, delay_step(plan));
     Ok(table)
+}
+
+/// The time a step of a segment's delay stands for.
+fn delay_step(plan: &Plan) -> Seconds {
+    Seconds::new(f64::from(plan.slew_step / DELAY_STEPS_PER_SLEW_STEP))
+}
+
+/// The least delay per length unit among the buffered `segments` whose
+/// output slew is no worse than their input slew, so that a run of them
+/// could go on without end; none when no buffered segment keeps its slew.
+fn least_wire_delay_rate(segments: &[WireSegment], delay_step: Seconds) -> Option<WireDelayRate> {
+    segments
+        .iter()
+        .filter(|s| s.is_buffered() && s.length > 0 && s.output_slew <= s.input_slew)
+        .map(|s| delay_step * f64::from(s.delay) / f64::from(s.length))
+        .reduce(Seconds::min)
+        .map(WireDelayRate)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// A segment of `length` units with `delay` steps, `input_slew` and
+    /// `output_slew` steps, buffered or bare.
+    fn segment(
+        length: u8,
+        delay: u32,
+        input_slew: u8,
+        output_slew: u8,
+        buffered: bool,
+    ) -> WireSegment {
+        WireSegment {
+            length,
+            load: 1,
+            output_slew,
+            delay,
+            input_cap: 1,
+            input_slew,
+            buffer_locations: if buffered { vec![0.5] } else { Vec::new() },
+            buffer_masters: if buffered {
+                vec![LibCellId(0)]
+            } else {
+                Vec::new()
+            },
+            wl_to_first_buffer: 0,
+            last_wl: 0,
+        }
+    }
+
+    const STEP: Seconds = Seconds::new(1e-12);
+
+    #[test]
+    fn the_rate_is_the_least_delay_per_length_of_buffered_segments_keeping_their_slew() {
+        let segments = [
+            segment(5, 10, 3, 3, true),
+            segment(2, 6, 3, 2, true),
+            segment(10, 1, 2, 4, true),
+            segment(10, 1, 3, 3, false),
+        ];
+
+        let rate = least_wire_delay_rate(&segments, STEP).unwrap();
+
+        assert_eq!(rate.length_of(Seconds::new(10e-12)), SegmentLength(5.0));
+    }
+
+    #[test]
+    fn without_a_buffered_segment_keeping_its_slew_there_is_no_rate() {
+        let segments = [segment(10, 1, 2, 4, true), segment(10, 1, 3, 3, false)];
+
+        assert_eq!(least_wire_delay_rate(&segments, STEP), None);
+    }
 }

@@ -20,10 +20,11 @@ use crate::options::{
     MAX_SLEW, SINK_CLUSTERING_SIZE, Settings,
 };
 use crate::sink_clustering::SinkClustering;
-use crate::techchar::TechChar;
+use crate::techchar::{SegmentLength, TechChar};
 use pare_common::db::liberty::LibCellId;
 use pare_common::geom::dbu::Dbu;
 use pare_common::geom::rect::Rect;
+use pare_common::units::Seconds;
 use rustc_hash::{FxHashMap, FxHashSet};
 
 /// The fewest register sinks a tree clusters under leaf buffers, as
@@ -221,7 +222,7 @@ pub(crate) struct Builder {
     pub top_input_net: Option<pare_common::db::indices::NetId>,
     pub n_dummies: usize,
     occupied: FxHashSet<(u64, u64)>,
-    insertion_delays: FxHashMap<(u64, u64), f64>,
+    insertion_lengths: FxHashMap<(u64, u64), SegmentLength>,
     sink_region: Region,
     topologies: Vec<LevelTopology>,
     location_to_sink: FxHashMap<(u64, u64), InstRef>,
@@ -246,7 +247,7 @@ impl Builder {
             top_input_net: None,
             n_dummies: 0,
             occupied: FxHashSet::default(),
-            insertion_delays: FxHashMap::default(),
+            insertion_lengths: FxHashMap::default(),
             sink_region: Region::default(),
             topologies: Vec::new(),
             location_to_sink: FxHashMap::default(),
@@ -265,14 +266,18 @@ impl Builder {
         self.children.is_empty()
     }
 
-    fn insertion_delay(&self, p: Point) -> f64 {
-        self.insertion_delays.get(&p.key()).copied().unwrap_or(0.0)
+    /// The length of clock wire a sink at `p` stands for beyond its pin.
+    fn insertion_length(&self, p: Point) -> SegmentLength {
+        self.insertion_lengths
+            .get(&p.key())
+            .copied()
+            .unwrap_or_default()
     }
 
-    /// The distance between two points plus the insertion delays at them,
-    /// as `TreeBuilder::computeDist`.
+    /// The distance between two points plus the clock wire the sinks there
+    /// stand for, as `TreeBuilder::computeDist`.
     pub(crate) fn compute_dist(&self, a: Point, b: Point) -> f64 {
-        a.dist(b) + self.insertion_delay(a) + self.insertion_delay(b)
+        a.dist(b) + self.insertion_length(a).get() + self.insertion_length(b).get()
     }
 
     fn is_occupied(&self, p: Point) -> bool {
@@ -501,7 +506,7 @@ impl Builder {
         max_diameter: f32,
         size: u32,
     ) {
-        self.index_sinks();
+        self.index_sinks(tech);
         if sinks.len() <= self.min_clustering_sinks() || !ctx.settings.sink_clustering {
             self.top_level_sinks_clustered = sinks.to_vec();
             return;
@@ -524,9 +529,10 @@ impl Builder {
         }
     }
 
-    /// Records each sink by its location in wire segment units, and its
-    /// insertion delay where it has one.
-    fn index_sinks(&mut self) {
+    /// Records each sink by its location in wire segment units, and where
+    /// it has an insertion delay, the length of the tree's own clock wire
+    /// with that delay, as `HTreeBuilder::preSinkClustering` does.
+    fn index_sinks(&mut self, tech: &TechChar) {
         let unit = self.wire_segment_unit as f32;
         for i in 0..self.clock.sinks.len() {
             let s = &self.clock.sinks[i];
@@ -538,11 +544,24 @@ impl Builder {
             let _ = self
                 .location_to_sink
                 .insert(location.key(), InstRef::Sink(i));
-            if !fuzzy_eq(delay, 0.0, 1e-6) {
-                let _ = self
-                    .insertion_delays
-                    .insert(location.key(), delay / self.unit());
+            if delay == Seconds::ZERO {
+                continue;
             }
+            // NOTE: diverges from TritonCTS, which takes delay / (r * c) of
+            // the signal wire per micron, an area rather than a length, and
+            // divides it by the segment unit in database units; PARE takes
+            // the length of the tree's own buffered wire with that delay.
+            let Some(rate) = tech.wire_delay_rate() else {
+                log::warn!(
+                    "insertion delay of {} is not used: no characterized buffered \
+                     segment keeps its slew",
+                    s.name
+                );
+                continue;
+            };
+            let _ = self
+                .insertion_lengths
+                .insert(location.key(), rate.length_of(delay));
         }
     }
 
@@ -570,7 +589,8 @@ impl Builder {
             } else {
                 cap
             };
-            matching.add_point(f64::from(x), f64::from(y), cap);
+            let at = Point::new(f64::from(x), f64::from(y));
+            matching.add_point(at.x, at.y, cap, self.insertion_length(at));
         }
         let (diameter_set, size_set) = if is_macro {
             (ctx.settings.macro_max_diameter.is_some(), true)
@@ -579,25 +599,24 @@ impl Builder {
         };
         let unit_i = self.wire_segment_unit;
         let dbu = ctx.dbu as f32;
-        let dist = |a: Point, b: Point| self.compute_dist(a, b);
         match (size_set, diameter_set) {
-            (true, true) => matching.run(size as usize, max_diameter, unit_i, &dist),
+            (true, true) => matching.run(size as usize, max_diameter, unit_i),
             (false, true) => {
                 for &s in &ctx.settings.sink_clustering_sizes {
-                    matching.run(s as usize, max_diameter, unit_i, &dist);
+                    matching.run(s as usize, max_diameter, unit_i);
                 }
             }
             (true, false) => {
                 for d in CLUSTER_DIAMETERS {
                     let diameter = d as f32 * dbu / unit;
-                    matching.run(size as usize, diameter, unit_i, &dist);
+                    matching.run(size as usize, diameter, unit_i);
                 }
             }
             (false, false) => {
                 for d in CLUSTER_DIAMETERS {
                     for &s in &ctx.settings.sink_clustering_sizes {
                         let diameter = d as f32 * dbu / unit;
-                        matching.run(s as usize, diameter, unit_i, &dist);
+                        matching.run(s as usize, diameter, unit_i);
                     }
                 }
             }

@@ -129,4 +129,98 @@ library (clock_cells) {
       }
     }
   }
+  cell (DFF_SLOW) {
+    area : 4.5 ;
+    ff ("IQ", "IQN") {
+      next_state : "D" ;
+      clocked_on : "CK" ;
+    }
+    pin (D) {
+      direction : input ;
+      capacitance : 1.1 ;
+      timing () {
+        related_pin : "CK" ;
+        timing_type : setup_rising ;
+        rise_constraint (check_t) { values ("0.03, 0.05", "0.03, 0.05") ; }
+        fall_constraint (check_t) { values ("0.03, 0.05", "0.03, 0.05") ; }
+      }
+      timing () {
+        related_pin : "CK" ;
+        timing_type : hold_rising ;
+        rise_constraint (check_t) { values ("0.01, 0.02", "0.01, 0.02") ; }
+        fall_constraint (check_t) { values ("0.01, 0.02", "0.01, 0.02") ; }
+      }
+    }
+    pin (CK) {
+      direction : input ;
+      clock : true ;
+      capacitance : 0.95 ;
+      timing () {
+        timing_type : max_clock_tree_path ;
+        timing_sense : positive_unate ;
+        cell_rise (scalar) { values ("0.2") ; }
+        cell_fall (scalar) { values ("0.2") ; }
+      }
+    }
+    pin (Q) {
+      direction : output ;
+      function : "IQ" ;
+      max_capacitance : 60.0 ;
+      timing () {
+        related_pin : "CK" ;
+        timing_type : rising_edge ;
+        cell_rise (delay_t) { values ("0.08, 0.3", "0.09, 0.31") ; }
+        cell_fall (delay_t) { values ("0.08, 0.3", "0.09, 0.31") ; }
+        rise_transition (delay_t) { values ("0.01, 0.4", "0.02, 0.41") ; }
+        fall_transition (delay_t) { values ("0.01, 0.4", "0.02, 0.41") ; }
+      }
+    }
+  }
+  cell (DFF_SLOWER) {
+    area : 4.5 ;
+    ff ("IQ", "IQN") {
+      next_state : "D" ;
+      clocked_on : "CK" ;
+    }
+    pin (D) {
+      direction : input ;
+      capacitance : 1.1 ;
+      timing () {
+        related_pin : "CK" ;
+        timing_type : setup_rising ;
+        rise_constraint (check_t) { values ("0.03, 0.05", "0.03, 0.05") ; }
+        fall_constraint (check_t) { values ("0.03, 0.05", "0.03, 0.05") ; }
+      }
+      timing () {
+        related_pin : "CK" ;
+        timing_type : hold_rising ;
+        rise_constraint (check_t) { values ("0.01, 0.02", "0.01, 0.02") ; }
+        fall_constraint (check_t) { values ("0.01, 0.02", "0.01, 0.02") ; }
+      }
+    }
+    pin (CK) {
+      direction : input ;
+      clock : true ;
+      capacitance : 0.95 ;
+      timing () {
+        timing_type : max_clock_tree_path ;
+        timing_sense : positive_unate ;
+        cell_rise (scalar) { values ("0.6") ; }
+        cell_fall (scalar) { values ("0.6") ; }
+      }
+    }
+    pin (Q) {
+      direction : output ;
+      function : "IQ" ;
+      max_capacitance : 60.0 ;
+      timing () {
+        related_pin : "CK" ;
+        timing_type : rising_edge ;
+        cell_rise (delay_t) { values ("0.08, 0.3", "0.09, 0.31") ; }
+        cell_fall (delay_t) { values ("0.08, 0.3", "0.09, 0.31") ; }
+        rise_transition (delay_t) { values ("0.01, 0.4", "0.02, 0.41") ; }
+        fall_transition (delay_t) { values ("0.01, 0.4", "0.02, 0.41") ; }
+      }
+    }
+  }
 }
