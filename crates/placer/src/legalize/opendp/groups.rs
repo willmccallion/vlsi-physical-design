@@ -7,7 +7,7 @@
 use super::cpp::{Mt19937, sort};
 use super::{
     DUMMY_CELL, DetailedPlacementError, GridPt, MAX_DISPLACEMENT_X, MAX_DISPLACEMENT_Y, Node,
-    Placer, area,
+    Placer, area, group_id, node_id,
 };
 use pare_common::db::design::NetlistDB;
 use pare_common::geom::dbu::Dbu;
@@ -171,7 +171,7 @@ impl Placer {
                     }
                 }
             }
-            let id = u32::try_from(g).unwrap_or(u32::MAX);
+            let id = group_id(g);
             for rect in &rects {
                 let (x0, y0, x1, y1) = self.grid_within(rect);
                 for y in y0..y1 {
@@ -216,7 +216,7 @@ impl Placer {
     /// `Opendp::groupAssignCellRegions`.
     fn assign_cell_regions(&mut self) {
         for g in 0..self.groups.len() {
-            let id = u32::try_from(g).unwrap_or(u32::MAX);
+            let id = group_id(g);
             let mut site_area: i64 = 0;
             if !self.groups[g].cells.is_empty() {
                 for x in 0..self.row_site_count {
@@ -537,7 +537,7 @@ impl Placer {
             Point::new(Dbu(node.left + node.width), Dbu(node.bottom + node.height)),
         );
         let (x0, y0, x1, y1) = self.covering(&rect);
-        let id = u32::try_from(n).unwrap_or(super::NO_CELL);
+        let id = node_id(n);
         for x in x0..x1 {
             for y in y0..y1 {
                 if let Some(p) = self.pixel_mut(x, y)
