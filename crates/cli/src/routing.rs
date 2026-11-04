@@ -3,9 +3,7 @@
 use crate::checks::report_routing;
 use crate::path_str;
 use crate::placement::legalize;
-use crate::repair::{
-    NetlistRepair, Networks, clock_wire_rc, show_design_repair, timing_repair_on, wire_rc,
-};
+use crate::repair::{NetlistRepair, Networks, show_design_repair, timing_repair_on};
 use crate::report::{GlobalRouteRepairSummary, Report, RoutingSummary};
 use anyhow::Context;
 use pare_common::db::design::NetlistDB;
@@ -96,7 +94,6 @@ pub(crate) fn global_route_with_repair(
     ui::phase("Global Route");
     let mut session = GlobalSession::new(db, &config.routing)?;
     report.phase("global routing", phase_start);
-    let rc = wire_rc(config, db)?;
     let route_rc = route_rc(config, db)?;
     let sites = SiteGrid::new(db).context("the design has no core rows to legalize on")?;
     let legalize = |db: &mut NetlistDB, cell: CellId| sites.legalize(db, cell);
@@ -112,7 +109,6 @@ pub(crate) fn global_route_with_repair(
         let phase_start = Instant::now();
         let link = Link::new(db, &repair.liberty, &config.netlist.dont_use)?;
         let networks = Networks::find(db, &link, config, Some(sdc))?;
-        let clock_rc = clock_wire_rc(config, db)?;
         let routes = GlobalRouting {
             source: &mut session,
             rc: route_rc.clone(),
@@ -120,8 +116,8 @@ pub(crate) fn global_route_with_repair(
         };
         let inputs = SessionInputs {
             db,
-            context: networks.context(&link, clock_rc),
-            rc,
+            context: networks.context(&link, repair.wires.clock),
+            rc: repair.wires.signal,
             buffers: networks.buffers.clone(),
             namer: &mut repair.namer,
         };

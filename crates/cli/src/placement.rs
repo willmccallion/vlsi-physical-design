@@ -4,9 +4,7 @@
 use crate::checks::report_placement;
 use crate::cts::clock_tree_synthesis;
 use crate::path_str;
-use crate::repair::{
-    NetlistRepair, Networks, clock_wire_rc, repair_design, repair_netlist, repair_timing, wire_rc,
-};
+use crate::repair::{NetlistRepair, Networks, repair_design, repair_netlist, repair_timing};
 use crate::report::{PlacementSummary, Report};
 use anyhow::Context;
 use pare_common::db::design::{NetlistDB, PlacementStatus};
@@ -31,7 +29,6 @@ use pare_placer::legalize::opendp::improve::improve_placement;
 use pare_placer::legalize::opendp::mirror::optimize_mirroring;
 use pare_placer::model::PlacementModel;
 use pare_placer::zones::{Zone, Zones};
-use pare_resizer::parasitics::WireRc;
 use pare_resizer::{Link, Rebuffer, Repairer, Resizer, SessionInputs, timing_net_weights};
 use pare_router::{CapacityReduction, GlobalRouteEstimator};
 use std::num::NonZeroUsize;
@@ -411,12 +408,10 @@ fn global_placement(
     };
     let result = if let Some(repair) = timing {
         drop(estimator);
-        let rc = wire_rc(config, db)?;
         let mut driver = TimingPlacement {
             config,
             db,
             repair,
-            rc,
             rounds: 0,
         };
         global::place(&mut model, &params, None, Some(&mut driver), show)?
@@ -553,7 +548,6 @@ struct TimingPlacement<'a> {
     config: &'a Config,
     db: &'a mut NetlistDB,
     repair: &'a mut NetlistRepair,
-    rc: WireRc,
     rounds: usize,
 }
 
@@ -571,12 +565,11 @@ impl TimingDriver for TimingPlacement<'_> {
             .context("timing-driven placement needs an SDC file")?;
         let link = Link::new(self.db, &self.repair.liberty, &self.config.netlist.dont_use)?;
         let networks = Networks::find(self.db, &link, self.config, Some(sdc))?;
-        let clock_rc = clock_wire_rc(self.config, self.db)?;
         let cells_before = self.db.cells.len();
         let inputs = SessionInputs {
             db: self.db,
-            context: networks.context(&link, clock_rc),
-            rc: self.rc,
+            context: networks.context(&link, self.repair.wires.clock),
+            rc: self.repair.wires.signal,
             buffers: networks.buffers.clone(),
             namer: &mut self.repair.namer,
         };

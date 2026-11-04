@@ -1,6 +1,6 @@
 //! Clock tree synthesis and the repairs that follow it.
 
-use crate::repair::{NetlistRepair, Networks, clock_wire_rc, wire_rc};
+use crate::repair::{NetlistRepair, Networks};
 use crate::report::{ClockTreeSummary, Report};
 use anyhow::Context;
 use pare_common::db::design::NetlistDB;
@@ -27,8 +27,11 @@ pub(crate) fn clock_tree_synthesis(
     if repair.sdc.is_none() || !config.netlist.clock_tree {
         return Ok(false);
     }
-    let rc = wire_rc(config, db)?;
-    let clock_rc = clock_wire_rc(config, db)?.context("[netlist] clock trees need clock_wire")?;
+    let rc = repair.wires.signal;
+    let clock_rc = repair
+        .wires
+        .clock
+        .context("[netlist] clock trees need clock_wire")?;
     let phase_start = Instant::now();
     ui::phase("Clock Tree Synthesis");
     let link = Link::new(db, &repair.liberty, &config.netlist.dont_use)?;
