@@ -8,7 +8,9 @@
 
 use crate::CtsError;
 use crate::htree::{Point, TreeContext};
-use crate::triton::{ClockTrees, avg_xy, first_output, is_sink, net_cell_pins, pin_direction};
+use crate::triton::{
+    ClockTrees, first_output, is_sink, net_cell_pins, pin_direction, sink_bbox_center,
+};
 use pare_common::db::design::{NetlistDB, PinOwner, PlacementStatus};
 use pare_common::db::indices::{MacroPinId, NetId, PinId};
 use pare_common::db::liberty::{ClockGatePin, Edge, SequentialKind};
@@ -261,9 +263,9 @@ impl Balancer<'_> {
         worst
     }
 
-    fn source_position(&self, db: &NetlistDB, node: usize) -> (i64, i64) {
+    fn source_position(&self, db: &NetlistDB, node: usize) -> DbPoint<Dbu> {
         if let Some(pin) = self.nodes[node].input {
-            return avg_xy(db, pin);
+            return db.average_pin_position(pin);
         }
         let net = self.trees.builders[self.root].top_input_net;
         net.and_then(|n| {
@@ -273,15 +275,12 @@ impl Balancer<'_> {
                 .copied()
                 .find(|&p| matches!(db.pins[p.index()].owner, PinOwner::Io(_)))
         })
-        .map_or((0, 0), |p| {
-            let c = db.pin_position(p);
-            (c.x.get(), c.y.get())
-        })
+        .map_or_else(DbPoint::default, |p| db.pin_position(p))
     }
 
     /// How many delay buffers a node needs to reach the slowest arrival,
     /// as `LatencyBalancer::computeNumberOfDelayBuffers`.
-    fn delay_buffers_needed(&mut self, db: &NetlistDB, node: usize, src: (i64, i64)) {
+    fn delay_buffers_needed(&mut self, db: &NetlistDB, node: usize, src: DbPoint<Dbu>) {
         if self.nodes[node].arrival == 0.0 {
             return;
         }
@@ -290,9 +289,9 @@ impl Balancer<'_> {
         let Some(input) = self.nodes[node].input else {
             return;
         };
-        let sink = avg_xy(db, input);
-        let dx = (sink.0 - src.0) as f32 / (first + 1) as f32;
-        let dy = (sink.1 - src.1) as f32 / (first + 1) as f32;
+        let sink = db.average_pin_position(input);
+        let dx = (sink.x - src.x).get() as f32 / (first + 1) as f32;
+        let dy = (sink.y - src.y).get() as f32 / (first + 1) as f32;
         let delay = self.buffer_delay(f64::from(dx.abs() + dy.abs()) * self.trees.cap_per_dbu);
         self.nodes[node].buffers = (gap / f64::from(delay)) as i32;
     }
@@ -345,22 +344,16 @@ impl Balancer<'_> {
         &mut self,
         db: &mut NetlistDB,
         count: i32,
-        src: (i64, i64),
+        src: DbPoint<Dbu>,
         loads: &[PinId],
     ) -> Result<Option<PinId>, CtsError> {
         let Some(&first_load) = loads.first() else {
             return Ok(None);
         };
         let mut driving = db.pins[first_load.index()].net;
-        let (mut lo, mut hi) = ((i64::MAX, i64::MAX), (i64::MIN, i64::MIN));
-        for &load in loads {
-            let p = avg_xy(db, load);
-            lo = (lo.0.min(p.0), lo.1.min(p.1));
-            hi = (hi.0.max(p.0), hi.1.max(p.1));
-        }
-        let center = (i64::midpoint(lo.0, hi.0), i64::midpoint(lo.1, hi.1));
-        let dx = (center.0 - src.0) as f32 / (count + 1) as f32;
-        let dy = (center.1 - src.1) as f32 / (count + 1) as f32;
+        let center = sink_bbox_center(db, loads);
+        let dx = (center.x - src.x).get() as f32 / (count + 1) as f32;
+        let dy = (center.y - src.y).get() as f32 / (count + 1) as f32;
         let root = &self.trees.builders[self.root];
         let ctx = TreeContext {
             settings: &self.trees.settings,
@@ -393,14 +386,10 @@ impl Balancer<'_> {
         for i in 0..count {
             let step = (i + 1) as f32;
             let at = Point::new(
-                f64::from(src.0 as f32 + dx * step) / unit,
-                f64::from(src.1 as f32 + dy * step) / unit,
+                f64::from(src.x.get() as f32 + dx * step) / unit,
+                f64::from(src.y.get() as f32 + dy * step) / unit,
             );
-            let legal = root.legalize_one_buffer(&ctx, at, buffer);
-            let location = DbPoint::new(
-                Dbu(i64::from((legal.x * unit) as i32)),
-                Dbu(i64::from((legal.y * unit) as i32)),
-            );
+            let location = root.legalize_one_buffer(&ctx, at, buffer).to_dbu(unit);
             let name = format!("delaybuf_{}_{clock_name}", self.index);
             let net_name = format!("delaynet_{}_{clock_name}", self.index);
             self.index += 1;

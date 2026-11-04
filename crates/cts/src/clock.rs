@@ -3,11 +3,11 @@
 
 use pare_common::db::indices::{CellId, NetId, PinId};
 use pare_common::db::liberty::LibCellId;
+use pare_common::geom::dbu::Dbu;
+use pare_common::geom::point::Point;
+use pare_common::geom::rect::Rect;
 use pare_common::units::Seconds;
 use rustc_hash::FxHashMap;
-
-/// A point in database units.
-pub(crate) type DbuPoint = (i64, i64);
 
 /// Whether a clock instance is a buffer the tree adds or a sink it reaches.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -22,7 +22,7 @@ pub(crate) struct ClockInst {
     pub name: String,
     pub master: Option<LibCellId>,
     pub kind: InstKind,
-    pub location: DbuPoint,
+    pub location: Point<Dbu>,
     /// The sink's clock pin, or the buffer's input once it exists.
     pub input_pin: Option<PinId>,
     /// The buffer's instance once it exists.
@@ -115,7 +115,7 @@ impl Clock {
         &mut self,
         name: &str,
         master: LibCellId,
-        location: DbuPoint,
+        location: Point<Dbu>,
     ) -> InstRef {
         let full = format!("{name}_{}", self.net_name);
         let inst = InstRef::Buffer(self.buffers.len());
@@ -163,16 +163,16 @@ impl Clock {
 
     /// The box around the sinks with the outer hundredth on each side left
     /// out, as `Clock::computeSinkRegion`.
-    pub(crate) fn sink_region(&self) -> (DbuPoint, DbuPoint) {
-        let mut xs: Vec<i64> = self.sinks.iter().map(|s| s.location.0).collect();
-        let mut ys: Vec<i64> = self.sinks.iter().map(|s| s.location.1).collect();
+    pub(crate) fn sink_region(&self) -> Rect<Dbu> {
+        let mut xs: Vec<Dbu> = self.sinks.iter().map(|s| s.location.x).collect();
+        let mut ys: Vec<Dbu> = self.sinks.iter().map(|s| s.location.y).collect();
         xs.sort_unstable();
         ys.sort_unstable();
         let n = xs.len();
         let outliers = (0.01 * n as f64) as usize;
-        (
-            (xs[outliers], ys[outliers]),
-            (xs[n - outliers - 1], ys[n - outliers - 1]),
+        Rect::new(
+            Point::new(xs[outliers], ys[outliers]),
+            Point::new(xs[n - outliers - 1], ys[n - outliers - 1]),
         )
     }
 }
@@ -181,7 +181,7 @@ impl Clock {
 #[derive(Clone, Debug, PartialEq)]
 pub(crate) struct ClockSink {
     pub name: String,
-    pub location: DbuPoint,
+    pub location: Point<Dbu>,
     pub pin: PinId,
     pub input_cap: f32,
     /// The delay through the sink's own clock tree.

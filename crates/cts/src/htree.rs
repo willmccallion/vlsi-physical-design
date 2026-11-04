@@ -23,6 +23,7 @@ use crate::sink_clustering::SinkClustering;
 use crate::techchar::{SegmentLength, TechChar};
 use pare_common::db::liberty::LibCellId;
 use pare_common::geom::dbu::Dbu;
+use pare_common::geom::point::Point as DbPoint;
 use pare_common::geom::rect::Rect;
 use pare_common::units::Seconds;
 use rustc_hash::{FxHashMap, FxHashSet};
@@ -59,6 +60,13 @@ impl Point {
         Self::new(f64::from(p.0), f64::from(p.1))
     }
 
+    /// The point in database units, `unit` of them to the tree's length
+    /// unit, truncated to `int` as `TritonCTS` stores positions.
+    pub(crate) fn to_dbu(self, unit: f64) -> DbPoint<Dbu> {
+        let truncate = |v: f64| Dbu(i64::from((v * unit) as i32));
+        DbPoint::new(truncate(self.x), truncate(self.y))
+    }
+
     pub fn dist(self, other: Self) -> f64 {
         (self.x - other.x).abs() + (self.y - other.y).abs()
     }
@@ -79,6 +87,12 @@ impl Point {
     fn key_f32(self) -> (u64, u64) {
         Self::new(f64::from(self.x as f32), f64::from(self.y as f32)).key()
     }
+}
+
+/// A position in database units in the tree's length unit, `unit`
+/// database units long, in single precision as `TritonCTS` takes sinks.
+fn in_segment_units(p: DbPoint<Dbu>, unit: f32) -> (f32, f32) {
+    (p.x.get() as f32 / unit, p.y.get() as f32 / unit)
 }
 
 /// `TritonCTS`'s `fuzzyEqual`.
@@ -203,7 +217,7 @@ pub(crate) struct TreeContext<'a> {
     pub dbu: i32,
     pub root_buffer: LibCellId,
     pub sink_buffer: LibCellId,
-    pub buffer_sizes: &'a FxHashMap<LibCellId, (i64, i64)>,
+    pub buffer_sizes: &'a FxHashMap<LibCellId, DbPoint<Dbu>>,
     pub blockages: &'a [Rect<Dbu>],
 }
 
@@ -325,8 +339,11 @@ impl Builder {
     }
 
     fn buffer_size(&self, ctx: &TreeContext<'_>, buffer: LibCellId) -> (f64, f64) {
-        let (w, h) = ctx.buffer_sizes.get(&buffer).copied().unwrap_or((0, 0));
-        (w as f64 / self.unit(), h as f64 / self.unit())
+        let size = ctx.buffer_sizes.get(&buffer).copied().unwrap_or_default();
+        (
+            size.x.get() as f64 / self.unit(),
+            size.y.get() as f64 / self.unit(),
+        )
     }
 
     /// Moves a buffer inside a blockage to the free spot beside it nearest
@@ -465,18 +482,18 @@ impl Builder {
             .clock
             .sinks
             .iter()
-            .map(|s| (s.location.0 as f32 / unit, s.location.1 as f32 / unit))
+            .map(|s| in_segment_units(s.location, unit))
             .collect();
         let max_diameter = (diameter * f64::from(ctx.dbu) / self.unit()) as f32;
         self.pre_sink_clustering(ctx, tech, &sinks, max_diameter, size);
         if sinks.len() <= self.min_clustering_sinks() || !ctx.settings.sink_clustering {
-            let (lo, hi) = self.clock.sink_region();
+            let region = self.clock.sink_region();
             let f = 1.0 / self.unit();
             self.sink_region = Region::new(
-                lo.0 as f64 * f,
-                lo.1 as f64 * f,
-                hi.0 as f64 * f,
-                hi.1 as f64 * f,
+                region.min.x.get() as f64 * f,
+                region.min.y.get() as f64 * f,
+                region.max.x.get() as f64 * f,
+                region.max.y.get() as f64 * f,
             );
         } else {
             let (mut x_min, mut x_max) = (f32::MAX, f32::MIN);
@@ -536,10 +553,7 @@ impl Builder {
         let unit = self.wire_segment_unit as f32;
         for i in 0..self.clock.sinks.len() {
             let s = &self.clock.sinks[i];
-            let location = Point::new(
-                f64::from(s.location.0 as f32 / unit),
-                f64::from(s.location.1 as f32 / unit),
-            );
+            let location = Point::from_f32(in_segment_units(s.location, unit));
             let delay = s.insertion_delay;
             let _ = self
                 .location_to_sink
@@ -647,10 +661,7 @@ impl Builder {
         let center = Point::new(f64::from(x_sum / n), f64::from(y_sum / n));
         let legal = self.legalize_one_buffer(ctx, center, ctx.sink_buffer);
         self.commit_move(center, legal);
-        let location = (
-            (legal.x * self.unit()) as i32 as i64,
-            (legal.y * self.unit()) as i32 as i64,
-        );
+        let location = legal.to_dbu(self.unit());
         let buffer =
             self.clock
                 .add_buffer(&format!("clkbuf_leaf_{count}"), ctx.sink_buffer, location);
@@ -1065,10 +1076,9 @@ impl Builder {
         self.sink_region.center = Some(legal_center);
         self.commit_move(center, legal_center);
         let unit = self.unit();
-        let to_dbu = |p: Point| ((p.x * unit) as i32 as i64, (p.y * unit) as i32 as i64);
         let root = self
             .clock
-            .add_buffer("clkbuf_0", ctx.root_buffer, to_dbu(legal_center));
+            .add_buffer("clkbuf_0", ctx.root_buffer, legal_center.to_dbu(unit));
         if self.top_buffer_name.is_empty() {
             self.top_buffer_name = self.clock.inst(root).name.clone();
         }
@@ -1142,10 +1152,7 @@ impl Builder {
         self.sink_region.center = Some(legal);
         self.commit_move(center, legal);
         let unit = self.unit();
-        let location = (
-            (legal.x * unit) as i32 as i64,
-            (legal.y * unit) as i32 as i64,
-        );
+        let location = legal.to_dbu(unit);
         let root = self.clock.add_buffer("clkbuf_0", ctx.root_buffer, location);
         if self.top_buffer_name.is_empty() {
             self.top_buffer_name = self.clock.inst(root).name.clone();
@@ -1373,10 +1380,7 @@ impl SegmentBuilder {
                 let buffer = tree.clock.add_buffer(
                     &format!("{}{}", self.inst_prefix, self.levels),
                     master,
-                    (
-                        (legal.x * unit) as i32 as i64,
-                        (legal.y * unit) as i32 as i64,
-                    ),
+                    legal.to_dbu(unit),
                 );
                 if !at.same(legal) {
                     connection -= tree.compute_dist(at, legal);
@@ -1403,10 +1407,7 @@ impl SegmentBuilder {
         let buffer = tree.clock.add_buffer(
             &format!("{}_f", self.inst_prefix),
             master,
-            (
-                (self.target.x * unit) as i32 as i64,
-                (self.target.y * unit) as i32 as i64,
-            ),
+            self.target.to_dbu(unit),
         );
         let _ = tree.tree_level_buffers.insert(buffer);
         tree.clock.subnets[self.driving].add(buffer);
