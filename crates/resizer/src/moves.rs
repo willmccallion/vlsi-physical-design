@@ -8,7 +8,7 @@ use crate::bnet::{self, Bnet, BnetPtr, Kind};
 use crate::fuzzy;
 use crate::library::is_logic_std_cell;
 use crate::rebuffer::{Rebuffer, can_remove_buffer};
-use crate::resizer::{RepairError, Resizer, buffer_delays, gate_delays};
+use crate::resizer::{PortSlews, RepairError, Resizer, buffer_delays, gate_delays};
 use crate::sta::{Path, Sta};
 use pare_common::db::design::PinOwner;
 use pare_common::db::indices::{CellId, LayerId, NetId, PinId};
@@ -760,7 +760,7 @@ fn swap_candidate(
     drvr_port: usize,
     equivalent: &[usize],
     load_cap: Farads,
-    input_slews: &[(String, EdgeValues<Seconds>)],
+    input_slews: &PortSlews<'_>,
     target_slews: &EdgeValues<Seconds>,
 ) -> Option<usize> {
     let mut base_delay = -Seconds::INFINITY;
@@ -769,12 +769,8 @@ fn swap_candidate(
         let from_name = &cell.ports[set.from].name;
         for arc in &set.arcs {
             let in_slew = input_slews
-                .iter()
-                .find(|(n, _)| n == from_name)
-                .map_or_else(
-                    || target_slews.get(arc.from_edge),
-                    |(_, s)| s.get(arc.from_edge),
-                );
+                .get(from_name.as_str())
+                .map_or_else(|| target_slews.get(arc.from_edge), |s| s.get(arc.from_edge));
             let delay = arc.gate_delay(in_slew, load_cap).0;
             if set.from == input {
                 base_delay = base_delay.max(delay);
@@ -997,11 +993,11 @@ fn input_slew_impact_ok(resizer: &Resizer<'_, Sta>, cell: CellId, impact: &SlewI
             return false;
         };
         let load_cap = resizer.load_cap(pin);
-        let slews_of = |slew: EdgeValues<Seconds>| -> Vec<(String, EdgeValues<Seconds>)> {
+        let slews_of = |slew: EdgeValues<Seconds>| -> PortSlews<'_> {
             lib_cell
                 .ports
                 .iter()
-                .map(|p| (p.name.clone(), slew))
+                .map(|p| (p.name.as_str(), slew))
                 .collect()
         };
         let (old_delay, _) = gate_delays(
@@ -1020,7 +1016,9 @@ fn input_slew_impact_ok(resizer: &Resizer<'_, Sta>, cell: CellId, impact: &SlewI
         );
         let delay_diff = (new_delay.rise - old_delay.rise).max(new_delay.fall - old_delay.fall);
         let old_slack = sta.slack(pin, MinMax::Max).time() - impact.margin;
-        let new_slack = old_slack - delay_diff - impact.adjust - impact.margin;
+        // NOTE: OpenROAD takes the margin off the new slack a second time, so
+        // under a margin even an unchanged output breaks the no-worse rule.
+        let new_slack = old_slack - delay_diff - impact.adjust;
         let breaks = match impact.rule {
             SlackRule::NoWorse => fuzzy::greater(old_slack, new_slack),
             SlackRule::NonNegative => new_slack < Seconds::ZERO,
@@ -1181,7 +1179,7 @@ fn slews_in_tree(
             Kind::Load { pin } => out.push((*pin, upstream)),
             Kind::Wire { to, layer } => {
                 let (res, cap) = resizer.tree_rc().wire(*layer);
-                let meters = Meters::from_dbu(node.length(), resizer.db.dbu().get() as f64);
+                let meters = Meters::from_dbu(Dbu(node.length()), resizer.db.dbu());
                 let degradation =
                     meters * res * (to.cap + meters * cap / 2.0) * resizer.slew_rc_factor;
                 walk(resizer, to, upstream + degradation, out);
@@ -1243,7 +1241,15 @@ mod tests {
             rise: Seconds::ZERO,
             fall: Seconds::ZERO,
         };
-        swap_candidate(cell, 0, 2, &[1], Farads::ZERO, &[], &slews)
+        swap_candidate(
+            cell,
+            0,
+            2,
+            &[1],
+            Farads::ZERO,
+            &PortSlews::default(),
+            &slews,
+        )
     }
 
     #[test]
@@ -1284,6 +1290,16 @@ mod tests {
             margin: Seconds::ZERO,
             rule,
         }
+    }
+
+    #[test]
+    fn an_unchanged_arrival_keeps_the_no_worse_rule_under_a_margin() {
+        let impact = SlewImpact {
+            margin: Seconds::new(0.05e-9),
+            ..later_by(0.0, SlackRule::NoWorse)
+        };
+
+        assert_eq!(inverter_keeps(&[impact]), [true]);
     }
 
     /// Whether the inverter's output keeps its slack under each impact,

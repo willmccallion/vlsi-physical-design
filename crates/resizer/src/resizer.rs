@@ -18,11 +18,11 @@ use pare_common::db::indices::{CellId, MacroId, MacroPinId, NetId, PinId};
 use pare_common::db::liberty::{Edge, EdgeValues, LibCell, LibCellId, LibPort, MinMax};
 use pare_common::db::library::DuplicateName;
 use pare_common::db::sdc::Sdc;
-use pare_common::geom::dbu::Dbu;
+use pare_common::geom::dbu::{Dbu, DbuPerMicron};
 use pare_common::geom::orient::Orientation;
 use pare_common::geom::point::Point;
-use pare_common::units::{Farads, Ohms, Seconds};
-use rustc_hash::FxHashSet;
+use pare_common::units::{Farads, Meters, Ohms, Seconds};
+use rustc_hash::{FxHashMap, FxHashSet};
 use std::collections::{HashMap, HashSet};
 
 /// The load a buffer's target slew is measured at, in multiples of its
@@ -59,8 +59,8 @@ pub(crate) struct RepairOptions {
     pub(crate) slew_margin: f64,
     /// Percentage of each capacitance limit kept in hand.
     pub(crate) cap_margin: f64,
-    /// Longest wire allowed, in database units; zero for no limit.
-    pub(crate) max_wire_length: i64,
+    /// Longest wire allowed, if any.
+    pub(crate) max_wire_length: Option<Dbu>,
     /// How much one sizing step may grow a cell.
     pub(crate) sizing_limits: SizingLimits,
 }
@@ -70,7 +70,7 @@ impl Default for RepairOptions {
         Self {
             slew_margin: 0.0,
             cap_margin: 0.0,
-            max_wire_length: 0,
+            max_wire_length: None,
             sizing_limits: SizingLimits::OPENROAD,
         }
     }
@@ -192,6 +192,10 @@ impl Timing for Sta {
         Some(self)
     }
 }
+
+/// The slews at a cell's inputs, by Liberty port name, which equivalent
+/// cells share.
+pub(crate) type PortSlews<'l> = FxHashMap<&'l str, EdgeValues<Seconds>>;
 
 /// What a repair session works on: the design and what it reads about it,
 /// the signal wire it estimates with, the buffers it may insert and the
@@ -393,7 +397,7 @@ impl<'a, T: Timing> Resizer<'a, T> {
         TreeRc {
             signal: self.graph.wire_rc(),
             layers: self.routes.as_ref().map(|r| &r.rc),
-            dbu: self.db.dbu().get() as f64,
+            dbu: self.db.dbu(),
         }
     }
 
@@ -497,7 +501,7 @@ impl<'a, T: Timing> Resizer<'a, T> {
 
     /// Sets the longest wire design repair allows, in database units; zero
     /// for no limit.
-    pub const fn set_max_wire_length(&mut self, length: i64) {
+    pub const fn set_max_wire_length(&mut self, length: Option<Dbu>) {
         self.options.max_wire_length = length;
     }
 
@@ -645,14 +649,14 @@ impl<'a, T: Timing> Resizer<'a, T> {
 
     /// The slews at each input pin of `cell`, by Liberty port name.
     #[must_use]
-    pub fn input_slews(&self, cell: CellId) -> Vec<(String, EdgeValues<Seconds>)> {
+    pub(crate) fn input_slews(&self, cell: CellId) -> PortSlews<'_> {
         let netlist = self.netlist();
         self.db.cells[cell.index()]
             .pins
             .iter()
             .filter_map(|&pin| {
                 let port = netlist.lib_port(pin)?;
-                Some((port.name.clone(), self.graph.slew(pin)))
+                Some((port.name.as_str(), self.graph.slew(pin)))
             })
             .collect()
     }
@@ -1269,6 +1273,14 @@ fn slew_rc_factor(link: &Link<'_>) -> Result<f64, RepairError> {
     Ok(factor * (1.0 + SLEW_RC_PESSIMISM))
 }
 
+/// `meters` in database units, rounded and kept within an `int`, as
+/// `Resizer::metersToDbu`.
+pub(crate) fn meters_to_dbu(meters: Meters, dbu: DbuPerMicron) -> Dbu {
+    Dbu(i64::from(
+        ((meters.get() * f64::from(dbu.get()) * 1e6).round() as i64 as i32) & i32::MAX,
+    ))
+}
+
 /// Target slews from the buffers and the load each usable cell meets them
 /// at, as `Resizer::findBufferTargetSlews` and `findTargetLoads`.
 pub(crate) fn find_targets(link: &Link<'_>, buffers: &BufferSet) -> Targets {
@@ -1390,7 +1402,7 @@ pub(crate) fn gate_delays(
     port: usize,
     load_cap: Farads,
     target_slews: &EdgeValues<Seconds>,
-    input_slews: Option<&[(String, EdgeValues<Seconds>)]>,
+    input_slews: Option<&PortSlews<'_>>,
 ) -> (EdgeValues<Seconds>, EdgeValues<Seconds>) {
     let mut delays = EdgeValues::both(-Seconds::INFINITY);
     let mut slews = delays;
@@ -1398,11 +1410,8 @@ pub(crate) fn gate_delays(
         let from_name = &cell.ports[set.from].name;
         for arc in &set.arcs {
             let in_slew = input_slews
-                .and_then(|slews| slews.iter().find(|(n, _)| n == from_name))
-                .map_or_else(
-                    || target_slews.get(arc.from_edge),
-                    |(_, s)| s.get(arc.from_edge),
-                );
+                .and_then(|slews| slews.get(from_name.as_str()))
+                .map_or_else(|| target_slews.get(arc.from_edge), |s| s.get(arc.from_edge));
             let (delay, slew) = arc.gate_delay(in_slew, load_cap);
             match arc.to_edge {
                 Edge::Rise => {

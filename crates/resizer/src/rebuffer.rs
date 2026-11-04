@@ -14,7 +14,7 @@ use crate::dmp::{self, PiModel};
 use crate::fuzzy;
 use crate::library::{BufferSet, Link, is_logic_std_cell};
 use crate::parasitics::WireRc;
-use crate::resizer::{RepairError, Resizer, buffer_delays, find_targets};
+use crate::resizer::{RepairError, Resizer, buffer_delays, find_targets, meters_to_dbu};
 use crate::sta::{Sta, Via};
 use pare_common::db::design::PinOwner;
 use pare_common::db::indices::{CellId, LayerId, NetId, PinId};
@@ -78,7 +78,7 @@ struct DriverTiming {
 #[derive(Debug)]
 pub struct Rebuffer {
     sizes: Vec<BufferSize>,
-    max_wire_length: i64,
+    max_wire_length: Option<Dbu>,
     wire_length_step: i64,
     driver: Option<Driver>,
     /// Buffers taken out while rebuffering whole designs.
@@ -100,13 +100,15 @@ impl Rebuffer {
         let smallest = sizes
             .first()
             .ok_or_else(|| RepairError::MissingPins("no buffers to rebuffer with".into()))?;
-        let wire_length_step = max_wire_length
-            .min(wire_length_limit_by_load_slew(resizer, smallest))
-            .min(wire_length_limit_by_max_cap(resizer, smallest));
+        let wire_length_step = least_length([
+            max_wire_length,
+            wire_length_limit_by_load_slew(resizer, smallest),
+            wire_length_limit_by_max_cap(resizer, smallest),
+        ]);
         Ok(Self {
             sizes,
             max_wire_length,
-            wire_length_step: wire_length_step.max(1),
+            wire_length_step,
             driver: None,
             removed: 0,
             inserted: 0,
@@ -127,7 +129,7 @@ impl Rebuffer {
         let Some(smallest) = self.sizes.first() else {
             return self.wire_length_step;
         };
-        let dbu = resizer.db.dbu().get() as f64;
+        let dbu = resizer.db.dbu();
         let lib = resizer.link.liberty.cell(smallest.cell);
         let input_cap = smallest.input_cap.get();
         let drive_resistance = smallest.drive_resistance.get();
@@ -137,23 +139,23 @@ impl Rebuffer {
                 .liberty
                 .capacitance_limit(lib, &lib.ports[output])
         });
-        let cap_length = cap_limit.map_or(i64::MAX, |limit| {
+        let cap_length = cap_limit.map(|limit| {
             let slack = margined(limit, CAP_MARGIN).get() - input_cap;
-            meters_to_dbu(slack / cap, dbu).max(0)
+            Dbu(meters_to_dbu(Meters::new(slack / cap), dbu).get().max(0))
         });
         let max_slew = margined(smallest.input_max_slew, SLEW_MARGIN).get();
         let a = res * cap;
         let b = res * input_cap + drive_resistance * cap;
         let c = drive_resistance * input_cap - max_slew / ELMORE_SKEW_FACTOR;
         let discriminant = b * b - 4.0 * a * c;
-        let mut slew_length = i64::MAX;
+        let mut slew_length = None;
         if discriminant >= 0.0 {
             let meters = (-b + discriminant.sqrt()) / (2.0 * a);
             if meters > 0.0 && meters <= 1.0 {
-                slew_length = meters_to_dbu(meters, dbu);
+                slew_length = Some(meters_to_dbu(Meters::new(meters), dbu));
             }
         }
-        self.max_wire_length.min(slew_length).min(cap_length).max(1)
+        least_length([self.max_wire_length, slew_length, cap_length])
     }
 
     /// Rebuffers the net `driver` drives for timing, as
@@ -542,7 +544,7 @@ impl Rebuffer {
             .liberty
             .cell(driver.cell)
             .drive_resistance(driver.port);
-        let meters = Meters::from_dbu(tree.max_load_wire_length(), resizer.db.dbu().get() as f64);
+        let meters = Meters::from_dbu(Dbu(tree.max_load_wire_length()), resizer.db.dbu());
         let load_slew = (r_drvr + meters * rc.resistance) * tree.cap * ELMORE_SKEW_FACTOR;
         load_slew <= margined(tree.max_load_slew, SLEW_MARGIN)
     }
@@ -1279,9 +1281,9 @@ fn buffer_delay(
 /// slew and load limits, as `bufferSizeCanDriveLoad`.
 fn can_drive(resizer: &Resizer<'_, Sta>, size: &BufferSize, tree: &Bnet, extra_wire: i64) -> bool {
     let rc = resizer.graph.wire_rc();
-    let dbu = resizer.db.dbu().get() as f64;
-    let extra_cap = Meters::from_dbu(extra_wire, dbu) * rc.capacitance + size.output_cap;
-    let wire_meters = Meters::from_dbu(tree.max_load_wire_length() + extra_wire, dbu);
+    let dbu = resizer.db.dbu();
+    let extra_cap = Meters::from_dbu(Dbu(extra_wire), dbu) * rc.capacitance + size.output_cap;
+    let wire_meters = Meters::from_dbu(Dbu(tree.max_load_wire_length() + extra_wire), dbu);
     let load_slew = (size.drive_resistance + wire_meters * rc.resistance)
         * (tree.cap + extra_cap)
         * ELMORE_SKEW_FACTOR;
@@ -1603,13 +1605,24 @@ fn load_limit_by_driver_slew(resizer: &Resizer<'_, Sta>, cell: LibCellId) -> Far
     Farads::new(cap1)
 }
 
+/// The step of a wire search bound by the least of `limits`, at least one
+/// database unit; with no limit at all, one step spans any wire.
+fn least_length<const N: usize>(limits: [Option<Dbu>; N]) -> i64 {
+    limits
+        .into_iter()
+        .flatten()
+        .min()
+        .map_or(i64::MAX, Dbu::get)
+        .max(1)
+}
+
 /// The wire a buffer can drive before its load's slew limit is reached, in
 /// database units, as `wireLengthLimitImpliedByLoadSlew`.
 // The quadratic keeps OpenROAD's grouping so it can be checked against it.
 #[allow(clippy::suboptimal_flops)]
-fn wire_length_limit_by_load_slew(resizer: &Resizer<'_, Sta>, size: &BufferSize) -> i64 {
+fn wire_length_limit_by_load_slew(resizer: &Resizer<'_, Sta>, size: &BufferSize) -> Option<Dbu> {
     let rc = resizer.graph.wire_rc();
-    let dbu = resizer.db.dbu().get() as f64;
+    let dbu = resizer.db.dbu();
     let (res, cap) = (rc.resistance.get(), rc.capacitance.get());
     let (input_cap, drive_resistance) = (size.input_cap.get(), size.drive_resistance.get());
     let max_slew = margined(size.input_max_slew, SLEW_MARGIN).get();
@@ -1618,45 +1631,37 @@ fn wire_length_limit_by_load_slew(resizer: &Resizer<'_, Sta>, size: &BufferSize)
     let c = drive_resistance * input_cap - max_slew / ELMORE_SKEW_FACTOR;
     let discriminant = b * b - 4.0 * a * c;
     if discriminant < 0.0 || a <= 0.0 {
-        return i64::MAX;
+        return None;
     }
     let meters = (-b + discriminant.sqrt()) / (2.0 * a);
     if meters > 1.0 {
-        return i64::MAX;
+        return None;
     }
     if meters <= 0.0 {
-        return 1;
+        return Some(Dbu(1));
     }
-    meters_to_dbu(meters, dbu).max(1)
+    Some(Dbu(meters_to_dbu(Meters::new(meters), dbu).get().max(1)))
 }
 
 /// The wire a buffer can drive before its load limit is reached, as
 /// `wireLengthLimitImpliedByMaxCap`.
-fn wire_length_limit_by_max_cap(resizer: &Resizer<'_, Sta>, size: &BufferSize) -> i64 {
+fn wire_length_limit_by_max_cap(resizer: &Resizer<'_, Sta>, size: &BufferSize) -> Option<Dbu> {
     let lib = resizer.link.liberty.cell(size.cell);
-    let Some((_, output)) = lib.buffer_ports() else {
-        return i64::MAX;
-    };
-    let Some(limit) = resizer
+    let (_, output) = lib.buffer_ports()?;
+    let limit = resizer
         .link
         .liberty
-        .capacitance_limit(lib, &lib.ports[output])
-    else {
-        return i64::MAX;
-    };
+        .capacitance_limit(lib, &lib.ports[output])?;
     let rc = resizer.graph.wire_rc();
     if rc.capacitance <= FaradsPerMeter::ZERO {
-        return i64::MAX;
+        return None;
     }
-    let dbu = resizer.db.dbu().get() as f64;
+    let dbu = resizer.db.dbu();
     let slack = margined(limit, CAP_MARGIN) - size.input_cap;
-    meters_to_dbu((slack / rc.capacitance).get().max(0.0), dbu)
-}
-
-/// `meters` in database units, rounded and kept within an `int`, as
-/// `Resizer::metersToDbu`.
-fn meters_to_dbu(meters: f64, dbu: f64) -> i64 {
-    i64::from(((meters * dbu * 1e6).round() as i64 as i32) & i32::MAX)
+    Some(meters_to_dbu(
+        Meters::new((slack / rc.capacitance).get().max(0.0)),
+        dbu,
+    ))
 }
 
 /// The buffers worth inserting for speed: of the repair buffers by rising
@@ -1749,7 +1754,7 @@ fn outmatched(
 ///
 /// The shortest, over the repair buffers, at which one buffer driving the
 /// wire whole is slower than two each driving half, as `findMaxWireLength`.
-pub fn max_wire_length(resizer: &Resizer<'_, Sta>) -> i64 {
+pub fn max_wire_length(resizer: &Resizer<'_, Sta>) -> Option<Dbu> {
     wire_length_limit(
         resizer.link,
         &resizer.buffers,
@@ -1766,7 +1771,7 @@ pub fn max_wire_length_of(
     buffers: &BufferSet,
     rc: WireRc,
     dbu: DbuPerMicron,
-) -> i64 {
+) -> Option<Dbu> {
     let targets = find_targets(link, buffers);
     wire_length_limit(link, buffers, &targets.slews, rc, dbu)
 }
@@ -1777,9 +1782,9 @@ fn wire_length_limit(
     slews: &EdgeValues<Seconds>,
     rc: WireRc,
     dbu: DbuPerMicron,
-) -> i64 {
+) -> Option<Dbu> {
     if rc.resistance <= OhmsPerMeter::ZERO {
-        return i64::MAX;
+        return None;
     }
     let dbu = dbu.get() as f64;
     let mut shortest = Meters::INFINITY;
@@ -1788,9 +1793,9 @@ fn wire_length_limit(
         shortest = shortest.min(meters);
     }
     if !shortest.is_finite() {
-        return i64::MAX;
+        return None;
     }
-    (shortest.get() * 1e6 * dbu).round() as i64
+    Some(Dbu((shortest.get() * 1e6 * dbu).round() as i64))
 }
 
 /// `findMaxWireLength` for one buffer.

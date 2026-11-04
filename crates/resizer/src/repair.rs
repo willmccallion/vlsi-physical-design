@@ -8,11 +8,11 @@
 
 use crate::bnet::{self, BnetPtr, Kind};
 use crate::library::SizingLimits;
-use crate::resizer::{RepairError, Resizer, Timing, gate_slew};
+use crate::resizer::{PortSlews, RepairError, Resizer, Timing, gate_slew, meters_to_dbu};
 use pare_common::db::design::PinOwner;
 use pare_common::db::indices::{NetId, PinId};
-use pare_common::db::liberty::{ArcRole, EdgeValues, LibCellId};
-use pare_common::geom::dbu::Dbu;
+use pare_common::db::liberty::{ArcRole, LibCellId};
+use pare_common::geom::dbu::{Dbu, DbuPerMicron};
 use pare_common::geom::point::Point;
 use pare_common::units::{Farads, FaradsPerMeter, Meters, Ohms, OhmsPerMeter, Seconds};
 use std::collections::HashSet;
@@ -81,12 +81,12 @@ struct DriverWire {
     cap: FaradsPerMeter,
     r_drvr: Ohms,
     slew_rc_factor: f64,
-    dbu_per_micron: f64,
+    dbu_per_micron: DbuPerMicron,
 }
 
 impl DriverWire {
     fn meters(&self, length: i64) -> Meters {
-        Meters::from_dbu(length, self.dbu_per_micron)
+        Meters::from_dbu(Dbu(length), self.dbu_per_micron)
     }
 
     /// The load at the driver of `length` of wire with `ref_cap` beyond it.
@@ -217,7 +217,7 @@ impl<'r, 'a, T: Timing> Repairer<'r, 'a, T> {
     pub fn repair_clock_nets(
         mut self,
         clock_buffers: &[LibCellId],
-        max_length: i64,
+        max_length: Option<Dbu>,
     ) -> Result<RepairSummary, RepairError> {
         let saved_options = self.resizer.options;
         let saved_strongest = self.resizer.r_strongest_buffer;
@@ -267,8 +267,11 @@ impl<'r, 'a, T: Timing> Repairer<'r, 'a, T> {
         let Some(tree) = self.driver_tree(net, driver) else {
             return Ok(());
         };
-        let max_length = self.resizer.options.max_wire_length;
-        let too_long = max_length > 0 && tree.max_load_wire_length() > max_length;
+        let too_long = self
+            .resizer
+            .options
+            .max_wire_length
+            .is_some_and(|max| tree.max_load_wire_length() > max.get());
         if too_long {
             self.summary.length_violations += 1;
         }
@@ -427,7 +430,7 @@ impl<'r, 'a, T: Timing> Repairer<'r, 'a, T> {
         &self,
         size: LibCellId,
         port_name: &str,
-        input_slews: &[(String, EdgeValues<Seconds>)],
+        input_slews: &PortSlews<'_>,
         load_cap: Farads,
     ) -> Option<Seconds> {
         let liberty = &self.resizer.link.liberty;
@@ -444,10 +447,10 @@ impl<'r, 'a, T: Timing> Repairer<'r, 'a, T> {
             .filter(|s| s.to == port && s.role.is_logic_delay());
         for set in sets {
             let from_name = &size_cell.ports[set.from].name;
-            let from_slews = input_slews.iter().find(|(n, _)| n == from_name);
+            let from_slews = input_slews.get(from_name.as_str());
             for arc in &set.arcs {
                 let in_slew = match from_slews {
-                    Some((_, slews)) if set.role != ArcRole::RegClkToQ => slews.get(arc.from_edge),
+                    Some(slews) if set.role != ArcRole::RegClkToQ => slews.get(arc.from_edge),
                     _ => Seconds::ZERO,
                 };
                 let arc_slew = arc.gate_delay(in_slew, load_cap).1;
@@ -652,7 +655,7 @@ impl<'r, 'a, T: Timing> Repairer<'r, 'a, T> {
             }
         }
         let max_length = self.resizer.options.max_wire_length;
-        if max_length > 0 && left.wire_length + right.wire_length > max_length {
+        if max_length.is_some_and(|max| left.wire_length + right.wire_length > max.get()) {
             repeaters.reason = "max_length";
             if left.wire_length > right.wire_length {
                 repeaters.left = true;
@@ -681,7 +684,7 @@ impl<'r, 'a, T: Timing> Repairer<'r, 'a, T> {
             cap,
             r_drvr,
             slew_rc_factor: self.resizer.slew_rc_factor,
-            dbu_per_micron: self.resizer.db.dbu().get() as f64,
+            dbu_per_micron: self.resizer.db.dbu(),
         };
         let length = from.manhattan(to.at).get();
         let mut rest = WireRest {
@@ -757,7 +760,7 @@ impl<'r, 'a, T: Timing> Repairer<'r, 'a, T> {
     /// limit `max_cap`, or the load slew limit beyond it.
     fn wire_breaks_limits(&self, wire: &DriverWire, rest: &WireRest, max_cap: Farads) -> bool {
         let max_length = self.resizer.options.max_wire_length;
-        (max_length > 0 && rest.wire_length > max_length)
+        max_length.is_some_and(|max| rest.wire_length > max.get())
             || (wire.cap > FaradsPerMeter::ZERO
                 && max_cap > Farads::ZERO
                 && wire.load_cap(rest.length, rest.ref_cap) > max_cap)
@@ -771,8 +774,8 @@ impl<'r, 'a, T: Timing> Repairer<'r, 'a, T> {
     // The slew estimates keep OpenROAD's grouping so they can be checked.
     #[allow(clippy::suboptimal_flops, clippy::suspicious_operation_groupings)]
     fn split_length(&self, input: SplitInput) -> i64 {
-        let dbu = self.resizer.db.dbu().get() as f64;
-        let to_dbu = |m: f64| i64::from(((m * dbu * 1e6).round() as i64 as i32) & i32::MAX);
+        let dbu = self.resizer.db.dbu();
+        let to_dbu = |m: f64| meters_to_dbu(Meters::new(m), dbu).get();
         let (wire_res, wire_cap) = (input.wire_res.get(), input.wire_cap.get());
         let (load_cap, ref_cap, max_cap) = (
             input.load_cap.get(),
@@ -784,13 +787,11 @@ impl<'r, 'a, T: Timing> Repairer<'r, 'a, T> {
             input.load_slew.get(),
             input.max_load_slew_margined.get(),
         );
-        let max_length = self.resizer.options.max_wire_length;
-        let mut split = if max_length > 0 && input.wire_length > max_length {
-            (max_length - input.wire_length_ref)
+        let mut split = match self.resizer.options.max_wire_length {
+            Some(max) if input.wire_length > max.get() => (max.get() - input.wire_length_ref)
                 .max(0)
-                .min(input.length / 2)
-        } else {
-            i64::MAX
+                .min(input.length / 2),
+            _ => i64::MAX,
         };
         if wire_cap > 0.0 && load_cap > max_cap {
             split = split.min(to_dbu((max_cap - ref_cap) / wire_cap).max(0));

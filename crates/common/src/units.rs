@@ -1,6 +1,7 @@
 //! Electrical quantities in SI units, typed so that a time cannot be passed
 //! where a capacitance or a resistance is expected.
 
+use crate::geom::dbu::{Dbu, DbuPerMicron};
 use std::iter::Sum;
 use std::ops::{Add, AddAssign, Div, Mul, Neg, Sub, SubAssign};
 
@@ -230,11 +231,27 @@ impl Seconds {
     }
 }
 
-impl Meters {
-    /// `length` database units, at `dbu_per_micron` of them to a micron.
+impl OhmsPerMeter {
+    /// Ohms per database unit, at `dbu_per_micron` of them to a micron.
     #[must_use]
-    pub fn from_dbu(length: i64, dbu_per_micron: f64) -> Self {
-        Self(length as f64 / dbu_per_micron * 1e-6)
+    pub fn per_dbu(self, dbu_per_micron: DbuPerMicron) -> f64 {
+        self.0 * 1e-6 / f64::from(dbu_per_micron.get())
+    }
+}
+
+impl FaradsPerMeter {
+    /// Farads per database unit, at `dbu_per_micron` of them to a micron.
+    #[must_use]
+    pub fn per_dbu(self, dbu_per_micron: DbuPerMicron) -> f64 {
+        self.0 * 1e-6 / f64::from(dbu_per_micron.get())
+    }
+}
+
+impl Meters {
+    /// `length` at `dbu_per_micron` database units to a micron.
+    #[must_use]
+    pub fn from_dbu(length: Dbu, dbu_per_micron: DbuPerMicron) -> Self {
+        Self(length.to_f64() / f64::from(dbu_per_micron.get()) * 1e-6)
     }
 }
 
@@ -257,8 +274,19 @@ mod tests {
     }
 
     #[test]
+    fn a_wire_per_meter_converts_to_per_database_unit() {
+        let dbu = DbuPerMicron::new(2000).unwrap();
+
+        let res = OhmsPerMeter::new(4e6).per_dbu(dbu);
+        let cap = FaradsPerMeter::new(2e-10).per_dbu(dbu);
+
+        assert!((res - 2e-3).abs() < 1e-15);
+        assert!((cap - 1e-19).abs() < 1e-30);
+    }
+
+    #[test]
     fn a_length_in_database_units_converts_to_meters() {
-        let length = Meters::from_dbu(4000, 2000.0);
+        let length = Meters::from_dbu(Dbu(4000), DbuPerMicron::new(2000).unwrap());
 
         assert!((length.get() - 2e-6).abs() < 1e-18);
     }

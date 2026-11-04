@@ -119,7 +119,6 @@ impl NetParasitics {
     #[must_use]
     pub fn estimate(netlist: &Netlist<'_>, net: NetId, rc: &WireRc) -> Option<Self> {
         let db = netlist.db;
-        let dbu = db.dbu().get() as f64;
         let mut pins: Vec<(PinId, Point<Dbu>)> = db.nets[net.index()]
             .pins
             .iter()
@@ -156,7 +155,7 @@ impl NetParasitics {
                 resistors.push((node, parent, JOIN_RESISTANCE));
                 continue;
             }
-            let length = Meters::from_dbu(length_dbu, dbu);
+            let length = Meters::from_dbu(Dbu(length_dbu), db.dbu());
             let cap = (length * rc.capacitance).get();
             let res = (length * rc.resistance).get();
             wire_cap[node] += cap / 2.0;
