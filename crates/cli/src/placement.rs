@@ -4,7 +4,7 @@
 use crate::checks::report_placement;
 use crate::cts::clock_tree_synthesis;
 use crate::path_str;
-use crate::repair::{NetlistRepair, Stage, repair_design, repair_netlist, repair_timing};
+use crate::repair::{NetlistRepair, TimedRepair, repair_design, repair_netlist, repair_timing};
 use crate::report::{PlacementSummary, Report};
 use anyhow::Context;
 use pare_common::db::design::{NetlistDB, PlacementStatus};
@@ -362,7 +362,9 @@ fn global_placement(
     report: &mut Report,
 ) -> anyhow::Result<PlacementModel> {
     let gp = &config.global_placement;
-    let timing = repair.filter(|r| pass == Pass::Full && gp.timing_driven && r.sdc.is_some());
+    let timing = repair
+        .filter(|_| pass == Pass::Full && gp.timing_driven)
+        .and_then(NetlistRepair::timed);
     if timing.is_some()
         && gp.routability_driven
         && gp.congestion_estimate == CongestionEstimate::GlobalRouter
@@ -547,7 +549,7 @@ fn show_global_result(db: &NetlistDB, result: &GlobalResult) -> anyhow::Result<(
 struct TimingPlacement<'a> {
     config: &'a Config,
     db: &'a mut NetlistDB,
-    repair: &'a mut NetlistRepair,
+    repair: TimedRepair<'a>,
     rounds: usize,
 }
 
@@ -558,15 +560,10 @@ impl TimingDriver for TimingPlacement<'_> {
         let round_start = Instant::now();
         self.rounds += 1;
         model.write_back(self.db);
-        let sdc = self
-            .repair
-            .sdc
-            .as_ref()
-            .context("timing-driven placement needs an SDC file")?;
-        let stage = Stage::find(self.config, self.db, &self.repair.liberty, Some(sdc))?;
+        let stage = self.repair.stage(self.config, self.db)?;
         let cells_before = self.db.cells.len();
-        let inputs = stage.session(self.db, self.repair.wires, &mut self.repair.namer);
-        let mut resizer = Resizer::timed(inputs, sdc)?;
+        let inputs = stage.session(self.db, self.repair.wires, self.repair.namer);
+        let mut resizer = Resizer::timed(inputs, self.repair.sdc)?;
         let area_before = resizer.design_area();
         let wns_before = resizer.sta().worst_slack(MinMax::Max).0.time();
         resizer.set_max_wire_length(pare_resizer::rebuffer::max_wire_length(&resizer));

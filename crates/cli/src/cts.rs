@@ -1,6 +1,6 @@
 //! Clock tree synthesis and the repairs that follow it.
 
-use crate::repair::{NetlistRepair, Stage};
+use crate::repair::NetlistRepair;
 use crate::report::{ClockTreeSummary, Report};
 use anyhow::Context;
 use pare_common::db::design::NetlistDB;
@@ -24,11 +24,14 @@ pub(crate) fn clock_tree_synthesis(
     repair: &mut NetlistRepair,
     report: &mut Report,
 ) -> anyhow::Result<bool> {
-    if repair.sdc.is_none() || !config.netlist.clock_tree {
+    if !config.netlist.clock_tree {
         return Ok(false);
     }
-    let rc = repair.wires.signal;
-    let clock_rc = repair
+    let Some(timed) = repair.timed() else {
+        return Ok(false);
+    };
+    let rc = timed.wires.signal;
+    let clock_rc = timed
         .wires
         .clock
         .context("[netlist] clock trees need clock_wire")?;
@@ -36,18 +39,17 @@ pub(crate) fn clock_tree_synthesis(
     ui::phase("Clock Tree Synthesis");
     let mut summary = ClockTreeSummary::default();
     {
-        let stage = Stage::find(config, db, &repair.liberty, repair.sdc.as_ref())?;
-        let inverters = repair_clock_inverters(db, &stage.link, &stage.clocks, &mut repair.namer)?;
+        let stage = timed.stage(config, db)?;
+        let inverters = repair_clock_inverters(db, &stage.link, &stage.clocks, timed.namer)?;
         summary.cloned_inverters = inverters.inverters;
     }
     let (trees, max_wire_length) = {
-        let sdc = repair.sdc.as_ref().context("constraints")?;
-        let stage = Stage::find(config, db, &repair.liberty, Some(sdc))?;
+        let stage = timed.stage(config, db)?;
         let max_wire_length =
             pare_resizer::rebuffer::max_wire_length_of(&stage.link, &stage.buffers, rc, db.dbu());
         let input = CtsInput {
             link: &stage.link,
-            sdc,
+            sdc: timed.sdc,
             clocks: &stage.clocks,
             signal_rc: rc,
             clock_rc,
@@ -56,30 +58,28 @@ pub(crate) fn clock_tree_synthesis(
         };
         (pare_cts::synthesize(db, &input)?, max_wire_length)
     };
-    let sdc = repair.sdc.as_mut().context("constraints")?;
-    for clock in &mut sdc.clocks {
+    for clock in &mut timed.sdc.clocks {
         clock.propagated = true;
     }
-    let sdc = repair.sdc.as_ref().context("constraints")?;
     {
-        let stage = Stage::find(config, db, &repair.liberty, Some(sdc))?;
-        let mut resizer = Resizer::new(stage.session(db, repair.wires, &mut repair.namer))?;
+        let stage = timed.stage(config, db)?;
+        let mut resizer = Resizer::new(stage.session(db, timed.wires, timed.namer))?;
         let done = Repairer::new(&mut resizer)
             .repair_clock_nets(trees.clock_buffers(), max_wire_length)?;
         summary.clock_net_repeaters = done.inserted;
         let _ = resizer.finish()?;
     }
     let arrivals: FxHashMap<PinId, Seconds> = {
-        let stage = Stage::find(config, db, &repair.liberty, Some(sdc))?;
+        let stage = timed.stage(config, db)?;
         let pins = db.pins.len();
-        let resizer = Resizer::timed(stage.session(db, repair.wires, &mut repair.namer), sdc)?;
+        let resizer = Resizer::timed(stage.session(db, timed.wires, timed.namer), timed.sdc)?;
         let sta = resizer.sta();
         (0..pins)
             .map(PinId::new)
             .filter_map(|p| sta.clock_rise_arrival(p).map(|a| (p, a)))
             .collect()
     };
-    let link = Link::new(db, &repair.liberty, &config.netlist.dont_use)?;
+    let link = Link::new(db, timed.liberty, &config.netlist.dont_use)?;
     summary.delay_buffers = balance_latencies(db, &link, &trees, &|p| arrivals.get(&p).copied())?;
     let cts = &trees.summary;
     summary.trees = cts.trees;
