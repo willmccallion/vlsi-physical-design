@@ -353,9 +353,8 @@ fn the_faster_tree_of_a_clock_is_delayed_as_it_always_is() {
     let port = db.pin_position(db.io_pins[0].pin);
     let arrivals: Vec<Seconds> = (0..db.pins.len())
         .map(|p| {
-            let at = db.pin_position(PinId::new(p));
-            let away = (at.x - port.x).get().abs() + (at.y - port.y).get().abs();
-            Seconds::new(away as f64 * 1e-15)
+            let away = db.pin_position(PinId::new(p)).manhattan(port);
+            Seconds::new(away.get() as f64 * 1e-15)
         })
         .collect();
 

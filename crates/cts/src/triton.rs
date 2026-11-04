@@ -78,7 +78,7 @@ pub struct ClockTrees {
     pub(crate) settings: Settings,
     pub(crate) buffers: ClockBuffers,
     pub(crate) cap_per_dbu: f64,
-    pub(crate) buffer_sizes: FxHashMap<LibCellId, (i64, i64)>,
+    pub(crate) buffer_sizes: FxHashMap<LibCellId, DbPoint<Dbu>>,
     pub(crate) blockages: Vec<Rect<Dbu>>,
     /// What was done.
     pub summary: CtsSummary,
@@ -162,7 +162,7 @@ struct Cts<'a> {
     settings: Settings,
     buffers: ClockBuffers,
     builders: Vec<Builder>,
-    buffer_sizes: FxHashMap<LibCellId, (i64, i64)>,
+    buffer_sizes: FxHashMap<LibCellId, DbPoint<Dbu>>,
     blockages: Vec<Rect<Dbu>>,
     visited: FxHashSet<NetId>,
     net_builder: FxHashMap<NetId, usize>,
@@ -174,11 +174,10 @@ struct Cts<'a> {
 
 /// A pin's position as `TritonCTS` takes it: the mean of its shapes'
 /// centers, in integer arithmetic.
-fn pin_position(db: &NetlistDB, pin: PinId) -> (i64, i64) {
+fn pin_position(db: &NetlistDB, pin: PinId) -> DbPoint<Dbu> {
     let shapes = db.pin_shapes(pin);
     if shapes.is_empty() {
-        let p = db.pin_position(pin);
-        return (p.x.get(), p.y.get());
+        return db.pin_position(pin);
     }
     let (mut x, mut y) = (0_i64, 0_i64);
     for s in &shapes {
@@ -186,13 +185,7 @@ fn pin_position(db: &NetlistDB, pin: PinId) -> (i64, i64) {
         y += s.rect.min.y.get() + (s.rect.max.y.get() - s.rect.min.y.get()) / 2;
     }
     let n = shapes.len() as i64;
-    (x / n, y / n)
-}
-
-/// A pin's position as `dbITerm::getAvgXY` takes it.
-pub(crate) fn avg_xy(db: &NetlistDB, pin: PinId) -> (i64, i64) {
-    let at = db.average_pin_position(pin);
-    (at.x.get(), at.y.get())
+    DbPoint::new(Dbu(x / n), Dbu(y / n))
 }
 
 /// The cell pins of a net in the order `OpenDB` lists them after reading
@@ -323,11 +316,7 @@ impl Cts<'_> {
             }
             clock_roots.push((nets, clock.name.clone()));
         }
-        let mut occupied: FxHashSet<(i64, i64)> = db
-            .cells
-            .iter()
-            .map(|c| (c.location.x.get(), c.location.y.get()))
-            .collect();
+        let mut occupied: FxHashSet<DbPoint<Dbu>> = db.cells.iter().map(|c| c.location).collect();
         for (nets, name) in clock_roots {
             for net in nets {
                 self.clone_clock_gaters(db, net, &mut occupied)?;
@@ -542,7 +531,7 @@ impl Cts<'_> {
         db: &mut NetlistDB,
         buffer: LibCellId,
         name: &str,
-        at: (i64, i64),
+        at: DbPoint<Dbu>,
     ) -> Result<CellId, CtsError> {
         let master = self
             .link
@@ -551,7 +540,7 @@ impl Cts<'_> {
         let cell = db.add_cell(
             name.to_string(),
             master,
-            DbPoint::new(Dbu(at.0), Dbu(at.1)),
+            at,
             Orientation::N,
             PlacementStatus::Placed,
         )?;
@@ -595,20 +584,20 @@ impl Cts<'_> {
         &mut self,
         db: &mut NetlistDB,
         net: NetId,
-        occupied: &mut FxHashSet<(i64, i64)>,
+        occupied: &mut FxHashSet<DbPoint<Dbu>>,
     ) -> Result<(), CtsError> {
         let pins = net_cell_pins(db, net);
         let driver = pins.iter().copied().find(|&p| {
             pin_direction(db, p)
                 .is_some_and(|(_, d, u)| d == PinDirection::Output && !u.is_supply())
         });
-        let mut points: Vec<(i64, i64)> = Vec::new();
-        let mut point_pins: BTreeMap<(i64, i64), Vec<PinId>> = BTreeMap::new();
+        let mut points: Vec<DbPoint<Dbu>> = Vec::new();
+        let mut point_pins: BTreeMap<DbPoint<Dbu>, Vec<PinId>> = BTreeMap::new();
         for &pin in &pins {
             if Some(pin) == driver || !is_input_signal(db, pin) {
                 continue;
             }
-            let at = avg_xy(db, pin);
+            let at = db.average_pin_position(pin);
             points.push(at);
             point_pins.entry(at).or_default().push(pin);
             if self.is_sink(db, pin) {
@@ -643,13 +632,9 @@ impl Cts<'_> {
         {
             return Ok(());
         }
-        let driver_at = avg_xy(db, driver);
+        let driver_at = db.average_pin_position(driver);
         point_pins.entry(driver_at).or_default().push(driver);
-        let tree_points: Vec<DbPoint<Dbu>> = points
-            .iter()
-            .map(|&(x, y)| DbPoint::new(Dbu(x), Dbu(y)))
-            .collect();
-        let tree = prim_dijkstra(&tree_points, 0, DEFAULT_ALPHA);
+        let tree = prim_dijkstra(&points, 0, DEFAULT_ALPHA);
         let clusters = long_edge_clusters(&tree.nodes, &tree.parent, self.settings.max_wire_length);
         self.place_gate_clones(
             db,
@@ -673,34 +658,24 @@ impl Cts<'_> {
         driver: PinId,
         clusters: &[Vec<usize>],
         nodes: &[DbPoint<Dbu>],
-        point_pins: &BTreeMap<(i64, i64), Vec<PinId>>,
-        driver_at: (i64, i64),
-        occupied: &mut FxHashSet<(i64, i64)>,
+        point_pins: &BTreeMap<DbPoint<Dbu>, Vec<PinId>>,
+        driver_at: DbPoint<Dbu>,
+        occupied: &mut FxHashSet<DbPoint<Dbu>>,
     ) -> Result<(), CtsError> {
         let node_sinks = |cluster: &[usize]| -> Vec<PinId> {
             cluster
                 .iter()
-                .flat_map(|&b| {
-                    let at = (nodes[b].x.get(), nodes[b].y.get());
-                    point_pins.get(&at).cloned().unwrap_or_default()
-                })
+                .flat_map(|&b| point_pins.get(&nodes[b]).cloned().unwrap_or_default())
                 .filter(|&p| is_input_signal(db, p))
                 .collect()
         };
         let cluster_sinks: Vec<Vec<PinId>> = clusters.iter().map(|c| node_sinks(c)).collect();
-        let mut driver_cluster = None;
-        let mut best = i64::MAX;
-        for (n, sinks) in cluster_sinks.iter().enumerate() {
-            if sinks.is_empty() {
-                continue;
-            }
-            let center = sink_bbox_center(db, sinks);
-            let d = (center.0 - driver_at.0).abs() + (center.1 - driver_at.1).abs();
-            if d < best {
-                driver_cluster = Some(n);
-                best = d;
-            }
-        }
+        let driver_cluster = cluster_sinks
+            .iter()
+            .enumerate()
+            .filter(|(_, sinks)| !sinks.is_empty())
+            .min_by_key(|(_, sinks)| sink_bbox_center(db, sinks).manhattan(driver_at))
+            .map(|(n, _)| n);
         let gate_name = db.cells[gate.index()].name.clone();
         let net_name = db.nets[net.index()].name.clone();
         let mut clones = 0;
@@ -753,11 +728,11 @@ impl Cts<'_> {
             let center = sink_bbox_center(db, sinks);
             let mut at = center;
             while occupied.contains(&at) {
-                at.0 += 1;
+                at.x += Dbu(1);
             }
             let _ = occupied.insert(at);
             let cell = &mut db.cells[clone.index()];
-            cell.location = DbPoint::new(Dbu(at.0), Dbu(at.1));
+            cell.location = at;
             cell.status = PlacementStatus::Placed;
         }
         Ok(())
@@ -766,7 +741,7 @@ impl Cts<'_> {
     fn tree_context<'b>(
         &'b self,
         db: &NetlistDB,
-        sizes: &'b FxHashMap<LibCellId, (i64, i64)>,
+        sizes: &'b FxHashMap<LibCellId, DbPoint<Dbu>>,
         blockages: &'b [Rect<Dbu>],
     ) -> TreeContext<'b> {
         TreeContext {
@@ -793,15 +768,12 @@ impl Cts<'_> {
                 .link
                 .macro_of(b)
                 .ok_or_else(|| CtsError::NoMaster(self.link.liberty.cell(b).name.clone()))?;
-            let size = db.library.cell_macro(master).size;
-            let _ = sizes.insert(b, (size.x.get(), size.y.get()));
+            let _ = sizes.insert(b, db.library.cell_macro(master).size);
         }
-        let (root_w, root_h) = sizes.get(&self.buffers.root).copied().unwrap_or((0, 0));
+        let root = sizes.get(&self.buffers.root).copied().unwrap_or_default();
         let unit = f64::from(tech.length_unit());
-        let bloat = (
-            ((root_w as f64 / unit) * unit / 2.0).ceil() as i64,
-            ((root_h as f64 / unit) * unit / 2.0).ceil() as i64,
-        );
+        let half = |side: Dbu| Dbu(((side.get() as f64 / unit) * unit / 2.0).ceil() as i64);
+        let bloat = DbPoint::new(half(root.x), half(root.y));
         let (blockages, macro_diameter) = merge_blockages(db, bloat);
         if macro_diameter > 0.0 && self.settings.macro_max_diameter.is_none() {
             self.settings.macro_max_diameter = Some(macro_diameter.max(MACRO_MAX_DIAMETER));
@@ -1120,14 +1092,17 @@ fn sta_fuzzy_equal(a: f32, b: f32) -> bool {
 
 /// The center of the box around some pins' average positions, as
 /// `dbNet::getTermBBox` and `findLongEdges` take it.
-fn sink_bbox_center(db: &NetlistDB, sinks: &[PinId]) -> (i64, i64) {
+pub(crate) fn sink_bbox_center(db: &NetlistDB, sinks: &[PinId]) -> DbPoint<Dbu> {
     let (mut lo, mut hi) = ((i64::MAX, i64::MAX), (i64::MIN, i64::MIN));
     for &s in sinks {
-        let p = avg_xy(db, s);
-        lo = (lo.0.min(p.0), lo.1.min(p.1));
-        hi = (hi.0.max(p.0), hi.1.max(p.1));
+        let p = db.average_pin_position(s);
+        lo = (lo.0.min(p.x.get()), lo.1.min(p.y.get()));
+        hi = (hi.0.max(p.x.get()), hi.1.max(p.y.get()));
     }
-    (i64::midpoint(lo.0, hi.0), i64::midpoint(lo.1, hi.1))
+    DbPoint::new(
+        Dbu(i64::midpoint(lo.0, hi.0)),
+        Dbu(i64::midpoint(lo.1, hi.1)),
+    )
 }
 
 /// Groups the nodes of a Steiner tree joined by edges shorter than
@@ -1188,7 +1163,7 @@ fn long_edge_clusters(nodes: &[DbPoint<Dbu>], parent: &[usize], threshold: i64) 
 /// The placed blocks and hard placement blockages, each group closer than a
 /// buffer joined into the box around it, and the diameter macro clusters
 /// may take, as `TreeBuilder::mergeBlockages`.
-fn merge_blockages(db: &NetlistDB, bloat: (i64, i64)) -> (Vec<Rect<Dbu>>, f64) {
+fn merge_blockages(db: &NetlistDB, bloat: DbPoint<Dbu>) -> (Vec<Rect<Dbu>>, f64) {
     let mut rects: Vec<Rect<Dbu>> = Vec::new();
     let (mut max_dx, mut max_dy) = (0_i64, 0_i64);
     for (c, cell) in db.cells.iter().enumerate() {
@@ -1205,12 +1180,7 @@ fn merge_blockages(db: &NetlistDB, bloat: (i64, i64)) -> (Vec<Rect<Dbu>>, f64) {
     let diameter = (2 * max_dx.max(max_dy)) as f64 / f64::from(db.dbu().get() as i32);
     let grown: Vec<Rect<Dbu>> = rects
         .iter()
-        .map(|r| {
-            Rect::new(
-                DbPoint::new(r.min.x - Dbu(bloat.0), r.min.y - Dbu(bloat.1)),
-                DbPoint::new(r.max.x + Dbu(bloat.0), r.max.y + Dbu(bloat.1)),
-            )
-        })
+        .map(|r| Rect::new(r.min - bloat, r.max + bloat))
         .collect();
     let mut group: Vec<usize> = (0..grown.len()).collect();
     for i in 0..grown.len() {
