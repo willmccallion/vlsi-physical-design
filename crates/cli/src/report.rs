@@ -2,6 +2,7 @@
 //! long each phase took, what the checks found and how much memory it took.
 
 use pare_common::util::ui;
+use pare_resizer::{HoldSummary, SetupSummary};
 use serde::Serialize;
 use std::collections::BTreeMap;
 use std::path::Path;
@@ -148,6 +149,32 @@ pub struct TimingSummary {
     pub hold_wns_after_ns: f64,
     /// Hold buffers inserted.
     pub hold_buffers: usize,
+}
+
+impl TimingSummary {
+    /// What `setup` and `hold` repair did, for the report.
+    pub(crate) const fn of(setup: &SetupSummary, hold: &HoldSummary) -> Self {
+        Self {
+            failing_before: setup.failing_before,
+            failing_after: setup.failing_after,
+            wns_before_ns: setup.wns_before.nanos(),
+            wns_after_ns: setup.wns_after.nanos(),
+            tns_before_ns: setup.tns_before.nanos(),
+            tns_after_ns: setup.tns_after.nanos(),
+            removed: setup.removed,
+            resized: setup.resized,
+            inserted: setup.inserted,
+            cloned: setup.cloned,
+            swapped: setup.swapped,
+            iterations: setup.iterations,
+            area_change_percent: setup.area_change_percent,
+            hold_failing_before: hold.failing_before,
+            hold_failing_after: hold.failing_after,
+            hold_wns_before_ns: hold.wns_before.nanos(),
+            hold_wns_after_ns: hold.wns_after.nanos(),
+            hold_buffers: hold.inserted,
+        }
+    }
 }
 
 /// What placement did.

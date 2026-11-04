@@ -13,8 +13,9 @@ use crate::report::{NetlistSummary, Report, TimingSummary};
 use pare_resizer::parasitics::WireRc;
 use pare_resizer::resizer::Context as RepairContext;
 use pare_resizer::{
-    BufferSet, ClockNetwork, Constants, HoldOptions, Link, Namer, Netlist, Repairer, Resizer,
-    SessionInputs, SetupOptions, Sta, Timing, repair_hold, repair_setup,
+    BufferSet, ClockNetwork, Constants, HoldOptions, HoldSummary, Link, Namer, Netlist, Repairer,
+    Resizer, SessionInputs, SetupOptions, SetupProgress, SetupSummary, Sta, Timing, repair_hold,
+    repair_setup,
 };
 use std::path::PathBuf;
 use std::time::Instant;
@@ -344,67 +345,73 @@ pub(crate) fn timing_repair_on(
     liberty: &Liberty,
 ) -> anyhow::Result<TimingSummary> {
     ui::timing_table_header();
-    let summary = {
-        let mut show = |progress: &pare_resizer::SetupProgress| {
-            let iter = progress
-                .iteration
-                .map_or_else(|| "final".to_string(), |i| i.to_string());
-            let worst = progress.worst.as_deref().unwrap_or("");
-            ui::timing_iter(&ui::TimingRow {
-                iter: &iter,
-                removed: progress.removed,
-                resized: progress.resized,
-                inserted: progress.inserted,
-                cloned: progress.cloned,
-                swaps: progress.swapped,
-                area_change_percent: progress.area_change_percent,
-                wns_ns: progress.wns.nanos(),
-                tns_ns: progress.tns.nanos(),
-                failing: progress.failing,
-                worst,
-            });
-        };
-        repair_setup(resizer, SetupOptions::default(), &mut show)?
-    };
+    let setup = repair_setup(resizer, SetupOptions::default(), &mut show_setup_progress)?;
     let hold = repair_hold(resizer, &HoldOptions::default())?;
     eprintln!();
+    show_timing_repair(&setup, &hold, liberty);
+    Ok(TimingSummary::of(&setup, &hold))
+}
+
+/// Shows one row of setup repair's progress table.
+fn show_setup_progress(progress: &SetupProgress) {
+    let iter = progress
+        .iteration
+        .map_or_else(|| "final".to_string(), |i| i.to_string());
+    ui::timing_iter(&ui::TimingRow {
+        iter: &iter,
+        removed: progress.removed,
+        resized: progress.resized,
+        inserted: progress.inserted,
+        cloned: progress.cloned,
+        swaps: progress.swapped,
+        area_change_percent: progress.area_change_percent,
+        wns_ns: progress.wns.nanos(),
+        tns_ns: progress.tns.nanos(),
+        failing: progress.failing,
+        worst: progress.worst.as_deref().unwrap_or(""),
+    });
+}
+
+/// Shows what setup and hold repair found and did, naming hold's buffer
+/// from `liberty`.
+fn show_timing_repair(setup: &SetupSummary, hold: &HoldSummary, liberty: &Liberty) {
     ui::stat_row(
         "WNS (ns):",
         &format!(
             "{:.3} -> {:.3}",
-            summary.wns_before.nanos(),
-            summary.wns_after.nanos()
+            setup.wns_before.nanos(),
+            setup.wns_after.nanos()
         ),
         "TNS (ns):",
         &format!(
             "{:.1} -> {:.1}",
-            summary.tns_before.nanos(),
-            summary.tns_after.nanos()
+            setup.tns_before.nanos(),
+            setup.tns_after.nanos()
         ),
     );
     ui::stat_row(
         "Failing endpoints:",
-        &format!("{} -> {}", summary.failing_before, summary.failing_after),
+        &format!("{} -> {}", setup.failing_before, setup.failing_after),
         "Iterations:",
-        &summary.iterations.to_string(),
+        &setup.iterations.to_string(),
     );
     ui::stat_row(
         "Removed:",
-        &summary.removed.to_string(),
+        &setup.removed.to_string(),
         "Resized:",
-        &summary.resized.to_string(),
+        &setup.resized.to_string(),
     );
     ui::stat_row(
         "Inserted:",
-        &summary.inserted.to_string(),
+        &setup.inserted.to_string(),
         "Cloned:",
-        &summary.cloned.to_string(),
+        &setup.cloned.to_string(),
     );
     ui::stat_row(
         "Pin swaps:",
-        &summary.swapped.to_string(),
+        &setup.swapped.to_string(),
         "Area:",
-        &format!("{:+.1}%", summary.area_change_percent),
+        &format!("{:+.1}%", setup.area_change_percent),
     );
     ui::stat_row(
         "Hold WNS (ns):",
@@ -423,26 +430,6 @@ pub(crate) fn timing_repair_on(
         hold.buffer
             .map_or("none", |b| liberty.cell(b).name.as_str()),
     );
-    Ok(TimingSummary {
-        failing_before: summary.failing_before,
-        failing_after: summary.failing_after,
-        wns_before_ns: summary.wns_before.nanos(),
-        wns_after_ns: summary.wns_after.nanos(),
-        tns_before_ns: summary.tns_before.nanos(),
-        tns_after_ns: summary.tns_after.nanos(),
-        removed: summary.removed,
-        resized: summary.resized,
-        inserted: summary.inserted,
-        cloned: summary.cloned,
-        swapped: summary.swapped,
-        iterations: summary.iterations,
-        area_change_percent: summary.area_change_percent,
-        hold_failing_before: hold.failing_before,
-        hold_failing_after: hold.failing_after,
-        hold_wns_before_ns: hold.wns_before.nanos(),
-        hold_wns_after_ns: hold.wns_after.nanos(),
-        hold_buffers: hold.inserted,
-    })
 }
 
 /// The wires repair estimates parasitics with, as `set_wire_rc` sets them.
