@@ -1,6 +1,7 @@
 //! A clock net as the tree builders see it, `TritonCTS`'s `Clock`: its sinks,
 //! the buffers a builder adds and the subnets joining them.
 
+use crate::capacitance::Farads32;
 use pare_common::db::indices::{CellId, NetId, PinId};
 use pare_common::db::liberty::LibCellId;
 use pare_common::geom::dbu::Dbu;
@@ -27,11 +28,9 @@ pub(crate) struct ClockInst {
     pub input_pin: Option<PinId>,
     /// The buffer's instance once it exists.
     pub cell: Option<CellId>,
-    pub input_cap: f32,
+    pub input_cap: Farads32,
     /// The delay through a sink's own clock tree; zero for a buffer.
     pub insertion_delay: Seconds,
-    pub output_cap: f32,
-    pub ideal_output_cap: f32,
 }
 
 /// Which clock instance: a sink or a buffer, by index.
@@ -104,8 +103,6 @@ impl Clock {
             cell: None,
             input_cap: sink.input_cap,
             insertion_delay: sink.insertion_delay,
-            output_cap: 0.0,
-            ideal_output_cap: 0.0,
         });
     }
 
@@ -127,10 +124,8 @@ impl Clock {
             location,
             input_pin: None,
             cell: None,
-            input_cap: 0.0,
+            input_cap: Farads32::ZERO,
             insertion_delay: Seconds::ZERO,
-            output_cap: 0.0,
-            ideal_output_cap: 0.0,
         });
         inst
     }
@@ -183,7 +178,7 @@ pub(crate) struct ClockSink {
     pub name: String,
     pub location: Point<Dbu>,
     pub pin: PinId,
-    pub input_cap: f32,
+    pub input_cap: Farads32,
     /// The delay through the sink's own clock tree.
     pub insertion_delay: Seconds,
 }

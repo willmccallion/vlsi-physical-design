@@ -7,6 +7,7 @@
 // The arithmetic keeps TritonCTS's operations, whose rounding fusing would change.
 #![allow(clippy::suboptimal_flops)]
 
+use crate::capacitance::Farads32;
 use crate::htree::Point;
 use crate::techchar::SegmentLength;
 
@@ -19,7 +20,7 @@ const MAX_CAP_FACTOR: f64 = 10.0;
 #[derive(Clone, Debug)]
 pub(crate) struct SinkClustering {
     points: Vec<Point>,
-    caps: Vec<f32>,
+    caps: Vec<Farads32>,
     insertion_lengths: Vec<SegmentLength>,
     order: Vec<(f64, usize)>,
     best_solution: Vec<Vec<usize>>,
@@ -28,7 +29,7 @@ pub(crate) struct SinkClustering {
     cap_per_unit: f32,
     use_max_cap: bool,
     cap_per_dbu: f64,
-    sink_buffer_input_cap: f64,
+    sink_buffer_input_cap: Farads32,
     first_run: bool,
     x_span: f64,
     y_span: f64,
@@ -37,7 +38,7 @@ pub(crate) struct SinkClustering {
 }
 
 impl SinkClustering {
-    pub const fn new(use_max_cap: bool, cap_per_dbu: f64, sink_buffer_input_cap: f64) -> Self {
+    pub const fn new(use_max_cap: bool, cap_per_dbu: f64, sink_buffer_input_cap: Farads32) -> Self {
         Self {
             points: Vec::new(),
             caps: Vec::new(),
@@ -60,7 +61,7 @@ impl SinkClustering {
     /// Adds a sink at (`x`, `y`) in wire segment units with input
     /// capacitance `cap`, standing for `insertion` more clock wire beyond
     /// its pin.
-    pub(crate) fn add_point(&mut self, x: f64, y: f64, cap: f32, insertion: SegmentLength) {
+    pub(crate) fn add_point(&mut self, x: f64, y: f64, cap: Farads32, insertion: SegmentLength) {
         self.points.push(Point::new(x, y));
         self.caps.push(cap);
         self.insertion_lengths.push(insertion);
@@ -129,7 +130,7 @@ impl SinkClustering {
 
     fn limit_exceeded(&self, size: usize, cost: f64, cap_cost: f64, size_limit: usize) -> bool {
         if self.use_max_cap {
-            return cap_cost > self.sink_buffer_input_cap * MAX_CAP_FACTOR;
+            return cap_cost > f64::from(self.sink_buffer_input_cap.get()) * MAX_CAP_FACTOR;
         }
         size >= size_limit || cost > f64::from(self.max_internal_diameter)
     }
@@ -185,11 +186,11 @@ impl SinkClustering {
         }
         let open = run.clusters.last().map_or(&[][..], Vec::as_slice);
         let mut distance_cost = 0.0_f64;
-        let mut cap_cost = f64::from(self.caps[idx]);
+        let mut cap_cost = f64::from(self.caps[idx].get());
         for &other in open {
             let cost = self.distance(idx, other);
             if self.use_max_cap {
-                cap_cost += cost * f64::from(self.cap_per_unit) + f64::from(self.caps[other]);
+                cap_cost += cost * f64::from(self.cap_per_unit) + f64::from(self.caps[other].get());
             }
             distance_cost = distance_cost.max(cost);
         }
