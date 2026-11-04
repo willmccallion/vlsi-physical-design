@@ -84,7 +84,7 @@ fn random_trial(imp: &mut Improver, candidates: &[usize]) -> Result<bool> {
             "Only working with single height cells currently.",
         ));
     };
-    let ydim = i32::try_from(ydim).unwrap_or(i32::MAX);
+    let ydim = ydim as i32;
     let reach = REACH as i32;
     for _ in 0..TRIES {
         let yi = imp.bottom(n) as f64 + 0.5 * imp.height(n) as f64;
@@ -98,7 +98,7 @@ fn random_trial(imp: &mut Improver, candidates: &[usize]) -> Result<bool> {
         let xj = min_x + f64::from(grid_xj) * xwid;
         let yj = min_y + f64::from(grid_yj) * ywid;
         let rj = (((yj - min_y) / row_height) as i32).max(0).min(ydim - 1);
-        let rj = usize::try_from(rj).unwrap_or(0);
+        let rj = rj as usize;
         let x_truncated = i64::from(xj as i32);
         let found = imp.segs_in_row[rj].iter().copied().find(|&s| {
             let seg = &imp.segments[s];

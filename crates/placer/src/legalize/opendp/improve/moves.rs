@@ -337,7 +337,7 @@ impl Improver {
                 return None;
             }
         }
-        let site = |i: usize| i0 + i64::try_from(i).unwrap_or(0) - 1;
+        let site = |i: usize| i0 + i as i64 - 1;
         let mut cost = vec![vec![0.0_f64; ncells + 1]; nsites + 1];
         for j in 1..=ncells {
             for (i, row_cost) in cost.iter_mut().enumerate().skip(1) {
@@ -361,7 +361,7 @@ impl Improver {
                     tcost[i][j] = c;
                     prev[i][j] = Some((i - 1, j));
                 }
-                let ii = i64::try_from(i).unwrap_or(0) - prev_wid;
+                let ii = i as i64 - prev_wid;
                 if let Ok(ii) = usize::try_from(ii)
                     && site_id + curr_wid - 1 <= i1
                 {

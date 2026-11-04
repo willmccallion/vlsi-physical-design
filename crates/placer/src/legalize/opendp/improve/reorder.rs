@@ -172,7 +172,7 @@ fn even_padding(width: &[i64], span: i64, site_width: i64) -> Option<(Vec<i64>, 
     if span < total_width {
         return None;
     }
-    let size_i64 = i64::try_from(size).unwrap_or(1);
+    let size_i64 = size as i64;
     let space_per_cell = (span - total_width) / size_i64;
     let sites_per_cell = space_per_cell / site_width;
     let sites_right = sites_per_cell >> 1;
