@@ -202,6 +202,11 @@ pub struct RouteTech {
     pub manufacturing_grid: Dbu,
 }
 
+/// The non-default rule each net of `db` follows, indexed by net.
+fn net_rules(db: &NetlistDB) -> Vec<Option<NonDefaultRuleId>> {
+    db.nets.iter().map(|n| n.non_default_rule).collect()
+}
+
 /// Routing layers whose track spacings choose the gcell pitch: the second
 /// to the fourth, counted from one.
 const GCELL_PITCH_LAYERS: usize = 4;
@@ -331,7 +336,7 @@ impl RouteTech {
                 .iter()
                 .map(|r| RuleTech::new(db, r))
                 .collect(),
-            net_rules: db.nets.iter().map(|n| n.non_default_rule).collect(),
+            net_rules: net_rules(db),
             gcell_pitch: gcell_pitch(
                 |l| db.average_track_spacing(LayerId::new(l)),
                 max_layer.index(),
@@ -342,6 +347,12 @@ impl RouteTech {
                 .filter(|g| g.get() > 0)
                 .unwrap_or(Dbu(1)),
         })
+    }
+
+    /// Takes each net's rule from `db` again, after edits renumbered its
+    /// nets or added some.
+    pub(crate) fn follow_net_rules(&mut self, db: &NetlistDB) {
+        self.net_rules = net_rules(db);
     }
 
     /// The non-default rule the net at index `net` follows, if any.

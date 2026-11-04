@@ -168,7 +168,7 @@ pub fn route_on(
     mut session: Session<'_>,
 ) -> Result<RoutingSummary, RouteError> {
     check_routable(db)?;
-    let (tech, grid, routes, routed) = global.into_parts();
+    let (tech, grid, routes, routed) = global.into_parts(db);
     let gcell = gcell_size(&tech, config);
     let (routes, summary, gcells) = {
         let settled = settled_stage(db, &tech, config, gcell, grid, routes, routed);
