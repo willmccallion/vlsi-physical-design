@@ -66,6 +66,13 @@ impl Owner {
 pub struct OwnerIndex(pub u32);
 
 impl OwnerIndex {
+    /// The owner at position `index` of the table. Owners are nets, cells
+    /// and I/O pins, which the design's 32-bit ids number.
+    fn new(index: usize) -> Self {
+        debug_assert!(index < u32::MAX as usize, "owner {index} past the index");
+        Self(index as u32)
+    }
+
     /// The position in the owner table.
     pub const fn index(self) -> usize {
         self.0 as usize
@@ -164,7 +171,7 @@ impl Layout {
             return index;
         }
         let owners = Arc::make_mut(&mut self.owners);
-        let index = OwnerIndex(u32::try_from(owners.by_index.len()).unwrap_or(u32::MAX));
+        let index = OwnerIndex::new(owners.by_index.len());
         owners.by_index.push(owner);
         owners.supply.push(supply);
         owners.rule_of.push(None);

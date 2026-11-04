@@ -482,7 +482,7 @@ impl Escape {
         let i = (along - self.chunk_origin)
             .get()
             .div_euclid(self.chunk.get());
-        usize::try_from(i).unwrap_or(0).min(self.chunks - 1)
+        (i.max(0) as usize).min(self.chunks - 1)
     }
 
     /// What blocks via `k`'s upper pad with the via on track `t` at
@@ -497,7 +497,7 @@ impl Escape {
     /// every shape that can block a pad whose via stands in chunk `c`.
     fn chunk_stretches(&self, t: usize, c: usize) -> Vec<PadStretches> {
         let track = self.tracks[t];
-        let start = self.chunk_origin + self.chunk * i64::try_from(c).unwrap_or(i64::MAX);
+        let start = self.chunk_origin + self.chunk * c as i64;
         let open = Dbu(i64::MAX / 4);
         let lo = if c == 0 { -open } else { start };
         let hi = if c + 1 == self.chunks {

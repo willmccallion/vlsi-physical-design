@@ -193,7 +193,7 @@ impl LayerCheck<'_> {
     fn spacing_marker(&self, rule: usize, facing: &Facing, cut: &GcRect, other: &GcRect) -> Marker {
         Marker::new(
             Violation::CutSpacing,
-            u16::try_from(rule).unwrap_or(u16::MAX),
+            rule,
             LayerRef::Cut(self.layer),
             facing.marker,
             cut.owner,

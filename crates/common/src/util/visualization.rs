@@ -257,7 +257,7 @@ pub fn draw_area(
                 continue;
             }
             let color = if s.is_fixed() {
-                let grey = 70 + u8::try_from(l * 12).unwrap_or(80).min(80);
+                let grey = 70 + (l * 12).min(80) as u8;
                 Rgba([grey, grey, grey, alpha])
             } else {
                 let [r, g, b] = LAYER_COLORS[l % LAYER_COLORS.len()];

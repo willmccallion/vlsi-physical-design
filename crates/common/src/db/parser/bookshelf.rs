@@ -68,7 +68,11 @@ pub fn parse(aux: &Path, num_layers: usize) -> Result<NetlistDB, ParseError> {
     read_placement(&mut db, &files.pl)?;
     add_nets(&mut db, &nets);
     db.die_area = die_area(&db);
-    add_tracks(&mut db);
+    add_tracks(&mut db).map_err(|message| ParseError::Syntax {
+        path: aux.to_path_buf(),
+        line: 1,
+        message,
+    })?;
     Ok(db)
 }
 
@@ -577,8 +581,9 @@ fn die_area(db: &NetlistDB) -> Rect<Dbu> {
         .unwrap_or_default()
 }
 
-/// Adds tracks in each layer's preferred direction across the die.
-fn add_tracks(db: &mut NetlistDB) {
+/// Adds tracks in each layer's preferred direction across the die; fails
+/// for a die with more tracks of a layer than a track pattern counts.
+fn add_tracks(db: &mut NetlistDB) -> Result<(), String> {
     let die = db.die_area;
     for (i, layer) in db.library.routing_layers.iter().enumerate() {
         let pitch = layer.track_pitch();
@@ -587,14 +592,17 @@ fn add_tracks(db: &mut NetlistDB) {
             Direction::Vertical => (TrackAxis::X, die.min.x, die.width()),
         };
         let count = ((extent - pitch / 2).get() / pitch.get() + 1).max(0);
+        let count = u32::try_from(count)
+            .map_err(|_| format!("the die is too large for the tracks of {}", layer.name))?;
         db.tracks.push(TrackDef {
             axis,
             start: lo + pitch / 2,
-            count: u32::try_from(count).unwrap_or(u32::MAX),
+            count,
             step: pitch,
             layers: vec![LayerId::new(i)],
         });
     }
+    Ok(())
 }
 
 #[cfg(test)]

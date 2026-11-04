@@ -118,17 +118,23 @@ pub struct Marker {
 }
 
 impl Marker {
+    /// A marker of breaking the `rule`th rule of a kind on `layer`; a layer
+    /// has far fewer than 65,536 rules of one kind.
     fn new(
         violation: Violation,
-        rule: u16,
+        rule: usize,
         layer: LayerRef,
         bbox: Rect<Dbu>,
         a: OwnerIndex,
         b: OwnerIndex,
     ) -> Self {
+        debug_assert!(
+            u16::try_from(rule).is_ok(),
+            "rule {rule} past the marker's field"
+        );
         Self {
             violation,
-            rule,
+            rule: rule as u16,
             layer,
             bbox,
             owners: (a.min(b), a.max(b)),
