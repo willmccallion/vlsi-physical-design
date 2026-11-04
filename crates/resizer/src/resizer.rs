@@ -1509,6 +1509,154 @@ pub(crate) fn buffer_delays(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use pare_common::db::indices::LayerId;
+    use pare_common::db::parser::{def, lef, liberty, sdc};
+    use pare_common::geom::dbu::DbuPerMicron;
+    use pare_common::units::{FaradsPerMeter, OhmsPerMeter};
+    use std::fmt::Write;
+    use std::path::{Path, PathBuf};
+
+    fn fixture(name: &str) -> PathBuf {
+        Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../cts/tests/fixtures")
+            .join(name)
+    }
+
+    /// Buffers in the chain between the two flops of [`buffered_pair`].
+    const CHAIN: usize = 6;
+
+    /// Two flops on one clock, the first launching through buffers `b1` to
+    /// `b6` into the second.
+    fn buffered_pair() -> NetlistDB {
+        let mut components = String::from("- f1 DFF_X1 + PLACED ( 2000 2800 ) N ;\n");
+        let mut nets =
+            String::from("- clk ( PIN clk ) ( f1 CK ) ( f2 CK ) ;\n- n0 ( f1 Q ) ( b1 A ) ;\n");
+        for i in 1..=CHAIN {
+            writeln!(
+                components,
+                "- b{i} BUF_X1 + PLACED ( {} 2800 ) N ;",
+                2000 + 8000 * i
+            )
+            .unwrap();
+            let load = if i == CHAIN {
+                "f2 D".to_string()
+            } else {
+                format!("b{} A", i + 1)
+            };
+            writeln!(nets, "- n{i} ( b{i} Z ) ( {load} ) ;").unwrap();
+        }
+        writeln!(
+            components,
+            "- f2 DFF_X1 + PLACED ( {} 2800 ) N ;",
+            2000 + 8000 * (CHAIN + 1)
+        )
+        .unwrap();
+        let text = format!(
+            "VERSION 5.8 ;\nDIVIDERCHAR \"/\" ;\nBUSBITCHARS \"[]\" ;\nDESIGN chain ;\n\
+             UNITS DISTANCE MICRONS 2000 ;\nDIEAREA ( 0 0 ) ( 80000 40000 ) ;\n\
+             COMPONENTS {} ;\n{components}END COMPONENTS\n\
+             PINS 1 ;\n- clk + NET clk + DIRECTION INPUT ;\nEND PINS\n\
+             NETS {} ;\n{nets}END NETS\nEND DESIGN\n",
+            CHAIN + 2,
+            CHAIN + 2
+        );
+        let units = DbuPerMicron::new(2000).unwrap();
+        let library = lef::parse_files(&[fixture("clock.lef")], units).unwrap();
+        def::parse_str(&text, Path::new("chain.def"), library).unwrap()
+    }
+
+    fn pin(db: &NetlistDB, name: &str) -> PinId {
+        let (cell, _) = name.split_once('/').unwrap();
+        db.cells[db.cell_id(cell).unwrap().index()]
+            .pins
+            .iter()
+            .copied()
+            .find(|&p| db.pin_name(p) == name)
+            .unwrap()
+    }
+
+    #[test]
+    fn a_buffer_put_before_a_chain_leaves_every_pin_on_the_path_its_slack() {
+        let mut db = buffered_pair();
+        let lib = liberty::parse_file(&fixture("clock.lib")).unwrap();
+        let constraints = sdc::parse_str(
+            "create_clock -name clk -period 1.0 [get_ports clk]\n",
+            Path::new("t.sdc"),
+            &db,
+            &lib,
+        )
+        .unwrap();
+        let link = Link::new(&db, &lib, &[]).unwrap();
+        let buffers = link.find_buffers(&db).unwrap();
+        let (constants, clocks) = {
+            let netlist = Netlist::new(&db, &link);
+            let constants = Constants::find(&netlist);
+            let clocks = ClockNetwork::from_sdc(&netlist, &constraints, &constants);
+            (constants, clocks)
+        };
+        let b1_in = pin(&db, "b1/A");
+        let end = pin(&db, "f2/D");
+        let q = db.pins[b1_in.index()].net;
+        let rc = WireRc {
+            resistance: OhmsPerMeter::ZERO,
+            capacitance: FaradsPerMeter::ZERO,
+            layer: LayerId(1),
+        };
+        let context = Context {
+            link: &link,
+            clocks: &clocks,
+            constants: &constants,
+            clock_rc: None,
+        };
+        let mut namer = Namer::new();
+        let mut resizer = Resizer::timed(
+            &mut db,
+            context,
+            rc,
+            buffers.clone(),
+            &mut namer,
+            RepairOptions::default(),
+            &constraints,
+        )
+        .unwrap();
+        let at = Point::new(Dbu(10_000), Dbu(2800));
+        let mut first = b1_in;
+
+        for _ in 0..CHAIN {
+            first = resizer
+                .insert_buffer_before_loads(q, &[first], buffers.lowest_drive, at, "rebuffer")
+                .unwrap()
+                .input;
+        }
+
+        let sta = resizer.sta();
+        let path_slack = sta.slack(end, MinMax::Max).time();
+        assert!(path_slack.is_finite());
+        let netlist = resizer.netlist();
+        let mut at_pin = first;
+        while at_pin != end {
+            let slack = sta.slack(at_pin, MinMax::Max).time();
+            assert!(
+                fuzzy::equal(slack, path_slack),
+                "{}: {slack:?} vs {path_slack:?}",
+                resizer.db.pin_name(at_pin)
+            );
+            let PinOwner::Cell { cell, .. } = resizer.db.pins[at_pin.index()].owner else {
+                unreachable!()
+            };
+            let out = resizer.db.cells[cell.index()]
+                .pins
+                .iter()
+                .copied()
+                .find(|&p| netlist.is_driver(p))
+                .unwrap();
+            assert!(fuzzy::equal(sta.slack(out, MinMax::Max).time(), path_slack));
+            at_pin = netlist
+                .loads(resizer.db.pins[out.index()].net)
+                .next()
+                .unwrap();
+        }
+    }
 
     fn slacks(values: &[f64]) -> Vec<(NetId, Slack)> {
         values

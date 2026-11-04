@@ -96,6 +96,19 @@ struct Entry {
     prev: [Option<Prev>; 2],
 }
 
+/// What finding a pin's arrivals again did to its entries, by how much
+/// timing must follow: fanout for any change, the required search for an
+/// entry without a required time.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
+enum Stored {
+    /// The arrivals stand as they were.
+    Same,
+    /// The arrivals changed and every entry kept its required time.
+    Moved,
+    /// An entry is new and has no required time yet.
+    Unrequired,
+}
+
 impl Entry {
     const fn new(tag: TagId) -> Self {
         Self {
@@ -370,7 +383,7 @@ impl Sta {
         };
         sta.find_endpoints(netlist, clocks);
         let all: Vec<PinId> = (0..n).map(PinId::new).collect();
-        sta.find_arrivals(netlist, graph, clocks, &all);
+        let _ = sta.find_arrivals(netlist, graph, clocks, &all);
         sta.find_requireds(netlist, graph, &all);
         sta
     }
@@ -392,7 +405,8 @@ impl Sta {
             seeds.extend(netlist.loads(net));
             seeds.extend(graph.in_arcs(driver).iter().map(|a| a.from));
         }
-        self.find_arrivals(netlist, graph, clocks, &seeds);
+        let unrequired = self.find_arrivals(netlist, graph, clocks, &seeds);
+        seeds.extend(unrequired);
         self.find_requireds(netlist, graph, &seeds);
     }
 
@@ -655,14 +669,19 @@ impl Sta {
     }
 
     /// Finds arrivals again from `seeds` onward, following changes through
-    /// the fanout.
+    /// the fanout; returns the pins left with an entry that has no required
+    /// time yet, which the required search must visit.
+    ///
+    /// Stale levels after edits can time a load before its new driver, so
+    /// a pin may lose its entries and get them back within one search,
+    /// anywhere downstream of an edit.
     fn find_arrivals(
         &mut self,
         netlist: &Netlist<'_>,
         graph: &TimingGraph,
         clocks: &ClockNetwork,
         seeds: &[PinId],
-    ) {
+    ) -> Vec<PinId> {
         let n = netlist.db.pins.len();
         let mut queued = vec![false; n];
         let mut heap: BinaryHeap<Reverse<(u32, usize)>> = BinaryHeap::new();
@@ -672,11 +691,14 @@ impl Sta {
                 heap.push(Reverse((graph.level(pin), pin.index())));
             }
         }
+        let mut unrequired = Vec::new();
         while let Some(Reverse((_, index))) = heap.pop() {
             queued[index] = false;
             let pin = PinId::new(index);
-            if !self.visit_arrivals(netlist, graph, clocks, pin) {
-                continue;
+            match self.visit_arrivals(netlist, graph, clocks, pin) {
+                Stored::Same => continue,
+                Stored::Moved => {}
+                Stored::Unrequired => unrequired.push(pin),
             }
             for next in successors(netlist, graph, pin) {
                 if !queued[next.index()] {
@@ -686,23 +708,24 @@ impl Sta {
             }
         }
         self.cache_worst();
+        unrequired
     }
 
     /// Computes a pin's arrivals from its predecessors or its seeds and
-    /// stores them; true when they changed.
+    /// stores them.
     fn visit_arrivals(
         &mut self,
         netlist: &Netlist<'_>,
         graph: &TimingGraph,
         clocks: &ClockNetwork,
         pin: PinId,
-    ) -> bool {
+    ) -> Stored {
         let is_driver = netlist.is_driver(pin);
         let is_load = netlist.is_load(pin);
         if !is_driver && !is_load {
             return self.clear_arrivals(pin);
         }
-        let mut changed = false;
+        let mut stored = Stored::Same;
         for edge in Edge::BOTH {
             let fresh = if clocks.is_ideal(pin) {
                 self.clock_seeds(clocks, pin, edge)
@@ -717,33 +740,35 @@ impl Sta {
             } else {
                 self.load_arrivals(netlist, graph, pin, edge)
             };
-            changed |= self.store_arrivals(pin, edge, fresh);
+            stored = stored.max(self.store_arrivals(pin, edge, fresh));
         }
-        if changed && self.is_endpoint(pin) {
+        if stored != Stored::Same && self.is_endpoint(pin) {
             self.refresh_endpoint(netlist, graph, pin);
         }
-        changed
+        stored
     }
 
-    fn clear_arrivals(&mut self, pin: PinId) -> bool {
-        let mut changed = false;
+    fn clear_arrivals(&mut self, pin: PinId) -> Stored {
+        let mut stored = Stored::Same;
         for edge in Edge::BOTH {
             let slot = &mut self.entries[pin.index() * 2 + edge.index()];
             if !slot.is_empty() {
                 slot.clear();
-                changed = true;
+                stored = Stored::Moved;
             }
         }
-        changed
+        stored
     }
 
     /// Replaces a pin's entries, keeping the required times of tags that
-    /// stay; true when the tags or arrivals changed.
-    fn store_arrivals(&mut self, pin: PinId, edge: Edge, mut fresh: Vec<Entry>) -> bool {
+    /// stay.
+    fn store_arrivals(&mut self, pin: PinId, edge: Edge, mut fresh: Vec<Entry>) -> Stored {
         let slot = &mut self.entries[pin.index() * 2 + edge.index()];
+        let mut unrequired = false;
         for entry in &mut fresh {
-            if let Some(old) = slot.iter().find(|o| o.tag == entry.tag) {
-                entry.required = old.required;
+            match slot.iter().find(|o| o.tag == entry.tag) {
+                Some(old) => entry.required = old.required,
+                None => unrequired = true,
             }
         }
         let same_arrival = |o: &Entry, f: &Entry| {
@@ -761,7 +786,13 @@ impl Sta {
         if changed || slot.iter().zip(&fresh).any(|(o, f)| o.prev != f.prev) {
             *slot = fresh;
         }
-        changed
+        if unrequired {
+            Stored::Unrequired
+        } else if changed {
+            Stored::Moved
+        } else {
+            Stored::Same
+        }
     }
 
     /// The clock edges arriving at a pin of a clock network: each clock's
