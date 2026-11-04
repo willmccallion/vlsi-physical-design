@@ -632,7 +632,7 @@ impl PinAccess {
         let vias: Vec<ViaUp> = lib
             .vias
             .iter()
-            .filter(|v| v.cut == cut && !v.from_def)
+            .filter(|v| v.cut == cut && !v.is_from_def())
             .filter_map(|v| {
                 let cut_rect = v
                     .shapes
@@ -657,7 +657,7 @@ impl PinAccess {
                 let vias: Vec<ViaUp> = lib
                     .vias
                     .iter()
-                    .filter(|v| v.cut == cut_up && !v.from_def)
+                    .filter(|v| v.cut == cut_up && !v.is_from_def())
                     .filter_map(|v| {
                         let cut_rect = v
                             .shapes
@@ -1210,7 +1210,7 @@ mod tests {
     use crate::db::indices::{CutLayerId, MacroId, MacroPinId, SiteId};
     use crate::db::library::{
         CoreKind, CutLayer, Library, Macro, MacroClass, MacroPin, PinDirection, RoutingLayer,
-        Shape, SignalUse, Site, SiteClass, Symmetry, ViaDef,
+        Shape, SignalUse, Site, SiteClass, Symmetry, ViaDef, ViaSource,
     };
     use crate::db::rules::{CutLayerRules, ParallelRunLengthTable, RoutingLayerRules};
     use crate::geom::dbu::DbuPerMicron;
@@ -1273,7 +1273,6 @@ mod tests {
     fn via(name: &str, cut: CutLayerId, below: Shape, above: Shape) -> ViaDef {
         ViaDef {
             name: name.into(),
-            is_default: true,
             cut,
             shapes: vec![
                 below,
@@ -1283,7 +1282,7 @@ mod tests {
                 },
                 above,
             ],
-            from_def: false,
+            source: ViaSource::LefDefault,
         }
     }
 
@@ -1369,7 +1368,7 @@ mod tests {
             via("V23", v2, metal(m2, tall), metal(m3, wide)),
             via("V12", v1, metal(m1, wide), metal(m2, tall)),
             ViaDef {
-                is_default: false,
+                source: ViaSource::Lef,
                 ..via("V12V", v1, metal(m1, tall), metal(m2, tall))
             },
         ] {

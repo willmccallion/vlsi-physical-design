@@ -9,7 +9,7 @@
 use crate::db::indices::LayerId;
 use crate::db::library::{
     CoreKind, CutLayer, Direction, LayerElectrical, LayerRef, Library, Macro, MacroClass, MacroPin,
-    PinDirection, RoutingLayer, Shape, SignalUse, Site, SiteClass, Symmetry, ViaDef,
+    PinDirection, RoutingLayer, Shape, SignalUse, Site, SiteClass, Symmetry, ViaDef, ViaSource,
 };
 use crate::db::parser::lef_rules::{RoutingSpacing, RuleReader};
 use crate::db::parser::lexer::{Lexer, ParseError, Token, read_file};
@@ -773,7 +773,12 @@ impl<'a> LefParser<'a, '_> {
             }
         }
 
-        let via = via_from_shapes(name, is_default, shapes, false)
+        let source = if is_default {
+            ViaSource::LefDefault
+        } else {
+            ViaSource::Lef
+        };
+        let via = via_from_shapes(name, source, shapes)
             .map_err(|message| self.lx.error(line, message))?;
         let _ = self
             .lib
@@ -1133,9 +1138,8 @@ fn via_rule_from_layers(
 /// the routing layers directly below and above it.
 pub(crate) fn via_from_shapes(
     name: &str,
-    is_default: bool,
+    source: ViaSource,
     shapes: Vec<Shape>,
-    from_def: bool,
 ) -> Result<ViaDef, String> {
     let mut cuts = shapes.iter().filter_map(|s| match s.layer {
         LayerRef::Cut(c) => Some(c),
@@ -1158,10 +1162,9 @@ pub(crate) fn via_from_shapes(
     }
     Ok(ViaDef {
         name: name.to_string(),
-        is_default,
         cut,
         shapes,
-        from_def,
+        source,
     })
 }
 

@@ -396,22 +396,43 @@ impl Macro {
     }
 }
 
+/// Where a via was defined.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ViaSource {
+    /// In LEF, marked `DEFAULT` for its cut layer.
+    LefDefault,
+    /// In LEF, not marked default.
+    Lef,
+    /// In the DEF `VIAS` section.
+    Def,
+}
+
 /// A fixed via: a cut and the metal enclosing it on the layers above and below.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ViaDef {
     /// Via name.
     pub name: String,
-    /// Whether LEF marks it as a default via for its cut layer.
-    pub is_default: bool,
     /// The cut layer.
     pub cut: CutLayerId,
     /// Geometry on the bottom metal, cut and top metal, centered on the origin.
     pub shapes: Vec<Shape>,
-    /// Whether the via was defined in the DEF `VIAS` section rather than in LEF.
-    pub from_def: bool,
+    /// Where it was defined.
+    pub source: ViaSource,
 }
 
 impl ViaDef {
+    /// Whether LEF marks it as a default via for its cut layer.
+    #[must_use]
+    pub const fn is_default(&self) -> bool {
+        matches!(self.source, ViaSource::LefDefault)
+    }
+
+    /// Whether the DEF `VIAS` section defined it.
+    #[must_use]
+    pub const fn is_from_def(&self) -> bool {
+        matches!(self.source, ViaSource::Def)
+    }
+
     /// The routing layer below the cut.
     pub const fn bottom(&self) -> LayerId {
         self.cut.below()
@@ -587,10 +608,10 @@ impl Library {
     /// The via a router should use through `cut`: the first default via on
     /// that cut, or the first via on it if none is marked default.
     pub fn default_via(&self, cut: CutLayerId) -> Option<ViaId> {
-        let on_cut = |v: &&ViaDef| v.cut == cut && !v.from_def;
+        let on_cut = |v: &&ViaDef| v.cut == cut && !v.is_from_def();
         self.vias
             .iter()
-            .position(|v| on_cut(&v) && v.is_default)
+            .position(|v| on_cut(&v) && v.is_default())
             .or_else(|| self.vias.iter().position(|v| on_cut(&v)))
             .map(ViaId::new)
     }

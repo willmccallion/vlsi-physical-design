@@ -1350,7 +1350,7 @@ mod tests {
 
     /// The library of [`access_design`], with its masters R and E.
     fn access_library() -> (Library, MacroId, MacroId) {
-        use pare_common::db::library::{CutLayer, ViaDef};
+        use pare_common::db::library::{CutLayer, ViaDef, ViaSource};
         use pare_common::db::rules::CutLayerRules;
 
         let mut lib = Library::new(DbuPerMicron::new(1000).unwrap());
@@ -1376,7 +1376,6 @@ mod tests {
         let _ = lib
             .add_via(ViaDef {
                 name: "V12".into(),
-                is_default: true,
                 cut: v1,
                 shapes: vec![
                     pad(LayerRef::Routing(m1)),
@@ -1386,7 +1385,7 @@ mod tests {
                     },
                     pad(LayerRef::Routing(m2)),
                 ],
-                from_def: false,
+                source: ViaSource::LefDefault,
             })
             .unwrap();
         let symmetry = Symmetry {

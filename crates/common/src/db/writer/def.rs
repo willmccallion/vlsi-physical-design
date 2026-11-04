@@ -108,7 +108,7 @@ fn path_point(p: Point<Dbu>, extension: Dbu) -> String {
 }
 
 fn write_vias(lib: &Library, out: &mut impl Write) -> io::Result<()> {
-    let vias: Vec<_> = lib.vias.iter().filter(|v| v.from_def).collect();
+    let vias: Vec<_> = lib.vias.iter().filter(|v| v.is_from_def()).collect();
     if vias.is_empty() {
         return Ok(());
     }

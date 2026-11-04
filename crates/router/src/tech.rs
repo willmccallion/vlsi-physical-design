@@ -436,7 +436,7 @@ fn ranked_vias(db: &NetlistDB, cut: CutLayerId, layers: &[LayerTech], both: bool
     let lib = &db.library;
     let mut ranked: Vec<((Dbu, bool, i64), ViaTech)> = Vec::new();
     for (i, v) in lib.vias.iter().enumerate() {
-        if v.cut != cut || v.from_def {
+        if v.cut != cut || v.is_from_def() {
             continue;
         }
         let metal = |layer: LayerId| {
@@ -455,7 +455,11 @@ fn ranked_vias(db: &NetlistDB, cut: CutLayerId, layers: &[LayerTech], both: bool
         } else {
             top_overhang
         };
-        let key = (overhang, !v.is_default, (bottom.area() + top.area()).get());
+        let key = (
+            overhang,
+            !v.is_default(),
+            (bottom.area() + top.area()).get(),
+        );
         let cut_size = v
             .shapes
             .iter()

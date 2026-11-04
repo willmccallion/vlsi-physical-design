@@ -12,7 +12,7 @@ use crate::db::design::{
     TrackAxis, TrackDef,
 };
 use crate::db::indices::{CellId, LayerId, NetId, NonDefaultRuleId, RegionId, ViaId, ViaRuleId};
-use crate::db::library::{LayerRef, Library, PinDirection, Shape, SignalUse, ViaDef};
+use crate::db::library::{LayerRef, Library, PinDirection, Shape, SignalUse, ViaDef, ViaSource};
 use crate::db::parser::lef::{parse_pin_direction, parse_signal_use, via_from_shapes};
 use crate::db::parser::lexer::{Lexer, ParseError, Token, read_file};
 use crate::geom::dbu::{Dbu, DbuPerMicron};
@@ -533,7 +533,8 @@ impl<'a> DefParser<'a> {
                 .map_err(|m| self.lx.error(line, format!("via '{name}': {m}")))?;
             shapes.extend(generated);
         }
-        let via = via_from_shapes(name, false, shapes, true).map_err(|m| self.lx.error(line, m))?;
+        let via =
+            via_from_shapes(name, ViaSource::Def, shapes).map_err(|m| self.lx.error(line, m))?;
         self.add_def_via(via, line)
     }
 
