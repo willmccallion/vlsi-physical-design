@@ -12,7 +12,7 @@ use pare_common::units::Seconds;
 use pare_resizer::parasitics::WireRc;
 use pare_resizer::{
     ClockNetwork, Constants, Context, HoldOptions, Link, Namer, Netlist, Repairer, Resizer,
-    SessionInputs, SetupOptions, repair_hold, repair_setup,
+    SessionInputs, SetupOptions, Sta, repair_hold, repair_setup,
 };
 use std::fmt::Write as _;
 use std::path::{Path, PathBuf};
@@ -28,10 +28,10 @@ fn at(c: usize, r: usize) -> String {
     format!("( {} {} ) N", 2000 + c * 380, 2000 + r * 2800)
 }
 
-/// A die of 140 rows with three kinds of work for repair: eight flop to
+/// Three kinds of work for repair, as DEF cells and nets: eight flop to
 /// flop paths through six gates spread across the die, a buffer fanning
 /// out to 24 flops all over it, and four pairs of flops side by side.
-fn design_text() -> String {
+fn timing_work() -> (Vec<String>, Vec<String>) {
     let mut cells = Vec::new();
     let mut nets = Vec::new();
     for s in 0..8 {
@@ -68,12 +68,48 @@ fn design_text() -> String {
         cells.push(format!("- hb{h} DFF_X1 + PLACED {} ;", at(512, row)));
         nets.push(format!("- h{h} ( ha{h} Q ) ( hb{h} D ) ;"));
     }
+    (cells, nets)
+}
+
+/// Nets design repair splits, as DEF cells and nets: a buffer driving 180
+/// flops, past the load limit of any size of it, four flops each driving one flop across the
+/// die, and one driving three flops at the die's far corners.
+fn long_and_loaded_nets() -> (Vec<String>, Vec<String>) {
+    let mut cells = Vec::new();
+    let mut nets = Vec::new();
+    cells.push(format!("- fan BUF_X1 + PLACED {} ;", at(500, 70)));
+    let mut fanout = String::from("- fo ( fan Z )");
+    for i in 0..180 {
+        cells.push(format!(
+            "- fo{i} DFF_X1 + PLACED {} ;",
+            at(450 + (i % 10) * 10, 60 + i / 10 * 2)
+        ));
+        let _ = write!(fanout, " ( fo{i} D )");
+    }
+    nets.push(fanout + " ;");
+    nets.push("- in0 ( PIN in0 ) ( fan A ) ;".to_string());
+    for k in 0..4 {
+        let row = 20 + k * 30;
+        cells.push(format!("- ffl{k} DFF_X1 + PLACED {} ;", at(5, row)));
+        cells.push(format!("- ffr{k} DFF_X1 + PLACED {} ;", at(990, row)));
+        nets.push(format!("- l{k} ( ffl{k} Q ) ( ffr{k} D ) ;"));
+    }
+    cells.push(format!("- ffm DFF_X1 + PLACED {} ;", at(500, 135)));
+    let corners = [(0, 0), (990, 0), (0, 139)];
+    for (n, &(c, r)) in corners.iter().enumerate() {
+        cells.push(format!("- ffc{n} DFF_X1 + PLACED {} ;", at(c, r)));
+    }
+    nets.push("- m ( ffm Q ) ( ffc0 D ) ( ffc1 D ) ( ffc2 D ) ;".to_string());
+    (cells, nets)
+}
+
+/// A die of 140 rows holding `cells` and `nets`, every flop clocked from
+/// the port `clk`.
+fn design_text(cells: &[String], mut nets: Vec<String>) -> String {
     let mut clock = String::from("- clk ( PIN clk )");
-    for cell in &cells {
+    for cell in cells.iter().filter(|c| c.contains(" DFF_")) {
         let name = cell.split_whitespace().nth(1).unwrap();
-        if name.starts_with("ff") || name.starts_with("fo") || name.starts_with('h') {
-            let _ = write!(clock, " ( {name} CK )");
-        }
+        let _ = write!(clock, " ( {name} CK )");
     }
     nets.push(clock + " + USE CLOCK ;");
 
@@ -90,7 +126,7 @@ fn design_text() -> String {
         );
     }
     let _ = writeln!(text, "COMPONENTS {} ;", cells.len());
-    for cell in &cells {
+    for cell in cells {
         let _ = writeln!(text, "{cell}");
     }
     text.push_str(
@@ -109,10 +145,11 @@ fn design_text() -> String {
     text
 }
 
-fn load() -> (NetlistDB, Liberty) {
+fn load((cells, nets): (Vec<String>, Vec<String>)) -> (NetlistDB, Liberty) {
     let units = DbuPerMicron::new(2000).unwrap();
     let library = lef::parse_files(&[fixture("clock.lef")], units).unwrap();
-    let db = def::parse_str(&design_text(), Path::new("flow.def"), library).unwrap();
+    let text = design_text(&cells, nets);
+    let db = def::parse_str(&text, Path::new("flow.def"), library).unwrap();
     let lib = liberty::parse_file(&fixture("clock.lib")).unwrap();
     (db, lib)
 }
@@ -133,10 +170,14 @@ fn cells_text(db: &NetlistDB) -> String {
     text
 }
 
-/// Design, setup and hold repair of the design under a clock of
-/// `period_ns`, as text: what each repair did and every cell after.
-fn repaired(period_ns: f64) -> String {
-    let (mut db, lib) = load();
+/// What `repair` reports of a timed session over the design of `work`
+/// under a clock of `period_ns`, then every cell once the session ends.
+fn repaired_text(
+    work: (Vec<String>, Vec<String>),
+    period_ns: f64,
+    repair: impl FnOnce(&mut Resizer<'_, Sta>) -> String,
+) -> String {
+    let (mut db, lib) = load(work);
     let constraints = sdc::parse_str(
         &format!(
             "create_clock -name core -period {period_ns} [get_ports clk]\n\
@@ -171,27 +212,31 @@ fn repaired(period_ns: f64) -> String {
         namer: &mut namer,
     };
     let mut resizer = Resizer::timed(inputs, &constraints).unwrap();
-
-    let design = Repairer::new(&mut resizer).repair_design().unwrap();
-    let mut reports = Vec::new();
-    let setup = repair_setup(&mut resizer, SetupOptions::default(), &mut |progress| {
-        reports.push((progress.iteration, progress.failing));
-    })
-    .unwrap();
-    let hold = repair_hold(
-        &mut resizer,
-        &HoldOptions {
-            hold_margin: Seconds::new(0.12e-9),
-            ..HoldOptions::default()
-        },
-    )
-    .unwrap();
+    let reported = repair(&mut resizer);
     let _ = resizer.finish().unwrap();
+    format!("{reported}\n{}", cells_text(&db))
+}
 
-    format!(
-        "{design:#?}\nreported (iteration, failing): {reports:?}\n{setup:#?}\n{hold:#?}\n{}",
-        cells_text(&db)
-    )
+/// Design, setup and hold repair of the timing work under a clock of
+/// `period_ns`, as text: what each repair did and every cell after.
+fn repaired(period_ns: f64) -> String {
+    repaired_text(timing_work(), period_ns, |resizer| {
+        let design = Repairer::new(resizer).repair_design().unwrap();
+        let mut reports = Vec::new();
+        let setup = repair_setup(resizer, SetupOptions::default(), &mut |progress| {
+            reports.push((progress.iteration, progress.failing));
+        })
+        .unwrap();
+        let hold = repair_hold(
+            resizer,
+            &HoldOptions {
+                hold_margin: Seconds::new(0.12e-9),
+                ..HoldOptions::default()
+            },
+        )
+        .unwrap();
+        format!("{design:#?}\nreported (iteration, failing): {reports:?}\n{setup:#?}\n{hold:#?}")
+    })
 }
 
 fn assert_golden(name: &str, actual: &str) {
@@ -210,4 +255,19 @@ fn repairing_design_setup_and_hold_gives_what_it_always_has() {
 #[test]
 fn setup_repair_short_of_its_target_gives_what_it_always_has() {
     assert_golden("flow_unclosed.txt", &repaired(0.18));
+}
+
+/// The longest wire design repair leaves, as `repair_design -max_wire_length
+/// 100`.
+const MAX_WIRE_LENGTH: i64 = 200_000;
+
+#[test]
+fn design_repair_splits_long_and_overloaded_nets_as_it_always_has() {
+    let repaired = repaired_text(long_and_loaded_nets(), 1.0, |resizer| {
+        resizer.set_max_wire_length(MAX_WIRE_LENGTH);
+        let design = Repairer::new(resizer).repair_design().unwrap();
+        format!("{design:#?}")
+    });
+
+    assert_golden("long_and_loaded_nets.txt", &repaired);
 }
