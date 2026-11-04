@@ -38,3 +38,6 @@ layer_rc = [
   { layer = "metal9", resistance_ohm_per_um = 0.034286, capacitance_ff_per_um = 0.106091 },
   { layer = "metal10", resistance_ohm_per_um = 0.038654, capacitance_ff_per_um = 0.737095 },
 ]
+
+[routing]
+clock_min_layer = "metal4"

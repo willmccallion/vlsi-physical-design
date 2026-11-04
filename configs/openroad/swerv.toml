@@ -23,3 +23,6 @@ layer_adjustments = [
 [io_placement]
 horizontal_layer = "metal5"
 vertical_layer = "metal6"
+
+[routing]
+clock_min_layer = "metal4"
