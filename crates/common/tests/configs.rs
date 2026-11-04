@@ -46,6 +46,18 @@ fn a_config_of_only_its_purpose_parses() {
 }
 
 #[test]
+fn every_step_runs_unless_the_config_turns_it_off() {
+    let config = parse("").unwrap();
+
+    let netlist = &config.netlist;
+    let gp = &config.global_placement;
+    assert!(netlist.remove_buffers && netlist.buffer_ports && netlist.clock_tree);
+    assert!(netlist.repair_design && netlist.repair_timing && netlist.repair_on_global_routes);
+    assert!(gp.routability_driven && gp.timing_driven);
+    assert!(config.io_placement.enabled);
+}
+
+#[test]
 fn unknown_keys_are_rejected() {
     let parsed = parse("[global_placement]\ntarget_densty = 0.7\n");
 
