@@ -75,11 +75,8 @@ pub struct CtsSummary {
 #[derive(Clone, Debug)]
 pub struct ClockTrees {
     pub(crate) builders: Vec<Builder>,
-    pub(crate) settings: Settings,
-    pub(crate) buffers: ClockBuffers,
+    pub(crate) setup: TreeSetup,
     pub(crate) cap_per_dbu: f64,
-    pub(crate) buffer_sizes: FxHashMap<LibCellId, DbPoint<Dbu>>,
-    pub(crate) blockages: Vec<Rect<Dbu>>,
     /// What was done.
     pub summary: CtsSummary,
 }
@@ -88,7 +85,33 @@ impl ClockTrees {
     /// The clock buffers, as inferred from the library.
     #[must_use]
     pub fn clock_buffers(&self) -> &[LibCellId] {
-        &self.buffers.all
+        &self.setup.buffers.all
+    }
+}
+
+/// What every tree of a run is built with.
+#[derive(Clone, Debug)]
+pub(crate) struct TreeSetup {
+    pub settings: Settings,
+    pub buffers: ClockBuffers,
+    /// The width and height of each buffer's master.
+    pub buffer_sizes: FxHashMap<LibCellId, DbPoint<Dbu>>,
+    /// Where buffers must not go.
+    pub blockages: Vec<Rect<Dbu>>,
+}
+
+impl TreeSetup {
+    /// What a tree builder of `db` reads.
+    pub(crate) fn context(&self, db: &NetlistDB) -> TreeContext<'_> {
+        TreeContext {
+            settings: &self.settings,
+            core: db.core_area(),
+            dbu: db.dbu().get() as i32,
+            root_buffer: self.buffers.root,
+            sink_buffer: self.buffers.sink,
+            buffer_sizes: &self.buffer_sizes,
+            blockages: &self.blockages,
+        }
     }
 }
 
@@ -122,11 +145,13 @@ pub fn synthesize(db: &mut NetlistDB, input: &CtsInput<'_>) -> Result<ClockTrees
     let mut cts = Cts {
         link: input.link,
         clocks: input.clocks,
-        settings,
-        buffers,
+        setup: TreeSetup {
+            settings,
+            buffers,
+            buffer_sizes: FxHashMap::default(),
+            blockages: Vec::new(),
+        },
         builders: Vec::new(),
-        buffer_sizes: FxHashMap::default(),
-        blockages: Vec::new(),
         visited: FxHashSet::default(),
         net_builder: FxHashMap::default(),
         clock_nets: FxHashSet::default(),
@@ -136,10 +161,10 @@ pub fn synthesize(db: &mut NetlistDB, input: &CtsInput<'_>) -> Result<ClockTrees
     };
     cts.summary
         .root_buffer
-        .clone_from(&liberty.cell(cts.buffers.root).name);
+        .clone_from(&liberty.cell(cts.setup.buffers.root).name);
     cts.summary
         .sink_buffer
-        .clone_from(&liberty.cell(cts.buffers.sink).name);
+        .clone_from(&liberty.cell(cts.setup.buffers.sink).name);
     cts.populate(db, input.sdc)?;
     if !cts.builders.is_empty() {
         cts.build(db, &mut tech)?;
@@ -147,11 +172,8 @@ pub fn synthesize(db: &mut NetlistDB, input: &CtsInput<'_>) -> Result<ClockTrees
     }
     Ok(ClockTrees {
         builders: cts.builders,
-        settings: cts.settings,
-        buffers: cts.buffers,
+        setup: cts.setup,
         cap_per_dbu: tech.cap_per_dbu(),
-        buffer_sizes: cts.buffer_sizes,
-        blockages: cts.blockages,
         summary: cts.summary,
     })
 }
@@ -159,11 +181,8 @@ pub fn synthesize(db: &mut NetlistDB, input: &CtsInput<'_>) -> Result<ClockTrees
 struct Cts<'a> {
     link: &'a Link<'a>,
     clocks: &'a ClockNetwork,
-    settings: Settings,
-    buffers: ClockBuffers,
+    setup: TreeSetup,
     builders: Vec<Builder>,
-    buffer_sizes: FxHashMap<LibCellId, DbPoint<Dbu>>,
-    blockages: Vec<Rect<Dbu>>,
     visited: FxHashSet<NetId>,
     net_builder: FxHashMap<NetId, usize>,
     clock_nets: FxHashSet<NetId>,
@@ -388,7 +407,7 @@ impl Cts<'_> {
     /// of the latest rising and falling delays at zero input slew, or the
     /// one there is; zero when insertion delays are off.
     fn insertion_delay(&self, db: &NetlistDB, pin: PinId) -> Seconds {
-        if !self.settings.insertion_delay {
+        if !self.setup.settings.insertion_delay {
             return Seconds::ZERO;
         }
         let Some((lib, port)) = self.link.pin_port(db, pin) else {
@@ -465,7 +484,10 @@ impl Cts<'_> {
                 register_sinks.push(pin);
             }
         }
-        if !self.settings.insertion_delay || macro_sinks.is_empty() || register_sinks.is_empty() {
+        if !self.setup.settings.insertion_delay
+            || macro_sinks.is_empty()
+            || register_sinks.is_empty()
+        {
             for pin in net_cell_pins(db, net) {
                 let Some((cell, _, _)) = pin_direction(db, pin) else {
                     continue;
@@ -521,8 +543,8 @@ impl Cts<'_> {
         let name = format!("clkbuf_regs_{}_{sdc_name}", self.reg_tree_index);
         self.reg_tree_index += 1;
         let center = sink_bbox_center(db, &db.nets[regs.index()].pins.clone());
-        let cell = self.make_buffer(db, self.buffers.root, &name, center)?;
-        let _ = self.connect_buffer(db, cell, self.buffers.root, Some(net), Some(regs))?;
+        let cell = self.make_buffer(db, self.setup.buffers.root, &name, center)?;
+        let _ = self.connect_buffer(db, cell, self.setup.buffers.root, Some(net), Some(regs))?;
         Ok((regs, name))
     }
 
@@ -635,7 +657,11 @@ impl Cts<'_> {
         let driver_at = db.average_pin_position(driver);
         point_pins.entry(driver_at).or_default().push(driver);
         let tree = prim_dijkstra(&points, 0, DEFAULT_ALPHA);
-        let clusters = long_edge_clusters(&tree.nodes, &tree.parent, self.settings.max_wire_length);
+        let clusters = long_edge_clusters(
+            &tree.nodes,
+            &tree.parent,
+            self.setup.settings.max_wire_length,
+        );
         self.place_gate_clones(
             db,
             net,
@@ -738,56 +764,34 @@ impl Cts<'_> {
         Ok(())
     }
 
-    fn tree_context<'b>(
-        &'b self,
-        db: &NetlistDB,
-        sizes: &'b FxHashMap<LibCellId, DbPoint<Dbu>>,
-        blockages: &'b [Rect<Dbu>],
-    ) -> TreeContext<'b> {
-        TreeContext {
-            settings: &self.settings,
-            core: db.core_area(),
-            dbu: db.dbu().get() as i32,
-            root_buffer: self.buffers.root,
-            sink_buffer: self.buffers.sink,
-            buffer_sizes: sizes,
-            blockages,
-        }
-    }
-
     /// Builds every tree, as `TritonCTS::buildClockTrees`.
     fn build(&mut self, db: &NetlistDB, tech: &mut TechChar) -> Result<(), CtsError> {
         let mut sizes = FxHashMap::default();
-        for &b in self
-            .buffers
-            .all
-            .iter()
-            .chain([&self.buffers.root, &self.buffers.sink])
-        {
+        let buffers = &self.setup.buffers;
+        for &b in buffers.all.iter().chain([&buffers.root, &buffers.sink]) {
             let master = self
                 .link
                 .macro_of(b)
                 .ok_or_else(|| CtsError::NoMaster(self.link.liberty.cell(b).name.clone()))?;
             let _ = sizes.insert(b, db.library.cell_macro(master).size);
         }
-        let root = sizes.get(&self.buffers.root).copied().unwrap_or_default();
+        let root = sizes
+            .get(&self.setup.buffers.root)
+            .copied()
+            .unwrap_or_default();
         let unit = f64::from(tech.length_unit());
         let half = |side: Dbu| Dbu(((side.get() as f64 / unit) * unit / 2.0).ceil() as i64);
         let bloat = DbPoint::new(half(root.x), half(root.y));
         let (blockages, macro_diameter) = merge_blockages(db, bloat);
-        if macro_diameter > 0.0 && self.settings.macro_max_diameter.is_none() {
-            self.settings.macro_max_diameter = Some(macro_diameter.max(MACRO_MAX_DIAMETER));
+        if macro_diameter > 0.0 && self.setup.settings.macro_max_diameter.is_none() {
+            self.setup.settings.macro_max_diameter = Some(macro_diameter.max(MACRO_MAX_DIAMETER));
         }
-        let mut builders = std::mem::take(&mut self.builders);
-        {
-            let ctx = self.tree_context(db, &sizes, &blockages);
-            for builder in &mut builders {
-                builder.run(&ctx, tech);
-            }
+        self.setup.buffer_sizes = sizes;
+        self.setup.blockages = blockages;
+        let ctx = self.setup.context(db);
+        for builder in &mut self.builders {
+            builder.run(&ctx, tech);
         }
-        self.builders = builders;
-        self.buffer_sizes = sizes;
-        self.blockages = blockages;
         Ok(())
     }
 
@@ -796,10 +800,10 @@ impl Cts<'_> {
         for i in 0..self.builders.len() {
             prune_empty_subnets(&mut self.builders[i].clock);
             self.write_clock_nets(db, i)?;
-            if self.settings.ndr != NdrStrategy::None {
+            if self.setup.settings.ndr != NdrStrategy::None {
                 self.write_ndr(db, i);
             }
-            if self.settings.dummy_loads {
+            if self.setup.settings.dummy_loads {
                 let n = self.write_dummy_loads(db, i)?;
                 self.builders[i].n_dummies = n;
                 self.summary.dummies += n;
@@ -818,7 +822,7 @@ impl Cts<'_> {
         let mut buffers = Vec::new();
         for b in 0..self.builders[index].clock.buffers.len() {
             let inst = self.builders[index].clock.buffers[b].clone();
-            let master = inst.master.unwrap_or(self.buffers.root);
+            let master = inst.master.unwrap_or(self.setup.buffers.root);
             let cell = self.make_buffer(db, master, &inst.name, inst.location)?;
             self.builders[index].clock.buffers[b].cell = Some(cell);
             buffers.push((cell, master));
@@ -863,7 +867,7 @@ impl Cts<'_> {
             let master = buffers
                 .iter()
                 .find(|(c, _)| *c == root)
-                .map_or(self.buffers.root, |&(_, m)| m);
+                .map_or(self.setup.buffers.root, |&(_, m)| m);
             let (input, _) = self.connect_buffer(db, root, master, Some(top_net), None)?;
             if let Some(pos) = buffers.iter().position(|(c, _)| *c == root) {
                 self.builders[index].clock.buffers[pos].input_pin = input;
@@ -890,7 +894,7 @@ impl Cts<'_> {
             .collect();
         levels.sort_unstable();
         levels.dedup();
-        let targets: Vec<u32> = match self.settings.ndr {
+        let targets: Vec<u32> = match self.setup.settings.ndr {
             NdrStrategy::None => Vec::new(),
             NdrStrategy::RootOnly => vec![0],
             NdrStrategy::Half => levels[..levels.len().div_ceil(2)].to_vec(),
@@ -940,7 +944,7 @@ impl Cts<'_> {
                 };
                 // NOTE: TritonCTS compares with its zero for no limit, so
                 // without one only a sinkless subnet is passed over.
-                let full = self.settings.max_fanout.map_or(0, |f| f as usize);
+                let full = self.setup.settings.max_fanout.map_or(0, |f| f as usize);
                 if self.builders[index].clock.subnets[own].sinks().len() == full {
                     continue;
                 }
@@ -1046,7 +1050,7 @@ impl Cts<'_> {
     /// named `INV`, else every candidate inverter.
     fn dummy_candidates(&self) -> Vec<LibCellId> {
         let liberty = self.link.liberty;
-        let mut candidates = self.buffers.all.clone();
+        let mut candidates = self.setup.buffers.all.clone();
         let inverters: Vec<LibCellId> = (0..liberty.cells.len())
             .map(|i| LibCellId(i as u32))
             .filter(|&id| {

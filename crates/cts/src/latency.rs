@@ -7,7 +7,7 @@
 #![allow(clippy::suboptimal_flops)]
 
 use crate::CtsError;
-use crate::htree::{Point, TreeContext};
+use crate::htree::Point;
 use crate::triton::{
     ClockTrees, first_output, is_sink, net_cell_pins, pin_direction, sink_bbox_center,
 };
@@ -41,7 +41,7 @@ pub fn balance_latencies(
     trees: &ClockTrees,
     arrival: &dyn Fn(PinId) -> Option<Seconds>,
 ) -> Result<usize, CtsError> {
-    if !trees.settings.insertion_delay {
+    if !trees.setup.settings.insertion_delay {
         return Ok(0);
     }
     let mut inserted = 0;
@@ -236,7 +236,7 @@ impl Balancer<'_> {
     /// `extra` farads, its slew settled over three lookups, as
     /// `LatencyBalancer::computeBufferDelay`.
     fn buffer_delay(&self, extra: f64) -> f32 {
-        let lib = self.link.liberty.cell(self.trees.buffers.root);
+        let lib = self.link.liberty.cell(self.trees.setup.buffers.root);
         let Some((input, output)) = lib.buffer_ports() else {
             return 0.0;
         };
@@ -355,17 +355,9 @@ impl Balancer<'_> {
         let dx = (center.x - src.x).get() as f32 / (count + 1) as f32;
         let dy = (center.y - src.y).get() as f32 / (count + 1) as f32;
         let root = &self.trees.builders[self.root];
-        let ctx = TreeContext {
-            settings: &self.trees.settings,
-            core: db.core_area(),
-            dbu: db.dbu().get() as i32,
-            root_buffer: self.trees.buffers.root,
-            sink_buffer: self.trees.buffers.sink,
-            buffer_sizes: &self.trees.buffer_sizes,
-            blockages: &self.trees.blockages,
-        };
+        let ctx = self.trees.setup.context(db);
         let unit = root.unit();
-        let buffer = self.trees.buffers.root;
+        let buffer = self.trees.setup.buffers.root;
         let lib = self.link.liberty.cell(buffer);
         let (in_port, out_port) = lib
             .buffer_ports()
