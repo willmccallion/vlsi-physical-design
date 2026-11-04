@@ -448,6 +448,16 @@ impl ArcRole {
         !self.is_check()
     }
 
+    /// Whether the arc carries a delay through the cell's logic to its
+    /// output: a delay other than a tristate enable or disable.
+    #[must_use]
+    pub const fn is_logic_delay(self) -> bool {
+        matches!(
+            self,
+            Self::Combinational | Self::RegClkToQ | Self::RegSetClr | Self::LatchEnToQ
+        )
+    }
+
     /// Whether the arc constrains a delay rather than carrying one.
     #[must_use]
     pub(crate) const fn is_check(self) -> bool {
@@ -1443,6 +1453,36 @@ impl FuncParser<'_> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn logic_delays_are_the_delays_besides_tristate_enables() {
+        let roles = [
+            ArcRole::Combinational,
+            ArcRole::RegClkToQ,
+            ArcRole::RegSetClr,
+            ArcRole::LatchEnToQ,
+            ArcRole::TristateEnable,
+            ArcRole::TristateDisable,
+            ArcRole::Setup,
+            ArcRole::Hold,
+            ArcRole::Recovery,
+            ArcRole::Removal,
+            ArcRole::Check,
+        ];
+
+        let logic: Vec<ArcRole> = roles.into_iter().filter(|r| r.is_logic_delay()).collect();
+
+        assert_eq!(
+            logic,
+            [
+                ArcRole::Combinational,
+                ArcRole::RegClkToQ,
+                ArcRole::RegSetClr,
+                ArcRole::LatchEnToQ
+            ]
+        );
+        assert!(logic.iter().all(|r| r.is_delay()));
+    }
 
     fn times(values: &[f64]) -> Vec<Seconds> {
         values.iter().copied().map(Seconds::new).collect()

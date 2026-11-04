@@ -11,7 +11,7 @@ use crate::library::SizingLimits;
 use crate::resizer::{RepairError, Resizer, Timing, gate_slew};
 use pare_common::db::design::PinOwner;
 use pare_common::db::indices::{NetId, PinId};
-use pare_common::db::liberty::{ArcRole, LibCellId};
+use pare_common::db::liberty::{ArcRole, EdgeValues, LibCellId};
 use pare_common::geom::dbu::Dbu;
 use pare_common::geom::point::Point;
 use pare_common::units::{Farads, FaradsPerMeter, Meters, Ohms, OhmsPerMeter, Seconds};
@@ -326,51 +326,13 @@ impl<'r, 'a, T: Timing> Repairer<'r, 'a, T> {
             return Ok(false);
         }
         let input_slews = self.resizer.input_slews(cell);
-        let mut sizes: Vec<(Seconds, f64, LibCellId)> = Vec::new();
-        for size in candidates {
-            let size_cell = self.resizer.link.liberty.cell(size);
-            let Some(port) = size_cell.port(&port_name) else {
-                continue;
-            };
-            let mut violation = Seconds::ZERO;
-            if let Some(limit) = self
-                .resizer
-                .link
-                .liberty
-                .slew_limit(size_cell, &size_cell.ports[port])
-            {
-                let limit = self.resizer.margined_slew(limit);
-                for set in size_cell.arc_sets.iter().filter(|s| s.to == port) {
-                    if !matches!(
-                        set.role,
-                        ArcRole::Combinational
-                            | ArcRole::RegClkToQ
-                            | ArcRole::RegSetClr
-                            | ArcRole::LatchEnToQ
-                    ) {
-                        continue;
-                    }
-                    let from_name = &size_cell.ports[set.from].name;
-                    for arc in &set.arcs {
-                        let in_slew = input_slews.iter().find(|(n, _)| n == from_name).map_or(
-                            Seconds::ZERO,
-                            |(_, s)| {
-                                if set.role == ArcRole::RegClkToQ {
-                                    Seconds::ZERO
-                                } else {
-                                    s.get(arc.from_edge)
-                                }
-                            },
-                        );
-                        let arc_slew = arc.gate_delay(in_slew, load_cap).1;
-                        if arc_slew > limit {
-                            violation = violation.max(arc_slew - limit);
-                        }
-                    }
-                }
-            }
-            sizes.push((violation, size_cell.area, size));
-        }
+        let mut sizes: Vec<(Seconds, f64, LibCellId)> = candidates
+            .into_iter()
+            .filter_map(|size| {
+                let violation = self.slew_violation(size, &port_name, &input_slews, load_cap)?;
+                Some((violation, self.resizer.link.liberty.cell(size).area, size))
+            })
+            .collect();
         sizes.sort_by(|a, b| {
             if a.0 == Seconds::ZERO && b.0 == Seconds::ZERO {
                 a.1.total_cmp(&b.1)
@@ -385,6 +347,45 @@ impl<'r, 'a, T: Timing> Repairer<'r, 'a, T> {
             return Ok(false);
         }
         self.resizer.replace_cell(cell, selected)
+    }
+
+    /// How far the slew out of port `port_name` of `size` would pass its
+    /// limit, driving `load_cap` from `input_slews`, over the arcs through
+    /// the cell's logic into it; none when `size` has no such port.
+    fn slew_violation(
+        &self,
+        size: LibCellId,
+        port_name: &str,
+        input_slews: &[(String, EdgeValues<Seconds>)],
+        load_cap: Farads,
+    ) -> Option<Seconds> {
+        let liberty = &self.resizer.link.liberty;
+        let size_cell = liberty.cell(size);
+        let port = size_cell.port(port_name)?;
+        let Some(limit) = liberty.slew_limit(size_cell, &size_cell.ports[port]) else {
+            return Some(Seconds::ZERO);
+        };
+        let limit = self.resizer.margined_slew(limit);
+        let mut violation = Seconds::ZERO;
+        let sets = size_cell
+            .arc_sets
+            .iter()
+            .filter(|s| s.to == port && s.role.is_logic_delay());
+        for set in sets {
+            let from_name = &size_cell.ports[set.from].name;
+            let from_slews = input_slews.iter().find(|(n, _)| n == from_name);
+            for arc in &set.arcs {
+                let in_slew = match from_slews {
+                    Some((_, slews)) if set.role != ArcRole::RegClkToQ => slews.get(arc.from_edge),
+                    _ => Seconds::ZERO,
+                };
+                let arc_slew = arc.gate_delay(in_slew, load_cap).1;
+                if arc_slew > limit {
+                    violation = violation.max(arc_slew - limit);
+                }
+            }
+        }
+        Some(violation)
     }
 
     /// The load at which the driver's slew would equal `slew`, by binary
