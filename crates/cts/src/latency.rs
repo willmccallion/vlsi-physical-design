@@ -37,7 +37,7 @@ pub fn balance_latencies(
     db: &mut NetlistDB,
     link: &Link<'_>,
     trees: &ClockTrees,
-    arrival: &dyn Fn(PinId) -> Option<f64>,
+    arrival: &dyn Fn(PinId) -> Option<Seconds>,
 ) -> Result<usize, CtsError> {
     if !trees.settings.insertion_delay {
         return Ok(0);
@@ -68,7 +68,7 @@ struct Balancer<'a> {
     link: &'a Link<'a>,
     trees: &'a ClockTrees,
     root: usize,
-    arrival: &'a dyn Fn(PinId) -> Option<f64>,
+    arrival: &'a dyn Fn(PinId) -> Option<Seconds>,
     nodes: Vec<Node>,
     leaf_builders: BTreeMap<String, usize>,
     worse_delay: f32,
@@ -128,7 +128,7 @@ impl Balancer<'_> {
     }
 
     fn sink_arrival(&self, pin: PinId) -> f32 {
-        (self.arrival)(pin).unwrap_or(0.0) as f32
+        (self.arrival)(pin).map_or(0.0, Seconds::get) as f32
     }
 
     /// The mean arrival at a tree's sinks, as

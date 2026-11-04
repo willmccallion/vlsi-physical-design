@@ -38,8 +38,8 @@ const PRINT_INTERVAL: usize = 10;
 /// How setup repair runs.
 #[derive(Clone, Debug, PartialEq)]
 pub struct SetupOptions {
-    /// Slack every endpoint should reach, in seconds.
-    pub margin: f64,
+    /// Slack every endpoint should reach.
+    pub margin: Seconds,
     /// Share of the failing endpoints to work on, from the worst.
     pub repair_tns_share: f64,
     /// Passes an endpoint may take.
@@ -57,7 +57,7 @@ impl Default for SetupOptions {
     /// repair and move sequence.
     fn default() -> Self {
         Self {
-            margin: 0.0,
+            margin: Seconds::ZERO,
             repair_tns_share: 1.0,
             max_passes: 10_000,
             max_repairs_per_pass: 1,
@@ -91,10 +91,10 @@ pub struct SetupProgress {
     pub swapped: usize,
     /// Area now over area at the start, as a percentage change.
     pub area_change_percent: f64,
-    /// Worst slack, in seconds.
-    pub wns: f64,
-    /// Total negative slack, in seconds.
-    pub tns: f64,
+    /// Worst slack.
+    pub wns: Seconds,
+    /// Total negative slack.
+    pub tns: Seconds,
     /// Endpoints still failing.
     pub failing: usize,
     /// The worst endpoint's name.
@@ -108,14 +108,14 @@ pub struct SetupSummary {
     pub failing_before: usize,
     /// Endpoints failing at the end.
     pub failing_after: usize,
-    /// Worst slack at the start, in seconds.
-    pub wns_before: f64,
+    /// Worst slack at the start.
+    pub wns_before: Seconds,
     /// Worst slack at the end.
-    pub wns_after: f64,
+    pub wns_after: Seconds,
     /// Total negative slack at the start.
-    pub tns_before: f64,
+    pub tns_before: Seconds,
     /// Total negative slack at the end.
-    pub tns_after: f64,
+    pub tns_after: Seconds,
     /// Buffers removed.
     pub removed: usize,
     /// Gates resized.
@@ -141,8 +141,8 @@ struct Repair<'r, 'a> {
     options: SetupOptions,
     initial_area: f64,
     iteration: usize,
-    min_violation: f64,
-    max_violation: f64,
+    min_violation: Seconds,
+    max_violation: Seconds,
     fallback: bool,
 }
 
@@ -161,8 +161,8 @@ pub fn repair_setup(
         options,
         initial_area,
         iteration: 0,
-        min_violation: 0.0,
-        max_violation: 0.0,
+        min_violation: Seconds::ZERO,
+        max_violation: Seconds::ZERO,
         fallback: false,
     };
     let violating = repair.violating_endpoints();
@@ -213,24 +213,24 @@ pub fn repair_setup(
 impl Repair<'_, '_> {
     /// The endpoints below the margin, worst first, as
     /// `ViolatorCollector::collectViolatingEndpoints`.
-    fn violating_endpoints(&self) -> Vec<(PinId, f64)> {
+    fn violating_endpoints(&self) -> Vec<(PinId, Seconds)> {
         let sta = self.resizer.sta();
-        let mut ends: Vec<(PinId, f64)> = sta
+        let mut ends: Vec<(PinId, Seconds)> = sta
             .endpoints()
             .iter()
-            .map(|&end| (end, sta.slack(end, MinMax::Max).seconds()))
+            .map(|&end| (end, sta.slack(end, MinMax::Max).time()))
             .filter(|&(_, slack)| fuzzy::less(slack, self.options.margin))
             .collect();
         ends.sort_by(|a, b| a.1.total_cmp(&b.1));
         ends
     }
 
-    fn worst(&self) -> (f64, Option<PinId>) {
+    fn worst(&self) -> (Seconds, Option<PinId>) {
         let (slack, end) = self.resizer.sta().worst_slack(MinMax::Max);
-        (slack.seconds(), end)
+        (slack.time(), end)
     }
 
-    fn tns(&self) -> f64 {
+    fn tns(&self) -> Seconds {
         self.resizer.sta().total_negative_slack(MinMax::Max)
     }
 
@@ -274,13 +274,13 @@ impl Repair<'_, '_> {
     }
 
     /// Whether the repair has stopped paying off, as `terminateProgress`.
-    fn terminate(&self, initial_tns: f64, prev_tns: &mut f64, threshold: &mut f64) -> bool {
+    fn terminate(&self, initial_tns: Seconds, prev_tns: &mut Seconds, threshold: &mut f64) -> bool {
         if self.iteration.is_multiple_of(LARGE_INTERVAL) {
             *threshold *= 2.0;
         }
         if self.iteration.is_multiple_of(SMALL_INTERVAL) {
             let current = self.tns();
-            let rate = if initial_tns == 0.0 {
+            let rate = if initial_tns == Seconds::ZERO {
                 0.0
             } else {
                 (*prev_tns - current) / initial_tns
@@ -296,10 +296,10 @@ impl Repair<'_, '_> {
     /// `repairSetup_Legacy`.
     fn legacy_phase(
         &mut self,
-        violating: &[(PinId, f64)],
+        violating: &[(PinId, Seconds)],
         max_end_repairs: usize,
-        initial_tns: f64,
-        prev_tns: &mut f64,
+        initial_tns: Seconds,
+        prev_tns: &mut Seconds,
         report: &mut dyn FnMut(&SetupProgress),
     ) -> Result<(), RepairError> {
         self.min_violation = -violating[violating.len() - 1].1;
@@ -314,7 +314,7 @@ impl Repair<'_, '_> {
             }
             self.fallback = false;
             let mut end = first_end;
-            let mut end_slack = self.resizer.sta().slack(end, MinMax::Max).seconds();
+            let mut end_slack = self.resizer.sta().slack(end, MinMax::Max).time();
             let (mut worst_slack, _) = self.worst();
             let mut prev_end_slack = end_slack;
             let mut prev_worst_slack = worst_slack;
@@ -360,7 +360,7 @@ impl Repair<'_, '_> {
                     journal_open = false;
                     break;
                 }
-                end_slack = self.resizer.sta().slack(end, MinMax::Max).seconds();
+                end_slack = self.resizer.sta().slack(end, MinMax::Max).time();
                 let (new_worst, worst_vertex) = self.worst();
                 worst_slack = new_worst;
                 let better = fuzzy::greater(worst_slack, prev_worst_slack)
@@ -408,7 +408,7 @@ impl Repair<'_, '_> {
     /// move's total, so the phase ends soon after moves stop landing often.
     fn last_gasp(
         &mut self,
-        initial_tns: f64,
+        initial_tns: Seconds,
         report: &mut dyn FnMut(&SetupProgress),
     ) -> Result<(), RepairError> {
         let sequence = std::mem::replace(
@@ -418,7 +418,7 @@ impl Repair<'_, '_> {
         let margin = self.options.margin;
         let violating = self.violating_endpoints();
         let mut current_tns = self.tns();
-        if fuzzy::greater_equal(current_tns, 0.0) || violating.is_empty() {
+        if fuzzy::greater_equal(current_tns, Seconds::ZERO) || violating.is_empty() {
             self.options.sequence = sequence;
             return Ok(());
         }
@@ -430,7 +430,7 @@ impl Repair<'_, '_> {
             let end_index = end_index + 1;
             self.fallback = false;
             let mut end = first_end;
-            let mut end_slack = self.resizer.sta().slack(end, MinMax::Max).seconds();
+            let mut end_slack = self.resizer.sta().slack(end, MinMax::Max).time();
             let mut two_terminations = false;
             self.journal_begin();
             let mut journal_open = true;
@@ -468,7 +468,7 @@ impl Repair<'_, '_> {
                     journal_open = false;
                     break;
                 }
-                end_slack = self.resizer.sta().slack(end, MinMax::Max).seconds();
+                end_slack = self.resizer.sta().slack(end, MinMax::Max).time();
                 let (current_worst, worst_vertex) = self.worst();
                 current_tns = self.tns();
                 let wns_improved = fuzzy::greater_equal(current_worst, prev_worst);
@@ -512,8 +512,8 @@ impl Repair<'_, '_> {
     fn repair_endpoint(
         &mut self,
         end: PinId,
-        path_slack: f64,
-        margin: f64,
+        path_slack: Seconds,
+        margin: Seconds,
     ) -> Result<bool, RepairError> {
         let path = {
             let netlist = self.resizer.netlist();
@@ -527,7 +527,7 @@ impl Repair<'_, '_> {
         if path.points.len() <= 1 {
             return Ok(false);
         }
-        let mut load_delays: Vec<(usize, f64)> = Vec::new();
+        let mut load_delays: Vec<(usize, Seconds)> = Vec::new();
         for i in path.start_index..path.points.len() {
             if i == 0 {
                 continue;
@@ -549,7 +549,9 @@ impl Repair<'_, '_> {
         }
         load_delays.sort_by(|a, b| b.1.total_cmp(&a.1).then_with(|| b.0.cmp(&a.0)));
         let mut repairs_per_pass = 1;
-        if self.max_violation - self.min_violation != 0.0 && self.options.max_repairs_per_pass > 1 {
+        if self.max_violation - self.min_violation != Seconds::ZERO
+            && self.options.max_repairs_per_pass > 1
+        {
             let share =
                 (-path_slack - self.min_violation) / (self.max_violation - self.min_violation);
             repairs_per_pass +=
@@ -584,7 +586,7 @@ impl Repair<'_, '_> {
     /// The delay the load adds to the arc into the driver at `index`: the
     /// arc's delay less its intrinsic delay, as `repairEndpoint` ranks
     /// drivers by.
-    fn load_delay(&self, path: &Path, index: usize) -> Option<f64> {
+    fn load_delay(&self, path: &Path, index: usize) -> Option<Seconds> {
         let point = &path.points[index];
         let prev = &path.points[index - 1];
         let Via::Arc { set } = point.via else {
@@ -597,8 +599,8 @@ impl Repair<'_, '_> {
             .arcs
             .iter()
             .filter(|a| a.from_edge == prev.edge && a.to_edge == point.edge)
-            .map(|a| a.gate_delay(Seconds::ZERO, Farads::ZERO).0.get())
-            .fold(0.0, f64::max);
+            .map(|a| a.gate_delay(Seconds::ZERO, Farads::ZERO).0)
+            .fold(Seconds::ZERO, Seconds::max);
         let delay = self
             .resizer
             .graph

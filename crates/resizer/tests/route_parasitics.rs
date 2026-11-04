@@ -9,8 +9,8 @@ use pare_common::db::indices::{LayerId, NetId, NonDefaultRuleId, PinId};
 use pare_common::db::parser::{def, lef, liberty};
 use pare_common::geom::dbu::{Dbu, DbuPerMicron};
 use pare_common::geom::point::Point;
-use pare_common::units::{FaradsPerMeter, OhmsPerMeter};
-use pare_resizer::bnet::{self, Kind, LoadModel, TreeRc};
+use pare_common::units::{Farads, FaradsPerMeter, OhmsPerMeter, Seconds};
+use pare_resizer::bnet::{self, Kind, LoadModel, PinLoad, TreeRc};
 use pare_resizer::parasitics::{NetParasitics, WireRc};
 use pare_resizer::route_parasitics::RouteRc;
 use pare_resizer::{Link, Netlist};
@@ -198,8 +198,12 @@ fn a_wider_non_default_rule_lowers_the_wire_resistance() {
 struct UnitLoads;
 
 impl LoadModel for UnitLoads {
-    fn load(&self, _: PinId) -> (f64, f64, f64) {
-        (1e-15, 1.0, 1e-9)
+    fn load(&self, _: PinId) -> PinLoad {
+        PinLoad {
+            cap: Farads::new(1e-15),
+            fanout: 1.0,
+            max_slew: Seconds::new(1e-9),
+        }
     }
 }
 

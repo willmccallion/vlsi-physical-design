@@ -16,32 +16,32 @@ use crate::graph::TimingGraph;
 use crate::netlist::{ClockNetwork, Constants, Netlist};
 use pare_common::db::design::PinOwner;
 use pare_common::db::indices::{CellId, IoPinId, PinId};
-use pare_common::db::liberty::{ArcRole, Edge, FuncExpr, Logic, MinMax, SequentialKind, TimingArc};
+use pare_common::db::liberty::{ArcRole, Edge, FuncExpr, Logic, MinMax, SequentialKind};
 use pare_common::db::sdc::{ClockEdge, ClockId, MultiCyclePath, PathEnd, Sdc};
 use pare_common::units::Seconds;
 use rustc_hash::{FxHashMap, FxHashSet};
 use std::cmp::Reverse;
 use std::collections::BinaryHeap;
 
-/// A slack in seconds as `OpenSTA` keeps it: [`Slack::UNCONSTRAINED`]
+/// A slack as `OpenSTA` keeps it: [`Slack::UNCONSTRAINED`]
 /// where nothing constrains the pin, which `OpenSTA` holds as its finite
 /// `INF` and so orders after every real slack.
 #[derive(Clone, Copy, Debug, PartialEq, PartialOrd)]
-pub struct Slack(f64);
+pub struct Slack(Seconds);
 
 impl Slack {
     /// The slack of a pin nothing constrains.
-    pub const UNCONSTRAINED: Self = Self(f64::INFINITY);
+    pub const UNCONSTRAINED: Self = Self(Seconds::INFINITY);
 
-    /// The slack of `seconds`.
+    /// A slack of `time`.
     #[must_use]
-    pub const fn new(seconds: f64) -> Self {
-        Self(seconds)
+    pub const fn new(time: Seconds) -> Self {
+        Self(time)
     }
 
-    /// The slack in seconds, infinite where nothing constrains the pin.
+    /// The slack's time, infinite where nothing constrains the pin.
     #[must_use]
-    pub const fn seconds(self) -> f64 {
+    pub const fn time(self) -> Seconds {
         self.0
     }
 
@@ -89,10 +89,10 @@ struct Prev {
 struct Entry {
     tag: TagId,
     /// Arrival per side; absent on a side nothing constrains.
-    arrival: [Option<f64>; 2],
+    arrival: [Option<Seconds>; 2],
     /// Required time per side: the latest allowed on the late side, the
     /// earliest on the early side; unconstrained starts at the identity.
-    required: [f64; 2],
+    required: [Seconds; 2],
     prev: [Option<Prev>; 2],
 }
 
@@ -106,7 +106,7 @@ impl Entry {
         }
     }
 
-    fn slack(&self, side: MinMax) -> f64 {
+    fn slack(&self, side: MinMax) -> Seconds {
         slack_of(
             self.arrival[side.index()],
             self.required[side.index()],
@@ -117,36 +117,36 @@ impl Entry {
 
 /// The required time nothing constrains: no bound on the early side, none
 /// on the late side.
-const REQUIRED_INIT: [f64; 2] = [f64::NEG_INFINITY, f64::INFINITY];
+const REQUIRED_INIT: [Seconds; 2] = [Seconds::new(f64::NEG_INFINITY), Seconds::INFINITY];
 
 /// The required time of a pin `OpenSTA`'s required search never reaches,
 /// one with neither fanin nor fanout such as an unconnected input port:
 /// the zero its paths start with, so a late arrival leaves negative slack.
-const REQUIRED_UNREACHED: [f64; 2] = [0.0, 0.0];
+const REQUIRED_UNREACHED: [Seconds; 2] = [Seconds::ZERO; 2];
 
 /// Whether a required time is the unconstrained one.
-const fn unconstrained(required: f64) -> bool {
-    required.is_infinite()
+const fn unconstrained(required: Seconds) -> bool {
+    required.get().is_infinite()
 }
 
 /// Whether two pairs of times differ at all, bit for bit, which is what a
 /// change worth propagating means.
-fn differ(a: [f64; 2], b: [f64; 2]) -> bool {
+fn differ(a: [Seconds; 2], b: [Seconds; 2]) -> bool {
     a.iter().zip(&b).any(|(&x, &y)| !same_time(x, y))
 }
 
 /// Whether two times, either possibly infinite, are equal within
 /// `OpenSTA`'s tolerance, so that a change too small to matter does not
 /// propagate through the graph.
-fn same_time(a: f64, b: f64) -> bool {
-    if a.is_infinite() || b.is_infinite() {
-        return a.to_bits() == b.to_bits();
+fn same_time(a: Seconds, b: Seconds) -> bool {
+    if a.get().is_infinite() || b.get().is_infinite() {
+        return a.get().to_bits() == b.get().to_bits();
     }
     fuzzy::equal(a, b)
 }
 
 /// Whether `candidate` is a tighter required time than `held` on `side`.
-fn tighter(side: MinMax, candidate: f64, held: f64) -> bool {
+fn tighter(side: MinMax, candidate: Seconds, held: Seconds) -> bool {
     match side {
         MinMax::Max => candidate < held,
         MinMax::Min => candidate > held,
@@ -155,12 +155,12 @@ fn tighter(side: MinMax, candidate: f64, held: f64) -> bool {
 
 /// Slack from an arrival and a required time, infinite where either is
 /// absent.
-fn slack_of(arrival: Option<f64>, required: f64, side: MinMax) -> f64 {
+fn slack_of(arrival: Option<Seconds>, required: Seconds, side: MinMax) -> Seconds {
     let Some(arrival) = arrival else {
-        return f64::INFINITY;
+        return Seconds::INFINITY;
     };
     if unconstrained(required) {
-        return f64::INFINITY;
+        return Seconds::INFINITY;
     }
     match side {
         MinMax::Max => required - arrival,
@@ -192,7 +192,7 @@ pub struct PathPoint {
     /// What launched the path.
     pub tag: Tag,
     /// When the edge arrives.
-    pub arrival: f64,
+    pub arrival: Seconds,
     /// How the path got here.
     pub via: Via,
 }
@@ -208,7 +208,7 @@ pub struct Path {
     /// Which side the path was searched on.
     pub side: MinMax,
     /// The slack at its endpoint.
-    pub slack: f64,
+    pub slack: Seconds,
 }
 
 impl Path {
@@ -224,14 +224,14 @@ impl Path {
 /// for each kind of check.
 #[derive(Clone, Copy, Debug, PartialEq)]
 struct Accounting {
-    setup_required: f64,
-    hold_required: f64,
+    setup_required: Seconds,
+    hold_required: Seconds,
     /// For a gated clock's hold check, made against the trailing edge in
     /// the cycle of the setup check rather than the one before.
-    gated_hold_required: f64,
+    gated_hold_required: Seconds,
     /// For a latch whose enable is the capturing edge: when the latch opens
     /// before the closing edge the data must beat.
-    latch_setup_required: f64,
+    latch_setup_required: Seconds,
     /// The cycles of the launching and capturing clocks the latch
     /// accounting landed on.
     latch_cycles: (i64, i64),
@@ -248,7 +248,7 @@ enum Check {
 }
 
 impl Accounting {
-    const fn required(&self, side: MinMax, check: Check) -> f64 {
+    const fn required(&self, side: MinMax, check: Check) -> Seconds {
         match (side, check) {
             (MinMax::Max, _) => self.setup_required,
             (MinMax::Min, Check::Ordinary) => self.hold_required,
@@ -278,10 +278,10 @@ struct Latch {
 /// `latchRequired` for an ideal clock.
 #[derive(Clone, Copy, Debug, PartialEq)]
 struct LatchTiming {
-    required: f64,
-    borrow: f64,
+    required: Seconds,
+    borrow: Seconds,
     /// The data's arrival in the enable clock's frame, when it borrows.
-    adjusted_arrival: f64,
+    adjusted_arrival: Seconds,
 }
 
 /// The timing of a design, kept current as repair edits it.
@@ -295,8 +295,8 @@ pub struct Sta {
     endpoints: Vec<PinId>,
     is_endpoint: Vec<bool>,
     /// Each endpoint pin's slack from its own checks, per side.
-    end_slack: Vec<[f64; 2]>,
-    tns: [f64; 2],
+    end_slack: Vec<[Seconds; 2]>,
+    tns: [Seconds; 2],
     worst: [Option<(Slack, Option<PinId>)>; 2],
     accountings: FxHashMap<(ClockEdge, ClockEdge), Accounting>,
     exception_ports: FxHashSet<IoPinId>,
@@ -314,14 +314,14 @@ pub struct Sta {
 #[derive(Clone, Copy, Debug)]
 struct Capture {
     edge: ClockEdge,
-    latency: [f64; 2],
+    latency: [Seconds; 2],
 }
 
 impl Capture {
     /// The latency a check on `side` captures with: the early arrival for
     /// setup and the late one for hold, as `OpenSTA` takes the capturing
     /// clock path on the side opposite the check.
-    const fn latency(&self, side: MinMax) -> f64 {
+    const fn latency(&self, side: MinMax) -> Seconds {
         match side {
             MinMax::Max => self.latency[0],
             MinMax::Min => self.latency[1],
@@ -357,8 +357,8 @@ impl Sta {
             entries: vec![Vec::new(); 2 * n],
             endpoints: Vec::new(),
             is_endpoint: vec![false; n],
-            end_slack: vec![[f64::INFINITY; 2]; n],
-            tns: [0.0; 2],
+            end_slack: vec![[Seconds::INFINITY; 2]; n],
+            tns: [Seconds::ZERO; 2],
             worst: [None, None],
             accountings: FxHashMap::default(),
             exception_ports,
@@ -404,7 +404,7 @@ impl Sta {
         }
         self.entries.resize(2 * n, Vec::new());
         self.is_endpoint.resize(n, false);
-        self.end_slack.resize(n, [f64::INFINITY; 2]);
+        self.end_slack.resize(n, [Seconds::INFINITY; 2]);
         self.propagated.resize(n, false);
     }
 
@@ -485,7 +485,7 @@ impl Sta {
             Edge::BOTH
                 .iter()
                 .map(|&edge| self.slack_edge(pin, edge, side).0)
-                .fold(f64::INFINITY, f64::min),
+                .fold(Seconds::INFINITY, Seconds::min),
         )
     }
 
@@ -496,7 +496,7 @@ impl Sta {
             self.entries(pin, edge)
                 .iter()
                 .map(|e| e.slack(side))
-                .fold(f64::INFINITY, f64::min),
+                .fold(Seconds::INFINITY, Seconds::min),
         )
     }
 
@@ -504,7 +504,7 @@ impl Sta {
     /// side, the earliest on the early side, over the tags; none where
     /// nothing arrives.
     #[must_use]
-    pub fn arrival(&self, pin: PinId, edge: Edge, side: MinMax) -> Option<f64> {
+    pub fn arrival(&self, pin: PinId, edge: Edge, side: MinMax) -> Option<Seconds> {
         self.entries(pin, edge)
             .iter()
             .filter_map(|e| e.arrival[side.index()])
@@ -515,7 +515,7 @@ impl Sta {
     /// as `TritonCTS` reads it from the first such clock path: the pin's
     /// rising transitions first.
     #[must_use]
-    pub fn clock_rise_arrival(&self, pin: PinId) -> Option<f64> {
+    pub fn clock_rise_arrival(&self, pin: PinId) -> Option<Seconds> {
         Edge::BOTH.iter().find_map(|&edge| {
             self.entries(pin, edge).iter().find_map(|e| {
                 let tag = self.tags[e.tag.index()];
@@ -530,7 +530,7 @@ impl Sta {
     /// The required time at a pin for `edge` on `side`, over the tags;
     /// none where nothing constrains it.
     #[must_use]
-    pub fn required(&self, pin: PinId, edge: Edge, side: MinMax) -> Option<f64> {
+    pub fn required(&self, pin: PinId, edge: Edge, side: MinMax) -> Option<Seconds> {
         self.entries(pin, edge)
             .iter()
             .map(|e| e.required[side.index()])
@@ -540,7 +540,7 @@ impl Sta {
 
     /// The sum of the negative endpoint slacks on `side`.
     #[must_use]
-    pub(crate) const fn total_negative_slack(&self, side: MinMax) -> f64 {
+    pub(crate) const fn total_negative_slack(&self, side: MinMax) -> Seconds {
         self.tns[side.index()]
     }
 
@@ -580,7 +580,7 @@ impl Sta {
         end: PinId,
         side: MinMax,
     ) -> Option<Path> {
-        let mut best: Option<(f64, Edge, Entry)> = None;
+        let mut best: Option<(Seconds, Edge, Entry)> = None;
         for edge in Edge::BOTH {
             for entry in self.entries(end, edge) {
                 let slack = entry.slack(side);
@@ -603,7 +603,7 @@ impl Sta {
                 pin,
                 edge,
                 tag: self.tags[entry.tag.index()],
-                arrival: entry.arrival[side.index()].unwrap_or(0.0),
+                arrival: entry.arrival[side.index()].unwrap_or(Seconds::ZERO),
                 via,
             });
             let Some(prev) = entry.prev[side.index()] else {
@@ -770,7 +770,7 @@ impl Sta {
         let mut entries = Vec::new();
         for &clock in clocks.clocks_of(pin) {
             let launch = ClockEdge { clock, edge };
-            let time = self.sdc.edge_time(launch).get();
+            let time = self.sdc.edge_time(launch);
             let tag = self.intern(Tag {
                 launch: Some(launch),
                 from_port: None,
@@ -798,7 +798,7 @@ impl Sta {
             });
             return vec![Entry {
                 tag,
-                arrival: [Some(0.0), Some(0.0)],
+                arrival: [Some(Seconds::ZERO), Some(Seconds::ZERO)],
                 required: REQUIRED_INIT,
                 prev: [None, None],
             }];
@@ -811,9 +811,9 @@ impl Sta {
                 from_port,
                 is_clock: false,
             });
-            let edge_time = self.sdc.edge_time(delay.reference).get();
+            let edge_time = self.sdc.edge_time(delay.reference);
             let arrival =
-                MinMax::BOTH.map(|side| delay.delays.get(edge, side).map(|d| edge_time + d.get()));
+                MinMax::BOTH.map(|side| delay.delays.get(edge, side).map(|d| edge_time + d));
             if arrival.iter().all(Option::is_none) {
                 continue;
             }
@@ -855,8 +855,8 @@ impl Sta {
             .filter_map(|e| {
                 let t = self.tags[e.tag.index()];
                 let launch = t.launch.filter(|_| t.is_clock)?;
-                let time = self.sdc.edge_time(launch).get();
-                let latency = e.arrival.map(|a| a.map_or(0.0, |a| a - time));
+                let time = self.sdc.edge_time(launch);
+                let latency = e.arrival.map(|a| a.map_or(Seconds::ZERO, |a| a - time));
                 Some(Capture {
                     edge: launch,
                     latency,
@@ -868,11 +868,11 @@ impl Sta {
     /// The transition at a check's clock pin that its margin is read at:
     /// zero for an ideal clock, as `OpenSTA` takes an ideal clock's slew,
     /// and the clock's own slew on the check's side for a propagated one.
-    fn clock_slew(&self, graph: &TimingGraph, pin: PinId, edge: Edge, side: MinMax) -> f64 {
+    fn clock_slew(&self, graph: &TimingGraph, pin: PinId, edge: Edge, side: MinMax) -> Seconds {
         if self.propagated.get(pin.index()).copied().unwrap_or(false) {
             graph.slew_side(pin, side).get(edge)
         } else {
-            0.0
+            Seconds::ZERO
         }
     }
 
@@ -1003,9 +1003,9 @@ impl Sta {
         graph: &TimingGraph,
         latch: Latch,
         data_tag: TagId,
-        arrival: f64,
+        arrival: Seconds,
         side: MinMax,
-    ) -> Vec<(TagId, f64)> {
+    ) -> Vec<(TagId, Seconds)> {
         let tag = self.tags[data_tag.index()];
         let Some(launch) = tag.launch else {
             return Vec::new();
@@ -1021,7 +1021,7 @@ impl Sta {
                 continue;
             }
             let timing = self.latch_timing(tag, launch, capture, to, arrival, margin);
-            if fuzzy::greater(timing.borrow, 0.0) {
+            if fuzzy::greater(timing.borrow, Seconds::ZERO) {
                 let q_tag = self.intern(Tag {
                     launch: Some(enable),
                     from_port: tag.from_port,
@@ -1042,12 +1042,12 @@ impl Sta {
         launch: ClockEdge,
         capture: Capture,
         to: PathEnd,
-        arrival: f64,
-        margin: f64,
+        arrival: Seconds,
+        margin: Seconds,
     ) -> LatchTiming {
         let enable = capture.edge;
         let accounting = self.accounting(launch, enable);
-        let open_uncertainty = -self.sdc.clock(enable.clock).uncertainty(MinMax::Max).get();
+        let open_uncertainty = -self.sdc.clock(enable.clock).uncertainty(MinMax::Max);
         let adjustment = self.multicycle_adjustment(tag, launch, enable, to, MinMax::Max);
         let enable_arrival = accounting.latch_setup_required
             + open_uncertainty
@@ -1056,15 +1056,14 @@ impl Sta {
         if fuzzy::less_equal(arrival, enable_arrival) {
             return LatchTiming {
                 required: enable_arrival,
-                borrow: 0.0,
+                borrow: Seconds::ZERO,
                 adjusted_arrival: arrival,
             };
         }
         let clock = self.sdc.clock(enable.clock);
-        let mut width =
-            clock.edge_time(opposite(enable.edge)).get() - clock.edge_time(enable.edge).get();
-        if width < 0.0 {
-            width += clock.period.get();
+        let mut width = clock.edge_time(opposite(enable.edge)) - clock.edge_time(enable.edge);
+        if width < Seconds::ZERO {
+            width += clock.period;
         }
         let max_borrow = width - margin;
         let mut borrow = arrival - enable_arrival;
@@ -1075,10 +1074,11 @@ impl Sta {
             enable_arrival + max_borrow
         };
         let (src_cycle, tgt_cycle) = accounting.latch_cycles;
-        let shift = (src_cycle as f64).mul_add(
-            self.sdc.clock(launch.clock).period.get(),
-            -(tgt_cycle as f64) * clock.period.get(),
-        );
+        let shift = self
+            .sdc
+            .clock(launch.clock)
+            .period
+            .mul_add(src_cycle as f64, -(tgt_cycle as f64) * clock.period);
         LatchTiming {
             required,
             borrow,
@@ -1172,7 +1172,7 @@ impl Sta {
         pin: PinId,
         edge: Edge,
         tag: TagId,
-    ) -> [f64; 2] {
+    ) -> [Seconds; 2] {
         let mut required = REQUIRED_INIT;
         if netlist.is_driver(pin) {
             let net = netlist.db.pins[pin.index()].net;
@@ -1238,13 +1238,13 @@ impl Sta {
         pin: PinId,
         edge: Edge,
         entry: &Entry,
-    ) -> [Option<f64>; 2] {
+    ) -> [Option<Seconds>; 2] {
         let tag = self.tags[entry.tag.index()];
         let Some(launch) = tag.launch else {
             return [None, None];
         };
-        let mut required: [Option<f64>; 2] = [None, None];
-        let mut tighten = |side: MinMax, candidate: f64| {
+        let mut required: [Option<Seconds>; 2] = [None, None];
+        let mut tighten = |side: MinMax, candidate: Seconds| {
             let slot = &mut required[side.index()];
             if slot.is_none_or(|held| tighter(side, candidate, held)) {
                 *slot = Some(candidate);
@@ -1265,7 +1265,7 @@ impl Sta {
                             continue;
                         }
                         let base = self.target_arrival(tag, launch, target, to, side);
-                        tighten(side, base - margin.get());
+                        tighten(side, base - margin);
                     }
                 }
             }
@@ -1307,7 +1307,7 @@ impl Sta {
                             continue;
                         }
                         let clock_slew = self.clock_slew(graph, clock_pin, arc.from_edge, side);
-                        let margin = check_value(arc, clock_slew, data_slew);
+                        let margin = arc.check_value(clock_slew, data_slew);
                         let is_latch_setup = latch.is_some() && set.role == ArcRole::Setup;
                         let clock_edge = if is_latch_setup {
                             opposite(arc.from_edge)
@@ -1350,7 +1350,7 @@ impl Sta {
         launch: ClockEdge,
         entry: &Entry,
         gate: GatedEnable,
-    ) -> Vec<(MinMax, f64)> {
+    ) -> Vec<(MinMax, Seconds)> {
         let mut out = Vec::new();
         for side in MinMax::BOTH {
             if entry.arrival[side.index()].is_none() {
@@ -1421,7 +1421,7 @@ impl Sta {
         target: ClockEdge,
         to: PathEnd,
         side: MinMax,
-    ) -> f64 {
+    ) -> Seconds {
         self.capture_arrival(tag, launch, target, to, side, Check::Ordinary)
     }
 
@@ -1434,10 +1434,10 @@ impl Sta {
         to: PathEnd,
         side: MinMax,
         check: Check,
-    ) -> f64 {
+    ) -> Seconds {
         let accounting = self.accounting(launch, target);
         let clock_time = accounting.required(side, check);
-        let uncertainty = self.sdc.clock(target.clock).uncertainty(side).get();
+        let uncertainty = self.sdc.clock(target.clock).uncertainty(side);
         let uncertainty = match side {
             MinMax::Max => -uncertainty,
             MinMax::Min => uncertainty,
@@ -1454,26 +1454,26 @@ impl Sta {
         target: ClockEdge,
         to: PathEnd,
         side: MinMax,
-    ) -> f64 {
+    ) -> Seconds {
         let period = |mcp: &MultiCyclePath| {
             let clock = if mcp.use_end_clock {
                 target.clock
             } else {
                 launch.clock
             };
-            self.sdc.clock(clock).period.get()
+            self.sdc.clock(clock).period
         };
         let setup_cycles =
             |mcp: &MultiCyclePath| f64::from(mcp.multiplier(MinMax::Max) - 1) * period(mcp);
         let setup = self.multicycle(tag, to, Some(target.clock), MinMax::Max);
         match side {
-            MinMax::Max => setup.map_or(0.0, setup_cycles),
+            MinMax::Max => setup.map_or(Seconds::ZERO, setup_cycles),
             MinMax::Min => {
                 let hold = self.multicycle(tag, to, Some(target.clock), MinMax::Min);
-                let hold_cycles = hold.map_or(0.0, |mcp| {
+                let hold_cycles = hold.map_or(Seconds::ZERO, |mcp| {
                     f64::from(mcp.multiplier(MinMax::Min)) * period(mcp)
                 });
-                setup.map_or(0.0, setup_cycles) - hold_cycles
+                setup.map_or(Seconds::ZERO, setup_cycles) - hold_cycles
             }
         }
     }
@@ -1490,7 +1490,7 @@ impl Sta {
 
     /// Recomputes an endpoint's own-check slack and the totals it enters.
     fn refresh_endpoint(&mut self, netlist: &Netlist<'_>, graph: &TimingGraph, pin: PinId) {
-        let mut slack = [f64::INFINITY; 2];
+        let mut slack = [Seconds::INFINITY; 2];
         for edge in Edge::BOTH {
             let entries = self.entries(pin, edge).to_vec();
             for entry in entries {
@@ -1509,10 +1509,10 @@ impl Sta {
         }
         for side in MinMax::BOTH {
             let i = side.index();
-            if old[i].is_finite() && old[i] < 0.0 {
+            if old[i].is_finite() && old[i] < Seconds::ZERO {
                 self.tns[i] -= old[i];
             }
-            if slack[i].is_finite() && slack[i] < 0.0 {
+            if slack[i].is_finite() && slack[i] < Seconds::ZERO {
                 self.tns[i] += slack[i];
             }
             self.worst[i] = None;
@@ -1528,11 +1528,11 @@ fn latch_margin(
     graph: &TimingGraph,
     latch: Latch,
     side: MinMax,
-    clock_slew: f64,
-) -> f64 {
+    clock_slew: Seconds,
+) -> Seconds {
     let db = netlist.db;
     let Some((lib, port)) = netlist.link.pin_port(db, latch.data) else {
-        return 0.0;
+        return Seconds::ZERO;
     };
     let slews = graph.slew_side(latch.data, side);
     netlist
@@ -1543,14 +1543,8 @@ fn latch_margin(
         .iter()
         .filter(|set| set.to == port && set.role == ArcRole::Setup)
         .flat_map(|set| set.arcs.iter())
-        .map(|arc| check_value(arc, clock_slew, slews.get(arc.to_edge)))
-        .fold(0.0, f64::max)
-}
-
-/// The time a check arc demands at its clock and data slews.
-fn check_value(arc: &TimingArc, clock_slew: f64, data_slew: f64) -> f64 {
-    arc.check_value(Seconds::new(clock_slew), Seconds::new(data_slew))
-        .get()
+        .map(|arc| arc.check_value(clock_slew, slews.get(arc.to_edge)))
+        .fold(Seconds::ZERO, Seconds::max)
 }
 
 const fn opposite(edge: Edge) -> Edge {
@@ -1618,7 +1612,7 @@ fn find_latches(netlist: &Netlist<'_>, constants: &Constants) -> FxHashMap<CellI
 /// Keeps the arrival for `tag` on `side` in `entries`, adding the tag when
 /// new, as `OpenSTA` keeps the latest arrival for the late side and the
 /// earliest for the early side.
-fn merge_arrival(entries: &mut Vec<Entry>, tag: TagId, side: MinMax, time: f64, prev: Prev) {
+fn merge_arrival(entries: &mut Vec<Entry>, tag: TagId, side: MinMax, time: Seconds, prev: Prev) {
     let index = entries
         .iter()
         .position(|e| e.tag == tag)
@@ -1684,23 +1678,23 @@ fn predecessors(netlist: &Netlist<'_>, graph: &TimingGraph, pin: PinId) -> Vec<P
 fn cycle_accounting(sdc: &Sdc, launch: ClockEdge, target: ClockEdge) -> Accounting {
     let src_clock = sdc.clock(launch.clock);
     let tgt_clock = sdc.clock(target.clock);
-    let src_period = src_clock.period.get();
-    let tgt_period = tgt_clock.period.get();
-    let src_edge_time = src_clock.edge_time(launch.edge).get();
-    let tgt_edge_time = tgt_clock.edge_time(target.edge).get();
-    let tgt_opposite_time = tgt_clock.edge_time(opposite(target.edge)).get();
+    let src_period = src_clock.period;
+    let tgt_period = tgt_clock.period;
+    let src_edge_time = src_clock.edge_time(launch.edge);
+    let tgt_edge_time = tgt_clock.edge_time(target.edge);
+    let tgt_opposite_time = tgt_clock.edge_time(opposite(target.edge));
     let mut accounting = Accounting {
-        setup_required: 0.0,
-        hold_required: 0.0,
-        gated_hold_required: 0.0,
-        latch_setup_required: 0.0,
+        setup_required: Seconds::ZERO,
+        hold_required: Seconds::ZERO,
+        gated_hold_required: Seconds::ZERO,
+        latch_setup_required: Seconds::ZERO,
         latch_cycles: (0, 0),
     };
-    if !(tgt_period > 0.0 && src_period > 0.0) {
+    if !(tgt_period > Seconds::ZERO && src_period > Seconds::ZERO) {
         return accounting;
     }
-    let first_cycle = |time: f64, period: f64| -> i64 {
-        if time < 0.0 {
+    let first_cycle = |time: Seconds, period: Seconds| -> i64 {
+        if time < Seconds::ZERO {
             1
         } else if time < period {
             0
@@ -1713,10 +1707,10 @@ fn cycle_accounting(sdc: &Sdc, launch: ClockEdge, target: ClockEdge) -> Accounti
     } else {
         ((src_period / tgt_period).ceil() as i64).max(1000)
     };
-    let mut setup_delay = f64::INFINITY;
-    let mut hold_delay = f64::INFINITY;
-    let mut gated_hold_delay = f64::INFINITY;
-    let mut latch_delay = f64::INFINITY;
+    let mut setup_delay = Seconds::INFINITY;
+    let mut hold_delay = Seconds::INFINITY;
+    let mut gated_hold_delay = Seconds::INFINITY;
+    let mut latch_delay = Seconds::INFINITY;
     let mut tgt_past_src = false;
     let mut src_past_tgt = false;
     let mut tgt_cycle = first_cycle(tgt_edge_time, tgt_period);
@@ -1819,8 +1813,8 @@ mod tests {
 
         let acct = cycle_accounting(&sdc, edge(0, Edge::Rise), edge(0, Edge::Rise));
 
-        assert!((acct.setup_required - 2e-9).abs() < 1e-20);
-        assert!(acct.hold_required.abs() < 1e-20);
+        assert!((acct.setup_required.get() - 2e-9).abs() < 1e-20);
+        assert!(acct.hold_required.get().abs() < 1e-20);
     }
 
     #[test]
@@ -1832,9 +1826,9 @@ mod tests {
 
         let acct = cycle_accounting(&sdc, edge(0, Edge::Rise), edge(0, Edge::Fall));
 
-        assert!((acct.gated_hold_required - 1e-9).abs() < 1e-20);
-        assert!((acct.required(MinMax::Min, Check::GatedClock) - 1e-9).abs() < 1e-20);
-        assert!((acct.required(MinMax::Min, Check::Ordinary) + 1e-9).abs() < 1e-20);
+        assert!((acct.gated_hold_required.get() - 1e-9).abs() < 1e-20);
+        assert!((acct.required(MinMax::Min, Check::GatedClock).get() - 1e-9).abs() < 1e-20);
+        assert!((acct.required(MinMax::Min, Check::Ordinary).get() + 1e-9).abs() < 1e-20);
     }
 
     #[test]
@@ -1846,8 +1840,8 @@ mod tests {
 
         let acct = cycle_accounting(&sdc, edge(0, Edge::Rise), edge(0, Edge::Fall));
 
-        assert!((acct.setup_required - 1e-9).abs() < 1e-20);
-        assert!((acct.hold_required + 1e-9).abs() < 1e-20);
+        assert!((acct.setup_required.get() - 1e-9).abs() < 1e-20);
+        assert!((acct.hold_required.get() + 1e-9).abs() < 1e-20);
     }
 
     #[test]
@@ -1859,7 +1853,7 @@ mod tests {
 
         let acct = cycle_accounting(&sdc, edge(0, Edge::Rise), edge(0, Edge::Fall));
 
-        assert!((acct.latch_setup_required - 1.1e-9).abs() < 1e-20);
+        assert!((acct.latch_setup_required.get() - 1.1e-9).abs() < 1e-20);
         assert_eq!(acct.latch_cycles, (0, 0));
     }
 
@@ -1875,8 +1869,8 @@ mod tests {
 
         let acct = cycle_accounting(&sdc, edge(0, Edge::Rise), edge(1, Edge::Rise));
 
-        assert!((acct.setup_required - 1e-9).abs() < 1e-20);
-        assert!(acct.hold_required.abs() < 1e-20);
+        assert!((acct.setup_required.get() - 1e-9).abs() < 1e-20);
+        assert!(acct.hold_required.get().abs() < 1e-20);
     }
 
     fn fixture(crate_name: &str, name: &str) -> PathBuf {
@@ -1949,7 +1943,8 @@ mod tests {
         );
         Sta::new(&netlist, &graph, &clocks, &constants, &sdc)
             .slack(pin, side)
-            .seconds()
+            .time()
+            .get()
     }
 
     #[test]
@@ -1985,9 +1980,15 @@ mod tests {
 
     #[test]
     fn slack_is_infinite_without_an_arrival_or_a_bound() {
-        assert!(slack_of(None, 1.0, MinMax::Max).is_infinite());
-        assert!(slack_of(Some(1.0), REQUIRED_INIT[1], MinMax::Max).is_infinite());
-        assert!((slack_of(Some(1.0), 3.0, MinMax::Max) - 2.0).abs() < 1e-12);
-        assert!((slack_of(Some(1.0), 0.5, MinMax::Min) - 0.5).abs() < 1e-12);
+        assert!(!slack_of(None, Seconds::new(1.0), MinMax::Max).is_finite());
+        assert!(!slack_of(Some(Seconds::new(1.0)), REQUIRED_INIT[1], MinMax::Max).is_finite());
+        assert!(
+            (slack_of(Some(Seconds::new(1.0)), Seconds::new(3.0), MinMax::Max).get() - 2.0).abs()
+                < 1e-12
+        );
+        assert!(
+            (slack_of(Some(Seconds::new(1.0)), Seconds::new(0.5), MinMax::Min).get() - 0.5).abs()
+                < 1e-12
+        );
     }
 }

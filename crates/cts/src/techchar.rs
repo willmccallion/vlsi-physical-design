@@ -11,6 +11,7 @@
 use crate::CtsError;
 use pare_common::db::design::NetlistDB;
 use pare_common::db::liberty::{AxisVariable, Edge, LibCell, LibCellId, Liberty, Thresholds};
+use pare_common::units::{Farads, Ohms, Seconds};
 use pare_resizer::Link;
 use pare_resizer::dmp::{self, PiModel};
 use pare_resizer::parasitics::WireRc;
@@ -716,11 +717,11 @@ impl Chain<'_> {
             let (model, elmore) = if with_wires {
                 let pi = self.wire_pi(i + 1, load);
                 let model = PiModel {
-                    c2: f64::from(pi.c2),
-                    rpi: f64::from(pi.rpi),
-                    c1: f64::from(pi.c1),
+                    c2: Farads::new(f64::from(pi.c2)),
+                    rpi: Ohms::new(f64::from(pi.rpi)),
+                    c1: Farads::new(f64::from(pi.c1)),
                 };
-                (model, Some(f64::from(pi.elmore)))
+                (model, Some(Seconds::new(f64::from(pi.elmore))))
             } else {
                 let pin_cap = self.config.get(i + 1).map_or(0.0, |&next| {
                     let next_cell = self.liberty.cell(self.masters[next]);
@@ -729,20 +730,20 @@ impl Chain<'_> {
                     })
                 });
                 let model = PiModel {
-                    c2: 0.0,
-                    rpi: 0.0,
-                    c1: f64::from(pin_cap),
+                    c2: Farads::ZERO,
+                    rpi: Ohms::ZERO,
+                    c1: Farads::new(f64::from(pin_cap)),
                 };
                 (model, None)
             };
             let mut worst: Option<(f32, f32)> = None;
             for set in cell.delay_arc_sets_to(output).filter(|s| s.from == input) {
                 for arc in set.arcs.iter().filter(|a| a.to_edge == edge) {
-                    let gate = dmp::gate_delay(arc, t, f64::from(slew), model);
+                    let gate = dmp::gate_delay(arc, t, Seconds::new(f64::from(slew)), model);
                     let (wire_delay, load_slew) =
-                        elmore.map_or((0.0, gate.slew), |e| gate.load_delay_slew(e));
-                    let at = arrival + gate.delay as f32 + wire_delay as f32;
-                    let s = load_slew as f32;
+                        elmore.map_or((Seconds::ZERO, gate.slew), |e| gate.load_delay_slew(e));
+                    let at = arrival + gate.delay.get() as f32 + wire_delay.get() as f32;
+                    let s = load_slew.get() as f32;
                     worst = Some(worst.map_or((at, s), |(a, w)| (a.max(at), w.max(s))));
                 }
             }

@@ -17,11 +17,12 @@ use pare_common::db::liberty::{
     ArcRole, Edge, EdgeValues, FuncExpr, MinMax, SequentialKind, TimingArcSet,
 };
 use pare_common::db::library::{MacroClass, SignalUse};
+use pare_common::units::{Farads, Ohms, Seconds};
 use std::collections::{BinaryHeap, VecDeque};
 
 /// The slew `OpenSTA` seeds a root with: an input port without a declared
 /// transition, or an undriven pin.
-const ROOT_SLEW: f64 = 0.0;
+const ROOT_SLEW: Seconds = Seconds::ZERO;
 
 /// An arc into a driver: from which pin of its cell, through which set.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -46,9 +47,9 @@ pub(crate) struct ArcDelay {
     pub from_edge: Edge,
     /// The edge at the driver.
     pub to_edge: Edge,
-    /// The delay for each side, in seconds: from the early input slew on
-    /// the early side, the late one on the late side.
-    pub delay: [f64; 2],
+    /// The delay for each side: from the early input slew on the early
+    /// side, the late one on the late side.
+    pub delay: [Seconds; 2],
 }
 
 /// Where the graph's nets get their parasitics.
@@ -62,7 +63,7 @@ pub(crate) enum Estimator<'r> {
 }
 
 /// A value for each edge on each side of the delay range, min first.
-type PerSide = [EdgeValues<f64>; 2];
+type PerSide = [EdgeValues<Seconds>; 2];
 
 /// Slews and delays over the design, kept current as repair edits it.
 ///
@@ -75,7 +76,7 @@ pub(crate) struct TimingGraph {
     in_arcs: Vec<Vec<InArc>>,
     loop_arcs: rustc_hash::FxHashSet<(PinId, PinId)>,
     slew: Vec<PerSide>,
-    annotated: Vec<Option<f64>>,
+    annotated: Vec<Option<Seconds>>,
     arc_delays: Vec<Vec<ArcDelay>>,
     wire_delay: Vec<PerSide>,
     parasitics: Vec<Option<NetParasitics>>,
@@ -151,10 +152,10 @@ impl TimingGraph {
     /// the largest over the driver's arcs on the late side, the smallest
     /// on the early side, as `OpenSTA` annotates a wire.
     #[must_use]
-    pub fn wire_delay(&self, load: PinId, edge: Edge, side: MinMax) -> f64 {
+    pub fn wire_delay(&self, load: PinId, edge: Edge, side: MinMax) -> Seconds {
         self.wire_delay
             .get(load.index())
-            .map_or(0.0, |d| d[side.index()].get(edge))
+            .map_or(Seconds::ZERO, |d| d[side.index()].get(edge))
     }
 
     /// The pins driving nets, by rising level and then name, as `OpenROAD`
@@ -177,13 +178,13 @@ impl TimingGraph {
 
     /// A pin's late-side slews, which the slew limits are checked against.
     #[must_use]
-    pub fn slew(&self, pin: PinId) -> EdgeValues<f64> {
+    pub fn slew(&self, pin: PinId) -> EdgeValues<Seconds> {
         self.slew_side(pin, MinMax::Max)
     }
 
     /// A pin's slews on `side`.
     #[must_use]
-    pub(crate) fn slew_side(&self, pin: PinId, side: MinMax) -> EdgeValues<f64> {
+    pub(crate) fn slew_side(&self, pin: PinId, side: MinMax) -> EdgeValues<Seconds> {
         self.slew
             .get(pin.index())
             .map_or_else(EdgeValues::default, |s| s[side.index()])
@@ -191,12 +192,9 @@ impl TimingGraph {
 
     /// Holds a pin's slew at `slew` for both edges and sides until cleared,
     /// as `OpenSTA`'s annotated slews.
-    pub(crate) fn annotate_slew(&mut self, pin: PinId, slew: f64) {
+    pub(crate) fn annotate_slew(&mut self, pin: PinId, slew: Seconds) {
         self.annotated[pin.index()] = Some(slew);
-        let both = EdgeValues {
-            rise: slew,
-            fall: slew,
-        };
+        let both = EdgeValues::both(slew);
         self.slew[pin.index()] = [both, both];
     }
 
@@ -245,14 +243,14 @@ impl TimingGraph {
     /// The load a driver sees: its loads' pins and the wire, the larger of
     /// the two edges, as `OpenSTA`'s `loadCap`.
     #[must_use]
-    pub fn load_cap(&self, netlist: &Netlist<'_>, driver: PinId) -> f64 {
+    pub fn load_cap(&self, netlist: &Netlist<'_>, driver: PinId) -> Farads {
         Edge::BOTH
             .iter()
             .map(|&edge| self.load_cap_for(netlist, driver, edge))
-            .fold(0.0, f64::max)
+            .fold(Farads::ZERO, Farads::max)
     }
 
-    fn load_cap_for(&self, netlist: &Netlist<'_>, driver: PinId, edge: Edge) -> f64 {
+    fn load_cap_for(&self, netlist: &Netlist<'_>, driver: PinId, edge: Edge) -> Farads {
         self.pi_elmore(netlist, driver, edge).map_or_else(
             || {
                 let net = netlist.db.pins[driver.index()].net;
@@ -424,8 +422,8 @@ impl TimingGraph {
         &mut self,
         netlist: &Netlist<'_>,
         clocks: &ClockNetwork,
-        limit_of: &dyn Fn(PinId) -> Option<f64>,
-    ) -> (Vec<(PinId, f64)>, Vec<PinId>) {
+        limit_of: &dyn Fn(PinId) -> Option<Seconds>,
+    ) -> (Vec<(PinId, Seconds)>, Vec<PinId>) {
         let mut annotated = Vec::new();
         let mut changed = Vec::new();
         for driver in self.drivers_by_level(netlist) {
@@ -460,7 +458,7 @@ impl TimingGraph {
         netlist: &Netlist<'_>,
         driver: PinId,
         loads: &[PinId],
-        root: EdgeValues<f64>,
+        root: EdgeValues<Seconds>,
     ) -> Vec<(PerSide, PerSide)> {
         let t = &netlist.link.liberty.thresholds;
         let mut out = vec![([root, root], [EdgeValues::default(); 2]); loads.len()];
@@ -477,8 +475,9 @@ impl TimingGraph {
                 else {
                     continue;
                 };
+                let slew = elmore.get().mul_add(slew_factor, root.get(edge).get());
                 for side in 0..2 {
-                    out[i].0[side].set(edge, elmore.mul_add(slew_factor, root.get(edge)));
+                    out[i].0[side].set(edge, Seconds::new(slew));
                     out[i].1[side].set(edge, elmore * delay_factor);
                 }
             }
@@ -509,10 +508,7 @@ impl TimingGraph {
         let net = netlist.db.pins[driver.index()].net;
         let loads: Vec<PinId> = netlist.loads(net).filter(|&p| p != driver).collect();
         let found = self.driver_delays(netlist, clocks, driver, &loads);
-        let root = EdgeValues {
-            rise: ROOT_SLEW,
-            fall: ROOT_SLEW,
-        };
+        let root = EdgeValues::both(ROOT_SLEW);
         let drvr_slew = if found.any_arc {
             found.driver_slew.map(Merged::values)
         } else {
@@ -581,19 +577,15 @@ impl TimingGraph {
                 let model = pi.as_ref().map_or_else(
                     || PiModel {
                         c2: self.load_cap_for(netlist, driver, edge),
-                        rpi: 0.0,
-                        c1: 0.0,
+                        rpi: Ohms::ZERO,
+                        c1: Farads::ZERO,
                     },
-                    |p| PiModel {
-                        c2: p.c2,
-                        rpi: p.rpi,
-                        c1: p.c1,
-                    },
+                    PiElmore::model,
                 );
-                let mut delay = [0.0; 2];
+                let mut delay = [Seconds::ZERO; 2];
                 for side in MinMax::BOTH {
                     let in_slew = if set.role == ArcRole::RegClkToQ && clocks.is_ideal(arc.from) {
-                        0.0
+                        Seconds::ZERO
                     } else {
                         self.slew[arc.from.index()][side.index()].get(timing_arc.from_edge)
                     };
@@ -606,12 +598,7 @@ impl TimingGraph {
                     delay[side.index()] = result.delay;
                     found.driver_slew[side.index()].take(edge, result.slew);
                     for (i, &load) in loads.iter().enumerate() {
-                        let elmore = pi
-                            .as_ref()
-                            .and_then(|p| {
-                                p.elmore.iter().find(|(l, _)| *l == load).map(|(_, e)| *e)
-                            })
-                            .unwrap_or(0.0);
+                        let elmore = pi.as_ref().map_or(Seconds::ZERO, |p| p.elmore_to(load));
                         let (load_delay, load_slew) = result.load_delay_slew(elmore);
                         found.load_slews[i][side.index()].take(edge, load_slew);
                         found.load_delays[i][side.index()].take(edge, load_delay);
@@ -654,13 +641,13 @@ fn same_slews(a: &PerSide, b: &PerSide) -> bool {
 #[derive(Clone, Copy, Debug)]
 struct Merged {
     side: MinMax,
-    rise: f64,
-    fall: f64,
+    rise: Seconds,
+    fall: Seconds,
 }
 
 impl Merged {
     const fn new(side: MinMax) -> Self {
-        let init = side.init_value().get();
+        let init = side.init_value();
         Self {
             side,
             rise: init,
@@ -668,7 +655,7 @@ impl Merged {
         }
     }
 
-    fn take(&mut self, edge: Edge, value: f64) {
+    fn take(&mut self, edge: Edge, value: Seconds) {
         let slot = match edge {
             Edge::Rise => &mut self.rise,
             Edge::Fall => &mut self.fall,
@@ -678,8 +665,14 @@ impl Merged {
         }
     }
 
-    fn values(self) -> EdgeValues<f64> {
-        let settle = |v: f64| if v.is_finite() { v } else { 0.0 };
+    fn values(self) -> EdgeValues<Seconds> {
+        let settle = |v: Seconds| {
+            if v.get().is_finite() {
+                v
+            } else {
+                Seconds::ZERO
+            }
+        };
         EdgeValues {
             rise: settle(self.rise),
             fall: settle(self.fall),
@@ -690,10 +683,10 @@ impl Merged {
 /// A load pin's capacitance for `edge`: its Liberty value, or none for a
 /// design pin without a declared load.
 #[must_use]
-pub(crate) fn pin_capacitance(netlist: &Netlist<'_>, pin: PinId, edge: Edge) -> f64 {
+pub(crate) fn pin_capacitance(netlist: &Netlist<'_>, pin: PinId, edge: Edge) -> Farads {
     netlist
         .lib_port(pin)
-        .map_or(0.0, |port| port.capacitance.get(edge).get())
+        .map_or(Farads::ZERO, |port| port.capacitance.get(edge))
 }
 
 /// A net's estimated parasitics. From global routes, as `OpenROAD`'s

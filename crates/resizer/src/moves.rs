@@ -17,7 +17,7 @@ use pare_common::db::liberty::{
 };
 use pare_common::geom::dbu::Dbu;
 use pare_common::geom::point::Point;
-use pare_common::units::{Farads, Seconds};
+use pare_common::units::{Farads, Meters, Ohms, Seconds};
 use rustc_hash::{FxHashMap, FxHashSet};
 use std::rc::Rc;
 
@@ -176,7 +176,7 @@ impl Moves {
         kind: MoveKind,
         path: &Path,
         index: usize,
-        margin: f64,
+        margin: Seconds,
     ) -> Result<bool, RepairError> {
         let Some(site) = site(resizer, path, index) else {
             return Ok(false);
@@ -214,8 +214,8 @@ impl Moves {
         let prev_drive = site
             .prev_driver
             .and_then(|p| resizer.link.pin_port(resizer.db, p))
-            .map_or(0.0, |(lib, port)| {
-                resizer.link.liberty.cell(lib).drive_resistance(port).get()
+            .map_or(Ohms::ZERO, |(lib, port)| {
+                resizer.link.liberty.cell(lib).drive_resistance(port)
             });
         let load_cap = resizer.load_cap(site.driver);
         let Some(upsize) = upsize_cell(resizer, site.lib, in_port, site.port, load_cap, prev_drive)
@@ -366,15 +366,13 @@ impl Moves {
         }
         let sta = resizer.sta();
         let net = resizer.db.pins[site.driver.index()].net;
-        let driver_slack = sta
-            .slack_edge(site.driver, site.edge, MinMax::Max)
-            .seconds();
-        let mut fanouts: Vec<(f64, String, PinId)> = resizer
+        let driver_slack = sta.slack_edge(site.driver, site.edge, MinMax::Max).time();
+        let mut fanouts: Vec<(Seconds, String, PinId)> = resizer
             .netlist()
             .loads(net)
             .filter(|&l| l != site.driver)
             .map(|load| {
-                let slack = sta.slack_edge(load, site.edge, MinMax::Max).seconds();
+                let slack = sta.slack_edge(load, site.edge, MinMax::Max).time();
                 (slack - driver_slack, resizer.db.pin_name(load), load)
             })
             .collect();
@@ -447,13 +445,13 @@ impl Moves {
         }
         let sta = resizer.sta();
         let net = resizer.db.pins[site.driver.index()].net;
-        let driver_slack = sta.slack(site.driver, MinMax::Max).seconds();
-        let mut fanouts: Vec<(f64, String, PinId)> = resizer
+        let driver_slack = sta.slack(site.driver, MinMax::Max).time();
+        let mut fanouts: Vec<(Seconds, String, PinId)> = resizer
             .netlist()
             .loads(net)
             .filter(|&l| l != site.driver)
             .map(|load| {
-                let slack = sta.slack_edge(load, site.edge, MinMax::Max).seconds();
+                let slack = sta.slack_edge(load, site.edge, MinMax::Max).time();
                 (slack - driver_slack, resizer.db.pin_name(load), load)
             })
             .collect();
@@ -482,7 +480,7 @@ impl Moves {
         &mut self,
         resizer: &mut Resizer<'_, Sta>,
         site: &Site,
-        margin: f64,
+        margin: Seconds,
     ) -> Result<bool, RepairError> {
         let lib = resizer.link.liberty.cell(site.lib);
         if !lib.is_buffer() {
@@ -513,10 +511,10 @@ impl Moves {
         let Some((in_port, _)) = lib.buffer_ports() else {
             return Ok(false);
         };
-        let buffer_in_cap = lib.ports[in_port].capacitance().get();
+        let buffer_in_cap = lib.ports[in_port].capacitance();
         let buffer_load = resizer.load_cap(site.driver);
         if let Some(limit) = resizer.cap_limit(prev_driver)
-            && limit > 0.0
+            && limit > Farads::ZERO
         {
             let new_cap = resizer.load_cap(prev_driver) + buffer_load - buffer_in_cap;
             if new_cap > limit {
@@ -564,8 +562,8 @@ fn upsize_cell(
     lib: LibCellId,
     in_port: usize,
     drvr_port: usize,
-    load_cap: f64,
-    prev_drive: f64,
+    load_cap: Farads,
+    prev_drive: Ohms,
 ) -> Option<LibCellId> {
     let liberty = resizer.link.liberty;
     let cell = liberty.cell(lib);
@@ -593,16 +591,12 @@ fn upsize_cell(
     });
     let drive = cell.drive_resistance(drvr_port);
     let (delays, _) = gate_delays(cell, drvr_port, load_cap, &resizer.targets.slews, None);
-    let delay = prev_drive.mul_add(
-        cell.ports[in_port].capacitance().get(),
-        delays.max().max(0.0),
-    );
+    let delay = driven_delay(prev_drive, cell.ports[in_port].capacitance(), delays.max());
     for (id, c_in, c_out) in candidates {
         let c = liberty.cell(id);
         let c_drive = c.drive_resistance(c_out);
         let (c_delays, _) = gate_delays(c, c_out, load_cap, &resizer.targets.slews, None);
-        let c_delay =
-            prev_drive.mul_add(c.ports[c_in].capacitance().get(), c_delays.max().max(0.0));
+        let c_delay = driven_delay(prev_drive, c.ports[c_in].capacitance(), c_delays.max());
         if c_drive < drive && c_delay < delay {
             return Some(id);
         }
@@ -610,19 +604,25 @@ fn upsize_cell(
     None
 }
 
-/// The larger of a pin's edge capacitances, in farads.
-fn port_capacitance(cell: &LibCell, port: usize) -> f64 {
-    cell.ports[port].capacitance().get()
+/// The delay of a gate driven through `prev_drive` into its input `cap`
+/// and then `gate_delay` through it, as `UpsizeMove` sums them, with one
+/// rounding.
+const fn driven_delay(prev_drive: Ohms, cap: Farads, gate_delay: Seconds) -> Seconds {
+    Seconds::new(
+        prev_drive
+            .get()
+            .mul_add(cap.get(), gate_delay.max(Seconds::ZERO).get()),
+    )
 }
 
 /// The largest intrinsic delay of the arcs into `port`, as
 /// `LibertyPort::intrinsicDelay`.
-fn intrinsic_delay(cell: &LibCell, port: usize) -> f64 {
+fn intrinsic_delay(cell: &LibCell, port: usize) -> Seconds {
     cell.delay_arc_sets_to(port)
         .flat_map(|s| s.arcs.iter())
-        .map(|a| a.gate_delay(Seconds::ZERO, Farads::ZERO).0.get())
-        .filter(|&d| d > 0.0)
-        .fold(0.0, f64::max)
+        .map(|a| a.gate_delay(Seconds::ZERO, Farads::ZERO).0)
+        .filter(|&d| d > Seconds::ZERO)
+        .fold(Seconds::ZERO, Seconds::max)
 }
 
 /// Whether an instance is a single-output gate without state, as
@@ -643,16 +643,16 @@ fn is_single_output_combinational(
 /// as `Resizer::halfDrivingPowerCell`.
 fn half_driving_power_cell(resizer: &Resizer<'_, Sta>, lib: LibCellId) -> Option<LibCellId> {
     let liberty = resizer.link.liberty;
-    let max_load = |id: LibCellId| -> f64 {
+    let max_load = |id: LibCellId| -> Farads {
         let c = liberty.cell(id);
         c.ports
             .iter()
             .filter(|p| p.is_output())
             .find_map(|p| liberty.capacitance_limit(c, p))
-            .map_or(0.0, Farads::get)
+            .unwrap_or(Farads::ZERO)
     };
     let target = 0.5 * max_load(lib);
-    let mut closest: Option<(f64, LibCellId)> = None;
+    let mut closest: Option<(Farads, LibCellId)> = None;
     for candidate in resizer.link.swappable_cells(lib) {
         let limit = max_load(candidate);
         let diff = (limit - target).abs();
@@ -755,11 +755,11 @@ fn swap_candidate(
     input: usize,
     drvr_port: usize,
     equivalent: &[usize],
-    load_cap: f64,
-    input_slews: &[(String, EdgeValues<f64>)],
+    load_cap: Farads,
+    input_slews: &[(String, EdgeValues<Seconds>)],
 ) -> Option<usize> {
-    let mut base_delay = f64::NEG_INFINITY;
-    let mut port_delays: FxHashMap<usize, f64> = FxHashMap::default();
+    let mut base_delay = -Seconds::INFINITY;
+    let mut port_delays: FxHashMap<usize, Seconds> = FxHashMap::default();
     for set in cell.delay_arc_sets_to(drvr_port) {
         let from_name = &cell.ports[set.from].name;
         for arc in &set.arcs {
@@ -770,14 +770,11 @@ fn swap_candidate(
                     || resizer.targets.slews.get(arc.from_edge),
                     |(_, s)| s.get(arc.from_edge),
                 );
-            let delay = arc
-                .gate_delay(Seconds::new(in_slew), Farads::new(load_cap))
-                .0
-                .get();
+            let delay = arc.gate_delay(in_slew, load_cap).0;
             if set.from == input {
                 base_delay = base_delay.max(delay);
             } else {
-                let slot = port_delays.entry(set.from).or_insert(f64::NEG_INFINITY);
+                let slot = port_delays.entry(set.from).or_insert(-Seconds::INFINITY);
                 *slot = slot.max(delay);
             }
         }
@@ -807,7 +804,7 @@ fn estimated_slack_ok(
     buffer_input: PinId,
     prev_driver: PinId,
     prev_edge: Edge,
-    margin: f64,
+    margin: Seconds,
 ) -> bool {
     let sta = resizer.sta();
     let PinOwner::Cell {
@@ -833,7 +830,7 @@ fn estimated_slack_ok(
         &resizer.targets.slews,
         Some(&prev_input_slews),
     );
-    let new_load = old_load + resizer.load_cap(site.driver) - port_capacitance(buffer, in_port);
+    let new_load = old_load + resizer.load_cap(site.driver) - buffer.ports[in_port].capacitance();
     let (new_delay, new_slew) = gate_delays(
         prev,
         prev_port,
@@ -865,10 +862,7 @@ fn estimated_slack_ok(
             continue;
         };
         let old = resizer.graph.slew(load);
-        let new = EdgeValues {
-            rise: slew,
-            fall: slew,
-        };
+        let new = EdgeValues::both(slew);
         if !input_slew_impact_ok(
             resizer,
             cell,
@@ -886,11 +880,11 @@ fn estimated_slack_ok(
         if side == prev_driver || side == buffer_input {
             continue;
         }
-        let old_slack = sta.slack(side, MinMax::Max).seconds();
+        let old_slack = sta.slack(side, MinMax::Max).time();
         let new_slack = old_slack - delay_degrade - margin;
-        if new_slack < 0.0 {
+        if new_slack < Seconds::ZERO {
             let degrade = old_slack - new_slack;
-            if old_slack >= 0.0 || degrade > SLACK_DEGRADE_RATIO_LIMIT * old_slack.abs() {
+            if old_slack >= Seconds::ZERO || degrade > SLACK_DEGRADE_RATIO_LIMIT * old_slack.abs() {
                 return false;
             }
         }
@@ -917,10 +911,10 @@ fn estimated_slack_ok(
 fn input_slew_impact_ok(
     resizer: &Resizer<'_, Sta>,
     cell: CellId,
-    old: EdgeValues<f64>,
-    new: EdgeValues<f64>,
-    adjust: f64,
-    margin: f64,
+    old: EdgeValues<Seconds>,
+    new: EdgeValues<Seconds>,
+    adjust: Seconds,
+    margin: Seconds,
     accept_if_improves: bool,
 ) -> bool {
     let sta = resizer.sta();
@@ -940,7 +934,7 @@ fn input_slew_impact_ok(
             return false;
         };
         let load_cap = resizer.load_cap(pin);
-        let slews_of = |slew: EdgeValues<f64>| -> Vec<(String, EdgeValues<f64>)> {
+        let slews_of = |slew: EdgeValues<Seconds>| -> Vec<(String, EdgeValues<Seconds>)> {
             c.ports.iter().map(|p| (p.name.clone(), slew)).collect()
         };
         let (old_delay, _) = gate_delays(
@@ -958,10 +952,10 @@ fn input_slew_impact_ok(
             Some(&slews_of(new)),
         );
         let delay_diff = (new_delay.rise - old_delay.rise).max(new_delay.fall - old_delay.fall);
-        let old_slack = sta.slack(pin, MinMax::Max).seconds() - margin;
+        let old_slack = sta.slack(pin, MinMax::Max).time() - margin;
         let new_slack = old_slack - delay_diff - adjust - margin;
         if (accept_if_improves && fuzzy::greater(old_slack, new_slack))
-            || (!accept_if_improves && new_slack < 0.0)
+            || (!accept_if_improves && new_slack < Seconds::ZERO)
         {
             return false;
         }
@@ -978,8 +972,8 @@ fn slews_after_removal(
     prev_driver: PinId,
     buffer_output: PinId,
     buffer_input: PinId,
-    new_driver_slew: f64,
-) -> Option<Vec<(PinId, f64)>> {
+    new_driver_slew: Seconds,
+) -> Option<Vec<(PinId, Seconds)>> {
     let tree1 = tree_of(resizer, prev_driver)?;
     let tree2 = tree_of(resizer, buffer_output)?;
     let stitched = stitch(resizer, &tree1, buffer_input, &tree2)?;
@@ -1009,7 +1003,7 @@ fn slews_after_removal(
     let mut slews = slews_in_tree(resizer, new_driver_slew, &stitched);
     for (load, slew) in &mut slews {
         if let Some(factor) = calibration.get(load) {
-            *slew *= factor;
+            *slew = *slew * *factor;
         }
     }
     Some(slews)
@@ -1103,14 +1097,22 @@ fn join_at_load(outer: &BnetPtr, inner: &BnetPtr, rc: &bnet::TreeRc<'_>) -> Bnet
 /// The slew at each load of a tree from the driver's slew, degraded along
 /// the wires by their Elmore delay times the slew shape factor, as
 /// `Resizer::estimateSlewsInTree`.
-fn slews_in_tree(resizer: &Resizer<'_, Sta>, driver_slew: f64, tree: &Bnet) -> Vec<(PinId, f64)> {
-    fn walk(resizer: &Resizer<'_, Sta>, node: &Bnet, upstream: f64, out: &mut Vec<(PinId, f64)>) {
+fn slews_in_tree(
+    resizer: &Resizer<'_, Sta>,
+    driver_slew: Seconds,
+    tree: &Bnet,
+) -> Vec<(PinId, Seconds)> {
+    fn walk(
+        resizer: &Resizer<'_, Sta>,
+        node: &Bnet,
+        upstream: Seconds,
+        out: &mut Vec<(PinId, Seconds)>,
+    ) {
         match &node.kind {
             Kind::Load { pin } => out.push((*pin, upstream)),
             Kind::Wire { to, layer } => {
                 let (res, cap) = resizer.tree_rc().wire(*layer);
-                let (res, cap) = (res.get(), cap.get());
-                let meters = node.length() as f64 / resizer.db.dbu().get() as f64 * 1e-6;
+                let meters = Meters::from_dbu(node.length(), resizer.db.dbu().get() as f64);
                 let degradation =
                     meters * res * (to.cap + meters * cap / 2.0) * resizer.slew_rc_factor;
                 walk(resizer, to, upstream + degradation, out);
@@ -1120,7 +1122,7 @@ fn slews_in_tree(resizer: &Resizer<'_, Sta>, driver_slew: f64, tree: &Bnet) -> V
                 layer,
                 to_layer,
             } => {
-                let r_via = resizer.tree_rc().via(*layer, *to_layer).get();
+                let r_via = resizer.tree_rc().via(*layer, *to_layer);
                 let degradation = r_via * to.cap * resizer.slew_rc_factor;
                 walk(resizer, to, upstream + degradation, out);
             }

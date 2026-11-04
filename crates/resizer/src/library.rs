@@ -6,6 +6,7 @@ use pare_common::db::design::{NetlistDB, PinOwner};
 use pare_common::db::indices::{CellId, MacroId, PinId, SiteId};
 use pare_common::db::liberty::{LibCell, LibCellId, Liberty};
 use pare_common::db::library::{CoreKind, MacroClass, PinDirection, SignalUse};
+use pare_common::units::{Farads, Ohms};
 use std::collections::HashMap;
 
 /// Why the library could not be joined to the design.
@@ -160,18 +161,18 @@ impl<'a> Link<'a> {
 
     /// Drive resistance of a buffer's output.
     #[must_use]
-    pub(crate) fn buffer_drive_resistance(&self, buffer: LibCellId) -> f64 {
+    pub(crate) fn buffer_drive_resistance(&self, buffer: LibCellId) -> Ohms {
         let cell = self.liberty.cell(buffer);
         cell.buffer_ports()
-            .map_or(0.0, |(_, output)| cell.drive_resistance(output).get())
+            .map_or(Ohms::ZERO, |(_, output)| cell.drive_resistance(output))
     }
 
     /// Capacitance of a buffer's input.
     #[must_use]
-    pub(crate) fn buffer_input_capacitance(&self, buffer: LibCellId) -> f64 {
+    pub(crate) fn buffer_input_capacitance(&self, buffer: LibCellId) -> Farads {
         let cell = self.liberty.cell(buffer);
         cell.buffer_ports()
-            .map_or(0.0, |(input, _)| cell.ports[input].capacitance().get())
+            .map_or(Farads::ZERO, |(input, _)| cell.ports[input].capacitance())
     }
 
     /// The buffers to insert, as `OpenROAD`'s `findBuffers` chooses them:

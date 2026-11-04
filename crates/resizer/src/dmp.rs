@@ -11,7 +11,7 @@
 #![allow(clippy::suboptimal_flops, clippy::suspicious_operation_groupings)]
 
 use pare_common::db::liberty::{Thresholds, TimingArc};
-use pare_common::units::{Farads, Seconds};
+use pare_common::units::{Farads, Ohms, Seconds};
 
 const DRIVER_PARAM_TOL: f64 = 0.01;
 const VTH_TIME_TOL: f64 = 0.01;
@@ -22,32 +22,33 @@ const NEWTON_MAX_ITER: usize = 100;
 /// The pi model of a driver's load.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct PiModel {
-    /// Capacitance at the driver, in farads.
-    pub c2: f64,
-    /// Resistance to the far capacitance, in ohms.
-    pub rpi: f64,
-    /// Capacitance beyond the resistance, in farads.
-    pub c1: f64,
+    /// Capacitance at the driver.
+    pub c2: Farads,
+    /// Resistance to the far capacitance.
+    pub rpi: Ohms,
+    /// Capacitance beyond the resistance.
+    pub c1: Farads,
 }
 
 /// What the calculator found for a driver.
 #[derive(Clone, Debug, PartialEq)]
 pub struct GateDelay {
-    /// Delay through the gate, in seconds.
-    pub delay: f64,
-    /// Slew at the driver, in seconds.
-    pub slew: f64,
-    /// The effective capacitance the lookup used, in farads.
-    pub ceff: f64,
+    /// Delay through the gate.
+    pub delay: Seconds,
+    /// Slew at the driver.
+    pub slew: Seconds,
+    /// The effective capacitance the lookup used.
+    pub ceff: Farads,
     model: LoadModel,
 }
 
 impl GateDelay {
     /// Wire delay and slew at a load with Elmore delay `elmore` from the
-    /// driver, in seconds.
+    /// driver.
     #[must_use]
-    pub fn load_delay_slew(&self, elmore: f64) -> (f64, f64) {
-        self.model.load_delay_slew(elmore, self.slew)
+    pub fn load_delay_slew(&self, elmore: Seconds) -> (Seconds, Seconds) {
+        let (delay, slew) = self.model.load_delay_slew(elmore.get(), self.slew.get());
+        (Seconds::new(delay), Seconds::new(slew))
     }
 }
 
@@ -56,9 +57,41 @@ impl GateDelay {
 pub fn gate_delay(
     arc: &TimingArc,
     thresholds: &Thresholds,
-    in_slew: f64,
+    in_slew: Seconds,
     pi: PiModel,
 ) -> GateDelay {
+    let raw = Pi {
+        c2: pi.c2.get(),
+        rpi: pi.rpi.get(),
+        c1: pi.c1.get(),
+    };
+    let found = fit_gate(arc, thresholds, in_slew.get(), raw);
+    GateDelay {
+        delay: Seconds::new(found.delay),
+        slew: Seconds::new(found.slew),
+        ceff: Farads::new(found.ceff),
+        model: found.model,
+    }
+}
+
+/// [`PiModel`] in base units, as the fit computes with it.
+#[derive(Clone, Copy, Debug, PartialEq)]
+struct Pi {
+    c2: f64,
+    rpi: f64,
+    c1: f64,
+}
+
+/// [`GateDelay`] in base units, as the fit computes it.
+#[derive(Clone, Debug, PartialEq)]
+struct RawDelay {
+    delay: f64,
+    slew: f64,
+    ceff: f64,
+    model: LoadModel,
+}
+
+fn fit_gate(arc: &TimingArc, thresholds: &Thresholds, in_slew: f64, pi: Pi) -> RawDelay {
     let edge = arc.to_edge;
     let vth = thresholds.output.get(edge);
     let vl = thresholds.slew_lower.get(edge);
@@ -71,13 +104,13 @@ pub fn gate_delay(
         vh,
         slew_derate: thresholds.slew_derate,
     };
-    let PiModel { c2, rpi, c1 } = pi;
+    let Pi { c2, rpi, c1 } = pi;
     let rd = common.gate_model_rd(c2, c1);
     let lumped = rd < 1e-2 || rpi < rd * 1e-3 || c1 == 0.0 || c1 < c2 * 1e-3 || rpi == 0.0;
     if lumped {
         let ceff = c1 + c2;
         let (delay, slew) = common.table(ceff);
-        return GateDelay {
+        return RawDelay {
             delay,
             slew,
             ceff,
@@ -411,8 +444,8 @@ fn initial_params(common: &Common<'_>, rd: f64, ceff: f64) -> Params {
 }
 
 /// The full pi model fit, as `DmpPi`.
-fn pi_model(common: &Common<'_>, rd: f64, pi: PiModel) -> GateDelay {
-    let PiModel { c2, rpi, c1 } = pi;
+fn pi_model(common: &Common<'_>, rd: f64, pi: Pi) -> RawDelay {
+    let Pi { c2, rpi, c1 } = pi;
     let poles = PiPoles::new(rd, pi);
     let equations = |x: &[f64; 3], fvec: &mut [f64; 3], fjac: &mut [[f64; 3]; 3]| {
         poles.equations(common, rd, pi, x, fvec, fjac)
@@ -446,14 +479,14 @@ fn pi_model(common: &Common<'_>, rd: f64, pi: PiModel) -> GateDelay {
     match fit.driver_delay_slew() {
         Ok((vo_delay, vo_slew)) => {
             fit.vo_delay = vo_delay;
-            GateDelay {
+            RawDelay {
                 delay: table_delay,
                 slew: vo_slew,
                 ceff,
                 model: LoadModel::Fitted(fit),
             }
         }
-        Err(DmpError) => GateDelay {
+        Err(DmpError) => RawDelay {
             delay: table_delay,
             slew: table_slew,
             ceff,
@@ -463,9 +496,9 @@ fn pi_model(common: &Common<'_>, rd: f64, pi: PiModel) -> GateDelay {
 }
 
 /// The table delay and slew at a lumped `ceff`.
-fn lumped(common: &Common<'_>, ceff: f64) -> GateDelay {
+fn lumped(common: &Common<'_>, ceff: f64) -> RawDelay {
     let (delay, slew) = common.table(ceff);
-    GateDelay {
+    RawDelay {
         delay,
         slew,
         ceff,
@@ -489,8 +522,8 @@ struct PiPoles {
 }
 
 impl PiPoles {
-    fn new(rd: f64, pi: PiModel) -> Self {
-        let PiModel { c2, rpi, c1 } = pi;
+    fn new(rd: f64, pi: Pi) -> Self {
+        let Pi { c2, rpi, c1 } = pi;
         let z1 = 1.0 / (rpi * c1);
         let k0 = 1.0 / (rd * c2);
         let a = rpi * rd * c1 * c2;
@@ -536,7 +569,7 @@ impl PiPoles {
         &self,
         common: &Common<'_>,
         rd: f64,
-        pi: PiModel,
+        pi: Pi,
         x: &[f64; 3],
         fvec: &mut [f64; 3],
         fjac: &mut [[f64; 3]; 3],
@@ -591,8 +624,8 @@ impl PiPoles {
 }
 
 /// The fit when the near capacitance vanishes, as `DmpZeroC2`.
-fn zero_c2(common: &Common<'_>, rd: f64, pi: PiModel) -> GateDelay {
-    let PiModel { rpi, c1, .. } = pi;
+fn zero_c2(common: &Common<'_>, rd: f64, pi: Pi) -> RawDelay {
+    let Pi { rpi, c1, .. } = pi;
     let ceff = c1;
     let z1 = 1.0 / (rpi * c1);
     let p1 = 1.0 / (c1 * (rd + rpi));
@@ -637,7 +670,7 @@ fn zero_c2(common: &Common<'_>, rd: f64, pi: PiModel) -> GateDelay {
         Ok((delay, slew, fit))
     });
     if let Ok((delay, slew, fit)) = fitted {
-        return GateDelay {
+        return RawDelay {
             delay,
             slew,
             ceff,
@@ -645,7 +678,7 @@ fn zero_c2(common: &Common<'_>, rd: f64, pi: PiModel) -> GateDelay {
         };
     }
     let (delay, slew) = common.table(ceff);
-    GateDelay {
+    RawDelay {
         delay,
         slew,
         ceff,
@@ -863,37 +896,40 @@ mod tests {
     fn a_lumped_load_is_the_table_value() {
         let arc = buffer_arc();
         let pi = PiModel {
-            c2: 20e-15,
-            rpi: 0.0,
-            c1: 0.0,
+            c2: Farads::new(20e-15),
+            rpi: Ohms::ZERO,
+            c1: Farads::ZERO,
         };
-        let result = gate_delay(&arc, &Thresholds::default(), 10e-12, pi);
+
+        let result = gate_delay(&arc, &Thresholds::default(), Seconds::new(10e-12), pi);
+
         let (delay, slew) = arc.gate_delay(Seconds::new(10e-12), Farads::new(20e-15));
-        let (delay, slew) = (delay.get(), slew.get());
-        assert!((result.delay - delay).abs() < 1e-18);
-        assert!((result.slew - slew).abs() < 1e-18);
-        assert!((result.ceff - 20e-15).abs() < 1e-30);
-        assert_eq!(result.load_delay_slew(3e-12), (3e-12, slew));
+        assert!((result.delay - delay).abs() < Seconds::new(1e-18));
+        assert!((result.slew - slew).abs() < Seconds::new(1e-18));
+        assert!((result.ceff - Farads::new(20e-15)).abs() < Farads::new(1e-30));
+        assert_eq!(
+            result.load_delay_slew(Seconds::new(3e-12)),
+            (Seconds::new(3e-12), slew)
+        );
     }
 
     #[test]
     fn a_resistive_wire_lowers_the_effective_capacitance() {
         let arc = buffer_arc();
         let pi = PiModel {
-            c2: 5e-15,
-            rpi: 2000.0,
-            c1: 40e-15,
+            c2: Farads::new(5e-15),
+            rpi: Ohms::new(2000.0),
+            c1: Farads::new(40e-15),
         };
-        let result = gate_delay(&arc, &Thresholds::default(), 10e-12, pi);
-        assert!(result.ceff < 45e-15);
-        assert!(result.ceff > 5e-15);
-        let lumped_delay = arc
-            .gate_delay(Seconds::new(10e-12), Farads::new(45e-15))
-            .0
-            .get();
+
+        let result = gate_delay(&arc, &Thresholds::default(), Seconds::new(10e-12), pi);
+
+        assert!(result.ceff < Farads::new(45e-15));
+        assert!(result.ceff > Farads::new(5e-15));
+        let lumped_delay = arc.gate_delay(Seconds::new(10e-12), Farads::new(45e-15)).0;
         assert!(result.delay < lumped_delay);
-        let (wire_delay, load_slew) = result.load_delay_slew(40e-12);
-        assert!(wire_delay > 0.0);
+        let (wire_delay, load_slew) = result.load_delay_slew(Seconds::new(40e-12));
+        assert!(wire_delay > Seconds::ZERO);
         assert!(load_slew >= result.slew);
     }
 

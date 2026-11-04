@@ -4,7 +4,7 @@
 //! repair sizes against, and a journal of edits so that a repair which did
 //! not pay off can be taken back.
 
-use crate::bnet::{LoadModel, TreeRc};
+use crate::bnet::{LoadModel, PinLoad, TreeRc};
 use crate::fuzzy;
 use crate::graph::{Estimator, TimingGraph};
 use crate::library::{BufferSet, Link, is_logic_std_cell};
@@ -21,7 +21,7 @@ use pare_common::db::sdc::Sdc;
 use pare_common::geom::dbu::Dbu;
 use pare_common::geom::orient::Orientation;
 use pare_common::geom::point::Point;
-use pare_common::units::{Farads, Seconds};
+use pare_common::units::{Farads, Ohms, Seconds};
 use rustc_hash::FxHashSet;
 use std::collections::{HashMap, HashSet};
 
@@ -120,9 +120,9 @@ fn estimator<'r>(routes: Option<&'r GlobalRouting<'_>>) -> Estimator<'r> {
 #[derive(Clone, Debug)]
 pub(crate) struct Targets {
     /// The slews repair sizes toward, per edge.
-    pub slews: EdgeValues<f64>,
+    pub slews: EdgeValues<Seconds>,
     /// The load at which each Liberty cell reaches them.
-    pub load: Vec<f64>,
+    pub load: Vec<Farads>,
 }
 
 /// One edit, recorded so it can be undone.
@@ -204,7 +204,7 @@ pub struct Resizer<'a, T: Timing = Untimed> {
     pub(crate) namer: &'a mut Namer,
     pub(crate) options: RepairOptions,
     pub(crate) slew_rc_factor: f64,
-    pub(crate) r_strongest_buffer: f64,
+    pub(crate) r_strongest_buffer: Ohms,
     journal: Journal,
     dead_nets: Vec<NetId>,
     resized_multi_output: HashSet<CellId>,
@@ -336,8 +336,8 @@ impl<'a> Resizer<'a, Sta> {
         }
         let mut slacks: Vec<(NetId, Slack)> = slack_of.into_iter().collect();
         slacks.sort_by(|a, b| {
-            a.1.seconds()
-                .total_cmp(&b.1.seconds())
+            a.1.time()
+                .total_cmp(&b.1.time())
                 .then_with(|| a.0.cmp(&b.0))
         });
         slacks
@@ -382,7 +382,7 @@ impl<'a, T: Timing> Resizer<'a, T> {
             .cells
             .iter()
             .map(|&b| link.buffer_drive_resistance(b))
-            .fold(f64::MAX, f64::min);
+            .fold(Ohms::new(f64::MAX), Ohms::min);
         let targets = find_targets(link, &buffers);
         let (graph, timing) = {
             let netlist = Netlist::new(db, link);
@@ -553,7 +553,7 @@ impl<'a, T: Timing> Resizer<'a, T> {
     /// fixes up for libraries like Nangate45, the library default meant
     /// for outputs; infinite without either.
     #[must_use]
-    pub(crate) fn max_input_slew(&self, cell: &LibCell, port: &LibPort) -> f64 {
+    pub(crate) fn max_input_slew(&self, cell: &LibCell, port: &LibPort) -> Seconds {
         max_input_slew(self.link, cell, port)
     }
 
@@ -587,19 +587,19 @@ impl<'a, T: Timing> Resizer<'a, T> {
 
     /// A slew limit less the margin kept in hand.
     #[must_use]
-    pub(crate) fn margined_slew(&self, limit: f64) -> f64 {
+    pub(crate) fn margined_slew(&self, limit: Seconds) -> Seconds {
         limit * (1.0 - self.options.slew_margin / 100.0)
     }
 
     /// A load limit less the margin kept in hand.
     #[must_use]
-    pub(crate) fn margined_cap(&self, limit: f64) -> f64 {
+    pub(crate) fn margined_cap(&self, limit: Farads) -> Farads {
         limit * (1.0 - self.options.cap_margin / 100.0)
     }
 
     /// The slew limit at a driver, if any applies, as `OpenSTA` finds it.
     #[must_use]
-    pub(crate) fn driver_slew_limit(&self, driver: PinId) -> Option<f64> {
+    pub(crate) fn driver_slew_limit(&self, driver: PinId) -> Option<Seconds> {
         let netlist = self.netlist();
         let own = netlist
             .lib_cell_port(driver)
@@ -612,12 +612,11 @@ impl<'a, T: Timing> Resizer<'a, T> {
             (Some(a), Some(b)) => Some(a.min(b)),
             (a, b) => a.or(b),
         }
-        .map(Seconds::get)
     }
 
     /// The load limit at a driver, if any applies.
     #[must_use]
-    pub(crate) fn cap_limit(&self, driver: PinId) -> Option<f64> {
+    pub(crate) fn cap_limit(&self, driver: PinId) -> Option<Farads> {
         let netlist = self.netlist();
         let own = netlist
             .lib_cell_port(driver)
@@ -630,7 +629,6 @@ impl<'a, T: Timing> Resizer<'a, T> {
             (Some(a), Some(b)) => Some(a.min(b)),
             (a, b) => a.or(b),
         }
-        .map(Farads::get)
     }
 
     /// The fanout limit on every driver, if the constraints set one.
@@ -643,7 +641,7 @@ impl<'a, T: Timing> Resizer<'a, T> {
 
     /// The load a driver sees.
     #[must_use]
-    pub fn load_cap(&self, driver: PinId) -> f64 {
+    pub fn load_cap(&self, driver: PinId) -> Farads {
         self.graph.load_cap(&self.netlist(), driver)
     }
 
@@ -683,7 +681,7 @@ impl<'a, T: Timing> Resizer<'a, T> {
 
     /// The slews at each input pin of `cell`, by Liberty port name.
     #[must_use]
-    pub fn input_slews(&self, cell: CellId) -> Vec<(String, EdgeValues<f64>)> {
+    pub fn input_slews(&self, cell: CellId) -> Vec<(String, EdgeValues<Seconds>)> {
         let netlist = self.netlist();
         self.db.cells[cell.index()]
             .pins
@@ -698,7 +696,7 @@ impl<'a, T: Timing> Resizer<'a, T> {
     /// The worst delay of a buffer or inverter at `load_cap` from the
     /// target input slews, as `Resizer::bufferDelay`.
     #[must_use]
-    pub fn buffer_delay(&self, cell: LibCellId, load_cap: f64) -> f64 {
+    pub fn buffer_delay(&self, cell: LibCellId, load_cap: Farads) -> Seconds {
         buffer_delay(self.link.liberty.cell(cell), &self.targets.slews, load_cap)
     }
 
@@ -1080,7 +1078,7 @@ impl<'a, T: Timing> Resizer<'a, T> {
             let revisiting = multiple_outputs && !self.resized_multi_output.insert(cell);
             (cell, lib_id, self.load_cap(driver), revisiting)
         };
-        if load_cap <= 0.0 {
+        if load_cap <= Farads::ZERO {
             return Ok(false);
         }
         let target = self.find_target_cell(lib_id, load_cap, revisiting);
@@ -1098,7 +1096,7 @@ impl<'a, T: Timing> Resizer<'a, T> {
     pub(crate) fn find_target_cell(
         &self,
         cell: LibCellId,
-        load_cap: f64,
+        load_cap: Farads,
         revisiting: bool,
     ) -> LibCellId {
         let candidates = self.link.swappable_cells(cell);
@@ -1112,7 +1110,7 @@ impl<'a, T: Timing> Resizer<'a, T> {
             if is_buf_inv {
                 self.buffer_delay(c, load_cap)
             } else {
-                0.0
+                Seconds::ZERO
             }
         };
         let mut best = cell;
@@ -1157,12 +1155,12 @@ impl<'a, T: Timing> Resizer<'a, T> {
             }
             let old_cap = current
                 .port(&port.name)
-                .map_or(0.0, |p| current.ports[p].capacitance().get());
+                .map_or(Farads::ZERO, |p| current.ports[p].capacitance());
             let new_cap = new_lib
                 .port(&port.name)
-                .map_or(0.0, |p| new_lib.ports[p].capacitance().get());
+                .map_or(Farads::ZERO, |p| new_lib.ports[p].capacitance());
             let delta = new_cap - old_cap;
-            if delta <= 0.0 {
+            if delta <= Farads::ZERO {
                 continue;
             }
             let net = self.db.pins[pin.index()].net;
@@ -1178,11 +1176,11 @@ impl<'a, T: Timing> Resizer<'a, T> {
     /// Whether `driver` can take `delta` more load: within its limit, or
     /// no worse when already over it, as `BaseMove::checkMaxCapOK`.
     #[must_use]
-    pub(crate) fn cap_ok(&self, driver: PinId, delta: f64) -> bool {
+    pub(crate) fn cap_ok(&self, driver: PinId, delta: Farads) -> bool {
         let Some(limit) = self.cap_limit(driver) else {
             return true;
         };
-        if limit <= 0.0 {
+        if limit <= Farads::ZERO {
             return true;
         }
         let cap = self.load_cap(driver);
@@ -1195,16 +1193,14 @@ impl<'a, T: Timing> Resizer<'a, T> {
 }
 
 impl<T: Timing> LoadModel for Resizer<'_, T> {
-    fn load(&self, pin: PinId) -> (f64, f64, f64) {
+    fn load(&self, pin: PinId) -> PinLoad {
         let netlist = self.netlist();
         netlist
             .lib_cell_port(pin)
-            .map_or((0.0, 0.0, f64::INFINITY), |(cell, port)| {
-                (
-                    port.capacitance().get(),
-                    self.link.liberty.fanout_load(cell, port),
-                    self.max_input_slew(cell, port),
-                )
+            .map_or(PinLoad::NONE, |(cell, port)| PinLoad {
+                cap: port.capacitance(),
+                fanout: self.link.liberty.fanout_load(cell, port),
+                max_slew: self.max_input_slew(cell, port),
             })
     }
 }
@@ -1236,7 +1232,7 @@ pub fn timing_net_weights(slacks: &[(NetId, Slack)], weight_max: f64) -> Vec<(Ne
     let worst = ((slacks.len() as f64) * WORST_SLACK_NETS_SHARE).ceil() as usize;
     let slack_max = slacks[worst.clamp(1, slacks.len()) - 1].1;
     let scale = WeightScale {
-        slack_min: slack_min.seconds(),
+        slack_min: slack_min.time(),
         slack_max,
         weight_max,
     };
@@ -1247,10 +1243,10 @@ pub fn timing_net_weights(slacks: &[(NetId, Slack)], weight_max: f64) -> Vec<(Ne
         .collect()
 }
 
-/// Net weights falling linearly from `weight_max` at `slack_min`, in
-/// seconds, to one at `slack_max`.
+/// Net weights falling linearly from `weight_max` at `slack_min` to one at
+/// `slack_max`.
 struct WeightScale {
-    slack_min: f64,
+    slack_min: Seconds,
     slack_max: Slack,
     weight_max: f64,
 }
@@ -1260,25 +1256,25 @@ impl WeightScale {
     /// constrained slack `weight_max`, as `OpenSTA`'s finite `INF` does in
     /// `gpl`.
     fn weight(&self, slack: Slack) -> f64 {
-        let max = self.slack_max.seconds();
-        if fuzzy::equal(max, self.slack_min) {
+        let max = self.slack_max.time();
+        if fuzzy::equal(max.get(), self.slack_min.get()) {
             return 1.0;
         }
         if !self.slack_max.is_constrained() {
             return self.weight_max;
         }
-        ((self.weight_max - 1.0) * (max - slack.seconds()) / (max - self.slack_min)) + 1.0
+        ((self.weight_max - 1.0) * (max - slack.time()).get() / (max - self.slack_min).get()) + 1.0
     }
 }
 
 /// The transition limit at an input pin: its own, else, as `OpenROAD`
 /// fixes up for libraries like Nangate45, the library default meant for
 /// outputs; infinite without either.
-fn max_input_slew(link: &Link<'_>, cell: &LibCell, port: &LibPort) -> f64 {
+fn max_input_slew(link: &Link<'_>, cell: &LibCell, port: &LibPort) -> Seconds {
     port.max_transition
         .filter(|&l| l != Seconds::ZERO)
         .or_else(|| link.liberty.cell_defaults(cell).max_transition)
-        .map_or(f64::INFINITY, Seconds::get)
+        .unwrap_or(Seconds::INFINITY)
 }
 
 /// The factor between a driver's resistance times its load and the slew
@@ -1306,7 +1302,7 @@ fn slew_rc_factor(link: &Link<'_>) -> Result<f64, RepairError> {
 /// at, as `Resizer::findBufferTargetSlews` and `findTargetLoads`.
 pub(crate) fn find_targets(link: &Link<'_>, buffers: &BufferSet) -> Targets {
     let liberty = link.liberty;
-    let mut sums = EdgeValues::<f64>::default();
+    let mut sums = EdgeValues::<Seconds>::default();
     let mut counts = [0usize; 2];
     for &buffer in &buffers.cells {
         let cell = liberty.cell(buffer);
@@ -1324,8 +1320,8 @@ pub(crate) fn find_targets(link: &Link<'_>, buffers: &BufferSet) -> Targets {
                 let (_, slew1) = arc.gate_delay(Seconds::ZERO, load);
                 let (_, slew2) = arc.gate_delay(slew1, load);
                 match arc.to_edge {
-                    Edge::Rise => sums.rise += slew2.get(),
-                    Edge::Fall => sums.fall += slew2.get(),
+                    Edge::Rise => sums.rise += slew2,
+                    Edge::Fall => sums.fall += slew2,
                 }
                 counts[arc.to_edge.index()] += 1;
             }
@@ -1335,12 +1331,12 @@ pub(crate) fn find_targets(link: &Link<'_>, buffers: &BufferSet) -> Targets {
         rise: if counts[0] > 0 {
             sums.rise / counts[0] as f64
         } else {
-            0.0
+            Seconds::ZERO
         },
         fall: if counts[1] > 0 {
             sums.fall / counts[1] as f64
         } else {
-            0.0
+            Seconds::ZERO
         },
     };
     let load = (0..liberty.cells.len())
@@ -1349,7 +1345,7 @@ pub(crate) fn find_targets(link: &Link<'_>, buffers: &BufferSet) -> Targets {
             if link.is_link_cell(id) && !link.dont_use(id) {
                 find_target_load(liberty.cell(id), &slews)
             } else {
-                0.0
+                Farads::ZERO
             }
         })
         .collect();
@@ -1358,8 +1354,8 @@ pub(crate) fn find_targets(link: &Link<'_>, buffers: &BufferSet) -> Targets {
 
 /// The mean over a cell's delay arcs of the load at which each reaches the
 /// target output slew from the target input slew.
-fn find_target_load(cell: &LibCell, slews: &EdgeValues<f64>) -> f64 {
-    let mut sum = 0.0;
+fn find_target_load(cell: &LibCell, slews: &EdgeValues<Seconds>) -> Farads {
+    let mut sum = Farads::ZERO;
     let mut count = 0;
     for set in &cell.arc_sets {
         if !matches!(
@@ -1375,23 +1371,26 @@ fn find_target_load(cell: &LibCell, slews: &EdgeValues<f64>) -> f64 {
             count += 1;
         }
     }
-    if count == 0 { 0.0 } else { sum / count as f64 }
+    if count == 0 {
+        Farads::ZERO
+    } else {
+        sum / count as f64
+    }
 }
 
 /// The load at which `arc` gives `out_slew` from `in_slew`, by binary
 /// search; zero when even no load exceeds it.
-fn arc_target_load(arc: &pare_common::db::liberty::TimingArc, in_slew: f64, out_slew: f64) -> f64 {
-    let diff = |load: f64| {
-        arc.gate_delay(Seconds::new(in_slew), Farads::new(load))
-            .1
-            .get()
-            - out_slew
-    };
+fn arc_target_load(
+    arc: &pare_common::db::liberty::TimingArc,
+    in_slew: Seconds,
+    out_slew: Seconds,
+) -> Farads {
+    let diff = |load: f64| (arc.gate_delay(in_slew, Farads::new(load)).1 - out_slew).get();
     let mut cap1 = 0.0;
     let mut cap2 = 1.0e-12;
     let tol = 0.01;
     if diff(cap1) > 0.0 {
-        return 0.0;
+        return Farads::ZERO;
     }
     let mut diff2 = diff(cap2);
     let mut iterations = 0;
@@ -1412,7 +1411,7 @@ fn arc_target_load(arc: &pare_common::db::liberty::TimingArc, in_slew: f64, out_
             }
         }
     }
-    cap1
+    Farads::new(cap1)
 }
 
 /// The worst delay and slew per output edge over the delay arcs into
@@ -1424,14 +1423,11 @@ fn arc_target_load(arc: &pare_common::db::liberty::TimingArc, in_slew: f64, out_
 pub(crate) fn gate_delays(
     cell: &LibCell,
     port: usize,
-    load_cap: f64,
-    target_slews: &EdgeValues<f64>,
-    input_slews: Option<&[(String, EdgeValues<f64>)]>,
-) -> (EdgeValues<f64>, EdgeValues<f64>) {
-    let mut delays = EdgeValues {
-        rise: f64::NEG_INFINITY,
-        fall: f64::NEG_INFINITY,
-    };
+    load_cap: Farads,
+    target_slews: &EdgeValues<Seconds>,
+    input_slews: Option<&[(String, EdgeValues<Seconds>)]>,
+) -> (EdgeValues<Seconds>, EdgeValues<Seconds>) {
+    let mut delays = EdgeValues::both(-Seconds::INFINITY);
     let mut slews = delays;
     for set in cell.delay_arc_sets_to(port) {
         let from_name = &cell.ports[set.from].name;
@@ -1442,8 +1438,7 @@ pub(crate) fn gate_delays(
                     || target_slews.get(arc.from_edge),
                     |(_, s)| s.get(arc.from_edge),
                 );
-            let (delay, slew) = arc.gate_delay(Seconds::new(in_slew), Farads::new(load_cap));
-            let (delay, slew) = (delay.get(), slew.get());
+            let (delay, slew) = arc.gate_delay(in_slew, load_cap);
             match arc.to_edge {
                 Edge::Rise => {
                     delays.rise = delays.rise.max(delay);
@@ -1465,22 +1460,22 @@ pub(crate) fn gate_delays(
 pub(crate) fn gate_slew(
     cell: &LibCell,
     port: usize,
-    slews: &EdgeValues<f64>,
-    load_cap: f64,
-) -> f64 {
+    slews: &EdgeValues<Seconds>,
+    load_cap: Farads,
+) -> Seconds {
     let (_, out) = gate_delays(cell, port, load_cap, slews, None);
-    out.rise.max(out.fall).max(0.0)
+    out.rise.max(out.fall).max(Seconds::ZERO)
 }
 
 /// The worst delay of a buffer or inverter at `load_cap` from the target
 /// input slews, as `Resizer::bufferDelay`.
 #[must_use]
-pub fn buffer_delay(cell: &LibCell, slews: &EdgeValues<f64>, load_cap: f64) -> f64 {
+pub fn buffer_delay(cell: &LibCell, slews: &EdgeValues<Seconds>, load_cap: Farads) -> Seconds {
     let Some((_, output)) = cell.buffer_ports() else {
-        return 0.0;
+        return Seconds::ZERO;
     };
     let (delays, _) = gate_delays(cell, output, load_cap, slews, None);
-    delays.rise.max(delays.fall).max(0.0)
+    delays.rise.max(delays.fall).max(Seconds::ZERO)
 }
 
 /// The worst delay per edge of a buffer at `load_cap`, as
@@ -1488,16 +1483,16 @@ pub fn buffer_delay(cell: &LibCell, slews: &EdgeValues<f64>, load_cap: f64) -> f
 #[must_use]
 pub(crate) fn buffer_delays(
     cell: &LibCell,
-    slews: &EdgeValues<f64>,
-    load_cap: f64,
-) -> EdgeValues<f64> {
+    slews: &EdgeValues<Seconds>,
+    load_cap: Farads,
+) -> EdgeValues<Seconds> {
     let Some((_, output)) = cell.buffer_ports() else {
         return EdgeValues::default();
     };
     let (delays, _) = gate_delays(cell, output, load_cap, slews, None);
     EdgeValues {
-        rise: delays.rise.max(0.0),
-        fall: delays.fall.max(0.0),
+        rise: delays.rise.max(Seconds::ZERO),
+        fall: delays.fall.max(Seconds::ZERO),
     }
 }
 
@@ -1509,7 +1504,7 @@ mod tests {
         values
             .iter()
             .enumerate()
-            .map(|(i, &v)| (NetId::new(i), Slack::new(v)))
+            .map(|(i, &v)| (NetId::new(i), Slack::new(Seconds::new(v))))
             .collect()
     }
 

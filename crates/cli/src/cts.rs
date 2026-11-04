@@ -5,6 +5,7 @@ use crate::report::{ClockTreeSummary, Report};
 use anyhow::Context;
 use pare_common::db::design::NetlistDB;
 use pare_common::db::indices::PinId;
+use pare_common::units::Seconds;
 use pare_common::util::config::Config;
 use pare_common::util::ui;
 use pare_cts::{CtsInput, CtsOptions, balance_latencies};
@@ -73,7 +74,7 @@ pub(crate) fn clock_tree_synthesis(
         summary.clock_net_repeaters = done.inserted;
         let _ = resizer.finish()?;
     }
-    let arrivals: FxHashMap<PinId, f64> = {
+    let arrivals: FxHashMap<PinId, Seconds> = {
         let networks = Networks::find(db, &link, config, Some(sdc))?;
         let pins = db.pins.len();
         let resizer = Resizer::timed(
