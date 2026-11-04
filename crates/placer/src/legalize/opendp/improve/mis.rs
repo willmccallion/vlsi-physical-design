@@ -82,32 +82,29 @@ fn color_cells(imp: &Improver, candidates: &[usize]) -> Vec<Option<usize>> {
             }
         }
     }
-    let mut color = vec![usize::MAX; nodes];
     if nodes == 0 {
         return Vec::new();
     }
-    color[0] = 0;
-    let mut avail = vec![usize::MAX; nodes];
+    let mut color: Vec<Option<usize>> = vec![None; nodes];
+    color[0] = Some(0);
+    let mut taken_by = vec![None; nodes];
     for v in 1..nodes {
         adjacent[v].sort_unstable();
         adjacent[v].dedup();
         for &u in &adjacent[v] {
-            if color[u] != usize::MAX {
-                avail[color[u]] = v;
+            if let Some(c) = color[u] {
+                taken_by[c] = Some(v);
             }
         }
-        color[v] = (0..nodes).find(|&c| avail[c] != v).unwrap_or(0);
+        color[v] = Some((0..nodes).find(|&c| taken_by[c] != Some(v)).unwrap_or(0));
     }
-    (0..nodes).map(|n| movable[n].then_some(color[n])).collect()
+    (0..nodes)
+        .map(|n| color[n].filter(|_| movable[n]))
+        .collect()
 }
 
 impl Bins {
     /// Bins about five cells wide and high, as `DetailedMis::buildGrid`.
-    #[allow(
-        clippy::cast_possible_truncation,
-        clippy::cast_precision_loss,
-        clippy::cast_sign_loss
-    )] // bin counts and sizes as OpenDP's doubles
     fn new(imp: &Improver, candidates: &[usize]) -> Self {
         let count = candidates.len() as f64;
         let avg_h = candidates

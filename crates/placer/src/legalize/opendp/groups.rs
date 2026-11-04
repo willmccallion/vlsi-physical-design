@@ -41,12 +41,15 @@ impl Placer {
     /// `Opendp::setUpPlacementGroups`: in the order of the DEF's groups, each
     /// member where `OpenDB` lists it.
     pub(super) fn make_groups(&mut self, db: &NetlistDB) {
-        let mut node_of = vec![usize::MAX; db.cells.len()];
+        let mut node_of = vec![None; db.cells.len()];
         for (n, node) in self.nodes.iter().enumerate() {
-            node_of[node.cell.index()] = n;
+            node_of[node.cell.index()] = Some(n);
         }
         let mut regions: Vec<usize> = (0..db.regions.len()).collect();
-        regions.sort_by_key(|&r| (db.regions[r].group_order.unwrap_or(usize::MAX), r));
+        regions.sort_by_key(|&r| {
+            let order = db.regions[r].group_order;
+            (order.is_none(), order, r)
+        });
         for r in regions {
             let region = &db.regions[r];
             let mut rects = Vec::new();
@@ -70,18 +73,17 @@ impl Placer {
                     Point::new(Dbu(0), Dbu(0)),
                 ));
             let g = self.groups.len();
-            let mut members: Vec<usize> = (0..db.cells.len())
+            let mut members: Vec<(usize, usize)> = (0..db.cells.len())
                 .filter(|&i| {
                     let c = &db.cells[i];
-                    !c.retired
-                        && c.region.map(pare_common::db::indices::RegionId::index) == Some(r)
-                        && node_of[i] != usize::MAX
+                    !c.retired && c.region.map(pare_common::db::indices::RegionId::index) == Some(r)
                 })
+                .filter_map(|i| node_of[i].map(|n| (i, n)))
                 .collect();
-            members.sort_by_key(|&i| (db.cells[i].region_member_order(), std::cmp::Reverse(i)));
+            members
+                .sort_by_key(|&(i, _)| (db.cells[i].region_member_order(), std::cmp::Reverse(i)));
             let mut cells = Vec::with_capacity(members.len());
-            for i in members {
-                let n = node_of[i];
+            for (_, n) in members {
                 self.nodes[n].group = Some(g);
                 cells.push(n);
             }
