@@ -133,12 +133,15 @@ fn cells_text(db: &NetlistDB) -> String {
     text
 }
 
-#[test]
-fn repairing_design_setup_and_hold_gives_what_it_always_has() {
+/// Design, setup and hold repair of the design under a clock of
+/// `period_ns`, as text: what each repair did and every cell after.
+fn repaired(period_ns: f64) -> String {
     let (mut db, lib) = load();
     let constraints = sdc::parse_str(
-        "create_clock -name core -period 0.25 [get_ports clk]\n\
-         set_input_delay 0.1 -clock core [get_ports in0]\n",
+        &format!(
+            "create_clock -name core -period {period_ns} [get_ports clk]\n\
+             set_input_delay 0.1 -clock core [get_ports in0]\n"
+        ),
         Path::new("flow.sdc"),
         &db,
         &lib,
@@ -181,10 +184,23 @@ fn repairing_design_setup_and_hold_gives_what_it_always_has() {
     .unwrap();
     let _ = resizer.finish().unwrap();
 
-    let text = format!("{design:#?}\n{setup:#?}\n{hold:#?}\n{}", cells_text(&db));
+    format!("{design:#?}\n{setup:#?}\n{hold:#?}\n{}", cells_text(&db))
+}
+
+fn assert_golden(name: &str, actual: &str) {
     testing::assert_golden(
         &Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/golden"),
-        "flow.txt",
-        &text,
+        name,
+        actual,
     );
+}
+
+#[test]
+fn repairing_design_setup_and_hold_gives_what_it_always_has() {
+    assert_golden("flow.txt", &repaired(0.25));
+}
+
+#[test]
+fn setup_repair_short_of_its_target_gives_what_it_always_has() {
+    assert_golden("flow_unclosed.txt", &repaired(0.18));
 }
