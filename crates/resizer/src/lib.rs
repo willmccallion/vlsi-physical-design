@@ -22,6 +22,8 @@ pub mod route_parasitics;
 pub mod setup;
 pub mod sta;
 pub mod steiner;
+#[cfg(test)]
+mod testing;
 
 pub use buffers::{BufferError, PortBuffers, buffer_ports, remove_buffers};
 pub use clock_inverters::{ClockInverterRepair, repair_clock_inverters};
