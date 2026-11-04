@@ -479,7 +479,7 @@ impl Rebuffer {
                 continue;
             };
             let arc_set = &cell.arc_sets[set];
-            let in_slew = if arc_set.role == ArcRole::RegClkToQ && resizer.clocks.is_clock(from_pin)
+            let in_slew = if arc_set.role == ArcRole::RegClkToQ && resizer.clocks.is_ideal(from_pin)
             {
                 Seconds::ZERO
             } else {
@@ -1857,4 +1857,48 @@ fn buffer_max_wire_length(
         }
     }
     Meters::new(low)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::testing::{design, pin, with_timed_session};
+    use pare_common::db::design::NetlistDB;
+
+    /// A flop launching into another, both clocked through a clock buffer
+    /// whose output slew reaches their clock pins.
+    fn buffered_clock_pair() -> NetlistDB {
+        design(
+            "VERSION 5.8 ;\nDIVIDERCHAR \"/\" ;\nBUSBITCHARS \"[]\" ;\nDESIGN pair ;\n\
+             UNITS DISTANCE MICRONS 2000 ;\nDIEAREA ( 0 0 ) ( 80000 40000 ) ;\n\
+             COMPONENTS 3 ;\n- cb CLKBUF_X3 + PLACED ( 2000 2800 ) N ;\n\
+             - f1 DFF_X1 + PLACED ( 12000 2800 ) N ;\n- f2 DFF_X1 + PLACED ( 40000 2800 ) N ;\n\
+             END COMPONENTS\nPINS 1 ;\n- clk + NET clk + DIRECTION INPUT ;\nEND PINS\n\
+             NETS 3 ;\n- clk ( PIN clk ) ( cb A ) ;\n- ck ( cb Z ) ( f1 CK ) ( f2 CK ) ;\n\
+             - q ( f1 Q ) ( f2 D ) ;\nEND NETS\nEND DESIGN\n",
+        )
+    }
+
+    #[test]
+    fn a_flop_on_a_propagated_clock_is_rebuffered_from_its_clock_pin_slew() {
+        let mut db = buffered_clock_pair();
+        let q = pin(&db, "f1/Q");
+        let constraints = "create_clock -name clk -period 0.5 [get_ports clk]\n\
+                           set_propagated_clock [all_clocks]\n";
+
+        with_timed_session(&mut db, constraints, |resizer| {
+            let mut rebuffer = Rebuffer::new(resizer).unwrap();
+            rebuffer.set_driver(resizer, q);
+            let tree = make_tree(resizer, q).unwrap();
+            let tree = rebuffer.annotate_load_slacks(resizer, &tree, q);
+
+            let seen = rebuffer.slack_at_driver(resizer, &tree).to_seconds();
+            let timed = resizer.sta().slack(q, MinMax::Max).time();
+
+            assert!(
+                (seen - timed).abs() < Seconds::new(1e-14),
+                "{seen:?} vs {timed:?}"
+            );
+        });
+    }
 }
