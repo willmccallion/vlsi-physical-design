@@ -22,7 +22,7 @@ use pare_common::geom::dbu::{Dbu, DbuPerMicron};
 use pare_common::geom::orient::Orientation;
 use pare_common::geom::point::Point;
 use pare_common::units::{Farads, Meters, Ohms, Seconds};
-use rustc_hash::FxHashSet;
+use rustc_hash::{FxHashMap, FxHashSet};
 use std::collections::{HashMap, HashSet};
 
 /// The load a buffer's target slew is measured at, in multiples of its
@@ -192,6 +192,10 @@ impl Timing for Sta {
         Some(self)
     }
 }
+
+/// The slews at a cell's inputs, by Liberty port name, which equivalent
+/// cells share.
+pub(crate) type PortSlews<'l> = FxHashMap<&'l str, EdgeValues<Seconds>>;
 
 /// What a repair session works on: the design and what it reads about it,
 /// the signal wire it estimates with, the buffers it may insert and the
@@ -645,14 +649,14 @@ impl<'a, T: Timing> Resizer<'a, T> {
 
     /// The slews at each input pin of `cell`, by Liberty port name.
     #[must_use]
-    pub fn input_slews(&self, cell: CellId) -> Vec<(String, EdgeValues<Seconds>)> {
+    pub(crate) fn input_slews(&self, cell: CellId) -> PortSlews<'_> {
         let netlist = self.netlist();
         self.db.cells[cell.index()]
             .pins
             .iter()
             .filter_map(|&pin| {
                 let port = netlist.lib_port(pin)?;
-                Some((port.name.clone(), self.graph.slew(pin)))
+                Some((port.name.as_str(), self.graph.slew(pin)))
             })
             .collect()
     }
@@ -1398,7 +1402,7 @@ pub(crate) fn gate_delays(
     port: usize,
     load_cap: Farads,
     target_slews: &EdgeValues<Seconds>,
-    input_slews: Option<&[(String, EdgeValues<Seconds>)]>,
+    input_slews: Option<&PortSlews<'_>>,
 ) -> (EdgeValues<Seconds>, EdgeValues<Seconds>) {
     let mut delays = EdgeValues::both(-Seconds::INFINITY);
     let mut slews = delays;
@@ -1406,11 +1410,8 @@ pub(crate) fn gate_delays(
         let from_name = &cell.ports[set.from].name;
         for arc in &set.arcs {
             let in_slew = input_slews
-                .and_then(|slews| slews.iter().find(|(n, _)| n == from_name))
-                .map_or_else(
-                    || target_slews.get(arc.from_edge),
-                    |(_, s)| s.get(arc.from_edge),
-                );
+                .and_then(|slews| slews.get(from_name.as_str()))
+                .map_or_else(|| target_slews.get(arc.from_edge), |s| s.get(arc.from_edge));
             let (delay, slew) = arc.gate_delay(in_slew, load_cap);
             match arc.to_edge {
                 Edge::Rise => {

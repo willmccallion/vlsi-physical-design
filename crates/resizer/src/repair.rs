@@ -8,10 +8,10 @@
 
 use crate::bnet::{self, BnetPtr, Kind};
 use crate::library::SizingLimits;
-use crate::resizer::{RepairError, Resizer, Timing, gate_slew, meters_to_dbu};
+use crate::resizer::{PortSlews, RepairError, Resizer, Timing, gate_slew, meters_to_dbu};
 use pare_common::db::design::PinOwner;
 use pare_common::db::indices::{NetId, PinId};
-use pare_common::db::liberty::{ArcRole, EdgeValues, LibCellId};
+use pare_common::db::liberty::{ArcRole, LibCellId};
 use pare_common::geom::dbu::{Dbu, DbuPerMicron};
 use pare_common::geom::point::Point;
 use pare_common::units::{Farads, FaradsPerMeter, Meters, Ohms, OhmsPerMeter, Seconds};
@@ -430,7 +430,7 @@ impl<'r, 'a, T: Timing> Repairer<'r, 'a, T> {
         &self,
         size: LibCellId,
         port_name: &str,
-        input_slews: &[(String, EdgeValues<Seconds>)],
+        input_slews: &PortSlews<'_>,
         load_cap: Farads,
     ) -> Option<Seconds> {
         let liberty = &self.resizer.link.liberty;
@@ -447,10 +447,10 @@ impl<'r, 'a, T: Timing> Repairer<'r, 'a, T> {
             .filter(|s| s.to == port && s.role.is_logic_delay());
         for set in sets {
             let from_name = &size_cell.ports[set.from].name;
-            let from_slews = input_slews.iter().find(|(n, _)| n == from_name);
+            let from_slews = input_slews.get(from_name.as_str());
             for arc in &set.arcs {
                 let in_slew = match from_slews {
-                    Some((_, slews)) if set.role != ArcRole::RegClkToQ => slews.get(arc.from_edge),
+                    Some(slews) if set.role != ArcRole::RegClkToQ => slews.get(arc.from_edge),
                     _ => Seconds::ZERO,
                 };
                 let arc_slew = arc.gate_delay(in_slew, load_cap).1;

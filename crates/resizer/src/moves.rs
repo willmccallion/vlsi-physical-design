@@ -8,7 +8,7 @@ use crate::bnet::{self, Bnet, BnetPtr, Kind};
 use crate::fuzzy;
 use crate::library::is_logic_std_cell;
 use crate::rebuffer::{Rebuffer, can_remove_buffer};
-use crate::resizer::{RepairError, Resizer, buffer_delays, gate_delays};
+use crate::resizer::{PortSlews, RepairError, Resizer, buffer_delays, gate_delays};
 use crate::sta::{Path, Sta};
 use pare_common::db::design::PinOwner;
 use pare_common::db::indices::{CellId, LayerId, NetId, PinId};
@@ -760,7 +760,7 @@ fn swap_candidate(
     drvr_port: usize,
     equivalent: &[usize],
     load_cap: Farads,
-    input_slews: &[(String, EdgeValues<Seconds>)],
+    input_slews: &PortSlews<'_>,
     target_slews: &EdgeValues<Seconds>,
 ) -> Option<usize> {
     let mut base_delay = -Seconds::INFINITY;
@@ -769,12 +769,8 @@ fn swap_candidate(
         let from_name = &cell.ports[set.from].name;
         for arc in &set.arcs {
             let in_slew = input_slews
-                .iter()
-                .find(|(n, _)| n == from_name)
-                .map_or_else(
-                    || target_slews.get(arc.from_edge),
-                    |(_, s)| s.get(arc.from_edge),
-                );
+                .get(from_name.as_str())
+                .map_or_else(|| target_slews.get(arc.from_edge), |s| s.get(arc.from_edge));
             let delay = arc.gate_delay(in_slew, load_cap).0;
             if set.from == input {
                 base_delay = base_delay.max(delay);
@@ -997,11 +993,11 @@ fn input_slew_impact_ok(resizer: &Resizer<'_, Sta>, cell: CellId, impact: &SlewI
             return false;
         };
         let load_cap = resizer.load_cap(pin);
-        let slews_of = |slew: EdgeValues<Seconds>| -> Vec<(String, EdgeValues<Seconds>)> {
+        let slews_of = |slew: EdgeValues<Seconds>| -> PortSlews<'_> {
             lib_cell
                 .ports
                 .iter()
-                .map(|p| (p.name.clone(), slew))
+                .map(|p| (p.name.as_str(), slew))
                 .collect()
         };
         let (old_delay, _) = gate_delays(
@@ -1245,7 +1241,15 @@ mod tests {
             rise: Seconds::ZERO,
             fall: Seconds::ZERO,
         };
-        swap_candidate(cell, 0, 2, &[1], Farads::ZERO, &[], &slews)
+        swap_candidate(
+            cell,
+            0,
+            2,
+            &[1],
+            Farads::ZERO,
+            &PortSlews::default(),
+            &slews,
+        )
     }
 
     #[test]
