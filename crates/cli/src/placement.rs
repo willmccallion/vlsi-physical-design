@@ -3,7 +3,6 @@
 
 use crate::checks::report_placement;
 use crate::cts::clock_tree_synthesis;
-use crate::path_str;
 use crate::repair::{NetlistRepair, TimedRepair, repair_design, repair_netlist, repair_timing};
 use crate::report::{PlacementSummary, Report};
 use anyhow::Context;
@@ -35,6 +34,9 @@ use pare_router::{CapacityReduction, GlobalRouteEstimator};
 use std::num::NonZeroUsize;
 use std::path::Path;
 use std::time::{Duration, Instant};
+
+/// Pixels across each side of a placement image.
+const PLACEMENT_IMAGE_PIXELS: u32 = 1000;
 
 /// Iterations between rows of global placement's progress table.
 const PROGRESS_INTERVAL: usize = 50;
@@ -77,7 +79,7 @@ pub(crate) fn run_placement(
         repair_design(config, db, repair, report)?;
     }
     let global_png = output_dir.join("nesterov_placer.png");
-    visualization::draw_placement(db, &path_str(&global_png)?, 1000, 1000);
+    draw_placement(db, &global_png)?;
     let (legalization, access, blocked_pins) = legalize_with_pin_access(config, db, report)?;
     detailed_placement(db, legalization, access.as_ref(), blocked_pins, report)?;
     if let Some(repair) = &mut repair
@@ -272,10 +274,10 @@ fn write_placement(
 ) -> anyhow::Result<()> {
     let phase_start = Instant::now();
     ui::phase("Output");
-    ui::wrote(&path_str(global_png)?);
+    ui::wrote(global_png);
     let placed_png = output_dir.join("placed.png");
-    visualization::draw_placement(db, &path_str(&placed_png)?, 1000, 1000);
-    ui::wrote(&path_str(&placed_png)?);
+    draw_placement(db, &placed_png)?;
+    ui::wrote(&placed_png);
     let placed = if matches!(config.input.design, DesignInput::Bookshelf { .. }) {
         let pl = output_dir.join("placed.pl");
         writer::bookshelf::write_pl(db, &pl)
@@ -287,7 +289,7 @@ fn write_placement(
             .with_context(|| format!("cannot write {}", out.display()))?;
         out
     };
-    ui::wrote(&path_str(&placed)?);
+    ui::wrote(&placed);
     report.phase("placement output", phase_start);
     Ok(())
 }
@@ -728,6 +730,12 @@ fn reweighted_model(
         .map(|c| c.map(CellId::index))
         .collect();
     Ok(Reweighted { model, cell_map })
+}
+
+/// Draws the placement of `db` into the image at `path`.
+fn draw_placement(db: &NetlistDB, path: &Path) -> anyhow::Result<()> {
+    visualization::draw_placement(db, path, PLACEMENT_IMAGE_PIXELS, PLACEMENT_IMAGE_PIXELS)
+        .with_context(|| format!("cannot write {}", path.display()))
 }
 
 /// The routability settings of `config`, and the global-router estimator

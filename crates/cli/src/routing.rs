@@ -1,7 +1,6 @@
 //! Global routing with repair on its parasitics, and detailed routing.
 
 use crate::checks::report_routing;
-use crate::path_str;
 use crate::placement::legalize;
 use crate::repair::{NetlistRepair, show_design_repair, timing_repair_on};
 use crate::report::{GlobalRouteRepairSummary, Report, RoutingSummary};
@@ -22,6 +21,9 @@ use pare_resizer::{Repairer, Resizer};
 use pare_router::GlobalSession;
 use std::path::{Path, PathBuf};
 use std::time::Instant;
+
+/// Pixels across each side of the routed design's image.
+const ROUTED_IMAGE_PIXELS: u32 = 2000;
 
 /// How far routing goes.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -273,7 +275,7 @@ pub(crate) fn run_routing(
             ui::stat_row("Nets:", &global.summary.nets.to_string(), "", "");
             if let Some(path) = guides {
                 write_guides(&path, db, &global.guides)?;
-                ui::wrote(&path_str(&path)?);
+                ui::wrote(&path);
             }
             report.phase("global routing", phase_start);
             return Ok(());
@@ -286,7 +288,7 @@ pub(crate) fn run_routing(
         let mut write = |state: &pare_router::RouteState| {
             if let Some((path, _)) = &files.save {
                 match write_state(path, state) {
-                    Ok(()) => ui::wrote(&path.display().to_string()),
+                    Ok(()) => ui::wrote(path),
                     Err(e) => save_error = Some(e),
                 }
             }
@@ -350,11 +352,12 @@ pub(crate) fn run_routing(
     let phase_start = Instant::now();
     ui::phase("Output");
     let png = output_dir.join("routed.png");
-    visualization::draw_routed_design(db, &path_str(&png)?, 2000, 2000);
-    ui::wrote(&path_str(&png)?);
+    visualization::draw_routed_design(db, &png, ROUTED_IMAGE_PIXELS, ROUTED_IMAGE_PIXELS)
+        .with_context(|| format!("cannot write {}", png.display()))?;
+    ui::wrote(&png);
     let out = output_dir.join("routed.def");
     writer::def::write_file(db, &out).with_context(|| format!("cannot write {}", out.display()))?;
-    ui::wrote(&path_str(&out)?);
+    ui::wrote(&out);
     report.phase("routing output", phase_start);
 
     if !routing_ok {

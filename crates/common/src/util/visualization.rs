@@ -51,12 +51,27 @@ impl PixelMap {
     }
 }
 
-/// Draws every cell as a filled rectangle, fixed cells in a separate color.
-pub fn draw_placement(db: &NetlistDB, filename: &str, width: u32, height: u32) {
+/// Draws every cell as a filled rectangle, fixed cells in a separate color,
+/// into an image of `width` by `height` pixels saved at `path`; a die of no
+/// area draws as the background alone.
+///
+/// # Errors
+///
+/// When the image cannot be saved.
+pub fn draw_placement(
+    db: &NetlistDB,
+    path: &Path,
+    width: u32,
+    height: u32,
+) -> image::ImageResult<()> {
     let mut img = RgbImage::from_pixel(width, height, Rgb([20, 20, 20]));
-    let Some(map) = PixelMap::new(db, width, height) else {
-        return;
-    };
+    if let Some(map) = PixelMap::new(db, width, height) {
+        paint_cells(db, &map, &mut img);
+    }
+    img.save(path)
+}
+
+fn paint_cells(db: &NetlistDB, map: &PixelMap, img: &mut RgbImage) {
     let color_cell = Rgb([180, 60, 60]);
     let color_fixed = Rgb([180, 120, 40]);
     for i in 0..db.num_cells() {
@@ -65,28 +80,48 @@ pub fn draw_placement(db: &NetlistDB, filename: &str, width: u32, height: u32) {
         } else {
             color_fixed
         };
-        draw_filled_rect_mut(&mut img, map.rect(db, CellId::new(i), 2.0), color);
-    }
-    if let Err(e) = img.save(Path::new(filename)) {
-        log::error!("Failed to save placement image to {filename}: {e}");
+        draw_filled_rect_mut(img, map.rect(db, CellId::new(i), 2.0), color);
     }
 }
 
-/// Draws cells, wires colored by layer, vias and pins.
-///
-/// Draws at a minimum of 4000x4000 pixels so thin wires stay visible, then
-/// downsamples if a smaller image was requested.
-pub fn draw_routed_design(db: &NetlistDB, filename: &str, width: u32, height: u32) {
-    let w = width.max(4000);
-    let h = height.max(4000);
-    let mut img = RgbaImage::from_pixel(w, h, Rgba([0, 0, 0, 255]));
-    let Some(map) = PixelMap::new(db, w, h) else {
-        return;
-    };
+/// The fewest pixels across a routed design is drawn at, so thin wires
+/// stay visible.
+const MIN_ROUTED_PIXELS: u32 = 4000;
 
+/// Draws cells, wires colored by layer, vias and pins into an image of
+/// `width` by `height` pixels saved at `path`; a die of no area draws as the
+/// background alone.
+///
+/// Draws at 4000 pixels across or more, then downsamples if a smaller
+/// image was asked for.
+///
+/// # Errors
+///
+/// When the image cannot be saved.
+pub fn draw_routed_design(
+    db: &NetlistDB,
+    path: &Path,
+    width: u32,
+    height: u32,
+) -> image::ImageResult<()> {
+    let w = width.max(MIN_ROUTED_PIXELS);
+    let h = height.max(MIN_ROUTED_PIXELS);
+    let mut img = RgbaImage::from_pixel(w, h, Rgba([0, 0, 0, 255]));
+    if let Some(map) = PixelMap::new(db, w, h) {
+        paint_routed(db, &map, &mut img);
+    }
+    if width < w || height < h {
+        image::imageops::resize(&img, width, height, image::imageops::FilterType::Lanczos3)
+            .save(path)
+    } else {
+        img.save(path)
+    }
+}
+
+fn paint_routed(db: &NetlistDB, map: &PixelMap, img: &mut RgbaImage) {
     let cell_color = Rgba([35, 35, 40, 255]);
     for i in 0..db.num_cells() {
-        draw_filled_rect_mut(&mut img, map.rect(db, CellId::new(i), 1.0), cell_color);
+        draw_filled_rect_mut(img, map.rect(db, CellId::new(i), 1.0), cell_color);
     }
 
     let colors = [
@@ -113,15 +148,10 @@ pub fn draw_routed_design(db: &NetlistDB, filename: &str, width: u32, height: u3
         let (x1, y1) = map.map(from);
         let (x2, y2) = map.map(to);
         let color = colors[layer.index().min(colors.len() - 1)];
-        draw_line_segment_mut(
-            &mut img,
-            (x1 as f32, y1 as f32),
-            (x2 as f32, y2 as f32),
-            color,
-        );
+        draw_line_segment_mut(img, (x1 as f32, y1 as f32), (x2 as f32, y2 as f32), color);
         if layer.index() >= 2 {
             draw_line_segment_mut(
-                &mut img,
+                img,
                 ((x1 + 0.5) as f32, (y1 + 0.5) as f32),
                 ((x2 + 0.5) as f32, (y2 + 0.5) as f32),
                 color,
@@ -135,7 +165,7 @@ pub fn draw_routed_design(db: &NetlistDB, filename: &str, width: u32, height: u3
                 RouteElem::Via { at, .. } => {
                     let (x, y) = map.map(at);
                     let rect = ImageRect::at(x as i32 - 1, y as i32 - 1).of_size(3, 3);
-                    draw_filled_rect_mut(&mut img, rect, Rgba([255, 255, 255, 200]));
+                    draw_filled_rect_mut(img, rect, Rgba([255, 255, 255, 200]));
                 }
                 RouteElem::Patch { layer, rect } => {
                     let (x1, y1) = map.map(rect.min);
@@ -144,7 +174,7 @@ pub fn draw_routed_design(db: &NetlistDB, filename: &str, width: u32, height: u3
                     let area = ImageRect::at(x1.min(x2) as i32, y1.min(y2) as i32)
                         .of_size(w as u32, h as u32);
                     let color = colors[layer.index().min(colors.len() - 1)];
-                    draw_filled_rect_mut(&mut img, area, color);
+                    draw_filled_rect_mut(img, area, color);
                 }
                 RouteElem::Wire { .. } => {}
             }
@@ -155,17 +185,7 @@ pub fn draw_routed_design(db: &NetlistDB, filename: &str, width: u32, height: u3
     for pin in 0..db.pins.len() {
         let (px, py) = map.map(db.pin_position(crate::db::indices::PinId::new(pin)));
         let rect = ImageRect::at(px as i32, py as i32).of_size(2, 2);
-        draw_filled_rect_mut(&mut img, rect, pin_color);
-    }
-
-    let result = if width < w || height < h {
-        image::imageops::resize(&img, width, height, image::imageops::FilterType::Lanczos3)
-            .save(Path::new(filename))
-    } else {
-        img.save(Path::new(filename))
-    };
-    if let Err(e) = result {
-        log::error!("Failed to save routing image to {filename}: {e}");
+        draw_filled_rect_mut(img, rect, pin_color);
     }
 }
 

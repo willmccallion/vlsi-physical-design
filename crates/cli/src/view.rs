@@ -6,7 +6,6 @@ use pare_common::geom::point::Point;
 use pare_common::util::{ui, visualization};
 use pare_common::verify::drc::Marker;
 
-use crate::path_str;
 use std::path::Path;
 
 /// Draws the area `box_um` of `db`, in microns, with `nets` bright, and
@@ -68,6 +67,6 @@ pub(crate) fn view_area(
     }
     visualization::draw_area(&layout, area, &shown, &highlight, &boxes, out, size)
         .with_context(|| format!("writing {}", out.display()))?;
-    ui::wrote(&path_str(out)?);
+    ui::wrote(out);
     Ok(())
 }
