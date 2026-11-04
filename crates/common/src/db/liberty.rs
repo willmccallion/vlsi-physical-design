@@ -82,6 +82,17 @@ impl<T: Copy> EdgeValues<T> {
     }
 }
 
+impl<T> std::ops::Index<Edge> for EdgeValues<T> {
+    type Output = T;
+
+    fn index(&self, edge: Edge) -> &T {
+        match edge {
+            Edge::Rise => &self.rise,
+            Edge::Fall => &self.fall,
+        }
+    }
+}
+
 macro_rules! impl_edge_max {
     ($($value:ty),*) => {$(
         impl EdgeValues<$value> {
@@ -645,9 +656,40 @@ pub struct LibPort {
     pub is_clock: bool,
     /// Its part in an integrated clock gate.
     pub clock_gate: ClockGatePin,
+    /// The delays through the cell's own clock tree from it.
+    pub clock_tree_paths: Vec<ClockTreePath>,
+}
+
+/// The delay through a cell's own clock tree from one of its pins to the
+/// registers inside, as a `min_clock_tree_path` or `max_clock_tree_path`
+/// timing group gives it.
+#[derive(Clone, Debug, PartialEq)]
+pub struct ClockTreePath {
+    /// The side of the delay range it gives.
+    pub bound: MinMax,
+    /// Which edge at the pin reaches which edge inside.
+    pub sense: TimingSense,
+    /// The delay to each edge inside, by the pin's slew.
+    pub delays: EdgeValues<Option<Table>>,
 }
 
 impl LibPort {
+    /// The delay through the cell's clock tree from an `edge` at the pin to
+    /// the same edge inside, on the `bound` side, with `in_slew` at the
+    /// pin, as `OpenSTA`'s `LibertyPort::clkTreeDelay`; zero without one.
+    #[must_use]
+    pub fn clock_tree_delay(&self, in_slew: Seconds, edge: Edge, bound: MinMax) -> Seconds {
+        // NOTE: diverges from OpenSTA's clkTreeDelay, which reads the arc
+        // into `edge` through TimingArcSet::arcTo; that keeps only the last
+        // arc made, from the opposite edge on a non-unate path, so OpenSTA
+        // finds no delay there although the same-edge arc exists.
+        self.clock_tree_paths
+            .iter()
+            .filter(|p| p.bound == bound && p.sense != TimingSense::NegativeUnate)
+            .find_map(|p| p.delays[edge].as_ref())
+            .map_or(Seconds::ZERO, |table| table.lookup(in_slew, Farads::ZERO))
+    }
+
     /// The larger of the pin's edge capacitances.
     #[must_use]
     pub const fn capacitance(&self) -> Farads {
@@ -1513,6 +1555,7 @@ mod tests {
             three_state: None,
             is_clock: false,
             clock_gate: ClockGatePin::None,
+            clock_tree_paths: Vec::new(),
         }
     }
 
