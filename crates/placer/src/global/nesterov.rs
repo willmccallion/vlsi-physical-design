@@ -984,7 +984,48 @@ impl Run {
         context: &mut StretchContext<'_, '_>,
         report: &mut impl FnMut(&Progress),
     ) -> Flow {
-        let params = context.params;
+        let (mut s, mut eval) = self.start(objective, objects, context);
+        let mut moving = objective.moving(&s.weights.frozen);
+        let flow = loop {
+            if self.k >= self.limit {
+                break Flow::Done;
+            }
+            self.iterations = self.k + 1;
+            let Some(next_eval) = self.step(objective, &mut s, &eval, &moving) else {
+                self.outcome = Outcome::Diverged;
+                break Flow::Done;
+            };
+            eval = next_eval;
+            report(&Progress {
+                iteration: self.k,
+                hpwl: eval.wirelength.hpwl,
+                overflow: eval.overflow,
+                penalty: s.weights.highest(),
+                step: s.step,
+            });
+            if let Some(flow) =
+                self.settle(objective, objects, context, &mut s, &mut eval, &mut moving)
+            {
+                break flow;
+            }
+            self.k += 1;
+        };
+        objects.centers.copy_from_slice(&s.major);
+        if flow == Flow::Done {
+            self.record_last(objective, objects, context, &s);
+        }
+        self.s = Some(s);
+        flow
+    }
+
+    /// The state to go on from, made afresh on the first call, and its
+    /// evaluation; after a rebuild the fields still overflowing move again.
+    fn start(
+        &mut self,
+        objective: &mut Objective<'_>,
+        objects: &Objects,
+        context: &StretchContext<'_, '_>,
+    ) -> (State, Evaluation) {
         let mut s = match self.s.take() {
             Some(s) => s,
             None => initial_state(
@@ -995,87 +1036,85 @@ impl Run {
                 &mut self.grad,
             ),
         };
-        let mut eval = objective.gradient(&s.reference, s.gamma, &s.weights, &mut self.grad);
+        let eval = objective.gradient(&s.reference, s.gamma, &s.weights, &mut self.grad);
         if self.rebuilt {
             s.prev_hpwl = eval.wirelength.hpwl;
             for (frozen, &overflow) in s.weights.frozen.iter_mut().zip(&eval.field_overflow) {
-                if overflow > params.target_overflow {
+                if overflow > context.params.target_overflow {
                     *frozen = false;
                 }
             }
             self.rebuilt = false;
         }
-        let mut moving = objective.moving(&s.weights.frozen);
+        (s, eval)
+    }
 
-        let flow = loop {
-            if self.k >= self.limit {
-                break Flow::Done;
-            }
-            self.iterations = self.k + 1;
-            let a_next = f64::midpoint(1.0, (4.0 * s.a).mul_add(s.a, 1.0).sqrt());
-            let momentum = (s.a - 1.0) / a_next;
-            let (next_eval, next_step) =
-                self.backtrack(objective, &mut s, &eval, &moving, momentum);
-            if !(next_step.is_finite()
-                && all_finite(&self.next_major)
-                && all_finite(&self.next_grad))
-            {
-                self.outcome = Outcome::Diverged;
-                break Flow::Done;
-            }
-            if self.routability.is_some() {
-                self.settling.observe(
-                    &objective.displacements(&s.reference, &self.next_reference),
-                    &s.weights.frozen,
-                );
-            }
-            std::mem::swap(&mut s.major, &mut self.next_major);
-            std::mem::swap(&mut s.reference, &mut self.next_reference);
-            std::mem::swap(&mut self.grad, &mut self.next_grad);
-            eval = next_eval;
-            s.step = next_step;
-            s.a = a_next;
-
-            report(&Progress {
-                iteration: self.k,
-                hpwl: eval.wirelength.hpwl,
-                overflow: eval.overflow,
-                penalty: s.weights.highest(),
-                step: s.step,
-            });
-            if self.k.is_multiple_of(50) && log::log_enabled!(log::Level::Debug) {
-                s.weights.log(self.k, &eval);
-            }
-            if freeze_spread_fields(&mut s, &eval, params.target_overflow) {
-                moving = objective.moving(&s.weights.frozen);
-            }
-            s.weights.damp(self.k, &eval);
-            let converged = s.weights.frozen.iter().all(|&f| f);
-            if !converged {
-                self.grow_penalty(&mut s, &eval, context.bin);
-            }
-            let overflow = mean(&eval.field_overflow);
-            if self.check_routability(objective, objects, context, &mut s, &eval) {
-                eval = objective.gradient(&s.reference, s.gamma, &s.weights, &mut self.grad);
-                moving = objective.moving(&s.weights.frozen);
-            }
-            if self.timing_round_due(params, overflow) {
-                self.k += 1;
-                break Flow::Timing;
-            }
-            if converged {
-                self.outcome = Outcome::Converged;
-                break Flow::Done;
-            }
-            self.k += 1;
-        };
-
-        objects.centers.copy_from_slice(&s.major);
-        if flow == Flow::Done {
-            self.record_last(objective, objects, context, &s);
+    /// Takes one Nesterov step from `s`; none when it diverged.
+    fn step(
+        &mut self,
+        objective: &mut Objective<'_>,
+        s: &mut State,
+        eval: &Evaluation,
+        moving: &[bool],
+    ) -> Option<Evaluation> {
+        let a_next = f64::midpoint(1.0, (4.0 * s.a).mul_add(s.a, 1.0).sqrt());
+        let momentum = (s.a - 1.0) / a_next;
+        let (next_eval, next_step) = self.backtrack(objective, s, eval, moving, momentum);
+        if !(next_step.is_finite() && all_finite(&self.next_major) && all_finite(&self.next_grad)) {
+            return None;
         }
-        self.s = Some(s);
-        flow
+        if self.routability.is_some() {
+            self.settling.observe(
+                &objective.displacements(&s.reference, &self.next_reference),
+                &s.weights.frozen,
+            );
+        }
+        std::mem::swap(&mut s.major, &mut self.next_major);
+        std::mem::swap(&mut s.reference, &mut self.next_reference);
+        std::mem::swap(&mut self.grad, &mut self.next_grad);
+        s.step = next_step;
+        s.a = a_next;
+        Some(next_eval)
+    }
+
+    /// Updates the penalties, frozen fields and inflation after a step, and
+    /// says how the run goes on: stopping once every field has spread, or
+    /// for a timing-driven repair when one is due.
+    fn settle(
+        &mut self,
+        objective: &mut Objective<'_>,
+        objects: &mut Objects,
+        context: &mut StretchContext<'_, '_>,
+        s: &mut State,
+        eval: &mut Evaluation,
+        moving: &mut Vec<bool>,
+    ) -> Option<Flow> {
+        let params = context.params;
+        if self.k.is_multiple_of(50) && log::log_enabled!(log::Level::Debug) {
+            s.weights.log(self.k, eval);
+        }
+        if freeze_spread_fields(s, eval, params.target_overflow) {
+            *moving = objective.moving(&s.weights.frozen);
+        }
+        s.weights.damp(self.k, eval);
+        let converged = s.weights.frozen.iter().all(|&f| f);
+        if !converged {
+            self.grow_penalty(s, eval, context.bin);
+        }
+        let overflow = mean(&eval.field_overflow);
+        if self.check_routability(objective, objects, context, s, eval) {
+            *eval = objective.gradient(&s.reference, s.gamma, &s.weights, &mut self.grad);
+            *moving = objective.moving(&s.weights.frozen);
+        }
+        if self.timing_round_due(params, overflow) {
+            self.k += 1;
+            return Some(Flow::Timing);
+        }
+        if converged {
+            self.outcome = Outcome::Converged;
+            return Some(Flow::Done);
+        }
+        None
     }
 
     /// Takes the next step from `s`, shortening it while the step the new
