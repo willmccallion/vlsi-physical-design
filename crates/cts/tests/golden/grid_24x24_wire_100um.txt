@@ -1,0 +1,329 @@
+CtsSummary {
+    trees: 1,
+    sinks: 576,
+    buffers: 124,
+    nets: 124,
+    dummies: 69,
+    clones: 0,
+    ndr_nets: 4,
+    root_buffer: "CLKBUF_X3",
+    sink_buffer: "CLKBUF_X3",
+}
+cell clkbuf_leaf_0_clk CLKBUF_X3 54543 98666 N
+cell clkbuf_leaf_1_clk CLKBUF_X3 17239 92600 N
+cell clkbuf_leaf_2_clk CLKBUF_X3 20406 122000 N
+cell clkbuf_leaf_3_clk CLKBUF_X3 20406 150000 N
+cell clkbuf_leaf_4_clk CLKBUF_X3 58204 145799 N
+cell clkbuf_leaf_5_clk CLKBUF_X3 78420 131333 N
+cell clkbuf_leaf_6_clk CLKBUF_X3 102043 103333 N
+cell clkbuf_leaf_7_clk CLKBUF_X3 115279 131333 N
+cell clkbuf_leaf_8_clk CLKBUF_X3 119270 153500 N
+cell clkbuf_leaf_9_clk CLKBUF_X3 153204 145799 N
+cell clkbuf_leaf_10_clk CLKBUF_X3 165972 171000 N
+cell clkbuf_leaf_11_clk CLKBUF_X3 134280 182199 N
+cell clkbuf_leaf_12_clk CLKBUF_X3 105703 187799 N
+cell clkbuf_leaf_13_clk CLKBUF_X3 118471 212999 N
+cell clkbuf_leaf_14_clk CLKBUF_X3 86779 224200 N
+cell clkbuf_leaf_15_clk CLKBUF_X3 77355 184999 N
+cell clkbuf_leaf_16_clk CLKBUF_X3 49286 182666 N
+cell clkbuf_leaf_17_clk CLKBUF_X3 12490 185000 N
+cell clkbuf_leaf_18_clk CLKBUF_X3 23547 212999 N
+cell clkbuf_leaf_19_clk CLKBUF_X3 20431 235399 N
+cell clkbuf_leaf_20_clk CLKBUF_X3 58204 229799 N
+cell clkbuf_leaf_21_clk CLKBUF_X3 70972 254999 N
+cell clkbuf_leaf_22_clk CLKBUF_X3 39279 266200 N
+cell clkbuf_leaf_23_clk CLKBUF_X3 10932 271799 N
+cell clkbuf_leaf_24_clk CLKBUF_X3 23547 296999 N
+cell clkbuf_leaf_25_clk CLKBUF_X3 20431 319399 N
+cell clkbuf_leaf_26_clk CLKBUF_X3 58204 313799 N
+cell clkbuf_leaf_27_clk CLKBUF_X3 78420 299333 N
+cell clkbuf_leaf_28_clk CLKBUF_X3 102043 271333 N
+cell clkbuf_leaf_29_clk CLKBUF_X3 108895 302599 N
+cell clkbuf_leaf_30_clk CLKBUF_X3 124856 313799 N
+cell clkbuf_leaf_31_clk CLKBUF_X3 153204 313799 N
+cell clkbuf_leaf_32_clk CLKBUF_X3 174750 307499 N
+cell clkbuf_leaf_33_clk CLKBUF_X3 165971 277399 N
+cell clkbuf_leaf_34_clk CLKBUF_X3 149606 259666 N
+cell clkbuf_leaf_35_clk CLKBUF_X3 123260 240999 N
+cell clkbuf_leaf_36_clk CLKBUF_X3 153204 229799 N
+cell clkbuf_leaf_37_clk CLKBUF_X3 173420 215333 N
+cell clkbuf_leaf_38_clk CLKBUF_X3 197043 187333 N
+cell clkbuf_leaf_39_clk CLKBUF_X3 204959 220000 N
+cell clkbuf_leaf_40_clk CLKBUF_X3 228773 226999 N
+cell clkbuf_leaf_41_clk CLKBUF_X3 255119 243333 N
+cell clkbuf_leaf_42_clk CLKBUF_X3 219779 260599 N
+cell clkbuf_leaf_43_clk CLKBUF_X3 207619 280666 N
+cell clkbuf_leaf_44_clk CLKBUF_X3 200704 313799 N
+cell clkbuf_leaf_45_clk CLKBUF_X3 234030 310999 N
+cell clkbuf_leaf_46_clk CLKBUF_X3 265759 310999 N
+cell clkbuf_leaf_47_clk CLKBUF_X3 260972 277399 N
+cell clkbuf_leaf_48_clk CLKBUF_X3 289395 266200 N
+cell clkbuf_leaf_49_clk CLKBUF_X3 302087 294200 N
+cell clkbuf_leaf_50_clk CLKBUF_X3 308472 319399 N
+cell clkbuf_leaf_51_clk CLKBUF_X3 336895 308200 N
+cell clkbuf_leaf_52_clk CLKBUF_X3 362356 310999 N
+cell clkbuf_leaf_53_clk CLKBUF_X3 355971 277399 N
+cell clkbuf_leaf_54_clk CLKBUF_X3 339606 259666 N
+cell clkbuf_leaf_55_clk CLKBUF_X3 307939 238666 N
+cell clkbuf_leaf_56_clk CLKBUF_X3 343280 232599 N
+cell clkbuf_leaf_57_clk CLKBUF_X3 355971 218599 N
+cell clkbuf_leaf_58_clk CLKBUF_X3 355971 193399 N
+cell clkbuf_leaf_59_clk CLKBUF_X3 348790 174500 N
+cell clkbuf_leaf_60_clk CLKBUF_X3 314856 182199 N
+cell clkbuf_leaf_61_clk CLKBUF_X3 294639 196666 N
+cell clkbuf_leaf_62_clk CLKBUF_X3 273644 220000 N
+cell clkbuf_leaf_63_clk CLKBUF_X3 260972 193399 N
+cell clkbuf_leaf_64_clk CLKBUF_X3 244606 175666 N
+cell clkbuf_leaf_65_clk CLKBUF_X3 226113 154666 N
+cell clkbuf_leaf_66_clk CLKBUF_X3 265759 143000 N
+cell clkbuf_leaf_67_clk CLKBUF_X3 270953 112666 N
+cell clkbuf_leaf_68_clk CLKBUF_X3 295703 134600 N
+cell clkbuf_leaf_69_clk CLKBUF_X3 318516 145333 N
+cell clkbuf_leaf_70_clk CLKBUF_X3 355971 151400 N
+cell clkbuf_leaf_71_clk CLKBUF_X3 352780 122000 N
+cell clkbuf_leaf_72_clk CLKBUF_X3 352780 94000 N
+cell clkbuf_leaf_73_clk CLKBUF_X3 314856 98200 N
+cell clkbuf_leaf_74_clk CLKBUF_X3 318453 70666 N
+cell clkbuf_leaf_75_clk CLKBUF_X3 360760 58999 N
+cell clkbuf_leaf_76_clk CLKBUF_X3 359164 25399 N
+cell clkbuf_leaf_77_clk CLKBUF_X3 343204 14199 N
+cell clkbuf_leaf_78_clk CLKBUF_X3 314855 14199 N
+cell clkbuf_leaf_79_clk CLKBUF_X3 293309 20499 N
+cell clkbuf_leaf_80_clk CLKBUF_X3 302087 50599 N
+cell clkbuf_leaf_81_clk CLKBUF_X3 271016 58999 N
+cell clkbuf_leaf_82_clk CLKBUF_X3 264163 25399 N
+cell clkbuf_leaf_83_clk CLKBUF_X3 248203 14199 N
+cell clkbuf_leaf_84_clk CLKBUF_X3 219856 14199 N
+cell clkbuf_leaf_85_clk CLKBUF_X3 198309 20499 N
+cell clkbuf_leaf_86_clk CLKBUF_X3 207087 50599 N
+cell clkbuf_leaf_87_clk CLKBUF_X3 223453 68333 N
+cell clkbuf_leaf_88_clk CLKBUF_X3 255119 89333 N
+cell clkbuf_leaf_89_clk CLKBUF_X3 223516 101000 N
+cell clkbuf_leaf_90_clk CLKBUF_X3 198309 104500 N
+cell clkbuf_leaf_91_clk CLKBUF_X3 207087 134600 N
+cell clkbuf_leaf_92_clk CLKBUF_X3 176016 131333 N
+cell clkbuf_leaf_93_clk CLKBUF_X3 162780 94000 N
+cell clkbuf_leaf_94_clk CLKBUF_X3 128516 89333 N
+cell clkbuf_leaf_95_clk CLKBUF_X3 153279 67400 N
+cell clkbuf_leaf_96_clk CLKBUF_X3 165440 47333 N
+cell clkbuf_leaf_97_clk CLKBUF_X3 172356 14199 N
+cell clkbuf_leaf_98_clk CLKBUF_X3 139030 17000 N
+cell clkbuf_leaf_99_clk CLKBUF_X3 107299 17000 N
+cell clkbuf_leaf_100_clk CLKBUF_X3 112087 50600 N
+cell clkbuf_leaf_101_clk CLKBUF_X3 81016 47333 N
+cell clkbuf_leaf_102_clk CLKBUF_X3 67780 9999 N
+cell clkbuf_leaf_103_clk CLKBUF_X3 29856 11399 N
+cell clkbuf_leaf_104_clk CLKBUF_X3 17239 25399 N
+cell clkbuf_leaf_105_clk CLKBUF_X3 17239 50599 N
+cell clkbuf_leaf_106_clk CLKBUF_X3 24365 69500 N
+cell clkbuf_leaf_107_clk CLKBUF_X3 58204 61800 N
+cell clkbuf_leaf_108_clk CLKBUF_X3 83740 80000 N
+cell clkbuf_0_clk CLKBUF_X3 186644 164699 N
+cell clkbuf_1_0_0_clk CLKBUF_X3 158644 164699 N
+cell clkbuf_1_1_0_clk CLKBUF_X3 214643 164699 N
+cell clkbuf_2_0_0_clk CLKBUF_X3 92260 149106 N
+cell clkbuf_2_1_0_clk CLKBUF_X3 93521 183577 N
+cell clkbuf_2_2_0_clk CLKBUF_X3 278597 144653 N
+cell clkbuf_2_3_0_clk CLKBUF_X3 281643 178257 N
+cell clkbuf_3_0_0_clk CLKBUF_X3 64260 93106 N
+cell clkbuf_3_1_0_clk CLKBUF_X3 120260 93106 N
+cell clkbuf_3_2_0_clk CLKBUF_X3 65521 239577 N
+cell clkbuf_3_3_0_clk CLKBUF_X3 121521 239577 N
+cell clkbuf_3_4_0_clk CLKBUF_X3 250597 88653 N
+cell clkbuf_3_5_0_clk CLKBUF_X3 306597 88653 N
+cell clkbuf_3_6_0_clk CLKBUF_X3 253643 234257 N
+cell clkbuf_3_7_0_clk CLKBUF_X3 309643 234257 N
+cell clkload0 CLKBUF_X3 120260 93106 N
+cell clkload1 CLKBUF_X3 306597 88653 N
+cell clkload2 CLKBUF_X3 253643 234257 N
+cell clkload3 CLKBUF_X3 17239 92600 N
+cell clkload4 CLKBUF_X3 58204 145799 N
+cell clkload5 CLKBUF_X3 29856 11399 N
+cell clkload6 CLKBUF_X3 17239 25399 N
+cell clkload7 CLKBUF_X3 17239 50599 N
+cell clkload8 INV_X1 24365 69500 N
+cell clkload9 CLKBUF_X3 58204 61800 N
+cell clkload10 INV_X1 83740 80000 N
+cell clkload11 INV_X1 119270 153500 N
+cell clkload12 CLKBUF_X3 153204 145799 N
+cell clkload13 CLKBUF_X3 153279 67400 N
+cell clkload14 CLKBUF_X3 172356 14199 N
+cell clkload15 CLKBUF_X3 112087 50600 N
+cell clkload16 CLKBUF_X3 86779 224200 N
+cell clkload17 CLKBUF_X3 77355 184999 N
+cell clkload18 CLKBUF_X3 23547 212999 N
+cell clkload19 CLKBUF_X3 20431 235399 N
+cell clkload20 CLKBUF_X3 58204 229799 N
+cell clkload21 CLKBUF_X3 70972 254999 N
+cell clkload22 CLKBUF_X3 39279 266200 N
+cell clkload23 CLKBUF_X3 10932 271799 N
+cell clkload24 CLKBUF_X3 23547 296999 N
+cell clkload25 CLKBUF_X3 20431 319399 N
+cell clkload26 CLKBUF_X3 58204 313799 N
+cell clkload27 CLKBUF_X3 165972 171000 N
+cell clkload28 CLKBUF_X3 134280 182199 N
+cell clkload29 CLKBUF_X3 105703 187799 N
+cell clkload30 CLKBUF_X3 118471 212999 N
+cell clkload31 CLKBUF_X3 108895 302599 N
+cell clkload32 CLKBUF_X3 124856 313799 N
+cell clkload33 CLKBUF_X3 153204 313799 N
+cell clkload34 INV_X1 174750 307499 N
+cell clkload35 CLKBUF_X3 165971 277399 N
+cell clkload36 INV_X1 123260 240999 N
+cell clkload37 CLKBUF_X3 153204 229799 N
+cell clkload38 CLKBUF_X3 264163 25399 N
+cell clkload39 CLKBUF_X3 248203 14199 N
+cell clkload40 CLKBUF_X3 219856 14199 N
+cell clkload41 INV_X1 198309 20499 N
+cell clkload42 CLKBUF_X3 207087 50599 N
+cell clkload43 INV_X1 198309 104500 N
+cell clkload44 CLKBUF_X3 207087 134600 N
+cell clkload45 CLKBUF_X3 295703 134600 N
+cell clkload46 CLKBUF_X3 355971 151400 N
+cell clkload47 CLKBUF_X3 314856 98200 N
+cell clkload48 CLKBUF_X3 359164 25399 N
+cell clkload49 CLKBUF_X3 343204 14199 N
+cell clkload50 CLKBUF_X3 314855 14199 N
+cell clkload51 INV_X1 293309 20499 N
+cell clkload52 CLKBUF_X3 302087 50599 N
+cell clkload53 CLKBUF_X3 219779 260599 N
+cell clkload54 CLKBUF_X3 200704 313799 N
+cell clkload55 CLKBUF_X3 260972 277399 N
+cell clkload56 INV_X1 273644 220000 N
+cell clkload57 CLKBUF_X3 260972 193399 N
+cell clkload58 CLKBUF_X3 289395 266200 N
+cell clkload59 CLKBUF_X3 302087 294200 N
+cell clkload60 CLKBUF_X3 308472 319399 N
+cell clkload61 CLKBUF_X3 336895 308200 N
+cell clkload62 CLKBUF_X3 362356 310999 N
+cell clkload63 CLKBUF_X3 355971 277399 N
+cell clkload64 CLKBUF_X3 343280 232599 N
+cell clkload65 CLKBUF_X3 355971 218599 N
+cell clkload66 CLKBUF_X3 355971 193399 N
+cell clkload67 INV_X1 348790 174500 N
+cell clkload68 CLKBUF_X3 314856 182199 N
+net clk CTS_NDR_0 PIN clk clkbuf_0_clk/A
+net clknet_0_clk CTS_NDR_0 clkbuf_0_clk/Z clkbuf_1_0_0_clk/A clkbuf_1_1_0_clk/A
+net clknet_1_0_0_clk CTS_NDR_0 clkbuf_1_0_0_clk/Z clkbuf_2_0_0_clk/A clkbuf_2_1_0_clk/A
+net clknet_1_1_0_clk CTS_NDR_0 clkbuf_1_1_0_clk/Z clkbuf_2_2_0_clk/A clkbuf_2_3_0_clk/A
+net clknet_2_0_0_clk - clkbuf_2_0_0_clk/Z clkbuf_3_0_0_clk/A clkbuf_3_1_0_clk/A
+net clknet_2_1_0_clk - clkbuf_2_1_0_clk/Z clkbuf_3_2_0_clk/A clkbuf_3_3_0_clk/A
+net clknet_2_2_0_clk - clkbuf_2_2_0_clk/Z clkbuf_3_4_0_clk/A clkbuf_3_5_0_clk/A
+net clknet_2_3_0_clk - clkbuf_2_3_0_clk/Z clkbuf_3_6_0_clk/A clkbuf_3_7_0_clk/A
+net clknet_3_0_0_clk - clkbuf_3_0_0_clk/Z clkbuf_leaf_0_clk/A clkbuf_leaf_101_clk/A clkbuf_leaf_102_clk/A clkbuf_leaf_103_clk/A clkbuf_leaf_104_clk/A clkbuf_leaf_105_clk/A clkbuf_leaf_106_clk/A clkbuf_leaf_107_clk/A clkbuf_leaf_108_clk/A clkbuf_leaf_1_clk/A clkbuf_leaf_2_clk/A clkbuf_leaf_3_clk/A clkbuf_leaf_4_clk/A clkbuf_leaf_5_clk/A
+net clknet_3_1_0_clk - clkbuf_3_1_0_clk/Z clkbuf_leaf_100_clk/A clkbuf_leaf_6_clk/A clkbuf_leaf_7_clk/A clkbuf_leaf_8_clk/A clkbuf_leaf_92_clk/A clkbuf_leaf_93_clk/A clkbuf_leaf_94_clk/A clkbuf_leaf_95_clk/A clkbuf_leaf_96_clk/A clkbuf_leaf_97_clk/A clkbuf_leaf_98_clk/A clkbuf_leaf_99_clk/A clkbuf_leaf_9_clk/A clkload0/A
+net clknet_3_2_0_clk - clkbuf_3_2_0_clk/Z clkbuf_leaf_14_clk/A clkbuf_leaf_15_clk/A clkbuf_leaf_16_clk/A clkbuf_leaf_17_clk/A clkbuf_leaf_18_clk/A clkbuf_leaf_19_clk/A clkbuf_leaf_20_clk/A clkbuf_leaf_21_clk/A clkbuf_leaf_22_clk/A clkbuf_leaf_23_clk/A clkbuf_leaf_24_clk/A clkbuf_leaf_25_clk/A clkbuf_leaf_26_clk/A clkbuf_leaf_27_clk/A
+net clknet_3_3_0_clk - clkbuf_3_3_0_clk/Z clkbuf_leaf_10_clk/A clkbuf_leaf_11_clk/A clkbuf_leaf_12_clk/A clkbuf_leaf_13_clk/A clkbuf_leaf_28_clk/A clkbuf_leaf_29_clk/A clkbuf_leaf_30_clk/A clkbuf_leaf_31_clk/A clkbuf_leaf_32_clk/A clkbuf_leaf_33_clk/A clkbuf_leaf_34_clk/A clkbuf_leaf_35_clk/A clkbuf_leaf_36_clk/A clkbuf_leaf_37_clk/A
+net clknet_3_4_0_clk - clkbuf_3_4_0_clk/Z clkbuf_leaf_65_clk/A clkbuf_leaf_66_clk/A clkbuf_leaf_67_clk/A clkbuf_leaf_81_clk/A clkbuf_leaf_82_clk/A clkbuf_leaf_83_clk/A clkbuf_leaf_84_clk/A clkbuf_leaf_85_clk/A clkbuf_leaf_86_clk/A clkbuf_leaf_87_clk/A clkbuf_leaf_88_clk/A clkbuf_leaf_89_clk/A clkbuf_leaf_90_clk/A clkbuf_leaf_91_clk/A
+net clknet_3_5_0_clk - clkbuf_3_5_0_clk/Z clkbuf_leaf_68_clk/A clkbuf_leaf_69_clk/A clkbuf_leaf_70_clk/A clkbuf_leaf_71_clk/A clkbuf_leaf_72_clk/A clkbuf_leaf_73_clk/A clkbuf_leaf_74_clk/A clkbuf_leaf_75_clk/A clkbuf_leaf_76_clk/A clkbuf_leaf_77_clk/A clkbuf_leaf_78_clk/A clkbuf_leaf_79_clk/A clkbuf_leaf_80_clk/A clkload1/A
+net clknet_3_6_0_clk - clkbuf_3_6_0_clk/Z clkbuf_leaf_38_clk/A clkbuf_leaf_39_clk/A clkbuf_leaf_40_clk/A clkbuf_leaf_41_clk/A clkbuf_leaf_42_clk/A clkbuf_leaf_43_clk/A clkbuf_leaf_44_clk/A clkbuf_leaf_45_clk/A clkbuf_leaf_46_clk/A clkbuf_leaf_47_clk/A clkbuf_leaf_62_clk/A clkbuf_leaf_63_clk/A clkbuf_leaf_64_clk/A clkload2/A
+net clknet_3_7_0_clk - clkbuf_3_7_0_clk/Z clkbuf_leaf_48_clk/A clkbuf_leaf_49_clk/A clkbuf_leaf_50_clk/A clkbuf_leaf_51_clk/A clkbuf_leaf_52_clk/A clkbuf_leaf_53_clk/A clkbuf_leaf_54_clk/A clkbuf_leaf_55_clk/A clkbuf_leaf_56_clk/A clkbuf_leaf_57_clk/A clkbuf_leaf_58_clk/A clkbuf_leaf_59_clk/A clkbuf_leaf_60_clk/A clkbuf_leaf_61_clk/A
+net clknet_leaf_0_clk - clkbuf_leaf_0_clk/Z ff147/CK ff148/CK ff170/CK ff171/CK ff172/CK ff195/CK
+net clknet_leaf_100_clk - clkbuf_leaf_100_clk/Z clkload15/A ff102/CK ff103/CK ff78/CK ff79/CK ff80/CK
+net clknet_leaf_101_clk - clkbuf_leaf_101_clk/Z ff101/CK ff126/CK ff52/CK ff53/CK ff76/CK ff77/CK
+net clknet_leaf_102_clk - clkbuf_leaf_102_clk/Z ff27/CK ff28/CK ff29/CK ff3/CK ff4/CK ff5/CK
+net clknet_leaf_103_clk - clkbuf_leaf_103_clk/Z clkload5/A ff0/CK ff1/CK ff2/CK ff26/CK ff51/CK
+net clknet_leaf_104_clk - clkbuf_leaf_104_clk/Z clkload6/A ff24/CK ff25/CK ff48/CK ff49/CK ff50/CK
+net clknet_leaf_105_clk - clkbuf_leaf_105_clk/Z clkload7/A ff72/CK ff73/CK ff74/CK ff96/CK ff97/CK
+net clknet_leaf_106_clk - clkbuf_leaf_106_clk/Z clkload8/A ff120/CK ff121/CK ff122/CK ff98/CK
+net clknet_leaf_107_clk - clkbuf_leaf_107_clk/Z clkload9/A ff100/CK ff123/CK ff124/CK ff75/CK ff99/CK
+net clknet_leaf_108_clk - clkbuf_leaf_108_clk/Z clkload10/A ff125/CK ff149/CK
+net clknet_leaf_10_clk - clkbuf_leaf_10_clk/Z clkload27/A ff275/CK ff297/CK ff298/CK ff299/CK ff322/CK
+net clknet_leaf_11_clk - clkbuf_leaf_11_clk/Z clkload28/A ff295/CK ff296/CK ff320/CK ff321/CK ff345/CK
+net clknet_leaf_12_clk - clkbuf_leaf_12_clk/Z clkload29/A ff294/CK ff318/CK ff319/CK ff342/CK ff343/CK
+net clknet_leaf_13_clk - clkbuf_leaf_13_clk/Z clkload30/A ff344/CK ff366/CK ff367/CK ff368/CK ff391/CK
+net clknet_leaf_14_clk - clkbuf_leaf_14_clk/Z clkload16/A ff364/CK ff365/CK ff389/CK ff390/CK ff414/CK
+net clknet_leaf_15_clk - clkbuf_leaf_15_clk/Z clkload17/A ff292/CK ff293/CK ff317/CK ff340/CK ff341/CK
+net clknet_leaf_16_clk - clkbuf_leaf_16_clk/Z ff290/CK ff291/CK ff314/CK ff315/CK ff316/CK ff339/CK
+net clknet_leaf_17_clk - clkbuf_leaf_17_clk/Z ff288/CK ff289/CK ff312/CK ff313/CK ff336/CK ff337/CK
+net clknet_leaf_18_clk - clkbuf_leaf_18_clk/Z clkload18/A ff338/CK ff360/CK ff361/CK ff362/CK ff385/CK
+net clknet_leaf_19_clk - clkbuf_leaf_19_clk/Z clkload19/A ff384/CK ff386/CK ff408/CK ff409/CK ff410/CK
+net clknet_leaf_1_clk - clkbuf_leaf_1_clk/Z clkload3/A ff144/CK ff145/CK ff146/CK ff168/CK ff169/CK
+net clknet_leaf_20_clk - clkbuf_leaf_20_clk/Z clkload20/A ff363/CK ff387/CK ff388/CK ff411/CK ff412/CK
+net clknet_leaf_21_clk - clkbuf_leaf_21_clk/Z clkload21/A ff413/CK ff435/CK ff436/CK ff437/CK ff460/CK
+net clknet_leaf_22_clk - clkbuf_leaf_22_clk/Z clkload22/A ff433/CK ff434/CK ff458/CK ff459/CK ff483/CK
+net clknet_leaf_23_clk - clkbuf_leaf_23_clk/Z clkload23/A ff432/CK ff456/CK ff457/CK ff480/CK ff481/CK
+net clknet_leaf_24_clk - clkbuf_leaf_24_clk/Z clkload24/A ff482/CK ff504/CK ff505/CK ff506/CK ff529/CK
+net clknet_leaf_25_clk - clkbuf_leaf_25_clk/Z clkload25/A ff528/CK ff530/CK ff552/CK ff553/CK ff554/CK
+net clknet_leaf_26_clk - clkbuf_leaf_26_clk/Z clkload26/A ff507/CK ff531/CK ff532/CK ff555/CK ff556/CK
+net clknet_leaf_27_clk - clkbuf_leaf_27_clk/Z ff484/CK ff485/CK ff508/CK ff509/CK ff533/CK ff557/CK
+net clknet_leaf_28_clk - clkbuf_leaf_28_clk/Z ff438/CK ff461/CK ff462/CK ff463/CK ff486/CK ff487/CK
+net clknet_leaf_29_clk - clkbuf_leaf_29_clk/Z clkload31/A ff488/CK ff510/CK ff511/CK ff534/CK ff558/CK
+net clknet_leaf_2_clk - clkbuf_leaf_2_clk/Z ff192/CK ff193/CK ff194/CK ff216/CK ff217/CK ff218/CK
+net clknet_leaf_30_clk - clkbuf_leaf_30_clk/Z clkload32/A ff512/CK ff535/CK ff536/CK ff559/CK ff560/CK
+net clknet_leaf_31_clk - clkbuf_leaf_31_clk/Z clkload33/A ff513/CK ff537/CK ff538/CK ff561/CK ff562/CK
+net clknet_leaf_32_clk - clkbuf_leaf_32_clk/Z clkload34/A ff514/CK ff515/CK ff539/CK ff563/CK
+net clknet_leaf_33_clk - clkbuf_leaf_33_clk/Z clkload35/A ff466/CK ff467/CK ff489/CK ff490/CK ff491/CK
+net clknet_leaf_34_clk - clkbuf_leaf_34_clk/Z ff440/CK ff441/CK ff442/CK ff443/CK ff464/CK ff465/CK
+net clknet_leaf_35_clk - clkbuf_leaf_35_clk/Z clkload36/A ff392/CK ff415/CK ff416/CK ff439/CK
+net clknet_leaf_36_clk - clkbuf_leaf_36_clk/Z clkload37/A ff369/CK ff393/CK ff394/CK ff417/CK ff418/CK
+net clknet_leaf_37_clk - clkbuf_leaf_37_clk/Z ff346/CK ff347/CK ff370/CK ff371/CK ff395/CK ff419/CK
+net clknet_leaf_38_clk - clkbuf_leaf_38_clk/Z ff300/CK ff323/CK ff324/CK ff325/CK ff348/CK ff349/CK
+net clknet_leaf_39_clk - clkbuf_leaf_39_clk/Z ff350/CK ff372/CK ff373/CK ff396/CK ff397/CK ff420/CK
+net clknet_leaf_3_clk - clkbuf_leaf_3_clk/Z ff240/CK ff241/CK ff242/CK ff264/CK ff265/CK ff266/CK
+net clknet_leaf_40_clk - clkbuf_leaf_40_clk/Z ff374/CK ff375/CK ff398/CK ff399/CK ff421/CK ff422/CK
+net clknet_leaf_41_clk - clkbuf_leaf_41_clk/Z ff400/CK ff423/CK ff424/CK ff425/CK ff447/CK ff448/CK
+net clknet_leaf_42_clk - clkbuf_leaf_42_clk/Z clkload53/A ff444/CK ff445/CK ff446/CK ff470/CK ff471/CK
+net clknet_leaf_43_clk - clkbuf_leaf_43_clk/Z ff468/CK ff469/CK ff492/CK ff493/CK ff494/CK ff517/CK
+net clknet_leaf_44_clk - clkbuf_leaf_44_clk/Z clkload54/A ff516/CK ff540/CK ff541/CK ff564/CK ff565/CK
+net clknet_leaf_45_clk - clkbuf_leaf_45_clk/Z ff518/CK ff519/CK ff542/CK ff543/CK ff566/CK ff567/CK
+net clknet_leaf_46_clk - clkbuf_leaf_46_clk/Z ff520/CK ff521/CK ff544/CK ff545/CK ff568/CK ff569/CK
+net clknet_leaf_47_clk - clkbuf_leaf_47_clk/Z clkload55/A ff472/CK ff473/CK ff495/CK ff496/CK ff497/CK
+net clknet_leaf_48_clk - clkbuf_leaf_48_clk/Z clkload58/A ff449/CK ff450/CK ff474/CK ff475/CK ff498/CK
+net clknet_leaf_49_clk - clkbuf_leaf_49_clk/Z clkload59/A ff499/CK ff500/CK ff522/CK ff523/CK ff546/CK
+net clknet_leaf_4_clk - clkbuf_leaf_4_clk/Z clkload4/A ff219/CK ff243/CK ff244/CK ff267/CK ff268/CK
+net clknet_leaf_50_clk - clkbuf_leaf_50_clk/Z clkload60/A ff547/CK ff548/CK ff570/CK ff571/CK ff572/CK
+net clknet_leaf_51_clk - clkbuf_leaf_51_clk/Z clkload61/A ff524/CK ff525/CK ff549/CK ff550/CK ff573/CK
+net clknet_leaf_52_clk - clkbuf_leaf_52_clk/Z clkload62/A ff526/CK ff527/CK ff551/CK ff574/CK ff575/CK
+net clknet_leaf_53_clk - clkbuf_leaf_53_clk/Z clkload63/A ff478/CK ff479/CK ff501/CK ff502/CK ff503/CK
+net clknet_leaf_54_clk - clkbuf_leaf_54_clk/Z ff452/CK ff453/CK ff454/CK ff455/CK ff476/CK ff477/CK
+net clknet_leaf_55_clk - clkbuf_leaf_55_clk/Z ff403/CK ff404/CK ff426/CK ff427/CK ff428/CK ff451/CK
+net clknet_leaf_56_clk - clkbuf_leaf_56_clk/Z clkload64/A ff380/CK ff405/CK ff429/CK ff430/CK ff431/CK
+net clknet_leaf_57_clk - clkbuf_leaf_57_clk/Z clkload65/A ff381/CK ff382/CK ff383/CK ff406/CK ff407/CK
+net clknet_leaf_58_clk - clkbuf_leaf_58_clk/Z clkload66/A ff334/CK ff335/CK ff357/CK ff358/CK ff359/CK
+net clknet_leaf_59_clk - clkbuf_leaf_59_clk/Z clkload67/A ff309/CK ff310/CK ff311/CK ff333/CK
+net clknet_leaf_5_clk - clkbuf_leaf_5_clk/Z ff196/CK ff197/CK ff220/CK ff221/CK ff245/CK ff269/CK
+net clknet_leaf_60_clk - clkbuf_leaf_60_clk/Z clkload68/A ff307/CK ff308/CK ff331/CK ff332/CK ff356/CK
+net clknet_leaf_61_clk - clkbuf_leaf_61_clk/Z ff306/CK ff330/CK ff354/CK ff355/CK ff378/CK ff379/CK
+net clknet_leaf_62_clk - clkbuf_leaf_62_clk/Z clkload56/A ff376/CK ff377/CK ff401/CK ff402/CK
+net clknet_leaf_63_clk - clkbuf_leaf_63_clk/Z clkload57/A ff328/CK ff329/CK ff351/CK ff352/CK ff353/CK
+net clknet_leaf_64_clk - clkbuf_leaf_64_clk/Z ff302/CK ff303/CK ff304/CK ff305/CK ff326/CK ff327/CK
+net clknet_leaf_65_clk - clkbuf_leaf_65_clk/Z ff254/CK ff255/CK ff277/CK ff278/CK ff279/CK ff301/CK
+net clknet_leaf_66_clk - clkbuf_leaf_66_clk/Z ff232/CK ff233/CK ff256/CK ff257/CK ff280/CK ff281/CK
+net clknet_leaf_67_clk - clkbuf_leaf_67_clk/Z ff185/CK ff186/CK ff208/CK ff209/CK ff210/CK ff231/CK
+net clknet_leaf_68_clk - clkbuf_leaf_68_clk/Z clkload45/A ff211/CK ff234/CK ff235/CK ff258/CK ff282/CK
+net clknet_leaf_69_clk - clkbuf_leaf_69_clk/Z ff236/CK ff259/CK ff260/CK ff261/CK ff283/CK ff284/CK
+net clknet_leaf_6_clk - clkbuf_leaf_6_clk/Z ff150/CK ff173/CK ff174/CK ff175/CK ff198/CK ff199/CK
+net clknet_leaf_70_clk - clkbuf_leaf_70_clk/Z clkload46/A ff262/CK ff263/CK ff285/CK ff286/CK ff287/CK
+net clknet_leaf_71_clk - clkbuf_leaf_71_clk/Z ff213/CK ff214/CK ff215/CK ff237/CK ff238/CK ff239/CK
+net clknet_leaf_72_clk - clkbuf_leaf_72_clk/Z ff165/CK ff166/CK ff167/CK ff189/CK ff190/CK ff191/CK
+net clknet_leaf_73_clk - clkbuf_leaf_73_clk/Z clkload47/A ff163/CK ff164/CK ff187/CK ff188/CK ff212/CK
+net clknet_leaf_74_clk - clkbuf_leaf_74_clk/Z ff116/CK ff117/CK ff139/CK ff140/CK ff141/CK ff162/CK
+net clknet_leaf_75_clk - clkbuf_leaf_75_clk/Z ff118/CK ff119/CK ff142/CK ff143/CK ff94/CK ff95/CK
+net clknet_leaf_76_clk - clkbuf_leaf_76_clk/Z clkload48/A ff23/CK ff47/CK ff70/CK ff71/CK ff93/CK
+net clknet_leaf_77_clk - clkbuf_leaf_77_clk/Z clkload49/A ff21/CK ff22/CK ff45/CK ff46/CK ff69/CK
+net clknet_leaf_78_clk - clkbuf_leaf_78_clk/Z clkload50/A ff19/CK ff20/CK ff43/CK ff44/CK ff68/CK
+net clknet_leaf_79_clk - clkbuf_leaf_79_clk/Z clkload51/A ff18/CK ff42/CK ff66/CK ff67/CK
+net clknet_leaf_7_clk - clkbuf_leaf_7_clk/Z ff200/CK ff222/CK ff223/CK ff224/CK ff246/CK ff247/CK
+net clknet_leaf_80_clk - clkbuf_leaf_80_clk/Z clkload52/A ff114/CK ff115/CK ff90/CK ff91/CK ff92/CK
+net clknet_leaf_81_clk - clkbuf_leaf_81_clk/Z ff112/CK ff113/CK ff137/CK ff138/CK ff88/CK ff89/CK
+net clknet_leaf_82_clk - clkbuf_leaf_82_clk/Z clkload38/A ff17/CK ff41/CK ff64/CK ff65/CK ff87/CK
+net clknet_leaf_83_clk - clkbuf_leaf_83_clk/Z clkload39/A ff15/CK ff16/CK ff39/CK ff40/CK ff63/CK
+net clknet_leaf_84_clk - clkbuf_leaf_84_clk/Z clkload40/A ff13/CK ff14/CK ff37/CK ff38/CK ff62/CK
+net clknet_leaf_85_clk - clkbuf_leaf_85_clk/Z clkload41/A ff12/CK ff36/CK ff60/CK ff61/CK
+net clknet_leaf_86_clk - clkbuf_leaf_86_clk/Z clkload42/A ff108/CK ff109/CK ff84/CK ff85/CK ff86/CK
+net clknet_leaf_87_clk - clkbuf_leaf_87_clk/Z ff110/CK ff111/CK ff132/CK ff133/CK ff134/CK ff135/CK
+net clknet_leaf_88_clk - clkbuf_leaf_88_clk/Z ff136/CK ff159/CK ff160/CK ff161/CK ff183/CK ff184/CK
+net clknet_leaf_89_clk - clkbuf_leaf_89_clk/Z ff157/CK ff158/CK ff181/CK ff182/CK ff206/CK ff207/CK
+net clknet_leaf_8_clk - clkbuf_leaf_8_clk/Z clkload11/A ff248/CK ff270/CK ff271/CK ff272/CK
+net clknet_leaf_90_clk - clkbuf_leaf_90_clk/Z clkload43/A ff156/CK ff180/CK ff204/CK ff205/CK
+net clknet_leaf_91_clk - clkbuf_leaf_91_clk/Z clkload44/A ff228/CK ff229/CK ff230/CK ff252/CK ff253/CK
+net clknet_leaf_92_clk - clkbuf_leaf_92_clk/Z ff202/CK ff203/CK ff226/CK ff227/CK ff251/CK ff276/CK
+net clknet_leaf_93_clk - clkbuf_leaf_93_clk/Z ff153/CK ff154/CK ff155/CK ff177/CK ff178/CK ff179/CK
+net clknet_leaf_94_clk - clkbuf_leaf_94_clk/Z ff127/CK ff128/CK ff151/CK ff152/CK ff176/CK ff201/CK
+net clknet_leaf_95_clk - clkbuf_leaf_95_clk/Z clkload13/A ff104/CK ff105/CK ff129/CK ff130/CK ff131/CK
+net clknet_leaf_96_clk - clkbuf_leaf_96_clk/Z ff106/CK ff107/CK ff58/CK ff81/CK ff82/CK ff83/CK
+net clknet_leaf_97_clk - clkbuf_leaf_97_clk/Z clkload14/A ff10/CK ff11/CK ff34/CK ff35/CK ff59/CK
+net clknet_leaf_98_clk - clkbuf_leaf_98_clk/Z ff32/CK ff33/CK ff56/CK ff57/CK ff8/CK ff9/CK
+net clknet_leaf_99_clk - clkbuf_leaf_99_clk/Z ff30/CK ff31/CK ff54/CK ff55/CK ff6/CK ff7/CK
+net clknet_leaf_9_clk - clkbuf_leaf_9_clk/Z clkload12/A ff225/CK ff249/CK ff250/CK ff273/CK ff274/CK
