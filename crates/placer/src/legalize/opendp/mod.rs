@@ -99,6 +99,21 @@ const NO_CELL: u32 = u32::MAX;
 const DUMMY_CELL: u32 = u32::MAX - 1;
 const NO_GROUP: u32 = u32::MAX;
 
+/// The pixel id of node `n`. Nodes are cells, which [`CellId`]'s 32 bits
+/// number, so every id falls below the [`DUMMY_CELL`] and [`NO_CELL`]
+/// markers.
+fn node_id(n: usize) -> u32 {
+    debug_assert!(n < DUMMY_CELL as usize, "node {n} past the pixel ids");
+    n as u32
+}
+
+/// The pixel id of group `g`, below [`NO_GROUP`] as groups are fewer than
+/// cells.
+fn group_id(g: usize) -> u32 {
+    debug_assert!(g < NO_GROUP as usize, "group {g} past the pixel ids");
+    g as u32
+}
+
 /// One site of one row band, as `OpenDP`'s `Pixel`.
 #[derive(Clone, Copy, Debug)]
 struct Pixel {
@@ -242,7 +257,7 @@ impl Placer {
         row_edges.sort_unstable();
         row_edges.dedup();
         let row_site_count = core.width().get() / site_width;
-        let row_count = i64::try_from(row_edges.len()).unwrap_or(1) - 1;
+        let row_count = row_edges.len() as i64 - 1;
         let uniform_row_height = uniform_row_height(db, &rows);
         let edge_spacing = EdgeSpacing::new(db);
         let mut placer = Self {
@@ -260,9 +275,9 @@ impl Placer {
                     hopeless: false,
                     blocked_layers: 0,
                 };
-                usize::try_from(row_site_count * row_count).unwrap_or(0)
+                (row_site_count * row_count).max(0) as usize
             ],
-            row_sites: vec![Vec::new(); usize::try_from(row_count).unwrap_or(0)],
+            row_sites: vec![Vec::new(); row_count.max(0) as usize],
             nodes: Vec::new(),
             edge_spacing,
             disallow_one_site_gaps: !has_one_site_master(db),
@@ -284,7 +299,7 @@ impl Placer {
 
     fn pixel_index(&self, x: i64, y: i64) -> Option<usize> {
         (x >= 0 && x < self.row_site_count && y >= 0 && y < self.row_count)
-            .then(|| usize::try_from(y * self.row_site_count + x).unwrap_or(0))
+            .then(|| (y * self.row_site_count + x) as usize)
     }
 
     fn pixel(&self, x: i64, y: i64) -> Option<&Pixel> {
@@ -308,12 +323,12 @@ impl Placer {
     /// The last row edge at or below `y`, as `Grid::gridSnapDownY`.
     fn snap_down_y(&self, y: i64) -> i64 {
         let above = self.row_edges.partition_point(|&e| e <= y);
-        i64::try_from(above.saturating_sub(1)).unwrap_or(0)
+        above.saturating_sub(1) as i64
     }
 
     /// The first row edge at or above `y`, as `Grid::gridEndY`.
     fn end_y(&self, y: i64) -> i64 {
-        i64::try_from(self.row_edges.partition_point(|&e| e < y)).unwrap_or(0)
+        self.row_edges.partition_point(|&e| e < y) as i64
     }
 
     /// The nearer row edge to `y`, the upper on a tie, as `Grid::gridRoundY`.
@@ -588,7 +603,7 @@ impl Placer {
             for x in x0..x1 {
                 for y in y0..y1 {
                     if let Some(p) = self.pixel_mut(x, y) {
-                        p.cell = u32::try_from(n).unwrap_or(NO_CELL);
+                        p.cell = node_id(n);
                         if block {
                             p.hopeless = true;
                         }
@@ -885,9 +900,7 @@ impl Placer {
         if !self.region_overlap_allowed(node, x, y, x_end, y_end) {
             return false;
         }
-        let group = node
-            .group
-            .map_or(NO_GROUP, |g| u32::try_from(g).unwrap_or(NO_GROUP));
+        let group = node.group.map_or(NO_GROUP, group_id);
         for y1 in y..y_end {
             for x1 in x..x_end {
                 let Some(p) = self.pixel(x1, y1) else {
@@ -1062,7 +1075,7 @@ impl Placer {
         for gx in x..x_end {
             for gy in y..y_end {
                 if let Some(p) = self.pixel_mut(gx, gy) {
-                    p.cell = u32::try_from(n).unwrap_or(NO_CELL);
+                    p.cell = node_id(n);
                 }
             }
         }
@@ -1087,7 +1100,7 @@ impl Placer {
             Point::new(Dbu(node.left + node.width), Dbu(node.bottom + node.height)),
         );
         let (x0, y0, x1, y1) = self.covering(&rect);
-        let id = u32::try_from(n).unwrap_or(NO_CELL);
+        let id = node_id(n);
         for x in x0..x1 {
             for y in y0..y1 {
                 if let Some(p) = self.pixel_mut(x, y)
@@ -1177,7 +1190,7 @@ impl SearchMarks {
     fn new() -> Self {
         Self {
             stamp: 0,
-            marks: vec![0; usize::try_from(Self::WIDTH * Self::HEIGHT).unwrap_or(0)],
+            marks: vec![0; (Self::WIDTH * Self::HEIGHT) as usize],
             center: (0, 0),
         }
     }
@@ -1196,7 +1209,7 @@ impl SearchMarks {
     fn visit(&mut self, (x, y): GridPt) -> bool {
         let dx = x - self.center.0 + MAX_DISPLACEMENT_X + 1;
         let dy = y - self.center.1 + MAX_DISPLACEMENT_Y + 1;
-        let i = usize::try_from(dy * Self::WIDTH + dx).unwrap_or(0);
+        let i = (dy * Self::WIDTH + dx) as usize;
         if self.marks[i] == self.stamp {
             return false;
         }
