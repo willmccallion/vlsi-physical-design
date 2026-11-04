@@ -160,12 +160,31 @@ struct Markers {
     fixed: Vec<Marker>,
 }
 
-impl Markers {
-    fn add(&mut self, marker: Marker, fixed_only: bool) {
+/// What metal a violation involves, which decides who can fix it.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Involves {
+    /// Some routed metal, which routing can fix.
+    Routing,
+    /// Fixed metal alone: a defect of the input.
+    FixedOnly,
+}
+
+impl Involves {
+    /// `FixedOnly` when `fixed_only` holds, else `Routing`.
+    const fn of(fixed_only: bool) -> Self {
         if fixed_only {
-            self.fixed.push(marker);
+            Self::FixedOnly
         } else {
-            self.violations.push(marker);
+            Self::Routing
+        }
+    }
+}
+
+impl Markers {
+    fn add(&mut self, marker: Marker, involves: Involves) {
+        match involves {
+            Involves::Routing => self.violations.push(marker),
+            Involves::FixedOnly => self.fixed.push(marker),
         }
     }
 

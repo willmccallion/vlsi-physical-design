@@ -4,7 +4,7 @@
 use super::layout::OwnerIndex;
 use super::model::{Facing, GcRect, Metal, Model};
 use super::rules::{MetalRules, Rules};
-use super::{Marker, Markers, Violation};
+use super::{Involves, Marker, Markers, Violation};
 use crate::db::indices::LayerId;
 use crate::db::library::LayerRef;
 use crate::db::rules::SpacingTable;
@@ -118,7 +118,7 @@ impl LayerCheck<'_> {
             r1.owner,
             r2.owner,
         );
-        found.add(marker, (r1.fixed && r2.fixed) || !routed);
+        found.add(marker, Involves::of((r1.fixed && r2.fixed) || !routed));
     }
 
     /// Whether two touching rectangles of one owner overlap by at least the
@@ -222,7 +222,7 @@ impl LayerCheck<'_> {
             r1.owner,
             r2.owner,
         );
-        found.add(marker, (r1.fixed && r2.fixed) || !routed);
+        found.add(marker, Involves::of((r1.fixed && r2.fixed) || !routed));
     }
 
     /// The spacing two rectangles need at parallel run `prl`, and whether a

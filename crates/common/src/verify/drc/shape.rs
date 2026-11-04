@@ -3,7 +3,7 @@
 
 use super::model::{GcPolygon, GcRect, Metal, Model};
 use super::rules::{MetalRules, Rules};
-use super::{Marker, Markers, ThinPiece, Violation};
+use super::{Involves, Marker, Markers, ThinPiece, Violation};
 use crate::db::indices::LayerId;
 use crate::db::library::LayerRef;
 use crate::geom::dbu::Dbu;
@@ -114,7 +114,10 @@ impl PieceCheck<'_> {
                 .fixed_within(piece.owner, &slice)
                 .covers_rect(&slice)
             {
-                found.add(self.marker(Violation::MinWidth, 0, piece, slice), false);
+                found.add(
+                    self.marker(Violation::MinWidth, 0, piece, slice),
+                    Involves::Routing,
+                );
             }
         }
     }
@@ -126,7 +129,10 @@ impl PieceCheck<'_> {
             return;
         };
         if whole(self.window, piece) && piece.area < min_area && !piece.has_fixed_edge {
-            found.add(self.marker(Violation::MinArea, 0, piece, piece.bbox), false);
+            found.add(
+                self.marker(Violation::MinArea, 0, piece, piece.bbox),
+                Involves::Routing,
+            );
         }
     }
 
@@ -144,7 +150,10 @@ impl PieceCheck<'_> {
             for (k, &min) in self.rules.min_enclosed_areas.iter().enumerate() {
                 if area < min {
                     let rule = u16::try_from(k).unwrap_or(u16::MAX);
-                    found.add(self.marker(Violation::MinHole, rule, piece, bbox), false);
+                    found.add(
+                        self.marker(Violation::MinHole, rule, piece, bbox),
+                        Involves::Routing,
+                    );
                 }
             }
         }
@@ -169,7 +178,7 @@ impl PieceCheck<'_> {
                 rect.owner,
                 rect.owner,
             );
-            found.add(marker, false);
+            found.add(marker, Involves::Routing);
         }
     }
 
