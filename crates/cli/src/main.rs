@@ -14,7 +14,7 @@ mod view;
 use crate::checks::{report_placement, report_routing};
 use crate::placement::{PlacementStart, run_placement};
 use crate::routing::{
-    RouteStage, StateFiles, global_route_with_repair, parse_save_point, run_routing,
+    StateFiles, global_route_with_repair, parse_save_point, route_detailed, route_global,
 };
 use crate::view::view_area;
 use anyhow::Context;
@@ -262,29 +262,20 @@ fn route(args: RouteArgs, report: &mut Report) -> anyhow::Result<()> {
     }
     let mut db = load_design(&config, args.placement.as_deref())?;
     report.design.clone_from(&db.name);
-    let stage = route_stage(args, db.dbu());
-    run_routing(
-        &config,
-        &mut db,
-        &prepare_output_dir(&config)?,
-        stage,
-        None,
-        report,
-    )
+    if args.global_only {
+        return route_global(&config, &db, args.guides.as_deref(), report);
+    }
+    let files = state_files(args, db.dbu());
+    route_detailed(&config, &mut db, &files, None, report)
 }
 
-/// The routing `args` ask for, with the trace box in database `units`.
-fn route_stage(args: RouteArgs, units: DbuPerMicron) -> RouteStage {
-    if args.global_only {
-        return RouteStage::Global {
-            guides: args.guides,
-        };
-    }
+/// The state files `args` name, with the trace box in database `units`.
+fn state_files(args: RouteArgs, units: DbuPerMicron) -> StateFiles {
     let area = args.trace_box.map(|b| {
         let at = |x: f64, y: f64| Point::new(units.to_dbu_rounded(x), units.to_dbu_rounded(y));
         pare_common::geom::rect::Rect::new(at(b[0], b[1]), at(b[2], b[3]))
     });
-    RouteStage::Detailed(StateFiles {
+    StateFiles {
         save: args.save_state.map(|path| {
             (
                 path,
@@ -296,7 +287,7 @@ fn route_stage(args: RouteArgs, units: DbuPerMicron) -> RouteStage {
             nets: args.trace_nets,
             area,
         },
-    })
+    }
 }
 
 /// The `run` command: places and routes the design `name` as its purpose
@@ -324,8 +315,7 @@ fn place_and_route(name: &Path, report: &mut Report) -> anyhow::Result<()> {
         Some(mut repair) => global_route_with_repair(&config, &mut db, &mut repair, report)?,
         None => None,
     };
-    let stage = RouteStage::Detailed(StateFiles::default());
-    run_routing(&config, &mut db, &output_dir, stage, global, report)
+    route_detailed(&config, &mut db, &StateFiles::default(), global, report)
 }
 
 /// The `check` command.
@@ -373,7 +363,9 @@ fn load_design(config: &Config, placement: Option<&Path>) -> anyhow::Result<Netl
     }
 }
 
-fn prepare_output_dir(config: &Config) -> anyhow::Result<PathBuf> {
+/// Creates the directory for images and results, as [`output_dir`] names
+/// it, and returns it.
+pub(crate) fn prepare_output_dir(config: &Config) -> anyhow::Result<PathBuf> {
     let dir = output_dir(config);
     std::fs::create_dir_all(&dir).with_context(|| format!("cannot create {}", dir.display()))?;
     Ok(dir)

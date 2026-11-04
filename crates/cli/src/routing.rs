@@ -2,6 +2,7 @@
 
 use crate::checks::report_routing;
 use crate::placement::legalize;
+use crate::prepare_output_dir;
 use crate::repair::{NetlistRepair, show_design_repair, timing_repair_on};
 use crate::report::{GlobalRouteRepairSummary, Report, RoutingSummary};
 use anyhow::Context;
@@ -24,16 +25,6 @@ use std::time::Instant;
 
 /// Pixels across each side of the routed design's image.
 const ROUTED_IMAGE_PIXELS: u32 = 2000;
-
-/// How far routing goes.
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub(crate) enum RouteStage {
-    /// Global routing and track assignment only, writing the global routes
-    /// as guides to the file given.
-    Global { guides: Option<PathBuf> },
-    /// Through detailed routing, verification and output.
-    Detailed(StateFiles),
-}
 
 /// Where a run saves its state and when, and the state it resumes from.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
@@ -258,52 +249,93 @@ fn write_guides(
     std::fs::write(path, out).with_context(|| format!("writing {}", path.display()))
 }
 
-/// Routes every signal net, checks the result and writes it out.
-pub(crate) fn run_routing(
+/// Routes every signal net globally and assigns tracks, without detailed
+/// routing, writing the global routes as guides to `guides` when given.
+pub(crate) fn route_global(
+    config: &Config,
+    db: &NetlistDB,
+    guides: Option<&Path>,
+    report: &mut Report,
+) -> anyhow::Result<()> {
+    let phase_start = Instant::now();
+    ui::section("Routing");
+    let global = pare_router::route_global_only(db, &config.routing)?;
+    ui::stat_row("Nets:", &global.summary.nets.to_string(), "", "");
+    if let Some(path) = guides {
+        write_guides(path, db, &global.guides)?;
+        ui::wrote(path);
+    }
+    report.phase("global routing", phase_start);
+    Ok(())
+}
+
+/// Routes every signal net in detail, from the global routes of `global`
+/// when given, saving and resuming state as `files` say, then checks the
+/// result and writes it to the output directory.
+pub(crate) fn route_detailed(
     config: &Config,
     db: &mut NetlistDB,
-    output_dir: &Path,
-    stage: RouteStage,
+    files: &StateFiles,
     global: Option<GlobalSession>,
     report: &mut Report,
 ) -> anyhow::Result<()> {
     let phase_start = Instant::now();
     ui::section("Routing");
-    let files = match stage {
-        RouteStage::Global { guides } => {
-            let global = pare_router::route_global_only(db, &config.routing)?;
-            ui::stat_row("Nets:", &global.summary.nets.to_string(), "", "");
-            if let Some(path) = guides {
-                write_guides(&path, db, &global.guides)?;
-                ui::wrote(&path);
-            }
-            report.phase("global routing", phase_start);
-            return Ok(());
-        }
-        RouteStage::Detailed(files) => files,
-    };
+    let summary = run_router(config, db, files, global)?;
+    show_routing(&summary);
+    report.phase("routing", phase_start);
+    report.routing = Some(RoutingSummary {
+        nets: summary.nets,
+        rounds: summary.rounds,
+        inaccessible: summary.inaccessible.len(),
+        incomplete: summary.incomplete.len(),
+        conflicted: summary.conflicted.len(),
+    });
+
+    let phase_start = Instant::now();
+    ui::phase("Verification");
+    let routing_ok = report_routing(db, report);
+    report.phase("verification", phase_start);
+
+    let phase_start = Instant::now();
+    ui::phase("Output");
+    write_routed(db, &prepare_output_dir(config)?)?;
+    report.phase("routing output", phase_start);
+
+    if !routing_ok {
+        anyhow::bail!("routing has opens or design rule violations");
+    }
+    Ok(())
+}
+
+/// Runs the detailed router over `db`, saving and resuming its state as
+/// `files` say.
+fn run_router(
+    config: &Config,
+    db: &mut NetlistDB,
+    files: &StateFiles,
+    global: Option<GlobalSession>,
+) -> anyhow::Result<pare_router::RoutingSummary> {
     let resume = files.resume.as_deref().map(read_state).transpose()?;
-    let summary = {
-        let mut write = |state: &pare_router::RouteState| {
-            let Some((path, _)) = &files.save else {
-                return Ok(());
-            };
-            write_state(path, state).map_err(|e| pare_router::SaveError(format!("{e:#}")))?;
-            ui::wrote(path);
-            Ok(())
+    let mut write = |state: &pare_router::RouteState| {
+        let Some((path, _)) = &files.save else {
+            return Ok(());
         };
-        let session = pare_router::Session {
-            resume: resume.as_ref(),
-            save: files.save.as_ref().map(|&(_, after)| pare_router::Save {
-                after,
-                write: &mut write,
-            }),
-            trace: files.trace.clone(),
-        };
-        match global {
-            Some(global) => pare_router::route_on(db, &config.routing, global, session)?,
-            None => pare_router::route_with(db, &config.routing, session)?,
-        }
+        write_state(path, state).map_err(|e| pare_router::SaveError(format!("{e:#}")))?;
+        ui::wrote(path);
+        Ok(())
+    };
+    let session = pare_router::Session {
+        resume: resume.as_ref(),
+        save: files.save.as_ref().map(|&(_, after)| pare_router::Save {
+            after,
+            write: &mut write,
+        }),
+        trace: files.trace.clone(),
+    };
+    let summary = match global {
+        Some(global) => pare_router::route_on(db, &config.routing, global, session)?,
+        None => pare_router::route_with(db, &config.routing, session)?,
     };
     if let Some((path, after)) = &files.save
         && !summary.state_saved
@@ -313,6 +345,11 @@ pub(crate) fn run_routing(
             path.display()
         );
     }
+    Ok(summary)
+}
+
+/// Shows what detailed routing left: nets, rounds and unfinished nets.
+fn show_routing(summary: &pare_router::RoutingSummary) {
     ui::stat_row(
         "Nets:",
         &summary.nets.to_string(),
@@ -331,22 +368,10 @@ pub(crate) fn run_routing(
         "",
         "",
     );
-    report.phase("routing", phase_start);
-    report.routing = Some(RoutingSummary {
-        nets: summary.nets,
-        rounds: summary.rounds,
-        inaccessible: summary.inaccessible.len(),
-        incomplete: summary.incomplete.len(),
-        conflicted: summary.conflicted.len(),
-    });
+}
 
-    let phase_start = Instant::now();
-    ui::phase("Verification");
-    let routing_ok = report_routing(db, report);
-    report.phase("verification", phase_start);
-
-    let phase_start = Instant::now();
-    ui::phase("Output");
+/// Writes the routed design's image and DEF into `output_dir`.
+fn write_routed(db: &NetlistDB, output_dir: &Path) -> anyhow::Result<()> {
     let png = output_dir.join("routed.png");
     visualization::draw_routed_design(db, &png, ROUTED_IMAGE_PIXELS, ROUTED_IMAGE_PIXELS)
         .with_context(|| format!("cannot write {}", png.display()))?;
@@ -354,10 +379,5 @@ pub(crate) fn run_routing(
     let out = output_dir.join("routed.def");
     writer::def::write_file(db, &out).with_context(|| format!("cannot write {}", out.display()))?;
     ui::wrote(&out);
-    report.phase("routing output", phase_start);
-
-    if !routing_ok {
-        anyhow::bail!("routing has opens or design rule violations");
-    }
     Ok(())
 }
