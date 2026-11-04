@@ -418,7 +418,7 @@ impl Interpreter {
             let line = cell.line;
             let _ = lib
                 .add_cell(parsed)
-                .map_err(|name| self.error(line, format!("cell '{name}' is defined twice")))?;
+                .map_err(|e| self.error(line, format!("cell '{}' is defined twice", e.name)))?;
         }
         Ok(lib)
     }
@@ -1346,6 +1346,7 @@ fn arc_role(timing_type: &str) -> ArcKind {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::db::library::DuplicateName;
     use crate::units::{Farads, Seconds, Watts};
 
     const LIB: &str = r#"
@@ -1629,6 +1630,57 @@ library (tiny) {
         assert_eq!(
             clock_tree_delay(&lib, ns(0.0), Edge::Rise, MinMax::Max),
             ns(0.3)
+        );
+    }
+
+    #[test]
+    fn a_library_defining_a_cell_twice_is_refused() {
+        let src = "library (x) { cell (c) { } cell (c) { } }";
+
+        let err = parse_str(src, Path::new("x.lib")).unwrap_err();
+
+        assert!(
+            err.to_string().contains("cell 'c' is defined twice"),
+            "{err}"
+        );
+    }
+
+    #[test]
+    fn an_absorbed_library_brings_its_cells_with_their_own_defaults() {
+        let mut first = parse_str(
+            "library (a) { default_max_fanout : 10; cell (x) { } }",
+            Path::new("a.lib"),
+        )
+        .unwrap();
+        let second = parse_str(
+            "library (b) { default_max_fanout : 20; cell (y) { } }",
+            Path::new("b.lib"),
+        )
+        .unwrap();
+
+        first.absorb(second).unwrap();
+
+        let fanout = |name: &str| {
+            let cell = first.cell(first.cell_id(name).unwrap());
+            first.cell_defaults(cell).max_fanout
+        };
+        assert_eq!(fanout("x"), Some(10.0));
+        assert_eq!(fanout("y"), Some(20.0));
+    }
+
+    #[test]
+    fn absorbing_a_library_with_a_cell_already_there_names_the_cell() {
+        let mut first = parse_str("library (a) { cell (x) { } }", Path::new("a.lib")).unwrap();
+        let second = parse_str("library (b) { cell (x) { } }", Path::new("b.lib")).unwrap();
+
+        let clash = first.absorb(second);
+
+        assert_eq!(
+            clash,
+            Err(DuplicateName {
+                kind: "cell",
+                name: "x".to_string(),
+            })
         );
     }
 
