@@ -7,9 +7,9 @@
 //! wrong.
 
 use crate::db::liberty::{
-    ArcRole, Axis, AxisVariable, ClockGatePin, Defaults, Edge, EdgeValues, FuncExpr, LibCell,
-    LibPort, Liberty, LibraryUnits, PortDirection, Sequential, SequentialKind, Statetable, Table,
-    TimingArc, TimingArcSet, TimingSense,
+    ArcRole, Axis, AxisVariable, ClockGatePin, ClockTreePath, Defaults, Edge, EdgeValues, FuncExpr,
+    LibCell, LibPort, Liberty, LibraryUnits, MinMax, PortDirection, Sequential, SequentialKind,
+    Statetable, Table, TimingArc, TimingArcSet, TimingSense,
 };
 use crate::db::parser::lexer::{ParseError, read_file};
 use crate::units::{Farads, Seconds, Watts};
@@ -826,6 +826,7 @@ impl Interpreter {
             three_state: None,
             is_clock: false,
             clock_gate: ClockGatePin::None,
+            clock_tree_paths: Vec::new(),
         };
         self.read_port_attributes(group, &mut port)?;
         Ok(port)
@@ -895,7 +896,13 @@ impl Interpreter {
     }
 
     fn timing(&self, cell: &mut LibCell, to: usize, group: &Group<'_>) -> Result<(), ParseError> {
-        let kind = arc_role(group.attr_text("timing_type").unwrap_or("combinational"));
+        let timing_type = group.attr_text("timing_type").unwrap_or("combinational");
+        if let Some(bound) = clock_tree_path_bound(timing_type) {
+            let path = self.clock_tree_path(group, bound)?;
+            cell.ports[to].clock_tree_paths.push(path);
+            return Ok(());
+        }
+        let kind = arc_role(timing_type);
         let stated_sense = stated_sense(group);
         let when = self.function_attr(group, "when")?;
         let tables = self.arc_tables(group, kind.role)?;
@@ -925,6 +932,31 @@ impl Interpreter {
             });
         }
         Ok(())
+    }
+
+    /// The clock tree path a `min_clock_tree_path` or `max_clock_tree_path`
+    /// timing group gives on its `bound` side: its sense, unknown taken as
+    /// non-unate as `OpenSTA` builds its arcs, and its delay tables.
+    fn clock_tree_path(
+        &self,
+        group: &Group<'_>,
+        bound: MinMax,
+    ) -> Result<ClockTreePath, ParseError> {
+        let delay = |name: &str| {
+            group
+                .groups_named(name)
+                .next()
+                .map(|g| self.table(g))
+                .transpose()
+        };
+        Ok(ClockTreePath {
+            bound,
+            sense: stated_sense(group).unwrap_or(TimingSense::NonUnate),
+            delays: EdgeValues {
+                rise: delay("cell_rise")?,
+                fall: delay("cell_fall")?,
+            },
+        })
     }
 
     /// The delay and slew tables, or the constraint tables of a check, a
@@ -1258,6 +1290,15 @@ fn delay_edge_pairs(kind: ArcKind, sense: TimingSense) -> Vec<(Edge, Edge)> {
     }
 }
 
+/// The side a clock tree path `timing_type` bounds, or none for any other.
+fn clock_tree_path_bound(timing_type: &str) -> Option<MinMax> {
+    match timing_type {
+        "min_clock_tree_path" => Some(MinMax::Min),
+        "max_clock_tree_path" => Some(MinMax::Max),
+        _ => None,
+    }
+}
+
 /// The role a `timing_type` names, with the input edge it fixes for a clock
 /// and the output edge it restricts to, where it does.
 fn arc_role(timing_type: &str) -> ArcKind {
@@ -1497,6 +1538,88 @@ library (tiny) {
             .unwrap();
         assert!(q.arcs.iter().all(|a| a.from_edge == Edge::Rise));
         assert_eq!(q.arcs.len(), 2);
+    }
+
+    /// A macro whose clock pin `CK` has the clock tree path timing groups
+    /// `paths`, in a library timed in nanoseconds.
+    fn macro_with_clock_tree(paths: &str) -> Liberty {
+        let src = format!(
+            "library (x) {{ time_unit : \"1ns\"; \
+             lu_table_template (by_slew) {{ variable_1 : input_net_transition; \
+             index_1 (\"0.0, 1.0\"); }} \
+             cell (ram) {{ pin (CK) {{ direction : input; clock : true; {paths} }} }} }}"
+        );
+        parse_str(&src, Path::new("x.lib")).unwrap()
+    }
+
+    fn ns(value: f64) -> Seconds {
+        Seconds::new(value * 1e-9)
+    }
+
+    fn clock_tree_delay(lib: &Liberty, slew: Seconds, edge: Edge, bound: MinMax) -> Seconds {
+        lib.cells[0].ports[0].clock_tree_delay(slew, edge, bound)
+    }
+
+    #[test]
+    fn a_clock_tree_path_gives_each_edge_its_own_delay_on_its_side() {
+        let lib = macro_with_clock_tree(
+            "timing () { timing_type : max_clock_tree_path; timing_sense : positive_unate; \
+             cell_rise (scalar) { values (\"0.3\"); } cell_fall (scalar) { values (\"0.4\"); } }",
+        );
+
+        assert_eq!(
+            clock_tree_delay(&lib, ns(0.0), Edge::Rise, MinMax::Max),
+            ns(0.3)
+        );
+        assert_eq!(
+            clock_tree_delay(&lib, ns(0.0), Edge::Fall, MinMax::Max),
+            ns(0.4)
+        );
+        assert_eq!(
+            clock_tree_delay(&lib, ns(0.0), Edge::Rise, MinMax::Min),
+            Seconds::ZERO
+        );
+    }
+
+    #[test]
+    fn a_clock_tree_path_is_looked_up_at_the_pins_slew() {
+        let lib = macro_with_clock_tree(
+            "timing () { timing_type : min_clock_tree_path; timing_sense : positive_unate; \
+             cell_rise (by_slew) { values (\"0.2, 0.6\"); } }",
+        );
+
+        let halfway = clock_tree_delay(&lib, ns(0.5), Edge::Rise, MinMax::Min);
+        assert!((halfway - ns(0.4)).get().abs() < 1e-21, "{halfway:?}");
+        assert_eq!(
+            clock_tree_delay(&lib, ns(0.5), Edge::Fall, MinMax::Min),
+            Seconds::ZERO
+        );
+    }
+
+    #[test]
+    fn a_negative_unate_clock_tree_path_gives_no_same_edge_delay() {
+        let lib = macro_with_clock_tree(
+            "timing () { timing_type : max_clock_tree_path; timing_sense : negative_unate; \
+             cell_rise (scalar) { values (\"0.3\"); } }",
+        );
+
+        assert_eq!(
+            clock_tree_delay(&lib, ns(0.0), Edge::Rise, MinMax::Max),
+            Seconds::ZERO
+        );
+    }
+
+    #[test]
+    fn a_clock_tree_path_without_a_stated_sense_still_gives_its_delay() {
+        let lib = macro_with_clock_tree(
+            "timing () { timing_type : max_clock_tree_path; \
+             cell_rise (scalar) { values (\"0.3\"); } }",
+        );
+
+        assert_eq!(
+            clock_tree_delay(&lib, ns(0.0), Edge::Rise, MinMax::Max),
+            ns(0.3)
+        );
     }
 
     #[test]
