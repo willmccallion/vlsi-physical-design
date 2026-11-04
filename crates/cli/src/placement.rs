@@ -7,12 +7,13 @@ use crate::path_str;
 use crate::repair::{NetlistRepair, TimedRepair, repair_design, repair_netlist, repair_timing};
 use crate::report::{PlacementSummary, Report};
 use anyhow::Context;
-use pare_common::db::design::{NetlistDB, PlacementStatus};
+use pare_common::db::design::{NetlistDB, PlacementStatus, Renumbering};
 use pare_common::db::indices::{CellId, NetId};
 use pare_common::db::liberty::MinMax;
 use pare_common::db::writer;
 use pare_common::geom::dbu::Dbu;
 use pare_common::geom::point::Point;
+use pare_common::units::Seconds;
 use pare_common::util::config::{
     Config, CongestionEstimate, DesignInput, GlobalPlacementConfig, Share, TargetDensity,
 };
@@ -29,11 +30,11 @@ use pare_placer::legalize::opendp::improve::improve_placement;
 use pare_placer::legalize::opendp::mirror::optimize_mirroring;
 use pare_placer::model::PlacementModel;
 use pare_placer::zones::{Zone, Zones};
-use pare_resizer::{Rebuffer, Repairer, Resizer, timing_net_weights};
+use pare_resizer::{Rebuffer, Repairer, Resizer, area_change_percent, timing_net_weights};
 use pare_router::{CapacityReduction, GlobalRouteEstimator};
 use std::num::NonZeroUsize;
 use std::path::Path;
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
 /// How far `improve_placement` may move a cell, in row heights across and
 /// rows up or down: OpenROAD-flow-scripts' `DPO_MAX_DISPLACEMENT`.
@@ -560,6 +561,25 @@ impl TimingDriver for TimingPlacement<'_> {
         let round_start = Instant::now();
         self.rounds += 1;
         model.write_back(self.db);
+        let (round, renumbering) = self.repair_round()?;
+        show_timing_round(self.rounds, &round, round_start.elapsed());
+        if round.weights.is_empty() {
+            log::warn!("timing-driven placement found no net slacks; it stops here");
+            return Ok(None);
+        }
+        Ok(Some(reweighted_model(
+            self.db,
+            &renumbering,
+            round.weights,
+        )?))
+    }
+}
+
+impl TimingPlacement<'_> {
+    /// Repairs the design and rebuffers every net for timing, as one round
+    /// of `OpenROAD`'s timing-driven placement does, and weights the nets by
+    /// their slack; returns the round and how the design was renumbered.
+    fn repair_round(&mut self) -> anyhow::Result<(TimingRound, Renumbering)> {
         let stage = self.repair.stage(self.config, self.db)?;
         let cells_before = self.db.cells.len();
         let inputs = stage.session(self.db, self.repair.wires, self.repair.namer);
@@ -578,70 +598,102 @@ impl TimingDriver for TimingPlacement<'_> {
             slacks.first().map_or(f64::INFINITY, |s| s.1.time().nanos()),
             weights.iter().map(|w| w.1).fold(1.0, f64::max)
         );
-        let area_after = resizer.design_area();
         let wns_after = resizer.sta().worst_slack(MinMax::Max).0.time();
+        let area_after = resizer.design_area();
         let renumbering = resizer.finish()?;
-        let area_change = if area_before > 0.0 {
-            (area_after - area_before) / area_before * 100.0
-        } else {
-            0.0
+        let round = TimingRound {
+            wns_before,
+            wns_after,
+            area_change_percent: area_change_percent(area_before, area_after),
+            resized: done.resized,
+            repeaters: done.inserted,
+            rebuffer_removed: rebuffer.removed,
+            rebuffer_inserted: rebuffer.inserted,
+            nets: slacks.len(),
+            weights,
+            cells_before,
+            cells_after: self.db.cells.len(),
         };
-        ui::stat_row(
-            &format!("Timing round {}:", self.rounds),
-            &format!(
-                "WNS {:.3} -> {:.3} ns",
-                wns_before.nanos(),
-                wns_after.nanos()
-            ),
-            "Area:",
-            &format!("{area_change:+.2}%"),
-        );
-        ui::stat_row(
-            "Repair:",
-            &format!("{} resized, {} repeaters", done.resized, done.inserted),
-            "Rebuffer:",
-            &format!(
-                "{} removed, {} inserted",
-                rebuffer.removed, rebuffer.inserted
-            ),
-        );
-        ui::stat_row(
-            "Weighted nets:",
-            &format!("{} of {}", weights.len(), slacks.len()),
-            "Cells:",
-            &format!("{cells_before} -> {}", self.db.cells.len()),
-        );
-        ui::stat_row(
-            "Round time:",
-            &format!("{:.1}s", round_start.elapsed().as_secs_f64()),
-            "",
-            "",
-        );
-        if weights.is_empty() {
-            log::warn!("timing-driven placement found no net slacks; it stops here");
-            return Ok(None);
-        }
-        let zones = Zones::new(self.db)?;
-        let mut new_model = PlacementModel::from_db(self.db, &zones);
-        let weight_of: std::collections::HashMap<NetId, f64> = weights
-            .into_iter()
-            .filter_map(|(net, weight)| renumbering.nets[net.index()].map(|new| (new, weight)))
-            .collect();
-        for net in &mut new_model.nets {
-            if let Some(weight) = weight_of.get(&net.net) {
-                net.weight *= weight;
-            }
-        }
-        let cell_map = renumbering
-            .cells
-            .iter()
-            .map(|c| c.map(CellId::index))
-            .collect();
-        Ok(Some(Reweighted {
-            model: new_model,
-            cell_map,
-        }))
+        Ok((round, renumbering))
     }
+}
+
+/// What one round of timing-driven repair did.
+struct TimingRound {
+    wns_before: Seconds,
+    wns_after: Seconds,
+    area_change_percent: f64,
+    resized: usize,
+    repeaters: usize,
+    rebuffer_removed: usize,
+    rebuffer_inserted: usize,
+    /// The nets with a slack.
+    nets: usize,
+    /// The nets weighted for timing, with their weights.
+    weights: Vec<(NetId, f64)>,
+    cells_before: usize,
+    cells_after: usize,
+}
+
+/// Shows what timing round `number` did in `elapsed`.
+fn show_timing_round(number: usize, round: &TimingRound, elapsed: Duration) {
+    ui::stat_row(
+        &format!("Timing round {number}:"),
+        &format!(
+            "WNS {:.3} -> {:.3} ns",
+            round.wns_before.nanos(),
+            round.wns_after.nanos()
+        ),
+        "Area:",
+        &format!("{:+.2}%", round.area_change_percent),
+    );
+    ui::stat_row(
+        "Repair:",
+        &format!("{} resized, {} repeaters", round.resized, round.repeaters),
+        "Rebuffer:",
+        &format!(
+            "{} removed, {} inserted",
+            round.rebuffer_removed, round.rebuffer_inserted
+        ),
+    );
+    ui::stat_row(
+        "Weighted nets:",
+        &format!("{} of {}", round.weights.len(), round.nets),
+        "Cells:",
+        &format!("{} -> {}", round.cells_before, round.cells_after),
+    );
+    ui::stat_row(
+        "Round time:",
+        &format!("{:.1}s", elapsed.as_secs_f64()),
+        "",
+        "",
+    );
+}
+
+/// The placement model of `db` after a round's repair, its nets weighted by
+/// `weights` under their old numbers, and where each old cell went.
+fn reweighted_model(
+    db: &NetlistDB,
+    renumbering: &Renumbering,
+    weights: Vec<(NetId, f64)>,
+) -> anyhow::Result<Reweighted> {
+    let zones = Zones::new(db)?;
+    let mut model = PlacementModel::from_db(db, &zones);
+    let weight_of: std::collections::HashMap<NetId, f64> = weights
+        .into_iter()
+        .filter_map(|(net, weight)| renumbering.nets[net.index()].map(|new| (new, weight)))
+        .collect();
+    for net in &mut model.nets {
+        if let Some(weight) = weight_of.get(&net.net) {
+            net.weight *= weight;
+        }
+    }
+    let cell_map = renumbering
+        .cells
+        .iter()
+        .map(|c| c.map(CellId::index))
+        .collect();
+    Ok(Reweighted { model, cell_map })
 }
 
 /// The routability settings of `config`, and the global-router estimator

@@ -6,7 +6,7 @@
 
 use crate::fuzzy;
 use crate::moves::{MoveKind, Moves};
-use crate::resizer::{RepairError, Resizer};
+use crate::resizer::{RepairError, Resizer, area_change_percent};
 use crate::sta::{Path, Sta, Via};
 use pare_common::db::design::PinOwner;
 use pare_common::db::indices::PinId;
@@ -290,11 +290,7 @@ impl Repair<'_, '_> {
     fn progress(&self, iteration: Option<usize>) -> SetupProgress {
         let (wns, worst) = self.worst();
         let area = self.resizer.design_area();
-        let change = if self.initial_area > 0.0 {
-            (area - self.initial_area) / self.initial_area * 100.0
-        } else {
-            0.0
-        };
+        let change = area_change_percent(self.initial_area, area);
         let log = &self.moves.log;
         SetupProgress {
             iteration,
