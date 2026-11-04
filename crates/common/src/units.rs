@@ -4,6 +4,19 @@
 use std::iter::Sum;
 use std::ops::{Add, AddAssign, Div, Mul, Neg, Sub, SubAssign};
 
+/// A quantity in base units, or a plain number, for comparisons that work
+/// on any one of them.
+pub trait Quantity: Copy {
+    /// The value in base units.
+    fn base(self) -> f64;
+}
+
+impl Quantity for f64 {
+    fn base(self) -> f64 {
+        self
+    }
+}
+
 macro_rules! define_quantity {
     ($(#[$doc:meta])* $name:ident) => {
         $(#[$doc])*
@@ -13,6 +26,9 @@ macro_rules! define_quantity {
         impl $name {
             /// None of it.
             pub const ZERO: Self = Self(0.0);
+
+            /// More than any amount, which marks the absence of a limit.
+            pub const INFINITY: Self = Self(f64::INFINITY);
 
             /// The quantity of `si` base units.
             #[must_use]
@@ -38,16 +54,34 @@ macro_rules! define_quantity {
                 Self(self.0.min(other.0))
             }
 
+            /// Whether it is neither infinite nor NaN.
+            #[must_use]
+            pub const fn is_finite(self) -> bool {
+                self.0.is_finite()
+            }
+
             /// Its magnitude.
             #[must_use]
             pub const fn abs(self) -> Self {
                 Self(self.0.abs())
             }
 
+            /// `self * factor + addend` with one rounding, as `f64::mul_add`.
+            #[must_use]
+            pub const fn mul_add(self, factor: f64, addend: Self) -> Self {
+                Self(self.0.mul_add(factor, addend.0))
+            }
+
             /// The order of `f64::total_cmp`.
             #[must_use]
             pub fn total_cmp(&self, other: &Self) -> std::cmp::Ordering {
                 self.0.total_cmp(&other.0)
+            }
+        }
+
+        impl Quantity for $name {
+            fn base(self) -> f64 {
+                self.0
             }
         }
 
@@ -200,6 +234,14 @@ impl Seconds {
     }
 }
 
+impl Meters {
+    /// `length` database units, at `dbu_per_micron` of them to a micron.
+    #[must_use]
+    pub fn from_dbu(length: i64, dbu_per_micron: f64) -> Self {
+        Self(length as f64 / dbu_per_micron * 1e-6)
+    }
+}
+
 impl Farads {
     /// `ff` femtofarads.
     #[must_use]
@@ -236,6 +278,13 @@ mod tests {
         let resistance = Seconds::from_nanos(1.0) / Farads::from_femto(10.0);
 
         assert!((resistance.get() - 1e5).abs() < 1e-6);
+    }
+
+    #[test]
+    fn a_length_in_database_units_converts_to_meters() {
+        let length = Meters::from_dbu(4000, 2000.0);
+
+        assert!((length.get() - 2e-6).abs() < 1e-18);
     }
 
     #[test]
