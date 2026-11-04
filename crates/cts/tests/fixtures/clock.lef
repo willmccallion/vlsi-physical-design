@@ -148,6 +148,53 @@ MACRO BUF_X1
   END VSS
 END BUF_X1
 
+MACRO AND2_X1
+  CLASS CORE ;
+  ORIGIN 0 0 ;
+  SIZE 0.76 BY 1.4 ;
+  SITE core ;
+  PIN A
+    DIRECTION INPUT ;
+    USE SIGNAL ;
+    PORT
+      LAYER metal1 ;
+        RECT 0.10 0.4 0.20 0.6 ;
+    END
+  END A
+  PIN B
+    DIRECTION INPUT ;
+    USE SIGNAL ;
+    PORT
+      LAYER metal1 ;
+        RECT 0.50 0.4 0.60 0.6 ;
+    END
+  END B
+  PIN Z
+    DIRECTION OUTPUT ;
+    USE SIGNAL ;
+    PORT
+      LAYER metal1 ;
+        RECT 0.30 0.4 0.40 0.6 ;
+    END
+  END Z
+  PIN VDD
+    DIRECTION INOUT ;
+    USE POWER ;
+    PORT
+      LAYER metal1 ;
+        RECT 0 1.35 0.76 1.45 ;
+    END
+  END VDD
+  PIN VSS
+    DIRECTION INOUT ;
+    USE GROUND ;
+    PORT
+      LAYER metal1 ;
+        RECT 0 -0.05 0.76 0.05 ;
+    END
+  END VSS
+END AND2_X1
+
 MACRO INV_X1
   CLASS CORE ;
   ORIGIN 0 0 ;
