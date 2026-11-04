@@ -7,6 +7,7 @@ use crate::resizer::{Context, RepairOptions, Resizer};
 use crate::sta::Sta;
 use pare_common::db::design::NetlistDB;
 use pare_common::db::indices::{LayerId, PinId};
+use pare_common::db::liberty::Liberty;
 use pare_common::db::parser::{def, lef, liberty, sdc};
 use pare_common::geom::dbu::DbuPerMicron;
 use pare_common::units::{FaradsPerMeter, OhmsPerMeter};
@@ -25,6 +26,16 @@ pub(crate) fn design(text: &str) -> NetlistDB {
     def::parse_str(text, Path::new("test.def"), library).unwrap()
 }
 
+/// The text of the clock test cells' library.
+pub(crate) fn clock_cells_source() -> String {
+    std::fs::read_to_string(fixture("clock.lib")).unwrap()
+}
+
+/// The clock test cells' library, from `source`.
+pub(crate) fn cells(source: &str) -> Liberty {
+    liberty::parse_str(source, Path::new("clock.lib")).unwrap()
+}
+
 /// The pin `cell/pin` of `db`.
 pub(crate) fn pin(db: &NetlistDB, name: &str) -> PinId {
     let (cell, _) = name.split_once('/').unwrap();
@@ -36,16 +47,16 @@ pub(crate) fn pin(db: &NetlistDB, name: &str) -> PinId {
         .unwrap()
 }
 
-/// Runs `test` on a timed session over `db` under `constraints`, with
-/// wires of no resistance or capacitance.
+/// Runs `test` on a timed session over `db` with the cells of `lib`, under
+/// `constraints`, with wires of no resistance or capacitance.
 pub(crate) fn with_timed_session(
     db: &mut NetlistDB,
+    lib: &Liberty,
     constraints: &str,
     test: impl FnOnce(&mut Resizer<'_, Sta>),
 ) {
-    let lib = liberty::parse_file(&fixture("clock.lib")).unwrap();
-    let constraints = sdc::parse_str(constraints, Path::new("test.sdc"), db, &lib).unwrap();
-    let link = Link::new(db, &lib, &[]).unwrap();
+    let constraints = sdc::parse_str(constraints, Path::new("test.sdc"), db, lib).unwrap();
+    let link = Link::new(db, lib, &[]).unwrap();
     let buffers = link.find_buffers(db).unwrap();
     let (constants, clocks) = {
         let netlist = Netlist::new(db, &link);

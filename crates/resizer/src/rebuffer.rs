@@ -1862,7 +1862,7 @@ fn buffer_max_wire_length(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::testing::{design, pin, with_timed_session};
+    use crate::testing::{cells, clock_cells_source, design, pin, with_timed_session};
     use pare_common::db::design::NetlistDB;
 
     /// A flop launching into another, both clocked through a clock buffer
@@ -1894,7 +1894,7 @@ mod tests {
         let q = pin(&db, "f1/Q");
         let clock = "create_clock -name clk -period 0.5 [get_ports clk]\n";
 
-        with_timed_session(&mut db, clock, |resizer| {
+        with_timed_session(&mut db, &cells(&clock_cells_source()), clock, |resizer| {
             let tree = make_tree(resizer, q).unwrap();
             let mut sinks = Vec::new();
             collect_sinks(&tree, &mut sinks);
@@ -1918,19 +1918,24 @@ mod tests {
         let constraints = "create_clock -name clk -period 0.5 [get_ports clk]\n\
                            set_propagated_clock [all_clocks]\n";
 
-        with_timed_session(&mut db, constraints, |resizer| {
-            let mut rebuffer = Rebuffer::new(resizer).unwrap();
-            rebuffer.set_driver(resizer, q);
-            let tree = make_tree(resizer, q).unwrap();
-            let tree = rebuffer.annotate_load_slacks(resizer, &tree, q);
+        with_timed_session(
+            &mut db,
+            &cells(&clock_cells_source()),
+            constraints,
+            |resizer| {
+                let mut rebuffer = Rebuffer::new(resizer).unwrap();
+                rebuffer.set_driver(resizer, q);
+                let tree = make_tree(resizer, q).unwrap();
+                let tree = rebuffer.annotate_load_slacks(resizer, &tree, q);
 
-            let seen = rebuffer.slack_at_driver(resizer, &tree).to_seconds();
-            let timed = resizer.sta().slack(q, MinMax::Max).time();
+                let seen = rebuffer.slack_at_driver(resizer, &tree).to_seconds();
+                let timed = resizer.sta().slack(q, MinMax::Max).time();
 
-            assert!(
-                (seen - timed).abs() < Seconds::new(1e-14),
-                "{seen:?} vs {timed:?}"
-            );
-        });
+                assert!(
+                    (seen - timed).abs() < Seconds::new(1e-14),
+                    "{seen:?} vs {timed:?}"
+                );
+            },
+        );
     }
 }

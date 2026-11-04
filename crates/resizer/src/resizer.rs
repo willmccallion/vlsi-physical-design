@@ -1509,7 +1509,7 @@ pub(crate) fn buffer_delays(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::testing::{design, pin, with_timed_session};
+    use crate::testing::{cells, clock_cells_source, design, pin, with_timed_session};
     use std::fmt::Write;
 
     /// Buffers in the chain between the two flops of [`buffered_pair`].
@@ -1559,7 +1559,7 @@ mod tests {
         let q = db.pins[b1_in.index()].net;
         let clock = "create_clock -name clk -period 1.0 [get_ports clk]\n";
 
-        with_timed_session(&mut db, clock, |resizer| {
+        with_timed_session(&mut db, &cells(&clock_cells_source()), clock, |resizer| {
             let buffer = resizer.buffers.lowest_drive;
             let at = Point::new(Dbu(10_000), Dbu(2800));
             let mut first = b1_in;
