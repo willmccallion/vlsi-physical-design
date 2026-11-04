@@ -5,10 +5,10 @@
 //! units on exit. Supply nets are left out: they connect almost every cell
 //! and would only pull everything together.
 
-use crate::rows::{blocked_stretches, expand_rows, free_intervals};
+use crate::rows::{RowSpan, blocked_stretches, expand_rows, free_intervals};
 use crate::zones::{Zone, Zones};
 use pare_common::db::design::{NetlistDB, PinOwner, PlacementStatus};
-use pare_common::db::indices::{CellId, NetId};
+use pare_common::db::indices::{CellId, NetId, PinId};
 use pare_common::geom::dbu::{Dbu, DbuPerMicron};
 use pare_common::geom::point::Point;
 use pare_common::geom::rect::Rect;
@@ -104,6 +104,85 @@ pub struct PlacementModel {
     pub units: DbuPerMicron,
 }
 
+/// The rectangle from (`x0`, `y0`) to (`x1`, `y1`) in microns.
+fn microns_rect(units: DbuPerMicron, x0: Dbu, x1: Dbu, y0: Dbu, y1: Dbu) -> Rect<f64> {
+    Rect::new(
+        units.point_in_microns(Point::new(x0, y0)),
+        units.point_in_microns(Point::new(x1, y1)),
+    )
+}
+
+/// The signal nets of `db` with two pins or more among those that anchor
+/// them: every cell pin, and the I/O pins `io` takes.
+fn model_nets(db: &NetlistDB, io: IoAnchors) -> Vec<ModelNet> {
+    let units = db.dbu();
+    let um = |p: Point<Dbu>| units.point_in_microns(p);
+    let model_pin = |pin: PinId| {
+        let at = db.pin_position(pin);
+        let (anchor, average) = match db.pins[pin.index()].owner {
+            PinOwner::Cell { cell, .. } => (
+                PinAnchor::Cell {
+                    cell: cell.index(),
+                    offset: um(at - db.cells[cell.index()].location),
+                },
+                um(db.average_pin_position(pin) - at),
+            ),
+            PinOwner::Io(pin) => {
+                let fixed = !db.io_pins[pin.index()].status.is_movable();
+                if io == IoAnchors::FixedOnly && !fixed {
+                    return None;
+                }
+                (PinAnchor::Fixed(um(at)), Point::default())
+            }
+        };
+        Some(ModelPin { anchor, average })
+    };
+    db.nets
+        .iter()
+        .enumerate()
+        .filter(|(_, n)| !n.signal_use.is_supply())
+        .map(|(i, n)| ModelNet {
+            net: NetId::new(i),
+            weight: n.weight,
+            pins: n.pins.iter().filter_map(|&pin| model_pin(pin)).collect(),
+        })
+        .filter(|n| n.pins.len() >= 2)
+        .collect()
+}
+
+/// The stretches of row each zone's cells may use, in microns: the free
+/// parts of the rows `spans` inside the zone, or the whole zone without
+/// rows.
+fn zone_rows(db: &NetlistDB, zones: &Zones, spans: &[RowSpan]) -> Vec<ZoneRows> {
+    let units = db.dbu();
+    let blocked = blocked_stretches(db, spans);
+    zones
+        .all()
+        .map(|zone| {
+            let rects = if spans.is_empty() {
+                whole_zone(db, zones, zone)
+                    .iter()
+                    .map(|r| microns_rect(units, r.min.x, r.max.x, r.min.y, r.max.y))
+                    .collect()
+            } else {
+                spans
+                    .iter()
+                    .zip(&blocked)
+                    .flat_map(|(r, stretches)| {
+                        let (y0, y1) = (r.y, r.y + r.height);
+                        zones
+                            .intervals(zone, r.x_min, r.x_max, y0, y1)
+                            .into_iter()
+                            .flat_map(move |(a, b)| free_intervals(stretches, a, b, y0, y1))
+                            .map(move |(a, b)| microns_rect(units, a, b, y0, y1))
+                    })
+                    .collect()
+            };
+            ZoneRows { zone, rects }
+        })
+        .collect()
+}
+
 /// Each cell's size in the density, as `OpenROAD`'s `PlacerBaseCommon`
 /// extends instances by pin density: a movable cell of three signal pins or
 /// more is scaled toward the area that holds its pins at the average density
@@ -156,97 +235,39 @@ fn cell_kinds(db: &NetlistDB, row_height: Option<Dbu>) -> Vec<CellKind> {
         .collect()
 }
 
+/// Which I/O pins anchor the model's nets.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum IoAnchors {
+    /// Every I/O pin, where it is now.
+    All,
+    /// Only those placement may not move.
+    FixedOnly,
+}
+
 impl PlacementModel {
     /// Builds the model from the current state of `db`, its cells in
     /// `zones`.
     pub fn from_db(db: &NetlistDB, zones: &Zones) -> Self {
-        Self::build(db, zones, true)
+        Self::build(db, zones, IoAnchors::All)
     }
 
     /// Builds the model from `db` without the I/O pins placement may still
     /// move, so that cells are not pulled toward where those pins are now.
     pub fn from_db_without_movable_io(db: &NetlistDB, zones: &Zones) -> Self {
-        Self::build(db, zones, false)
+        Self::build(db, zones, IoAnchors::FixedOnly)
     }
 
-    fn build(db: &NetlistDB, zones: &Zones, movable_io: bool) -> Self {
+    fn build(db: &NetlistDB, zones: &Zones, io: IoAnchors) -> Self {
         let units = db.dbu();
-        let um = |p: Point<pare_common::geom::dbu::Dbu>| {
-            Point::new(units.to_microns(p.x), units.to_microns(p.y))
-        };
-        let nets = db
-            .nets
-            .iter()
-            .enumerate()
-            .filter(|(_, n)| !n.signal_use.is_supply())
-            .map(|(i, n)| ModelNet {
-                net: NetId::new(i),
-                weight: n.weight,
-                pins: n
-                    .pins
-                    .iter()
-                    .filter_map(|&pin| {
-                        let at = db.pin_position(pin);
-                        let (anchor, average) = match db.pins[pin.index()].owner {
-                            PinOwner::Cell { cell, .. } => (
-                                PinAnchor::Cell {
-                                    cell: cell.index(),
-                                    offset: um(at - db.cells[cell.index()].location),
-                                },
-                                um(db.average_pin_position(pin) - at),
-                            ),
-                            PinOwner::Io(io) => {
-                                let fixed = !db.io_pins[io.index()].status.is_movable();
-                                if !(movable_io || fixed) {
-                                    return None;
-                                }
-                                (PinAnchor::Fixed(um(at)), Point::default())
-                            }
-                        };
-                        Some(ModelPin { anchor, average })
-                    })
-                    .collect(),
-            })
-            .filter(|n| n.pins.len() >= 2)
-            .collect();
+        let um = |p: Point<Dbu>| units.point_in_microns(p);
         let spans = expand_rows(db);
-        let um_rect = |x0: Dbu, x1: Dbu, y0: Dbu, y1: Dbu| {
-            Rect::new(um(Point::new(x0, y0)), um(Point::new(x1, y1)))
-        };
-        let rows = spans
-            .iter()
-            .map(|r| um_rect(r.x_min, r.x_max, r.y, r.y + r.height))
-            .collect();
-        let blocked = blocked_stretches(db, &spans);
-        let zone_rows = zones
-            .all()
-            .map(|zone| {
-                let rects = if spans.is_empty() {
-                    whole_zone(db, zones, zone)
-                        .iter()
-                        .map(|r| um_rect(r.min.x, r.max.x, r.min.y, r.max.y))
-                        .collect()
-                } else {
-                    spans
-                        .iter()
-                        .zip(&blocked)
-                        .flat_map(|(r, stretches)| {
-                            let (y0, y1) = (r.y, r.y + r.height);
-                            zones
-                                .intervals(zone, r.x_min, r.x_max, y0, y1)
-                                .into_iter()
-                                .flat_map(move |(a, b)| free_intervals(stretches, a, b, y0, y1))
-                                .map(move |(a, b)| um_rect(a, b, y0, y1))
-                        })
-                        .collect()
-                };
-                ZoneRows { zone, rects }
-            })
-            .collect();
         Self {
             units,
             die: Rect::new(um(db.die_area.min), um(db.die_area.max)),
-            rows,
+            rows: spans
+                .iter()
+                .map(|r| microns_rect(units, r.x_min, r.x_max, r.y, r.y + r.height))
+                .collect(),
             sizes: (0..db.num_cells())
                 .map(|i| um(db.cell_size(CellId::new(i))))
                 .collect(),
@@ -254,8 +275,8 @@ impl PlacementModel {
             movable: db.cells.iter().map(|c| c.status.is_movable()).collect(),
             kinds: cell_kinds(db, spans.iter().map(|r| r.height).min()),
             positions: db.cells.iter().map(|c| um(c.location)).collect(),
-            nets,
-            zones: zone_rows,
+            nets: model_nets(db, io),
+            zones: zone_rows(db, zones, &spans),
             zone_of: (0..db.num_cells())
                 .map(|i| zones.index(zones.of(CellId::new(i))))
                 .collect(),
