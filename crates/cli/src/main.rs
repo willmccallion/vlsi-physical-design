@@ -23,7 +23,7 @@ use pare_common::db::design::NetlistDB;
 use pare_common::db::parser::{bookshelf, def, lef};
 use pare_common::geom::dbu::DbuPerMicron;
 use pare_common::geom::point::Point;
-use pare_common::util::config::{Config, Purpose};
+use pare_common::util::config::{Config, DesignInput, Purpose};
 use pare_common::util::{logger, ui};
 use report::Report;
 use std::path::{Path, PathBuf};
@@ -344,24 +344,33 @@ fn check(name: &Path, placement: Option<&Path>, report: &mut Report) -> anyhow::
 /// Reads the design named by the `[input]` section. `placement` replaces the
 /// input DEF, or for a Bookshelf design supplies a `.pl` to apply.
 fn load_design(config: &Config, placement: Option<&Path>) -> anyhow::Result<NetlistDB> {
-    if let Some(aux) = &config.input.bookshelf_aux_file {
-        ui::header("Input", aux);
-        let mut db = bookshelf::parse(Path::new(aux), config.input.num_layers)?;
-        if let Some(pl) = placement {
-            ui::header("Input", &pl.display().to_string());
-            bookshelf::read_placement(&mut db, pl)?;
+    match &config.input.design {
+        DesignInput::Bookshelf {
+            aux_file,
+            num_layers,
+        } => {
+            ui::header("Input", &aux_file.display().to_string());
+            let mut db = bookshelf::parse(aux_file, *num_layers)?;
+            if let Some(pl) = placement {
+                ui::header("Input", &pl.display().to_string());
+                bookshelf::read_placement(&mut db, pl)?;
+            }
+            Ok(db)
         }
-        return Ok(db);
+        DesignInput::LefDef {
+            lef_files,
+            def_file,
+        } => {
+            let def_path = placement.unwrap_or(def_file);
+            for lef in lef_files {
+                ui::header("Input", &lef.display().to_string());
+            }
+            ui::header("Input", &def_path.display().to_string());
+            let units = def::read_units(def_path)?;
+            let library = lef::parse_files(lef_files, units)?;
+            Ok(def::parse(def_path, library)?)
+        }
     }
-    let def_path = placement.unwrap_or_else(|| Path::new(&config.input.def_file));
-    let lefs: Vec<PathBuf> = config.input.lef_files.iter().map(PathBuf::from).collect();
-    for lef in &lefs {
-        ui::header("Input", &lef.display().to_string());
-    }
-    ui::header("Input", &def_path.display().to_string());
-    let units = def::read_units(def_path)?;
-    let library = lef::parse_files(&lefs, units)?;
-    Ok(def::parse(def_path, library)?)
 }
 
 fn prepare_output_dir(config: &Config) -> anyhow::Result<PathBuf> {
@@ -373,9 +382,11 @@ fn prepare_output_dir(config: &Config) -> anyhow::Result<PathBuf> {
 /// Directory for images and results: `output_dir`, else `output_def`'s parent.
 fn output_dir(config: &Config) -> PathBuf {
     if let Some(dir) = &config.input.output_dir {
-        return PathBuf::from(dir);
+        return dir.clone();
     }
-    Path::new(&config.input.output_def)
+    config
+        .input
+        .output_def
         .parent()
         .filter(|p| !p.as_os_str().is_empty())
         .map_or_else(|| PathBuf::from("output"), Path::to_path_buf)

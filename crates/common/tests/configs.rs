@@ -2,7 +2,7 @@
 
 #![allow(clippy::unwrap_used)]
 
-use pare_common::util::config::Config;
+use pare_common::util::config::{Config, DesignInput, InputConfig, InputError};
 use std::path::{Path, PathBuf};
 
 /// Every `.toml` file under `dir`, in its subfolders too.
@@ -33,16 +33,85 @@ fn every_design_config_parses() {
     }
 }
 
-/// `body` after the one key every config needs.
+/// `body` between the purpose and the design every config needs.
 fn parse(body: &str) -> Result<Config, toml::de::Error> {
-    toml::from_str(&format!("purpose = \"place_and_route\"\n{body}"))
+    toml::from_str(&format!(
+        "purpose = \"place_and_route\"\n{body}\n[input]\nlef_files = [\"a.lef\"]\ndef_file = \"a.def\"\n"
+    ))
+}
+
+/// A config whose `[input]` table is `input`.
+fn parse_input(input: &str) -> Result<InputConfig, String> {
+    toml::from_str::<Config>(&format!("purpose = \"place_and_route\"\n[input]\n{input}"))
+        .map(|c| c.input)
+        .map_err(|e| e.message().to_string())
 }
 
 #[test]
-fn a_config_of_only_its_purpose_parses() {
+fn a_config_of_its_purpose_and_design_parses() {
     let parsed = parse("");
 
     assert!(parsed.is_ok(), "{:?}", parsed.err());
+}
+
+#[test]
+fn a_config_without_a_design_is_rejected() {
+    let parsed = toml::from_str::<Config>("purpose = \"place_and_route\"\n");
+
+    assert!(parsed.is_err());
+}
+
+#[test]
+fn a_def_design_is_read_with_its_library() {
+    let input = parse_input("lef_files = [\"t.lef\", \"c.lef\"]\ndef_file = \"d.def\"\n").unwrap();
+
+    assert_eq!(
+        input.design,
+        DesignInput::LefDef {
+            lef_files: vec![PathBuf::from("t.lef"), PathBuf::from("c.lef")],
+            def_file: PathBuf::from("d.def"),
+        }
+    );
+}
+
+#[test]
+fn a_bookshelf_design_takes_six_layers_unless_told() {
+    let plain = parse_input("bookshelf_aux_file = \"d.aux\"\n").unwrap();
+    let ten = parse_input("bookshelf_aux_file = \"d.aux\"\nnum_layers = 10\n").unwrap();
+
+    let layers = |input: &InputConfig| match input.design {
+        DesignInput::Bookshelf { num_layers, .. } => Some(num_layers),
+        DesignInput::LefDef { .. } => None,
+    };
+    assert_eq!((layers(&plain), layers(&ten)), (Some(6), Some(10)));
+}
+
+#[test]
+fn an_input_naming_no_single_design_is_rejected_with_why() {
+    let cases = [
+        (
+            "def_file = \"d.def\"\nlef_files = [\"t.lef\"]\nbookshelf_aux_file = \"d.aux\"\n",
+            InputError::TwoDesigns,
+        ),
+        ("sdc_file = \"d.sdc\"\n", InputError::NoDesign),
+        ("def_file = \"d.def\"\n", InputError::NoLefFiles),
+        (
+            "bookshelf_aux_file = \"d.aux\"\nlef_files = [\"t.lef\"]\n",
+            InputError::LefFilesWithBookshelf,
+        ),
+        (
+            "def_file = \"d.def\"\nlef_files = [\"t.lef\"]\nnum_layers = 4\n",
+            InputError::NumLayersWithDef,
+        ),
+    ];
+
+    for (input, error) in cases {
+        assert_eq!(
+            parse_input(input).unwrap_err(),
+            error.to_string(),
+            "{input}"
+        );
+    }
 }
 
 #[test]
