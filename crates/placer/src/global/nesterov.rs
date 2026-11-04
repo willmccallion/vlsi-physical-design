@@ -799,104 +799,76 @@ struct Run {
     last: Option<(Evaluation, Option<f64>, Vec<ZoneOutcome>)>,
 }
 
+/// What a run calls out to: the congestion probe for routability, the
+/// driver of timing-driven repairs, and the report of each iteration.
+pub(super) struct Hooks<'a, D, R> {
+    pub probe: Option<Probe<'a>>,
+    pub timing: Option<&'a mut D>,
+    pub report: R,
+}
+
 /// Minimizes wirelength plus density energy over the objects' centers,
 /// leaving the placement in `model`. With routability enabled, congested
 /// standard cells grow as in `OpenROAD` once spreading has nearly finished
-/// and settled, and placement resumes from a snapshot. With `timing`, the
-/// design is repaired at the overflows `params.timing` names and placement
-/// goes on with the repaired model, which replaces `model`.
-pub(super) fn minimize<D: TimingDriver>(
+/// and settled, and placement resumes from a snapshot. With a timing
+/// driver, the design is repaired at the overflows `params.timing` names
+/// and placement goes on with the repaired model, which replaces `model`.
+pub(super) fn minimize<D: TimingDriver, R: FnMut(&Progress)>(
     model: &mut PlacementModel,
     mut setup: Setup,
     params: &GlobalParams,
-    mut probe: Option<Probe<'_>>,
-    mut timing: Option<&mut D>,
+    mut hooks: Hooks<'_, D, R>,
     rng: &mut StdRng,
-    mut report: impl FnMut(&Progress),
 ) -> Result<GlobalResult, D::Error> {
-    let die = model.die;
-    let site = model.site_width;
     let Some(bin) = setup.fields.first().map(|f| f.grid.bin()) else {
-        let mut grad = vec![Point::new(0.0, 0.0); setup.objects.centers.len()];
-        let wirelength =
-            setup
-                .netlist
-                .gradient(&setup.objects.centers, 1.0, &mut Vec::new(), &mut grad);
-        return Ok(GlobalResult {
-            outcome: Outcome::Converged,
-            iterations: 0,
-            overflow: 0.0,
-            hpwl: wirelength.hpwl,
-            congestion: Vec::new(),
-            final_congestion: None,
-            zones: Vec::new(),
-            timing_rounds: 0,
-        });
+        return Ok(unspread_result(&setup));
     };
     let mut run = Run::new(&setup, params, model.units.to_microns(REFERENCE_HPWL));
     loop {
-        let flow = {
-            let Setup {
-                objects,
-                fields,
-                netlist,
-                movable,
-                ..
-            } = &mut setup;
-            let mut objective = Objective::new(objects, &die, fields, netlist);
-            let mut context = StretchContext {
-                netlist,
-                movable,
-                probe: &mut probe,
-                params,
-                bin,
-                site,
-            };
-            run.resume(&mut objective, objects, &mut context, &mut report)
-        };
+        let flow = run.resume_setup(&mut setup, model, params, bin, &mut hooks);
         if flow == Flow::Done {
             break;
         }
         write_positions(model, &setup);
-        let repaired = match timing.as_mut() {
+        let repaired = match hooks.timing.as_mut() {
             Some(driver) => driver.repair(model)?,
             None => None,
         };
-        match repaired {
-            None => run.timing_on = false,
-            Some(reweighted) => {
-                let (rebuilt, remap) =
-                    setup.rebuild(&reweighted.model, &reweighted.cell_map, params, rng);
-                run.remap(&remap, &rebuilt);
-                if let Some(p) = probe.as_mut() {
-                    p.refresh(&reweighted.model);
-                }
-                *model = reweighted.model;
-                setup = rebuilt;
-                run.timing_rounds += 1;
-            }
+        let Some(reweighted) = repaired else {
+            run.timing_on = false;
+            continue;
+        };
+        let (rebuilt, remap) = setup.rebuild(&reweighted.model, &reweighted.cell_map, params, rng);
+        run.remap(&remap, &rebuilt);
+        if let Some(p) = hooks.probe.as_mut() {
+            p.refresh(&reweighted.model);
         }
+        *model = reweighted.model;
+        setup = rebuilt;
+        run.timing_rounds += 1;
     }
     write_positions(model, &setup);
-    let (last, final_congestion, zones) = run.last.take().unwrap_or_else(|| {
-        let empty = Evaluation {
-            wirelength: Wirelength::default(),
-            overflow: 0.0,
-            field_overflow: Vec::new(),
-            field_energy: Vec::new(),
-        };
-        (empty, None, Vec::new())
-    });
-    Ok(GlobalResult {
-        outcome: run.outcome,
-        iterations: run.iterations,
-        overflow: last.overflow,
-        hpwl: last.wirelength.hpwl,
-        congestion: run.routability.map(|r| r.rounds).unwrap_or_default(),
-        final_congestion,
-        zones,
-        timing_rounds: run.timing_rounds,
-    })
+    Ok(run.result())
+}
+
+/// The result of a run with no field to spread: the wirelength of the
+/// objects where they are.
+fn unspread_result(setup: &Setup) -> GlobalResult {
+    let mut grad = vec![Point::new(0.0, 0.0); setup.objects.centers.len()];
+    let wirelength =
+        setup
+            .netlist
+            .gradient(&setup.objects.centers, 1.0, &mut Vec::new(), &mut grad);
+    GlobalResult {
+        outcome: Outcome::Converged,
+        iterations: 0,
+        overflow: 0.0,
+        hpwl: wirelength.hpwl,
+        congestion: Vec::new(),
+        final_congestion: None,
+        zones: Vec::new(),
+        timing_rounds: 0,
+    }
 }
 
 /// Writes the cell objects' centers into `model` as cell positions.
@@ -937,6 +909,62 @@ impl Run {
             timing_on: params.timing.is_some(),
             rebuilt: false,
             last: None,
+        }
+    }
+
+    /// Resumes the run on `setup` until it is over or a timing-driven
+    /// repair is due.
+    fn resume_setup<D, R: FnMut(&Progress)>(
+        &mut self,
+        setup: &mut Setup,
+        model: &PlacementModel,
+        params: &GlobalParams,
+        bin: Point<f64>,
+        hooks: &mut Hooks<'_, D, R>,
+    ) -> Flow {
+        let Setup {
+            objects,
+            fields,
+            netlist,
+            movable,
+            ..
+        } = setup;
+        let mut objective = Objective::new(objects, &model.die, fields, netlist);
+        let mut context = StretchContext {
+            netlist,
+            movable,
+            probe: &mut hooks.probe,
+            params,
+            bin,
+            site: model.site_width,
+        };
+        self.resume(&mut objective, objects, &mut context, &mut hooks.report)
+    }
+
+    /// What the run came to.
+    fn result(&mut self) -> GlobalResult {
+        let (last, final_congestion, zones) = self.last.take().unwrap_or_else(|| {
+            let empty = Evaluation {
+                wirelength: Wirelength::default(),
+                overflow: 0.0,
+                field_overflow: Vec::new(),
+                field_energy: Vec::new(),
+            };
+            (empty, None, Vec::new())
+        });
+        GlobalResult {
+            outcome: self.outcome,
+            iterations: self.iterations,
+            overflow: last.overflow,
+            hpwl: last.wirelength.hpwl,
+            congestion: self
+                .routability
+                .take()
+                .map(|r| r.rounds)
+                .unwrap_or_default(),
+            final_congestion,
+            zones,
+            timing_rounds: self.timing_rounds,
         }
     }
 

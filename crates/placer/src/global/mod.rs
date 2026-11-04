@@ -293,7 +293,12 @@ pub fn place<D: TimingDriver>(
     let mut rng = StdRng::seed_from_u64(params.seed);
     let setup = Setup::new(model, params, &mut rng);
     let probe = estimator.map(|estimator| Probe::new(estimator, model));
-    nesterov::minimize(model, setup, params, probe, timing, &mut rng, report)
+    let hooks = nesterov::Hooks {
+        probe,
+        timing,
+        report,
+    };
+    nesterov::minimize(model, setup, params, hooks, &mut rng)
 }
 
 /// What a run works on, built from one model: the objects, their fields
