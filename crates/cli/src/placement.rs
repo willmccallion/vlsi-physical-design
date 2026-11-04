@@ -4,7 +4,7 @@
 use crate::checks::report_placement;
 use crate::cts::clock_tree_synthesis;
 use crate::path_str;
-use crate::repair::{NetlistRepair, Networks, repair_design, repair_netlist, repair_timing};
+use crate::repair::{NetlistRepair, Stage, repair_design, repair_netlist, repair_timing};
 use crate::report::{PlacementSummary, Report};
 use anyhow::Context;
 use pare_common::db::design::{NetlistDB, PlacementStatus};
@@ -29,7 +29,7 @@ use pare_placer::legalize::opendp::improve::improve_placement;
 use pare_placer::legalize::opendp::mirror::optimize_mirroring;
 use pare_placer::model::PlacementModel;
 use pare_placer::zones::{Zone, Zones};
-use pare_resizer::{Link, Rebuffer, Repairer, Resizer, SessionInputs, timing_net_weights};
+use pare_resizer::{Rebuffer, Repairer, Resizer, timing_net_weights};
 use pare_router::{CapacityReduction, GlobalRouteEstimator};
 use std::num::NonZeroUsize;
 use std::path::{Path, PathBuf};
@@ -563,16 +563,9 @@ impl TimingDriver for TimingPlacement<'_> {
             .sdc
             .as_ref()
             .context("timing-driven placement needs an SDC file")?;
-        let link = Link::new(self.db, &self.repair.liberty, &self.config.netlist.dont_use)?;
-        let networks = Networks::find(self.db, &link, self.config, Some(sdc))?;
+        let stage = Stage::find(self.config, self.db, &self.repair.liberty, Some(sdc))?;
         let cells_before = self.db.cells.len();
-        let inputs = SessionInputs {
-            db: self.db,
-            context: networks.context(&link, self.repair.wires.clock),
-            rc: self.repair.wires.signal,
-            buffers: networks.buffers.clone(),
-            namer: &mut self.repair.namer,
-        };
+        let inputs = stage.session(self.db, self.repair.wires, &mut self.repair.namer);
         let mut resizer = Resizer::timed(inputs, sdc)?;
         let area_before = resizer.design_area();
         let wns_before = resizer.sta().worst_slack(MinMax::Max).0.time();
