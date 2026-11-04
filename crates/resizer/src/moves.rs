@@ -1020,7 +1020,9 @@ fn input_slew_impact_ok(resizer: &Resizer<'_, Sta>, cell: CellId, impact: &SlewI
         );
         let delay_diff = (new_delay.rise - old_delay.rise).max(new_delay.fall - old_delay.fall);
         let old_slack = sta.slack(pin, MinMax::Max).time() - impact.margin;
-        let new_slack = old_slack - delay_diff - impact.adjust - impact.margin;
+        // NOTE: OpenROAD takes the margin off the new slack a second time, so
+        // under a margin even an unchanged output breaks the no-worse rule.
+        let new_slack = old_slack - delay_diff - impact.adjust;
         let breaks = match impact.rule {
             SlackRule::NoWorse => fuzzy::greater(old_slack, new_slack),
             SlackRule::NonNegative => new_slack < Seconds::ZERO,
@@ -1284,6 +1286,16 @@ mod tests {
             margin: Seconds::ZERO,
             rule,
         }
+    }
+
+    #[test]
+    fn an_unchanged_arrival_keeps_the_no_worse_rule_under_a_margin() {
+        let impact = SlewImpact {
+            margin: Seconds::new(0.05e-9),
+            ..later_by(0.0, SlackRule::NoWorse)
+        };
+
+        assert_eq!(inverter_keeps(&[impact]), [true]);
     }
 
     /// Whether the inverter's output keeps its slack under each impact,
