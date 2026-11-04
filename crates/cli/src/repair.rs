@@ -16,16 +16,16 @@ use pare_resizer::{
     BufferSet, ClockNetwork, Constants, HoldOptions, Link, Namer, Netlist, Repairer, Resizer,
     SessionInputs, SetupOptions, Sta, Timing, repair_hold, repair_setup,
 };
-use std::path::Path;
+use std::path::PathBuf;
 use std::time::Instant;
 
 /// Reads the Liberty files, the first one's thresholds and defaults
 /// standing for all.
-fn load_liberty(paths: &[String]) -> anyhow::Result<Liberty> {
+fn load_liberty(paths: &[PathBuf]) -> anyhow::Result<Liberty> {
     let mut merged: Option<Liberty> = None;
     for path in paths {
-        ui::header("Input", path);
-        let lib = liberty::parse_file(Path::new(path))?;
+        ui::header("Input", &path.display().to_string());
+        let lib = liberty::parse_file(path)?;
         match &mut merged {
             None => merged = Some(lib),
             Some(first) => first
@@ -171,8 +171,8 @@ pub(crate) fn repair_netlist(
     let liberty = load_liberty(&config.input.liberty_files)?;
     let sdc = match &config.input.sdc_file {
         Some(path) => {
-            ui::header("Input", path);
-            Some(sdc::parse_file(Path::new(path), db, &liberty)?)
+            ui::header("Input", &path.display().to_string());
+            Some(sdc::parse_file(path, db, &liberty)?)
         }
         None => None,
     };

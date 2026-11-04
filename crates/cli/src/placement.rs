@@ -14,7 +14,7 @@ use pare_common::db::writer;
 use pare_common::geom::dbu::Dbu;
 use pare_common::geom::point::Point;
 use pare_common::util::config::{
-    Config, CongestionEstimate, GlobalPlacementConfig, Share, TargetDensity,
+    Config, CongestionEstimate, DesignInput, GlobalPlacementConfig, Share, TargetDensity,
 };
 use pare_common::util::{ui, visualization};
 use pare_common::verify::pin_access::PinAccess;
@@ -32,7 +32,7 @@ use pare_placer::zones::{Zone, Zones};
 use pare_resizer::{Rebuffer, Repairer, Resizer, timing_net_weights};
 use pare_router::{CapacityReduction, GlobalRouteEstimator};
 use std::num::NonZeroUsize;
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use std::time::Instant;
 
 /// How far `improve_placement` may move a cell, in row heights across and
@@ -272,13 +272,13 @@ fn write_placement(
     let placed_png = output_dir.join("placed.png");
     visualization::draw_placement(db, &path_str(&placed_png)?, 1000, 1000);
     ui::wrote(&path_str(&placed_png)?);
-    let placed = if config.input.bookshelf_aux_file.is_some() {
+    let placed = if matches!(config.input.design, DesignInput::Bookshelf { .. }) {
         let pl = output_dir.join("placed.pl");
         writer::bookshelf::write_pl(db, &pl)
             .with_context(|| format!("cannot write {}", pl.display()))?;
         pl
     } else {
-        let out = PathBuf::from(&config.input.output_def);
+        let out = config.input.output_def.clone();
         writer::def::write_file(db, &out)
             .with_context(|| format!("cannot write {}", out.display()))?;
         out

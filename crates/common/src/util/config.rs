@@ -5,6 +5,7 @@ use crate::db::library::Library;
 use serde::Deserialize;
 use std::num::{NonZeroU32, NonZeroUsize};
 use std::ops::RangeInclusive;
+use std::path::PathBuf;
 
 /// A run configuration. Unknown keys are rejected so typos do not pass silently.
 #[derive(Debug, Deserialize)]
@@ -27,7 +28,6 @@ pub struct Config {
     #[serde(default)]
     pub netlist: NetlistConfig,
     /// Input and output files.
-    #[serde(default)]
     pub input: InputConfig,
 }
 
@@ -421,45 +421,118 @@ impl Default for RoutingConfig {
 
 /// Input design and output locations.
 #[derive(Debug, Deserialize)]
-#[serde(deny_unknown_fields)]
+#[serde(try_from = "InputTable")]
 pub struct InputConfig {
-    /// LEF files, technology first.
-    #[serde(default)]
-    pub lef_files: Vec<String>,
+    /// The design.
+    pub design: DesignInput,
     /// Liberty files; netlist repair runs when there are any.
-    #[serde(default)]
-    pub liberty_files: Vec<String>,
+    pub liberty_files: Vec<PathBuf>,
     /// SDC timing constraints; timing repair runs when set.
-    pub sdc_file: Option<String>,
-    /// DEF design.
-    #[serde(default)]
-    pub def_file: String,
+    pub sdc_file: Option<PathBuf>,
     /// Where to write the placed DEF.
-    #[serde(default = "default_output_def")]
-    pub output_def: String,
-    /// Bookshelf `.aux` file, used instead of LEF/DEF when set.
-    pub bookshelf_aux_file: Option<String>,
-    /// Routing layers to synthesize for a Bookshelf design.
-    #[serde(default = "default_num_layers")]
-    pub num_layers: usize,
+    pub output_def: PathBuf,
     /// Directory for generated files; defaults to `output_def`'s directory.
-    pub output_dir: Option<String>,
+    pub output_dir: Option<PathBuf>,
 }
 
-impl Default for InputConfig {
-    fn default() -> Self {
-        Self {
-            lef_files: Vec::new(),
-            liberty_files: Vec::new(),
-            sdc_file: None,
-            def_file: String::new(),
-            output_def: default_output_def(),
-            bookshelf_aux_file: None,
-            num_layers: default_num_layers(),
-            output_dir: None,
-        }
+/// The design a run reads.
+#[derive(Debug, PartialEq, Eq)]
+pub enum DesignInput {
+    /// A DEF design over its LEF library.
+    LefDef {
+        /// LEF files, technology first.
+        lef_files: Vec<PathBuf>,
+        /// The DEF design.
+        def_file: PathBuf,
+    },
+    /// A Bookshelf design, with routing layers synthesized for it.
+    Bookshelf {
+        /// The `.aux` file naming the design's other files.
+        aux_file: PathBuf,
+        /// Routing layers to synthesize.
+        num_layers: usize,
+    },
+}
+
+/// Why an `[input]` table does not name one design.
+#[derive(Debug, PartialEq, Eq, thiserror::Error)]
+pub enum InputError {
+    /// Both a DEF and a Bookshelf design.
+    #[error("[input] names both def_file and bookshelf_aux_file; give one")]
+    TwoDesigns,
+    /// Neither a DEF nor a Bookshelf design.
+    #[error("[input] names no design; give def_file and lef_files, or bookshelf_aux_file")]
+    NoDesign,
+    /// A DEF design without its library.
+    #[error("[input] def_file needs lef_files")]
+    NoLefFiles,
+    /// LEF files for a Bookshelf design, which brings its own cells.
+    #[error("[input] lef_files are for def_file, not bookshelf_aux_file")]
+    LefFilesWithBookshelf,
+    /// Synthesized layers for a DEF design, which has its own.
+    #[error("[input] num_layers is for bookshelf_aux_file, not def_file")]
+    NumLayersWithDef,
+}
+
+/// The `[input]` table as written.
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct InputTable {
+    #[serde(default)]
+    lef_files: Vec<PathBuf>,
+    #[serde(default)]
+    liberty_files: Vec<PathBuf>,
+    sdc_file: Option<PathBuf>,
+    def_file: Option<PathBuf>,
+    #[serde(default = "default_output_def")]
+    output_def: PathBuf,
+    bookshelf_aux_file: Option<PathBuf>,
+    num_layers: Option<usize>,
+    output_dir: Option<PathBuf>,
+}
+
+impl TryFrom<InputTable> for InputConfig {
+    type Error = InputError;
+
+    fn try_from(table: InputTable) -> Result<Self, InputError> {
+        let design = match (table.def_file, table.bookshelf_aux_file) {
+            (Some(_), Some(_)) => return Err(InputError::TwoDesigns),
+            (None, None) => return Err(InputError::NoDesign),
+            (Some(def_file), None) => {
+                if table.lef_files.is_empty() {
+                    return Err(InputError::NoLefFiles);
+                }
+                if table.num_layers.is_some() {
+                    return Err(InputError::NumLayersWithDef);
+                }
+                DesignInput::LefDef {
+                    lef_files: table.lef_files,
+                    def_file,
+                }
+            }
+            (None, Some(aux_file)) => {
+                if !table.lef_files.is_empty() {
+                    return Err(InputError::LefFilesWithBookshelf);
+                }
+                DesignInput::Bookshelf {
+                    aux_file,
+                    num_layers: table.num_layers.unwrap_or(DEFAULT_BOOKSHELF_LAYERS),
+                }
+            }
+        };
+        Ok(Self {
+            design,
+            liberty_files: table.liberty_files,
+            sdc_file: table.sdc_file,
+            output_def: table.output_def,
+            output_dir: table.output_dir,
+        })
     }
 }
+
+/// Routing layers synthesized for a Bookshelf design when the config does
+/// not say.
+const DEFAULT_BOOKSHELF_LAYERS: usize = 6;
 
 const fn default_placer_max_iterations() -> usize {
     2000
@@ -513,10 +586,6 @@ const fn default_detailed_iterations() -> usize {
     64
 }
 
-const fn default_num_layers() -> usize {
-    6
-}
-
-fn default_output_def() -> String {
-    "output/placed.def".to_string()
+fn default_output_def() -> PathBuf {
+    PathBuf::from("output/placed.def")
 }
