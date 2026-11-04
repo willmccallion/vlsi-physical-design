@@ -1,5 +1,6 @@
 //! Integer database units (DBU), the exact coordinate type of a design.
 
+use crate::geom::point::Point;
 use std::fmt;
 use std::iter::Sum;
 use std::ops::{Add, AddAssign, Div, Mul, Neg, Rem, Sub, SubAssign};
@@ -193,6 +194,12 @@ impl DbuPerMicron {
     #[must_use]
     pub fn to_microns(self, dbu: Dbu) -> f64 {
         dbu.to_f64() / f64::from(self.0)
+    }
+
+    /// `p` in microns.
+    #[must_use]
+    pub fn point_in_microns(self, p: Point<Dbu>) -> Point<f64> {
+        Point::new(self.to_microns(p.x), self.to_microns(p.y))
     }
 }
 
