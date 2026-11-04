@@ -211,11 +211,11 @@ fn group_members_are_ranked_as_opendb_lists_them() {
     .unwrap();
 
     let rank = |name: &str| db.cells[db.cell_id(name).unwrap().index()].group_rank;
-    let ranks: Vec<u32> = ["u7", "u6", "u5", "u4", "u3", "u2", "u1"]
+    let ranks: Vec<Option<usize>> = ["u7", "u6", "u5", "u4", "u3", "u2", "u1"]
         .iter()
         .map(|n| rank(n))
         .collect();
-    assert_eq!(ranks, [0, 1, 2, 3, 4, 5, 6]);
+    assert_eq!(ranks, (0..7).map(Some).collect::<Vec<_>>());
     assert_eq!(db.regions[0].group_order, Some(1));
     assert_eq!(db.regions[1].group_order, Some(0));
 }
@@ -254,7 +254,7 @@ fn group_order_of(db: &NetlistDB, region: RegionId) -> Vec<String> {
     let mut members: Vec<usize> = (0..db.cells.len())
         .filter(|&i| db.cells[i].region == Some(region))
         .collect();
-    members.sort_by_key(|&i| (db.cells[i].group_rank, std::cmp::Reverse(i)));
+    members.sort_by_key(|&i| (db.cells[i].region_member_order(), std::cmp::Reverse(i)));
     members
         .into_iter()
         .map(|i| db.cells[i].name.clone())
@@ -290,6 +290,27 @@ fn members_of_two_groups_on_one_region_keep_their_order_when_written() {
         group_order_of(&reread, RegionId(0)),
         group_order_of(&db, RegionId(0))
     );
+}
+
+#[test]
+fn components_given_a_region_directly_come_after_its_group_members() {
+    let db = design_with(&[
+        (
+            "COMPONENTS 8 ;",
+            "REGIONS 1 ;\n- left ( 0 0 ) ( 6000 4000 ) ;\nEND REGIONS\n\nCOMPONENTS 8 ;",
+        ),
+        ("- u4 NAND2\n", "- u4 NAND2 + REGION left\n"),
+        (
+            "END NETS",
+            "END NETS\n\nGROUPS 1 ;\n- g u2 u3 + REGION left ;\nEND GROUPS",
+        ),
+    ])
+    .unwrap();
+
+    let u4 = &db.cells[db.cell_id("u4").unwrap().index()];
+
+    assert_eq!(u4.group_rank, None);
+    assert_eq!(group_order_of(&db, RegionId(0)), ["u3", "u2", "u4"]);
 }
 
 #[test]
