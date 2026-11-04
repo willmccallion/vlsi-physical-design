@@ -15,7 +15,7 @@ use crate::sta::{Slack, Sta};
 use pare_common::db::design::{EditError, NetlistDB, PinOwner, PlacementStatus};
 use pare_common::db::global_route::RouteSource;
 use pare_common::db::indices::{CellId, MacroId, MacroPinId, NetId, PinId};
-use pare_common::db::liberty::{ArcRole, Edge, EdgeValues, LibCell, LibCellId, LibPort, MinMax};
+use pare_common::db::liberty::{Edge, EdgeValues, LibCell, LibCellId, LibPort, MinMax};
 use pare_common::db::library::DuplicateName;
 use pare_common::db::sdc::Sdc;
 use pare_common::geom::dbu::Dbu;
@@ -1328,13 +1328,7 @@ pub(crate) fn find_targets(link: &Link<'_>, buffers: &BufferSet) -> Targets {
 fn find_target_load(cell: &LibCell, slews: &EdgeValues<Seconds>) -> Farads {
     let mut sum = Farads::ZERO;
     let mut count = 0;
-    for set in &cell.arc_sets {
-        if !matches!(
-            set.role,
-            ArcRole::Combinational | ArcRole::RegClkToQ | ArcRole::RegSetClr | ArcRole::LatchEnToQ
-        ) {
-            continue;
-        }
+    for set in cell.arc_sets.iter().filter(|s| s.role.is_logic_delay()) {
         for arc in &set.arcs {
             let in_slew = slews.get(arc.from_edge);
             let out_slew = slews.get(arc.to_edge);
