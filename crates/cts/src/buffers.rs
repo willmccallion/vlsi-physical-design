@@ -13,6 +13,10 @@ use pare_resizer::parasitics::WireRc;
 /// `CtsOptions`' default `sinkBufferMaxCapDerate`.
 const MAX_CAP_DERATE: f32 = 0.01;
 
+/// How close, as a share of its own, a buffer's load limit may come to the
+/// one kept before it and still be dropped from the characterized list.
+const CLOSE_LIMIT_SHARE: f32 = 0.1;
+
 /// The buffers of a clock tree.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) struct ClockBuffers {
@@ -54,7 +58,7 @@ impl ClockBuffers {
         } else {
             best_max_cap_buffer(liberty, &all, wire_cap_per_um * core_length)?
         };
-        let characterized = trim_and_sort(liberty, &all, root, sink, true);
+        let characterized = trim_and_sort(liberty, &all, root, sink);
         Ok(Self {
             all,
             root,
@@ -99,7 +103,8 @@ fn best_max_cap_buffer(
     best.or(next_best).ok_or(CtsError::NoBuffers)
 }
 
-/// A buffer's load limit, zero without one.
+/// A buffer's load limit, zero without one, as `TechChar::getMaxCapLimit`
+/// reads it.
 fn max_cap_limit(liberty: &Liberty, buffer: LibCellId) -> f32 {
     let cell = liberty.cell(buffer);
     cell.buffer_ports()
@@ -107,36 +112,38 @@ fn max_cap_limit(liberty: &Liberty, buffer: LibCellId) -> f32 {
         .map_or(0.0, Farads::get) as f32
 }
 
-/// The buffers to characterize, as `TechChar::trimSortBufferList`: for an
-/// inferred list, those whose load limit lies between the root's and the
-/// sink's, sorted by limit, each within a tenth of the one before dropped.
+/// The inferred buffers to characterize, as `TechChar::trimSortBufferList`
+/// trims an inferred list: those whose load limit lies between the root's
+/// and the sink's, sorted by limit, each too close to the one kept before
+/// it dropped.
 fn trim_and_sort(
     liberty: &Liberty,
     buffers: &[LibCellId],
     root: LibCellId,
     sink: LibCellId,
-    inferred: bool,
 ) -> Vec<LibCellId> {
-    let mut list = buffers.to_vec();
-    if inferred {
-        let (sink_cap, root_cap) = (max_cap_limit(liberty, sink), max_cap_limit(liberty, root));
-        let (low, high) = (sink_cap.min(root_cap), sink_cap.max(root_cap));
-        list.retain(|&b| (low..=high).contains(&max_cap_limit(liberty, b)));
-    }
-    list.sort_by(|&a, &b| max_cap_limit(liberty, a).total_cmp(&max_cap_limit(liberty, b)));
-    if inferred && !list.is_empty() {
-        let mut kept = vec![list[0]];
-        let mut prev = max_cap_limit(liberty, list[0]);
-        for &buffer in &list[1..] {
-            let current = max_cap_limit(liberty, buffer);
-            if (prev - current).abs() / current >= 0.1 {
-                kept.push(buffer);
-                prev = current;
-            }
+    let limit = |b: LibCellId| max_cap_limit(liberty, b);
+    let (sink_cap, root_cap) = (limit(sink), limit(root));
+    let (low, high) = (sink_cap.min(root_cap), sink_cap.max(root_cap));
+    let mut list: Vec<LibCellId> = buffers
+        .iter()
+        .copied()
+        .filter(|&b| (low..=high).contains(&limit(b)))
+        .collect();
+    list.sort_by(|&a, &b| limit(a).total_cmp(&limit(b)));
+    let Some((&first, rest)) = list.split_first() else {
+        return list;
+    };
+    let mut kept = vec![first];
+    let mut prev = limit(first);
+    for &buffer in rest {
+        let current = limit(buffer);
+        if (prev - current).abs() / current >= CLOSE_LIMIT_SHARE {
+            kept.push(buffer);
+            prev = current;
         }
-        list = kept;
     }
-    list
+    kept
 }
 
 /// The most fanout a buffer may drive under the constraints and the
@@ -156,4 +163,79 @@ pub(crate) fn fanout_limit(
         .flatten()
         .map(|l| l as u32)
         .min()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use pare_common::db::parser::liberty;
+    use std::fmt::Write as _;
+    use std::path::Path;
+
+    /// A library of buffers named `B<limit>`, each with that load limit
+    /// and, where given, a fanout limit.
+    fn buffers(limits: &[(u32, Option<u32>)], default_fanout: Option<u32>) -> Liberty {
+        let mut src = String::from("library (x) {\n");
+        if let Some(f) = default_fanout {
+            writeln!(src, "  default_max_fanout : {f};").unwrap();
+        }
+        for &(cap, fanout) in limits {
+            let fanout = fanout.map_or_else(String::new, |f| format!("max_fanout : {f};"));
+            writeln!(
+                src,
+                "  cell (B{cap}) {{ pin (A) {{ direction : input; }} \
+                 pin (Z) {{ direction : output; function : \"A\"; \
+                 max_capacitance : {cap}; {fanout} }} }}"
+            )
+            .unwrap();
+        }
+        src.push('}');
+        liberty::parse_str(&src, Path::new("x.lib")).unwrap()
+    }
+
+    fn id(lib: &Liberty, cap: u32) -> LibCellId {
+        lib.cell_id(&format!("B{cap}")).unwrap()
+    }
+
+    #[test]
+    fn buffers_between_the_sink_and_root_limits_are_kept_by_limit_less_close_neighbours() {
+        let caps = [60, 10, 30, 32, 5, 70];
+        let lib = buffers(&caps.map(|c| (c, None)), None);
+        let all: Vec<LibCellId> = caps.iter().map(|&c| id(&lib, c)).collect();
+
+        let kept = trim_and_sort(&lib, &all, id(&lib, 60), id(&lib, 10));
+
+        assert_eq!(kept, vec![id(&lib, 10), id(&lib, 30), id(&lib, 60)]);
+    }
+
+    #[test]
+    fn no_buffer_within_the_limits_leaves_nothing_to_characterize() {
+        let lib = buffers(&[(10, None), (20, None), (40, None)], None);
+
+        let kept = trim_and_sort(&lib, &[id(&lib, 40)], id(&lib, 20), id(&lib, 10));
+
+        assert_eq!(kept, Vec::new());
+    }
+
+    #[test]
+    fn the_fanout_limit_is_the_lower_of_the_design_and_the_buffer() {
+        let lib = buffers(&[(10, Some(8))], Some(20));
+
+        assert_eq!(fanout_limit(&lib, id(&lib, 10), Some(12.0)), Some(8));
+        assert_eq!(fanout_limit(&lib, id(&lib, 10), Some(5.0)), Some(5));
+    }
+
+    #[test]
+    fn a_buffer_without_its_own_fanout_limit_takes_the_library_default() {
+        let lib = buffers(&[(10, None)], Some(20));
+
+        assert_eq!(fanout_limit(&lib, id(&lib, 10), None), Some(20));
+    }
+
+    #[test]
+    fn without_any_fanout_limit_there_is_none() {
+        let lib = buffers(&[(10, None)], None);
+
+        assert_eq!(fanout_limit(&lib, id(&lib, 10), None), None);
+    }
 }
