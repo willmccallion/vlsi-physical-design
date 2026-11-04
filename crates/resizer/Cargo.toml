@@ -17,3 +17,6 @@ pare-common = { path = "../common" }
 log = "0.4"
 thiserror = "2.0"
 rustc-hash = "2.1"
+
+[dev-dependencies]
+pare-common = { path = "../common", features = ["testing"] }
