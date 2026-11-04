@@ -1444,3 +1444,36 @@ fn div_ceil(a: i64, b: i64) -> i64 {
 fn div_round(a: i64, b: i64) -> i64 {
     (a as f64 / b as f64).round() as i64
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn rect(x0: i64, y0: i64, x1: i64, y1: i64) -> Rect<Dbu> {
+        Rect::new(Point::new(Dbu(x0), Dbu(y0)), Point::new(Dbu(x1), Dbu(y1)))
+    }
+
+    #[test]
+    fn rows_framing_a_gap_enclose_it() {
+        let rows = [
+            rect(0, 0, 30, 10),
+            rect(0, 10, 10, 20),
+            rect(20, 10, 30, 20),
+            rect(0, 20, 30, 30),
+        ];
+
+        assert_eq!(enclosed_holes(&rows), vec![rect(10, 10, 20, 20)]);
+    }
+
+    #[test]
+    fn a_gap_reaching_the_rows_edge_encloses_nothing() {
+        let rows = [rect(0, 0, 30, 10), rect(0, 10, 10, 20)];
+
+        assert_eq!(enclosed_holes(&rows), Vec::new());
+    }
+
+    #[test]
+    fn no_rows_enclose_nothing() {
+        assert_eq!(enclosed_holes(&[]), Vec::new());
+    }
+}

@@ -4,9 +4,10 @@
 
 #![allow(clippy::unwrap_used)]
 
+mod common;
+
 use pare_common::db::design::{NetlistDB, PlacementStatus};
 use pare_common::db::indices::CellId;
-use pare_common::db::parser::{def, lef};
 use pare_common::geom::orient::Orientation;
 use pare_common::geom::point::Point;
 use pare_common::testing;
@@ -18,50 +19,7 @@ use pare_placer::model::PlacementModel;
 use pare_placer::zones::Zones;
 use std::convert::Infallible;
 use std::fmt::Write as _;
-use std::path::{Path, PathBuf};
-
-fn fixture(name: &str) -> PathBuf {
-    Path::new(env!("CARGO_MANIFEST_DIR"))
-        .join("../common/tests/fixtures")
-        .join(name)
-}
-
-/// Gates in a ring, every third an inverter and the rest NAND gates, each
-/// NAND's second input fed by the gate halfway round, unplaced in a core
-/// of thirty rows of the fixture's cells.
-fn ring(gates: usize) -> NetlistDB {
-    let mut text = String::from(
-        "VERSION 5.8 ;\nDIVIDERCHAR \"/\" ;\nBUSBITCHARS \"[]\" ;\nDESIGN ring ;\n\
-         UNITS DISTANCE MICRONS 1000 ;\nDIEAREA ( 0 0 ) ( 60000 60000 ) ;\n",
-    );
-    for r in 0..30 {
-        let orient = if r % 2 == 0 { "N" } else { "FS" };
-        let _ = writeln!(
-            text,
-            "ROW ROW_{r} core 0 {} {orient} DO 300 BY 1 STEP 200 0 ;",
-            r * 2000
-        );
-    }
-    let is_inverter = |g: usize| g.is_multiple_of(3);
-    let _ = writeln!(text, "COMPONENTS {gates} ;");
-    for g in 0..gates {
-        let master = if is_inverter(g) { "INV" } else { "NAND2" };
-        let _ = writeln!(text, "- g{g} {master} ;");
-    }
-    let _ = writeln!(text, "END COMPONENTS\nNETS {gates} ;");
-    for g in 0..gates {
-        let _ = write!(text, "- n{g} ( g{g} Y ) ( g{} A )", (g + 1) % gates);
-        let fed = (g + gates / 2) % gates;
-        if !is_inverter(fed) {
-            let _ = write!(text, " ( g{fed} B )");
-        }
-        text.push_str(" ;\n");
-    }
-    text.push_str("END NETS\nEND DESIGN\n");
-    let units = def::read_units(&fixture("tiny.def")).unwrap();
-    let library = lef::parse_files(&[fixture("tiny.lef")], units).unwrap();
-    def::parse_str(&text, Path::new("ring.def"), library).unwrap()
-}
+use std::path::Path;
 
 /// A repair that, once, turns inverter `g3` into a NAND gate, adds an
 /// inverter `extra` on `n0` where `g0` stands, and removes `g10`.
@@ -153,7 +111,7 @@ fn assert_golden(name: &str, actual: &str) {
 
 #[test]
 fn a_congested_placement_inflates_its_cells_as_it_always_does() {
-    let mut db = ring(240);
+    let mut db = common::ring(240);
     let mut model = PlacementModel::from_db(&db, &Zones::new(&db).unwrap());
     let tiles = RoutingTiles {
         origin: Point::new(0.0, 0.0),
@@ -185,7 +143,7 @@ fn a_congested_placement_inflates_its_cells_as_it_always_does() {
 
 #[test]
 fn a_repair_midway_through_placement_gives_the_placement_it_always_has() {
-    let mut db = ring(240);
+    let mut db = common::ring(240);
     let mut model = PlacementModel::from_db(&db, &Zones::new(&db).unwrap());
     let params = GlobalParams {
         timing: Some(TimingParams {
