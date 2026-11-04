@@ -6,6 +6,7 @@ RepairSummary {
     resized: 1,
     inserted: 2,
 }
+reported (iteration, failing): [(Some(1), 8), (Some(10), 7), (Some(20), 3), (None, 0)]
 SetupSummary {
     failing_before: 8,
     failing_after: 0,
