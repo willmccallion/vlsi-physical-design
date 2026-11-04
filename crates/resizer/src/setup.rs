@@ -32,6 +32,10 @@ const FIX_RATE_THRESHOLD: f64 = 0.0001;
 /// Passes per endpoint in the last gasp.
 const LAST_GASP_PASSES: usize = 10;
 
+/// The moves the last gasp tries: sizing only.
+const LAST_GASP_SEQUENCE: [MoveKind; 3] =
+    [MoveKind::SizeUpMatch, MoveKind::SizeUp, MoveKind::SwapPins];
+
 /// Iterations between progress reports.
 const PRINT_INTERVAL: usize = 10;
 
@@ -139,11 +143,68 @@ struct Repair<'r, 'a> {
     resizer: &'r mut Resizer<'a, Sta>,
     moves: Moves,
     options: SetupOptions,
+    report: &'r mut dyn FnMut(&SetupProgress),
     initial_area: f64,
     iteration: usize,
     min_violation: Seconds,
     max_violation: Seconds,
     fallback: bool,
+}
+
+/// What a phase of the repair runs with, and the rate of repair it is held
+/// to, as `terminateProgress` tracks it.
+struct Phase {
+    /// The moves tried on each driver, in order.
+    sequence: Vec<MoveKind>,
+    /// Passes an endpoint may take.
+    max_passes: usize,
+    /// Total negative slack before the repair.
+    initial_tns: Seconds,
+    /// Total negative slack at the last check of the rate.
+    prev_tns: Seconds,
+    /// The share of the initial violation each check must have fixed.
+    threshold: f64,
+    /// Whether the last check of the rate ended an endpoint's passes.
+    just_terminated: bool,
+}
+
+impl Phase {
+    const fn new(
+        sequence: Vec<MoveKind>,
+        max_passes: usize,
+        initial_tns: Seconds,
+        tns: Seconds,
+    ) -> Self {
+        Self {
+            sequence,
+            max_passes,
+            initial_tns,
+            prev_tns: tns,
+            threshold: FIX_RATE_THRESHOLD,
+            just_terminated: false,
+        }
+    }
+
+    /// Notes that the rate ended an endpoint's passes; whether the last
+    /// check did too, which ends the phase.
+    const fn terminated(&mut self) -> EndpointEnd {
+        let twice = self.just_terminated;
+        self.just_terminated = true;
+        if twice {
+            EndpointEnd::Stop
+        } else {
+            EndpointEnd::Next
+        }
+    }
+}
+
+/// What becomes of a phase once an endpoint's passes end.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum EndpointEnd {
+    /// It goes on to the next endpoint.
+    Next,
+    /// It stops: the repair has stopped paying off twice running.
+    Stop,
 }
 
 /// Repairs the setup violations of the session's design, reporting
@@ -159,6 +220,7 @@ pub fn repair_setup(
         resizer,
         moves,
         options,
+        report,
         initial_area,
         iteration: 0,
         min_violation: Seconds::ZERO,
@@ -180,21 +242,12 @@ pub fn repair_setup(
         summary.tns_after = tns_before;
         return Ok(summary);
     }
-    let max_end_repairs =
-        ((violating.len() as f64 * repair.options.repair_tns_share) as usize).max(1);
-    let mut prev_tns = tns_before;
-    repair.legacy_phase(
-        &violating,
-        max_end_repairs,
-        tns_before,
-        &mut prev_tns,
-        report,
-    )?;
+    repair.legacy_phase(&violating, tns_before)?;
     if !repair.options.skip_last_gasp {
-        repair.last_gasp(tns_before, report)?;
+        repair.last_gasp(tns_before)?;
     }
     let progress = repair.progress(None);
-    report(&progress);
+    (repair.report)(&progress);
     let log = &repair.moves.log;
     summary.removed = log.committed(MoveKind::Unbuffer);
     summary.resized = log.committed(MoveKind::SizeUp) + log.committed(MoveKind::SizeUpMatch);
@@ -273,237 +326,221 @@ impl Repair<'_, '_> {
         Ok(())
     }
 
+    /// Reports progress every [`PRINT_INTERVAL`] iterations and on the
+    /// first.
+    fn report_progress(&mut self) {
+        if self.iteration.is_multiple_of(PRINT_INTERVAL) || self.iteration == 1 {
+            let progress = self.progress(Some(self.iteration));
+            (self.report)(&progress);
+        }
+    }
+
+    fn end_slack(&self, end: PinId) -> Seconds {
+        self.resizer.sta().slack(end, MinMax::Max).time()
+    }
+
     /// Whether the repair has stopped paying off, as `terminateProgress`.
-    fn terminate(&self, initial_tns: Seconds, prev_tns: &mut Seconds, threshold: &mut f64) -> bool {
+    fn terminate(&self, phase: &mut Phase) -> bool {
         if self.iteration.is_multiple_of(LARGE_INTERVAL) {
-            *threshold *= 2.0;
+            phase.threshold *= 2.0;
         }
         if self.iteration.is_multiple_of(SMALL_INTERVAL) {
             let current = self.tns();
-            let rate = if initial_tns == Seconds::ZERO {
+            let rate = if phase.initial_tns == Seconds::ZERO {
                 0.0
             } else {
-                (*prev_tns - current) / initial_tns
+                (phase.prev_tns - current) / phase.initial_tns
             };
-            *prev_tns = current;
-            if self.iteration > INITIAL_ITERATIONS && rate < *threshold {
+            phase.prev_tns = current;
+            if self.iteration > INITIAL_ITERATIONS && rate < phase.threshold {
                 return true;
             }
         }
         false
     }
 
-    /// `repairSetup_Legacy`.
+    /// `repairSetup_Legacy`: passes over each failing endpoint from the
+    /// worst, up to the share `repair_tns_share` of them.
     fn legacy_phase(
         &mut self,
         violating: &[(PinId, Seconds)],
-        max_end_repairs: usize,
         initial_tns: Seconds,
-        prev_tns: &mut Seconds,
-        report: &mut dyn FnMut(&SetupProgress),
     ) -> Result<(), RepairError> {
         self.min_violation = -violating[violating.len() - 1].1;
         self.max_violation = -violating[0].1;
-        let mut threshold = FIX_RATE_THRESHOLD;
-        let mut prev_termination = false;
-        let margin = self.options.margin;
-        for (end_index, &(first_end, _)) in violating.iter().enumerate() {
-            let end_index = end_index + 1;
-            if end_index > max_end_repairs {
-                break;
-            }
-            self.fallback = false;
-            let mut end = first_end;
-            let mut end_slack = self.resizer.sta().slack(end, MinMax::Max).time();
-            let (mut worst_slack, _) = self.worst();
-            let mut prev_end_slack = end_slack;
-            let mut prev_worst_slack = worst_slack;
-            let mut decreasing = 0;
-            let mut two_terminations = false;
-            self.journal_begin();
-            let mut journal_open = true;
-            let mut pass = 1;
-            while pass <= self.options.max_passes {
-                self.iteration += 1;
-                if self.iteration.is_multiple_of(PRINT_INTERVAL) || self.iteration == 1 {
-                    report(&self.progress(Some(self.iteration)));
-                }
-                if self.terminate(initial_tns, prev_tns, &mut threshold) {
-                    if prev_termination {
-                        two_terminations = true;
-                    } else {
-                        prev_termination = true;
-                    }
-                    self.journal_restore()?;
-                    journal_open = false;
-                    break;
-                }
-                if self.iteration.is_multiple_of(SMALL_INTERVAL) {
-                    prev_termination = false;
-                }
-                if fuzzy::greater_equal(end_slack, margin) {
-                    if pass == 1 {
-                        self.journal_end();
-                    } else {
-                        self.journal_restore()?;
-                    }
-                    journal_open = false;
-                    break;
-                }
-                let changed = self.repair_endpoint(end, end_slack, margin)?;
-                if !changed {
-                    if pass == 1 {
-                        self.journal_end();
-                    } else {
-                        self.journal_restore()?;
-                    }
-                    journal_open = false;
-                    break;
-                }
-                end_slack = self.resizer.sta().slack(end, MinMax::Max).time();
-                let (new_worst, worst_vertex) = self.worst();
-                worst_slack = new_worst;
-                let better = fuzzy::greater(worst_slack, prev_worst_slack)
-                    || (end_index != 1
-                        && fuzzy::equal(worst_slack, prev_worst_slack)
-                        && fuzzy::greater(end_slack, prev_end_slack));
-                if better {
-                    prev_end_slack = end_slack;
-                    prev_worst_slack = worst_slack;
-                    decreasing = 0;
-                    self.journal_end();
-                    if pass < self.options.max_passes {
-                        self.journal_begin();
-                    } else {
-                        journal_open = false;
-                    }
-                } else {
-                    self.fallback = true;
-                    decreasing += 1;
-                    if decreasing > DECREASING_SLACK_MAX_PASSES {
-                        self.journal_restore()?;
-                        journal_open = false;
-                        break;
-                    }
-                }
-                if end_index == 1
-                    && let Some(worst) = worst_vertex
-                {
-                    end = worst;
-                }
-                pass += 1;
-            }
-            if journal_open {
-                self.journal_end();
-            }
-            if two_terminations {
+        let max_end_repairs =
+            ((violating.len() as f64 * self.options.repair_tns_share) as usize).max(1);
+        let mut phase = Phase::new(
+            self.options.sequence.clone(),
+            self.options.max_passes,
+            initial_tns,
+            initial_tns,
+        );
+        for (end_index, &(end, _)) in violating.iter().enumerate().take(max_end_repairs) {
+            if self.legacy_endpoint(end_index + 1, end, &mut phase)? == EndpointEnd::Stop {
                 break;
             }
         }
         Ok(())
     }
 
+    /// The passes over the endpoint ranked `end_index` from the worst,
+    /// each kept when the worst slack improves, or for any but the worst
+    /// endpoint when its own slack does; the worst endpoint's passes follow
+    /// the worst path wherever it goes.
+    fn legacy_endpoint(
+        &mut self,
+        end_index: usize,
+        first_end: PinId,
+        phase: &mut Phase,
+    ) -> Result<EndpointEnd, RepairError> {
+        let margin = self.options.margin;
+        self.fallback = false;
+        let mut end = first_end;
+        let mut end_slack = self.end_slack(end);
+        let (mut prev_worst_slack, _) = self.worst();
+        let mut prev_end_slack = end_slack;
+        let mut decreasing = 0;
+        self.journal_begin();
+        for pass in 1..=phase.max_passes {
+            self.iteration += 1;
+            self.report_progress();
+            if self.terminate(phase) {
+                self.journal_restore()?;
+                return Ok(phase.terminated());
+            }
+            if self.iteration.is_multiple_of(SMALL_INTERVAL) {
+                phase.just_terminated = false;
+            }
+            if fuzzy::greater_equal(end_slack, margin)
+                || !self.repair_endpoint(end, end_slack, &phase.sequence)?
+            {
+                self.end_passes(pass)?;
+                return Ok(EndpointEnd::Next);
+            }
+            end_slack = self.end_slack(end);
+            let (worst_slack, worst_vertex) = self.worst();
+            let better = fuzzy::greater(worst_slack, prev_worst_slack)
+                || (end_index != 1
+                    && fuzzy::equal(worst_slack, prev_worst_slack)
+                    && fuzzy::greater(end_slack, prev_end_slack));
+            if better {
+                prev_end_slack = end_slack;
+                prev_worst_slack = worst_slack;
+                decreasing = 0;
+                self.journal_end();
+                if pass == phase.max_passes {
+                    return Ok(EndpointEnd::Next);
+                }
+                self.journal_begin();
+            } else {
+                self.fallback = true;
+                decreasing += 1;
+                if decreasing > DECREASING_SLACK_MAX_PASSES {
+                    self.journal_restore()?;
+                    return Ok(EndpointEnd::Next);
+                }
+            }
+            if end_index == 1
+                && let Some(worst) = worst_vertex
+            {
+                end = worst;
+            }
+        }
+        self.journal_end();
+        Ok(EndpointEnd::Next)
+    }
+
+    /// Closes the journal of passes that ended at `pass` with nothing more
+    /// to try: kept after the first, undone after a later one, whose moves
+    /// since the last improvement did not pay.
+    fn end_passes(&mut self, pass: usize) -> Result<(), RepairError> {
+        if pass == 1 {
+            self.journal_end();
+            Ok(())
+        } else {
+            self.journal_restore()
+        }
+    }
+
     /// `repairSetup_LastGasp`: sizing only, kept only when both worst and
     /// total slack improve. The rate of repair is judged from the last kept
     /// move's total, so the phase ends soon after moves stop landing often.
-    fn last_gasp(
-        &mut self,
-        initial_tns: Seconds,
-        report: &mut dyn FnMut(&SetupProgress),
-    ) -> Result<(), RepairError> {
-        let sequence = std::mem::replace(
-            &mut self.options.sequence,
-            vec![MoveKind::SizeUpMatch, MoveKind::SizeUp, MoveKind::SwapPins],
-        );
-        let margin = self.options.margin;
+    fn last_gasp(&mut self, initial_tns: Seconds) -> Result<(), RepairError> {
         let violating = self.violating_endpoints();
-        let mut current_tns = self.tns();
+        let current_tns = self.tns();
         if fuzzy::greater_equal(current_tns, Seconds::ZERO) || violating.is_empty() {
-            self.options.sequence = sequence;
             return Ok(());
         }
-        let mut threshold = FIX_RATE_THRESHOLD;
-        let mut prev_termination = false;
+        let mut phase = Phase::new(
+            LAST_GASP_SEQUENCE.to_vec(),
+            LAST_GASP_PASSES,
+            initial_tns,
+            current_tns,
+        );
         let (mut prev_worst, _) = self.worst();
-        let mut prev_tns = current_tns;
-        for (end_index, &(first_end, _)) in violating.iter().enumerate() {
-            let end_index = end_index + 1;
-            self.fallback = false;
-            let mut end = first_end;
-            let mut end_slack = self.resizer.sta().slack(end, MinMax::Max).time();
-            let mut two_terminations = false;
-            self.journal_begin();
-            let mut journal_open = true;
-            let mut pass = 1;
-            while pass <= LAST_GASP_PASSES {
-                self.iteration += 1;
-                if self.terminate(initial_tns, &mut prev_tns, &mut threshold) {
-                    if prev_termination {
-                        two_terminations = true;
-                    } else {
-                        prev_termination = true;
-                    }
-                    self.journal_end();
-                    journal_open = false;
-                    break;
-                }
-                if self.iteration.is_multiple_of(SMALL_INTERVAL) {
-                    prev_termination = false;
-                }
-                if self.iteration.is_multiple_of(PRINT_INTERVAL) || self.iteration == 1 {
-                    report(&self.progress(Some(self.iteration)));
-                }
-                if fuzzy::greater_equal(end_slack, margin) {
-                    self.journal_end();
-                    journal_open = false;
-                    break;
-                }
-                let changed = self.repair_endpoint(end, end_slack, margin)?;
-                if !changed {
-                    if pass == 1 {
-                        self.journal_end();
-                    } else {
-                        self.journal_restore()?;
-                    }
-                    journal_open = false;
-                    break;
-                }
-                end_slack = self.resizer.sta().slack(end, MinMax::Max).time();
-                let (current_worst, worst_vertex) = self.worst();
-                current_tns = self.tns();
-                let wns_improved = fuzzy::greater_equal(current_worst, prev_worst);
-                let tns_improved = fuzzy::greater_equal(current_tns, prev_tns);
-                if wns_improved && tns_improved {
-                    prev_worst = current_worst;
-                    prev_tns = current_tns;
-                    self.journal_end();
-                    if pass < LAST_GASP_PASSES {
-                        self.journal_begin();
-                    } else {
-                        journal_open = false;
-                    }
-                } else {
-                    self.fallback = true;
-                    self.journal_restore()?;
-                    journal_open = false;
-                    break;
-                }
-                if end_index == 1
-                    && let Some(worst) = worst_vertex
-                {
-                    end = worst;
-                }
-                pass += 1;
-            }
-            if journal_open {
-                self.journal_end();
-            }
-            if two_terminations {
+        for (end_index, &(end, _)) in violating.iter().enumerate() {
+            let ended = self.last_gasp_endpoint(end_index + 1, end, &mut phase, &mut prev_worst)?;
+            if ended == EndpointEnd::Stop {
                 break;
             }
         }
-        self.options.sequence = sequence;
         Ok(())
+    }
+
+    /// The last gasp's passes over the endpoint ranked `end_index` from the
+    /// worst, each kept only when neither the worst slack `prev_worst` nor
+    /// the total slack gets worse; the first that does ends them.
+    fn last_gasp_endpoint(
+        &mut self,
+        end_index: usize,
+        first_end: PinId,
+        phase: &mut Phase,
+        prev_worst: &mut Seconds,
+    ) -> Result<EndpointEnd, RepairError> {
+        let margin = self.options.margin;
+        self.fallback = false;
+        let mut end = first_end;
+        let mut end_slack = self.end_slack(end);
+        for pass in 1..=phase.max_passes {
+            self.journal_begin();
+            self.iteration += 1;
+            if self.terminate(phase) {
+                self.journal_end();
+                return Ok(phase.terminated());
+            }
+            if self.iteration.is_multiple_of(SMALL_INTERVAL) {
+                phase.just_terminated = false;
+            }
+            self.report_progress();
+            if fuzzy::greater_equal(end_slack, margin) {
+                self.journal_end();
+                return Ok(EndpointEnd::Next);
+            }
+            if !self.repair_endpoint(end, end_slack, &phase.sequence)? {
+                self.end_passes(pass)?;
+                return Ok(EndpointEnd::Next);
+            }
+            end_slack = self.end_slack(end);
+            let (current_worst, worst_vertex) = self.worst();
+            let current_tns = self.tns();
+            if !(fuzzy::greater_equal(current_worst, *prev_worst)
+                && fuzzy::greater_equal(current_tns, phase.prev_tns))
+            {
+                self.fallback = true;
+                self.journal_restore()?;
+                return Ok(EndpointEnd::Next);
+            }
+            *prev_worst = current_worst;
+            phase.prev_tns = current_tns;
+            self.journal_end();
+            if end_index == 1
+                && let Some(worst) = worst_vertex
+            {
+                end = worst;
+            }
+        }
+        Ok(EndpointEnd::Next)
     }
 
     /// One pass over the worst path into `end`: the drivers with the most
@@ -513,8 +550,9 @@ impl Repair<'_, '_> {
         &mut self,
         end: PinId,
         path_slack: Seconds,
-        margin: Seconds,
+        sequence: &[MoveKind],
     ) -> Result<bool, RepairError> {
+        let margin = self.options.margin;
         let path = {
             let netlist = self.resizer.netlist();
             self.resizer
@@ -561,12 +599,11 @@ impl Repair<'_, '_> {
             repairs_per_pass = 1;
         }
         let mut changed = 0;
-        let sequence = self.options.sequence.clone();
         for (index, _) in load_delays {
             if changed >= repairs_per_pass {
                 break;
             }
-            for &kind in &sequence {
+            for &kind in sequence {
                 if self
                     .moves
                     .try_move(self.resizer, kind, &path, index, margin)?
