@@ -193,7 +193,7 @@ fn main() -> anyhow::Result<()> {
     report.peak_rss_mb = report::peak_rss_mb();
     if let Some(path) = &args.report {
         report.write(path)?;
-        ui::wrote(&path_str(path)?);
+        ui::wrote(path);
     }
     outcome?;
 
@@ -390,10 +390,4 @@ fn output_dir(config: &Config) -> PathBuf {
         .parent()
         .filter(|p| !p.as_os_str().is_empty())
         .map_or_else(|| PathBuf::from("output"), Path::to_path_buf)
-}
-
-fn path_str(path: &Path) -> anyhow::Result<String> {
-    path.to_str()
-        .map(str::to_owned)
-        .with_context(|| format!("path is not valid UTF-8: {}", path.display()))
 }

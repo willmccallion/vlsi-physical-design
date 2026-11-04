@@ -200,8 +200,8 @@ pub fn fail(msg: &str) {
 }
 
 /// Prints a dimmed "Wrote" line with the file path highlighted.
-pub fn wrote(path: &str) {
-    eprintln!("    {} {}", "->".dim(), path);
+pub fn wrote(path: &std::path::Path) {
+    eprintln!("    {} {}", "->".dim(), path.display());
 }
 
 /// Prints a dimmed phase timing line.
