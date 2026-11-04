@@ -126,7 +126,7 @@ pub enum LayerRef {
 pub struct Shape {
     /// Layer the rectangle is on.
     pub layer: LayerRef,
-    /// The rectangle.
+    /// Where it lies on its layer, relative to whatever owns it.
     pub rect: Rect<Dbu>,
 }
 
@@ -335,7 +335,7 @@ pub struct Macro {
     pub symmetry: Symmetry,
     /// Site the cell is built on, for row-based cells.
     pub site: Option<SiteId>,
-    /// Pins.
+    /// Its pins, indexed by [`MacroPinId`].
     pub pins: Vec<MacroPin>,
     /// Routing obstructions in macro coordinates.
     pub obstructions: Vec<Shape>,

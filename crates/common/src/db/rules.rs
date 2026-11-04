@@ -146,7 +146,7 @@ pub struct ParallelEdge {
 /// Spacing for shapes whose width lies in a range (LEF `SPACING ... RANGE`).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct WidthRangeSpacing {
-    /// The spacing.
+    /// The least distance a shape in the range keeps from other metal.
     pub spacing: Dbu,
     /// Narrowest shape the rule applies to.
     pub min_width: Dbu,
@@ -233,7 +233,8 @@ pub struct RoutingLayerRules {
 /// A spacing rule between cuts (LEF cut layer `SPACING`).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct CutSpacing {
-    /// The spacing.
+    /// The least distance between two cuts, between their edges unless
+    /// measured center to center.
     pub spacing: Dbu,
     /// Measured between cut centers rather than edges.
     pub center_to_center: bool,
@@ -264,7 +265,8 @@ pub enum CutSpacingCondition {
 /// statements and checks them differently, so the model does too.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Lef58CutSpacing {
-    /// The spacing.
+    /// The least distance between two cuts, between their edges unless
+    /// measured center to center.
     pub spacing: Dbu,
     /// Measured between cut centers rather than edges.
     pub center_to_center: bool,
@@ -330,7 +332,7 @@ pub struct ViaRule {
 /// One metal layer of a [`ViaRule`].
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct ViaRuleMetal {
-    /// The layer.
+    /// The metal layer on this side of the cut.
     pub layer: LayerId,
     /// Overhang past the cut array on one pair of sides and the other.
     pub enclosure: (Dbu, Dbu),
@@ -365,7 +367,7 @@ pub struct SameNetSpacing {
     pub first: LayerRef,
     /// The other layer, possibly the same.
     pub second: LayerRef,
-    /// The spacing.
+    /// The least distance between shapes of one net on the two layers.
     pub spacing: Dbu,
     /// Whether cuts on the two layers may stack directly on each other.
     pub stack: bool,

@@ -95,11 +95,11 @@ struct ViaUp {
 /// keep clear of.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Neighbour {
-    /// The cell.
+    /// The cell beside the one being checked.
     pub cell: CellId,
     /// Its lower-left corner.
     pub at: Point<Dbu>,
-    /// Its orientation.
+    /// How it is turned and flipped where it stands.
     pub orient: Orientation,
 }
 

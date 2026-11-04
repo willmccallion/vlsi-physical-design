@@ -110,7 +110,7 @@ pub struct Region {
 /// A metal layer's width and spacing under a non-default rule.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct NonDefaultLayer {
-    /// The layer.
+    /// The metal layer whose wires the rule sets.
     pub layer: LayerId,
     /// Wire width.
     pub width: Dbu,
@@ -398,7 +398,7 @@ pub struct SpecialNet {
 pub struct SpecialRect {
     /// Layer of the rectangle.
     pub layer: LayerRef,
-    /// The rectangle.
+    /// Where it lies on its layer.
     pub rect: Rect<Dbu>,
     /// The DEF `SHAPE` keyword in force for it, such as `STRIPE`.
     pub shape: Option<String>,
