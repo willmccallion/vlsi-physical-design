@@ -6,7 +6,7 @@
 use pare_common::db::design::NetlistDB;
 use pare_common::db::liberty::Liberty;
 use pare_common::db::parser::{def, lef, liberty, sdc};
-use pare_common::geom::dbu::DbuPerMicron;
+use pare_common::geom::dbu::{Dbu, DbuPerMicron};
 use pare_common::testing;
 use pare_common::units::Seconds;
 use pare_resizer::parasitics::WireRc;
@@ -259,12 +259,12 @@ fn setup_repair_short_of_its_target_gives_what_it_always_has() {
 
 /// The longest wire design repair leaves, as `repair_design -max_wire_length
 /// 100`.
-const MAX_WIRE_LENGTH: i64 = 200_000;
+const MAX_WIRE_LENGTH: Dbu = Dbu(200_000);
 
 #[test]
 fn design_repair_splits_long_and_overloaded_nets_as_it_always_has() {
     let repaired = repaired_text(long_and_loaded_nets(), 1.0, |resizer| {
-        resizer.set_max_wire_length(MAX_WIRE_LENGTH);
+        resizer.set_max_wire_length(Some(MAX_WIRE_LENGTH));
         let design = Repairer::new(resizer).repair_design().unwrap();
         format!("{design:#?}")
     });

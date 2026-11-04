@@ -705,10 +705,10 @@ impl Builder {
             curr_wl = previous.curr_wl;
         }
         let slew_threshold = MAX_SLEW;
-        let wirelength_threshold = if ctx.settings.max_wire_length == 0 {
-            (slew_threshold * tech.max_segment_length()) as i32
-        } else {
-            (ctx.settings.max_wire_length as u32 / tech.char_unit()) as i32
+        let wirelength_threshold = match ctx.settings.max_wire_length {
+            None => (slew_threshold * tech.max_segment_length()) as i32,
+            // A threshold past i32 is longer than any wire, as unbounded.
+            Some(max) => i32::try_from(max.get() / i64::from(tech.char_unit())).unwrap_or(i32::MAX),
         };
         let mut length = 0;
         let mut char_length = tech.max_segment_length();

@@ -1,6 +1,8 @@
 //! What clock tree synthesis is asked to do, and the settings `TritonCTS`
 //! fixes or derives before building the trees.
 
+use pare_common::geom::dbu::Dbu;
+
 /// Which levels of each clock tree get the clock's non-default rule of
 /// doubled spacing, as `clock_tree_synthesis -apply_ndr`.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -103,9 +105,8 @@ pub(crate) struct Settings {
     /// The largest diameter of a cluster of macro sinks once the macros
     /// set it, in microns.
     pub macro_max_diameter: Option<f64>,
-    /// The longest wire worth driving whole, in database units; zero when
-    /// unknown.
-    pub max_wire_length: i64,
+    /// The longest wire worth driving whole, when the resizer gave one.
+    pub max_wire_length: Option<Dbu>,
 }
 
 impl Settings {
@@ -118,7 +119,7 @@ impl Settings {
             max_fanout: None,
             sink_clustering_sizes: SINK_CLUSTERING_SIZES.to_vec(),
             macro_max_diameter: None,
-            max_wire_length: 0,
+            max_wire_length: None,
         }
     }
 

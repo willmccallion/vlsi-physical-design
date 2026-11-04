@@ -42,9 +42,10 @@ pub struct CtsInput<'a> {
     pub signal_rc: WireRc,
     /// The clock wire's resistance and capacitance.
     pub clock_rc: WireRc,
-    /// The longest wire worth driving whole, in database units, as the
-    /// resizer's `findMaxWireLength` gives it; zero when unknown.
-    pub max_wire_length: i64,
+    /// The longest wire worth driving whole, as the resizer's
+    /// `findMaxWireLength` gives it; without one, `TritonCTS`'s own
+    /// thresholds apply.
+    pub max_wire_length: Option<Dbu>,
     /// What is asked.
     pub options: CtsOptions,
 }
@@ -92,7 +93,7 @@ impl ClockTrees {
     /// The longest wire the trees were built to drive whole, as
     /// [`CtsInput::max_wire_length`] gave it.
     #[must_use]
-    pub const fn max_wire_length(&self) -> i64 {
+    pub const fn max_wire_length(&self) -> Option<Dbu> {
         self.setup.settings.max_wire_length
     }
 }
@@ -1124,7 +1125,12 @@ pub(crate) fn sink_bbox_center(db: &NetlistDB, sinks: &[PinId]) -> DbPoint<Dbu> 
 
 /// Groups the nodes of a Steiner tree joined by edges shorter than
 /// `threshold`, as `TritonCTS::findLongEdges` clusters them.
-fn long_edge_clusters(nodes: &[DbPoint<Dbu>], parent: &[usize], threshold: i64) -> Vec<Vec<usize>> {
+fn long_edge_clusters(
+    nodes: &[DbPoint<Dbu>],
+    parent: &[usize],
+    threshold: Option<Dbu>,
+) -> Vec<Vec<usize>> {
+    let threshold = threshold.map_or(0, Dbu::get);
     let mut cluster_of: FxHashMap<usize, usize> = FxHashMap::default();
     let mut clusters: Vec<Vec<usize>> = Vec::new();
     for b in 0..nodes.len() {
