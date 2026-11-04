@@ -1202,7 +1202,9 @@ fn timing_arcs(kind: ArcKind, sense: TimingSense, tables: &ArcTables) -> Vec<Tim
         .collect()
 }
 
-/// The input and output edges a delay arc of `kind` and `sense` joins.
+/// The input and output edges a delay arc of `kind` and `sense` joins, in
+/// the order `OpenSTA`'s `LibertyBuilder` makes them, so whatever walks a
+/// cell's arcs meets them, and breaks ties, as `OpenSTA` does.
 fn delay_edge_pairs(kind: ArcKind, sense: TimingSense) -> Vec<(Edge, Edge)> {
     match (kind.role, kind.from_edge, sense) {
         (ArcRole::RegClkToQ | ArcRole::LatchEnToQ, Some(f), _) => {
@@ -1215,10 +1217,10 @@ fn delay_edge_pairs(kind: ArcKind, sense: TimingSense) -> Vec<(Edge, Edge)> {
             vec![(Edge::Rise, Edge::Fall), (Edge::Fall, Edge::Rise)]
         }
         (_, _, TimingSense::NonUnate) => vec![
+            (Edge::Fall, Edge::Fall),
+            (Edge::Rise, Edge::Fall),
             (Edge::Rise, Edge::Rise),
             (Edge::Fall, Edge::Rise),
-            (Edge::Rise, Edge::Fall),
-            (Edge::Fall, Edge::Fall),
         ],
     }
 }
@@ -1602,6 +1604,27 @@ library (x) {{
 
         assert_eq!(set.sense, TimingSense::NegativeUnate);
         assert_eq!(edges, [(Edge::Rise, Edge::Fall), (Edge::Fall, Edge::Rise)]);
+    }
+
+    #[test]
+    fn non_unate_arcs_come_falling_outputs_first_as_opensta_makes_them() {
+        let cell = sensed_cell(r#"function : "A ^ B";"#, r#"related_pin : "A";"#);
+
+        let edges: Vec<(Edge, Edge)> = cell.arc_sets[0]
+            .arcs
+            .iter()
+            .map(|a| (a.from_edge, a.to_edge))
+            .collect();
+
+        assert_eq!(
+            edges,
+            [
+                (Edge::Fall, Edge::Fall),
+                (Edge::Rise, Edge::Fall),
+                (Edge::Rise, Edge::Rise),
+                (Edge::Fall, Edge::Rise),
+            ]
+        );
     }
 
     #[test]
