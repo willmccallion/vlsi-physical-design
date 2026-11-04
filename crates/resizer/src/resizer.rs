@@ -1273,6 +1273,17 @@ fn slew_rc_factor(link: &Link<'_>) -> Result<f64, RepairError> {
     Ok(factor * (1.0 + SLEW_RC_PESSIMISM))
 }
 
+/// How much `after` grew over `before`, as a percentage; zero when there
+/// was no area before.
+#[must_use]
+pub fn area_change_percent(before: f64, after: f64) -> f64 {
+    if before > 0.0 {
+        (after - before) / before * 100.0
+    } else {
+        0.0
+    }
+}
+
 /// `meters` in database units, rounded and kept within an `int`, as
 /// `Resizer::metersToDbu`.
 pub(crate) fn meters_to_dbu(meters: Meters, dbu: DbuPerMicron) -> Dbu {
