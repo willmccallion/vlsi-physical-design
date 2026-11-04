@@ -88,6 +88,13 @@ impl ClockTrees {
     pub fn clock_buffers(&self) -> &[LibCellId] {
         &self.setup.buffers.all
     }
+
+    /// The longest wire the trees were built to drive whole, as
+    /// [`CtsInput::max_wire_length`] gave it.
+    #[must_use]
+    pub const fn max_wire_length(&self) -> i64 {
+        self.setup.settings.max_wire_length
+    }
 }
 
 /// What every tree of a run is built with.
