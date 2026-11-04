@@ -12,7 +12,7 @@ use crate::db::liberty::{
     TimingArc, TimingArcSet, TimingSense,
 };
 use crate::db::parser::lexer::{ParseError, read_file};
-use crate::units::{Farads, Seconds};
+use crate::units::{Farads, Seconds, Watts};
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
@@ -464,7 +464,36 @@ impl Interpreter {
             };
             units.capacitance = Farads::new(scale * factor);
         }
+        if let Some(attr) = group.attr("leakage_power_unit") {
+            let text = attr.values.first().map_or("", |v| v.0);
+            units.leakage_power = unit_factor(
+                text,
+                &[
+                    ("kw", 1e3),
+                    ("w", 1.0),
+                    ("mw", 1e-3),
+                    ("uw", 1e-6),
+                    ("nw", 1e-9),
+                    ("pw", 1e-12),
+                    ("fw", 1e-15),
+                ],
+            )
+            .map(Watts::new)
+            .ok_or_else(|| self.error(attr.line, format!("unknown leakage power unit '{text}'")))?;
+        }
         Ok(units)
+    }
+
+    /// The value of each `leakage_power` group of a cell; like `OpenSTA`,
+    /// which only warns, a group without one is passed over.
+    fn state_leakages(&self, cell: &Group<'_>) -> Result<Vec<Watts>, ParseError> {
+        let mut out = Vec::new();
+        for group in cell.groups_named("leakage_power") {
+            if let Some(value) = self.number_attr(group, "value")? {
+                out.push(value * self.units.leakage_power);
+            }
+        }
+        Ok(out)
     }
 
     fn thresholds(&self, group: &Group<'_>) -> Result<crate::db::liberty::Thresholds, ParseError> {
@@ -634,6 +663,10 @@ impl Interpreter {
                 .next()
                 .map(|g| self.statetable(g))
                 .transpose()?,
+            leakage: self
+                .number_attr(group, "cell_leakage_power")?
+                .map(|v| v * self.units.leakage_power),
+            state_leakages: self.state_leakages(group)?,
         };
         for pin in group.groups_named("pin") {
             for arg in &pin.args {
@@ -1262,7 +1295,7 @@ fn arc_role(timing_type: &str) -> ArcKind {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::units::{Farads, Seconds};
+    use crate::units::{Farads, Seconds, Watts};
 
     const LIB: &str = r#"
 /* a comment */
@@ -1353,6 +1386,54 @@ library (tiny) {
         assert!((z.max_capacitance.unwrap().get() - 60e-15).abs() < 1e-28);
         assert!((lib.defaults.max_transition.unwrap().get() - 0.5e-9).abs() < 1e-22);
         assert!((lib.thresholds.slew_lower.rise - 0.3).abs() < 1e-12);
+    }
+
+    /// A one-cell library whose header adds `header` and whose cell `c`
+    /// has `body`.
+    fn leaky(header: &str, body: &str) -> Result<Liberty, ParseError> {
+        let src = format!(
+            r#"library (x) {{ time_unit : "1ns"; capacitive_load_unit (1,ff); {header}
+  cell (c) {{ {body} pin (A) {{ direction : input; capacitance : 1.0; }} }} }}"#
+        );
+        parse_str(&src, Path::new("x.lib"))
+    }
+
+    #[test]
+    fn leakage_scales_by_the_leakage_power_unit() {
+        let lib = leaky(
+            r#"leakage_power_unit : "1nW";"#,
+            r#"cell_leakage_power : 21.5;
+               leakage_power () { when : "!A"; value : 20.0; }
+               leakage_power () { when : "A"; value : 23.0; }"#,
+        )
+        .unwrap();
+
+        let cell = &lib.cells[0];
+        let got: Vec<f64> = cell.state_leakages.iter().map(|w| w.get()).collect();
+
+        assert!((cell.leakage.unwrap().get() - 21.5e-9).abs() < 1e-20);
+        assert!((got[0] - 20.0e-9).abs() < 1e-20 && (got[1] - 23.0e-9).abs() < 1e-20);
+    }
+
+    #[test]
+    fn leakage_without_a_unit_is_in_watts_and_a_valueless_state_is_passed_over() {
+        let lib = leaky("", r#"leakage_power () { when : "A"; }"#).unwrap();
+
+        let cell = &lib.cells[0];
+
+        assert_eq!(cell.leakage, None);
+        assert_eq!(cell.state_leakages, Vec::<Watts>::new());
+        assert_eq!(lib.units.leakage_power, Watts::new(1.0));
+    }
+
+    #[test]
+    fn an_unknown_leakage_power_unit_is_refused() {
+        let err = leaky(r#"leakage_power_unit : "1nJ";"#, "").unwrap_err();
+
+        assert!(
+            err.to_string().contains("unknown leakage power unit"),
+            "{err}"
+        );
     }
 
     #[test]

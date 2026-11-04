@@ -198,6 +198,10 @@ define_quantity!(
     /// A resistance, in ohms.
     Ohms
 );
+define_quantity!(
+    /// A power, in watts.
+    Watts
+);
 
 define_quantity!(
     /// A length, in meters.

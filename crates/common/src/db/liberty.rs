@@ -6,7 +6,7 @@
 //! them up, interpolating linearly between the two nearest axis points and
 //! extrapolating from the end pair outside the axis.
 
-use crate::units::{Farads, Ohms, Seconds};
+use crate::units::{Farads, Ohms, Seconds, Watts};
 use std::collections::HashMap;
 use std::fmt;
 
@@ -752,6 +752,10 @@ pub struct LibCell {
     pub sequentials: Vec<Sequential>,
     /// The state table of a cell described by one.
     pub statetable: Option<Statetable>,
+    /// Its `cell_leakage_power`, if given.
+    pub leakage: Option<Watts>,
+    /// The value of each of its `leakage_power` groups, one per state.
+    pub state_leakages: Vec<Watts>,
 }
 
 impl LibCell {
@@ -915,15 +919,18 @@ pub struct LibraryUnits {
     pub time: Seconds,
     /// One capacitance unit.
     pub capacitance: Farads,
+    /// One leakage power unit.
+    pub leakage_power: Watts,
 }
 
 impl Default for LibraryUnits {
     /// Nanoseconds and picofarads, which Liberty assumes when a file
-    /// declares nothing.
+    /// declares nothing, and watts, which `OpenSTA` assumes.
     fn default() -> Self {
         Self {
             time: Seconds::new(1e-9),
             capacitance: Farads::new(1e-12),
+            leakage_power: Watts::new(1.0),
         }
     }
 }
@@ -1525,6 +1532,8 @@ mod tests {
             arc_sets: Vec::new(),
             sequentials: Vec::new(),
             statetable: None,
+            leakage: None,
+            state_leakages: Vec::new(),
         }
     }
 
