@@ -36,6 +36,9 @@ use std::num::NonZeroUsize;
 use std::path::Path;
 use std::time::{Duration, Instant};
 
+/// Iterations between rows of global placement's progress table.
+const PROGRESS_INTERVAL: usize = 50;
+
 /// How far `improve_placement` may move a cell, in row heights across and
 /// rows up or down: OpenROAD-flow-scripts' `DPO_MAX_DISPLACEMENT`.
 const IMPROVE_MAX_DISPLACEMENT: (i64, i64) = (5, 1);
@@ -366,15 +369,8 @@ fn global_placement(
     let timing = repair
         .filter(|_| pass == Pass::Full && gp.timing_driven)
         .and_then(NetlistRepair::timed);
-    if timing.is_some()
-        && gp.routability_driven
-        && gp.congestion_estimate == CongestionEstimate::GlobalRouter
-    {
-        anyhow::bail!(
-            "timing-driven placement changes the netlist as it goes, which the global-router \
-             congestion estimate cannot follow: set congestion_estimate = \"rudy\" or \
-             timing_driven = false"
-        );
+    if timing.is_some() {
+        check_congestion_follows_timing(gp)?;
     }
     let density = Density::of(&model, gp);
     let (routability, mut estimator) = if gp.routability_driven && pass == Pass::Full {
@@ -394,21 +390,9 @@ fn global_placement(
         bins: density.bins,
         seed: gp.seed,
         routability,
-        timing: timing.as_ref().map(|_| TimingParams {
-            overflows: gp
-                .timing_driven_overflows
-                .iter()
-                .copied()
-                .map(Share::get)
-                .collect(),
-        }),
+        timing: timing.as_ref().map(|_| timing_params(gp)),
     };
     ui::placement_table_header();
-    let show = |p: &global::Progress| {
-        if p.iteration.is_multiple_of(50) {
-            ui::placement_iter(p.iteration, p.hpwl, p.overflow, p.penalty, p.step);
-        }
-    };
     let result = if let Some(repair) = timing {
         drop(estimator);
         let mut driver = TimingPlacement {
@@ -417,25 +401,76 @@ fn global_placement(
             repair,
             rounds: 0,
         };
-        global::place(&mut model, &params, None, Some(&mut driver), show)?
+        global::place(
+            &mut model,
+            &params,
+            None,
+            Some(&mut driver),
+            show_global_progress,
+        )?
     } else {
+        let estimator = estimator
+            .as_mut()
+            .map(|e| e as &mut dyn CongestionEstimator);
         let Ok(result) = global::place::<global::NoTiming>(
             &mut model,
             &params,
-            estimator
-                .as_mut()
-                .map(|e| e as &mut dyn CongestionEstimator),
+            estimator,
             None,
-            show,
+            show_global_progress,
         );
         result
     };
     eprintln!();
     show_global_result(db, &result)?;
+    report.placement = Some(placement_summary(&model, &result, density.movable_cells));
+    Ok(model)
+}
+
+/// Fails when timing-driven placement would run beside the global-router
+/// congestion estimate, which cannot follow the netlist's changes.
+fn check_congestion_follows_timing(gp: &GlobalPlacementConfig) -> anyhow::Result<()> {
+    if gp.routability_driven && gp.congestion_estimate == CongestionEstimate::GlobalRouter {
+        anyhow::bail!(
+            "timing-driven placement changes the netlist as it goes, which the global-router \
+             congestion estimate cannot follow: set congestion_estimate = \"rudy\" or \
+             timing_driven = false"
+        );
+    }
+    Ok(())
+}
+
+/// The overflows timing-driven placement repairs the design at.
+fn timing_params(gp: &GlobalPlacementConfig) -> TimingParams {
+    TimingParams {
+        overflows: gp
+            .timing_driven_overflows
+            .iter()
+            .copied()
+            .map(Share::get)
+            .collect(),
+    }
+}
+
+/// Shows global placement's progress every [`PROGRESS_INTERVAL`]
+/// iterations.
+fn show_global_progress(p: &global::Progress) {
+    if p.iteration.is_multiple_of(PROGRESS_INTERVAL) {
+        ui::placement_iter(p.iteration, p.hpwl, p.overflow, p.penalty, p.step);
+    }
+}
+
+/// What global placement of `cells` movable cells reached, for the report;
+/// shows its wirelength.
+fn placement_summary(
+    model: &PlacementModel,
+    result: &GlobalResult,
+    cells: usize,
+) -> PlacementSummary {
     let hpwl = model.hpwl();
     ui::stat_row("HPWL (um):", &format!("{hpwl:.0}"), "", "");
-    report.placement = Some(PlacementSummary {
-        cells: density.movable_cells,
+    PlacementSummary {
+        cells,
         nets: model.nets.len(),
         iterations: result.iterations,
         overflow: result.overflow,
@@ -443,8 +478,7 @@ fn global_placement(
         detailed_moves: 0,
         blocked_pins: 0,
         timing_rounds: result.timing_rounds,
-    });
-    Ok(model)
+    }
 }
 
 /// How densely global placement packs `model`: its movable cells, their
