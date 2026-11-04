@@ -149,9 +149,8 @@ impl PieceCheck<'_> {
             let area = hole.area();
             for (k, &min) in self.rules.min_enclosed_areas.iter().enumerate() {
                 if area < min {
-                    let rule = u16::try_from(k).unwrap_or(u16::MAX);
                     found.add(
-                        self.marker(Violation::MinHole, rule, piece, bbox),
+                        self.marker(Violation::MinHole, k, piece, bbox),
                         Involves::Routing,
                     );
                 }
@@ -185,7 +184,7 @@ impl PieceCheck<'_> {
     fn marker(
         &self,
         violation: Violation,
-        rule: u16,
+        rule: usize,
         piece: &GcPolygon,
         bbox: Rect<Dbu>,
     ) -> Marker {

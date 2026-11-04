@@ -141,7 +141,7 @@ impl<'a> Metal<'a> {
         let mut polygons = Vec::new();
         let mut pieces = 0;
         for geometry in owners {
-            let edge_base = u32::try_from(edges.len()).unwrap_or(u32::MAX);
+            let edge_base = edge_index(edges.len());
             rects.extend(geometry.rects);
             edges.extend(geometry.edges.into_iter().map(|e| GcEdge {
                 piece: e.piece + pieces,
@@ -271,7 +271,6 @@ fn owner_geometry(shapes: &[LayoutShape], group: &[usize]) -> OwnerGeometry {
             .enumerate()
             .map(|(k, e)| (e.to, first + k))
             .collect();
-        let position = |i: usize| u32::try_from(i).unwrap_or(u32::MAX);
         geometry
             .edges
             .extend(boundary.iter().enumerate().map(|(k, &edge)| GcEdge {
@@ -279,8 +278,8 @@ fn owner_geometry(shapes: &[LayoutShape], group: &[usize]) -> OwnerGeometry {
                 owner,
                 fixed: fixed_edges.contains(&edge),
                 piece: geometry.pieces,
-                prev: position(*ending_at.get(&edge.from).unwrap_or(&(first + k))),
-                next: position(*starting_at.get(&edge.to).unwrap_or(&(first + k))),
+                prev: edge_index(*ending_at.get(&edge.from).unwrap_or(&(first + k))),
+                next: edge_index(*starting_at.get(&edge.to).unwrap_or(&(first + k))),
             }));
         geometry.pieces += 1;
         let Some(bbox) = piece.bounding_box() else {
@@ -431,4 +430,11 @@ impl Facing {
     pub(crate) fn prl(&self) -> Dbu {
         self.prl_x.max(self.prl_y)
     }
+}
+
+/// Edge `i` of a model as the edges' own links hold it. A model covers one
+/// bounded tile, whose edges number far below `u32::MAX`.
+fn edge_index(i: usize) -> u32 {
+    debug_assert!(i < u32::MAX as usize, "edge {i} past the index");
+    i as u32
 }

@@ -83,7 +83,7 @@ impl LayerCheck<'_> {
         }
         let marker = Marker::new(
             Violation::MinimumCut,
-            u16::try_from(k).unwrap_or(u16::MAX),
+            k,
             LayerRef::Routing(self.layer),
             Facing::new(&wide.rect, &cut.rect).marker,
             wide.owner,
