@@ -349,6 +349,7 @@ impl HoldRepair<'_> {
         if loads.is_empty() {
             return None;
         }
+        // NOTE: repairEndHold takes the endpoint's load here, not the driver's.
         let load_cap = (resizer.load_cap(driver) - excluded_cap).max(Farads::ZERO);
         let lib = resizer.link.liberty.cell(self.buffer);
         let delays = buffer_delays(lib, &resizer.targets.slews, load_cap);
@@ -390,6 +391,7 @@ impl HoldRepair<'_> {
             && fuzzy::less(setup_after, setup_before)
             && setup_after < self.options.setup_margin;
         if growth > MAX_SLEW_GROWTH || breaks_setup {
+            // NOTE: repairEndHold zeroes its whole inserted count here.
             resizer.journal_restore()?;
         } else {
             resizer.journal_end();
