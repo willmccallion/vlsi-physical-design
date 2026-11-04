@@ -97,8 +97,8 @@ pub(crate) fn run_placement(
 }
 
 /// The layers to place the movable I/O pins on, when they are placed;
-/// none when there are none, the placement is given, or placing them is
-/// turned off and every one already has a place.
+/// none when there are none, the placement is given, or the config names no
+/// layers and every one already has a place.
 fn io_layers_to_place(
     config: &Config,
     db: &NetlistDB,
@@ -108,18 +108,18 @@ fn io_layers_to_place(
     if movable_io.is_empty() || start == PlacementStart::Given {
         return Ok(None);
     }
-    if config.io_placement.enabled {
-        return Ok(Some(IoLayers::from_config(
-            &config.io_placement,
-            &db.library,
-        )?));
+    if let Some(names) = &config.io_placement.layers {
+        return Ok(Some(IoLayers::from_names(names, &db.library)?));
     }
     let unplaced = movable_io
         .iter()
         .filter(|&&p| db.io_pins[p.index()].status == PlacementStatus::Unplaced)
         .count();
     if unplaced > 0 {
-        anyhow::bail!("I/O pin placement is disabled but {unplaced} I/O pins are unplaced");
+        anyhow::bail!(
+            "{unplaced} I/O pins are unplaced; [io_placement] horizontal_layer and \
+             vertical_layer name the layers to place them on"
+        );
     }
     Ok(None)
 }

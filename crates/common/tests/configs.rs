@@ -2,7 +2,9 @@
 
 #![allow(clippy::unwrap_used)]
 
-use pare_common::util::config::{Config, DesignInput, InputConfig, InputError};
+use pare_common::util::config::{
+    Config, DesignInput, InputConfig, InputError, IoLayerNames, OneIoLayer,
+};
 use std::path::{Path, PathBuf};
 
 /// Every `.toml` file under `dir`, in its subfolders too.
@@ -123,7 +125,35 @@ fn every_step_runs_unless_the_config_turns_it_off() {
     assert!(netlist.remove_buffers && netlist.buffer_ports && netlist.clock_tree);
     assert!(netlist.repair_design && netlist.repair_timing && netlist.repair_on_global_routes);
     assert!(gp.routability_driven && gp.timing_driven);
-    assert!(config.io_placement.enabled);
+}
+
+#[test]
+fn pins_are_placed_on_the_two_layers_named() {
+    let config =
+        parse("[io_placement]\nhorizontal_layer = \"metal5\"\nvertical_layer = \"metal6\"\n")
+            .unwrap();
+
+    assert_eq!(
+        config.io_placement.layers,
+        Some(IoLayerNames {
+            horizontal: "metal5".to_string(),
+            vertical: "metal6".to_string(),
+        })
+    );
+}
+
+#[test]
+fn pins_keep_their_places_unless_layers_are_named() {
+    let config = parse("").unwrap();
+
+    assert_eq!(config.io_placement.layers, None);
+}
+
+#[test]
+fn one_pin_layer_without_the_other_is_rejected() {
+    let error = parse("[io_placement]\nvertical_layer = \"metal6\"\n").unwrap_err();
+
+    assert_eq!(error.message(), OneIoLayer.to_string());
 }
 
 #[test]

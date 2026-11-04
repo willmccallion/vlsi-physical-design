@@ -22,9 +22,6 @@ layer_adjustments = [
   { layer = "metal10", adjustment = 0.25 },
 ]
 
-[io_placement]
-enabled = false
-
 [netlist]
 signal_wire = { layer = "metal3", resistance_ohm_per_um = 3.57728, capacitance_ff_per_um = 0.103981 }
 clock_wire = { layer = "metal5", resistance_ohm_per_um = 1.49065, capacitance_ff_per_um = 0.109256 }

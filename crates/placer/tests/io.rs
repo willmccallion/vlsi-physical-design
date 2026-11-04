@@ -5,8 +5,8 @@
 use pare_common::db::design::{NetlistDB, PlacementStatus};
 use pare_common::db::library::LayerRef;
 use pare_common::db::parser::{def, lef};
-use pare_common::util::config::IoPlacementConfig;
-use pare_placer::io::{IoLayers, place_io_pins};
+use pare_common::util::config::IoLayerNames;
+use pare_placer::io::{IoLayers, IoPlacementError, place_io_pins};
 use std::path::{Path, PathBuf};
 
 fn fixture(name: &str) -> PathBuf {
@@ -22,12 +22,11 @@ fn tiny() -> NetlistDB {
 }
 
 fn layers(db: &NetlistDB) -> IoLayers {
-    let config = IoPlacementConfig {
-        horizontal_layer: Some("M3".to_string()),
-        vertical_layer: Some("M2".to_string()),
-        ..IoPlacementConfig::default()
+    let names = IoLayerNames {
+        horizontal: "M3".to_string(),
+        vertical: "M2".to_string(),
     };
-    IoLayers::from_config(&config, &db.library).unwrap()
+    IoLayers::from_names(&names, &db.library).unwrap()
 }
 
 fn pin<'a>(db: &'a NetlistDB, name: &str) -> &'a pare_common::db::design::IoPin {
@@ -71,14 +70,20 @@ fn a_placed_pin_moves_onto_the_boundary_on_the_layer_crossing_its_edge() {
 }
 
 #[test]
-fn placement_needs_both_layers_configured() {
+fn a_pin_layer_running_the_wrong_way_is_rejected() {
     let db = tiny();
-    let config = IoPlacementConfig {
-        vertical_layer: Some("M2".to_string()),
-        ..IoPlacementConfig::default()
+    let names = IoLayerNames {
+        horizontal: "M2".to_string(),
+        vertical: "M3".to_string(),
     };
 
-    let result = IoLayers::from_config(&config, &db.library);
+    let result = IoLayers::from_names(&names, &db.library);
 
-    assert!(result.is_err());
+    assert_eq!(
+        result,
+        Err(IoPlacementError::WrongDirection {
+            layer: "M2".to_string(),
+            direction: "horizontal",
+        })
+    );
 }
