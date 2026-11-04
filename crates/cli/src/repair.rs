@@ -45,6 +45,41 @@ pub(crate) struct NetlistRepair {
     pub(crate) summary: NetlistSummary,
 }
 
+impl NetlistRepair {
+    /// The repair as the timed stages work on it, when the input has
+    /// constraints.
+    pub(crate) fn timed(&mut self) -> Option<TimedRepair<'_>> {
+        let Self {
+            liberty,
+            wires,
+            sdc,
+            namer,
+            ..
+        } = self;
+        Some(TimedRepair {
+            liberty,
+            wires: *wires,
+            sdc: sdc.as_mut()?,
+            namer,
+        })
+    }
+}
+
+/// A netlist repair whose input has constraints.
+pub(crate) struct TimedRepair<'r> {
+    pub(crate) liberty: &'r Liberty,
+    pub(crate) wires: Wires,
+    pub(crate) sdc: &'r mut Sdc,
+    pub(crate) namer: &'r mut Namer,
+}
+
+impl<'r> TimedRepair<'r> {
+    /// The stage `db` is at, its clocks those of the constraints.
+    pub(crate) fn stage(&self, config: &Config, db: &NetlistDB) -> anyhow::Result<Stage<'r>> {
+        Stage::find(config, db, self.liberty, Some(self.sdc))
+    }
+}
+
 /// The pins the clocks reach: those the SDC file's clocks enter at when
 /// the input names one, else those `[netlist] clock_ports` names.
 fn clock_network(
@@ -286,17 +321,17 @@ pub(crate) fn repair_timing(
     repair: &mut NetlistRepair,
     report: &mut Report,
 ) -> anyhow::Result<bool> {
-    let Some(sdc) = repair.sdc.as_ref() else {
-        return Ok(false);
-    };
     if !config.netlist.repair_timing {
         return Ok(false);
     }
+    let Some(timed) = repair.timed() else {
+        return Ok(false);
+    };
     let phase_start = Instant::now();
     ui::phase("Timing Repair");
-    let stage = Stage::find(config, db, &repair.liberty, Some(sdc))?;
-    let mut resizer = Resizer::timed(stage.session(db, repair.wires, &mut repair.namer), sdc)?;
-    report.timing = Some(timing_repair_on(&mut resizer, &repair.liberty)?);
+    let stage = timed.stage(config, db)?;
+    let mut resizer = Resizer::timed(stage.session(db, timed.wires, timed.namer), timed.sdc)?;
+    report.timing = Some(timing_repair_on(&mut resizer, timed.liberty)?);
     let _ = resizer.finish()?;
     report.phase("timing repair", phase_start);
     Ok(true)

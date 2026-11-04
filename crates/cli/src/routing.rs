@@ -3,7 +3,7 @@
 use crate::checks::report_routing;
 use crate::path_str;
 use crate::placement::legalize;
-use crate::repair::{NetlistRepair, Stage, show_design_repair, timing_repair_on};
+use crate::repair::{NetlistRepair, show_design_repair, timing_repair_on};
 use crate::report::{GlobalRouteRepairSummary, Report, RoutingSummary};
 use anyhow::Context;
 use pare_common::db::design::NetlistDB;
@@ -83,12 +83,12 @@ pub(crate) fn global_route_with_repair(
     repair: &mut NetlistRepair,
     report: &mut Report,
 ) -> anyhow::Result<Option<GlobalSession>> {
-    let Some(sdc) = repair.sdc.as_ref() else {
-        return Ok(None);
-    };
     if !config.netlist.repair_on_global_routes {
         return Ok(None);
     }
+    let Some(timed) = repair.timed() else {
+        return Ok(None);
+    };
     ui::section("Global Routing");
     let phase_start = Instant::now();
     ui::phase("Global Route");
@@ -107,14 +107,14 @@ pub(crate) fn global_route_with_repair(
             continue;
         }
         let phase_start = Instant::now();
-        let stage = Stage::find(config, db, &repair.liberty, Some(sdc))?;
+        let stage = timed.stage(config, db)?;
         let routes = GlobalRouting {
             source: &mut session,
             rc: route_rc.clone(),
             legalize: &legalize,
         };
-        let inputs = stage.session(db, repair.wires, &mut repair.namer);
-        let mut resizer = Resizer::on_global_routes(inputs, sdc, routes)?;
+        let inputs = stage.session(db, timed.wires, timed.namer);
+        let mut resizer = Resizer::on_global_routes(inputs, timed.sdc, routes)?;
         match step {
             RepairStep::Design => {
                 ui::phase("Design Repair");
@@ -128,7 +128,7 @@ pub(crate) fn global_route_with_repair(
             }
             RepairStep::Timing => {
                 ui::phase("Timing Repair");
-                summary.timing = Some(timing_repair_on(&mut resizer, &repair.liberty)?);
+                summary.timing = Some(timing_repair_on(&mut resizer, timed.liberty)?);
             }
         }
         let renumbering = resizer.finish()?;
