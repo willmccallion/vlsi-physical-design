@@ -4,7 +4,7 @@
 
 use pare_common::db::design::{NetlistDB, PinOwner};
 use pare_common::db::indices::{CellId, MacroId, PinId, SiteId};
-use pare_common::db::liberty::{LibCell, LibCellId, Liberty};
+use pare_common::db::liberty::{LibCell, LibCellId, LibPort, Liberty};
 use pare_common::db::library::{CoreKind, MacroClass, PinDirection, SignalUse};
 use pare_common::units::{Farads, Ohms};
 use std::collections::HashMap;
@@ -339,7 +339,8 @@ fn is_clock_buffer(cell: &LibCell) -> bool {
 }
 
 /// Groups the cells that may be used into classes of mutually equivalent
-/// cells, as `OpenSTA`'s `EquivCells`; a cell in no class maps to `None`.
+/// cells, as `OpenSTA`'s `EquivCells`, each sorted by falling drive
+/// resistance; a cell in no class maps to `None`.
 fn equivalence_classes(
     liberty: &Liberty,
     dont_use: &[bool],
@@ -367,7 +368,24 @@ fn equivalence_classes(
         }
         candidates.push(i);
     }
+    // NOTE: EquivCells uses std::sort, which over a class this small is an
+    // insertion sort, so cells of equal drive keep library order.
+    for class in &mut classes {
+        class.sort_by(|&a, &b| {
+            output_drive_resistance(liberty.cell(b))
+                .total_cmp(&output_drive_resistance(liberty.cell(a)))
+        });
+    }
     (class_of, classes)
+}
+
+/// The drive resistance of a cell's first output, as `EquivCells` sorts
+/// by; zero for a cell without one.
+fn output_drive_resistance(cell: &LibCell) -> Ohms {
+    cell.ports
+        .iter()
+        .position(LibPort::is_output)
+        .map_or(Ohms::ZERO, |port| cell.drive_resistance(port))
 }
 
 /// Whether an instance is a plain standard cell, as `OpenROAD`'s
@@ -377,4 +395,51 @@ pub(crate) fn is_logic_std_cell(db: &NetlistDB, instance: CellId) -> bool {
         db.cell_macro(instance).class,
         MacroClass::Core(CoreKind::Regular)
     )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use pare_common::db::parser::liberty::parse_str;
+    use std::fmt::Write;
+    use std::path::Path;
+
+    /// Buffers in library order, each slewing to `slew` nanoseconds at
+    /// 2 fF, which sets its drive resistance.
+    fn buffers(slews: &[(&str, f64)]) -> Liberty {
+        let mut cells = String::new();
+        for (name, slew) in slews {
+            write!(
+                cells,
+                "cell ({name}) {{
+                   pin (A) {{ direction : input; capacitance : 1.0; }}
+                   pin (Z) {{ direction : output; function : \"A\";
+                     timing () {{ related_pin : \"A\"; timing_sense : positive_unate;
+                       cell_rise(scalar) {{ values (\"0.01\"); }}
+                       rise_transition(load) {{ values (\"0.0, {slew}\"); }} }} }} }}"
+            )
+            .unwrap();
+        }
+        let src = format!(
+            "library (t) {{ time_unit : \"1ns\"; capacitive_load_unit (1,ff);
+               lu_table_template (load) {{
+                 variable_1 : total_output_net_capacitance; index_1 (\"1.0, 2.0\"); }}
+               {cells} }}"
+        );
+        parse_str(&src, Path::new("t.lib")).unwrap()
+    }
+
+    #[test]
+    fn equivalent_cells_run_from_weakest_drive_and_ties_keep_library_order() {
+        let lib = buffers(&[("A", 0.2), ("B", 0.6), ("C", 0.4), ("D", 0.4)]);
+
+        let (_, classes) = equivalence_classes(&lib, &[false; 4]);
+        let names: Vec<&str> = classes[0]
+            .iter()
+            .map(|&c| lib.cell(c).name.as_str())
+            .collect();
+
+        assert_eq!(classes.len(), 1);
+        assert_eq!(names, ["B", "C", "D", "A"]);
+    }
 }
