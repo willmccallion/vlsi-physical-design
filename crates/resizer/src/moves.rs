@@ -1210,6 +1210,7 @@ fn slews_in_tree(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::testing::{cells, clock_cells_source, design, with_timed_session};
     use pare_common::db::parser::liberty::parse_str;
     use std::path::Path;
 
@@ -1257,6 +1258,81 @@ mod tests {
         let cell = and2((0.05, 0.05), (0.04, 0.03));
 
         assert_eq!(candidate(&cell), Some(1));
+    }
+
+    /// A flop launching through an inverter into another flop.
+    fn inverted_pair() -> pare_common::db::design::NetlistDB {
+        design(
+            "VERSION 5.8 ;\nDIVIDERCHAR \"/\" ;\nBUSBITCHARS \"[]\" ;\nDESIGN inv ;\n\
+             UNITS DISTANCE MICRONS 2000 ;\nDIEAREA ( 0 0 ) ( 80000 40000 ) ;\n\
+             COMPONENTS 3 ;\n- f1 DFF_X1 + PLACED ( 2000 2800 ) N ;\n\
+             - i1 INV_X1 + PLACED ( 20000 2800 ) N ;\n- f2 DFF_X1 + PLACED ( 40000 2800 ) N ;\n\
+             END COMPONENTS\nPINS 1 ;\n- clk + NET clk + DIRECTION INPUT ;\nEND PINS\n\
+             NETS 3 ;\n- clk ( PIN clk ) ( f1 CK ) ( f2 CK ) ;\n- a ( f1 Q ) ( i1 A ) ;\n\
+             - b ( i1 ZN ) ( f2 D ) ;\nEND NETS\nEND DESIGN\n",
+        )
+    }
+
+    /// The inverter's input slews unchanged and its inputs arriving
+    /// `adjust_ns` later, judged by `rule`.
+    fn later_by(adjust_ns: f64, rule: SlackRule) -> SlewImpact {
+        let slew = EdgeValues::both(Seconds::new(0.02e-9));
+        SlewImpact {
+            old: slew,
+            new: slew,
+            adjust: Seconds::new(adjust_ns * 1e-9),
+            margin: Seconds::ZERO,
+            rule,
+        }
+    }
+
+    /// Whether the inverter's output keeps its slack under each impact,
+    /// with a clock of 1 ns.
+    fn inverter_keeps(impacts: &[SlewImpact]) -> Vec<bool> {
+        let mut db = inverted_pair();
+        let mut kept = Vec::new();
+        let constraints = "create_clock -name c -period 1 [get_ports clk]\n";
+        with_timed_session(
+            &mut db,
+            &cells(&clock_cells_source()),
+            constraints,
+            |resizer| {
+                let inverter = resizer.db.cell_id("i1").unwrap();
+                kept = impacts
+                    .iter()
+                    .map(|impact| input_slew_impact_ok(resizer, inverter, impact))
+                    .collect();
+            },
+        );
+        kept
+    }
+
+    #[test]
+    fn a_later_arrival_breaks_the_no_worse_rule_but_not_a_positive_slack() {
+        let impacts = [
+            later_by(0.01, SlackRule::NoWorse),
+            later_by(0.01, SlackRule::NonNegative),
+        ];
+
+        assert_eq!(inverter_keeps(&impacts), [false, true]);
+    }
+
+    #[test]
+    fn an_arrival_past_the_slack_breaks_the_non_negative_rule() {
+        assert_eq!(
+            inverter_keeps(&[later_by(10.0, SlackRule::NonNegative)]),
+            [false]
+        );
+    }
+
+    #[test]
+    fn an_earlier_arrival_keeps_both_rules() {
+        let impacts = [
+            later_by(-0.01, SlackRule::NoWorse),
+            later_by(-0.01, SlackRule::NonNegative),
+        ];
+
+        assert_eq!(inverter_keeps(&impacts), [true, true]);
     }
 
     #[test]
