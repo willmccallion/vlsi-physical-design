@@ -30,7 +30,7 @@ fn load_liberty(paths: &[String]) -> anyhow::Result<Liberty> {
             None => merged = Some(lib),
             Some(first) => first
                 .absorb(lib)
-                .map_err(|name| anyhow::anyhow!("cell '{name}' is in two Liberty files"))?,
+                .map_err(|e| anyhow::anyhow!("cell '{}' is in two Liberty files", e.name))?,
         }
     }
     merged.context("no Liberty files")

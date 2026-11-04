@@ -6,6 +6,7 @@
 //! them up, interpolating linearly between the two nearest axis points and
 //! extrapolating from the end pair outside the axis.
 
+use crate::db::library::DuplicateName;
 use crate::units::{Farads, Ohms, Seconds, Watts};
 use std::collections::HashMap;
 use std::fmt;
@@ -992,10 +993,13 @@ impl Liberty {
         }
     }
 
-    /// Adds a cell, or returns its name when one by that name exists.
-    pub fn add_cell(&mut self, cell: LibCell) -> Result<LibCellId, String> {
+    /// Adds a cell, unless one by its name is already there.
+    pub fn add_cell(&mut self, cell: LibCell) -> Result<LibCellId, DuplicateName> {
         if self.cell_by_name.contains_key(&cell.name) {
-            return Err(cell.name);
+            return Err(DuplicateName {
+                kind: "cell",
+                name: cell.name,
+            });
         }
         let id = LibCellId(self.cells.len() as u32);
         let _ = self.cell_by_name.insert(cell.name.clone(), id);
@@ -1005,8 +1009,8 @@ impl Liberty {
 
     /// Takes the cells of another library into this one, which keeps its
     /// own thresholds, while each absorbed cell keeps its library's
-    /// defaults; returns the name of a cell both have.
-    pub fn absorb(&mut self, other: Self) -> Result<(), String> {
+    /// defaults; fails on a cell both have.
+    pub fn absorb(&mut self, other: Self) -> Result<(), DuplicateName> {
         let base = self.absorbed_defaults.len() + 1;
         self.absorbed_defaults.push(other.defaults);
         self.absorbed_defaults.extend(other.absorbed_defaults);
