@@ -3,7 +3,7 @@
 use crate::checks::report_routing;
 use crate::path_str;
 use crate::placement::legalize;
-use crate::repair::{NetlistRepair, Networks, show_design_repair, timing_repair_on};
+use crate::repair::{NetlistRepair, Stage, show_design_repair, timing_repair_on};
 use crate::report::{GlobalRouteRepairSummary, Report, RoutingSummary};
 use anyhow::Context;
 use pare_common::db::design::NetlistDB;
@@ -18,7 +18,7 @@ use pare_placer::zones::Zones;
 use pare_resizer::parasitics::WireRc;
 use pare_resizer::resizer::GlobalRouting;
 use pare_resizer::route_parasitics::RouteRc;
-use pare_resizer::{Link, Repairer, Resizer, SessionInputs};
+use pare_resizer::{Repairer, Resizer};
 use pare_router::GlobalSession;
 use std::path::{Path, PathBuf};
 use std::time::Instant;
@@ -107,20 +107,13 @@ pub(crate) fn global_route_with_repair(
             continue;
         }
         let phase_start = Instant::now();
-        let link = Link::new(db, &repair.liberty, &config.netlist.dont_use)?;
-        let networks = Networks::find(db, &link, config, Some(sdc))?;
+        let stage = Stage::find(config, db, &repair.liberty, Some(sdc))?;
         let routes = GlobalRouting {
             source: &mut session,
             rc: route_rc.clone(),
             legalize: &legalize,
         };
-        let inputs = SessionInputs {
-            db,
-            context: networks.context(&link, repair.wires.clock),
-            rc: repair.wires.signal,
-            buffers: networks.buffers.clone(),
-            namer: &mut repair.namer,
-        };
+        let inputs = stage.session(db, repair.wires, &mut repair.namer);
         let mut resizer = Resizer::on_global_routes(inputs, sdc, routes)?;
         match step {
             RepairStep::Design => {

@@ -68,43 +68,55 @@ fn clock_network(
     }
 }
 
-/// What a repair works around: the design's constant pins and clock
-/// network, and the buffers it may insert.
-pub(crate) struct Networks {
+/// The design as a repair stage finds it: its masters linked to the
+/// library, the constant pins and clock network repair leaves alone, and the
+/// buffers it may insert.
+pub(crate) struct Stage<'l> {
+    pub(crate) link: Link<'l>,
     pub(crate) constants: Constants,
     pub(crate) clocks: ClockNetwork,
     pub(crate) buffers: BufferSet,
 }
 
-impl Networks {
-    /// The networks of `db` as it stands, linked by `link`.
+impl<'l> Stage<'l> {
+    /// Links `db` as it stands to `liberty` and finds its networks.
     pub(crate) fn find(
-        db: &NetlistDB,
-        link: &Link<'_>,
         config: &Config,
+        db: &NetlistDB,
+        liberty: &'l Liberty,
         sdc: Option<&Sdc>,
     ) -> anyhow::Result<Self> {
-        let netlist = Netlist::new(db, link);
+        let link = Link::new(db, liberty, &config.netlist.dont_use)?;
+        let netlist = Netlist::new(db, &link);
         let constants = Constants::find(&netlist);
         let clocks = clock_network(&netlist, config, sdc, &constants)?;
+        let buffers = link.find_buffers(db)?;
         Ok(Self {
+            link,
             constants,
             clocks,
-            buffers: link.find_buffers(db)?,
+            buffers,
         })
     }
 
-    /// The context a resizer session over these networks takes.
-    pub(crate) const fn context<'a>(
+    /// The inputs of a resizer session over `db` at this stage.
+    pub(crate) fn session<'a>(
         &'a self,
-        link: &'a Link<'a>,
-        clock_rc: Option<WireRc>,
-    ) -> RepairContext<'a> {
-        RepairContext {
-            link,
-            clocks: &self.clocks,
-            constants: &self.constants,
-            clock_rc,
+        db: &'a mut NetlistDB,
+        wires: Wires,
+        namer: &'a mut Namer,
+    ) -> SessionInputs<'a> {
+        SessionInputs {
+            db,
+            context: RepairContext {
+                link: &self.link,
+                clocks: &self.clocks,
+                constants: &self.constants,
+                clock_rc: wires.clock,
+            },
+            rc: wires.signal,
+            buffers: self.buffers.clone(),
+            namer,
         }
     }
 }
@@ -149,20 +161,20 @@ pub(crate) fn repair_netlist(
     if config.netlist.buffer_ports {
         let phase_start = Instant::now();
         ui::phase("Port Buffering");
-        let networks = Networks::find(db, &link, config, sdc.as_ref())?;
+        let stage = Stage::find(config, db, &liberty, sdc.as_ref())?;
         let done = pare_resizer::buffer_ports(
             db,
-            &link,
-            &networks.buffers,
-            &networks.clocks,
-            &networks.constants,
+            &stage.link,
+            &stage.buffers,
+            &stage.clocks,
+            &stage.constants,
             &mut namer,
         )?;
         summary.input_buffers = done.inputs;
         summary.output_buffers = done.outputs;
         summary
             .buffer_cell
-            .clone_from(&liberty.cell(networks.buffers.lowest_drive).name);
+            .clone_from(&liberty.cell(stage.buffers.lowest_drive).name);
         ui::stat_row(
             "Input buffers:",
             &done.inputs.to_string(),
@@ -173,7 +185,7 @@ pub(crate) fn repair_netlist(
             "Buffer:",
             &summary.buffer_cell,
             "Clock pins:",
-            &networks.clocks.sources().len().to_string(),
+            &stage.clocks.sources().len().to_string(),
         );
         report.phase("port buffering", phase_start);
     }
@@ -207,15 +219,8 @@ pub(crate) fn repair_design(
     }
     let phase_start = Instant::now();
     ui::phase("Design Repair");
-    let link = Link::new(db, &repair.liberty, &config.netlist.dont_use)?;
-    let networks = Networks::find(db, &link, config, repair.sdc.as_ref())?;
-    let inputs = SessionInputs {
-        db,
-        context: networks.context(&link, repair.wires.clock),
-        rc: repair.wires.signal,
-        buffers: networks.buffers.clone(),
-        namer: &mut repair.namer,
-    };
+    let stage = Stage::find(config, db, &repair.liberty, repair.sdc.as_ref())?;
+    let inputs = stage.session(db, repair.wires, &mut repair.namer);
     let done = match repair.sdc.as_ref() {
         Some(sdc) => repair_design_on(Resizer::timed(inputs, sdc)?)?,
         None => repair_design_on(Resizer::new(inputs)?)?,
@@ -289,16 +294,8 @@ pub(crate) fn repair_timing(
     }
     let phase_start = Instant::now();
     ui::phase("Timing Repair");
-    let link = Link::new(db, &repair.liberty, &config.netlist.dont_use)?;
-    let networks = Networks::find(db, &link, config, Some(sdc))?;
-    let inputs = SessionInputs {
-        db,
-        context: networks.context(&link, repair.wires.clock),
-        rc: repair.wires.signal,
-        buffers: networks.buffers.clone(),
-        namer: &mut repair.namer,
-    };
-    let mut resizer = Resizer::timed(inputs, sdc)?;
+    let stage = Stage::find(config, db, &repair.liberty, Some(sdc))?;
+    let mut resizer = Resizer::timed(stage.session(db, repair.wires, &mut repair.namer), sdc)?;
     report.timing = Some(timing_repair_on(&mut resizer, &repair.liberty)?);
     let _ = resizer.finish()?;
     report.phase("timing repair", phase_start);

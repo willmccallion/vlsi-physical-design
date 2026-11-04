@@ -1,6 +1,6 @@
 //! Clock tree synthesis and the repairs that follow it.
 
-use crate::repair::{NetlistRepair, Networks};
+use crate::repair::{NetlistRepair, Stage};
 use crate::report::{ClockTreeSummary, Report};
 use anyhow::Context;
 use pare_common::db::design::NetlistDB;
@@ -9,7 +9,7 @@ use pare_common::units::Seconds;
 use pare_common::util::config::Config;
 use pare_common::util::ui;
 use pare_cts::{CtsInput, CtsOptions, balance_latencies};
-use pare_resizer::{Link, Repairer, Resizer, SessionInputs, repair_clock_inverters};
+use pare_resizer::{Link, Repairer, Resizer, repair_clock_inverters};
 use rustc_hash::FxHashMap;
 use std::time::Instant;
 
@@ -34,28 +34,27 @@ pub(crate) fn clock_tree_synthesis(
         .context("[netlist] clock trees need clock_wire")?;
     let phase_start = Instant::now();
     ui::phase("Clock Tree Synthesis");
-    let link = Link::new(db, &repair.liberty, &config.netlist.dont_use)?;
     let mut summary = ClockTreeSummary::default();
     {
-        let networks = Networks::find(db, &link, config, repair.sdc.as_ref())?;
-        let inverters = repair_clock_inverters(db, &link, &networks.clocks, &mut repair.namer)?;
+        let stage = Stage::find(config, db, &repair.liberty, repair.sdc.as_ref())?;
+        let inverters = repair_clock_inverters(db, &stage.link, &stage.clocks, &mut repair.namer)?;
         summary.cloned_inverters = inverters.inverters;
     }
-    let max_wire_length =
-        pare_resizer::rebuffer::max_wire_length_of(&link, &link.find_buffers(db)?, rc, db.dbu());
-    let trees = {
+    let (trees, max_wire_length) = {
         let sdc = repair.sdc.as_ref().context("constraints")?;
-        let networks = Networks::find(db, &link, config, Some(sdc))?;
+        let stage = Stage::find(config, db, &repair.liberty, Some(sdc))?;
+        let max_wire_length =
+            pare_resizer::rebuffer::max_wire_length_of(&stage.link, &stage.buffers, rc, db.dbu());
         let input = CtsInput {
-            link: &link,
+            link: &stage.link,
             sdc,
-            clocks: &networks.clocks,
+            clocks: &stage.clocks,
             signal_rc: rc,
             clock_rc,
             max_wire_length,
             options: CtsOptions::default(),
         };
-        pare_cts::synthesize(db, &input)?
+        (pare_cts::synthesize(db, &input)?, max_wire_length)
     };
     let sdc = repair.sdc.as_mut().context("constraints")?;
     for clock in &mut sdc.clocks {
@@ -63,36 +62,24 @@ pub(crate) fn clock_tree_synthesis(
     }
     let sdc = repair.sdc.as_ref().context("constraints")?;
     {
-        let networks = Networks::find(db, &link, config, Some(sdc))?;
-        let mut resizer = Resizer::new(SessionInputs {
-            db,
-            context: networks.context(&link, Some(clock_rc)),
-            rc,
-            buffers: networks.buffers.clone(),
-            namer: &mut repair.namer,
-        })?;
+        let stage = Stage::find(config, db, &repair.liberty, Some(sdc))?;
+        let mut resizer = Resizer::new(stage.session(db, repair.wires, &mut repair.namer))?;
         let done = Repairer::new(&mut resizer)
             .repair_clock_nets(trees.clock_buffers(), max_wire_length)?;
         summary.clock_net_repeaters = done.inserted;
         let _ = resizer.finish()?;
     }
     let arrivals: FxHashMap<PinId, Seconds> = {
-        let networks = Networks::find(db, &link, config, Some(sdc))?;
+        let stage = Stage::find(config, db, &repair.liberty, Some(sdc))?;
         let pins = db.pins.len();
-        let inputs = SessionInputs {
-            db,
-            context: networks.context(&link, Some(clock_rc)),
-            rc,
-            buffers: networks.buffers.clone(),
-            namer: &mut repair.namer,
-        };
-        let resizer = Resizer::timed(inputs, sdc)?;
+        let resizer = Resizer::timed(stage.session(db, repair.wires, &mut repair.namer), sdc)?;
         let sta = resizer.sta();
         (0..pins)
             .map(PinId::new)
             .filter_map(|p| sta.clock_rise_arrival(p).map(|a| (p, a)))
             .collect()
     };
+    let link = Link::new(db, &repair.liberty, &config.netlist.dont_use)?;
     summary.delay_buffers = balance_latencies(db, &link, &trees, &|p| arrivals.get(&p).copied())?;
     let cts = &trees.summary;
     summary.trees = cts.trees;
