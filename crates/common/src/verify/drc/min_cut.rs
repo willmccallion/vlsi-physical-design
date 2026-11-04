@@ -7,7 +7,7 @@
 
 use super::model::{Cut, Facing, GcRect, Metal, Model};
 use super::rules::Rules;
-use super::{Marker, Markers, Violation};
+use super::{Involves, Marker, Markers, Violation};
 use crate::db::indices::LayerId;
 use crate::db::library::LayerRef;
 use crate::db::rules::{CutApproach, MinimumCut};
@@ -89,7 +89,7 @@ impl LayerCheck<'_> {
             wide.owner,
             cut.owner,
         );
-        found.add(marker, wide.fixed && cut.fixed);
+        found.add(marker, Involves::of(wide.fixed && cut.fixed));
     }
 
     /// Whether a maximal rectangle of the owner on this layer meets both the

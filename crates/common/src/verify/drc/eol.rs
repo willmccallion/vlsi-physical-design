@@ -11,7 +11,7 @@
 
 use super::model::{Facing, GcEdge, Metal, Model};
 use super::rules::Rules;
-use super::{Marker, Markers, Violation};
+use super::{Involves, Marker, Markers, Violation};
 use crate::db::indices::LayerId;
 use crate::db::library::LayerRef;
 use crate::db::rules::{EndOfLineSpacing, ParallelEdge};
@@ -197,7 +197,7 @@ impl LayerCheck<'_> {
             edge.owner,
             other.owner,
         );
-        found.add(marker, false);
+        found.add(marker, Involves::Routing);
     }
 }
 

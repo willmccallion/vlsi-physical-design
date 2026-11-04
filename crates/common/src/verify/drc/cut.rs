@@ -10,7 +10,7 @@
 use super::layout::OwnerIndex;
 use super::model::{Cut, Facing, GcRect, Metal, Model};
 use super::rules::CutRules;
-use super::{Marker, Markers, Violation};
+use super::{Involves, Marker, Markers, Violation};
 use crate::db::indices::CutLayerId;
 use crate::db::library::LayerRef;
 use crate::db::rules::{
@@ -95,7 +95,7 @@ impl LayerCheck<'_> {
                     cut.owner,
                     other.owner,
                 );
-                found.add(marker, cut.fixed && other.fixed);
+                found.add(marker, Involves::of(cut.fixed && other.fixed));
             } else {
                 self.check_spacing(&cut, &other, &facing, k, rule, found);
             }
@@ -149,7 +149,7 @@ impl LayerCheck<'_> {
         }
         found.add(
             self.spacing_marker(k, facing, cut, other),
-            cut.fixed && other.fixed,
+            Involves::of(cut.fixed && other.fixed),
         );
     }
 
@@ -185,7 +185,7 @@ impl LayerCheck<'_> {
             }
             found.add(
                 self.spacing_marker(k, &facing, &cut, &other),
-                cut.fixed && other.fixed,
+                Involves::of(cut.fixed && other.fixed),
             );
         }
     }
