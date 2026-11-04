@@ -59,8 +59,8 @@ pub(crate) struct RepairOptions {
     pub(crate) slew_margin: f64,
     /// Percentage of each capacitance limit kept in hand.
     pub(crate) cap_margin: f64,
-    /// Longest wire allowed, in database units; zero for no limit.
-    pub(crate) max_wire_length: i64,
+    /// Longest wire allowed, if any.
+    pub(crate) max_wire_length: Option<Dbu>,
     /// How much one sizing step may grow a cell.
     pub(crate) sizing_limits: SizingLimits,
 }
@@ -70,7 +70,7 @@ impl Default for RepairOptions {
         Self {
             slew_margin: 0.0,
             cap_margin: 0.0,
-            max_wire_length: 0,
+            max_wire_length: None,
             sizing_limits: SizingLimits::OPENROAD,
         }
     }
@@ -497,7 +497,7 @@ impl<'a, T: Timing> Resizer<'a, T> {
 
     /// Sets the longest wire design repair allows, in database units; zero
     /// for no limit.
-    pub const fn set_max_wire_length(&mut self, length: i64) {
+    pub const fn set_max_wire_length(&mut self, length: Option<Dbu>) {
         self.options.max_wire_length = length;
     }
 

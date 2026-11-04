@@ -217,7 +217,7 @@ impl<'r, 'a, T: Timing> Repairer<'r, 'a, T> {
     pub fn repair_clock_nets(
         mut self,
         clock_buffers: &[LibCellId],
-        max_length: i64,
+        max_length: Option<Dbu>,
     ) -> Result<RepairSummary, RepairError> {
         let saved_options = self.resizer.options;
         let saved_strongest = self.resizer.r_strongest_buffer;
@@ -267,8 +267,11 @@ impl<'r, 'a, T: Timing> Repairer<'r, 'a, T> {
         let Some(tree) = self.driver_tree(net, driver) else {
             return Ok(());
         };
-        let max_length = self.resizer.options.max_wire_length;
-        let too_long = max_length > 0 && tree.max_load_wire_length() > max_length;
+        let too_long = self
+            .resizer
+            .options
+            .max_wire_length
+            .is_some_and(|max| tree.max_load_wire_length() > max.get());
         if too_long {
             self.summary.length_violations += 1;
         }
@@ -652,7 +655,7 @@ impl<'r, 'a, T: Timing> Repairer<'r, 'a, T> {
             }
         }
         let max_length = self.resizer.options.max_wire_length;
-        if max_length > 0 && left.wire_length + right.wire_length > max_length {
+        if max_length.is_some_and(|max| left.wire_length + right.wire_length > max.get()) {
             repeaters.reason = "max_length";
             if left.wire_length > right.wire_length {
                 repeaters.left = true;
@@ -757,7 +760,7 @@ impl<'r, 'a, T: Timing> Repairer<'r, 'a, T> {
     /// limit `max_cap`, or the load slew limit beyond it.
     fn wire_breaks_limits(&self, wire: &DriverWire, rest: &WireRest, max_cap: Farads) -> bool {
         let max_length = self.resizer.options.max_wire_length;
-        (max_length > 0 && rest.wire_length > max_length)
+        max_length.is_some_and(|max| rest.wire_length > max.get())
             || (wire.cap > FaradsPerMeter::ZERO
                 && max_cap > Farads::ZERO
                 && wire.load_cap(rest.length, rest.ref_cap) > max_cap)
@@ -784,13 +787,11 @@ impl<'r, 'a, T: Timing> Repairer<'r, 'a, T> {
             input.load_slew.get(),
             input.max_load_slew_margined.get(),
         );
-        let max_length = self.resizer.options.max_wire_length;
-        let mut split = if max_length > 0 && input.wire_length > max_length {
-            (max_length - input.wire_length_ref)
+        let mut split = match self.resizer.options.max_wire_length {
+            Some(max) if input.wire_length > max.get() => (max.get() - input.wire_length_ref)
                 .max(0)
-                .min(input.length / 2)
-        } else {
-            i64::MAX
+                .min(input.length / 2),
+            _ => i64::MAX,
         };
         if wire_cap > 0.0 && load_cap > max_cap {
             split = split.min(to_dbu((max_cap - ref_cap) / wire_cap).max(0));

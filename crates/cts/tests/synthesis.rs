@@ -9,7 +9,7 @@ use pare_common::db::liberty::Liberty;
 use pare_common::db::library::{DuplicateName, SignalUse};
 use pare_common::db::parser::{def, lef, liberty, sdc};
 use pare_common::db::sdc::Sdc;
-use pare_common::geom::dbu::DbuPerMicron;
+use pare_common::geom::dbu::{Dbu, DbuPerMicron};
 use pare_common::geom::orient::Orientation;
 use pare_common::testing;
 use pare_common::units::Seconds;
@@ -170,7 +170,7 @@ fn every_flop_is_clocked_through_a_tree_of_clock_buffers() {
         clocks: &clocks,
         signal_rc: wire(&db, "metal2", 3.5, 0.1),
         clock_rc: wire(&db, "metal3", 1.5, 0.11),
-        max_wire_length: 0,
+        max_wire_length: None,
         options: CtsOptions::default(),
     };
 
@@ -201,7 +201,7 @@ fn the_root_net_gets_the_clock_rule_of_doubled_spacing() {
         clocks: &clocks,
         signal_rc: wire(&db, "metal2", 3.5, 0.1),
         clock_rc: wire(&db, "metal3", 1.5, 0.11),
-        max_wire_length: 0,
+        max_wire_length: None,
         options: CtsOptions::default(),
     };
 
@@ -254,7 +254,7 @@ fn synthesized_with_slow_flops(slow: usize, insertion_delay: bool) -> (NetlistDB
         clocks: &clocks,
         signal_rc: wire(&db, "metal2", 3.5, 0.1),
         clock_rc: wire(&db, "metal3", 1.5, 0.11),
-        max_wire_length: 0,
+        max_wire_length: None,
         options: CtsOptions {
             insertion_delay,
             ..CtsOptions::default()
@@ -315,7 +315,7 @@ fn a_clock_gate_driving_far_apart_flops_is_cloned_as_it_always_is() {
         clocks: &clocks,
         signal_rc: wire(&db, "metal2", 3.5, 0.1),
         clock_rc: wire(&db, "metal3", 1.5, 0.11),
-        max_wire_length: 23_000,
+        max_wire_length: Some(Dbu(23_000)),
         options: CtsOptions::default(),
     };
     let first_added = db.cells.len();
@@ -346,7 +346,7 @@ fn the_faster_tree_of_a_clock_is_delayed_as_it_always_is() {
         clocks: &clocks,
         signal_rc: wire(&db, "metal2", 3.5, 0.1),
         clock_rc: wire(&db, "metal3", 1.5, 0.11),
-        max_wire_length: 0,
+        max_wire_length: None,
         options: CtsOptions::default(),
     };
     let first_added = db.cells.len();
@@ -392,7 +392,7 @@ fn a_tree_whose_buffer_name_is_taken_is_refused_with_that_name() {
         clocks: &clocks,
         signal_rc: wire(&db, "metal2", 3.5, 0.1),
         clock_rc: wire(&db, "metal3", 1.5, 0.11),
-        max_wire_length: 0,
+        max_wire_length: None,
         options: CtsOptions::default(),
     };
 
@@ -469,7 +469,7 @@ fn clock_trees_text(db: &NetlistDB, first_added: usize, summary: &CtsSummary) ->
 
 /// Synthesizes the trees of a 24 by 24 grid of flops under `sdc_text`
 /// with wires of at most `max_wire_length`, as text.
-fn synthesized_grid(sdc_text: &str, max_wire_length: i64) -> String {
+fn synthesized_grid(sdc_text: &str, max_wire_length: Option<Dbu>) -> String {
     let (mut db, lib, constraints) = load_constrained(24, 24, false, sdc_text);
     let link = Link::new(&db, &lib, &[]).unwrap();
     let clocks = clock_network(&db, &link, &constraints);
@@ -491,19 +491,19 @@ fn synthesized_grid(sdc_text: &str, max_wire_length: i64) -> String {
 
 #[test]
 fn a_grid_of_clustered_flops_gets_the_trees_it_always_has() {
-    assert_golden("grid_24x24.txt", &synthesized_grid(CLOCK, 0));
+    assert_golden("grid_24x24.txt", &synthesized_grid(CLOCK, None));
 }
 
 #[test]
 fn a_grid_under_a_fanout_limit_gets_the_trees_it_always_has() {
     let sdc = format!("{CLOCK}set_max_fanout 10 [current_design]\n");
-    assert_golden("grid_24x24_fanout_10.txt", &synthesized_grid(&sdc, 0));
+    assert_golden("grid_24x24_fanout_10.txt", &synthesized_grid(&sdc, None));
 }
 
 #[test]
 fn a_grid_under_a_wire_length_limit_gets_the_trees_it_always_has() {
     assert_golden(
         "grid_24x24_wire_100um.txt",
-        &synthesized_grid(CLOCK, 200_000),
+        &synthesized_grid(CLOCK, Some(Dbu(200_000))),
     );
 }
