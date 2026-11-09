@@ -427,12 +427,8 @@ impl Improver {
     }
 
     /// Pushes `right` and the cells after it right of a cell placed at
-    /// `xj`, as `DetailedMgr::shiftRightHelper`.
-    ///
-    /// `OpenDP` snaps each pushed cell to the site at `xj - origin /
-    /// spacing`, not `(xj - origin) / spacing`, which flings it about
-    /// `spacing` times too far, so a push only stays when its row begins at
-    /// zero and the cell at it.
+    /// `xj`, each onto the first site at or after where it must start, as
+    /// `DetailedMgr::shiftRightHelper`.
     pub(super) fn shift_right_helper(
         &mut self,
         mut ndi: NodeId,
@@ -450,7 +446,7 @@ impl Improver {
                 return Ok(false);
             }
             xj += self.width(ndi);
-            let mut sx = misaligned_site(xj, row.left, row.site_spacing);
+            let mut sx = site_holding(xj, row.left, row.site_spacing);
             if xj != sx {
                 if xj > sx {
                     sx += row.site_spacing;
@@ -477,9 +473,8 @@ impl Improver {
     }
 
     /// Pushes `left` and the cells before it left of a cell placed at `xj`,
-    /// as `DetailedMgr::shiftLeftHelper`; the misplaced site of
-    /// [`Self::shift_right_helper`] lies right of `xj` here, so the cells
-    /// pack exactly.
+    /// each onto the last site at or before where it must end, as
+    /// `DetailedMgr::shiftLeftHelper`.
     pub(super) fn shift_left_helper(
         &mut self,
         mut ndi: NodeId,
@@ -496,7 +491,7 @@ impl Improver {
                 return Ok(false);
             }
             xj -= self.width(ndl);
-            let sx = misaligned_site(xj, row.left, row.site_spacing);
+            let sx = site_holding(xj, row.left, row.site_spacing);
             if xj > sx {
                 xj = sx;
             }
@@ -642,13 +637,12 @@ impl Improver {
     }
 }
 
-/// `originX + (xj - originX / spacing) * spacing` in C++ `int` arithmetic.
-// Wraps as OpenDP's int does.
-fn misaligned_site(xj: Dbu, origin: Dbu, spacing: Dbu) -> Dbu {
-    let site = (xj.get() - origin.get() / spacing.get()) as i32;
-    Dbu(i64::from(
-        (origin.get() as i32).wrapping_add(site.wrapping_mul(spacing.get() as i32)),
-    ))
+/// The start of the site holding `xj` in a row whose sites start at
+/// `origin`, `spacing` apart, the offset divided toward zero as C++ does.
+// NOTE: shift{Right,Left}Helper divide only originX by siteSpacing, a
+// precedence slip that flings cells far off; PARE divides the offset.
+fn site_holding(xj: Dbu, origin: Dbu, spacing: Dbu) -> Dbu {
+    origin + spacing * ((xj - origin).get() / spacing.get())
 }
 
 #[cfg(test)]
@@ -678,6 +672,16 @@ mod tests {
         let cells = nodes(3);
 
         assert_eq!(around(&cells, 3), (Some(cells[2]), None));
+    }
+
+    #[test]
+    fn a_position_snaps_to_the_start_of_the_site_holding_it() {
+        let (origin, spacing) = (Dbu(100), Dbu(10));
+
+        let inside = site_holding(Dbu(135), origin, spacing);
+        let on_edge = site_holding(Dbu(130), origin, spacing);
+
+        assert_eq!((inside, on_edge), (Dbu(130), Dbu(130)));
     }
 
     #[test]
