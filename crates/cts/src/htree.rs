@@ -199,7 +199,7 @@ struct LevelTopology {
     wire_segments: Vec<usize>,
     points: Vec<TreePoint>,
     parents: Vec<Option<usize>>,
-    sinks: Vec<Vec<TreePoint>>,
+    sinks: Vec<BranchSinks>,
     driving_subnet: Vec<Option<usize>>,
     output_slew: u32,
     output_cap: u32,
@@ -224,7 +224,7 @@ impl LevelTopology {
     fn add_point(&mut self, point: TreePoint, parent: Option<usize>) -> usize {
         self.points.push(point);
         self.parents.push(parent);
-        self.sinks.push(Vec::new());
+        self.sinks.push(BranchSinks::default());
         self.driving_subnet.push(None);
         self.points.len() - 1
     }
@@ -236,8 +236,39 @@ impl LevelTopology {
     }
 }
 
+/// The sinks and leaf buffers a branch reaches: where each is, in the
+/// single precision `TritonCTS` keeps them in, and which it is.
+#[derive(Clone, Debug, Default)]
+struct BranchSinks {
+    points: Vec<(f32, f32)>,
+    insts: Vec<InstRef>,
+}
+
+impl BranchSinks {
+    fn push(&mut self, point: (f32, f32), inst: InstRef) {
+        self.points.push(point);
+        self.insts.push(inst);
+    }
+
+    const fn len(&self) -> usize {
+        self.points.len()
+    }
+
+    const fn is_empty(&self) -> bool {
+        self.points.is_empty()
+    }
+
+    /// Where each is, as tree points.
+    fn tree_points(&self) -> Vec<TreePoint> {
+        self.points
+            .iter()
+            .map(|&p| TreePoint::from_f32(p))
+            .collect()
+    }
+}
+
 /// A parent branching point: its index, position and sinks.
-type BranchRoot = (usize, TreePoint, Vec<(f32, f32)>);
+type BranchRoot = (usize, TreePoint, BranchSinks);
 
 /// What every tree builder of a design shares.
 #[derive(Clone, Copy, Debug)]
@@ -265,8 +296,9 @@ pub(crate) struct Builder {
     insertion_lengths: FxHashMap<(u64, u64), SegmentLength>,
     sink_region: Region,
     topologies: Vec<LevelTopology>,
-    location_to_sink: FxHashMap<(u64, u64), InstRef>,
-    top_level_sinks_clustered: Vec<(f32, f32)>,
+    /// Where the sinks and leaf buffers are, which no buffer may take.
+    sink_locations: FxHashSet<(u64, u64)>,
+    top_level_sinks_clustered: BranchSinks,
     wire_segment_unit: i32,
     min_input_cap: u32,
     min_length_sink_region: u32,
@@ -286,8 +318,8 @@ impl Builder {
             insertion_lengths: FxHashMap::default(),
             sink_region: Region::default(),
             topologies: Vec::new(),
-            location_to_sink: FxHashMap::default(),
-            top_level_sinks_clustered: Vec::new(),
+            sink_locations: FxHashSet::default(),
+            top_level_sinks_clustered: BranchSinks::default(),
             wire_segment_unit: 0,
             min_input_cap: 0,
             min_length_sink_region: 0,
@@ -425,7 +457,7 @@ impl Builder {
         let legal = self.legalize_in_blockages(ctx, p, buffer);
         let mut resolved = legal;
         let mut jitter = 0;
-        while self.location_to_sink.contains_key(&resolved.key_f32()) {
+        while self.sink_locations.contains(&resolved.key_f32()) {
             jitter += 1;
             resolved.x = legal.x + f64::from(jitter) / self.unit();
         }
@@ -530,7 +562,7 @@ impl Builder {
         } else {
             let (mut x_min, mut x_max) = (f32::MAX, f32::MIN);
             let (mut y_min, mut y_max) = (f32::MAX, f32::MIN);
-            for &(x, y) in &self.top_level_sinks_clustered {
+            for &(x, y) in &self.top_level_sinks_clustered.points {
                 x_min = x_min.min(x);
                 x_max = x_max.max(x);
                 y_min = y_min.min(y);
@@ -556,35 +588,36 @@ impl Builder {
         size: u32,
     ) {
         self.index_sinks(tech);
+        let mut top_level = BranchSinks::default();
         if sinks.len() <= self.min_clustering_sinks() || !ctx.settings.sink_clustering {
-            self.top_level_sinks_clustered = sinks.to_vec();
+            for (i, &point) in sinks.iter().enumerate() {
+                top_level.push(point, InstRef::Sink(i));
+            }
+            self.top_level_sinks_clustered = top_level;
             return;
         }
         let solution = self.cluster_sinks(ctx, tech, sinks, max_diameter, size);
-        let mut new_locations = Vec::with_capacity(solution.len());
         for (count, cluster) in solution.iter().enumerate() {
             if cluster.len() == 1 {
-                new_locations.push(sinks[cluster[0]]);
+                top_level.push(sinks[cluster[0]], InstRef::Sink(cluster[0]));
             }
             if cluster.len() > 1 {
-                new_locations.push(self.add_leaf_buffer(ctx, sinks, cluster, count));
+                let (point, buffer) = self.add_leaf_buffer(ctx, sinks, cluster, count);
+                top_level.push(point, buffer);
             }
         }
-        self.top_level_sinks_clustered = new_locations;
+        self.top_level_sinks_clustered = top_level;
     }
 
-    /// Records each sink by its location in wire segment units, and where
-    /// it has an insertion delay, the length of the tree's own clock wire
-    /// with that delay, as `HTreeBuilder::preSinkClustering` does.
+    /// Records each sink's location in wire segment units, and where it
+    /// has an insertion delay, the length of the tree's own clock wire with
+    /// that delay, as `HTreeBuilder::preSinkClustering` does.
     fn index_sinks(&mut self, tech: &TechChar) {
         let unit = self.wire_segment_unit as f32;
-        for i in 0..self.clock.sinks.len() {
-            let s = &self.clock.sinks[i];
+        for s in &self.clock.sinks {
             let location = TreePoint::from_f32(in_segment_units(s.location, unit));
             let delay = s.insertion_delay;
-            let _ = self
-                .location_to_sink
-                .insert(location.key(), InstRef::Sink(i));
+            let _ = self.sink_locations.insert(location.key());
             if delay == Seconds::ZERO {
                 continue;
             }
@@ -663,23 +696,18 @@ impl Builder {
     }
 
     /// Puts leaf buffer `count` at the legalized center of the sinks of
-    /// `cluster`, driving them; returns where it went.
+    /// `cluster`, driving them; returns where it went and the buffer.
     fn add_leaf_buffer(
         &mut self,
         ctx: &TreeContext<'_>,
         sinks: &[(f32, f32)],
         cluster: &[usize],
         count: usize,
-    ) -> (f32, f32) {
-        let mut members = Vec::with_capacity(cluster.len());
+    ) -> ((f32, f32), InstRef) {
         let (mut x_sum, mut y_sum) = (0.0_f32, 0.0_f32);
         for &idx in cluster {
-            let point = TreePoint::from_f32(sinks[idx]);
             x_sum += sinks[idx].0;
             y_sum += sinks[idx].1;
-            if let Some(&inst) = self.location_to_sink.get(&point.key()) {
-                members.push(inst);
-            }
         }
         let n = cluster.len() as f32;
         let center = TreePoint::new(f64::from(x_sum / n), f64::from(y_sum / n));
@@ -691,15 +719,16 @@ impl Builder {
                 .add_buffer(&format!("clkbuf_leaf_{count}"), ctx.sink_buffer, location);
         let subnet = self.clock.add_subnet(&format!("clknet_leaf_{count}"));
         self.clock.subnets[subnet].add(buffer);
-        for member in members {
-            self.clock.subnets[subnet].add(member);
+        // NOTE: preSinkClustering finds each sink by its location
+        // (mapLocationToSink_), losing all but one of the sinks on one spot;
+        // PARE takes them by index.
+        for &idx in cluster {
+            self.clock.subnets[subnet].add(InstRef::Sink(idx));
         }
         self.clock.subnets[subnet].leaf = true;
         let point = (legal.x as f32, legal.y as f32);
-        let _ = self
-            .location_to_sink
-            .insert(TreePoint::from_f32(point).key(), buffer);
-        point
+        let _ = self.sink_locations.insert(TreePoint::from_f32(point).key());
+        (point, buffer)
     }
 
     /// Picks the wire segments of a level's branches, as
@@ -816,13 +845,7 @@ impl Builder {
             .points
             .iter()
             .enumerate()
-            .map(|(idx, &p)| {
-                let sinks = parent.sinks[idx]
-                    .iter()
-                    .map(|s| (s.x as f32, s.y as f32))
-                    .collect();
-                (idx, p, sinks)
-            })
+            .map(|(idx, &p)| (idx, p, parent.sinks[idx].clone()))
             .collect();
         for (idx, root, sinks) in roots {
             let (low, high) = spread(root, topology.length);
@@ -869,7 +892,7 @@ impl Builder {
                 } else {
                     Direction::South
                 };
-                let sinks = self.topologies[level_idx].sinks[idx].clone();
+                let sinks = self.topologies[level_idx].sinks[idx].tree_points();
                 let length = self.topologies[level_idx].length;
                 let leng = point.dist(parent);
                 let blockage = if self.is_occupied(point) {
@@ -919,7 +942,7 @@ impl Builder {
                 let parent_idx = self.topologies[level_idx].parents[idx];
                 let parent = self.parent_point(level_idx, parent_idx, top);
                 let topology = &self.topologies[level_idx];
-                let sinks = topology.sinks[idx].clone();
+                let sinks = topology.sinks[idx].tree_points();
                 let length = topology.length;
                 let sibling = topology.points[topology.sibling(idx, parent_idx)];
                 let mut point = topology.points[idx];
@@ -1160,10 +1183,10 @@ impl Builder {
                 continue;
             };
             self.clock.subnets[subnet].leaf = true;
-            for loc in self.topologies[leaf].sinks[idx].clone() {
-                if let Some(&inst) = self.location_to_sink.get(&loc.key()) {
-                    self.clock.subnets[subnet].add(inst);
-                }
+            // NOTE: createClockSubNets finds each sink by its location
+            // (mapLocationToSink_); PARE carries which sink it is.
+            for &inst in &self.topologies[leaf].sinks[idx].insts {
+                self.clock.subnets[subnet].add(inst);
             }
         }
     }
@@ -1228,9 +1251,9 @@ fn refine_with_clustering(
     a: usize,
     b: usize,
     root: TreePoint,
-    sinks: &[(f32, f32)],
+    sinks: &BranchSinks,
 ) {
-    let mut engine = Clustering::new(sinks, (root.x as f32, root.y as f32));
+    let mut engine = Clustering::new(&sinks.points, (root.x as f32, root.y as f32));
     let pa = topology.points[a];
     let pb = topology.points[b];
     let mut means = [(pa.x as f32, pa.y as f32), (pb.x as f32, pb.y as f32)];
@@ -1246,7 +1269,7 @@ fn refine_with_clustering(
     for (cluster, members) in engine.clusters().iter().enumerate() {
         let branch = if cluster == 0 { a } else { b };
         for &s in members {
-            topology.sinks[branch].push(TreePoint::from_f32(sinks[s]));
+            topology.sinks[branch].push(sinks.points[s], sinks.insts[s]);
         }
     }
 }
@@ -1618,7 +1641,7 @@ mod tests {
         let mut level = LevelTopology::new(20.0);
         let dummy = level.add_point(TreePoint::new(0.0, 0.0), None);
         let branch = level.add_point(TreePoint::new(30.0, 50.0), None);
-        level.sinks[branch].push(TreePoint::new(30.0, 40.0));
+        level.sinks[branch].push((30.0, 40.0), InstRef::Sink(0));
         builder.topologies.push(level);
 
         builder.legalize_dummies(&scene.ctx());
@@ -1810,7 +1833,10 @@ mod tests {
         let mut tree = builder();
         tree.min_input_cap = 1;
         tree.min_length_sink_region = 2;
-        tree.top_level_sinks_clustered = vec![(10.0, 50.0), (90.0, 50.0)];
+        tree.top_level_sinks_clustered = BranchSinks {
+            points: vec![(10.0, 50.0), (90.0, 50.0)],
+            insts: vec![InstRef::Sink(0), InstRef::Sink(1)],
+        };
 
         tree.level_topology(&scene.ctx(), &tech, 1, 10.0, 10.0);
 
