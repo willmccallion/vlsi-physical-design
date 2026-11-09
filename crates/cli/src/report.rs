@@ -2,6 +2,7 @@
 //! long each phase took, what the checks found and how much memory it took.
 
 use crate::ui;
+use anyhow::Context;
 use pare_resizer::{HoldSummary, RepairSummary, SetupSummary};
 use serde::Serialize;
 use std::collections::BTreeMap;
@@ -265,8 +266,8 @@ impl Report {
     /// Writes the report as JSON to `path`.
     pub fn write(&self, path: &Path) -> anyhow::Result<()> {
         let text = serde_json::to_string_pretty(self)?;
-        std::fs::write(path, text)?;
-        Ok(())
+        std::fs::write(path, text)
+            .with_context(|| format!("cannot write report {}", path.display()))
     }
 }
 

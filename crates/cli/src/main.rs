@@ -202,13 +202,24 @@ fn main() -> anyhow::Result<()> {
     report.passed = outcome.is_ok();
     report.wall_seconds = start_time.elapsed().as_secs_f64();
     report.peak_rss_mb = report::peak_rss_mb();
-    if let Some(path) = &args.report {
-        report.write(path)?;
-        ui::wrote(path);
+    let written = args
+        .report
+        .as_deref()
+        .map_or(Ok(()), |path| write_report(&report, path));
+    if let (Err(_), Err(unwritten)) = (&outcome, &written) {
+        log::error!("{unwritten:#}");
     }
     outcome?;
+    written?;
 
     ui::done(report.wall_seconds);
+    Ok(())
+}
+
+/// Writes `report` as JSON to `path` and says so.
+fn write_report(report: &Report, path: &Path) -> anyhow::Result<()> {
+    report.write(path)?;
+    ui::wrote(path);
     Ok(())
 }
 
