@@ -342,26 +342,26 @@ impl Bnet {
         }
     }
 
-    /// The length of the wire at this node, if it is one.
+    /// The length of wire at this node: none unless it is a wire.
     #[must_use]
-    pub fn length(&self) -> i64 {
+    pub fn length(&self) -> Dbu {
         match &self.kind {
-            Kind::Wire { to, .. } => self.at.manhattan(to.at).get(),
-            _ => 0,
+            Kind::Wire { to, .. } => self.at.manhattan(to.at),
+            _ => Dbu(0),
         }
     }
 
     /// The longest wire from this node down to a load or buffer, as
     /// `OpenROAD`'s `maxLoadWireLength`.
     #[must_use]
-    pub fn max_load_wire_length(&self) -> i64 {
+    pub fn max_load_wire_length(&self) -> Dbu {
         match &self.kind {
             Kind::Wire { to, .. } => self.length() + to.max_load_wire_length(),
             Kind::Via { to, .. } => to.max_load_wire_length(),
             Kind::Junction { left, right } => left
                 .max_load_wire_length()
                 .max(right.max_load_wire_length()),
-            Kind::Load { .. } | Kind::Buffer { .. } => 0,
+            Kind::Load { .. } | Kind::Buffer { .. } => Dbu(0),
         }
     }
 
@@ -478,7 +478,7 @@ pub(crate) struct BufferSize {
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub(crate) struct Metrics {
     /// See [`Bnet::max_load_wire_length`].
-    pub max_load_wire_length: i64,
+    pub max_load_wire_length: Dbu,
     /// See [`Bnet::slack`].
     pub slack: Fixed,
     /// See [`Bnet::cap`].
@@ -830,11 +830,11 @@ mod tests {
         let wire = Bnet::wire(Point::new(Dbu(0), Dbu(0)), load, None, &tree_rc);
 
         // One micron of wire: 1 ohm and 1 fF; delay = 1 * (0.5 fF + 1 fF).
-        assert_eq!(wire.length(), 2000);
+        assert_eq!(wire.length(), Dbu(2000));
         assert!((wire.cap - Farads::new(2e-15)).abs() < Farads::new(1e-30));
         assert_eq!(wire.delay, Fixed(1));
         assert_eq!(wire.slack, Fixed(1_000_000 - 1));
-        assert_eq!(wire.max_load_wire_length(), 2000);
+        assert_eq!(wire.max_load_wire_length(), Dbu(2000));
     }
 
     #[test]

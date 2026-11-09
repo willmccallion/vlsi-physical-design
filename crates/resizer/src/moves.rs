@@ -1212,7 +1212,7 @@ fn slews_in_tree(
             Kind::Load { pin } => out.push((*pin, upstream)),
             Kind::Wire { to, layer } => {
                 let (res, cap) = resizer.tree_rc().wire(*layer);
-                let meters = Meters::from_dbu(Dbu(node.length()), resizer.db.dbu());
+                let meters = Meters::from_dbu(node.length(), resizer.db.dbu());
                 let degradation =
                     meters * res * (to.cap + meters * cap / 2.0) * resizer.slew_rc_factor;
                 walk(resizer, to, upstream + degradation, out);

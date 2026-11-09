@@ -62,9 +62,9 @@ enum Checks {
 struct SplitInput {
     wire_res: OhmsPerMeter,
     wire_cap: FaradsPerMeter,
-    length: i64,
-    wire_length: i64,
-    wire_length_ref: i64,
+    length: Dbu,
+    wire_length: Dbu,
+    wire_length_ref: Dbu,
     load_cap: Farads,
     ref_cap: Farads,
     max_cap: Farads,
@@ -85,12 +85,12 @@ struct DriverWire {
 }
 
 impl DriverWire {
-    fn meters(&self, length: i64) -> Meters {
-        Meters::from_dbu(Dbu(length), self.dbu_per_micron)
+    fn meters(&self, length: Dbu) -> Meters {
+        Meters::from_dbu(length, self.dbu_per_micron)
     }
 
     /// The load at the driver of `length` of wire with `ref_cap` beyond it.
-    fn load_cap(&self, length: i64, ref_cap: Farads) -> Farads {
+    fn load_cap(&self, length: Dbu, ref_cap: Farads) -> Farads {
         self.meters(length) * self.cap + ref_cap
     }
 
@@ -98,7 +98,7 @@ impl DriverWire {
     /// beyond it.
     // The slew estimates keep OpenROAD's grouping so they can be checked.
     #[allow(clippy::suboptimal_flops)]
-    fn elmore_slew(&self, length: i64, ref_cap: Farads) -> Seconds {
+    fn elmore_slew(&self, length: Dbu, ref_cap: Farads) -> Seconds {
         let r_wire = self.meters(length) * self.res;
         let c_wire = self.meters(length) * self.cap;
         (self.r_drvr * (c_wire + ref_cap) + r_wire * ref_cap + r_wire * c_wire / 2.0)
@@ -106,7 +106,7 @@ impl DriverWire {
     }
 
     /// The slew `length` of wire with `ref_cap` beyond it adds on its own.
-    fn slew_drop(&self, length: i64, ref_cap: Farads) -> Seconds {
+    fn slew_drop(&self, length: Dbu, ref_cap: Farads) -> Seconds {
         let r_wire = self.meters(length) * self.res;
         let c_wire = self.meters(length) * self.cap;
         r_wire * (c_wire / 2.0 + ref_cap) * self.slew_rc_factor
@@ -119,11 +119,11 @@ impl DriverWire {
 #[derive(Clone, Copy, Debug)]
 struct WireRest {
     to: Point<Dbu>,
-    length: i64,
+    length: Dbu,
     /// Its length with the wire beyond `to` up to the next repeater.
-    wire_length: i64,
+    wire_length: Dbu,
     /// The length of the wire beyond `to` up to the next repeater.
-    wire_length_ref: i64,
+    wire_length_ref: Dbu,
     ref_cap: Farads,
     max_load_slew: Seconds,
 }
@@ -142,7 +142,7 @@ struct Branch {
     cap: Farads,
     fanout: f64,
     max_load_slew: Seconds,
-    wire_length: i64,
+    wire_length: Dbu,
     loads: Vec<PinId>,
 }
 
@@ -271,7 +271,7 @@ impl<'r, 'a, T: Timing> Repairer<'r, 'a, T> {
             .resizer
             .options
             .max_wire_length
-            .is_some_and(|max| tree.max_load_wire_length() > max.get());
+            .is_some_and(|max| tree.max_load_wire_length() > max);
         if too_long {
             self.summary.length_violations += 1;
         }
@@ -574,7 +574,7 @@ impl<'r, 'a, T: Timing> Repairer<'r, 'a, T> {
             cap: load.cap,
             fanout: load.fanout,
             max_load_slew: load.max_slew,
-            wire_length: 0,
+            wire_length: Dbu(0),
             loads: vec![pin],
         }
     }
@@ -598,11 +598,11 @@ impl<'r, 'a, T: Timing> Repairer<'r, 'a, T> {
         let repeaters = self.junction_repeaters(&left, &right, max_cap, r_drvr);
         if repeaters.left {
             let _ = self.make_repeater(repeaters.reason, at, buffer_cell, &mut left)?;
-            left.wire_length = 0;
+            left.wire_length = Dbu(0);
         }
         if repeaters.right {
             let _ = self.make_repeater(repeaters.reason, at, buffer_cell, &mut right)?;
-            right.wire_length = 0;
+            right.wire_length = Dbu(0);
         }
         let mut loads = left.loads;
         loads.extend(right.loads);
@@ -655,7 +655,7 @@ impl<'r, 'a, T: Timing> Repairer<'r, 'a, T> {
             }
         }
         let max_length = self.resizer.options.max_wire_length;
-        if max_length.is_some_and(|max| left.wire_length + right.wire_length > max.get()) {
+        if max_length.is_some_and(|max| left.wire_length + right.wire_length > max) {
             repeaters.reason = "max_length";
             if left.wire_length > right.wire_length {
                 repeaters.left = true;
@@ -686,7 +686,7 @@ impl<'r, 'a, T: Timing> Repairer<'r, 'a, T> {
             slew_rc_factor: self.resizer.slew_rc_factor,
             dbu_per_micron: self.resizer.db.dbu(),
         };
-        let length = from.manhattan(to.at).get();
+        let length = from.manhattan(to.at);
         let mut rest = WireRest {
             to: to.at,
             length,
@@ -702,12 +702,12 @@ impl<'r, 'a, T: Timing> Repairer<'r, 'a, T> {
             let Some(leaf) = self.wire_repeater(&wire, &rest, at, &mut branch)? else {
                 break;
             };
-            let length = rest.length - buf_dist as i64;
+            let length = rest.length - Dbu(buf_dist as i64);
             rest = WireRest {
                 to: at,
                 length,
                 wire_length: length,
-                wire_length_ref: 0,
+                wire_length_ref: Dbu(0),
                 ref_cap: leaf.cap,
                 max_load_slew: leaf.max_load_slew,
             };
@@ -735,9 +735,9 @@ impl<'r, 'a, T: Timing> Repairer<'r, 'a, T> {
             r_drvr: wire.r_drvr,
         });
         if split_length >= rest.length {
-            rest.length as f64
+            rest.length.to_f64()
         } else {
-            split_length as f64 * (1.0 - LENGTH_MARGIN)
+            split_length.to_f64() * (1.0 - LENGTH_MARGIN)
         }
     }
 
@@ -759,7 +759,7 @@ impl<'r, 'a, T: Timing> Repairer<'r, 'a, T> {
             cap: rest.ref_cap,
             fanout: branch.fanout,
             max_load_slew: rest.max_load_slew,
-            wire_length: 0,
+            wire_length: Dbu(0),
             loads: std::mem::take(&mut branch.loads),
         };
         let inserted = self.make_repeater("wire", at, buffer_cell, &mut leaf)?;
@@ -782,7 +782,7 @@ impl<'r, 'a, T: Timing> Repairer<'r, 'a, T> {
     /// limit `max_cap`, or the load slew limit beyond it.
     fn wire_breaks_limits(&self, wire: &DriverWire, rest: &WireRest, max_cap: Farads) -> bool {
         let max_length = self.resizer.options.max_wire_length;
-        max_length.is_some_and(|max| rest.wire_length > max.get())
+        max_length.is_some_and(|max| rest.wire_length > max)
             || (wire.cap > FaradsPerMeter::ZERO
                 && max_cap > Farads::ZERO
                 && wire.load_cap(rest.length, rest.ref_cap) > max_cap)
@@ -795,9 +795,9 @@ impl<'r, 'a, T: Timing> Repairer<'r, 'a, T> {
     /// the split length of `RepairDesign::repairNetWire`.
     // The slew estimates keep OpenROAD's grouping so they can be checked.
     #[allow(clippy::suboptimal_flops, clippy::suspicious_operation_groupings)]
-    fn split_length(&self, input: SplitInput) -> i64 {
+    fn split_length(&self, input: SplitInput) -> Dbu {
         let dbu = self.resizer.db.dbu();
-        let to_dbu = |m: f64| meters_to_dbu(Meters::new(m), dbu).get();
+        let to_dbu = |m: f64| meters_to_dbu(Meters::new(m), dbu);
         let (wire_res, wire_cap) = (input.wire_res.get(), input.wire_cap.get());
         let (load_cap, ref_cap, max_cap) = (
             input.load_cap.get(),
@@ -810,13 +810,13 @@ impl<'r, 'a, T: Timing> Repairer<'r, 'a, T> {
             input.max_load_slew_margined.get(),
         );
         let mut split = match self.resizer.options.max_wire_length {
-            Some(max) if input.wire_length > max.get() => (max.get() - input.wire_length_ref)
-                .max(0)
+            Some(max) if input.wire_length > max => (max - input.wire_length_ref)
+                .max(Dbu(0))
                 .min(input.length / 2),
-            _ => i64::MAX,
+            _ => Dbu(i64::MAX),
         };
         if wire_cap > 0.0 && load_cap > max_cap {
-            split = split.min(to_dbu((max_cap - ref_cap) / wire_cap).max(0));
+            split = split.min(to_dbu((max_cap - ref_cap) / wire_cap).max(Dbu(0)));
         }
         if load_slew > max_load_slew {
             // `OpenROAD` solves the quadratic in single precision.
@@ -838,7 +838,7 @@ impl<'r, 'a, T: Timing> Repairer<'r, 'a, T> {
             split = if l >= 0.0 {
                 split.min(to_dbu(f64::from(l)))
             } else {
-                0
+                Dbu(0)
             };
         }
         split
@@ -885,11 +885,11 @@ impl<'r, 'a, T: Timing> Repairer<'r, 'a, T> {
 /// `repairNetWire` places its repeaters.
 // OpenROAD rounds the product before the sum; a fused one could move it.
 #[allow(clippy::suboptimal_flops)]
-fn point_back_along(to: Point<Dbu>, from: Point<Dbu>, distance: f64, length: i64) -> Point<Dbu> {
-    let share = if length == 0 {
+fn point_back_along(to: Point<Dbu>, from: Point<Dbu>, distance: f64, length: Dbu) -> Point<Dbu> {
+    let share = if length == Dbu(0) {
         0.0
     } else {
-        distance / length as f64
+        distance / length.to_f64()
     };
     let along = |to: Dbu, from: Dbu| {
         let (to, from) = (to.get(), from.get());

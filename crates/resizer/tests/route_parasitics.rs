@@ -284,7 +284,7 @@ fn a_route_tree_climbs_by_vias_and_runs_wires_on_the_route_layers() {
     assert_eq!(loads, vec![a, b]);
     assert!(matches!(tree.kind, Kind::Via { .. }));
     assert_eq!(tree.layer(), Some(LayerId(0)));
-    assert_eq!(tree.max_load_wire_length(), 20000);
+    assert_eq!(tree.max_load_wire_length(), Dbu(20000));
     let mut wire_layers = Vec::new();
     collect_wire_layers(&tree, &mut wire_layers);
     wire_layers.sort_unstable();
