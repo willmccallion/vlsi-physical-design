@@ -26,7 +26,7 @@ pub use initial::INITIAL_PLACE_ROUNDS;
 pub use routability::{CongestionEstimator, CongestionRound, RoutabilityParams, RoutingTiles};
 
 use crate::model::{PinAnchor, PlacementModel};
-use crate::zones::{Zone, ZoneId};
+use crate::zones::Zone;
 use density::DensityGrid;
 use nesterov::Objects;
 use pare_common::config::{Share, TargetDensity};
@@ -116,6 +116,28 @@ pub struct Progress {
     pub penalty: f64,
     /// Step length.
     pub step: f64,
+}
+
+/// A zone whose movable cells have nowhere to go: no stretch of row inside
+/// it is free, or, in a design without rows, it has no area.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, thiserror::Error)]
+#[error("the {cells} movable cells of {zone} have no free stretch of row to go in")]
+pub struct ZoneWithoutRoom {
+    /// The zone.
+    pub zone: Zone,
+    /// How many movable cells it has.
+    pub cells: usize,
+}
+
+/// Why global placement failed.
+#[derive(Debug, thiserror::Error)]
+pub enum GlobalPlacementError<E> {
+    /// A zone's cells have nowhere to go.
+    #[error(transparent)]
+    NoRoom(#[from] ZoneWithoutRoom),
+    /// A timing-driven repair failed.
+    #[error("timing-driven repair failed: {0}")]
+    Repair(E),
 }
 
 /// How global placement ended.
@@ -217,8 +239,10 @@ impl ObjectRange {
 pub(super) struct Field {
     zone: Zone,
     grid: DensityGrid,
-    /// Where its objects may go.
+    /// Where its objects may go, never empty.
     area: Vec<Rect<f64>>,
+    /// The box around its area.
+    bounds: Rect<f64>,
     /// The objects that are its zone's movable cells.
     cells: ObjectRange,
     /// The filler objects that pad its zone to the target density.
@@ -340,15 +364,20 @@ fn channel_pitch(rows: &[Rect<f64>]) -> Option<f64> {
 /// With `timing`, the design is repaired and its nets reweighted at the
 /// overflows `params.timing` names; the model then changes to the repaired
 /// design.
+///
+/// # Errors
+///
+/// When a zone with movable cells has no room, before or after a repair,
+/// or a repair fails.
 pub fn place<D: TimingDriver>(
     model: &mut PlacementModel,
     params: &GlobalParams,
     estimator: Option<&mut dyn CongestionEstimator>,
     timing: Option<&mut D>,
     report: impl FnMut(&Progress),
-) -> Result<GlobalResult, D::Error> {
+) -> Result<GlobalResult, GlobalPlacementError<D::Error>> {
     let mut rng = StdRng::seed_from_u64(params.seed);
-    let setup = Setup::new(model, params, &mut rng);
+    let setup = Setup::new(model, params, &mut rng)?;
     let probe = estimator.map(|estimator| Probe::new(estimator, model));
     let hooks = nesterov::Hooks {
         probe,
@@ -381,26 +410,31 @@ struct Remap {
 }
 
 impl Setup {
-    fn new(model: &PlacementModel, params: &GlobalParams, rng: &mut StdRng) -> Self {
+    fn new(
+        model: &PlacementModel,
+        params: &GlobalParams,
+        rng: &mut StdRng,
+    ) -> Result<Self, ZoneWithoutRoom> {
         let movable = movable_cells(model);
         let fixed = fixed_rects(model);
         let netlist = build_netlist(model, &movable);
+        let mut fields = build_fields(model, &movable, &fixed, params)?;
+        let start = StartBoxes::new(model, &fields, movable.len());
         let mut objects = Objects {
-            centers: initial_centers(model, &movable, &netlist, params.initial_rounds, rng),
+            centers: initial_centers(model, &start, &netlist, params.initial_rounds, rng),
             sizes: movable.iter().map(|&i| model.density_sizes[i]).collect(),
             kinds: movable.iter().map(|&i| model.kinds[i]).collect(),
         };
-        let mut fields = build_fields(model, &movable, &fixed, params);
         for field in &mut fields {
             add_fillers(field, &mut objects, rng);
         }
-        Self {
+        Ok(Self {
             netlist,
             model_sizes: movable.iter().map(|&i| model.sizes[i]).collect(),
             objects,
             fields,
             movable,
-        }
+        })
     }
 
     /// The setup for `model`, the design after a repair, continuing this
@@ -415,11 +449,11 @@ impl Setup {
         cell_map: &IdVec<CellId, Option<CellId>>,
         params: &GlobalParams,
         rng: &mut StdRng,
-    ) -> (Self, Remap) {
+    ) -> Result<(Self, Remap), ZoneWithoutRoom> {
         let movable = movable_cells(model);
         let (mut objects, mut old_of_new, added_area) =
             self.continued_cells(model, &movable, cell_map);
-        let mut fields = build_fields(model, &movable, &fixed_rects(model), params);
+        let mut fields = build_fields(model, &movable, &fixed_rects(model), params)?;
         let mut old_field_of_new = IdVec::with_capacity(fields.len());
         for field in &mut fields {
             let old = self
@@ -449,7 +483,7 @@ impl Setup {
             old_field_of_new,
             added_area,
         };
-        (setup, remap)
+        Ok((setup, remap))
     }
 
     /// The objects of the `movable` cells of `model`, each continuing the
@@ -618,7 +652,7 @@ fn build_fields(
     movable: &IdVec<ObjectId, CellId>,
     fixed: &[Rect<f64>],
     params: &GlobalParams,
-) -> IdVec<FieldId, Field> {
+) -> Result<IdVec<FieldId, Field>, ZoneWithoutRoom> {
     let mut fields = IdVec::new();
     let mut start = 0;
     for (id, zone) in model.zones.iter_enumerated() {
@@ -631,7 +665,11 @@ fn build_fields(
         if end == start {
             continue;
         }
-        let area = zone_area(model, id);
+        let area = zone.rects.clone();
+        let bounds = bounding_box(&area).ok_or(ZoneWithoutRoom {
+            zone: zone.zone,
+            cells: end - start,
+        })?;
         let mut grid = DensityGrid::new(
             &model.die,
             params.bins,
@@ -655,6 +693,7 @@ fn build_fields(
             zone: zone.zone,
             grid,
             area,
+            bounds,
             cells,
             fillers: ObjectRange::EMPTY,
             kept_fillers: 0,
@@ -663,7 +702,7 @@ fn build_fields(
         });
         start = end;
     }
-    fields
+    Ok(fields)
 }
 
 /// The density a zone's cells are spread to: the requested target, or just
@@ -701,21 +740,25 @@ fn filler_layout(cells: &[Point<f64>], free_area: f64, target: f64) -> (Point<f6
     (size, (filler_area / mean_area) as usize)
 }
 
-/// The rows, or the whole die for a design without rows.
-fn placeable_area(model: &PlacementModel) -> Vec<Rect<f64>> {
-    if model.rows.is_empty() {
-        vec![model.die]
-    } else {
-        model.rows.clone()
-    }
+/// The boxes the cells start in: the core, the box of the rows or the
+/// whole die without rows, and each fence's cells the box of their fence.
+struct StartBoxes {
+    core: Rect<f64>,
+    of_cell: IdVec<ObjectId, Rect<f64>>,
 }
 
-/// The area the cells of zone `id` may use.
-fn zone_area(model: &PlacementModel, id: ZoneId) -> Vec<Rect<f64>> {
-    model
-        .zones
-        .get(id)
-        .map_or_else(|| placeable_area(model), |z| z.rects.clone())
+impl StartBoxes {
+    /// The boxes of the `cells` cell objects of `fields`.
+    fn new(model: &PlacementModel, fields: &IdVec<FieldId, Field>, cells: usize) -> Self {
+        let core = bounding_box(&model.rows).unwrap_or(model.die);
+        let mut of_cell = IdVec::filled(core, cells);
+        for field in fields.iter().filter(|f| matches!(f.zone, Zone::Fence(_))) {
+            for k in field.cells.iter() {
+                of_cell[k] = field.bounds;
+            }
+        }
+        Self { core, of_cell }
+    }
 }
 
 /// Where the movable cells start, as `gpl` starts them: at the center of
@@ -724,19 +767,12 @@ fn zone_area(model: &PlacementModel, id: ZoneId) -> Vec<Rect<f64>> {
 /// on each axis.
 fn initial_centers(
     model: &PlacementModel,
-    movable: &IdVec<ObjectId, CellId>,
+    start: &StartBoxes,
     netlist: &Netlist,
     rounds: usize,
     rng: &mut StdRng,
 ) -> ObjectPoints {
-    let core = bounding_box(&placeable_area(model));
-    let bounds: IdVec<ObjectId, Rect<f64>> = movable
-        .iter()
-        .map(|&i| match model.zones.get(model.zone_of[i]) {
-            Some(zone) if matches!(zone.zone, Zone::Fence(_)) => bounding_box(&zone.rects),
-            _ => core,
-        })
-        .collect();
+    let (core, bounds) = (start.core, &start.of_cell);
     let mut centers: ObjectPoints = bounds
         .iter()
         .map(|b| {
@@ -747,44 +783,41 @@ fn initial_centers(
         })
         .collect();
     let min_diff = model.units.to_microns(initial::MIN_DIFF_LENGTH);
-    initial::place(netlist, &mut centers, core, &bounds, rounds, min_diff);
+    initial::place(netlist, &mut centers, core, bounds, rounds, min_diff);
     for center in &mut centers {
         *center += Point::new(rng.gen_range(-1.0..1.0), rng.gen_range(-1.0..1.0));
     }
     centers
 }
 
-fn bounding_box(rects: &[Rect<f64>]) -> Rect<f64> {
-    rects
-        .iter()
-        .copied()
-        .reduce(|a, b| {
-            Rect::new(
-                Point::new(a.min.x.min(b.min.x), a.min.y.min(b.min.y)),
-                Point::new(a.max.x.max(b.max.x), a.max.y.max(b.max.y)),
-            )
-        })
-        .unwrap_or_default()
+/// The box around `rects`; none without any.
+fn bounding_box(rects: &[Rect<f64>]) -> Option<Rect<f64>> {
+    rects.iter().copied().reduce(|a, b| {
+        Rect::new(
+            Point::new(a.min.x.min(b.min.x), a.min.y.min(b.min.y)),
+            Point::new(a.max.x.max(b.max.x), a.max.y.max(b.max.y)),
+        )
+    })
 }
 
-/// A uniformly random point in the union of disjoint `rects`.
+/// A uniformly random point in the union of disjoint `rects`, of which
+/// there is at least one.
 fn random_point(rects: &[Rect<f64>], rng: &mut StdRng) -> Point<f64> {
     let total: f64 = rects.iter().map(Rect::area).sum();
     let mut pick = rng.gen_range(0.0..=total);
     let chosen = rects
         .iter()
-        .find(|r| {
+        .position(|r| {
             let inside = pick <= r.area();
             pick -= r.area();
             inside
         })
-        .or_else(|| rects.last());
-    chosen.map_or(Point::new(0.0, 0.0), |r| {
-        Point::new(
-            rng.gen_range(r.min.x..=r.max.x),
-            rng.gen_range(r.min.y..=r.max.y),
-        )
-    })
+        .unwrap_or(rects.len() - 1);
+    let r = rects[chosen];
+    Point::new(
+        rng.gen_range(r.min.x..=r.max.x),
+        rng.gen_range(r.min.y..=r.max.y),
+    )
 }
 
 /// The model's nets with movable cells as objects and everything else as
@@ -949,7 +982,7 @@ mod tests {
     fn repair() -> Repair {
         let model = tiny_model();
         let mut rng = StdRng::seed_from_u64(1);
-        let before = Setup::new(&model, &params(), &mut rng);
+        let before = Setup::new(&model, &params(), &mut rng).unwrap();
         let mut after = model;
         let resized = before.movable[ObjectId::new(0)];
         after.sizes[resized].x *= 2.0;
@@ -987,6 +1020,7 @@ mod tests {
         repair
             .before
             .rebuild(&repair.after, &cell_map, &params(), &mut rng)
+            .unwrap()
     }
 
     #[test]

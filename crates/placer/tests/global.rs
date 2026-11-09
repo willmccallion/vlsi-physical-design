@@ -12,11 +12,11 @@ use pare_common::geom::orient::Orientation;
 use pare_common::geom::point::Point;
 use pare_common::testing;
 use pare_placer::global::{
-    self, GlobalParams, NoTiming, Reweighted, RoutabilityParams, RoutingTiles, TimingDriver,
-    TimingParams,
+    self, GlobalParams, GlobalPlacementError, NoTiming, Reweighted, RoutabilityParams,
+    RoutingTiles, TimingDriver, TimingParams, ZoneWithoutRoom,
 };
 use pare_placer::model::PlacementModel;
-use pare_placer::zones::Zones;
+use pare_placer::zones::{Zone, Zones};
 use std::convert::Infallible;
 use std::fmt::Write as _;
 use std::path::Path;
@@ -206,4 +206,21 @@ fn a_repair_midway_through_placement_gives_the_placement_it_always_has() {
     assert_eq!(repair.repairs, 1);
     model.write_back(&mut db);
     assert_golden("ring_240_repaired.txt", &placement_text(&db, &result));
+}
+
+/// The fence is 20 um wide but only 0.5 um tall, so it holds no whole row.
+#[test]
+fn a_fence_holding_no_whole_row_is_an_error() {
+    let db = ring_fenced_by("( 20000 21000 ) ( 40000 21500 )");
+    let mut model = PlacementModel::from_db(&db, &Zones::new(&db).unwrap());
+
+    let result = global::place::<NoTiming>(&mut model, &params(), None, None, |_| {});
+
+    assert!(matches!(
+        result,
+        Err(GlobalPlacementError::NoRoom(ZoneWithoutRoom {
+            zone: Zone::Fence(_),
+            cells: 48
+        }))
+    ));
 }

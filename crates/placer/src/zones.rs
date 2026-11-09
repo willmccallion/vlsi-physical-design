@@ -22,6 +22,15 @@ pub enum Zone {
     Outside,
 }
 
+impl std::fmt::Display for Zone {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Fence(region) => write!(f, "fence region {}", region.index()),
+            Self::Outside => f.write_str("the space outside every fence"),
+        }
+    }
+}
+
 pare_common::define_index!(
     /// A zone's position in [`Zones::all`]: each fence, then the space
     /// outside them.
