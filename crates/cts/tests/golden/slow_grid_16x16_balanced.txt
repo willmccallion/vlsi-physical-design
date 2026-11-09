@@ -114,15 +114,17 @@ cell clkload38 CLKBUF_X3 301480 249399 N
 cell clkload39 CLKBUF_X3 348980 238200 N
 cell clkload40 CLKBUF_X3 348980 193400 N
 cell clkload41 CLKBUF_X3 301479 193399 N
-cell delaybuf_0_core_clock CLKBUF_X3 198114 1720 N
-cell delaybuf_1_core_clock CLKBUF_X3 196228 3405 N
-cell delaybuf_2_core_clock CLKBUF_X3 194343 5090 N
-cell delaybuf_3_core_clock CLKBUF_X3 192457 6775 N
-cell delaybuf_4_core_clock CLKBUF_X3 190572 8460 N
-cell delaybuf_5_core_clock CLKBUF_X3 188686 10145 N
-cell delaybuf_6_core_clock CLKBUF_X3 186801 11830 N
-cell delaybuf_7_core_clock CLKBUF_X3 184915 13515 N
-net clk CTS_NDR_0 PIN clk clkbuf_regs_0_core_clock/A delaybuf_0_core_clock/A
+cell delaybuf_0_core_clock CLKBUF_X3 198457 16686 N
+cell delaybuf_1_core_clock CLKBUF_X3 196914 33337 N
+cell delaybuf_2_core_clock CLKBUF_X3 195371 49989 N
+cell delaybuf_3_core_clock CLKBUF_X3 193829 66640 N
+cell delaybuf_4_core_clock CLKBUF_X3 192286 83291 N
+cell delaybuf_5_core_clock CLKBUF_X3 190743 99943 N
+cell delaybuf_6_core_clock CLKBUF_X3 189200 116594 N
+cell delaybuf_7_core_clock CLKBUF_X3 187658 133245 N
+cell delaybuf_8_core_clock CLKBUF_X3 186115 149897 N
+cell delaybuf_9_core_clock CLKBUF_X3 184572 166548 N
+net clk CTS_NDR_0 PIN clk clkbuf_0_clk/A delaybuf_0_core_clock/A
 net clk_regs CTS_NDR_1 clkbuf_0_clk_regs/A clkbuf_regs_0_core_clock/Z
 net clknet_0_clk CTS_NDR_0 clkbuf_0_clk/Z clkbuf_1_0__f_clk/A clkbuf_1_1__f_clk/A
 net clknet_0_clk_regs CTS_NDR_1 clkbuf_0_clk_regs/Z clkbuf_2_0__f_clk_regs/A clkbuf_2_1__f_clk_regs/A clkbuf_2_2__f_clk_regs/A clkbuf_2_3__f_clk_regs/A
@@ -193,4 +195,6 @@ net delaynet_3_core_clock CTS_NDR_0 delaybuf_3_core_clock/Z delaybuf_4_core_cloc
 net delaynet_4_core_clock CTS_NDR_0 delaybuf_4_core_clock/Z delaybuf_5_core_clock/A
 net delaynet_5_core_clock CTS_NDR_0 delaybuf_5_core_clock/Z delaybuf_6_core_clock/A
 net delaynet_6_core_clock CTS_NDR_0 delaybuf_6_core_clock/Z delaybuf_7_core_clock/A
-net delaynet_7_core_clock CTS_NDR_0 clkbuf_0_clk/A delaybuf_7_core_clock/Z
+net delaynet_7_core_clock CTS_NDR_0 delaybuf_7_core_clock/Z delaybuf_8_core_clock/A
+net delaynet_8_core_clock CTS_NDR_0 delaybuf_8_core_clock/Z delaybuf_9_core_clock/A
+net delaynet_9_core_clock CTS_NDR_0 clkbuf_regs_0_core_clock/A delaybuf_9_core_clock/Z
