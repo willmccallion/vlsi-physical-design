@@ -680,3 +680,78 @@ impl Repair<'_, '_> {
         Some(delay - intrinsic)
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::testing::{
+        DefSections, cells, clock_cells_source, def_text, design, with_wired_session,
+    };
+    use std::fmt::Write;
+
+    /// Buffers in the chain between the flops of [`chain`].
+    const CHAIN: usize = 6;
+
+    /// A flop launching through a chain of buffers 40 microns apart into
+    /// another flop.
+    fn chain() -> pare_common::db::design::NetlistDB {
+        let x = |i: usize| 2000 + 80_000 * i;
+        let mut components = format!("- f1 DFF_X1 + PLACED ( {} 2800 ) N ;\n", x(0));
+        let mut nets = String::from("- clk ( PIN clk ) ( f1 CK ) ( f2 CK ) ;\n");
+        let mut from = "f1 Q".to_string();
+        for i in 1..=CHAIN {
+            writeln!(components, "- b{i} BUF_X1 + PLACED ( {} 2800 ) N ;", x(i)).unwrap();
+            writeln!(nets, "- n{i} ( {from} ) ( b{i} A ) ;").unwrap();
+            from = format!("b{i} Z");
+        }
+        writeln!(
+            components,
+            "- f2 DFF_X1 + PLACED ( {} 2800 ) N ;",
+            x(CHAIN + 1)
+        )
+        .unwrap();
+        writeln!(nets, "- n{} ( {from} ) ( f2 D ) ;", CHAIN + 1).unwrap();
+        design(&def_text(
+            "chain",
+            &DefSections {
+                components: &components,
+                nets: &nets,
+                inputs: &["clk"],
+                outputs: &[],
+            },
+        ))
+    }
+
+    #[test]
+    fn a_failing_path_ends_with_better_worst_slack() {
+        let mut db = chain();
+        let lib = cells(&clock_cells_source());
+        let clock = "create_clock -name clk -period 0.25 [get_ports clk]\n";
+
+        with_wired_session(&mut db, &lib, clock, |resizer| {
+            let (before, _) = resizer.sta().worst_slack(MinMax::Max);
+
+            let summary = repair_setup(resizer, SetupOptions::default(), &mut |_| {}).unwrap();
+
+            let (after, _) = resizer.sta().worst_slack(MinMax::Max);
+            assert!(before.time() < Seconds::ZERO);
+            assert!(after.time() > before.time(), "{before:?} to {after:?}");
+            assert_eq!(summary.wns_before, before.time());
+            assert_eq!(summary.wns_after, after.time());
+        });
+    }
+
+    #[test]
+    fn a_path_that_meets_its_clock_is_left_alone() {
+        let mut db = chain();
+        let lib = cells(&clock_cells_source());
+        let clock = "create_clock -name clk -period 10.0 [get_ports clk]\n";
+
+        with_wired_session(&mut db, &lib, clock, |resizer| {
+            let summary = repair_setup(resizer, SetupOptions::default(), &mut |_| {}).unwrap();
+
+            assert_eq!(summary.failing_before, 0);
+            assert_eq!(summary.removed + summary.resized, 0, "{summary:?}");
+        });
+    }
+}
