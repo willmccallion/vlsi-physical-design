@@ -171,19 +171,20 @@ fn a_net_is_removed_only_once_nothing_connects_to_it() {
 fn a_retired_cell_leaves_its_nets_and_comes_back() {
     let mut db = tiny_design();
     let u1 = db.cell_id("u1").unwrap();
+    let before = (net_pin_order(&db, "in"), net_pin_order(&db, "n1"));
+    assert_eq!(before.1.first().map(String::as_str), Some("u1/Y"));
 
-    db.retire_cell(u1);
+    let places = db.retire_cell(u1);
 
     assert!(db.cells[u1].retired);
     assert_eq!(net_pins(&db, "in"), vec!["PIN in"]);
     assert_eq!(net_pins(&db, "n1"), vec!["u2/A", "u3/A"]);
     assert_eq!(db.cells[u1].pins.len(), 2);
 
-    db.unretire_cell(u1);
+    db.unretire_cell(u1, places);
 
     assert!(!db.cells[u1].retired);
-    assert_eq!(net_pins(&db, "in"), vec!["PIN in", "u1/A"]);
-    assert_eq!(net_pins(&db, "n1"), vec!["u1/Y", "u2/A", "u3/A"]);
+    assert_eq!((net_pin_order(&db, "in"), net_pin_order(&db, "n1")), before);
     assert_consistent(&db);
 }
 
@@ -195,7 +196,7 @@ fn removal_drops_retired_cells_and_maps_the_survivors() {
     let u7 = db.cell_id("u7").unwrap();
     let u7_pin = db.cells[u7].pins[0];
     let n3 = db.net_id("n3").unwrap();
-    db.retire_cell(u5);
+    let _ = db.retire_cell(u5);
 
     let map = db.remove(&[u1], &[]).unwrap();
 

@@ -646,28 +646,43 @@ impl NetlistDB {
         Ok(id)
     }
 
-    /// Takes `cell` off its nets without removing it, so that the edit can
-    /// be undone with [`NetlistDB::unretire_cell`]; nothing changes for a
-    /// cell already retired.
-    pub fn retire_cell(&mut self, cell: CellId) {
-        if self.cells[cell].retired {
-            return;
+    /// Takes `cell` off its nets without removing it, returning where each
+    /// of its pins stood, in the order the cell lists them, so that
+    /// [`NetlistDB::unretire_cell`] can undo it; nothing changes for a cell
+    /// already retired, whose pins stand nowhere.
+    pub fn retire_cell(&mut self, cell: CellId) -> Vec<PinPlace> {
+        let places = self.cells[cell]
+            .pins
+            .iter()
+            .map(|&pin| self.pin_place(pin))
+            .collect();
+        if !self.cells[cell].retired {
+            for &pin in &self.cells[cell].pins {
+                let net = self.pins[pin].net;
+                self.nets[net].pins.retain(|&p| p != pin);
+            }
+            self.cells[cell].retired = true;
         }
-        for &pin in &self.cells[cell].pins {
-            let net = self.pins[pin].net;
-            self.nets[net].pins.retain(|&p| p != pin);
-        }
-        self.cells[cell].retired = true;
+        places
     }
 
-    /// Puts a retired cell back on the nets its pins kept.
-    pub fn unretire_cell(&mut self, cell: CellId) {
+    /// Puts a retired cell back on its nets, each pin where `places`, from
+    /// [`NetlistDB::retire_cell`], says it stood, or last on its net where
+    /// it stood nowhere; a cell not retired stays as it is.
+    pub fn unretire_cell(&mut self, cell: CellId, places: Vec<PinPlace>) {
         if !self.cells[cell].retired {
             return;
         }
-        for &pin in &self.cells[cell].pins {
-            let net = self.pins[pin].net;
-            self.nets[net].pins.push(pin);
+        let mut back: Vec<(PinId, PinPlace)> =
+            self.cells[cell].pins.iter().copied().zip(places).collect();
+        // Ascending, so each lands among the pins that stood before it.
+        back.sort_by_key(|(_, place)| place.index);
+        for (pin, place) in back {
+            let pins = &mut self.nets[place.net].pins;
+            match place.index {
+                Some(index) => pins.insert(index, pin),
+                None => pins.push(pin),
+            }
         }
         self.cells[cell].retired = false;
     }

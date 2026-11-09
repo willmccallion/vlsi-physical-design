@@ -57,7 +57,7 @@ pub fn repair_clock_inverters(
             .map(|pin| db.pins[pin].net)
             .collect();
         for &cell in &removed {
-            db.retire_cell(cell);
+            let _ = db.retire_cell(cell);
         }
         done.renumbering = Some(db.remove(&[], &dead_nets)?);
     }
