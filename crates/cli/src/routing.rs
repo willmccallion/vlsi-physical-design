@@ -4,7 +4,7 @@ use crate::checks::report_routing;
 use crate::phase::{Phase, PhaseTimer};
 use crate::placement::{CellPlaces, legalize};
 use crate::prepare_output_dir;
-use crate::repair::{NetlistRepair, show_design_repair, timing_repair_on};
+use crate::repair::{NetlistRepair, propagate_clocks, show_design_repair, timing_repair_on};
 use crate::report::{DesignRepairSummary, GlobalRouteRepairSummary, Report, RoutingSummary};
 use crate::{ui, visualization};
 use anyhow::Context;
@@ -65,10 +65,12 @@ fn write_state(path: &Path, state: &pare_router::RouteState) -> anyhow::Result<(
 /// Global routing with design and timing repair on its parasitics, as
 /// OpenROAD-flow-scripts' global route stage does it.
 ///
-/// After `estimate_parasitics -global_routing` come `repair_design` and
-/// detailed placement, then `repair_timing` and detailed placement again;
-/// the nets of every cell an edit or detailed placement moves are routed
-/// again. None when the run has no constraints or the repair is off.
+/// Every clock is propagated, with or without clock trees, as
+/// `set_propagated_clock [all_clocks]` there. After `estimate_parasitics
+/// -global_routing` come `repair_design` and detailed placement, then
+/// `repair_timing` and detailed placement again; the nets of every cell an
+/// edit or detailed placement moves are routed again. None when the run has
+/// no constraints or the repair is off.
 pub(crate) fn global_route_with_repair(
     config: &Config,
     db: &mut NetlistDB,
@@ -87,6 +89,7 @@ pub(crate) fn global_route_with_repair(
     let mut tables = RouteTables::default();
     let mut session = GlobalSession::new(db, &config.routing, &mut |p| tables.show(p))?;
     timer.finish(report);
+    propagate_clocks(timed.sdc);
     let sites = SiteGrid::new(db).context("cannot lay out the core's site grid to legalize on")?;
     let legalize = |db: &mut NetlistDB, cell: CellId| sites.legalize(db, cell);
     let mut summary = GlobalRouteRepairSummary::default();
@@ -400,7 +403,9 @@ fn write_routed(db: &NetlistDB, output_dir: &Path) -> anyhow::Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::testing::{half_height_tiny, scratch_dir, tiny};
+    use crate::placement::{PlacementStart, run_placement};
+    use crate::plan::FlowPlan;
+    use crate::testing::{half_height_tiny, scratch_dir, timed, timed_config, tiny};
     use pare_common::geom::dbu::Dbu;
     use pare_common::geom::point::Point;
     use pare_common::geom::rect::Rect;
@@ -474,5 +479,27 @@ mod tests {
             image::image_dimensions(dir.join("routed.png")).unwrap(),
             (ROUTED_IMAGE_PIXELS, ROUTED_IMAGE_PIXELS / 2)
         );
+    }
+
+    #[test]
+    fn repair_on_global_routes_propagates_the_clocks_without_clock_trees() {
+        let config = timed_config("clock_tree = false", &scratch_dir("propagated"));
+        let mut db = timed();
+        let plan = FlowPlan::resolve(&config, &db).unwrap();
+        let mut report = Report::default();
+        let mut repair = run_placement(
+            &config,
+            &plan,
+            &mut db,
+            PlacementStart::Scratch,
+            &mut report,
+        )
+        .unwrap()
+        .unwrap();
+
+        let _ = global_route_with_repair(&config, &mut db, &mut repair, &mut report).unwrap();
+
+        let timed = repair.timed().unwrap();
+        assert!(timed.sdc.clocks.iter().all(|clock| clock.propagated));
     }
 }

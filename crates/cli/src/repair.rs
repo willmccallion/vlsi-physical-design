@@ -118,6 +118,14 @@ impl<'r> TimedRepair<'r> {
     }
 }
 
+/// Sets every clock of `sdc` propagated through its network, as
+/// `set_propagated_clock [all_clocks]`.
+pub(crate) fn propagate_clocks(sdc: &mut Sdc) {
+    for clock in &mut sdc.clocks {
+        clock.propagated = true;
+    }
+}
+
 /// Where a repair stage finds the clocks.
 #[derive(Clone, Copy, Debug)]
 pub(crate) enum Clocks<'a> {
