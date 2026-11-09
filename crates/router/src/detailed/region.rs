@@ -230,9 +230,8 @@ impl<'p> Work<'p> {
     /// What was taken out of the net of piece `i`: nothing for a given
     /// piece, whose wiring was carved before the worker ran.
     fn removed(&self, i: usize) -> &Wiring {
-        self.victims
-            .get(i.wrapping_sub(self.given.len()))
-            .map_or(&NOTHING, |v| &v.removed)
+        i.checked_sub(self.given.len())
+            .map_or(&NOTHING, |v| &self.victims[v].removed)
     }
 
     /// The work as done, with `results` as the wiring of each piece; a
