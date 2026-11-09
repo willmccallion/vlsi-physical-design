@@ -298,4 +298,27 @@ mod tests {
              \"repeaters\":3}"
         );
     }
+
+    /// The keys of a report `scripts/compare.py` reads, by path.
+    const COMPARED_KEYS: [&str; 5] = [
+        "/netlist",
+        "/checks/wirelength_um",
+        "/checks/vias",
+        "/checks/violations",
+        "/checks/opens",
+    ];
+
+    #[test]
+    fn a_report_has_the_keys_compare_reads() {
+        let report = Report {
+            netlist: Some(NetlistSummary::default()),
+            ..Report::default()
+        };
+
+        let json = serde_json::to_value(&report).unwrap();
+
+        for key in COMPARED_KEYS {
+            assert!(json.pointer(key).is_some(), "no {key} in {json}");
+        }
+    }
 }
