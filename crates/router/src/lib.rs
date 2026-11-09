@@ -6,19 +6,21 @@
 //! crossings inside the corridors, repairing conflicts until no two nets
 //! touch or come closer than the layer spacing.
 
-pub mod access;
-pub mod detailed;
-pub mod global;
-pub mod occupancy;
-pub mod runs;
+mod access;
+mod detailed;
+mod global;
+mod occupancy;
+mod runs;
 mod search;
-pub mod session;
-pub mod shared_access;
-pub mod state;
-pub mod tech;
-pub mod track;
-pub mod tree;
-pub mod wiring;
+mod session;
+mod shared_access;
+mod state;
+mod tech;
+#[cfg(test)]
+mod tests;
+mod track;
+mod tree;
+mod wiring;
 
 use detailed::{
     DetailedRouter, Flow, FlowState, RepairStats, RestoreRoutesError, RipUp, Scope, round_costs,

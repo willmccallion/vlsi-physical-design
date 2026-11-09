@@ -32,11 +32,6 @@ impl Trace {
         }
     }
 
-    /// Whether anything is traced.
-    pub fn is_empty(&self) -> bool {
-        self.nets.is_empty() && self.area.is_none()
-    }
-
     /// Whether to trace `net`'s routing in the region `region`.
     pub(super) fn wants(&self, net: NetId, region: &Rect<Dbu>) -> bool {
         self.nets.contains(&net) || self.meets(region)
