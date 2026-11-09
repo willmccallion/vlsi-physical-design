@@ -1610,7 +1610,7 @@ fn footprint(tech: &RouteTech, a: &AccessPoint) -> Vec<(ViaId, Point<Dbu>)> {
 
 /// Signal nets with at least two pins, shortest bounding box first.
 pub(crate) fn routable_nets(db: &NetlistDB) -> Vec<NetId> {
-    let mut nets: Vec<(i64, NetId)> = (0..db.nets.len())
+    let mut nets: Vec<(Dbu, NetId)> = (0..db.nets.len())
         .map(NetId::new)
         .filter(|&n| is_signal_net(db, n))
         .map(|n| {
@@ -1623,7 +1623,7 @@ pub(crate) fn routable_nets(db: &NetlistDB) -> Vec<NetId> {
                 })
                 .reduce(|a, b| a.union(&b))
                 .unwrap_or_default();
-            ((bbox.width() + bbox.height()).get(), n)
+            (bbox.width() + bbox.height(), n)
         })
         .collect();
     nets.sort_unstable();
