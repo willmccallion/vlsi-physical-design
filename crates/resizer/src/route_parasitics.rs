@@ -13,7 +13,7 @@
 use crate::parasitics::{NetParasitics, WireShape};
 use pare_common::db::design::NetlistDB;
 use pare_common::db::global_route::{NetRoute, RoutePoint};
-use pare_common::db::indices::{LayerId, NetId};
+use pare_common::db::indices::{CutLayerId, LayerId, NetId};
 use pare_common::db::library::Library;
 use pare_common::geom::dbu::{Dbu, DbuPerMicron};
 use pare_common::units::{FaradsPerMeter, Ohms, OhmsPerMeter};
@@ -45,7 +45,7 @@ impl RouteRc {
     pub fn new(
         library: &Library,
         layers: &[(LayerId, OhmsPerMeter, FaradsPerMeter)],
-        vias: &[(usize, Ohms)],
+        vias: &[(CutLayerId, Ohms)],
         min_layer: LayerId,
     ) -> Self {
         let dbu_per_micron = library.dbu_per_micron;
@@ -56,7 +56,7 @@ impl RouteRc {
         }
         let mut via = vec![Ohms::ZERO; library.cut_layers.len()];
         for &(cut, r) in vias {
-            via[cut] = r;
+            via[cut.index()] = r;
         }
         let lef_layer = library
             .routing_layers

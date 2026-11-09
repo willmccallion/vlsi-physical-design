@@ -3,7 +3,8 @@
 use crate::{ui, visualization};
 use anyhow::Context;
 use pare_common::db::design::NetlistDB;
-use pare_common::geom::point::Point;
+use pare_common::geom::dbu::Dbu;
+use pare_common::geom::rect::Rect;
 use pare_common::verify::drc::Marker;
 
 use std::path::Path;
@@ -12,7 +13,7 @@ use std::path::Path;
 /// lists the design rule violations there.
 pub(crate) fn view_area(
     db: &NetlistDB,
-    box_um: &[f64],
+    area: Rect<Dbu>,
     nets: &[String],
     layers: &[String],
     out: &Path,
@@ -20,22 +21,15 @@ pub(crate) fn view_area(
 ) -> anyhow::Result<()> {
     use pare_common::verify::drc::{Layout, Owner, Rules, check_area};
     let units = db.dbu();
-    let at = |x: f64, y: f64| Point::new(units.to_dbu_rounded(x), units.to_dbu_rounded(y));
-    let area =
-        pare_common::geom::rect::Rect::new(at(box_um[0], box_um[1]), at(box_um[2], box_um[3]));
     let layout = Layout::from_db(db);
     let rules = Rules::from_design(db);
     let report = check_area(&layout, &rules, area);
     let mut highlight = Vec::new();
     for name in nets {
         let net = db
-            .nets
-            .iter()
-            .position(|n| &n.name == name)
+            .net_id(name)
             .with_context(|| format!("no net '{name}'"))?;
-        if let Some(owner) =
-            layout.owner_index(Owner::Net(pare_common::db::indices::NetId::new(net)))
-        {
+        if let Some(owner) = layout.owner_index(Owner::Net(net)) {
             highlight.push(owner);
         }
     }
@@ -57,13 +51,11 @@ pub(crate) fn view_area(
     let boxes: Vec<_> = markers.iter().map(|m| m.bbox).collect();
     let mut shown = vec![layers.is_empty(); db.library.routing_layers.len()];
     for name in layers {
-        let l = db
+        let layer = db
             .library
-            .routing_layers
-            .iter()
-            .position(|layer| &layer.name == name)
+            .routing_layer_id(name)
             .with_context(|| format!("no routing layer '{name}'"))?;
-        shown[l] = true;
+        shown[layer.index()] = true;
     }
     visualization::draw_area(&layout, area, &shown, &highlight, &boxes, out, size)
         .with_context(|| format!("writing {}", out.display()))?;

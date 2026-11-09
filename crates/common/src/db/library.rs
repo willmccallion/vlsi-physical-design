@@ -554,6 +554,14 @@ impl Library {
         self.layer_by_name.get(name).copied()
     }
 
+    /// Looks up a cut layer by name.
+    pub fn cut_layer_id(&self, name: &str) -> Option<CutLayerId> {
+        match self.layer_ref(name)? {
+            LayerRef::Cut(id) => Some(id),
+            LayerRef::Routing(_) => None,
+        }
+    }
+
     /// Looks up a routing layer by name.
     pub fn routing_layer_id(&self, name: &str) -> Option<LayerId> {
         match self.layer_ref(name)? {

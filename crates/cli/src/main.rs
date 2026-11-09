@@ -25,8 +25,9 @@ use clap::{Parser, Subcommand};
 use pare_common::config::{Config, DesignInput, Purpose};
 use pare_common::db::design::NetlistDB;
 use pare_common::db::parser::{bookshelf, def, lef};
-use pare_common::geom::dbu::DbuPerMicron;
+use pare_common::geom::dbu::{Dbu, DbuPerMicron};
 use pare_common::geom::point::Point;
+use pare_common::geom::rect::Rect;
 use report::Report;
 use std::path::{Path, PathBuf};
 use std::time::Instant;
@@ -221,7 +222,7 @@ fn run(command: Commands, report: &mut Report) -> anyhow::Result<()> {
         } => {
             let config = load_config(&config, report)?;
             let db = load_design(&config, placement.as_deref())?;
-            view_area(&db, &area, &nets, &layers, &out, size)
+            view_area(&db, box_in_dbu(&area, db.dbu()), &nets, &layers, &out, size)
         }
     }
 }
@@ -271,12 +272,16 @@ fn route(args: RouteArgs, report: &mut Report) -> anyhow::Result<()> {
     route_detailed(&config, &mut db, &files, None, report)
 }
 
+/// The box whose corners `corners` gives as x0, y0, x1, y1 in microns, as
+/// the command line takes it, in database `units`.
+fn box_in_dbu(corners: &[f64], units: DbuPerMicron) -> Rect<Dbu> {
+    let at = |x: f64, y: f64| Point::new(units.to_dbu_rounded(x), units.to_dbu_rounded(y));
+    Rect::new(at(corners[0], corners[1]), at(corners[2], corners[3]))
+}
+
 /// The state files `args` name, with the trace box in database `units`.
 fn state_files(args: RouteArgs, units: DbuPerMicron) -> StateFiles {
-    let area = args.trace_box.map(|b| {
-        let at = |x: f64, y: f64| Point::new(units.to_dbu_rounded(x), units.to_dbu_rounded(y));
-        pare_common::geom::rect::Rect::new(at(b[0], b[1]), at(b[2], b[3]))
-    });
+    let area = args.trace_box.map(|corners| box_in_dbu(&corners, units));
     StateFiles {
         save: args.save_state.map(|path| {
             (
