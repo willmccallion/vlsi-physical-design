@@ -621,11 +621,11 @@ impl<'a> DetailedPlacer<'a> {
     fn segment_plan(&self, db: &NetlistDB, s: usize) -> Option<Vec<(CellId, Dbu)>> {
         let seg = &self.segments[s];
         let row = &self.rows[seg.row];
-        let mut candidates: Vec<Vec<(Dbu, i64)>> = Vec::with_capacity(seg.cells.len());
+        let mut candidates: Vec<Vec<(Dbu, Dbu)>> = Vec::with_capacity(seg.cells.len());
         for &c in &seg.cells {
             let x = db.cells[c].location.x;
             let width = db.cell_size(c).x;
-            let spots: Vec<(Dbu, i64)> = (-MAX_SHIFT_SITES..=MAX_SHIFT_SITES)
+            let spots: Vec<(Dbu, Dbu)> = (-MAX_SHIFT_SITES..=MAX_SHIFT_SITES)
                 .map(|k| x + row.site * k)
                 .filter(|&p| p >= seg.lo && p + width <= seg.hi)
                 .filter(|&p| {
@@ -638,7 +638,7 @@ impl<'a> DetailedPlacer<'a> {
                         Absent::segment(s),
                     ) == 0
                 })
-                .map(|p| (p, (p - x).abs().get()))
+                .map(|p| (p, (p - x).abs()))
                 .collect();
             if spots.is_empty() {
                 return None;
@@ -647,52 +647,57 @@ impl<'a> DetailedPlacer<'a> {
         }
         let reach = self.access.map_or(Dbu::ZERO, PinAccess::reach);
         let mut pairs = PairCheck::default();
-        let mut best: Vec<Vec<(i64, usize)>> = Vec::with_capacity(candidates.len());
-        best.push(candidates[0].iter().map(|&(_, cost)| (cost, 0)).collect());
+        // Each spot's least total displacement over the cells up to it and
+        // the spot of the cell before that reaches it, none when unreachable.
+        let mut best: Vec<Vec<Option<(Dbu, usize)>>> = Vec::with_capacity(candidates.len());
+        best.push(
+            candidates[0]
+                .iter()
+                .map(|&(_, cost)| Some((cost, 0)))
+                .collect(),
+        );
         for i in 1..candidates.len() {
             let (prev, cur) = (seg.cells[i - 1], seg.cells[i]);
             let width_before = db.cell_size(prev).x;
-            let mut prefix: Vec<(i64, usize)> = Vec::with_capacity(best[i - 1].len());
-            let mut low = (i64::MAX, 0);
-            for (j, &(cost, _)) in best[i - 1].iter().enumerate() {
-                if cost < low.0 {
-                    low = (cost, j);
+            let mut prefix: Vec<Option<(Dbu, usize)>> = Vec::with_capacity(best[i - 1].len());
+            let mut low: Option<(Dbu, usize)> = None;
+            for (j, reached) in best[i - 1].iter().enumerate() {
+                if let Some((cost, _)) = *reached
+                    && low.is_none_or(|(least, _)| cost < least)
+                {
+                    low = Some((cost, j));
                 }
                 prefix.push(low);
             }
             let before = &candidates[i - 1];
-            let here: Vec<(i64, usize)> = candidates[i]
+            let here: Vec<Option<(Dbu, usize)>> = candidates[i]
                 .iter()
                 .map(|&(p, cost)| {
                     let fits = before.partition_point(|&(q, _)| q + width_before <= p);
                     let far = before.partition_point(|&(q, _)| q + width_before + reach <= p);
-                    let distant = far.checked_sub(1).map(|k| prefix[k]);
+                    let distant = far.checked_sub(1).and_then(|k| prefix[k]);
                     let near = (far..fits)
-                        .filter(|&k| best[i - 1][k].0 < i64::MAX)
-                        .filter(|&k| pairs.clear(self, db, seg.row, (prev, before[k].0), (cur, p)))
-                        .map(|k| (best[i - 1][k].0, k));
-                    match distant.into_iter().chain(near).min() {
-                        Some((total, j)) if total < i64::MAX => (total + cost, j),
-                        _ => (i64::MAX, 0),
-                    }
+                        .filter_map(|k| best[i - 1][k].map(|(total, _)| (total, k)))
+                        .filter(|&(_, k)| {
+                            pairs.clear(self, db, seg.row, (prev, before[k].0), (cur, p))
+                        });
+                    let (total, j) = distant.into_iter().chain(near).min()?;
+                    Some((total + cost, j))
                 })
                 .collect();
             best.push(here);
         }
         let last = best.len() - 1;
-        let (mut k, total) = best[last]
+        let (mut k, _) = best[last]
             .iter()
             .enumerate()
-            .map(|(k, &(total, _))| (k, total))
+            .filter_map(|(k, reached)| reached.map(|(total, _)| (k, total)))
             .min_by_key(|&(_, total)| total)?;
-        if total == i64::MAX {
-            return None;
-        }
         let mut plan = Vec::with_capacity(best.len());
         for i in (0..=last).rev() {
             let (p, _) = candidates[i][k];
             plan.push((seg.cells[i], p));
-            k = best[i][k].1;
+            k = best[i][k]?.1;
         }
         Some(plan)
     }
