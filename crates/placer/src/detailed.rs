@@ -1007,7 +1007,7 @@ impl<'a> DetailedPlacer<'a> {
             return false;
         };
 
-        for row in [r, r.saturating_sub(1), (r + 1).min(self.rows.len() - 1)] {
+        for row in rows_around(r, self.rows.len()) {
             if self.rows[row].height != size.y
                 || !db.cell_macro(cell).symmetry.allows(self.rows[row].orient)
             {
@@ -1229,6 +1229,13 @@ fn net_cost(db: &NetlistDB, net: NetId) -> f64 {
     let Some(first) = pins.next() else { return 0.0 };
     let bbox = pins.fold(Rect::new(first, first), |b, p| b.union(&Rect::new(p, p)));
     n.weight * (bbox.width() + bbox.height()).to_f64()
+}
+
+/// Row `r` and the rows below and above it, those that exist of `rows`.
+fn rows_around(r: usize, rows: usize) -> impl Iterator<Item = usize> {
+    [Some(r), r.checked_sub(1), (r + 1 < rows).then_some(r + 1)]
+        .into_iter()
+        .flatten()
 }
 
 #[cfg(test)]
@@ -1551,5 +1558,16 @@ mod tests {
             "{:?}",
             placement_violations(&db)
         );
+    }
+
+    #[test]
+    fn a_row_inside_comes_with_the_rows_below_and_above() {
+        assert_eq!(rows_around(2, 5).collect::<Vec<_>>(), [2, 1, 3]);
+    }
+
+    #[test]
+    fn an_edge_row_comes_only_with_its_one_neighbour() {
+        assert_eq!(rows_around(0, 5).collect::<Vec<_>>(), [0, 1]);
+        assert_eq!(rows_around(4, 5).collect::<Vec<_>>(), [4, 3]);
     }
 }
