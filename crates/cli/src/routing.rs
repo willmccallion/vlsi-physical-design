@@ -24,7 +24,7 @@ use pare_router::{GlobalSession, Progress, Stage};
 use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 
-/// Pixels across each side of the routed design's image.
+/// Pixels along the die's longer side in the routed design's image.
 const ROUTED_IMAGE_PIXELS: u32 = 2000;
 
 /// Where a run saves its state and when, and the state it resumes from.
@@ -432,7 +432,7 @@ fn show_stage(stage: Stage, elapsed: Duration) {
 /// Writes the routed design's image and DEF into `output_dir`.
 fn write_routed(db: &NetlistDB, output_dir: &Path) -> anyhow::Result<()> {
     let png = output_dir.join("routed.png");
-    visualization::draw_routed_design(db, &png, ROUTED_IMAGE_PIXELS, ROUTED_IMAGE_PIXELS)
+    visualization::draw_routed_design(db, &png, ROUTED_IMAGE_PIXELS)
         .with_context(|| format!("cannot write {}", png.display()))?;
     ui::wrote(&png);
     let out = output_dir.join("routed.def");
@@ -444,7 +444,7 @@ fn write_routed(db: &NetlistDB, output_dir: &Path) -> anyhow::Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::testing::{scratch_dir, tiny};
+    use crate::testing::{half_height_tiny, scratch_dir, tiny};
     use pare_common::geom::dbu::Dbu;
     use pare_common::geom::point::Point;
     use pare_common::geom::rect::Rect;
@@ -506,5 +506,17 @@ mod tests {
         write_guides(&path, &tiny(), &[]).unwrap();
 
         assert_eq!(std::fs::read_to_string(&path).unwrap(), "");
+    }
+
+    #[test]
+    fn a_routed_image_keeps_the_die_in_proportion() {
+        let dir = scratch_dir("routed-image");
+
+        write_routed(&half_height_tiny(), &dir).unwrap();
+
+        assert_eq!(
+            image::image_dimensions(dir.join("routed.png")).unwrap(),
+            (ROUTED_IMAGE_PIXELS, ROUTED_IMAGE_PIXELS / 2)
+        );
     }
 }

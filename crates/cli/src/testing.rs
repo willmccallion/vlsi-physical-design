@@ -27,6 +27,13 @@ pub(crate) fn tiny() -> NetlistDB {
     def::parse(&fixture("tiny.def"), library).unwrap()
 }
 
+/// The tiny design on a die half as tall as it is wide.
+pub(crate) fn half_height_tiny() -> NetlistDB {
+    let mut db = tiny();
+    db.die_area.max.y = db.die_area.min.y + db.die_area.height() / 2;
+    db
+}
+
 /// A config for the tiny design with the TOML `tables` beside its input.
 pub(crate) fn tiny_config(tables: &str) -> Config {
     let quoted = |p: &Path| format!("{:?}", p.display().to_string());
