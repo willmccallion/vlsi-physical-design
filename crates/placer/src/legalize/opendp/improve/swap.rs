@@ -253,3 +253,18 @@ fn vertical_trial(imp: &mut Improver, n: NodeId) -> Result<bool> {
     }
     imp.try_swap(n, si, xj, sj)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_cell_is_centered_in_a_box_rounding_down() {
+        assert_eq!(centered(0, 11, 4), 3);
+    }
+
+    #[test]
+    fn a_cell_centered_left_of_the_origin_rounds_toward_minus_infinity() {
+        assert_eq!(centered(-10, -1, 4), -8);
+    }
+}

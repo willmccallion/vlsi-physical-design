@@ -189,3 +189,80 @@ pub(super) fn merge_intervals(sorted: &[(i64, i64)]) -> Vec<(i64, i64)> {
     }
     merged
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    const ROW_HEIGHT: i64 = 100;
+
+    /// Rows `ROW_HEIGHT` high stacked from the bottom at zero.
+    fn rows(count: i64) -> Arch {
+        let rows: Vec<Row> = (0..count)
+            .map(|r| Row {
+                left: 0,
+                bottom: r * ROW_HEIGHT,
+                height: ROW_HEIGHT,
+                site_spacing: 10,
+                site_width: 10,
+                num_sites: 10,
+                orient: Orientation::N,
+                symmetry: Symmetry::default(),
+            })
+            .collect();
+        Arch {
+            rows,
+            min_x: 0,
+            max_x: 100,
+            min_y: 0,
+            max_y: count * ROW_HEIGHT,
+        }
+    }
+
+    #[test]
+    fn overlapping_and_touching_intervals_merge_and_apart_ones_stay() {
+        let merged = merge_intervals(&[(0, 2), (1, 3), (3, 4), (6, 7)]);
+
+        assert_eq!(merged, [(0, 4), (6, 7)]);
+    }
+
+    #[test]
+    fn no_intervals_merge_into_none() {
+        assert_eq!(merge_intervals(&[]), []);
+    }
+
+    #[test]
+    fn a_point_below_the_rows_is_closest_to_the_first() {
+        assert_eq!(rows(3).closest_row(-5), 0);
+    }
+
+    #[test]
+    fn a_point_above_the_rows_is_closest_to_the_last() {
+        assert_eq!(rows(3).closest_row(500), 2);
+    }
+
+    #[test]
+    fn a_point_is_closest_to_the_row_whose_bottom_is_nearest() {
+        let arch = rows(3);
+
+        assert_eq!(
+            [40, 60, 100, 160].map(|y| arch.closest_row(y)),
+            [0, 1, 1, 2]
+        );
+    }
+
+    #[test]
+    fn a_point_halfway_between_rows_is_closest_to_the_lower() {
+        assert_eq!(rows(3).closest_row(150), 1);
+    }
+
+    #[test]
+    fn a_cell_spans_its_height_in_rows_rounded_half_up() {
+        let arch = rows(3);
+
+        assert_eq!(
+            [100, 140, 150, 200].map(|h| arch.rows_spanned(h)),
+            [1, 1, 2, 2]
+        );
+    }
+}

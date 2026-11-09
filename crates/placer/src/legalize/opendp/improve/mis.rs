@@ -351,3 +351,30 @@ fn hpwl_at(imp: &Improver, n: NodeId, x: i64, y: i64) -> i64 {
     }
     hpwl
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    const TOLERANCE: f64 = 0.005;
+
+    #[test]
+    fn a_pass_converges_when_it_changes_the_wirelength_within_the_tolerance() {
+        assert!(converged(1000, 995, TOLERANCE));
+    }
+
+    #[test]
+    fn a_pass_saving_more_than_the_tolerance_has_not_converged() {
+        assert!(!converged(1000, 990, TOLERANCE));
+    }
+
+    #[test]
+    fn a_pass_lengthening_the_nets_past_the_tolerance_has_not_converged() {
+        assert!(!converged(1000, 1010, TOLERANCE));
+    }
+
+    #[test]
+    fn no_wirelength_to_improve_has_converged() {
+        assert!(converged(0, 50, TOLERANCE));
+    }
+}
