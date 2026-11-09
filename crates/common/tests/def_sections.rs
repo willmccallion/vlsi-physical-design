@@ -434,6 +434,20 @@ fn blockages_keep_their_rectangles_past_their_options() {
 }
 
 #[test]
+fn a_fill_or_slot_layer_blockage_stays_a_routing_blockage() {
+    let fills = "BLOCKAGES 2 ;
+     - LAYER M2 + FILLS RECT ( 300 0 ) ( 400 100 ) ;
+     - LAYER M1 + SLOTS + EXCEPTPGNET RECT ( 0 0 ) ( 100 100 ) ;
+     END BLOCKAGES
+COMPONENTS 8 ;";
+
+    let db = design_with(&[("COMPONENTS 8 ;", fills)]).unwrap();
+
+    let rects: Vec<Rect<Dbu>> = db.routing_blockages.iter().map(|b| b.rect).collect();
+    assert_eq!(rects, [rect(300, 0, 400, 100), rect(0, 0, 100, 100)]);
+}
+
+#[test]
 fn detailed_placement_may_use_only_soft_blockages() {
     let db = design_with(&[("COMPONENTS 8 ;", BLOCKAGES)]).unwrap();
 

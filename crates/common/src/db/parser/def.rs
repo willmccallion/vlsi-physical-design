@@ -69,6 +69,10 @@ const SPECIAL_NET_IGNORED: &[&str] = &[
     "VOLTAGE",
 ];
 
+/// Layer blockage options that make it something other than a routing
+/// blockage.
+const LAYER_BLOCKAGE_KINDS: &[&str] = &["FILLS", "SLOTS", "EXCEPTPGNET"];
+
 /// Reads the `UNITS DISTANCE MICRONS` value of a DEF file.
 ///
 /// LEF geometry must be converted at this resolution, so this runs before
@@ -294,6 +298,19 @@ impl<'a> DefParser<'a> {
         {
             let _ = self.lx.next_token();
         }
+    }
+
+    /// Skips a layer blockage option, warning once of one that changes what
+    /// the blockage is.
+    fn skip_layer_blockage_option(&mut self) {
+        // NOTE: io::Parser::setObstructions keeps only the layer and box, so
+        // a fill, slot or non-PG blockage still blocks all routing; kept.
+        if let Some(t) = self.lx.peek()
+            && LAYER_BLOCKAGE_KINDS.contains(&t.text)
+        {
+            self.warn(t, "layer blockage kind");
+        }
+        self.skip_blockage_option();
     }
 
     /// Reads a placement blockage's options. As in `OpenDB`, a maximum
@@ -806,7 +823,7 @@ impl<'a> DefParser<'a> {
             "LAYER" => {
                 let layer = self.any_layer()?;
                 while self.lx.accept("+") {
-                    self.skip_blockage_option();
+                    self.skip_layer_blockage_option();
                 }
                 while self.lx.accept("RECT") {
                     let rect = self.rect()?;
