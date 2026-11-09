@@ -894,8 +894,7 @@ fn post_process(measurements: &[Measured], plan: &Plan) -> (Vec<Normalized>, All
             .iter()
             .map(|piece| match *piece {
                 Piece::Wire(length) => {
-                    let share = format!("{:.6}", length / f64::from(m.wirelength));
-                    NormalizedPiece::Share(share.parse().unwrap_or(0.0))
+                    NormalizedPiece::Share(round_six_decimals(length / f64::from(m.wirelength)))
                 }
                 Piece::Buffer(b) => NormalizedPiece::Buffer(b),
             })
@@ -912,6 +911,13 @@ fn post_process(measurements: &[Measured], plan: &Plan) -> (Vec<Normalized>, All
         });
     }
     (lines, bounds)
+}
+
+/// `value` written with six decimals and read back, as `TechChar` stores
+/// a pattern's wire shares in the text of its table.
+fn round_six_decimals(value: f64) -> f64 {
+    // Whatever `{:.6}` writes, NaN and infinities included, parses back.
+    format!("{value:.6}").parse().unwrap_or(value)
 }
 
 /// Builds the table from the normalized measurements, as
