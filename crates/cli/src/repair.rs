@@ -228,11 +228,9 @@ pub(crate) fn repair_netlist<'p>(
         let timer = PhaseTimer::start(Phase::BufferRemoval);
         let before = db.cells.len();
         summary.buffers_removed = pare_resizer::remove_buffers(db, &link, sdc.as_ref())?;
-        ui::stat_row(
-            "Removed:",
-            &summary.buffers_removed.to_string(),
-            "Cells:",
-            &format!("{before} -> {}", db.cells.len()),
+        ui::stat_pair(
+            ("Removed:", &summary.buffers_removed.to_string()),
+            ("Cells:", &format!("{before} -> {}", db.cells.len())),
         );
         timer.finish(report);
     }
@@ -252,17 +250,13 @@ pub(crate) fn repair_netlist<'p>(
         summary
             .buffer_cell
             .clone_from(&liberty.cell(stage.buffers.lowest_drive.id).name);
-        ui::stat_row(
-            "Input buffers:",
-            &done.inputs.to_string(),
-            "Output buffers:",
-            &done.outputs.to_string(),
+        ui::stat_pair(
+            ("Input buffers:", &done.inputs.to_string()),
+            ("Output buffers:", &done.outputs.to_string()),
         );
-        ui::stat_row(
-            "Buffer:",
-            &summary.buffer_cell,
-            "Clock pins:",
-            &stage.clocks.sources().len().to_string(),
+        ui::stat_pair(
+            ("Buffer:", &summary.buffer_cell),
+            ("Clock pins:", &stage.clocks.sources().len().to_string()),
         );
         timer.finish(report);
     }
@@ -314,23 +308,17 @@ pub(crate) fn repair_design_on<T: Timing>(
 
 /// Shows what design repair found and did.
 fn show_design_repair(done: &pare_resizer::RepairSummary, cells: usize) {
-    ui::stat_row(
-        "Slew violations:",
-        &done.slew_violations.to_string(),
-        "Cap violations:",
-        &done.cap_violations.to_string(),
+    ui::stat_pair(
+        ("Slew violations:", &done.slew_violations.to_string()),
+        ("Cap violations:", &done.cap_violations.to_string()),
     );
-    ui::stat_row(
-        "Resized:",
-        &done.resized.to_string(),
-        "Repeaters:",
-        &done.inserted.to_string(),
+    ui::stat_pair(
+        ("Resized:", &done.resized.to_string()),
+        ("Repeaters:", &done.inserted.to_string()),
     );
-    ui::stat_row(
-        "Nets repaired:",
-        &done.repaired_nets.to_string(),
-        "Cells:",
-        &cells.to_string(),
+    ui::stat_pair(
+        ("Nets repaired:", &done.repaired_nets.to_string()),
+        ("Cells:", &cells.to_string()),
     );
 }
 
@@ -395,60 +383,64 @@ fn show_setup_progress(progress: &SetupProgress) {
 /// Shows what setup and hold repair found and did, naming hold's buffer
 /// from `liberty`.
 fn show_timing_repair(setup: &SetupSummary, hold: &HoldSummary, liberty: &Liberty) {
-    ui::stat_row(
-        "WNS (ns):",
-        &format!(
-            "{:.3} -> {:.3}",
-            setup.wns_before.nanos(),
-            setup.wns_after.nanos()
+    ui::stat_pair(
+        (
+            "WNS (ns):",
+            &format!(
+                "{:.3} -> {:.3}",
+                setup.wns_before.nanos(),
+                setup.wns_after.nanos()
+            ),
         ),
-        "TNS (ns):",
-        &format!(
-            "{:.1} -> {:.1}",
-            setup.tns_before.nanos(),
-            setup.tns_after.nanos()
+        (
+            "TNS (ns):",
+            &format!(
+                "{:.1} -> {:.1}",
+                setup.tns_before.nanos(),
+                setup.tns_after.nanos()
+            ),
         ),
     );
-    ui::stat_row(
-        "Failing endpoints:",
-        &format!("{} -> {}", setup.failing_before, setup.failing_after),
-        "Iterations:",
-        &setup.iterations.to_string(),
-    );
-    ui::stat_row(
-        "Removed:",
-        &setup.removed.to_string(),
-        "Resized:",
-        &setup.resized.to_string(),
-    );
-    ui::stat_row(
-        "Inserted:",
-        &setup.inserted.to_string(),
-        "Cloned:",
-        &setup.cloned.to_string(),
-    );
-    ui::stat_row(
-        "Pin swaps:",
-        &setup.swapped.to_string(),
-        "Area:",
-        &format!("{:+.1}%", setup.area_change_percent),
-    );
-    ui::stat_row(
-        "Hold WNS (ns):",
-        &format!(
-            "{:.3} -> {:.3}",
-            hold.wns_before.nanos(),
-            hold.wns_after.nanos()
+    ui::stat_pair(
+        (
+            "Failing endpoints:",
+            &format!("{} -> {}", setup.failing_before, setup.failing_after),
         ),
-        "Hold failing:",
-        &format!("{} -> {}", hold.failing_before, hold.failing_after),
+        ("Iterations:", &setup.iterations.to_string()),
     );
-    ui::stat_row(
-        "Hold buffers:",
-        &hold.inserted.to_string(),
-        "Hold buffer:",
-        hold.buffer
-            .map_or("none", |b| liberty.cell(b).name.as_str()),
+    ui::stat_pair(
+        ("Removed:", &setup.removed.to_string()),
+        ("Resized:", &setup.resized.to_string()),
+    );
+    ui::stat_pair(
+        ("Inserted:", &setup.inserted.to_string()),
+        ("Cloned:", &setup.cloned.to_string()),
+    );
+    ui::stat_pair(
+        ("Pin swaps:", &setup.swapped.to_string()),
+        ("Area:", &format!("{:+.1}%", setup.area_change_percent)),
+    );
+    ui::stat_pair(
+        (
+            "Hold WNS (ns):",
+            &format!(
+                "{:.3} -> {:.3}",
+                hold.wns_before.nanos(),
+                hold.wns_after.nanos()
+            ),
+        ),
+        (
+            "Hold failing:",
+            &format!("{} -> {}", hold.failing_before, hold.failing_after),
+        ),
+    );
+    ui::stat_pair(
+        ("Hold buffers:", &hold.inserted.to_string()),
+        (
+            "Hold buffer:",
+            hold.buffer
+                .map_or("none", |b| liberty.cell(b).name.as_str()),
+        ),
     );
 }
 

@@ -24,35 +24,49 @@ pub(crate) fn report_placement(db: &NetlistDB, report: &mut Report) -> bool {
     }
     let count = |f: fn(&PlacementViolation) -> bool| violations.iter().filter(|v| f(v)).count();
     ui::fail(&format!("Placement has {} violations", violations.len()));
-    ui::stat_row(
-        "Outside die:",
-        &count(|v| matches!(v, PlacementViolation::OutsideDie(_))).to_string(),
-        "Overlaps:",
-        &count(|v| matches!(v, PlacementViolation::Overlap(..))).to_string(),
+    ui::stat_pair(
+        (
+            "Outside die:",
+            &count(|v| matches!(v, PlacementViolation::OutsideDie(_))).to_string(),
+        ),
+        (
+            "Overlaps:",
+            &count(|v| matches!(v, PlacementViolation::Overlap(..))).to_string(),
+        ),
     );
-    ui::stat_row(
-        "Not in a row:",
-        &count(|v| matches!(v, PlacementViolation::NotInRow(_))).to_string(),
-        "Off site:",
-        &count(|v| matches!(v, PlacementViolation::OffSite(_))).to_string(),
+    ui::stat_pair(
+        (
+            "Not in a row:",
+            &count(|v| matches!(v, PlacementViolation::NotInRow(_))).to_string(),
+        ),
+        (
+            "Off site:",
+            &count(|v| matches!(v, PlacementViolation::OffSite(_))).to_string(),
+        ),
     );
-    ui::stat_row(
-        "Wrong orient:",
-        &count(|v| matches!(v, PlacementViolation::WrongOrientation(_))).to_string(),
-        "In blockage:",
-        &count(|v| matches!(v, PlacementViolation::InBlockage(_))).to_string(),
+    ui::stat_pair(
+        (
+            "Wrong orient:",
+            &count(|v| matches!(v, PlacementViolation::WrongOrientation(_))).to_string(),
+        ),
+        (
+            "In blockage:",
+            &count(|v| matches!(v, PlacementViolation::InBlockage(_))).to_string(),
+        ),
     );
-    ui::stat_row(
-        "Outside region:",
-        &count(|v| matches!(v, PlacementViolation::OutsideRegion(_))).to_string(),
-        "In a fence:",
-        &count(|v| matches!(v, PlacementViolation::InFence(_))).to_string(),
+    ui::stat_pair(
+        (
+            "Outside region:",
+            &count(|v| matches!(v, PlacementViolation::OutsideRegion(_))).to_string(),
+        ),
+        (
+            "In a fence:",
+            &count(|v| matches!(v, PlacementViolation::InFence(_))).to_string(),
+        ),
     );
-    ui::stat_row(
+    ui::stat(
         "Unplaced:",
         &count(|v| matches!(v, PlacementViolation::Unplaced(_))).to_string(),
-        "",
-        "",
     );
     false
 }
@@ -103,23 +117,17 @@ pub(crate) fn report_routing(db: &NetlistDB, run: &mut Report) -> bool {
         .iter()
         .map(|&l| units.to_microns(l))
         .sum();
-    ui::stat_row(
-        "Opens:",
-        &report.opens.len().to_string(),
-        "Wirelength (um):",
-        &format!("{wirelength:.0}"),
+    ui::stat_pair(
+        ("Opens:", &report.opens.len().to_string()),
+        ("Wirelength (um):", &format!("{wirelength:.0}")),
     );
-    ui::stat_row(
-        "Vias:",
-        &report.stats.vias.to_string(),
-        "Off track:",
-        &report.stats.off_track.to_string(),
+    ui::stat_pair(
+        ("Vias:", &report.stats.vias.to_string()),
+        ("Off track:", &report.stats.off_track.to_string()),
     );
-    ui::stat_row(
-        "Wrong way:",
-        &report.stats.wrong_way.to_string(),
-        "Non-Manhattan:",
-        &report.stats.non_manhattan.to_string(),
+    ui::stat_pair(
+        ("Wrong way:", &report.stats.wrong_way.to_string()),
+        ("Non-Manhattan:", &report.stats.non_manhattan.to_string()),
     );
     let drc = check_drc(db);
     for m in &drc.violations {
@@ -137,33 +145,25 @@ pub(crate) fn report_routing(db: &NetlistDB, run: &mut Report) -> bool {
     for m in &drc.input {
         log::debug!("drc in the input: {}", describe_marker(db, &drc, m));
     }
-    ui::stat_row(
-        "DRC violations:",
-        &drc.violations.len().to_string(),
-        "From placement:",
-        &drc.placement.len().to_string(),
+    ui::stat_pair(
+        ("DRC violations:", &drc.violations.len().to_string()),
+        ("From placement:", &drc.placement.len().to_string()),
     );
-    ui::stat_row(
-        "In the input:",
-        &drc.input.len().to_string(),
-        "Advisory:",
-        &drc.advisory.len().to_string(),
+    ui::stat_pair(
+        ("In the input:", &drc.input.len().to_string()),
+        ("Advisory:", &drc.advisory.len().to_string()),
     );
-    ui::stat_row(
+    ui::stat(
         "Pins in obstructions:",
         &drc.pin_obstruction.len().to_string(),
-        "",
-        "",
     );
     for (kind, count) in drc.counts() {
-        ui::stat_row(&format!("  {}:", kind.name()), &count.to_string(), "", "");
+        ui::stat(&format!("  {}:", kind.name()), &count.to_string());
     }
     for (kind, count) in drc.advisory_counts() {
-        ui::stat_row(
+        ui::stat(
             &format!("  {} (advisory):", kind.name()),
             &count.to_string(),
-            "",
-            "",
         );
     }
     let by_kind = |counts: Vec<(pare_common::verify::drc::Violation, usize)>| {

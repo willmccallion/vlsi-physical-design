@@ -40,9 +40,21 @@ pub(crate) fn header(label: &str, value: &str) {
     eprintln!("  {} {}  {}", ">".cyan().bold(), label.cyan().bold(), value);
 }
 
-/// Prints a two-column stat row with dimmed labels.
-pub(crate) fn stat_row(l1: &str, v1: &str, l2: &str, v2: &str) {
-    eprintln!("    {:<18} {:<14} {:<18} {}", l1.dim(), v1, l2.dim(), v2);
+/// Prints one stat, its label dimmed.
+pub(crate) fn stat(label: &str, value: &str) {
+    eprintln!("    {:<18} {}", label.dim(), value);
+}
+
+/// Prints two stats side by side, each given as its label and value, the
+/// labels dimmed.
+pub(crate) fn stat_pair(left: (&str, &str), right: (&str, &str)) {
+    eprintln!(
+        "    {:<18} {:<14} {:<18} {}",
+        left.0.dim(),
+        left.1,
+        right.0.dim(),
+        right.1
+    );
 }
 
 /// Prints the header row for placement iteration table.
