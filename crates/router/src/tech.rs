@@ -10,7 +10,7 @@ use crate::RouteError;
 use pare_common::config::RoutingConfig;
 use pare_common::db::design::NetlistDB;
 use pare_common::db::design::NonDefaultRule;
-use pare_common::db::indices::{CutLayerId, LayerId, NonDefaultRuleId, ViaId};
+use pare_common::db::indices::{CutLayerId, IdVec, LayerId, NetId, NonDefaultRuleId, ViaId};
 use pare_common::db::library::{Direction, LayerRef, Library, Shape};
 use pare_common::db::rules::SpacingTable;
 use pare_common::geom::dbu::Dbu;
@@ -197,7 +197,7 @@ pub struct RouteTech {
     /// Every non-default rule's widths and spacings, indexed by rule id.
     rules: Vec<RuleTech>,
     /// The non-default rule each net follows, indexed by net.
-    net_rules: Vec<Option<NonDefaultRuleId>>,
+    net_rules: IdVec<NetId, Option<NonDefaultRuleId>>,
     /// The track spacing a gcell's edge is a multiple of.
     pub gcell_pitch: Dbu,
     /// The step every wire end must fall on, one without a stated grid.
@@ -205,7 +205,7 @@ pub struct RouteTech {
 }
 
 /// The non-default rule each net of `db` follows, indexed by net.
-fn net_rules(db: &NetlistDB) -> Vec<Option<NonDefaultRuleId>> {
+fn net_rules(db: &NetlistDB) -> IdVec<NetId, Option<NonDefaultRuleId>> {
     db.nets.iter().map(|n| n.non_default_rule).collect()
 }
 
@@ -342,8 +342,9 @@ impl RouteTech {
         self.net_rules = net_rules(db);
     }
 
-    /// The non-default rule the net at index `net` follows, if any.
-    pub fn net_rule(&self, net: usize) -> Option<NonDefaultRuleId> {
+    /// The non-default rule `net` follows, if any; a net added since the
+    /// rules were last read follows none.
+    pub fn net_rule(&self, net: NetId) -> Option<NonDefaultRuleId> {
         self.net_rules.get(net).copied().flatten()
     }
 

@@ -208,7 +208,7 @@ impl<'p> Work<'p> {
     /// counts as routed with no edges.
     fn add_victim(&mut self, net: NetId, removed: Wiring, piece: Option<Piece>) -> usize {
         self.results.push(piece.is_none().then(Wiring::default));
-        self.ripped.push(Owner::Net(net.0));
+        self.ripped.push(Owner::Net(net));
         self.victims.push(Victim {
             net,
             removed,
@@ -398,7 +398,7 @@ impl DetailedRouter<'_> {
             let mut nets: Vec<NetId> = m.nets.iter().flatten().copied().collect();
             nets.dedup();
             let routes: Vec<(NetId, &NetRoute)> =
-                nets.iter().map(|&n| (n, &self.routes[n.index()])).collect();
+                nets.iter().map(|&n| (n, &self.routes[n])).collect();
             self.mark_violation(&mut marks, area, m.layer, &m.bbox, &routes);
         }
         marks
@@ -428,12 +428,7 @@ impl DetailedRouter<'_> {
             }
             let routes: Vec<(NetId, &NetRoute)> = nets
                 .iter()
-                .map(|&n| {
-                    (
-                        n,
-                        proposed.get(&n).unwrap_or_else(|| &self.routes[n.index()]),
-                    )
-                })
+                .map(|&n| (n, proposed.get(&n).unwrap_or_else(|| &self.routes[n])))
                 .collect();
             self.mark_violation(marks, area, m.layer, &m.bbox, &routes);
         }
@@ -449,7 +444,7 @@ impl DetailedRouter<'_> {
         let mut regions_of: BTreeMap<NetId, Vec<usize>> = BTreeMap::new();
         for (r, job) in batch.iter().enumerate() {
             for &net in &job.nets {
-                if self.routes[net.index()].complete {
+                if self.routes[net].complete {
                     regions_of.entry(net).or_default().push(r);
                 }
             }
@@ -573,7 +568,7 @@ impl DetailedRouter<'_> {
         let routes: Vec<(NetId, NetRoute)> = changes
             .into_par_iter()
             .map(|(net, change)| {
-                let mut route = self.routes[net.index()].clone();
+                let mut route = self.routes[net].clone();
                 route.edges.retain(|e| !change.removed_edges.contains(&e));
                 route
                     .patches
@@ -594,7 +589,7 @@ impl DetailedRouter<'_> {
     /// all areas at once means that joining each area's groups restores every
     /// connection the removed edges made.
     fn carve(&self, net: NetId, areas: &[Rect<Dbu>]) -> Vec<(Wiring, Option<Piece>)> {
-        let route = &self.routes[net.index()];
+        let route = &self.routes[net];
         let area_of = |n: Node| {
             let p = self.point(n);
             areas.iter().position(|a| contains_half_open(a, p))
@@ -710,7 +705,7 @@ impl DetailedRouter<'_> {
                 let Some(piece) = work.piece(i) else {
                     continue;
                 };
-                let owner = Owner::Net(piece.net.0);
+                let owner = Owner::Net(piece.net);
                 overlay.remove_owner(owner);
                 let search = Search {
                     db: self.db,
@@ -813,14 +808,14 @@ impl DetailedRouter<'_> {
         work: &mut Work<'_>,
         overlay: &mut LocalOccupancy,
     ) -> Option<usize> {
-        if !self.routes[net.index()].complete {
+        if !self.routes[net].complete {
             return None;
         }
         let (inside, piece) = self.carve(net, &[*area]).pop()?;
         if inside.is_empty() {
             return None;
         }
-        let route = &self.routes[net.index()];
+        let route = &self.routes[net];
         let mut edges = route.edges.clone();
         edges.subtract(&inside.edges.iter().copied().collect());
         let kept = NetRoute {
@@ -835,7 +830,7 @@ impl DetailedRouter<'_> {
             ..NetRoute::default()
         };
         let near = area.expand(self.halo);
-        let owner = Owner::Net(net.0);
+        let owner = Owner::Net(net);
         for (layer, rect) in kept.metal(self.db, self.tech, net) {
             if self.tech.routable(layer) && rect.touches(&near) {
                 overlay.keep_rect(self.tech, layer, &rect, owner);
@@ -865,7 +860,7 @@ impl DetailedRouter<'_> {
     /// How early `net` routes: [`NDR_PRIORITY`] under a non-default rule,
     /// whose wider wires and spacing have the fewest ways through.
     fn priority(&self, net: NetId) -> u8 {
-        if self.tech.net_rule(net.index()).is_some() {
+        if self.tech.net_rule(net).is_some() {
             NDR_PRIORITY
         } else {
             0
@@ -1044,7 +1039,7 @@ impl DetailedRouter<'_> {
     /// crowd.
     fn vias_near(&self, net: NetId, area: &Rect<Dbu>) -> OwnVias {
         let near = area.expand(self.gcell);
-        let mut own = OwnVias::new(self.db, self.tech, self.tech.net_rule(net.index()));
+        let mut own = OwnVias::new(self.db, self.tech, self.tech.net_rule(net));
         for (via, at) in self.wiring_vias(net) {
             if near.contains(at) {
                 own.add(via, at);
@@ -1062,7 +1057,7 @@ impl DetailedRouter<'_> {
                     .wiring_owners_in(self.tech, LayerId::new(l), &probe)
             })
             .filter_map(|o| match o {
-                Owner::Net(n) => Some(NetId(n)),
+                Owner::Net(n) => Some(n),
                 Owner::Obstacle => None,
             })
             .collect();

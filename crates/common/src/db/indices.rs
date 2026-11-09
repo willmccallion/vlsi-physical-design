@@ -150,6 +150,17 @@ impl<I: TableIndex, T> IdVec<I, T> {
     }
 }
 
+impl<I: TableIndex + Send, T: Sync> IdVec<I, T> {
+    /// Every entry with its index, in parallel.
+    pub fn par_iter_enumerated(&self) -> impl rayon::iter::IndexedParallelIterator<Item = (I, &T)> {
+        use rayon::prelude::*;
+        self.entries
+            .par_iter()
+            .enumerate()
+            .map(|(i, entry)| (I::from_position(i), entry))
+    }
+}
+
 impl<I: TableIndex + Send, T: Send> IdVec<I, T> {
     /// Every entry to change with its index, in parallel.
     pub fn par_iter_enumerated_mut(

@@ -224,7 +224,7 @@ impl DetailedRouter<'_> {
         let mut present: FxHashSet<NetId> = FxHashSet::default();
         let mut note = |owner: crate::occupancy::Owner| {
             if let crate::occupancy::Owner::Net(n) = owner {
-                let _ = present.insert(NetId(n));
+                let _ = present.insert(n);
             }
         };
         for l in self.tech.min_layer.index()..=self.tech.max_layer.index() {
@@ -241,7 +241,7 @@ impl DetailedRouter<'_> {
         }
         for net in present {
             if !candidate_nets.contains(&net) {
-                layout.add_wiring(self.db, net, &self.elems[net.index()], Some(window));
+                layout.add_wiring(self.db, net, &self.elems[net], Some(window));
             }
         }
         for c in candidates {
@@ -282,12 +282,11 @@ impl DetailedRouter<'_> {
     /// The box around every shape of every net's wiring.
     fn wiring_bounds(&self) -> Option<Rect<Dbu>> {
         self.elems
-            .par_iter()
-            .enumerate()
+            .par_iter_enumerated()
             .filter_map(|(n, elems)| {
                 elems
                     .iter()
-                    .flat_map(|e| route_elem_shapes(self.db, NetId::new(n), e))
+                    .flat_map(|e| route_elem_shapes(self.db, n, e))
                     .map(|s| s.rect)
                     .reduce(|a, b| a.union(&b))
             })
@@ -298,7 +297,7 @@ impl DetailedRouter<'_> {
     /// its tracks filled as committing it does, so that it is judged there as
     /// it will be kept; only its wiring within a halo of `window` is built.
     pub(super) fn as_committed(&self, c: &Candidate<'_>, window: &Rect<Dbu>) -> NetRoute {
-        let mut route = self.routes[c.net.index()].near(self.tech, &window.expand(self.halo));
+        let mut route = self.routes[c.net].near(self.tech, &window.expand(self.halo));
         if !c.without.is_empty() {
             let gone: EdgeSet = c.without.edges.iter().copied().collect();
             route.edges.subtract(&gone);

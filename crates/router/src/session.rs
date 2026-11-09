@@ -535,7 +535,7 @@ mod tests {
 
         let (tech, ..) = session.into_parts(&db);
 
-        let rules: Vec<_> = (0..db.nets.len()).map(|n| tech.net_rule(n)).collect();
+        let rules: Vec<_> = db.nets.ids().map(|n| tech.net_rule(n)).collect();
         let wanted: Vec<_> = db.nets.iter().map(|n| n.non_default_rule).collect();
         assert_eq!(rules, wanted);
     }

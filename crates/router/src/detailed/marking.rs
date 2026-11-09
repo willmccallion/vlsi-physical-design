@@ -60,7 +60,7 @@ impl DetailedRouter<'_> {
         route: &NetRoute,
     ) {
         let lt = self.tech.layer(layer);
-        let width = self.tech.wire_width(self.tech.net_rule(net.index()), layer);
+        let width = self.tech.wire_width(self.tech.net_rule(net), layer);
         let along = lt.across_along_rect(bbox).1;
         let inside = |n: Node| contains_half_open(area, self.point(n));
         let mut steps: Vec<(u32, u32)> = route

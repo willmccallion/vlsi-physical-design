@@ -19,7 +19,7 @@
 //! coarser buckets so they do not widen every query.
 
 use crate::tech::{CutTech, LayerTech, RouteTech};
-use pare_common::db::indices::{CutLayerId, LayerId, NonDefaultRuleId};
+use pare_common::db::indices::{CutLayerId, LayerId, NetId, NonDefaultRuleId};
 use pare_common::db::library::LayerRef;
 use pare_common::db::rules::SpacingTable;
 use pare_common::db::shapes::{self, OwnedShape};
@@ -31,8 +31,8 @@ use rustc_hash::FxHashMap;
 /// What occupies a stretch of track.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub enum Owner {
-    /// A signal net, by index.
-    Net(u32),
+    /// A signal net.
+    Net(NetId),
     /// Something no net may approach: an obstruction, a supply or unused
     /// pin, a special net or a blockage.
     Obstacle,
@@ -553,7 +553,7 @@ fn narrow_side(rect: &Rect<Dbu>) -> Dbu {
 /// The non-default rule `owner` follows.
 fn rule_of(tech: &RouteTech, owner: Owner) -> Option<NonDefaultRuleId> {
     match owner {
-        Owner::Net(n) => tech.net_rule(n as usize),
+        Owner::Net(n) => tech.net_rule(n),
         Owner::Obstacle => None,
     }
 }
@@ -652,7 +652,7 @@ impl FixedTracks {
             }
             let lt = tech.layer(layer);
             let rule = match s.owner {
-                shapes::Owner::Net(n) => tech.net_rule(n.index()),
+                shapes::Owner::Net(n) => tech.net_rule(n),
                 shapes::Owner::Obstacle => None,
             };
             let spacing = tech.wire_spacing(rule, layer);
@@ -811,7 +811,7 @@ impl Occupancy {
         let mut settle: Vec<TrackRef> = Vec::new();
         for s in shapes {
             let owner = match s.owner {
-                shapes::Owner::Net(n) => Owner::Net(n.0),
+                shapes::Owner::Net(n) => Owner::Net(n),
                 shapes::Owner::Obstacle => Owner::Obstacle,
             };
             match s.shape.layer {
@@ -1186,10 +1186,10 @@ mod tests {
         ));
 
         let near_edge = cuts
-            .conflicts(rect(300_050, 100, 300_150, 200), Owner::Net(1))
+            .conflicts(rect(300_050, 100, 300_150, 200), Owner::Net(NetId(1)))
             .count();
         let clear = cuts
-            .conflicts(rect(300_100, 100, 300_200, 200), Owner::Net(1))
+            .conflicts(rect(300_100, 100, 300_200, 200), Owner::Net(NetId(1)))
             .count();
 
         assert_eq!(near_edge, 1);
@@ -1206,7 +1206,7 @@ mod tests {
         ));
 
         let spanning = cuts
-            .conflicts(rect(51_100, 39_950, 51_300, 40_050), Owner::Net(1))
+            .conflicts(rect(51_100, 39_950, 51_300, 40_050), Owner::Net(NetId(1)))
             .count();
 
         assert_eq!(spanning, 1);
@@ -1216,9 +1216,13 @@ mod tests {
     fn removing_wiring_keeps_fixed_cuts_in_both_tiers() {
         let mut cuts = layer();
         let shapes = [
-            cut(rect(0, 0, 100, 100), Owner::Net(1), Origin::Wiring),
-            cut(rect(0, 0, 100, 100), Owner::Net(1), Origin::Fixed),
-            cut(rect(1000, 0, 60_000, 500), Owner::Net(1), Origin::Wiring),
+            cut(rect(0, 0, 100, 100), Owner::Net(NetId(1)), Origin::Wiring),
+            cut(rect(0, 0, 100, 100), Owner::Net(NetId(1)), Origin::Fixed),
+            cut(
+                rect(1000, 0, 60_000, 500),
+                Owner::Net(NetId(1)),
+                Origin::Wiring,
+            ),
         ];
         let buckets: Vec<CutBucket> = shapes.iter().map(|c| cuts.bucket_of(&c.rect())).collect();
         for shape in shapes {
@@ -1227,7 +1231,7 @@ mod tests {
 
         for bucket in buckets {
             cuts.retain_in(bucket, |o| {
-                o.owner != Owner::Net(1) || o.origin == Origin::Fixed
+                o.owner != Owner::Net(NetId(1)) || o.origin == Origin::Fixed
             });
         }
 
@@ -1245,7 +1249,7 @@ mod tests {
     fn a_cut_keeps_its_rectangle() {
         let r = rect(-1_000, 2_000, 3_000, 4_000);
 
-        let kept = cut(r, Owner::Net(1), Origin::Wiring).rect();
+        let kept = cut(r, Owner::Net(NetId(1)), Origin::Wiring).rect();
 
         assert_eq!(kept, r);
     }
@@ -1253,7 +1257,11 @@ mod tests {
     #[test]
     fn every_cut_is_listed_once() {
         let mut cuts = layer();
-        cuts.add(cut(rect(0, 0, 100, 100), Owner::Net(1), Origin::Wiring));
+        cuts.add(cut(
+            rect(0, 0, 100, 100),
+            Owner::Net(NetId(1)),
+            Origin::Wiring,
+        ));
         cuts.add(cut(
             rect(-60_000, -60_000, 60_000, 60_000),
             Owner::Obstacle,

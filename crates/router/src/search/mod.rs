@@ -441,7 +441,7 @@ impl Search<'_> {
     /// The non-default rule the net being routed follows.
     pub(crate) fn rule(&self) -> Option<NonDefaultRuleId> {
         match self.owner {
-            Owner::Net(n) => self.tech.net_rule(n as usize),
+            Owner::Net(n) => self.tech.net_rule(n),
             Owner::Obstacle => None,
         }
     }
@@ -1043,6 +1043,7 @@ fn distance_to(r: &Rect<Dbu>, p: Point<Dbu>) -> i64 {
 mod tests {
     use super::*;
     use pare_common::config::RoutingConfig;
+    use pare_common::db::indices::NetId;
     use pare_common::db::parser::{def, lef};
     use std::path::{Path, PathBuf};
 
@@ -1103,7 +1104,7 @@ mod tests {
             occupancy: &occupancy,
             overlay: None,
             marks: &marks,
-            owner: Owner::Net(0),
+            owner: Owner::Net(NetId(0)),
             costs: COSTS,
             guide: None,
             own_vias: None,
@@ -1150,7 +1151,13 @@ mod tests {
         let lt = tech.layer(LayerId(0));
         let other = wire_rect(lt.point(1, 1), lt.point(1, 3), lt.width).unwrap();
         let mut occupancy = Occupancy::new(&tech, Dbu(1000));
-        occupancy.add_rect(&tech, LayerId(0), &other, Owner::Net(1), Origin::Wiring);
+        occupancy.add_rect(
+            &tech,
+            LayerId(0),
+            &other,
+            Owner::Net(NetId(1)),
+            Origin::Wiring,
+        );
         (tech, occupancy)
     }
 
@@ -1182,7 +1189,7 @@ mod tests {
             occupancy: &occupancy,
             overlay: None,
             marks: &marks,
-            owner: Owner::Net(0),
+            owner: Owner::Net(NetId(0)),
             costs: COSTS,
             guide: None,
             own_vias: None,
@@ -1209,11 +1216,11 @@ mod tests {
             occupancy: &occupancy,
             overlay: None,
             marks: &marks,
-            owner: Owner::Net(0),
+            owner: Owner::Net(NetId(0)),
             costs: COSTS,
             guide: None,
             own_vias: None,
-            ripped: &[Owner::Net(1)],
+            ripped: &[Owner::Net(NetId(1))],
         };
         let lower = step(1, 1);
 
@@ -1238,7 +1245,7 @@ mod tests {
             occupancy: &occupancy,
             overlay: None,
             marks: &marks,
-            owner: Owner::Net(0),
+            owner: Owner::Net(NetId(0)),
             costs: COSTS,
             guide: None,
             own_vias: None,
@@ -1267,7 +1274,7 @@ mod tests {
             occupancy: &occupancy,
             overlay: None,
             marks: &marks,
-            owner: Owner::Net(0),
+            owner: Owner::Net(NetId(0)),
             costs: COSTS,
             guide: None,
             own_vias: None,
@@ -1284,7 +1291,7 @@ mod tests {
 
         let explanation = search.explain(&edges);
 
-        assert_eq!(explanation.met, vec![Owner::Net(1)]);
+        assert_eq!(explanation.met, vec![Owner::Net(NetId(1))]);
         assert!(
             (explanation.total() - paid).abs() < 1e-9,
             "{explanation:?} against {paid}"

@@ -281,7 +281,7 @@ pub(crate) fn gap_fills(
     }
     let mut fills = Vec::new();
     for ((layer, track), spans) in metal {
-        let spacing = tech.wire_spacing(tech.net_rule(net.index()), layer);
+        let spacing = tech.wire_spacing(tech.net_rule(net), layer);
         let gaps = narrow_gaps(spans, spacing);
         if gaps.is_empty() {
             continue;

@@ -105,7 +105,7 @@ impl DetailedRouter<'_> {
                 whole.push(net);
                 continue;
             }
-            let mut route = self.routes[net.index()].clone();
+            let mut route = self.routes[net].clone();
             route.access = access;
             route.complete = true;
             last.push((net, route));
@@ -136,7 +136,7 @@ impl DetailedRouter<'_> {
         let taken_out: Vec<(NetId, NetRoute)> = areas_of
             .par_iter()
             .map(|(&net, areas)| {
-                let mut route = self.routes[net.index()].clone();
+                let mut route = self.routes[net].clone();
                 route.edges.retain(|e| !self.inside_one(e, areas));
                 (net, route)
             })
@@ -177,7 +177,7 @@ impl DetailedRouter<'_> {
     /// region is routed.
     fn skeleton(&self, net: NetId, bridges: &[Edge], grid: &RegionGrid) -> EdgeSet {
         let region_of = |n: Node| grid.key(self.point(n));
-        self.wires[net.index()]
+        self.wires[net]
             .iter()
             .flat_map(|w| w.edges())
             .filter(|e| {
@@ -192,10 +192,10 @@ impl DetailedRouter<'_> {
     /// has no global route, a pin without access, or a boundary crossing
     /// that is not one step along its layer's direction.
     fn plan(&self, net: NetId, grid: &RegionGrid) -> Option<Plan> {
-        let guide = self.guides[net.index()].as_ref()?;
+        let guide = self.guides[net].as_ref()?;
         let tree = &guide.tree;
         let cells = tree.cells();
-        let access: Vec<AccessPoint> = self.access[net.index()]
+        let access: Vec<AccessPoint> = self.access[net]
             .iter()
             .map(|candidates| candidates.first().cloned())
             .collect::<Option<_>>()?;
@@ -304,7 +304,7 @@ impl DetailedRouter<'_> {
             return None;
         }
         let row = lt.tracks_within(row_start, row_start + self.gcell - Dbu(1));
-        let assigned = self.wires[net.index()].iter().find(|w| {
+        let assigned = self.wires[net].iter().find(|w| {
             w.layer == layer && w.from <= before && before < w.to && row.contains(&w.track)
         });
         if let Some(w) = assigned {
@@ -336,7 +336,7 @@ impl DetailedRouter<'_> {
 
     /// Whether fixed metal of another owner conflicts with an edge's wire.
     fn blocked_by_fixed(&self, net: NetId, edge: Edge) -> bool {
-        let owner = crate::occupancy::Owner::Net(net.0);
+        let owner = crate::occupancy::Owner::Net(net);
         let route = NetRoute {
             edges: std::iter::once(edge).collect(),
             ..NetRoute::default()
