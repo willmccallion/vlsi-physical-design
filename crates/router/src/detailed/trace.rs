@@ -66,7 +66,7 @@ pub(super) fn region_text(r: &Rect<Dbu>) -> String {
 /// The name of an owner of metal.
 pub(super) fn owner_text(db: &NetlistDB, owner: Owner) -> String {
     match owner {
-        Owner::Net(n) => db.nets[NetId(n)].name.clone(),
+        Owner::Net(n) => db.nets[n].name.clone(),
         Owner::Obstacle => "an obstacle".to_string(),
     }
 }

@@ -39,7 +39,7 @@ use crate::wiring::{Edge, Patch, access_elems, elem_cuts, elem_metal, gap_fills,
 use judge::ShapeTiles;
 use pare_common::db::design::NetlistDB;
 use pare_common::db::design::RouteElem;
-use pare_common::db::indices::{CutLayerId, LayerId, NetId, NonDefaultRuleId, PinId, ViaId};
+use pare_common::db::indices::{CutLayerId, IdVec, LayerId, NetId, NonDefaultRuleId, PinId, ViaId};
 use pare_common::db::library::LayerRef;
 use pare_common::db::shapes::{fixed_shapes, is_signal_net};
 use pare_common::geom::dbu::Dbu;
@@ -85,13 +85,13 @@ pub struct DetailedRouter<'a> {
     tech: &'a RouteTech,
     /// Occupancy of every track.
     pub occupancy: Occupancy,
-    access: Vec<Vec<Vec<AccessPoint>>>,
-    routes: Vec<NetRoute>,
+    access: IdVec<NetId, Vec<Vec<AccessPoint>>>,
+    routes: IdVec<NetId, NetRoute>,
     window_margin: Dbu,
     gcell: Dbu,
     grid_origin: Point<Dbu>,
-    guides: Vec<Option<NetGuide>>,
-    wires: Vec<Vec<TrackWire>>,
+    guides: IdVec<NetId, Option<NetGuide>>,
+    wires: IdVec<NetId, Vec<TrackWire>>,
     /// The design rules the judge applies.
     rules: Rules,
     /// The fixed shapes of the design, with every net an owner.
@@ -102,7 +102,7 @@ pub struct DetailedRouter<'a> {
     halo: Dbu,
     /// The wiring of every net as the design will hold it, kept in step
     /// with `routes`.
-    elems: Vec<Vec<RouteElem>>,
+    elems: IdVec<NetId, Vec<RouteElem>>,
     /// Every violation found by the last round's judge.
     markers: Vec<Marker>,
     /// What to log in detail.
@@ -158,12 +158,12 @@ impl PinJudge {
 }
 
 /// Bytes the vectors of `nested` hold on the heap, with their headers.
-fn nested_bytes<T>(nested: &[Vec<T>]) -> usize {
+fn nested_bytes<T>(nested: &IdVec<NetId, Vec<T>>) -> usize {
     nested
         .iter()
         .map(|v| v.capacity() * size_of::<T>())
         .sum::<usize>()
-        + size_of_val(nested)
+        + nested.len() * size_of::<Vec<T>>()
 }
 
 impl<'a> DetailedRouter<'a> {
@@ -219,7 +219,7 @@ impl<'a> DetailedRouter<'a> {
         );
         let start = std::time::Instant::now();
         let shared = SharedAccess::new(db, tech);
-        let own: Vec<Vec<Option<Vec<AccessPoint>>>> = (0..db.nets.len())
+        let own: IdVec<NetId, Vec<Option<Vec<AccessPoint>>>> = (0..db.nets.len())
             .into_par_iter()
             .map(|n| {
                 let net = NetId::new(n);
@@ -240,7 +240,8 @@ impl<'a> DetailedRouter<'a> {
                     })
                     .collect()
             })
-            .collect();
+            .collect::<Vec<_>>()
+            .into();
         log::debug!(
             "access points found in {:.1}s for {} kinds of cell, {} MB resident",
             start.elapsed().as_secs_f64(),
@@ -265,17 +266,17 @@ impl<'a> DetailedRouter<'a> {
             tech,
             occupancy,
             access,
-            routes: vec![NetRoute::default(); db.nets.len()],
+            routes: IdVec::filled(NetRoute::default(), db.nets.len()),
             window_margin: gcell * 4,
             gcell,
             grid_origin: db.die_area.min,
-            guides: vec![None; db.nets.len()],
-            wires: vec![Vec::new(); db.nets.len()],
+            guides: IdVec::filled(None, db.nets.len()),
+            wires: IdVec::filled(Vec::new(), db.nets.len()),
             halo: rules.max_reach() * 2,
             rules,
             fixed,
             fixed_tiles,
-            elems: vec![Vec::new(); db.nets.len()],
+            elems: IdVec::filled(Vec::new(), db.nets.len()),
             markers: Vec::new(),
             trace: Trace::default(),
         }
@@ -283,7 +284,7 @@ impl<'a> DetailedRouter<'a> {
 
     /// Where each pin of each net is reached: the point of its best access
     /// point, by net.
-    pub(crate) fn pin_points(&self) -> Vec<Vec<Point<Dbu>>> {
+    pub(crate) fn pin_points(&self) -> IdVec<NetId, Vec<Point<Dbu>>> {
         self.access
             .iter()
             .map(|pins| {
@@ -298,16 +299,18 @@ impl<'a> DetailedRouter<'a> {
     /// routing then joins each net's pins through them.
     pub(crate) fn set_track_wires(&mut self, wires: Vec<TrackWire>) {
         for w in wires {
-            self.wires[w.net.index()].push(w);
+            self.wires[w.net].push(w);
         }
-        let routes: Vec<(NetId, NetRoute)> = (0..self.wires.len())
-            .filter(|&n| !self.wires[n].is_empty())
-            .map(|n| {
+        let routes: Vec<(NetId, NetRoute)> = self
+            .wires
+            .iter_enumerated()
+            .filter(|(_, wires)| !wires.is_empty())
+            .map(|(n, wires)| {
                 let route = NetRoute {
-                    edges: EdgeSet::from_runs(self.wires[n].iter().map(|w| w.run())),
+                    edges: EdgeSet::from_runs(wires.iter().map(|w| w.run())),
                     ..NetRoute::default()
                 };
-                (NetId::new(n), route)
+                (n, route)
             })
             .collect();
         self.commit_all(routes);
@@ -315,10 +318,10 @@ impl<'a> DetailedRouter<'a> {
 
     /// Logs every pin that has no access point, with its net.
     pub(crate) fn log_inaccessible_pins(&self) {
-        for (n, pins) in self.access.iter().enumerate() {
+        for (n, pins) in self.access.iter_enumerated() {
             for (k, points) in pins.iter().enumerate() {
                 if points.is_empty() {
-                    let net = &self.db.nets[NetId::new(n)];
+                    let net = &self.db.nets[n];
                     log::warn!(
                         "no access to pin {} of net {}",
                         self.db.pin_name(net.pins[k]),
@@ -331,9 +334,10 @@ impl<'a> DetailedRouter<'a> {
 
     /// Nets that have a pin with no access point.
     pub(crate) fn inaccessible_nets(&self) -> Vec<NetId> {
-        (0..self.access.len())
-            .filter(|&n| self.access[n].iter().any(Vec::is_empty))
-            .map(NetId::new)
+        self.access
+            .iter_enumerated()
+            .filter(|(_, pins)| pins.iter().any(Vec::is_empty))
+            .map(|(n, _)| n)
             .collect()
     }
 
@@ -357,7 +361,7 @@ impl<'a> DetailedRouter<'a> {
                 .par_iter()
                 .map(|&n| (n, self.route_net(n, costs)))
                 .collect();
-            let mut committed: FxHashSet<u32> = FxHashSet::default();
+            let mut committed: FxHashSet<NetId> = FxHashSet::default();
             let mut deferred = Vec::new();
             for (n, route) in results {
                 if !retried.contains(&n) && self.touches_any(n, &route, &committed) {
@@ -366,7 +370,7 @@ impl<'a> DetailedRouter<'a> {
                     continue;
                 }
                 self.commit(n, &route);
-                let _ = committed.insert(n.0);
+                let _ = committed.insert(n);
                 done.push((n, route));
             }
             for n in deferred.into_iter().rev() {
@@ -376,8 +380,8 @@ impl<'a> DetailedRouter<'a> {
     }
 
     /// Whether `route` of `net` conflicts with the wiring of any net in `nets`.
-    fn touches_any(&self, net: NetId, route: &NetRoute, nets: &FxHashSet<u32>) -> bool {
-        let owner = Owner::Net(net.0);
+    fn touches_any(&self, net: NetId, route: &NetRoute, nets: &FxHashSet<NetId>) -> bool {
+        let owner = Owner::Net(net);
         let listed = |o: Owner| matches!(o, Owner::Net(other) if nets.contains(&other));
         let metal = route
             .metal(self.db, self.tech, net)
@@ -457,7 +461,7 @@ impl<'a> DetailedRouter<'a> {
 
     /// The routable metal of the wiring `net` has now.
     fn wiring_metal(&self, net: NetId) -> Vec<(LayerId, Rect<Dbu>)> {
-        self.elems[net.index()]
+        self.elems[net]
             .iter()
             .flat_map(|e| elem_metal(self.db, net, e))
             .filter(|(layer, _)| self.tech.routable(*layer))
@@ -466,17 +470,17 @@ impl<'a> DetailedRouter<'a> {
 
     /// Where the wiring `net` has now is recorded in the occupancy.
     fn wiring_slots(&self, net: NetId) -> Vec<Slot> {
-        let cuts: Vec<_> = self.elems[net.index()]
+        let cuts: Vec<_> = self.elems[net]
             .iter()
             .flat_map(|e| elem_cuts(self.db, e))
             .collect();
         self.occupancy
-            .slots_of(self.tech, Owner::Net(net.0), &self.wiring_metal(net), &cuts)
+            .slots_of(self.tech, Owner::Net(net), &self.wiring_metal(net), &cuts)
     }
 
     /// The vias of the wiring `net` has now.
     fn wiring_vias(&self, net: NetId) -> impl Iterator<Item = (ViaId, Point<Dbu>)> + '_ {
-        self.elems[net.index()].iter().filter_map(|e| match *e {
+        self.elems[net].iter().filter_map(|e| match *e {
             RouteElem::Via { via, at } => Some((via, at)),
             RouteElem::Wire { .. } | RouteElem::Patch { .. } => None,
         })
@@ -486,7 +490,7 @@ impl<'a> DetailedRouter<'a> {
     /// the occupancy and puts the new one in.
     fn apply_commit(&mut self, p: PreparedCommit) {
         let net = p.net;
-        let owner = Owner::Net(net.0);
+        let owner = Owner::Net(net);
         self.occupancy.remove_wiring(&p.previous, owner);
         for (layer, rect) in &p.metal {
             self.occupancy
@@ -495,12 +499,12 @@ impl<'a> DetailedRouter<'a> {
         for (cut, rect) in &p.cuts {
             self.occupancy.add_cut(*cut, rect, owner, Origin::Wiring);
         }
-        self.elems[net.index()] = p.elems;
-        self.routes[net.index()] = p.route;
+        self.elems[net] = p.elems;
+        self.routes[net] = p.route;
     }
 
     /// The current routing of every net.
-    pub fn routes(&self) -> &[NetRoute] {
+    pub const fn routes(&self) -> &IdVec<NetId, NetRoute> {
         &self.routes
     }
 
@@ -571,8 +575,7 @@ impl<'a> DetailedRouter<'a> {
             {
                 return Err(RestoreRoutesError::OffTracks(*net));
             }
-            let offered =
-                |a: &AccessPoint| self.access[net.index()].iter().flatten().any(|o| o == a);
+            let offered = |a: &AccessPoint| self.access[*net].iter().flatten().any(|o| o == a);
             if !route.access.iter().all(offered) {
                 return Err(RestoreRoutesError::Access(*net));
             }
@@ -614,7 +617,7 @@ impl<'a> DetailedRouter<'a> {
 
     /// Global routing terminals: the gcell of each pin's best access point.
     pub fn terminals(&self, net: NetId, grid: &GlobalGrid) -> Option<Vec<GCell>> {
-        self.access[net.index()]
+        self.access[net]
             .iter()
             .map(|c| {
                 let a = c.first()?;
@@ -631,7 +634,7 @@ impl<'a> DetailedRouter<'a> {
     /// layer of the pin shape that point reaches; none when a pin has no
     /// access point.
     pub(crate) fn pin_terminals(&self, net: NetId, grid: &GlobalGrid) -> Option<Vec<PinTerminal>> {
-        self.access[net.index()]
+        self.access[net]
             .iter()
             .zip(&self.db.nets[net].pins)
             .map(|(c, &pin)| {
@@ -661,7 +664,7 @@ impl<'a> DetailedRouter<'a> {
                 .map(|c| grid.cell_rect(c.x, c.y))
                 .reduce(|a, b| a.union(&b));
             if let (Some(bbox), Some(terminals)) = (bbox, self.terminals(net, grid)) {
-                self.guides[net.index()] = Some(NetGuide {
+                self.guides[net] = Some(NetGuide {
                     tree,
                     terminals,
                     bbox,
@@ -673,7 +676,7 @@ impl<'a> DetailedRouter<'a> {
     /// The window a net searches in: its guide, or else its pins' bounding
     /// box plus a margin.
     fn window(&self, net: NetId) -> Rect<Dbu> {
-        if let Some(guide) = &self.guides[net.index()] {
+        if let Some(guide) = &self.guides[net] {
             return guide.bbox.expand(self.gcell * GUIDE_SLACK_GCELLS);
         }
         let pins = &self.db.nets[net].pins;
@@ -690,11 +693,11 @@ impl<'a> DetailedRouter<'a> {
     /// Routes a net through its track wires and pins, or through its pins
     /// alone when the wires cannot all be joined.
     fn route_net(&self, net: NetId, costs: Costs) -> NetRoute {
-        let pins = &self.access[net.index()];
+        let pins = &self.access[net];
         if pins.iter().any(Vec::is_empty) || pins.len() < 2 {
             return NetRoute::default();
         }
-        let wires = self.wires[net.index()].as_slice();
+        let wires = self.wires[net].as_slice();
         if !wires.is_empty() {
             let terms = Terminals { pins, wires };
             if let Some(route) = self.route_terminals(net, costs, &terms) {
@@ -708,7 +711,7 @@ impl<'a> DetailedRouter<'a> {
     /// Joins every terminal inside the net's guide, or failing that in ever
     /// larger windows without it.
     fn route_terminals(&self, net: NetId, costs: Costs, terms: &Terminals<'_>) -> Option<NetRoute> {
-        let net_guide = self.guides[net.index()].as_ref();
+        let net_guide = self.guides[net].as_ref();
         let guide =
             net_guide.map(|g| Guide::new(g.tree.cells(), self.grid_origin, self.gcell, self.tech));
         let unmarked = Marks::default();
@@ -718,7 +721,7 @@ impl<'a> DetailedRouter<'a> {
             occupancy: &self.occupancy,
             overlay: None,
             marks: &unmarked,
-            owner: Owner::Net(net.0),
+            owner: Owner::Net(net),
             costs,
             guide: guide.as_ref(),
             own_vias: None,
@@ -1343,7 +1346,7 @@ struct FixedView<'f> {
 }
 
 /// A pad below the routable layers: its layer, metal and net.
-type LowPad = (LayerId, Rect<Dbu>, u32);
+type LowPad = (LayerId, Rect<Dbu>, NetId);
 
 /// The pads below the routable layers that reserved access points put
 /// down, by bucket.
@@ -1367,7 +1370,7 @@ impl LowPads {
         (x0..=x1).flat_map(move |x| (y0..=y1).map(move |y| (x, y)))
     }
 
-    fn add(&mut self, layer: LayerId, rect: Rect<Dbu>, net: u32) {
+    fn add(&mut self, layer: LayerId, rect: Rect<Dbu>, net: NetId) {
         for key in self.keys(&rect) {
             self.pads.entry(key).or_default().push((layer, rect, net));
         }
@@ -1375,7 +1378,7 @@ impl LowPads {
 
     /// Whether `rect` on `layer`, of `net`, keeps `spacing` from every pad
     /// of another net.
-    fn clear(&self, layer: LayerId, rect: &Rect<Dbu>, net: u32, spacing: Dbu) -> bool {
+    fn clear(&self, layer: LayerId, rect: &Rect<Dbu>, net: NetId, spacing: Dbu) -> bool {
         let reach = rect.expand(spacing);
         self.keys(&reach).all(|key| {
             self.pads.get(&key).is_none_or(|pads| {
@@ -1405,16 +1408,16 @@ fn reserve_accesses(
     db: &NetlistDB,
     tech: &RouteTech,
     shared: &SharedAccess,
-    own: &[Vec<Option<Vec<AccessPoint>>>],
+    own: &IdVec<NetId, Vec<Option<Vec<AccessPoint>>>>,
     occupancy: &mut Occupancy,
     fixed: &FixedView<'_>,
-) -> Vec<Vec<Vec<AccessPoint>>> {
+) -> IdVec<NetId, Vec<Vec<AccessPoint>>> {
     let fellows = fellow_boxes_of_nets(db, own);
-    let candidates_of = |n: usize, k: usize| {
+    let candidates_of = |n: NetId, k: usize| {
         let mut candidates = match &own[n][k] {
             Some(c) => c.clone(),
             None => shared
-                .candidates(db, db.nets[NetId::new(n)].pins[k])
+                .candidates(db, db.nets[n].pins[k])
                 .unwrap_or_default(),
         };
         if let Some(fellows) = &fellows[n][k] {
@@ -1422,7 +1425,7 @@ fn reserve_accesses(
         }
         candidates
     };
-    let mut access: Vec<Vec<Vec<AccessPoint>>> = own
+    let mut access: IdVec<NetId, Vec<Vec<AccessPoint>>> = own
         .iter()
         .map(|pins| vec![Vec::new(); pins.len()])
         .collect();
@@ -1432,7 +1435,8 @@ fn reserve_accesses(
         occupancy,
         fixed,
         low_pads: LowPads::new(fixed.bucket),
-        vias: (0..own.len())
+        vias: own
+            .ids()
             .map(|n| OwnVias::new(db, tech, tech.net_rule(n)))
             .collect(),
     };
@@ -1447,14 +1451,14 @@ fn reserve_accesses(
             None => {
                 log::debug!(
                     "net {} pin {k}: none of {count} access points is clear, leaving the choice to routing",
-                    db.nets[NetId::new(n)].name
+                    db.nets[n].name
                 );
                 continue;
             }
         };
         log::trace!(
             "net {} pin {k}: reserved access point {chosen} of {count} at {:?}",
-            db.nets[NetId::new(n)].name,
+            db.nets[n].name,
             access[n][k][chosen].at
         );
         let picked = access[n][k].swap_remove(chosen);
@@ -1468,15 +1472,14 @@ fn reserve_accesses(
 /// pins that its candidates are ordered toward.
 fn fellow_boxes_of_nets(
     db: &NetlistDB,
-    own: &[Vec<Option<Vec<AccessPoint>>>],
-) -> Vec<Vec<Option<Rect<Dbu>>>> {
-    own.iter()
-        .enumerate()
+    own: &IdVec<NetId, Vec<Option<Vec<AccessPoint>>>>,
+) -> IdVec<NetId, Vec<Option<Rect<Dbu>>>> {
+    own.iter_enumerated()
         .map(|(n, pins)| {
             if pins.is_empty() {
                 return Vec::new();
             }
-            let points: Vec<Point<Dbu>> = db.nets[NetId::new(n)]
+            let points: Vec<Point<Dbu>> = db.nets[n]
                 .pins
                 .iter()
                 .map(|&p| db.pin_position(p))
@@ -1491,17 +1494,14 @@ fn fellow_boxes_of_nets(
 fn reservation_order(
     db: &NetlistDB,
     shared: &SharedAccess,
-    own: &[Vec<Option<Vec<AccessPoint>>>],
-) -> Vec<(usize, usize, usize)> {
-    let count_of = |n: usize, k: usize| match &own[n][k] {
+    own: &IdVec<NetId, Vec<Option<Vec<AccessPoint>>>>,
+) -> Vec<(usize, NetId, usize)> {
+    let count_of = |n: NetId, k: usize| match &own[n][k] {
         Some(c) => c.len(),
-        None => shared
-            .count(db, db.nets[NetId::new(n)].pins[k])
-            .unwrap_or(0),
+        None => shared.count(db, db.nets[n].pins[k]).unwrap_or(0),
     };
-    let mut order: Vec<(usize, usize, usize)> = own
-        .iter()
-        .enumerate()
+    let mut order: Vec<(usize, NetId, usize)> = own
+        .iter_enumerated()
         .flat_map(|(n, pins)| (0..pins.len()).map(move |k| (n, k)))
         .map(|(n, k)| (count_of(n, k), n, k))
         .filter(|&(count, _, _)| count > 0)
@@ -1519,14 +1519,14 @@ struct Reservations<'r, 'f> {
     occupancy: &'r mut Occupancy,
     fixed: &'r FixedView<'f>,
     low_pads: LowPads,
-    vias: Vec<OwnVias>,
+    vias: IdVec<NetId, OwnVias>,
 }
 
 impl Reservations<'_, '_> {
-    fn metal_of(&self, n: usize, a: &AccessPoint) -> Vec<(LayerId, Rect<Dbu>)> {
+    fn metal_of(&self, n: NetId, a: &AccessPoint) -> Vec<(LayerId, Rect<Dbu>)> {
         access_elems(self.tech, a)
             .iter()
-            .flat_map(|e| elem_metal(self.db, NetId::new(n), e))
+            .flat_map(|e| elem_metal(self.db, n, e))
             .collect()
     }
 
@@ -1540,9 +1540,9 @@ impl Reservations<'_, '_> {
     /// Whether net `n` can take `a`: its vias leave room for those its
     /// pins chose earlier, and its metal and cuts are clear of every
     /// reservation and, below the routable layers, of fixed shapes.
-    fn is_clear(&self, n: usize, a: &AccessPoint) -> bool {
+    fn is_clear(&self, n: NetId, a: &AccessPoint) -> bool {
         let (db, tech) = (self.db, self.tech);
-        let owner = Owner::Net(crate::tech::index_u32(n));
+        let owner = Owner::Net(n);
         let leaves_room = footprint(tech, a)
             .iter()
             .all(|&(via, at)| self.vias[n].crowded(db, tech, via, at) == 0);
@@ -1559,12 +1559,11 @@ impl Reservations<'_, '_> {
                 return true;
             }
             let spacing = tech.layer(*layer).spacing;
-            self.low_pads
-                .clear(*layer, rect, crate::tech::index_u32(n), spacing)
+            self.low_pads.clear(*layer, rect, n, spacing)
                 && judge::clear_of_fixed(
                     self.fixed.layout,
                     self.fixed.tiles,
-                    NetId::new(n),
+                    n,
                     *layer,
                     rect,
                     spacing,
@@ -1582,14 +1581,14 @@ impl Reservations<'_, '_> {
     }
 
     /// Reserves `a` for net `n`.
-    fn reserve(&mut self, n: usize, a: &AccessPoint) {
-        let owner = Owner::Net(crate::tech::index_u32(n));
+    fn reserve(&mut self, n: NetId, a: &AccessPoint) {
+        let owner = Owner::Net(n);
         for (layer, rect) in self.metal_of(n, a) {
             if self.tech.routable(layer) {
                 self.occupancy
                     .add_rect(self.tech, layer, &rect, owner, Origin::Fixed);
             } else {
-                self.low_pads.add(layer, rect, crate::tech::index_u32(n));
+                self.low_pads.add(layer, rect, n);
             }
         }
         for (cut, rect) in self.cuts_of(a) {
@@ -1660,34 +1659,34 @@ mod tests {
     #[test]
     fn a_pad_closer_than_the_spacing_to_another_nets_pad_is_not_clear() {
         let mut pads = LowPads::new(Dbu(1000));
-        pads.add(LayerId::new(0), rect(0, 0, 140, 70), 1);
+        pads.add(LayerId::new(0), rect(0, 0, 140, 70), NetId(1));
 
         let near = rect(260, 0, 400, 70);
         let far = rect(270, 0, 410, 70);
 
-        assert!(!pads.clear(LayerId::new(0), &near, 2, Dbu(130)));
-        assert!(pads.clear(LayerId::new(0), &far, 2, Dbu(130)));
+        assert!(!pads.clear(LayerId::new(0), &near, NetId(2), Dbu(130)));
+        assert!(pads.clear(LayerId::new(0), &far, NetId(2), Dbu(130)));
     }
 
     #[test]
     fn a_pad_is_clear_of_its_own_nets_pads_and_other_layers() {
         let mut pads = LowPads::new(Dbu(1000));
-        pads.add(LayerId::new(0), rect(0, 0, 140, 70), 1);
+        pads.add(LayerId::new(0), rect(0, 0, 140, 70), NetId(1));
 
         let touching = rect(140, 0, 280, 70);
 
-        assert!(pads.clear(LayerId::new(0), &touching, 1, Dbu(130)));
-        assert!(pads.clear(LayerId::new(1), &touching, 2, Dbu(130)));
+        assert!(pads.clear(LayerId::new(0), &touching, NetId(1), Dbu(130)));
+        assert!(pads.clear(LayerId::new(1), &touching, NetId(2), Dbu(130)));
     }
 
     #[test]
     fn pads_are_found_across_bucket_edges() {
         let mut pads = LowPads::new(Dbu(100));
-        pads.add(LayerId::new(0), rect(150, 150, 190, 190), 1);
+        pads.add(LayerId::new(0), rect(150, 150, 190, 190), NetId(1));
 
         let across = rect(220, 150, 260, 190);
 
-        assert!(!pads.clear(LayerId::new(0), &across, 2, Dbu(65)));
+        assert!(!pads.clear(LayerId::new(0), &across, NetId(2), Dbu(65)));
     }
 
     #[test]

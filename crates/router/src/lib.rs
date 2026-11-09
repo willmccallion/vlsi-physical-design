@@ -401,13 +401,13 @@ fn route_detailed(
         .iter()
         .copied()
         .filter(|n| {
-            let route = &dr.routes()[n.index()];
+            let route = &dr.routes()[*n];
             !(route.complete && route.is_connected())
         })
         .collect();
     let wiring: Vec<(NetId, Vec<RouteElem>)> = nets
         .iter()
-        .map(|&n| (n, dr.routes()[n.index()].elems(tech)))
+        .map(|&n| (n, dr.routes()[n].elems(tech)))
         .collect();
     Ok((wiring, summary, gcell_grid(db.die_area.min, gcell, nx, ny)))
 }
@@ -546,7 +546,7 @@ impl StateSaver<'_> {
         let routes = self
             .nets
             .iter()
-            .map(|&n| (self.db.nets[n].name.clone(), dr.routes()[n.index()].clone()))
+            .map(|&n| (self.db.nets[n].name.clone(), dr.routes()[n].clone()))
             .collect();
         RouteState {
             detailed: Some(DetailedState {

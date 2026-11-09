@@ -7,7 +7,7 @@ use crate::tech::RouteTech;
 use crate::track::{TrackWire, assign_tracks};
 use pare_common::config::{CapacityReserve, RoutingConfig};
 use pare_common::db::design::NetlistDB;
-use pare_common::db::indices::{LayerId, NetId};
+use pare_common::db::indices::{IdVec, LayerId, NetId};
 use pare_common::db::parser::{def, lef};
 use pare_common::db::shapes::wire_rect;
 use pare_common::geom::dbu::Dbu;
@@ -50,7 +50,7 @@ fn assign(db: &NetlistDB, paths: Vec<Vec<GCell>>) -> (RouteTech, Vec<TrackWire>)
             .map(|(n, p)| (NetId::new(n), vec![p]))
             .collect(),
     };
-    let pins = vec![Vec::new(); db.nets.len()];
+    let pins = IdVec::filled(Vec::new(), db.nets.len());
     let wires = assign_tracks(&tech, &dr.occupancy, &grid, &routes, &pins);
     (tech, wires)
 }
@@ -81,7 +81,7 @@ fn a_wire_is_cut_where_it_would_cross_an_obstacle() {
         let (a, b) = (lt.point(w.track, w.from), lt.point(w.track, w.to));
         let metal = wire_rect(a, b, lt.width).unwrap();
         let blocked = occupancy
-            .rect_conflicts(&tech, M3, &metal, Owner::Net(0))
+            .rect_conflicts(&tech, M3, &metal, Owner::Net(NetId(0)))
             .any(|c| c.proximity == Proximity::Within && c.occupant.owner == Owner::Obstacle);
         assert!(!blocked, "{w:?} crosses an obstacle");
         assert!(b.x < stripe_x, "{w:?} should stop before the stripe");

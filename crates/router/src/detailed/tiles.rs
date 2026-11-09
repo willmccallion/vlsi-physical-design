@@ -284,7 +284,7 @@ impl DetailedRouter<'_> {
         let mut boxes = Vec::new();
         for m in self.markers() {
             for net in m.nets.iter().flatten() {
-                let Some(guide) = &self.guides[net.index()] else {
+                let Some(guide) = &self.guides[*net] else {
                     continue;
                 };
                 let runs = self.guide_runs(guide);

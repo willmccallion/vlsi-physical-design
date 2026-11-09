@@ -19,7 +19,7 @@ use crate::occupancy::{LayerSpacing, Occupancy, Owner, Proximity, Query, affecte
 use crate::runs::Run;
 use crate::tech::{LayerTech, RouteTech};
 use crate::wiring::Edge;
-use pare_common::db::indices::{LayerId, NetId};
+use pare_common::db::indices::{IdVec, LayerId, NetId};
 use pare_common::db::library::Direction;
 use pare_common::db::shapes::wire_rect;
 use pare_common::geom::dbu::Dbu;
@@ -164,7 +164,7 @@ pub fn assign_tracks(
     occupancy: &Occupancy,
     grid: &GlobalGrid,
     routes: &GlobalRoutes,
-    pins: &[Vec<Point<Dbu>>],
+    pins: &IdVec<NetId, Vec<Point<Dbu>>>,
 ) -> Vec<TrackWire> {
     let panels = panels(tech, grid, routes, pins);
     let mut placed: FxHashMap<PanelId, Placed> = FxHashMap::default();
@@ -210,7 +210,7 @@ fn panels(
     tech: &RouteTech,
     grid: &GlobalGrid,
     routes: &GlobalRoutes,
-    pins: &[Vec<Point<Dbu>>],
+    pins: &IdVec<NetId, Vec<Point<Dbu>>>,
 ) -> Vec<Panel> {
     let mut nets: Vec<(NetId, &Vec<Vec<GCell>>)> =
         routes.paths.iter().map(|(&n, p)| (n, p)).collect();
@@ -219,7 +219,7 @@ fn panels(
     let direction = |l: LayerId| tech.layer(l).direction;
     for (net, paths) in nets {
         let net_runs = runs(direction, paths);
-        let net_pins = pins.get(net.index()).map_or(&[][..], Vec::as_slice);
+        let net_pins = pins.get(net).map_or(&[][..], Vec::as_slice);
         for &(id, first, last) in &net_runs {
             let lt = tech.layer(id.layer);
             let ends = [first, last].map(|along| cell_along(lt.direction, id.index, along));
@@ -419,16 +419,13 @@ impl<'a> Costing<'a> {
 
     /// The wire of `net` from crossing `from` to `to` on `track`.
     fn metal(&self, net: NetId, track: u32, from: u32, to: u32) -> Option<Rect<Dbu>> {
-        let width = self
-            .tech
-            .wire_width(self.tech.net_rule(net.index()), self.layer);
+        let width = self.tech.wire_width(self.tech.net_rule(net), self.layer);
         wire_rect(self.lt.point(track, from), self.lt.point(track, to), width)
     }
 
     /// The spacing `net`'s wires keep on this layer.
     fn spacing(&self, net: NetId) -> Dbu {
-        self.tech
-            .wire_spacing(self.tech.net_rule(net.index()), self.layer)
+        self.tech.wire_spacing(self.tech.net_rule(net), self.layer)
     }
 
     /// Overlap of `rect` of `net` with fixed metal of other owners.
@@ -436,7 +433,7 @@ impl<'a> Costing<'a> {
         let query = Query::of(self.lt, rect, self.spacing(net));
         let rules = LayerSpacing::of(self.lt);
         self.occupancy
-            .rect_conflicts(self.tech, self.layer, rect, Owner::Net(net.0))
+            .rect_conflicts(self.tech, self.layer, rect, Owner::Net(net))
             .filter(|c| c.proximity == Proximity::Within)
             .map(|c| {
                 let o = c.occupant;

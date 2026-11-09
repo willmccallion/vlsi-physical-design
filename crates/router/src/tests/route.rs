@@ -277,14 +277,14 @@ fn removing_a_nets_wiring_keeps_its_fixed_metal() {
     let around = |p: Point<Dbu>| Rect::new(p, p).expand(Dbu(50));
     let pin = around(tech.layer(layer).point(0, 0));
     let wire = around(tech.layer(layer).point(0, 20));
-    let owner = Owner::Net(0);
+    let owner = Owner::Net(NetId(0));
     occupancy.add_rect(&tech, layer, &pin, owner, Origin::Fixed);
     occupancy.add_rect(&tech, layer, &wire, owner, Origin::Wiring);
     let slots = occupancy.slots_of(&tech, owner, &[(layer, pin), (layer, wire)], &[]);
 
     occupancy.remove_wiring(&slots, owner);
 
-    let other = Owner::Net(1);
+    let other = Owner::Net(NetId(1));
     assert_eq!(
         occupancy.rect_conflicts(&tech, layer, &pin, other).count(),
         1
@@ -307,19 +307,19 @@ fn cuts_of_different_nets_conflict_within_the_cut_spacing() {
             Point::new(Dbu(x + 100), Dbu(y + 100)),
         )
     };
-    occupancy.add_cut(v1, &cut(0, 0), Owner::Net(0), Origin::Wiring);
+    occupancy.add_cut(v1, &cut(0, 0), Owner::Net(NetId(0)), Origin::Wiring);
 
     let close = occupancy
-        .cut_conflicts(v1, &cut(210, 0), Owner::Net(1))
+        .cut_conflicts(v1, &cut(210, 0), Owner::Net(NetId(1)))
         .count();
     let apart = occupancy
-        .cut_conflicts(v1, &cut(220, 0), Owner::Net(1))
+        .cut_conflicts(v1, &cut(220, 0), Owner::Net(NetId(1)))
         .count();
     let diagonal = occupancy
-        .cut_conflicts(v1, &cut(190, 190), Owner::Net(1))
+        .cut_conflicts(v1, &cut(190, 190), Owner::Net(NetId(1)))
         .count();
     let same_net = occupancy
-        .cut_conflicts(v1, &cut(150, 0), Owner::Net(0))
+        .cut_conflicts(v1, &cut(150, 0), Owner::Net(NetId(0)))
         .count();
 
     assert_eq!((close, apart, diagonal, same_net), (1, 0, 0, 0));
@@ -337,14 +337,14 @@ fn removing_a_nets_wiring_keeps_its_fixed_cuts() {
             Point::new(Dbu(x + 100), Dbu(100)),
         )
     };
-    let owner = Owner::Net(0);
+    let owner = Owner::Net(NetId(0));
     occupancy.add_cut(v1, &cut(0), owner, Origin::Fixed);
     occupancy.add_cut(v1, &cut(5000), owner, Origin::Wiring);
     let slots = occupancy.slots_of(&tech, owner, &[], &[(v1, cut(0)), (v1, cut(5000))]);
 
     occupancy.remove_wiring(&slots, owner);
 
-    let other = Owner::Net(1);
+    let other = Owner::Net(NetId(1));
     assert_eq!(occupancy.cut_conflicts(v1, &cut(150), other).count(), 1);
     assert_eq!(occupancy.cut_conflicts(v1, &cut(5150), other).count(), 0);
 }
@@ -642,7 +642,7 @@ fn a_rule_sets_the_width_and_spacing_of_its_nets_wires() {
 
     let tech = RouteTech::new(&db, &RoutingConfig::default()).unwrap();
 
-    let rule = tech.net_rule(0);
+    let rule = tech.net_rule(NetId(0));
     assert_eq!(rule, Some(NonDefaultRuleId::new(0)));
     assert_eq!(tech.wire_width(rule, LayerId(0)), Dbu(200));
     assert_eq!(tech.wire_spacing(rule, LayerId(0)), Dbu(300));
@@ -661,14 +661,14 @@ fn a_wire_under_a_rule_keeps_other_tracks_at_the_rules_spacing() {
         Point::new(Dbu(1000), Dbu(0)),
         Point::new(Dbu(2000), Dbu(200)),
     );
-    occupancy.add_rect(&tech, m1, &wide, Owner::Net(0), Origin::Wiring);
+    occupancy.add_rect(&tech, m1, &wide, Owner::Net(NetId(0)), Origin::Wiring);
     let two_tracks_up = Rect::new(
         Point::new(Dbu(1000), Dbu(450)),
         Point::new(Dbu(2000), Dbu(550)),
     );
 
     let conflicts = occupancy
-        .rect_conflicts(&tech, m1, &two_tracks_up, Owner::Net(1))
+        .rect_conflicts(&tech, m1, &two_tracks_up, Owner::Net(NetId(1)))
         .count();
 
     assert_eq!(conflicts, 1);
@@ -684,14 +684,14 @@ fn a_wire_without_a_rule_leaves_tracks_beyond_the_layer_spacing_alone() {
         Point::new(Dbu(1000), Dbu(50)),
         Point::new(Dbu(2000), Dbu(150)),
     );
-    occupancy.add_rect(&tech, m1, &wire, Owner::Net(0), Origin::Wiring);
+    occupancy.add_rect(&tech, m1, &wire, Owner::Net(NetId(0)), Origin::Wiring);
     let two_tracks_up = Rect::new(
         Point::new(Dbu(1000), Dbu(450)),
         Point::new(Dbu(2000), Dbu(550)),
     );
 
     let conflicts = occupancy
-        .rect_conflicts(&tech, m1, &two_tracks_up, Owner::Net(1))
+        .rect_conflicts(&tech, m1, &two_tracks_up, Owner::Net(NetId(1)))
         .count();
 
     assert_eq!(conflicts, 0);
@@ -707,14 +707,14 @@ fn a_wire_under_a_rule_keeps_its_track_clear_for_the_rules_spacing() {
         Point::new(Dbu(1000), Dbu(0)),
         Point::new(Dbu(2000), Dbu(200)),
     );
-    occupancy.add_rect(&tech, m1, &wide, Owner::Net(0), Origin::Wiring);
+    occupancy.add_rect(&tech, m1, &wide, Owner::Net(NetId(0)), Origin::Wiring);
     let further_along = Rect::new(
         Point::new(Dbu(2150), Dbu(50)),
         Point::new(Dbu(3000), Dbu(150)),
     );
 
     let conflicts = occupancy
-        .rect_conflicts(&tech, m1, &further_along, Owner::Net(1))
+        .rect_conflicts(&tech, m1, &further_along, Owner::Net(NetId(1)))
         .count();
 
     assert_eq!(conflicts, 1);
