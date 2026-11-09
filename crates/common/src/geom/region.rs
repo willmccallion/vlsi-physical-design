@@ -241,10 +241,11 @@ impl Region {
             })
     }
 
-    /// Whether the region contains all of `rect`, which must have area.
+    /// Whether the region, taken with its boundary, contains all of `rect`,
+    /// by the rule of [`Rect::covered_by`].
     pub(crate) fn covers_rect(&self, rect: &Rect<Dbu>) -> bool {
-        if rect.width() <= Dbu::ZERO || rect.height() <= Dbu::ZERO {
-            return false;
+        if rect.width() == Dbu::ZERO || rect.height() == Dbu::ZERO {
+            return rect.covered_by(&self.rectangles().collect::<Vec<_>>());
         }
         let mut reached = rect.min.x;
         for s in self
@@ -989,6 +990,17 @@ mod tests {
         assert!(!region.covers_rect(&rect(0, 0, 3, 3)));
         assert!(region.intersects_rect(&rect(1, 1, 5, 5)));
         assert!(!region.intersects_rect(&rect(2, 2, 5, 5)));
+    }
+
+    #[test]
+    fn covering_a_rectangle_without_area_needs_every_point_of_it_edges_included() {
+        let region = Region::from_rects([rect(0, 0, 5, 10), rect(5, 0, 10, 5)]);
+
+        assert!(region.covers_rect(&rect(5, 0, 5, 10)));
+        assert!(region.covers_rect(&rect(0, 10, 5, 10)));
+        assert!(region.covers_rect(&rect(10, 5, 10, 5)));
+        assert!(!region.covers_rect(&rect(5, 0, 5, 11)));
+        assert!(!region.covers_rect(&rect(0, 10, 6, 10)));
     }
 
     /// A small deterministic generator for the randomised comparisons.

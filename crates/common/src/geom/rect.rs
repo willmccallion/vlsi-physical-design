@@ -118,10 +118,18 @@ impl Rect<Dbu> {
     }
 
     /// Whether the union of `cover`, whose rectangles may overlap, contains
-    /// this rectangle.
+    /// this rectangle, all taken as closed point sets: a rectangle without
+    /// area is covered when every point of it, ends included, lies in some
+    /// cover rectangle, edges included.
     pub fn covered_by(&self, cover: &[Self]) -> bool {
-        if self.width() <= Dbu::ZERO || self.height() <= Dbu::ZERO {
-            return cover.iter().any(|c| c.encloses(self));
+        let (x, y) = (self.min.x, self.min.y);
+        if self.width() == Dbu::ZERO {
+            let crossing = cover.iter().filter(|c| c.min.x <= x && x <= c.max.x);
+            return union_covers(crossing.map(|c| (c.min.y, c.max.y)), self.min.y, self.max.y);
+        }
+        if self.height() == Dbu::ZERO {
+            let crossing = cover.iter().filter(|c| c.min.y <= y && y <= c.max.y);
+            return union_covers(crossing.map(|c| (c.min.x, c.max.x)), self.min.x, self.max.x);
         }
         let pieces: Vec<Self> = cover
             .iter()
@@ -142,21 +150,26 @@ impl Rect<Dbu> {
     /// Whether `pieces` spanning the whole slab `[x0, x1]` cover this
     /// rectangle's height there.
     fn slab_covered(&self, pieces: &[Self], x0: Dbu, x1: Dbu) -> bool {
-        let mut spans: Vec<(Dbu, Dbu)> = pieces
+        let spanning = pieces
             .iter()
             .filter(|p| p.min.x <= x0 && x1 <= p.max.x)
-            .map(|p| (p.min.y, p.max.y))
-            .collect();
-        spans.sort_unstable();
-        let mut reached = self.min.y;
-        for (lo, hi) in spans {
-            if lo > reached {
-                return false;
-            }
-            reached = reached.max(hi);
-        }
-        reached >= self.max.y
+            .map(|p| (p.min.y, p.max.y));
+        union_covers(spanning, self.min.y, self.max.y)
     }
+}
+
+/// Whether the closed intervals `spans` together hold all of `[lo, hi]`.
+fn union_covers(spans: impl Iterator<Item = (Dbu, Dbu)>, lo: Dbu, hi: Dbu) -> bool {
+    let mut spans: Vec<(Dbu, Dbu)> = spans.filter(|&(_, end)| end >= lo).collect();
+    spans.sort_unstable();
+    let mut reached: Option<Dbu> = None;
+    for (start, end) in spans {
+        if start > reached.unwrap_or(lo) {
+            break;
+        }
+        reached = Some(reached.map_or(end, |r| r.max(end)));
+    }
+    reached.is_some_and(|r| r >= hi)
 }
 
 #[cfg(test)]
@@ -201,6 +214,32 @@ mod tests {
     #[test]
     fn a_rectangle_sticking_out_of_its_cover_is_not_covered() {
         assert!(!rect(0, 0, 10, 10).covered_by(&[rect(0, 0, 10, 9)]));
+    }
+
+    #[test]
+    fn a_segment_split_across_two_abutting_covers_is_covered() {
+        let covers = [rect(0, 0, 10, 5), rect(0, 5, 10, 10)];
+
+        assert!(rect(5, 0, 5, 10).covered_by(&covers));
+        assert!(rect(0, 5, 10, 5).covered_by(&covers));
+        assert!(!rect(5, 0, 5, 11).covered_by(&covers));
+    }
+
+    #[test]
+    fn a_segment_across_a_gap_between_covers_is_not_covered() {
+        let covers = [rect(0, 0, 10, 4), rect(0, 6, 10, 10)];
+
+        assert!(!rect(5, 0, 5, 10).covered_by(&covers));
+        assert!(!rect(0, 5, 10, 5).covered_by(&covers));
+    }
+
+    #[test]
+    fn a_point_is_covered_when_a_cover_holds_it_edges_included() {
+        let covers = [rect(0, 0, 10, 10)];
+
+        assert!(rect(10, 10, 10, 10).covered_by(&covers));
+        assert!(!rect(11, 10, 11, 10).covered_by(&covers));
+        assert!(!rect(5, 5, 5, 5).covered_by(&[]));
     }
 
     #[test]
