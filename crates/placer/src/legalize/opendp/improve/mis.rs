@@ -2,7 +2,7 @@
 //! sharing a net, are gathered from nearby bins and reassigned to each
 //! other's spots by a minimum-cost matching on wirelength.
 
-use super::{ImprovementError, Improver, Move, Result};
+use super::{ImprovementError, Improver, Move, Result, SKIP_NETS_LARGER_THAN};
 use super::{NodeId, SegmentId};
 use pare_common::db::indices::IdVec;
 use pare_common::geom::dbu::Dbu;
@@ -14,8 +14,6 @@ use std::collections::VecDeque;
 const MAX_PROBLEM_SIZE: usize = 25;
 /// Times a cell may take part in matchings in one pass.
 const MAX_TIMES_USED: usize = 2;
-/// Nets with more pins than this neither colour cells nor count in costs.
-const SKIP_EDGES_LARGER_THAN: usize = 100;
 
 /// The bins cells are gathered from, as `DetailedMis`'s grid of buckets.
 struct Bins {
@@ -70,7 +68,7 @@ fn color_cells(imp: &Improver, candidates: &[NodeId]) -> Result<IdVec<NodeId, Op
     }
     let mut adjacent: IdVec<NodeId, Vec<NodeId>> = IdVec::filled(Vec::new(), nodes);
     for edge in &imp.net.edges {
-        if edge.len() <= 1 || edge.len() > SKIP_EDGES_LARGER_THAN {
+        if edge.len() <= 1 || edge.len() > SKIP_NETS_LARGER_THAN {
             continue;
         }
         for (k, &pi) in edge.iter().enumerate() {
@@ -340,7 +338,7 @@ fn hpwl_at(imp: &Improver, n: NodeId, center: Point<Dbu>) -> Dbu {
     let mut hpwl = Dbu::ZERO;
     for &pin in &imp.net.node_pins[n] {
         let edge = &imp.net.edges[imp.net.pins[pin].edge];
-        if edge.len() <= 1 || edge.len() > SKIP_EDGES_LARGER_THAN {
+        if edge.len() <= 1 || edge.len() > SKIP_NETS_LARGER_THAN {
             continue;
         }
         let (mut x0, mut y0) = (Dbu(i64::MAX), Dbu(i64::MAX));
