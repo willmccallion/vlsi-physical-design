@@ -36,7 +36,6 @@ use pare_common::geom::rect::Rect;
 use rand::rngs::StdRng;
 use rand::{Rng, SeedableRng};
 use std::convert::Infallible;
-use std::ops::Range;
 use wirelength::{Netlist, Terminal};
 
 /// Settings for global placement.
@@ -167,6 +166,51 @@ pub struct ZoneOutcome {
     pub overflow: f64,
 }
 
+pare_common::define_index!(
+    /// An object being placed: the movable cells first, then the fillers.
+    ObjectId(u32)
+);
+
+pare_common::define_index!(
+    /// A field of a run: one for each zone with movable cells.
+    FieldId(u32)
+);
+
+/// The center or the like of every object.
+type ObjectPoints = IdVec<ObjectId, Point<f64>>;
+
+/// A run of consecutive objects.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(super) struct ObjectRange {
+    start: ObjectId,
+    end: ObjectId,
+}
+
+impl ObjectRange {
+    /// The objects from `start` up to, not including, `end`.
+    const fn new(start: ObjectId, end: ObjectId) -> Self {
+        Self { start, end }
+    }
+
+    /// No objects.
+    const EMPTY: Self = Self::new(ObjectId(0), ObjectId(0));
+
+    /// How many objects the range holds.
+    const fn len(self) -> usize {
+        self.end.index() - self.start.index()
+    }
+
+    /// The first `len` objects of the range.
+    const fn prefix(self, len: usize) -> Self {
+        Self::new(self.start, ObjectId::new(self.start.index() + len))
+    }
+
+    /// Every object of the range, in order.
+    fn iter(self) -> impl Iterator<Item = ObjectId> {
+        (self.start.index()..self.end.index()).map(ObjectId::new)
+    }
+}
+
 /// One electrostatic system: the cells of one zone and their fillers,
 /// spread over that zone's rows only.
 #[derive(Debug)]
@@ -175,10 +219,10 @@ pub(super) struct Field {
     grid: DensityGrid,
     /// Where its objects may go.
     area: Vec<Rect<f64>>,
-    /// Object indices of its cells.
-    cells: Range<usize>,
-    /// Object indices of its fillers.
-    fillers: Range<usize>,
+    /// Its cells.
+    cells: ObjectRange,
+    /// Its fillers.
+    fillers: ObjectRange,
     /// How many of its fillers, from the first, are in play: routability
     /// removes them from the last.
     kept_fillers: usize,
@@ -188,9 +232,19 @@ pub(super) struct Field {
 }
 
 impl Field {
-    /// Object indices of the fillers in play.
-    const fn live_fillers(&self) -> Range<usize> {
-        self.fillers.start..self.fillers.start + self.kept_fillers
+    /// The fillers in play.
+    const fn live_fillers(&self) -> ObjectRange {
+        self.fillers.prefix(self.kept_fillers)
+    }
+
+    /// Its cells and the fillers in play.
+    fn live_objects(&self) -> impl Iterator<Item = ObjectId> {
+        self.cells.iter().chain(self.live_fillers().iter())
+    }
+
+    /// Its cells and all its fillers.
+    fn objects(&self) -> impl Iterator<Item = ObjectId> {
+        self.cells.iter().chain(self.fillers.iter())
     }
 }
 
@@ -307,20 +361,20 @@ pub fn place<D: TimingDriver>(
 /// and the nets between them.
 struct Setup {
     objects: Objects,
-    fields: Vec<Field>,
+    fields: IdVec<FieldId, Field>,
     netlist: Netlist,
     /// The model cell of each object that is a cell.
-    movable: Vec<CellId>,
+    movable: IdVec<ObjectId, CellId>,
     /// Each cell object's size in the model, before any inflation.
-    model_sizes: Vec<Point<f64>>,
+    model_sizes: ObjectPoints,
 }
 
 /// How the objects of a rebuilt setup continue those of the one before.
 struct Remap {
     /// For each new object, the old object it continues.
-    old_of_new: Vec<Option<usize>>,
+    old_of_new: IdVec<ObjectId, Option<ObjectId>>,
     /// For each new field, the old field of the same zone.
-    old_field_of_new: Vec<Option<usize>>,
+    old_field_of_new: IdVec<FieldId, Option<FieldId>>,
     /// Cell area the new objects add over the old ones.
     added_area: f64,
 }
@@ -365,15 +419,21 @@ impl Setup {
         let (mut objects, mut old_of_new, added_area) =
             self.continued_cells(model, &movable, cell_map);
         let mut fields = build_fields(model, &movable, &fixed_rects(model), params);
-        let mut old_field_of_new = Vec::with_capacity(fields.len());
+        let mut old_field_of_new = IdVec::with_capacity(fields.len());
         for field in &mut fields {
-            let old = self.fields.iter().position(|f| f.zone == field.zone);
-            old_field_of_new.push(old);
+            let old = self
+                .fields
+                .iter_enumerated()
+                .find(|(_, f)| f.zone == field.zone)
+                .map(|(id, _)| id);
+            let _ = old_field_of_new.push(old);
             if let Some(old) = old {
                 self.continue_field(field, old, &mut objects, &mut old_of_new);
             } else {
                 add_fillers(field, &mut objects, rng);
-                old_of_new.extend(field.fillers.clone().map(|_| None));
+                for _ in field.fillers.iter() {
+                    let _ = old_of_new.push(None);
+                }
             }
         }
         let setup = Self {
@@ -397,21 +457,21 @@ impl Setup {
     fn continued_cells(
         &self,
         model: &PlacementModel,
-        movable: &[CellId],
+        movable: &IdVec<ObjectId, CellId>,
         cell_map: &IdVec<CellId, Option<CellId>>,
-    ) -> (Objects, Vec<Option<usize>>, f64) {
+    ) -> (Objects, IdVec<ObjectId, Option<ObjectId>>, f64) {
         let mut old_object_of_new_cell = IdVec::filled(None, model.num_cells());
-        for (k, &i) in self.movable.iter().enumerate() {
+        for (k, &i) in self.movable.iter_enumerated() {
             if let Some(j) = cell_map[i] {
                 old_object_of_new_cell[j] = Some(k);
             }
         }
         let mut objects = Objects {
-            centers: Vec::with_capacity(movable.len()),
-            sizes: Vec::with_capacity(movable.len()),
+            centers: IdVec::with_capacity(movable.len()),
+            sizes: IdVec::with_capacity(movable.len()),
             kinds: movable.iter().map(|&i| model.kinds[i]).collect(),
         };
-        let mut old_of_new = Vec::with_capacity(movable.len());
+        let mut old_of_new = IdVec::with_capacity(movable.len());
         let area = |size: Point<f64>| size.x * size.y;
         let mut added_area = 0.0;
         for &i in movable {
@@ -419,27 +479,24 @@ impl Setup {
             // size, without the pin density scaling the first placement
             // gave it, as resizeGCell and createCbkGCell read the instance.
             let size = model.sizes[i];
-            match old_object_of_new_cell[i] {
+            let (center, size, old) = match old_object_of_new_cell[i] {
                 Some(k) if self.model_sizes[k] == size => {
-                    objects.centers.push(self.objects.centers[k]);
-                    objects.sizes.push(self.objects.sizes[k]);
-                    old_of_new.push(Some(k));
+                    (self.objects.centers[k], self.objects.sizes[k], Some(k))
                 }
                 Some(k) => {
-                    objects.centers.push(self.objects.centers[k]);
-                    objects.sizes.push(size);
-                    old_of_new.push(Some(k));
                     added_area += area(size) - area(self.model_sizes[k]);
+                    (self.objects.centers[k], size, Some(k))
                 }
                 None => {
-                    objects.centers.push(model.positions[i] + size * 0.5);
-                    objects.sizes.push(size);
-                    old_of_new.push(None);
                     added_area += area(size);
+                    (model.positions[i] + size * 0.5, size, None)
                 }
-            }
+            };
+            let _ = objects.centers.push(center);
+            let _ = objects.sizes.push(size);
+            let _ = old_of_new.push(old);
         }
-        for (k, &i) in self.movable.iter().enumerate() {
+        for (k, &i) in self.movable.iter_enumerated() {
             if cell_map[i].is_none() {
                 added_area -= area(self.model_sizes[k]);
             }
@@ -453,27 +510,27 @@ impl Setup {
     fn continue_field(
         &self,
         field: &mut Field,
-        old: usize,
+        old: FieldId,
         objects: &mut Objects,
-        old_of_new: &mut Vec<Option<usize>>,
+        old_of_new: &mut IdVec<ObjectId, Option<ObjectId>>,
     ) {
         let old = &self.fields[old];
-        let first = objects.centers.len();
-        for k in old.fillers.clone() {
-            objects.centers.push(self.objects.centers[k]);
-            objects.sizes.push(self.objects.sizes[k]);
-            old_of_new.push(Some(k));
+        let first = objects.centers.next_id();
+        for k in old.fillers.iter() {
+            let _ = objects.centers.push(self.objects.centers[k]);
+            let _ = objects.sizes.push(self.objects.sizes[k]);
+            let _ = old_of_new.push(Some(k));
         }
-        field.fillers = first..objects.centers.len();
+        field.fillers = ObjectRange::new(first, objects.centers.next_id());
         field.kept_fillers = old.kept_fillers;
         field.filler = old.filler;
-        let cell_area = |objects: &Objects, cells: &Range<usize>| -> f64 {
+        let cell_area = |objects: &Objects, cells: ObjectRange| -> f64 {
             cells
-                .clone()
+                .iter()
                 .map(|i| objects.sizes[i].x * objects.sizes[i].y)
                 .sum()
         };
-        let gained = cell_area(objects, &field.cells) - cell_area(&self.objects, &old.cells);
+        let gained = cell_area(objects, field.cells) - cell_area(&self.objects, old.cells);
         let free = field.grid.free_area();
         if free > 0.0 {
             let target = old.grid.target() + gained / free;
@@ -481,16 +538,16 @@ impl Setup {
                 log::warn!("timing-driven repair raised a field's target density to {target:.3}");
             }
             field.grid.set_target(target);
-            field.utilization = cell_area(objects, &field.cells) / free;
+            field.utilization = cell_area(objects, field.cells) / free;
         }
     }
 }
 
 /// The model's movable cells, grouped by zone.
-fn movable_cells(model: &PlacementModel) -> Vec<CellId> {
+fn movable_cells(model: &PlacementModel) -> IdVec<ObjectId, CellId> {
     let mut movable: Vec<CellId> = model.cells().filter(|&i| model.movable[i]).collect();
     movable.sort_by_key(|&i| (model.zone_of[i], i));
-    movable
+    movable.into()
 }
 
 /// The boxes of the model's fixed cells.
@@ -505,14 +562,14 @@ fn fixed_rects(model: &PlacementModel) -> Vec<Rect<f64>> {
 /// Gives `field` the fillers that bring its free area to its target
 /// density, as new objects scattered over its area.
 fn add_fillers(field: &mut Field, objects: &mut Objects, rng: &mut StdRng) {
-    let cells = &objects.sizes[field.cells.clone()];
-    let (size, count) = filler_layout(cells, field.grid.free_area(), field.grid.target());
-    let first = objects.centers.len();
+    let cells: Vec<Point<f64>> = field.cells.iter().map(|i| objects.sizes[i]).collect();
+    let (size, count) = filler_layout(&cells, field.grid.free_area(), field.grid.target());
+    let first = objects.centers.next_id();
     for _ in 0..count {
-        objects.centers.push(random_point(&field.area, rng));
-        objects.sizes.push(size);
+        let _ = objects.centers.push(random_point(&field.area, rng));
+        let _ = objects.sizes.push(size);
     }
-    field.fillers = first..objects.centers.len();
+    field.fillers = ObjectRange::new(first, objects.centers.next_id());
     field.kept_fillers = count;
     field.filler = size;
 }
@@ -545,8 +602,8 @@ impl<'a> Probe<'a> {
 
     /// The congestion of every gcell with the cell objects where
     /// `objects` has them.
-    fn measure(&mut self, objects: &Objects, movable: &[CellId]) -> Vec<f64> {
-        for (k, &i) in movable.iter().enumerate() {
+    fn measure(&mut self, objects: &Objects, movable: &IdVec<ObjectId, CellId>) -> Vec<f64> {
+        for (k, &i) in movable.iter_enumerated() {
             self.centers[i] = objects.centers[k];
         }
         self.estimator.congestion(&self.centers)
@@ -557,14 +614,19 @@ impl<'a> Probe<'a> {
 /// `movable`, which are grouped by zone; their fillers are added later.
 fn build_fields(
     model: &PlacementModel,
-    movable: &[CellId],
+    movable: &IdVec<ObjectId, CellId>,
     fixed: &[Rect<f64>],
     params: &GlobalParams,
-) -> Vec<Field> {
-    let mut fields = Vec::new();
+) -> IdVec<FieldId, Field> {
+    let mut fields = IdVec::new();
     let mut start = 0;
     for (id, zone) in model.zones.iter_enumerated() {
-        let end = movable.partition_point(|&i| model.zone_of[i] <= id);
+        let end = start
+            + movable
+                .iter()
+                .skip(start)
+                .take_while(|&&i| model.zone_of[i] <= id)
+                .count();
         if end == start {
             continue;
         }
@@ -576,9 +638,10 @@ fn build_fields(
             &area,
             fixed,
         );
-        let cell_area: f64 = movable[start..end]
+        let cells = ObjectRange::new(ObjectId::new(start), ObjectId::new(end));
+        let cell_area: f64 = cells
             .iter()
-            .map(|&i| model.density_sizes[i].x * model.density_sizes[i].y)
+            .map(|k| model.density_sizes[movable[k]].x * model.density_sizes[movable[k]].y)
             .sum();
         let free = grid.free_area();
         let utilization = if free > 0.0 {
@@ -587,12 +650,12 @@ fn build_fields(
             f64::INFINITY
         };
         grid.set_target(zone_target(params.target_density.get(), utilization));
-        fields.push(Field {
+        let _ = fields.push(Field {
             zone: zone.zone,
             grid,
             area,
-            cells: start..end,
-            fillers: 0..0,
+            cells,
+            fillers: ObjectRange::EMPTY,
             kept_fillers: 0,
             filler: Point::new(0.0, 0.0),
             utilization,
@@ -660,20 +723,20 @@ fn zone_area(model: &PlacementModel, id: ZoneId) -> Vec<Rect<f64>> {
 /// on each axis.
 fn initial_centers(
     model: &PlacementModel,
-    movable: &[CellId],
+    movable: &IdVec<ObjectId, CellId>,
     netlist: &Netlist,
     rounds: usize,
     rng: &mut StdRng,
-) -> Vec<Point<f64>> {
+) -> ObjectPoints {
     let core = bounding_box(&placeable_area(model));
-    let bounds: Vec<Rect<f64>> = movable
+    let bounds: IdVec<ObjectId, Rect<f64>> = movable
         .iter()
         .map(|&i| match model.zones.get(model.zone_of[i]) {
             Some(zone) if matches!(zone.zone, Zone::Fence(_)) => bounding_box(&zone.rects),
             _ => core,
         })
         .collect();
-    let mut centers: Vec<Point<f64>> = bounds
+    let mut centers: ObjectPoints = bounds
         .iter()
         .map(|b| {
             Point::new(
@@ -725,9 +788,9 @@ fn random_point(rects: &[Rect<f64>], rng: &mut StdRng) -> Point<f64> {
 
 /// The model's nets with movable cells as objects and everything else as
 /// fixed points.
-fn build_netlist(model: &PlacementModel, movable: &[CellId]) -> Netlist {
+fn build_netlist(model: &PlacementModel, movable: &IdVec<ObjectId, CellId>) -> Netlist {
     let mut object_of_cell = IdVec::filled(None, model.num_cells());
-    for (k, &i) in movable.iter().enumerate() {
+    for (k, &i) in movable.iter_enumerated() {
         object_of_cell[i] = Some(k);
     }
     let mut netlist = Netlist::default();

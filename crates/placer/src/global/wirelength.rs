@@ -1,6 +1,8 @@
 //! Weighted-average wirelength: a smooth stand-in for half-perimeter
 //! wirelength whose error shrinks with the smoothing length `gamma`.
 
+use super::{ObjectId, ObjectPoints};
+use pare_common::db::indices::IdVec;
 use pare_common::geom::point::Point;
 use pare_common::geom::rect::Rect;
 use rayon::prelude::*;
@@ -11,8 +13,8 @@ use std::ops::Range;
 pub(super) enum Terminal {
     /// At `offset` from the center of a placed object.
     Object {
-        /// Index of the movable object in the placer's objects.
-        index: usize,
+        /// The movable object.
+        index: ObjectId,
         /// Offset from its center.
         offset: Point<f64>,
     },
@@ -69,8 +71,8 @@ impl Netlist {
     }
 
     /// Number of terminals on each of `objects` objects.
-    pub(super) fn pin_counts(&self, objects: usize) -> Vec<f64> {
-        let mut counts = vec![0.0; objects];
+    pub(super) fn pin_counts(&self, objects: usize) -> IdVec<ObjectId, f64> {
+        let mut counts = IdVec::filled(0.0, objects);
         for t in &self.terminals {
             if let Terminal::Object { index, .. } = *t {
                 counts[index] += 1.0;
@@ -83,7 +85,7 @@ impl Netlist {
     /// `OpenROAD`'s `dbNet::getTermBBox`.
     pub(super) fn term_boxes<'a>(
         &'a self,
-        centers: &'a [Point<f64>],
+        centers: &'a ObjectPoints,
     ) -> impl Iterator<Item = Rect<f64>> + 'a {
         self.nets.iter().filter_map(move |(range, _)| {
             self.terminals[range.clone()]
@@ -107,10 +109,10 @@ impl Netlist {
     /// gradients.
     pub(super) fn gradient(
         &self,
-        centers: &[Point<f64>],
+        centers: &ObjectPoints,
         gamma: f64,
         scratch: &mut Vec<Point<f64>>,
-        grads: &mut [Point<f64>],
+        grads: &mut ObjectPoints,
     ) -> Wirelength {
         scratch.resize(self.terminals.len(), Point::new(0.0, 0.0));
         let mut slices = Vec::with_capacity(self.nets.len());
@@ -146,7 +148,9 @@ impl Netlist {
                 hpwl: a.hpwl + b.hpwl,
             });
 
-        grads.fill(Point::new(0.0, 0.0));
+        for g in grads.iter_mut() {
+            *g = Point::new(0.0, 0.0);
+        }
         for (t, g) in self.terminals.iter().zip(scratch.iter()) {
             if let Terminal::Object { index, .. } = *t {
                 grads[index] += *g;
@@ -157,7 +161,7 @@ impl Netlist {
 }
 
 /// Where terminal `t` is with its objects at `centers`.
-pub(super) fn position(t: Terminal, centers: &[Point<f64>]) -> Point<f64> {
+pub(super) fn position(t: Terminal, centers: &ObjectPoints) -> Point<f64> {
     match t {
         Terminal::Object { index, offset } => centers[index] + offset,
         Terminal::Fixed(p) => p,
@@ -175,7 +179,7 @@ struct AxisBuffers {
 /// terminal's derivative into `buf.grads`.
 fn net_axis(
     terminals: &[Terminal],
-    centers: &[Point<f64>],
+    centers: &ObjectPoints,
     gamma: f64,
     axis: impl Fn(Point<f64>) -> f64,
     buf: &mut AxisBuffers,
@@ -216,9 +220,9 @@ fn net_axis(
 mod tests {
     use super::*;
 
-    fn object(index: usize) -> (Terminal, Point<f64>) {
+    fn object(index: u32) -> (Terminal, Point<f64>) {
         point(Terminal::Object {
-            index,
+            index: ObjectId(index),
             offset: Point::new(0.0, 0.0),
         })
     }
@@ -238,8 +242,8 @@ mod tests {
             ],
             1.0,
         );
-        let centers = [Point::new(0.0, 0.0), Point::new(3.0, 4.0)];
-        let mut grads = [Point::new(0.0, 0.0); 2];
+        let centers = vec![Point::new(0.0, 0.0), Point::new(3.0, 4.0)].into();
+        let mut grads = IdVec::filled(Point::new(0.0, 0.0), 2);
 
         let wl = netlist.gradient(&centers, 0.01, &mut Vec::new(), &mut grads);
 
@@ -251,8 +255,8 @@ mod tests {
     fn net_weights_scale_the_smooth_length_but_not_the_half_perimeter() {
         let mut netlist = Netlist::default();
         netlist.push([object(0), object(1)], 3.0);
-        let centers = [Point::new(0.0, 0.0), Point::new(3.0, 4.0)];
-        let mut grads = [Point::new(0.0, 0.0); 2];
+        let centers = vec![Point::new(0.0, 0.0), Point::new(3.0, 4.0)].into();
+        let mut grads = IdVec::filled(Point::new(0.0, 0.0), 2);
 
         let wl = netlist.gradient(&centers, 0.01, &mut Vec::new(), &mut grads);
 
@@ -264,29 +268,31 @@ mod tests {
     fn the_gradient_matches_a_finite_difference() {
         let mut netlist = Netlist::default();
         netlist.push([object(0), object(1), object(2)], 2.0);
-        let centers = [
+        let centers: ObjectPoints = vec![
             Point::new(0.0, 1.0),
             Point::new(2.0, 3.0),
             Point::new(1.5, -1.0),
-        ];
-        let mut grads = [Point::new(0.0, 0.0); 3];
+        ]
+        .into();
+        let mut grads = IdVec::filled(Point::new(0.0, 0.0), 3);
         let gamma = 0.7;
         let _ = netlist.gradient(&centers, gamma, &mut Vec::new(), &mut grads);
 
         let h = 1e-6;
+        let third = ObjectId(2);
         let mut moved = centers;
-        moved[2].x += h;
-        let mut ignored = [Point::new(0.0, 0.0); 3];
+        moved[third].x += h;
+        let mut ignored = IdVec::filled(Point::new(0.0, 0.0), 3);
         let up = netlist.gradient(&moved, gamma, &mut Vec::new(), &mut ignored);
-        moved[2].x -= h;
-        moved[2].x -= h;
+        moved[third].x -= h;
+        moved[third].x -= h;
         let down = netlist.gradient(&moved, gamma, &mut Vec::new(), &mut ignored);
 
         let numeric = (up.smooth - down.smooth) / (2.0 * h);
         assert!(
-            (grads[2].x - numeric).abs() < 1e-5,
+            (grads[third].x - numeric).abs() < 1e-5,
             "{} vs {numeric}",
-            grads[2].x
+            grads[third].x
         );
     }
 
