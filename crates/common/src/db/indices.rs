@@ -119,7 +119,7 @@ impl<I: TableIndex, T> IdVec<I, T> {
     }
 
     /// Every index of the table, in order.
-    pub fn ids(&self) -> impl Iterator<Item = I> + use<I, T> {
+    pub fn ids(&self) -> impl Iterator<Item = I> + Clone + use<I, T> {
         (0..self.entries.len()).map(I::from_position)
     }
 
@@ -332,6 +332,33 @@ impl LayerId {
     /// The cut layer directly above this routing layer.
     pub const fn cut_above(self) -> CutLayerId {
         CutLayerId(self.0)
+    }
+
+    /// The cut layer directly below this routing layer, if any.
+    pub const fn cut_below(self) -> Option<CutLayerId> {
+        match self.0.checked_sub(1) {
+            Some(cut) => Some(CutLayerId(cut)),
+            None => None,
+        }
+    }
+
+    /// The routing layer directly below this one, if any.
+    pub const fn below(self) -> Option<Self> {
+        match self.0.checked_sub(1) {
+            Some(layer) => Some(Self(layer)),
+            None => None,
+        }
+    }
+
+    /// The routing layer directly above this one.
+    #[must_use]
+    pub const fn above(self) -> Self {
+        Self(self.0 + 1)
+    }
+
+    /// Every routing layer from this one up to `top`, both included.
+    pub fn through(self, top: Self) -> impl Iterator<Item = Self> + use<> {
+        (self.0..=top.0).map(Self)
     }
 }
 

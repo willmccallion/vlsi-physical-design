@@ -17,7 +17,7 @@ use crate::access::Node;
 use crate::occupancy::{LocalOccupancy, Owner};
 use crate::search::{Costs, Marks, OwnVias, Search, WindowCache};
 use crate::wiring::{DisjointSets, Edge, NetRoute, Patch, Wiring, path_edges, tidy_patches};
-use pare_common::db::indices::{CutLayerId, LayerId, NetId};
+use pare_common::db::indices::{CutLayerId, NetId};
 use pare_common::geom::dbu::Dbu;
 use pare_common::geom::point::Point;
 use pare_common::geom::rect::Rect;
@@ -1051,11 +1051,10 @@ impl DetailedRouter<'_> {
     /// Nets with wiring within `reach` of `at` on any routable layer.
     fn nets_near(&self, at: Point<Dbu>, reach: Dbu) -> Vec<NetId> {
         let probe = Rect::new(at, at).expand(reach);
-        let mut nets: Vec<NetId> = (self.tech.min_layer.index()..=self.tech.max_layer.index())
-            .flat_map(|l| {
-                self.occupancy
-                    .wiring_owners_in(self.tech, LayerId::new(l), &probe)
-            })
+        let mut nets: Vec<NetId> = self
+            .tech
+            .routable_layers()
+            .flat_map(|l| self.occupancy.wiring_owners_in(self.tech, l, &probe))
             .filter_map(|o| match o {
                 Owner::Net(n) => Some(n),
                 Owner::Obstacle => None,

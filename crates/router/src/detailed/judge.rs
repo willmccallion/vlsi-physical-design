@@ -227,13 +227,12 @@ impl DetailedRouter<'_> {
                 let _ = present.insert(n);
             }
         };
-        for l in self.tech.min_layer.index()..=self.tech.max_layer.index() {
-            for owner in self.occupancy.owners_in(self.tech, LayerId::new(l), window) {
+        for layer in self.tech.routable_layers() {
+            for owner in self.occupancy.owners_in(self.tech, layer, window) {
                 note(owner);
             }
         }
-        for c in 0..self.tech.cuts.len() {
-            let cut = CutLayerId::new(c);
+        for cut in self.tech.cuts.ids() {
             let probe = crate::occupancy::Owner::Obstacle;
             for occupant in self.occupancy.cut_conflicts(cut, window, probe) {
                 note(occupant.owner);
