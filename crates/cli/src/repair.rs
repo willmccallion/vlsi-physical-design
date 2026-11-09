@@ -17,7 +17,7 @@ use pare_resizer::{
     Resizer, SessionInputs, SetupOptions, SetupProgress, SetupSummary, Sta, Timing, repair_hold,
     repair_setup,
 };
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::time::Instant;
 
 /// Reads the Liberty files, the first one's thresholds and defaults
@@ -31,10 +31,26 @@ fn load_liberty(paths: &[PathBuf]) -> anyhow::Result<Liberty> {
             None => merged = Some(lib),
             Some(first) => first
                 .absorb(lib)
-                .map_err(|e| anyhow::anyhow!("cell '{}' is in two Liberty files", e.name))?,
+                .map_err(|e| duplicate_cell(first, paths, path, &e.name))?,
         }
     }
     merged.context("no Liberty files")
+}
+
+/// The error for cell `name` of the Liberty file `path`, which `merged`,
+/// read from the files `paths` before it, already has.
+fn duplicate_cell(merged: &Liberty, paths: &[PathBuf], path: &Path, name: &str) -> anyhow::Error {
+    let earlier = merged
+        .cell_id(name)
+        .and_then(|id| paths.get(merged.cell(id).library))
+        .map_or_else(
+            || "an earlier Liberty file".to_string(),
+            |earlier| earlier.display().to_string(),
+        );
+    anyhow::anyhow!(
+        "cell '{name}' of {} is already in {earlier}",
+        path.display()
+    )
 }
 
 /// What the netlist steps before placement leave for the repair after it.
@@ -457,7 +473,6 @@ mod tests {
     use crate::testing::{cts_fixture, scratch_dir, tiny, tiny_config};
     use pare_common::db::design::PinOwner;
     use pare_common::db::indices::PinId;
-    use std::path::Path;
 
     fn wire(layer: &str) -> LayerRcConfig {
         LayerRcConfig {
@@ -547,12 +562,37 @@ mod tests {
     }
 
     #[test]
-    fn a_cell_in_two_liberty_files_is_an_error() {
+    fn a_cell_in_two_liberty_files_names_both() {
+        let dir = scratch_dir("liberty-twice");
+        let text = std::fs::read_to_string(clock_lib()).unwrap();
+        let renamed = text.replace("  cell (", "  cell (B_");
+        let (second, third) = (dir.join("b.lib"), dir.join("c.lib"));
+        std::fs::write(&second, &renamed).unwrap();
+        std::fs::write(&third, &renamed).unwrap();
+
+        let error = load_liberty(&[clock_lib(), second.clone(), third.clone()]).unwrap_err();
+
+        assert_eq!(
+            error.to_string(),
+            format!(
+                "cell 'B_CLKBUF_X3' of {} is already in {}",
+                third.display(),
+                second.display()
+            )
+        );
+    }
+
+    #[test]
+    fn a_cell_of_the_first_liberty_file_again_names_the_first() {
         let error = load_liberty(&[clock_lib(), clock_lib()]).unwrap_err();
 
         assert_eq!(
             error.to_string(),
-            "cell 'CLKBUF_X3' is in two Liberty files"
+            format!(
+                "cell 'CLKBUF_X3' of {} is already in {}",
+                clock_lib().display(),
+                clock_lib().display()
+            )
         );
     }
 
