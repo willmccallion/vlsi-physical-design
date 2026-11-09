@@ -134,12 +134,15 @@ struct RouteArgs {
     trace_box: Option<Vec<f64>>,
 }
 
+/// The directory of suites whose configs a design name finds.
+const CONFIGS_DIR: &str = "configs";
+
 /// Resolves a config argument to a file path.
 ///
 /// An existing path, or anything containing '/' or ending in '.toml', is used
 /// as is; otherwise it names a design whose config is
-/// `configs/<suite>/<design>.toml`.
-fn resolve_config(name: &Path) -> anyhow::Result<PathBuf> {
+/// `<configs>/<suite>/<design>.toml`.
+fn resolve_config(name: &Path, configs: &Path) -> anyhow::Result<PathBuf> {
     let text = name.to_str().context("config path is not valid UTF-8")?;
     if name.exists()
         || text.contains('/')
@@ -151,7 +154,9 @@ fn resolve_config(name: &Path) -> anyhow::Result<PathBuf> {
     }
     let file = format!("{text}.toml");
     let mut found = Vec::new();
-    for suite in std::fs::read_dir("configs").context("cannot read configs/")? {
+    let suites = std::fs::read_dir(configs)
+        .with_context(|| format!("cannot read {}/", configs.display()))?;
+    for suite in suites {
         let candidate = suite?.path().join(&file);
         if candidate.is_file() {
             found.push(candidate);
@@ -160,7 +165,8 @@ fn resolve_config(name: &Path) -> anyhow::Result<PathBuf> {
     match found.as_slice() {
         [one] => Ok(one.clone()),
         [] => anyhow::bail!(
-            "no config for '{text}' in configs/<suite>/; download it with scripts/download.py"
+            "no config for '{text}' in {}/<suite>/; download it with scripts/download.py",
+            configs.display()
         ),
         _ => anyhow::bail!("'{text}' names several configs: {found:?}"),
     }
@@ -169,7 +175,7 @@ fn resolve_config(name: &Path) -> anyhow::Result<PathBuf> {
 /// Reads the config, records it in the report and sizes the thread pool as
 /// it asks.
 fn load_config(name: &Path, report: &mut Report) -> anyhow::Result<Config> {
-    let path = resolve_config(name)?;
+    let path = resolve_config(name, Path::new(CONFIGS_DIR))?;
     ui::header("Config", &path.display().to_string());
     report.config = path.display().to_string();
     let text = std::fs::read_to_string(&path)
