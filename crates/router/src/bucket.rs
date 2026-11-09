@@ -21,6 +21,11 @@ impl Bucket {
         Self(self.0.abs())
     }
 
+    /// 0 for an even column or row, 1 for an odd one.
+    pub(crate) const fn parity(self) -> i64 {
+        self.0.rem_euclid(2)
+    }
+
     /// The length of this many buckets of side `size`.
     pub(crate) fn length(self, size: Dbu) -> Dbu {
         size * self.0

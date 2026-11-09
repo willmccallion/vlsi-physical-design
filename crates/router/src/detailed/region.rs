@@ -14,6 +14,7 @@ use super::judge::{Candidate, Judgment};
 use super::trace;
 use super::{DetailedRouter, Marker};
 use crate::access::Node;
+use crate::bucket::{Bucket, bucket_at};
 use crate::global::Gcells;
 use crate::occupancy::{LocalOccupancy, Owner};
 use crate::search::{Costs, Marks, OwnVias, Search, WindowCache};
@@ -42,7 +43,7 @@ const NDR_RIPUP_HARDINESS: u8 = 3;
 const NDR_PRIORITY: u8 = 2;
 
 /// One region's position in the region grid.
-pub(super) type RegionKey = (i64, i64);
+pub(super) type RegionKey = Point<Bucket>;
 
 /// Square regions of [`REGION_GCELLS`] gcells from an origin.
 #[derive(Clone, Copy, Debug)]
@@ -64,24 +65,21 @@ impl RegionGrid {
 
     /// The region holding `p`, counting regions' lower and left edges as
     /// theirs.
-    pub(super) const fn key(&self, p: Point<Dbu>) -> RegionKey {
-        (
-            (p.x.get() - self.origin.x.get()).div_euclid(self.size.get()),
-            (p.y.get() - self.origin.y.get()).div_euclid(self.size.get()),
-        )
+    pub(super) fn key(&self, p: Point<Dbu>) -> RegionKey {
+        bucket_at(p - self.origin, self.size)
     }
 
     /// The area of a region.
-    pub(super) fn area(&self, (rx, ry): RegionKey) -> Rect<Dbu> {
-        let min = self.origin + Point::new(self.size * rx, self.size * ry);
+    pub(super) fn area(&self, key: RegionKey) -> Rect<Dbu> {
+        let min = self.origin + Point::new(key.x.length(self.size), key.y.length(self.size));
         Rect::new(min, min + Point::new(self.size, self.size))
     }
 }
 
 /// Which of four batches a region is routed in; regions of one batch do
 /// not touch.
-pub(super) const fn colour((rx, ry): RegionKey) -> i64 {
-    rx.rem_euclid(2) + 2 * ry.rem_euclid(2)
+pub(super) const fn colour(key: RegionKey) -> i64 {
+    key.x.parity() + 2 * key.y.parity()
 }
 
 /// One region a repair pass routes again: its area, the nets chosen
@@ -377,11 +375,10 @@ impl DetailedRouter<'_> {
     fn markers_by_region(&self, grid: &RegionGrid) -> FxHashMap<RegionKey, Vec<usize>> {
         let mut touching: FxHashMap<RegionKey, Vec<usize>> = FxHashMap::default();
         for (i, m) in self.markers().iter().enumerate() {
-            let (x0, y0) = grid.key(m.bbox.min);
-            let (x1, y1) = grid.key(m.bbox.max);
-            for ry in y0..=y1 {
-                for rx in x0..=x1 {
-                    touching.entry((rx, ry)).or_default().push(i);
+            let (low, high) = (grid.key(m.bbox.min), grid.key(m.bbox.max));
+            for ry in low.y.through(high.y) {
+                for rx in low.x.through(high.x) {
+                    touching.entry(Point::new(rx, ry)).or_default().push(i);
                 }
             }
         }
