@@ -614,6 +614,16 @@ fn a_clock_driving_a_block_and_registers_gets_a_tree_for_each() {
 }
 
 #[test]
+fn a_block_taking_the_clock_on_an_inout_pin_is_a_sink() {
+    let text = with_ram(&design(4, 4, false), &[("clk", "CLKIO")]);
+    let (db, lib, constraints) = load_with_ram(&text);
+
+    let summary = synthesized_summary(db, &lib, &constraints);
+
+    assert_eq!((summary.trees, summary.sinks), (2, 17));
+}
+
+#[test]
 fn an_inverter_is_classed_by_the_first_load_opendb_lists() {
     // The inverter drives the block, then four flops in DEF order. OpenDB
     // lists the last connected first, so its first load is a flop: the
