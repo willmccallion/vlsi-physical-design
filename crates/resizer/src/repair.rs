@@ -234,16 +234,18 @@ impl<'r, 'a, T: Timing> Repairer<'r, 'a, T> {
         clock_buffers: &[BufferCell],
         max_length: Option<Dbu>,
     ) -> Result<RepairSummary, RepairError> {
+        let strongest = clock_buffers
+            .iter()
+            .map(|&b| self.resizer.link.buffer_drive_resistance(b))
+            .reduce(Ohms::min)
+            .ok_or(RepairError::NoBuffers)?;
         let saved_options = self.resizer.options;
         let saved_strongest = self.resizer.r_strongest_buffer;
         self.resizer.options.slew_margin = 0.0;
         self.resizer.options.cap_margin = 0.0;
         self.resizer.options.max_wire_length = max_length;
         self.resizer.options.sizing_limits = SizingLimits::NONE;
-        self.resizer.r_strongest_buffer = clock_buffers
-            .iter()
-            .map(|&b| self.resizer.link.buffer_drive_resistance(b))
-            .fold(Ohms::new(f64::MAX), Ohms::min);
+        self.resizer.r_strongest_buffer = strongest;
         let drivers: Vec<PinId> = {
             let netlist = self.resizer.netlist();
             (0..self.resizer.db.pins.len())
@@ -1098,6 +1100,18 @@ mod tests {
             );
             let q = pin(resizer.db, "f1/Q");
             assert!(resizer.sta().slack(q, MinMax::Max).is_constrained());
+        });
+    }
+
+    #[test]
+    fn clock_nets_without_clock_buffers_cannot_be_repaired() {
+        let mut db = apart();
+        let lib = cells(&clock_cells_source());
+
+        with_wired_session(&mut db, &lib, SLOW_CLOCK, |resizer| {
+            let repaired = Repairer::new(resizer).repair_clock_nets(&[], None);
+
+            assert_eq!(repaired, Err(RepairError::NoBuffers));
         });
     }
 
