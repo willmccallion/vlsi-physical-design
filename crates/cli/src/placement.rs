@@ -26,7 +26,7 @@ use pare_placer::global::{
 };
 use pare_placer::io::{self, IoLayers};
 use pare_placer::legalize::Legalization;
-use pare_placer::legalize::opendp::improve::improve_placement;
+use pare_placer::legalize::opendp::improve::{MaxDisplacement, RowHeights, improve_placement};
 use pare_placer::legalize::opendp::mirror::optimize_mirroring;
 use pare_placer::model::PlacementModel;
 use pare_placer::zones::{Zone, Zones};
@@ -47,8 +47,11 @@ const PLACEMENT_IMAGE_PIXELS: u32 = 1000;
 const PROGRESS_INTERVAL: usize = 50;
 
 /// How far `improve_placement` may move a cell, in row heights across and
-/// rows up or down: OpenROAD-flow-scripts' `DPO_MAX_DISPLACEMENT`.
-const IMPROVE_MAX_DISPLACEMENT: (i64, i64) = (5, 1);
+/// up or down: OpenROAD-flow-scripts' `DPO_MAX_DISPLACEMENT` of `5 1`.
+const IMPROVE_MAX_DISPLACEMENT: MaxDisplacement = MaxDisplacement {
+    x: Some(RowHeights(5)),
+    y: Some(RowHeights(1)),
+};
 
 /// Where placement starts from.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

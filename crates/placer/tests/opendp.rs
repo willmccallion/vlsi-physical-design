@@ -11,10 +11,16 @@ use pare_common::db::parser::{def, lef};
 use pare_common::geom::dbu::Dbu;
 use pare_common::geom::orient::Orientation;
 use pare_common::geom::point::Point;
-use pare_placer::legalize::opendp::improve::improve_placement;
+use pare_placer::legalize::opendp::improve::{MaxDisplacement, RowHeights, improve_placement};
 use pare_placer::legalize::opendp::mirror::optimize_mirroring;
 use pare_placer::legalize::opendp::{DetailedPlacementError, detailed_placement};
 use std::path::{Path, PathBuf};
+
+/// OpenROAD-flow-scripts' `DPO_MAX_DISPLACEMENT` of `5 1`.
+const MAX_DISPLACEMENT: MaxDisplacement = MaxDisplacement {
+    x: Some(RowHeights(5)),
+    y: Some(RowHeights(1)),
+};
 
 fn fixture(name: &str) -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR"))
@@ -155,7 +161,7 @@ fn legalized(start: &[(i64, i64)]) -> NetlistDB {
 fn improvement_pulls_cells_to_their_nets_as_openroad_does() {
     let mut db = legalized(&[(1000, 1000); 6]);
 
-    let improvement = improve_placement(&mut db, (5, 1)).unwrap();
+    let improvement = improve_placement(&mut db, MAX_DISPLACEMENT).unwrap();
 
     assert!(improvement.hpwl_after < improvement.hpwl_before);
     assert_eq!(
@@ -175,7 +181,7 @@ fn improvement_pulls_cells_to_their_nets_as_openroad_does() {
 fn improvement_from_scattered_cells_matches_openroad() {
     let mut db = legalized(&SCATTERED);
 
-    let _ = improve_placement(&mut db, (5, 1)).unwrap();
+    let _ = improve_placement(&mut db, MAX_DISPLACEMENT).unwrap();
 
     assert_eq!(
         places(&db),
@@ -193,7 +199,7 @@ fn improvement_from_scattered_cells_matches_openroad() {
 #[test]
 fn mirroring_leaves_cells_whose_master_may_not_be_mirrored() {
     let mut db = legalized(&SCATTERED);
-    let _ = improve_placement(&mut db, (5, 1)).unwrap();
+    let _ = improve_placement(&mut db, MAX_DISPLACEMENT).unwrap();
     for m in &mut db.library.macros {
         m.symmetry.y = false;
     }
@@ -208,7 +214,7 @@ fn mirroring_leaves_cells_whose_master_may_not_be_mirrored() {
 #[test]
 fn mirroring_turns_the_cells_openroad_turns() {
     let mut db = legalized(&SCATTERED);
-    let _ = improve_placement(&mut db, (5, 1)).unwrap();
+    let _ = improve_placement(&mut db, MAX_DISPLACEMENT).unwrap();
 
     let mirrored = optimize_mirroring(&mut db);
 
