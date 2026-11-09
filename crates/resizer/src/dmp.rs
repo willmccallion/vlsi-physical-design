@@ -447,7 +447,7 @@ fn initial_params(common: &Common<'_>, rd: f64, ceff: f64) -> Params {
 fn pi_model(common: &Common<'_>, rd: f64, pi: Pi) -> RawDelay {
     let Pi { c2, rpi, c1 } = pi;
     let poles = PiPoles::new(rd, pi);
-    let equations = |x: &[f64; 3], fvec: &mut [f64; 3], fjac: &mut [[f64; 3]; 3]| {
+    let equations = |x: &mut [f64; 3], fvec: &mut [f64; 3], fjac: &mut [[f64; 3]; 3]| {
         poles.equations(common, rd, pi, x, fvec, fjac)
     };
     let solve = |start: f64| -> Result<Params, DmpError> {
@@ -636,13 +636,12 @@ fn zero_c2(common: &Common<'_>, rd: f64, pi: Pi) -> RawDelay {
     let response = Response::ZeroC2 { p1, k0, k1, k2, k3 };
 
     let eqns =
-        |x: &[f64; 2], fvec: &mut [f64; 2], fjac: &mut [[f64; 2]; 2]| -> Result<(), DmpError> {
-            let t0 = x[0];
-            let mut dt = x[1];
+        |x: &mut [f64; 2], fvec: &mut [f64; 2], fjac: &mut [[f64; 2]; 2]| -> Result<(), DmpError> {
             let (t_vth, t_vl, _) = common.gate_delays(ceff);
-            if dt <= 0.0 {
-                dt = (t_vl - t_vth) / 100.0;
+            if x[1] <= 0.0 {
+                x[1] = (t_vl - t_vth) / 100.0;
             }
+            let (t0, dt) = (x[0], x[1]);
             fvec[1] = y(t_vth, t0, dt, rd, ceff) - common.vth;
             fvec[0] = y(t_vl, t0, dt, rd, ceff) - common.vl;
             let [a0, a1, _] = dy(t_vl, t0, dt, rd, ceff);
@@ -686,9 +685,10 @@ fn zero_c2(common: &Common<'_>, rd: f64, pi: Pi) -> RawDelay {
     }
 }
 
-/// A system of `N` equations: fills the residuals and the Jacobian at `x`.
+/// A system of `N` equations: fills the residuals and the Jacobian at `x`,
+/// which it may move back into its domain first, as `evalDmpEqns` does.
 type Equations<'a, const N: usize> =
-    dyn Fn(&[f64; N], &mut [f64; N], &mut [[f64; N]; N]) -> Result<(), DmpError> + 'a;
+    dyn Fn(&mut [f64; N], &mut [f64; N], &mut [[f64; N]; N]) -> Result<(), DmpError> + 'a;
 
 /// Newton-Raphson over `N` unknowns with LU-decomposed steps, as `OpenSTA`'s
 /// `newtonRaphson`.
@@ -944,6 +944,22 @@ mod tests {
         })
         .unwrap();
         assert!((x[0] - 3.0).abs() < 1e-9 && (x[1] - 2.0).abs() < 1e-9);
+    }
+
+    #[test]
+    fn newton_steps_from_where_the_equations_move_the_iterate() {
+        let mut x = [-1.0e6];
+        let solved = newton_raphson::<1>(&mut x, &|x, f, j| {
+            if x[0] <= 0.0 {
+                x[0] = 1.0;
+            }
+            f[0] = x[0] - 2.0;
+            j[0][0] = 1.0;
+            Ok(())
+        });
+
+        assert_eq!(solved, Ok(()));
+        assert!((x[0] - 2.0).abs() < 1e-9, "{x:?}");
     }
 
     #[test]
