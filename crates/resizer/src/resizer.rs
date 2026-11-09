@@ -1187,12 +1187,12 @@ fn hierarchy_depth(name: &str) -> usize {
 
 /// Share of the nets, from the worst slack up, that timing-driven
 /// placement weights, as `OpenROAD`'s `worst_slack_nets_percent`.
-pub const WORST_SLACK_NETS_SHARE: f64 = 0.1;
+pub(crate) const WORST_SLACK_NETS_SHARE: f64 = 0.1;
 
 /// The wirelength weights timing-driven placement gives nets for their
 /// `slacks`, sorted worst first, as `OpenROAD`'s `TimingBase` does.
 ///
-/// Over the worst [`WORST_SLACK_NETS_SHARE`] of them, the weight runs from
+/// Over the worst tenth of them, the weight runs from
 /// `weight_max` at the worst slack down to one at the best; nets at or
 /// above that best keep a weight of one and are left out. Empty when no
 /// net is constrained.

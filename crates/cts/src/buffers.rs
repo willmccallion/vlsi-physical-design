@@ -7,7 +7,7 @@ use pare_common::db::design::NetlistDB;
 use pare_common::db::liberty::{LibCellId, Liberty};
 use pare_common::units::Farads;
 use pare_resizer::Link;
-use pare_resizer::parasitics::WireRc;
+use pare_resizer::WireRc;
 
 /// The share of a buffer's load limit a sink or root buffer may use, as
 /// `CtsOptions`' default `sinkBufferMaxCapDerate`.

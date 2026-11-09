@@ -14,7 +14,7 @@ use pare_common::geom::orient::Orientation;
 use pare_common::testing;
 use pare_common::units::Seconds;
 use pare_cts::{CtsError, CtsInput, CtsOptions, CtsSummary, balance_latencies, synthesize};
-use pare_resizer::parasitics::WireRc;
+use pare_resizer::WireRc;
 use pare_resizer::{ClockNetwork, Constants, Link, Namer, Netlist, repair_clock_inverters};
 use std::fmt::Write as _;
 use std::path::{Path, PathBuf};

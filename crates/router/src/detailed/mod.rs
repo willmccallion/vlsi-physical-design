@@ -21,7 +21,7 @@ mod trace;
 
 pub use flow::{Flow, FlowState};
 pub use region::{RepairStats, Scope};
-pub use schedule::{RipUp, round_costs, round_strategy};
+pub(crate) use schedule::{RipUp, round_costs, round_strategy};
 pub use trace::Trace;
 
 use crate::access::{AccessPoint, Node, access_points, fellow_boxes, order_toward};

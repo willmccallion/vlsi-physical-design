@@ -23,7 +23,7 @@ use pare_common::geom::orient::Orientation;
 use pare_common::geom::point::Point as DbPoint;
 use pare_common::geom::rect::Rect;
 use pare_common::units::Seconds;
-use pare_resizer::parasitics::WireRc;
+use pare_resizer::WireRc;
 use pare_resizer::steiner::{DEFAULT_ALPHA, prim_dijkstra};
 use pare_resizer::{ClockNetwork, Link};
 use rustc_hash::{FxHashMap, FxHashSet};
