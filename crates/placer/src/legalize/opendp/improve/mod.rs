@@ -47,6 +47,13 @@ pub enum ImprovementError {
     /// The design cannot be laid on `OpenDP`'s grid.
     #[error(transparent)]
     Grid(#[from] DetailedPlacementError),
+    /// No row is one the improver can place in: horizontal, of the
+    /// shortest site, and not of pad sites.
+    #[error("no rows to improve the placement in")]
+    NoRows,
+    /// A row of several sites puts no distance between them.
+    #[error("row {0} has several sites but no step between them")]
+    RowWithoutStep(String),
     /// An I/O pin has no shapes to place it by.
     #[error("I/O pin {0} has no shapes")]
     PinWithoutShapes(String),
@@ -95,8 +102,9 @@ pub struct MaxDisplacement {
 ///
 /// # Errors
 ///
-/// When the design cannot be laid on `OpenDP`'s grid, an I/O pin has no
-/// shapes, or the improver's state comes apart.
+/// When the design cannot be laid on `OpenDP`'s grid, has no row the
+/// improver places in, has a row of sites without a step, an I/O pin has
+/// no shapes, or the improver's state comes apart.
 pub fn improve_placement(
     db: &mut NetlistDB,
     max_displacement: MaxDisplacement,
@@ -219,7 +227,7 @@ impl Improver {
             node.height = node.master_size.y;
         }
         let mut net = Network::new(db, &grid)?;
-        let arch = Arch::new(db, &grid, &mut net);
+        let arch = Arch::new(db, &grid, &mut net)?;
         let node_count = net.node_count();
         let limit = Dbu(arch.width().max(arch.height()).get() << 1);
         let row_height = arch.rows[0].height;

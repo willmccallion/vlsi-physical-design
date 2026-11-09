@@ -2,11 +2,13 @@
 //! `Architecture::postProcess` make them: the core rows of the shortest
 //! site, those at one height merged into one, with fillers over the gaps.
 
-use super::{Network, Placer};
+use super::{ImprovementError, Network, Placer, Result};
 use pare_common::db::design::NetlistDB;
 use pare_common::db::library::{SiteClass, Symmetry};
 use pare_common::geom::dbu::Dbu;
 use pare_common::geom::orient::Orientation;
+use pare_common::geom::point::Point;
+use pare_common::geom::rect::Rect;
 
 /// A row, as `Architecture::Row`; positions are relative to the core.
 #[derive(Clone, Copy, Debug)]
@@ -29,6 +31,13 @@ impl Row {
     pub(super) fn top(&self) -> Dbu {
         self.bottom + self.height
     }
+
+    fn bbox(&self) -> Rect<Dbu> {
+        Rect::new(
+            Point::new(self.left, self.bottom),
+            Point::new(self.right(), self.top()),
+        )
+    }
 }
 
 #[derive(Debug)]
@@ -42,37 +51,21 @@ pub(super) struct Arch {
 }
 
 impl Arch {
-    pub(super) fn new(db: &NetlistDB, grid: &Placer, network: &mut Network) -> Self {
-        let core = grid.core;
-        let min_row_height = db.rows.iter().map(|r| db.library.site(r.site).size.y).min();
-        let mut rows = Vec::new();
-        for r in &db.rows {
-            let site = db.library.site(r.site);
-            if site.class == SiteClass::Pad
-                || r.num_y != 1
-                || min_row_height.is_some_and(|min| site.size.y > min)
-            {
-                continue;
-            }
-            rows.push(Row {
-                left: r.origin.x - core.min.x,
-                bottom: r.origin.y - core.min.y,
-                height: site.size.y,
-                site_spacing: r.step.x,
-                site_width: site.size.x,
-                num_sites: i64::from(r.num_x),
-                orient: r.orient,
-                symmetry: site.symmetry,
-            });
-        }
+    /// The improver's rows, as `Opendp::createArchitecture`.
+    ///
+    /// # Errors
+    ///
+    /// When no row is one the improver places in, or a row of several
+    /// sites has no step between them.
+    pub(super) fn new(db: &NetlistDB, grid: &Placer, network: &mut Network) -> Result<Self> {
         let mut arch = Self {
-            rows,
-            min_x: Dbu(i64::MAX),
-            max_x: Dbu(i64::MIN),
-            min_y: Dbu(i64::MAX),
-            max_y: Dbu(i64::MIN),
+            rows: improver_rows(db, grid)?,
+            min_x: Dbu::ZERO,
+            max_x: Dbu::ZERO,
+            min_y: Dbu::ZERO,
+            max_y: Dbu::ZERO,
         };
-        arch.find_bounds();
+        arch.find_bounds()?;
         for row in &mut arch.rows {
             let end_gap = row.site_width - row.site_spacing;
             row.left = row.left.max(arch.min_x);
@@ -80,29 +73,32 @@ impl Arch {
                 row.num_sites = (arch.max_x - end_gap - row.left).get() / row.site_spacing.get();
             }
         }
-        arch.merge_rows(network);
-        arch
+        arch.merge_rows(network)?;
+        Ok(arch)
     }
 
-    fn find_bounds(&mut self) {
-        for row in &self.rows {
-            self.min_x = self.min_x.min(row.left);
-            self.max_x = self.max_x.max(row.right());
-            self.min_y = self.min_y.min(row.bottom);
-            self.max_y = self.max_y.max(row.top());
-        }
+    /// The box around the rows, as `Opendp::createArchitecture` and
+    /// `Architecture::postProcess` measure it.
+    fn find_bounds(&mut self) -> Result<()> {
+        let bounds = self
+            .rows
+            .iter()
+            .map(Row::bbox)
+            .reduce(|a, b| a.union(&b))
+            .ok_or(ImprovementError::NoRows)?;
+        self.min_x = bounds.min.x;
+        self.max_x = bounds.max.x;
+        self.min_y = bounds.min.y;
+        self.max_y = bounds.max.y;
+        Ok(())
     }
 
     /// Merges the rows at each height into one spanning them all and closes
     /// the gaps between and around them with fillers, as
     /// `Architecture::postProcess`.
-    fn merge_rows(&mut self, network: &mut Network) {
+    fn merge_rows(&mut self, network: &mut Network) -> Result<()> {
         self.rows.sort_by_key(|r| r.bottom);
-        self.min_x = Dbu(i64::MAX);
-        self.max_x = Dbu(i64::MIN);
-        self.min_y = Dbu(i64::MAX);
-        self.max_y = Dbu(i64::MIN);
-        self.find_bounds();
+        self.find_bounds()?;
         let mut merged = Vec::new();
         let mut r = 0;
         while r < self.rows.len() {
@@ -138,6 +134,7 @@ impl Arch {
         }
         self.rows = merged;
         self.rows.sort_by_key(|r| r.bottom);
+        Ok(())
     }
 
     pub(super) fn width(&self) -> Dbu {
@@ -172,6 +169,47 @@ impl Arch {
         }
         r
     }
+}
+
+/// The core's horizontal rows of the shortest site, relative to the core,
+/// as `Opendp::createArchitecture` takes them.
+fn improver_rows(db: &NetlistDB, grid: &Placer) -> Result<Vec<Row>> {
+    let core = grid.core;
+    let min_row_height = db.rows.iter().map(|r| db.library.site(r.site).size.y).min();
+    let mut rows = Vec::new();
+    for r in &db.rows {
+        let site = db.library.site(r.site);
+        if site.class == SiteClass::Pad
+            || r.num_y != 1
+            || min_row_height.is_some_and(|min| site.size.y > min)
+        {
+            continue;
+        }
+        rows.push(Row {
+            left: r.origin.x - core.min.x,
+            bottom: r.origin.y - core.min.y,
+            height: site.size.y,
+            site_spacing: site_spacing(r, site.size.x)?,
+            site_width: site.size.x,
+            num_sites: i64::from(r.num_x),
+            orient: r.orient,
+            symmetry: site.symmetry,
+        });
+    }
+    Ok(rows)
+}
+
+/// The distance between a row's sites; a lone site is as wide as itself.
+// NOTE: Opendp::createArchitecture takes the row's spacing, which a lone
+// site written STEP 0 0 has as zero, leaving a row no wider than a point.
+fn site_spacing(row: &pare_common::db::design::Row, site_width: Dbu) -> Result<Dbu> {
+    if row.num_x == 1 {
+        return Ok(site_width);
+    }
+    if row.step.x <= Dbu::ZERO {
+        return Err(ImprovementError::RowWithoutStep(row.name.clone()));
+    }
+    Ok(row.step.x)
 }
 
 /// Sorted intervals with the overlapping and touching ones merged, as the
@@ -264,6 +302,52 @@ mod tests {
         assert_eq!(
             [100, 140, 150, 200].map(|h| arch.rows_spanned(Dbu(h))),
             [1, 1, 2, 2]
+        );
+    }
+}
+
+#[cfg(test)]
+mod design_tests {
+    use super::super::{Network, Placer};
+    use super::*;
+    use pare_common::db::parser::{def, lef};
+    use std::path::{Path, PathBuf};
+
+    fn fixture(name: &str) -> PathBuf {
+        Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../common/tests/fixtures")
+            .join(name)
+    }
+
+    /// The improver's rows of the tiny design with its top row as `row`.
+    fn arch_with_top_row(row: &str) -> Result<Arch> {
+        let text = std::fs::read_to_string(fixture("tiny.def"))
+            .unwrap()
+            .replace("ROW ROW_2 core 0 4000 N DO 20 BY 1 STEP 200 0 ;", row);
+        let units = def::read_units(&fixture("tiny.def")).unwrap();
+        let library = lef::parse_files(&[fixture("tiny.lef")], units).unwrap();
+        let db = def::parse_str(&text, &fixture("tiny.def"), library).unwrap();
+        let grid = Placer::new(&db).unwrap();
+        let mut network = Network::new(&db, &grid).unwrap();
+        Arch::new(&db, &grid, &mut network)
+    }
+
+    #[test]
+    fn a_one_site_row_without_a_step_spans_its_site() {
+        let arch = arch_with_top_row("ROW ROW_2 core 0 4000 N DO 1 BY 1 STEP 0 0 ;").unwrap();
+
+        let top = arch.rows[arch.rows.len() - 1];
+
+        assert_eq!((top.left, top.right()), (Dbu(0), Dbu(200)));
+    }
+
+    #[test]
+    fn a_row_of_sites_without_a_step_is_an_error() {
+        let arch = arch_with_top_row("ROW ROW_2 core 0 4000 N DO 20 BY 1 STEP 0 0 ;");
+
+        assert_eq!(
+            arch.map(|_| ()),
+            Err(ImprovementError::RowWithoutStep("ROW_2".into()))
         );
     }
 }

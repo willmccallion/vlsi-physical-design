@@ -11,7 +11,9 @@ use pare_common::db::parser::{def, lef};
 use pare_common::geom::dbu::Dbu;
 use pare_common::geom::orient::Orientation;
 use pare_common::geom::point::Point;
-use pare_placer::legalize::opendp::improve::{MaxDisplacement, RowHeights, improve_placement};
+use pare_placer::legalize::opendp::improve::{
+    ImprovementError, MaxDisplacement, RowHeights, improve_placement,
+};
 use pare_placer::legalize::opendp::mirror::optimize_mirroring;
 use pare_placer::legalize::opendp::{DetailedPlacementError, detailed_placement};
 use std::path::{Path, PathBuf};
@@ -32,9 +34,7 @@ const MOVABLE: [&str; 6] = ["u1", "u2", "u4", "u5", "u6", "u7"];
 
 /// The tiny design with its movable cells at `places`.
 fn tiny_with(places: &[(i64, i64)]) -> NetlistDB {
-    let units = def::read_units(&fixture("tiny.def")).unwrap();
-    let library = lef::parse_files(&[fixture("tiny.lef")], units).unwrap();
-    let mut db = def::parse(&fixture("tiny.def"), library).unwrap();
+    let mut db = tiny_edited(|text| text);
     for (name, &(x, y)) in MOVABLE.iter().zip(places) {
         let id = db.cell_id(name).unwrap();
         let c = &mut db.cells[id];
@@ -43,6 +43,14 @@ fn tiny_with(places: &[(i64, i64)]) -> NetlistDB {
         c.status = PlacementStatus::Placed;
     }
     db
+}
+
+/// The tiny design from its DEF as `edit` rewrites it.
+fn tiny_edited(edit: impl Fn(String) -> String) -> NetlistDB {
+    let text = edit(std::fs::read_to_string(fixture("tiny.def")).unwrap());
+    let units = def::read_units(&fixture("tiny.def")).unwrap();
+    let library = lef::parse_files(&[fixture("tiny.lef")], units).unwrap();
+    def::parse_str(&text, &fixture("tiny.def"), library).unwrap()
 }
 
 fn places(db: &NetlistDB) -> Vec<(i64, i64, Orientation)> {
@@ -231,4 +239,16 @@ fn mirroring_turns_the_cells_openroad_turns() {
             Orientation::FN,
         ]
     );
+}
+
+#[test]
+fn improvement_without_a_horizontal_row_is_an_error() {
+    let mut db = tiny_edited(|text| {
+        text.replace("DO 30 BY 1 STEP 200 0", "DO 1 BY 2 STEP 0 2000")
+            .replace("DO 20 BY 1 STEP 200 0", "DO 1 BY 2 STEP 0 2000")
+    });
+
+    let result = improve_placement(&mut db, MAX_DISPLACEMENT);
+
+    assert_eq!(result, Err(ImprovementError::NoRows));
 }
