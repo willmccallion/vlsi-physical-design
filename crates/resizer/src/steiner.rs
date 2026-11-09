@@ -44,11 +44,11 @@ impl SteinerTree {
 
     /// Total wire length.
     #[must_use]
-    pub fn length(&self) -> i64 {
+    pub fn length(&self) -> Dbu {
         self.parent
             .iter()
             .enumerate()
-            .map(|(node, &parent)| self.nodes[node].manhattan(self.nodes[parent]).get())
+            .map(|(node, &parent)| self.nodes[node].manhattan(self.nodes[parent]))
             .sum()
     }
 }
@@ -170,7 +170,7 @@ fn nearest_neighbors(points: &[Point<Dbu>]) -> Vec<Vec<usize>> {
 #[derive(Clone, Copy, Debug, PartialEq)]
 struct SearchEdge {
     weight: f64,
-    path_length: i64,
+    path_length: Dbu,
     parent: Option<usize>,
     node: usize,
 }
@@ -202,7 +202,7 @@ fn build_spanning_tree(graph: &mut Graph, driver: usize, alpha: f64, neighbors: 
     let mut heap = BinaryHeap::new();
     let start = SearchEdge {
         weight: 0.0,
-        path_length: 0,
+        path_length: Dbu(0),
         parent: None,
         node: driver,
     };
@@ -225,11 +225,9 @@ fn build_spanning_tree(graph: &mut Graph, driver: usize, alpha: f64, neighbors: 
             if visited[neighbor] {
                 continue;
             }
-            let edge_length = graph.points[neighbor]
-                .manhattan(graph.points[edge.node])
-                .get();
+            let edge_length = graph.points[neighbor].manhattan(graph.points[edge.node]);
             let candidate = SearchEdge {
-                weight: alpha.mul_add(edge.path_length as f64, edge_length as f64),
+                weight: alpha.mul_add(edge.path_length.to_f64(), edge_length.to_f64()),
                 path_length: edge_length + edge.path_length,
                 parent: Some(edge.node),
                 node: neighbor,
@@ -246,7 +244,7 @@ fn build_spanning_tree(graph: &mut Graph, driver: usize, alpha: f64, neighbors: 
 /// A Steiner point that would shorten two edges at a node.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 struct Candidate {
-    gain: i64,
+    gain: Dbu,
     node: usize,
     other1: usize,
     other2: usize,
@@ -274,7 +272,7 @@ impl PartialOrd for Candidate {
 fn best_steiner_for_node(graph: &Graph, node: usize) -> Candidate {
     let pt = graph.points[node];
     let mut best = Candidate {
-        gain: 0,
+        gain: Dbu(0),
         node,
         other1: node,
         other2: node,
@@ -296,7 +294,7 @@ fn best_steiner_for_node(graph: &Graph, node: usize) -> Candidate {
             } else if p1.y.max(p2.y) < pt.y {
                 steiner.y = p1.y.max(p2.y);
             }
-            let gain = steiner.manhattan(pt).get();
+            let gain = steiner.manhattan(pt);
             if gain > best.gain {
                 best = Candidate {
                     gain,
@@ -331,7 +329,7 @@ fn steinerize(graph: &mut Graph) {
         push(graph, node, &mut heap, &mut version, &mut stamps);
     }
     while let Some(best) = heap.pop() {
-        if best.gain == 0 {
+        if best.gain == Dbu(0) {
             break;
         }
         let current = version[best.node];
@@ -458,7 +456,7 @@ mod tests {
         let tree = prim_dijkstra(&[pt(0, 0), pt(10, 5)], 0, DEFAULT_ALPHA);
         assert_eq!(tree.nodes.len(), 2);
         assert_eq!(tree.parent, vec![0, 0]);
-        assert_eq!(tree.length(), 15);
+        assert_eq!(tree.length(), Dbu(15));
     }
 
     #[test]
@@ -467,7 +465,7 @@ mod tests {
         assert_eq!(tree.terminals, 3);
         assert_eq!(tree.nodes.len(), 4);
         assert_eq!(tree.nodes[3], pt(10, 0));
-        assert_eq!(tree.length(), 30);
+        assert_eq!(tree.length(), Dbu(30));
         assert!(connected_to_root(&tree));
         assert!(is_valid(&tree));
     }
@@ -478,7 +476,7 @@ mod tests {
         let tree = prim_dijkstra(&points, 0, DEFAULT_ALPHA);
         assert!(tree.children().iter().all(|c| c.len() <= 3));
         assert!(connected_to_root(&tree));
-        assert_eq!(tree.length(), 20);
+        assert_eq!(tree.length(), Dbu(20));
     }
 
     #[test]
@@ -495,10 +493,7 @@ mod tests {
         let tree = prim_dijkstra(&points, 0, DEFAULT_ALPHA);
         assert!(connected_to_root(&tree));
         assert!(is_valid(&tree));
-        let star: i64 = points[1..]
-            .iter()
-            .map(|&p| p.manhattan(points[0]).get())
-            .sum();
+        let star: Dbu = points[1..].iter().map(|&p| p.manhattan(points[0])).sum();
         assert!(tree.length() < star);
     }
 }

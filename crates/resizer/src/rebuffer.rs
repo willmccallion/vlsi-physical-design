@@ -81,7 +81,7 @@ struct DriverTiming {
 pub struct Rebuffer {
     sizes: Vec<BufferSize>,
     max_wire_length: Option<Dbu>,
-    wire_length_step: i64,
+    wire_length_step: Dbu,
     driver: Option<Driver>,
     /// Buffers taken out while rebuffering whole designs.
     pub removed: usize,
@@ -122,7 +122,7 @@ impl Rebuffer {
     /// the least of the longest wire repair allows and the wire the smallest
     /// buffer drives within its load's slew and its own load limit on the
     /// layer's RC.
-    fn wire_length_step_on(&self, resizer: &Resizer<'_, Sta>, layer: Option<LayerId>) -> i64 {
+    fn wire_length_step_on(&self, resizer: &Resizer<'_, Sta>, layer: Option<LayerId>) -> Dbu {
         let (res, cap) = resizer.tree_rc().wire(layer);
         let (res, cap) = (res.get(), cap.get());
         if layer.is_none() || cap <= 0.0 || res <= 0.0 {
@@ -539,7 +539,7 @@ impl Rebuffer {
             .liberty
             .cell(driver.cell)
             .drive_resistance(driver.port);
-        let meters = Meters::from_dbu(Dbu(tree.max_load_wire_length()), resizer.db.dbu());
+        let meters = Meters::from_dbu(tree.max_load_wire_length(), resizer.db.dbu());
         let load_slew = (r_drvr + meters * rc.resistance) * tree.cap * ELMORE_SKEW_FACTOR;
         load_slew <= margined(tree.max_load_slew, SLEW_MARGIN)
     }
@@ -608,14 +608,14 @@ impl Rebuffer {
         mut options: Vec<BnetPtr>,
     ) -> Vec<BnetPtr> {
         let mut location = under.at;
-        let full_length = node.at.manhattan(location).get();
+        let full_length = node.at.manhattan(location);
         let step = self.wire_length_step_on(resizer, layer);
         if full_length <= step / 2 {
             let mut near: Vec<BnetPtr> = options
                 .iter()
                 .map(|o| wire(resizer, node.at, layer, Rc::clone(o)))
                 .collect();
-            self.insert_buffer_options(resizer, &mut near, 0, None);
+            self.insert_buffer_options(resizer, &mut near, Dbu(0), None);
             if near.is_empty() {
                 let mut far = options;
                 self.insert_buffer_options(resizer, &mut far, full_length, None);
@@ -623,24 +623,24 @@ impl Rebuffer {
                     .iter()
                     .map(|o| wire(resizer, node.at, layer, Rc::clone(o)))
                     .collect();
-                self.insert_buffer_options(resizer, &mut near, 0, None);
+                self.insert_buffer_options(resizer, &mut near, Dbu(0), None);
             }
             return near;
         }
         self.insert_buffer_options(resizer, &mut options, full_length.min(step), None);
         while location != node.at {
             let last_valid = options.clone();
-            let mut dx = node.at.x.get() - location.x.get();
-            let mut dy = node.at.y.get() - location.y.get();
+            let mut dx = node.at.x - location.x;
+            let mut dy = node.at.y - location.y;
             if dx.abs() + dy.abs() >= step {
-                let ratio = dx.abs() as f64 / (dx.abs() + dy.abs()) as f64;
-                let dx_abs = ((ratio * step as f64) as i64).min(step);
+                let ratio = dx.abs().to_f64() / (dx.abs() + dy.abs()).to_f64();
+                let dx_abs = Dbu((ratio * step.to_f64()) as i64).min(step);
                 let dy_abs = step - dx_abs;
-                dx = if dx > 0 { dx_abs } else { -dx_abs };
-                dy = if dy > 0 { dy_abs } else { -dy_abs };
+                dx = if dx > Dbu(0) { dx_abs } else { -dx_abs };
+                dy = if dy > Dbu(0) { dy_abs } else { -dy_abs };
             }
-            location = Point::new(Dbu(location.x.get() + dx), Dbu(location.y.get() + dy));
-            let remaining = node.at.manhattan(location).get();
+            location = Point::new(location.x + dx, location.y + dy);
+            let remaining = node.at.manhattan(location);
             options = options
                 .iter()
                 .map(|o| wire(resizer, location, layer, Rc::clone(o)))
@@ -786,7 +786,7 @@ impl Rebuffer {
                 junction1.cap + size.output_cap,
             );
             let buffer_slack = junction1.slack - delay;
-            if buffer_slack >= junction_slack && can_drive(resizer, size, &junction1, 0) {
+            if buffer_slack >= junction_slack && can_drive(resizer, size, &junction1, Dbu(0)) {
                 let buffer = Bnet::buffer(node.at, size, Rc::clone(&junction1), delay);
                 return Some(Bnet::junction(node.at, buffer, in3));
             }
@@ -801,7 +801,7 @@ impl Rebuffer {
         &self,
         resizer: &Resizer<'_, Sta>,
         options: &mut Vec<BnetPtr>,
-        next_segment: i64,
+        next_segment: Dbu,
         area: Option<(Fixed, &Bnet)>,
     ) {
         if options.is_empty() {
@@ -866,7 +866,7 @@ impl Rebuffer {
             (Fixed::ZERO, -Fixed::INF)
         };
         let root = with_arrivals(root, -correction);
-        let options = self.area_options(resizer, &root, target, alpha, 0);
+        let options = self.area_options(resizer, &root, target, alpha, Dbu(0));
         let mut best_slack: Option<(Fixed, BnetPtr)> = None;
         let mut best_area: Option<(f64, BnetPtr)> = None;
         for option in options {
@@ -899,7 +899,7 @@ impl Rebuffer {
         node: &BnetPtr,
         slack_target: Fixed,
         alpha: f64,
-        upstream_wire: i64,
+        upstream_wire: Dbu,
     ) -> Vec<BnetPtr> {
         match &node.kind {
             Kind::Load { .. } => vec![Rc::clone(node)],
@@ -925,7 +925,7 @@ impl Rebuffer {
                         .map(|o| wire(resizer, inner.at, *layer, o))
                         .collect()
                 } else {
-                    self.area_options(resizer, &inner, slack_target, alpha, 0)
+                    self.area_options(resizer, &inner, slack_target, alpha, Dbu(0))
                 };
                 let threshold = Fixed::lerp(node.slack, slack_target + node.arrival_delay, alpha);
                 self.insert_buffer_options(
@@ -1150,7 +1150,7 @@ impl Frontier {
         resizer: &Resizer<'_, Sta>,
         strong: &BufferSize,
         option: &BnetPtr,
-        next_segment: i64,
+        next_segment: Dbu,
     ) {
         if self.improves(option.slack, option.area)
             && can_drive(resizer, strong, option, next_segment)
@@ -1172,7 +1172,7 @@ impl Frontier {
         let mut best = None;
         for option in options {
             if !self.improves(option.slack - size.intrinsic_delay, option.area + size.area)
-                || !can_drive(resizer, size, option, 0)
+                || !can_drive(resizer, size, option, Dbu(0))
             {
                 continue;
             }
@@ -1233,7 +1233,7 @@ fn assured_fallback(
             option.slack_edges,
             option.cap + size.output_cap,
         );
-        if can_drive(resizer, &size, option, 0) && option.slack - delay >= threshold {
+        if can_drive(resizer, &size, option, Dbu(0)) && option.slack - delay >= threshold {
             let buffered = Bnet::buffer(option.at, &size, Rc::clone(option), delay);
             if buffered.fits(envelope) {
                 best = Some((option.area, buffered));
@@ -1269,11 +1269,11 @@ fn buffer_delay(
 
 /// Whether `size` can drive `tree` plus `extra_wire` of wire within its
 /// slew and load limits, as `bufferSizeCanDriveLoad`.
-fn can_drive(resizer: &Resizer<'_, Sta>, size: &BufferSize, tree: &Bnet, extra_wire: i64) -> bool {
+fn can_drive(resizer: &Resizer<'_, Sta>, size: &BufferSize, tree: &Bnet, extra_wire: Dbu) -> bool {
     let rc = resizer.graph.wire_rc();
     let dbu = resizer.db.dbu();
-    let extra_cap = Meters::from_dbu(Dbu(extra_wire), dbu) * rc.capacitance + size.output_cap;
-    let wire_meters = Meters::from_dbu(Dbu(tree.max_load_wire_length() + extra_wire), dbu);
+    let extra_cap = Meters::from_dbu(extra_wire, dbu) * rc.capacitance + size.output_cap;
+    let wire_meters = Meters::from_dbu(tree.max_load_wire_length() + extra_wire, dbu);
     let load_slew = (size.drive_resistance + wire_meters * rc.resistance)
         * (tree.cap + extra_cap)
         * ELMORE_SKEW_FACTOR;
@@ -1596,13 +1596,13 @@ fn load_limit_by_driver_slew(resizer: &Resizer<'_, Sta>, buffer: BufferCell) -> 
 
 /// The step of a wire search bound by the least of `limits`, at least one
 /// database unit; with no limit at all, one step spans any wire.
-fn least_length<const N: usize>(limits: [Option<Dbu>; N]) -> i64 {
+fn least_length<const N: usize>(limits: [Option<Dbu>; N]) -> Dbu {
     limits
         .into_iter()
         .flatten()
         .min()
-        .map_or(i64::MAX, Dbu::get)
-        .max(1)
+        .unwrap_or(Dbu(i64::MAX))
+        .max(Dbu(1))
 }
 
 /// The wire a buffer can drive before its load's slew limit is reached, in
