@@ -902,7 +902,7 @@ fn routability_params(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::testing::tiny;
+    use crate::testing::{tiny, tiny_config};
 
     #[test]
     fn cells_moved_or_turned_since_the_record_are_the_moved_ones() {
@@ -922,5 +922,37 @@ mod tests {
         let db = tiny();
 
         assert_eq!(CellPlaces::record(&db).moved(&db), Vec::new());
+    }
+
+    fn share(value: f64) -> Share {
+        Share::new(value).unwrap()
+    }
+
+    #[test]
+    fn layers_without_their_own_adjustment_take_the_routing_adjustment() {
+        let db = tiny();
+        let config = tiny_config(
+            "[global_placement]\n\
+             routing_layer_adjustment = 0.5\n\
+             layer_adjustments = [{ layer = \"M2\", adjustment = 0.25 }]",
+        );
+
+        let adjustments = layer_adjustments(&config, &db).unwrap();
+
+        assert_eq!(
+            adjustments,
+            IdVec::from(vec![share(0.5), share(0.25), share(0.5)])
+        );
+    }
+
+    #[test]
+    fn an_adjustment_of_an_unknown_layer_names_the_layer() {
+        let config = tiny_config(
+            "[global_placement]\nlayer_adjustments = [{ layer = \"M9\", adjustment = 0.25 }]",
+        );
+
+        let error = layer_adjustments(&config, &tiny()).unwrap_err();
+
+        assert_eq!(error.to_string(), "no routing layer named M9");
     }
 }
