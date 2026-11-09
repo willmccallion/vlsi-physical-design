@@ -1035,4 +1035,95 @@ mod tests {
 
         assert_eq!(least_wire_delay_rate(&segments, STEP), None);
     }
+
+    #[test]
+    fn a_value_normalizes_up_to_whole_steps_and_at_least_one() {
+        let mut bounds = Bounds::new();
+
+        let normalized = [2.5, 0.0, 4.0].map(|v| bounds.normalize(v, 1.0));
+
+        assert_eq!(normalized, [3, 1, 4]);
+        assert_eq!((bounds.min, bounds.max), (1, 4));
+    }
+
+    #[test]
+    fn axis_values_within_a_percent_of_the_last_kept_are_dropped() {
+        let mut values = vec![1.016, 1.0, 1.008, 1.0];
+
+        sort_and_uniquify(&mut values);
+
+        assert_eq!(values, [1.0, 1.016]);
+    }
+
+    #[test]
+    fn too_many_axis_values_lose_the_one_closest_to_its_predecessor() {
+        let mut values = vec![0.0, 1.0, 1.5, 4.0];
+
+        reduce_or_expand(&mut values, 3);
+
+        assert_eq!(values, [0.0, 1.0, 4.0]);
+    }
+
+    #[test]
+    fn too_few_axis_values_split_the_first_widest_gap() {
+        let mut values = vec![0.0, 1.0, 4.0];
+
+        reduce_or_expand(&mut values, 5);
+
+        assert_eq!(values, [0.0, 1.0, 1.75, 2.5, 4.0]);
+    }
+
+    #[test]
+    fn a_single_axis_value_has_no_gap_to_split() {
+        let mut values = vec![2.0];
+
+        reduce_or_expand(&mut values, 3);
+
+        assert_eq!(values, [2.0]);
+    }
+
+    #[test]
+    fn patterns_place_a_buffer_or_none_at_each_node() {
+        let descriptors: Vec<Vec<Piece>> =
+            patterns(20, 10).into_iter().map(|p| p.descriptor).collect();
+
+        assert_eq!(
+            descriptors,
+            [
+                vec![Piece::Wire(20.0)],
+                vec![Piece::Wire(10.0), Piece::Buffer(0), Piece::Wire(10.0)],
+                vec![Piece::Wire(20.0), Piece::Buffer(0)],
+                vec![
+                    Piece::Wire(10.0),
+                    Piece::Buffer(0),
+                    Piece::Wire(10.0),
+                    Piece::Buffer(0)
+                ],
+            ]
+        );
+    }
+
+    #[test]
+    fn a_pattern_ending_in_a_buffer_has_an_empty_last_net() {
+        let ending_in_buffer = &patterns(20, 10)[2];
+
+        assert_eq!(ending_in_buffer.nets, [2, 0]);
+        assert!(!ending_in_buffer.is_pure_wire());
+    }
+
+    #[test]
+    fn buffer_configurations_never_shrink_along_the_chain() {
+        assert_eq!(
+            buffer_configs(2, 2, 0),
+            [vec![0, 0], vec![0, 1], vec![1, 1]]
+        );
+    }
+
+    #[test]
+    fn buffer_configurations_start_at_the_characterization_buffer_and_wrap() {
+        assert_eq!(
+            buffer_configs(2, 2, 1),
+            [vec![1, 1], vec![0, 0], vec![0, 1]]
+        );
+    }
 }
