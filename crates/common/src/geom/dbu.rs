@@ -91,6 +91,7 @@ impl Mul for Dbu {
     }
 }
 
+/// Truncates toward zero, as C++ `/` does.
 impl Div<i64> for Dbu {
     type Output = Self;
     fn div(self, rhs: i64) -> Self {
@@ -98,10 +99,12 @@ impl Div<i64> for Dbu {
     }
 }
 
+/// The remainder of [`Div`]'s truncating division, as C++ `%`, so that
+/// `a / b * b + a % b == a`.
 impl Rem<i64> for Dbu {
     type Output = Self;
     fn rem(self, rhs: i64) -> Self {
-        Self(self.0.rem_euclid(rhs))
+        Self(self.0 % rhs)
     }
 }
 
@@ -260,6 +263,14 @@ mod tests {
     #[test]
     fn zero_resolution_is_rejected() {
         assert!(DbuPerMicron::new(0).is_none());
+    }
+
+    #[test]
+    fn remainder_pairs_with_truncating_division() {
+        let (quotient, remainder) = (Dbu(-3) / 2, Dbu(-3) % 2);
+
+        assert_eq!((quotient, remainder), (Dbu(-1), Dbu(-1)));
+        assert_eq!(quotient * 2 + remainder, Dbu(-3));
     }
 
     #[test]
