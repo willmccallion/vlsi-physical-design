@@ -13,7 +13,7 @@ use crate::db::liberty::{
     SequentialKind, Statetable, Table, TimingArc, TimingArcSet, TimingSense,
 };
 use crate::db::parser::lexer::{ParseError, read_file};
-use crate::units::{Farads, Seconds, Watts};
+use crate::units::{CellArea, Farads, Seconds, Watts};
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
@@ -641,7 +641,7 @@ impl Interpreter {
         }
         let mut cell = LibCell {
             name,
-            area: self.number_attr(group, "area")?.unwrap_or(0.0),
+            area: CellArea::new(self.number_attr(group, "area")?.unwrap_or(0.0)),
             dont_use: Self::bool_attr(group, "dont_use"),
             dont_touch: Self::bool_attr(group, "dont_touch"),
             is_clock_gate: group.attr("clock_gating_integrated_cell").is_some(),

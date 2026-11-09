@@ -84,7 +84,7 @@ fn best_max_cap_buffer(
     let mut best_cap = 0.0_f32;
     for &buffer in buffers {
         let cell = liberty.cell(buffer.id);
-        let area = cell.area as f32;
+        let area = cell.area.get() as f32;
         let limit = cell.ports[buffer.output]
             .max_capacitance
             .map(|c| c.get() as f32);

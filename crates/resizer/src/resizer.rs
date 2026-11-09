@@ -23,7 +23,7 @@ use pare_common::db::sdc::Sdc;
 use pare_common::geom::dbu::{Dbu, DbuPerMicron};
 use pare_common::geom::orient::Orientation;
 use pare_common::geom::point::Point;
-use pare_common::units::{Farads, MICRONS_PER_METER, Meters, Ohms, Seconds};
+use pare_common::units::{CellArea, Farads, MICRONS_PER_METER, Meters, Ohms, Seconds};
 use rustc_hash::{FxHashMap, FxHashSet};
 use std::collections::{HashMap, HashSet};
 
@@ -705,9 +705,9 @@ impl<'a, T: Timing> Resizer<'a, T> {
         self.as_buffer(self.find_target_cell(buffer.id, load_cap, false))
     }
 
-    /// The design's area in the library's units, over cells of the core.
+    /// The design's area, over cells of the core.
     #[must_use]
-    pub fn design_area(&self) -> f64 {
+    pub fn design_area(&self) -> CellArea {
         self.db
             .cells
             .iter()
@@ -1322,9 +1322,9 @@ fn slew_rc_factor(link: &Link<'_>) -> Result<f64, RepairError> {
 /// How much `after` grew over `before`, as a percentage; zero when there
 /// was no area before.
 #[must_use]
-pub fn area_change_percent(before: f64, after: f64) -> f64 {
-    if before > 0.0 {
-        (after - before) / before * 100.0
+pub fn area_change_percent(before: CellArea, after: CellArea) -> f64 {
+    if before > CellArea::ZERO {
+        (after - before).get() / before.get() * 100.0
     } else {
         0.0
     }

@@ -8,7 +8,7 @@
 
 use crate::db::indices::IdVec;
 use crate::db::library::DuplicateName;
-use crate::units::{Farads, Ohms, Seconds, Watts};
+use crate::units::{CellArea, Farads, Ohms, Seconds, Watts};
 use std::collections::HashMap;
 use std::fmt;
 
@@ -843,8 +843,8 @@ pub struct Statetable {
 pub struct LibCell {
     /// Cell name.
     pub name: String,
-    /// Area in the library's units.
-    pub area: f64,
+    /// Its area.
+    pub area: CellArea,
     /// Whether the library asks tools not to use the cell.
     pub dont_use: bool,
     /// Whether the library asks tools not to change instances of it.
@@ -1689,7 +1689,7 @@ mod tests {
     fn cell(name: &str, ports: Vec<LibPort>) -> LibCell {
         LibCell {
             name: name.into(),
-            area: 1.0,
+            area: CellArea::new(1.0),
             dont_use: false,
             dont_touch: false,
             is_clock_gate: false,
@@ -1747,7 +1747,7 @@ mod tests {
         );
         let mut x2 = x1.clone();
         x2.name = "BUF_X2".into();
-        x2.area = 2.0;
+        x2.area = CellArea::new(2.0);
         let mut clkbuf = x1.clone();
         clkbuf.name = "CLKBUF_X1".into();
         let inv = cell(

@@ -16,7 +16,7 @@ use pare_common::db::indices::{LayerId, PinId};
 use pare_common::db::liberty::{BufferCell, Edge};
 use pare_common::geom::dbu::{Dbu, DbuPerMicron};
 use pare_common::geom::point::Point;
-use pare_common::units::{Farads, FaradsPerMeter, Meters, Ohms, OhmsPerMeter, Seconds};
+use pare_common::units::{CellArea, Farads, FaradsPerMeter, Meters, Ohms, OhmsPerMeter, Seconds};
 use rustc_hash::FxHashMap;
 use std::collections::HashSet;
 use std::rc::Rc;
@@ -176,7 +176,7 @@ pub struct Bnet {
     /// The tightest slew limit among the subtree's loads.
     pub max_load_slew: Seconds,
     /// The area of the buffers in the subtree.
-    pub area: f64,
+    pub area: CellArea,
     /// The slack at the node's point for the subtree's loads.
     pub slack: Fixed,
     /// Which edges the slack covers.
@@ -197,7 +197,7 @@ impl Bnet {
             cap: load.cap,
             fanout: load.fanout,
             max_load_slew: load.max_slew,
-            area: 0.0,
+            area: CellArea::ZERO,
             slack: Fixed::ZERO,
             slack_edges: None,
             delay: Fixed::ZERO,
@@ -464,8 +464,8 @@ pub(crate) struct BufferSize {
     pub input_max_slew: Seconds,
     /// Its output's capacitance.
     pub output_cap: Farads,
-    /// Its area in the library's units.
-    pub area: f64,
+    /// Its area.
+    pub area: CellArea,
     /// Its delay with no load and no input slew.
     pub intrinsic_delay: Fixed,
     /// The largest load it may drive within its limits.
