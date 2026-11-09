@@ -560,9 +560,10 @@ impl DetailedRouter<'_> {
         verdict
     }
 
-    /// Commits every net's wiring with `changes` made to it.
+    /// Commits every net's wiring with `changes` made to it, in net order.
     pub(super) fn commit_changes(&mut self, changes: Changes) {
-        let changes: Vec<(NetId, Change)> = changes.by_net.into_iter().collect();
+        let mut changes: Vec<(NetId, Change)> = changes.by_net.into_iter().collect();
+        changes.sort_unstable_by_key(|&(net, _)| net);
         let routes: Vec<(NetId, NetRoute)> = changes
             .into_par_iter()
             .map(|(net, change)| {
