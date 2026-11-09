@@ -4,6 +4,8 @@
 use crate::checks::report_placement;
 use crate::cts::clock_tree_synthesis;
 use crate::phase::{Phase, PhaseTimer};
+use crate::plan::FlowPlan;
+use crate::prepare_output_dir;
 use crate::repair::{NetlistRepair, TimedRepair, repair_design, repair_netlist, repair_timing};
 use crate::report::{GlobalPlacementSummary, PlacementSummary, Report};
 use crate::{ui, visualization};
@@ -64,25 +66,41 @@ pub(crate) enum PlacementStart {
     Given,
 }
 
-/// Global placement, I/O pin placement, legalization, checking and output.
-pub(crate) fn run_placement(
+/// Global placement, I/O pin placement, legalization, checking and output,
+/// as `plan` resolves the config; returns the netlist repair, when the run
+/// repaired the netlist, for the repair after global routing.
+pub(crate) fn run_placement<'p>(
     config: &Config,
+    plan: &'p FlowPlan,
     db: &mut NetlistDB,
-    output_dir: &Path,
     start: PlacementStart,
     report: &mut Report,
-) -> anyhow::Result<Option<NetlistRepair>> {
+) -> anyhow::Result<Option<NetlistRepair<'p>>> {
+    let output_dir = prepare_output_dir(config)?;
     if let Some(layers) = io_layers_to_place(config, db, start)? {
         ui::section("Pin Placement");
         place_io_pins_by_cells(config, db, &Zones::new(db)?, layers, report)?;
     }
-    let mut repair = if start == PlacementStart::Scratch {
-        repair_netlist(config, db, report)?
-    } else {
-        None
+    let mut repair = match (start, &plan.repair) {
+        (PlacementStart::Scratch, Some(repair_plan)) => {
+            Some(repair_netlist(config, repair_plan, db, report)?)
+        }
+        _ => None,
     };
     ui::section("Placement");
-    let global = starting_placement(config, db, start, repair.as_mut(), report)?;
+    let global = match start {
+        PlacementStart::Given => {
+            keep_given_placement(db)?;
+            None
+        }
+        PlacementStart::Scratch => {
+            let full = Pass::Full {
+                adjustments: &plan.layer_adjustments,
+                repair: repair.as_mut(),
+            };
+            Some(place_from_scratch(config, db, full, report)?)
+        }
+    };
     if let Some(repair) = &mut repair {
         repair_design(config, db, repair, report)?;
     }
@@ -103,7 +121,7 @@ pub(crate) fn run_placement(
     if !report_placement(db, report) {
         anyhow::bail!("placement is not legal");
     }
-    write_placement(config, db, output_dir, &global_png, report)?;
+    write_placement(config, db, &output_dir, &global_png, report)?;
     Ok(repair)
 }
 
@@ -135,33 +153,33 @@ fn io_layers_to_place(
     Ok(None)
 }
 
-/// Places the design to legalize: keeps the given placement, which must
-/// place every cell, or places it globally from scratch, returning what
-/// global placement did.
-fn starting_placement(
+/// Starts from the given placement, which must place every cell.
+fn keep_given_placement(db: &NetlistDB) -> anyhow::Result<()> {
+    let unplaced = db
+        .cells
+        .iter()
+        .filter(|c| c.status == PlacementStatus::Unplaced)
+        .count();
+    if unplaced > 0 {
+        anyhow::bail!("{unplaced} cells of the given placement are unplaced");
+    }
+    ui::check("Starting from the given placement");
+    Ok(())
+}
+
+/// Places the design globally from scratch with every connection, as
+/// `full` steers it, returning what global placement did.
+fn place_from_scratch(
     config: &Config,
     db: &mut NetlistDB,
-    start: PlacementStart,
-    repair: Option<&mut NetlistRepair>,
+    full: Pass<'_, '_>,
     report: &mut Report,
-) -> anyhow::Result<Option<GlobalPlacementSummary>> {
-    if start == PlacementStart::Given {
-        let unplaced = db
-            .cells
-            .iter()
-            .filter(|c| c.status == PlacementStatus::Unplaced)
-            .count();
-        if unplaced > 0 {
-            anyhow::bail!("{unplaced} cells of the given placement are unplaced");
-        }
-        ui::check("Starting from the given placement");
-        return Ok(None);
-    }
+) -> anyhow::Result<GlobalPlacementSummary> {
     let timer = PhaseTimer::start(Phase::GlobalPlacement);
     let model = PlacementModel::from_db(db, &Zones::new(db)?);
-    let summary = global_placement(config, db, model, Pass::Full, repair)?;
+    let summary = global_placement(config, db, model, full)?;
     timer.finish(report);
-    Ok(Some(summary))
+    Ok(summary)
 }
 
 /// How the placement was legalized, and the pin access checked on it.
@@ -265,10 +283,10 @@ fn detailed_placement(
 fn clock_trees_and_timing(
     config: &Config,
     db: &mut NetlistDB,
-    repair: &mut NetlistRepair,
+    repair: &mut NetlistRepair<'_>,
     report: &mut Report,
 ) -> anyhow::Result<()> {
-    if clock_tree_synthesis(config, db, repair, report)? {
+    if clock_tree_synthesis(db, repair, report)? {
         legalize_again(db, report, Phase::LegalizationAfterClockTrees)?;
     }
     if repair_timing(config, db, repair, report)? {
@@ -356,7 +374,7 @@ fn place_io_pins_by_cells(
 ) -> anyhow::Result<()> {
     let timer = PhaseTimer::start(Phase::GlobalPlacementWithoutIo);
     let model = PlacementModel::from_db_without_movable_io(db, zones);
-    let _ = global_placement(config, db, model, Pass::SkipIo, None)?;
+    let _ = global_placement(config, db, model, Pass::SkipIo)?;
     timer.finish(report);
 
     let timer = PhaseTimer::start(Phase::IoPinPlacement);
@@ -371,53 +389,75 @@ fn place_io_pins_by_cells(
     Ok(())
 }
 
-/// Whether a global placement pass sees every connection.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum Pass {
+/// Which global placement pass runs, and what may steer it.
+enum Pass<'a, 'p> {
     /// Before the I/O pins are placed: like `OpenROAD`'s skip-I/O mode,
-    /// without routability.
+    /// neither routability- nor timing-driven.
     SkipIo,
     /// With every connection in place.
-    Full,
+    Full {
+        /// The share of each layer's capacity routability-driven placement
+        /// counts as taken.
+        adjustments: &'a IdVec<LayerId, Share>,
+        /// The netlist repair timing-driven placement makes, when there is
+        /// one.
+        repair: Option<&'a mut NetlistRepair<'p>>,
+    },
+}
+
+impl Pass<'_, '_> {
+    /// Rounds of initial placement before the Nesterov iterations.
+    const fn initial_rounds(&self) -> usize {
+        match self {
+            Self::SkipIo => 0,
+            Self::Full { .. } => global::INITIAL_PLACE_ROUNDS,
+        }
+    }
 }
 
 /// Runs global placement on `model`, writes it into `db` and shows it,
 /// returning what it did; `db` supplies the routing resources for
-/// routability-driven placement and, with `repair` and an SDC file, is
-/// repaired along the way for timing-driven placement.
+/// routability-driven placement and, with a repair that has constraints,
+/// is repaired along the way for timing-driven placement.
 fn global_placement(
     config: &Config,
     db: &mut NetlistDB,
     mut model: PlacementModel,
-    pass: Pass,
-    repair: Option<&mut NetlistRepair>,
+    pass: Pass<'_, '_>,
 ) -> anyhow::Result<GlobalPlacementSummary> {
     let gp = &config.global_placement;
-    let timing = repair
-        .filter(|_| pass == Pass::Full && gp.timing_driven)
-        .and_then(NetlistRepair::timed);
-    if timing.is_some() {
-        check_congestion_follows_timing(gp)?;
-    }
     let density = Density::of(&model, gp)?;
-    let (routability, estimator) = if gp.routability_driven && pass == Pass::Full {
-        let (params, estimator) = routability_setup(config, db)?;
-        (Some(params), estimator)
-    } else {
-        (None, None)
+    let initial_rounds = pass.initial_rounds();
+    let (adjustments, repair) = match pass {
+        Pass::SkipIo => (None, None),
+        Pass::Full {
+            adjustments,
+            repair,
+        } => (Some(adjustments), repair),
+    };
+    let timing = repair
+        .filter(|_| gp.timing_driven)
+        .and_then(NetlistRepair::timed);
+    let (routability, estimator) = match adjustments.filter(|_| gp.routability_driven) {
+        Some(adjustments) => {
+            let (params, estimator) = routability_setup(config, db, adjustments)?;
+            (Some(params), estimator)
+        }
+        None => (None, None),
     };
     let params = GlobalParams {
+        initial_rounds,
         routability,
         timing: timing.as_ref().map(|_| timing_params(gp)),
-        ..global_params(gp, &density, pass)
+        ..global_params(gp, &density)
     };
     let steering = match timing {
         Some(repair) => {
             drop(estimator);
             Steering::Timing(TimingPlacement {
-                config,
                 db,
                 repair,
+                net_weight_max: gp.timing_net_weight_max,
                 rounds: 0,
             })
         }
@@ -448,17 +488,14 @@ enum Steering<'a> {
     Congestion(Option<Box<GlobalRouteCongestion<'a>>>),
 }
 
-/// The global placer's parameters for `pass` of the configured placement,
-/// neither routability- nor timing-driven.
-const fn global_params(gp: &GlobalPlacementConfig, density: &Density, pass: Pass) -> GlobalParams {
+/// The global placer's parameters for the configured placement, without
+/// initial rounds and neither routability- nor timing-driven.
+const fn global_params(gp: &GlobalPlacementConfig, density: &Density) -> GlobalParams {
     GlobalParams {
         target_density: density.target,
         target_overflow: gp.target_overflow,
         max_iterations: gp.placer_max_iterations,
-        initial_rounds: match pass {
-            Pass::SkipIo => 0,
-            Pass::Full => global::INITIAL_PLACE_ROUNDS,
-        },
+        initial_rounds: 0,
         bins: density.bins,
         seed: gp.seed,
         routability: None,
@@ -494,19 +531,6 @@ fn place_globally(
             )?)
         }
     }
-}
-
-/// Fails when timing-driven placement would run beside the global-router
-/// congestion estimate, which cannot follow the netlist's changes.
-fn check_congestion_follows_timing(gp: &GlobalPlacementConfig) -> anyhow::Result<()> {
-    if gp.routability_driven && gp.congestion_estimate == CongestionEstimate::GlobalRouter {
-        anyhow::bail!(
-            "timing-driven placement changes the netlist as it goes, which the global-router \
-             congestion estimate cannot follow: set congestion_estimate = \"rudy\" or \
-             timing_driven = false"
-        );
-    }
-    Ok(())
 }
 
 /// The overflows timing-driven placement repairs the design at.
@@ -629,9 +653,10 @@ fn show_global_result(db: &NetlistDB, result: &GlobalResult) -> anyhow::Result<(
 /// with the buffers' wire length limit, every net rebuffered for timing,
 /// and the worst tenth of the nets weighted by their slack.
 struct TimingPlacement<'a> {
-    config: &'a Config,
     db: &'a mut NetlistDB,
     repair: TimedRepair<'a>,
+    /// The weight the net of worst slack gets.
+    net_weight_max: f64,
     rounds: usize,
 }
 
@@ -661,9 +686,9 @@ impl TimingPlacement<'_> {
     /// of `OpenROAD`'s timing-driven placement does, and weights the nets by
     /// their slack; returns the round and how the design was renumbered.
     fn repair_round(&mut self) -> anyhow::Result<(TimingRound, Renumbering)> {
-        let stage = self.repair.stage(self.config, self.db)?;
+        let stage = self.repair.stage(self.db)?;
         let cells_before = self.db.cells.len();
-        let inputs = stage.session(self.db, self.repair.wires, self.repair.namer);
+        let inputs = stage.session(self.db, self.repair.plan.wires, self.repair.namer);
         let mut resizer = Resizer::timed(inputs, self.repair.sdc)?;
         let area_before = resizer.design_area();
         let wns_before = resizer.sta().worst_slack(MinMax::Max).0.time();
@@ -672,8 +697,7 @@ impl TimingPlacement<'_> {
         let mut rebuffer = Rebuffer::new(&resizer)?;
         rebuffer.fully_rebuffer(&mut resizer)?;
         let slacks = resizer.driver_net_slacks();
-        let weights =
-            timing_net_weights(&slacks, self.config.global_placement.timing_net_weight_max);
+        let weights = timing_net_weights(&slacks, self.net_weight_max);
         log::debug!(
             "timing weights: worst net slack {:.4} ns, largest weight {:.4}",
             slacks.first().map_or(f64::INFINITY, |s| s.1.time().nanos()),
@@ -798,39 +822,25 @@ impl CellPlaces {
     }
 }
 
-/// The routability settings of `config`, and the global-router estimator
-/// when congestion is to be measured that way.
+/// The routability settings of `config` with the layers' capacity held
+/// back by `adjustment`, and the global-router estimator when congestion is
+/// to be measured that way.
 fn routability_setup<'a>(
     config: &Config,
     db: &'a NetlistDB,
+    adjustment: &IdVec<LayerId, Share>,
 ) -> anyhow::Result<(RoutabilityParams, Option<GlobalRouteCongestion<'a>>)> {
-    let adjustment = layer_adjustments(config, db)?;
     match config.global_placement.congestion_estimate {
         CongestionEstimate::GlobalRouter => {
             let estimator = GlobalRouteCongestion::new(db, config)?;
-            let reduction = estimator.capacity_reduction(&adjustment);
+            let reduction = estimator.capacity_reduction(adjustment);
             Ok((routability_params(config, db, reduction), Some(estimator)))
         }
         CongestionEstimate::Rudy => {
-            let reduction = pare_router::capacity_reduction(db, &config.routing, &adjustment)?;
+            let reduction = pare_router::capacity_reduction(db, &config.routing, adjustment)?;
             Ok((routability_params(config, db, reduction), None))
         }
     }
-}
-
-/// The share of each routing layer's capacity held back, by layer index.
-fn layer_adjustments(config: &Config, db: &NetlistDB) -> anyhow::Result<IdVec<LayerId, Share>> {
-    let gp = &config.global_placement;
-    let layers = &db.library.routing_layers;
-    let mut adjustments = IdVec::filled(gp.routing_layer_adjustment, layers.len());
-    for entry in &gp.layer_adjustments {
-        let layer = db
-            .library
-            .routing_layer_id(&entry.layer)
-            .with_context(|| format!("no routing layer named {}", entry.layer))?;
-        adjustments[layer] = entry.adjustment;
-    }
-    Ok(adjustments)
 }
 
 /// Routing congestion from `pare_router`'s global router, measured where
@@ -944,40 +954,8 @@ mod tests {
         assert_eq!(CellPlaces::record(&db).moved(&db), Vec::new());
     }
 
-    fn share(value: f64) -> Share {
-        Share::new(value).unwrap()
-    }
-
     fn model(db: &NetlistDB) -> PlacementModel {
         PlacementModel::from_db(db, &Zones::new(db).unwrap())
-    }
-
-    #[test]
-    fn layers_without_their_own_adjustment_take_the_routing_adjustment() {
-        let db = tiny();
-        let config = tiny_config(
-            "[global_placement]\n\
-             routing_layer_adjustment = 0.5\n\
-             layer_adjustments = [{ layer = \"M2\", adjustment = 0.25 }]",
-        );
-
-        let adjustments = layer_adjustments(&config, &db).unwrap();
-
-        assert_eq!(
-            adjustments,
-            IdVec::from(vec![share(0.5), share(0.25), share(0.5)])
-        );
-    }
-
-    #[test]
-    fn an_adjustment_of_an_unknown_layer_names_the_layer() {
-        let config = tiny_config(
-            "[global_placement]\nlayer_adjustments = [{ layer = \"M9\", adjustment = 0.25 }]",
-        );
-
-        let error = layer_adjustments(&config, &tiny()).unwrap_err();
-
-        assert_eq!(error.to_string(), "no routing layer named M9");
     }
 
     #[test]

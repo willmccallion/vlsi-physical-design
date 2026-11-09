@@ -8,6 +8,7 @@ mod cts;
 mod logger;
 mod phase;
 mod placement;
+mod plan;
 mod repair;
 mod report;
 mod routing;
@@ -19,6 +20,7 @@ mod visualization;
 
 use crate::checks::{report_placement, report_routing};
 use crate::placement::{PlacementStart, run_placement};
+use crate::plan::FlowPlan;
 use crate::routing::{
     StateFiles, global_route_with_repair, parse_save_point, route_detailed, route_global,
 };
@@ -266,18 +268,13 @@ fn place(name: &Path, from: Option<&Path>, report: &mut Report) -> anyhow::Resul
     }
     let mut db = load_design(&config, from)?;
     report.design.clone_from(&db.name);
+    let plan = FlowPlan::resolve(&config, &db)?;
     let start = if from.is_some() {
         PlacementStart::Given
     } else {
         PlacementStart::Scratch
     };
-    let _ = run_placement(
-        &config,
-        &mut db,
-        &prepare_output_dir(&config)?,
-        start,
-        report,
-    )?;
+    let _ = run_placement(&config, &plan, &mut db, start, report)?;
     Ok(())
 }
 
@@ -353,18 +350,11 @@ fn place_and_route(name: &Path, report: &mut Report) -> anyhow::Result<()> {
     let config = load_config(name, report)?;
     let mut db = load_design(&config, None)?;
     report.design.clone_from(&db.name);
-    let output_dir = prepare_output_dir(&config)?;
-    let repair = if config.purpose == Purpose::Routing {
-        None
-    } else {
-        run_placement(
-            &config,
-            &mut db,
-            &output_dir,
-            PlacementStart::Scratch,
-            report,
-        )?
-    };
+    if config.purpose == Purpose::Routing {
+        return route_detailed(&config, &mut db, &StateFiles::default(), None, report);
+    }
+    let plan = FlowPlan::resolve(&config, &db)?;
+    let repair = run_placement(&config, &plan, &mut db, PlacementStart::Scratch, report)?;
     if config.purpose == Purpose::Placement {
         return Ok(());
     }

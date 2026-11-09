@@ -378,6 +378,29 @@ fn placing_a_timed_design_repairs_it_and_builds_its_clock_tree() {
 }
 
 #[test]
+fn a_timed_design_without_a_clock_wire_fails_before_placing() {
+    let dir = work_dir("timed-no-clock-wire");
+    let config = write_timed_config(&dir, "");
+    let text = std::fs::read_to_string(&config).unwrap();
+    let without: Vec<&str> = text
+        .lines()
+        .filter(|line| !line.starts_with("clock_wire"))
+        .collect();
+    std::fs::write(&config, without.join("\n")).unwrap();
+    let report = dir.join("report.json");
+
+    let output = pare(&[Path::new("place"), &config, Path::new("--report"), &report]);
+
+    assert!(!output.status.success());
+    assert!(
+        printed(&output).contains("Error: [netlist] clock trees need clock_wire"),
+        "{}",
+        printed(&output)
+    );
+    assert_eq!(phase_names(&read_report(&report)), Vec::<String>::new());
+}
+
+#[test]
 fn running_a_timed_design_repairs_it_on_its_global_routes() {
     let dir = work_dir("timed-run");
     let config = write_timed_config(&dir, "");
