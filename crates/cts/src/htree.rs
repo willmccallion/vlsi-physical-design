@@ -1580,40 +1580,118 @@ mod tests {
         Rect::new(Point::new(Dbu(x0), Dbu(y0)), Point::new(Dbu(x1), Dbu(y1)))
     }
 
-    #[test]
-    fn a_dummy_in_a_blockage_moves_along_the_blockages_full_box() {
-        let settings = Settings::new(CtsOptions::default());
-        let buffer = BufferCell {
+    fn buffer() -> BufferCell {
+        BufferCell {
             id: LibCellId::new(0),
             input: LibPortId::new(0),
             output: LibPortId::new(1),
-        };
-        let buffer_sizes = FxHashMap::default();
-        // The dummy lands inside the first blockage; the first point at the
-        // level's length from the parent along it is its lower left corner,
-        // which the second blockage covers.
-        let blockages = [rect(60, 40, 80, 60), rect(55, 35, 65, 45)];
-        let ctx = TreeContext {
-            settings: &settings,
-            core: rect(0, 0, 100, 100),
-            dbu: 1000,
-            root_buffer: buffer,
-            sink_buffer: buffer,
-            buffer_sizes: &buffer_sizes,
-            blockages: &blockages,
-        };
+        }
+    }
+
+    /// What a tree context borrows: blockages and buffer sizes in a core
+    /// 100 database units a side.
+    struct Scene {
+        settings: Settings,
+        buffer_sizes: FxHashMap<BufferCell, Point<Dbu>>,
+        blockages: Vec<Rect<Dbu>>,
+    }
+
+    impl Scene {
+        fn new(blockages: Vec<Rect<Dbu>>) -> Self {
+            Self {
+                settings: Settings::new(CtsOptions::default()),
+                buffer_sizes: FxHashMap::default(),
+                blockages,
+            }
+        }
+
+        fn with_buffer_size(mut self, width: i64, height: i64) -> Self {
+            let _ = self
+                .buffer_sizes
+                .insert(buffer(), Point::new(Dbu(width), Dbu(height)));
+            self
+        }
+
+        fn ctx(&self) -> TreeContext<'_> {
+            TreeContext {
+                settings: &self.settings,
+                core: rect(0, 0, 100, 100),
+                dbu: 1000,
+                root_buffer: buffer(),
+                sink_buffer: buffer(),
+                buffer_sizes: &self.buffer_sizes,
+                blockages: &self.blockages,
+            }
+        }
+    }
+
+    /// A builder whose tree unit is one database unit, its sinks spread
+    /// over the whole core.
+    fn builder() -> Builder {
         let mut builder = Builder::new(Clock::new(NetId::new(0), "clk", "clk"), None);
         builder.wire_segment_unit = 1;
         builder.sink_region = Region::new(0.0, 0.0, 100.0, 100.0);
+        builder
+    }
+
+    #[test]
+    fn a_dummy_in_a_blockage_moves_along_the_blockages_full_box() {
+        // The dummy lands inside the first blockage; the first point at the
+        // level's length from the parent along it is its lower left corner,
+        // which the second blockage covers.
+        let scene = Scene::new(vec![rect(60, 40, 80, 60), rect(55, 35, 65, 45)]);
+        let mut builder = builder();
         let mut level = LevelTopology::new(20.0);
         let dummy = level.add_point(TreePoint::new(0.0, 0.0), None);
         let branch = level.add_point(TreePoint::new(30.0, 50.0), None);
         level.sinks[branch].push(TreePoint::new(30.0, 40.0));
         builder.topologies.push(level);
 
-        builder.legalize_dummies(&ctx);
+        builder.legalize_dummies(&scene.ctx());
 
         let moved = builder.topologies[0].points[dummy];
         assert!(moved.same(TreePoint::new(60.0, 40.0)), "{moved:?}");
+    }
+
+    #[test]
+    fn a_buffer_outside_every_blockage_stays_put() {
+        let scene = Scene::new(vec![rect(40, 40, 60, 60)]).with_buffer_size(4, 2);
+        let at = TreePoint::new(20.0, 50.0);
+
+        let legal = builder().legalize_in_blockages(&scene.ctx(), at, buffer());
+
+        assert!(legal.same(at), "{legal:?}");
+    }
+
+    #[test]
+    fn a_buffer_on_a_blockage_edge_is_outside_it() {
+        let scene = Scene::new(vec![rect(40, 40, 60, 60)]).with_buffer_size(4, 2);
+        let at = TreePoint::new(40.0, 50.0);
+
+        let legal = builder().legalize_in_blockages(&scene.ctx(), at, buffer());
+
+        assert!(legal.same(at), "{legal:?}");
+    }
+
+    #[test]
+    fn a_buffer_in_a_blockage_moves_its_width_clear_of_the_nearest_side() {
+        let scene = Scene::new(vec![rect(40, 40, 60, 60)]).with_buffer_size(4, 2);
+
+        let legal =
+            builder().legalize_in_blockages(&scene.ctx(), TreePoint::new(45.0, 50.0), buffer());
+
+        assert!(legal.same(TreePoint::new(36.0, 50.0)), "{legal:?}");
+    }
+
+    #[test]
+    fn a_buffer_in_a_blockage_skips_a_taken_spot_beside_it() {
+        let scene = Scene::new(vec![rect(40, 40, 60, 60)]).with_buffer_size(4, 2);
+        let mut builder = builder();
+        builder.commit(TreePoint::new(36.0, 50.0));
+
+        let legal =
+            builder.legalize_in_blockages(&scene.ctx(), TreePoint::new(45.0, 50.0), buffer());
+
+        assert!(legal.same(TreePoint::new(45.0, 60.0)), "{legal:?}");
     }
 }
