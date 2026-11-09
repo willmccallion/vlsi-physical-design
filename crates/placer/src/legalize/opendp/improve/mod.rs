@@ -26,6 +26,7 @@ use super::{DetailedPlacementError, GroupId, NodeId, Placer};
 use arch::Arch;
 use network::Network;
 use pare_common::db::design::NetlistDB;
+use pare_common::db::indices::IdVec;
 use pare_common::geom::orient::Orientation;
 use std::collections::BTreeSet;
 
@@ -91,6 +92,21 @@ pub fn improve_placement(db: &mut NetlistDB, max_displacement: (i64, i64)) -> Re
     })
 }
 
+pare_common::define_index!(
+    /// A signal net of the improver's network, as `Edge`.
+    EdgeId(u32)
+);
+
+pare_common::define_index!(
+    /// A pin of the improver's network, as `Pin`.
+    NetworkPinId(u32)
+);
+
+pare_common::define_index!(
+    /// A stretch of a row the improver places cells in, as `DetailedSeg`.
+    SegmentId(u32)
+);
+
 /// A stretch of a row between blockages and region edges, as `DetailedSeg`.
 #[derive(Clone, Copy, Debug)]
 struct Segment {
@@ -118,18 +134,18 @@ struct Blockage {
 /// One move a trial made, as `MoveCellAction`.
 #[derive(Clone, Debug)]
 struct Move {
-    node: usize,
+    node: NodeId,
     from: (i64, i64),
-    from_segs: Vec<usize>,
-    to_segs: Vec<usize>,
+    from_segs: Vec<SegmentId>,
+    to_segs: Vec<SegmentId>,
 }
 
 /// The moves of the trial under way, as `Journal`.
 #[derive(Debug, Default)]
 struct Journal {
     moves: Vec<Move>,
-    nodes: BTreeSet<usize>,
-    edges: BTreeSet<usize>,
+    nodes: BTreeSet<NodeId>,
+    edges: BTreeSet<EdgeId>,
 }
 
 impl Journal {
@@ -146,17 +162,19 @@ struct Improver {
     grid: Placer,
     net: Network,
     arch: Arch,
-    segments: Vec<Segment>,
-    segs_in_row: Vec<Vec<usize>>,
+    segments: IdVec<SegmentId, Segment>,
+    /// The segments of each row.
+    segs_in_row: Vec<Vec<SegmentId>>,
     /// The cells of each segment by center, as `cellsInSeg_`.
-    cells_in_seg: Vec<Vec<usize>>,
+    cells_in_seg: IdVec<SegmentId, Vec<NodeId>>,
     /// The segments each cell lies in, as `reverseCellToSegs_`.
-    cell_segs: Vec<Vec<usize>>,
+    cell_segs: IdVec<NodeId, Vec<SegmentId>>,
+    /// The blockages of each row.
     blockages: Vec<Vec<Blockage>>,
-    single_height: Vec<usize>,
+    single_height: Vec<NodeId>,
     /// Multi-row cells by the rows they span.
-    multi_height: Vec<Vec<usize>>,
-    fixed_cells: Vec<usize>,
+    multi_height: Vec<Vec<NodeId>>,
+    fixed_cells: Vec<NodeId>,
     journal: Journal,
     rng: Mt19937,
     max_displacement: (i64, i64),
@@ -193,10 +211,10 @@ impl Improver {
                 displacement(max_displacement.1),
             ),
             arch,
-            segments: Vec::new(),
+            segments: IdVec::new(),
             segs_in_row: Vec::new(),
-            cells_in_seg: Vec::new(),
-            cell_segs: vec![Vec::new(); node_count],
+            cells_in_seg: IdVec::new(),
+            cell_segs: IdVec::filled(Vec::new(), node_count),
             blockages: Vec::new(),
             single_height: Vec::new(),
             multi_height: Vec::new(),
@@ -229,55 +247,51 @@ impl Improver {
         Ok(())
     }
 
-    const fn cell_count(&self) -> usize {
-        self.net.cells
-    }
-
-    fn left(&self, n: usize) -> i64 {
+    fn left(&self, n: NodeId) -> i64 {
         self.grid
             .nodes
-            .get(NodeId::new(n))
-            .map_or_else(|| self.net.fixed[n - self.net.cells].left, |c| c.left)
+            .get(n)
+            .map_or_else(|| self.net.fixed_node(n).left, |c| c.left)
     }
 
-    fn bottom(&self, n: usize) -> i64 {
+    fn bottom(&self, n: NodeId) -> i64 {
         self.grid
             .nodes
-            .get(NodeId::new(n))
-            .map_or_else(|| self.net.fixed[n - self.net.cells].bottom, |c| c.bottom)
+            .get(n)
+            .map_or_else(|| self.net.fixed_node(n).bottom, |c| c.bottom)
     }
 
-    fn width(&self, n: usize) -> i64 {
+    fn width(&self, n: NodeId) -> i64 {
         self.grid
             .nodes
-            .get(NodeId::new(n))
-            .map_or_else(|| self.net.fixed[n - self.net.cells].width, |c| c.width)
+            .get(n)
+            .map_or_else(|| self.net.fixed_node(n).width, |c| c.width)
     }
 
-    fn height(&self, n: usize) -> i64 {
+    fn height(&self, n: NodeId) -> i64 {
         self.grid
             .nodes
-            .get(NodeId::new(n))
-            .map_or_else(|| self.net.fixed[n - self.net.cells].height, |c| c.height)
+            .get(n)
+            .map_or_else(|| self.net.fixed_node(n).height, |c| c.height)
     }
 
-    fn right(&self, n: usize) -> i64 {
+    fn right(&self, n: NodeId) -> i64 {
         self.left(n) + self.width(n)
     }
 
-    fn top(&self, n: usize) -> i64 {
+    fn top(&self, n: NodeId) -> i64 {
         self.bottom(n) + self.height(n)
     }
 
-    fn center_x(&self, n: usize) -> i64 {
+    fn center_x(&self, n: NodeId) -> i64 {
         self.left(n) + self.width(n) / 2
     }
 
-    fn center_y(&self, n: usize) -> i64 {
+    fn center_y(&self, n: NodeId) -> i64 {
         self.bottom(n) + self.height(n) / 2
     }
 
-    fn orig(&self, n: usize) -> (i64, i64) {
+    fn orig(&self, n: NodeId) -> (i64, i64) {
         self.net
             .orig
             .get(n)
@@ -285,30 +299,30 @@ impl Improver {
             .unwrap_or_else(|| (self.left(n), self.bottom(n)))
     }
 
-    fn is_fixed(&self, n: usize) -> bool {
-        self.grid.nodes.get(NodeId::new(n)).is_none_or(|c| c.fixed)
+    fn is_fixed(&self, n: NodeId) -> bool {
+        self.grid.nodes.get(n).is_none_or(|c| c.fixed)
     }
 
-    fn is_terminal(&self, n: usize) -> bool {
-        n >= self.net.cells && self.net.fixed[n - self.net.cells].terminal
+    fn is_terminal(&self, n: NodeId) -> bool {
+        !self.net.is_cell(n) && self.net.fixed_node(n).terminal
     }
 
-    fn group(&self, n: usize) -> Option<GroupId> {
-        self.grid.nodes.get(NodeId::new(n)).and_then(|c| c.group)
+    fn group(&self, n: NodeId) -> Option<GroupId> {
+        self.grid.nodes.get(n).and_then(|c| c.group)
     }
 
-    fn set_position(&mut self, n: usize, left: i64, bottom: i64) {
-        let node = &mut self.grid.nodes[NodeId::new(n)];
+    fn set_position(&mut self, n: NodeId, left: i64, bottom: i64) {
+        let node = &mut self.grid.nodes[n];
         node.left = left;
         node.bottom = bottom;
     }
 
-    fn rows_spanned(&self, n: usize) -> usize {
+    fn rows_spanned(&self, n: NodeId) -> usize {
         self.arch.rows_spanned(self.height(n))
     }
 
     /// Where a pin is, from its cell's center.
-    fn pin_position(&self, pin: usize) -> (i64, i64) {
+    fn pin_position(&self, pin: NetworkPinId) -> (i64, i64) {
         let p = &self.net.pins[pin];
         (
             self.center_x(p.node) + p.offset.0,
@@ -317,7 +331,7 @@ impl Improver {
     }
 
     /// The half-perimeter wirelength of an edge's pins, as `Edge::hpwl`.
-    fn edge_hpwl(&self, edge: usize) -> i64 {
+    fn edge_hpwl(&self, edge: EdgeId) -> i64 {
         let mut bounds: Option<(i64, i64, i64, i64)> = None;
         for &pin in &self.net.edges[edge] {
             let (x, y) = self.pin_position(pin);
@@ -330,9 +344,11 @@ impl Improver {
 
     /// The wirelength of every edge of two or more pins, as `Utility::hpwl`.
     fn total_hpwl(&self) -> i64 {
-        (0..self.net.edges.len())
-            .filter(|&e| self.net.edges[e].len() > 1)
-            .map(|e| self.edge_hpwl(e))
+        self.net
+            .edges
+            .iter_enumerated()
+            .filter(|(_, pins)| pins.len() > 1)
+            .map(|(e, _)| self.edge_hpwl(e))
             .sum()
     }
 
@@ -342,7 +358,7 @@ impl Improver {
     }
 
     /// `Utility::random_shuffle` with the improver's generator.
-    fn shuffle(&mut self, nodes: &mut [usize]) {
+    fn shuffle(&mut self, nodes: &mut [NodeId]) {
         for i in 1..nodes.len() {
             let r = self.rng.next_u32() as usize % (i + 1);
             nodes.swap(i, r);
@@ -350,28 +366,25 @@ impl Improver {
     }
 
     /// Takes a cell off the grid, as `DetailedMgr::eraseFromGrid`.
-    fn erase(&mut self, n: usize) {
-        self.grid.erase_pixels(NodeId::new(n));
+    fn erase(&mut self, n: NodeId) {
+        self.grid.erase_pixels(n);
     }
 
     /// Puts a cell on the grid where it stands in its row's orientation, as
     /// `DetailedMgr::paintInGrid`.
-    fn paint(&mut self, n: usize) {
+    fn paint(&mut self, n: NodeId) {
         let x = self.grid.grid_x(self.left(n));
         let y = self.grid.snap_down_y(self.bottom(n));
-        self.grid.paint_pixels(NodeId::new(n), x, y);
-        if let Some(orient) = self
-            .grid
-            .site_orientation(x, y, self.grid.nodes[NodeId::new(n)].site)
-        {
+        self.grid.paint_pixels(n, x, y);
+        if let Some(orient) = self.grid.site_orientation(x, y, self.grid.nodes[n].site) {
             self.orient_node(n, orient);
         }
     }
 
     /// Whether the cell breaks a placement rule where it stands, as
     /// `DetailedMgr::hasPlacementViolation`.
-    fn has_placement_violation(&self, n: usize) -> bool {
-        let node = &self.grid.nodes[NodeId::new(n)];
+    fn has_placement_violation(&self, n: NodeId) -> bool {
+        let node = &self.grid.nodes[n];
         let x = self.grid.grid_x(node.left);
         let y = self.grid.round_y(node.bottom);
         !(self.grid.check_edge_spacing(node, x, y, node.orient)
@@ -381,9 +394,9 @@ impl Improver {
 
     /// Turns a cell to a new orientation about its lower-left corner,
     /// carrying its pins along, as `Node::adjustCurrOrient`.
-    fn orient_node(&mut self, n: usize, to: Orientation) {
+    fn orient_node(&mut self, n: NodeId, to: Orientation) {
         use Orientation::{E, FE, FN, FS, FW, N, S, W};
-        let mut from = self.grid.nodes[NodeId::new(n)].orient;
+        let mut from = self.grid.nodes[n].orient;
         if from == to {
             return;
         }
@@ -394,7 +407,7 @@ impl Improver {
                 let (dx, dy) = self.net.pins[pin].offset;
                 self.net.pins[pin].offset = if back { (-dy, dx) } else { (dy, -dx) };
             }
-            let node = &mut self.grid.nodes[NodeId::new(n)];
+            let node = &mut self.grid.nodes[n];
             std::mem::swap(&mut node.width, &mut node.height);
             from = match from {
                 W => N,
@@ -427,6 +440,6 @@ impl Improver {
                 offset.1 = -offset.1;
             }
         }
-        self.grid.nodes[NodeId::new(n)].orient = to;
+        self.grid.nodes[n].orient = to;
     }
 }

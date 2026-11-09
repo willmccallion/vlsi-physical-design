@@ -2,6 +2,7 @@
 //! hpwl -cost (hpwl)`: random cells try moves and swaps to random spots
 //! within ten sites and rows, each kept unless it lengthens the nets.
 
+use super::NodeId;
 use super::swap::Hpwl;
 use super::{ImprovementError, Improver, Result};
 
@@ -61,7 +62,7 @@ fn go(imp: &mut Improver, objective: &mut Hpwl, moves_per_candidate: f64) -> Res
 
 /// A move or else a swap of a random cell to a random spot nearby, as
 /// `RandomGenerator::generate`.
-fn random_trial(imp: &mut Improver, candidates: &[usize]) -> Result<bool> {
+fn random_trial(imp: &mut Improver, candidates: &[NodeId]) -> Result<bool> {
     let arch = &imp.arch;
     let ydim = arch.rows.len();
     let span_x = (arch.max_x - arch.min_x) as f64;

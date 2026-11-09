@@ -3,6 +3,8 @@
 //! other's spots by a minimum-cost matching on wirelength.
 
 use super::{ImprovementError, Improver, Move, Result};
+use super::{NodeId, SegmentId};
+use pare_common::db::indices::IdVec;
 use pare_common::network_simplex::{Arc, min_cost_flow};
 use std::collections::VecDeque;
 
@@ -17,9 +19,10 @@ const SKIP_EDGES_LARGER_THAN: usize = 100;
 struct Bins {
     step: (f64, f64),
     dim: (usize, usize),
-    nodes: Vec<Vec<usize>>,
+    /// The cells in each bin.
+    nodes: Vec<Vec<NodeId>>,
     traversal: Vec<usize>,
-    bin_of: Vec<Option<usize>>,
+    bin_of: IdVec<NodeId, Option<usize>>,
 }
 
 /// `DetailedMis::run` minimizing wirelength.
@@ -57,13 +60,13 @@ pub(super) fn converged(last: i64, current: i64, tolerance: f64) -> bool {
 
 /// Colours the movable cells greedily so that no two on a net share a
 /// colour, as `DetailedMis::colorCells` with `ColorGraph::greedyColoring`.
-fn color_cells(imp: &Improver, candidates: &[usize]) -> Vec<Option<usize>> {
+fn color_cells(imp: &Improver, candidates: &[NodeId]) -> IdVec<NodeId, Option<usize>> {
     let nodes = imp.net.node_count();
-    let mut movable = vec![false; nodes];
+    let mut movable = IdVec::filled(false, nodes);
     for &n in candidates {
         movable[n] = true;
     }
-    let mut adjacent = vec![Vec::new(); nodes];
+    let mut adjacent: IdVec<NodeId, Vec<NodeId>> = IdVec::filled(Vec::new(), nodes);
     for edge in &imp.net.edges {
         if edge.len() <= 1 || edge.len() > SKIP_EDGES_LARGER_THAN {
             continue;
@@ -83,12 +86,12 @@ fn color_cells(imp: &Improver, candidates: &[usize]) -> Vec<Option<usize>> {
         }
     }
     if nodes == 0 {
-        return Vec::new();
+        return IdVec::new();
     }
-    let mut color: Vec<Option<usize>> = vec![None; nodes];
-    color[0] = Some(0);
-    let mut taken_by = vec![None; nodes];
-    for v in 1..nodes {
+    let mut color: IdVec<NodeId, Option<usize>> = IdVec::filled(None, nodes);
+    color[NodeId(0)] = Some(0);
+    let mut taken_by: Vec<Option<NodeId>> = vec![None; nodes];
+    for v in imp.net.nodes().skip(1) {
         adjacent[v].sort_unstable();
         adjacent[v].dedup();
         for &u in &adjacent[v] {
@@ -98,14 +101,15 @@ fn color_cells(imp: &Improver, candidates: &[usize]) -> Vec<Option<usize>> {
         }
         color[v] = Some((0..nodes).find(|&c| taken_by[c] != Some(v)).unwrap_or(0));
     }
-    (0..nodes)
+    imp.net
+        .nodes()
         .map(|n| color[n].filter(|_| movable[n]))
         .collect()
 }
 
 impl Bins {
     /// Bins about five cells wide and high, as `DetailedMis::buildGrid`.
-    fn new(imp: &Improver, candidates: &[usize]) -> Self {
+    fn new(imp: &Improver, candidates: &[NodeId]) -> Self {
         let count = candidates.len() as f64;
         let avg_h = candidates
             .iter()
@@ -124,7 +128,7 @@ impl Bins {
             dim,
             nodes: vec![Vec::new(); dim.0 * dim.1],
             traversal: vec![0; dim.0 * dim.1],
-            bin_of: vec![None; imp.net.node_count()],
+            bin_of: IdVec::filled(None, imp.net.node_count()),
         }
     }
 
@@ -133,11 +137,13 @@ impl Bins {
     }
 
     /// Bins the cells by center, as `DetailedMis::populateGrid`.
-    fn populate(&mut self, imp: &Improver, candidates: &[usize]) {
+    fn populate(&mut self, imp: &Improver, candidates: &[NodeId]) {
         for bin in &mut self.nodes {
             bin.clear();
         }
-        self.bin_of.fill(None);
+        for bin in &mut self.bin_of {
+            *bin = None;
+        }
         let last = |dim: usize| dim as i32 - 1;
         for &n in candidates {
             let y = imp.bottom(n) as f64 + 0.5 * imp.height(n) as f64;
@@ -159,13 +165,13 @@ impl Bins {
 /// `DetailedMis::place`.
 fn place(
     imp: &mut Improver,
-    candidates: &mut [usize],
-    colors: &[Option<usize>],
+    candidates: &mut [NodeId],
+    colors: &IdVec<NodeId, Option<usize>>,
     bins: &mut Bins,
     traversal: &mut usize,
 ) -> Result<()> {
     bins.populate(imp, candidates);
-    let mut times_used = vec![0; imp.net.node_count()];
+    let mut times_used = IdVec::filled(0, imp.net.node_count());
     imp.shuffle(candidates);
     for &n in candidates.iter() {
         if times_used[n] >= MAX_TIMES_USED {
@@ -186,11 +192,11 @@ fn place(
 /// then ever farther bins, as `DetailedMis::gatherNeighbours`.
 fn gather_neighbours(
     imp: &Improver,
-    n: usize,
-    colors: &[Option<usize>],
+    n: NodeId,
+    colors: &IdVec<NodeId, Option<usize>>,
     bins: &mut Bins,
     traversal: &mut usize,
-) -> Option<Vec<usize>> {
+) -> Option<Vec<NodeId>> {
     let start = bins.bin_of[n]?;
     let mut neighbours = vec![n];
     let spanned = imp.rows_spanned(n);
@@ -234,7 +240,7 @@ fn gather_neighbours(
 
 /// Reassigns the cells to each other's spots by a minimum-cost matching,
 /// undoing it if it breaks a placement rule, as `DetailedMis::solveMatch`.
-fn solve_match(imp: &mut Improver, nodes: &[usize]) -> Result<()> {
+fn solve_match(imp: &mut Improver, nodes: &[NodeId]) -> Result<()> {
     if nodes.len() <= 1 {
         return Ok(());
     }
@@ -243,7 +249,7 @@ fn solve_match(imp: &mut Improver, nodes: &[usize]) -> Result<()> {
         .iter()
         .map(|&n| (imp.left(n), imp.bottom(n)))
         .collect();
-    let segs: Vec<Vec<usize>> = nodes.iter().map(|&n| imp.cell_segs[n].clone()).collect();
+    let segs: Vec<Vec<SegmentId>> = nodes.iter().map(|&n| imp.cell_segs[n].clone()).collect();
     let cell_node = |i: usize| 2 * i;
     let spot_node = |i: usize| 2 * i + 1;
     let (supply, demand) = (2 * count, 2 * count + 1);
@@ -323,7 +329,7 @@ fn solve_match(imp: &mut Improver, nodes: &[usize]) -> Result<()> {
 /// The wirelength of a cell's nets with it centered at `(x, y)`, as
 /// `DetailedMis::getHpwl`; a net the cell has several pins on counts as
 /// often.
-fn hpwl_at(imp: &Improver, n: usize, x: i64, y: i64) -> i64 {
+fn hpwl_at(imp: &Improver, n: NodeId, x: i64, y: i64) -> i64 {
     let mut hpwl = 0;
     for &pin in &imp.net.node_pins[n] {
         let edge = &imp.net.edges[imp.net.pins[pin].edge];
