@@ -697,42 +697,11 @@ impl<'r, 'a, T: Timing> Repairer<'r, 'a, T> {
         };
         Self::carry_wire(&wire, &rest, &mut branch);
         while self.wire_breaks_limits(&wire, &rest, max_cap) {
-            let split_length = self.split_length(SplitInput {
-                wire_res: wire.res,
-                wire_cap: wire.cap,
-                length: rest.length,
-                wire_length: rest.wire_length,
-                wire_length_ref: rest.wire_length_ref,
-                load_cap: wire.load_cap(rest.length, rest.ref_cap),
-                ref_cap: rest.ref_cap,
-                max_cap,
-                load_slew: wire.elmore_slew(rest.length, rest.ref_cap),
-                max_load_slew_margined: self.resizer.margined_slew(rest.max_load_slew),
-                r_drvr,
-            });
-            let buf_dist = if split_length >= rest.length {
-                rest.length as f64
-            } else {
-                split_length as f64 * (1.0 - LENGTH_MARGIN)
-            };
+            let buf_dist = self.repeater_distance(&wire, &rest, max_cap);
             let at = point_back_along(rest.to, from, buf_dist, rest.length);
-            let buffer_cell = self.resizer.find_target_buffer(
-                self.resizer.buffers.lowest_drive,
-                wire.load_cap(rest.length, rest.ref_cap),
-            )?;
-            let mut leaf = Branch {
-                cap: rest.ref_cap,
-                fanout: branch.fanout,
-                max_load_slew: rest.max_load_slew,
-                wire_length: 0,
-                loads: std::mem::take(&mut branch.loads),
-            };
-            let inserted = self.make_repeater("wire", at, buffer_cell, &mut leaf)?;
-            branch.loads = leaf.loads;
-            if !inserted {
+            let Some(leaf) = self.wire_repeater(&wire, &rest, at, &mut branch)? else {
                 break;
-            }
-            branch.fanout = leaf.fanout;
+            };
             let length = rest.length - buf_dist as i64;
             rest = WireRest {
                 to: at,
@@ -746,6 +715,60 @@ impl<'r, 'a, T: Timing> Repairer<'r, 'a, T> {
         }
         branch.wire_length = rest.wire_length;
         Ok(branch)
+    }
+
+    /// How far back from the end of the rest of the wire a repeater goes:
+    /// its whole length when that is where the limits break, else short of
+    /// the split length by [`LENGTH_MARGIN`].
+    fn repeater_distance(&self, wire: &DriverWire, rest: &WireRest, max_cap: Farads) -> f64 {
+        let split_length = self.split_length(SplitInput {
+            wire_res: wire.res,
+            wire_cap: wire.cap,
+            length: rest.length,
+            wire_length: rest.wire_length,
+            wire_length_ref: rest.wire_length_ref,
+            load_cap: wire.load_cap(rest.length, rest.ref_cap),
+            ref_cap: rest.ref_cap,
+            max_cap,
+            load_slew: wire.elmore_slew(rest.length, rest.ref_cap),
+            max_load_slew_margined: self.resizer.margined_slew(rest.max_load_slew),
+            r_drvr: wire.r_drvr,
+        });
+        if split_length >= rest.length {
+            rest.length as f64
+        } else {
+            split_length as f64 * (1.0 - LENGTH_MARGIN)
+        }
+    }
+
+    /// Puts a repeater at `at` driving `branch`'s loads, sized for the rest
+    /// of the wire; returns the branch it drives, or none when it could not
+    /// go in and the loads stay with `branch`.
+    fn wire_repeater(
+        &mut self,
+        wire: &DriverWire,
+        rest: &WireRest,
+        at: Point<Dbu>,
+        branch: &mut Branch,
+    ) -> Result<Option<Branch>, RepairError> {
+        let buffer_cell = self.resizer.find_target_buffer(
+            self.resizer.buffers.lowest_drive,
+            wire.load_cap(rest.length, rest.ref_cap),
+        )?;
+        let mut leaf = Branch {
+            cap: rest.ref_cap,
+            fanout: branch.fanout,
+            max_load_slew: rest.max_load_slew,
+            wire_length: 0,
+            loads: std::mem::take(&mut branch.loads),
+        };
+        let inserted = self.make_repeater("wire", at, buffer_cell, &mut leaf)?;
+        branch.loads = std::mem::take(&mut leaf.loads);
+        if !inserted {
+            return Ok(None);
+        }
+        branch.fanout = leaf.fanout;
+        Ok(Some(leaf))
     }
 
     /// Sets what `branch` presents through the rest of the wire: its load
