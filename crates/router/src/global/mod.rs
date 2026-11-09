@@ -182,9 +182,7 @@ impl GlobalGrid {
             grid_index(cells as usize).max(1)
         };
         let (nx, ny) = (span(die.width()), span(die.height()));
-        let layers: Vec<LayerId> = (tech.min_layer.index()..=tech.max_layer.index())
-            .map(LayerId::new)
-            .collect();
+        let layers: Vec<LayerId> = tech.routable_layers().collect();
         let per_layer = usize::from(nx) * usize::from(ny);
         let mut grid = Self {
             origin: die.min,
@@ -751,11 +749,10 @@ fn via_pad_along(tech: &RouteTech, layer: LayerId) -> Dbu {
         b1 - b0
     };
     let from_below = layer
-        .index()
-        .checked_sub(1)
-        .and_then(|below| tech.vias.get(below))
+        .cut_below()
+        .and_then(|cut| tech.vias.get(cut))
         .map(|v| along(&v.top));
-    let from_above = tech.vias.get(layer.index()).map(|v| along(&v.bottom));
+    let from_above = tech.vias.get(layer.cut_above()).map(|v| along(&v.bottom));
     from_below
         .into_iter()
         .chain(from_above)
@@ -952,9 +949,8 @@ pub fn track_demand(db: &NetlistDB, tech: &RouteTech, net: NetId) -> Vec<Tracks>
     let rule = db.nets[net]
         .non_default_rule
         .map(|r| &db.non_default_rules[r]);
-    (tech.min_layer.index()..=tech.max_layer.index())
-        .map(|l| {
-            let layer = LayerId::new(l);
+    tech.routable_layers()
+        .map(|layer| {
             let lt = tech.layer(layer);
             let Some(ndr) = rule.and_then(|r| r.layers.iter().find(|x| x.layer == layer)) else {
                 return Tracks::ONE;

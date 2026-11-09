@@ -968,9 +968,10 @@ pub fn capacity_reduction(
 /// The RUDY wire width over the routing layers of `tech`, each at its LEF
 /// pitch, or its width plus spacing without one, as `OpenROAD` takes it.
 fn layers_wire_width(db: &NetlistDB, tech: &RouteTech) -> Dbu {
-    let pitches: Vec<Dbu> = (tech.min_layer.index()..=tech.max_layer.index())
+    let pitches: Vec<Dbu> = tech
+        .routable_layers()
         .map(|l| {
-            let layer = &db.library.routing_layers[LayerId::new(l)];
+            let layer = &db.library.routing_layers[l];
             if layer.pitch_x > Dbu::ZERO {
                 layer.pitch_x
             } else {

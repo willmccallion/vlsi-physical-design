@@ -19,7 +19,7 @@
 //! coarser buckets so they do not widen every query.
 
 use crate::tech::{CutTech, LayerTech, RouteTech};
-use pare_common::db::indices::{CutLayerId, LayerId, NetId, NonDefaultRuleId};
+use pare_common::db::indices::{CutLayerId, IdVec, LayerId, NetId, NonDefaultRuleId};
 use pare_common::db::library::LayerRef;
 use pare_common::db::rules::SpacingTable;
 use pare_common::db::shapes::{self, OwnedShape};
@@ -421,19 +421,19 @@ fn gap_sq(a: &Rect<Dbu>, b: &Rect<Dbu>) -> i128 {
 /// of every cut layer.
 #[derive(Clone, Debug)]
 pub struct Occupancy {
-    /// `[layer][track]`.
-    tracks: Vec<Vec<Track>>,
+    /// Each layer's tracks, by track number.
+    tracks: IdVec<LayerId, Vec<Track>>,
     /// Each layer's wire width.
-    widths: Vec<Dbu>,
+    widths: IdVec<LayerId, Dbu>,
     /// Each layer's minimum spacing.
-    min_spacing: Vec<Dbu>,
+    min_spacing: IdVec<LayerId, Dbu>,
     /// Each layer's spacing table.
-    tables: Vec<Option<SpacingTable>>,
+    tables: IdVec<LayerId, Option<SpacingTable>>,
     /// The largest spacing any occupant of each layer can carry.
-    reach: Vec<Dbu>,
+    reach: IdVec<LayerId, Dbu>,
     /// The longest an occupant added after the fixed metal may be.
     chunk: Dbu,
-    cuts: Vec<CutLayer>,
+    cuts: IdVec<CutLayerId, CutLayer>,
 }
 
 /// One track's occupants: the fixed metal recorded before routing, whole and
@@ -605,7 +605,7 @@ impl FixedMetal for Occupancy {
         lo: Dbu,
         hi: Dbu,
     ) -> impl Iterator<Item = (Dbu, Dbu)> {
-        let l = track.layer.index();
+        let l = track.layer;
         let min = self.min_spacing[l];
         let extra = self.reach[l] - min;
         let rules = self.rules(track.layer);
@@ -631,14 +631,15 @@ impl FixedMetal for Occupancy {
 /// that [`Occupancy`] keeps for wiring.
 #[derive(Clone, Debug, Default)]
 pub struct FixedTracks {
-    stretches: Vec<Vec<Vec<(Dbu, Dbu)>>>,
+    /// Each layer's blocked stretches, by track number.
+    stretches: IdVec<LayerId, Vec<Vec<(Dbu, Dbu)>>>,
 }
 
 impl FixedTracks {
     /// The stretches `shapes` block on the layers `tech` routes, as
     /// [`Occupancy::add_fixed`] would record them.
     pub fn new(tech: &RouteTech, shapes: impl IntoIterator<Item = OwnedShape>) -> Self {
-        let mut stretches: Vec<Vec<Vec<(Dbu, Dbu)>>> = tech
+        let mut stretches: IdVec<LayerId, Vec<Vec<(Dbu, Dbu)>>> = tech
             .layers
             .iter()
             .map(|l| vec![Vec::new(); l.tracks.len()])
@@ -658,7 +659,7 @@ impl FixedTracks {
             let spacing = tech.wire_spacing(rule, layer);
             let extra = lt.spacing_around(&s.shape.rect).1.max(spacing) - lt.spacing;
             for b in blocked_stretches(lt, &s.shape.rect, spacing) {
-                stretches[layer.index()][b.track as usize].push((b.lo - extra, b.hi + extra));
+                stretches[layer][b.track as usize].push((b.lo - extra, b.hi + extra));
             }
         }
         for track in stretches.iter_mut().flatten() {
@@ -677,7 +678,7 @@ impl FixedMetal for FixedTracks {
     ) -> impl Iterator<Item = (Dbu, Dbu)> {
         let list = self
             .stretches
-            .get(track.layer.index())
+            .get(track.layer)
             .and_then(|l| l.get(track.track as usize))
             .map_or(&[][..], Vec::as_slice);
         let first = list.partition_point(|&(_, end)| end <= lo);
@@ -752,16 +753,15 @@ impl Occupancy {
                 .iter()
                 .map(|l| l.spacing_table.clone())
                 .collect(),
-            reach: (0..tech.layers.len())
-                .map(|l| {
-                    let lt = &tech.layers[l];
+            reach: tech
+                .layers
+                .iter_enumerated()
+                .map(|(l, lt)| {
                     let table = lt
                         .spacing_table
                         .as_ref()
                         .map_or(Dbu::ZERO, SpacingTable::max_spacing);
-                    tech.max_wire_spacing(LayerId::new(l))
-                        .max(table)
-                        .max(lt.spacing)
+                    tech.max_wire_spacing(l).max(table).max(lt.spacing)
                 })
                 .collect(),
             chunk: chunk.max(Dbu(1)),
@@ -786,12 +786,12 @@ impl Occupancy {
 
     /// Occupants of a track whose stretch meets `[lo, hi]`.
     fn meeting(&self, t: TrackRef, lo: Dbu, hi: Dbu) -> impl Iterator<Item = &Occupant> {
-        self.tracks[t.layer.index()][t.track as usize].meeting(lo, hi, self.chunk)
+        self.tracks[t.layer][t.track as usize].meeting(lo, hi, self.chunk)
     }
 
     /// Records a cut on `cut` for `owner`.
     pub fn add_cut(&mut self, cut: CutLayerId, rect: &Rect<Dbu>, owner: Owner, origin: Origin) {
-        self.cuts[cut.index()].add(CutOccupant::new(rect, owner, origin));
+        self.cuts[cut].add(CutOccupant::new(rect, owner, origin));
     }
 
     /// Cuts of owners other than `owner` that a cut at `rect` on `cut` would
@@ -802,7 +802,7 @@ impl Occupancy {
         rect: &Rect<Dbu>,
         owner: Owner,
     ) -> impl Iterator<Item = &CutOccupant> + '_ {
-        self.cuts[cut.index()].conflicts(*rect, owner)
+        self.cuts[cut].conflicts(*rect, owner)
     }
 
     /// Records `shapes` as fixed metal and cuts, on the layers `tech` routes:
@@ -818,7 +818,7 @@ impl Occupancy {
                 LayerRef::Routing(layer) if tech.routable(layer) => {
                     let spacing = tech.wire_spacing(rule_of(tech, owner), layer);
                     for b in blocked_stretches(tech.layer(layer), &s.shape.rect, spacing) {
-                        let track = &mut self.tracks[layer.index()][b.track as usize];
+                        let track = &mut self.tracks[layer][b.track as usize];
                         if track.fixed.len() == track.fixed_reach.len() {
                             settle.push(TrackRef {
                                 layer,
@@ -837,7 +837,7 @@ impl Occupancy {
             }
         }
         for t in settle {
-            self.tracks[t.layer.index()][t.track as usize].settle_fixed();
+            self.tracks[t.layer][t.track as usize].settle_fixed();
         }
     }
 
@@ -853,7 +853,7 @@ impl Occupancy {
     ) {
         let spacing = tech.wire_spacing(rule_of(tech, owner), layer);
         for blocked in blocked_stretches(tech.layer(layer), rect, spacing) {
-            let track = &mut self.tracks[layer.index()][blocked.track as usize];
+            let track = &mut self.tracks[layer][blocked.track as usize];
             let mut start = blocked.lo;
             loop {
                 let end = (start + self.chunk).min(blocked.hi);
@@ -887,7 +887,7 @@ impl Occupancy {
         let buckets = cuts.iter().map(|(cut, rect)| {
             Slot::Cut(CutRef {
                 cut: *cut,
-                bucket: self.cuts[cut.index()].bucket_of(rect),
+                bucket: self.cuts[*cut].bucket_of(rect),
             })
         });
         let mut slots: Vec<Slot> = tracks.chain(buckets).collect();
@@ -901,10 +901,10 @@ impl Occupancy {
     pub fn remove_wiring(&mut self, slots: &[Slot], owner: Owner) {
         for slot in slots {
             match *slot {
-                Slot::Track(t) => self.tracks[t.layer.index()][t.track as usize]
+                Slot::Track(t) => self.tracks[t.layer][t.track as usize]
                     .added
                     .retain(|o| o.owner != owner || o.origin == Origin::Fixed),
-                Slot::Cut(c) => self.cuts[c.cut.index()]
+                Slot::Cut(c) => self.cuts[c.cut]
                     .retain_in(c.bucket, |o| o.owner != owner || o.origin == Origin::Fixed),
             }
         }
@@ -912,7 +912,7 @@ impl Occupancy {
 
     /// The spacing rules of `layer`.
     fn rules(&self, layer: LayerId) -> LayerSpacing<'_> {
-        let l = layer.index();
+        let l = layer;
         LayerSpacing {
             width: self.widths[l],
             spacing: self.min_spacing[l],
@@ -931,7 +931,7 @@ impl Occupancy {
         centered: bool,
     ) -> impl Iterator<Item = Conflict<'_>> + use<'_> {
         let rules = self.rules(t.layer);
-        let reach = query.spacing.max(self.reach[t.layer.index()]);
+        let reach = query.spacing.max(self.reach[t.layer]);
         self.meeting(t, query.lo - reach, query.hi + reach)
             .filter(move |o| o.owner != owner && (centered || o.centered))
             .filter_map(move |o| {
@@ -1066,7 +1066,7 @@ impl LocalOccupancy {
     ) {
         self.cuts
             .entry(cut)
-            .or_insert_with(|| CutLayer::new(tech.cuts[cut.index()]))
+            .or_insert_with(|| CutLayer::new(tech.cuts[cut]))
             .add(CutOccupant::new(rect, owner, origin));
     }
 
@@ -1147,7 +1147,8 @@ mod tests {
                 (Dbu(0), Dbu(30)),
                 (Dbu(50), Dbu(60)),
                 (Dbu(80), Dbu(90)),
-            ]]],
+            ]]]
+            .into(),
         };
         let track = TrackRef {
             layer: LayerId(0),

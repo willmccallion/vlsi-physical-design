@@ -22,7 +22,7 @@
 
 use crate::tech::{RouteTech, ViaTech, index_u32};
 use pare_common::db::design::{NetlistDB, PinOwner};
-use pare_common::db::indices::{LayerId, PinId, ViaId};
+use pare_common::db::indices::{CutLayerId, LayerId, PinId, ViaId};
 use pare_common::db::library::{LayerRef, Shape};
 use pare_common::geom::dbu::Dbu;
 use pare_common::geom::point::Point;
@@ -420,8 +420,8 @@ fn via_stacks(
     pin: &[Shape],
     blockers: &[Shape],
 ) -> Vec<Vec<ViaId>> {
-    let fits = |l: usize, v: &ViaTech| {
-        let (below, above) = (LayerId::new(l), LayerId::new(l + 1));
+    let fits = |cut: CutLayerId, v: &ViaTech| {
+        let (below, above) = (cut.below(), cut.above());
         let bottom = v.bottom.translate(at);
         let top = v.top.translate(at);
         let on_pin = below != from
@@ -432,18 +432,22 @@ fn via_stacks(
             }) && clear_of_own_pin(tech, below, &bottom, pin));
         on_pin && clear_of(tech, below, &bottom, blockers) && clear_of(tech, above, &top, blockers)
     };
-    let first = from.index();
-    let upper: Option<Vec<ViaId>> = (first + 1..tech.min_layer.index())
+    let upper: Option<Vec<ViaId>> = from
+        .above()
+        .through(tech.min_layer)
+        .take_while(|&l| l < tech.min_layer)
         .map(|l| {
-            tech.access_vias[l]
+            let cut = l.cut_above();
+            tech.access_vias[cut]
                 .iter()
-                .find(|v| fits(l, v))
+                .find(|v| fits(cut, v))
                 .map(|v| v.via)
         })
         .collect();
     let Some(upper) = upper else {
         return Vec::new();
     };
+    let first = from.cut_above();
     tech.access_vias[first]
         .iter()
         .filter(|v| fits(first, v))

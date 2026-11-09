@@ -152,10 +152,10 @@ impl CutTech {
 #[derive(Clone, Debug)]
 pub(crate) struct RuleTech {
     /// Wire width per layer: the rule's, or the layer's where it is silent.
-    width: Vec<Dbu>,
+    width: IdVec<LayerId, Dbu>,
     /// Spacing other metal must keep per layer: the rule's where it sets one
     /// and that is larger, else the layer's.
-    spacing: Vec<Dbu>,
+    spacing: IdVec<LayerId, Dbu>,
 }
 
 impl RuleTech {
@@ -185,18 +185,18 @@ pub struct RouteTech {
     pub min_layer: LayerId,
     /// Highest layer signal wires may use.
     pub max_layer: LayerId,
-    /// Every routing layer, indexed by layer id.
-    pub layers: Vec<LayerTech>,
-    /// The via for each cut, indexed by cut id.
-    pub vias: Vec<ViaTech>,
+    /// Every routing layer.
+    pub layers: IdVec<LayerId, LayerTech>,
+    /// The via on each cut.
+    pub vias: IdVec<CutLayerId, ViaTech>,
     /// Every via on each cut, least overhang on the layer above first, for
     /// reaching pins below the routable layers.
-    pub access_vias: Vec<Vec<ViaTech>>,
-    /// Spacing rules of every cut layer, indexed by cut id.
-    pub cuts: Vec<CutTech>,
-    /// Every non-default rule's widths and spacings, indexed by rule id.
-    rules: Vec<RuleTech>,
-    /// The non-default rule each net follows, indexed by net.
+    pub access_vias: IdVec<CutLayerId, Vec<ViaTech>>,
+    /// Spacing rules of every cut layer.
+    pub cuts: IdVec<CutLayerId, CutTech>,
+    /// Every non-default rule's widths and spacings.
+    rules: IdVec<NonDefaultRuleId, RuleTech>,
+    /// The non-default rule each net follows.
     net_rules: IdVec<NetId, Option<NonDefaultRuleId>>,
     /// The track spacing a gcell's edge is a multiple of.
     pub gcell_pitch: Dbu,
@@ -218,12 +218,12 @@ const GCELL_PITCH_LAYERS: usize = 4;
 /// and fourth routing layers' average track spacings, or the highest
 /// routing layer's when that is below the fourth, each rounded down to an
 /// even number. `spacing` gives a layer's spacing by index from zero.
-fn gcell_pitch(spacing: impl Fn(usize) -> Dbu, max_layer: usize) -> Dbu {
+fn gcell_pitch(spacing: impl Fn(LayerId) -> Dbu, max_layer: LayerId) -> Dbu {
     let even = |s: Dbu| if s.get() % 2 == 0 { s } else { s - Dbu(1) };
-    if max_layer + 1 < GCELL_PITCH_LAYERS {
+    if max_layer.index() + 1 < GCELL_PITCH_LAYERS {
         return even(spacing(max_layer));
     }
-    let mut middle = [even(spacing(1)), even(spacing(2)), even(spacing(3))];
+    let mut middle = [LayerId(1), LayerId(2), LayerId(3)].map(|l| even(spacing(l)));
     middle.sort_unstable();
     middle[1]
 }
@@ -274,46 +274,42 @@ impl RouteTech {
             return Err(RouteError::DieTooLarge(reach));
         }
         let lib = &db.library;
-        let count = lib.routing_layers.len();
         let range = config.layer_range(lib)?;
         let (min_layer, max_layer) = (*range.start(), *range.end());
 
-        let tracks: Vec<Vec<Dbu>> = (0..count)
-            .map(|l| db.layer_tracks(LayerId::new(l)))
+        let tracks: IdVec<LayerId, Vec<Dbu>> = lib
+            .routing_layers
+            .ids()
+            .map(|l| db.layer_tracks(l))
             .collect();
-        let routable = min_layer.index()..=max_layer.index();
-        if let Some(l) = routable.into_iter().find(|&l| tracks[l].is_empty()) {
-            return Err(RouteError::NoTracks(
-                lib.routing_layers[LayerId::new(l)].name.clone(),
-            ));
+        if let Some(l) = min_layer.through(max_layer).find(|&l| tracks[l].is_empty()) {
+            return Err(RouteError::NoTracks(lib.routing_layers[l].name.clone()));
         }
 
-        let gcell_pitch = gcell_pitch(
-            |l| db.average_track_spacing(LayerId::new(l)),
-            max_layer.index(),
-        );
+        let gcell_pitch = gcell_pitch(|l| db.average_track_spacing(l), max_layer);
         check_grid_span(
             &db.die_area,
             gcell_pitch * i64::from(config.gcell_tracks.get()),
         )?;
-        let layers: Vec<LayerTech> = (0..count).map(|l| layer_tech(lib, &tracks, l)).collect();
+        let layers: IdVec<LayerId, LayerTech> =
+            tracks.ids().map(|l| layer_tech(lib, &tracks, l)).collect();
 
-        let cuts = 0..lib.cut_layers.len();
+        let cuts = lib.cut_layers.ids();
         let vias = cuts
             .clone()
-            .map(|c| {
-                let cut = CutLayerId::new(c);
+            .map(|cut| {
                 ranked_vias(db, cut, &layers, Overhang::BothLayers)
                     .into_iter()
                     .next()
                     .ok_or_else(|| RouteError::NoVia(lib.cut_layers[cut].name.clone()))
             })
-            .collect::<Result<Vec<_>, _>>()?;
+            .collect::<Result<Vec<_>, _>>()?
+            .into();
         let access_vias = cuts
             .clone()
-            .map(|c| ranked_vias(db, CutLayerId::new(c), &layers, Overhang::UpperOnly))
+            .map(|cut| ranked_vias(db, cut, &layers, Overhang::UpperOnly))
             .collect();
-        let cuts = cuts.map(|c| cut_tech(db, CutLayerId::new(c))).collect();
+        let cuts = cuts.map(|cut| cut_tech(db, cut)).collect();
         Ok(Self {
             min_layer,
             max_layer,
@@ -350,32 +346,37 @@ impl RouteTech {
 
     /// The width of wires on `layer` under `rule`.
     pub fn wire_width(&self, rule: Option<NonDefaultRuleId>, layer: LayerId) -> Dbu {
-        rule.and_then(|r| self.rules.get(r.index()))
-            .map_or_else(|| self.layer(layer).width, |r| r.width[layer.index()])
+        rule.and_then(|r| self.rules.get(r))
+            .map_or_else(|| self.layer(layer).width, |r| r.width[layer])
     }
 
     /// The spacing other metal must keep from wires on `layer` under `rule`.
     pub fn wire_spacing(&self, rule: Option<NonDefaultRuleId>, layer: LayerId) -> Dbu {
-        rule.and_then(|r| self.rules.get(r.index()))
-            .map_or_else(|| self.layer(layer).spacing, |r| r.spacing[layer.index()])
+        rule.and_then(|r| self.rules.get(r))
+            .map_or_else(|| self.layer(layer).spacing, |r| r.spacing[layer])
     }
 
     /// The largest spacing any rule asks of wires on `layer`.
     pub(crate) fn max_wire_spacing(&self, layer: LayerId) -> Dbu {
         self.rules
             .iter()
-            .map(|r| r.spacing[layer.index()])
+            .map(|r| r.spacing[layer])
             .fold(self.layer(layer).spacing, Dbu::max)
     }
 
     /// The layer data of `layer`.
     pub fn layer(&self, layer: LayerId) -> &LayerTech {
-        &self.layers[layer.index()]
+        &self.layers[layer]
     }
 
     /// The via between `layer` and the layer above it.
     pub(crate) fn via_above(&self, layer: LayerId) -> &ViaTech {
-        &self.vias[layer.index()]
+        &self.vias[layer.cut_above()]
+    }
+
+    /// Every layer signal wires may use, from the lowest up.
+    pub fn routable_layers(&self) -> impl Iterator<Item = LayerId> + use<> {
+        self.min_layer.through(self.max_layer)
     }
 
     /// Whether `layer` may carry signal wires.
@@ -402,18 +403,16 @@ fn across_overhang(rect: &Rect<Dbu>, layer: &LayerTech) -> Dbu {
 
 /// The tracks and crossings of routing layer `l`, whose tracks and its
 /// neighbours' are in `tracks`.
-fn layer_tech(lib: &Library, tracks: &[Vec<Dbu>], l: usize) -> LayerTech {
-    let below = l.checked_sub(1).map(|b| tracks[b].as_slice());
-    let above = tracks.get(l + 1).map(Vec::as_slice);
-    let below_cross = l.checked_sub(1).map(|b| {
-        merge_cross(
-            b.checked_sub(1).map(|bb| tracks[bb].as_slice()),
-            Some(&tracks[l]),
-        )
-    });
-    let above_cross = (l + 1 < tracks.len())
-        .then(|| merge_cross(Some(&tracks[l]), tracks.get(l + 2).map(Vec::as_slice)));
-    let layer = &lib.routing_layers[LayerId::new(l)];
+fn layer_tech(lib: &Library, tracks: &IdVec<LayerId, Vec<Dbu>>, l: LayerId) -> LayerTech {
+    let tracks_of = |layer: Option<LayerId>| layer.and_then(|t| tracks.get(t)).map(Vec::as_slice);
+    let below = tracks_of(l.below());
+    let above = tracks_of(Some(l.above()));
+    let below_cross = l
+        .below()
+        .map(|b| merge_cross(tracks_of(b.below()), Some(&tracks[l])));
+    let above_cross =
+        above.map(|_| merge_cross(Some(&tracks[l]), tracks_of(Some(l.above().above()))));
+    let layer = &lib.routing_layers[l];
     LayerTech {
         direction: layer.direction,
         track_down: tracks[l]
@@ -482,7 +481,7 @@ enum Overhang {
 fn ranked_vias(
     db: &NetlistDB,
     cut: CutLayerId,
-    layers: &[LayerTech],
+    layers: &IdVec<LayerId, LayerTech>,
     overhang: Overhang,
 ) -> Vec<ViaTech> {
     let lib = &db.library;
@@ -501,11 +500,9 @@ fn ranked_vias(
         let (Some(bottom), Some(top)) = (metal(v.bottom()), metal(v.top())) else {
             continue;
         };
-        let top_overhang = across_overhang(&top, &layers[v.top().index()]);
+        let top_overhang = across_overhang(&top, &layers[v.top()]);
         let reach = match overhang {
-            Overhang::BothLayers => {
-                top_overhang.max(across_overhang(&bottom, &layers[v.bottom().index()]))
-            }
+            Overhang::BothLayers => top_overhang.max(across_overhang(&bottom, &layers[v.bottom()])),
             Overhang::UpperOnly => top_overhang,
         };
         let key = (reach, !v.is_default(), (bottom.area() + top.area()).get());
@@ -553,27 +550,27 @@ mod tests {
         );
     }
 
-    fn spacings(of: &[i64]) -> impl Fn(usize) -> Dbu + '_ {
-        |l| Dbu(of[l])
+    fn spacings(of: &[i64]) -> impl Fn(LayerId) -> Dbu + '_ {
+        |l| Dbu(of[l.index()])
     }
 
     #[test]
     fn gcells_are_sized_by_the_middle_spacing_of_the_second_to_fourth_layers() {
-        let pitch = gcell_pitch(spacings(&[280, 380, 280, 560, 560]), 4);
+        let pitch = gcell_pitch(spacings(&[280, 380, 280, 560, 560]), LayerId(4));
 
         assert_eq!(pitch, Dbu(380));
     }
 
     #[test]
     fn an_odd_track_spacing_is_rounded_down_to_an_even_one() {
-        let pitch = gcell_pitch(spacings(&[200, 401, 401, 401]), 3);
+        let pitch = gcell_pitch(spacings(&[200, 401, 401, 401]), LayerId(3));
 
         assert_eq!(pitch, Dbu(400));
     }
 
     #[test]
     fn below_four_routing_layers_the_highest_layer_sizes_the_gcells() {
-        let pitch = gcell_pitch(spacings(&[200, 300, 500]), 2);
+        let pitch = gcell_pitch(spacings(&[200, 300, 500]), LayerId(2));
 
         assert_eq!(pitch, Dbu(500));
     }

@@ -33,7 +33,7 @@ struct Span {
 /// The crossings inside a window, numbered layer by layer.
 #[derive(Debug)]
 struct Numbering {
-    min_layer: usize,
+    min_layer: LayerId,
     spans: Vec<Span>,
     nodes: usize,
     /// Most crossings back along its track a recent via can lie.
@@ -43,12 +43,10 @@ struct Numbering {
 impl Numbering {
     fn new(search: &Search<'_>, window: &Rect<Dbu>) -> Self {
         let tech = search.tech;
-        let min_layer = tech.min_layer.index();
         let mut spans = Vec::new();
         let mut nodes = 0;
         let mut reach = 0;
-        for l in min_layer..=tech.max_layer.index() {
-            let layer = LayerId::new(l);
+        for layer in tech.routable_layers() {
             let lt = tech.layer(layer);
             let ((a0, a1), (b0, b1)) = lt.across_along_rect(window);
             let tracks = lt.tracks_within(a0, a1);
@@ -62,11 +60,10 @@ impl Numbering {
             };
             nodes += span.tracks as usize * span.crosses as usize;
             spans.push(span);
-            let neighbours = [l.checked_sub(1), Some(l + 1)];
+            let neighbours = [layer.below(), Some(layer.above())];
             let via_reach = neighbours
                 .into_iter()
                 .flatten()
-                .map(LayerId::new)
                 .filter(|&other| tech.min_layer <= other && other <= tech.max_layer)
                 .map(|other| search.via_reach(layer, other))
                 .max()
@@ -75,7 +72,7 @@ impl Numbering {
             reach = reach.max(steps_within(&at, via_reach));
         }
         Self {
-            min_layer,
+            min_layer: tech.min_layer,
             spans,
             nodes,
             reach,
@@ -89,7 +86,7 @@ impl Numbering {
     fn node_index(&self, n: Node) -> Option<usize> {
         let span = self
             .spans
-            .get(n.layer.index().checked_sub(self.min_layer)?)?;
+            .get(n.layer.index().checked_sub(self.min_layer.index())?)?;
         let t = n.track.checked_sub(span.first_track)?;
         let c = n.cross.checked_sub(span.first_cross)?;
         (t < span.tracks && c < span.crosses)
@@ -102,7 +99,7 @@ impl Numbering {
         let offset = index - span.base;
         let crosses = span.crosses as usize;
         Node {
-            layer: LayerId::new(self.min_layer + l),
+            layer: LayerId::new(self.min_layer.index() + l),
             track: span.first_track + crate::tech::index_u32(offset / crosses),
             cross: span.first_cross + crate::tech::index_u32(offset % crosses),
         }
