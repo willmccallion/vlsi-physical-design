@@ -651,3 +651,38 @@ fn misaligned_site(xj: i64, origin: i64, spacing: i64) -> i64 {
     let site = (xj - origin / spacing) as i32;
     i64::from((origin as i32).wrapping_add(site.wrapping_mul(spacing as i32)))
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn nodes(count: u32) -> Vec<NodeId> {
+        (0..count).map(NodeId).collect()
+    }
+
+    #[test]
+    fn a_position_inside_a_segment_lies_between_two_cells() {
+        let cells = nodes(3);
+
+        assert_eq!(around(&cells, 1), (Some(cells[0]), Some(cells[1])));
+    }
+
+    #[test]
+    fn a_position_before_the_first_cell_has_nothing_left_of_it() {
+        let cells = nodes(3);
+
+        assert_eq!(around(&cells, 0), (None, Some(cells[0])));
+    }
+
+    #[test]
+    fn a_position_past_the_last_cell_has_nothing_right_of_it() {
+        let cells = nodes(3);
+
+        assert_eq!(around(&cells, 3), (Some(cells[2]), None));
+    }
+
+    #[test]
+    fn an_empty_segment_has_no_neighbours() {
+        assert_eq!(around(&[], 0), (None, None));
+    }
+}
