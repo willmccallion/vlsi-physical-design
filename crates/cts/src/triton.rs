@@ -1319,3 +1319,50 @@ fn net_spacing(layer: &pare_common::db::library::RoutingLayer, width: Dbu) -> Db
         spacing
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn points(xs: &[i64]) -> Vec<Point<Dbu>> {
+        xs.iter().map(|&x| Point::new(Dbu(x), Dbu(0))).collect()
+    }
+
+    #[test]
+    fn without_a_wire_length_limit_every_node_is_its_own_cluster() {
+        let nodes = points(&[0, 10, 20]);
+
+        let clusters = long_edge_clusters(&nodes, &[0, 0, 1], None);
+
+        assert_eq!(clusters, vec![vec![1], vec![0], vec![2]]);
+    }
+
+    #[test]
+    fn short_edges_join_their_nodes_and_long_edges_part_them() {
+        let nodes = points(&[0, 10, 1000, 1010]);
+
+        let clusters = long_edge_clusters(&nodes, &[0, 0, 1, 2], Some(Dbu(100)));
+
+        assert_eq!(clusters, vec![vec![1, 0], vec![2, 3]]);
+    }
+
+    #[test]
+    fn an_edge_as_long_as_the_limit_is_long() {
+        let nodes = points(&[0, 100]);
+
+        let clusters = long_edge_clusters(&nodes, &[0, 0], Some(Dbu(100)));
+
+        assert_eq!(clusters, vec![vec![1], vec![0]]);
+    }
+
+    #[test]
+    fn a_short_edge_between_clusters_moves_the_smaller_into_the_larger() {
+        // Node 4's edge to the root joins {1, 0} into {2, 3, 4}, leaving
+        // the smaller cluster empty in its place.
+        let nodes = points(&[0, 1, 2, 3, 4]);
+
+        let clusters = long_edge_clusters(&nodes, &[0, 0, 3, 4, 0], Some(Dbu(100)));
+
+        assert_eq!(clusters, vec![vec![], vec![2, 3, 4, 1, 0]]);
+    }
+}
