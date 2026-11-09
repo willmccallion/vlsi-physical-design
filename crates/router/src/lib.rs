@@ -1188,6 +1188,11 @@ pub enum RouteError {
     /// A routable layer has no tracks and no pitch to derive them from.
     #[error("routing layer '{0}' has no tracks")]
     NoTracks(String),
+    /// The routable layers all run one way, so no route can turn.
+    #[error(
+        "every routing layer from min_layer to max_layer runs {0:?}; routing needs both directions"
+    )]
+    OneDirection(Direction),
     /// No usable via is defined through a cut layer.
     #[error("no via is defined through cut layer '{0}'")]
     NoVia(String),
