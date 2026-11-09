@@ -69,6 +69,13 @@ pub enum CtsError {
     /// A normalized characterization value overflows the table's fields.
     #[error("normalized characterization values must lie in [1, {0}]")]
     CharacterizationRange(u32),
+    /// The clock buffers' fanout limit is below the two branches each
+    /// point of an H-tree drives.
+    #[error(
+        "a clock buffer fanout limit of {0} is below the {branches} an H-tree needs",
+        branches = triton::TREE_BRANCHES
+    )]
+    FanoutLimitTooLow(u32),
     /// Two clocks enter on the same net.
     #[error("clock '{0}' overlaps a previous clock")]
     OverlappingClock(String),

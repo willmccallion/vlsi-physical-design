@@ -29,6 +29,10 @@ use pare_resizer::{ClockNetwork, Link};
 use rustc_hash::{FxHashMap, FxHashSet};
 use std::collections::BTreeMap;
 
+/// The branches each branching point of an H-tree drives, the least
+/// fanout a tree can keep to.
+pub(crate) const TREE_BRANCHES: u32 = 2;
+
 /// What clock tree synthesis reads.
 #[derive(Clone, Copy, Debug)]
 pub struct CtsInput<'a> {
@@ -152,6 +156,13 @@ pub fn synthesize(db: &mut NetlistDB, input: &CtsInput<'_>) -> Result<ClockTrees
         if settings.max_fanout.is_some_and(|max| sink < max) {
             settings.max_fanout = Some(sink);
         }
+    }
+    // NOTE: TritonCTS takes a limit of one and splits the sinks level after
+    // level until memory runs out; PARE refuses it.
+    if let Some(limit) = settings.max_fanout
+        && limit < TREE_BRANCHES
+    {
+        return Err(CtsError::FanoutLimitTooLow(limit));
     }
     settings.max_wire_length = input.max_wire_length;
     let mut tech = TechChar::new(&CharSetup {

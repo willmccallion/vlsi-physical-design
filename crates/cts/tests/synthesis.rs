@@ -719,6 +719,27 @@ fn a_grid_under_a_fanout_limit_gets_the_trees_it_always_has() {
 }
 
 #[test]
+fn a_fanout_limit_of_one_is_refused() {
+    let sdc = format!("{CLOCK}set_max_fanout 1 [current_design]\n");
+    let (mut db, lib, constraints) = load_constrained(4, 4, false, &sdc);
+    let link = Link::new(&db, &lib, &[]).unwrap();
+    let clocks = clock_network(&db, &link, &constraints);
+    let input = CtsInput {
+        link: &link,
+        sdc: &constraints,
+        clocks: &clocks,
+        signal_rc: wire(&db, "metal2", 3.5, 0.1),
+        clock_rc: wire(&db, "metal3", 1.5, 0.11),
+        max_wire_length: None,
+        options: CtsOptions::default(),
+    };
+
+    let refused = synthesize(&mut db, &input).err();
+
+    assert_eq!(refused, Some(CtsError::FanoutLimitTooLow(1)));
+}
+
+#[test]
 fn a_grid_under_a_wire_length_limit_gets_the_trees_it_always_has() {
     assert_golden(
         "grid_24x24_wire_100um.txt",
