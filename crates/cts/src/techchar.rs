@@ -227,27 +227,29 @@ enum NormalizedPiece {
     Buffer(usize),
 }
 
-/// The ranges the normalized values span.
-#[derive(Clone, Copy, Debug)]
+/// The range the normalized values of one quantity span.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 struct Bounds {
     min: u32,
     max: u32,
 }
 
-impl Bounds {
-    const fn new() -> Self {
-        Self {
-            min: u32::MAX,
-            max: 0,
-        }
-    }
-
-    fn normalize(&mut self, value: f32, step: f32) -> u32 {
-        let normalized = ((value / step).ceil() as u32).max(1);
-        self.min = self.min.min(normalized);
-        self.max = self.max.max(normalized);
-        normalized
-    }
+/// `value` in whole `step`s, rounded up and at least one, as
+/// `TechChar::characterizationPostProcess` normalizes it, widening
+/// `bounds` to take it in.
+fn normalize(bounds: &mut Option<Bounds>, value: f32, step: f32) -> u32 {
+    let normalized = ((value / step).ceil() as u32).max(1);
+    *bounds = Some(bounds.map_or(
+        Bounds {
+            min: normalized,
+            max: normalized,
+        },
+        |b| Bounds {
+            min: b.min.min(normalized),
+            max: b.max.max(normalized),
+        },
+    ));
+    normalized
 }
 
 /// The steps, axes and lengths the characterization runs over.
@@ -270,10 +272,7 @@ impl TechChar {
     pub fn new(setup: &CharSetup<'_>) -> Result<Self, CtsError> {
         let liberty = setup.link.liberty;
         let plan = plan(setup)?;
-        let wire = WirePerDbu {
-            res: setup.clock_rc.resistance.per_dbu(setup.db.dbu()),
-            cap: setup.clock_rc.capacitance.per_dbu(setup.db.dbu()),
-        };
+        let wire = WirePerDbu::of(setup);
         let mut groups: BTreeMap<CharKey, Vec<Measured>> = BTreeMap::new();
         for &wirelength in &plan.wirelengths {
             for pattern in patterns(wirelength, plan.char_unit) {
@@ -307,8 +306,7 @@ impl TechChar {
             }
         }
         let measurements: Vec<Measured> = groups.into_values().flatten().collect();
-        let (lines, bounds) = post_process(&measurements, &plan);
-        compile(&lines, &bounds, &plan, setup.masters, wire.cap)
+        tabulate(setup, &plan, &measurements)
     }
 
     /// The segment at `index`.
@@ -476,6 +474,13 @@ fn plan(setup: &CharSetup<'_>) -> Result<Plan, CtsError> {
         .macro_of(char_buffer.id)
         .map(|m| setup.db.library.cell_macro(m).size.y.get())
         .ok_or_else(|| CtsError::NoMaster(liberty.cell(char_buffer.id).name.clone()))?;
+    // NOTE: initCharacterization steps its wire lengths by ten heights
+    // and never ends on a zero-height buffer; PARE refuses it.
+    if height == 0 {
+        return Err(CtsError::ZeroHeightBuffer(
+            liberty.cell(char_buffer.id).name.clone(),
+        ));
+    }
     let char_unit = (height * 10) as u32;
     let max_wirelength = (char_unit * WIRELENGTH_ITERATIONS).max(2 * char_unit);
     let mut wirelengths = Vec::new();
@@ -685,6 +690,16 @@ struct WirePerDbu {
     cap: FaradsPerDbu,
 }
 
+impl WirePerDbu {
+    /// The clock wire of `setup`.
+    fn of(setup: &CharSetup<'_>) -> Self {
+        Self {
+            res: setup.clock_rc.resistance.per_dbu(setup.db.dbu()),
+            cap: setup.clock_rc.capacitance.per_dbu(setup.db.dbu()),
+        }
+    }
+}
+
 /// A pattern with its buffers' types, timed as `TechChar`'s characterization
 /// block is: an ideal input port, then each wire's pi model and Elmore
 /// delay as set by hand, the last wire carrying the load.
@@ -858,23 +873,25 @@ struct AllBounds {
     wirelength: Bounds,
 }
 
+/// The measurements within the slew limit, normalized, and the ranges
+/// they span.
+#[derive(Clone, Debug)]
+struct Normalization {
+    lines: Vec<Normalized>,
+    bounds: AllBounds,
+}
+
 /// Keeps the measurements within the slew limit and normalizes them, as
-/// `TechChar::characterizationPostProcess`.
-fn post_process(measurements: &[Measured], plan: &Plan) -> (Vec<Normalized>, AllBounds) {
-    let mut bounds = AllBounds {
-        slew: Bounds::new(),
-        cap: Bounds::new(),
-        wirelength: Bounds::new(),
-    };
+/// `TechChar::characterizationPostProcess`; none when none is within it.
+fn post_process(measurements: &[Measured], plan: &Plan) -> Option<Normalization> {
+    let (mut slew, mut cap, mut wire) = (None, None, None);
     let mut lines = Vec::new();
     for m in measurements.iter().filter(|m| m.pin_slew <= plan.max_slew) {
-        let pin_slew = bounds.slew.normalize(m.pin_slew, plan.slew_step) as f32;
-        let in_slew = bounds.slew.normalize(m.in_slew, plan.slew_step) as f32;
-        let total_cap = bounds.cap.normalize(m.total_cap, plan.cap_step) as f32;
-        let load = bounds.cap.normalize(m.load, plan.cap_step) as f32;
-        let wirelength = bounds
-            .wirelength
-            .normalize(m.wirelength, plan.char_unit as f32) as f32;
+        let pin_slew = normalize(&mut slew, m.pin_slew, plan.slew_step) as f32;
+        let in_slew = normalize(&mut slew, m.in_slew, plan.slew_step) as f32;
+        let total_cap = normalize(&mut cap, m.total_cap, plan.cap_step) as f32;
+        let load = normalize(&mut cap, m.load, plan.cap_step) as f32;
+        let wirelength = normalize(&mut wire, m.wirelength, plan.char_unit as f32) as f32;
         let pin_arrival = (m.pin_arrival / (plan.slew_step / DELAY_STEPS_PER_SLEW_STEP)).ceil();
         let topology = m
             .topology
@@ -897,7 +914,41 @@ fn post_process(measurements: &[Measured], plan: &Plan) -> (Vec<Normalized>, All
             topology,
         });
     }
-    (lines, bounds)
+    Some(Normalization {
+        lines,
+        bounds: AllBounds {
+            slew: slew?,
+            cap: cap?,
+            wirelength: wire?,
+        },
+    })
+}
+
+/// The table of `measurements` taken over `plan`, as `TechChar::create`
+/// finishes it; an error when no segment keeps its slew within the limit.
+fn tabulate(
+    setup: &CharSetup<'_>,
+    plan: &Plan,
+    measurements: &[Measured],
+) -> Result<TechChar, CtsError> {
+    // NOTE: characterizationPostProcess seeds its ranges with UINT_MAX and 0,
+    // which overflow when nothing is kept; PARE refuses an empty table.
+    let normalization =
+        post_process(measurements, plan).ok_or_else(|| CtsError::NoSegmentWithinSlewLimit {
+            buffer: setup
+                .link
+                .liberty
+                .cell(setup.masters[plan.char_buffer].id)
+                .name
+                .clone(),
+            max_transition: Seconds::new(f64::from(plan.max_slew)),
+        })?;
+    compile(
+        &normalization,
+        plan,
+        setup.masters,
+        WirePerDbu::of(setup).cap,
+    )
 }
 
 /// `value` written with six decimals and read back, as `TechChar` stores
@@ -910,13 +961,18 @@ fn round_six_decimals(value: f64) -> f64 {
 /// Builds the table from the normalized measurements, as
 /// `TechChar::compileLut`.
 fn compile(
-    lines: &[Normalized],
-    bounds: &AllBounds,
+    normalization: &Normalization,
     plan: &Plan,
     masters: &[BufferCell],
     cap_per_dbu: FaradsPerDbu,
 ) -> Result<TechChar, CtsError> {
+    let Normalization { lines, bounds } = normalization;
     let ratio = plan.char_unit / plan.length_unit;
+    // The top of the load range bounds every input capacitance from above.
+    let actual_min_input_cap = lines
+        .iter()
+        .map(|line| line.total_cap as u32)
+        .fold(bounds.cap.max, u32::min);
     let mut table = TechChar {
         segments: Vec::with_capacity(lines.len()),
         by_key: FxHashMap::default(),
@@ -924,7 +980,7 @@ fn compile(
         max_segment_length: bounds.wirelength.max * ratio,
         max_capacitance: bounds.cap.max,
         max_slew: bounds.slew.max,
-        actual_min_input_cap: u32::MAX,
+        actual_min_input_cap,
         length_unit: plan.length_unit,
         cap_per_dbu,
         sink_buffer_input_cap: plan.sink_buffer_input_cap,
@@ -942,7 +998,6 @@ fn compile(
         return Err(CtsError::CharacterizationRange(MAX_NORMALIZED));
     }
     for line in lines {
-        table.actual_min_input_cap = table.actual_min_input_cap.min(line.total_cap as u32);
         let mut pin_slew = line.pin_slew;
         if line.pure_wire && pin_slew <= line.in_slew {
             pin_slew += 1.0;
@@ -1050,19 +1105,71 @@ mod tests {
         "cell_rise (delay_t) { values (\"0.02, 0.08\", \"0.03, 0.09\") ; }
          cell_fall (delay_t) { values (\"0.02, 0.08\", \"0.03, 0.09\") ; }";
 
-    /// What `plan` makes of `lib` characterizing its buffer in `db`.
-    fn plan_of(db: &NetlistDB, lib: &Liberty) -> Result<Plan, CtsError> {
+    /// Delay and slew tables over input slew and load.
+    /// What `step` makes of characterizing the buffer of `lib` in `db`.
+    fn characterized<T>(
+        db: &NetlistDB,
+        lib: &Liberty,
+        step: impl FnOnce(&CharSetup<'_>) -> T,
+    ) -> T {
         let link = Link::new(db, lib, &[]).unwrap();
         let id = lib.cell_id("CLKBUF_X3").unwrap();
         let buffer = lib.buffer_cell(id).unwrap();
         let layer = db.library.routing_layer_id("metal3").unwrap();
-        plan(&CharSetup {
+        step(&CharSetup {
             link: &link,
             db,
             masters: &[buffer],
             sink_buffer: buffer,
             clock_rc: WireRc::per_micron(1.5, 0.11, layer),
         })
+    }
+
+    /// What `plan` makes of `lib` characterizing its buffer in `db`.
+    fn plan_of(db: &NetlistDB, lib: &Liberty) -> Result<Plan, CtsError> {
+        characterized(db, lib, plan)
+    }
+
+    #[test]
+    fn no_measurement_within_the_slew_limit_is_refused_naming_the_buffer() {
+        let lib = clock_buffer_library(
+            "",
+            "max_capacitance : 180.0 ; max_transition : 0.2 ;",
+            TWO_AXIS_TIMING,
+        );
+
+        let refused = characterized(&fixtures::design(""), &lib, |setup| {
+            let plan = plan(setup).unwrap();
+            tabulate(setup, &plan, &[]).err()
+        });
+
+        assert_eq!(
+            refused,
+            Some(CtsError::NoSegmentWithinSlewLimit {
+                buffer: "CLKBUF_X3".to_string(),
+                max_transition: Seconds::new(f64::from(0.2e-9_f32)),
+            })
+        );
+    }
+
+    #[test]
+    fn a_characterization_buffer_of_no_height_is_refused() {
+        let mut db = fixtures::design("");
+        for master in &mut db.library.macros {
+            master.size.y = pare_common::geom::dbu::Dbu(0);
+        }
+        let lib = clock_buffer_library(
+            "",
+            "max_capacitance : 180.0 ; max_transition : 0.2 ;",
+            TWO_AXIS_TIMING,
+        );
+
+        let refused = plan_of(&db, &lib).err();
+
+        assert_eq!(
+            refused,
+            Some(CtsError::ZeroHeightBuffer("CLKBUF_X3".to_string()))
+        );
     }
 
     #[test]
@@ -1177,12 +1284,12 @@ mod tests {
 
     #[test]
     fn a_value_normalizes_up_to_whole_steps_and_at_least_one() {
-        let mut bounds = Bounds::new();
+        let mut bounds = None;
 
-        let normalized = [2.5, 0.0, 4.0].map(|v| bounds.normalize(v, 1.0));
+        let normalized = [2.5, 0.0, 4.0].map(|v| normalize(&mut bounds, v, 1.0));
 
         assert_eq!(normalized, [3, 1, 4]);
-        assert_eq!((bounds.min, bounds.max), (1, 4));
+        assert_eq!(bounds, Some(Bounds { min: 1, max: 4 }));
     }
 
     #[test]
