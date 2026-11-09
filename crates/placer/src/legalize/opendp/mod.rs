@@ -725,13 +725,13 @@ impl Placer {
             return legal;
         };
         if pixel.hopeless
-            && let Some(valid) = self.move_hopeless(node, at)
+            && let Some((valid, valid_pixel)) = self.move_hopeless(node, at)
         {
             legal = Point::new(
                 valid.x.to_dbu(self.rows.site_width()),
                 self.rows.row_y(valid.y),
             );
-            pixel = self.pixel(valid.x, valid.y).copied().unwrap_or(pixel);
+            pixel = valid_pixel;
         }
         if let Some(block) = pixel.node() {
             let block = &self.nodes[block];
@@ -750,42 +750,45 @@ impl Placer {
     }
 
     /// The nearest valid site left, right, below or above a hopeless one,
-    /// as `Opendp::moveHopeless`; none when its row and column have none.
-    fn move_hopeless(&self, node: &Node, from: GridPt) -> Option<GridPt> {
+    /// with its pixel, as `Opendp::moveHopeless`; none when its row and
+    /// column have none.
+    fn move_hopeless(&self, node: &Node, from: GridPt) -> Option<(GridPt, Pixel)> {
         let GridPt { x: x0, y: y0 } = from;
-        let mut best: Option<(Dbu, GridPt)> = None;
-        let valid = |x: GridX, y: GridY| self.pixel(x, y).is_some_and(|p| p.valid);
-        if let Some(x) = GridX::ZERO.until(x0).rev().find(|&x| valid(x, y0)) {
-            best = Some((
-                (x0 - x - 1).to_dbu(self.rows.site_width()),
-                GridPt::new(x, y0),
-            ));
+        let valid = |at: GridPt| self.pixel(at.x, at.y).filter(|p| p.valid).map(|&p| (at, p));
+        let site_width = self.rows.site_width();
+        let mut best: Option<(Dbu, (GridPt, Pixel))> = None;
+        let mut offer = |dist: Dbu, found: (GridPt, Pixel)| {
+            if best.is_none_or(|(d, _)| dist < d) {
+                best = Some((dist, found));
+            }
+        };
+        let left = GridX::ZERO
+            .until(x0)
+            .rev()
+            .find_map(|x| valid(GridPt::new(x, y0)));
+        if let Some(found) = left {
+            offer((x0 - found.0.x - 1).to_dbu(site_width), found);
         }
-        if let Some(x) = (x0 + 1)
+        let right = (x0 + 1)
             .until(self.rows.row_site_count())
-            .find(|&x| valid(x, y0))
-        {
-            let dist = (x - x0).to_dbu(self.rows.site_width()) - node.width;
-            if best.is_none_or(|(d, _)| dist < d) {
-                best = Some((dist, GridPt::new(x, y0)));
-            }
+            .find_map(|x| valid(GridPt::new(x, y0)));
+        if let Some(found) = right {
+            offer((found.0.x - x0).to_dbu(site_width) - node.width, found);
         }
-        if let Some(y) = GridY::ZERO.until(y0).rev().find(|&y| valid(x0, y)) {
-            let dist = self.rows.row_y(y0) - self.rows.row_y(y);
-            if best.is_none_or(|(d, _)| dist < d) {
-                best = Some((dist, GridPt::new(x0, y)));
-            }
+        let below = GridY::ZERO
+            .until(y0)
+            .rev()
+            .find_map(|y| valid(GridPt::new(x0, y)));
+        if let Some(found) = below {
+            offer(self.rows.row_y(y0) - self.rows.row_y(found.0.y), found);
         }
-        if let Some(y) = (y0 + 1)
+        let above = (y0 + 1)
             .until(self.rows.row_count())
-            .find(|&y| valid(x0, y))
-        {
-            let dist = self.rows.row_y(y) - self.rows.row_y(y0);
-            if best.is_none_or(|(d, _)| dist < d) {
-                best = Some((dist, GridPt::new(x0, y)));
-            }
+            .find_map(|y| valid(GridPt::new(x0, y)));
+        if let Some(found) = above {
+            offer(self.rows.row_y(found.0.y) - self.rows.row_y(y0), found);
         }
-        best.map(|(_, at)| at)
+        best.map(|(_, found)| found)
     }
 
     /// The nearest spot from `start` where the cell can be placed, in
@@ -1209,9 +1212,9 @@ impl RowShell {
 /// The parts of the rows' bounding box no row covers and that do not reach
 /// the box's edge, as rectangles of the compressed coordinate grid.
 fn enclosed_holes(rows: &[Rect<Dbu>]) -> Vec<Rect<Dbu>> {
-    let Some(bbox) = rows.iter().copied().reduce(|a, b| a.union(&b)) else {
+    if rows.is_empty() {
         return Vec::new();
-    };
+    }
     let mut xs: Vec<Dbu> = rows.iter().flat_map(|r| [r.min.x, r.max.x]).collect();
     let mut ys: Vec<Dbu> = rows.iter().flat_map(|r| [r.min.y, r.max.y]).collect();
     xs.sort_unstable();
@@ -1267,7 +1270,6 @@ fn enclosed_holes(rows: &[Rect<Dbu>]) -> Vec<Rect<Dbu>> {
             }));
         }
     }
-    let _ = bbox;
     holes
 }
 
