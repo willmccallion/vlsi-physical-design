@@ -4,23 +4,23 @@
 //! pin's slew and every driver's load are within the library's limits.
 
 pub mod bnet;
-pub mod buffers;
-pub mod clock_inverters;
+mod buffers;
+mod clock_inverters;
 pub mod dmp;
 pub mod fuzzy;
-pub mod gated;
-pub mod graph;
-pub mod hold;
-pub mod library;
-pub mod moves;
-pub mod netlist;
-pub mod parasitics;
-pub mod rebuffer;
-pub mod repair;
-pub mod resizer;
-pub mod route_parasitics;
-pub mod setup;
-pub mod sta;
+mod gated;
+mod graph;
+mod hold;
+mod library;
+mod moves;
+mod netlist;
+mod parasitics;
+mod rebuffer;
+mod repair;
+mod resizer;
+mod route_parasitics;
+mod setup;
+mod sta;
 pub mod steiner;
 #[cfg(test)]
 mod testing;
@@ -30,11 +30,13 @@ pub use clock_inverters::{ClockInverterRepair, repair_clock_inverters};
 pub use hold::{HoldOptions, HoldSummary, repair_hold};
 pub use library::{BufferSet, Link, LinkError};
 pub use netlist::{ClockNetwork, Constants, Namer, Netlist, NetlistError};
-pub use rebuffer::Rebuffer;
+pub use parasitics::{NetParasitics, WireRc};
+pub use rebuffer::{Rebuffer, max_wire_length, max_wire_length_of};
 pub use repair::{RepairSummary, Repairer};
 pub use resizer::{
-    Context, RepairError, Resizer, SessionInputs, Timing, Untimed, area_change_percent,
-    timing_net_weights,
+    Context, GlobalRouting, RepairError, Resizer, SessionInputs, Timing, Untimed,
+    area_change_percent, timing_net_weights,
 };
+pub use route_parasitics::RouteRc;
 pub use setup::{SetupOptions, SetupProgress, SetupSummary, repair_setup};
 pub use sta::{Path, PathPoint, Slack, Sta, Tag, Via};

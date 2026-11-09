@@ -10,10 +10,10 @@ use pare_common::db::parser::{def, lef, liberty};
 use pare_common::geom::dbu::{Dbu, DbuPerMicron};
 use pare_common::geom::point::Point;
 use pare_common::units::{Farads, FaradsPerMeter, OhmsPerMeter, Seconds};
+use pare_resizer::RouteRc;
 use pare_resizer::bnet::{self, Kind, LoadModel, PinLoad, TreeRc};
-use pare_resizer::parasitics::{NetParasitics, WireRc};
-use pare_resizer::route_parasitics::RouteRc;
 use pare_resizer::{Link, Netlist};
+use pare_resizer::{NetParasitics, WireRc};
 use std::path::{Path, PathBuf};
 
 const fn per_meter_ohms(value: f64) -> OhmsPerMeter {

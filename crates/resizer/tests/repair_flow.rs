@@ -9,7 +9,7 @@ use pare_common::db::parser::{def, lef, liberty, sdc};
 use pare_common::geom::dbu::{Dbu, DbuPerMicron};
 use pare_common::testing;
 use pare_common::units::Seconds;
-use pare_resizer::parasitics::WireRc;
+use pare_resizer::WireRc;
 use pare_resizer::{
     ClockNetwork, Constants, Context, HoldOptions, Link, Namer, Netlist, Repairer, Resizer,
     SessionInputs, SetupOptions, Sta, repair_hold, repair_setup,

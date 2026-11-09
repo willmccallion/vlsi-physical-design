@@ -622,7 +622,7 @@ impl TimingPlacement<'_> {
         let mut resizer = Resizer::timed(inputs, self.repair.sdc)?;
         let area_before = resizer.design_area();
         let wns_before = resizer.sta().worst_slack(MinMax::Max).0.time();
-        resizer.set_max_wire_length(pare_resizer::rebuffer::max_wire_length(&resizer));
+        resizer.set_max_wire_length(pare_resizer::max_wire_length(&resizer));
         let done = Repairer::new(&mut resizer).repair_design()?;
         let mut rebuffer = Rebuffer::new(&resizer)?;
         rebuffer.fully_rebuffer(&mut resizer)?;

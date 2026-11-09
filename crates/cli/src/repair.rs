@@ -10,8 +10,8 @@ use pare_common::db::parser::{liberty, sdc};
 use pare_common::db::sdc::Sdc;
 
 use crate::report::{NetlistSummary, Report, TimingSummary};
-use pare_resizer::parasitics::WireRc;
-use pare_resizer::resizer::Context as RepairContext;
+use pare_resizer::Context as RepairContext;
+use pare_resizer::WireRc;
 use pare_resizer::{
     BufferSet, ClockNetwork, Constants, HoldOptions, HoldSummary, Link, Namer, Netlist, Repairer,
     Resizer, SessionInputs, SetupOptions, SetupProgress, SetupSummary, Sta, Timing, repair_hold,
