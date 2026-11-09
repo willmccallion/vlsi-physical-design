@@ -3,6 +3,7 @@
 
 use crate::checks::report_placement;
 use crate::cts::clock_tree_synthesis;
+use crate::phase::{Phase, PhaseTimer};
 use crate::repair::{NetlistRepair, TimedRepair, repair_design, repair_netlist, repair_timing};
 use crate::report::{GlobalPlacementSummary, PlacementSummary, Report};
 use crate::{ui, visualization};
@@ -156,10 +157,10 @@ fn starting_placement(
         ui::check("Starting from the given placement");
         return Ok(None);
     }
-    let phase_start = Instant::now();
+    let timer = PhaseTimer::start(Phase::GlobalPlacement);
     let model = PlacementModel::from_db(db, &Zones::new(db)?);
     let summary = global_placement(config, db, model, Pass::Full, repair)?;
-    report.phase("global placement", phase_start);
+    timer.finish(report);
     Ok(Some(summary))
 }
 
@@ -189,8 +190,7 @@ fn legalize_with_pin_access(
         .iter()
         .filter(|c| !matches!(c.status, PlacementStatus::Fixed | PlacementStatus::Cover))
         .count();
-    let phase_start = Instant::now();
-    ui::phase("Legalization");
+    let timer = PhaseTimer::start(Phase::Legalization);
     let legalization = legalize(db, &zones)?;
     ui::check(&format!("Legalized {movable_cells} cells"));
     let access = config
@@ -211,7 +211,7 @@ fn legalize_with_pin_access(
         }
     });
     show_hpwl(hpwl_um(db));
-    report.phase("legalization", phase_start);
+    timer.finish(report);
     Ok(Legalized {
         legalization,
         pin_access,
@@ -235,8 +235,7 @@ fn detailed_placement(
     report: &mut Report,
 ) -> anyhow::Result<Detailed> {
     let zones = Zones::new(db)?;
-    let phase_start = Instant::now();
-    ui::phase("Detailed Placement");
+    let timer = PhaseTimer::start(Phase::DetailedPlacement);
     let before = CellPlaces::record(db);
     if let Legalization::DetailedPlacement(_) = legalized.legalization {
         let _ = improve_placement(db, IMPROVE_MAX_DISPLACEMENT)?;
@@ -256,7 +255,7 @@ fn detailed_placement(
         "HPWL (um):",
         &format!("{:.0}", detailed.hpwl_um),
     );
-    report.phase("detailed placement", phase_start);
+    timer.finish(report);
     Ok(detailed)
 }
 
@@ -270,23 +269,22 @@ fn clock_trees_and_timing(
     report: &mut Report,
 ) -> anyhow::Result<()> {
     if clock_tree_synthesis(config, db, repair, report)? {
-        legalize_again(db, report, "legalization after clock tree synthesis")?;
+        legalize_again(db, report, Phase::LegalizationAfterClockTrees)?;
     }
     if repair_timing(config, db, repair, report)? {
-        legalize_again(db, report, "legalization after timing repair")?;
+        legalize_again(db, report, Phase::LegalizationAfterTimingRepair)?;
     }
     Ok(())
 }
 
 /// Legalizes the placement again after a step that added or moved cells,
-/// reporting it as `phase`.
-fn legalize_again(db: &mut NetlistDB, report: &mut Report, phase: &str) -> anyhow::Result<()> {
+/// timing it as `phase`.
+fn legalize_again(db: &mut NetlistDB, report: &mut Report, phase: Phase) -> anyhow::Result<()> {
     let zones = Zones::new(db)?;
-    let phase_start = Instant::now();
-    ui::phase("Legalization");
+    let timer = PhaseTimer::start(phase);
     let _ = legalize(db, &zones)?;
     show_hpwl(hpwl_um(db));
-    report.phase(phase, phase_start);
+    timer.finish(report);
     Ok(())
 }
 
@@ -309,8 +307,7 @@ fn write_placement(
     global_png: &Path,
     report: &mut Report,
 ) -> anyhow::Result<()> {
-    let phase_start = Instant::now();
-    ui::phase("Output");
+    let timer = PhaseTimer::start(Phase::PlacementOutput);
     ui::wrote(global_png);
     let placed_png = output_dir.join("placed.png");
     draw_placement(db, &placed_png)?;
@@ -327,7 +324,7 @@ fn write_placement(
         out
     };
     ui::wrote(&placed);
-    report.phase("placement output", phase_start);
+    timer.finish(report);
     Ok(())
 }
 
@@ -357,14 +354,12 @@ fn place_io_pins_by_cells(
     layers: IoLayers,
     report: &mut Report,
 ) -> anyhow::Result<()> {
-    let phase_start = Instant::now();
-    ui::phase("Global Placement Without I/O");
+    let timer = PhaseTimer::start(Phase::GlobalPlacementWithoutIo);
     let model = PlacementModel::from_db_without_movable_io(db, zones);
     let _ = global_placement(config, db, model, Pass::SkipIo, None)?;
-    report.phase("global placement without I/O", phase_start);
+    timer.finish(report);
 
-    let phase_start = Instant::now();
-    ui::phase("I/O Pin Placement");
+    let timer = PhaseTimer::start(Phase::IoPinPlacement);
     let placed = io::place_io_pins(db, layers)?;
     ui::stat_row(
         "Pins:",
@@ -372,7 +367,7 @@ fn place_io_pins_by_cells(
         "Free slots:",
         &placed.slots.to_string(),
     );
-    report.phase("I/O pin placement", phase_start);
+    timer.finish(report);
     Ok(())
 }
 
