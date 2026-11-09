@@ -11,6 +11,8 @@
 
 use pare_common::network_simplex::{Arc, min_cost_flow};
 
+/// The farthest a sink may be from a mean and still be assigned to it, as
+/// `Clustering::Kmeans` passes `minCostFlow`.
 const MAX_DIST: f32 = 5200.0;
 
 /// A sink to cluster, in the tree's length units.
@@ -128,6 +130,8 @@ impl Clustering {
     fn silhouette(&self, means: &[(f32, f32); 2]) -> f32 {
         let mut sum = 0.0_f32;
         for sink in &self.sinks {
+            // NOTE: calcSilh quirk kept: an unassigned sink scores in_d = 0, a
+            // perfect fit, as the clusters TritonCTS picks depend on it.
             let (mut in_d, mut out_d) = (0.0_f32, f32::MAX);
             for (j, &mean) in means.iter().enumerate() {
                 let d = dist(mean, (sink.x, sink.y));
