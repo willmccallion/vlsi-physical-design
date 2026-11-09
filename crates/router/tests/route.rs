@@ -21,7 +21,7 @@ use pare_router::runs::{EdgeSet, Run};
 use pare_router::tech::RouteTech;
 use pare_router::wiring::{Edge, NetRoute};
 use pare_router::{
-    GlobalRouteEstimator, RouteError, RouteState, Save, SaveError, SavePoint, Session,
+    GlobalRouteEstimator, RouteError, RouteState, RunOptions, Save, SaveError, SavePoint,
     capacity_reduction, route, route_with, rudy_wire_width,
 };
 use std::num::NonZeroU32;
@@ -99,14 +99,14 @@ fn route_saving(point: SavePoint) -> (Vec<Vec<RouteElem>>, RouteState) {
         saved = Some(state.clone());
         Ok(())
     };
-    let session = Session {
+    let run = RunOptions {
         save: Some(Save {
             after: point,
             write: &mut write,
         }),
-        ..Session::default()
+        ..RunOptions::default()
     };
-    let _ = route_with(&mut db, &config, session).unwrap();
+    let _ = route_with(&mut db, &config, run).unwrap();
     let wiring = db.nets.iter().map(|n| n.routing.clone()).collect();
     (wiring, saved.unwrap())
 }
@@ -114,11 +114,11 @@ fn route_saving(point: SavePoint) -> (Vec<Vec<RouteElem>>, RouteState) {
 /// Routes the placed fixture from `state`.
 fn route_resuming(state: &RouteState) -> Vec<Vec<RouteElem>> {
     let (mut db, config) = placed_tiny();
-    let session = Session {
+    let run = RunOptions {
         resume: Some(state),
-        ..Session::default()
+        ..RunOptions::default()
     };
-    let _ = route_with(&mut db, &config, session).unwrap();
+    let _ = route_with(&mut db, &config, run).unwrap();
     db.nets.iter().map(|n| n.routing.clone()).collect()
 }
 
@@ -160,9 +160,9 @@ fn a_run_resumed_after_its_last_round_counts_the_rounds_before_it() {
     let summary = route_with(
         &mut db,
         &config,
-        Session {
+        RunOptions {
             resume: Some(&state),
-            ..Session::default()
+            ..RunOptions::default()
         },
     )
     .unwrap();
@@ -174,15 +174,15 @@ fn a_run_resumed_after_its_last_round_counts_the_rounds_before_it() {
 fn a_save_that_fails_stops_the_run_with_its_error() {
     let (mut db, config) = placed_tiny();
     let mut write = |_: &RouteState| Err(SaveError("disk full".to_string()));
-    let session = Session {
+    let run = RunOptions {
         save: Some(Save {
             after: SavePoint::Global,
             write: &mut write,
         }),
-        ..Session::default()
+        ..RunOptions::default()
     };
 
-    let result = route_with(&mut db, &config, session);
+    let result = route_with(&mut db, &config, run);
 
     assert_eq!(
         result.map(|_| ()),
@@ -198,15 +198,15 @@ fn a_save_point_the_run_never_reaches_saves_nothing_and_says_so() {
         saved = true;
         Ok(())
     };
-    let session = Session {
+    let run = RunOptions {
         save: Some(Save {
             after: SavePoint::Round(TINY_ROUNDS + 1),
             write: &mut write,
         }),
-        ..Session::default()
+        ..RunOptions::default()
     };
 
-    let summary = route_with(&mut db, &config, session).unwrap();
+    let summary = route_with(&mut db, &config, run).unwrap();
 
     assert!(!saved);
     assert!(!summary.state_saved);
@@ -239,9 +239,9 @@ fn a_state_with_a_wire_past_the_end_of_its_track_is_refused() {
     let result = route_with(
         &mut db,
         &config,
-        Session {
+        RunOptions {
             resume: Some(&bad),
-            ..Session::default()
+            ..RunOptions::default()
         },
     );
 
@@ -261,9 +261,9 @@ fn a_state_of_another_design_is_refused() {
     let result = route_with(
         &mut db,
         &config,
-        Session {
+        RunOptions {
             resume: Some(&state),
-            ..Session::default()
+            ..RunOptions::default()
         },
     );
 
