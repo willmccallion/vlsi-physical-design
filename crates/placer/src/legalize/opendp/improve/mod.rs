@@ -68,15 +68,39 @@ pub struct Improvement {
     pub hpwl_after: Dbu,
 }
 
+/// A distance in heights of the first row, the unit
+/// `DetailedMgr::setMaxDisplacement` scales both displacement limits by.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct RowHeights(pub i64);
+
+impl RowHeights {
+    const fn to_dbu(self, row_height: Dbu) -> Dbu {
+        Dbu(self.0 * row_height.get())
+    }
+}
+
+/// How far `improve_placement -max_displacement {x y}` lets a cell move
+/// across and up or down; `None` for no limit, which `OpenDP` reads from
+/// a zero.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct MaxDisplacement {
+    /// Across.
+    pub x: Option<RowHeights>,
+    /// Up or down.
+    pub y: Option<RowHeights>,
+}
+
 /// Improves a legal placement's wirelength as `improve_placement
-/// -max_displacement {x y}` does, keeping it legal; the displacement limits
-/// are in rows, zero for no limit.
+/// -max_displacement {x y}` does, keeping it legal.
 ///
 /// # Errors
 ///
 /// When the design cannot be laid on `OpenDP`'s grid, an I/O pin has no
 /// shapes, or the improver's state comes apart.
-pub fn improve_placement(db: &mut NetlistDB, max_displacement: (i64, i64)) -> Result<Improvement> {
+pub fn improve_placement(
+    db: &mut NetlistDB,
+    max_displacement: MaxDisplacement,
+) -> Result<Improvement> {
     let hpwl_before = super::mirror::hpwl(db);
     if hpwl_before == Dbu::ZERO {
         return Ok(Improvement {
@@ -187,7 +211,7 @@ struct Improver {
 }
 
 impl Improver {
-    fn new(db: &NetlistDB, max_displacement: (i64, i64)) -> Result<Self> {
+    fn new(db: &NetlistDB, max_displacement: MaxDisplacement) -> Result<Self> {
         let mut grid = Placer::new(db)?;
         for node in &mut grid.nodes {
             node.orient = Orientation::N;
@@ -199,20 +223,16 @@ impl Improver {
         let node_count = net.node_count();
         let limit = Dbu(arch.width().max(arch.height()).get() << 1);
         let row_height = arch.rows[0].height;
-        let displacement = |rows: i64| {
-            if rows == 0 {
-                limit
-            } else {
-                (row_height * rows).min(limit)
-            }
+        let displacement = |rows: Option<RowHeights>| {
+            rows.map_or(limit, |rows| rows.to_dbu(row_height).min(limit))
         };
         let disallow_one_site_gaps = grid.disallow_one_site_gaps;
         Ok(Self {
             grid,
             net,
             max_displacement: Point::new(
-                displacement(max_displacement.0),
-                displacement(max_displacement.1),
+                displacement(max_displacement.x),
+                displacement(max_displacement.y),
             ),
             arch,
             segments: IdVec::new(),
@@ -484,7 +504,11 @@ mod tests {
             cell.status = PlacementStatus::Placed;
         }
         let _ = detailed_placement(&mut db).unwrap();
-        let mut improver = Improver::new(&db, (5, 1)).unwrap();
+        let max_displacement = MaxDisplacement {
+            x: Some(RowHeights(5)),
+            y: Some(RowHeights(1)),
+        };
+        let mut improver = Improver::new(&db, max_displacement).unwrap();
         shift::legalize(&mut improver).unwrap();
         improver.grid.paint_fixed_cells();
         improver
