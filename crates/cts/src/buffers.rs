@@ -174,7 +174,7 @@ mod tests {
     use std::path::Path;
 
     /// A library of buffers named `B<limit>`, each with that load limit
-    /// and, where given, a fanout limit.
+    /// (none for a limit of zero) and, where given, a fanout limit.
     fn buffers(limits: &[(u32, Option<u32>)], default_fanout: Option<u32>) -> Liberty {
         let mut src = String::from("library (x) {\n");
         if let Some(f) = default_fanout {
@@ -182,11 +182,16 @@ mod tests {
         }
         for &(cap, fanout) in limits {
             let fanout = fanout.map_or_else(String::new, |f| format!("max_fanout : {f};"));
+            let load = if cap == 0 {
+                String::new()
+            } else {
+                format!("max_capacitance : {cap};")
+            };
             writeln!(
                 src,
                 "  cell (B{cap}) {{ pin (A) {{ direction : input; }} \
                  pin (Z) {{ direction : output; function : \"A\"; \
-                 max_capacitance : {cap}; {fanout} }} }}"
+                 {load} {fanout} }} }}"
             )
             .unwrap();
         }
@@ -217,6 +222,23 @@ mod tests {
         let kept = trim_and_sort(&lib, &[id(&lib, 40)], id(&lib, 20), id(&lib, 10));
 
         assert_eq!(kept, Vec::new());
+    }
+
+    #[test]
+    fn a_buffer_without_a_load_limit_is_characterized_as_limit_zero() {
+        let lib = buffers(&[(0, None), (10, None), (20, None)], None);
+        let all = [id(&lib, 20), id(&lib, 10), id(&lib, 0)];
+
+        let kept = trim_and_sort(&lib, &all, id(&lib, 10), id(&lib, 0));
+
+        assert_eq!(kept, vec![id(&lib, 0), id(&lib, 10)]);
+    }
+
+    #[test]
+    fn a_fractional_design_fanout_limit_is_truncated() {
+        let lib = buffers(&[(10, None)], None);
+
+        assert_eq!(fanout_limit(&lib, id(&lib, 10), Some(7.9)), Some(7));
     }
 
     #[test]
