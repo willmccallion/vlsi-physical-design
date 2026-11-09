@@ -453,7 +453,7 @@ fn timing_params(gp: &GlobalPlacementConfig) -> TimingParams {
 /// iterations.
 fn show_global_progress(p: &global::Progress) {
     if p.iteration.is_multiple_of(PROGRESS_INTERVAL) {
-        ui::placement_iter(p.iteration, p.hpwl, p.overflow, p.penalty, p.step);
+        ui::placement_iter(p);
     }
 }
 
