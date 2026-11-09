@@ -404,6 +404,42 @@ mod tests {
         assert_eq!(grid.fixed, [2.0, 0.0, 4.0, 4.0]);
     }
 
+    /// A smooth cosine potential on 32 bins of 1 by 2 um: its field is
+    /// minus its derivative, within the 1% central differences lose at
+    /// these frequencies.
+    #[test]
+    fn the_field_of_a_smooth_potential_is_minus_its_derivative() {
+        use std::f64::consts::PI;
+        let (dim, bin) = (32, Point::new(1.0, 2.0));
+        let mut grid = DensityGrid::new(&die(32.0, 64.0), dim, 1.0, &[die(32.0, 64.0)], &[]);
+        let (a, b) = (1.0, 2.0);
+        let phase = |k: f64, i: usize| PI * k * (i as f64 + 0.5) / dim as f64;
+        for y in 0..dim {
+            for x in 0..dim {
+                grid.potential[y * dim + x] = phase(a, x).cos() * phase(b, y).cos();
+            }
+        }
+
+        grid.compute_field();
+
+        let (ka, kb) = (PI * a / dim as f64 / bin.x, PI * b / dim as f64 / bin.y);
+        for y in 0..dim {
+            for x in 0..dim {
+                let idx = y * dim + x;
+                let ex = ka * phase(a, x).sin() * phase(b, y).cos();
+                let ey = kb * phase(a, x).cos() * phase(b, y).sin();
+                assert!(
+                    (grid.field_x[idx] - ex).abs() < 0.01 * ka,
+                    "x at ({x}, {y})"
+                );
+                assert!(
+                    (grid.field_y[idx] - ey).abs() < 0.01 * kb,
+                    "y at ({x}, {y})"
+                );
+            }
+        }
+    }
+
     #[test]
     fn the_field_pushes_an_object_away_from_a_crowd() {
         let mut grid = DensityGrid::new(&die(16.0, 16.0), 16, 0.5, &[die(16.0, 16.0)], &[]);
