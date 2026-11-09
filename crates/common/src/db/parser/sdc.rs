@@ -1745,7 +1745,7 @@ impl ExprParser {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::db::design::PlacementStatus;
+    use crate::db::design::{NewIoPin, PlacementStatus};
     use crate::db::library::{Library, Macro, MacroClass, Symmetry};
     use crate::geom::dbu::{Dbu, DbuPerMicron};
     use crate::geom::orient::Orientation;
@@ -1784,20 +1784,20 @@ mod tests {
         ] {
             let net = db.add_net(name).unwrap();
             let _ = db
-                .add_io_pin(
-                    name.into(),
+                .add_io_pin(NewIoPin {
+                    name: name.into(),
                     net,
                     direction,
-                    if name == "VDD" {
+                    signal_use: if name == "VDD" {
                         SignalUse::Power
                     } else {
                         SignalUse::Signal
                     },
-                    Vec::new(),
-                    Point::new(Dbu(0), Dbu(0)),
-                    Orientation::N,
-                    PlacementStatus::Placed,
-                )
+                    shapes: Vec::new(),
+                    location: Point::new(Dbu(0), Dbu(0)),
+                    orient: Orientation::N,
+                    status: PlacementStatus::Placed,
+                })
                 .unwrap();
         }
         db
