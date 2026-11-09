@@ -204,7 +204,7 @@ fn main() -> anyhow::Result<()> {
     let outcome = run(args.command, &mut report);
     report.passed = outcome.is_ok();
     report.wall = start_time.elapsed();
-    report.peak_rss_mb = report::peak_rss_mb();
+    report.peak_rss_mb = pare_common::memory::peak_rss_mb();
     let written = args
         .report
         .as_deref()

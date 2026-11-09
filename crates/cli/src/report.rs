@@ -281,8 +281,6 @@ impl Report {
     }
 }
 
-pub use pare_common::memory::peak_rss_mb;
-
 #[cfg(test)]
 mod tests {
     use super::*;
