@@ -69,6 +69,35 @@ struct Driver {
     arrival_paths: EdgeValues<Option<DriverPoint>>,
 }
 
+/// Whether buffering may restructure a tree at its junctions, as
+/// `bufferForTiming`'s `allow_topology_rewrite`.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Topology {
+    /// A junction may pull its less critical loads under a new buffer.
+    Rewritable,
+    /// The tree branches as it does.
+    Kept,
+}
+
+impl Topology {
+    /// What `Rebuffer::rebufferPin` allows in `resizer`'s session:
+    /// rewrites on placement parasitics only, never along global routes.
+    const fn of_session(resizer: &Resizer<'_, Sta>) -> Self {
+        if resizer.has_global_routes() {
+            Self::Kept
+        } else {
+            Self::Rewritable
+        }
+    }
+}
+
+/// The options for the two sides of a junction, each best slack last.
+#[derive(Clone, Copy, Debug)]
+struct JunctionSides<'o> {
+    left: &'o [BnetPtr],
+    right: &'o [BnetPtr],
+}
+
 /// The delay, slack correction and slew at the driver for a tree.
 #[derive(Clone, Copy, Debug, PartialEq)]
 struct DriverTiming {
@@ -184,8 +213,9 @@ impl Rebuffer {
             return Ok(0);
         };
         let mut tree = self.annotate_load_slacks(resizer, &tree, driver);
+        let topology = Topology::of_session(resizer);
         for _ in 0..TIMING_ROUNDS {
-            match self.buffer_for_timing(resizer, &tree) {
+            match self.buffer_for_timing(resizer, &tree, topology) {
                 Some(better) => tree = better,
                 None => return Ok(0),
             }
@@ -252,7 +282,8 @@ impl Rebuffer {
             };
             let mut found = true;
             for _ in 0..TIMING_ROUNDS {
-                if let Some(better) = self.buffer_for_timing(resizer, &timing_tree) {
+                let topology = Topology::Rewritable;
+                if let Some(better) = self.buffer_for_timing(resizer, &timing_tree, topology) {
                     timing_tree = better;
                 } else {
                     found = false;
@@ -568,8 +599,13 @@ impl Rebuffer {
     /// The buffering options for a tree, best slack last, as
     /// `bufferForTiming`'s recursion; the chosen one is the option with
     /// the most slack at the driver.
-    fn buffer_for_timing(&mut self, resizer: &Resizer<'_, Sta>, tree: &BnetPtr) -> Option<BnetPtr> {
-        let options = self.timing_options(resizer, tree);
+    fn buffer_for_timing(
+        &mut self,
+        resizer: &Resizer<'_, Sta>,
+        tree: &BnetPtr,
+        topology: Topology,
+    ) -> Option<BnetPtr> {
+        let options = self.timing_options(resizer, tree, topology);
         let mut best: Option<(Fixed, BnetPtr)> = None;
         for option in options {
             let Some(slack) = self.evaluate_option(resizer, &option) else {
@@ -585,17 +621,26 @@ impl Rebuffer {
         best.map(|(_, option)| option)
     }
 
-    fn timing_options(&self, resizer: &Resizer<'_, Sta>, node: &BnetPtr) -> Vec<BnetPtr> {
+    fn timing_options(
+        &self,
+        resizer: &Resizer<'_, Sta>,
+        node: &BnetPtr,
+        topology: Topology,
+    ) -> Vec<BnetPtr> {
         match &node.kind {
             Kind::Load { .. } => vec![Rc::clone(node)],
             Kind::Junction { left, right } => {
-                let left_options = self.timing_options(resizer, left);
-                let right_options = self.timing_options(resizer, right);
-                self.junction_options(resizer, node, &left_options, &right_options)
+                let left_options = self.timing_options(resizer, left, topology);
+                let right_options = self.timing_options(resizer, right, topology);
+                let sides = JunctionSides {
+                    left: &left_options,
+                    right: &right_options,
+                };
+                self.junction_options(resizer, node, sides, topology)
             }
             Kind::Wire { to, .. } | Kind::Via { to, .. } | Kind::Buffer { to, .. } => {
                 let under = to.under_wires_and_buffers();
-                let options = self.timing_options(resizer, &under);
+                let options = self.timing_options(resizer, &under, topology);
                 self.wire_options(resizer, node, &under, node.wire_layer_below(), options)
             }
         }
@@ -680,14 +725,16 @@ impl Rebuffer {
     }
 
     /// The options for a junction: each side's options paired off from the
-    /// most slack down, keeping the pairs that lower the capacitance.
+    /// most slack down, keeping the pairs that lower the capacitance, each
+    /// pair rewritten where `topology` allows and that pays.
     fn junction_options(
         &self,
         resizer: &Resizer<'_, Sta>,
         node: &Bnet,
-        left: &[BnetPtr],
-        right: &[BnetPtr],
+        sides: JunctionSides<'_>,
+        topology: Topology,
     ) -> Vec<BnetPtr> {
+        let JunctionSides { left, right } = sides;
         let fanout_limit = self
             .driver
             .as_ref()
@@ -707,11 +754,15 @@ impl Rebuffer {
             while ri > 0 && right[ri - 1].slack >= left[li].slack {
                 ri -= 1;
             }
-            let junction = self
-                .rewrite_topology(resizer, node, &left[li], &right[ri], best_cap)
-                .unwrap_or_else(|| {
-                    Bnet::junction(node.at, Rc::clone(&left[li]), Rc::clone(&right[ri]))
-                });
+            let rewritten = match topology {
+                Topology::Rewritable => {
+                    self.rewrite_topology(resizer, node, &left[li], &right[ri], best_cap)
+                }
+                Topology::Kept => None,
+            };
+            let junction = rewritten.unwrap_or_else(|| {
+                Bnet::junction(node.at, Rc::clone(&left[li]), Rc::clone(&right[ri]))
+            });
             if junction.fanout <= fanout_limit {
                 best_cap = junction.cap;
                 options.push(junction);
@@ -1841,8 +1892,15 @@ fn buffer_max_wire_length(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::testing::{cells, clock_cells_source, design, pin, with_timed_session};
+    use crate::bnet::PinLoad;
+    use crate::resizer::GlobalRouting;
+    use crate::route_parasitics::RouteRc;
+    use crate::testing::{
+        cells, clock_cells_source, design, metal2_wires, pin, with_session_inputs,
+        with_timed_session,
+    };
     use pare_common::db::design::NetlistDB;
+    use pare_common::db::global_route::{NetRoute, RouteSource};
 
     /// A flop launching into another, both clocked through a clock buffer
     /// whose output slew reaches their clock pins.
@@ -1946,6 +2004,96 @@ mod tests {
         let derated = format!("{CLOCK}set_timing_derate -late 1.1 [get_cells bf]\n");
 
         assert!(!removable_under(buffer_between_flops("PLACED"), &derated));
+    }
+
+    /// A load of `cap_ff` femtofarads at the origin with `slack_ns`
+    /// nanoseconds of slack.
+    fn load_with(pin: PinId, cap_ff: f64, slack_ns: f64) -> BnetPtr {
+        let load = PinLoad {
+            cap: Farads::new(cap_ff * 1e-15),
+            fanout: 1.0,
+            max_slew: Seconds::INFINITY,
+        };
+        let slack = Fixed::from_seconds(Seconds::new(slack_ns * 1e-9));
+        Bnet::load(Point::new(Dbu(0), Dbu(0)), pin, load).with_slack(slack, None)
+    }
+
+    /// Whether a junction pulls a side under a buffer of its own making.
+    fn is_rewritten(junction: &Bnet) -> bool {
+        matches!(&junction.kind, Kind::Junction { left, .. }
+            if matches!(&left.kind, Kind::Buffer { to, .. }
+                if matches!(to.under_wires().kind, Kind::Junction { .. })))
+    }
+
+    #[test]
+    fn a_junction_rewrites_its_topology_only_where_allowed() {
+        let mut db = buffer_between_flops("PLACED");
+        let pin = pin(&db, "f2/D");
+
+        with_timed_session(&mut db, &cells(&clock_cells_source()), CLOCK, |resizer| {
+            let rebuffer = Rebuffer::new(resizer).unwrap();
+            let critical = Bnet::junction(
+                Point::new(Dbu(0), Dbu(0)),
+                load_with(pin, 1.0, 1.0),
+                load_with(pin, 5.0, 5.0),
+            );
+            let buffered = Bnet::buffer(
+                Point::new(Dbu(0), Dbu(0)),
+                &rebuffer.sizes[0],
+                load_with(pin, 5.0, 10.0),
+                Fixed::ZERO,
+            );
+            let node = Bnet::junction(
+                Point::new(Dbu(0), Dbu(0)),
+                Rc::clone(&critical),
+                Rc::clone(&buffered),
+            );
+            let (left, right) = ([critical], [buffered]);
+            let sides = JunctionSides {
+                left: &left,
+                right: &right,
+            };
+
+            let rewritable = rebuffer.junction_options(resizer, &node, sides, Topology::Rewritable);
+            let kept = rebuffer.junction_options(resizer, &node, sides, Topology::Kept);
+
+            assert!(rewritable.iter().any(|o| is_rewritten(o)));
+            assert!(!kept.iter().any(|o| is_rewritten(o)));
+        });
+    }
+
+    /// Global routes that have none to give.
+    struct NoRoutes;
+
+    impl RouteSource for NoRoutes {
+        fn update(&mut self, _: &NetlistDB, _: &[NetId]) {}
+
+        fn route(&self, _: &NetlistDB, _: NetId) -> Option<NetRoute> {
+            None
+        }
+    }
+
+    #[test]
+    fn rebuffering_rewrites_topology_on_placement_parasitics_only() {
+        let mut db = buffer_between_flops("PLACED");
+        let lib = cells(&clock_cells_source());
+        let rc = RouteRc::new(&db.library, &[], &[], LayerId(0));
+        let wires = metal2_wires(&db);
+
+        with_timed_session(&mut db, &lib, CLOCK, |resizer| {
+            assert_eq!(Topology::of_session(resizer), Topology::Rewritable);
+        });
+        with_session_inputs(&mut db, &lib, CLOCK, wires, |inputs, sdc| {
+            let mut source = NoRoutes;
+            let routes = GlobalRouting {
+                source: &mut source,
+                rc,
+                legalize: &|_, _| {},
+            };
+            let resizer = Resizer::on_global_routes(inputs, sdc, routes).unwrap();
+
+            assert_eq!(Topology::of_session(&resizer), Topology::Kept);
+        });
     }
 
     #[test]

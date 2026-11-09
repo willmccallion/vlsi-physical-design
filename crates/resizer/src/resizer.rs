@@ -516,6 +516,12 @@ impl<'a, T: Timing> Resizer<'a, T> {
         Netlist::new(self.db, self.link)
     }
 
+    /// Whether the session's parasitics follow global routes.
+    #[must_use]
+    pub(crate) const fn has_global_routes(&self) -> bool {
+        self.routes.is_some()
+    }
+
     /// The timing graph.
     #[must_use]
     pub(crate) const fn graph(&self) -> &TimingGraph {
