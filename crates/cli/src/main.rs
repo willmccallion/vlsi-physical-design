@@ -444,6 +444,13 @@ mod tests {
         configs
     }
 
+    fn config_with_input(input: &str) -> Config {
+        toml::from_str(&format!(
+            "purpose = \"placement\"\n[input]\nlef_files = [\"a.lef\"]\ndef_file = \"a.def\"\n{input}"
+        ))
+        .unwrap()
+    }
+
     #[test]
     fn a_config_path_is_taken_as_it_is() {
         let configs = configs_with("resolve-path", &[]);
@@ -502,6 +509,27 @@ mod tests {
             error.to_string(),
             format!("cannot read {}/", missing.display())
         );
+    }
+
+    #[test]
+    fn the_output_directory_is_the_one_the_config_names() {
+        let config = config_with_input("output_def = \"out/placed.def\"\noutput_dir = \"images\"");
+
+        assert_eq!(output_dir(&config), PathBuf::from("images"));
+    }
+
+    #[test]
+    fn without_an_output_directory_results_go_beside_the_output_def() {
+        let config = config_with_input("output_def = \"out/aes/placed.def\"");
+
+        assert_eq!(output_dir(&config), PathBuf::from("out/aes"));
+    }
+
+    #[test]
+    fn an_output_def_without_a_directory_puts_results_in_output() {
+        let config = config_with_input("output_def = \"placed.def\"");
+
+        assert_eq!(output_dir(&config), PathBuf::from("output"));
     }
 
     #[test]
