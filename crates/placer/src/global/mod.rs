@@ -906,4 +906,165 @@ mod tests {
         assert_eq!(size, Point::new(2.0, 1.0));
         assert_eq!(count, 0);
     }
+
+    use crate::zones::Zones;
+    use pare_common::db::parser::{def, lef};
+
+    /// The tiny design's placement model.
+    fn tiny_model() -> PlacementModel {
+        let fixture = |name: &str| {
+            std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+                .join("../common/tests/fixtures")
+                .join(name)
+        };
+        let units = def::read_units(&fixture("tiny.def")).unwrap();
+        let library = lef::parse_files(&[fixture("tiny.lef")], units).unwrap();
+        let db = def::parse(&fixture("tiny.def"), library).unwrap();
+        PlacementModel::from_db(&db, &Zones::new(&db).unwrap())
+    }
+
+    fn params() -> GlobalParams {
+        GlobalParams {
+            target_density: TargetDensity::new(0.7).unwrap(),
+            target_overflow: Share::new(0.1).unwrap(),
+            max_iterations: 0,
+            initial_rounds: 0,
+            bins: 16,
+            seed: 1,
+            routability: None,
+            timing: None,
+        }
+    }
+
+    /// A placement of the tiny design, and the design after a repair that
+    /// doubled the width of its first movable cell and added a copy of its
+    /// second where the copy's position says.
+    struct Repair {
+        before: Setup,
+        after: PlacementModel,
+        resized: CellId,
+        added: CellId,
+    }
+
+    fn repair() -> Repair {
+        let model = tiny_model();
+        let mut rng = StdRng::seed_from_u64(1);
+        let before = Setup::new(&model, &params(), &mut rng);
+        let mut after = model;
+        let resized = before.movable[ObjectId::new(0)];
+        after.sizes[resized].x *= 2.0;
+        let copied = before.movable[ObjectId::new(1)];
+        let added = after.sizes.push(after.sizes[copied]);
+        let _ = after.density_sizes.push(after.density_sizes[copied]);
+        let _ = after.movable.push(true);
+        let _ = after.kinds.push(after.kinds[copied]);
+        let _ = after.positions.push(Point::new(1.0, 1.0));
+        let _ = after.zone_of.push(after.zone_of[copied]);
+        Repair {
+            before,
+            after,
+            resized,
+            added,
+        }
+    }
+
+    /// The object of `cell` in `setup`.
+    fn object_of(setup: &Setup, cell: CellId) -> ObjectId {
+        setup
+            .movable
+            .iter_enumerated()
+            .find(|&(_, &c)| c == cell)
+            .map(|(k, _)| k)
+            .unwrap()
+    }
+
+    /// The setup rebuilt after `repair`, every cell before it kept.
+    fn rebuilt(repair: &Repair) -> (Setup, Remap) {
+        let cells_before = repair.after.num_cells() - 1;
+        let cell_map: IdVec<CellId, Option<CellId>> =
+            (0..cells_before).map(|i| Some(CellId::new(i))).collect();
+        let mut rng = StdRng::seed_from_u64(2);
+        repair
+            .before
+            .rebuild(&repair.after, &cell_map, &params(), &mut rng)
+    }
+
+    #[test]
+    fn a_resized_cell_keeps_its_place_and_takes_its_new_size() {
+        let repair = repair();
+
+        let (after, remap) = rebuilt(&repair);
+
+        let old = object_of(&repair.before, repair.resized);
+        let new = object_of(&after, repair.resized);
+        assert_eq!(remap.old_of_new[new], Some(old));
+        assert_eq!(
+            after.objects.centers[new],
+            repair.before.objects.centers[old]
+        );
+        assert_eq!(after.objects.sizes[new], repair.after.sizes[repair.resized]);
+    }
+
+    #[test]
+    fn a_new_cell_starts_where_the_repair_put_it() {
+        let repair = repair();
+
+        let (after, remap) = rebuilt(&repair);
+
+        let new = object_of(&after, repair.added);
+        let size = repair.after.sizes[repair.added];
+        assert_eq!(remap.old_of_new[new], None);
+        assert_eq!(
+            after.objects.centers[new],
+            Point::new(1.0, 1.0) + size * 0.5
+        );
+    }
+
+    #[test]
+    fn the_repair_adds_the_area_its_cells_gained() {
+        let repair = repair();
+        let area = |s: Point<f64>| s.x * s.y;
+        let resized = repair.after.sizes[repair.resized];
+        let gained = area(resized) / 2.0 + area(repair.after.sizes[repair.added]);
+
+        let (_, remap) = rebuilt(&repair);
+
+        assert!(
+            (remap.added_area - gained).abs() < 1e-9,
+            "{}",
+            remap.added_area
+        );
+    }
+
+    #[test]
+    fn each_field_keeps_its_fillers_where_they_were() {
+        let repair = repair();
+
+        let (after, remap) = rebuilt(&repair);
+
+        let (old, new) = (&repair.before.fields, &after.fields);
+        assert!(old.iter().any(|f| f.fillers.len() > 0));
+        assert_eq!(new.len(), old.len());
+        for (f, field) in new.iter_enumerated() {
+            let was = remap.old_field_of_new[f].unwrap();
+            assert_eq!(field.fillers.len(), old[was].fillers.len());
+            for (k, j) in field.fillers.iter().zip(old[was].fillers.iter()) {
+                assert_eq!(remap.old_of_new[k], Some(j));
+                assert_eq!(after.objects.centers[k], repair.before.objects.centers[j]);
+            }
+        }
+    }
+
+    #[test]
+    fn a_field_whose_cells_gained_area_raises_its_target_density() {
+        let repair = repair();
+
+        let (after, remap) = rebuilt(&repair);
+
+        let field = &after.fields[FieldId::new(0)];
+        let was = &repair.before.fields[remap.old_field_of_new[FieldId::new(0)].unwrap()];
+        let expected = was.grid.target() + remap.added_area / field.grid.free_area();
+        assert!((field.grid.target() - expected).abs() < 1e-12);
+        assert!(field.grid.target() > was.grid.target());
+    }
 }
