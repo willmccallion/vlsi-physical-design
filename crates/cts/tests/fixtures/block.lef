@@ -1,0 +1,28 @@
+# A block with no timing model, its clock taken in by an input pin and by
+# an inout pin, read after clock.lef for the clock tree synthesis tests.
+VERSION 5.8 ;
+BUSBITCHARS "[]" ;
+DIVIDERCHAR "/" ;
+
+MACRO RAM
+  CLASS BLOCK ;
+  ORIGIN 0 0 ;
+  SIZE 20 BY 20 ;
+  PIN CLK
+    DIRECTION INPUT ;
+    USE CLOCK ;
+    PORT
+      LAYER metal2 ;
+        RECT 0 9.9 0.2 10.1 ;
+    END
+  END CLK
+  PIN CLKIO
+    DIRECTION INOUT ;
+    USE CLOCK ;
+    PORT
+      LAYER metal2 ;
+        RECT 19.8 9.9 20 10.1 ;
+    END
+  END CLKIO
+END RAM
+END LIBRARY

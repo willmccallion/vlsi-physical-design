@@ -421,6 +421,42 @@ impl TechChar {
     }
 }
 
+#[cfg(test)]
+impl TechChar {
+    /// A table of `segments` alone, `length_unit` database units to the
+    /// tree's length unit and `char_unit` to a characterization step, its
+    /// ranges those of the segments.
+    pub(crate) fn from_segments(
+        segments: Vec<WireSegment>,
+        length_unit: u32,
+        char_unit: u32,
+    ) -> Self {
+        let range = |field: fn(&WireSegment) -> u8| {
+            let values = segments.iter().map(|s| u32::from(field(s)));
+            (values.clone().min().unwrap(), values.max().unwrap())
+        };
+        let (min_segment_length, max_segment_length) = range(|s| s.length);
+        let mut table = Self {
+            segments: Vec::new(),
+            by_key: FxHashMap::default(),
+            min_segment_length,
+            max_segment_length,
+            max_capacitance: range(|s| s.load).1,
+            max_slew: range(|s| s.output_slew).1,
+            actual_min_input_cap: range(|s| s.input_cap).0,
+            length_unit,
+            char_unit,
+            cap_per_dbu: FaradsPerDbu::new(0.0),
+            sink_buffer_input_cap: Farads32::ZERO,
+            wire_delay_rate: None,
+        };
+        for segment in segments {
+            table.push(segment);
+        }
+        table
+    }
+}
+
 const fn key(length: u32, load: u32, output_slew: u32) -> u32 {
     length | (load << NUM_BITS_PER_FIELD) | (output_slew << (2 * NUM_BITS_PER_FIELD))
 }
@@ -980,7 +1016,118 @@ fn least_wire_delay_rate(segments: &[WireSegment], delay_step: Seconds) -> Optio
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::fixtures;
     use pare_common::db::liberty::LibCellId;
+    use pare_common::db::parser::liberty;
+    use std::path::Path;
+
+    /// A library of the one clock buffer `CLKBUF_X3`, with `defaults` at
+    /// library level, `limits` on its output and `timing` in its arc.
+    fn clock_buffer_library(defaults: &str, limits: &str, timing: &str) -> Liberty {
+        let src = format!(
+            "library (x) {{
+               capacitive_load_unit (1,ff) ;
+               {defaults}
+               lu_table_template (delay_t) {{
+                 variable_1 : input_net_transition ;
+                 variable_2 : total_output_net_capacitance ;
+                 index_1 (\"0.005, 0.2\") ;
+                 index_2 (\"1.0, 100.0\") ;
+               }}
+               lu_table_template (load_t) {{
+                 variable_1 : total_output_net_capacitance ;
+                 index_1 (\"1.0, 100.0\") ;
+               }}
+               cell (CLKBUF_X3) {{
+                 area : 1.33 ;
+                 pin (A) {{ direction : input ; capacitance : 1.4 ; }}
+                 pin (Z) {{
+                   direction : output ; function : \"A\" ; {limits}
+                   timing () {{
+                     related_pin : \"A\" ; timing_sense : positive_unate ; {timing}
+                   }}
+                 }}
+               }}
+             }}"
+        );
+        liberty::parse_str(&src, Path::new("x.lib")).unwrap()
+    }
+
+    /// Delay tables over input slew and load.
+    const TWO_AXIS_TIMING: &str =
+        "cell_rise (delay_t) { values (\"0.02, 0.08\", \"0.03, 0.09\") ; }
+         cell_fall (delay_t) { values (\"0.02, 0.08\", \"0.03, 0.09\") ; }";
+
+    /// What `plan` makes of `lib` characterizing its buffer in `db`.
+    fn plan_of(db: &NetlistDB, lib: &Liberty) -> Result<Plan, CtsError> {
+        let link = Link::new(db, lib, &[]).unwrap();
+        let id = lib.cell_id("CLKBUF_X3").unwrap();
+        let buffer = lib.buffer_cell(id).unwrap();
+        let layer = db.library.routing_layer_id("metal3").unwrap();
+        plan(&CharSetup {
+            link: &link,
+            db,
+            masters: &[buffer],
+            sink_buffer: buffer,
+            clock_rc: WireRc::per_micron(1.5, 0.11, layer),
+        })
+    }
+
+    #[test]
+    fn a_planned_characterization_steps_through_the_buffers_axes() {
+        let lib = clock_buffer_library(
+            "",
+            "max_capacitance : 180.0 ; max_transition : 0.2 ;",
+            TWO_AXIS_TIMING,
+        );
+
+        let plan = plan_of(&fixtures::design(""), &lib).unwrap();
+
+        assert_eq!(
+            (plan.slews.len(), plan.loads.len()),
+            (SLEW_STEPS, CAP_STEPS)
+        );
+        assert_eq!((plan.char_unit, plan.length_unit), (28_000, 14_000));
+        assert_eq!(plan.wirelengths, [28_000, 56_000, 84_000, 112_000]);
+    }
+
+    #[test]
+    fn a_characterization_buffer_without_a_slew_limit_is_refused() {
+        let lib = clock_buffer_library("", "max_capacitance : 180.0 ;", TWO_AXIS_TIMING);
+
+        let refused = plan_of(&fixtures::design(""), &lib).err();
+
+        assert_eq!(refused, Some(CtsError::NoMaxSlew("CLKBUF_X3".to_string())));
+    }
+
+    #[test]
+    fn a_buffer_without_a_load_limit_is_refused() {
+        let lib = clock_buffer_library("default_max_transition : 0.2 ;", "", TWO_AXIS_TIMING);
+
+        let refused = plan_of(&fixtures::design(""), &lib).err();
+
+        assert_eq!(
+            refused,
+            Some(CtsError::NoMaxCapacitance("CLKBUF_X3".to_string()))
+        );
+    }
+
+    #[test]
+    fn delay_tables_with_a_load_axis_but_no_slew_axis_are_refused() {
+        let lib = clock_buffer_library(
+            "",
+            "max_capacitance : 180.0 ; max_transition : 0.2 ;",
+            "cell_rise (load_t) { values (\"0.02, 0.08\") ; }
+             cell_fall (load_t) { values (\"0.02, 0.08\") ; }",
+        );
+
+        let refused = plan_of(&fixtures::design(""), &lib).err();
+
+        assert_eq!(
+            refused,
+            Some(CtsError::NoTableAxes("CLKBUF_X3".to_string()))
+        );
+    }
 
     /// A segment of `length` units with `delay` steps, `input_slew` and
     /// `output_slew` steps, buffered or bare.
