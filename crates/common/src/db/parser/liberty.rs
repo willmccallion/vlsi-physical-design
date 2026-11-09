@@ -1842,6 +1842,22 @@ library (tiny) {
     }
 
     #[test]
+    fn a_refused_absorption_leaves_the_library_as_it_was() {
+        let mut first = parse_str("library (a) { cell (x) { } }", Path::new("a.lib")).unwrap();
+        let before = first.clone();
+        let second = parse_str(
+            "library (b) { cell (y) { } cell (x) { } }",
+            Path::new("b.lib"),
+        )
+        .unwrap();
+
+        let clash = first.absorb(second);
+
+        assert!(clash.is_err());
+        assert_eq!(first, before);
+    }
+
+    #[test]
     fn absorbing_a_library_with_a_cell_already_there_names_the_cell() {
         let mut first = parse_str("library (a) { cell (x) { } }", Path::new("a.lib")).unwrap();
         let second = parse_str("library (b) { cell (x) { } }", Path::new("b.lib")).unwrap();

@@ -1091,8 +1091,18 @@ impl Liberty {
 
     /// Takes the cells of another library into this one, which keeps its
     /// own thresholds, while each absorbed cell keeps its library's
-    /// defaults; fails on a cell both have.
+    /// defaults; fails on a cell both have, leaving this library as it was.
     pub fn absorb(&mut self, other: Self) -> Result<(), DuplicateName> {
+        if let Some(shared) = other
+            .cells
+            .iter()
+            .find(|c| self.cell_by_name.contains_key(&c.name))
+        {
+            return Err(DuplicateName {
+                kind: "cell",
+                name: shared.name.clone(),
+            });
+        }
         let base = self.absorbed_defaults.len() + 1;
         self.absorbed_defaults.push(other.defaults);
         self.absorbed_defaults.extend(other.absorbed_defaults);
