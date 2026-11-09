@@ -18,8 +18,8 @@ use pare_common::geom::rect::Rect;
 pub enum PinAnchor {
     /// At `offset` from the lower-left corner of a cell.
     Cell {
-        /// Index into the model's cells.
-        cell: usize,
+        /// The cell, whose entries the model's tables hold in database order.
+        cell: CellId,
         /// Offset from the cell's lower-left corner.
         offset: Point<f64>,
     },
@@ -122,7 +122,7 @@ fn model_nets(db: &NetlistDB, io: IoAnchors) -> Vec<ModelNet> {
         let (anchor, average) = match db.pins[pin.index()].owner {
             PinOwner::Cell { cell, .. } => (
                 PinAnchor::Cell {
-                    cell: cell.index(),
+                    cell,
                     offset: um(at - db.cells[cell.index()].location),
                 },
                 um(db.average_pin_position(pin) - at),
@@ -297,7 +297,7 @@ impl PlacementModel {
     #[inline]
     pub fn pin_position(pin: &PinAnchor, positions: &[Point<f64>]) -> Point<f64> {
         match *pin {
-            PinAnchor::Cell { cell, offset } => positions[cell] + offset,
+            PinAnchor::Cell { cell, offset } => positions[cell.index()] + offset,
             PinAnchor::Fixed(p) => p,
         }
     }
