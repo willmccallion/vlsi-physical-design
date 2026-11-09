@@ -157,11 +157,18 @@ fn same_time(a: Seconds, b: Seconds) -> bool {
     fuzzy::equal(a, b)
 }
 
-/// Whether `candidate` is a tighter required time than `held` on `side`.
+/// Whether `candidate` is a tighter required time than `held` on `side`
+/// by more than the tolerance, as `RequiredCmp::requiredSet` compares them.
 fn tighter(side: MinMax, candidate: Seconds, held: Seconds) -> bool {
+    delay_greater(side.opposite(), candidate, held)
+}
+
+/// Whether `a` is further toward `side` than `b` by more than the
+/// tolerance, as `OpenSTA`'s `delayGreater` with a min-max.
+fn delay_greater(side: MinMax, a: Seconds, b: Seconds) -> bool {
     match side {
-        MinMax::Max => candidate < held,
-        MinMax::Min => candidate > held,
+        MinMax::Max => fuzzy::greater(a, b),
+        MinMax::Min => fuzzy::less(a, b),
     }
 }
 
@@ -561,7 +568,7 @@ impl Sta {
         let mut worst = (Slack::UNCONSTRAINED, None);
         for &end in &self.endpoints {
             let slack = Slack(self.end_slack[end][side]);
-            if slack < worst.0 {
+            if fuzzy::less(slack.0, worst.0.0) {
                 worst = (slack, Some(end));
             }
         }
@@ -592,7 +599,7 @@ impl Sta {
         for edge in Edge::BOTH {
             for entry in self.entries(end, edge) {
                 let slack = entry.slack(side);
-                if slack.is_finite() && best.is_none_or(|(s, _, _)| slack < s) {
+                if slack.is_finite() && best.is_none_or(|(s, _, _)| fuzzy::less(slack, s)) {
                     best = Some((slack, edge, *entry));
                 }
             }
@@ -1596,16 +1603,22 @@ impl Sta {
             return;
         }
         for side in MinMax::BOTH {
-            if old[side].is_finite() && old[side] < Seconds::ZERO {
+            if counts_in_tns(old[side]) {
                 self.tns[side] -= old[side];
             }
-            if slack[side].is_finite() && slack[side] < Seconds::ZERO {
+            if counts_in_tns(slack[side]) {
                 self.tns[side] += slack[side];
             }
             self.worst[side] = None;
         }
         self.end_slack[pin] = slack;
     }
+}
+
+/// Whether an endpoint's slack enters the total negative slack, as
+/// `Search::tnsIncr` takes it: below zero by more than the tolerance.
+fn counts_in_tns(slack: Seconds) -> bool {
+    slack.is_finite() && fuzzy::less(slack, Seconds::ZERO)
 }
 
 const fn opposite(edge: Edge) -> Edge {
@@ -1682,7 +1695,7 @@ fn merge_arrival(entries: &mut Vec<Entry>, tag: TagId, side: MinMax, time: Secon
         });
     let entry = &mut entries[index];
     let slot = &mut entry.arrival[side];
-    if slot.is_none_or(|held| side.beats(time, held)) {
+    if slot.is_none_or(|held| delay_greater(side, time, held)) {
         *slot = Some(time);
         entry.prev[side] = Some(prev);
     }
