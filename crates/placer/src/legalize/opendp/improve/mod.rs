@@ -507,7 +507,7 @@ mod tests {
     }
 
     /// The tiny design with its six movable cells at one spot.
-    fn tiny_from_one_spot() -> NetlistDB {
+    pub(super) fn tiny_from_one_spot() -> NetlistDB {
         tiny_edited_from_one_spot(|text| text)
     }
 
@@ -528,7 +528,7 @@ mod tests {
     }
 
     /// `db` legalized and laid out for improvement.
-    fn improver_of(mut db: NetlistDB) -> Improver {
+    pub(super) fn improver_of(mut db: NetlistDB) -> Improver {
         let _ = detailed_placement(&mut db).unwrap();
         let max_displacement = MaxDisplacement {
             x: Some(RowHeights(5)),
