@@ -10,7 +10,7 @@ use crate::RouteError;
 use pare_common::db::design::NetlistDB;
 use pare_common::db::design::NonDefaultRule;
 use pare_common::db::indices::{CutLayerId, LayerId, NonDefaultRuleId, ViaId};
-use pare_common::db::library::{Direction, LayerRef};
+use pare_common::db::library::{Direction, LayerRef, Library, Shape};
 use pare_common::db::rules::SpacingTable;
 use pare_common::geom::dbu::Dbu;
 use pare_common::geom::point::Point;
@@ -265,55 +265,13 @@ impl RouteTech {
             return Err(RouteError::NoTracks(lib.routing_layers[l].name.clone()));
         }
 
-        let mut layers = Vec::with_capacity(count);
-        for l in 0..count {
-            let below = l.checked_sub(1).map(|b| &tracks[b]);
-            let above = tracks.get(l + 1);
-            let cross = merge_cross(below, above);
-            let index_in = |coords: Option<&Vec<Dbu>>, t: Dbu| {
-                coords.and_then(|c| c.binary_search(&t).ok()).map(to_u32)
-            };
-            let below_cross = l
-                .checked_sub(1)
-                .map(|b| merge_cross(b.checked_sub(1).map(|bb| &tracks[bb]), Some(&tracks[l])));
-            let above_cross =
-                (l + 1 < count).then(|| merge_cross(Some(&tracks[l]), tracks.get(l + 2)));
-            let position = |list: &Option<Vec<Dbu>>, t: Dbu| {
-                list.as_ref()
-                    .and_then(|c| c.binary_search(&t).ok())
-                    .map(to_u32)
-            };
-            let layer = &lib.routing_layers[l];
-            layers.push(LayerTech {
-                direction: layer.direction,
-                track_down: tracks[l]
-                    .iter()
-                    .map(|&t| position(&below_cross, t))
-                    .collect(),
-                track_up: tracks[l]
-                    .iter()
-                    .map(|&t| position(&above_cross, t))
-                    .collect(),
-                cross: cross
-                    .into_iter()
-                    .map(|at| Cross {
-                        at,
-                        down: index_in(below, at),
-                        up: index_in(above, at),
-                    })
-                    .collect(),
-                tracks: tracks[l].clone(),
-                width: layer.width,
-                spacing: layer.min_spacing,
-                spacing_table: layer.spacing_table.clone(),
-            });
-        }
+        let layers: Vec<LayerTech> = (0..count).map(|l| layer_tech(lib, &tracks, l)).collect();
 
         let cuts = 0..lib.cut_layers.len();
         let vias = cuts
             .clone()
             .map(|c| {
-                ranked_vias(db, CutLayerId::new(c), &layers, true)
+                ranked_vias(db, CutLayerId::new(c), &layers, Overhang::BothLayers)
                     .into_iter()
                     .next()
                     .ok_or_else(|| RouteError::NoVia(lib.cut_layers[c].name.clone()))
@@ -321,7 +279,7 @@ impl RouteTech {
             .collect::<Result<Vec<_>, _>>()?;
         let access_vias = cuts
             .clone()
-            .map(|c| ranked_vias(db, CutLayerId::new(c), &layers, false))
+            .map(|c| ranked_vias(db, CutLayerId::new(c), &layers, Overhang::UpperOnly))
             .collect();
         let cuts = cuts.map(|c| cut_tech(db, CutLayerId::new(c))).collect();
         Ok(Self {
@@ -397,7 +355,7 @@ impl RouteTech {
 }
 
 /// Sorted, deduplicated union of two coordinate lists.
-fn merge_cross(a: Option<&Vec<Dbu>>, b: Option<&Vec<Dbu>>) -> Vec<Dbu> {
+fn merge_cross(a: Option<&[Dbu]>, b: Option<&[Dbu]>) -> Vec<Dbu> {
     let mut all: Vec<Dbu> = a.into_iter().chain(b).flatten().copied().collect();
     all.sort_unstable();
     all.dedup();
@@ -412,27 +370,89 @@ fn across_overhang(rect: &Rect<Dbu>, layer: &LayerTech) -> Dbu {
     (hi - half).max(-lo - half).max(Dbu::ZERO)
 }
 
-/// The spacing of cut layer `cut` and the largest cut of any via on it.
-fn cut_tech(db: &NetlistDB, cut: CutLayerId) -> CutTech {
-    let lib = &db.library;
-    let max_half = lib
-        .vias
-        .iter()
-        .flat_map(|v| v.shapes.iter())
+/// The tracks and crossings of routing layer `l`, whose tracks and its
+/// neighbours' are in `tracks`.
+fn layer_tech(lib: &Library, tracks: &[Vec<Dbu>], l: usize) -> LayerTech {
+    let below = l.checked_sub(1).map(|b| tracks[b].as_slice());
+    let above = tracks.get(l + 1).map(Vec::as_slice);
+    let below_cross = l.checked_sub(1).map(|b| {
+        merge_cross(
+            b.checked_sub(1).map(|bb| tracks[bb].as_slice()),
+            Some(&tracks[l]),
+        )
+    });
+    let above_cross = (l + 1 < tracks.len())
+        .then(|| merge_cross(Some(&tracks[l]), tracks.get(l + 2).map(Vec::as_slice)));
+    let layer = &lib.routing_layers[l];
+    LayerTech {
+        direction: layer.direction,
+        track_down: tracks[l]
+            .iter()
+            .map(|&t| track_index(below_cross.as_deref(), t))
+            .collect(),
+        track_up: tracks[l]
+            .iter()
+            .map(|&t| track_index(above_cross.as_deref(), t))
+            .collect(),
+        cross: merge_cross(below, above)
+            .into_iter()
+            .map(|at| Cross {
+                at,
+                down: track_index(below, at),
+                up: track_index(above, at),
+            })
+            .collect(),
+        tracks: tracks[l].clone(),
+        width: layer.width,
+        spacing: layer.min_spacing,
+        spacing_table: layer.spacing_table.clone(),
+    }
+}
+
+/// Where `at` lies in the sorted coordinates `coords`, when it is one.
+fn track_index(coords: Option<&[Dbu]>, at: Dbu) -> Option<u32> {
+    coords.and_then(|c| c.binary_search(&at).ok()).map(to_u32)
+}
+
+/// The largest extent, either way, of the cuts on `cut` among `shapes`;
+/// zero without one.
+fn largest_cut<'s>(shapes: impl Iterator<Item = &'s Shape>, cut: CutLayerId) -> Dbu {
+    shapes
         .filter(|s| s.layer == LayerRef::Cut(cut))
         .map(|s| s.rect.width().max(s.rect.height()))
         .max()
-        .unwrap_or_default();
+        .unwrap_or_default()
+}
+
+/// The spacing of cut layer `cut` and the largest cut of any via on it.
+fn cut_tech(db: &NetlistDB, cut: CutLayerId) -> CutTech {
+    let lib = &db.library;
+    let max_half = largest_cut(lib.vias.iter().flat_map(|v| v.shapes.iter()), cut);
     CutTech {
         spacing: lib.cut_layers[cut.index()].spacing.unwrap_or_default(),
         max_half: Dbu(max_half.get().div_euclid(2) + max_half.get().rem_euclid(2)),
     }
 }
 
+/// Which layers' metal a via is ranked by, by how far it sticks out across
+/// their tracks.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Overhang {
+    /// Both layers, as vias between routed wires.
+    BothLayers,
+    /// The upper layer alone, as vias up from a pin.
+    UpperOnly,
+}
+
 /// Every LEF via through `cut`, ordered by how far its metal sticks out
-/// across the tracks of both layers (or of the upper layer only, when
-/// `both` is false), then LEF defaults first, then smaller metal.
-fn ranked_vias(db: &NetlistDB, cut: CutLayerId, layers: &[LayerTech], both: bool) -> Vec<ViaTech> {
+/// across the tracks of the layers `overhang` names, then LEF defaults
+/// first, then smaller metal.
+fn ranked_vias(
+    db: &NetlistDB,
+    cut: CutLayerId,
+    layers: &[LayerTech],
+    overhang: Overhang,
+) -> Vec<ViaTech> {
     let lib = &db.library;
     let mut ranked: Vec<((Dbu, bool, i64), ViaTech)> = Vec::new();
     for (i, v) in lib.vias.iter().enumerate() {
@@ -450,23 +470,14 @@ fn ranked_vias(db: &NetlistDB, cut: CutLayerId, layers: &[LayerTech], both: bool
             continue;
         };
         let top_overhang = across_overhang(&top, &layers[v.top().index()]);
-        let overhang = if both {
-            top_overhang.max(across_overhang(&bottom, &layers[v.bottom().index()]))
-        } else {
-            top_overhang
+        let reach = match overhang {
+            Overhang::BothLayers => {
+                top_overhang.max(across_overhang(&bottom, &layers[v.bottom().index()]))
+            }
+            Overhang::UpperOnly => top_overhang,
         };
-        let key = (
-            overhang,
-            !v.is_default(),
-            (bottom.area() + top.area()).get(),
-        );
-        let cut_size = v
-            .shapes
-            .iter()
-            .filter(|s| s.layer == LayerRef::Cut(cut))
-            .map(|s| s.rect.width().max(s.rect.height()))
-            .max()
-            .unwrap_or_default();
+        let key = (reach, !v.is_default(), (bottom.area() + top.area()).get());
+        let cut_size = largest_cut(v.shapes.iter(), cut);
         let spacing = lib.cut_layers[cut.index()].spacing.unwrap_or_default();
         let cuts = v
             .shapes
