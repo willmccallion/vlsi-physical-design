@@ -361,8 +361,8 @@ fn nearest_cross(lt: &LayerTech, along: Dbu) -> Option<u32> {
 
 /// Length by which `[lo, hi]` and `[olo, ohi]` overlap once one is widened
 /// by `spacing`; zero when they keep that far apart.
-fn overlap(lo: Dbu, hi: Dbu, olo: Dbu, ohi: Dbu, spacing: Dbu) -> i64 {
-    (hi.min(ohi) - lo.max(olo) + spacing).get().max(0)
+fn overlap(lo: Dbu, hi: Dbu, olo: Dbu, ohi: Dbu, spacing: Dbu) -> Dbu {
+    (hi.min(ohi) - lo.max(olo) + spacing).max(Dbu::ZERO)
 }
 
 /// Runs of consecutive crossings in `from..=to` joined by edges that are
@@ -390,12 +390,12 @@ fn clear_runs(from: u32, to: u32, blocked: impl Fn(u32) -> bool) -> Vec<(u32, u3
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 struct Cost {
     overlap: i64,
-    pins: i64,
+    pins: Dbu,
 }
 
 impl Cost {
     const fn total(self) -> i64 {
-        self.overlap + self.pins
+        self.overlap + self.pins.get()
     }
 }
 
@@ -429,7 +429,7 @@ impl<'a> Costing<'a> {
     }
 
     /// Overlap of `rect` of `net` with fixed metal of other owners.
-    fn fixed_overlap(&self, net: NetId, rect: &Rect<Dbu>) -> i64 {
+    fn fixed_overlap(&self, net: NetId, rect: &Rect<Dbu>) -> Dbu {
         let query = Query::of(self.lt, rect, self.spacing(net));
         let rules = LayerSpacing::of(self.lt);
         self.occupancy
@@ -452,7 +452,7 @@ impl<'a> Costing<'a> {
         let rect = self.metal(ir.net, track, ir.from, ir.to)?;
         let (_, (lo, hi)) = self.lt.across_along_rect(&rect);
         let spacing = self.spacing(ir.net);
-        let mut wires = 0;
+        let mut wires = Dbu::ZERO;
         for (t, _) in affected_tracks(self.lt, &rect, spacing) {
             let spans = placed
                 .spans_on(t)
@@ -465,8 +465,9 @@ impl<'a> Costing<'a> {
         }
         let across = self.lt.tracks[track as usize];
         Some(Cost {
-            overlap: FIXED_WEIGHT * self.fixed_overlap(ir.net, &rect) + OVERLAP_WEIGHT * wires,
-            pins: ir.pins.iter().map(|&p| (across - p).abs().get()).sum(),
+            overlap: FIXED_WEIGHT * self.fixed_overlap(ir.net, &rect).get()
+                + OVERLAP_WEIGHT * wires.get(),
+            pins: ir.pins.iter().map(|&p| (across - p).abs()).sum(),
         })
     }
 
@@ -549,7 +550,7 @@ impl<'a> Costing<'a> {
     fn clear_pieces(&self, ir: &Iroute, track: u32) -> Vec<TrackWire> {
         let blocked = |cross: u32| {
             self.metal(ir.net, track, cross, cross + 1)
-                .is_none_or(|r| self.fixed_overlap(ir.net, &r) > 0)
+                .is_none_or(|r| self.fixed_overlap(ir.net, &r) > Dbu::ZERO)
         };
         clear_runs(ir.from, ir.to, blocked)
             .into_iter()
@@ -615,7 +616,13 @@ mod tests {
 
     #[test]
     fn overlap_counts_the_spacing_and_is_zero_when_apart() {
-        assert_eq!(overlap(Dbu(0), Dbu(100), Dbu(50), Dbu(300), Dbu(10)), 60);
-        assert_eq!(overlap(Dbu(0), Dbu(100), Dbu(110), Dbu(300), Dbu(10)), 0);
+        assert_eq!(
+            overlap(Dbu(0), Dbu(100), Dbu(50), Dbu(300), Dbu(10)),
+            Dbu(60)
+        );
+        assert_eq!(
+            overlap(Dbu(0), Dbu(100), Dbu(110), Dbu(300), Dbu(10)),
+            Dbu(0)
+        );
     }
 }
