@@ -151,7 +151,7 @@ pub enum Kind {
     },
     /// A buffer driving the subtree.
     Buffer {
-        /// The buffer.
+        /// The cell put in, with the ports its input and output connect.
         buffer: BufferCell,
         /// What it drives.
         to: BnetPtr,
@@ -454,7 +454,7 @@ impl Bnet {
 /// its output can drive, as `OpenROAD`'s `BufferSize`.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub(crate) struct BufferSize {
-    /// The buffer.
+    /// The cell, with the ports the search connects.
     pub buffer: BufferCell,
     /// Its input capacitance.
     pub input_cap: Farads,
@@ -470,7 +470,7 @@ pub(crate) struct BufferSize {
     pub intrinsic_delay: Fixed,
     /// The largest load it may drive within its limits.
     pub margined_max_cap: Farads,
-    /// Its drive resistance.
+    /// The resistance its output drives a load through.
     pub drive_resistance: Ohms,
 }
 
@@ -502,7 +502,7 @@ impl Metrics {
 pub struct PinLoad {
     /// The load's input capacitance.
     pub cap: Farads,
-    /// Its fanout load.
+    /// What it adds to its driver's fanout, as Liberty's `fanout_load`.
     pub fanout: f64,
     /// Its slew limit.
     pub max_slew: Seconds,

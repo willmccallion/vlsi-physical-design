@@ -156,7 +156,7 @@ pub struct GlobalResult {
 pub struct ZoneOutcome {
     /// The zone whose cells were spread.
     pub zone: Zone,
-    /// Its movable cells.
+    /// How many movable cells it has.
     pub cells: usize,
     /// Their area over the free area of the zone's rows.
     pub utilization: f64,
@@ -219,9 +219,9 @@ pub(super) struct Field {
     grid: DensityGrid,
     /// Where its objects may go.
     area: Vec<Rect<f64>>,
-    /// Its cells.
+    /// The objects that are its zone's movable cells.
     cells: ObjectRange,
-    /// Its fillers.
+    /// The filler objects that pad its zone to the target density.
     fillers: ObjectRange,
     /// How many of its fillers, from the first, are in play: routability
     /// removes them from the last.

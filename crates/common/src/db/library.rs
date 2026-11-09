@@ -414,7 +414,7 @@ pub enum ViaSource {
 pub struct ViaDef {
     /// Via name.
     pub name: String,
-    /// The cut layer.
+    /// The layer its cuts are on.
     pub cut: CutLayerId,
     /// Geometry on the bottom metal, cut and top metal, centered on the origin.
     pub shapes: Vec<Shape>,

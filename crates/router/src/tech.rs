@@ -119,7 +119,7 @@ impl LayerTech {
 /// A via chosen for one cut, with its metal relative to its center.
 #[derive(Clone, Debug)]
 pub struct ViaTech {
-    /// The via definition.
+    /// The library's definition of the via.
     pub via: ViaId,
     /// Metal on the layer below.
     pub bottom: Rect<Dbu>,

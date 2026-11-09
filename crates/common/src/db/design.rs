@@ -310,7 +310,7 @@ pub enum RouteElem {
     },
     /// A via instance centered at a point.
     Via {
-        /// The via definition.
+        /// The library's definition of the via placed.
         via: ViaId,
         /// Where the via definition's origin sits, as a DEF route places it.
         at: Point<Dbu>,

@@ -321,7 +321,7 @@ pub struct ViaRule {
     pub bottom: ViaRuleMetal,
     /// The metal above the cut.
     pub top: ViaRuleMetal,
-    /// The cut layer.
+    /// The layer its cuts are on.
     pub cut: CutLayerId,
     /// One cut, centered on the origin.
     pub cut_rect: Rect<Dbu>,
@@ -397,7 +397,7 @@ pub enum CellSide {
 pub struct CellEdge {
     /// Which edges.
     pub side: CellSide,
-    /// The edge type.
+    /// The type those edges take, which the edge spacing rules name.
     pub edge_type: EdgeType,
 }
 

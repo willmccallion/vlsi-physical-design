@@ -723,7 +723,7 @@ pub struct LibPort {
     pub max_transition: Option<Seconds>,
     /// Largest fanout it may drive.
     pub max_fanout: Option<f64>,
-    /// Its fanout load.
+    /// What it adds to its driver's fanout, where the library gives it.
     pub fanout_load: Option<f64>,
     /// The logic it carries, for an output.
     pub function: Option<FuncExpr>,
@@ -1028,7 +1028,7 @@ pub struct Liberty {
     pub name: String,
     /// The units the file declared, which constraints are written in.
     pub units: LibraryUnits,
-    /// Its voltage thresholds.
+    /// The shares of the supply its delays and slews are measured between.
     pub thresholds: Thresholds,
     /// Values pins fall back on.
     pub defaults: Defaults,

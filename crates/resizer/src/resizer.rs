@@ -101,7 +101,7 @@ impl std::fmt::Debug for GlobalRouting<'_> {
 /// What repair reads about the design besides the netlist itself.
 #[derive(Clone, Copy, Debug)]
 pub struct Context<'a> {
-    /// The library link.
+    /// The Liberty cells matched to the design's masters.
     pub link: &'a Link<'a>,
     /// The clock network, which repair leaves alone.
     pub clocks: &'a ClockNetwork,

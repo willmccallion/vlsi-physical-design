@@ -58,7 +58,7 @@ pub(crate) struct SizingLimits {
 struct CellMeasures {
     /// Its master's area, in square database units.
     area: Option<i64>,
-    /// Its leakage power.
+    /// The power it leaks while idle, where the library gives it.
     leakage: Option<Watts>,
 }
 

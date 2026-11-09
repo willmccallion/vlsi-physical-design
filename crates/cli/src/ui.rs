@@ -167,7 +167,7 @@ pub struct TimingRow<'a> {
     pub tns_ns: f64,
     /// Endpoints still failing.
     pub failing: usize,
-    /// The worst endpoint.
+    /// The name of the endpoint with the worst slack, empty when there is none.
     pub worst: &'a str,
 }
 

@@ -249,7 +249,8 @@ pub enum CutBucket {
 pub struct CutRef {
     /// Cut layer.
     pub cut: CutLayerId,
-    /// Its bucket or buckets.
+    /// Where on the layer it is filed: one small bucket, or a span of coarse
+    /// ones.
     pub bucket: CutBucket,
 }
 
