@@ -1492,7 +1492,10 @@ pub(crate) fn buffer_delays(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::testing::{cells, clock_cells_source, design, pin, with_timed_session};
+    use crate::testing::{
+        DefSections, cells, clock_cells_source, def_text, design, metal2_wires, pin,
+        with_session_inputs, with_timed_session,
+    };
     use std::fmt::Write;
 
     /// Buffers in the chain between the two flops of [`buffered_pair`].
@@ -1632,5 +1635,114 @@ mod tests {
         let weights = timing_net_weights(&slacks(&values), 5.0);
 
         assert_eq!(weights, vec![(NetId::new(0), 5.0)]);
+    }
+
+    const CLOCK: &str = "create_clock -name clk -period 1.0 [get_ports clk]\n";
+
+    /// Two flops with buffers `b1` and `b2` between them, the first
+    /// fed from a net inside a hierarchy.
+    fn two_buffers() -> NetlistDB {
+        design(&def_text(
+            "two_buffers",
+            &DefSections {
+                components: "- f1 DFF_X1 + PLACED ( 2000 2800 ) N ;\n\
+                             - b1 BUF_X1 + PLACED ( 20000 2800 ) N ;\n\
+                             - b2 BUF_X1 + PLACED ( 40000 2800 ) N ;\n\
+                             - f2 DFF_X1 + PLACED ( 60000 2800 ) N ;\n",
+                nets: "- clk ( PIN clk ) ( f1 CK ) ( f2 CK ) ;\n\
+                       - u1/q ( f1 Q ) ( b1 A ) ;\n- m ( b1 Z ) ( b2 A ) ;\n\
+                       - d ( b2 Z ) ( f2 D ) ;\n",
+                inputs: &["clk"],
+                outputs: &[],
+            },
+        ))
+    }
+
+    fn def_of(db: &NetlistDB) -> String {
+        let mut text = Vec::new();
+        pare_common::db::writer::def::write(db, &mut text).unwrap();
+        String::from_utf8(text).unwrap()
+    }
+
+    /// `def` with the connections of each net in name order, which a
+    /// restore does not keep.
+    fn connections_sorted(def: &str) -> String {
+        let mut in_nets = false;
+        let mut sorted = Vec::new();
+        for line in def.lines() {
+            if line.starts_with("NETS ") || line == "END NETS" {
+                in_nets = !in_nets;
+            }
+            let net = in_nets
+                .then(|| line.split_once(" ( "))
+                .flatten()
+                .and_then(|(head, rest)| Some((head, rest.split_once(" ) +")?)));
+            let Some((head, (connections, tail))) = net else {
+                sorted.push(line.to_string());
+                continue;
+            };
+            let mut pins: Vec<&str> = connections.split(" ) ( ").collect();
+            pins.sort_unstable();
+            sorted.push(format!("{head} ( {} ) +{tail}", pins.join(" ) ( ")));
+        }
+        sorted.join("\n")
+    }
+
+    /// How a test session closes its journal.
+    #[derive(Clone, Copy)]
+    enum Close {
+        Restore,
+        End,
+    }
+
+    /// The DEF of [`two_buffers`] after a session that removes `b1`, which
+    /// renames nets, resizes `b2` and buffers `f2`, then closes the journal
+    /// as `close` says.
+    fn after_edits(close: Close) -> String {
+        let mut db = two_buffers();
+        let lib = cells(&clock_cells_source());
+        let rc = metal2_wires(&db);
+        with_session_inputs(&mut db, &lib, CLOCK, rc, |inputs, sdc| {
+            let mut resizer = Resizer::timed(inputs, sdc).unwrap();
+            resizer.journal_begin();
+            let b1 = resizer.db.cell_id("b1").unwrap();
+            let _ = resizer.remove_buffer(b1).unwrap();
+            let b2 = resizer.db.cell_id("b2").unwrap();
+            let clock_buffer = resizer.link.liberty.cell_id("CLKBUF_X3").unwrap();
+            assert!(resizer.replace_cell(b2, clock_buffer).unwrap());
+            let d = resizer.db.net_id("d").unwrap();
+            let load = pin(resizer.db, "f2/D");
+            let buffer = resizer.buffers.lowest_drive;
+            let at = Point::new(Dbu(50_000), Dbu(2800));
+            let _ = resizer
+                .insert_buffer_before_loads(d, &[load], buffer, at, "rebuffer")
+                .unwrap();
+            match close {
+                Close::Restore => resizer.journal_restore().unwrap(),
+                Close::End => resizer.journal_end(),
+            }
+            let _ = resizer.finish().unwrap();
+        });
+        def_of(&db)
+    }
+
+    #[test]
+    fn restoring_the_journal_leaves_the_design_as_it_was() {
+        let before = def_of(&two_buffers());
+
+        let after = after_edits(Close::Restore);
+
+        assert_eq!(connections_sorted(&after), connections_sorted(&before));
+    }
+
+    #[test]
+    fn ending_the_journal_keeps_the_edits() {
+        let before = def_of(&two_buffers());
+
+        let after = after_edits(Close::End);
+
+        assert_ne!(after, before);
+        assert!(after.contains("- rebuffer1 BUF_X1") && after.contains("- b2 CLKBUF_X3"));
+        assert!(!after.contains("- b1 BUF_X1"));
     }
 }
