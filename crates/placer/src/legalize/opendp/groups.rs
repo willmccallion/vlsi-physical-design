@@ -781,4 +781,22 @@ mod tests {
         };
         assert_eq!([1, 2, 3].map(group_of), [None, None, Some(GroupId(0))]);
     }
+
+    #[test]
+    fn outer_bricks_pack_a_member_toward_the_box_corner_on_its_side() {
+        let mut db = tiny_fenced("( 0 0 ) ( 2000 2000 )", "u1");
+        let u1 = db.cell_id("u1").unwrap();
+        db.cells[u1].location = Point::new(Dbu(1500), Dbu(1500));
+        let mut placer = placer_with_regions(&db);
+        let u1 = placer
+            .nodes
+            .ids()
+            .find(|&n| placer.nodes[n].name == "u1")
+            .unwrap();
+
+        placer.brick_place_outer(GroupId(0)).unwrap();
+
+        let at = placer.nodes[u1].bbox().min;
+        assert_eq!(at, Point::new(Dbu(1600), Dbu(0)));
+    }
 }

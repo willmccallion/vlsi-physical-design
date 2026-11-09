@@ -282,3 +282,43 @@ fn of_two_cells_wanting_one_spot_the_one_nearer_the_core_center_goes_first() {
         )
     );
 }
+
+#[test]
+fn a_design_without_rows_is_an_error() {
+    let mut db = tiny_with(&[(1000, 1000); 6]);
+    db.rows.clear();
+
+    assert_eq!(
+        detailed_placement(&mut db),
+        Err(DetailedPlacementError::NoRows)
+    );
+}
+
+#[test]
+fn rows_of_sites_of_different_widths_are_an_error() {
+    let mut db = tiny_with(&[(1000, 1000); 6]);
+    let mut wide = db.library.sites[db.rows[0].site].clone();
+    wide.name = "wide".into();
+    wide.size.x = Dbu(400);
+    db.rows[2].site = db.library.sites.push(wide);
+
+    assert_eq!(
+        detailed_placement(&mut db),
+        Err(DetailedPlacementError::SiteWidths(Dbu(400), Dbu(200)))
+    );
+}
+
+#[test]
+fn a_cell_wider_than_the_core_is_an_error() {
+    let mut db = tiny_with(&[(1000, 1000); 6]);
+    let u1 = db.cell_id("u1").unwrap();
+    let mut wide = db.cell_macro(u1).clone();
+    wide.name = "WIDE".into();
+    wide.size.x = Dbu(6200);
+    db.cells[u1].macro_id = db.library.add_macro(wide).unwrap();
+
+    assert_eq!(
+        detailed_placement(&mut db),
+        Err(DetailedPlacementError::DoesNotFit("u1".into()))
+    );
+}
