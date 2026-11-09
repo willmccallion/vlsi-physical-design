@@ -285,6 +285,16 @@ struct Latch {
     state: LatchState,
 }
 
+/// Data reaching a clocked latch's input: its tag, its edge and its arrival
+/// on one side.
+#[derive(Clone, Copy, Debug)]
+struct LatchData {
+    tag: TagId,
+    edge: Edge,
+    side: MinMax,
+    arrival: Seconds,
+}
+
 /// What a latch does with data arriving at `arrival`: `OpenSTA`'s
 /// `latchRequired` for an ideal clock.
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -949,8 +959,14 @@ impl Sta {
                     };
                     match through_latch {
                         Some(latch) if latch.state == LatchState::Enabled => {
-                            for (q_tag, adjusted) in self
-                                .latch_departures(netlist, graph, latch, from.tag, arrival, side)
+                            let data = LatchData {
+                                tag: from.tag,
+                                edge: arc.from_edge,
+                                side,
+                                arrival,
+                            };
+                            for (q_tag, adjusted) in
+                                self.latch_departures(netlist, graph, latch, data)
                             {
                                 merge_arrival(&mut entries, q_tag, side, adjusted + delay, prev);
                             }
@@ -1025,17 +1041,15 @@ impl Sta {
         netlist: &Netlist<'_>,
         graph: &TimingGraph,
         latch: Latch,
-        data_tag: TagId,
-        arrival: Seconds,
-        side: MinMax,
+        data: LatchData,
     ) -> Vec<(TagId, Seconds)> {
-        let tag = self.tags[data_tag];
+        let tag = self.tags[data.tag];
         let Some(launch) = tag.launch else {
             return Vec::new();
         };
         let enables = self.captures(latch.enable, latch.open_edge);
-        let related = self.clock_slew(graph, latch.enable, opposite(latch.open_edge), side);
-        let margin = latch_margin(netlist, graph, latch, side, related);
+        let margin = self.latch_margin(netlist, graph, latch, data.edge, data.side);
+        let arrival = data.arrival;
         let mut departures = Vec::new();
         for capture in enables {
             let enable = capture.edge;
@@ -1054,6 +1068,43 @@ impl Sta {
             }
         }
         departures
+    }
+
+    /// The setup a latch's data pin demands before the closing edge for
+    /// data on `data_edge`, as `Latches::latchSetupMargin`: the first setup
+    /// arc from the enable matching the data edge and the closing edge, at
+    /// `side`'s slews, whatever its sign; zero without one.
+    fn latch_margin(
+        &self,
+        netlist: &Netlist<'_>,
+        graph: &TimingGraph,
+        latch: Latch,
+        data_edge: Edge,
+        side: MinMax,
+    ) -> Seconds {
+        let db = netlist.db;
+        let (Some((lib, port)), Some((_, enable_port))) = (
+            netlist.link.pin_port(db, latch.data),
+            netlist.link.pin_port(db, latch.enable),
+        ) else {
+            return Seconds::ZERO;
+        };
+        let close_edge = opposite(latch.open_edge);
+        let clock_slew = self.clock_slew(graph, latch.enable, close_edge, side);
+        let data_slew = graph.slew_side(latch.data, side).get(data_edge);
+        netlist
+            .link
+            .liberty
+            .cell(lib)
+            .arc_sets
+            .iter()
+            .filter(|set| set.to == port && set.from == enable_port && set.role == ArcRole::Setup)
+            .find_map(|set| {
+                set.arcs
+                    .iter()
+                    .find(|arc| arc.to_edge == data_edge && arc.from_edge == close_edge)
+            })
+            .map_or(Seconds::ZERO, |arc| arc.check_value(clock_slew, data_slew))
     }
 
     /// `OpenSTA`'s `latchRequired` for an ideal clock: data arriving before
@@ -1554,32 +1605,6 @@ impl Sta {
     }
 }
 
-/// The setup a latch's data pin demands before the closing edge, on
-/// `side`'s slew, over its setup arcs.
-fn latch_margin(
-    netlist: &Netlist<'_>,
-    graph: &TimingGraph,
-    latch: Latch,
-    side: MinMax,
-    clock_slew: Seconds,
-) -> Seconds {
-    let db = netlist.db;
-    let Some((lib, port)) = netlist.link.pin_port(db, latch.data) else {
-        return Seconds::ZERO;
-    };
-    let slews = graph.slew_side(latch.data, side);
-    netlist
-        .link
-        .liberty
-        .cell(lib)
-        .arc_sets
-        .iter()
-        .filter(|set| set.to == port && set.role == ArcRole::Setup)
-        .flat_map(|set| set.arcs.iter())
-        .map(|arc| arc.check_value(clock_slew, slews.get(arc.to_edge)))
-        .fold(Seconds::ZERO, Seconds::max)
-}
-
 const fn opposite(edge: Edge) -> Edge {
     match edge {
         Edge::Rise => Edge::Fall,
@@ -1875,8 +1900,10 @@ mod tests {
     use crate::graph::{Estimator, PortConditions};
     use crate::library::Link;
     use crate::parasitics::WireRc;
+    use crate::testing::{DefSections, cells_with, def_text, design_with_copies};
     use pare_common::db::design::NetlistDB;
     use pare_common::db::indices::LayerId;
+    use pare_common::db::liberty::Liberty;
     use pare_common::db::parser::{def, lef, liberty, sdc};
     use pare_common::db::sdc::Clock;
     use pare_common::geom::dbu::DbuPerMicron;
@@ -2032,8 +2059,19 @@ mod tests {
         inspect: impl FnOnce(&Netlist<'_>, &Sta) -> R,
     ) -> R {
         let lib = liberty::parse_file(&fixture("cts", "clock.lib")).unwrap();
-        let sdc = sdc::parse_str(constraints, Path::new("test.sdc"), db, &lib).unwrap();
-        let link = Link::new(db, &lib, &[]).unwrap();
+        timed_with(db, &lib, constraints, inspect)
+    }
+
+    /// What `inspect` reads from the design timed with the cells of `lib`
+    /// under `constraints` with wires without resistance or capacitance.
+    fn timed_with<R>(
+        db: &NetlistDB,
+        lib: &Liberty,
+        constraints: &str,
+        inspect: impl FnOnce(&Netlist<'_>, &Sta) -> R,
+    ) -> R {
+        let sdc = sdc::parse_str(constraints, Path::new("test.sdc"), db, lib).unwrap();
+        let link = Link::new(db, lib, &[]).unwrap();
         let netlist = Netlist::new(db, &link);
         let constants = Constants::find(&netlist);
         let clocks = ClockNetwork::from_sdc(&netlist, &sdc, &constants);
@@ -2112,6 +2150,60 @@ mod tests {
         assert_eq!(worst, (pin_slack, Some(d)));
         assert!(pin_slack.is_constrained(), "{pin_slack:?}");
         assert_eq!(path.map(|p| p.slack), Some(pin_slack.time()));
+    }
+
+    /// A latch transparent while `CK` is high, whose setup before the
+    /// closing fall is negative for rising data and positive for falling
+    /// data, with a tenth of a nanosecond from `D` and from `CK` to `Q`.
+    const LATCH: &str = "cell (LAT) { area : 4.5 ;
+        latch (\"IQ\", \"IQN\") { data_in : \"D\" ; enable : \"CK\" ; }
+        pin (D) { direction : input ; capacitance : 1.0 ;
+          timing () { related_pin : \"CK\" ; timing_type : setup_falling ;
+            rise_constraint (scalar) { values (\"-0.05\") ; }
+            fall_constraint (scalar) { values (\"0.08\") ; } } }
+        pin (CK) { direction : input ; clock : true ; capacitance : 1.0 ; }
+        pin (Q) { direction : output ; function : \"IQ\" ;
+          timing () { related_pin : \"D\" ; timing_sense : positive_unate ;
+            cell_rise (scalar) { values (\"0.1\") ; }
+            cell_fall (scalar) { values (\"0.1\") ; } }
+          timing () { related_pin : \"CK\" ; timing_type : rising_edge ;
+            cell_rise (scalar) { values (\"0.1\") ; }
+            cell_fall (scalar) { values (\"0.1\") ; } } } }";
+
+    /// The latch `l` of [`LATCH`] clocked from `clk`, its data from the
+    /// port `in`, its output to the port `out`.
+    fn latch_design() -> NetlistDB {
+        design_with_copies(
+            &def_text(
+                "latched",
+                &DefSections {
+                    components: "- l LAT + PLACED ( 2000 2800 ) N ;\n",
+                    nets: "- clk ( PIN clk ) ( l CK ) ;\n- in ( PIN in ) ( l D ) ;\n\
+                           - out ( l Q ) ( PIN out ) ;\n",
+                    inputs: &["clk", "in"],
+                    outputs: &["out"],
+                },
+            ),
+            &[("DFF_X1", "LAT")],
+        )
+    }
+
+    #[test]
+    fn data_borrows_up_to_the_setup_of_its_own_edge_before_the_latch_closes() {
+        let db = latch_design();
+        let q = cell_pin(&db, "l/Q");
+        let constraints = "create_clock -name clk -period 2.0 [get_ports clk]\n\
+                           set_input_delay 0.98 -clock clk [get_ports in]\n";
+
+        let (rise, fall) = timed_with(&db, &cells_with(LATCH), constraints, |_, sta| {
+            (
+                sta.arrival(q, Edge::Rise, MinMax::Max).unwrap(),
+                sta.arrival(q, Edge::Fall, MinMax::Max).unwrap(),
+            )
+        });
+
+        assert!((rise.get() - 1.08e-9).abs() < 1e-15, "{rise:?}");
+        assert!((fall.get() - 1.02e-9).abs() < 1e-15, "{fall:?}");
     }
 
     #[test]
