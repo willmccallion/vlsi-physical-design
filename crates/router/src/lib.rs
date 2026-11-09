@@ -49,7 +49,7 @@ pub use session::GlobalSession;
 use state::{DetailedState, GridShape};
 pub use state::{RouteState, StateParseError};
 use std::time::{Duration, Instant};
-use tech::{MAX_DIE_REACH, MAX_GRID_SPAN, RouteTech};
+use tech::{MAX_DIE_REACH, MAX_GRID_NODES, MAX_GRID_SPAN, RouteTech};
 use track::assign_tracks;
 
 /// What routing achieved.
@@ -1207,6 +1207,12 @@ pub enum RouteError {
         "the die spans {0} gcells, beyond the global router's {MAX_GRID_SPAN}; raise [routing] gcell_tracks"
     )]
     GridTooLarge(Gcells),
+    /// The global grid has more nodes, gcells times routing layers, than
+    /// its searches index.
+    #[error(
+        "the gcell grid has {0} nodes over its routing layers, beyond the global router's {MAX_GRID_NODES}; raise [routing] gcell_tracks"
+    )]
+    GridTooManyNodes(i64),
     /// A saved state is of another design.
     #[error("the route state was saved for design '{0}'")]
     StateDesign(String),

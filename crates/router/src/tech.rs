@@ -247,8 +247,9 @@ fn reach_from_origin(die: &Rect<Dbu>) -> Dbu {
 
 /// `i` as the 32-bit index the router stores. Every such index counts
 /// things 32 bits hold: tracks and crossings, whose coordinates lie within
-/// [`MAX_DIE_REACH`] of the origin, the design's nets and shapes, and search
-/// nodes of grids [`check_grid_span`] keeps within 16 bits a side.
+/// [`MAX_DIE_REACH`] of the origin, the design's nets and shapes, and
+/// global search nodes, which [`check_grid_span`] keeps below
+/// [`MAX_GRID_NODES`].
 pub(crate) fn index_u32(i: usize) -> u32 {
     debug_assert!(u32::try_from(i).is_ok(), "router index {i} past 32 bits");
     i as u32
@@ -258,11 +259,25 @@ pub(crate) fn index_u32(i: usize) -> u32 {
 /// hold.
 pub(crate) const MAX_GRID_SPAN: Gcells = Gcells(u16::MAX as i64);
 
-/// Fails when `die` spans more than [`MAX_GRID_SPAN`] gcells of `gcell`.
-fn check_grid_span(die: &Rect<Dbu>, gcell: Dbu) -> Result<(), RouteError> {
-    let cells = Gcells::covering(die.width().max(die.height()), gcell);
+/// The most nodes, gcells times routing layers, the global grid may have:
+/// its searches index nodes in 32 bits and keep `u32::MAX` for "no parent".
+pub(crate) const MAX_GRID_NODES: i64 = u32::MAX as i64;
+
+/// Fails when `die` spans more than [`MAX_GRID_SPAN`] gcells of `gcell`,
+/// or its grid over `layers` routing layers has [`MAX_GRID_NODES`] nodes
+/// or more.
+fn check_grid_span(die: &Rect<Dbu>, gcell: Dbu, layers: usize) -> Result<(), RouteError> {
+    let (nx, ny) = (
+        Gcells::covering(die.width(), gcell),
+        Gcells::covering(die.height(), gcell),
+    );
+    let cells = nx.max(ny);
     if cells > MAX_GRID_SPAN {
         return Err(RouteError::GridTooLarge(cells));
+    }
+    let nodes = nx.get() * ny.get() * layers as i64;
+    if nodes >= MAX_GRID_NODES {
+        return Err(RouteError::GridTooManyNodes(nodes));
     }
     Ok(())
 }
@@ -309,6 +324,7 @@ impl RouteTech {
         check_grid_span(
             &db.die_area,
             gcell_pitch * i64::from(config.gcell_tracks.get()),
+            min_layer.through(max_layer).count(),
         )?;
         let layers: IdVec<LayerId, LayerTech> =
             tracks.ids().map(|l| layer_tech(lib, &tracks, l)).collect();
@@ -558,14 +574,27 @@ mod tests {
 
     #[test]
     fn a_die_of_as_many_gcells_as_the_grid_holds_is_routable() {
-        assert_eq!(check_grid_span(&die(65_535 * 100), Dbu(100)), Ok(()));
+        assert_eq!(check_grid_span(&die(65_535 * 100), Dbu(100), 2), Ok(()));
     }
 
     #[test]
     fn a_die_past_the_grid_s_span_is_refused_with_its_gcells() {
         assert_eq!(
-            check_grid_span(&die(65_535 * 100 + 1), Dbu(100)),
+            check_grid_span(&die(65_535 * 100 + 1), Dbu(100), 2),
             Err(RouteError::GridTooLarge(Gcells(65_536)))
+        );
+    }
+
+    #[test]
+    fn a_grid_with_more_nodes_than_32_bits_index_is_refused() {
+        let square = Rect::new(
+            Point::new(Dbu(0), Dbu(0)),
+            Point::new(Dbu(40_000), Dbu(40_000)),
+        );
+
+        assert_eq!(
+            check_grid_span(&square, Dbu(1), 3),
+            Err(RouteError::GridTooManyNodes(4_800_000_000))
         );
     }
 
