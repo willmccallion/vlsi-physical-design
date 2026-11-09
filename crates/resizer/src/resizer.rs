@@ -4,7 +4,7 @@
 //! repair sizes against, and a journal of edits so that a repair which did
 //! not pay off can be taken back.
 
-use crate::bnet::{LoadModel, PinLoad, TreeRc};
+use crate::bnet::{self, BnetPtr, LoadModel, PinLoad, TreeRc};
 use crate::buffers::{MergedNets, hierarchy_depth, merged_nets};
 use crate::fuzzy;
 use crate::graph::{Estimator, PortConditions, TimingGraph};
@@ -50,6 +50,31 @@ pub enum RepairError {
     /// A cell to insert lacks the pins it needs.
     #[error("cell '{0}' has no usable pins")]
     MissingPins(String),
+    /// A net's global route reaches fewer of its pins than it has, as
+    /// `OpenROAD`'s RSZ 74.
+    #[error(
+        "failed to build a tree from the global route of pin '{pin}': \
+         found a route to {found} pins, expected {expected}"
+    )]
+    RouteTree {
+        /// The net's driver.
+        pin: String,
+        /// The loads the route reaches.
+        found: usize,
+        /// The loads the net has.
+        expected: usize,
+    },
+    /// Area recovery found no buffering of a net that meets its slack
+    /// threshold, as `OpenROAD`'s RSZ 501, 2004 and 2022.
+    #[error("buffering pin '{0}' failed: area recovery found no solution")]
+    AreaRecovery(String),
+    /// The library offers no buffer to insert.
+    #[error("there are no buffers to repair with")]
+    NoBuffers,
+    /// No wire length lets a buffer drive its own input within its slew
+    /// limit, as `OpenROAD`'s RSZ 2010 and 2011.
+    #[error("cannot find the wire length buffer '{0}' drives within its load's slew limit")]
+    WireLengthLimit(String),
     /// The library's slew thresholds give an unusable shape factor.
     #[error("the slew thresholds give an RC shape factor of {0:.3e}, outside 0.1 to 10")]
     ShapeFactor(f64),
@@ -412,6 +437,16 @@ impl<'a, T: Timing> Resizer<'a, T> {
             stale_timing: Vec::new(),
             routes,
         })
+    }
+
+    /// The buffering tree of the net `driver` drives, from its parasitics;
+    /// none for a net without them.
+    pub(crate) fn buffered_tree(&self, driver: PinId) -> Result<Option<BnetPtr>, RepairError> {
+        let net = self.db.pins[driver].net;
+        let Some(parasitics) = self.graph.parasitics(net) else {
+            return Ok(None);
+        };
+        bnet::from_parasitics(&self.netlist(), parasitics, driver, &self.tree_rc(), self)
     }
 
     /// The wire and via RC buffering trees take.

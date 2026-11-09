@@ -69,6 +69,16 @@ struct Driver {
     arrival_paths: EdgeValues<Option<DriverPoint>>,
 }
 
+/// Area recovery found no option meeting its slack threshold, which
+/// `OpenROAD` reports as RSZ 501, 2004 or 2022.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+struct AreaRecoveryFailed;
+
+/// The error area recovery's failure on `driver`'s net is.
+fn area_recovery_error(resizer: &Resizer<'_, Sta>, driver: PinId) -> RepairError {
+    RepairError::AreaRecovery(resizer.db.pin_name(driver))
+}
+
 /// Whether buffering may restructure a tree at its junctions, as
 /// `bufferForTiming`'s `allow_topology_rewrite`.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -129,12 +139,10 @@ impl Rebuffer {
             .map(|buffer| buffer_size(resizer, buffer))
             .collect();
         sizes.sort_by(|a, b| a.input_cap.total_cmp(&b.input_cap));
-        let smallest = sizes
-            .first()
-            .ok_or_else(|| RepairError::MissingPins("no buffers to rebuffer with".into()))?;
+        let smallest = sizes.first().ok_or(RepairError::NoBuffers)?;
         let wire_length_step = least_length([
             max_wire_length,
-            wire_length_limit_by_load_slew(resizer, smallest),
+            wire_length_limit_by_load_slew(resizer, smallest)?,
             wire_length_limit_by_max_cap(resizer, smallest),
         ]);
         Ok(Self {
@@ -209,7 +217,7 @@ impl Rebuffer {
         if !self.set_driver(resizer, driver) {
             return Ok(0);
         }
-        let Some(tree) = make_tree(resizer, driver) else {
+        let Some(tree) = resizer.buffered_tree(driver)? else {
             return Ok(0);
         };
         let mut tree = self.annotate_load_slacks(resizer, &tree, driver);
@@ -227,10 +235,9 @@ impl Rebuffer {
         let target = self.slack_at_driver(resizer, &tree) - Fixed::from_seconds(relaxation);
         for round in 0..AREA_ROUNDS {
             let alpha = (round + 1) as f64 / AREA_ROUNDS as f64;
-            match self.recover_area(resizer, &tree, target, alpha) {
-                Some(leaner) => tree = leaner,
-                None => return Ok(0),
-            }
+            tree = self
+                .recover_area(resizer, &tree, target, alpha)
+                .map_err(|AreaRecoveryFailed| area_recovery_error(resizer, driver))?;
         }
         let inserted = export_tree(resizer, &tree, "rebuffer")?;
         self.inserted += inserted;
@@ -269,7 +276,7 @@ impl Rebuffer {
             if !self.set_driver(resizer, driver) {
                 continue;
             }
-            let Some(original) = self.import_buffer_tree(resizer, driver) else {
+            let Some(original) = self.import_buffer_tree(resizer, driver)? else {
                 continue;
             };
             let original = self.annotate_load_slacks(resizer, &original, driver);
@@ -307,18 +314,11 @@ impl Rebuffer {
                 -Fixed::INF
             };
             let mut area_tree = timing_tree;
-            let mut recovered = true;
             for round in 0..AREA_ROUNDS {
                 let alpha = (round + 1) as f64 / AREA_ROUNDS as f64;
-                if let Some(leaner) = self.recover_area(resizer, &area_tree, target, alpha) {
-                    area_tree = leaner;
-                } else {
-                    recovered = false;
-                    break;
-                }
-            }
-            if !recovered {
-                continue;
+                area_tree = self
+                    .recover_area(resizer, &area_tree, target, alpha)
+                    .map_err(|AreaRecoveryFailed| area_recovery_error(resizer, driver))?;
             }
             let old_buffers = collect_imported_buffers(resizer, driver, &original);
             resizer.batch_edits();
@@ -663,7 +663,7 @@ impl Rebuffer {
         let Some(step) = step.filter(|&step| full_length > step / 2) else {
             return self.short_wire_options(resizer, node, layer, options, full_length);
         };
-        self.insert_buffer_options(resizer, &mut options, full_length.min(step), None);
+        self.insert_buffer_options(resizer, &mut options, full_length.min(step));
         while location != node.at {
             let last_valid = options.clone();
             let mut dx = node.at.x - location.x;
@@ -681,7 +681,7 @@ impl Rebuffer {
                 .iter()
                 .map(|o| wire(resizer, location, layer, Rc::clone(o)))
                 .collect();
-            self.insert_buffer_options(resizer, &mut options, remaining.min(step), None);
+            self.insert_buffer_options(resizer, &mut options, remaining.min(step));
             if options.is_empty() {
                 let net = self
                     .driver
@@ -711,15 +711,15 @@ impl Rebuffer {
             .iter()
             .map(|o| wire(resizer, node.at, layer, Rc::clone(o)))
             .collect();
-        self.insert_buffer_options(resizer, &mut near, Dbu(0), None);
+        self.insert_buffer_options(resizer, &mut near, Dbu(0));
         if near.is_empty() {
             let mut far = options;
-            self.insert_buffer_options(resizer, &mut far, full_length, None);
+            self.insert_buffer_options(resizer, &mut far, full_length);
             near = far
                 .iter()
                 .map(|o| wire(resizer, node.at, layer, Rc::clone(o)))
                 .collect();
-            self.insert_buffer_options(resizer, &mut near, Dbu(0), None);
+            self.insert_buffer_options(resizer, &mut near, Dbu(0));
         }
         near
     }
@@ -865,22 +865,60 @@ impl Rebuffer {
     }
 
     /// Offers every buffer size on top of the options, keeping the options
-    /// that trade capacitance for slack (or, recovering area, for area at
-    /// no less than a slack threshold), as `insertBufferOptions`.
+    /// that trade capacitance for slack, as `insertBufferOptions` buffering
+    /// for timing.
     fn insert_buffer_options(
         &self,
         resizer: &Resizer<'_, Sta>,
         options: &mut Vec<BnetPtr>,
         next_segment: Dbu,
-        area: Option<(Fixed, &Bnet)>,
     ) {
+        *options = self
+            .buffered_frontier(resizer, options, next_segment, None)
+            .kept;
+    }
+
+    /// Offers every buffer size on top of the options, keeping the options
+    /// that trade area for slack at no less than `threshold`, as
+    /// `insertBufferOptions` recovering area; fails, as it does with RSZ
+    /// 501, when no option reproduces what `exemplar` timed.
+    fn insert_area_options(
+        &self,
+        resizer: &Resizer<'_, Sta>,
+        options: &mut Vec<BnetPtr>,
+        next_segment: Dbu,
+        (threshold, exemplar): (Fixed, &Bnet),
+    ) -> Result<(), AreaRecoveryFailed> {
         if options.is_empty() {
-            return;
+            return Ok(());
         }
-        let Some(strong) = self.sizes.last().copied() else {
-            return;
-        };
+        let area = Some((threshold, exemplar));
+        let mut frontier = self.buffered_frontier(resizer, options, next_segment, area);
+        if !frontier.assured
+            && let Some(envelope) = &frontier.envelope
+        {
+            let option =
+                assured_fallback(resizer, &self.sizes, options, threshold, exemplar, envelope)
+                    .ok_or(AreaRecoveryFailed)?;
+            insert_assured(&mut frontier.kept, option);
+        }
+        *options = frontier.kept;
+        Ok(())
+    }
+
+    /// The options worth keeping once every buffer size is offered on top
+    /// of `options`, for timing or, given `area`, for area.
+    fn buffered_frontier(
+        &self,
+        resizer: &Resizer<'_, Sta>,
+        options: &[BnetPtr],
+        next_segment: Dbu,
+        area: Option<(Fixed, &Bnet)>,
+    ) -> Frontier {
         let mut frontier = Frontier::new(area, options.len() * 2);
+        let Some(strong) = self.sizes.last().copied() else {
+            return frontier;
+        };
         let mut at = 0usize;
         for size in &self.sizes {
             while at < options.len() && options[at].cap <= size.input_cap {
@@ -900,21 +938,7 @@ impl Rebuffer {
         for option in &options[at..] {
             frontier.offer(resizer, &strong, option, next_segment);
         }
-        if !frontier.assured
-            && let Some((threshold, exemplar)) = area
-            && let Some(envelope) = &frontier.envelope
-        {
-            match assured_fallback(resizer, &self.sizes, options, threshold, exemplar, envelope) {
-                Some(option) => insert_assured(&mut frontier.kept, option),
-                None => log::warn!(
-                    "rebuffering {}: area recovery cannot reproduce the timing solution",
-                    resizer
-                        .db
-                        .pin_name(self.driver.as_ref().map_or(PinId::new(0), |d| d.pin))
-                ),
-            }
-        }
-        *options = frontier.kept;
+        frontier
     }
 
     /// Trades buffers for area while every node keeps at least a share
@@ -926,7 +950,7 @@ impl Rebuffer {
         root: &BnetPtr,
         slack_target: Fixed,
         alpha: f64,
-    ) -> Option<BnetPtr> {
+    ) -> Result<BnetPtr, AreaRecoveryFailed> {
         let (correction, target) = if root.slack_edges.is_some() {
             (
                 Fixed::from_seconds(self.driver_timing(resizer, root).correction),
@@ -936,7 +960,7 @@ impl Rebuffer {
             (Fixed::ZERO, -Fixed::INF)
         };
         let root = with_arrivals(root, -correction);
-        let options = self.area_options(resizer, &root, target, alpha, Dbu(0));
+        let options = self.area_options(resizer, &root, target, alpha, Dbu(0))?;
         let mut best_slack: Option<(Fixed, BnetPtr)> = None;
         let mut best_area: Option<(CellArea, BnetPtr)> = None;
         for option in options {
@@ -961,6 +985,7 @@ impl Rebuffer {
         best_area
             .map(|(_, o)| o)
             .or_else(|| best_slack.map(|(_, o)| o))
+            .ok_or(AreaRecoveryFailed)
     }
 
     fn area_options(
@@ -970,15 +995,15 @@ impl Rebuffer {
         slack_target: Fixed,
         alpha: f64,
         upstream_wire: Dbu,
-    ) -> Vec<BnetPtr> {
-        match &node.kind {
+    ) -> Result<Vec<BnetPtr>, AreaRecoveryFailed> {
+        Ok(match &node.kind {
             Kind::Load { .. } => vec![Rc::clone(node)],
             Kind::Via {
                 to,
                 layer,
                 to_layer,
             } => self
-                .area_options(resizer, to, slack_target, alpha, upstream_wire)
+                .area_options(resizer, to, slack_target, alpha, upstream_wire)?
                 .into_iter()
                 .map(|o| Bnet::via(node.at, *layer, *to_layer, o, &resizer.tree_rc()))
                 .collect(),
@@ -989,28 +1014,23 @@ impl Rebuffer {
                 };
                 let mut options = if let Kind::Wire { to, layer } = &inner.kind {
                     let options =
-                        self.area_options(resizer, to, slack_target, alpha, inner.length());
+                        self.area_options(resizer, to, slack_target, alpha, inner.length())?;
                     options
                         .into_iter()
                         .map(|o| wire(resizer, inner.at, *layer, o))
                         .collect()
                 } else {
-                    self.area_options(resizer, &inner, slack_target, alpha, Dbu(0))
+                    self.area_options(resizer, &inner, slack_target, alpha, Dbu(0))?
                 };
                 let threshold = Fixed::lerp(node.slack, slack_target + node.arrival_delay, alpha);
-                self.insert_buffer_options(
-                    resizer,
-                    &mut options,
-                    upstream_wire,
-                    Some((threshold, node)),
-                );
+                self.insert_area_options(resizer, &mut options, upstream_wire, (threshold, node))?;
                 options
             }
             Kind::Junction { left, right } => {
                 let left_options =
-                    self.area_options(resizer, left, slack_target, alpha, upstream_wire);
+                    self.area_options(resizer, left, slack_target, alpha, upstream_wire)?;
                 let right_options =
-                    self.area_options(resizer, right, slack_target, alpha, upstream_wire);
+                    self.area_options(resizer, right, slack_target, alpha, upstream_wire)?;
                 let threshold = Fixed::lerp(node.slack, slack_target + node.arrival_delay, alpha);
                 let envelope = node.metrics().with_slack(threshold);
                 let fanout_limit = self
@@ -1038,21 +1058,31 @@ impl Rebuffer {
                 }
                 options
             }
-        }
+        })
     }
 
     /// The tree of `driver`'s net with the removable buffers under it
     /// folded in as buffer nodes, as `importBufferTree`.
-    fn import_buffer_tree(&self, resizer: &Resizer<'_, Sta>, driver: PinId) -> Option<BnetPtr> {
-        let tree = make_tree(resizer, driver)?;
-        self.import_node(resizer, &tree)
+    fn import_buffer_tree(
+        &self,
+        resizer: &Resizer<'_, Sta>,
+        driver: PinId,
+    ) -> Result<Option<BnetPtr>, RepairError> {
+        let Some(tree) = resizer.buffered_tree(driver)? else {
+            return Ok(None);
+        };
+        self.import_node(resizer, &tree).map(Some)
     }
 
-    fn import_node(&self, resizer: &Resizer<'_, Sta>, node: &BnetPtr) -> Option<BnetPtr> {
-        match &node.kind {
+    fn import_node(
+        &self,
+        resizer: &Resizer<'_, Sta>,
+        node: &BnetPtr,
+    ) -> Result<BnetPtr, RepairError> {
+        Ok(match &node.kind {
             Kind::Wire { to, layer } => {
                 let inner = self.import_node(resizer, to)?;
-                Some(wire(resizer, node.at, *layer, inner))
+                wire(resizer, node.at, *layer, inner)
             }
             Kind::Via {
                 to,
@@ -1060,54 +1090,59 @@ impl Rebuffer {
                 to_layer,
             } => {
                 let inner = self.import_node(resizer, to)?;
-                Some(Bnet::via(
-                    node.at,
-                    *layer,
-                    *to_layer,
-                    inner,
-                    &resizer.tree_rc(),
-                ))
+                Bnet::via(node.at, *layer, *to_layer, inner, &resizer.tree_rc())
             }
             Kind::Junction { left, right } => {
                 let left = self.import_node(resizer, left)?;
                 let right = self.import_node(resizer, right)?;
-                Some(Bnet::junction(node.at, left, right))
+                Bnet::junction(node.at, left, right)
             }
             Kind::Buffer { buffer, to } => {
                 let inner = self.import_node(resizer, to)?;
-                Some(self.buffer_node(resizer, node.at, *buffer, inner))
+                self.buffer_node(resizer, node.at, *buffer, inner)
             }
-            Kind::Load { pin } => {
-                let PinOwner::Cell { cell, .. } = resizer.db.pins[*pin].owner else {
-                    return Some(Rc::clone(node));
-                };
-                let Some((lib_id, lib)) = resizer.link.cell(resizer.db, cell) else {
-                    return Some(Rc::clone(node));
-                };
-                let netlist = resizer.netlist();
-                let is_input = netlist
-                    .lib_port(*pin)
-                    .is_some_and(pare_common::db::liberty::LibPort::is_input);
-                let buffer = resizer
-                    .link
-                    .liberty
-                    .buffer_cell(lib_id)
-                    .filter(|_| lib.is_buffer());
-                let Some(buffer) = buffer.filter(|_| {
-                    is_input
-                        && is_logic_std_cell(resizer.db, cell)
-                        && !is_port_buffer(resizer, cell)
-                        && can_remove_buffer(resizer, cell)
-                }) else {
-                    return Some(Rc::clone(node));
-                };
-                let (_, out_pin) = resizer.buffer_pins(cell)?;
-                let Some(inner) = self.import_buffer_tree(resizer, out_pin) else {
-                    return Some(Rc::clone(node));
-                };
-                Some(self.buffer_node(resizer, node.at, buffer, inner))
-            }
-        }
+            Kind::Load { pin } => return self.import_load(resizer, node, *pin),
+        })
+    }
+
+    /// A load of an imported tree, with the tree a removable buffer there
+    /// drives folded in under it.
+    fn import_load(
+        &self,
+        resizer: &Resizer<'_, Sta>,
+        node: &BnetPtr,
+        pin: PinId,
+    ) -> Result<BnetPtr, RepairError> {
+        let PinOwner::Cell { cell, .. } = resizer.db.pins[pin].owner else {
+            return Ok(Rc::clone(node));
+        };
+        let Some((lib_id, lib)) = resizer.link.cell(resizer.db, cell) else {
+            return Ok(Rc::clone(node));
+        };
+        let netlist = resizer.netlist();
+        let is_input = netlist
+            .lib_port(pin)
+            .is_some_and(pare_common::db::liberty::LibPort::is_input);
+        let buffer = resizer
+            .link
+            .liberty
+            .buffer_cell(lib_id)
+            .filter(|_| lib.is_buffer());
+        let Some(buffer) = buffer.filter(|_| {
+            is_input
+                && is_logic_std_cell(resizer.db, cell)
+                && !is_port_buffer(resizer, cell)
+                && can_remove_buffer(resizer, cell)
+        }) else {
+            return Ok(Rc::clone(node));
+        };
+        let Some((_, out_pin)) = resizer.buffer_pins(cell) else {
+            return Ok(Rc::clone(node));
+        };
+        let Some(inner) = self.import_buffer_tree(resizer, out_pin)? else {
+            return Ok(Rc::clone(node));
+        };
+        Ok(self.buffer_node(resizer, node.at, buffer, inner))
     }
 }
 
@@ -1159,14 +1194,6 @@ fn resteiner(resizer: &Resizer<'_, Sta>, tree: &BnetPtr) -> Option<BnetPtr> {
     let mut sinks = Vec::new();
     collect_sinks(tree, &mut sinks);
     bnet::over_subtrees(tree.at, &sinks, &resizer.tree_rc())
-}
-
-/// The tree of `driver`'s net over its estimated parasitics.
-fn make_tree(resizer: &Resizer<'_, Sta>, driver: PinId) -> Option<BnetPtr> {
-    let net = resizer.db.pins[driver].net;
-    let netlist = resizer.netlist();
-    let parasitics = resizer.graph.parasitics(net)?;
-    bnet::from_parasitics(&netlist, parasitics, driver, &resizer.tree_rc(), resizer)
 }
 
 /// A wire node from `at` down to `to` on `layer`, or at the signal wire
@@ -1650,10 +1677,14 @@ fn least_length<const N: usize>(limits: [Option<Dbu>; N]) -> Option<Dbu> {
 }
 
 /// The wire a buffer can drive before its load's slew limit is reached, in
-/// database units, as `wireLengthLimitImpliedByLoadSlew`.
+/// database units, as `wireLengthLimitImpliedByLoadSlew`; none without a
+/// limit, and an error where even no wire breaks the slew limit.
 // The quadratic keeps OpenROAD's grouping so it can be checked against it.
 #[allow(clippy::suboptimal_flops)]
-fn wire_length_limit_by_load_slew(resizer: &Resizer<'_, Sta>, size: &BufferSize) -> Option<Dbu> {
+fn wire_length_limit_by_load_slew(
+    resizer: &Resizer<'_, Sta>,
+    size: &BufferSize,
+) -> Result<Option<Dbu>, RepairError> {
     let rc = resizer.graph.wire_rc();
     let dbu = resizer.db.dbu();
     let (res, cap) = (rc.resistance.get(), rc.capacitance.get());
@@ -1662,18 +1693,26 @@ fn wire_length_limit_by_load_slew(resizer: &Resizer<'_, Sta>, size: &BufferSize)
     let a = res * cap;
     let b = res * input_cap + drive_resistance * cap;
     let c = drive_resistance * input_cap - max_slew / ELMORE_SKEW_FACTOR;
+    // NOTE: wireLengthLimitImpliedByLoadSlew divides by a zero `a` for a
+    // wire without resistance or capacitance; PARE sets no limit there.
+    if a <= 0.0 {
+        return Ok(None);
+    }
+    let unreachable =
+        || RepairError::WireLengthLimit(resizer.link.liberty.cell(size.buffer.id).name.clone());
     let discriminant = b * b - 4.0 * a * c;
-    if discriminant < 0.0 || a <= 0.0 {
-        return None;
+    if discriminant < 0.0 {
+        return Err(unreachable());
     }
     let meters = (-b + discriminant.sqrt()) / (2.0 * a);
     if meters > 1.0 {
-        return None;
+        return Ok(None);
     }
-    if meters <= 0.0 {
-        return Some(Dbu(1));
+    let length = meters_to_dbu(Meters::new(meters), dbu);
+    if meters < 0.0 || length == Dbu(0) {
+        return Err(unreachable());
     }
-    Some(Dbu(meters_to_dbu(Meters::new(meters), dbu).get().max(1)))
+    Ok(Some(length))
 }
 
 /// The wire a buffer can drive before its load limit is reached, as
@@ -1897,7 +1936,7 @@ mod tests {
     use crate::route_parasitics::RouteRc;
     use crate::testing::{
         cells, clock_cells_source, design, metal2_wires, pin, with_session_inputs,
-        with_timed_session,
+        with_timed_session, with_wired_session,
     };
     use pare_common::db::design::NetlistDB;
     use pare_common::db::global_route::{NetRoute, RouteSource};
@@ -1932,7 +1971,7 @@ mod tests {
         let clock = "create_clock -name clk -period 0.5 [get_ports clk]\n";
 
         with_timed_session(&mut db, &cells(&clock_cells_source()), clock, |resizer| {
-            let tree = make_tree(resizer, q).unwrap();
+            let tree = resizer.buffered_tree(q).unwrap().unwrap();
             let mut sinks = Vec::new();
             collect_sinks(&tree, &mut sinks);
             let mut names: Vec<String> = sinks
@@ -1973,6 +2012,25 @@ mod tests {
     }
 
     const CLOCK: &str = "create_clock -name clk -period 0.5 [get_ports clk]\n";
+
+    #[test]
+    fn a_buffer_that_cannot_drive_its_own_input_within_its_slew_limit_is_refused() {
+        let mut db = buffer_between_flops("PLACED");
+        let tight = clock_cells_source().replacen(
+            "capacitance : 0.97 ;",
+            "capacitance : 0.97 ; max_transition : 0.000001 ;",
+            1,
+        );
+
+        with_wired_session(&mut db, &cells(&tight), CLOCK, |resizer| {
+            let error = Rebuffer::new(resizer).err();
+
+            assert_eq!(
+                error,
+                Some(RepairError::WireLengthLimit("BUF_X1".to_string()))
+            );
+        });
+    }
 
     #[test]
     fn a_placed_buffer_may_be_taken_out_and_a_fixed_one_may_not() {
@@ -2110,7 +2168,7 @@ mod tests {
             |resizer| {
                 let mut rebuffer = Rebuffer::new(resizer).unwrap();
                 assert!(rebuffer.set_driver(resizer, q));
-                let tree = make_tree(resizer, q).unwrap();
+                let tree = resizer.buffered_tree(q).unwrap().unwrap();
                 let tree = rebuffer.annotate_load_slacks(resizer, &tree, q);
 
                 let seen = rebuffer.slack_at_driver(resizer, &tree).to_seconds();

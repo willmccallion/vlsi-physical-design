@@ -10,7 +10,7 @@ use crate::bnet::{self, BnetPtr, Kind};
 use crate::library::SizingLimits;
 use crate::resizer::{PortSlews, RepairError, Resizer, Timing, gate_slew, meters_to_dbu};
 use pare_common::db::design::PinOwner;
-use pare_common::db::indices::{NetId, PinId};
+use pare_common::db::indices::PinId;
 use pare_common::db::liberty::{ArcRole, BufferCell, LibCellId};
 use pare_common::geom::dbu::{Dbu, DbuPerMicron};
 use pare_common::geom::point::Point;
@@ -208,19 +208,18 @@ impl<'r, 'a, T: Timing> Repairer<'r, 'a, T> {
     }
 
     fn repair_driver(&mut self, driver: PinId) -> Result<(), RepairError> {
-        let (net, skip) = {
+        let skip = {
             let netlist = self.resizer.netlist();
             let net = self.resizer.db.pins[driver].net;
-            let skip = netlist.is_special(net)
+            netlist.is_special(net)
                 || self.resizer.clocks.is_clock(driver)
                 || self.resizer.constants.is_constant(driver)
-                || (!netlist.has_instance_pins(net) && !netlist.has_port(net));
-            (net, skip)
+                || (!netlist.has_instance_pins(net) && !netlist.has_port(net))
         };
         if skip {
             return Ok(());
         }
-        self.repair_net(net, driver, Checks::All)
+        self.repair_net(driver, Checks::All)
     }
 
     /// Buffers every clock net with a wire longer than `max_length`
@@ -255,10 +254,9 @@ impl<'r, 'a, T: Timing> Repairer<'r, 'a, T> {
                 .collect()
         };
         self.resizer.defer_timing();
-        let result = drivers.into_iter().try_for_each(|driver| {
-            let net = self.resizer.db.pins[driver].net;
-            self.repair_net(net, driver, Checks::LengthOnly)
-        });
+        let result = drivers
+            .into_iter()
+            .try_for_each(|driver| self.repair_net(driver, Checks::LengthOnly));
         self.resizer.resume_timing();
         self.resizer.options = saved_options;
         self.resizer.r_strongest_buffer = saved_strongest;
@@ -269,7 +267,7 @@ impl<'r, 'a, T: Timing> Repairer<'r, 'a, T> {
     /// `RepairDesign::repairNet` for one driver: its own slew repaired by
     /// sizing, then its net buffered where loads, load slews or wire
     /// lengths still break their limits.
-    fn repair_net(&mut self, net: NetId, driver: PinId, checks: Checks) -> Result<(), RepairError> {
+    fn repair_net(&mut self, driver: PinId, checks: Checks) -> Result<(), RepairError> {
         let tristate = self.resizer.is_tristate_driver(driver);
         let needs = match checks {
             Checks::All => self.check_limits(driver)?,
@@ -278,7 +276,7 @@ impl<'r, 'a, T: Timing> Repairer<'r, 'a, T> {
         if tristate {
             return Ok(());
         }
-        let Some(tree) = self.driver_tree(net, driver) else {
+        let Some(tree) = self.resizer.buffered_tree(driver)? else {
             return Ok(());
         };
         let too_long = self
@@ -337,19 +335,6 @@ impl<'r, 'a, T: Timing> Repairer<'r, 'a, T> {
             }
         }
         Ok(needs)
-    }
-
-    /// The buffering tree of the driver's net, from its parasitics.
-    fn driver_tree(&self, net: NetId, driver: PinId) -> Option<BnetPtr> {
-        let netlist = self.resizer.netlist();
-        let parasitics = self.resizer.graph.parasitics(net)?;
-        bnet::from_parasitics(
-            &netlist,
-            parasitics,
-            driver,
-            &self.resizer.tree_rc(),
-            self.resizer,
-        )
     }
 
     /// The driver's slew and its margined limit, if one applies.
