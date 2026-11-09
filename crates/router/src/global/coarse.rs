@@ -7,8 +7,7 @@
 //! Dijkstra search is made an A* toward the pins still to join, which finds
 //! trees just as cheap while visiting far fewer cells of a long net.
 
-use super::grid_index;
-use super::{GCell, GlobalGrid, GlobalNet};
+use super::{GCell, GcellWindow, GlobalGrid, GlobalNet, grid_index};
 use crate::tech::index_u32;
 use pare_common::db::indices::LayerId;
 use pare_common::db::library::Direction;
@@ -501,7 +500,7 @@ pub(super) struct Corridor {
     slots: Vec<u32>,
     cells: Vec<(u16, u16)>,
     /// The gcells of the bounding box, as (x0, x1, y0, y1).
-    window: (u16, u16, u16, u16),
+    window: GcellWindow,
     nx: u16,
     ny: u16,
 }
@@ -522,12 +521,12 @@ impl Corridor {
         for (k, &(x, y)) in cells.iter().enumerate() {
             slots[usize::from(y - y0) * usize::from(width) + usize::from(x - x0)] = index_u32(k);
         }
-        let window = (
-            x0 * SCALE,
-            (x1 * SCALE + SCALE - 1).min(grid.nx - 1),
-            y0 * SCALE,
-            (y1 * SCALE + SCALE - 1).min(grid.ny - 1),
-        );
+        let window = GcellWindow {
+            x0: x0 * SCALE,
+            x1: (x1 * SCALE + SCALE - 1).min(grid.nx - 1),
+            y0: y0 * SCALE,
+            y1: (y1 * SCALE + SCALE - 1).min(grid.ny - 1),
+        };
         Self {
             x0,
             y0,
@@ -540,8 +539,8 @@ impl Corridor {
         }
     }
 
-    /// The gcells of the corridor's bounding box, as (x0, x1, y0, y1).
-    pub(super) const fn window(&self) -> (u16, u16, u16, u16) {
+    /// The gcells of the corridor's bounding box.
+    pub(super) const fn window(&self) -> GcellWindow {
         self.window
     }
 

@@ -1307,8 +1307,8 @@ impl Best {
 
 /// Half-perimeter of a net's terminals' bounding box, in gcells.
 fn span(cells: &[GCell]) -> u32 {
-    let (x0, x1, y0, y1) = window(cells, 0, u16::MAX, u16::MAX);
-    u32::from(x1 - x0) + u32::from(y1 - y0)
+    let w = window(cells, 0, u16::MAX, u16::MAX);
+    u32::from(w.x1 - w.x0) + u32::from(w.y1 - w.y0)
 }
 
 /// Nets to reroute in one batch: their indices in the order to route them,
@@ -1425,11 +1425,11 @@ fn dependencies(
 }
 
 /// The blocks of [`BATCH_BLOCK`] gcells a window of gcells meets.
-fn blocks_of((x0, x1, y0, y1): (u16, u16, u16, u16), blocks_x: usize) -> Vec<usize> {
+fn blocks_of(w: GcellWindow, blocks_x: usize) -> Vec<usize> {
     let block = |v: u16| usize::from(v / BATCH_BLOCK);
     let mut out = Vec::new();
-    for y in block(y0)..=block(y1) {
-        for x in block(x0)..=block(x1) {
+    for y in block(w.y0)..=block(w.y1) {
+        for x in block(w.x0)..=block(w.x1) {
             out.push(y * blocks_x + x);
         }
     }
@@ -1443,12 +1443,12 @@ fn corridor_blocks(corridor: &Corridor, grid: &GlobalGrid, blocks_x: usize) -> V
         .cells()
         .iter()
         .flat_map(|&(cx, cy)| {
-            let cell = (
-                (cx * SCALE).saturating_sub(1),
-                (cx * SCALE + SCALE).min(grid.nx - 1),
-                (cy * SCALE).saturating_sub(1),
-                (cy * SCALE + SCALE).min(grid.ny - 1),
-            );
+            let cell = GcellWindow {
+                x0: (cx * SCALE).saturating_sub(1),
+                x1: (cx * SCALE + SCALE).min(grid.nx - 1),
+                y0: (cy * SCALE).saturating_sub(1),
+                y1: (cy * SCALE + SCALE).min(grid.ny - 1),
+            };
             blocks_of(cell, blocks_x)
         })
         .collect()
@@ -1590,19 +1590,54 @@ fn route_initial(
 /// Nets per thread pattern-routed in one chunk of the initial routing.
 const INITIAL_PER_THREAD: usize = 32;
 
-/// Bounding box of cells, grown by `margin` and clamped to the grid, as
-/// (x0, x1, y0, y1).
-fn window(cells: &[GCell], margin: u16, nx: u16, ny: u16) -> (u16, u16, u16, u16) {
+/// An inclusive box of gcell columns `x0..=x1` and rows `y0..=y1`.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) struct GcellWindow {
+    pub(crate) x0: u16,
+    pub(crate) x1: u16,
+    pub(crate) y0: u16,
+    pub(crate) y1: u16,
+}
+
+impl GcellWindow {
+    /// Every gcell of a grid of `nx` columns and `ny` rows.
+    pub(crate) const fn whole(nx: u16, ny: u16) -> Self {
+        Self {
+            x0: 0,
+            x1: nx - 1,
+            y0: 0,
+            y1: ny - 1,
+        }
+    }
+
+    /// Whether the gcell at column `x` and row `y` lies inside.
+    pub(crate) fn contains(self, x: u16, y: u16) -> bool {
+        (self.x0..=self.x1).contains(&x) && (self.y0..=self.y1).contains(&y)
+    }
+
+    /// The smallest window holding both.
+    pub(crate) fn union(self, other: Self) -> Self {
+        Self {
+            x0: self.x0.min(other.x0),
+            x1: self.x1.max(other.x1),
+            y0: self.y0.min(other.y0),
+            y1: self.y1.max(other.y1),
+        }
+    }
+}
+
+/// Bounding box of cells, grown by `margin` and clamped to the grid.
+fn window(cells: &[GCell], margin: u16, nx: u16, ny: u16) -> GcellWindow {
     let x0 = cells.iter().map(|c| c.x).min().unwrap_or(0);
     let x1 = cells.iter().map(|c| c.x).max().unwrap_or(0);
     let y0 = cells.iter().map(|c| c.y).min().unwrap_or(0);
     let y1 = cells.iter().map(|c| c.y).max().unwrap_or(0);
-    (
-        x0.saturating_sub(margin),
-        (x1 + margin).min(nx - 1),
-        y0.saturating_sub(margin),
-        (y1 + margin).min(ny - 1),
-    )
+    GcellWindow {
+        x0: x0.saturating_sub(margin),
+        x1: (x1 + margin).min(nx - 1),
+        y0: y0.saturating_sub(margin),
+        y1: (y1 + margin).min(ny - 1),
+    }
 }
 
 #[cfg(test)]
