@@ -55,7 +55,8 @@ struct Simplex {
     supply: Vec<i32>,
     flow: Vec<i32>,
     pi: Vec<i32>,
-    parent: Vec<i64>,
+    /// The parent of each node but the root, which has none.
+    parent: Vec<usize>,
     pred: Vec<usize>,
     pred_dir: Vec<i32>,
     thread: Vec<usize>,
@@ -111,7 +112,7 @@ impl Simplex {
             supply: vec![0; all_node_num],
             flow: vec![0; max_arc_num],
             pi: vec![0; all_node_num],
-            parent: vec![0; all_node_num],
+            parent: vec![0; node_num],
             pred: vec![0; all_node_num],
             pred_dir: vec![0; all_node_num],
             thread: vec![0; all_node_num],
@@ -168,7 +169,6 @@ impl Simplex {
             self.state[e] = STATE_LOWER;
         }
         let root = self.root;
-        self.parent[root] = -1;
         self.thread[root] = 0;
         self.rev_thread[0] = root;
         self.succ_num[root] = (self.node_num + 1) as i32;
@@ -182,7 +182,7 @@ impl Simplex {
         self.all_arc_num = self.arc_num + self.node_num;
         for u in 0..self.node_num {
             let e = self.arc_num + u;
-            self.parent[u] = root as i64;
+            self.parent[u] = root;
             self.pred[u] = e;
             self.thread[u] = u + 1;
             self.rev_thread[u + 1] = u;
@@ -255,8 +255,14 @@ impl Simplex {
         (min < 0).then_some(next_arc)
     }
 
+    /// The parent of `u`, which is not the root.
     fn up(&self, u: usize) -> usize {
-        self.parent[u] as usize
+        self.parent[u]
+    }
+
+    /// The parent of `u`, or none for the root.
+    fn parent_of(&self, u: usize) -> Option<usize> {
+        (u != self.root).then(|| self.parent[u])
     }
 
     fn find_join_node(&mut self) {
@@ -373,7 +379,7 @@ impl Simplex {
     /// end, from the entering arc's other end.
     fn rehang_leaving_root(&mut self, old: OldSubtree) {
         let (u_in, v_in, u_out) = (self.u_in, self.v_in, self.u_out);
-        self.parent[u_in] = v_in as i64;
+        self.parent[u_in] = v_in;
         self.pred[u_in] = self.in_arc;
         self.pred_dir[u_in] = self.entering_direction();
         if self.thread[v_in] != u_out {
@@ -412,7 +418,7 @@ impl Simplex {
             let before = self.rev_thread[stem];
             self.thread[before] = after;
             self.rev_thread[after] = before;
-            self.parent[stem] = par_stem as i64;
+            self.parent[stem] = par_stem;
             par_stem = stem;
             stem = next_stem;
             last = if self.last_succ[stem] == self.last_succ[par_stem] {
@@ -422,7 +428,7 @@ impl Simplex {
             };
             after = self.thread[last];
         }
-        self.parent[u_out] = par_stem as i64;
+        self.parent[u_out] = par_stem;
         self.thread[last] = thread_continue;
         self.rev_thread[thread_continue] = last;
         self.last_succ[u_out] = last;
@@ -465,16 +471,14 @@ impl Simplex {
     /// above the leaving arc, up to their join.
     fn update_last_succ(&mut self, v_out: usize, old: OldSubtree) {
         let (v_in, u_out, join) = (self.v_in, self.u_out, self.join);
-        let up_limit_out = if self.last_succ[join] == v_in {
-            join as i64
-        } else {
-            -1
-        };
+        let up_limit_out = (self.last_succ[join] == v_in).then_some(join);
         let last_succ_out = self.last_succ[u_out];
-        let mut u = v_in as i64;
-        while u != -1 && self.last_succ[u as usize] == v_in {
-            self.last_succ[u as usize] = last_succ_out;
-            u = self.parent[u as usize];
+        let mut u = Some(v_in);
+        while let Some(at) = u
+            && self.last_succ[at] == v_in
+        {
+            self.last_succ[at] = last_succ_out;
+            u = self.parent_of(at);
         }
         let replacement = if join != old.rev_thread && v_in != old.rev_thread {
             old.rev_thread
@@ -483,10 +487,13 @@ impl Simplex {
         } else {
             return;
         };
-        let mut u = v_out as i64;
-        while u != up_limit_out && self.last_succ[u as usize] == old.last_succ {
-            self.last_succ[u as usize] = replacement;
-            u = self.parent[u as usize];
+        let mut u = Some(v_out);
+        while let Some(at) = u
+            && u != up_limit_out
+            && self.last_succ[at] == old.last_succ
+        {
+            self.last_succ[at] = replacement;
+            u = self.parent_of(at);
         }
     }
 
