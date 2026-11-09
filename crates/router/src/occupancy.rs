@@ -695,6 +695,8 @@ fn merge_stretches(stretches: &mut Vec<(Dbu, Dbu)>) {
     *stretches = merged;
 }
 
+/// Tracks whose wires `rect` could touch or crowd, and whether each runs
+/// through it.
 pub(crate) fn affected_tracks<'t>(
     lt: &'t LayerTech,
     rect: &Rect<Dbu>,
@@ -716,7 +718,10 @@ impl Occupancy {
         let tracks = self.tracks.iter().flatten();
         let fixed = tracks
             .clone()
-            .map(|t| t.fixed.capacity() * size_of::<Occupant>() + t.fixed_reach.capacity() * 8)
+            .map(|t| {
+                t.fixed.capacity() * size_of::<Occupant>()
+                    + t.fixed_reach.capacity() * size_of::<Dbu>()
+            })
             .sum();
         let added = tracks
             .map(|t| t.added.capacity() * size_of::<Occupant>())
