@@ -4,6 +4,8 @@
 //! Uses `yansi` for ANSI colors with automatic TTY detection.
 
 use pare_common::db::library::Direction;
+use pare_placer::global;
+use pare_router::RoundReport;
 use yansi::Paint;
 
 /// Prints the PARE banner and a horizontal rule.
@@ -56,8 +58,11 @@ pub fn placement_table_header() {
 }
 
 /// Prints a single placement iteration row.
-pub fn placement_iter(iter: usize, hpwl: f64, overflow: f64, penalty: f64, step: f64) {
-    eprintln!("    {iter:<8} {hpwl:>12.0} {overflow:>12.4} {penalty:>12.3e} {step:>10.3e}");
+pub fn placement_iter(p: &global::Progress) {
+    eprintln!(
+        "    {:<8} {:>12.0} {:>12.4} {:>12.3e} {:>10.3e}",
+        p.iteration, p.hpwl, p.overflow, p.penalty, p.step
+    );
 }
 
 /// Prints the header of the global routing table: each layer's resources,
@@ -105,17 +110,16 @@ pub fn dr_table_header() {
 }
 
 /// Prints one detailed routing round.
-pub fn dr_iter(
-    iter: usize,
-    markers: usize,
-    nets: usize,
-    ripped: usize,
-    conflict: f64,
-    flow: &str,
-    time_ms: u128,
-) {
+pub fn dr_iter(r: &RoundReport) {
     eprintln!(
-        "    {iter:<8} {markers:>10} {nets:>10} {ripped:>10} {conflict:>10.1} {flow:>10} {time_ms:>8}ms"
+        "    {:<8} {:>10} {:>10} {:>10} {:>10.1} {:>10} {:>8}ms",
+        r.round,
+        r.markers,
+        r.conflicted,
+        r.repaired,
+        r.conflict_cost,
+        r.flow,
+        r.elapsed.as_millis()
     );
 }
 

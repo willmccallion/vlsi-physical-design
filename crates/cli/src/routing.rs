@@ -404,15 +404,7 @@ impl RouteTables {
                     ui::dr_table_header();
                     self.detailed_started = true;
                 }
-                ui::dr_iter(
-                    round.round,
-                    round.markers,
-                    round.conflicted,
-                    round.repaired,
-                    round.conflict_cost,
-                    round.flow,
-                    round.elapsed.as_millis(),
-                );
+                ui::dr_iter(round);
             }
         }
     }
