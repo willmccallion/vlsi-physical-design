@@ -10,6 +10,7 @@
 #![allow(clippy::suboptimal_flops)]
 
 use crate::bnet::{self, Bnet, BnetPtr, BufferSize, Fixed, Kind, Metrics, SlackEdges};
+use crate::buffers::removable_buffer;
 use crate::dmp::{self, PiModel};
 use crate::fuzzy;
 use crate::library::{BufferSet, Link, is_logic_std_cell};
@@ -1490,37 +1491,12 @@ fn is_port_buffer(resizer: &Resizer<'_, Sta>, cell: CellId) -> bool {
     })
 }
 
-/// Whether a buffer may be taken out: a plain standard cell with both its
-/// nets free of ports that constraints name, as `canRemoveBuffer`.
+/// Whether setup repair may take a buffer out, as
+/// `UnbufferMove::canRemoveBuffer` honouring dont-touch and fixed cells,
+/// with both its pins connected, as `UnbufferMove::removeBuffer` requires.
 pub(crate) fn can_remove_buffer(resizer: &Resizer<'_, Sta>, cell: CellId) -> bool {
-    let Some((_, lib)) = resizer.link.cell(resizer.db, cell) else {
-        return false;
-    };
-    if !lib.is_buffer() || !resizer.is_editable(cell) {
-        return false;
-    }
-    let Some((in_pin, out_pin)) = resizer.buffer_pins(cell) else {
-        return false;
-    };
-    let netlist = resizer.netlist();
-    let in_net = resizer.db.pins[in_pin].net;
-    let out_net = resizer.db.pins[out_pin].net;
-    let constrained = |net: NetId| {
-        let sta = resizer.sta();
-        resizer.db.nets[net].pins.iter().any(|&p| {
-            matches!(resizer.db.pins[p].owner, PinOwner::Io(io)
-                if sta.sdc().input_delays.contains_key(&io)
-                    || sta.sdc().output_delays.contains_key(&io)
-                    || sta.sdc().clock_at(io).is_some())
-        })
-    };
-    let removed = if netlist.has_port(out_net) {
-        in_net
-    } else {
-        out_net
-    };
-    let between_ports = netlist.has_port(in_net) && netlist.has_port(out_net);
-    !constrained(removed) && !between_ports
+    removable_buffer(resizer.db, resizer.link, Some(resizer.sta().sdc()), cell).is_some()
+        && resizer.buffer_pins(cell).is_some()
 }
 
 /// Whether a net reaches an output port of the design.
@@ -1912,6 +1888,64 @@ mod tests {
 
             assert_eq!(names, ["b1/A", "b2/A", "b3/A"]);
         });
+    }
+
+    /// A flop launching through buffer `bf`, placed with `status`, into
+    /// another.
+    fn buffer_between_flops(status: &str) -> NetlistDB {
+        design(&format!(
+            "VERSION 5.8 ;\nDIVIDERCHAR \"/\" ;\nBUSBITCHARS \"[]\" ;\nDESIGN between ;\n\
+             UNITS DISTANCE MICRONS 2000 ;\nDIEAREA ( 0 0 ) ( 80000 40000 ) ;\n\
+             COMPONENTS 3 ;\n- f1 DFF_X1 + PLACED ( 2000 2800 ) N ;\n\
+             - bf BUF_X1 + {status} ( 30000 2800 ) N ;\n- f2 DFF_X1 + PLACED ( 50000 2800 ) N ;\n\
+             END COMPONENTS\nPINS 1 ;\n- clk + NET clk + DIRECTION INPUT ;\nEND PINS\n\
+             NETS 3 ;\n- clk ( PIN clk ) ( f1 CK ) ( f2 CK ) ;\n\
+             - q ( f1 Q ) ( bf A ) ;\n- d ( bf Z ) ( f2 D ) ;\nEND NETS\nEND DESIGN\n"
+        ))
+    }
+
+    /// Whether setup repair may take buffer `bf` out of `db` under
+    /// `constraints`.
+    fn removable_under(mut db: NetlistDB, constraints: &str) -> bool {
+        let mut removable = false;
+        with_timed_session(&mut db, &cells(&clock_cells_source()), constraints, |r| {
+            removable = can_remove_buffer(r, r.db.cell_id("bf").unwrap());
+        });
+        removable
+    }
+
+    const CLOCK: &str = "create_clock -name clk -period 0.5 [get_ports clk]\n";
+
+    #[test]
+    fn a_placed_buffer_may_be_taken_out_and_a_fixed_one_may_not() {
+        assert!(removable_under(buffer_between_flops("PLACED"), CLOCK));
+        assert!(!removable_under(buffer_between_flops("FIXED"), CLOCK));
+    }
+
+    #[test]
+    fn a_buffer_between_constrained_ports_may_be_taken_out() {
+        let db = design(
+            "VERSION 5.8 ;\nDIVIDERCHAR \"/\" ;\nBUSBITCHARS \"[]\" ;\nDESIGN ports ;\n\
+             UNITS DISTANCE MICRONS 2000 ;\nDIEAREA ( 0 0 ) ( 80000 40000 ) ;\n\
+             COMPONENTS 1 ;\n- bf BUF_X1 + PLACED ( 30000 2800 ) N ;\nEND COMPONENTS\n\
+             PINS 3 ;\n- clk + NET clk + DIRECTION INPUT ;\n- in + NET in + DIRECTION INPUT ;\n\
+             - out + NET out + DIRECTION OUTPUT ;\nEND PINS\n\
+             NETS 3 ;\n- clk ( PIN clk ) ;\n- in ( PIN in ) ( bf A ) ;\n\
+             - out ( bf Z ) ( PIN out ) ;\nEND NETS\nEND DESIGN\n",
+        );
+        let delays = format!(
+            "{CLOCK}set_input_delay 0.1 -clock clk [get_ports in]\n\
+             set_output_delay 0.1 -clock clk [get_ports out]\n"
+        );
+
+        assert!(removable_under(db, &delays));
+    }
+
+    #[test]
+    fn a_buffer_with_its_own_derate_may_not_be_taken_out() {
+        let derated = format!("{CLOCK}set_timing_derate -late 1.1 [get_cells bf]\n");
+
+        assert!(!removable_under(buffer_between_flops("PLACED"), &derated));
     }
 
     #[test]

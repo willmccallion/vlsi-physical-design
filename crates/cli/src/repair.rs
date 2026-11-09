@@ -185,7 +185,7 @@ pub(crate) fn repair_netlist(
         let phase_start = Instant::now();
         ui::phase("Buffer Removal");
         let before = db.cells.len();
-        summary.buffers_removed = pare_resizer::remove_buffers(db, &link)?;
+        summary.buffers_removed = pare_resizer::remove_buffers(db, &link, sdc.as_ref())?;
         ui::stat_row(
             "Removed:",
             &summary.buffers_removed.to_string(),

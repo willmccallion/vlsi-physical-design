@@ -5,6 +5,7 @@
 //! not pay off can be taken back.
 
 use crate::bnet::{LoadModel, PinLoad, TreeRc};
+use crate::buffers::{MergedNets, hierarchy_depth, merged_nets};
 use crate::fuzzy;
 use crate::graph::{Estimator, PortConditions, TimingGraph};
 use crate::library::{BufferSet, Link, SizingLimits, is_logic_std_cell};
@@ -1000,22 +1001,17 @@ impl<'a, T: Timing> Resizer<'a, T> {
         })
     }
 
-    /// Takes a buffer out, joining its nets: the input net survives unless
-    /// only the output net reaches a port, and the survivor takes the
-    /// removed net's name when that name is deeper in the hierarchy, as
-    /// `UnbufferMove::removeBuffer`. Returns the surviving net.
+    /// Takes a buffer out, joining its nets as [`merged_nets`] picks the
+    /// survivor, which takes the removed net's name when that name is
+    /// shallower in the hierarchy, as `UnbufferMove::removeBuffer`. Returns
+    /// the surviving net.
     pub(crate) fn remove_buffer(&mut self, buffer: CellId) -> Result<NetId, RepairError> {
         let (in_pin, out_pin) = self
             .buffer_pins(buffer)
             .ok_or_else(|| RepairError::MissingPins(self.db.cells[buffer].name.clone()))?;
         let in_net = self.db.pins[in_pin].net;
         let out_net = self.db.pins[out_pin].net;
-        let netlist = self.netlist();
-        let (survivor, removed) = if !netlist.has_port(in_net) && netlist.has_port(out_net) {
-            (out_net, in_net)
-        } else {
-            (in_net, out_net)
-        };
+        let MergedNets { survivor, removed } = merged_nets(&self.netlist(), in_net, out_net);
         let moving: Vec<PinId> = self.db.nets[removed]
             .pins
             .iter()
@@ -1220,11 +1216,6 @@ impl<T: Timing> LoadModel for Resizer<'_, T> {
                 max_slew: self.max_input_slew(cell, port),
             })
     }
-}
-
-/// How many levels of hierarchy a name has: one more than its dividers.
-fn hierarchy_depth(name: &str) -> usize {
-    name.matches('/').count()
 }
 
 /// Share of the nets, from the worst slack up, that timing-driven
