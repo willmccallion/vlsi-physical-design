@@ -1,9 +1,9 @@
 //! The `view` command: one area of a design with its violations.
 
+use crate::{ui, visualization};
 use anyhow::Context;
 use pare_common::db::design::NetlistDB;
 use pare_common::geom::point::Point;
-use pare_common::util::{ui, visualization};
 use pare_common::verify::drc::Marker;
 
 use std::path::Path;

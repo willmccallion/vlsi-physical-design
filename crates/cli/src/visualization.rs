@@ -1,16 +1,16 @@
 //! PNG renderings of placed and routed designs.
 
-use crate::db::design::{NetlistDB, RouteElem};
-use crate::db::indices::CellId;
-use crate::geom::dbu::Dbu;
-use crate::geom::point::Point;
-use crate::geom::rect::Rect;
-use crate::verify::drc::{Layout, LayoutShape, OwnerIndex};
 use image::{Rgb, RgbImage, Rgba, RgbaImage};
 use imageproc::drawing::{
     Blend, draw_filled_rect_mut, draw_hollow_rect_mut, draw_line_segment_mut,
 };
 use imageproc::rect::Rect as ImageRect;
+use pare_common::db::design::{NetlistDB, RouteElem};
+use pare_common::db::indices::CellId;
+use pare_common::geom::dbu::Dbu;
+use pare_common::geom::point::Point;
+use pare_common::geom::rect::Rect;
+use pare_common::verify::drc::{Layout, LayoutShape, OwnerIndex};
 use std::path::Path;
 
 /// Maps design coordinates to image pixels, with Y pointing down.
@@ -183,7 +183,7 @@ fn paint_routed(db: &NetlistDB, map: &PixelMap, img: &mut RgbaImage) {
 
     let pin_color = Rgba([255, 255, 255, 255]);
     for pin in 0..db.pins.len() {
-        let (px, py) = map.map(db.pin_position(crate::db::indices::PinId::new(pin)));
+        let (px, py) = map.map(db.pin_position(pare_common::db::indices::PinId::new(pin)));
         let rect = ImageRect::at(px as i32, py as i32).of_size(2, 2);
         draw_filled_rect_mut(img, rect, pin_color);
     }
