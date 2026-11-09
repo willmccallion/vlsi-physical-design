@@ -169,6 +169,13 @@ impl PinJudge {
     }
 }
 
+/// This process's resident memory for a log line; "unknown" where the
+/// kernel does not report it.
+fn resident() -> String {
+    pare_common::memory::current_rss_mb()
+        .map_or_else(|| "unknown".to_string(), |mb| format!("{mb} MB"))
+}
+
 /// Bytes the vectors of `nested` hold on the heap, with their headers.
 fn nested_bytes<T>(nested: &IdVec<NetId, Vec<T>>) -> usize {
     nested
@@ -197,7 +204,7 @@ impl<'a> DetailedRouter<'a> {
         let (fixed, added, cuts) = self.occupancy.heap_bytes();
         log::debug!(
             "{stage} footprint: routes {} MB, elems {} MB, wires {} MB, \
-             access {} MB, occupancy fixed {} MB, added {} MB, cuts {} MB, {} MB resident",
+             access {} MB, occupancy fixed {} MB, added {} MB, cuts {} MB, {} resident",
             mb(routes + self.routes.len() * size_of::<NetRoute>()),
             mb(nested_bytes(&self.elems)),
             mb(nested_bytes(&self.wires)),
@@ -205,7 +212,7 @@ impl<'a> DetailedRouter<'a> {
             mb(fixed),
             mb(added),
             mb(cuts),
-            pare_common::memory::current_rss_mb().unwrap_or(0)
+            resident()
         );
     }
 
@@ -216,18 +223,18 @@ impl<'a> DetailedRouter<'a> {
         let mut occupancy = Occupancy::new(tech, gcell);
         occupancy.add_fixed(tech, fixed_shapes(db));
         log::debug!(
-            "fixed shapes recorded in {:.1}s, {} MB resident",
+            "fixed shapes recorded in {:.1}s, {} resident",
             start.elapsed().as_secs_f64(),
-            pare_common::memory::current_rss_mb().unwrap_or(0)
+            resident()
         );
         let start = std::time::Instant::now();
         let rules = Rules::from_design(db);
         let fixed = judge::fixed_layout(db);
         let fixed_tiles = ShapeTiles::new(&fixed, &db.die_area, gcell);
         log::debug!(
-            "fixed layout built for the judge in {:.1}s, {} MB resident",
+            "fixed layout built for the judge in {:.1}s, {} resident",
             start.elapsed().as_secs_f64(),
-            pare_common::memory::current_rss_mb().unwrap_or(0)
+            resident()
         );
         let start = std::time::Instant::now();
         let shared = SharedAccess::new(db, tech);
@@ -255,10 +262,10 @@ impl<'a> DetailedRouter<'a> {
             .collect::<Vec<_>>()
             .into();
         log::debug!(
-            "access points found in {:.1}s for {} kinds of cell, {} MB resident",
+            "access points found in {:.1}s for {} kinds of cell, {} resident",
             start.elapsed().as_secs_f64(),
             shared.kinds(),
-            pare_common::memory::current_rss_mb().unwrap_or(0)
+            resident()
         );
         let start = std::time::Instant::now();
         let fixed_view = FixedView {
@@ -269,9 +276,9 @@ impl<'a> DetailedRouter<'a> {
         let access = reserve_accesses(db, tech, &shared, &own, &mut occupancy, &fixed_view);
         drop(own);
         log::debug!(
-            "access points reserved in {:.1}s, {} MB resident",
+            "access points reserved in {:.1}s, {} resident",
             start.elapsed().as_secs_f64(),
-            pare_common::memory::current_rss_mb().unwrap_or(0)
+            resident()
         );
         Self {
             db,
