@@ -530,9 +530,11 @@ impl Improver {
     /// as `DetailedMgr::isInsideABlockage`.
     fn inside_blockage(&self, n: NodeId, position: Dbu) -> bool {
         let first = &self.arch.rows[0];
-        let last = self.arch.rows.len() as i64 - 1;
+        let rows = self.arch.rows.len() as i64;
         let start = ((self.bottom(n) - first.bottom).get() / first.height.get()).max(0);
-        let end = ((self.top(n) - first.bottom).get() / first.height.get()).min(last);
+        // NOTE: DetailedMgr::isInsideABlockage clamps its exclusive end to the
+        // last row, so it never tests the top row; PARE tests every row spanned.
+        let end = ((self.top(n) - first.bottom).get() / first.height.get()).min(rows);
         (start..end).any(|r| {
             let row = &self.blockages[r as usize];
             let at = row.partition_point(|b| b.max_x < position);
@@ -624,4 +626,23 @@ impl Improver {
 /// Whether two closed spans meet.
 fn spans_overlap((b1, t1): (Dbu, Dbu), (b2, t2): (Dbu, Dbu)) -> bool {
     (b2 <= b1 && b1 <= t2) || (b1 <= b2 && b2 <= t1)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::super::tests::improver;
+    use pare_common::geom::dbu::Dbu;
+    use pare_common::geom::point::Point;
+
+    /// The tiny design's top row ends at 4 um; a filler blocks it from
+    /// there to the core's right edge at 6 um.
+    #[test]
+    fn a_blockage_of_the_top_row_is_seen_from_a_cell_in_it() {
+        let mut imp = improver();
+        let n = imp.movable_cells()[0];
+        let top_row = imp.arch.rows[imp.arch.rows.len() - 1].bottom;
+        imp.set_position(n, Point::new(Dbu(3000), top_row));
+
+        assert!(imp.inside_blockage(n, Dbu(5000)));
+    }
 }
