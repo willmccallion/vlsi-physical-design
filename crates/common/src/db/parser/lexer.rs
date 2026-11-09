@@ -30,6 +30,14 @@ pub enum ParseError {
         /// What was wrong.
         message: String,
     },
+    /// The file as a whole is malformed or inconsistent, at no one line.
+    #[error("{}: {message}", path.display())]
+    File {
+        /// The file the error is in.
+        path: PathBuf,
+        /// What was wrong.
+        message: String,
+    },
 }
 
 /// Reads a whole input file.

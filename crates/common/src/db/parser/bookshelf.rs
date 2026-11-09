@@ -37,14 +37,13 @@ pub fn parse(aux: &Path, num_layers: usize) -> Result<NetlistDB, ParseError> {
     let units = BOOKSHELF_DBU;
     let nodes = read_nodes(&files.nodes, units)?;
     let scl = read_scl(&files.scl, units)?;
-    let nets = read_nets(&files.nets, &nodes, units)?;
+    let nets = read_nets(&files.nets, &nodes.nodes, units)?;
 
     let row_height = scl.row_height(&files.scl)?;
     let mut library = Library::new(units);
     synthesize_layer_stack(&mut library, row_height, num_layers).map_err(|message| {
-        ParseError::Syntax {
+        ParseError::File {
             path: files.scl.clone(),
-            line: 1,
             message,
         }
     })?;
@@ -55,22 +54,16 @@ pub fn parse(aux: &Path, num_layers: usize) -> Result<NetlistDB, ParseError> {
     let mut db = NetlistDB::new(name, library);
     let site = scl
         .add_rows(&mut db, row_height)
-        .map_err(|message| ParseError::Syntax {
+        .map_err(|message| ParseError::File {
             path: files.scl.clone(),
-            line: 1,
             message,
         })?;
-    add_cells(&mut db, &nodes, &nets, site).map_err(|message| ParseError::Syntax {
-        path: files.nodes.clone(),
-        line: 1,
-        message,
-    })?;
+    add_cells(&mut db, &nodes, &nets, site)?;
     read_placement(&mut db, &files.pl)?;
     add_nets(&mut db, &nets);
     db.die_area = die_area(&db);
-    add_tracks(&mut db).map_err(|message| ParseError::Syntax {
+    add_tracks(&mut db).map_err(|message| ParseError::File {
         path: aux.to_path_buf(),
-        line: 1,
         message,
     })?;
     Ok(db)
@@ -248,9 +241,8 @@ impl AuxFiles {
             src.split_whitespace()
                 .find(|w| Path::new(w).extension().is_some_and(|e| e == ext))
                 .map(|w| dir.join(w))
-                .ok_or_else(|| ParseError::Syntax {
+                .ok_or_else(|| ParseError::File {
                     path: aux.to_path_buf(),
-                    line: 1,
                     message: format!("no .{ext} file listed"),
                 })
         };
@@ -267,11 +259,19 @@ struct Node {
     name: String,
     size: Point<Dbu>,
     terminal: bool,
+    /// The line of the `.nodes` file it is on.
+    line: usize,
 }
 
-fn read_nodes(path: &Path, units: DbuPerMicron) -> Result<Vec<Node>, ParseError> {
+/// The nodes of a `.nodes` file, with the file to place errors in.
+struct NodeFile {
+    path: PathBuf,
+    nodes: Vec<Node>,
+}
+
+fn read_nodes(path: &Path, units: DbuPerMicron) -> Result<NodeFile, ParseError> {
     let src = read_file(path)?;
-    data_lines(&src)
+    let nodes = data_lines(&src)
         .into_iter()
         .map(|(line, parts)| {
             let err = |message: String| ParseError::Syntax {
@@ -289,9 +289,14 @@ fn read_nodes(path: &Path, units: DbuPerMicron) -> Result<Vec<Node>, ParseError>
                     number(h, units).map_err(err)?,
                 ),
                 terminal: rest.iter().any(|w| w.starts_with("terminal")),
+                line,
             })
         })
-        .collect()
+        .collect::<Result<_, _>>()?;
+    Ok(NodeFile {
+        path: path.to_path_buf(),
+        nodes,
+    })
 }
 
 /// One net connection: node index, offset from the node center, direction.
@@ -362,6 +367,8 @@ fn read_nets(
 }
 
 struct SclRow {
+    /// The line of the `.scl` file its `CoreRow` is on.
+    line: usize,
     y: Dbu,
     height: Dbu,
     site_width: Dbu,
@@ -376,9 +383,8 @@ struct Scl {
 
 impl Scl {
     fn row_height(&self, path: &Path) -> Result<Dbu, ParseError> {
-        let first = self.rows.first().ok_or_else(|| ParseError::Syntax {
+        let first = self.rows.first().ok_or_else(|| ParseError::File {
             path: path.to_path_buf(),
-            line: 1,
             message: "no rows defined".into(),
         })?;
         if let Some(r) = self
@@ -388,7 +394,7 @@ impl Scl {
         {
             return Err(ParseError::Syntax {
                 path: path.to_path_buf(),
-                line: 1,
+                line: r.line,
                 message: format!(
                     "rows of different heights or site widths ({} vs {}) are not supported",
                     first.height, r.height
@@ -447,6 +453,7 @@ fn read_scl(path: &Path, units: DbuPerMicron) -> Result<Scl, ParseError> {
         match parts[0] {
             "CoreRow" => {
                 current = Some(SclRow {
+                    line,
                     y: Dbu::ZERO,
                     height: Dbu::ZERO,
                     site_width: Dbu(i64::from(units.get())),
@@ -486,10 +493,16 @@ type MacroKey = (Point<Dbu>, bool, Vec<Point<Dbu>>);
 /// Creates one macro per distinct node size and pin-offset list, then the cells.
 fn add_cells(
     db: &mut NetlistDB,
-    nodes: &[Node],
+    nodes: &NodeFile,
     nets: &[BookshelfNet],
     site: SiteId,
-) -> Result<(), String> {
+) -> Result<(), ParseError> {
+    let at_node = |node: &Node, message: String| ParseError::Syntax {
+        path: nodes.path.clone(),
+        line: node.line,
+        message,
+    };
+    let nodes = &nodes.nodes;
     let mut pins_of: Vec<Vec<(Point<Dbu>, PinDirection)>> = vec![Vec::new(); nodes.len()];
     for net in nets {
         for p in &net.pins {
@@ -540,7 +553,10 @@ fn add_cells(
                     }],
                 });
             }
-            let id = db.library.add_macro(m).map_err(|e| e.to_string())?;
+            let id = db
+                .library
+                .add_macro(m)
+                .map_err(|e| at_node(node, e.to_string()))?;
             let _ = macro_of.insert(key, id);
             id
         };
@@ -557,7 +573,7 @@ fn add_cells(
                 Orientation::N,
                 status,
             )
-            .map_err(|e| e.to_string())?;
+            .map_err(|e| at_node(node, e.to_string()))?;
     }
     Ok(())
 }
