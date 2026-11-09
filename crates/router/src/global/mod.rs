@@ -1740,7 +1740,7 @@ mod tests {
         }
     }
 
-    fn at(layer: usize, x: u16, y: u16) -> GCell {
+    pub(super) fn at(layer: usize, x: u16, y: u16) -> GCell {
         GCell {
             layer: LayerId::new(layer),
             x,
@@ -1750,7 +1750,7 @@ mod tests {
 
     /// A 10x10 grid with a horizontal layer 1 over a vertical layer 2,
     /// every edge holding 4 tracks and every via taking a tenth of one.
-    fn grid() -> GlobalGrid {
+    pub(super) fn grid() -> GlobalGrid {
         let (nx, ny) = (10, 10);
         let edges = 2 * usize::from(nx) * usize::from(ny);
         GlobalGrid {
@@ -1770,7 +1770,7 @@ mod tests {
         }
     }
 
-    fn net(terminals: Vec<GCell>) -> GlobalNet {
+    pub(super) fn net(terminals: Vec<GCell>) -> GlobalNet {
         GlobalNet {
             net: NetId::new(0),
             terminals,
@@ -1778,7 +1778,7 @@ mod tests {
         }
     }
 
-    const COSTS: GlobalCosts = GlobalCosts {
+    pub(super) const COSTS: GlobalCosts = GlobalCosts {
         via: 1.0,
         congestion: 1.0,
         penalty: 1.0,
