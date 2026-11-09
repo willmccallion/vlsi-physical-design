@@ -693,6 +693,7 @@ impl Interpreter {
             is_power_cell: Self::bool_attr(group, "always_on")
                 || Self::bool_attr(group, "is_isolation_cell")
                 || Self::bool_attr(group, "is_level_shifter"),
+            is_isolation_cell: Self::bool_attr(group, "is_isolation_cell"),
             footprint: group.attr_text("cell_footprint").map(str::to_string),
             user_function_class: group.attr_text("user_function_class").map(str::to_string),
             ports: IdVec::new(),
