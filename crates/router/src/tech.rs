@@ -7,6 +7,7 @@
 //! lands on a track of both layers it joins.
 
 use crate::RouteError;
+use pare_common::config::RoutingConfig;
 use pare_common::db::design::NetlistDB;
 use pare_common::db::design::NonDefaultRule;
 use pare_common::db::indices::{CutLayerId, LayerId, NonDefaultRuleId, ViaId};
@@ -15,7 +16,6 @@ use pare_common::db::rules::SpacingTable;
 use pare_common::geom::dbu::Dbu;
 use pare_common::geom::point::Point;
 use pare_common::geom::rect::Rect;
-use pare_common::util::config::RoutingConfig;
 
 /// A position along a layer's tracks where a via may go.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

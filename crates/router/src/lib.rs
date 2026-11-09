@@ -30,6 +30,7 @@ use global::{
     track_demand,
 };
 use occupancy::FixedTracks;
+use pare_common::config::{LayerRangeError, RoutingConfig, Share};
 use pare_common::db::design::{
     GCellGridDef, NetlistDB, PinOwner, PlacementStatus, RouteElem, TrackAxis,
 };
@@ -38,7 +39,6 @@ use pare_common::db::library::{Direction, Shape};
 use pare_common::geom::dbu::Dbu;
 use pare_common::geom::point::Point;
 use pare_common::geom::rect::Rect;
-use pare_common::util::config::{LayerRangeError, RoutingConfig, Share};
 use pare_common::verify::shapes::obstruction_shapes;
 use rustc_hash::{FxHashMap, FxHashSet};
 use search::Costs;

@@ -3,7 +3,7 @@
 //! other's spots by a minimum-cost matching on wirelength.
 
 use super::{ImprovementError, Improver, Move, Result};
-use pare_common::util::network_simplex::{Arc, min_cost_flow};
+use pare_common::network_simplex::{Arc, min_cost_flow};
 use std::collections::VecDeque;
 
 /// Cells a matching gathers before it stops widening its search.

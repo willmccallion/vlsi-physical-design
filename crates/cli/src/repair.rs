@@ -3,11 +3,11 @@
 
 use crate::ui;
 use anyhow::Context;
+use pare_common::config::{Config, LayerRcConfig, NetlistConfig};
 use pare_common::db::design::NetlistDB;
 use pare_common::db::liberty::Liberty;
 use pare_common::db::parser::{liberty, sdc};
 use pare_common::db::sdc::Sdc;
-use pare_common::util::config::{Config, LayerRcConfig, NetlistConfig};
 
 use crate::report::{NetlistSummary, Report, TimingSummary};
 use pare_resizer::parasitics::WireRc;

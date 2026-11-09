@@ -193,7 +193,7 @@ impl<'a> DetailedRouter<'a> {
             mb(fixed),
             mb(added),
             mb(cuts),
-            pare_common::util::memory::current_rss_mb().unwrap_or(0)
+            pare_common::memory::current_rss_mb().unwrap_or(0)
         );
     }
 
@@ -206,7 +206,7 @@ impl<'a> DetailedRouter<'a> {
         log::debug!(
             "fixed shapes recorded in {:.1}s, {} MB resident",
             start.elapsed().as_secs_f64(),
-            pare_common::util::memory::current_rss_mb().unwrap_or(0)
+            pare_common::memory::current_rss_mb().unwrap_or(0)
         );
         let start = std::time::Instant::now();
         let rules = Rules::from_design(db);
@@ -215,7 +215,7 @@ impl<'a> DetailedRouter<'a> {
         log::debug!(
             "fixed layout built for the judge in {:.1}s, {} MB resident",
             start.elapsed().as_secs_f64(),
-            pare_common::util::memory::current_rss_mb().unwrap_or(0)
+            pare_common::memory::current_rss_mb().unwrap_or(0)
         );
         let start = std::time::Instant::now();
         let shared = SharedAccess::new(db, tech);
@@ -245,7 +245,7 @@ impl<'a> DetailedRouter<'a> {
             "access points found in {:.1}s for {} kinds of cell, {} MB resident",
             start.elapsed().as_secs_f64(),
             shared.kinds(),
-            pare_common::util::memory::current_rss_mb().unwrap_or(0)
+            pare_common::memory::current_rss_mb().unwrap_or(0)
         );
         let start = std::time::Instant::now();
         let fixed_view = FixedView {
@@ -258,7 +258,7 @@ impl<'a> DetailedRouter<'a> {
         log::debug!(
             "access points reserved in {:.1}s, {} MB resident",
             start.elapsed().as_secs_f64(),
-            pare_common::util::memory::current_rss_mb().unwrap_or(0)
+            pare_common::memory::current_rss_mb().unwrap_or(0)
         );
         Self {
             db,

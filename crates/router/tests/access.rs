@@ -2,6 +2,7 @@
 
 #![allow(clippy::unwrap_used)]
 
+use pare_common::config::RoutingConfig;
 use pare_common::db::design::{NetlistDB, PinOwner};
 use pare_common::db::indices::{LayerId, PinId};
 use pare_common::db::library::LayerRef;
@@ -9,7 +10,6 @@ use pare_common::db::parser::{def, lef};
 use pare_common::geom::dbu::Dbu;
 use pare_common::geom::point::Point;
 use pare_common::geom::rect::Rect;
-use pare_common::util::config::RoutingConfig;
 use pare_router::access::{AccessPoint, Node, access_points};
 use pare_router::shared_access::SharedAccess;
 use pare_router::tech::RouteTech;

@@ -721,10 +721,10 @@ thread_local! {
 mod tests {
     use super::super::{GlobalGrid, Tracks, Usage};
     use super::*;
+    use pare_common::config::CapacityReserve;
     use pare_common::db::indices::NetId;
     use pare_common::geom::dbu::Dbu;
     use pare_common::geom::point::Point;
-    use pare_common::util::config::CapacityReserve;
 
     /// A `nx` by `ny` grid with a horizontal layer 1 over a vertical layer
     /// 2, every edge holding 4 tracks.

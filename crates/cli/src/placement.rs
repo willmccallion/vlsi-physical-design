@@ -7,6 +7,9 @@ use crate::repair::{NetlistRepair, TimedRepair, repair_design, repair_netlist, r
 use crate::report::{PlacementSummary, Report};
 use crate::{ui, visualization};
 use anyhow::Context;
+use pare_common::config::{
+    Config, CongestionEstimate, DesignInput, GlobalPlacementConfig, Share, TargetDensity,
+};
 use pare_common::db::design::{NetlistDB, PlacementStatus, Renumbering};
 use pare_common::db::indices::{CellId, NetId};
 use pare_common::db::liberty::MinMax;
@@ -14,9 +17,6 @@ use pare_common::db::writer;
 use pare_common::geom::dbu::Dbu;
 use pare_common::geom::point::Point;
 use pare_common::units::Seconds;
-use pare_common::util::config::{
-    Config, CongestionEstimate, DesignInput, GlobalPlacementConfig, Share, TargetDensity,
-};
 use pare_common::verify::pin_access::PinAccess;
 use pare_placer::detailed;
 use pare_placer::global::{

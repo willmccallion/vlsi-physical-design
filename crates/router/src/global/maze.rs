@@ -593,8 +593,8 @@ mod tests {
     use super::super::coarse::CoarseGrid;
     use super::super::{Tracks, Usage};
     use super::*;
+    use pare_common::config::CapacityReserve;
     use pare_common::db::indices::NetId;
-    use pare_common::util::config::CapacityReserve;
 
     const COSTS: GlobalCosts = GlobalCosts {
         via: 1.0,

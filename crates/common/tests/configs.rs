@@ -2,9 +2,7 @@
 
 #![allow(clippy::unwrap_used)]
 
-use pare_common::util::config::{
-    Config, DesignInput, InputConfig, InputError, IoLayerNames, OneIoLayer,
-};
+use pare_common::config::{Config, DesignInput, InputConfig, InputError, IoLayerNames, OneIoLayer};
 use std::path::{Path, PathBuf};
 
 /// Every `.toml` file under `dir`, in its subfolders too.

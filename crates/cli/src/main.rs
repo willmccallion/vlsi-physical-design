@@ -22,11 +22,11 @@ use crate::routing::{
 use crate::view::view_area;
 use anyhow::Context;
 use clap::{Parser, Subcommand};
+use pare_common::config::{Config, DesignInput, Purpose};
 use pare_common::db::design::NetlistDB;
 use pare_common::db::parser::{bookshelf, def, lef};
 use pare_common::geom::dbu::DbuPerMicron;
 use pare_common::geom::point::Point;
-use pare_common::util::config::{Config, DesignInput, Purpose};
 use report::Report;
 use std::path::{Path, PathBuf};
 use std::time::Instant;

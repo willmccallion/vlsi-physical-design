@@ -256,4 +256,4 @@ impl Report {
     }
 }
 
-pub use pare_common::util::memory::peak_rss_mb;
+pub use pare_common::memory::peak_rss_mb;
