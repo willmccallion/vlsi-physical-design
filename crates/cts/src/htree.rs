@@ -1421,9 +1421,11 @@ impl SegmentBuilder {
         for &wire in wires {
             let segment = tech.segment(wire);
             let length = f64::from(segment.length);
+            let mut to_last_buffer = 0.0;
             for (&location, &master) in segment.buffer_locations.iter().zip(&segment.buffer_masters)
             {
                 connection += location * length;
+                to_last_buffer += location * length;
                 let (x, y) = if connection < length_x {
                     let x = if low_to_high_x {
                         self.root.x + connection
@@ -1457,7 +1459,9 @@ impl SegmentBuilder {
                 tree.clock.subnets[self.driving].add(buffer);
                 self.levels += 1;
             }
-            connection += length;
+            // NOTE: SegmentBuilder::build adds the whole length after the
+            // buffers, counting the wire up to them twice; PARE the rest.
+            connection += length - to_last_buffer;
         }
     }
 
@@ -1942,6 +1946,17 @@ mod tests {
         );
 
         assert_eq!(placed, [at(5, 50)]);
+    }
+
+    #[test]
+    fn buffers_of_successive_segments_sit_where_each_segment_puts_them() {
+        let placed = buffers_along(
+            TreePoint::new(0.0, 50.0),
+            TreePoint::new(20.0, 50.0),
+            vec![segment(10, 1, &[0.5], 5), segment(10, 1, &[0.5], 5)],
+        );
+
+        assert_eq!(placed, [at(5, 50), at(15, 50)]);
     }
 
     #[test]
