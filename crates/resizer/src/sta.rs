@@ -1872,7 +1872,7 @@ impl CycleSearch {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::graph::Estimator;
+    use crate::graph::{Estimator, PortConditions};
     use crate::library::Link;
     use crate::parasitics::WireRc;
     use pare_common::db::design::NetlistDB;
@@ -2049,6 +2049,7 @@ mod tests {
             rc,
             None,
             Estimator::Placement,
+            PortConditions::from_sdc(&sdc),
         );
         inspect(
             &netlist,

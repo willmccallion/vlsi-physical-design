@@ -6,7 +6,7 @@
 
 use crate::bnet::{LoadModel, PinLoad, TreeRc};
 use crate::fuzzy;
-use crate::graph::{Estimator, TimingGraph};
+use crate::graph::{Estimator, PortConditions, TimingGraph};
 use crate::library::{BufferSet, Link, SizingLimits, is_logic_std_cell};
 use crate::netlist::{ClockNetwork, Constants, Namer, Netlist};
 use crate::parasitics::WireRc;
@@ -271,7 +271,7 @@ impl<'a> Resizer<'a> {
     /// Prepares a session over `inputs` without timing: estimates every
     /// net's parasitics and slews.
     pub fn new(inputs: SessionInputs<'a>) -> Result<Self, RepairError> {
-        Self::build(inputs, None, |_, _| Untimed)
+        Self::build(inputs, None, PortConditions::default(), |_, _| Untimed)
     }
 }
 
@@ -298,7 +298,8 @@ impl<'a> Resizer<'a, Sta> {
         sdc: &Sdc,
     ) -> Result<Self, RepairError> {
         let (clocks, constants) = (inputs.context.clocks, inputs.context.constants);
-        Self::build(inputs, routes, |netlist, graph| {
+        let ports = PortConditions::from_sdc(sdc);
+        Self::build(inputs, routes, ports, |netlist, graph| {
             Sta::new(netlist, graph, clocks, constants, sdc)
         })
     }
@@ -343,11 +344,13 @@ impl<'a> Resizer<'a, Sta> {
 }
 
 impl<'a, T: Timing> Resizer<'a, T> {
-    /// Estimates every net's parasitics and slews, and times the design
-    /// as `timing` does once the graph is built.
+    /// Estimates every net's parasitics and slews under the port
+    /// conditions `ports`, and times the design as `timing` does once the
+    /// graph is built.
     fn build(
         inputs: SessionInputs<'a>,
         routes: Option<GlobalRouting<'a>>,
+        ports: PortConditions,
         timing: impl FnOnce(&Netlist<'_>, &TimingGraph) -> T,
     ) -> Result<Self, RepairError> {
         let SessionInputs {
@@ -379,6 +382,7 @@ impl<'a, T: Timing> Resizer<'a, T> {
                 rc,
                 clock_rc,
                 estimator(routes.as_ref()),
+                ports,
             );
             let timing = timing(&netlist, &graph);
             (graph, timing)
@@ -1198,8 +1202,16 @@ impl<'a, T: Timing> Resizer<'a, T> {
 }
 
 impl<T: Timing> LoadModel for Resizer<'_, T> {
+    /// What `pin` presents, as `BufferedNet`'s load constructor reads it: an
+    /// instance pin's Liberty port, a design pin's load from `set_load`.
     fn load(&self, pin: PinId) -> PinLoad {
         let netlist = self.netlist();
+        if let PinOwner::Io(_) = self.db.pins[pin].owner {
+            return PinLoad {
+                cap: self.graph.pin_capacitance(&netlist, pin, Edge::Rise),
+                ..PinLoad::NONE
+            };
+        }
         netlist
             .lib_cell_port(pin)
             .map_or(PinLoad::NONE, |(cell, port)| PinLoad {
