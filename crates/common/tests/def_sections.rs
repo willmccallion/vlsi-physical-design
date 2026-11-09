@@ -541,3 +541,15 @@ fn a_pin_shape_with_its_own_spacing_rule_is_refused() {
         assert!(error.contains("is not supported"), "{error}");
     }
 }
+
+#[test]
+fn a_row_without_sites_adds_nothing_to_the_core() {
+    let db = design_with(&[(
+        "ROW ROW_2 core 0 4000 N DO 20 BY 1 STEP 200 0 ;",
+        "ROW ROW_2 core 0 4000 N DO 20 BY 1 STEP 200 0 ;\n\
+         ROW ROW_EMPTY core 0 8000 N DO 0 BY 1 STEP 200 0 ;",
+    )])
+    .unwrap();
+
+    assert_eq!(db.core_area(), rect(0, 0, 6000, 6000));
+}
