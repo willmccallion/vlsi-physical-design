@@ -173,8 +173,8 @@ impl SinkClustering {
             }
         }
         let mut best = None;
-        // NOTE: kept: findBestMatching never picks the cut at offset 0.
-        for (j, run) in runs.iter().enumerate().skip(1) {
+        // NOTE: findBestMatching skips the cut at offset 0; PARE weighs it too.
+        for (j, run) in runs.iter().enumerate() {
             if run.cost < self.best_cost {
                 best = Some(j);
                 self.best_cost = run.cost;
@@ -293,7 +293,7 @@ mod tests {
 
         clustering.run(2, 1000.0, 1);
 
-        assert_eq!(clustering.solution(), [vec![3, 2], vec![1, 0]]);
+        assert_eq!(clustering.solution(), [vec![0, 3], vec![2, 1]]);
     }
 
     #[test]
@@ -302,7 +302,7 @@ mod tests {
 
         clustering.run(4, 50.0, 1);
 
-        assert_eq!(clustering.solution(), [vec![3], vec![2], vec![1], vec![0]]);
+        assert_eq!(clustering.solution(), [vec![0], vec![3], vec![2], vec![1]]);
     }
 
     #[test]
@@ -313,16 +313,37 @@ mod tests {
 
         clustering.run(4, 1000.0, 1);
 
-        assert_eq!(clustering.solution(), [vec![3, 2], vec![1, 0]]);
+        assert_eq!(clustering.solution(), [vec![0, 3], vec![2, 1]]);
     }
 
     #[test]
-    fn a_group_size_of_one_finds_no_clustering() {
+    fn a_group_size_of_one_puts_each_sink_alone() {
         let mut clustering = square_corners(false, 1.0);
 
         clustering.run(1, 1000.0, 1);
 
-        assert_eq!(clustering.solution(), &[] as &[Vec<usize>]);
+        assert_eq!(clustering.solution(), [vec![0], vec![3], vec![2], vec![1]]);
+    }
+
+    #[test]
+    fn the_cut_at_the_curves_start_wins_when_it_is_tightest() {
+        // Along the curve the sinks run 0, 1, 2, 3, and only the cut from 0
+        // pairs each with its near neighbour.
+        let sink_buffer_input_cap = Farads32::of(Farads::new(FEMTOFARAD));
+        let mut clustering =
+            SinkClustering::new(false, FaradsPerDbu::new(0.0), sink_buffer_input_cap);
+        for (x, y) in [(0.0, 0.0), (0.0, 10.0), (100.0, 100.0), (100.0, 90.0)] {
+            clustering.add_point(
+                x,
+                y,
+                Farads32::of(Farads::new(FEMTOFARAD)),
+                SegmentLength::default(),
+            );
+        }
+
+        clustering.run(2, 1000.0, 1);
+
+        assert_eq!(clustering.solution(), [vec![0, 1], vec![2, 3]]);
     }
 
     #[test]
@@ -332,6 +353,6 @@ mod tests {
 
         clustering.run(4, 50.0, 1);
 
-        assert_eq!(clustering.solution(), [vec![3, 2], vec![1, 0]]);
+        assert_eq!(clustering.solution(), [vec![0, 3], vec![2, 1]]);
     }
 }
