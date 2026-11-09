@@ -2,11 +2,12 @@
 
 use pare_common::geom::dbu::Dbu;
 use pare_common::geom::point::Point;
+use std::ops::{Add, Sub};
 
 /// A column or row of a spatial hash's square buckets, counted from the
-/// origin the hash measures from.
+/// origin the hash measures from, or an offset between two.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
-pub(crate) struct Bucket(i64);
+pub(crate) struct Bucket(pub(crate) i64);
 
 impl Bucket {
     /// The bucket of side `size` holding `at` along one axis, each bucket
@@ -18,6 +19,22 @@ impl Bucket {
     /// Every column or row from this one to `last`, both included.
     pub(crate) fn through(self, last: Self) -> impl Iterator<Item = Self> {
         (self.0..=last.0).map(Self)
+    }
+}
+
+impl Add for Bucket {
+    type Output = Self;
+
+    fn add(self, rhs: Self) -> Self {
+        Self(self.0 + rhs.0)
+    }
+}
+
+impl Sub for Bucket {
+    type Output = Self;
+
+    fn sub(self, rhs: Self) -> Self {
+        Self(self.0 - rhs.0)
     }
 }
 

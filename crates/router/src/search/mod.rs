@@ -16,6 +16,7 @@ mod marks;
 pub(crate) use marks::Marks;
 
 use crate::access::{AccessPoint, Node};
+use crate::bucket::{Bucket, bucket_at, buckets_between};
 use crate::global::{GCell, Gcells};
 use crate::occupancy::{LocalOccupancy, Occupancy, Origin, Owner, Proximity, too_close};
 use crate::tech::RouteTech;
@@ -274,7 +275,7 @@ pub(crate) struct OwnVias {
     bucket: Dbu,
     /// The non-default rule the net follows.
     rule: Option<NonDefaultRuleId>,
-    vias: FxHashMap<(i64, i64), Vec<PlacedVia>>,
+    vias: FxHashMap<Point<Bucket>, Vec<PlacedVia>>,
 }
 
 impl OwnVias {
@@ -301,11 +302,8 @@ impl OwnVias {
         }
     }
 
-    const fn key(&self, p: Point<Dbu>) -> (i64, i64) {
-        (
-            p.x.get().div_euclid(self.bucket.get()),
-            p.y.get().div_euclid(self.bucket.get()),
-        )
+    const fn key(&self, p: Point<Dbu>) -> Point<Bucket> {
+        bucket_at(p, self.bucket)
     }
 
     pub(crate) fn add(&mut self, via: ViaId, at: Point<Dbu>) {
@@ -321,14 +319,14 @@ impl OwnVias {
         via: ViaId,
         at: Point<Dbu>,
     ) -> usize {
-        let (x, y) = self.key(at);
+        let key = self.key(at);
+        let one = Point::new(Bucket(1), Bucket(1));
         let shapes = &db.library.via(via).shapes;
         let spacing = |layer: LayerRef| match layer {
             LayerRef::Routing(l) => tech.wire_spacing(self.rule, l),
             LayerRef::Cut(c) => db.library.cut_layers[c].spacing.unwrap_or_default(),
         };
-        (x - 1..=x + 1)
-            .flat_map(|bx| (y - 1..=y + 1).map(move |by| (bx, by)))
+        buckets_between(key - one, key + one)
             .filter_map(|k| self.vias.get(&k))
             .flatten()
             .filter(|&&(other, p)| {
