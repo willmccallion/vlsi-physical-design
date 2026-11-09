@@ -710,12 +710,19 @@ impl Merged {
         }
     }
 
+    /// Keeps `value` for `edge` where it passes the one held by more than
+    /// the tolerance, as `GraphDelayCalc` merges slews and wire delays with
+    /// `delayGreater`.
     fn take(&mut self, edge: Edge, value: Seconds) {
         let slot = match edge {
             Edge::Rise => &mut self.rise,
             Edge::Fall => &mut self.fall,
         };
-        if self.side.beats(value, *slot) {
+        let passes = match self.side {
+            MinMax::Max => fuzzy::greater(value, *slot),
+            MinMax::Min => fuzzy::less(value, *slot),
+        };
+        if passes {
             *slot = value;
         }
     }
