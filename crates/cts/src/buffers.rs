@@ -149,7 +149,8 @@ fn trim_and_sort(
 }
 
 /// The most fanout a buffer may drive under the constraints and the
-/// library, as `TritonCTS::getBufferFanoutLimit`; `None` without a limit.
+/// library, as `TritonCTS::getBufferFanoutLimit`; `None` without a limit,
+/// or with one below a single sink.
 pub(crate) fn fanout_limit(
     liberty: &Liberty,
     buffer: BufferCell,
@@ -164,6 +165,8 @@ pub(crate) fn fanout_limit(
         .flatten()
         .map(|l| l as u32)
         .min()
+        // NOTE: kept: TritonCTS truncates a limit below one to 0 and its callers skip it.
+        .filter(|&limit| limit > 0)
 }
 
 #[cfg(test)]
@@ -239,6 +242,13 @@ mod tests {
         let lib = buffers(&[(10, None)], None);
 
         assert_eq!(fanout_limit(&lib, id(&lib, 10), Some(7.9)), Some(7));
+    }
+
+    #[test]
+    fn a_fanout_limit_below_one_is_no_limit() {
+        let lib = buffers(&[(10, Some(8))], None);
+
+        assert_eq!(fanout_limit(&lib, id(&lib, 10), Some(0.5)), None);
     }
 
     #[test]
