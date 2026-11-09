@@ -28,8 +28,8 @@ use detailed::{
 };
 pub use global::{CapacityReduction, rudy_wire_width};
 use global::{
-    GCell, GlobalGrid, GlobalNet, GlobalRoutes, RestoreError, Tracks, restore_global, route_global,
-    track_demand,
+    GCell, Gcells, GlobalGrid, GlobalNet, GlobalRoutes, RestoreError, Tracks, restore_global,
+    route_global, track_demand,
 };
 use occupancy::FixedTracks;
 use pare_common::config::{LayerRangeError, RoutingConfig, Share};
@@ -1200,7 +1200,7 @@ pub enum RouteError {
     #[error(
         "the die spans {0} gcells, beyond the global router's {MAX_GRID_SPAN}; raise [routing] gcell_tracks"
     )]
-    GridTooLarge(i64),
+    GridTooLarge(Gcells),
     /// A saved state is of another design.
     #[error("the route state was saved for design '{0}'")]
     StateDesign(String),
