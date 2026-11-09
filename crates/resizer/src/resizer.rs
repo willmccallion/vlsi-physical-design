@@ -1493,7 +1493,7 @@ pub(crate) fn buffer_delays(
 mod tests {
     use super::*;
     use crate::testing::{
-        DefSections, cells, clock_cells_source, def_text, design, metal2_wires, pin,
+        DefSections, cells, cells_with, clock_cells_source, def_text, design, metal2_wires, pin,
         with_session_inputs, with_timed_session,
     };
     use std::fmt::Write;
@@ -1744,5 +1744,90 @@ mod tests {
         assert_ne!(after, before);
         assert!(after.contains("- rebuffer1 BUF_X1") && after.contains("- b2 CLKBUF_X3"));
         assert!(!after.contains("- b1 BUF_X1"));
+    }
+
+    /// The error a timed session over [`two_buffers`] with the clock cells
+    /// of `source` fails to start with.
+    fn start_error(source: &str) -> Option<RepairError> {
+        let mut db = two_buffers();
+        let lib = cells(source);
+        let rc = metal2_wires(&db);
+        with_session_inputs(&mut db, &lib, CLOCK, rc, |inputs, sdc| {
+            Resizer::timed(inputs, sdc).err()
+        })
+    }
+
+    #[test]
+    fn slew_thresholds_derated_out_of_shape_refuse_a_session() {
+        let derated = clock_cells_source().replace(
+            "slew_derate_from_library : 1.0",
+            "slew_derate_from_library : 100.0",
+        );
+
+        let error = start_error(&derated);
+
+        assert!(
+            matches!(error, Some(RepairError::ShapeFactor(_))),
+            "{error:?}"
+        );
+        assert!(start_error(&clock_cells_source()).is_none());
+    }
+
+    /// A buffer cell the design's library has no master for.
+    const MASTERLESS_BUFFER: &str = "cell (BUF_X2) { area : 1.0 ; \
+        pin (A) { direction : input ; capacitance : 1.0 ; } \
+        pin (Z) { direction : output ; function : \"A\" ; } }";
+
+    #[test]
+    fn a_size_without_a_master_is_refused() {
+        let mut db = two_buffers();
+        let lib = cells_with(MASTERLESS_BUFFER);
+
+        with_timed_session(&mut db, &lib, CLOCK, |resizer| {
+            let b1 = resizer.db.cell_id("b1").unwrap();
+            let size = resizer.link.liberty.cell_id("BUF_X2").unwrap();
+
+            let error = resizer.replace_cell(b1, size);
+
+            assert_eq!(error, Err(RepairError::NoMaster("BUF_X2".to_string())));
+        });
+    }
+
+    #[test]
+    fn a_master_lacking_a_connected_pin_is_refused() {
+        let mut db = two_buffers();
+        let lib = cells(&clock_cells_source());
+
+        with_timed_session(&mut db, &lib, CLOCK, |resizer| {
+            let f1 = resizer.db.cell_id("f1").unwrap();
+            let inverter = resizer.link.liberty.cell_id("INV_X1").unwrap();
+
+            let error = resizer.replace_cell(f1, inverter);
+
+            assert!(
+                matches!(error, Err(RepairError::Edit(EditError::MissingPin { .. }))),
+                "{error:?}"
+            );
+        });
+    }
+
+    #[test]
+    fn a_cell_that_is_not_a_buffer_has_no_buffer_pins() {
+        let mut db = two_buffers();
+        let lib = cells(&clock_cells_source());
+
+        with_timed_session(&mut db, &lib, CLOCK, |resizer| {
+            let and_gate = resizer.link.liberty.cell_id("AND2_X1").unwrap();
+            let f1 = resizer.db.cell_id("f1").unwrap();
+
+            assert_eq!(
+                resizer.as_buffer(and_gate),
+                Err(RepairError::MissingPins("AND2_X1".to_string()))
+            );
+            assert_eq!(
+                resizer.remove_buffer(f1),
+                Err(RepairError::MissingPins("f1".to_string()))
+            );
+        });
     }
 }
