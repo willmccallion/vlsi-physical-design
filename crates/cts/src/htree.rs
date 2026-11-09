@@ -855,21 +855,25 @@ impl Builder {
                 };
                 let moved = if let Some(rect) = blockage {
                     let candidates = Self::legal_locations(parent, point, rect);
-                    let best = self.best_legal_location(
+                    let search = LegalSearch {
                         ctx,
-                        length,
-                        point,
+                        target: length,
                         parent,
-                        &candidates,
-                        &sinks,
-                        rect,
+                        sinks: &sinks,
                         direction,
-                    );
+                    };
+                    let best = self.best_legal_location(&search, point, &candidates, rect);
                     self.commit_move(point, best);
                     best
                 } else if self.is_occupied(point) || !fuzzy_eq(leng, length, 0.01) {
-                    let best =
-                        self.adjust_beyond_blockage(ctx, point, parent, length, &sinks, direction);
+                    let search = LegalSearch {
+                        ctx,
+                        target: length,
+                        parent,
+                        sinks: &sinks,
+                        direction,
+                    };
+                    let best = self.adjust_beyond_blockage(&search, point);
                     self.commit_move(point, best);
                     best
                 } else {
@@ -909,16 +913,15 @@ impl Builder {
                     && let Some([x1, y1, x2, y2]) = Self::find_blockage(ctx, point, unit)
                 {
                     let candidates = Self::legal_locations(parent, point, [x1, y1, x2, y2]);
-                    let best = self.best_legal_location(
+                    let search = LegalSearch {
                         ctx,
-                        length,
-                        point,
+                        target: length,
                         parent,
-                        &candidates,
-                        &sinks,
-                        [x1, y2, x2, y2],
-                        Direction::North,
-                    );
+                        sinks: &sinks,
+                        direction: Direction::North,
+                    };
+                    let best =
+                        self.best_legal_location(&search, point, &candidates, [x1, y2, x2, y2]);
                     self.commit_move(point, best);
                     point = best;
                 }
@@ -955,18 +958,18 @@ impl Builder {
             .collect()
     }
 
-    #[allow(clippy::too_many_arguments)]
+    /// The candidate around the blockage `rect` whose path through it is
+    /// nearest the search's target length, adjusted along or beyond the
+    /// blockage when it is not at the target from the parent, as
+    /// `HTreeBuilder::findBestLegalLocation`.
     fn best_legal_location(
         &self,
-        ctx: &TreeContext<'_>,
-        target: f64,
+        search: &LegalSearch<'_>,
         branch: Point,
-        parent: Point,
         candidates: &[Point],
-        sinks: &[Point],
         rect: [f64; 4],
-        direction: Direction,
     ) -> Point {
+        let (target, parent) = (search.target, search.parent);
         let mut best = Point::new(0.0, 0.0);
         let mut min_diff = f64::MAX;
         for &loc in candidates {
@@ -980,23 +983,27 @@ impl Builder {
         if fuzzy_eq(target, self.compute_dist(best, parent), 1e-6) {
             return best;
         }
-        if let Some(along) = self.adjust_along_blockage(ctx, target, best, parent, sinks, rect) {
+        if let Some(along) = self.adjust_along_blockage(search, best, rect) {
             return along;
         }
-        self.adjust_beyond_blockage(ctx, best, parent, target, sinks, direction)
+        self.adjust_beyond_blockage(search, best)
     }
 
-    /// The point at `target` from the parent along the blockage's edge
+    /// The point at the target from the parent along the blockage's edge
     /// nearest the sinks, as `HTreeBuilder::adjustAlongBlockage`.
     fn adjust_along_blockage(
         &self,
-        ctx: &TreeContext<'_>,
-        target: f64,
+        search: &LegalSearch<'_>,
         current: Point,
-        parent: Point,
-        sinks: &[Point],
         rect: [f64; 4],
     ) -> Option<Point> {
+        let LegalSearch {
+            ctx,
+            target,
+            parent,
+            sinks,
+            ..
+        } = *search;
         let (x, y) = (current.x, current.y);
         let (px, py) = (parent.x, parent.y);
         let candidates = [
@@ -1025,17 +1032,16 @@ impl Builder {
         best.filter(|b| !b.same(Point::new(f64::MIN_POSITIVE, f64::MIN_POSITIVE)))
     }
 
-    /// The legal point at `target` from the parent, toward `direction`,
-    /// nearest the sinks, as `HTreeBuilder::adjustBeyondBlockage`.
-    fn adjust_beyond_blockage(
-        &self,
-        ctx: &TreeContext<'_>,
-        branch: Point,
-        parent: Point,
-        target: f64,
-        sinks: &[Point],
-        direction: Direction,
-    ) -> Point {
+    /// The legal point at the target from the parent, toward the search's
+    /// direction, nearest the sinks, as `HTreeBuilder::adjustBeyondBlockage`.
+    fn adjust_beyond_blockage(&self, search: &LegalSearch<'_>, branch: Point) -> Point {
+        let LegalSearch {
+            ctx,
+            target,
+            parent,
+            sinks,
+            direction,
+        } = *search;
         let mut candidates = arc_candidates(parent, target, direction);
         let straight = candidates[0];
         if let Some(blockage) = Self::find_blockage(ctx, straight, self.unit()) {
@@ -1163,6 +1169,17 @@ impl Builder {
             self.clock.subnets[subnet].add(InstRef::Sink(i));
         }
     }
+}
+
+/// What a search for a legal branching point looks for: a point `target`
+/// from `parent`, toward `direction`, near `sinks`.
+#[derive(Clone, Copy, Debug)]
+struct LegalSearch<'a> {
+    ctx: &'a TreeContext<'a>,
+    target: f64,
+    parent: Point,
+    sinks: &'a [Point],
+    direction: Direction,
 }
 
 /// Whether `p` lies on the boundary of `rect`, as `TreeBuilder::isAlongBbox`.
