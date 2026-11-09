@@ -2,7 +2,7 @@
 
 use pare_common::geom::dbu::Dbu;
 use pare_common::geom::point::Point;
-use std::ops::{Add, Sub};
+use std::ops::{Add, AddAssign, Sub};
 
 /// A column or row of a spatial hash's square buckets, counted from the
 /// origin the hash measures from, or an offset between two.
@@ -16,6 +16,16 @@ impl Bucket {
         Self(at.get().div_euclid(size.get()))
     }
 
+    /// The size of an offset between columns or rows, whichever way it runs.
+    pub(crate) const fn abs(self) -> Self {
+        Self(self.0.abs())
+    }
+
+    /// The length of this many buckets of side `size`.
+    pub(crate) fn length(self, size: Dbu) -> Dbu {
+        size * self.0
+    }
+
     /// Every column or row from this one to `last`, both included.
     pub(crate) fn through(self, last: Self) -> impl Iterator<Item = Self> {
         (self.0..=last.0).map(Self)
@@ -27,6 +37,12 @@ impl Add for Bucket {
 
     fn add(self, rhs: Self) -> Self {
         Self(self.0 + rhs.0)
+    }
+}
+
+impl AddAssign for Bucket {
+    fn add_assign(&mut self, rhs: Self) {
+        self.0 += rhs.0;
     }
 }
 

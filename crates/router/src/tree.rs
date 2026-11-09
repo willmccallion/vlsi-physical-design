@@ -7,6 +7,7 @@
 //! and find the nearest earlier centre through a bucket grid, which keeps
 //! nets with tens of thousands of pins fast.
 
+use crate::bucket::{Bucket, bucket_at};
 use pare_common::geom::dbu::Dbu;
 use pare_common::geom::point::Point;
 use pare_common::geom::rect::Rect;
@@ -134,25 +135,26 @@ fn curve_order(points: &[Point<Dbu>]) -> (usize, Vec<Join>) {
     let order = hilbert_order(points);
 
     let cells_per_side = (points.len() as f64).sqrt().ceil().max(1.0) as i64;
-    let bucket = (span / cells_per_side).max(Dbu(1)).get();
-    let key = |p: Point<Dbu>| ((p.x - min_x).get() / bucket, (p.y - min_y).get() / bucket);
-    let mut buckets: FxHashMap<(i64, i64), Vec<usize>> = FxHashMap::default();
+    let bucket = (span / cells_per_side).max(Dbu(1));
+    let origin = Point::new(min_x, min_y);
+    let key = |p: Point<Dbu>| bucket_at(p - origin, bucket);
+    let mut buckets: FxHashMap<Point<Bucket>, Vec<usize>> = FxHashMap::default();
 
     let first = order[0];
     buckets.entry(key(points[first])).or_default().push(first);
     let mut joins = Vec::with_capacity(points.len() - 1);
     for &i in &order[1..] {
         let p = points[i];
-        let (cx, cy) = key(p);
+        let c = key(p);
         let mut nearest: Option<(Dbu, usize)> = None;
-        let mut ring = 0;
+        let mut ring = Bucket(0);
         loop {
-            for bx in cx - ring..=cx + ring {
-                for by in cy - ring..=cy + ring {
-                    if (bx - cx).abs() != ring && (by - cy).abs() != ring {
+            for x in (c.x - ring).through(c.x + ring) {
+                for y in (c.y - ring).through(c.y + ring) {
+                    if (x - c.x).abs() != ring && (y - c.y).abs() != ring {
                         continue;
                     }
-                    for &j in buckets.get(&(bx, by)).into_iter().flatten() {
+                    for &j in buckets.get(&Point::new(x, y)).into_iter().flatten() {
                         let d = p.manhattan(points[j]);
                         if nearest.is_none_or(|(b, k)| (d, j) < (b, k)) {
                             nearest = Some((d, j));
@@ -160,16 +162,17 @@ fn curve_order(points: &[Point<Dbu>]) -> (usize, Vec<Join>) {
                     }
                 }
             }
-            // Anything beyond this ring is at least `ring * bucket` away.
-            if nearest.is_some_and(|(d, _)| d.get() <= ring * bucket) || ring > cells_per_side + 1 {
+            // Anything beyond this ring is at least `ring` buckets away.
+            let found = nearest.is_some_and(|(d, _)| d <= ring.length(bucket));
+            if found || ring > Bucket(cells_per_side + 1) {
                 break;
             }
-            ring += 1;
+            ring += Bucket(1);
         }
         if let Some((_, parent)) = nearest {
             joins.push(Join { pin: i, parent });
         }
-        buckets.entry((cx, cy)).or_default().push(i);
+        buckets.entry(c).or_default().push(i);
     }
     (first, joins)
 }
