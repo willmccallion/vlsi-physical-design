@@ -1309,8 +1309,8 @@ impl Best {
 
 /// Half-perimeter of a net's terminals' bounding box, in gcells.
 fn span(cells: &[GCell]) -> u32 {
-    let w = window(cells, 0, u16::MAX, u16::MAX);
-    u32::from(w.x1 - w.x0) + u32::from(w.y1 - w.y0)
+    window(cells, 0, u16::MAX, u16::MAX)
+        .map_or(0, |w| u32::from(w.x1 - w.x0) + u32::from(w.y1 - w.y0))
 }
 
 /// Nets to reroute in one batch: their indices in the order to route them,
@@ -1402,7 +1402,7 @@ fn dependencies(
             grid.nx,
             grid.ny,
         );
-        let mut blocks = blocks_of(area, blocks_x);
+        let mut blocks = area.map_or_else(Vec::new, |a| blocks_of(a, blocks_x));
         if let Some(plan) = &plans[k] {
             blocks.extend(corridor_blocks(plan.corridor(), grid, blocks_x));
         }
@@ -1530,7 +1530,7 @@ fn disjoint_levels(grid: &GlobalGrid, nets: &[GlobalNet], ripped: &[usize]) -> V
     let mut levels: Vec<Vec<usize>> = Vec::new();
     for &i in ripped {
         let area = window(&nets[i].terminals, 0, grid.nx, grid.ny);
-        let blocks = blocks_of(area, blocks_x);
+        let blocks = area.map_or_else(Vec::new, |a| blocks_of(a, blocks_x));
         let level = blocks.iter().map(|&b| height[b]).max().unwrap_or(0);
         for &b in &blocks {
             height[b] = level + 1;
@@ -1629,22 +1629,43 @@ impl GcellWindow {
             y1: self.y1.max(other.y1),
         }
     }
+
+    /// The window of the gcell `c` alone.
+    const fn of(c: GCell) -> Self {
+        Self {
+            x0: c.x,
+            x1: c.x,
+            y0: c.y,
+            y1: c.y,
+        }
+    }
+
+    /// The window of the gcells `a` and `b` and those between.
+    pub(crate) fn spanning(a: GCell, b: GCell) -> Self {
+        Self::of(a).union(Self::of(b))
+    }
+
+    /// This window grown by `margin` on every side and clamped to a grid of
+    /// `nx` columns and `ny` rows; the growth saturates, which clamps it
+    /// exactly, as the grid ends below `u16::MAX`.
+    pub(crate) fn grown(self, margin: u16, nx: u16, ny: u16) -> Self {
+        Self {
+            x0: self.x0.saturating_sub(margin),
+            x1: self.x1.saturating_add(margin).min(nx - 1),
+            y0: self.y0.saturating_sub(margin),
+            y1: self.y1.saturating_add(margin).min(ny - 1),
+        }
+    }
 }
 
-/// Bounding box of cells, grown by `margin` and clamped to the grid; the
-/// growth saturates, which clamps it exactly, as the grid ends below
-/// `u16::MAX`.
-fn window(cells: &[GCell], margin: u16, nx: u16, ny: u16) -> GcellWindow {
-    let x0 = cells.iter().map(|c| c.x).min().unwrap_or(0);
-    let x1 = cells.iter().map(|c| c.x).max().unwrap_or(0);
-    let y0 = cells.iter().map(|c| c.y).min().unwrap_or(0);
-    let y1 = cells.iter().map(|c| c.y).max().unwrap_or(0);
-    GcellWindow {
-        x0: x0.saturating_sub(margin),
-        x1: x1.saturating_add(margin).min(nx - 1),
-        y0: y0.saturating_sub(margin),
-        y1: y1.saturating_add(margin).min(ny - 1),
-    }
+/// Bounding box of `cells`, grown by `margin` and clamped to the grid; none
+/// for no cells.
+fn window(cells: &[GCell], margin: u16, nx: u16, ny: u16) -> Option<GcellWindow> {
+    cells
+        .iter()
+        .map(|&c| GcellWindow::of(c))
+        .reduce(GcellWindow::union)
+        .map(|w| w.grown(margin, nx, ny))
 }
 
 #[cfg(test)]
@@ -1809,6 +1830,25 @@ mod tests {
             }
         }
         (grid, nets)
+    }
+
+    #[test]
+    fn nets_without_terminals_have_no_window_and_no_span() {
+        assert_eq!(window(&[], 2, 10, 10), None);
+        assert_eq!(span(&[]), 0);
+    }
+
+    #[test]
+    fn a_window_grows_by_its_margin_within_the_grid() {
+        let w = window(&[cell(1, 8), cell(4, 2)], 2, 10, 10);
+
+        let expected = GcellWindow {
+            x0: 0,
+            x1: 6,
+            y0: 0,
+            y1: 9,
+        };
+        assert_eq!(w, Some(expected));
     }
 
     #[test]

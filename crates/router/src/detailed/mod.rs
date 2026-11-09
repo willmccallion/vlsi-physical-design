@@ -726,8 +726,8 @@ impl<'a> DetailedRouter<'a> {
     /// larger windows without it.
     fn route_terminals(&self, net: NetId, costs: Costs, terms: &Terminals<'_>) -> Option<NetRoute> {
         let net_guide = self.guides[net].as_ref();
-        let guide =
-            net_guide.map(|g| Guide::new(g.tree.cells(), self.grid_origin, self.gcell, self.tech));
+        let guide = net_guide
+            .and_then(|g| Guide::new(g.tree.cells(), self.grid_origin, self.gcell, self.tech));
         let unmarked = Marks::default();
         let mut search = Search {
             db: self.db,
