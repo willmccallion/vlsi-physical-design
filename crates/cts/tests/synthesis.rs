@@ -190,6 +190,65 @@ fn every_flop_is_clocked_through_a_tree_of_clock_buffers() {
     }
 }
 
+/// `text`, a generated design, with `ff1` placed where `ff0` is.
+fn stacked_on_ff0(text: &str) -> String {
+    let placement = |flop: &str| {
+        let line = text
+            .lines()
+            .find(|l| l.starts_with(&format!("- {flop} ")))
+            .unwrap();
+        let at = line.find("( ").unwrap();
+        let end = line[at..].find(')').unwrap() + at + 1;
+        line[at..end].to_string()
+    };
+    let (ff0, ff1) = (placement("ff0"), placement("ff1"));
+    text.replace(
+        &format!("- ff1 DFF_X1 + PLACED {ff1}"),
+        &format!("- ff1 DFF_X1 + PLACED {ff0}"),
+    )
+}
+
+/// Synthesizes the trees of the generated design `text` with no wire
+/// length limit and checks that every flop is clocked from the root buffer
+/// through clock buffers alone.
+fn assert_every_flop_is_clocked_through_the_tree(text: &str) {
+    let (db, lib, constraints) = load(1, 1, false);
+    let mut db = def::parse_str(text, Path::new("grid.def"), db.library).unwrap();
+    let link = Link::new(&db, &lib, &[]).unwrap();
+    let clocks = clock_network(&db, &link, &constraints);
+    let input = CtsInput {
+        link: &link,
+        sdc: &constraints,
+        clocks: &clocks,
+        signal_rc: wire(&db, "metal2", 3.5, 0.1),
+        clock_rc: wire(&db, "metal3", 1.5, 0.11),
+        max_wire_length: None,
+        options: CtsOptions::default(),
+    };
+
+    let _ = synthesize(&mut db, &input).unwrap();
+
+    for pin in flop_clock_pins(&db) {
+        let path = path_to_port(&db, pin);
+        assert!(
+            path.last().is_some_and(|root| root == "clkbuf_0_clk")
+                && path.iter().all(|name| name.starts_with("clkbuf_")),
+            "{}: {path:?}",
+            db.pin_name(pin)
+        );
+    }
+}
+
+#[test]
+fn flops_on_one_spot_are_each_clocked_through_the_tree() {
+    assert_every_flop_is_clocked_through_the_tree(&stacked_on_ff0(&design(3, 3, false)));
+}
+
+#[test]
+fn clustered_flops_on_one_spot_are_each_clocked_through_the_tree() {
+    assert_every_flop_is_clocked_through_the_tree(&stacked_on_ff0(&design(16, 16, false)));
+}
+
 #[test]
 fn the_root_net_gets_the_clock_rule_of_doubled_spacing() {
     let (mut db, lib, constraints) = load(16, 16, false);
