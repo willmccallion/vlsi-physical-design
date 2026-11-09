@@ -4,12 +4,17 @@ use crate::checks::report_routing;
 use crate::phase::{Phase, PhaseTimer};
 use crate::placement::{CellPlaces, legalize};
 use crate::prepare_output_dir;
-use crate::repair::{NetlistRepair, propagate_clocks, show_design_repair, timing_repair_on};
-use crate::report::{DesignRepairSummary, GlobalRouteRepairSummary, Report, RoutingSummary};
+use crate::repair::{
+    Clocks, NetlistRepair, Stage as RepairStage, TimedRepair, propagate_clocks, repair_design_on,
+    timing_repair_on,
+};
+use crate::report::{
+    DesignRepairSummary, GlobalRouteRepairSummary, Report, RoutingSummary, TimingSummary,
+};
 use crate::{ui, visualization};
 use anyhow::Context;
 use pare_common::config::Config;
-use pare_common::db::design::NetlistDB;
+use pare_common::db::design::{NetlistDB, Renumbering};
 use pare_common::db::global_route::RouteSource;
 use pare_common::db::indices::{CellId, NetId};
 use pare_common::db::writer;
@@ -17,7 +22,7 @@ use pare_common::memory;
 use pare_placer::legalize::site::SiteGrid;
 use pare_placer::zones::Zones;
 use pare_resizer::GlobalRouting;
-use pare_resizer::{Repairer, Resizer};
+use pare_resizer::{Resizer, RouteRc};
 use pare_router::{GlobalSession, Progress, Stage};
 use std::path::{Path, PathBuf};
 use std::time::Duration;
@@ -78,10 +83,7 @@ pub(crate) fn global_route_with_repair(
     report: &mut Report,
 ) -> anyhow::Result<Option<GlobalSession>> {
     let plan = repair.plan;
-    let Some(route_rc) = &plan.on_global_routes else {
-        return Ok(None);
-    };
-    let Some(timed) = repair.timed() else {
+    let Some(rc) = &plan.on_global_routes else {
         return Ok(None);
     };
     ui::section("Global Routing");
@@ -89,60 +91,104 @@ pub(crate) fn global_route_with_repair(
     let mut tables = RouteTables::default();
     let mut session = GlobalSession::new(db, &config.routing, &mut |p| tables.show(p))?;
     timer.finish(report);
-    propagate_clocks(timed.sdc);
+    if let Some(timed) = repair.timed() {
+        propagate_clocks(timed.sdc);
+    }
     let sites = SiteGrid::new(db).context("cannot lay out the core's site grid to legalize on")?;
     let legalize = |db: &mut NetlistDB, cell: CellId| sites.legalize(db, cell);
+    let mut routes = RepairRoutes {
+        session: &mut session,
+        rc,
+        legalize: &legalize,
+    };
     let mut summary = GlobalRouteRepairSummary::default();
-    for step in [RepairStep::Design, RepairStep::Timing] {
-        let enabled = match step {
-            RepairStep::Design => config.netlist.repair_design,
-            RepairStep::Timing => config.netlist.repair_timing,
-        };
-        if !enabled {
-            continue;
-        }
-        let timer = PhaseTimer::start(step.phase());
-        let stage = timed.stage(db)?;
-        let routes = GlobalRouting {
-            source: &mut session,
-            rc: route_rc.clone(),
-            legalize: &legalize,
-        };
-        let inputs = stage.session(db, plan.wires, timed.namer);
-        let mut resizer = Resizer::on_global_routes(inputs, timed.sdc, routes)?;
-        match step {
-            RepairStep::Design => {
-                let done = Repairer::new(&mut resizer).repair_design()?;
-                show_design_repair(&done, resizer.netlist().db.cells.len());
-                summary.design = DesignRepairSummary::of(&done);
-            }
-            RepairStep::Timing => {
-                summary.timing = Some(timing_repair_on(&mut resizer, timed.liberty)?);
-            }
-        }
-        let renumbering = resizer.finish()?;
-        session.renumber(&renumbering);
-        timer.finish(report);
-        legalize_and_reroute(db, &mut session, report)?;
+    if config.netlist.repair_design {
+        summary.design = repair_design_on_routes(db, repair, &mut routes, report)?;
+    }
+    if config.netlist.repair_timing
+        && let Some(mut timed) = repair.timed()
+    {
+        summary.timing = Some(repair_timing_on_routes(
+            db,
+            &mut timed,
+            &mut routes,
+            report,
+        )?);
     }
     report.global_route_repair = Some(summary);
     Ok(Some(session))
 }
 
-/// The repairs the global route stage makes, in order.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum RepairStep {
-    Design,
-    Timing,
+/// The global routes a repair follows, and how it legalizes the cells it
+/// edits.
+struct RepairRoutes<'s> {
+    session: &'s mut GlobalSession,
+    rc: &'s RouteRc,
+    legalize: &'s dyn Fn(&mut NetlistDB, CellId),
 }
 
-impl RepairStep {
-    const fn phase(self) -> Phase {
-        match self {
-            Self::Design => Phase::DesignRepairOnGlobalRoutes,
-            Self::Timing => Phase::TimingRepairOnGlobalRoutes,
+impl RepairRoutes<'_> {
+    /// The routes as a resizer session follows them.
+    fn followed(&mut self) -> GlobalRouting<'_> {
+        GlobalRouting {
+            source: &mut *self.session,
+            rc: self.rc.clone(),
+            legalize: self.legalize,
         }
     }
+
+    /// Takes in how a repair renumbered the design, then legalizes it and
+    /// routes again the nets of the cells that moved.
+    fn settle(
+        &mut self,
+        db: &mut NetlistDB,
+        renumbering: &Renumbering,
+        report: &mut Report,
+    ) -> anyhow::Result<()> {
+        self.session.renumber(renumbering);
+        legalize_and_reroute(db, self.session, report)
+    }
+}
+
+/// `repair_design` on the global routes' parasitics, timed when the input
+/// has constraints, as OpenROAD-flow-scripts' `repair_design_helper` runs
+/// it with or without them.
+fn repair_design_on_routes(
+    db: &mut NetlistDB,
+    repair: &mut NetlistRepair<'_>,
+    routes: &mut RepairRoutes<'_>,
+    report: &mut Report,
+) -> anyhow::Result<DesignRepairSummary> {
+    let timer = PhaseTimer::start(Phase::DesignRepairOnGlobalRoutes);
+    let clocks = repair.constraints.clocks();
+    let stage = RepairStage::find(db, repair.plan, &repair.liberty, clocks)?;
+    let inputs = stage.session(db, repair.plan.wires, &mut repair.namer);
+    let followed = routes.followed();
+    let (done, renumbering) = match clocks {
+        Clocks::Sdc(sdc) => repair_design_on(Resizer::on_global_routes(inputs, sdc, followed)?)?,
+        Clocks::Ports(_) => repair_design_on(Resizer::untimed_on_global_routes(inputs, followed)?)?,
+    };
+    timer.finish(report);
+    routes.settle(db, &renumbering, report)?;
+    Ok(DesignRepairSummary::of(&done))
+}
+
+/// `repair_timing` on the global routes' parasitics.
+fn repair_timing_on_routes(
+    db: &mut NetlistDB,
+    timed: &mut TimedRepair<'_>,
+    routes: &mut RepairRoutes<'_>,
+    report: &mut Report,
+) -> anyhow::Result<TimingSummary> {
+    let timer = PhaseTimer::start(Phase::TimingRepairOnGlobalRoutes);
+    let stage = timed.stage(db)?;
+    let inputs = stage.session(db, timed.plan.wires, timed.namer);
+    let mut resizer = Resizer::on_global_routes(inputs, timed.sdc, routes.followed())?;
+    let summary = timing_repair_on(&mut resizer, timed.liberty)?;
+    let renumbering = resizer.finish()?;
+    timer.finish(report);
+    routes.settle(db, &renumbering, report)?;
+    Ok(summary)
 }
 
 /// Detailed placement after a repair, as OpenROAD-flow-scripts runs
@@ -405,6 +451,7 @@ mod tests {
     use super::*;
     use crate::placement::{PlacementStart, run_placement};
     use crate::plan::FlowPlan;
+    use crate::repair::Constraints;
     use crate::testing::{half_height_tiny, scratch_dir, timed, timed_config, tiny};
     use pare_common::geom::dbu::Dbu;
     use pare_common::geom::point::Point;
@@ -501,5 +548,39 @@ mod tests {
 
         let timed = repair.timed().unwrap();
         assert!(timed.sdc.clocks.iter().all(|clock| clock.propagated));
+    }
+
+    #[test]
+    fn without_constraints_the_design_is_still_repaired_on_global_routes() {
+        let config = timed_config("", &scratch_dir("untimed-repair"));
+        let mut db = timed();
+        let plan = FlowPlan::resolve(&config, &db).unwrap();
+        let mut report = Report::default();
+        let mut repair = run_placement(
+            &config,
+            &plan,
+            &mut db,
+            PlacementStart::Scratch,
+            &mut report,
+        )
+        .unwrap()
+        .unwrap();
+        let ports = ["clk".to_string()];
+        repair.constraints = Constraints::Ports(&ports);
+        report.phases.clear();
+
+        let session = global_route_with_repair(&config, &mut db, &mut repair, &mut report).unwrap();
+
+        assert!(session.is_some());
+        let names: Vec<&str> = report.phases.iter().map(|phase| phase.name).collect();
+        assert_eq!(
+            names,
+            [
+                "global routing",
+                "design repair on global routes",
+                "legalization on global routes"
+            ]
+        );
+        assert!(report.global_route_repair.unwrap().timing.is_none());
     }
 }
