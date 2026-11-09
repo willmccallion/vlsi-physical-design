@@ -4,6 +4,7 @@
 //! tree is written into the design with dummy loads balancing its levels.
 
 use pare_common::db::library::DuplicateName;
+use pare_common::units::Seconds;
 
 mod buffers;
 mod capacitance;
@@ -23,7 +24,7 @@ pub use options::{CtsOptions, NdrStrategy};
 pub use triton::{ClockTrees, CtsInput, CtsSummary, synthesize};
 
 /// Why a clock tree could not be built.
-#[derive(Clone, Debug, PartialEq, Eq, thiserror::Error)]
+#[derive(Clone, Debug, PartialEq, thiserror::Error)]
 pub enum CtsError {
     /// No usable buffer was found for the clock tree.
     #[error("no clock buffers")]
@@ -49,6 +50,22 @@ pub enum CtsError {
     /// A clock buffer's delay tables lack slew or load axes.
     #[error("the delay tables of cell '{0}' have no slew or load axis")]
     NoTableAxes(String),
+    /// No characterized segment keeps its slew within the characterization
+    /// buffer's limit.
+    #[error(
+        "no characterized segment of '{buffer}' keeps its slew within {} ns",
+        .max_transition.nanos()
+    )]
+    NoSegmentWithinSlewLimit {
+        /// The characterization buffer.
+        buffer: String,
+        /// Its slew limit.
+        max_transition: Seconds,
+    },
+    /// The characterization buffer's master has no height to measure the
+    /// characterized wires by.
+    #[error("the characterization buffer '{0}' has no height")]
+    ZeroHeightBuffer(String),
     /// A normalized characterization value overflows the table's fields.
     #[error("normalized characterization values must lie in [1, {0}]")]
     CharacterizationRange(u32),
