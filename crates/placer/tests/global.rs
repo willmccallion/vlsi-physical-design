@@ -6,6 +6,7 @@
 
 mod common;
 
+use pare_common::config::{Share, TargetDensity};
 use pare_common::db::design::{NetlistDB, PlacementStatus};
 use pare_common::db::indices::CellId;
 use pare_common::geom::orient::Orientation;
@@ -69,8 +70,8 @@ impl TimingDriver for ScriptedRepair<'_> {
 /// Settings for placing the ring at a 0.7 target density.
 const fn params() -> GlobalParams {
     GlobalParams {
-        target_density: 0.7,
-        target_overflow: 0.1,
+        target_density: TargetDensity::new(0.7).unwrap(),
+        target_overflow: Share::new(0.1).unwrap(),
         max_iterations: 400,
         initial_rounds: global::INITIAL_PLACE_ROUNDS,
         bins: 32,
@@ -147,7 +148,7 @@ fn a_repair_midway_through_placement_gives_the_placement_it_always_has() {
     let mut model = PlacementModel::from_db(&db, &Zones::new(&db).unwrap());
     let params = GlobalParams {
         timing: Some(TimingParams {
-            overflows: vec![0.5],
+            overflows: vec![Share::new(0.5).unwrap()],
         }),
         ..params()
     };

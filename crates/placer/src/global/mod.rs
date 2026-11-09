@@ -29,6 +29,7 @@ use crate::model::{PinAnchor, PlacementModel};
 use crate::zones::Zone;
 use density::DensityGrid;
 use nesterov::Objects;
+use pare_common::config::{Share, TargetDensity};
 use pare_common::geom::point::Point;
 use pare_common::geom::rect::Rect;
 use rand::rngs::StdRng;
@@ -40,10 +41,10 @@ use wirelength::{Netlist, Terminal};
 /// Settings for global placement.
 #[derive(Clone, Debug, PartialEq)]
 pub struct GlobalParams {
-    /// Highest fraction of a bin cells should fill, in `(0, 1]`.
-    pub target_density: f64,
-    /// Fraction of cell area above the target density at which to stop.
-    pub target_overflow: f64,
+    /// Highest share of a bin cells should fill.
+    pub target_density: TargetDensity,
+    /// Share of cell area above the target density at which to stop.
+    pub target_overflow: Share,
     /// Iteration limit.
     pub max_iterations: usize,
     /// Most rounds of `gpl`'s bound-to-bound initial placement; with none,
@@ -65,7 +66,7 @@ pub struct GlobalParams {
 pub struct TimingParams {
     /// Overflows at which the design is repaired and its nets reweighted,
     /// each once, as the overflow falls below it.
-    pub overflows: Vec<f64>,
+    pub overflows: Vec<Share>,
 }
 
 /// The design after a timing-driven repair: the model to go on with, and
@@ -567,8 +568,13 @@ fn build_fields(
             continue;
         }
         let area = zone_area(model, k);
-        let mut grid =
-            DensityGrid::new(&model.die, params.bins, params.target_density, &area, fixed);
+        let mut grid = DensityGrid::new(
+            &model.die,
+            params.bins,
+            params.target_density.get(),
+            &area,
+            fixed,
+        );
         let cell_area: f64 = movable[start..end]
             .iter()
             .map(|&i| model.density_sizes[i].x * model.density_sizes[i].y)
@@ -579,7 +585,7 @@ fn build_fields(
         } else {
             f64::INFINITY
         };
-        grid.set_target(zone_target(params.target_density, utilization));
+        grid.set_target(zone_target(params.target_density.get(), utilization));
         fields.push(Field {
             zone: zone.zone,
             grid,

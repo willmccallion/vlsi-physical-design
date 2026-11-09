@@ -374,7 +374,7 @@ fn global_placement(
     if timing.is_some() {
         check_congestion_follows_timing(gp)?;
     }
-    let density = Density::of(&model, gp);
+    let density = Density::of(&model, gp)?;
     let (routability, mut estimator) = if gp.routability_driven && pass == Pass::Full {
         let (params, estimator) = routability_setup(config, db)?;
         (Some(params), estimator)
@@ -383,7 +383,7 @@ fn global_placement(
     };
     let params = GlobalParams {
         target_density: density.target,
-        target_overflow: gp.target_overflow.get(),
+        target_overflow: gp.target_overflow,
         max_iterations: gp.placer_max_iterations,
         initial_rounds: match pass {
             Pass::SkipIo => 0,
@@ -445,12 +445,7 @@ fn check_congestion_follows_timing(gp: &GlobalPlacementConfig) -> anyhow::Result
 /// The overflows timing-driven placement repairs the design at.
 fn timing_params(gp: &GlobalPlacementConfig) -> TimingParams {
     TimingParams {
-        overflows: gp
-            .timing_driven_overflows
-            .iter()
-            .copied()
-            .map(Share::get)
-            .collect(),
+        overflows: gp.timing_driven_overflows.clone(),
     }
 }
 
@@ -487,13 +482,13 @@ fn placement_summary(
 /// utilization of the free area, the target density and the bins.
 struct Density {
     movable_cells: usize,
-    target: f64,
+    target: TargetDensity,
     bins: usize,
 }
 
 impl Density {
     /// The density `gp` sets or derives for `model`, shown as it is found.
-    fn of(model: &PlacementModel, gp: &GlobalPlacementConfig) -> Self {
+    fn of(model: &PlacementModel, gp: &GlobalPlacementConfig) -> anyhow::Result<Self> {
         let movable_area: f64 = model
             .density_sizes
             .iter()
@@ -503,13 +498,18 @@ impl Density {
             .sum();
         let movable_cells = model.movable.iter().filter(|&&m| m).count();
         let utilization = movable_area / model.free_area();
-        let target = gp.target_density.map_or_else(
-            || global::default_target_density(utilization),
-            TargetDensity::get,
+        let target = if let Some(target) = gp.target_density {
+            target
+        } else {
+            let derived = global::default_target_density(utilization);
+            TargetDensity::new(derived).with_context(|| {
+                format!("utilization {utilization} gives no target density in (0, 1]")
+            })?
+        };
+        let bins = gp.bin_dimension.map_or_else(
+            || global::default_bins(model, target.get()),
+            NonZeroUsize::get,
         );
-        let bins = gp
-            .bin_dimension
-            .map_or_else(|| global::default_bins(model, target), NonZeroUsize::get);
         ui::stat_row(
             "Cells:",
             &movable_cells.to_string(),
@@ -520,14 +520,14 @@ impl Density {
             "Utilization:",
             &format!("{:.2}%", utilization * 100.0),
             "Target Density:",
-            &format!("{target:.2}"),
+            &format!("{:.2}", target.get()),
         );
         ui::stat_row("Bin Grid:", &format!("{bins}x{bins}"), "", "");
-        Self {
+        Ok(Self {
             movable_cells,
             target,
             bins,
-        }
+        })
     }
 }
 

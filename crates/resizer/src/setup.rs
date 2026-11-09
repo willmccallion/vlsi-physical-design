@@ -8,6 +8,7 @@ use crate::fuzzy;
 use crate::moves::{MoveKind, Moves};
 use crate::resizer::{RepairError, Resizer, area_change_percent};
 use crate::sta::{Path, Sta, Via};
+use pare_common::config::Share;
 use pare_common::db::design::PinOwner;
 use pare_common::db::indices::PinId;
 use pare_common::db::liberty::MinMax;
@@ -29,6 +30,13 @@ const INITIAL_ITERATIONS: usize = 1000;
 /// The share of the initial violation each hundred iterations must fix.
 const FIX_RATE_THRESHOLD: f64 = 0.0001;
 
+/// Every failing endpoint, as `OpenROAD-flow-scripts` repairs them with
+/// `-repair_tns 100`.
+const ALL_FAILING: Share = match Share::new(1.0) {
+    Some(share) => share,
+    None => panic!("1 is a share"),
+};
+
 /// Passes per endpoint in the last gasp.
 const LAST_GASP_PASSES: usize = 10;
 
@@ -45,7 +53,7 @@ pub struct SetupOptions {
     /// Slack every endpoint should reach.
     pub margin: Seconds,
     /// Share of the failing endpoints to work on, from the worst.
-    pub repair_tns_share: f64,
+    pub repair_tns_share: Share,
     /// Passes an endpoint may take.
     pub max_passes: usize,
     /// Moves a pass may make on the worst path.
@@ -62,7 +70,7 @@ impl Default for SetupOptions {
     fn default() -> Self {
         Self {
             margin: Seconds::ZERO,
-            repair_tns_share: 1.0,
+            repair_tns_share: ALL_FAILING,
             max_passes: 10_000,
             max_repairs_per_pass: 1,
             sequence: vec![
@@ -365,7 +373,7 @@ impl Repair<'_, '_> {
         self.min_violation = -violating[violating.len() - 1].1;
         self.max_violation = -violating[0].1;
         let max_end_repairs =
-            ((violating.len() as f64 * self.options.repair_tns_share) as usize).max(1);
+            ((violating.len() as f64 * self.options.repair_tns_share.get()) as usize).max(1);
         let mut phase = Phase::new(
             self.options.sequence.clone(),
             self.options.max_passes,

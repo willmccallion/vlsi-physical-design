@@ -9,6 +9,7 @@
 use crate::fuzzy;
 use crate::resizer::{RepairError, Resizer, buffer_delays};
 use crate::sta::Sta;
+use pare_common::config::Share;
 use pare_common::db::indices::PinId;
 use pare_common::db::liberty::{Edge, LibCellId, MinMax};
 use pare_common::geom::dbu::Dbu;
@@ -30,6 +31,13 @@ const SLACK_LIMIT_RATIO: f64 = 0.2;
 /// the design.
 const MIN_BUFFER_BUDGET: usize = 100;
 
+/// The most hold buffers as a share of the instances, `OpenROAD`'s
+/// `-max_buffer_percent 20`.
+const MAX_BUFFER_SHARE: Share = match Share::new(0.2) {
+    Some(share) => share,
+    None => panic!("0.2 is a share"),
+};
+
 /// How hold repair runs, as `repair_timing -hold` takes it.
 #[derive(Clone, Debug, PartialEq)]
 pub struct HoldOptions {
@@ -40,7 +48,7 @@ pub struct HoldOptions {
     /// Whether a hold fix may break setup.
     pub allow_setup_violations: bool,
     /// The most hold buffers, as a share of the instances.
-    pub max_buffer_share: f64,
+    pub max_buffer_share: Share,
     /// The most endpoint repairs.
     pub max_passes: usize,
 }
@@ -52,7 +60,7 @@ impl Default for HoldOptions {
             setup_margin: Seconds::ZERO,
             hold_margin: Seconds::ZERO,
             allow_setup_violations: false,
-            max_buffer_share: 0.2,
+            max_buffer_share: MAX_BUFFER_SHARE,
             max_passes: 10_000,
         }
     }
@@ -106,7 +114,7 @@ pub fn repair_hold(
     };
     summary.buffer = Some(buffer);
     let cells = resizer.netlist().db.cells.len();
-    let budget = ((options.max_buffer_share * cells as f64) as usize).max(MIN_BUFFER_BUDGET);
+    let budget = ((options.max_buffer_share.get() * cells as f64) as usize).max(MIN_BUFFER_BUDGET);
     let mut repair = HoldRepair {
         buffer,
         options,
