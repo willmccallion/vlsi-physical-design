@@ -1176,4 +1176,41 @@ mod tests {
             assert_eq!(total, region.area().get());
         }
     }
+
+    /// Asserts `slices` partition `region`: none empty, none overlapping,
+    /// together all of it.
+    fn assert_partition(region: &Region, slices: &[Rect<Dbu>]) {
+        let area: i64 = slices.iter().map(|r| r.area().get()).sum();
+
+        assert!(
+            slices
+                .iter()
+                .all(|r| r.width() > Dbu::ZERO && r.height() > Dbu::ZERO)
+        );
+        assert_eq!(&Region::from_rects(slices.iter().copied()), region);
+        assert_eq!(area, region.area().get());
+    }
+
+    #[test]
+    fn slices_partition_random_regions() {
+        let mut lcg = Lcg(31);
+        for _ in 0..1000 {
+            let region = Region::from_rects(lcg.rects(5, 12));
+
+            assert_partition(&region, &region.horizontal_slices());
+            assert_partition(&region, &region.vertical_slices());
+        }
+    }
+
+    #[test]
+    fn slices_partition_random_regions_with_holes() {
+        let mut lcg = Lcg(37);
+        for _ in 0..1000 {
+            let outer = Region::from_rects(lcg.rects(4, 14));
+            let region = outer.difference(&Region::from_rects(lcg.rects(4, 14)));
+
+            assert_partition(&region, &region.horizontal_slices());
+            assert_partition(&region, &region.vertical_slices());
+        }
+    }
 }
