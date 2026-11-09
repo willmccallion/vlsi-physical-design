@@ -203,7 +203,10 @@ impl Clustering {
             });
         }
         let supply = (means.len() * cap + remaining) as i32;
-        let flows = min_cost_flow(2 + n + means.len(), &arcs, source, target, supply);
+        // NOTE: Clustering::minCostFlow ignores run()'s outcome
+        // (Clustering.cpp:370) and reads the flows as the simplex left them.
+        let flows = min_cost_flow(2 + n + means.len(), &arcs, source, target, supply)
+            .unwrap_or_else(|failure| failure.flows);
         for (a, i, j) in sink_arcs {
             if flows[a] != 0 {
                 self.sinks[i].cluster = Some(j);

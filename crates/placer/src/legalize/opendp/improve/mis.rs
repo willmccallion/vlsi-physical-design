@@ -292,7 +292,11 @@ fn solve_match(imp: &mut Improver, nodes: &[NodeId]) -> Result<()> {
         }
     }
     let count_i32 = count as i32;
-    let flow = min_cost_flow(2 * count + 2, &arcs, supply, demand, count_i32);
+    // NOTE: solveMatch first checks with Preflow that every cell can be
+    // matched; each cell's arc to its own spot makes that always so here.
+    let Ok(flow) = min_cost_flow(2 * count + 2, &arcs, supply, demand, count_i32) else {
+        return Ok(());
+    };
     let mut journal = Vec::new();
     for &(arc, i, j) in assignment.iter().rev() {
         if flow[arc] == 0 || i == j {
