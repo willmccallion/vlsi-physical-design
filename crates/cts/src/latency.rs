@@ -7,7 +7,7 @@
 #![allow(clippy::suboptimal_flops)]
 
 use crate::CtsError;
-use crate::htree::Point;
+use crate::htree::TreePoint;
 use crate::triton::{
     ClockTrees, first_output, is_sink, net_cell_pins, pin_direction, sink_bbox_center,
 };
@@ -17,7 +17,7 @@ use pare_common::db::liberty::{ClockGatePin, Edge, LibPortId, SequentialKind};
 use pare_common::db::library::PinDirection;
 use pare_common::geom::dbu::Dbu;
 use pare_common::geom::orient::Orientation;
-use pare_common::geom::point::Point as DbPoint;
+use pare_common::geom::point::Point;
 use pare_common::units::{Farads, Seconds};
 use pare_resizer::Link;
 use std::collections::BTreeMap;
@@ -262,7 +262,7 @@ impl Balancer<'_> {
         worst
     }
 
-    fn source_position(&self, db: &NetlistDB, node: usize) -> DbPoint<Dbu> {
+    fn source_position(&self, db: &NetlistDB, node: usize) -> Point<Dbu> {
         if let Some(pin) = self.nodes[node].input {
             return db.average_pin_position(pin);
         }
@@ -274,12 +274,12 @@ impl Balancer<'_> {
                 .copied()
                 .find(|&p| matches!(db.pins[p].owner, PinOwner::Io(_)))
         })
-        .map_or_else(DbPoint::default, |p| db.pin_position(p))
+        .map_or_else(Point::default, |p| db.pin_position(p))
     }
 
     /// How many delay buffers a node needs to reach the slowest arrival,
     /// as `LatencyBalancer::computeNumberOfDelayBuffers`.
-    fn delay_buffers_needed(&mut self, db: &NetlistDB, node: usize, src: DbPoint<Dbu>) {
+    fn delay_buffers_needed(&mut self, db: &NetlistDB, node: usize, src: Point<Dbu>) {
         if self.nodes[node].arrival == 0.0 {
             return;
         }
@@ -344,7 +344,7 @@ impl Balancer<'_> {
         &mut self,
         db: &mut NetlistDB,
         count: i32,
-        src: DbPoint<Dbu>,
+        src: Point<Dbu>,
         loads: &[PinId],
     ) -> Result<Option<PinId>, CtsError> {
         let Some(&first_load) = loads.first() else {
@@ -373,7 +373,7 @@ impl Balancer<'_> {
         let mut first_input_pin = None;
         for i in 0..count {
             let step = (i + 1) as f32;
-            let at = Point::new(
+            let at = TreePoint::new(
                 f64::from(src.x.get() as f32 + dx * step) / unit,
                 f64::from(src.y.get() as f32 + dy * step) / unit,
             );

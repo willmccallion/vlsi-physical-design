@@ -20,7 +20,7 @@ use pare_common::db::library::{MacroClass, PinDirection, SignalUse};
 use pare_common::db::sdc::Sdc;
 use pare_common::geom::dbu::Dbu;
 use pare_common::geom::orient::Orientation;
-use pare_common::geom::point::Point as DbPoint;
+use pare_common::geom::point::Point;
 use pare_common::geom::rect::Rect;
 use pare_common::units::{FaradsPerDbu, Seconds};
 use pare_resizer::WireRc;
@@ -105,7 +105,7 @@ struct GateToClone {
     net: NetId,
     cell: CellId,
     driver: PinId,
-    driver_at: DbPoint<Dbu>,
+    driver_at: Point<Dbu>,
 }
 
 /// What every tree of a run is built with.
@@ -114,7 +114,7 @@ pub(crate) struct TreeSetup {
     pub settings: Settings,
     pub buffers: ClockBuffers,
     /// The width and height of each buffer's master.
-    pub buffer_sizes: FxHashMap<BufferCell, DbPoint<Dbu>>,
+    pub buffer_sizes: FxHashMap<BufferCell, Point<Dbu>>,
     /// Where buffers must not go.
     pub blockages: Vec<Rect<Dbu>>,
 }
@@ -212,7 +212,7 @@ struct Cts<'a> {
 
 /// A pin's position as `TritonCTS` takes it: the mean of its shapes'
 /// centers, in integer arithmetic.
-fn pin_position(db: &NetlistDB, pin: PinId) -> DbPoint<Dbu> {
+fn pin_position(db: &NetlistDB, pin: PinId) -> Point<Dbu> {
     let shapes = db.pin_shapes(pin);
     if shapes.is_empty() {
         return db.pin_position(pin);
@@ -223,7 +223,7 @@ fn pin_position(db: &NetlistDB, pin: PinId) -> DbPoint<Dbu> {
         y += s.rect.min.y.get() + (s.rect.max.y.get() - s.rect.min.y.get()) / 2;
     }
     let n = shapes.len() as i64;
-    DbPoint::new(Dbu(x / n), Dbu(y / n))
+    Point::new(Dbu(x / n), Dbu(y / n))
 }
 
 /// The cell pins of a net in the order `OpenDB` lists them after reading
@@ -352,7 +352,7 @@ impl Cts<'_> {
             }
             clock_roots.push((nets, clock.name.clone()));
         }
-        let mut occupied: FxHashSet<DbPoint<Dbu>> = db.cells.iter().map(|c| c.location).collect();
+        let mut occupied: FxHashSet<Point<Dbu>> = db.cells.iter().map(|c| c.location).collect();
         for (nets, name) in clock_roots {
             for net in nets {
                 self.clone_clock_gaters(db, net, &mut occupied)?;
@@ -569,7 +569,7 @@ impl Cts<'_> {
         db: &mut NetlistDB,
         buffer: BufferCell,
         name: &str,
-        at: DbPoint<Dbu>,
+        at: Point<Dbu>,
     ) -> Result<CellId, CtsError> {
         let master = self
             .link
@@ -618,15 +618,15 @@ impl Cts<'_> {
         &mut self,
         db: &mut NetlistDB,
         net: NetId,
-        occupied: &mut FxHashSet<DbPoint<Dbu>>,
+        occupied: &mut FxHashSet<Point<Dbu>>,
     ) -> Result<(), CtsError> {
         let pins = net_cell_pins(db, net);
         let driver = pins.iter().copied().find(|&p| {
             pin_direction(db, p)
                 .is_some_and(|(_, d, u)| d == PinDirection::Output && !u.is_supply())
         });
-        let mut points: Vec<DbPoint<Dbu>> = Vec::new();
-        let mut point_pins: BTreeMap<DbPoint<Dbu>, Vec<PinId>> = BTreeMap::new();
+        let mut points: Vec<Point<Dbu>> = Vec::new();
+        let mut point_pins: BTreeMap<Point<Dbu>, Vec<PinId>> = BTreeMap::new();
         for &pin in &pins {
             if Some(pin) == driver || !is_input_signal(db, pin) {
                 continue;
@@ -702,7 +702,7 @@ impl Cts<'_> {
         db: &mut NetlistDB,
         gate: &GateToClone,
         cluster_sinks: &[Vec<PinId>],
-        occupied: &mut FxHashSet<DbPoint<Dbu>>,
+        occupied: &mut FxHashSet<Point<Dbu>>,
     ) -> Result<(), CtsError> {
         let driver_cluster = cluster_sinks
             .iter()
@@ -797,7 +797,7 @@ impl Cts<'_> {
             .unwrap_or_default();
         let unit = f64::from(tech.length_unit());
         let half = |side: Dbu| Dbu(((side.get() as f64 / unit) * unit / 2.0).ceil() as i64);
-        let bloat = DbPoint::new(half(root.x), half(root.y));
+        let bloat = Point::new(half(root.x), half(root.y));
         let (blockages, macro_diameter) = merge_blockages(db, bloat);
         if macro_diameter > 0.0 && self.setup.settings.macro_max_diameter.is_none() {
             self.setup.settings.macro_max_diameter = Some(macro_diameter.max(MACRO_MAX_DIAMETER));
@@ -1114,14 +1114,14 @@ fn sta_fuzzy_equal(a: Farads32, b: Farads32) -> bool {
 
 /// The center of the box around some pins' average positions, as
 /// `dbNet::getTermBBox` and `findLongEdges` take it.
-pub(crate) fn sink_bbox_center(db: &NetlistDB, sinks: &[PinId]) -> DbPoint<Dbu> {
+pub(crate) fn sink_bbox_center(db: &NetlistDB, sinks: &[PinId]) -> Point<Dbu> {
     let (mut lo, mut hi) = ((i64::MAX, i64::MAX), (i64::MIN, i64::MIN));
     for &s in sinks {
         let p = db.average_pin_position(s);
         lo = (lo.0.min(p.x.get()), lo.1.min(p.y.get()));
         hi = (hi.0.max(p.x.get()), hi.1.max(p.y.get()));
     }
-    DbPoint::new(
+    Point::new(
         Dbu(i64::midpoint(lo.0, hi.0)),
         Dbu(i64::midpoint(lo.1, hi.1)),
     )
@@ -1130,7 +1130,7 @@ pub(crate) fn sink_bbox_center(db: &NetlistDB, sinks: &[PinId]) -> DbPoint<Dbu> 
 /// Groups the nodes of a Steiner tree joined by edges shorter than
 /// `threshold`, as `TritonCTS::findLongEdges` clusters them.
 fn long_edge_clusters(
-    nodes: &[DbPoint<Dbu>],
+    nodes: &[Point<Dbu>],
     parent: &[usize],
     threshold: Option<Dbu>,
 ) -> Vec<Vec<usize>> {
@@ -1190,7 +1190,7 @@ fn long_edge_clusters(
 /// The placed blocks and hard placement blockages, each group closer than a
 /// buffer joined into the box around it, and the diameter macro clusters
 /// may take, as `TreeBuilder::mergeBlockages`.
-fn merge_blockages(db: &NetlistDB, bloat: DbPoint<Dbu>) -> (Vec<Rect<Dbu>>, f64) {
+fn merge_blockages(db: &NetlistDB, bloat: Point<Dbu>) -> (Vec<Rect<Dbu>>, f64) {
     let mut rects: Vec<Rect<Dbu>> = Vec::new();
     let (mut max_dx, mut max_dy) = (0_i64, 0_i64);
     for (c, cell) in db.cells.iter().enumerate() {

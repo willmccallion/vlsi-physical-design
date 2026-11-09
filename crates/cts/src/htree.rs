@@ -24,7 +24,7 @@ use crate::sink_clustering::SinkClustering;
 use crate::techchar::{SegmentLength, TechChar};
 use pare_common::db::liberty::BufferCell;
 use pare_common::geom::dbu::Dbu;
-use pare_common::geom::point::Point as DbPoint;
+use pare_common::geom::point::Point;
 use pare_common::geom::rect::Rect;
 use pare_common::units::Seconds;
 use rustc_hash::{FxHashMap, FxHashSet};
@@ -45,14 +45,15 @@ const MAX_TOLERANCE: u32 = 10;
 /// `HTreeBuilder::refineBranchingPointsWithClustering` runs it.
 const KMEANS_ROUNDS: u32 = 5;
 
-/// A position in the tree's length unit.
+/// A position in the tree's length unit, a whole number of database units
+/// that the characterization chose.
 #[derive(Clone, Copy, Debug, Default)]
-pub(crate) struct Point {
+pub(crate) struct TreePoint {
     pub x: f64,
     pub y: f64,
 }
 
-impl Point {
+impl TreePoint {
     pub const fn new(x: f64, y: f64) -> Self {
         Self { x, y }
     }
@@ -63,18 +64,18 @@ impl Point {
 
     /// The point in database units, `unit` of them to the tree's length
     /// unit, truncated to `int` as `TritonCTS` stores positions.
-    pub(crate) fn to_dbu(self, unit: f64) -> DbPoint<Dbu> {
+    pub(crate) fn to_dbu(self, unit: f64) -> Point<Dbu> {
         let truncate = |v: f64| Dbu(i64::from((v * unit) as i32));
-        DbPoint::new(truncate(self.x), truncate(self.y))
+        Point::new(truncate(self.x), truncate(self.y))
     }
 
     pub fn dist(self, other: Self) -> f64 {
         (self.x - other.x).abs() + (self.y - other.y).abs()
     }
 
-    /// `TritonCTS`'s point equality, to a millionth of a unit.
+    /// `TritonCTS`'s point equality, to [`FUZZY_EPSILON`].
     pub fn same(self, other: Self) -> bool {
-        (self.x - other.x).abs() < 1e-6 && (self.y - other.y).abs() < 1e-6
+        fuzzy_eq(self.x, other.x, FUZZY_EPSILON) && fuzzy_eq(self.y, other.y, FUZZY_EPSILON)
     }
 
     /// The exact key `TritonCTS` hashes and orders points by.
@@ -92,7 +93,7 @@ impl Point {
 
 /// A position in database units in the tree's length unit, `unit`
 /// database units long, in single precision as `TritonCTS` takes sinks.
-fn in_segment_units(p: DbPoint<Dbu>, unit: f32) -> (f32, f32) {
+fn in_segment_units(p: Point<Dbu>, unit: f32) -> (f32, f32) {
     (p.x.get() as f32 / unit, p.y.get() as f32 / unit)
 }
 
@@ -101,12 +102,15 @@ fn fuzzy_eq(a: f64, b: f64, epsilon: f64) -> bool {
     (a - b).abs() < epsilon
 }
 
+/// The tolerance `TritonCTS` compares positions and lengths to.
+const FUZZY_EPSILON: f64 = 1e-6;
+
 fn fuzzy_ge(a: f64, b: f64) -> bool {
-    fuzzy_eq(a, b, 1e-6) || a > b
+    fuzzy_eq(a, b, FUZZY_EPSILON) || a > b
 }
 
 fn fuzzy_le(a: f64, b: f64) -> bool {
-    fuzzy_eq(a, b, 1e-6) || a < b
+    fuzzy_eq(a, b, FUZZY_EPSILON) || a < b
 }
 
 /// A region with a center that, once read, stays put unless set, as
@@ -117,7 +121,7 @@ struct Region {
     y_min: f64,
     width: f64,
     height: f64,
-    center: Option<Point>,
+    center: Option<TreePoint>,
 }
 
 impl Region {
@@ -131,9 +135,9 @@ impl Region {
         }
     }
 
-    fn center(&mut self) -> Point {
+    fn center(&mut self) -> TreePoint {
         *self.center.get_or_insert_with(|| {
-            Point::new(
+            TreePoint::new(
                 self.x_min + self.width / 2.0,
                 self.y_min + self.height / 2.0,
             )
@@ -168,9 +172,9 @@ pub(crate) enum TreeType {
 struct LevelTopology {
     length: f64,
     wire_segments: Vec<usize>,
-    points: Vec<Point>,
+    points: Vec<TreePoint>,
     parents: Vec<Option<usize>>,
-    sinks: Vec<Vec<Point>>,
+    sinks: Vec<Vec<TreePoint>>,
     driving_subnet: Vec<Option<usize>>,
     output_slew: u32,
     output_cap: u32,
@@ -192,7 +196,7 @@ impl LevelTopology {
         }
     }
 
-    fn add_point(&mut self, point: Point, parent: Option<usize>) -> usize {
+    fn add_point(&mut self, point: TreePoint, parent: Option<usize>) -> usize {
         self.points.push(point);
         self.parents.push(parent);
         self.sinks.push(Vec::new());
@@ -208,7 +212,7 @@ impl LevelTopology {
 }
 
 /// A parent branching point: its index, position and sinks.
-type BranchRoot = (usize, Point, Vec<(f32, f32)>);
+type BranchRoot = (usize, TreePoint, Vec<(f32, f32)>);
 
 /// What every tree builder of a design shares.
 #[derive(Clone, Copy, Debug)]
@@ -218,7 +222,7 @@ pub(crate) struct TreeContext<'a> {
     pub dbu: i32,
     pub root_buffer: BufferCell,
     pub sink_buffer: BufferCell,
-    pub buffer_sizes: &'a FxHashMap<BufferCell, DbPoint<Dbu>>,
+    pub buffer_sizes: &'a FxHashMap<BufferCell, Point<Dbu>>,
     pub blockages: &'a [Rect<Dbu>],
 }
 
@@ -282,7 +286,7 @@ impl Builder {
     }
 
     /// The length of clock wire a sink at `p` stands for beyond its pin.
-    fn insertion_length(&self, p: Point) -> SegmentLength {
+    fn insertion_length(&self, p: TreePoint) -> SegmentLength {
         self.insertion_lengths
             .get(&p.key())
             .copied()
@@ -291,19 +295,19 @@ impl Builder {
 
     /// The distance between two points plus the clock wire the sinks there
     /// stand for, as `TreeBuilder::computeDist`.
-    pub(crate) fn compute_dist(&self, a: Point, b: Point) -> f64 {
+    pub(crate) fn compute_dist(&self, a: TreePoint, b: TreePoint) -> f64 {
         a.dist(b) + self.insertion_length(a).get() + self.insertion_length(b).get()
     }
 
-    fn is_occupied(&self, p: Point) -> bool {
+    fn is_occupied(&self, p: TreePoint) -> bool {
         self.occupied.contains(&p.key())
     }
 
-    fn commit(&mut self, p: Point) {
+    fn commit(&mut self, p: TreePoint) {
         let _ = self.occupied.insert(p.key());
     }
 
-    fn commit_move(&mut self, from: Point, to: Point) {
+    fn commit_move(&mut self, from: TreePoint, to: TreePoint) {
         let _ = self.occupied.remove(&from.key());
         let _ = self.occupied.insert(to.key());
     }
@@ -314,7 +318,7 @@ impl Builder {
 
     /// The blockage `p` lies strictly inside, scaled to the tree's unit,
     /// as `TreeBuilder::findBlockage`.
-    fn find_blockage(ctx: &TreeContext<'_>, p: Point, scale: f64) -> Option<[f64; 4]> {
+    fn find_blockage(ctx: &TreeContext<'_>, p: TreePoint, scale: f64) -> Option<[f64; 4]> {
         let (bx, by) = (p.x * scale, p.y * scale);
         ctx.blockages.iter().find_map(|b| {
             let [x1, y1, x2, y2] = [b.min.x, b.min.y, b.max.x, b.max.y].map(|v| v.get() as f64);
@@ -325,7 +329,7 @@ impl Builder {
 
     /// Whether a buffer may stand at `p`: free, in the core and outside
     /// every blockage, as `TreeBuilder::checkLegalityLoc`.
-    fn legal_location(&self, ctx: &TreeContext<'_>, p: Point, scale: f64) -> bool {
+    fn legal_location(&self, ctx: &TreeContext<'_>, p: TreePoint, scale: f64) -> bool {
         if self.is_occupied(p) {
             return false;
         }
@@ -349,26 +353,31 @@ impl Builder {
 
     /// Moves a buffer inside a blockage to the free spot beside it nearest
     /// to where it was, as `TreeBuilder::legalizeOneBuffer`.
-    fn legalize_in_blockages(&self, ctx: &TreeContext<'_>, p: Point, buffer: BufferCell) -> Point {
+    fn legalize_in_blockages(
+        &self,
+        ctx: &TreeContext<'_>,
+        p: TreePoint,
+        buffer: BufferCell,
+    ) -> TreePoint {
         let Some([x1, y1, x2, y2]) = Self::find_blockage(ctx, p, self.unit()) else {
             return p;
         };
         let (w, h) = self.buffer_size(ctx, buffer);
         let candidates = [
-            Point::new(x1 - w, p.y),
-            Point::new(x1 - w, p.y + h),
-            Point::new(x1 - w, p.y - h),
-            Point::new(x2, p.y),
-            Point::new(x2, p.y + h),
-            Point::new(x2, p.y - h),
-            Point::new(p.x, y1 - h),
-            Point::new(p.x + w, y1 - h),
-            Point::new(p.x - w, y1 - h),
-            Point::new(p.x, y2),
-            Point::new(p.x + w, y2),
-            Point::new(p.x - w, y2),
+            TreePoint::new(x1 - w, p.y),
+            TreePoint::new(x1 - w, p.y + h),
+            TreePoint::new(x1 - w, p.y - h),
+            TreePoint::new(x2, p.y),
+            TreePoint::new(x2, p.y + h),
+            TreePoint::new(x2, p.y - h),
+            TreePoint::new(p.x, y1 - h),
+            TreePoint::new(p.x + w, y1 - h),
+            TreePoint::new(p.x - w, y1 - h),
+            TreePoint::new(p.x, y2),
+            TreePoint::new(p.x + w, y2),
+            TreePoint::new(p.x - w, y2),
         ];
-        let mut best: Option<(Point, f64)> = None;
+        let mut best: Option<(TreePoint, f64)> = None;
         for c in candidates {
             if self.is_occupied(c) {
                 continue;
@@ -386,9 +395,9 @@ impl Builder {
     pub(crate) fn legalize_one_buffer(
         &self,
         ctx: &TreeContext<'_>,
-        p: Point,
+        p: TreePoint,
         buffer: BufferCell,
-    ) -> Point {
+    ) -> TreePoint {
         let legal = self.legalize_in_blockages(ctx, p, buffer);
         let mut resolved = legal;
         let mut jitter = 0;
@@ -554,7 +563,7 @@ impl Builder {
         let unit = self.wire_segment_unit as f32;
         for i in 0..self.clock.sinks.len() {
             let s = &self.clock.sinks[i];
-            let location = Point::from_f32(in_segment_units(s.location, unit));
+            let location = TreePoint::from_f32(in_segment_units(s.location, unit));
             let delay = s.insertion_delay;
             let _ = self
                 .location_to_sink
@@ -601,7 +610,7 @@ impl Builder {
             } else {
                 cap
             };
-            let at = Point::new(f64::from(x), f64::from(y));
+            let at = TreePoint::new(f64::from(x), f64::from(y));
             matching.add_point(at.x, at.y, cap, self.insertion_length(at));
         }
         let (diameter_set, size_set) = if is_macro {
@@ -648,7 +657,7 @@ impl Builder {
         let mut members = Vec::with_capacity(cluster.len());
         let (mut x_sum, mut y_sum) = (0.0_f32, 0.0_f32);
         for &idx in cluster {
-            let point = Point::from_f32(sinks[idx]);
+            let point = TreePoint::from_f32(sinks[idx]);
             x_sum += sinks[idx].0;
             y_sum += sinks[idx].1;
             if let Some(&inst) = self.location_to_sink.get(&point.key()) {
@@ -656,7 +665,7 @@ impl Builder {
             }
         }
         let n = cluster.len() as f32;
-        let center = Point::new(f64::from(x_sum / n), f64::from(y_sum / n));
+        let center = TreePoint::new(f64::from(x_sum / n), f64::from(y_sum / n));
         let legal = self.legalize_one_buffer(ctx, center, ctx.sink_buffer);
         self.commit_move(center, legal);
         let location = legal.to_dbu(self.unit());
@@ -673,7 +682,7 @@ impl Builder {
         let point = (legal.x as f32, legal.y as f32);
         let _ = self
             .location_to_sink
-            .insert(Point::from_f32(point).key(), buffer);
+            .insert(TreePoint::from_f32(point).key(), buffer);
         point
     }
 
@@ -764,16 +773,16 @@ impl Builder {
         topology: &mut LevelTopology,
     ) {
         let horizontal = self.is_horizontal(level);
-        let spread = |root: Point, length: f64| -> (Point, Point) {
+        let spread = |root: TreePoint, length: f64| -> (TreePoint, TreePoint) {
             if horizontal {
                 (
-                    Point::new(root.x - length, root.y),
-                    Point::new(root.x + length, root.y),
+                    TreePoint::new(root.x - length, root.y),
+                    TreePoint::new(root.x + length, root.y),
                 )
             } else {
                 (
-                    Point::new(root.x, root.y - length),
-                    Point::new(root.x, root.y + length),
+                    TreePoint::new(root.x, root.y - length),
+                    TreePoint::new(root.x, root.y + length),
                 )
             }
         };
@@ -807,14 +816,14 @@ impl Builder {
         }
     }
 
-    fn parent_point(&self, level_idx: usize, parent: Option<usize>, top: Point) -> Point {
+    fn parent_point(&self, level_idx: usize, parent: Option<usize>, top: TreePoint) -> TreePoint {
         match (level_idx, parent) {
             (0, _) | (_, None) => top,
             (_, Some(p)) => self.topologies[level_idx - 1].points[p],
         }
     }
 
-    fn weighted_distance(&self, new: Point, old: Point, sinks: &[Point]) -> f64 {
+    fn weighted_distance(&self, new: TreePoint, old: TreePoint, sinks: &[TreePoint]) -> f64 {
         sinks
             .iter()
             .map(|&s| self.compute_dist(new, s) + self.compute_dist(new, old))
@@ -902,7 +911,7 @@ impl Builder {
                 let mut point = topology.points[idx];
                 let overlap = point.dist(sibling) == 0.0 || point.dist(parent) == 0.0;
                 if sinks.is_empty() {
-                    point = Point::new(2.0 * parent.x - sibling.x, 2.0 * parent.y - sibling.y);
+                    point = TreePoint::new(2.0 * parent.x - sibling.x, 2.0 * parent.y - sibling.y);
                     point = scale_position(point, parent, length, 0.1);
                 } else if overlap {
                     point = scale_position(point, parent, length, 0.1);
@@ -933,7 +942,7 @@ impl Builder {
     /// The corners of a blockage, where the branch's axes meet its edges
     /// and where the line from the parent crosses them, as
     /// `HTreeBuilder::findLegalLocations`.
-    fn legal_locations(parent: Point, branch: Point, rect: [f64; 4]) -> Vec<Point> {
+    fn legal_locations(parent: TreePoint, branch: TreePoint, rect: [f64; 4]) -> Vec<TreePoint> {
         let [x1, y1, x2, y2] = rect;
         let (bx, by) = (branch.x, branch.y);
         let m = (parent.y - by) / (parent.x - bx);
@@ -953,7 +962,7 @@ impl Builder {
         ];
         candidates
             .iter()
-            .map(|&(x, y)| Point::new(x, y))
+            .map(|&(x, y)| TreePoint::new(x, y))
             .filter(|&c| !c.same(parent) && along_box(c, rect))
             .collect()
     }
@@ -965,12 +974,12 @@ impl Builder {
     fn best_legal_location(
         &self,
         search: &LegalSearch<'_>,
-        branch: Point,
-        candidates: &[Point],
+        branch: TreePoint,
+        candidates: &[TreePoint],
         rect: [f64; 4],
-    ) -> Point {
+    ) -> TreePoint {
         let (target, parent) = (search.target, search.parent);
-        let mut best = Point::new(0.0, 0.0);
+        let mut best = TreePoint::new(0.0, 0.0);
         let mut min_diff = f64::MAX;
         for &loc in candidates {
             let d = self.compute_dist(loc, parent) + self.compute_dist(loc, branch);
@@ -980,7 +989,7 @@ impl Builder {
                 best = loc;
             }
         }
-        if fuzzy_eq(target, self.compute_dist(best, parent), 1e-6) {
+        if fuzzy_eq(target, self.compute_dist(best, parent), FUZZY_EPSILON) {
             return best;
         }
         if let Some(along) = self.adjust_along_blockage(search, best, rect) {
@@ -994,9 +1003,9 @@ impl Builder {
     fn adjust_along_blockage(
         &self,
         search: &LegalSearch<'_>,
-        current: Point,
+        current: TreePoint,
         rect: [f64; 4],
-    ) -> Option<Point> {
+    ) -> Option<TreePoint> {
         let LegalSearch {
             ctx,
             target,
@@ -1007,15 +1016,15 @@ impl Builder {
         let (x, y) = (current.x, current.y);
         let (px, py) = (parent.x, parent.y);
         let candidates = [
-            Point::new(x, py - target + (px - x).abs()),
-            Point::new(x, py + target - (px - x).abs()),
-            Point::new(px - target + (py - y).abs(), y),
-            Point::new(px + target - (py - y).abs(), y),
+            TreePoint::new(x, py - target + (px - x).abs()),
+            TreePoint::new(x, py + target - (px - x).abs()),
+            TreePoint::new(px - target + (py - y).abs(), y),
+            TreePoint::new(px + target - (py - y).abs(), y),
         ];
         let mut best = None;
         let mut best_cost = f64::MAX;
         for c in candidates {
-            if !fuzzy_eq(self.compute_dist(c, parent), target, 1e-6) {
+            if !fuzzy_eq(self.compute_dist(c, parent), target, FUZZY_EPSILON) {
                 continue;
             }
             let legal = (!self.is_occupied(c) && along_box(c, rect))
@@ -1029,12 +1038,12 @@ impl Builder {
                 best_cost = cost;
             }
         }
-        best.filter(|b| !b.same(Point::new(f64::MIN_POSITIVE, f64::MIN_POSITIVE)))
+        best.filter(|b| !b.same(TreePoint::new(f64::MIN_POSITIVE, f64::MIN_POSITIVE)))
     }
 
     /// The legal point at the target from the parent, toward the search's
     /// direction, nearest the sinks, as `HTreeBuilder::adjustBeyondBlockage`.
-    fn adjust_beyond_blockage(&self, search: &LegalSearch<'_>, branch: Point) -> Point {
+    fn adjust_beyond_blockage(&self, search: &LegalSearch<'_>, branch: TreePoint) -> TreePoint {
         let LegalSearch {
             ctx,
             target,
@@ -1058,7 +1067,7 @@ impl Builder {
         let mut best = None;
         let mut best_cost = f64::MAX;
         for c in candidates {
-            if fuzzy_eq(self.compute_dist(c, parent), target, 1e-6)
+            if fuzzy_eq(self.compute_dist(c, parent), target, FUZZY_EPSILON)
                 && self.legal_location(ctx, c, self.unit())
             {
                 let cost = self.weighted_distance(c, branch, sinks);
@@ -1068,7 +1077,7 @@ impl Builder {
                 }
             }
         }
-        best.filter(|b| !b.same(Point::new(f64::MIN_POSITIVE, f64::MIN_POSITIVE)))
+        best.filter(|b| !b.same(TreePoint::new(f64::MIN_POSITIVE, f64::MIN_POSITIVE)))
             .unwrap_or(branch)
     }
 
@@ -1177,18 +1186,18 @@ impl Builder {
 struct LegalSearch<'a> {
     ctx: &'a TreeContext<'a>,
     target: f64,
-    parent: Point,
-    sinks: &'a [Point],
+    parent: TreePoint,
+    sinks: &'a [TreePoint],
     direction: Direction,
 }
 
 /// Whether `p` lies on the boundary of `rect`, as `TreeBuilder::isAlongBbox`.
-fn along_box(p: Point, rect: [f64; 4]) -> bool {
+fn along_box(p: TreePoint, rect: [f64; 4]) -> bool {
     let [x1, y1, x2, y2] = rect;
-    let on_vertical = (fuzzy_eq(p.x, x1, 1e-6) || fuzzy_eq(p.x, x2, 1e-6))
+    let on_vertical = (fuzzy_eq(p.x, x1, FUZZY_EPSILON) || fuzzy_eq(p.x, x2, FUZZY_EPSILON))
         && fuzzy_ge(p.y, y1)
         && fuzzy_le(p.y, y2);
-    let on_horizontal = (fuzzy_eq(p.y, y1, 1e-6) || fuzzy_eq(p.y, y2, 1e-6))
+    let on_horizontal = (fuzzy_eq(p.y, y1, FUZZY_EPSILON) || fuzzy_eq(p.y, y2, FUZZY_EPSILON))
         && fuzzy_ge(p.x, x1)
         && fuzzy_le(p.x, x2);
     on_vertical || on_horizontal
@@ -1197,7 +1206,7 @@ fn along_box(p: Point, rect: [f64; 4]) -> bool {
 /// Pulls a point toward its parent until it is `length` away, after
 /// pushing it a `scale` share off the axes, as
 /// `HTreeBuilder::scalePosition`.
-fn scale_position(p: Point, parent: Point, length: f64, scale: f64) -> Point {
+fn scale_position(p: TreePoint, parent: TreePoint, length: f64, scale: f64) -> TreePoint {
     let d = p.dist(parent);
     if d > 0.0 {
         let delta = d * scale;
@@ -1206,9 +1215,9 @@ fn scale_position(p: Point, parent: Point, length: f64, scale: f64) -> Point {
         dx += if dx > 0.0 { delta } else { -delta };
         dy += if dy > 0.0 { -delta } else { delta };
         let s = length / d;
-        Point::new(parent.x + dx * s, parent.y + dy * s)
+        TreePoint::new(parent.x + dx * s, parent.y + dy * s)
     } else {
-        Point::new(parent.x + length / 2.0, parent.y + length / 2.0)
+        TreePoint::new(parent.x + length / 2.0, parent.y + length / 2.0)
     }
 }
 
@@ -1220,7 +1229,7 @@ fn refine_with_clustering(
     topology: &mut LevelTopology,
     a: usize,
     b: usize,
-    root: Point,
+    root: TreePoint,
     sinks: &[(f32, f32)],
 ) {
     let mut engine = Clustering::new(sinks, (root.x as f32, root.y as f32));
@@ -1234,12 +1243,12 @@ fn refine_with_clustering(
     };
     let cap = (sinks.len() as f64 * share) as usize;
     engine.run(cap, KMEANS_ROUNDS, CLUSTERING_POWER, &mut means);
-    topology.points[a] = Point::from_f32(means[0]);
-    topology.points[b] = Point::from_f32(means[1]);
+    topology.points[a] = TreePoint::from_f32(means[0]);
+    topology.points[b] = TreePoint::from_f32(means[1]);
     for (cluster, members) in engine.clusters().iter().enumerate() {
         let branch = if cluster == 0 { a } else { b };
         for &s in members {
-            topology.sinks[branch].push(Point::from_f32(sinks[s]));
+            topology.sinks[branch].push(TreePoint::from_f32(sinks[s]));
         }
     }
 }
@@ -1345,8 +1354,8 @@ fn min_delay_segment(
 struct SegmentBuilder {
     inst_prefix: String,
     net_prefix: String,
-    root: Point,
-    target: Point,
+    root: TreePoint,
+    target: TreePoint,
     driving: usize,
     levels: u32,
 }
@@ -1389,7 +1398,7 @@ impl SegmentBuilder {
                     .get(b)
                     .copied()
                     .unwrap_or(ctx.root_buffer);
-                let at = Point::new(x, y);
+                let at = TreePoint::new(x, y);
                 let legal = tree.legalize_one_buffer(ctx, at, master);
                 tree.commit_move(at, legal);
                 let buffer = tree.clock.add_buffer(
@@ -1434,39 +1443,39 @@ impl SegmentBuilder {
 
 /// The points at distance `target` from `parent` toward `direction`:
 /// straight ahead, then half and quarter of the way across to each side.
-fn arc_candidates(parent: Point, target: f64, direction: Direction) -> Vec<Point> {
+fn arc_candidates(parent: TreePoint, target: f64, direction: Direction) -> Vec<TreePoint> {
     let (px, py) = (parent.x, parent.y);
     let l50 = target * 0.5;
     let l25 = target * 0.25;
     let l75 = target * 0.75;
     match direction {
         Direction::North => vec![
-            Point::new(px, py + target),
-            Point::new(px + l50, py + l50),
-            Point::new(px - l50, py + l50),
-            Point::new(px + l25, py + l75),
-            Point::new(px - l25, py + l75),
+            TreePoint::new(px, py + target),
+            TreePoint::new(px + l50, py + l50),
+            TreePoint::new(px - l50, py + l50),
+            TreePoint::new(px + l25, py + l75),
+            TreePoint::new(px - l25, py + l75),
         ],
         Direction::East => vec![
-            Point::new(px + target, py),
-            Point::new(px + l50, py + l50),
-            Point::new(px + l50, py - l50),
-            Point::new(px + l75, py + l25),
-            Point::new(px + l75, py - l25),
+            TreePoint::new(px + target, py),
+            TreePoint::new(px + l50, py + l50),
+            TreePoint::new(px + l50, py - l50),
+            TreePoint::new(px + l75, py + l25),
+            TreePoint::new(px + l75, py - l25),
         ],
         Direction::South => vec![
-            Point::new(px, py - target),
-            Point::new(px + l50, py - l50),
-            Point::new(px - l50, py - l50),
-            Point::new(px + l25, py - l75),
-            Point::new(px - l25, py - l75),
+            TreePoint::new(px, py - target),
+            TreePoint::new(px + l50, py - l50),
+            TreePoint::new(px - l50, py - l50),
+            TreePoint::new(px + l25, py - l75),
+            TreePoint::new(px - l25, py - l75),
         ],
         Direction::West => vec![
-            Point::new(px - target, py),
-            Point::new(px - l50, py - l50),
-            Point::new(px - l50, py + l50),
-            Point::new(px - l75, py - l25),
-            Point::new(px - l75, py + l25),
+            TreePoint::new(px - target, py),
+            TreePoint::new(px - l50, py - l50),
+            TreePoint::new(px - l50, py + l50),
+            TreePoint::new(px - l75, py - l25),
+            TreePoint::new(px - l75, py + l25),
         ],
     }
 }
@@ -1474,28 +1483,28 @@ fn arc_candidates(parent: Point, target: f64, direction: Direction) -> Vec<Point
 /// The two points at distance `target` from `parent` along the side of
 /// `[x1, y1, x2, y2]` facing it.
 fn along_blockage(
-    parent: Point,
+    parent: TreePoint,
     target: f64,
     [x1, y1, x2, y2]: [f64; 4],
     direction: Direction,
-) -> [Point; 2] {
+) -> [TreePoint; 2] {
     let (px, py) = (parent.x, parent.y);
     match direction {
         Direction::North => [
-            Point::new(-target - py + px + y1, y1),
-            Point::new(-target - py + px + y1, target + py + px - y1),
+            TreePoint::new(-target - py + px + y1, y1),
+            TreePoint::new(-target - py + px + y1, target + py + px - y1),
         ],
         Direction::East => [
-            Point::new(x1, target + py + px - x1),
-            Point::new(x1, -target + py - px + x1),
+            TreePoint::new(x1, target + py + px - x1),
+            TreePoint::new(x1, -target + py - px + x1),
         ],
         Direction::South => [
-            Point::new(-target + py + px - y2, y2),
-            Point::new(target - py + px + y2, y2),
+            TreePoint::new(-target + py + px - y2, y2),
+            TreePoint::new(target - py + px + y2, y2),
         ],
         Direction::West => [
-            Point::new(x2, target + py - px + x2),
-            Point::new(x2, -target + py + px - x2),
+            TreePoint::new(x2, target + py - px + x2),
+            TreePoint::new(x2, -target + py + px - x2),
         ],
     }
 }
@@ -1503,12 +1512,12 @@ fn along_blockage(
 /// The two points at distance `target` from `parent` that lie `margin`
 /// to either side of `branch`, across `direction`.
 fn beside_branch(
-    parent: Point,
-    branch: Point,
+    parent: TreePoint,
+    branch: TreePoint,
     target: f64,
     (min_x, min_y): (f64, f64),
     direction: Direction,
-) -> [Point; 2] {
+) -> [TreePoint; 2] {
     let (px, py) = (parent.x, parent.y);
     let x_plus = branch.x + min_x;
     let x_minus = branch.x - min_x;
@@ -1516,20 +1525,20 @@ fn beside_branch(
     let y_minus = branch.y - min_y;
     match direction {
         Direction::South => [
-            Point::new(x_plus, py - target + (px - x_plus).abs()),
-            Point::new(x_minus, py - target + (px - x_minus).abs()),
+            TreePoint::new(x_plus, py - target + (px - x_plus).abs()),
+            TreePoint::new(x_minus, py - target + (px - x_minus).abs()),
         ],
         Direction::North => [
-            Point::new(x_plus, py + target - (px - x_plus).abs()),
-            Point::new(x_minus, py + target - (px - x_minus).abs()),
+            TreePoint::new(x_plus, py + target - (px - x_plus).abs()),
+            TreePoint::new(x_minus, py + target - (px - x_minus).abs()),
         ],
         Direction::West => [
-            Point::new(px - target + (py - y_plus).abs(), y_plus),
-            Point::new(px - target + (py - y_minus).abs(), y_minus),
+            TreePoint::new(px - target + (py - y_plus).abs(), y_plus),
+            TreePoint::new(px - target + (py - y_minus).abs(), y_minus),
         ],
         Direction::East => [
-            Point::new(px + target - (py - y_plus).abs(), y_plus),
-            Point::new(px + target - (py - y_minus).abs(), y_minus),
+            TreePoint::new(px + target - (py - y_plus).abs(), y_plus),
+            TreePoint::new(px + target - (py - y_minus).abs(), y_minus),
         ],
     }
 }
