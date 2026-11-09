@@ -1876,6 +1876,88 @@ mod tests {
         (grid, nets)
     }
 
+    /// Restores `saved` as the routes of net 0 from (1, 2) to (4, 2) on
+    /// layer 1 of a fresh grid, and whether that worked.
+    fn restore_route_of_net_0(saved: Vec<(NetId, Vec<Vec<GCell>>)>) -> Result<(), RestoreError> {
+        let nets = [net(vec![at(1, 1, 2), at(1, 4, 2)])];
+        restore_global(&grid(), &nets, saved).map(|_| ())
+    }
+
+    fn row_2(from: u16, to: u16) -> Vec<GCell> {
+        (from..=to).map(|x| at(1, x, 2)).collect()
+    }
+
+    #[test]
+    fn a_saved_tree_through_every_pin_is_restored() {
+        let saved = vec![(NetId::new(0), vec![row_2(1, 4)])];
+
+        assert_eq!(restore_route_of_net_0(saved), Ok(()));
+    }
+
+    #[test]
+    fn a_net_without_a_saved_route_is_refused() {
+        assert_eq!(
+            restore_route_of_net_0(Vec::new()),
+            Err(RestoreError::Missing(NetId::new(0)))
+        );
+    }
+
+    #[test]
+    fn a_saved_route_of_a_net_not_routed_is_refused() {
+        let saved = vec![
+            (NetId::new(0), vec![row_2(1, 4)]),
+            (NetId::new(7), vec![row_2(5, 6)]),
+        ];
+
+        assert_eq!(
+            restore_route_of_net_0(saved),
+            Err(RestoreError::Unrouted(NetId::new(7)))
+        );
+    }
+
+    #[test]
+    fn a_saved_step_against_the_layer_s_direction_is_refused() {
+        let saved = vec![(
+            NetId::new(0),
+            vec![row_2(1, 4), vec![at(1, 2, 2), at(1, 2, 3)]],
+        )];
+
+        assert_eq!(
+            restore_route_of_net_0(saved),
+            Err(RestoreError::OffGrid(NetId::new(0)))
+        );
+    }
+
+    #[test]
+    fn a_saved_path_off_the_grid_is_refused() {
+        let saved = vec![(NetId::new(0), vec![row_2(1, 4), row_2(9, 10)])];
+
+        assert_eq!(
+            restore_route_of_net_0(saved),
+            Err(RestoreError::OffGrid(NetId::new(0)))
+        );
+    }
+
+    #[test]
+    fn a_saved_path_that_starts_off_the_tree_is_refused() {
+        let saved = vec![(NetId::new(0), vec![row_2(1, 2), row_2(3, 4)])];
+
+        assert_eq!(
+            restore_route_of_net_0(saved),
+            Err(RestoreError::Disconnected(NetId::new(0)))
+        );
+    }
+
+    #[test]
+    fn a_saved_route_that_misses_a_pin_is_refused() {
+        let saved = vec![(NetId::new(0), vec![row_2(1, 3)])];
+
+        assert_eq!(
+            restore_route_of_net_0(saved),
+            Err(RestoreError::Unreached(NetId::new(0)))
+        );
+    }
+
     #[test]
     fn nets_without_terminals_have_no_window_and_no_span() {
         assert_eq!(window(&[], 2, 10, 10), None);
