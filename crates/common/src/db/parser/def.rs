@@ -57,6 +57,14 @@ const NET_IGNORED: &[&str] = &[
     "FIXEDBUMP",
     "FREQUENCY",
     "XTALK",
+];
+const SPECIAL_NET_IGNORED: &[&str] = &[
+    "SOURCE",
+    "PROPERTY",
+    "ORIGINAL",
+    "PATTERN",
+    "ESTCAP",
+    "FIXEDBUMP",
     "WEIGHT",
     "VOLTAGE",
 ];
@@ -903,7 +911,7 @@ impl<'a> DefParser<'a> {
                         format!("special net '{}': + {} is not supported", net.name, t.text),
                     ));
                 }
-                _ => self.skip_listed_option(t, NET_IGNORED, "special net option"),
+                _ => self.skip_listed_option(t, SPECIAL_NET_IGNORED, "special net option"),
             }
         }
         self.lx.expect(";")?;
