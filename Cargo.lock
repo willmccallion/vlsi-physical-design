@@ -652,6 +652,8 @@ dependencies = [
  "anyhow",
  "clap",
  "env_logger",
+ "image",
+ "imageproc",
  "log",
  "pare-common",
  "pare-cts",
@@ -663,15 +665,13 @@ dependencies = [
  "serde",
  "serde_json",
  "toml",
+ "yansi",
 ]
 
 [[package]]
 name = "pare-common"
 version = "0.1.0"
 dependencies = [
- "env_logger",
- "image",
- "imageproc",
  "log",
  "rayon",
  "rstar",
@@ -679,7 +679,6 @@ dependencies = [
  "serde",
  "thiserror",
  "toml",
- "yansi",
 ]
 
 [[package]]

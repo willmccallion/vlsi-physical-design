@@ -1,10 +1,10 @@
 //! The placement and routing checks a run ends with.
 
 use crate::report::Report;
+use crate::ui;
 use pare_common::db::design::NetlistDB;
 use pare_common::db::indices::CellId;
 use pare_common::db::library::LayerRef;
-use pare_common::util::ui;
 use pare_common::verify::drc::{DrcReport, Marker, check_drc};
 use pare_common::verify::placement::{PlacementViolation, placement_violations};
 use pare_common::verify::routing::check_routing;

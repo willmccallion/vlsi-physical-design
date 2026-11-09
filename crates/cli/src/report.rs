@@ -1,7 +1,7 @@
 //! The record of a run that `--report` writes as JSON: what was run, how
 //! long each phase took, what the checks found and how much memory it took.
 
-use pare_common::util::ui;
+use crate::ui;
 use pare_resizer::{HoldSummary, SetupSummary};
 use serde::Serialize;
 use std::collections::BTreeMap;

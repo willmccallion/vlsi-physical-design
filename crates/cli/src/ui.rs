@@ -3,7 +3,7 @@
 //! All functions write to stderr so stdout stays clean for piping.
 //! Uses `yansi` for ANSI colors with automatic TTY detection.
 
-use crate::db::library::Direction;
+use pare_common::db::library::Direction;
 use yansi::Paint;
 
 /// Prints the PARE banner and a horizontal rule.
@@ -214,10 +214,4 @@ pub fn done(elapsed_secs: f64) {
     eprintln!();
     rule();
     eprintln!("  {} {:.1}s\n", "Done in".bold(), elapsed_secs);
-}
-
-/// Prints a carriage-return progress line (overwrites current line).
-pub fn progress(label: &str, cur: usize, total: usize) {
-    eprint!("\r  {} {}/{}\x1b[K", label.cyan(), cur, total);
-    let _ = std::io::Write::flush(&mut std::io::stderr());
 }

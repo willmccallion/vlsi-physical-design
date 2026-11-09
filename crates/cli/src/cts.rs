@@ -2,12 +2,12 @@
 
 use crate::repair::{NetlistRepair, TimedRepair};
 use crate::report::{ClockTreeSummary, Report};
+use crate::ui;
 use anyhow::Context;
 use pare_common::db::design::NetlistDB;
 use pare_common::db::indices::PinId;
 use pare_common::units::Seconds;
 use pare_common::util::config::Config;
-use pare_common::util::ui;
 use pare_cts::{ClockTrees, CtsInput, CtsOptions, balance_latencies};
 use pare_resizer::parasitics::WireRc;
 use pare_resizer::rebuffer::max_wire_length_of;

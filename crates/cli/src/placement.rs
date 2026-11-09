@@ -5,6 +5,7 @@ use crate::checks::report_placement;
 use crate::cts::clock_tree_synthesis;
 use crate::repair::{NetlistRepair, TimedRepair, repair_design, repair_netlist, repair_timing};
 use crate::report::{PlacementSummary, Report};
+use crate::{ui, visualization};
 use anyhow::Context;
 use pare_common::db::design::{NetlistDB, PlacementStatus, Renumbering};
 use pare_common::db::indices::{CellId, NetId};
@@ -16,7 +17,6 @@ use pare_common::units::Seconds;
 use pare_common::util::config::{
     Config, CongestionEstimate, DesignInput, GlobalPlacementConfig, Share, TargetDensity,
 };
-use pare_common::util::{ui, visualization};
 use pare_common::verify::pin_access::PinAccess;
 use pare_placer::detailed;
 use pare_placer::global::{

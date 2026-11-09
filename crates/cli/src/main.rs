@@ -5,11 +5,14 @@
 
 mod checks;
 mod cts;
+mod logger;
 mod placement;
 mod repair;
 mod report;
 mod routing;
+mod ui;
 mod view;
+mod visualization;
 
 use crate::checks::{report_placement, report_routing};
 use crate::placement::{PlacementStart, run_placement};
@@ -24,7 +27,6 @@ use pare_common::db::parser::{bookshelf, def, lef};
 use pare_common::geom::dbu::DbuPerMicron;
 use pare_common::geom::point::Point;
 use pare_common::util::config::{Config, DesignInput, Purpose};
-use pare_common::util::{logger, ui};
 use report::Report;
 use std::path::{Path, PathBuf};
 use std::time::Instant;
