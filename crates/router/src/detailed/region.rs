@@ -14,6 +14,7 @@ use super::judge::{Candidate, Judgment};
 use super::trace;
 use super::{DetailedRouter, Marker};
 use crate::access::Node;
+use crate::global::Gcells;
 use crate::occupancy::{LocalOccupancy, Owner};
 use crate::search::{Costs, Marks, OwnVias, Search, WindowCache};
 use crate::wiring::{DisjointSets, Edge, NetRoute, Patch, Wiring, path_edges, tidy_patches};
@@ -26,7 +27,7 @@ use rustc_hash::{FxHashMap, FxHashSet};
 use std::collections::BTreeMap;
 
 /// Edge of a region, in gcells.
-pub(super) const REGION_GCELLS: i64 = 6;
+pub(super) const REGION_GCELLS: Gcells = Gcells(6);
 
 /// Local rip-up and reroute rounds within one region.
 const LOCAL_ROUNDS: usize = 6;
@@ -54,10 +55,10 @@ impl RegionGrid {
     /// The grid of one pass: aligned with the gcells, shifted by a third of
     /// a region per `pass`.
     pub(super) fn of_pass(router: &DetailedRouter<'_>, pass: usize) -> Self {
-        let shift = router.gcell * (REGION_GCELLS * (pass as i64 % 3) / 3);
+        let shift = (REGION_GCELLS * (pass as i64 % 3) / 3).length(router.gcell);
         Self {
             origin: router.grid_origin - Point::new(shift, shift),
-            size: router.gcell * REGION_GCELLS,
+            size: REGION_GCELLS.length(router.gcell),
         }
     }
 
