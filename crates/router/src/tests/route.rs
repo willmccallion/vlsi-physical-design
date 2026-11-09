@@ -2,6 +2,7 @@
 
 use super::{TINY_ROUNDS, placed_tiny, tiny};
 use crate::access::Node;
+use crate::detailed::RestoreRoutesError;
 use crate::global::{GCell, GlobalGrid, GlobalNet, route_global, track_demand};
 use crate::occupancy::{FixedTracks, Occupancy, Origin, Owner};
 use crate::runs::{EdgeSet, Run};
@@ -186,11 +187,10 @@ fn a_save_point_the_run_never_reaches_saves_nothing_and_says_so() {
     assert!(!summary.state_saved);
 }
 
-#[test]
-fn a_state_with_a_wire_past_the_end_of_its_track_is_refused() {
+/// The state saved after the first pass with its first line of `kind`
+/// rewritten by `edit` from its words.
+fn tampered_state(kind: &str, edit: impl Fn(&[&str]) -> String) -> RouteState {
     let (_, state) = route_saving(SavePoint::Round(0));
-    let (mut db, config) = placed_tiny();
-    let tech = RouteTech::new(&db, &config).unwrap();
     let mut text = Vec::new();
     state.write(&mut text).unwrap();
     let text = String::from_utf8(text).unwrap();
@@ -199,29 +199,66 @@ fn a_state_with_a_wire_past_the_end_of_its_track_is_refused() {
         .lines()
         .map(|line| {
             let words: Vec<&str> = line.split(' ').collect();
-            if tampered || words[0] != "s" {
+            if tampered || words[0] != kind {
                 return line.to_string();
             }
             tampered = true;
-            let layer = LayerId::new(words[1].parse().unwrap());
-            let past_end = tech.layer(layer).cross.len();
-            format!("s {} {} {} {past_end}", words[1], words[2], words[3])
+            edit(&words)
         })
         .collect();
-    let bad = RouteState::parse(&(lines.join("\n") + "\n")).unwrap();
+    assert!(tampered, "no `{kind}` line to tamper with");
+    RouteState::parse(&(lines.join("\n") + "\n")).unwrap()
+}
 
-    let result = route_with(
-        &mut db,
-        &config,
-        RunOptions {
-            resume: Some(&bad),
-            ..RunOptions::default()
-        },
-    );
+/// Routes the placed fixture resuming from `state`.
+fn resume_tiny(state: &RouteState) -> Result<crate::RoutingSummary, RouteError> {
+    let (mut db, config) = placed_tiny();
+    let run = RunOptions {
+        resume: Some(state),
+        ..RunOptions::default()
+    };
+    route_with(&mut db, &config, run)
+}
 
-    assert!(tampered);
+#[test]
+fn a_state_with_a_wire_past_the_end_of_its_track_is_refused() {
+    let (db, config) = placed_tiny();
+    let tech = RouteTech::new(&db, &config).unwrap();
+    let bad = tampered_state("s", |words| {
+        let layer = LayerId::new(words[1].parse().unwrap());
+        let past_end = tech.layer(layer).cross.len();
+        format!("s {} {} {} {past_end}", words[1], words[2], words[3])
+    });
+
+    let result = resume_tiny(&bad);
+
     assert!(
-        matches!(result, Err(RouteError::DetailedRestore(_))),
+        matches!(
+            result,
+            Err(RouteError::DetailedRestore(RestoreRoutesError::OffTracks(
+                _
+            )))
+        ),
+        "{result:?}"
+    );
+}
+
+#[test]
+fn a_state_with_a_via_between_nodes_of_one_layer_is_refused() {
+    let bad = tampered_state("v", |words| {
+        format!(
+            "v {} {} {} {} {} {}",
+            words[1], words[2], words[3], words[1], words[2], words[3]
+        )
+    });
+
+    let result = resume_tiny(&bad);
+
+    assert!(
+        matches!(
+            result,
+            Err(RouteError::DetailedRestore(RestoreRoutesError::Via(_)))
+        ),
         "{result:?}"
     );
 }
