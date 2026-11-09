@@ -21,6 +21,7 @@ use super::{
 };
 use crate::model::{CellKind, PlacementModel};
 use crate::zones::Zone;
+use pare_common::config::Share;
 use pare_common::geom::dbu::Dbu;
 use pare_common::geom::point::Point;
 use pare_common::geom::rect::Rect;
@@ -1068,7 +1069,7 @@ impl Run {
         if self.rebuilt {
             s.prev_hpwl = eval.wirelength.hpwl;
             for (frozen, &overflow) in s.weights.frozen.iter_mut().zip(&eval.field_overflow) {
-                if overflow > context.params.target_overflow {
+                if overflow > context.params.target_overflow.get() {
                     *frozen = false;
                 }
             }
@@ -1121,7 +1122,7 @@ impl Run {
         if self.k.is_multiple_of(50) && log::log_enabled!(log::Level::Debug) {
             s.weights.log(self.k, eval);
         }
-        if freeze_spread_fields(s, eval, params.target_overflow) {
+        if freeze_spread_fields(s, eval, params.target_overflow.get()) {
             *moving = objective.moving(&s.weights.frozen);
         }
         s.weights.damp(self.k, eval);
@@ -1361,11 +1362,11 @@ fn initial_state(
 /// thresholds it passes, as `OpenROAD`'s `isTimingNetWeightOverflow`: each
 /// threshold, from the largest down, fires once when the overflow in whole
 /// percent is under it.
-fn timing_due(thresholds: &[f64], fired: &mut [bool], overflow: f64) -> bool {
+fn timing_due(thresholds: &[Share], fired: &mut [bool], overflow: f64) -> bool {
     let percent = (overflow * 100.0).round();
-    let as_percent = |t: f64| (t * 100.0).round();
+    let as_percent = |t: Share| (t.get() * 100.0).round();
     let mut order: Vec<usize> = (0..thresholds.len()).collect();
-    order.sort_by(|&a, &b| thresholds[b].total_cmp(&thresholds[a]));
+    order.sort_by(|&a, &b| thresholds[b].get().total_cmp(&thresholds[a].get()));
     let Some(&largest) = order.first() else {
         return false;
     };
@@ -1600,9 +1601,13 @@ mod tests {
         assert!((s.precondition[1] - 0.25).abs() < 1e-12);
     }
 
+    fn shares(values: [f64; 2]) -> [Share; 2] {
+        values.map(|v| Share::new(v).unwrap())
+    }
+
     #[test]
     fn timing_thresholds_fire_once_each_from_the_largest_down() {
-        let thresholds = [0.64, 0.20];
+        let thresholds = shares([0.64, 0.20]);
         let mut fired = [false, false];
 
         assert!(!timing_due(&thresholds, &mut fired, 0.70));
@@ -1616,7 +1621,7 @@ mod tests {
 
     #[test]
     fn an_overflow_under_every_threshold_fires_them_all_at_once() {
-        let thresholds = [0.20, 0.64];
+        let thresholds = shares([0.20, 0.64]);
         let mut fired = [false, false];
 
         assert!(timing_due(&thresholds, &mut fired, 0.10));
