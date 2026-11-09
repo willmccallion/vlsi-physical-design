@@ -70,7 +70,9 @@ impl Network {
                 left: bbox.min.x - core.min.x,
                 bottom: bbox.min.y - core.min.y,
                 width: bbox.width(),
-                height: Dbu::ZERO,
+                // NOTE: Network::addNode(dbBTerm*) takes yMax - yMax, putting
+                // the pin at its shape's bottom; PARE takes the shape's height.
+                height: bbox.height(),
                 terminal: true,
             });
         }
