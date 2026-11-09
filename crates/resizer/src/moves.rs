@@ -684,7 +684,7 @@ fn is_single_output_combinational(
 }
 
 /// The usable size of `lib` whose load limit is nearest half of its own,
-/// as `Resizer::halfDrivingPowerCell`.
+/// as `Resizer::halfDrivingPowerCell` and `closestDriver`.
 fn half_driving_power_cell(resizer: &Resizer<'_, Sta>, lib: LibCellId) -> Option<LibCellId> {
     let liberty = resizer.link.liberty;
     let max_load = |id: LibCellId| -> Farads {
@@ -692,17 +692,17 @@ fn half_driving_power_cell(resizer: &Resizer<'_, Sta>, lib: LibCellId) -> Option
         c.ports
             .iter()
             .filter(|p| p.is_output())
-            .find_map(|p| liberty.capacitance_limit(c, p))
+            .find_map(|p| resizer.port_cap_limit(c, p))
             .unwrap_or(Farads::ZERO)
     };
     let target = 0.5 * max_load(lib);
     let mut closest: Option<(Farads, LibCellId)> = None;
     for candidate in resizer.swappable_cells(lib) {
         let limit = max_load(candidate);
-        let diff = (limit - target).abs();
-        if fuzzy::zero(diff) {
+        if limit == target {
             return Some(candidate);
         }
+        let diff = (limit - target).abs();
         if closest.is_none_or(|(d, _)| diff < d) {
             closest = Some((diff, candidate));
         }
@@ -1241,7 +1241,9 @@ fn slews_in_tree(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::testing::{cells, clock_cells_source, design, with_timed_session};
+    use crate::testing::{
+        cells, cells_with, clock_cells_source, design, design_with_copies, with_timed_session,
+    };
     use pare_common::db::parser::liberty::parse_str;
     use std::path::Path;
 
@@ -1283,6 +1285,58 @@ mod tests {
             &PortSlews::default(),
             &slews,
         )
+    }
+
+    /// A buffer `name` on `BUF_X1`'s footprint that may drive `max_cap_ff`
+    /// femtofarads and slews to `slew` nanoseconds at 100 fF.
+    fn sized_buffer(name: &str, max_cap_ff: f64, slew: f64) -> String {
+        format!(
+            "cell ({name}) {{ area : 0.8 ;
+               pin (A) {{ direction : input ; capacitance : 0.97 ; }}
+               pin (Z) {{ direction : output ; function : \"A\" ; max_capacitance : {max_cap_ff} ;
+                 timing () {{ related_pin : \"A\" ; timing_sense : positive_unate ;
+                   cell_rise (delay_t) {{ values (\"0.03, 0.30\", \"0.04, 0.31\") ; }}
+                   rise_transition (delay_t) {{
+                     values (\"0.0, {slew}\", \"0.0, {slew}\") ; }} }} }} }}\n"
+        )
+    }
+
+    /// The size `half_driving_power_cell` picks for a `BUF_X1` under
+    /// `constraints`, among buffers `A` driving up to 30.6 fF, `B` up to
+    /// 30 fF and `C` up to 10 fF, `A` the weakest.
+    fn half_driver_under(constraints: &str) -> String {
+        let sizes = [("A", 30.6, 0.9), ("B", 30.0, 0.5), ("C", 10.0, 0.45)];
+        let copies: Vec<(&str, &str)> = sizes.iter().map(|&(n, _, _)| ("BUF_X1", n)).collect();
+        let mut db = design_with_copies(
+            "VERSION 5.8 ;\nDIVIDERCHAR \"/\" ;\nBUSBITCHARS \"[]\" ;\nDESIGN sizes ;\n\
+             UNITS DISTANCE MICRONS 2000 ;\nDIEAREA ( 0 0 ) ( 40000 40000 ) ;\nEND DESIGN\n",
+            &copies,
+        );
+        let extra: String = sizes
+            .iter()
+            .map(|&(name, cap, slew)| sized_buffer(name, cap, slew))
+            .collect();
+        let lib = cells_with(&extra);
+        let mut picked = String::new();
+        with_timed_session(&mut db, &lib, constraints, |resizer| {
+            let buf = resizer.link.liberty.cell_id("BUF_X1").unwrap();
+            let half = half_driving_power_cell(resizer, buf).unwrap();
+            picked.clone_from(&resizer.link.liberty.cell(half).name);
+        });
+        picked
+    }
+
+    #[test]
+    fn the_half_driving_size_matches_its_target_exactly_or_comes_closest() {
+        assert_eq!(half_driver_under(""), "B");
+    }
+
+    #[test]
+    fn a_design_load_limit_bounds_every_size_the_half_driver_is_chosen_by() {
+        assert_eq!(
+            half_driver_under("set_max_capacitance 20 [current_design]\n"),
+            "C"
+        );
     }
 
     #[test]
