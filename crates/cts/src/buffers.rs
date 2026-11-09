@@ -10,8 +10,8 @@ use pare_resizer::Link;
 use pare_resizer::WireRc;
 
 /// The share of a buffer's load limit a sink or root buffer may use, as
-/// `CtsOptions`' default `sinkBufferMaxCapDerate`.
-const MAX_CAP_DERATE: f32 = 0.01;
+/// `CtsOptions`' default `sinkBufferMaxCapDerate`, a double.
+const MAX_CAP_DERATE: f64 = 0.01;
 
 /// How close, as a share of its own, a buffer's load limit may come to the
 /// one kept before it and still be dropped from the characterized list.
@@ -47,18 +47,17 @@ impl ClockBuffers {
         let core = db.core_area();
         let dbu = db.dbu().get() as f32;
         let core_length = (core.width().get().max(core.height().get()) as f32) / dbu;
-        let wire_cap_per_um = signal_rc.capacitance.per_micron() as f32;
         let root = if all.len() == 1 {
             all[0]
         } else {
-            best_max_cap_buffer(liberty, &all, wire_cap_per_um * core_length / 2.0)
-                .ok_or(CtsError::NoBuffers)?
+            let half_core = signal_wire_cap(signal_rc, f64::from(core_length) / 2.0);
+            best_max_cap_buffer(liberty, &all, half_core).ok_or(CtsError::NoBuffers)?
         };
         let sink = if all.len() == 1 {
             all[0]
         } else {
-            best_max_cap_buffer(liberty, &all, wire_cap_per_um * core_length)
-                .ok_or(CtsError::NoBuffers)?
+            let whole_core = signal_wire_cap(signal_rc, f64::from(core_length));
+            best_max_cap_buffer(liberty, &all, whole_core).ok_or(CtsError::NoBuffers)?
         };
         let characterized = trim_and_sort(liberty, &all, root, sink);
         Ok(Self {
@@ -68,6 +67,13 @@ impl ClockBuffers {
             characterized,
         })
     }
+}
+
+/// The capacitance of `length_um` microns of signal wire, worked out in
+/// double precision and rounded once to single, as
+/// `TritonCTS::selectRootBuffer` and `selectSinkBuffer` estimate it.
+fn signal_wire_cap(signal_rc: &WireRc, length_um: f64) -> f32 {
+    (signal_rc.capacitance.per_micron() * length_um) as f32
 }
 
 /// The smallest buffer whose derated load limit covers `total_cap`, or the
@@ -89,7 +95,7 @@ fn best_max_cap_buffer(
             .max_capacitance
             .map(|c| c.get() as f32);
         if let Some(max_cap) = limit
-            && max_cap * MAX_CAP_DERATE > total_cap
+            && f64::from(max_cap) * MAX_CAP_DERATE > f64::from(total_cap)
             && area < best_area
         {
             best = Some(buffer);
@@ -172,6 +178,7 @@ pub(crate) fn fanout_limit(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use pare_common::db::indices::LayerId;
     use pare_common::db::parser::liberty;
     use std::fmt::Write as _;
     use std::path::Path;
@@ -235,6 +242,29 @@ mod tests {
         let kept = trim_and_sort(&lib, &all, id(&lib, 10), id(&lib, 0));
 
         assert_eq!(kept, vec![id(&lib, 0), id(&lib, 10)]);
+    }
+
+    #[test]
+    fn a_limit_covering_the_load_only_in_double_precision_covers_it() {
+        // A limit of 1 pF derated lies above the load in double precision;
+        // in single precision it rounds to the load itself.
+        let lib = buffers(&[(1, None), (100, None)], None);
+        let load = (1e-12_f64 as f32) * 0.01_f32;
+
+        let best = best_max_cap_buffer(&lib, &[id(&lib, 1), id(&lib, 100)], load);
+
+        assert_eq!(best, Some(id(&lib, 1)));
+    }
+
+    #[test]
+    fn a_wires_capacitance_is_rounded_to_single_precision_once() {
+        let rc = WireRc::per_micron(1.0, 0.07, LayerId::new(0));
+        let per_micron = rc.capacitance.per_micron();
+
+        let cap = signal_wire_cap(&rc, 3.0);
+
+        assert_eq!(cap.to_bits(), ((per_micron * 3.0) as f32).to_bits());
+        assert_ne!(cap.to_bits(), (per_micron as f32 * 3.0).to_bits());
     }
 
     #[test]
