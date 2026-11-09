@@ -1,7 +1,15 @@
 //! Routing entry checks on the shared fixture design.
 
-#![allow(clippy::unwrap_used)]
-
+use crate::access::Node;
+use crate::global::{GCell, GlobalGrid, GlobalNet, route_global, track_demand};
+use crate::occupancy::{FixedTracks, Occupancy, Origin, Owner};
+use crate::runs::{EdgeSet, Run};
+use crate::tech::RouteTech;
+use crate::wiring::{Edge, NetRoute};
+use crate::{
+    GlobalRouteEstimator, RouteError, RouteState, RunOptions, Save, SaveError, SavePoint,
+    capacity_reduction, route, route_with, rudy_wire_width,
+};
 use pare_common::config::{CapacityReserve, RoutingConfig, Share};
 use pare_common::db::design::{
     NetlistDB, NonDefaultLayer, NonDefaultRule, PlacementStatus, RouteElem,
@@ -14,16 +22,6 @@ use pare_common::geom::dbu::Dbu;
 use pare_common::geom::point::Point;
 use pare_common::geom::rect::Rect;
 use pare_common::verify::routing::net_components;
-use pare_router::access::Node;
-use pare_router::global::{GCell, GlobalGrid, GlobalNet, route_global, track_demand};
-use pare_router::occupancy::{FixedTracks, Occupancy, Origin, Owner};
-use pare_router::runs::{EdgeSet, Run};
-use pare_router::tech::RouteTech;
-use pare_router::wiring::{Edge, NetRoute};
-use pare_router::{
-    GlobalRouteEstimator, RouteError, RouteState, RunOptions, Save, SaveError, SavePoint,
-    capacity_reduction, route, route_with, rudy_wire_width,
-};
 use std::num::NonZeroU32;
 use std::path::{Path, PathBuf};
 

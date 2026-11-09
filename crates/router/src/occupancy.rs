@@ -184,8 +184,6 @@ pub enum Proximity {
 /// An occupant a query comes near, and how near.
 #[derive(Clone, Copy, Debug)]
 pub struct Conflict<'a> {
-    /// The track the occupant was met on.
-    pub track: TrackRef,
     /// The occupant.
     pub occupant: &'a Occupant,
     /// How near the query comes to it.
@@ -938,7 +936,6 @@ impl Occupancy {
             .filter(move |o| o.owner != owner && (centered || o.centered))
             .filter_map(move |o| {
                 rules.proximity(o, query).map(|proximity| Conflict {
-                    track: t,
                     occupant: o,
                     proximity,
                 })
@@ -1117,7 +1114,6 @@ impl LocalOccupancy {
                 .filter(move |o| o.owner != owner && (centered || o.centered))
                 .filter_map(move |o| {
                     rules.proximity(o, query).map(|proximity| Conflict {
-                        track: t,
                         occupant: o,
                         proximity,
                     })

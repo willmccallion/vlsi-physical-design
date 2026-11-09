@@ -1,18 +1,16 @@
 //! Track assignment on the shared fixture design.
 
-#![allow(clippy::unwrap_used)]
-
+use crate::detailed::DetailedRouter;
+use crate::global::{GCell, GlobalGrid, GlobalRoutes};
+use crate::occupancy::{Owner, Proximity};
+use crate::tech::RouteTech;
+use crate::track::{TrackWire, assign_tracks};
 use pare_common::config::{CapacityReserve, RoutingConfig};
 use pare_common::db::design::NetlistDB;
 use pare_common::db::indices::{LayerId, NetId};
 use pare_common::db::parser::{def, lef};
 use pare_common::db::shapes::wire_rect;
 use pare_common::geom::dbu::Dbu;
-use pare_router::detailed::DetailedRouter;
-use pare_router::global::{GCell, GlobalGrid, GlobalRoutes};
-use pare_router::occupancy::{Owner, Proximity};
-use pare_router::tech::RouteTech;
-use pare_router::track::{TrackWire, assign_tracks};
 use std::path::{Path, PathBuf};
 
 const GCELL: Dbu = Dbu(2000);

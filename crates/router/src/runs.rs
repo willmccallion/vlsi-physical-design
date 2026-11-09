@@ -189,20 +189,6 @@ impl EdgeSet {
                 .map(|&(lower, upper)| Edge::Via { lower, upper }),
         )
     }
-
-    /// How many edges it holds.
-    pub fn len(&self) -> usize {
-        self.runs
-            .iter()
-            .map(|r| (r.to - r.from) as usize)
-            .sum::<usize>()
-            + self.vias.len()
-    }
-
-    /// Whether it holds no edge.
-    pub const fn is_empty(&self) -> bool {
-        self.runs.is_empty() && self.vias.is_empty()
-    }
 }
 
 impl FromIterator<Edge> for EdgeSet {
@@ -310,7 +296,6 @@ mod tests {
         let set: EdgeSet = mixed().into_iter().collect();
 
         assert_eq!(set.iter().collect::<Vec<_>>(), sorted(&mixed()));
-        assert_eq!(set.len(), sorted(&mixed()).len());
     }
 
     #[test]

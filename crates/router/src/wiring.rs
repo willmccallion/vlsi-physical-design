@@ -9,11 +9,10 @@ use crate::access::{AccessPoint, Node};
 use crate::runs::{EdgeSet, Run};
 use crate::tech::{LayerTech, RouteTech};
 use pare_common::db::design::{NetlistDB, RouteElem};
-use pare_common::db::indices::{CutLayerId, LayerId, NetId, ViaId};
+use pare_common::db::indices::{CutLayerId, LayerId, NetId};
 use pare_common::db::library::LayerRef;
 use pare_common::db::shapes::route_elem_shapes;
 use pare_common::geom::dbu::Dbu;
-use pare_common::geom::point::Point;
 use pare_common::geom::rect::Rect;
 use rustc_hash::FxHashMap;
 use std::collections::BTreeMap;
@@ -216,17 +215,6 @@ impl NetRoute {
         self.elems(tech)
             .iter()
             .flat_map(|e| elem_cuts(db, e))
-            .collect()
-    }
-
-    /// Every via it places, with its location.
-    pub fn vias(&self, tech: &RouteTech) -> Vec<(ViaId, Point<Dbu>)> {
-        self.elems(tech)
-            .into_iter()
-            .filter_map(|e| match e {
-                RouteElem::Via { via, at } => Some((via, at)),
-                RouteElem::Wire { .. } | RouteElem::Patch { .. } => None,
-            })
             .collect()
     }
 }
