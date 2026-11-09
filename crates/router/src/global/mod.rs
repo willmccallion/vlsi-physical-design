@@ -20,6 +20,7 @@
 //! for detailed routing.
 
 mod coarse;
+mod gcells;
 mod maze;
 mod pattern;
 mod steiner;
@@ -28,6 +29,7 @@ mod tracks;
 use crate::occupancy::{FixedMetal, TrackRef};
 use crate::tech::{RouteTech, index_u32};
 use coarse::{CoarseGrid, Corridor, Plan, SCALE};
+pub use gcells::Gcells;
 use maze::{OutgrowsArea, route_tree, route_tree_within};
 use pare_common::config::{CapacityReserve, Share};
 use pare_common::db::design::NetlistDB;
