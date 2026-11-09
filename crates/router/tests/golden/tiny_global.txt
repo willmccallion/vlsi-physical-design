@@ -1,0 +1,31 @@
+pare-route-state 1
+design tiny
+grid 1200 5 5 1 2
+global 5
+n in 2
+c 1 0 0
+c 1 0 0 1 0 1 1 0 2 1 0 3 1 0 4
+n n1 3
+c 1 0 1 2 0 1
+c 1 0 1 1 0 2
+c 2 0 1 2 1 1 1 1 1 1 1 0
+n n2 5
+c 1 1 0
+c 1 1 0 1 1 1 1 1 2
+c 1 1 2 2 1 2
+c 2 1 2 2 2 2
+c 2 2 2 1 2 2
+n n3 6
+c 1 0 4
+c 1 0 4 2 0 4 2 1 4 1 1 4 1 1 3
+c 1 1 3 2 1 3 2 2 3 1 2 3
+c 1 2 3 1 2 2
+c 1 2 2 1 2 1
+c 2 1 4 2 2 4 2 3 4 2 4 4 1 4 4 1 4 3
+n out 2
+c 1 2 2
+c 1 2 2 2 2 2 2 3 2 2 4 2
+end
+gcells 5 5 overflow 2
+layer M2 Vertical capacity 60 usage 12 overflow 0
+layer M3 Horizontal capacity 34 usage 11 overflow 2
