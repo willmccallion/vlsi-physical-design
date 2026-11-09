@@ -130,6 +130,20 @@ pub(crate) fn with_timed_session(
     });
 }
 
+/// Runs `test` on a timed session over `db` with the cells of `lib`, under
+/// `constraints`, with the wires of [`metal2_wires`].
+pub(crate) fn with_wired_session(
+    db: &mut NetlistDB,
+    lib: &Liberty,
+    constraints: &str,
+    test: impl FnOnce(&mut Resizer<'_, Sta>),
+) {
+    let rc = metal2_wires(db);
+    with_session_inputs(db, lib, constraints, rc, |inputs, sdc| {
+        test(&mut Resizer::timed(inputs, sdc).unwrap());
+    });
+}
+
 /// What `start` makes of the inputs of a session over `db` with the cells
 /// of `lib` and wires of `rc`, given `constraints` parsed.
 pub(crate) fn with_session_inputs<R>(
