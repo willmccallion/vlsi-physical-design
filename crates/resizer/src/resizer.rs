@@ -276,7 +276,6 @@ pub struct Resizer<'a, T: Timing = Untimed> {
     journal: Journal,
     dead_nets: Vec<NetId>,
     resized_multi_output: HashSet<CellId>,
-    inserted_buffers: usize,
     /// Drivers whose timing is to be found again at the next flush, while
     /// edits are batched.
     pending: Option<Vec<PinId>>,
@@ -429,7 +428,6 @@ impl<'a, T: Timing> Resizer<'a, T> {
             journal: Journal::default(),
             dead_nets: Vec::new(),
             resized_multi_output: HashSet::new(),
-            inserted_buffers: 0,
             pending: None,
             pending_nets: Vec::new(),
             nets_before_batch: 0,
@@ -1101,7 +1099,6 @@ impl<'a, T: Timing> Resizer<'a, T> {
         let output = self
             .connect(cell, buffer.id, buffer.output, new_net)
             .ok_or_else(|| RepairError::MissingPins(lib.name.clone()))?;
-        self.inserted_buffers += 1;
         {
             let netlist = Netlist::new(self.db, self.link);
             self.graph.grow(&netlist);

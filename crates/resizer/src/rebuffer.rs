@@ -125,7 +125,7 @@ pub struct Rebuffer {
     driver: Option<Driver>,
     /// Buffers taken out while rebuffering whole designs.
     pub removed: usize,
-    /// Buffers put in.
+    /// Buffers put in while rebuffering whole designs.
     pub inserted: usize,
 }
 
@@ -239,9 +239,7 @@ impl Rebuffer {
                 .recover_area(resizer, &tree, target, alpha)
                 .map_err(|AreaRecoveryFailed| area_recovery_error(resizer, driver))?;
         }
-        let inserted = export_tree(resizer, &tree, "rebuffer")?;
-        self.inserted += inserted;
-        Ok(inserted)
+        export_tree(resizer, &tree, "rebuffer")
     }
 
     /// Strips the buffers from every net and buffers it again for timing,
