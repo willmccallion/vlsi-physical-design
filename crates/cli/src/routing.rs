@@ -14,12 +14,9 @@ use pare_common::db::global_route::RouteSource;
 use pare_common::db::indices::{CellId, NetId};
 use pare_common::db::writer;
 use pare_common::memory;
-use pare_common::units::Ohms;
 use pare_placer::legalize::site::SiteGrid;
 use pare_placer::zones::Zones;
 use pare_resizer::GlobalRouting;
-use pare_resizer::RouteRc;
-use pare_resizer::WireRc;
 use pare_resizer::{Repairer, Resizer};
 use pare_router::{GlobalSession, Progress, Stage};
 use std::path::{Path, PathBuf};
@@ -75,12 +72,13 @@ fn write_state(path: &Path, state: &pare_router::RouteState) -> anyhow::Result<(
 pub(crate) fn global_route_with_repair(
     config: &Config,
     db: &mut NetlistDB,
-    repair: &mut NetlistRepair,
+    repair: &mut NetlistRepair<'_>,
     report: &mut Report,
 ) -> anyhow::Result<Option<GlobalSession>> {
-    if !config.netlist.repair_on_global_routes {
+    let plan = repair.plan;
+    let Some(route_rc) = &plan.on_global_routes else {
         return Ok(None);
-    }
+    };
     let Some(timed) = repair.timed() else {
         return Ok(None);
     };
@@ -89,7 +87,6 @@ pub(crate) fn global_route_with_repair(
     let mut tables = RouteTables::default();
     let mut session = GlobalSession::new(db, &config.routing, &mut |p| tables.show(p))?;
     timer.finish(report);
-    let route_rc = route_rc(config, db)?;
     let sites = SiteGrid::new(db).context("cannot lay out the core's site grid to legalize on")?;
     let legalize = |db: &mut NetlistDB, cell: CellId| sites.legalize(db, cell);
     let mut summary = GlobalRouteRepairSummary::default();
@@ -102,13 +99,13 @@ pub(crate) fn global_route_with_repair(
             continue;
         }
         let timer = PhaseTimer::start(step.phase());
-        let stage = timed.stage(config, db)?;
+        let stage = timed.stage(db)?;
         let routes = GlobalRouting {
             source: &mut session,
             rc: route_rc.clone(),
             legalize: &legalize,
         };
-        let inputs = stage.session(db, timed.wires, timed.namer);
+        let inputs = stage.session(db, plan.wires, timed.namer);
         let mut resizer = Resizer::on_global_routes(inputs, timed.sdc, routes)?;
         match step {
             RepairStep::Design => {
@@ -172,37 +169,6 @@ fn legalize_and_reroute(
     );
     timer.finish(report);
     Ok(())
-}
-
-/// Each routing layer's and cut layer's resistance and capacitance from
-/// the netlist config, for the global routes' parasitics.
-fn route_rc(config: &Config, db: &NetlistDB) -> anyhow::Result<RouteRc> {
-    let lib = &db.library;
-    let layers = config
-        .netlist
-        .layer_rc
-        .iter()
-        .map(|l| {
-            let id = lib
-                .routing_layer_id(&l.layer)
-                .with_context(|| format!("[netlist] layer_rc names unknown layer '{}'", l.layer))?;
-            let rc = WireRc::per_micron(l.resistance_ohm_per_um, l.capacitance_ff_per_um, id);
-            Ok((id, rc.resistance, rc.capacitance))
-        })
-        .collect::<anyhow::Result<Vec<_>>>()?;
-    let vias = config
-        .netlist
-        .via_rc
-        .iter()
-        .map(|v| {
-            let cut = lib.cut_layer_id(&v.layer).with_context(|| {
-                format!("[netlist] via_rc names unknown cut layer '{}'", v.layer)
-            })?;
-            Ok((cut, Ohms::new(v.resistance_ohm)))
-        })
-        .collect::<anyhow::Result<Vec<_>>>()?;
-    let min_layer = *config.routing.layer_range(lib)?.start();
-    Ok(RouteRc::new(lib, &layers, &vias, min_layer))
 }
 
 /// Writes `guides` to `path` in the ISPD 2018 route guide format: each net's

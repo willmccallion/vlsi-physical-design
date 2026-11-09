@@ -2,9 +2,10 @@
 //! repair and timing repair, and the wire parasitics they estimate with.
 
 use crate::phase::{Phase, PhaseTimer};
+use crate::plan::{ClockSource, RepairPlan, Wires};
 use crate::ui;
 use anyhow::Context;
-use pare_common::config::{Config, LayerRcConfig, NetlistConfig};
+use pare_common::config::Config;
 use pare_common::db::design::NetlistDB;
 use pare_common::db::liberty::Liberty;
 use pare_common::db::parser::{liberty, sdc};
@@ -12,7 +13,6 @@ use pare_common::db::sdc::Sdc;
 
 use crate::report::{DesignRepairSummary, NetlistSummary, Report, TimingSummary};
 use pare_resizer::Context as RepairContext;
-use pare_resizer::WireRc;
 use pare_resizer::{
     BufferSet, ClockNetwork, Constants, HoldOptions, HoldSummary, Link, Namer, Netlist, Repairer,
     Resizer, SessionInputs, SetupOptions, SetupProgress, SetupSummary, Sta, Timing, repair_hold,
@@ -54,69 +54,88 @@ fn duplicate_cell(merged: &Liberty, paths: &[PathBuf], path: &Path, name: &str) 
 }
 
 /// What the netlist steps before placement leave for the repair after it.
-pub(crate) struct NetlistRepair {
+pub(crate) struct NetlistRepair<'p> {
+    pub(crate) plan: &'p RepairPlan,
     pub(crate) liberty: Liberty,
-    pub(crate) wires: Wires,
-    pub(crate) sdc: Option<Sdc>,
+    pub(crate) constraints: Constraints<'p>,
     pub(crate) namer: Namer,
     pub(crate) summary: NetlistSummary,
 }
 
-impl NetlistRepair {
+impl NetlistRepair<'_> {
     /// The repair as the timed stages work on it, when the input has
     /// constraints.
-    pub(crate) fn timed(&mut self) -> Option<TimedRepair<'_>> {
+    pub(crate) const fn timed(&mut self) -> Option<TimedRepair<'_>> {
         let Self {
+            plan,
             liberty,
-            wires,
-            sdc,
+            constraints,
             namer,
             ..
         } = self;
+        let Constraints::Sdc(sdc) = constraints else {
+            return None;
+        };
         Some(TimedRepair {
+            plan,
             liberty,
-            wires: *wires,
-            sdc: sdc.as_mut()?,
+            sdc,
             namer,
         })
     }
 }
 
+/// The constraints a netlist repair works under.
+pub(crate) enum Constraints<'p> {
+    /// The SDC file's, which time the design.
+    Sdc(Box<Sdc>),
+    /// No timing, the clocks entering at these I/O pins.
+    Ports(&'p [String]),
+}
+
+impl Constraints<'_> {
+    /// Where the clocks come from.
+    const fn clocks(&self) -> Clocks<'_> {
+        match self {
+            Self::Sdc(sdc) => Clocks::Sdc(sdc),
+            Self::Ports(ports) => Clocks::Ports(ports),
+        }
+    }
+}
+
 /// A netlist repair whose input has constraints.
 pub(crate) struct TimedRepair<'r> {
+    pub(crate) plan: &'r RepairPlan,
     pub(crate) liberty: &'r Liberty,
-    pub(crate) wires: Wires,
     pub(crate) sdc: &'r mut Sdc,
     pub(crate) namer: &'r mut Namer,
 }
 
 impl<'r> TimedRepair<'r> {
     /// The stage `db` is at, its clocks those of the constraints.
-    pub(crate) fn stage(&self, config: &Config, db: &NetlistDB) -> anyhow::Result<Stage<'r>> {
-        Stage::find(config, db, self.liberty, Some(self.sdc))
+    pub(crate) fn stage(&self, db: &NetlistDB) -> anyhow::Result<Stage<'r>> {
+        Stage::find(db, self.plan, self.liberty, Clocks::Sdc(self.sdc))
     }
 }
 
-/// The pins the clocks reach: those the SDC file's clocks enter at when
-/// the input names one, else those `[netlist] clock_ports` names.
+/// Where a repair stage finds the clocks.
+#[derive(Clone, Copy, Debug)]
+pub(crate) enum Clocks<'a> {
+    /// Where the SDC file's clocks enter.
+    Sdc(&'a Sdc),
+    /// At these I/O pins.
+    Ports(&'a [String]),
+}
+
+/// The pins the clocks reach from where they enter.
 fn clock_network(
     netlist: &Netlist<'_>,
-    config: &Config,
-    sdc: Option<&Sdc>,
+    clocks: Clocks<'_>,
     constants: &Constants,
 ) -> anyhow::Result<ClockNetwork> {
-    match sdc {
-        Some(sdc) => {
-            if !config.netlist.clock_ports.is_empty() {
-                anyhow::bail!("[netlist] clock_ports must be empty when [input] sdc_file is set");
-            }
-            Ok(ClockNetwork::from_sdc(netlist, sdc, constants))
-        }
-        None => Ok(ClockNetwork::from_ports(
-            netlist,
-            &config.netlist.clock_ports,
-            constants,
-        )?),
+    match clocks {
+        Clocks::Sdc(sdc) => Ok(ClockNetwork::from_sdc(netlist, sdc, constants)),
+        Clocks::Ports(ports) => Ok(ClockNetwork::from_ports(netlist, ports, constants)?),
     }
 }
 
@@ -131,17 +150,18 @@ pub(crate) struct Stage<'l> {
 }
 
 impl<'l> Stage<'l> {
-    /// Links `db` as it stands to `liberty` and finds its networks.
+    /// Links `db` as it stands to `liberty`, without the cells `plan` keeps
+    /// repair from, and finds its networks.
     pub(crate) fn find(
-        config: &Config,
         db: &NetlistDB,
+        plan: &RepairPlan,
         liberty: &'l Liberty,
-        sdc: Option<&Sdc>,
+        clocks: Clocks<'_>,
     ) -> anyhow::Result<Self> {
-        let link = Link::new(db, liberty, &config.netlist.dont_use)?;
+        let link = Link::new(db, liberty, &plan.dont_use)?;
         let netlist = Netlist::new(db, &link);
         let constants = Constants::find(&netlist);
-        let clocks = clock_network(&netlist, config, sdc, &constants)?;
+        let clocks = clock_network(&netlist, clocks, &constants)?;
         let buffers = link.find_buffers(db)?;
         Ok(Self {
             link,
@@ -173,27 +193,24 @@ impl<'l> Stage<'l> {
     }
 }
 
-/// Strips the buffers synthesis left and buffers the ports, as
-/// OpenROAD-flow-scripts does before placing, when the config names Liberty
-/// files.
-pub(crate) fn repair_netlist(
+/// Reads the Liberty files and the constraints `plan` names, then strips
+/// the buffers synthesis left and buffers the ports, as
+/// OpenROAD-flow-scripts does before placing.
+pub(crate) fn repair_netlist<'p>(
     config: &Config,
+    plan: &'p RepairPlan,
     db: &mut NetlistDB,
     report: &mut Report,
-) -> anyhow::Result<Option<NetlistRepair>> {
-    if config.input.liberty_files.is_empty() {
-        return Ok(None);
-    }
-    let wires = Wires::from_config(&config.netlist, db)?;
+) -> anyhow::Result<NetlistRepair<'p>> {
     let liberty = load_liberty(&config.input.liberty_files)?;
-    let sdc = match &config.input.sdc_file {
-        Some(path) => {
+    let constraints = match &plan.clocks {
+        ClockSource::Sdc(path) => {
             ui::header("Input", &path.display().to_string());
-            Some(sdc::parse_file(path, db, &liberty)?)
+            Constraints::Sdc(Box::new(sdc::parse_file(path, db, &liberty)?))
         }
-        None => None,
+        ClockSource::Ports(ports) => Constraints::Ports(ports),
     };
-    let link = Link::new(db, &liberty, &config.netlist.dont_use)?;
+    let link = Link::new(db, &liberty, &plan.dont_use)?;
     ui::section("Netlist");
     let mut namer = Namer::new();
     let mut summary = NetlistSummary::default();
@@ -211,7 +228,7 @@ pub(crate) fn repair_netlist(
     }
     if config.netlist.buffer_ports {
         let timer = PhaseTimer::start(Phase::PortBuffering);
-        let stage = Stage::find(config, db, &liberty, sdc.as_ref())?;
+        let stage = Stage::find(db, plan, &liberty, constraints.clocks())?;
         let done = pare_resizer::buffer_ports(
             db,
             &stage.link,
@@ -240,13 +257,13 @@ pub(crate) fn repair_netlist(
         timer.finish(report);
     }
     report.netlist = Some(summary.clone());
-    Ok(Some(NetlistRepair {
+    Ok(NetlistRepair {
+        plan,
         liberty,
-        wires,
-        sdc,
+        constraints,
         namer,
         summary,
-    }))
+    })
 }
 
 /// Resizes drivers and inserts repeaters where the placed netlist breaks
@@ -255,18 +272,19 @@ pub(crate) fn repair_netlist(
 pub(crate) fn repair_design(
     config: &Config,
     db: &mut NetlistDB,
-    repair: &mut NetlistRepair,
+    repair: &mut NetlistRepair<'_>,
     report: &mut Report,
 ) -> anyhow::Result<()> {
     if !config.netlist.repair_design {
         return Ok(());
     }
     let timer = PhaseTimer::start(Phase::DesignRepair);
-    let stage = Stage::find(config, db, &repair.liberty, repair.sdc.as_ref())?;
-    let inputs = stage.session(db, repair.wires, &mut repair.namer);
-    let done = match repair.sdc.as_ref() {
-        Some(sdc) => repair_design_on(Resizer::timed(inputs, sdc)?)?,
-        None => repair_design_on(Resizer::new(inputs)?)?,
+    let clocks = repair.constraints.clocks();
+    let stage = Stage::find(db, repair.plan, &repair.liberty, clocks)?;
+    let inputs = stage.session(db, repair.plan.wires, &mut repair.namer);
+    let done = match clocks {
+        Clocks::Sdc(sdc) => repair_design_on(Resizer::timed(inputs, sdc)?)?,
+        Clocks::Ports(_) => repair_design_on(Resizer::new(inputs)?)?,
     };
     repair.summary.design = DesignRepairSummary::of(&done);
     report.netlist = Some(repair.summary.clone());
@@ -312,7 +330,7 @@ pub(crate) fn show_design_repair(done: &pare_resizer::RepairSummary, cells: usiz
 pub(crate) fn repair_timing(
     config: &Config,
     db: &mut NetlistDB,
-    repair: &mut NetlistRepair,
+    repair: &mut NetlistRepair<'_>,
     report: &mut Report,
 ) -> anyhow::Result<bool> {
     if !config.netlist.repair_timing {
@@ -322,8 +340,8 @@ pub(crate) fn repair_timing(
         return Ok(false);
     };
     let timer = PhaseTimer::start(Phase::TimingRepair);
-    let stage = timed.stage(config, db)?;
-    let mut resizer = Resizer::timed(stage.session(db, timed.wires, timed.namer), timed.sdc)?;
+    let stage = timed.stage(db)?;
+    let mut resizer = Resizer::timed(stage.session(db, timed.plan.wires, timed.namer), timed.sdc)?;
     report.timing = Some(timing_repair_on(&mut resizer, timed.liberty)?);
     let _ = resizer.finish()?;
     timer.finish(report);
@@ -424,115 +442,12 @@ fn show_timing_repair(setup: &SetupSummary, hold: &HoldSummary, liberty: &Libert
     );
 }
 
-/// The wires repair estimates parasitics with, as `set_wire_rc` sets them.
-#[derive(Clone, Copy, Debug, PartialEq)]
-pub(crate) struct Wires {
-    /// The signal wire, as `set_wire_rc -signal`.
-    pub(crate) signal: WireRc,
-    /// The clock wire, as `set_wire_rc -clock`, when the config has one.
-    pub(crate) clock: Option<WireRc>,
-}
-
-impl Wires {
-    /// The wires the netlist config names, on their layers of `db`.
-    fn from_config(config: &NetlistConfig, db: &NetlistDB) -> anyhow::Result<Self> {
-        let signal = config
-            .signal_wire
-            .as_ref()
-            .context("[netlist] repair needs signal_wire")?;
-        Ok(Self {
-            signal: layer_wire_rc(signal, db).context("[netlist] signal_wire")?,
-            clock: config
-                .clock_wire
-                .as_ref()
-                .map(|wire| layer_wire_rc(wire, db).context("[netlist] clock_wire"))
-                .transpose()?,
-        })
-    }
-}
-
-fn layer_wire_rc(wire: &LayerRcConfig, db: &NetlistDB) -> anyhow::Result<WireRc> {
-    let layer = db
-        .library
-        .routing_layer_id(&wire.layer)
-        .with_context(|| format!("unknown routing layer '{}'", wire.layer))?;
-    Ok(WireRc::per_micron(
-        wire.resistance_ohm_per_um,
-        wire.capacitance_ff_per_um,
-        layer,
-    ))
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::testing::{cts_fixture, scratch_dir, tiny, tiny_config};
+    use crate::testing::{cts_fixture, scratch_dir, tiny};
     use pare_common::db::design::PinOwner;
     use pare_common::db::indices::PinId;
-
-    fn wire(layer: &str) -> LayerRcConfig {
-        LayerRcConfig {
-            layer: layer.to_string(),
-            resistance_ohm_per_um: 2.0,
-            capacitance_ff_per_um: 0.5,
-        }
-    }
-
-    #[test]
-    fn wires_take_their_layers_and_rc_from_the_config() {
-        let db = tiny();
-        let config = NetlistConfig {
-            signal_wire: Some(wire("M1")),
-            clock_wire: Some(wire("M1")),
-            ..NetlistConfig::default()
-        };
-
-        let wires = Wires::from_config(&config, &db).unwrap();
-
-        let m1 = WireRc::per_micron(2.0, 0.5, db.library.routing_layer_id("M1").unwrap());
-        assert_eq!(
-            wires,
-            Wires {
-                signal: m1,
-                clock: Some(m1)
-            }
-        );
-    }
-
-    #[test]
-    fn wires_without_a_clock_wire_estimate_clocks_as_signals() {
-        let config = NetlistConfig {
-            signal_wire: Some(wire("M1")),
-            ..NetlistConfig::default()
-        };
-
-        let wires = Wires::from_config(&config, &tiny()).unwrap();
-
-        assert_eq!(wires.clock, None);
-    }
-
-    #[test]
-    fn wires_need_a_signal_wire() {
-        let error = Wires::from_config(&NetlistConfig::default(), &tiny()).unwrap_err();
-
-        assert_eq!(error.to_string(), "[netlist] repair needs signal_wire");
-    }
-
-    #[test]
-    fn a_wire_on_an_unknown_layer_names_the_layer() {
-        let config = NetlistConfig {
-            signal_wire: Some(wire("M1")),
-            clock_wire: Some(wire("M9")),
-            ..NetlistConfig::default()
-        };
-
-        let error = Wires::from_config(&config, &tiny()).unwrap_err();
-
-        assert_eq!(
-            format!("{error:#}"),
-            "[netlist] clock_wire: unknown routing layer 'M9'"
-        );
-    }
 
     fn clock_lib() -> PathBuf {
         cts_fixture("clock.lib")
@@ -593,19 +508,21 @@ mod tests {
     }
 
     /// The clock network `clock_network` finds in the tiny design, linked to
-    /// the clock library, for `config` and the SDC `constraints`.
+    /// the clock library, for the SDC `constraints` when given, else the
+    /// clock `ports`.
     fn tiny_clock_network(
-        config: &Config,
+        ports: &[String],
         constraints: Option<&str>,
     ) -> (NetlistDB, anyhow::Result<ClockNetwork>) {
         let db = tiny();
         let liberty = load_liberty(&[clock_lib()]).unwrap();
         let sdc = constraints
             .map(|text| sdc::parse_str(text, Path::new("tiny.sdc"), &db, &liberty).unwrap());
+        let clocks = sdc.as_ref().map_or(Clocks::Ports(ports), Clocks::Sdc);
         let link = Link::new(&db, &liberty, &[]).unwrap();
         let netlist = Netlist::new(&db, &link);
         let constants = Constants::find(&netlist);
-        let network = clock_network(&netlist, config, sdc.as_ref(), &constants);
+        let network = clock_network(&netlist, clocks, &constants);
         (db, network)
     }
 
@@ -625,25 +542,21 @@ mod tests {
 
     #[test]
     fn without_an_sdc_file_the_clock_ports_are_the_clocks() {
-        let config = tiny_config("[netlist]\nclock_ports = [\"in\"]");
-
-        let (db, network) = tiny_clock_network(&config, None);
+        let (db, network) = tiny_clock_network(&["in".to_string()], None);
 
         assert!(network.unwrap().is_clock(u1_input(&db)));
     }
 
     #[test]
     fn without_clock_ports_or_an_sdc_file_nothing_is_a_clock() {
-        let (db, network) = tiny_clock_network(&tiny_config(""), None);
+        let (db, network) = tiny_clock_network(&[], None);
 
         assert!(!network.unwrap().is_clock(u1_input(&db)));
     }
 
     #[test]
     fn an_unknown_clock_port_is_an_error() {
-        let config = tiny_config("[netlist]\nclock_ports = [\"clk\"]");
-
-        let (_, network) = tiny_clock_network(&config, None);
+        let (_, network) = tiny_clock_network(&["clk".to_string()], None);
 
         assert_eq!(
             network.unwrap_err().to_string(),
@@ -653,21 +566,9 @@ mod tests {
 
     #[test]
     fn with_an_sdc_file_its_clocks_are_the_clocks() {
-        let (db, network) = tiny_clock_network(&tiny_config(""), Some(CLOCK_ON_IN));
+        let (db, network) = tiny_clock_network(&[], Some(CLOCK_ON_IN));
 
         assert!(network.unwrap().is_clock(u1_input(&db)));
-    }
-
-    #[test]
-    fn clock_ports_beside_an_sdc_file_are_an_error() {
-        let config = tiny_config("[netlist]\nclock_ports = [\"in\"]");
-
-        let (_, network) = tiny_clock_network(&config, Some(CLOCK_ON_IN));
-
-        assert_eq!(
-            network.unwrap_err().to_string(),
-            "[netlist] clock_ports must be empty when [input] sdc_file is set"
-        );
     }
 
     #[test]
