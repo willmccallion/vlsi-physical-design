@@ -222,7 +222,7 @@ impl Placer {
     /// `Opendp::groupAssignCellRegions`.
     fn assign_cell_regions(&mut self) {
         for g in self.groups.ids() {
-            let mut site_area = DbuArea(0);
+            let mut site_area = DbuArea::ZERO;
             if !self.groups[g].cells.is_empty() {
                 for x in GridX::ZERO.until(self.row_site_count) {
                     for y in GridY::ZERO.until(self.row_count) {
@@ -230,8 +230,7 @@ impl Placer {
                             .pixel(x, y)
                             .is_some_and(|p| p.valid && p.group() == Some(g))
                         {
-                            let pixel_area = self.pixel_height(y).get() * self.site_width.get();
-                            site_area = DbuArea(site_area.get() + pixel_area);
+                            site_area += self.pixel_height(y) * self.site_width;
                         }
                     }
                 }
@@ -239,7 +238,7 @@ impl Placer {
             let mut cell_area = 0.0;
             for k in 0..self.groups[g].cells.len() {
                 let n = self.groups[g].cells[k];
-                cell_area += area(&self.nodes[n]).get() as f64;
+                cell_area += area(&self.nodes[n]).to_f64();
                 let mut region = None;
                 for (r, rect) in self.groups[g].rects.iter().enumerate() {
                     if is_inside(&self.nodes[n], rect) {
@@ -248,10 +247,10 @@ impl Placer {
                 }
                 self.nodes[n].region = Some(region.unwrap_or(0));
             }
-            self.groups[g].util = if site_area == DbuArea(0) {
+            self.groups[g].util = if site_area == DbuArea::ZERO {
                 0.0
             } else {
-                cell_area / site_area.get() as f64
+                cell_area / site_area.to_f64()
             };
         }
     }

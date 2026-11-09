@@ -9,7 +9,7 @@ use crate::rows::{RowSpan, blocked_stretches, expand_rows, free_intervals};
 use crate::zones::{Zone, ZoneId, Zones};
 use pare_common::db::design::{NetlistDB, PinOwner, PlacementStatus};
 use pare_common::db::indices::{CellId, IdVec, NetId, PinId};
-use pare_common::geom::dbu::{Dbu, DbuPerMicron};
+use pare_common::geom::dbu::{Dbu, DbuArea, DbuPerMicron};
 use pare_common::geom::point::Point;
 use pare_common::geom::rect::Rect;
 
@@ -192,16 +192,16 @@ fn pin_density_sizes(db: &NetlistDB) -> IdVec<CellId, Point<Dbu>> {
         let pins = &db.cell_macro(i).pins;
         pins.iter().filter(|p| !p.signal_use.is_supply()).count()
     };
-    let area = |s: Point<Dbu>| s.x.get() * s.y.get();
-    let (mut total_pins, mut movable_area) = (0, 0);
+    let area = |s: Point<Dbu>| s.x * s.y;
+    let (mut total_pins, mut movable_area) = (0, DbuArea::ZERO);
     for i in db.cells.ids() {
         if db.cells[i].status.is_movable() {
             total_pins += signal_pins(i);
             movable_area += area(db.cell_size(i));
         }
     }
-    let average = if movable_area > 0 {
-        total_pins as f64 / movable_area as f64
+    let average = if movable_area > DbuArea::ZERO {
+        total_pins as f64 / movable_area.to_f64()
     } else {
         0.0
     };
@@ -210,11 +210,15 @@ fn pin_density_sizes(db: &NetlistDB) -> IdVec<CellId, Point<Dbu>> {
         .map(|i| {
             let size = db.cell_size(i);
             let pins = signal_pins(i);
-            if !db.cells[i].status.is_movable() || pins <= 2 || average <= 0.0 || area(size) == 0 {
+            if !db.cells[i].status.is_movable()
+                || pins <= 2
+                || average <= 0.0
+                || area(size) == DbuArea::ZERO
+            {
                 return size;
             }
             let target = pins as f64 / average;
-            let scale = (target / area(size) as f64).sqrt().clamp(0.95, 1.2);
+            let scale = (target / area(size).to_f64()).sqrt().clamp(0.95, 1.2);
             let scaled = |side: Dbu| Dbu((side.get() as f64 * scale) as i64 / 2 * 2);
             Point::new(scaled(size.x), scaled(size.y))
         })

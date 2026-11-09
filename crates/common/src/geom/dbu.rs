@@ -116,10 +116,19 @@ impl Sum for Dbu {
 pub struct DbuArea(pub i64);
 
 impl DbuArea {
+    /// No area.
+    pub const ZERO: Self = Self(0);
+
     /// Returns the raw integer value.
     #[must_use]
     pub const fn get(self) -> i64 {
         self.0
+    }
+
+    /// Converts to `f64` without scaling.
+    #[must_use]
+    pub const fn to_f64(self) -> f64 {
+        self.0 as f64
     }
 }
 
@@ -127,6 +136,12 @@ impl Add for DbuArea {
     type Output = Self;
     fn add(self, rhs: Self) -> Self {
         Self(self.0 + rhs.0)
+    }
+}
+
+impl AddAssign for DbuArea {
+    fn add_assign(&mut self, rhs: Self) {
+        self.0 += rhs.0;
     }
 }
 

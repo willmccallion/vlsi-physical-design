@@ -1490,8 +1490,8 @@ fn has_one_site_master(db: &NetlistDB) -> bool {
 }
 
 /// The area of a node's master.
-const fn area(node: &Node) -> DbuArea {
-    DbuArea(node.master_size.x.get() * node.master_size.y.get())
+fn area(node: &Node) -> DbuArea {
+    node.master_size.x * node.master_size.y
 }
 
 /// The core's center, rounding toward zero as `OpenDP`'s `int` halves do.
