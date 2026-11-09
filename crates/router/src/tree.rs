@@ -45,19 +45,13 @@ pub fn gap(a: &Rect<Dbu>, b: &Rect<Dbu>) -> Dbu {
 fn prim(pins: &[Rect<Dbu>]) -> (usize, Vec<Join>) {
     let n = pins.len();
     let mut joined = vec![false; n];
-    let mut best: Vec<(Dbu, usize)> = vec![(Dbu(i64::MAX), 0); n];
+    let Some(first) = pins.first() else {
+        return (0, Vec::new());
+    };
+    let mut best: Vec<(Dbu, usize)> = pins.iter().map(|p| (gap(p, first), 0)).collect();
     let mut joins = Vec::with_capacity(n.saturating_sub(1));
-    let mut current = 0;
     joined[0] = true;
     for _ in 1..n {
-        for (i, b) in best.iter_mut().enumerate() {
-            if !joined[i] {
-                let d = gap(&pins[i], &pins[current]);
-                if d < b.0 {
-                    *b = (d, current);
-                }
-            }
-        }
         let Some(next) = (0..n)
             .filter(|&i| !joined[i])
             .min_by_key(|&i| (best[i].0, i))
@@ -69,7 +63,14 @@ fn prim(pins: &[Rect<Dbu>]) -> (usize, Vec<Join>) {
             pin: next,
             parent: best[next].1,
         });
-        current = next;
+        for (i, b) in best.iter_mut().enumerate() {
+            if !joined[i] {
+                let d = gap(&pins[i], &pins[next]);
+                if d < b.0 {
+                    *b = (d, next);
+                }
+            }
+        }
     }
     (0, joins)
 }
