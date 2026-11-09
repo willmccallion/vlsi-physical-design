@@ -1004,12 +1004,9 @@ impl<'a> LefParser<'a, '_> {
         m.obstructions = obstructions;
         m.edges = edges;
         for pin in pins {
-            let pin_name = pin.name.clone();
-            if m.add_pin(pin).is_none() {
-                return Err(self
-                    .lx
-                    .error(line, format!("macro '{name}' repeats pin '{pin_name}'")));
-            }
+            let _ = m
+                .add_pin(pin)
+                .map_err(|e| self.lx.error(line, format!("macro '{name}': {e}")))?;
         }
         let _ = self
             .lib
@@ -1105,7 +1102,7 @@ fn via_rule_from_layers(
     let [(bottom, b), (top, t)] = metals[..] else {
         return Err(format!("via rule '{name}' needs exactly two metal layers"));
     };
-    if bottom != cut.below() || top != cut.above() {
+    if bottom != cut.below() || Some(top) != cut.above() {
         return Err(format!(
             "via rule '{name}' names metal layers its cut does not touch"
         ));
@@ -1152,7 +1149,7 @@ pub(crate) fn via_from_shapes(
         return Err(format!("via '{name}' spans more than one cut layer"));
     }
     let stray = shapes.iter().any(|s| match s.layer {
-        LayerRef::Routing(l) => l != cut.below() && l != cut.above(),
+        LayerRef::Routing(l) => l != cut.below() && Some(l) != cut.above(),
         LayerRef::Cut(_) => false,
     });
     if stray {

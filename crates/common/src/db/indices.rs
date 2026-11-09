@@ -6,6 +6,8 @@ use std::ops::{Index, IndexMut};
 
 /// A typed position in one kind of table, as [`define_index!`](crate::define_index) makes them.
 pub trait TableIndex: Copy {
+    /// How many table positions the index type counts.
+    const CAPACITY: usize;
     /// The index of table position `index`.
     fn from_position(index: usize) -> Self;
     /// The table position.
@@ -22,10 +24,12 @@ macro_rules! define_index {
         pub struct $name(pub $repr);
 
         impl $name {
-            /// Creates an index from a table position.
+            /// Creates an index from a table position, which must be one
+            /// the type counts: tables refuse entries past it when filled
+            /// through [`IdVec::try_next_id`]($crate::db::indices::IdVec::try_next_id).
             #[inline]
             pub const fn new(index: usize) -> Self {
-                debug_assert!(index <= <$repr>::MAX as usize, "table position past the index type");
+                assert!(index <= <$repr>::MAX as usize, "table position past the index type");
                 Self(index as $repr)
             }
 
@@ -37,6 +41,8 @@ macro_rules! define_index {
         }
 
         impl $crate::db::indices::TableIndex for $name {
+            const CAPACITY: usize = <$repr>::MAX as usize + 1;
+
             #[inline]
             fn from_position(index: usize) -> Self {
                 Self::new(index)
@@ -54,6 +60,16 @@ macro_rules! define_index {
             }
         }
     };
+}
+
+/// A table that already holds as many entries as its index type counts.
+#[derive(Clone, Debug, PartialEq, Eq, thiserror::Error)]
+#[error("more than {capacity} {kind}s")]
+pub struct TableFull {
+    /// What the table holds.
+    pub kind: &'static str,
+    /// How many entries it can hold.
+    pub capacity: usize,
 }
 
 /// A table indexed only by its own index type `I`, so that indexing it
@@ -123,6 +139,20 @@ impl<I: TableIndex, T> IdVec<I, T> {
     /// The index the next [`Self::push`] gives its entry.
     pub fn next_id(&self) -> I {
         I::from_position(self.entries.len())
+    }
+
+    /// The index the next [`Self::push`] gives its entry, or an error naming
+    /// the table's entries `kind` when it already holds every index `I`
+    /// counts.
+    pub fn try_next_id(&self, kind: &'static str) -> Result<I, TableFull> {
+        if self.entries.len() < I::CAPACITY {
+            Ok(self.next_id())
+        } else {
+            Err(TableFull {
+                kind,
+                capacity: I::CAPACITY,
+            })
+        }
     }
 
     /// Appends `entry`, returning its index.
@@ -374,10 +404,12 @@ impl LayerId {
         }
     }
 
-    /// The routing layer directly above this one.
-    #[must_use]
-    pub const fn above(self) -> Self {
-        Self(self.0 + 1)
+    /// The routing layer directly above this one, if its id can be counted.
+    pub const fn above(self) -> Option<Self> {
+        match self.0.checked_add(1) {
+            Some(layer) => Some(Self(layer)),
+            None => None,
+        }
     }
 
     /// The routing layer one step from this one toward `target`, or `target`
@@ -405,9 +437,9 @@ impl CutLayerId {
         LayerId(self.0)
     }
 
-    /// The routing layer above this cut.
-    pub const fn above(self) -> LayerId {
-        LayerId(self.0 + 1)
+    /// The routing layer above this cut, if its id can be counted.
+    pub const fn above(self) -> Option<LayerId> {
+        self.below().above()
     }
 }
 
@@ -442,6 +474,27 @@ mod tests {
 
         assert_eq!(listed, vec![(PinId(0), "p0"), (PinId(1), "p1")]);
         assert_eq!(names.ids().collect::<Vec<_>>(), vec![PinId(0), PinId(1)]);
+    }
+
+    #[test]
+    fn the_top_layer_id_has_no_layer_above() {
+        assert_eq!(LayerId(u8::MAX).above(), None);
+        assert_eq!(CutLayerId(u8::MAX).above(), None);
+        assert_eq!(CutLayerId(3).above(), Some(LayerId(4)));
+    }
+
+    #[test]
+    fn a_full_table_has_no_next_id() {
+        let mut layers: IdVec<LayerId, ()> = IdVec::filled((), 255);
+        assert_eq!(layers.try_next_id("layer"), Ok(LayerId(255)));
+        let _ = layers.push(());
+
+        let full = layers.try_next_id("layer");
+
+        assert_eq!(
+            full.map_err(|e| e.to_string()),
+            Err("more than 256 layers".to_string())
+        );
     }
 
     #[test]

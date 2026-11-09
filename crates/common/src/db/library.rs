@@ -1,7 +1,7 @@
 //! Technology and cell library: layers, sites, cell masters and vias.
 
 use crate::db::indices::{
-    CutLayerId, IdVec, LayerId, MacroId, MacroPinId, SiteId, ViaId, ViaRuleId,
+    CutLayerId, IdVec, LayerId, MacroId, MacroPinId, SiteId, TableFull, ViaId, ViaRuleId,
 };
 use crate::db::rules::{
     CellEdge, CutLayerRules, CutSpacingCondition, Lef58CutSpacingCondition, LibraryRules,
@@ -368,15 +368,12 @@ impl Macro {
         }
     }
 
-    /// Adds a pin, returning `None` if one with that name exists.
-    pub fn add_pin(&mut self, pin: MacroPin) -> Option<MacroPinId> {
-        let id = self.pins.next_id();
-        if self.pin_by_name.contains_key(&pin.name) {
-            return None;
-        }
-        let _ = self.pin_by_name.insert(pin.name.clone(), id);
+    /// Adds a pin, failing if one with that name exists.
+    pub fn add_pin(&mut self, pin: MacroPin) -> Result<MacroPinId, AddError> {
+        let id = self.pins.try_next_id("pin")?;
+        insert_unique(&mut self.pin_by_name, "pin", &pin.name, id)?;
         let _ = self.pins.push(pin);
-        Some(id)
+        Ok(id)
     }
 
     /// Looks up a pin by name.
@@ -440,8 +437,8 @@ impl ViaDef {
         self.cut.below()
     }
 
-    /// The routing layer above the cut.
-    pub const fn top(&self) -> LayerId {
+    /// The routing layer above the cut, if its id can be counted.
+    pub const fn top(&self) -> Option<LayerId> {
         self.cut.above()
     }
 }
@@ -469,6 +466,17 @@ pub struct Library {
     site_by_name: HashMap<String, SiteId>,
     macro_by_name: HashMap<String, MacroId>,
     via_by_name: HashMap<String, ViaId>,
+}
+
+/// Why an entry was not added to a library table.
+#[derive(Clone, Debug, PartialEq, Eq, thiserror::Error)]
+pub enum AddError {
+    /// Its name is taken.
+    #[error(transparent)]
+    Duplicate(#[from] DuplicateName),
+    /// Its table holds every index there is.
+    #[error(transparent)]
+    Full(#[from] TableFull),
 }
 
 /// A library entry whose name is already taken.
@@ -501,16 +509,16 @@ impl Library {
     }
 
     /// Appends the next routing layer of the stack.
-    pub fn add_routing_layer(&mut self, layer: RoutingLayer) -> Result<LayerId, DuplicateName> {
-        let id = self.routing_layers.next_id();
+    pub fn add_routing_layer(&mut self, layer: RoutingLayer) -> Result<LayerId, AddError> {
+        let id = self.routing_layers.try_next_id("routing layer")?;
         self.claim_layer_name(&layer.name, LayerRef::Routing(id))?;
         let _ = self.routing_layers.push(layer);
         Ok(id)
     }
 
     /// Appends the next cut layer of the stack.
-    pub fn add_cut_layer(&mut self, layer: CutLayer) -> Result<CutLayerId, DuplicateName> {
-        let id = self.cut_layers.next_id();
+    pub fn add_cut_layer(&mut self, layer: CutLayer) -> Result<CutLayerId, AddError> {
+        let id = self.cut_layers.try_next_id("cut layer")?;
         self.claim_layer_name(&layer.name, LayerRef::Cut(id))?;
         let _ = self.cut_layers.push(layer);
         Ok(id)
@@ -528,24 +536,24 @@ impl Library {
     }
 
     /// Adds a site.
-    pub fn add_site(&mut self, site: Site) -> Result<SiteId, DuplicateName> {
-        let id = self.sites.next_id();
+    pub fn add_site(&mut self, site: Site) -> Result<SiteId, AddError> {
+        let id = self.sites.try_next_id("site")?;
         insert_unique(&mut self.site_by_name, "site", &site.name, id)?;
         let _ = self.sites.push(site);
         Ok(id)
     }
 
     /// Adds a cell master.
-    pub fn add_macro(&mut self, m: Macro) -> Result<MacroId, DuplicateName> {
-        let id = self.macros.next_id();
+    pub fn add_macro(&mut self, m: Macro) -> Result<MacroId, AddError> {
+        let id = self.macros.try_next_id("macro")?;
         insert_unique(&mut self.macro_by_name, "macro", &m.name, id)?;
         let _ = self.macros.push(m);
         Ok(id)
     }
 
     /// Adds a via definition.
-    pub fn add_via(&mut self, via: ViaDef) -> Result<ViaId, DuplicateName> {
-        let id = self.vias.next_id();
+    pub fn add_via(&mut self, via: ViaDef) -> Result<ViaId, AddError> {
+        let id = self.vias.try_next_id("via")?;
         insert_unique(&mut self.via_by_name, "via", &via.name, id)?;
         let _ = self.vias.push(via);
         Ok(id)
@@ -641,4 +649,43 @@ fn insert_unique<I: Copy>(
     }
     let _ = map.insert(name.to_string(), id);
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn routing_layer(name: String) -> RoutingLayer {
+        RoutingLayer {
+            name,
+            direction: Direction::Horizontal,
+            pitch_x: Dbu(200),
+            pitch_y: Dbu(200),
+            offset_x: None,
+            offset_y: None,
+            width: Dbu(100),
+            min_spacing: Dbu(100),
+            spacing_table: None,
+            rules: RoutingLayerRules::default(),
+            electrical: LayerElectrical::default(),
+        }
+    }
+
+    #[test]
+    fn a_routing_layer_past_what_layer_ids_count_is_refused() {
+        let mut library = Library::new(DbuPerMicron::new(1000).unwrap());
+        for k in 0..256 {
+            assert!(
+                library
+                    .add_routing_layer(routing_layer(format!("m{k}")))
+                    .is_ok()
+            );
+        }
+
+        let refused = library.add_routing_layer(routing_layer("m256".into()));
+
+        assert!(refused.is_err());
+        assert_eq!(library.routing_layers.len(), 256);
+        assert_eq!(library.layer_ref("m256"), None);
+    }
 }

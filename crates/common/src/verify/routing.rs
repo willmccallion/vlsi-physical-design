@@ -65,7 +65,7 @@ fn shapes_connect(a: &Shape, b: &Shape) -> bool {
         (LayerRef::Routing(x), LayerRef::Routing(y)) if x == y => shares_a_side(a, b),
         (LayerRef::Cut(x), LayerRef::Cut(y)) if x == y => shares_a_side(a, b),
         (LayerRef::Cut(c), LayerRef::Routing(m)) | (LayerRef::Routing(m), LayerRef::Cut(c)) => {
-            (m == c.below() || m == c.above()) && a.rect.overlaps(&b.rect)
+            (m == c.below() || Some(m) == c.above()) && a.rect.overlaps(&b.rect)
         }
         _ => false,
     }

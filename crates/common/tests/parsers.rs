@@ -200,7 +200,7 @@ fn lef_default_vias_are_found_per_cut() {
 
     let via = lib.via(lib.default_via(CutLayerId(0)).unwrap());
     assert_eq!(via.name, "M1M2");
-    assert_eq!((via.bottom(), via.top()), (LayerId(0), LayerId(1)));
+    assert_eq!((via.bottom(), via.top()), (LayerId(0), Some(LayerId(1))));
 }
 
 #[test]
