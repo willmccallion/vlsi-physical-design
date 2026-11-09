@@ -1055,6 +1055,7 @@ impl Builder {
             TreePoint::new(px - target + (py - y).abs(), y),
             TreePoint::new(px + target - (py - y).abs(), y),
         ];
+        // NOTE: OpenROAD marks no best with a DBL_MIN point (noBest); PARE with None.
         let mut best = None;
         let mut best_cost = f64::MAX;
         for c in candidates {
@@ -1072,7 +1073,7 @@ impl Builder {
                 best_cost = cost;
             }
         }
-        best.filter(|b| !b.same(TreePoint::new(f64::MIN_POSITIVE, f64::MIN_POSITIVE)))
+        best
     }
 
     /// The legal point at the target from the parent, toward the search's
@@ -1098,6 +1099,7 @@ impl Builder {
             (10.0 * w, 10.0 * h),
             direction,
         ));
+        // NOTE: OpenROAD marks no best with a DBL_MIN point (noBest); PARE with None.
         let mut best = None;
         let mut best_cost = f64::MAX;
         for c in candidates {
@@ -1111,8 +1113,7 @@ impl Builder {
                 }
             }
         }
-        best.filter(|b| !b.same(TreePoint::new(f64::MIN_POSITIVE, f64::MIN_POSITIVE)))
-            .unwrap_or(branch)
+        best.unwrap_or(branch)
     }
 
     /// Writes the buffers and subnets of the tree, as
