@@ -190,8 +190,6 @@ pub enum AxisVariable {
     RelatedPinTransition,
     /// The slew at the constrained pin of a check, in seconds.
     ConstrainedPinTransition,
-    /// A quantity lookups do not vary: a power axis.
-    Other,
 }
 
 /// The quantities a lookup may vary along the axes of a table.
@@ -349,7 +347,6 @@ impl Axis {
             AxisVariable::RelatedOutputCapacitance => inputs.related_cap.get(),
             AxisVariable::RelatedPinTransition => inputs.related_slew.get(),
             AxisVariable::ConstrainedPinTransition => inputs.constrained_slew.get(),
-            AxisVariable::Other => 0.0,
         }
     }
 }
