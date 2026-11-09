@@ -136,6 +136,20 @@ struct JunctionRepeaters {
     reason: &'static str,
 }
 
+/// What a net's tree is repaired against, as `RepairDesign` holds it while
+/// it walks the tree.
+#[derive(Clone, Copy, Debug)]
+struct TreeDriver {
+    /// The load the tree is buffered down to.
+    max_cap: Farads,
+    /// The driver's own resistance, which `repairNetJunc` estimates load
+    /// slews through.
+    resistance: Ohms,
+    /// Its resistance raised to the strongest buffer's, as `repairNetWire`
+    /// clips it so that a port without a driving cell still gets repeaters.
+    wire_resistance: Ohms,
+}
+
 /// What a repaired branch presents to its parent.
 #[derive(Clone, Debug)]
 struct Branch {
@@ -496,36 +510,32 @@ impl<'r, 'a, T: Timing> Repairer<'r, 'a, T> {
         driver: PinId,
         max_cap: Farads,
     ) -> Result<Branch, RepairError> {
-        let own = self
+        let resistance = self
             .resizer
             .link
             .pin_port(self.resizer.db, driver)
             .map_or(Ohms::ZERO, |(lib, port)| {
                 self.resizer.link.liberty.cell(lib).drive_resistance(port)
             });
-        let r_drvr = own.max(self.resizer.r_strongest_buffer);
-        self.repair_branch(tree, driver, max_cap, r_drvr)
+        let tree_driver = TreeDriver {
+            max_cap,
+            resistance,
+            wire_resistance: resistance.max(self.resizer.r_strongest_buffer),
+        };
+        self.repair_branch(tree, tree_driver)
     }
 
-    fn repair_branch(
-        &mut self,
-        tree: &BnetPtr,
-        driver: PinId,
-        max_cap: Farads,
-        r_drvr: Ohms,
-    ) -> Result<Branch, RepairError> {
+    fn repair_branch(&mut self, tree: &BnetPtr, driver: TreeDriver) -> Result<Branch, RepairError> {
         match &tree.kind {
             Kind::Load { pin } => Ok(self.load_branch(*pin)),
-            Kind::Junction { left, right } => {
-                self.repair_junction(tree.at, left, right, driver, max_cap, r_drvr)
-            }
+            Kind::Junction { left, right } => self.repair_junction(tree.at, left, right, driver),
             Kind::Wire { to, layer } => {
                 let (r, c) = self.resizer.tree_rc().wire(*layer);
-                self.repair_wire(tree.at, to, (r, c), driver, max_cap, r_drvr)
+                self.repair_wire(tree.at, to, (r, c), driver)
             }
             Kind::Buffer { to, .. } => {
                 let (r, c) = self.resizer.tree_rc().wire(None);
-                self.repair_wire(tree.at, to, (r, c), driver, max_cap, r_drvr)
+                self.repair_wire(tree.at, to, (r, c), driver)
             }
             Kind::Via {
                 to,
@@ -533,7 +543,7 @@ impl<'r, 'a, T: Timing> Repairer<'r, 'a, T> {
                 to_layer,
             } => {
                 let r_via = self.resizer.tree_rc().via(*layer, *to_layer);
-                self.repair_via(to, r_via, driver, max_cap, r_drvr)
+                self.repair_via(to, r_via, driver)
             }
         }
     }
@@ -546,11 +556,9 @@ impl<'r, 'a, T: Timing> Repairer<'r, 'a, T> {
         &mut self,
         to: &BnetPtr,
         r_via: Ohms,
-        driver: PinId,
-        max_cap: Farads,
-        r_drvr: Ohms,
+        driver: TreeDriver,
     ) -> Result<Branch, RepairError> {
-        let mut branch = self.repair_branch(to, driver, max_cap, r_drvr)?;
+        let mut branch = self.repair_branch(to, driver)?;
         branch.max_load_slew -= r_via * branch.cap * self.resizer.slew_rc_factor;
         Ok(branch)
     }
@@ -574,17 +582,15 @@ impl<'r, 'a, T: Timing> Repairer<'r, 'a, T> {
         at: Point<Dbu>,
         left: &BnetPtr,
         right: &BnetPtr,
-        driver: PinId,
-        max_cap: Farads,
-        r_drvr: Ohms,
+        driver: TreeDriver,
     ) -> Result<Branch, RepairError> {
-        let mut left = self.repair_branch(left, driver, max_cap, r_drvr)?;
-        let mut right = self.repair_branch(right, driver, max_cap, r_drvr)?;
+        let mut left = self.repair_branch(left, driver)?;
+        let mut right = self.repair_branch(right, driver)?;
         let load_cap = left.cap + right.cap;
         let buffer_cell = self
             .resizer
             .find_target_buffer(self.resizer.buffers.lowest_drive, load_cap)?;
-        let repeaters = self.junction_repeaters(&left, &right, max_cap, r_drvr);
+        let repeaters = self.junction_repeaters(&left, &right, driver);
         if repeaters.left {
             let _ = self.make_repeater(repeaters.reason, at, buffer_cell, &mut left)?;
             left.wire_length = Dbu(0);
@@ -613,9 +619,9 @@ impl<'r, 'a, T: Timing> Repairer<'r, 'a, T> {
         &self,
         left: &Branch,
         right: &Branch,
-        max_cap: Farads,
-        r_drvr: Ohms,
+        driver: TreeDriver,
     ) -> JunctionRepeaters {
+        let r_drvr = driver.resistance;
         let load_cap = left.cap + right.cap;
         let max_load_slew = left.max_load_slew.min(right.max_load_slew);
         let factor = self.resizer.slew_rc_factor;
@@ -635,7 +641,7 @@ impl<'r, 'a, T: Timing> Repairer<'r, 'a, T> {
                 repeaters.right = true;
             }
         }
-        if load_cap > max_cap {
+        if load_cap > driver.max_cap {
             repeaters.reason = "max_cap";
             if left.cap > right.cap {
                 repeaters.left = true;
@@ -663,15 +669,14 @@ impl<'r, 'a, T: Timing> Repairer<'r, 'a, T> {
         from: Point<Dbu>,
         to: &BnetPtr,
         (res, cap): (OhmsPerMeter, FaradsPerMeter),
-        driver: PinId,
-        max_cap: Farads,
-        r_drvr: Ohms,
+        driver: TreeDriver,
     ) -> Result<Branch, RepairError> {
-        let mut branch = self.repair_branch(to, driver, max_cap, r_drvr)?;
+        let max_cap = driver.max_cap;
+        let mut branch = self.repair_branch(to, driver)?;
         let wire = DriverWire {
             res,
             cap,
-            r_drvr,
+            r_drvr: driver.wire_resistance,
             slew_rc_factor: self.resizer.slew_rc_factor,
             dbu_per_micron: self.resizer.db.dbu(),
         };
@@ -973,6 +978,39 @@ mod tests {
         let (violated, _) = load_slew_violated(SLOW_CLOCK, margin);
 
         assert!(violated, "{slew:?} at {margin}%");
+    }
+
+    #[test]
+    fn a_junction_isolates_no_branch_for_load_slew_behind_an_undriven_port() {
+        let mut db = design(&def_text(
+            "fork",
+            &DefSections {
+                components: "- b1 BUF_X1 + PLACED ( 2000 2800 ) N ;\n\
+                             - b2 BUF_X1 + PLACED ( 2000 2800 ) N ;\n",
+                nets: "- in ( PIN in ) ( b1 A ) ( b2 A ) ;\n",
+                inputs: &["in"],
+                outputs: &[],
+            },
+        ));
+        let lib = cells(&clock_cells_source());
+
+        with_wired_session(&mut db, &lib, "", |resizer| {
+            let driver = resizer.db.io_pins[resizer.db.io_pin_id("in").unwrap()].pin;
+            let at = Point::new(Dbu(2000), Dbu(2800));
+            let load = |name: &str| {
+                let pin = pin(resizer.db, name);
+                bnet::Bnet::load(at, pin, bnet::LoadModel::load(&*resizer, pin))
+            };
+            let tree = bnet::Bnet::junction(at, load("b1/A"), load("b2/A"));
+            resizer.options.slew_margin = 99.99;
+            let mut repairer = Repairer::new(resizer);
+
+            let _ = repairer
+                .repair_tree(&tree, driver, Farads::INFINITY)
+                .unwrap();
+
+            assert_eq!(repairer.summary.inserted, 0);
+        });
     }
 
     #[test]
