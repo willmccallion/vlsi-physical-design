@@ -9,7 +9,7 @@ use pare_common::db::liberty::Liberty;
 use pare_common::db::parser::{liberty, sdc};
 use pare_common::db::sdc::Sdc;
 
-use crate::report::{NetlistSummary, Report, TimingSummary};
+use crate::report::{DesignRepairSummary, NetlistSummary, Report, TimingSummary};
 use pare_resizer::Context as RepairContext;
 use pare_resizer::WireRc;
 use pare_resizer::{
@@ -225,13 +225,7 @@ pub(crate) fn repair_netlist(
         );
         report.phase("port buffering", phase_start);
     }
-    report.netlist = Some(NetlistSummary {
-        buffers_removed: summary.buffers_removed,
-        input_buffers: summary.input_buffers,
-        output_buffers: summary.output_buffers,
-        buffer_cell: summary.buffer_cell.clone(),
-        ..NetlistSummary::default()
-    });
+    report.netlist = Some(summary.clone());
     Ok(Some(NetlistRepair {
         liberty,
         wires,
@@ -261,22 +255,8 @@ pub(crate) fn repair_design(
         Some(sdc) => repair_design_on(Resizer::timed(inputs, sdc)?)?,
         None => repair_design_on(Resizer::new(inputs)?)?,
     };
-    repair.summary.slew_violations = done.slew_violations;
-    repair.summary.cap_violations = done.cap_violations;
-    repair.summary.repaired_nets = done.repaired_nets;
-    repair.summary.resized = done.resized;
-    repair.summary.repeaters = done.inserted;
-    report.netlist = Some(NetlistSummary {
-        buffers_removed: repair.summary.buffers_removed,
-        input_buffers: repair.summary.input_buffers,
-        output_buffers: repair.summary.output_buffers,
-        buffer_cell: repair.summary.buffer_cell.clone(),
-        slew_violations: done.slew_violations,
-        cap_violations: done.cap_violations,
-        repaired_nets: done.repaired_nets,
-        resized: done.resized,
-        repeaters: done.inserted,
-    });
+    repair.summary.design = DesignRepairSummary::of(&done);
+    report.netlist = Some(repair.summary.clone());
     report.phase("design repair", phase_start);
     Ok(())
 }
