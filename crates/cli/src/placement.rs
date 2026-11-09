@@ -215,6 +215,8 @@ fn legalize_with_pin_access(
         .routing
         .lowest_signal_layer(&db.library)?
         .and_then(|layer| PinAccess::new(db, layer));
+    // NOTE: ORFS's detail_place.tcl runs improve_placement straight after detailed_placement;
+    // PARE first moves cells whose pins no via can reach, which its router could not access.
     let pin_access = access.map(|access| {
         let freed = detailed::free_blocked_pins(db, &zones, &access);
         ui::stat_row(

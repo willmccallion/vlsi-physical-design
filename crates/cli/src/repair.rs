@@ -214,6 +214,8 @@ pub(crate) fn repair_netlist<'p>(
     ui::section("Netlist");
     let mut namer = Namer::new();
     let mut summary = NetlistSummary::default();
+    // NOTE: ORFS's global_place.tcl removes buffers only with GPL_TIMING_DRIVEN; PARE
+    // keeps [netlist] remove_buffers a switch of its own. The defaults agree.
     if config.netlist.remove_buffers {
         let timer = PhaseTimer::start(Phase::BufferRemoval);
         let before = db.cells.len();
