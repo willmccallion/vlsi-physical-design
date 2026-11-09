@@ -27,20 +27,47 @@ pub struct Arc {
     pub cost: i32,
 }
 
+/// Why the simplex found no optimal flow, as LEMON's `ProblemType` says.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, thiserror::Error)]
+pub enum FlowProblem {
+    /// No flow meets the supplies.
+    #[error("no flow meets the supplies")]
+    Infeasible,
+    /// The cost falls without bound.
+    #[error("the cost falls without bound")]
+    Unbounded,
+}
+
+/// A run that ended without an optimal flow: why, and the flow on each arc
+/// as the simplex left it, which `TritonCTS` reads all the same.
+#[derive(Clone, Debug, PartialEq, Eq, thiserror::Error)]
+#[error("{problem}")]
+pub struct NoOptimalFlow {
+    /// Why there is no optimal flow.
+    pub problem: FlowProblem,
+    /// The flow on each arc, in the order the arcs were added.
+    pub flows: Vec<i32>,
+}
+
 /// The flow on each arc, in the order the arcs were added, after the
-/// simplex sends `supply` from `source` to `target` over `node_count` nodes.
+/// simplex sends `supply` from `source` to `target` over `node_count` nodes,
+/// or why it found no optimal flow.
 pub fn min_cost_flow(
     node_count: usize,
     arcs: &[Arc],
     source: usize,
     target: usize,
     supply: i32,
-) -> Vec<i32> {
+) -> Result<Vec<i32>, NoOptimalFlow> {
     let mut ns = Simplex::new(node_count, arcs);
     ns.supply[ns.node_id[source]] = supply;
     ns.supply[ns.node_id[target]] = supply.wrapping_neg();
-    ns.run();
-    (0..arcs.len()).map(|a| ns.flow[ns.arc_id[a]]).collect()
+    let outcome = ns.run();
+    let flows = (0..arcs.len()).map(|a| ns.flow[ns.arc_id[a]]).collect();
+    match outcome {
+        Ok(()) => Ok(flows),
+        Err(problem) => Err(NoOptimalFlow { problem, flows }),
+    }
 }
 
 struct Simplex {
@@ -153,16 +180,16 @@ impl Simplex {
     }
 
     /// `NetworkSimplex::init` for equal supplies, then `start` with the
-    /// block search rule; the outcome is left in the flows.
-    fn run(&mut self) {
+    /// block search rule; the flows are left in `flow`.
+    fn run(&mut self) -> Result<(), FlowProblem> {
         if self.node_num == 0 {
-            return;
+            return Err(FlowProblem::Infeasible);
         }
         let sum_supply = self.supply[..self.node_num]
             .iter()
             .fold(0_i32, |a, &b| a.wrapping_add(b));
         if sum_supply > 0 {
-            return;
+            return Err(FlowProblem::Infeasible);
         }
         for e in 0..self.arc_num {
             self.flow[e] = 0;
@@ -176,7 +203,9 @@ impl Simplex {
         self.supply[root] = sum_supply.wrapping_neg();
         self.pi[root] = 0;
         if sum_supply != 0 {
-            return;
+            // NOTE: NetworkSimplex::init solves supplies short of the demand
+            // too; this port, run with equal supplies alone, refuses them.
+            return Err(FlowProblem::Infeasible);
         }
         self.search_arc_num = self.arc_num;
         self.all_arc_num = self.arc_num + self.node_num;
@@ -213,7 +242,7 @@ impl Simplex {
             self.find_join_node();
             let change = self.find_leaving_arc();
             if self.delta == MAX {
-                return;
+                return Err(FlowProblem::Unbounded);
             }
             self.change_flow(change);
             if change {
@@ -221,6 +250,11 @@ impl Simplex {
                 self.update_potential();
             }
         }
+        let artificial = self.search_arc_num..self.all_arc_num;
+        if self.flow[artificial].iter().any(|&f| f != 0) {
+            return Err(FlowProblem::Infeasible);
+        }
+        Ok(())
     }
 
     fn reduced(&self, e: usize) -> i32 {
@@ -523,5 +557,42 @@ impl Simplex {
             self.pi[u] = self.pi[u].wrapping_add(sigma);
             u = self.thread[u];
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    const fn arc(source: usize, target: usize, capacity: i32, cost: i32) -> Arc {
+        Arc {
+            source,
+            target,
+            capacity,
+            cost,
+        }
+    }
+
+    #[test]
+    fn the_cheaper_of_two_paths_carries_the_flow() {
+        let arcs = [
+            arc(0, 1, 1, 5),
+            arc(0, 2, 1, 1),
+            arc(1, 3, 1, 0),
+            arc(2, 3, 1, 0),
+        ];
+
+        let flows = min_cost_flow(4, &arcs, 0, 3, 1);
+
+        assert_eq!(flows, Ok(vec![0, 1, 0, 1]));
+    }
+
+    #[test]
+    fn a_supply_no_path_can_carry_is_infeasible() {
+        let arcs = [arc(0, 1, 1, 0), arc(1, 2, 1, 0)];
+
+        let outcome = min_cost_flow(3, &arcs, 0, 2, 2);
+
+        assert_eq!(outcome.map_err(|e| e.problem), Err(FlowProblem::Infeasible));
     }
 }
