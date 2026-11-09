@@ -631,4 +631,16 @@ mod tests {
 
         assert_eq!(aligned, None);
     }
+
+    /// The pin `in` is a 0.1 by 0.2 um shape turned S at (1.1, 6), so it
+    /// spans 1.05 to 1.15 um across and 5.8 to 6 um up.
+    #[test]
+    fn an_io_pin_sits_at_the_center_of_its_shape() {
+        let imp = improver();
+        let pin_in = NodeId::new(imp.net.cells);
+
+        let at = imp.pin_position(imp.net.node_pins[pin_in][0]);
+
+        assert_eq!(at, Point::new(Dbu(1100), Dbu(5900)));
+    }
 }
