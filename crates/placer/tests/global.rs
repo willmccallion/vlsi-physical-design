@@ -1,6 +1,6 @@
-//! Global placement of a small generated design, pinned down whole:
-//! routability-driven, and timing-driven through a repair that resizes,
-//! adds and removes cells.
+//! Global placement of a small generated design, pinned down whole: plain,
+//! with a fence, routability-driven, and timing-driven through a repair
+//! that resizes, adds and removes cells.
 
 #![allow(clippy::unwrap_used)]
 
@@ -104,6 +104,54 @@ fn assert_golden(name: &str, actual: &str) {
         name,
         actual,
     );
+}
+
+/// The ring with every fifth gate in a group bound to a fence of `rects`,
+/// given as DEF points.
+fn ring_fenced_by(rects: &str) -> NetlistDB {
+    let gates = 240;
+    let mut members = String::new();
+    for g in (0..gates).step_by(5) {
+        let _ = write!(members, " g{g}");
+    }
+    let text = common::ring_text(gates)
+        .replace(
+            &format!("COMPONENTS {gates} ;"),
+            &format!(
+                "REGIONS 1 ;\n- fence {rects} + TYPE FENCE ;\nEND REGIONS\nCOMPONENTS {gates} ;"
+            ),
+        )
+        .replace(
+            "END DESIGN",
+            &format!("GROUPS 1 ;\n- g{members} + REGION fence ;\nEND GROUPS\nEND DESIGN"),
+        );
+    common::parse(&text)
+}
+
+#[test]
+fn a_plain_placement_spreads_the_ring_as_it_always_does() {
+    let mut db = common::ring(240);
+    let mut model = PlacementModel::from_db(&db, &Zones::new(&db).unwrap());
+
+    let result = global::place::<NoTiming>(&mut model, &params(), None, None, |_| {}).unwrap();
+
+    model.write_back(&mut db);
+    assert_golden("ring_240_plain.txt", &placement_text(&db, &result));
+}
+
+#[test]
+fn a_fenced_placement_spreads_each_zone_as_it_always_does() {
+    let mut db = ring_fenced_by("( 20000 20000 ) ( 40000 40000 )");
+    let mut model = PlacementModel::from_db(&db, &Zones::new(&db).unwrap());
+
+    let result = global::place::<NoTiming>(&mut model, &params(), None, None, |_| {}).unwrap();
+
+    model.write_back(&mut db);
+    let mut text = placement_text(&db, &result);
+    for zone in &result.zones {
+        let _ = writeln!(text, "{zone:?}");
+    }
+    assert_golden("fenced_ring_240_gp.txt", &text);
 }
 
 #[test]
