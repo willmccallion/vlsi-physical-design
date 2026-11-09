@@ -24,7 +24,7 @@ use rayon::prelude::*;
 
 /// Checks `layout` in square tiles of `core` a side, each seeing `halo`
 /// beyond its edges.
-pub fn check_tiled(layout: &Layout, rules: &Rules, core: Dbu, halo: Dbu) -> DrcReport {
+pub(crate) fn check_tiled(layout: &Layout, rules: &Rules, core: Dbu, halo: Dbu) -> DrcReport {
     let Some(grid) = layout.bounds().map(|b| Grid::from_bounds(b, core)) else {
         return DrcReport {
             owners: layout.owners().clone(),
@@ -39,7 +39,8 @@ pub fn check_tiled(layout: &Layout, rules: &Rules, core: Dbu, halo: Dbu) -> DrcR
     merged_report(found, layout.owners().clone())
 }
 
-/// Checks the tiles of `core` a side over `bounds` as [`check_tiled`] does.
+/// Checks `bounds` in square tiles of `core` a side, each seeing `halo`
+/// beyond its edges.
 ///
 /// Each tile's layout is built only when it is checked: `layout_of` gives
 /// the shapes meeting a window, with owner indices into `owners`.
