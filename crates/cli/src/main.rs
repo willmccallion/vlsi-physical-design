@@ -224,7 +224,14 @@ fn run(command: Commands, report: &mut Report) -> anyhow::Result<()> {
         } => {
             let config = load_config(&config, report)?;
             let db = load_design(&config, placement.as_deref())?;
-            view_area(&db, box_in_dbu(&area, db.dbu()), &nets, &layers, &out, size)
+            view_area(
+                &db,
+                MicronBox::from_corners(&area)?.in_dbu(db.dbu()),
+                &nets,
+                &layers,
+                &out,
+                size,
+            )
         }
     }
 }
@@ -270,21 +277,43 @@ fn route(args: RouteArgs, report: &mut Report) -> anyhow::Result<()> {
     if args.global_only {
         return route_global(&config, &db, args.guides.as_deref(), report);
     }
-    let files = state_files(args, db.dbu());
+    let files = state_files(args, db.dbu())?;
     route_detailed(&config, &mut db, &files, None, report)
 }
 
-/// The box whose corners `corners` gives as x0, y0, x1, y1 in microns, as
-/// the command line takes it, in database `units`.
-fn box_in_dbu(corners: &[f64], units: DbuPerMicron) -> Rect<Dbu> {
-    let at = |x: f64, y: f64| Point::new(units.to_dbu_rounded(x), units.to_dbu_rounded(y));
-    Rect::new(at(corners[0], corners[1]), at(corners[2], corners[3]))
+/// A box the command line gives by its corners in microns.
+#[derive(Clone, Copy, Debug, PartialEq)]
+struct MicronBox {
+    low: Point<f64>,
+    high: Point<f64>,
+}
+
+impl MicronBox {
+    /// The box whose corners `corners` gives as x0, y0, x1, y1.
+    fn from_corners(corners: &[f64]) -> anyhow::Result<Self> {
+        let &[x0, y0, x1, y1] = corners else {
+            anyhow::bail!("a box takes four corner coordinates, not {}", corners.len());
+        };
+        Ok(Self {
+            low: Point::new(x0, y0),
+            high: Point::new(x1, y1),
+        })
+    }
+
+    /// The box rounded onto the database grid of `units`.
+    fn in_dbu(self, units: DbuPerMicron) -> Rect<Dbu> {
+        let at = |p: Point<f64>| Point::new(units.to_dbu_rounded(p.x), units.to_dbu_rounded(p.y));
+        Rect::new(at(self.low), at(self.high))
+    }
 }
 
 /// The state files `args` name, with the trace box in database `units`.
-fn state_files(args: RouteArgs, units: DbuPerMicron) -> StateFiles {
-    let area = args.trace_box.map(|corners| box_in_dbu(&corners, units));
-    StateFiles {
+fn state_files(args: RouteArgs, units: DbuPerMicron) -> anyhow::Result<StateFiles> {
+    let area = args
+        .trace_box
+        .map(|corners| MicronBox::from_corners(&corners).map(|b| b.in_dbu(units)))
+        .transpose()?;
+    Ok(StateFiles {
         save: args.save_state.map(|path| {
             (
                 path,
@@ -296,7 +325,7 @@ fn state_files(args: RouteArgs, units: DbuPerMicron) -> StateFiles {
             nets: args.trace_nets,
             area,
         },
-    }
+    })
 }
 
 /// The `run` command: places and routes the design `name` as its purpose
@@ -398,10 +427,17 @@ mod tests {
     use super::*;
 
     #[test]
+    fn a_box_needs_four_corner_coordinates() {
+        assert!(MicronBox::from_corners(&[1.0, 2.0, 3.0]).is_err());
+    }
+
+    #[test]
     fn a_box_in_microns_is_rounded_onto_the_database_grid() {
         let units = DbuPerMicron::new(2000).unwrap();
 
-        let area = box_in_dbu(&[1.0, 2.5, 3.00025, 4.0], units);
+        let area = MicronBox::from_corners(&[1.0, 2.5, 3.00025, 4.0])
+            .unwrap()
+            .in_dbu(units);
 
         assert_eq!(
             area,
