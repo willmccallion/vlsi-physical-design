@@ -20,7 +20,7 @@ impl<T> Rect<T> {
     }
 }
 
-impl<T: Copy + PartialOrd + Sub<Output = T> + Mul<Output = T>> Rect<T> {
+impl<T: Copy + PartialOrd + Sub<Output = T>> Rect<T> {
     /// Width along X.
     pub fn width(&self) -> T {
         self.max.x - self.min.x
@@ -32,7 +32,10 @@ impl<T: Copy + PartialOrd + Sub<Output = T> + Mul<Output = T>> Rect<T> {
     }
 
     /// Width times height.
-    pub fn area(&self) -> T {
+    pub fn area(&self) -> <T as Mul>::Output
+    where
+        T: Mul,
+    {
         self.width() * self.height()
     }
 

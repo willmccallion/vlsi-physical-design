@@ -132,15 +132,10 @@ impl Region {
 
     /// The region's area.
     pub fn area(&self) -> DbuArea {
-        DbuArea(
-            self.slabs
-                .iter()
-                .map(|s| {
-                    let height: i64 = s.spans.iter().map(|&(lo, hi)| (hi - lo).get()).sum();
-                    (s.x1 - s.x0).get() * height
-                })
-                .sum(),
-        )
+        self.slabs
+            .iter()
+            .map(|s| (s.x1 - s.x0) * s.spans.iter().map(|&(lo, hi)| hi - lo).sum::<Dbu>())
+            .sum()
     }
 
     /// The smallest rectangle containing the region.
