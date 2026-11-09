@@ -7,9 +7,9 @@
 //! parser does not know is skipped with a warning, once per keyword and file.
 
 use crate::db::design::{
-    BlockageKind, GCellGridDef, NetlistDB, NonDefaultLayer, NonDefaultRule, PlacementBlockage,
-    PlacementStatus, Region, RegionKind, RouteElem, Row, SpecialNet, SpecialRect, SpecialWire,
-    TrackAxis, TrackDef,
+    BlockageKind, GCellGridDef, NetlistDB, NewIoPin, NonDefaultLayer, NonDefaultRule,
+    PlacementBlockage, PlacementStatus, Region, RegionKind, RouteElem, Row, SpecialNet,
+    SpecialRect, SpecialWire, TrackAxis, TrackDef,
 };
 use crate::db::indices::{CellId, LayerId, NetId, NonDefaultRuleId, RegionId, ViaId, ViaRuleId};
 use crate::db::library::{LayerRef, Library, PinDirection, Shape, SignalUse, ViaDef, ViaSource};
@@ -746,16 +746,16 @@ impl<'a> DefParser<'a> {
         let line = pending.line;
         let _ = self
             .db
-            .add_io_pin(
-                pending.name,
+            .add_io_pin(NewIoPin {
+                name: pending.name,
                 net,
-                pending.direction,
-                pending.signal_use,
-                pending.shapes,
-                pending.placement.location,
-                pending.placement.orient,
-                pending.placement.status,
-            )
+                direction: pending.direction,
+                signal_use: pending.signal_use,
+                shapes: pending.shapes,
+                location: pending.placement.location,
+                orient: pending.placement.orient,
+                status: pending.placement.status,
+            })
             .map_err(|e| self.lx.error(line, e.to_string()))?;
         Ok(())
     }

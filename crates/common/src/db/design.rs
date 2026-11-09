@@ -258,6 +258,21 @@ pub struct IoPin {
     pub pin: PinId,
 }
 
+/// An I/O pin to add, everything but the net connection
+/// [`NetlistDB::add_io_pin`] makes for it.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) struct NewIoPin {
+    pub name: String,
+    pub net: NetId,
+    pub direction: PinDirection,
+    pub signal_use: SignalUse,
+    /// Geometry relative to `location`, before orientation.
+    pub shapes: Vec<Shape>,
+    pub location: Point<Dbu>,
+    pub orient: Orientation,
+    pub status: PlacementStatus,
+}
+
 impl IoPin {
     /// Shapes in design coordinates.
     pub fn placed_shapes(&self) -> impl Iterator<Item = Shape> + '_ {
@@ -689,18 +704,17 @@ impl NetlistDB {
     }
 
     /// Adds an I/O pin and connects it to its net.
-    #[allow(clippy::too_many_arguments)]
-    pub(crate) fn add_io_pin(
-        &mut self,
-        name: String,
-        net: NetId,
-        direction: PinDirection,
-        signal_use: SignalUse,
-        shapes: Vec<Shape>,
-        location: Point<Dbu>,
-        orient: Orientation,
-        status: PlacementStatus,
-    ) -> Result<IoPinId, DuplicateName> {
+    pub(crate) fn add_io_pin(&mut self, new: NewIoPin) -> Result<IoPinId, DuplicateName> {
+        let NewIoPin {
+            name,
+            net,
+            direction,
+            signal_use,
+            shapes,
+            location,
+            orient,
+            status,
+        } = new;
         if self.io_pin_by_name.contains_key(&name) {
             return Err(DuplicateName { kind: "pin", name });
         }
