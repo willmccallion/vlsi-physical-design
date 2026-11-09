@@ -99,6 +99,16 @@ fn write_timed_config(dir: &Path) -> PathBuf {
     write_config_for(dir, "place_and_route", &input, &tables)
 }
 
+/// Writes a config for the Bookshelf fixture design, a placement
+/// benchmark, into `dir`, and returns its path.
+fn write_bookshelf_config(dir: &Path) -> PathBuf {
+    let input = format!(
+        "bookshelf_aux_file = {}\n",
+        quoted(&fixture("bookshelf/tiny.aux"))
+    );
+    write_config_for(dir, "placement", &input, "")
+}
+
 fn pare(args: &[&Path]) -> Output {
     pare_in(Path::new(env!("CARGO_MANIFEST_DIR")), args)
 }
@@ -177,11 +187,7 @@ fn refining_a_given_placement_writes_a_legal_placed_def() {
 #[test]
 fn placing_a_bookshelf_design_writes_its_placement_as_pl() {
     let dir = work_dir("bookshelf");
-    let input = format!(
-        "bookshelf_aux_file = {}\n",
-        quoted(&fixture("bookshelf/tiny.aux"))
-    );
-    let config = write_config_for(&dir, "placement", &input, "");
+    let config = write_bookshelf_config(&dir);
 
     let output = pare(&[Path::new("place"), &config]);
 
@@ -403,6 +409,24 @@ fn checking_an_unrouted_placement_passes_the_placement_and_fails_the_routing() {
     let report = read_report(&report);
     assert_eq!(report["design"], "tiny");
     assert_eq!(report["passed"], false);
+}
+
+#[test]
+fn checking_a_placement_benchmark_checks_only_its_placement() {
+    let dir = work_dir("check-placement");
+    let config = write_bookshelf_config(&dir);
+    let placed = pare(&[Path::new("place"), &config]);
+    assert!(placed.status.success(), "{}", printed(&placed));
+
+    let output = pare(&[
+        Path::new("check"),
+        &config,
+        Path::new("--placement"),
+        &dir.join("placed.pl"),
+    ]);
+
+    assert!(output.status.success(), "{}", printed(&output));
+    assert!(!printed(&output).contains("Opens:"), "{}", printed(&output));
 }
 
 #[test]

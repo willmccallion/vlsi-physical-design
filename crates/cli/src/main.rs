@@ -362,13 +362,14 @@ fn place_and_route(name: &Path, report: &mut Report) -> anyhow::Result<()> {
     route_detailed(&config, &mut db, &StateFiles::default(), global, report)
 }
 
-/// The `check` command.
+/// The `check` command: checks the placement, and the routing too unless
+/// the design is a placement benchmark, which is never routed.
 fn check(name: &Path, placement: Option<&Path>, report: &mut Report) -> anyhow::Result<()> {
     let config = load_config(name, report)?;
     let db = load_design(&config, placement)?;
     report.design.clone_from(&db.name);
     let placement_ok = report_placement(&db, report);
-    let routing_ok = report_routing(&db, report);
+    let routing_ok = config.purpose == Purpose::Placement || report_routing(&db, report);
     if !(placement_ok && routing_ok) {
         anyhow::bail!("{} failed its checks", db.name);
     }
