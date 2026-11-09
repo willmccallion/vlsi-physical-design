@@ -268,9 +268,12 @@ pub(crate) fn pin_direction(
     Some((cell, p.direction, p.signal_use))
 }
 
-/// Whether a pin takes a signal in, as `dbITerm::isInputSignal`.
+/// Whether a pin takes a signal in, inout pins too, as
+/// `dbITerm::isInputSignal` by default.
 pub(crate) fn is_input_signal(db: &NetlistDB, pin: PinId) -> bool {
-    pin_direction(db, pin).is_some_and(|(_, d, u)| d == PinDirection::Input && !u.is_supply())
+    pin_direction(db, pin).is_some_and(|(_, d, u)| {
+        matches!(d, PinDirection::Input | PinDirection::Inout) && !u.is_supply()
+    })
 }
 
 fn is_placed(db: &NetlistDB, cell: CellId) -> bool {
