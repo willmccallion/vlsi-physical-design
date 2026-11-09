@@ -459,14 +459,18 @@ impl GlobalGrid {
         let half = Dbu(self.gcell.get() / 2);
         self.origin
             + Point::new(
-                self.gcell * i64::from(c.x) + half,
-                self.gcell * i64::from(c.y) + half,
+                Gcells::from(c.x).length(self.gcell) + half,
+                Gcells::from(c.y).length(self.gcell) + half,
             )
     }
 
     /// The area of a gcell.
     pub(crate) fn cell_rect(&self, x: u16, y: u16) -> Rect<Dbu> {
-        let min = self.origin + Point::new(self.gcell * i64::from(x), self.gcell * i64::from(y));
+        let min = self.origin
+            + Point::new(
+                Gcells::from(x).length(self.gcell),
+                Gcells::from(y).length(self.gcell),
+            );
         Rect::new(min, min + Point::new(self.gcell, self.gcell))
     }
 

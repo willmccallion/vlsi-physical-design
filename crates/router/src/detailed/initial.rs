@@ -15,7 +15,7 @@ use super::region::{
 };
 use super::{DetailedRouter, NetRoute};
 use crate::access::{AccessPoint, Node};
-use crate::global::GCell;
+use crate::global::{GCell, Gcells};
 use crate::runs::EdgeSet;
 use crate::search::{Costs, Marks};
 use crate::wiring::Edge;
@@ -270,7 +270,11 @@ impl DetailedRouter<'_> {
 
     /// The lower-left corner of a gcell.
     fn gcell_corner(&self, c: GCell) -> Point<Dbu> {
-        self.grid_origin + Point::new(self.gcell * i64::from(c.x), self.gcell * i64::from(c.y))
+        self.grid_origin
+            + Point::new(
+                Gcells::from(c.x).length(self.gcell),
+                Gcells::from(c.y).length(self.gcell),
+            )
     }
 
     /// A wire edge across the boundary between neighbouring gcells `a` and
@@ -289,12 +293,12 @@ impl DetailedRouter<'_> {
         };
         let (boundary, row_start) = match lt.direction {
             Direction::Horizontal if low.y == high.y && high.x == low.x + 1 => (
-                self.grid_origin.x + self.gcell * i64::from(high.x),
-                self.grid_origin.y + self.gcell * i64::from(low.y),
+                self.grid_origin.x + Gcells::from(high.x).length(self.gcell),
+                self.grid_origin.y + Gcells::from(low.y).length(self.gcell),
             ),
             Direction::Vertical if low.x == high.x && high.y == low.y + 1 => (
-                self.grid_origin.y + self.gcell * i64::from(high.y),
-                self.grid_origin.x + self.gcell * i64::from(low.x),
+                self.grid_origin.y + Gcells::from(high.y).length(self.gcell),
+                self.grid_origin.x + Gcells::from(low.x).length(self.gcell),
             ),
             _ => return None,
         };
