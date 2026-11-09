@@ -78,6 +78,23 @@ const COMMIT_CHUNK: usize = 4096;
 /// `OpenROAD` counterpart.
 const SPECULATIVE_BATCH: usize = 28;
 
+/// Gcells a net's search window reaches past its guide or its pins' box.
+/// PARE tunable, no `OpenROAD` counterpart.
+const WINDOW_MARGIN_GCELLS: Gcells = Gcells(4);
+
+/// Windows, each wider than the last, a net is searched in without its
+/// guide once the guide holds no route. PARE tunable, no `OpenROAD`
+/// counterpart.
+const UNGUIDED_WINDOWS: usize = 2;
+
+/// Gcells one connection's search reaches past the box of its two ends at
+/// first. PARE tunable, no `OpenROAD` counterpart.
+const CONNECT_MARGIN_GCELLS: Gcells = Gcells(2);
+
+/// Factor a search margin grows by each time its window holds no route.
+/// PARE tunable, no `OpenROAD` counterpart.
+const MARGIN_GROWTH: i64 = 4;
+
 /// A net's commit worked out and waiting to be recorded.
 #[derive(Debug)]
 struct PreparedCommit {
@@ -286,7 +303,7 @@ impl<'a> DetailedRouter<'a> {
             occupancy,
             access,
             routes: IdVec::filled(NetRoute::default(), db.nets.len()),
-            window_margin: gcell * 4,
+            window_margin: WINDOW_MARGIN_GCELLS.length(gcell),
             gcell,
             grid_origin: db.die_area.min,
             guides: IdVec::filled(None, db.nets.len()),
@@ -754,11 +771,11 @@ impl<'a> DetailedRouter<'a> {
         }
         search.guide = None;
         let mut window = window.expand(self.window_margin);
-        for _ in 0..2 {
+        for _ in 0..UNGUIDED_WINDOWS {
             if let Some(route) = self.route_tree(&search, terms, &window, None) {
                 return Some(route);
             }
-            window = window.expand(self.window_margin * 4);
+            window = window.expand(self.window_margin * MARGIN_GROWTH);
         }
         None
     }
@@ -953,7 +970,7 @@ impl<'a> DetailedRouter<'a> {
             }
         }
         let (from, to) = ends;
-        let mut margin = self.gcell * 2;
+        let mut margin = CONNECT_MARGIN_GCELLS.length(self.gcell);
         loop {
             let around = Rect::from_corners(from, to).expand(margin);
             let local = around.intersection(window).unwrap_or(*window);
@@ -966,7 +983,7 @@ impl<'a> DetailedRouter<'a> {
             if local.encloses(window) {
                 return None;
             }
-            margin = margin * 4;
+            margin = margin * MARGIN_GROWTH;
         }
     }
 

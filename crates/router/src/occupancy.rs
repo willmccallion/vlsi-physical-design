@@ -481,8 +481,6 @@ impl Track {
     }
 }
 
-/// Tracks whose wires `rect` could touch or crowd, and whether each runs
-/// through it.
 /// The stretch of one track that a shape blocks.
 #[derive(Clone, Copy, Debug)]
 struct Blocked {
