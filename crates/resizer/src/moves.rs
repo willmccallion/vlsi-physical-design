@@ -713,7 +713,7 @@ fn half_driving_power_cell(resizer: &Resizer<'_, Sta>, lib: LibCellId) -> Option
 /// The input ports of `cell` that every output's function treats the same
 /// as `input`, as `SwapPinsMove::equivCellPins`.
 fn equivalent_pins(cell: &LibCell, input: LibPortId) -> Vec<LibPortId> {
-    if !cell.sequentials.is_empty() {
+    if !cell.sequentials.is_empty() || cell.is_isolation_cell {
         return Vec::new();
     }
     let inputs: Vec<LibPortId> = cell
@@ -1337,6 +1337,23 @@ mod tests {
             half_driver_under("set_max_capacitance 20 [current_design]\n"),
             "C"
         );
+    }
+
+    #[test]
+    fn an_isolation_cell_has_no_equivalent_inputs() {
+        let gate = and2((0.05, 0.05), (0.05, 0.05));
+        let src = "library (t) {
+               cell (ISO) { is_isolation_cell : true ;
+                 pin (A1) { direction : input; capacitance : 1.0; }
+                 pin (A2) { direction : input; capacitance : 1.0; }
+                 pin (ZN) { direction : output; function : \"(A1 & A2)\"; } } }";
+        let isolation = parse_str(src, Path::new("t.lib")).unwrap().cells[LibCellId(0)].clone();
+
+        assert_eq!(
+            equivalent_pins(&gate, LibPortId::new(0)),
+            [LibPortId::new(1)]
+        );
+        assert_eq!(equivalent_pins(&isolation, LibPortId::new(0)), []);
     }
 
     #[test]

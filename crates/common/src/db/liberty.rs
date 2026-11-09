@@ -858,6 +858,9 @@ pub struct LibCell {
     /// Whether it is a power-management cell (`always_on`,
     /// `is_isolation_cell` or `is_level_shifter`), which clock trees avoid.
     pub is_power_cell: bool,
+    /// Whether it is an isolation cell (`is_isolation_cell`), whose inputs
+    /// are never swapped.
+    pub is_isolation_cell: bool,
     /// Its footprint class, when given.
     pub footprint: Option<String>,
     /// The class sizing keeps it within (`user_function_class`), when
@@ -1707,6 +1710,7 @@ mod tests {
             is_clock_gate: false,
             is_clock_cell: false,
             is_power_cell: false,
+            is_isolation_cell: false,
             library: 0,
             footprint: None,
             user_function_class: None,
