@@ -501,10 +501,10 @@ impl Cts<'_> {
                 register_sinks.push(pin);
             }
         }
-        if !self.setup.settings.insertion_delay
-            || macro_sinks.is_empty()
-            || register_sinks.is_empty()
-        {
+        let forked_center = (self.setup.settings.insertion_delay && !macro_sinks.is_empty())
+            .then(|| sink_bbox_center(db, &register_sinks))
+            .flatten();
+        let Some(center) = forked_center else {
             for pin in net_cell_pins(db, net) {
                 let Some((cell, _, _)) = pin_direction(db, pin) else {
                     continue;
@@ -518,15 +518,19 @@ impl Cts<'_> {
             }
             self.summary.sinks += clock.sinks.len();
             return Ok(Some(self.add_builder(clock, input_net, parent)));
-        }
+        };
         for &pin in &macro_sinks {
             clock.add_sink(self.sink(db, pin));
         }
         self.summary.sinks += clock.sinks.len();
         let first = self.add_builder(clock, input_net, parent);
         self.builders[first].tree_type = TreeType::Macro;
+        let registers = RegisterSinks {
+            pins: &register_sinks,
+            center,
+        };
         let (regs_net, top_buffer) =
-            self.fork_register_network(db, net, &net_name, sdc_name, &register_sinks)?;
+            self.fork_register_network(db, net, &net_name, sdc_name, registers)?;
         let mut regs_clock = Clock::new(regs_net, &db.nets[regs_net].name.clone(), sdc_name);
         for &pin in &register_sinks {
             regs_clock.add_sink(self.sink(db, pin));
@@ -548,18 +552,17 @@ impl Cts<'_> {
         net: NetId,
         net_name: &str,
         sdc_name: &str,
-        sinks: &[PinId],
+        registers: RegisterSinks<'_>,
     ) -> Result<(NetId, String), CtsError> {
         let regs_name = format!("{net_name}_regs");
         let regs = db.add_net(&regs_name)?;
         db.nets[regs].signal_use = SignalUse::Clock;
-        for &pin in sinks {
+        for &pin in registers.pins {
             db.move_pin(pin, regs);
         }
         let name = format!("clkbuf_regs_{}_{sdc_name}", self.reg_tree_index);
         self.reg_tree_index += 1;
-        let center = sink_bbox_center(db, &db.nets[regs].pins.clone());
-        let cell = self.make_buffer(db, self.setup.buffers.root, &name, center)?;
+        let cell = self.make_buffer(db, self.setup.buffers.root, &name, registers.center)?;
         let _ = self.connect_buffer(db, cell, self.setup.buffers.root, Some(net), Some(regs))?;
         Ok((regs, name))
     }
@@ -700,21 +703,29 @@ impl Cts<'_> {
         cluster_sinks: &[Vec<PinId>],
         occupied: &mut FxHashSet<Point<Dbu>>,
     ) -> Result<(), CtsError> {
-        let driver_cluster = cluster_sinks
+        let centers: Vec<Option<Point<Dbu>>> = cluster_sinks
+            .iter()
+            .map(|sinks| sink_bbox_center(db, sinks))
+            .collect();
+        let driver_cluster = centers
             .iter()
             .enumerate()
-            .filter(|(_, sinks)| !sinks.is_empty())
-            .min_by_key(|(_, sinks)| sink_bbox_center(db, sinks).manhattan(gate.driver_at))
+            .filter_map(|(n, center)| Some((n, (*center)?)))
+            .min_by_key(|&(_, center)| center.manhattan(gate.driver_at))
             .map(|(n, _)| n);
         let mut clones = 0;
         for (n, sinks) in cluster_sinks.iter().enumerate() {
+            // NOTE: cloneClockGaters clones the gate for a cluster with no
+            // input sinks too, driving nothing; PARE leaves such clusters.
+            let Some(center) = centers[n] else {
+                continue;
+            };
             let clone = if driver_cluster == Some(n) {
                 gate.cell
             } else {
                 clones += 1;
                 self.clone_gate(db, gate, clones, sinks)?
             };
-            let center = sink_bbox_center(db, sinks);
             let mut at = center;
             while occupied.contains(&at) {
                 at.x += Dbu(1);
@@ -1108,19 +1119,29 @@ fn sta_fuzzy_equal(a: Farads32, b: Farads32) -> bool {
     pare_resizer::fuzzy::equal(f64::from(a.get()), f64::from(b.get()))
 }
 
+/// The register sinks a clock net forks off behind a root buffer of their
+/// own, and the center of their box, where that buffer goes.
+#[derive(Clone, Copy, Debug)]
+struct RegisterSinks<'a> {
+    pins: &'a [PinId],
+    center: Point<Dbu>,
+}
+
 /// The center of the box around some pins' average positions, as
-/// `dbNet::getTermBBox` and `findLongEdges` take it.
-pub(crate) fn sink_bbox_center(db: &NetlistDB, sinks: &[PinId]) -> Point<Dbu> {
-    let (mut lo, mut hi) = ((i64::MAX, i64::MAX), (i64::MIN, i64::MIN));
-    for &s in sinks {
-        let p = db.average_pin_position(s);
-        lo = (lo.0.min(p.x.get()), lo.1.min(p.y.get()));
-        hi = (hi.0.max(p.x.get()), hi.1.max(p.y.get()));
-    }
-    Point::new(
-        Dbu(i64::midpoint(lo.0, hi.0)),
-        Dbu(i64::midpoint(lo.1, hi.1)),
-    )
+/// `dbNet::getTermBBox` and `findLongEdges` take it, rounded toward zero
+/// as `Rect::xCenter` divides; none for no pins.
+pub(crate) fn sink_bbox_center(db: &NetlistDB, sinks: &[PinId]) -> Option<Point<Dbu>> {
+    let bbox = sinks
+        .iter()
+        .map(|&s| {
+            let p = db.average_pin_position(s);
+            Rect::new(p, p)
+        })
+        .reduce(|a, b| a.union(&b))?;
+    Some(Point::new(
+        Dbu(i64::midpoint(bbox.min.x.get(), bbox.max.x.get())),
+        Dbu(i64::midpoint(bbox.min.y.get(), bbox.max.y.get())),
+    ))
 }
 
 /// Groups the nodes of a Steiner tree joined by edges shorter than
