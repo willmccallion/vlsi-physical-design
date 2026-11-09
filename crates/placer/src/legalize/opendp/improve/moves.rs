@@ -2,6 +2,7 @@
 //! `DetailedMgr::tryMove`, `DetailedMgr::trySwap` and their helpers.
 
 use super::{ImprovementError, Improver, Move, Result};
+use crate::legalize::opendp::NodeId;
 
 /// A node's neighbours around `x` in a segment by center, as the
 /// `std::lower_bound` probes of `DetailedMgr`: the first at or right of `x`
@@ -524,7 +525,7 @@ impl Improver {
         let y = self.grid.snap_down_y(to.1);
         if self
             .grid
-            .site_orientation(x, y, self.grid.nodes[n].site)
+            .site_orientation(x, y, self.grid.nodes[NodeId::new(n)].site)
             .is_none()
         {
             return Ok(false);
@@ -598,10 +599,10 @@ impl Improver {
             self.set_position(m.node, m.from.0, m.from.1);
             let x = self.grid.grid_x(m.from.0);
             let y = self.grid.round_y(m.from.1);
-            self.grid.paint_pixels(m.node, x, y);
+            self.grid.paint_pixels(NodeId::new(m.node), x, y);
             let orient = self
                 .grid
-                .site_orientation(x, y, self.grid.nodes[m.node].site)
+                .site_orientation(x, y, self.grid.nodes[NodeId::new(m.node)].site)
                 .ok_or(ImprovementError::Internal(
                     "cell put back where no row takes it",
                 ))?;

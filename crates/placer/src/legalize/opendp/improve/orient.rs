@@ -3,6 +3,7 @@
 //! where that shortens its nets and breaks no placement rule.
 
 use super::{Improver, SKIP_NETS_LARGER_THAN};
+use crate::legalize::opendp::NodeId;
 use pare_common::geom::orient::Orientation;
 
 pub(super) fn run(imp: &mut Improver) {
@@ -32,7 +33,9 @@ fn orient_cells(imp: &mut Improver) -> usize {
             orient_single_row_cell(imp, n, row)
         } else {
             row + imp.rows_spanned(n) <= imp.arch.rows.len()
-                && imp.grid.nodes[n].symmetry.allows(imp.grid.nodes[n].orient)
+                && imp.grid.nodes[NodeId::new(n)]
+                    .symmetry
+                    .allows(imp.grid.nodes[NodeId::new(n)].orient)
         };
         if !oriented {
             problems += 1;
@@ -45,8 +48,8 @@ fn orient_cells(imp: &mut Improver) -> usize {
 /// its row is turned over, mirrored ones only where the master allows.
 fn orient_single_row_cell(imp: &mut Improver, n: usize, row: usize) -> bool {
     use Orientation::{FN, FS, N, S};
-    let symmetry = imp.grid.nodes[n].symmetry;
-    let cell = imp.grid.nodes[n].orient;
+    let symmetry = imp.grid.nodes[NodeId::new(n)].symmetry;
+    let cell = imp.grid.nodes[NodeId::new(n)].orient;
     let to = match (imp.arch.rows[row].orient, cell) {
         (N | FN, N | FN) | (FS | S, FS | S) => return symmetry.allows(cell),
         (N | FN, FS) => N,
@@ -116,7 +119,7 @@ fn flip_cells(imp: &mut Improver) {
             if imp.left(n) < lx || imp.right(n) > rx {
                 continue;
             }
-            let from = imp.grid.nodes[n].orient;
+            let from = imp.grid.nodes[NodeId::new(n)].orient;
             let to = match from {
                 Orientation::N => Orientation::FN,
                 Orientation::S => Orientation::FS,

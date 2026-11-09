@@ -22,7 +22,7 @@ mod shift;
 mod swap;
 
 use super::cpp::Mt19937;
-use super::{DetailedPlacementError, Placer};
+use super::{DetailedPlacementError, GroupId, NodeId, Placer};
 use arch::Arch;
 use network::Network;
 use pare_common::db::design::NetlistDB;
@@ -95,7 +95,7 @@ pub fn improve_placement(db: &mut NetlistDB, max_displacement: (i64, i64)) -> Re
 #[derive(Clone, Copy, Debug)]
 struct Segment {
     row: usize,
-    region: Option<usize>,
+    region: Option<GroupId>,
     min_x: i64,
     max_x: i64,
     /// The width of the cells in it.
@@ -236,28 +236,28 @@ impl Improver {
     fn left(&self, n: usize) -> i64 {
         self.grid
             .nodes
-            .get(n)
+            .get(NodeId::new(n))
             .map_or_else(|| self.net.fixed[n - self.net.cells].left, |c| c.left)
     }
 
     fn bottom(&self, n: usize) -> i64 {
         self.grid
             .nodes
-            .get(n)
+            .get(NodeId::new(n))
             .map_or_else(|| self.net.fixed[n - self.net.cells].bottom, |c| c.bottom)
     }
 
     fn width(&self, n: usize) -> i64 {
         self.grid
             .nodes
-            .get(n)
+            .get(NodeId::new(n))
             .map_or_else(|| self.net.fixed[n - self.net.cells].width, |c| c.width)
     }
 
     fn height(&self, n: usize) -> i64 {
         self.grid
             .nodes
-            .get(n)
+            .get(NodeId::new(n))
             .map_or_else(|| self.net.fixed[n - self.net.cells].height, |c| c.height)
     }
 
@@ -286,19 +286,19 @@ impl Improver {
     }
 
     fn is_fixed(&self, n: usize) -> bool {
-        self.grid.nodes.get(n).is_none_or(|c| c.fixed)
+        self.grid.nodes.get(NodeId::new(n)).is_none_or(|c| c.fixed)
     }
 
     fn is_terminal(&self, n: usize) -> bool {
         n >= self.net.cells && self.net.fixed[n - self.net.cells].terminal
     }
 
-    fn group(&self, n: usize) -> Option<usize> {
-        self.grid.nodes.get(n).and_then(|c| c.group)
+    fn group(&self, n: usize) -> Option<GroupId> {
+        self.grid.nodes.get(NodeId::new(n)).and_then(|c| c.group)
     }
 
     fn set_position(&mut self, n: usize, left: i64, bottom: i64) {
-        let node = &mut self.grid.nodes[n];
+        let node = &mut self.grid.nodes[NodeId::new(n)];
         node.left = left;
         node.bottom = bottom;
     }
@@ -351,7 +351,7 @@ impl Improver {
 
     /// Takes a cell off the grid, as `DetailedMgr::eraseFromGrid`.
     fn erase(&mut self, n: usize) {
-        self.grid.erase_pixels(n);
+        self.grid.erase_pixels(NodeId::new(n));
     }
 
     /// Puts a cell on the grid where it stands in its row's orientation, as
@@ -359,8 +359,11 @@ impl Improver {
     fn paint(&mut self, n: usize) {
         let x = self.grid.grid_x(self.left(n));
         let y = self.grid.snap_down_y(self.bottom(n));
-        self.grid.paint_pixels(n, x, y);
-        if let Some(orient) = self.grid.site_orientation(x, y, self.grid.nodes[n].site) {
+        self.grid.paint_pixels(NodeId::new(n), x, y);
+        if let Some(orient) = self
+            .grid
+            .site_orientation(x, y, self.grid.nodes[NodeId::new(n)].site)
+        {
             self.orient_node(n, orient);
         }
     }
@@ -368,7 +371,7 @@ impl Improver {
     /// Whether the cell breaks a placement rule where it stands, as
     /// `DetailedMgr::hasPlacementViolation`.
     fn has_placement_violation(&self, n: usize) -> bool {
-        let node = &self.grid.nodes[n];
+        let node = &self.grid.nodes[NodeId::new(n)];
         let x = self.grid.grid_x(node.left);
         let y = self.grid.round_y(node.bottom);
         !(self.grid.check_edge_spacing(node, x, y, node.orient)
@@ -380,7 +383,7 @@ impl Improver {
     /// carrying its pins along, as `Node::adjustCurrOrient`.
     fn orient_node(&mut self, n: usize, to: Orientation) {
         use Orientation::{E, FE, FN, FS, FW, N, S, W};
-        let mut from = self.grid.nodes[n].orient;
+        let mut from = self.grid.nodes[NodeId::new(n)].orient;
         if from == to {
             return;
         }
@@ -391,7 +394,7 @@ impl Improver {
                 let (dx, dy) = self.net.pins[pin].offset;
                 self.net.pins[pin].offset = if back { (-dy, dx) } else { (dy, -dx) };
             }
-            let node = &mut self.grid.nodes[n];
+            let node = &mut self.grid.nodes[NodeId::new(n)];
             std::mem::swap(&mut node.width, &mut node.height);
             from = match from {
                 W => N,
@@ -424,6 +427,6 @@ impl Improver {
                 offset.1 = -offset.1;
             }
         }
-        self.grid.nodes[n].orient = to;
+        self.grid.nodes[NodeId::new(n)].orient = to;
     }
 }

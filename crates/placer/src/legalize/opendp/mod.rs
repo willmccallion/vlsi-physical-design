@@ -21,7 +21,7 @@ pub mod improve;
 pub mod mirror;
 
 use pare_common::db::design::{NetlistDB, PinOwner, PlacementStatus};
-use pare_common::db::indices::{CellId, SiteId};
+use pare_common::db::indices::{CellId, IdVec, SiteId};
 use pare_common::db::library::{LayerRef, MacroClass, SiteClass, Symmetry};
 use pare_common::db::rules::{CellSide, EdgeType};
 use pare_common::geom::dbu::Dbu;
@@ -94,30 +94,33 @@ pub fn detailed_placement(db: &mut NetlistDB) -> Result<DetailedPlacement, Detai
 /// A grid coordinate: a site column and a row-edge index.
 type GridPt = (i64, i64);
 
-const NO_CELL: u32 = u32::MAX;
-/// The fixed stand-in `OpenDP` puts on sites a region only partly covers.
-const DUMMY_CELL: u32 = u32::MAX - 1;
-const NO_GROUP: u32 = u32::MAX;
+pare_common::define_index!(
+    /// A cell the legalizer places, in [`Placer`]'s nodes.
+    NodeId(u32)
+);
 
-/// The pixel id of node `n`. Nodes are cells, which [`CellId`]'s 32 bits
-/// number, so every id falls below the [`DUMMY_CELL`] and [`NO_CELL`]
-/// markers.
-fn node_id(n: usize) -> u32 {
-    debug_assert!(n < DUMMY_CELL as usize, "node {n} past the pixel ids");
-    n as u32
-}
+pare_common::define_index!(
+    /// A region's group, in [`Placer`]'s groups.
+    GroupId(u32)
+);
 
-/// The pixel id of group `g`, below [`NO_GROUP`] as groups are fewer than
-/// cells.
-fn group_id(g: usize) -> u32 {
-    debug_assert!(g < NO_GROUP as usize, "group {g} past the pixel ids");
-    g as u32
+/// What a pixel holds, as `OpenDP`'s `Pixel::cell` points to.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Occupant {
+    Free,
+    /// The fixed stand-in `OpenDP` puts on sites a region only partly covers.
+    Dummy,
+    Node(NodeId),
 }
 
 /// One site of one row band, as `OpenDP`'s `Pixel`.
 #[derive(Clone, Copy, Debug)]
 struct Pixel {
-    cell: u32,
+    /// The occupant in 32 bits, as `OpenDP` keeps a pointer: a node's index,
+    /// or [`Self::FREE`] or [`Self::DUMMY`], past every node's.
+    occupant: u32,
+    /// The group whose region wholly covers the site, its index or
+    /// [`Self::NO_GROUP`].
     group: u32,
     /// The share of the site a region covers, as `Pixel::util` while
     /// regions are laid on the grid.
@@ -125,6 +128,69 @@ struct Pixel {
     valid: bool,
     hopeless: bool,
     blocked_layers: u8,
+}
+
+impl Pixel {
+    const FREE: u32 = u32::MAX;
+    const DUMMY: u32 = u32::MAX - 1;
+    const NO_GROUP: u32 = u32::MAX;
+
+    /// A free, invalid site of no group.
+    const EMPTY: Self = Self {
+        occupant: Self::FREE,
+        group: Self::NO_GROUP,
+        util: 0.0,
+        valid: false,
+        hopeless: false,
+        blocked_layers: 0,
+    };
+
+    const fn occupant(&self) -> Occupant {
+        match self.occupant {
+            Self::FREE => Occupant::Free,
+            Self::DUMMY => Occupant::Dummy,
+            node => Occupant::Node(NodeId(node)),
+        }
+    }
+
+    /// Whether nothing, not even the dummy, holds the site.
+    const fn is_free(&self) -> bool {
+        self.occupant == Self::FREE
+    }
+
+    /// The node holding the site, if one does.
+    const fn node(&self) -> Option<NodeId> {
+        match self.occupant() {
+            Occupant::Node(node) => Some(node),
+            Occupant::Free | Occupant::Dummy => None,
+        }
+    }
+
+    fn set_occupant(&mut self, occupant: Occupant) {
+        self.occupant = match occupant {
+            Occupant::Free => Self::FREE,
+            Occupant::Dummy => Self::DUMMY,
+            Occupant::Node(node) => {
+                debug_assert!(node.0 < Self::DUMMY, "node {node:?} past the pixel's ids");
+                node.0
+            }
+        };
+    }
+
+    const fn group(&self) -> Option<GroupId> {
+        match self.group {
+            Self::NO_GROUP => None,
+            group => Some(GroupId(group)),
+        }
+    }
+
+    fn set_group(&mut self, group: GroupId) {
+        debug_assert!(
+            group.0 < Self::NO_GROUP,
+            "group {group:?} past the pixel's ids"
+        );
+        self.group = group.0;
+    }
 }
 
 /// A cell as the legalizer sees it, as `OpenDP`'s `Node`.
@@ -137,7 +203,7 @@ struct Node {
     placed: bool,
     /// Placed early, which later passes leave alone.
     hold: bool,
-    group: Option<usize>,
+    group: Option<GroupId>,
     /// The rectangle of its group's region it belongs to.
     region: Option<usize>,
     left: i64,
@@ -220,11 +286,11 @@ struct Placer {
     row_count: i64,
     pixels: Vec<Pixel>,
     row_sites: Vec<Vec<RowSites>>,
-    nodes: Vec<Node>,
+    nodes: IdVec<NodeId, Node>,
     edge_spacing: EdgeSpacing,
     disallow_one_site_gaps: bool,
     search: SearchMarks,
-    groups: Vec<groups::Group>,
+    groups: IdVec<GroupId, groups::Group>,
     /// Every region rectangle with its top and right edges pulled in by one,
     /// as `OpenDP`'s region R-tree holds them.
     region_boxes: Vec<Rect<Dbu>>,
@@ -266,28 +332,18 @@ impl Placer {
             row_edges,
             row_site_count,
             row_count,
-            pixels: vec![
-                Pixel {
-                    cell: NO_CELL,
-                    group: NO_GROUP,
-                    util: 0.0,
-                    valid: false,
-                    hopeless: false,
-                    blocked_layers: 0,
-                };
-                (row_site_count * row_count).max(0) as usize
-            ],
+            pixels: vec![Pixel::EMPTY; (row_site_count * row_count).max(0) as usize],
             row_sites: vec![Vec::new(); row_count.max(0) as usize],
-            nodes: Vec::new(),
+            nodes: IdVec::new(),
             edge_spacing,
             disallow_one_site_gaps: !has_one_site_master(db),
             search: SearchMarks::new(),
-            groups: Vec::new(),
+            groups: IdVec::new(),
             region_boxes: Vec::new(),
         };
         placer.mark_rows(db, &rows);
         placer.mark_blocked(db);
-        placer.nodes = placer.make_nodes(db, &rows, uniform_row_height);
+        placer.nodes = placer.make_nodes(db, &rows, uniform_row_height).into();
         for node in &mut placer.nodes {
             if !node.fixed {
                 node.placed = false;
@@ -586,7 +642,7 @@ impl Placer {
     /// Puts every fixed cell on the grid, as `Opendp::setFixedGridCells`;
     /// the pixels of a macro become hopeless so cells move off it.
     fn paint_fixed_cells(&mut self) {
-        for n in 0..self.nodes.len() {
+        for n in self.nodes.ids() {
             if !self.nodes[n].fixed {
                 continue;
             }
@@ -600,7 +656,7 @@ impl Placer {
             for x in x0..x1 {
                 for y in y0..y1 {
                     if let Some(p) = self.pixel_mut(x, y) {
-                        p.cell = node_id(n);
+                        p.set_occupant(Occupant::Node(n));
                         if block {
                             p.hopeless = true;
                         }
@@ -612,8 +668,8 @@ impl Placer {
 
     /// Places every movable standard cell, as `Opendp::place`.
     fn place(&mut self) -> Result<DetailedPlacement, DetailedPlacementError> {
-        let mut order: Vec<usize> = Vec::new();
-        for (n, node) in self.nodes.iter().enumerate() {
+        let mut order: Vec<NodeId> = Vec::new();
+        for (n, node) in self.nodes.iter_enumerated() {
             if !node.core || node.fixed || node.group.is_some() || node.placed {
                 continue;
             }
@@ -666,12 +722,12 @@ impl Placer {
 
     /// Places a cell at the free spot nearest its legal position, as
     /// `Opendp::diamondMove`.
-    fn diamond_move(&mut self, n: usize) -> bool {
+    fn diamond_move(&mut self, n: NodeId) -> bool {
         let start = self.legal_grid_pt(n);
         self.diamond_move_from(n, start)
     }
 
-    fn diamond_move_from(&mut self, n: usize, start: GridPt) -> bool {
+    fn diamond_move_from(&mut self, n: NodeId, start: GridPt) -> bool {
         match self.diamond_search(n, start) {
             Some((x, y)) => {
                 self.place_cell(n, x, y);
@@ -683,13 +739,13 @@ impl Placer {
 
     /// Takes up the cells around a cell that found no spot, places it and
     /// then them, as `Opendp::ripUpAndReplace`; failures are recorded.
-    fn rip_up_and_replace(&mut self, n: usize, failures: &mut Vec<usize>) -> bool {
+    fn rip_up_and_replace(&mut self, n: NodeId, failures: &mut Vec<NodeId>) -> bool {
         let (tx, ty) = self.legal_grid_pt(n);
         let margin_width = self.grid_width(&self.nodes[n]) * (1 + RIP_UP_ROWS);
-        let mut around: BTreeSet<usize> = BTreeSet::new();
+        let mut around: BTreeSet<NodeId> = BTreeSet::new();
         for x in tx - margin_width..=tx + margin_width {
             for y in ty - RIP_UP_ROWS..=ty + RIP_UP_ROWS {
-                if let Some(other) = self.pixel(x, y).and_then(|p| node_at(p.cell))
+                if let Some(other) = self.pixel(x, y).and_then(Pixel::node)
                     && !self.nodes[other].fixed
                 {
                     let _ = around.insert(other);
@@ -697,7 +753,7 @@ impl Placer {
             }
         }
         let in_group = self.nodes[n].group.is_some();
-        let around: Vec<usize> = around
+        let around: Vec<NodeId> = around
             .into_iter()
             .filter(|&other| self.nodes[other].group.is_some() == in_group)
             .collect();
@@ -719,14 +775,14 @@ impl Placer {
 
     /// The grid point a cell's legal position falls in, as
     /// `Opendp::legalGridPt`.
-    fn legal_grid_pt(&self, n: usize) -> GridPt {
+    fn legal_grid_pt(&self, n: NodeId) -> GridPt {
         let (x, y) = self.legal_pt_moved(n);
         (self.grid_x(x), self.snap_down_y(y))
     }
 
     /// A cell's position made legal and moved off any macro, as
     /// `Opendp::legalPt` with padding.
-    fn legal_pt_moved(&self, n: usize) -> (i64, i64) {
+    fn legal_pt_moved(&self, n: NodeId) -> (i64, i64) {
         let node = &self.nodes[n];
         let mut legal = self.legal_pt(node, node.init);
         let mut gx = self.grid_x(legal.0);
@@ -738,7 +794,7 @@ impl Placer {
             legal = (gx * self.site_width, self.row_y(gy));
             pixel = self.pixel(gx, gy).copied().unwrap_or(pixel);
         }
-        if let Some(block) = node_at(pixel.cell) {
+        if let Some(block) = pixel.node() {
             let block = &self.nodes[block];
             if block.block {
                 let b = (
@@ -836,7 +892,7 @@ impl Placer {
     /// The nearest spot from `(x, y)` where the cell can be placed, in
     /// Manhattan distance and then the order the search reached it, as
     /// `Opendp::diamondSearch`.
-    fn diamond_search(&mut self, n: usize, (x, y): GridPt) -> Option<GridPt> {
+    fn diamond_search(&mut self, n: NodeId, (x, y): GridPt) -> Option<GridPt> {
         let (mut x_min, mut y_min) = (x - MAX_DISPLACEMENT_X, y - MAX_DISPLACEMENT_Y);
         let (mut x_max, mut y_max) = (x + MAX_DISPLACEMENT_X, y + MAX_DISPLACEMENT_Y);
         if let Some(g) = self.nodes[n].group {
@@ -879,7 +935,7 @@ impl Placer {
     }
 
     /// Whether the cell fits at `(x, y)`, as `Opendp::canBePlaced`.
-    fn can_be_placed(&self, n: usize, x: i64, y: i64) -> bool {
+    fn can_be_placed(&self, n: NodeId, x: i64, y: i64) -> bool {
         if y >= self.row_count {
             return false;
         }
@@ -897,13 +953,13 @@ impl Placer {
         if !self.region_overlap_allowed(node, x, y, x_end, y_end) {
             return false;
         }
-        let group = node.group.map_or(NO_GROUP, group_id);
+        let group = node.group;
         for y1 in y..y_end {
             for x1 in x..x_end {
                 let Some(p) = self.pixel(x1, y1) else {
                     return false;
                 };
-                if p.cell != NO_CELL || !p.valid || p.group != group {
+                if !p.is_free() || !p.valid || p.group() != group {
                     return false;
                 }
                 if y1 == y && self.site_orientation(x1, y1, node.site).is_none() {
@@ -931,8 +987,8 @@ impl Placer {
         let y_begin = y.max(0);
         let x_finish = x_end.min(self.row_site_count - 1);
         let y_finish = y_end.min(self.row_count - 1);
-        let abutted = |x: i64, y: i64| self.pixel(x, y).is_none_or(|p| p.cell != NO_CELL);
-        let cell_at = |x: i64, y: i64| self.pixel(x, y).is_some_and(|p| p.cell != NO_CELL);
+        let abutted = |x: i64, y: i64| self.pixel(x, y).is_none_or(|p| !p.is_free());
+        let cell_at = |x: i64, y: i64| self.pixel(x, y).is_some_and(|p| !p.is_free());
         for y in y_begin..y_finish {
             if !abutted(x_begin, y) && cell_at(x_begin - 1, y) {
                 return false;
@@ -952,7 +1008,7 @@ impl Placer {
         let x_begin = x - 1;
         let x_finish = x + self.grid_width(node);
         let y_finish = self.end_y(self.row_y(y) + node.height);
-        let taken = |x: i64, y: i64| self.pixel(x, y).is_none_or(|p| p.cell != NO_CELL);
+        let taken = |x: i64, y: i64| self.pixel(x, y).is_none_or(|p| !p.is_free());
         for y in y..y_finish {
             if !taken(x_begin, y) && taken(x_begin - 1, y) {
                 return false;
@@ -1013,7 +1069,7 @@ impl Placer {
                     let Some(p) = self.pixel(x1, y1) else {
                         continue;
                     };
-                    let Some(other) = node_at(p.cell) else {
+                    let Some(other) = p.node() else {
                         continue;
                     };
                     if self.nodes[other].cell == node.cell || !checked.insert(other) {
@@ -1051,7 +1107,7 @@ impl Placer {
 
     /// Puts a cell at `(x, y)` in its row's orientation, as
     /// `Opendp::placeCell`.
-    fn place_cell(&mut self, n: usize, x: i64, y: i64) {
+    fn place_cell(&mut self, n: NodeId, x: i64, y: i64) {
         self.paint_pixels(n, x, y);
         let orient = self.site_orientation(x, y, self.nodes[n].site);
         let bottom = self.row_y(y);
@@ -1066,20 +1122,20 @@ impl Placer {
 
     /// Marks the sites a cell covers from `(x, y)` as its own, as
     /// `Grid::paintPixel`.
-    fn paint_pixels(&mut self, n: usize, x: i64, y: i64) {
+    fn paint_pixels(&mut self, n: NodeId, x: i64, y: i64) {
         let x_end = x + self.grid_width(&self.nodes[n]);
         let y_end = self.end_y(self.row_y(y) + self.nodes[n].height);
         for gx in x..x_end {
             for gy in y..y_end {
                 if let Some(p) = self.pixel_mut(gx, gy) {
-                    p.cell = node_id(n);
+                    p.set_occupant(Occupant::Node(n));
                 }
             }
         }
     }
 
     /// Takes a cell off the grid, as `Opendp::unplaceCell`.
-    fn unplace_cell(&mut self, n: usize) {
+    fn unplace_cell(&mut self, n: NodeId) {
         let node = &self.nodes[n];
         if node.fixed || !node.placed {
             return;
@@ -1090,20 +1146,19 @@ impl Placer {
     }
 
     /// Frees the sites a cell holds where it stands, as `Grid::erasePixel`.
-    fn erase_pixels(&mut self, n: usize) {
+    fn erase_pixels(&mut self, n: NodeId) {
         let node = &self.nodes[n];
         let rect = Rect::new(
             Point::new(Dbu(node.left), Dbu(node.bottom)),
             Point::new(Dbu(node.left + node.width), Dbu(node.bottom + node.height)),
         );
         let (x0, y0, x1, y1) = self.covering(&rect);
-        let id = node_id(n);
         for x in x0..x1 {
             for y in y0..y1 {
                 if let Some(p) = self.pixel_mut(x, y)
-                    && p.cell == id
+                    && p.node() == Some(n)
                 {
-                    p.cell = NO_CELL;
+                    p.set_occupant(Occupant::Free);
                 }
             }
         }
@@ -1160,15 +1215,6 @@ impl Placer {
                 c.status = PlacementStatus::Placed;
             }
         }
-    }
-}
-
-/// The node a pixel holds, if a real one does.
-const fn node_at(cell: u32) -> Option<usize> {
-    if cell == NO_CELL || cell == DUMMY_CELL {
-        None
-    } else {
-        Some(cell as usize)
     }
 }
 
