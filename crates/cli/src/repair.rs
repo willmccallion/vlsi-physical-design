@@ -454,7 +454,10 @@ fn layer_wire_rc(wire: &LayerRcConfig, db: &NetlistDB) -> anyhow::Result<WireRc>
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::testing::{cts_fixture, scratch_dir, tiny};
+    use crate::testing::{cts_fixture, scratch_dir, tiny, tiny_config};
+    use pare_common::db::design::PinOwner;
+    use pare_common::db::indices::PinId;
+    use std::path::Path;
 
     fn wire(layer: &str) -> LayerRcConfig {
         LayerRcConfig {
@@ -550,6 +553,84 @@ mod tests {
         assert_eq!(
             error.to_string(),
             "cell 'CLKBUF_X3' is in two Liberty files"
+        );
+    }
+
+    /// The clock network `clock_network` finds in the tiny design, linked to
+    /// the clock library, for `config` and the SDC `constraints`.
+    fn tiny_clock_network(
+        config: &Config,
+        constraints: Option<&str>,
+    ) -> (NetlistDB, anyhow::Result<ClockNetwork>) {
+        let db = tiny();
+        let liberty = load_liberty(&[clock_lib()]).unwrap();
+        let sdc = constraints
+            .map(|text| sdc::parse_str(text, Path::new("tiny.sdc"), &db, &liberty).unwrap());
+        let link = Link::new(&db, &liberty, &[]).unwrap();
+        let netlist = Netlist::new(&db, &link);
+        let constants = Constants::find(&netlist);
+        let network = clock_network(&netlist, config, sdc.as_ref(), &constants);
+        (db, network)
+    }
+
+    /// The input pin of `u1`, which the net of port `in` drives.
+    fn u1_input(db: &NetlistDB) -> PinId {
+        let u1 = db.cell_id("u1").unwrap();
+        let net = db.net_id("in").unwrap();
+        db.nets[net]
+            .pins
+            .iter()
+            .copied()
+            .find(|&p| matches!(db.pins[p].owner, PinOwner::Cell { cell, .. } if cell == u1))
+            .unwrap()
+    }
+
+    const CLOCK_ON_IN: &str = "create_clock -name clk -period 10 [get_ports in]";
+
+    #[test]
+    fn without_an_sdc_file_the_clock_ports_are_the_clocks() {
+        let config = tiny_config("[netlist]\nclock_ports = [\"in\"]");
+
+        let (db, network) = tiny_clock_network(&config, None);
+
+        assert!(network.unwrap().is_clock(u1_input(&db)));
+    }
+
+    #[test]
+    fn without_clock_ports_or_an_sdc_file_nothing_is_a_clock() {
+        let (db, network) = tiny_clock_network(&tiny_config(""), None);
+
+        assert!(!network.unwrap().is_clock(u1_input(&db)));
+    }
+
+    #[test]
+    fn an_unknown_clock_port_is_an_error() {
+        let config = tiny_config("[netlist]\nclock_ports = [\"clk\"]");
+
+        let (_, network) = tiny_clock_network(&config, None);
+
+        assert_eq!(
+            network.unwrap_err().to_string(),
+            "clock port 'clk' is not an I/O pin of the design"
+        );
+    }
+
+    #[test]
+    fn with_an_sdc_file_its_clocks_are_the_clocks() {
+        let (db, network) = tiny_clock_network(&tiny_config(""), Some(CLOCK_ON_IN));
+
+        assert!(network.unwrap().is_clock(u1_input(&db)));
+    }
+
+    #[test]
+    fn clock_ports_beside_an_sdc_file_are_an_error() {
+        let config = tiny_config("[netlist]\nclock_ports = [\"in\"]");
+
+        let (_, network) = tiny_clock_network(&config, Some(CLOCK_ON_IN));
+
+        assert_eq!(
+            network.unwrap_err().to_string(),
+            "[netlist] clock_ports must be empty when [input] sdc_file is set"
         );
     }
 
