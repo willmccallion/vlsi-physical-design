@@ -280,10 +280,11 @@ impl FaradsPerMeter {
 }
 
 impl Meters {
-    /// `length` at `dbu_per_micron` database units to a micron.
+    /// `length` at `dbu_per_micron` database units to a micron, rounded as
+    /// `Resizer::dbuToMeters` divides.
     #[must_use]
     pub fn from_dbu(length: Dbu, dbu_per_micron: DbuPerMicron) -> Self {
-        Self(length.to_f64() / f64::from(dbu_per_micron.get()) * METERS_PER_MICRON)
+        Self(length.to_f64() / (f64::from(dbu_per_micron.get()) * MICRONS_PER_METER))
     }
 }
 
@@ -321,6 +322,13 @@ mod tests {
         let length = Meters::from_dbu(Dbu(4000), DbuPerMicron::new(2000).unwrap());
 
         assert!((length.get() - 2e-6).abs() < 1e-18);
+    }
+
+    #[test]
+    fn a_length_converts_to_meters_as_openroad_rounds_it() {
+        let length = Meters::from_dbu(Dbu(13), DbuPerMicron::new(2000).unwrap());
+
+        assert_eq!(length.get().to_bits(), 6.5e-9_f64.to_bits());
     }
 
     #[test]

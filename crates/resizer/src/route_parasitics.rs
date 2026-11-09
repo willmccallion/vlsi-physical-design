@@ -17,7 +17,7 @@ use pare_common::db::indices::{CutLayerId, IdVec, LayerId, NetId};
 use pare_common::db::library::Library;
 use pare_common::geom::dbu::{Dbu, DbuPerMicron};
 use pare_common::units::{
-    FARADS_PER_PICOFARAD, Farads, FaradsPerMeter, MICRONS_PER_METER, Ohms, OhmsPerMeter,
+    FARADS_PER_PICOFARAD, Farads, FaradsPerMeter, MICRONS_PER_METER, Meters, Ohms, OhmsPerMeter,
 };
 use rustc_hash::FxHashMap;
 
@@ -124,8 +124,7 @@ impl RouteRc {
             let ratio = width.get() as f32 / self.width[layer].get() as f32;
             r_per_meter /= f64::from(ratio);
         }
-        let meters =
-            (length.to_f64() / (f64::from(self.dbu_per_micron.get()) * MICRONS_PER_METER)) as f32;
+        let meters = Meters::from_dbu(length, self.dbu_per_micron).get() as f32;
         (
             (r_per_meter * f64::from(meters)) as f32,
             (cap_per_meter * f64::from(meters)) as f32,

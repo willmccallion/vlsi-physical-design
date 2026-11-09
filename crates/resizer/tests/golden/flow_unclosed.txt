@@ -11,16 +11,16 @@ SetupSummary {
     failing_before: 32,
     failing_after: 31,
     wns_before: Seconds(
-        -1.0738456775465223e-10,
+        -1.0738456775465202e-10,
     ),
     wns_after: Seconds(
-        -4.366518714586217e-11,
+        -4.3665187145862144e-11,
     ),
     tns_before: Seconds(
-        -1.7596899840220717e-9,
+        -1.7596899840220632e-9,
     ),
     tns_after: Seconds(
-        -6.824003618870046e-10,
+        -6.824003618870091e-10,
     ),
     removed: 25,
     resized: 8,
@@ -35,16 +35,16 @@ HoldSummary {
     failing_before: 5,
     failing_after: 1,
     wns_before: Seconds(
-        7.008957467797602e-11,
+        7.00895746779772e-11,
     ),
     wns_after: Seconds(
         1.166988248038224e-10,
     ),
     setup_wns_before: Seconds(
-        -4.366518714586217e-11,
+        -4.3665187145862144e-11,
     ),
     setup_wns_after: Seconds(
-        -4.366518714586217e-11,
+        -4.3665187145862144e-11,
     ),
     inserted: 8,
     resized: 0,
