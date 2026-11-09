@@ -444,7 +444,11 @@ fn write_routed(db: &NetlistDB, output_dir: &Path) -> anyhow::Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use pare_router::SavePoint;
+    use crate::testing::{scratch_dir, tiny};
+    use pare_common::geom::dbu::Dbu;
+    use pare_common::geom::point::Point;
+    use pare_common::geom::rect::Rect;
+    use pare_router::{NetGuide, SavePoint};
 
     #[test]
     fn a_save_point_is_global_or_a_round_number() {
@@ -461,5 +465,46 @@ mod tests {
             error.contains("first") && error.contains("global"),
             "{error}"
         );
+    }
+
+    fn rect(x0: i64, y0: i64, x1: i64, y1: i64) -> Rect<Dbu> {
+        Rect::new(Point::new(Dbu(x0), Dbu(y0)), Point::new(Dbu(x1), Dbu(y1)))
+    }
+
+    #[test]
+    fn guides_are_written_net_by_net_in_the_ispd_format() {
+        let db = tiny();
+        let layer = |name: &str| db.library.routing_layer_id(name).unwrap();
+        let guides = [
+            NetGuide {
+                net: db.net_id("n3").unwrap(),
+                boxes: vec![
+                    (layer("M1"), rect(2000, 0, 4000, 2000)),
+                    (layer("M3"), rect(2000, 2000, 6000, 4000)),
+                ],
+            },
+            NetGuide {
+                net: db.net_id("in").unwrap(),
+                boxes: vec![(layer("M2"), rect(0, 0, 2000, 6000))],
+            },
+        ];
+        let path = scratch_dir("guides").join("tiny.guide");
+
+        write_guides(&path, &db, &guides).unwrap();
+
+        assert_eq!(
+            std::fs::read_to_string(&path).unwrap(),
+            "n3\n(\n2000 0 4000 2000 M1\n2000 2000 6000 4000 M3\n)\n\
+             in\n(\n0 0 2000 6000 M2\n)\n"
+        );
+    }
+
+    #[test]
+    fn no_guides_write_an_empty_file() {
+        let path = scratch_dir("no-guides").join("tiny.guide");
+
+        write_guides(&path, &tiny(), &[]).unwrap();
+
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), "");
     }
 }
