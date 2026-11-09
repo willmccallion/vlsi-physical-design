@@ -68,23 +68,22 @@ impl Bins {
         self.size.x * self.size.y
     }
 
-    /// The columns and rows `rect` covers, each with the length of overlap.
-    #[allow(clippy::type_complexity)]
-    fn under(&self, rect: &Rect<f64>) -> Option<(Vec<(usize, f64)>, Vec<(usize, f64)>)> {
-        let cols = overlaps(rect.min.x, rect.max.x, self.origin.x, self.size.x, self.dim);
+    /// The columns and rows `rect` covers, none when it misses the bins.
+    fn under(&self, rect: &Rect<f64>) -> Option<Coverage> {
+        let columns = overlaps(rect.min.x, rect.max.x, self.origin.x, self.size.x, self.dim);
         let rows = overlaps(rect.min.y, rect.max.y, self.origin.y, self.size.y, self.dim);
-        (!cols.is_empty() && !rows.is_empty()).then_some((cols, rows))
+        (!columns.is_empty() && !rows.is_empty()).then_some(Coverage { columns, rows })
     }
 
     /// Adds `density` times the overlap of `rect` with each bin to `map`.
     fn spread(&self, rect: &Rect<f64>, density: f64, map: &mut [f64]) {
-        let Some((cols, rows)) = self.under(rect) else {
+        let Some(coverage) = self.under(rect) else {
             return;
         };
-        for (r, oy) in rows {
-            for &(c, ox) in &cols {
-                let idx = r * self.dim + c;
-                map[idx] = (ox * oy).mul_add(density, map[idx]);
+        for row in &coverage.rows {
+            for column in &coverage.columns {
+                let idx = row.bin * self.dim + column.bin;
+                map[idx] = (column.length * row.length).mul_add(density, map[idx]);
             }
         }
     }
@@ -297,11 +296,11 @@ impl DensityGrid {
     pub(super) fn gradient_at(&self, center: Point<f64>, f: &Footprint) -> Point<f64> {
         let rect = Rect::new(center - f.half, center + f.half);
         let mut force = Point::new(0.0, 0.0);
-        if let Some((cols, rows)) = self.bins.under(&rect) {
-            for (r, oy) in rows {
-                for &(col, ox) in &cols {
-                    let q = ox * oy * f.density;
-                    let idx = r * self.bins.dim + col;
+        if let Some(coverage) = self.bins.under(&rect) {
+            for row in &coverage.rows {
+                for column in &coverage.columns {
+                    let q = column.length * row.length * f.density;
+                    let idx = row.bin * self.bins.dim + column.bin;
                     force.x = q.mul_add(self.field_x[idx], force.x);
                     force.y = q.mul_add(self.field_y[idx], force.y);
                 }
@@ -318,15 +317,32 @@ fn overlap(a: &Rect<f64>, b: &Rect<f64>) -> Option<Rect<f64>> {
     (min.x < max.x && min.y < max.y).then(|| Rect::new(min, max))
 }
 
+/// A bin along one axis, and how much of an interval lies in it.
+#[derive(Clone, Copy, Debug)]
+struct AxisOverlap {
+    bin: usize,
+    length: f64,
+}
+
+/// The bins a rectangle covers along each axis.
+#[derive(Clone, Debug)]
+struct Coverage {
+    columns: Vec<AxisOverlap>,
+    rows: Vec<AxisOverlap>,
+}
+
 /// The bins along one axis that `[lo, hi]` overlaps, with overlap lengths.
-fn overlaps(lo: f64, hi: f64, origin: f64, size: f64, count: usize) -> Vec<(usize, f64)> {
+fn overlaps(lo: f64, hi: f64, origin: f64, size: f64, count: usize) -> Vec<AxisOverlap> {
     let first = ((lo - origin) / size).floor().max(0.0) as usize;
     let last = (((hi - origin) / size).ceil().max(0.0) as usize).min(count);
     (first..last)
         .filter_map(|i| {
             let start = (i as f64).mul_add(size, origin);
             let len = hi.min(start + size) - lo.max(start);
-            (len > 0.0).then_some((i, len))
+            (len > 0.0).then_some(AxisOverlap {
+                bin: i,
+                length: len,
+            })
         })
         .collect()
 }
