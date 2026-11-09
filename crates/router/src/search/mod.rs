@@ -185,14 +185,21 @@ pub(crate) struct Guide {
 }
 
 impl Guide {
-    pub(crate) fn new(cells: &[GCell], origin: Point<Dbu>, gcell: Dbu, tech: &RouteTech) -> Self {
+    /// The guide around the global route through `cells`; none for a route
+    /// of no cells.
+    pub(crate) fn new(
+        cells: &[GCell],
+        origin: Point<Dbu>,
+        gcell: Dbu,
+        tech: &RouteTech,
+    ) -> Option<Self> {
         let reach = GUIDE_SLACK_GCELLS;
         let column = |c: &GCell| Gcells::from(c.x);
         let row = |c: &GCell| Gcells::from(c.y);
-        let x0 = cells.iter().map(column).min().unwrap_or_default() - reach;
-        let y0 = cells.iter().map(row).min().unwrap_or_default() - reach;
-        let x1 = cells.iter().map(column).max().unwrap_or_default() + reach;
-        let y1 = cells.iter().map(row).max().unwrap_or_default() + reach;
+        let x0 = cells.iter().map(column).min()? - reach;
+        let y0 = cells.iter().map(row).min()? - reach;
+        let x1 = cells.iter().map(column).max()? + reach;
+        let y1 = cells.iter().map(row).max()? + reach;
         let min_layer = tech.min_layer.index();
         let layers = tech.max_layer.index() - min_layer + 1;
         let (width, height) = (x1 - x0 + Gcells(1), y1 - y0 + Gcells(1));
@@ -223,7 +230,7 @@ impl Guide {
                 }
             }
         }
-        guide
+        Some(guide)
     }
 
     /// The extent of one gcell.
@@ -1075,6 +1082,16 @@ mod tests {
             i = j + 1;
         }
         out
+    }
+
+    #[test]
+    fn a_global_route_of_no_cells_gives_no_guide() {
+        let db = tiny();
+        let tech = RouteTech::new(&db, &RoutingConfig::default()).unwrap();
+
+        let guide = Guide::new(&[], db.die_area.min, Dbu(1000), &tech);
+
+        assert!(guide.is_none());
     }
 
     #[test]

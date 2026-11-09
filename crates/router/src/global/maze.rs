@@ -10,7 +10,7 @@
 
 use super::coarse::{Corridor, Plan, SCALE};
 use super::grid_index;
-use super::{BLOCKED_COST, GCell, GcellWindow, GlobalCosts, GlobalGrid, GlobalNet, window};
+use super::{BLOCKED_COST, GCell, GcellWindow, GlobalCosts, GlobalGrid, GlobalNet};
 use crate::tech::index_u32;
 use crate::tree::connection_order;
 use pare_common::db::indices::LayerId;
@@ -133,7 +133,7 @@ fn search_extended(
     ends: [GCell; 2],
     margin: u16,
 ) -> Option<Vec<GCell>> {
-    let w = window(&ends, margin, grid.nx, grid.ny);
+    let w = GcellWindow::spanning(ends[0], ends[1]).grown(margin, grid.nx, grid.ny);
     let c = corridor.window();
     let span = w.union(c);
     let inside = |cell: &GCell| w.contains(cell.x, cell.y) || corridor.allows(cell.x, cell.y);
@@ -165,7 +165,7 @@ fn search_widening(
         if let Some(p) = search_window(grid, avoid, buckets, ends, margin) {
             return p;
         }
-        if window(&ends, margin, grid.nx, grid.ny) == full {
+        if GcellWindow::spanning(ends[0], ends[1]).grown(margin, grid.nx, grid.ny) == full {
             let all = cells_in(buckets, full);
             let cross = Query {
                 blocked: Blocked::Cross,
@@ -186,7 +186,7 @@ fn search_window(
     ends: [GCell; 2],
     margin: u16,
 ) -> Option<Vec<GCell>> {
-    let w = window(&ends, margin, grid.nx, grid.ny);
+    let w = GcellWindow::spanning(ends[0], ends[1]).grown(margin, grid.nx, grid.ny);
     let sources = cells_in(buckets, w);
     if sources.is_empty() {
         return None;
