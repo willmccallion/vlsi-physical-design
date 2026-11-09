@@ -33,9 +33,25 @@ pub(super) struct Group {
     /// The region's rectangles within the core, relative to it.
     pub(super) rects: Vec<Rect<Dbu>>,
     pub(super) bbox: Rect<Dbu>,
-    /// Its member nodes, in the order `OpenDB` lists a group's instances.
-    pub(super) cells: Vec<NodeId>,
+    /// Its members, in the order `OpenDB` lists a group's instances.
+    members: Vec<Member>,
     util: f64,
+}
+
+impl Group {
+    /// Its member nodes, in order.
+    fn nodes(&self) -> impl Iterator<Item = NodeId> + '_ {
+        self.members.iter().map(|m| m.node)
+    }
+}
+
+/// A node of a group with the rectangle of the region it belongs to.
+#[derive(Clone, Copy, Debug)]
+struct Member {
+    node: NodeId,
+    /// The rectangle it is packed toward when its group is placed as
+    /// bricks, as `Node::getRegion`.
+    home: Rect<Dbu>,
 }
 
 impl Placer {
@@ -70,14 +86,6 @@ impl Placer {
                 ));
                 rects.push(rel);
             }
-            let bbox = rects
-                .iter()
-                .copied()
-                .reduce(|a, b| a.union(&b))
-                .unwrap_or(Rect::new(
-                    Point::new(Dbu(0), Dbu(0)),
-                    Point::new(Dbu(0), Dbu(0)),
-                ));
             let g = self.groups.next_id();
             let mut members: Vec<(CellId, NodeId)> = db
                 .cells
@@ -90,22 +98,24 @@ impl Placer {
                 .collect();
             members
                 .sort_by_key(|&(i, _)| (db.cells[i].region_member_order(), std::cmp::Reverse(i)));
-            // NOTE: Opendp::setUpPlacementGroups keeps such a region and
-            // brickPlace2 dereferences its missing rectangle; PARE rejects it.
-            if rects.is_empty() && !members.is_empty() {
-                return Err(DetailedPlacementError::RegionOutsideCore(
-                    region.name.clone(),
-                ));
-            }
-            let mut cells = Vec::with_capacity(members.len());
+            let mut group_members = Vec::with_capacity(members.len());
             for (_, n) in members {
+                // NOTE: Opendp::setUpPlacementGroups keeps a region off the core
+                // and brickPlace2 dereferences its missing rectangle; PARE rejects it.
+                let home = home_rect(&self.nodes[n], &rects).ok_or_else(|| {
+                    DetailedPlacementError::RegionOutsideCore(region.name.clone())
+                })?;
                 self.nodes[n].group = Some(g);
-                cells.push(n);
+                group_members.push(Member { node: n, home });
             }
+            let Some(bbox) = rects.iter().copied().reduce(|a, b| a.union(&b)) else {
+                // Off the core and so, having no members, nothing to place.
+                continue;
+            };
             let _ = self.groups.push(Group {
                 rects,
                 bbox,
-                cells,
+                members: group_members,
                 util: 0.0,
             });
         }
@@ -158,7 +168,7 @@ impl Placer {
         }
         let site = self.site_width.get();
         for g in self.groups.ids() {
-            if self.groups[g].cells.is_empty() {
+            if self.groups[g].members.is_empty() {
                 if g != GroupId(0) {
                     log::warn!("No cells found in group {}.", g.index());
                 }
@@ -214,7 +224,7 @@ impl Placer {
 
     /// Places every group's cells, as `Opendp::placeGroups`.
     pub(super) fn place_groups(&mut self) -> Result<(), DetailedPlacementError> {
-        self.assign_cell_regions();
+        self.measure_group_utilization();
         self.pre_place_groups();
         self.pre_place();
         self.place_group_cells()?;
@@ -230,12 +240,12 @@ impl Placer {
         Ok(())
     }
 
-    /// Each group's utilization and each member's rectangle, as
-    /// `Opendp::groupAssignCellRegions`.
-    fn assign_cell_regions(&mut self) {
+    /// Each group's utilization, as `Opendp::groupAssignCellRegions`
+    /// measures it; [`Self::make_groups`] gives each member its rectangle.
+    fn measure_group_utilization(&mut self) {
         for g in self.groups.ids() {
             let mut site_area = DbuArea::ZERO;
-            if !self.groups[g].cells.is_empty() {
+            if !self.groups[g].members.is_empty() {
                 for x in GridX::ZERO.until(self.row_site_count) {
                     for y in GridY::ZERO.until(self.row_count) {
                         if self
@@ -247,18 +257,10 @@ impl Placer {
                     }
                 }
             }
-            let mut cell_area = 0.0;
-            for k in 0..self.groups[g].cells.len() {
-                let n = self.groups[g].cells[k];
-                cell_area += area(&self.nodes[n]).to_f64();
-                let mut region = None;
-                for (r, rect) in self.groups[g].rects.iter().enumerate() {
-                    if is_inside(&self.nodes[n], rect) {
-                        region = Some(r);
-                    }
-                }
-                self.nodes[n].region = Some(region.unwrap_or(0));
-            }
+            let cell_area: f64 = self.groups[g]
+                .nodes()
+                .map(|n| area(&self.nodes[n]).to_f64())
+                .sum();
             self.groups[g].util = if site_area == DbuArea::ZERO {
                 0.0
             } else {
@@ -288,33 +290,20 @@ impl Placer {
     /// `Opendp::prePlaceGroups`.
     fn pre_place_groups(&mut self) {
         for g in self.groups.ids() {
-            for k in 0..self.groups[g].cells.len() {
-                let n = self.groups[g].cells[k];
-                if self.nodes[n].fixed || self.nodes[n].placed {
+            for k in 0..self.groups[g].members.len() {
+                let n = self.groups[g].members[k].node;
+                let node = &self.nodes[n];
+                let rects = &self.groups[g].rects;
+                if node.fixed || node.placed || rects.iter().any(|r| is_inside(node, r)) {
                     continue;
                 }
-                let mut distance = Dbu(i64::MAX);
-                let mut inside = false;
-                let mut nearest = None;
-                for rect in &self.groups[g].rects {
-                    if is_inside(&self.nodes[n], rect) {
-                        inside = true;
-                    }
-                    let d = dist_to_rect(&self.nodes[n], rect);
-                    if d < distance {
-                        distance = d;
-                        nearest = Some(*rect);
-                    }
-                }
-                let Some(rect) = nearest else {
+                let Some(rect) = nearest_rect(node, rects) else {
                     continue;
                 };
-                if !inside {
-                    let to = nearest_pt(&self.nodes[n], &rect);
-                    let legal = self.legal_grid_pt_at(n, to);
-                    if self.diamond_move_from(n, legal) {
-                        self.nodes[n].hold = true;
-                    }
+                let to = nearest_pt(node, &rect);
+                let legal = self.legal_grid_pt_at(n, to);
+                if self.diamond_move_from(n, legal) {
+                    self.nodes[n].hold = true;
                 }
             }
         }
@@ -358,9 +347,7 @@ impl Placer {
     fn place_group_cells(&mut self) -> Result<(), DetailedPlacementError> {
         for g in self.groups.ids() {
             let mut order: Vec<NodeId> = self.groups[g]
-                .cells
-                .iter()
-                .copied()
+                .nodes()
                 .filter(|&n| !self.nodes[n].fixed && !self.nodes[n].placed)
                 .collect();
             let less = self.place_order_less();
@@ -377,8 +364,8 @@ impl Placer {
             if pass {
                 continue;
             }
-            for k in 0..self.groups[g].cells.len() {
-                let n = self.groups[g].cells[k];
+            for k in 0..self.groups[g].members.len() {
+                let n = self.groups[g].members[k].node;
                 self.unplace_cell(n);
             }
             if self.groups[g].util > BRICK_UTILIZATION {
@@ -394,7 +381,7 @@ impl Placer {
     /// box, nearest first, as `Opendp::brickPlace1`.
     fn brick_place_outer(&mut self, g: GroupId) -> Result<(), DetailedPlacementError> {
         let boundary = self.groups[g].bbox;
-        let mut order = self.groups[g].cells.clone();
+        let mut order: Vec<NodeId> = self.groups[g].nodes().collect();
         sort(&mut order, &|&a, &b| {
             corner_dist(&self.nodes[a], &boundary) < corner_dist(&self.nodes[b], &boundary)
         });
@@ -413,18 +400,15 @@ impl Placer {
     /// Packs a group's cells toward the corners of their own rectangles,
     /// nearest first, as `Opendp::brickPlace2`.
     fn brick_place_inner(&mut self, g: GroupId) -> Result<(), DetailedPlacementError> {
-        let rects = self.groups[g].rects.clone();
-        let rect_of = |node: &Node| rects[node.region.unwrap_or(0)];
-        let mut order = self.groups[g].cells.clone();
-        sort(&mut order, &|&a, &b| {
-            let (na, nb) = (&self.nodes[a], &self.nodes[b]);
-            corner_dist(na, &rect_of(na)) < corner_dist(nb, &rect_of(nb))
+        let mut order = self.groups[g].members.clone();
+        sort(&mut order, &|a, b| {
+            corner_dist(&self.nodes[a.node], &a.home) < corner_dist(&self.nodes[b.node], &b.home)
         });
-        for n in order {
+        for Member { node: n, home } in order {
             if self.nodes[n].hold {
                 continue;
             }
-            let to = corner(&self.nodes[n], &rect_of(&self.nodes[n]));
+            let to = corner(&self.nodes[n], &home);
             let legal = self.legal_grid_pt_at(n, to);
             if !self.diamond_move_from(n, legal) {
                 return Err(DetailedPlacementError::Failed(vec![
@@ -438,7 +422,7 @@ impl Placer {
     /// Moves the most displaced twentieth of a group's cells nearer to where
     /// they started, as `Opendp::groupRefine`; returns how many moved.
     fn group_refine(&mut self, g: GroupId) -> usize {
-        let mut by_displacement = self.groups[g].cells.clone();
+        let mut by_displacement: Vec<NodeId> = self.groups[g].nodes().collect();
         sort(&mut by_displacement, &|&a, &b| {
             displacement(&self.nodes[a]) > displacement(&self.nodes[b])
         });
@@ -489,7 +473,7 @@ impl Placer {
     /// where they started, as `Opendp::anneal`; returns how many swapped.
     fn anneal(&mut self, g: GroupId) -> usize {
         let mut generator = Mt19937::new(RANDOM_SEED);
-        let cells = self.groups[g].cells.clone();
+        let cells: Vec<NodeId> = self.groups[g].nodes().collect();
         let Ok(high) = i32::try_from(cells.len()) else {
             return 0;
         };
@@ -600,6 +584,25 @@ fn is_inside(node: &Node, rect: &Rect<Dbu>) -> bool {
         && y + node.height <= rect.max.y
 }
 
+/// The rectangle of a region a member belongs to: the last that holds its
+/// start, else the nearest; none when the region has no rectangle.
+// NOTE: Opendp::groupAssignCellRegions falls back to the first rectangle,
+// which can pack a member far from its start; PARE takes the nearest.
+fn home_rect(node: &Node, rects: &[Rect<Dbu>]) -> Option<Rect<Dbu>> {
+    rects
+        .iter()
+        .rev()
+        .find(|r| is_inside(node, r))
+        .copied()
+        .or_else(|| nearest_rect(node, rects))
+}
+
+/// The rectangle nearest a cell's start, the first of equals, as
+/// `Opendp::prePlaceGroups` picks it.
+fn nearest_rect(node: &Node, rects: &[Rect<Dbu>]) -> Option<Rect<Dbu>> {
+    rects.iter().copied().min_by_key(|r| dist_to_rect(node, r))
+}
+
 /// How far a cell's starting position lies outside a rectangle, as
 /// `Opendp::distToRect`.
 fn dist_to_rect(node: &Node, rect: &Rect<Dbu>) -> Dbu {
@@ -689,4 +692,63 @@ fn corner_dist(node: &Node, rect: &Rect<Dbu>) -> Dbu {
 /// How far a cell stands from where it started, as `Opendp::disp`.
 fn displacement(node: &Node) -> Dbu {
     (node.init.x - node.left).abs() + (node.init.y - node.bottom).abs()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use pare_common::db::parser::{def, lef};
+    use std::path::{Path, PathBuf};
+
+    fn fixture(name: &str) -> PathBuf {
+        Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../common/tests/fixtures")
+            .join(name)
+    }
+
+    fn rect(x0: i64, y0: i64, x1: i64, y1: i64) -> Rect<Dbu> {
+        Rect::new(Point::new(Dbu(x0), Dbu(y0)), Point::new(Dbu(x1), Dbu(y1)))
+    }
+
+    /// The tiny design with `u1` and `u2` fenced into a region of a first
+    /// rectangle at the bottom left and a second in the top row, and `u1`
+    /// starting outside both, nearer the second.
+    fn tiny_with_two_rectangle_fence() -> NetlistDB {
+        let text = std::fs::read_to_string(fixture("tiny.def"))
+            .unwrap()
+            .replace(
+                "COMPONENTS 8 ;",
+                "REGIONS 1 ;\n- fence ( 0 0 ) ( 2000 2000 ) ( 3000 4000 ) ( 4000 6000 ) \
+                 + TYPE FENCE ;\nEND REGIONS\nCOMPONENTS 8 ;",
+            )
+            .replace(
+                "END DESIGN",
+                "GROUPS 1 ;\n- g u1 u2 + REGION fence ;\nEND GROUPS\nEND DESIGN",
+            );
+        let units = def::read_units(&fixture("tiny.def")).unwrap();
+        let library = lef::parse_files(&[fixture("tiny.lef")], units).unwrap();
+        let mut db = def::parse_str(&text, Path::new("fenced.def"), library).unwrap();
+        let u1 = db.cell_id("u1").unwrap();
+        db.cells[u1].location = Point::new(Dbu(3800), Dbu(3000));
+        db
+    }
+
+    #[test]
+    fn a_member_outside_its_region_is_packed_into_the_nearest_rectangle() {
+        let db = tiny_with_two_rectangle_fence();
+        let mut placer = Placer::new(&db).unwrap();
+        placer.paint_fixed_cells();
+        placer.mark_region_edges();
+        placer.mark_region_sites();
+        placer.measure_group_utilization();
+        let u1 = placer
+            .nodes
+            .ids()
+            .find(|&n| placer.nodes[n].name == "u1")
+            .unwrap();
+
+        placer.brick_place_inner(GroupId(0)).unwrap();
+
+        assert!(rect(3000, 4000, 4000, 6000).encloses(&placer.nodes[u1].bbox()));
+    }
 }

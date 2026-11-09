@@ -207,8 +207,6 @@ struct Node {
     /// Placed early, which later passes leave alone.
     hold: bool,
     group: Option<GroupId>,
-    /// The rectangle of its group's region it belongs to.
-    region: Option<usize>,
     left: Dbu,
     bottom: Dbu,
     width: Dbu,
@@ -593,7 +591,6 @@ impl Placer {
                 placed: c.status != PlacementStatus::Unplaced,
                 hold: false,
                 group: None,
-                region: None,
                 left: rel.min.x,
                 bottom: rel.min.y,
                 width: size.x,
@@ -1219,7 +1216,7 @@ impl Placer {
             .region_boxes
             .iter()
             .filter(|b| closed_overlap(b, &query));
-        if node.region.is_some() {
+        if node.group.is_some() {
             let (Some(only), None) = (hits.next(), hits.next()) else {
                 return false;
             };
