@@ -322,14 +322,27 @@ impl Rebuffer {
             }
             let old_buffers = collect_imported_buffers(resizer, driver, &original);
             resizer.batch_edits();
-            self.inserted += export_tree(resizer, &area_tree, "place")?;
-            for buffer in old_buffers {
-                if !resizer.db.cells[buffer].retired {
-                    let _ = resizer.remove_buffer(buffer)?;
-                    self.removed += 1;
-                }
-            }
+            let replaced = self.replace_buffers(resizer, &area_tree, &old_buffers);
             resizer.flush();
+            replaced?;
+        }
+        Ok(())
+    }
+
+    /// Puts the buffers of `tree` into the design and takes `old_buffers`
+    /// out.
+    fn replace_buffers(
+        &mut self,
+        resizer: &mut Resizer<'_, Sta>,
+        tree: &BnetPtr,
+        old_buffers: &[CellId],
+    ) -> Result<(), RepairError> {
+        self.inserted += export_tree(resizer, tree, "place")?;
+        for &buffer in old_buffers {
+            if !resizer.db.cells[buffer].retired {
+                let _ = resizer.remove_buffer(buffer)?;
+                self.removed += 1;
+            }
         }
         Ok(())
     }
