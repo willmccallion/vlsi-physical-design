@@ -273,7 +273,7 @@ impl IoPin {
 pub enum PinOwner {
     /// A pin of a placed instance.
     Cell {
-        /// The instance.
+        /// The instance the pin belongs to.
         cell: CellId,
         /// Which pin of its master.
         pin: MacroPinId,
@@ -312,7 +312,7 @@ pub enum RouteElem {
     Via {
         /// The via definition.
         via: ViaId,
-        /// Its center.
+        /// Where the via definition's origin sits, as a DEF route places it.
         at: Point<Dbu>,
     },
     /// A rectangle of metal patched onto the wiring (DEF `RECT`), as routers
@@ -320,7 +320,7 @@ pub enum RouteElem {
     Patch {
         /// Layer of the patch.
         layer: LayerId,
-        /// The rectangle.
+        /// The patch's metal, on the layer the patch names.
         rect: Rect<Dbu>,
     },
 }
@@ -332,7 +332,7 @@ pub struct Net {
     pub name: String,
     /// What the net carries.
     pub signal_use: SignalUse,
-    /// Its connections.
+    /// The cell and I/O pins it connects.
     pub pins: Vec<PinId>,
     /// Placement weight.
     pub weight: f64,
@@ -428,7 +428,7 @@ pub enum BlockageKind {
 /// An area cells keep out of.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct PlacementBlockage {
-    /// The area.
+    /// The area cells are kept out of.
     pub rect: Rect<Dbu>,
     /// How it keeps cells out.
     pub kind: BlockageKind,
@@ -481,7 +481,7 @@ pub enum EditError {
     /// A replacement master lacks a pin the instance connects.
     #[error("master '{master}' has no pin '{pin}' for instance '{cell}'")]
     MissingPin {
-        /// The instance.
+        /// The name of the instance missing the pin.
         cell: String,
         /// The replacement master.
         master: String,

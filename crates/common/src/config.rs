@@ -92,7 +92,7 @@ pub struct NetlistConfig {
 pub struct LayerAdjustmentConfig {
     /// The routing layer's name.
     pub layer: String,
-    /// The share.
+    /// The share of the layer's capacity held back.
     pub adjustment: Share,
 }
 
@@ -163,7 +163,7 @@ macro_rules! define_bounded {
                 if $holds { Some(Self($v)) } else { None }
             }
 
-            /// The value.
+            /// The bounded value as a plain float.
             #[must_use]
             pub const fn get(self) -> f64 {
                 self.0
@@ -447,7 +447,7 @@ impl Default for RoutingConfig {
 #[derive(Debug, Deserialize)]
 #[serde(try_from = "InputTable")]
 pub struct InputConfig {
-    /// The design.
+    /// The DEF or Bookshelf design the run reads.
     pub design: DesignInput,
     /// Liberty files; netlist repair runs when there are any.
     pub liberty_files: Vec<PathBuf>,

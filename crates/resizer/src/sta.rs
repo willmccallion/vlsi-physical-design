@@ -198,9 +198,9 @@ pub enum Via {
 /// One pin on a path.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct PathPoint {
-    /// The pin.
+    /// The pin the path passes.
     pub pin: PinId,
-    /// Its edge.
+    /// The transition the path takes at the pin.
     pub edge: Edge,
     /// What launched the path.
     pub tag: Tag,
@@ -225,7 +225,7 @@ pub struct Path {
 }
 
 impl Path {
-    /// The endpoint.
+    /// The path's last point: the endpoint it ends at.
     #[must_use]
     pub fn end(&self) -> &PathPoint {
         &self.points[self.points.len() - 1]

@@ -25,7 +25,7 @@ pub enum NetlistError {
 /// The design with its library link.
 #[derive(Clone, Copy, Debug)]
 pub struct Netlist<'a> {
-    /// The design.
+    /// The design whose connectivity this reads.
     pub db: &'a NetlistDB,
     /// Its masters' Liberty cells.
     pub link: &'a Link<'a>,

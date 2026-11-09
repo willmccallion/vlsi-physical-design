@@ -150,7 +150,7 @@ struct Journal {
 /// A buffer newly inserted before some loads.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) struct InsertedBuffer {
-    /// The instance.
+    /// The buffer instance put in.
     pub cell: CellId,
     /// Its input pin, on the loads' old net.
     pub input: PinId,

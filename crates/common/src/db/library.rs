@@ -252,7 +252,7 @@ pub enum SignalUse {
     Power,
     /// A ground supply.
     Ground,
-    /// A clock.
+    /// A clock, as LEF's `USE CLOCK`.
     Clock,
     /// An analog signal.
     Analog,

@@ -83,9 +83,9 @@ pub struct NetRoute {
 /// metal up to its layer's minimum area.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub struct Patch {
-    /// The layer.
+    /// The routing layer of the patch.
     pub layer: LayerId,
-    /// The metal.
+    /// The patch's metal, in database units.
     pub rect: Rect<Dbu>,
 }
 

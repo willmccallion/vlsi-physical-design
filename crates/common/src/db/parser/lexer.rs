@@ -13,7 +13,7 @@ pub enum ParseError {
     /// The file could not be read.
     #[error("cannot read {}: {source}", path.display())]
     Io {
-        /// The file.
+        /// The file that could not be read.
         path: PathBuf,
         /// The underlying error.
         #[source]
@@ -22,7 +22,7 @@ pub enum ParseError {
     /// The file's contents are malformed or inconsistent.
     #[error("{}:{line}: {message}", path.display())]
     Syntax {
-        /// The file.
+        /// The file the error is in.
         path: PathBuf,
         /// One-based line number.
         line: usize,

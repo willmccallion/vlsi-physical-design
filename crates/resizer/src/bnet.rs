@@ -121,14 +121,14 @@ impl SlackEdges {
 pub enum Kind {
     /// A load pin.
     Load {
-        /// The pin.
+        /// The load pin the leaf stands for.
         pin: PinId,
     },
     /// Two subtrees meeting.
     Junction {
         /// One side.
         left: BnetPtr,
-        /// The other.
+        /// The other side.
         right: BnetPtr,
     },
     /// A wire from this node's point to the subtree's.
@@ -454,7 +454,7 @@ impl Bnet {
 /// its output can drive, as `OpenROAD`'s `BufferSize`.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub(crate) struct BufferSize {
-    /// The cell.
+    /// The buffer's Liberty cell.
     pub cell: LibCellId,
     /// Its input capacitance.
     pub input_cap: Farads,
@@ -464,7 +464,7 @@ pub(crate) struct BufferSize {
     pub input_max_slew: Seconds,
     /// Its output's capacitance.
     pub output_cap: Farads,
-    /// Its area.
+    /// Its area in the library's units.
     pub area: f64,
     /// Its delay with no load and no input slew.
     pub intrinsic_delay: Fixed,
@@ -500,7 +500,7 @@ impl Metrics {
 /// What a load pin presents to the tree it is in.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct PinLoad {
-    /// Its capacitance.
+    /// The load's input capacitance.
     pub cap: Farads,
     /// Its fanout load.
     pub fanout: f64,
