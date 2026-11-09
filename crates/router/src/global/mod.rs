@@ -97,11 +97,14 @@ impl Usage {
         let _ = self.0[e].fetch_add(t.raw(), Ordering::Relaxed);
     }
 
-    /// Takes `t` from edge `e`, down to no usage at most.
+    /// Takes `t` from edge `e`, which an add of at least `t` put there.
     fn remove(&self, e: usize, t: Tracks) {
-        let _ = self.0[e].try_update(Ordering::Relaxed, Ordering::Relaxed, |v| {
-            Some((v - t.raw()).max(0))
-        });
+        let before = self.0[e].fetch_sub(t.raw(), Ordering::Relaxed);
+        debug_assert!(
+            before >= t.raw(),
+            "more usage lifted from edge {e} than was placed: {before} < {}",
+            t.raw()
+        );
     }
 
     #[cfg(test)]
@@ -2023,6 +2026,17 @@ mod tests {
         grid.add_tree(&net, &paths, Sign::Remove);
 
         assert!(grid.usage.iter().all(|u| u == Tracks::ZERO));
+    }
+
+    #[test]
+    #[cfg(debug_assertions)]
+    #[should_panic(expected = "more usage lifted")]
+    fn lifting_a_tree_that_was_never_placed_is_caught() {
+        let grid = grid();
+        let net = net(vec![at(1, 2, 5), at(1, 4, 5)]);
+        let paths = vec![vec![at(1, 2, 5), at(1, 3, 5), at(1, 4, 5)]];
+
+        grid.lift(&net, &paths);
     }
 
     #[test]
