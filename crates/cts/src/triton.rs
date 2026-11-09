@@ -22,7 +22,7 @@ use pare_common::geom::dbu::Dbu;
 use pare_common::geom::orient::Orientation;
 use pare_common::geom::point::Point as DbPoint;
 use pare_common::geom::rect::Rect;
-use pare_common::units::Seconds;
+use pare_common::units::{FaradsPerDbu, Seconds};
 use pare_resizer::WireRc;
 use pare_resizer::steiner::{DEFAULT_ALPHA, prim_dijkstra};
 use pare_resizer::{ClockNetwork, Link};
@@ -78,7 +78,7 @@ pub struct CtsSummary {
 pub struct ClockTrees {
     pub(crate) builders: Vec<Builder>,
     pub(crate) setup: TreeSetup,
-    pub(crate) cap_per_dbu: f64,
+    pub(crate) cap_per_dbu: FaradsPerDbu,
     /// What was done.
     pub summary: CtsSummary,
 }

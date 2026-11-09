@@ -10,6 +10,7 @@
 use crate::capacitance::Farads32;
 use crate::htree::Point;
 use crate::techchar::SegmentLength;
+use pare_common::units::FaradsPerDbu;
 
 /// How much load a leaf buffer may drive, as a multiple of its own input
 /// capacitance, as `kMaxCapFactor`.
@@ -28,7 +29,7 @@ pub(crate) struct SinkClustering {
     max_internal_diameter: f32,
     cap_per_unit: f32,
     use_max_cap: bool,
-    cap_per_dbu: f64,
+    cap_per_dbu: FaradsPerDbu,
     sink_buffer_input_cap: Farads32,
     first_run: bool,
     x_span: f64,
@@ -38,7 +39,11 @@ pub(crate) struct SinkClustering {
 }
 
 impl SinkClustering {
-    pub const fn new(use_max_cap: bool, cap_per_dbu: f64, sink_buffer_input_cap: Farads32) -> Self {
+    pub const fn new(
+        use_max_cap: bool,
+        cap_per_dbu: FaradsPerDbu,
+        sink_buffer_input_cap: Farads32,
+    ) -> Self {
         Self {
             points: Vec::new(),
             caps: Vec::new(),
@@ -125,7 +130,7 @@ impl SinkClustering {
             (false, false) => self.x_span.min(self.y_span),
         };
         self.max_internal_diameter = (f64::from(max_diameter) / self.span) as f32;
-        self.cap_per_unit = (self.cap_per_dbu * f64::from(scale_factor) * self.span) as f32;
+        self.cap_per_unit = (self.cap_per_dbu.get() * f64::from(scale_factor) * self.span) as f32;
     }
 
     fn limit_exceeded(&self, size: usize, cost: f64, cap_cost: f64, size_limit: usize) -> bool {

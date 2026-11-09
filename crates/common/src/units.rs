@@ -217,11 +217,23 @@ define_quantity!(
     FaradsPerMeter
 );
 
+define_quantity!(
+    /// A wire's resistance per length, in ohms per database unit.
+    OhmsPerDbu
+);
+define_quantity!(
+    /// A wire's capacitance per length, in farads per database unit.
+    FaradsPerDbu
+);
+
 define_product!(Ohms * Farads = Seconds);
 define_product!(OhmsPerMeter * Meters = Ohms);
 define_product!(FaradsPerMeter * Meters = Farads);
 
 const NANOS_PER_SECOND: f64 = 1e9;
+
+/// Meters in a micron, the length a design's database units count in.
+pub const METERS_PER_MICRON: f64 = 1e-6;
 
 impl Seconds {
     /// The time in nanoseconds, as reports give it.
@@ -234,16 +246,22 @@ impl Seconds {
 impl OhmsPerMeter {
     /// Ohms per database unit, at `dbu_per_micron` of them to a micron.
     #[must_use]
-    pub fn per_dbu(self, dbu_per_micron: DbuPerMicron) -> f64 {
-        self.0 * 1e-6 / f64::from(dbu_per_micron.get())
+    pub fn per_dbu(self, dbu_per_micron: DbuPerMicron) -> OhmsPerDbu {
+        OhmsPerDbu(self.0 * METERS_PER_MICRON / f64::from(dbu_per_micron.get()))
     }
 }
 
 impl FaradsPerMeter {
     /// Farads per database unit, at `dbu_per_micron` of them to a micron.
     #[must_use]
-    pub fn per_dbu(self, dbu_per_micron: DbuPerMicron) -> f64 {
-        self.0 * 1e-6 / f64::from(dbu_per_micron.get())
+    pub fn per_dbu(self, dbu_per_micron: DbuPerMicron) -> FaradsPerDbu {
+        FaradsPerDbu(self.0 * METERS_PER_MICRON / f64::from(dbu_per_micron.get()))
+    }
+
+    /// Farads per micron, for arithmetic kept in microns.
+    #[must_use]
+    pub fn per_micron(self) -> f64 {
+        self.0 * METERS_PER_MICRON
     }
 }
 
@@ -251,7 +269,7 @@ impl Meters {
     /// `length` at `dbu_per_micron` database units to a micron.
     #[must_use]
     pub fn from_dbu(length: Dbu, dbu_per_micron: DbuPerMicron) -> Self {
-        Self(length.to_f64() / f64::from(dbu_per_micron.get()) * 1e-6)
+        Self(length.to_f64() / f64::from(dbu_per_micron.get()) * METERS_PER_MICRON)
     }
 }
 
@@ -280,8 +298,8 @@ mod tests {
         let res = OhmsPerMeter::new(4e6).per_dbu(dbu);
         let cap = FaradsPerMeter::new(2e-10).per_dbu(dbu);
 
-        assert!((res - 2e-3).abs() < 1e-15);
-        assert!((cap - 1e-19).abs() < 1e-30);
+        assert!((res.get() - 2e-3).abs() < 1e-15);
+        assert!((cap.get() - 1e-19).abs() < 1e-30);
     }
 
     #[test]
