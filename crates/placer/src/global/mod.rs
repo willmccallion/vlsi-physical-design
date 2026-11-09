@@ -26,7 +26,7 @@ pub use initial::INITIAL_PLACE_ROUNDS;
 pub use routability::{CongestionEstimator, CongestionRound, RoutabilityParams, RoutingTiles};
 
 use crate::model::{PinAnchor, PlacementModel};
-use crate::zones::Zone;
+use crate::zones::{Zone, ZoneId};
 use density::DensityGrid;
 use nesterov::Objects;
 use pare_common::config::{Share, TargetDensity};
@@ -226,7 +226,7 @@ pub fn default_target_density(utilization: f64) -> f64 {
 /// to a less crowded row instead of facing a wall of blocked bins;
 /// legalization moves them into the rows.
 pub fn default_bins(model: &PlacementModel, target_density: f64) -> usize {
-    let movable = (0..model.num_cells()).filter(|&i| model.movable[i]);
+    let movable = model.cells().filter(|&i| model.movable[i]);
     let (area, count) = movable.fold((0.0, 0usize), |(area, count), i| {
         (
             model.density_sizes[i]
@@ -310,7 +310,7 @@ struct Setup {
     fields: Vec<Field>,
     netlist: Netlist,
     /// The model cell of each object that is a cell.
-    movable: Vec<usize>,
+    movable: Vec<CellId>,
     /// Each cell object's size in the model, before any inflation.
     model_sizes: Vec<Point<f64>>,
 }
@@ -397,13 +397,13 @@ impl Setup {
     fn continued_cells(
         &self,
         model: &PlacementModel,
-        movable: &[usize],
+        movable: &[CellId],
         cell_map: &IdVec<CellId, Option<CellId>>,
     ) -> (Objects, Vec<Option<usize>>, f64) {
-        let mut old_object_of_new_cell = vec![None; model.num_cells()];
+        let mut old_object_of_new_cell = IdVec::filled(None, model.num_cells());
         for (k, &i) in self.movable.iter().enumerate() {
-            if let Some(j) = cell_map[CellId::new(i)] {
-                old_object_of_new_cell[j.index()] = Some(k);
+            if let Some(j) = cell_map[i] {
+                old_object_of_new_cell[j] = Some(k);
             }
         }
         let mut objects = Objects {
@@ -440,7 +440,7 @@ impl Setup {
             }
         }
         for (k, &i) in self.movable.iter().enumerate() {
-            if cell_map[CellId::new(i)].is_none() {
+            if cell_map[i].is_none() {
                 added_area -= area(self.model_sizes[k]);
             }
         }
@@ -487,17 +487,16 @@ impl Setup {
 }
 
 /// The model's movable cells, grouped by zone.
-fn movable_cells(model: &PlacementModel) -> Vec<usize> {
-    let mut movable: Vec<usize> = (0..model.num_cells())
-        .filter(|&i| model.movable[i])
-        .collect();
+fn movable_cells(model: &PlacementModel) -> Vec<CellId> {
+    let mut movable: Vec<CellId> = model.cells().filter(|&i| model.movable[i]).collect();
     movable.sort_by_key(|&i| (model.zone_of[i], i));
     movable
 }
 
 /// The boxes of the model's fixed cells.
 fn fixed_rects(model: &PlacementModel) -> Vec<Rect<f64>> {
-    (0..model.num_cells())
+    model
+        .cells()
         .filter(|&i| !model.movable[i])
         .map(|i| Rect::new(model.positions[i], model.positions[i] + model.sizes[i]))
         .collect()
@@ -523,14 +522,14 @@ fn add_fillers(field: &mut Field, objects: &mut Objects, rng: &mut StdRng) {
 struct Probe<'a> {
     estimator: &'a mut dyn CongestionEstimator,
     /// The center of every cell of the model.
-    centers: Vec<Point<f64>>,
+    centers: IdVec<CellId, Point<f64>>,
 }
 
 impl<'a> Probe<'a> {
     fn new(estimator: &'a mut dyn CongestionEstimator, model: &PlacementModel) -> Self {
         let mut probe = Self {
             estimator,
-            centers: Vec::new(),
+            centers: IdVec::new(),
         };
         probe.refresh(model);
         probe
@@ -538,14 +537,15 @@ impl<'a> Probe<'a> {
 
     /// Takes in the cells of `model`.
     fn refresh(&mut self, model: &PlacementModel) {
-        self.centers = (0..model.num_cells())
+        self.centers = model
+            .cells()
             .map(|i| model.positions[i] + model.sizes[i] * 0.5)
             .collect();
     }
 
     /// The congestion of every gcell with the cell objects where
     /// `objects` has them.
-    fn measure(&mut self, objects: &Objects, movable: &[usize]) -> Vec<f64> {
+    fn measure(&mut self, objects: &Objects, movable: &[CellId]) -> Vec<f64> {
         for (k, &i) in movable.iter().enumerate() {
             self.centers[i] = objects.centers[k];
         }
@@ -557,18 +557,18 @@ impl<'a> Probe<'a> {
 /// `movable`, which are grouped by zone; their fillers are added later.
 fn build_fields(
     model: &PlacementModel,
-    movable: &[usize],
+    movable: &[CellId],
     fixed: &[Rect<f64>],
     params: &GlobalParams,
 ) -> Vec<Field> {
     let mut fields = Vec::new();
     let mut start = 0;
-    for (k, zone) in model.zones.iter().enumerate() {
-        let end = movable.partition_point(|&i| model.zone_of[i] <= k);
+    for (id, zone) in model.zones.iter_enumerated() {
+        let end = movable.partition_point(|&i| model.zone_of[i] <= id);
         if end == start {
             continue;
         }
-        let area = zone_area(model, k);
+        let area = zone_area(model, id);
         let mut grid = DensityGrid::new(
             &model.die,
             params.bins,
@@ -646,11 +646,11 @@ fn placeable_area(model: &PlacementModel) -> Vec<Rect<f64>> {
     }
 }
 
-/// The area the cells of zone `k` may use.
-fn zone_area(model: &PlacementModel, k: usize) -> Vec<Rect<f64>> {
+/// The area the cells of zone `id` may use.
+fn zone_area(model: &PlacementModel, id: ZoneId) -> Vec<Rect<f64>> {
     model
         .zones
-        .get(k)
+        .get(id)
         .map_or_else(|| placeable_area(model), |z| z.rects.clone())
 }
 
@@ -660,7 +660,7 @@ fn zone_area(model: &PlacementModel, k: usize) -> Vec<Rect<f64>> {
 /// on each axis.
 fn initial_centers(
     model: &PlacementModel,
-    movable: &[usize],
+    movable: &[CellId],
     netlist: &Netlist,
     rounds: usize,
     rng: &mut StdRng,
@@ -725,8 +725,8 @@ fn random_point(rects: &[Rect<f64>], rng: &mut StdRng) -> Point<f64> {
 
 /// The model's nets with movable cells as objects and everything else as
 /// fixed points.
-fn build_netlist(model: &PlacementModel, movable: &[usize]) -> Netlist {
-    let mut object_of_cell = vec![None; model.num_cells()];
+fn build_netlist(model: &PlacementModel, movable: &[CellId]) -> Netlist {
+    let mut object_of_cell = IdVec::filled(None, model.num_cells());
     for (k, &i) in movable.iter().enumerate() {
         object_of_cell[i] = Some(k);
     }
@@ -734,12 +734,12 @@ fn build_netlist(model: &PlacementModel, movable: &[usize]) -> Netlist {
     for net in &model.nets {
         let pins = net.pins.iter().map(|pin| {
             let terminal = match pin.anchor {
-                PinAnchor::Cell { cell, offset } => match object_of_cell[cell.index()] {
+                PinAnchor::Cell { cell, offset } => match object_of_cell[cell] {
                     Some(index) => Terminal::Object {
                         index,
-                        offset: offset - model.sizes[cell.index()] * 0.5,
+                        offset: offset - model.sizes[cell] * 0.5,
                     },
-                    None => Terminal::Fixed(model.positions[cell.index()] + offset),
+                    None => Terminal::Fixed(model.positions[cell] + offset),
                 },
                 PinAnchor::Fixed(p) => Terminal::Fixed(p),
             };

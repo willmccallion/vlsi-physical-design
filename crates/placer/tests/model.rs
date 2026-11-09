@@ -8,7 +8,7 @@ use pare_common::geom::dbu::Dbu;
 use pare_common::geom::point::Point;
 use pare_common::geom::rect::Rect;
 use pare_placer::model::{CellKind, PlacementModel};
-use pare_placer::zones::Zones;
+use pare_placer::zones::{ZoneId, Zones};
 use std::path::{Path, PathBuf};
 
 fn fixture(name: &str) -> PathBuf {
@@ -25,7 +25,7 @@ fn tiny() -> NetlistDB {
 
 fn kind_of(db: &NetlistDB, cell: &str) -> CellKind {
     let model = PlacementModel::from_db(db, &Zones::new(db).unwrap());
-    model.kinds[db.cells.iter().position(|c| c.name == cell).unwrap()]
+    model.kinds[db.cell_id(cell).unwrap()]
 }
 
 fn set_inv_height(db: &mut NetlistDB, height: Dbu) {
@@ -61,7 +61,7 @@ fn a_core_cell_six_rows_high_is_standard() {
 fn a_movable_cell_of_two_signal_pins_keeps_its_size_in_the_density() {
     let db = tiny();
     let model = PlacementModel::from_db(&db, &Zones::new(&db).unwrap());
-    let inv = db.cells.iter().position(|c| c.name == "u1").unwrap();
+    let inv = db.cell_id("u1").unwrap();
 
     assert_eq!(model.density_sizes[inv], model.sizes[inv]);
 }
@@ -70,7 +70,7 @@ fn a_movable_cell_of_two_signal_pins_keeps_its_size_in_the_density() {
 fn a_fixed_cell_keeps_its_size_in_the_density() {
     let db = tiny();
     let model = PlacementModel::from_db(&db, &Zones::new(&db).unwrap());
-    let fixed = db.cells.iter().position(|c| c.name == "u3").unwrap();
+    let fixed = db.cell_id("u3").unwrap();
 
     assert_eq!(model.density_sizes[fixed], model.sizes[fixed]);
 }
@@ -86,7 +86,7 @@ fn a_movable_cell_of_three_signal_pins_scales_toward_the_average_pin_density() {
         .unwrap();
     inv.size.x = inv.size.x * 2;
     let model = PlacementModel::from_db(&db, &Zones::new(&db).unwrap());
-    let nand = db.cells.iter().position(|c| c.name == "u4").unwrap();
+    let nand = db.cell_id("u4").unwrap();
 
     let scale = model.density_sizes[nand].x / model.sizes[nand].x;
 
@@ -111,6 +111,9 @@ fn global_placement_keeps_out_of_a_soft_blockage() {
 
     let after = PlacementModel::from_db(&db, &Zones::new(&db).unwrap());
 
-    assert_eq!(after.zones[0].rects.len(), before.zones[0].rects.len() - 1);
+    assert_eq!(
+        after.zones[ZoneId(0)].rects.len(),
+        before.zones[ZoneId(0)].rects.len() - 1
+    );
     assert!(after.free_area() < before.free_area());
 }

@@ -8,7 +8,7 @@
 //! on the same geometry.
 
 use pare_common::db::design::{NetlistDB, RegionKind};
-use pare_common::db::indices::{CellId, RegionId};
+use pare_common::db::indices::{CellId, IdVec, RegionId};
 use pare_common::geom::dbu::Dbu;
 use pare_common::geom::point::Point;
 use pare_common::geom::rect::Rect;
@@ -22,6 +22,12 @@ pub enum Zone {
     Outside,
 }
 
+pare_common::define_index!(
+    /// A zone's position in [`Zones::all`]: each fence, then the space
+    /// outside them.
+    ZoneId(u32)
+);
+
 /// Why the design's regions cannot be turned into zones.
 #[derive(Debug, thiserror::Error, PartialEq, Eq)]
 pub enum ZoneError {
@@ -34,7 +40,7 @@ pub enum ZoneError {
 /// The zone of every cell and the rectangles of every fence.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Zones {
-    of_cell: Vec<Zone>,
+    of_cell: IdVec<CellId, ZoneId>,
     fences: Vec<(RegionId, Vec<Rect<Dbu>>)>,
 }
 
@@ -43,29 +49,43 @@ impl Zones {
     /// if they had none, since a guide only suggests where they should go.
     pub fn new(db: &NetlistDB) -> Result<Self, ZoneError> {
         let mut fences = Vec::new();
-        for (i, region) in db.regions.iter().enumerate() {
+        let mut zone_of_region = IdVec::filled(None, db.regions.len());
+        for (id, region) in db.regions.iter_enumerated() {
             match region.kind {
-                RegionKind::Fence => fences.push((RegionId::new(i), region.rects.clone())),
+                RegionKind::Fence => {
+                    zone_of_region[id] = Some(ZoneId::new(fences.len()));
+                    fences.push((id, region.rects.clone()));
+                }
                 RegionKind::Inclusive => {
                     return Err(ZoneError::InclusiveRegion(region.name.clone()));
                 }
                 RegionKind::Guide => {}
             }
         }
+        let outside = ZoneId::new(fences.len());
         let of_cell = db
             .cells
             .iter()
-            .map(|c| match c.region {
-                Some(r) if db.regions[r].kind == RegionKind::Fence => Zone::Fence(r),
-                _ => Zone::Outside,
-            })
+            .map(|c| c.region.and_then(|r| zone_of_region[r]).unwrap_or(outside))
             .collect();
         Ok(Self { of_cell, fences })
     }
 
     /// The zone of `cell`.
     pub fn of(&self, cell: CellId) -> Zone {
-        self.of_cell[cell.index()]
+        self.zone(self.of_cell[cell])
+    }
+
+    /// The position of `cell`'s zone in [`Self::all`].
+    pub fn id_of(&self, cell: CellId) -> ZoneId {
+        self.of_cell[cell]
+    }
+
+    /// The zone at `id` in [`Self::all`].
+    fn zone(&self, id: ZoneId) -> Zone {
+        self.fences
+            .get(id.index())
+            .map_or(Zone::Outside, |&(region, _)| Zone::Fence(region))
     }
 
     /// Every zone: each fence, then the space outside them.
@@ -79,18 +99,6 @@ impl Zones {
     /// Whether the design has any fence.
     pub(crate) const fn has_fences(&self) -> bool {
         !self.fences.is_empty()
-    }
-
-    /// The position of `zone` in [`Self::all`].
-    pub fn index(&self, zone: Zone) -> usize {
-        match zone {
-            Zone::Fence(r) => self
-                .fences
-                .iter()
-                .position(|&(id, _)| id == r)
-                .unwrap_or(self.fences.len()),
-            Zone::Outside => self.fences.len(),
-        }
     }
 
     /// The rectangles of a fence, or nothing for the space outside them.

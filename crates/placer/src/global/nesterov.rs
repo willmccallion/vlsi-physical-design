@@ -22,6 +22,7 @@ use super::{
 use crate::model::{CellKind, PlacementModel};
 use crate::zones::Zone;
 use pare_common::config::Share;
+use pare_common::db::indices::CellId;
 use pare_common::geom::dbu::Dbu;
 use pare_common::geom::point::Point;
 use pare_common::geom::rect::Rect;
@@ -1311,7 +1312,7 @@ impl Run {
 /// run's parameters, the bin size and the site width.
 struct StretchContext<'a, 'p> {
     netlist: &'a Netlist,
-    movable: &'a [usize],
+    movable: &'a [CellId],
     probe: &'a mut Option<Probe<'p>>,
     params: &'a GlobalParams,
     bin: Point<f64>,
@@ -1405,7 +1406,7 @@ fn congestion_map(
     probe: &mut Option<Probe<'_>>,
     netlist: &Netlist,
     objects: &Objects,
-    movable: &[usize],
+    movable: &[CellId],
     die: &Rect<f64>,
     params: &RoutabilityParams,
 ) -> CongestionMap {
