@@ -17,11 +17,11 @@ use pare_common::db::global_route::{
 };
 use pare_common::db::indices::{LayerId, MacroId, NetId, PinId};
 use pare_common::db::library::LayerRef;
+use pare_common::db::shapes::is_signal_net;
 use pare_common::geom::dbu::Dbu;
 use pare_common::geom::orient::Orientation;
 use pare_common::geom::point::Point;
 use pare_common::geom::rect::Rect;
-use pare_common::verify::shapes::is_signal_net;
 use rustc_hash::{FxHashMap, FxHashSet};
 
 /// A design's global routes, kept in step with its netlist.

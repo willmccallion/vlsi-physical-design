@@ -8,4 +8,5 @@ pub mod library;
 pub mod parser;
 pub mod rules;
 pub mod sdc;
+pub mod shapes;
 pub mod writer;

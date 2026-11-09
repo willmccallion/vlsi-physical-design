@@ -22,10 +22,10 @@ use crate::tech::{CutTech, LayerTech, RouteTech};
 use pare_common::db::indices::{CutLayerId, LayerId, NonDefaultRuleId};
 use pare_common::db::library::LayerRef;
 use pare_common::db::rules::SpacingTable;
+use pare_common::db::shapes::{self, OwnedShape};
 use pare_common::geom::dbu::Dbu;
 use pare_common::geom::point::Point;
 use pare_common::geom::rect::Rect;
-use pare_common::verify::shapes::{self, OwnedShape};
 use rustc_hash::FxHashMap;
 
 /// What occupies a stretch of track.

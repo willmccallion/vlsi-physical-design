@@ -23,10 +23,10 @@ use crate::wiring::Edge;
 use pare_common::db::design::NetlistDB;
 use pare_common::db::indices::{CutLayerId, LayerId, NonDefaultRuleId, ViaId};
 use pare_common::db::library::LayerRef;
+use pare_common::db::shapes::wire_rect;
 use pare_common::geom::dbu::Dbu;
 use pare_common::geom::point::Point;
 use pare_common::geom::rect::Rect;
-use pare_common::verify::shapes::wire_rect;
 use rustc_hash::FxHashMap;
 use std::collections::BinaryHeap;
 

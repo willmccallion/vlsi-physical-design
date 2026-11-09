@@ -14,6 +14,7 @@ use crate::wiring::{NetRoute, Wiring, gap_fills, tidy_patches};
 use pare_common::db::design::{NetlistDB, RouteElem};
 use pare_common::db::indices::{CutLayerId, LayerId, NetId};
 use pare_common::db::library::LayerRef;
+use pare_common::db::shapes::route_elem_shapes;
 use pare_common::geom::dbu::Dbu;
 use pare_common::geom::point::Point;
 use pare_common::geom::rect::Rect;
@@ -21,7 +22,6 @@ use pare_common::verify::drc::{
     Findings, Layout, Marker as DrcMarker, Origin, Owner, Rules, Violation, check_tiles_lazily,
     check_window,
 };
-use pare_common::verify::shapes::route_elem_shapes;
 use rayon::prelude::*;
 use rustc_hash::FxHashSet;
 
