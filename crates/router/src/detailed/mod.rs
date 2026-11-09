@@ -1369,9 +1369,10 @@ struct LowPads {
 }
 
 impl LowPads {
+    /// No pads, to be kept in buckets of the positive side `bucket`.
     fn new(bucket: Dbu) -> Self {
         Self {
-            bucket: bucket.max(Dbu(1)),
+            bucket,
             pads: FxHashMap::default(),
         }
     }

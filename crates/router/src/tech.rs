@@ -200,7 +200,7 @@ pub struct RouteTech {
     rules: IdVec<NonDefaultRuleId, RuleTech>,
     /// The non-default rule each net follows.
     net_rules: IdVec<NetId, Option<NonDefaultRuleId>>,
-    /// The track spacing a gcell's edge is a multiple of.
+    /// The track spacing a gcell's edge is a multiple of; positive.
     pub gcell_pitch: Dbu,
     /// The step every wire end must fall on, one without a stated grid.
     pub manufacturing_grid: Dbu,
@@ -321,6 +321,9 @@ impl RouteTech {
         }
 
         let gcell_pitch = gcell_pitch(|l| db.average_track_spacing(l), max_layer);
+        if gcell_pitch <= Dbu::ZERO {
+            return Err(RouteError::NoGcellPitch);
+        }
         check_grid_span(
             &db.die_area,
             gcell_pitch * i64::from(config.gcell_tracks.get()),
