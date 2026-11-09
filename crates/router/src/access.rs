@@ -127,14 +127,14 @@ pub fn access_points(
                         pin_layer: layer,
                         vias,
                     };
-                    found.push(((false, manhattan(at, target)), access));
+                    found.push(((false, at.manhattan(target).get()), access));
                 }
                 any
             });
             if !on_grid {
                 stub_accesses(tech, tech.min_layer, &shape.rect, stacks, |a, stub| {
                     found.push((
-                        (true, stub + manhattan(a.at, target)),
+                        (true, stub + a.at.manhattan(target).get()),
                         AccessPoint {
                             pin_layer: layer,
                             ..a
@@ -244,7 +244,7 @@ fn planar_accesses(
             pin_layer: layer,
             vias: Vec::new(),
         };
-        crossings.push(((false, manhattan(at, target)), access));
+        crossings.push(((false, at.manhattan(target).get()), access));
         true
     });
     let is_clean = |a: &AccessPoint| clean(layer, &wire_end_metal(tech, a));
@@ -258,11 +258,11 @@ fn planar_accesses(
         layer,
         rect,
         |_| vec![Vec::new()],
-        |a, stub| stubs.push(((true, stub + manhattan(a.at, target)), a)),
+        |a, stub| stubs.push(((true, stub + a.at.manhattan(target).get()), a)),
     );
     let mut reaching: Vec<((bool, i64), AccessPoint)> = stubs_from_beyond(tech, layer, rect)
         .into_iter()
-        .map(|(a, stub)| ((true, stub + manhattan(a.at, target)), a))
+        .map(|(a, stub)| ((true, stub + a.at.manhattan(target).get()), a))
         .collect();
     reaching.extend(stubs.iter().cloned());
     if reaching.iter().any(|(_, a)| is_clean(a)) {
@@ -327,10 +327,6 @@ fn wire_end_metal(tech: &RouteTech, a: &AccessPoint) -> Rect<Dbu> {
         Point::new(node.x.max(a.at.x), node.y.max(a.at.y)),
     )
     .expand(lt.width / 2)
-}
-
-fn manhattan(a: Point<Dbu>, b: Point<Dbu>) -> i64 {
-    ((a.x - b.x).abs() + (a.y - b.y).abs()).get()
 }
 
 /// Calls `f` for every node of `layer` whose point lies inside `rect`;

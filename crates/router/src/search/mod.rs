@@ -593,7 +593,7 @@ impl Search<'_> {
 
     /// Price of a whole wire from `a` to `b`, such as an access stub.
     fn wire_price(&self, layer: LayerId, a: Point<Dbu>, b: Point<Dbu>) -> Price {
-        let length = ((a.x - b.x).abs() + (a.y - b.y).abs()).to_f64();
+        let length = a.manhattan(b).to_f64();
         let meets = wire_rect(a, b, self.width(layer)).map_or_else(Meets::default, |r| {
             self.metal_meets(layer, &r, false, &mut Total)
         });
@@ -609,7 +609,7 @@ impl Search<'_> {
             ..lower
         };
         let (a, b) = (self.point(lower), self.point(upper));
-        let length = ((a.x - b.x).abs() + (a.y - b.y).abs()).to_f64();
+        let length = a.manhattan(b).to_f64();
         let meets = wire_rect(a, b, self.width(lower.layer)).map_or_else(Meets::default, |r| {
             self.metal_meets(lower.layer, &r, true, parts)
         });
@@ -1168,7 +1168,7 @@ mod tests {
             lt.point(lower.track, lower.cross),
             lt.point(lower.track, lower.cross + 1),
         );
-        ((a.x - b.x).abs() + (a.y - b.y).abs()).to_f64()
+        a.manhattan(b).to_f64()
     }
 
     #[test]

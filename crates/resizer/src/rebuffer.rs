@@ -630,7 +630,7 @@ impl Rebuffer {
         mut options: Vec<BnetPtr>,
     ) -> Vec<BnetPtr> {
         let mut location = under.at;
-        let full_length = bnet::manhattan(node.at, location);
+        let full_length = node.at.manhattan(location).get();
         let step = self.wire_length_step_on(resizer, layer);
         if full_length <= step / 2 {
             let mut near: Vec<BnetPtr> = options
@@ -662,7 +662,7 @@ impl Rebuffer {
                 dy = if dy > 0 { dy_abs } else { -dy_abs };
             }
             location = Point::new(Dbu(location.x.get() + dx), Dbu(location.y.get() + dy));
-            let remaining = bnet::manhattan(node.at, location);
+            let remaining = node.at.manhattan(location).get();
             options = options
                 .iter()
                 .map(|o| wire(resizer, location, layer, Rc::clone(o)))

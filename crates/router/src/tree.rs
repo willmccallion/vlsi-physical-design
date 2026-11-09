@@ -41,10 +41,6 @@ pub fn gap(a: &Rect<Dbu>, b: &Rect<Dbu>) -> i64 {
     (dx + dy).get()
 }
 
-fn manhattan(a: Point<Dbu>, b: Point<Dbu>) -> i64 {
-    ((a.x - b.x).abs() + (a.y - b.y).abs()).get()
-}
-
 fn prim(pins: &[Rect<Dbu>]) -> (usize, Vec<Join>) {
     let n = pins.len();
     let mut joined = vec![false; n];
@@ -157,7 +153,7 @@ fn curve_order(points: &[Point<Dbu>]) -> (usize, Vec<Join>) {
                         continue;
                     }
                     for &j in buckets.get(&(bx, by)).into_iter().flatten() {
-                        let d = manhattan(p, points[j]);
+                        let d = p.manhattan(points[j]).get();
                         if nearest.is_none_or(|(b, k)| (d, j) < (b, k)) {
                             nearest = Some((d, j));
                         }
@@ -239,14 +235,18 @@ mod tests {
         for j in joins {
             let nearest = earlier
                 .iter()
-                .map(|&e| manhattan(points[j.pin], points[e]))
+                .map(|&e| points[j.pin].manhattan(points[e]).get())
                 .min()
                 .unwrap();
             assert!(
                 earlier.contains(&j.parent),
                 "{j:?} joined before its parent"
             );
-            assert_eq!(manhattan(points[j.pin], points[j.parent]), nearest, "{j:?}");
+            assert_eq!(
+                points[j.pin].manhattan(points[j.parent]).get(),
+                nearest,
+                "{j:?}"
+            );
             earlier.push(j.pin);
         }
     }
