@@ -85,9 +85,9 @@ impl Mul<i64> for Dbu {
 }
 
 impl Mul for Dbu {
-    type Output = Self;
-    fn mul(self, rhs: Self) -> Self {
-        Self(self.0 * rhs.0)
+    type Output = DbuArea;
+    fn mul(self, rhs: Self) -> DbuArea {
+        DbuArea(self.0 * rhs.0)
     }
 }
 
@@ -120,6 +120,19 @@ impl DbuArea {
     #[must_use]
     pub const fn get(self) -> i64 {
         self.0
+    }
+}
+
+impl Add for DbuArea {
+    type Output = Self;
+    fn add(self, rhs: Self) -> Self {
+        Self(self.0 + rhs.0)
+    }
+}
+
+impl Sum for DbuArea {
+    fn sum<I: Iterator<Item = Self>>(iter: I) -> Self {
+        Self(iter.map(|a| a.0).sum())
     }
 }
 
