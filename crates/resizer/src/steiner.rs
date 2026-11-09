@@ -389,9 +389,9 @@ fn split_high_degree_nodes(graph: &mut Graph) {
     }
 }
 
-/// Whether no two branches of positive area cross without sharing a corner,
-/// as `OpenROAD`'s `checkTree`; trees of over a hundred terminals pass
-/// unchecked, as they will be buffered anyway.
+/// Whether no two branches of positive length cross without sharing a
+/// corner, as `OpenROAD`'s `checkTree`; trees of over a hundred terminals
+/// pass unchecked, as they will be buffered anyway.
 #[must_use]
 pub(crate) fn is_valid(tree: &SteinerTree) -> bool {
     if tree.terminals > 100 {
@@ -407,7 +407,7 @@ pub(crate) fn is_valid(tree: &SteinerTree) -> bool {
             )
         })
         .collect();
-    let area_zero = |r: &(Point<Dbu>, Point<Dbu>)| r.0.x == r.1.x || r.0.y == r.1.y;
+    let length_zero = |r: &(Point<Dbu>, Point<Dbu>)| r.0 == r.1;
     let intersects = |r: &(Point<Dbu>, Point<Dbu>), s: &(Point<Dbu>, Point<Dbu>)| {
         r.0.x <= s.1.x && s.0.x <= r.1.x && r.0.y <= s.1.y && s.0.y <= r.1.y
     };
@@ -417,7 +417,7 @@ pub(crate) fn is_valid(tree: &SteinerTree) -> bool {
     for i in 0..rects.len() {
         for j in (i + 1)..rects.len() {
             let (r, s) = (&rects[i], &rects[j]);
-            if area_zero(r) || area_zero(s) || !intersects(r, s) {
+            if length_zero(r) || length_zero(s) || !intersects(r, s) {
                 continue;
             }
             let share_corner = corners(r).iter().any(|c| corners(s).contains(c));
@@ -450,6 +450,20 @@ mod tests {
             }
             false
         })
+    }
+
+    #[test]
+    fn a_straight_branch_across_another_branchs_box_fails_the_check() {
+        // The branch from (-5, 5) to (15, 5) runs through the box of the
+        // branch from (0, 0) to (10, 10) and shares none of its corners.
+        let tree = SteinerTree {
+            nodes: vec![pt(0, 0), pt(10, 10), pt(-5, 5), pt(15, 5)],
+            parent: vec![None, Some(0), Some(0), Some(2)],
+            terminals: 4,
+            root: 0,
+        };
+
+        assert!(!is_valid(&tree));
     }
 
     #[test]
