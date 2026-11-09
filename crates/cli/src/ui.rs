@@ -13,7 +13,7 @@ use yansi::Paint;
 pub fn banner() {
     eprintln!(
         "\n  {}  {}",
-        "PARE v0.1.0".bold(),
+        format!("PARE v{}", env!("CARGO_PKG_VERSION")).bold(),
         "Placement And Routing Engine".dim()
     );
     rule();
