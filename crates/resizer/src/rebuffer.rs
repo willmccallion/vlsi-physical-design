@@ -1863,7 +1863,6 @@ fn wire_length_limit(
     if rc.resistance <= OhmsPerMeter::ZERO {
         return None;
     }
-    let dbu = dbu.get() as f64;
     let mut shortest = Meters::INFINITY;
     for &buffer in &buffers.cells {
         let meters = buffer_max_wire_length(link, buffer, slews, rc);
@@ -1872,7 +1871,7 @@ fn wire_length_limit(
     if !shortest.is_finite() {
         return None;
     }
-    Some(Dbu((shortest.get() * 1e6 * dbu).round() as i64))
+    Some(meters_to_dbu(shortest, dbu))
 }
 
 /// `findMaxWireLength` for one buffer.
