@@ -158,14 +158,14 @@ fn starting_placement(
         return Ok(PlacementModel::from_db(db, &zones));
     }
     let phase_start = Instant::now();
-    let model = global_placement(
+    let (model, summary) = global_placement(
         config,
         db,
         PlacementModel::from_db(db, &zones),
         Pass::Full,
         repair,
-        report,
     )?;
+    report.placement = Some(summary);
     report.phase("global placement", phase_start);
     Ok(model)
 }
@@ -322,14 +322,14 @@ fn place_io_pins_by_cells(
 ) -> anyhow::Result<()> {
     let phase_start = Instant::now();
     ui::phase("Global Placement Without I/O");
-    let model = global_placement(
+    let (model, summary) = global_placement(
         config,
         db,
         PlacementModel::from_db_without_movable_io(db, zones),
         Pass::SkipIo,
         None,
-        report,
     )?;
+    report.placement = Some(summary);
     model.write_back(db);
     report.phase("global placement without I/O", phase_start);
 
@@ -356,17 +356,17 @@ enum Pass {
     Full,
 }
 
-/// Runs global placement on `model` and reports it; `db` supplies the
-/// routing resources for routability-driven placement and, with `repair`
-/// and an SDC file, is repaired along the way for timing-driven placement.
+/// Runs global placement on `model` and shows it, returning the placement
+/// and its summary; `db` supplies the routing resources for
+/// routability-driven placement and, with `repair` and an SDC file, is
+/// repaired along the way for timing-driven placement.
 fn global_placement(
     config: &Config,
     db: &mut NetlistDB,
     mut model: PlacementModel,
     pass: Pass,
     repair: Option<&mut NetlistRepair>,
-    report: &mut Report,
-) -> anyhow::Result<PlacementModel> {
+) -> anyhow::Result<(PlacementModel, PlacementSummary)> {
     let gp = &config.global_placement;
     let timing = repair
         .filter(|_| pass == Pass::Full && gp.timing_driven)
@@ -375,13 +375,49 @@ fn global_placement(
         check_congestion_follows_timing(gp)?;
     }
     let density = Density::of(&model, gp)?;
-    let (routability, mut estimator) = if gp.routability_driven && pass == Pass::Full {
+    let (routability, estimator) = if gp.routability_driven && pass == Pass::Full {
         let (params, estimator) = routability_setup(config, db)?;
         (Some(params), estimator)
     } else {
         (None, None)
     };
     let params = GlobalParams {
+        routability,
+        timing: timing.as_ref().map(|_| timing_params(gp)),
+        ..global_params(gp, &density, pass)
+    };
+    let steering = match timing {
+        Some(repair) => {
+            drop(estimator);
+            Steering::Timing(TimingPlacement {
+                config,
+                db,
+                repair,
+                rounds: 0,
+            })
+        }
+        None => Steering::Congestion(estimator.map(Box::new)),
+    };
+    ui::placement_table_header();
+    let result = place_globally(&mut model, &params, steering)?;
+    eprintln!();
+    show_global_result(db, &result)?;
+    let summary = placement_summary(&model, &result, density.movable_cells);
+    Ok((model, summary))
+}
+
+/// What steers global placement besides wirelength and density: repairs
+/// for timing, or else the congestion the global router measures, when it
+/// is the estimate.
+enum Steering<'a> {
+    Timing(TimingPlacement<'a>),
+    Congestion(Option<Box<GlobalRouteCongestion<'a>>>),
+}
+
+/// The global placer's parameters for `pass` of the configured placement,
+/// neither routability- nor timing-driven.
+const fn global_params(gp: &GlobalPlacementConfig, density: &Density, pass: Pass) -> GlobalParams {
+    GlobalParams {
         target_density: density.target,
         target_overflow: gp.target_overflow,
         max_iterations: gp.placer_max_iterations,
@@ -391,42 +427,39 @@ fn global_placement(
         },
         bins: density.bins,
         seed: gp.seed,
-        routability,
-        timing: timing.as_ref().map(|_| timing_params(gp)),
-    };
-    ui::placement_table_header();
-    let result = if let Some(repair) = timing {
-        drop(estimator);
-        let mut driver = TimingPlacement {
-            config,
-            db,
-            repair,
-            rounds: 0,
-        };
-        global::place(
-            &mut model,
-            &params,
+        routability: None,
+        timing: None,
+    }
+}
+
+/// Runs the global placer on `model` under `steering`.
+fn place_globally(
+    model: &mut PlacementModel,
+    params: &GlobalParams,
+    steering: Steering<'_>,
+) -> anyhow::Result<GlobalResult> {
+    match steering {
+        Steering::Timing(mut driver) => Ok(global::place(
+            model,
+            params,
             None,
             Some(&mut driver),
             show_global_progress,
-        )?
-    } else {
-        let estimator = estimator
-            .as_mut()
-            .map(|e| e as &mut dyn CongestionEstimator);
-        let Ok(result) = global::place::<global::NoTiming>(
-            &mut model,
-            &params,
-            estimator,
-            None,
-            show_global_progress,
-        );
-        result
-    };
-    eprintln!();
-    show_global_result(db, &result)?;
-    report.placement = Some(placement_summary(&model, &result, density.movable_cells));
-    Ok(model)
+        )?),
+        Steering::Congestion(mut estimator) => {
+            let estimator = estimator
+                .as_deref_mut()
+                .map(|e| e as &mut dyn CongestionEstimator);
+            let Ok(result) = global::place::<global::NoTiming>(
+                model,
+                params,
+                estimator,
+                None,
+                show_global_progress,
+            );
+            Ok(result)
+        }
+    }
 }
 
 /// Fails when timing-driven placement would run beside the global-router
