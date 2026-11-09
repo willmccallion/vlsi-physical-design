@@ -421,14 +421,11 @@ mod tests {
     /// The half perimeter of the box around `pins`' locations.
     fn half_perimeter(netlist: &Netlist<'_>, pins: &[PinId]) -> Meters {
         let points: Vec<Point<Dbu>> = pins.iter().map(|&p| netlist.pin_location(p)).collect();
-        let span = |axis: fn(&Point<Dbu>) -> i64| {
+        let span = |axis: fn(&Point<Dbu>) -> Dbu| {
             let values = points.iter().map(axis);
             values.clone().max().unwrap() - values.min().unwrap()
         };
-        Meters::from_dbu(
-            Dbu(span(|p| p.x.get()) + span(|p| p.y.get())),
-            netlist.db.dbu(),
-        )
+        Meters::from_dbu(span(|p| p.x) + span(|p| p.y), netlist.db.dbu())
     }
 
     fn relative_gap(a: f64, b: f64) -> f64 {
