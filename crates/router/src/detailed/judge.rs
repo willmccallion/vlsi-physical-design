@@ -90,15 +90,17 @@ impl ShapeTiles {
     }
 
     /// The shapes, as (layer, position on the layer), whose tiles meet
-    /// `window`; some may lie outside it.
-    pub(super) fn near(&self, window: &Rect<Dbu>) -> FxHashSet<(LayerRef, u32)> {
+    /// `window`, in order and each once; some may lie outside it.
+    pub(super) fn near(&self, window: &Rect<Dbu>) -> Vec<(LayerRef, u32)> {
         let (x0, x1, y0, y1) = self.span(window);
-        let mut found = FxHashSet::default();
+        let mut found = Vec::new();
         for j in y0..=y1 {
             for i in x0..=x1 {
                 found.extend(self.buckets[j * self.nx + i].iter().copied());
             }
         }
+        found.sort_unstable();
+        found.dedup();
         found
     }
 }
@@ -324,5 +326,48 @@ fn marker_of(owners: &IdVec<OwnerIndex, Owner>, m: &DrcMarker) -> Marker {
         bbox: m.bbox,
         layer: m.layer,
         nets: [net(m.owners.0), net(m.owners.1)],
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use pare_common::db::indices::CutLayerId;
+
+    fn rect(x0: i64, y0: i64, x1: i64, y1: i64) -> Rect<Dbu> {
+        Rect::new(Point::new(Dbu(x0), Dbu(y0)), Point::new(Dbu(x1), Dbu(y1)))
+    }
+
+    /// A 1000 by 1000 die in tiles of 100 with metal at two corners, one
+    /// across four tiles and past the die's upper right corner, and a cut.
+    fn cornered() -> (Layout, ShapeTiles) {
+        let mut layout = Layout::new(1, 1);
+        let owner = layout.owner(Owner::Net(NetId::new(0)), false);
+        let metal = LayerRef::Routing(LayerId::new(0));
+        layout.add(metal, owner, rect(850, 850, 1100, 1100), Origin::Input);
+        layout.add(metal, owner, rect(0, 0, 50, 50), Origin::Input);
+        let cut = LayerRef::Cut(CutLayerId::new(0));
+        layout.add(cut, owner, rect(960, 960, 990, 990), Origin::Input);
+        let tiles = ShapeTiles::new(&layout, &rect(0, 0, 1000, 1000), Dbu(100));
+        (layout, tiles)
+    }
+
+    #[test]
+    fn shapes_past_the_die_edge_are_found_from_its_edge_tiles_in_order_once() {
+        let (_, tiles) = cornered();
+
+        let near = tiles.near(&rect(900, 900, 2000, 2000));
+
+        let metal = LayerRef::Routing(LayerId::new(0));
+        assert_eq!(near, [(metal, 0), (LayerRef::Cut(CutLayerId::new(0)), 0)]);
+    }
+
+    #[test]
+    fn a_window_beyond_the_die_finds_the_shapes_of_the_nearest_tiles() {
+        let (_, tiles) = cornered();
+
+        let near = tiles.near(&rect(-500, -500, -400, -400));
+
+        assert_eq!(near, [(LayerRef::Routing(LayerId::new(0)), 1)]);
     }
 }

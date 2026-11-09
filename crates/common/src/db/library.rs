@@ -115,7 +115,7 @@ impl CutLayer {
 }
 
 /// A layer a shape can be drawn on.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub enum LayerRef {
     /// A metal layer.
     Routing(LayerId),
