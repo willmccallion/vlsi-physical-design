@@ -39,7 +39,7 @@ pub(super) fn run(imp: &mut Improver, passes: usize, tolerance: f64) -> Result<(
     if candidates.is_empty() {
         return Ok(());
     }
-    let colors = color_cells(imp, &candidates);
+    let colors = color_cells(imp, &candidates)?;
     let mut bins = Bins::new(imp, &candidates);
     let mut traversal = 0;
     for _ in 0..passes.max(1) {
@@ -62,7 +62,7 @@ pub(super) fn converged(last: Dbu, current: Dbu, tolerance: f64) -> bool {
 
 /// Colours the movable cells greedily so that no two on a net share a
 /// colour, as `DetailedMis::colorCells` with `ColorGraph::greedyColoring`.
-fn color_cells(imp: &Improver, candidates: &[NodeId]) -> IdVec<NodeId, Option<usize>> {
+fn color_cells(imp: &Improver, candidates: &[NodeId]) -> Result<IdVec<NodeId, Option<usize>>> {
     let nodes = imp.net.node_count();
     let mut movable = IdVec::filled(false, nodes);
     for &n in candidates {
@@ -88,7 +88,7 @@ fn color_cells(imp: &Improver, candidates: &[NodeId]) -> IdVec<NodeId, Option<us
         }
     }
     if nodes == 0 {
-        return IdVec::new();
+        return Ok(IdVec::new());
     }
     let mut color: IdVec<NodeId, Option<usize>> = IdVec::filled(None, nodes);
     color[NodeId(0)] = Some(0);
@@ -101,12 +101,16 @@ fn color_cells(imp: &Improver, candidates: &[NodeId]) -> IdVec<NodeId, Option<us
                 taken_by[c] = Some(v);
             }
         }
-        color[v] = Some((0..nodes).find(|&c| taken_by[c] != Some(v)).unwrap_or(0));
+        let free = (0..nodes)
+            .find(|&c| taken_by[c] != Some(v))
+            .ok_or(ImprovementError::Internal("no colour left for a cell"))?;
+        color[v] = Some(free);
     }
-    imp.net
+    Ok(imp
+        .net
         .nodes()
         .map(|n| color[n].filter(|_| movable[n]))
-        .collect()
+        .collect())
 }
 
 impl Bins {
@@ -378,7 +382,7 @@ mod tests {
     /// The cells set matching gathers around `name`'s.
     fn neighbours_of(imp: &Improver, name: &str) -> Vec<NodeId> {
         let candidates = imp.movable_cells();
-        let colors = color_cells(imp, &candidates);
+        let colors = color_cells(imp, &candidates).unwrap();
         let mut bins = Bins::new(imp, &candidates);
         bins.populate(imp, &candidates);
         gather_neighbours(imp, node(imp, name), &colors, &mut bins, &mut 0).unwrap()

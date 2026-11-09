@@ -251,14 +251,12 @@ impl Improver {
         if self.rows_spanned(n) != 1 || self.rows_spanned(ndj) != 1 {
             return Ok(false);
         }
-        let ix_i = self.cells_in_seg[si]
-            .iter()
-            .position(|&c| c == n)
-            .unwrap_or(self.cells_in_seg[si].len());
-        let ix_j = self.cells_in_seg[sj]
-            .iter()
-            .position(|&c| c == ndj)
-            .unwrap_or(self.cells_in_seg[sj].len());
+        let ix_i = self.cells_in_seg[si].iter().position(|&c| c == n).ok_or(
+            ImprovementError::Internal("Cell not found in expected segment"),
+        )?;
+        let ix_j = self.cells_in_seg[sj].iter().position(|&c| c == ndj).ok_or(
+            ImprovementError::Internal("Cell not found in expected segment"),
+        )?;
         let mut xi = self.left(n);
         let gap_around = |imp: &Self, s: SegmentId, ix: usize| {
             let cells = &imp.cells_in_seg[s];

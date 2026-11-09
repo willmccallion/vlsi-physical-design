@@ -67,9 +67,7 @@ fn reorder_segments(imp: &mut Improver, marks: &mut EdgeMarks) -> Result<()> {
             while j < n && imp.rows_spanned(imp.cells_in_seg[s][j]) == 1 {
                 j += 1;
             }
-            let Some(jstop) = j.checked_sub(1) else {
-                continue;
-            };
+            let jstop = j - 1;
             let mut i = jstrt;
             while i + WINDOW <= jstop {
                 let istop = jstop.min(i + WINDOW - 1);

@@ -406,9 +406,6 @@ impl Placer {
             corner_dist(&self.nodes[a.node], &a.home) < corner_dist(&self.nodes[b.node], &b.home)
         });
         for Member { node: n, home } in order {
-            if self.nodes[n].hold {
-                continue;
-            }
             let to = corner(&self.nodes[n], &home);
             let legal = self.legal_grid_pt_at(n, to);
             if !self.diamond_move_from(n, legal) {
