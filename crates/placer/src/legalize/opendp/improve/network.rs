@@ -73,7 +73,11 @@ impl Network {
                 terminal: true,
             });
         }
-        let orig = grid.nodes.iter().map(|n| (n.left, n.bottom)).collect();
+        let orig = grid
+            .nodes
+            .iter()
+            .map(|n| (n.left.get(), n.bottom.get()))
+            .collect();
         let mut network = Self {
             cells,
             fixed,

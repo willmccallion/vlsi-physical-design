@@ -6,12 +6,13 @@
 
 use super::cpp::{Mt19937, sort};
 use super::{
-    DetailedPlacementError, GridPt, GroupId, MAX_DISPLACEMENT_X, MAX_DISPLACEMENT_Y, Node, NodeId,
-    Occupant, Placer, area,
+    DetailedPlacementError, GroupId, MAX_DISPLACEMENT_X, MAX_DISPLACEMENT_Y, Node, NodeId,
+    Occupant, Placer, area, core_center,
 };
+use crate::legalize::grid::{GridPt, GridX, GridY};
 use pare_common::db::design::NetlistDB;
 use pare_common::db::indices::{CellId, IdVec, RegionId};
-use pare_common::geom::dbu::Dbu;
+use pare_common::geom::dbu::{Dbu, DbuArea};
 use pare_common::geom::point::Point;
 use pare_common::geom::rect::Rect;
 
@@ -104,15 +105,15 @@ impl Placer {
     pub(super) fn mark_region_edges(&mut self) {
         let rects: Vec<Rect<Dbu>> = self.groups.iter().flat_map(|g| g.rects.clone()).collect();
         for rect in rects {
-            let x0 = (rect.min.x.get() / self.site_width).max(0);
-            let x1 = self.grid_end_x(rect.max.x.get()).min(self.row_site_count);
-            let y0 = self.snap_down_y(rect.min.y.get()).max(0);
-            let y1 = self.end_y(rect.max.y.get()).min(self.row_count);
-            for x in x0..x1 {
-                for y in y0..y1 {
+            let x0 = self.grid_x(rect.min.x).max(GridX::ZERO);
+            let x1 = self.grid_end_x(rect.max.x).min(self.row_site_count);
+            let y0 = self.snap_down_y(rect.min.y).max(GridY::ZERO);
+            let y1 = self.end_y(rect.max.y).min(self.row_count);
+            for x in x0.until(x1) {
+                for y in y0.until(y1) {
                     let sub = Rect::new(
-                        Point::new(Dbu(x * self.site_width), Dbu(self.row_y(y))),
-                        Point::new(Dbu((x + 1) * self.site_width), Dbu(self.row_y(y + 1))),
+                        Point::new(x.to_dbu(self.site_width), self.row_y(y)),
+                        Point::new((x + 1).to_dbu(self.site_width), self.row_y(y + 1)),
                     );
                     let inside = rect.min.x <= sub.min.x
                         && sub.max.x <= rect.max.x
@@ -143,7 +144,7 @@ impl Placer {
         for p in &mut self.pixels {
             p.util = 0.0;
         }
-        let site = self.site_width;
+        let site = self.site_width.get();
         for g in self.groups.ids() {
             if self.groups[g].cells.is_empty() {
                 if g != GroupId(0) {
@@ -153,9 +154,10 @@ impl Placer {
             }
             let rects = self.groups[g].rects.clone();
             for rect in &rects {
-                let (x0, y0, x1, y1) = self.grid_within(rect);
-                for y in y0..y1 {
-                    for x in x0..x1 {
+                let within = self.grid_within(rect);
+                let (x0, x1) = (within.min.x, within.max.x);
+                for y in within.min.y.until(within.max.y) {
+                    for x in x0.until(x1) {
                         if let Some(p) = self.pixel_mut(x, y) {
                             p.util += 1.0;
                         }
@@ -177,9 +179,9 @@ impl Placer {
                 }
             }
             for rect in &rects {
-                let (x0, y0, x1, y1) = self.grid_within(rect);
-                for y in y0..y1 {
-                    for x in x0..x1 {
+                let within = self.grid_within(rect);
+                for y in within.min.y.until(within.max.y) {
+                    for x in within.min.x.until(within.max.x) {
                         let Some(p) = self.pixel_mut(x, y) else {
                             continue;
                         };
@@ -220,15 +222,16 @@ impl Placer {
     /// `Opendp::groupAssignCellRegions`.
     fn assign_cell_regions(&mut self) {
         for g in self.groups.ids() {
-            let mut site_area: i64 = 0;
+            let mut site_area = DbuArea(0);
             if !self.groups[g].cells.is_empty() {
-                for x in 0..self.row_site_count {
-                    for y in 0..self.row_count {
+                for x in GridX::ZERO.until(self.row_site_count) {
+                    for y in GridY::ZERO.until(self.row_count) {
                         if self
                             .pixel(x, y)
                             .is_some_and(|p| p.valid && p.group() == Some(g))
                         {
-                            site_area += self.pixel_height(y) * self.site_width;
+                            let pixel_area = self.pixel_height(y).get() * self.site_width.get();
+                            site_area = DbuArea(site_area.get() + pixel_area);
                         }
                     }
                 }
@@ -236,7 +239,7 @@ impl Placer {
             let mut cell_area = 0.0;
             for k in 0..self.groups[g].cells.len() {
                 let n = self.groups[g].cells[k];
-                cell_area += area(&self.nodes[n]) as f64;
+                cell_area += area(&self.nodes[n]).get() as f64;
                 let mut region = None;
                 for (r, rect) in self.groups[g].rects.iter().enumerate() {
                     if is_inside(&self.nodes[n], rect) {
@@ -245,24 +248,29 @@ impl Placer {
                 }
                 self.nodes[n].region = Some(region.unwrap_or(0));
             }
-            self.groups[g].util = if site_area == 0 {
+            self.groups[g].util = if site_area == DbuArea(0) {
                 0.0
             } else {
-                cell_area / site_area as f64
+                cell_area / site_area.get() as f64
             };
         }
     }
 
     /// The height `OpenDP` gives grid row `y`: from the row edge below it,
     /// as `Grid::rowHeight`.
-    fn pixel_height(&self, y: i64) -> i64 {
-        let edge = |i: i64| {
-            usize::try_from(i)
+    fn pixel_height(&self, y: GridY) -> Dbu {
+        let edge = |i: GridY| {
+            usize::try_from(i.get())
                 .ok()
                 .and_then(|i| self.row_edges.get(i))
                 .copied()
         };
-        edge(y).unwrap_or(0) - if y > 0 { edge(y - 1).unwrap_or(0) } else { 0 }
+        edge(y).unwrap_or(Dbu::ZERO)
+            - if y > GridY::ZERO {
+                edge(y - 1).unwrap_or(Dbu::ZERO)
+            } else {
+                Dbu::ZERO
+            }
     }
 
     /// Moves each group's members that lie outside its region into it, as
@@ -274,7 +282,7 @@ impl Placer {
                 if self.nodes[n].fixed || self.nodes[n].placed {
                     continue;
                 }
-                let mut distance = i64::MAX;
+                let mut distance = Dbu(i64::MAX);
                 let mut inside = false;
                 let mut nearest = None;
                 for rect in &self.groups[g].rects {
@@ -329,9 +337,9 @@ impl Placer {
 
     /// The grid point of a legal position near `at`, as `Opendp::legalGridPt`
     /// with a point.
-    fn legal_grid_pt_at(&self, n: NodeId, at: (i64, i64)) -> GridPt {
-        let (x, y) = self.legal_pt(&self.nodes[n], at);
-        (self.grid_x(x), self.snap_down_y(y))
+    fn legal_grid_pt_at(&self, n: NodeId, at: Point<Dbu>) -> GridPt {
+        let legal = self.legal_pt(&self.nodes[n], at);
+        GridPt::new(self.grid_x(legal.x), self.snap_down_y(legal.y))
     }
 
     /// Places each group's remaining members, packing them against the
@@ -440,27 +448,29 @@ impl Placer {
     /// brings it nearer to where it started, as `Opendp::refineMove`.
     fn refine_move(&mut self, n: NodeId) -> bool {
         let grid_pt = self.legal_grid_pt(n);
-        let Some((x, y)) = self.diamond_search(n, grid_pt) else {
+        let Some(to) = self.diamond_search(n, grid_pt) else {
             return false;
         };
-        if (grid_pt.0 - x).abs() > MAX_DISPLACEMENT_X || (grid_pt.1 - y).abs() > MAX_DISPLACEMENT_Y
+        if (grid_pt.x - to.x).abs() > MAX_DISPLACEMENT_X
+            || (grid_pt.y - to.y).abs() > MAX_DISPLACEMENT_Y
         {
             return false;
         }
-        if self.dist_change(n, x * self.site_width, self.row_y(y)) < 0 {
+        let at = Point::new(to.x.to_dbu(self.site_width), self.row_y(to.y));
+        if self.dist_change(n, at) < Dbu::ZERO {
             self.unplace_cell(n);
-            self.place_cell(n, x, y);
+            self.place_cell(n, to);
             return true;
         }
         false
     }
 
-    /// How much nearer to where it started a cell would be at `(x, y)`, as
+    /// How much nearer to where it started a cell would be at `at`, as
     /// `Opendp::distChange`.
-    fn dist_change(&self, n: NodeId, x: i64, y: i64) -> i64 {
+    fn dist_change(&self, n: NodeId, at: Point<Dbu>) -> Dbu {
         let node = &self.nodes[n];
-        let now = (node.left - node.init.0).abs() + (node.bottom - node.init.1).abs();
-        let then = (node.init.0 - x).abs() + (node.init.1 - y).abs();
+        let now = (node.left - node.init.x).abs() + (node.bottom - node.init.y).abs();
+        let then = (node.init.x - at.x).abs() + (node.init.y - at.y).abs();
         then - now
     }
 
@@ -500,21 +510,21 @@ impl Placer {
         {
             return false;
         }
-        let change =
-            self.dist_change(a, nb.left, nb.bottom) + self.dist_change(b, na.left, na.bottom);
-        if change >= 0 {
+        let (a_at, b_at) = (
+            Point::new(na.left, na.bottom),
+            Point::new(nb.left, nb.bottom),
+        );
+        let change = self.dist_change(a, b_at) + self.dist_change(b, a_at);
+        if change >= Dbu::ZERO {
             return false;
         }
-        let (a_was, b_was) = (
-            (na.left, na.bottom, na.placed),
-            (nb.left, nb.bottom, nb.placed),
-        );
-        let (ax, ay) = (self.grid_x(nb.left), self.snap_down_y(nb.bottom));
-        let (bx, by) = (self.grid_x(na.left), self.snap_down_y(na.bottom));
+        let (a_was, b_was) = ((a_at, na.placed), (b_at, nb.placed));
+        let a_to = GridPt::new(self.grid_x(nb.left), self.snap_down_y(nb.bottom));
+        let b_to = GridPt::new(self.grid_x(na.left), self.snap_down_y(na.bottom));
         self.unplace_cell(a);
         self.unplace_cell(b);
-        self.place_cell(a, ax, ay);
-        self.place_cell(b, bx, by);
+        self.place_cell(a, a_to);
+        self.place_cell(b, b_to);
         if self.check_drc_here(a) && self.check_drc_here(b) {
             return true;
         }
@@ -536,15 +546,15 @@ impl Placer {
     /// Puts a moved cell back, as the journal undoes a `MoveCellAction`:
     /// its pixels cleared where it stands, its place restored and painted
     /// in that row's orientation when it was placed.
-    fn undo_move(&mut self, n: NodeId, (left, bottom, was_placed): (i64, i64, bool)) {
+    fn undo_move(&mut self, n: NodeId, (at, was_placed): (Point<Dbu>, bool)) {
         self.erase_pixels(n);
-        self.nodes[n].left = left;
-        self.nodes[n].bottom = bottom;
+        self.nodes[n].left = at.x;
+        self.nodes[n].bottom = at.y;
         if !was_placed {
             self.nodes[n].placed = false;
             return;
         }
-        let (gx, gy) = (self.grid_x(left), self.round_y(bottom));
+        let (gx, gy) = (self.grid_x(at.x), self.round_y(at.y));
         self.paint_pixels(n, gx, gy);
         if let Some(orient) = self.site_orientation(gx, gy, self.nodes[n].site) {
             self.nodes[n].orient = orient;
@@ -555,12 +565,9 @@ impl Placer {
     /// a row first, then larger, then nearer the core's center, then by
     /// name.
     pub(super) fn place_order_less(&self) -> impl Fn(&Node, &Node) -> bool + use<> {
-        let center = (
-            i64::midpoint(self.core.min.x.get(), self.core.max.x.get()),
-            i64::midpoint(self.core.min.y.get(), self.core.max.y.get()),
-        );
+        let center = core_center(&self.core);
         move |a: &Node, b: &Node| {
-            let dist = |n: &Node| (n.left - center.0).abs() + (n.bottom - center.1).abs();
+            let dist = |n: &Node| (n.left - center.x).abs() + (n.bottom - center.y).abs();
             if a.multi_row != b.multi_row {
                 return a.multi_row;
             }
@@ -574,56 +581,48 @@ impl Placer {
 
 /// Whether a cell's starting position lies wholly in a rectangle, as
 /// `Opendp::isInside`.
-const fn is_inside(node: &Node, rect: &Rect<Dbu>) -> bool {
-    let (x, y) = node.init;
-    x >= rect.min.x.get()
-        && x + node.width <= rect.max.x.get()
-        && y >= rect.min.y.get()
-        && y + node.height <= rect.max.y.get()
+fn is_inside(node: &Node, rect: &Rect<Dbu>) -> bool {
+    let Point { x, y } = node.init;
+    x >= rect.min.x
+        && x + node.width <= rect.max.x
+        && y >= rect.min.y
+        && y + node.height <= rect.max.y
 }
 
 /// How far a cell's starting position lies outside a rectangle, as
 /// `Opendp::distToRect`.
-const fn dist_to_rect(node: &Node, rect: &Rect<Dbu>) -> i64 {
-    let (x, y) = node.init;
-    let dx = if x < rect.min.x.get() {
-        rect.min.x.get() - x
-    } else if x + node.width > rect.max.x.get() {
-        x + node.width - rect.max.x.get()
+fn dist_to_rect(node: &Node, rect: &Rect<Dbu>) -> Dbu {
+    let Point { x, y } = node.init;
+    let dx = if x < rect.min.x {
+        rect.min.x - x
+    } else if x + node.width > rect.max.x {
+        x + node.width - rect.max.x
     } else {
-        0
+        Dbu::ZERO
     };
-    let dy = if y < rect.min.y.get() {
-        rect.min.y.get() - y
-    } else if y + node.height > rect.max.y.get() {
-        y + node.height - rect.max.y.get()
+    let dy = if y < rect.min.y {
+        rect.min.y - y
+    } else if y + node.height > rect.max.y {
+        y + node.height - rect.max.y
     } else {
-        0
+        Dbu::ZERO
     };
     dx + dy
 }
 
 /// Whether a cell's starting position straddles a rectangle's left edge,
 /// as the `Node` form of `Opendp::checkOverlap` tests it.
-const fn overlaps_left_edge(node: &Node, rect: &Rect<Dbu>) -> bool {
-    let (x, y) = node.init;
-    x + node.width > rect.min.x.get()
-        && x < rect.min.x.get()
-        && y + node.height > rect.min.y.get()
-        && y < rect.max.y.get()
+fn overlaps_left_edge(node: &Node, rect: &Rect<Dbu>) -> bool {
+    let Point { x, y } = node.init;
+    x + node.width > rect.min.x && x < rect.min.x && y + node.height > rect.min.y && y < rect.max.y
 }
 
 /// The nearest position to a cell's start inside a rectangle, or just out
 /// of it across its nearest edge when the cell straddles its left edge, as
 /// `Opendp::nearestPt`.
-const fn nearest_pt(node: &Node, rect: &Rect<Dbu>) -> (i64, i64) {
-    let (x, y) = node.init;
-    let (xl, yl, xh, yh) = (
-        rect.min.x.get(),
-        rect.min.y.get(),
-        rect.max.x.get(),
-        rect.max.y.get(),
-    );
+fn nearest_pt(node: &Node, rect: &Rect<Dbu>) -> Point<Dbu> {
+    let Point { x, y } = node.init;
+    let (xl, yl, xh, yh) = (rect.min.x, rect.min.y, rect.max.x, rect.max.y);
     if overlaps_left_edge(node, rect) {
         let (dist_x, to_x) = if (x + node.width - xl).abs() > (xh - x).abs() {
             ((xh - x).abs(), xh)
@@ -636,9 +635,9 @@ const fn nearest_pt(node: &Node, rect: &Rect<Dbu>) -> (i64, i64) {
             ((y - yl).abs(), yl - node.height)
         };
         return if dist_x < dist_y {
-            (to_x, y)
+            Point::new(to_x, y)
         } else {
-            (x, to_y)
+            Point::new(x, to_y)
         };
     }
     let to_x = if x < xl {
@@ -655,36 +654,28 @@ const fn nearest_pt(node: &Node, rect: &Rect<Dbu>) -> (i64, i64) {
     } else {
         y
     };
-    (to_x, to_y)
+    Point::new(to_x, to_y)
 }
 
 /// The corner of a rectangle on the side of its center a cell's start is
 /// on, as `Opendp::rectDist` finds it.
-const fn corner(node: &Node, rect: &Rect<Dbu>) -> (i64, i64) {
-    let (x, y) = node.init;
-    let cx = i64::midpoint(rect.min.x.get(), rect.max.x.get());
-    let cy = i64::midpoint(rect.min.y.get(), rect.max.y.get());
-    (
-        if x > cx {
-            rect.max.x.get()
-        } else {
-            rect.min.x.get()
-        },
-        if y > cy {
-            rect.max.y.get()
-        } else {
-            rect.min.y.get()
-        },
+fn corner(node: &Node, rect: &Rect<Dbu>) -> Point<Dbu> {
+    let Point { x, y } = node.init;
+    let cx = Dbu(i64::midpoint(rect.min.x.get(), rect.max.x.get()));
+    let cy = Dbu(i64::midpoint(rect.min.y.get(), rect.max.y.get()));
+    Point::new(
+        if x > cx { rect.max.x } else { rect.min.x },
+        if y > cy { rect.max.y } else { rect.min.y },
     )
 }
 
 /// How far a cell's start is from that corner, as `Opendp::rectDist`.
-const fn corner_dist(node: &Node, rect: &Rect<Dbu>) -> i64 {
-    let (cx, cy) = corner(node, rect);
-    (node.init.0 - cx).abs() + (node.init.1 - cy).abs()
+fn corner_dist(node: &Node, rect: &Rect<Dbu>) -> Dbu {
+    let c = corner(node, rect);
+    (node.init.x - c.x).abs() + (node.init.y - c.y).abs()
 }
 
 /// How far a cell stands from where it started, as `Opendp::disp`.
-const fn displacement(node: &Node) -> i64 {
-    (node.init.0 - node.left).abs() + (node.init.1 - node.bottom).abs()
+fn displacement(node: &Node) -> Dbu {
+    (node.init.x - node.left).abs() + (node.init.y - node.bottom).abs()
 }

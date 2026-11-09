@@ -1,6 +1,7 @@
 //! Legalization: moving globally placed cells onto rows without overlap.
 
 pub mod abacus;
+mod grid;
 pub mod opendp;
 pub mod site;
 
