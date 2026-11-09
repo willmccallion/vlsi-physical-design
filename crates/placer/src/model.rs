@@ -119,16 +119,16 @@ fn model_nets(db: &NetlistDB, io: IoAnchors) -> Vec<ModelNet> {
     let um = |p: Point<Dbu>| units.point_in_microns(p);
     let model_pin = |pin: PinId| {
         let at = db.pin_position(pin);
-        let (anchor, average) = match db.pins[pin.index()].owner {
+        let (anchor, average) = match db.pins[pin].owner {
             PinOwner::Cell { cell, .. } => (
                 PinAnchor::Cell {
                     cell,
-                    offset: um(at - db.cells[cell.index()].location),
+                    offset: um(at - db.cells[cell].location),
                 },
                 um(db.average_pin_position(pin) - at),
             ),
             PinOwner::Io(pin) => {
-                let fixed = !db.io_pins[pin.index()].status.is_movable();
+                let fixed = !db.io_pins[pin].status.is_movable();
                 if io == IoAnchors::FixedOnly && !fixed {
                     return None;
                 }
@@ -188,16 +188,16 @@ fn zone_rows(db: &NetlistDB, zones: &Zones, spans: &[RowSpan]) -> Vec<ZoneRows> 
 /// more is scaled toward the area that holds its pins at the average density
 /// of the movable cells, by no more than 1.2 nor less than 0.95.
 fn pin_density_sizes(db: &NetlistDB) -> Vec<Point<Dbu>> {
-    let signal_pins = |i: usize| {
-        let pins = &db.cell_macro(CellId::new(i)).pins;
+    let signal_pins = |i: CellId| {
+        let pins = &db.cell_macro(i).pins;
         pins.iter().filter(|p| !p.signal_use.is_supply()).count()
     };
     let area = |s: Point<Dbu>| s.x.get() * s.y.get();
     let (mut total_pins, mut movable_area) = (0, 0);
-    for i in 0..db.num_cells() {
+    for i in db.cells.ids() {
         if db.cells[i].status.is_movable() {
             total_pins += signal_pins(i);
-            movable_area += area(db.cell_size(CellId::new(i)));
+            movable_area += area(db.cell_size(i));
         }
     }
     let average = if movable_area > 0 {
@@ -205,9 +205,10 @@ fn pin_density_sizes(db: &NetlistDB) -> Vec<Point<Dbu>> {
     } else {
         0.0
     };
-    (0..db.num_cells())
+    db.cells
+        .ids()
         .map(|i| {
-            let size = db.cell_size(CellId::new(i));
+            let size = db.cell_size(i);
             let pins = signal_pins(i);
             if !db.cells[i].status.is_movable() || pins <= 2 || average <= 0.0 || area(size) == 0 {
                 return size;

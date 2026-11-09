@@ -853,7 +853,7 @@ impl<'a> LefParser<'a, '_> {
         }
         let rule = via_rule_from_layers(name, is_default, &layers)
             .map_err(|message| self.lx.error(line, message))?;
-        self.lib.via_rules.push(rule);
+        let _ = self.lib.via_rules.push(rule);
         Ok(())
     }
 

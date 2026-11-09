@@ -4,7 +4,7 @@
 #![allow(clippy::unwrap_used)]
 
 use pare_common::db::design::{BlockageKind, NetlistDB, PlacementBlockage, RegionKind, RouteElem};
-use pare_common::db::indices::{CutLayerId, RegionId};
+use pare_common::db::indices::{CellId, CutLayerId, NonDefaultRuleId, RegionId, SpecialNetId};
 use pare_common::db::library::{LayerRef, Library};
 use pare_common::db::parser::{def, lef};
 use pare_common::db::writer;
@@ -61,7 +61,7 @@ fn special_net_rects_and_wire_extensions_are_kept() {
     )])
     .unwrap();
 
-    let vdd = &db.special_nets[0];
+    let vdd = &db.special_nets[SpecialNetId(0)];
     assert_eq!(vdd.wires[1].rect(), rect(4800, -50, 5200, 6070));
     assert_eq!(vdd.rects.len(), 1);
     assert_eq!(vdd.rects[0].rect, rect(0, 0, 300, 100));
@@ -77,7 +77,7 @@ fn regular_wire_end_extensions_stay_on_their_wire_ends() {
     )])
     .unwrap();
 
-    let n3 = &db.nets[db.net_id("n3").unwrap().index()];
+    let n3 = &db.nets[db.net_id("n3").unwrap()];
     let extensions: Vec<_> = n3
         .routing
         .iter()
@@ -114,7 +114,7 @@ fn a_special_net_rect_takes_the_shape_option_before_it() {
     )])
     .unwrap();
 
-    let shapes: Vec<Option<&str>> = db.special_nets[0]
+    let shapes: Vec<Option<&str>> = db.special_nets[SpecialNetId(0)]
         .rects
         .iter()
         .map(|r| r.shape.as_deref())
@@ -185,10 +185,10 @@ fn groups_assign_matching_components_to_their_region() {
     ])
     .unwrap();
 
-    assert_eq!(db.regions[0].rects.len(), 2);
-    assert_eq!(db.regions[0].kind, RegionKind::Fence);
-    assert_eq!(db.regions[1].kind, RegionKind::Inclusive);
-    let region = |name: &str| db.cells[db.cell_id(name).unwrap().index()].region;
+    assert_eq!(db.regions[RegionId(0)].rects.len(), 2);
+    assert_eq!(db.regions[RegionId(0)].kind, RegionKind::Fence);
+    assert_eq!(db.regions[RegionId(1)].kind, RegionKind::Inclusive);
+    let region = |name: &str| db.cells[db.cell_id(name).unwrap()].region;
     assert_eq!(region("u2"), Some(RegionId(0)));
     assert_eq!(region("u7"), Some(RegionId(0)));
     assert_eq!(region("ram0"), Some(RegionId(1)));
@@ -210,14 +210,14 @@ fn group_members_are_ranked_as_opendb_lists_them() {
     ])
     .unwrap();
 
-    let rank = |name: &str| db.cells[db.cell_id(name).unwrap().index()].group_rank;
+    let rank = |name: &str| db.cells[db.cell_id(name).unwrap()].group_rank;
     let ranks: Vec<Option<usize>> = ["u7", "u6", "u5", "u4", "u3", "u2", "u1"]
         .iter()
         .map(|n| rank(n))
         .collect();
     assert_eq!(ranks, (0..7).map(Some).collect::<Vec<_>>());
-    assert_eq!(db.regions[0].group_order, Some(1));
-    assert_eq!(db.regions[1].group_order, Some(0));
+    assert_eq!(db.regions[RegionId(0)].group_order, Some(1));
+    assert_eq!(db.regions[RegionId(1)].group_order, Some(0));
 }
 
 #[test]
@@ -251,7 +251,9 @@ fn groups_are_written_and_read_back_unchanged() {
 /// A region's members in the order `OpenDP` takes them: by rank, then the
 /// later cell first.
 fn group_order_of(db: &NetlistDB, region: RegionId) -> Vec<String> {
-    let mut members: Vec<usize> = (0..db.cells.len())
+    let mut members: Vec<CellId> = db
+        .cells
+        .ids()
         .filter(|&i| db.cells[i].region == Some(region))
         .collect();
     members.sort_by_key(|&i| (db.cells[i].region_member_order(), std::cmp::Reverse(i)));
@@ -307,7 +309,7 @@ fn components_given_a_region_directly_come_after_its_group_members() {
     ])
     .unwrap();
 
-    let u4 = &db.cells[db.cell_id("u4").unwrap().index()];
+    let u4 = &db.cells[db.cell_id("u4").unwrap()];
 
     assert_eq!(u4.group_rank, None);
     assert_eq!(group_order_of(&db, RegionId(0)), ["u3", "u2", "u4"]);
@@ -335,7 +337,7 @@ fn groups_may_come_before_the_regions_and_components_they_name() {
     .unwrap();
 
     assert_eq!(
-        db.cells[db.cell_id("u2").unwrap().index()].region,
+        db.cells[db.cell_id("u2").unwrap()].region,
         Some(RegionId(0))
     );
 }
@@ -355,7 +357,7 @@ fn a_group_without_a_region_assigns_nothing() {
     .unwrap();
 
     assert_eq!(
-        db.cells[db.cell_id("u1").unwrap().index()].region,
+        db.cells[db.cell_id("u1").unwrap()].region,
         Some(RegionId(0))
     );
 }
@@ -391,12 +393,12 @@ fn non_default_rules_attach_to_their_nets() {
     ])
     .unwrap();
 
-    let rule = &db.non_default_rules[0];
+    let rule = &db.non_default_rules[NonDefaultRuleId(0)];
     assert!(rule.hard_spacing);
     assert_eq!(rule.layers[0].spacing, Some(Dbu(150)));
     assert_eq!(rule.layers[1].wire_extension, Some(Dbu(100)));
     assert_eq!(rule.min_cuts, [(CutLayerId(0), 2)]);
-    let n2 = &db.nets[db.net_id("n2").unwrap().index()];
+    let n2 = &db.nets[db.net_id("n2").unwrap()];
     assert!(n2.non_default_rule.is_some());
 }
 

@@ -74,13 +74,13 @@ pub fn draw_placement(
 fn paint_cells(db: &NetlistDB, map: &PixelMap, img: &mut RgbImage) {
     let color_cell = Rgb([180, 60, 60]);
     let color_fixed = Rgb([180, 120, 40]);
-    for i in 0..db.num_cells() {
-        let color = if db.cells[i].status.is_movable() {
+    for (id, cell) in db.cells.iter_enumerated() {
+        let color = if cell.status.is_movable() {
             color_cell
         } else {
             color_fixed
         };
-        draw_filled_rect_mut(img, map.rect(db, CellId::new(i), 2.0), color);
+        draw_filled_rect_mut(img, map.rect(db, id, 2.0), color);
     }
 }
 

@@ -27,7 +27,7 @@ fn tiny_design() -> NetlistDB {
 fn legalized(x: i64, y: i64) -> Option<Point<Dbu>> {
     let mut db = tiny_design();
     let u1 = db.cell_id("u1").unwrap();
-    db.cells[u1.index()].location = Point::new(Dbu(x), Dbu(y));
+    db.cells[u1].location = Point::new(Dbu(x), Dbu(y));
     let grid = SiteGrid::new(&db).unwrap();
     grid.legal_position(&db, u1)
 }
@@ -65,7 +65,7 @@ fn a_cell_near_the_top_of_a_raised_core_stays_on_its_top_row() {
         row.origin.y += Dbu(2000);
     }
     let u1 = db.cell_id("u1").unwrap();
-    db.cells[u1.index()].location = Point::new(Dbu(1000), Dbu(7900));
+    db.cells[u1].location = Point::new(Dbu(1000), Dbu(7900));
     let grid = SiteGrid::new(&db).unwrap();
 
     let legal = grid.legal_position(&db, u1);

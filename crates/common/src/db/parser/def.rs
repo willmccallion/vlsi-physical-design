@@ -741,7 +741,7 @@ impl<'a> DefParser<'a> {
     fn connect_io_pin(&mut self, pending: PendingIo) -> Result<(), ParseError> {
         let net = self.db.net_or_insert(&pending.net);
         if pending.signal_use.is_supply() {
-            self.db.nets[net.index()].signal_use = pending.signal_use;
+            self.db.nets[net].signal_use = pending.signal_use;
         }
         let line = pending.line;
         let _ = self
@@ -779,7 +779,7 @@ impl<'a> DefParser<'a> {
                 }
                 while self.lx.accept("RECT") {
                     let rect = self.rect()?;
-                    self.db.routing_blockages.push(Shape { layer, rect });
+                    let _ = self.db.routing_blockages.push(Shape { layer, rect });
                 }
             }
             "PLACEMENT" => {
@@ -906,7 +906,7 @@ impl<'a> DefParser<'a> {
             }
         }
         self.lx.expect(";")?;
-        self.db.special_nets.push(net);
+        let _ = self.db.special_nets.push(net);
         Ok(())
     }
 
@@ -982,10 +982,10 @@ impl<'a> DefParser<'a> {
             match t.text {
                 "USE" => {
                     let word = self.word("use")?;
-                    self.db.nets[net.index()].signal_use = parse_signal_use(word)
+                    self.db.nets[net].signal_use = parse_signal_use(word)
                         .ok_or_else(|| self.lx.error(t.line, format!("unknown use '{word}'")))?;
                 }
-                "WEIGHT" => self.db.nets[net.index()].weight = self.lx.number("net weight")?,
+                "WEIGHT" => self.db.nets[net].weight = self.lx.number("net weight")?,
                 "ROUTED" | "FIXED" | "COVER" | "NOSHIELD" => self.net_wiring(net)?,
                 "NONDEFAULTRULE" => {
                     let r = self.lx.expect_token("rule name")?;
@@ -993,7 +993,7 @@ impl<'a> DefParser<'a> {
                         self.lx
                             .error(r.line, format!("unknown non-default rule '{}'", r.text))
                     })?;
-                    self.db.nets[net.index()].non_default_rule = Some(rule);
+                    self.db.nets[net].non_default_rule = Some(rule);
                 }
                 _ => self.skip_listed_option(t, NET_IGNORED, "net option"),
             }
@@ -1006,7 +1006,7 @@ impl<'a> DefParser<'a> {
         let owner = self.word("component name")?;
         let pin_name = self.word("pin name")?;
         while self.lx.expect_token("')'")?.text != ")" {}
-        let net_name = self.db.nets[net.index()].name.clone();
+        let net_name = self.db.nets[net].name.clone();
         if owner == "PIN" {
             let pending = self
                 .pending_by_name
@@ -1062,7 +1062,7 @@ impl<'a> DefParser<'a> {
             ));
         }
         if let Some(existing) = self.db.cell_pin(cell, pin) {
-            let other = &self.db.nets[self.db.pins[existing.index()].net.index()].name;
+            let other = &self.db.nets[self.db.pins[existing].net].name;
             return Err(self.lx.error(
                 line,
                 format!(
@@ -1084,7 +1084,7 @@ impl<'a> DefParser<'a> {
                     "(" => {
                         let (p, extension) = self.path_point(prev.map(|(at, _)| at))?;
                         if let Some((from, from_extension)) = prev {
-                            self.db.nets[net.index()].routing.push(RouteElem::Wire {
+                            self.db.nets[net].routing.push(RouteElem::Wire {
                                 layer,
                                 from,
                                 to: p,
@@ -1107,7 +1107,7 @@ impl<'a> DefParser<'a> {
                             .map(|(at, _)| at)
                             .ok_or_else(|| self.lx.error(t.line, "RECT before any point"))?;
                         let rect = self.patch_rect(at)?;
-                        self.db.nets[net.index()]
+                        self.db.nets[net]
                             .routing
                             .push(RouteElem::Patch { layer, rect });
                     }
@@ -1131,9 +1131,7 @@ impl<'a> DefParser<'a> {
                                 format!("via '{}' does not touch the current wiring layer", t.text),
                             ));
                         };
-                        self.db.nets[net.index()]
-                            .routing
-                            .push(RouteElem::Via { via, at });
+                        self.db.nets[net].routing.push(RouteElem::Via { via, at });
                         prev = Some((at, None));
                     }
                 }
@@ -1209,7 +1207,7 @@ impl<'a> DefParser<'a> {
                 .lx
                 .error(line, format!("duplicate non-default rule '{}'", rule.name)));
         }
-        self.db.non_default_rules.push(rule);
+        let _ = self.db.non_default_rules.push(rule);
         Ok(())
     }
 
@@ -1276,11 +1274,11 @@ impl<'a> DefParser<'a> {
         if rects.is_empty() {
             return Err(self.lx.error(line, format!("region '{name}' has no area")));
         }
-        let id = RegionId::new(self.db.regions.len());
+        let id = self.db.regions.next_id();
         if self.region_by_name.insert(name.clone(), id).is_some() {
             return Err(self.lx.error(line, format!("duplicate region '{name}'")));
         }
-        self.db.regions.push(Region {
+        let _ = self.db.regions.push(Region {
             name,
             rects,
             kind,
@@ -1330,7 +1328,7 @@ impl<'a> DefParser<'a> {
     fn assign_regions(&mut self) -> Result<(), ParseError> {
         for (cell, t) in std::mem::take(&mut self.component_regions) {
             let region = self.region_id(t)?;
-            let c = &mut self.db.cells[cell.index()];
+            let c = &mut self.db.cells[cell];
             c.region = Some(region);
             c.group_rank = None;
         }
@@ -1339,9 +1337,7 @@ impl<'a> DefParser<'a> {
                 continue;
             };
             let region = self.region_id(region)?;
-            let _ = self.db.regions[region.index()]
-                .group_order
-                .get_or_insert(order);
+            let _ = self.db.regions[region].group_order.get_or_insert(order);
             let added = self.group_members(&group)?;
             let mut seen = std::collections::HashSet::new();
             let listed: Vec<CellId> = added
@@ -1351,7 +1347,7 @@ impl<'a> DefParser<'a> {
                 .filter(|&c| seen.insert(c))
                 .collect();
             for (rank, cell) in listed.into_iter().enumerate() {
-                let c = &mut self.db.cells[cell.index()];
+                let c = &mut self.db.cells[cell];
                 if c.region.is_some_and(|r| r != region) {
                     return Err(self.lx.error(
                         group.line,
@@ -1370,9 +1366,10 @@ impl<'a> DefParser<'a> {
         for p in &group.patterns {
             if p.text.contains('*') {
                 members.extend(
-                    (0..self.db.num_cells())
-                        .filter(|&i| matches_pattern(p.text, &self.db.cells[i].name))
-                        .map(CellId::new),
+                    self.db
+                        .cells
+                        .ids()
+                        .filter(|&id| matches_pattern(p.text, &self.db.cells[id].name)),
                 );
             } else {
                 members.push(self.db.cell_id(p.text).ok_or_else(|| {

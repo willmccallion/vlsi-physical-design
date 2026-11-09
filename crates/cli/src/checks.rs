@@ -63,10 +63,8 @@ fn describe_violation(db: &NetlistDB, v: &PlacementViolation) -> String {
         let bbox = db.cell_bbox(c);
         format!(
             "{} {:?} at ({}, {})-({}, {})",
-            db.cells[c.index()].name,
-            db.cells[c.index()]
-                .region
-                .map(|r| db.regions[r.index()].name.as_str()),
+            db.cells[c].name,
+            db.cells[c].region.map(|r| db.regions[r].name.as_str()),
             bbox.min.x.get(),
             bbox.min.y.get(),
             bbox.max.x.get(),
@@ -94,7 +92,7 @@ pub(crate) fn report_routing(db: &NetlistDB, run: &mut Report) -> bool {
         log::debug!(
             "open: net {} '{}' in {} pieces",
             open.net.index(),
-            db.nets[open.net.index()].name,
+            db.nets[open.net].name,
             open.components
         );
     }
@@ -196,7 +194,7 @@ fn describe_marker(db: &NetlistDB, drc: &DrcReport, m: &Marker) -> String {
     let units = db.dbu();
     let layer = match m.layer {
         LayerRef::Routing(l) => db.library.layer(l).name.as_str(),
-        LayerRef::Cut(c) => db.library.cut_layers[c.index()].name.as_str(),
+        LayerRef::Cut(c) => db.library.cut_layers[c].name.as_str(),
     };
     let name = |i: usize| drc.owners[i].name(db);
     format!(

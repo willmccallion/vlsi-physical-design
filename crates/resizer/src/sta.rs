@@ -401,7 +401,7 @@ impl Sta {
         let mut seeds: Vec<PinId> = Vec::new();
         for &driver in dirty_drivers {
             seeds.push(driver);
-            let net = netlist.db.pins[driver.index()].net;
+            let net = netlist.db.pins[driver].net;
             seeds.extend(netlist.loads(net));
             seeds.extend(graph.in_arcs(driver).iter().map(|a| a.from));
         }
@@ -451,12 +451,11 @@ impl Sta {
         let db = netlist.db;
         self.endpoints.clear();
         self.is_endpoint.fill(false);
-        for i in 0..db.pins.len() {
-            let pin = PinId::new(i);
+        for pin in db.pins.ids() {
             if !netlist.is_load(pin) {
                 continue;
             }
-            let is_end = match db.pins[i].owner {
+            let is_end = match db.pins[pin].owner {
                 PinOwner::Io(io) => self.sdc.output_delays.contains_key(&io),
                 PinOwner::Cell { cell, .. } => {
                     let Some((lib, port)) = netlist.link.pin_port(db, pin) else {
@@ -473,7 +472,7 @@ impl Sta {
                 }
             };
             if is_end || self.gated.contains_key(&pin) {
-                self.is_endpoint[i] = true;
+                self.is_endpoint[pin.index()] = true;
                 self.endpoints.push(pin);
             }
         }
@@ -652,7 +651,7 @@ impl Sta {
     /// Whether the arc of `set` into `pin` leaves a register or an open
     /// latch, where `OpenSTA`'s expanded path starts.
     fn starts_data(&self, netlist: &Netlist<'_>, pin: PinId, set: usize) -> bool {
-        let PinOwner::Cell { cell, .. } = netlist.db.pins[pin.index()].owner else {
+        let PinOwner::Cell { cell, .. } = netlist.db.pins[pin].owner else {
             return false;
         };
         let Some((_, lib)) = netlist.link.cell(netlist.db, cell) else {
@@ -731,7 +730,7 @@ impl Sta {
                 self.clock_seeds(clocks, pin, edge)
             } else if clocks.is_propagated(pin) {
                 self.network_arrivals(netlist, graph, pin, edge)
-            } else if let PinOwner::Io(io) = netlist.db.pins[pin.index()].owner
+            } else if let PinOwner::Io(io) = netlist.db.pins[pin].owner
                 && is_driver
             {
                 self.port_seeds(io, edge)
@@ -917,7 +916,7 @@ impl Sta {
     ) -> Vec<Entry> {
         let mut entries: Vec<Entry> = Vec::new();
         let derate = self.cell_derates(netlist, driver);
-        let latch = match netlist.db.pins[driver.index()].owner {
+        let latch = match netlist.db.pins[driver].owner {
             PinOwner::Cell { cell, .. } => self.latches.get(&cell).copied(),
             PinOwner::Io(_) => None,
         };
@@ -980,7 +979,7 @@ impl Sta {
         edge: Edge,
     ) -> Vec<Entry> {
         let mut entries: Vec<Entry> = Vec::new();
-        let net = netlist.db.pins[load.index()].net;
+        let net = netlist.db.pins[load].net;
         let derate = self.sdc.derating.net;
         for driver in netlist.drivers(net) {
             if driver == load {
@@ -1188,7 +1187,7 @@ impl Sta {
     /// the early and late sides: its instance's own derate where set, else
     /// the design's.
     fn cell_derates(&self, netlist: &Netlist<'_>, driver: PinId) -> [f64; 2] {
-        let cell = match netlist.db.pins[driver.index()].owner {
+        let cell = match netlist.db.pins[driver].owner {
             PinOwner::Cell { cell, .. } => Some(cell),
             PinOwner::Io(_) => None,
         };
@@ -1206,7 +1205,7 @@ impl Sta {
     ) -> [Seconds; 2] {
         let mut required = REQUIRED_INIT;
         if netlist.is_driver(pin) {
-            let net = netlist.db.pins[pin.index()].net;
+            let net = netlist.db.pins[pin].net;
             let derate = self.sdc.derating.net;
             for load in netlist.loads(net) {
                 if load == pin {
@@ -1282,7 +1281,7 @@ impl Sta {
             }
         };
         let db = netlist.db;
-        match db.pins[pin.index()].owner {
+        match db.pins[pin].owner {
             PinOwner::Io(io) => {
                 let delays = self.sdc.output_delays.get(&io).cloned().unwrap_or_default();
                 for delay in delays {
@@ -1591,8 +1590,7 @@ const fn opposite(edge: Edge) -> Edge {
 fn find_latches(netlist: &Netlist<'_>, constants: &Constants) -> FxHashMap<CellId, Latch> {
     let db = netlist.db;
     let mut latches = FxHashMap::default();
-    for i in 0..db.cells.len() {
-        let cell = CellId::new(i);
+    for cell in db.cells.ids() {
         let Some((_, lib)) = netlist.link.cell(db, cell) else {
             continue;
         };
@@ -1664,7 +1662,7 @@ fn merge_arrival(entries: &mut Vec<Entry>, tag: TagId, side: MinMax, time: Secon
 fn successors(netlist: &Netlist<'_>, graph: &TimingGraph, pin: PinId) -> Vec<PinId> {
     let mut next = Vec::new();
     if netlist.is_driver(pin) {
-        let net = netlist.db.pins[pin.index()].net;
+        let net = netlist.db.pins[pin].net;
         next.extend(netlist.loads(net).filter(|&l| l != pin));
     }
     if netlist.is_load(pin) {
@@ -1687,7 +1685,7 @@ fn is_isolated(netlist: &Netlist<'_>, graph: &TimingGraph, pin: PinId) -> bool {
 fn predecessors(netlist: &Netlist<'_>, graph: &TimingGraph, pin: PinId) -> Vec<PinId> {
     let mut prev = Vec::new();
     if netlist.is_load(pin) {
-        let net = netlist.db.pins[pin.index()].net;
+        let net = netlist.db.pins[pin].net;
         prev.extend(netlist.drivers(net).filter(|&d| d != pin));
     }
     if netlist.is_driver(pin) {
@@ -1942,7 +1940,7 @@ mod tests {
 
     fn cell_pin(db: &NetlistDB, name: &str) -> PinId {
         let (cell, _) = name.split_once('/').unwrap();
-        db.cells[db.cell_id(cell).unwrap().index()]
+        db.cells[db.cell_id(cell).unwrap()]
             .pins
             .iter()
             .copied()
@@ -1984,7 +1982,7 @@ mod tests {
         let constraints = "create_clock -name clk -period 2.2 [get_ports clk]\n\
             set_input_delay 0.44 -clock clk [get_ports in]\n\
             set_input_delay 0.44 -clock clk [get_ports boot]\n";
-        let boot = db.io_pins[db.io_pin_id("boot").unwrap().index()].pin;
+        let boot = db.io_pins[db.io_pin_id("boot").unwrap()].pin;
 
         let slack = slack_under(&db, constraints, boot, MinMax::Max);
 

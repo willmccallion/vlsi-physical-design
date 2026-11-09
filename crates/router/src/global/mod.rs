@@ -949,9 +949,9 @@ impl GlobalNet {
 /// Tracks a wire of `net` takes on each routable layer: one, or as many
 /// pitches as its non-default rule's width and spacing span.
 pub fn track_demand(db: &NetlistDB, tech: &RouteTech, net: NetId) -> Vec<Tracks> {
-    let rule = db.nets[net.index()]
+    let rule = db.nets[net]
         .non_default_rule
-        .map(|r| &db.non_default_rules[r.index()]);
+        .map(|r| &db.non_default_rules[r]);
     (tech.min_layer.index()..=tech.max_layer.index())
         .map(|l| {
             let layer = LayerId::new(l);

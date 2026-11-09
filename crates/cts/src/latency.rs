@@ -161,7 +161,7 @@ impl Balancer<'_> {
         if !self.propagates(db, pin) {
             return;
         }
-        let net = db.pins[out.index()].net;
+        let net = db.pins[out].net;
         for load in net_cell_pins(db, net) {
             if pin_direction(db, load).is_some_and(|(_, d, _)| d == PinDirection::Input) {
                 self.sink_arrivals(db, load, sum, count);
@@ -191,7 +191,7 @@ impl Balancer<'_> {
                     let Some(out) = first_output(db, cell) else {
                         continue;
                     };
-                    db.pins[out.index()].net
+                    db.pins[out].net
                 }
                 None => input_net,
             };
@@ -214,7 +214,7 @@ impl Balancer<'_> {
                     input: Some(pin),
                 });
                 self.nodes[driver].children.push(id);
-                let name = &db.cells[cell.index()].name;
+                let name = &db.cells[cell].name;
                 if let Some(&builder) = self.leaf_builders.get(name) {
                     let average = self.average_sink_arrival(db, builder);
                     self.worse_delay = self.worse_delay.max(average);
@@ -268,11 +268,11 @@ impl Balancer<'_> {
         }
         let net = self.trees.builders[self.root].top_input_net;
         net.and_then(|n| {
-            db.nets[n.index()]
+            db.nets[n]
                 .pins
                 .iter()
                 .copied()
-                .find(|&p| matches!(db.pins[p.index()].owner, PinOwner::Io(_)))
+                .find(|&p| matches!(db.pins[p].owner, PinOwner::Io(_)))
         })
         .map_or_else(DbPoint::default, |p| db.pin_position(p))
     }
@@ -349,7 +349,7 @@ impl Balancer<'_> {
         let Some(&first_load) = loads.first() else {
             return Ok(None);
         };
-        let mut driving = db.pins[first_load.index()].net;
+        let mut driving = db.pins[first_load].net;
         let center = sink_bbox_center(db, loads);
         let dx = (center.x - src.x).get() as f32 / (count + 1) as f32;
         let dy = (center.y - src.y).get() as f32 / (count + 1) as f32;
@@ -388,8 +388,8 @@ impl Balancer<'_> {
                 PlacementStatus::Placed,
             )?;
             let net = db.add_net(&net_name)?;
-            db.nets[net.index()].signal_use = db.nets[driving.index()].signal_use;
-            db.nets[net.index()].non_default_rule = db.nets[driving.index()].non_default_rule;
+            db.nets[net].signal_use = db.nets[driving].signal_use;
+            db.nets[net].non_default_rule = db.nets[driving].non_default_rule;
             let input = db.connect_cell_pin(cell, in_pin, driving);
             let _ = db.connect_cell_pin(cell, out_pin, net);
             for &load in loads {

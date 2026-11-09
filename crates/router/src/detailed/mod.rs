@@ -229,7 +229,7 @@ impl<'a> DetailedRouter<'a> {
                 let clean = |layer: LayerId, metal: &Rect<Dbu>| {
                     judge::wiring_is_clean(&fixed, &fixed_tiles, &rules, net, layer, metal)
                 };
-                db.nets[n]
+                db.nets[net]
                     .pins
                     .iter()
                     .map(|&p| {
@@ -318,7 +318,7 @@ impl<'a> DetailedRouter<'a> {
         for (n, pins) in self.access.iter().enumerate() {
             for (k, points) in pins.iter().enumerate() {
                 if points.is_empty() {
-                    let net = &self.db.nets[n];
+                    let net = &self.db.nets[NetId::new(n)];
                     log::warn!(
                         "no access to pin {} of net {}",
                         self.db.pin_name(net.pins[k]),
@@ -602,7 +602,7 @@ impl<'a> DetailedRouter<'a> {
             .nets
             .iter()
             .flatten()
-            .map(|n| self.db.nets[n.index()].name.clone())
+            .map(|&n| self.db.nets[n].name.clone())
             .collect();
         log::info!(
             "trace marker {:?} at {} between {}",
@@ -633,7 +633,7 @@ impl<'a> DetailedRouter<'a> {
     pub(crate) fn pin_terminals(&self, net: NetId, grid: &GlobalGrid) -> Option<Vec<PinTerminal>> {
         self.access[net.index()]
             .iter()
-            .zip(&self.db.nets[net.index()].pins)
+            .zip(&self.db.nets[net].pins)
             .map(|(c, &pin)| {
                 let a = c.first()?;
                 Some(PinTerminal::of(pin, a, self.tech, grid))
@@ -676,7 +676,7 @@ impl<'a> DetailedRouter<'a> {
         if let Some(guide) = &self.guides[net.index()] {
             return guide.bbox.expand(self.gcell * GUIDE_SLACK_GCELLS);
         }
-        let pins = &self.db.nets[net.index()].pins;
+        let pins = &self.db.nets[net].pins;
         pins.iter()
             .map(|&p| {
                 let at = self.db.pin_position(p);
@@ -1414,7 +1414,7 @@ fn reserve_accesses(
         let mut candidates = match &own[n][k] {
             Some(c) => c.clone(),
             None => shared
-                .candidates(db, db.nets[n].pins[k])
+                .candidates(db, db.nets[NetId::new(n)].pins[k])
                 .unwrap_or_default(),
         };
         if let Some(fellows) = &fellows[n][k] {
@@ -1447,14 +1447,14 @@ fn reserve_accesses(
             None => {
                 log::debug!(
                     "net {} pin {k}: none of {count} access points is clear, leaving the choice to routing",
-                    db.nets[n].name
+                    db.nets[NetId::new(n)].name
                 );
                 continue;
             }
         };
         log::trace!(
             "net {} pin {k}: reserved access point {chosen} of {count} at {:?}",
-            db.nets[n].name,
+            db.nets[NetId::new(n)].name,
             access[n][k][chosen].at
         );
         let picked = access[n][k].swap_remove(chosen);
@@ -1476,7 +1476,7 @@ fn fellow_boxes_of_nets(
             if pins.is_empty() {
                 return Vec::new();
             }
-            let points: Vec<Point<Dbu>> = db.nets[n]
+            let points: Vec<Point<Dbu>> = db.nets[NetId::new(n)]
                 .pins
                 .iter()
                 .map(|&p| db.pin_position(p))
@@ -1495,7 +1495,9 @@ fn reservation_order(
 ) -> Vec<(usize, usize, usize)> {
     let count_of = |n: usize, k: usize| match &own[n][k] {
         Some(c) => c.len(),
-        None => shared.count(db, db.nets[n].pins[k]).unwrap_or(0),
+        None => shared
+            .count(db, db.nets[NetId::new(n)].pins[k])
+            .unwrap_or(0),
     };
     let mut order: Vec<(usize, usize, usize)> = own
         .iter()
@@ -1613,7 +1615,7 @@ pub(crate) fn routable_nets(db: &NetlistDB) -> Vec<NetId> {
         .map(NetId::new)
         .filter(|&n| is_signal_net(db, n))
         .map(|n| {
-            let bbox = db.nets[n.index()]
+            let bbox = db.nets[n]
                 .pins
                 .iter()
                 .map(|&p| {

@@ -56,7 +56,7 @@ pub fn legalize(db: &mut NetlistDB, zones: &Zones) -> Result<(), LegalizeError> 
     let mut subrows = build_subrows(db, zones, &rows, &obstacles);
     let ranges = row_ranges(&subrows, rows.len());
     let mut order = std_cells;
-    order.sort_by_key(|&c| (db.cells[c.index()].location.x, c));
+    order.sort_by_key(|&c| (db.cells[c].location.x, c));
     for cell in order {
         place_cell(db, &rows, &ranges, &mut subrows, cell, zones.of(cell))?;
     }
@@ -88,7 +88,7 @@ fn legalize_macros(
     let die = db.die_area;
     for cell in order {
         let size = db.cell_size(cell);
-        let target = db.cells[cell.index()].location;
+        let target = db.cells[cell].location;
         let mut best: Option<(i128, Point<Dbu>)> = None;
         for r in rows_outward(rows, target.y) {
             let row = &rows[r];
@@ -115,9 +115,9 @@ fn legalize_macros(
                 }
             }
         }
-        let (_, at) = best
-            .ok_or_else(|| LegalizeError::MacroDoesNotFit(db.cells[cell.index()].name.clone()))?;
-        let c = &mut db.cells[cell.index()];
+        let (_, at) =
+            best.ok_or_else(|| LegalizeError::MacroDoesNotFit(db.cells[cell].name.clone()))?;
+        let c = &mut db.cells[cell];
         c.location = at;
         c.status = PlacementStatus::Placed;
         obstacles.push(Rect::new(at, at + size));
@@ -218,7 +218,7 @@ impl SubRow {
                 .map_or(self.cells.len(), |c| c.first);
             let mut x = cluster.x;
             for &(cell, width) in &self.cells[cluster.first..end] {
-                let c = &mut db.cells[cell.index()];
+                let c = &mut db.cells[cell];
                 c.location = Point::new(x, row.y);
                 c.orient = row.orient;
                 c.status = PlacementStatus::Placed;
@@ -284,7 +284,7 @@ fn place_cell(
     cell: CellId,
     zone: Zone,
 ) -> Result<(), LegalizeError> {
-    let target = db.cells[cell.index()].location;
+    let target = db.cells[cell].location;
     let size = db.cell_size(cell);
 
     let mut best: Option<(i128, usize)> = None;
@@ -311,8 +311,7 @@ fn place_cell(
         }
     }
 
-    let (_, s) =
-        best.ok_or_else(|| LegalizeError::CellDoesNotFit(db.cells[cell.index()].name.clone()))?;
+    let (_, s) = best.ok_or_else(|| LegalizeError::CellDoesNotFit(db.cells[cell].name.clone()))?;
     let site = rows[subrows[s].row].site;
     let width = snap_up(size.x, Dbu::ZERO, site);
     let sub = &mut subrows[s];
@@ -325,7 +324,7 @@ fn place_cell(
 mod tests {
     use super::*;
     use pare_common::db::design::{Region, RegionKind, Row};
-    use pare_common::db::indices::{RegionId, SiteId};
+    use pare_common::db::indices::SiteId;
     use pare_common::db::library::{
         CoreKind, Library, Macro, MacroClass, Site, SiteClass, Symmetry,
     };
@@ -389,29 +388,29 @@ mod tests {
     }
 
     /// Fences the left half of both rows and assigns `members` to it.
-    fn fence_left_half(db: &mut NetlistDB, members: &[usize]) {
-        db.regions.push(Region {
+    fn fence_left_half(db: &mut NetlistDB, members: &[CellId]) {
+        let fence = db.regions.push(Region {
             name: "f".into(),
             rects: vec![Rect::new(pt(0, 0), pt(50, 200))],
             kind: RegionKind::Fence,
             group_order: None,
         });
         for &m in members {
-            db.cells[m].region = Some(RegionId(0));
+            db.cells[m].region = Some(fence);
         }
     }
 
     #[test]
     fn a_fence_member_far_outside_its_fence_is_legalized_inside_it() {
         let mut db = design(&[(pt(80, 0), PlacementStatus::Placed, 20)]);
-        fence_left_half(&mut db, &[0]);
+        fence_left_half(&mut db, &[CellId(0)]);
 
         legalize_zoned(&mut db).unwrap();
 
         assert!(
-            db.cells[0].location.x <= Dbu(30),
+            db.cells[CellId(0)].location.x <= Dbu(30),
             "{:?}",
-            db.cells[0].location
+            db.cells[CellId(0)].location
         );
         assert_eq!(placement_violations(&db), []);
     }
@@ -424,9 +423,9 @@ mod tests {
         legalize_zoned(&mut db).unwrap();
 
         assert!(
-            db.cells[0].location.x >= Dbu(50),
+            db.cells[CellId(0)].location.x >= Dbu(50),
             "{:?}",
-            db.cells[0].location
+            db.cells[CellId(0)].location
         );
         assert_eq!(placement_violations(&db), []);
     }
@@ -434,7 +433,7 @@ mod tests {
     #[test]
     fn a_full_fence_is_an_error_even_with_room_outside() {
         let mut db = design(&[(pt(0, 0), PlacementStatus::Placed, 50); 5]);
-        fence_left_half(&mut db, &[0, 1, 2, 3, 4]);
+        fence_left_half(&mut db, &[0, 1, 2, 3, 4].map(CellId));
 
         assert!(matches!(
             legalize_zoned(&mut db),
@@ -461,8 +460,8 @@ mod tests {
 
         legalize_zoned(&mut db).unwrap();
 
-        assert_eq!(db.cells[0].location, pt(40, 100));
-        assert_eq!(db.cells[0].orient, Orientation::FS);
+        assert_eq!(db.cells[CellId(0)].location, pt(40, 100));
+        assert_eq!(db.cells[CellId(0)].orient, Orientation::FS);
     }
 
     #[test]
@@ -471,7 +470,7 @@ mod tests {
 
         legalize_zoned(&mut db).unwrap();
 
-        assert_eq!(db.cells[0].location, pt(30, 0));
+        assert_eq!(db.cells[CellId(0)].location, pt(30, 0));
     }
 
     #[test]
@@ -483,7 +482,7 @@ mod tests {
 
         legalize_zoned(&mut db).unwrap();
 
-        assert_eq!(db.cells[0].location, pt(40, 0));
+        assert_eq!(db.cells[CellId(0)].location, pt(40, 0));
         assert_eq!(placement_violations(&db), []);
     }
 

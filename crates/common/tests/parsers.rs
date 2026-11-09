@@ -7,7 +7,7 @@ use pare_common::db::design::{
     GCellGridDef, NetlistDB, PlacementStatus, RouteElem, TrackAxis, TrackDef,
 };
 use pare_common::db::global_route::{RoutePoint, RouteSegment};
-use pare_common::db::indices::{CellId, CutLayerId, LayerId, PinId};
+use pare_common::db::indices::{CellId, CutLayerId, LayerId, PinId, SpecialNetId};
 use pare_common::db::library::{Direction, LayerRef, Library, MacroClass, Shape};
 use pare_common::db::parser::{bookshelf, def, lef, segments};
 use pare_common::db::rules::SpacingTable;
@@ -48,11 +48,11 @@ fn cell(db: &NetlistDB, name: &str) -> CellId {
 fn cell_pin(db: &NetlistDB, cell_name: &str, pin_name: &str) -> PinId {
     let c = cell(db, cell_name);
     let m = db.cell_macro(c);
-    *db.cells[c.index()]
+    *db.cells[c]
         .pins
         .iter()
         .find(|&&p| {
-            matches!(db.pins[p.index()].owner,
+            matches!(db.pins[p].owner,
                 pare_common::db::design::PinOwner::Cell { pin, .. } if m.pin(pin).name == pin_name)
         })
         .unwrap()
@@ -103,8 +103,8 @@ fn lef_layers_carry_their_resistance_and_capacitance() {
         ),
         (Some(0.25), None, None)
     );
-    assert_eq!(lib.cut_layers[0].resistance, Some(5.0));
-    assert_eq!(lib.cut_layers[1].resistance, None);
+    assert_eq!(lib.cut_layers[CutLayerId(0)].resistance, Some(5.0));
+    assert_eq!(lib.cut_layers[CutLayerId(1)].resistance, None);
 }
 
 #[test]
@@ -154,7 +154,8 @@ fn lef_min_spacing_comes_from_plain_spacing_or_the_first_table_entry() {
 fn lef_parallel_run_spacing_tables_are_read_whole() {
     let lib = tiny_library();
 
-    let Some(SpacingTable::ParallelRunLength(table)) = lib.routing_layers[1].spacing_table.clone()
+    let Some(SpacingTable::ParallelRunLength(table)) =
+        lib.routing_layers[LayerId(1)].spacing_table.clone()
     else {
         panic!("M2 has a parallel run length table");
     };
@@ -171,7 +172,7 @@ fn lef_parallel_run_spacing_tables_are_read_whole() {
 
 #[test]
 fn spacing_grows_only_once_both_width_and_run_exceed_their_thresholds() {
-    let table = tiny_library().routing_layers[1]
+    let table = tiny_library().routing_layers[LayerId(1)]
         .spacing_table
         .clone()
         .unwrap();
@@ -265,12 +266,12 @@ fn def_viarule_vias_generate_a_cut_array_with_enclosing_metal() {
 fn def_components_keep_status_and_orientation() {
     let db = tiny_design();
 
-    let status = |n: &str| db.cells[cell(&db, n).index()].status;
+    let status = |n: &str| db.cells[cell(&db, n)].status;
     assert_eq!(status("u1"), PlacementStatus::Placed);
     assert_eq!(status("u3"), PlacementStatus::Fixed);
     assert_eq!(status("u5"), PlacementStatus::Unplaced);
     assert_eq!(status("u6"), PlacementStatus::Unplaced);
-    assert_eq!(db.cells[cell(&db, "u4").index()].orient, Orientation::FS);
+    assert_eq!(db.cells[cell(&db, "u4")].orient, Orientation::FS);
 }
 
 #[test]
@@ -286,7 +287,7 @@ fn pin_positions_follow_the_cell_orientation() {
 fn a_pin_position_at_another_location_moves_with_the_cell() {
     let db = tiny_design();
     let pin = cell_pin(&db, "u2", "A");
-    let cell = db.cells.iter().position(|c| c.name == "u2").unwrap();
+    let cell = db.cell_id("u2").unwrap();
     let moved = db.cells[cell].location + pt(400, -2000);
 
     assert_eq!(
@@ -299,7 +300,7 @@ fn a_pin_position_at_another_location_moves_with_the_cell() {
 fn io_pin_shapes_rotate_about_the_pin_location() {
     let db = tiny_design();
 
-    let pin = &db.io_pins[db.io_pin_id("in").unwrap().index()];
+    let pin = &db.io_pins[db.io_pin_id("in").unwrap()];
     let shapes: Vec<Shape> = pin.placed_shapes().collect();
     assert_eq!(shapes[0].rect, rect(1050, 5800, 1150, 6000));
     assert_eq!(db.pin_position(pin.pin), pt(1100, 5900));
@@ -309,18 +310,18 @@ fn io_pin_shapes_rotate_about_the_pin_location() {
 fn def_nets_connect_cell_and_io_pins() {
     let db = tiny_design();
 
-    let out = &db.nets[db.net_id("out").unwrap().index()];
+    let out = &db.nets[db.net_id("out").unwrap()];
     assert_eq!(out.pins.len(), 2);
-    let n3 = &db.nets[db.net_id("n3").unwrap().index()];
+    let n3 = &db.nets[db.net_id("n3").unwrap()];
     assert_eq!(n3.pins.len(), 6);
-    assert!((db.nets[db.net_id("n2").unwrap().index()].weight - 2.0).abs() < f64::EPSILON);
+    assert!((db.nets[db.net_id("n2").unwrap()].weight - 2.0).abs() < f64::EPSILON);
 }
 
 #[test]
 fn def_regular_wiring_switches_layers_at_vias() {
     let db = tiny_design();
 
-    let n3 = &db.nets[db.net_id("n3").unwrap().index()];
+    let n3 = &db.nets[db.net_id("n3").unwrap()];
     let m1m2 = db.library.via_id("M1M2").unwrap();
     let m2m3 = db.library.via_id("M2M3").unwrap();
     assert_eq!(
@@ -365,7 +366,7 @@ fn def_regular_wiring_patches_are_rectangles_offset_from_the_current_point() {
 
     let db = def::parse_str(src, Path::new("patch.def"), tiny_library()).unwrap();
 
-    let n = &db.nets[db.net_id("n").unwrap().index()];
+    let n = &db.nets[db.net_id("n").unwrap()];
     assert_eq!(
         n.routing[2],
         RouteElem::Patch {
@@ -380,7 +381,7 @@ fn def_regular_wiring_patches_are_rectangles_offset_from_the_current_point() {
 fn def_regular_wiring_patches_survive_writing_and_reading_back() {
     let mut db = tiny_design();
     let n3 = db.net_id("n3").unwrap();
-    db.nets[n3.index()].routing.push(RouteElem::Patch {
+    db.nets[n3].routing.push(RouteElem::Patch {
         layer: LayerId(2),
         rect: rect(4950, 3450, 5100, 3550),
     });
@@ -401,7 +402,7 @@ fn def_regular_wiring_patches_survive_writing_and_reading_back() {
 fn def_special_wiring_keeps_widths_shapes_and_vias() {
     let db = tiny_design();
 
-    let vdd = &db.special_nets[0];
+    let vdd = &db.special_nets[SpecialNetId(0)];
     assert_eq!(vdd.wires.len(), 2);
     assert_eq!(vdd.wires[0].rect(), rect(0, 1900, 6000, 2100));
     assert_eq!(vdd.wires[1].shape.as_deref(), Some("STRIPE"));
@@ -546,8 +547,8 @@ fn bookshelf_die_covers_rows_and_fixed_terminals() {
 fn bookshelf_pins_sit_at_their_offset_from_the_cell_center() {
     let db = tiny_bookshelf();
 
-    let a0 = &db.cells[cell(&db, "a0").index()];
-    let a1 = &db.cells[cell(&db, "a1").index()];
+    let a0 = &db.cells[cell(&db, "a0")];
+    let a1 = &db.cells[cell(&db, "a1")];
     assert_eq!(db.pin_position(a0.pins[0]), pt(350, 750));
     assert_eq!(db.pin_position(a1.pins[0]), pt(750, 3950));
 }
@@ -557,13 +558,10 @@ fn bookshelf_terminals_are_fixed_pads_and_tall_nodes_are_blocks() {
     let db = tiny_bookshelf();
 
     let class = |n: &str| db.cell_macro(cell(&db, n)).class;
-    assert_eq!(
-        db.cells[cell(&db, "p0").index()].status,
-        PlacementStatus::Fixed
-    );
+    assert_eq!(db.cells[cell(&db, "p0")].status, PlacementStatus::Fixed);
     assert_eq!(class("p0"), MacroClass::Pad);
     assert_eq!(class("a3"), MacroClass::Block);
-    assert!(db.cells[cell(&db, "a0").index()].status.is_movable());
+    assert!(db.cells[cell(&db, "a0")].status.is_movable());
 }
 
 #[test]
@@ -578,8 +576,8 @@ fn bookshelf_nets_are_named_by_index_unless_named() {
 fn bookshelf_placement_written_as_pl_reads_back() {
     let mut db = tiny_bookshelf();
     let a2 = cell(&db, "a2");
-    db.cells[a2.index()].location = pt(1250, 3200);
-    db.cells[a2.index()].orient = Orientation::FS;
+    db.cells[a2].location = pt(1250, 3200);
+    db.cells[a2].orient = Orientation::FS;
     let path = std::env::temp_dir().join(format!("pare-test-{}.pl", std::process::id()));
 
     writer::bookshelf::write_pl(&db, &path).unwrap();

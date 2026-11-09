@@ -4,7 +4,7 @@
 use crate::library::{BufferSet, Link, is_logic_std_cell};
 use crate::netlist::{ClockNetwork, Constants, Namer, Netlist};
 use pare_common::db::design::{EditError, NetlistDB, PinOwner, PlacementStatus};
-use pare_common::db::indices::{CellId, IoPinId, MacroPinId, NetId, PinId};
+use pare_common::db::indices::{CellId, IdVec, IoPinId, MacroPinId, NetId, PinId};
 use pare_common::db::liberty::{BufferCell, LibPortId};
 use pare_common::db::library::{DuplicateName, PinDirection};
 use pare_common::geom::dbu::Dbu;
@@ -35,19 +35,18 @@ pub enum BufferError {
 /// buffer and does not protect, it is not fixed, and its nets merge into
 /// one. Returns how many went.
 pub fn remove_buffers(db: &mut NetlistDB, link: &Link<'_>) -> Result<usize, BufferError> {
-    let mut removed_cells = vec![false; db.cells.len()];
-    let mut removed_nets = vec![false; db.nets.len()];
+    let mut removed_cells = IdVec::filled(false, db.cells.len());
+    let mut removed_nets = IdVec::filled(false, db.nets.len());
     let mut renames: Vec<(String, String)> = Vec::new();
     let mut count = 0;
-    for i in 0..db.cells.len() {
-        let instance = CellId::new(i);
+    for instance in db.cells.ids() {
         let Some((lib_id, lib)) = link.cell(db, instance) else {
             continue;
         };
         if !is_logic_std_cell(db, instance) || !lib.is_buffer() || lib.dont_touch {
             continue;
         }
-        if db.cells[i].status == PlacementStatus::Fixed {
+        if db.cells[instance].status == PlacementStatus::Fixed {
             continue;
         }
         let Some(ports) = link.liberty.buffer_cell(lib_id) else {
@@ -55,69 +54,70 @@ pub fn remove_buffers(db: &mut NetlistDB, link: &Link<'_>) -> Result<usize, Buff
         };
         let pin_for = |port: LibPortId| -> Option<PinId> {
             let macro_pin = link.macro_pin_of_port(ports.id, port)?;
-            db.cells[i].pins.iter().copied().find(|&p| {
-                matches!(db.pins[p.index()].owner, PinOwner::Cell { pin, .. } if pin == macro_pin)
-            })
+            db.cells[instance].pins.iter().copied().find(
+                |&p| matches!(db.pins[p].owner, PinOwner::Cell { pin, .. } if pin == macro_pin),
+            )
         };
         let Some(in_pin) = pin_for(ports.input) else {
-            log::warn!("buffer {} has no input net and stays", db.cells[i].name);
+            log::warn!(
+                "buffer {} has no input net and stays",
+                db.cells[instance].name
+            );
             continue;
         };
         let Some(out_pin) = pin_for(ports.output) else {
-            removed_cells[i] = true;
+            removed_cells[instance] = true;
             count += 1;
             continue;
         };
-        let in_net = db.pins[in_pin.index()].net;
-        let out_net = db.pins[out_pin.index()].net;
+        let in_net = db.pins[in_pin].net;
+        let out_net = db.pins[out_pin].net;
         if in_net == out_net {
-            removed_cells[i] = true;
+            removed_cells[instance] = true;
             count += 1;
             continue;
         }
         let has_port = |net: NetId| {
-            db.nets[net.index()]
+            db.nets[net]
                 .pins
                 .iter()
-                .any(|&p| matches!(db.pins[p.index()].owner, PinOwner::Io(_)))
+                .any(|&p| matches!(db.pins[p].owner, PinOwner::Io(_)))
         };
         let (survivor, removed) = if !has_port(in_net) && has_port(out_net) {
             (out_net, in_net)
         } else {
             (in_net, out_net)
         };
-        let survivor_name = db.nets[survivor.index()].name.clone();
-        let removed_name = db.nets[removed.index()].name.clone();
+        let survivor_name = db.nets[survivor].name.clone();
+        let removed_name = db.nets[removed].name.clone();
         if hierarchy_depth(&survivor_name) > hierarchy_depth(&removed_name) {
             renames.push((survivor_name, removed_name));
         }
-        let moving: Vec<PinId> = db.nets[removed.index()]
+        let moving: Vec<PinId> = db.nets[removed]
             .pins
             .iter()
             .copied()
-            .filter(|&p| match db.pins[p.index()].owner {
-                PinOwner::Cell { cell, .. } => cell != instance && !removed_cells[cell.index()],
+            .filter(|&p| match db.pins[p].owner {
+                PinOwner::Cell { cell, .. } => cell != instance && !removed_cells[cell],
                 PinOwner::Io(_) => true,
             })
             .collect();
         for pin in moving {
             db.move_pin(pin, survivor);
         }
-        removed_cells[i] = true;
-        removed_nets[removed.index()] = true;
+        removed_cells[instance] = true;
+        removed_nets[removed] = true;
         count += 1;
     }
     let cells: Vec<CellId> = removed_cells
-        .iter()
-        .enumerate()
-        .filter(|(_, r)| **r)
-        .map(|(i, _)| CellId::new(i))
+        .iter_enumerated()
+        .filter(|&(_, &removed)| removed)
+        .map(|(id, _)| id)
         .collect();
     let nets: Vec<NetId> = removed_nets
-        .iter()
-        .enumerate()
-        .filter(|(_, r)| **r)
-        .map(|(i, _)| NetId::new(i))
+        .iter_enumerated()
+        .filter(|&(_, &removed)| removed)
+        .map(|(id, _)| id)
         .collect();
     let _ = db.remove(&cells, &nets)?;
     for (survivor, name) in renames {
@@ -161,10 +161,9 @@ pub fn buffer_ports(
 ) -> Result<PortBuffers, BufferError> {
     let buffer = buffers.lowest_drive;
     let mut done = PortBuffers::default();
-    for i in 0..db.io_pins.len() {
-        let io = IoPinId::new(i);
+    for io in db.io_pins.ids() {
         let (pin, direction, net) = {
-            let p = &db.io_pins[i];
+            let p = &db.io_pins[io];
             (p.pin, p.direction, p.net)
         };
         let netlist = Netlist::new(db, link);
@@ -202,11 +201,11 @@ pub fn buffer_ports(
 /// that is protected, as `OpenROAD`'s `bufferInput` requires.
 fn input_wants_buffer(netlist: &Netlist<'_>, port_pin: PinId, net: NetId) -> bool {
     let mut has_non_buffer = false;
-    for pin in &netlist.db.nets[net.index()].pins {
+    for pin in &netlist.db.nets[net].pins {
         if *pin == port_pin {
             continue;
         }
-        let PinOwner::Cell { cell, .. } = netlist.db.pins[pin.index()].owner else {
+        let PinOwner::Cell { cell, .. } = netlist.db.pins[*pin].owner else {
             continue;
         };
         match netlist.link.cell(netlist.db, cell) {
@@ -214,7 +213,7 @@ fn input_wants_buffer(netlist: &Netlist<'_>, port_pin: PinId, net: NetId) -> boo
                 log::warn!(
                     "input {} can't be buffered due to protected fanout {}",
                     netlist.db.pin_name(port_pin),
-                    netlist.db.cells[cell.index()].name
+                    netlist.db.cells[cell].name
                 );
                 return false;
             }
@@ -235,7 +234,7 @@ fn has_tristate_or_protected_driver(netlist: &Netlist<'_>, net: NetId) -> bool {
         {
             return true;
         }
-        match netlist.db.pins[pin.index()].owner {
+        match netlist.db.pins[pin].owner {
             PinOwner::Cell { cell, .. } => netlist
                 .link
                 .cell(netlist.db, cell)
@@ -283,9 +282,9 @@ fn make_buffer(
 /// names it, the port's old net taking a generated name if it had the
 /// port's.
 fn port_net(db: &mut NetlistDB, io: IoPinId, namer: &mut Namer) -> Result<NetId, BufferError> {
-    let port_name = db.io_pins[io.index()].name.clone();
-    let old = db.io_pins[io.index()].net;
-    if db.nets[old.index()].name == port_name {
+    let port_name = db.io_pins[io].name.clone();
+    let old = db.io_pins[io].net;
+    if db.nets[old].name == port_name {
         let fresh = namer.net(db, "net");
         db.rename_net(old, fresh)?;
     }
@@ -302,8 +301,8 @@ fn insert_after_driver(
     io: IoPinId,
     namer: &mut Namer,
 ) -> Result<(), BufferError> {
-    let port_pin = db.io_pins[io.index()].pin;
-    let old = db.io_pins[io.index()].net;
+    let port_pin = db.io_pins[io].pin;
+    let old = db.io_pins[io].net;
     let at = db.pin_position(port_pin);
     let new = make_buffer(db, link, buffer, at, "input", namer)?;
     let fresh = port_net(db, io, namer)?;
@@ -322,8 +321,8 @@ fn insert_before_load(
     io: IoPinId,
     namer: &mut Namer,
 ) -> Result<(), BufferError> {
-    let port_pin = db.io_pins[io.index()].pin;
-    let old = db.io_pins[io.index()].net;
+    let port_pin = db.io_pins[io].pin;
+    let old = db.io_pins[io].net;
     let at = db.pin_position(port_pin);
     let new = make_buffer(db, link, buffer, at, "output", namer)?;
     let fresh = port_net(db, io, namer)?;

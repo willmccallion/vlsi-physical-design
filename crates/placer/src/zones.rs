@@ -56,7 +56,7 @@ impl Zones {
             .cells
             .iter()
             .map(|c| match c.region {
-                Some(r) if db.regions[r.index()].kind == RegionKind::Fence => Zone::Fence(r),
+                Some(r) if db.regions[r].kind == RegionKind::Fence => Zone::Fence(r),
                 _ => Zone::Outside,
             })
             .collect();

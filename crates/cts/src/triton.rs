@@ -14,7 +14,7 @@ use crate::techchar::{CharSetup, TechChar};
 use pare_common::db::design::{
     NetlistDB, NonDefaultLayer, NonDefaultRule, PinOwner, PlacementStatus,
 };
-use pare_common::db::indices::{CellId, LayerId, MacroPinId, NetId, NonDefaultRuleId, PinId};
+use pare_common::db::indices::{CellId, MacroPinId, NetId, NonDefaultRuleId, PinId};
 use pare_common::db::liberty::{BufferCell, Edge, LibCellId, LibPortId, Liberty, MinMax};
 use pare_common::db::library::{MacroClass, PinDirection, SignalUse};
 use pare_common::db::sdc::Sdc;
@@ -219,12 +219,12 @@ fn pin_position(db: &NetlistDB, pin: PinId) -> DbPoint<Dbu> {
 /// The cell pins of a net in the order `OpenDB` lists them after reading
 /// it from DEF, the last connected first.
 pub(crate) fn net_cell_pins(db: &NetlistDB, net: NetId) -> Vec<PinId> {
-    db.nets[net.index()]
+    db.nets[net]
         .pins
         .iter()
         .rev()
         .copied()
-        .filter(|&p| matches!(db.pins[p.index()].owner, PinOwner::Cell { .. }))
+        .filter(|&p| matches!(db.pins[p].owner, PinOwner::Cell { .. }))
         .collect()
 }
 
@@ -232,7 +232,7 @@ pub(crate) fn pin_direction(
     db: &NetlistDB,
     pin: PinId,
 ) -> Option<(CellId, PinDirection, SignalUse)> {
-    let PinOwner::Cell { cell, pin: mp } = db.pins[pin.index()].owner else {
+    let PinOwner::Cell { cell, pin: mp } = db.pins[pin].owner else {
         return None;
     };
     let p = db.cell_macro(cell).pin(mp);
@@ -245,7 +245,7 @@ pub(crate) fn is_input_signal(db: &NetlistDB, pin: PinId) -> bool {
 }
 
 fn is_placed(db: &NetlistDB, cell: CellId) -> bool {
-    db.cells[cell.index()].status != PlacementStatus::Unplaced
+    db.cells[cell].status != PlacementStatus::Unplaced
 }
 
 pub(crate) fn is_block(db: &NetlistDB, cell: CellId) -> bool {
@@ -254,14 +254,14 @@ pub(crate) fn is_block(db: &NetlistDB, cell: CellId) -> bool {
 
 /// The first signal output pin connected on an instance.
 pub(crate) fn first_output(db: &NetlistDB, cell: CellId) -> Option<PinId> {
-    db.cells[cell.index()].pins.iter().copied().find(|&p| {
+    db.cells[cell].pins.iter().copied().find(|&p| {
         pin_direction(db, p).is_some_and(|(_, d, u)| d == PinDirection::Output && !u.is_supply())
     })
 }
 
 /// The first signal input pin connected on an instance.
 pub(crate) fn first_input(db: &NetlistDB, cell: CellId) -> Option<PinId> {
-    db.cells[cell.index()]
+    db.cells[cell]
         .pins
         .iter()
         .copied()
@@ -314,10 +314,10 @@ impl Cts<'_> {
     /// The output of a clock-network cell other than `input` whose net
     /// carries the clock on, as `TritonCTS::getSingleOutput`.
     fn single_output(&self, db: &NetlistDB, cell: CellId, input: PinId) -> Option<PinId> {
-        db.cells[cell.index()].pins.iter().copied().find(|&p| {
+        db.cells[cell].pins.iter().copied().find(|&p| {
             p != input
                 && pin_direction(db, p).is_some_and(|(_, d, _)| d == PinDirection::Output)
-                && self.clock_nets.contains(&db.pins[p.index()].net)
+                && self.clock_nets.contains(&db.pins[p].net)
         })
     }
 
@@ -332,11 +332,7 @@ impl Cts<'_> {
         let mut clock_roots: Vec<(Vec<NetId>, String)> = Vec::new();
         let mut seen = FxHashSet::default();
         for clock in &sdc.clocks {
-            let mut nets: Vec<NetId> = clock
-                .sources
-                .iter()
-                .map(|io| db.io_pins[io.index()].net)
-                .collect();
+            let mut nets: Vec<NetId> = clock.sources.iter().map(|&io| db.io_pins[io].net).collect();
             nets.sort_unstable();
             nets.dedup();
             for net in &nets {
@@ -388,7 +384,7 @@ impl Cts<'_> {
             let Some(output) = self.single_output(db, cell, pin) else {
                 continue;
             };
-            let out_net = db.pins[output.index()].net;
+            let out_net = db.pins[output].net;
             if self.visited.contains(&out_net) {
                 continue;
             }
@@ -455,9 +451,9 @@ impl Cts<'_> {
         sdc_name: &str,
         parent: Option<usize>,
     ) -> Result<Option<usize>, CtsError> {
-        let net_name = db.nets[net.index()].name.clone();
+        let net_name = db.nets[net].name.clone();
         let mut clock = Clock::new(net, &net_name, sdc_name);
-        clock.driver_pin = db.nets[net.index()]
+        clock.driver_pin = db.nets[net]
             .pins
             .iter()
             .copied()
@@ -478,7 +474,7 @@ impl Cts<'_> {
                 .is_some_and(|(_, lib)| lib.is_inverter())
             {
                 let inverted = first_output(db, cell).and_then(|out| {
-                    let out_net = db.pins[out.index()].net;
+                    let out_net = db.pins[out].net;
                     net_cell_pins(db, out_net)
                         .into_iter()
                         .rev()
@@ -521,8 +517,7 @@ impl Cts<'_> {
         self.builders[first].tree_type = TreeType::Macro;
         let (regs_net, top_buffer) =
             self.fork_register_network(db, net, &net_name, sdc_name, &register_sinks)?;
-        let mut regs_clock =
-            Clock::new(regs_net, &db.nets[regs_net.index()].name.clone(), sdc_name);
+        let mut regs_clock = Clock::new(regs_net, &db.nets[regs_net].name.clone(), sdc_name);
         for &pin in &register_sinks {
             regs_clock.add_sink(self.sink(db, pin));
         }
@@ -547,13 +542,13 @@ impl Cts<'_> {
     ) -> Result<(NetId, String), CtsError> {
         let regs_name = format!("{net_name}_regs");
         let regs = db.add_net(&regs_name)?;
-        db.nets[regs.index()].signal_use = SignalUse::Clock;
+        db.nets[regs].signal_use = SignalUse::Clock;
         for &pin in sinks {
             db.move_pin(pin, regs);
         }
         let name = format!("clkbuf_regs_{}_{sdc_name}", self.reg_tree_index);
         self.reg_tree_index += 1;
-        let center = sink_bbox_center(db, &db.nets[regs.index()].pins.clone());
+        let center = sink_bbox_center(db, &db.nets[regs].pins.clone());
         let cell = self.make_buffer(db, self.setup.buffers.root, &name, center)?;
         let _ = self.connect_buffer(db, cell, self.setup.buffers.root, Some(net), Some(regs))?;
         Ok((regs, name))
@@ -644,7 +639,7 @@ impl Cts<'_> {
             if lib.is_inverter() || lib.is_buffer() {
                 continue;
             }
-            let out_net = db.pins[output.index()].net;
+            let out_net = db.pins[output].net;
             self.clone_clock_gaters(db, out_net, occupied)?;
         }
         let Some(driver) = driver else {
@@ -653,7 +648,7 @@ impl Cts<'_> {
         let Some((gate, _, _)) = pin_direction(db, driver) else {
             return Ok(());
         };
-        let gate_cell = &db.cells[gate.index()];
+        let gate_cell = &db.cells[gate];
         if self.is_sink(db, driver)
             || gate_cell.status == PlacementStatus::Fixed
             || db.cell_macro(gate).class == MacroClass::Pad
@@ -709,8 +704,8 @@ impl Cts<'_> {
             .filter(|(_, sinks)| !sinks.is_empty())
             .min_by_key(|(_, sinks)| sink_bbox_center(db, sinks).manhattan(driver_at))
             .map(|(n, _)| n);
-        let gate_name = db.cells[gate.index()].name.clone();
-        let net_name = db.nets[net.index()].name.clone();
+        let gate_name = db.cells[gate].name.clone();
+        let net_name = db.nets[net].name.clone();
         let mut clones = 0;
         for (n, cluster) in clusters.iter().enumerate() {
             if cluster.is_empty() {
@@ -722,10 +717,10 @@ impl Cts<'_> {
             } else {
                 clones += 1;
                 let clone_net = db.add_net(&format!("clonenet_{clones}_{net_name}"))?;
-                db.nets[clone_net.index()].signal_use = SignalUse::Clock;
+                db.nets[clone_net].signal_use = SignalUse::Clock;
                 let _ = self.clock_nets.insert(clone_net);
-                let master = db.cells[gate.index()].macro_id;
-                let at = db.cells[gate.index()].location;
+                let master = db.cells[gate].macro_id;
+                let at = db.cells[gate].location;
                 let cell = db.add_cell(
                     format!("clone_{clones}_{gate_name}"),
                     master,
@@ -733,16 +728,16 @@ impl Cts<'_> {
                     Orientation::N,
                     PlacementStatus::Placed,
                 )?;
-                let connections: Vec<(MacroPinId, NetId)> = db.cells[gate.index()]
+                let connections: Vec<(MacroPinId, NetId)> = db.cells[gate]
                     .pins
                     .iter()
                     .filter(|&&p| p == driver || is_input_signal(db, p))
-                    .filter_map(|&p| match db.pins[p.index()].owner {
+                    .filter_map(|&p| match db.pins[p].owner {
                         PinOwner::Cell { pin, .. } => {
                             let target = if p == driver {
                                 clone_net
                             } else {
-                                db.pins[p.index()].net
+                                db.pins[p].net
                             };
                             Some((pin, target))
                         }
@@ -764,7 +759,7 @@ impl Cts<'_> {
                 at.x += Dbu(1);
             }
             let _ = occupied.insert(at);
-            let cell = &mut db.cells[clone.index()];
+            let cell = &mut db.cells[clone];
             cell.location = at;
             cell.status = PlacementStatus::Placed;
         }
@@ -837,13 +832,13 @@ impl Cts<'_> {
         self.summary.buffers += buffers.len();
         let clock_name = self.builders[index].clock.net_name.clone();
         let root_cell = db.cell_id(&format!("clkbuf_0_{clock_name}"));
-        db.nets[top_net.index()].signal_use = SignalUse::Clock;
+        db.nets[top_net].signal_use = SignalUse::Clock;
         let subnet_count = self.builders[index].clock.subnets.len();
         let mut nets = Vec::with_capacity(subnet_count);
         for s in 0..subnet_count {
             let name = self.builders[index].clock.subnets[s].name.clone();
             let net = db.add_net(&name)?;
-            db.nets[net.index()].signal_use = SignalUse::Clock;
+            db.nets[net].signal_use = SignalUse::Clock;
             self.builders[index].clock.subnets[s].net = Some(net);
             nets.push(net);
         }
@@ -919,8 +914,8 @@ impl Cts<'_> {
                 applied.push(net);
             }
         }
-        for net in &applied {
-            db.nets[net.index()].non_default_rule = Some(rule);
+        for &net in &applied {
+            db.nets[net].non_default_rule = Some(rule);
         }
         self.summary.ndr_nets += applied.len();
     }
@@ -1274,10 +1269,9 @@ fn add_clock_ndr(db: &mut NetlistDB) -> NonDefaultRuleId {
     let layers = db
         .library
         .routing_layers
-        .iter()
-        .enumerate()
-        .map(|(i, layer)| NonDefaultLayer {
-            layer: LayerId::new(i),
+        .iter_enumerated()
+        .map(|(id, layer)| NonDefaultLayer {
+            layer: id,
             width: layer.width,
             spacing: Some(net_spacing(layer, layer.width) * 2),
             wire_extension: None,
@@ -1290,8 +1284,7 @@ fn add_clock_ndr(db: &mut NetlistDB) -> NonDefaultRuleId {
         vias: Vec::new(),
         via_rules: Vec::new(),
         min_cuts: Vec::new(),
-    });
-    NonDefaultRuleId::new(db.non_default_rules.len() - 1)
+    })
 }
 
 /// The spacing two wires `width` wide need, as `TritonCTS::getNetSpacing`.

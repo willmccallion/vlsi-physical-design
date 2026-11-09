@@ -31,7 +31,7 @@ fn tiny_with(places: &[(i64, i64)]) -> NetlistDB {
     let mut db = def::parse(&fixture("tiny.def"), library).unwrap();
     for (name, &(x, y)) in MOVABLE.iter().zip(places) {
         let id = db.cell_id(name).unwrap();
-        let c = &mut db.cells[id.index()];
+        let c = &mut db.cells[id];
         c.location = Point::new(Dbu(x), Dbu(y));
         c.orient = Orientation::N;
         c.status = PlacementStatus::Placed;
@@ -43,7 +43,7 @@ fn places(db: &NetlistDB) -> Vec<(i64, i64, Orientation)> {
     MOVABLE
         .iter()
         .map(|name| {
-            let c = &db.cells[db.cell_id(name).unwrap().index()];
+            let c = &db.cells[db.cell_id(name).unwrap()];
             (c.location.x.get(), c.location.y.get(), c.orient)
         })
         .collect()
@@ -117,7 +117,7 @@ fn cells_past_the_core_come_back_inside() {
 #[test]
 fn a_design_too_full_for_its_rows_fails_naming_the_cells_left_out() {
     let mut db = tiny_with(&[(1000, 1000); 6]);
-    let inv = db.cells[db.cell_id("u1").unwrap().index()].macro_id;
+    let inv = db.cells[db.cell_id("u1").unwrap()].macro_id;
     for i in 0..30 {
         let _ = db
             .add_cell(

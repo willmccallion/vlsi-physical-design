@@ -29,12 +29,7 @@ fn kind_of(db: &NetlistDB, cell: &str) -> CellKind {
 }
 
 fn set_inv_height(db: &mut NetlistDB, height: Dbu) {
-    let inv = db
-        .library
-        .macros
-        .iter()
-        .position(|m| m.name == "INV")
-        .unwrap();
+    let inv = db.library.macro_id("INV").unwrap();
     db.library.macros[inv].size.y = height;
 }
 

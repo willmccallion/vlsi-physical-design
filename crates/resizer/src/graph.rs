@@ -232,7 +232,7 @@ impl TimingGraph {
         driver: PinId,
         edge: Edge,
     ) -> Option<PiElmore> {
-        let net = netlist.db.pins[driver.index()].net;
+        let net = netlist.db.pins[driver].net;
         self.parasitics[net.index()].as_ref().and_then(|p| {
             p.pi_elmore(netlist, driver, edge, &|pin, e| {
                 pin_capacitance(netlist, pin, e)
@@ -253,7 +253,7 @@ impl TimingGraph {
     fn load_cap_for(&self, netlist: &Netlist<'_>, driver: PinId, edge: Edge) -> Farads {
         self.pi_elmore(netlist, driver, edge).map_or_else(
             || {
-                let net = netlist.db.pins[driver.index()].net;
+                let net = netlist.db.pins[driver].net;
                 netlist
                     .loads(net)
                     .map(|p| pin_capacitance(netlist, p, edge))
@@ -359,7 +359,7 @@ impl TimingGraph {
                 .max()
                 .or_else(|| {
                     if netlist.is_load(pin) {
-                        let net = db.pins[pin.index()].net;
+                        let net = db.pins[pin].net;
                         netlist
                             .drivers(net)
                             .filter(|d| d.index() < self.level.len())
@@ -383,10 +383,10 @@ impl TimingGraph {
     /// arc passes through a latch.
     fn successor_drivers(&self, netlist: &Netlist<'_>, load: PinId) -> Vec<(PinId, bool)> {
         let db = netlist.db;
-        let PinOwner::Cell { cell, .. } = db.pins[load.index()].owner else {
+        let PinOwner::Cell { cell, .. } = db.pins[load].owner else {
             return Vec::new();
         };
-        db.cells[cell.index()]
+        db.cells[cell]
             .pins
             .iter()
             .copied()
@@ -400,10 +400,10 @@ impl TimingGraph {
 
     pub(crate) fn drivers_fed_by(&self, netlist: &Netlist<'_>, load: PinId) -> Vec<PinId> {
         let db = netlist.db;
-        let PinOwner::Cell { cell, .. } = db.pins[load.index()].owner else {
+        let PinOwner::Cell { cell, .. } = db.pins[load].owner else {
             return Vec::new();
         };
-        db.cells[cell.index()]
+        db.cells[cell]
             .pins
             .iter()
             .copied()
@@ -432,7 +432,7 @@ impl TimingGraph {
             if self.slew[driver.index()] != before {
                 changed.push(driver);
             }
-            let net = netlist.db.pins[driver.index()].net;
+            let net = netlist.db.pins[driver].net;
             for load in netlist.loads(net).filter(|&p| p != driver) {
                 if self.annotated[load.index()].is_some() {
                     continue;
@@ -505,7 +505,7 @@ impl TimingGraph {
         clocks: &ClockNetwork,
         driver: PinId,
     ) -> Vec<PinId> {
-        let net = netlist.db.pins[driver.index()].net;
+        let net = netlist.db.pins[driver].net;
         let loads: Vec<PinId> = netlist.loads(net).filter(|&p| p != driver).collect();
         let found = self.driver_delays(netlist, clocks, driver, &loads);
         let root = EdgeValues::both(ROOT_SLEW);
@@ -562,7 +562,7 @@ impl TimingGraph {
             arc_delays: Vec::new(),
             any_arc: false,
         };
-        let PinOwner::Cell { cell, .. } = db.pins[driver.index()].owner else {
+        let PinOwner::Cell { cell, .. } = db.pins[driver].owner else {
             return found;
         };
         let Some((_, lib)) = netlist.link.cell(db, cell) else {
@@ -722,11 +722,11 @@ fn estimate_net(
 /// their LEF class.
 fn is_non_leaf_clock(netlist: &Netlist<'_>, net: NetId) -> bool {
     let db = netlist.db;
-    if db.nets[net.index()].signal_use != SignalUse::Clock {
+    if db.nets[net].signal_use != SignalUse::Clock {
         return false;
     }
-    !db.nets[net.index()].pins.iter().any(|&pin| {
-        let PinOwner::Cell { cell, .. } = db.pins[pin.index()].owner else {
+    !db.nets[net].pins.iter().any(|&pin| {
+        let PinOwner::Cell { cell, .. } = db.pins[pin].owner else {
             return false;
         };
         let Some((lib, port)) = netlist.link.pin_port(db, pin) else {
@@ -754,7 +754,7 @@ fn in_arcs_of(
     enabled: &dyn Fn(CellId, LibPortId, LibPortId) -> bool,
 ) -> Vec<InArc> {
     let db = netlist.db;
-    let PinOwner::Cell { cell, .. } = db.pins[pin.index()].owner else {
+    let PinOwner::Cell { cell, .. } = db.pins[pin].owner else {
         return Vec::new();
     };
     if !netlist.is_driver(pin) {
@@ -803,7 +803,7 @@ fn levelize(
     for pin in 0..n {
         let id = PinId::new(pin);
         if netlist.is_driver(id) {
-            let net = db.pins[pin].net;
+            let net = db.pins[id].net;
             for load in netlist.loads(net) {
                 if load != id {
                     successors[pin].push(load.index());

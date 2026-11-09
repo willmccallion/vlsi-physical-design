@@ -307,7 +307,7 @@ impl<'a> Resizer<'a, Sta> {
         let netlist = self.netlist();
         let mut slack_of: HashMap<NetId, Slack> = HashMap::new();
         for driver in self.graph.drivers_by_level(&netlist).into_iter().rev() {
-            let net = self.db.pins[driver.index()].net;
+            let net = self.db.pins[driver].net;
             if netlist.is_special(net)
                 || self.constants.is_constant(driver)
                 || self.clocks.is_clock(driver)
@@ -426,9 +426,9 @@ impl<'a, T: Timing> Resizer<'a, T> {
         let Some(routes) = &self.routes else {
             return;
         };
-        let from = self.db.cells[cell.index()].location;
+        let from = self.db.cells[cell].location;
         (routes.legalize)(self.db, cell);
-        if self.db.cells[cell.index()].location != from {
+        if self.db.cells[cell].location != from {
             self.record(Edit::Moved { cell, from });
         }
     }
@@ -514,7 +514,7 @@ impl<'a, T: Timing> Resizer<'a, T> {
             .dead_nets
             .iter()
             .copied()
-            .filter(|&n| self.db.nets[n.index()].pins.is_empty())
+            .filter(|&n| self.db.nets[n].pins.is_empty())
             .collect();
         Ok(self.db.remove(&[], &dead)?)
     }
@@ -619,7 +619,7 @@ impl<'a, T: Timing> Resizer<'a, T> {
     #[must_use]
     pub fn fanout(&self, driver: PinId) -> usize {
         let netlist = self.netlist();
-        let net = self.db.pins[driver.index()].net;
+        let net = self.db.pins[driver].net;
         netlist.loads(net).filter(|&l| l != driver).count()
     }
 
@@ -645,7 +645,7 @@ impl<'a, T: Timing> Resizer<'a, T> {
     /// driven by a tristate, not a supply.
     #[must_use]
     pub(crate) fn ok_to_buffer_net(&self, driver: PinId) -> bool {
-        let net = self.db.pins[driver.index()].net;
+        let net = self.db.pins[driver].net;
         !self.is_tristate_driver(driver) && !self.netlist().is_special(net)
     }
 
@@ -653,7 +653,7 @@ impl<'a, T: Timing> Resizer<'a, T> {
     #[must_use]
     pub(crate) fn input_slews(&self, cell: CellId) -> PortSlews<'_> {
         let netlist = self.netlist();
-        self.db.cells[cell.index()]
+        self.db.cells[cell]
             .pins
             .iter()
             .filter_map(|&pin| {
@@ -726,32 +726,32 @@ impl<'a, T: Timing> Resizer<'a, T> {
                 Edit::Master { cell, old } => {
                     self.db.replace_master(cell, old)?;
                     let _ = cells.insert(cell);
-                    for &pin in &self.db.cells[cell.index()].pins {
-                        let _ = nets.insert(self.db.pins[pin.index()].net);
+                    for &pin in &self.db.cells[cell].pins {
+                        let _ = nets.insert(self.db.pins[pin].net);
                     }
                 }
                 Edit::Moved { cell, from } => {
-                    self.db.cells[cell.index()].location = from;
-                    for &pin in &self.db.cells[cell.index()].pins {
-                        let _ = nets.insert(self.db.pins[pin.index()].net);
+                    self.db.cells[cell].location = from;
+                    for &pin in &self.db.cells[cell].pins {
+                        let _ = nets.insert(self.db.pins[pin].net);
                     }
                 }
                 Edit::MovedPin { pin, from } => {
-                    let _ = nets.insert(self.db.pins[pin.index()].net);
+                    let _ = nets.insert(self.db.pins[pin].net);
                     let _ = nets.insert(from);
                     self.db.move_pin(pin, from);
                 }
                 Edit::NewCell(cell) => {
-                    for &pin in &self.db.cells[cell.index()].pins {
-                        let _ = nets.insert(self.db.pins[pin.index()].net);
+                    for &pin in &self.db.cells[cell].pins {
+                        let _ = nets.insert(self.db.pins[pin].net);
                     }
                     self.db.retire_cell(cell);
                 }
                 Edit::NewNet(net) => self.dead_nets.push(net),
                 Edit::Retired(cell) => {
                     self.db.unretire_cell(cell);
-                    for &pin in &self.db.cells[cell.index()].pins {
-                        let _ = nets.insert(self.db.pins[pin.index()].net);
+                    for &pin in &self.db.cells[cell].pins {
+                        let _ = nets.insert(self.db.pins[pin].net);
                     }
                 }
                 Edit::Renamed { net, old } => self.db.rename_net(net, old)?,
@@ -771,9 +771,9 @@ impl<'a, T: Timing> Resizer<'a, T> {
                 dirty.extend(netlist.drivers(net));
             }
             for cell in cells {
-                for &pin in &self.db.cells[cell.index()].pins {
+                for &pin in &self.db.cells[cell].pins {
                     if netlist.is_load(pin) {
-                        dirty.extend(netlist.drivers(self.db.pins[pin.index()].net));
+                        dirty.extend(netlist.drivers(self.db.pins[pin].net));
                     }
                     if netlist.is_driver(pin) {
                         dirty.push(pin);
@@ -804,7 +804,7 @@ impl<'a, T: Timing> Resizer<'a, T> {
                     drivers.push(pin);
                 }
                 if netlist.is_load(pin) {
-                    drivers.extend(netlist.drivers(self.db.pins[pin.index()].net));
+                    drivers.extend(netlist.drivers(self.db.pins[pin].net));
                 }
             }
         }
@@ -842,8 +842,8 @@ impl<'a, T: Timing> Resizer<'a, T> {
             let netlist = Netlist::new(self.db, self.link);
             let mut nets = Vec::new();
             let mut drivers = Vec::new();
-            for &pin in &self.db.cells[cell.index()].pins {
-                let net = self.db.pins[pin.index()].net;
+            for &pin in &self.db.cells[cell].pins {
+                let net = self.db.pins[pin].net;
                 if netlist.is_load(pin) || netlist.is_driver(pin) {
                     nets.push(net);
                 }
@@ -873,7 +873,7 @@ impl<'a, T: Timing> Resizer<'a, T> {
             .link
             .macro_of(size)
             .ok_or_else(|| RepairError::NoMaster(self.link.liberty.cell(size).name.clone()))?;
-        let old = self.db.cells[cell.index()].macro_id;
+        let old = self.db.cells[cell].macro_id;
         if old == master {
             return Ok(false);
         }
@@ -886,7 +886,7 @@ impl<'a, T: Timing> Resizer<'a, T> {
 
     /// Moves a pin to another net, recording it.
     pub fn move_pin(&mut self, pin: PinId, to: NetId) {
-        let from = self.db.pins[pin.index()].net;
+        let from = self.db.pins[pin].net;
         if from == to {
             return;
         }
@@ -921,7 +921,7 @@ impl<'a, T: Timing> Resizer<'a, T> {
     pub(crate) fn make_net(&mut self, base: &str, like: NetId) -> Result<NetId, RepairError> {
         let name = self.namer.net(self.db, base);
         let net = self.db.add_net(&name)?;
-        self.db.nets[net.index()].signal_use = self.db.nets[like.index()].signal_use;
+        self.db.nets[net].signal_use = self.db.nets[like].signal_use;
         self.record(Edit::NewNet(net));
         Ok(net)
     }
@@ -987,23 +987,23 @@ impl<'a, T: Timing> Resizer<'a, T> {
     pub(crate) fn remove_buffer(&mut self, buffer: CellId) -> Result<NetId, RepairError> {
         let (in_pin, out_pin) = self
             .buffer_pins(buffer)
-            .ok_or_else(|| RepairError::MissingPins(self.db.cells[buffer.index()].name.clone()))?;
-        let in_net = self.db.pins[in_pin.index()].net;
-        let out_net = self.db.pins[out_pin.index()].net;
+            .ok_or_else(|| RepairError::MissingPins(self.db.cells[buffer].name.clone()))?;
+        let in_net = self.db.pins[in_pin].net;
+        let out_net = self.db.pins[out_pin].net;
         let netlist = self.netlist();
         let (survivor, removed) = if !netlist.has_port(in_net) && netlist.has_port(out_net) {
             (out_net, in_net)
         } else {
             (in_net, out_net)
         };
-        let moving: Vec<PinId> = self.db.nets[removed.index()]
+        let moving: Vec<PinId> = self.db.nets[removed]
             .pins
             .iter()
             .copied()
             .filter(|&p| p != in_pin && p != out_pin)
             .collect();
-        let survivor_name = self.db.nets[survivor.index()].name.clone();
-        let removed_name = self.db.nets[removed.index()].name.clone();
+        let survivor_name = self.db.nets[survivor].name.clone();
+        let removed_name = self.db.nets[removed].name.clone();
         self.db.retire_cell(buffer);
         self.record(Edit::Retired(buffer));
         for pin in moving {
@@ -1054,7 +1054,7 @@ impl<'a, T: Timing> Resizer<'a, T> {
     /// the cell changed.
     pub(crate) fn resize_to_target_slew(&mut self, driver: PinId) -> Result<bool, RepairError> {
         let (cell, lib_id, load_cap, revisiting) = {
-            let PinOwner::Cell { cell, .. } = self.db.pins[driver.index()].owner else {
+            let PinOwner::Cell { cell, .. } = self.db.pins[driver].owner else {
                 return Ok(false);
             };
             let Some((lib_id, lib)) = self.link.cell(self.db, cell) else {
@@ -1132,7 +1132,7 @@ impl<'a, T: Timing> Resizer<'a, T> {
             return true;
         };
         let new_lib = self.link.liberty.cell(replacement);
-        for &pin in &self.db.cells[cell.index()].pins {
+        for &pin in &self.db.cells[cell].pins {
             let Some(port) = netlist.lib_port(pin) else {
                 continue;
             };
@@ -1149,7 +1149,7 @@ impl<'a, T: Timing> Resizer<'a, T> {
             if delta <= Farads::ZERO {
                 continue;
             }
-            let net = self.db.pins[pin.index()].net;
+            let net = self.db.pins[pin].net;
             for driver in netlist.drivers(net) {
                 if !self.cap_ok(driver, delta) {
                     return false;
@@ -1541,7 +1541,7 @@ mod tests {
     fn a_buffer_put_before_a_chain_leaves_every_pin_on_the_path_its_slack() {
         let mut db = buffered_pair();
         let (b1_in, end) = (pin(&db, "b1/A"), pin(&db, "f2/D"));
-        let q = db.pins[b1_in.index()].net;
+        let q = db.pins[b1_in].net;
         let clock = "create_clock -name clk -period 1.0 [get_ports clk]\n";
 
         with_timed_session(&mut db, &cells(&clock_cells_source()), clock, |resizer| {
@@ -1561,10 +1561,10 @@ mod tests {
             let netlist = resizer.netlist();
             let mut at_pin = first;
             while at_pin != end {
-                let PinOwner::Cell { cell, .. } = resizer.db.pins[at_pin.index()].owner else {
+                let PinOwner::Cell { cell, .. } = resizer.db.pins[at_pin].owner else {
                     unreachable!()
                 };
-                let out = resizer.db.cells[cell.index()]
+                let out = resizer.db.cells[cell]
                     .pins
                     .iter()
                     .copied()
@@ -1578,10 +1578,7 @@ mod tests {
                         resizer.db.pin_name(p)
                     );
                 }
-                at_pin = netlist
-                    .loads(resizer.db.pins[out.index()].net)
-                    .next()
-                    .unwrap();
+                at_pin = netlist.loads(resizer.db.pins[out].net).next().unwrap();
             }
         });
     }

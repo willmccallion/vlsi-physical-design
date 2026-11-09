@@ -56,8 +56,8 @@ impl<'a> Netlist<'a> {
     /// sees.
     #[must_use]
     pub(crate) fn is_retired(&self, pin: PinId) -> bool {
-        match self.db.pins[pin.index()].owner {
-            PinOwner::Cell { cell, .. } => self.db.cells[cell.index()].retired,
+        match self.db.pins[pin].owner {
+            PinOwner::Cell { cell, .. } => self.db.cells[cell].retired,
             PinOwner::Io(_) => false,
         }
     }
@@ -69,7 +69,7 @@ impl<'a> Netlist<'a> {
         if self.is_retired(pin) {
             return false;
         }
-        match self.db.pins[pin.index()].owner {
+        match self.db.pins[pin].owner {
             PinOwner::Cell {
                 cell,
                 pin: macro_pin,
@@ -83,7 +83,7 @@ impl<'a> Netlist<'a> {
                 LibPort::is_output,
             ),
             PinOwner::Io(io) => matches!(
-                self.db.io_pins[io.index()].direction,
+                self.db.io_pins[io].direction,
                 PinDirection::Input | PinDirection::Inout
             ),
         }
@@ -96,7 +96,7 @@ impl<'a> Netlist<'a> {
         if self.is_retired(pin) {
             return false;
         }
-        match self.db.pins[pin.index()].owner {
+        match self.db.pins[pin].owner {
             PinOwner::Cell {
                 cell,
                 pin: macro_pin,
@@ -110,7 +110,7 @@ impl<'a> Netlist<'a> {
                 LibPort::is_input,
             ),
             PinOwner::Io(io) => matches!(
-                self.db.io_pins[io.index()].direction,
+                self.db.io_pins[io].direction,
                 PinDirection::Output | PinDirection::Inout
             ),
         }
@@ -118,7 +118,7 @@ impl<'a> Netlist<'a> {
 
     /// The pins driving `net`.
     pub fn drivers(&self, net: NetId) -> impl Iterator<Item = PinId> + '_ {
-        self.db.nets[net.index()]
+        self.db.nets[net]
             .pins
             .iter()
             .copied()
@@ -127,7 +127,7 @@ impl<'a> Netlist<'a> {
 
     /// The pins `net` drives.
     pub fn loads(&self, net: NetId) -> impl Iterator<Item = PinId> + '_ {
-        self.db.nets[net.index()]
+        self.db.nets[net]
             .pins
             .iter()
             .copied()
@@ -137,26 +137,26 @@ impl<'a> Netlist<'a> {
     /// Whether `net` connects to a pin of the design.
     #[must_use]
     pub(crate) fn has_port(&self, net: NetId) -> bool {
-        self.db.nets[net.index()]
+        self.db.nets[net]
             .pins
             .iter()
-            .any(|&p| matches!(self.db.pins[p.index()].owner, PinOwner::Io(_)))
+            .any(|&p| matches!(self.db.pins[p].owner, PinOwner::Io(_)))
     }
 
     /// Whether `net` connects to a pin of an instance.
     #[must_use]
     pub(crate) fn has_instance_pins(&self, net: NetId) -> bool {
-        self.db.nets[net.index()]
+        self.db.nets[net]
             .pins
             .iter()
-            .any(|&p| matches!(self.db.pins[p.index()].owner, PinOwner::Cell { .. }))
+            .any(|&p| matches!(self.db.pins[p].owner, PinOwner::Cell { .. }))
     }
 
     /// Whether `net` carries power or ground, which repair leaves alone.
     #[must_use]
     pub(crate) fn is_special(&self, net: NetId) -> bool {
         matches!(
-            self.db.nets[net.index()].signal_use,
+            self.db.nets[net].signal_use,
             SignalUse::Power | SignalUse::Ground
         )
     }
@@ -169,7 +169,7 @@ impl<'a> Netlist<'a> {
         if shapes.is_empty() {
             return self.db.pin_position(pin);
         }
-        if matches!(self.db.pins[pin.index()].owner, PinOwner::Io(_)) {
+        if matches!(self.db.pins[pin].owner, PinOwner::Io(_)) {
             return shapes[0].rect.center();
         }
         let n = shapes.len() as i64;
@@ -187,17 +187,15 @@ impl<'a> Netlist<'a> {
     pub(crate) fn pin_of_port(&self, instance: CellId, port: LibPortId) -> Option<PinId> {
         let (lib, _) = self.link.cell(self.db, instance)?;
         let macro_pin = self.link.macro_pin_of_port(lib, port)?;
-        self.db.cells[instance.index()]
-            .pins
-            .iter()
-            .copied()
-            .find(|&p| matches!(self.db.pins[p.index()].owner, PinOwner::Cell { pin, .. } if pin == macro_pin))
+        self.db.cells[instance].pins.iter().copied().find(
+            |&p| matches!(self.db.pins[p].owner, PinOwner::Cell { pin, .. } if pin == macro_pin),
+        )
     }
 
     /// The level of each pin of `instance` by Liberty port name, as
     /// `levels` holds them now.
     fn port_levels(&self, instance: CellId, levels: &[Logic]) -> impl Fn(&str) -> Logic + '_ {
-        let pins: Vec<(PinId, Logic)> = self.db.cells[instance.index()]
+        let pins: Vec<(PinId, Logic)> = self.db.cells[instance]
             .pins
             .iter()
             .map(|&p| (p, levels[p.index()]))
@@ -264,14 +262,14 @@ impl Constants {
         }
         level[pin.index()] = value;
         let db = netlist.db;
-        if let PinOwner::Cell { cell, .. } = db.pins[pin.index()].owner
+        if let PinOwner::Cell { cell, .. } = db.pins[pin].owner
             && netlist.is_load(pin)
             && queue.back() != Some(&cell)
         {
             queue.push_back(cell);
         }
         if netlist.is_driver(pin) {
-            let net = db.pins[pin.index()].net;
+            let net = db.pins[pin].net;
             let loads: Vec<PinId> = netlist.loads(net).filter(|&p| p != pin).collect();
             for load in loads {
                 Self::set(netlist, level, queue, load, value);
@@ -290,7 +288,7 @@ impl Constants {
             return;
         };
         let port_level = netlist.port_levels(instance, level);
-        let outputs: Vec<PinId> = db.cells[instance.index()]
+        let outputs: Vec<PinId> = db.cells[instance]
             .pins
             .iter()
             .copied()
@@ -431,12 +429,12 @@ impl ClockNetwork {
         let mut sources = Vec::new();
         let all_sources: Vec<PinId> = clocks
             .iter()
-            .flat_map(|(_, ports)| ports.iter().map(|io| db.io_pins[io.index()].pin))
+            .flat_map(|(_, ports)| ports.iter().map(|&io| db.io_pins[io].pin))
             .collect();
         for (clock, ports) in clocks {
             let mut queue: VecDeque<PinId> = VecDeque::new();
             for io in ports {
-                let pin = db.io_pins[io.index()].pin;
+                let pin = db.io_pins[*io].pin;
                 sources.push(pin);
                 clocks_of[pin.index()].push(*clock);
                 queue.push_back(pin);
@@ -450,12 +448,12 @@ impl ClockNetwork {
                 };
             while let Some(pin) = queue.pop_front() {
                 if netlist.is_driver(pin) {
-                    let net = db.pins[pin.index()].net;
+                    let net = db.pins[pin].net;
                     for load in netlist.loads(net) {
                         reach(&mut clocks_of, &mut queue, load);
                     }
                 }
-                let PinOwner::Cell { cell, .. } = db.pins[pin.index()].owner else {
+                let PinOwner::Cell { cell, .. } = db.pins[pin].owner else {
                     continue;
                 };
                 if !netlist.is_load(pin) {

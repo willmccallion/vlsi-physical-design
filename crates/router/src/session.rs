@@ -15,7 +15,7 @@ use pare_common::db::design::{NetlistDB, PinOwner, Renumbering};
 use pare_common::db::global_route::{
     NetRoute, PinGridLocation, RoutePoint, RouteSegment, RouteSource,
 };
-use pare_common::db::indices::{LayerId, MacroId, NetId, PinId};
+use pare_common::db::indices::{CellId, LayerId, MacroId, NetId, PinId};
 use pare_common::db::library::LayerRef;
 use pare_common::db::shapes::is_signal_net;
 use pare_common::geom::dbu::Dbu;
@@ -117,12 +117,12 @@ impl GlobalSession {
     /// Follows the design's renumbering after cells and nets were removed:
     /// the routes of nets it dropped are lifted, the rest keep theirs.
     pub fn renumber(&mut self, renumbering: &Renumbering) {
-        let pin = |p: PinId| renumbering.pins.get(p.index()).copied().flatten();
+        let pin = |p: PinId| renumbering.pins.get(p).copied().flatten();
         let mut nets = FxHashMap::default();
         let mut paths = FxHashMap::default();
         for (net, (mut global_net, terminals)) in std::mem::take(&mut self.nets) {
             let tree = self.routes.paths.remove(&net);
-            let Some(new) = renumbering.nets.get(net.index()).copied().flatten() else {
+            let Some(new) = renumbering.nets.get(net).copied().flatten() else {
                 if let Some(tree) = tree {
                     self.grid.lift(&global_net, &tree);
                 }
@@ -154,7 +154,13 @@ impl GlobalSession {
             .collect();
         let mut placed = Vec::with_capacity(self.placed.len());
         for (old, &at) in self.placed.iter().enumerate() {
-            if renumbering.cells.get(old).copied().flatten().is_some() {
+            if renumbering
+                .cells
+                .get(CellId::new(old))
+                .copied()
+                .flatten()
+                .is_some()
+            {
                 placed.push(at);
             }
         }
@@ -188,10 +194,10 @@ impl GlobalSession {
     /// Whether `pin` belongs to a port or to a cell with the master,
     /// location and orientation it had when routing began.
     fn unchanged(&self, db: &NetlistDB, pin: PinId) -> bool {
-        match db.pins[pin.index()].owner {
+        match db.pins[pin].owner {
             PinOwner::Io(_) => true,
             PinOwner::Cell { cell, .. } => {
-                let c = &db.cells[cell.index()];
+                let c = &db.cells[cell];
                 !c.retired
                     && self.placed.get(cell.index()) == Some(&(c.macro_id, c.location, c.orient))
             }
@@ -204,7 +210,7 @@ impl GlobalSession {
         if !is_signal_net(db, net) {
             return None;
         }
-        let pins = &db.nets[net.index()].pins;
+        let pins = &db.nets[net].pins;
         let points: Vec<Point<Dbu>> = pins.iter().map(|&p| db.pin_position(p)).collect();
         pins.iter()
             .zip(fellow_boxes(&points))
@@ -432,7 +438,6 @@ fn straight_runs(links: &[(GCell, GCell)], terminals: &[PinTerminal]) -> Vec<(GC
 mod tests {
     use super::*;
     use pare_common::db::design::{NonDefaultLayer, NonDefaultRule, PlacementStatus};
-    use pare_common::db::indices::NonDefaultRuleId;
     use pare_common::db::parser::{def, lef};
     use std::path::{Path, PathBuf};
 
@@ -500,7 +505,7 @@ mod tests {
             cell.location = Point::new(Dbu(x), Dbu(4000));
             cell.status = PlacementStatus::Placed;
         }
-        db.non_default_rules.push(NonDefaultRule {
+        let rule = db.non_default_rules.push(NonDefaultRule {
             name: "DW".to_string(),
             hard_spacing: true,
             layers: vec![NonDefaultLayer {
@@ -514,7 +519,7 @@ mod tests {
             min_cuts: Vec::new(),
         });
         let out = db.net_id("out").unwrap();
-        db.nets[out.index()].non_default_rule = Some(NonDefaultRuleId::new(0));
+        db.nets[out].non_default_rule = Some(rule);
         db
     }
 

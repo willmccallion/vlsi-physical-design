@@ -311,7 +311,7 @@ fn write_wiring(
         net.routing.clear();
     }
     for (n, elems) in routes {
-        db.nets[n.index()].routing = elems;
+        db.nets[n].routing = elems;
     }
 }
 
@@ -546,12 +546,7 @@ impl StateSaver<'_> {
         let routes = self
             .nets
             .iter()
-            .map(|&n| {
-                (
-                    self.db.nets[n.index()].name.clone(),
-                    dr.routes()[n.index()].clone(),
-                )
-            })
+            .map(|&n| (self.db.nets[n].name.clone(), dr.routes()[n.index()].clone()))
             .collect();
         RouteState {
             detailed: Some(DetailedState {
@@ -586,7 +581,7 @@ fn named_global(db: &NetlistDB, global: &GlobalRoutes) -> Vec<(String, Vec<Vec<G
     let mut out: Vec<(String, Vec<Vec<GCell>>)> = global
         .paths
         .iter()
-        .map(|(n, paths)| (db.nets[n.index()].name.clone(), paths.clone()))
+        .map(|(&n, paths)| (db.nets[n].name.clone(), paths.clone()))
         .collect();
     out.sort_unstable_by(|a, b| a.0.cmp(&b.0));
     out
@@ -975,7 +970,7 @@ pub fn capacity_reduction(
 fn layers_wire_width(db: &NetlistDB, tech: &RouteTech) -> Dbu {
     let pitches: Vec<Dbu> = (tech.min_layer.index()..=tech.max_layer.index())
         .map(|l| {
-            let layer = &db.library.routing_layers[l];
+            let layer = &db.library.routing_layers[LayerId::new(l)];
             if layer.pitch_x > Dbu::ZERO {
                 layer.pitch_x
             } else {
@@ -1026,7 +1021,7 @@ impl<'a> GlobalRouteEstimator<'a> {
             .into_iter()
             .map(|net| EstimatedNet {
                 net,
-                pins: db.nets[net.index()]
+                pins: db.nets[net]
                     .pins
                     .iter()
                     .map(|&pin| (pin, terminal_layer(db, &tech, pin)))
@@ -1065,7 +1060,7 @@ impl<'a> GlobalRouteEstimator<'a> {
                     .pins
                     .iter()
                     .map(|&(pin, layer)| {
-                        let at = match self.db.pins[pin.index()].owner {
+                        let at = match self.db.pins[pin].owner {
                             PinOwner::Cell { cell, .. } => {
                                 self.db.pin_position_at(pin, locations[cell.index()])
                             }
@@ -1125,7 +1120,7 @@ fn overlapping_pins(db: &NetlistDB) -> Option<RouteError> {
         let pins: Vec<(NetId, Vec<Shape>)> = cell
             .pins
             .iter()
-            .map(|&p| (db.pins[p.index()].net, db.pin_shapes(p)))
+            .map(|&p| (db.pins[p].net, db.pin_shapes(p)))
             .collect();
         let clash = pins.iter().enumerate().find_map(|(i, (a, shapes_a))| {
             pins[i + 1..]
@@ -1138,8 +1133,8 @@ fn overlapping_pins(db: &NetlistDB) -> Option<RouteError> {
             let _ = first.get_or_insert_with(|| {
                 (
                     cell.name.clone(),
-                    db.nets[a.index()].name.clone(),
-                    db.nets[b.index()].name.clone(),
+                    db.nets[a].name.clone(),
+                    db.nets[b].name.clone(),
                 )
             });
         }

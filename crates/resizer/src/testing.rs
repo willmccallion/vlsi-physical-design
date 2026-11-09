@@ -39,7 +39,7 @@ pub(crate) fn cells(source: &str) -> Liberty {
 /// The pin `cell/pin` of `db`.
 pub(crate) fn pin(db: &NetlistDB, name: &str) -> PinId {
     let (cell, _) = name.split_once('/').unwrap();
-    db.cells[db.cell_id(cell).unwrap().index()]
+    db.cells[db.cell_id(cell).unwrap()]
         .pins
         .iter()
         .copied()

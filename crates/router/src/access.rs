@@ -355,10 +355,10 @@ fn nodes_inside(
 
 /// Other shapes of the pin's cell, which the access vias must keep clear of.
 fn neighbour_shapes(db: &NetlistDB, pin: PinId) -> Vec<Shape> {
-    let PinOwner::Cell { cell, pin: own } = db.pins[pin.index()].owner else {
+    let PinOwner::Cell { cell, pin: own } = db.pins[pin].owner else {
         return Vec::new();
     };
-    let c = &db.cells[cell.index()];
+    let c = &db.cells[cell];
     let m = db.cell_macro(cell);
     let place = |s: &Shape| Shape {
         layer: s.layer,

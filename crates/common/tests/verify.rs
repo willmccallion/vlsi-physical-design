@@ -5,7 +5,7 @@
 use pare_common::db::design::{
     NetlistDB, NonDefaultLayer, NonDefaultRule, PlacementStatus, Region, RegionKind, RouteElem,
 };
-use pare_common::db::indices::{CellId, CutLayerId, LayerId, NetId, NonDefaultRuleId, RegionId};
+use pare_common::db::indices::{CellId, CutLayerId, LayerId, NetId};
 use pare_common::db::library::LayerRef;
 use pare_common::db::parser::{def, lef};
 use pare_common::db::rules::EndOfLineSpacing;
@@ -90,7 +90,7 @@ fn pins_joined_through_vias_and_an_upper_wire_are_connected() {
         wire(M2, pt(100, 500), pt(1100, 500)),
         via(&db, 0, pt(1100, 500)),
     ];
-    db.nets[net.index()].routing = routing;
+    db.nets[net].routing = routing;
 
     let report = check_routing(&db);
 
@@ -106,7 +106,7 @@ fn a_wire_passing_over_a_pin_on_another_layer_does_not_connect_it() {
         via(&db, 0, pt(100, 500)),
         wire(M2, pt(100, 500), pt(1100, 500)),
     ];
-    db.nets[net.index()].routing = routing;
+    db.nets[net].routing = routing;
 
     let opens = check_routing(&db).opens;
 
@@ -129,7 +129,7 @@ fn an_unrouted_net_is_open() {
 fn a_wire_along_the_pin_layer_connects_the_pins_it_crosses() {
     let mut db = empty_design();
     let net = two_inverters_on_a_net(&mut db);
-    db.nets[net.index()].routing = vec![wire(M1, pt(100, 500), pt(1100, 500))];
+    db.nets[net].routing = vec![wire(M1, pt(100, 500), pt(1100, 500))];
 
     assert_eq!(check_routing(&db).opens, []);
 }
@@ -145,7 +145,7 @@ const fn patch(layer: LayerId, min: Point<Dbu>, max: Point<Dbu>) -> RouteElem {
 fn metal_meeting_only_at_a_corner_does_not_connect() {
     let mut db = empty_design();
     let net = two_inverters_on_a_net(&mut db);
-    db.nets[net.index()].routing = vec![
+    db.nets[net].routing = vec![
         patch(M1, pt(100, 450), pt(600, 550)),
         patch(M1, pt(600, 550), pt(1100, 650)),
     ];
@@ -160,7 +160,7 @@ fn metal_meeting_only_at_a_corner_does_not_connect() {
 fn metal_sharing_a_length_of_edge_connects() {
     let mut db = empty_design();
     let net = two_inverters_on_a_net(&mut db);
-    db.nets[net.index()].routing = vec![
+    db.nets[net].routing = vec![
         patch(M1, pt(100, 450), pt(600, 550)),
         patch(M1, pt(600, 500), pt(1100, 650)),
     ];
@@ -177,19 +177,19 @@ fn wiring_stats_count_wrong_way_wires_and_vias() {
         wire(M2, pt(100, 500), pt(1100, 500)),
         via(&db, 0, pt(1100, 500)),
     ];
-    db.nets[net.index()].routing = routing;
+    db.nets[net].routing = routing;
 
     let stats = check_routing(&db).stats;
 
     assert_eq!(stats.vias, 2);
     assert_eq!(stats.wrong_way, 1);
-    assert_eq!(stats.wirelength[M2.index()], Dbu(1000));
+    assert_eq!(stats.wirelength[M2], Dbu(1000));
 }
 
 /// Puts `net` under a nondefault rule of double width and hard double
 /// spacing on M2, with the given wire extension.
 fn double_width_rule(db: &mut NetlistDB, net: NetId, wire_extension: Option<Dbu>) {
-    db.non_default_rules.push(NonDefaultRule {
+    let rule = db.non_default_rules.push(NonDefaultRule {
         name: "DW".into(),
         hard_spacing: true,
         layers: vec![NonDefaultLayer {
@@ -202,7 +202,7 @@ fn double_width_rule(db: &mut NetlistDB, net: NetId, wire_extension: Option<Dbu>
         via_rules: Vec::new(),
         min_cuts: Vec::new(),
     });
-    db.nets[net.index()].non_default_rule = Some(NonDefaultRuleId::new(0));
+    db.nets[net].non_default_rule = Some(rule);
 }
 
 #[test]
@@ -232,10 +232,10 @@ fn a_nondefault_wire_extension_replaces_the_half_width_at_the_ends() {
 #[test]
 fn nondefault_wires_must_meet_the_minimum_area_at_the_default_width_too() {
     let mut db = empty_design();
-    db.library.routing_layers[M2.index()].rules.min_area = Some(DbuArea(60_000));
+    db.library.routing_layers[M2].rules.min_area = Some(DbuArea(60_000));
     let net = db.net_or_insert("n");
     double_width_rule(&mut db, net, None);
-    db.nets[net.index()].routing = vec![wire(M2, pt(1000, 1000), pt(1000, 1300))];
+    db.nets[net].routing = vec![wire(M2, pt(1000, 1000), pt(1000, 1300))];
 
     let report = check_drc(&db);
 
@@ -258,7 +258,7 @@ fn nondefault_wires_that_merge_at_their_width_are_spaced_at_the_default_width() 
     let mut db = empty_design();
     let net = db.net_or_insert("n");
     double_width_rule(&mut db, net, None);
-    db.nets[net.index()].routing = vec![
+    db.nets[net].routing = vec![
         wire(M2, pt(1000, 1000), pt(1000, 3000)),
         wire(M2, pt(1190, 1000), pt(1190, 3000)),
     ];
@@ -277,7 +277,7 @@ fn nondefault_wires_that_merge_at_their_width_are_spaced_at_the_default_width() 
 #[test]
 fn a_nondefault_wire_end_is_held_to_the_end_of_line_rule_at_the_default_width() {
     let mut db = empty_design();
-    db.library.routing_layers[M2.index()].rules.end_of_line = vec![EndOfLineSpacing {
+    db.library.routing_layers[M2].rules.end_of_line = vec![EndOfLineSpacing {
         spacing: Dbu(150),
         eol_width: Dbu(150),
         within: Dbu(50),
@@ -285,9 +285,9 @@ fn a_nondefault_wire_end_is_held_to_the_end_of_line_rule_at_the_default_width() 
     }];
     let net = db.net_or_insert("n");
     double_width_rule(&mut db, net, None);
-    db.nets[net.index()].routing = vec![wire(M2, pt(1000, 1000), pt(1000, 2000))];
+    db.nets[net].routing = vec![wire(M2, pt(1000, 1000), pt(1000, 2000))];
     let other = db.net_or_insert("m");
-    db.nets[other.index()].routing = vec![wire(M2, pt(800, 2220), pt(1200, 2220))];
+    db.nets[other].routing = vec![wire(M2, pt(800, 2220), pt(1200, 2220))];
 
     let report = check_drc(&db);
 
@@ -333,7 +333,7 @@ fn fixture_placement_violations_are_unplaced_cells_and_a_wrong_orientation() {
 fn a_movable_cell_on_a_fixed_macro_overlaps_it() {
     let mut db = tiny_placed();
     let u4 = cell(&db, "u4");
-    db.cells[u4.index()].location = pt(4000, 2000);
+    db.cells[u4].location = pt(4000, 2000);
 
     assert!(
         placement_violations(&db).contains(&PlacementViolation::Overlap(u4, cell(&db, "ram0")))
@@ -345,8 +345,8 @@ fn stacked_cells_give_one_overlap_per_movable_cell() {
     let mut db = tiny_placed();
     let stacked = ["u1", "u2", "u4", "u7"].map(|name| cell(&db, name));
     for c in stacked {
-        db.cells[c.index()].location = pt(1000, 2000);
-        db.cells[c.index()].orient = Orientation::FS;
+        db.cells[c].location = pt(1000, 2000);
+        db.cells[c].orient = Orientation::FS;
     }
 
     let overlapping: Vec<CellId> = placement_violations(&db)
@@ -364,7 +364,7 @@ fn stacked_cells_give_one_overlap_per_movable_cell() {
 fn a_cell_between_sites_is_off_site() {
     let mut db = tiny_placed();
     let u1 = cell(&db, "u1");
-    db.cells[u1.index()].location = pt(250, 0);
+    db.cells[u1].location = pt(250, 0);
 
     assert!(placement_violations(&db).contains(&PlacementViolation::OffSite(u1)));
 }
@@ -373,7 +373,7 @@ fn a_cell_between_sites_is_off_site() {
 fn a_cell_between_rows_is_not_in_a_row() {
     let mut db = tiny_placed();
     let u1 = cell(&db, "u1");
-    db.cells[u1.index()].location = pt(200, 100);
+    db.cells[u1].location = pt(200, 100);
 
     assert!(placement_violations(&db).contains(&PlacementViolation::NotInRow(u1)));
 }
@@ -382,7 +382,7 @@ fn a_cell_between_rows_is_not_in_a_row() {
 fn a_y_mirrored_cell_is_legal_in_its_row() {
     let mut db = tiny_placed();
     let u1 = cell(&db, "u1");
-    db.cells[u1.index()].orient = Orientation::FN;
+    db.cells[u1].orient = Orientation::FN;
 
     assert!(
         !placement_violations(&db)
@@ -393,15 +393,15 @@ fn a_y_mirrored_cell_is_legal_in_its_row() {
 
 /// Adds a region of `kind` over `rects` and assigns `members` to it.
 fn add_region(db: &mut NetlistDB, kind: RegionKind, rects: &[Rect<Dbu>], members: &[CellId]) {
-    let id = RegionId::new(db.regions.len());
-    db.regions.push(Region {
+    let id = db.regions.next_id();
+    let _ = db.regions.push(Region {
         name: format!("r{}", id.index()),
         rects: rects.to_vec(),
         kind,
         group_order: None,
     });
     for &c in members {
-        db.cells[c.index()].region = Some(id);
+        db.cells[c].region = Some(id);
     }
 }
 

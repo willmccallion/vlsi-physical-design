@@ -1,5 +1,20 @@
 //! Typed indices into the design and library tables.
 
+use std::fmt;
+use std::marker::PhantomData;
+use std::ops::{Index, IndexMut};
+
+/// A typed position in one kind of table, as [`define_index!`](crate::define_index) makes them.
+pub trait TableIndex: Copy {
+    /// The index of table position `index`.
+    fn from_position(index: usize) -> Self;
+    /// The table position.
+    fn position(self) -> usize;
+}
+
+/// Defines a typed table index: a newtype over an unsigned integer that
+/// only indexes the [`IdVec`] tables keyed by it.
+#[macro_export]
 macro_rules! define_index {
     ($(#[$doc:meta])* $name:ident($repr:ty)) => {
         $(#[$doc])*
@@ -10,6 +25,7 @@ macro_rules! define_index {
             /// Creates an index from a table position.
             #[inline]
             pub const fn new(index: usize) -> Self {
+                debug_assert!(index <= <$repr>::MAX as usize, "table position past the index type");
                 Self(index as $repr)
             }
 
@@ -20,12 +36,197 @@ macro_rules! define_index {
             }
         }
 
+        impl $crate::db::indices::TableIndex for $name {
+            #[inline]
+            fn from_position(index: usize) -> Self {
+                Self::new(index)
+            }
+
+            #[inline]
+            fn position(self) -> usize {
+                self.index()
+            }
+        }
+
         impl std::fmt::Debug for $name {
             fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
                 write!(f, "{}({})", stringify!($name), self.0)
             }
         }
     };
+}
+
+/// A table indexed only by its own index type `I`, so that indexing it
+/// with another table's index does not compile:
+///
+/// ```compile_fail
+/// use pare_common::db::indices::{CellId, IdVec, NetId};
+/// let names: IdVec<CellId, &str> = vec!["u1"].into();
+/// let _ = names[NetId(0)];
+/// ```
+pub struct IdVec<I, T> {
+    entries: Vec<T>,
+    index: PhantomData<fn(I) -> I>,
+}
+
+impl<I: TableIndex, T> IdVec<I, T> {
+    /// An empty table.
+    pub const fn new() -> Self {
+        Self {
+            entries: Vec::new(),
+            index: PhantomData,
+        }
+    }
+
+    /// An empty table with room for `capacity` entries.
+    pub fn with_capacity(capacity: usize) -> Self {
+        Vec::with_capacity(capacity).into()
+    }
+
+    /// The table of `len` copies of `entry`.
+    pub fn filled(entry: T, len: usize) -> Self
+    where
+        T: Clone,
+    {
+        vec![entry; len].into()
+    }
+
+    /// How many entries the table has.
+    pub const fn len(&self) -> usize {
+        self.entries.len()
+    }
+
+    /// Whether the table has no entries.
+    pub const fn is_empty(&self) -> bool {
+        self.entries.is_empty()
+    }
+
+    /// The index the next [`Self::push`] gives its entry.
+    pub fn next_id(&self) -> I {
+        I::from_position(self.entries.len())
+    }
+
+    /// Appends `entry`, returning its index.
+    pub fn push(&mut self, entry: T) -> I {
+        let id = self.next_id();
+        self.entries.push(entry);
+        id
+    }
+
+    /// The entry at `id`, if the table has one there.
+    pub fn get(&self, id: I) -> Option<&T> {
+        self.entries.get(id.position())
+    }
+
+    /// Every index of the table, in order.
+    pub fn ids(&self) -> impl Iterator<Item = I> + use<I, T> {
+        (0..self.entries.len()).map(I::from_position)
+    }
+
+    /// Every entry, in order.
+    pub fn iter(&self) -> std::slice::Iter<'_, T> {
+        self.entries.iter()
+    }
+
+    /// Every entry to change, in order.
+    pub fn iter_mut(&mut self) -> std::slice::IterMut<'_, T> {
+        self.entries.iter_mut()
+    }
+
+    /// Every entry with its index, in order.
+    pub fn iter_enumerated(&self) -> impl Iterator<Item = (I, &T)> {
+        self.entries
+            .iter()
+            .enumerate()
+            .map(|(i, entry)| (I::from_position(i), entry))
+    }
+}
+
+impl<I: TableIndex, T> Default for IdVec<I, T> {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl<I, T: Clone> Clone for IdVec<I, T> {
+    fn clone(&self) -> Self {
+        Self {
+            entries: self.entries.clone(),
+            index: PhantomData,
+        }
+    }
+}
+
+impl<I, T: PartialEq> PartialEq for IdVec<I, T> {
+    fn eq(&self, other: &Self) -> bool {
+        self.entries == other.entries
+    }
+}
+
+impl<I, T: Eq> Eq for IdVec<I, T> {}
+
+impl<I, T: fmt::Debug> fmt::Debug for IdVec<I, T> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        self.entries.fmt(f)
+    }
+}
+
+impl<I, T> From<Vec<T>> for IdVec<I, T> {
+    fn from(entries: Vec<T>) -> Self {
+        Self {
+            entries,
+            index: PhantomData,
+        }
+    }
+}
+
+impl<I, T> FromIterator<T> for IdVec<I, T> {
+    fn from_iter<It: IntoIterator<Item = T>>(entries: It) -> Self {
+        Vec::from_iter(entries).into()
+    }
+}
+
+impl<'a, I, T> IntoIterator for &'a IdVec<I, T> {
+    type Item = &'a T;
+    type IntoIter = std::slice::Iter<'a, T>;
+
+    fn into_iter(self) -> Self::IntoIter {
+        self.entries.iter()
+    }
+}
+
+impl<'a, I, T> IntoIterator for &'a mut IdVec<I, T> {
+    type Item = &'a mut T;
+    type IntoIter = std::slice::IterMut<'a, T>;
+
+    fn into_iter(self) -> Self::IntoIter {
+        self.entries.iter_mut()
+    }
+}
+
+impl<I, T> IntoIterator for IdVec<I, T> {
+    type Item = T;
+    type IntoIter = std::vec::IntoIter<T>;
+
+    fn into_iter(self) -> Self::IntoIter {
+        self.entries.into_iter()
+    }
+}
+
+impl<I: TableIndex, T> Index<I> for IdVec<I, T> {
+    type Output = T;
+
+    #[inline]
+    fn index(&self, id: I) -> &T {
+        &self.entries[id.position()]
+    }
+}
+
+impl<I: TableIndex, T> IndexMut<I> for IdVec<I, T> {
+    #[inline]
+    fn index_mut(&mut self, id: I) -> &mut T {
+        &mut self.entries[id.position()]
+    }
 }
 
 define_index!(
@@ -107,5 +308,47 @@ impl CutLayerId {
     /// The routing layer above this cut.
     pub const fn above(self) -> LayerId {
         LayerId(self.0 + 1)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn each_push_returns_the_index_its_entry_is_found_at() {
+        let mut names: IdVec<CellId, &str> = IdVec::new();
+
+        let (a, b) = (names.push("a"), names.push("b"));
+
+        assert_eq!((a, b), (CellId(0), CellId(1)));
+        assert_eq!((names[a], names[b]), ("a", "b"));
+    }
+
+    #[test]
+    fn the_next_id_is_the_one_the_next_push_returns() {
+        let mut names: IdVec<NetId, &str> = vec!["n0"].into();
+
+        let next = names.next_id();
+
+        assert_eq!(names.push("n1"), next);
+    }
+
+    #[test]
+    fn entries_enumerate_with_their_indices_in_order() {
+        let names: IdVec<PinId, &str> = vec!["p0", "p1"].into();
+
+        let listed: Vec<(PinId, &str)> = names.iter_enumerated().map(|(i, &n)| (i, n)).collect();
+
+        assert_eq!(listed, vec![(PinId(0), "p0"), (PinId(1), "p1")]);
+        assert_eq!(names.ids().collect::<Vec<_>>(), vec![PinId(0), PinId(1)]);
+    }
+
+    #[test]
+    fn an_index_past_the_end_gets_nothing() {
+        let names: IdVec<CellId, &str> = IdVec::filled("x", 2);
+
+        assert_eq!(names.get(CellId(1)), Some(&"x"));
+        assert_eq!(names.get(CellId(2)), None);
     }
 }

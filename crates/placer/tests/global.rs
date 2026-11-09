@@ -42,7 +42,7 @@ impl TimingDriver for ScriptedRepair<'_> {
         let nand = db.library.macro_id("NAND2").unwrap();
         let inverter = db.library.macro_id("INV").unwrap();
         db.replace_master(db.cell_id("g3").unwrap(), nand).unwrap();
-        let at = db.cells[db.cell_id("g0").unwrap().index()].location;
+        let at = db.cells[db.cell_id("g0").unwrap()].location;
         let extra = db
             .add_cell(
                 "extra".to_string(),
@@ -52,13 +52,13 @@ impl TimingDriver for ScriptedRepair<'_> {
                 PlacementStatus::Placed,
             )
             .unwrap();
-        let input = db.library.macros[inverter.index()].pin_id("A").unwrap();
+        let input = db.library.macros[inverter].pin_id("A").unwrap();
         let _ = db.connect_cell_pin(extra, input, db.net_id("n0").unwrap());
         let renumbering = db.remove(&[db.cell_id("g10").unwrap()], &[]).unwrap();
         let model = PlacementModel::from_db(db, &Zones::new(db).unwrap());
         Ok(Some(Reweighted {
             model,
-            cell_map: renumbering.cells[..cells].to_vec(),
+            cell_map: renumbering.cells.iter().take(cells).copied().collect(),
         }))
     }
 }

@@ -162,12 +162,7 @@ fn legalize_and_reroute(
     let moved = before.moved(db);
     let mut moved_nets: Vec<NetId> = moved
         .iter()
-        .flat_map(|c| {
-            db.cells[c.index()]
-                .pins
-                .iter()
-                .map(|&p| db.pins[p.index()].net)
-        })
+        .flat_map(|&c| db.cells[c].pins.iter().map(|&p| db.pins[p].net))
         .collect();
     moved_nets.sort_unstable();
     moved_nets.dedup();
@@ -223,7 +218,7 @@ fn write_guides(
     use std::fmt::Write as _;
     let mut out = String::new();
     for guide in guides {
-        writeln!(out, "{}\n(", db.nets[guide.net.index()].name)?;
+        writeln!(out, "{}\n(", db.nets[guide.net].name)?;
         for (layer, r) in &guide.boxes {
             writeln!(
                 out,

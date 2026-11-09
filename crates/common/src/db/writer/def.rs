@@ -158,14 +158,10 @@ fn write_non_default_rules(db: &NetlistDB, out: &mut impl Write) -> io::Result<(
             write!(out, "\n  + VIA {}", lib.via(v).name)?;
         }
         for &v in &r.via_rules {
-            write!(out, "\n  + VIARULE {}", lib.via_rules[v.index()].name)?;
+            write!(out, "\n  + VIARULE {}", lib.via_rules[v].name)?;
         }
         for &(cut, n) in &r.min_cuts {
-            write!(
-                out,
-                "\n  + MINCUTS {} {n}",
-                lib.cut_layers[cut.index()].name
-            )?;
+            write!(out, "\n  + MINCUTS {} {n}", lib.cut_layers[cut].name)?;
         }
         writeln!(out, " ;")?;
     }
@@ -205,7 +201,7 @@ fn write_components(db: &NetlistDB, out: &mut impl Write) -> io::Result<()> {
         if let Some(r) = c.region
             && !is_listed_in_group(db, c)
         {
-            write!(out, " + REGION {}", db.regions[r.index()].name)?;
+            write!(out, " + REGION {}", db.regions[r].name)?;
         }
         writeln!(out, " ;")?;
     }
@@ -218,27 +214,28 @@ fn is_listed_in_group(db: &NetlistDB, cell: &Cell) -> bool {
     cell.group_rank.is_some()
         && cell
             .region
-            .is_some_and(|r| db.regions[r.index()].group_order.is_some())
+            .is_some_and(|r| db.regions[r].group_order.is_some())
 }
 
 /// One group for each region a DEF group named, in the groups' order and
 /// named after the region, so that reading them back orders the regions
 /// and their members as before.
 fn write_groups(db: &NetlistDB, out: &mut impl Write) -> io::Result<()> {
-    let mut grouped: Vec<RegionId> = (0..db.regions.len())
-        .map(RegionId::new)
-        .filter(|r| db.regions[r.index()].group_order.is_some())
+    let mut grouped: Vec<RegionId> = db
+        .regions
+        .ids()
+        .filter(|&r| db.regions[r].group_order.is_some())
         .collect();
     if grouped.is_empty() {
         return Ok(());
     }
-    grouped.sort_by_key(|r| db.regions[r.index()].group_order);
+    grouped.sort_by_key(|&r| db.regions[r].group_order);
     writeln!(out, "GROUPS {} ;", grouped.len())?;
     for region in grouped {
-        let name = &db.regions[region.index()].name;
+        let name = &db.regions[region].name;
         write!(out, "- {name}")?;
         for cell in members_last_listed_first(db, region) {
-            write!(out, " {}", db.cells[cell.index()].name)?;
+            write!(out, " {}", db.cells[cell].name)?;
         }
         writeln!(out, " + REGION {name} ;")?;
     }
@@ -248,19 +245,15 @@ fn write_groups(db: &NetlistDB, out: &mut impl Write) -> io::Result<()> {
 /// A region's group members in reverse of the order `OpenDP` takes them,
 /// since a group's last member is ranked first when read.
 fn members_last_listed_first(db: &NetlistDB, region: RegionId) -> Vec<CellId> {
-    let mut members: Vec<CellId> = (0..db.cells.len())
-        .map(CellId::new)
-        .filter(|c| {
-            let cell = &db.cells[c.index()];
+    let mut members: Vec<CellId> = db
+        .cells
+        .ids()
+        .filter(|&c| {
+            let cell = &db.cells[c];
             cell.region == Some(region) && is_listed_in_group(db, cell)
         })
         .collect();
-    members.sort_by_key(|c| {
-        (
-            db.cells[c.index()].region_member_order(),
-            std::cmp::Reverse(*c),
-        )
-    });
+    members.sort_by_key(|&c| (db.cells[c].region_member_order(), std::cmp::Reverse(c)));
     members.reverse();
     members
 }
@@ -275,7 +268,7 @@ fn write_pins(db: &NetlistDB, out: &mut impl Write) -> io::Result<()> {
             out,
             "- {} + NET {} + DIRECTION {} + USE {}",
             p.name,
-            db.nets[p.net.index()].name,
+            db.nets[p.net].name,
             p.direction.as_str(),
             p.signal_use.as_str()
         )?;
@@ -396,14 +389,14 @@ fn write_nets(db: &NetlistDB, out: &mut impl Write) -> io::Result<()> {
         line.clear();
         let _ = write!(line, "- {}", net.name);
         for &pin in &net.pins {
-            match db.pins[pin.index()].owner {
+            match db.pins[pin].owner {
                 PinOwner::Cell { cell, pin } => {
-                    let c = &db.cells[cell.index()];
+                    let c = &db.cells[cell];
                     let name = &lib.cell_macro(c.macro_id).pin(pin).name;
                     let _ = write!(line, " ( {} {} )", c.name, name);
                 }
                 PinOwner::Io(io) => {
-                    let _ = write!(line, " ( PIN {} )", db.io_pins[io.index()].name);
+                    let _ = write!(line, " ( PIN {} )", db.io_pins[io].name);
                 }
             }
         }
@@ -412,11 +405,7 @@ fn write_nets(db: &NetlistDB, out: &mut impl Write) -> io::Result<()> {
             let _ = write!(line, " + WEIGHT {}", net.weight);
         }
         if let Some(r) = net.non_default_rule {
-            let _ = write!(
-                line,
-                " + NONDEFAULTRULE {}",
-                db.non_default_rules[r.index()].name
-            );
+            let _ = write!(line, " + NONDEFAULTRULE {}", db.non_default_rules[r].name);
         }
         let mut keyword = "+ ROUTED";
         for elem in &net.routing {

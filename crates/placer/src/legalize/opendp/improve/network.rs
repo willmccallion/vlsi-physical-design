@@ -53,7 +53,7 @@ impl Network {
         let mut fixed = Vec::new();
         let mut node_of_io = vec![None; db.io_pins.len()];
         for (i, io) in db.io_pins.iter().enumerate() {
-            if db.nets[io.net.index()].signal_use.is_supply() || !is_placed(io.status) {
+            if db.nets[io.net].signal_use.is_supply() || !is_placed(io.status) {
                 continue;
             }
             let bbox = io
@@ -96,7 +96,7 @@ impl Network {
                 let PinOwner::Cell {
                     cell,
                     pin: macro_pin,
-                } = db.pins[pin.index()].owner
+                } = db.pins[pin].owner
                 else {
                     continue;
                 };
@@ -117,7 +117,7 @@ impl Network {
                 network.add_pin(node, edge, offset);
             }
             for &pin in &net.pins {
-                if let PinOwner::Io(io) = db.pins[pin.index()].owner
+                if let PinOwner::Io(io) = db.pins[pin].owner
                     && let Some(node) = node_of_io[io.index()]
                 {
                     network.add_pin(node, edge, (0, 0));

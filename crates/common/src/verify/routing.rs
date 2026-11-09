@@ -2,7 +2,7 @@
 //! business of [`super::drc`].
 
 use crate::db::design::{NetlistDB, RouteElem, TrackAxis};
-use crate::db::indices::NetId;
+use crate::db::indices::{IdVec, LayerId, NetId};
 use crate::db::library::{Direction, LayerRef, Shape};
 use crate::db::shapes::{is_signal_net, route_elem_shapes};
 use crate::geom::dbu::Dbu;
@@ -22,7 +22,7 @@ pub struct Open {
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct WiringStats {
     /// Centerline wirelength per routing layer.
-    pub wirelength: Vec<Dbu>,
+    pub wirelength: IdVec<LayerId, Dbu>,
     /// Number of via instances.
     pub vias: usize,
     /// Wires that are neither horizontal nor vertical.
@@ -96,7 +96,7 @@ const fn union(parent: &mut [usize], a: usize, b: usize) {
 /// How many separately connected groups the pins of `net` form, counting
 /// its wiring and the shapes of its pins.
 pub fn net_components(db: &NetlistDB, net: NetId) -> usize {
-    let n = &db.nets[net.index()];
+    let n = &db.nets[net];
     let mut shapes: Vec<(Shape, Option<usize>)> = n
         .routing
         .iter()
@@ -160,23 +160,23 @@ fn opens(db: &NetlistDB) -> Vec<Open> {
 
 fn wiring_stats(db: &NetlistDB) -> WiringStats {
     let layers = &db.library.routing_layers;
-    let mut tracks: HashSet<(usize, Dbu)> = HashSet::new();
-    let mut has_tracks = vec![false; layers.len()];
+    let mut tracks: HashSet<(LayerId, Dbu)> = HashSet::new();
+    let mut has_tracks = IdVec::filled(false, layers.len());
     for t in &db.tracks {
         for &l in &t.layers {
-            let preferred = match layers[l.index()].direction {
+            let preferred = match layers[l].direction {
                 Direction::Horizontal => TrackAxis::Y,
                 Direction::Vertical => TrackAxis::X,
             };
             if t.axis == preferred {
-                has_tracks[l.index()] = true;
-                tracks.extend(t.coords().map(|c| (l.index(), c)));
+                has_tracks[l] = true;
+                tracks.extend(t.coords().map(|c| (l, c)));
             }
         }
     }
 
     let mut stats = WiringStats {
-        wirelength: vec![Dbu::ZERO; layers.len()],
+        wirelength: IdVec::filled(Dbu::ZERO, layers.len()),
         ..WiringStats::default()
     };
     for net in &db.nets {
@@ -187,7 +187,7 @@ fn wiring_stats(db: &NetlistDB) -> WiringStats {
                 RouteElem::Wire {
                     layer, from, to, ..
                 } => {
-                    let l = layer.index();
+                    let l = layer;
                     let (dx, dy) = ((to.x - from.x).abs(), (to.y - from.y).abs());
                     stats.wirelength[l] += dx + dy;
                     if dx != Dbu::ZERO && dy != Dbu::ZERO {

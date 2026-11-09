@@ -575,10 +575,7 @@ impl Repair<'_, '_> {
                 continue;
             }
             let point = &path.points[i];
-            if !matches!(
-                self.resizer.db.pins[point.pin.index()].owner,
-                PinOwner::Cell { .. }
-            ) {
+            if !matches!(self.resizer.db.pins[point.pin].owner, PinOwner::Cell { .. }) {
                 continue;
             }
             if !self.resizer.netlist().is_driver(point.pin) {

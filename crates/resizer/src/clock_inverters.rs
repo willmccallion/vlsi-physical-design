@@ -38,7 +38,7 @@ pub fn repair_clock_inverters(
     let mut done = ClockInverterRepair::default();
     let mut removed = Vec::new();
     for inverter in inverters {
-        if db.cells[inverter.index()].status == PlacementStatus::Fixed
+        if db.cells[inverter].status == PlacementStatus::Fixed
             || link
                 .cell(db, inverter)
                 .is_some_and(|(_, lib)| lib.dont_touch)
@@ -54,7 +54,7 @@ pub fn repair_clock_inverters(
         let dead_nets: Vec<NetId> = removed
             .iter()
             .filter_map(|&cell| output_pin(db, link, cell))
-            .map(|pin| db.pins[pin.index()].net)
+            .map(|pin| db.pins[pin].net)
             .collect();
         for &cell in &removed {
             db.retire_cell(cell);
@@ -68,9 +68,11 @@ fn output_pin(db: &NetlistDB, link: &Link<'_>, cell: CellId) -> Option<PinId> {
     let (lib_id, _) = link.cell(db, cell)?;
     let inverter = link.liberty.buffer_cell(lib_id)?;
     let macro_pin = link.macro_pin_of_port(lib_id, inverter.output)?;
-    db.cells[cell.index()].pins.iter().copied().find(
-        |&p| matches!(db.pins[p.index()].owner, PinOwner::Cell { pin, .. } if pin == macro_pin),
-    )
+    db.cells[cell]
+        .pins
+        .iter()
+        .copied()
+        .find(|&p| matches!(db.pins[p].owner, PinOwner::Cell { pin, .. } if pin == macro_pin))
 }
 
 /// The inverters the clocks pass through, breadth first from where they
@@ -89,7 +91,7 @@ fn find_clock_inverters(db: &NetlistDB, link: &Link<'_>, clocks: &ClockNetwork) 
         if netlist.is_driver(pin)
             && let Some((lib, _)) = port
             && link.liberty.cell(lib).is_inverter()
-            && let PinOwner::Cell { cell, .. } = db.pins[pin.index()].owner
+            && let PinOwner::Cell { cell, .. } = db.pins[pin].owner
             && !found.contains(&cell)
         {
             found.push(cell);
@@ -99,9 +101,8 @@ fn find_clock_inverters(db: &NetlistDB, link: &Link<'_>, clocks: &ClockNetwork) 
         }
         let mut next = Vec::new();
         if netlist.is_driver(pin) {
-            next.extend(netlist.loads(db.pins[pin.index()].net));
-        } else if let (Some((lib, from)), PinOwner::Cell { cell, .. }) =
-            (port, db.pins[pin.index()].owner)
+            next.extend(netlist.loads(db.pins[pin].net));
+        } else if let (Some((lib, from)), PinOwner::Cell { cell, .. }) = (port, db.pins[pin].owner)
         {
             for set in &link.liberty.cell(lib).arc_sets {
                 if set.from == from
@@ -143,23 +144,24 @@ fn clone_inverter(
     ) else {
         return Ok(false);
     };
-    let pin_of = |db: &NetlistDB, macro_pin: MacroPinId| {
-        db.cells[inverter.index()].pins.iter().copied().find(
-            |&p| matches!(db.pins[p.index()].owner, PinOwner::Cell { pin, .. } if pin == macro_pin),
-        )
-    };
+    let pin_of =
+        |db: &NetlistDB, macro_pin: MacroPinId| {
+            db.cells[inverter].pins.iter().copied().find(
+                |&p| matches!(db.pins[p].owner, PinOwner::Cell { pin, .. } if pin == macro_pin),
+            )
+        };
     let (Some(in_pin), Some(out_pin)) = (pin_of(db, in_macro), pin_of(db, out_macro)) else {
         return Ok(false);
     };
-    let in_net = db.pins[in_pin.index()].net;
-    let out_net = db.pins[out_pin.index()].net;
-    let master = db.cells[inverter.index()].macro_id;
-    let base = format!("{}_", db.cells[inverter.index()].name);
-    let loads: Vec<PinId> = db.nets[out_net.index()]
+    let in_net = db.pins[in_pin].net;
+    let out_net = db.pins[out_pin].net;
+    let master = db.cells[inverter].macro_id;
+    let base = format!("{}_", db.cells[inverter].name);
+    let loads: Vec<PinId> = db.nets[out_net]
         .pins
         .iter()
         .copied()
-        .filter(|&p| p != out_pin && matches!(db.pins[p.index()].owner, PinOwner::Cell { .. }))
+        .filter(|&p| p != out_pin && matches!(db.pins[p].owner, PinOwner::Cell { .. }))
         .collect();
     for load in loads {
         let at = db.pin_position(load);
@@ -173,15 +175,15 @@ fn clone_inverter(
         )?;
         let net_name = namer.net(db, "net");
         let clone_net = db.add_net(&net_name)?;
-        db.nets[clone_net.index()].signal_use = db.nets[in_net.index()].signal_use;
+        db.nets[clone_net].signal_use = db.nets[in_net].signal_use;
         let _ = db.connect_cell_pin(clone, in_macro, in_net);
         let _ = db.connect_cell_pin(clone, out_macro, clone_net);
         db.move_pin(load, clone_net);
         done.clones += 1;
     }
-    let drives_port = db.nets[out_net.index()]
+    let drives_port = db.nets[out_net]
         .pins
         .iter()
-        .any(|&p| matches!(db.pins[p.index()].owner, PinOwner::Io(_)));
+        .any(|&p| matches!(db.pins[p].owner, PinOwner::Io(_)));
     Ok(!drives_port)
 }

@@ -2,7 +2,7 @@
 //! row orientation and placement regions.
 
 use crate::db::design::{NetlistDB, PlacementStatus, RegionKind};
-use crate::db::indices::CellId;
+use crate::db::indices::{CellId, IdVec};
 use crate::db::library::MacroClass;
 use crate::geom::dbu::Dbu;
 use crate::geom::rect::Rect;
@@ -37,9 +37,7 @@ pub enum PlacementViolation {
 pub fn placement_violations(db: &NetlistDB) -> Vec<PlacementViolation> {
     let mut violations = Vec::new();
     let rows = RowIndex::new(db);
-    for i in 0..db.num_cells() {
-        let id = CellId::new(i);
-        let cell = &db.cells[i];
+    for (id, cell) in db.cells.iter_enumerated() {
         if cell.status == PlacementStatus::Unplaced {
             violations.push(PlacementViolation::Unplaced(id));
             continue;
@@ -67,9 +65,9 @@ pub fn placement_violations(db: &NetlistDB) -> Vec<PlacementViolation> {
 /// inclusive region must lie inside it, and no other cell may overlap a
 /// fence. Guide regions constrain nothing.
 fn region_violation(db: &NetlistDB, id: CellId, bbox: &Rect<Dbu>) -> Option<PlacementViolation> {
-    match db.cells[id.index()].region {
+    match db.cells[id].region {
         Some(r) => {
-            let region = &db.regions[r.index()];
+            let region = &db.regions[r];
             let confined = matches!(region.kind, RegionKind::Fence | RegionKind::Inclusive);
             (confined && !bbox.covered_by(&region.rects))
                 .then_some(PlacementViolation::OutsideRegion(id))
@@ -111,7 +109,7 @@ impl RowIndex {
         if step > 0 && (bbox.min.x - row.origin.x).get() % step != 0 {
             return Some(PlacementViolation::OffSite(id));
         }
-        let orient = db.cells[id.index()].orient;
+        let orient = db.cells[id].orient;
         let mirrored_ok = db.cell_macro(id).symmetry.y && orient == row.orient.mirrored_about_y();
         if orient != row.orient && !mirrored_ok {
             return Some(PlacementViolation::WrongOrientation(id));
@@ -124,16 +122,15 @@ impl RowIndex {
 /// the first one found; like `OpenROAD`, this counts overlapping cells rather
 /// than pairs, so a stack of cells costs linear time and memory.
 fn overlaps(db: &NetlistDB) -> Vec<PlacementViolation> {
-    let boxes: Vec<Rect<Dbu>> = (0..db.num_cells())
-        .map(|i| db.cell_bbox(CellId::new(i)))
-        .collect();
-    let checked = |i: usize| {
+    let boxes: IdVec<CellId, Rect<Dbu>> = db.cells.ids().map(|id| db.cell_bbox(id)).collect();
+    let checked = |i: CellId| {
         let r = boxes[i];
         db.cells[i].status != PlacementStatus::Unplaced
             && r.width() > Dbu::ZERO
             && r.height() > Dbu::ZERO
     };
-    let bin = (0..boxes.len())
+    let bin = boxes
+        .ids()
         .filter(|&i| db.cells[i].status.is_movable())
         .map(|i| boxes[i].width().max(boxes[i].height()))
         .max()
@@ -141,22 +138,25 @@ fn overlaps(db: &NetlistDB) -> Vec<PlacementViolation> {
         .max(Dbu(1))
         .get();
 
-    let mut bins: HashMap<(i64, i64), Vec<usize>> = HashMap::new();
-    for i in (0..boxes.len()).filter(|&i| checked(i)) {
+    let mut bins: HashMap<(i64, i64), Vec<CellId>> = HashMap::new();
+    for i in boxes.ids().filter(|&i| checked(i)) {
         for key in bins_covering(&boxes[i], bin) {
             bins.entry(key).or_default().push(i);
         }
     }
 
     let mut found = Vec::new();
-    for a in (0..boxes.len()).filter(|&a| checked(a) && db.cells[a].status.is_movable()) {
+    for a in boxes
+        .ids()
+        .filter(|&a| checked(a) && db.cells[a].status.is_movable())
+    {
         let partner = bins_covering(&boxes[a], bin)
             .filter_map(|key| bins.get(&key))
             .flatten()
             .copied()
             .find(|&b| b != a && boxes[b].overlaps(&boxes[a]));
         if let Some(b) = partner {
-            found.push(PlacementViolation::Overlap(CellId::new(a), CellId::new(b)));
+            found.push(PlacementViolation::Overlap(a, b));
         }
     }
     found

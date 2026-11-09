@@ -321,7 +321,7 @@ impl OwnVias {
         let shapes = &db.library.via(via).shapes;
         let spacing = |layer: LayerRef| match layer {
             LayerRef::Routing(l) => tech.wire_spacing(self.rule, l),
-            LayerRef::Cut(c) => db.library.cut_layers[c.index()].spacing.unwrap_or_default(),
+            LayerRef::Cut(c) => db.library.cut_layers[c].spacing.unwrap_or_default(),
         };
         (x - 1..=x + 1)
             .flat_map(|bx| (y - 1..=y + 1).map(move |by| (bx, by)))

@@ -161,15 +161,17 @@ pub(crate) struct RuleTech {
 impl RuleTech {
     fn new(db: &NetlistDB, rule: &NonDefaultRule) -> Self {
         let layers = &db.library.routing_layers;
-        let per_layer = |l: usize| rule.layers.iter().find(|x| x.layer.index() == l);
+        let per_layer = |l: LayerId| rule.layers.iter().find(|x| x.layer == l);
         Self {
-            width: (0..layers.len())
-                .map(|l| per_layer(l).map_or(layers[l].width, |x| x.width))
+            width: layers
+                .iter_enumerated()
+                .map(|(l, layer)| per_layer(l).map_or(layer.width, |x| x.width))
                 .collect(),
-            spacing: (0..layers.len())
-                .map(|l| {
+            spacing: layers
+                .iter_enumerated()
+                .map(|(l, layer)| {
                     let own = per_layer(l).and_then(|x| x.spacing).unwrap_or(Dbu::ZERO);
-                    own.max(layers[l].min_spacing)
+                    own.max(layer.min_spacing)
                 })
                 .collect(),
         }
@@ -281,7 +283,9 @@ impl RouteTech {
             .collect();
         let routable = min_layer.index()..=max_layer.index();
         if let Some(l) = routable.into_iter().find(|&l| tracks[l].is_empty()) {
-            return Err(RouteError::NoTracks(lib.routing_layers[l].name.clone()));
+            return Err(RouteError::NoTracks(
+                lib.routing_layers[LayerId::new(l)].name.clone(),
+            ));
         }
 
         let gcell_pitch = gcell_pitch(
@@ -298,10 +302,11 @@ impl RouteTech {
         let vias = cuts
             .clone()
             .map(|c| {
-                ranked_vias(db, CutLayerId::new(c), &layers, Overhang::BothLayers)
+                let cut = CutLayerId::new(c);
+                ranked_vias(db, cut, &layers, Overhang::BothLayers)
                     .into_iter()
                     .next()
-                    .ok_or_else(|| RouteError::NoVia(lib.cut_layers[c].name.clone()))
+                    .ok_or_else(|| RouteError::NoVia(lib.cut_layers[cut].name.clone()))
             })
             .collect::<Result<Vec<_>, _>>()?;
         let access_vias = cuts
@@ -407,7 +412,7 @@ fn layer_tech(lib: &Library, tracks: &[Vec<Dbu>], l: usize) -> LayerTech {
     });
     let above_cross = (l + 1 < tracks.len())
         .then(|| merge_cross(Some(&tracks[l]), tracks.get(l + 2).map(Vec::as_slice)));
-    let layer = &lib.routing_layers[l];
+    let layer = &lib.routing_layers[LayerId::new(l)];
     LayerTech {
         direction: layer.direction,
         track_down: tracks[l]
@@ -455,7 +460,7 @@ fn cut_tech(db: &NetlistDB, cut: CutLayerId) -> CutTech {
     let lib = &db.library;
     let max_half = largest_cut(lib.vias.iter().flat_map(|v| v.shapes.iter()), cut);
     CutTech {
-        spacing: lib.cut_layers[cut.index()].spacing.unwrap_or_default(),
+        spacing: lib.cut_layers[cut].spacing.unwrap_or_default(),
         max_half: Dbu(max_half.get().div_euclid(2) + max_half.get().rem_euclid(2)),
     }
 }
@@ -504,7 +509,7 @@ fn ranked_vias(
         };
         let key = (reach, !v.is_default(), (bottom.area() + top.area()).get());
         let cut_size = largest_cut(v.shapes.iter(), cut);
-        let spacing = lib.cut_layers[cut.index()].spacing.unwrap_or_default();
+        let spacing = lib.cut_layers[cut].spacing.unwrap_or_default();
         let cuts = v
             .shapes
             .iter()

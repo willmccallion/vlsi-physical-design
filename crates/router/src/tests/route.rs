@@ -367,16 +367,10 @@ fn routing_refuses_pins_of_different_nets_that_overlap() {
     for cell in &mut db.cells {
         cell.status = PlacementStatus::Placed;
     }
-    let nand = db
-        .library
-        .macros
-        .iter()
-        .position(|m| m.name == "NAND2")
-        .unwrap();
-    let pins = &mut db.library.macros[nand].pins;
-    let a = pins.iter().position(|p| p.name == "A").unwrap();
-    let b = pins.iter().position(|p| p.name == "B").unwrap();
-    pins[b].shapes = pins[a].shapes.clone();
+    let nand = db.library.macro_id("NAND2").unwrap();
+    let master = &mut db.library.macros[nand];
+    let (a, b) = (master.pin_id("A").unwrap(), master.pin_id("B").unwrap());
+    master.pins[b].shapes = master.pins[a].shapes.clone();
 
     let result = route(&mut db, &RoutingConfig::default());
 
@@ -513,7 +507,7 @@ fn a_fixed_block_takes_the_tracks_its_obstruction_crosses() {
 #[test]
 fn a_layer_blocked_everywhere_counts_as_taken() {
     let mut db = tiny();
-    db.routing_blockages.push(Shape {
+    let _ = db.routing_blockages.push(Shape {
         layer: LayerRef::Routing(LayerId(1)),
         rect: db.die_area,
     });
@@ -623,7 +617,7 @@ fn the_estimator_measures_congestion_where_the_given_locations_put_the_nets() {
 /// asking 0.3 um of spacing there.
 fn tiny_with_wide_rule() -> NetlistDB {
     let mut db = tiny();
-    db.non_default_rules.push(NonDefaultRule {
+    let rule = db.non_default_rules.push(NonDefaultRule {
         name: "DW".to_string(),
         hard_spacing: true,
         layers: vec![NonDefaultLayer {
@@ -636,7 +630,7 @@ fn tiny_with_wide_rule() -> NetlistDB {
         via_rules: Vec::new(),
         min_cuts: Vec::new(),
     });
-    db.nets[0].non_default_rule = Some(NonDefaultRuleId::new(0));
+    db.nets[NetId(0)].non_default_rule = Some(rule);
     db
 }
 

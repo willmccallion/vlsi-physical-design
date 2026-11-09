@@ -479,14 +479,11 @@ impl Placer {
         uniform_row_height: Option<i64>,
     ) -> Vec<Node> {
         let shell = RowShell::new(db, rows);
-        let mut order: Vec<usize> = (0..db.cells.len())
-            .filter(|&i| !db.cells[i].retired)
-            .collect();
+        let mut order: Vec<CellId> = db.cells.ids().filter(|&i| !db.cells[i].retired).collect();
         order.sort_by(|&a, &b| db.cells[a].name.cmp(&db.cells[b].name));
         let mut nodes = Vec::new();
-        for i in order {
-            let id = CellId::new(i);
-            let c = &db.cells[i];
+        for id in order {
+            let c = &db.cells[id];
             let m = db.cell_macro(id);
             let placeable = matches!(
                 m.class,
@@ -1153,7 +1150,7 @@ impl Placer {
             if node.fixed || !node.std_cell {
                 continue;
             }
-            let c = &mut db.cells[node.cell.index()];
+            let c = &mut db.cells[node.cell];
             c.orient = node.orient;
             c.location = Point::new(
                 Dbu(self.core.min.x.get() + node.left),
@@ -1375,12 +1372,12 @@ const fn symmetry_allows(symmetry: Symmetry, orient: Orientation) -> bool {
 /// level, up to metal3, as `Network::addPin` marks them.
 fn used_layers(db: &NetlistDB, cell: CellId) -> u8 {
     let mut layers = 0u8;
-    for &pin in &db.cells[cell.index()].pins {
-        let net = db.pins[pin.index()].net;
-        if db.nets[net.index()].signal_use.is_supply() {
+    for &pin in &db.cells[cell].pins {
+        let net = db.pins[pin].net;
+        if db.nets[net].signal_use.is_supply() {
             continue;
         }
-        let PinOwner::Cell { pin: macro_pin, .. } = db.pins[pin.index()].owner else {
+        let PinOwner::Cell { pin: macro_pin, .. } = db.pins[pin].owner else {
             continue;
         };
         for shape in &db.cell_macro(cell).pin(macro_pin).shapes {

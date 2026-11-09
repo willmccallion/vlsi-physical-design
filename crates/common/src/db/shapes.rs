@@ -3,7 +3,7 @@
 use crate::db::design::{
     Cell, IoPin, NetlistDB, NonDefaultRule, PinOwner, RouteElem, SpecialNet, SpecialWire,
 };
-use crate::db::indices::{CellId, LayerId, NetId};
+use crate::db::indices::{LayerId, NetId};
 use crate::db::library::{LayerRef, Shape};
 use crate::geom::dbu::Dbu;
 use crate::geom::point::Point;
@@ -70,9 +70,9 @@ pub(crate) fn wire_rect_with_ends(
 
 /// The nondefault rule the wires of `net` follow, if any.
 fn rule_of(db: &NetlistDB, net: NetId) -> Option<&NonDefaultRule> {
-    db.nets[net.index()]
+    db.nets[net]
         .non_default_rule
-        .map(|r| &db.non_default_rules[r.index()])
+        .map(|r| &db.non_default_rules[r])
 }
 
 /// The width wires of `net` have on `layer`: the layer's unless the net's
@@ -225,7 +225,7 @@ fn extend_along(rect: &Rect<Dbu>, along_y: bool, by: Dbu) -> Rect<Dbu> {
 
 /// Whether the router is responsible for connecting this net.
 pub fn is_signal_net(db: &NetlistDB, net: NetId) -> bool {
-    let n = &db.nets[net.index()];
+    let n = &db.nets[net];
     !n.signal_use.is_supply() && n.pins.len() >= 2
 }
 
@@ -268,9 +268,7 @@ fn fixed_shapes_of(
         obstruction: true,
     };
 
-    for i in 0..db.num_cells() {
-        let id = CellId::new(i);
-        let c = &db.cells[i];
+    for (id, c) in db.cells.iter_enumerated() {
         if !keep_cell(c) {
             continue;
         }
@@ -281,8 +279,8 @@ fn fixed_shapes_of(
         };
         let mut pin_net = vec![None; m.pins.len()];
         for &pin in &c.pins {
-            if let PinOwner::Cell { pin: mp, .. } = db.pins[pin.index()].owner {
-                let net = db.pins[pin.index()].net;
+            if let PinOwner::Cell { pin: mp, .. } = db.pins[pin].owner {
+                let net = db.pins[pin].net;
                 if is_signal_net(db, net) {
                     pin_net[mp.index()] = Some(net);
                 }

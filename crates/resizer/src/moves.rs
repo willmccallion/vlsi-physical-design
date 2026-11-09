@@ -247,7 +247,7 @@ impl Moves {
         }
         let PinOwner::Cell {
             cell: prev_cell, ..
-        } = resizer.db.pins[prev_driver.index()].owner
+        } = resizer.db.pins[prev_driver].owner
         else {
             return Ok(false);
         };
@@ -331,8 +331,8 @@ impl Moves {
         ) else {
             return false;
         };
-        let net1 = resizer.db.pins[pin1.index()].net;
-        let net2 = resizer.db.pins[pin2.index()].net;
+        let net1 = resizer.db.pins[pin1].net;
+        let net2 = resizer.db.pins[pin2].net;
         resizer.move_pin(pin1, net2);
         resizer.move_pin(pin2, net1);
         resizer.update_net(net1);
@@ -371,7 +371,7 @@ impl Moves {
             return Ok(false);
         }
         let sta = resizer.sta();
-        let net = resizer.db.pins[site.driver.index()].net;
+        let net = resizer.db.pins[site.driver].net;
         let driver_slack = sta.slack_edge(site.driver, site.edge, MinMax::Max).time();
         let mut fanouts: Vec<(Seconds, String, PinId)> = resizer
             .netlist()
@@ -387,7 +387,7 @@ impl Moves {
         let moving: Vec<PinId> = fanouts[..split]
             .iter()
             .map(|(_, _, pin)| *pin)
-            .filter(|&p| matches!(resizer.db.pins[p.index()].owner, PinOwner::Cell { .. }))
+            .filter(|&p| matches!(resizer.db.pins[p].owner, PinOwner::Cell { .. }))
             .collect();
         let clone_lib = half_driving_power_cell(resizer, site.lib).unwrap_or(site.lib);
         let location = {
@@ -405,7 +405,7 @@ impl Moves {
         let original = resizer.link.liberty.cell(site.lib);
         let clone_cell = resizer.link.liberty.cell(clone_lib);
         let mut touched: Vec<NetId> = Vec::new();
-        for &pin in &resizer.db.cells[site.cell.index()].pins.clone() {
+        for &pin in &resizer.db.cells[site.cell].pins.clone() {
             let Some((_, port)) = resizer.link.pin_port(resizer.db, pin) else {
                 continue;
             };
@@ -415,7 +415,7 @@ impl Moves {
             let Some(clone_port) = clone_cell.port(&original.ports[port].name) else {
                 continue;
             };
-            let input_net = resizer.db.pins[pin.index()].net;
+            let input_net = resizer.db.pins[pin].net;
             let _ = resizer.connect(clone, clone_lib, clone_port, input_net);
             touched.push(input_net);
         }
@@ -453,7 +453,7 @@ impl Moves {
             return Ok(false);
         }
         let sta = resizer.sta();
-        let net = resizer.db.pins[site.driver.index()].net;
+        let net = resizer.db.pins[site.driver].net;
         let driver_slack = sta.slack(site.driver, MinMax::Max).time();
         let mut fanouts: Vec<(Seconds, String, PinId)> = resizer
             .netlist()
@@ -469,7 +469,7 @@ impl Moves {
         let moving: Vec<PinId> = fanouts[..split]
             .iter()
             .map(|(_, _, pin)| *pin)
-            .filter(|&p| matches!(resizer.db.pins[p.index()].owner, PinOwner::Cell { .. }))
+            .filter(|&p| matches!(resizer.db.pins[p].owner, PinOwner::Cell { .. }))
             .collect();
         if moving.is_empty() {
             return Ok(false);
@@ -551,7 +551,7 @@ impl Moves {
 /// Where the driver at `index` of `path` sits.
 fn site(resizer: &Resizer<'_, Sta>, path: &Path, index: usize) -> Option<Site> {
     let point = path.points.get(index)?;
-    let PinOwner::Cell { cell, .. } = resizer.db.pins[point.pin.index()].owner else {
+    let PinOwner::Cell { cell, .. } = resizer.db.pins[point.pin].owner else {
         return None;
     };
     let (lib, port) = resizer.link.pin_port(resizer.db, point.pin)?;
@@ -871,7 +871,7 @@ fn driver_change(resizer: &Resizer<'_, Sta>, removal: &Removal) -> Option<Driver
     let prev_driver = removal.prev_driver;
     let PinOwner::Cell {
         cell: prev_cell, ..
-    } = resizer.db.pins[prev_driver.index()].owner
+    } = resizer.db.pins[prev_driver].owner
     else {
         return None;
     };
@@ -932,7 +932,7 @@ fn buffer_loads_ok(
         return false;
     };
     load_slews.into_iter().all(|(load, slew)| {
-        let PinOwner::Cell { cell, .. } = resizer.db.pins[load.index()].owner else {
+        let PinOwner::Cell { cell, .. } = resizer.db.pins[load].owner else {
             return true;
         };
         let impact = SlewImpact {
@@ -955,8 +955,8 @@ fn side_loads_ok(
     margin: Seconds,
 ) -> bool {
     let sta = resizer.sta();
-    let input_net = resizer.db.pins[removal.prev_driver.index()].net;
-    let sides = resizer.db.nets[input_net.index()]
+    let input_net = resizer.db.pins[removal.prev_driver].net;
+    let sides = resizer.db.nets[input_net]
         .pins
         .iter()
         .copied()
@@ -977,7 +977,7 @@ fn side_loads_ok(
             margin,
             rule: SlackRule::NonNegative,
         };
-        if let PinOwner::Cell { cell, .. } = resizer.db.pins[side.index()].owner
+        if let PinOwner::Cell { cell, .. } = resizer.db.pins[side].owner
             && !input_slew_impact_ok(resizer, cell, &impact)
         {
             return false;
@@ -995,7 +995,7 @@ fn input_slew_impact_ok(resizer: &Resizer<'_, Sta>, cell: CellId, impact: &SlewI
         return false;
     };
     let netlist = resizer.netlist();
-    for &pin in &resizer.db.cells[cell.index()].pins {
+    for &pin in &resizer.db.cells[cell].pins {
         let Some(port) = netlist.lib_port(pin) else {
             continue;
         };
@@ -1091,7 +1091,7 @@ fn slews_after_removal(
 
 /// The tree of the net `driver` drives.
 fn tree_of(resizer: &Resizer<'_, Sta>, driver: PinId) -> Option<BnetPtr> {
-    let net = resizer.db.pins[driver.index()].net;
+    let net = resizer.db.pins[driver].net;
     let netlist = resizer.netlist();
     let parasitics = resizer.graph.parasitics(net)?;
     bnet::from_parasitics(&netlist, parasitics, driver, &resizer.tree_rc(), resizer)
@@ -1246,7 +1246,7 @@ mod tests {
             timing("A2", a2)
         );
         let lib = parse_str(&src, Path::new("t.lib")).unwrap();
-        lib.cells[0].clone()
+        lib.cells[LibCellId(0)].clone()
     }
 
     fn candidate(cell: &LibCell) -> Option<LibPortId> {
