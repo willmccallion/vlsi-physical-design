@@ -309,8 +309,9 @@ impl<'a> Link<'a> {
         })
     }
 
-    /// The usable buffers that are not clock buffers, by rising drive
-    /// resistance and then name.
+    /// The usable buffers that are neither clock buffers nor
+    /// power-management cells, by rising drive resistance and then name, as
+    /// `Resizer::getBufferList` filters them.
     fn usable_buffers(&self) -> Vec<BufferCell> {
         let mut list: Vec<BufferCell> = self
             .liberty
@@ -321,6 +322,7 @@ impl<'a> Link<'a> {
                 cell.is_buffer()
                     && !self.dont_use(id)
                     && self.is_link_cell(id)
+                    && !cell.is_power_cell
                     && !is_clock_buffer(cell)
             })
             .filter_map(|id| self.liberty.buffer_cell(id))
@@ -459,10 +461,11 @@ fn cell_leakage(cell: &LibCell) -> Option<Watts> {
     Some(total / cell.state_leakages.len() as f64)
 }
 
-/// Whether a buffer is meant for clock trees: `OpenROAD`'s default test,
-/// `CLKBUF` in its name.
+/// Whether a buffer is meant for clock trees, as `Resizer::getBufferUse`
+/// tells by default: the library marks it a clock cell or `CLKBUF` is in
+/// its name.
 fn is_clock_buffer(cell: &LibCell) -> bool {
-    cell.name.to_ascii_lowercase().contains("clkbuf")
+    cell.is_clock_cell || cell.name.to_ascii_lowercase().contains("clkbuf")
 }
 
 /// Groups the cells that may be used into classes of mutually equivalent
@@ -654,6 +657,46 @@ mod tests {
     #[test]
     fn a_library_of_only_clock_and_unusable_buffers_has_none_to_choose() {
         assert_eq!(find_among(&[]), Err(LinkError::NoBuffers));
+    }
+
+    #[test]
+    fn clock_cells_and_power_management_buffers_are_not_chosen() {
+        let attributes = [
+            ("B0", "is_clock_cell : true ;"),
+            ("B1", "is_level_shifter : true ;"),
+            ("B2", "is_isolation_cell : true ;"),
+            ("B3", "always_on : true ;"),
+            ("B4", ""),
+        ];
+        let copies: Vec<(&str, &str)> = attributes.iter().map(|&(n, _)| ("BUF_X1", n)).collect();
+        let sections = DefSections {
+            components: "",
+            nets: "",
+            inputs: &[],
+            outputs: &[],
+        };
+        let db = design_with_copies(&def_text("buffers", &sections), &copies);
+        let extra: String = attributes
+            .iter()
+            .map(|&(name, attribute)| {
+                buffer_cell(name, "buf", 0.1).replacen(
+                    "area : 0.8 ;",
+                    &format!("area : 0.8 ; {attribute}"),
+                    1,
+                )
+            })
+            .collect();
+        let lib = cells_with(&extra);
+        let link = Link::new(&db, &lib, &["BUF_X1".to_string()]).unwrap();
+
+        let set = link.find_buffers(&db).unwrap();
+
+        let chosen: Vec<&str> = set
+            .cells
+            .iter()
+            .map(|b| lib.cell(b.id).name.as_str())
+            .collect();
+        assert_eq!(chosen, ["B4"]);
     }
 
     /// Buffers in library order, each slewing to `slew` nanoseconds at
