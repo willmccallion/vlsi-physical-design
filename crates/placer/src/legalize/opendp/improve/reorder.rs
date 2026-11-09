@@ -4,7 +4,7 @@
 
 use super::mis::converged;
 use super::{EdgeId, NodeId, SegmentId};
-use super::{Improver, SKIP_NETS_LARGER_THAN};
+use super::{Improver, Result, SKIP_NETS_LARGER_THAN};
 use pare_common::db::indices::IdVec;
 use pare_common::geom::dbu::Dbu;
 use pare_common::geom::point::Point;
@@ -12,23 +12,24 @@ use pare_common::geom::point::Point;
 const WINDOW: usize = 3;
 
 /// `ro -p passes -t tolerance`.
-pub(super) fn run(imp: &mut Improver, passes: usize, tolerance: f64) {
+pub(super) fn run(imp: &mut Improver, passes: usize, tolerance: f64) -> Result<()> {
     let tolerance = tolerance.max(0.01);
     imp.resort_segments();
     let mut hpwl = imp.total_hpwl();
     if hpwl == Dbu::ZERO {
-        return;
+        return Ok(());
     }
     let mut marks = EdgeMarks::new(imp.net.edges.len());
     for _ in 0..passes.max(1) {
         let last = hpwl;
-        reorder_segments(imp, &mut marks);
+        reorder_segments(imp, &mut marks)?;
         hpwl = imp.total_hpwl();
         if converged(last, hpwl, tolerance) {
             break;
         }
     }
     imp.resort_segments();
+    Ok(())
 }
 
 /// Each edge's last traversal, so a cost counts it once.
@@ -48,7 +49,7 @@ impl EdgeMarks {
 
 /// `DetailedReorderer::reorder`: windows over each run of single-row cells
 /// of each segment.
-fn reorder_segments(imp: &mut Improver, marks: &mut EdgeMarks) {
+fn reorder_segments(imp: &mut Improver, marks: &mut EdgeMarks) -> Result<()> {
     marks.traversal = 0;
     marks.mark.fill(0);
     for s in imp.segments.ids() {
@@ -92,11 +93,12 @@ fn reorder_segments(imp: &mut Improver, marks: &mut EdgeMarks) {
                     left_limit,
                     right_limit,
                 };
-                reorder_window(imp, marks, &window);
+                reorder_window(imp, marks, &window)?;
                 i += 1;
             }
         }
     }
+    Ok(())
 }
 
 /// Orders segment `s`'s cells `[start, end)` by center as `std::sort` does.
@@ -128,23 +130,22 @@ struct Window {
 /// Tries every order of the window's cells, spaced evenly in its gap, and
 /// keeps the cheapest legal one, as `DetailedReorderer::reorder` of a
 /// window.
-fn reorder_window(imp: &mut Improver, marks: &mut EdgeMarks, w: &Window) {
+fn reorder_window(imp: &mut Improver, marks: &mut EdgeMarks, w: &Window) -> Result<()> {
     let cells: Vec<NodeId> = imp.cells_in_seg[w.segment][w.first..=w.last].to_vec();
     let original: Vec<Dbu> = cells.iter().map(|&n| imp.left(n)).collect();
     let width: Vec<Dbu> = cells.iter().map(|&n| imp.width(n)).collect();
     let site_width = imp.arch.rows[0].site_width;
     let Some(pads) = even_padding(&width, w.right_limit - w.left_limit, site_width) else {
-        return;
+        return Ok(());
     };
     let orig_cost = cost(imp, marks, &cells);
-    let Some(best) = cheapest_order(imp, marks, &cells, &width, &pads, w.left_limit, orig_cost)
+    let Some(best) = cheapest_order(imp, marks, &cells, &width, &pads, w.left_limit, orig_cost)?
     else {
-        place_at(imp, &cells, &original);
-        return;
+        return place_at(imp, &cells, &original);
     };
-    place_at(imp, &cells, &best);
+    place_at(imp, &cells, &best)?;
     sort_segment(imp, w.segment, w.first, w.last + 1);
-    let realigned = realign(imp, w);
+    let realigned = realign(imp, w)?;
     let ordered = imp.cells_in_seg[w.segment][w.first..=w.last].to_vec();
     let failed = match realigned {
         None => true,
@@ -163,9 +164,10 @@ fn reorder_window(imp: &mut Improver, marks: &mut EdgeMarks, w: &Window) {
                     .map_or_else(|| imp.left(n), |i| original[i])
             })
             .collect();
-        place_at(imp, &ordered, &lefts);
+        place_at(imp, &ordered, &lefts)?;
         sort_segment(imp, w.segment, w.first, w.last + 1);
     }
+    Ok(())
 }
 
 /// The site padding left and right of each cell that spreads cells of
@@ -206,7 +208,7 @@ fn cheapest_order(
     (left_pad, right_pad): &(Vec<Dbu>, Vec<Dbu>),
     left_limit: Dbu,
     orig_cost: f64,
-) -> Option<Vec<Dbu>> {
+) -> Result<Option<Vec<Dbu>>> {
     let size = cells.len();
     let mut best_cost = orig_cost;
     let mut best: Option<Vec<Dbu>> = None;
@@ -222,7 +224,7 @@ fn cheapest_order(
             imp.erase(n);
             let bottom = imp.bottom(n);
             imp.set_position(n, Point::new(x, bottom));
-            imp.paint(n);
+            imp.paint(n)?;
             x += width[ix] + right_pad[ix];
             if (imp.left(n) - imp.orig(n).x).abs() > imp.max_displacement.x {
                 within_reach = false;
@@ -236,40 +238,43 @@ fn cheapest_order(
             }
         }
         if !next_permutation(&mut order) {
-            return best;
+            return Ok(best);
         }
     }
 }
 
 /// Aligns the window's cells, left to right, to legal sites within reach;
 /// whether any moved, or none when one cannot be aligned.
-fn realign(imp: &mut Improver, w: &Window) -> Option<bool> {
+fn realign(imp: &mut Improver, w: &Window) -> Result<Option<bool>> {
     let mut shifted = false;
     let mut left = w.left_limit;
     for i in w.first..=w.last {
         let n = imp.cells_in_seg[w.segment][i];
-        let x = imp.align(n, imp.left(n), left, w.right_limit)?;
+        let Some(x) = imp.align(n, imp.left(n), left, w.right_limit) else {
+            return Ok(None);
+        };
         shifted |= x != imp.left(n);
         imp.erase(n);
         let bottom = imp.bottom(n);
         imp.set_position(n, Point::new(x, bottom));
-        imp.paint(n);
+        imp.paint(n)?;
         left = imp.right(n);
         if (imp.left(n) - imp.orig(n).x).abs() > imp.max_displacement.x {
-            return None;
+            return Ok(None);
         }
     }
-    Some(shifted)
+    Ok(Some(shifted))
 }
 
 /// Moves each cell to its left edge, keeping its row.
-fn place_at(imp: &mut Improver, cells: &[NodeId], lefts: &[Dbu]) {
+fn place_at(imp: &mut Improver, cells: &[NodeId], lefts: &[Dbu]) -> Result<()> {
     for (&n, &x) in cells.iter().zip(lefts) {
         imp.erase(n);
         let bottom = imp.bottom(n);
         imp.set_position(n, Point::new(x, bottom));
-        imp.paint(n);
+        imp.paint(n)?;
     }
+    Ok(())
 }
 
 /// The horizontal span of the cells' nets, each net once, or the largest

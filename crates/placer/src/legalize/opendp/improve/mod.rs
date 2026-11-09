@@ -264,7 +264,7 @@ impl Improver {
         mis::run(self, 10, 0.005)?;
         swap::run_global(self, 10, 0.005)?;
         swap::run_vertical(self, 10, 0.005)?;
-        reorder::run(self, 10, 0.005);
+        reorder::run(self, 10, 0.005)?;
         random::run(self, 5, 0.005, 20.0)?;
         orient::run(self);
         if self.disallow_one_site_gaps {
@@ -408,13 +408,16 @@ impl Improver {
 
     /// Puts a cell on the grid where it stands in its row's orientation, as
     /// `DetailedMgr::paintInGrid`.
-    fn paint(&mut self, n: NodeId) {
+    fn paint(&mut self, n: NodeId) -> Result<()> {
         let x = self.grid.rows.grid_x(self.left(n));
         let y = self.grid.rows.snap_down_y(self.bottom(n));
         self.grid.paint_pixels(n, x, y);
-        if let Some(orient) = self.grid.site_orientation(x, y, self.grid.nodes[n].site) {
-            self.orient_node(n, orient);
-        }
+        let orient = self
+            .grid
+            .site_orientation(x, y, self.grid.nodes[n].site)
+            .ok_or(ImprovementError::Internal("cell put where no row takes it"))?;
+        self.orient_node(n, orient);
+        Ok(())
     }
 
     /// Whether the cell breaks a placement rule where it stands, as
@@ -489,7 +492,7 @@ mod tests {
     use super::*;
     use crate::legalize::opendp::detailed_placement;
     use pare_common::db::design::PlacementStatus;
-    use pare_common::db::library::Macro;
+    use pare_common::db::library::{Macro, Site};
     use pare_common::db::parser::{def, lef};
     use std::path::{Path, PathBuf};
 
@@ -708,5 +711,29 @@ mod tests {
 
         assert!(moved);
         assert_eq!(imp.position(n), Point::new(Dbu(1000), Dbu(4000)));
+    }
+
+    #[test]
+    fn a_cell_whose_site_no_row_has_is_an_internal_error() {
+        let mut db = tiny_from_one_spot();
+        let _ = detailed_placement(&mut db).unwrap();
+        let core = db.library.sites[db.rows[0].site].clone();
+        let other = db.library.sites.push(Site {
+            name: "other".into(),
+            ..core
+        });
+        let inv = db.cells[db.cell_id("u1").unwrap()].macro_id;
+        db.library.macros[inv].site = Some(other);
+        let max_displacement = MaxDisplacement {
+            x: Some(RowHeights(5)),
+            y: Some(RowHeights(1)),
+        };
+
+        let result = improve_placement(&mut db, max_displacement);
+
+        assert_eq!(
+            result,
+            Err(ImprovementError::Internal("cell put where no row takes it"))
+        );
     }
 }

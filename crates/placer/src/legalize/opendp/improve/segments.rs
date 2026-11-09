@@ -400,7 +400,7 @@ impl Improver {
             let x = xmin.max((xmax - self.width(n)).min(self.left(n)));
             let y = self.arch.rows[self.segments[segs[0]].row].bottom;
             self.set_position(n, Point::new(x, y));
-            self.paint(n);
+            self.paint(n)?;
         }
         Ok(())
     }
