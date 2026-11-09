@@ -69,8 +69,8 @@ impl Edge {
     }
 
     /// The edge's length.
-    pub fn length(&self) -> Dbu {
-        (self.to.x - self.from.x).abs() + (self.to.y - self.from.y).abs()
+    pub const fn length(&self) -> Dbu {
+        self.from.manhattan(self.to)
     }
 }
 
