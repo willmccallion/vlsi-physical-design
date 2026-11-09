@@ -11,7 +11,7 @@ use crate::sta::{Path, Sta, Via};
 use pare_common::config::Share;
 use pare_common::db::design::PinOwner;
 use pare_common::db::indices::PinId;
-use pare_common::db::liberty::MinMax;
+use pare_common::db::liberty::{Edge, MinMax, TimingArcSet};
 use pare_common::units::{CellArea, Farads, Seconds};
 
 /// Passes an endpoint may go on failing to improve before its best state
@@ -659,12 +659,7 @@ impl Repair<'_, '_> {
         let (lib, _) = self.resizer.link.pin_port(self.resizer.db, point.pin)?;
         let cell = self.resizer.link.liberty.cell(lib);
         let arc_set = cell.arc_sets.get(set)?;
-        let intrinsic = arc_set
-            .arcs
-            .iter()
-            .filter(|a| a.from_edge == prev.edge && a.to_edge == point.edge)
-            .map(|a| a.gate_delay(Seconds::ZERO, Farads::ZERO).0)
-            .fold(Seconds::ZERO, Seconds::max);
+        let intrinsic = intrinsic_delay(arc_set, prev.edge, point.edge);
         let delay = self
             .resizer
             .graph
@@ -681,6 +676,18 @@ impl Repair<'_, '_> {
     }
 }
 
+/// The delay of the arc of `set` from `from` to `to` at no input slew and
+/// no load, as `TimingArc::intrinsicDelay`, negative where the tables
+/// extrapolate below zero; zero without the arc.
+fn intrinsic_delay(set: &TimingArcSet, from: Edge, to: Edge) -> Seconds {
+    set.arcs
+        .iter()
+        .find(|a| a.from_edge == from && a.to_edge == to)
+        .map_or(Seconds::ZERO, |a| {
+            a.gate_delay(Seconds::ZERO, Farads::ZERO).0
+        })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -688,6 +695,20 @@ mod tests {
         DefSections, cells, clock_cells_source, def_text, design, with_wired_session,
     };
     use std::fmt::Write;
+
+    #[test]
+    fn an_intrinsic_delay_extrapolated_below_zero_stays_negative() {
+        let lib = cells(&clock_cells_source().replacen(
+            "cell_rise (delay_t) { values (\"0.03, 0.30\", \"0.04, 0.31\") ; }",
+            "cell_rise (delay_t) { values (\"0.0, 0.30\", \"0.01, 0.31\") ; }",
+            1,
+        ));
+        let buffer = lib.cell(lib.cell_id("BUF_X1").unwrap());
+
+        let rise = intrinsic_delay(&buffer.arc_sets[0], Edge::Rise, Edge::Rise);
+
+        assert!(rise < Seconds::ZERO, "{rise:?}");
+    }
 
     /// Buffers in the chain between the flops of [`chain`].
     const CHAIN: usize = 6;
