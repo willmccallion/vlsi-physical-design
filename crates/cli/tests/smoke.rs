@@ -476,3 +476,47 @@ fn an_unknown_design_says_where_to_get_its_config() {
         printed(&output)
     );
 }
+
+#[test]
+fn a_report_that_cannot_be_written_is_named_without_hiding_the_run_error() {
+    let dir = work_dir("report-unwritable");
+    std::fs::create_dir(dir.join("configs")).unwrap();
+    let report = dir.join("missing").join("report.json");
+
+    let output = pare_in(
+        &dir,
+        &[
+            Path::new("check"),
+            Path::new("no-such-design"),
+            Path::new("--report"),
+            &report,
+        ],
+    );
+
+    assert!(!output.status.success());
+    let printed = printed(&output);
+    assert!(
+        printed.contains("Error: no config for 'no-such-design'"),
+        "{printed}"
+    );
+    assert!(
+        printed.contains(&format!("cannot write report {}", report.display())),
+        "{printed}"
+    );
+}
+
+#[test]
+fn a_report_that_cannot_be_written_fails_a_run_that_passed() {
+    let dir = work_dir("report-unwritable-pass");
+    let config = write_config(&dir, "place_and_route", "");
+    let report = dir.join("missing").join("report.json");
+
+    let output = pare(&[Path::new("place"), &config, Path::new("--report"), &report]);
+
+    assert!(!output.status.success());
+    assert!(
+        printed(&output).contains(&format!("Error: cannot write report {}", report.display())),
+        "{}",
+        printed(&output)
+    );
+}
