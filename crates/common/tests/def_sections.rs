@@ -505,3 +505,25 @@ fn a_quoted_string_left_open_is_an_error_at_its_line() {
         "{error}"
     );
 }
+
+#[test]
+fn a_pin_shape_on_a_mask_keeps_its_rectangle() {
+    let db = design_with(&[("+ LAYER M2 ( -50 0 )", "+ LAYER M2 MASK 2 ( -50 0 )")]).unwrap();
+
+    let pin = &db.io_pins[db.io_pin_id("in").unwrap()];
+    assert_eq!(pin.shapes[0].rect, rect(-50, 0, 50, 200));
+}
+
+#[test]
+fn a_pin_shape_with_its_own_spacing_rule_is_refused() {
+    for option in ["SPACING 100", "DESIGNRULEWIDTH 300"] {
+        let error = design_with(&[(
+            "+ LAYER M2 ( -50 0 )",
+            &format!("+ LAYER M2 {option} ( -50 0 )"),
+        )])
+        .map(|_| ())
+        .unwrap_err();
+
+        assert!(error.contains("is not supported"), "{error}");
+    }
+}

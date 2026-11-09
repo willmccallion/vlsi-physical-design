@@ -711,9 +711,7 @@ impl<'a> DefParser<'a> {
                 }
                 "LAYER" => {
                     let layer = self.any_layer()?;
-                    while self.lx.peek().is_some_and(|t| t.text != "(") {
-                        let _ = self.lx.next_token();
-                    }
+                    self.pin_layer_options(&name)?;
                     let rect = self.rect()?;
                     shapes.push(Shape { layer, rect });
                 }
@@ -774,6 +772,30 @@ impl<'a> DefParser<'a> {
         let pending = std::mem::take(&mut self.pending_io);
         for p in pending.into_iter().flatten() {
             self.connect_io_pin(p)?;
+        }
+        Ok(())
+    }
+
+    /// Reads the options of a pin's `+ LAYER` before its rectangle: a mask,
+    /// which placement and routing do not use, but not a spacing or design
+    /// rule width of the shape's own, which LEF geometry refuses as well.
+    fn pin_layer_options(&mut self, pin: &str) -> Result<(), ParseError> {
+        while let Some(t) = self.lx.peek() {
+            match t.text {
+                "MASK" => {
+                    let _ = self.lx.next_token();
+                    let _ = self.word("mask number")?;
+                }
+                "SPACING" | "DESIGNRULEWIDTH" => {
+                    // NOTE: definReader::pinCallback keeps them on the box
+                    // (pinMinSpacing, pinEffectiveWidth); PARE has no model for them.
+                    return Err(self.lx.error(
+                        t.line,
+                        format!("pin '{pin}': {} on a pin shape is not supported", t.text),
+                    ));
+                }
+                _ => break,
+            }
         }
         Ok(())
     }
