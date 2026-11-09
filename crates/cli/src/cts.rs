@@ -1,7 +1,7 @@
 //! Clock tree synthesis and the repairs that follow it.
 
 use crate::phase::{Phase, PhaseTimer};
-use crate::repair::{NetlistRepair, TimedRepair};
+use crate::repair::{NetlistRepair, TimedRepair, propagate_clocks};
 use crate::report::{ClockTreeSummary, Report};
 use crate::ui;
 use pare_common::db::design::NetlistDB;
@@ -32,9 +32,7 @@ pub(crate) fn clock_tree_synthesis(
     let timer = PhaseTimer::start(Phase::ClockTreeSynthesis);
     let cloned_inverters = clone_clock_inverters(db, &mut timed)?;
     let trees = build_trees(db, &timed, clock_rc)?;
-    for clock in &mut timed.sdc.clocks {
-        clock.propagated = true;
-    }
+    propagate_clocks(timed.sdc);
     let clock_net_repeaters = repair_clock_nets(db, &mut timed, &trees)?;
     let arrivals = clock_arrivals(db, &mut timed)?;
     let link = Link::new(db, timed.liberty, &timed.plan.dont_use)?;
