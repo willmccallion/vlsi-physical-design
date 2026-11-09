@@ -1,7 +1,7 @@
 //! Global routing with repair on its parasitics, and detailed routing.
 
 use crate::checks::report_routing;
-use crate::placement::legalize;
+use crate::placement::{CellPlaces, legalize};
 use crate::prepare_output_dir;
 use crate::repair::{NetlistRepair, show_design_repair, timing_repair_on};
 use crate::report::{GlobalRouteRepairSummary, Report, RoutingSummary};
@@ -161,27 +161,24 @@ fn legalize_and_reroute(
 ) -> anyhow::Result<()> {
     let phase_start = Instant::now();
     ui::phase("Legalization");
-    let before: Vec<_> = db.cells.iter().map(|c| (c.location, c.orient)).collect();
+    let before = CellPlaces::record(db);
     let _ = legalize(db, &Zones::new(db)?)?;
-    let mut moved_nets: Vec<NetId> = db
-        .cells
+    let moved = before.moved(db);
+    let mut moved_nets: Vec<NetId> = moved
         .iter()
-        .zip(&before)
-        .filter(|(c, was)| (c.location, c.orient) != **was)
-        .flat_map(|(c, _)| c.pins.iter().map(|&p| db.pins[p.index()].net))
+        .flat_map(|c| {
+            db.cells[c.index()]
+                .pins
+                .iter()
+                .map(|&p| db.pins[p.index()].net)
+        })
         .collect();
     moved_nets.sort_unstable();
     moved_nets.dedup();
-    let moved = db
-        .cells
-        .iter()
-        .zip(&before)
-        .filter(|(c, was)| (c.location, c.orient) != **was)
-        .count();
     session.update(db, &moved_nets);
     ui::stat_row(
         "Cells moved:",
-        &moved.to_string(),
+        &moved.len().to_string(),
         "Nets updated:",
         &moved_nets.len().to_string(),
     );
@@ -210,13 +207,9 @@ fn route_rc(config: &Config, db: &NetlistDB) -> anyhow::Result<RouteRc> {
         .via_rc
         .iter()
         .map(|v| {
-            let cut = lib
-                .cut_layers
-                .iter()
-                .position(|c| c.name == v.layer)
-                .with_context(|| {
-                    format!("[netlist] via_rc names unknown cut layer '{}'", v.layer)
-                })?;
+            let cut = lib.cut_layer_id(&v.layer).with_context(|| {
+                format!("[netlist] via_rc names unknown cut layer '{}'", v.layer)
+            })?;
             Ok((cut, Ohms::new(v.resistance_ohm)))
         })
         .collect::<anyhow::Result<Vec<_>>>()?;

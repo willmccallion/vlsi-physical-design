@@ -15,6 +15,7 @@ use pare_common::db::indices::{CellId, NetId};
 use pare_common::db::liberty::MinMax;
 use pare_common::db::writer;
 use pare_common::geom::dbu::Dbu;
+use pare_common::geom::orient::Orientation;
 use pare_common::geom::point::Point;
 use pare_common::units::Seconds;
 use pare_common::verify::pin_access::PinAccess;
@@ -34,6 +35,10 @@ use pare_router::{CapacityReduction, GlobalRouteEstimator};
 use std::num::NonZeroUsize;
 use std::path::Path;
 use std::time::{Duration, Instant};
+
+/// Rounds of swaps and reordering detailed placement runs on a design that
+/// does not follow `OpenROAD`'s flow.
+const DETAILED_PASSES: usize = 3;
 
 /// Pixels across each side of a placement image.
 const PLACEMENT_IMAGE_PIXELS: u32 = 1000;
@@ -220,20 +225,15 @@ fn detailed_placement(
     let zones = Zones::new(db)?;
     let phase_start = Instant::now();
     ui::phase("Detailed Placement");
-    let before: Vec<_> = db.cells.iter().map(|c| (c.location, c.orient)).collect();
+    let before = CellPlaces::record(db);
     if let Legalization::DetailedPlacement(_) = legalization {
         let _ = improve_placement(db, IMPROVE_MAX_DISPLACEMENT)?;
         let mirrored = optimize_mirroring(db);
         ui::stat_row("Mirrored:", &mirrored.to_string(), "", "");
     } else {
-        let _ = detailed::improve(db, &zones, 3, access);
+        let _ = detailed::improve(db, &zones, DETAILED_PASSES, access);
     }
-    let changed = db
-        .cells
-        .iter()
-        .zip(&before)
-        .filter(|&(c, &b)| (c.location, c.orient) != b)
-        .count();
+    let changed = before.moved(db).len();
     let hpwl = PlacementModel::from_db(db, &zones).hpwl();
     ui::stat_row(
         "Cells changed:",
@@ -299,7 +299,7 @@ fn write_placement(
 pub(crate) fn legalize(db: &mut NetlistDB, zones: &Zones) -> anyhow::Result<Legalization> {
     let legalization = pare_placer::legalize::legalize(db, zones)?;
     if let Legalization::DetailedPlacement(done) = legalization {
-        let um = |d: Dbu| d.get() as f64 / f64::from(db.dbu().get());
+        let um = |d: Dbu| db.dbu().to_microns(d);
         ui::stat_row(
             "Displacement (um):",
             &format!("{:.0}", um(done.total_displacement)),
@@ -736,6 +736,28 @@ fn draw_placement(db: &NetlistDB, path: &Path) -> anyhow::Result<()> {
         .with_context(|| format!("cannot write {}", path.display()))
 }
 
+/// Where each cell of a design sits and how it is turned, to tell later
+/// which cells a step moved.
+pub(crate) struct CellPlaces(Vec<(Point<Dbu>, Orientation)>);
+
+impl CellPlaces {
+    /// Where the cells of `db` sit now.
+    pub(crate) fn record(db: &NetlistDB) -> Self {
+        Self(db.cells.iter().map(|c| (c.location, c.orient)).collect())
+    }
+
+    /// The cells of `db` placed elsewhere or turned since the record.
+    pub(crate) fn moved(&self, db: &NetlistDB) -> Vec<CellId> {
+        db.cells
+            .iter()
+            .zip(&self.0)
+            .enumerate()
+            .filter(|(_, (c, was))| (c.location, c.orient) != **was)
+            .map(|(i, _)| CellId::new(i))
+            .collect()
+    }
+}
+
 /// The routability settings of `config`, and the global-router estimator
 /// when congestion is to be measured that way.
 fn routability_setup<'a>(
@@ -762,11 +784,11 @@ fn layer_adjustments(config: &Config, db: &NetlistDB) -> anyhow::Result<Vec<Shar
     let layers = &db.library.routing_layers;
     let mut adjustments = vec![gp.routing_layer_adjustment; layers.len()];
     for entry in &gp.layer_adjustments {
-        let index = layers
-            .iter()
-            .position(|l| l.name == entry.layer)
+        let layer = db
+            .library
+            .routing_layer_id(&entry.layer)
             .with_context(|| format!("no routing layer named {}", entry.layer))?;
-        adjustments[index] = entry.adjustment;
+        adjustments[layer.index()] = entry.adjustment;
     }
     Ok(adjustments)
 }
