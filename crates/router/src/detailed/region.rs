@@ -687,7 +687,8 @@ impl DetailedRouter<'_> {
     }
 
     /// The local rounds of a region worker, starting with the pieces of
-    /// `work` at `todo` and `overlay` holding what was ripped up.
+    /// `work` at `todo` and `overlay` holding what was ripped up; returns
+    /// the routes of the round the judge found best.
     fn negotiate(
         &self,
         area: &Rect<Dbu>,
@@ -697,59 +698,16 @@ impl DetailedRouter<'_> {
         costs: Costs,
         mut marks: Marks,
     ) -> Vec<Routed> {
-        let window = Rect::new(area.min, area.max - Point::new(Dbu(1), Dbu(1)));
+        let local = LocalRound {
+            area,
+            window: Rect::new(area.min, area.max - Point::new(Dbu(1), Dbu(1))),
+            costs,
+        };
         let mut best: Option<(Score, Vec<Option<Wiring>>)> = None;
         let mut avoided: FxHashMap<NetId, u8> = FxHashMap::default();
         for round in 0..LOCAL_ROUNDS {
             for &i in &todo {
-                let Some(piece) = work.piece(i) else {
-                    continue;
-                };
-                let owner = Owner::Net(piece.net);
-                overlay.remove_owner(owner);
-                let search = Search {
-                    db: self.db,
-                    tech: self.tech,
-                    occupancy: &self.occupancy,
-                    overlay: Some(&overlay),
-                    marks: &marks,
-                    owner,
-                    costs,
-                    guide: None,
-                    own_vias: None,
-                    ripped: &work.ripped,
-                };
-                let own = self.vias_near(piece.net, area);
-                let edges = self.connect_groups(&search, &piece.groups, &window, own);
-                if self.trace.wants(piece.net, area) {
-                    self.trace_piece(area, round, piece.net, &search, edges.as_deref());
-                }
-                let result = edges.map(|edges| {
-                    let wiring = Wiring {
-                        edges,
-                        patches: Vec::new(),
-                    };
-                    let candidate = Candidate {
-                        net: piece.net,
-                        without: work.removed(i),
-                        with: &wiring,
-                    };
-                    let patches = self.min_area_patches(&candidate, area, &search);
-                    Wiring { patches, ..wiring }
-                });
-                if let Some(wiring) = &result {
-                    for (layer, rect) in self.edge_metal(piece.net, &wiring.edges) {
-                        overlay.add_rect(self.tech, layer, &rect, owner);
-                    }
-                    for (cut, rect) in self.edge_cuts(&wiring.edges) {
-                        overlay.add_cut(self.tech, cut, &rect, owner);
-                    }
-                    for p in &wiring.patches {
-                        overlay.add_rect(self.tech, p.layer, &p.rect, owner);
-                    }
-                }
-                work.results[i] = result;
-                marks.decay(costs.decay);
+                self.route_local_piece(&local, round, i, &mut work, &mut overlay, &mut marks);
             }
             let judgment = self.judge(area, &work.candidates());
             let score = Score {
@@ -775,19 +733,8 @@ impl DetailedRouter<'_> {
                 break;
             }
             self.mark_judgment(&mut marks, area, &judgment, &work);
-            let reroute = self.to_reroute(&judgment, &mut avoided);
-            let mut again: Vec<usize> = (0..work.len())
-                .filter(|&i| work.results[i].is_some() && reroute.contains(&work.net(i)))
-                .collect();
-            let mut victims: Vec<NetId> = reroute
-                .iter()
-                .copied()
-                .filter(|n| !work.holds(*n))
-                .collect();
-            victims.sort_unstable();
-            for net in victims {
-                again.extend(self.rip_victim(net, area, &mut work, &mut overlay));
-            }
+            let again =
+                self.pieces_to_reroute(area, &judgment, &mut avoided, &mut work, &mut overlay);
             if again.is_empty() {
                 break;
             }
@@ -796,6 +743,102 @@ impl DetailedRouter<'_> {
         }
         let kept = best.map_or_else(|| work.results.clone(), |(_, kept)| kept);
         work.into_routed(kept)
+    }
+
+    /// Routes the piece of `work` at `i` against the rest, its patches
+    /// included, and puts what it routed in `overlay`.
+    fn route_local_piece(
+        &self,
+        local: &LocalRound<'_>,
+        round: usize,
+        i: usize,
+        work: &mut Work<'_>,
+        overlay: &mut LocalOccupancy,
+        marks: &mut Marks,
+    ) {
+        let area = local.area;
+        let Some(piece) = work.piece(i) else {
+            return;
+        };
+        let owner = Owner::Net(piece.net);
+        overlay.remove_owner(owner);
+        let search = Search {
+            db: self.db,
+            tech: self.tech,
+            occupancy: &self.occupancy,
+            overlay: Some(overlay),
+            marks,
+            owner,
+            costs: local.costs,
+            guide: None,
+            own_vias: None,
+            ripped: &work.ripped,
+        };
+        let own = self.vias_near(piece.net, area);
+        let edges = self.connect_groups(&search, &piece.groups, &local.window, own);
+        if self.trace.wants(piece.net, area) {
+            self.trace_piece(area, round, piece.net, &search, edges.as_deref());
+        }
+        let result = edges.map(|edges| {
+            let wiring = Wiring {
+                edges,
+                patches: Vec::new(),
+            };
+            let candidate = Candidate {
+                net: piece.net,
+                without: work.removed(i),
+                with: &wiring,
+            };
+            let patches = self.min_area_patches(&candidate, area, &search);
+            Wiring { patches, ..wiring }
+        });
+        let net = piece.net;
+        if let Some(wiring) = &result {
+            self.occupy_overlay(net, wiring, overlay);
+        }
+        work.results[i] = result;
+        marks.decay(local.costs.decay);
+    }
+
+    /// Puts `net`'s `wiring` in `overlay`: its metal, cuts and patches.
+    fn occupy_overlay(&self, net: NetId, wiring: &Wiring, overlay: &mut LocalOccupancy) {
+        let owner = Owner::Net(net);
+        for (layer, rect) in self.edge_metal(net, &wiring.edges) {
+            overlay.add_rect(self.tech, layer, &rect, owner);
+        }
+        for (cut, rect) in self.edge_cuts(&wiring.edges) {
+            overlay.add_cut(self.tech, cut, &rect, owner);
+        }
+        for p in &wiring.patches {
+            overlay.add_rect(self.tech, p.layer, &p.rect, owner);
+        }
+    }
+
+    /// The pieces of `work` to route again after `judgment`: those of the
+    /// nets it picks that were routed, and the pieces of the nets it picks
+    /// that the work does not hold yet, ripped up into it.
+    fn pieces_to_reroute(
+        &self,
+        area: &Rect<Dbu>,
+        judgment: &Judgment,
+        avoided: &mut FxHashMap<NetId, u8>,
+        work: &mut Work<'_>,
+        overlay: &mut LocalOccupancy,
+    ) -> Vec<usize> {
+        let reroute = self.to_reroute(judgment, avoided);
+        let mut again: Vec<usize> = (0..work.len())
+            .filter(|&i| work.results[i].is_some() && reroute.contains(&work.net(i)))
+            .collect();
+        let mut victims: Vec<NetId> = reroute
+            .iter()
+            .copied()
+            .filter(|n| !work.holds(*n))
+            .collect();
+        victims.sort_unstable();
+        for net in victims {
+            again.extend(self.rip_victim(net, area, work, overlay));
+        }
+        again
     }
 
     /// Rips `net`'s wiring inside `area` up for `work` when it can be routed
@@ -1090,6 +1133,14 @@ impl DetailedRouter<'_> {
             .filter(|(layer, _)| self.tech.routable(*layer))
             .collect()
     }
+}
+
+/// What a region's local rounds share: the area they route, the window
+/// their searches stay inside and the costs.
+struct LocalRound<'a> {
+    area: &'a Rect<Dbu>,
+    window: Rect<Dbu>,
+    costs: Costs,
 }
 
 /// How well a local round did: pieces left unconnected count before
