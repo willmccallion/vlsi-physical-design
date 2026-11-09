@@ -1,7 +1,7 @@
 //! Columns, rows and spans of the gcell grid.
 
 use pare_common::geom::dbu::Dbu;
-use std::ops::{Add, AddAssign, Div, Neg, Sub, SubAssign};
+use std::ops::{Add, AddAssign, Div, Mul, Neg, Sub, SubAssign};
 
 /// A column, row or span of the gcell grid, in gcells.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -74,6 +74,14 @@ impl Neg for Gcells {
 
     fn neg(self) -> Self {
         Self(-self.0)
+    }
+}
+
+impl Mul<i64> for Gcells {
+    type Output = Self;
+
+    fn mul(self, rhs: i64) -> Self {
+        Self(self.0 * rhs)
     }
 }
 
