@@ -137,6 +137,11 @@ impl<I: TableIndex, T> IdVec<I, T> {
         self.entries.get(id.position())
     }
 
+    /// The entry at `id` to change, if the table has one there.
+    pub fn get_mut(&mut self, id: I) -> Option<&mut T> {
+        self.entries.get_mut(id.position())
+    }
+
     /// Every index of the table, in order.
     pub fn ids(&self) -> impl Iterator<Item = I> + Clone + use<I, T> {
         (0..self.entries.len()).map(I::from_position)

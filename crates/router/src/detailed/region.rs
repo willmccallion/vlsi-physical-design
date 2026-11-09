@@ -927,7 +927,7 @@ impl DetailedRouter<'_> {
 
     /// Logs a traced region's judgment after a local round.
     fn trace_judgment(&self, area: &Rect<Dbu>, round: usize, score: &Score, judgment: &Judgment) {
-        let name = |o: pare_common::verify::drc::OwnerIndex| match self.fixed.owners()[o.index()] {
+        let name = |o: pare_common::verify::drc::OwnerIndex| match self.fixed.owners()[o] {
             pare_common::verify::drc::Owner::Net(n) => self.db.nets[n].name.clone(),
             other => format!("{other:?}"),
         };
@@ -954,7 +954,7 @@ impl DetailedRouter<'_> {
         if !log::log_enabled!(log::Level::Trace) {
             return;
         }
-        let name = |o: pare_common::verify::drc::OwnerIndex| match self.fixed.owners()[o.index()] {
+        let name = |o: pare_common::verify::drc::OwnerIndex| match self.fixed.owners()[o] {
             pare_common::verify::drc::Owner::Net(n) => self.db.nets[n].name.clone(),
             other => format!("{other:?}"),
         };

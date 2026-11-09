@@ -30,7 +30,7 @@ pub use tile::{check_tiled, check_tiles_lazily, check_window};
 const TILE_HALOS: i64 = 32;
 
 use crate::db::design::NetlistDB;
-use crate::db::indices::{CutLayerId, LayerId};
+use crate::db::indices::{IdVec, LayerId};
 use crate::db::library::LayerRef;
 use crate::geom::dbu::{Dbu, DbuArea};
 use crate::geom::rect::Rect;
@@ -252,12 +252,12 @@ pub struct DrcReport {
     /// cells and I/O pins, special wiring and blockages.
     pub input: Vec<Marker>,
     /// The owner each index of the markers stands for.
-    pub owners: Vec<Owner>,
+    pub owners: IdVec<OwnerIndex, Owner>,
 }
 
 impl DrcReport {
     /// The report of `found`, each class sorted and without repeats.
-    fn from_findings(found: Findings, owners: Vec<Owner>) -> Self {
+    fn from_findings(found: Findings, owners: IdVec<OwnerIndex, Owner>) -> Self {
         Self {
             violations: deduplicated(found.violations),
             advisory: deduplicated(found.advisory),
@@ -297,18 +297,18 @@ fn counts(markers: &[Marker]) -> Vec<(Violation, usize)> {
 pub fn check_area(layout: &Layout, rules: &Rules, area: Rect<Dbu>) -> DrcReport {
     let window = area.expand(rules.max_reach() * 2);
     let mut near = Layout::with_owners_of(layout);
-    for l in 0..layout.metal_layers() {
+    for l in layout.metal_layer_ids() {
         for s in layout.metal(l).iter().filter(|s| s.rect.touches(&window)) {
-            near.add_shape(LayerRef::Routing(LayerId::new(l)), s);
+            near.add_shape(LayerRef::Routing(l), s);
         }
     }
-    for c in 0..layout.cut_layers() {
+    for c in layout.cut_layer_ids() {
         for s in layout.cut(c).iter().filter(|s| s.rect.touches(&window)) {
-            near.add_shape(LayerRef::Cut(CutLayerId::new(c)), s);
+            near.add_shape(LayerRef::Cut(c), s);
         }
     }
     let found = check_window(&near, rules, area, window);
-    DrcReport::from_findings(found, layout.owners().to_vec())
+    DrcReport::from_findings(found, layout.owners().clone())
 }
 
 /// Checks every shape of `db` against the rules of its library and its
@@ -406,7 +406,7 @@ pub fn thin_pieces(layout: &Layout, rules: &Rules, window: Option<Rect<Dbu>>) ->
 pub fn check(layout: &Layout, rules: &Rules) -> DrcReport {
     let model = Model::new(layout);
     let found = classify(run_checks(&model, rules), &model);
-    DrcReport::from_findings(found, layout.owners().to_vec())
+    DrcReport::from_findings(found, layout.owners().clone())
 }
 
 /// Every rule's markers on `model`.
@@ -453,24 +453,25 @@ fn classify(found: Markers, model: &Model<'_>) -> Findings {
 /// the rule.
 fn split_pin_obstructions(model: &Model<'_>, routed: Vec<Marker>) -> (Vec<Marker>, Vec<Marker>) {
     let owners = model.layout.owners();
-    let net_of = |m: &Marker| match (owners[m.owners.0.index()], owners[m.owners.1.index()]) {
+    let net_of = |m: &Marker| match (owners[m.owners.0], owners[m.owners.1]) {
         (Owner::Net(_), Owner::Obstruction(_)) => Some(m.owners.0),
         (Owner::Obstruction(_), Owner::Net(_)) => Some(m.owners.1),
         _ => None,
     };
-    let candidates: Vec<(usize, OwnerIndex, usize)> = routed
+    let candidates: Vec<(usize, OwnerIndex, LayerId)> = routed
         .iter()
         .enumerate()
         .filter_map(|(i, m)| match m.layer {
-            LayerRef::Routing(l) => net_of(m).map(|n| (i, n, l.index())),
+            LayerRef::Routing(l) => net_of(m).map(|n| (i, n, l)),
             LayerRef::Cut(_) => None,
         })
         .collect();
     if candidates.is_empty() {
         return (Vec::new(), routed);
     }
-    let wanted: HashSet<(OwnerIndex, usize)> = candidates.iter().map(|&(_, n, l)| (n, l)).collect();
-    let mut pins: HashMap<(OwnerIndex, usize), Vec<Rect<Dbu>>> = HashMap::new();
+    let wanted: HashSet<(OwnerIndex, LayerId)> =
+        candidates.iter().map(|&(_, n, l)| (n, l)).collect();
+    let mut pins: HashMap<(OwnerIndex, LayerId), Vec<Rect<Dbu>>> = HashMap::new();
     for &(_, l) in &wanted {
         for s in model.layout.metal(l) {
             if s.is_fixed() && wanted.contains(&(s.owner, l)) {
@@ -496,11 +497,11 @@ fn placement_takes_part(model: &Model<'_>, m: &Marker) -> bool {
     match m.layer {
         LayerRef::Routing(l) => model
             .metal
-            .get(l.index())
+            .get(l)
             .is_some_and(|metal| metal.placed_metal_meets(m.owners, &m.bbox)),
         LayerRef::Cut(c) => model
             .cut
-            .get(c.index())
+            .get(c)
             .is_some_and(|cut| cut.placed_cut_meets(m.owners, &m.bbox)),
     }
 }

@@ -3,6 +3,7 @@
 use crate::{ui, visualization};
 use anyhow::Context;
 use pare_common::db::design::NetlistDB;
+use pare_common::db::indices::IdVec;
 use pare_common::geom::dbu::Dbu;
 use pare_common::geom::rect::Rect;
 use pare_common::verify::drc::Marker;
@@ -35,7 +36,7 @@ pub(crate) fn view_area(
     }
     let markers: Vec<&Marker> = report.violations.iter().chain(&report.advisory).collect();
     for m in &markers {
-        let name = |o: pare_common::verify::drc::OwnerIndex| report.owners[o.index()].name(db);
+        let name = |o: pare_common::verify::drc::OwnerIndex| report.owners[o].name(db);
         println!(
             "{} on {:?} at ({:.4}, {:.4})-({:.4}, {:.4}) between {} and {}",
             m.violation.name(),
@@ -49,13 +50,13 @@ pub(crate) fn view_area(
         );
     }
     let boxes: Vec<_> = markers.iter().map(|m| m.bbox).collect();
-    let mut shown = vec![layers.is_empty(); db.library.routing_layers.len()];
+    let mut shown = IdVec::filled(layers.is_empty(), db.library.routing_layers.len());
     for name in layers {
         let layer = db
             .library
             .routing_layer_id(name)
             .with_context(|| format!("no routing layer '{name}'"))?;
-        shown[layer.index()] = true;
+        shown[layer] = true;
     }
     visualization::draw_area(&layout, area, &shown, &highlight, &boxes, out, size)
         .with_context(|| format!("writing {}", out.display()))?;

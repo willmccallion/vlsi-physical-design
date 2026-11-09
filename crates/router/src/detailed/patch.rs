@@ -34,8 +34,8 @@ impl DetailedRouter<'_> {
         let mut layout = Layout::with_owners_of(&self.fixed);
         for (layer, i) in self.fixed_tiles.near(&window) {
             let shape = match layer {
-                LayerRef::Routing(l) => &self.fixed.metal(l.index())[i as usize],
-                LayerRef::Cut(c) => &self.fixed.cut(c.index())[i as usize],
+                LayerRef::Routing(l) => &self.fixed.metal(l)[i as usize],
+                LayerRef::Cut(c) => &self.fixed.cut(c)[i as usize],
             };
             if shape.owner == owner && shape.rect.touches(&window) {
                 layout.add_shape(layer, shape);

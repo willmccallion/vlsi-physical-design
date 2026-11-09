@@ -6,7 +6,7 @@ use imageproc::drawing::{
 };
 use imageproc::rect::Rect as ImageRect;
 use pare_common::db::design::{NetlistDB, RouteElem};
-use pare_common::db::indices::CellId;
+use pare_common::db::indices::{CellId, IdVec, LayerId};
 use pare_common::geom::dbu::Dbu;
 use pare_common::geom::point::Point;
 use pare_common::geom::rect::Rect;
@@ -228,13 +228,13 @@ const NET_COLORS: [[u8; 3]; 6] = [
 pub fn draw_area(
     layout: &Layout,
     area: Rect<Dbu>,
-    layers: &[bool],
+    layers: &IdVec<LayerId, bool>,
     highlight: &[OwnerIndex],
     markers: &[Rect<Dbu>],
     filename: &Path,
     size: u32,
 ) -> image::ImageResult<()> {
-    let shown = |l: usize| layers.get(l).copied().unwrap_or(true);
+    let shown = |l: LayerId| layers.get(l).copied().unwrap_or(true);
     let longer = area.width().max(area.height()).to_f64().max(1.0);
     let scale = f64::from(size) / longer;
     let width = ((area.width().to_f64() * scale).ceil() as u32).max(1);
@@ -264,7 +264,7 @@ pub fn draw_area(
             45
         }
     };
-    for l in (0..layout.metal_layers()).filter(|&l| shown(l)) {
+    for l in layout.metal_layer_ids().filter(|&l| shown(l)) {
         for s in layout.metal(l) {
             let Some(rect) = pixels(&s.rect) else {
                 continue;
@@ -277,16 +277,16 @@ pub fn draw_area(
                 continue;
             }
             let color = if s.is_fixed() {
-                let grey = 70 + (l * 12).min(80) as u8;
+                let grey = 70 + (l.index() * 12).min(80) as u8;
                 Rgba([grey, grey, grey, alpha])
             } else {
-                let [r, g, b] = LAYER_COLORS[l % LAYER_COLORS.len()];
+                let [r, g, b] = LAYER_COLORS[l.index() % LAYER_COLORS.len()];
                 Rgba([r, g, b, alpha])
             };
             draw_filled_rect_mut(&mut canvas, rect, color);
         }
-        if l < layout.cut_layers() && shown(l + 1) {
-            for s in layout.cut(l) {
+        if shown(l.above()) {
+            for s in layout.cut(l.cut_above()) {
                 if let Some(rect) = pixels(&s.rect) {
                     draw_filled_rect_mut(&mut canvas, rect, Rgba([255, 255, 255, emphasis(s)]));
                 }

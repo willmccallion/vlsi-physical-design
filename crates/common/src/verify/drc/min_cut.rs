@@ -16,17 +16,15 @@ use crate::db::rules::{CutApproach, MinimumCut};
 pub(super) fn check(model: &Model<'_>, rules: &Rules) -> Markers {
     model
         .metal
-        .iter()
-        .enumerate()
+        .iter_enumerated()
         .filter(|&(l, _)| !rules.metal[l].minimum_cuts.is_empty())
         .map(|(l, metal)| {
-            let layer = LayerId::new(l);
             let check = LayerCheck {
-                layer,
+                layer: l,
                 metal,
                 rules: &rules.metal[l].minimum_cuts,
-                below: l.checked_sub(1).and_then(|c| model.cut.get(c)),
-                above: model.cut.get(layer.cut_above().index()),
+                below: l.cut_below().and_then(|c| model.cut.get(c)),
+                above: model.cut.get(l.cut_above()),
             };
             metal
                 .rects

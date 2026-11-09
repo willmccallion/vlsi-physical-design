@@ -12,15 +12,15 @@ use super::{DetailedRouter, Marker};
 use crate::runs::EdgeSet;
 use crate::wiring::{NetRoute, Wiring, gap_fills, tidy_patches};
 use pare_common::db::design::{NetlistDB, RouteElem};
-use pare_common::db::indices::{CutLayerId, LayerId, NetId};
+use pare_common::db::indices::{IdVec, LayerId, NetId};
 use pare_common::db::library::LayerRef;
 use pare_common::db::shapes::route_elem_shapes;
 use pare_common::geom::dbu::Dbu;
 use pare_common::geom::point::Point;
 use pare_common::geom::rect::Rect;
 use pare_common::verify::drc::{
-    Findings, Layout, Marker as DrcMarker, Origin, Owner, Rules, Violation, check_tiles_lazily,
-    check_window,
+    Findings, Layout, Marker as DrcMarker, Origin, Owner, OwnerIndex, Rules, Violation,
+    check_tiles_lazily, check_window,
 };
 use rayon::prelude::*;
 use rustc_hash::FxHashSet;
@@ -52,14 +52,14 @@ impl ShapeTiles {
             ny,
             buckets: vec![Vec::new(); nx * ny],
         };
-        for l in 0..layout.metal_layers() {
+        for l in layout.metal_layer_ids() {
             for (i, s) in layout.metal(l).iter().enumerate() {
-                tiles.insert(LayerRef::Routing(LayerId::new(l)), i, &s.rect);
+                tiles.insert(LayerRef::Routing(l), i, &s.rect);
             }
         }
-        for c in 0..layout.cut_layers() {
+        for c in layout.cut_layer_ids() {
             for (i, s) in layout.cut(c).iter().enumerate() {
-                tiles.insert(LayerRef::Cut(CutLayerId::new(c)), i, &s.rect);
+                tiles.insert(LayerRef::Cut(c), i, &s.rect);
             }
         }
         tiles
@@ -118,8 +118,8 @@ pub(super) fn wiring_is_clean(
     let mut layout = Layout::with_owners_of(fixed);
     for (layer, i) in tiles.near(&window) {
         let shape = match layer {
-            LayerRef::Routing(l) => &fixed.metal(l.index())[i as usize],
-            LayerRef::Cut(c) => &fixed.cut(c.index())[i as usize],
+            LayerRef::Routing(l) => &fixed.metal(l)[i as usize],
+            LayerRef::Cut(c) => &fixed.cut(c)[i as usize],
         };
         if shape.rect.touches(&window) {
             layout.add_shape(layer, shape);
@@ -149,7 +149,7 @@ pub(super) fn clear_of_fixed(
         if l != LayerRef::Routing(layer) {
             return true;
         }
-        let shape = &fixed.metal(layer.index())[i as usize];
+        let shape = &fixed.metal(layer)[i as usize];
         Some(shape.owner) == own || !shape.rect.overlaps(&reach)
     })
 }
@@ -193,7 +193,7 @@ impl DetailedRouter<'_> {
         let window = self.judge_window(area);
         let layout = self.window_layout(&window, candidates);
         let findings = check_window(&layout, &self.rules, *area, window);
-        let net_of = |o: pare_common::verify::drc::OwnerIndex| match layout.owners()[o.index()] {
+        let net_of = |o: OwnerIndex| match layout.owners()[o] {
             Owner::Net(n) => Some(n),
             _ => None,
         };
@@ -213,8 +213,8 @@ impl DetailedRouter<'_> {
         let mut layout = Layout::with_owners_of(&self.fixed);
         for (layer, i) in self.fixed_tiles.near(window) {
             let shape = match layer {
-                LayerRef::Routing(l) => &self.fixed.metal(l.index())[i as usize],
-                LayerRef::Cut(c) => &self.fixed.cut(c.index())[i as usize],
+                LayerRef::Routing(l) => &self.fixed.metal(l)[i as usize],
+                LayerRef::Cut(c) => &self.fixed.cut(c)[i as usize],
             };
             if shape.rect.touches(window) {
                 layout.add_shape(layer, shape);
@@ -264,7 +264,7 @@ impl DetailedRouter<'_> {
         };
         let report = check_tiles_lazily(
             bounds,
-            self.fixed.owners().to_vec(),
+            self.fixed.owners().clone(),
             &self.rules,
             (self.halo * TILE_HALOS, self.halo),
             |window| self.window_layout(window, &[]),
@@ -314,8 +314,8 @@ impl DetailedRouter<'_> {
 
 /// The repair marker of a checker marker: its center, extent, layer and
 /// nets.
-fn marker_of(owners: &[Owner], m: &DrcMarker) -> Marker {
-    let net = |o: pare_common::verify::drc::OwnerIndex| match owners[o.index()] {
+fn marker_of(owners: &IdVec<OwnerIndex, Owner>, m: &DrcMarker) -> Marker {
+    let net = |o: OwnerIndex| match owners[o] {
         Owner::Net(n) => Some(n),
         _ => None,
     };

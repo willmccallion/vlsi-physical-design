@@ -11,11 +11,11 @@
 //! thread, since a tile or a router's region is small and the checks of
 //! many of them run at once.
 
-use super::layout::{Layout, LayoutShape, Owner};
+use super::layout::{Layout, LayoutShape, Owner, OwnerIndex};
 use super::model::Model;
 use super::rules::Rules;
 use super::{DrcReport, Findings, Marker, classify, run_checks};
-use crate::db::indices::{CutLayerId, LayerId};
+use crate::db::indices::IdVec;
 use crate::db::library::LayerRef;
 use crate::geom::dbu::Dbu;
 use crate::geom::point::Point;
@@ -27,7 +27,7 @@ use rayon::prelude::*;
 pub fn check_tiled(layout: &Layout, rules: &Rules, core: Dbu, halo: Dbu) -> DrcReport {
     let Some(grid) = layout.bounds().map(|b| Grid::from_bounds(b, core)) else {
         return DrcReport {
-            owners: layout.owners().to_vec(),
+            owners: layout.owners().clone(),
             ..DrcReport::default()
         };
     };
@@ -36,7 +36,7 @@ pub fn check_tiled(layout: &Layout, rules: &Rules, core: Dbu, halo: Dbu) -> DrcR
         .into_par_iter()
         .map(|tile| check_window(&tile.layout, rules, tile.core, tile.window))
         .collect();
-    merged_report(found, layout.owners().to_vec())
+    merged_report(found, layout.owners().clone())
 }
 
 /// Checks the tiles of `core` a side over `bounds` as [`check_tiled`] does.
@@ -45,7 +45,7 @@ pub fn check_tiled(layout: &Layout, rules: &Rules, core: Dbu, halo: Dbu) -> DrcR
 /// the shapes meeting a window, with owner indices into `owners`.
 pub fn check_tiles_lazily(
     bounds: Rect<Dbu>,
-    owners: Vec<Owner>,
+    owners: IdVec<OwnerIndex, Owner>,
     rules: &Rules,
     (core, halo): (Dbu, Dbu),
     layout_of: impl Fn(&Rect<Dbu>) -> Layout + Sync,
@@ -61,7 +61,7 @@ pub fn check_tiles_lazily(
     merged_report(found, owners)
 }
 
-fn merged_report(found: Vec<Findings>, owners: Vec<Owner>) -> DrcReport {
+fn merged_report(found: Vec<Findings>, owners: IdVec<OwnerIndex, Owner>) -> DrcReport {
     let merged = found.into_iter().fold(Findings::default(), Findings::merge);
     DrcReport::from_findings(merged, owners)
 }
@@ -129,21 +129,17 @@ impl Grid {
                 }
             })
             .collect();
-        for l in 0..layout.metal_layers() {
+        for l in layout.metal_layer_ids() {
             for s in layout.metal(l) {
                 self.spread(s, halo, |t| {
-                    tiles[t]
-                        .layout
-                        .add_shape(LayerRef::Routing(LayerId::new(l)), s);
+                    tiles[t].layout.add_shape(LayerRef::Routing(l), s);
                 });
             }
         }
-        for c in 0..layout.cut_layers() {
+        for c in layout.cut_layer_ids() {
             for s in layout.cut(c) {
                 self.spread(s, halo, |t| {
-                    tiles[t]
-                        .layout
-                        .add_shape(LayerRef::Cut(CutLayerId::new(c)), s);
+                    tiles[t].layout.add_shape(LayerRef::Cut(c), s);
                 });
             }
         }
