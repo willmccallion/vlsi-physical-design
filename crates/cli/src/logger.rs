@@ -1,60 +1,38 @@
-//! Logging Initialization.
-//!
-//! Sets up the logging infrastructure using `env_logger` with styled output.
-//! Info messages get a clean 2-space indent, warnings get a yellow prefix,
-//! errors get a red prefix, and debug/trace use a bracketed format.
+//! Logging setup: `env_logger` writing PARE's styled lines to stderr, where
+//! all of PARE's terminal output goes. Info messages read as plain output,
+//! warnings and errors get a coloured prefix and debug and trace a dimmed
+//! bracketed level.
 
-/// Whether to colour PARE's output, all of which goes to stderr: when
-/// stderr is a terminal and the environment allows colours, whatever stdout
-/// is, as yansi's own example builds it.
-const STDERR_COLOR: yansi::Condition = yansi::Condition::from(|| {
-    yansi::Condition::stderr_is_tty()
-        && yansi::Condition::clicolor()
-        && yansi::Condition::no_color()
+use log::Level;
+use std::io::Write;
+use yansi::{Condition, Paint, Painted};
+
+/// Whether to colour PARE's output: when stderr is a terminal and the
+/// environment allows colours, whatever stdout is, as yansi's own example
+/// builds it.
+const STDERR_COLOR: Condition = Condition::from(|| {
+    Condition::stderr_is_tty() && Condition::clicolor() && Condition::no_color()
 });
 
-/// Initializes the logging system with styled formatting.
-///
-/// Filters at Info level unless `RUST_LOG` says otherwise, with clean,
-/// minimal output formatting, and colours output only when stderr is a
-/// terminal.
+/// Initializes logging at the info level unless `RUST_LOG` says otherwise,
+/// and colours for every styled line PARE prints.
 pub fn init() {
     yansi::whenever(STDERR_COLOR);
-
     env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("info"))
-        .format_timestamp(None)
-        .format(|_buf, record| {
-            use std::io::Write;
-            use yansi::Paint;
-            match record.level() {
-                log::Level::Error => {
-                    writeln!(
-                        std::io::stderr(),
-                        "  {} {}",
-                        "ERROR".red().bold(),
-                        record.args()
-                    )
-                }
-                log::Level::Warn => {
-                    writeln!(
-                        std::io::stderr(),
-                        "  {} {}",
-                        "WARN".yellow().bold(),
-                        record.args()
-                    )
-                }
-                log::Level::Info => {
-                    writeln!(std::io::stderr(), "  {}", record.args())
-                }
-                log::Level::Debug | log::Level::Trace => {
-                    writeln!(
-                        std::io::stderr(),
-                        "  {} {}",
-                        format!("[{:5}]", record.level()).dim(),
-                        record.args()
-                    )
-                }
-            }
+        .format(|buf, record| match level_prefix(record.level()) {
+            Some(prefix) => writeln!(buf, "  {prefix} {}", record.args()),
+            None => writeln!(buf, "  {}", record.args()),
         })
         .init();
+}
+
+/// The styled prefix of a line logged at `level`; none for info.
+fn level_prefix(level: Level) -> Option<Painted<&'static str>> {
+    match level {
+        Level::Error => Some("ERROR".red().bold()),
+        Level::Warn => Some("WARN".yellow().bold()),
+        Level::Info => None,
+        Level::Debug => Some("[DEBUG]".dim()),
+        Level::Trace => Some("[TRACE]".dim()),
+    }
 }
