@@ -140,6 +140,27 @@ impl<I: TableIndex, T> IdVec<I, T> {
             .enumerate()
             .map(|(i, entry)| (I::from_position(i), entry))
     }
+
+    /// Every entry to change with its index, in order.
+    pub fn iter_enumerated_mut(&mut self) -> impl Iterator<Item = (I, &mut T)> {
+        self.entries
+            .iter_mut()
+            .enumerate()
+            .map(|(i, entry)| (I::from_position(i), entry))
+    }
+}
+
+impl<I: TableIndex + Send, T: Send> IdVec<I, T> {
+    /// Every entry to change with its index, in parallel.
+    pub fn par_iter_enumerated_mut(
+        &mut self,
+    ) -> impl rayon::iter::IndexedParallelIterator<Item = (I, &mut T)> {
+        use rayon::prelude::*;
+        self.entries
+            .par_iter_mut()
+            .enumerate()
+            .map(|(i, entry)| (I::from_position(i), entry))
+    }
 }
 
 impl<I: TableIndex, T> Default for IdVec<I, T> {
@@ -154,6 +175,10 @@ impl<I, T: Clone> Clone for IdVec<I, T> {
             entries: self.entries.clone(),
             index: PhantomData,
         }
+    }
+
+    fn clone_from(&mut self, source: &Self) {
+        self.entries.clone_from(&source.entries);
     }
 }
 

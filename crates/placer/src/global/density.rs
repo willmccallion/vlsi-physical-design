@@ -9,10 +9,11 @@
 //! exactly full.
 
 use super::poisson::PoissonSolver;
+use super::{ObjectId, ObjectPoints, ObjectRange};
+use pare_common::db::indices::IdVec;
 use pare_common::geom::point::Point;
 use pare_common::geom::rect::Rect;
 use std::f64::consts::SQRT_2;
-use std::ops::Range;
 
 /// Cell area above the target density, all cell area, and the electrostatic
 /// energy of one grid.
@@ -213,21 +214,21 @@ impl DensityGrid {
     /// target density and all cell area.
     pub(super) fn update(
         &mut self,
-        centers: &[Point<f64>],
-        footprints: &[Footprint],
-        cells: Range<usize>,
-        fillers: Range<usize>,
+        centers: &ObjectPoints,
+        footprints: &IdVec<ObjectId, Footprint>,
+        cells: ObjectRange,
+        fillers: ObjectRange,
     ) -> Excess {
         self.cells.fill(0.0);
         self.total.copy_from_slice(&self.fixed);
-        for i in cells {
+        for i in cells.iter() {
             let f = footprints[i];
             let rect = Rect::new(centers[i] - f.half, centers[i] + f.half);
             let density = self.deposited_density(&f);
             self.bins.spread(&rect, density, &mut self.cells);
             self.bins.spread(&rect, density, &mut self.total);
         }
-        for i in fillers {
+        for i in fillers.iter() {
             let f = footprints[i];
             let rect = Rect::new(centers[i] - f.half, centers[i] + f.half);
             self.bins.spread(&rect, f.density, &mut self.total);
@@ -350,12 +351,22 @@ mod tests {
         assert!((w * h).mul_add(f.density, -0.25).abs() < 1e-12);
     }
 
+    /// The objects from `start` up to `end`.
+    const fn objects(start: u32, end: u32) -> ObjectRange {
+        ObjectRange::new(ObjectId(start), ObjectId(end))
+    }
+
     #[test]
     fn overflow_is_cell_area_above_the_target_over_all_cell_area() {
         let mut grid = DensityGrid::new(&die(4.0, 4.0), 4, 0.5, &[], &[]);
         let f = grid.footprint(Point::new(2.0, 2.0), Charge::Whole);
 
-        let excess = grid.update(&[Point::new(1.0, 1.0)], &[f], 0..1, 1..1);
+        let excess = grid.update(
+            &vec![Point::new(1.0, 1.0)].into(),
+            &vec![f].into(),
+            objects(0, 1),
+            objects(1, 1),
+        );
 
         assert!((excess.fraction() - 0.5).abs() < 1e-12);
     }
@@ -393,10 +404,15 @@ mod tests {
         let mut grid = DensityGrid::new(&die(16.0, 16.0), 16, 0.5, &[], &[]);
         let crowd = grid.footprint(Point::new(4.0, 4.0), Charge::Whole);
         let probe = grid.footprint(Point::new(1.0, 1.0), Charge::Whole);
-        let centers = [Point::new(8.0, 8.0), Point::new(11.0, 8.0)];
-        let _ = grid.update(&centers, &[crowd, probe], 0..2, 2..2);
+        let centers = vec![Point::new(8.0, 8.0), Point::new(11.0, 8.0)].into();
+        let _ = grid.update(
+            &centers,
+            &vec![crowd, probe].into(),
+            objects(0, 2),
+            objects(2, 2),
+        );
 
-        let probe_grad = grid.gradient_at(centers[1], &probe);
+        let probe_grad = grid.gradient_at(centers[ObjectId(1)], &probe);
 
         assert!(probe_grad.x < 0.0, "{probe_grad:?}");
     }
@@ -406,7 +422,12 @@ mod tests {
         let mut grid = DensityGrid::new(&die(4.0, 4.0), 2, 0.5, &[], &[]);
         let block = grid.footprint(Point::new(4.0, 4.0), Charge::AtTarget);
 
-        let excess = grid.update(&[Point::new(2.0, 2.0)], &[block], 0..1, 1..1);
+        let excess = grid.update(
+            &vec![Point::new(2.0, 2.0)].into(),
+            &vec![block].into(),
+            objects(0, 1),
+            objects(1, 1),
+        );
 
         assert!(excess.over.abs() < 1e-12, "{excess:?}");
         assert!((excess.cells - 8.0).abs() < 1e-12, "{excess:?}");

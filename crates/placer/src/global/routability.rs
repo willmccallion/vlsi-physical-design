@@ -19,7 +19,7 @@
 
 use super::nesterov::{Objects, remap_fields};
 use super::wirelength::Netlist;
-use super::{Field, Remap};
+use super::{Field, FieldId, ObjectPoints, ObjectRange, Remap};
 use crate::model::CellKind;
 use pare_common::db::indices::{CellId, IdVec};
 use pare_common::geom::point::Point;
@@ -194,7 +194,7 @@ impl CongestionMap {
     /// area lays no wire.
     pub(super) fn rudy(
         netlist: &Netlist,
-        centers: &[Point<f64>],
+        centers: &ObjectPoints,
         die: &Rect<f64>,
         params: &RoutabilityParams,
     ) -> Self {
@@ -279,10 +279,11 @@ impl CongestionMap {
 #[derive(Clone, Debug)]
 struct Minimum {
     congestion: f64,
-    sizes: Vec<Point<f64>>,
-    targets: Vec<f64>,
-    kept_fillers: Vec<usize>,
-    grown: Vec<f64>,
+    /// The size of each cell object.
+    sizes: ObjectPoints,
+    targets: IdVec<FieldId, f64>,
+    kept_fillers: IdVec<FieldId, usize>,
+    grown: IdVec<FieldId, f64>,
 }
 
 /// What to do after measuring congestion.
@@ -308,7 +309,7 @@ pub(super) struct Routability {
     /// All cell area before any growth.
     initial_cell_area: f64,
     /// Area each field's cells have grown by.
-    grown: Vec<f64>,
+    grown: IdVec<FieldId, f64>,
     minimum: Option<Minimum>,
     stalled: usize,
     calls: usize,
@@ -318,12 +319,16 @@ pub(super) struct Routability {
 }
 
 impl Routability {
-    pub(super) fn new(params: RoutabilityParams, objects: &Objects, fields: &[Field]) -> Self {
+    pub(super) fn new(
+        params: RoutabilityParams,
+        objects: &Objects,
+        fields: &IdVec<FieldId, Field>,
+    ) -> Self {
         let original_area = fields
             .iter()
             .flat_map(|f| {
                 let target = f.grid.target();
-                f.cells.clone().map(move |i| (i, target))
+                f.cells.iter().map(move |i| (i, target))
             })
             .map(|(i, target)| {
                 let area = objects.sizes[i].x * objects.sizes[i].y;
@@ -337,7 +342,7 @@ impl Routability {
             params,
             original_area,
             initial_cell_area: cell_area(objects),
-            grown: vec![0.0; fields.len()],
+            grown: IdVec::filled(0.0, fields.len()),
             minimum: None,
             stalled: 0,
             calls: 0,
@@ -353,7 +358,12 @@ impl Routability {
     /// Carries the budget and the record of the least congested round to
     /// the objects and fields of a rebuilt setup: the area a repair added
     /// counts as if it had been there from the start.
-    pub(super) fn remap(&mut self, remap: &Remap, objects: &Objects, fields: &[Field]) {
+    pub(super) fn remap(
+        &mut self,
+        remap: &Remap,
+        objects: &Objects,
+        fields: &IdVec<FieldId, Field>,
+    ) {
         self.original_area += remap.added_area;
         self.initial_cell_area += remap.added_area;
         self.grown = remap_fields(&self.grown, &remap.old_field_of_new, 0.0);
@@ -364,7 +374,9 @@ impl Routability {
             // footprint is too small and a downsized one's too large, misplacing its
             // area until placement ends. It needs a timing round between this record
             // and the revert, which the ORFS runs seen so far never have.
-            m.sizes = (0..objects.cells())
+            m.sizes = objects
+                .cells()
+                .iter()
                 .map(|i| remap.old_of_new[i].map_or(objects.sizes[i], |k| m.sizes[k]))
                 .collect();
             m.targets = remap
@@ -394,7 +406,7 @@ impl Routability {
         iteration: usize,
         map: &CongestionMap,
         objects: &mut Objects,
-        fields: &mut [Field],
+        fields: &mut IdVec<FieldId, Field>,
     ) -> Verdict {
         self.calls += 1;
         let congestion = map.metric();
@@ -414,7 +426,7 @@ impl Routability {
 
         let budget = self.budget_scale(map, objects);
         let mut over_density = false;
-        for (k, field) in fields.iter_mut().enumerate() {
+        for (k, field) in fields.iter_enumerated_mut() {
             let (inflated, added) = grow(map, objects, field, budget.scale);
             round.inflated += inflated;
             self.grown[k] += added;
@@ -444,7 +456,12 @@ impl Routability {
     /// Keeps the growth in effect as the new minimum when `congestion`
     /// improves on the old one by [`MIN_IMPROVEMENT`], or counts a round
     /// without improvement.
-    fn track_minimum(&mut self, congestion: f64, objects: &Objects, fields: &[Field]) {
+    fn track_minimum(
+        &mut self,
+        congestion: f64,
+        objects: &Objects,
+        fields: &IdVec<FieldId, Field>,
+    ) {
         let improved = self
             .minimum
             .as_ref()
@@ -455,7 +472,7 @@ impl Routability {
         }
         self.minimum = Some(Minimum {
             congestion,
-            sizes: objects.sizes[..objects.cells()].to_vec(),
+            sizes: objects.cells().iter().map(|i| objects.sizes[i]).collect(),
             targets: fields.iter().map(|f| f.grid.target()).collect(),
             kept_fillers: fields.iter().map(|f| f.kept_fillers).collect(),
             grown: self.grown.clone(),
@@ -469,7 +486,9 @@ impl Routability {
         let budget = MAX_INFLATION_TOTAL * self.original_area;
         let spent: f64 = self.grown.iter().sum();
         let allowed = (budget / BUDGET_PASSES).min(budget - spent);
-        let wanted: f64 = (0..objects.cells())
+        let wanted: f64 = objects
+            .cells()
+            .iter()
             .filter(|&i| objects.kinds[i] == CellKind::Standard)
             .map(|i| {
                 let size = objects.sizes[i];
@@ -490,11 +509,13 @@ impl Routability {
 
     /// Restores the sizes, target densities and fillers of the round that
     /// measured least congestion.
-    fn revert(&mut self, objects: &mut Objects, fields: &mut [Field]) {
+    fn revert(&mut self, objects: &mut Objects, fields: &mut IdVec<FieldId, Field>) {
         let Some(m) = &self.minimum else {
             return;
         };
-        objects.sizes[..m.sizes.len()].copy_from_slice(&m.sizes);
+        for (i, &size) in m.sizes.iter_enumerated() {
+            objects.sizes[i] = size;
+        }
         for ((f, &target), &kept) in fields.iter_mut().zip(&m.targets).zip(&m.kept_fillers) {
             f.grid.set_target(target);
             f.kept_fillers = kept;
@@ -511,14 +532,19 @@ struct BudgetScale {
     spent: bool,
 }
 
-fn highest_target(fields: &[Field]) -> f64 {
+fn highest_target(fields: &IdVec<FieldId, Field>) -> f64 {
     fields.iter().map(|f| f.grid.target()).fold(0.0, f64::max)
 }
 
 fn cell_area(objects: &Objects) -> f64 {
-    objects.sizes[..objects.cells()]
+    objects_area(objects, objects.cells())
+}
+
+/// The area of the objects of `range`.
+fn objects_area(objects: &Objects, range: ObjectRange) -> f64 {
+    range
         .iter()
-        .map(|s| s.x * s.y)
+        .map(|i| objects.sizes[i].x * objects.sizes[i].y)
         .sum()
 }
 
@@ -528,7 +554,7 @@ fn cell_area(objects: &Objects) -> f64 {
 fn grow(map: &CongestionMap, objects: &mut Objects, field: &Field, scale: f64) -> (usize, f64) {
     let mut inflated = 0;
     let mut added = 0.0;
-    for i in field.cells.clone() {
+    for i in field.cells.iter() {
         if objects.kinds[i] != CellKind::Standard {
             continue;
         }
@@ -561,10 +587,7 @@ fn remove_fillers(objects: &Objects, field: &mut Field, added: f64) {
     if missing <= single || free <= 0.0 {
         return;
     }
-    let cells: f64 = objects.sizes[field.cells.clone()]
-        .iter()
-        .map(|s| s.x * s.y)
-        .sum();
+    let cells = objects_area(objects, field.cells);
     let total = (field.kept_fillers as f64).mul_add(single, cells);
     field.grid.set_target(total / free);
 }
@@ -572,6 +595,7 @@ fn remove_fillers(objects: &Objects, field: &mut Field, added: f64) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::global::ObjectId;
     use crate::global::density::DensityGrid;
     use crate::global::wirelength::Terminal;
     use crate::zones::Zone;
@@ -611,9 +635,9 @@ mod tests {
     /// Standard cells of unit size at `centers`.
     fn cells_at(centers: &[Point<f64>]) -> Objects {
         Objects {
-            centers: centers.to_vec(),
-            sizes: vec![Point::new(1.0, 1.0); centers.len()],
-            kinds: vec![CellKind::Standard; centers.len()],
+            centers: centers.to_vec().into(),
+            sizes: IdVec::filled(Point::new(1.0, 1.0), centers.len()),
+            kinds: IdVec::filled(CellKind::Standard, centers.len()),
         }
     }
 
@@ -632,14 +656,15 @@ mod tests {
         netlist
     }
 
-    fn field(cells: std::ops::Range<usize>, fillers: std::ops::Range<usize>) -> Field {
+    fn field(cells: std::ops::Range<u32>, fillers: std::ops::Range<u32>) -> Field {
+        let range = |r: std::ops::Range<u32>| ObjectRange::new(ObjectId(r.start), ObjectId(r.end));
         Field {
             zone: Zone::Outside,
             grid: DensityGrid::new(&die(4.0), 4, 0.5, &[], &[]),
             area: vec![die(4.0)],
-            cells,
+            cells: range(cells),
             kept_fillers: fillers.len(),
-            fillers,
+            fillers: range(fillers),
             filler: Point::new(1.0, 1.0),
             utilization: 0.125,
         }
@@ -649,7 +674,7 @@ mod tests {
     fn a_net_spreads_its_wire_area_evenly_over_its_box() {
         let netlist = two_pin(at(0.5, 1.25), at(3.5, 1.75));
 
-        let map = CongestionMap::rudy(&netlist, &[], &die(4.0), &params(&[0.0; 16]));
+        let map = CongestionMap::rudy(&netlist, &IdVec::new(), &die(4.0), &params(&[0.0; 16]));
 
         let density = (3.0 + 0.5) * 0.1 / (3.0 * 0.5);
         let half = density * 0.5;
@@ -671,7 +696,7 @@ mod tests {
     fn a_net_whose_pin_points_line_up_lays_no_wire() {
         let netlist = two_pin(at(0.5, 1.5), at(2.5, 1.5));
 
-        let map = CongestionMap::rudy(&netlist, &[], &die(4.0), &params(&[0.0; 16]));
+        let map = CongestionMap::rudy(&netlist, &IdVec::new(), &die(4.0), &params(&[0.0; 16]));
 
         assert!(
             map.congestion.iter().all(|&c| c == 0.0),
@@ -687,7 +712,7 @@ mod tests {
             pin(Point::new(2.5, 1.5), Point::new(0.0, 0.5)),
         );
 
-        let map = CongestionMap::rudy(&netlist, &[], &die(4.0), &params(&[0.0; 16]));
+        let map = CongestionMap::rudy(&netlist, &IdVec::new(), &die(4.0), &params(&[0.0; 16]));
 
         let wire_area = (2.0 + 0.5) * 0.1;
         let laid: f64 = map.congestion.iter().sum();
@@ -701,7 +726,7 @@ mod tests {
         taken[0] = 5.0;
         let netlist = two_pin(at(0.0, 0.0), at(4.0, 4.0));
 
-        let map = CongestionMap::rudy(&netlist, &[], &die(4.0), &params(&taken));
+        let map = CongestionMap::rudy(&netlist, &IdVec::new(), &die(4.0), &params(&taken));
 
         let wire = 8.0 * 0.1 / 16.0;
         assert!(
@@ -721,7 +746,7 @@ mod tests {
         let mut params = params(&[3.0; 16]);
         params.tiles.capacity[3] = 0.0;
 
-        let map = CongestionMap::rudy(&Netlist::default(), &[], &die(4.0), &params);
+        let map = CongestionMap::rudy(&Netlist::default(), &IdVec::new(), &die(4.0), &params);
 
         assert!(map.congestion[3].abs() < 1e-12);
         assert!((map.congestion[2] - 0.3).abs() < 1e-12);
@@ -731,7 +756,7 @@ mod tests {
     fn a_gcell_the_die_cuts_short_spreads_wire_over_its_own_area() {
         let netlist = two_pin(at(3.0, 0.0), at(3.5, 1.0));
 
-        let map = CongestionMap::rudy(&netlist, &[], &die(3.5), &params(&[0.0; 16]));
+        let map = CongestionMap::rudy(&netlist, &IdVec::new(), &die(3.5), &params(&[0.0; 16]));
 
         let density = (0.5 + 1.0) * 0.1 / 0.5;
         assert!(
@@ -779,8 +804,10 @@ mod tests {
     #[test]
     fn growth_removes_whole_fillers_from_the_last_kept() {
         let mut objects = cells_at(&[Point::new(0.5, 0.5), Point::new(0.4, 0.6)]);
-        objects.centers.extend([Point::new(2.0, 2.0); 3]);
-        objects.sizes.extend([Point::new(1.0, 1.0); 3]);
+        for _ in 0..3 {
+            let _ = objects.centers.push(Point::new(2.0, 2.0));
+            let _ = objects.sizes.push(Point::new(1.0, 1.0));
+        }
         let mut congestion = vec![0.0; 16];
         congestion[0] = 1.5;
         let mut f = field(0..2, 2..5);
@@ -797,9 +824,9 @@ mod tests {
     #[test]
     fn growth_past_the_fillers_raises_the_target_to_cover_the_cells() {
         let objects = Objects {
-            centers: vec![Point::new(1.0, 1.0)],
-            sizes: vec![Point::new(3.0, 3.0)],
-            kinds: vec![CellKind::Standard],
+            centers: vec![Point::new(1.0, 1.0)].into(),
+            sizes: vec![Point::new(3.0, 3.0)].into(),
+            kinds: vec![CellKind::Standard].into(),
         };
         let mut f = field(0..1, 1..1);
 
@@ -811,7 +838,11 @@ mod tests {
     #[test]
     fn a_round_takes_at_most_a_sixth_of_the_growth_budget() {
         let objects = cells_at(&[Point::new(0.5, 0.5); 10]);
-        let routability = Routability::new(params(&[0.0; 16]), &objects, &[field(0..10, 10..10)]);
+        let routability = Routability::new(
+            params(&[0.0; 16]),
+            &objects,
+            &vec![field(0..10, 10..10)].into(),
+        );
         let mut congestion = vec![0.0; 16];
         congestion[0] = 9.0;
 
@@ -825,7 +856,7 @@ mod tests {
     #[test]
     fn congestion_below_the_target_keeps_the_sizes_and_ends_routability() {
         let mut objects = cells_at(&[Point::new(0.5, 0.5)]);
-        let mut fields = [field(0..1, 1..1)];
+        let mut fields = vec![field(0..1, 1..1)].into();
         let mut routability = Routability::new(params(&[0.0; 16]), &objects, &fields);
 
         let verdict = routability.check(0, &map_of(vec![0.5; 16]), &mut objects, &mut fields);
@@ -837,7 +868,7 @@ mod tests {
     #[test]
     fn three_rounds_without_improvement_revert_to_the_least_congested_sizes() {
         let mut objects = cells_at(&[Point::new(0.5, 0.5)]);
-        let mut fields = [field(0..1, 1..1)];
+        let mut fields = vec![field(0..1, 1..1)].into();
         let mut routability = Routability::new(params(&[0.0; 16]), &objects, &fields);
         let mut congestion = vec![0.0; 16];
         congestion[0] = 1.2;
@@ -855,7 +886,7 @@ mod tests {
                 Verdict::Revert
             ]
         );
-        assert_eq!(objects.sizes[0], Point::new(1.0, 1.0));
-        assert!((fields[0].grid.target() - 0.5).abs() < 1e-12);
+        assert_eq!(objects.sizes[ObjectId(0)], Point::new(1.0, 1.0));
+        assert!((fields[FieldId(0)].grid.target() - 0.5).abs() < 1e-12);
     }
 }

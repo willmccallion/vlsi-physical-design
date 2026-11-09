@@ -16,13 +16,13 @@ use super::routability::{
 };
 use super::wirelength::{Netlist, Wirelength};
 use super::{
-    Field, GlobalParams, GlobalResult, Outcome, Probe, Progress, Remap, Setup, TimingDriver,
-    ZoneOutcome,
+    Field, FieldId, GlobalParams, GlobalResult, ObjectId, ObjectPoints, ObjectRange, Outcome,
+    Probe, Progress, Remap, Setup, TimingDriver, ZoneOutcome,
 };
 use crate::model::{CellKind, PlacementModel};
 use crate::zones::Zone;
 use pare_common::config::Share;
-use pare_common::db::indices::CellId;
+use pare_common::db::indices::{CellId, IdVec};
 use pare_common::geom::dbu::Dbu;
 use pare_common::geom::point::Point;
 use pare_common::geom::rect::Rect;
@@ -72,37 +72,41 @@ const MAX_DAMPING: f64 = 1024.0;
 #[derive(Debug)]
 pub(super) struct Objects {
     /// Center of each object.
-    pub(super) centers: Vec<Point<f64>>,
+    pub(super) centers: ObjectPoints,
     /// Width and height of each object.
-    pub(super) sizes: Vec<Point<f64>>,
+    pub(super) sizes: ObjectPoints,
     /// The kind of each cell, the first objects.
-    pub(super) kinds: Vec<CellKind>,
+    pub(super) kinds: IdVec<ObjectId, CellKind>,
 }
 
 impl Objects {
-    /// How many of the objects are cells.
-    pub(super) const fn cells(&self) -> usize {
-        self.kinds.len()
+    /// The objects that are cells, the first ones.
+    pub(super) const fn cells(&self) -> ObjectRange {
+        ObjectRange::new(ObjectId(0), ObjectId::new(self.kinds.len()))
     }
 }
 
 /// The objective and the buffers to evaluate it.
 struct Objective<'a> {
-    fields: &'a mut [Field],
+    fields: &'a mut IdVec<FieldId, Field>,
     netlist: &'a Netlist,
     die: Rect<f64>,
     /// The field of each object.
-    field_of: Vec<usize>,
+    field_of: IdVec<ObjectId, FieldId>,
     /// Whether each object is in play: a cell, or a filler not removed.
-    active: Vec<bool>,
-    footprints: Vec<Footprint>,
-    areas: Vec<f64>,
-    pins: Vec<f64>,
-    bounds: Vec<Rect<f64>>,
-    wirelength_grad: Vec<Point<f64>>,
-    density_grad: Vec<Point<f64>>,
+    active: IdVec<ObjectId, bool>,
+    footprints: IdVec<ObjectId, Footprint>,
+    areas: IdVec<ObjectId, f64>,
+    pins: IdVec<ObjectId, f64>,
+    bounds: IdVec<ObjectId, Rect<f64>>,
+    wirelength_grad: ObjectPoints,
+    density_grad: ObjectPoints,
+    /// The wirelength gradient of each terminal.
     scratch: Vec<Point<f64>>,
 }
+
+/// A value for each field.
+type FieldValues = IdVec<FieldId, f64>;
 
 /// The state of a placement besides its gradient.
 #[derive(Clone, Debug)]
@@ -112,18 +116,18 @@ struct Evaluation {
     /// together.
     overflow: f64,
     /// The overflow of each field.
-    field_overflow: Vec<f64>,
+    field_overflow: FieldValues,
     /// The electrostatic energy of each field.
-    field_energy: Vec<f64>,
+    field_energy: FieldValues,
 }
 
 /// How strongly each field's density energy pulls its objects apart.
 #[derive(Clone, Debug)]
 struct Weights {
     /// Each field's density weight.
-    penalties: Vec<f64>,
+    penalties: FieldValues,
     /// Whether each field has stopped moving.
-    frozen: Vec<bool>,
+    frozen: IdVec<FieldId, bool>,
     /// With several fields, the schedule of the quadratic penalty.
     schedule: Option<Schedule>,
 }
@@ -146,9 +150,9 @@ enum Precondition {
 #[derive(Clone, Debug)]
 struct Schedule {
     /// One over each field's initial energy, or zero for a field without any.
-    precondition: Vec<f64>,
+    precondition: FieldValues,
     /// The subgradient iterate of each field.
-    u: Vec<f64>,
+    u: FieldValues,
     /// The subgradient step length.
     step: f64,
     /// The largest weight, [`SCHEDULED_WEIGHT_CAP`] in microns.
@@ -157,15 +161,15 @@ struct Schedule {
     /// preconditioner is tuned for.
     site: f64,
     /// How each field's objects are preconditioned.
-    kinds: Vec<Precondition>,
+    kinds: IdVec<FieldId, Precondition>,
     /// The factor damping large objects, doubled late in placement.
     damping: f64,
 }
 
 impl Weights {
     /// ePlace's weights: one per field, all free to move.
-    fn eplace(penalties: Vec<f64>) -> Self {
-        let frozen = vec![false; penalties.len()];
+    fn eplace(penalties: FieldValues) -> Self {
+        let frozen = IdVec::filled(false, penalties.len());
         Self {
             penalties,
             frozen,
@@ -175,7 +179,7 @@ impl Weights {
 
     /// What field `k`'s density gradient is multiplied by when its energy
     /// is `energy`: its weight, times the quadratic term's derivative.
-    fn multiplier(&self, k: usize, energy: f64) -> f64 {
+    fn multiplier(&self, k: FieldId, energy: f64) -> f64 {
         let quadratic = self
             .schedule
             .as_ref()
@@ -191,7 +195,7 @@ impl Weights {
     /// with `pins` pins and `area`, at least one. ePlace's weighs the area
     /// by the field's weight; with a schedule it follows `DREAMPlace`,
     /// computed in its units of one site width.
-    fn precondition(&self, k: usize, pins: f64, area: f64) -> f64 {
+    fn precondition(&self, k: FieldId, pins: f64, area: f64) -> f64 {
         let Some(s) = self.schedule.as_ref() else {
             return self.penalties[k].mul_add(area, pins).max(1.0);
         };
@@ -208,11 +212,11 @@ impl Weights {
     /// schedule reads the same normalized energy there as it did before the
     /// change and goes on as it would have. Nothing changes when the
     /// energies are equal.
-    fn rescale_energy(&mut self, before: &[f64], after: &[f64]) {
+    fn rescale_energy(&mut self, before: &FieldValues, after: &FieldValues) {
         let Some(s) = self.schedule.as_mut() else {
             return;
         };
-        for (k, (&b, &a)) in before.iter().zip(after).enumerate() {
+        for ((k, &b), &a) in before.iter_enumerated().zip(after) {
             if self.frozen[k] || b <= 0.0 || a <= 0.0 {
                 continue;
             }
@@ -222,7 +226,7 @@ impl Weights {
 
     /// Carries the weights to the fields of a rebuilt setup: a field with
     /// no old counterpart starts at the mean weight, unfrozen.
-    fn remap(&mut self, old_field_of_new: &[Option<usize>]) {
+    fn remap(&mut self, old_field_of_new: &IdVec<FieldId, Option<FieldId>>) {
         let mean_penalty = mean(&self.penalties);
         self.penalties = remap_fields(&self.penalties, old_field_of_new, mean_penalty);
         self.frozen = old_field_of_new
@@ -253,19 +257,19 @@ impl Weights {
     /// Logs every field's overflow, energy against its initial energy, and
     /// weight.
     fn log(&self, iteration: usize, eval: &Evaluation) {
-        for (k, (&overflow, &energy)) in eval
+        for ((k, &overflow), &energy) in eval
             .field_overflow
-            .iter()
+            .iter_enumerated()
             .zip(&eval.field_energy)
-            .enumerate()
         {
             let relative = self
                 .schedule
                 .as_ref()
                 .map_or(f64::NAN, |s| energy * s.precondition[k]);
             log::debug!(
-                "iteration {iteration} field {k}: overflow {overflow:.3}, energy/initial {relative:.3e}, \
+                "iteration {iteration} field {}: overflow {overflow:.3}, energy/initial {relative:.3e}, \
                  weight {:.3e}{}",
+                k.index(),
                 self.penalties[k],
                 if self.frozen[k] { " (frozen)" } else { "" }
             );
@@ -286,14 +290,14 @@ impl Weights {
             }
             return;
         };
-        let normalized: Vec<f64> = eval
+        let normalized: FieldValues = eval
             .field_energy
             .iter()
             .zip(&schedule.precondition)
             .map(|(d, p)| d * p)
             .collect();
         let half = QUADRATIC_COEFFICIENT / 2.0;
-        let direction: Vec<f64> = normalized
+        let direction: FieldValues = normalized
             .iter()
             .map(|&n| (half * n).mul_add(n, n))
             .collect();
@@ -303,7 +307,7 @@ impl Weights {
                 *u = (schedule.step * d).mul_add(1.0 / length, *u);
             }
         }
-        for (k, penalty) in self.penalties.iter_mut().enumerate() {
+        for (k, penalty) in self.penalties.iter_enumerated_mut() {
             if !self.frozen[k] {
                 let weight = schedule.u[k] * QUADRATIC_COEFFICIENT.mul_add(normalized[k], 1.0);
                 *penalty = weight.min(schedule.cap);
@@ -315,7 +319,7 @@ impl Weights {
     }
 }
 
-fn norm(v: &[f64]) -> f64 {
+fn norm(v: &FieldValues) -> f64 {
     v.iter().map(|x| x * x).sum::<f64>().sqrt()
 }
 
@@ -324,28 +328,28 @@ impl<'a> Objective<'a> {
     fn new(
         objects: &Objects,
         die: &Rect<f64>,
-        fields: &'a mut [Field],
+        fields: &'a mut IdVec<FieldId, Field>,
         netlist: &'a Netlist,
     ) -> Self {
         let n = objects.centers.len();
-        let mut field_of = vec![0; n];
-        for (k, f) in fields.iter().enumerate() {
-            for i in f.cells.clone().chain(f.fillers.clone()) {
+        let mut field_of = IdVec::filled(FieldId(0), n);
+        for (k, f) in fields.iter_enumerated() {
+            for i in f.objects() {
                 field_of[i] = k;
             }
         }
         let mut objective = Self {
             die: *die,
             field_of,
-            active: Vec::new(),
-            footprints: Vec::new(),
-            areas: Vec::new(),
+            active: IdVec::new(),
+            footprints: IdVec::new(),
+            areas: IdVec::new(),
             pins: netlist.pin_counts(n),
-            bounds: Vec::new(),
+            bounds: IdVec::new(),
             fields,
             netlist,
-            wirelength_grad: vec![Point::new(0.0, 0.0); n],
-            density_grad: vec![Point::new(0.0, 0.0); n],
+            wirelength_grad: IdVec::filled(Point::new(0.0, 0.0), n),
+            density_grad: IdVec::filled(Point::new(0.0, 0.0), n),
             scratch: Vec::new(),
         };
         objective.refresh(objects);
@@ -354,11 +358,10 @@ impl<'a> Objective<'a> {
 
     /// Takes in the objects' sizes and the fillers each field keeps.
     fn refresh(&mut self, objects: &Objects) {
-        let grid = &self.fields[0].grid;
+        let grid = &self.fields[FieldId(0)].grid;
         self.footprints = objects
             .sizes
-            .iter()
-            .enumerate()
+            .iter_enumerated()
             .map(|(i, &size)| grid.footprint(size, charge_of(objects.kinds.get(i))))
             .collect();
         self.areas = objects.sizes.iter().map(|s| s.x * s.y).collect();
@@ -367,9 +370,9 @@ impl<'a> Objective<'a> {
             .iter()
             .map(|&s| center_bounds(&self.die, s))
             .collect();
-        self.active = vec![false; objects.centers.len()];
+        self.active = IdVec::filled(false, objects.centers.len());
         for f in self.fields.iter() {
-            for i in f.cells.clone().chain(f.live_fillers()) {
+            for i in f.live_objects() {
                 self.active[i] = true;
             }
         }
@@ -377,24 +380,24 @@ impl<'a> Objective<'a> {
 
     /// Evaluates both gradients, unweighted, at `centers`: wirelength over
     /// every object, and each object's density energy in its own field.
-    fn evaluate(&mut self, centers: &[Point<f64>], gamma: f64) -> Evaluation {
+    fn evaluate(&mut self, centers: &ObjectPoints, gamma: f64) -> Evaluation {
         let wirelength =
             self.netlist
                 .gradient(centers, gamma, &mut self.scratch, &mut self.wirelength_grad);
         let footprints = &self.footprints;
-        let excess: Vec<Excess> = self
+        let excess: IdVec<FieldId, Excess> = self
             .fields
-            .par_iter_mut()
-            .map(|f| {
+            .par_iter_enumerated_mut()
+            .map(|(_, f)| {
                 f.grid
-                    .update(centers, footprints, f.cells.clone(), f.live_fillers())
+                    .update(centers, footprints, f.cells, f.live_fillers())
             })
-            .collect();
-        let fields: &[Field] = self.fields;
+            .collect::<Vec<Excess>>()
+            .into();
+        let fields: &IdVec<FieldId, Field> = self.fields;
         let field_of = &self.field_of;
         self.density_grad
-            .par_iter_mut()
-            .enumerate()
+            .par_iter_enumerated_mut()
             .for_each(|(i, g)| {
                 *g = fields[field_of[i]]
                     .grid
@@ -418,19 +421,18 @@ impl<'a> Objective<'a> {
     /// removed fillers get none.
     fn gradient(
         &mut self,
-        centers: &[Point<f64>],
+        centers: &ObjectPoints,
         gamma: f64,
         weights: &Weights,
-        out: &mut [Point<f64>],
+        out: &mut ObjectPoints,
     ) -> Evaluation {
         let eval = self.evaluate(centers, gamma);
-        let multipliers: Vec<f64> = eval
+        let multipliers: FieldValues = eval
             .field_energy
-            .iter()
-            .enumerate()
+            .iter_enumerated()
             .map(|(k, &energy)| weights.multiplier(k, energy))
             .collect();
-        for (i, g) in out.iter_mut().enumerate() {
+        for (i, g) in out.iter_enumerated_mut() {
             let k = self.field_of[i];
             if weights.frozen[k] || !self.active[i] {
                 *g = Point::new(0.0, 0.0);
@@ -444,14 +446,13 @@ impl<'a> Objective<'a> {
 
     /// The L1 norms of the wirelength and density gradients over each
     /// field's objects, at the last evaluation.
-    fn gradient_norms(&self) -> Vec<(f64, f64)> {
+    fn gradient_norms(&self) -> IdVec<FieldId, (f64, f64)> {
         let l1 = |g: Point<f64>| g.x.abs() + g.y.abs();
         self.fields
             .iter()
             .map(|f| {
-                let objects = || f.cells.clone().chain(f.live_fillers());
-                let wirelength: f64 = objects().map(|i| l1(self.wirelength_grad[i])).sum();
-                let density: f64 = objects().map(|i| l1(self.density_grad[i])).sum();
+                let wirelength: f64 = f.live_objects().map(|i| l1(self.wirelength_grad[i])).sum();
+                let density: f64 = f.live_objects().map(|i| l1(self.density_grad[i])).sum();
                 (wirelength, density)
             })
             .collect()
@@ -477,23 +478,23 @@ impl<'a> Objective<'a> {
                 .collect();
             return Weights::eplace(penalties);
         }
-        let precondition: Vec<f64> = first
+        let precondition: FieldValues = first
             .field_energy
             .iter()
             .map(|&d| if d > 0.0 { 1.0 / d } else { 0.0 })
             .collect();
         let half = QUADRATIC_COEFFICIENT / 2.0;
-        let normalized: Vec<f64> = first
+        let normalized: FieldValues = first
             .field_energy
             .iter()
             .zip(&precondition)
             .map(|(d, p)| d * p)
             .collect();
-        let mut u: Vec<f64> = normalized
+        let mut u: FieldValues = normalized
             .iter()
             .map(|&n| (half * n).mul_add(n, n))
             .collect();
-        let s: Vec<f64> = normalized
+        let s: FieldValues = normalized
             .iter()
             .map(|&n| QUADRATIC_COEFFICIENT.mul_add(n, 1.0))
             .collect();
@@ -521,7 +522,7 @@ impl<'a> Objective<'a> {
             })
             .collect();
         Weights {
-            frozen: vec![false; u.len()],
+            frozen: IdVec::filled(false, u.len()),
             penalties,
             schedule: Some(Schedule {
                 precondition,
@@ -536,7 +537,7 @@ impl<'a> Objective<'a> {
     }
 
     /// Whether each object may move: those in play of fields not yet frozen.
-    fn moving(&self, frozen: &[bool]) -> Vec<bool> {
+    fn moving(&self, frozen: &IdVec<FieldId, bool>) -> IdVec<ObjectId, bool> {
         self.field_of
             .iter()
             .zip(&self.active)
@@ -546,13 +547,13 @@ impl<'a> Objective<'a> {
 
     /// How far each field's objects in play moved from `before` to `after`:
     /// the root mean square change of their coordinates.
-    fn displacements(&self, before: &[Point<f64>], after: &[Point<f64>]) -> Vec<f64> {
+    fn displacements(&self, before: &ObjectPoints, after: &ObjectPoints) -> FieldValues {
         self.fields
             .iter()
             .map(|f| {
                 let mut sum = 0.0;
                 let mut count = 0;
-                for i in f.cells.clone().chain(f.live_fillers()) {
+                for i in f.live_objects() {
                     let d = after[i] - before[i];
                     sum = d.x.mul_add(d.x, d.y.mul_add(d.y, sum));
                     count += 1;
@@ -581,7 +582,7 @@ impl<'a> Objective<'a> {
             .collect()
     }
 
-    fn clamp(&self, centers: &mut [Point<f64>]) {
+    fn clamp(&self, centers: &mut ObjectPoints) {
         for (c, b) in centers.iter_mut().zip(&self.bounds) {
             *c = Point::new(c.x.clamp(b.min.x, b.max.x), c.y.clamp(b.min.y, b.max.y));
         }
@@ -656,7 +657,7 @@ impl GrowthLimit {
     }
 }
 
-fn distance(a: &[Point<f64>], b: &[Point<f64>]) -> f64 {
+fn distance(a: &ObjectPoints, b: &ObjectPoints) -> f64 {
     a.iter()
         .zip(b)
         .map(|(p, q)| {
@@ -667,14 +668,14 @@ fn distance(a: &[Point<f64>], b: &[Point<f64>]) -> f64 {
         .sqrt()
 }
 
-fn all_finite(v: &[Point<f64>]) -> bool {
+fn all_finite(v: &ObjectPoints) -> bool {
     v.iter().all(|p| p.x.is_finite() && p.y.is_finite())
 }
 /// Where Nesterov's method stands: enough to resume from.
 #[derive(Clone, Debug)]
 struct State {
-    major: Vec<Point<f64>>,
-    reference: Vec<Point<f64>>,
+    major: ObjectPoints,
+    reference: ObjectPoints,
     step: f64,
     weights: Weights,
     gamma: f64,
@@ -687,28 +688,28 @@ struct State {
 #[derive(Clone, Debug)]
 struct Snapshot {
     state: State,
-    energy: Vec<f64>,
+    energy: FieldValues,
 }
 
 /// Each field's displacement in its last iteration and the largest it has
 /// had, which tell when placement has settled, as in `OpenROAD`.
 #[derive(Clone, Debug)]
 struct Settling {
-    last: Vec<f64>,
-    peak: Vec<f64>,
+    last: FieldValues,
+    peak: FieldValues,
 }
 
 impl Settling {
     fn new(fields: usize) -> Self {
         Self {
-            last: vec![0.0; fields],
-            peak: vec![0.0; fields],
+            last: IdVec::filled(0.0, fields),
+            peak: IdVec::filled(0.0, fields),
         }
     }
 
     /// Records the `displacements` of the fields not `frozen`.
-    fn observe(&mut self, displacements: &[f64], frozen: &[bool]) {
-        for (k, &d) in displacements.iter().enumerate() {
+    fn observe(&mut self, displacements: &FieldValues, frozen: &IdVec<FieldId, bool>) {
+        for (k, &d) in displacements.iter_enumerated() {
             if !frozen[k] {
                 self.last[k] = d;
                 self.peak[k] = self.peak[k].max(d);
@@ -717,7 +718,7 @@ impl Settling {
     }
 
     /// Carries the record to the fields of a rebuilt setup.
-    fn remap(&mut self, old_field_of_new: &[Option<usize>]) {
+    fn remap(&mut self, old_field_of_new: &IdVec<FieldId, Option<FieldId>>) {
         self.last = remap_fields(&self.last, old_field_of_new, 0.0);
         self.peak = remap_fields(&self.peak, old_field_of_new, 0.0);
     }
@@ -735,14 +736,14 @@ impl Settling {
 /// The state to resume from after routability changed object sizes: the
 /// `snapshot` for every field still moving, as `OpenROAD` does not revert a
 /// region that has converged, and the HPWL the penalty last saw.
-fn revert(snapshot: &State, current: &State, fields: &[Field]) -> State {
+fn revert(snapshot: &State, current: &State, fields: &IdVec<FieldId, Field>) -> State {
     let mut s = snapshot.clone();
     s.prev_hpwl = current.prev_hpwl;
-    for (k, f) in fields.iter().enumerate() {
+    for (k, f) in fields.iter_enumerated() {
         if !current.weights.frozen[k] {
             continue;
         }
-        for i in f.cells.clone().chain(f.fillers.clone()) {
+        for i in f.objects() {
             s.major[i] = current.major[i];
             s.reference[i] = current.reference[i];
         }
@@ -758,7 +759,7 @@ fn revert(snapshot: &State, current: &State, fields: &[Field]) -> State {
     s
 }
 
-fn mean(values: &[f64]) -> f64 {
+fn mean(values: &FieldValues) -> f64 {
     values.iter().sum::<f64>() / values.len().max(1) as f64
 }
 
@@ -775,10 +776,10 @@ enum Flow {
 /// with the objective of the setup at hand.
 struct Run {
     s: Option<State>,
-    grad: Vec<Point<f64>>,
-    next_major: Vec<Point<f64>>,
-    next_reference: Vec<Point<f64>>,
-    next_grad: Vec<Point<f64>>,
+    grad: ObjectPoints,
+    next_major: ObjectPoints,
+    next_reference: ObjectPoints,
+    next_grad: ObjectPoints,
     settling: Settling,
     snapshot: Option<Snapshot>,
     routability: Option<Routability>,
@@ -822,7 +823,7 @@ pub(super) fn minimize<D: TimingDriver, R: FnMut(&Progress)>(
     mut hooks: Hooks<'_, D, R>,
     rng: &mut StdRng,
 ) -> Result<GlobalResult, D::Error> {
-    let Some(bin) = setup.fields.first().map(|f| f.grid.bin()) else {
+    let Some(bin) = setup.fields.iter().next().map(|f| f.grid.bin()) else {
         return Ok(unspread_result(&setup));
     };
     let mut run = Run::new(&setup, params, model.units.to_microns(REFERENCE_HPWL));
@@ -856,7 +857,7 @@ pub(super) fn minimize<D: TimingDriver, R: FnMut(&Progress)>(
 /// The result of a run with no field to spread: the wirelength of the
 /// objects where they are.
 fn unspread_result(setup: &Setup) -> GlobalResult {
-    let mut grad = vec![Point::new(0.0, 0.0); setup.objects.centers.len()];
+    let mut grad = IdVec::filled(Point::new(0.0, 0.0), setup.objects.centers.len());
     let wirelength =
         setup
             .netlist
@@ -875,7 +876,7 @@ fn unspread_result(setup: &Setup) -> GlobalResult {
 
 /// Writes the cell objects' centers into `model` as cell positions.
 fn write_positions(model: &mut PlacementModel, setup: &Setup) {
-    for (k, &i) in setup.movable.iter().enumerate() {
+    for (k, &i) in setup.movable.iter_enumerated() {
         model.positions[i] = setup.objects.centers[k] - model.sizes[i] * 0.5;
     }
 }
@@ -883,7 +884,7 @@ fn write_positions(model: &mut PlacementModel, setup: &Setup) {
 impl Run {
     fn new(setup: &Setup, params: &GlobalParams, reference_hpwl: f64) -> Self {
         let n = setup.objects.centers.len();
-        let zero = vec![Point::new(0.0, 0.0); n];
+        let zero = IdVec::filled(Point::new(0.0, 0.0), n);
         Self {
             s: None,
             grad: zero.clone(),
@@ -949,8 +950,8 @@ impl Run {
             let empty = Evaluation {
                 wirelength: Wirelength::default(),
                 overflow: 0.0,
-                field_overflow: Vec::new(),
-                field_energy: Vec::new(),
+                field_overflow: IdVec::new(),
+                field_energy: IdVec::new(),
             };
             (empty, None, Vec::new())
         });
@@ -974,11 +975,10 @@ impl Run {
     /// object taking the state of the old one it continues and the rest
     /// starting where the setup has them.
     fn remap(&mut self, remap: &Remap, rebuilt: &Setup) {
-        let carry = |old: &[Point<f64>]| -> Vec<Point<f64>> {
+        let carry = |old: &ObjectPoints| -> ObjectPoints {
             remap
                 .old_of_new
-                .iter()
-                .enumerate()
+                .iter_enumerated()
                 .map(|(i, k)| k.map_or(rebuilt.objects.centers[i], |k| old[k]))
                 .collect()
         };
@@ -997,7 +997,7 @@ impl Run {
         if let Some(r) = self.routability.as_mut() {
             r.remap(remap, &rebuilt.objects, &rebuilt.fields);
         }
-        let zero = vec![Point::new(0.0, 0.0); remap.old_of_new.len()];
+        let zero = IdVec::filled(Point::new(0.0, 0.0), remap.old_of_new.len());
         self.grad.clone_from(&zero);
         self.next_major.clone_from(&zero);
         self.next_reference.clone_from(&zero);
@@ -1040,7 +1040,7 @@ impl Run {
             }
             self.k += 1;
         };
-        objects.centers.copy_from_slice(&s.major);
+        objects.centers.clone_from(&s.major);
         if flow == Flow::Done {
             self.record_last(objective, objects, context, &s);
         }
@@ -1085,7 +1085,7 @@ impl Run {
         objective: &mut Objective<'_>,
         s: &mut State,
         eval: &Evaluation,
-        moving: &[bool],
+        moving: &IdVec<ObjectId, bool>,
     ) -> Option<Evaluation> {
         let a_next = f64::midpoint(1.0, (4.0 * s.a).mul_add(s.a, 1.0).sqrt());
         let momentum = (s.a - 1.0) / a_next;
@@ -1117,7 +1117,7 @@ impl Run {
         context: &mut StretchContext<'_, '_>,
         s: &mut State,
         eval: &mut Evaluation,
-        moving: &mut Vec<bool>,
+        moving: &mut IdVec<ObjectId, bool>,
     ) -> Option<Flow> {
         let params = context.params;
         if self.k.is_multiple_of(50) && log::log_enabled!(log::Level::Debug) {
@@ -1156,13 +1156,13 @@ impl Run {
         objective: &mut Objective<'_>,
         s: &mut State,
         eval: &Evaluation,
-        moving: &[bool],
+        moving: &IdVec<ObjectId, bool>,
         momentum: f64,
     ) -> (Evaluation, f64) {
         let mut next_eval = eval.clone();
         let mut next_step = s.step;
         for attempt in 0..=MAX_BACKTRACKS {
-            for (i, &moves) in moving.iter().enumerate() {
+            for (i, &moves) in moving.iter_enumerated() {
                 self.next_major[i] = if moves {
                     s.reference[i] - self.grad[i] * s.step
                 } else {
@@ -1170,7 +1170,7 @@ impl Run {
                 };
             }
             objective.clamp(&mut self.next_major);
-            for (i, &moves) in moving.iter().enumerate() {
+            for (i, &moves) in moving.iter_enumerated() {
                 self.next_reference[i] = if moves {
                     self.next_major[i] + (self.next_major[i] - s.major[i]) * momentum
                 } else {
@@ -1249,7 +1249,7 @@ impl Run {
         if !(r.active() && overflow <= CHECK_OVERFLOW && self.settling.settled()) {
             return false;
         }
-        objects.centers.copy_from_slice(&s.major);
+        objects.centers.clone_from(&s.major);
         let map = congestion_map(
             context.probe,
             context.netlist,
@@ -1312,7 +1312,7 @@ impl Run {
 /// run's parameters, the bin size and the site width.
 struct StretchContext<'a, 'p> {
     netlist: &'a Netlist,
-    movable: &'a [CellId],
+    movable: &'a IdVec<ObjectId, CellId>,
     probe: &'a mut Option<Probe<'p>>,
     params: &'a GlobalParams,
     bin: Point<f64>,
@@ -1339,7 +1339,7 @@ fn initial_state(
     objects: &Objects,
     bin: Point<f64>,
     site: f64,
-    grad: &mut [Point<f64>],
+    grad: &mut ObjectPoints,
 ) -> State {
     let mut major = objects.centers.clone();
     objective.clamp(&mut major);
@@ -1390,10 +1390,10 @@ fn timing_due(thresholds: &[Share], fired: &mut [bool], overflow: f64) -> bool {
 /// Values per field carried to the fields of a rebuilt setup, `default`
 /// where a field is new.
 pub(super) fn remap_fields<T: Copy>(
-    old: &[T],
-    old_field_of_new: &[Option<usize>],
+    old: &IdVec<FieldId, T>,
+    old_field_of_new: &IdVec<FieldId, Option<FieldId>>,
     default: T,
-) -> Vec<T> {
+) -> IdVec<FieldId, T> {
     old_field_of_new
         .iter()
         .map(|o| o.map_or(default, |k| old[k]))
@@ -1406,7 +1406,7 @@ fn congestion_map(
     probe: &mut Option<Probe<'_>>,
     netlist: &Netlist,
     objects: &Objects,
-    movable: &[CellId],
+    movable: &IdVec<ObjectId, CellId>,
     die: &Rect<f64>,
     params: &RoutabilityParams,
 ) -> CongestionMap {
@@ -1419,8 +1419,8 @@ fn congestion_map(
 /// A first step length from the gradient change over a small probe move.
 fn initial_step(
     objective: &mut Objective<'_>,
-    at: &[Point<f64>],
-    grad: &[Point<f64>],
+    at: &ObjectPoints,
+    grad: &ObjectPoints,
     gamma: f64,
     weights: &Weights,
     bin: Point<f64>,
@@ -1434,9 +1434,9 @@ fn initial_step(
         return fallback;
     }
     let scale = fallback / largest;
-    let mut probe: Vec<Point<f64>> = at.iter().zip(grad).map(|(&p, &g)| p - g * scale).collect();
+    let mut probe: ObjectPoints = at.iter().zip(grad).map(|(&p, &g)| p - g * scale).collect();
     objective.clamp(&mut probe);
-    let mut probe_grad = vec![Point::new(0.0, 0.0); at.len()];
+    let mut probe_grad = IdVec::filled(Point::new(0.0, 0.0), at.len());
     let _ = objective.gradient(&probe, gamma, weights, &mut probe_grad);
     let changed = distance(&probe_grad, grad);
     if changed > 0.0 {
@@ -1485,34 +1485,34 @@ mod tests {
         Evaluation {
             wirelength: Wirelength::default(),
             overflow: 0.5,
-            field_overflow: vec![0.5; field_energy.len()],
-            field_energy,
+            field_overflow: vec![0.5; field_energy.len()].into(),
+            field_energy: field_energy.into(),
         }
     }
 
     #[test]
     fn eplace_weights_grow_by_the_given_factor_except_when_frozen() {
-        let mut weights = Weights::eplace(vec![2.0, 4.0]);
-        weights.frozen[1] = true;
+        let mut weights = Weights::eplace(vec![2.0, 4.0].into());
+        weights.frozen[FieldId(1)] = true;
 
         weights.update(&evaluation(vec![1.0, 1.0]), 1.05);
 
-        assert!((weights.penalties[0] - 2.1).abs() < 1e-12);
-        assert!((weights.penalties[1] - 4.0).abs() < 1e-12);
+        assert!((weights.penalties[FieldId(0)] - 2.1).abs() < 1e-12);
+        assert!((weights.penalties[FieldId(1)] - 4.0).abs() < 1e-12);
     }
 
     #[test]
     fn a_scheduled_weight_steps_along_its_normalized_energy() {
         let mut weights = Weights {
-            penalties: vec![1.0, 1.0],
-            frozen: vec![false, false],
+            penalties: vec![1.0, 1.0].into(),
+            frozen: vec![false, false].into(),
             schedule: Some(Schedule {
-                precondition: vec![0.1, 0.05],
-                u: vec![1.0, 1.0],
+                precondition: vec![0.1, 0.05].into(),
+                u: vec![1.0, 1.0].into(),
                 step: 0.1,
                 cap: f64::MAX,
                 site: 1.0,
-                kinds: vec![Precondition::Weighted; 2],
+                kinds: vec![Precondition::Weighted; 2].into(),
                 damping: 1.0,
             }),
         };
@@ -1521,8 +1521,8 @@ mod tests {
 
         let u = 0.1f64.mul_add(std::f64::consts::FRAC_1_SQRT_2, 1.0);
         let penalty = u * 2001.0;
-        assert!((weights.penalties[0] - penalty).abs() < 1e-9);
-        assert!((weights.penalties[1] - penalty).abs() < 1e-9);
+        assert!((weights.penalties[FieldId(0)] - penalty).abs() < 1e-9);
+        assert!((weights.penalties[FieldId(1)] - penalty).abs() < 1e-9);
         let rate = (2000.0 * std::f64::consts::SQRT_2).ln();
         let growth = (rate / (1.0 + rate)).mul_add(0.01, 1.03);
         let expected_step = 0.1 * growth;
@@ -1533,35 +1533,35 @@ mod tests {
     #[test]
     fn the_quadratic_term_scales_a_scheduled_weight_by_the_energy_left() {
         let weights = Weights {
-            penalties: vec![3.0],
-            frozen: vec![false],
+            penalties: vec![3.0].into(),
+            frozen: vec![false].into(),
             schedule: Some(Schedule {
-                precondition: vec![0.5],
-                u: vec![1.0],
+                precondition: vec![0.5].into(),
+                u: vec![1.0].into(),
                 step: 0.1,
                 cap: f64::MAX,
                 site: 1.0,
-                kinds: vec![Precondition::Weighted],
+                kinds: vec![Precondition::Weighted].into(),
                 damping: 1.0,
             }),
         };
 
         let expected = 3.0 * 1001.0;
-        assert!((weights.multiplier(0, 1.0) - expected).abs() < 1e-9);
-        assert!((weights.multiplier(0, 0.0) - 3.0).abs() < 1e-12);
+        assert!((weights.multiplier(FieldId(0), 1.0) - expected).abs() < 1e-9);
+        assert!((weights.multiplier(FieldId(0), 0.0) - 3.0).abs() < 1e-12);
     }
 
     fn scheduled(frozen: Vec<bool>) -> Weights {
         Weights {
-            penalties: vec![5.0, 7.0],
-            frozen,
+            penalties: vec![5.0, 7.0].into(),
+            frozen: frozen.into(),
             schedule: Some(Schedule {
-                precondition: vec![0.5, 0.25],
-                u: vec![0.01, 0.02],
+                precondition: vec![0.5, 0.25].into(),
+                u: vec![0.01, 0.02].into(),
                 step: 0.1,
                 cap: f64::MAX,
                 site: 1.0,
-                kinds: vec![Precondition::Weighted; 2],
+                kinds: vec![Precondition::Weighted; 2].into(),
                 damping: 1.0,
             }),
         }
@@ -1573,7 +1573,7 @@ mod tests {
         let mut grown = scheduled(vec![false, false]);
 
         plain.update(&evaluation(vec![2.0, 4.0]), 1.05);
-        grown.rescale_energy(&[2.0, 4.0], &[6.0, 10.0]);
+        grown.rescale_energy(&vec![2.0, 4.0].into(), &vec![6.0, 10.0].into());
         grown.update(&evaluation(vec![6.0, 10.0]), 1.05);
 
         for (a, b) in plain.penalties.iter().zip(&grown.penalties) {
@@ -1586,7 +1586,7 @@ mod tests {
         let mut weights = scheduled(vec![false, false]);
         let before = weights.schedule.as_ref().unwrap().precondition.clone();
 
-        weights.rescale_energy(&[2.0, 4.0], &[2.0, 4.0]);
+        weights.rescale_energy(&vec![2.0, 4.0].into(), &vec![2.0, 4.0].into());
 
         assert_eq!(weights.schedule.as_ref().unwrap().precondition, before);
     }
@@ -1595,11 +1595,11 @@ mod tests {
     fn a_frozen_field_keeps_its_energy_reference() {
         let mut weights = scheduled(vec![false, true]);
 
-        weights.rescale_energy(&[2.0, 4.0], &[6.0, 10.0]);
+        weights.rescale_energy(&vec![2.0, 4.0].into(), &vec![6.0, 10.0].into());
 
         let s = weights.schedule.as_ref().unwrap();
-        assert!((s.precondition[0] - 0.5 / 3.0).abs() < 1e-12);
-        assert!((s.precondition[1] - 0.25).abs() < 1e-12);
+        assert!((s.precondition[FieldId(0)] - 0.5 / 3.0).abs() < 1e-12);
+        assert!((s.precondition[FieldId(1)] - 0.25).abs() < 1e-12);
     }
 
     fn shares(values: [f64; 2]) -> [Share; 2] {
@@ -1631,13 +1631,13 @@ mod tests {
 
     #[test]
     fn remapped_weights_carry_fields_by_their_old_index() {
-        let mut weights = Weights::eplace(vec![2.0, 4.0]);
-        weights.frozen[1] = true;
+        let mut weights = Weights::eplace(vec![2.0, 4.0].into());
+        weights.frozen[FieldId(1)] = true;
 
-        weights.remap(&[Some(1), None, Some(0)]);
+        weights.remap(&vec![Some(FieldId(1)), None, Some(FieldId(0))].into());
 
-        assert_eq!(weights.penalties, vec![4.0, 3.0, 2.0]);
-        assert_eq!(weights.frozen, vec![true, false, false]);
+        assert_eq!(weights.penalties, IdVec::from(vec![4.0, 3.0, 2.0]));
+        assert_eq!(weights.frozen, IdVec::from(vec![true, false, false]));
     }
 
     #[test]

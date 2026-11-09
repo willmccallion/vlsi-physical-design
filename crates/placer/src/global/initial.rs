@@ -3,6 +3,8 @@
 //! both axes by `BiCGSTAB` from the positions of the round before.
 
 use super::wirelength::{Netlist, Terminal, position};
+use super::{ObjectId, ObjectPoints};
+use pare_common::db::indices::IdVec;
 use pare_common::geom::dbu::Dbu;
 use pare_common::geom::point::Point;
 use pare_common::geom::rect::Rect;
@@ -42,9 +44,9 @@ const CHUNK: usize = 4096;
 /// `min_diff` apart.
 pub(super) fn place(
     netlist: &Netlist,
-    centers: &mut [Point<f64>],
+    centers: &mut ObjectPoints,
     core: Rect<f64>,
-    bounds: &[Rect<f64>],
+    bounds: &IdVec<ObjectId, Rect<f64>>,
     rounds: usize,
     min_diff: f64,
 ) {
@@ -57,8 +59,9 @@ pub(super) fn place(
             log::warn!("initial placement solver failed at round {round}");
             break;
         }
-        for (k, center) in centers.iter_mut().enumerate() {
-            let held = clamp(Point::new(xs[k], ys[k]), core);
+        for (k, center) in centers.iter_enumerated_mut() {
+            let row = k.index();
+            let held = clamp(Point::new(xs[row], ys[row]), core);
             *center = clamp(held, bounds[k]);
         }
         let residual = x_error.max(y_error);
@@ -79,7 +82,7 @@ const fn clamp(p: Point<f64>, area: Rect<f64>) -> Point<f64> {
 /// One axis's new coordinates and the solver's relative residual.
 fn solve_axis(
     netlist: &Netlist,
-    centers: &[Point<f64>],
+    centers: &ObjectPoints,
     min_diff: f64,
     axis: impl Fn(Point<f64>) -> f64,
 ) -> (Vec<f64>, f64) {
@@ -148,7 +151,7 @@ impl Matrix {
 /// pins with weight `NET_WEIGHT_SCALE / (pins - 1)` over their distance.
 fn bound_to_bound(
     netlist: &Netlist,
-    centers: &[Point<f64>],
+    centers: &ObjectPoints,
     min_diff: f64,
     axis: &impl Fn(Point<f64>) -> f64,
 ) -> (Matrix, Vec<f64>) {
@@ -183,6 +186,7 @@ fn bound_to_bound(
                         },
                     ) => {
                         let gap = axis(oa) - axis(ob);
+                        let (a, b) = (a.index(), b.index());
                         diagonal[a] += weight;
                         diagonal[b] += weight;
                         off_diagonal.push((a, b, -weight));
@@ -192,6 +196,7 @@ fn bound_to_bound(
                     }
                     (Terminal::Fixed(p), Terminal::Object { index, offset })
                     | (Terminal::Object { index, offset }, Terminal::Fixed(p)) => {
+                        let index = index.index();
                         diagonal[index] += weight;
                         rhs[index] = weight.mul_add(axis(p) - axis(offset), rhs[index]);
                     }
@@ -218,7 +223,7 @@ fn outermost(coords: &[f64]) -> (usize, usize) {
     (lowest, highest)
 }
 
-const fn same_object(a: Terminal, b: Terminal) -> bool {
+fn same_object(a: Terminal, b: Terminal) -> bool {
     matches!(
         (a, b),
         (Terminal::Object { index: i, .. }, Terminal::Object { index: j, .. }) if i == j
@@ -314,7 +319,7 @@ mod tests {
     fn object(index: usize) -> (Terminal, Point<f64>) {
         (
             Terminal::Object {
-                index,
+                index: ObjectId::new(index),
                 offset: Point::new(0.0, 0.0),
             },
             Point::new(0.0, 0.0),
@@ -355,18 +360,18 @@ mod tests {
         let mut netlist = Netlist::default();
         netlist.push([fixed(0.0, 0.0), object(0)], 1.0);
         netlist.push([object(0), fixed(10.0, 4.0)], 1.0);
-        let mut centers = vec![Point::new(20.0, 20.0)];
+        let mut centers = vec![Point::new(20.0, 20.0)].into();
 
         place(
             &netlist,
             &mut centers,
             whole_plane(),
-            &[whole_plane()],
+            &vec![whole_plane()].into(),
             20,
             0.75,
         );
 
-        let c = centers[0];
+        let c = centers[ObjectId(0)];
         assert!(
             (0.0..=10.0).contains(&c.x) && (0.0..=4.0).contains(&c.y),
             "{c:?}"
@@ -378,23 +383,31 @@ mod tests {
         let mut netlist = Netlist::default();
         netlist.push([object(0), fixed(10.0, 10.0)], 1.0);
         let bound = Rect::new(Point::new(0.0, 0.0), Point::new(4.0, 6.0));
-        let mut centers = vec![Point::new(1.0, 1.0)];
+        let mut centers = vec![Point::new(1.0, 1.0)].into();
 
-        place(&netlist, &mut centers, whole_plane(), &[bound], 1, 0.75);
+        place(
+            &netlist,
+            &mut centers,
+            whole_plane(),
+            &vec![bound].into(),
+            1,
+            0.75,
+        );
 
-        assert_eq!(centers[0], Point::new(4.0, 6.0));
+        assert_eq!(centers[ObjectId(0)], Point::new(4.0, 6.0));
     }
 
     #[test]
     fn only_pairs_with_an_outermost_pin_are_tied() {
         let mut netlist = Netlist::default();
         netlist.push([object(0), object(1), object(2), object(3)], 1.0);
-        let centers = [
+        let centers = vec![
             Point::new(0.0, 0.0),
             Point::new(3.0, 0.0),
             Point::new(6.0, 0.0),
             Point::new(10.0, 0.0),
-        ];
+        ]
+        .into();
 
         let (matrix, _) = bound_to_bound(&netlist, &centers, 0.75, &|p: Point<f64>| p.x);
 
@@ -405,7 +418,7 @@ mod tests {
     fn nets_at_the_fanout_limit_are_left_out() {
         let mut netlist = Netlist::default();
         netlist.push((0..MAX_FANOUT).map(object), 1.0);
-        let centers: Vec<Point<f64>> = (0..MAX_FANOUT).map(|i| Point::new(i as f64, 0.0)).collect();
+        let centers: ObjectPoints = (0..MAX_FANOUT).map(|i| Point::new(i as f64, 0.0)).collect();
 
         let (matrix, _) = bound_to_bound(&netlist, &centers, 0.75, &|p: Point<f64>| p.x);
 
