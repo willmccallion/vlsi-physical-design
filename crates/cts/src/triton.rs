@@ -24,7 +24,7 @@ use pare_common::geom::point::Point;
 use pare_common::geom::rect::Rect;
 use pare_common::units::{FaradsPerDbu, Seconds};
 use pare_resizer::WireRc;
-use pare_resizer::steiner::{DEFAULT_ALPHA, prim_dijkstra};
+use pare_resizer::steiner::{DEFAULT_ALPHA, SteinerTree, prim_dijkstra};
 use pare_resizer::{ClockNetwork, Link};
 use rustc_hash::{FxHashMap, FxHashSet};
 use std::collections::BTreeMap;
@@ -669,11 +669,7 @@ impl Cts<'_> {
         let driver_at = db.average_pin_position(driver);
         point_pins.entry(driver_at).or_default().push(driver);
         let tree = prim_dijkstra(&points, 0, DEFAULT_ALPHA);
-        let clusters = long_edge_clusters(
-            &tree.nodes,
-            &tree.parent,
-            self.setup.settings.max_wire_length,
-        );
+        let clusters = long_edge_clusters(&tree, self.setup.settings.max_wire_length);
         let cluster_sinks: Vec<Vec<PinId>> = clusters
             .iter()
             .filter(|cluster| !cluster.is_empty())
@@ -1129,20 +1125,12 @@ pub(crate) fn sink_bbox_center(db: &NetlistDB, sinks: &[PinId]) -> Point<Dbu> {
 
 /// Groups the nodes of a Steiner tree joined by edges shorter than
 /// `threshold`, as `TritonCTS::findLongEdges` clusters them.
-fn long_edge_clusters(
-    nodes: &[Point<Dbu>],
-    parent: &[usize],
-    threshold: Option<Dbu>,
-) -> Vec<Vec<usize>> {
-    let threshold = threshold.map_or(0, Dbu::get);
+fn long_edge_clusters(tree: &SteinerTree, threshold: Option<Dbu>) -> Vec<Vec<usize>> {
+    let threshold = threshold.unwrap_or(Dbu(0));
     let mut cluster_of: FxHashMap<usize, usize> = FxHashMap::default();
     let mut clusters: Vec<Vec<usize>> = Vec::new();
-    for b in 0..nodes.len() {
-        let n = parent[b];
-        if b == n {
-            continue;
-        }
-        let d = nodes[b].manhattan(nodes[n]).get();
+    for (b, n) in tree.branches() {
+        let d = tree.nodes[b].manhattan(tree.nodes[n]);
         let from = cluster_of.get(&b).copied();
         let to = cluster_of.get(&n).copied();
         if d >= threshold {
@@ -1324,33 +1312,39 @@ fn net_spacing(layer: &pare_common::db::library::RoutingLayer, width: Dbu) -> Db
 mod tests {
     use super::*;
 
-    fn points(xs: &[i64]) -> Vec<Point<Dbu>> {
-        xs.iter().map(|&x| Point::new(Dbu(x), Dbu(0))).collect()
+    /// A tree rooted at node 0 over nodes at `xs` along the x axis.
+    fn tree(xs: &[i64], parent: &[Option<usize>]) -> SteinerTree {
+        SteinerTree {
+            nodes: xs.iter().map(|&x| Point::new(Dbu(x), Dbu(0))).collect(),
+            parent: parent.to_vec(),
+            terminals: xs.len(),
+            root: 0,
+        }
     }
 
     #[test]
     fn without_a_wire_length_limit_every_node_is_its_own_cluster() {
-        let nodes = points(&[0, 10, 20]);
+        let tree = tree(&[0, 10, 20], &[None, Some(0), Some(1)]);
 
-        let clusters = long_edge_clusters(&nodes, &[0, 0, 1], None);
+        let clusters = long_edge_clusters(&tree, None);
 
         assert_eq!(clusters, vec![vec![1], vec![0], vec![2]]);
     }
 
     #[test]
     fn short_edges_join_their_nodes_and_long_edges_part_them() {
-        let nodes = points(&[0, 10, 1000, 1010]);
+        let tree = tree(&[0, 10, 1000, 1010], &[None, Some(0), Some(1), Some(2)]);
 
-        let clusters = long_edge_clusters(&nodes, &[0, 0, 1, 2], Some(Dbu(100)));
+        let clusters = long_edge_clusters(&tree, Some(Dbu(100)));
 
         assert_eq!(clusters, vec![vec![1, 0], vec![2, 3]]);
     }
 
     #[test]
     fn an_edge_as_long_as_the_limit_is_long() {
-        let nodes = points(&[0, 100]);
+        let tree = tree(&[0, 100], &[None, Some(0)]);
 
-        let clusters = long_edge_clusters(&nodes, &[0, 0], Some(Dbu(100)));
+        let clusters = long_edge_clusters(&tree, Some(Dbu(100)));
 
         assert_eq!(clusters, vec![vec![1], vec![0]]);
     }
@@ -1359,9 +1353,12 @@ mod tests {
     fn a_short_edge_between_clusters_moves_the_smaller_into_the_larger() {
         // Node 4's edge to the root joins {1, 0} into {2, 3, 4}, leaving
         // the smaller cluster empty in its place.
-        let nodes = points(&[0, 1, 2, 3, 4]);
+        let tree = tree(
+            &[0, 1, 2, 3, 4],
+            &[None, Some(0), Some(3), Some(4), Some(0)],
+        );
 
-        let clusters = long_edge_clusters(&nodes, &[0, 0, 3, 4, 0], Some(Dbu(100)));
+        let clusters = long_edge_clusters(&tree, Some(Dbu(100)));
 
         assert_eq!(clusters, vec![vec![], vec![2, 3, 4, 1, 0]]);
     }
