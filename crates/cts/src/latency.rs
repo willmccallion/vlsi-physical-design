@@ -291,7 +291,8 @@ impl Balancer<'_> {
         let sink = db.average_pin_position(input);
         let dx = (sink.x - src.x).get() as f32 / (first + 1) as f32;
         let dy = (sink.y - src.y).get() as f32 / (first + 1) as f32;
-        let delay = self.buffer_delay(f64::from(dx.abs() + dy.abs()) * self.trees.cap_per_dbu);
+        let delay =
+            self.buffer_delay(f64::from(dx.abs() + dy.abs()) * self.trees.cap_per_dbu.get());
         self.nodes[node].buffers = (gap / f64::from(delay)) as i32;
     }
 

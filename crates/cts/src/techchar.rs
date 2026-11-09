@@ -14,7 +14,7 @@ use pare_common::db::design::NetlistDB;
 use pare_common::db::liberty::{
     AxisVariable, BufferCell, Edge, LibCell, LibPortId, Liberty, Thresholds,
 };
-use pare_common::units::{Farads, Ohms, Seconds};
+use pare_common::units::{Farads, FaradsPerDbu, Ohms, OhmsPerDbu, Seconds};
 use pare_resizer::Link;
 use pare_resizer::WireRc;
 use pare_resizer::dmp::{self, PiModel};
@@ -123,7 +123,7 @@ pub(crate) struct TechChar {
     actual_min_input_cap: u32,
     length_unit: u32,
     char_unit: u32,
-    cap_per_dbu: f64,
+    cap_per_dbu: FaradsPerDbu,
     sink_buffer_input_cap: Farads32,
     wire_delay_rate: Option<WireDelayRate>,
 }
@@ -378,7 +378,7 @@ impl TechChar {
 
     /// Clock wire capacitance per database unit, in farads.
     #[must_use]
-    pub(crate) const fn cap_per_dbu(&self) -> f64 {
+    pub(crate) const fn cap_per_dbu(&self) -> FaradsPerDbu {
         self.cap_per_dbu
     }
 
@@ -658,8 +658,8 @@ fn buffer_configs(masters: usize, nodes: usize, start: usize) -> Vec<Vec<usize>>
 /// Clock wire resistance and capacitance per database unit.
 #[derive(Clone, Copy, Debug)]
 struct WirePerDbu {
-    res: f64,
-    cap: f64,
+    res: OhmsPerDbu,
+    cap: FaradsPerDbu,
 }
 
 /// A pattern with its buffers' types, timed as `TechChar`'s characterization
@@ -704,8 +704,8 @@ impl Chain<'_> {
 
     fn wire_pi(&self, net: usize, load: f32) -> WirePi {
         let length = f64::from(self.pattern.nets[net] * self.unit);
-        let cap = length * self.wire.cap;
-        let res = length * self.wire.res;
+        let cap = length * self.wire.cap.get();
+        let res = length * self.wire.res.get();
         let c2 = (cap / 2.0) as f32;
         let rpi = res as f32;
         let c1 = (cap / 2.0) as f32;
@@ -797,7 +797,7 @@ impl Chain<'_> {
         topology: &[Piece],
     ) -> Result<Measured, CtsError> {
         let in_cap = if self.pattern.is_pure_wire() {
-            (f64::from(load) + f64::from(wirelength) * self.wire.cap) as f32
+            (f64::from(load) + f64::from(wirelength) * self.wire.cap.get()) as f32
         } else {
             let first_length = match topology.first() {
                 Some(Piece::Wire(length)) => *length as f32,
@@ -807,7 +807,7 @@ impl Chain<'_> {
             let first_pin_cap = self.liberty.cell(first.id).ports[first.input]
                 .capacitance()
                 .get() as f32;
-            (f64::from(first_pin_cap) + f64::from(first_length) * self.wire.cap) as f32
+            (f64::from(first_pin_cap) + f64::from(first_length) * self.wire.cap.get()) as f32
         };
         let total_cap = (in_cap / plan.cap_step).round() * plan.cap_step;
         let (fall_arrival, fall_slew) = self.propagate(Edge::Fall, load, in_slew)?;
@@ -885,7 +885,7 @@ fn compile(
     bounds: &AllBounds,
     plan: &Plan,
     masters: &[BufferCell],
-    cap_per_dbu: f64,
+    cap_per_dbu: FaradsPerDbu,
 ) -> Result<TechChar, CtsError> {
     let ratio = plan.char_unit / plan.length_unit;
     let mut table = TechChar {
