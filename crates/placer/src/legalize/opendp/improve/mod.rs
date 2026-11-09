@@ -238,7 +238,7 @@ impl Improver {
         if self.disallow_one_site_gaps {
             let limit = self.move_limit;
             self.move_limit = 10_000;
-            let unfixed = self.one_site_gap_violations(true)?;
+            let unfixed = self.close_one_site_gaps()?;
             self.move_limit = limit;
             if unfixed > 0 {
                 log::warn!("{unfixed} one-site gaps remain after detailed improvement");

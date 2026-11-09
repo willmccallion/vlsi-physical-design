@@ -539,10 +539,10 @@ impl Improver {
         })
     }
 
-    /// Finds, and with `fix` tries to close, the one-site gaps between
-    /// cells and next to blockages, returning how many remain, as
-    /// `DetailedMgr::getOneSiteGapViolationsPerSegment`.
-    pub(super) fn one_site_gap_violations(&mut self, fix: bool) -> Result<usize> {
+    /// Tries to close the one-site gaps between cells and next to
+    /// blockages, returning how many remain, as
+    /// `DetailedMgr::getOneSiteGapViolationsPerSegment` with fixing on.
+    pub(super) fn close_one_site_gaps(&mut self) -> Result<usize> {
         let gap = self.arch.rows[0].site_width;
         let mut violations = 0;
         for s in self.segments.ids() {
@@ -572,7 +572,7 @@ impl Improver {
                                 violations += 1;
                                 continue;
                             }
-                            if !fix || !self.fix_one_site_gap(cell, gap, s, nd)? {
+                            if !self.fix_one_site_gap(cell, gap, s, nd)? {
                                 violations += 1;
                             }
                             break;
@@ -584,7 +584,7 @@ impl Improver {
                     && !self.inside_blockage(nd, self.left(nd)))
                     || (self.inside_blockage(nd, self.right(nd) + gap)
                         && !self.inside_blockage(nd, self.right(nd)));
-                if opens_on_blockage && (!fix || !self.fix_one_site_gap(nd, gap, s, nd)?) {
+                if opens_on_blockage && !self.fix_one_site_gap(nd, gap, s, nd)? {
                     violations += 1;
                 }
                 at_last_x.push(nd);
