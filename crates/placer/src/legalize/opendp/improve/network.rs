@@ -5,6 +5,7 @@
 use super::{EdgeId, ImprovementError, NetworkPinId, NodeId, Placer, Result};
 use pare_common::db::design::{NetlistDB, PinOwner, PlacementStatus};
 use pare_common::db::indices::IdVec;
+use pare_common::db::library::{Macro, SignalUse};
 use pare_common::geom::dbu::Dbu;
 use pare_common::geom::point::Point;
 use pare_common::geom::rect::Rect;
@@ -28,6 +29,22 @@ pub(super) struct FixedNode {
     pub(super) terminal: bool,
 }
 
+/// The supply along an edge of a master, as `Architecture::Row`'s power
+/// types.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(super) enum Rail {
+    Power,
+    Ground,
+}
+
+/// The supplies along a master's bottom and top edges, as `getMasterPwrs`
+/// finds them.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(super) struct Rails {
+    bottom: Rail,
+    top: Rail,
+}
+
 #[derive(Debug)]
 pub(super) struct Network {
     /// How many of the nodes, the first, are the legalizer's cells, which
@@ -37,6 +54,8 @@ pub(super) struct Network {
     fixed: Vec<FixedNode>,
     /// Where each cell started, relative to the core.
     pub(super) orig: IdVec<NodeId, Point<Dbu>>,
+    /// Each cell's rails, none when its master lacks power or ground.
+    pub(super) rails: IdVec<NodeId, Option<Rails>>,
     pub(super) pins: IdVec<NetworkPinId, Pin>,
     /// The pins of every node.
     pub(super) node_pins: IdVec<NodeId, Vec<NetworkPinId>>,
@@ -81,10 +100,16 @@ impl Network {
             .iter()
             .map(|n| Point::new(n.left, n.bottom))
             .collect();
+        let rails = grid
+            .nodes
+            .iter()
+            .map(|n| master_rails(db.cell_macro(n.cell)))
+            .collect();
         let mut network = Self {
             cells,
             fixed,
             orig,
+            rails,
             pins: IdVec::new(),
             node_pins: IdVec::filled(Vec::new(), cells),
             edges: IdVec::new(),
@@ -173,6 +198,29 @@ impl Network {
     pub(super) fn fixed_node(&self, n: NodeId) -> &FixedNode {
         &self.fixed[n.index() - self.cells]
     }
+}
+
+/// A master's rails: each edge carries whichever supply reaches nearer it;
+/// none unless it has both power and ground shapes, as `getMasterPwrs`.
+// NOTE: getMasterPwrs takes the center of each pin port's box; PARE's
+// library keeps a pin's shapes but not its ports, so it takes each shape's.
+fn master_rails(m: &Macro) -> Option<Rails> {
+    let centers = |supply: SignalUse| {
+        m.pins
+            .iter()
+            .filter(|p| p.signal_use == supply)
+            .flat_map(|p| &p.shapes)
+            .map(|s| (s.rect.min.y + s.rect.max.y) / 2)
+            .fold(None, |span: Option<(Dbu, Dbu)>, y| {
+                Some(span.map_or((y, y), |(lo, hi)| (lo.min(y), hi.max(y))))
+            })
+    };
+    let (power, ground) = (centers(SignalUse::Power)?, centers(SignalUse::Ground)?);
+    let nearer = |is_power: bool| if is_power { Rail::Power } else { Rail::Ground };
+    Some(Rails {
+        bottom: nearer(power.0 < ground.0),
+        top: nearer(power.1 > ground.1),
+    })
 }
 
 const fn is_placed(status: PlacementStatus) -> bool {
