@@ -413,8 +413,8 @@ impl Sta {
             seeds.extend(netlist.loads(net));
             seeds.extend(graph.in_arcs(driver).iter().map(|a| a.from));
         }
-        let unrequired = self.find_arrivals(netlist, graph, clocks, &seeds);
-        seeds.extend(unrequired);
+        let requiring = self.find_arrivals(netlist, graph, clocks, &seeds);
+        seeds.extend(requiring);
         self.find_requireds(netlist, graph, &seeds);
     }
 
@@ -673,8 +673,10 @@ impl Sta {
     }
 
     /// Finds arrivals again from `seeds` onward, following changes through
-    /// the fanout; returns the pins left with an entry that has no required
-    /// time yet, which the required search must visit.
+    /// the fanout; returns the pins the required search must visit: those
+    /// left with an entry that has no required time yet, and latch inputs
+    /// whose arrival moved, since a borrowing latch requires its data when
+    /// it arrives.
     ///
     /// Stale levels after edits can time a load before its new driver, so
     /// a pin may lose its entries and get them back within one search,
@@ -695,13 +697,14 @@ impl Sta {
                 heap.push(Reverse((graph.level(pin), pin)));
             }
         }
-        let mut unrequired = Vec::new();
+        let mut requiring = Vec::new();
         while let Some(Reverse((_, pin))) = heap.pop() {
             queued[pin] = false;
             match self.visit_arrivals(netlist, graph, clocks, pin) {
                 Stored::Same => continue,
+                Stored::Moved if self.is_latch_data(netlist, pin) => requiring.push(pin),
                 Stored::Moved => {}
-                Stored::Unrequired => unrequired.push(pin),
+                Stored::Unrequired => requiring.push(pin),
             }
             for next in successors(netlist, graph, pin) {
                 if !queued[next] {
@@ -711,7 +714,17 @@ impl Sta {
             }
         }
         self.cache_worst();
-        unrequired
+        requiring
+    }
+
+    /// Whether a pin is the data input of a clocked latch.
+    fn is_latch_data(&self, netlist: &Netlist<'_>, pin: PinId) -> bool {
+        let PinOwner::Cell { cell, .. } = netlist.db.pins[pin].owner else {
+            return false;
+        };
+        self.latches
+            .get(&cell)
+            .is_some_and(|l| l.data == pin && l.state == LatchState::Enabled)
     }
 
     /// Computes a pin's arrivals from its predecessors or its seeds and
@@ -1900,7 +1913,9 @@ mod tests {
     use crate::graph::{Estimator, PortConditions};
     use crate::library::Link;
     use crate::parasitics::WireRc;
-    use crate::testing::{DefSections, cells_with, def_text, design_with_copies};
+    use crate::testing::{
+        DefSections, cells_with, def_text, design_with_copies, with_timed_session,
+    };
     use pare_common::db::design::NetlistDB;
     use pare_common::db::indices::LayerId;
     use pare_common::db::liberty::Liberty;
@@ -2204,6 +2219,60 @@ mod tests {
 
         assert!((rise.get() - 1.08e-9).abs() < 1e-15, "{rise:?}");
         assert!((fall.get() - 1.02e-9).abs() < 1e-15, "{fall:?}");
+    }
+
+    /// A buffer as `BUF_X1` but a tenth of a nanosecond slower.
+    const SLOW_BUFFER: &str = "cell (BUF_SLOW) { area : 0.8 ;
+        pin (A) { direction : input ; capacitance : 0.97 ; }
+        pin (Z) { direction : output ; function : \"A\" ; max_capacitance : 60.0 ;
+          timing () { related_pin : \"A\" ; timing_sense : positive_unate ;
+            cell_rise (delay_t) { values (\"0.13, 0.40\", \"0.14, 0.41\") ; }
+            cell_fall (delay_t) { values (\"0.13, 0.40\", \"0.14, 0.41\") ; }
+            rise_transition (delay_t) { values (\"0.01, 0.40\", \"0.02, 0.41\") ; }
+            fall_transition (delay_t) { values (\"0.01, 0.40\", \"0.02, 0.41\") ; } } } }";
+
+    #[test]
+    fn a_borrowing_latch_requires_its_data_where_an_upstream_resize_moved_it() {
+        let mut db = design_with_copies(
+            &def_text(
+                "borrow",
+                &DefSections {
+                    components: "- b1 BUF_X1 + PLACED ( 2000 2800 ) N ;\n\
+                                 - b2 BUF_X1 + PLACED ( 4000 2800 ) N ;\n\
+                                 - l LAT + PLACED ( 6000 2800 ) N ;\n",
+                    nets: "- clk ( PIN clk ) ( l CK ) ;\n- in ( PIN in ) ( b1 A ) ;\n\
+                           - n1 ( b1 Z ) ( b2 A ) ;\n- n2 ( b2 Z ) ( l D ) ;\n\
+                           - out ( l Q ) ( PIN out ) ;\n",
+                    inputs: &["clk", "in"],
+                    outputs: &["out"],
+                },
+            ),
+            &[("DFF_X1", "LAT"), ("BUF_X1", "BUF_SLOW")],
+        );
+        let d = cell_pin(&db, "l/D");
+        let lib = cells_with(&format!("{LATCH}\n{SLOW_BUFFER}"));
+        let constraints = "create_clock -name clk -period 2.0 [get_ports clk]\n\
+                           set_input_delay 0.4 -clock clk [get_ports in]\n";
+
+        with_timed_session(&mut db, &lib, constraints, |resizer| {
+            let b1 = resizer.db.cell_id("b1").unwrap();
+            let slow = resizer.link.liberty.cell_id("BUF_SLOW").unwrap();
+            assert!(resizer.replace_cell(b1, slow).unwrap());
+
+            let netlist = resizer.netlist();
+            let sdc = resizer.sta().sdc();
+            let fresh = Sta::new(
+                &netlist,
+                &resizer.graph,
+                resizer.clocks,
+                resizer.constants,
+                sdc,
+            );
+            assert_eq!(
+                resizer.sta().slack(d, MinMax::Max),
+                fresh.slack(d, MinMax::Max)
+            );
+        });
     }
 
     #[test]
