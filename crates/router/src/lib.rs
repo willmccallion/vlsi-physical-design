@@ -47,7 +47,7 @@ pub use session::GlobalSession;
 use state::{DetailedState, GridShape};
 pub use state::{RouteState, StateParseError};
 use std::time::Instant;
-use tech::{MAX_DIE_REACH, RouteTech};
+use tech::{MAX_DIE_REACH, MAX_GRID_SPAN, RouteTech};
 use track::assign_tracks;
 
 /// What routing achieved.
@@ -1061,6 +1061,11 @@ pub enum RouteError {
         "the die reaches {0} database units from the origin, beyond the router's limit of {MAX_DIE_REACH}"
     )]
     DieTooLarge(i64),
+    /// The die spans more gcells than the global grid's coordinates hold.
+    #[error(
+        "the die spans {0} gcells, beyond the global router's {MAX_GRID_SPAN}; raise [routing] gcell_tracks"
+    )]
+    GridTooLarge(i64),
     /// A saved state is of another design.
     #[error("the route state was saved for design '{0}'")]
     StateDesign(String),

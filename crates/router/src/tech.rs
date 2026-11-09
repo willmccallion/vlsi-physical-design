@@ -105,14 +105,14 @@ impl LayerTech {
     pub fn tracks_within(&self, lo: Dbu, hi: Dbu) -> std::ops::Range<u32> {
         let a = self.tracks.partition_point(|&t| t < lo);
         let b = self.tracks.partition_point(|&t| t <= hi);
-        to_u32(a)..to_u32(b)
+        index_u32(a)..index_u32(b)
     }
 
     /// Indices of crossings in `[lo, hi]`.
     pub fn cross_within(&self, lo: Dbu, hi: Dbu) -> std::ops::Range<u32> {
         let a = self.cross.partition_point(|c| c.at < lo);
         let b = self.cross.partition_point(|c| c.at <= hi);
-        to_u32(a)..to_u32(b)
+        index_u32(a)..index_u32(b)
     }
 }
 
@@ -241,8 +241,27 @@ fn reach_from_origin(die: &Rect<Dbu>) -> i64 {
         .unwrap_or(0)
 }
 
-pub(crate) fn to_u32(i: usize) -> u32 {
-    u32::try_from(i).unwrap_or(u32::MAX)
+/// `i` as the 32-bit index the router stores. Every such index counts
+/// things 32 bits hold: tracks and crossings, whose coordinates lie within
+/// [`MAX_DIE_REACH`] of the origin, the design's nets, and search nodes of
+/// grids [`check_grid_span`] keeps within 16 bits a side.
+pub(crate) fn index_u32(i: usize) -> u32 {
+    debug_assert!(u32::try_from(i).is_ok(), "router index {i} past 32 bits");
+    i as u32
+}
+
+/// The most gcells the global grid spans across, as its 16-bit coordinates
+/// hold.
+pub(crate) const MAX_GRID_SPAN: i64 = u16::MAX as i64;
+
+/// Fails when `die` spans more than [`MAX_GRID_SPAN`] gcells of `gcell`.
+fn check_grid_span(die: &Rect<Dbu>, gcell: Dbu) -> Result<(), RouteError> {
+    let extent = die.width().max(die.height()).get();
+    let cells = (extent + gcell.get() - 1) / gcell.get();
+    if cells > MAX_GRID_SPAN {
+        return Err(RouteError::GridTooLarge(cells));
+    }
+    Ok(())
 }
 
 impl RouteTech {
@@ -265,6 +284,14 @@ impl RouteTech {
             return Err(RouteError::NoTracks(lib.routing_layers[l].name.clone()));
         }
 
+        let gcell_pitch = gcell_pitch(
+            |l| db.average_track_spacing(LayerId::new(l)),
+            max_layer.index(),
+        );
+        check_grid_span(
+            &db.die_area,
+            gcell_pitch * i64::from(config.gcell_tracks.get()),
+        )?;
         let layers: Vec<LayerTech> = (0..count).map(|l| layer_tech(lib, &tracks, l)).collect();
 
         let cuts = 0..lib.cut_layers.len();
@@ -295,10 +322,7 @@ impl RouteTech {
                 .map(|r| RuleTech::new(db, r))
                 .collect(),
             net_rules: net_rules(db),
-            gcell_pitch: gcell_pitch(
-                |l| db.average_track_spacing(LayerId::new(l)),
-                max_layer.index(),
-            ),
+            gcell_pitch,
             manufacturing_grid: lib
                 .rules
                 .manufacturing_grid
@@ -411,7 +435,9 @@ fn layer_tech(lib: &Library, tracks: &[Vec<Dbu>], l: usize) -> LayerTech {
 
 /// Where `at` lies in the sorted coordinates `coords`, when it is one.
 fn track_index(coords: Option<&[Dbu]>, at: Dbu) -> Option<u32> {
-    coords.and_then(|c| c.binary_search(&at).ok()).map(to_u32)
+    coords
+        .and_then(|c| c.binary_search(&at).ok())
+        .map(index_u32)
 }
 
 /// The largest extent, either way, of the cuts on `cut` among `shapes`;
@@ -503,6 +529,23 @@ fn ranked_vias(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn die(width: i64) -> Rect<Dbu> {
+        Rect::new(Point::new(Dbu(0), Dbu(0)), Point::new(Dbu(width), Dbu(10)))
+    }
+
+    #[test]
+    fn a_die_of_as_many_gcells_as_the_grid_holds_is_routable() {
+        assert_eq!(check_grid_span(&die(65_535 * 100), Dbu(100)), Ok(()));
+    }
+
+    #[test]
+    fn a_die_past_the_grid_s_span_is_refused_with_its_gcells() {
+        assert_eq!(
+            check_grid_span(&die(65_535 * 100 + 1), Dbu(100)),
+            Err(RouteError::GridTooLarge(65_536))
+        );
+    }
 
     fn spacings(of: &[i64]) -> impl Fn(usize) -> Dbu + '_ {
         |l| Dbu(of[l])

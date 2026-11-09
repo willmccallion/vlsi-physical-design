@@ -103,8 +103,8 @@ impl Numbering {
         let crosses = span.crosses as usize;
         Node {
             layer: LayerId::new(self.min_layer + l),
-            track: span.first_track + crate::tech::to_u32(offset / crosses),
-            cross: span.first_cross + crate::tech::to_u32(offset % crosses),
+            track: span.first_track + crate::tech::index_u32(offset / crosses),
+            cross: span.first_cross + crate::tech::index_u32(offset % crosses),
         }
     }
 
@@ -143,7 +143,7 @@ fn steps_within(at: &[Dbu], reach: Dbu) -> u32 {
         }
         most = most.max(end - start);
     }
-    crate::tech::to_u32(most)
+    crate::tech::index_u32(most)
 }
 
 /// Arrays reused by one thread's dense searches.
@@ -270,13 +270,16 @@ impl Visits for DenseVisits<'_> {
         self.cost[slot] = cost;
         self.from[slot] = from
             .and_then(|f| self.numbering.slot(f))
-            .map_or(NONE, crate::tech::to_u32);
+            .map_or(NONE, crate::tech::index_u32);
     }
 
     fn path_to(&self, end: State) -> Vec<Node> {
         let per_node = self.numbering.slots_per_node();
         let mut path = vec![end.node];
-        let mut slot = self.numbering.slot(end).map_or(NONE, crate::tech::to_u32);
+        let mut slot = self
+            .numbering
+            .slot(end)
+            .map_or(NONE, crate::tech::index_u32);
         while slot != NONE && self.seen[slot as usize] == *self.generation {
             let prev = self.from[slot as usize];
             if prev == NONE {

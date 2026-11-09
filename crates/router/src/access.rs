@@ -20,7 +20,7 @@
 //! obstruction leaves metal reaching into it, and only a stub from a
 //! crossing outside reaches the pin cleanly.
 
-use crate::tech::{RouteTech, ViaTech, to_u32};
+use crate::tech::{RouteTech, ViaTech, index_u32};
 use pare_common::db::design::{NetlistDB, PinOwner};
 use pare_common::db::indices::{LayerId, PinId, ViaId};
 use pare_common::db::library::{LayerRef, Shape};
@@ -204,7 +204,7 @@ fn stub_accesses(
                     let node = Node {
                         layer,
                         track,
-                        cross: to_u32(cross),
+                        cross: index_u32(cross),
                     };
                     for vias in fitting {
                         f(
@@ -304,7 +304,7 @@ fn stubs_from_beyond(
                 node: Node {
                     layer,
                     track,
-                    cross: to_u32(cross),
+                    cross: index_u32(cross),
                 },
                 at,
                 pin_layer: layer,
@@ -372,7 +372,7 @@ fn neighbour_shapes(db: &NetlistDB, pin: PinId) -> Vec<Shape> {
         .pins
         .iter()
         .enumerate()
-        .filter(|&(k, _)| to_u32(k) != own.0)
+        .filter(|&(k, _)| index_u32(k) != own.0)
         .flat_map(|(_, p)| p.shapes.iter().map(place));
     others.chain(m.obstructions.iter().map(place)).collect()
 }

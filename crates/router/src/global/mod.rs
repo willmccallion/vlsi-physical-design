@@ -26,7 +26,7 @@ mod steiner;
 mod tracks;
 
 use crate::occupancy::{FixedMetal, TrackRef};
-use crate::tech::RouteTech;
+use crate::tech::{RouteTech, index_u32};
 use coarse::{CoarseGrid, Corridor, Plan, SCALE};
 use maze::{OutgrowsArea, route_tree, route_tree_within};
 use pare_common::db::design::NetlistDB;
@@ -178,9 +178,8 @@ impl GlobalGrid {
         reserve: CapacityReserve,
     ) -> Self {
         let span = |extent: Dbu| {
-            u16::try_from((extent.get() + gcell.get() - 1) / gcell.get())
-                .unwrap_or(u16::MAX)
-                .max(1)
+            let cells = (extent.get() + gcell.get() - 1) / gcell.get();
+            grid_index(cells as usize).max(1)
         };
         let (nx, ny) = (span(die.width()), span(die.height()));
         let layers: Vec<LayerId> = (tech.min_layer.index()..=tech.max_layer.index())
@@ -261,7 +260,7 @@ impl GlobalGrid {
             };
             let track = TrackRef {
                 layer,
-                track: crate::tech::to_u32(t),
+                track: index_u32(t),
             };
             for i in 0..along_cells {
                 let index = match lt.direction {
@@ -426,8 +425,8 @@ impl GlobalGrid {
     fn cell_index(&self, layer: LayerId, x: usize, y: usize) -> usize {
         self.edge(GCell {
             layer,
-            x: u16::try_from(x).unwrap_or(u16::MAX),
-            y: u16::try_from(y).unwrap_or(u16::MAX),
+            x: grid_index(x),
+            y: grid_index(y),
         })
     }
 
@@ -448,7 +447,7 @@ impl GlobalGrid {
                 .get()
                 .div_euclid(self.gcell.get())
                 .clamp(0, i64::from(n) - 1);
-            u16::try_from(c).unwrap_or(0)
+            grid_index(c as usize)
         };
         GCell {
             layer,
@@ -488,8 +487,8 @@ impl GlobalGrid {
         let rest = index % per_layer;
         GCell {
             layer: LayerId::new(self.min_layer.index() + index / per_layer),
-            x: u16::try_from(rest % usize::from(self.nx)).unwrap_or(u16::MAX),
-            y: u16::try_from(rest / usize::from(self.nx)).unwrap_or(u16::MAX),
+            x: grid_index(rest % usize::from(self.nx)),
+            y: grid_index(rest / usize::from(self.nx)),
         }
     }
 
@@ -966,7 +965,7 @@ pub fn track_demand(db: &NetlistDB, tech: &RouteTech, net: NetId) -> Vec<Tracks>
             }
             let span = (ndr.width + ndr.spacing.unwrap_or(lt.spacing)).get();
             let tracks = (span + pitch - 1) / pitch;
-            Tracks::whole(u32::try_from(tracks.max(1)).unwrap_or(1))
+            Tracks::whole(index_u32(tracks.max(1) as usize))
         })
         .collect()
 }
@@ -1413,14 +1412,14 @@ fn dependencies(
             if *slot != u32::MAX {
                 before.push(*slot);
             }
-            *slot = to_u32(k);
+            *slot = index_u32(k);
         }
         before.sort_unstable();
         before.dedup();
         for &p in &before {
-            next[p as usize].push(to_u32(k));
+            next[p as usize].push(index_u32(k));
         }
-        waits.push(AtomicU32::new(to_u32(before.len())));
+        waits.push(AtomicU32::new(index_u32(before.len())));
     }
     (waits, next)
 }
@@ -1497,8 +1496,11 @@ impl Schedule<'_> {
     }
 }
 
-fn to_u32(v: usize) -> u32 {
-    u32::try_from(v).unwrap_or(u32::MAX)
+/// `v` as a 16-bit grid coordinate; `RouteTech::new` refuses a die whose
+/// grid would span more.
+pub(crate) fn grid_index(v: usize) -> u16 {
+    debug_assert!(u16::try_from(v).is_ok(), "grid coordinate {v} past 16 bits");
+    v as u16
 }
 
 /// Seconds one rip-up round spends in each of its steps.

@@ -356,7 +356,7 @@ fn nearest_cross(lt: &LayerTech, along: Dbu) -> Option<u32> {
         .into_iter()
         .flatten()
         .min_by_key(|&i| ((lt.cross[i].at - along).abs(), i))
-        .map(crate::tech::to_u32)
+        .map(crate::tech::index_u32)
 }
 
 /// Length by which `[lo, hi]` and `[olo, ohi]` overlap once one is widened

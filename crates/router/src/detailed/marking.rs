@@ -125,7 +125,7 @@ impl DetailedRouter<'_> {
                     let node = Node {
                         layer,
                         track,
-                        cross: crate::tech::to_u32(cross),
+                        cross: crate::tech::index_u32(cross),
                     };
                     marks.mark_planar(node);
                     marks.mark_via(node);
@@ -205,8 +205,8 @@ fn marked_crossings(
     let mut within = None;
     for bloat in 1..=MAX_BLOATS {
         let (lo, hi) = (along.0 - width * bloat, along.1 + width * bloat);
-        let first = crate::tech::to_u32(lt.cross.partition_point(|c| c.at < lo)).max(wire.0);
-        let end = crate::tech::to_u32(lt.cross.partition_point(|c| c.at <= hi)).min(wire.1 + 1);
+        let first = crate::tech::index_u32(lt.cross.partition_point(|c| c.at < lo)).max(wire.0);
+        let end = crate::tech::index_u32(lt.cross.partition_point(|c| c.at <= hi)).min(wire.1 + 1);
         within = (first < end).then(|| (first, end - 1));
         if end >= first + 2 {
             break;

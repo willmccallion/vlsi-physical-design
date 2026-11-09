@@ -9,7 +9,9 @@
 //! then as few of them as possible.
 
 use super::coarse::{Corridor, Plan, SCALE};
+use super::grid_index;
 use super::{BLOCKED_COST, GCell, GlobalCosts, GlobalGrid, GlobalNet, window};
+use crate::tech::index_u32;
 use crate::tree::connection_order;
 use pare_common::db::indices::LayerId;
 use pare_common::db::library::Direction;
@@ -359,7 +361,7 @@ fn search_with(
             let ng = g + step;
             let index = local.index(next);
             if state.cost(index).is_none_or(|b| ng < b) {
-                state.set(index, ng, crate::tech::to_u32(at));
+                state.set(index, ng, index_u32(at));
                 heap.push(Entry {
                     f: ng + rules.estimate(next),
                     g: ng,
@@ -567,8 +569,8 @@ impl<'a> Local<'a> {
         let plane = index / self.layers;
         let (x, y) = match plane.checked_sub(self.window_cells()) {
             None => (
-                self.x0 + to_u16(plane % self.width()),
-                self.y0 + to_u16(plane / self.width()),
+                self.x0 + grid_index(plane % self.width()),
+                self.y0 + grid_index(plane / self.width()),
             ),
             Some(beyond) => {
                 let (cx, cy) = self
@@ -577,17 +579,13 @@ impl<'a> Local<'a> {
                 let within = beyond % COARSE_CELLS;
                 let s = usize::from(SCALE);
                 (
-                    cx * SCALE + to_u16(within % s),
-                    cy * SCALE + to_u16(within / s),
+                    cx * SCALE + grid_index(within % s),
+                    cy * SCALE + grid_index(within / s),
                 )
             }
         };
         GCell { layer, x, y }
     }
-}
-
-fn to_u16(v: usize) -> u16 {
-    u16::try_from(v).unwrap_or(u16::MAX)
 }
 
 #[cfg(test)]
