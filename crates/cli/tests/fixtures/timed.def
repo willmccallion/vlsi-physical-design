@@ -1,0 +1,57 @@
+# Four flops in a chain, a synthesis buffer and a gate, over the clock tree
+# synthesis tests' cells, for the timed flow's smoke tests.
+VERSION 5.8 ;
+DIVIDERCHAR "/" ;
+BUSBITCHARS "[]" ;
+DESIGN timed ;
+UNITS DISTANCE MICRONS 2000 ;
+
+DIEAREA ( 0 0 ) ( 40000 40000 ) ;
+
+ROW ROW_0 core 2000 2000 N DO 90 BY 1 STEP 380 0 ;
+ROW ROW_1 core 2000 4800 FS DO 90 BY 1 STEP 380 0 ;
+ROW ROW_2 core 2000 7600 N DO 90 BY 1 STEP 380 0 ;
+ROW ROW_3 core 2000 10400 FS DO 90 BY 1 STEP 380 0 ;
+ROW ROW_4 core 2000 13200 N DO 90 BY 1 STEP 380 0 ;
+ROW ROW_5 core 2000 16000 FS DO 90 BY 1 STEP 380 0 ;
+ROW ROW_6 core 2000 18800 N DO 90 BY 1 STEP 380 0 ;
+ROW ROW_7 core 2000 21600 FS DO 90 BY 1 STEP 380 0 ;
+ROW ROW_8 core 2000 24400 N DO 90 BY 1 STEP 380 0 ;
+ROW ROW_9 core 2000 27200 FS DO 90 BY 1 STEP 380 0 ;
+ROW ROW_10 core 2000 30000 N DO 90 BY 1 STEP 380 0 ;
+ROW ROW_11 core 2000 32800 FS DO 90 BY 1 STEP 380 0 ;
+
+TRACKS Y 140 DO 142 STEP 280 LAYER metal1 ;
+TRACKS X 190 DO 105 STEP 380 LAYER metal2 ;
+TRACKS Y 140 DO 142 STEP 280 LAYER metal3 ;
+
+COMPONENTS 6 ;
+- ff0 DFF_X1 ;
+- ff1 DFF_X1 ;
+- ff2 DFF_X1 ;
+- ff3 DFF_X1 ;
+- b0 BUF_X1 ;
+- g0 AND2_X1 ;
+END COMPONENTS
+
+PINS 3 ;
+- clk + NET clk + DIRECTION INPUT + USE CLOCK
+  + PORT + LAYER metal2 ( -35 0 ) ( 35 70 ) + FIXED ( 10070 0 ) N ;
+- din + NET din + DIRECTION INPUT + USE SIGNAL
+  + PORT + LAYER metal2 ( -35 0 ) ( 35 70 ) + FIXED ( 20330 0 ) N ;
+- dout + NET dout + DIRECTION OUTPUT + USE SIGNAL
+  + PORT + LAYER metal2 ( -35 0 ) ( 35 70 ) + FIXED ( 30210 0 ) N ;
+END PINS
+
+NETS 8 ;
+- clk ( PIN clk ) ( ff0 CK ) ( ff1 CK ) ( ff2 CK ) ( ff3 CK ) + USE CLOCK ;
+- din ( PIN din ) ( ff0 D ) ;
+- q0 ( ff0 Q ) ( b0 A ) ;
+- n0 ( b0 Z ) ( ff1 D ) ( g0 A ) ;
+- q1 ( ff1 Q ) ( g0 B ) ;
+- n1 ( g0 Z ) ( ff2 D ) ;
+- q2 ( ff2 Q ) ( ff3 D ) ;
+- dout ( ff3 Q ) ( PIN dout ) ;
+END NETS
+
+END DESIGN
