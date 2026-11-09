@@ -107,7 +107,7 @@ pub fn access_points(
     let shapes = db.pin_shapes(pin);
     let target = db.pin_position(pin);
     let blockers = neighbour_shapes(db, pin);
-    let mut found: Vec<((bool, i64), AccessPoint)> = Vec::new();
+    let mut found: Vec<((bool, Dbu), AccessPoint)> = Vec::new();
 
     for shape in &shapes {
         let LayerRef::Routing(layer) = shape.layer else {
@@ -127,14 +127,14 @@ pub fn access_points(
                         pin_layer: layer,
                         vias,
                     };
-                    found.push(((false, at.manhattan(target).get()), access));
+                    found.push(((false, at.manhattan(target)), access));
                 }
                 any
             });
             if !on_grid {
                 stub_accesses(tech, tech.min_layer, &shape.rect, stacks, |a, stub| {
                     found.push((
-                        (true, stub + a.at.manhattan(target).get()),
+                        (true, stub + a.at.manhattan(target)),
                         AccessPoint {
                             pin_layer: layer,
                             ..a
@@ -150,7 +150,7 @@ pub fn access_points(
 
 /// The candidates of the first [`MAX_CANDIDATE_NODES`] distinct nodes of
 /// `found`, which is in order of preference, each kept once.
-fn best_per_node(found: Vec<((bool, i64), AccessPoint)>) -> Vec<AccessPoint> {
+fn best_per_node(found: Vec<((bool, Dbu), AccessPoint)>) -> Vec<AccessPoint> {
     let mut nodes: Vec<Node> = Vec::new();
     let mut kept: Vec<AccessPoint> = Vec::new();
     for (_, a) in found {
@@ -182,7 +182,7 @@ fn stub_accesses(
     layer: LayerId,
     rect: &Rect<Dbu>,
     stacks: impl Fn(Point<Dbu>) -> Vec<Vec<ViaId>>,
-    mut f: impl FnMut(AccessPoint, i64),
+    mut f: impl FnMut(AccessPoint, Dbu),
 ) {
     let lt = tech.layer(layer);
     let ((a0, a1), (b0, b1)) = lt.across_along_rect(rect);
@@ -214,7 +214,7 @@ fn stub_accesses(
                                 pin_layer: layer,
                                 vias,
                             },
-                            (along - node_along).abs().get(),
+                            (along - node_along).abs(),
                         );
                     }
                     break;
@@ -235,7 +235,7 @@ fn planar_accesses(
     rect: &Rect<Dbu>,
     target: Point<Dbu>,
     clean: &impl Fn(LayerId, &Rect<Dbu>) -> bool,
-) -> Vec<((bool, i64), AccessPoint)> {
+) -> Vec<((bool, Dbu), AccessPoint)> {
     let mut crossings = Vec::new();
     let _ = nodes_inside(tech, layer, rect, |node, at| {
         let access = AccessPoint {
@@ -244,7 +244,7 @@ fn planar_accesses(
             pin_layer: layer,
             vias: Vec::new(),
         };
-        crossings.push(((false, at.manhattan(target).get()), access));
+        crossings.push(((false, at.manhattan(target)), access));
         true
     });
     let is_clean = |a: &AccessPoint| clean(layer, &wire_end_metal(tech, a));
@@ -258,11 +258,11 @@ fn planar_accesses(
         layer,
         rect,
         |_| vec![Vec::new()],
-        |a, stub| stubs.push(((true, stub + a.at.manhattan(target).get()), a)),
+        |a, stub| stubs.push(((true, stub + a.at.manhattan(target)), a)),
     );
-    let mut reaching: Vec<((bool, i64), AccessPoint)> = stubs_from_beyond(tech, layer, rect)
+    let mut reaching: Vec<((bool, Dbu), AccessPoint)> = stubs_from_beyond(tech, layer, rect)
         .into_iter()
-        .map(|(a, stub)| ((true, stub + a.at.manhattan(target).get()), a))
+        .map(|(a, stub)| ((true, stub + a.at.manhattan(target)), a))
         .collect();
     reaching.extend(stubs.iter().cloned());
     if reaching.iter().any(|(_, a)| is_clean(a)) {
@@ -283,7 +283,7 @@ fn stubs_from_beyond(
     tech: &RouteTech,
     layer: LayerId,
     rect: &Rect<Dbu>,
-) -> Vec<(AccessPoint, i64)> {
+) -> Vec<(AccessPoint, Dbu)> {
     let lt = tech.layer(layer);
     let ((a0, a1), (b0, b1)) = lt.across_along_rect(rect);
     let before = lt.cross.partition_point(|c| c.at < b0).checked_sub(1);
@@ -310,7 +310,7 @@ fn stubs_from_beyond(
                 pin_layer: layer,
                 vias: Vec::new(),
             };
-            found.push((access, (end - lt.cross[cross].at).abs().get()));
+            found.push((access, (end - lt.cross[cross].at).abs()));
         }
     }
     found
