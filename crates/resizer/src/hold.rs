@@ -454,27 +454,79 @@ fn in_hand<Q: Quantity>(value: Q, limit: Q) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::testing::{cells, clock_cells_source, design, with_timed_session};
+    use crate::testing::{
+        DefSections, cells, clock_cells_source, def_text, design, pin, with_timed_session,
+    };
+
+    const CLOCK: &str = "create_clock -name clk -period 1.0 [get_ports clk]\n";
+
+    /// Two flops side by side on one clock, the first driving the second.
+    fn pair() -> pare_common::db::design::NetlistDB {
+        design(&def_text(
+            "pair",
+            &DefSections {
+                components: "- f1 DFF_X1 + PLACED ( 2000 2800 ) N ;\n\
+                             - f2 DFF_X1 + PLACED ( 12000 2800 ) N ;\n",
+                nets: "- clk ( PIN clk ) ( f1 CK ) ( f2 CK ) ;\n- q ( f1 Q ) ( f2 D ) ;\n",
+                inputs: &["clk"],
+                outputs: &[],
+            },
+        ))
+    }
+
+    /// What hold repair of [`pair`] to `hold_margin` reports, with the hold
+    /// slack at the second flop's input before and after it.
+    fn repaired_pair(hold_margin: Seconds) -> (HoldSummary, Seconds, Seconds) {
+        let mut db = pair();
+        let lib = cells(&clock_cells_source());
+        let mut repaired = None;
+        with_timed_session(&mut db, &lib, CLOCK, |resizer| {
+            let end = pin(resizer.db, "f2/D");
+            let before = resizer.sta().slack(end, MinMax::Min).time();
+            let options = HoldOptions {
+                hold_margin,
+                ..HoldOptions::default()
+            };
+
+            let summary = repair_hold(resizer, &options).unwrap();
+
+            let after = resizer.sta().slack(end, MinMax::Min).time();
+            repaired = Some((summary, before, after));
+        });
+        repaired.unwrap()
+    }
+
+    #[test]
+    fn a_path_short_of_the_hold_margin_gets_hold_buffers_until_it_meets_it() {
+        let margin = Seconds::new(0.12e-9);
+
+        let (summary, before, after) = repaired_pair(margin);
+
+        assert!(before < margin);
+        assert!(summary.inserted > 0, "{summary:?}");
+        assert!(after >= margin, "{before:?} to {after:?}");
+        assert_eq!((summary.failing_before, summary.failing_after), (1, 0));
+    }
+
+    #[test]
+    fn a_path_that_meets_hold_gets_no_buffer() {
+        let (summary, before, after) = repaired_pair(Seconds::ZERO);
+
+        assert!(before > Seconds::ZERO);
+        assert_eq!(summary.inserted, 0);
+        assert_eq!(after, before);
+    }
 
     #[test]
     fn a_clock_buffer_with_the_most_hold_delay_per_area_is_the_hold_buffer() {
-        let mut db = design(
-            "VERSION 5.8 ;\nDIVIDERCHAR \"/\" ;\nBUSBITCHARS \"[]\" ;\nDESIGN pair ;\n\
-             UNITS DISTANCE MICRONS 2000 ;\nDIEAREA ( 0 0 ) ( 40000 40000 ) ;\n\
-             COMPONENTS 2 ;\n- f1 DFF_X1 + PLACED ( 2000 2800 ) N ;\n\
-             - f2 DFF_X1 + PLACED ( 12000 2800 ) N ;\nEND COMPONENTS\n\
-             PINS 1 ;\n- clk + NET clk + DIRECTION INPUT ;\nEND PINS\n\
-             NETS 2 ;\n- clk ( PIN clk ) ( f1 CK ) ( f2 CK ) ;\n- q ( f1 Q ) ( f2 D ) ;\n\
-             END NETS\nEND DESIGN\n",
-        );
+        let mut db = pair();
         let slow_clock_buffer = clock_cells_source().replace(
             "values (\"0.02, 0.08\", \"0.03, 0.09\")",
             "values (\"0.5, 0.6\", \"0.5, 0.6\")",
         );
         let lib = cells(&slow_clock_buffer);
-        let clock = "create_clock -name clk -period 1.0 [get_ports clk]\n";
 
-        with_timed_session(&mut db, &lib, clock, |resizer| {
+        with_timed_session(&mut db, &lib, CLOCK, |resizer| {
             let chosen = hold_buffer(resizer).map(|b| resizer.link.liberty.cell(b.id).name.clone());
 
             assert_eq!(chosen.as_deref(), Some("CLKBUF_X3"));
