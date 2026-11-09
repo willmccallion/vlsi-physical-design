@@ -948,7 +948,12 @@ impl Interpreter {
             cell.ports[to].clock_tree_paths.push(path);
             return Ok(());
         }
-        let kind = arc_role(timing_type);
+        let kind = arc_role(timing_type).ok_or_else(|| {
+            // NOTE: LibertyReader::readTimingType warns (1244) and reads an
+            // unknown type as combinational; PARE refuses to guess its role.
+            let line = group.attr("timing_type").map_or(group.line, |a| a.line);
+            self.error(line, format!("unknown timing_type '{timing_type}'"))
+        })?;
         let stated_sense = stated_sense(group);
         let when = self.function_attr(group, "when")?;
         let tables = self.arc_tables(group, kind.role)?;
@@ -1379,8 +1384,9 @@ fn clock_tree_path_bound(timing_type: &str) -> Option<MinMax> {
 }
 
 /// The role a `timing_type` names, with the input edge it fixes for a clock
-/// and the output edge it restricts to, where it does.
-fn arc_role(timing_type: &str) -> ArcKind {
+/// and the output edge it restricts to, where it does, or `None` for a type
+/// `OpenSTA`'s `TimingType` does not know.
+fn arc_role(timing_type: &str) -> Option<ArcKind> {
     let (role, from_edge, to_edge) = match timing_type {
         "combinational" => (ArcRole::Combinational, None, None),
         "combinational_rise" => (ArcRole::Combinational, None, Some(Edge::Rise)),
@@ -1403,13 +1409,26 @@ fn arc_role(timing_type: &str) -> ArcKind {
         "recovery_falling" => (ArcRole::Recovery, Some(Edge::Fall), None),
         "removal_rising" => (ArcRole::Removal, Some(Edge::Rise), None),
         "removal_falling" => (ArcRole::Removal, Some(Edge::Fall), None),
-        _ => (ArcRole::Check, None, None),
+        "min_pulse_width"
+        | "minimum_period"
+        | "retaining_time"
+        | "nochange_high_high"
+        | "nochange_high_low"
+        | "nochange_low_high"
+        | "nochange_low_low"
+        | "non_seq_hold_falling"
+        | "non_seq_hold_rising"
+        | "non_seq_setup_falling"
+        | "non_seq_setup_rising"
+        | "skew_falling"
+        | "skew_rising" => (ArcRole::Check, None, None),
+        _ => return None,
     };
-    ArcKind {
+    Some(ArcKind {
         role,
         from_edge,
         to_edge,
-    }
+    })
 }
 
 #[cfg(test)]
@@ -1664,6 +1683,35 @@ library (tiny) {
         );
 
         assert!(lib.is_ok());
+    }
+
+    #[test]
+    fn an_unknown_timing_type_is_refused() {
+        let refused = tiny_with("timing_type : setup_rising;", "timing_type : setup_risng;");
+
+        let message = refused.map(|_| ()).unwrap_err().to_string();
+        assert!(
+            message.contains("unknown timing_type 'setup_risng'"),
+            "{message}"
+        );
+    }
+
+    #[test]
+    fn every_timing_type_opensta_knows_is_read() {
+        for timing_type in [
+            "non_seq_setup_rising",
+            "nochange_high_low",
+            "skew_falling",
+            "min_pulse_width",
+            "retaining_time",
+        ] {
+            let lib = tiny_with(
+                "timing_type : setup_rising;",
+                &format!("timing_type : {timing_type};"),
+            );
+
+            assert!(lib.is_ok(), "{timing_type}: {lib:?}");
+        }
     }
 
     /// A macro whose clock pin `CK` has the clock tree path timing groups
