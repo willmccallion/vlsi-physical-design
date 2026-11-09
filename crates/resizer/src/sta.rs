@@ -254,6 +254,9 @@ struct Accounting {
     /// The cycles of the launching and capturing clocks the latch
     /// accounting landed on.
     latch_cycles: (i64, i64),
+    /// Whether the search ran out of cycles before the clocks realigned,
+    /// which `OpenSTA` warns of as having no common period.
+    max_cycles_exceeded: bool,
 }
 
 /// Which check a capture is for, since a gated clock's hold check lands on
@@ -328,6 +331,8 @@ pub struct Sta {
     tns: SideValues<Seconds>,
     worst: SideValues<Option<(Slack, Option<PinId>)>>,
     accountings: FxHashMap<(ClockEdge, ClockEdge), Accounting>,
+    /// The pairs of clocks already warned of as having no common period.
+    unaligned_clocks: FxHashSet<(ClockId, ClockId)>,
     exception_ports: FxHashSet<IoPinId>,
     latches: FxHashMap<CellId, Latch>,
     /// The enables of gated clocks, checked against their gate's clock.
@@ -387,6 +392,7 @@ impl Sta {
             tns: SideValues::both(Seconds::ZERO),
             worst: SideValues::both(None),
             accountings: FxHashMap::default(),
+            unaligned_clocks: FxHashSet::default(),
             exception_ports,
             latches: find_latches(netlist, constants),
             gated: gated_enables(netlist, clocks),
@@ -1573,12 +1579,25 @@ impl Sta {
         }
     }
 
-    /// The cycle accounting between two clock edges, found once.
+    /// The cycle accounting between two clock edges, found once; warns
+    /// once for each pair of clocks without a common period, as `OpenSTA`'s
+    /// warning 1010.
     fn accounting(&mut self, launch: ClockEdge, target: ClockEdge) -> Accounting {
         if let Some(&found) = self.accountings.get(&(launch, target)) {
             return found;
         }
         let found = cycle_accounting(&self.sdc, launch, target);
+        let pair = (
+            launch.clock.min(target.clock),
+            launch.clock.max(target.clock),
+        );
+        if found.max_cycles_exceeded && self.unaligned_clocks.insert(pair) {
+            log::warn!(
+                "no common period was found between clocks {} and {}",
+                self.sdc.clock(launch.clock).name,
+                self.sdc.clock(target.clock).name
+            );
+        }
         let _ = self.accountings.insert((launch, target), found);
         found
     }
@@ -1757,8 +1776,11 @@ fn cycle_accounting(sdc: &Sdc, launch: ClockEdge, target: ClockEdge) -> Accounti
     let tgt_edge_time = tgt_clock.edge_time(target.edge);
     let tgt_opposite_time = tgt_clock.edge_time(opposite(target.edge));
     let mut search = CycleSearch::new();
-    if !(tgt_period > Seconds::ZERO && src_period > Seconds::ZERO) {
+    if tgt_period <= Seconds::ZERO {
         return search.accounting;
+    }
+    if src_period <= Seconds::ZERO {
+        return default_arrival_accounting(tgt_edge_time, tgt_period);
     }
     let first_cycle = |time: Seconds, period: Seconds| -> i64 {
         if time < Seconds::ZERO {
@@ -1805,7 +1827,32 @@ fn cycle_accounting(sdc: &Sdc, launch: ClockEdge, target: ClockEdge) -> Accounti
         }
         tgt_cycle += 1;
     }
-    search.accounting
+    Accounting {
+        max_cycles_exceeded: true,
+        ..search.accounting
+    }
+}
+
+/// The accounting of a launch without a period against a capturing edge at
+/// `tgt_time` of a clock of `tgt_period`, as `CycleAccting`'s
+/// `findDefaultArrivalSrcDelays`: setup in the first cycle the edge falls
+/// in, hold at the edge itself.
+fn default_arrival_accounting(tgt_time: Seconds, tgt_period: Seconds) -> Accounting {
+    let (setup_required, tgt_cycle) = if tgt_time > tgt_period {
+        (tgt_time - tgt_period, 0)
+    } else if tgt_time > Seconds::ZERO {
+        (tgt_time, 0)
+    } else {
+        (tgt_period, 1)
+    };
+    Accounting {
+        setup_required,
+        hold_required: tgt_time,
+        gated_hold_required: Seconds::ZERO,
+        latch_setup_required: setup_required,
+        latch_cycles: (0, tgt_cycle),
+        max_cycles_exceeded: false,
+    }
 }
 
 /// The target cycles `CycleAccting::findDelays` searches when the target
@@ -1858,6 +1905,7 @@ impl CycleSearch {
                 gated_hold_required: Seconds::ZERO,
                 latch_setup_required: Seconds::ZERO,
                 latch_cycles: (0, 0),
+                max_cycles_exceeded: false,
             },
             setup_delay: Seconds::INFINITY,
             hold_delay: Seconds::INFINITY,
@@ -2015,6 +2063,45 @@ mod tests {
 
         assert!((acct.setup_required.get() - 1e-9).abs() < 1e-20);
         assert!(acct.hold_required.get().abs() < 1e-20);
+    }
+
+    #[test]
+    fn a_launch_without_a_period_is_captured_in_the_first_cycle() {
+        let sdc = Sdc {
+            clocks: vec![
+                clock("virtual", 0.0, 0.0, 0.0),
+                clock("clk", 2e-9, 0.0, 1e-9),
+            ]
+            .into(),
+            ..Sdc::default()
+        };
+
+        let falling = cycle_accounting(&sdc, edge(0, Edge::Rise), edge(1, Edge::Fall));
+        let rising = cycle_accounting(&sdc, edge(0, Edge::Rise), edge(1, Edge::Rise));
+
+        assert!((falling.setup_required.get() - 1e-9).abs() < 1e-20);
+        assert!((falling.hold_required.get() - 1e-9).abs() < 1e-20);
+        assert!((rising.setup_required.get() - 2e-9).abs() < 1e-20);
+        assert!(rising.hold_required.get().abs() < 1e-20);
+        assert_eq!(rising.latch_cycles, (0, 1));
+    }
+
+    #[test]
+    fn clocks_without_a_common_period_are_flagged() {
+        let sdc = Sdc {
+            clocks: vec![
+                clock("a", 1e-9, 0.0, 0.5e-9),
+                clock("b", 2f64.sqrt() * 1e-9, 0.0, 0.5e-9),
+            ]
+            .into(),
+            ..Sdc::default()
+        };
+
+        let unrelated = cycle_accounting(&sdc, edge(0, Edge::Rise), edge(1, Edge::Rise));
+        let same = cycle_accounting(&sdc, edge(0, Edge::Rise), edge(0, Edge::Rise));
+
+        assert!(unrelated.max_cycles_exceeded);
+        assert!(!same.max_cycles_exceeded);
     }
 
     fn fixture(crate_name: &str, name: &str) -> PathBuf {
