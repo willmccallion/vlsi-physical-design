@@ -14,8 +14,8 @@ use crate::route_parasitics::RouteRc;
 use crate::sta::{Slack, Sta};
 use pare_common::db::design::{EditError, NetlistDB, PinOwner, PlacementStatus};
 use pare_common::db::global_route::RouteSource;
-use pare_common::db::indices::{CellId, MacroId, MacroPinId, NetId, PinId};
-use pare_common::db::liberty::{Edge, EdgeValues, LibCell, LibCellId, LibPort, MinMax};
+use pare_common::db::indices::{CellId, MacroId, NetId, PinId};
+use pare_common::db::liberty::{Edge, EdgeValues, LibCell, LibCellId, LibPort, LibPortId, MinMax};
 use pare_common::db::library::DuplicateName;
 use pare_common::db::sdc::Sdc;
 use pare_common::geom::dbu::{Dbu, DbuPerMicron};
@@ -910,14 +910,11 @@ impl<'a, T: Timing> Resizer<'a, T> {
         &mut self,
         cell: CellId,
         lib: LibCellId,
-        port: usize,
+        port: LibPortId,
         net: NetId,
     ) -> Option<PinId> {
         let macro_pin = self.link.macro_pin_of_port(lib, port)?;
-        Some(
-            self.db
-                .connect_cell_pin(cell, MacroPinId::new(macro_pin), net),
-        )
+        Some(self.db.connect_cell_pin(cell, macro_pin, net))
     }
 
     /// Puts a buffer of `buffer` at `at` between `net` and `loads`, which
@@ -1410,7 +1407,7 @@ fn arc_target_load(
 #[must_use]
 pub(crate) fn gate_delays(
     cell: &LibCell,
-    port: usize,
+    port: LibPortId,
     load_cap: Farads,
     target_slews: &EdgeValues<Seconds>,
     input_slews: Option<&PortSlews<'_>>,
@@ -1444,7 +1441,7 @@ pub(crate) fn gate_delays(
 #[must_use]
 pub(crate) fn gate_slew(
     cell: &LibCell,
-    port: usize,
+    port: LibPortId,
     slews: &EdgeValues<Seconds>,
     load_cap: Farads,
 ) -> Seconds {

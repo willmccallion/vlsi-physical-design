@@ -5,7 +5,7 @@ use crate::library::{BufferSet, Link, is_logic_std_cell};
 use crate::netlist::{ClockNetwork, Constants, Namer, Netlist};
 use pare_common::db::design::{EditError, NetlistDB, PinOwner, PlacementStatus};
 use pare_common::db::indices::{CellId, IoPinId, MacroPinId, NetId, PinId};
-use pare_common::db::liberty::LibCellId;
+use pare_common::db::liberty::{LibCellId, LibPortId};
 use pare_common::db::library::{DuplicateName, PinDirection};
 use pare_common::geom::dbu::Dbu;
 use pare_common::geom::orient::Orientation;
@@ -53,10 +53,10 @@ pub fn remove_buffers(db: &mut NetlistDB, link: &Link<'_>) -> Result<usize, Buff
         let Some((in_port, out_port)) = lib.buffer_ports() else {
             continue;
         };
-        let pin_for = |port: usize| -> Option<PinId> {
+        let pin_for = |port: LibPortId| -> Option<PinId> {
             let macro_pin = link.macro_pin_of_port(link.cell(db, instance)?.0, port)?;
             db.cells[i].pins.iter().copied().find(|&p| {
-                matches!(db.pins[p.index()].owner, PinOwner::Cell { pin, .. } if pin.index() == macro_pin)
+                matches!(db.pins[p.index()].owner, PinOwner::Cell { pin, .. } if pin == macro_pin)
             })
         };
         let Some(in_pin) = pin_for(in_port) else {
@@ -277,8 +277,8 @@ fn make_buffer(
     let cell = db.add_cell(name, master, at, Orientation::N, PlacementStatus::Placed)?;
     Ok(NewBuffer {
         cell,
-        input: MacroPinId::new(input),
-        output: MacroPinId::new(output),
+        input,
+        output,
     })
 }
 

@@ -11,7 +11,9 @@
 use crate::CtsError;
 use crate::capacitance::Farads32;
 use pare_common::db::design::NetlistDB;
-use pare_common::db::liberty::{AxisVariable, Edge, LibCell, LibCellId, Liberty, Thresholds};
+use pare_common::db::liberty::{
+    AxisVariable, Edge, LibCell, LibCellId, LibPortId, Liberty, Thresholds,
+};
 use pare_common::units::{Farads, Ohms, Seconds};
 use pare_resizer::Link;
 use pare_resizer::WireRc;
@@ -517,8 +519,8 @@ fn plan(setup: &CharSetup<'_>) -> Result<Plan, CtsError> {
 /// a buffer's input to its output.
 fn collect_table_axes(
     cell: &LibCell,
-    input: usize,
-    output: usize,
+    input: LibPortId,
+    output: LibPortId,
     slews: &mut Vec<f32>,
     loads: &mut Vec<f32>,
 ) {

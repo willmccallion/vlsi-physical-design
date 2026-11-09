@@ -68,9 +68,9 @@ fn output_pin(db: &NetlistDB, link: &Link<'_>, cell: CellId) -> Option<PinId> {
     let (lib_id, lib) = link.cell(db, cell)?;
     let (_, out) = lib.buffer_ports()?;
     let macro_pin = link.macro_pin_of_port(lib_id, out)?;
-    db.cells[cell.index()].pins.iter().copied().find(|&p| {
-        matches!(db.pins[p.index()].owner, PinOwner::Cell { pin, .. } if pin.index() == macro_pin)
-    })
+    db.cells[cell.index()].pins.iter().copied().find(
+        |&p| matches!(db.pins[p.index()].owner, PinOwner::Cell { pin, .. } if pin == macro_pin),
+    )
 }
 
 /// The inverters the clocks pass through, breadth first from where they
@@ -143,10 +143,10 @@ fn clone_inverter(
     ) else {
         return Ok(false);
     };
-    let pin_of = |db: &NetlistDB, macro_pin: usize| {
-        db.cells[inverter.index()].pins.iter().copied().find(|&p| {
-            matches!(db.pins[p.index()].owner, PinOwner::Cell { pin, .. } if pin.index() == macro_pin)
-        })
+    let pin_of = |db: &NetlistDB, macro_pin: MacroPinId| {
+        db.cells[inverter.index()].pins.iter().copied().find(
+            |&p| matches!(db.pins[p.index()].owner, PinOwner::Cell { pin, .. } if pin == macro_pin),
+        )
     };
     let (Some(in_pin), Some(out_pin)) = (pin_of(db, in_macro), pin_of(db, out_macro)) else {
         return Ok(false);
@@ -174,8 +174,8 @@ fn clone_inverter(
         let net_name = namer.net(db, "net");
         let clone_net = db.add_net(&net_name)?;
         db.nets[clone_net.index()].signal_use = db.nets[in_net.index()].signal_use;
-        let _ = db.connect_cell_pin(clone, MacroPinId::new(in_macro), in_net);
-        let _ = db.connect_cell_pin(clone, MacroPinId::new(out_macro), clone_net);
+        let _ = db.connect_cell_pin(clone, in_macro, in_net);
+        let _ = db.connect_cell_pin(clone, out_macro, clone_net);
         db.move_pin(load, clone_net);
         done.clones += 1;
     }

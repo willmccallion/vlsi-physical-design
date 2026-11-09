@@ -23,6 +23,39 @@ impl LibCellId {
     }
 }
 
+/// A port of a cell, in its [`LibCell::ports`].
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub struct LibPortId(pub u32);
+
+impl LibPortId {
+    /// The port at position `index` of its cell's ports.
+    #[must_use]
+    pub const fn new(index: usize) -> Self {
+        debug_assert!(index <= u32::MAX as usize, "port index past 32 bits");
+        Self(index as u32)
+    }
+
+    /// Index into [`LibCell::ports`].
+    #[must_use]
+    pub const fn index(self) -> usize {
+        self.0 as usize
+    }
+}
+
+impl std::ops::Index<LibPortId> for Vec<LibPort> {
+    type Output = LibPort;
+
+    fn index(&self, port: LibPortId) -> &LibPort {
+        &self[port.index()]
+    }
+}
+
+impl std::ops::IndexMut<LibPortId> for Vec<LibPort> {
+    fn index_mut(&mut self, port: LibPortId) -> &mut LibPort {
+        &mut self[port.index()]
+    }
+}
+
 /// A rising or falling transition.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub enum Edge {
@@ -599,10 +632,10 @@ impl TimingArc {
 /// A `timing` group: arcs from one pin to another.
 #[derive(Clone, Debug, PartialEq)]
 pub struct TimingArcSet {
-    /// Index of the related pin in [`LibCell::ports`].
-    pub from: usize,
-    /// Index of the pin the group belongs to in [`LibCell::ports`].
-    pub to: usize,
+    /// The related pin.
+    pub from: LibPortId,
+    /// The pin the group belongs to.
+    pub to: LibPortId,
     /// What the arcs describe.
     pub role: ArcRole,
     /// How the output follows the input.
@@ -812,19 +845,28 @@ pub struct LibCell {
 }
 
 impl LibCell {
-    /// Index of the pin named `name`.
+    /// Every pin, in order.
+    pub fn port_ids(&self) -> impl Iterator<Item = LibPortId> + use<> {
+        (0..self.ports.len()).map(LibPortId::new)
+    }
+
+    /// The pin named `name`.
     #[must_use]
-    pub fn port(&self, name: &str) -> Option<usize> {
-        self.ports.iter().position(|p| p.name == name)
+    pub fn port(&self, name: &str) -> Option<LibPortId> {
+        self.ports
+            .iter()
+            .position(|p| p.name == name)
+            .map(LibPortId::new)
     }
 
     /// The single input and single output of a cell with exactly one of
     /// each and no other signal pin, as `OpenSTA`'s `bufferPorts`.
     #[must_use]
-    pub fn buffer_ports(&self) -> Option<(usize, usize)> {
+    pub fn buffer_ports(&self) -> Option<(LibPortId, LibPortId)> {
         let mut input = None;
         let mut output = None;
         for (i, port) in self.ports.iter().enumerate() {
+            let i = LibPortId::new(i);
             match port.direction {
                 PortDirection::Input => {
                     if input.replace(i).is_some() {
@@ -862,7 +904,7 @@ impl LibCell {
     /// Whether `port` clocks a register or opens a latch, as `OpenSTA`'s
     /// `isRegClk`: a clock-to-output or enable-to-output arc starts there.
     #[must_use]
-    pub fn is_register_clock(&self, port: usize) -> bool {
+    pub fn is_register_clock(&self, port: LibPortId) -> bool {
         self.arc_sets
             .iter()
             .any(|s| s.from == port && matches!(s.role, ArcRole::RegClkToQ | ArcRole::LatchEnToQ))
@@ -875,7 +917,7 @@ impl LibCell {
     }
 
     /// The delay arc sets into `port`.
-    pub fn delay_arc_sets_to(&self, port: usize) -> impl Iterator<Item = &TimingArcSet> + '_ {
+    pub fn delay_arc_sets_to(&self, port: LibPortId) -> impl Iterator<Item = &TimingArcSet> + '_ {
         self.arc_sets
             .iter()
             .filter(move |s| s.to == port && s.role.is_delay())
@@ -884,7 +926,7 @@ impl LibCell {
     /// The largest drive resistance over the delay arcs into `port`, as
     /// `OpenSTA`'s `driveResistance`; zero when no arc gives one.
     #[must_use]
-    pub fn drive_resistance(&self, port: usize) -> Ohms {
+    pub fn drive_resistance(&self, port: LibPortId) -> Ohms {
         self.delay_arc_sets_to(port)
             .flat_map(|s| s.arcs.iter())
             .map(TimingArc::drive_resistance)

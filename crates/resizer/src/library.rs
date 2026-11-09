@@ -3,8 +3,8 @@
 //! which sizes a cell can swap to.
 
 use pare_common::db::design::{NetlistDB, PinOwner};
-use pare_common::db::indices::{CellId, MacroId, PinId, SiteId};
-use pare_common::db::liberty::{LibCell, LibCellId, LibPort, Liberty};
+use pare_common::db::indices::{CellId, MacroId, MacroPinId, PinId, SiteId};
+use pare_common::db::liberty::{LibCell, LibCellId, LibPortId, Liberty};
 use pare_common::db::library::{CoreKind, MacroClass, PinDirection, SignalUse};
 use pare_common::units::{Farads, Ohms, Watts};
 use std::collections::HashMap;
@@ -37,7 +37,7 @@ pub struct Link<'a> {
     pub liberty: &'a Liberty,
     cell_of_macro: Vec<Option<LibCellId>>,
     macro_of_cell: Vec<Option<MacroId>>,
-    port_of_pin: Vec<Vec<Option<usize>>>,
+    port_of_pin: Vec<Vec<Option<LibPortId>>>,
     dont_use: Vec<bool>,
     class_of: Vec<Option<usize>>,
     classes: Vec<Vec<LibCellId>>,
@@ -181,7 +181,7 @@ impl<'a> Link<'a> {
 
     /// The Liberty cell and port index of an instance pin.
     #[must_use]
-    pub fn pin_port(&self, db: &NetlistDB, pin: PinId) -> Option<(LibCellId, usize)> {
+    pub fn pin_port(&self, db: &NetlistDB, pin: PinId) -> Option<(LibCellId, LibPortId)> {
         let PinOwner::Cell {
             cell,
             pin: macro_pin,
@@ -197,11 +197,12 @@ impl<'a> Link<'a> {
 
     /// The index in the master's pins of the Liberty port `port` of `cell`.
     #[must_use]
-    pub fn macro_pin_of_port(&self, cell: LibCellId, port: usize) -> Option<usize> {
+    pub fn macro_pin_of_port(&self, cell: LibCellId, port: LibPortId) -> Option<MacroPinId> {
         let master = self.macro_of(cell)?;
         self.port_of_pin[master.index()]
             .iter()
             .position(|p| *p == Some(port))
+            .map(MacroPinId::new)
     }
 
     /// The cells an instance of `cell` may be swapped for, itself included,
@@ -462,9 +463,8 @@ fn equivalence_classes(
 /// The drive resistance of a cell's first output, as `EquivCells` sorts
 /// by; zero for a cell without one.
 fn output_drive_resistance(cell: &LibCell) -> Ohms {
-    cell.ports
-        .iter()
-        .position(LibPort::is_output)
+    cell.port_ids()
+        .find(|&p| cell.ports[p].is_output())
         .map_or(Ohms::ZERO, |port| cell.drive_resistance(port))
 }
 
