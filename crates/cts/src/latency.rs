@@ -342,11 +342,10 @@ impl Balancer<'_> {
         src: Point<Dbu>,
         loads: &[PinId],
     ) -> Result<Option<PinId>, CtsError> {
-        let Some(&first_load) = loads.first() else {
+        let (Some(&first_load), Some(center)) = (loads.first(), sink_bbox_center(db, loads)) else {
             return Ok(None);
         };
         let mut driving = db.pins[first_load].net;
-        let center = sink_bbox_center(db, loads);
         let dx = (center.x - src.x).get() as f32 / (count + 1) as f32;
         let dy = (center.y - src.y).get() as f32 / (count + 1) as f32;
         let root = &self.trees.builders[self.root];

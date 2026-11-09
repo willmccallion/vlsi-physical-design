@@ -283,9 +283,17 @@ fn a_grid_with_slow_flops_gets_the_trees_it_always_has() {
 
 /// The 16 by 16 grid clocked through the gate `clkgate`, an `AND2_X1`.
 fn gated_grid() -> (NetlistDB, Liberty, Sdc) {
+    gated_grid_with_gate_at("2000 2000")
+}
+
+/// The gated grid with its gate placed at `at`, given as DEF coordinates.
+fn gated_grid_with_gate_at(at: &str) -> (NetlistDB, Liberty, Sdc) {
     let (db, lib, _) = load(16, 16, true);
     let text = design(16, 16, true)
-        .replace("- clkinv INV_X1 ", "- clkgate AND2_X1 ")
+        .replace(
+            "- clkinv INV_X1 + PLACED ( 2000 2000 )",
+            &format!("- clkgate AND2_X1 + PLACED ( {at} )"),
+        )
         .replace("( clkinv A )", "( clkgate A )")
         .replace("( clkinv ZN )", "( clkgate Z )");
     let db = def::parse_str(&text, Path::new("grid.def"), db.library).unwrap();
@@ -316,6 +324,46 @@ fn a_clock_gate_driving_far_apart_flops_is_cloned_as_it_always_is() {
         "gated_grid_16x16_column_clusters.txt",
         &clock_trees_text(&db, first_added, &trees.summary),
     );
+}
+
+#[test]
+fn a_cluster_of_only_a_steiner_point_gets_no_clone() {
+    // Three flops in a T: their Steiner point is over the wire length limit
+    // from each, so it is a cluster of its own with no flop.
+    let (db, lib, _) = load(1, 3, true);
+    let text = design(1, 3, true)
+        .replace("- clkinv INV_X1 ", "- clkgate AND2_X1 ")
+        .replace("( clkinv A )", "( clkgate A )")
+        .replace("( clkinv ZN )", "( clkgate Z )")
+        .replace(
+            "ff0 DFF_X1 + PLACED ( 4000 2000 )",
+            "ff0 DFF_X1 + PLACED ( 4000 130800 )",
+        )
+        .replace(
+            "ff1 DFF_X1 + PLACED ( 4000 130800 )",
+            "ff1 DFF_X1 + PLACED ( 100040 2000 )",
+        )
+        .replace(
+            "ff2 DFF_X1 + PLACED ( 4000 259600 )",
+            "ff2 DFF_X1 + PLACED ( 100040 259600 )",
+        );
+    let mut db = def::parse_str(&text, Path::new("t.def"), db.library).unwrap();
+    let constraints = sdc::parse_str(CLOCK, Path::new("t.sdc"), &db, &lib).unwrap();
+    let link = Link::new(&db, &lib, &[]).unwrap();
+    let clocks = clock_network(&db, &link, &constraints);
+    let input = CtsInput {
+        link: &link,
+        sdc: &constraints,
+        clocks: &clocks,
+        signal_rc: wire(&db, "metal2", 3.5, 0.1),
+        clock_rc: wire(&db, "metal3", 1.5, 0.11),
+        max_wire_length: Some(Dbu(23_000)),
+        options: CtsOptions::default(),
+    };
+
+    let trees = synthesize(&mut db, &input).unwrap();
+
+    assert_eq!(trees.summary.clones, 2, "{:?}", trees.summary);
 }
 
 #[test]
