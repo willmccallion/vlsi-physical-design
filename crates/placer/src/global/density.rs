@@ -137,21 +137,10 @@ impl DensityGrid {
     }
 
     /// Area of each bin cells may not use: outside every placeable
-    /// rectangle, or under a fixed one. A design without placeable
-    /// rectangles may use the whole die. Placeable rectangles must not
+    /// rectangle, or under a fixed one. Placeable rectangles must not
     /// overlap each other, nor fixed ones each other.
     fn blocked_area(&self, placeable: &[Rect<f64>], fixed: &[Rect<f64>]) -> Vec<f64> {
         let bin_area = self.bins.area();
-        let die = Rect::new(
-            self.bins.origin,
-            self.bins.origin + self.bins.size * self.bins.dim as f64,
-        );
-        let whole_die = [die];
-        let placeable = if placeable.is_empty() {
-            &whole_die[..]
-        } else {
-            placeable
-        };
         let mut open = vec![0.0; self.bins.dim * self.bins.dim];
         for r in placeable {
             self.bins.spread(r, 1.0, &mut open);
@@ -357,7 +346,7 @@ mod tests {
 
     #[test]
     fn a_small_object_spreads_its_area_over_a_wider_footprint() {
-        let grid = DensityGrid::new(&die(8.0, 8.0), 8, 1.0, &[], &[]);
+        let grid = DensityGrid::new(&die(8.0, 8.0), 8, 1.0, &[die(8.0, 8.0)], &[]);
 
         let f = grid.footprint(Point::new(0.5, 0.5), Charge::Whole);
 
@@ -374,7 +363,7 @@ mod tests {
 
     #[test]
     fn overflow_is_cell_area_above_the_target_over_all_cell_area() {
-        let mut grid = DensityGrid::new(&die(4.0, 4.0), 4, 0.5, &[], &[]);
+        let mut grid = DensityGrid::new(&die(4.0, 4.0), 4, 0.5, &[die(4.0, 4.0)], &[]);
         let f = grid.footprint(Point::new(2.0, 2.0), Charge::Whole);
 
         let excess = grid.update(
@@ -417,7 +406,7 @@ mod tests {
 
     #[test]
     fn the_field_pushes_an_object_away_from_a_crowd() {
-        let mut grid = DensityGrid::new(&die(16.0, 16.0), 16, 0.5, &[], &[]);
+        let mut grid = DensityGrid::new(&die(16.0, 16.0), 16, 0.5, &[die(16.0, 16.0)], &[]);
         let crowd = grid.footprint(Point::new(4.0, 4.0), Charge::Whole);
         let probe = grid.footprint(Point::new(1.0, 1.0), Charge::Whole);
         let centers = vec![Point::new(8.0, 8.0), Point::new(11.0, 8.0)].into();
@@ -435,7 +424,7 @@ mod tests {
 
     #[test]
     fn a_movable_macro_fills_its_bins_only_to_the_target_density() {
-        let mut grid = DensityGrid::new(&die(4.0, 4.0), 2, 0.5, &[], &[]);
+        let mut grid = DensityGrid::new(&die(4.0, 4.0), 2, 0.5, &[die(4.0, 4.0)], &[]);
         let block = grid.footprint(Point::new(4.0, 4.0), Charge::AtTarget);
 
         let excess = grid.update(

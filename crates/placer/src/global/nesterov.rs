@@ -16,8 +16,8 @@ use super::routability::{
 };
 use super::wirelength::{Netlist, Wirelength};
 use super::{
-    Field, FieldId, GlobalParams, GlobalResult, ObjectId, ObjectPoints, ObjectRange, Outcome,
-    Probe, Progress, Remap, Setup, TimingDriver, ZoneOutcome,
+    Field, FieldId, GlobalParams, GlobalPlacementError, GlobalResult, ObjectId, ObjectPoints,
+    ObjectRange, Outcome, Probe, Progress, Remap, Setup, TimingDriver, ZoneOutcome,
 };
 use crate::model::{CellKind, PlacementModel};
 use crate::zones::Zone;
@@ -822,7 +822,7 @@ pub(super) fn minimize<D: TimingDriver, R: FnMut(&Progress)>(
     params: &GlobalParams,
     mut hooks: Hooks<'_, D, R>,
     rng: &mut StdRng,
-) -> Result<GlobalResult, D::Error> {
+) -> Result<GlobalResult, GlobalPlacementError<D::Error>> {
     let Some(bin) = setup.fields.iter().next().map(|f| f.grid.bin()) else {
         return Ok(unspread_result(&setup));
     };
@@ -834,14 +834,15 @@ pub(super) fn minimize<D: TimingDriver, R: FnMut(&Progress)>(
         }
         write_positions(model, &setup);
         let repaired = match hooks.timing.as_mut() {
-            Some(driver) => driver.repair(model)?,
+            Some(driver) => driver.repair(model).map_err(GlobalPlacementError::Repair)?,
             None => None,
         };
         let Some(reweighted) = repaired else {
             run.timing_on = false;
             continue;
         };
-        let (rebuilt, remap) = setup.rebuild(&reweighted.model, &reweighted.cell_map, params, rng);
+        let (rebuilt, remap) =
+            setup.rebuild(&reweighted.model, &reweighted.cell_map, params, rng)?;
         run.remap(&remap, &rebuilt);
         if let Some(p) = hooks.probe.as_mut() {
             p.refresh(&reweighted.model);

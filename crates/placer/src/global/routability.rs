@@ -660,8 +660,9 @@ mod tests {
         let range = |r: std::ops::Range<u32>| ObjectRange::new(ObjectId(r.start), ObjectId(r.end));
         Field {
             zone: Zone::Outside,
-            grid: DensityGrid::new(&die(4.0), 4, 0.5, &[], &[]),
+            grid: DensityGrid::new(&die(4.0), 4, 0.5, &[die(4.0)], &[]),
             area: vec![die(4.0)],
+            bounds: die(4.0),
             cells: range(cells),
             kept_fillers: fillers.len(),
             fillers: range(fillers),

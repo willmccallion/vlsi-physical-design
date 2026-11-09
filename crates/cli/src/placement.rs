@@ -21,8 +21,8 @@ use pare_common::units::Seconds;
 use pare_common::verify::pin_access::PinAccess;
 use pare_placer::detailed;
 use pare_placer::global::{
-    self, CongestionEstimator, GlobalParams, GlobalResult, Outcome, Reweighted, RoutabilityParams,
-    RoutingTiles, TimingDriver, TimingParams,
+    self, CongestionEstimator, GlobalParams, GlobalPlacementError, GlobalResult, Outcome,
+    Reweighted, RoutabilityParams, RoutingTiles, TimingDriver, TimingParams,
 };
 use pare_placer::io::{self, IoLayers};
 use pare_placer::legalize::Legalization;
@@ -442,25 +442,25 @@ fn place_globally(
     steering: Steering<'_>,
 ) -> anyhow::Result<GlobalResult> {
     match steering {
-        Steering::Timing(mut driver) => Ok(global::place(
-            model,
-            params,
-            None,
-            Some(&mut driver),
-            show_global_progress,
-        )?),
+        Steering::Timing(mut driver) => {
+            global::place(model, params, None, Some(&mut driver), show_global_progress).map_err(
+                |e| match e {
+                    GlobalPlacementError::Repair(repair) => repair,
+                    GlobalPlacementError::NoRoom(no_room) => no_room.into(),
+                },
+            )
+        }
         Steering::Congestion(mut estimator) => {
             let estimator = estimator
                 .as_deref_mut()
                 .map(|e| e as &mut dyn CongestionEstimator);
-            let Ok(result) = global::place::<global::NoTiming>(
+            Ok(global::place::<global::NoTiming>(
                 model,
                 params,
                 estimator,
                 None,
                 show_global_progress,
-            );
-            Ok(result)
+            )?)
         }
     }
 }
