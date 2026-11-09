@@ -444,7 +444,8 @@ impl<'a> MoveRules<'a> {
     /// and a via per layer between.
     fn estimate(&self, c: GCell) -> f64 {
         let layers = c.layer.index().abs_diff(self.target.layer.index()) as f64;
-        let plane = f64::from(c.x.abs_diff(self.target.x) + c.y.abs_diff(self.target.y));
+        let along = |a: u16, b: u16| f64::from(a.abs_diff(b));
+        let plane = along(c.x, self.target.x) + along(c.y, self.target.y);
         self.costs.via.mul_add(layers, plane)
     }
 
@@ -804,5 +805,37 @@ mod tests {
             .filter(|&t| !reaches(&paths, t))
             .collect();
         assert_eq!(missed, []);
+    }
+
+    #[test]
+    fn a_net_widens_past_half_a_wide_grid_to_route_around_a_wall() {
+        let mut grid = sized_grid(40_000, 1);
+        wall(&mut grid, 39_994, 0..=0);
+        let terminals = [cell(1, 39_990, 0), cell(1, 39_999, 0)];
+
+        let paths = route_tree(&grid, &net(&terminals), 2, COSTS, None);
+
+        assert!(reaches(&paths, terminals[0]) && reaches(&paths, terminals[1]));
+    }
+
+    #[test]
+    fn the_estimate_spans_a_grid_wider_than_half_the_coordinate_range() {
+        // The estimate reads only the grid's layers, not its edges.
+        let grid = GlobalGrid {
+            nx: 40_000,
+            ny: 40_000,
+            ..grid()
+        };
+        let terminals = [cell(1, 0, 0), cell(1, 39_999, 39_999)];
+        let query = Query {
+            net: &net(&terminals),
+            costs: COSTS,
+            blocked: Blocked::Avoid,
+            corridor: None,
+        };
+
+        let rules = MoveRules::new(&grid, query, &terminals[..1], terminals[1]);
+
+        assert!((rules.estimate(terminals[0]) - 79_998.0).abs() < 1e-9);
     }
 }

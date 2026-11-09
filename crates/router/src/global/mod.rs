@@ -1628,7 +1628,9 @@ impl GcellWindow {
     }
 }
 
-/// Bounding box of cells, grown by `margin` and clamped to the grid.
+/// Bounding box of cells, grown by `margin` and clamped to the grid; the
+/// growth saturates, which clamps it exactly, as the grid ends below
+/// `u16::MAX`.
 fn window(cells: &[GCell], margin: u16, nx: u16, ny: u16) -> GcellWindow {
     let x0 = cells.iter().map(|c| c.x).min().unwrap_or(0);
     let x1 = cells.iter().map(|c| c.x).max().unwrap_or(0);
@@ -1636,9 +1638,9 @@ fn window(cells: &[GCell], margin: u16, nx: u16, ny: u16) -> GcellWindow {
     let y1 = cells.iter().map(|c| c.y).max().unwrap_or(0);
     GcellWindow {
         x0: x0.saturating_sub(margin),
-        x1: (x1 + margin).min(nx - 1),
+        x1: x1.saturating_add(margin).min(nx - 1),
         y0: y0.saturating_sub(margin),
-        y1: (y1 + margin).min(ny - 1),
+        y1: y1.saturating_add(margin).min(ny - 1),
     }
 }
 
