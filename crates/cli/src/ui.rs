@@ -10,7 +10,7 @@ use std::time::Duration;
 use yansi::Paint;
 
 /// Prints the PARE banner and a horizontal rule.
-pub fn banner() {
+pub(crate) fn banner() {
     eprintln!(
         "\n  {}  {}",
         format!("PARE v{}", env!("CARGO_PKG_VERSION")).bold(),
@@ -20,33 +20,33 @@ pub fn banner() {
 }
 
 /// Prints a dimmed horizontal rule.
-pub fn rule() {
+pub(crate) fn rule() {
     eprintln!("  {}", "-".repeat(60).dim());
 }
 
 /// Prints a section title (e.g. "Placement", "Routing").
-pub fn section(title: &str) {
+pub(crate) fn section(title: &str) {
     eprintln!("\n  {}", title.bold());
     eprintln!("  {}", "-".repeat(40).dim());
 }
 
 /// Prints a colored sub-phase label (e.g. "Legalization", "Verification").
-pub fn phase(title: &str) {
+pub(crate) fn phase(title: &str) {
     eprintln!("\n  {}", title.cyan().bold());
 }
 
 /// Prints a labeled header line: "  > Label  value".
-pub fn header(label: &str, value: &str) {
+pub(crate) fn header(label: &str, value: &str) {
     eprintln!("  {} {}  {}", ">".cyan().bold(), label.cyan().bold(), value);
 }
 
 /// Prints a two-column stat row with dimmed labels.
-pub fn stat_row(l1: &str, v1: &str, l2: &str, v2: &str) {
+pub(crate) fn stat_row(l1: &str, v1: &str, l2: &str, v2: &str) {
     eprintln!("    {:<18} {:<14} {:<18} {}", l1.dim(), v1, l2.dim(), v2);
 }
 
 /// Prints the header row for placement iteration table.
-pub fn placement_table_header() {
+pub(crate) fn placement_table_header() {
     eprintln!(
         "\n    {}",
         format!(
@@ -59,7 +59,7 @@ pub fn placement_table_header() {
 }
 
 /// Prints a single placement iteration row.
-pub fn placement_iter(p: &global::Progress) {
+pub(crate) fn placement_iter(p: &global::Progress) {
     eprintln!(
         "    {:<8} {:>12.0} {:>12.4} {:>12.3e} {:>10.3e}",
         p.iteration, p.hpwl, p.overflow, p.penalty, p.step
@@ -68,7 +68,7 @@ pub fn placement_iter(p: &global::Progress) {
 
 /// Prints the header of the global routing table: each layer's resources,
 /// the demand on them and the overflow, as `OpenROAD` reports them.
-pub fn gr_layer_table_header() {
+pub(crate) fn gr_layer_table_header() {
     eprintln!(
         "    {}",
         format!(
@@ -80,7 +80,13 @@ pub fn gr_layer_table_header() {
 }
 
 /// Prints one layer of the global routing table.
-pub fn gr_layer_row(layer: &str, direction: Direction, capacity: i64, usage: i64, overflow: i64) {
+pub(crate) fn gr_layer_row(
+    layer: &str,
+    direction: Direction,
+    capacity: i64,
+    usage: i64,
+    overflow: i64,
+) {
     let direction = match direction {
         Direction::Horizontal => "horizontal",
         Direction::Vertical => "vertical",
@@ -98,7 +104,7 @@ pub fn gr_layer_row(layer: &str, direction: Direction, capacity: i64, usage: i64
 /// Prints the header of the detailed routing table: the design rule
 /// violations left after each round, the nets in them, the pieces routed
 /// again, and the round's conflict cost per unit of length.
-pub fn dr_table_header() {
+pub(crate) fn dr_table_header() {
     eprintln!(
         "\n    {}",
         format!(
@@ -111,7 +117,7 @@ pub fn dr_table_header() {
 }
 
 /// Prints one detailed routing round.
-pub fn dr_iter(r: &RoundReport) {
+pub(crate) fn dr_iter(r: &RoundReport) {
     eprintln!(
         "    {:<8} {:>10} {:>10} {:>10} {:>10.1} {:>10} {:>8}ms",
         r.round,
@@ -127,7 +133,7 @@ pub fn dr_iter(r: &RoundReport) {
 /// Prints the header of the timing repair table: the moves made so far,
 /// the area change, the worst and total negative slack, the endpoints
 /// still failing and the worst of them.
-pub fn timing_table_header() {
+pub(crate) fn timing_table_header() {
     eprintln!(
         "\n    {}",
         format!(
@@ -151,33 +157,33 @@ pub fn timing_table_header() {
 
 /// One row of the timing repair table; slacks in nanoseconds.
 #[derive(Clone, Copy, Debug)]
-pub struct TimingRow<'a> {
+pub(crate) struct TimingRow<'a> {
     /// The iteration, or a label for the final row.
-    pub iter: &'a str,
+    pub(crate) iter: &'a str,
     /// Buffers removed so far.
-    pub removed: usize,
+    pub(crate) removed: usize,
     /// Gates resized so far.
-    pub resized: usize,
+    pub(crate) resized: usize,
     /// Buffers inserted so far.
-    pub inserted: usize,
+    pub(crate) inserted: usize,
     /// Gates cloned so far.
-    pub cloned: usize,
+    pub(crate) cloned: usize,
     /// Pins swapped so far.
-    pub swaps: usize,
+    pub(crate) swaps: usize,
     /// Cell area change since the start, as a percentage.
-    pub area_change_percent: f64,
+    pub(crate) area_change_percent: f64,
     /// Worst slack.
-    pub wns_ns: f64,
+    pub(crate) wns_ns: f64,
     /// Total negative slack.
-    pub tns_ns: f64,
+    pub(crate) tns_ns: f64,
     /// Endpoints still failing.
-    pub failing: usize,
+    pub(crate) failing: usize,
     /// The name of the endpoint with the worst slack, empty when there is none.
-    pub worst: &'a str,
+    pub(crate) worst: &'a str,
 }
 
 /// Prints one timing repair progress row.
-pub fn timing_iter(row: &TimingRow<'_>) {
+pub(crate) fn timing_iter(row: &TimingRow<'_>) {
     eprintln!(
         "    {:<6} {:>7} {:>7} {:>8} {:>6} {:>5} {:>6.1}% {:>8.3} {:>9.1} {:>6}  {}",
         row.iter,
@@ -195,32 +201,32 @@ pub fn timing_iter(row: &TimingRow<'_>) {
 }
 
 /// Prints a green PASS line.
-pub fn check(msg: &str) {
+pub(crate) fn check(msg: &str) {
     eprintln!("  {} {}", "PASS".green().bold(), msg);
 }
 
 /// Prints a red FAIL line.
-pub fn fail(msg: &str) {
+pub(crate) fn fail(msg: &str) {
     eprintln!("  {} {}", "FAIL".red().bold(), msg);
 }
 
 /// Prints a dimmed "Wrote" line with the file path highlighted.
-pub fn wrote(path: &std::path::Path) {
+pub(crate) fn wrote(path: &std::path::Path) {
     eprintln!("    {} {}", "->".dim(), path.display());
 }
 
 /// A wall time in seconds, to a tenth.
-pub fn seconds(elapsed: Duration) -> String {
+pub(crate) fn seconds(elapsed: Duration) -> String {
     format!("{:.1}s", elapsed.as_secs_f64())
 }
 
 /// Prints a dimmed phase timing line.
-pub fn phase_time(elapsed: Duration) {
+pub(crate) fn phase_time(elapsed: Duration) {
     eprintln!("    {}", format!("time: {}", seconds(elapsed)).dim());
 }
 
 /// Prints a "Done in Xs" line with a rule.
-pub fn done(elapsed: Duration) {
+pub(crate) fn done(elapsed: Duration) {
     eprintln!();
     rule();
     eprintln!("  {} {}\n", "Done in".bold(), seconds(elapsed));
