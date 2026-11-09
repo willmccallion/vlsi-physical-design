@@ -56,6 +56,12 @@ pub enum DetailedPlacementError {
     /// A region with member cells has no rectangle inside the core.
     #[error("region {0} lies outside the core")]
     RegionOutsideCore(String),
+    /// More cells than a pixel can tell apart.
+    #[error("{0} cells are more than detailed placement can hold")]
+    TooManyCells(usize),
+    /// More regions than a pixel can tell apart.
+    #[error("{0} regions are more than detailed placement can hold")]
+    TooManyRegions(usize),
     /// Some cells found no free spot.
     #[error("detailed placement failed on {} instances, the first {}", .0.len(), .0.first().map_or("", String::as_str))]
     Failed(Vec<String>),
@@ -165,14 +171,11 @@ impl Pixel {
         }
     }
 
-    fn set_occupant(&mut self, occupant: Occupant) {
+    const fn set_occupant(&mut self, occupant: Occupant) {
         self.occupant = match occupant {
             Occupant::Free => Self::FREE,
             Occupant::Dummy => Self::DUMMY,
-            Occupant::Node(node) => {
-                debug_assert!(node.0 < Self::DUMMY, "node {node:?} past the pixel's ids");
-                node.0
-            }
+            Occupant::Node(node) => node.0,
         };
     }
 
@@ -183,11 +186,7 @@ impl Pixel {
         }
     }
 
-    fn set_group(&mut self, group: GroupId) {
-        debug_assert!(
-            group.0 < Self::NO_GROUP,
-            "group {group:?} past the pixel's ids"
-        );
+    const fn set_group(&mut self, group: GroupId) {
         self.group = group.0;
     }
 }
@@ -323,7 +322,9 @@ impl Placer {
         };
         placer.mark_rows(&rows);
         placer.mark_blocked(db);
-        placer.nodes = placer.make_nodes(db, &rows, uniform_row_height).into();
+        let nodes = placer.make_nodes(db, &rows, uniform_row_height);
+        check_pixel_ids(nodes.len(), db.regions.len())?;
+        placer.nodes = nodes.into();
         for node in &mut placer.nodes {
             if !node.fixed {
                 node.placed = false;
@@ -1335,6 +1336,18 @@ fn used_layers(db: &NetlistDB, cell: CellId) -> u8 {
     layers
 }
 
+/// Checks that `nodes` nodes and `groups` groups all have ids a [`Pixel`]
+/// holds apart from its markers, as [`Placer::new`] promises its pixels.
+const fn check_pixel_ids(nodes: usize, groups: usize) -> Result<(), DetailedPlacementError> {
+    if nodes >= Pixel::DUMMY as usize {
+        return Err(DetailedPlacementError::TooManyCells(nodes));
+    }
+    if groups >= Pixel::NO_GROUP as usize {
+        return Err(DetailedPlacementError::TooManyRegions(groups));
+    }
+    Ok(())
+}
+
 /// The row height every row's is a multiple of, as `Grid::examineRows`
 /// finds it; none when the heights do not divide each other.
 fn uniform_row_height(db: &NetlistDB, rows: &[&pare_common::db::design::Row]) -> Option<Dbu> {
@@ -1410,6 +1423,33 @@ mod tests {
         let rows = [rect(0, 0, 30, 10), rect(0, 10, 10, 20)];
 
         assert_eq!(enclosed_holes(&rows), Vec::new());
+    }
+
+    #[test]
+    fn every_node_id_below_the_pixel_markers_fits() {
+        let most = Pixel::DUMMY as usize - 1;
+
+        assert_eq!(check_pixel_ids(most, Pixel::NO_GROUP as usize - 1), Ok(()));
+    }
+
+    #[test]
+    fn a_node_id_reaching_the_pixel_markers_is_an_error() {
+        let count = Pixel::DUMMY as usize;
+
+        assert_eq!(
+            check_pixel_ids(count, 0),
+            Err(DetailedPlacementError::TooManyCells(count))
+        );
+    }
+
+    #[test]
+    fn a_group_id_reaching_the_no_group_marker_is_an_error() {
+        let count = Pixel::NO_GROUP as usize;
+
+        assert_eq!(
+            check_pixel_ids(0, count),
+            Err(DetailedPlacementError::TooManyRegions(count))
+        );
     }
 
     #[test]
