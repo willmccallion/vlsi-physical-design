@@ -10,7 +10,7 @@ use crate::dmp::PiModel;
 use crate::netlist::Netlist;
 use crate::steiner::{self, SteinerTree};
 use pare_common::db::global_route::NetRoute;
-use pare_common::db::indices::{LayerId, NetId, PinId};
+use pare_common::db::indices::{IdVec, LayerId, NetId, PinId};
 use pare_common::db::liberty::Edge;
 use pare_common::geom::dbu::Dbu;
 use pare_common::geom::point::Point;
@@ -20,8 +20,24 @@ use pare_common::units::{
 };
 
 /// The resistance `OpenROAD` gives a zero-length connection so the network
-/// stays joined, in ohms.
-const JOIN_RESISTANCE: f64 = 1.0e-3;
+/// stays joined.
+const JOIN_RESISTANCE: Ohms = Ohms::new(1.0e-3);
+
+pare_common::define_index!(
+    /// A node of a net's parasitic network.
+    RcNode(u32)
+);
+
+/// A resistor of a parasitic network.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Resistor {
+    /// The node at one end.
+    pub a: RcNode,
+    /// The node at the other end.
+    pub b: RcNode,
+    /// Its resistance.
+    pub resistance: Ohms,
+}
 
 /// Resistance and capacitance per length of signal wire.
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -110,10 +126,10 @@ pub(crate) enum WireShape {
 pub struct NetParasitics {
     /// What the wires follow.
     pub(crate) shape: WireShape,
-    node_count: usize,
-    resistors: Vec<(usize, usize, f64)>,
-    wire_cap: Vec<f64>,
-    pin_node: Vec<(PinId, usize)>,
+    resistors: Vec<Resistor>,
+    /// The wire capacitance at each node.
+    wire_cap: IdVec<RcNode, Farads>,
+    pin_node: Vec<(PinId, RcNode)>,
 }
 
 impl NetParasitics {
@@ -145,111 +161,115 @@ impl NetParasitics {
         }
         let terminal_pins: Vec<Vec<PinId>> = pins.iter().map(|&(p, _)| vec![p]).collect();
 
-        let mut node_count = tree.nodes.len();
         let mut resistors = Vec::new();
-        let mut wire_cap = vec![0.0; node_count];
-        for (node, &parent) in tree.parent.iter().enumerate() {
-            if parent == node {
+        let mut wire_cap: IdVec<RcNode, Farads> = IdVec::filled(Farads::ZERO, tree.nodes.len());
+        for (index, &parent_index) in tree.parent.iter().enumerate() {
+            if parent_index == index {
                 continue;
             }
-            let (a, b) = (tree.nodes[node], tree.nodes[parent]);
+            let (node, parent) = (RcNode::new(index), RcNode::new(parent_index));
+            let (a, b) = (tree.nodes[index], tree.nodes[parent_index]);
             let length_dbu = (a.x.get() - b.x.get()).abs() + (a.y.get() - b.y.get()).abs();
             if length_dbu == 0 {
-                resistors.push((node, parent, JOIN_RESISTANCE));
+                resistors.push(Resistor {
+                    a: node,
+                    b: parent,
+                    resistance: JOIN_RESISTANCE,
+                });
                 continue;
             }
             let length = Meters::from_dbu(Dbu(length_dbu), db.dbu());
-            let cap = (length * rc.capacitance).get();
-            let res = (length * rc.resistance).get();
+            let cap = length * rc.capacitance;
             wire_cap[node] += cap / 2.0;
             wire_cap[parent] += cap / 2.0;
-            resistors.push((node, parent, res));
+            resistors.push(Resistor {
+                a: node,
+                b: parent,
+                resistance: length * rc.resistance,
+            });
         }
 
         let mut pin_node = Vec::with_capacity(pins.len());
         for (terminal, &(pin, _)) in pins.iter().enumerate() {
             let pin_layer = db.pin_reference_layer(pin).unwrap_or(rc.layer);
             let cuts = pin_layer.index().abs_diff(rc.layer.index());
-            let pin_node_index = node_count;
-            node_count += 1;
-            wire_cap.push(0.0);
-            let mut from = pin_node_index;
+            let pin_rc_node = wire_cap.push(Farads::ZERO);
+            let mut from = pin_rc_node;
             for cut in 0..cuts.max(1) {
                 let to = if cut + 1 == cuts.max(1) {
-                    terminal
+                    RcNode::new(terminal)
                 } else {
-                    node_count += 1;
-                    wire_cap.push(0.0);
-                    node_count - 1
+                    wire_cap.push(Farads::ZERO)
                 };
-                resistors.push((from, to, JOIN_RESISTANCE));
+                resistors.push(Resistor {
+                    a: from,
+                    b: to,
+                    resistance: JOIN_RESISTANCE,
+                });
                 from = to;
             }
-            pin_node.push((pin, pin_node_index));
+            pin_node.push((pin, pin_rc_node));
         }
         Some(Self {
             shape: WireShape::Steiner {
                 tree,
                 terminal_pins,
             },
-            node_count,
             resistors,
             wire_cap,
             pin_node,
         })
     }
 
-    /// A network of `node_count` nodes from its resistors, each node's
-    /// wire capacitance and the node of each pin.
+    /// A network from its resistors, each node's wire capacitance and the
+    /// node of each pin.
     pub(crate) const fn from_network(
         shape: WireShape,
-        node_count: usize,
-        resistors: Vec<(usize, usize, f64)>,
-        wire_cap: Vec<f64>,
-        pin_node: Vec<(PinId, usize)>,
+        resistors: Vec<Resistor>,
+        wire_cap: IdVec<RcNode, Farads>,
+        pin_node: Vec<(PinId, RcNode)>,
     ) -> Self {
         Self {
             shape,
-            node_count,
             resistors,
             wire_cap,
             pin_node,
         }
     }
 
-    /// The resistors: the nodes at each end and ohms.
+    /// The resistors.
     #[must_use]
-    pub fn resistors(&self) -> &[(usize, usize, f64)] {
+    pub fn resistors(&self) -> &[Resistor] {
         &self.resistors
     }
 
-    /// The wire capacitance at each node, in farads.
+    /// The wire capacitance at each node.
     #[must_use]
-    pub fn node_caps(&self) -> &[f64] {
+    pub const fn node_caps(&self) -> &IdVec<RcNode, Farads> {
         &self.wire_cap
     }
 
     /// The node of each pin.
     #[must_use]
-    pub fn pin_nodes(&self) -> &[(PinId, usize)] {
+    pub fn pin_nodes(&self) -> &[(PinId, RcNode)] {
         &self.pin_node
     }
 
     /// The pin at each node, where a node is a pin's.
-    fn pins_by_node(&self) -> Vec<Option<PinId>> {
-        let mut by_node = vec![None; self.node_count];
+    fn pins_by_node(&self) -> IdVec<RcNode, Option<PinId>> {
+        let mut by_node = IdVec::filled(None, self.wire_cap.len());
         for &(pin, node) in &self.pin_node {
             by_node[node] = Some(pin);
         }
         by_node
     }
 
-    /// The resistors at each node.
-    fn adjacency(&self) -> Vec<Vec<(usize, f64)>> {
-        let mut adjacent = vec![Vec::new(); self.node_count];
-        for &(a, b, r) in &self.resistors {
-            adjacent[a].push((b, r));
-            adjacent[b].push((a, r));
+    /// The resistors at each node, with the node at the other end.
+    fn adjacency(&self) -> IdVec<RcNode, Vec<(RcNode, Ohms)>> {
+        let mut adjacent = IdVec::filled(Vec::new(), self.wire_cap.len());
+        for r in &self.resistors {
+            adjacent[r.a].push((r.b, r.resistance));
+            adjacent[r.b].push((r.a, r.resistance));
         }
         adjacent
     }
@@ -265,44 +285,33 @@ impl NetParasitics {
         pin_cap: &dyn Fn(PinId, Edge) -> Farads,
     ) -> Option<PiElmore> {
         let &(_, root) = self.pin_node.iter().find(|&&(p, _)| p == driver)?;
-        let pins = self.pins_by_node();
-        let adjacent = self.adjacency();
-        let load_cap_at = |node: usize| -> f64 {
-            pins[node]
-                .filter(|&p| p != driver && netlist.is_load(p))
-                .map_or(0.0, |p| pin_cap(p, edge).get())
+        let load_pins: IdVec<RcNode, Option<PinId>> = self
+            .pins_by_node()
+            .into_iter()
+            .map(|pin| pin.filter(|&p| p != driver && netlist.is_load(p)))
+            .collect();
+        let load_caps: IdVec<RcNode, f64> = load_pins
+            .iter()
+            .map(|pin| pin.map_or(0.0, |p| pin_cap(p, edge).get()))
+            .collect();
+        let mut reduction = Reduction {
+            adjacent: self.adjacency(),
+            wire_cap: &self.wire_cap,
+            load_caps: &load_caps,
+            downstream: IdVec::filled(0.0, self.wire_cap.len()),
+            visited: IdVec::filled(false, self.wire_cap.len()),
         };
-        let mut downstream = vec![0.0; self.node_count];
-        let mut visited = vec![false; self.node_count];
-        let (y1, y2, y3) = self.moments(
-            root,
-            usize::MAX,
-            &adjacent,
-            &load_cap_at,
-            &mut downstream,
-            &mut visited,
-        );
+        let (y1, y2, y3) = reduction.moments(root, None);
         let (c2, rpi, c1) = if y2 == 0.0 && y3 == 0.0 {
             (0.0, 0.0, y1)
         } else {
             (y1 - y2 * y2 / y3, -y3 * y3 / (y2 * y2 * y2), y2 * y2 / y3)
         };
         let mut elmore = Vec::new();
-        let mut visited = vec![false; self.node_count];
-        elmore_dfs(
-            root,
-            usize::MAX,
-            0.0,
-            &adjacent,
-            &downstream,
-            &pins,
-            driver,
-            netlist,
-            &mut visited,
-            &mut elmore,
-        );
-        let wire_cap: f64 = self.wire_cap.iter().sum();
-        let pin_cap_total: f64 = (0..self.node_count).map(load_cap_at).sum();
+        reduction.visited.fill(false);
+        reduction.elmore(root, None, 0.0, &load_pins, &mut elmore);
+        let wire_cap: f64 = self.wire_cap.iter().map(|c| c.get()).sum();
+        let pin_cap_total: f64 = load_caps.iter().sum();
         Some(PiElmore {
             c2: Farads::new(c2),
             rpi: Ohms::new(rpi),
@@ -315,70 +324,71 @@ impl NetParasitics {
             pin_cap: Farads::new(pin_cap_total),
         })
     }
+}
 
-    /// The first three admittance moments below `node`, as `OpenSTA`'s
-    /// `reducePiDfs`, recording each node's downstream capacitance.
+/// A network's reduction seen from its driver: the resistors at each node,
+/// the wire and load capacitance at each, and each node's downstream
+/// capacitance once the moments are found.
+struct Reduction<'n> {
+    adjacent: IdVec<RcNode, Vec<(RcNode, Ohms)>>,
+    wire_cap: &'n IdVec<RcNode, Farads>,
+    load_caps: &'n IdVec<RcNode, f64>,
+    downstream: IdVec<RcNode, f64>,
+    visited: IdVec<RcNode, bool>,
+}
+
+impl Reduction<'_> {
+    /// The first three admittance moments below `node`, reached from
+    /// `from`, as `OpenSTA`'s `reducePiDfs`, recording each node's
+    /// downstream capacitance.
     // The sums keep OpenSTA's grouping so they can be checked against it.
-    #[allow(clippy::too_many_arguments, clippy::suboptimal_flops)]
-    fn moments(
-        &self,
-        node: usize,
-        from: usize,
-        adjacent: &[Vec<(usize, f64)>],
-        load_cap_at: &dyn Fn(usize) -> f64,
-        downstream: &mut [f64],
-        visited: &mut [bool],
-    ) -> (f64, f64, f64) {
-        visited[node] = true;
-        let mut y1 = self.wire_cap[node] + load_cap_at(node);
+    #[allow(clippy::suboptimal_flops)]
+    fn moments(&mut self, node: RcNode, from: Option<RcNode>) -> (f64, f64, f64) {
+        self.visited[node] = true;
+        let mut y1 = self.wire_cap[node].get() + self.load_caps[node];
         let mut y2 = 0.0;
         let mut y3 = 0.0;
         let mut cap = y1;
-        for &(next, r) in &adjacent[node] {
-            if next == from || visited[next] {
+        for k in 0..self.adjacent[node].len() {
+            let (next, r) = self.adjacent[node][k];
+            let r = r.get();
+            if Some(next) == from || self.visited[next] {
                 continue;
             }
-            let (d1, d2, d3) = self.moments(next, node, adjacent, load_cap_at, downstream, visited);
+            let (d1, d2, d3) = self.moments(next, Some(node));
             y1 += d1;
             y2 += d2 - r * d1 * d1;
             y3 += d3 - 2.0 * r * d1 * d2 + r * r * d1 * d1 * d1;
-            cap += downstream[next];
+            cap += self.downstream[next];
         }
-        downstream[node] = cap;
+        self.downstream[node] = cap;
         (y1, y2, y3)
     }
-}
 
-/// Records each load's Elmore delay from the driver, as `OpenSTA`'s
-/// `reduceElmoreDfs`.
-#[allow(clippy::too_many_arguments)]
-fn elmore_dfs(
-    node: usize,
-    from: usize,
-    delay: f64,
-    adjacent: &[Vec<(usize, f64)>],
-    downstream: &[f64],
-    pins: &[Option<PinId>],
-    driver: PinId,
-    netlist: &Netlist<'_>,
-    visited: &mut [bool],
-    out: &mut Vec<(PinId, f64)>,
-) {
-    visited[node] = true;
-    if from != usize::MAX
-        && let Some(pin) = pins[node]
-        && pin != driver
-        && netlist.is_load(pin)
-    {
-        out.push((pin, delay));
-    }
-    for &(next, r) in &adjacent[node] {
-        if next == from || visited[next] {
-            continue;
+    /// Records the Elmore delay from the driver of each load pin below
+    /// `node`, reached from `from` after `delay`, as `OpenSTA`'s
+    /// `reduceElmoreDfs`.
+    fn elmore(
+        &mut self,
+        node: RcNode,
+        from: Option<RcNode>,
+        delay: f64,
+        load_pins: &IdVec<RcNode, Option<PinId>>,
+        out: &mut Vec<(PinId, f64)>,
+    ) {
+        self.visited[node] = true;
+        if from.is_some()
+            && let Some(pin) = load_pins[node]
+        {
+            out.push((pin, delay));
         }
-        let next_delay = r.mul_add(downstream[next], delay);
-        elmore_dfs(
-            next, node, next_delay, adjacent, downstream, pins, driver, netlist, visited, out,
-        );
+        for k in 0..self.adjacent[node].len() {
+            let (next, r) = self.adjacent[node][k];
+            if Some(next) == from || self.visited[next] {
+                continue;
+            }
+            let next_delay = r.get().mul_add(self.downstream[next], delay);
+            self.elmore(next, Some(node), next_delay, load_pins, out);
+        }
     }
 }
