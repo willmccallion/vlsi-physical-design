@@ -98,6 +98,16 @@ impl ClockTrees {
     }
 }
 
+/// A clock gate whose sinks are split among clones of it: its output net,
+/// its cell, the pin driving the net and where that pin sits.
+#[derive(Clone, Copy, Debug)]
+struct GateToClone {
+    net: NetId,
+    cell: CellId,
+    driver: PinId,
+    driver_at: DbPoint<Dbu>,
+}
+
 /// What every tree of a run is built with.
 #[derive(Clone, Debug)]
 pub(crate) struct TreeSetup {
@@ -664,94 +674,49 @@ impl Cts<'_> {
             &tree.parent,
             self.setup.settings.max_wire_length,
         );
-        self.place_gate_clones(
-            db,
+        let cluster_sinks: Vec<Vec<PinId>> = clusters
+            .iter()
+            .filter(|cluster| !cluster.is_empty())
+            .map(|cluster| {
+                cluster
+                    .iter()
+                    .flat_map(|&b| point_pins.get(&tree.nodes[b]).cloned().unwrap_or_default())
+                    .filter(|&p| is_input_signal(db, p))
+                    .collect()
+            })
+            .collect();
+        let gate = GateToClone {
             net,
-            gate,
+            cell: gate,
             driver,
-            &clusters,
-            &tree.nodes,
-            &point_pins,
             driver_at,
-            occupied,
-        )
+        };
+        self.place_gate_clones(db, &gate, &cluster_sinks, occupied)
     }
 
-    #[allow(clippy::too_many_arguments)]
+    /// Gives each cluster of sinks a clone of `gate` at their center, the
+    /// cluster nearest its driver keeping the gate itself, as
+    /// `TritonCTS::cloneClockGaters`.
     fn place_gate_clones(
         &mut self,
         db: &mut NetlistDB,
-        net: NetId,
-        gate: CellId,
-        driver: PinId,
-        clusters: &[Vec<usize>],
-        nodes: &[DbPoint<Dbu>],
-        point_pins: &BTreeMap<DbPoint<Dbu>, Vec<PinId>>,
-        driver_at: DbPoint<Dbu>,
+        gate: &GateToClone,
+        cluster_sinks: &[Vec<PinId>],
         occupied: &mut FxHashSet<DbPoint<Dbu>>,
     ) -> Result<(), CtsError> {
-        let node_sinks = |cluster: &[usize]| -> Vec<PinId> {
-            cluster
-                .iter()
-                .flat_map(|&b| point_pins.get(&nodes[b]).cloned().unwrap_or_default())
-                .filter(|&p| is_input_signal(db, p))
-                .collect()
-        };
-        let cluster_sinks: Vec<Vec<PinId>> = clusters.iter().map(|c| node_sinks(c)).collect();
         let driver_cluster = cluster_sinks
             .iter()
             .enumerate()
             .filter(|(_, sinks)| !sinks.is_empty())
-            .min_by_key(|(_, sinks)| sink_bbox_center(db, sinks).manhattan(driver_at))
+            .min_by_key(|(_, sinks)| sink_bbox_center(db, sinks).manhattan(gate.driver_at))
             .map(|(n, _)| n);
-        let gate_name = db.cells[gate].name.clone();
-        let net_name = db.nets[net].name.clone();
         let mut clones = 0;
-        for (n, cluster) in clusters.iter().enumerate() {
-            if cluster.is_empty() {
-                continue;
-            }
-            let sinks = &cluster_sinks[n];
+        for (n, sinks) in cluster_sinks.iter().enumerate() {
             let clone = if driver_cluster == Some(n) {
-                gate
+                gate.cell
             } else {
                 clones += 1;
-                let clone_net = db.add_net(&format!("clonenet_{clones}_{net_name}"))?;
-                db.nets[clone_net].signal_use = SignalUse::Clock;
-                let _ = self.clock_nets.insert(clone_net);
-                let master = db.cells[gate].macro_id;
-                let at = db.cells[gate].location;
-                let cell = db.add_cell(
-                    format!("clone_{clones}_{gate_name}"),
-                    master,
-                    at,
-                    Orientation::N,
-                    PlacementStatus::Placed,
-                )?;
-                let connections: Vec<(MacroPinId, NetId)> = db.cells[gate]
-                    .pins
-                    .iter()
-                    .filter(|&&p| p == driver || is_input_signal(db, p))
-                    .filter_map(|&p| match db.pins[p].owner {
-                        PinOwner::Cell { pin, .. } => {
-                            let target = if p == driver {
-                                clone_net
-                            } else {
-                                db.pins[p].net
-                            };
-                            Some((pin, target))
-                        }
-                        PinOwner::Io(_) => None,
-                    })
-                    .collect();
-                for (pin, target) in connections {
-                    let _ = db.connect_cell_pin(cell, pin, target);
-                }
-                for &sink in sinks {
-                    db.move_pin(sink, clone_net);
-                }
-                self.summary.clones += 1;
-                cell
+                self.clone_gate(db, gate, clones, sinks)?
             };
             let center = sink_bbox_center(db, sinks);
             let mut at = center;
@@ -764,6 +729,55 @@ impl Cts<'_> {
             cell.status = PlacementStatus::Placed;
         }
         Ok(())
+    }
+
+    /// Adds clone `number` of `gate`, its output on a net of its own that
+    /// `sinks` move to, its inputs on the gate's nets.
+    fn clone_gate(
+        &mut self,
+        db: &mut NetlistDB,
+        gate: &GateToClone,
+        number: usize,
+        sinks: &[PinId],
+    ) -> Result<CellId, CtsError> {
+        let gate_name = db.cells[gate.cell].name.clone();
+        let net_name = db.nets[gate.net].name.clone();
+        let clone_net = db.add_net(&format!("clonenet_{number}_{net_name}"))?;
+        db.nets[clone_net].signal_use = SignalUse::Clock;
+        let _ = self.clock_nets.insert(clone_net);
+        let master = db.cells[gate.cell].macro_id;
+        let at = db.cells[gate.cell].location;
+        let cell = db.add_cell(
+            format!("clone_{number}_{gate_name}"),
+            master,
+            at,
+            Orientation::N,
+            PlacementStatus::Placed,
+        )?;
+        let connections: Vec<(MacroPinId, NetId)> = db.cells[gate.cell]
+            .pins
+            .iter()
+            .filter(|&&p| p == gate.driver || is_input_signal(db, p))
+            .filter_map(|&p| match db.pins[p].owner {
+                PinOwner::Cell { pin, .. } => {
+                    let target = if p == gate.driver {
+                        clone_net
+                    } else {
+                        db.pins[p].net
+                    };
+                    Some((pin, target))
+                }
+                PinOwner::Io(_) => None,
+            })
+            .collect();
+        for (pin, target) in connections {
+            let _ = db.connect_cell_pin(cell, pin, target);
+        }
+        for &sink in sinks {
+            db.move_pin(sink, clone_net);
+        }
+        self.summary.clones += 1;
+        Ok(cell)
     }
 
     /// Builds every tree, as `TritonCTS::buildClockTrees`.
