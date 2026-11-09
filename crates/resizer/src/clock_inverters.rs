@@ -8,7 +8,7 @@ use crate::library::Link;
 use crate::netlist::{ClockNetwork, Namer, Netlist};
 use crate::resizer::RepairError;
 use pare_common::db::design::{NetlistDB, PinOwner, PlacementStatus, Renumbering};
-use pare_common::db::indices::{CellId, MacroPinId, NetId, PinId};
+use pare_common::db::indices::{CellId, IdVec, MacroPinId, NetId, PinId};
 use pare_common::db::liberty::ArcRole;
 use pare_common::geom::orient::Orientation;
 use pare_common::geom::point::Point;
@@ -80,10 +80,10 @@ fn output_pin(db: &NetlistDB, link: &Link<'_>, cell: CellId) -> Option<PinId> {
 /// clocks, as `Resizer::findClkInverters`.
 fn find_clock_inverters(db: &NetlistDB, link: &Link<'_>, clocks: &ClockNetwork) -> Vec<CellId> {
     let netlist = Netlist::new(db, link);
-    let mut seen = vec![false; db.pins.len()];
+    let mut seen = IdVec::filled(false, db.pins.len());
     let mut queue: VecDeque<PinId> = clocks.sources().iter().copied().collect();
     for &p in &queue {
-        seen[p.index()] = true;
+        seen[p] = true;
     }
     let mut found = Vec::new();
     while let Some(pin) = queue.pop_front() {
@@ -114,8 +114,8 @@ fn find_clock_inverters(db: &NetlistDB, link: &Link<'_>, clocks: &ClockNetwork) 
             }
         }
         for n in next {
-            if !seen[n.index()] {
-                seen[n.index()] = true;
+            if !seen[n] {
+                seen[n] = true;
                 queue.push_back(n);
             }
         }

@@ -6,22 +6,15 @@
 //! library's units, which `OpenSTA` reads constraints in whatever
 //! `set_units` says.
 
-use crate::db::indices::{CellId, IoPinId};
+use crate::db::indices::{CellId, IdVec, IoPinId};
 use crate::db::liberty::{Edge, EdgeValues, MinMax, SideValues};
 use crate::units::{Farads, Seconds};
 use std::collections::HashMap;
 
-/// A clock's index in [`Sdc::clocks`].
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
-pub struct ClockId(pub u32);
-
-impl ClockId {
-    /// Index into [`Sdc::clocks`].
-    #[must_use]
-    pub const fn index(self) -> usize {
-        self.0 as usize
-    }
-}
+crate::define_index!(
+    /// A clock in [`Sdc::clocks`].
+    ClockId(u32)
+);
 
 /// One edge of a clock's waveform.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
@@ -253,7 +246,7 @@ pub struct DesignLimits {
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct Sdc {
     /// The clocks, in the order created.
-    pub clocks: Vec<Clock>,
+    pub clocks: IdVec<ClockId, Clock>,
     /// Arrivals outside the design at its input ports.
     pub input_delays: HashMap<IoPinId, Vec<PortDelay>>,
     /// Delays outside the design after its output ports.
@@ -279,15 +272,15 @@ impl Sdc {
     #[must_use]
     pub(crate) fn clock_id(&self, name: &str) -> Option<ClockId> {
         self.clocks
-            .iter()
-            .position(|c| c.name == name)
-            .map(|i| ClockId(i as u32))
+            .iter_enumerated()
+            .find(|(_, c)| c.name == name)
+            .map(|(id, _)| id)
     }
 
     /// The clock with this id.
     #[must_use]
     pub fn clock(&self, id: ClockId) -> &Clock {
-        &self.clocks[id.index()]
+        &self.clocks[id]
     }
 
     /// When `edge` happens within its clock's first period.
@@ -310,9 +303,9 @@ impl Sdc {
     #[must_use]
     pub fn clock_at(&self, port: IoPinId) -> Option<ClockId> {
         self.clocks
-            .iter()
-            .position(|c| c.sources.contains(&port))
-            .map(|i| ClockId(i as u32))
+            .iter_enumerated()
+            .find(|(_, c)| c.sources.contains(&port))
+            .map(|(id, _)| id)
     }
 
     /// Every port a clock enters at.

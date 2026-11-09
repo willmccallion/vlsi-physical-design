@@ -13,10 +13,12 @@
 use crate::parasitics::{NetParasitics, WireShape};
 use pare_common::db::design::NetlistDB;
 use pare_common::db::global_route::{NetRoute, RoutePoint};
-use pare_common::db::indices::{CutLayerId, LayerId, NetId};
+use pare_common::db::indices::{CutLayerId, IdVec, LayerId, NetId};
 use pare_common::db::library::Library;
 use pare_common::geom::dbu::{Dbu, DbuPerMicron};
-use pare_common::units::{FaradsPerMeter, Ohms, OhmsPerMeter};
+use pare_common::units::{
+    FARADS_PER_PICOFARAD, FaradsPerMeter, MICRONS_PER_METER, Ohms, OhmsPerMeter,
+};
 use rustc_hash::FxHashMap;
 
 /// The resistance and capacitance of each layer that global route
@@ -25,14 +27,15 @@ use rustc_hash::FxHashMap;
 pub struct RouteRc {
     /// Per routing layer, `set_layer_rc`'s resistance and capacitance per
     /// length, zero where not given.
-    layer: Vec<(OhmsPerMeter, FaradsPerMeter)>,
+    layer: IdVec<LayerId, (OhmsPerMeter, FaradsPerMeter)>,
     /// Per routing layer, the same from the LEF, as `OpenROAD` falls back.
-    lef_layer: Vec<(OhmsPerMeter, FaradsPerMeter)>,
-    width: Vec<Dbu>,
+    lef_layer: IdVec<LayerId, (OhmsPerMeter, FaradsPerMeter)>,
+    /// Per routing layer, its default wire width.
+    width: IdVec<LayerId, Dbu>,
     /// Per cut layer, `set_layer_rc -via`'s resistance, zero where not given.
-    via: Vec<Ohms>,
+    via: IdVec<CutLayerId, Ohms>,
     /// Per cut layer, the LEF's resistance per cut.
-    lef_via: Vec<Ohms>,
+    lef_via: IdVec<CutLayerId, Ohms>,
     min_layer: LayerId,
     dbu_per_micron: DbuPerMicron,
 }
@@ -49,14 +52,19 @@ impl RouteRc {
         min_layer: LayerId,
     ) -> Self {
         let dbu_per_micron = library.dbu_per_micron;
-        let mut layer =
-            vec![(OhmsPerMeter::ZERO, FaradsPerMeter::ZERO); library.routing_layers.len()];
+        // NOTE: OpenROAD quirk kept: a zero resistance or capacitance means
+        // not given and falls back to the LEF's, as EstimateParasitics stores
+        // set_layer_rc's values.
+        let mut layer = IdVec::filled(
+            (OhmsPerMeter::ZERO, FaradsPerMeter::ZERO),
+            library.routing_layers.len(),
+        );
         for &(id, r, c) in layers {
-            layer[id.index()] = (r, c);
+            layer[id] = (r, c);
         }
-        let mut via = vec![Ohms::ZERO; library.cut_layers.len()];
+        let mut via = IdVec::filled(Ohms::ZERO, library.cut_layers.len());
         for &(cut, r) in vias {
-            via[cut.index()] = r;
+            via[cut] = r;
         }
         let lef_layer = library
             .routing_layers
@@ -82,7 +90,7 @@ impl RouteRc {
     /// layer, zero where not given, as `EstimateParasitics::layerRC`.
     #[must_use]
     pub fn layer_rc(&self, layer: LayerId) -> (OhmsPerMeter, FaradsPerMeter) {
-        self.layer[layer.index()]
+        self.layer[layer]
     }
 
     /// The resistance of one cut on the cut layer above routing layer
@@ -90,7 +98,7 @@ impl RouteRc {
     /// `BufferedNet::viaResistance` adds them up.
     #[must_use]
     pub(crate) fn via_resistance(&self, below: LayerId) -> Ohms {
-        let cut = below.index();
+        let cut = below.cut_above();
         match self.via.get(cut) {
             Some(&r) if r != Ohms::ZERO => r,
             _ => self.lef_via.get(cut).copied().unwrap_or(Ohms::ZERO),
@@ -102,9 +110,9 @@ impl RouteRc {
     /// as `MakeWireParasitics::layerRC`.
     // OpenROAD returns them in single precision.
     fn wire(&self, length: Dbu, layer: LayerId, ndr_width: Option<Dbu>) -> (f32, f32) {
-        let (r, c) = self.layer[layer.index()];
+        let (r, c) = self.layer[layer];
         let (mut r_per_meter, mut cap_per_meter) = (r.get(), c.get());
-        let (lef_r, lef_c) = self.lef_layer[layer.index()];
+        let (lef_r, lef_c) = self.lef_layer[layer];
         let (lef_r, lef_c) = (lef_r.get(), lef_c.get());
         if r_per_meter == 0.0 {
             r_per_meter = lef_r;
@@ -113,10 +121,11 @@ impl RouteRc {
             cap_per_meter = lef_c;
         }
         if let Some(width) = ndr_width {
-            let ratio = width.get() as f32 / self.width[layer.index()].get() as f32;
+            let ratio = width.get() as f32 / self.width[layer].get() as f32;
             r_per_meter /= f64::from(ratio);
         }
-        let meters = (length.to_f64() / (f64::from(self.dbu_per_micron.get()) * 1e6)) as f32;
+        let meters =
+            (length.to_f64() / (f64::from(self.dbu_per_micron.get()) * MICRONS_PER_METER)) as f32;
         (
             (r_per_meter * f64::from(meters)) as f32,
             (cap_per_meter * f64::from(meters)) as f32,
@@ -146,8 +155,10 @@ fn lef_layer_rc(
         * electrical.capacitance_per_area.unwrap_or(0.0)
         + 2.0 * electrical.edge_capacitance.unwrap_or(0.0)) as f32;
     (
-        OhmsPerMeter::new(1e6 * f64::from(res_ohm_per_micron)),
-        FaradsPerMeter::new(1e6 * 1e-12 * f64::from(cap_pf_per_micron)),
+        OhmsPerMeter::new(MICRONS_PER_METER * f64::from(res_ohm_per_micron)),
+        FaradsPerMeter::new(
+            MICRONS_PER_METER * FARADS_PER_PICOFARAD * f64::from(cap_pf_per_micron),
+        ),
     )
 }
 

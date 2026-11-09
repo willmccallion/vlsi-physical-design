@@ -4,7 +4,7 @@
 
 use crate::library::Link;
 use pare_common::db::design::{NetlistDB, PinOwner};
-use pare_common::db::indices::{CellId, IoPinId, NetId, PinId};
+use pare_common::db::indices::{CellId, IdVec, IoPinId, NetId, PinId};
 use pare_common::db::liberty::{
     ArcRole, ClockGatePin, FuncExpr, LibCell, LibPort, LibPortId, Logic,
 };
@@ -194,11 +194,15 @@ impl<'a> Netlist<'a> {
 
     /// The level of each pin of `instance` by Liberty port name, as
     /// `levels` holds them now.
-    fn port_levels(&self, instance: CellId, levels: &[Logic]) -> impl Fn(&str) -> Logic + '_ {
+    fn port_levels(
+        &self,
+        instance: CellId,
+        levels: &IdVec<PinId, Logic>,
+    ) -> impl Fn(&str) -> Logic + '_ {
         let pins: Vec<(PinId, Logic)> = self.db.cells[instance]
             .pins
             .iter()
-            .map(|&p| (p, levels[p.index()]))
+            .map(|&p| (p, levels[p]))
             .collect();
         let link = self.link;
         let db = self.db;
@@ -218,7 +222,7 @@ impl<'a> Netlist<'a> {
 /// looking through registers.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Constants {
-    level: Vec<Logic>,
+    level: IdVec<PinId, Logic>,
 }
 
 impl Constants {
@@ -226,7 +230,7 @@ impl Constants {
     #[must_use]
     pub fn find(netlist: &Netlist<'_>) -> Self {
         let db = netlist.db;
-        let mut level = vec![Logic::Unknown; db.pins.len()];
+        let mut level = IdVec::filled(Logic::Unknown, db.pins.len());
         let mut queue: VecDeque<CellId> = VecDeque::new();
         for cell in &db.cells {
             for &pin in &cell.pins {
@@ -252,15 +256,15 @@ impl Constants {
 
     fn set(
         netlist: &Netlist<'_>,
-        level: &mut [Logic],
+        level: &mut IdVec<PinId, Logic>,
         queue: &mut VecDeque<CellId>,
         pin: PinId,
         value: Logic,
     ) {
-        if level[pin.index()] == value {
+        if level[pin] == value {
             return;
         }
-        level[pin.index()] = value;
+        level[pin] = value;
         let db = netlist.db;
         if let PinOwner::Cell { cell, .. } = db.pins[pin].owner
             && netlist.is_load(pin)
@@ -279,7 +283,7 @@ impl Constants {
 
     fn eval_instance(
         netlist: &Netlist<'_>,
-        level: &mut [Logic],
+        level: &mut IdVec<PinId, Logic>,
         queue: &mut VecDeque<CellId>,
         instance: CellId,
     ) {
@@ -316,7 +320,7 @@ impl Constants {
             } else {
                 Logic::Unknown
             };
-            if value != level[pin.index()] {
+            if value != level[pin] {
                 Self::set(netlist, level, queue, pin, value);
             }
         }
@@ -325,10 +329,7 @@ impl Constants {
     /// The level a pin holds; pins added since the search are unknown.
     #[must_use]
     pub fn level(&self, pin: PinId) -> Logic {
-        self.level
-            .get(pin.index())
-            .copied()
-            .unwrap_or(Logic::Unknown)
+        self.level.get(pin).copied().unwrap_or(Logic::Unknown)
     }
 
     /// Whether a pin holds a constant.
@@ -380,10 +381,10 @@ impl Constants {
 /// combinational arcs, as `OpenSTA`'s clock network.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ClockNetwork {
-    clocks_of: Vec<Vec<ClockId>>,
+    clocks_of: IdVec<PinId, Vec<ClockId>>,
     sources: Vec<PinId>,
-    /// Whether each clock is propagated, by clock id.
-    propagated: Vec<bool>,
+    /// Whether each clock is propagated.
+    propagated: IdVec<ClockId, bool>,
 }
 
 impl ClockNetwork {
@@ -400,7 +401,7 @@ impl ClockNetwork {
             let io = db
                 .io_pin_id(name)
                 .ok_or_else(|| NetlistError::UnknownClockPort(name.clone()))?;
-            clocks.push((ClockId(i as u32), vec![io]));
+            clocks.push((ClockId::new(i), vec![io]));
         }
         Ok(Self::find(netlist, &clocks, constants))
     }
@@ -410,9 +411,8 @@ impl ClockNetwork {
     pub fn from_sdc(netlist: &Netlist<'_>, sdc: &Sdc, constants: &Constants) -> Self {
         let clocks: Vec<(ClockId, Vec<IoPinId>)> = sdc
             .clocks
-            .iter()
-            .enumerate()
-            .map(|(i, c)| (ClockId(i as u32), c.sources.clone()))
+            .iter_enumerated()
+            .map(|(id, c)| (id, c.sources.clone()))
             .collect();
         let mut network = Self::find(netlist, &clocks, constants);
         network.propagated = sdc.clocks.iter().map(|c| c.propagated).collect();
@@ -425,7 +425,7 @@ impl ClockNetwork {
         constants: &Constants,
     ) -> Self {
         let db = netlist.db;
-        let mut clocks_of: Vec<Vec<ClockId>> = vec![Vec::new(); db.pins.len()];
+        let mut clocks_of: IdVec<PinId, Vec<ClockId>> = IdVec::filled(Vec::new(), db.pins.len());
         let mut sources = Vec::new();
         let all_sources: Vec<PinId> = clocks
             .iter()
@@ -436,16 +436,17 @@ impl ClockNetwork {
             for io in ports {
                 let pin = db.io_pins[*io].pin;
                 sources.push(pin);
-                clocks_of[pin.index()].push(*clock);
+                clocks_of[pin].push(*clock);
                 queue.push_back(pin);
             }
-            let reach =
-                |clocks_of: &mut Vec<Vec<ClockId>>, queue: &mut VecDeque<PinId>, next: PinId| {
-                    if !clocks_of[next.index()].contains(clock) && !all_sources.contains(&next) {
-                        clocks_of[next.index()].push(*clock);
-                        queue.push_back(next);
-                    }
-                };
+            let reach = |clocks_of: &mut IdVec<PinId, Vec<ClockId>>,
+                         queue: &mut VecDeque<PinId>,
+                         next: PinId| {
+                if !clocks_of[next].contains(clock) && !all_sources.contains(&next) {
+                    clocks_of[next].push(*clock);
+                    queue.push_back(next);
+                }
+            };
             while let Some(pin) = queue.pop_front() {
                 if netlist.is_driver(pin) {
                     let net = db.pins[pin].net;
@@ -480,7 +481,7 @@ impl ClockNetwork {
         Self {
             clocks_of,
             sources,
-            propagated: vec![false; clocks.len()],
+            propagated: IdVec::filled(false, clocks.len()),
         }
     }
 
@@ -493,7 +494,7 @@ impl ClockNetwork {
     /// The clocks reaching a pin.
     #[must_use]
     pub fn clocks_of(&self, pin: PinId) -> &[ClockId] {
-        self.clocks_of.get(pin.index()).map_or(&[], Vec::as_slice)
+        self.clocks_of.get(pin).map_or(&[], Vec::as_slice)
     }
 
     /// Whether an ideal clock reaches a pin, as `OpenSTA`'s
@@ -503,7 +504,7 @@ impl ClockNetwork {
     pub(crate) fn carries_ideal_clock(&self, pin: PinId) -> bool {
         self.clocks_of(pin)
             .iter()
-            .any(|c| !self.propagated.get(c.index()).copied().unwrap_or(false))
+            .any(|&c| !self.propagated.get(c).copied().unwrap_or(false))
     }
 
     /// Whether a clock pin takes its clock at the edge time, ideally,
@@ -516,7 +517,7 @@ impl ClockNetwork {
                 || self
                     .clocks_of(pin)
                     .iter()
-                    .any(|c| !self.propagated.get(c.index()).copied().unwrap_or(false)))
+                    .any(|&c| !self.propagated.get(c).copied().unwrap_or(false)))
     }
 
     /// Whether a clock pin's clocks arrive through the network's delays.

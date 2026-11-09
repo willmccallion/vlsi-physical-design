@@ -551,7 +551,8 @@ mod tests {
     }
 
     fn spacings(of: &[i64]) -> impl Fn(LayerId) -> Dbu + '_ {
-        |l| Dbu(of[l.index()])
+        let of: IdVec<LayerId, i64> = of.to_vec().into();
+        move |l| Dbu(of[l])
     }
 
     #[test]

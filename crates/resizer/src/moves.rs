@@ -11,7 +11,7 @@ use crate::rebuffer::{Rebuffer, can_remove_buffer};
 use crate::resizer::{PortSlews, RepairError, Resizer, buffer_delays, gate_delays};
 use crate::sta::{Path, Sta};
 use pare_common::db::design::PinOwner;
-use pare_common::db::indices::{CellId, LayerId, NetId, PinId};
+use pare_common::db::indices::{CellId, NetId, PinId};
 use pare_common::db::liberty::{
     Edge, EdgeValues, FuncExpr, LibCell, LibCellId, LibPortId, Logic, MinMax,
 };
@@ -57,7 +57,19 @@ pub(crate) enum MoveKind {
 }
 
 impl MoveKind {
-    const fn index(self) -> usize {
+    /// Every kind.
+    const ALL: [Self; 7] = [
+        Self::Unbuffer,
+        Self::SizeUp,
+        Self::SizeUpMatch,
+        Self::SwapPins,
+        Self::Buffer,
+        Self::Clone,
+        Self::SplitLoad,
+    ];
+
+    /// The kind's position in [`Self::ALL`].
+    const fn position(self) -> usize {
         match self {
             Self::Unbuffer => 0,
             Self::SizeUp => 1,
@@ -67,6 +79,24 @@ impl MoveKind {
             Self::Clone => 5,
             Self::SplitLoad => 6,
         }
+    }
+}
+
+/// A tally for each kind of move.
+#[derive(Clone, Debug, Default)]
+struct Tallies([Tally; MoveKind::ALL.len()]);
+
+impl std::ops::Index<MoveKind> for Tallies {
+    type Output = Tally;
+
+    fn index(&self, kind: MoveKind) -> &Tally {
+        &self.0[kind.position()]
+    }
+}
+
+impl std::ops::IndexMut<MoveKind> for Tallies {
+    fn index_mut(&mut self, kind: MoveKind) -> &mut Tally {
+        &mut self.0[kind.position()]
     }
 }
 
@@ -82,12 +112,12 @@ struct Tally {
 /// The moves made so far, per kind, as `OpenROAD` counts them.
 #[derive(Clone, Debug, Default)]
 pub(crate) struct MoveLog {
-    tallies: [Tally; 7],
+    tallies: Tallies,
 }
 
 impl MoveLog {
     fn count(&mut self, kind: MoveKind, cell: CellId, count: usize) {
-        let tally = &mut self.tallies[kind.index()];
+        let tally = &mut self.tallies[kind];
         tally.pending += count;
         let _ = tally.pending_cells.insert(cell);
         let _ = tally.all_cells.insert(cell);
@@ -96,30 +126,30 @@ impl MoveLog {
     /// Whether a move of `kind` ever touched `cell`.
     #[must_use]
     pub(crate) fn has_moves(&self, kind: MoveKind, cell: CellId) -> bool {
-        self.tallies[kind.index()].all_cells.contains(&cell)
+        self.tallies[kind].all_cells.contains(&cell)
     }
 
     /// Whether a move of `kind` touched `cell` since the last commit.
     #[must_use]
     pub(crate) fn has_pending(&self, kind: MoveKind, cell: CellId) -> bool {
-        self.tallies[kind.index()].pending_cells.contains(&cell)
+        self.tallies[kind].pending_cells.contains(&cell)
     }
 
     /// Moves of `kind` kept so far.
     #[must_use]
-    pub const fn committed(&self, kind: MoveKind) -> usize {
-        self.tallies[kind.index()].committed
+    pub fn committed(&self, kind: MoveKind) -> usize {
+        self.tallies[kind].committed
     }
 
     /// Moves of `kind` kept or pending.
     #[must_use]
-    pub const fn made(&self, kind: MoveKind) -> usize {
-        self.tallies[kind.index()].committed + self.tallies[kind.index()].pending
+    pub fn made(&self, kind: MoveKind) -> usize {
+        self.tallies[kind].committed + self.tallies[kind].pending
     }
 
     /// Keeps the pending moves, as `commitMoves`.
     pub fn commit(&mut self) {
-        for tally in &mut self.tallies {
+        for tally in &mut self.tallies.0 {
             tally.committed += tally.pending;
             tally.pending = 0;
             tally.pending_cells.clear();
@@ -128,7 +158,7 @@ impl MoveLog {
 
     /// Drops the pending moves, as `undoMoves`.
     pub fn undo(&mut self) {
-        for tally in &mut self.tallies {
+        for tally in &mut self.tallies.0 {
             tally.pending = 0;
             tally.pending_cells.clear();
         }
@@ -1152,20 +1182,10 @@ fn join_at_load(outer: &BnetPtr, inner: &BnetPtr, rc: &bnet::TreeRc<'_>) -> Bnet
         return Rc::clone(inner);
     };
     let mut joined = Rc::clone(inner);
-    let mut layer = out_layer.index();
-    while layer != in_layer.index() {
-        let next = if in_layer.index() > layer {
-            layer + 1
-        } else {
-            layer - 1
-        };
-        joined = Bnet::via(
-            inner.at,
-            LayerId::new(layer),
-            LayerId::new(next),
-            joined,
-            rc,
-        );
+    let mut layer = out_layer;
+    while layer != in_layer {
+        let next = layer.toward(in_layer);
+        joined = Bnet::via(inner.at, layer, next, joined, rc);
         layer = next;
     }
     if outer.at != inner.at {

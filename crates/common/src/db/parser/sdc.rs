@@ -660,7 +660,7 @@ impl Interpreter<'_> {
         if !parsed.flag("-add")
             && let Some(existing) = self.sdc.clock_id(&name)
         {
-            self.sdc.clocks[existing.index()] = Clock {
+            self.sdc.clocks[existing] = Clock {
                 name,
                 period,
                 rise,
@@ -676,7 +676,7 @@ impl Interpreter<'_> {
                 clock.sources.retain(|s| !sources.contains(s));
             }
         }
-        self.sdc.clocks.push(Clock {
+        let _ = self.sdc.clocks.push(Clock {
             name,
             period,
             rise,
@@ -782,7 +782,7 @@ impl Interpreter<'_> {
             return Err(self.error(line, "set_propagated_clock wants one object list"));
         };
         for clock in self.clocks_of(objects, line)? {
-            self.sdc.clocks[clock.index()].propagated = true;
+            self.sdc.clocks[clock].propagated = true;
         }
         Ok(String::new())
     }
@@ -800,7 +800,7 @@ impl Interpreter<'_> {
         let sides = sides_of_setup_hold(&parsed);
         for clock in self.clocks_of(clocks_text, line)? {
             for side in &sides {
-                self.sdc.clocks[clock.index()].uncertainty[*side] = Some(value);
+                self.sdc.clocks[clock].uncertainty[*side] = Some(value);
             }
         }
         Ok(String::new())
@@ -1837,7 +1837,7 @@ set_output_delay [expr $clk_period * $clk_io_pct] -clock $clk_name [all_outputs]
         let sdc = parse(ORFS);
 
         assert_eq!(sdc.clocks.len(), 1);
-        let clock = &sdc.clocks[0];
+        let clock = &sdc.clocks[ClockId(0)];
         assert_eq!(clock.name, "core_clock");
         assert!((clock.period.get() - 2.2e-9).abs() < 1e-20);
         assert!((clock.fall.get() - 1.1e-9).abs() < 1e-20);
@@ -1863,9 +1863,9 @@ set_output_delay [expr $clk_period * $clk_io_pct] -clock $clk_name [all_outputs]
              create_clock -name b -period [expr ($p + 1.0) / 2] -waveform [list 0 [expr $p/2]] [get_ports rst_n]\n",
         );
 
-        assert!((sdc.clocks[0].period.get() - 1e-9).abs() < 1e-20);
-        assert!((sdc.clocks[1].period.get() - 2e-9).abs() < 1e-20);
-        assert!((sdc.clocks[1].fall.get() - 1e-9).abs() < 1e-20);
+        assert!((sdc.clocks[ClockId(0)].period.get() - 1e-9).abs() < 1e-20);
+        assert!((sdc.clocks[ClockId(1)].period.get() - 2e-9).abs() < 1e-20);
+        assert!((sdc.clocks[ClockId(1)].fall.get() - 1e-9).abs() < 1e-20);
     }
 
     #[test]
@@ -1912,10 +1912,19 @@ set_output_delay [expr $clk_period * $clk_io_pct] -clock $clk_name [all_outputs]
 
         let close =
             |got: Option<Seconds>, want: f64| got.is_some_and(|g| (g.get() - want).abs() < 1e-20);
-        assert!(close(sdc.clocks[0].uncertainty[MinMax::Min], 0.15e-9));
-        assert!(close(sdc.clocks[0].uncertainty[MinMax::Max], 0.15e-9));
-        assert!(close(sdc.clocks[1].uncertainty[MinMax::Min], 0.05e-9));
-        assert_eq!(sdc.clocks[1].uncertainty[MinMax::Max], None);
+        assert!(close(
+            sdc.clocks[ClockId(0)].uncertainty[MinMax::Min],
+            0.15e-9
+        ));
+        assert!(close(
+            sdc.clocks[ClockId(0)].uncertainty[MinMax::Max],
+            0.15e-9
+        ));
+        assert!(close(
+            sdc.clocks[ClockId(1)].uncertainty[MinMax::Min],
+            0.05e-9
+        ));
+        assert_eq!(sdc.clocks[ClockId(1)].uncertainty[MinMax::Max], None);
         assert_eq!(sdc.false_paths.len(), 1);
         assert_eq!(sdc.false_paths[0].paths.from_clocks, vec![ClockId(0)]);
         assert_eq!(sdc.false_paths[0].paths.to_clocks, vec![ClockId(1)]);
@@ -1954,7 +1963,7 @@ set_output_delay [expr $clk_period * $clk_io_pct] -clock $clk_name [all_outputs]
              create_clock -name \"my clk\" \\\n    -period 2 \\\n    [get_ports clk]; set x 1\n",
         );
 
-        assert_eq!(sdc.clocks[0].name, "my clk");
+        assert_eq!(sdc.clocks[ClockId(0)].name, "my clk");
     }
 
     #[test]
@@ -1986,7 +1995,7 @@ set_output_delay [expr $clk_period * $clk_io_pct] -clock $clk_name [all_outputs]
              set_propagated_clock [get_clocks {clk}]\n",
         );
 
-        assert!(sdc.clocks[0].propagated);
+        assert!(sdc.clocks[ClockId(0)].propagated);
     }
 
     #[test]

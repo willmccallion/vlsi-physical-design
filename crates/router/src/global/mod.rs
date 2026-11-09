@@ -31,7 +31,7 @@ use coarse::{CoarseGrid, Corridor, Plan, SCALE};
 use maze::{OutgrowsArea, route_tree, route_tree_within};
 use pare_common::config::{CapacityReserve, Share};
 use pare_common::db::design::NetlistDB;
-use pare_common::db::indices::{LayerId, NetId};
+use pare_common::db::indices::{IdVec, LayerId, NetId};
 use pare_common::db::library::Direction;
 use pare_common::geom::dbu::Dbu;
 use pare_common::geom::point::Point;
@@ -354,7 +354,7 @@ impl GlobalGrid {
     pub fn capacity_reduction(
         &self,
         tech: &RouteTech,
-        adjustments: &[Share],
+        adjustments: &IdVec<LayerId, Share>,
         wire_width: Dbu,
     ) -> CapacityReduction {
         let (nx, ny) = (usize::from(self.nx), usize::from(self.ny));
@@ -371,10 +371,7 @@ impl GlobalGrid {
                 continue;
             }
             let tracks = self.tracks_per_line(tech, layer);
-            let adjustment = adjustments
-                .get(layer.index())
-                .copied()
-                .map_or(0.0, Share::get);
+            let adjustment = adjustments.get(layer).copied().map_or(0.0, Share::get);
             for y in 0..ny {
                 for x in 0..nx {
                     let (line, edge) = match direction {
