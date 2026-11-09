@@ -22,13 +22,12 @@ use crate::geom::rect::Rect;
 pub(super) fn check(model: &Model<'_>, rules: &Rules) -> Markers {
     model
         .metal
-        .iter()
-        .enumerate()
-        .filter(|(l, _)| !rules.metal[*l].min_steps.is_empty())
+        .iter_enumerated()
+        .filter(|&(l, _)| !rules.metal[l].min_steps.is_empty())
         .map(|(l, metal)| {
             let check = LayerCheck {
                 metal,
-                layer: LayerId::new(l),
+                layer: l,
                 rules: &rules.metal[l].min_steps,
             };
             piece_ranges(&metal.edges)

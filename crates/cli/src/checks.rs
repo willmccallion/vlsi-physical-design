@@ -5,7 +5,7 @@ use crate::ui;
 use pare_common::db::design::NetlistDB;
 use pare_common::db::indices::CellId;
 use pare_common::db::library::LayerRef;
-use pare_common::verify::drc::{DrcReport, Marker, check_drc};
+use pare_common::verify::drc::{DrcReport, Marker, OwnerIndex, check_drc};
 use pare_common::verify::placement::{PlacementViolation, placement_violations};
 use pare_common::verify::routing::check_routing;
 
@@ -196,7 +196,7 @@ fn describe_marker(db: &NetlistDB, drc: &DrcReport, m: &Marker) -> String {
         LayerRef::Routing(l) => db.library.layer(l).name.as_str(),
         LayerRef::Cut(c) => db.library.cut_layers[c].name.as_str(),
     };
-    let name = |i: usize| drc.owners[i].name(db);
+    let name = |o: OwnerIndex| drc.owners[o].name(db);
     format!(
         "{} on {layer} at ({:.4}, {:.4}) - ({:.4}, {:.4}) between {} and {}",
         m.violation.name(),
@@ -204,7 +204,7 @@ fn describe_marker(db: &NetlistDB, drc: &DrcReport, m: &Marker) -> String {
         units.to_microns(m.bbox.min.y),
         units.to_microns(m.bbox.max.x),
         units.to_microns(m.bbox.max.y),
-        name(m.owners.0.index()),
-        name(m.owners.1.index()),
+        name(m.owners.0),
+        name(m.owners.1),
     )
 }

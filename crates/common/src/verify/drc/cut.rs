@@ -11,7 +11,7 @@ use super::layout::OwnerIndex;
 use super::model::{Cut, Facing, GcRect, Metal, Model};
 use super::rules::CutRules;
 use super::{Involves, Marker, Markers, Violation};
-use crate::db::indices::CutLayerId;
+use crate::db::indices::{CutLayerId, IdVec};
 use crate::db::library::LayerRef;
 use crate::db::rules::{
     CutSpacing, CutSpacingCondition, Lef58CutSpacing, Lef58CutSpacingCondition,
@@ -20,20 +20,18 @@ use crate::geom::dbu::Dbu;
 use crate::geom::rect::Rect;
 
 /// Checks the cuts of every cut layer.
-pub(super) fn check(model: &Model<'_>, rules: &[CutRules]) -> Markers {
+pub(super) fn check(model: &Model<'_>, rules: &IdVec<CutLayerId, CutRules>) -> Markers {
     model
         .cut
-        .iter()
-        .enumerate()
-        .map(|(c, cut)| {
-            let layer = CutLayerId::new(c);
+        .iter_enumerated()
+        .map(|(layer, cut)| {
             let check = LayerCheck {
                 model,
                 layer,
                 cut,
-                rules: &rules[c],
-                below: model.metal.get(layer.below().index()),
-                above: model.metal.get(layer.above().index()),
+                rules: &rules[layer],
+                below: model.metal.get(layer.below()),
+                above: model.metal.get(layer.above()),
             };
             (0..cut.rects.len()).fold(Markers::default(), |mut found, i| {
                 check.check_cut(i, &mut found);
@@ -64,7 +62,7 @@ impl LayerCheck<'_> {
     }
 
     fn is_blockage(&self, owner: OwnerIndex) -> bool {
-        self.model.layout.owners()[owner.index()].is_blockage()
+        self.model.layout.owners()[owner].is_blockage()
     }
 
     /// Checks cut `i` against the cuts near it under rule `k`.

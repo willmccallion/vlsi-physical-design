@@ -16,16 +16,15 @@ use crate::geom::region::{Heading, Region};
 pub(super) fn check(model: &Model<'_>, rules: &Rules) -> Markers {
     model
         .metal
-        .iter()
-        .enumerate()
+        .iter_enumerated()
         .map(|(l, metal)| {
             let layer = LayerCheck {
                 model,
                 rules,
-                layer: LayerId::new(l),
+                layer: l,
                 metal,
                 layer_rules: &rules.metal[l],
-                hard_spacing_reach: rules.max_hard_spacing(LayerId::new(l)),
+                hard_spacing_reach: rules.max_hard_spacing(l),
             };
             (0..metal.rects.len()).fold(Markers::default(), |mut found, i| {
                 layer.check_rect(i, &mut found);
@@ -92,7 +91,7 @@ impl LayerCheck<'_> {
     }
 
     fn is_blockage(&self, owner: OwnerIndex) -> bool {
-        self.model.layout.owners()[owner.index()].is_blockage()
+        self.model.layout.owners()[owner].is_blockage()
     }
 
     /// Two rectangles that touch: a short between owners, or too little

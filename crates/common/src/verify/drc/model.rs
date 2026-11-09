@@ -6,6 +6,7 @@
 //! by one; a cut is fixed when a fixed cut of its owner has its rectangle.
 
 use super::layout::{Layout, LayoutShape, Origin, OwnerIndex};
+use crate::db::indices::{CutLayerId, IdVec, LayerId};
 use crate::geom::dbu::{Dbu, DbuArea};
 use crate::geom::point::Point;
 use crate::geom::rect::Rect;
@@ -351,8 +352,8 @@ impl<'a> Cut<'a> {
 #[derive(Debug)]
 pub(super) struct Model<'a> {
     pub layout: &'a Layout,
-    pub metal: Vec<Metal<'a>>,
-    pub cut: Vec<Cut<'a>>,
+    pub metal: IdVec<LayerId, Metal<'a>>,
+    pub cut: IdVec<CutLayerId, Cut<'a>>,
     /// The area the layout's shapes were taken from, when it holds only the
     /// shapes meeting a window of the design; a piece reaching the window's
     /// edge may be cut short there.
@@ -362,10 +363,12 @@ pub(super) struct Model<'a> {
 impl<'a> Model<'a> {
     pub fn new(layout: &'a Layout) -> Self {
         Self {
-            metal: (0..layout.metal_layers())
+            metal: layout
+                .metal_layer_ids()
                 .map(|l| Metal::new(layout.metal(l)))
                 .collect(),
-            cut: (0..layout.cut_layers())
+            cut: layout
+                .cut_layer_ids()
                 .map(|c| Cut::new(layout.cut(c)))
                 .collect(),
             layout,

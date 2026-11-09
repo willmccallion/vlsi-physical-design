@@ -44,7 +44,7 @@ fn metal(spacing: SpacingTable) -> MetalRules {
 /// layer.
 fn rules_with_min_area(area: i64) -> Rules {
     let mut rules = rules(Vec::new());
-    rules.metal[0].min_area = Some(DbuArea(area));
+    rules.metal[LayerId(0)].min_area = Some(DbuArea(area));
     rules
 }
 
@@ -54,12 +54,14 @@ fn rules(cut_spacings: Vec<CutSpacing>) -> Rules {
         metal: vec![
             metal(table(&[0], &[(0, &[100])])),
             metal(table(&[0], &[(0, &[100])])),
-        ],
+        ]
+        .into(),
         cut: vec![CutRules {
             width: Some(Dbu(100)),
             spacings: cut_spacings,
             lef58_spacings: Vec::new(),
-        }],
+        }]
+        .into(),
         min_spacing_for_obstructions: true,
         manufacturing_grid: None,
         non_default: Vec::new(),
@@ -69,7 +71,7 @@ fn rules(cut_spacings: Vec<CutSpacing>) -> Rules {
 /// The rules of [`rules`] with cut spacing property rules as well.
 fn rules_with_properties(statements: Vec<CutSpacing>, properties: Vec<Lef58CutSpacing>) -> Rules {
     let mut rules = rules(statements);
-    rules.cut[0].lef58_spacings = properties;
+    rules.cut[CutLayerId(0)].lef58_spacings = properties;
     rules
 }
 
@@ -253,7 +255,7 @@ fn a_notch_of_one_net_narrower_than_the_spacing_is_a_spacing_violation() {
 #[test]
 fn a_longer_parallel_run_needs_more_spacing() {
     let mut rules = rules(Vec::new());
-    rules.metal[0].spacing = table(&[0, 500], &[(0, &[100, 150])]);
+    rules.metal[LayerId(0)].spacing = table(&[0, 500], &[(0, &[100, 150])]);
     let mut short_run = Fixture::new();
     let (a, b) = (short_run.a, short_run.b);
     short_run.route(M1, a, rect(0, 0, 400, 100));
@@ -272,7 +274,7 @@ fn a_longer_parallel_run_needs_more_spacing() {
 #[test]
 fn an_obstruction_counts_as_a_default_width_wire_when_the_library_says_so() {
     let mut wide_needs_more = rules(Vec::new());
-    wide_needs_more.metal[0].spacing = table(&[0], &[(0, &[100]), (500, &[200])]);
+    wide_needs_more.metal[LayerId(0)].spacing = table(&[0], &[(0, &[100]), (500, &[200])]);
     let mut by_width = wide_needs_more.clone();
     by_width.min_spacing_for_obstructions = false;
     let mut f = Fixture::new();
@@ -304,7 +306,7 @@ fn a_wire_crossing_an_obstruction_shorts_outside_its_own_pin() {
 #[test]
 fn shapes_in_a_width_range_keep_the_range_spacing() {
     let mut rules = rules(Vec::new());
-    rules.metal[0].ranges.push(WidthRangeSpacing {
+    rules.metal[LayerId(0)].ranges.push(WidthRangeSpacing {
         spacing: Dbu(300),
         min_width: Dbu(400),
         max_width: Dbu(1000),
@@ -700,7 +702,7 @@ fn a_narrow_slice_partly_over_fixed_metal_violates_the_minimum_width() {
 /// The rules of [`rules`] with `rule` on the first metal layer.
 fn rules_with_minimum_cut(rule: MinimumCut) -> Rules {
     let mut rules = rules(Vec::new());
-    rules.metal[0].minimum_cuts = vec![rule];
+    rules.metal[LayerId(0)].minimum_cuts = vec![rule];
     rules
 }
 
@@ -749,7 +751,7 @@ fn a_minimum_cut_rule_from_above_ignores_cuts_below() {
     f.route(M2, a, rect(0, 0, 1000, 500));
     f.route(V1, a, rect(100, 100, 200, 200));
     let mut rules = rules(Vec::new());
-    rules.metal[1].minimum_cuts = vec![MinimumCut {
+    rules.metal[LayerId(1)].minimum_cuts = vec![MinimumCut {
         from: Some(CutApproach::Above),
         ..minimum_cut(400)
     }];
@@ -803,7 +805,7 @@ fn a_hole_smaller_than_the_minimum_enclosed_area_violates_it() {
     let mut f = Fixture::new();
     route_ring(&mut f);
     let mut rules = rules(Vec::new());
-    rules.metal[0].min_enclosed_areas = vec![DbuArea(50_000)];
+    rules.metal[LayerId(0)].min_enclosed_areas = vec![DbuArea(50_000)];
 
     let report = f.check(&rules);
 
@@ -816,7 +818,7 @@ fn a_hole_as_large_as_the_minimum_enclosed_area_is_legal() {
     let mut f = Fixture::new();
     route_ring(&mut f);
     let mut rules = rules(Vec::new());
-    rules.metal[0].min_enclosed_areas = vec![DbuArea(40_000)];
+    rules.metal[LayerId(0)].min_enclosed_areas = vec![DbuArea(40_000)];
 
     assert_eq!(f.check(&rules).violations, []);
 }
@@ -949,7 +951,7 @@ fn a_hard_nondefault_spacing_on_another_layer_changes_nothing() {
 /// spacing 200 at line ends narrower than 120, reaching 45 past the ends.
 fn rules_with_eol(parallel_edge: Option<ParallelEdge>) -> Rules {
     let mut rules = rules(Vec::new());
-    rules.metal[0].end_of_line = vec![EndOfLineSpacing {
+    rules.metal[LayerId(0)].end_of_line = vec![EndOfLineSpacing {
         spacing: Dbu(200),
         eol_width: Dbu(120),
         within: Dbu(45),
@@ -1094,7 +1096,7 @@ fn two_edges_need_a_neighbour_beside_both_ends() {
 /// The rules of [`rules`] with a minimum step rule on the first metal layer.
 fn rules_with_min_step(length: i64, max_edges: Option<u32>) -> Rules {
     let mut rules = rules(Vec::new());
-    rules.metal[0].min_steps = vec![MinStep {
+    rules.metal[LayerId(0)].min_steps = vec![MinStep {
         length: Dbu(length),
         max_edges,
     }];
@@ -1168,14 +1170,14 @@ fn a_loop_with_a_single_long_edge_is_not_checked_for_steps() {
 /// straddling the tile edges a 1000-DBU tiling puts at multiples of 1000.
 fn scattered_scene() -> (Layout, Rules) {
     let mut rules = rules(vec![cut_rule(100)]);
-    rules.metal[0].min_area = Some(DbuArea(20_000));
-    rules.metal[0].end_of_line = vec![EndOfLineSpacing {
+    rules.metal[LayerId(0)].min_area = Some(DbuArea(20_000));
+    rules.metal[LayerId(0)].end_of_line = vec![EndOfLineSpacing {
         spacing: Dbu(200),
         eol_width: Dbu(120),
         within: Dbu(45),
         parallel_edge: None,
     }];
-    rules.metal[0].min_steps = vec![MinStep {
+    rules.metal[LayerId(0)].min_steps = vec![MinStep {
         length: Dbu(60),
         max_edges: Some(1),
     }];
@@ -1221,14 +1223,14 @@ fn tiles_smaller_than_the_rules_reach_still_find_everything() {
 /// The shapes of `layout` meeting `window`, under its owners.
 fn shapes_meeting(layout: &Layout, window: &Rect<Dbu>) -> Layout {
     let mut near = Layout::with_owners_of(layout);
-    for l in 0..layout.metal_layers() {
+    for l in layout.metal_layer_ids() {
         for s in layout.metal(l).iter().filter(|s| s.rect.touches(window)) {
-            near.add_shape(LayerRef::Routing(LayerId::new(l)), s);
+            near.add_shape(LayerRef::Routing(l), s);
         }
     }
-    for c in 0..layout.cut_layers() {
+    for c in layout.cut_layer_ids() {
         for s in layout.cut(c).iter().filter(|s| s.rect.touches(window)) {
-            near.add_shape(LayerRef::Cut(CutLayerId::new(c)), s);
+            near.add_shape(LayerRef::Cut(c), s);
         }
     }
     near
@@ -1241,7 +1243,7 @@ fn building_tiles_when_checked_finds_what_bucketing_them_finds() {
 
     let lazy = check_tiles_lazily(
         bounds,
-        layout.owners().to_vec(),
+        layout.owners().clone(),
         &rules,
         (Dbu(1000), Dbu(500)),
         |window| shapes_meeting(&layout, window),

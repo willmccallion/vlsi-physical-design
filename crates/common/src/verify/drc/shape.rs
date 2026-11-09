@@ -13,12 +13,11 @@ use crate::geom::rect::Rect;
 pub(super) fn check(model: &Model<'_>, rules: &Rules) -> Markers {
     model
         .metal
-        .iter()
-        .enumerate()
+        .iter_enumerated()
         .map(|(l, metal)| {
             let check = PieceCheck {
                 metal,
-                layer: LayerId::new(l),
+                layer: l,
                 rules: &rules.metal[l],
                 grid: rules.manufacturing_grid,
                 window: model.window,
@@ -56,7 +55,7 @@ fn whole(window: Option<Rect<Dbu>>, piece: &GcPolygon) -> bool {
 /// Every piece below its layer's minimum area, without a fixed edge.
 pub(super) fn thin_pieces(model: &Model<'_>, rules: &Rules) -> Vec<ThinPiece> {
     let mut thin = Vec::new();
-    for (l, metal) in model.metal.iter().enumerate() {
+    for (l, metal) in model.metal.iter_enumerated() {
         let Some(min_area) = rules.metal[l].min_area else {
             continue;
         };
@@ -64,7 +63,7 @@ pub(super) fn thin_pieces(model: &Model<'_>, rules: &Rules) -> Vec<ThinPiece> {
             if piece.area < min_area && !piece.has_fixed_edge && whole(model.window, piece) {
                 thin.push(ThinPiece {
                     owner: piece.owner,
-                    layer: LayerId::new(l),
+                    layer: l,
                     bbox: piece.bbox,
                     area: piece.area,
                     min_area,

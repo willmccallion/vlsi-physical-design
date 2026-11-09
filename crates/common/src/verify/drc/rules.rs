@@ -2,7 +2,7 @@
 //! detailed router reads them.
 
 use crate::db::design::{NetlistDB, NonDefaultRule};
-use crate::db::indices::{LayerId, NonDefaultRuleId};
+use crate::db::indices::{CutLayerId, IdVec, LayerId, NonDefaultRuleId};
 use crate::db::library::Library;
 use crate::db::rules::{
     CutSpacing, CutSpacingCondition, EndOfLineSpacing, Lef58CutSpacing, MinStep, MinimumCut,
@@ -89,9 +89,9 @@ impl NonDefaultRules {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Rules {
     /// Rules of each routing layer.
-    pub metal: Vec<MetalRules>,
+    pub metal: IdVec<LayerId, MetalRules>,
     /// Rules of each cut layer.
-    pub cut: Vec<CutRules>,
+    pub cut: IdVec<CutLayerId, CutRules>,
     /// Whether obstructions count as wires of their layer's default width
     /// when looking up spacing.
     pub min_spacing_for_obstructions: bool,

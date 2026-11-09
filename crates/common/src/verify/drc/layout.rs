@@ -6,7 +6,10 @@
 //! except supply pins, which share one owner per supply.
 
 use crate::db::design::{NetlistDB, PinOwner, PlacementStatus, RouteElem};
-use crate::db::indices::{BlockageId, CellId, MacroPinId, NetId, NonDefaultRuleId, SpecialNetId};
+use crate::db::indices::{
+    BlockageId, CellId, CutLayerId, IdVec, LayerId, MacroPinId, NetId, NonDefaultRuleId,
+    SpecialNetId,
+};
 use crate::db::library::{LayerRef, Shape, SignalUse};
 use crate::db::shapes::{default_width_shapes, route_elem_shapes, special_net_metal};
 use crate::geom::dbu::Dbu;
@@ -57,23 +60,11 @@ impl Owner {
     }
 }
 
-/// An owner's position in [`Layout::owners`].
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
-pub struct OwnerIndex(pub u32);
-
-impl OwnerIndex {
-    /// The owner at position `index` of the table. Owners are nets, cells
-    /// and I/O pins, which the design's 32-bit ids number.
-    fn new(index: usize) -> Self {
-        debug_assert!(index < u32::MAX as usize, "owner {index} past the index");
-        Self(index as u32)
-    }
-
-    /// The position in the owner table.
-    pub const fn index(self) -> usize {
-        self.0 as usize
-    }
-}
+crate::define_index!(
+    /// An owner's position in [`Layout::owners`]. Owners are nets, cells and
+    /// I/O pins, which the design's 32-bit ids number.
+    OwnerIndex(u32)
+);
 
 /// Which step of the flow put a shape where it is.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -127,9 +118,9 @@ impl LayoutShape {
 /// that a window of it names owners the way the whole does.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 struct Owners {
-    by_index: Vec<Owner>,
-    supply: Vec<bool>,
-    rule_of: Vec<Option<NonDefaultRuleId>>,
+    by_index: IdVec<OwnerIndex, Owner>,
+    supply: IdVec<OwnerIndex, bool>,
+    rule_of: IdVec<OwnerIndex, Option<NonDefaultRuleId>>,
     index_of: HashMap<Owner, OwnerIndex>,
 }
 
@@ -137,16 +128,16 @@ struct Owners {
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct Layout {
     owners: Arc<Owners>,
-    metal: Vec<Vec<LayoutShape>>,
-    cut: Vec<Vec<LayoutShape>>,
+    metal: IdVec<LayerId, Vec<LayoutShape>>,
+    cut: IdVec<CutLayerId, Vec<LayoutShape>>,
 }
 
 impl Layout {
     /// An empty layout with `metal` routing layers and `cut` cut layers.
     pub fn new(metal: usize, cut: usize) -> Self {
         Self {
-            metal: vec![Vec::new(); metal],
-            cut: vec![Vec::new(); cut],
+            metal: IdVec::filled(Vec::new(), metal),
+            cut: IdVec::filled(Vec::new(), cut),
             ..Self::default()
         }
     }
@@ -167,10 +158,9 @@ impl Layout {
             return index;
         }
         let owners = Arc::make_mut(&mut self.owners);
-        let index = OwnerIndex::new(owners.by_index.len());
-        owners.by_index.push(owner);
-        owners.supply.push(supply);
-        owners.rule_of.push(None);
+        let index = owners.by_index.push(owner);
+        let _ = owners.supply.push(supply);
+        let _ = owners.rule_of.push(None);
         let _ = owners.index_of.insert(owner, index);
         index
     }
@@ -182,17 +172,14 @@ impl Layout {
 
     /// Puts `owner`'s shapes under nondefault rule `rule`.
     pub(crate) fn set_non_default_rule(&mut self, owner: OwnerIndex, rule: NonDefaultRuleId) {
-        if let Some(slot) = Arc::make_mut(&mut self.owners)
-            .rule_of
-            .get_mut(owner.index())
-        {
+        if let Some(slot) = Arc::make_mut(&mut self.owners).rule_of.get_mut(owner) {
             *slot = Some(rule);
         }
     }
 
     /// The nondefault rule `owner`'s shapes follow, if any.
     pub fn non_default_rule(&self, owner: OwnerIndex) -> Option<NonDefaultRuleId> {
-        self.owners.rule_of.get(owner.index()).copied().flatten()
+        self.owners.rule_of.get(owner).copied().flatten()
     }
 
     /// Adds a rectangle; one on a layer the layout does not have, or
@@ -214,8 +201,8 @@ impl Layout {
     /// Adds a shape as it is, on a layer the layout has.
     pub fn add_shape(&mut self, layer: LayerRef, shape: &LayoutShape) {
         let shapes = match layer {
-            LayerRef::Routing(l) => self.metal.get_mut(l.index()),
-            LayerRef::Cut(c) => self.cut.get_mut(c.index()),
+            LayerRef::Routing(l) => self.metal.get_mut(l),
+            LayerRef::Cut(c) => self.cut.get_mut(c),
         };
         if let Some(shapes) = shapes {
             shapes.push(*shape);
@@ -223,27 +210,33 @@ impl Layout {
     }
 
     /// Every owner, by index.
-    pub fn owners(&self) -> &[Owner] {
+    pub fn owners(&self) -> &IdVec<OwnerIndex, Owner> {
         &self.owners.by_index
     }
 
     /// Whether `owner` carries power or ground.
     pub fn is_supply(&self, owner: OwnerIndex) -> bool {
-        self.owners
-            .supply
-            .get(owner.index())
-            .copied()
-            .unwrap_or(false)
+        self.owners.supply.get(owner).copied().unwrap_or(false)
     }
 
     /// The shapes on a routing layer.
-    pub fn metal(&self, layer: usize) -> &[LayoutShape] {
+    pub fn metal(&self, layer: LayerId) -> &[LayoutShape] {
         self.metal.get(layer).map_or(&[], Vec::as_slice)
     }
 
     /// The shapes on a cut layer.
-    pub fn cut(&self, layer: usize) -> &[LayoutShape] {
+    pub fn cut(&self, layer: CutLayerId) -> &[LayoutShape] {
         self.cut.get(layer).map_or(&[], Vec::as_slice)
+    }
+
+    /// Every routing layer the layout has.
+    pub fn metal_layer_ids(&self) -> impl Iterator<Item = LayerId> + use<> {
+        self.metal.ids()
+    }
+
+    /// Every cut layer the layout has.
+    pub fn cut_layer_ids(&self) -> impl Iterator<Item = CutLayerId> + use<> {
+        self.cut.ids()
     }
 
     /// The box around every shape, or `None` when there are none.

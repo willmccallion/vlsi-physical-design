@@ -24,13 +24,12 @@ use crate::geom::region::{Edge, Heading};
 pub(super) fn check(model: &Model<'_>, rules: &Rules) -> Markers {
     model
         .metal
-        .iter()
-        .enumerate()
-        .filter(|(l, _)| !rules.metal[*l].end_of_line.is_empty())
+        .iter_enumerated()
+        .filter(|&(l, _)| !rules.metal[l].end_of_line.is_empty())
         .map(|(l, metal)| {
             let check = LayerCheck {
                 metal,
-                layer: LayerId::new(l),
+                layer: l,
                 rules: &rules.metal[l].end_of_line,
             };
             (0..metal.edges.len()).fold(Markers::default(), |mut found, i| {
