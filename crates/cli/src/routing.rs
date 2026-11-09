@@ -4,7 +4,7 @@ use crate::checks::report_routing;
 use crate::placement::{CellPlaces, legalize};
 use crate::prepare_output_dir;
 use crate::repair::{NetlistRepair, show_design_repair, timing_repair_on};
-use crate::report::{GlobalRouteRepairSummary, Report, RoutingSummary};
+use crate::report::{DesignRepairSummary, GlobalRouteRepairSummary, Report, RoutingSummary};
 use crate::{ui, visualization};
 use anyhow::Context;
 use pare_common::config::Config;
@@ -115,11 +115,7 @@ pub(crate) fn global_route_with_repair(
                 ui::phase("Design Repair");
                 let done = Repairer::new(&mut resizer).repair_design()?;
                 show_design_repair(&done, resizer.netlist().db.cells.len());
-                summary.slew_violations = done.slew_violations;
-                summary.cap_violations = done.cap_violations;
-                summary.repaired_nets = done.repaired_nets;
-                summary.resized = done.resized;
-                summary.repeaters = done.inserted;
+                summary.design = DesignRepairSummary::of(&done);
             }
             RepairStep::Timing => {
                 ui::phase("Timing Repair");

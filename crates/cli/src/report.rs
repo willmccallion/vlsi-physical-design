@@ -2,7 +2,7 @@
 //! long each phase took, what the checks found and how much memory it took.
 
 use crate::ui;
-use pare_resizer::{HoldSummary, SetupSummary};
+use pare_resizer::{HoldSummary, RepairSummary, SetupSummary};
 use serde::Serialize;
 use std::collections::BTreeMap;
 use std::path::Path;
@@ -50,7 +50,7 @@ pub struct Phase {
 }
 
 /// What netlist repair did.
-#[derive(Debug, Default, Serialize)]
+#[derive(Clone, Debug, Default, Serialize)]
 pub struct NetlistSummary {
     /// Buffers from synthesis removed before placement.
     pub buffers_removed: usize,
@@ -60,9 +60,17 @@ pub struct NetlistSummary {
     pub output_buffers: usize,
     /// The buffer cell the ports got.
     pub buffer_cell: String,
-    /// Drivers whose own or whose loads' slew broke a limit after placement.
+    /// What design repair after placement did.
+    #[serde(flatten)]
+    pub design: DesignRepairSummary,
+}
+
+/// What design repair did.
+#[derive(Clone, Copy, Debug, Default, Serialize)]
+pub struct DesignRepairSummary {
+    /// Drivers whose own or whose loads' slew broke a limit.
     pub slew_violations: usize,
-    /// Drivers whose load broke their capacitance limit after placement.
+    /// Drivers whose load broke their capacitance limit.
     pub cap_violations: usize,
     /// Nets repair changed.
     pub repaired_nets: usize,
@@ -70,6 +78,19 @@ pub struct NetlistSummary {
     pub resized: usize,
     /// Repeaters repair inserted.
     pub repeaters: usize,
+}
+
+impl DesignRepairSummary {
+    /// What the repair `done` reports, for the report.
+    pub(crate) const fn of(done: &RepairSummary) -> Self {
+        Self {
+            slew_violations: done.slew_violations,
+            cap_violations: done.cap_violations,
+            repaired_nets: done.repaired_nets,
+            resized: done.resized,
+            repeaters: done.inserted,
+        }
+    }
 }
 
 /// What clock tree synthesis did.
@@ -96,16 +117,9 @@ pub struct ClockTreeSummary {
 /// What design and timing repair did on the global routes' parasitics.
 #[derive(Debug, Default, Serialize)]
 pub struct GlobalRouteRepairSummary {
-    /// Drivers breaking a slew limit.
-    pub slew_violations: usize,
-    /// Drivers breaking a load limit.
-    pub cap_violations: usize,
-    /// Nets design repair changed.
-    pub repaired_nets: usize,
-    /// Gates design repair resized.
-    pub resized: usize,
-    /// Repeaters design repair inserted.
-    pub repeaters: usize,
+    /// What design repair did.
+    #[serde(flatten)]
+    pub design: DesignRepairSummary,
     /// What timing repair did.
     pub timing: Option<TimingSummary>,
 }
@@ -257,3 +271,30 @@ impl Report {
 }
 
 pub use pare_common::memory::peak_rss_mb;
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn design_repair_reports_as_fields_of_its_summary() {
+        let summary = NetlistSummary {
+            buffers_removed: 1,
+            design: DesignRepairSummary {
+                slew_violations: 2,
+                repeaters: 3,
+                ..DesignRepairSummary::default()
+            },
+            ..NetlistSummary::default()
+        };
+
+        let json = serde_json::to_string(&summary).unwrap();
+
+        assert_eq!(
+            json,
+            "{\"buffers_removed\":1,\"input_buffers\":0,\"output_buffers\":0,\"buffer_cell\":\"\",\
+             \"slew_violations\":2,\"cap_violations\":0,\"repaired_nets\":0,\"resized\":0,\
+             \"repeaters\":3}"
+        );
+    }
+}
