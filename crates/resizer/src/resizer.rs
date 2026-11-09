@@ -396,7 +396,8 @@ impl<'a, T: Timing> Resizer<'a, T> {
             .cells
             .iter()
             .map(|&b| link.buffer_drive_resistance(b))
-            .fold(Ohms::new(f64::MAX), Ohms::min);
+            .reduce(Ohms::min)
+            .ok_or(RepairError::NoBuffers)?;
         let targets = find_targets(link, &buffers);
         let (graph, timing) = {
             let netlist = Netlist::new(db, link);
