@@ -283,6 +283,11 @@ impl RowGrid {
             .unwrap_or_else(|| self.core.height())
     }
 
+    /// How tall row `y` is, from its bottom edge to the next.
+    pub fn row_height(&self, y: GridY) -> Dbu {
+        self.row_y(y + 1) - self.row_y(y)
+    }
+
     /// The grid cells a rectangle covers, ends excluded, as
     /// `Grid::gridCovering`.
     pub fn covering(&self, r: &Rect<Dbu>) -> GridRect {

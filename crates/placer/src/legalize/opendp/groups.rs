@@ -258,7 +258,9 @@ impl Placer {
                             .pixel(x, y)
                             .is_some_and(|p| p.valid && p.group() == Some(g))
                         {
-                            site_area += self.pixel_height(y) * self.rows.site_width();
+                            // NOTE: Grid::rowHeight gives row y the height of the
+                            // row below (row 0 none); PARE gives its own.
+                            site_area += self.rows.row_height(y) * self.rows.site_width();
                         }
                     }
                 }
@@ -273,17 +275,6 @@ impl Placer {
                 cell_area / site_area.to_f64()
             };
         }
-    }
-
-    /// The height `OpenDP` gives grid row `y`: from the row edge below it,
-    /// as `Grid::rowHeight`.
-    fn pixel_height(&self, y: GridY) -> Dbu {
-        let below = if y > GridY::ZERO {
-            self.rows.row_y(y - 1)
-        } else {
-            Dbu::ZERO
-        };
-        self.rows.row_y(y) - below
     }
 
     /// Moves each group's members that lie outside its region into it, as
@@ -710,37 +701,41 @@ mod tests {
         Rect::new(Point::new(Dbu(x0), Dbu(y0)), Point::new(Dbu(x1), Dbu(y1)))
     }
 
-    /// The tiny design with `u1` and `u2` fenced into a region of a first
-    /// rectangle at the bottom left and a second in the top row, and `u1`
-    /// starting outside both, nearer the second.
-    fn tiny_with_two_rectangle_fence() -> NetlistDB {
+    /// The tiny design with `members` fenced into a region of `rects`,
+    /// given as DEF points.
+    fn tiny_fenced(rects: &str, members: &str) -> NetlistDB {
         let text = std::fs::read_to_string(fixture("tiny.def"))
             .unwrap()
             .replace(
                 "COMPONENTS 8 ;",
-                "REGIONS 1 ;\n- fence ( 0 0 ) ( 2000 2000 ) ( 3000 4000 ) ( 4000 6000 ) \
-                 + TYPE FENCE ;\nEND REGIONS\nCOMPONENTS 8 ;",
+                &format!(
+                    "REGIONS 1 ;\n- fence {rects} + TYPE FENCE ;\nEND REGIONS\nCOMPONENTS 8 ;"
+                ),
             )
             .replace(
                 "END DESIGN",
-                "GROUPS 1 ;\n- g u1 u2 + REGION fence ;\nEND GROUPS\nEND DESIGN",
+                &format!("GROUPS 1 ;\n- g {members} + REGION fence ;\nEND GROUPS\nEND DESIGN"),
             );
         let units = def::read_units(&fixture("tiny.def")).unwrap();
         let library = lef::parse_files(&[fixture("tiny.lef")], units).unwrap();
-        let mut db = def::parse_str(&text, Path::new("fenced.def"), library).unwrap();
-        let u1 = db.cell_id("u1").unwrap();
-        db.cells[u1].location = Point::new(Dbu(3800), Dbu(3000));
-        db
+        def::parse_str(&text, Path::new("fenced.def"), library).unwrap()
+    }
+
+    /// The placer of `db` with its fixed cells and regions on the grid.
+    fn placer_with_regions(db: &NetlistDB) -> Placer {
+        let mut placer = Placer::new(db).unwrap();
+        placer.paint_fixed_cells();
+        placer.mark_region_edges();
+        placer.mark_region_sites();
+        placer
     }
 
     #[test]
     fn a_member_outside_its_region_is_packed_into_the_nearest_rectangle() {
-        let db = tiny_with_two_rectangle_fence();
-        let mut placer = Placer::new(&db).unwrap();
-        placer.paint_fixed_cells();
-        placer.mark_region_edges();
-        placer.mark_region_sites();
-        placer.measure_group_utilization();
+        let mut db = tiny_fenced("( 0 0 ) ( 2000 2000 ) ( 3000 4000 ) ( 4000 6000 )", "u1 u2");
+        let u1 = db.cell_id("u1").unwrap();
+        db.cells[u1].location = Point::new(Dbu(3800), Dbu(3000));
+        let mut placer = placer_with_regions(&db);
         let u1 = placer
             .nodes
             .ids()
@@ -750,5 +745,17 @@ mod tests {
         placer.brick_place_inner(GroupId(0)).unwrap();
 
         assert!(rect(3000, 4000, 4000, 6000).encloses(&placer.nodes[u1].bbox()));
+    }
+
+    #[test]
+    fn a_region_on_the_bottom_row_counts_that_row_s_height() {
+        let db = tiny_fenced("( 0 0 ) ( 2000 2000 )", "u1");
+        let mut placer = placer_with_regions(&db);
+
+        placer.measure_group_utilization();
+
+        let site_area = 10.0 * 200.0 * 2000.0;
+        let expected = 400.0 * 2000.0 / site_area;
+        assert!((placer.groups[GroupId(0)].util - expected).abs() < 1e-12);
     }
 }
