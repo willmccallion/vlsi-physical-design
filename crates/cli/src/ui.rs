@@ -6,6 +6,7 @@
 use pare_common::db::library::Direction;
 use pare_placer::global;
 use pare_router::RoundReport;
+use std::time::Duration;
 use yansi::Paint;
 
 /// Prints the PARE banner and a horizontal rule.
@@ -208,14 +209,19 @@ pub fn wrote(path: &std::path::Path) {
     eprintln!("    {} {}", "->".dim(), path.display());
 }
 
+/// A wall time in seconds, to a tenth.
+pub fn seconds(elapsed: Duration) -> String {
+    format!("{:.1}s", elapsed.as_secs_f64())
+}
+
 /// Prints a dimmed phase timing line.
-pub fn phase_time(elapsed_secs: f64) {
-    eprintln!("    {}", format!("time: {elapsed_secs:.1}s").dim());
+pub fn phase_time(elapsed: Duration) {
+    eprintln!("    {}", format!("time: {}", seconds(elapsed)).dim());
 }
 
 /// Prints a "Done in Xs" line with a rule.
-pub fn done(elapsed_secs: f64) {
+pub fn done(elapsed: Duration) {
     eprintln!();
     rule();
-    eprintln!("  {} {:.1}s\n", "Done in".bold(), elapsed_secs);
+    eprintln!("  {} {}\n", "Done in".bold(), seconds(elapsed));
 }

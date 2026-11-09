@@ -421,12 +421,7 @@ fn show_stage(stage: Stage, elapsed: Duration) {
         Stage::TrackAssignment => "Track assign:",
     };
     let resident = memory::current_rss_mb().map_or_else(String::new, |mb| format!("{mb} MB"));
-    ui::stat_row(
-        label,
-        &format!("{:.1}s", elapsed.as_secs_f64()),
-        "Resident:",
-        &resident,
-    );
+    ui::stat_row(label, &ui::seconds(elapsed), "Resident:", &resident);
 }
 
 /// Writes the routed design's image and DEF into `output_dir`.
