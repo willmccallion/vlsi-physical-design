@@ -2,7 +2,8 @@
 //!
 //! Tokens are whitespace-separated words. A `#` at the start of a word begins
 //! a comment that runs to the end of the line, double-quoted strings are one
-//! token, and a `;` glued to the end of a word is split off on its own.
+//! token (one left open is an error at its line), and a `;` glued to the end
+//! of a word is split off on its own.
 
 use std::path::{Path, PathBuf};
 use std::str::FromStr;
@@ -57,6 +58,9 @@ pub(crate) struct Lexer<'a> {
     path: &'a Path,
     peeked: Option<Token<'a>>,
     split_semicolon: Option<Token<'a>>,
+    /// The line of a quote that never closes, once scanning reaches it;
+    /// the tokens end there.
+    unterminated: Option<usize>,
 }
 
 impl<'a> Lexer<'a> {
@@ -69,6 +73,7 @@ impl<'a> Lexer<'a> {
             path,
             peeked: None,
             split_semicolon: None,
+            unterminated: None,
         }
     }
 
@@ -82,6 +87,7 @@ impl<'a> Lexer<'a> {
             path,
             peeked: None,
             split_semicolon: None,
+            unterminated: None,
         }
     }
 
@@ -120,8 +126,20 @@ impl<'a> Lexer<'a> {
     /// Consumes the next token, failing at end of input.
     pub(crate) fn expect_token(&mut self, what: &str) -> Result<Token<'a>, ParseError> {
         let line = self.line;
-        self.next_token()
-            .ok_or_else(|| self.error(line, format!("unexpected end of file, expected {what}")))
+        if let Some(t) = self.next_token() {
+            return Ok(t);
+        }
+        self.finish()?;
+        Err(self.error(line, format!("unexpected end of file, expected {what}")))
+    }
+
+    /// Fails if the tokens ended at a quoted string that never closes; a
+    /// reader that stops at the end of the tokens calls it there.
+    pub(crate) fn finish(&self) -> Result<(), ParseError> {
+        match self.unterminated {
+            Some(line) => Err(self.error(line, "unterminated string")),
+            None => Ok(()),
+        }
     }
 
     /// Consumes the next token and checks that it is `keyword`.
@@ -184,11 +202,13 @@ impl<'a> Lexer<'a> {
         let line = self.line;
         if bytes[self.pos] == b'"' {
             let start = self.pos + 1;
-            let len = self.src[start..]
-                .find('"')
-                .unwrap_or(self.src.len() - start);
+            let Some(len) = self.src[start..].find('"') else {
+                self.unterminated = Some(line);
+                self.pos = self.src.len();
+                return None;
+            };
             self.line += self.src[start..start + len].matches('\n').count();
-            self.pos = (start + len + 1).min(self.src.len());
+            self.pos = start + len + 1;
             return Some(Token {
                 text: &self.src[start..start + len],
                 line,
@@ -258,6 +278,22 @@ mod tests {
                 (";", 1)
             ]
         );
+    }
+
+    #[test]
+    fn an_unterminated_quoted_string_is_an_error_at_its_line() {
+        let mut lexer = Lexer::new("A\n\"B C\nD ;", Path::new("t"));
+
+        let first = lexer.expect_token("word").map(|t| t.text);
+        let second = lexer.expect_token("word").map(|t| t.text);
+
+        assert_eq!(first.ok(), Some("A"));
+        match second {
+            Err(ParseError::Syntax { line, message, .. }) => {
+                assert_eq!((line, message.as_str()), (2, "unterminated string"));
+            }
+            other => panic!("expected a syntax error, got {other:?}"),
+        }
     }
 
     #[test]
