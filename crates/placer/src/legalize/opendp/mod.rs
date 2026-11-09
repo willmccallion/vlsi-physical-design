@@ -13,7 +13,10 @@
 //! library has no one-site cell to fill them. Cells take their row's
 //! orientation. The members of each placement region are placed first,
 //! inside it, and other cells kept out of it. Hybrid rows and placement
-//! padding, which the designs here do not use, are not modelled.
+//! padding, which the designs here do not use, are not modelled; nor are
+//! edge spacing rules of the `EXACT` form, edges trimmed by `RANGE`,
+//! `CELLROW` or `HALFROW`, or a fixed cell's `OVERLAP` outline, so a fixed
+//! rectilinear macro blocks its whole box.
 
 mod cpp;
 mod groups;
@@ -537,6 +540,8 @@ impl Placer {
             return Vec::new();
         }
         let (w, h) = (m.size.x, m.size.y);
+        // NOTE: Network::addMaster trims edges to their RANGE, CELLROW or
+        // HALFROW; PARE's LEF reader reads none, so each edge is a whole side.
         let segment = |side: CellSide| -> Rect<Dbu> {
             match side {
                 CellSide::Right => Rect::new(Point::new(w, Dbu(0)), Point::new(w, h)),
@@ -589,6 +594,8 @@ impl Placer {
             }
             let node = &self.nodes[n];
             let block = node.block;
+            // NOTE: Grid::visitCellPixels paints only a master's OVERLAP
+            // obstructions when it has some; PARE's library drops OVERLAP.
             let cells = self.rows.covering(&node.bbox());
             for x in cells.min.x.until(cells.max.x) {
                 for y in cells.min.y.until(cells.max.y) {
@@ -677,6 +684,8 @@ impl Placer {
     fn rip_up_and_replace(&mut self, n: NodeId, failures: &mut Vec<NodeId>) -> bool {
         let target = self.legal_grid_pt(n);
         let margin_width = self.grid_width(&self.nodes[n]) * (1 + RIP_UP_ROWS.get());
+        // NOTE: Opendp::ripUpAndReplace orders its std::set<Node*> by address,
+        // not fixed by the language; PARE orders by NodeId, the cells' order.
         let mut around: BTreeSet<NodeId> = BTreeSet::new();
         for x in (target.x - margin_width).through(target.x + margin_width) {
             for y in (target.y - RIP_UP_ROWS).through(target.y + RIP_UP_ROWS) {
@@ -1012,6 +1021,8 @@ impl Placer {
                         } else {
                             merged.height()
                         };
+                        // NOTE: PlacementDRC::checkEdgeSpacing also takes EXACT rules,
+                        // met only at their spacing; PARE's LEF reader has none.
                         if dist < spacing {
                             return false;
                         }

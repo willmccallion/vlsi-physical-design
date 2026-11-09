@@ -301,6 +301,8 @@ impl RowGrid {
     /// rounded onto the site grid and a row, as `Opendp::legalPt` with a
     /// point.
     pub fn legal_pt(&self, at: Point<Dbu>, size: Point<Dbu>) -> Point<Dbu> {
+        // NOTE: Opendp::legalPt's std::clamp is undefined for a cell wider or
+        // taller than the core; PARE puts such a cell at the core's start.
         let core_x = at.x.clamp(
             Dbu::ZERO,
             (self.row_site_count.to_dbu(self.site_width) - size.x).max(Dbu::ZERO),
