@@ -298,11 +298,12 @@ fn route(args: RouteArgs, report: &mut Report) -> anyhow::Result<()> {
     route_detailed(&config, &mut db, &files, None, report)
 }
 
-/// A box the command line gives by its corners in microns.
+/// A box the command line gives by two opposite corners in microns, in
+/// either order.
 #[derive(Clone, Copy, Debug, PartialEq)]
 struct MicronBox {
-    low: Point<f64>,
-    high: Point<f64>,
+    corner: Point<f64>,
+    opposite: Point<f64>,
 }
 
 impl MicronBox {
@@ -312,15 +313,15 @@ impl MicronBox {
             anyhow::bail!("a box takes four corner coordinates, not {}", corners.len());
         };
         Ok(Self {
-            low: Point::new(x0, y0),
-            high: Point::new(x1, y1),
+            corner: Point::new(x0, y0),
+            opposite: Point::new(x1, y1),
         })
     }
 
     /// The box rounded onto the database grid of `units`.
     fn in_dbu(self, units: DbuPerMicron) -> Rect<Dbu> {
         let at = |p: Point<f64>| Point::new(units.to_dbu_rounded(p.x), units.to_dbu_rounded(p.y));
-        Rect::new(at(self.low), at(self.high))
+        Rect::from_corners(at(self.corner), at(self.opposite))
     }
 }
 
@@ -564,5 +565,14 @@ mod tests {
                 Point::new(Dbu(6001), Dbu(8000))
             )
         );
+    }
+
+    #[test]
+    fn a_box_given_high_corner_first_is_the_same_box() {
+        let units = DbuPerMicron::new(1000).unwrap();
+        let at = |corners: &[f64]| MicronBox::from_corners(corners).unwrap().in_dbu(units);
+
+        assert_eq!(at(&[6.0, 6.0, 0.0, 0.0]), at(&[0.0, 0.0, 6.0, 6.0]));
+        assert_eq!(at(&[6.0, 0.0, 0.0, 6.0]), at(&[0.0, 0.0, 6.0, 6.0]));
     }
 }
