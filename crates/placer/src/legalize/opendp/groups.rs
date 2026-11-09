@@ -6,8 +6,8 @@
 
 use super::cpp::{Mt19937, sort};
 use super::{
-    DUMMY_CELL, DetailedPlacementError, GridPt, MAX_DISPLACEMENT_X, MAX_DISPLACEMENT_Y, Node,
-    Placer, area, group_id, node_id,
+    DetailedPlacementError, GridPt, GroupId, MAX_DISPLACEMENT_X, MAX_DISPLACEMENT_Y, Node, NodeId,
+    Occupant, Placer, area,
 };
 use pare_common::db::design::NetlistDB;
 use pare_common::db::indices::{CellId, IdVec, RegionId};
@@ -33,7 +33,7 @@ pub(super) struct Group {
     pub(super) rects: Vec<Rect<Dbu>>,
     pub(super) bbox: Rect<Dbu>,
     /// Its member nodes, in the order `OpenDB` lists a group's instances.
-    pub(super) cells: Vec<usize>,
+    pub(super) cells: Vec<NodeId>,
     util: f64,
 }
 
@@ -43,7 +43,7 @@ impl Placer {
     /// member where `OpenDB` lists it.
     pub(super) fn make_groups(&mut self, db: &NetlistDB) {
         let mut node_of = IdVec::filled(None, db.cells.len());
-        for (n, node) in self.nodes.iter().enumerate() {
+        for (n, node) in self.nodes.iter_enumerated() {
             node_of[node.cell] = Some(n);
         }
         let mut regions: Vec<RegionId> = db.regions.ids().collect();
@@ -73,8 +73,8 @@ impl Placer {
                     Point::new(Dbu(0), Dbu(0)),
                     Point::new(Dbu(0), Dbu(0)),
                 ));
-            let g = self.groups.len();
-            let mut members: Vec<(CellId, usize)> = db
+            let g = self.groups.next_id();
+            let mut members: Vec<(CellId, NodeId)> = db
                 .cells
                 .ids()
                 .filter(|&i| {
@@ -90,7 +90,7 @@ impl Placer {
                 self.nodes[n].group = Some(g);
                 cells.push(n);
             }
-            self.groups.push(Group {
+            let _ = self.groups.push(Group {
                 rects,
                 bbox,
                 cells,
@@ -127,7 +127,7 @@ impl Placer {
                         && let Some(p) = self.pixel_mut(x, y)
                     {
                         p.util = 0.0;
-                        p.cell = DUMMY_CELL;
+                        p.set_occupant(Occupant::Dummy);
                         p.valid = false;
                     }
                 }
@@ -144,10 +144,10 @@ impl Placer {
             p.util = 0.0;
         }
         let site = self.site_width;
-        for g in 0..self.groups.len() {
+        for g in self.groups.ids() {
             if self.groups[g].cells.is_empty() {
-                if g != 0 {
-                    log::warn!("No cells found in group {g}.");
+                if g != GroupId(0) {
+                    log::warn!("No cells found in group {}.", g.index());
                 }
                 continue;
             }
@@ -176,7 +176,6 @@ impl Placer {
                     }
                 }
             }
-            let id = group_id(g);
             for rect in &rects {
                 let (x0, y0, x1, y1) = self.grid_within(rect);
                 for y in y0..y1 {
@@ -185,11 +184,11 @@ impl Placer {
                             continue;
                         };
                         if p.util == 1.0 {
-                            p.group = id;
+                            p.set_group(g);
                             p.valid = true;
                             p.util = 1.0;
                         } else if p.util > 0.0 && p.util < 1.0 {
-                            p.cell = DUMMY_CELL;
+                            p.set_occupant(Occupant::Dummy);
                             p.util = 0.0;
                             p.valid = false;
                         }
@@ -205,7 +204,7 @@ impl Placer {
         self.pre_place_groups();
         self.pre_place();
         self.place_group_cells()?;
-        for g in 0..self.groups.len() {
+        for g in self.groups.ids() {
             for _ in 0..PASSES {
                 let refined = self.group_refine(g);
                 let annealed = self.anneal(g);
@@ -220,13 +219,15 @@ impl Placer {
     /// Each group's utilization and each member's rectangle, as
     /// `Opendp::groupAssignCellRegions`.
     fn assign_cell_regions(&mut self) {
-        for g in 0..self.groups.len() {
-            let id = group_id(g);
+        for g in self.groups.ids() {
             let mut site_area: i64 = 0;
             if !self.groups[g].cells.is_empty() {
                 for x in 0..self.row_site_count {
                     for y in 0..self.row_count {
-                        if self.pixel(x, y).is_some_and(|p| p.valid && p.group == id) {
+                        if self
+                            .pixel(x, y)
+                            .is_some_and(|p| p.valid && p.group() == Some(g))
+                        {
                             site_area += self.pixel_height(y) * self.site_width;
                         }
                     }
@@ -267,7 +268,7 @@ impl Placer {
     /// Moves each group's members that lie outside its region into it, as
     /// `Opendp::prePlaceGroups`.
     fn pre_place_groups(&mut self) {
-        for g in 0..self.groups.len() {
+        for g in self.groups.ids() {
             for k in 0..self.groups[g].cells.len() {
                 let n = self.groups[g].cells[k];
                 if self.nodes[n].fixed || self.nodes[n].placed {
@@ -303,7 +304,7 @@ impl Placer {
     /// Moves the cells outside every group that sit over a region's left
     /// edge out of it, as `Opendp::prePlace`.
     fn pre_place(&mut self) {
-        for n in 0..self.nodes.len() {
+        for n in self.nodes.ids() {
             let node = &self.nodes[n];
             if node.group.is_some() || node.placed {
                 continue;
@@ -328,7 +329,7 @@ impl Placer {
 
     /// The grid point of a legal position near `at`, as `Opendp::legalGridPt`
     /// with a point.
-    fn legal_grid_pt_at(&self, n: usize, at: (i64, i64)) -> GridPt {
+    fn legal_grid_pt_at(&self, n: NodeId, at: (i64, i64)) -> GridPt {
         let (x, y) = self.legal_pt(&self.nodes[n], at);
         (self.grid_x(x), self.snap_down_y(y))
     }
@@ -336,8 +337,8 @@ impl Placer {
     /// Places each group's remaining members, packing them against the
     /// region's corners when one does not fit, as `Opendp::placeGroups2`.
     fn place_group_cells(&mut self) -> Result<(), DetailedPlacementError> {
-        for g in 0..self.groups.len() {
-            let mut order: Vec<usize> = self.groups[g]
+        for g in self.groups.ids() {
+            let mut order: Vec<NodeId> = self.groups[g]
                 .cells
                 .iter()
                 .copied()
@@ -372,7 +373,7 @@ impl Placer {
 
     /// Packs a group's cells toward the corners of its region's bounding
     /// box, nearest first, as `Opendp::brickPlace1`.
-    fn brick_place_outer(&mut self, g: usize) -> Result<(), DetailedPlacementError> {
+    fn brick_place_outer(&mut self, g: GroupId) -> Result<(), DetailedPlacementError> {
         let boundary = self.groups[g].bbox;
         let mut order = self.groups[g].cells.clone();
         sort(&mut order, &|&a, &b| {
@@ -392,7 +393,7 @@ impl Placer {
 
     /// Packs a group's cells toward the corners of their own rectangles,
     /// nearest first, as `Opendp::brickPlace2`.
-    fn brick_place_inner(&mut self, g: usize) -> Result<(), DetailedPlacementError> {
+    fn brick_place_inner(&mut self, g: GroupId) -> Result<(), DetailedPlacementError> {
         let rects = self.groups[g].rects.clone();
         let rect_of = |node: &Node| rects[node.region.unwrap_or(0)];
         let mut order = self.groups[g].cells.clone();
@@ -417,7 +418,7 @@ impl Placer {
 
     /// Moves the most displaced twentieth of a group's cells nearer to where
     /// they started, as `Opendp::groupRefine`; returns how many moved.
-    fn group_refine(&mut self, g: usize) -> usize {
+    fn group_refine(&mut self, g: GroupId) -> usize {
         let mut by_displacement = self.groups[g].cells.clone();
         sort(&mut by_displacement, &|&a, &b| {
             displacement(&self.nodes[a]) > displacement(&self.nodes[b])
@@ -437,7 +438,7 @@ impl Placer {
 
     /// Moves a cell to the free spot nearest its legal position when that
     /// brings it nearer to where it started, as `Opendp::refineMove`.
-    fn refine_move(&mut self, n: usize) -> bool {
+    fn refine_move(&mut self, n: NodeId) -> bool {
         let grid_pt = self.legal_grid_pt(n);
         let Some((x, y)) = self.diamond_search(n, grid_pt) else {
             return false;
@@ -456,7 +457,7 @@ impl Placer {
 
     /// How much nearer to where it started a cell would be at `(x, y)`, as
     /// `Opendp::distChange`.
-    fn dist_change(&self, n: usize, x: i64, y: i64) -> i64 {
+    fn dist_change(&self, n: NodeId, x: i64, y: i64) -> i64 {
         let node = &self.nodes[n];
         let now = (node.left - node.init.0).abs() + (node.bottom - node.init.1).abs();
         let then = (node.init.0 - x).abs() + (node.init.1 - y).abs();
@@ -465,7 +466,7 @@ impl Placer {
 
     /// Swaps random pairs of a group's cells when that brings them nearer to
     /// where they started, as `Opendp::anneal`; returns how many swapped.
-    fn anneal(&mut self, g: usize) -> usize {
+    fn anneal(&mut self, g: GroupId) -> usize {
         let mut generator = Mt19937::new(RANDOM_SEED);
         let cells = self.groups[g].cells.clone();
         let Ok(high) = i32::try_from(cells.len()) else {
@@ -487,7 +488,7 @@ impl Placer {
 
     /// Swaps two cells of one size when that brings them nearer to where
     /// they started and breaks no placement rule, as `Opendp::swapCells`.
-    fn swap_cells(&mut self, a: usize, b: usize) -> bool {
+    fn swap_cells(&mut self, a: NodeId, b: NodeId) -> bool {
         let (na, nb) = (&self.nodes[a], &self.nodes[b]);
         if a == b
             || na.hold
@@ -524,7 +525,7 @@ impl Placer {
 
     /// The placement rules checked where a cell stands, as
     /// `PlacementDRC::checkDRC`.
-    fn check_drc_here(&self, n: usize) -> bool {
+    fn check_drc_here(&self, n: NodeId) -> bool {
         let node = &self.nodes[n];
         let (x, y) = (self.grid_x(node.left), self.round_y(node.bottom));
         self.check_edge_spacing(node, x, y, node.orient)
@@ -535,23 +536,8 @@ impl Placer {
     /// Puts a moved cell back, as the journal undoes a `MoveCellAction`:
     /// its pixels cleared where it stands, its place restored and painted
     /// in that row's orientation when it was placed.
-    fn undo_move(&mut self, n: usize, (left, bottom, was_placed): (i64, i64, bool)) {
-        let node = &self.nodes[n];
-        let rect = Rect::new(
-            Point::new(Dbu(node.left), Dbu(node.bottom)),
-            Point::new(Dbu(node.left + node.width), Dbu(node.bottom + node.height)),
-        );
-        let (x0, y0, x1, y1) = self.covering(&rect);
-        let id = node_id(n);
-        for x in x0..x1 {
-            for y in y0..y1 {
-                if let Some(p) = self.pixel_mut(x, y)
-                    && p.cell == id
-                {
-                    p.cell = super::NO_CELL;
-                }
-            }
-        }
+    fn undo_move(&mut self, n: NodeId, (left, bottom, was_placed): (i64, i64, bool)) {
+        self.erase_pixels(n);
         self.nodes[n].left = left;
         self.nodes[n].bottom = bottom;
         if !was_placed {
@@ -559,15 +545,7 @@ impl Placer {
             return;
         }
         let (gx, gy) = (self.grid_x(left), self.round_y(bottom));
-        let x_end = gx + self.grid_width(&self.nodes[n]);
-        let y_end = self.end_y(self.row_y(gy) + self.nodes[n].height);
-        for x in gx..x_end {
-            for y in gy..y_end {
-                if let Some(p) = self.pixel_mut(x, y) {
-                    p.cell = id;
-                }
-            }
-        }
+        self.paint_pixels(n, gx, gy);
         if let Some(orient) = self.site_orientation(gx, gy, self.nodes[n].site) {
             self.nodes[n].orient = orient;
         }

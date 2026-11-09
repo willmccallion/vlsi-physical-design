@@ -2,6 +2,7 @@
 
 use super::arch::merge_intervals;
 use super::{Blockage, ImprovementError, Improver, Result, Segment};
+use crate::legalize::opendp::{GroupId, NodeId};
 use pare_common::geom::orient::Orientation;
 
 impl Improver {
@@ -117,7 +118,7 @@ impl Improver {
                 }
             }
         }
-        for region in 0..self.grid.groups.len() {
+        for region in self.grid.groups.ids() {
             let intervals = self.region_intervals(region);
             for (r, row_intervals) in intervals.iter().enumerate() {
                 for &(il, ir) in row_intervals {
@@ -139,7 +140,7 @@ impl Improver {
         Ok(())
     }
 
-    fn add_segment(&mut self, row: usize, region: Option<usize>, min_x: i64, max_x: i64) {
+    fn add_segment(&mut self, row: usize, region: Option<GroupId>, min_x: i64, max_x: i64) {
         self.segs_in_row[row].push(self.segments.len());
         self.segments.push(Segment {
             row,
@@ -153,7 +154,7 @@ impl Improver {
     /// Gives the part of each segment of row `r` within `[il, ir)` to the
     /// region, splitting segments as needed; the pieces it adds are visited
     /// too, as in `DetailedMgr::findSegments`.
-    fn split_segments(&mut self, r: usize, region: usize, il: i64, ir: i64) -> Result<()> {
+    fn split_segments(&mut self, r: usize, region: GroupId, il: i64, ir: i64) -> Result<()> {
         let mut s = 0;
         while s < self.segs_in_row[r].len() {
             let id = self.segs_in_row[r][s];
@@ -190,7 +191,7 @@ impl Improver {
 
     /// The site-aligned spans of each row a region wholly covers in height,
     /// as `DetailedMgr::findRegionIntervals`.
-    fn region_intervals(&self, region: usize) -> Vec<Vec<(i64, i64)>> {
+    fn region_intervals(&self, region: GroupId) -> Vec<Vec<(i64, i64)>> {
         let rows = &self.arch.rows;
         let height = rows[0].height;
         let mut intervals = vec![Vec::new(); rows.len()];
@@ -227,7 +228,7 @@ impl Improver {
     pub(super) fn master_symmetry_allows(&self, n: usize, row: usize) -> bool {
         match self.arch.rows[row].orient {
             Orientation::N | Orientation::FN => true,
-            Orientation::FS | Orientation::S => self.grid.nodes[n].symmetry.x,
+            Orientation::FS | Orientation::S => self.grid.nodes[NodeId::new(n)].symmetry.x,
             _ => false,
         }
     }
