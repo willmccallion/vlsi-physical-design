@@ -505,11 +505,7 @@ fn ranked_vias(
             Overhang::BothLayers => top_overhang.max(across_overhang(&bottom, &layers[v.bottom()])),
             Overhang::UpperOnly => top_overhang,
         };
-        let key = (
-            reach,
-            !v.is_default(),
-            DbuArea((bottom.area() + top.area()).get()),
-        );
+        let key = (reach, !v.is_default(), bottom.area() + top.area());
         let cut_size = largest_cut(v.shapes.iter(), cut);
         let spacing = lib.cut_layers[cut].spacing.unwrap_or_default();
         let cuts = v
