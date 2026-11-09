@@ -90,7 +90,7 @@ pub(crate) fn global_route_with_repair(
     let mut session = GlobalSession::new(db, &config.routing, &mut |p| tables.show(p))?;
     report.phase("global routing", phase_start);
     let route_rc = route_rc(config, db)?;
-    let sites = SiteGrid::new(db).context("the design has no core rows to legalize on")?;
+    let sites = SiteGrid::new(db).context("cannot lay out the core's site grid to legalize on")?;
     let legalize = |db: &mut NetlistDB, cell: CellId| sites.legalize(db, cell);
     let mut summary = GlobalRouteRepairSummary::default();
     for step in [RepairStep::Design, RepairStep::Timing] {

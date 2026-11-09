@@ -53,7 +53,7 @@ impl Network {
         for (n, node) in grid.nodes.iter_enumerated() {
             node_of_cell[node.cell] = Some(n);
         }
-        let core = grid.core;
+        let core = grid.rows.core();
         let mut fixed = Vec::new();
         let mut node_of_io = IdVec::filled(None, db.io_pins.len());
         for (i, io) in db.io_pins.iter_enumerated() {

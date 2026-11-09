@@ -76,10 +76,10 @@ impl Placer {
             let region = &db.regions[r];
             let mut rects = Vec::new();
             for rect in &region.rects {
-                let Some(inside) = rect.intersection(&self.core) else {
+                let Some(inside) = rect.intersection(&self.rows.core()) else {
                     continue;
                 };
-                let rel = self.relative(inside);
+                let rel = self.rows.relative(inside);
                 self.region_boxes.push(Rect::new(
                     rel.min,
                     Point::new(rel.max.x - Dbu(1), rel.max.y - Dbu(1)),
@@ -127,15 +127,21 @@ impl Placer {
     pub(super) fn mark_region_edges(&mut self) {
         let rects: Vec<Rect<Dbu>> = self.groups.iter().flat_map(|g| g.rects.clone()).collect();
         for rect in rects {
-            let x0 = self.grid_x(rect.min.x).max(GridX::ZERO);
-            let x1 = self.grid_end_x(rect.max.x).min(self.row_site_count);
-            let y0 = self.snap_down_y(rect.min.y).max(GridY::ZERO);
-            let y1 = self.end_y(rect.max.y).min(self.row_count);
+            let x0 = self.rows.grid_x(rect.min.x).max(GridX::ZERO);
+            let x1 = self
+                .rows
+                .grid_end_x(rect.max.x)
+                .min(self.rows.row_site_count());
+            let y0 = self.rows.snap_down_y(rect.min.y).max(GridY::ZERO);
+            let y1 = self.rows.end_y(rect.max.y).min(self.rows.row_count());
             for x in x0.until(x1) {
                 for y in y0.until(y1) {
                     let sub = Rect::new(
-                        Point::new(x.to_dbu(self.site_width), self.row_y(y)),
-                        Point::new((x + 1).to_dbu(self.site_width), self.row_y(y + 1)),
+                        Point::new(x.to_dbu(self.rows.site_width()), self.rows.row_y(y)),
+                        Point::new(
+                            (x + 1).to_dbu(self.rows.site_width()),
+                            self.rows.row_y(y + 1),
+                        ),
                     );
                     let inside = rect.min.x <= sub.min.x
                         && sub.max.x <= rect.max.x
@@ -166,7 +172,7 @@ impl Placer {
         for p in &mut self.pixels {
             p.util = 0.0;
         }
-        let site = self.site_width.get();
+        let site = self.rows.site_width().get();
         for g in self.groups.ids() {
             if self.groups[g].members.is_empty() {
                 if g != GroupId(0) {
@@ -246,13 +252,13 @@ impl Placer {
         for g in self.groups.ids() {
             let mut site_area = DbuArea::ZERO;
             if !self.groups[g].members.is_empty() {
-                for x in GridX::ZERO.until(self.row_site_count) {
-                    for y in GridY::ZERO.until(self.row_count) {
+                for x in GridX::ZERO.until(self.rows.row_site_count()) {
+                    for y in GridY::ZERO.until(self.rows.row_count()) {
                         if self
                             .pixel(x, y)
                             .is_some_and(|p| p.valid && p.group() == Some(g))
                         {
-                            site_area += self.pixel_height(y) * self.site_width;
+                            site_area += self.pixel_height(y) * self.rows.site_width();
                         }
                     }
                 }
@@ -272,18 +278,12 @@ impl Placer {
     /// The height `OpenDP` gives grid row `y`: from the row edge below it,
     /// as `Grid::rowHeight`.
     fn pixel_height(&self, y: GridY) -> Dbu {
-        let edge = |i: GridY| {
-            usize::try_from(i.get())
-                .ok()
-                .and_then(|i| self.row_edges.get(i))
-                .copied()
+        let below = if y > GridY::ZERO {
+            self.rows.row_y(y - 1)
+        } else {
+            Dbu::ZERO
         };
-        edge(y).unwrap_or(Dbu::ZERO)
-            - if y > GridY::ZERO {
-                edge(y - 1).unwrap_or(Dbu::ZERO)
-            } else {
-                Dbu::ZERO
-            }
+        self.rows.row_y(y) - below
     }
 
     /// Moves each group's members that lie outside its region into it, as
@@ -338,8 +338,8 @@ impl Placer {
     /// The grid point of a legal position near `at`, as `Opendp::legalGridPt`
     /// with a point.
     fn legal_grid_pt_at(&self, n: NodeId, at: Point<Dbu>) -> GridPt {
-        let legal = self.legal_pt(&self.nodes[n], at);
-        GridPt::new(self.grid_x(legal.x), self.snap_down_y(legal.y))
+        let legal = self.rows.legal_pt(at, self.nodes[n].size());
+        GridPt::new(self.rows.grid_x(legal.x), self.rows.snap_down_y(legal.y))
     }
 
     /// Places each group's remaining members, packing them against the
@@ -451,7 +451,7 @@ impl Placer {
         {
             return false;
         }
-        let at = Point::new(to.x.to_dbu(self.site_width), self.row_y(to.y));
+        let at = Point::new(to.x.to_dbu(self.rows.site_width()), self.rows.row_y(to.y));
         if self.dist_change(n, at) < Dbu::ZERO {
             self.unplace_cell(n);
             self.place_cell(n, to);
@@ -514,8 +514,8 @@ impl Placer {
             return false;
         }
         let (a_was, b_was) = ((a_at, na.placed), (b_at, nb.placed));
-        let a_to = GridPt::new(self.grid_x(nb.left), self.snap_down_y(nb.bottom));
-        let b_to = GridPt::new(self.grid_x(na.left), self.snap_down_y(na.bottom));
+        let a_to = GridPt::new(self.rows.grid_x(nb.left), self.rows.snap_down_y(nb.bottom));
+        let b_to = GridPt::new(self.rows.grid_x(na.left), self.rows.snap_down_y(na.bottom));
         self.unplace_cell(a);
         self.unplace_cell(b);
         self.place_cell(a, a_to);
@@ -532,7 +532,7 @@ impl Placer {
     /// `PlacementDRC::checkDRC`.
     fn check_drc_here(&self, n: NodeId) -> bool {
         let node = &self.nodes[n];
-        let (x, y) = (self.grid_x(node.left), self.round_y(node.bottom));
+        let (x, y) = (self.rows.grid_x(node.left), self.rows.round_y(node.bottom));
         self.check_edge_spacing(node, x, y, node.orient)
             && self.check_blocked_layers(node, x, y)
             && self.check_one_site_gap(node, x, y)
@@ -549,7 +549,7 @@ impl Placer {
             self.nodes[n].placed = false;
             return;
         }
-        let (gx, gy) = (self.grid_x(at.x), self.round_y(at.y));
+        let (gx, gy) = (self.rows.grid_x(at.x), self.rows.round_y(at.y));
         self.paint_pixels(n, gx, gy);
         if let Some(orient) = self.site_orientation(gx, gy, self.nodes[n].site) {
             self.nodes[n].orient = orient;
@@ -560,7 +560,7 @@ impl Placer {
     /// a row first, then larger, then nearer the core's center, then by
     /// name.
     pub(super) fn place_order_less(&self) -> impl Fn(&Node, &Node) -> bool + use<> {
-        let center = core_center(&self.core);
+        let center = core_center(&self.rows.core());
         move |a: &Node, b: &Node| {
             let dist = |n: &Node| (n.left - center.x).abs() + (n.bottom - center.y).abs();
             if a.multi_row != b.multi_row {
