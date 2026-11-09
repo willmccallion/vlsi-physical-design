@@ -694,6 +694,7 @@ impl Interpreter {
                 || Self::bool_attr(group, "is_isolation_cell")
                 || Self::bool_attr(group, "is_level_shifter"),
             footprint: group.attr_text("cell_footprint").map(str::to_string),
+            user_function_class: group.attr_text("user_function_class").map(str::to_string),
             ports: IdVec::new(),
             pg_pins: group
                 .groups_named("pg_pin")

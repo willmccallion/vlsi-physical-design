@@ -860,6 +860,9 @@ pub struct LibCell {
     pub is_power_cell: bool,
     /// Its footprint class, when given.
     pub footprint: Option<String>,
+    /// The class sizing keeps it within (`user_function_class`), when
+    /// given.
+    pub user_function_class: Option<String>,
     /// Signal pins.
     pub ports: IdVec<LibPortId, LibPort>,
     /// Power and ground pin names.
@@ -1706,6 +1709,7 @@ mod tests {
             is_power_cell: false,
             library: 0,
             footprint: None,
+            user_function_class: None,
             ports: ports.into(),
             pg_pins: vec!["VDD".into(), "VSS".into()],
             arc_sets: Vec::new(),
