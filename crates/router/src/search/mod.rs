@@ -872,7 +872,7 @@ impl Search<'_> {
                 .map(|&l| l.abs_diff(n.layer.index()))
                 .min()
                 .unwrap_or(0) as f64;
-            let plane = distance_to(&goal, self.point(n)) as f64;
+            let plane = distance_to(&goal, self.point(n)).to_f64();
             effort.weight * self.costs.via.mul_add(layers, plane)
         };
 
@@ -1033,10 +1033,10 @@ impl WindowCache {
 }
 
 /// Manhattan distance from a point to a rectangle.
-fn distance_to(r: &Rect<Dbu>, p: Point<Dbu>) -> i64 {
+fn distance_to(r: &Rect<Dbu>, p: Point<Dbu>) -> Dbu {
     let dx = (r.min.x - p.x).max(p.x - r.max.x).max(Dbu::ZERO);
     let dy = (r.min.y - p.y).max(p.y - r.max.y).max(Dbu::ZERO);
-    (dx + dy).get()
+    dx + dy
 }
 
 #[cfg(test)]
