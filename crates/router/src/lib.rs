@@ -63,14 +63,14 @@ pub struct RoutingSummary {
     pub rounds: usize,
     /// Nets still in conflict when negotiation stopped.
     pub conflicted: Vec<NetId>,
-    /// Whether the run reached its session's save point and handed over its
+    /// Whether the run reached its save point and handed over its
     /// state; false without a save point.
     pub state_saved: bool,
 }
 
 /// Where a routing run resumes from and when it saves its state.
 #[derive(Debug, Default)]
-pub struct Session<'a> {
+pub struct RunOptions<'a> {
     /// A state saved by an earlier run on the same design, to go on from.
     pub resume: Option<&'a RouteState>,
     /// When to save the run's state, and what to hand it to.
@@ -118,7 +118,7 @@ pub enum SavePoint {
     Round(usize),
 }
 
-impl Session<'_> {
+impl RunOptions<'_> {
     /// Hands the state `build` makes to the save, if it is due after
     /// `point`, returning whether it was.
     fn save_at(
@@ -136,25 +136,25 @@ impl Session<'_> {
 
 /// Routes every signal net of `db` and stores the wiring in the design.
 pub fn route(db: &mut NetlistDB, config: &RoutingConfig) -> Result<RoutingSummary, RouteError> {
-    route_with(db, config, Session::default())
+    route_with(db, config, RunOptions::default())
 }
 
 /// Routes every signal net of `db` as [`route`] does, resuming from and
-/// saving state as `session` says.
+/// saving state as `run` says.
 ///
 /// A run resumed from a state saved after a detailed round goes on from
 /// the round after it exactly as the run that saved it would have.
 pub fn route_with(
     db: &mut NetlistDB,
     config: &RoutingConfig,
-    mut session: Session<'_>,
+    mut run: RunOptions<'_>,
 ) -> Result<RoutingSummary, RouteError> {
     check_routable(db)?;
     let tech = RouteTech::new(db, config)?;
     let gcell = gcell_size(&tech, config);
     let (routes, summary, gcells) = {
-        let routed = global_stage(db, &tech, config, gcell, session.resume)?;
-        route_detailed(db, &tech, config, gcell, routed, &mut session)?
+        let routed = global_stage(db, &tech, config, gcell, run.resume)?;
+        route_detailed(db, &tech, config, gcell, routed, &mut run)?
     };
     write_wiring(db, routes, gcells);
     Ok(summary)
@@ -174,14 +174,14 @@ pub fn route_on(
     db: &mut NetlistDB,
     config: &RoutingConfig,
     global: GlobalSession,
-    mut session: Session<'_>,
+    mut run: RunOptions<'_>,
 ) -> Result<RoutingSummary, RouteError> {
     check_routable(db)?;
     let (tech, grid, routes, routed) = global.into_parts(db);
     let gcell = gcell_size(&tech, config);
     let (routes, summary, gcells) = {
         let settled = settled_stage(db, &tech, config, gcell, grid, routes, routed);
-        route_detailed(db, &tech, config, gcell, settled, &mut session)?
+        route_detailed(db, &tech, config, gcell, settled, &mut run)?
     };
     write_wiring(db, routes, gcells);
     Ok(summary)
@@ -211,14 +211,14 @@ type DetailedResult = (
 );
 
 /// Track assignment and detailed routing over the global routes of
-/// `routed`, saving state as `session` says.
+/// `routed`, saving state as `run` says.
 fn route_detailed(
     db: &NetlistDB,
     tech: &RouteTech,
     config: &RoutingConfig,
     gcell: Dbu,
     routed: GlobalStage<'_>,
-    session: &mut Session<'_>,
+    run: &mut RunOptions<'_>,
 ) -> Result<DetailedResult, RouteError> {
     let via = 4.0 * tech.layer(tech.min_layer).pitch().to_f64();
     let GlobalStage {
@@ -232,10 +232,10 @@ fn route_detailed(
         db,
         nets: &nets,
         grid: grid_shape(tech, &grid),
-        global: session.save.is_some().then(|| named_global(db, &global)),
+        global: run.save.is_some().then(|| named_global(db, &global)),
     };
-    let mut state_saved = session.save_at(SavePoint::Global, || saver.global_state())?;
-    dr.set_trace(trace_of(db, &session.trace)?);
+    let mut state_saved = run.save_at(SavePoint::Global, || saver.global_state())?;
+    dr.set_trace(trace_of(db, &run.trace)?);
     let start = Instant::now();
     let wires = assign_tracks(tech, &dr.occupancy, &grid, &global, &dr.pin_points());
     dr.set_guides(global, &grid);
@@ -247,13 +247,13 @@ fn route_detailed(
         inaccessible: dr.inaccessible_nets(),
         ..RoutingSummary::default()
     };
-    let mut negotiation = match session.resume.and_then(|s| s.detailed.as_ref()) {
+    let mut negotiation = match run.resume.and_then(|s| s.detailed.as_ref()) {
         Some(saved) => Negotiation::resumed(&mut dr, db, saved, via)?,
         None => Negotiation::after_first_pass(&mut dr, &nets, via),
     };
     summary.rounds = negotiation.first_round - 1;
     if negotiation.first_round == 1 {
-        state_saved |= session.save_at(SavePoint::Round(0), || {
+        state_saved |= run.save_at(SavePoint::Round(0), || {
             saver.detailed_state(&dr, 0, &negotiation)
         })?;
     }
@@ -265,7 +265,7 @@ fn route_detailed(
         let costs = round_costs(round, via);
         let (flow, repaired) = negotiation.round(&mut dr, round, costs);
         summary.rounds = round;
-        state_saved |= session.save_at(SavePoint::Round(round), || {
+        state_saved |= run.save_at(SavePoint::Round(round), || {
             saver.detailed_state(&dr, round, &negotiation)
         })?;
         ui::dr_iter(

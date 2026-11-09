@@ -325,7 +325,7 @@ fn run_router(
         ui::wrote(path);
         Ok(())
     };
-    let session = pare_router::Session {
+    let run = pare_router::RunOptions {
         resume: resume.as_ref(),
         save: files.save.as_ref().map(|&(_, after)| pare_router::Save {
             after,
@@ -334,8 +334,8 @@ fn run_router(
         trace: files.trace.clone(),
     };
     let summary = match global {
-        Some(global) => pare_router::route_on(db, &config.routing, global, session)?,
-        None => pare_router::route_with(db, &config.routing, session)?,
+        Some(global) => pare_router::route_on(db, &config.routing, global, run)?,
+        None => pare_router::route_with(db, &config.routing, run)?,
     };
     if let Some((path, after)) = &files.save
         && !summary.state_saved
