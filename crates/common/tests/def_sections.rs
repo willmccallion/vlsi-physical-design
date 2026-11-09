@@ -488,3 +488,20 @@ fn constraint_sections_are_written_and_read_back_unchanged() {
 
     assert_eq!(reread, db);
 }
+
+#[test]
+fn a_quoted_string_left_open_is_an_error_at_its_line() {
+    let edits = [("END DESIGN", "\"dangling\nEND DESIGN")];
+    let text = edited("tiny.def", &edits);
+    let line = text[..text.rfind("\"dangling").unwrap()]
+        .matches('\n')
+        .count()
+        + 1;
+
+    let error = design_with(&edits).unwrap_err();
+
+    assert!(
+        error.ends_with(&format!(":{line}: unterminated string")),
+        "{error}"
+    );
+}

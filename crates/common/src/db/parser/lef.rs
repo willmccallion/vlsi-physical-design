@@ -221,7 +221,7 @@ impl<'a> LefParser<'a, '_> {
                 _ => self.skip_unknown(t, "library")?,
             }
         }
-        Ok(())
+        self.lx.finish()
     }
 
     /// Warns once per file about a statement kind that is not read.

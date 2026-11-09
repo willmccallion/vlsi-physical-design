@@ -82,6 +82,7 @@ pub fn read_units(path: &Path) -> Result<DbuPerMicron, ParseError> {
             _ => {}
         }
     }
+    lx.finish()?;
     Err(lx.error(
         1,
         "no UNITS DISTANCE MICRONS statement before the design body",
@@ -187,7 +188,7 @@ impl<'a> DefParser<'a> {
                 }
             }
         }
-        Ok(())
+        self.lx.finish()
     }
 
     /// Warns once per file about a statement or option that is not read.
