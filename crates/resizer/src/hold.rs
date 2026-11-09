@@ -416,6 +416,9 @@ impl HoldRepair<'_> {
     /// Whether a buffer's output keeps [`SLACK_LIMIT_RATIO`] of its load,
     /// slew and load slew limits in hand, so it can stay at the smallest
     /// size, as `checkMaxSlewCap`.
+    // NOTE: checkMaxSlewCap compares the least load slack with the least
+    // limit and passes loads with only the library default; PARE holds each
+    // load to its own limit.
     fn load_in_hand(resizer: &Resizer<'_, Sta>, output: PinId) -> bool {
         if let Some(limit) = resizer.cap_limit(output)
             && limit > Farads::ZERO
@@ -429,14 +432,10 @@ impl HoldRepair<'_> {
         {
             return false;
         }
-        let netlist = resizer.netlist();
-        let net = netlist.db.pins[output].net;
-        netlist.loads(net).filter(|&l| l != output).all(|load| {
-            netlist.lib_cell_port(load).is_none_or(|(cell, port)| {
-                let limit = resizer.max_input_slew(cell, port);
-                !limit.is_finite() || in_hand(resizer.graph().slew(load).max(), limit)
-            })
-        })
+        resizer
+            .load_slews(output)
+            .into_iter()
+            .all(|(slew, limit)| in_hand(slew, limit))
     }
 }
 
@@ -457,6 +456,7 @@ mod tests {
     use super::*;
     use crate::testing::{
         DefSections, cells, clock_cells_source, def_text, design, pin, with_timed_session,
+        with_wired_session,
     };
 
     const CLOCK: &str = "create_clock -name clk -period 1.0 [get_ports clk]\n";
@@ -516,6 +516,51 @@ mod tests {
         assert!(before > Seconds::ZERO);
         assert_eq!(summary.inserted, 0);
         assert_eq!(after, before);
+    }
+
+    /// Two flops 300 microns apart on one clock, the first driving the
+    /// second.
+    fn apart() -> pare_common::db::design::NetlistDB {
+        design(&def_text(
+            "apart",
+            &DefSections {
+                components: "- f1 DFF_X1 + PLACED ( 2000 2800 ) N ;\n\
+                             - f2 DFF_X1 + PLACED ( 602000 2800 ) N ;\n",
+                nets: "- clk ( PIN clk ) ( f1 CK ) ( f2 CK ) ;\n- q ( f1 Q ) ( f2 D ) ;\n",
+                inputs: &["clk"],
+                outputs: &[],
+            },
+        ))
+    }
+
+    /// The slews at the first flop's output and the second's input of
+    /// [`apart`] on wires, and whether hold repair would leave the first at
+    /// its size under `constraints`.
+    fn hand_under(constraints: &str) -> (Seconds, Seconds, bool) {
+        let mut db = apart();
+        let lib = cells(&clock_cells_source());
+        let mut found = (Seconds::ZERO, Seconds::ZERO, false);
+        with_wired_session(&mut db, &lib, constraints, |resizer| {
+            let (driver, load) = (pin(resizer.db, "f1/Q"), pin(resizer.db, "f2/D"));
+            found = (
+                resizer.graph().slew(driver).max(),
+                resizer.graph().slew(load).max(),
+                HoldRepair::load_in_hand(resizer, driver),
+            );
+        });
+        found
+    }
+
+    #[test]
+    fn a_load_near_a_design_slew_limit_is_not_in_hand() {
+        let (driver_slew, load_slew, in_hand) = hand_under(CLOCK);
+        assert!(in_hand && driver_slew < load_slew);
+        let limit = (driver_slew + load_slew).get() / 2.0 / (1.0 - SLACK_LIMIT_RATIO) * 1e9;
+        let tight = format!("{CLOCK}set_max_transition {limit} [current_design]\n");
+
+        let (_, _, in_hand) = hand_under(&tight);
+
+        assert!(!in_hand);
     }
 
     #[test]

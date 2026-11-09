@@ -348,27 +348,16 @@ impl<'r, 'a, T: Timing> Repairer<'r, 'a, T> {
         (slew, limit)
     }
 
-    /// Whether any load of the driver's net has a slew over its limit, as
-    /// `Resizer::checkLoadSlews`.
+    /// Whether any load of the driver's net has a slew over its margined
+    /// limit.
+    // NOTE: Resizer::checkLoadSlews never flags a load with only the library
+    // default limit, leaving it to the unmargined forward pass; PARE margins
+    // every load's own limit alike.
     fn loads_violate_slew(&self, driver: PinId) -> bool {
-        let netlist = self.resizer.netlist();
-        let net = self.resizer.db.pins[driver].net;
-        netlist.loads(net).filter(|&p| p != driver).any(|load| {
-            let Some((cell, port)) = netlist.lib_cell_port(load) else {
-                return false;
-            };
-            let slew = self.resizer.graph.slew(load).max();
-            match port.max_transition.filter(|&l| l != Seconds::ZERO) {
-                Some(limit) => slew > self.resizer.margined_slew(limit),
-                None => self
-                    .resizer
-                    .link
-                    .liberty
-                    .cell_defaults(cell)
-                    .max_transition
-                    .is_some_and(|limit| slew > limit),
-            }
-        })
+        self.resizer
+            .load_slews(driver)
+            .into_iter()
+            .any(|(slew, limit)| slew > self.resizer.margined_slew(limit))
     }
 
     /// Picks the smallest size of the driver's cell that meets its slew
@@ -929,6 +918,61 @@ mod tests {
         let (cell, port) = netlist.lib_cell_port(pin).unwrap();
         let slew = resizer.graph.slew(pin);
         slew[Edge::Rise].max(slew[Edge::Fall]) - resizer.max_input_slew(cell, port)
+    }
+
+    /// A flop driving a flop 300 microns away, whose input slew there
+    /// is under the library's default limit of 0.2 nanoseconds.
+    fn apart() -> pare_common::db::design::NetlistDB {
+        design(&def_text(
+            "apart",
+            &DefSections {
+                components: "- f1 DFF_X1 + PLACED ( 2000 2800 ) N ;\n\
+                             - f2 DFF_X1 + PLACED ( 602000 2800 ) N ;\n",
+                nets: "- clk ( PIN clk ) ( f1 CK ) ( f2 CK ) ;\n- q ( f1 Q ) ( f2 D ) ;\n",
+                inputs: &["clk"],
+                outputs: &[],
+            },
+        ))
+    }
+
+    /// Whether design repair under `constraints`, keeping `slew_margin`
+    /// percent of each limit in hand, finds a load of [`apart`]'s net over
+    /// its slew limit, and the load's slew.
+    fn load_slew_violated(constraints: &str, slew_margin: f64) -> (bool, Seconds) {
+        let mut db = apart();
+        let lib = cells(&clock_cells_source());
+        let mut found = (false, Seconds::ZERO);
+        with_wired_session(&mut db, &lib, constraints, |resizer| {
+            let (driver, load) = (pin(resizer.db, "f1/Q"), pin(resizer.db, "f2/D"));
+            resizer.options.slew_margin = slew_margin;
+            let slew = resizer.graph.slew(load).max();
+            found = (Repairer::new(resizer).loads_violate_slew(driver), slew);
+        });
+        found
+    }
+
+    const SLOW_CLOCK: &str = "create_clock -name clk -period 10.0 [get_ports clk]\n";
+
+    #[test]
+    fn a_load_within_the_library_default_breaks_a_tighter_design_limit() {
+        let (unconstrained, slew) = load_slew_violated(SLOW_CLOCK, 0.0);
+        assert!(!unconstrained && slew < Seconds::new(0.2e-9), "{slew:?}");
+        let limit = slew.get() * 0.5e9;
+        let constraints = format!("{SLOW_CLOCK}set_max_transition {limit} [current_design]\n");
+
+        let (constrained, _) = load_slew_violated(&constraints, 0.0);
+
+        assert!(constrained);
+    }
+
+    #[test]
+    fn the_slew_margin_applies_to_a_load_with_the_library_default_limit() {
+        let (_, slew) = load_slew_violated(SLOW_CLOCK, 0.0);
+        let margin = (1.0 - slew.get() / 0.2e-9).mul_add(100.0, 1.0);
+
+        let (violated, _) = load_slew_violated(SLOW_CLOCK, margin);
+
+        assert!(violated, "{slew:?} at {margin}%");
     }
 
     #[test]
