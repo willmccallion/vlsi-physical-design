@@ -4,7 +4,7 @@
 use crate::library::{BufferSet, Link, is_logic_std_cell};
 use crate::netlist::{ClockNetwork, Constants, Namer, Netlist};
 use pare_common::db::design::{EditError, NetlistDB, PinOwner, PlacementStatus};
-use pare_common::db::indices::{CellId, IdVec, IoPinId, MacroPinId, NetId, PinId};
+use pare_common::db::indices::{CellId, IdVec, IoPinId, MacroPinId, NetId, PinId, TableIndex};
 use pare_common::db::liberty::{BufferCell, LibPortId};
 use pare_common::db::library::{DuplicateName, PinDirection};
 use pare_common::geom::dbu::Dbu;
@@ -35,48 +35,63 @@ pub enum BufferError {
 /// buffer and does not protect, it is not fixed, and its nets merge into
 /// one. Returns how many went.
 pub fn remove_buffers(db: &mut NetlistDB, link: &Link<'_>) -> Result<usize, BufferError> {
-    let mut removed_cells = IdVec::filled(false, db.cells.len());
-    let mut removed_nets = IdVec::filled(false, db.nets.len());
-    let mut renames: Vec<(String, String)> = Vec::new();
-    let mut count = 0;
+    let mut removal = BufferRemoval {
+        cells: IdVec::filled(false, db.cells.len()),
+        nets: IdVec::filled(false, db.nets.len()),
+        renames: Vec::new(),
+    };
     for instance in db.cells.ids() {
-        let Some((lib_id, lib)) = link.cell(db, instance) else {
-            continue;
-        };
-        if !is_logic_std_cell(db, instance) || !lib.is_buffer() || lib.dont_touch {
-            continue;
-        }
-        if db.cells[instance].status == PlacementStatus::Fixed {
-            continue;
-        }
-        let Some(ports) = link.liberty.buffer_cell(lib_id) else {
+        let Some(buffer) = removable_buffer(db, link, instance) else {
             continue;
         };
         let pin_for = |port: LibPortId| -> Option<PinId> {
-            let macro_pin = link.macro_pin_of_port(ports.id, port)?;
-            db.cells[instance].pins.iter().copied().find(
-                |&p| matches!(db.pins[p].owner, PinOwner::Cell { pin, .. } if pin == macro_pin),
-            )
+            let macro_pin = link.macro_pin_of_port(buffer.id, port)?;
+            db.cell_pin(instance, macro_pin)
         };
-        let Some(in_pin) = pin_for(ports.input) else {
+        let Some(in_pin) = pin_for(buffer.input) else {
             log::warn!(
                 "buffer {} has no input net and stays",
                 db.cells[instance].name
             );
             continue;
         };
-        let Some(out_pin) = pin_for(ports.output) else {
-            removed_cells[instance] = true;
-            count += 1;
-            continue;
-        };
-        let in_net = db.pins[in_pin].net;
-        let out_net = db.pins[out_pin].net;
-        if in_net == out_net {
-            removed_cells[instance] = true;
-            count += 1;
-            continue;
+        if let Some(out_pin) = pin_for(buffer.output) {
+            let (in_net, out_net) = (db.pins[in_pin].net, db.pins[out_pin].net);
+            if in_net != out_net {
+                removal.merge_nets(db, instance, in_net, out_net);
+            }
         }
+        removal.cells[instance] = true;
+    }
+    removal.apply(db)
+}
+
+/// The buffer `instance` is when it may go: a plain standard cell the
+/// library calls a buffer and does not protect, not fixed.
+fn removable_buffer(db: &NetlistDB, link: &Link<'_>, instance: CellId) -> Option<BufferCell> {
+    let (lib_id, lib) = link.cell(db, instance)?;
+    let removable = is_logic_std_cell(db, instance)
+        && lib.is_buffer()
+        && !lib.dont_touch
+        && db.cells[instance].status != PlacementStatus::Fixed;
+    removable
+        .then(|| link.liberty.buffer_cell(lib_id))
+        .flatten()
+}
+
+/// The buffers and nets [`remove_buffers`] takes out, and the nets it
+/// renames.
+struct BufferRemoval {
+    cells: IdVec<CellId, bool>,
+    nets: IdVec<NetId, bool>,
+    /// The surviving net's name and the deeper name it takes afterwards.
+    renames: Vec<(String, String)>,
+}
+
+impl BufferRemoval {
+    /// Merges buffer `instance`'s input and output nets: the one with a port
+    /// survives, else the input, and the other's connections move to it.
+    fn merge_nets(&mut self, db: &mut NetlistDB, instance: CellId, in_net: NetId, out_net: NetId) {
         let has_port = |net: NetId| {
             db.nets[net]
                 .pins
@@ -91,43 +106,47 @@ pub fn remove_buffers(db: &mut NetlistDB, link: &Link<'_>) -> Result<usize, Buff
         let survivor_name = db.nets[survivor].name.clone();
         let removed_name = db.nets[removed].name.clone();
         if hierarchy_depth(&survivor_name) > hierarchy_depth(&removed_name) {
-            renames.push((survivor_name, removed_name));
+            self.renames.push((survivor_name, removed_name));
         }
         let moving: Vec<PinId> = db.nets[removed]
             .pins
             .iter()
             .copied()
             .filter(|&p| match db.pins[p].owner {
-                PinOwner::Cell { cell, .. } => cell != instance && !removed_cells[cell],
+                PinOwner::Cell { cell, .. } => cell != instance && !self.cells[cell],
                 PinOwner::Io(_) => true,
             })
             .collect();
         for pin in moving {
             db.move_pin(pin, survivor);
         }
-        removed_cells[instance] = true;
-        removed_nets[removed] = true;
-        count += 1;
+        self.nets[removed] = true;
     }
-    let cells: Vec<CellId> = removed_cells
-        .iter_enumerated()
-        .filter(|&(_, &removed)| removed)
-        .map(|(id, _)| id)
-        .collect();
-    let nets: Vec<NetId> = removed_nets
-        .iter_enumerated()
-        .filter(|&(_, &removed)| removed)
-        .map(|(id, _)| id)
-        .collect();
-    let _ = db.remove(&cells, &nets)?;
-    for (survivor, name) in renames {
-        if let Some(net) = db.net_id(&survivor)
-            && db.net_id(&name).is_none()
-        {
-            db.rename_net(net, name)?;
+
+    /// Takes the buffers and nets out of `db` and renames the survivors;
+    /// returns how many buffers went.
+    fn apply(self, db: &mut NetlistDB) -> Result<usize, BufferError> {
+        let cells: Vec<CellId> = flagged(&self.cells);
+        let nets: Vec<NetId> = flagged(&self.nets);
+        let _ = db.remove(&cells, &nets)?;
+        for (survivor, name) in self.renames {
+            if let Some(net) = db.net_id(&survivor)
+                && db.net_id(&name).is_none()
+            {
+                db.rename_net(net, name)?;
+            }
         }
+        Ok(cells.len())
     }
-    Ok(count)
+}
+
+/// The indices `flags` marks.
+fn flagged<I: TableIndex>(flags: &IdVec<I, bool>) -> Vec<I> {
+    flags
+        .iter_enumerated()
+        .filter(|&(_, &marked)| marked)
+        .map(|(id, _)| id)
+        .collect()
 }
 
 /// How deep in the design hierarchy a name sits: its path separators.
