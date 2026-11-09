@@ -35,16 +35,16 @@ pub(crate) fn connection_order(pins: &[Rect<Dbu>]) -> (usize, Vec<Join>) {
 }
 
 /// Manhattan distance between the closest points of two rectangles.
-pub fn gap(a: &Rect<Dbu>, b: &Rect<Dbu>) -> i64 {
+pub fn gap(a: &Rect<Dbu>, b: &Rect<Dbu>) -> Dbu {
     let dx = (a.min.x - b.max.x).max(b.min.x - a.max.x).max(Dbu::ZERO);
     let dy = (a.min.y - b.max.y).max(b.min.y - a.max.y).max(Dbu::ZERO);
-    (dx + dy).get()
+    dx + dy
 }
 
 fn prim(pins: &[Rect<Dbu>]) -> (usize, Vec<Join>) {
     let n = pins.len();
     let mut joined = vec![false; n];
-    let mut best: Vec<(i64, usize)> = vec![(i64::MAX, 0); n];
+    let mut best: Vec<(Dbu, usize)> = vec![(Dbu(i64::MAX), 0); n];
     let mut joins = Vec::with_capacity(n.saturating_sub(1));
     let mut current = 0;
     joined[0] = true;
@@ -104,7 +104,7 @@ pub(crate) fn hilbert_order(points: &[Point<Dbu>]) -> Vec<usize> {
     let min_y = points.iter().map(|p| p.y).min().unwrap_or_default();
     let span = span(points);
     let scale = |v: Dbu, lo: Dbu| {
-        let s = (v - lo).get() * HILBERT_SIDE / span;
+        let s = (v - lo).get() * HILBERT_SIDE / span.get();
         debug_assert!((0..=HILBERT_SIDE).contains(&s), "{s} off the Hilbert curve");
         s as u32
     };
@@ -119,12 +119,12 @@ pub(crate) fn hilbert_order(points: &[Point<Dbu>]) -> Vec<usize> {
 }
 
 /// The larger side of the points' bounding box, at least one.
-fn span(points: &[Point<Dbu>]) -> i64 {
+fn span(points: &[Point<Dbu>]) -> Dbu {
     let min_x = points.iter().map(|p| p.x).min().unwrap_or_default();
     let min_y = points.iter().map(|p| p.y).min().unwrap_or_default();
     let max_x = points.iter().map(|p| p.x).max().unwrap_or_default();
     let max_y = points.iter().map(|p| p.y).max().unwrap_or_default();
-    (max_x - min_x).max(max_y - min_y).get().max(1)
+    (max_x - min_x).max(max_y - min_y).max(Dbu(1))
 }
 
 fn curve_order(points: &[Point<Dbu>]) -> (usize, Vec<Join>) {
@@ -134,7 +134,7 @@ fn curve_order(points: &[Point<Dbu>]) -> (usize, Vec<Join>) {
     let order = hilbert_order(points);
 
     let cells_per_side = (points.len() as f64).sqrt().ceil().max(1.0) as i64;
-    let bucket = (span / cells_per_side).max(1);
+    let bucket = (span / cells_per_side).max(Dbu(1)).get();
     let key = |p: Point<Dbu>| ((p.x - min_x).get() / bucket, (p.y - min_y).get() / bucket);
     let mut buckets: FxHashMap<(i64, i64), Vec<usize>> = FxHashMap::default();
 
@@ -144,7 +144,7 @@ fn curve_order(points: &[Point<Dbu>]) -> (usize, Vec<Join>) {
     for &i in &order[1..] {
         let p = points[i];
         let (cx, cy) = key(p);
-        let mut nearest: Option<(i64, usize)> = None;
+        let mut nearest: Option<(Dbu, usize)> = None;
         let mut ring = 0;
         loop {
             for bx in cx - ring..=cx + ring {
@@ -153,7 +153,7 @@ fn curve_order(points: &[Point<Dbu>]) -> (usize, Vec<Join>) {
                         continue;
                     }
                     for &j in buckets.get(&(bx, by)).into_iter().flatten() {
-                        let d = p.manhattan(points[j]).get();
+                        let d = p.manhattan(points[j]);
                         if nearest.is_none_or(|(b, k)| (d, j) < (b, k)) {
                             nearest = Some((d, j));
                         }
@@ -161,7 +161,7 @@ fn curve_order(points: &[Point<Dbu>]) -> (usize, Vec<Join>) {
                 }
             }
             // Anything beyond this ring is at least `ring * bucket` away.
-            if nearest.is_some_and(|(d, _)| d <= ring * bucket) || ring > cells_per_side + 1 {
+            if nearest.is_some_and(|(d, _)| d.get() <= ring * bucket) || ring > cells_per_side + 1 {
                 break;
             }
             ring += 1;
