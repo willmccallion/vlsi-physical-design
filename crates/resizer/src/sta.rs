@@ -1144,23 +1144,10 @@ impl Sta {
         for edge in Edge::BOTH {
             let entries = self.entries(pin, edge).to_vec();
             for (k, entry) in entries.iter().enumerate() {
-                let required = if self.tags[entry.tag].is_clock {
-                    REQUIRED_INIT
-                } else if unreached {
-                    REQUIRED_UNREACHED
-                } else {
-                    let mut required = self.fanout_requireds(netlist, graph, pin, edge, entry.tag);
-                    if self.is_endpoint(pin) {
-                        let checks = self.check_requireds(netlist, graph, pin, edge, entry);
-                        for side in MinMax::BOTH {
-                            if let Some(check) = checks[side]
-                                && tighter(side, check, required[side])
-                            {
-                                required[side] = check;
-                            }
-                        }
-                    }
-                    required
+                let required = match (unreached, self.tags[entry.tag].is_clock) {
+                    (true, true) => REQUIRED_INIT,
+                    (true, false) => REQUIRED_UNREACHED,
+                    (false, _) => self.entry_requireds(netlist, graph, pin, edge, entry),
                 };
                 let slot = &mut self.entries[pin][edge][k];
                 if differ(slot.required, required) {
@@ -1173,6 +1160,32 @@ impl Sta {
             self.refresh_endpoint(netlist, graph, pin);
         }
         changed
+    }
+
+    /// The required times of one entry, clock paths included, as
+    /// `OpenSTA`'s `RequiredVisitor::visit`: the tightest its fanout imposes
+    /// and, at an endpoint, its checks.
+    fn entry_requireds(
+        &mut self,
+        netlist: &Netlist<'_>,
+        graph: &TimingGraph,
+        pin: PinId,
+        edge: Edge,
+        entry: &Entry,
+    ) -> SideValues<Seconds> {
+        let mut required = self.fanout_requireds(netlist, graph, pin, edge, entry.tag);
+        if !self.is_endpoint(pin) {
+            return required;
+        }
+        let checks = self.check_requireds(netlist, graph, pin, edge, entry);
+        for side in MinMax::BOTH {
+            if let Some(check) = checks[side]
+                && tighter(side, check, required[side])
+            {
+                required[side] = check;
+            }
+        }
+        required
     }
 
     /// The factors the delays of the arcs into `driver` are scaled by, for
@@ -2008,6 +2021,16 @@ mod tests {
     /// The slack at `pin` on `side` with the design timed under `constraints`
     /// and wires without resistance or capacitance.
     fn slack_under(db: &NetlistDB, constraints: &str, pin: PinId, side: MinMax) -> f64 {
+        timed(db, constraints, |_, sta| sta.slack(pin, side).time().get())
+    }
+
+    /// What `inspect` reads from the design timed under `constraints` with
+    /// wires without resistance or capacitance.
+    fn timed<R>(
+        db: &NetlistDB,
+        constraints: &str,
+        inspect: impl FnOnce(&Netlist<'_>, &Sta) -> R,
+    ) -> R {
         let lib = liberty::parse_file(&fixture("cts", "clock.lib")).unwrap();
         let sdc = sdc::parse_str(constraints, Path::new("test.sdc"), db, &lib).unwrap();
         let link = Link::new(db, &lib, &[]).unwrap();
@@ -2027,10 +2050,10 @@ mod tests {
             None,
             Estimator::Placement,
         );
-        Sta::new(&netlist, &graph, &clocks, &constants, &sdc)
-            .slack(pin, side)
-            .time()
-            .get()
+        inspect(
+            &netlist,
+            &Sta::new(&netlist, &graph, &clocks, &constants, &sdc),
+        )
     }
 
     #[test]
@@ -2062,6 +2085,32 @@ mod tests {
             (single - tripled - 4.4e-9).abs() < 1e-15,
             "{single} vs {tripled}"
         );
+    }
+
+    #[test]
+    fn a_clock_used_as_data_has_its_check_slack_at_the_pin_and_a_path() {
+        let text = "VERSION 5.8 ;\nDIVIDERCHAR \"/\" ;\nBUSBITCHARS \"[]\" ;\nDESIGN cad ;\n\
+            UNITS DISTANCE MICRONS 2000 ;\nDIEAREA ( 0 0 ) ( 40000 40000 ) ;\n\
+            COMPONENTS 1 ;\n- f1 DFF_X1 + PLACED ( 2000 2800 ) N ;\nEND COMPONENTS\n\
+            PINS 1 ;\n- clk + NET clk + DIRECTION INPUT ;\nEND PINS\n\
+            NETS 1 ;\n- clk ( PIN clk ) ( f1 CK ) ( f1 D ) ;\nEND NETS\nEND DESIGN\n";
+        let units = DbuPerMicron::new(2000).unwrap();
+        let library = lef::parse_files(&[fixture("cts", "clock.lef")], units).unwrap();
+        let db = def::parse_str(text, Path::new("cad.def"), library).unwrap();
+        let d = cell_pin(&db, "f1/D");
+        let constraints = "create_clock -name clk -period 2.2 [get_ports clk]\n";
+
+        let (pin_slack, worst, path) = timed(&db, constraints, |netlist, sta| {
+            (
+                sta.slack(d, MinMax::Max),
+                sta.worst_slack(MinMax::Max),
+                sta.worst_slack_path(netlist, d, MinMax::Max),
+            )
+        });
+
+        assert_eq!(worst, (pin_slack, Some(d)));
+        assert!(pin_slack.is_constrained(), "{pin_slack:?}");
+        assert_eq!(path.map(|p| p.slack), Some(pin_slack.time()));
     }
 
     #[test]
