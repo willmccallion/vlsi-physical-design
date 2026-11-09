@@ -46,7 +46,7 @@ const HOLD_GROWTH_OVERFLOW: f64 = 0.35;
 /// What that lowers the highest growth by.
 const HOLD_GROWTH_FACTOR: f64 = 0.99;
 
-/// Times one iteration may shorten its step before accepting it.
+/// Trial steps one iteration may evaluate, `gpl`'s `maxBackTrack` of 10.
 const MAX_BACKTRACKS: usize = 10;
 
 /// Weight of the quadratic density term against the linear one, relative to
@@ -793,6 +793,22 @@ impl Refund {
     }
 }
 
+/// Tries `step`, then each shorter step the last trial suggests, until a
+/// trial suggests more than 95% of the step it tried or `MAX_BACKTRACKS`
+/// trials have run, as `gpl`'s `doBackTracking`; returns the step the last
+/// trial suggests.
+fn backtrack_steps(step: f64, mut trial: impl FnMut(f64) -> f64) -> f64 {
+    let mut step = step;
+    for _ in 0..MAX_BACKTRACKS {
+        let suggested = trial(step);
+        if suggested > 0.95 * step {
+            return suggested;
+        }
+        step = suggested;
+    }
+    step
+}
+
 /// Why a stretch of iterations ended.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum Flow {
@@ -1179,23 +1195,22 @@ impl Run {
     }
 
     /// Takes the next step from `s`, shortening it while the step the new
-    /// gradients suggest falls short of it; returns the new evaluation and
-    /// that suggested step, leaving the new positions and gradients in the
-    /// run's `next_` buffers.
+    /// gradients suggest falls short of it, as `gpl`'s `doBackTracking`;
+    /// returns the new evaluation and that suggested step, leaving the new
+    /// positions and gradients in the run's `next_` buffers.
     fn backtrack(
         &mut self,
         objective: &mut Objective<'_>,
-        s: &mut State,
+        s: &State,
         eval: &Evaluation,
         moving: &IdVec<ObjectId, bool>,
         momentum: f64,
     ) -> (Evaluation, f64) {
         let mut next_eval = eval.clone();
-        let mut next_step = s.step;
-        for attempt in 0..=MAX_BACKTRACKS {
+        let next_step = backtrack_steps(s.step, |step| {
             for (i, &moves) in moving.iter_enumerated() {
                 self.next_major[i] = if moves {
-                    s.reference[i] - self.grad[i] * s.step
+                    s.reference[i] - self.grad[i] * step
                 } else {
                     s.major[i]
                 };
@@ -1217,16 +1232,8 @@ impl Run {
             );
             let moved = distance(&self.next_reference, &s.reference);
             let changed = distance(&self.next_grad, &self.grad);
-            next_step = if changed > 0.0 {
-                moved / changed
-            } else {
-                s.step
-            };
-            if next_step >= 0.95 * s.step || attempt == MAX_BACKTRACKS {
-                break;
-            }
-            s.step = next_step;
-        }
+            if changed > 0.0 { moved / changed } else { step }
+        });
         (next_eval, next_step)
     }
 
@@ -1490,6 +1497,30 @@ mod tests {
         assert!((penalty_growth(-1.0, 100.0, 1.05) - 1.05).abs() < 1e-12);
         assert!((penalty_growth(100.0, 100.0, 1.05) - 1.0).abs() < 1e-12);
         assert!((penalty_growth(1e9, 100.0, 1.05) - 0.95).abs() < 1e-12);
+    }
+
+    #[test]
+    fn a_step_kept_whole_takes_one_trial() {
+        let mut trials = 0;
+
+        let step = backtrack_steps(1.0, |step| {
+            trials += 1;
+            step
+        });
+
+        assert_eq!((trials, step), (1, 1.0));
+    }
+
+    #[test]
+    fn a_step_that_keeps_shrinking_stops_after_gpl_s_ten_trials() {
+        let mut trials = 0;
+
+        let step = backtrack_steps(1.0, |step| {
+            trials += 1;
+            step / 2.0
+        });
+
+        assert_eq!((trials, step), (MAX_BACKTRACKS, 0.5_f64.powi(10)));
     }
 
     #[test]
