@@ -55,6 +55,9 @@ pub struct AccessPoint {
 }
 
 /// Most access nodes kept per pin, each with every via stack that fits.
+/// PARE tunable.
+// NOTE: FlexPA ranks OnGrid, HalfGrid, Center and EncOpt coordinates and stops
+// at MINNUMACCESSPOINT_STDCELLPIN (3); PARE ranks crossings, then stubs, by distance.
 const MAX_CANDIDATE_NODES: usize = 8;
 
 /// The box around the other points of `points`, for each of them; `None`
@@ -376,6 +379,8 @@ fn neighbour_shapes(db: &NetlistDB, pin: PinId) -> Vec<Shape> {
 }
 
 /// Whether `metal` on `layer` stays at least the layer spacing from every blocker.
+// NOTE: FlexPA::isViaViolationFree checks a via access with a FlexGCWorker;
+// PARE checks via pads against the minimum spacing only, a looser test.
 fn clear_of(tech: &RouteTech, layer: LayerId, metal: &Rect<Dbu>, blockers: &[Shape]) -> bool {
     let reach = metal.expand(tech.layer(layer).spacing);
     blockers

@@ -498,6 +498,8 @@ impl Negotiation {
             RipUp::Drc | RipUp::All => Scope::Conflicts,
         };
         let repaired = match flow {
+            // NOTE: FlexDR::searchRepair rips up as the row's RipUpMode says,
+            // every net on ALL rows; PARE's regular rounds take next_scope's.
             Flow::Regular => dr.repair(costs, round, self.scope),
             Flow::Guides => dr.repair_guides(tile_scope, costs),
             Flow::Stubborn => dr.repair_stubborn(tile_scope, costs),
@@ -935,7 +937,8 @@ fn restored_global(
 
 /// The scope of the next repair pass: conflicts only, except for one pass
 /// that also rips up wiring near each conflict after a conflicts-only pass
-/// that left no fewer nets in conflict.
+/// that left no fewer nets in conflict. PARE's own rule; `TritonRoute`
+/// takes each iteration's scope from its strategy row.
 const fn next_scope(previous: Scope, improved: bool) -> Scope {
     match previous {
         Scope::Conflicts if !improved => Scope::NearConflicts,

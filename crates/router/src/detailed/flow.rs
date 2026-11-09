@@ -69,7 +69,8 @@ impl FlowState {
         Self::after(0, Flow::Regular, true)
     }
 
-    /// The flow of round `round`, with `violations` left.
+    /// The flow of round `round`, with `violations` left, as
+    /// `FlexDRFlow::determineNextFlow` chooses it.
     pub fn next(&mut self, round: usize, violations: usize) -> Flow {
         let strategy = round_strategy(round);
         self.current = if violations > FEW_VIOLATIONS || strategy.ripup == RipUp::All {
