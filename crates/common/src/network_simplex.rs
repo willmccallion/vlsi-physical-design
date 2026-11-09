@@ -595,4 +595,84 @@ mod tests {
 
         assert_eq!(outcome.map_err(|e| e.problem), Err(FlowProblem::Infeasible));
     }
+
+    /// Every ordering of `0..n`.
+    fn permutations(n: usize) -> Vec<Vec<usize>> {
+        let Some(last) = n.checked_sub(1) else {
+            return vec![Vec::new()];
+        };
+        let mut all = Vec::new();
+        for shorter in permutations(last) {
+            for k in 0..=shorter.len() {
+                let mut p = shorter.clone();
+                p.insert(k, last);
+                all.push(p);
+            }
+        }
+        all
+    }
+
+    /// A cost for each cell and spot of an `n` by `n` assignment, every cell
+    /// able to keep its own spot and some able to take others.
+    fn random_costs(state: &mut u64, n: usize) -> Vec<Vec<Option<i32>>> {
+        let mut next = |bound: u64| {
+            *state = state
+                .wrapping_mul(6_364_136_223_846_793_005)
+                .wrapping_add(1_442_695_040_888_963_407);
+            (*state >> 33) % bound
+        };
+        (0..n)
+            .map(|i| {
+                (0..n)
+                    .map(|j| (i == j || next(3) > 0).then(|| next(1000) as i32))
+                    .collect()
+            })
+            .collect()
+    }
+
+    /// The cost of the matching the simplex finds over `cost`, as `solveMatch`
+    /// builds the flow problem, and how many cells it matches.
+    fn simplex_matching(cost: &[Vec<Option<i32>>]) -> (i64, usize) {
+        let n = cost.len();
+        let (supply, demand) = (2 * n, 2 * n + 1);
+        let mut arcs = Vec::new();
+        let mut assignment = Vec::new();
+        for (i, row) in cost.iter().enumerate() {
+            arcs.push(arc(supply, 2 * i, 1, 0));
+            arcs.push(arc(2 * i + 1, demand, 1, 0));
+            for (j, c) in row.iter().enumerate() {
+                if let Some(c) = *c {
+                    assignment.push((arcs.len(), c));
+                    arcs.push(arc(2 * i, 2 * j + 1, 1, c));
+                }
+            }
+        }
+        let flows = min_cost_flow(2 * n + 2, &arcs, supply, demand, n as i32).unwrap();
+        let used: Vec<i32> = assignment
+            .iter()
+            .filter(|&&(a, _)| flows[a] == 1)
+            .map(|&(_, c)| c)
+            .collect();
+        (used.iter().map(|&c| i64::from(c)).sum(), used.len())
+    }
+
+    #[test]
+    fn an_assignment_costs_as_little_as_the_best_permutation() {
+        let mut state = 12_345;
+        for _ in 0..3000 {
+            let n = 1 + (state % 6) as usize;
+            let cost = random_costs(&mut state, n);
+
+            let best = permutations(n)
+                .iter()
+                .filter_map(|p| {
+                    (0..n)
+                        .map(|i| cost[i][p[i]].map(i64::from))
+                        .sum::<Option<i64>>()
+                })
+                .min();
+
+            assert_eq!(simplex_matching(&cost), (best.unwrap(), n), "{cost:?}");
+        }
+    }
 }
