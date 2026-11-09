@@ -155,7 +155,6 @@ impl Placer {
                         && overlaps
                         && let Some(p) = self.pixel_mut(x, y)
                     {
-                        p.util = 0.0;
                         p.set_occupant(Occupant::Dummy);
                         p.valid = false;
                     }
@@ -165,14 +164,10 @@ impl Placer {
     }
 
     /// Gives each group the sites its region covers, as
-    /// `Opendp::groupInitPixels`.
-    // A site is the region's when its share is exactly one, as OpenDP tests it.
-    #[allow(clippy::float_cmp)]
+    /// `Opendp::groupInitPixels`, which counts each site's cover in
+    /// `Pixel::util`; here it is counted in site widths, exactly.
     pub(super) fn mark_region_sites(&mut self) {
-        for p in &mut self.pixels {
-            p.util = 0.0;
-        }
-        let site = self.rows.site_width().get();
+        let mut cover = vec![Dbu::ZERO; self.pixels.len()];
         for g in self.groups.ids() {
             if self.groups[g].members.is_empty() {
                 if g != GroupId(0) {
@@ -182,47 +177,62 @@ impl Placer {
             }
             let rects = self.groups[g].rects.clone();
             for rect in &rects {
-                let within = self.grid_within(rect);
-                let (x0, x1) = (within.min.x, within.max.x);
-                for y in within.min.y.until(within.max.y) {
-                    for x in x0.until(x1) {
-                        if let Some(p) = self.pixel_mut(x, y) {
-                            p.util += 1.0;
-                        }
-                    }
-                    if rect.min.x.get() % site != 0
-                        && let Some(p) = self.pixel_mut(x0, y)
-                    {
-                        p.util = (f64::from(p.util)
-                            - (rect.min.x.get() % site) as f64 / site as f64)
-                            as f32;
-                    }
-                    if rect.max.x.get() % site != 0
-                        && let Some(p) = self.pixel_mut(x1 - 1, y)
-                    {
-                        p.util = (f64::from(p.util)
-                            - ((site - rect.max.x.get()) % site) as f64 / site as f64)
-                            as f32;
-                    }
-                }
+                self.add_region_cover(&mut cover, rect);
             }
             for rect in &rects {
-                let within = self.grid_within(rect);
-                for y in within.min.y.until(within.max.y) {
-                    for x in within.min.x.until(within.max.x) {
-                        let Some(p) = self.pixel_mut(x, y) else {
-                            continue;
-                        };
-                        if p.util == 1.0 {
-                            p.set_group(g);
-                            p.valid = true;
-                            p.util = 1.0;
-                        } else if p.util > 0.0 && p.util < 1.0 {
-                            p.set_occupant(Occupant::Dummy);
-                            p.util = 0.0;
-                            p.valid = false;
-                        }
-                    }
+                self.claim_covered_sites(&mut cover, g, rect);
+            }
+        }
+    }
+
+    /// Adds a site width to the cover of each site `rect` wholly covers,
+    /// less the part of either end off the site grid.
+    // NOTE: Opendp::groupInitPixels quirk kept: it takes each end's part off
+    // the grid from the first and last whole sites, not the partial ones, so
+    // an off-grid region loses them; a fix wants a union cover of the
+    // region's rectangles, which groupInitPixels2's edge test also lacks.
+    fn add_region_cover(&self, cover: &mut [Dbu], rect: &Rect<Dbu>) {
+        let site = self.rows.site_width();
+        let within = self.grid_within(rect);
+        let left_off_grid = Dbu(rect.min.x.get() % site.get());
+        let right_off_grid = Dbu((site - rect.max.x).get() % site.get());
+        for y in within.min.y.until(within.max.y) {
+            for x in within.min.x.until(within.max.x) {
+                if let Some(i) = self.pixel_index(x, y) {
+                    cover[i] += site;
+                }
+            }
+            if left_off_grid != Dbu::ZERO
+                && let Some(i) = self.pixel_index(within.min.x, y)
+            {
+                cover[i] -= left_off_grid;
+            }
+            if right_off_grid != Dbu::ZERO
+                && let Some(i) = self.pixel_index(within.max.x - 1, y)
+            {
+                cover[i] -= right_off_grid;
+            }
+        }
+    }
+
+    /// Gives group `g` each site in `rect` covered exactly once and blocks
+    /// each covered in part.
+    fn claim_covered_sites(&mut self, cover: &mut [Dbu], g: GroupId, rect: &Rect<Dbu>) {
+        let site = self.rows.site_width();
+        let within = self.grid_within(rect);
+        for y in within.min.y.until(within.max.y) {
+            for x in within.min.x.until(within.max.x) {
+                let Some(i) = self.pixel_index(x, y) else {
+                    continue;
+                };
+                let p = &mut self.pixels[i];
+                if cover[i] == site {
+                    p.set_group(g);
+                    p.valid = true;
+                } else if cover[i] > Dbu::ZERO && cover[i] < site {
+                    p.set_occupant(Occupant::Dummy);
+                    p.valid = false;
+                    cover[i] = Dbu::ZERO;
                 }
             }
         }
@@ -687,6 +697,7 @@ fn displacement(node: &Node) -> Dbu {
 
 #[cfg(test)]
 mod tests {
+    use super::super::Pixel;
     use super::*;
     use pare_common::db::parser::{def, lef};
     use std::path::{Path, PathBuf};
@@ -757,5 +768,20 @@ mod tests {
         let site_area = 10.0 * 200.0 * 2000.0;
         let expected = 400.0 * 2000.0 / site_area;
         assert!((placer.groups[GroupId(0)].util - expected).abs() < 1e-12);
+    }
+
+    /// The region starts half way into the second site of the bottom row.
+    #[test]
+    fn a_region_off_the_site_grid_loses_its_first_whole_site_as_opendp_does() {
+        let db = tiny_fenced("( 300 0 ) ( 2000 2000 )", "u1");
+
+        let placer = placer_with_regions(&db);
+
+        let group_of = |x: i64| {
+            placer
+                .pixel(GridX::new(x), GridY::ZERO)
+                .and_then(Pixel::group)
+        };
+        assert_eq!([1, 2, 3].map(group_of), [None, None, Some(GroupId(0))]);
     }
 }
