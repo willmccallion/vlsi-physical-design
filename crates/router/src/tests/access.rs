@@ -1,5 +1,6 @@
 //! Pin access on the shared fixture design.
 
+use super::tiny;
 use crate::access::{AccessPoint, Node, access_points};
 use crate::shared_access::SharedAccess;
 use crate::tech::RouteTech;
@@ -7,23 +8,9 @@ use pare_common::config::RoutingConfig;
 use pare_common::db::design::{NetlistDB, PinOwner};
 use pare_common::db::indices::{LayerId, PinId};
 use pare_common::db::library::LayerRef;
-use pare_common::db::parser::{def, lef};
 use pare_common::geom::dbu::Dbu;
 use pare_common::geom::point::Point;
 use pare_common::geom::rect::Rect;
-use std::path::{Path, PathBuf};
-
-fn fixture(name: &str) -> PathBuf {
-    Path::new(env!("CARGO_MANIFEST_DIR"))
-        .join("../common/tests/fixtures")
-        .join(name)
-}
-
-fn tiny() -> NetlistDB {
-    let units = def::read_units(&fixture("tiny.def")).unwrap();
-    let library = lef::parse_files(&[fixture("tiny.lef")], units).unwrap();
-    def::parse(&fixture("tiny.def"), library).unwrap()
-}
 
 fn cell_pin(db: &NetlistDB, cell: &str, pin: &str) -> PinId {
     let c = db.cell_id(cell).unwrap();

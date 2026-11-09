@@ -1044,22 +1044,9 @@ fn distance_to(r: &Rect<Dbu>, p: Point<Dbu>) -> Dbu {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::tests::tiny;
     use pare_common::config::RoutingConfig;
     use pare_common::db::indices::NetId;
-    use pare_common::db::parser::{def, lef};
-    use std::path::{Path, PathBuf};
-
-    fn fixture(name: &str) -> PathBuf {
-        Path::new(env!("CARGO_MANIFEST_DIR"))
-            .join("../common/tests/fixtures")
-            .join(name)
-    }
-
-    fn tiny() -> NetlistDB {
-        let units = def::read_units(&fixture("tiny.def")).unwrap();
-        let library = lef::parse_files(&[fixture("tiny.lef")], units).unwrap();
-        def::parse(&fixture("tiny.def"), library).unwrap()
-    }
 
     /// Runs on one track between two vias through the same cut, as the run's
     /// length and the reach of that cut.

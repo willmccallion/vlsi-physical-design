@@ -219,21 +219,11 @@ fn marked_crossings(
 mod tests {
     use super::*;
     use crate::tech::RouteTech;
+    use crate::tests::tiny;
     use pare_common::config::RoutingConfig;
-    use pare_common::db::parser::{def, lef};
-    use std::path::{Path, PathBuf};
-
-    fn fixture(name: &str) -> PathBuf {
-        Path::new(env!("CARGO_MANIFEST_DIR"))
-            .join("../common/tests/fixtures")
-            .join(name)
-    }
 
     fn tiny_tech() -> RouteTech {
-        let units = def::read_units(&fixture("tiny.def")).unwrap();
-        let library = lef::parse_files(&[fixture("tiny.lef")], units).unwrap();
-        let db = def::parse(&fixture("tiny.def"), library).unwrap();
-        RouteTech::new(&db, &RoutingConfig::default()).unwrap()
+        RouteTech::new(&tiny(), &RoutingConfig::default()).unwrap()
     }
 
     #[test]
