@@ -649,6 +649,7 @@ fn site_holding(xj: Dbu, origin: Dbu, spacing: Dbu) -> Dbu {
 
 #[cfg(test)]
 mod tests {
+    use super::super::tests::{improver_of, tiny_edited_from_one_spot};
     use super::*;
 
     fn nodes(count: u32) -> Vec<NodeId> {
@@ -689,5 +690,28 @@ mod tests {
     #[test]
     fn an_empty_segment_has_no_neighbours() {
         assert_eq!(around(&[], 0), (None, None));
+    }
+
+    /// The second row starts a site in, at 0.2 um, and holds six cells
+    /// side by side from 0.4 um: a NAND2 at 0.4, then cells at 1, 1.6, 2,
+    /// 2.4 and 2.8 um.
+    #[test]
+    fn pushed_cells_land_on_the_sites_of_a_row_not_starting_at_zero() {
+        let mut imp = improver_of(tiny_edited_from_one_spot(|text| {
+            text.replace(
+                "ROW ROW_1 core 0 2000 FS DO 30 BY 1 STEP 200 0 ;",
+                "ROW ROW_1 core 200 2000 FS DO 29 BY 1 STEP 200 0 ;",
+            )
+        }));
+        let s = imp.segs_in_row[1][0];
+        let cells = imp.cells_in_seg[s].clone();
+
+        let pushed = imp
+            .shift_right_helper(cells[0], Dbu(500), s, cells[1])
+            .unwrap();
+
+        assert!(pushed);
+        let lefts: Vec<Dbu> = cells[1..].iter().map(|&n| imp.left(n)).collect();
+        assert_eq!(lefts, [1200, 1800, 2200, 2600, 3000].map(Dbu));
     }
 }

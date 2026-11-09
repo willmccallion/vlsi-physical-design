@@ -516,7 +516,7 @@ mod tests {
 
     /// The tiny design, its DEF as `edit` rewrites it, with its six movable
     /// cells at one spot.
-    fn tiny_edited_from_one_spot(edit: impl Fn(String) -> String) -> NetlistDB {
+    pub(super) fn tiny_edited_from_one_spot(edit: impl Fn(String) -> String) -> NetlistDB {
         let text = edit(std::fs::read_to_string(fixture("tiny.def")).unwrap());
         let units = def::read_units(&fixture("tiny.def")).unwrap();
         let library = lef::parse_files(&[fixture("tiny.lef")], units).unwrap();
