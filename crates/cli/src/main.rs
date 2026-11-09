@@ -200,7 +200,7 @@ fn main() -> anyhow::Result<()> {
     let mut report = Report::default();
     let outcome = run(args.command, &mut report);
     report.passed = outcome.is_ok();
-    report.wall_seconds = start_time.elapsed().as_secs_f64();
+    report.wall = start_time.elapsed();
     report.peak_rss_mb = report::peak_rss_mb();
     let written = args
         .report
@@ -212,7 +212,7 @@ fn main() -> anyhow::Result<()> {
     outcome?;
     written?;
 
-    ui::done(report.wall_seconds);
+    ui::done(report.wall);
     Ok(())
 }
 

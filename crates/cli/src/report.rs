@@ -4,10 +4,10 @@
 use crate::ui;
 use anyhow::Context;
 use pare_resizer::{HoldSummary, RepairSummary, SetupSummary};
-use serde::Serialize;
+use serde::{Serialize, Serializer};
 use std::collections::BTreeMap;
 use std::path::Path;
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
 /// Everything a run reports.
 #[derive(Debug, Default, Serialize)]
@@ -35,8 +35,9 @@ pub struct Report {
     pub checks: CheckSummary,
     /// Whether the run finished without an error and passed its checks.
     pub passed: bool,
-    /// Wall time of the whole run in seconds.
-    pub wall_seconds: f64,
+    /// Wall time of the whole run.
+    #[serde(rename = "wall_seconds", serialize_with = "as_seconds")]
+    pub wall: Duration,
     /// Peak resident memory of the process in megabytes, where known.
     pub peak_rss_mb: Option<u64>,
 }
@@ -46,8 +47,14 @@ pub struct Report {
 pub struct Phase {
     /// What the phase did.
     pub name: String,
-    /// Its wall time in seconds.
-    pub seconds: f64,
+    /// Its wall time.
+    #[serde(rename = "seconds", serialize_with = "as_seconds")]
+    pub elapsed: Duration,
+}
+
+/// Writes a wall time as seconds, the unit the keys name.
+fn as_seconds<S: Serializer>(time: &Duration, serializer: S) -> Result<S::Ok, S::Error> {
+    serializer.serialize_f64(time.as_secs_f64())
 }
 
 /// What netlist repair did.
@@ -269,11 +276,11 @@ pub struct CheckSummary {
 impl Report {
     /// Records the time since `start` as phase `name` and prints it.
     pub fn phase(&mut self, name: &str, start: Instant) {
-        let seconds = start.elapsed().as_secs_f64();
-        ui::phase_time(seconds);
+        let elapsed = start.elapsed();
+        ui::phase_time(elapsed);
         self.phases.push(Phase {
             name: name.to_string(),
-            seconds,
+            elapsed,
         });
     }
 
@@ -334,5 +341,22 @@ mod tests {
         for key in COMPARED_KEYS {
             assert!(json.pointer(key).is_some(), "no {key} in {json}");
         }
+    }
+
+    #[test]
+    fn wall_times_report_as_seconds() {
+        let report = Report {
+            phases: vec![Phase {
+                name: "routing".to_string(),
+                elapsed: Duration::from_millis(1500),
+            }],
+            wall: Duration::from_millis(2250),
+            ..Report::default()
+        };
+
+        let json = serde_json::to_value(&report).unwrap();
+
+        assert_eq!(json["phases"][0]["seconds"], 1.5);
+        assert_eq!(json["wall_seconds"], 2.25);
     }
 }

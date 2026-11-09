@@ -748,12 +748,7 @@ fn show_timing_round(number: usize, round: &TimingRound, elapsed: Duration) {
         "Cells:",
         &format!("{} -> {}", round.cells_before, round.cells_after),
     );
-    ui::stat_row(
-        "Round time:",
-        &format!("{:.1}s", elapsed.as_secs_f64()),
-        "",
-        "",
-    );
+    ui::stat_row("Round time:", &ui::seconds(elapsed), "", "");
 }
 
 /// The placement model of `db` after a round's repair, its nets weighted by
