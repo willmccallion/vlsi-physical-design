@@ -599,9 +599,7 @@ impl Sweep {
             .or_else(|| self.open.iter().next())
             .map(|(&k, _)| k);
         while let Some(key) = cursor {
-            let Some(&slice) = self.open.get(&key) else {
-                break;
-            };
+            let slice = self.open[&key];
             if slice.lo > hi {
                 break;
             }
