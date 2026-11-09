@@ -3,6 +3,7 @@
 
 use super::{ImprovementError, Improver, Move, Result};
 use super::{NodeId, SegmentId};
+use pare_common::geom::dbu::Dbu;
 
 /// A node's neighbours around `x` in a segment by center, as the
 /// `std::lower_bound` probes of `DetailedMgr`: the first at or right of `x`
@@ -551,8 +552,8 @@ impl Improver {
         if self.journal.moves.len() >= self.move_limit {
             return Ok(false);
         }
-        let x = self.grid.grid_x(to.0);
-        let y = self.grid.snap_down_y(to.1);
+        let x = self.grid.grid_x(Dbu(to.0));
+        let y = self.grid.snap_down_y(Dbu(to.1));
         if self
             .grid
             .site_orientation(x, y, self.grid.nodes[n].site)
@@ -627,8 +628,8 @@ impl Improver {
                 self.remove_cell_from_segment(m.node, s)?;
             }
             self.set_position(m.node, m.from.0, m.from.1);
-            let x = self.grid.grid_x(m.from.0);
-            let y = self.grid.round_y(m.from.1);
+            let x = self.grid.grid_x(Dbu(m.from.0));
+            let y = self.grid.round_y(Dbu(m.from.1));
             self.grid.paint_pixels(m.node, x, y);
             let orient = self
                 .grid

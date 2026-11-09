@@ -27,6 +27,7 @@ use arch::Arch;
 use network::Network;
 use pare_common::db::design::NetlistDB;
 use pare_common::db::indices::IdVec;
+use pare_common::geom::dbu::Dbu;
 use pare_common::geom::orient::Orientation;
 use std::collections::BTreeSet;
 
@@ -187,8 +188,8 @@ impl Improver {
         let mut grid = Placer::new(db)?;
         for node in &mut grid.nodes {
             node.orient = Orientation::N;
-            node.width = node.master_size.0;
-            node.height = node.master_size.1;
+            node.width = node.master_size.x;
+            node.height = node.master_size.y;
         }
         let mut net = Network::new(db, &grid)?;
         let arch = Arch::new(db, &grid, &mut net);
@@ -251,28 +252,28 @@ impl Improver {
         self.grid
             .nodes
             .get(n)
-            .map_or_else(|| self.net.fixed_node(n).left, |c| c.left)
+            .map_or_else(|| self.net.fixed_node(n).left, |c| c.left.get())
     }
 
     fn bottom(&self, n: NodeId) -> i64 {
         self.grid
             .nodes
             .get(n)
-            .map_or_else(|| self.net.fixed_node(n).bottom, |c| c.bottom)
+            .map_or_else(|| self.net.fixed_node(n).bottom, |c| c.bottom.get())
     }
 
     fn width(&self, n: NodeId) -> i64 {
         self.grid
             .nodes
             .get(n)
-            .map_or_else(|| self.net.fixed_node(n).width, |c| c.width)
+            .map_or_else(|| self.net.fixed_node(n).width, |c| c.width.get())
     }
 
     fn height(&self, n: NodeId) -> i64 {
         self.grid
             .nodes
             .get(n)
-            .map_or_else(|| self.net.fixed_node(n).height, |c| c.height)
+            .map_or_else(|| self.net.fixed_node(n).height, |c| c.height.get())
     }
 
     fn right(&self, n: NodeId) -> i64 {
@@ -313,8 +314,8 @@ impl Improver {
 
     fn set_position(&mut self, n: NodeId, left: i64, bottom: i64) {
         let node = &mut self.grid.nodes[n];
-        node.left = left;
-        node.bottom = bottom;
+        node.left = Dbu(left);
+        node.bottom = Dbu(bottom);
     }
 
     fn rows_spanned(&self, n: NodeId) -> usize {
@@ -373,8 +374,8 @@ impl Improver {
     /// Puts a cell on the grid where it stands in its row's orientation, as
     /// `DetailedMgr::paintInGrid`.
     fn paint(&mut self, n: NodeId) {
-        let x = self.grid.grid_x(self.left(n));
-        let y = self.grid.snap_down_y(self.bottom(n));
+        let x = self.grid.grid_x(Dbu(self.left(n)));
+        let y = self.grid.snap_down_y(Dbu(self.bottom(n)));
         self.grid.paint_pixels(n, x, y);
         if let Some(orient) = self.grid.site_orientation(x, y, self.grid.nodes[n].site) {
             self.orient_node(n, orient);
@@ -450,7 +451,6 @@ mod tests {
     use crate::legalize::opendp::detailed_placement;
     use pare_common::db::design::PlacementStatus;
     use pare_common::db::parser::{def, lef};
-    use pare_common::geom::dbu::Dbu;
     use pare_common::geom::point::Point;
     use std::path::{Path, PathBuf};
 
