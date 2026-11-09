@@ -1704,7 +1704,7 @@ mod tests {
         let (db, config) = crate::tests::placed_tiny();
         let tech = RouteTech::new(&db, &config).unwrap();
         let gcell = crate::gcell_size(&tech, &config);
-        let costs = round_costs(0, 4.0 * tech.layer(tech.min_layer).pitch().to_f64());
+        let costs = round_costs(0, 4.0 * tech.min_layer_pitch.to_f64());
         let route_with = |threads: usize| {
             let pool = rayon::ThreadPoolBuilder::new()
                 .num_threads(threads)

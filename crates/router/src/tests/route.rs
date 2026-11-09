@@ -55,6 +55,19 @@ fn routing_refuses_layers_that_all_run_one_way() {
 }
 
 #[test]
+fn routing_refuses_a_lowest_layer_of_a_single_track() {
+    let (mut db, config) = placed_tiny();
+    let m2 = db.library.routing_layer_id("M2").unwrap();
+    for t in db.tracks.iter_mut().filter(|t| t.layers.contains(&m2)) {
+        t.count = 1;
+    }
+
+    let result = route(&mut db, &config).map(|_| ());
+
+    assert_eq!(result, Err(RouteError::OneTrack("M2".to_string())));
+}
+
+#[test]
 fn nets_crossing_many_regions_are_routed_connected() {
     let (mut db, config) = placed_tiny();
 
@@ -552,7 +565,7 @@ fn rudy_wires_are_as_wide_as_openroad_makes_them() {
 fn merged_fixed_stretches_give_the_capacity_the_occupancy_gives() {
     let db = tiny();
     let tech = RouteTech::new(&db, &RoutingConfig::default()).unwrap();
-    let gcell = tech.layer(tech.min_layer).pitch() * 15;
+    let gcell = tech.min_layer_pitch * 15;
     let mut occupancy = Occupancy::new(&tech, gcell);
     occupancy.add_fixed(&tech, fixed_shapes(&db));
     let fixed = FixedTracks::new(&tech, fixed_shapes(&db));
@@ -570,7 +583,7 @@ fn merged_fixed_stretches_give_the_capacity_the_occupancy_gives() {
 fn gcell_congestion_follows_the_routed_edges_of_the_grid() {
     let db = tiny();
     let tech = RouteTech::new(&db, &no_reserve()).unwrap();
-    let gcell = tech.layer(tech.min_layer).pitch() * 5;
+    let gcell = tech.min_layer_pitch * 5;
     let fixed = FixedTracks::new(&tech, fixed_shapes(&db));
     let mut grid = GlobalGrid::new(&tech, &fixed, db.die_area, gcell, CapacityReserve::NONE);
     let (nx, ny) = grid.size();

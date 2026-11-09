@@ -950,7 +950,8 @@ impl GlobalNet {
 }
 
 /// Tracks a wire of `net` takes on each routable layer: one, or as many
-/// pitches as its non-default rule's width and spacing span.
+/// pitches as its non-default rule's width and spacing span; one on a layer
+/// of a single track, which has no pitch.
 pub fn track_demand(db: &NetlistDB, tech: &RouteTech, net: NetId) -> Vec<Tracks> {
     let rule = db.nets[net]
         .non_default_rule
@@ -961,10 +962,9 @@ pub fn track_demand(db: &NetlistDB, tech: &RouteTech, net: NetId) -> Vec<Tracks>
             let Some(ndr) = rule.and_then(|r| r.layers.iter().find(|x| x.layer == layer)) else {
                 return Tracks::ONE;
             };
-            let pitch = lt.pitch().get();
-            if pitch <= 0 {
+            let Some(pitch) = lt.pitch().map(Dbu::get) else {
                 return Tracks::ONE;
-            }
+            };
             let span = (ndr.width + ndr.spacing.unwrap_or(lt.spacing)).get();
             let tracks = (span + pitch - 1) / pitch;
             Tracks::whole(index_u32(tracks.max(1) as usize))

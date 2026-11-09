@@ -362,7 +362,7 @@ impl DetailedRouter<'_> {
     pub(super) fn nets_of(&self, m: &Marker, scope: Scope) -> Vec<NetId> {
         let mut nets: Vec<NetId> = m.nets.iter().flatten().copied().collect();
         if scope == Scope::NearConflicts {
-            let reach = self.tech.layer(self.tech.min_layer).pitch() * NEAR_TRACKS;
+            let reach = self.tech.min_layer_pitch * NEAR_TRACKS;
             nets.extend(self.nets_near(m.at, reach));
         }
         nets.sort_unstable();
