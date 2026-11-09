@@ -95,6 +95,11 @@ impl GridX {
         Self(x.get() / site_width.get())
     }
 
+    /// The column holding `x`, rounding toward negative infinity.
+    pub const fn from_dbu_floor(x: Dbu, site_width: Dbu) -> Self {
+        Self(x.get().div_euclid(site_width.get()))
+    }
+
     /// The first column at or right of `x`, in doubles as dpl's
     /// `dbuToGridCeil` and `Grid::gridEndX` divide.
     pub fn from_dbu_ceil(x: Dbu, site_width: Dbu) -> Self {
@@ -139,4 +144,11 @@ impl GridPt {
 pub struct GridRect {
     pub min: GridPt,
     pub max: GridPt,
+}
+
+impl GridRect {
+    /// Whether `p` lies in the box.
+    pub fn contains(&self, p: GridPt) -> bool {
+        (self.min.x..self.max.x).contains(&p.x) && (self.min.y..self.max.y).contains(&p.y)
+    }
 }
