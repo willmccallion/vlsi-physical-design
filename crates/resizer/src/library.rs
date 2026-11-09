@@ -9,6 +9,19 @@ use pare_common::db::library::{CoreKind, MacroClass, PinDirection, SignalUse};
 use pare_common::units::{Farads, Ohms, Watts};
 use std::collections::HashMap;
 
+/// Bands of drive resistance `findBuffers` splits the buffers into.
+const DRIVE_BANDS: usize = 5;
+
+/// Buffers `findBuffers` keeps from each band when they stand on one site.
+const BUFFERS_PER_BAND: usize = 2;
+
+/// The most used sites `findBuffers` keeps one buffer of each band for.
+const BUFFER_SITES: usize = 2;
+
+/// The share of the buffers above which `findBuffers` keeps only those of
+/// one footprint.
+const DOMINANT_FOOTPRINT_SHARE: f64 = 0.5;
+
 /// Why the library could not be joined to the design.
 #[derive(Clone, Debug, PartialEq, Eq, thiserror::Error)]
 pub enum LinkError {
@@ -249,92 +262,37 @@ impl<'a> Link<'a> {
     /// five bands of drive resistance, and the best two of each band by
     /// drive resistance times input capacitance kept.
     pub fn find_buffers(&self, db: &NetlistDB) -> Result<BufferSet, LinkError> {
-        let mut list: Vec<BufferCell> = (0..self.liberty.cells.len())
-            .map(|i| LibCellId(i as u32))
-            .filter(|&id| {
-                let cell = self.liberty.cell(id);
-                cell.is_buffer()
-                    && !self.dont_use(id)
-                    && self.is_link_cell(id)
-                    && !is_clock_buffer(cell)
-            })
-            .filter_map(|id| self.liberty.buffer_cell(id))
-            .collect();
+        let list = self.usable_buffers();
         if list.is_empty() {
             return Err(LinkError::NoBuffers);
         }
-        list.sort_by(|&a, &b| {
-            self.buffer_drive_resistance(a)
-                .total_cmp(&self.buffer_drive_resistance(b))
-                .then_with(|| {
-                    self.liberty
-                        .cell(a.id)
-                        .name
-                        .cmp(&self.liberty.cell(b.id).name)
-                })
-        });
-
-        let footprints: Vec<Option<&str>> = list
-            .iter()
-            .map(|b| self.liberty.cell(b.id).footprint.as_deref())
-            .collect();
-        let mut footprint_counts: Vec<(&str, usize)> = Vec::new();
-        for footprint in footprints.iter().flatten() {
-            match footprint_counts.iter_mut().find(|(f, _)| f == footprint) {
-                Some((_, n)) => *n += 1,
-                None => footprint_counts.push((footprint, 1)),
-            }
-        }
-        let best_footprint = if footprint_counts.len() > 1 {
-            footprint_counts
-                .iter()
-                .find(|(_, n)| *n as f64 / list.len() as f64 > 0.5)
-                .map(|(f, _)| *f)
-        } else {
-            None
-        };
+        let footprint = self.dominant_footprint(&list);
         let filtered: Vec<BufferCell> = list
             .iter()
             .copied()
             .filter(|b| {
-                best_footprint
+                footprint
                     .is_none_or(|best| self.liberty.cell(b.id).footprint.as_deref() == Some(best))
             })
             .collect();
-
         let site_of = |b: BufferCell| {
             self.macro_of(b.id)
                 .and_then(|m| db.library.cell_macro(m).site)
         };
-        let mut site_counts: Vec<(Option<SiteId>, usize)> = Vec::new();
-        for &b in &list {
-            let site = site_of(b);
-            match site_counts.iter_mut().find(|(s, _)| *s == site) {
-                Some((_, n)) => *n += 1,
-                None => site_counts.push((site, 1)),
-            }
-        }
-        site_counts.sort_by_key(|(_, n)| std::cmp::Reverse(*n));
-        let best_sites: Vec<_> = site_counts.iter().take(2).map(|(s, _)| *s).collect();
-
-        let n = filtered.len();
-        let bucket_size = n / 5;
-        let remainder = n % 5;
+        let sites = most_used_sites(list.iter().map(|&b| site_of(b)));
         let mut chosen = Vec::new();
-        for bucket in 0..5 {
-            let start = bucket * bucket_size + bucket.min(remainder);
-            let end = (start + bucket_size + usize::from(bucket < remainder)).min(n);
-            let mut band: Vec<BufferCell> = filtered[start.min(n)..end].to_vec();
+        for band in drive_bands(&filtered) {
+            let mut band = band.to_vec();
             band.sort_by(|&a, &b| {
                 let metric = |buffer: BufferCell| {
                     self.buffer_drive_resistance(buffer) * self.buffer_input_capacitance(buffer)
                 };
                 metric(a).total_cmp(&metric(b))
             });
-            if best_sites.len() <= 1 {
-                chosen.extend(band.iter().take(2));
+            if sites.len() <= 1 {
+                chosen.extend(band.iter().take(BUFFERS_PER_BAND));
             } else {
-                for site in &best_sites {
+                for site in &sites {
                     if let Some(&b) = band.iter().find(|&&b| site_of(b) == *site) {
                         chosen.push(b);
                     }
@@ -347,6 +305,88 @@ impl<'a> Link<'a> {
             lowest_drive,
         })
     }
+
+    /// The usable buffers that are not clock buffers, by rising drive
+    /// resistance and then name.
+    fn usable_buffers(&self) -> Vec<BufferCell> {
+        let mut list: Vec<BufferCell> = self
+            .liberty
+            .cells
+            .ids()
+            .filter(|&id| {
+                let cell = self.liberty.cell(id);
+                cell.is_buffer()
+                    && !self.dont_use(id)
+                    && self.is_link_cell(id)
+                    && !is_clock_buffer(cell)
+            })
+            .filter_map(|id| self.liberty.buffer_cell(id))
+            .collect();
+        list.sort_by(|&a, &b| {
+            self.buffer_drive_resistance(a)
+                .total_cmp(&self.buffer_drive_resistance(b))
+                .then_with(|| {
+                    self.liberty
+                        .cell(a.id)
+                        .name
+                        .cmp(&self.liberty.cell(b.id).name)
+                })
+        });
+        list
+    }
+
+    /// The footprint more than [`DOMINANT_FOOTPRINT_SHARE`] of `buffers`
+    /// have, when they have more than one.
+    fn dominant_footprint<'l>(&'l self, buffers: &[BufferCell]) -> Option<&'l str> {
+        let mut counts: Vec<(&str, usize)> = Vec::new();
+        for footprint in buffers
+            .iter()
+            .filter_map(|b| self.liberty.cell(b.id).footprint.as_deref())
+        {
+            match counts.iter_mut().find(|(f, _)| *f == footprint) {
+                Some((_, n)) => *n += 1,
+                None => counts.push((footprint, 1)),
+            }
+        }
+        if counts.len() <= 1 {
+            return None;
+        }
+        counts
+            .iter()
+            .find(|(_, n)| *n as f64 / buffers.len() as f64 > DOMINANT_FOOTPRINT_SHARE)
+            .map(|(f, _)| *f)
+    }
+}
+
+/// The [`BUFFER_SITES`] sites the most of `sites` stand on, the most used
+/// first; buffers without a site count as one.
+fn most_used_sites(sites: impl Iterator<Item = Option<SiteId>>) -> Vec<Option<SiteId>> {
+    let mut counts: Vec<(Option<SiteId>, usize)> = Vec::new();
+    for site in sites {
+        match counts.iter_mut().find(|(s, _)| *s == site) {
+            Some((_, n)) => *n += 1,
+            None => counts.push((site, 1)),
+        }
+    }
+    counts.sort_by_key(|(_, n)| std::cmp::Reverse(*n));
+    counts
+        .into_iter()
+        .take(BUFFER_SITES)
+        .map(|(s, _)| s)
+        .collect()
+}
+
+/// `buffers` split into [`DRIVE_BANDS`] consecutive bands as evenly as they
+/// go, the first bands taking one more where they do not divide.
+fn drive_bands(buffers: &[BufferCell]) -> impl Iterator<Item = &[BufferCell]> {
+    let n = buffers.len();
+    let size = n / DRIVE_BANDS;
+    let remainder = n % DRIVE_BANDS;
+    (0..DRIVE_BANDS).map(move |band| {
+        let start = band * size + band.min(remainder);
+        let end = (start + size + usize::from(band < remainder)).min(n);
+        &buffers[start.min(n)..end]
+    })
 }
 
 impl Link<'_> {
