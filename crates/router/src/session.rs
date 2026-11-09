@@ -247,7 +247,7 @@ impl GlobalSession {
 }
 
 /// The multiset of where the pins meet the grid, as `OpenROAD` compares
-/// nets' pin positions on the grid.
+/// nets' pin positions on the grid (`GlobalRouter::pinPositionsChanged`).
 fn grid_positions(terminals: &[PinTerminal]) -> Vec<(GCell, LayerId)> {
     let mut positions: Vec<(GCell, LayerId)> =
         terminals.iter().map(|t| (t.cell, t.pin_layer)).collect();
@@ -302,7 +302,8 @@ impl RouteSource for GlobalSession {
 }
 
 /// Where `OpenROAD`'s global router takes a pin to be: the lower left of
-/// the last shape of the pin on a routing layer.
+/// the last shape of the pin on a routing layer, as
+/// `GlobalRouter::makeItermPins` sets it.
 fn route_pin_position(db: &NetlistDB, pin: PinId) -> Point<Dbu> {
     db.pin_shapes(pin)
         .iter()
@@ -315,7 +316,8 @@ fn route_pin_position(db: &NetlistDB, pin: PinId) -> Point<Dbu> {
 /// a via between each pair of layers a column of the tree climbs, the
 /// vias from each pin's own layer up to where the tree starts, and a wire
 /// along each straight run of the tree between the points where it
-/// branches, turns, climbs or meets a pin.
+/// branches, turns, climbs or meets a pin, as `GlobalRouter::mergeSegments`
+/// leaves them.
 fn route_segments(
     center: &dyn Fn(GCell) -> Point<Dbu>,
     tree: &[Vec<GCell>],

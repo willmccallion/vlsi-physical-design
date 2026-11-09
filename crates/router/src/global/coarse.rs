@@ -1,11 +1,12 @@
-//! Coarse planning of rip-up and reroute, as CUGR's multi-level maze
-//! routing: before a ripped net is maze-routed on the gcell grid, a search
-//! over the whole chip on cells of [`SCALE`] by [`SCALE`] gcells, priced by
-//! how few free tracks they have left, picks the corridor its route keeps
-//! to. A net can then detour as far as the free tracks call for, while the
-//! fine search stays inside a band a coarse cell wide. CUGR's multi-source
-//! Dijkstra search is made an A* toward the pins still to join, which finds
-//! trees just as cheap while visiting far fewer cells of a long net.
+//! Coarse planning of rip-up and reroute, as the multi-level maze routing
+//! of cu-gr (CUGR 1, not `OpenROAD`'s `grt/src/cugr`): before a ripped net
+//! is maze-routed on the gcell grid, a search over the whole chip on cells
+//! of [`SCALE`] by [`SCALE`] gcells, priced by how few free tracks they
+//! have left, picks the corridor its route keeps to. A net can then detour
+//! as far as the free tracks call for, while the fine search stays inside a
+//! band a coarse cell wide. cu-gr's multi-source Dijkstra search is made an
+//! A* toward the pins still to join, which finds trees just as cheap while
+//! visiting far fewer cells of a long net.
 
 use super::{GCell, GcellWindow, GlobalGrid, GlobalNet, grid_index};
 use crate::tech::index_u32;
@@ -16,11 +17,12 @@ use rustc_hash::{FxHashMap, FxHashSet};
 use std::cell::RefCell;
 use std::collections::BinaryHeap;
 
-/// Gcells along each side of a coarse cell, as in CUGR.
+/// Gcells along each side of a coarse cell, as in cu-gr (CUGR 1).
 pub(super) const SCALE: u16 = 5;
 
-/// Free tracks a coarse cell is priced at when it has fewer, as in CUGR, so
-/// a full cell costs a bounded amount rather than an infinite one.
+/// Free tracks a coarse cell is priced at when it has fewer, as in cu-gr
+/// (CUGR 1), so a full cell costs a bounded amount rather than an infinite
+/// one.
 const MIN_FREE: f64 = 0.1;
 
 /// The gcell grid coarsened by [`SCALE`]: per layer and coarse cell, the
@@ -121,7 +123,7 @@ impl CoarseGrid {
     }
 
     /// The plan of a reroute of `net`: the cheapest coarse tree joining its
-    /// terminals, found by CUGR's multi-source search, which grows the tree
+    /// terminals, found by cu-gr's multi-source search, which grows the tree
     /// from one terminal and restarts from the whole tree at cost zero each
     /// time it reaches another. None when its terminals share one coarse
     /// cell, which the windowed search covers, or when fixed metal cuts one
@@ -271,7 +273,7 @@ impl CoarseGrid {
         }
     }
 
-    /// Cost of passing through a node, CUGR's inverse of its free tracks.
+    /// Cost of passing through a node, cu-gr's inverse of its free tracks.
     fn price(&self, node: usize) -> f64 {
         1.0 / self.free[node].max(MIN_FREE)
     }
@@ -471,7 +473,8 @@ impl CoarseTree {
 }
 
 /// Free tracks a gcell has left on its layer: the mean over the edges it
-/// lies between of their capacity less their usage, as CUGR's cell resource.
+/// lies between of their capacity less their usage, as cu-gr's (CUGR 1)
+/// cell resource.
 fn free_tracks(grid: &GlobalGrid, c: GCell) -> f64 {
     let mut sum = 0.0;
     let mut count = 0_u32;

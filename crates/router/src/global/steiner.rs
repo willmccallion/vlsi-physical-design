@@ -5,6 +5,8 @@
 //! is shortened by three-point Steiner points: wherever a node and two of
 //! its neighbours can be joined through the median of their positions with
 //! less wire than the two edges they replace, the median becomes a node.
+// NOTE: grt and grt's cugr build trees with FLUTE through stt
+// (PatternRoute::constructSteinerTree); PARE's heuristic can be longer.
 
 use crate::tree::connection_order;
 use pare_common::geom::dbu::Dbu;
@@ -14,7 +16,8 @@ use pare_common::geom::rect::Rect;
 /// A position in the plane of the gcell grid, as (column, row).
 pub(super) type Spot = (u16, u16);
 
-/// Passes over all nodes looking for Steiner points.
+/// Passes over all nodes looking for Steiner points. PARE tunable, no
+/// `OpenROAD` counterpart.
 const MAX_PASSES: usize = 16;
 
 /// A tree over gcell positions, rooted at node 0.

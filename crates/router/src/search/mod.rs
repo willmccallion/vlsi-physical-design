@@ -1,14 +1,17 @@
 //! The A* search over track crossings and what it costs.
 //!
 //! Every edge of the track graph costs as `TritonRoute` prices an edge of
-//! its grid graph: its length (a via counts as long as its cost), plus the
-//! round's conflict cost per unit of length if its metal or cuts would
-//! short or crowd another net's wiring, plus the round's marker cost per
-//! unit of length if it runs where a violation was marked lately.
-//! Obstacles, and other nets' pins and reserved pin access, never move, so
-//! they cost so much that a route through one exists only when nothing
-//! else does. A guide limits the search to gcells near a net's global
-//! route.
+//! its grid graph (`FlexGridGraph::getCosts`): its length (a via counts as
+//! long as its cost), plus the round's conflict cost per unit of length if
+//! its metal or cuts would short or crowd another net's wiring, plus the
+//! round's marker cost per unit of length if it runs where a violation was
+//! marked lately. Obstacles, and other nets' pins and reserved pin access,
+//! never move, so they cost so much that a route through one exists only
+//! when nothing else does. A guide limits the search to gcells near a net's
+//! global route.
+// NOTE: TritonRoute adds one per turn (FlexGridGraph::getNextPathCost) and
+// prices off-guide edges in getCosts; PARE has no turn cost and makes the
+// guide a hard bound, widened only when it holds no route.
 
 mod dense;
 mod marks;
@@ -33,6 +36,8 @@ use std::collections::BinaryHeap;
 
 /// Cost of crossing an obstacle or another net's fixed metal, in DBU of
 /// wirelength.
+// NOTE: getCosts charges ggFixedShapeCost_ per unit length and BLOCKCOST *
+// minWidth * 20 when blocked; PARE makes all fixed metal one near-wall price.
 const OBSTACLE_COST: f64 = 1e9;
 
 /// How hard one A* run tries.
@@ -44,14 +49,16 @@ struct Effort {
     limit: usize,
 }
 
-/// The first, near-optimal search of a connection.
+/// The first, near-optimal search of a connection. PARE tunable.
+// NOTE: FlexGridGraph's A* is unweighted and unbounded; PARE weighs its
+// heuristic and caps expansions to bound each search's time.
 const FOCUSED: Effort = Effort {
     weight: 1.0,
     limit: 2_000_000,
 };
 
 /// The greedy search that finds a path quickly when the focused one gives
-/// up; past its limit the connection gives up in this window.
+/// up; past its limit the connection gives up in this window. PARE tunable.
 const GREEDY: Effort = Effort {
     weight: 4.0,
     limit: 4_000_000,
@@ -570,7 +577,8 @@ impl Search<'_> {
     /// The price of an edge of `length` that `meets` what it meets and runs
     /// where a violation was marked if `marked`: its length, and the
     /// round's conflict and marker costs per unit of it, as `TritonRoute`
-    /// prices an edge of its grid graph. Fixed metal costs an obstacle.
+    /// prices an edge of its grid graph (`FlexGridGraph::getCosts`). Fixed
+    /// metal costs an obstacle.
     fn price(&self, length: f64, meets: Meets, marked: bool) -> Price {
         Price {
             length,
@@ -612,6 +620,8 @@ impl Search<'_> {
     /// Price of the wire step from `lower` to the next crossing along its
     /// track, telling `parts` whose metal it meets. It is marked when either
     /// end is.
+    // NOTE: FlexGridGraph::getMarkerCostAdj charges the node stepped into;
+    // PARE also charges the step leaving a marked node.
     fn step_price(&self, lower: Node, parts: &mut impl CostParts) -> Price {
         let upper = Node {
             cross: lower.cross + 1,

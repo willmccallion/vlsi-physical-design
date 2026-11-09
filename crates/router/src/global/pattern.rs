@@ -1,4 +1,4 @@
-//! 3D pattern routing of a net's Steiner tree, as in CUGR.
+//! 3D pattern routing of a net's Steiner tree, as in cu-gr (CUGR 1).
 //!
 //! Every tree edge runs straight or as one of its two L shapes, each leg on
 //! a layer of matching direction. Layers are chosen for the whole tree at
