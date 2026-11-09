@@ -43,9 +43,8 @@ pub fn parse_files(paths: &[PathBuf], dbu: DbuPerMicron) -> Result<Library, Pars
         parser.parse()?;
     }
     if library.routing_layers.is_empty() {
-        return Err(ParseError::Syntax {
+        return Err(ParseError::File {
             path: paths.first().cloned().unwrap_or_default(),
-            line: 1,
             message: "no routing layers defined".into(),
         });
     }

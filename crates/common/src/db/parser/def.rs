@@ -95,10 +95,10 @@ pub fn read_units(path: &Path) -> Result<DbuPerMicron, ParseError> {
         }
     }
     lx.finish()?;
-    Err(lx.error(
-        1,
-        "no UNITS DISTANCE MICRONS statement before the design body",
-    ))
+    Err(ParseError::File {
+        path: path.to_path_buf(),
+        message: "no UNITS DISTANCE MICRONS statement before the design body".into(),
+    })
 }
 
 /// Parses a DEF file into a design over `library`.

@@ -9,6 +9,7 @@ use pare_common::db::design::{
 use pare_common::db::global_route::{RoutePoint, RouteSegment};
 use pare_common::db::indices::{CellId, CutLayerId, LayerId, PinId, SpecialNetId};
 use pare_common::db::library::{Direction, LayerRef, Library, MacroClass, Shape};
+use pare_common::db::parser::lexer::ParseError;
 use pare_common::db::parser::{bookshelf, def, lef, segments};
 use pare_common::db::rules::SpacingTable;
 use pare_common::db::writer;
@@ -678,4 +679,72 @@ fn the_lowest_signal_layer_defaults_to_the_second() {
     let layer = RoutingConfig::default().lowest_signal_layer(&tiny_library());
 
     assert_eq!(layer, Ok(Some(LayerId(1))));
+}
+
+/// Parses a copy of the Bookshelf fixture with `old` replaced by `new` in
+/// its file `name`.
+fn bookshelf_with(name: &str, old: &str, new: &str, tag: &str) -> Result<NetlistDB, String> {
+    let dir = std::env::temp_dir().join(format!("pare-bookshelf-{tag}-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    for entry in std::fs::read_dir(fixture("bookshelf")).unwrap() {
+        let source = entry.unwrap().path();
+        let mut text = std::fs::read_to_string(&source).unwrap();
+        if source.file_name().unwrap() == name {
+            assert!(text.contains(old), "{name} has no '{old}'");
+            text = text.replacen(old, new, 1);
+        }
+        std::fs::write(dir.join(source.file_name().unwrap()), text).unwrap();
+    }
+    let parsed = bookshelf::parse(&dir.join("tiny.aux"), 6).map_err(|e| e.to_string());
+    std::fs::remove_dir_all(&dir).unwrap();
+    parsed
+}
+
+#[test]
+fn a_bookshelf_row_of_another_height_is_an_error_at_its_line() {
+    let error = bookshelf_with(
+        "tiny.scl",
+        "Coordinate   :\t32\n Height       :\t16",
+        "Coordinate   :\t32\n Height       :\t32",
+        "row-height",
+    )
+    .map(|_| ())
+    .unwrap_err();
+
+    assert!(
+        error.contains("tiny.scl:14: rows of different heights"),
+        "{error}"
+    );
+}
+
+#[test]
+fn a_bookshelf_node_named_twice_is_an_error_at_its_line() {
+    let error = bookshelf_with(
+        "tiny.nodes",
+        "\ta2\t4\t16\n",
+        "\ta2\t4\t16\n\ta0\t4\t16\n",
+        "node-name",
+    )
+    .map(|_| ())
+    .unwrap_err();
+
+    assert!(
+        error.contains("tiny.nodes:9: duplicate component 'a0'"),
+        "{error}"
+    );
+}
+
+#[test]
+fn a_def_without_units_is_an_error_of_the_whole_file() {
+    let path = std::env::temp_dir().join(format!("pare-no-units-{}.def", std::process::id()));
+    std::fs::write(
+        &path,
+        "VERSION 5.8 ;\nDESIGN x ;\nCOMPONENTS 0 ;\nEND COMPONENTS\n",
+    )
+    .unwrap();
+
+    let error = def::read_units(&path).unwrap_err();
+    std::fs::remove_file(&path).unwrap();
+
+    assert!(matches!(error, ParseError::File { .. }), "{error}");
 }

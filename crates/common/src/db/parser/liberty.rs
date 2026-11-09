@@ -31,7 +31,10 @@ pub fn parse_str(src: &str, path: &Path) -> Result<Liberty, ParseError> {
         .groups
         .iter()
         .find(|g| g.name == "library")
-        .ok_or_else(|| lexer.error(1, "no library group".into()))?;
+        .ok_or_else(|| ParseError::File {
+            path: path.to_path_buf(),
+            message: "no library group".into(),
+        })?;
     Interpreter::new(path).library(library)
 }
 
@@ -1712,6 +1715,13 @@ library (tiny) {
 
             assert!(lib.is_ok(), "{timing_type}: {lib:?}");
         }
+    }
+
+    #[test]
+    fn a_file_without_a_library_group_is_an_error_of_the_whole_file() {
+        let error = parse_str("/* empty */", Path::new("x.lib")).unwrap_err();
+
+        assert!(matches!(error, ParseError::File { .. }), "{error}");
     }
 
     /// A macro whose clock pin `CK` has the clock tree path timing groups
