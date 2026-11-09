@@ -7,6 +7,7 @@ use pare_common::db::design::{EditError, NetlistDB, PinOwner, PlacementStatus};
 use pare_common::db::indices::{CellId, IdVec, IoPinId, MacroPinId, NetId, PinId, TableIndex};
 use pare_common::db::liberty::{BufferCell, LibPortId};
 use pare_common::db::library::{DuplicateName, PinDirection};
+use pare_common::db::sdc::Sdc;
 use pare_common::geom::dbu::Dbu;
 use pare_common::geom::orient::Orientation;
 use pare_common::geom::point::Point;
@@ -28,20 +29,22 @@ pub enum BufferError {
     MissingPins(String),
 }
 
-/// Removes every buffer that may go, as `OpenROAD`'s `remove_buffers`
-/// without arguments.
-///
-/// A buffer goes when it is a plain standard cell the library calls a
-/// buffer and does not protect, it is not fixed, and its nets merge into
-/// one. Returns how many went.
-pub fn remove_buffers(db: &mut NetlistDB, link: &Link<'_>) -> Result<usize, BufferError> {
+/// Removes every buffer that may go under `sdc`, as `OpenROAD`'s
+/// `remove_buffers` without arguments: each buffer
+/// `UnbufferMove::canRemoveBuffer` lets go, its nets merged into one.
+/// Returns how many went.
+pub fn remove_buffers(
+    db: &mut NetlistDB,
+    link: &Link<'_>,
+    sdc: Option<&Sdc>,
+) -> Result<usize, BufferError> {
     let mut removal = BufferRemoval {
         cells: IdVec::filled(false, db.cells.len()),
         nets: IdVec::filled(false, db.nets.len()),
         renames: Vec::new(),
     };
     for instance in db.cells.ids() {
-        let Some(buffer) = removable_buffer(db, link, instance) else {
+        let Some(buffer) = removable_buffer(db, link, sdc, instance) else {
             continue;
         };
         let pin_for = |port: LibPortId| -> Option<PinId> {
@@ -58,7 +61,8 @@ pub fn remove_buffers(db: &mut NetlistDB, link: &Link<'_>) -> Result<usize, Buff
         if let Some(out_pin) = pin_for(buffer.output) {
             let (in_net, out_net) = (db.pins[in_pin].net, db.pins[out_pin].net);
             if in_net != out_net {
-                removal.merge_nets(db, instance, in_net, out_net);
+                let merge = merged_nets(&Netlist::new(db, link), in_net, out_net);
+                removal.merge_nets(db, instance, merge);
             }
         }
         removal.cells[instance] = true;
@@ -66,17 +70,55 @@ pub fn remove_buffers(db: &mut NetlistDB, link: &Link<'_>) -> Result<usize, Buff
     removal.apply(db)
 }
 
-/// The buffer `instance` is when it may go: a plain standard cell the
-/// library calls a buffer and does not protect, not fixed.
-fn removable_buffer(db: &NetlistDB, link: &Link<'_>, instance: CellId) -> Option<BufferCell> {
+/// The buffer `instance` is when it may be taken out, as
+/// `UnbufferMove::canRemoveBuffer` honouring dont-touch and fixed cells: a
+/// plain standard cell the library calls a buffer and does not protect,
+/// not fixed, and constrained by nothing in `sdc`.
+pub(crate) fn removable_buffer(
+    db: &NetlistDB,
+    link: &Link<'_>,
+    sdc: Option<&Sdc>,
+    instance: CellId,
+) -> Option<BufferCell> {
     let (lib_id, lib) = link.cell(db, instance)?;
+    // Of what Sdc::isConstrained asks of the buffer, its pins and the net
+    // that goes, PARE's constraints can hold only an instance's own derate.
+    let constrained = sdc.is_some_and(|sdc| sdc.cell_derates.contains_key(&instance));
+    // NOTE: OpenROAD protects only set_dont_touch instances, which PARE
+    // lacks; PARE honours the library's dont_touch in their stead.
     let removable = is_logic_std_cell(db, instance)
         && lib.is_buffer()
         && !lib.dont_touch
-        && db.cells[instance].status != PlacementStatus::Fixed;
+        && db.cells[instance].status != PlacementStatus::Fixed
+        && !constrained;
     removable
         .then(|| link.liberty.buffer_cell(lib_id))
         .flatten()
+}
+
+/// The nets a buffer's removal joins: the one that survives and the one
+/// that goes.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) struct MergedNets {
+    pub(crate) survivor: NetId,
+    pub(crate) removed: NetId,
+}
+
+/// Which of a buffer's input and output nets survives its removal, as
+/// `UnbufferMove::removeBuffer` decides: the input net, unless only the
+/// output net reaches a port.
+pub(crate) fn merged_nets(netlist: &Netlist<'_>, in_net: NetId, out_net: NetId) -> MergedNets {
+    if !netlist.has_port(in_net) && netlist.has_port(out_net) {
+        MergedNets {
+            survivor: out_net,
+            removed: in_net,
+        }
+    } else {
+        MergedNets {
+            survivor: in_net,
+            removed: out_net,
+        }
+    }
 }
 
 /// The buffers and nets [`remove_buffers`] takes out, and the nets it
@@ -89,20 +131,10 @@ struct BufferRemoval {
 }
 
 impl BufferRemoval {
-    /// Merges buffer `instance`'s input and output nets: the one with a port
-    /// survives, else the input, and the other's connections move to it.
-    fn merge_nets(&mut self, db: &mut NetlistDB, instance: CellId, in_net: NetId, out_net: NetId) {
-        let has_port = |net: NetId| {
-            db.nets[net]
-                .pins
-                .iter()
-                .any(|&p| matches!(db.pins[p].owner, PinOwner::Io(_)))
-        };
-        let (survivor, removed) = if !has_port(in_net) && has_port(out_net) {
-            (out_net, in_net)
-        } else {
-            (in_net, out_net)
-        };
+    /// Merges buffer `instance`'s input and output nets: the removed net's
+    /// connections move to the survivor.
+    fn merge_nets(&mut self, db: &mut NetlistDB, instance: CellId, merge: MergedNets) {
+        let MergedNets { survivor, removed } = merge;
         let survivor_name = db.nets[survivor].name.clone();
         let removed_name = db.nets[removed].name.clone();
         if hierarchy_depth(&survivor_name) > hierarchy_depth(&removed_name) {
@@ -150,7 +182,7 @@ fn flagged<I: TableIndex>(flags: &IdVec<I, bool>) -> Vec<I> {
 }
 
 /// How deep in the design hierarchy a name sits: its path separators.
-fn hierarchy_depth(name: &str) -> usize {
+pub(crate) fn hierarchy_depth(name: &str) -> usize {
     name.matches('/').count()
 }
 
@@ -355,6 +387,8 @@ fn insert_before_load(
 mod tests {
     use super::*;
     use crate::testing::{DefSections, cells, clock_cells_source, def_text, design, pin};
+    use pare_common::db::parser::sdc;
+    use std::path::Path;
 
     /// Buffers to remove: `b0` and `b1` in a chain from port `in0` to flop
     /// `f1`, `b2` from port `in1` to flop `f2`, `b3` from `f1` to port
@@ -395,7 +429,7 @@ mod tests {
         let lib = cells(&clock_cells_source());
         let link = Link::new(&db, &lib, &[]).unwrap();
 
-        let removed = remove_buffers(&mut db, &link).unwrap();
+        let removed = remove_buffers(&mut db, &link, None).unwrap();
 
         assert_eq!(removed, 5);
         let left: Vec<&str> = db.cells.iter().map(|c| c.name.as_str()).collect();
@@ -405,12 +439,26 @@ mod tests {
     }
 
     #[test]
+    fn a_buffer_with_its_own_derate_stays() {
+        let mut db = buffered();
+        let lib = cells(&clock_cells_source());
+        let link = Link::new(&db, &lib, &[]).unwrap();
+        let constraints = "set_timing_derate -late 1.1 [get_cells b2]\n";
+        let sdc = sdc::parse_str(constraints, Path::new("test.sdc"), &db, &lib).unwrap();
+
+        let removed = remove_buffers(&mut db, &link, Some(&sdc)).unwrap();
+
+        assert_eq!(removed, 4);
+        assert!(db.cell_id("b2").is_some());
+    }
+
+    #[test]
     fn the_net_with_a_port_survives_and_a_deeper_survivor_takes_the_shallower_name() {
         let mut db = buffered();
         let lib = cells(&clock_cells_source());
         let link = Link::new(&db, &lib, &[]).unwrap();
 
-        let _ = remove_buffers(&mut db, &link).unwrap();
+        let _ = remove_buffers(&mut db, &link, None).unwrap();
 
         let net_name = |name: &str| db.nets[db.pins[pin(&db, name)].net].name.as_str();
         assert_eq!(net_name("f1/Q"), "out0");
@@ -424,7 +472,7 @@ mod tests {
         let mut db = buffered();
         let lib = cells(&clock_cells_source());
         let link = Link::new(&db, &lib, &[]).unwrap();
-        let _ = remove_buffers(&mut db, &link).unwrap();
+        let _ = remove_buffers(&mut db, &link, None).unwrap();
         let link = Link::new(&db, &lib, &[]).unwrap();
         let buffers = link.find_buffers(&db).unwrap();
         let (clocks, constants) = {
