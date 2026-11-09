@@ -113,6 +113,31 @@ fn fuzzy_le(a: f64, b: f64) -> bool {
     fuzzy_eq(a, b, FUZZY_EPSILON) || a < b
 }
 
+/// A blockage in the tree's length unit, by its lower left and upper right
+/// corners.
+#[derive(Clone, Copy, Debug)]
+struct TreeBox {
+    low: TreePoint,
+    high: TreePoint,
+}
+
+impl TreeBox {
+    /// Whether `p` lies on the box's boundary, as `TreeBuilder::isAlongBbox`.
+    fn has_on_edge(self, p: TreePoint) -> bool {
+        let Self {
+            low: TreePoint { x: x1, y: y1 },
+            high: TreePoint { x: x2, y: y2 },
+        } = self;
+        let on_vertical = (fuzzy_eq(p.x, x1, FUZZY_EPSILON) || fuzzy_eq(p.x, x2, FUZZY_EPSILON))
+            && fuzzy_ge(p.y, y1)
+            && fuzzy_le(p.y, y2);
+        let on_horizontal = (fuzzy_eq(p.y, y1, FUZZY_EPSILON) || fuzzy_eq(p.y, y2, FUZZY_EPSILON))
+            && fuzzy_ge(p.x, x1)
+            && fuzzy_le(p.x, x2);
+        on_vertical || on_horizontal
+    }
+}
+
 /// A region with a center that, once read, stays put unless set, as
 /// `TritonCTS`'s `Box`.
 #[derive(Clone, Copy, Debug, Default)]
@@ -318,12 +343,14 @@ impl Builder {
 
     /// The blockage `p` lies strictly inside, scaled to the tree's unit,
     /// as `TreeBuilder::findBlockage`.
-    fn find_blockage(ctx: &TreeContext<'_>, p: TreePoint, scale: f64) -> Option<[f64; 4]> {
+    fn find_blockage(ctx: &TreeContext<'_>, p: TreePoint, scale: f64) -> Option<TreeBox> {
         let (bx, by) = (p.x * scale, p.y * scale);
         ctx.blockages.iter().find_map(|b| {
             let [x1, y1, x2, y2] = [b.min.x, b.min.y, b.max.x, b.max.y].map(|v| v.get() as f64);
-            (bx > x1 && bx < x2 && by > y1 && by < y2)
-                .then(|| [x1 / scale, y1 / scale, x2 / scale, y2 / scale])
+            (bx > x1 && bx < x2 && by > y1 && by < y2).then(|| TreeBox {
+                low: TreePoint::new(x1 / scale, y1 / scale),
+                high: TreePoint::new(x2 / scale, y2 / scale),
+            })
         })
     }
 
@@ -359,7 +386,11 @@ impl Builder {
         p: TreePoint,
         buffer: BufferCell,
     ) -> TreePoint {
-        let Some([x1, y1, x2, y2]) = Self::find_blockage(ctx, p, self.unit()) else {
+        let Some(TreeBox {
+            low: TreePoint { x: x1, y: y1 },
+            high: TreePoint { x: x2, y: y2 },
+        }) = Self::find_blockage(ctx, p, self.unit())
+        else {
             return p;
         };
         let (w, h) = self.buffer_size(ctx, buffer);
@@ -862,8 +893,8 @@ impl Builder {
                 } else {
                     Self::find_blockage(ctx, point, unit)
                 };
-                let moved = if let Some(rect) = blockage {
-                    let candidates = Self::legal_locations(parent, point, rect);
+                let moved = if let Some(blockage) = blockage {
+                    let candidates = Self::legal_locations(parent, point, blockage);
                     let search = LegalSearch {
                         ctx,
                         target: length,
@@ -871,7 +902,7 @@ impl Builder {
                         sinks: &sinks,
                         direction,
                     };
-                    let best = self.best_legal_location(&search, point, &candidates, rect);
+                    let best = self.best_legal_location(&search, point, &candidates, blockage);
                     self.commit_move(point, best);
                     best
                 } else if self.is_occupied(point) || !fuzzy_eq(leng, length, 0.01) {
@@ -919,9 +950,9 @@ impl Builder {
                     continue;
                 }
                 if !self.is_occupied(point)
-                    && let Some([x1, y1, x2, y2]) = Self::find_blockage(ctx, point, unit)
+                    && let Some(blockage) = Self::find_blockage(ctx, point, unit)
                 {
-                    let candidates = Self::legal_locations(parent, point, [x1, y1, x2, y2]);
+                    let candidates = Self::legal_locations(parent, point, blockage);
                     let search = LegalSearch {
                         ctx,
                         target: length,
@@ -930,8 +961,7 @@ impl Builder {
                         direction: Direction::North,
                     };
                     // NOTE: legalizeDummy's typo passes x1, y2, x2, y2; PARE the whole box.
-                    let best =
-                        self.best_legal_location(&search, point, &candidates, [x1, y1, x2, y2]);
+                    let best = self.best_legal_location(&search, point, &candidates, blockage);
                     self.commit_move(point, best);
                     point = best;
                 }
@@ -943,8 +973,11 @@ impl Builder {
     /// The corners of a blockage, where the branch's axes meet its edges
     /// and where the line from the parent crosses them, as
     /// `HTreeBuilder::findLegalLocations`.
-    fn legal_locations(parent: TreePoint, branch: TreePoint, rect: [f64; 4]) -> Vec<TreePoint> {
-        let [x1, y1, x2, y2] = rect;
+    fn legal_locations(parent: TreePoint, branch: TreePoint, blockage: TreeBox) -> Vec<TreePoint> {
+        let TreeBox {
+            low: TreePoint { x: x1, y: y1 },
+            high: TreePoint { x: x2, y: y2 },
+        } = blockage;
         let (bx, by) = (branch.x, branch.y);
         let m = (parent.y - by) / (parent.x - bx);
         let candidates = [
@@ -964,11 +997,11 @@ impl Builder {
         candidates
             .iter()
             .map(|&(x, y)| TreePoint::new(x, y))
-            .filter(|&c| !c.same(parent) && along_box(c, rect))
+            .filter(|&c| !c.same(parent) && blockage.has_on_edge(c))
             .collect()
     }
 
-    /// The candidate around the blockage `rect` whose path through it is
+    /// The candidate around `blockage` whose path through it is
     /// nearest the search's target length, adjusted along or beyond the
     /// blockage when it is not at the target from the parent, as
     /// `HTreeBuilder::findBestLegalLocation`.
@@ -977,7 +1010,7 @@ impl Builder {
         search: &LegalSearch<'_>,
         branch: TreePoint,
         candidates: &[TreePoint],
-        rect: [f64; 4],
+        blockage: TreeBox,
     ) -> TreePoint {
         let (target, parent) = (search.target, search.parent);
         let mut best = TreePoint::new(0.0, 0.0);
@@ -993,7 +1026,7 @@ impl Builder {
         if fuzzy_eq(target, self.compute_dist(best, parent), FUZZY_EPSILON) {
             return best;
         }
-        if let Some(along) = self.adjust_along_blockage(search, best, rect) {
+        if let Some(along) = self.adjust_along_blockage(search, best, blockage) {
             return along;
         }
         self.adjust_beyond_blockage(search, best)
@@ -1005,7 +1038,7 @@ impl Builder {
         &self,
         search: &LegalSearch<'_>,
         current: TreePoint,
-        rect: [f64; 4],
+        blockage: TreeBox,
     ) -> Option<TreePoint> {
         let LegalSearch {
             ctx,
@@ -1028,7 +1061,7 @@ impl Builder {
             if !fuzzy_eq(self.compute_dist(c, parent), target, FUZZY_EPSILON) {
                 continue;
             }
-            let legal = (!self.is_occupied(c) && along_box(c, rect))
+            let legal = (!self.is_occupied(c) && blockage.has_on_edge(c))
                 || self.legal_location(ctx, c, self.unit());
             if !legal {
                 continue;
@@ -1190,18 +1223,6 @@ struct LegalSearch<'a> {
     parent: TreePoint,
     sinks: &'a [TreePoint],
     direction: Direction,
-}
-
-/// Whether `p` lies on the boundary of `rect`, as `TreeBuilder::isAlongBbox`.
-fn along_box(p: TreePoint, rect: [f64; 4]) -> bool {
-    let [x1, y1, x2, y2] = rect;
-    let on_vertical = (fuzzy_eq(p.x, x1, FUZZY_EPSILON) || fuzzy_eq(p.x, x2, FUZZY_EPSILON))
-        && fuzzy_ge(p.y, y1)
-        && fuzzy_le(p.y, y2);
-    let on_horizontal = (fuzzy_eq(p.y, y1, FUZZY_EPSILON) || fuzzy_eq(p.y, y2, FUZZY_EPSILON))
-        && fuzzy_ge(p.x, x1)
-        && fuzzy_le(p.x, x2);
-    on_vertical || on_horizontal
 }
 
 /// Pulls a point toward its parent until it is `length` away, after
@@ -1482,13 +1503,17 @@ fn arc_candidates(parent: TreePoint, target: f64, direction: Direction) -> Vec<T
 }
 
 /// The two points at distance `target` from `parent` along the side of
-/// `[x1, y1, x2, y2]` facing it.
+/// `blockage` facing it.
 fn along_blockage(
     parent: TreePoint,
     target: f64,
-    [x1, y1, x2, y2]: [f64; 4],
+    blockage: TreeBox,
     direction: Direction,
 ) -> [TreePoint; 2] {
+    let TreeBox {
+        low: TreePoint { x: x1, y: y1 },
+        high: TreePoint { x: x2, y: y2 },
+    } = blockage;
     let (px, py) = (parent.x, parent.y);
     match direction {
         Direction::North => [
