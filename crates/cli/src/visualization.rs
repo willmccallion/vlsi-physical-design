@@ -78,7 +78,7 @@ impl PixelMap {
 /// # Errors
 ///
 /// When the image cannot be saved.
-pub fn draw_placement(db: &NetlistDB, path: &Path, size: u32) -> image::ImageResult<()> {
+pub(crate) fn draw_placement(db: &NetlistDB, path: &Path, size: u32) -> image::ImageResult<()> {
     let fit = Fit::new(&db.die_area, size);
     let mut img = RgbImage::from_pixel(fit.width, fit.height, Rgb([20, 20, 20]));
     paint_cells(db, &PixelMap::new(db, fit), &mut img);
@@ -111,7 +111,7 @@ const MIN_ROUTED_PIXELS: u32 = 4000;
 /// # Errors
 ///
 /// When the image cannot be saved.
-pub fn draw_routed_design(db: &NetlistDB, path: &Path, size: u32) -> image::ImageResult<()> {
+pub(crate) fn draw_routed_design(db: &NetlistDB, path: &Path, size: u32) -> image::ImageResult<()> {
     let drawn = Fit::new(&db.die_area, size.max(MIN_ROUTED_PIXELS));
     let mut img = RgbaImage::from_pixel(drawn.width, drawn.height, Rgba([0, 0, 0, 255]));
     paint_routed(db, &PixelMap::new(db, drawn), &mut img);
@@ -235,7 +235,7 @@ const NET_COLORS: [[u8; 3]; 6] = [
 /// # Errors
 ///
 /// When the image cannot be written.
-pub fn draw_area(
+pub(crate) fn draw_area(
     layout: &Layout,
     area: Rect<Dbu>,
     layers: &IdVec<LayerId, bool>,

@@ -10,45 +10,45 @@ use std::time::Duration;
 
 /// Everything a run reports.
 #[derive(Debug, Default, Serialize)]
-pub struct Report {
+pub(crate) struct Report {
     /// Design name from the input.
-    pub design: String,
+    pub(crate) design: String,
     /// The config file the run used.
-    pub config: String,
+    pub(crate) config: String,
     /// Wall time of each phase, in order.
-    pub phases: Vec<PhaseTime>,
+    pub(crate) phases: Vec<PhaseTime>,
     /// Netlist repair results, when the run repaired the netlist.
-    pub netlist: Option<NetlistSummary>,
+    pub(crate) netlist: Option<NetlistSummary>,
     /// Clock tree synthesis results, when the run built clock trees.
-    pub clock_tree: Option<ClockTreeSummary>,
+    pub(crate) clock_tree: Option<ClockTreeSummary>,
     /// Timing repair results, when the run had constraints.
-    pub timing: Option<TimingSummary>,
+    pub(crate) timing: Option<TimingSummary>,
     /// Repair results on the global routes' parasitics, when the run
     /// repaired after global routing.
-    pub global_route_repair: Option<GlobalRouteRepairSummary>,
+    pub(crate) global_route_repair: Option<GlobalRouteRepairSummary>,
     /// Placement results, when the run placed.
-    pub placement: Option<PlacementSummary>,
+    pub(crate) placement: Option<PlacementSummary>,
     /// Routing results, when the run routed.
-    pub routing: Option<RoutingSummary>,
+    pub(crate) routing: Option<RoutingSummary>,
     /// What the checks found.
-    pub checks: CheckSummary,
+    pub(crate) checks: CheckSummary,
     /// Whether the run finished without an error and passed its checks.
-    pub passed: bool,
+    pub(crate) passed: bool,
     /// Wall time of the whole run.
     #[serde(rename = "wall_seconds", serialize_with = "as_seconds")]
-    pub wall: Duration,
+    pub(crate) wall: Duration,
     /// Peak resident memory of the process in megabytes, where known.
-    pub peak_rss_mb: Option<u64>,
+    pub(crate) peak_rss_mb: Option<u64>,
 }
 
 /// The wall time of one phase.
 #[derive(Debug, Serialize)]
-pub struct PhaseTime {
+pub(crate) struct PhaseTime {
     /// What the phase did.
-    pub name: &'static str,
+    pub(crate) name: &'static str,
     /// Its wall time.
     #[serde(rename = "seconds", serialize_with = "as_seconds")]
-    pub elapsed: Duration,
+    pub(crate) elapsed: Duration,
 }
 
 /// Writes a wall time as seconds, the unit the keys name.
@@ -58,33 +58,33 @@ fn as_seconds<S: Serializer>(time: &Duration, serializer: S) -> Result<S::Ok, S:
 
 /// What netlist repair did.
 #[derive(Clone, Debug, Default, Serialize)]
-pub struct NetlistSummary {
+pub(crate) struct NetlistSummary {
     /// Buffers from synthesis removed before placement.
-    pub buffers_removed: usize,
+    pub(crate) buffers_removed: usize,
     /// Buffers added after input ports.
-    pub input_buffers: usize,
+    pub(crate) input_buffers: usize,
     /// Buffers added before output ports.
-    pub output_buffers: usize,
+    pub(crate) output_buffers: usize,
     /// The buffer cell the ports got.
-    pub buffer_cell: String,
+    pub(crate) buffer_cell: String,
     /// What design repair after placement did.
     #[serde(flatten)]
-    pub design: DesignRepairSummary,
+    pub(crate) design: DesignRepairSummary,
 }
 
 /// What design repair did.
 #[derive(Clone, Copy, Debug, Default, Serialize)]
-pub struct DesignRepairSummary {
+pub(crate) struct DesignRepairSummary {
     /// Drivers whose own or whose loads' slew broke a limit.
-    pub slew_violations: usize,
+    pub(crate) slew_violations: usize,
     /// Drivers whose load broke their capacitance limit.
-    pub cap_violations: usize,
+    pub(crate) cap_violations: usize,
     /// Nets repair changed.
-    pub repaired_nets: usize,
+    pub(crate) repaired_nets: usize,
     /// Instances repair resized.
-    pub resized: usize,
+    pub(crate) resized: usize,
     /// Repeaters repair inserted.
-    pub repeaters: usize,
+    pub(crate) repeaters: usize,
 }
 
 impl DesignRepairSummary {
@@ -102,74 +102,74 @@ impl DesignRepairSummary {
 
 /// What clock tree synthesis did.
 #[derive(Debug, Default, Serialize)]
-pub struct ClockTreeSummary {
+pub(crate) struct ClockTreeSummary {
     /// Clock nets a tree was built for.
-    pub trees: usize,
+    pub(crate) trees: usize,
     /// Sinks the trees reach.
-    pub sinks: usize,
+    pub(crate) sinks: usize,
     /// Clock buffers inserted.
-    pub buffers: usize,
+    pub(crate) buffers: usize,
     /// Dummy loads inserted.
-    pub dummies: usize,
+    pub(crate) dummies: usize,
     /// Clock gates cloned.
-    pub cloned_gates: usize,
+    pub(crate) cloned_gates: usize,
     /// Clock inverters cloned at their loads.
-    pub cloned_inverters: usize,
+    pub(crate) cloned_inverters: usize,
     /// Repeaters inserted on long clock nets.
-    pub clock_net_repeaters: usize,
+    pub(crate) clock_net_repeaters: usize,
     /// Delay buffers inserted to balance the trees' latencies.
-    pub delay_buffers: usize,
+    pub(crate) delay_buffers: usize,
 }
 
 /// What design and timing repair did on the global routes' parasitics.
 #[derive(Debug, Default, Serialize)]
-pub struct GlobalRouteRepairSummary {
+pub(crate) struct GlobalRouteRepairSummary {
     /// What design repair did.
     #[serde(flatten)]
-    pub design: DesignRepairSummary,
+    pub(crate) design: DesignRepairSummary,
     /// What timing repair did.
-    pub timing: Option<TimingSummary>,
+    pub(crate) timing: Option<TimingSummary>,
 }
 
 /// What setup repair did, with slacks in nanoseconds.
 #[derive(Debug, Default, Serialize)]
-pub struct TimingSummary {
+pub(crate) struct TimingSummary {
     /// Endpoints failing setup before repair.
-    pub failing_before: usize,
+    pub(crate) failing_before: usize,
     /// Endpoints failing setup after repair.
-    pub failing_after: usize,
+    pub(crate) failing_after: usize,
     /// Worst setup slack before repair.
-    pub wns_before_ns: f64,
+    pub(crate) wns_before_ns: f64,
     /// Worst setup slack after repair.
-    pub wns_after_ns: f64,
+    pub(crate) wns_after_ns: f64,
     /// Total negative setup slack before repair.
-    pub tns_before_ns: f64,
+    pub(crate) tns_before_ns: f64,
     /// Total negative setup slack after repair.
-    pub tns_after_ns: f64,
+    pub(crate) tns_after_ns: f64,
     /// Buffers repair removed.
-    pub removed: usize,
+    pub(crate) removed: usize,
     /// Gates repair resized.
-    pub resized: usize,
+    pub(crate) resized: usize,
     /// Buffers repair inserted.
-    pub inserted: usize,
+    pub(crate) inserted: usize,
     /// Gates repair cloned.
-    pub cloned: usize,
+    pub(crate) cloned: usize,
     /// Input pins repair swapped.
-    pub swapped: usize,
+    pub(crate) swapped: usize,
     /// Repair iterations.
-    pub iterations: usize,
+    pub(crate) iterations: usize,
     /// Cell area change, as a percentage.
-    pub area_change_percent: f64,
+    pub(crate) area_change_percent: f64,
     /// Endpoints failing hold before hold repair.
-    pub hold_failing_before: usize,
+    pub(crate) hold_failing_before: usize,
     /// Endpoints failing hold after it.
-    pub hold_failing_after: usize,
+    pub(crate) hold_failing_after: usize,
     /// Worst hold slack before hold repair.
-    pub hold_wns_before_ns: f64,
+    pub(crate) hold_wns_before_ns: f64,
     /// Worst hold slack after it.
-    pub hold_wns_after_ns: f64,
+    pub(crate) hold_wns_after_ns: f64,
     /// Hold buffers inserted.
-    pub hold_buffers: usize,
+    pub(crate) hold_buffers: usize,
 }
 
 impl TimingSummary {
@@ -200,81 +200,81 @@ impl TimingSummary {
 
 /// What placement did.
 #[derive(Debug, Serialize)]
-pub struct PlacementSummary {
+pub(crate) struct PlacementSummary {
     /// What global placement did, when the run placed from scratch.
-    pub global: Option<GlobalPlacementSummary>,
+    pub(crate) global: Option<GlobalPlacementSummary>,
     /// Signal pins left where fixed metal blocks every via to them, when
     /// vias reach the lowest signal layer.
-    pub blocked_pins: Option<usize>,
+    pub(crate) blocked_pins: Option<usize>,
     /// Cells detailed placement moved or turned.
-    pub detailed_moves: usize,
+    pub(crate) detailed_moves: usize,
     /// Half-perimeter wirelength after detailed placement, in microns.
-    pub detailed_hpwl_um: f64,
+    pub(crate) detailed_hpwl_um: f64,
     /// Half-perimeter wirelength of the placement written out, after the
     /// clock trees, timing repair and legalization that follow detailed
     /// placement, in microns.
-    pub final_hpwl_um: f64,
+    pub(crate) final_hpwl_um: f64,
 }
 
 /// What global placement did.
 #[derive(Debug, Serialize)]
-pub struct GlobalPlacementSummary {
+pub(crate) struct GlobalPlacementSummary {
     /// Movable cells placed.
-    pub cells: usize,
+    pub(crate) cells: usize,
     /// Nets the placer optimised.
-    pub nets: usize,
+    pub(crate) nets: usize,
     /// Iterations run.
-    pub iterations: usize,
+    pub(crate) iterations: usize,
     /// Density overflow where it stopped.
-    pub overflow: f64,
+    pub(crate) overflow: f64,
     /// Half-perimeter wirelength where it stopped, in microns.
-    pub hpwl_um: f64,
+    pub(crate) hpwl_um: f64,
     /// Timing-driven repairs made along the way.
-    pub timing_rounds: usize,
+    pub(crate) timing_rounds: usize,
 }
 
 /// What routing did.
 #[derive(Debug, Default, Serialize)]
-pub struct RoutingSummary {
+pub(crate) struct RoutingSummary {
     /// Signal nets routed.
-    pub nets: usize,
+    pub(crate) nets: usize,
     /// Repair rounds run.
-    pub rounds: usize,
+    pub(crate) rounds: usize,
     /// Nets with a pin no access point reaches.
-    pub inaccessible: usize,
+    pub(crate) inaccessible: usize,
     /// Nets whose search failed to connect every pin.
-    pub incomplete: usize,
+    pub(crate) incomplete: usize,
     /// Nets still in conflict when routing stopped.
-    pub conflicted: usize,
+    pub(crate) conflicted: usize,
 }
 
 /// What the placement, connectivity and design rule checks found.
 #[derive(Debug, Default, Serialize)]
-pub struct CheckSummary {
+pub(crate) struct CheckSummary {
     /// Placement violations.
-    pub placement_violations: usize,
+    pub(crate) placement_violations: usize,
     /// Nets with disconnected pins.
-    pub opens: usize,
+    pub(crate) opens: usize,
     /// Total centerline wirelength in microns.
-    pub wirelength_um: f64,
+    pub(crate) wirelength_um: f64,
     /// Via instances.
-    pub vias: usize,
+    pub(crate) vias: usize,
     /// Design rule violations involving routed metal, by kind.
-    pub violations: BTreeMap<String, usize>,
+    pub(crate) violations: BTreeMap<String, usize>,
     /// Advisory violations, by kind.
-    pub advisory: BTreeMap<String, usize>,
+    pub(crate) advisory: BTreeMap<String, usize>,
     /// Violations between routed metal inside a pin and the obstruction
     /// covering that pin, which the library makes unavoidable.
-    pub pin_obstructions: usize,
+    pub(crate) pin_obstructions: usize,
     /// Violations among fixed metal that placement takes part in.
-    pub from_placement: usize,
+    pub(crate) from_placement: usize,
     /// Violations among fixed metal the input alone makes.
-    pub in_input: usize,
+    pub(crate) in_input: usize,
 }
 
 impl Report {
     /// Writes the report as JSON to `path`.
-    pub fn write(&self, path: &Path) -> anyhow::Result<()> {
+    pub(crate) fn write(&self, path: &Path) -> anyhow::Result<()> {
         let text = serde_json::to_string_pretty(self)?;
         std::fs::write(path, text)
             .with_context(|| format!("cannot write report {}", path.display()))

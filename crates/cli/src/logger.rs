@@ -16,7 +16,7 @@ const STDERR_COLOR: Condition = Condition::from(|| {
 
 /// Initializes logging at the info level unless `RUST_LOG` says otherwise,
 /// and colours for every styled line PARE prints.
-pub fn init() {
+pub(crate) fn init() {
     yansi::whenever(STDERR_COLOR);
     env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("info"))
         .format(|buf, record| match level_prefix(record.level()) {
