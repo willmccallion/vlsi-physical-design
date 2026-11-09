@@ -166,6 +166,9 @@ impl NetParasitics {
     /// `MakeWireParasitics::estimateParasitics`.
     #[must_use]
     pub fn from_route(db: &NetlistDB, net: NetId, route: NetRoute, rc: &RouteRc) -> Self {
+        // NOTE: MakeWireParasitics::layerRC reads the rule for the layer
+        // unchecked and crashes where the NDR has none; PARE leaves the
+        // resistance unscaled there.
         let ndr_width = |layer: LayerId| {
             let rule = db.nets[net].non_default_rule?;
             db.non_default_rules[rule]

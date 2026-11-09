@@ -153,6 +153,8 @@ impl NetParasitics {
             .unwrap_or(0);
         let points: Vec<Point<Dbu>> = pins.iter().map(|&(_, at)| at).collect();
         let tree = steiner::prim_dijkstra(&points, driver, steiner::DEFAULT_ALPHA);
+        // NOTE: SteinerTreeBuilder falls back to FLUTE when checkTree fails;
+        // PARE keeps the Prim-Dijkstra tree, which still joins every pin.
         if !steiner::is_valid(&tree) {
             log::debug!(
                 "Steiner tree of {} crosses itself; OpenROAD would fall back to FLUTE here",
@@ -174,6 +176,10 @@ impl NetParasitics {
                 });
                 continue;
             }
+            // NOTE: estimateWireParasiticSteiner weighs a branch by the
+            // horizontal and vertical RC, scales an NDR net's resistance by
+            // its width and keeps values in float; PARE takes the one wire RC
+            // in double, the same under set_wire_rc -layer bar the last bits.
             let length = Meters::from_dbu(length_dbu, db.dbu());
             let cap = length * rc.capacitance;
             wire_cap[node] += cap / 2.0;
@@ -187,6 +193,10 @@ impl NetParasitics {
 
         let mut pin_node = Vec::with_capacity(pins.len());
         for (terminal, &(pin, _)) in pins.iter().enumerate() {
+            // NOTE: parasiticNodeConnectPins gives each cut set_layer_rc -via's
+            // resistance, at least 1 mOhm, and joins through one 1 mOhm cut
+            // without any set_layer_rc; PARE gives each cut 1 mOhm, the same
+            // where set_layer_rc sets layers but no vias, as ORFS Nangate45.
             let pin_layer = db.pin_reference_layer(pin).unwrap_or(rc.layer);
             let cuts = pin_layer.index().abs_diff(rc.layer.index());
             let pin_rc_node = wire_cap.push(Farads::ZERO);
