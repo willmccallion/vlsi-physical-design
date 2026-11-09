@@ -132,33 +132,35 @@ impl Graph {
 fn nearest_neighbors(points: &[Point<Dbu>]) -> Vec<Vec<usize>> {
     let n = points.len();
     let mut neighbors = vec![Vec::new(); n];
-    let mut upper_right = vec![i64::MAX; n];
-    let mut lower_right = vec![i64::MAX; n];
-    let mut upper_left = vec![i64::MIN; n];
-    let mut lower_left = vec![i64::MIN; n];
+    let mut upper_right: Vec<Option<Dbu>> = vec![None; n];
+    let mut lower_right: Vec<Option<Dbu>> = vec![None; n];
+    let mut upper_left: Vec<Option<Dbu>> = vec![None; n];
+    let mut lower_left: Vec<Option<Dbu>> = vec![None; n];
+    let left_of = |x: Dbu, bound: Option<Dbu>| bound.is_none_or(|b| x < b);
+    let right_of = |x: Dbu, bound: Option<Dbu>| bound.is_none_or(|b| b < x);
     let mut sorted: Vec<usize> = (0..n).collect();
-    sorted.sort_by_key(|&i| (points[i].y.get(), points[i].x.get()));
+    sorted.sort_by_key(|&i| (points[i].y, points[i].x));
     for idx in 0..n {
         let pt = sorted[idx];
-        let pt_x = points[pt].x.get();
+        let pt_x = points[pt].x;
         for &below in &sorted[..idx] {
-            let below_x = points[below].x.get();
-            if below_x <= pt_x && pt_x < upper_right[below] {
+            let below_x = points[below].x;
+            if below_x <= pt_x && left_of(pt_x, upper_right[below]) {
                 neighbors[below].push(pt);
-                upper_right[below] = pt_x;
-            } else if upper_left[below] < pt_x && pt_x < below_x {
+                upper_right[below] = Some(pt_x);
+            } else if right_of(pt_x, upper_left[below]) && pt_x < below_x {
                 neighbors[below].push(pt);
-                upper_left[below] = pt_x;
+                upper_left[below] = Some(pt_x);
             }
         }
         for &below in sorted[..idx].iter().rev() {
-            let below_x = points[below].x.get();
-            if pt_x <= below_x && below_x < lower_right[pt] {
+            let below_x = points[below].x;
+            if pt_x <= below_x && left_of(below_x, lower_right[pt]) {
                 neighbors[pt].push(below);
-                lower_right[pt] = below_x;
-            } else if lower_left[pt] < below_x && below_x < pt_x {
+                lower_right[pt] = Some(below_x);
+            } else if right_of(below_x, lower_left[pt]) && below_x < pt_x {
                 neighbors[pt].push(below);
-                lower_left[pt] = below_x;
+                lower_left[pt] = Some(below_x);
             }
         }
     }
