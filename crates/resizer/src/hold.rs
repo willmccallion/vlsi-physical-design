@@ -124,7 +124,7 @@ pub fn repair_hold(
     let mut pass = 1;
     let mut progress = true;
     while !failures.is_empty()
-        && fuzzy::less(worst, options.hold_margin)
+        && worst < options.hold_margin
         && progress
         && repair.inserted <= budget
         && pass <= options.max_passes
@@ -507,6 +507,16 @@ mod tests {
         assert!(summary.inserted > 0, "{summary:?}");
         assert!(after >= margin, "{before:?} to {after:?}");
         assert_eq!((summary.failing_before, summary.failing_after), (1, 0));
+    }
+
+    #[test]
+    fn a_path_a_hair_short_of_the_hold_margin_is_repaired() {
+        let (_, before, _) = repaired_pair(Seconds::ZERO);
+        let margin = before * (1.0 + 1e-7);
+
+        let (summary, _, _) = repaired_pair(margin);
+
+        assert!(summary.inserted > 0, "{summary:?}");
     }
 
     #[test]
