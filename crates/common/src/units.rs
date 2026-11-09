@@ -235,6 +235,15 @@ const NANOS_PER_SECOND: f64 = 1e9;
 /// Meters in a micron, the length a design's database units count in.
 pub const METERS_PER_MICRON: f64 = 1e-6;
 
+/// Microns in a meter.
+pub const MICRONS_PER_METER: f64 = 1e6;
+
+/// Farads in a picofarad.
+pub const FARADS_PER_PICOFARAD: f64 = 1e-12;
+
+/// Farads in a femtofarad.
+pub const FARADS_PER_FEMTOFARAD: f64 = 1e-15;
+
 impl Seconds {
     /// The time in nanoseconds, as reports give it.
     #[must_use]

@@ -14,7 +14,10 @@ use pare_common::db::indices::{LayerId, NetId, PinId};
 use pare_common::db::liberty::Edge;
 use pare_common::geom::dbu::Dbu;
 use pare_common::geom::point::Point;
-use pare_common::units::{Farads, FaradsPerMeter, Meters, Ohms, OhmsPerMeter, Seconds};
+use pare_common::units::{
+    FARADS_PER_FEMTOFARAD, Farads, FaradsPerMeter, MICRONS_PER_METER, Meters, Ohms, OhmsPerMeter,
+    Seconds,
+};
 
 /// The resistance `OpenROAD` gives a zero-length connection so the network
 /// stays joined, in ohms.
@@ -36,8 +39,8 @@ impl WireRc {
     #[must_use]
     pub fn per_micron(ohm_per_um: f64, ff_per_um: f64, layer: LayerId) -> Self {
         Self {
-            resistance: OhmsPerMeter::new(ohm_per_um * 1e6),
-            capacitance: FaradsPerMeter::new(ff_per_um * 1e-15 * 1e6),
+            resistance: OhmsPerMeter::new(ohm_per_um * MICRONS_PER_METER),
+            capacitance: FaradsPerMeter::new(ff_per_um * FARADS_PER_FEMTOFARAD * MICRONS_PER_METER),
             layer,
         }
     }

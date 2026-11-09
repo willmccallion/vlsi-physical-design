@@ -23,7 +23,7 @@ use pare_common::db::sdc::Sdc;
 use pare_common::geom::dbu::{Dbu, DbuPerMicron};
 use pare_common::geom::orient::Orientation;
 use pare_common::geom::point::Point;
-use pare_common::units::{Farads, Meters, Ohms, Seconds};
+use pare_common::units::{Farads, MICRONS_PER_METER, Meters, Ohms, Seconds};
 use rustc_hash::{FxHashMap, FxHashSet};
 use std::collections::{HashMap, HashSet};
 
@@ -1299,7 +1299,8 @@ pub fn area_change_percent(before: f64, after: f64) -> f64 {
 /// `Resizer::metersToDbu`.
 pub(crate) fn meters_to_dbu(meters: Meters, dbu: DbuPerMicron) -> Dbu {
     Dbu(i64::from(
-        ((meters.get() * f64::from(dbu.get()) * 1e6).round() as i64 as i32) & i32::MAX,
+        ((meters.get() * f64::from(dbu.get()) * MICRONS_PER_METER).round() as i64 as i32)
+            & i32::MAX,
     ))
 }
 
