@@ -1702,15 +1702,9 @@ fn cycle_accounting(sdc: &Sdc, launch: ClockEdge, target: ClockEdge) -> Accounti
     let src_edge_time = src_clock.edge_time(launch.edge);
     let tgt_edge_time = tgt_clock.edge_time(target.edge);
     let tgt_opposite_time = tgt_clock.edge_time(opposite(target.edge));
-    let mut accounting = Accounting {
-        setup_required: Seconds::ZERO,
-        hold_required: Seconds::ZERO,
-        gated_hold_required: Seconds::ZERO,
-        latch_setup_required: Seconds::ZERO,
-        latch_cycles: (0, 0),
-    };
+    let mut search = CycleSearch::new();
     if !(tgt_period > Seconds::ZERO && src_period > Seconds::ZERO) {
-        return accounting;
+        return search.accounting;
     }
     let first_cycle = |time: Seconds, period: Seconds| -> i64 {
         if time < Seconds::ZERO {
@@ -1722,72 +1716,144 @@ fn cycle_accounting(sdc: &Sdc, launch: ClockEdge, target: ClockEdge) -> Accounti
         }
     };
     let tgt_max_cycle: i64 = if tgt_period > src_period {
-        100
+        SLOWER_TARGET_CYCLES
     } else {
-        ((src_period / tgt_period).ceil() as i64).max(1000)
+        ((src_period / tgt_period).ceil() as i64).max(FASTER_TARGET_MIN_CYCLES)
     };
-    let mut setup_delay = Seconds::INFINITY;
-    let mut hold_delay = Seconds::INFINITY;
-    let mut gated_hold_delay = Seconds::INFINITY;
-    let mut latch_delay = Seconds::INFINITY;
-    let mut tgt_past_src = false;
-    let mut src_past_tgt = false;
     let mut tgt_cycle = first_cycle(tgt_edge_time, tgt_period);
     while tgt_cycle <= tgt_max_cycle {
-        let tgt_cycle_start = tgt_cycle as f64 * tgt_period;
-        let tgt_time = tgt_cycle_start + tgt_edge_time;
-        let tgt_opposite = tgt_cycle_start + tgt_opposite_time;
+        let start = tgt_cycle as f64 * tgt_period;
+        let tgt = TargetCycle {
+            cycle: tgt_cycle,
+            start,
+            time: start + tgt_edge_time,
+            opposite: start + tgt_opposite_time,
+            period: tgt_period,
+        };
         let mut src_cycle = first_cycle(src_edge_time, src_period);
         loop {
-            let src_cycle_start = src_cycle as f64 * src_period;
-            let src_time = src_cycle_start + src_edge_time;
-            if tgt_past_src && src_past_tgt && fuzzy::equal(src_cycle_start, tgt_cycle_start) {
-                return accounting;
+            let src_start = src_cycle as f64 * src_period;
+            if search.tgt_past_src && search.src_past_tgt && fuzzy::equal(src_start, tgt.start) {
+                return search.accounting;
             }
-            if fuzzy::greater(src_cycle_start, tgt_cycle_start + tgt_period) && src_past_tgt {
+            if fuzzy::greater(src_start, tgt.start + tgt.period) && search.src_past_tgt {
                 break;
             }
-            if fuzzy::greater(tgt_time, src_time) {
-                tgt_past_src = true;
-                let delay = tgt_time - src_time;
-                if fuzzy::less(delay, setup_delay) {
-                    setup_delay = delay;
-                    accounting.setup_required = tgt_time - src_cycle_start;
-                }
-            }
-            if fuzzy::greater(tgt_opposite, src_time) {
-                let delay = tgt_opposite - src_time;
-                if fuzzy::less(delay, latch_delay) {
-                    latch_delay = delay;
-                    let (mut latch_time, mut latch_cycle) = (tgt_time, tgt_cycle);
-                    if tgt_time > tgt_opposite {
-                        latch_time -= tgt_period;
-                        latch_cycle -= 1;
-                    }
-                    accounting.latch_setup_required = latch_time - src_cycle_start;
-                    accounting.latch_cycles = (src_cycle, latch_cycle);
-                }
-            }
-            if fuzzy::less_equal(tgt_time, src_time) {
-                let delay = src_time - tgt_time;
-                src_past_tgt = true;
-                if fuzzy::less(delay, hold_delay) {
-                    hold_delay = delay;
-                    accounting.hold_required = tgt_time - src_cycle_start;
-                }
-            }
-            if fuzzy::less_equal(tgt_opposite, src_time) {
-                let delay = src_time - tgt_time;
-                if fuzzy::less(delay, gated_hold_delay) {
-                    gated_hold_delay = delay;
-                    accounting.gated_hold_required = tgt_time - src_cycle_start;
-                }
-            }
+            search.record(
+                &tgt,
+                SourceCycle {
+                    cycle: src_cycle,
+                    start: src_start,
+                    time: src_start + src_edge_time,
+                },
+            );
             src_cycle += 1;
         }
         tgt_cycle += 1;
     }
-    accounting
+    search.accounting
+}
+
+/// The target cycles `CycleAccting::findDelays` searches when the target
+/// clock is the slower.
+const SLOWER_TARGET_CYCLES: i64 = 100;
+
+/// The fewest target cycles `CycleAccting::findDelays` searches when the
+/// target clock is no slower.
+const FASTER_TARGET_MIN_CYCLES: i64 = 1000;
+
+/// One cycle of the capturing clock: its number, when it starts, when its
+/// edge and the opposite edge happen in it, and its period.
+#[derive(Clone, Copy, Debug)]
+struct TargetCycle {
+    cycle: i64,
+    start: Seconds,
+    time: Seconds,
+    opposite: Seconds,
+    period: Seconds,
+}
+
+/// One cycle of the launching clock: its number, when it starts and when
+/// its edge happens in it.
+#[derive(Clone, Copy, Debug)]
+struct SourceCycle {
+    cycle: i64,
+    start: Seconds,
+    time: Seconds,
+}
+
+/// Where `CycleAccting::findDelays` stands: the tightest delays found so
+/// far for each check, the requireds they give, and whether either clock's
+/// edge has passed the other's.
+struct CycleSearch {
+    accounting: Accounting,
+    setup_delay: Seconds,
+    hold_delay: Seconds,
+    gated_hold_delay: Seconds,
+    latch_delay: Seconds,
+    tgt_past_src: bool,
+    src_past_tgt: bool,
+}
+
+impl CycleSearch {
+    const fn new() -> Self {
+        Self {
+            accounting: Accounting {
+                setup_required: Seconds::ZERO,
+                hold_required: Seconds::ZERO,
+                gated_hold_required: Seconds::ZERO,
+                latch_setup_required: Seconds::ZERO,
+                latch_cycles: (0, 0),
+            },
+            setup_delay: Seconds::INFINITY,
+            hold_delay: Seconds::INFINITY,
+            gated_hold_delay: Seconds::INFINITY,
+            latch_delay: Seconds::INFINITY,
+            tgt_past_src: false,
+            src_past_tgt: false,
+        }
+    }
+
+    /// Takes the launching edge of `src` against the capturing edges of
+    /// `tgt`, keeping each check's tighter delay.
+    fn record(&mut self, tgt: &TargetCycle, src: SourceCycle) {
+        if fuzzy::greater(tgt.time, src.time) {
+            self.tgt_past_src = true;
+            let delay = tgt.time - src.time;
+            if fuzzy::less(delay, self.setup_delay) {
+                self.setup_delay = delay;
+                self.accounting.setup_required = tgt.time - src.start;
+            }
+        }
+        if fuzzy::greater(tgt.opposite, src.time) {
+            let delay = tgt.opposite - src.time;
+            if fuzzy::less(delay, self.latch_delay) {
+                self.latch_delay = delay;
+                let (mut latch_time, mut latch_cycle) = (tgt.time, tgt.cycle);
+                if tgt.time > tgt.opposite {
+                    latch_time -= tgt.period;
+                    latch_cycle -= 1;
+                }
+                self.accounting.latch_setup_required = latch_time - src.start;
+                self.accounting.latch_cycles = (src.cycle, latch_cycle);
+            }
+        }
+        if fuzzy::less_equal(tgt.time, src.time) {
+            let delay = src.time - tgt.time;
+            self.src_past_tgt = true;
+            if fuzzy::less(delay, self.hold_delay) {
+                self.hold_delay = delay;
+                self.accounting.hold_required = tgt.time - src.start;
+            }
+        }
+        if fuzzy::less_equal(tgt.opposite, src.time) {
+            let delay = src.time - tgt.time;
+            if fuzzy::less(delay, self.gated_hold_delay) {
+                self.gated_hold_delay = delay;
+                self.accounting.gated_hold_required = tgt.time - src.start;
+            }
+        }
+    }
 }
 
 #[cfg(test)]
