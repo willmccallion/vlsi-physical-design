@@ -618,18 +618,14 @@ impl Repair<'_, '_> {
             load_delays.push((i, load_delay));
         }
         load_delays.sort_by(|a, b| b.1.total_cmp(&a.1).then_with(|| b.0.cmp(&a.0)));
-        let mut repairs_per_pass = 1;
-        if self.max_violation - self.min_violation != Seconds::ZERO
-            && self.options.max_repairs_per_pass > 1
-        {
-            let share =
-                (-path_slack - self.min_violation) / (self.max_violation - self.min_violation);
-            repairs_per_pass +=
-                ((self.options.max_repairs_per_pass - 1) as f64 * share).round() as usize;
-        }
-        if self.fallback {
-            repairs_per_pass = 1;
-        }
+        let spread = self.max_violation - self.min_violation;
+        let repairs_per_pass =
+            if self.fallback || spread == Seconds::ZERO || self.options.max_repairs_per_pass <= 1 {
+                1
+            } else {
+                let share = (-path_slack - self.min_violation) / spread;
+                scaled_repairs(self.options.max_repairs_per_pass, share)
+            };
         let mut changed = 0;
         for (index, _) in load_delays {
             if changed >= repairs_per_pass {
@@ -693,6 +689,16 @@ fn intrinsic_delay(set: &TimingArcSet, from: Edge, to: Edge) -> Seconds {
         })
 }
 
+/// How many moves a pass may make on an endpoint whose violation is
+/// `share` of the way from the least violation at the start to the worst,
+/// as `repairEndpoint` scales `max_repairs_per_pass`.
+// NOTE: repairEndpoint lets a negative share, an endpoint better than the
+// least violation, take the count to zero or below, so the pass makes no
+// move; PARE makes at least one.
+fn scaled_repairs(max_repairs: usize, share: f64) -> usize {
+    1 + ((max_repairs - 1) as f64 * share).round().max(0.0) as usize
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -700,6 +706,14 @@ mod tests {
         DefSections, cells, clock_cells_source, def_text, design, with_wired_session,
     };
     use std::fmt::Write;
+
+    #[test]
+    fn a_pass_makes_more_moves_the_worse_its_violation_and_at_least_one() {
+        assert_eq!(scaled_repairs(5, 1.0), 5);
+        assert_eq!(scaled_repairs(5, 0.5), 3);
+        assert_eq!(scaled_repairs(5, 0.0), 1);
+        assert_eq!(scaled_repairs(5, -0.5), 1);
+    }
 
     #[test]
     fn an_intrinsic_delay_extrapolated_below_zero_stays_negative() {
