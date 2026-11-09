@@ -928,6 +928,10 @@ mod tests {
         Share::new(value).unwrap()
     }
 
+    fn model(db: &NetlistDB) -> PlacementModel {
+        PlacementModel::from_db(db, &Zones::new(db).unwrap())
+    }
+
     #[test]
     fn layers_without_their_own_adjustment_take_the_routing_adjustment() {
         let db = tiny();
@@ -954,5 +958,46 @@ mod tests {
         let error = layer_adjustments(&config, &tiny()).unwrap_err();
 
         assert_eq!(error.to_string(), "no routing layer named M9");
+    }
+
+    #[test]
+    fn the_density_takes_the_target_and_bins_the_config_sets() {
+        let db = tiny();
+        let config = tiny_config("[global_placement]\ntarget_density = 0.7\nbin_dimension = 8");
+
+        let density = Density::of(&model(&db), &config.global_placement).unwrap();
+
+        assert_eq!(density.target, TargetDensity::new(0.7).unwrap());
+        assert_eq!(density.bins, 8);
+    }
+
+    #[test]
+    fn the_density_counts_the_cells_that_are_not_fixed() {
+        let db = tiny();
+        let config = tiny_config("");
+
+        let density = Density::of(&model(&db), &config.global_placement).unwrap();
+
+        assert_eq!(density.movable_cells, 6);
+    }
+
+    #[test]
+    fn without_a_target_or_bins_the_density_derives_them_from_the_utilization() {
+        let db = tiny();
+        let model = model(&db);
+        let config = tiny_config("");
+
+        let density = Density::of(&model, &config.global_placement).unwrap();
+
+        let movable_area: f64 = model
+            .density_sizes
+            .iter()
+            .zip(&model.movable)
+            .filter(|(_, movable)| **movable)
+            .map(|(size, _)| size.x * size.y)
+            .sum();
+        let target = global::default_target_density(movable_area / model.free_area()).unwrap();
+        assert_eq!(density.target, target);
+        assert_eq!(density.bins, global::default_bins(&model, target.get()));
     }
 }
