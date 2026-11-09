@@ -14,8 +14,9 @@ use pare_resizer::WireRc;
 const MAX_CAP_DERATE: f64 = 0.01;
 
 /// How close, as a share of its own, a buffer's load limit may come to the
-/// one kept before it and still be dropped from the characterized list.
-const CLOSE_LIMIT_SHARE: f32 = 0.1;
+/// one kept before it and still be dropped from the characterized list, as
+/// `TechChar::trimSortBufferList` fixes it.
+const CLOSE_LIMIT_SHARE: f64 = 0.1;
 
 /// The buffers of a clock tree.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -146,7 +147,9 @@ fn trim_and_sort(
     let mut prev = limit(first);
     for &buffer in rest {
         let current = limit(buffer);
-        if (prev - current).abs() / current >= CLOSE_LIMIT_SHARE {
+        // Written as trimSortBufferList drops, so two missing limits (0 / 0) keep.
+        let is_close = f64::from((prev - current).abs() / current) < CLOSE_LIMIT_SHARE;
+        if !is_close {
             kept.push(buffer);
             prev = current;
         }
@@ -265,6 +268,26 @@ mod tests {
 
         assert_eq!(cap.to_bits(), ((per_micron * 3.0) as f32).to_bits());
         assert_ne!(cap.to_bits(), (per_micron as f32 * 3.0).to_bits());
+    }
+
+    #[test]
+    fn buffers_without_load_limits_are_all_characterized() {
+        let lib = liberty::parse_str(
+            "library (x) {
+               cell (N1) { pin (A) { direction : input; }
+                 pin (Z) { direction : output; function : \"A\"; } }
+               cell (N2) { pin (A) { direction : input; }
+                 pin (Z) { direction : output; function : \"A\"; } }
+             }",
+            Path::new("x.lib"),
+        )
+        .unwrap();
+        let named = |name: &str| lib.buffer_cell(lib.cell_id(name).unwrap()).unwrap();
+        let all = [named("N1"), named("N2")];
+
+        let kept = trim_and_sort(&lib, &all, all[0], all[1]);
+
+        assert_eq!(kept, all);
     }
 
     #[test]
