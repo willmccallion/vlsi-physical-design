@@ -3,7 +3,9 @@
 //! and the order with the shortest horizontal wirelength kept.
 
 use super::mis::converged;
+use super::{EdgeId, NodeId, SegmentId};
 use super::{Improver, SKIP_NETS_LARGER_THAN};
+use pare_common::db::indices::IdVec;
 
 const WINDOW: usize = 3;
 
@@ -29,14 +31,14 @@ pub(super) fn run(imp: &mut Improver, passes: usize, tolerance: f64) {
 
 /// Each edge's last traversal, so a cost counts it once.
 struct EdgeMarks {
-    mark: Vec<usize>,
+    mark: IdVec<EdgeId, usize>,
     traversal: usize,
 }
 
 impl EdgeMarks {
     fn new(edges: usize) -> Self {
         Self {
-            mark: vec![0; edges],
+            mark: IdVec::filled(0, edges),
             traversal: 0,
         }
     }
@@ -46,8 +48,10 @@ impl EdgeMarks {
 /// of each segment.
 fn reorder_segments(imp: &mut Improver, marks: &mut EdgeMarks) {
     marks.traversal = 0;
-    marks.mark.fill(0);
-    for s in 0..imp.segments.len() {
+    for mark in &mut marks.mark {
+        *mark = 0;
+    }
+    for s in imp.segments.ids() {
         let n = imp.cells_in_seg[s].len();
         if n < 2 {
             continue;
@@ -96,10 +100,10 @@ fn reorder_segments(imp: &mut Improver, marks: &mut EdgeMarks) {
 }
 
 /// Orders segment `s`'s cells `[start, end)` by center as `std::sort` does.
-fn sort_segment(imp: &mut Improver, s: usize, start: usize, end: usize) {
+fn sort_segment(imp: &mut Improver, s: SegmentId, start: usize, end: usize) {
     let mut cells = std::mem::take(&mut imp.cells_in_seg[s]);
     let centers: Vec<i64> = cells.iter().map(|&c| imp.center_x(c)).collect();
-    let mut keyed: Vec<(i64, usize)> = centers[start..end]
+    let mut keyed: Vec<(i64, NodeId)> = centers[start..end]
         .iter()
         .copied()
         .zip(cells[start..end].iter().copied())
@@ -114,7 +118,7 @@ fn sort_segment(imp: &mut Improver, s: usize, start: usize, end: usize) {
 /// A run of a segment's cells, `first` to `last` in its order, and the
 /// gap they may use.
 struct Window {
-    segment: usize,
+    segment: SegmentId,
     first: usize,
     last: usize,
     left_limit: i64,
@@ -125,7 +129,7 @@ struct Window {
 /// keeps the cheapest legal one, as `DetailedReorderer::reorder` of a
 /// window.
 fn reorder_window(imp: &mut Improver, marks: &mut EdgeMarks, w: &Window) {
-    let cells: Vec<usize> = imp.cells_in_seg[w.segment][w.first..=w.last].to_vec();
+    let cells: Vec<NodeId> = imp.cells_in_seg[w.segment][w.first..=w.last].to_vec();
     let original: Vec<i64> = cells.iter().map(|&n| imp.left(n)).collect();
     let width: Vec<i64> = cells.iter().map(|&n| imp.width(n)).collect();
     let site_width = imp.arch.rows[0].site_width;
@@ -198,7 +202,7 @@ fn even_padding(width: &[i64], span: i64, site_width: i64) -> Option<(Vec<i64>, 
 fn cheapest_order(
     imp: &mut Improver,
     marks: &mut EdgeMarks,
-    cells: &[usize],
+    cells: &[NodeId],
     width: &[i64],
     (left_pad, right_pad): &(Vec<i64>, Vec<i64>),
     left_limit: i64,
@@ -260,7 +264,7 @@ fn realign(imp: &mut Improver, w: &Window) -> Option<bool> {
 }
 
 /// Moves each cell to its left edge, keeping its row.
-fn place_at(imp: &mut Improver, cells: &[usize], lefts: &[i64]) {
+fn place_at(imp: &mut Improver, cells: &[NodeId], lefts: &[i64]) {
     for (&n, &x) in cells.iter().zip(lefts) {
         imp.erase(n);
         let bottom = imp.bottom(n);
@@ -272,7 +276,7 @@ fn place_at(imp: &mut Improver, cells: &[usize], lefts: &[i64]) {
 /// The horizontal span of the cells' nets, each net once, or the largest
 /// cost if one of them breaks a placement rule, as
 /// `DetailedReorderer::cost`.
-fn cost(imp: &Improver, marks: &mut EdgeMarks, cells: &[usize]) -> f64 {
+fn cost(imp: &Improver, marks: &mut EdgeMarks, cells: &[NodeId]) -> f64 {
     marks.traversal += 1;
     let mut cost = 0.0;
     for &n in cells {

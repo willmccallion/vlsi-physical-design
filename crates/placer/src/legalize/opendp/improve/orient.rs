@@ -2,8 +2,9 @@
 //! cell is turned to suit its row, then mirrored about its vertical axis
 //! where that shortens its nets and breaks no placement rule.
 
+use super::{EdgeId, NodeId};
 use super::{Improver, SKIP_NETS_LARGER_THAN};
-use crate::legalize::opendp::NodeId;
+use pare_common::db::indices::IdVec;
 use pare_common::geom::orient::Orientation;
 
 pub(super) fn run(imp: &mut Improver) {
@@ -21,7 +22,7 @@ pub(super) fn run(imp: &mut Improver) {
 /// ones it cannot, as `DetailedOrient::orientCells`.
 fn orient_cells(imp: &mut Improver) -> usize {
     let mut problems = 0;
-    for n in 0..imp.cell_count() {
+    for n in imp.grid.nodes.ids() {
         if imp.is_fixed(n) {
             continue;
         }
@@ -33,9 +34,7 @@ fn orient_cells(imp: &mut Improver) -> usize {
             orient_single_row_cell(imp, n, row)
         } else {
             row + imp.rows_spanned(n) <= imp.arch.rows.len()
-                && imp.grid.nodes[NodeId::new(n)]
-                    .symmetry
-                    .allows(imp.grid.nodes[NodeId::new(n)].orient)
+                && imp.grid.nodes[n].symmetry.allows(imp.grid.nodes[n].orient)
         };
         if !oriented {
             problems += 1;
@@ -46,10 +45,10 @@ fn orient_cells(imp: &mut Improver) -> usize {
 
 /// `DetailedOrient::orientSingleHeightCellForRow`: a cell upside down for
 /// its row is turned over, mirrored ones only where the master allows.
-fn orient_single_row_cell(imp: &mut Improver, n: usize, row: usize) -> bool {
+fn orient_single_row_cell(imp: &mut Improver, n: NodeId, row: usize) -> bool {
     use Orientation::{FN, FS, N, S};
-    let symmetry = imp.grid.nodes[NodeId::new(n)].symmetry;
-    let cell = imp.grid.nodes[NodeId::new(n)].orient;
+    let symmetry = imp.grid.nodes[n].symmetry;
+    let cell = imp.grid.nodes[n].orient;
     let to = match (imp.arch.rows[row].orient, cell) {
         (N | FN, N | FN) | (FS | S, FS | S) => return symmetry.allows(cell),
         (N | FN, FS) => N,
@@ -69,9 +68,9 @@ fn orient_single_row_cell(imp: &mut Improver, n: usize, row: usize) -> bool {
 /// it and it shortens their nets' horizontal spans, as
 /// `DetailedOrient::flipCells`.
 fn flip_cells(imp: &mut Improver) {
-    let mut marks = vec![0_usize; imp.net.edges.len()];
+    let mut marks: IdVec<EdgeId, usize> = IdVec::filled(0, imp.net.edges.len());
     let mut traversal = 0;
-    for s in 0..imp.segments.len() {
+    for s in imp.segments.ids() {
         let seg = imp.segments[s];
         if !imp.arch.rows[seg.row].symmetry.y {
             continue;
@@ -119,7 +118,7 @@ fn flip_cells(imp: &mut Improver) {
             if imp.left(n) < lx || imp.right(n) > rx {
                 continue;
             }
-            let from = imp.grid.nodes[NodeId::new(n)].orient;
+            let from = imp.grid.nodes[n].orient;
             let to = match from {
                 Orientation::N => Orientation::FN,
                 Orientation::S => Orientation::FS,

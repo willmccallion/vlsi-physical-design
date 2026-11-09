@@ -1,15 +1,52 @@
 //! `ShiftLegalizer`: puts every movable cell in its segments and clumps
 //! overlapping cells apart, which on a legal placement moves nothing.
 
-use super::{ImprovementError, Improver, Result};
+use super::{ImprovementError, Improver, NodeId, Result, SegmentId};
+use pare_common::db::indices::IdVec;
 
 /// A run of cells pushed together, as `ShiftLegalizer`'s `Clump`.
 #[derive(Clone, Debug, Default)]
 struct Clump {
-    nodes: Vec<usize>,
+    vertices: Vec<Vertex>,
     weight: f64,
     weighted_position: f64,
     position: i64,
+}
+
+pare_common::define_index!(
+    /// A vertex of the shifting constraint graph: every network node, then
+    /// each segment's left stand-in, then each segment's right stand-in.
+    Vertex(u32)
+);
+
+pare_common::define_index!(
+    /// A clump, as `ShiftLegalizer` numbers them.
+    ClumpId(u32)
+);
+
+/// How the constraint graph numbers its vertices.
+#[derive(Clone, Copy, Debug)]
+struct Vertices {
+    nodes: usize,
+    segments: usize,
+}
+
+impl Vertices {
+    const fn count(self) -> usize {
+        self.nodes + 2 * self.segments
+    }
+
+    const fn node(n: NodeId) -> Vertex {
+        Vertex::new(n.index())
+    }
+
+    const fn left_end(self, s: SegmentId) -> Vertex {
+        Vertex::new(self.nodes + s.index())
+    }
+
+    const fn right_end(self, s: SegmentId) -> Vertex {
+        Vertex::new(self.nodes + self.segments + s.index())
+    }
 }
 
 /// The weight of the stand-ins pinning each segment's ends.
@@ -19,7 +56,9 @@ pub(super) fn legalize(imp: &mut Improver) -> Result<()> {
     imp.collect_cells();
     imp.find_blockages();
     imp.find_segments()?;
-    let original: Vec<(i64, i64)> = (0..imp.net.node_count())
+    let original: IdVec<NodeId, (i64, i64)> = imp
+        .net
+        .nodes()
         .map(|n| (imp.left(n), imp.bottom(n)))
         .collect();
     let mut cells = Vec::new();
@@ -56,17 +95,17 @@ pub(super) fn legalize(imp: &mut Improver) -> Result<()> {
 
 /// Whether the segments' left-to-right orders admit one order of all the
 /// cells, as the topological sort `ShiftLegalizer::legalize` checks.
-fn ordered_without_cycles(imp: &Improver, cells: &[usize]) -> bool {
+fn ordered_without_cycles(imp: &Improver, cells: &[NodeId]) -> bool {
     let size = imp.net.node_count();
-    let mut incoming = vec![0_usize; size];
-    let mut outgoing = vec![Vec::new(); size];
+    let mut incoming: IdVec<NodeId, usize> = IdVec::filled(0, size);
+    let mut outgoing: IdVec<NodeId, Vec<NodeId>> = IdVec::filled(Vec::new(), size);
     for seg in &imp.cells_in_seg {
         for pair in seg.windows(2) {
             incoming[pair[1]] += 1;
             outgoing[pair[0]].push(pair[1]);
         }
     }
-    let mut order: Vec<usize> = cells
+    let mut order: Vec<NodeId> = cells
         .iter()
         .copied()
         .filter(|&n| incoming[n] == 0)
@@ -84,47 +123,105 @@ fn ordered_without_cycles(imp: &Improver, cells: &[usize]) -> bool {
     order.len() == cells.len()
 }
 
-/// Clumps each segment's cells between stand-ins pinned to its ends,
-/// as `ShiftLegalizer::shift` and `ShiftLegalizer::clump`.
-fn shift(imp: &mut Improver, cells: &[usize]) -> Result<()> {
-    let nodes = imp.net.node_count();
-    let segs = imp.segments.len();
-    let left_dummy = |s: usize| nodes + s;
-    let right_dummy = |s: usize| nodes + segs + s;
-    let total = nodes + 2 * segs;
-    let mut width = vec![0_i64; total];
-    for (n, w) in width.iter_mut().enumerate().take(nodes) {
-        *w = imp.width(n);
-    }
-    let mut incoming = vec![Vec::new(); total];
-    for s in 0..segs {
-        let mut order = Vec::with_capacity(imp.cells_in_seg[s].len() + 2);
-        order.push(left_dummy(s));
-        order.extend_from_slice(&imp.cells_in_seg[s]);
-        order.push(right_dummy(s));
-        for pair in order.windows(2) {
-            incoming[pair[1]].push(pair[0]);
-        }
-    }
-    let mut clumps = Vec::with_capacity(2 * segs + cells.len());
-    let mut owner = vec![usize::MAX; total];
-    let mut offset = vec![0_i64; total];
-    let mut add = |node: usize, left: i64, weight: f64, position: i64| {
-        owner[node] = clumps.len();
-        clumps.push(Clump {
-            nodes: vec![node],
+/// The constraint graph's clumps and where each vertex sits in them.
+struct Clumping {
+    clumps: IdVec<ClumpId, Clump>,
+    owner: IdVec<Vertex, Option<ClumpId>>,
+    offset: IdVec<Vertex, i64>,
+}
+
+impl Clumping {
+    fn add(&mut self, vertex: Vertex, left: i64, weight: f64, position: i64) {
+        let id = self.clumps.push(Clump {
+            vertices: vec![vertex],
             weight,
             weighted_position: weight * left as f64,
             position,
         });
+        self.owner[vertex] = Some(id);
+    }
+
+    fn owner(&self, vertex: Vertex) -> Result<ClumpId> {
+        self.owner[vertex].ok_or(ImprovementError::Internal(
+            "a cell in no clump during shifting",
+        ))
+    }
+
+    /// Merges clump `r` into clump `l`, `dist` to its right.
+    fn merge(&mut self, r: ClumpId, l: ClumpId, dist: i64) {
+        let moved = std::mem::take(&mut self.clumps[r].vertices);
+        for &vertex in &moved {
+            self.offset[vertex] += dist;
+            self.owner[vertex] = Some(l);
+        }
+        let (weight, weighted) = (self.clumps[r].weight, self.clumps[r].weighted_position);
+        let left = &mut self.clumps[l];
+        left.vertices.extend(moved);
+        left.weighted_position += weighted - dist as f64 * weight;
+        left.weight += weight;
+        left.position = (left.weighted_position / left.weight).floor() as i64;
+    }
+
+    /// The clump the worst overlap of `r` on its left neighbours is with and
+    /// how far it must sit right of it, as `ShiftLegalizer::violated`.
+    fn violated(
+        &self,
+        r: ClumpId,
+        incoming: &IdVec<Vertex, Vec<Vertex>>,
+        width: &IdVec<Vertex, i64>,
+    ) -> Result<Option<(ClumpId, i64)>> {
+        let mut worst: Option<(i64, ClumpId, i64)> = None;
+        for &right in &self.clumps[r].vertices {
+            for &left in &incoming[right] {
+                let t = self.owner(left)?;
+                if t == r {
+                    continue;
+                }
+                let pdst = self.clumps[r].position + self.offset[right];
+                let psrc = self.clumps[t].position + self.offset[left];
+                let diff = pdst - (psrc + width[left]);
+                if diff < 0 && worst.is_none_or(|w| diff < w.0) {
+                    worst = Some((
+                        diff,
+                        t,
+                        self.offset[left] + width[left] - self.offset[right],
+                    ));
+                }
+            }
+        }
+        Ok(worst.map(|(_, l, dist)| (l, dist)))
+    }
+}
+
+/// Clumps each segment's cells between stand-ins pinned to its ends,
+/// as `ShiftLegalizer::shift` and `ShiftLegalizer::clump`.
+fn shift(imp: &mut Improver, cells: &[NodeId]) -> Result<()> {
+    let vertices = Vertices {
+        nodes: imp.net.node_count(),
+        segments: imp.segments.len(),
     };
-    for s in 0..segs {
-        add(
-            left_dummy(s),
-            imp.segments[s].min_x,
-            END_WEIGHT,
-            imp.segments[s].min_x,
-        );
+    let mut width: IdVec<Vertex, i64> = IdVec::filled(0, vertices.count());
+    for n in imp.net.nodes() {
+        width[Vertices::node(n)] = imp.width(n);
+    }
+    let mut incoming: IdVec<Vertex, Vec<Vertex>> = IdVec::filled(Vec::new(), vertices.count());
+    for s in imp.segments.ids() {
+        let mut order = Vec::with_capacity(imp.cells_in_seg[s].len() + 2);
+        order.push(vertices.left_end(s));
+        order.extend(imp.cells_in_seg[s].iter().map(|&n| Vertices::node(n)));
+        order.push(vertices.right_end(s));
+        for pair in order.windows(2) {
+            incoming[pair[1]].push(pair[0]);
+        }
+    }
+    let mut clumps = Clumping {
+        clumps: IdVec::with_capacity(2 * vertices.segments + cells.len()),
+        owner: IdVec::filled(None, vertices.count()),
+        offset: IdVec::filled(0, vertices.count()),
+    };
+    for s in imp.segments.ids() {
+        let min_x = imp.segments[s].min_x;
+        clumps.add(vertices.left_end(s), min_x, END_WEIGHT, min_x);
     }
     for &n in cells {
         let mut position = imp.left(n);
@@ -132,30 +229,16 @@ fn shift(imp: &mut Improver, cells: &[usize]) -> Result<()> {
             let seg = &imp.segments[s];
             position = position.max(seg.min_x).min(seg.max_x - imp.width(n));
         }
-        add(n, imp.left(n), 1.0, position);
+        clumps.add(Vertices::node(n), imp.left(n), 1.0, position);
     }
-    for s in 0..segs {
-        add(
-            right_dummy(s),
-            imp.segments[s].max_x,
-            END_WEIGHT,
-            imp.segments[s].max_x,
-        );
+    for s in imp.segments.ids() {
+        let max_x = imp.segments[s].max_x;
+        clumps.add(vertices.right_end(s), max_x, END_WEIGHT, max_x);
     }
-    for c in 0..clumps.len() {
+    for c in clumps.clumps.ids() {
         let mut r = c;
-        while let Some((l, dist)) = violated(&clumps, r, &incoming, &owner, &offset, &width) {
-            let moved = std::mem::take(&mut clumps[r].nodes);
-            for &node in &moved {
-                offset[node] += dist;
-                owner[node] = l;
-            }
-            let (weight, weighted) = (clumps[r].weight, clumps[r].weighted_position);
-            let left = &mut clumps[l];
-            left.nodes.extend(moved);
-            left.weighted_position += weighted - dist as f64 * weight;
-            left.weight += weight;
-            left.position = (left.weighted_position / left.weight).floor() as i64;
+        while let Some((l, dist)) = clumps.violated(r, &incoming, &width)? {
+            clumps.merge(r, l, dist);
             r = l;
         }
     }
@@ -167,37 +250,10 @@ fn shift(imp: &mut Improver, cells: &[usize]) -> Result<()> {
             .ok_or(ImprovementError::Internal(
                 "Shifting failed during legalization",
             ))?;
-        let x = clumps[owner[n]].position + offset[n];
+        let vertex = Vertices::node(n);
+        let x = clumps.clumps[clumps.owner(vertex)?].position + clumps.offset[vertex];
         let y = imp.arch.rows[row].bottom;
         imp.set_position(n, x, y);
     }
     Ok(())
-}
-
-/// The clump the worst overlap of `r` on its left neighbours is with and
-/// how far it must sit right of it, as `ShiftLegalizer::violated`.
-fn violated(
-    clumps: &[Clump],
-    r: usize,
-    incoming: &[Vec<usize>],
-    owner: &[usize],
-    offset: &[i64],
-    width: &[i64],
-) -> Option<(usize, i64)> {
-    let mut worst: Option<(i64, usize, i64)> = None;
-    for &ndr in &clumps[r].nodes {
-        for &ndl in &incoming[ndr] {
-            let t = owner[ndl];
-            if t == r {
-                continue;
-            }
-            let pdst = clumps[r].position + offset[ndr];
-            let psrc = clumps[t].position + offset[ndl];
-            let diff = pdst - (psrc + width[ndl]);
-            if diff < 0 && worst.is_none_or(|w| diff < w.0) {
-                worst = Some((diff, t, offset[ndl] + width[ndl] - offset[ndr]));
-            }
-        }
-    }
-    worst.map(|(_, l, dist)| (l, dist))
 }

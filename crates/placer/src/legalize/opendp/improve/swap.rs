@@ -3,19 +3,21 @@
 //! or swap toward it, kept when the wirelength does not grow.
 
 use super::mis::converged;
+use super::{EdgeId, NetworkPinId, NodeId, SegmentId};
 use super::{Improver, Result, SKIP_NETS_LARGER_THAN};
+use pare_common::db::indices::IdVec;
 
 /// The wirelength objective the swaps and random moves weigh, as
 /// `DetailedHPWL`: each net of two to 99 pins, cached by edge.
 pub(super) struct Hpwl {
-    by_edge: Vec<i64>,
-    pending: Vec<usize>,
+    by_edge: IdVec<EdgeId, i64>,
+    pending: Vec<EdgeId>,
 }
 
 impl Hpwl {
     pub(super) fn new(imp: &Improver) -> Self {
         Self {
-            by_edge: vec![0; imp.net.edges.len()],
+            by_edge: IdVec::filled(0, imp.net.edges.len()),
             pending: Vec::new(),
         }
     }
@@ -27,7 +29,7 @@ impl Hpwl {
     /// The whole objective, refreshing the cache, as `DetailedHPWL::curr`.
     pub(super) fn current(&mut self, imp: &Improver) -> i64 {
         let mut total = 0;
-        for (e, pins) in imp.net.edges.iter().enumerate() {
+        for (e, pins) in imp.net.edges.iter_enumerated() {
             if Self::counts(pins.len()) {
                 self.by_edge[e] = imp.edge_hpwl(e);
                 total += self.by_edge[e];
@@ -68,7 +70,7 @@ pub(super) fn run_vertical(imp: &mut Improver, passes: usize, tolerance: f64) ->
     run(imp, passes, tolerance, vertical_trial)
 }
 
-type Trial = fn(&mut Improver, usize) -> Result<bool>;
+type Trial = fn(&mut Improver, NodeId) -> Result<bool>;
 
 fn run(imp: &mut Improver, passes: usize, tolerance: f64, trial: Trial) -> Result<()> {
     let tolerance = tolerance.max(0.01);
@@ -112,7 +114,7 @@ fn sweep(imp: &mut Improver, trial: Trial) -> Result<()> {
 
 /// The box between the medians of the cell's nets' bounding boxes without
 /// it, its pin offsets taken off, as `getRange`.
-pub(super) fn optimal_region(imp: &Improver, n: usize) -> Option<(i64, i64, i64, i64)> {
+pub(super) fn optimal_region(imp: &Improver, n: NodeId) -> Option<(i64, i64, i64, i64)> {
     let (mut xs, mut ys) = (Vec::new(), Vec::new());
     let arch = &imp.arch;
     for &pin in &imp.net.node_pins[n] {
@@ -139,7 +141,7 @@ pub(super) fn optimal_region(imp: &Improver, n: usize) -> Option<(i64, i64, i64,
 }
 
 /// The box of an edge's pins on other cells, as `calculateEdgeBB`.
-fn others_box(imp: &Improver, edge: &[usize], n: usize) -> Option<(i64, i64, i64, i64)> {
+fn others_box(imp: &Improver, edge: &[NetworkPinId], n: NodeId) -> Option<(i64, i64, i64, i64)> {
     let mut bounds = None;
     for &pin in edge {
         if imp.net.pins[pin].node == n {
@@ -155,7 +157,7 @@ fn others_box(imp: &Improver, edge: &[usize], n: usize) -> Option<(i64, i64, i64
 }
 
 /// The cell's center and its optimal region, unless it is already there.
-fn region_elsewhere(imp: &Improver, n: usize) -> Option<(i64, i64, i64, i64)> {
+fn region_elsewhere(imp: &Improver, n: NodeId) -> Option<(i64, i64, i64, i64)> {
     let yi = imp.bottom(n) as f64 + 0.5 * imp.height(n) as f64;
     let xi = imp.left(n) as f64 + 0.5 * imp.width(n) as f64;
     let (x0, y0, x1, y1) = optimal_region(imp, n)?;
@@ -170,7 +172,7 @@ fn centered(min: i64, max: i64, size: i64) -> i64 {
 }
 
 /// The first segment of row `r` whose span holds `x`.
-pub(super) fn segment_at(imp: &Improver, r: usize, x: i64) -> Option<usize> {
+pub(super) fn segment_at(imp: &Improver, r: usize, x: i64) -> Option<SegmentId> {
     imp.segs_in_row[r].iter().copied().find(|&s| {
         let seg = &imp.segments[s];
         x >= seg.min_x && x <= seg.max_x
@@ -179,7 +181,7 @@ pub(super) fn segment_at(imp: &Improver, r: usize, x: i64) -> Option<usize> {
 
 /// A move or else a swap of the cell to the middle of its optimal region
 /// within reach, as `legacy::DetailedGlobalSwap::generate`.
-fn global_trial(imp: &mut Improver, n: usize) -> Result<bool> {
+fn global_trial(imp: &mut Improver, n: NodeId) -> Result<bool> {
     let Some((mut x0, mut y0, mut x1, mut y1)) = region_elsewhere(imp, n) else {
         return Ok(false);
     };
@@ -222,7 +224,7 @@ const fn clip_to_reach(lo: i64, hi: i64, at: i64, reach: i64) -> (i64, i64) {
 
 /// A move or else a swap of the cell one or two rows toward its optimal
 /// region, picked at random, as `DetailedVerticalSwap::generate`.
-fn vertical_trial(imp: &mut Improver, n: usize) -> Result<bool> {
+fn vertical_trial(imp: &mut Improver, n: NodeId) -> Result<bool> {
     let yi = imp.bottom(n) as f64 + 0.5 * imp.height(n) as f64;
     let Some((x0, y0, x1, y1)) = region_elsewhere(imp, n) else {
         return Ok(false);

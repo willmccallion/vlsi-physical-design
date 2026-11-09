@@ -2,12 +2,12 @@
 //! `DetailedMgr::tryMove`, `DetailedMgr::trySwap` and their helpers.
 
 use super::{ImprovementError, Improver, Move, Result};
-use crate::legalize::opendp::NodeId;
+use super::{NodeId, SegmentId};
 
 /// A node's neighbours around `x` in a segment by center, as the
 /// `std::lower_bound` probes of `DetailedMgr`: the first at or right of `x`
 /// and the one before it.
-fn around(cells: &[usize], at: usize) -> (Option<usize>, Option<usize>) {
+fn around(cells: &[NodeId], at: usize) -> (Option<NodeId>, Option<NodeId>) {
     if at == cells.len() {
         (cells.last().copied(), None)
     } else {
@@ -18,14 +18,20 @@ fn around(cells: &[usize], at: usize) -> (Option<usize>, Option<usize>) {
 impl Improver {
     /// The index of the first cell of segment `s` whose center is at or
     /// right of `x`.
-    fn lower_bound(&self, s: usize, x: i64) -> usize {
+    fn lower_bound(&self, s: SegmentId, x: i64) -> usize {
         self.cells_in_seg[s].partition_point(|&c| self.center_x(c) < x)
     }
 
     /// Moves a cell to `(xj, yj)` in segment `sj`, pushing neighbours aside
     /// as needed; the trial stays journaled when it is legal, as
     /// `DetailedMgr::tryMove`.
-    pub(super) fn try_move(&mut self, n: usize, si: usize, xj: i64, sj: usize) -> Result<bool> {
+    pub(super) fn try_move(
+        &mut self,
+        n: NodeId,
+        si: SegmentId,
+        xj: i64,
+        sj: SegmentId,
+    ) -> Result<bool> {
         if !self.master_symmetry_allows(n, self.segments[sj].row) {
             self.reject_move()?;
             return Ok(false);
@@ -48,7 +54,13 @@ impl Improver {
 
     /// Swaps a cell with the one at `xj` in segment `sj`, as
     /// `DetailedMgr::trySwap`.
-    pub(super) fn try_swap(&mut self, n: usize, si: usize, xj: i64, sj: usize) -> Result<bool> {
+    pub(super) fn try_swap(
+        &mut self,
+        n: NodeId,
+        si: SegmentId,
+        xj: i64,
+        sj: SegmentId,
+    ) -> Result<bool> {
         if !self.master_symmetry_allows(n, self.segments[sj].row) {
             self.reject_move()?;
             return Ok(false);
@@ -61,7 +73,13 @@ impl Improver {
     }
 
     /// `DetailedMgr::tryMove1`: a single-row cell into another segment.
-    fn try_move_across(&mut self, n: usize, si: usize, mut xj: i64, sj: usize) -> Result<bool> {
+    fn try_move_across(
+        &mut self,
+        n: NodeId,
+        si: SegmentId,
+        mut xj: i64,
+        sj: SegmentId,
+    ) -> Result<bool> {
         self.journal.clear();
         if sj == si || self.group(n) != self.segments[sj].region || self.rows_spanned(n) != 1 {
             return Ok(false);
@@ -107,7 +125,13 @@ impl Improver {
 
     /// `DetailedMgr::tryMove2`: a single-row cell into a gap of its own
     /// segment beside the cell at `xj`.
-    fn try_move_within(&mut self, n: usize, si: usize, xj: i64, sj: usize) -> Result<bool> {
+    fn try_move_within(
+        &mut self,
+        n: NodeId,
+        si: SegmentId,
+        xj: i64,
+        sj: SegmentId,
+    ) -> Result<bool> {
         self.journal.clear();
         if sj != si || self.group(n) != self.segments[sj].region || self.rows_spanned(n) != 1 {
             return Ok(false);
@@ -140,7 +164,7 @@ impl Improver {
 
     /// `DetailedMgr::tryMove3`: a multi-row cell into the gap at `xj` of a
     /// stack of segments, one per row.
-    fn try_move_multi(&mut self, n: usize, xj: i64, sj: usize) -> Result<bool> {
+    fn try_move_multi(&mut self, n: NodeId, xj: i64, sj: SegmentId) -> Result<bool> {
         self.journal.clear();
         let spanned = self.rows_spanned(n);
         if spanned <= 1 || spanned != self.cell_segs[n].len() {
@@ -211,7 +235,13 @@ impl Improver {
 
     /// `DetailedMgr::trySwap1`: swaps two single-row cells, each into the
     /// other's gap, or, when they are neighbours, shifts the pair.
-    fn try_swap_single(&mut self, n: usize, si: usize, mut xj: i64, sj: usize) -> Result<bool> {
+    fn try_swap_single(
+        &mut self,
+        n: NodeId,
+        si: SegmentId,
+        mut xj: i64,
+        sj: SegmentId,
+    ) -> Result<bool> {
         self.journal.clear();
         let cells_j = &self.cells_in_seg[sj];
         if cells_j.is_empty() {
@@ -233,7 +263,7 @@ impl Improver {
             .position(|&c| c == ndj)
             .unwrap_or(self.cells_in_seg[sj].len());
         let mut xi = self.left(n);
-        let gap_around = |imp: &Self, s: usize, ix: usize| {
+        let gap_around = |imp: &Self, s: SegmentId, ix: usize| {
             let cells = &imp.cells_in_seg[s];
             let seg = &imp.segments[s];
             let lx = ix
@@ -301,7 +331,7 @@ impl Improver {
     /// `DetailedMgr::shift`.
     fn shift(
         &self,
-        cells: &[usize],
+        cells: &[NodeId],
         targets: &[i64],
         left_limit: i64,
         right_limit: i64,
@@ -408,10 +438,10 @@ impl Improver {
     /// zero and the cell at it.
     pub(super) fn shift_right_helper(
         &mut self,
-        mut ndi: usize,
+        mut ndi: NodeId,
         mut xj: i64,
-        sj: usize,
-        mut ndr: usize,
+        sj: SegmentId,
+        mut ndr: NodeId,
     ) -> Result<bool> {
         let Some(mut ix) = self.cells_in_seg[sj].iter().position(|&c| c == ndr) else {
             return Ok(false);
@@ -455,10 +485,10 @@ impl Improver {
     /// pack exactly.
     pub(super) fn shift_left_helper(
         &mut self,
-        mut ndi: usize,
+        mut ndi: NodeId,
         mut xj: i64,
-        sj: usize,
-        mut ndl: usize,
+        sj: SegmentId,
+        mut ndl: NodeId,
     ) -> Result<bool> {
         let Some(mut ix) = self.cells_in_seg[sj].iter().position(|&c| c == ndl) else {
             return Ok(false);
@@ -493,7 +523,7 @@ impl Improver {
 
     /// The site-aligned left edge nearest `x` that keeps the cell within
     /// `[xl, xr)`, as `DetailedMgr::alignPos`.
-    pub(super) fn align(&self, n: usize, x: i64, xl: i64, xr: i64) -> Option<i64> {
+    pub(super) fn align(&self, n: NodeId, x: i64, xl: i64, xr: i64) -> Option<i64> {
         let row = &self.arch.rows[0];
         let xr = xr - self.width(n);
         let mut xp = xl.max(xr.min(x));
@@ -511,11 +541,11 @@ impl Improver {
     /// far from where the cell began, as `DetailedMgr::addToMoveList`.
     pub(super) fn add_to_move_list(
         &mut self,
-        n: usize,
+        n: NodeId,
         from: (i64, i64),
-        from_segs: &[usize],
+        from_segs: &[SegmentId],
         to: (i64, i64),
-        to_segs: &[usize],
+        to_segs: &[SegmentId],
         limited: bool,
     ) -> Result<bool> {
         if self.journal.moves.len() >= self.move_limit {
@@ -525,7 +555,7 @@ impl Improver {
         let y = self.grid.snap_down_y(to.1);
         if self
             .grid
-            .site_orientation(x, y, self.grid.nodes[NodeId::new(n)].site)
+            .site_orientation(x, y, self.grid.nodes[n].site)
             .is_none()
         {
             return Ok(false);
@@ -599,10 +629,10 @@ impl Improver {
             self.set_position(m.node, m.from.0, m.from.1);
             let x = self.grid.grid_x(m.from.0);
             let y = self.grid.round_y(m.from.1);
-            self.grid.paint_pixels(NodeId::new(m.node), x, y);
+            self.grid.paint_pixels(m.node, x, y);
             let orient = self
                 .grid
-                .site_orientation(x, y, self.grid.nodes[NodeId::new(m.node)].site)
+                .site_orientation(x, y, self.grid.nodes[m.node].site)
                 .ok_or(ImprovementError::Internal(
                     "cell put back where no row takes it",
                 ))?;

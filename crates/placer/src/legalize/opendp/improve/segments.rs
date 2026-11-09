@@ -2,19 +2,19 @@
 
 use super::arch::merge_intervals;
 use super::{Blockage, ImprovementError, Improver, Result, Segment};
-use crate::legalize::opendp::{GroupId, NodeId};
+use super::{NodeId, SegmentId};
+use crate::legalize::opendp::GroupId;
+use pare_common::db::indices::IdVec;
 use pare_common::geom::orient::Orientation;
 
 impl Improver {
     /// Collects the movable single-row cells by node, as
     /// `DetailedMgr::collectSingleHeightCells`.
     pub(super) fn collect_cells(&mut self) {
-        self.fixed_cells = (0..self.net.node_count())
-            .filter(|&n| self.is_fixed(n))
-            .collect();
+        self.fixed_cells = self.net.nodes().filter(|&n| self.is_fixed(n)).collect();
         self.single_height.clear();
         self.multi_height = vec![Vec::new(); 2];
-        for n in 0..self.net.node_count() {
+        for n in self.net.nodes() {
             if self.is_terminal(n) || self.is_fixed(n) {
                 continue;
             }
@@ -32,7 +32,7 @@ impl Improver {
 
     /// Every movable cell, single-row ones first, as the passes collect
     /// their candidates.
-    pub(super) fn movable_cells(&self) -> Vec<usize> {
+    pub(super) fn movable_cells(&self) -> Vec<NodeId> {
         let mut cells = self.single_height.clone();
         for spanned in self.multi_height.iter().skip(2) {
             cells.extend_from_slice(spanned);
@@ -88,7 +88,7 @@ impl Improver {
     /// Cuts the rows into segments between blockages and region edges,
     /// their ends on sites, as `DetailedMgr::findSegments`.
     pub(super) fn find_segments(&mut self) -> Result<()> {
-        self.segments.clear();
+        self.segments = IdVec::new();
         self.segs_in_row = vec![Vec::new(); self.arch.rows.len()];
         for r in 0..self.arch.rows.len() {
             let row = self.arch.rows[r];
@@ -136,13 +136,13 @@ impl Improver {
             let ix = (seg.max_x - row.left) / row.site_spacing;
             seg.max_x = row.left + ix * row.site_spacing;
         }
-        self.cells_in_seg = vec![Vec::new(); self.segments.len()];
+        self.cells_in_seg = IdVec::filled(Vec::new(), self.segments.len());
         Ok(())
     }
 
     fn add_segment(&mut self, row: usize, region: Option<GroupId>, min_x: i64, max_x: i64) {
-        self.segs_in_row[row].push(self.segments.len());
-        self.segments.push(Segment {
+        self.segs_in_row[row].push(self.segments.next_id());
+        let _ = self.segments.push(Segment {
             row,
             region,
             min_x,
@@ -225,25 +225,25 @@ impl Improver {
 
     /// Whether a cell's master may take the orientation of row `row`, as
     /// `checkMasterSymmetry`.
-    pub(super) fn master_symmetry_allows(&self, n: usize, row: usize) -> bool {
+    pub(super) fn master_symmetry_allows(&self, n: NodeId, row: usize) -> bool {
         match self.arch.rows[row].orient {
             Orientation::N | Orientation::FN => true,
-            Orientation::FS | Orientation::S => self.grid.nodes[NodeId::new(n)].symmetry.x,
+            Orientation::FS | Orientation::S => self.grid.nodes[n].symmetry.x,
             _ => false,
         }
     }
 
     /// The nearest segment of the cell's region and a row its master can
     /// take, preferring one it fits, as `DetailedMgr::findClosestSegment`.
-    fn closest_segment(&self, n: usize) -> Option<usize> {
+    fn closest_segment(&self, n: NodeId) -> Option<SegmentId> {
         let row = self.arch.closest_row(self.bottom(n));
         let (left, width) = (self.left(n), self.width(n));
-        let mut best1: Option<(usize, i64)> = None;
-        let mut best2: Option<(usize, i64)> = None;
+        let mut best1: Option<(SegmentId, i64)> = None;
+        let mut best2: Option<(SegmentId, i64)> = None;
         let consider = |r: usize,
                         vert: i64,
-                        best1: &mut Option<(usize, i64)>,
-                        best2: &mut Option<(usize, i64)>| {
+                        best1: &mut Option<(SegmentId, i64)>,
+                        best2: &mut Option<(SegmentId, i64)>| {
             for &s in &self.segs_in_row[r] {
                 let seg = &self.segments[s];
                 if self.group(n) != seg.region || !self.master_symmetry_allows(n, seg.row) {
@@ -260,7 +260,7 @@ impl Improver {
             }
         };
         consider(row, 0, &mut best1, &mut best2);
-        let within = |vert: i64, b1: Option<(usize, i64)>, b2: Option<(usize, i64)>| {
+        let within = |vert: i64, b1: Option<(SegmentId, i64)>, b2: Option<(SegmentId, i64)>| {
             let d1 = b1.map_or_else(|| i64::from(i32::MAX), |b| b.1);
             let d2 = b2.map_or_else(|| i64::from(i32::MAX), |b| b.1);
             vert <= d1 || vert <= d2
@@ -284,13 +284,13 @@ impl Improver {
     /// The nearest stack of segments, one per row, a multi-row cell can
     /// take, preferring one it fits, as
     /// `DetailedMgr::findClosestSpanOfSegments`.
-    fn closest_span_of_segments(&self, n: usize) -> Result<Option<Vec<usize>>> {
+    fn closest_span_of_segments(&self, n: NodeId) -> Result<Option<Vec<SegmentId>>> {
         let spanned = self.rows_spanned(n);
         if spanned <= 1 {
             return Ok(None);
         }
-        let mut best1: Option<(Vec<usize>, f64)> = None;
-        let mut best2: Option<(Vec<usize>, f64)> = None;
+        let mut best1: Option<(Vec<SegmentId>, f64)> = None;
+        let mut best2: Option<(Vec<SegmentId>, f64)> = None;
         for b in 0..self.arch.rows.len() {
             let t = b + spanned - 1;
             if t >= self.arch.rows.len() || !self.master_symmetry_allows(n, b) {
@@ -341,12 +341,12 @@ impl Improver {
     /// `DetailedMgr::findClosestSpanOfSegmentsDfs`.
     fn span_dfs(
         &self,
-        s: usize,
+        s: SegmentId,
         (xmin, xmax): (i64, i64),
         top: usize,
         spanned: usize,
-        stack: &mut Vec<usize>,
-        candidates: &mut Vec<Vec<usize>>,
+        stack: &mut Vec<SegmentId>,
+        candidates: &mut Vec<Vec<SegmentId>>,
     ) -> Result<()> {
         stack.push(s);
         let row = self.segments[s].row;
@@ -372,7 +372,7 @@ impl Improver {
 
     /// Puts each cell in its nearest segment or segments, clamped into them
     /// and onto their row, as `DetailedMgr::assignCellsToSegments`.
-    pub(super) fn assign_cells_to_segments(&mut self, nodes: &[usize]) -> Result<()> {
+    pub(super) fn assign_cells_to_segments(&mut self, nodes: &[NodeId]) -> Result<()> {
         for &n in nodes {
             let segs = if self.rows_spanned(n) == 1 {
                 vec![self.closest_segment(n).ok_or(ImprovementError::Internal(
@@ -406,7 +406,7 @@ impl Improver {
     }
 
     /// `DetailedMgr::addCellToSegment`: in order of center, ahead of equals.
-    pub(super) fn add_cell_to_segment(&mut self, n: usize, s: usize) -> Result<()> {
+    pub(super) fn add_cell_to_segment(&mut self, n: NodeId, s: SegmentId) -> Result<()> {
         let x = self.center_x(n);
         let at = self.cells_in_seg[s].partition_point(|&c| self.center_x(c) < x);
         self.cells_in_seg[s].insert(at, n);
@@ -426,7 +426,7 @@ impl Improver {
     }
 
     /// `DetailedMgr::removeCellFromSegment`.
-    pub(super) fn remove_cell_from_segment(&mut self, n: usize, s: usize) -> Result<()> {
+    pub(super) fn remove_cell_from_segment(&mut self, n: NodeId, s: SegmentId) -> Result<()> {
         let at =
             self.cells_in_seg[s]
                 .iter()
@@ -446,7 +446,7 @@ impl Improver {
 
     /// Puts a segment's cells back in order of center, keeping equals in
     /// place, as `DetailedMgr::resortSegment`.
-    pub(super) fn resort_segment(&mut self, s: usize) {
+    pub(super) fn resort_segment(&mut self, s: SegmentId) {
         let mut cells = std::mem::take(&mut self.cells_in_seg[s]);
         cells.sort_by_key(|&c| self.center_x(c));
         self.segments[s].util = cells.iter().map(|&c| self.width(c)).sum();
@@ -454,7 +454,7 @@ impl Improver {
     }
 
     pub(super) fn resort_segments(&mut self) {
-        for s in 0..self.segments.len() {
+        for s in self.segments.ids() {
             self.resort_segment(s);
         }
     }
@@ -463,7 +463,7 @@ impl Improver {
     /// overlapping or breaking a placement rule, as `DetailedMgr`'s checks.
     pub(super) fn placement_problems(&self) -> Result<usize> {
         let mut problems = 0;
-        for (s, cells) in self.cells_in_seg.iter().enumerate() {
+        for (s, cells) in self.cells_in_seg.iter_enumerated() {
             let seg = &self.segments[s];
             let mut by_center = cells.clone();
             by_center.sort_by_key(|&c| self.center_x(c));
@@ -489,7 +489,7 @@ impl Improver {
             }
         }
         let height = self.arch.rows[0].height;
-        for n in 0..self.net.node_count() {
+        for n in self.net.nodes() {
             if self.is_terminal(n) || self.is_fixed(n) {
                 continue;
             }
@@ -526,7 +526,7 @@ impl Improver {
 
     /// Whether `position` lies within a blockage of a row the cell spans,
     /// as `DetailedMgr::isInsideABlockage`.
-    fn inside_blockage(&self, n: usize, position: i64) -> bool {
+    fn inside_blockage(&self, n: NodeId, position: i64) -> bool {
         let first = &self.arch.rows[0];
         let last = self.arch.rows.len() as i64 - 1;
         let start = ((self.bottom(n) - first.bottom) / first.height).max(0);
@@ -545,7 +545,7 @@ impl Improver {
     pub(super) fn one_site_gap_violations(&mut self, fix: bool) -> Result<usize> {
         let gap = self.arch.rows[0].site_width;
         let mut violations = 0;
-        for s in 0..self.segments.len() {
+        for s in self.segments.ids() {
             if self.cells_in_seg[s].len() < 2 {
                 continue;
             }
@@ -598,10 +598,10 @@ impl Improver {
     /// as `DetailedMgr::fixOneSiteGapViolations`.
     fn fix_one_site_gap(
         &mut self,
-        cell: usize,
+        cell: NodeId,
         gap: i64,
-        s: usize,
-        violating: usize,
+        s: SegmentId,
+        violating: NodeId,
     ) -> Result<bool> {
         let to = self.right(violating) - gap;
         if self.shift_left_helper(violating, to, s, violating)? && self.verify_move()? {
