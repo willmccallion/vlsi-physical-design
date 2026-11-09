@@ -15,9 +15,9 @@ use crate::gated::{GatedEnable, gated_enables};
 use crate::graph::TimingGraph;
 use crate::netlist::{ClockNetwork, Constants, Netlist};
 use pare_common::db::design::PinOwner;
-use pare_common::db::indices::{CellId, IoPinId, PinId};
+use pare_common::db::indices::{CellId, IdVec, IoPinId, PinId};
 use pare_common::db::liberty::{
-    ArcRole, Edge, FuncExpr, Logic, MinMax, SequentialKind, SideValues,
+    ArcRole, Edge, EdgeValues, FuncExpr, Logic, MinMax, SequentialKind, SideValues,
 };
 use pare_common::db::sdc::{ClockEdge, ClockId, MultiCyclePath, PathEnd, Sdc};
 use pare_common::units::Seconds;
@@ -66,15 +66,10 @@ pub struct Tag {
     pub is_clock: bool,
 }
 
-/// Index of a tag in the analysis.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
-pub(crate) struct TagId(u32);
-
-impl TagId {
-    const fn index(self) -> usize {
-        self.0 as usize
-    }
-}
+pare_common::define_index!(
+    /// A tag of the analysis.
+    TagId(u32)
+);
 
 /// The step before a point on a path.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -304,14 +299,14 @@ struct LatchTiming {
 #[derive(Clone, Debug)]
 pub struct Sta {
     sdc: Sdc,
-    tags: Vec<Tag>,
+    tags: IdVec<TagId, Tag>,
     tag_ids: FxHashMap<Tag, TagId>,
-    /// Entries by pin and edge: `pin * 2 + edge`.
-    entries: Vec<Vec<Entry>>,
+    /// Each pin's entries for each edge.
+    entries: IdVec<PinId, EdgeValues<Vec<Entry>>>,
     endpoints: Vec<PinId>,
-    is_endpoint: Vec<bool>,
+    is_endpoint: IdVec<PinId, bool>,
     /// Each endpoint pin's slack from its own checks, per side.
-    end_slack: Vec<SideValues<Seconds>>,
+    end_slack: IdVec<PinId, SideValues<Seconds>>,
     tns: SideValues<Seconds>,
     worst: SideValues<Option<(Slack, Option<PinId>)>>,
     accountings: FxHashMap<(ClockEdge, ClockEdge), Accounting>,
@@ -321,7 +316,7 @@ pub struct Sta {
     gated: FxHashMap<PinId, GatedEnable>,
     /// Whether each pin is in a propagated clock's network, below where the
     /// clock enters, so its clock arrives through the network's delays.
-    propagated: Vec<bool>,
+    propagated: IdVec<PinId, bool>,
 }
 
 /// A clock edge a check captures with, and how late it arrives at the
@@ -365,24 +360,27 @@ impl Sta {
             .collect();
         let mut sta = Self {
             sdc: sdc.clone(),
-            tags: Vec::new(),
+            tags: IdVec::new(),
             tag_ids: FxHashMap::default(),
-            entries: vec![Vec::new(); 2 * n],
+            entries: IdVec::filled(EdgeValues::default(), n),
             endpoints: Vec::new(),
-            is_endpoint: vec![false; n],
-            end_slack: vec![SideValues::both(Seconds::INFINITY); n],
+            is_endpoint: IdVec::filled(false, n),
+            end_slack: IdVec::filled(SideValues::both(Seconds::INFINITY), n),
             tns: SideValues::both(Seconds::ZERO),
             worst: SideValues::both(None),
             accountings: FxHashMap::default(),
             exception_ports,
             latches: find_latches(netlist, constants),
             gated: gated_enables(netlist, clocks),
-            propagated: (0..n)
-                .map(|p| clocks.is_propagated(PinId::new(p)))
+            propagated: netlist
+                .db
+                .pins
+                .ids()
+                .map(|p| clocks.is_propagated(p))
                 .collect(),
         };
         sta.find_endpoints(netlist, clocks);
-        let all: Vec<PinId> = (0..n).map(PinId::new).collect();
+        let all: Vec<PinId> = netlist.db.pins.ids().collect();
         let _ = sta.find_arrivals(netlist, graph, clocks, &all);
         sta.find_requireds(netlist, graph, &all);
         sta
@@ -413,14 +411,11 @@ impl Sta {
     /// Makes room for pins added since the analysis started.
     fn grow(&mut self, netlist: &Netlist<'_>) {
         let n = netlist.db.pins.len();
-        if self.is_endpoint.len() >= n {
-            return;
-        }
-        self.entries.resize(2 * n, Vec::new());
-        self.is_endpoint.resize(n, false);
+        self.entries.grow_to(n, EdgeValues::default());
+        self.is_endpoint.grow_to(n, false);
         self.end_slack
-            .resize(n, SideValues::both(Seconds::INFINITY));
-        self.propagated.resize(n, false);
+            .grow_to(n, SideValues::both(Seconds::INFINITY));
+        self.propagated.grow_to(n, false);
     }
 
     /// The constraints an analysis runs under.
@@ -433,16 +428,15 @@ impl Sta {
         if let Some(&id) = self.tag_ids.get(&tag) {
             return id;
         }
-        let id = TagId(self.tags.len() as u32);
-        self.tags.push(tag);
+        let id = self.tags.push(tag);
         let _ = self.tag_ids.insert(tag, id);
         id
     }
 
     fn entries(&self, pin: PinId, edge: Edge) -> &[Entry] {
         self.entries
-            .get(pin.index() * 2 + edge.index())
-            .map_or(&[], Vec::as_slice)
+            .get(pin)
+            .map_or(&[], |entries| entries[edge].as_slice())
     }
 
     /// The pins timing ends at: register inputs with checks from a clocked
@@ -473,7 +467,7 @@ impl Sta {
                 }
             };
             if is_end || self.gated.contains_key(&pin) {
-                self.is_endpoint[pin.index()] = true;
+                self.is_endpoint[pin] = true;
                 self.endpoints.push(pin);
             }
         }
@@ -488,7 +482,7 @@ impl Sta {
     /// Whether timing ends at a pin.
     #[must_use]
     pub(crate) fn is_endpoint(&self, pin: PinId) -> bool {
-        self.is_endpoint.get(pin.index()).copied().unwrap_or(false)
+        self.is_endpoint.get(pin).copied().unwrap_or(false)
     }
 
     /// A pin's slack on `side`: the least over its edges and tags, as
@@ -532,7 +526,7 @@ impl Sta {
     pub fn clock_rise_arrival(&self, pin: PinId) -> Option<Seconds> {
         Edge::BOTH.iter().find_map(|&edge| {
             self.entries(pin, edge).iter().find_map(|e| {
-                let tag = self.tags[e.tag.index()];
+                let tag = self.tags[e.tag];
                 let rising = tag.launch.is_some_and(|l| l.edge == Edge::Rise);
                 (tag.is_clock && rising)
                     .then_some(e.arrival[MinMax::Max])
@@ -566,7 +560,7 @@ impl Sta {
         }
         let mut worst = (Slack::UNCONSTRAINED, None);
         for &end in &self.endpoints {
-            let slack = Slack(self.end_slack[end.index()][side]);
+            let slack = Slack(self.end_slack[end][side]);
             if slack < worst.0 {
                 worst = (slack, Some(end));
             }
@@ -616,7 +610,7 @@ impl Sta {
             points.push(PathPoint {
                 pin,
                 edge,
-                tag: self.tags[entry.tag.index()],
+                tag: self.tags[entry.tag],
                 arrival: entry.arrival[side].unwrap_or(Seconds::ZERO),
                 via,
             });
@@ -683,27 +677,26 @@ impl Sta {
         seeds: &[PinId],
     ) -> Vec<PinId> {
         let n = netlist.db.pins.len();
-        let mut queued = vec![false; n];
-        let mut heap: BinaryHeap<Reverse<(u32, usize)>> = BinaryHeap::new();
+        let mut queued = IdVec::filled(false, n);
+        let mut heap: BinaryHeap<Reverse<(u32, PinId)>> = BinaryHeap::new();
         for &pin in seeds {
-            if pin.index() < n && !queued[pin.index()] {
-                queued[pin.index()] = true;
-                heap.push(Reverse((graph.level(pin), pin.index())));
+            if queued.get(pin) == Some(&false) {
+                queued[pin] = true;
+                heap.push(Reverse((graph.level(pin), pin)));
             }
         }
         let mut unrequired = Vec::new();
-        while let Some(Reverse((_, index))) = heap.pop() {
-            queued[index] = false;
-            let pin = PinId::new(index);
+        while let Some(Reverse((_, pin))) = heap.pop() {
+            queued[pin] = false;
             match self.visit_arrivals(netlist, graph, clocks, pin) {
                 Stored::Same => continue,
                 Stored::Moved => {}
                 Stored::Unrequired => unrequired.push(pin),
             }
             for next in successors(netlist, graph, pin) {
-                if !queued[next.index()] {
-                    queued[next.index()] = true;
-                    heap.push(Reverse((graph.level(next), next.index())));
+                if !queued[next] {
+                    queued[next] = true;
+                    heap.push(Reverse((graph.level(next), next)));
                 }
             }
         }
@@ -751,7 +744,7 @@ impl Sta {
     fn clear_arrivals(&mut self, pin: PinId) -> Stored {
         let mut stored = Stored::Same;
         for edge in Edge::BOTH {
-            let slot = &mut self.entries[pin.index() * 2 + edge.index()];
+            let slot = &mut self.entries[pin][edge];
             if !slot.is_empty() {
                 slot.clear();
                 stored = Stored::Moved;
@@ -763,7 +756,7 @@ impl Sta {
     /// Replaces a pin's entries, keeping the required times of tags that
     /// stay.
     fn store_arrivals(&mut self, pin: PinId, edge: Edge, mut fresh: Vec<Entry>) -> Stored {
-        let slot = &mut self.entries[pin.index() * 2 + edge.index()];
+        let slot = &mut self.entries[pin][edge];
         let mut unrequired = false;
         for entry in &mut fresh {
             match slot.iter().find(|o| o.tag == entry.tag) {
@@ -877,7 +870,7 @@ impl Sta {
             self.load_arrivals(netlist, graph, pin, edge)
         };
         all.into_iter()
-            .filter(|e| self.tags[e.tag.index()].is_clock)
+            .filter(|e| self.tags[e.tag].is_clock)
             .collect()
     }
 
@@ -887,7 +880,7 @@ impl Sta {
         self.entries(pin, edge)
             .iter()
             .filter_map(|e| {
-                let t = self.tags[e.tag.index()];
+                let t = self.tags[e.tag];
                 let launch = t.launch.filter(|_| t.is_clock)?;
                 let time = self.sdc.edge_time(launch);
                 let latency = e.arrival.map(|a| a.map_or(Seconds::ZERO, |a| a - time));
@@ -903,7 +896,7 @@ impl Sta {
     /// zero for an ideal clock, as `OpenSTA` takes an ideal clock's slew,
     /// and the clock's own slew on the check's side for a propagated one.
     fn clock_slew(&self, graph: &TimingGraph, pin: PinId, edge: Edge, side: MinMax) -> Seconds {
-        if self.propagated.get(pin.index()).copied().unwrap_or(false) {
+        if self.propagated.get(pin).copied().unwrap_or(false) {
             graph.slew_side(pin, side).get(edge)
         } else {
             Seconds::ZERO
@@ -936,11 +929,7 @@ impl Sta {
                 continue;
             }
             let from_entries: Vec<Entry> = self.entries(arc.arc.from, arc.from_edge).to_vec();
-            let in_network = self
-                .propagated
-                .get(driver.index())
-                .copied()
-                .unwrap_or(false);
+            let in_network = self.propagated.get(driver).copied().unwrap_or(false);
             for from in from_entries {
                 let tag = if in_network {
                     from.tag
@@ -1016,7 +1005,7 @@ impl Sta {
     /// The tag a path carries once it leaves a clock network and becomes
     /// data.
     fn data_tag(&mut self, tag: TagId) -> TagId {
-        let value = self.tags[tag.index()];
+        let value = self.tags[tag];
         if !value.is_clock {
             return tag;
         }
@@ -1040,7 +1029,7 @@ impl Sta {
         arrival: Seconds,
         side: MinMax,
     ) -> Vec<(TagId, Seconds)> {
-        let tag = self.tags[data_tag.index()];
+        let tag = self.tags[data_tag];
         let Some(launch) = tag.launch else {
             return Vec::new();
         };
@@ -1124,24 +1113,23 @@ impl Sta {
     /// through the fanin.
     fn find_requireds(&mut self, netlist: &Netlist<'_>, graph: &TimingGraph, seeds: &[PinId]) {
         let n = netlist.db.pins.len();
-        let mut queued = vec![false; n];
-        let mut heap: BinaryHeap<(u32, usize)> = BinaryHeap::new();
+        let mut queued = IdVec::filled(false, n);
+        let mut heap: BinaryHeap<(u32, PinId)> = BinaryHeap::new();
         for &pin in seeds {
-            if pin.index() < n && !queued[pin.index()] {
-                queued[pin.index()] = true;
-                heap.push((graph.level(pin), pin.index()));
+            if queued.get(pin) == Some(&false) {
+                queued[pin] = true;
+                heap.push((graph.level(pin), pin));
             }
         }
-        while let Some((_, index)) = heap.pop() {
-            queued[index] = false;
-            let pin = PinId::new(index);
+        while let Some((_, pin)) = heap.pop() {
+            queued[pin] = false;
             if !self.visit_requireds(netlist, graph, pin) {
                 continue;
             }
             for prev in predecessors(netlist, graph, pin) {
-                if !queued[prev.index()] {
-                    queued[prev.index()] = true;
-                    heap.push((graph.level(prev), prev.index()));
+                if !queued[prev] {
+                    queued[prev] = true;
+                    heap.push((graph.level(prev), prev));
                 }
             }
         }
@@ -1156,7 +1144,7 @@ impl Sta {
         for edge in Edge::BOTH {
             let entries = self.entries(pin, edge).to_vec();
             for (k, entry) in entries.iter().enumerate() {
-                let required = if self.tags[entry.tag.index()].is_clock {
+                let required = if self.tags[entry.tag].is_clock {
                     REQUIRED_INIT
                 } else if unreached {
                     REQUIRED_UNREACHED
@@ -1174,7 +1162,7 @@ impl Sta {
                     }
                     required
                 };
-                let slot = &mut self.entries[pin.index() * 2 + edge.index()][k];
+                let slot = &mut self.entries[pin][edge][k];
                 if differ(slot.required, required) {
                     slot.required = required;
                     changed = true;
@@ -1272,7 +1260,7 @@ impl Sta {
         edge: Edge,
         entry: &Entry,
     ) -> SideValues<Option<Seconds>> {
-        let tag = self.tags[entry.tag.index()];
+        let tag = self.tags[entry.tag];
         let Some(launch) = tag.launch else {
             return SideValues::both(None);
         };
@@ -1536,7 +1524,7 @@ impl Sta {
                 }
             }
         }
-        let old = self.end_slack[pin.index()];
+        let old = self.end_slack[pin];
         if !differ(old, slack) {
             return;
         }
@@ -1549,7 +1537,7 @@ impl Sta {
             }
             self.worst[side] = None;
         }
-        self.end_slack[pin.index()] = slack;
+        self.end_slack[pin] = slack;
     }
 }
 

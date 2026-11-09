@@ -11,7 +11,7 @@ use crate::resizer::{RepairError, Resizer, buffer_delays};
 use crate::sta::Sta;
 use pare_common::config::Share;
 use pare_common::db::indices::PinId;
-use pare_common::db::liberty::{BufferCell, Edge, LibCellId, MinMax};
+use pare_common::db::liberty::{BufferCell, Edge, EdgeValues, LibCellId, MinMax};
 use pare_common::geom::dbu::Dbu;
 use pare_common::geom::point::Point;
 use pare_common::units::{Farads, Quantity, Seconds};
@@ -263,24 +263,23 @@ fn hold_delay(resizer: &Resizer<'_, Sta>, buffer: BufferCell) -> Seconds {
 /// them: the least early slack and the greatest late one.
 #[derive(Clone, Copy, Debug)]
 struct Slacks {
-    early: [Seconds; 2],
-    late: [Seconds; 2],
+    early: EdgeValues<Seconds>,
+    late: EdgeValues<Seconds>,
 }
 
 impl Slacks {
     const fn new() -> Self {
         Self {
-            early: [Seconds::INFINITY; 2],
-            late: [Seconds::new(f64::NEG_INFINITY); 2],
+            early: EdgeValues::both(Seconds::INFINITY),
+            late: EdgeValues::both(Seconds::new(f64::NEG_INFINITY)),
         }
     }
 
     fn merge(&mut self, resizer: &Resizer<'_, Sta>, pin: PinId) {
         let sta = resizer.sta();
         for edge in Edge::BOTH {
-            let i = edge.index();
-            self.early[i] = self.early[i].min(sta.slack_edge(pin, edge, MinMax::Min).time());
-            self.late[i] = self.late[i].max(sta.slack_edge(pin, edge, MinMax::Max).time());
+            self.early[edge] = self.early[edge].min(sta.slack_edge(pin, edge, MinMax::Min).time());
+            self.late[edge] = self.late[edge].max(sta.slack_edge(pin, edge, MinMax::Max).time());
         }
     }
 }
@@ -367,9 +366,8 @@ impl HoldRepair<'_> {
         let o = self.options;
         let fits = o.allow_setup_violations
             || Edge::BOTH.iter().all(|&edge| {
-                let i = edge.index();
-                let setup = slacks.late[i] - o.setup_margin;
-                setup > -(slacks.early[i] - o.hold_margin) && setup > delays.get(edge)
+                let setup = slacks.late[edge] - o.setup_margin;
+                setup > -(slacks.early[edge] - o.hold_margin) && setup > delays.get(edge)
             });
         fits.then_some(loads)
     }

@@ -46,15 +46,6 @@ pub enum Edge {
 impl Edge {
     /// Both edges, rise first.
     pub const BOTH: [Self; 2] = [Self::Rise, Self::Fall];
-
-    /// Index into a pair of per-edge values, rise first.
-    #[must_use]
-    pub const fn index(self) -> usize {
-        match self {
-            Self::Rise => 0,
-            Self::Fall => 1,
-        }
-    }
 }
 
 /// A value for each edge.

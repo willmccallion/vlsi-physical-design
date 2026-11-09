@@ -101,6 +101,25 @@ impl<I: TableIndex, T> IdVec<I, T> {
         self.entries.is_empty()
     }
 
+    /// Appends copies of `entry` until the table has `len` entries; a table
+    /// that long already is left alone, so no index goes stale.
+    pub fn grow_to(&mut self, len: usize, entry: T)
+    where
+        T: Clone,
+    {
+        if self.entries.len() < len {
+            self.entries.resize(len, entry);
+        }
+    }
+
+    /// Sets every entry to `entry`.
+    pub fn fill(&mut self, entry: T)
+    where
+        T: Clone,
+    {
+        self.entries.fill(entry);
+    }
+
     /// The index the next [`Self::push`] gives its entry.
     pub fn next_id(&self) -> I {
         I::from_position(self.entries.len())

@@ -65,7 +65,7 @@ struct Driver {
     fanout_limit: f64,
     max_slew: Seconds,
     load_high_water_mark: Farads,
-    arrival_paths: [Option<DriverPoint>; 2],
+    arrival_paths: EdgeValues<Option<DriverPoint>>,
 }
 
 /// The delay, slack correction and slew at the driver for a tree.
@@ -316,7 +316,7 @@ impl Rebuffer {
             fanout_limit: resizer.fanout_limit().unwrap_or(f64::INFINITY),
             max_slew,
             load_high_water_mark: Farads::ZERO,
-            arrival_paths: [None, None],
+            arrival_paths: EdgeValues::default(),
         });
         true
     }
@@ -330,7 +330,7 @@ impl Rebuffer {
         tree: &BnetPtr,
         driver: PinId,
     ) -> BnetPtr {
-        let mut arrival_paths: [Option<DriverPoint>; 2] = [None, None];
+        let mut arrival_paths: EdgeValues<Option<DriverPoint>> = EdgeValues::default();
         let annotated = self.annotate_loads(resizer, tree, driver, &mut arrival_paths);
         if let Some(d) = &mut self.driver {
             d.arrival_paths = arrival_paths;
@@ -343,7 +343,7 @@ impl Rebuffer {
         resizer: &Resizer<'_, Sta>,
         node: &BnetPtr,
         driver: PinId,
-        arrival_paths: &mut [Option<DriverPoint>; 2],
+        arrival_paths: &mut EdgeValues<Option<DriverPoint>>,
     ) -> BnetPtr {
         match &node.kind {
             Kind::Load { pin } => {
@@ -360,14 +360,14 @@ impl Rebuffer {
                 let required = end.arrival + path.slack;
                 let slack = Fixed::from_seconds(required - driver_point.arrival);
                 let edge = end.edge;
-                if arrival_paths[edge.index()].is_none() {
+                if arrival_paths[edge].is_none() {
                     let from = (at_driver > 0)
                         .then(|| path.points[at_driver - 1])
                         .and_then(|prev| match driver_point.via {
                             Via::Arc { set } => Some((prev.pin, prev.edge, set)),
                             _ => None,
                         });
-                    arrival_paths[edge.index()] = Some(DriverPoint {
+                    arrival_paths[edge] = Some(DriverPoint {
                         arrival: driver_point.arrival,
                         from,
                     });
@@ -468,7 +468,7 @@ impl Rebuffer {
         let mut correction = Seconds::INFINITY;
         let mut slew = Seconds::ZERO;
         for &edge in edges.edges() {
-            let Some(point) = driver.arrival_paths[edge.index()] else {
+            let Some(point) = driver.arrival_paths[edge] else {
                 continue;
             };
             let Some((from_pin, from_edge, set)) = point.from else {
