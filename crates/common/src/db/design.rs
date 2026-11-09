@@ -559,19 +559,16 @@ fn new_ids<I: TableIndex>(dropped: &IdVec<I, bool>, map: &IdVec<I, I>) -> IdVec<
         .collect()
 }
 
-/// The new index of each kept entry, with the dropped ones left at their old
-/// index, which nothing reads.
-fn renumber<I: TableIndex>(dropped: &IdVec<I, bool>) -> IdVec<I, I> {
-    let mut next = 0;
+/// How many entries `dropped` keeps before each one, which for a kept
+/// entry is its new id.
+fn kept_ranks<I: TableIndex>(dropped: &IdVec<I, bool>) -> IdVec<I, I> {
+    let mut kept = 0;
     dropped
-        .iter_enumerated()
-        .map(|(id, &drop)| {
-            if drop {
-                id
-            } else {
-                next += 1;
-                I::from_position(next - 1)
-            }
+        .iter()
+        .map(|&drop| {
+            let rank = I::from_position(kept);
+            kept += usize::from(!drop);
+            rank
         })
         .collect()
 }
@@ -695,11 +692,21 @@ impl NetlistDB {
     /// The connection of an instance's macro pin, if it has one.
     #[must_use]
     pub fn cell_pin(&self, cell: CellId, macro_pin: MacroPinId) -> Option<PinId> {
+        self.cell_connections(cell)
+            .find(|&(_, on)| on == macro_pin)
+            .map(|(pin, _)| pin)
+    }
+
+    /// Each connection of `cell` with the macro pin it is on; every pin a
+    /// cell lists is its own, as [`Self::connect_cell_pin`] makes them.
+    fn cell_connections(&self, cell: CellId) -> impl Iterator<Item = (PinId, MacroPinId)> + '_ {
         self.cells[cell]
             .pins
             .iter()
-            .copied()
-            .find(|&p| matches!(self.pins[p].owner, PinOwner::Cell { pin, .. } if pin == macro_pin))
+            .filter_map(|&pin| match self.pins[pin].owner {
+                PinOwner::Cell { pin: on, .. } => Some((pin, on)),
+                PinOwner::Io(_) => None,
+            })
     }
 
     /// Connects a pin of an instance to a net.
@@ -781,17 +788,9 @@ impl NetlistDB {
         if old == master {
             return Ok(());
         }
-        let new_pins: Vec<(PinId, MacroPinId)> = self.cells[cell]
-            .pins
-            .iter()
-            .map(|&pin| {
-                let PinOwner::Cell { pin: old_pin, .. } = self.pins[pin].owner else {
-                    return Err(EditError::MissingPin {
-                        cell: self.cells[cell].name.clone(),
-                        master: self.library.cell_macro(master).name.clone(),
-                        pin: String::new(),
-                    });
-                };
+        let new_pins: Vec<(PinId, MacroPinId)> = self
+            .cell_connections(cell)
+            .map(|(pin, old_pin)| {
                 let name = &self.library.cell_macro(old).pin(old_pin).name;
                 self.library
                     .cell_macro(master)
@@ -867,9 +866,9 @@ impl NetlistDB {
                 PinOwner::Io(_) => false,
             })
             .collect();
-        let cell_map = renumber(&drop_cell);
-        let net_map = renumber(&drop_net);
-        let pin_map = renumber(&drop_pin);
+        let cell_map = kept_ranks(&drop_cell);
+        let net_map = kept_ranks(&drop_net);
+        let pin_map = kept_ranks(&drop_pin);
         let remap_pins = |pins: &mut Vec<PinId>| {
             pins.retain(|&p| !drop_pin[p]);
             for p in pins.iter_mut() {
