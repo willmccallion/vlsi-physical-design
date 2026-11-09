@@ -89,15 +89,56 @@ pub struct RoutingTiles {
     pub reduction: Vec<f64>,
 }
 
+/// Gcells that cannot be measured: none at all, or tables of capacity that
+/// do not hold one entry per gcell.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, thiserror::Error)]
+#[error(
+    "{nx} by {ny} gcells of a positive size need as many capacities and reductions, \
+     not {capacities} and {reductions}"
+)]
+pub struct MismatchedTiles {
+    /// Columns.
+    pub nx: usize,
+    /// Rows.
+    pub ny: usize,
+    /// Entries of the capacity table.
+    pub capacities: usize,
+    /// Entries of the reduction table.
+    pub reductions: usize,
+}
+
 impl RoutingTiles {
+    /// Checks that there are gcells, of a positive size, and one capacity
+    /// and one reduction for each.
+    ///
+    /// # Errors
+    ///
+    /// When there are none, or the tables do not hold one entry per gcell.
+    pub fn check(&self) -> Result<(), MismatchedTiles> {
+        let gcells = self.nx * self.ny;
+        let fits = gcells > 0
+            && self.size > 0.0
+            && self.capacity.len() == gcells
+            && self.reduction.len() == gcells;
+        if fits {
+            return Ok(());
+        }
+        Err(MismatchedTiles {
+            nx: self.nx,
+            ny: self.ny,
+            capacities: self.capacity.len(),
+            reductions: self.reduction.len(),
+        })
+    }
+
     /// The share of gcell `i`'s capacity taken before placement; none for a
     /// gcell without capacity, which `OpenROAD`'s RUDY leaves at its wire.
     fn taken(&self, i: usize) -> f64 {
-        let capacity = self.capacity.get(i).copied().unwrap_or(0.0);
+        let capacity = self.capacity[i];
         if capacity <= 0.0 {
             return 0.0;
         }
-        self.reduction.get(i).copied().unwrap_or(0.0) / capacity
+        self.reduction[i] / capacity
     }
 
     /// The extent of column or row `i` of an axis starting at `origin`,
@@ -117,9 +158,6 @@ impl RoutingTiles {
     /// gcell, the grid clipped to `die`. The last gcell of a row or column
     /// ends at the die where `OpenROAD`'s grid stretches it to there.
     fn overlaps(&self, rect: &Rect<f64>, die: &Rect<f64>) -> Vec<(usize, f64, f64)> {
-        if self.nx == 0 || self.ny == 0 || self.size <= 0.0 {
-            return Vec::new();
-        }
         let columns = self.line(rect.min.x, self.origin.x, self.nx)
             ..=self.line(rect.max.x, self.origin.x, self.nx);
         let rows = self.line(rect.min.y, self.origin.y, self.ny)

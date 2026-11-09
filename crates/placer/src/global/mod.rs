@@ -23,7 +23,9 @@ mod routability;
 mod wirelength;
 
 pub use initial::INITIAL_PLACE_ROUNDS;
-pub use routability::{CongestionEstimator, CongestionRound, RoutabilityParams, RoutingTiles};
+pub use routability::{
+    CongestionEstimator, CongestionRound, MismatchedTiles, RoutabilityParams, RoutingTiles,
+};
 
 use crate::model::{PinAnchor, PlacementModel};
 use crate::zones::Zone;
@@ -135,6 +137,9 @@ pub enum GlobalPlacementError<E> {
     /// A zone's cells have nowhere to go.
     #[error(transparent)]
     NoRoom(#[from] ZoneWithoutRoom),
+    /// Routability was given gcells it cannot measure.
+    #[error(transparent)]
+    Tiles(#[from] MismatchedTiles),
     /// A timing-driven repair failed.
     #[error("timing-driven repair failed: {0}")]
     Repair(E),
@@ -368,7 +373,7 @@ fn channel_pitch(rows: &[Rect<f64>]) -> Option<f64> {
 /// # Errors
 ///
 /// When a zone with movable cells has no room, before or after a repair,
-/// or a repair fails.
+/// routability's gcells do not match their tables, or a repair fails.
 pub fn place<D: TimingDriver>(
     model: &mut PlacementModel,
     params: &GlobalParams,
@@ -376,6 +381,9 @@ pub fn place<D: TimingDriver>(
     timing: Option<&mut D>,
     report: impl FnMut(&Progress),
 ) -> Result<GlobalResult, GlobalPlacementError<D::Error>> {
+    if let Some(routability) = &params.routability {
+        routability.tiles.check()?;
+    }
     let mut rng = StdRng::seed_from_u64(params.seed);
     let setup = Setup::new(model, params, &mut rng)?;
     let probe = estimator.map(|estimator| Probe::new(estimator, model));
