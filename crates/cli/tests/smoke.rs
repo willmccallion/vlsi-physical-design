@@ -526,3 +526,20 @@ fn a_report_that_cannot_be_written_fails_a_run_that_passed() {
         printed(&output)
     );
 }
+
+#[test]
+fn an_image_that_cannot_be_written_fails_the_run() {
+    let dir = work_dir("image-unwritable");
+    let config = write_config(&dir, "place_and_route", "");
+    let image = dir.join("nesterov_placer.png");
+    std::fs::create_dir(&image).unwrap();
+
+    let output = pare(&[Path::new("place"), &config]);
+
+    assert!(!output.status.success());
+    assert!(
+        printed(&output).contains(&format!("Error: cannot write {}", image.display())),
+        "{}",
+        printed(&output)
+    );
+}
