@@ -47,12 +47,14 @@ impl Arch {
             .rows
             .iter()
             .map(|r| db.library.site(r.site).size.y.get())
-            .min()
-            .unwrap_or(i64::MAX);
+            .min();
         let mut rows = Vec::new();
         for r in &db.rows {
             let site = db.library.site(r.site);
-            if site.class == SiteClass::Pad || r.num_y != 1 || site.size.y.get() > min_row_height {
+            if site.class == SiteClass::Pad
+                || r.num_y != 1
+                || min_row_height.is_some_and(|min| site.size.y.get() > min)
+            {
                 continue;
             }
             rows.push(Row {
