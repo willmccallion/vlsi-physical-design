@@ -1540,7 +1540,7 @@ impl Reservations<'_, '_> {
     /// reservation and, below the routable layers, of fixed shapes.
     fn is_clear(&self, n: usize, a: &AccessPoint) -> bool {
         let (db, tech) = (self.db, self.tech);
-        let owner = Owner::Net(crate::tech::to_u32(n));
+        let owner = Owner::Net(crate::tech::index_u32(n));
         let leaves_room = footprint(tech, a)
             .iter()
             .all(|&(via, at)| self.vias[n].crowded(db, tech, via, at) == 0);
@@ -1558,7 +1558,7 @@ impl Reservations<'_, '_> {
             }
             let spacing = tech.layer(*layer).spacing;
             self.low_pads
-                .clear(*layer, rect, crate::tech::to_u32(n), spacing)
+                .clear(*layer, rect, crate::tech::index_u32(n), spacing)
                 && judge::clear_of_fixed(
                     self.fixed.layout,
                     self.fixed.tiles,
@@ -1581,13 +1581,13 @@ impl Reservations<'_, '_> {
 
     /// Reserves `a` for net `n`.
     fn reserve(&mut self, n: usize, a: &AccessPoint) {
-        let owner = Owner::Net(crate::tech::to_u32(n));
+        let owner = Owner::Net(crate::tech::index_u32(n));
         for (layer, rect) in self.metal_of(n, a) {
             if self.tech.routable(layer) {
                 self.occupancy
                     .add_rect(self.tech, layer, &rect, owner, Origin::Fixed);
             } else {
-                self.low_pads.add(layer, rect, crate::tech::to_u32(n));
+                self.low_pads.add(layer, rect, crate::tech::index_u32(n));
             }
         }
         for (cut, rect) in self.cuts_of(a) {

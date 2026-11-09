@@ -7,7 +7,9 @@
 //! Dijkstra search is made an A* toward the pins still to join, which finds
 //! trees just as cheap while visiting far fewer cells of a long net.
 
+use super::grid_index;
 use super::{GCell, GlobalGrid, GlobalNet};
+use crate::tech::index_u32;
 use pare_common::db::indices::LayerId;
 use pare_common::db::library::Direction;
 use rayon::prelude::*;
@@ -233,7 +235,7 @@ impl CoarseGrid {
         let mut push = |next: usize, step: f64| {
             let reach = cost + step;
             if state.cost(next).is_none_or(|best| reach < best) {
-                state.set(next, reach, crate::tech::to_u32(node));
+                state.set(next, reach, index_u32(node));
                 heap.push(Visit {
                     key: reach + estimate(next),
                     cost: reach,
@@ -337,11 +339,7 @@ impl CoarseGrid {
         let (nx, ny) = (usize::from(self.nx), usize::from(self.ny));
         let x = node % nx;
         let rest = node / nx;
-        (
-            rest / ny,
-            u16::try_from(x).unwrap_or(u16::MAX),
-            u16::try_from(rest % ny).unwrap_or(u16::MAX),
-        )
+        (rest / ny, grid_index(x), grid_index(rest % ny))
     }
 
     fn plane(&self, node: usize) -> (u16, u16) {
@@ -425,7 +423,7 @@ impl CoarseTree {
         let index: FxHashMap<usize, u32> = nodes
             .iter()
             .enumerate()
-            .map(|(k, &(n, _))| (n, crate::tech::to_u32(k)))
+            .map(|(k, &(n, _))| (n, index_u32(k)))
             .collect();
         let parent: Vec<u32> = nodes
             .iter()
@@ -435,7 +433,7 @@ impl CoarseTree {
                     .get(&(p as usize))
                     .copied()
                     .filter(|_| p != NO_PARENT)
-                    .unwrap_or_else(|| crate::tech::to_u32(k))
+                    .unwrap_or_else(|| index_u32(k))
             })
             .collect();
         let mut depth = vec![u32::MAX; nodes.len()];
@@ -522,8 +520,7 @@ impl Corridor {
         let height = y1 - y0 + 1;
         let mut slots = vec![NO_SLOT; usize::from(width) * usize::from(height)];
         for (k, &(x, y)) in cells.iter().enumerate() {
-            slots[usize::from(y - y0) * usize::from(width) + usize::from(x - x0)] =
-                crate::tech::to_u32(k);
+            slots[usize::from(y - y0) * usize::from(width) + usize::from(x - x0)] = index_u32(k);
         }
         let window = (
             x0 * SCALE,

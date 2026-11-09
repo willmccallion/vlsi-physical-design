@@ -10,7 +10,7 @@
 //! derived from its kind's.
 
 use crate::access::{AccessPoint, Node, access_points};
-use crate::tech::{RouteTech, to_u32};
+use crate::tech::{RouteTech, index_u32};
 use pare_common::db::design::{NetlistDB, PinOwner};
 use pare_common::db::indices::{CellId, LayerId, MacroId, PinId, ViaId};
 use pare_common::db::library::LayerRef;
@@ -79,7 +79,7 @@ impl SharedAccess {
             .into_iter()
             .enumerate()
             .map(|(c, (kind, window))| {
-                let next = to_u32(representatives.len());
+                let next = index_u32(representatives.len());
                 let k = *index.entry(kind).or_insert_with(|| {
                     representatives.push(CellId::new(c));
                     next
