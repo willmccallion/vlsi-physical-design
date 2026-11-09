@@ -174,7 +174,7 @@ impl Arch {
 /// The core's horizontal rows of the shortest site, relative to the core,
 /// as `Opendp::createArchitecture` takes them.
 fn improver_rows(db: &NetlistDB, grid: &Placer) -> Result<Vec<Row>> {
-    let core = grid.core;
+    let core = grid.rows.core();
     let min_row_height = db.rows.iter().map(|r| db.library.site(r.site).size.y).min();
     let mut rows = Vec::new();
     for r in &db.rows {

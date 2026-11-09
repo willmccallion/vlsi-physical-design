@@ -1,11 +1,17 @@
-//! The coordinates of `OpenDP`'s grid, as dpl's `Coordinates.h` types them:
-//! a site column, a row, and points and boxes of the two.
+//! `OpenDP`'s grid of the core's rows, and its coordinates as dpl's
+//! `Coordinates.h` types them: a site column, a row, and points and boxes
+//! of the two.
 //!
 //! As in dpl, a coordinate and a span along one axis share a type.
 //! Converting to and from database units goes through the methods that
 //! name the rounding, never arithmetic on the raw values.
 
+use super::opendp::DetailedPlacementError;
+use pare_common::db::design::{NetlistDB, Row};
+use pare_common::db::library::SiteClass;
 use pare_common::geom::dbu::Dbu;
+use pare_common::geom::point::Point;
+use pare_common::geom::rect::Rect;
 use std::ops::{Add, Mul, Sub};
 
 /// Defines one axis of the grid, as an instance of dpl's `TypedCoordinate`.
@@ -95,11 +101,6 @@ impl GridX {
         Self(x.get() / site_width.get())
     }
 
-    /// The column holding `x`, rounding toward negative infinity.
-    pub const fn from_dbu_floor(x: Dbu, site_width: Dbu) -> Self {
-        Self(x.get().div_euclid(site_width.get()))
-    }
-
     /// The first column at or right of `x`, in doubles as dpl's
     /// `dbuToGridCeil` and `Grid::gridEndX` divide.
     pub fn from_dbu_ceil(x: Dbu, site_width: Dbu) -> Self {
@@ -150,5 +151,185 @@ impl GridRect {
     /// Whether `p` lies in the box.
     pub fn contains(&self, p: GridPt) -> bool {
         (self.min.x..self.max.x).contains(&p.x) && (self.min.y..self.max.y).contains(&p.y)
+    }
+}
+
+/// The core's rows, which pad sites do not make.
+pub fn core_rows(db: &NetlistDB) -> Vec<&Row> {
+    db.rows
+        .iter()
+        .filter(|r| db.library.site(r.site).class != SiteClass::Pad)
+        .collect()
+}
+
+/// The core's rows as `OpenDP`'s `Grid` lays them out: columns one site
+/// wide from the core's left, and rows between the bottom and top edges
+/// of every row, all relative to the core.
+#[derive(Clone, Debug)]
+pub struct RowGrid {
+    core: Rect<Dbu>,
+    site_width: Dbu,
+    /// The bottom and top of every row, ascending.
+    row_edges: Vec<Dbu>,
+    row_site_count: GridX,
+}
+
+impl RowGrid {
+    /// The grid of `rows`, each `DO … BY n` statement as its `n` rows, as
+    /// `Grid::allocateGrid` and `Grid::examineRows` lay it out.
+    ///
+    /// # Errors
+    ///
+    /// When there is no row, or the rows' sites differ in width.
+    pub fn new(db: &NetlistDB, rows: &[&Row]) -> Result<Self, DetailedPlacementError> {
+        let core = db.core_area();
+        let first = rows.first().ok_or(DetailedPlacementError::NoRows)?;
+        let site_width = db.library.site(first.site).size.x;
+        let mut row_edges = Vec::new();
+        for r in rows {
+            let site = db.library.site(r.site).size;
+            if site.x != site_width {
+                return Err(DetailedPlacementError::SiteWidths(site.x, site_width));
+            }
+            let bottom = r.origin.y - core.min.y;
+            for k in 0..i64::from(r.num_y) {
+                let y = bottom + r.step.y * k;
+                row_edges.push(y);
+                row_edges.push(y + site.y);
+            }
+        }
+        row_edges.sort_unstable();
+        row_edges.dedup();
+        Ok(Self {
+            core,
+            site_width,
+            row_edges,
+            row_site_count: GridX::from_dbu_trunc(core.width(), site_width),
+        })
+    }
+
+    /// The core, in absolute coordinates.
+    pub const fn core(&self) -> Rect<Dbu> {
+        self.core
+    }
+
+    pub const fn site_width(&self) -> Dbu {
+        self.site_width
+    }
+
+    /// The sites across the core, as `Grid::getRowSiteCount`.
+    pub const fn row_site_count(&self) -> GridX {
+        self.row_site_count
+    }
+
+    /// The rows, one between each pair of adjacent row edges, as
+    /// `Grid::getRowCount`.
+    pub const fn row_count(&self) -> GridY {
+        GridY::new(self.row_edges.len() as i64 - 1)
+    }
+
+    /// Whether `at` lies on the grid.
+    pub fn contains(&self, at: GridPt) -> bool {
+        (GridX::ZERO..self.row_site_count).contains(&at.x)
+            && (GridY::ZERO..self.row_count()).contains(&at.y)
+    }
+
+    /// A rectangle relative to the core.
+    pub fn relative(&self, r: Rect<Dbu>) -> Rect<Dbu> {
+        Rect::new(r.min - self.core.min, r.max - self.core.min)
+    }
+
+    /// The site column at or left of `x`, truncating as `Grid::gridX`.
+    pub const fn grid_x(&self, x: Dbu) -> GridX {
+        GridX::from_dbu_trunc(x, self.site_width)
+    }
+
+    /// The first site column at or right of `x`, as `Grid::gridEndX`.
+    pub fn grid_end_x(&self, x: Dbu) -> GridX {
+        GridX::from_dbu_ceil(x, self.site_width)
+    }
+
+    /// The last row edge at or below `y`, as `Grid::gridSnapDownY`.
+    pub fn snap_down_y(&self, y: Dbu) -> GridY {
+        let above = self.row_edges.partition_point(|&e| e <= y);
+        GridY::new(above.saturating_sub(1) as i64)
+    }
+
+    /// The first row edge at or above `y`, as `Grid::gridEndY`.
+    pub fn end_y(&self, y: Dbu) -> GridY {
+        GridY::new(self.row_edges.partition_point(|&e| e < y) as i64)
+    }
+
+    /// The nearer row edge to `y`, the upper on a tie, as `Grid::gridRoundY`.
+    pub fn round_y(&self, y: Dbu) -> GridY {
+        let below = self.snap_down_y(y);
+        if below < self.row_count()
+            && (self.row_y(below) - y).abs() >= (self.row_y(below + 1) - y).abs()
+        {
+            return below + 1;
+        }
+        below
+    }
+
+    /// The offset of row edge `index`, the core's top past the last, as
+    /// `Grid::gridYToDbu`.
+    pub fn row_y(&self, index: GridY) -> Dbu {
+        usize::try_from(index.get())
+            .ok()
+            .and_then(|i| self.row_edges.get(i))
+            .copied()
+            .unwrap_or(self.core.max.y)
+    }
+
+    /// The grid cells a rectangle covers, ends excluded, as
+    /// `Grid::gridCovering`.
+    pub fn covering(&self, r: &Rect<Dbu>) -> GridRect {
+        GridRect {
+            min: GridPt::new(self.grid_x(r.min.x), self.snap_down_y(r.min.y)),
+            max: GridPt::new(self.grid_end_x(r.max.x), self.end_y(r.max.y)),
+        }
+    }
+
+    /// Where a cell of `size` at `at` goes: clamped into the core and
+    /// rounded onto the site grid and a row, as `Opendp::legalPt` with a
+    /// point.
+    pub fn legal_pt(&self, at: Point<Dbu>, size: Point<Dbu>) -> Point<Dbu> {
+        let core_x = at.x.clamp(
+            Dbu::ZERO,
+            (self.row_site_count.to_dbu(self.site_width) - size.x).max(Dbu::ZERO),
+        );
+        let column = GridX::from_dbu_round(core_x, self.site_width);
+        // NOTE: diverges from OpenDP, which bounds this by the core's absolute top.
+        let core_y =
+            at.y.clamp(Dbu::ZERO, (self.core.height() - size.y).max(Dbu::ZERO));
+        Point::new(
+            column.to_dbu(self.site_width),
+            self.row_y(self.round_y(core_y)),
+        )
+    }
+
+    /// A cell of `size` at `at` moved past the nearest edge of `block`, as
+    /// `Opendp::nearestBlockEdge`.
+    pub fn nearest_block_edge(
+        &self,
+        at: Point<Dbu>,
+        size: Point<Dbu>,
+        block: &Rect<Dbu>,
+    ) -> Point<Dbu> {
+        let x_min = (at.x - block.min.x).abs();
+        let x_max = (block.max.x - (at.x + size.x)).abs();
+        let y_min = (at.y - block.min.y).abs();
+        let y_max = (block.max.y - (at.y + size.y)).abs();
+        let nearest = x_min.min(x_max).min(y_min).min(y_max);
+        let to = if nearest == x_min {
+            Point::new(block.min.x - size.x, at.y)
+        } else if nearest == x_max {
+            Point::new(block.max.x, at.y)
+        } else if nearest == y_min {
+            Point::new(at.x, block.min.y - size.y)
+        } else {
+            Point::new(at.x, block.max.y)
+        };
+        self.legal_pt(to, size)
     }
 }

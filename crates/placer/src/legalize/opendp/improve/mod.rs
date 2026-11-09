@@ -409,8 +409,8 @@ impl Improver {
     /// Puts a cell on the grid where it stands in its row's orientation, as
     /// `DetailedMgr::paintInGrid`.
     fn paint(&mut self, n: NodeId) {
-        let x = self.grid.grid_x(self.left(n));
-        let y = self.grid.snap_down_y(self.bottom(n));
+        let x = self.grid.rows.grid_x(self.left(n));
+        let y = self.grid.rows.snap_down_y(self.bottom(n));
         self.grid.paint_pixels(n, x, y);
         if let Some(orient) = self.grid.site_orientation(x, y, self.grid.nodes[n].site) {
             self.orient_node(n, orient);
@@ -421,8 +421,8 @@ impl Improver {
     /// `DetailedMgr::hasPlacementViolation`.
     fn has_placement_violation(&self, n: NodeId) -> bool {
         let node = &self.grid.nodes[n];
-        let x = self.grid.grid_x(node.left);
-        let y = self.grid.round_y(node.bottom);
+        let x = self.grid.rows.grid_x(node.left);
+        let y = self.grid.rows.round_y(node.bottom);
         !(self.grid.check_edge_spacing(node, x, y, node.orient)
             && self.grid.check_blocked_layers(node, x, y)
             && self.grid.check_one_site_gap(node, x, y))

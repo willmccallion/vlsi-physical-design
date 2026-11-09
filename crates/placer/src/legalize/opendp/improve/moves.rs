@@ -543,8 +543,8 @@ impl Improver {
         if self.journal.moves.len() >= self.move_limit {
             return Ok(false);
         }
-        let x = self.grid.grid_x(to.x);
-        let y = self.grid.snap_down_y(to.y);
+        let x = self.grid.rows.grid_x(to.x);
+        let y = self.grid.rows.snap_down_y(to.y);
         if self
             .grid
             .site_orientation(x, y, self.grid.nodes[n].site)
@@ -619,8 +619,8 @@ impl Improver {
                 self.remove_cell_from_segment(m.node, s)?;
             }
             self.set_position(m.node, m.from);
-            let x = self.grid.grid_x(m.from.x);
-            let y = self.grid.round_y(m.from.y);
+            let x = self.grid.rows.grid_x(m.from.x);
+            let y = self.grid.rows.round_y(m.from.y);
             self.grid.paint_pixels(m.node, x, y);
             let orient = self
                 .grid
