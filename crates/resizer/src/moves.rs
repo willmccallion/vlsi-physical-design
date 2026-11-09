@@ -260,11 +260,17 @@ impl Moves {
         }
         let both_buffers = prev.is_buffer() && lib.is_buffer();
         let both_inverters = prev.is_inverter() && lib.is_inverter();
+        let liberty = resizer.link.liberty;
+        let (Some(prev_buffer), Some(buffer)) =
+            (liberty.buffer_cell(prev_lib), liberty.buffer_cell(site.lib))
+        else {
+            return Ok(false);
+        };
         if !both_buffers && !both_inverters {
             return Ok(false);
         }
-        if resizer.link.buffer_drive_resistance(prev_lib)
-            >= resizer.link.buffer_drive_resistance(site.lib)
+        if resizer.link.buffer_drive_resistance(prev_buffer)
+            >= resizer.link.buffer_drive_resistance(buffer)
         {
             return Ok(false);
         }
@@ -511,10 +517,10 @@ impl Moves {
         if new_fanout > fanout_limit {
             return Ok(false);
         }
-        let Some((in_port, _)) = lib.buffer_ports() else {
+        let Some(buffer) = resizer.link.liberty.buffer_cell(site.lib) else {
             return Ok(false);
         };
-        let buffer_in_cap = lib.ports[in_port].capacitance();
+        let buffer_in_cap = lib.ports[buffer.input].capacitance();
         let buffer_load = resizer.load_cap(site.driver);
         if let Some(limit) = resizer.cap_limit(prev_driver)
             && limit > Farads::ZERO
@@ -871,8 +877,8 @@ fn driver_change(resizer: &Resizer<'_, Sta>, removal: &Removal) -> Option<Driver
     };
     let (prev_lib, prev_port) = resizer.link.pin_port(resizer.db, prev_driver)?;
     let prev = resizer.link.liberty.cell(prev_lib);
-    let buffer = resizer.link.liberty.cell(site.lib);
-    let (in_port, _) = buffer.buffer_ports()?;
+    let liberty = resizer.link.liberty;
+    let buffer = liberty.buffer_cell(site.lib)?;
     let prev_input_slews = resizer.input_slews(prev_cell);
     let old_load = resizer.load_cap(prev_driver);
     let (old_delay, old_slew) = gate_delays(
@@ -882,7 +888,8 @@ fn driver_change(resizer: &Resizer<'_, Sta>, removal: &Removal) -> Option<Driver
         &resizer.targets.slews,
         Some(&prev_input_slews),
     );
-    let new_load = old_load + resizer.load_cap(site.driver) - buffer.ports[in_port].capacitance();
+    let buffer_in_cap = liberty.cell(buffer.id).ports[buffer.input].capacitance();
+    let new_load = old_load + resizer.load_cap(site.driver) - buffer_in_cap;
     let (new_delay, new_slew) = gate_delays(
         prev,
         prev_port,
@@ -894,6 +901,7 @@ fn driver_change(resizer: &Resizer<'_, Sta>, removal: &Removal) -> Option<Driver
         return None;
     }
     let buffer_out_delays = buffer_delays(
+        liberty,
         buffer,
         &resizer.targets.slews,
         resizer.load_cap(site.driver),

@@ -5,7 +5,7 @@ use crate::library::{BufferSet, Link, is_logic_std_cell};
 use crate::netlist::{ClockNetwork, Constants, Namer, Netlist};
 use pare_common::db::design::{EditError, NetlistDB, PinOwner, PlacementStatus};
 use pare_common::db::indices::{CellId, IoPinId, MacroPinId, NetId, PinId};
-use pare_common::db::liberty::{LibCellId, LibPortId};
+use pare_common::db::liberty::{BufferCell, LibPortId};
 use pare_common::db::library::{DuplicateName, PinDirection};
 use pare_common::geom::dbu::Dbu;
 use pare_common::geom::orient::Orientation;
@@ -41,7 +41,7 @@ pub fn remove_buffers(db: &mut NetlistDB, link: &Link<'_>) -> Result<usize, Buff
     let mut count = 0;
     for i in 0..db.cells.len() {
         let instance = CellId::new(i);
-        let Some((_, lib)) = link.cell(db, instance) else {
+        let Some((lib_id, lib)) = link.cell(db, instance) else {
             continue;
         };
         if !is_logic_std_cell(db, instance) || !lib.is_buffer() || lib.dont_touch {
@@ -50,20 +50,20 @@ pub fn remove_buffers(db: &mut NetlistDB, link: &Link<'_>) -> Result<usize, Buff
         if db.cells[i].status == PlacementStatus::Fixed {
             continue;
         }
-        let Some((in_port, out_port)) = lib.buffer_ports() else {
+        let Some(ports) = link.liberty.buffer_cell(lib_id) else {
             continue;
         };
         let pin_for = |port: LibPortId| -> Option<PinId> {
-            let macro_pin = link.macro_pin_of_port(link.cell(db, instance)?.0, port)?;
+            let macro_pin = link.macro_pin_of_port(ports.id, port)?;
             db.cells[i].pins.iter().copied().find(|&p| {
                 matches!(db.pins[p.index()].owner, PinOwner::Cell { pin, .. } if pin == macro_pin)
             })
         };
-        let Some(in_pin) = pin_for(in_port) else {
+        let Some(in_pin) = pin_for(ports.input) else {
             log::warn!("buffer {} has no input net and stays", db.cells[i].name);
             continue;
         };
-        let Some(out_pin) = pin_for(out_port) else {
+        let Some(out_pin) = pin_for(ports.output) else {
             removed_cells[i] = true;
             count += 1;
             continue;
@@ -255,23 +255,20 @@ struct NewBuffer {
 fn make_buffer(
     db: &mut NetlistDB,
     link: &Link<'_>,
-    buffer: LibCellId,
+    buffer: BufferCell,
     at: Point<Dbu>,
     base: &str,
     namer: &mut Namer,
 ) -> Result<NewBuffer, BufferError> {
-    let lib = link.liberty.cell(buffer);
+    let lib = link.liberty.cell(buffer.id);
     let master = link
-        .macro_of(buffer)
+        .macro_of(buffer.id)
         .ok_or_else(|| BufferError::NoMaster(lib.name.clone()))?;
-    let (in_port, out_port) = lib
-        .buffer_ports()
-        .ok_or_else(|| BufferError::MissingPins(lib.name.clone()))?;
     let input = link
-        .macro_pin_of_port(buffer, in_port)
+        .macro_pin_of_port(buffer.id, buffer.input)
         .ok_or_else(|| BufferError::MissingPins(lib.name.clone()))?;
     let output = link
-        .macro_pin_of_port(buffer, out_port)
+        .macro_pin_of_port(buffer.id, buffer.output)
         .ok_or_else(|| BufferError::MissingPins(lib.name.clone()))?;
     let name = namer.instance(db, base);
     let cell = db.add_cell(name, master, at, Orientation::N, PlacementStatus::Placed)?;
@@ -301,7 +298,7 @@ fn port_net(db: &mut NetlistDB, io: IoPinId, namer: &mut Namer) -> Result<NetId,
 fn insert_after_driver(
     db: &mut NetlistDB,
     link: &Link<'_>,
-    buffer: LibCellId,
+    buffer: BufferCell,
     io: IoPinId,
     namer: &mut Namer,
 ) -> Result<(), BufferError> {
@@ -321,7 +318,7 @@ fn insert_after_driver(
 fn insert_before_load(
     db: &mut NetlistDB,
     link: &Link<'_>,
-    buffer: LibCellId,
+    buffer: BufferCell,
     io: IoPinId,
     namer: &mut Namer,
 ) -> Result<(), BufferError> {

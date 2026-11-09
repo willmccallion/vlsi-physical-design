@@ -12,7 +12,7 @@ use crate::CtsError;
 use crate::capacitance::Farads32;
 use pare_common::db::design::NetlistDB;
 use pare_common::db::liberty::{
-    AxisVariable, Edge, LibCell, LibCellId, LibPortId, Liberty, Thresholds,
+    AxisVariable, BufferCell, Edge, LibCell, LibPortId, Liberty, Thresholds,
 };
 use pare_common::units::{Farads, Ohms, Seconds};
 use pare_resizer::Link;
@@ -55,7 +55,7 @@ pub(crate) struct WireSegment {
     /// the previous buffer or the start.
     pub buffer_locations: Vec<f64>,
     /// The buffer at each location.
-    pub buffer_masters: Vec<LibCellId>,
+    pub buffer_masters: Vec<BufferCell>,
     /// Wire from the start to the first buffer, in length units; the whole
     /// length for a bare wire.
     pub wl_to_first_buffer: i32,
@@ -104,9 +104,9 @@ pub(crate) struct CharSetup<'a> {
     /// The design, for the buffers' masters.
     pub db: &'a NetlistDB,
     /// The buffers to characterize, by increasing load limit.
-    pub masters: &'a [LibCellId],
+    pub masters: &'a [BufferCell],
     /// The buffer leaf clusters are driven by.
-    pub sink_buffer: LibCellId,
+    pub sink_buffer: BufferCell,
     /// The clock wire's resistance and capacitance.
     pub clock_rc: WireRc,
 }
@@ -429,15 +429,13 @@ const fn key(length: u32, load: u32, output_slew: u32) -> u32 {
 /// `TechChar::initCharacterization`.
 fn plan(setup: &CharSetup<'_>) -> Result<Plan, CtsError> {
     let liberty = setup.link.liberty;
-    let mut char_buffer: Option<(usize, LibCellId)> = None;
+    let mut char_buffer: Option<(usize, BufferCell)> = None;
     let mut max_buffer_cap = 0.0_f32;
     let mut axis_slews: Vec<f32> = Vec::new();
     let mut axis_loads: Vec<f32> = Vec::new();
     for (index, &master) in setup.masters.iter().enumerate() {
-        let cell = liberty.cell(master);
-        let (input, output) = cell
-            .buffer_ports()
-            .ok_or_else(|| CtsError::NotABuffer(cell.name.clone()))?;
+        let cell = liberty.cell(master.id);
+        let (input, output) = (master.input, master.output);
         let max_cap = cell.ports[output]
             .max_capacitance
             .or_else(|| liberty.cell_defaults(cell).max_capacitance)
@@ -452,9 +450,9 @@ fn plan(setup: &CharSetup<'_>) -> Result<Plan, CtsError> {
     let (char_index, char_buffer) = char_buffer.ok_or(CtsError::NoBuffers)?;
     let height = setup
         .link
-        .macro_of(char_buffer)
+        .macro_of(char_buffer.id)
         .map(|m| setup.db.library.cell_macro(m).size.y.get())
-        .ok_or_else(|| CtsError::NoMaster(liberty.cell(char_buffer).name.clone()))?;
+        .ok_or_else(|| CtsError::NoMaster(liberty.cell(char_buffer.id).name.clone()))?;
     let char_unit = (height * 10) as u32;
     let max_wirelength = (char_unit * WIRELENGTH_ITERATIONS).max(2 * char_unit);
     let mut wirelengths = Vec::new();
@@ -463,10 +461,8 @@ fn plan(setup: &CharSetup<'_>) -> Result<Plan, CtsError> {
         wirelengths.push(wirelength);
         wirelength += char_unit;
     }
-    let cell = liberty.cell(char_buffer);
-    let (input, output) = cell
-        .buffer_ports()
-        .ok_or_else(|| CtsError::NotABuffer(cell.name.clone()))?;
+    let cell = liberty.cell(char_buffer.id);
+    let (input, output) = (char_buffer.input, char_buffer.output);
     let max_slew = cell.ports[output]
         .max_transition
         .or(cell.ports[input].max_transition)
@@ -478,10 +474,8 @@ fn plan(setup: &CharSetup<'_>) -> Result<Plan, CtsError> {
         .or_else(|| liberty.cell_defaults(cell).max_capacitance)
         .ok_or_else(|| CtsError::NoMaxCapacitance(cell.name.clone()))?
         .get() as f32;
-    let sink = liberty.cell(setup.sink_buffer);
-    let sink_buffer_input_cap = sink.buffer_ports().map_or(Farads32::ZERO, |(input, _)| {
-        Farads32::of(sink.ports[input].capacitance())
-    });
+    let sink = setup.sink_buffer;
+    let sink_buffer_input_cap = Farads32::of(liberty.cell(sink.id).ports[sink.input].capacitance());
     let slew_step = max_slew / SLEW_STEPS as f32;
     let cap_step = max_cap / CAP_STEPS as f32;
     let (slews, loads) = if axis_slews.is_empty() && axis_loads.is_empty() {
@@ -674,7 +668,7 @@ struct WirePerDbu {
 struct Chain<'a> {
     liberty: &'a Liberty,
     thresholds: &'a Thresholds,
-    masters: &'a [LibCellId],
+    masters: &'a [BufferCell],
     config: &'a [usize],
     pattern: &'a Pattern,
     unit: u32,
@@ -748,10 +742,9 @@ impl Chain<'_> {
         };
         let mut slew = in_slew;
         for (i, &kind) in self.config.iter().enumerate() {
-            let cell = self.liberty.cell(self.masters[kind]);
-            let (input, output) = cell
-                .buffer_ports()
-                .ok_or_else(|| CtsError::NotABuffer(cell.name.clone()))?;
+            let master = self.masters[kind];
+            let cell = self.liberty.cell(master.id);
+            let (input, output) = (master.input, master.output);
             let (model, elmore) = if with_wires {
                 let pi = self.wire_pi(i + 1, load);
                 let model = PiModel {
@@ -762,10 +755,11 @@ impl Chain<'_> {
                 (model, Some(Seconds::new(f64::from(pi.elmore))))
             } else {
                 let pin_cap = self.config.get(i + 1).map_or(0.0, |&next| {
-                    let next_cell = self.liberty.cell(self.masters[next]);
-                    next_cell.buffer_ports().map_or(0.0, |(next_input, _)| {
-                        next_cell.ports[next_input].capacitance.get(edge).get() as f32
-                    })
+                    let next = self.masters[next];
+                    self.liberty.cell(next.id).ports[next.input]
+                        .capacitance
+                        .get(edge)
+                        .get() as f32
                 });
                 let model = PiModel {
                     c2: Farads::ZERO,
@@ -785,7 +779,7 @@ impl Chain<'_> {
                     worst = Some(worst.map_or((at, s), |(a, w)| (a.max(at), w.max(s))));
                 }
             }
-            let (at, s) = worst.ok_or_else(|| CtsError::NotABuffer(cell.name.clone()))?;
+            let (at, s) = worst.ok_or_else(|| CtsError::NoDelayArc(cell.name.clone()))?;
             arrival = at;
             slew = s;
         }
@@ -809,11 +803,10 @@ impl Chain<'_> {
                 Some(Piece::Wire(length)) => *length as f32,
                 _ => 0.0,
             };
-            let cell = self.liberty.cell(self.masters[self.config[0]]);
-            let first_pin_cap = cell
-                .buffer_ports()
-                .map_or(0.0, |(input, _)| cell.ports[input].capacitance().get())
-                as f32;
+            let first = self.masters[self.config[0]];
+            let first_pin_cap = self.liberty.cell(first.id).ports[first.input]
+                .capacitance()
+                .get() as f32;
             (f64::from(first_pin_cap) + f64::from(first_length) * self.wire.cap) as f32
         };
         let total_cap = (in_cap / plan.cap_step).round() * plan.cap_step;
@@ -891,7 +884,7 @@ fn compile(
     lines: &[Normalized],
     bounds: &AllBounds,
     plan: &Plan,
-    masters: &[LibCellId],
+    masters: &[BufferCell],
     cap_per_dbu: f64,
 ) -> Result<TechChar, CtsError> {
     let ratio = plan.char_unit / plan.length_unit;
@@ -987,6 +980,7 @@ fn least_wire_delay_rate(segments: &[WireSegment], delay_step: Seconds) -> Optio
 #[cfg(test)]
 mod tests {
     use super::*;
+    use pare_common::db::liberty::LibCellId;
 
     /// A segment of `length` units with `delay` steps, `input_slew` and
     /// `output_slew` steps, buffered or bare.
@@ -1006,7 +1000,11 @@ mod tests {
             input_slew,
             buffer_locations: if buffered { vec![0.5] } else { Vec::new() },
             buffer_masters: if buffered {
-                vec![LibCellId(0)]
+                vec![BufferCell {
+                    id: LibCellId(0),
+                    input: LibPortId::new(0),
+                    output: LibPortId::new(1),
+                }]
             } else {
                 Vec::new()
             },

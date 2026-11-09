@@ -13,7 +13,7 @@ use crate::route_parasitics::RouteRc;
 use crate::steiner::{self, SteinerTree};
 use pare_common::db::global_route::{NetRoute, RoutePoint};
 use pare_common::db::indices::{LayerId, PinId};
-use pare_common::db::liberty::{Edge, LibCellId};
+use pare_common::db::liberty::{BufferCell, Edge};
 use pare_common::geom::dbu::{Dbu, DbuPerMicron};
 use pare_common::geom::point::Point;
 use pare_common::units::{Farads, FaradsPerMeter, Meters, Ohms, OhmsPerMeter, Seconds};
@@ -151,8 +151,8 @@ pub enum Kind {
     },
     /// A buffer driving the subtree.
     Buffer {
-        /// The buffer's cell.
-        cell: LibCellId,
+        /// The buffer.
+        buffer: BufferCell,
         /// What it drives.
         to: BnetPtr,
     },
@@ -294,7 +294,7 @@ impl Bnet {
             arrival_delay: Fixed::ZERO,
             at,
             kind: Kind::Buffer {
-                cell: size.cell,
+                buffer: size.buffer,
                 to,
             },
         })
@@ -454,8 +454,8 @@ impl Bnet {
 /// its output can drive, as `OpenROAD`'s `BufferSize`.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub(crate) struct BufferSize {
-    /// The buffer's Liberty cell.
-    pub cell: LibCellId,
+    /// The buffer.
+    pub buffer: BufferCell,
     /// Its input capacitance.
     pub input_cap: Farads,
     /// Its input's fanout load.

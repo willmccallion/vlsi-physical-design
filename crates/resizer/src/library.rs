@@ -4,7 +4,7 @@
 
 use pare_common::db::design::{NetlistDB, PinOwner};
 use pare_common::db::indices::{CellId, MacroId, MacroPinId, PinId, SiteId};
-use pare_common::db::liberty::{LibCell, LibCellId, LibPortId, Liberty};
+use pare_common::db::liberty::{BufferCell, LibCell, LibCellId, LibPortId, Liberty};
 use pare_common::db::library::{CoreKind, MacroClass, PinDirection, SignalUse};
 use pare_common::units::{Farads, Ohms, Watts};
 use std::collections::HashMap;
@@ -25,9 +25,9 @@ pub enum LinkError {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct BufferSet {
     /// The chosen buffers, by increasing drive resistance.
-    pub cells: Vec<LibCellId>,
+    pub cells: Vec<BufferCell>,
     /// The chosen buffer with the largest drive resistance.
-    pub lowest_drive: LibCellId,
+    pub lowest_drive: BufferCell,
 }
 
 /// A Liberty library joined to the masters of a design.
@@ -232,18 +232,14 @@ impl<'a> Link<'a> {
 
     /// Drive resistance of a buffer's output.
     #[must_use]
-    pub(crate) fn buffer_drive_resistance(&self, buffer: LibCellId) -> Ohms {
-        let cell = self.liberty.cell(buffer);
-        cell.buffer_ports()
-            .map_or(Ohms::ZERO, |(_, output)| cell.drive_resistance(output))
+    pub(crate) fn buffer_drive_resistance(&self, buffer: BufferCell) -> Ohms {
+        self.liberty.cell(buffer.id).drive_resistance(buffer.output)
     }
 
     /// Capacitance of a buffer's input.
     #[must_use]
-    pub(crate) fn buffer_input_capacitance(&self, buffer: LibCellId) -> Farads {
-        let cell = self.liberty.cell(buffer);
-        cell.buffer_ports()
-            .map_or(Farads::ZERO, |(input, _)| cell.ports[input].capacitance())
+    pub(crate) fn buffer_input_capacitance(&self, buffer: BufferCell) -> Farads {
+        self.liberty.cell(buffer.id).ports[buffer.input].capacitance()
     }
 
     /// The buffers to insert, as `OpenROAD`'s `findBuffers` chooses them:
@@ -252,7 +248,7 @@ impl<'a> Link<'a> {
     /// five bands of drive resistance, and the best two of each band by
     /// drive resistance times input capacitance kept.
     pub fn find_buffers(&self, db: &NetlistDB) -> Result<BufferSet, LinkError> {
-        let mut list: Vec<LibCellId> = (0..self.liberty.cells.len())
+        let mut list: Vec<BufferCell> = (0..self.liberty.cells.len())
             .map(|i| LibCellId(i as u32))
             .filter(|&id| {
                 let cell = self.liberty.cell(id);
@@ -261,6 +257,7 @@ impl<'a> Link<'a> {
                     && self.is_link_cell(id)
                     && !is_clock_buffer(cell)
             })
+            .filter_map(|id| self.liberty.buffer_cell(id))
             .collect();
         if list.is_empty() {
             return Err(LinkError::NoBuffers);
@@ -268,12 +265,17 @@ impl<'a> Link<'a> {
         list.sort_by(|&a, &b| {
             self.buffer_drive_resistance(a)
                 .total_cmp(&self.buffer_drive_resistance(b))
-                .then_with(|| self.liberty.cell(a).name.cmp(&self.liberty.cell(b).name))
+                .then_with(|| {
+                    self.liberty
+                        .cell(a.id)
+                        .name
+                        .cmp(&self.liberty.cell(b.id).name)
+                })
         });
 
         let footprints: Vec<Option<&str>> = list
             .iter()
-            .map(|&id| self.liberty.cell(id).footprint.as_deref())
+            .map(|b| self.liberty.cell(b.id).footprint.as_deref())
             .collect();
         let mut footprint_counts: Vec<(&str, usize)> = Vec::new();
         for footprint in footprints.iter().flatten() {
@@ -290,22 +292,22 @@ impl<'a> Link<'a> {
         } else {
             None
         };
-        let filtered: Vec<LibCellId> = list
+        let filtered: Vec<BufferCell> = list
             .iter()
             .copied()
-            .filter(|&id| {
+            .filter(|b| {
                 best_footprint
-                    .is_none_or(|best| self.liberty.cell(id).footprint.as_deref() == Some(best))
+                    .is_none_or(|best| self.liberty.cell(b.id).footprint.as_deref() == Some(best))
             })
             .collect();
 
-        let site_of = |id: LibCellId| {
-            self.macro_of(id)
+        let site_of = |b: BufferCell| {
+            self.macro_of(b.id)
                 .and_then(|m| db.library.cell_macro(m).site)
         };
         let mut site_counts: Vec<(Option<SiteId>, usize)> = Vec::new();
-        for &id in &list {
-            let site = site_of(id);
+        for &b in &list {
+            let site = site_of(b);
             match site_counts.iter_mut().find(|(s, _)| *s == site) {
                 Some((_, n)) => *n += 1,
                 None => site_counts.push((site, 1)),
@@ -321,10 +323,10 @@ impl<'a> Link<'a> {
         for bucket in 0..5 {
             let start = bucket * bucket_size + bucket.min(remainder);
             let end = (start + bucket_size + usize::from(bucket < remainder)).min(n);
-            let mut band: Vec<LibCellId> = filtered[start.min(n)..end].to_vec();
+            let mut band: Vec<BufferCell> = filtered[start.min(n)..end].to_vec();
             band.sort_by(|&a, &b| {
-                let metric = |id: LibCellId| {
-                    self.buffer_drive_resistance(id) * self.buffer_input_capacitance(id)
+                let metric = |buffer: BufferCell| {
+                    self.buffer_drive_resistance(buffer) * self.buffer_input_capacitance(buffer)
                 };
                 metric(a).total_cmp(&metric(b))
             });
@@ -332,8 +334,8 @@ impl<'a> Link<'a> {
                 chosen.extend(band.iter().take(2));
             } else {
                 for site in &best_sites {
-                    if let Some(&id) = band.iter().find(|&&id| site_of(id) == *site) {
-                        chosen.push(id);
+                    if let Some(&b) = band.iter().find(|&&b| site_of(b) == *site) {
+                        chosen.push(b);
                     }
                 }
             }
@@ -362,39 +364,39 @@ impl Link<'_> {
     /// with a LEF clock input, else those named `CLKBUF`, else those named
     /// `BUF`, else all of them.
     #[must_use]
-    pub fn infer_clock_buffers(&self, db: &NetlistDB) -> Vec<LibCellId> {
-        let candidates: Vec<LibCellId> = (0..self.liberty.cells.len())
+    pub fn infer_clock_buffers(&self, db: &NetlistDB) -> Vec<BufferCell> {
+        let candidates: Vec<BufferCell> = (0..self.liberty.cells.len())
             .map(|i| LibCellId(i as u32))
             .filter(|&id| {
                 self.liberty.cell(id).is_buffer()
                     && self.is_link_cell(id)
                     && self.is_clock_cell_candidate(id)
             })
+            .filter_map(|id| self.liberty.buffer_cell(id))
             .collect();
         let has_clock_input =
-            |id: LibCellId| {
-                self.macro_of(id).is_some_and(|m| {
+            |b: BufferCell| {
+                self.macro_of(b.id).is_some_and(|m| {
                     db.library.cell_macro(m).pins.iter().any(|p| {
                         p.direction == PinDirection::Input && p.signal_use == SignalUse::Clock
                     })
                 })
             };
-        let named = |id: LibCellId, pattern: &str| {
+        let named = |b: BufferCell, pattern: &str| {
             self.liberty
-                .cell(id)
+                .cell(b.id)
                 .name
                 .to_ascii_uppercase()
                 .contains(pattern)
         };
-        let tiers: [&dyn Fn(LibCellId) -> bool; 4] = [
-            &|id| self.liberty.cell(id).is_clock_cell,
+        let tiers: [&dyn Fn(BufferCell) -> bool; 4] = [
+            &|b| self.liberty.cell(b.id).is_clock_cell,
             &has_clock_input,
-            &|id| named(id, "CLKBUF"),
-            &|id| named(id, "BUF"),
+            &|b| named(b, "CLKBUF"),
+            &|b| named(b, "BUF"),
         ];
         for tier in tiers {
-            let chosen: Vec<LibCellId> =
-                candidates.iter().copied().filter(|&id| tier(id)).collect();
+            let chosen: Vec<BufferCell> = candidates.iter().copied().filter(|&b| tier(b)).collect();
             if !chosen.is_empty() {
                 return chosen;
             }

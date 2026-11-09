@@ -210,7 +210,7 @@ pub(crate) fn repair_netlist(
         summary.output_buffers = done.outputs;
         summary
             .buffer_cell
-            .clone_from(&liberty.cell(stage.buffers.lowest_drive).name);
+            .clone_from(&liberty.cell(stage.buffers.lowest_drive.id).name);
         ui::stat_row(
             "Input buffers:",
             &done.inputs.to_string(),

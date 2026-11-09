@@ -236,10 +236,9 @@ impl Balancer<'_> {
     /// `extra` farads, its slew settled over three lookups, as
     /// `LatencyBalancer::computeBufferDelay`.
     fn buffer_delay(&self, extra: f64) -> f32 {
-        let lib = self.link.liberty.cell(self.trees.setup.buffers.root);
-        let Some((input, output)) = lib.buffer_ports() else {
-            return 0.0;
-        };
+        let root = self.trees.setup.buffers.root;
+        let lib = self.link.liberty.cell(root.id);
+        let (input, output) = (root.input, root.output);
         let load = Farads::new(lib.ports[input].capacitance.rise.get() + extra);
         let mut worst = 0.0_f32;
         for set in lib.delay_arc_sets_to(output).filter(|s| s.from == input) {
@@ -358,19 +357,16 @@ impl Balancer<'_> {
         let ctx = self.trees.setup.context(db);
         let unit = root.unit();
         let buffer = self.trees.setup.buffers.root;
-        let lib = self.link.liberty.cell(buffer);
-        let (in_port, out_port) = lib
-            .buffer_ports()
-            .ok_or_else(|| CtsError::NotABuffer(lib.name.clone()))?;
+        let lib = self.link.liberty.cell(buffer.id);
         let pin_of = |port: LibPortId| {
             self.link
-                .macro_pin_of_port(buffer, port)
-                .ok_or_else(|| CtsError::NotABuffer(lib.name.clone()))
+                .macro_pin_of_port(buffer.id, port)
+                .ok_or_else(|| CtsError::MissingPin(lib.name.clone()))
         };
-        let (in_pin, out_pin) = (pin_of(in_port)?, pin_of(out_port)?);
+        let (in_pin, out_pin) = (pin_of(buffer.input)?, pin_of(buffer.output)?);
         let master = self
             .link
-            .macro_of(buffer)
+            .macro_of(buffer.id)
             .ok_or_else(|| CtsError::NoMaster(lib.name.clone()))?;
         let clock_name = root.clock.sdc_name.clone();
         let mut first_input_pin = None;

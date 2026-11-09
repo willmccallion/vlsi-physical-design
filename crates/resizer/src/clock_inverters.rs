@@ -65,9 +65,9 @@ pub fn repair_clock_inverters(
 }
 
 fn output_pin(db: &NetlistDB, link: &Link<'_>, cell: CellId) -> Option<PinId> {
-    let (lib_id, lib) = link.cell(db, cell)?;
-    let (_, out) = lib.buffer_ports()?;
-    let macro_pin = link.macro_pin_of_port(lib_id, out)?;
+    let (lib_id, _) = link.cell(db, cell)?;
+    let inverter = link.liberty.buffer_cell(lib_id)?;
+    let macro_pin = link.macro_pin_of_port(lib_id, inverter.output)?;
     db.cells[cell.index()].pins.iter().copied().find(
         |&p| matches!(db.pins[p.index()].owner, PinOwner::Cell { pin, .. } if pin == macro_pin),
     )
@@ -131,15 +131,15 @@ fn clone_inverter(
     namer: &mut Namer,
     done: &mut ClockInverterRepair,
 ) -> Result<bool, RepairError> {
-    let Some((lib_id, lib)) = link.cell(db, inverter) else {
-        return Ok(false);
-    };
-    let Some((in_port, out_port)) = lib.buffer_ports() else {
+    let Some(ports) = link
+        .cell(db, inverter)
+        .and_then(|(lib_id, _)| link.liberty.buffer_cell(lib_id))
+    else {
         return Ok(false);
     };
     let (Some(in_macro), Some(out_macro)) = (
-        link.macro_pin_of_port(lib_id, in_port),
-        link.macro_pin_of_port(lib_id, out_port),
+        link.macro_pin_of_port(ports.id, ports.input),
+        link.macro_pin_of_port(ports.id, ports.output),
     ) else {
         return Ok(false);
     };

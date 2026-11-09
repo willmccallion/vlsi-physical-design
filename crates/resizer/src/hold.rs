@@ -11,7 +11,7 @@ use crate::resizer::{RepairError, Resizer, buffer_delays};
 use crate::sta::Sta;
 use pare_common::config::Share;
 use pare_common::db::indices::PinId;
-use pare_common::db::liberty::{Edge, LibCellId, MinMax};
+use pare_common::db::liberty::{BufferCell, Edge, LibCellId, MinMax};
 use pare_common::geom::dbu::Dbu;
 use pare_common::geom::point::Point;
 use pare_common::units::{Farads, Quantity, Seconds};
@@ -112,7 +112,7 @@ pub fn repair_hold(
         summary.setup_wns_after = setup_wns_before;
         return Ok(summary);
     };
-    summary.buffer = Some(buffer);
+    summary.buffer = Some(buffer.id);
     let cells = resizer.netlist().db.cells.len();
     let budget = ((options.max_buffer_share.get() * cells as f64) as usize).max(MIN_BUFFER_BUDGET);
     let mut repair = HoldRepair {
@@ -178,22 +178,22 @@ fn hold_violations(
 
 /// The buffer with the most hold delay per area, or a smaller one within
 /// [`BUFFER_METRIC_MARGIN`] of it, as `findHoldBuffer`.
-fn hold_buffer(resizer: &Resizer<'_, Sta>) -> Option<LibCellId> {
+fn hold_buffer(resizer: &Resizer<'_, Sta>) -> Option<BufferCell> {
     let liberty = resizer.link.liberty;
-    let mut scored: Vec<(Seconds, LibCellId)> = hold_buffer_candidates(resizer)
+    let mut scored: Vec<(Seconds, BufferCell)> = hold_buffer_candidates(resizer)
         .iter()
-        .filter_map(|&cell| {
-            let lib = liberty.cell(cell);
-            (lib.area != 0.0).then(|| (hold_delay(resizer, cell) / lib.area, cell))
+        .filter_map(|&buffer| {
+            let lib = liberty.cell(buffer.id);
+            (lib.area != 0.0).then(|| (hold_delay(resizer, buffer) / lib.area, buffer))
         })
         .collect();
     scored.sort_by(|a, b| a.0.total_cmp(&b.0));
     let &(best_metric, mut best) = scored.last()?;
-    for &(metric, cell) in scored.iter().rev().skip(1) {
+    for &(metric, buffer) in scored.iter().rev().skip(1) {
         if metric >= BUFFER_METRIC_MARGIN * best_metric
-            && liberty.cell(cell).area < liberty.cell(best).area
+            && liberty.cell(buffer.id).area < liberty.cell(best.id).area
         {
-            best = cell;
+            best = buffer;
         }
     }
     Some(best)
@@ -205,39 +205,40 @@ fn hold_buffer(resizer: &Resizer<'_, Sta>) -> Option<LibCellId> {
 /// those on the shortest site, and delay cells alone when the library has
 /// any, each preference dropped when nothing meets it. The library model
 /// has no threshold voltages to match.
-fn hold_buffer_candidates(resizer: &Resizer<'_, Sta>) -> Vec<LibCellId> {
+fn hold_buffer_candidates(resizer: &Resizer<'_, Sta>) -> Vec<BufferCell> {
     let link = resizer.link;
     let library = &resizer.db.library;
-    let buffers: Vec<LibCellId> = (0..link.liberty.cells.len())
+    let buffers: Vec<BufferCell> = (0..link.liberty.cells.len())
         .map(|i| LibCellId(i as u32))
         .filter(|&id| {
             let cell = link.liberty.cell(id);
             cell.is_buffer() && !cell.is_power_cell && !link.dont_use(id) && link.is_link_cell(id)
         })
+        .filter_map(|id| link.liberty.buffer_cell(id))
         .collect();
-    let site_of = |id: LibCellId| link.macro_of(id).and_then(|m| library.cell_macro(m).site);
+    let site_of = |b: BufferCell| link.macro_of(b.id).and_then(|m| library.cell_macro(m).site);
     let shortest_site = buffers
         .iter()
-        .filter_map(|&id| site_of(id))
+        .filter_map(|&b| site_of(b))
         .min_by_key(|&site| library.site(site).size.y);
-    let delay_footprint = |id: LibCellId| {
+    let delay_footprint = |b: BufferCell| {
         link.liberty
-            .cell(id)
+            .cell(b.id)
             .footprint
             .as_deref()
             .is_some_and(is_delay_cell)
     };
-    let has_delay_cells = buffers.iter().any(|&id| delay_footprint(id));
-    let is_delay = |id: LibCellId| !has_delay_cells || delay_footprint(id);
-    let on_site_delay: Vec<LibCellId> = buffers
+    let has_delay_cells = buffers.iter().any(|&b| delay_footprint(b));
+    let is_delay = |b: BufferCell| !has_delay_cells || delay_footprint(b);
+    let on_site_delay: Vec<BufferCell> = buffers
         .iter()
         .copied()
-        .filter(|&id| site_of(id) == shortest_site && is_delay(id))
+        .filter(|&b| site_of(b) == shortest_site && is_delay(b))
         .collect();
     if !on_site_delay.is_empty() {
         return on_site_delay;
     }
-    let delay: Vec<LibCellId> = buffers.iter().copied().filter(|&id| is_delay(id)).collect();
+    let delay: Vec<BufferCell> = buffers.iter().copied().filter(|&b| is_delay(b)).collect();
     if delay.is_empty() { buffers } else { delay }
 }
 
@@ -251,12 +252,10 @@ fn is_delay_cell(footprint: &str) -> bool {
 
 /// A buffer's delay driving its own input, the lesser of its edges, as
 /// `bufferHoldDelay`.
-fn hold_delay(resizer: &Resizer<'_, Sta>, cell: LibCellId) -> Seconds {
-    let lib = resizer.link.liberty.cell(cell);
-    let Some((input, _)) = lib.buffer_ports() else {
-        return Seconds::ZERO;
-    };
-    let delays = buffer_delays(lib, &resizer.targets.slews, lib.ports[input].capacitance());
+fn hold_delay(resizer: &Resizer<'_, Sta>, buffer: BufferCell) -> Seconds {
+    let liberty = resizer.link.liberty;
+    let input_cap = liberty.cell(buffer.id).ports[buffer.input].capacitance();
+    let delays = buffer_delays(liberty, buffer, &resizer.targets.slews, input_cap);
     delays.rise.min(delays.fall)
 }
 
@@ -288,7 +287,7 @@ impl Slacks {
 
 /// The repair in progress.
 struct HoldRepair<'o> {
-    buffer: LibCellId,
+    buffer: BufferCell,
     options: &'o HoldOptions,
     inserted: usize,
     resized: usize,
@@ -359,8 +358,12 @@ impl HoldRepair<'_> {
         }
         // NOTE: repairEndHold takes the endpoint's load here, not the driver's.
         let load_cap = (resizer.load_cap(driver) - excluded_cap).max(Farads::ZERO);
-        let lib = resizer.link.liberty.cell(self.buffer);
-        let delays = buffer_delays(lib, &resizer.targets.slews, load_cap);
+        let delays = buffer_delays(
+            resizer.link.liberty,
+            self.buffer,
+            &resizer.targets.slews,
+            load_cap,
+        );
         let o = self.options;
         let fits = o.allow_setup_violations
             || Edge::BOTH.iter().all(|&edge| {
@@ -474,7 +477,7 @@ mod tests {
         let clock = "create_clock -name clk -period 1.0 [get_ports clk]\n";
 
         with_timed_session(&mut db, &lib, clock, |resizer| {
-            let chosen = hold_buffer(resizer).map(|c| resizer.link.liberty.cell(c).name.clone());
+            let chosen = hold_buffer(resizer).map(|b| resizer.link.liberty.cell(b.id).name.clone());
 
             assert_eq!(chosen.as_deref(), Some("CLKBUF_X3"));
         });

@@ -4,7 +4,7 @@
 
 use crate::CtsError;
 use pare_common::db::design::NetlistDB;
-use pare_common::db::liberty::{LibCellId, Liberty};
+use pare_common::db::liberty::{BufferCell, Liberty};
 use pare_common::units::Farads;
 use pare_resizer::Link;
 use pare_resizer::WireRc;
@@ -21,13 +21,13 @@ const CLOSE_LIMIT_SHARE: f32 = 0.1;
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) struct ClockBuffers {
     /// Every clock buffer, in library order.
-    pub all: Vec<LibCellId>,
+    pub all: Vec<BufferCell>,
     /// The buffer at each tree's root and along its trunk.
-    pub root: LibCellId,
+    pub root: BufferCell,
     /// The buffer driving each cluster of sinks.
-    pub sink: LibCellId,
+    pub sink: BufferCell,
     /// The buffers characterized, by increasing load limit.
-    pub characterized: Vec<LibCellId>,
+    pub characterized: Vec<BufferCell>,
 }
 
 impl ClockBuffers {
@@ -51,12 +51,14 @@ impl ClockBuffers {
         let root = if all.len() == 1 {
             all[0]
         } else {
-            best_max_cap_buffer(liberty, &all, wire_cap_per_um * core_length / 2.0)?
+            best_max_cap_buffer(liberty, &all, wire_cap_per_um * core_length / 2.0)
+                .ok_or(CtsError::NoBuffers)?
         };
         let sink = if all.len() == 1 {
             all[0]
         } else {
-            best_max_cap_buffer(liberty, &all, wire_cap_per_um * core_length)?
+            best_max_cap_buffer(liberty, &all, wire_cap_per_um * core_length)
+                .ok_or(CtsError::NoBuffers)?
         };
         let characterized = trim_and_sort(liberty, &all, root, sink);
         Ok(Self {
@@ -70,23 +72,22 @@ impl ClockBuffers {
 
 /// The smallest buffer whose derated load limit covers `total_cap`, or the
 /// one with the largest limit when none does, as
-/// `TritonCTS::selectBestMaxCapBuffer`.
+/// `TritonCTS::selectBestMaxCapBuffer`; none when no buffer has a limit.
 fn best_max_cap_buffer(
     liberty: &Liberty,
-    buffers: &[LibCellId],
+    buffers: &[BufferCell],
     total_cap: f32,
-) -> Result<LibCellId, CtsError> {
+) -> Option<BufferCell> {
     let mut best = None;
     let mut best_area = f32::MAX;
     let mut next_best = None;
     let mut best_cap = 0.0_f32;
     for &buffer in buffers {
-        let cell = liberty.cell(buffer);
-        let (_, output) = cell
-            .buffer_ports()
-            .ok_or_else(|| CtsError::NotABuffer(cell.name.clone()))?;
+        let cell = liberty.cell(buffer.id);
         let area = cell.area as f32;
-        let limit = cell.ports[output].max_capacitance.map(|c| c.get() as f32);
+        let limit = cell.ports[buffer.output]
+            .max_capacitance
+            .map(|c| c.get() as f32);
         if let Some(max_cap) = limit
             && max_cap * MAX_CAP_DERATE > total_cap
             && area < best_area
@@ -100,15 +101,16 @@ fn best_max_cap_buffer(
             best_cap = max_cap;
         }
     }
-    best.or(next_best).ok_or(CtsError::NoBuffers)
+    best.or(next_best)
 }
 
 /// A buffer's load limit, zero without one, as `TechChar::getMaxCapLimit`
 /// reads it.
-fn max_cap_limit(liberty: &Liberty, buffer: LibCellId) -> f32 {
-    let cell = liberty.cell(buffer);
-    cell.buffer_ports()
-        .and_then(|(_, output)| cell.ports[output].max_capacitance)
+fn max_cap_limit(liberty: &Liberty, buffer: BufferCell) -> f32 {
+    // NOTE: getMaxCapLimit reads a missing limit as zero, which decides the
+    // buffers characterized; kept so the trees match TritonCTS's.
+    liberty.cell(buffer.id).ports[buffer.output]
+        .max_capacitance
         .map_or(0.0, Farads::get) as f32
 }
 
@@ -118,14 +120,14 @@ fn max_cap_limit(liberty: &Liberty, buffer: LibCellId) -> f32 {
 /// it dropped.
 fn trim_and_sort(
     liberty: &Liberty,
-    buffers: &[LibCellId],
-    root: LibCellId,
-    sink: LibCellId,
-) -> Vec<LibCellId> {
-    let limit = |b: LibCellId| max_cap_limit(liberty, b);
+    buffers: &[BufferCell],
+    root: BufferCell,
+    sink: BufferCell,
+) -> Vec<BufferCell> {
+    let limit = |b: BufferCell| max_cap_limit(liberty, b);
     let (sink_cap, root_cap) = (limit(sink), limit(root));
     let (low, high) = (sink_cap.min(root_cap), sink_cap.max(root_cap));
-    let mut list: Vec<LibCellId> = buffers
+    let mut list: Vec<BufferCell> = buffers
         .iter()
         .copied()
         .filter(|&b| (low..=high).contains(&limit(b)))
@@ -150,13 +152,12 @@ fn trim_and_sort(
 /// library, as `TritonCTS::getBufferFanoutLimit`; `None` without a limit.
 pub(crate) fn fanout_limit(
     liberty: &Liberty,
-    buffer: LibCellId,
+    buffer: BufferCell,
     design_limit: Option<f64>,
 ) -> Option<u32> {
-    let cell = liberty.cell(buffer);
-    let port_limit = cell
-        .buffer_ports()
-        .and_then(|(_, output)| cell.ports[output].max_fanout)
+    let cell = liberty.cell(buffer.id);
+    let port_limit = cell.ports[buffer.output]
+        .max_fanout
         .or_else(|| liberty.cell_defaults(cell).max_fanout);
     [design_limit, port_limit]
         .into_iter()
@@ -193,15 +194,16 @@ mod tests {
         liberty::parse_str(&src, Path::new("x.lib")).unwrap()
     }
 
-    fn id(lib: &Liberty, cap: u32) -> LibCellId {
-        lib.cell_id(&format!("B{cap}")).unwrap()
+    fn id(lib: &Liberty, cap: u32) -> BufferCell {
+        lib.buffer_cell(lib.cell_id(&format!("B{cap}")).unwrap())
+            .unwrap()
     }
 
     #[test]
     fn buffers_between_the_sink_and_root_limits_are_kept_by_limit_less_close_neighbours() {
         let caps = [60, 10, 30, 32, 5, 70];
         let lib = buffers(&caps.map(|c| (c, None)), None);
-        let all: Vec<LibCellId> = caps.iter().map(|&c| id(&lib, c)).collect();
+        let all: Vec<BufferCell> = caps.iter().map(|&c| id(&lib, c)).collect();
 
         let kept = trim_and_sort(&lib, &all, id(&lib, 60), id(&lib, 10));
 
