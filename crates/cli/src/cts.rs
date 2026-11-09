@@ -116,22 +116,19 @@ fn clock_arrivals(
 /// Shows what clock tree synthesis built, `root_buffer` naming the buffer
 /// at each tree's root.
 fn show_clock_trees(summary: &ClockTreeSummary, root_buffer: &str) {
-    ui::stat_row(
-        "Clock trees:",
-        &summary.trees.to_string(),
-        "Sinks:",
-        &summary.sinks.to_string(),
+    ui::stat_pair(
+        ("Clock trees:", &summary.trees.to_string()),
+        ("Sinks:", &summary.sinks.to_string()),
     );
-    ui::stat_row(
-        "Buffers:",
-        &format!("{} {root_buffer}", summary.buffers),
-        "Dummy loads:",
-        &summary.dummies.to_string(),
+    ui::stat_pair(
+        ("Buffers:", &format!("{} {root_buffer}", summary.buffers)),
+        ("Dummy loads:", &summary.dummies.to_string()),
     );
-    ui::stat_row(
-        "Clock net repeaters:",
-        &summary.clock_net_repeaters.to_string(),
-        "Delay buffers:",
-        &summary.delay_buffers.to_string(),
+    ui::stat_pair(
+        (
+            "Clock net repeaters:",
+            &summary.clock_net_repeaters.to_string(),
+        ),
+        ("Delay buffers:", &summary.delay_buffers.to_string()),
     );
 }

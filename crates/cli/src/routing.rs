@@ -210,11 +210,9 @@ fn legalize_and_reroute(
     moved_nets.sort_unstable();
     moved_nets.dedup();
     session.update(db, &moved_nets);
-    ui::stat_row(
-        "Cells moved:",
-        &moved.len().to_string(),
-        "Nets updated:",
-        &moved_nets.len().to_string(),
+    ui::stat_pair(
+        ("Cells moved:", &moved.len().to_string()),
+        ("Nets updated:", &moved_nets.len().to_string()),
     );
     timer.finish(report);
     Ok(())
@@ -259,7 +257,7 @@ pub(crate) fn route_global(
     let timer = PhaseTimer::start(Phase::GlobalRouting);
     let mut tables = RouteTables::default();
     let global = pare_router::route_global_only(db, &config.routing, &mut |p| tables.show(p))?;
-    ui::stat_row("Nets:", &global.summary.nets.to_string(), "", "");
+    ui::stat("Nets:", &global.summary.nets.to_string());
     if let Some(path) = guides {
         write_guides(path, db, &global.guides)?;
         ui::wrote(path);
@@ -350,24 +348,15 @@ fn run_router(
 
 /// Shows what detailed routing left: nets, rounds and unfinished nets.
 fn show_routing(summary: &pare_router::RoutingSummary) {
-    ui::stat_row(
-        "Nets:",
-        &summary.nets.to_string(),
-        "Rounds:",
-        &summary.rounds.to_string(),
+    ui::stat_pair(
+        ("Nets:", &summary.nets.to_string()),
+        ("Rounds:", &summary.rounds.to_string()),
     );
-    ui::stat_row(
-        "No access:",
-        &summary.inaccessible.len().to_string(),
-        "Incomplete:",
-        &summary.incomplete.len().to_string(),
+    ui::stat_pair(
+        ("No access:", &summary.inaccessible.len().to_string()),
+        ("Incomplete:", &summary.incomplete.len().to_string()),
     );
-    ui::stat_row(
-        "In conflict:",
-        &summary.conflicted.len().to_string(),
-        "",
-        "",
-    );
+    ui::stat("In conflict:", &summary.conflicted.len().to_string());
 }
 
 /// Shows a routing run's progress as `pare`'s tables, the detailed table's
@@ -386,11 +375,9 @@ impl RouteTables {
                 overflow,
                 layers,
             } => {
-                ui::stat_row(
-                    "GCells:",
-                    &format!("{nx}x{ny}"),
-                    "GR overflow:",
-                    &overflow.to_string(),
+                ui::stat_pair(
+                    ("GCells:", &format!("{nx}x{ny}")),
+                    ("GR overflow:", &overflow.to_string()),
                 );
                 ui::gr_layer_table_header();
                 for layer in *layers {
@@ -403,11 +390,9 @@ impl RouteTables {
                     );
                 }
             }
-            Progress::GlobalSettled { kept, rerouted } => ui::stat_row(
-                "Routes kept:",
-                &kept.to_string(),
-                "Routed again:",
-                &rerouted.to_string(),
+            Progress::GlobalSettled { kept, rerouted } => ui::stat_pair(
+                ("Routes kept:", &kept.to_string()),
+                ("Routed again:", &rerouted.to_string()),
             ),
             Progress::DetailedRound(round) => {
                 if !self.detailed_started {
@@ -431,7 +416,7 @@ fn show_stage(stage: Stage, elapsed: Duration) {
         Stage::TrackAssignment => "Track assign:",
     };
     let resident = memory::current_rss_mb().map_or_else(String::new, |mb| format!("{mb} MB"));
-    ui::stat_row(label, &ui::seconds(elapsed), "Resident:", &resident);
+    ui::stat_pair((label, &ui::seconds(elapsed)), ("Resident:", &resident));
 }
 
 /// Writes the routed design's image and DEF into `output_dir`.

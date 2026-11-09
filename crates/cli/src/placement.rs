@@ -219,11 +219,12 @@ fn legalize_with_pin_access(
     // PARE first moves cells whose pins no via can reach, which its router could not access.
     let pin_access = access.map(|access| {
         let freed = detailed::free_blocked_pins(db, &zones, &access);
-        ui::stat_row(
-            "Blocked pins:",
-            &format!("{} -> {}", freed.blocked_before, freed.blocked_after),
-            "Cells moved:",
-            &freed.moved.to_string(),
+        ui::stat_pair(
+            (
+                "Blocked pins:",
+                &format!("{} -> {}", freed.blocked_before, freed.blocked_after),
+            ),
+            ("Cells moved:", &freed.moved.to_string()),
         );
         CheckedAccess {
             access,
@@ -260,7 +261,7 @@ fn detailed_placement(
     if let Legalization::DetailedPlacement(_) = legalized.legalization {
         let _ = improve_placement(db, IMPROVE_MAX_DISPLACEMENT)?;
         let mirrored = optimize_mirroring(db);
-        ui::stat_row("Mirrored:", &mirrored.to_string(), "", "");
+        ui::stat("Mirrored:", &mirrored.to_string());
     } else {
         let access = legalized.pin_access.as_ref().map(|checked| &checked.access);
         let _ = detailed::improve(db, &zones, DETAILED_PASSES, access);
@@ -269,11 +270,9 @@ fn detailed_placement(
         moves: before.moved(db).len(),
         hpwl_um: hpwl_um(db),
     };
-    ui::stat_row(
-        "Cells changed:",
-        &detailed.moves.to_string(),
-        "HPWL (um):",
-        &format!("{:.0}", detailed.hpwl_um),
+    ui::stat_pair(
+        ("Cells changed:", &detailed.moves.to_string()),
+        ("HPWL (um):", &format!("{:.0}", detailed.hpwl_um)),
     );
     timer.finish(report);
     Ok(detailed)
@@ -315,7 +314,7 @@ fn hpwl_um(db: &NetlistDB) -> f64 {
 
 /// Shows the half-perimeter wirelength `um`, in microns.
 fn show_hpwl(um: f64) {
-    ui::stat_row("HPWL (um):", &format!("{um:.0}"), "", "");
+    ui::stat("HPWL (um):", &format!("{um:.0}"));
 }
 
 /// Draws the placement and writes it where the config says, as DEF or, for
@@ -354,11 +353,12 @@ pub(crate) fn legalize(db: &mut NetlistDB, zones: &Zones) -> anyhow::Result<Lega
     let legalization = pare_placer::legalize::legalize(db, zones)?;
     if let Legalization::DetailedPlacement(done) = legalization {
         let um = |d: Dbu| db.dbu().to_microns(d);
-        ui::stat_row(
-            "Displacement (um):",
-            &format!("{:.0}", um(done.total_displacement)),
-            "Max (um):",
-            &format!("{:.1}", um(done.max_displacement)),
+        ui::stat_pair(
+            (
+                "Displacement (um):",
+                &format!("{:.0}", um(done.total_displacement)),
+            ),
+            ("Max (um):", &format!("{:.1}", um(done.max_displacement))),
         );
     }
     Ok(legalization)
@@ -381,11 +381,9 @@ fn place_io_pins_by_cells(
 
     let timer = PhaseTimer::start(Phase::IoPinPlacement);
     let placed = io::place_io_pins(db, layers)?;
-    ui::stat_row(
-        "Pins:",
-        &placed.pins.to_string(),
-        "Free slots:",
-        &placed.slots.to_string(),
+    ui::stat_pair(
+        ("Pins:", &placed.pins.to_string()),
+        ("Free slots:", &placed.slots.to_string()),
     );
     timer.finish(report);
     Ok(())
@@ -581,19 +579,15 @@ impl Density {
             || global::default_bins(model, target.get()),
             NonZeroUsize::get,
         );
-        ui::stat_row(
-            "Cells:",
-            &movable_cells.to_string(),
-            "Nets:",
-            &model.nets.len().to_string(),
+        ui::stat_pair(
+            ("Cells:", &movable_cells.to_string()),
+            ("Nets:", &model.nets.len().to_string()),
         );
-        ui::stat_row(
-            "Utilization:",
-            &format!("{:.2}%", utilization * 100.0),
-            "Target Density:",
-            &format!("{:.2}", target.get()),
+        ui::stat_pair(
+            ("Utilization:", &format!("{:.2}%", utilization * 100.0)),
+            ("Target Density:", &format!("{:.2}", target.get())),
         );
-        ui::stat_row("Bin Grid:", &format!("{bins}x{bins}"), "", "");
+        ui::stat("Bin Grid:", &format!("{bins}x{bins}"));
         Ok(Self {
             movable_cells,
             target,
@@ -606,18 +600,22 @@ impl Density {
 /// an error when it diverged.
 fn show_global_result(db: &NetlistDB, result: &GlobalResult) -> anyhow::Result<()> {
     for (k, round) in result.congestion.iter().enumerate() {
-        ui::stat_row(
-            &format!("Congestion {}:", k + 1),
-            &format!("{:.4} @ {}", round.congestion, round.iteration),
-            "Inflated:",
-            &format!(
-                "{} cells, area x{:.2}, density {:.2}",
-                round.inflated, round.area_ratio, round.target_density
+        ui::stat_pair(
+            (
+                &format!("Congestion {}:", k + 1),
+                &format!("{:.4} @ {}", round.congestion, round.iteration),
+            ),
+            (
+                "Inflated:",
+                &format!(
+                    "{} cells, area x{:.2}, density {:.2}",
+                    round.inflated, round.area_ratio, round.target_density
+                ),
             ),
         );
     }
     if let Some(congestion) = result.final_congestion {
-        ui::stat_row("Final congestion:", &format!("{congestion:.4}"), "", "");
+        ui::stat("Final congestion:", &format!("{congestion:.4}"));
     }
     if result.zones.len() > 1 {
         for z in &result.zones {
@@ -625,11 +623,15 @@ fn show_global_result(db: &NetlistDB, result: &GlobalResult) -> anyhow::Result<(
                 Zone::Fence(r) => db.regions[r].name.as_str(),
                 Zone::Outside => "outside fences",
             };
-            ui::stat_row(
-                &format!("Zone {name}:"),
-                &format!("{} cells, util {:.3}", z.cells, z.utilization),
-                "Target / ovfl:",
-                &format!("{:.3} / {:.3}", z.target, z.overflow),
+            ui::stat_pair(
+                (
+                    &format!("Zone {name}:"),
+                    &format!("{} cells, util {:.3}", z.cells, z.utilization),
+                ),
+                (
+                    "Target / ovfl:",
+                    &format!("{:.3} / {:.3}", z.target, z.overflow),
+                ),
             );
         }
     }
@@ -744,32 +746,41 @@ struct TimingRound {
 
 /// Shows what timing round `number` did in `elapsed`.
 fn show_timing_round(number: usize, round: &TimingRound, elapsed: Duration) {
-    ui::stat_row(
-        &format!("Timing round {number}:"),
-        &format!(
-            "WNS {:.3} -> {:.3} ns",
-            round.wns_before.nanos(),
-            round.wns_after.nanos()
+    ui::stat_pair(
+        (
+            &format!("Timing round {number}:"),
+            &format!(
+                "WNS {:.3} -> {:.3} ns",
+                round.wns_before.nanos(),
+                round.wns_after.nanos()
+            ),
         ),
-        "Area:",
-        &format!("{:+.2}%", round.area_change_percent),
+        ("Area:", &format!("{:+.2}%", round.area_change_percent)),
     );
-    ui::stat_row(
-        "Repair:",
-        &format!("{} resized, {} repeaters", round.resized, round.repeaters),
-        "Rebuffer:",
-        &format!(
-            "{} removed, {} inserted",
-            round.rebuffer_removed, round.rebuffer_inserted
+    ui::stat_pair(
+        (
+            "Repair:",
+            &format!("{} resized, {} repeaters", round.resized, round.repeaters),
+        ),
+        (
+            "Rebuffer:",
+            &format!(
+                "{} removed, {} inserted",
+                round.rebuffer_removed, round.rebuffer_inserted
+            ),
         ),
     );
-    ui::stat_row(
-        "Weighted nets:",
-        &format!("{} of {}", round.weights.len(), round.nets),
-        "Cells:",
-        &format!("{} -> {}", round.cells_before, round.cells_after),
+    ui::stat_pair(
+        (
+            "Weighted nets:",
+            &format!("{} of {}", round.weights.len(), round.nets),
+        ),
+        (
+            "Cells:",
+            &format!("{} -> {}", round.cells_before, round.cells_after),
+        ),
     );
-    ui::stat_row("Round time:", &ui::seconds(elapsed), "", "");
+    ui::stat("Round time:", &ui::seconds(elapsed));
 }
 
 /// The placement model of `db` after a round's repair, its nets weighted by
