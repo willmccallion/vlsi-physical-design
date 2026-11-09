@@ -179,7 +179,8 @@ impl RuleTech {
     }
 }
 
-/// Everything the router needs to know about the technology.
+/// Everything the router needs to know about the technology. Its
+/// routable layers run both ways, as [`RouteTech::new`] checks.
 #[derive(Clone, Debug)]
 pub struct RouteTech {
     /// Lowest layer signal wires may use.
@@ -266,6 +267,23 @@ fn check_grid_span(die: &Rect<Dbu>, gcell: Dbu) -> Result<(), RouteError> {
     Ok(())
 }
 
+/// Fails when the layers `min_layer..=max_layer` of `lib` all run one way,
+/// since a route between pins in different rows and columns must turn.
+fn check_both_directions(
+    lib: &Library,
+    min_layer: LayerId,
+    max_layer: LayerId,
+) -> Result<(), RouteError> {
+    let first = lib.layer(min_layer).direction;
+    if min_layer
+        .through(max_layer)
+        .all(|l| lib.layer(l).direction == first)
+    {
+        return Err(RouteError::OneDirection(first));
+    }
+    Ok(())
+}
+
 impl RouteTech {
     /// Builds the routing technology of `db`.
     pub fn new(db: &NetlistDB, config: &RoutingConfig) -> Result<Self, RouteError> {
@@ -276,6 +294,7 @@ impl RouteTech {
         let lib = &db.library;
         let range = config.layer_range(lib)?;
         let (min_layer, max_layer) = (*range.start(), *range.end());
+        check_both_directions(lib, min_layer, max_layer)?;
 
         let tracks: IdVec<LayerId, Vec<Dbu>> = lib
             .routing_layers

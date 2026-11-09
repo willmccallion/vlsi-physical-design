@@ -16,7 +16,7 @@ use pare_common::db::design::{
     NetlistDB, NonDefaultLayer, NonDefaultRule, PlacementStatus, RouteElem,
 };
 use pare_common::db::indices::{CellId, CutLayerId, IdVec, LayerId, NetId, NonDefaultRuleId};
-use pare_common::db::library::{LayerRef, Shape};
+use pare_common::db::library::{Direction, LayerRef, Shape};
 use pare_common::db::shapes::fixed_shapes;
 use pare_common::geom::dbu::Dbu;
 use pare_common::geom::point::Point;
@@ -37,6 +37,20 @@ fn routing_refuses_a_design_with_unplaced_cells() {
             first: "u5".to_string(),
         })
     );
+}
+
+#[test]
+fn routing_refuses_layers_that_all_run_one_way() {
+    let (mut db, placed) = placed_tiny();
+    let config = RoutingConfig {
+        min_layer: Some("M2".to_string()),
+        max_layer: Some("M2".to_string()),
+        ..placed
+    };
+
+    let result = route(&mut db, &config).map(|_| ());
+
+    assert_eq!(result, Err(RouteError::OneDirection(Direction::Vertical)));
 }
 
 #[test]

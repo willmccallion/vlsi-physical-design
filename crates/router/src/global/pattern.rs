@@ -36,6 +36,8 @@ struct EdgeChoice {
     shape: Shape,
     /// Layer at the child's end.
     child_layer: usize,
+    /// The child's subtree when the edge attaches on `child_layer`.
+    below: NodeChoice,
 }
 
 /// The cheapest subtree under a node when its parent edge attaches on
@@ -65,9 +67,7 @@ pub(super) fn route_pattern(
     let base = grid.min_layer.index();
     let mut pins: Vec<Option<(usize, usize)>> = vec![None; tree.nodes.len()];
     for t in terminals {
-        let Ok(k) = spots.binary_search(&(t.x, t.y)) else {
-            continue;
-        };
+        let k = spots.partition_point(|&s| s < (t.x, t.y));
         let l = t.layer.index() - base;
         pins[k] = Some(pins[k].map_or((l, l), |(lo, hi)| (lo.min(l), hi.max(l))));
     }
@@ -93,7 +93,6 @@ pub(super) fn route_pattern(
     }
 
     let mut span = vec![(0, 0); tree.nodes.len()];
-    let mut attach = vec![0; tree.nodes.len()];
     let Some(root) = (0..layers)
         .filter_map(|l| node_best[0][l].map(|n| (n.cost, l, n)))
         .min_by(|a, b| a.0.total_cmp(&b.0).then(a.1.cmp(&b.1)))
@@ -120,13 +119,10 @@ pub(super) fn route_pattern(
             else {
                 continue;
             };
-            attach[c] = edge.child_layer;
-            let Some(n) = node_best[c][edge.child_layer] else {
-                continue;
-            };
+            let n = edge.below;
             span[c] = (n.low, n.high);
             paths.push(planner.edge_path(tree.nodes[v], parent_layer, tree.nodes[c], edge));
-            let a = attach[c];
+            let a = edge.child_layer;
             if n.low < a {
                 paths.push((n.low..=a).rev().map(|l| cell(tree.nodes[c], l)).collect());
             }
@@ -243,6 +239,7 @@ impl Planner<'_> {
                     cost: total,
                     shape,
                     child_layer,
+                    below: sub,
                 });
             }
         };
