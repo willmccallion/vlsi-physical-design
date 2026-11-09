@@ -10,6 +10,7 @@ use crate::fuzzy;
 use crate::resizer::{RepairError, Resizer, buffer_delays};
 use crate::sta::Sta;
 use pare_common::config::Share;
+use pare_common::db::design::NetlistDB;
 use pare_common::db::indices::PinId;
 use pare_common::db::liberty::{BufferCell, Edge, EdgeValues, LibCellId, MinMax};
 use pare_common::geom::dbu::Dbu;
@@ -113,8 +114,7 @@ pub fn repair_hold(
         return Ok(summary);
     };
     summary.buffer = Some(buffer.id);
-    let cells = resizer.netlist().db.cells.len();
-    let budget = ((options.max_buffer_share.get() * cells as f64) as usize).max(MIN_BUFFER_BUDGET);
+    let budget = buffer_budget(resizer.db, options.max_buffer_share);
     let mut repair = HoldRepair {
         buffer,
         options,
@@ -154,6 +154,14 @@ pub fn repair_hold(
     summary.inserted = repair.inserted;
     summary.resized = repair.resized;
     Ok(summary)
+}
+
+/// The most hold buffers repair may insert: `share` of the live instances,
+/// as `network_->instanceCount()` counts them, but no fewer than
+/// [`MIN_BUFFER_BUDGET`].
+fn buffer_budget(db: &NetlistDB, share: Share) -> usize {
+    let cells = db.cells.iter().filter(|c| !c.retired).count();
+    ((share.get() * cells as f64) as usize).max(MIN_BUFFER_BUDGET)
 }
 
 /// The endpoints whose hold slack is below `margin`, clock pins aside, and
@@ -458,6 +466,7 @@ mod tests {
         DefSections, cells, clock_cells_source, def_text, design, pin, with_timed_session,
         with_wired_session,
     };
+    use std::fmt::Write;
 
     const CLOCK: &str = "create_clock -name clk -period 1.0 [get_ports clk]\n";
 
@@ -517,6 +526,30 @@ mod tests {
         let (summary, _, _) = repaired_pair(margin);
 
         assert!(summary.inserted > 0, "{summary:?}");
+    }
+
+    #[test]
+    fn the_buffer_budget_counts_only_the_cells_still_in_the_design() {
+        let mut components = String::new();
+        for i in 0..150 {
+            writeln!(components, "- b{i} BUF_X1 + PLACED ( 2000 2800 ) N ;").unwrap();
+        }
+        let sections = DefSections {
+            components: &components,
+            nets: "",
+            inputs: &[],
+            outputs: &[],
+        };
+        let mut db = design(&def_text("many", &sections));
+        let all = Share::new(1.0).unwrap();
+        assert_eq!(buffer_budget(&db, all), 150);
+
+        for i in 0..100 {
+            let cell = db.cell_id(&format!("b{i}")).unwrap();
+            let _ = db.retire_cell(cell);
+        }
+
+        assert_eq!(buffer_budget(&db, all), MIN_BUFFER_BUDGET);
     }
 
     #[test]
