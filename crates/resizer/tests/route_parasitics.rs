@@ -12,7 +12,7 @@ use pare_common::geom::point::Point;
 use pare_common::units::{Farads, FaradsPerMeter, OhmsPerMeter, Seconds};
 use pare_resizer::RouteRc;
 use pare_resizer::bnet::{self, Kind, LoadModel, PinLoad, TreeRc};
-use pare_resizer::{Link, Netlist};
+use pare_resizer::{Link, Netlist, RepairError};
 use pare_resizer::{NetParasitics, WireRc};
 use std::path::{Path, PathBuf};
 
@@ -277,7 +277,9 @@ fn a_route_tree_climbs_by_vias_and_runs_wires_on_the_route_layers() {
     };
     let parasitics = NetParasitics::from_route(&db, net, route, &route_rc);
 
-    let tree = bnet::from_parasitics(&netlist, &parasitics, d, &rc, &UnitLoads).unwrap();
+    let tree = bnet::from_parasitics(&netlist, &parasitics, d, &rc, &UnitLoads)
+        .unwrap()
+        .unwrap();
 
     let mut loads = tree.loads();
     loads.sort_unstable();
@@ -304,4 +306,44 @@ fn collect_wire_layers(node: &bnet::Bnet, into: &mut Vec<Option<LayerId>>) {
         }
         Kind::Load { .. } => {}
     }
+}
+
+#[test]
+fn a_route_that_misses_a_load_fails_to_build_a_tree() {
+    let db = fanout_design();
+    let lib = liberty::parse_file(&fixture("cts", "clock.lib")).unwrap();
+    let link = Link::new(&db, &lib, &[]).unwrap();
+    let netlist = Netlist::new(&db, &link);
+    let net = NetId::new(0);
+    let (d, a, b) = (
+        cell_pin(&db, "d", "ZN"),
+        cell_pin(&db, "a", "A"),
+        cell_pin(&db, "b", "A"),
+    );
+    let route = NetRoute {
+        segments: vec![segment(at(3000, 3000, 0), at(21000, 3000, 0))],
+        pins: vec![
+            pin_at(d, pt(2500, 3000), pt(3000, 3000), 0),
+            pin_at(a, pt(20500, 3000), pt(21000, 3000), 0),
+            pin_at(b, pt(2500, 23000), pt(3000, 23000), 0),
+        ],
+    };
+    let route_rc = RouteRc::new(&db.library, &[], &[], LayerId(0));
+    let rc = TreeRc {
+        signal: WireRc::per_micron(3.0, 0.1, LayerId(0)),
+        layers: Some(&route_rc),
+        dbu: DbuPerMicron::new(2000).unwrap(),
+    };
+    let parasitics = NetParasitics::from_route(&db, net, route, &route_rc);
+
+    let tree = bnet::from_parasitics(&netlist, &parasitics, d, &rc, &UnitLoads);
+
+    assert_eq!(
+        tree.err(),
+        Some(RepairError::RouteTree {
+            pin: "d/ZN".to_string(),
+            found: 1,
+            expected: 2,
+        })
+    );
 }

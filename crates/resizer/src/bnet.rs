@@ -9,6 +9,7 @@
 
 use crate::netlist::Netlist;
 use crate::parasitics::{NetParasitics, WireRc, WireShape};
+use crate::resizer::RepairError;
 use crate::route_parasitics::RouteRc;
 use crate::steiner::{self, SteinerTree};
 use pare_common::db::global_route::{NetRoute, RoutePoint};
@@ -567,19 +568,30 @@ impl TreeRc<'_> {
 ///
 /// It follows the net's Steiner tree as `Resizer::makeBufferedNetSteiner`
 /// does, or its global route as `Resizer::makeBufferedNetGroute` does.
-#[must_use]
+///
+/// # Errors
+///
+/// [`RepairError::RouteTree`] when the global route reaches fewer loads
+/// than the net has, as `OpenROAD`'s RSZ 74.
 pub fn from_parasitics(
     netlist: &Netlist<'_>,
     parasitics: &NetParasitics,
     driver: PinId,
     rc: &TreeRc<'_>,
     loads: &dyn LoadModel,
-) -> Option<BnetPtr> {
+) -> Result<Option<BnetPtr>, RepairError> {
     match &parasitics.shape {
         WireShape::Steiner {
             tree,
             terminal_pins,
-        } => from_steiner(netlist, tree, terminal_pins, driver, rc, loads),
+        } => Ok(from_steiner(
+            netlist,
+            tree,
+            terminal_pins,
+            driver,
+            rc,
+            loads,
+        )),
         WireShape::Route(route) => from_route(netlist, route, driver, rc, loads),
     }
 }
@@ -625,7 +637,7 @@ fn from_route(
     driver: PinId,
     rc: &TreeRc<'_>,
     loads: &dyn LoadModel,
-) -> Option<BnetPtr> {
+) -> Result<Option<BnetPtr>, RepairError> {
     let mut pins_at: FxHashMap<RoutePoint, Vec<PinId>> = FxHashMap::default();
     let mut root = None;
     for location in &route.pins {
@@ -643,7 +655,7 @@ fn from_route(
             "driver pin {} not found in global routes",
             netlist.db.pin_name(driver)
         );
-        return None;
+        return Ok(None);
     };
     let mut adjacent: FxHashMap<RoutePoint, Vec<RoutePoint>> = FxHashMap::default();
     for segment in &route.segments {
@@ -658,17 +670,19 @@ fn from_route(
         loads,
         visited: HashSet::new(),
     };
-    let tree = walk.build(None, root)?;
+    let Some(tree) = walk.build(None, root) else {
+        return Ok(None);
+    };
     let expected = route.pins.len() - 1;
-    if tree.loads().len() != expected {
-        log::error!(
-            "Failed to build tree from global routes for pin '{}': found route to {} pins, expected {expected}",
-            netlist.db.pin_name(driver),
-            tree.loads().len(),
-        );
-        return None;
+    let found = tree.loads().len();
+    if found != expected {
+        return Err(RepairError::RouteTree {
+            pin: netlist.db.pin_name(driver),
+            found,
+            expected,
+        });
     }
-    Some(tree)
+    Ok(Some(tree))
 }
 
 /// The walk `makeBufferedNet` makes over a global route.

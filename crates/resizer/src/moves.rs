@@ -571,7 +571,7 @@ impl Moves {
             prev_driver,
             prev_edge,
         };
-        if !estimated_slack_ok(resizer, &removal, margin) {
+        if !estimated_slack_ok(resizer, &removal, margin)? {
             return Ok(false);
         }
         if !can_remove_buffer(resizer, site.cell) {
@@ -890,12 +890,16 @@ enum SlackRule {
 /// `BaseMove::estimatedSlackOK`: whether taking the buffer out leaves every
 /// path through its loads and the previous driver's other loads no worse,
 /// by estimated slews and delays.
-fn estimated_slack_ok(resizer: &Resizer<'_, Sta>, removal: &Removal, margin: Seconds) -> bool {
+fn estimated_slack_ok(
+    resizer: &Resizer<'_, Sta>,
+    removal: &Removal,
+    margin: Seconds,
+) -> Result<bool, RepairError> {
     let Some(change) = driver_change(resizer, removal) else {
-        return false;
+        return Ok(false);
     };
-    buffer_loads_ok(resizer, removal, &change, margin)
-        && side_loads_ok(resizer, removal, &change, margin)
+    Ok(buffer_loads_ok(resizer, removal, &change, margin)?
+        && side_loads_ok(resizer, removal, &change, margin))
 }
 
 /// How the previous driver's delay and slew change when it drives the
@@ -956,17 +960,18 @@ fn buffer_loads_ok(
     removal: &Removal,
     change: &DriverChange,
     margin: Seconds,
-) -> bool {
+) -> Result<bool, RepairError> {
     let Some(load_slews) = slews_after_removal(
         resizer,
         removal.prev_driver,
         removal.buffer.driver,
         removal.input,
         change.new_slew.get(removal.prev_edge),
-    ) else {
-        return false;
+    )?
+    else {
+        return Ok(false);
     };
-    load_slews.into_iter().all(|(load, slew)| {
+    Ok(load_slews.into_iter().all(|(load, slew)| {
         let PinOwner::Cell { cell, .. } = resizer.db.pins[load].owner else {
             return true;
         };
@@ -978,7 +983,7 @@ fn buffer_loads_ok(
             rule: SlackRule::NoWorse,
         };
         input_slew_impact_ok(resizer, cell, &impact)
-    })
+    }))
 }
 
 /// Whether the previous driver's other loads keep their slacks as its
@@ -1088,13 +1093,21 @@ fn slews_after_removal(
     buffer_output: PinId,
     buffer_input: PinId,
     new_driver_slew: Seconds,
-) -> Option<Vec<(PinId, Seconds)>> {
-    let tree1 = tree_of(resizer, prev_driver)?;
-    let tree2 = tree_of(resizer, buffer_output)?;
-    let stitched = stitch(resizer, &tree1, buffer_input, &tree2)?;
+) -> Result<Option<Vec<(PinId, Seconds)>>, RepairError> {
+    let (Some(tree1), Some(tree2)) = (
+        resizer.buffered_tree(prev_driver)?,
+        resizer.buffered_tree(buffer_output)?,
+    ) else {
+        return Ok(None);
+    };
+    let Some(stitched) = stitch(resizer, &tree1, buffer_input, &tree2) else {
+        return Ok(None);
+    };
     let driver_slew_with_buffer = resizer.graph.slew(prev_driver).max();
     let to_buffer = slews_in_tree(resizer, driver_slew_with_buffer, &tree1);
-    let estimated_at_buffer = to_buffer.iter().find(|(p, _)| *p == buffer_input)?.1;
+    let Some(&(_, estimated_at_buffer)) = to_buffer.iter().find(|(p, _)| *p == buffer_input) else {
+        return Ok(None);
+    };
     let actual_at_buffer = resizer.graph.slew(buffer_input).max();
     let in_calibration = if fuzzy::zero(estimated_at_buffer) {
         1.0
@@ -1121,15 +1134,7 @@ fn slews_after_removal(
             *slew = *slew * *factor;
         }
     }
-    Some(slews)
-}
-
-/// The tree of the net `driver` drives.
-fn tree_of(resizer: &Resizer<'_, Sta>, driver: PinId) -> Option<BnetPtr> {
-    let net = resizer.db.pins[driver].net;
-    let netlist = resizer.netlist();
-    let parasitics = resizer.graph.parasitics(net)?;
-    bnet::from_parasitics(&netlist, parasitics, driver, &resizer.tree_rc(), resizer)
+    Ok(Some(slews))
 }
 
 /// `outer` with the load `at_load` replaced by `inner`, joined by a wire
