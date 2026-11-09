@@ -485,11 +485,11 @@ impl Cts<'_> {
                 .cell(db, cell)
                 .is_some_and(|(_, lib)| lib.is_inverter())
             {
+                // In OpenDB's order, the first is get1stSignalInput's.
                 let inverted = first_output(db, cell).and_then(|out| {
                     let out_net = db.pins[out].net;
                     net_cell_pins(db, out_net)
                         .into_iter()
-                        .rev()
                         .find(|&p| is_input_signal(db, p))
                 });
                 non_sink_macro &= inverted

@@ -613,6 +613,27 @@ fn a_clock_driving_a_block_and_registers_gets_a_tree_for_each() {
     assert_eq!((summary.trees, summary.sinks), (2, 17));
 }
 
+#[test]
+fn an_inverter_is_classed_by_the_first_load_opendb_lists() {
+    // The inverter drives the block, then four flops in DEF order. OpenDB
+    // lists the last connected first, so its first load is a flop: the
+    // inverter is a register sink of clk, which drives four flops too.
+    let text = design(4, 2, true);
+    let mut moved = String::new();
+    for i in 0..4 {
+        let _ = write!(moved, " ( ff{i} CK )");
+    }
+    let text = text
+        .replace(&moved, "")
+        .replace("( clkinv A )", &format!("( clkinv A ){moved}"));
+    let text = with_ram(&text, &[("clk_n", "CLK")]);
+    let (db, lib, constraints) = load_with_ram(&text);
+
+    let summary = synthesized_summary(db, &lib, &constraints);
+
+    assert_eq!((summary.trees, summary.sinks), (3, 10));
+}
+
 /// Checks `actual` against the golden file `name` of this crate.
 fn assert_golden(name: &str, actual: &str) {
     testing::assert_golden(
