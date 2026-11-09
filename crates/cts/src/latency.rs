@@ -27,7 +27,8 @@ use std::collections::BTreeMap;
 struct Node {
     children: Vec<usize>,
     arrival: f64,
-    buffers: i32,
+    /// The delay buffers the node needs, once balancing has counted them.
+    buffers: Option<i32>,
     input: Option<PinId>,
 }
 
@@ -178,7 +179,7 @@ impl Balancer<'_> {
         self.nodes.push(Node {
             children: Vec::new(),
             arrival: 0.0,
-            buffers: -1,
+            buffers: None,
             input: root_output,
         });
         let mut stack = vec![0];
@@ -210,7 +211,7 @@ impl Balancer<'_> {
                 self.nodes.push(Node {
                     children: Vec::new(),
                     arrival: 0.0,
-                    buffers: -1,
+                    buffers: None,
                     input: Some(pin),
                 });
                 self.nodes[driver].children.push(id);
@@ -293,7 +294,7 @@ impl Balancer<'_> {
         let dy = (sink.y - src.y).get() as f32 / (first + 1) as f32;
         let delay =
             self.buffer_delay(f64::from(dx.abs() + dy.abs()) * self.trees.cap_per_dbu.get());
-        self.nodes[node].buffers = (gap / f64::from(delay)) as i32;
+        self.nodes[node].buffers = Some((gap / f64::from(delay)) as i32);
     }
 
     /// Balances a node's children bottom up, as
@@ -309,30 +310,24 @@ impl Balancer<'_> {
             self.balance(db, child)?;
             self.delay_buffers_needed(db, child, src);
             max_arrival = max_arrival.max(self.nodes[child].arrival);
-            if let Some(input) = self.nodes[child].input {
-                by_need
-                    .entry(self.nodes[child].buffers)
-                    .or_default()
-                    .push(input);
+            if let (Some(input), Some(need)) = (self.nodes[child].input, self.nodes[child].buffers)
+            {
+                by_need.entry(need).or_default().push(input);
             }
         }
+        let mut groups = by_need.into_iter().rev();
         let mut previous = 0;
-        let mut loads: Vec<PinId> = Vec::new();
-        for (need, children) in by_need.into_iter().rev() {
-            if need == -1 {
-                continue;
-            }
-            if previous == 0 {
-                previous = need;
-                loads = children;
-                continue;
-            }
-            let first = self.insert_delay_buffers(db, previous - need, src, &loads)?;
-            loads = children;
-            loads.extend(first);
+        if let Some((need, children)) = groups.next() {
             previous = need;
+            let mut loads = children;
+            for (need, children) in groups {
+                let first = self.insert_delay_buffers(db, previous - need, src, &loads)?;
+                loads = children;
+                loads.extend(first);
+                previous = need;
+            }
         }
-        self.nodes[node].buffers = previous;
+        self.nodes[node].buffers = Some(previous);
         self.nodes[node].arrival = max_arrival;
         Ok(())
     }
