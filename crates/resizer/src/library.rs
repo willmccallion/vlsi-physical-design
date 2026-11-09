@@ -523,9 +523,135 @@ pub(crate) fn is_logic_std_cell(db: &NetlistDB, instance: CellId) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::testing::{DefSections, cells_with, def_text, design_with_copies};
+    use pare_common::db::library::Site;
     use pare_common::db::parser::liberty::parse_str;
     use std::fmt::Write;
     use std::path::Path;
+
+    /// A buffer cell `name` of `footprint` on the clock cells' tables whose
+    /// output slews to `slew` nanoseconds at 100 fF, which sets its drive.
+    fn buffer_cell(name: &str, footprint: &str, slew: f64) -> String {
+        format!(
+            "cell ({name}) {{ area : 0.8 ; cell_footprint : \"{footprint}\" ;
+               pin (A) {{ direction : input ; capacitance : 1.0 ; }}
+               pin (Z) {{ direction : output ; function : \"A\" ;
+                 timing () {{ related_pin : \"A\" ; timing_sense : positive_unate ;
+                   cell_rise (delay_t) {{ values (\"0.03, 0.30\", \"0.04, 0.31\") ; }}
+                   rise_transition (delay_t) {{
+                     values (\"0.0, {slew}\", \"0.0, {slew}\") ; }} }} }} }}\n"
+        )
+    }
+
+    /// The names `find_buffers` chooses among buffers `B0`, `B1`, ... of
+    /// the `(footprint, site)` of `buffers`, each driving more weakly than
+    /// the last, in a design without instances where they copy `BUF_X1`,
+    /// which is not to be used.
+    fn find_among(buffers: &[(&str, &str)]) -> Result<Vec<String>, LinkError> {
+        let names: Vec<String> = (0..buffers.len()).map(|i| format!("B{i}")).collect();
+        let copies: Vec<(&str, &str)> = names.iter().map(|n| ("BUF_X1", n.as_str())).collect();
+        let mut db = design_with_copies(
+            &def_text(
+                "buffers",
+                &DefSections {
+                    components: "",
+                    nets: "",
+                    inputs: &[],
+                    outputs: &[],
+                },
+            ),
+            &copies,
+        );
+        let core = db.library.site(db.library.site_id("core").unwrap()).clone();
+        for (name, &(_, site)) in names.iter().zip(buffers) {
+            let site = db.library.site_id(site).unwrap_or_else(|| {
+                db.library
+                    .add_site(Site {
+                        name: site.to_string(),
+                        ..core.clone()
+                    })
+                    .unwrap()
+            });
+            let id = db.library.macro_id(name).unwrap();
+            db.library.macros[id].site = Some(site);
+        }
+        let extra: String = names
+            .iter()
+            .zip(buffers)
+            .enumerate()
+            .map(|(i, (name, (footprint, _)))| buffer_cell(name, footprint, 0.1 * (i + 1) as f64))
+            .collect();
+        let lib = cells_with(&extra);
+        let link = Link::new(&db, &lib, &["BUF_X1".to_string()]).unwrap();
+        let set = link.find_buffers(&db)?;
+        assert_eq!(set.lowest_drive, *set.cells.last().unwrap());
+        Ok(set
+            .cells
+            .iter()
+            .map(|b| lib.cell(b.id).name.clone())
+            .collect())
+    }
+
+    #[test]
+    fn the_two_strongest_buffers_of_each_of_five_drive_bands_are_chosen() {
+        let chosen = find_among(&[("buf", "core"); 15]).unwrap();
+
+        assert_eq!(
+            chosen,
+            [
+                "B0", "B1", "B3", "B4", "B6", "B7", "B9", "B10", "B12", "B13"
+            ]
+        );
+    }
+
+    #[test]
+    fn a_footprint_most_buffers_share_leaves_out_the_others() {
+        let buffers = [
+            ("buf", "core"),
+            ("buf", "core"),
+            ("dly", "core"),
+            ("buf", "core"),
+        ];
+
+        let chosen = find_among(&buffers).unwrap();
+
+        assert_eq!(chosen, ["B0", "B1", "B3"]);
+    }
+
+    #[test]
+    fn footprints_split_evenly_leave_out_none() {
+        let buffers = [
+            ("buf", "core"),
+            ("dly", "core"),
+            ("dly", "core"),
+            ("buf", "core"),
+        ];
+
+        let chosen = find_among(&buffers).unwrap();
+
+        assert_eq!(chosen, ["B0", "B1", "B2", "B3"]);
+    }
+
+    #[test]
+    fn buffers_on_two_sites_give_each_band_the_strongest_of_each_site() {
+        let buffers: Vec<(&str, &str)> = (0..15)
+            .map(|i| ("buf", if i % 2 == 0 { "core" } else { "tall" }))
+            .collect();
+
+        let chosen = find_among(&buffers).unwrap();
+
+        assert_eq!(
+            chosen,
+            [
+                "B0", "B1", "B4", "B3", "B6", "B7", "B10", "B9", "B12", "B13"
+            ]
+        );
+    }
+
+    #[test]
+    fn a_library_of_only_clock_and_unusable_buffers_has_none_to_choose() {
+        assert_eq!(find_among(&[]), Err(LinkError::NoBuffers));
+    }
 
     /// Buffers in library order, each slewing to `slew` nanoseconds at
     /// 2 fF, which sets its drive resistance.
