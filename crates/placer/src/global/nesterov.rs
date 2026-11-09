@@ -763,6 +763,36 @@ fn mean(values: &FieldValues) -> f64 {
     values.iter().sum::<f64>() / values.len().max(1) as f64
 }
 
+/// The iterations routability gives back to the run while it waits for
+/// spreading to finish, up to the run's own budget each round.
+#[derive(Clone, Copy, Debug)]
+struct Refund {
+    given: usize,
+    cap: usize,
+}
+
+impl Refund {
+    const fn new(cap: usize) -> Self {
+        Self { given: 0, cap }
+    }
+
+    /// Gives back one iteration, unless this round has given back its cap.
+    // NOTE: gpl's doNesterovPlace raises maxNesterovIter without bound while
+    // overflow exceeds routability_end_overflow; capped so a stalled spread ends.
+    const fn take(&mut self) -> bool {
+        if self.given >= self.cap {
+            return false;
+        }
+        self.given += 1;
+        true
+    }
+
+    /// Starts a routability round with its whole cap to give.
+    const fn start_round(&mut self) {
+        self.given = 0;
+    }
+}
+
 /// Why a stretch of iterations ended.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum Flow {
@@ -784,7 +814,7 @@ struct Run {
     snapshot: Option<Snapshot>,
     routability: Option<Routability>,
     limit: usize,
-    refunded: usize,
+    refund: Refund,
     /// The wirelength growth at which the density penalty holds steady.
     reference_hpwl: f64,
     growth_limit: GrowthLimit,
@@ -899,7 +929,7 @@ impl Run {
                 .clone()
                 .map(|r| Routability::new(r, &setup.objects, &setup.fields)),
             limit: params.max_iterations,
-            refunded: 0,
+            refund: Refund::new(params.max_iterations),
             reference_hpwl,
             growth_limit: GrowthLimit::new(),
             iterations: 0,
@@ -1230,13 +1260,8 @@ impl Run {
             return false;
         };
         let overflow = mean(&eval.field_overflow);
-        // OpenROAD refunds without bound; the cap keeps one stalled spread finite.
-        if self.snapshot.is_some()
-            && overflow > CHECK_OVERFLOW
-            && self.refunded < context.params.max_iterations
-        {
+        if self.snapshot.is_some() && overflow > CHECK_OVERFLOW && self.refund.take() {
             self.limit += 1;
-            self.refunded += 1;
         }
         if self.snapshot.is_none() && overflow <= SNAPSHOT_OVERFLOW {
             self.snapshot = Some(Snapshot {
@@ -1262,7 +1287,7 @@ impl Run {
         if r.check(self.k, &map, objects, objective.fields) == Verdict::Done {
             return false;
         }
-        self.refunded = 0;
+        self.refund.start_round();
         *s = revert(&saved.state, s, objective.fields);
         objective.refresh(objects);
         let resized = objective.evaluate(&s.reference, s.gamma);
@@ -1465,6 +1490,25 @@ mod tests {
         assert!((penalty_growth(-1.0, 100.0, 1.05) - 1.05).abs() < 1e-12);
         assert!((penalty_growth(100.0, 100.0, 1.05) - 1.0).abs() < 1e-12);
         assert!((penalty_growth(1e9, 100.0, 1.05) - 0.95).abs() < 1e-12);
+    }
+
+    #[test]
+    fn a_round_gives_back_iterations_up_to_its_cap() {
+        let mut refund = Refund::new(2);
+
+        let taken = [refund.take(), refund.take(), refund.take()];
+
+        assert_eq!(taken, [true, true, false]);
+    }
+
+    #[test]
+    fn each_routability_round_gives_back_its_own_cap() {
+        let mut refund = Refund::new(2);
+        let _ = (refund.take(), refund.take());
+
+        refund.start_round();
+
+        assert!(refund.take());
     }
 
     #[test]
