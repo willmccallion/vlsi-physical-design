@@ -36,7 +36,7 @@ use pare_common::config::{LayerRangeError, RoutingConfig, Share};
 use pare_common::db::design::{
     GCellGridDef, NetlistDB, PinOwner, PlacementStatus, RouteElem, TrackAxis,
 };
-use pare_common::db::indices::{LayerId, NetId, PinId};
+use pare_common::db::indices::{CellId, IdVec, LayerId, NetId, PinId};
 use pare_common::db::library::{Direction, Shape};
 use pare_common::db::shapes::obstruction_shapes;
 use pare_common::geom::dbu::Dbu;
@@ -1050,7 +1050,7 @@ impl<'a> GlobalRouteEstimator<'a> {
     /// Each gcell's congestion, row by row, once every net is routed with
     /// each cell's lower-left corner at its entry of `locations`, which is
     /// indexed like the design's cells.
-    pub fn congestion(&mut self, locations: &[Point<Dbu>]) -> Vec<f64> {
+    pub fn congestion(&mut self, locations: &IdVec<CellId, Point<Dbu>>) -> Vec<f64> {
         let nets: Vec<GlobalNet> = self
             .nets
             .iter()
@@ -1062,7 +1062,7 @@ impl<'a> GlobalRouteEstimator<'a> {
                     .map(|&(pin, layer)| {
                         let at = match self.db.pins[pin].owner {
                             PinOwner::Cell { cell, .. } => {
-                                self.db.pin_position_at(pin, locations[cell.index()])
+                                self.db.pin_position_at(pin, locations[cell])
                             }
                             PinOwner::Io(_) => self.db.pin_position(pin),
                         };

@@ -16,7 +16,7 @@ use crate::rows::{
 };
 use crate::zones::{Zone, Zones, intersect};
 use pare_common::db::design::{NetlistDB, PinOwner};
-use pare_common::db::indices::{CellId, LayerId, MacroId, NetId};
+use pare_common::db::indices::{CellId, IdVec, LayerId, MacroId, NetId};
 use pare_common::geom::dbu::Dbu;
 use pare_common::geom::orient::Orientation;
 use pare_common::geom::point::Point;
@@ -183,9 +183,9 @@ struct DetailedPlacer<'a> {
     /// For each movable standard cell, its segment.
     segment_of: HashMap<CellId, usize>,
     /// The zone of every cell.
-    zone_of: Vec<Zone>,
+    zone_of: IdVec<CellId, Zone>,
     /// For each cell, the cost nets it is on.
-    nets_of: Vec<Vec<NetId>>,
+    nets_of: IdVec<CellId, Vec<NetId>>,
     /// Which spots block a pin, when the design has pins to check.
     access: Option<&'a PinAccess>,
     /// The widest movable standard cell.
@@ -350,16 +350,16 @@ impl<'a> DetailedPlacer<'a> {
             seg.cells.sort_by_key(|&c| db.cells[c].location.x);
         }
 
-        let mut nets_of = vec![Vec::new(); db.num_cells()];
-        for (i, net) in db.nets.iter().enumerate() {
+        let mut nets_of = IdVec::filled(Vec::new(), db.num_cells());
+        for (id, net) in db.nets.iter_enumerated() {
             if net.signal_use.is_supply() || net.pins.len() < 2 || net.pins.len() > MAX_NET_PINS {
                 continue;
             }
             for &pin in &net.pins {
                 if let PinOwner::Cell { cell, .. } = db.pins[pin].owner {
-                    let list: &mut Vec<NetId> = &mut nets_of[cell.index()];
-                    if list.last() != Some(&NetId::new(i)) {
-                        list.push(NetId::new(i));
+                    let list: &mut Vec<NetId> = &mut nets_of[cell];
+                    if list.last() != Some(&id) {
+                        list.push(id);
                     }
                 }
             }
@@ -371,9 +371,7 @@ impl<'a> DetailedPlacer<'a> {
             segments,
             row_segments,
             segment_of,
-            zone_of: (0..db.num_cells())
-                .map(|i| zones.of(CellId::new(i)))
-                .collect(),
+            zone_of: db.cells.ids().map(|id| zones.of(id)).collect(),
             nets_of,
             access,
             max_width,
@@ -726,7 +724,7 @@ impl<'a> DetailedPlacer<'a> {
             }
         }
         let size = db.cell_size(cell);
-        let zone = self.zone_of[cell.index()];
+        let zone = self.zone_of[cell];
         let reach = site * MAX_SHIFT_SITES;
         let rows_near: Vec<usize> = (0..=FREE_ROWS)
             .flat_map(|d| [row.checked_sub(d), Some(row + d)])
@@ -817,7 +815,7 @@ impl<'a> DetailedPlacer<'a> {
             .copied()
             .filter(|&c| c != cell && db.cell_size(c).x == width)
             .filter(|&c| (db.cells[c].location.x - x).abs() <= reach)
-            .filter(|&c| self.zone_of[c.index()] == self.zone_of[cell.index()])
+            .filter(|&c| self.zone_of[c] == self.zone_of[cell])
             .filter(|&c| db.cell_macro(c).symmetry.allows(self.rows[row_here].orient))
             .find(|&c| {
                 let there = db.cells[c].location;
@@ -878,11 +876,11 @@ impl<'a> DetailedPlacer<'a> {
     }
 
     fn total_cost(&self, db: &NetlistDB) -> f64 {
-        let mut seen = vec![false; db.nets.len()];
+        let mut seen = IdVec::filled(false, db.nets.len());
         let mut total = 0.0;
         for nets in &self.nets_of {
             for &n in nets {
-                if !std::mem::replace(&mut seen[n.index()], true) {
+                if !std::mem::replace(&mut seen[n], true) {
                     total += net_cost(db, n);
                 }
             }
@@ -897,7 +895,7 @@ impl<'a> DetailedPlacer<'a> {
     fn affected(&self, cells: &[CellId]) -> Vec<NetId> {
         let mut nets: Vec<NetId> = cells
             .iter()
-            .flat_map(|c| self.nets_of[c.index()].iter().copied())
+            .flat_map(|&c| self.nets_of[c].iter().copied())
             .collect();
         nets.sort_unstable();
         nets.dedup();
@@ -946,7 +944,7 @@ impl<'a> DetailedPlacer<'a> {
     fn optimal_region(&self, db: &NetlistDB, cell: CellId) -> Option<Rect<Dbu>> {
         let mut xs = Vec::new();
         let mut ys = Vec::new();
-        for &n in &self.nets_of[cell.index()] {
+        for &n in &self.nets_of[cell] {
             let others = db.nets[n].pins.iter().filter(
                 |&&p| !matches!(db.pins[p].owner, PinOwner::Cell { cell: c, .. } if c == cell),
             );
@@ -1012,7 +1010,7 @@ impl<'a> DetailedPlacer<'a> {
             }
             for s in self.row_segments[row].0..self.row_segments[row].1 {
                 let seg = &self.segments[s];
-                if seg.zone != self.zone_of[cell.index()]
+                if seg.zone != self.zone_of[cell]
                     || seg.hi < target.x - size.x * 4
                     || seg.lo > target.x + size.x * 4
                 {
@@ -1028,7 +1026,7 @@ impl<'a> DetailedPlacer<'a> {
                 if let Some(other) = self.equal_width_near(db, s, target.x, size.x, cell) {
                     let other_at = db.cells[other].location;
                     let other_row = self.segments[from].row;
-                    if self.zone_of[other.index()] != self.segments[from].zone
+                    if self.zone_of[other] != self.segments[from].zone
                         || !db
                             .cell_macro(other)
                             .symmetry

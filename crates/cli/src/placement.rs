@@ -11,7 +11,7 @@ use pare_common::config::{
     Config, CongestionEstimate, DesignInput, GlobalPlacementConfig, Share, TargetDensity,
 };
 use pare_common::db::design::{NetlistDB, PlacementStatus, Renumbering};
-use pare_common::db::indices::{CellId, NetId};
+use pare_common::db::indices::{CellId, IdVec, NetId};
 use pare_common::db::liberty::MinMax;
 use pare_common::db::writer;
 use pare_common::geom::dbu::Dbu;
@@ -799,7 +799,7 @@ struct GlobalRouteCongestion<'a> {
     db: &'a NetlistDB,
     estimator: GlobalRouteEstimator<'a>,
     /// Width and height of each cell, in microns.
-    sizes: Vec<Point<f64>>,
+    sizes: IdVec<CellId, Point<f64>>,
 }
 
 impl<'a> GlobalRouteCongestion<'a> {
@@ -808,9 +808,11 @@ impl<'a> GlobalRouteCongestion<'a> {
         Ok(Self {
             db,
             estimator: GlobalRouteEstimator::new(db, &config.routing)?,
-            sizes: (0..db.num_cells())
-                .map(|i| {
-                    let size = db.cell_size(CellId::new(i));
+            sizes: db
+                .cells
+                .ids()
+                .map(|id| {
+                    let size = db.cell_size(id);
                     Point::new(units.to_microns(size.x), units.to_microns(size.y))
                 })
                 .collect(),
@@ -823,9 +825,9 @@ impl<'a> GlobalRouteCongestion<'a> {
 }
 
 impl CongestionEstimator for GlobalRouteCongestion<'_> {
-    fn congestion(&mut self, centers: &[Point<f64>]) -> Vec<f64> {
+    fn congestion(&mut self, centers: &IdVec<CellId, Point<f64>>) -> Vec<f64> {
         let units = self.db.dbu();
-        let locations: Vec<Point<Dbu>> = centers
+        let locations: IdVec<CellId, Point<Dbu>> = centers
             .iter()
             .zip(&self.sizes)
             .map(|(c, size)| {

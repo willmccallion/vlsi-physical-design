@@ -21,6 +21,7 @@ use super::nesterov::{Objects, remap_fields};
 use super::wirelength::Netlist;
 use super::{Field, Remap};
 use crate::model::CellKind;
+use pare_common::db::indices::{CellId, IdVec};
 use pare_common::geom::point::Point;
 use pare_common::geom::rect::Rect;
 
@@ -146,7 +147,7 @@ pub trait CongestionEstimator {
     /// The congestion of every gcell, row by row, with each of the model's
     /// cells centered at its entry of `centers`, in microns: the share of
     /// the routing capacity left to the gcell that its routes take.
-    fn congestion(&mut self, centers: &[Point<f64>]) -> Vec<f64>;
+    fn congestion(&mut self, centers: &IdVec<CellId, Point<f64>>) -> Vec<f64>;
 }
 
 /// Settings for routability-driven placement.

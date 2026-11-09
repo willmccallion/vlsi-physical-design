@@ -14,7 +14,7 @@ use pare_common::config::{CapacityReserve, RoutingConfig, Share};
 use pare_common::db::design::{
     NetlistDB, NonDefaultLayer, NonDefaultRule, PlacementStatus, RouteElem,
 };
-use pare_common::db::indices::{CutLayerId, LayerId, NetId, NonDefaultRuleId};
+use pare_common::db::indices::{CellId, CutLayerId, IdVec, LayerId, NetId, NonDefaultRuleId};
 use pare_common::db::library::{LayerRef, Shape};
 use pare_common::db::parser::{def, lef};
 use pare_common::db::shapes::fixed_shapes;
@@ -594,10 +594,12 @@ fn the_estimator_measures_congestion_where_the_given_locations_put_the_nets() {
     };
     let mut estimator = GlobalRouteEstimator::new(&db, &config).unwrap();
     let tiles = estimator.capacity_reduction(&[]);
-    let packed = vec![Point::new(Dbu(0), Dbu(0)); db.num_cells()];
-    let spread: Vec<Point<Dbu>> = (0..db.num_cells())
-        .map(|i| {
-            let far = Dbu(5000 * i64::from(u8::from(i % 2 == 1)));
+    let packed = IdVec::filled(Point::new(Dbu(0), Dbu(0)), db.num_cells());
+    let spread: IdVec<CellId, Point<Dbu>> = db
+        .cells
+        .ids()
+        .map(|id| {
+            let far = Dbu(5000 * i64::from(u8::from(id.index() % 2 == 1)));
             Point::new(far, far)
         })
         .collect();

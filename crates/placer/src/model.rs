@@ -6,9 +6,9 @@
 //! and would only pull everything together.
 
 use crate::rows::{RowSpan, blocked_stretches, expand_rows, free_intervals};
-use crate::zones::{Zone, Zones};
+use crate::zones::{Zone, ZoneId, Zones};
 use pare_common::db::design::{NetlistDB, PinOwner, PlacementStatus};
-use pare_common::db::indices::{CellId, NetId, PinId};
+use pare_common::db::indices::{CellId, IdVec, NetId, PinId};
 use pare_common::geom::dbu::{Dbu, DbuPerMicron};
 use pare_common::geom::point::Point;
 use pare_common::geom::rect::Rect;
@@ -79,24 +79,24 @@ pub struct PlacementModel {
     /// Rows cells may sit in, each one row high.
     pub rows: Vec<Rect<f64>>,
     /// Width and height of each cell as placed.
-    pub sizes: Vec<Point<f64>>,
+    pub sizes: IdVec<CellId, Point<f64>>,
     /// Width and height of each cell in the density, about its center: its
     /// size, scaled to the design's average pin density for a movable cell
     /// of three signal pins or more.
-    pub density_sizes: Vec<Point<f64>>,
+    pub density_sizes: IdVec<CellId, Point<f64>>,
     /// Whether the placer may move each cell.
-    pub movable: Vec<bool>,
+    pub movable: IdVec<CellId, bool>,
     /// Whether each cell is a standard cell or a macro.
-    pub kinds: Vec<CellKind>,
+    pub kinds: IdVec<CellId, CellKind>,
     /// Lower-left corner of each cell.
-    pub positions: Vec<Point<f64>>,
+    pub positions: IdVec<CellId, Point<f64>>,
     /// Signal nets with at least two connections.
     pub nets: Vec<ModelNet>,
     /// Every zone's stretches of row, without what global placement keeps
     /// out of: each fence, then the space outside.
-    pub zones: Vec<ZoneRows>,
-    /// For each cell, the index of its zone in `zones`.
-    pub zone_of: Vec<usize>,
+    pub zones: IdVec<ZoneId, ZoneRows>,
+    /// The zone of each cell.
+    pub zone_of: IdVec<CellId, ZoneId>,
     /// Width of the narrowest row site, one micron for a design without
     /// rows.
     pub site_width: f64,
@@ -153,7 +153,7 @@ fn model_nets(db: &NetlistDB, io: IoAnchors) -> Vec<ModelNet> {
 /// The stretches of row each zone's cells may use, in microns: the free
 /// parts of the rows `spans` inside the zone, or the whole zone without
 /// rows.
-fn zone_rows(db: &NetlistDB, zones: &Zones, spans: &[RowSpan]) -> Vec<ZoneRows> {
+fn zone_rows(db: &NetlistDB, zones: &Zones, spans: &[RowSpan]) -> IdVec<ZoneId, ZoneRows> {
     let units = db.dbu();
     let blocked = blocked_stretches(db, spans);
     zones
@@ -187,7 +187,7 @@ fn zone_rows(db: &NetlistDB, zones: &Zones, spans: &[RowSpan]) -> Vec<ZoneRows> 
 /// extends instances by pin density: a movable cell of three signal pins or
 /// more is scaled toward the area that holds its pins at the average density
 /// of the movable cells, by no more than 1.2 nor less than 0.95.
-fn pin_density_sizes(db: &NetlistDB) -> Vec<Point<Dbu>> {
+fn pin_density_sizes(db: &NetlistDB) -> IdVec<CellId, Point<Dbu>> {
     let signal_pins = |i: CellId| {
         let pins = &db.cell_macro(i).pins;
         pins.iter().filter(|p| !p.signal_use.is_supply()).count()
@@ -222,10 +222,10 @@ fn pin_density_sizes(db: &NetlistDB) -> Vec<Point<Dbu>> {
 }
 
 /// The kind of every cell of `db`, given the height of the shortest row.
-fn cell_kinds(db: &NetlistDB, row_height: Option<Dbu>) -> Vec<CellKind> {
-    (0..db.num_cells())
-        .map(|i| {
-            let id = CellId::new(i);
+fn cell_kinds(db: &NetlistDB, row_height: Option<Dbu>) -> IdVec<CellId, CellKind> {
+    db.cells
+        .ids()
+        .map(|id| {
             let tall = row_height.is_some_and(|h| db.cell_size(id).y > h * MACRO_ROWS);
             if db.cell_macro(id).is_block() || tall {
                 CellKind::Macro
@@ -269,18 +269,14 @@ impl PlacementModel {
                 .iter()
                 .map(|r| microns_rect(units, r.x_min, r.x_max, r.y, r.y + r.height))
                 .collect(),
-            sizes: (0..db.num_cells())
-                .map(|i| um(db.cell_size(CellId::new(i))))
-                .collect(),
+            sizes: db.cells.ids().map(|id| um(db.cell_size(id))).collect(),
             density_sizes: pin_density_sizes(db).into_iter().map(um).collect(),
             movable: db.cells.iter().map(|c| c.status.is_movable()).collect(),
             kinds: cell_kinds(db, spans.iter().map(|r| r.height).min()),
             positions: db.cells.iter().map(|c| um(c.location)).collect(),
             nets: model_nets(db, io),
             zones: zone_rows(db, zones, &spans),
-            zone_of: (0..db.num_cells())
-                .map(|i| zones.index(zones.of(CellId::new(i))))
-                .collect(),
+            zone_of: db.cells.ids().map(|id| zones.id_of(id)).collect(),
             site_width: spans
                 .iter()
                 .map(|r| units.to_microns(r.site))
@@ -294,11 +290,16 @@ impl PlacementModel {
         self.positions.len()
     }
 
+    /// Every cell of the model, in database order.
+    pub fn cells(&self) -> impl Iterator<Item = CellId> + use<> {
+        self.positions.ids()
+    }
+
     /// Position of a connection for the given cell positions.
     #[inline]
-    pub fn pin_position(pin: &PinAnchor, positions: &[Point<f64>]) -> Point<f64> {
+    pub fn pin_position(pin: &PinAnchor, positions: &IdVec<CellId, Point<f64>>) -> Point<f64> {
         match *pin {
-            PinAnchor::Cell { cell, offset } => positions[cell.index()] + offset,
+            PinAnchor::Cell { cell, offset } => positions[cell] + offset,
             PinAnchor::Fixed(p) => p,
         }
     }
@@ -313,7 +314,8 @@ impl PlacementModel {
         open.sort_by(|a, b| a.min.y.total_cmp(&b.min.y));
         let rows: f64 = open.iter().map(|r| r.area()).sum();
         let tallest = open.iter().map(|r| r.height()).fold(0.0, f64::max);
-        let fixed: f64 = (0..self.num_cells())
+        let fixed: f64 = self
+            .cells()
             .filter(|&i| !self.movable[i])
             .map(|i| {
                 let cell = Rect::new(self.positions[i], self.positions[i] + self.sizes[i]);
