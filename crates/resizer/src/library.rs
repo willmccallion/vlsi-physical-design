@@ -285,6 +285,9 @@ impl<'a> Link<'a> {
         if list.is_empty() {
             return Err(LinkError::NoBuffers);
         }
+        // NOTE: Resizer::findBuffers also keeps only the second-leakiest
+        // threshold voltage (cellVTType); PARE has no VT model, which is the
+        // same on single-VT libraries such as Nangate45.
         let footprint = self.dominant_footprint(&list);
         let filtered: Vec<BufferCell> = list
             .iter()

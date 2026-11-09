@@ -33,6 +33,8 @@ pub struct Slack(Seconds);
 
 impl Slack {
     /// The slack of a pin nothing constrains.
+    // NOTE: OpenSTA holds this as its finite INF (1e30); PARE takes a real
+    // infinity, which orders the same and is never mistaken for a slack.
     pub const UNCONSTRAINED: Self = Self(Seconds::INFINITY);
 
     /// A slack of `time`.
