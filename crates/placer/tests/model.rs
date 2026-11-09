@@ -117,3 +117,16 @@ fn global_placement_keeps_out_of_a_soft_blockage() {
     );
     assert!(after.free_area() < before.free_area());
 }
+
+#[test]
+fn hpwl_leaves_out_net_weights() {
+    let db = tiny();
+    let mut model = PlacementModel::from_db(&db, &Zones::new(&db).unwrap());
+    let unweighted = model.hpwl();
+
+    for net in &mut model.nets {
+        net.weight = 5.0;
+    }
+
+    assert!((model.hpwl() - unweighted).abs() < 1e-9);
+}
