@@ -10,7 +10,7 @@ use crate::db::indices::{CutLayerId, IdVec, LayerId};
 use crate::geom::dbu::{Dbu, DbuArea};
 use crate::geom::point::Point;
 use crate::geom::rect::Rect;
-use crate::geom::region::{Edge, Region};
+use crate::geom::region::{Edge, Heading, Region};
 use rstar::{AABB, RTree, RTreeObject};
 use std::collections::{HashMap, HashSet};
 
@@ -262,26 +262,20 @@ fn owner_geometry(shapes: &[LayoutShape], group: &[usize]) -> OwnerGeometry {
     for piece in all.components() {
         let first = geometry.edges.len();
         let boundary = piece.edges();
-        let starting_at: HashMap<Point<Dbu>, usize> = boundary
-            .iter()
-            .enumerate()
-            .map(|(k, e)| (e.from, first + k))
-            .collect();
-        let ending_at: HashMap<Point<Dbu>, usize> = boundary
-            .iter()
-            .enumerate()
-            .map(|(k, e)| (e.to, first + k))
-            .collect();
-        geometry
-            .edges
-            .extend(boundary.iter().enumerate().map(|(k, &edge)| GcEdge {
-                edge,
-                owner,
-                fixed: fixed_edges.contains(&edge),
-                piece: geometry.pieces,
-                prev: edge_index(*ending_at.get(&edge.from).unwrap_or(&(first + k))),
-                next: edge_index(*starting_at.get(&edge.to).unwrap_or(&(first + k))),
-            }));
+        let links = boundary_links(&boundary);
+        geometry.edges.extend(
+            boundary
+                .iter()
+                .zip(links)
+                .map(|(&edge, (prev, next))| GcEdge {
+                    edge,
+                    owner,
+                    fixed: fixed_edges.contains(&edge),
+                    piece: geometry.pieces,
+                    prev: edge_index(first + prev),
+                    next: edge_index(first + next),
+                }),
+        );
         geometry.pieces += 1;
         let Some(bbox) = piece.bounding_box() else {
             continue;
@@ -300,6 +294,34 @@ fn owner_geometry(shapes: &[LayoutShape], group: &[usize]) -> OwnerGeometry {
         }
     }
     geometry
+}
+
+/// The positions in `boundary`, one piece's edges, of each edge's
+/// predecessor and successor. Where the boundary passes a point twice, each
+/// edge turns left into the next, as Boost.Polygon traces such a boundary,
+/// so both corners there stay convex.
+fn boundary_links(boundary: &[Edge]) -> Vec<(usize, usize)> {
+    let starting: HashMap<(Point<Dbu>, Heading), usize> = boundary
+        .iter()
+        .enumerate()
+        .map(|(k, e)| ((e.from, e.heading()), k))
+        .collect();
+    let next: Vec<usize> = boundary
+        .iter()
+        .enumerate()
+        .map(|(k, e)| {
+            let heading = e.heading();
+            starting
+                .get(&(e.to, heading.turned_left()))
+                .or_else(|| starting.get(&(e.to, heading.turned_right())))
+                .map_or(k, |&n| n)
+        })
+        .collect();
+    let mut prev: Vec<usize> = (0..boundary.len()).collect();
+    for (k, &n) in next.iter().enumerate() {
+        prev[n] = k;
+    }
+    prev.into_iter().zip(next).collect()
 }
 
 /// The cuts of every owner on one cut layer.
