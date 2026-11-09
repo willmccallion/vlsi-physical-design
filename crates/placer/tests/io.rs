@@ -16,9 +16,15 @@ fn fixture(name: &str) -> PathBuf {
 }
 
 fn tiny() -> NetlistDB {
+    tiny_edited(|text| text)
+}
+
+/// The tiny design from its DEF as `edit` rewrites it.
+fn tiny_edited(edit: impl Fn(String) -> String) -> NetlistDB {
+    let text = edit(std::fs::read_to_string(fixture("tiny.def")).unwrap());
     let units = def::read_units(&fixture("tiny.def")).unwrap();
     let library = lef::parse_files(&[fixture("tiny.lef")], units).unwrap();
-    def::parse(&fixture("tiny.def"), library).unwrap()
+    def::parse_str(&text, &fixture("tiny.def"), library).unwrap()
 }
 
 fn layers(db: &NetlistDB) -> IoLayers {
@@ -85,5 +91,52 @@ fn a_pin_layer_running_the_wrong_way_is_rejected() {
             layer: "M2".to_string(),
             direction: "horizontal",
         })
+    );
+}
+
+#[test]
+fn a_pin_layer_that_is_no_routing_layer_is_rejected() {
+    let db = tiny();
+    let names = IoLayerNames {
+        horizontal: "M9".to_string(),
+        vertical: "M2".to_string(),
+    };
+
+    let result = IoLayers::from_names(&names, &db.library);
+
+    assert_eq!(
+        result,
+        Err(IoPlacementError::UnknownLayer("M9".to_string()))
+    );
+}
+
+#[test]
+fn a_pin_layer_without_tracks_is_an_error() {
+    let mut db = tiny_edited(|text| text.replace("TRACKS Y 200 DO 15 STEP 400 LAYER M3 ;", ""));
+    let io = layers(&db);
+
+    let result = place_io_pins(&mut db, io);
+
+    assert_eq!(result, Err(IoPlacementError::NoTracks("M3".to_string())));
+}
+
+/// One track per pin layer, each within a micron of a corner, where no
+/// pin may go.
+#[test]
+fn a_boundary_without_free_slots_for_the_pins_is_an_error() {
+    let mut db = tiny_edited(|text| {
+        text.replace("DO 15 STEP 400 LAYER M3", "DO 1 STEP 400 LAYER M3")
+            .replace(
+                "TRACKS X 100 DO 30 STEP 200 LAYER M2",
+                "TRACKS X 100 DO 1 STEP 200 LAYER M2",
+            )
+    });
+    let io = layers(&db);
+
+    let result = place_io_pins(&mut db, io);
+
+    assert_eq!(
+        result,
+        Err(IoPlacementError::TooFewSlots { pins: 1, slots: 0 })
     );
 }
