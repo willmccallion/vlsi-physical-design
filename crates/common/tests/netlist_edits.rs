@@ -27,6 +27,12 @@ fn net_pins(db: &NetlistDB, net: &str) -> Vec<String> {
     names
 }
 
+/// The names of a net's pins in the order the net lists them.
+fn net_pin_order(db: &NetlistDB, net: &str) -> Vec<String> {
+    let id = db.net_id(net).unwrap();
+    db.nets[id].pins.iter().map(|&p| db.pin_name(p)).collect()
+}
+
 /// Every connection is listed by its net and its owner, and every listing
 /// points back to it.
 fn assert_consistent(db: &NetlistDB) {
@@ -72,14 +78,15 @@ fn a_pin_moves_between_nets() {
 #[test]
 fn a_moved_pin_put_back_takes_its_old_place() {
     let mut db = tiny_design();
-    let u2_a = db.cells[db.cell_id("u2").unwrap()].pins[0];
-    let place = db.pin_place(u2_a);
-    db.move_pin(u2_a, db.net_id("n2").unwrap());
+    let u1_y = db.cells[db.cell_id("u1").unwrap()].pins[1];
+    let before = (net_pin_order(&db, "n1"), net_pin_order(&db, "n2"));
+    assert_eq!(before.0.first().map(String::as_str), Some("u1/Y"));
+    let place = db.pin_place(u1_y);
+    db.move_pin(u1_y, db.net_id("n2").unwrap());
 
-    db.put_pin_back(u2_a, place);
+    db.put_pin_back(u1_y, place);
 
-    assert_eq!(net_pins(&db, "n1"), vec!["u1/Y", "u2/A", "u3/A"]);
-    assert_eq!(net_pins(&db, "n2"), vec!["u2/Y", "u3/B", "u4/A"]);
+    assert_eq!((net_pin_order(&db, "n1"), net_pin_order(&db, "n2")), before);
     assert_consistent(&db);
 }
 
