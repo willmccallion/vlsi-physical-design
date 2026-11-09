@@ -1195,7 +1195,7 @@ pub enum RouteError {
     #[error(
         "the die reaches {0} database units from the origin, beyond the router's limit of {MAX_DIE_REACH}"
     )]
-    DieTooLarge(i64),
+    DieTooLarge(Dbu),
     /// The die spans more gcells than the global grid's coordinates hold.
     #[error(
         "the die spans {0} gcells, beyond the global router's {MAX_GRID_SPAN}; raise [routing] gcell_tracks"

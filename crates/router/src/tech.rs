@@ -231,16 +231,16 @@ fn gcell_pitch(spacing: impl Fn(LayerId) -> Dbu, max_layer: LayerId) -> Dbu {
 /// How far from the origin, in database units, the die may reach: half the
 /// 32-bit range the occupancy stores, leaving room for shapes and spacing
 /// beyond the die's edges.
-pub(crate) const MAX_DIE_REACH: i64 = 1 << 30;
+pub(crate) const MAX_DIE_REACH: Dbu = Dbu(1 << 30);
 
 /// How far the farthest corner of `die` lies from the origin along either
 /// axis.
-fn reach_from_origin(die: &Rect<Dbu>) -> i64 {
+fn reach_from_origin(die: &Rect<Dbu>) -> Dbu {
     [die.min.x, die.min.y, die.max.x, die.max.y]
         .iter()
-        .map(|c| c.get().abs())
+        .map(|c| c.abs())
         .max()
-        .unwrap_or(0)
+        .unwrap_or_default()
 }
 
 /// `i` as the 32-bit index the router stores. Every such index counts
