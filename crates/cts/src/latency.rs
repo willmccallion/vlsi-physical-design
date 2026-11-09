@@ -14,7 +14,9 @@ use crate::triton::{
 };
 use pare_common::db::design::{NetlistDB, PinOwner, PlacementStatus};
 use pare_common::db::indices::{NetId, PinId};
-use pare_common::db::liberty::{ClockGatePin, Edge, LibPortId, SequentialKind};
+use pare_common::db::liberty::{
+    BufferCell, ClockGatePin, Edge, LibPortId, Liberty, SequentialKind,
+};
 use pare_common::db::library::PinDirection;
 use pare_common::geom::dbu::Dbu;
 use pare_common::geom::orient::Orientation;
@@ -27,7 +29,8 @@ use std::collections::BTreeMap;
 #[derive(Clone, Debug)]
 struct Node {
     children: Vec<usize>,
-    arrival: f64,
+    /// When the clock reaches the node; none where timing gives no arrival.
+    arrival: Option<f64>,
     /// The delay buffers the node needs, once balancing has counted them.
     buffers: Option<i32>,
     input: Option<PinId>,
@@ -87,7 +90,7 @@ impl Balancer<'_> {
             return Ok(0);
         };
         self.build_graph(db, input_net);
-        self.buffer_delay = self.buffer_delay(0.0);
+        self.buffer_delay = self.root_buffer_delay(Farads::ZERO)?;
         self.balance(db, 0)?;
         Ok(self.index)
     }
@@ -133,15 +136,18 @@ impl Balancer<'_> {
 
     /// When the clock reaches the registers behind a sink pin: its arrival
     /// at the pin plus the clock tree inside the sink's cell, as
-    /// `LatencyBalancer::buildGraph` and `computeSinkArrivalRecur` add them.
-    fn sink_arrival(&self, db: &NetlistDB, pin: PinId) -> f32 {
-        let arrival = (self.arrival)(pin).map_or(0.0, Seconds::get) as f32;
-        arrival + liberty_insertion_delay(self.link, db, pin).get() as f32
+    /// `LatencyBalancer::buildGraph` and `computeSinkArrivalRecur` add them;
+    /// none where timing gives the pin no arrival.
+    fn sink_arrival(&self, db: &NetlistDB, pin: PinId) -> Option<f32> {
+        // NOTE: getVertexClkArrival warns and takes 0 for a pin with no
+        // clock path; PARE leaves such a sink out of the balance.
+        let arrival = (self.arrival)(pin)?.get() as f32;
+        Some(arrival + liberty_insertion_delay(self.link, db, pin).get() as f32)
     }
 
-    /// The mean arrival at a tree's sinks, as
-    /// `LatencyBalancer::computeAveSinkArrivals`.
-    fn average_sink_arrival(&self, db: &NetlistDB, builder: usize) -> f32 {
+    /// The mean arrival at a tree's sinks that have one, as
+    /// `LatencyBalancer::computeAveSinkArrivals`; none when none has.
+    fn average_sink_arrival(&self, db: &NetlistDB, builder: usize) -> Option<f32> {
         let mut sum = 0.0_f32;
         let mut count = 0_u32;
         for sink in &self.trees.builders[builder].clock.sinks {
@@ -149,13 +155,15 @@ impl Balancer<'_> {
                 self.sink_arrivals(db, pin, &mut sum, &mut count);
             }
         }
-        if count == 0 { 0.0 } else { sum / count as f32 }
+        (count > 0).then(|| sum / count as f32)
     }
 
     fn sink_arrivals(&self, db: &NetlistDB, pin: PinId, sum: &mut f32, count: &mut u32) {
         if is_sink(self.link, db, pin) {
-            *sum += self.sink_arrival(db, pin);
-            *count += 1;
+            if let Some(arrival) = self.sink_arrival(db, pin) {
+                *sum += arrival;
+                *count += 1;
+            }
             return;
         }
         let Some((cell, _, _)) = pin_direction(db, pin) else {
@@ -183,7 +191,7 @@ impl Balancer<'_> {
             .find(|&p| pin_direction(db, p).is_some_and(|(_, d, _)| d == PinDirection::Output));
         self.nodes.push(Node {
             children: Vec::new(),
-            arrival: 0.0,
+            arrival: None,
             buffers: None,
             input: root_output,
         });
@@ -215,57 +223,36 @@ impl Balancer<'_> {
                 let id = self.nodes.len();
                 self.nodes.push(Node {
                     children: Vec::new(),
-                    arrival: 0.0,
+                    arrival: None,
                     buffers: None,
                     input: Some(pin),
                 });
                 self.nodes[driver].children.push(id);
                 let name = &db.cells[cell].name;
-                if let Some(&builder) = self.leaf_builders.get(name) {
-                    let average = self.average_sink_arrival(db, builder);
-                    self.worse_delay = self.worse_delay.max(average);
-                    self.nodes[id].arrival = f64::from(average);
+                let arrival = if let Some(&builder) = self.leaf_builders.get(name) {
+                    self.average_sink_arrival(db, builder)
+                } else if sink {
+                    self.sink_arrival(db, pin)
+                } else {
+                    stack.push(id);
                     continue;
-                }
-                if sink {
-                    let at = self.sink_arrival(db, pin);
+                };
+                if let Some(at) = arrival {
                     self.worse_delay = self.worse_delay.max(at);
-                    self.nodes[id].arrival = f64::from(at);
-                    continue;
                 }
-                stack.push(id);
+                self.nodes[id].arrival = arrival.map(f64::from);
             }
         }
     }
 
     /// The rising delay of the root buffer driving another of its kind and
-    /// `extra` farads, its slew settled over three lookups, as
-    /// `LatencyBalancer::computeBufferDelay`.
-    fn buffer_delay(&self, extra: f64) -> f32 {
+    /// `extra` more, as `LatencyBalancer::computeBufferDelay`.
+    fn root_buffer_delay(&self, extra: Farads) -> Result<f32, CtsError> {
         let root = self.trees.setup.buffers.root;
-        let lib = self.link.liberty.cell(root.id);
-        let (input, output) = (root.input, root.output);
-        let load = Farads::new(lib.ports[input].capacitance.rise.get() + extra);
-        let mut worst = 0.0_f32;
-        for set in lib.delay_arc_sets_to(output).filter(|s| s.from == input) {
-            for arc in set
-                .arcs
-                .iter()
-                .filter(|a| a.from_edge == Edge::Rise && a.to_edge == Edge::Rise)
-            {
-                let (Some(delay), Some(slew)) = (&arc.delay, &arc.slew) else {
-                    continue;
-                };
-                let mut in_slew = 0.0_f32;
-                let mut d = 0.0_f32;
-                for _ in 0..3 {
-                    d = delay.lookup(Seconds::new(f64::from(in_slew)), load).get() as f32;
-                    in_slew = slew.lookup(Seconds::new(f64::from(in_slew)), load).get() as f32;
-                }
-                worst = worst.max(d);
-            }
-        }
-        worst
+        // NOTE: computeBufferDelay gives 0 without a rising arc, which the
+        // buffer count divides by; PARE refuses to balance.
+        rising_delay(self.link.liberty, root, extra)
+            .ok_or_else(|| CtsError::NoRisingDelay(self.link.liberty.cell(root.id).name.clone()))
     }
 
     fn source_position(&self, db: &NetlistDB, node: usize) -> Point<Dbu> {
@@ -285,21 +272,27 @@ impl Balancer<'_> {
 
     /// How many delay buffers a node needs to reach the slowest arrival,
     /// as `LatencyBalancer::computeNumberOfDelayBuffers`.
-    fn delay_buffers_needed(&mut self, db: &NetlistDB, node: usize, src: Point<Dbu>) {
-        if self.nodes[node].arrival == 0.0 {
-            return;
-        }
-        let gap = f64::from(self.worse_delay) - self.nodes[node].arrival;
-        let first = (gap / f64::from(self.buffer_delay)) as i32;
-        let Some(input) = self.nodes[node].input else {
-            return;
+    fn delay_buffers_needed(
+        &mut self,
+        db: &NetlistDB,
+        node: usize,
+        src: Point<Dbu>,
+    ) -> Result<(), CtsError> {
+        // NOTE: computeNumberOfDelayBuffers skips an arrival of 0, its mark
+        // for none; PARE skips only a node without an arrival.
+        let (Some(arrival), Some(input)) = (self.nodes[node].arrival, self.nodes[node].input)
+        else {
+            return Ok(());
         };
+        let gap = f64::from(self.worse_delay) - arrival;
+        let first = (gap / f64::from(self.buffer_delay)) as i32;
         let sink = db.average_pin_position(input);
         let dx = (sink.x - src.x).get() as f32 / (first + 1) as f32;
         let dy = (sink.y - src.y).get() as f32 / (first + 1) as f32;
-        let delay =
-            self.buffer_delay(f64::from(dx.abs() + dy.abs()) * self.trees.cap_per_dbu.get());
+        let wire = Farads::new(f64::from(dx.abs() + dy.abs()) * self.trees.cap_per_dbu.get());
+        let delay = self.root_buffer_delay(wire)?;
         self.nodes[node].buffers = Some((gap / f64::from(delay)) as i32);
+        Ok(())
     }
 
     /// Balances a node's children bottom up, as
@@ -309,12 +302,16 @@ impl Balancer<'_> {
             return Ok(());
         }
         let src = self.source_position(db, node);
-        let mut max_arrival = f64::MIN_POSITIVE;
+        let mut max_arrival: Option<f64> = None;
         let mut by_need: BTreeMap<i32, Vec<PinId>> = BTreeMap::new();
         for child in self.nodes[node].children.clone() {
             self.balance(db, child)?;
-            self.delay_buffers_needed(db, child, src);
-            max_arrival = max_arrival.max(self.nodes[child].arrival);
+            self.delay_buffers_needed(db, child, src)?;
+            // NOTE: balanceLatencies seeds the latest arrival with DBL_MIN,
+            // which a node whose children have none keeps; PARE gives none.
+            if let Some(at) = self.nodes[child].arrival {
+                max_arrival = Some(max_arrival.map_or(at, |latest| latest.max(at)));
+            }
             if let (Some(input), Some(need)) = (self.nodes[child].input, self.nodes[child].buffers)
             {
                 by_need.entry(need).or_default().push(input);
@@ -399,5 +396,88 @@ impl Balancer<'_> {
             let _ = first_input_pin.get_or_insert(input);
         }
         Ok(first_input_pin)
+    }
+}
+
+/// The latest rising delay of `buffer` driving its own input and `extra`
+/// more, its input slew settled over three lookups, as
+/// `LatencyBalancer::computeBufferDelay`; none without a rising arc of
+/// positive delay.
+fn rising_delay(liberty: &Liberty, buffer: BufferCell, extra: Farads) -> Option<f32> {
+    let cell = liberty.cell(buffer.id);
+    let load = cell.ports[buffer.input].capacitance.rise + extra;
+    let mut latest: Option<f32> = None;
+    for set in cell
+        .delay_arc_sets_to(buffer.output)
+        .filter(|s| s.from == buffer.input)
+    {
+        for arc in set
+            .arcs
+            .iter()
+            .filter(|a| a.from_edge == Edge::Rise && a.to_edge == Edge::Rise)
+        {
+            let (Some(delay), Some(slew)) = (&arc.delay, &arc.slew) else {
+                continue;
+            };
+            let mut in_slew = 0.0_f32;
+            let mut d = 0.0_f32;
+            for _ in 0..3 {
+                d = delay.lookup(Seconds::new(f64::from(in_slew)), load).get() as f32;
+                in_slew = slew.lookup(Seconds::new(f64::from(in_slew)), load).get() as f32;
+            }
+            latest = Some(latest.map_or(d, |l| l.max(d)));
+        }
+    }
+    latest.filter(|&d| d > 0.0)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use pare_common::db::parser::liberty;
+    use std::path::Path;
+
+    /// The buffer `B` whose timing arc has the tables `tables`.
+    fn buffer_with(tables: &str) -> (Liberty, BufferCell) {
+        let src = format!(
+            "library (x) {{
+               capacitive_load_unit (1,ff) ;
+               lu_table_template (delay_t) {{
+                 variable_1 : input_net_transition ;
+                 variable_2 : total_output_net_capacitance ;
+                 index_1 (\"0.005, 0.2\") ;
+                 index_2 (\"1.0, 100.0\") ;
+               }}
+               cell (B) {{
+                 pin (A) {{ direction : input ; capacitance : 1.0 ; }}
+                 pin (Z) {{
+                   direction : output ; function : \"A\" ;
+                   timing () {{ related_pin : \"A\" ; timing_sense : positive_unate ; {tables} }}
+                 }}
+               }}
+             }}"
+        );
+        let lib = liberty::parse_str(&src, Path::new("x.lib")).unwrap();
+        let buffer = lib.buffer_cell(lib.cell_id("B").unwrap()).unwrap();
+        (lib, buffer)
+    }
+
+    const TABLE: &str = "(delay_t) { values (\"0.02, 0.08\", \"0.03, 0.09\") ; }";
+
+    #[test]
+    fn a_buffers_rising_delay_grows_with_the_load_beyond_its_own_input() {
+        let (lib, buffer) = buffer_with(&format!("cell_rise {TABLE} rise_transition {TABLE}"));
+
+        let alone = rising_delay(&lib, buffer, Farads::ZERO).unwrap();
+        let loaded = rising_delay(&lib, buffer, Farads::new(50e-15)).unwrap();
+
+        assert!(0.0 < alone && alone < loaded, "{alone} {loaded}");
+    }
+
+    #[test]
+    fn a_buffer_without_a_rising_arc_has_no_rising_delay() {
+        let (lib, buffer) = buffer_with(&format!("cell_fall {TABLE} fall_transition {TABLE}"));
+
+        assert_eq!(rising_delay(&lib, buffer, Farads::ZERO), None);
     }
 }
