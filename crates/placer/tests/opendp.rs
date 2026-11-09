@@ -252,3 +252,33 @@ fn improvement_without_a_horizontal_row_is_an_error() {
 
     assert_eq!(result, Err(ImprovementError::NoRows));
 }
+
+#[test]
+fn of_two_cells_wanting_one_spot_the_one_nearer_the_core_center_goes_first() {
+    const SHIFT: i64 = 10_000;
+    let mut db = tiny_with(&[
+        (3000, 2000),
+        (3200, 2000),
+        (0, 0),
+        (200, 4000),
+        (600, 0),
+        (1000, 4000),
+    ]);
+    for row in &mut db.rows {
+        row.origin.x += Dbu(SHIFT);
+    }
+    for cell in &mut db.cells {
+        cell.location.x += Dbu(SHIFT);
+    }
+
+    let _ = detailed_placement(&mut db).unwrap();
+
+    let at = |name: &str| db.cells[db.cell_id(name).unwrap()].location;
+    assert_eq!(
+        (at("u1"), at("u2")),
+        (
+            Point::new(Dbu(SHIFT + 3000), Dbu(2000)),
+            Point::new(Dbu(SHIFT + 2600), Dbu(2000))
+        )
+    );
+}

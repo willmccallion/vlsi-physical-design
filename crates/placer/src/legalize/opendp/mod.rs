@@ -1381,12 +1381,12 @@ fn area(node: &Node) -> DbuArea {
     node.master_size.x * node.master_size.y
 }
 
-/// The core's center, rounding toward zero as `OpenDP`'s `int` halves do.
-const fn core_center(core: &Rect<Dbu>) -> Point<Dbu> {
-    Point::new(
-        Dbu(i64::midpoint(core.min.x.get(), core.max.x.get())),
-        Dbu(i64::midpoint(core.min.y.get(), core.max.y.get())),
-    )
+/// The core's center relative to its lower left, as the nodes' positions
+/// are, rounding down as `CellPlaceOrderLess`'s `int` halves do.
+// NOTE: CellPlaceOrderLess measures nodes, relative to the core, from the
+// core's absolute center; PARE measures both relative to the core.
+fn core_center(core: &Rect<Dbu>) -> Point<Dbu> {
+    Point::new(core.width() / 2, core.height() / 2)
 }
 
 #[cfg(test)]
