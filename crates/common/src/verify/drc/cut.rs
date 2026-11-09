@@ -113,6 +113,7 @@ impl LayerCheck<'_> {
         }
         let needed = i64::from(cuts);
         let within_sq = square(within);
+        // The search below finds `cut` itself, which is no neighbour.
         let mut count: i64 = -1;
         for j in self.cut.near(&cut.rect.expand(within)) {
             let other = self.cut.rects[j];
