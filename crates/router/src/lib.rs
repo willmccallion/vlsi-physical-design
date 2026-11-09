@@ -52,6 +52,10 @@ use std::time::{Duration, Instant};
 use tech::{MAX_DIE_REACH, MAX_GRID_NODES, MAX_GRID_SPAN, RouteTech};
 use track::assign_tracks;
 
+/// Pitches of the lowest routing layer a via costs in detailed routing,
+/// as `TritonRoute`'s `VIACOST` (4).
+const VIA_COST_PITCHES: f64 = 4.0;
+
 /// What routing achieved.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct RoutingSummary {
@@ -334,7 +338,9 @@ fn route_detailed(
     run: &mut RunOptions<'_>,
     report: &mut dyn FnMut(&Progress<'_>),
 ) -> Result<DetailedResult, RouteError> {
-    let via = 4.0 * tech.min_layer_pitch.to_f64();
+    // NOTE: FlexGridGraph::initGrids prices each via at VIACOST times its upper
+    // layer's pitch; PARE prices every via at the lowest layer's.
+    let via = VIA_COST_PITCHES * tech.min_layer_pitch.to_f64();
     let GlobalStage {
         mut dr,
         nets,

@@ -1,4 +1,5 @@
-//! Global routing on a grid of gcells, in the manner of CUGR.
+//! Global routing on a grid of gcells, in the manner of cu-gr (CUGR 1), not
+//! of `OpenROAD`'s `grt/src/cugr` (CUGR 2).
 //!
 //! Each routable layer gets a capacity on every gcell edge in its preferred
 //! direction: its tracks crossing that edge, each counted for the share of
@@ -13,11 +14,19 @@
 //! then nets crossing overflowed edges are ripped up and rerouted by maze
 //! search (`maze`) in a search area grown around their pins and extended
 //! by a corridor that a search over the whole chip on coarse cells picks
-//! first (`coarse`), as in CUGR, so a net can detour as far as the free
-//! tracks call for. As in CUGR, nets are planned in parallel batches whose
+//! first (`coarse`), as in cu-gr, so a net can detour as far as the free
+//! tracks call for. As in cu-gr, nets are planned in parallel batches whose
 //! pin boxes do not meet, then rerouted in order, each seeing every earlier
 //! net it could meet. The cells each net passes through become its guide
 //! for detailed routing.
+
+// NOTE: which parts follow which router. From cu-gr (CUGR 1): 3D pattern
+// routing, and the coarse grid of `coarse` with its 1/free price. From
+// OpenROAD's grt/src/cugr: the net order by span (CUGR::sortNetIndices,
+// without slack) and the capacity of usable_fraction (GridGraph's
+// constructor). PARE's own: edge_cost, via_loss, the PathFinder history and
+// overflow penalty across rounds, and the Steiner trees of `steiner`;
+// FastRoute's costs are not followed either.
 
 mod coarse;
 mod gcells;
@@ -182,6 +191,8 @@ impl GlobalGrid {
         gcell: Dbu,
         reserve: CapacityReserve,
     ) -> Self {
+        // NOTE: GlobalRouter::initGrid takes floor(die / gcell) gcells and
+        // stretches the last; PARE covers the die by ceil, every gcell equal.
         let span = |extent: Dbu| {
             let cells = (extent.get() + gcell.get() - 1) / gcell.get();
             grid_index(cells as usize).max(1)
@@ -297,8 +308,12 @@ impl GlobalGrid {
     /// Each gcell's congestion, row by row: the largest share of its
     /// capacity the routes take on any routable layer, over both edges of
     /// the gcell along that layer, as `OpenROAD`'s placer reads its global
-    /// router. A layer does not count in a gcell where fixed metal takes
+    /// router (`getUsageCapacityRatio` in gpl's `RouteBase::updateRoute`). A
+    /// layer does not count in a gcell where fixed metal takes
     /// `IGNORED_BLOCKAGE` of the tracks or more, or every one of them.
+    // NOTE: gpl reads (usage + blockage) / (capacity + blockage) and lets the
+    // last layer past minInflationRatio set the tile; PARE takes routed usage
+    // over what is left, the largest over layers.
     pub fn congestion(&self, tech: &RouteTech) -> Vec<f64> {
         let (nx, ny) = (usize::from(self.nx), usize::from(self.ny));
         let mut congestion = vec![0.0; nx * ny];
@@ -457,7 +472,8 @@ impl GlobalGrid {
     }
 
     /// The center of a gcell, as `OpenROAD`'s global router places route
-    /// points: half a gcell into it, whatever part of it the die holds.
+    /// points (`grt::Grid::getPositionOnGrid`): half a gcell into it,
+    /// whatever part of it the die holds.
     pub(crate) fn cell_center(&self, c: GCell) -> Point<Dbu> {
         let half = Dbu(self.gcell.get() / 2);
         self.origin
@@ -639,6 +655,8 @@ impl GlobalGrid {
     }
 
     /// Cost of `demand` more tracks on edge `e`.
+    // NOTE: grt cugr's GridGraph::getWireCost weighs demand by edge length and
+    // a logistic of free capacity; PARE prices each edge alike, with history.
     fn edge_cost(&self, e: usize, demand: Tracks, costs: GlobalCosts) -> f64 {
         let excess = (self.usage.get(e) + demand - self.capacity[e]).to_f64();
         let congestion = costs.congestion / (1.0 + (-CONGESTION_SLOPE * excess).exp());
@@ -776,12 +794,23 @@ fn via_pad_along(tech: &RouteTech, layer: LayerId) -> Dbu {
 /// [`usable_fraction`] counts fixed metal. Averaged over the position, each
 /// adjacent edge loses an eighth of a track plus the blocked length over
 /// the gcell size.
+// NOTE: grt cugr's GridGraph::commitVia adds min-area wire demand to the
+// neighbouring edges; PARE models the pad's expected blockage instead.
 fn via_loss(tech: &RouteTech, layer: LayerId, gcell: Dbu) -> Tracks {
     let lt = tech.layer(layer);
     let blocked = via_pad_along(tech, layer) / 2 + lt.spacing;
-    let loss = 0.125 + blocked.to_f64() / gcell.to_f64();
-    Tracks::from_f64(loss.min(0.5))
+    let loss = VIA_LOSS_BASE + blocked.to_f64() / gcell.to_f64();
+    Tracks::from_f64(loss.min(MAX_VIA_LOSS))
 }
+
+/// The share of a track a via takes from each edge beside its gcell on
+/// average whatever its pad: an eighth, from averaging its position along
+/// the gcell. PARE tunable, no `OpenROAD` counterpart.
+const VIA_LOSS_BASE: f64 = 0.125;
+
+/// The most of a track a via takes from an edge beside its gcell. PARE
+/// tunable, no `OpenROAD` counterpart.
+const MAX_VIA_LOSS: f64 = 0.5;
 
 /// The via stacks of a tree: for every column of cells on consecutive
 /// layers at one position, the cells a via pad lands on.
@@ -822,7 +851,8 @@ pub(crate) struct GlobalCosts {
     pub penalty: f64,
 }
 
-/// Steepness, per track, of the logistic congestion cost around capacity.
+/// Steepness, per track, of the logistic congestion cost around capacity,
+/// as grt cugr's `cost_logistic_slope` default.
 const CONGESTION_SLOPE: f64 = 1.0;
 
 /// Cost of an edge or via pad fixed metal blocks outright, in pattern
@@ -831,13 +861,16 @@ const CONGESTION_SLOPE: f64 = 1.0;
 const BLOCKED_COST: f64 = 1e12;
 
 /// Search margin, in gcells, around a net's first route's connections.
+/// PARE tunable, no `OpenROAD` counterpart.
 const FIRST_MARGIN: u16 = 2;
 
-/// Gcells the search margin grows by each time a net is ripped up.
+/// Gcells the search margin grows by each time a net is ripped up. PARE
+/// tunable, no `OpenROAD` counterpart.
 const MARGIN_STEP: u16 = 2;
 
 /// Largest search margin, in gcells; wider margins leave too few nets with
-/// disjoint search areas to reroute in parallel.
+/// disjoint search areas to reroute in parallel. PARE tunable, no
+/// `OpenROAD` counterpart.
 const MAX_MARGIN: u16 = 12;
 
 /// Global routes of all nets.
@@ -952,6 +985,8 @@ impl GlobalNet {
 /// Tracks a wire of `net` takes on each routable layer: one, or as many
 /// pitches as its non-default rule's width and spacing span; one on a layer
 /// of a single track, which has no pitch.
+// NOTE: GlobalRouter::computeTrackConsumption takes ceil((w/2 + s + w_default/2)
+// / pitch); PARE ceil((w + s) / pitch), room for a whole wire and its spacing.
 pub fn track_demand(db: &NetlistDB, tech: &RouteTech, net: NetId) -> Vec<Tracks> {
     let rule = db.nets[net]
         .non_default_rule
@@ -1062,9 +1097,9 @@ pub(crate) fn restore_global(
 ///
 /// The history of overflow on each edge grows every round. The overflow
 /// penalty grows by `PENALTY_STEP` after a round that lowers the overflow
-/// and shrinks by it after one that raises it: more pressure clears the
-/// last overflow of a routable design, while pressure that keeps growing
-/// on overflow that cannot be cleared drives nets into detours that
+/// below the best round's and shrinks by it after any other: more pressure
+/// clears the last overflow of a routable design, while pressure that keeps
+/// growing on overflow that cannot be cleared drives nets into detours that
 /// overflow more than they relieve. Negotiation stops early once
 /// `STALL_ROUNDS` pass without lowering the overflow by
 /// `MIN_PROGRESS` of what it was when it last did. Returns the routes of
@@ -1100,7 +1135,8 @@ pub fn reroute(grid: &mut GlobalGrid, nets: &[GlobalNet], rounds: usize) -> Glob
     routes
 }
 
-/// The costs of the first routing of a net.
+/// The costs of the first routing of a net. PARE tunables: grt cugr weighs
+/// a via at `weight_via_number` (4) wire units, and has no overflow penalty.
 const FIRST_COSTS: GlobalCosts = GlobalCosts {
     via: 1.0,
     congestion: 1.0,
@@ -1110,6 +1146,8 @@ const FIRST_COSTS: GlobalCosts = GlobalCosts {
 /// Rips up and reroutes the nets of `nets` that cross overflowed edges, for
 /// at most `rounds` rounds, as [`route_global`] describes; leaves the routes
 /// and the grid's usage at the round with the lowest overflow.
+// NOTE: CUGR::route runs pattern, detoured pattern and sparse maze stages and
+// keeps no history; PARE negotiates PathFinder-style, its own scheme.
 fn negotiate(grid: &mut GlobalGrid, nets: &[GlobalNet], routes: &mut GlobalRoutes, rounds: usize) {
     let mut costs = FIRST_COSTS;
     let mut margins = vec![FIRST_MARGIN; nets.len()];
@@ -1241,7 +1279,7 @@ fn log_overflow_regions(grid: &GlobalGrid) {
     let mut worst: Vec<((u16, u16), f64)> = regions.into_iter().collect();
     worst.sort_by(|a, b| b.1.total_cmp(&a.1));
     let side = grid.gcell * i64::from(OVERFLOW_REGION);
-    for ((x, y), over) in worst.into_iter().take(12) {
+    for ((x, y), over) in worst.into_iter().take(LOGGED_OVERFLOW_REGIONS) {
         let at = grid.origin + Point::new(side * i64::from(x), side * i64::from(y));
         log::debug!(
             "GR overflow {over:.0} ({:.1}%) in the region at ({}, {})",
@@ -1256,15 +1294,21 @@ fn log_overflow_regions(grid: &GlobalGrid) {
 /// over.
 const OVERFLOW_REGION: u16 = 20;
 
-/// Rounds without enough progress after which negotiation stops.
+/// How many of the regions with the most overflow are logged.
+const LOGGED_OVERFLOW_REGIONS: usize = 12;
+
+/// Rounds without enough progress after which negotiation stops. PARE
+/// tunable, no `OpenROAD` counterpart.
 const STALL_ROUNDS: usize = 3;
 
 /// Share of the overflow a round must remove, against the overflow when
-/// it last made progress, to count as progress.
+/// it last made progress, to count as progress. PARE tunable, no
+/// `OpenROAD` counterpart.
 const MIN_PROGRESS: f64 = 0.005;
 
 /// Factor the overflow penalty grows by after a round that lowers the
-/// overflow, and shrinks by after one that does not.
+/// overflow below the best round's, and shrinks by after any other. PARE
+/// tunable, no `OpenROAD` counterpart.
 const PENALTY_STEP: f64 = 1.5;
 
 /// Share of a gcell's tracks on a layer that fixed metal must take for the
