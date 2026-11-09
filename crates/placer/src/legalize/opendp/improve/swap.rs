@@ -6,18 +6,21 @@ use super::mis::converged;
 use super::{EdgeId, NetworkPinId, NodeId, SegmentId};
 use super::{Improver, Result, SKIP_NETS_LARGER_THAN};
 use pare_common::db::indices::IdVec;
+use pare_common::geom::dbu::Dbu;
+use pare_common::geom::point::Point;
+use pare_common::geom::rect::Rect;
 
 /// The wirelength objective the swaps and random moves weigh, as
 /// `DetailedHPWL`: each net of two to 99 pins, cached by edge.
 pub(super) struct Hpwl {
-    by_edge: IdVec<EdgeId, i64>,
+    by_edge: IdVec<EdgeId, Dbu>,
     pending: Vec<EdgeId>,
 }
 
 impl Hpwl {
     pub(super) fn new(imp: &Improver) -> Self {
         Self {
-            by_edge: IdVec::filled(0, imp.net.edges.len()),
+            by_edge: IdVec::filled(Dbu::ZERO, imp.net.edges.len()),
             pending: Vec::new(),
         }
     }
@@ -27,8 +30,8 @@ impl Hpwl {
     }
 
     /// The whole objective, refreshing the cache, as `DetailedHPWL::curr`.
-    pub(super) fn current(&mut self, imp: &Improver) -> i64 {
-        let mut total = 0;
+    pub(super) fn current(&mut self, imp: &Improver) -> Dbu {
+        let mut total = Dbu::ZERO;
         for (e, pins) in imp.net.edges.iter_enumerated() {
             if Self::counts(pins.len()) {
                 self.by_edge[e] = imp.edge_hpwl(e);
@@ -40,8 +43,8 @@ impl Hpwl {
 
     /// How much the journaled trial shortens the objective, as
     /// `DetailedHPWL::delta`.
-    pub(super) fn delta(&mut self, imp: &Improver) -> i64 {
-        let (mut old, mut new) = (0, 0);
+    pub(super) fn delta(&mut self, imp: &Improver) -> Dbu {
+        let (mut old, mut new) = (Dbu::ZERO, Dbu::ZERO);
         for &e in &imp.journal.edges {
             if Self::counts(imp.net.edges[e].len()) {
                 self.pending.push(e);
@@ -75,7 +78,7 @@ type Trial = fn(&mut Improver, NodeId) -> Result<bool>;
 fn run(imp: &mut Improver, passes: usize, tolerance: f64, trial: Trial) -> Result<()> {
     let tolerance = tolerance.max(0.01);
     let mut hpwl = imp.total_hpwl();
-    if hpwl == 0 {
+    if hpwl == Dbu::ZERO {
         return Ok(());
     }
     for _ in 0..passes.max(1) {
@@ -102,7 +105,7 @@ fn sweep(imp: &mut Improver, trial: Trial) -> Result<()> {
         if !trial(imp, n)? {
             continue;
         }
-        if objective.delta(imp) >= 0 {
+        if objective.delta(imp) >= Dbu::ZERO {
             objective.accept(imp);
             imp.accept_move();
         } else {
@@ -114,7 +117,7 @@ fn sweep(imp: &mut Improver, trial: Trial) -> Result<()> {
 
 /// The box between the medians of the cell's nets' bounding boxes without
 /// it, its pin offsets taken off, as `getRange`.
-pub(super) fn optimal_region(imp: &Improver, n: NodeId) -> Option<(i64, i64, i64, i64)> {
+pub(super) fn optimal_region(imp: &Improver, n: NodeId) -> Option<Rect<Dbu>> {
     let (mut xs, mut ys) = (Vec::new(), Vec::new());
     let arch = &imp.arch;
     for &pin in &imp.net.node_pins[n] {
@@ -123,13 +126,13 @@ pub(super) fn optimal_region(imp: &Improver, n: NodeId) -> Option<(i64, i64, i64
         if edge.len() <= 1 || edge.len() > SKIP_NETS_LARGER_THAN {
             continue;
         }
-        let Some((x0, y0, x1, y1)) = others_box(imp, edge, n) else {
+        let Some(others) = others_box(imp, edge, n) else {
             continue;
         };
-        xs.push((x0 - p.offset.0).max(arch.min_x).min(arch.max_x));
-        xs.push((x1 - p.offset.0).min(arch.max_x).max(arch.min_x));
-        ys.push((y0 - p.offset.1).max(arch.min_y).min(arch.max_y));
-        ys.push((y1 - p.offset.1).min(arch.max_y).max(arch.min_y));
+        xs.push((others.min.x - p.offset.x).max(arch.min_x).min(arch.max_x));
+        xs.push((others.max.x - p.offset.x).min(arch.max_x).max(arch.min_x));
+        ys.push((others.min.y - p.offset.y).max(arch.min_y).min(arch.max_y));
+        ys.push((others.max.y - p.offset.y).min(arch.max_y).max(arch.min_y));
     }
     if xs.len() <= 1 {
         return None;
@@ -137,42 +140,46 @@ pub(super) fn optimal_region(imp: &Improver, n: NodeId) -> Option<(i64, i64, i64
     let mid = xs.len() / 2;
     xs.sort_unstable();
     ys.sort_unstable();
-    Some((xs[mid - 1], ys[mid - 1], xs[mid], ys[mid]))
+    Some(Rect::new(
+        Point::new(xs[mid - 1], ys[mid - 1]),
+        Point::new(xs[mid], ys[mid]),
+    ))
 }
 
 /// The box of an edge's pins on other cells, as `calculateEdgeBB`.
-fn others_box(imp: &Improver, edge: &[NetworkPinId], n: NodeId) -> Option<(i64, i64, i64, i64)> {
-    let mut bounds = None;
+fn others_box(imp: &Improver, edge: &[NetworkPinId], n: NodeId) -> Option<Rect<Dbu>> {
+    let mut bounds: Option<Rect<Dbu>> = None;
     for &pin in edge {
         if imp.net.pins[pin].node == n {
             continue;
         }
-        let (x, y) = imp.pin_position(pin);
-        bounds = Some(match bounds {
-            None => (x, y, x, y),
-            Some((x0, y0, x1, y1)) => (x.min(x0), y.min(y0), x.max(x1), y.max(y1)),
-        });
+        let p = imp.pin_position(pin);
+        let at = Rect::new(p, p);
+        bounds = Some(bounds.map_or(at, |b| b.union(&at)));
     }
     bounds
 }
 
 /// The cell's center and its optimal region, unless it is already there.
-fn region_elsewhere(imp: &Improver, n: NodeId) -> Option<(i64, i64, i64, i64)> {
-    let yi = imp.bottom(n) as f64 + 0.5 * imp.height(n) as f64;
-    let xi = imp.left(n) as f64 + 0.5 * imp.width(n) as f64;
-    let (x0, y0, x1, y1) = optimal_region(imp, n)?;
-    let inside = xi >= x0 as f64 && xi <= x1 as f64 && yi >= y0 as f64 && yi <= y1 as f64;
-    (!inside).then_some((x0, y0, x1, y1))
+fn region_elsewhere(imp: &Improver, n: NodeId) -> Option<Rect<Dbu>> {
+    let yi = imp.bottom(n).to_f64() + 0.5 * imp.height(n).to_f64();
+    let xi = imp.left(n).to_f64() + 0.5 * imp.width(n).to_f64();
+    let region = optimal_region(imp, n)?;
+    let inside = xi >= region.min.x.to_f64()
+        && xi <= region.max.x.to_f64()
+        && yi >= region.min.y.to_f64()
+        && yi <= region.max.y.to_f64();
+    (!inside).then_some(region)
 }
 
 /// The left edge and bottom that center the cell in a box, as
 /// `std::floor(0.5 * (min + max) - 0.5 * size)`.
-fn centered(min: i64, max: i64, size: i64) -> i64 {
-    (0.5 * (min + max) as f64 - 0.5 * size as f64).floor() as i64
+fn centered(min: Dbu, max: Dbu, size: Dbu) -> Dbu {
+    Dbu((0.5 * (min + max).to_f64() - 0.5 * size.to_f64()).floor() as i64)
 }
 
 /// The first segment of row `r` whose span holds `x`.
-pub(super) fn segment_at(imp: &Improver, r: usize, x: i64) -> Option<SegmentId> {
+pub(super) fn segment_at(imp: &Improver, r: usize, x: Dbu) -> Option<SegmentId> {
     imp.segs_in_row[r].iter().copied().find(|&s| {
         let seg = &imp.segments[s];
         x >= seg.min_x && x <= seg.max_x
@@ -182,13 +189,12 @@ pub(super) fn segment_at(imp: &Improver, r: usize, x: i64) -> Option<SegmentId> 
 /// A move or else a swap of the cell to the middle of its optimal region
 /// within reach, as `legacy::DetailedGlobalSwap::generate`.
 fn global_trial(imp: &mut Improver, n: NodeId) -> Result<bool> {
-    let Some((mut x0, mut y0, mut x1, mut y1)) = region_elsewhere(imp, n) else {
+    let Some(region) = region_elsewhere(imp, n) else {
         return Ok(false);
     };
-    let (left, bottom) = (imp.left(n), imp.bottom(n));
-    let (dx, dy) = imp.max_displacement;
-    (x0, x1) = clip_to_reach(x0, x1, left, dx);
-    (y0, y1) = clip_to_reach(y0, y1, bottom, dy);
+    let reach = imp.max_displacement;
+    let (x0, x1) = clip_to_reach(region.min.x, region.max.x, imp.left(n), reach.x);
+    let (y0, y1) = clip_to_reach(region.min.y, region.max.y, imp.bottom(n), reach.y);
     let [si] = imp.cell_segs[n][..] else {
         return Ok(false);
     };
@@ -209,7 +215,7 @@ fn global_trial(imp: &mut Improver, n: NodeId) -> Result<bool> {
 
 /// The part of `[lo, hi]` within `reach` of `at`, or the reachable span
 /// toward it when none is.
-const fn clip_to_reach(lo: i64, hi: i64, at: i64, reach: i64) -> (i64, i64) {
+fn clip_to_reach(lo: Dbu, hi: Dbu, at: Dbu, reach: Dbu) -> (Dbu, Dbu) {
     if at + reach <= lo {
         (at, at + reach)
     } else if at - reach >= hi {
@@ -225,18 +231,18 @@ const fn clip_to_reach(lo: i64, hi: i64, at: i64, reach: i64) -> (i64, i64) {
 /// A move or else a swap of the cell one or two rows toward its optimal
 /// region, picked at random, as `DetailedVerticalSwap::generate`.
 fn vertical_trial(imp: &mut Improver, n: NodeId) -> Result<bool> {
-    let yi = imp.bottom(n) as f64 + 0.5 * imp.height(n) as f64;
-    let Some((x0, y0, x1, y1)) = region_elsewhere(imp, n) else {
+    let yi = imp.bottom(n).to_f64() + 0.5 * imp.height(n).to_f64();
+    let Some(region) = region_elsewhere(imp, n) else {
         return Ok(false);
     };
     let [si] = imp.cell_segs[n][..] else {
         return Ok(false);
     };
     let ri = imp.segments[si].row;
-    let xj = centered(x0, x1, imp.width(n));
-    let yj = centered(y0, y1, imp.height(n));
+    let xj = centered(region.min.x, region.max.x, imp.width(n));
+    let yj = centered(region.min.y, region.max.y, imp.height(n));
     let last = imp.arch.rows.len() - 1;
-    let (rmin, rmax) = if yj > i64::from(yi as i32) {
+    let (rmin, rmax) = if yj > Dbu(i64::from(yi as i32)) {
         ((ri + 1).min(last), (ri + 2).min(last))
     } else {
         (ri.saturating_sub(2), ri.saturating_sub(1))
@@ -260,11 +266,11 @@ mod tests {
 
     #[test]
     fn a_cell_is_centered_in_a_box_rounding_down() {
-        assert_eq!(centered(0, 11, 4), 3);
+        assert_eq!(centered(Dbu(0), Dbu(11), Dbu(4)), Dbu(3));
     }
 
     #[test]
     fn a_cell_centered_left_of_the_origin_rounds_toward_minus_infinity() {
-        assert_eq!(centered(-10, -1, 4), -8);
+        assert_eq!(centered(Dbu(-10), Dbu(-1), Dbu(4)), Dbu(-8));
     }
 }

@@ -4,6 +4,7 @@
 use super::{ImprovementError, Improver, Move, Result};
 use super::{NodeId, SegmentId};
 use pare_common::geom::dbu::Dbu;
+use pare_common::geom::point::Point;
 
 /// A node's neighbours around `x` in a segment by center, as the
 /// `std::lower_bound` probes of `DetailedMgr`: the first at or right of `x`
@@ -19,7 +20,7 @@ fn around(cells: &[NodeId], at: usize) -> (Option<NodeId>, Option<NodeId>) {
 impl Improver {
     /// The index of the first cell of segment `s` whose center is at or
     /// right of `x`.
-    fn lower_bound(&self, s: SegmentId, x: i64) -> usize {
+    fn lower_bound(&self, s: SegmentId, x: Dbu) -> usize {
         self.cells_in_seg[s].partition_point(|&c| self.center_x(c) < x)
     }
 
@@ -30,7 +31,7 @@ impl Improver {
         &mut self,
         n: NodeId,
         si: SegmentId,
-        xj: i64,
+        xj: Dbu,
         sj: SegmentId,
     ) -> Result<bool> {
         if !self.master_symmetry_allows(n, self.segments[sj].row) {
@@ -59,7 +60,7 @@ impl Improver {
         &mut self,
         n: NodeId,
         si: SegmentId,
-        xj: i64,
+        xj: Dbu,
         sj: SegmentId,
     ) -> Result<bool> {
         if !self.master_symmetry_allows(n, self.segments[sj].row) {
@@ -78,7 +79,7 @@ impl Improver {
         &mut self,
         n: NodeId,
         si: SegmentId,
-        mut xj: i64,
+        mut xj: Dbu,
         sj: SegmentId,
     ) -> Result<bool> {
         self.journal.clear();
@@ -101,14 +102,7 @@ impl Improver {
             return Ok(false);
         };
         xj = x;
-        if !self.add_to_move_list(
-            n,
-            (self.left(n), self.bottom(n)),
-            &[si],
-            (xj, yj),
-            &[sj],
-            true,
-        )? {
+        if !self.add_to_move_list(n, self.position(n), &[si], Point::new(xj, yj), &[sj], true)? {
             return Ok(false);
         }
         if let Some(r) = right
@@ -130,7 +124,7 @@ impl Improver {
         &mut self,
         n: NodeId,
         si: SegmentId,
-        xj: i64,
+        xj: Dbu,
         sj: SegmentId,
     ) -> Result<bool> {
         self.journal.clear();
@@ -156,8 +150,8 @@ impl Improver {
                 let Some(x) = self.align(n, xj, lx, rx) else {
                     return Ok(false);
                 };
-                let from = (self.left(n), self.bottom(n));
-                return self.add_to_move_list(n, from, &[si], (x, yj), &[sj], true);
+                let from = self.position(n);
+                return self.add_to_move_list(n, from, &[si], Point::new(x, yj), &[sj], true);
             }
         }
         Ok(false)
@@ -165,7 +159,7 @@ impl Improver {
 
     /// `DetailedMgr::tryMove3`: a multi-row cell into the gap at `xj` of a
     /// stack of segments, one per row.
-    fn try_move_multi(&mut self, n: NodeId, xj: i64, sj: SegmentId) -> Result<bool> {
+    fn try_move_multi(&mut self, n: NodeId, xj: Dbu, sj: SegmentId) -> Result<bool> {
         self.journal.clear();
         let spanned = self.rows_spanned(n);
         if spanned <= 1 || spanned != self.cell_segs[n].len() {
@@ -192,7 +186,7 @@ impl Improver {
         if segs.len() != spanned {
             return Ok(false);
         }
-        let (mut xmin, mut xmax) = (i64::from(i32::MIN), i64::from(i32::MAX));
+        let (mut xmin, mut xmax) = (Dbu(i64::from(i32::MIN)), Dbu(i64::from(i32::MAX)));
         for &s in &segs {
             let cells = &self.cells_in_seg[s];
             let (mut left, mut right) = (None, None);
@@ -229,8 +223,8 @@ impl Improver {
             return Ok(false);
         };
         let from_segs = self.cell_segs[n].clone();
-        let from = (self.left(n), self.bottom(n));
-        let to = (x, self.arch.rows[rb].bottom);
+        let from = self.position(n);
+        let to = Point::new(x, self.arch.rows[rb].bottom);
         self.add_to_move_list(n, from, &from_segs, to, &segs, false)
     }
 
@@ -240,7 +234,7 @@ impl Improver {
         &mut self,
         n: NodeId,
         si: SegmentId,
-        mut xj: i64,
+        mut xj: Dbu,
         sj: SegmentId,
     ) -> Result<bool> {
         self.journal.clear();
@@ -314,12 +308,11 @@ impl Improver {
             };
             xj = x;
         }
-        let (x1, y1) = (self.left(n), self.bottom(n));
-        let (x2, y2) = (self.left(ndj), self.bottom(ndj));
-        if !self.add_to_move_list(n, (x1, y1), &[si], (xj, y2), &[sj], true)? {
+        let (from_i, from_j) = (self.position(n), self.position(ndj));
+        if !self.add_to_move_list(n, from_i, &[si], Point::new(xj, from_j.y), &[sj], true)? {
             return Ok(false);
         }
-        if !self.add_to_move_list(ndj, (x2, y2), &[sj], (xi, y1), &[si], true)? {
+        if !self.add_to_move_list(ndj, from_j, &[sj], Point::new(xi, from_i.y), &[si], true)? {
             self.paint(ndj);
             return Ok(false);
         }
@@ -333,24 +326,27 @@ impl Improver {
     fn shift(
         &self,
         cells: &[NodeId],
-        targets: &[i64],
-        left_limit: i64,
-        right_limit: i64,
+        targets: &[Dbu],
+        left_limit: Dbu,
+        right_limit: Dbu,
         row: usize,
-    ) -> Option<Vec<i64>> {
+    ) -> Option<Vec<Dbu>> {
         let row = &self.arch.rows[row];
         let (origin, spacing) = (row.left, row.site_spacing);
-        let mut i0 = (left_limit - origin) / spacing;
-        if origin + i0 * spacing < left_limit {
+        let mut i0 = (left_limit - origin).get() / spacing.get();
+        if origin + spacing * i0 < left_limit {
             i0 += 1;
         }
-        let mut i1 = (right_limit - origin) / spacing;
-        if origin + i1 * spacing + row.site_width >= right_limit {
+        let mut i1 = (right_limit - origin).get() / spacing.get();
+        if origin + spacing * i1 + row.site_width >= right_limit {
             i1 -= 1;
         }
         let nsites = usize::try_from(i1 - i0 + 1).ok()?;
         let ncells = cells.len();
-        let swid: Vec<i64> = cells.iter().map(|&c| self.width(c) / spacing).collect();
+        let swid: Vec<i64> = cells
+            .iter()
+            .map(|&c| self.width(c).get() / spacing.get())
+            .collect();
         if swid.iter().sum::<i64>() > i1 - i0 + 1 {
             return None;
         }
@@ -377,7 +373,7 @@ impl Improver {
                 if site_id < site_l[j - 1] || site_id > site_r[j - 1] {
                     continue;
                 }
-                row_cost[j] = (origin + site_id * spacing - targets[j - 1]).abs() as f64;
+                row_cost[j] = (origin + spacing * site_id - targets[j - 1]).abs().to_f64();
             }
         }
         let mut tcost = vec![vec![f64::MAX; ncells + 1]; nsites + 1];
@@ -416,14 +412,14 @@ impl Improver {
         if !reached {
             return None;
         }
-        let mut positions = vec![0; ncells];
+        let mut positions = vec![Dbu::ZERO; ncells];
         let mut at = (nsites, ncells);
         while at != (0, 0) {
             let Some(back) = prev[at.0][at.1] else {
                 break;
             };
             if at.1 != back.1 {
-                positions[at.1 - 1] = origin + site(at.0) * spacing;
+                positions[at.1 - 1] = origin + spacing * site(at.0);
             }
             at = back;
         }
@@ -440,7 +436,7 @@ impl Improver {
     pub(super) fn shift_right_helper(
         &mut self,
         mut ndi: NodeId,
-        mut xj: i64,
+        mut xj: Dbu,
         sj: SegmentId,
         mut ndr: NodeId,
     ) -> Result<bool> {
@@ -463,8 +459,8 @@ impl Improver {
                     xj = sx;
                 }
             }
-            let from = (self.left(ndr), self.bottom(ndr));
-            if !self.add_to_move_list(ndr, from, &[sj], (xj, from.1), &[sj], true)? {
+            let from = self.position(ndr);
+            if !self.add_to_move_list(ndr, from, &[sj], Point::new(xj, from.y), &[sj], true)? {
                 return Ok(false);
             }
             if xj + self.width(ndr) > self.segments[sj].max_x {
@@ -487,7 +483,7 @@ impl Improver {
     pub(super) fn shift_left_helper(
         &mut self,
         mut ndi: NodeId,
-        mut xj: i64,
+        mut xj: Dbu,
         sj: SegmentId,
         mut ndl: NodeId,
     ) -> Result<bool> {
@@ -504,8 +500,8 @@ impl Improver {
             if xj > sx {
                 xj = sx;
             }
-            let from = (self.left(ndl), self.bottom(ndl));
-            if !self.add_to_move_list(ndl, from, &[sj], (xj, from.1), &[sj], true)? {
+            let from = self.position(ndl);
+            if !self.add_to_move_list(ndl, from, &[sj], Point::new(xj, from.y), &[sj], true)? {
                 return Ok(false);
             }
             if xj < self.segments[sj].min_x {
@@ -524,11 +520,11 @@ impl Improver {
 
     /// The site-aligned left edge nearest `x` that keeps the cell within
     /// `[xl, xr)`, as `DetailedMgr::alignPos`.
-    pub(super) fn align(&self, n: NodeId, x: i64, xl: i64, xr: i64) -> Option<i64> {
+    pub(super) fn align(&self, n: NodeId, x: Dbu, xl: Dbu, xr: Dbu) -> Option<Dbu> {
         let row = &self.arch.rows[0];
         let xr = xr - self.width(n);
         let mut xp = xl.max(xr.min(x));
-        xp = row.left + (xp - row.left) / row.site_spacing * row.site_spacing;
+        xp = row.left + row.site_spacing * ((xp - row.left).get() / row.site_spacing.get());
         if xp < xl {
             xp += row.site_spacing;
         } else if xp > xr {
@@ -543,17 +539,17 @@ impl Improver {
     pub(super) fn add_to_move_list(
         &mut self,
         n: NodeId,
-        from: (i64, i64),
+        from: Point<Dbu>,
         from_segs: &[SegmentId],
-        to: (i64, i64),
+        to: Point<Dbu>,
         to_segs: &[SegmentId],
         limited: bool,
     ) -> Result<bool> {
         if self.journal.moves.len() >= self.move_limit {
             return Ok(false);
         }
-        let x = self.grid.grid_x(Dbu(to.0));
-        let y = self.grid.snap_down_y(Dbu(to.1));
+        let x = self.grid.grid_x(to.x);
+        let y = self.grid.snap_down_y(to.y);
         if self
             .grid
             .site_orientation(x, y, self.grid.nodes[n].site)
@@ -563,8 +559,8 @@ impl Improver {
         }
         let orig = self.orig(n);
         if limited
-            && ((to.0 - orig.0).abs() > self.max_displacement.0
-                || (to.1 - orig.1).abs() > self.max_displacement.1)
+            && ((to.x - orig.x).abs() > self.max_displacement.x
+                || (to.y - orig.y).abs() > self.max_displacement.y)
         {
             return Ok(false);
         }
@@ -572,7 +568,7 @@ impl Improver {
         for &s in from_segs {
             self.remove_cell_from_segment(n, s)?;
         }
-        self.set_position(n, to.0, to.1);
+        self.set_position(n, to);
         self.paint(n);
         for &s in to_segs {
             self.add_cell_to_segment(n, s)?;
@@ -627,9 +623,9 @@ impl Improver {
             for &s in &m.to_segs {
                 self.remove_cell_from_segment(m.node, s)?;
             }
-            self.set_position(m.node, m.from.0, m.from.1);
-            let x = self.grid.grid_x(Dbu(m.from.0));
-            let y = self.grid.round_y(Dbu(m.from.1));
+            self.set_position(m.node, m.from);
+            let x = self.grid.grid_x(m.from.x);
+            let y = self.grid.round_y(m.from.y);
             self.grid.paint_pixels(m.node, x, y);
             let orient = self
                 .grid
@@ -648,9 +644,11 @@ impl Improver {
 
 /// `originX + (xj - originX / spacing) * spacing` in C++ `int` arithmetic.
 // Wraps as OpenDP's int does.
-fn misaligned_site(xj: i64, origin: i64, spacing: i64) -> i64 {
-    let site = (xj - origin / spacing) as i32;
-    i64::from((origin as i32).wrapping_add(site.wrapping_mul(spacing as i32)))
+fn misaligned_site(xj: Dbu, origin: Dbu, spacing: Dbu) -> Dbu {
+    let site = (xj.get() - origin.get() / spacing.get()) as i32;
+    Dbu(i64::from(
+        (origin.get() as i32).wrapping_add(site.wrapping_mul(spacing.get() as i32)),
+    ))
 }
 
 #[cfg(test)]

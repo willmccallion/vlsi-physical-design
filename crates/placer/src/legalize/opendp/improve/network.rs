@@ -6,6 +6,7 @@ use super::{EdgeId, ImprovementError, NetworkPinId, NodeId, Placer, Result};
 use pare_common::db::design::{NetlistDB, PinOwner, PlacementStatus};
 use pare_common::db::indices::IdVec;
 use pare_common::geom::dbu::Dbu;
+use pare_common::geom::point::Point;
 use pare_common::geom::rect::Rect;
 
 /// A pin, as `Pin`: where it is from its node's center.
@@ -13,17 +14,17 @@ use pare_common::geom::rect::Rect;
 pub(super) struct Pin {
     pub(super) node: NodeId,
     pub(super) edge: EdgeId,
-    pub(super) offset: (i64, i64),
+    pub(super) offset: Point<Dbu>,
 }
 
 /// A node that never moves and is not one of the legalizer's cells: an I/O
 /// pin, or a filler closing a gap in the rows.
 #[derive(Clone, Copy, Debug)]
 pub(super) struct FixedNode {
-    pub(super) left: i64,
-    pub(super) bottom: i64,
-    pub(super) width: i64,
-    pub(super) height: i64,
+    pub(super) left: Dbu,
+    pub(super) bottom: Dbu,
+    pub(super) width: Dbu,
+    pub(super) height: Dbu,
     pub(super) terminal: bool,
 }
 
@@ -35,7 +36,7 @@ pub(super) struct Network {
     /// The nodes after the cells.
     fixed: Vec<FixedNode>,
     /// Where each cell started, relative to the core.
-    pub(super) orig: IdVec<NodeId, (i64, i64)>,
+    pub(super) orig: IdVec<NodeId, Point<Dbu>>,
     pub(super) pins: IdVec<NetworkPinId, Pin>,
     /// The pins of every node.
     pub(super) node_pins: IdVec<NodeId, Vec<NetworkPinId>>,
@@ -66,17 +67,17 @@ impl Network {
                 .ok_or_else(|| ImprovementError::PinWithoutShapes(io.name.clone()))?;
             node_of_io[i] = Some(NodeId::new(cells + fixed.len()));
             fixed.push(FixedNode {
-                left: (bbox.min.x - core.min.x).get(),
-                bottom: (bbox.min.y - core.min.y).get(),
-                width: bbox.width().get(),
-                height: 0,
+                left: bbox.min.x - core.min.x,
+                bottom: bbox.min.y - core.min.y,
+                width: bbox.width(),
+                height: Dbu::ZERO,
                 terminal: true,
             });
         }
         let orig = grid
             .nodes
             .iter()
-            .map(|n| (n.left.get(), n.bottom.get()))
+            .map(|n| Point::new(n.left, n.bottom))
             .collect();
         let mut network = Self {
             cells,
@@ -117,23 +118,23 @@ impl Network {
                     .map(|s| s.rect)
                     .reduce(|a, b| a.union(&b))
                     .unwrap_or_default();
-                let center_x = bbox.min.x.get().midpoint(bbox.max.x.get());
-                let center_y = bbox.min.y.get().midpoint(bbox.max.y.get());
-                let offset = (center_x - m.size.x.get() / 2, center_y - m.size.y.get() / 2);
+                let center_x = Dbu(bbox.min.x.get().midpoint(bbox.max.x.get()));
+                let center_y = Dbu(bbox.min.y.get().midpoint(bbox.max.y.get()));
+                let offset = Point::new(center_x - m.size.x / 2, center_y - m.size.y / 2);
                 network.add_pin(node, edge, offset);
             }
             for &pin in &net.pins {
                 if let PinOwner::Io(io) = db.pins[pin].owner
                     && let Some(node) = node_of_io[io]
                 {
-                    network.add_pin(node, edge, (0, 0));
+                    network.add_pin(node, edge, Point::new(Dbu::ZERO, Dbu::ZERO));
                 }
             }
         }
         Ok(network)
     }
 
-    fn add_pin(&mut self, node: NodeId, edge: EdgeId, offset: (i64, i64)) {
+    fn add_pin(&mut self, node: NodeId, edge: EdgeId, offset: Point<Dbu>) {
         let pin = self.pins.push(Pin { node, edge, offset });
         self.node_pins[node].push(pin);
         self.edges[edge].push(pin);
@@ -141,7 +142,7 @@ impl Network {
 
     /// Adds a fixed node closing a gap in a row, as
     /// `Network::addFillerNode`.
-    pub(super) fn add_filler(&mut self, left: i64, bottom: i64, width: i64, height: i64) {
+    pub(super) fn add_filler(&mut self, left: Dbu, bottom: Dbu, width: Dbu, height: Dbu) {
         self.fixed.push(FixedNode {
             left,
             bottom,

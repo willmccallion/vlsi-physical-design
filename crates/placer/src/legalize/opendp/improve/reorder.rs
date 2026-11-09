@@ -6,6 +6,8 @@ use super::mis::converged;
 use super::{EdgeId, NodeId, SegmentId};
 use super::{Improver, SKIP_NETS_LARGER_THAN};
 use pare_common::db::indices::IdVec;
+use pare_common::geom::dbu::Dbu;
+use pare_common::geom::point::Point;
 
 const WINDOW: usize = 3;
 
@@ -14,7 +16,7 @@ pub(super) fn run(imp: &mut Improver, passes: usize, tolerance: f64) {
     let tolerance = tolerance.max(0.01);
     imp.resort_segments();
     let mut hpwl = imp.total_hpwl();
-    if hpwl == 0 {
+    if hpwl == Dbu::ZERO {
         return;
     }
     let mut marks = EdgeMarks::new(imp.net.edges.len());
@@ -100,8 +102,8 @@ fn reorder_segments(imp: &mut Improver, marks: &mut EdgeMarks) {
 /// Orders segment `s`'s cells `[start, end)` by center as `std::sort` does.
 fn sort_segment(imp: &mut Improver, s: SegmentId, start: usize, end: usize) {
     let mut cells = std::mem::take(&mut imp.cells_in_seg[s]);
-    let centers: Vec<i64> = cells.iter().map(|&c| imp.center_x(c)).collect();
-    let mut keyed: Vec<(i64, NodeId)> = centers[start..end]
+    let centers: Vec<Dbu> = cells.iter().map(|&c| imp.center_x(c)).collect();
+    let mut keyed: Vec<(Dbu, NodeId)> = centers[start..end]
         .iter()
         .copied()
         .zip(cells[start..end].iter().copied())
@@ -119,8 +121,8 @@ struct Window {
     segment: SegmentId,
     first: usize,
     last: usize,
-    left_limit: i64,
-    right_limit: i64,
+    left_limit: Dbu,
+    right_limit: Dbu,
 }
 
 /// Tries every order of the window's cells, spaced evenly in its gap, and
@@ -128,8 +130,8 @@ struct Window {
 /// window.
 fn reorder_window(imp: &mut Improver, marks: &mut EdgeMarks, w: &Window) {
     let cells: Vec<NodeId> = imp.cells_in_seg[w.segment][w.first..=w.last].to_vec();
-    let original: Vec<i64> = cells.iter().map(|&n| imp.left(n)).collect();
-    let width: Vec<i64> = cells.iter().map(|&n| imp.width(n)).collect();
+    let original: Vec<Dbu> = cells.iter().map(|&n| imp.left(n)).collect();
+    let width: Vec<Dbu> = cells.iter().map(|&n| imp.width(n)).collect();
     let site_width = imp.arch.rows[0].site_width;
     let Some(pads) = even_padding(&width, w.right_limit - w.left_limit, site_width) else {
         return;
@@ -152,7 +154,7 @@ fn reorder_window(imp: &mut Improver, marks: &mut EdgeMarks, w: &Window) {
         }
     };
     if failed {
-        let lefts: Vec<i64> = ordered
+        let lefts: Vec<Dbu> = ordered
             .iter()
             .map(|&n| {
                 cells
@@ -168,27 +170,26 @@ fn reorder_window(imp: &mut Improver, marks: &mut EdgeMarks, w: &Window) {
 
 /// The site padding left and right of each cell that spreads cells of
 /// `width` evenly over `span`; none when they do not fit.
-fn even_padding(width: &[i64], span: i64, site_width: i64) -> Option<(Vec<i64>, Vec<i64>)> {
+fn even_padding(width: &[Dbu], span: Dbu, site_width: Dbu) -> Option<(Vec<Dbu>, Vec<Dbu>)> {
     let size = width.len();
-    let total_width: i64 = width.iter().sum();
+    let total_width: Dbu = width.iter().copied().sum();
     if span < total_width {
         return None;
     }
-    let size_i64 = size as i64;
-    let space_per_cell = (span - total_width) / size_i64;
-    let sites_per_cell = space_per_cell / site_width;
+    let space_per_cell = (span - total_width) / size as i64;
+    let sites_per_cell = space_per_cell.get() / site_width.get();
     let sites_right = sites_per_cell >> 1;
     let sites_left = sites_per_cell - sites_right;
-    let mut padding = 0;
-    let (mut left_pad, mut right_pad) = (vec![0; size], vec![0; size]);
+    let mut padding = Dbu::ZERO;
+    let (mut left_pad, mut right_pad) = (vec![Dbu::ZERO; size], vec![Dbu::ZERO; size]);
     for i in 0..size {
-        if total_width + padding + sites_right * site_width < span {
-            padding += sites_right * site_width;
-            right_pad[i] += sites_right * site_width;
+        if total_width + padding + site_width * sites_right < span {
+            padding += site_width * sites_right;
+            right_pad[i] += site_width * sites_right;
         }
-        if total_width + padding + sites_left * site_width < span {
-            padding += sites_left * site_width;
-            left_pad[i] += sites_left * site_width;
+        if total_width + padding + site_width * sites_left < span {
+            padding += site_width * sites_left;
+            left_pad[i] += site_width * sites_left;
         }
     }
     (span >= total_width + padding).then_some((left_pad, right_pad))
@@ -201,16 +202,16 @@ fn cheapest_order(
     imp: &mut Improver,
     marks: &mut EdgeMarks,
     cells: &[NodeId],
-    width: &[i64],
-    (left_pad, right_pad): &(Vec<i64>, Vec<i64>),
-    left_limit: i64,
+    width: &[Dbu],
+    (left_pad, right_pad): &(Vec<Dbu>, Vec<Dbu>),
+    left_limit: Dbu,
     orig_cost: f64,
-) -> Option<Vec<i64>> {
+) -> Option<Vec<Dbu>> {
     let size = cells.len();
     let mut best_cost = orig_cost;
-    let mut best: Option<Vec<i64>> = None;
+    let mut best: Option<Vec<Dbu>> = None;
     let mut order: Vec<usize> = (0..size).collect();
-    let mut positions = vec![0; size];
+    let mut positions = vec![Dbu::ZERO; size];
     loop {
         let mut within_reach = true;
         let mut x = left_limit;
@@ -220,10 +221,10 @@ fn cheapest_order(
             positions[ix] = x;
             imp.erase(n);
             let bottom = imp.bottom(n);
-            imp.set_position(n, x, bottom);
+            imp.set_position(n, Point::new(x, bottom));
             imp.paint(n);
             x += width[ix] + right_pad[ix];
-            if (imp.left(n) - imp.orig(n).0).abs() > imp.max_displacement.0 {
+            if (imp.left(n) - imp.orig(n).x).abs() > imp.max_displacement.x {
                 within_reach = false;
             }
         }
@@ -251,10 +252,10 @@ fn realign(imp: &mut Improver, w: &Window) -> Option<bool> {
         shifted |= x != imp.left(n);
         imp.erase(n);
         let bottom = imp.bottom(n);
-        imp.set_position(n, x, bottom);
+        imp.set_position(n, Point::new(x, bottom));
         imp.paint(n);
         left = imp.right(n);
-        if (imp.left(n) - imp.orig(n).0).abs() > imp.max_displacement.0 {
+        if (imp.left(n) - imp.orig(n).x).abs() > imp.max_displacement.x {
             return None;
         }
     }
@@ -262,11 +263,11 @@ fn realign(imp: &mut Improver, w: &Window) -> Option<bool> {
 }
 
 /// Moves each cell to its left edge, keeping its row.
-fn place_at(imp: &mut Improver, cells: &[NodeId], lefts: &[i64]) {
+fn place_at(imp: &mut Improver, cells: &[NodeId], lefts: &[Dbu]) {
     for (&n, &x) in cells.iter().zip(lefts) {
         imp.erase(n);
         let bottom = imp.bottom(n);
-        imp.set_position(n, x, bottom);
+        imp.set_position(n, Point::new(x, bottom));
         imp.paint(n);
     }
 }
@@ -291,13 +292,13 @@ fn cost(imp: &Improver, marks: &mut EdgeMarks, cells: &[NodeId]) -> f64 {
                 continue;
             }
             marks.mark[e] = marks.traversal;
-            let (mut lo, mut hi) = (i64::from(i32::MAX), i64::from(i32::MIN));
+            let (mut lo, mut hi) = (Dbu(i64::from(i32::MAX)), Dbu(i64::from(i32::MIN)));
             for &p in pins {
-                let x = imp.pin_position(p).0;
+                let x = imp.pin_position(p).x;
                 lo = lo.min(x);
                 hi = hi.max(x);
             }
-            cost += (hi - lo) as f64;
+            cost += (hi - lo).to_f64();
         }
     }
     cost
@@ -323,34 +324,38 @@ fn next_permutation(order: &mut [usize]) -> bool {
 mod tests {
     use super::*;
 
-    const SITE: i64 = 10;
+    const SITE: Dbu = Dbu(10);
+
+    fn lengths(values: &[i64]) -> Vec<Dbu> {
+        values.iter().copied().map(Dbu).collect()
+    }
 
     #[test]
     fn cells_are_padded_evenly_in_whole_sites_over_the_gap() {
-        let padding = even_padding(&[20, 30], 100, SITE);
+        let padding = even_padding(&lengths(&[20, 30]), Dbu(100), SITE);
 
-        assert_eq!(padding, Some((vec![10, 10], vec![10, 10])));
+        assert_eq!(padding, Some((lengths(&[10, 10]), lengths(&[10, 10]))));
     }
 
     #[test]
     fn cells_filling_the_gap_get_no_padding() {
-        let padding = even_padding(&[20, 30], 50, SITE);
+        let padding = even_padding(&lengths(&[20, 30]), Dbu(50), SITE);
 
-        assert_eq!(padding, Some((vec![0, 0], vec![0, 0])));
+        assert_eq!(padding, Some((lengths(&[0, 0]), lengths(&[0, 0]))));
     }
 
     #[test]
     fn padding_that_would_fill_the_gap_exactly_is_left_off() {
         // Three spare sites split one right and two left; the two left
         // would close the gap, so only the right one is taken.
-        let padding = even_padding(&[10], 40, SITE);
+        let padding = even_padding(&lengths(&[10]), Dbu(40), SITE);
 
-        assert_eq!(padding, Some((vec![0], vec![10])));
+        assert_eq!(padding, Some((lengths(&[0]), lengths(&[10]))));
     }
 
     #[test]
     fn cells_wider_than_the_gap_get_no_padding() {
-        assert_eq!(even_padding(&[20, 30], 40, SITE), None);
+        assert_eq!(even_padding(&lengths(&[20, 30]), Dbu(40), SITE), None);
     }
 
     #[test]

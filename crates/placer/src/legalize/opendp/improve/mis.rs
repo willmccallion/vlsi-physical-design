@@ -5,6 +5,8 @@
 use super::{ImprovementError, Improver, Move, Result};
 use super::{NodeId, SegmentId};
 use pare_common::db::indices::IdVec;
+use pare_common::geom::dbu::Dbu;
+use pare_common::geom::point::Point;
 use pare_common::network_simplex::{Arc, min_cost_flow};
 use std::collections::VecDeque;
 
@@ -30,7 +32,7 @@ pub(super) fn run(imp: &mut Improver, passes: usize, tolerance: f64) -> Result<(
     let tolerance = tolerance.max(0.01);
     imp.resort_segments();
     let mut hpwl = imp.total_hpwl();
-    if hpwl == 0 {
+    if hpwl == Dbu::ZERO {
         return Ok(());
     }
     let mut candidates = imp.movable_cells();
@@ -54,8 +56,8 @@ pub(super) fn run(imp: &mut Improver, passes: usize, tolerance: f64) -> Result<(
 
 /// Whether a pass changed the wirelength by no more than `tolerance` of
 /// it, as each pass's stopping test.
-pub(super) fn converged(last: i64, current: i64, tolerance: f64) -> bool {
-    last == 0 || (current - last).abs() as f64 / last as f64 <= tolerance
+pub(super) fn converged(last: Dbu, current: Dbu, tolerance: f64) -> bool {
+    last == Dbu::ZERO || (current - last).abs().to_f64() / last.to_f64() <= tolerance
 }
 
 /// Colours the movable cells greedily so that no two on a net share a
@@ -113,15 +115,19 @@ impl Bins {
         let count = candidates.len() as f64;
         let avg_h = candidates
             .iter()
-            .map(|&n| imp.height(n) as f64)
+            .map(|&n| imp.height(n).to_f64())
             .sum::<f64>()
             / count;
-        let avg_w = candidates.iter().map(|&n| imp.width(n) as f64).sum::<f64>() / count;
+        let avg_w = candidates
+            .iter()
+            .map(|&n| imp.width(n).to_f64())
+            .sum::<f64>()
+            / count;
         let side = (MAX_PROBLEM_SIZE as f64).sqrt();
         let step = (avg_w * side, avg_h * side);
         let dim = (
-            ((imp.arch.max_x - imp.arch.min_x) as f64 / step.0).ceil() as usize,
-            ((imp.arch.max_y - imp.arch.min_y) as f64 / step.1).ceil() as usize,
+            ((imp.arch.max_x - imp.arch.min_x).to_f64() / step.0).ceil() as usize,
+            ((imp.arch.max_y - imp.arch.min_y).to_f64() / step.1).ceil() as usize,
         );
         Self {
             step,
@@ -144,12 +150,12 @@ impl Bins {
         self.bin_of.fill(None);
         let last = |dim: usize| dim as i32 - 1;
         for &n in candidates {
-            let y = imp.bottom(n) as f64 + 0.5 * imp.height(n) as f64;
-            let x = imp.left(n) as f64 + 0.5 * imp.width(n) as f64;
-            let j = (((y - imp.arch.min_y as f64) / self.step.1) as i32)
+            let y = imp.bottom(n).to_f64() + 0.5 * imp.height(n).to_f64();
+            let x = imp.left(n).to_f64() + 0.5 * imp.width(n).to_f64();
+            let j = (((y - imp.arch.min_y.to_f64()) / self.step.1) as i32)
                 .min(last(self.dim.1))
                 .max(0);
-            let i = (((x - imp.arch.min_x as f64) / self.step.0) as i32)
+            let i = (((x - imp.arch.min_x.to_f64()) / self.step.0) as i32)
                 .min(last(self.dim.0))
                 .max(0);
             let bin = self.index(i as usize, j as usize);
@@ -243,10 +249,7 @@ fn solve_match(imp: &mut Improver, nodes: &[NodeId]) -> Result<()> {
         return Ok(());
     }
     let count = nodes.len();
-    let pos: Vec<(i64, i64)> = nodes
-        .iter()
-        .map(|&n| (imp.left(n), imp.bottom(n)))
-        .collect();
+    let pos: Vec<Point<Dbu>> = nodes.iter().map(|&n| imp.position(n)).collect();
     let segs: Vec<Vec<SegmentId>> = nodes.iter().map(|&n| imp.cell_segs[n].clone()).collect();
     let cell_node = |i: usize| 2 * i;
     let spot_node = |i: usize| 2 * i + 1;
@@ -267,14 +270,15 @@ fn solve_match(imp: &mut Improver, nodes: &[NodeId]) -> Result<()> {
             cost: 0,
         });
         let orig = imp.orig(n);
-        for (j, &(x, y)) in pos.iter().enumerate() {
+        for (j, &at) in pos.iter().enumerate() {
             if i != j
-                && ((x - orig.0).abs() > imp.max_displacement.0
-                    || (y - orig.1).abs() > imp.max_displacement.1)
+                && ((at.x - orig.x).abs() > imp.max_displacement.x
+                    || (at.y - orig.y).abs() > imp.max_displacement.y)
             {
                 continue;
             }
-            let cost = hpwl_at(imp, n, x + imp.width(n) / 2, y + imp.height(n) / 2) as f64;
+            let center = Point::new(at.x + imp.width(n) / 2, at.y + imp.height(n) / 2);
+            let cost = hpwl_at(imp, n, center).to_f64();
             assignment.push((arcs.len(), i, j));
             arcs.push(Arc {
                 source: cell_node(i),
@@ -306,7 +310,7 @@ fn solve_match(imp: &mut Improver, nodes: &[NodeId]) -> Result<()> {
             imp.remove_cell_from_segment(n, s)?;
         }
         imp.erase(n);
-        imp.set_position(n, pos[j].0, pos[j].1);
+        imp.set_position(n, pos[j]);
         imp.paint(n);
         for &s in &segs[j] {
             imp.add_cell_to_segment(n, s)?;
@@ -324,28 +328,29 @@ fn solve_match(imp: &mut Improver, nodes: &[NodeId]) -> Result<()> {
     Ok(())
 }
 
-/// The wirelength of a cell's nets with it centered at `(x, y)`, as
+/// The wirelength of a cell's nets with it centered at `center`, as
 /// `DetailedMis::getHpwl`; a net the cell has several pins on counts as
 /// often.
-fn hpwl_at(imp: &Improver, n: NodeId, x: i64, y: i64) -> i64 {
-    let mut hpwl = 0;
+fn hpwl_at(imp: &Improver, n: NodeId, center: Point<Dbu>) -> Dbu {
+    let mut hpwl = Dbu::ZERO;
     for &pin in &imp.net.node_pins[n] {
         let edge = &imp.net.edges[imp.net.pins[pin].edge];
         if edge.len() <= 1 || edge.len() > SKIP_EDGES_LARGER_THAN {
             continue;
         }
-        let (mut x0, mut y0, mut x1, mut y1) = (i64::MAX, i64::MAX, i64::MIN, i64::MIN);
+        let (mut x0, mut y0) = (Dbu(i64::MAX), Dbu(i64::MAX));
+        let (mut x1, mut y1) = (Dbu(i64::MIN), Dbu(i64::MIN));
         for &p in edge {
             let other = &imp.net.pins[p];
-            let (px, py) = if other.node == n {
-                (x + other.offset.0, y + other.offset.1)
+            let at = if other.node == n {
+                center + other.offset
             } else {
                 imp.pin_position(p)
             };
-            x0 = x0.min(px);
-            y0 = y0.min(py);
-            x1 = x1.max(px);
-            y1 = y1.max(py);
+            x0 = x0.min(at.x);
+            y0 = y0.min(at.y);
+            x1 = x1.max(at.x);
+            y1 = y1.max(at.y);
         }
         hpwl += (x1 - x0) + (y1 - y0);
     }
@@ -360,21 +365,21 @@ mod tests {
 
     #[test]
     fn a_pass_converges_when_it_changes_the_wirelength_within_the_tolerance() {
-        assert!(converged(1000, 995, TOLERANCE));
+        assert!(converged(Dbu(1000), Dbu(995), TOLERANCE));
     }
 
     #[test]
     fn a_pass_saving_more_than_the_tolerance_has_not_converged() {
-        assert!(!converged(1000, 990, TOLERANCE));
+        assert!(!converged(Dbu(1000), Dbu(990), TOLERANCE));
     }
 
     #[test]
     fn a_pass_lengthening_the_nets_past_the_tolerance_has_not_converged() {
-        assert!(!converged(1000, 1010, TOLERANCE));
+        assert!(!converged(Dbu(1000), Dbu(1010), TOLERANCE));
     }
 
     #[test]
     fn no_wirelength_to_improve_has_converged() {
-        assert!(converged(0, 50, TOLERANCE));
+        assert!(converged(Dbu(0), Dbu(50), TOLERANCE));
     }
 }

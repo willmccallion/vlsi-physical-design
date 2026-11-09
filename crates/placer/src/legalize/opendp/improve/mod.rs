@@ -29,6 +29,8 @@ use pare_common::db::design::NetlistDB;
 use pare_common::db::indices::IdVec;
 use pare_common::geom::dbu::Dbu;
 use pare_common::geom::orient::Orientation;
+use pare_common::geom::point::Point;
+use pare_common::geom::rect::Rect;
 use std::collections::BTreeSet;
 
 /// The seed `improve_placement` gives the random number generator.
@@ -61,9 +63,9 @@ type Result<T> = std::result::Result<T, ImprovementError>;
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Improvement {
     /// Before, in database units.
-    pub hpwl_before: i64,
+    pub hpwl_before: Dbu,
     /// After, in database units.
-    pub hpwl_after: i64,
+    pub hpwl_after: Dbu,
 }
 
 /// Improves a legal placement's wirelength as `improve_placement
@@ -76,7 +78,7 @@ pub struct Improvement {
 /// shapes, or the improver's state comes apart.
 pub fn improve_placement(db: &mut NetlistDB, max_displacement: (i64, i64)) -> Result<Improvement> {
     let hpwl_before = super::mirror::hpwl(db);
-    if hpwl_before == 0 {
+    if hpwl_before == Dbu::ZERO {
         return Ok(Improvement {
             hpwl_before,
             hpwl_after: hpwl_before,
@@ -113,14 +115,14 @@ pare_common::define_index!(
 struct Segment {
     row: usize,
     region: Option<GroupId>,
-    min_x: i64,
-    max_x: i64,
+    min_x: Dbu,
+    max_x: Dbu,
     /// The width of the cells in it.
-    util: i64,
+    util: Dbu,
 }
 
 impl Segment {
-    const fn width(&self) -> i64 {
+    fn width(&self) -> Dbu {
         self.max_x - self.min_x
     }
 }
@@ -128,15 +130,15 @@ impl Segment {
 /// A fixed cell's or blockage's span of a row, as `Blockage`.
 #[derive(Clone, Copy, Debug)]
 struct Blockage {
-    min_x: i64,
-    max_x: i64,
+    min_x: Dbu,
+    max_x: Dbu,
 }
 
 /// One move a trial made, as `MoveCellAction`.
 #[derive(Clone, Debug)]
 struct Move {
     node: NodeId,
-    from: (i64, i64),
+    from: Point<Dbu>,
     from_segs: Vec<SegmentId>,
     to_segs: Vec<SegmentId>,
 }
@@ -178,7 +180,8 @@ struct Improver {
     fixed_cells: Vec<NodeId>,
     journal: Journal,
     rng: Mt19937,
-    max_displacement: (i64, i64),
+    /// How far a cell may move across and up or down from where it began.
+    max_displacement: Point<Dbu>,
     move_limit: usize,
     disallow_one_site_gaps: bool,
 }
@@ -194,20 +197,20 @@ impl Improver {
         let mut net = Network::new(db, &grid)?;
         let arch = Arch::new(db, &grid, &mut net);
         let node_count = net.node_count();
-        let limit = arch.width().max(arch.height()) << 1;
+        let limit = Dbu(arch.width().max(arch.height()).get() << 1);
         let row_height = arch.rows[0].height;
         let displacement = |rows: i64| {
             if rows == 0 {
                 limit
             } else {
-                (rows * row_height).min(limit)
+                (row_height * rows).min(limit)
             }
         };
         let disallow_one_site_gaps = grid.disallow_one_site_gaps;
         Ok(Self {
             grid,
             net,
-            max_displacement: (
+            max_displacement: Point::new(
                 displacement(max_displacement.0),
                 displacement(max_displacement.1),
             ),
@@ -248,56 +251,61 @@ impl Improver {
         Ok(())
     }
 
-    fn left(&self, n: NodeId) -> i64 {
+    fn left(&self, n: NodeId) -> Dbu {
         self.grid
             .nodes
             .get(n)
-            .map_or_else(|| self.net.fixed_node(n).left, |c| c.left.get())
+            .map_or_else(|| self.net.fixed_node(n).left, |c| c.left)
     }
 
-    fn bottom(&self, n: NodeId) -> i64 {
+    fn bottom(&self, n: NodeId) -> Dbu {
         self.grid
             .nodes
             .get(n)
-            .map_or_else(|| self.net.fixed_node(n).bottom, |c| c.bottom.get())
+            .map_or_else(|| self.net.fixed_node(n).bottom, |c| c.bottom)
     }
 
-    fn width(&self, n: NodeId) -> i64 {
+    fn width(&self, n: NodeId) -> Dbu {
         self.grid
             .nodes
             .get(n)
-            .map_or_else(|| self.net.fixed_node(n).width, |c| c.width.get())
+            .map_or_else(|| self.net.fixed_node(n).width, |c| c.width)
     }
 
-    fn height(&self, n: NodeId) -> i64 {
+    fn height(&self, n: NodeId) -> Dbu {
         self.grid
             .nodes
             .get(n)
-            .map_or_else(|| self.net.fixed_node(n).height, |c| c.height.get())
+            .map_or_else(|| self.net.fixed_node(n).height, |c| c.height)
     }
 
-    fn right(&self, n: NodeId) -> i64 {
+    fn right(&self, n: NodeId) -> Dbu {
         self.left(n) + self.width(n)
     }
 
-    fn top(&self, n: NodeId) -> i64 {
+    fn top(&self, n: NodeId) -> Dbu {
         self.bottom(n) + self.height(n)
     }
 
-    fn center_x(&self, n: NodeId) -> i64 {
+    fn center_x(&self, n: NodeId) -> Dbu {
         self.left(n) + self.width(n) / 2
     }
 
-    fn center_y(&self, n: NodeId) -> i64 {
+    fn center_y(&self, n: NodeId) -> Dbu {
         self.bottom(n) + self.height(n) / 2
     }
 
-    fn orig(&self, n: NodeId) -> (i64, i64) {
+    /// Where it stands, its lower left corner.
+    fn position(&self, n: NodeId) -> Point<Dbu> {
+        Point::new(self.left(n), self.bottom(n))
+    }
+
+    fn orig(&self, n: NodeId) -> Point<Dbu> {
         self.net
             .orig
             .get(n)
             .copied()
-            .unwrap_or_else(|| (self.left(n), self.bottom(n)))
+            .unwrap_or_else(|| self.position(n))
     }
 
     fn is_fixed(&self, n: NodeId) -> bool {
@@ -312,10 +320,10 @@ impl Improver {
         self.grid.nodes.get(n).and_then(|c| c.group)
     }
 
-    fn set_position(&mut self, n: NodeId, left: i64, bottom: i64) {
+    fn set_position(&mut self, n: NodeId, at: Point<Dbu>) {
         let node = &mut self.grid.nodes[n];
-        node.left = Dbu(left);
-        node.bottom = Dbu(bottom);
+        node.left = at.x;
+        node.bottom = at.y;
     }
 
     fn rows_spanned(&self, n: NodeId) -> usize {
@@ -323,28 +331,27 @@ impl Improver {
     }
 
     /// Where a pin is, from its cell's center.
-    fn pin_position(&self, pin: NetworkPinId) -> (i64, i64) {
+    fn pin_position(&self, pin: NetworkPinId) -> Point<Dbu> {
         let p = &self.net.pins[pin];
-        (
-            self.center_x(p.node) + p.offset.0,
-            self.center_y(p.node) + p.offset.1,
+        Point::new(
+            self.center_x(p.node) + p.offset.x,
+            self.center_y(p.node) + p.offset.y,
         )
     }
 
     /// The half-perimeter wirelength of an edge's pins, as `Edge::hpwl`.
-    fn edge_hpwl(&self, edge: EdgeId) -> i64 {
-        let mut bounds: Option<(i64, i64, i64, i64)> = None;
+    fn edge_hpwl(&self, edge: EdgeId) -> Dbu {
+        let mut bounds: Option<Rect<Dbu>> = None;
         for &pin in &self.net.edges[edge] {
-            let (x, y) = self.pin_position(pin);
-            bounds = Some(bounds.map_or((x, y, x, y), |(x0, y0, x1, y1)| {
-                (x0.min(x), y0.min(y), x1.max(x), y1.max(y))
-            }));
+            let p = self.pin_position(pin);
+            let at = Rect::new(p, p);
+            bounds = Some(bounds.map_or(at, |b| b.union(&at)));
         }
-        bounds.map_or(0, |(x0, y0, x1, y1)| (x1 - x0) + (y1 - y0))
+        bounds.map_or(Dbu::ZERO, |b| b.width() + b.height())
     }
 
     /// The wirelength of every edge of two or more pins, as `Utility::hpwl`.
-    fn total_hpwl(&self) -> i64 {
+    fn total_hpwl(&self) -> Dbu {
         self.net
             .edges
             .iter_enumerated()
@@ -374,8 +381,8 @@ impl Improver {
     /// Puts a cell on the grid where it stands in its row's orientation, as
     /// `DetailedMgr::paintInGrid`.
     fn paint(&mut self, n: NodeId) {
-        let x = self.grid.grid_x(Dbu(self.left(n)));
-        let y = self.grid.snap_down_y(Dbu(self.bottom(n)));
+        let x = self.grid.grid_x(self.left(n));
+        let y = self.grid.snap_down_y(self.bottom(n));
         self.grid.paint_pixels(n, x, y);
         if let Some(orient) = self.grid.site_orientation(x, y, self.grid.nodes[n].site) {
             self.orient_node(n, orient);
@@ -405,8 +412,12 @@ impl Improver {
         if rotated(from) != rotated(to) {
             let back = rotated(from);
             for &pin in &self.net.node_pins[n] {
-                let (dx, dy) = self.net.pins[pin].offset;
-                self.net.pins[pin].offset = if back { (-dy, dx) } else { (dy, -dx) };
+                let Point { x: dx, y: dy } = self.net.pins[pin].offset;
+                self.net.pins[pin].offset = if back {
+                    Point::new(-dy, dx)
+                } else {
+                    Point::new(dy, -dx)
+                };
             }
             let node = &mut self.grid.nodes[n];
             std::mem::swap(&mut node.width, &mut node.height);
@@ -435,10 +446,10 @@ impl Improver {
         for &pin in &self.net.node_pins[n] {
             let offset = &mut self.net.pins[pin].offset;
             if flip_x {
-                offset.0 = -offset.0;
+                offset.x = -offset.x;
             }
             if flip_y {
-                offset.1 = -offset.1;
+                offset.y = -offset.y;
             }
         }
         self.grid.nodes[n].orient = to;
@@ -451,7 +462,6 @@ mod tests {
     use crate::legalize::opendp::detailed_placement;
     use pare_common::db::design::PlacementStatus;
     use pare_common::db::parser::{def, lef};
-    use pare_common::geom::point::Point;
     use std::path::{Path, PathBuf};
 
     fn fixture(name: &str) -> PathBuf {
@@ -484,7 +494,7 @@ mod tests {
     /// segment.
     #[derive(Debug, PartialEq, Eq)]
     struct Layout {
-        cells: Vec<(i64, i64, Orientation)>,
+        cells: Vec<(Dbu, Dbu, Orientation)>,
         segments: Vec<Vec<NodeId>>,
     }
 
@@ -559,9 +569,9 @@ mod tests {
         let imp = improver();
         let n = imp.movable_cells()[0];
         let row = imp.arch.rows[0];
-        let site = |i: i64| row.left + i * row.site_spacing;
+        let site = |i: i64| row.left + row.site_spacing * i;
 
-        let aligned = imp.align(n, site(3) + 1, site(0), site(40));
+        let aligned = imp.align(n, site(3) + Dbu(1), site(0), site(40));
 
         assert_eq!(aligned, Some(site(3)));
     }
@@ -571,7 +581,7 @@ mod tests {
         let imp = improver();
         let n = imp.movable_cells()[0];
         let row = imp.arch.rows[0];
-        let site = |i: i64| row.left + i * row.site_spacing;
+        let site = |i: i64| row.left + row.site_spacing * i;
         let right = site(40);
 
         let aligned = imp.align(n, right, site(0), right).unwrap();
@@ -585,7 +595,7 @@ mod tests {
         let n = imp.movable_cells()[0];
         let left = imp.arch.rows[0].left;
 
-        let aligned = imp.align(n, left, left, left + imp.width(n) - 1);
+        let aligned = imp.align(n, left, left, left + imp.width(n) - Dbu(1));
 
         assert_eq!(aligned, None);
     }

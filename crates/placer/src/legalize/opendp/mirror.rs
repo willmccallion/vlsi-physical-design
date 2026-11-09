@@ -6,32 +6,31 @@
 use pare_common::db::design::{NetlistDB, PinOwner, PlacementStatus};
 use pare_common::db::indices::{CellId, IdVec, NetId, PinId};
 use pare_common::db::library::MacroClass;
+use pare_common::geom::dbu::Dbu;
+use pare_common::geom::point::Point;
+use pare_common::geom::rect::Rect;
 
 /// Nets with more cell pins than this are left as they are.
 const MAX_CELL_PINS: usize = 100;
 
 /// The bounds of points, empty until one is added, as `odb::Rect` after
 /// `mergeInit`.
-type Bounds = Option<(i64, i64, i64, i64)>;
+type Bounds = Option<Rect<Dbu>>;
 
-fn merge(bounds: Bounds, (x, y): (i64, i64)) -> (i64, i64, i64, i64) {
-    bounds.map_or((x, y, x, y), |(x0, y0, x1, y1)| {
-        (x0.min(x), y0.min(y), x1.max(x), y1.max(y))
-    })
+fn merge(bounds: Bounds, p: Point<Dbu>) -> Rect<Dbu> {
+    let at = Rect::new(p, p);
+    bounds.map_or(at, |b| b.union(&at))
 }
 
-fn bounds_hpwl(bounds: Bounds) -> i64 {
-    bounds.map_or(0, |(x0, y0, x1, y1)| (x1 - x0) + (y1 - y0))
+fn bounds_hpwl(bounds: Bounds) -> Dbu {
+    bounds.map_or(Dbu::ZERO, |b| b.width() + b.height())
 }
 
 /// Where a pin is, as `dbITerm::getAvgXY` for cell pins and the center of
 /// an I/O pin's box. `None` for an unplaced I/O pin.
-fn pin_location(db: &NetlistDB, pin: PinId) -> Option<(i64, i64)> {
+fn pin_location(db: &NetlistDB, pin: PinId) -> Option<Point<Dbu>> {
     match db.pins[pin].owner {
-        PinOwner::Cell { .. } => {
-            let at = db.average_pin_position(pin);
-            Some((at.x.get(), at.y.get()))
-        }
+        PinOwner::Cell { .. } => Some(db.average_pin_position(pin)),
         PinOwner::Io(io) => {
             let io = &db.io_pins[io];
             let placed = matches!(
@@ -45,9 +44,9 @@ fn pin_location(db: &NetlistDB, pin: PinId) -> Option<(i64, i64)> {
                 .placed_shapes()
                 .map(|s| s.rect)
                 .reduce(|a, b| a.union(&b))?;
-            Some((
-                b.min.x.get().midpoint(b.max.x.get()),
-                b.min.y.get().midpoint(b.max.y.get()),
+            Some(Point::new(
+                Dbu(b.min.x.get().midpoint(b.max.x.get())),
+                Dbu(b.min.y.get().midpoint(b.max.y.get())),
             ))
         }
     }
@@ -64,7 +63,7 @@ fn term_bounds(db: &NetlistDB, net: NetId) -> Bounds {
 
 /// The half-perimeter wirelength of the signal nets' pins, as
 /// `odb::WireLengthEvaluator::hpwl`.
-pub(super) fn hpwl(db: &NetlistDB) -> i64 {
+pub(super) fn hpwl(db: &NetlistDB) -> Dbu {
     db.nets
         .ids()
         .filter(|&n| !db.nets[n].signal_use.is_supply())
@@ -134,7 +133,7 @@ fn mirror_candidates(
         if ignored[n] {
             continue;
         }
-        let Some((x0, y0, x1, y1)) = boxes[n] else {
+        let Some(bounds) = boxes[n] else {
             continue;
         };
         for &pin in &db.nets[n].pins {
@@ -151,10 +150,14 @@ fn mirror_candidates(
             {
                 continue;
             }
-            let Some((x, y)) = pin_location(db, pin) else {
+            let Some(at) = pin_location(db, pin) else {
                 continue;
             };
-            if x == x0 || x == x1 || y == y0 || y == y1 {
+            if at.x == bounds.min.x
+                || at.x == bounds.max.x
+                || at.y == bounds.min.y
+                || at.y == bounds.max.y
+            {
                 seen[cell] = true;
                 candidates.push(cell);
             }
@@ -186,7 +189,7 @@ fn cell_nets(db: &NetlistDB, cell: CellId) -> Vec<NetId> {
 
 /// `OptimizeMirroring::hpwl`: the boxes of a cell's nets, a net counted for
 /// each of its pins on it.
-fn nets_hpwl(nets: &[NetId], ignored: &IdVec<NetId, bool>, boxes: &IdVec<NetId, Bounds>) -> i64 {
+fn nets_hpwl(nets: &[NetId], ignored: &IdVec<NetId, bool>, boxes: &IdVec<NetId, Bounds>) -> Dbu {
     nets.iter()
         .filter(|&&n| !ignored[n])
         .map(|&n| bounds_hpwl(boxes[n]))

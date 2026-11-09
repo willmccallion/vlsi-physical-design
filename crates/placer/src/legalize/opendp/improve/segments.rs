@@ -5,7 +5,9 @@ use super::{Blockage, ImprovementError, Improver, Result, Segment};
 use super::{NodeId, SegmentId};
 use crate::legalize::opendp::GroupId;
 use pare_common::db::indices::IdVec;
+use pare_common::geom::dbu::Dbu;
 use pare_common::geom::orient::Orientation;
+use pare_common::geom::point::Point;
 
 impl Improver {
     /// Collects the movable single-row cells by node, as
@@ -45,7 +47,7 @@ impl Improver {
     pub(super) fn find_blockages(&mut self) {
         let rows = self.arch.rows.len();
         let mut blockages: Vec<Vec<Blockage>> = vec![Vec::new(); rows];
-        let mut block = |min_x: i64, max_x: i64, min_y: i64, max_y: i64| {
+        let mut block = |min_x: Dbu, max_x: Dbu, min_y: Dbu, max_y: Dbu| {
             for (r, row) in self.arch.rows.iter().enumerate() {
                 if min_y < row.top() && max_y > row.bottom {
                     blockages[r].push(Blockage { min_x, max_x });
@@ -65,10 +67,10 @@ impl Improver {
         }
         for b in &self.net.blockages {
             block(
-                self.arch.min_x.max(b.min.x.get()),
-                self.arch.max_x.min(b.max.x.get()),
-                self.arch.min_y.max(b.min.y.get()),
-                self.arch.max_y.min(b.max.y.get()),
+                self.arch.min_x.max(b.min.x),
+                self.arch.max_x.min(b.max.x),
+                self.arch.min_y.max(b.min.y),
+                self.arch.max_y.min(b.max.y),
             );
         }
         for row in &mut blockages {
@@ -128,33 +130,33 @@ impl Improver {
         }
         for seg in &mut self.segments {
             let row = &self.arch.rows[seg.row];
-            let mut ix = (seg.min_x - row.left) / row.site_spacing;
-            if row.left + ix * row.site_spacing < seg.min_x {
+            let mut ix = (seg.min_x - row.left).get() / row.site_spacing.get();
+            if row.left + row.site_spacing * ix < seg.min_x {
                 ix += 1;
             }
-            seg.min_x = row.left + ix * row.site_spacing;
-            let ix = (seg.max_x - row.left) / row.site_spacing;
-            seg.max_x = row.left + ix * row.site_spacing;
+            seg.min_x = row.left + row.site_spacing * ix;
+            let ix = (seg.max_x - row.left).get() / row.site_spacing.get();
+            seg.max_x = row.left + row.site_spacing * ix;
         }
         self.cells_in_seg = IdVec::filled(Vec::new(), self.segments.len());
         Ok(())
     }
 
-    fn add_segment(&mut self, row: usize, region: Option<GroupId>, min_x: i64, max_x: i64) {
+    fn add_segment(&mut self, row: usize, region: Option<GroupId>, min_x: Dbu, max_x: Dbu) {
         self.segs_in_row[row].push(self.segments.next_id());
         let _ = self.segments.push(Segment {
             row,
             region,
             min_x,
             max_x,
-            util: 0,
+            util: Dbu::ZERO,
         });
     }
 
     /// Gives the part of each segment of row `r` within `[il, ir)` to the
     /// region, splitting segments as needed; the pieces it adds are visited
     /// too, as in `DetailedMgr::findSegments`.
-    fn split_segments(&mut self, r: usize, region: GroupId, il: i64, ir: i64) -> Result<()> {
+    fn split_segments(&mut self, r: usize, region: GroupId, il: Dbu, ir: Dbu) -> Result<()> {
         let mut s = 0;
         while s < self.segs_in_row[r].len() {
             let id = self.segs_in_row[r][s];
@@ -191,27 +193,27 @@ impl Improver {
 
     /// The site-aligned spans of each row a region wholly covers in height,
     /// as `DetailedMgr::findRegionIntervals`.
-    fn region_intervals(&self, region: GroupId) -> Vec<Vec<(i64, i64)>> {
+    fn region_intervals(&self, region: GroupId) -> Vec<Vec<(Dbu, Dbu)>> {
         let rows = &self.arch.rows;
         let height = rows[0].height;
         let mut intervals = vec![Vec::new(); rows.len()];
         for rect in &self.grid.groups[region].rects {
-            let (xmin, xmax) = (rect.min.x.get(), rect.max.x.get());
-            let (ymin, ymax) = (rect.min.y.get(), rect.max.y.get());
+            let (xmin, xmax) = (rect.min.x, rect.max.x);
+            let (ymin, ymax) = (rect.min.y, rect.max.y);
             for (r, row) in rows.iter().enumerate() {
-                let lb = self.arch.min_y + r as i64 * height;
+                let lb = self.arch.min_y + height * r as i64;
                 if ymax < lb + height || ymin > lb {
                     continue;
                 }
-                let i0 = (xmin - row.left) / row.site_spacing;
-                let mut i1 = (xmax - row.left) / row.site_spacing;
-                if row.left + i1 * row.site_spacing != xmax {
+                let i0 = (xmin - row.left).get() / row.site_spacing.get();
+                let mut i1 = (xmax - row.left).get() / row.site_spacing.get();
+                if row.left + row.site_spacing * i1 != xmax {
                     i1 += 1;
                 }
                 if i1 > i0 {
                     intervals[r].push((
-                        row.left + i0 * row.site_spacing,
-                        row.left + i1 * row.site_spacing,
+                        row.left + row.site_spacing * i0,
+                        row.left + row.site_spacing * i1,
                     ));
                 }
             }
@@ -238,12 +240,12 @@ impl Improver {
     fn closest_segment(&self, n: NodeId) -> Option<SegmentId> {
         let row = self.arch.closest_row(self.bottom(n));
         let (left, width) = (self.left(n), self.width(n));
-        let mut best1: Option<(SegmentId, i64)> = None;
-        let mut best2: Option<(SegmentId, i64)> = None;
+        let mut best1: Option<(SegmentId, Dbu)> = None;
+        let mut best2: Option<(SegmentId, Dbu)> = None;
         let consider = |r: usize,
-                        vert: i64,
-                        best1: &mut Option<(SegmentId, i64)>,
-                        best2: &mut Option<(SegmentId, i64)>| {
+                        vert: Dbu,
+                        best1: &mut Option<(SegmentId, Dbu)>,
+                        best2: &mut Option<(SegmentId, Dbu)>| {
             for &s in &self.segs_in_row[r] {
                 let seg = &self.segments[s];
                 if self.group(n) != seg.region || !self.master_symmetry_allows(n, seg.row) {
@@ -259,15 +261,15 @@ impl Improver {
                 }
             }
         };
-        consider(row, 0, &mut best1, &mut best2);
-        let within = |vert: i64, b1: Option<(SegmentId, i64)>, b2: Option<(SegmentId, i64)>| {
-            let d1 = b1.map_or_else(|| i64::from(i32::MAX), |b| b.1);
-            let d2 = b2.map_or_else(|| i64::from(i32::MAX), |b| b.1);
+        consider(row, Dbu::ZERO, &mut best1, &mut best2);
+        let within = |vert: Dbu, b1: Option<(SegmentId, Dbu)>, b2: Option<(SegmentId, Dbu)>| {
+            let d1 = b1.map_or_else(|| Dbu(i64::from(i32::MAX)), |b| b.1);
+            let d2 = b2.map_or_else(|| Dbu(i64::from(i32::MAX)), |b| b.1);
             vert <= d1 || vert <= d2
         };
         let rows = self.arch.rows.len();
         for offset in 1..=rows {
-            let vert = offset as i64 * self.arch.rows[0].height;
+            let vert = self.arch.rows[0].height * offset as i64;
             if let Some(below) = row.checked_sub(offset)
                 && within(vert, best1, best2)
             {
@@ -325,7 +327,7 @@ impl Improver {
                     let ww = self.width(n).min(width);
                     let xc = self.center_x(n);
                     let xx = (xmin + ww / 2).max((xmax - ww / 2).min(xc));
-                    let disp = ((xc - xx).abs() + dy) as f64;
+                    let disp = ((xc - xx).abs() + dy).to_f64();
                     if best1.as_ref().is_none_or(|b| disp < b.1) {
                         best1 = Some((candidate.clone(), disp));
                     }
@@ -342,7 +344,7 @@ impl Improver {
     fn span_dfs(
         &self,
         s: SegmentId,
-        (xmin, xmax): (i64, i64),
+        (xmin, xmax): (Dbu, Dbu),
         top: usize,
         spanned: usize,
         stack: &mut Vec<SegmentId>,
@@ -353,7 +355,7 @@ impl Improver {
         if row < top {
             for &next in &self.segs_in_row[row + 1] {
                 let seg = &self.segments[next];
-                if xmax.min(seg.max_x) - xmin.max(seg.min_x) > 0 {
+                if xmax.min(seg.max_x) - xmin.max(seg.min_x) > Dbu::ZERO {
                     let clipped = (xmin.max(seg.min_x), xmax.min(seg.max_x));
                     self.span_dfs(next, clipped, top, spanned, stack, candidates)?;
                 }
@@ -391,7 +393,7 @@ impl Improver {
                 }
                 segs
             };
-            let (mut xmin, mut xmax) = (i64::MIN, i64::MAX);
+            let (mut xmin, mut xmax) = (Dbu(i64::MIN), Dbu(i64::MAX));
             for &s in &segs {
                 xmin = xmin.max(self.segments[s].min_x);
                 xmax = xmax.min(self.segments[s].max_x);
@@ -399,7 +401,7 @@ impl Improver {
             }
             let x = xmin.max((xmax - self.width(n)).min(self.left(n)));
             let y = self.arch.rows[self.segments[segs[0]].row].bottom;
-            self.set_position(n, x, y);
+            self.set_position(n, Point::new(x, y));
             self.paint(n);
         }
         Ok(())
@@ -410,7 +412,8 @@ impl Improver {
         let x = self.center_x(n);
         let at = self.cells_in_seg[s].partition_point(|&c| self.center_x(c) < x);
         self.cells_in_seg[s].insert(at, n);
-        self.segments[s].util += self.width(n);
+        let width = self.width(n);
+        self.segments[s].util += width;
         if self.cell_segs[n].contains(&s) {
             return Err(ImprovementError::Internal(
                 "Segment already present in cell to segment map",
@@ -440,7 +443,8 @@ impl Improver {
             .ok_or(ImprovementError::Internal("Cannot find segment for cell"))?;
         let _ = self.cell_segs[n].remove(back);
         let _ = self.cells_in_seg[s].remove(at);
-        self.segments[s].util -= self.width(n);
+        let width = self.width(n);
+        self.segments[s].util -= width;
         Ok(())
     }
 
@@ -504,19 +508,19 @@ impl Improver {
             if self.cell_segs[n].is_empty() {
                 continue;
             }
-            let spanned = (self.height(n) / height) as usize;
+            let spanned = (self.height(n).get() / height.get()) as usize;
             if self.cell_segs[n].len() != spanned {
                 return Err(ImprovementError::Internal(
                     "Reverse cell map incorrectly sized.",
                 ));
             }
-            let first = (self.bottom(n) - self.arch.min_y) / height;
+            let first = (self.bottom(n) - self.arch.min_y).get() / height.get();
             for r in first..first + spanned as i64 {
                 let Some(row) = usize::try_from(r).ok().and_then(|r| self.arch.rows.get(r)) else {
                     problems += 1;
                     continue;
                 };
-                if (self.left(n) - row.left) % row.site_spacing != 0 {
+                if (self.left(n) - row.left).get() % row.site_spacing.get() != 0 {
                     problems += 1;
                 }
             }
@@ -526,11 +530,11 @@ impl Improver {
 
     /// Whether `position` lies within a blockage of a row the cell spans,
     /// as `DetailedMgr::isInsideABlockage`.
-    fn inside_blockage(&self, n: NodeId, position: i64) -> bool {
+    fn inside_blockage(&self, n: NodeId, position: Dbu) -> bool {
         let first = &self.arch.rows[0];
         let last = self.arch.rows.len() as i64 - 1;
-        let start = ((self.bottom(n) - first.bottom) / first.height).max(0);
-        let end = ((self.top(n) - first.bottom) / first.height).min(last);
+        let start = ((self.bottom(n) - first.bottom).get() / first.height.get()).max(0);
+        let end = ((self.top(n) - first.bottom).get() / first.height.get()).min(last);
         (start..end).any(|r| {
             let row = &self.blockages[r as usize];
             let at = row.partition_point(|b| b.max_x < position);
@@ -599,7 +603,7 @@ impl Improver {
     fn fix_one_site_gap(
         &mut self,
         cell: NodeId,
-        gap: i64,
+        gap: Dbu,
         s: SegmentId,
         violating: NodeId,
     ) -> Result<bool> {
@@ -620,6 +624,6 @@ impl Improver {
 }
 
 /// Whether two closed spans meet.
-const fn spans_overlap((b1, t1): (i64, i64), (b2, t2): (i64, i64)) -> bool {
+fn spans_overlap((b1, t1): (Dbu, Dbu), (b2, t2): (Dbu, Dbu)) -> bool {
     (b2 <= b1 && b1 <= t2) || (b1 <= b2 && b2 <= t1)
 }
