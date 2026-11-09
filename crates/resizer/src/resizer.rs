@@ -644,18 +644,29 @@ impl<'a, T: Timing> Resizer<'a, T> {
     /// The load limit at a driver, if any applies.
     #[must_use]
     pub(crate) fn cap_limit(&self, driver: PinId) -> Option<Farads> {
-        let netlist = self.netlist();
-        let own = netlist
-            .lib_cell_port(driver)
-            .and_then(|(c, p)| self.link.liberty.capacitance_limit(c, p));
-        let design = self
-            .timing
-            .analysis()
-            .and_then(|s| s.sdc().limits.max_capacitance);
-        match (own, design) {
+        match self.netlist().lib_cell_port(driver) {
+            Some((cell, port)) => self.port_cap_limit(cell, port),
+            None => self.design_cap_limit(),
+        }
+    }
+
+    /// The load limit on an output port of `cell`: the tighter of its own,
+    /// or its library's default, and the constraints' design limit, as
+    /// `Resizer::maxLoad` reads it.
+    #[must_use]
+    pub(crate) fn port_cap_limit(&self, cell: &LibCell, port: &LibPort) -> Option<Farads> {
+        let own = self.link.liberty.capacitance_limit(cell, port);
+        match (own, self.design_cap_limit()) {
             (Some(a), Some(b)) => Some(a.min(b)),
             (a, b) => a.or(b),
         }
+    }
+
+    /// The load limit the constraints set on the whole design.
+    fn design_cap_limit(&self) -> Option<Farads> {
+        self.timing
+            .analysis()
+            .and_then(|s| s.sdc().limits.max_capacitance)
     }
 
     /// The fanout limit on every driver, if the constraints set one.
