@@ -36,8 +36,9 @@ impl Slack {
     pub const UNCONSTRAINED: Self = Self(Seconds::INFINITY);
 
     /// A slack of `time`.
+    #[cfg(test)]
     #[must_use]
-    pub const fn new(time: Seconds) -> Self {
+    pub(crate) const fn new(time: Seconds) -> Self {
         Self(time)
     }
 
@@ -543,17 +544,6 @@ impl Sta {
                     .flatten()
             })
         })
-    }
-
-    /// The required time at a pin for `edge` on `side`, over the tags;
-    /// none where nothing constrains it.
-    #[must_use]
-    pub fn required(&self, pin: PinId, edge: Edge, side: MinMax) -> Option<Seconds> {
-        self.entries(pin, edge)
-            .iter()
-            .map(|e| e.required[side])
-            .filter(|&r| !unconstrained(r))
-            .reduce(|a, b| if tighter(side, b, a) { b } else { a })
     }
 
     /// The sum of the negative endpoint slacks on `side`.
