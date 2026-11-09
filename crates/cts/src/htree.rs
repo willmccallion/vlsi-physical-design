@@ -192,15 +192,16 @@ pub(crate) enum TreeType {
 }
 
 /// One level of the H-tree: the wire segments of its branches, its
-/// branching points with their parents and sinks.
+/// branching points and their sinks.
+///
+/// Points `2 p` and `2 p + 1` are the two branches of point `p` of the
+/// level above, or of the tree's root for the first level.
 #[derive(Clone, Debug)]
 struct LevelTopology {
     length: f64,
     wire_segments: Vec<usize>,
     points: Vec<TreePoint>,
-    parents: Vec<Option<usize>>,
     sinks: Vec<BranchSinks>,
-    driving_subnet: Vec<Option<usize>>,
     output_slew: u32,
     output_cap: u32,
     curr_wl: i32,
@@ -212,27 +213,39 @@ impl LevelTopology {
             length,
             wire_segments: Vec::new(),
             points: Vec::new(),
-            parents: Vec::new(),
             sinks: Vec::new(),
-            driving_subnet: Vec::new(),
             output_slew: 0,
             output_cap: 0,
             curr_wl: 0,
         }
     }
 
-    fn add_point(&mut self, point: TreePoint, parent: Option<usize>) -> usize {
-        self.points.push(point);
-        self.parents.push(parent);
-        self.sinks.push(BranchSinks::default());
-        self.driving_subnet.push(None);
-        self.points.len() - 1
+    /// Adds the two branching points of the next parent in order, as
+    /// `TritonCTS` adds both points of each parent in turn; returns their
+    /// indices.
+    fn add_branches(&mut self, low: TreePoint, high: TreePoint) -> (usize, usize) {
+        let low_idx = self.points.len();
+        for point in [low, high] {
+            self.points.push(point);
+            self.sinks.push(BranchSinks::default());
+        }
+        (low_idx, low_idx + 1)
     }
 
-    fn sibling(&self, i: usize, parent: Option<usize>) -> usize {
-        (0..self.points.len())
-            .find(|&idx| idx != i && self.parents[idx] == parent)
-            .unwrap_or(i)
+    /// The parent of point `idx`: its index in the level above, or zero for
+    /// the tree's root above the first level.
+    const fn parent_of(idx: usize) -> usize {
+        idx / 2
+    }
+
+    /// The other branch of point `idx`'s parent.
+    const fn sibling_of(idx: usize) -> usize {
+        idx ^ 1
+    }
+
+    /// The two branches of parent `p`.
+    const fn branches_of(p: usize) -> [usize; 2] {
+        [2 * p, 2 * p + 1]
     }
 }
 
@@ -266,9 +279,6 @@ impl BranchSinks {
             .collect()
     }
 }
-
-/// A parent branching point: its index, position and sinks.
-type BranchRoot = (usize, TreePoint, BranchSinks);
 
 /// What every tree builder of a design shares.
 #[derive(Clone, Copy, Debug)]
@@ -834,32 +844,32 @@ impl Builder {
         if level == 1 {
             let root = self.sink_region.center();
             let (low, high) = spread(root, topology.length);
-            let a = topology.add_point(low, None);
-            let b = topology.add_point(high, None);
+            let (a, b) = topology.add_branches(low, high);
             let sinks = self.top_level_sinks_clustered.clone();
             refine_with_clustering(ctx, topology, a, b, root, &sinks);
             return;
         }
         let parent = &self.topologies[level as usize - 2];
-        let roots: Vec<BranchRoot> = parent
+        let roots: Vec<(TreePoint, BranchSinks)> = parent
             .points
             .iter()
-            .enumerate()
-            .map(|(idx, &p)| (idx, p, parent.sinks[idx].clone()))
+            .zip(&parent.sinks)
+            .map(|(&p, sinks)| (p, sinks.clone()))
             .collect();
-        for (idx, root, sinks) in roots {
+        for (root, sinks) in roots {
             let (low, high) = spread(root, topology.length);
-            let a = topology.add_point(low, Some(idx));
-            let b = topology.add_point(high, Some(idx));
+            let (a, b) = topology.add_branches(low, high);
             refine_with_clustering(ctx, topology, a, b, root, &sinks);
         }
     }
 
-    fn parent_point(&self, level_idx: usize, parent: Option<usize>, top: TreePoint) -> TreePoint {
-        match (level_idx, parent) {
-            (0, _) | (_, None) => top,
-            (_, Some(p)) => self.topologies[level_idx - 1].points[p],
+    /// Where the parent of point `idx` of level `level_idx` is, `top` being
+    /// the tree's root.
+    fn parent_point(&self, level_idx: usize, idx: usize, top: TreePoint) -> TreePoint {
+        if level_idx == 0 {
+            return top;
         }
+        self.topologies[level_idx - 1].points[LevelTopology::parent_of(idx)]
     }
 
     fn weighted_distance(&self, new: TreePoint, old: TreePoint, sinks: &[TreePoint]) -> f64 {
@@ -879,8 +889,7 @@ impl Builder {
         for level_idx in 0..self.topologies.len() {
             for idx in 0..self.topologies[level_idx].points.len() {
                 let point = self.topologies[level_idx].points[idx];
-                let parent_idx = self.topologies[level_idx].parents[idx];
-                let parent = self.parent_point(level_idx, parent_idx, new_top);
+                let parent = self.parent_point(level_idx, idx, new_top);
                 let direction = if self.is_horizontal(level_idx as u32 + 1) {
                     if point.x - parent.x > 0.0 {
                         Direction::East
@@ -939,12 +948,11 @@ impl Builder {
         let top = self.sink_region.center();
         for level_idx in 0..self.topologies.len() {
             for idx in 0..self.topologies[level_idx].points.len() {
-                let parent_idx = self.topologies[level_idx].parents[idx];
-                let parent = self.parent_point(level_idx, parent_idx, top);
+                let parent = self.parent_point(level_idx, idx, top);
                 let topology = &self.topologies[level_idx];
                 let sinks = topology.sinks[idx].tree_points();
                 let length = topology.length;
-                let sibling = topology.points[topology.sibling(idx, parent_idx)];
+                let sibling = topology.points[LevelTopology::sibling_of(idx)];
                 let mut point = topology.points[idx];
                 let overlap = point.dist(sibling) == 0.0 || point.dist(parent) == 0.0;
                 if sinks.is_empty() {
@@ -1139,47 +1147,29 @@ impl Builder {
         let root_net = self.clock.add_subnet("clknet_0");
         self.clock.subnets[root_net].level = Some(0);
         self.clock.subnets[root_net].add(root);
-        let levels = self.topologies.len();
-        for level_idx in 0..levels {
-            for idx in 0..self.topologies[level_idx].points.len() {
-                if self.topologies[level_idx].sinks[idx].is_empty() {
+        // Where each branch of a level starts and the subnet driving it,
+        // by parent; a point without sinks has none, nor do its branches.
+        let mut parents = vec![Some((legal_center, root_net))];
+        for level_idx in 0..self.topologies.len() {
+            let mut drivers = vec![None; self.topologies[level_idx].points.len()];
+            for (p, parent) in parents.iter().enumerate() {
+                let Some((from, driving)) = *parent else {
                     continue;
-                }
-                let point = self.topologies[level_idx].points[idx];
-                let (from, driving) = if level_idx == 0 {
-                    (legal_center, root_net)
-                } else {
-                    let parent_idx = self.topologies[level_idx].parents[idx].unwrap_or(0);
-                    let parent = &self.topologies[level_idx - 1];
-                    (
-                        parent.points[parent_idx],
-                        parent.driving_subnet[parent_idx].unwrap_or(root_net),
-                    )
                 };
-                let legal = self.legalize_one_buffer(ctx, point, ctx.root_buffer);
-                self.commit_move(point, legal);
-                if level_idx > 0 && self.clock.subnets[driving].level.is_none() {
-                    self.clock.subnets[driving].level = Some(level_idx as u32);
+                for idx in LevelTopology::branches_of(p) {
+                    if self.topologies[level_idx].sinks[idx].is_empty() {
+                        continue;
+                    }
+                    let point = self.topologies[level_idx].points[idx];
+                    let end = self.build_branch(ctx, tech, (level_idx, idx), from, driving);
+                    drivers[idx] = Some((point, end));
                 }
-                let wires = self.topologies[level_idx].wire_segments.clone();
-                let mut segment = SegmentBuilder {
-                    inst_prefix: format!("clkbuf_{}_{idx}_", level_idx + 1),
-                    net_prefix: format!("clknet_{}_{idx}_", level_idx + 1),
-                    root: from,
-                    target: legal,
-                    driving,
-                    levels: 0,
-                };
-                segment.build(self, ctx, tech, &wires);
-                if level_idx == levels - 1 {
-                    segment.force_buffer(self, ctx.root_buffer);
-                }
-                self.topologies[level_idx].driving_subnet[idx] = Some(segment.driving);
             }
+            parents = drivers;
         }
-        let leaf = levels - 1;
-        for idx in 0..self.topologies[leaf].points.len() {
-            let Some(subnet) = self.topologies[leaf].driving_subnet[idx] else {
+        let leaf = self.topologies.len() - 1;
+        for (idx, driver) in parents.iter().enumerate() {
+            let Some((_, subnet)) = *driver else {
                 continue;
             };
             self.clock.subnets[subnet].leaf = true;
@@ -1189,6 +1179,39 @@ impl Builder {
                 self.clock.subnets[subnet].add(inst);
             }
         }
+    }
+
+    /// Lays the buffers of the branch from `from` to point `idx` of level
+    /// `level_idx`, driven by subnet `driving`; returns the subnet the
+    /// branch's end drives.
+    fn build_branch(
+        &mut self,
+        ctx: &TreeContext<'_>,
+        tech: &TechChar,
+        (level_idx, idx): (usize, usize),
+        from: TreePoint,
+        driving: usize,
+    ) -> usize {
+        let point = self.topologies[level_idx].points[idx];
+        let legal = self.legalize_one_buffer(ctx, point, ctx.root_buffer);
+        self.commit_move(point, legal);
+        if level_idx > 0 && self.clock.subnets[driving].level.is_none() {
+            self.clock.subnets[driving].level = Some(level_idx as u32);
+        }
+        let wires = self.topologies[level_idx].wire_segments.clone();
+        let mut segment = SegmentBuilder {
+            inst_prefix: format!("clkbuf_{}_{idx}_", level_idx + 1),
+            net_prefix: format!("clknet_{}_{idx}_", level_idx + 1),
+            root: from,
+            target: legal,
+            driving,
+            levels: 0,
+        };
+        segment.build(self, ctx, tech, &wires);
+        if level_idx == self.topologies.len() - 1 {
+            segment.force_buffer(self, ctx.root_buffer);
+        }
+        segment.driving
     }
 
     /// One buffer driving every sink, as
@@ -1639,8 +1662,8 @@ mod tests {
         let scene = Scene::new(vec![rect(60, 40, 80, 60), rect(55, 35, 65, 45)]);
         let mut builder = builder();
         let mut level = LevelTopology::new(20.0);
-        let dummy = level.add_point(TreePoint::new(0.0, 0.0), None);
-        let branch = level.add_point(TreePoint::new(30.0, 50.0), None);
+        let (dummy, branch) =
+            level.add_branches(TreePoint::new(0.0, 0.0), TreePoint::new(30.0, 50.0));
         level.sinks[branch].push((30.0, 40.0), InstRef::Sink(0));
         builder.topologies.push(level);
 
