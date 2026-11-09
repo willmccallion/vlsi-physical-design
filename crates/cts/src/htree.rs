@@ -1537,9 +1537,11 @@ fn along_blockage(
     } = blockage;
     let (px, py) = (parent.x, parent.y);
     match direction {
+        // NOTE: addCandidatePointsAlongBlockage sets the second point's y
+        // where its own derivation gives x; PARE puts it at the target.
         Direction::North => [
             TreePoint::new(-target - py + px + y1, y1),
-            TreePoint::new(-target - py + px + y1, target + py + px - y1),
+            TreePoint::new(target + py + px - y1, y1),
         ],
         Direction::East => [
             TreePoint::new(x1, target + py + px - x1),
@@ -2059,5 +2061,23 @@ mod tests {
             moved.is_some_and(|p| p.same(TreePoint::new(60.0, 20.0))),
             "{moved:?}"
         );
+    }
+
+    #[test]
+    fn a_north_branch_blocked_ahead_moves_along_the_blockage_edge_toward_its_sinks() {
+        let scene = Scene::new(vec![rect(40, 20, 70, 60)]);
+        let ctx = scene.ctx();
+        let sinks = [TreePoint::new(62.0, 18.0)];
+        let search = LegalSearch {
+            ctx: &ctx,
+            target: 30.0,
+            parent: TreePoint::new(50.0, 0.0),
+            sinks: &sinks,
+            direction: Direction::North,
+        };
+
+        let moved = builder().adjust_beyond_blockage(&search, TreePoint::new(50.0, 30.0));
+
+        assert!(moved.same(TreePoint::new(60.0, 20.0)), "{moved:?}");
     }
 }
