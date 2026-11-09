@@ -34,19 +34,18 @@ use pare_common::db::design::{
     GCellGridDef, NetlistDB, PinOwner, PlacementStatus, RouteElem, TrackAxis,
 };
 use pare_common::db::indices::{LayerId, NetId, PinId};
-use pare_common::db::library::Shape;
+use pare_common::db::library::{Direction, Shape};
 use pare_common::geom::dbu::Dbu;
 use pare_common::geom::point::Point;
 use pare_common::geom::rect::Rect;
 use pare_common::util::config::{LayerRangeError, RoutingConfig, Share};
-use pare_common::util::{memory, ui};
 use pare_common::verify::shapes::obstruction_shapes;
 use rustc_hash::{FxHashMap, FxHashSet};
 use search::Costs;
 pub use session::GlobalSession;
 use state::{DetailedState, GridShape};
 pub use state::{RouteState, StateParseError};
-use std::time::Instant;
+use std::time::{Duration, Instant};
 use tech::{MAX_DIE_REACH, MAX_GRID_SPAN, RouteTech};
 use track::assign_tracks;
 
@@ -68,8 +67,9 @@ pub struct RoutingSummary {
     pub state_saved: bool,
 }
 
-/// Where a routing run resumes from and when it saves its state.
-#[derive(Debug, Default)]
+/// Where a routing run resumes from, when it saves its state, what it
+/// traces and whom it reports its progress to.
+#[derive(Default)]
 pub struct RunOptions<'a> {
     /// A state saved by an earlier run on the same design, to go on from.
     pub resume: Option<&'a RouteState>,
@@ -77,6 +77,101 @@ pub struct RunOptions<'a> {
     pub save: Option<Save<'a>>,
     /// The nets and area whose detailed routing to log in detail.
     pub trace: TraceRequest,
+    /// Takes the run's progress as it goes.
+    pub report: Option<&'a mut dyn FnMut(&Progress<'_>)>,
+}
+
+impl std::fmt::Debug for RunOptions<'_> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("RunOptions")
+            .field("resume", &self.resume)
+            .field("save", &self.save)
+            .field("trace", &self.trace)
+            .finish_non_exhaustive()
+    }
+}
+
+/// What a routing run reports as it goes, for its caller to show.
+#[derive(Clone, Debug, PartialEq)]
+pub enum Progress<'a> {
+    /// A stage of the run finished after `elapsed`.
+    Stage {
+        /// The stage.
+        stage: Stage,
+        /// How long it took.
+        elapsed: Duration,
+    },
+    /// Global routing finished on a grid of `gcells` columns and rows.
+    GlobalRouted {
+        /// The grid's columns and rows.
+        gcells: (u16, u16),
+        /// Tracks the routes take beyond the edges' capacity.
+        overflow: i64,
+        /// Each routing layer's totals, lowest first.
+        layers: &'a [LayerLoad<'a>],
+    },
+    /// Settling the global routes after repair kept some and routed the
+    /// rest again.
+    GlobalSettled {
+        /// Nets whose routes were kept.
+        kept: usize,
+        /// Nets routed again.
+        rerouted: usize,
+    },
+    /// A detailed round finished; the first is the first pass, or the round
+    /// a resumed run was saved after.
+    DetailedRound(RoundReport),
+}
+
+/// A stage of a routing run.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Stage {
+    /// Finding pin access.
+    PinAccess,
+    /// Building the gcell grid.
+    GCellGrid,
+    /// Routing every net globally.
+    GlobalRoute,
+    /// Taking the global routes from a saved state.
+    GlobalRestore,
+    /// Keeping or routing again the global routes after repair.
+    GlobalSettle,
+    /// Assigning tracks along the global routes.
+    TrackAssignment,
+}
+
+/// One routing layer's global routing totals, in whole tracks.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct LayerLoad<'a> {
+    /// The layer's name.
+    pub name: &'a str,
+    /// Its preferred direction.
+    pub direction: Direction,
+    /// Tracks its edges offer.
+    pub capacity: i64,
+    /// Tracks the routes take.
+    pub usage: i64,
+    /// Usage beyond capacity.
+    pub overflow: i64,
+}
+
+/// What one detailed round did.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct RoundReport {
+    /// The round; 0 is the first pass.
+    pub round: usize,
+    /// Design rule markers left.
+    pub markers: usize,
+    /// Nets still in conflict.
+    pub conflicted: usize,
+    /// Pieces ripped up and routed again.
+    pub repaired: usize,
+    /// The cost of a conflict this round.
+    pub conflict_cost: f64,
+    /// The flow the round ran.
+    pub flow: &'static str,
+    /// How long it took.
+    pub elapsed: Duration,
 }
 
 /// Nets, by name, and an area whose detailed routing to log in detail.
@@ -152,9 +247,11 @@ pub fn route_with(
     check_routable(db)?;
     let tech = RouteTech::new(db, config)?;
     let gcell = gcell_size(&tech, config);
+    let mut silent = |_: &Progress<'_>| {};
+    let report = run.report.take().unwrap_or(&mut silent);
     let (routes, summary, gcells) = {
-        let routed = global_stage(db, &tech, config, gcell, run.resume)?;
-        route_detailed(db, &tech, config, gcell, routed, &mut run)?
+        let routed = global_stage(db, &tech, config, gcell, run.resume, report)?;
+        route_detailed(db, &tech, config, gcell, routed, &mut run, report)?
     };
     write_wiring(db, routes, gcells);
     Ok(summary)
@@ -179,9 +276,22 @@ pub fn route_on(
     check_routable(db)?;
     let (tech, grid, routes, routed) = global.into_parts(db);
     let gcell = gcell_size(&tech, config);
+    let mut silent = |_: &Progress<'_>| {};
+    let report = run.report.take().unwrap_or(&mut silent);
     let (routes, summary, gcells) = {
-        let settled = settled_stage(db, &tech, config, gcell, grid, routes, routed);
-        route_detailed(db, &tech, config, gcell, settled, &mut run)?
+        let settled = settled_stage(
+            db,
+            &tech,
+            config,
+            gcell,
+            Settling {
+                grid,
+                global: routes,
+                routed,
+            },
+            report,
+        );
+        route_detailed(db, &tech, config, gcell, settled, &mut run, report)?
     };
     write_wiring(db, routes, gcells);
     Ok(summary)
@@ -219,6 +329,7 @@ fn route_detailed(
     gcell: Dbu,
     routed: GlobalStage<'_>,
     run: &mut RunOptions<'_>,
+    report: &mut dyn FnMut(&Progress<'_>),
 ) -> Result<DetailedResult, RouteError> {
     let via = 4.0 * tech.layer(tech.min_layer).pitch().to_f64();
     let GlobalStage {
@@ -240,7 +351,10 @@ fn route_detailed(
     let wires = assign_tracks(tech, &dr.occupancy, &grid, &global, &dr.pin_points());
     dr.set_guides(global, &grid);
     dr.set_track_wires(wires);
-    stage("Track assign:", start);
+    report(&Progress::Stage {
+        stage: Stage::TrackAssignment,
+        elapsed: start.elapsed(),
+    });
     dr.log_inaccessible_pins();
     let mut summary = RoutingSummary {
         nets: nets.len(),
@@ -248,8 +362,8 @@ fn route_detailed(
         ..RoutingSummary::default()
     };
     let mut negotiation = match run.resume.and_then(|s| s.detailed.as_ref()) {
-        Some(saved) => Negotiation::resumed(&mut dr, db, saved, via)?,
-        None => Negotiation::after_first_pass(&mut dr, &nets, via),
+        Some(saved) => Negotiation::resumed(&mut dr, db, saved, via, report)?,
+        None => Negotiation::after_first_pass(&mut dr, &nets, via, report),
     };
     summary.rounds = negotiation.first_round - 1;
     if negotiation.first_round == 1 {
@@ -268,15 +382,15 @@ fn route_detailed(
         state_saved |= run.save_at(SavePoint::Round(round), || {
             saver.detailed_state(&dr, round, &negotiation)
         })?;
-        ui::dr_iter(
+        report(&Progress::DetailedRound(RoundReport {
             round,
-            dr.marker_count(),
-            negotiation.conflicted.len(),
-            repaired.pieces,
-            costs.conflict,
-            flow.name(),
-            start.elapsed().as_millis(),
-        );
+            markers: dr.marker_count(),
+            conflicted: negotiation.conflicted.len(),
+            repaired: repaired.pieces,
+            conflict_cost: costs.conflict,
+            flow: flow.name(),
+            elapsed: start.elapsed(),
+        }));
     }
     dr.log_conflicts();
     summary.conflicted = negotiation.conflicted;
@@ -312,22 +426,22 @@ impl Negotiation {
         db: &NetlistDB,
         saved: &DetailedState,
         via: f64,
+        report: &mut dyn FnMut(&Progress<'_>),
     ) -> Result<Self, RouteError> {
         let start = Instant::now();
         let routes = named_routes(db, &saved.routes)?;
         dr.restore(&routes)?;
         dr.occupancy.shrink_to_fit();
-        ui::dr_table_header();
         let conflicted = dr.rejudge();
-        ui::dr_iter(
-            saved.round,
-            dr.marker_count(),
-            conflicted.len(),
-            0,
-            round_costs(saved.round, via).conflict,
-            saved.flow.name(),
-            start.elapsed().as_millis(),
-        );
+        report(&Progress::DetailedRound(RoundReport {
+            round: saved.round,
+            markers: dr.marker_count(),
+            conflicted: conflicted.len(),
+            repaired: 0,
+            conflict_cost: round_costs(saved.round, via).conflict,
+            flow: saved.flow.name(),
+            elapsed: start.elapsed(),
+        }));
         Ok(Self {
             first_round: saved.round + 1,
             conflicted,
@@ -337,24 +451,28 @@ impl Negotiation {
     }
 
     /// Routes `nets` for the first time.
-    fn after_first_pass(dr: &mut DetailedRouter<'_>, nets: &[NetId], via: f64) -> Self {
+    fn after_first_pass(
+        dr: &mut DetailedRouter<'_>,
+        nets: &[NetId],
+        via: f64,
+        report: &mut dyn FnMut(&Progress<'_>),
+    ) -> Self {
         let start = Instant::now();
         dr.log_footprint("track assignment");
         let first = dr.route_initial(nets, round_costs(0, via));
         dr.occupancy.shrink_to_fit();
         dr.log_footprint("first pass");
-        ui::dr_table_header();
         let conflicted = dr.rejudge();
         let flows = FlowState::after_first_pass();
-        ui::dr_iter(
-            0,
-            dr.marker_count(),
-            conflicted.len(),
-            first.pieces,
-            round_costs(0, via).conflict,
-            flows.current().name(),
-            start.elapsed().as_millis(),
-        );
+        report(&Progress::DetailedRound(RoundReport {
+            round: 0,
+            markers: dr.marker_count(),
+            conflicted: conflicted.len(),
+            repaired: first.pieces,
+            conflict_cost: round_costs(0, via).conflict,
+            flow: flows.current().name(),
+            elapsed: start.elapsed(),
+        }));
         Self {
             first_round: 1,
             conflicted,
@@ -510,7 +628,11 @@ fn net_ids(db: &NetlistDB) -> FxHashMap<&str, NetId> {
 
 /// Global routing and track assignment of every signal net of `db`, for
 /// measuring them on their own; the design is left as it is.
-pub fn route_global_only(db: &NetlistDB, config: &RoutingConfig) -> Result<GlobalOnly, RouteError> {
+pub fn route_global_only(
+    db: &NetlistDB,
+    config: &RoutingConfig,
+    report: &mut dyn FnMut(&Progress<'_>),
+) -> Result<GlobalOnly, RouteError> {
     check_routable(db)?;
     let tech = RouteTech::new(db, config)?;
     let gcell = gcell_size(&tech, config);
@@ -520,10 +642,13 @@ pub fn route_global_only(db: &NetlistDB, config: &RoutingConfig) -> Result<Globa
         grid,
         global,
         ..
-    } = global_stage(db, &tech, config, gcell, None)?;
+    } = global_stage(db, &tech, config, gcell, None, report)?;
     let start = Instant::now();
     let _ = assign_tracks(&tech, &dr.occupancy, &grid, &global, &dr.pin_points());
-    stage("Track assign:", start);
+    report(&Progress::Stage {
+        stage: Stage::TrackAssignment,
+        elapsed: start.elapsed(),
+    });
     let mut guides: Vec<NetGuide> = global
         .paths
         .iter()
@@ -623,11 +748,15 @@ fn global_stage<'a>(
     config: &RoutingConfig,
     gcell: Dbu,
     resume: Option<&RouteState>,
+    report: &mut dyn FnMut(&Progress<'_>),
 ) -> Result<GlobalStage<'a>, RouteError> {
     let start = Instant::now();
     let dr = DetailedRouter::new(db, tech, gcell);
     let nets = routable_nets(db);
-    stage("Pin access:", start);
+    report(&Progress::Stage {
+        stage: Stage::PinAccess,
+        elapsed: start.elapsed(),
+    });
 
     let start = Instant::now();
     let mut grid = GlobalGrid::new(
@@ -637,7 +766,10 @@ fn global_stage<'a>(
         gcell,
         config.global_capacity_reserve,
     );
-    stage("GCell grid:", start);
+    report(&Progress::Stage {
+        stage: Stage::GCellGrid,
+        elapsed: start.elapsed(),
+    });
     let start = Instant::now();
     let global_nets: Vec<GlobalNet> = nets
         .iter()
@@ -653,37 +785,44 @@ fn global_stage<'a>(
         Some(state) => restored_global(db, tech, &grid, &global_nets, state)?,
         None => route_global(&mut grid, &global_nets, config.global_iterations),
     };
-    let (nx, ny) = grid.size();
-    stage(
-        if resume.is_some() {
-            "Global restored:"
+    report(&Progress::Stage {
+        stage: if resume.is_some() {
+            Stage::GlobalRestore
         } else {
-            "Global route:"
+            Stage::GlobalRoute
         },
-        start,
-    );
-    ui::stat_row(
-        "GCells:",
-        &format!("{nx}x{ny}"),
-        "GR overflow:",
-        &grid.overflow().rounded().to_string(),
-    );
-    ui::gr_layer_table_header();
-    for t in grid.layer_totals() {
-        ui::gr_layer_row(
-            &db.library.layer(t.layer).name,
-            t.direction,
-            t.capacity.rounded(),
-            t.usage.rounded(),
-            t.overflow.rounded(),
-        );
-    }
+        elapsed: start.elapsed(),
+    });
+    let layers: Vec<LayerLoad<'_>> = grid
+        .layer_totals()
+        .into_iter()
+        .map(|t| LayerLoad {
+            name: &db.library.layer(t.layer).name,
+            direction: t.direction,
+            capacity: t.capacity.rounded(),
+            usage: t.usage.rounded(),
+            overflow: t.overflow.rounded(),
+        })
+        .collect();
+    report(&Progress::GlobalRouted {
+        gcells: grid.size(),
+        overflow: grid.overflow().rounded(),
+        layers: &layers,
+    });
     Ok(GlobalStage {
         dr,
         nets,
         grid,
         global,
     })
+}
+
+/// The global routes a session kept, to settle against pin access found
+/// afresh: its grid, its routes and the nets they were routed for.
+struct Settling {
+    grid: GlobalGrid,
+    global: GlobalRoutes,
+    routed: FxHashMap<NetId, GlobalNet>,
 }
 
 /// Pin access found afresh, with the global routes a session kept: a net
@@ -695,14 +834,21 @@ fn settled_stage<'a>(
     tech: &'a RouteTech,
     config: &RoutingConfig,
     gcell: Dbu,
-    mut grid: GlobalGrid,
-    mut global: GlobalRoutes,
-    mut routed: FxHashMap<NetId, GlobalNet>,
+    settling: Settling,
+    report: &mut dyn FnMut(&Progress<'_>),
 ) -> GlobalStage<'a> {
+    let Settling {
+        mut grid,
+        mut global,
+        mut routed,
+    } = settling;
     let start = Instant::now();
     let dr = DetailedRouter::new(db, tech, gcell);
     let nets = routable_nets(db);
-    stage("Pin access:", start);
+    report(&Progress::Stage {
+        stage: Stage::PinAccess,
+        elapsed: start.elapsed(),
+    });
     let start = Instant::now();
     let mut dirty = Vec::new();
     let mut kept = FxHashSet::default();
@@ -739,13 +885,14 @@ fn settled_stage<'a>(
     }
     let rerouted = global::reroute(&mut grid, &dirty, config.global_iterations);
     global.paths.extend(rerouted.paths);
-    stage("Global settled:", start);
-    ui::stat_row(
-        "Routes kept:",
-        &kept.len().to_string(),
-        "Routed again:",
-        &dirty.len().to_string(),
-    );
+    report(&Progress::Stage {
+        stage: Stage::GlobalSettle,
+        elapsed: start.elapsed(),
+    });
+    report(&Progress::GlobalSettled {
+        kept: kept.len(),
+        rerouted: dirty.len(),
+    });
     GlobalStage {
         dr,
         nets,
@@ -1007,16 +1154,6 @@ fn shapes_touch(a: &[Shape], b: &[Shape]) -> bool {
         b.iter()
             .any(|y| x.layer == y.layer && x.rect.overlaps(&y.rect))
     })
-}
-
-fn stage(label: &str, start: Instant) {
-    let resident = memory::current_rss_mb().map_or_else(String::new, |mb| format!("{mb} MB"));
-    ui::stat_row(
-        label,
-        &format!("{:.1}s", start.elapsed().as_secs_f64()),
-        "Resident:",
-        &resident,
-    );
 }
 
 /// Why routing could not run.

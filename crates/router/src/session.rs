@@ -9,7 +9,7 @@ use crate::access::{access_points, fellow_boxes, order_toward};
 use crate::detailed::{PinJudge, PinTerminal};
 use crate::global::{GCell, GlobalGrid, GlobalNet, GlobalRoutes, reroute, track_demand};
 use crate::tech::RouteTech;
-use crate::{GlobalStage, RouteError, check_routable, gcell_size, global_stage};
+use crate::{GlobalStage, Progress, RouteError, check_routable, gcell_size, global_stage};
 use pare_common::db::design::{NetlistDB, PinOwner, Renumbering};
 use pare_common::db::global_route::{
     NetRoute, PinGridLocation, RoutePoint, RouteSegment, RouteSource,
@@ -47,14 +47,18 @@ impl GlobalSession {
     /// # Errors
     ///
     /// When `db` cannot be routed under `config`.
-    pub fn new(db: &NetlistDB, config: &RoutingConfig) -> Result<Self, RouteError> {
+    pub fn new(
+        db: &NetlistDB,
+        config: &RoutingConfig,
+        report: &mut dyn FnMut(&Progress<'_>),
+    ) -> Result<Self, RouteError> {
         check_routable(db)?;
         let tech = RouteTech::new(db, config)?;
         let gcell = gcell_size(&tech, config);
         let (grid, routes, nets, judge) = {
             let GlobalStage {
                 dr, grid, global, ..
-            } = global_stage(db, &tech, config, gcell, None)?;
+            } = global_stage(db, &tech, config, gcell, None, report)?;
             let mut nets = FxHashMap::default();
             for &net in global.paths.keys() {
                 if let Some(terminals) = dr.pin_terminals(net, &grid) {
@@ -518,7 +522,7 @@ mod tests {
     fn detailed_routing_takes_each_nets_rule_as_it_is_after_renumbering() {
         let mut db = tiny_with_a_rule_after_a_spare_net();
         let config = RoutingConfig::default();
-        let mut session = GlobalSession::new(&db, &config).unwrap();
+        let mut session = GlobalSession::new(&db, &config, &mut |_| {}).unwrap();
         let u7 = db.cell_id("u7").unwrap();
         let spare = db.net_id("spare").unwrap();
         let renumbering = db.remove(&[u7], &[spare]).unwrap();
