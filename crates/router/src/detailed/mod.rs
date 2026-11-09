@@ -25,7 +25,7 @@ pub(crate) use schedule::{RipUp, round_costs, round_strategy};
 pub use trace::Trace;
 
 use crate::access::{AccessPoint, Node, access_points, fellow_boxes, order_toward};
-use crate::global::{GCell, GlobalGrid, GlobalRoutes, RouteTree};
+use crate::global::{GCell, Gcells, GlobalGrid, GlobalRoutes, RouteTree};
 use crate::occupancy::{Occupancy, Origin, Owner, Proximity, Slot};
 use crate::runs::EdgeSet;
 pub use crate::search::Costs;
@@ -888,7 +888,7 @@ impl<'a> DetailedRouter<'a> {
     /// The nodes of `sub` near `rep`, or all of them if none is; a small
     /// target area keeps the search's distance estimate sharp.
     fn join_targets(&self, sub: &SubTree, rep: &Rect<Dbu>) -> FxHashMap<Node, (usize, f64)> {
-        let reach = self.gcell * JOIN_GCELLS;
+        let reach = JOIN_GCELLS.length(self.gcell);
         let near: FxHashMap<Node, (usize, f64)> = sub
             .nodes
             .iter()
@@ -1263,7 +1263,7 @@ const CHUNK_PINS: usize = 256;
 
 /// Distance, in gcells, from a chunk's first pin within which another chunk
 /// joins its subtree.
-const JOIN_GCELLS: i64 = 2;
+const JOIN_GCELLS: Gcells = Gcells(2);
 
 /// The paths of a tree over some pins, the access point used for each pin,
 /// and every node it covers.
@@ -1282,7 +1282,7 @@ struct TreeIndex {
     origin: Point<Dbu>,
     gcell: Dbu,
     nodes: FxHashSet<Node>,
-    buckets: FxHashMap<(i64, i64), Vec<NodeAt>>,
+    buckets: FxHashMap<Point<Gcells>, Vec<NodeAt>>,
 }
 
 impl TreeIndex {
@@ -1295,10 +1295,10 @@ impl TreeIndex {
         }
     }
 
-    fn key(&self, p: Point<Dbu>) -> (i64, i64) {
-        (
-            (p.x - self.origin.x).get().div_euclid(self.gcell.get()),
-            (p.y - self.origin.y).get().div_euclid(self.gcell.get()),
+    fn key(&self, p: Point<Dbu>) -> Point<Gcells> {
+        Point::new(
+            Gcells::holding(p.x - self.origin.x, self.gcell),
+            Gcells::holding(p.y - self.origin.y, self.gcell),
         )
     }
 
@@ -1319,12 +1319,11 @@ impl TreeIndex {
 
     /// Tree nodes inside `r`, as zero-cost search sources.
     fn nodes_in(&self, r: &Rect<Dbu>) -> Vec<(Node, f64)> {
-        let (x0, y0) = self.key(r.min);
-        let (x1, y1) = self.key(r.max);
+        let (low, high) = (self.key(r.min), self.key(r.max));
         let mut out = Vec::new();
-        for bx in x0..=x1 {
-            for by in y0..=y1 {
-                for &(n, p) in self.buckets.get(&(bx, by)).into_iter().flatten() {
+        for x in low.x.through(high.x) {
+            for y in low.y.through(high.y) {
+                for &(n, p) in self.buckets.get(&Point::new(x, y)).into_iter().flatten() {
                     if r.contains(p) {
                         out.push((n, 0.0));
                     }
