@@ -26,9 +26,12 @@ pub enum CtsError {
     /// No usable buffer was found for the clock tree.
     #[error("no clock buffers")]
     NoBuffers,
-    /// A cell named as a clock buffer is not a buffer.
-    #[error("cell '{0}' is not a buffer")]
-    NotABuffer(String),
+    /// A clock buffer's master has no pin for one of its Liberty ports.
+    #[error("the master of cell '{0}' has no pin for its input or output")]
+    MissingPin(String),
+    /// A clock buffer has no delay arc from its input to its output.
+    #[error("cell '{0}' has no delay arc from its input to its output")]
+    NoDelayArc(String),
     /// A clock buffer has no physical master.
     #[error("cell '{0}' has no master")]
     NoMaster(String),

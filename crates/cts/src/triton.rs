@@ -15,7 +15,7 @@ use pare_common::db::design::{
     NetlistDB, NonDefaultLayer, NonDefaultRule, PinOwner, PlacementStatus,
 };
 use pare_common::db::indices::{CellId, LayerId, MacroPinId, NetId, NonDefaultRuleId, PinId};
-use pare_common::db::liberty::{Edge, LibCellId, LibPortId, Liberty, MinMax};
+use pare_common::db::liberty::{BufferCell, Edge, LibCellId, LibPortId, Liberty, MinMax};
 use pare_common::db::library::{MacroClass, PinDirection, SignalUse};
 use pare_common::db::sdc::Sdc;
 use pare_common::geom::dbu::Dbu;
@@ -86,7 +86,7 @@ pub struct ClockTrees {
 impl ClockTrees {
     /// The clock buffers, as inferred from the library.
     #[must_use]
-    pub fn clock_buffers(&self) -> &[LibCellId] {
+    pub fn clock_buffers(&self) -> &[BufferCell] {
         &self.setup.buffers.all
     }
 
@@ -104,7 +104,7 @@ pub(crate) struct TreeSetup {
     pub settings: Settings,
     pub buffers: ClockBuffers,
     /// The width and height of each buffer's master.
-    pub buffer_sizes: FxHashMap<LibCellId, DbPoint<Dbu>>,
+    pub buffer_sizes: FxHashMap<BufferCell, DbPoint<Dbu>>,
     /// Where buffers must not go.
     pub blockages: Vec<Rect<Dbu>>,
 }
@@ -170,10 +170,10 @@ pub fn synthesize(db: &mut NetlistDB, input: &CtsInput<'_>) -> Result<ClockTrees
     };
     cts.summary
         .root_buffer
-        .clone_from(&liberty.cell(cts.setup.buffers.root).name);
+        .clone_from(&liberty.cell(cts.setup.buffers.root.id).name);
     cts.summary
         .sink_buffer
-        .clone_from(&liberty.cell(cts.setup.buffers.sink).name);
+        .clone_from(&liberty.cell(cts.setup.buffers.sink.id).name);
     cts.populate(db, input.sdc)?;
     if !cts.builders.is_empty() {
         cts.build(db, &mut tech)?;
@@ -562,14 +562,14 @@ impl Cts<'_> {
     fn make_buffer(
         &self,
         db: &mut NetlistDB,
-        buffer: LibCellId,
+        buffer: BufferCell,
         name: &str,
         at: DbPoint<Dbu>,
     ) -> Result<CellId, CtsError> {
         let master = self
             .link
-            .macro_of(buffer)
-            .ok_or_else(|| CtsError::NoMaster(self.link.liberty.cell(buffer).name.clone()))?;
+            .macro_of(buffer.id)
+            .ok_or_else(|| CtsError::NoMaster(self.link.liberty.cell(buffer.id).name.clone()))?;
         let cell = db.add_cell(
             name.to_string(),
             master,
@@ -585,25 +585,22 @@ impl Cts<'_> {
         &self,
         db: &mut NetlistDB,
         cell: CellId,
-        buffer: LibCellId,
+        buffer: BufferCell,
         input: Option<NetId>,
         output: Option<NetId>,
     ) -> Result<(Option<PinId>, Option<PinId>), CtsError> {
-        let lib = self.link.liberty.cell(buffer);
-        let (in_port, out_port) = lib
-            .buffer_ports()
-            .ok_or_else(|| CtsError::NotABuffer(lib.name.clone()))?;
+        let lib = self.link.liberty.cell(buffer.id);
         let pin_of = |port: LibPortId| {
             self.link
-                .macro_pin_of_port(buffer, port)
-                .ok_or_else(|| CtsError::NotABuffer(lib.name.clone()))
+                .macro_pin_of_port(buffer.id, port)
+                .ok_or_else(|| CtsError::MissingPin(lib.name.clone()))
         };
         let in_pin = match input {
-            Some(net) => Some(db.connect_cell_pin(cell, pin_of(in_port)?, net)),
+            Some(net) => Some(db.connect_cell_pin(cell, pin_of(buffer.input)?, net)),
             None => None,
         };
         let out_pin = match output {
-            Some(net) => Some(db.connect_cell_pin(cell, pin_of(out_port)?, net)),
+            Some(net) => Some(db.connect_cell_pin(cell, pin_of(buffer.output)?, net)),
             None => None,
         };
         Ok((in_pin, out_pin))
@@ -781,8 +778,8 @@ impl Cts<'_> {
         for &b in buffers.all.iter().chain([&buffers.root, &buffers.sink]) {
             let master = self
                 .link
-                .macro_of(b)
-                .ok_or_else(|| CtsError::NoMaster(self.link.liberty.cell(b).name.clone()))?;
+                .macro_of(b.id)
+                .ok_or_else(|| CtsError::NoMaster(self.link.liberty.cell(b.id).name.clone()))?;
             let _ = sizes.insert(b, db.library.cell_macro(master).size);
         }
         let root = sizes
@@ -1027,7 +1024,7 @@ impl Cts<'_> {
         db: &mut NetlistDB,
         index: usize,
         (b, own): (usize, usize),
-        dummy: LibCellId,
+        dummy: BufferCell,
     ) -> Result<bool, CtsError> {
         let Some(net) = self.builders[index].clock.subnets[own].net else {
             return Ok(false);
@@ -1037,14 +1034,11 @@ impl Cts<'_> {
         let name = format!("clkload{}", self.dummy_index);
         self.dummy_index += 1;
         let cell = self.make_buffer(db, dummy, &name, location)?;
-        let lib = liberty.cell(dummy);
-        let (in_port, _) = lib
-            .buffer_ports()
-            .ok_or_else(|| CtsError::NotABuffer(lib.name.clone()))?;
+        let lib = liberty.cell(dummy.id);
         let pin = self
             .link
-            .macro_pin_of_port(dummy, in_port)
-            .ok_or_else(|| CtsError::NotABuffer(lib.name.clone()))?;
+            .macro_pin_of_port(dummy.id, dummy.input)
+            .ok_or_else(|| CtsError::MissingPin(lib.name.clone()))?;
         let input = db.connect_cell_pin(cell, pin, net);
         let clock = &mut self.builders[index].clock;
         let dummy_ref = clock.add_buffer(&name, dummy, location);
@@ -1058,28 +1052,35 @@ impl Cts<'_> {
     /// as `TritonCTS::findCandidateDummyCells`: the clock buffers and the
     /// clock-cell inverters, else the inverters named `CLKINV`, else those
     /// named `INV`, else every candidate inverter.
-    fn dummy_candidates(&self) -> Vec<LibCellId> {
+    fn dummy_candidates(&self) -> Vec<BufferCell> {
         let liberty = self.link.liberty;
         let mut candidates = self.setup.buffers.all.clone();
-        let inverters: Vec<LibCellId> = (0..liberty.cells.len())
+        let inverters: Vec<BufferCell> = (0..liberty.cells.len())
             .map(|i| LibCellId(i as u32))
             .filter(|&id| {
                 liberty.cell(id).is_inverter()
                     && self.link.is_link_cell(id)
                     && self.link.is_clock_cell_candidate(id)
             })
+            .filter_map(|id| liberty.buffer_cell(id))
             .collect();
-        let named = |pattern: &str| -> Vec<LibCellId> {
+        let named = |pattern: &str| -> Vec<BufferCell> {
             inverters
                 .iter()
                 .copied()
-                .filter(|&id| liberty.cell(id).name.to_ascii_uppercase().contains(pattern))
+                .filter(|b| {
+                    liberty
+                        .cell(b.id)
+                        .name
+                        .to_ascii_uppercase()
+                        .contains(pattern)
+                })
                 .collect()
         };
-        let clock_cells: Vec<LibCellId> = inverters
+        let clock_cells: Vec<BufferCell> = inverters
             .iter()
             .copied()
-            .filter(|&id| liberty.cell(id).is_clock_cell)
+            .filter(|b| liberty.cell(b.id).is_clock_cell)
             .collect();
         let chosen = [clock_cells, named("CLKINV"), named("INV")]
             .into_iter()
@@ -1092,13 +1093,9 @@ impl Cts<'_> {
     }
 }
 
-/// The input capacitance of a dummy load cell, zero for a cell that is no
-/// buffer or inverter.
-fn dummy_input_cap(liberty: &Liberty, cell: LibCellId) -> Farads32 {
-    let lib = liberty.cell(cell);
-    lib.buffer_ports().map_or(Farads32::ZERO, |(input, _)| {
-        Farads32::of(lib.ports[input].capacitance())
-    })
+/// The input capacitance of a dummy load cell.
+fn dummy_input_cap(liberty: &Liberty, dummy: BufferCell) -> Farads32 {
+    Farads32::of(liberty.cell(dummy.id).ports[dummy.input].capacitance())
 }
 
 /// `OpenSTA`'s `fuzzyEqual` on single-precision loads.

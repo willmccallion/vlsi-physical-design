@@ -15,7 +15,9 @@ use crate::sta::{Slack, Sta};
 use pare_common::db::design::{EditError, NetlistDB, PinOwner, PlacementStatus};
 use pare_common::db::global_route::RouteSource;
 use pare_common::db::indices::{CellId, MacroId, NetId, PinId};
-use pare_common::db::liberty::{Edge, EdgeValues, LibCell, LibCellId, LibPort, LibPortId, MinMax};
+use pare_common::db::liberty::{
+    BufferCell, Edge, EdgeValues, LibCell, LibCellId, LibPort, LibPortId, Liberty, MinMax,
+};
 use pare_common::db::library::DuplicateName;
 use pare_common::db::sdc::Sdc;
 use pare_common::geom::dbu::{Dbu, DbuPerMicron};
@@ -664,8 +666,27 @@ impl<'a, T: Timing> Resizer<'a, T> {
     /// The worst delay of a buffer or inverter at `load_cap` from the
     /// target input slews, as `Resizer::bufferDelay`.
     #[must_use]
-    pub fn buffer_delay(&self, cell: LibCellId, load_cap: Farads) -> Seconds {
-        buffer_delay(self.link.liberty.cell(cell), &self.targets.slews, load_cap)
+    pub fn buffer_delay(&self, buffer: BufferCell, load_cap: Farads) -> Seconds {
+        buffer_delay(self.link.liberty, buffer, &self.targets.slews, load_cap)
+    }
+
+    /// `cell` with its buffer ports, `cell` being a size of a buffer: the
+    /// sizes of a cell share its function and ports, so it is a buffer too.
+    pub(crate) fn as_buffer(&self, cell: LibCellId) -> Result<BufferCell, RepairError> {
+        let liberty = self.link.liberty;
+        liberty
+            .buffer_cell(cell)
+            .ok_or_else(|| RepairError::MissingPins(liberty.cell(cell).name.clone()))
+    }
+
+    /// The size of `buffer` that drives `load_cap` at the target slews, as
+    /// `findTargetCell` sizes a repeater.
+    pub(crate) fn find_target_buffer(
+        &self,
+        buffer: BufferCell,
+        load_cap: Farads,
+    ) -> Result<BufferCell, RepairError> {
+        self.as_buffer(self.find_target_cell(buffer.id, load_cap, false))
     }
 
     /// The design's area in the library's units, over cells of the core.
@@ -925,24 +946,21 @@ impl<'a, T: Timing> Resizer<'a, T> {
         &mut self,
         net: NetId,
         loads: &[PinId],
-        buffer: LibCellId,
+        buffer: BufferCell,
         at: Point<Dbu>,
         base: &str,
     ) -> Result<InsertedBuffer, RepairError> {
-        let lib = self.link.liberty.cell(buffer);
-        let (in_port, out_port) = lib
-            .buffer_ports()
-            .ok_or_else(|| RepairError::MissingPins(lib.name.clone()))?;
-        let cell = self.make_instance(buffer, at, base)?;
+        let lib = self.link.liberty.cell(buffer.id);
+        let cell = self.make_instance(buffer.id, at, base)?;
         let new_net = self.make_net("net", net)?;
         for &load in loads {
             self.move_pin(load, new_net);
         }
         let input = self
-            .connect(cell, buffer, in_port, net)
+            .connect(cell, buffer.id, buffer.input, net)
             .ok_or_else(|| RepairError::MissingPins(lib.name.clone()))?;
         let output = self
-            .connect(cell, buffer, out_port, new_net)
+            .connect(cell, buffer.id, buffer.output, new_net)
             .ok_or_else(|| RepairError::MissingPins(lib.name.clone()))?;
         self.inserted_buffers += 1;
         {
@@ -1015,13 +1033,12 @@ impl<'a, T: Timing> Resizer<'a, T> {
     /// The input and output pins of a buffer instance.
     #[must_use]
     pub(crate) fn buffer_pins(&self, buffer: CellId) -> Option<(PinId, PinId)> {
-        let (lib_id, lib) = self.link.cell(self.db, buffer)?;
-        let (in_port, out_port) = lib.buffer_ports()?;
+        let (lib_id, _) = self.link.cell(self.db, buffer)?;
+        let ports = self.link.liberty.buffer_cell(lib_id)?;
         let netlist = Netlist::new(self.db, self.link);
-        let _ = lib_id;
         Some((
-            netlist.pin_of_port(buffer, in_port)?,
-            netlist.pin_of_port(buffer, out_port)?,
+            netlist.pin_of_port(buffer, ports.input)?,
+            netlist.pin_of_port(buffer, ports.output)?,
         ))
     }
 
@@ -1078,12 +1095,9 @@ impl<'a, T: Timing> Resizer<'a, T> {
         let lib = self.link.liberty.cell(cell);
         let is_buf_inv = lib.is_buffer() || lib.is_inverter();
         let target_of = |c: LibCellId| self.targets.load[c.index()];
-        let delay_of = |c: LibCellId| {
-            if is_buf_inv {
-                self.buffer_delay(c, load_cap)
-            } else {
-                Seconds::ZERO
-            }
+        let delay_of = |c: LibCellId| match self.link.liberty.buffer_cell(c) {
+            Some(buffer) if is_buf_inv => self.buffer_delay(buffer, load_cap),
+            _ => Seconds::ZERO,
         };
         let mut best = cell;
         let mut best_load = target_of(cell);
@@ -1296,10 +1310,8 @@ pub(crate) fn find_targets(link: &Link<'_>, buffers: &BufferSet) -> Targets {
     let mut sums = EdgeValues::<Seconds>::default();
     let mut counts = [0usize; 2];
     for &buffer in &buffers.cells {
-        let cell = liberty.cell(buffer);
-        let Some((input, output)) = cell.buffer_ports() else {
-            continue;
-        };
+        let cell = liberty.cell(buffer.id);
+        let (input, output) = (buffer.input, buffer.output);
         for set in cell
             .arc_sets
             .iter()
@@ -1449,29 +1461,30 @@ pub(crate) fn gate_slew(
     out.rise.max(out.fall).max(Seconds::ZERO)
 }
 
-/// The worst delay of a buffer or inverter at `load_cap` from the target
+/// The worst delay of `buffer` of `liberty` at `load_cap` from the target
 /// input slews, as `Resizer::bufferDelay`.
 #[must_use]
-pub fn buffer_delay(cell: &LibCell, slews: &EdgeValues<Seconds>, load_cap: Farads) -> Seconds {
-    let Some((_, output)) = cell.buffer_ports() else {
-        return Seconds::ZERO;
-    };
-    let (delays, _) = gate_delays(cell, output, load_cap, slews, None);
-    delays.rise.max(delays.fall).max(Seconds::ZERO)
+pub fn buffer_delay(
+    liberty: &Liberty,
+    buffer: BufferCell,
+    slews: &EdgeValues<Seconds>,
+    load_cap: Farads,
+) -> Seconds {
+    let delays = buffer_delays(liberty, buffer, slews, load_cap);
+    delays.rise.max(delays.fall)
 }
 
-/// The worst delay per edge of a buffer at `load_cap`, as
+/// The worst delay per edge of `buffer` of `liberty` at `load_cap`, as
 /// `Resizer::bufferDelays`.
 #[must_use]
 pub(crate) fn buffer_delays(
-    cell: &LibCell,
+    liberty: &Liberty,
+    buffer: BufferCell,
     slews: &EdgeValues<Seconds>,
     load_cap: Farads,
 ) -> EdgeValues<Seconds> {
-    let Some((_, output)) = cell.buffer_ports() else {
-        return EdgeValues::default();
-    };
-    let (delays, _) = gate_delays(cell, output, load_cap, slews, None);
+    let cell = liberty.cell(buffer.id);
+    let (delays, _) = gate_delays(cell, buffer.output, load_cap, slews, None);
     EdgeValues {
         rise: delays.rise.max(Seconds::ZERO),
         fall: delays.fall.max(Seconds::ZERO),

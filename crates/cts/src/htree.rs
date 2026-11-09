@@ -22,7 +22,7 @@ use crate::options::{
 };
 use crate::sink_clustering::SinkClustering;
 use crate::techchar::{SegmentLength, TechChar};
-use pare_common::db::liberty::LibCellId;
+use pare_common::db::liberty::BufferCell;
 use pare_common::geom::dbu::Dbu;
 use pare_common::geom::point::Point as DbPoint;
 use pare_common::geom::rect::Rect;
@@ -216,9 +216,9 @@ pub(crate) struct TreeContext<'a> {
     pub settings: &'a Settings,
     pub core: Rect<Dbu>,
     pub dbu: i32,
-    pub root_buffer: LibCellId,
-    pub sink_buffer: LibCellId,
-    pub buffer_sizes: &'a FxHashMap<LibCellId, DbPoint<Dbu>>,
+    pub root_buffer: BufferCell,
+    pub sink_buffer: BufferCell,
+    pub buffer_sizes: &'a FxHashMap<BufferCell, DbPoint<Dbu>>,
     pub blockages: &'a [Rect<Dbu>],
 }
 
@@ -339,7 +339,7 @@ impl Builder {
         inside && Self::find_blockage(ctx, p, scale).is_none()
     }
 
-    fn buffer_size(&self, ctx: &TreeContext<'_>, buffer: LibCellId) -> (f64, f64) {
+    fn buffer_size(&self, ctx: &TreeContext<'_>, buffer: BufferCell) -> (f64, f64) {
         let size = ctx.buffer_sizes.get(&buffer).copied().unwrap_or_default();
         (
             size.x.get() as f64 / self.unit(),
@@ -349,7 +349,7 @@ impl Builder {
 
     /// Moves a buffer inside a blockage to the free spot beside it nearest
     /// to where it was, as `TreeBuilder::legalizeOneBuffer`.
-    fn legalize_in_blockages(&self, ctx: &TreeContext<'_>, p: Point, buffer: LibCellId) -> Point {
+    fn legalize_in_blockages(&self, ctx: &TreeContext<'_>, p: Point, buffer: BufferCell) -> Point {
         let Some([x1, y1, x2, y2]) = Self::find_blockage(ctx, p, self.unit()) else {
             return p;
         };
@@ -387,7 +387,7 @@ impl Builder {
         &self,
         ctx: &TreeContext<'_>,
         p: Point,
-        buffer: LibCellId,
+        buffer: BufferCell,
     ) -> Point {
         let legal = self.legalize_in_blockages(ctx, p, buffer);
         let mut resolved = legal;
@@ -1397,7 +1397,7 @@ impl SegmentBuilder {
 
     /// Puts a buffer at the branch's end when the segments placed none, as
     /// `SegmentBuilder::forceBufferInSegment`.
-    fn force_buffer(&mut self, tree: &mut Builder, master: LibCellId) {
+    fn force_buffer(&mut self, tree: &mut Builder, master: BufferCell) {
         if self.levels != 0 {
             return;
         }

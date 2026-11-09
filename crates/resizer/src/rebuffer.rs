@@ -18,7 +18,9 @@ use crate::resizer::{RepairError, Resizer, buffer_delays, find_targets, meters_t
 use crate::sta::{Sta, Via};
 use pare_common::db::design::PinOwner;
 use pare_common::db::indices::{CellId, LayerId, NetId, PinId};
-use pare_common::db::liberty::{ArcRole, Edge, EdgeValues, LibCellId, LibPortId, MinMax};
+use pare_common::db::liberty::{
+    ArcRole, BufferCell, Edge, EdgeValues, LibCellId, LibPortId, MinMax,
+};
 use pare_common::geom::dbu::{Dbu, DbuPerMicron};
 use pare_common::geom::point::Point;
 use pare_common::units::{Farads, FaradsPerMeter, Meters, Ohms, OhmsPerMeter, Seconds};
@@ -94,8 +96,8 @@ impl Rebuffer {
         let max_wire_length = max_wire_length(resizer);
         let mut sizes: Vec<BufferSize> = find_fast_buffers(resizer)
             .into_iter()
-            .map(|cell| buffer_size(resizer, cell))
-            .collect::<Result<_, _>>()?;
+            .map(|buffer| buffer_size(resizer, buffer))
+            .collect();
         sizes.sort_by(|a, b| a.input_cap.total_cmp(&b.input_cap));
         let smallest = sizes
             .first()
@@ -130,15 +132,13 @@ impl Rebuffer {
             return self.wire_length_step;
         };
         let dbu = resizer.db.dbu();
-        let lib = resizer.link.liberty.cell(smallest.cell);
+        let lib = resizer.link.liberty.cell(smallest.buffer.id);
         let input_cap = smallest.input_cap.get();
         let drive_resistance = smallest.drive_resistance.get();
-        let cap_limit = lib.buffer_ports().and_then(|(_, output)| {
-            resizer
-                .link
-                .liberty
-                .capacitance_limit(lib, &lib.ports[output])
-        });
+        let cap_limit = resizer
+            .link
+            .liberty
+            .capacitance_limit(lib, &lib.ports[smallest.buffer.output]);
         let cap_length = cap_limit.map(|limit| {
             let slack = margined(limit, CAP_MARGIN).get() - input_cap;
             Dbu(meters_to_dbu(Meters::new(slack / cap), dbu).get().max(0))
@@ -391,9 +391,9 @@ impl Rebuffer {
                 let to = self.annotate_loads(resizer, to, driver, arrival_paths);
                 Bnet::via(node.at, *layer, *to_layer, to, &resizer.tree_rc())
             }
-            Kind::Buffer { cell, to } => {
+            Kind::Buffer { buffer, to } => {
                 let to = self.annotate_loads(resizer, to, driver, arrival_paths);
-                self.buffer_node(resizer, node.at, *cell, to)
+                self.buffer_node(resizer, node.at, *buffer, to)
             }
         }
     }
@@ -420,38 +420,26 @@ impl Rebuffer {
                 self.retime(resizer, to),
                 &resizer.tree_rc(),
             ),
-            Kind::Buffer { cell, to } => {
-                self.buffer_node(resizer, node.at, *cell, self.retime(resizer, to))
+            Kind::Buffer { buffer, to } => {
+                self.buffer_node(resizer, node.at, *buffer, self.retime(resizer, to))
             }
         }
     }
 
-    /// A buffer node of `cell` at `at` driving `to`, timed at the load.
+    /// A buffer node of `buffer` at `at` driving `to`, timed at the load.
     fn buffer_node(
         &self,
         resizer: &Resizer<'_, Sta>,
         at: Point<Dbu>,
-        cell: LibCellId,
+        buffer: BufferCell,
         to: BnetPtr,
     ) -> BnetPtr {
         let size = self
             .sizes
             .iter()
-            .find(|s| s.cell == cell)
+            .find(|s| s.buffer == buffer)
             .copied()
-            .unwrap_or_else(|| {
-                buffer_size(resizer, cell).unwrap_or(BufferSize {
-                    cell,
-                    input_cap: Farads::ZERO,
-                    input_fanout: 0.0,
-                    input_max_slew: Seconds::INFINITY,
-                    output_cap: Farads::ZERO,
-                    area: 0.0,
-                    intrinsic_delay: Fixed::ZERO,
-                    margined_max_cap: Farads::INFINITY,
-                    drive_resistance: Ohms::ZERO,
-                })
-            });
+            .unwrap_or_else(|| buffer_size(resizer, buffer));
         let delay = buffer_delay(resizer, &size, to.slack_edges, to.cap + size.output_cap);
         Bnet::buffer(at, &size, to, delay)
     }
@@ -1029,9 +1017,9 @@ impl Rebuffer {
                 let right = self.import_node(resizer, right)?;
                 Some(Bnet::junction(node.at, left, right))
             }
-            Kind::Buffer { cell, to } => {
+            Kind::Buffer { buffer, to } => {
                 let inner = self.import_node(resizer, to)?;
-                Some(self.buffer_node(resizer, node.at, *cell, inner))
+                Some(self.buffer_node(resizer, node.at, *buffer, inner))
             }
             Kind::Load { pin } => {
                 let PinOwner::Cell { cell, .. } = resizer.db.pins[pin.index()].owner else {
@@ -1044,19 +1032,24 @@ impl Rebuffer {
                 let is_input = netlist
                     .lib_port(*pin)
                     .is_some_and(pare_common::db::liberty::LibPort::is_input);
-                if !lib.is_buffer()
-                    || !is_input
-                    || !is_logic_std_cell(resizer.db, cell)
-                    || is_port_buffer(resizer, cell)
-                    || !can_remove_buffer(resizer, cell)
-                {
+                let buffer = resizer
+                    .link
+                    .liberty
+                    .buffer_cell(lib_id)
+                    .filter(|_| lib.is_buffer());
+                let Some(buffer) = buffer.filter(|_| {
+                    is_input
+                        && is_logic_std_cell(resizer.db, cell)
+                        && !is_port_buffer(resizer, cell)
+                        && can_remove_buffer(resizer, cell)
+                }) else {
                     return Some(Rc::clone(node));
-                }
+                };
                 let (_, out_pin) = resizer.buffer_pins(cell)?;
                 let Some(inner) = self.import_buffer_tree(resizer, out_pin) else {
                     return Some(Rc::clone(node));
                 };
-                Some(self.buffer_node(resizer, node.at, lib_id, inner))
+                Some(self.buffer_node(resizer, node.at, buffer, inner))
             }
         }
     }
@@ -1090,14 +1083,14 @@ fn export_node(
             loads.extend(export_node(resizer, right, base, count)?);
             Ok(loads)
         }
-        Kind::Buffer { cell, to } => {
+        Kind::Buffer { buffer, to } => {
             let loads = export_node(resizer, to, base, count)?;
             if loads.is_empty() {
                 return Ok(loads);
             }
             let current = resizer.db.pins[loads[0].index()].net;
             let inserted =
-                resizer.insert_buffer_before_loads(current, &loads, *cell, node.at, base)?;
+                resizer.insert_buffer_before_loads(current, &loads, *buffer, node.at, base)?;
             *count += 1;
             Ok(vec![inserted.input])
         }
@@ -1239,10 +1232,10 @@ fn assured_fallback(
     exemplar: &Bnet,
     envelope: &Metrics,
 ) -> Option<BnetPtr> {
-    let Kind::Buffer { cell, .. } = &exemplar.kind else {
+    let Kind::Buffer { buffer, .. } = &exemplar.kind else {
         return options.iter().find(|o| o.fits(envelope)).map(Rc::clone);
     };
-    let size = sizes.iter().find(|s| s.cell == *cell).copied()?;
+    let size = sizes.iter().find(|s| s.buffer == *buffer).copied()?;
     let mut best: Option<(f64, BnetPtr)> = None;
     for option in options {
         if best.as_ref().is_some_and(|(a, _)| option.area >= *a) {
@@ -1275,8 +1268,12 @@ fn buffer_delay(
     let Some(edges) = edges else {
         return Fixed::ZERO;
     };
-    let cell = resizer.link.liberty.cell(size.cell);
-    let delays = buffer_delays(cell, &resizer.targets.slews, load_cap);
+    let delays = buffer_delays(
+        resizer.link.liberty,
+        size.buffer,
+        &resizer.targets.slews,
+        load_cap,
+    );
     let mut worst = Fixed::ZERO;
     for &edge in edges.edges() {
         worst = worst.max(Fixed::from_seconds(delays.get(edge)));
@@ -1354,10 +1351,13 @@ fn with_arrivals(node: &BnetPtr, arrival: Fixed) -> BnetPtr {
                 ..**node
             })
         }
-        Kind::Buffer { cell, to } => {
+        Kind::Buffer { buffer, to } => {
             let to = with_arrivals(to, arrival + node.delay);
             Rc::new(Bnet {
-                kind: Kind::Buffer { cell: *cell, to },
+                kind: Kind::Buffer {
+                    buffer: *buffer,
+                    to,
+                },
                 ..**node
             })
         }
@@ -1534,11 +1534,9 @@ fn margined<Q: Mul<f64, Output = Q>>(limit: Q, percent: f64) -> Q {
 
 /// What a buffer presents and can drive, as `BufferSize` with
 /// `characterizeBufferLimits`.
-fn buffer_size(resizer: &Resizer<'_, Sta>, cell: LibCellId) -> Result<BufferSize, RepairError> {
-    let lib = resizer.link.liberty.cell(cell);
-    let (input, output) = lib
-        .buffer_ports()
-        .ok_or_else(|| RepairError::MissingPins(lib.name.clone()))?;
+fn buffer_size(resizer: &Resizer<'_, Sta>, buffer: BufferCell) -> BufferSize {
+    let lib = resizer.link.liberty.cell(buffer.id);
+    let (input, output) = (buffer.input, buffer.output);
     let intrinsic = lib
         .delay_arc_sets_to(output)
         .flat_map(|s| s.arcs.iter())
@@ -1550,9 +1548,9 @@ fn buffer_size(resizer: &Resizer<'_, Sta>, cell: LibCellId) -> Result<BufferSize
         .liberty
         .capacitance_limit(lib, &lib.ports[output])
         .map_or(Farads::INFINITY, |l| margined(l, CAP_MARGIN));
-    let margined_max_cap = cap_limit.min(load_limit_by_driver_slew(resizer, cell));
-    Ok(BufferSize {
-        cell,
+    let margined_max_cap = cap_limit.min(load_limit_by_driver_slew(resizer, buffer));
+    BufferSize {
+        buffer,
         input_cap: lib.ports[input].capacitance(),
         input_fanout: resizer.link.liberty.fanout_load(lib, &lib.ports[input]),
         input_max_slew: resizer.max_input_slew(lib, &lib.ports[input]),
@@ -1561,16 +1559,14 @@ fn buffer_size(resizer: &Resizer<'_, Sta>, cell: LibCellId) -> Result<BufferSize
         intrinsic_delay: Fixed::from_seconds(intrinsic),
         margined_max_cap,
         drive_resistance: lib.drive_resistance(output),
-    })
+    }
 }
 
 /// The load at which a buffer's own slew reaches its limit, by bisection,
 /// as `findBufferLoadLimitImpliedByDriverSlew`.
-fn load_limit_by_driver_slew(resizer: &Resizer<'_, Sta>, cell: LibCellId) -> Farads {
-    let lib = resizer.link.liberty.cell(cell);
-    let Some((input, output)) = lib.buffer_ports() else {
-        return Farads::INFINITY;
-    };
+fn load_limit_by_driver_slew(resizer: &Resizer<'_, Sta>, buffer: BufferCell) -> Farads {
+    let lib = resizer.link.liberty.cell(buffer.id);
+    let (input, output) = (buffer.input, buffer.output);
     let Some(max_slew) = resizer.link.liberty.slew_limit(lib, &lib.ports[output]) else {
         return Farads::INFINITY;
     };
@@ -1653,12 +1649,11 @@ fn wire_length_limit_by_load_slew(resizer: &Resizer<'_, Sta>, size: &BufferSize)
 /// The wire a buffer can drive before its load limit is reached, as
 /// `wireLengthLimitImpliedByMaxCap`.
 fn wire_length_limit_by_max_cap(resizer: &Resizer<'_, Sta>, size: &BufferSize) -> Option<Dbu> {
-    let lib = resizer.link.liberty.cell(size.cell);
-    let (_, output) = lib.buffer_ports()?;
+    let lib = resizer.link.liberty.cell(size.buffer.id);
     let limit = resizer
         .link
         .liberty
-        .capacitance_limit(lib, &lib.ports[output])?;
+        .capacitance_limit(lib, &lib.ports[size.buffer.output])?;
     let rc = resizer.graph.wire_rc();
     if rc.capacitance <= FaradsPerMeter::ZERO {
         return None;
@@ -1674,14 +1669,14 @@ fn wire_length_limit_by_max_cap(resizer: &Resizer<'_, Sta>, size: &BufferSize) -
 /// The buffers worth inserting for speed: of the repair buffers by rising
 /// input capacitance, those no other buffer beats at every load, as
 /// `findFastBuffers`.
-fn find_fast_buffers(resizer: &Resizer<'_, Sta>) -> Vec<LibCellId> {
-    let input_cap = |cell: LibCellId| resizer.link.buffer_input_capacitance(cell);
-    let mut by_input: Vec<LibCellId> = resizer.buffers.cells.clone();
+fn find_fast_buffers(resizer: &Resizer<'_, Sta>) -> Vec<BufferCell> {
+    let input_cap = |buffer: BufferCell| resizer.link.buffer_input_capacitance(buffer);
+    let mut by_input: Vec<BufferCell> = resizer.buffers.cells.clone();
     by_input.sort_by(|&a, &b| input_cap(a).total_cmp(&input_cap(b)));
     let r_max = resizer
         .link
         .buffer_drive_resistance(resizer.buffers.lowest_drive);
-    let mut fast: Vec<LibCellId> = Vec::new();
+    let mut fast: Vec<BufferCell> = Vec::new();
     for size in by_input {
         if fast.is_empty() {
             fast.push(size);
@@ -1707,25 +1702,20 @@ fn find_fast_buffers(resizer: &Resizer<'_, Sta>) -> Vec<LibCellId> {
 /// as `bufferSizeOutmatched`.
 fn outmatched(
     resizer: &Resizer<'_, Sta>,
-    worse: LibCellId,
-    better: LibCellId,
+    worse: BufferCell,
+    better: BufferCell,
     r_max: Ohms,
 ) -> bool {
     let liberty = resizer.link.liberty;
-    let (w, b) = (liberty.cell(worse), liberty.cell(better));
-    let (Some((w_in, w_out)), Some((b_in, _))) = (w.buffer_ports(), b.buffer_ports()) else {
-        return false;
-    };
+    let (w, b) = (liberty.cell(worse.id), liberty.cell(better.id));
+    let (w_in, w_out, b_in) = (worse.input, worse.output, better.input);
     let extra_input = (b.ports[b_in].capacitance() - w.ports[w_in].capacitance()).max(Farads::ZERO);
     let penalty = r_max * extra_input;
-    let limit = liberty
-        .capacitance_limit(w, &w.ports[w_out])
-        .unwrap_or(Farads::ZERO);
+    let limit = liberty.capacitance_limit(w, &w.ports[w_out]);
     let mut points: Vec<Farads> = Vec::new();
-    for cell in [w, b] {
-        let Some((input, output)) = cell.buffer_ports() else {
-            continue;
-        };
+    for buffer in [worse, better] {
+        let cell = liberty.cell(buffer.id);
+        let (input, output) = (buffer.input, buffer.output);
         for set in cell
             .arc_sets
             .iter()
@@ -1745,7 +1735,7 @@ fn outmatched(
     points.dedup();
     let cutoff = w.ports[w_in].capacitance().min(b.ports[b_in].capacitance()) * 20.0;
     for p in points {
-        if (limit == Farads::ZERO || p <= limit) && p < cutoff {
+        if limit.is_none_or(|l| p <= l) && p < cutoff {
             let bd = resizer.buffer_delay(better, p);
             let wd = resizer.buffer_delay(worse, p);
             if bd + penalty > wd {
@@ -1808,14 +1798,12 @@ fn wire_length_limit(
 /// `findMaxWireLength` for one buffer.
 fn buffer_max_wire_length(
     link: &Link<'_>,
-    buffer: LibCellId,
+    buffer: BufferCell,
     slews: &EdgeValues<Seconds>,
     rc: WireRc,
 ) -> Meters {
-    let lib = link.liberty.cell(buffer);
-    let Some((input, output)) = lib.buffer_ports() else {
-        return Meters::INFINITY;
-    };
+    let lib = link.liberty.cell(buffer.id);
+    let (input, output) = (buffer.input, buffer.output);
     let drive = lib.drive_resistance(output);
     let delay = |length: f64| -> f64 {
         let length = Meters::new(length);

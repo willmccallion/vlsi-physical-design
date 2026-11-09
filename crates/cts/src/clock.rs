@@ -3,7 +3,7 @@
 
 use crate::capacitance::Farads32;
 use pare_common::db::indices::{CellId, NetId, PinId};
-use pare_common::db::liberty::LibCellId;
+use pare_common::db::liberty::BufferCell;
 use pare_common::geom::dbu::Dbu;
 use pare_common::geom::point::Point;
 use pare_common::geom::rect::Rect;
@@ -21,7 +21,7 @@ pub(crate) enum InstKind {
 #[derive(Clone, Debug, PartialEq)]
 pub(crate) struct ClockInst {
     pub name: String,
-    pub master: Option<LibCellId>,
+    pub master: Option<BufferCell>,
     pub kind: InstKind,
     pub location: Point<Dbu>,
     /// The sink's clock pin, or the buffer's input once it exists.
@@ -111,7 +111,7 @@ impl Clock {
     pub(crate) fn add_buffer(
         &mut self,
         name: &str,
-        master: LibCellId,
+        master: BufferCell,
         location: Point<Dbu>,
     ) -> InstRef {
         let full = format!("{name}_{}", self.net_name);

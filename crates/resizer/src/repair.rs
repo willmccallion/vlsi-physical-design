@@ -11,7 +11,7 @@ use crate::library::SizingLimits;
 use crate::resizer::{PortSlews, RepairError, Resizer, Timing, gate_slew, meters_to_dbu};
 use pare_common::db::design::PinOwner;
 use pare_common::db::indices::{NetId, PinId};
-use pare_common::db::liberty::{ArcRole, LibCellId};
+use pare_common::db::liberty::{ArcRole, BufferCell, LibCellId};
 use pare_common::geom::dbu::{Dbu, DbuPerMicron};
 use pare_common::geom::point::Point;
 use pare_common::units::{Farads, FaradsPerMeter, Meters, Ohms, OhmsPerMeter, Seconds};
@@ -216,7 +216,7 @@ impl<'r, 'a, T: Timing> Repairer<'r, 'a, T> {
     /// runs `repairNet` over the drivers of the clock network.
     pub fn repair_clock_nets(
         mut self,
-        clock_buffers: &[LibCellId],
+        clock_buffers: &[BufferCell],
         max_length: Option<Dbu>,
     ) -> Result<RepairSummary, RepairError> {
         let saved_options = self.resizer.options;
@@ -592,9 +592,9 @@ impl<'r, 'a, T: Timing> Repairer<'r, 'a, T> {
         let mut left = self.repair_branch(left, driver, max_cap, r_drvr)?;
         let mut right = self.repair_branch(right, driver, max_cap, r_drvr)?;
         let load_cap = left.cap + right.cap;
-        let buffer_cell =
-            self.resizer
-                .find_target_cell(self.resizer.buffers.lowest_drive, load_cap, false);
+        let buffer_cell = self
+            .resizer
+            .find_target_buffer(self.resizer.buffers.lowest_drive, load_cap)?;
         let repeaters = self.junction_repeaters(&left, &right, max_cap, r_drvr);
         if repeaters.left {
             let _ = self.make_repeater(repeaters.reason, at, buffer_cell, &mut left)?;
@@ -716,11 +716,10 @@ impl<'r, 'a, T: Timing> Repairer<'r, 'a, T> {
                 split_length as f64 * (1.0 - LENGTH_MARGIN)
             };
             let at = point_back_along(rest.to, from, buf_dist, rest.length);
-            let buffer_cell = self.resizer.find_target_cell(
+            let buffer_cell = self.resizer.find_target_buffer(
                 self.resizer.buffers.lowest_drive,
                 wire.load_cap(rest.length, rest.ref_cap),
-                false,
-            );
+            )?;
             let mut leaf = Branch {
                 cap: rest.ref_cap,
                 fanout: branch.fanout,
@@ -829,7 +828,7 @@ impl<'r, 'a, T: Timing> Repairer<'r, 'a, T> {
         &mut self,
         reason: &str,
         at: Point<Dbu>,
-        buffer: LibCellId,
+        buffer: BufferCell,
         branch: &mut Branch,
     ) -> Result<bool, RepairError> {
         if branch.loads.is_empty() {
@@ -841,16 +840,12 @@ impl<'r, 'a, T: Timing> Repairer<'r, 'a, T> {
                 .insert_buffer_before_loads(old_net, &branch.loads, buffer, at, reason)?;
         self.summary.inserted += 1;
         let _ = self.resizer.resize_to_target_slew(inserted.output)?;
-        let sized = self
-            .resizer
-            .link
-            .cell(self.resizer.db, inserted.cell)
-            .map_or(buffer, |(id, _)| id);
-        let sized_cell = self.resizer.link.liberty.cell(sized);
-        let (sized_in, _) = sized_cell
-            .buffer_ports()
-            .ok_or_else(|| RepairError::MissingPins(sized_cell.name.clone()))?;
-        let in_lib_port = &sized_cell.ports[sized_in];
+        let sized = match self.resizer.link.cell(self.resizer.db, inserted.cell) {
+            Some((id, _)) => self.resizer.as_buffer(id)?,
+            None => buffer,
+        };
+        let sized_cell = self.resizer.link.liberty.cell(sized.id);
+        let in_lib_port = &sized_cell.ports[sized.input];
         branch.loads = vec![inserted.input];
         branch.cap = in_lib_port.capacitance();
         branch.fanout = self

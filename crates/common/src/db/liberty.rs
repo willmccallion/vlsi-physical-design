@@ -56,6 +56,19 @@ impl std::ops::IndexMut<LibPortId> for Vec<LibPort> {
     }
 }
 
+/// A cell of one input and one output and no other signal pin, as
+/// `OpenSTA`'s `bufferPorts` finds it: a buffer or an inverter, with those
+/// two ports.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub struct BufferCell {
+    /// The cell.
+    pub id: LibCellId,
+    /// Its one input.
+    pub input: LibPortId,
+    /// Its one output.
+    pub output: LibPortId,
+}
+
 /// A rising or falling transition.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub enum Edge {
@@ -862,7 +875,7 @@ impl LibCell {
     /// The single input and single output of a cell with exactly one of
     /// each and no other signal pin, as `OpenSTA`'s `bufferPorts`.
     #[must_use]
-    pub fn buffer_ports(&self) -> Option<(LibPortId, LibPortId)> {
+    pub(crate) fn buffer_ports(&self) -> Option<(LibPortId, LibPortId)> {
         let mut input = None;
         let mut output = None;
         for (i, port) in self.ports.iter().enumerate() {
@@ -1093,6 +1106,14 @@ impl Liberty {
     #[must_use]
     pub fn cell(&self, id: LibCellId) -> &LibCell {
         &self.cells[id.index()]
+    }
+
+    /// The cell `id` with its one input and one output, when it has
+    /// exactly those signal pins.
+    #[must_use]
+    pub fn buffer_cell(&self, id: LibCellId) -> Option<BufferCell> {
+        let (input, output) = self.cell(id).buffer_ports()?;
+        Some(BufferCell { id, input, output })
     }
 
     /// The transition limit `OpenSTA` applies at a pin of `cell`: the
