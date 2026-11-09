@@ -562,4 +562,84 @@ mod tests {
 
         assert_eq!(error.line, 7);
     }
+
+    /// The lines of [`state`] as written: line 3 is the grid, 7 the
+    /// detailed header, 8 the net's `r` line and 9 its run.
+    fn state_lines() -> Vec<String> {
+        let mut text = Vec::new();
+        state().write(&mut text).unwrap();
+        String::from_utf8(text)
+            .unwrap()
+            .lines()
+            .map(str::to_string)
+            .collect()
+    }
+
+    /// The error of reading [`state`] with line `number` (from one) as
+    /// `replacement`.
+    fn error_with_line(number: usize, replacement: &str) -> StateParseError {
+        let mut lines = state_lines();
+        lines[number - 1] = replacement.to_string();
+        RouteState::parse(&(lines.join("\n") + "\n")).unwrap_err()
+    }
+
+    #[test]
+    fn single_wire_lines_of_older_states_read_as_the_run_they_make() {
+        let mut lines = state_lines();
+        lines[7] = "r a 1 3 1 1".to_string();
+        lines[8] = "w 2 4 7".to_string();
+        lines.insert(9, "w 2 4 8".to_string());
+
+        let read = RouteState::parse(&(lines.join("\n") + "\n")).unwrap();
+
+        assert_eq!(read, state());
+    }
+
+    #[test]
+    fn an_unknown_scope_is_refused_at_its_line() {
+        let error = error_with_line(7, "detailed 7 sideways stubborn 0 1");
+
+        assert_eq!(error.line, 7);
+        assert!(error.reason.contains("unknown scope"), "{error}");
+    }
+
+    #[test]
+    fn an_unknown_flow_is_refused_at_its_line() {
+        let error = error_with_line(7, "detailed 7 near drifting 0 1");
+
+        assert_eq!(error.line, 7);
+        assert!(error.reason.contains("unknown flow"), "{error}");
+    }
+
+    #[test]
+    fn a_flag_other_than_0_or_1_is_refused_at_its_line() {
+        let error = error_with_line(8, "r a 2 2 1 1");
+
+        assert_eq!(error.line, 8);
+        assert!(error.reason.contains("must be 0 or 1"), "{error}");
+    }
+
+    #[test]
+    fn a_line_with_extra_fields_is_refused_at_its_line() {
+        let error = error_with_line(3, "grid 5700 12 9 2 9 4");
+
+        assert_eq!(error.line, 3);
+        assert!(error.reason.contains("extra fields"), "{error}");
+    }
+
+    #[test]
+    fn a_run_that_ends_where_it_starts_is_refused_at_its_line() {
+        let error = error_with_line(9, "s 2 4 7 7");
+
+        assert_eq!(error.line, 9);
+        assert!(error.reason.contains("must end after"), "{error}");
+    }
+
+    #[test]
+    fn an_unknown_edge_is_refused_at_its_line() {
+        let error = error_with_line(9, "x 2 4 7");
+
+        assert_eq!(error.line, 9);
+        assert!(error.reason.contains("unknown edge"), "{error}");
+    }
 }
