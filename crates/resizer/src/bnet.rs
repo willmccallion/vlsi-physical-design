@@ -226,7 +226,7 @@ impl Bnet {
     /// through the wire's own capacitance taken off the subtree's slack.
     #[must_use]
     pub fn wire(at: Point<Dbu>, to: BnetPtr, layer: Option<LayerId>, rc: &TreeRc<'_>) -> BnetPtr {
-        let length = manhattan(at, to.at);
+        let length = at.manhattan(to.at).get();
         let meters = Meters::from_dbu(Dbu(length), rc.dbu);
         let (res_per_meter, cap_per_meter) = rc.wire(layer);
         let resistance = meters * res_per_meter;
@@ -346,7 +346,7 @@ impl Bnet {
     #[must_use]
     pub fn length(&self) -> i64 {
         match &self.kind {
-            Kind::Wire { to, .. } => manhattan(self.at, to.at),
+            Kind::Wire { to, .. } => self.at.manhattan(to.at).get(),
             _ => 0,
         }
     }
@@ -521,12 +521,6 @@ impl PinLoad {
 pub trait LoadModel {
     /// What `pin` presents.
     fn load(&self, pin: PinId) -> PinLoad;
-}
-
-/// Manhattan distance in database units.
-#[must_use]
-pub const fn manhattan(a: Point<Dbu>, b: Point<Dbu>) -> i64 {
-    (a.x.get() - b.x.get()).abs() + (a.y.get() - b.y.get()).abs()
 }
 
 /// The resistance and capacitance the wires and vias of a tree take, as

@@ -48,13 +48,9 @@ impl SteinerTree {
         self.parent
             .iter()
             .enumerate()
-            .map(|(node, &parent)| manhattan(self.nodes[node], self.nodes[parent]))
+            .map(|(node, &parent)| self.nodes[node].manhattan(self.nodes[parent]).get())
             .sum()
     }
-}
-
-const fn manhattan(a: Point<Dbu>, b: Point<Dbu>) -> i64 {
-    (a.x.get() - b.x.get()).abs() + (a.y.get() - b.y.get()).abs()
 }
 
 /// Builds a Steiner tree over `points`, rooted at `driver`, as `OpenROAD`'s
@@ -229,7 +225,9 @@ fn build_spanning_tree(graph: &mut Graph, driver: usize, alpha: f64, neighbors: 
             if visited[neighbor] {
                 continue;
             }
-            let edge_length = manhattan(graph.points[neighbor], graph.points[edge.node]);
+            let edge_length = graph.points[neighbor]
+                .manhattan(graph.points[edge.node])
+                .get();
             let candidate = SearchEdge {
                 weight: alpha.mul_add(edge.path_length as f64, edge_length as f64),
                 path_length: edge_length + edge.path_length,
@@ -298,7 +296,7 @@ fn best_steiner_for_node(graph: &Graph, node: usize) -> Candidate {
             } else if p1.y.max(p2.y) < pt.y {
                 steiner.y = p1.y.max(p2.y);
             }
-            let gain = manhattan(steiner, pt);
+            let gain = steiner.manhattan(pt).get();
             if gain > best.gain {
                 best = Candidate {
                     gain,
@@ -497,7 +495,10 @@ mod tests {
         let tree = prim_dijkstra(&points, 0, DEFAULT_ALPHA);
         assert!(connected_to_root(&tree));
         assert!(is_valid(&tree));
-        let star: i64 = points[1..].iter().map(|&p| manhattan(p, points[0])).sum();
+        let star: i64 = points[1..]
+            .iter()
+            .map(|&p| p.manhattan(points[0]).get())
+            .sum();
         assert!(tree.length() < star);
     }
 }

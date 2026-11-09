@@ -1136,7 +1136,7 @@ fn long_edge_clusters(
         if b == n {
             continue;
         }
-        let d = (nodes[b].x - nodes[n].x).get().abs() + (nodes[b].y - nodes[n].y).get().abs();
+        let d = nodes[b].manhattan(nodes[n]).get();
         let from = cluster_of.get(&b).copied();
         let to = cluster_of.get(&n).copied();
         if d >= threshold {

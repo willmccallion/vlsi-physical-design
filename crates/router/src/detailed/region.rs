@@ -1114,7 +1114,7 @@ fn nearest_group(search: &Search<'_>, tree: &[Node], groups: &[&Vec<Node>]) -> u
             .flat_map(|&a| {
                 tree.iter().map(move |&b| {
                     let (p, q) = (point(a), point(b));
-                    ((p.x - q.x).abs() + (p.y - q.y).abs()).get()
+                    p.manhattan(q).get()
                 })
             })
             .min()
