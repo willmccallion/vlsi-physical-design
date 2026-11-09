@@ -237,92 +237,99 @@ fn parse_detailed(lines: &mut Lines<'_>, header: &str) -> Result<DetailedState, 
     let flow_name = head.word()?;
     let flow = Flow::from_name(&flow_name)
         .ok_or_else(|| head.error(&format!("unknown flow `{flow_name}`")))?;
-    let effective = match head.int::<u8>()? {
-        0 => false,
-        1 => true,
-        _ => return Err(head.error("effectiveness must be 0 or 1")),
-    };
+    let effective = head.flag("effectiveness")?;
     let count: usize = head.int()?;
     head.done()?;
-    let mut routes = Vec::with_capacity(count);
-    for _ in 0..count {
-        let mut r = lines.keyword("r")?;
-        let name = r.word()?;
-        let complete = match r.int::<u8>()? {
-            0 => false,
-            1 => true,
-            _ => return Err(r.error("completeness must be 0 or 1")),
-        };
-        let (edges, patches, access): (usize, usize, usize) = (r.int()?, r.int()?, r.int()?);
-        r.done()?;
-        let mut route = NetRoute {
-            complete,
-            ..NetRoute::default()
-        };
-        let mut runs = Vec::new();
-        let mut steps = Vec::new();
-        for _ in 0..edges {
-            let line = lines.next_line()?;
-            let mut e = lines.fields(line);
-            match e.word()?.as_str() {
-                "s" => {
-                    let first = e.node()?;
-                    let to: u32 = e.int()?;
-                    if to <= first.cross {
-                        return Err(e.error("a run must end after its first crossing"));
-                    }
-                    runs.push(Run {
-                        layer: first.layer,
-                        track: first.track,
-                        from: first.cross,
-                        to,
-                    });
-                }
-                "w" => steps.push(Edge::Wire(e.node()?)),
-                "v" => steps.push(Edge::Via {
-                    lower: e.node()?,
-                    upper: e.node()?,
-                }),
-                other => return Err(e.error(&format!("unknown edge `{other}`"))),
-            }
-            e.done()?;
-        }
-        route.edges = EdgeSet::from_runs(runs);
-        route.edges.extend(steps);
-        for _ in 0..patches {
-            let mut p = lines.keyword("p")?;
-            let layer = LayerId::new(p.int()?);
-            let (x0, y0, x1, y1) = (p.int()?, p.int()?, p.int()?, p.int()?);
-            p.done()?;
-            route.patches.push(Patch {
-                layer,
-                rect: Rect::new(Point::new(Dbu(x0), Dbu(y0)), Point::new(Dbu(x1), Dbu(y1))),
-            });
-        }
-        for _ in 0..access {
-            let mut a = lines.keyword("a")?;
-            let node = a.node()?;
-            let at = Point::new(Dbu(a.int()?), Dbu(a.int()?));
-            let pin_layer = LayerId::new(a.int()?);
-            let mut vias = Vec::new();
-            while !a.is_done() {
-                vias.push(ViaId::new(a.int()?));
-            }
-            route.access.push(AccessPoint {
-                node,
-                at,
-                pin_layer,
-                vias,
-            });
-        }
-        routes.push((name, route));
-    }
+    let routes = (0..count)
+        .map(|_| parse_route(lines))
+        .collect::<Result<_, _>>()?;
     Ok(DetailedState {
         round,
         scope,
         flow,
         effective,
         routes,
+    })
+}
+
+/// One net's route: its `r` line, then its edges, patches and access points.
+fn parse_route(lines: &mut Lines<'_>) -> Result<(String, NetRoute), StateParseError> {
+    let mut r = lines.keyword("r")?;
+    let name = r.word()?;
+    let complete = r.flag("completeness")?;
+    let (edges, patches, access): (usize, usize, usize) = (r.int()?, r.int()?, r.int()?);
+    r.done()?;
+    let mut route = NetRoute {
+        complete,
+        edges: parse_edges(lines, edges)?,
+        ..NetRoute::default()
+    };
+    for _ in 0..patches {
+        let mut p = lines.keyword("p")?;
+        let layer = LayerId::new(p.int()?);
+        let (x0, y0, x1, y1) = (p.int()?, p.int()?, p.int()?, p.int()?);
+        p.done()?;
+        route.patches.push(Patch {
+            layer,
+            rect: Rect::new(Point::new(Dbu(x0), Dbu(y0)), Point::new(Dbu(x1), Dbu(y1))),
+        });
+    }
+    for _ in 0..access {
+        route.access.push(parse_access(lines)?);
+    }
+    Ok((name, route))
+}
+
+/// `count` edge lines: runs along a track, single wires and vias.
+fn parse_edges(lines: &mut Lines<'_>, count: usize) -> Result<EdgeSet, StateParseError> {
+    let mut runs = Vec::new();
+    let mut steps = Vec::new();
+    for _ in 0..count {
+        let line = lines.next_line()?;
+        let mut e = lines.fields(line);
+        match e.word()?.as_str() {
+            "s" => {
+                let first = e.node()?;
+                let to: u32 = e.int()?;
+                if to <= first.cross {
+                    return Err(e.error("a run must end after its first crossing"));
+                }
+                runs.push(Run {
+                    layer: first.layer,
+                    track: first.track,
+                    from: first.cross,
+                    to,
+                });
+            }
+            "w" => steps.push(Edge::Wire(e.node()?)),
+            "v" => steps.push(Edge::Via {
+                lower: e.node()?,
+                upper: e.node()?,
+            }),
+            other => return Err(e.error(&format!("unknown edge `{other}`"))),
+        }
+        e.done()?;
+    }
+    let mut edges = EdgeSet::from_runs(runs);
+    edges.extend(steps);
+    Ok(edges)
+}
+
+/// An `a` line: an access point's node, location, pin layer and vias.
+fn parse_access(lines: &mut Lines<'_>) -> Result<AccessPoint, StateParseError> {
+    let mut a = lines.keyword("a")?;
+    let node = a.node()?;
+    let at = Point::new(Dbu(a.int()?), Dbu(a.int()?));
+    let pin_layer = LayerId::new(a.int()?);
+    let mut vias = Vec::new();
+    while !a.is_done() {
+        vias.push(ViaId::new(a.int()?));
+    }
+    Ok(AccessPoint {
+        node,
+        at,
+        pin_layer,
+        vias,
     })
 }
 
@@ -413,6 +420,15 @@ impl Fields<'_> {
         let word = self.word()?;
         word.parse()
             .map_err(|_| self.error(&format!("`{word}` is not a valid number here")))
+    }
+
+    /// A `0` or `1` field, the `what` of the line it says.
+    fn flag(&mut self, what: &str) -> Result<bool, StateParseError> {
+        match self.int::<u8>()? {
+            0 => Ok(false),
+            1 => Ok(true),
+            _ => Err(self.error(&format!("{what} must be 0 or 1"))),
+        }
     }
 
     fn node(&mut self) -> Result<Node, StateParseError> {
