@@ -12,7 +12,7 @@ use crate::netlist::{ClockNetwork, Constants, Namer, Netlist};
 use crate::parasitics::WireRc;
 use crate::route_parasitics::RouteRc;
 use crate::sta::{Slack, Sta};
-use pare_common::db::design::{EditError, NetlistDB, PinOwner, PlacementStatus};
+use pare_common::db::design::{EditError, NetlistDB, PinOwner, PinPlace, PlacementStatus};
 use pare_common::db::global_route::RouteSource;
 use pare_common::db::indices::{CellId, IdVec, MacroId, NetId, PinId};
 use pare_common::db::liberty::{
@@ -133,13 +133,29 @@ pub(crate) struct Targets {
 /// One edit, recorded so it can be undone.
 #[derive(Clone, Debug, PartialEq, Eq)]
 enum Edit {
-    Master { cell: CellId, old: MacroId },
-    Moved { cell: CellId, from: Point<Dbu> },
-    MovedPin { pin: PinId, from: NetId },
+    Master {
+        cell: CellId,
+        old: MacroId,
+    },
+    Moved {
+        cell: CellId,
+        from: Point<Dbu>,
+    },
+    MovedPin {
+        pin: PinId,
+        from: PinPlace,
+    },
     NewCell(CellId),
     NewNet(NetId),
-    Retired(CellId),
-    Renamed { net: NetId, old: String },
+    /// A retired cell, with where each of its pins stood before.
+    Retired {
+        cell: CellId,
+        places: Vec<PinPlace>,
+    },
+    Renamed {
+        net: NetId,
+        old: String,
+    },
 }
 
 /// The edits since the last mark, as `OpenROAD`'s journal.
@@ -738,8 +754,8 @@ impl<'a, T: Timing> Resizer<'a, T> {
                 }
                 Edit::MovedPin { pin, from } => {
                     let _ = nets.insert(self.db.pins[pin].net);
-                    let _ = nets.insert(from);
-                    self.db.move_pin(pin, from);
+                    let _ = nets.insert(from.net);
+                    self.db.put_pin_back(pin, from);
                 }
                 Edit::NewCell(cell) => {
                     for &pin in &self.db.cells[cell].pins {
@@ -748,8 +764,19 @@ impl<'a, T: Timing> Resizer<'a, T> {
                     self.db.retire_cell(cell);
                 }
                 Edit::NewNet(net) => self.dead_nets.push(net),
-                Edit::Retired(cell) => {
+                Edit::Retired { cell, places } => {
                     self.db.unretire_cell(cell);
+                    let mut back: Vec<(PinId, PinPlace)> = self.db.cells[cell]
+                        .pins
+                        .iter()
+                        .copied()
+                        .zip(places)
+                        .collect();
+                    // Ascending, so each lands among the pins that stood before it.
+                    back.sort_by_key(|(_, place)| place.index);
+                    for (pin, place) in back {
+                        self.db.put_pin_back(pin, place);
+                    }
                     for &pin in &self.db.cells[cell].pins {
                         let _ = nets.insert(self.db.pins[pin].net);
                     }
@@ -886,8 +913,8 @@ impl<'a, T: Timing> Resizer<'a, T> {
 
     /// Moves a pin to another net, recording it.
     pub fn move_pin(&mut self, pin: PinId, to: NetId) {
-        let from = self.db.pins[pin].net;
-        if from == to {
+        let from = self.db.pin_place(pin);
+        if from.net == to {
             return;
         }
         self.db.move_pin(pin, to);
@@ -1004,8 +1031,16 @@ impl<'a, T: Timing> Resizer<'a, T> {
             .collect();
         let survivor_name = self.db.nets[survivor].name.clone();
         let removed_name = self.db.nets[removed].name.clone();
+        let places = self.db.cells[buffer]
+            .pins
+            .iter()
+            .map(|&pin| self.db.pin_place(pin))
+            .collect();
         self.db.retire_cell(buffer);
-        self.record(Edit::Retired(buffer));
+        self.record(Edit::Retired {
+            cell: buffer,
+            places,
+        });
         for pin in moving {
             self.move_pin(pin, survivor);
         }
@@ -1664,30 +1699,6 @@ mod tests {
         String::from_utf8(text).unwrap()
     }
 
-    /// `def` with the connections of each net in name order, which a
-    /// restore does not keep.
-    fn connections_sorted(def: &str) -> String {
-        let mut in_nets = false;
-        let mut sorted = Vec::new();
-        for line in def.lines() {
-            if line.starts_with("NETS ") || line == "END NETS" {
-                in_nets = !in_nets;
-            }
-            let net = in_nets
-                .then(|| line.split_once(" ( "))
-                .flatten()
-                .and_then(|(head, rest)| Some((head, rest.split_once(" ) +")?)));
-            let Some((head, (connections, tail))) = net else {
-                sorted.push(line.to_string());
-                continue;
-            };
-            let mut pins: Vec<&str> = connections.split(" ) ( ").collect();
-            pins.sort_unstable();
-            sorted.push(format!("{head} ( {} ) +{tail}", pins.join(" ) ( ")));
-        }
-        sorted.join("\n")
-    }
-
     /// How a test session closes its journal.
     #[derive(Clone, Copy)]
     enum Close {
@@ -1732,7 +1743,7 @@ mod tests {
 
         let after = after_edits(Close::Restore);
 
-        assert_eq!(connections_sorted(&after), connections_sorted(&before));
+        assert_eq!(after, before);
     }
 
     #[test]

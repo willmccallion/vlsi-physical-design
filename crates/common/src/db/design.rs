@@ -505,6 +505,16 @@ pub enum EditError {
     },
 }
 
+/// Where a connection stands: its net, and its place among the net's pins
+/// unless its instance is retired and off them.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct PinPlace {
+    /// The net the connection is on.
+    pub net: NetId,
+    /// Its place among the net's pins.
+    pub index: Option<usize>,
+}
+
 /// Where every entry went when [`NetlistDB::remove`] compacted the design:
 /// its new id, or none for a dropped one.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
@@ -799,6 +809,31 @@ impl NetlistDB {
         }
         self.cells[cell].macro_id = master;
         Ok(())
+    }
+
+    /// Where `pin` stands: its net, and its place among the net's pins.
+    #[must_use]
+    pub fn pin_place(&self, pin: PinId) -> PinPlace {
+        let net = self.pins[pin].net;
+        PinPlace {
+            net,
+            index: self.nets[net].pins.iter().position(|&p| p == pin),
+        }
+    }
+
+    /// Puts `pin` back where [`NetlistDB::pin_place`] found it, taking it
+    /// off the net it is on; undoing edits in reverse with the places they
+    /// left keeps each net's pins in their order.
+    pub fn put_pin_back(&mut self, pin: PinId, place: PinPlace) {
+        let current = self.pins[pin].net;
+        self.nets[current].pins.retain(|&p| p != pin);
+        if let Some(index) = place.index {
+            self.nets[place.net].pins.insert(index, pin);
+        }
+        self.pins[pin].net = place.net;
+        if let PinOwner::Io(io) = self.pins[pin].owner {
+            self.io_pins[io].net = place.net;
+        }
     }
 
     /// Moves a connection to another net.

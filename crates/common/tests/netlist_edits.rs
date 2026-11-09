@@ -70,6 +70,20 @@ fn a_pin_moves_between_nets() {
 }
 
 #[test]
+fn a_moved_pin_put_back_takes_its_old_place() {
+    let mut db = tiny_design();
+    let u2_a = db.cells[db.cell_id("u2").unwrap()].pins[0];
+    let place = db.pin_place(u2_a);
+    db.move_pin(u2_a, db.net_id("n2").unwrap());
+
+    db.put_pin_back(u2_a, place);
+
+    assert_eq!(net_pins(&db, "n1"), vec!["u1/Y", "u2/A", "u3/A"]);
+    assert_eq!(net_pins(&db, "n2"), vec!["u2/Y", "u3/B", "u4/A"]);
+    assert_consistent(&db);
+}
+
+#[test]
 fn an_io_pin_moving_nets_updates_its_record() {
     let mut db = tiny_design();
     let io = db.io_pin_id("in").unwrap();
