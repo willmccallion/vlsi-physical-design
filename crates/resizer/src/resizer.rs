@@ -14,7 +14,7 @@ use crate::route_parasitics::RouteRc;
 use crate::sta::{Slack, Sta};
 use pare_common::db::design::{EditError, NetlistDB, PinOwner, PlacementStatus};
 use pare_common::db::global_route::RouteSource;
-use pare_common::db::indices::{CellId, MacroId, NetId, PinId};
+use pare_common::db::indices::{CellId, IdVec, MacroId, NetId, PinId};
 use pare_common::db::liberty::{
     BufferCell, Edge, EdgeValues, LibCell, LibCellId, LibPort, LibPortId, Liberty, MinMax,
 };
@@ -127,7 +127,7 @@ pub(crate) struct Targets {
     /// The slews repair sizes toward, per edge.
     pub slews: EdgeValues<Seconds>,
     /// The load at which each Liberty cell reaches them.
-    pub load: Vec<Farads>,
+    pub load: IdVec<LibCellId, Farads>,
 }
 
 /// One edit, recorded so it can be undone.
@@ -1094,7 +1094,7 @@ impl<'a, T: Timing> Resizer<'a, T> {
         }
         let lib = self.link.liberty.cell(cell);
         let is_buf_inv = lib.is_buffer() || lib.is_inverter();
-        let target_of = |c: LibCellId| self.targets.load[c.index()];
+        let target_of = |c: LibCellId| self.targets.load[c];
         let delay_of = |c: LibCellId| match self.link.liberty.buffer_cell(c) {
             Some(buffer) if is_buf_inv => self.buffer_delay(buffer, load_cap),
             _ => Seconds::ZERO,
@@ -1308,7 +1308,7 @@ pub(crate) fn meters_to_dbu(meters: Meters, dbu: DbuPerMicron) -> Dbu {
 pub(crate) fn find_targets(link: &Link<'_>, buffers: &BufferSet) -> Targets {
     let liberty = link.liberty;
     let mut sums = EdgeValues::<Seconds>::default();
-    let mut counts = [0usize; 2];
+    let mut counts = EdgeValues::<usize>::default();
     for &buffer in &buffers.cells {
         let cell = liberty.cell(buffer.id);
         let (input, output) = (buffer.input, buffer.output);
@@ -1322,29 +1322,26 @@ pub(crate) fn find_targets(link: &Link<'_>, buffers: &BufferSet) -> Targets {
                 let load = in_cap * TARGET_SLEW_LOAD_FACTOR;
                 let (_, slew1) = arc.gate_delay(Seconds::ZERO, load);
                 let (_, slew2) = arc.gate_delay(slew1, load);
-                match arc.to_edge {
-                    Edge::Rise => sums.rise += slew2,
-                    Edge::Fall => sums.fall += slew2,
-                }
-                counts[arc.to_edge.index()] += 1;
+                sums[arc.to_edge] += slew2;
+                counts[arc.to_edge] += 1;
             }
         }
     }
-    let slews = EdgeValues {
-        rise: if counts[0] > 0 {
-            sums.rise / counts[0] as f64
+    let average = |edge: Edge| {
+        if counts[edge] > 0 {
+            sums[edge] / counts[edge] as f64
         } else {
             Seconds::ZERO
-        },
-        fall: if counts[1] > 0 {
-            sums.fall / counts[1] as f64
-        } else {
-            Seconds::ZERO
-        },
+        }
     };
-    let load = (0..liberty.cells.len())
-        .map(|i| {
-            let id = LibCellId(i as u32);
+    let slews = EdgeValues {
+        rise: average(Edge::Rise),
+        fall: average(Edge::Fall),
+    };
+    let load = liberty
+        .cells
+        .ids()
+        .map(|id| {
             if link.is_link_cell(id) && !link.dont_use(id) {
                 find_target_load(liberty.cell(id), &slews)
             } else {

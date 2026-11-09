@@ -141,9 +141,7 @@ impl Bins {
         for bin in &mut self.nodes {
             bin.clear();
         }
-        for bin in &mut self.bin_of {
-            *bin = None;
-        }
+        self.bin_of.fill(None);
         let last = |dim: usize| dim as i32 - 1;
         for &n in candidates {
             let y = imp.bottom(n) as f64 + 0.5 * imp.height(n) as f64;

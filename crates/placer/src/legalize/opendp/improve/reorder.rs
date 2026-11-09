@@ -48,9 +48,7 @@ impl EdgeMarks {
 /// of each segment.
 fn reorder_segments(imp: &mut Improver, marks: &mut EdgeMarks) {
     marks.traversal = 0;
-    for mark in &mut marks.mark {
-        *mark = 0;
-    }
+    marks.mark.fill(0);
     for s in imp.segments.ids() {
         let n = imp.cells_in_seg[s].len();
         if n < 2 {
