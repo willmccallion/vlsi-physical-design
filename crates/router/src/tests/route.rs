@@ -1,5 +1,6 @@
 //! Routing entry checks on the shared fixture design.
 
+use super::{TINY_ROUNDS, placed_tiny, tiny};
 use crate::access::Node;
 use crate::global::{GCell, GlobalGrid, GlobalNet, route_global, track_demand};
 use crate::occupancy::{FixedTracks, Occupancy, Origin, Owner};
@@ -16,26 +17,12 @@ use pare_common::db::design::{
 };
 use pare_common::db::indices::{CellId, CutLayerId, IdVec, LayerId, NetId, NonDefaultRuleId};
 use pare_common::db::library::{LayerRef, Shape};
-use pare_common::db::parser::{def, lef};
 use pare_common::db::shapes::fixed_shapes;
 use pare_common::geom::dbu::Dbu;
 use pare_common::geom::point::Point;
 use pare_common::geom::rect::Rect;
 use pare_common::verify::routing::net_components;
 use std::num::NonZeroU32;
-use std::path::{Path, PathBuf};
-
-fn fixture(name: &str) -> PathBuf {
-    Path::new(env!("CARGO_MANIFEST_DIR"))
-        .join("../common/tests/fixtures")
-        .join(name)
-}
-
-fn tiny() -> NetlistDB {
-    let units = def::read_units(&fixture("tiny.def")).unwrap();
-    let library = lef::parse_files(&[fixture("tiny.lef")], units).unwrap();
-    def::parse(&fixture("tiny.def"), library).unwrap()
-}
 
 #[test]
 fn routing_refuses_a_design_with_unplaced_cells() {
@@ -52,12 +39,6 @@ fn routing_refuses_a_design_with_unplaced_cells() {
     );
 }
 
-fn place(db: &mut NetlistDB, name: &str, at: Point<Dbu>) {
-    let cell = db.cells.iter_mut().find(|c| c.name == name).unwrap();
-    cell.location = at;
-    cell.status = PlacementStatus::Placed;
-}
-
 #[test]
 fn nets_crossing_many_regions_are_routed_connected() {
     let (mut db, config) = placed_tiny();
@@ -68,25 +49,6 @@ fn nets_crossing_many_regions_are_routed_connected() {
     for n in 0..db.nets.len() {
         assert_eq!(net_components(&db, NetId::new(n)), 1, "net {n}");
     }
-}
-
-/// Detailed rounds the placed fixture is routed for: enough to pass
-/// through the regular, guides, stubborn and skipped rounds, since some of
-/// its violations never clear.
-const TINY_ROUNDS: usize = 12;
-
-/// The fixture with its two unplaced cells placed, and a config that cuts
-/// it into many gcells.
-fn placed_tiny() -> (NetlistDB, RoutingConfig) {
-    let mut db = tiny();
-    place(&mut db, "u5", Point::new(Dbu(2000), Dbu(4000)));
-    place(&mut db, "u6", Point::new(Dbu(3000), Dbu(4000)));
-    let config = RoutingConfig {
-        gcell_tracks: NonZeroU32::new(3).unwrap(),
-        detailed_iterations: TINY_ROUNDS,
-        ..RoutingConfig::default()
-    };
-    (db, config)
 }
 
 /// Routes the placed fixture, saving its state after `point`.

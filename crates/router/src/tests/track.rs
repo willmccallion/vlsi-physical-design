@@ -1,5 +1,6 @@
 //! Track assignment on the shared fixture design.
 
+use super::tiny;
 use crate::detailed::DetailedRouter;
 use crate::global::{GCell, GlobalGrid, GlobalRoutes};
 use crate::occupancy::{Owner, Proximity};
@@ -8,25 +9,11 @@ use crate::track::{TrackWire, assign_tracks};
 use pare_common::config::{CapacityReserve, RoutingConfig};
 use pare_common::db::design::NetlistDB;
 use pare_common::db::indices::{IdVec, LayerId, NetId};
-use pare_common::db::parser::{def, lef};
 use pare_common::db::shapes::wire_rect;
 use pare_common::geom::dbu::Dbu;
-use std::path::{Path, PathBuf};
 
 const GCELL: Dbu = Dbu(2000);
 const M3: LayerId = LayerId(2);
-
-fn fixture(name: &str) -> PathBuf {
-    Path::new(env!("CARGO_MANIFEST_DIR"))
-        .join("../common/tests/fixtures")
-        .join(name)
-}
-
-fn tiny() -> NetlistDB {
-    let units = def::read_units(&fixture("tiny.def")).unwrap();
-    let library = lef::parse_files(&[fixture("tiny.lef")], units).unwrap();
-    def::parse(&fixture("tiny.def"), library).unwrap()
-}
 
 fn along_m3_row_0(from: u16, to: u16) -> Vec<GCell> {
     (from..=to).map(|x| GCell { layer: M3, x, y: 0 }).collect()

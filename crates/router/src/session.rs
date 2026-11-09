@@ -437,9 +437,10 @@ fn straight_runs(links: &[(GCell, GCell)], terminals: &[PinTerminal]) -> Vec<(GC
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::tests::fixture;
     use pare_common::db::design::{NonDefaultLayer, NonDefaultRule, PlacementStatus};
     use pare_common::db::parser::{def, lef};
-    use std::path::{Path, PathBuf};
+    use std::path::Path;
 
     const fn cell(layer: u8, x: u16, y: u16) -> GCell {
         GCell {
@@ -482,12 +483,6 @@ mod tests {
             .collect();
         out.sort_unstable();
         out
-    }
-
-    fn fixture(name: &str) -> PathBuf {
-        Path::new(env!("CARGO_MANIFEST_DIR"))
-            .join("../common/tests/fixtures")
-            .join(name)
     }
 
     /// The tiny design placed, with a one-pin net `spare` on `u7` ahead of
