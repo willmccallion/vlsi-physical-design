@@ -17,9 +17,9 @@ use crate::tech::LayerTech;
 use crate::wiring::{Edge, NetRoute};
 use pare_common::db::indices::{LayerId, NetId};
 use pare_common::db::library::LayerRef;
+use pare_common::db::shapes::wire_rect;
 use pare_common::geom::dbu::Dbu;
 use pare_common::geom::rect::Rect;
-use pare_common::verify::shapes::wire_rect;
 
 /// Widths a violation is grown by, at most, to take in two crossings of a
 /// wire: `TritonRoute` grows it once and then up to five times more.

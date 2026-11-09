@@ -36,10 +36,10 @@ use pare_common::db::design::{
 };
 use pare_common::db::indices::{LayerId, NetId, PinId};
 use pare_common::db::library::{Direction, Shape};
+use pare_common::db::shapes::obstruction_shapes;
 use pare_common::geom::dbu::Dbu;
 use pare_common::geom::point::Point;
 use pare_common::geom::rect::Rect;
-use pare_common::verify::shapes::obstruction_shapes;
 use rustc_hash::{FxHashMap, FxHashSet};
 use search::Costs;
 pub use session::GlobalSession;

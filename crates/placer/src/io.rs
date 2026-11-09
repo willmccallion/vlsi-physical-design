@@ -16,11 +16,11 @@ use pare_common::config::IoLayerNames;
 use pare_common::db::design::{IoPin, NetlistDB, PinOwner, PlacementStatus, TrackAxis, TrackDef};
 use pare_common::db::indices::{CellId, IoPinId, LayerId};
 use pare_common::db::library::{Direction, LayerRef, Library, MacroClass, Shape};
+use pare_common::db::shapes::fixed_shapes_keeping_io;
 use pare_common::geom::dbu::Dbu;
 use pare_common::geom::orient::Orientation;
 use pare_common::geom::point::Point;
 use pare_common::geom::rect::Rect;
-use pare_common::verify::shapes::fixed_shapes_keeping_io;
 use rayon::prelude::*;
 
 /// Slots in one section of an edge.

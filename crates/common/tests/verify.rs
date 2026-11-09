@@ -9,6 +9,7 @@ use pare_common::db::indices::{CellId, CutLayerId, LayerId, NetId, NonDefaultRul
 use pare_common::db::library::LayerRef;
 use pare_common::db::parser::{def, lef};
 use pare_common::db::rules::EndOfLineSpacing;
+use pare_common::db::shapes::route_elem_shapes;
 use pare_common::geom::dbu::{Dbu, DbuArea, DbuPerMicron};
 use pare_common::geom::orient::Orientation;
 use pare_common::geom::point::Point;
@@ -16,7 +17,6 @@ use pare_common::geom::rect::Rect;
 use pare_common::verify::drc::{Violation, check_drc};
 use pare_common::verify::placement::{PlacementViolation, placement_violations};
 use pare_common::verify::routing::check_routing;
-use pare_common::verify::shapes::route_elem_shapes;
 use std::path::{Path, PathBuf};
 
 const M1: LayerId = LayerId(0);

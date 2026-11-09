@@ -8,9 +8,9 @@
 use crate::db::design::{NetlistDB, PinOwner, PlacementStatus, RouteElem};
 use crate::db::indices::{BlockageId, CellId, MacroPinId, NetId, NonDefaultRuleId, SpecialNetId};
 use crate::db::library::{LayerRef, Shape, SignalUse};
+use crate::db::shapes::{default_width_shapes, route_elem_shapes, special_net_metal};
 use crate::geom::dbu::Dbu;
 use crate::geom::rect::Rect;
-use crate::verify::shapes::{default_width_shapes, route_elem_shapes, special_net_metal};
 use std::collections::HashMap;
 use std::sync::Arc;
 
