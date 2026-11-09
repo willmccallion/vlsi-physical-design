@@ -122,7 +122,6 @@ pub(crate) struct TechChar {
     max_slew: u32,
     actual_min_input_cap: u32,
     length_unit: u32,
-    char_unit: u32,
     cap_per_dbu: FaradsPerDbu,
     sink_buffer_input_cap: Farads32,
     wire_delay_rate: Option<WireDelayRate>,
@@ -370,12 +369,6 @@ impl TechChar {
         self.length_unit
     }
 
-    /// The wire length each characterization step adds, in database units.
-    #[must_use]
-    pub(crate) const fn char_unit(&self) -> u32 {
-        self.char_unit
-    }
-
     /// Clock wire capacitance per database unit, in farads.
     #[must_use]
     pub(crate) const fn cap_per_dbu(&self) -> FaradsPerDbu {
@@ -424,13 +417,8 @@ impl TechChar {
 #[cfg(test)]
 impl TechChar {
     /// A table of `segments` alone, `length_unit` database units to the
-    /// tree's length unit and `char_unit` to a characterization step, its
-    /// ranges those of the segments.
-    pub(crate) fn from_segments(
-        segments: Vec<WireSegment>,
-        length_unit: u32,
-        char_unit: u32,
-    ) -> Self {
+    /// tree's length unit, its ranges those of the segments.
+    pub(crate) fn from_segments(segments: Vec<WireSegment>, length_unit: u32) -> Self {
         let range = |field: fn(&WireSegment) -> u8| {
             let values = segments.iter().map(|s| u32::from(field(s)));
             (values.clone().min().unwrap(), values.max().unwrap())
@@ -445,7 +433,6 @@ impl TechChar {
             max_slew: range(|s| s.output_slew).1,
             actual_min_input_cap: range(|s| s.input_cap).0,
             length_unit,
-            char_unit,
             cap_per_dbu: FaradsPerDbu::new(0.0),
             sink_buffer_input_cap: Farads32::ZERO,
             wire_delay_rate: None,
@@ -939,7 +926,6 @@ fn compile(
         max_slew: bounds.slew.max,
         actual_min_input_cap: u32::MAX,
         length_unit: plan.length_unit,
-        char_unit: plan.char_unit,
         cap_per_dbu,
         sink_buffer_input_cap: plan.sink_buffer_input_cap,
         wire_delay_rate: None,
