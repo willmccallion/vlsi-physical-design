@@ -78,7 +78,9 @@ impl TreePoint {
         fuzzy_eq(self.x, other.x, FUZZY_EPSILON) && fuzzy_eq(self.y, other.y, FUZZY_EPSILON)
     }
 
-    /// The exact key `TritonCTS` hashes and orders points by.
+    /// The exact key points are hashed by.
+    // NOTE: TreeBuilder hashes points exactly but matches them by fuzzy
+    // equality, so near points sharing a bucket merge; PARE keys exactly.
     fn key(self) -> (u64, u64) {
         let bits = |v: f64| if v == 0.0 { 0 } else { v.to_bits() };
         (bits(self.x), bits(self.y))
@@ -443,6 +445,7 @@ impl Builder {
             TreePoint::new(p.x + w, y2),
             TreePoint::new(p.x - w, y2),
         ];
+        // NOTE: legalizeOneBuffer marks no best with a (-1e6, -1e6) point; PARE with None.
         let mut best: Option<(TreePoint, f64)> = None;
         for c in candidates {
             if self.is_occupied(c) {
@@ -904,6 +907,8 @@ impl Builder {
                 };
                 let sinks = self.topologies[level_idx].sinks[idx].tree_points();
                 let length = self.topologies[level_idx].length;
+                // NOTE: legalize measures with computeDist, insertion lengths
+                // included; PARE the geometric distance between the buffers.
                 let leng = point.dist(parent);
                 let blockage = if self.is_occupied(point) {
                     None
@@ -955,6 +960,7 @@ impl Builder {
                 let length = topology.length;
                 let sibling = topology.points[LevelTopology::sibling_of(idx)];
                 let mut point = topology.points[idx];
+                // NOTE: legalizeDummy tests with computeDist; PARE geometrically.
                 let overlap = point.dist(sibling) == 0.0 || point.dist(parent) == 0.0;
                 if sinks.is_empty() {
                     point = TreePoint::new(2.0 * parent.x - sibling.x, 2.0 * parent.y - sibling.y);
@@ -1252,6 +1258,7 @@ struct LegalSearch<'a> {
 /// pushing it a `scale` share off the axes, as
 /// `HTreeBuilder::scalePosition`.
 fn scale_position(p: TreePoint, parent: TreePoint, length: f64, scale: f64) -> TreePoint {
+    // NOTE: scalePosition measures with computeDist; PARE geometrically.
     let d = p.dist(parent);
     if d > 0.0 {
         let delta = d * scale;

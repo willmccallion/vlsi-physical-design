@@ -22,10 +22,18 @@ use rustc_hash::FxHashMap;
 use std::cmp::Ordering;
 use std::collections::BTreeMap;
 
+/// The input slews characterized, as `CtsOptions`' default `slewSteps`.
 const SLEW_STEPS: usize = 7;
+/// The loads characterized, as `CtsOptions`' default `capSteps`.
 const CAP_STEPS: usize = 20;
+/// The wire lengths characterized, in characterization units, as
+/// `CtsOptions`' default `charWirelengthIterations`.
 const WIRELENGTH_ITERATIONS: u32 = 4;
+/// The bits of each field of a segment's key, as `TechChar`'s
+/// `NUM_BITS_PER_FIELD`.
 const NUM_BITS_PER_FIELD: u32 = 10;
+/// The largest normalized value a key field holds, as `TechChar`'s
+/// `MAX_NORMALIZED_VAL`.
 const MAX_NORMALIZED: u32 = (1 << NUM_BITS_PER_FIELD) - 1;
 /// Steps of a segment's delay per slew step, as
 /// `TechChar::characterizationPostProcess` normalizes delays.
@@ -512,6 +520,7 @@ fn plan(setup: &CharSetup<'_>) -> Result<Plan, CtsError> {
             (1..=CAP_STEPS).map(|s| s as f32 * cap_step).collect(),
         )
     } else {
+        // NOTE: initCharacterization expands an empty axis, reading past it; PARE refuses.
         if axis_slews.is_empty() || axis_loads.is_empty() {
             return Err(CtsError::NoTableAxes(cell.name.clone()));
         }
@@ -601,6 +610,7 @@ fn reduce_or_expand(values: &mut Vec<f32>, limit: usize) {
         }
         let _ = values.remove(smallest);
     }
+    // NOTE: reduceOrExpand reads past a single value to split it; PARE keeps it.
     while values.len() < limit && values.len() >= 2 {
         let mut max_diff = f32::MIN_POSITIVE;
         let mut largest = 0;

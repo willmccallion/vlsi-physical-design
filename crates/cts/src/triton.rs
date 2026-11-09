@@ -225,6 +225,8 @@ struct Cts<'a> {
 /// centers, in integer arithmetic.
 fn pin_position(db: &NetlistDB, pin: PinId) -> Point<Dbu> {
     let shapes = db.pin_shapes(pin);
+    // NOTE: computeITermPosition gives (0, 0) for a pin without shapes; PARE
+    // its reference point.
     if shapes.is_empty() {
         return db.pin_position(pin);
     }
@@ -1095,6 +1097,9 @@ impl Cts<'_> {
             })
             .filter_map(|id| liberty.buffer_cell(id))
             .collect();
+        // NOTE: findCandidateDummyCells asks for a case-insensitive regexp, but
+        // `^*CLKINV*$` never compiles and OpenSTA falls back to a case-sensitive
+        // glob; PARE matches without case, as meant.
         let named = |pattern: &str| -> Vec<BufferCell> {
             inverters
                 .iter()
@@ -1405,6 +1410,22 @@ mod tests {
 
         assert!(blockages.is_empty());
         assert!(diameter.abs() < 1e-12, "{diameter}");
+    }
+
+    #[test]
+    fn a_pin_without_shapes_sits_at_its_reference_point() {
+        let mut db = fixtures::design(
+            "COMPONENTS 1 ;\n- ram RAM + PLACED ( 100000 100000 ) N ;\nEND COMPONENTS\n",
+        );
+        let ram = db.cell_id("ram").unwrap();
+        let bare = db.cell_macro(ram).pin_id("CLKBARE").unwrap();
+        let net = db.add_net("n").unwrap();
+        let pin = db.connect_cell_pin(ram, bare, net);
+
+        assert_eq!(
+            pin_position(&db, pin),
+            Point::new(Dbu(120_000), Dbu(120_000))
+        );
     }
 
     fn metal1() -> pare_common::db::library::RoutingLayer {

@@ -1,5 +1,6 @@
-# A block with no timing model, its clock taken in by an input pin and by
-# an inout pin, read after clock.lef for the clock tree synthesis tests.
+# A block with no timing model, its clock taken in by an input pin, an
+# inout pin and a pin without shapes, read after clock.lef for the clock
+# tree synthesis tests.
 VERSION 5.8 ;
 BUSBITCHARS "[]" ;
 DIVIDERCHAR "/" ;
@@ -24,5 +25,9 @@ MACRO RAM
         RECT 19.8 9.9 20 10.1 ;
     END
   END CLKIO
+  PIN CLKBARE
+    DIRECTION INPUT ;
+    USE CLOCK ;
+  END CLKBARE
 END RAM
 END LIBRARY
