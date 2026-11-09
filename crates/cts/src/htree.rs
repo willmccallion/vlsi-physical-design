@@ -770,9 +770,10 @@ impl Builder {
         }
         let slew_threshold = MAX_SLEW;
         let wirelength_threshold = match ctx.settings.max_wire_length {
-            None => (slew_threshold * tech.max_segment_length()) as i32,
-            // A threshold past i32 is longer than any wire, as unbounded.
-            Some(max) => i32::try_from(max.get() / i64::from(tech.char_unit())).unwrap_or(i32::MAX),
+            None => i64::from(slew_threshold * tech.max_segment_length()),
+            // NOTE: computeLevelTopology divides by the characterization unit,
+            // twice the length unit the segments count in; PARE by the latter.
+            Some(max) => max.get() / i64::from(tech.length_unit()),
         };
         let mut length = 0;
         let mut char_length = tech.max_segment_length();
@@ -1304,7 +1305,8 @@ struct SegmentQuery {
     input_slew: u32,
     input_cap: u32,
     slew_threshold: u32,
-    wirelength_threshold: i32,
+    /// The most wire since the last buffer, in length units.
+    wirelength_threshold: i64,
 }
 
 /// The slew, load and wire since the last buffer a chosen segment leaves.
@@ -1340,16 +1342,15 @@ fn min_delay_segment(
                 {
                     continue;
                 }
-                let wl = out.curr_wl + seg.wl_to_first_buffer;
-                let too_long = if seg.is_buffered() {
-                    wl > query.wirelength_threshold
+                let wl = i64::from(out.curr_wl) + i64::from(seg.wl_to_first_buffer);
+                let limit = if seg.is_buffered() {
+                    query.wirelength_threshold
                 } else {
-                    // The threshold less the shortest length is unsigned in `TritonCTS`.
-                    let limit =
-                        (query.wirelength_threshold as u32).wrapping_sub(tech.min_segment_length());
-                    (wl as u32) > limit
+                    // NOTE: computeMinDelaySegment subtracts in unsigned, so a limit below
+                    // the shortest segment wraps and admits any bare wire; PARE's is signed.
+                    query.wirelength_threshold - i64::from(tech.min_segment_length())
                 };
-                if too_long {
+                if wl > limit {
                     continue;
                 }
                 if seg.delay < min_delay {
@@ -1735,7 +1736,7 @@ mod tests {
 
     /// A search for a segment `length` long from slew and load 1 with no
     /// wire since the last buffer, under `wirelength_threshold`.
-    const fn query(length: u32, wirelength_threshold: i32) -> SegmentQuery {
+    const fn query(length: u32, wirelength_threshold: i64) -> SegmentQuery {
         SegmentQuery {
             length,
             input_slew: 1,
@@ -1770,7 +1771,6 @@ mod tests {
                 },
             ],
             1,
-            2,
         );
 
         let chosen = choose(&tech, &query(2, 100));
@@ -1786,7 +1786,6 @@ mod tests {
                 ..segment(2, 1, &[], 2)
             }],
             1,
-            2,
         );
 
         let chosen = choose(&tech, &query(2, 100));
@@ -1803,7 +1802,6 @@ mod tests {
                 at_threshold(segment(2, 5, &[0.5], 1)),
             ],
             1,
-            2,
         );
         let search = SegmentQuery {
             input_slew: 4,
@@ -1823,7 +1821,6 @@ mod tests {
                 ..segment(2, 1, &[], 2)
             }],
             1,
-            2,
         );
         let mut out = SegmentChoice {
             curr_wl: 3,
@@ -1837,11 +1834,8 @@ mod tests {
 
     #[test]
     fn a_buffered_segment_whose_first_buffer_is_past_the_wire_limit_is_passed_over() {
-        let tech = TechChar::from_segments(
-            vec![segment(2, 1, &[0.5], 6), segment(2, 5, &[0.5], 1)],
-            1,
-            2,
-        );
+        let tech =
+            TechChar::from_segments(vec![segment(2, 1, &[0.5], 6), segment(2, 5, &[0.5], 1)], 1);
 
         let chosen = choose(&tech, &query(2, 5));
 
@@ -1851,8 +1845,7 @@ mod tests {
     #[test]
     fn a_levels_segments_add_up_to_its_branch_length() {
         let scene = Scene::new(Vec::new());
-        let tech =
-            TechChar::from_segments(vec![segment(2, 1, &[], 2), segment(1, 1, &[], 1)], 1, 2);
+        let tech = TechChar::from_segments(vec![segment(2, 1, &[], 2), segment(1, 1, &[], 1)], 1);
         let mut tree = builder();
         tree.min_input_cap = 1;
         tree.min_length_sink_region = 2;
@@ -1871,6 +1864,44 @@ mod tests {
         assert_eq!(lengths, [2, 2, 1]);
     }
 
+    #[test]
+    fn a_bare_segment_is_refused_under_a_limit_shorter_than_the_shortest_segment() {
+        let tech = TechChar::from_segments(vec![segment(2, 1, &[], 2)], 1);
+
+        assert_eq!(choose(&tech, &query(2, 1)), None);
+    }
+
+    /// The segments chosen for the first level of a tree whose length unit
+    /// is 14000 database units, 7 microns, under a wire length limit of
+    /// `limit_um` microns: 0, buffered 10 units (70 microns) in, or 1, a
+    /// slower bare segment.
+    fn first_level_under(limit_um: i64) -> Vec<usize> {
+        let mut scene = Scene::new(Vec::new());
+        scene.settings.max_wire_length = Some(Dbu(limit_um * 2000));
+        let tech = TechChar::from_segments(
+            vec![segment(10, 1, &[1.0], 10), segment(10, 9, &[], 10)],
+            14_000,
+        );
+        let mut tree = builder();
+        tree.wire_segment_unit = 14_000;
+        tree.min_input_cap = 1;
+        tree.min_length_sink_region = 20;
+        tree.sink_region = Region::new(0.0, 0.0, 40.0, 40.0);
+        tree.top_level_sinks_clustered = BranchSinks {
+            points: vec![(1.0, 1.0), (39.0, 39.0)],
+            insts: vec![InstRef::Sink(0), InstRef::Sink(1)],
+        };
+
+        tree.level_topology(&scene.ctx(), &tech, 1, 20.0, 20.0);
+
+        tree.topologies[0].wire_segments.clone()
+    }
+
+    #[test]
+    fn a_wire_length_limit_admits_a_first_buffer_within_it() {
+        assert_eq!(first_level_under(100), [0]);
+    }
+
     /// Where `SegmentBuilder` puts the buffers of `segments`, laid end to
     /// end along the branch from `root` to `target`, in a tree whose unit
     /// is one database unit.
@@ -1881,7 +1912,7 @@ mod tests {
     ) -> Vec<Point<Dbu>> {
         let scene = Scene::new(Vec::new()).with_buffer_size(1, 1);
         let wires: Vec<usize> = (0..segments.len()).collect();
-        let tech = TechChar::from_segments(segments, 1, 2);
+        let tech = TechChar::from_segments(segments, 1);
         let mut tree = builder();
         let driving = tree.clock.add_subnet("root");
         let mut branch = SegmentBuilder {
@@ -1928,7 +1959,7 @@ mod tests {
     fn every_sink_hangs_off_one_leaf_net_driven_by_a_buffer() {
         let scene = Scene::new(Vec::new()).with_buffer_size(1, 1);
         let mut tech =
-            TechChar::from_segments(vec![segment(2, 1, &[0.5], 1), segment(1, 1, &[], 1)], 1, 2);
+            TechChar::from_segments(vec![segment(2, 1, &[0.5], 1), segment(1, 1, &[], 1)], 1);
         let mut clock = Clock::new(NetId::new(0), "clk", "clk");
         for (i, (x, y)) in [(10, 10), (90, 10), (10, 90), (90, 90)]
             .into_iter()

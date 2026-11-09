@@ -1,11 +1,11 @@
 CtsSummary {
     trees: 1,
     sinks: 576,
-    buffers: 124,
-    nets: 124,
+    buffers: 118,
+    nets: 118,
     dummies: 69,
     clones: 0,
-    ndr_nets: 4,
+    ndr_nets: 2,
     root_buffer: "CLKBUF_X3",
     sink_buffer: "CLKBUF_X3",
 }
@@ -119,12 +119,6 @@ cell clkbuf_leaf_106_clk CLKBUF_X3 24365 69500 N
 cell clkbuf_leaf_107_clk CLKBUF_X3 58204 61800 N
 cell clkbuf_leaf_108_clk CLKBUF_X3 83740 80000 N
 cell clkbuf_0_clk CLKBUF_X3 186644 164699 N
-cell clkbuf_1_0_0_clk CLKBUF_X3 158644 164699 N
-cell clkbuf_1_1_0_clk CLKBUF_X3 214643 164699 N
-cell clkbuf_2_0_0_clk CLKBUF_X3 92260 149106 N
-cell clkbuf_2_1_0_clk CLKBUF_X3 93521 183577 N
-cell clkbuf_2_2_0_clk CLKBUF_X3 278597 144653 N
-cell clkbuf_2_3_0_clk CLKBUF_X3 281643 178257 N
 cell clkbuf_3_0_0_clk CLKBUF_X3 64260 93106 N
 cell clkbuf_3_1_0_clk CLKBUF_X3 120260 93106 N
 cell clkbuf_3_2_0_clk CLKBUF_X3 65521 239577 N
@@ -203,13 +197,7 @@ cell clkload66 CLKBUF_X3 355971 193399 N
 cell clkload67 INV_X1 348790 174500 N
 cell clkload68 CLKBUF_X3 314856 182199 N
 net clk CTS_NDR_0 PIN clk clkbuf_0_clk/A
-net clknet_0_clk CTS_NDR_0 clkbuf_0_clk/Z clkbuf_1_0_0_clk/A clkbuf_1_1_0_clk/A
-net clknet_1_0_0_clk CTS_NDR_0 clkbuf_1_0_0_clk/Z clkbuf_2_0_0_clk/A clkbuf_2_1_0_clk/A
-net clknet_1_1_0_clk CTS_NDR_0 clkbuf_1_1_0_clk/Z clkbuf_2_2_0_clk/A clkbuf_2_3_0_clk/A
-net clknet_2_0_0_clk - clkbuf_2_0_0_clk/Z clkbuf_3_0_0_clk/A clkbuf_3_1_0_clk/A
-net clknet_2_1_0_clk - clkbuf_2_1_0_clk/Z clkbuf_3_2_0_clk/A clkbuf_3_3_0_clk/A
-net clknet_2_2_0_clk - clkbuf_2_2_0_clk/Z clkbuf_3_4_0_clk/A clkbuf_3_5_0_clk/A
-net clknet_2_3_0_clk - clkbuf_2_3_0_clk/Z clkbuf_3_6_0_clk/A clkbuf_3_7_0_clk/A
+net clknet_0_clk CTS_NDR_0 clkbuf_0_clk/Z clkbuf_3_0_0_clk/A clkbuf_3_1_0_clk/A clkbuf_3_2_0_clk/A clkbuf_3_3_0_clk/A clkbuf_3_4_0_clk/A clkbuf_3_5_0_clk/A clkbuf_3_6_0_clk/A clkbuf_3_7_0_clk/A
 net clknet_3_0_0_clk - clkbuf_3_0_0_clk/Z clkbuf_leaf_0_clk/A clkbuf_leaf_101_clk/A clkbuf_leaf_102_clk/A clkbuf_leaf_103_clk/A clkbuf_leaf_104_clk/A clkbuf_leaf_105_clk/A clkbuf_leaf_106_clk/A clkbuf_leaf_107_clk/A clkbuf_leaf_108_clk/A clkbuf_leaf_1_clk/A clkbuf_leaf_2_clk/A clkbuf_leaf_3_clk/A clkbuf_leaf_4_clk/A clkbuf_leaf_5_clk/A
 net clknet_3_1_0_clk - clkbuf_3_1_0_clk/Z clkbuf_leaf_100_clk/A clkbuf_leaf_6_clk/A clkbuf_leaf_7_clk/A clkbuf_leaf_8_clk/A clkbuf_leaf_92_clk/A clkbuf_leaf_93_clk/A clkbuf_leaf_94_clk/A clkbuf_leaf_95_clk/A clkbuf_leaf_96_clk/A clkbuf_leaf_97_clk/A clkbuf_leaf_98_clk/A clkbuf_leaf_99_clk/A clkbuf_leaf_9_clk/A clkload0/A
 net clknet_3_2_0_clk - clkbuf_3_2_0_clk/Z clkbuf_leaf_14_clk/A clkbuf_leaf_15_clk/A clkbuf_leaf_16_clk/A clkbuf_leaf_17_clk/A clkbuf_leaf_18_clk/A clkbuf_leaf_19_clk/A clkbuf_leaf_20_clk/A clkbuf_leaf_21_clk/A clkbuf_leaf_22_clk/A clkbuf_leaf_23_clk/A clkbuf_leaf_24_clk/A clkbuf_leaf_25_clk/A clkbuf_leaf_26_clk/A clkbuf_leaf_27_clk/A
