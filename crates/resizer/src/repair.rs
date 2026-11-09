@@ -692,11 +692,10 @@ impl<'r, 'a, T: Timing> Repairer<'r, 'a, T> {
         Self::carry_wire(&wire, &rest, &mut branch);
         while self.wire_breaks_limits(&wire, &rest, max_cap) {
             let buf_dist = self.repeater_distance(&wire, &rest, max_cap);
-            let at = point_back_along(rest.to, from, buf_dist, rest.length);
+            let (at, length) = back_along(rest.to, from, buf_dist, rest.length);
             let Some(leaf) = self.wire_repeater(&wire, &rest, at, &mut branch)? else {
                 break;
             };
-            let length = rest.length - Dbu(buf_dist as i64);
             rest = WireRest {
                 to: at,
                 length,
@@ -879,7 +878,17 @@ impl<'r, 'a, T: Timing> Repairer<'r, 'a, T> {
 }
 /// The point `distance` back from `to` toward `from` along the straight
 /// line between them, `length` long, truncated to the database grid as
-/// `repairNetWire` places its repeaters.
+/// `repairNetWire` places its repeaters, and the length of wire left from
+/// it back to `from`.
+// NOTE: RepairDesign::repairNetWire takes length - buf_dist cut to an int,
+// a DBU short where the point moves toward higher coordinates; PARE
+// measures what is left from where the point stands.
+fn back_along(to: Point<Dbu>, from: Point<Dbu>, distance: f64, length: Dbu) -> (Point<Dbu>, Dbu) {
+    let at = point_back_along(to, from, distance, length);
+    (at, from.manhattan(at))
+}
+
+/// The point of [`back_along`].
 // OpenROAD rounds the product before the sum; a fused one could move it.
 #[allow(clippy::suboptimal_flops)]
 fn point_back_along(to: Point<Dbu>, from: Point<Dbu>, distance: f64, length: Dbu) -> Point<Dbu> {
@@ -978,6 +987,17 @@ mod tests {
         let (violated, _) = load_slew_violated(SLOW_CLOCK, margin);
 
         assert!(violated, "{slew:?} at {margin}%");
+    }
+
+    #[test]
+    fn the_wire_left_behind_a_repeater_is_measured_from_where_it_stands() {
+        let (left, right) = (Point::new(Dbu(0), Dbu(0)), Point::new(Dbu(100), Dbu(0)));
+
+        let toward_left = back_along(right, left, 30.5, Dbu(100));
+        let toward_right = back_along(left, right, 30.5, Dbu(100));
+
+        assert_eq!(toward_left, (Point::new(Dbu(69), Dbu(0)), Dbu(69)));
+        assert_eq!(toward_right, (Point::new(Dbu(30), Dbu(0)), Dbu(70)));
     }
 
     #[test]
