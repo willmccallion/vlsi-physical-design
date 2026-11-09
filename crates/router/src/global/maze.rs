@@ -10,7 +10,7 @@
 
 use super::coarse::{Corridor, Plan, SCALE};
 use super::grid_index;
-use super::{BLOCKED_COST, GCell, GlobalCosts, GlobalGrid, GlobalNet, window};
+use super::{BLOCKED_COST, GCell, GcellWindow, GlobalCosts, GlobalGrid, GlobalNet, window};
 use crate::tech::index_u32;
 use crate::tree::connection_order;
 use pare_common::db::indices::LayerId;
@@ -135,11 +135,8 @@ fn search_extended(
 ) -> Option<Vec<GCell>> {
     let w = window(&ends, margin, grid.nx, grid.ny);
     let c = corridor.window();
-    let span = (w.0.min(c.0), w.1.max(c.1), w.2.min(c.2), w.3.max(c.3));
-    let inside = |cell: &GCell| {
-        (w.0..=w.1).contains(&cell.x) && (w.2..=w.3).contains(&cell.y)
-            || corridor.allows(cell.x, cell.y)
-    };
+    let span = w.union(c);
+    let inside = |cell: &GCell| w.contains(cell.x, cell.y) || corridor.allows(cell.x, cell.y);
     let sources: Vec<GCell> = cells_in(buckets, span).into_iter().filter(inside).collect();
     if sources.is_empty() {
         return None;
@@ -162,7 +159,7 @@ fn search_widening(
     margin: u16,
 ) -> Vec<GCell> {
     let target = ends[0];
-    let full = (0, grid.nx - 1, 0, grid.ny - 1);
+    let full = GcellWindow::whole(grid.nx, grid.ny);
     let mut margin = margin;
     loop {
         if let Some(p) = search_window(grid, avoid, buckets, ends, margin) {
@@ -207,12 +204,12 @@ fn add_cell(tree: &mut FxHashSet<GCell>, buckets: &mut Buckets, c: GCell) {
 }
 
 /// Tree cells inside a window.
-fn cells_in(buckets: &Buckets, w: (u16, u16, u16, u16)) -> Vec<GCell> {
+fn cells_in(buckets: &Buckets, w: GcellWindow) -> Vec<GCell> {
     let mut out = Vec::new();
-    for bx in w.0 / BUCKET..=w.1 / BUCKET {
-        for by in w.2 / BUCKET..=w.3 / BUCKET {
+    for bx in w.x0 / BUCKET..=w.x1 / BUCKET {
+        for by in w.y0 / BUCKET..=w.y1 / BUCKET {
             for &c in buckets.get(&(bx, by)).into_iter().flatten() {
-                if c.x >= w.0 && c.x <= w.1 && c.y >= w.2 && c.y <= w.3 {
+                if w.contains(c.x, c.y) {
                     out.push(c);
                 }
             }
@@ -321,7 +318,7 @@ fn search(
     query: Query<'_>,
     sources: &[GCell],
     target: GCell,
-    win: (u16, u16, u16, u16),
+    win: GcellWindow,
 ) -> Option<Vec<GCell>> {
     SEARCH.with_borrow_mut(|state| search_with(state, grid, query, sources, target, win))
 }
@@ -332,7 +329,7 @@ fn search_with(
     query: Query<'_>,
     sources: &[GCell],
     target: GCell,
-    win: (u16, u16, u16, u16),
+    win: GcellWindow,
 ) -> Option<Vec<GCell>> {
     let rules = MoveRules::new(grid, query, sources, target);
     let local = Local::new(grid, win, query.corridor);
@@ -500,10 +497,7 @@ const KEPT_SEARCH_NODES: usize = 1 << 20;
 /// no state for the gcells of its bounding box it leaves out.
 #[derive(Clone, Copy, Debug)]
 struct Local<'a> {
-    x0: u16,
-    y0: u16,
-    x1: u16,
-    y1: u16,
+    window: GcellWindow,
     corridor: Option<&'a Corridor>,
     layers: usize,
     first_layer: usize,
@@ -513,12 +507,9 @@ struct Local<'a> {
 const COARSE_CELLS: usize = SCALE as usize * SCALE as usize;
 
 impl<'a> Local<'a> {
-    fn new(grid: &GlobalGrid, win: (u16, u16, u16, u16), corridor: Option<&'a Corridor>) -> Self {
+    fn new(grid: &GlobalGrid, window: GcellWindow, corridor: Option<&'a Corridor>) -> Self {
         Self {
-            x0: win.0,
-            y0: win.2,
-            x1: win.1,
-            y1: win.3,
+            window,
             corridor,
             layers: grid.layers().count(),
             first_layer: *grid.layers().start(),
@@ -526,15 +517,15 @@ impl<'a> Local<'a> {
     }
 
     const fn width(&self) -> usize {
-        (self.x1 - self.x0) as usize + 1
+        (self.window.x1 - self.window.x0) as usize + 1
     }
 
     const fn window_cells(&self) -> usize {
-        self.width() * ((self.y1 - self.y0) as usize + 1)
+        self.width() * ((self.window.y1 - self.window.y0) as usize + 1)
     }
 
     fn in_window(&self, c: GCell) -> bool {
-        (self.x0..=self.x1).contains(&c.x) && (self.y0..=self.y1).contains(&c.y)
+        self.window.contains(c.x, c.y)
     }
 
     fn nodes(&self) -> usize {
@@ -552,7 +543,7 @@ impl<'a> Local<'a> {
     fn index(&self, c: GCell) -> usize {
         let l = c.layer.index() - self.first_layer;
         let plane = if self.in_window(c) {
-            usize::from(c.y - self.y0) * self.width() + usize::from(c.x - self.x0)
+            usize::from(c.y - self.window.y0) * self.width() + usize::from(c.x - self.window.x0)
         } else {
             let slot = self
                 .corridor
@@ -569,8 +560,8 @@ impl<'a> Local<'a> {
         let plane = index / self.layers;
         let (x, y) = match plane.checked_sub(self.window_cells()) {
             None => (
-                self.x0 + grid_index(plane % self.width()),
-                self.y0 + grid_index(plane / self.width()),
+                self.window.x0 + grid_index(plane % self.width()),
+                self.window.y0 + grid_index(plane / self.width()),
             ),
             Some(beyond) => {
                 let (cx, cy) = self
