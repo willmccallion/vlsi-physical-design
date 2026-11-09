@@ -16,7 +16,7 @@ mod marks;
 pub(crate) use marks::Marks;
 
 use crate::access::{AccessPoint, Node};
-use crate::global::GCell;
+use crate::global::{GCell, Gcells};
 use crate::occupancy::{LocalOccupancy, Occupancy, Origin, Owner, Proximity, too_close};
 use crate::tech::RouteTech;
 use crate::wiring::Edge;
@@ -161,7 +161,7 @@ impl CostParts for Explanation {
 }
 
 /// Gcells around each global route cell a net's detailed route may use.
-pub(crate) const GUIDE_SLACK_GCELLS: i64 = 1;
+pub(crate) const GUIDE_SLACK_GCELLS: Gcells = Gcells(1);
 
 /// Layers above and below each global route cell a net's detailed route
 /// may use.
@@ -173,11 +173,11 @@ const GUIDE_SLACK_LAYERS: usize = 1;
 pub(crate) struct Guide {
     origin: Point<Dbu>,
     gcell: Dbu,
-    reach: i64,
-    x0: i64,
-    y0: i64,
-    width: i64,
-    height: i64,
+    reach: Gcells,
+    x0: Gcells,
+    y0: Gcells,
+    width: Gcells,
+    height: Gcells,
     min_layer: usize,
     layers: usize,
     bits: Vec<u64>,
@@ -186,14 +186,16 @@ pub(crate) struct Guide {
 impl Guide {
     pub(crate) fn new(cells: &[GCell], origin: Point<Dbu>, gcell: Dbu, tech: &RouteTech) -> Self {
         let reach = GUIDE_SLACK_GCELLS;
-        let x0 = cells.iter().map(|c| i64::from(c.x)).min().unwrap_or(0) - reach;
-        let y0 = cells.iter().map(|c| i64::from(c.y)).min().unwrap_or(0) - reach;
-        let x1 = cells.iter().map(|c| i64::from(c.x)).max().unwrap_or(0) + reach;
-        let y1 = cells.iter().map(|c| i64::from(c.y)).max().unwrap_or(0) + reach;
+        let column = |c: &GCell| Gcells::from(c.x);
+        let row = |c: &GCell| Gcells::from(c.y);
+        let x0 = cells.iter().map(column).min().unwrap_or_default() - reach;
+        let y0 = cells.iter().map(row).min().unwrap_or_default() - reach;
+        let x1 = cells.iter().map(column).max().unwrap_or_default() + reach;
+        let y1 = cells.iter().map(row).max().unwrap_or_default() + reach;
         let min_layer = tech.min_layer.index();
         let layers = tech.max_layer.index() - min_layer + 1;
-        let (width, height) = (x1 - x0 + 1, y1 - y0 + 1);
-        let total = (width * height) as usize * layers;
+        let (width, height) = (x1 - x0 + Gcells(1), y1 - y0 + Gcells(1));
+        let total = (width.get() * height.get()) as usize * layers;
         let mut guide = Self {
             origin,
             gcell,
@@ -211,9 +213,9 @@ impl Guide {
             for dl in l.saturating_sub(GUIDE_SLACK_LAYERS)
                 ..=l.saturating_add(GUIDE_SLACK_LAYERS).min(layers - 1)
             {
-                for dy in -reach..=reach {
-                    for dx in -reach..=reach {
-                        if let Some(i) = guide.index(dl, i64::from(c.x) + dx, i64::from(c.y) + dy) {
+                for dy in (-reach).through(reach) {
+                    for dx in (-reach).through(reach) {
+                        if let Some(i) = guide.index(dl, column(c) + dx, row(c) + dy) {
                             guide.bits[i / 64] |= 1 << (i % 64);
                         }
                     }
@@ -227,8 +229,8 @@ impl Guide {
     pub(crate) fn cell_rect(&self, cell: GCell) -> Rect<Dbu> {
         let min = self.origin
             + Point::new(
-                self.gcell * i64::from(cell.x),
-                self.gcell * i64::from(cell.y),
+                Gcells::from(cell.x).length(self.gcell),
+                Gcells::from(cell.y).length(self.gcell),
             );
         Rect::new(min, min + Point::new(self.gcell, self.gcell))
     }
@@ -239,23 +241,25 @@ impl Guide {
             .iter()
             .map(|&c| self.cell_rect(c))
             .reduce(|a, b| a.union(&b))
-            .map(|r| r.expand(self.gcell * self.reach))
+            .map(|r| r.expand(self.reach.length(self.gcell)))
     }
 
-    fn index(&self, layer: usize, x: i64, y: i64) -> Option<usize> {
+    fn index(&self, layer: usize, x: Gcells, y: Gcells) -> Option<usize> {
         let (lx, ly) = (x - self.x0, y - self.y0);
-        if layer >= self.layers || lx < 0 || ly < 0 || lx >= self.width || ly >= self.height {
+        let outside = lx < Gcells(0) || ly < Gcells(0) || lx >= self.width || ly >= self.height;
+        if layer >= self.layers || outside {
             return None;
         }
-        usize::try_from((layer as i64 * self.height + ly) * self.width + lx).ok()
+        let (lx, ly) = (lx.get(), ly.get());
+        usize::try_from((layer as i64 * self.height.get() + ly) * self.width.get() + lx).ok()
     }
 
     pub(crate) fn contains(&self, layer: LayerId, p: Point<Dbu>) -> bool {
         let Some(l) = layer.index().checked_sub(self.min_layer) else {
             return false;
         };
-        let x = (p.x - self.origin.x).get().div_euclid(self.gcell.get());
-        let y = (p.y - self.origin.y).get().div_euclid(self.gcell.get());
+        let x = Gcells::holding(p.x - self.origin.x, self.gcell);
+        let y = Gcells::holding(p.y - self.origin.y, self.gcell);
         self.index(l, x, y)
             .is_some_and(|i| self.bits[i / 64] & (1 << (i % 64)) != 0)
     }

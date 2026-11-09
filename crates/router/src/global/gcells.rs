@@ -1,7 +1,7 @@
 //! Columns, rows and spans of the gcell grid.
 
 use pare_common::geom::dbu::Dbu;
-use std::ops::{Add, AddAssign, Div, Sub, SubAssign};
+use std::ops::{Add, AddAssign, Div, Neg, Sub, SubAssign};
 
 /// A column, row or span of the gcell grid, in gcells.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -22,6 +22,11 @@ impl Gcells {
     /// The length of this many gcells of side `gcell`.
     pub(crate) fn length(self, gcell: Dbu) -> Dbu {
         gcell * self.0
+    }
+
+    /// The raw count.
+    pub(crate) const fn get(self) -> i64 {
+        self.0
     }
 
     /// Every column or row from this one to `last`, both included.
@@ -61,6 +66,14 @@ impl Sub for Gcells {
 impl SubAssign for Gcells {
     fn sub_assign(&mut self, rhs: Self) {
         self.0 -= rhs.0;
+    }
+}
+
+impl Neg for Gcells {
+    type Output = Self;
+
+    fn neg(self) -> Self {
+        Self(-self.0)
     }
 }
 

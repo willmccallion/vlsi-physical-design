@@ -677,7 +677,7 @@ impl<'a> DetailedRouter<'a> {
     /// box plus a margin.
     fn window(&self, net: NetId) -> Rect<Dbu> {
         if let Some(guide) = &self.guides[net] {
-            return guide.bbox.expand(self.gcell * GUIDE_SLACK_GCELLS);
+            return guide.bbox.expand(GUIDE_SLACK_GCELLS.length(self.gcell));
         }
         let pins = &self.db.nets[net].pins;
         pins.iter()
