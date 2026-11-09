@@ -12,6 +12,14 @@ pub(crate) fn fixture(name: &str) -> PathBuf {
         .join(name)
 }
 
+/// A file of the CTS crate's test fixtures, whose Liberty library a
+/// repair links to.
+pub(crate) fn cts_fixture(name: &str) -> PathBuf {
+    PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("../cts/tests/fixtures")
+        .join(name)
+}
+
 /// The shared tiny fixture design.
 pub(crate) fn tiny() -> NetlistDB {
     let units = def::read_units(&fixture("tiny.def")).unwrap();
