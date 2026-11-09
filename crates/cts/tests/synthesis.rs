@@ -434,8 +434,10 @@ fn a_cluster_of_only_a_steiner_point_gets_no_clone() {
     assert_eq!(trees.summary.clones, 2, "{:?}", trees.summary);
 }
 
-#[test]
-fn the_faster_tree_of_a_clock_is_delayed_as_it_always_is() {
+/// The 16 by 16 grid with its first 24 flops slow, its trees synthesized
+/// and balanced with the clock arriving at each pin at `arrival` of it:
+/// the trees as text and how many delay buffers went in.
+fn balanced_slow_grid(arrival: fn(&NetlistDB, PinId) -> Seconds) -> (String, usize) {
     let (db, lib, constraints) = load(16, 16, false);
     let mut text = design(16, 16, false);
     for i in 0..24 {
@@ -456,23 +458,30 @@ fn the_faster_tree_of_a_clock_is_delayed_as_it_always_is() {
     };
     let first_added = db.cells.len();
     let trees = synthesize(&mut db, &input).unwrap();
-    let port = db.pin_position(db.io_pins[IoPinId(0)].pin);
-    let arrivals: IdVec<PinId, Seconds> = db
-        .pins
-        .ids()
-        .map(|p| {
-            let away = db.pin_position(p).manhattan(port);
-            Seconds::new(away.get() as f64 * 1e-15)
-        })
-        .collect();
+    let arrivals: IdVec<PinId, Seconds> = db.pins.ids().map(|p| arrival(&db, p)).collect();
 
     let inserted = balance_latencies(&mut db, &link, &trees, &|p| Some(arrivals[p])).unwrap();
 
+    (clock_trees_text(&db, first_added, &trees.summary), inserted)
+}
+
+#[test]
+fn the_faster_tree_of_a_clock_is_delayed_as_it_always_is() {
+    let (trees, inserted) = balanced_slow_grid(|db, pin| {
+        let port = db.pin_position(db.io_pins[IoPinId(0)].pin);
+        let away = db.pin_position(pin).manhattan(port);
+        Seconds::new(away.get() as f64 * 1e-15)
+    });
+
     assert!(inserted > 0);
-    assert_golden(
-        "slow_grid_16x16_balanced.txt",
-        &clock_trees_text(&db, first_added, &trees.summary),
-    );
+    assert_golden("slow_grid_16x16_balanced.txt", &trees);
+}
+
+#[test]
+fn registers_are_delayed_by_the_clock_tree_inside_the_slow_flops() {
+    let (_, inserted) = balanced_slow_grid(|_, _| Seconds::new(1e-10));
+
+    assert!(inserted > 0);
 }
 
 #[test]

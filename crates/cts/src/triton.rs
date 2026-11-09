@@ -226,6 +226,25 @@ fn pin_position(db: &NetlistDB, pin: PinId) -> Point<Dbu> {
     Point::new(Dbu(x / n), Dbu(y / n))
 }
 
+/// The delay through the clock tree inside the cell of `pin` as its
+/// Liberty port gives it, as `TritonCTS::computeInsertionDelay` and
+/// `LatencyBalancer::buildGraph` take it: the mean of the latest rising and
+/// falling delays at zero input slew, or the one there is; zero for a pin
+/// without a timing model.
+pub(crate) fn liberty_insertion_delay(link: &Link<'_>, db: &NetlistDB, pin: PinId) -> Seconds {
+    let Some((lib, port)) = link.pin_port(db, pin) else {
+        return Seconds::ZERO;
+    };
+    let port = &link.liberty.cell(lib).ports[port];
+    let [rise, fall] =
+        Edge::BOTH.map(|edge| port.clock_tree_delay(Seconds::ZERO, edge, MinMax::Max));
+    if rise != Seconds::ZERO && fall != Seconds::ZERO {
+        (rise + fall) / 2.0
+    } else {
+        rise + fall
+    }
+}
+
 /// The cell pins of a net in the order `OpenDB` lists them after reading
 /// it from DEF, the last connected first.
 pub(crate) fn net_cell_pins(db: &NetlistDB, net: NetId) -> Vec<PinId> {
@@ -419,25 +438,13 @@ impl Cts<'_> {
         }
     }
 
-    /// The delay through the clock tree inside the cell of `pin`, as
-    /// `TritonCTS::computeInsertionDelay` takes it from Liberty: the mean
-    /// of the latest rising and falling delays at zero input slew, or the
-    /// one there is; zero when insertion delays are off.
+    /// The delay through the clock tree inside the cell of `pin`; zero
+    /// when insertion delays are off, as `TritonCTS::computeInsertionDelay`.
     fn insertion_delay(&self, db: &NetlistDB, pin: PinId) -> Seconds {
         if !self.setup.settings.insertion_delay {
             return Seconds::ZERO;
         }
-        let Some((lib, port)) = self.link.pin_port(db, pin) else {
-            return Seconds::ZERO;
-        };
-        let port = &self.link.liberty.cell(lib).ports[port];
-        let [rise, fall] =
-            Edge::BOTH.map(|edge| port.clock_tree_delay(Seconds::ZERO, edge, MinMax::Max));
-        if rise != Seconds::ZERO && fall != Seconds::ZERO {
-            (rise + fall) / 2.0
-        } else {
-            rise + fall
-        }
+        liberty_insertion_delay(self.link, db, pin)
     }
 
     fn add_builder(&mut self, clock: Clock, input_net: NetId, parent: Option<usize>) -> usize {

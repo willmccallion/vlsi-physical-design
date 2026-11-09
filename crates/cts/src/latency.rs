@@ -9,7 +9,8 @@
 use crate::CtsError;
 use crate::htree::TreePoint;
 use crate::triton::{
-    ClockTrees, first_output, is_sink, net_cell_pins, pin_direction, sink_bbox_center,
+    ClockTrees, first_output, is_sink, liberty_insertion_delay, net_cell_pins, pin_direction,
+    sink_bbox_center,
 };
 use pare_common::db::design::{NetlistDB, PinOwner, PlacementStatus};
 use pare_common::db::indices::{NetId, PinId};
@@ -130,8 +131,12 @@ impl Balancer<'_> {
             })
     }
 
-    fn sink_arrival(&self, pin: PinId) -> f32 {
-        (self.arrival)(pin).map_or(0.0, Seconds::get) as f32
+    /// When the clock reaches the registers behind a sink pin: its arrival
+    /// at the pin plus the clock tree inside the sink's cell, as
+    /// `LatencyBalancer::buildGraph` and `computeSinkArrivalRecur` add them.
+    fn sink_arrival(&self, db: &NetlistDB, pin: PinId) -> f32 {
+        let arrival = (self.arrival)(pin).map_or(0.0, Seconds::get) as f32;
+        arrival + liberty_insertion_delay(self.link, db, pin).get() as f32
     }
 
     /// The mean arrival at a tree's sinks, as
@@ -149,7 +154,7 @@ impl Balancer<'_> {
 
     fn sink_arrivals(&self, db: &NetlistDB, pin: PinId, sum: &mut f32, count: &mut u32) {
         if is_sink(self.link, db, pin) {
-            *sum += self.sink_arrival(pin);
+            *sum += self.sink_arrival(db, pin);
             *count += 1;
             return;
         }
@@ -223,7 +228,7 @@ impl Balancer<'_> {
                     continue;
                 }
                 if sink {
-                    let at = self.sink_arrival(pin);
+                    let at = self.sink_arrival(db, pin);
                     self.worse_delay = self.worse_delay.max(at);
                     self.nodes[id].arrival = f64::from(at);
                     continue;
