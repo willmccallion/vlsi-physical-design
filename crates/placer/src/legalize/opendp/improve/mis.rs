@@ -312,7 +312,7 @@ fn solve_match(imp: &mut Improver, nodes: &[NodeId]) -> Result<()> {
         }
         imp.erase(n);
         imp.set_position(n, pos[j]);
-        imp.paint(n);
+        imp.paint(n)?;
         for &s in &segs[j] {
             imp.add_cell_to_segment(n, s)?;
         }

@@ -315,7 +315,7 @@ impl Improver {
             return Ok(false);
         }
         if !self.add_to_move_list(ndj, from_j, &[sj], Point::new(xi, from_i.y), &[si], true)? {
-            self.paint(ndj);
+            self.paint(ndj)?;
             return Ok(false);
         }
         Ok(true)
@@ -566,7 +566,7 @@ impl Improver {
             self.remove_cell_from_segment(n, s)?;
         }
         self.set_position(n, to);
-        self.paint(n);
+        self.paint(n)?;
         for &s in to_segs {
             self.add_cell_to_segment(n, s)?;
         }
