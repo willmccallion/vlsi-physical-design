@@ -53,6 +53,9 @@ pub enum DetailedPlacementError {
     /// A cell is wider or taller than the core.
     #[error("instance {0} does not fit inside the ROW core area")]
     DoesNotFit(String),
+    /// A region with member cells has no rectangle inside the core.
+    #[error("region {0} lies outside the core")]
+    RegionOutsideCore(String),
     /// Some cells found no free spot.
     #[error("detailed placement failed on {} instances, the first {}", .0.len(), .0.first().map_or("", String::as_str))]
     Failed(Vec<String>),
@@ -78,8 +81,9 @@ pub struct DetailedPlacement {
 ///
 /// # Errors
 ///
-/// When the design has no rows, rows of different site widths, a cell bigger
-/// than the core, or a cell no free spot within reach fits.
+/// When the design has no rows, rows of different site widths, a region
+/// with members outside the core, a cell bigger than the core, or a cell no
+/// free spot within reach fits.
 pub fn detailed_placement(db: &mut NetlistDB) -> Result<DetailedPlacement, DetailedPlacementError> {
     let mut placer = Placer::new(db)?;
     placer.paint_fixed_cells();
@@ -358,7 +362,7 @@ impl Placer {
                 node.placed = false;
             }
         }
-        placer.make_groups(db);
+        placer.make_groups(db)?;
         Ok(placer)
     }
 

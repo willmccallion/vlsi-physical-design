@@ -42,7 +42,11 @@ impl Placer {
     /// One group per region with its member cells, as
     /// `Opendp::setUpPlacementGroups`: in the order of the DEF's groups, each
     /// member where `OpenDB` lists it.
-    pub(super) fn make_groups(&mut self, db: &NetlistDB) {
+    ///
+    /// # Errors
+    ///
+    /// When a region with members has no rectangle inside the core.
+    pub(super) fn make_groups(&mut self, db: &NetlistDB) -> Result<(), DetailedPlacementError> {
         let mut node_of = IdVec::filled(None, db.cells.len());
         for (n, node) in self.nodes.iter_enumerated() {
             node_of[node.cell] = Some(n);
@@ -86,6 +90,13 @@ impl Placer {
                 .collect();
             members
                 .sort_by_key(|&(i, _)| (db.cells[i].region_member_order(), std::cmp::Reverse(i)));
+            // NOTE: Opendp::setUpPlacementGroups keeps such a region and
+            // brickPlace2 dereferences its missing rectangle; PARE rejects it.
+            if rects.is_empty() && !members.is_empty() {
+                return Err(DetailedPlacementError::RegionOutsideCore(
+                    region.name.clone(),
+                ));
+            }
             let mut cells = Vec::with_capacity(members.len());
             for (_, n) in members {
                 self.nodes[n].group = Some(g);
@@ -98,6 +109,7 @@ impl Placer {
                 util: 0.0,
             });
         }
+        Ok(())
     }
 
     /// Blocks every site a region rectangle overlaps without covering, as

@@ -5,17 +5,23 @@
 
 mod common;
 
-use pare_common::db::design::PlacementStatus;
+use pare_common::db::design::{NetlistDB, PlacementStatus};
 use pare_common::geom::dbu::Dbu;
 use pare_common::geom::point::Point;
 use pare_common::testing;
-use pare_placer::legalize::opendp::detailed_placement;
+use pare_placer::legalize::opendp::{DetailedPlacementError, detailed_placement};
 use std::fmt::Write as _;
 use std::path::Path;
 
 /// The ring with its gates scattered over the core, a fenced region in
 /// the middle, and every fifth gate in a group bound to it.
-fn fenced_ring() -> pare_common::db::design::NetlistDB {
+fn fenced_ring() -> NetlistDB {
+    ring_fenced_by("( 20000 20000 ) ( 40000 40000 )")
+}
+
+/// The ring with its gates scattered over the core and every fifth gate in
+/// a group bound to a fence of `rects`, given as DEF points.
+fn ring_fenced_by(rects: &str) -> NetlistDB {
     let gates = 240;
     let mut members = String::new();
     for g in (0..gates).step_by(5) {
@@ -25,7 +31,7 @@ fn fenced_ring() -> pare_common::db::design::NetlistDB {
         .replace(
             &format!("COMPONENTS {gates} ;"),
             &format!(
-                "REGIONS 1 ;\n- fence ( 20000 20000 ) ( 40000 40000 ) + TYPE FENCE ;\n\
+                "REGIONS 1 ;\n- fence {rects} + TYPE FENCE ;\n\
                  END REGIONS\nCOMPONENTS {gates} ;"
             ),
         )
@@ -63,5 +69,17 @@ fn a_fenced_group_is_placed_inside_its_region_as_it_always_is() {
         &Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/golden"),
         "fenced_ring_240.txt",
         &text,
+    );
+}
+
+#[test]
+fn a_group_whose_region_misses_the_core_is_an_error() {
+    let mut db = ring_fenced_by("( 70000 70000 ) ( 80000 80000 )");
+
+    let result = detailed_placement(&mut db);
+
+    assert_eq!(
+        result,
+        Err(DetailedPlacementError::RegionOutsideCore("fence".into()))
     );
 }
