@@ -929,8 +929,9 @@ impl Builder {
                         sinks: &sinks,
                         direction: Direction::North,
                     };
+                    // NOTE: legalizeDummy's typo passes x1, y2, x2, y2; PARE the whole box.
                     let best =
-                        self.best_legal_location(&search, point, &candidates, [x1, y2, x2, y2]);
+                        self.best_legal_location(&search, point, &candidates, [x1, y1, x2, y2]);
                     self.commit_move(point, best);
                     point = best;
                 }
@@ -1540,5 +1541,54 @@ fn beside_branch(
             TreePoint::new(px + target - (py - y_plus).abs(), y_plus),
             TreePoint::new(px + target - (py - y_minus).abs(), y_minus),
         ],
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::options::CtsOptions;
+    use pare_common::db::indices::NetId;
+    use pare_common::db::liberty::{LibCellId, LibPortId};
+
+    fn rect(x0: i64, y0: i64, x1: i64, y1: i64) -> Rect<Dbu> {
+        Rect::new(Point::new(Dbu(x0), Dbu(y0)), Point::new(Dbu(x1), Dbu(y1)))
+    }
+
+    #[test]
+    fn a_dummy_in_a_blockage_moves_along_the_blockages_full_box() {
+        let settings = Settings::new(CtsOptions::default());
+        let buffer = BufferCell {
+            id: LibCellId::new(0),
+            input: LibPortId::new(0),
+            output: LibPortId::new(1),
+        };
+        let buffer_sizes = FxHashMap::default();
+        // The dummy lands inside the first blockage; the first point at the
+        // level's length from the parent along it is its lower left corner,
+        // which the second blockage covers.
+        let blockages = [rect(60, 40, 80, 60), rect(55, 35, 65, 45)];
+        let ctx = TreeContext {
+            settings: &settings,
+            core: rect(0, 0, 100, 100),
+            dbu: 1000,
+            root_buffer: buffer,
+            sink_buffer: buffer,
+            buffer_sizes: &buffer_sizes,
+            blockages: &blockages,
+        };
+        let mut builder = Builder::new(Clock::new(NetId::new(0), "clk", "clk"), None);
+        builder.wire_segment_unit = 1;
+        builder.sink_region = Region::new(0.0, 0.0, 100.0, 100.0);
+        let mut level = LevelTopology::new(20.0);
+        let dummy = level.add_point(TreePoint::new(0.0, 0.0), None);
+        let branch = level.add_point(TreePoint::new(30.0, 50.0), None);
+        level.sinks[branch].push(TreePoint::new(30.0, 40.0));
+        builder.topologies.push(level);
+
+        builder.legalize_dummies(&ctx);
+
+        let moved = builder.topologies[0].points[dummy];
+        assert!(moved.same(TreePoint::new(60.0, 40.0)), "{moved:?}");
     }
 }
