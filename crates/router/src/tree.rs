@@ -97,13 +97,21 @@ fn hilbert(mut x: u32, mut y: u32) -> u64 {
     d
 }
 
+/// The last cell along each side of the Hilbert curve points are ordered
+/// on.
+const HILBERT_SIDE: i64 = 65_535;
+
 /// Indices of `points` in the order a Hilbert curve over their bounding box
 /// visits them, so that neighbours in the order are close together.
 pub(crate) fn hilbert_order(points: &[Point<Dbu>]) -> Vec<usize> {
     let min_x = points.iter().map(|p| p.x).min().unwrap_or_default();
     let min_y = points.iter().map(|p| p.y).min().unwrap_or_default();
     let span = span(points);
-    let scale = |v: Dbu, lo: Dbu| u32::try_from((v - lo).get() * 65_535 / span).unwrap_or(0);
+    let scale = |v: Dbu, lo: Dbu| {
+        let s = (v - lo).get() * HILBERT_SIDE / span;
+        debug_assert!((0..=HILBERT_SIDE).contains(&s), "{s} off the Hilbert curve");
+        s as u32
+    };
     let mut order: Vec<usize> = (0..points.len()).collect();
     order.sort_by_key(|&i| {
         (

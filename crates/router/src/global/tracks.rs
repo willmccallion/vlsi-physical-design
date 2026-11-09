@@ -33,8 +33,8 @@ impl Tracks {
     }
 
     /// The count rounded to whole tracks, for reporting.
-    pub fn rounded(self) -> u64 {
-        u64::try_from((self.0 + Self::SCALE / 2).div_euclid(Self::SCALE)).unwrap_or(0)
+    pub const fn rounded(self) -> i64 {
+        (self.0 + Self::SCALE / 2).div_euclid(Self::SCALE)
     }
 
     /// The fixed-point count, for storing in an atomic.

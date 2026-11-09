@@ -74,7 +74,7 @@ pub fn gr_layer_table_header() {
 }
 
 /// Prints one layer of the global routing table.
-pub fn gr_layer_row(layer: &str, direction: Direction, capacity: u64, usage: u64, overflow: u64) {
+pub fn gr_layer_row(layer: &str, direction: Direction, capacity: i64, usage: i64, overflow: i64) {
     let direction = match direction {
         Direction::Horizontal => "horizontal",
         Direction::Vertical => "vertical",
