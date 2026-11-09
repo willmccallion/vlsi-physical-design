@@ -441,7 +441,7 @@ fn edge_positions(
     let reach = SlotReach {
         lo: lo + size.half_width,
         hi: hi - size.half_width,
-        apart: (size.half_width * 2 + db.library.layer(layer).min_spacing).get(),
+        apart: size.half_width * 2 + db.library.layer(layer).min_spacing,
         max_corner: db.dbu().to_dbu(MAX_CORNER_MICRONS).unwrap_or(Dbu::ZERO),
     };
     let patterns: Vec<&TrackDef> = db
@@ -476,7 +476,7 @@ fn edge_positions(
 struct SlotReach {
     lo: Dbu,
     hi: Dbu,
-    apart: i64,
+    apart: Dbu,
     max_corner: Dbu,
 }
 
@@ -487,7 +487,7 @@ impl SlotReach {
     /// `IOPlacer::findLayerSlots`.
     fn slots_of(self, tracks: &TrackDef) -> Vec<Dbu> {
         let step = tracks.step.get().max(1);
-        let slot_tracks = SLOT_TRACKS.max((self.apart + step - 1) / step);
+        let slot_tracks = SLOT_TRACKS.max((self.apart.get() + step - 1) / step);
         let between = slot_tracks * step;
         let corner = (tracks.step * CORNER_TRACKS).min(self.max_corner).get();
         let clear = ceil_div(corner, between);
@@ -558,7 +558,7 @@ mod tests {
         let reach = SlotReach {
             lo: Dbu(70),
             hi: Dbu(9930),
-            apart: 180,
+            apart: Dbu(180),
             max_corner: Dbu(2000),
         };
 
