@@ -35,7 +35,7 @@ pub enum LegalizeError {
     /// Two rows overlap at one Y without sharing a site grid and
     /// orientation, so their sites cannot be told apart.
     #[error("rows overlap at y = {0} on different site grids or orientations")]
-    OverlappingRows(i64),
+    OverlappingRows(Dbu),
 }
 
 /// Moves every movable cell to a legal, row- and site-aligned position
@@ -46,7 +46,7 @@ pub fn legalize(db: &mut NetlistDB, zones: &Zones) -> Result<(), LegalizeError> 
     }
     let rows = expand_rows(db);
     if let Some(y) = overlapping_row(&rows) {
-        return Err(LegalizeError::OverlappingRows(y.get()));
+        return Err(LegalizeError::OverlappingRows(y));
     }
     let (macros, std_cells) = classify(db, &rows);
 
