@@ -31,7 +31,7 @@ pub(super) fn check(model: &Model<'_>, rules: &IdVec<CutLayerId, CutRules>) -> M
                 cut,
                 rules: &rules[layer],
                 below: model.metal.get(layer.below()),
-                above: model.metal.get(layer.above()),
+                above: layer.above().and_then(|l| model.metal.get(l)),
             };
             (0..cut.rects.len()).fold(Markers::default(), |mut found, i| {
                 check.check_cut(i, &mut found);

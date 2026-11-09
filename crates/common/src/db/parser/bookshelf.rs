@@ -157,6 +157,9 @@ pub fn synthesize_layer_stack(
                     resistance: None,
                 })
                 .map_err(|e| e.to_string())?;
+            let above = cut
+                .above()
+                .ok_or_else(|| format!("{num_layers} routing layers are more than ids count"))?;
             let shapes = vec![
                 Shape {
                     layer: LayerRef::Routing(cut.below()),
@@ -167,7 +170,7 @@ pub fn synthesize_layer_stack(
                     rect: square,
                 },
                 Shape {
-                    layer: LayerRef::Routing(cut.above()),
+                    layer: LayerRef::Routing(above),
                     rect: square,
                 },
             ];

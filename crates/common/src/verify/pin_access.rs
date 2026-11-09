@@ -19,7 +19,7 @@
 //! the cells above and below can never be connected.
 
 use crate::db::design::{NetlistDB, PinOwner};
-use crate::db::indices::{CellId, CutLayerId, IdVec, LayerId, MacroPinId, NetId};
+use crate::db::indices::{CellId, IdVec, LayerId, MacroPinId, NetId};
 use crate::db::library::{Direction, LayerRef, Macro};
 use crate::db::rules::{SpacingTable, WidthRangeSpacing};
 use crate::db::shapes::{Owner, obstruction_shapes};
@@ -619,8 +619,8 @@ impl PinAccess {
     /// The check for pins on the layer below `above`, the lowest layer
     /// signal wires use, or `None` when no library via joins the two.
     pub fn new(db: &NetlistDB, above: LayerId) -> Option<Self> {
-        let pin_layer = LayerId::new(above.index().checked_sub(1)?);
-        let cut = CutLayerId::new(pin_layer.index());
+        let pin_layer = above.below()?;
+        let cut = pin_layer.cut_above();
         let lib = &db.library;
         let metal_on = |v: &crate::db::library::ViaDef, layer: LayerId| {
             v.shapes
@@ -649,11 +649,12 @@ impl PinAccess {
         if vias.is_empty() {
             return None;
         }
-        let next = LayerId::new(above.index() + 1);
         let crosses = |l: LayerId| lib.layer(l).direction != lib.layer(above).direction;
-        let up = (next.index() < lib.routing_layers.len() && crosses(next))
-            .then(|| {
-                let cut_up = CutLayerId::new(above.index());
+        let up = above
+            .above()
+            .filter(|&next| next.index() < lib.routing_layers.len() && crosses(next))
+            .map(|next| {
+                let cut_up = above.cut_above();
                 let vias: Vec<ViaUp> = lib
                     .vias
                     .iter()

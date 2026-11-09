@@ -448,12 +448,16 @@ fn across_overhang(rect: &Rect<Dbu>, layer: &LayerTech) -> Dbu {
 fn layer_tech(lib: &Library, tracks: &IdVec<LayerId, Vec<Dbu>>, l: LayerId) -> LayerTech {
     let tracks_of = |layer: Option<LayerId>| layer.and_then(|t| tracks.get(t)).map(Vec::as_slice);
     let below = tracks_of(l.below());
-    let above = tracks_of(Some(l.above()));
+    let above = tracks_of(l.above());
     let below_cross = l
         .below()
         .map(|b| merge_cross(tracks_of(b.below()), Some(&tracks[l])));
-    let above_cross =
-        above.map(|_| merge_cross(Some(&tracks[l]), tracks_of(Some(l.above().above()))));
+    let above_cross = above.map(|_| {
+        merge_cross(
+            Some(&tracks[l]),
+            tracks_of(l.above().and_then(LayerId::above)),
+        )
+    });
     let layer = &lib.routing_layers[l];
     LayerTech {
         direction: layer.direction,
@@ -539,10 +543,13 @@ fn ranked_vias(
                 .map(|s| s.rect)
                 .reduce(|a, b| a.union(&b))
         };
-        let (Some(bottom), Some(top)) = (metal(v.bottom()), metal(v.top())) else {
+        let Some(top_layer) = v.top() else {
             continue;
         };
-        let top_overhang = across_overhang(&top, &layers[v.top()]);
+        let (Some(bottom), Some(top)) = (metal(v.bottom()), metal(top_layer)) else {
+            continue;
+        };
+        let top_overhang = across_overhang(&top, &layers[top_layer]);
         let reach = match overhang {
             Overhang::BothLayers => top_overhang.max(across_overhang(&bottom, &layers[v.bottom()])),
             Overhang::UpperOnly => top_overhang,

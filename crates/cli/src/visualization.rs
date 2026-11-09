@@ -285,7 +285,7 @@ pub fn draw_area(
             };
             draw_filled_rect_mut(&mut canvas, rect, color);
         }
-        if shown(l.above()) {
+        if l.above().is_some_and(shown) {
             for s in layout.cut(l.cut_above()) {
                 if let Some(rect) = pixels(&s.rect) {
                     draw_filled_rect_mut(&mut canvas, rect, Rgba([255, 255, 255, emphasis(s)]));

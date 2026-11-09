@@ -200,11 +200,14 @@ impl NetParasitics {
         for location in &route.pins {
             let pin = network.add_node();
             pin_node.push((location.pin, pin));
-            let above = location.layer.above();
-            let (grid, layer, via_res) = if let Some(&node) = network.nodes.get(&RoutePoint {
-                at: location.grid,
-                layer: above,
-            }) {
+            let node_above = location.layer.above().and_then(|above| {
+                let at = RoutePoint {
+                    at: location.grid,
+                    layer: above,
+                };
+                network.nodes.get(&at).map(|&node| (node, above))
+            });
+            let (grid, layer, via_res) = if let Some((node, above)) = node_above {
                 (Some(node), above, rc.cut(location.layer))
             } else {
                 let at = RoutePoint {

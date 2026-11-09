@@ -428,7 +428,7 @@ fn via_stacks(
     blockers: &[Shape],
 ) -> Vec<Vec<ViaId>> {
     let fits = |cut: CutLayerId, v: &ViaTech| {
-        let (below, above) = (cut.below(), cut.above());
+        let below = cut.below();
         let bottom = v.bottom.translate(at);
         let top = v.top.translate(at);
         let on_pin = below != from
@@ -437,11 +437,16 @@ fn via_stacks(
                 pin.iter()
                     .any(|s| s.layer == LayerRef::Routing(from) && s.rect.encloses(&cut))
             }) && clear_of_own_pin(tech, below, &bottom, pin));
-        on_pin && clear_of(tech, below, &bottom, blockers) && clear_of(tech, above, &top, blockers)
+        on_pin
+            && clear_of(tech, below, &bottom, blockers)
+            && cut
+                .above()
+                .is_some_and(|above| clear_of(tech, above, &top, blockers))
     };
     let upper: Option<Vec<ViaId>> = from
         .above()
-        .through(tech.min_layer)
+        .into_iter()
+        .flat_map(|above| above.through(tech.min_layer))
         .take_while(|&l| l < tech.min_layer)
         .map(|l| {
             let cut = l.cut_above();

@@ -60,7 +60,7 @@ impl Numbering {
             };
             nodes += span.tracks as usize * span.crosses as usize;
             spans.push(span);
-            let neighbours = [layer.below(), Some(layer.above())];
+            let neighbours = [layer.below(), layer.above()];
             let via_reach = neighbours
                 .into_iter()
                 .flatten()

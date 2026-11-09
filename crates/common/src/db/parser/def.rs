@@ -565,7 +565,7 @@ impl<'a> DefParser<'a> {
         let LayerRef::Cut(cut_id) = cut else {
             return Err(self.lx.error(line, "cut layer expected"));
         };
-        if (bottom, top) != (cut_id.below(), cut_id.above()) {
+        if (Some(bottom), Some(top)) != (Some(cut_id.below()), cut_id.above()) {
             return Err(self.lx.error(
                 line,
                 format!("via '{name}': + LAYERS names metal its cut does not touch"),
@@ -1121,15 +1121,18 @@ impl<'a> DefParser<'a> {
                             .map(|(at, _)| at)
                             .ok_or_else(|| self.lx.error(t.line, "via before any point"))?;
                         let def = self.db.library.via(via);
-                        layer = if def.bottom() == layer {
-                            def.top()
-                        } else if def.top() == layer {
-                            def.bottom()
-                        } else {
-                            return Err(self.lx.error(
-                                t.line,
-                                format!("via '{}' does not touch the current wiring layer", t.text),
-                            ));
+                        layer = match def.top() {
+                            Some(top) if def.bottom() == layer => top,
+                            Some(top) if top == layer => def.bottom(),
+                            _ => {
+                                return Err(self.lx.error(
+                                    t.line,
+                                    format!(
+                                        "via '{}' does not touch the current wiring layer",
+                                        t.text
+                                    ),
+                                ));
+                            }
                         };
                         self.db.nets[net].routing.push(RouteElem::Via { via, at });
                         prev = Some((at, None));
