@@ -453,3 +453,26 @@ fn write_routed(db: &NetlistDB, output_dir: &Path) -> anyhow::Result<()> {
     ui::wrote(&out);
     Ok(())
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use pare_router::SavePoint;
+
+    #[test]
+    fn a_save_point_is_global_or_a_round_number() {
+        assert_eq!(parse_save_point("global"), Ok(SavePoint::Global));
+        assert_eq!(parse_save_point("0"), Ok(SavePoint::Round(0)));
+        assert_eq!(parse_save_point("12"), Ok(SavePoint::Round(12)));
+    }
+
+    #[test]
+    fn a_save_point_that_is_neither_names_what_it_takes() {
+        let error = parse_save_point("first").unwrap_err();
+
+        assert!(
+            error.contains("first") && error.contains("global"),
+            "{error}"
+        );
+    }
+}

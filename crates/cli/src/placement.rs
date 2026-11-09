@@ -864,3 +864,29 @@ fn routability_params(
         target_congestion: config.global_placement.target_congestion,
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::testing::tiny;
+
+    #[test]
+    fn cells_moved_or_turned_since_the_record_are_the_moved_ones() {
+        let mut db = tiny();
+        let before = CellPlaces::record(&db);
+        let moved = db.cell_id("u1").unwrap();
+        let turned = db.cell_id("u2").unwrap();
+
+        db.cells[moved.index()].location.x += Dbu(200);
+        db.cells[turned.index()].orient = Orientation::N;
+
+        assert_eq!(before.moved(&db), vec![moved, turned]);
+    }
+
+    #[test]
+    fn nothing_moved_since_the_record_leaves_nothing_moved() {
+        let db = tiny();
+
+        assert_eq!(CellPlaces::record(&db).moved(&db), Vec::new());
+    }
+}

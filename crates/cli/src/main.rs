@@ -10,6 +10,8 @@ mod placement;
 mod repair;
 mod report;
 mod routing;
+#[cfg(test)]
+mod testing;
 mod ui;
 mod view;
 mod visualization;
@@ -389,4 +391,24 @@ fn output_dir(config: &Config) -> PathBuf {
         .parent()
         .filter(|p| !p.as_os_str().is_empty())
         .map_or_else(|| PathBuf::from("output"), Path::to_path_buf)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_box_in_microns_is_rounded_onto_the_database_grid() {
+        let units = DbuPerMicron::new(2000).unwrap();
+
+        let area = box_in_dbu(&[1.0, 2.5, 3.00025, 4.0], units);
+
+        assert_eq!(
+            area,
+            Rect::new(
+                Point::new(Dbu(2000), Dbu(5000)),
+                Point::new(Dbu(6001), Dbu(8000))
+            )
+        );
+    }
 }
