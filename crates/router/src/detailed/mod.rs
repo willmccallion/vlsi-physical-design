@@ -25,6 +25,7 @@ pub(crate) use schedule::{RipUp, round_costs, round_strategy};
 pub use trace::Trace;
 
 use crate::access::{AccessPoint, Node, access_points, fellow_boxes, order_toward};
+use crate::bucket::{Bucket, bucket_at, buckets_between};
 use crate::global::{GCell, Gcells, GlobalGrid, GlobalRoutes, RouteTree};
 use crate::occupancy::{Occupancy, Origin, Owner, Proximity, Slot};
 use crate::runs::EdgeSet;
@@ -1350,23 +1351,20 @@ type LowPad = (LayerId, Rect<Dbu>, NetId);
 /// The pads below the routable layers that reserved access points put
 /// down, by bucket.
 struct LowPads {
-    bucket: i64,
-    pads: FxHashMap<(i64, i64), Vec<LowPad>>,
+    bucket: Dbu,
+    pads: FxHashMap<Point<Bucket>, Vec<LowPad>>,
 }
 
 impl LowPads {
     fn new(bucket: Dbu) -> Self {
         Self {
-            bucket: bucket.get().max(1),
+            bucket: bucket.max(Dbu(1)),
             pads: FxHashMap::default(),
         }
     }
 
-    fn keys(&self, r: &Rect<Dbu>) -> impl Iterator<Item = (i64, i64)> + use<> {
-        let b = self.bucket;
-        let (x0, x1) = (r.min.x.get().div_euclid(b), r.max.x.get().div_euclid(b));
-        let (y0, y1) = (r.min.y.get().div_euclid(b), r.max.y.get().div_euclid(b));
-        (x0..=x1).flat_map(move |x| (y0..=y1).map(move |y| (x, y)))
+    fn keys(&self, r: &Rect<Dbu>) -> impl Iterator<Item = Point<Bucket>> + use<> {
+        buckets_between(bucket_at(r.min, self.bucket), bucket_at(r.max, self.bucket))
     }
 
     fn add(&mut self, layer: LayerId, rect: Rect<Dbu>, net: NetId) {
