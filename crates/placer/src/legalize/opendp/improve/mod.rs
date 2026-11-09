@@ -489,6 +489,7 @@ mod tests {
     use super::*;
     use crate::legalize::opendp::detailed_placement;
     use pare_common::db::design::PlacementStatus;
+    use pare_common::db::library::Macro;
     use pare_common::db::parser::{def, lef};
     use std::path::{Path, PathBuf};
 
@@ -502,15 +503,32 @@ mod tests {
     /// out for improvement as `improve_placement` lays them before its
     /// passes.
     pub(super) fn improver() -> Improver {
+        improver_of(tiny_from_one_spot())
+    }
+
+    /// The tiny design with its six movable cells at one spot.
+    fn tiny_from_one_spot() -> NetlistDB {
+        tiny_edited_from_one_spot(|text| text)
+    }
+
+    /// The tiny design, its DEF as `edit` rewrites it, with its six movable
+    /// cells at one spot.
+    fn tiny_edited_from_one_spot(edit: impl Fn(String) -> String) -> NetlistDB {
+        let text = edit(std::fs::read_to_string(fixture("tiny.def")).unwrap());
         let units = def::read_units(&fixture("tiny.def")).unwrap();
         let library = lef::parse_files(&[fixture("tiny.lef")], units).unwrap();
-        let mut db = def::parse(&fixture("tiny.def"), library).unwrap();
+        let mut db = def::parse_str(&text, &fixture("tiny.def"), library).unwrap();
         for name in ["u1", "u2", "u4", "u5", "u6", "u7"] {
             let id = db.cell_id(name).unwrap();
             let cell = &mut db.cells[id];
             cell.location = Point::new(Dbu(1000), Dbu(1000));
             cell.status = PlacementStatus::Placed;
         }
+        db
+    }
+
+    /// `db` legalized and laid out for improvement.
+    fn improver_of(mut db: NetlistDB) -> Improver {
         let _ = detailed_placement(&mut db).unwrap();
         let max_displacement = MaxDisplacement {
             x: Some(RowHeights(5)),
@@ -642,5 +660,53 @@ mod tests {
         let at = imp.pin_position(imp.net.node_pins[pin_in][0]);
 
         assert_eq!(at, Point::new(Dbu(1100), Dbu(5900)));
+    }
+
+    /// The tiny design with a fourth row on top and a cell two rows tall,
+    /// `tall`, starting at the bottom.
+    fn tiny_with_tall_cell() -> NetlistDB {
+        let mut db = tiny_edited_from_one_spot(|text| {
+            text.replace(
+                "ROW ROW_2 core 0 4000 N DO 20 BY 1 STEP 200 0 ;",
+                "ROW ROW_2 core 0 4000 N DO 20 BY 1 STEP 200 0 ;\n\
+                 ROW ROW_3 core 0 6000 FS DO 20 BY 1 STEP 200 0 ;",
+            )
+        });
+        let inv = db.cell_macro(db.cell_id("u1").unwrap()).clone();
+        let tall = Macro::new(
+            "TALL".into(),
+            inv.class,
+            Point::new(inv.size.x, inv.size.y * 2),
+            inv.symmetry,
+            inv.site,
+        );
+        let tall = db.library.add_macro(tall).unwrap();
+        let _ = db
+            .add_cell(
+                "tall".into(),
+                tall,
+                Point::new(Dbu(3000), Dbu(0)),
+                Orientation::N,
+                PlacementStatus::Placed,
+            )
+            .unwrap();
+        db
+    }
+
+    #[test]
+    fn a_cell_two_rows_tall_can_move_into_the_top_two_rows() {
+        let mut imp = improver_of(tiny_with_tall_cell());
+        let n = imp
+            .grid
+            .nodes
+            .ids()
+            .find(|&n| imp.grid.nodes[n].name == "tall")
+            .unwrap();
+        let (si, sj) = (imp.cell_segs[n][0], imp.segs_in_row[2][0]);
+
+        let moved = imp.try_move(n, si, Dbu(1000), sj).unwrap();
+
+        assert!(moved);
+        assert_eq!(imp.position(n), Point::new(Dbu(1000), Dbu(4000)));
     }
 }

@@ -166,7 +166,9 @@ impl Improver {
             return Ok(false);
         }
         let mut rb = self.segments[sj].row;
-        while rb + spanned >= self.arch.rows.len() {
+        // NOTE: DetailedMgr::tryMove3 tests >=, so a cell never reaches the
+        // top `spanned` rows; PARE lowers it only when it would stick out.
+        while rb + spanned > self.arch.rows.len() {
             let Some(below) = rb.checked_sub(1) else {
                 return Ok(false);
             };
