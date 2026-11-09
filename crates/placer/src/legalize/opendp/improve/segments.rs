@@ -263,9 +263,7 @@ impl Improver {
         };
         consider(row, Dbu::ZERO, &mut best1, &mut best2);
         let within = |vert: Dbu, b1: Option<(SegmentId, Dbu)>, b2: Option<(SegmentId, Dbu)>| {
-            let d1 = b1.map_or_else(|| Dbu(i64::from(i32::MAX)), |b| b.1);
-            let d2 = b2.map_or_else(|| Dbu(i64::from(i32::MAX)), |b| b.1);
-            vert <= d1 || vert <= d2
+            b1.is_none_or(|(_, d1)| vert <= d1) || b2.is_none_or(|(_, d2)| vert <= d2)
         };
         let rows = self.arch.rows.len();
         for offset in 1..=rows {
