@@ -14,7 +14,7 @@ SetupSummary {
         -3.7384567754652005e-11,
     ),
     wns_after: Seconds(
-        5.39873141201507e-12,
+        9.957325293975218e-12,
     ),
     tns_before: Seconds(
         -2.9907654203721377e-10,
@@ -41,10 +41,10 @@ HoldSummary {
         1.3084509580431128e-10,
     ),
     setup_wns_before: Seconds(
-        5.39873141201507e-12,
+        9.957325293975218e-12,
     ),
     setup_wns_after: Seconds(
-        5.39873141201507e-12,
+        9.957325293975218e-12,
     ),
     inserted: 8,
     resized: 0,
@@ -134,8 +134,8 @@ ha2 DFF_X1 192000 192400
 hb2 DFF_X1 196560 192400
 ha3 DFF_X1 192000 282000
 hb3 DFF_X1 196560 282000
-load_slew1 CLKBUF_X3 199900 204600
-load_slew2 CLKBUF_X3 184700 199000
+wire1 CLKBUF_X3 199900 204600
+wire2 CLKBUF_X3 184700 199000
 hold3 BUF_X1 194980 14200
 hold4 BUF_X1 194980 103800
 hold5 BUF_X1 194980 193400

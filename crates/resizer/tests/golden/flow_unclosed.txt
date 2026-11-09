@@ -6,45 +6,45 @@ RepairSummary {
     resized: 1,
     inserted: 2,
 }
-reported (iteration, failing): [(Some(1), 32), (Some(10), 32), (Some(20), 31), (Some(30), 31), (Some(40), 31), (Some(50), 31), (Some(60), 32), (Some(70), 32), (Some(80), 31), (Some(90), 31), (Some(100), 31), (Some(110), 31), (None, 31)]
+reported (iteration, failing): [(Some(1), 32), (Some(10), 32), (Some(20), 32), (Some(30), 32), (Some(40), 32), (Some(50), 32), (Some(60), 32), (Some(70), 32), (Some(80), 32), (Some(90), 32), (Some(100), 32), (Some(110), 32), (Some(120), 32), (Some(130), 32), (Some(140), 32), (Some(150), 32), (Some(160), 32), (Some(170), 32), (Some(180), 32), (None, 32)]
 SetupSummary {
     failing_before: 32,
-    failing_after: 31,
+    failing_after: 32,
     wns_before: Seconds(
         -1.0738456775465202e-10,
     ),
     wns_after: Seconds(
-        -4.3665187145862144e-11,
+        -5.091156344429175e-11,
     ),
     tns_before: Seconds(
-        -1.7596899840220632e-9,
+        -1.834039439328038e-9,
     ),
     tns_after: Seconds(
-        -6.824003618870091e-10,
+        -1.1004076201948352e-9,
     ),
-    removed: 25,
-    resized: 8,
-    inserted: 8,
+    removed: 23,
+    resized: 1,
+    inserted: 0,
     split: 0,
     cloned: 0,
     swapped: 0,
-    iterations: 113,
-    area_change_percent: -3.9260053193600384,
+    iterations: 184,
+    area_change_percent: -7.093803342463557,
 }
 HoldSummary {
-    failing_before: 5,
-    failing_after: 1,
+    failing_before: 4,
+    failing_after: 0,
     wns_before: Seconds(
         7.00895746779772e-11,
     ),
     wns_after: Seconds(
-        1.166988248038224e-10,
+        1.3084509580431128e-10,
     ),
     setup_wns_before: Seconds(
-        -4.3665187145862144e-11,
+        -5.091156344429175e-11,
     ),
     setup_wns_after: Seconds(
-        -4.3665187145862144e-11,
+        -5.091156344429175e-11,
     ),
     inserted: 8,
     resized: 0,
@@ -53,6 +53,7 @@ HoldSummary {
     ),
 }
 ffa0 DFF_X1 5800 30000
+g0_0 CLKBUF_X3 24800 30000
 g0_1 INV_X1 78000 30000
 g0_3 INV_X1 184400 30000
 g0_5 INV_X1 290800 30000
@@ -125,20 +126,13 @@ ha2 DFF_X1 192000 192400
 hb2 DFF_X1 196560 192400
 ha3 DFF_X1 192000 282000
 hb3 DFF_X1 196560 282000
-load_slew2 CLKBUF_X3 184700 199000
-rebuffer3 CLKBUF_X3 184700 157000
-rebuffer4 CLKBUF_X3 230300 101000
-rebuffer5 CLKBUF_X3 169500 103800
-rebuffer6 CLKBUF_X3 63100 103800
-rebuffer7 CLKBUF_X3 63100 53400
-rebuffer8 CLKBUF_X3 185000 200000
-rebuffer9 CLKBUF_X3 200200 204600
-rebuffer10 CLKBUF_X3 245500 204600
-hold41 BUF_X1 194980 14200
-hold42 BUF_X1 194980 103800
-hold43 BUF_X1 194980 193400
-hold44 BUF_X1 194980 283000
-hold45 BUF_X1 194190 14700
-hold46 BUF_X1 194190 104300
-hold47 BUF_X1 194190 193900
-hold48 BUF_X1 194190 283500
+wire1 CLKBUF_X3 199900 204600
+wire2 CLKBUF_X3 184700 199000
+hold215 BUF_X1 194980 14200
+hold216 BUF_X1 194980 103800
+hold217 BUF_X1 194980 193400
+hold218 BUF_X1 194980 283000
+hold219 BUF_X1 194190 14700
+hold220 BUF_X1 194190 104300
+hold221 BUF_X1 194190 193900
+hold222 BUF_X1 194190 283500
