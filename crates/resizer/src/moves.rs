@@ -27,8 +27,9 @@ const SPLIT_LOAD_MIN_FANOUT: usize = 8;
 /// Fanout at and above which rebuffering is not tried.
 const REBUFFER_MAX_FANOUT: usize = 20;
 
-/// Fanout a driver may take on when a buffer is removed, absent a limit.
-const BUFFER_REMOVAL_MAX_FANOUT: usize = 10;
+/// Fanout a driver may take on when a buffer is removed, absent a limit,
+/// as `BaseMove::buffer_removal_max_fanout_`.
+const BUFFER_REMOVAL_MAX_FANOUT: f64 = 10.0;
 
 /// Inputs beyond which pin equivalence is not simulated.
 const MAX_SIMULATED_INPUTS: usize = 16;
@@ -540,11 +541,15 @@ impl Moves {
             return Ok(false);
         };
         let prev_edge = site.prev_edge.unwrap_or(site.edge);
-        let new_fanout = resizer.fanout(prev_driver) + resizer.fanout(site.driver) - 1;
-        let fanout_limit = resizer
-            .fanout_limit()
-            .map_or(BUFFER_REMOVAL_MAX_FANOUT, |l| l as usize);
-        if new_fanout > fanout_limit {
+        let joined = (resizer.fanout(site.driver) - 1) as f64;
+        let fanout_ok = match resizer.fanout_limit(prev_driver) {
+            Some(limit) => resizer.fanout_load(prev_driver) + joined <= limit,
+            // NOTE: UnbufferMove::doMove reads checkFanout's infinite limit as
+            // a set one and never applies buffer_removal_max_fanout_; PARE
+            // applies it, as its comment intends, to the joined net.
+            None => resizer.fanout(prev_driver) as f64 + joined <= BUFFER_REMOVAL_MAX_FANOUT,
+        };
+        if !fanout_ok {
             return Ok(false);
         }
         let Some(buffer) = resizer.link.liberty.buffer_cell(site.lib) else {

@@ -669,12 +669,48 @@ impl<'a, T: Timing> Resizer<'a, T> {
             .and_then(|s| s.sdc().limits.max_capacitance)
     }
 
-    /// The fanout limit on every driver, if the constraints set one.
+    /// The fanout limit at a driver, if any applies, as
+    /// `CheckFanouts::findLimit`: the tighter of the design's
+    /// `set_max_fanout` and, at an instance output, its port's `max_fanout`
+    /// or its library's default.
     #[must_use]
-    pub fn fanout_limit(&self) -> Option<f64> {
-        self.timing
+    pub(crate) fn fanout_limit(&self, driver: PinId) -> Option<f64> {
+        let design = self
+            .timing
             .analysis()
-            .and_then(|s| s.sdc().limits.max_fanout)
+            .and_then(|s| s.sdc().limits.max_fanout);
+        let own = self
+            .netlist()
+            .lib_cell_port(driver)
+            .and_then(|(cell, port)| {
+                port.max_fanout
+                    .or_else(|| self.link.liberty.cell_defaults(cell).max_fanout)
+            });
+        let limit = match (own, design) {
+            (Some(a), Some(b)) => Some(a.min(b)),
+            (a, b) => a.or(b),
+        };
+        // A limit of zero limits nothing, as checkFanout's callers read it.
+        limit.filter(|&l| l > 0.0)
+    }
+
+    /// The fanout a driver's net presents, as `CheckFanouts::fanoutLoad`:
+    /// each instance load's Liberty fanout load, one for a load without a
+    /// Liberty port, nothing for a port of the design.
+    #[must_use]
+    pub(crate) fn fanout_load(&self, driver: PinId) -> f64 {
+        let netlist = self.netlist();
+        let net = self.db.pins[driver].net;
+        netlist
+            .loads(net)
+            .filter(|&load| load != driver)
+            .filter(|&load| matches!(self.db.pins[load].owner, PinOwner::Cell { .. }))
+            .map(|load| {
+                netlist.lib_cell_port(load).map_or(1.0, |(cell, port)| {
+                    self.link.liberty.fanout_load(cell, port)
+                })
+            })
+            .sum()
     }
 
     /// The load a driver sees.
@@ -1863,6 +1899,63 @@ mod tests {
                 matches!(error, Err(RepairError::Edit(EditError::MissingPin { .. }))),
                 "{error:?}"
             );
+        });
+    }
+
+    /// The clock test cells with a library fanout limit of 6, `BUF_X1`'s
+    /// own of 4, and a fanout load of 2 at the flops' data inputs, 1 by
+    /// default elsewhere.
+    fn fanout_cells() -> Liberty {
+        let source = clock_cells_source()
+            .replacen(
+                "default_max_transition : 0.2 ;",
+                "default_max_transition : 0.2 ; default_max_fanout : 6 ; \
+                 default_fanout_load : 1.0 ;",
+                1,
+            )
+            .replacen(
+                "function : \"A\" ;\n      max_capacitance : 60.0 ;",
+                "function : \"A\" ;\n      max_fanout : 4 ;\n      max_capacitance : 60.0 ;",
+                1,
+            )
+            .replace(
+                "capacitance : 1.1 ;",
+                "capacitance : 1.1 ; fanout_load : 2.0 ;",
+            );
+        cells(&source)
+    }
+
+    #[test]
+    fn a_drivers_fanout_limit_is_the_tightest_of_its_own_its_librarys_and_the_designs() {
+        let lib = fanout_cells();
+        let limits = |constraints: &str| {
+            let mut db = two_buffers();
+            let mut found = (None, None);
+            with_timed_session(&mut db, &lib, constraints, |resizer| {
+                let (flop, buffer) = (pin(resizer.db, "f1/Q"), pin(resizer.db, "b2/Z"));
+                found = (resizer.fanout_limit(flop), resizer.fanout_limit(buffer));
+            });
+            found
+        };
+
+        assert_eq!(limits(CLOCK), (Some(6.0), Some(4.0)));
+        assert_eq!(
+            limits(&format!("{CLOCK}set_max_fanout 5 [current_design]\n")),
+            (Some(5.0), Some(4.0))
+        );
+    }
+
+    #[test]
+    fn a_nets_fanout_sums_its_loads_fanout_loads() {
+        let mut db = two_buffers();
+        let lib = fanout_cells();
+
+        with_timed_session(&mut db, &lib, CLOCK, |resizer| {
+            let into_flop = resizer.fanout_load(pin(resizer.db, "b2/Z"));
+            let into_buffer = resizer.fanout_load(pin(resizer.db, "f1/Q"));
+
+            assert!((into_flop - 2.0).abs() < 1e-12, "{into_flop}");
+            assert!((into_buffer - 1.0).abs() < 1e-12, "{into_buffer}");
         });
     }
 

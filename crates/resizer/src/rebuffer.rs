@@ -349,7 +349,7 @@ impl Rebuffer {
             pin,
             cell,
             port,
-            fanout_limit: resizer.fanout_limit().unwrap_or(f64::INFINITY),
+            fanout_limit: resizer.fanout_limit(pin).unwrap_or(f64::INFINITY),
             max_slew,
             load_high_water_mark: Farads::ZERO,
             arrival_paths: EdgeValues::default(),
