@@ -8,7 +8,6 @@ use pare_common::geom::dbu::Dbu;
 use pare_common::geom::point::Point;
 use pare_common::geom::rect::Rect;
 use pare_common::units::Seconds;
-use rustc_hash::FxHashMap;
 
 /// Whether a clock instance is a buffer the tree adds or a sink it reaches.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -73,9 +72,6 @@ pub(crate) struct Clock {
     pub buffers: Vec<ClockInst>,
     pub subnets: Vec<SubNet>,
     pub net: NetId,
-    pub driver_pin: Option<PinId>,
-    pub max_level: usize,
-    by_name: FxHashMap<String, InstRef>,
 }
 
 impl Clock {
@@ -87,9 +83,6 @@ impl Clock {
             buffers: Vec::new(),
             subnets: Vec::new(),
             net,
-            driver_pin: None,
-            max_level: 0,
-            by_name: FxHashMap::default(),
         }
     }
 
@@ -116,7 +109,6 @@ impl Clock {
     ) -> InstRef {
         let full = format!("{name}_{}", self.net_name);
         let inst = InstRef::Buffer(self.buffers.len());
-        let _ = self.by_name.insert(full.clone(), inst);
         self.buffers.push(ClockInst {
             name: full,
             master: Some(master),

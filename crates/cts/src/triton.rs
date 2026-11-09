@@ -463,11 +463,6 @@ impl Cts<'_> {
     ) -> Result<Option<usize>, CtsError> {
         let net_name = db.nets[net].name.clone();
         let mut clock = Clock::new(net, &net_name, sdc_name);
-        clock.driver_pin = db.nets[net]
-            .pins
-            .iter()
-            .copied()
-            .find(|&p| pin_direction(db, p).is_some_and(|(_, d, _)| d == PinDirection::Output));
         let mut macro_sinks = Vec::new();
         let mut register_sinks = Vec::new();
         for pin in net_cell_pins(db, net) {
@@ -827,9 +822,7 @@ impl Cts<'_> {
                 self.write_ndr(db, i);
             }
             if self.setup.settings.dummy_loads {
-                let n = self.write_dummy_loads(db, i)?;
-                self.builders[i].n_dummies = n;
-                self.summary.dummies += n;
+                self.summary.dummies += self.write_dummy_loads(db, i)?;
             }
         }
         Ok(())

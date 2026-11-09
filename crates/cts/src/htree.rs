@@ -258,13 +258,9 @@ pub(crate) struct Builder {
     pub tree_type: TreeType,
     pub parent: Option<usize>,
     pub children: Vec<usize>,
-    pub tree_buf_levels: u32,
-    pub first_level_sink_drivers: FxHashSet<InstRef>,
-    pub tree_level_buffers: FxHashSet<InstRef>,
     pub top_buffer_name: String,
     pub driving_net: Option<pare_common::db::indices::NetId>,
     pub top_input_net: Option<pare_common::db::indices::NetId>,
-    pub n_dummies: usize,
     occupied: FxHashSet<(u64, u64)>,
     insertion_lengths: FxHashMap<(u64, u64), SegmentLength>,
     sink_region: Region,
@@ -283,13 +279,9 @@ impl Builder {
             tree_type: TreeType::Regular,
             parent,
             children: Vec::new(),
-            tree_buf_levels: 0,
-            first_level_sink_drivers: FxHashSet::default(),
-            tree_level_buffers: FxHashSet::default(),
             top_buffer_name: String::new(),
             driving_net: None,
             top_input_net: None,
-            n_dummies: 0,
             occupied: FxHashSet::default(),
             insertion_lengths: FxHashMap::default(),
             sink_region: Region::default(),
@@ -459,10 +451,8 @@ impl Builder {
         }
         if self.topologies.is_empty() {
             self.single_buffer_clock_net(ctx);
-            self.tree_buf_levels += 1;
             return;
         }
-        self.clock.max_level = self.topologies.len();
         self.legalize(ctx);
         self.create_clock_subnets(ctx, tech);
     }
@@ -571,20 +561,15 @@ impl Builder {
         }
         let solution = self.cluster_sinks(ctx, tech, sinks, max_diameter, size);
         let mut new_locations = Vec::with_capacity(solution.len());
-        let mut count = 0;
-        for cluster in &solution {
+        for (count, cluster) in solution.iter().enumerate() {
             if cluster.len() == 1 {
                 new_locations.push(sinks[cluster[0]]);
             }
             if cluster.len() > 1 {
                 new_locations.push(self.add_leaf_buffer(ctx, sinks, cluster, count));
             }
-            count += 1;
         }
         self.top_level_sinks_clustered = new_locations;
-        if count > 0 {
-            self.tree_buf_levels += 1;
-        }
     }
 
     /// Records each sink by its location in wire segment units, and where
@@ -703,7 +688,6 @@ impl Builder {
         let buffer =
             self.clock
                 .add_buffer(&format!("clkbuf_leaf_{count}"), ctx.sink_buffer, location);
-        let _ = self.first_level_sink_drivers.insert(buffer);
         let subnet = self.clock.add_subnet(&format!("clknet_leaf_{count}"));
         self.clock.subnets[subnet].add(buffer);
         for member in members {
@@ -1130,14 +1114,11 @@ impl Builder {
         if self.top_buffer_name.is_empty() {
             self.top_buffer_name = self.clock.inst(root).name.clone();
         }
-        let _ = self.tree_level_buffers.insert(root);
         let root_net = self.clock.add_subnet("clknet_0");
         self.clock.subnets[root_net].level = Some(0);
         self.clock.subnets[root_net].add(root);
-        self.tree_buf_levels += 1;
         let levels = self.topologies.len();
         for level_idx in 0..levels {
-            let mut first = true;
             for idx in 0..self.topologies[level_idx].points.len() {
                 if self.topologies[level_idx].sinks[idx].is_empty() {
                     continue;
@@ -1171,10 +1152,6 @@ impl Builder {
                 if level_idx == levels - 1 {
                     segment.force_buffer(self, ctx.root_buffer);
                 }
-                if first {
-                    self.tree_buf_levels += segment.levels;
-                    first = false;
-                }
                 self.topologies[level_idx].driving_subnet[idx] = Some(segment.driving);
             }
         }
@@ -1205,7 +1182,6 @@ impl Builder {
         if self.top_buffer_name.is_empty() {
             self.top_buffer_name = self.clock.inst(root).name.clone();
         }
-        let _ = self.tree_level_buffers.insert(root);
         let subnet = self.clock.add_subnet("clknet_0");
         self.clock.subnets[subnet].level = Some(0);
         self.clock.subnets[subnet].add(root);
@@ -1432,7 +1408,6 @@ impl SegmentBuilder {
                 if !at.same(legal) {
                     connection -= tree.compute_dist(at, legal);
                 }
-                let _ = tree.tree_level_buffers.insert(buffer);
                 tree.clock.subnets[self.driving].add(buffer);
                 self.driving = tree
                     .clock
@@ -1456,7 +1431,6 @@ impl SegmentBuilder {
             master,
             self.target.to_dbu(unit),
         );
-        let _ = tree.tree_level_buffers.insert(buffer);
         tree.clock.subnets[self.driving].add(buffer);
         self.driving = tree.clock.add_subnet(&format!("{}_leaf", self.net_prefix));
         tree.clock.subnets[self.driving].add(buffer);
