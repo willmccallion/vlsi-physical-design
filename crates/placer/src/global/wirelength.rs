@@ -11,7 +11,7 @@ use std::ops::Range;
 pub(super) enum Terminal {
     /// At `offset` from the center of a placed object.
     Object {
-        /// The object.
+        /// Index of the movable object in the placer's objects.
         index: usize,
         /// Offset from its center.
         offset: Point<f64>,

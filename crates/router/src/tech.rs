@@ -125,7 +125,7 @@ pub struct ViaTech {
     pub bottom: Rect<Dbu>,
     /// Metal on the layer above.
     pub top: Rect<Dbu>,
-    /// Its cuts.
+    /// Its cut rectangles, relative to its center.
     pub cuts: Vec<Rect<Dbu>>,
     /// Center distance below which two of these cuts break the cut spacing.
     pub cut_reach: Dbu,

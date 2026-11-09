@@ -44,7 +44,7 @@ pub enum IoPlacementError {
     /// A configured layer runs the wrong way.
     #[error("layer '{layer}' is not {direction}")]
     WrongDirection {
-        /// The layer.
+        /// The configured layer's name.
         layer: String,
         /// The direction it should have.
         direction: &'static str,

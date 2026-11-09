@@ -184,7 +184,7 @@ pub enum Proximity {
 /// An occupant a query comes near, and how near.
 #[derive(Clone, Copy, Debug)]
 pub struct Conflict<'a> {
-    /// The occupant.
+    /// The occupant the query comes near.
     pub occupant: &'a Occupant,
     /// How near the query comes to it.
     pub proximity: Proximity,

@@ -140,7 +140,7 @@ impl Usage {
 /// One layer's routing resources and their use, summed over its edges.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) struct LayerTotals {
-    /// The layer.
+    /// The routing layer the totals are for.
     pub layer: LayerId,
     /// Its preferred direction, which its edges run along.
     pub direction: Direction,
@@ -930,7 +930,7 @@ impl RouteTree {
 /// A net to route globally: its pins' gcells and what its wires take.
 #[derive(Clone, Debug)]
 pub struct GlobalNet {
-    /// The net.
+    /// The net to route.
     pub net: NetId,
     /// One gcell per pin.
     pub terminals: Vec<GCell>,

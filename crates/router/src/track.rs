@@ -42,7 +42,7 @@ const REASSIGN_ROUNDS: usize = 3;
 /// A net's wire along one track, from one crossing to a later one.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct TrackWire {
-    /// The net.
+    /// The net the wire belongs to.
     pub net: NetId,
     /// Routing layer.
     pub layer: LayerId,

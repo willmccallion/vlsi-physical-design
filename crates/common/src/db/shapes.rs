@@ -22,7 +22,7 @@ pub enum Owner {
 /// A fixed rectangle on a layer and what it belongs to.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct OwnedShape {
-    /// The geometry.
+    /// Its layer and rectangle.
     pub shape: Shape,
     /// Its net, if any.
     pub owner: Owner,

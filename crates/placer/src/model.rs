@@ -55,7 +55,7 @@ pub struct ModelPin {
 pub struct ModelNet {
     /// The net in the database.
     pub net: NetId,
-    /// Its connections.
+    /// The connections it ties together, at least two.
     pub pins: Vec<ModelPin>,
     /// Wirelength weight.
     pub weight: f64,

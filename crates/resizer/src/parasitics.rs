@@ -93,7 +93,7 @@ impl PiElmore {
 pub(crate) enum WireShape {
     /// A Steiner tree over the pins' positions.
     Steiner {
-        /// The tree.
+        /// The net's Steiner tree over its pins.
         tree: SteinerTree,
         /// The pins at each terminal of the tree.
         terminal_pins: Vec<Vec<PinId>>,

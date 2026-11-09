@@ -113,7 +113,7 @@ pub struct DetailedRouter<'a> {
 /// layer of the pin shape that point reaches.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) struct PinTerminal {
-    /// The pin.
+    /// The pin the terminal reaches.
     pub pin: PinId,
     /// The gcell, on the layer the access point's wire starts on.
     pub cell: GCell,

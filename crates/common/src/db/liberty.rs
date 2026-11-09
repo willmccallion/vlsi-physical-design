@@ -667,7 +667,7 @@ pub enum ClockGatePin {
     None,
     /// The clock in.
     Clock,
-    /// The enable.
+    /// The enable that gates the clock.
     Enable,
     /// The test enable.
     Test,
@@ -1202,7 +1202,7 @@ pub enum FuncExpr {
 #[derive(Clone, Debug, PartialEq, Eq, thiserror::Error)]
 #[error("invalid function '{text}': {message}")]
 pub struct FuncExprError {
-    /// The expression.
+    /// The function text that failed to parse.
     pub text: String,
     /// What was wrong.
     pub message: String,

@@ -98,7 +98,7 @@ impl std::fmt::Debug for RunOptions<'_> {
 pub enum Progress<'a> {
     /// A stage of the run finished after `elapsed`.
     Stage {
-        /// The stage.
+        /// The stage that finished.
         stage: Stage,
         /// How long it took.
         elapsed: Duration,
@@ -685,7 +685,7 @@ pub struct GlobalOnly {
 /// layer, one box per run of gcells along a layer, as route guides give it.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct NetGuide {
-    /// The net.
+    /// The net the guide is for.
     pub net: NetId,
     /// Layer and box of each run, clipped to the die.
     pub boxes: Vec<(LayerId, Rect<Dbu>)>,

@@ -41,7 +41,7 @@ pub(crate) struct InArc {
 /// load, as `OpenSTA`'s graph holds arc delays.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub(crate) struct ArcDelay {
-    /// The arc.
+    /// The arc the delay is through.
     pub arc: InArc,
     /// The edge at the arc's input.
     pub from_edge: Edge,

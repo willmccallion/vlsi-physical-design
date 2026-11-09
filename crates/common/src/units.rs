@@ -61,7 +61,7 @@ macro_rules! define_quantity {
                 self.0.is_finite()
             }
 
-            /// Its magnitude.
+            /// The same quantity without its sign.
             #[must_use]
             pub const fn abs(self) -> Self {
                 Self(self.0.abs())
