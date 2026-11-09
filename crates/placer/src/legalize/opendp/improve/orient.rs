@@ -5,10 +5,11 @@
 use super::{EdgeId, NodeId};
 use super::{Improver, SKIP_NETS_LARGER_THAN};
 use pare_common::db::indices::IdVec;
+use pare_common::geom::dbu::Dbu;
 use pare_common::geom::orient::Orientation;
 
 pub(super) fn run(imp: &mut Improver) {
-    if imp.total_hpwl() == 0 {
+    if imp.total_hpwl() == Dbu::ZERO {
         return;
     }
     let problems = orient_cells(imp);
@@ -94,12 +95,13 @@ fn flip_cells(imp: &mut Improver) {
                 let (mut new_lo, mut new_hi) = (f64::MAX, f64::MIN);
                 for &p in pins {
                     let other = &imp.net.pins[p];
-                    let center = imp.left(other.node) as f64 + 0.5 * imp.width(other.node) as f64;
-                    let x = center + other.offset.0 as f64;
+                    let center =
+                        imp.left(other.node).to_f64() + 0.5 * imp.width(other.node).to_f64();
+                    let x = center + other.offset.x.to_f64();
                     old_lo = old_lo.min(x);
                     old_hi = old_hi.max(x);
                     let x = if other.node == n {
-                        center - other.offset.0 as f64
+                        center - other.offset.x.to_f64()
                     } else {
                         x
                     };
