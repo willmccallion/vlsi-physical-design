@@ -454,7 +454,7 @@ fn layer_wire_rc(wire: &LayerRcConfig, db: &NetlistDB) -> anyhow::Result<WireRc>
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::testing::tiny;
+    use crate::testing::{cts_fixture, scratch_dir, tiny};
 
     fn wire(layer: &str) -> LayerRcConfig {
         LayerRcConfig {
@@ -518,5 +518,45 @@ mod tests {
             format!("{error:#}"),
             "[netlist] clock_wire: unknown routing layer 'M9'"
         );
+    }
+
+    fn clock_lib() -> PathBuf {
+        cts_fixture("clock.lib")
+    }
+
+    #[test]
+    fn one_liberty_file_gives_its_cells() {
+        let liberty = load_liberty(&[clock_lib()]).unwrap();
+
+        assert!(liberty.cell_id("DFF_X1").is_some());
+    }
+
+    #[test]
+    fn liberty_files_merge_their_cells() {
+        let renamed = scratch_dir("liberty-merge").join("renamed.lib");
+        let text = std::fs::read_to_string(clock_lib()).unwrap();
+        std::fs::write(&renamed, text.replace("  cell (", "  cell (B_")).unwrap();
+
+        let liberty = load_liberty(&[clock_lib(), renamed]).unwrap();
+
+        assert!(liberty.cell_id("DFF_X1").is_some());
+        assert!(liberty.cell_id("B_DFF_X1").is_some());
+    }
+
+    #[test]
+    fn a_cell_in_two_liberty_files_is_an_error() {
+        let error = load_liberty(&[clock_lib(), clock_lib()]).unwrap_err();
+
+        assert_eq!(
+            error.to_string(),
+            "cell 'CLKBUF_X3' is in two Liberty files"
+        );
+    }
+
+    #[test]
+    fn no_liberty_files_is_an_error() {
+        let error = load_liberty(&[]).unwrap_err();
+
+        assert_eq!(error.to_string(), "no Liberty files");
     }
 }
