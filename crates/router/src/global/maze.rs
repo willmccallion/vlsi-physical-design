@@ -223,6 +223,8 @@ struct Entry {
     f: f64,
     g: f64,
     cell: GCell,
+    /// The cell's node in the search, see [`Local`].
+    node: usize,
 }
 
 impl Eq for Entry {}
@@ -335,34 +337,34 @@ fn search_with(
     let local = Local::new(grid, win, query.corridor);
     state.reset(local.nodes());
     let mut heap = BinaryHeap::new();
-    for &c in sources {
-        state.set(local.index(c), 0.0, NO_PARENT);
+    for (c, node) in sources.iter().filter_map(|&c| Some((c, local.index(c)?))) {
+        state.set(node, 0.0, NO_PARENT);
         heap.push(Entry {
             f: rules.estimate(c),
             g: 0.0,
             cell: c,
+            node,
         });
     }
     let found = loop {
-        let Some(Entry { g, cell, .. }) = heap.pop() else {
+        let Some(Entry { g, cell, node, .. }) = heap.pop() else {
             break None;
         };
-        let at = local.index(cell);
-        if state.cost(at).is_some_and(|b| g > b) {
+        if state.cost(node).is_some_and(|b| g > b) {
             continue;
         }
         if cell == target {
-            break Some(traced_path(state, &local, at, cell));
+            break Some(traced_path(state, &local, node, cell));
         }
-        for (next, step) in rules.moves_from(cell, &local).into_iter().flatten() {
-            let ng = g + step;
-            let index = local.index(next);
-            if state.cost(index).is_none_or(|b| ng < b) {
-                state.set(index, ng, index_u32(at));
+        for step in rules.moves_from(cell, &local).into_iter().flatten() {
+            let ng = g + step.cost;
+            if state.cost(step.node).is_none_or(|b| ng < b) {
+                state.set(step.node, ng, index_u32(node));
                 heap.push(Entry {
-                    f: ng + rules.estimate(next),
+                    f: ng + rules.estimate(step.cell),
                     g: ng,
-                    cell: next,
+                    cell: step.cell,
+                    node: step.node,
                 });
             }
         }
@@ -451,7 +453,7 @@ impl<'a> MoveRules<'a> {
 
     /// The cells one move from `cell` within `local` with what each move
     /// costs: back and ahead along the layer's direction, then down and up.
-    fn moves_from(&self, cell: GCell, local: &Local<'_>) -> [Option<(GCell, f64)>; 4] {
+    fn moves_from(&self, cell: GCell, local: &Local<'_>) -> [Option<Move>; 4] {
         let grid = self.grid;
         let (x, y) = (cell.x, cell.y);
         let (behind, ahead) = match grid.direction(cell.layer) {
@@ -464,15 +466,23 @@ impl<'a> MoveRules<'a> {
                 (y + 1 < grid.ny).then(|| GCell { y: y + 1, ..cell }),
             ),
         };
-        let back = behind.filter(|&n| local.contains(n)).and_then(|next| {
+        let visit = |next: GCell, cost: f64| {
+            local.index(next).map(|node| Move {
+                cell: next,
+                node,
+                cost,
+            })
+        };
+        let back = behind.and_then(|next| {
             let e = grid.edge(next);
             self.passable(e, cell, next)
-                .then(|| (next, self.edge_cost(e)))
+                .then(|| visit(next, self.edge_cost(e)))
+                .flatten()
         });
         let here = grid.edge(cell);
         let forth = ahead
-            .filter(|&n| local.contains(n) && self.passable(here, cell, n))
-            .map(|next| (next, self.edge_cost(here)));
+            .filter(|&n| self.passable(here, cell, n))
+            .and_then(|next| visit(next, self.edge_cost(here)));
         let l = cell.layer.index();
         let climb = |layer: usize| {
             let next = GCell {
@@ -480,12 +490,22 @@ impl<'a> MoveRules<'a> {
                 ..cell
             };
             self.climbable(cell, next)
-                .then(|| (next, self.climb_cost(next)))
+                .then(|| visit(next, self.climb_cost(next)))
+                .flatten()
         };
         let down = (l > *grid.layers().start()).then(|| climb(l - 1)).flatten();
         let up = (l < *grid.layers().end()).then(|| climb(l + 1)).flatten();
         [back, forth, down, up]
     }
+}
+
+/// One move of a search: the cell it reaches, that cell's node and what the
+/// move costs.
+#[derive(Clone, Copy, Debug)]
+struct Move {
+    cell: GCell,
+    node: usize,
+    cost: f64,
 }
 
 /// Nodes of search state a thread keeps between searches; a larger state,
@@ -500,6 +520,8 @@ const KEPT_SEARCH_NODES: usize = 1 << 20;
 struct Local<'a> {
     window: GcellWindow,
     corridor: Option<&'a Corridor>,
+    /// The corridor's coarse cells, none without one.
+    corridor_cells: &'a [(u16, u16)],
     layers: usize,
     first_layer: usize,
 }
@@ -512,6 +534,7 @@ impl<'a> Local<'a> {
         Self {
             window,
             corridor,
+            corridor_cells: corridor.map_or(&[], Corridor::cells),
             layers: grid.layers().count(),
             first_layer: *grid.layers().start(),
         }
@@ -529,31 +552,22 @@ impl<'a> Local<'a> {
         self.window.contains(c.x, c.y)
     }
 
-    fn nodes(&self) -> usize {
-        let beyond = self.corridor.map_or(0, |c| c.cells().len() * COARSE_CELLS);
+    const fn nodes(&self) -> usize {
+        let beyond = self.corridor_cells.len() * COARSE_CELLS;
         (self.window_cells() + beyond) * self.layers
     }
 
-    fn contains(&self, c: GCell) -> bool {
-        self.in_window(c)
-            || self
-                .corridor
-                .is_some_and(|corridor| corridor.allows(c.x, c.y))
-    }
-
-    fn index(&self, c: GCell) -> usize {
+    /// The node of `c`, if the search may visit it.
+    fn index(&self, c: GCell) -> Option<usize> {
         let l = c.layer.index() - self.first_layer;
         let plane = if self.in_window(c) {
             usize::from(c.y - self.window.y0) * self.width() + usize::from(c.x - self.window.x0)
         } else {
-            let slot = self
-                .corridor
-                .and_then(|corridor| corridor.slot(c.x, c.y))
-                .unwrap_or(0);
+            let slot = self.corridor?.slot(c.x, c.y)?;
             let within = usize::from(c.y % SCALE) * usize::from(SCALE) + usize::from(c.x % SCALE);
             self.window_cells() + slot * COARSE_CELLS + within
         };
-        plane * self.layers + l
+        Some(plane * self.layers + l)
     }
 
     fn cell(&self, index: usize) -> GCell {
@@ -565,9 +579,7 @@ impl<'a> Local<'a> {
                 self.window.y0 + grid_index(plane / self.width()),
             ),
             Some(beyond) => {
-                let (cx, cy) = self
-                    .corridor
-                    .map_or((0, 0), |corridor| corridor.cells()[beyond / COARSE_CELLS]);
+                let (cx, cy) = self.corridor_cells[beyond / COARSE_CELLS];
                 let within = beyond % COARSE_CELLS;
                 let s = usize::from(SCALE);
                 (
