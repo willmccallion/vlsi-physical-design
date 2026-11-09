@@ -171,7 +171,9 @@ fn best_per_node(found: Vec<((bool, Dbu), AccessPoint)>) -> Vec<AccessPoint> {
 /// The middle of a span rounded down to the manufacturing grid, as
 /// `FlexPA::genAPCentered` places a centered access point.
 const fn middle_on_grid(low: Dbu, high: Dbu, grid: Dbu) -> Dbu {
-    Dbu(low.midpoint(high).get() / grid.get() * grid.get())
+    // NOTE: genAPCentered truncates both steps toward zero, which rounds up
+    // below the origin; PARE floors both, so a shifted die keeps its points.
+    Dbu(low.midpoint(high).get().div_euclid(grid.get()) * grid.get())
 }
 
 /// Off-crossing accesses on each track of `layer` through `rect`: the point
@@ -504,6 +506,12 @@ mod tests {
     #[test]
     fn the_middle_of_a_span_is_rounded_down_to_the_manufacturing_grid() {
         assert_eq!(middle_on_grid(Dbu(100), Dbu(130), Dbu(10)), Dbu(110));
+    }
+
+    #[test]
+    fn the_middle_of_a_span_below_the_origin_is_rounded_down_too() {
+        assert_eq!(middle_on_grid(Dbu(-20), Dbu(-10), Dbu(10)), Dbu(-20));
+        assert_eq!(middle_on_grid(Dbu(-19), Dbu(0), Dbu(10)), Dbu(-10));
     }
 
     #[test]
