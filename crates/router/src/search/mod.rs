@@ -193,7 +193,7 @@ impl Guide {
         let min_layer = tech.min_layer.index();
         let layers = tech.max_layer.index() - min_layer + 1;
         let (width, height) = (x1 - x0 + 1, y1 - y0 + 1);
-        let total = usize::try_from(width * height).unwrap_or(0) * layers;
+        let total = (width * height) as usize * layers;
         let mut guide = Self {
             origin,
             gcell,

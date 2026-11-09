@@ -54,8 +54,8 @@ struct Dbu32(i32);
 
 impl Dbu32 {
     fn of(d: Dbu) -> Self {
-        let saturated = if d.get() < 0 { i32::MIN } else { i32::MAX };
-        Self(i32::try_from(d.get()).unwrap_or(saturated))
+        debug_assert!(i32::try_from(d.get()).is_ok(), "{d:?} past 32 bits");
+        Self(d.get() as i32)
     }
 
     fn pair((a, b): (Dbu, Dbu)) -> (Self, Self) {

@@ -43,7 +43,7 @@ impl ShapeTiles {
     /// Buckets every shape of `layout` by the `cell`-sized tiles over `die`.
     pub(super) fn new(layout: &Layout, die: &Rect<Dbu>, cell: Dbu) -> Self {
         let cell = cell.max(Dbu(1));
-        let count = |span: Dbu| usize::try_from(span.get() / cell.get() + 1).unwrap_or(1);
+        let count = |span: Dbu| (span.get() / cell.get() + 1) as usize;
         let (nx, ny) = (count(die.width()), count(die.height()));
         let mut tiles = Self {
             origin: die.min,
@@ -66,7 +66,7 @@ impl ShapeTiles {
     }
 
     fn insert(&mut self, layer: LayerRef, index: usize, rect: &Rect<Dbu>) {
-        let index = u32::try_from(index).unwrap_or(u32::MAX);
+        let index = crate::tech::index_u32(index);
         let (x0, x1, y0, y1) = self.span(rect);
         for j in y0..=y1 {
             for i in x0..=x1 {
@@ -78,9 +78,8 @@ impl ShapeTiles {
     /// The columns and rows of tiles `rect` meets, clamped to the grid.
     fn span(&self, rect: &Rect<Dbu>) -> (usize, usize, usize, usize) {
         let index = |v: Dbu, origin: Dbu, count: usize| {
-            usize::try_from((v - origin).get().div_euclid(self.cell.get()))
-                .unwrap_or(0)
-                .min(count - 1)
+            let at = (v - origin).get().div_euclid(self.cell.get());
+            at.clamp(0, count as i64 - 1) as usize
         };
         (
             index(rect.min.x, self.origin.x, self.nx),

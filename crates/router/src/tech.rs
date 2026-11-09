@@ -243,8 +243,8 @@ fn reach_from_origin(die: &Rect<Dbu>) -> i64 {
 
 /// `i` as the 32-bit index the router stores. Every such index counts
 /// things 32 bits hold: tracks and crossings, whose coordinates lie within
-/// [`MAX_DIE_REACH`] of the origin, the design's nets, and search nodes of
-/// grids [`check_grid_span`] keeps within 16 bits a side.
+/// [`MAX_DIE_REACH`] of the origin, the design's nets and shapes, and search
+/// nodes of grids [`check_grid_span`] keeps within 16 bits a side.
 pub(crate) fn index_u32(i: usize) -> u32 {
     debug_assert!(u32::try_from(i).is_ok(), "router index {i} past 32 bits");
     i as u32
