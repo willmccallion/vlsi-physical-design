@@ -40,9 +40,9 @@ pub(super) struct ShapeTiles {
 }
 
 impl ShapeTiles {
-    /// Buckets every shape of `layout` by the `cell`-sized tiles over `die`.
+    /// Buckets every shape of `layout` by the `cell`-sized tiles over `die`;
+    /// `cell` is positive.
     pub(super) fn new(layout: &Layout, die: &Rect<Dbu>, cell: Dbu) -> Self {
-        let cell = cell.max(Dbu(1));
         let count = |span: Dbu| (span.get() / cell.get() + 1) as usize;
         let (nx, ny) = (count(die.width()), count(die.height()));
         let mut tiles = Self {

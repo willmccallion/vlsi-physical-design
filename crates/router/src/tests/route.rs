@@ -68,6 +68,19 @@ fn routing_refuses_a_lowest_layer_of_a_single_track() {
 }
 
 #[test]
+fn routing_refuses_tracks_too_close_to_size_gcells_by() {
+    let (mut db, config) = placed_tiny();
+    let m3 = db.library.routing_layer_id("M3").unwrap();
+    for t in db.tracks.iter_mut().filter(|t| t.layers.contains(&m3)) {
+        t.step = Dbu(1);
+    }
+
+    let result = route(&mut db, &config).map(|_| ());
+
+    assert_eq!(result, Err(RouteError::NoGcellPitch));
+}
+
+#[test]
 fn nets_crossing_many_regions_are_routed_connected() {
     let (mut db, config) = placed_tiny();
 

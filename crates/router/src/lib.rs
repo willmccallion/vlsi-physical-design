@@ -1091,7 +1091,7 @@ fn terminal_layer(db: &NetlistDB, tech: &RouteTech, pin: PinId) -> LayerId {
         .map_or(tech.min_layer, |l| l.clamp(tech.min_layer, tech.max_layer))
 }
 
-/// The edge of a gcell: `config.gcell_tracks` gcell pitches.
+/// The edge of a gcell: `config.gcell_tracks` gcell pitches, so positive.
 fn gcell_size(tech: &RouteTech, config: &RoutingConfig) -> Dbu {
     tech.gcell_pitch * i64::from(config.gcell_tracks.get())
 }
@@ -1188,6 +1188,9 @@ pub enum RouteError {
     /// A routable layer has no tracks and no pitch to derive them from.
     #[error("routing layer '{0}' has no tracks")]
     NoTracks(String),
+    /// The track spacing gcells are sized by rounds down to nothing.
+    #[error("the routing layers' track spacing gives gcells no size")]
+    NoGcellPitch,
     /// The lowest routable layer has a single track, so no pitch to price
     /// vias and size rip-ups by.
     #[error("routing layer '{0}' has a single track; the lowest routing layer needs two or more")]
