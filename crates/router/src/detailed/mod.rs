@@ -888,7 +888,7 @@ impl<'a> DetailedRouter<'a> {
     /// The nodes of `sub` near `rep`, or all of them if none is; a small
     /// target area keeps the search's distance estimate sharp.
     fn join_targets(&self, sub: &SubTree, rep: &Rect<Dbu>) -> FxHashMap<Node, (usize, f64)> {
-        let reach = (self.gcell * JOIN_GCELLS).get();
+        let reach = self.gcell * JOIN_GCELLS;
         let near: FxHashMap<Node, (usize, f64)> = sub
             .nodes
             .iter()
