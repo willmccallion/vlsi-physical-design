@@ -63,7 +63,8 @@ fn term_bounds(db: &NetlistDB, net: NetId) -> Bounds {
 
 /// The half-perimeter wirelength of the signal nets' pins, as
 /// `odb::WireLengthEvaluator::hpwl`.
-pub(super) fn hpwl(db: &NetlistDB) -> Dbu {
+#[must_use]
+pub fn hpwl(db: &NetlistDB) -> Dbu {
     db.nets
         .ids()
         .filter(|&n| !db.nets[n].signal_use.is_supply())
