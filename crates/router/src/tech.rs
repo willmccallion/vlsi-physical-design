@@ -13,7 +13,7 @@ use pare_common::db::design::NonDefaultRule;
 use pare_common::db::indices::{CutLayerId, IdVec, LayerId, NetId, NonDefaultRuleId, ViaId};
 use pare_common::db::library::{Direction, LayerRef, Library, Shape};
 use pare_common::db::rules::SpacingTable;
-use pare_common::geom::dbu::Dbu;
+use pare_common::geom::dbu::{Dbu, DbuArea};
 use pare_common::geom::point::Point;
 use pare_common::geom::rect::Rect;
 
@@ -485,7 +485,7 @@ fn ranked_vias(
     overhang: Overhang,
 ) -> Vec<ViaTech> {
     let lib = &db.library;
-    let mut ranked: Vec<((Dbu, bool, i64), ViaTech)> = Vec::new();
+    let mut ranked: Vec<((Dbu, bool, DbuArea), ViaTech)> = Vec::new();
     for (i, v) in lib.vias.iter().enumerate() {
         if v.cut != cut || v.is_from_def() {
             continue;
@@ -505,7 +505,11 @@ fn ranked_vias(
             Overhang::BothLayers => top_overhang.max(across_overhang(&bottom, &layers[v.bottom()])),
             Overhang::UpperOnly => top_overhang,
         };
-        let key = (reach, !v.is_default(), (bottom.area() + top.area()).get());
+        let key = (
+            reach,
+            !v.is_default(),
+            DbuArea((bottom.area() + top.area()).get()),
+        );
         let cut_size = largest_cut(v.shapes.iter(), cut);
         let spacing = lib.cut_layers[cut].spacing.unwrap_or_default();
         let cuts = v
