@@ -723,6 +723,8 @@ fn newton_raphson<const N: usize>(
 
 /// Crout LU decomposition with partial pivoting; returns the row
 /// permutation.
+// NOTE: OpenSTA's luDecomp and luSolve subtract term by term; PARE sums the
+// products and subtracts once, which can differ in the last bits.
 fn lu_decompose<const N: usize>(a: &mut [[f64; N]; N]) -> Result<[usize; N], DmpError> {
     let mut scale = [0.0; N];
     let mut index = [0usize; N];

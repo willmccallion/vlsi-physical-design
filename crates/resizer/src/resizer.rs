@@ -275,6 +275,11 @@ pub struct Resizer<'a, T: Timing = Untimed> {
     pub(crate) r_strongest_buffer: Ohms,
     journal: Journal,
     dead_nets: Vec<NetId>,
+    /// The multi-output cells design repair resized, as
+    /// `resized_multi_output_insts_`.
+    // NOTE: RepairDesign::repairDesign clears this at each run; a PARE
+    // session runs design repair at most once, before anything else
+    // resizes, so a set the session's length holds the same cells.
     resized_multi_output: HashSet<CellId>,
     /// Drivers whose timing is to be found again at the next flush, while
     /// edits are batched.
@@ -771,6 +776,8 @@ impl<'a, T: Timing> Resizer<'a, T> {
 
     /// Whether an instance may be resized or removed: a plain standard
     /// cell the library does not protect.
+    // NOTE: OpenROAD protects only set_dont_touch instances, which PARE
+    // lacks; PARE honours the library's dont_touch in their stead.
     #[must_use]
     pub(crate) fn is_editable(&self, cell: CellId) -> bool {
         self.link

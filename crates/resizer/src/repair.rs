@@ -271,6 +271,9 @@ impl<'r, 'a, T: Timing> Repairer<'r, 'a, T> {
     /// `RepairDesign::repairNet` for one driver: its own slew repaired by
     /// sizing, then its net buffered where loads, load slews or wire
     /// lengths still break their limits.
+    // NOTE: RepairDesign::repairNet first splits a net over its fanout limit
+    // with region repeaters (findLoadRegions, makeRegionRepeaters); PARE has
+    // not ported them and leaves fanout violations to setup repair.
     fn repair_net(&mut self, driver: PinId, checks: Checks) -> Result<(), RepairError> {
         let tristate = self.resizer.is_tristate_driver(driver);
         let needs = match checks {

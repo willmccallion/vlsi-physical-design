@@ -149,6 +149,10 @@ impl MoveLog {
     }
 
     /// Keeps the pending moves, as `commitMoves`.
+    // NOTE: commitMoves merges the pending cells into the accepted ones,
+    // which leaves those accepted before still pending until the next
+    // journalBegin undoes them; PARE clears them at once, which no read of
+    // has_pending between the two can tell apart.
     pub fn commit(&mut self) {
         for tally in &mut self.tallies.0 {
             tally.committed += tally.pending;
@@ -627,6 +631,8 @@ fn upsize_cell(
             Some((id, c.port(in_name)?, c.port(out_name)?))
         })
         .collect();
+    // NOTE: BaseMove::upsizeCell breaks ties on the output port's
+    // capacitance, by a slip a no-op; PARE breaks them on the input's.
     candidates.sort_by(|&(a, a_in, a_out), &(b, b_in, b_out)| {
         let (ca, cb) = (liberty.cell(a), liberty.cell(b));
         cb.drive_resistance(b_out)
