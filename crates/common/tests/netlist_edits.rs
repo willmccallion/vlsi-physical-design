@@ -206,3 +206,35 @@ fn removal_drops_retired_cells_and_maps_the_survivors() {
     );
     assert_consistent(&db);
 }
+
+#[test]
+fn a_new_master_with_every_pin_keeps_the_connections() {
+    let mut db = tiny_design();
+    let u1 = db.cell_id("u1").unwrap();
+    let nand2 = db.library.macro_id("NAND2").unwrap();
+
+    db.replace_master(u1, nand2).unwrap();
+
+    assert_eq!(db.cells[u1].macro_id, nand2);
+    assert_eq!(net_pins(&db, "in"), vec!["PIN in", "u1/A"]);
+    assert_eq!(net_pins(&db, "n1"), vec!["u1/Y", "u2/A", "u3/A"]);
+    assert_consistent(&db);
+}
+
+#[test]
+fn a_new_master_lacking_a_connected_pin_is_refused_by_its_name() {
+    let mut db = tiny_design();
+    let u3 = db.cell_id("u3").unwrap();
+    let inv = db.library.macro_id("INV").unwrap();
+
+    let refused = db.replace_master(u3, inv);
+
+    assert_eq!(
+        refused,
+        Err(EditError::MissingPin {
+            cell: "u3".into(),
+            master: "INV".into(),
+            pin: "B".into(),
+        })
+    );
+}
