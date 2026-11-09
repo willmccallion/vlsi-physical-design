@@ -493,7 +493,7 @@ mod tests {
     /// The tiny design's six movable cells legalized from one spot, laid
     /// out for improvement as `improve_placement` lays them before its
     /// passes.
-    fn improver() -> Improver {
+    pub(super) fn improver() -> Improver {
         let units = def::read_units(&fixture("tiny.def")).unwrap();
         let library = lef::parse_files(&[fixture("tiny.lef")], units).unwrap();
         let mut db = def::parse(&fixture("tiny.def"), library).unwrap();
