@@ -223,10 +223,10 @@ impl DetailedRouter<'_> {
             }
         }
         let candidate_nets: FxHashSet<NetId> = candidates.iter().map(|c| c.net).collect();
-        let mut present: FxHashSet<NetId> = FxHashSet::default();
+        let mut present: Vec<NetId> = Vec::new();
         let mut note = |owner: crate::occupancy::Owner| {
             if let crate::occupancy::Owner::Net(n) = owner {
-                let _ = present.insert(n);
+                present.push(n);
             }
         };
         for layer in self.tech.routable_layers() {
@@ -240,6 +240,8 @@ impl DetailedRouter<'_> {
                 note(occupant.owner);
             }
         }
+        present.sort_unstable();
+        present.dedup();
         for net in present {
             if !candidate_nets.contains(&net) {
                 layout.add_wiring(self.db, net, &self.elems[net], Some(window));
