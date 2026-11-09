@@ -10,14 +10,14 @@
 // The formulas keep OpenROAD's grouping so they can be checked against it.
 #![allow(clippy::suboptimal_flops)]
 
-use crate::parasitics::{NetParasitics, WireShape};
+use crate::parasitics::{NetParasitics, RcNode, Resistor, WireShape};
 use pare_common::db::design::NetlistDB;
 use pare_common::db::global_route::{NetRoute, RoutePoint};
 use pare_common::db::indices::{CutLayerId, IdVec, LayerId, NetId};
 use pare_common::db::library::Library;
 use pare_common::geom::dbu::{Dbu, DbuPerMicron};
 use pare_common::units::{
-    FARADS_PER_PICOFARAD, FaradsPerMeter, MICRONS_PER_METER, Ohms, OhmsPerMeter,
+    FARADS_PER_PICOFARAD, Farads, FaradsPerMeter, MICRONS_PER_METER, Ohms, OhmsPerMeter,
 };
 use rustc_hash::FxHashMap;
 
@@ -201,7 +201,7 @@ impl NetParasitics {
         for location in &route.pins {
             let pin = network.add_node();
             pin_node.push((location.pin, pin));
-            let above = LayerId::new(location.layer.index() + 1);
+            let above = location.layer.above();
             let (grid, layer, via_res) = if let Some(&node) = network.nodes.get(&RoutePoint {
                 at: location.grid,
                 layer: above,
@@ -229,9 +229,12 @@ impl NetParasitics {
         }
         Self::from_network(
             WireShape::Route(route),
-            network.cap.len(),
             network.resistors,
-            network.cap.iter().map(|&c| f64::from(c)).collect(),
+            network
+                .cap
+                .iter()
+                .map(|&c| Farads::new(f64::from(c)))
+                .collect(),
             pin_node,
         )
     }
@@ -241,18 +244,19 @@ impl NetParasitics {
 /// between them and each node's capacitance.
 #[derive(Default)]
 struct Network {
-    nodes: FxHashMap<RoutePoint, usize>,
-    resistors: Vec<(usize, usize, f64)>,
-    cap: Vec<f32>,
+    nodes: FxHashMap<RoutePoint, RcNode>,
+    resistors: Vec<Resistor>,
+    /// Each node's capacitance in farads, in single precision as `OpenROAD`
+    /// adds it up.
+    cap: IdVec<RcNode, f32>,
 }
 
 impl Network {
-    fn add_node(&mut self) -> usize {
-        self.cap.push(0.0);
-        self.cap.len() - 1
+    fn add_node(&mut self) -> RcNode {
+        self.cap.push(0.0)
     }
 
-    fn node(&mut self, at: RoutePoint) -> usize {
+    fn node(&mut self, at: RoutePoint) -> RcNode {
         if let Some(&node) = self.nodes.get(&at) {
             return node;
         }
@@ -262,9 +266,13 @@ impl Network {
     }
 
     /// A resistor from `a` to `b` with half of `cap` at each end.
-    fn wire(&mut self, a: usize, b: usize, res: f32, cap: f32) {
+    fn wire(&mut self, a: RcNode, b: RcNode, res: f32, cap: f32) {
         self.cap[a] += cap / 2.0;
-        self.resistors.push((a, b, f64::from(res)));
+        self.resistors.push(Resistor {
+            a,
+            b,
+            resistance: Ohms::new(f64::from(res)),
+        });
         self.cap[b] += cap / 2.0;
     }
 }

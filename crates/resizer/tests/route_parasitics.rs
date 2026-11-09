@@ -120,9 +120,15 @@ fn route_segments_become_resistors_with_half_their_capacitance_at_each_end() {
     // The via takes the LEF's 5 ohms; 2 um of M2 takes 4 ohms and 0.2 fF;
     // u1/Y joins through the via and 0.1 um of M2; u2/A sits on the route;
     // u3/A is on the unused M1 piece and stays apart.
-    let resistors = sorted(parasitics.resistors().iter().map(|r| r.2).collect());
+    let resistors = sorted(
+        parasitics
+            .resistors()
+            .iter()
+            .map(|r| r.resistance.get())
+            .collect(),
+    );
     assert!(close(&resistors, &[0.0, 4.0, 5.0, 5.2]), "{resistors:?}");
-    let total: f64 = parasitics.node_caps().iter().sum();
+    let total: f64 = parasitics.node_caps().iter().map(|c| c.get()).sum();
     assert!((total - 2.1e-16).abs() < 1e-6 * 2.1e-16, "{total}");
     let u3 = cell_pin(&db, "u3", "A");
     let (_, u3_node) = parasitics
@@ -135,7 +141,7 @@ fn route_segments_become_resistors_with_half_their_capacitance_at_each_end() {
         parasitics
             .resistors()
             .iter()
-            .all(|&(a, b, _)| a != u3_node && b != u3_node)
+            .all(|r| r.a != u3_node && r.b != u3_node)
     );
 }
 
@@ -153,9 +159,13 @@ fn layers_without_set_values_take_their_lef_resistance_and_capacitance() {
 
     // M1 is 0.1 um wide at 0.38 ohm per square, 7.7161e-5 pF per square
     // micron and 2.7365e-5 pF per micron of edge.
-    let resistors: Vec<f64> = parasitics.resistors().iter().map(|r| r.2).collect();
+    let resistors: Vec<f64> = parasitics
+        .resistors()
+        .iter()
+        .map(|r| r.resistance.get())
+        .collect();
     assert!(close(&resistors, &[3.8]), "{resistors:?}");
-    let total: f64 = parasitics.node_caps().iter().sum();
+    let total: f64 = parasitics.node_caps().iter().map(|c| c.get()).sum();
     let expected = 2.0f64.mul_add(2.7365e-5, 0.1 * 7.7161e-5) * 1e-12;
     assert!((total - expected).abs() < 1e-6 * expected, "{total}");
 }
@@ -191,7 +201,11 @@ fn a_wider_non_default_rule_lowers_the_wire_resistance() {
 
     let parasitics = NetParasitics::from_route(&db, net, route, &rc);
 
-    let resistors: Vec<f64> = parasitics.resistors().iter().map(|r| r.2).collect();
+    let resistors: Vec<f64> = parasitics
+        .resistors()
+        .iter()
+        .map(|r| r.resistance.get())
+        .collect();
     assert!(close(&resistors, &[2.0]), "{resistors:?}");
 }
 

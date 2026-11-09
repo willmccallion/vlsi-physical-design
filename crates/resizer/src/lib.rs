@@ -30,7 +30,7 @@ pub use clock_inverters::{ClockInverterRepair, repair_clock_inverters};
 pub use hold::{HoldOptions, HoldSummary, repair_hold};
 pub use library::{BufferSet, Link, LinkError};
 pub use netlist::{ClockNetwork, Constants, Namer, Netlist, NetlistError};
-pub use parasitics::{NetParasitics, WireRc};
+pub use parasitics::{NetParasitics, RcNode, Resistor, WireRc};
 pub use rebuffer::{Rebuffer, max_wire_length, max_wire_length_of};
 pub use repair::{RepairSummary, Repairer};
 pub use resizer::{
