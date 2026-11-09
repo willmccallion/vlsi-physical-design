@@ -813,7 +813,6 @@ impl Cts<'_> {
     /// Writes every tree into the design, as `TritonCTS::writeDataToDb`.
     fn write(&mut self, db: &mut NetlistDB) -> Result<(), CtsError> {
         for i in 0..self.builders.len() {
-            prune_empty_subnets(&mut self.builders[i].clock);
             self.write_clock_nets(db, i)?;
             if self.setup.settings.ndr != NdrStrategy::None {
                 self.write_ndr(db, i);
@@ -1248,24 +1247,6 @@ const fn root(group: &mut [usize], mut i: usize) -> usize {
         i = group[i];
     }
     i
-}
-
-/// Drops subnets that reach no sink, with the buffers driving them, up the
-/// tree as far as a buffer is left driving nothing, as `writeClockNetsToDb`
-/// and `checkUpstreamConnections` destroy them.
-fn prune_empty_subnets(clock: &mut Clock) {
-    loop {
-        let Some(empty) = clock.subnets.iter().position(|s| s.sinks().is_empty()) else {
-            return;
-        };
-        let driver = clock.subnets[empty].driver();
-        let _ = clock.subnets.remove(empty);
-        for subnet in &mut clock.subnets {
-            if subnet.insts.first() != Some(&driver) {
-                subnet.insts.retain(|&i| i != driver);
-            }
-        }
-    }
 }
 
 /// Adds a non-default rule doubling every routing layer's spacing at its
