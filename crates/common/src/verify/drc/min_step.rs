@@ -13,7 +13,7 @@ use super::rules::Rules;
 use super::{Involves, Marker, Markers, Violation};
 use crate::db::indices::LayerId;
 use crate::db::library::LayerRef;
-use crate::db::rules::MinStep;
+use crate::db::rules::{MinStep, RuleSource};
 use crate::geom::dbu::Dbu;
 use crate::geom::point::Point;
 use crate::geom::rect::Rect;
@@ -115,8 +115,15 @@ impl LayerCheck<'_> {
         {
             return;
         }
+        let violation = match rule.source {
+            RuleSource::Statement => Violation::MinStep,
+            // NOTE: setRoutingLayerProperties skips a LEF58_MINSTEP with
+            // MAXEDGES above 1 (io.cpp:1587) and checkMetalShape_lef58MinStep
+            // never acts on the rest; PARE checks it, reported as advisory.
+            RuleSource::Property => Violation::Lef58MinStep,
+        };
         let marker = Marker::new(
-            Violation::MinStep,
+            violation,
             0,
             LayerRef::Routing(self.layer),
             run.bbox,

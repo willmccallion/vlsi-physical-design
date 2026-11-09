@@ -9,7 +9,8 @@ use crate::db::rules::{
     CellEdge, CellEdgeSpacing, CellSide, ConvexCornerSpacing, CutApproach, CutSpacing,
     CutSpacingCondition, EdgeType, Enclosure, EndOfLineSpacing, Lef58CutSpacing,
     Lef58CutSpacingCondition, MinEnclosedArea, MinStep, MinimumCut, ParallelEdge,
-    ParallelRunLengthTable, SpacingTable, TwoWidthsRow, TwoWidthsTable, WidthRangeSpacing,
+    ParallelRunLengthTable, RuleSource, SpacingTable, TwoWidthsRow, TwoWidthsTable,
+    WidthRangeSpacing,
 };
 use crate::geom::dbu::{Dbu, DbuArea, DbuPerMicron};
 
@@ -247,8 +248,8 @@ impl<'l, 'a> RuleReader<'l, 'a> {
         })
     }
 
-    /// `MINSTEP l [MAXEDGES n] ;`
-    pub(crate) fn min_step(&mut self) -> Result<MinStep, ParseError> {
+    /// `MINSTEP l [MAXEDGES n] ;`, stated as `source`.
+    pub(crate) fn min_step(&mut self, source: RuleSource) -> Result<MinStep, ParseError> {
         let length = self.microns("minimum step")?;
         let max_edges = if self.lx.accept("MAXEDGES") {
             Some(self.count("maximum edges")?)
@@ -256,7 +257,11 @@ impl<'l, 'a> RuleReader<'l, 'a> {
             None
         };
         self.end("MINSTEP")?;
-        Ok(MinStep { length, max_edges })
+        Ok(MinStep {
+            length,
+            max_edges,
+            source,
+        })
     }
 
     /// `MINENCLOSEDAREA a [WIDTH w] ;`

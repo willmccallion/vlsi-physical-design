@@ -14,8 +14,8 @@ use crate::db::library::{
 use crate::db::parser::lef_rules::{RoutingSpacing, RuleReader};
 use crate::db::parser::lexer::{Lexer, ParseError, Token, read_file};
 use crate::db::rules::{
-    CellEdge, ClearanceMeasure, CutLayerRules, MaxViaStack, RoutingLayerRules, SameNetSpacing,
-    SpacingTable, ViaRule, ViaRuleMetal,
+    CellEdge, ClearanceMeasure, CutLayerRules, MaxViaStack, RoutingLayerRules, RuleSource,
+    SameNetSpacing, SpacingTable, ViaRule, ViaRuleMetal,
 };
 use crate::geom::dbu::{Dbu, DbuPerMicron};
 use crate::geom::point::Point;
@@ -412,7 +412,11 @@ impl<'a> LefParser<'a, '_> {
             "MINENCLOSEDAREA" => routing
                 .min_enclosed_areas
                 .push(self.rules().min_enclosed_area()?),
-            "MINSTEP" => routing.min_steps.push(self.rules().min_step()?),
+            // NOTE: lefinReader::layer reads only a layer's first MINSTEP
+            // (minstep(0)); PARE keeps and checks every statement.
+            "MINSTEP" => routing
+                .min_steps
+                .push(self.rules().min_step(RuleSource::Statement)?),
             "MINIMUMCUT" => routing.minimum_cuts.push(self.rules().minimum_cut()?),
             "RESISTANCE" => {
                 if self.lx.accept("RPERSQ") {
@@ -501,7 +505,9 @@ impl<'a> LefParser<'a, '_> {
                 }
                 (LayerKind::Routing, "LEF57_MINSTEP" | "LEF58_MINSTEP") => {
                     while rules.next_keyword("MINSTEP")?.is_some() {
-                        routing.min_steps.push(rules.min_step()?);
+                        routing
+                            .min_steps
+                            .push(rules.min_step(RuleSource::Property)?);
                     }
                 }
                 (LayerKind::Routing, "LEF58_CORNERSPACING") => {

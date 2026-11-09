@@ -3,7 +3,7 @@ use crate::db::indices::{CellId, CutLayerId, LayerId, NetId, NonDefaultRuleId};
 use crate::db::rules::{
     CutApproach, CutSpacing, CutSpacingCondition, EndOfLineSpacing, Lef58CutSpacing,
     Lef58CutSpacingCondition, MinStep, MinimumCut, ParallelEdge, ParallelRunLengthTable,
-    SpacingTable, WidthRangeSpacing,
+    RuleSource, SpacingTable, WidthRangeSpacing,
 };
 use crate::geom::dbu::DbuArea;
 use crate::geom::point::Point;
@@ -1094,14 +1094,55 @@ fn two_edges_need_a_neighbour_beside_both_ends() {
     );
 }
 
-/// The rules of [`rules`] with a minimum step rule on the first metal layer.
+/// The rules of [`rules`] with a minimum step rule on the first metal layer,
+/// given as a LEF57/LEF58 property.
 fn rules_with_min_step(length: i64, max_edges: Option<u32>) -> Rules {
+    rules_with_min_step_from(RuleSource::Property, length, max_edges)
+}
+
+fn rules_with_min_step_from(source: RuleSource, length: i64, max_edges: Option<u32>) -> Rules {
     let mut rules = rules(Vec::new());
     rules.metal[LayerId(0)].min_steps = vec![MinStep {
         length: Dbu(length),
         max_edges,
+        source,
     }];
     rules
+}
+
+#[test]
+fn a_min_step_statement_rule_is_counted_not_advisory() {
+    let mut f = Fixture::new();
+    let a = f.a;
+    f.route(M1, a, rect(0, 0, 300, 100));
+    f.route(M1, a, rect(100, 100, 150, 150));
+
+    let report = f.check(&rules_with_min_step_from(
+        RuleSource::Statement,
+        60,
+        Some(1),
+    ));
+
+    assert!(kinds(&report.violations).contains(&Violation::MinStep));
+    assert_eq!(report.advisory, []);
+}
+
+#[test]
+fn every_min_step_statement_of_a_layer_is_checked() {
+    let mut f = Fixture::new();
+    let a = f.a;
+    f.route(M1, a, rect(0, 0, 300, 100));
+    f.route(M1, a, rect(0, 100, 250, 200));
+    let mut rules = rules_with_min_step_from(RuleSource::Statement, 10, None);
+    rules.metal[LayerId(0)].min_steps.push(MinStep {
+        length: Dbu(60),
+        max_edges: None,
+        source: RuleSource::Statement,
+    });
+
+    let report = f.check(&rules);
+
+    assert_eq!(kinds(&report.violations), [Violation::MinStep]);
 }
 
 #[test]
@@ -1113,9 +1154,9 @@ fn more_short_edges_in_a_row_than_max_edges_allows_is_a_min_step() {
 
     let report = f.check(&rules_with_min_step(60, Some(1)));
 
-    assert_eq!(kinds(&report.advisory), [Violation::MinStep]);
+    assert_eq!(kinds(&report.advisory), [Violation::Lef58MinStep]);
     assert_eq!(report.advisory[0].bbox, rect(100, 100, 150, 150));
-    assert!(!kinds(&report.violations).contains(&Violation::MinStep));
+    assert!(!kinds(&report.violations).contains(&Violation::Lef58MinStep));
 }
 
 #[test]
@@ -1137,7 +1178,7 @@ fn any_short_edge_breaks_a_min_step_rule_without_max_edges() {
 
     let report = f.check(&rules_with_min_step(60, None));
 
-    assert_eq!(kinds(&report.advisory), [Violation::MinStep]);
+    assert_eq!(kinds(&report.advisory), [Violation::Lef58MinStep]);
     assert_eq!(report.advisory[0].bbox, rect(250, 100, 300, 100));
 }
 
@@ -1163,7 +1204,7 @@ fn a_loop_with_a_single_long_edge_is_not_checked_for_steps() {
     assert_eq!(f.check(&rules_with_min_step(260, None)).advisory, []);
     assert_eq!(
         kinds(&f.check(&rules_with_min_step(60, None)).advisory),
-        [Violation::MinStep, Violation::MinStep]
+        [Violation::Lef58MinStep, Violation::Lef58MinStep]
     );
 }
 
@@ -1181,6 +1222,7 @@ fn scattered_scene() -> (Layout, Rules) {
     rules.metal[LayerId(0)].min_steps = vec![MinStep {
         length: Dbu(60),
         max_edges: Some(1),
+        source: RuleSource::Property,
     }];
     let mut f = Fixture::new();
     let (a, b) = (f.a, f.b);

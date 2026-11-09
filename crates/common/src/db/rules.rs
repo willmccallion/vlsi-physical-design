@@ -161,6 +161,17 @@ pub struct MinStep {
     pub length: Dbu,
     /// How many consecutive short edges are allowed, if limited.
     pub max_edges: Option<u32>,
+    /// How the LEF states it, which decides whether `OpenROAD` checks it.
+    pub source: RuleSource,
+}
+
+/// How LEF states a rule.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum RuleSource {
+    /// In a statement of its own.
+    Statement,
+    /// In a `LEF57_` or `LEF58_` property string.
+    Property,
 }
 
 /// A minimum area of metal enclosed by a ring (LEF `MINENCLOSEDAREA`).
