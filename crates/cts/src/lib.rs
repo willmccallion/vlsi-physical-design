@@ -8,6 +8,8 @@ use pare_common::db::library::DuplicateName;
 mod buffers;
 mod capacitance;
 mod clock;
+#[cfg(test)]
+mod fixtures;
 mod htree;
 mod kmeans;
 mod latency;

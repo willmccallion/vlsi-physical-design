@@ -464,6 +464,71 @@ fn each_load_of_a_clock_inverter_gets_its_own_copy() {
     }
 }
 
+/// `text`, a generated design, with the block `ram` placed at the far
+/// corner and each of `connections`, a `(net, pin)` pair, made.
+fn with_ram(text: &str, connections: &[(&str, &str)]) -> String {
+    let components = text
+        .lines()
+        .find_map(|l| {
+            l.strip_prefix("COMPONENTS ")?
+                .strip_suffix(" ;")?
+                .parse::<usize>()
+                .ok()
+        })
+        .unwrap();
+    let mut text = text
+        .replace(
+            &format!("COMPONENTS {components} ;"),
+            &format!("COMPONENTS {} ;", components + 1),
+        )
+        .replace(
+            "END COMPONENTS",
+            "- ram RAM + PLACED ( 340000 340000 ) N ;\nEND COMPONENTS",
+        );
+    for (net, pin) in connections {
+        let start = format!("- {net} (");
+        let at = text.find(&start).unwrap() + start.len() - 1;
+        text.insert_str(at, &format!("( ram {pin} ) "));
+    }
+    text
+}
+
+/// The generated design `text` over the fixture cells and the block `RAM`.
+fn load_with_ram(text: &str) -> (NetlistDB, Liberty, Sdc) {
+    let units = DbuPerMicron::new(2000).unwrap();
+    let library = lef::parse_files(&[fixture("clock.lef"), fixture("block.lef")], units).unwrap();
+    let db = def::parse_str(text, Path::new("ram.def"), library).unwrap();
+    let lib = liberty::parse_file(&fixture("clock.lib")).unwrap();
+    let constraints = sdc::parse_str(CLOCK, Path::new("ram.sdc"), &db, &lib).unwrap();
+    (db, lib, constraints)
+}
+
+/// What synthesizing the trees of `db` did, with no wire length limit.
+fn synthesized_summary(mut db: NetlistDB, lib: &Liberty, constraints: &Sdc) -> CtsSummary {
+    let link = Link::new(&db, lib, &[]).unwrap();
+    let clocks = clock_network(&db, &link, constraints);
+    let input = CtsInput {
+        link: &link,
+        sdc: constraints,
+        clocks: &clocks,
+        signal_rc: wire(&db, "metal2", 3.5, 0.1),
+        clock_rc: wire(&db, "metal3", 1.5, 0.11),
+        max_wire_length: None,
+        options: CtsOptions::default(),
+    };
+    synthesize(&mut db, &input).unwrap().summary
+}
+
+#[test]
+fn a_clock_driving_a_block_and_registers_gets_a_tree_for_each() {
+    let text = with_ram(&design(4, 4, false), &[("clk", "CLK")]);
+    let (db, lib, constraints) = load_with_ram(&text);
+
+    let summary = synthesized_summary(db, &lib, &constraints);
+
+    assert_eq!((summary.trees, summary.sinks), (2, 17));
+}
+
 /// Checks `actual` against the golden file `name` of this crate.
 fn assert_golden(name: &str, actual: &str) {
     testing::assert_golden(

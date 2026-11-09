@@ -1332,6 +1332,8 @@ fn net_spacing(layer: &pare_common::db::library::RoutingLayer, width: Dbu) -> Db
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::fixtures;
+    use pare_common::db::rules::WidthRangeSpacing;
 
     /// A tree rooted at node 0 over nodes at `xs` along the x axis.
     fn tree(xs: &[i64], parent: &[Option<usize>]) -> SteinerTree {
@@ -1382,5 +1384,78 @@ mod tests {
         let clusters = long_edge_clusters(&tree, Some(Dbu(100)));
 
         assert_eq!(clusters, vec![vec![], vec![2, 3, 4, 1, 0]]);
+    }
+
+    #[test]
+    fn blocks_closer_than_a_buffer_merge_into_one_blockage() {
+        let db = fixtures::design(
+            "COMPONENTS 3 ;\n\
+             - a RAM + PLACED ( 0 0 ) N ;\n\
+             - b RAM + PLACED ( 40100 0 ) N ;\n\
+             - c RAM + PLACED ( 200000 200000 ) N ;\n\
+             END COMPONENTS\n",
+        );
+
+        let (blockages, diameter) = merge_blockages(&db, Point::new(Dbu(100), Dbu(100)));
+
+        let corners =
+            |x0, y0, x1, y1| Rect::new(Point::new(Dbu(x0), Dbu(y0)), Point::new(Dbu(x1), Dbu(y1)));
+        assert_eq!(
+            blockages,
+            [
+                corners(0, 0, 80_100, 40_000),
+                corners(200_000, 200_000, 240_000, 240_000)
+            ]
+        );
+        assert!((diameter - 40.0).abs() < 1e-12, "{diameter}");
+    }
+
+    #[test]
+    fn without_blocks_macro_clusters_get_no_diameter() {
+        let db = fixtures::design("");
+
+        let (blockages, diameter) = merge_blockages(&db, Point::new(Dbu(100), Dbu(100)));
+
+        assert!(blockages.is_empty());
+        assert!(diameter.abs() < 1e-12, "{diameter}");
+    }
+
+    fn metal1() -> pare_common::db::library::RoutingLayer {
+        let db = fixtures::design("");
+        db.library.routing_layers.iter().next().unwrap().clone()
+    }
+
+    #[test]
+    fn a_layers_net_spacing_is_its_min_spacing_without_other_rules() {
+        let layer = metal1();
+
+        assert_eq!(net_spacing(&layer, layer.width), Dbu(130));
+    }
+
+    #[test]
+    fn a_width_range_rule_covering_the_width_sets_the_net_spacing() {
+        let mut layer = metal1();
+        layer.rules.width_range_spacing = vec![
+            WidthRangeSpacing {
+                spacing: Dbu(300),
+                min_width: Dbu(500),
+                max_width: Dbu(1000),
+            },
+            WidthRangeSpacing {
+                spacing: Dbu(200),
+                min_width: Dbu(0),
+                max_width: Dbu(1000),
+            },
+        ];
+
+        assert_eq!(net_spacing(&layer, layer.width), Dbu(200));
+    }
+
+    #[test]
+    fn without_any_spacing_the_net_spacing_is_the_gap_between_tracks() {
+        let mut layer = metal1();
+        layer.min_spacing = Dbu::ZERO;
+
+        assert_eq!(net_spacing(&layer, layer.width), Dbu(140));
     }
 }

@@ -1573,8 +1573,10 @@ fn beside_branch(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::clock::ClockSink;
     use crate::options::CtsOptions;
-    use pare_common::db::indices::NetId;
+    use crate::techchar::WireSegment;
+    use pare_common::db::indices::{NetId, PinId};
     use pare_common::db::liberty::{LibCellId, LibPortId};
 
     fn rect(x0: i64, y0: i64, x1: i64, y1: i64) -> Rect<Dbu> {
@@ -1694,5 +1696,302 @@ mod tests {
             builder.legalize_in_blockages(&scene.ctx(), TreePoint::new(45.0, 50.0), buffer());
 
         assert!(legal.same(TreePoint::new(45.0, 60.0)), "{legal:?}");
+    }
+
+    /// A segment `length` units long with `delay`, entering and leaving at
+    /// slew and load 1, with a buffer at each share of `buffers`, the
+    /// first `wl_to_first_buffer` units in.
+    fn segment(length: u8, delay: u32, buffers: &[f64], wl_to_first_buffer: i32) -> WireSegment {
+        WireSegment {
+            length,
+            load: 1,
+            output_slew: 1,
+            delay,
+            input_cap: 1,
+            input_slew: 1,
+            buffer_locations: buffers.to_vec(),
+            buffer_masters: buffers.iter().map(|_| buffer()).collect(),
+            wl_to_first_buffer,
+            last_wl: 0,
+        }
+    }
+
+    /// A search for a segment `length` long from slew and load 1 with no
+    /// wire since the last buffer, under `wirelength_threshold`.
+    const fn query(length: u32, wirelength_threshold: i32) -> SegmentQuery {
+        SegmentQuery {
+            length,
+            input_slew: 1,
+            input_cap: 1,
+            slew_threshold: MAX_SLEW,
+            wirelength_threshold,
+        }
+    }
+
+    const NO_CHOICE: SegmentChoice = SegmentChoice {
+        slew: 0,
+        cap: 0,
+        curr_wl: 0,
+    };
+
+    /// The segment `search` finds in `tech`, starting from no wire since
+    /// the last buffer.
+    fn choose(tech: &TechChar, search: &SegmentQuery) -> Option<usize> {
+        let mut out = NO_CHOICE;
+        min_delay_segment(tech, search, 1, &mut out)
+    }
+
+    #[test]
+    fn the_fastest_segment_within_the_tolerance_of_the_input_is_chosen() {
+        let tech = TechChar::from_segments(
+            vec![
+                segment(2, 5, &[], 2),
+                segment(2, 3, &[], 2),
+                WireSegment {
+                    input_cap: 5,
+                    ..segment(2, 1, &[], 2)
+                },
+            ],
+            1,
+            2,
+        );
+
+        let chosen = choose(&tech, &query(2, 100));
+
+        assert_eq!(chosen, Some(1));
+    }
+
+    #[test]
+    fn a_search_finding_nothing_widens_its_tolerance() {
+        let tech = TechChar::from_segments(
+            vec![WireSegment {
+                input_cap: 3,
+                ..segment(2, 1, &[], 2)
+            }],
+            1,
+            2,
+        );
+
+        let chosen = choose(&tech, &query(2, 100));
+
+        assert_eq!(chosen, Some(0));
+    }
+
+    #[test]
+    fn once_the_slew_reaches_its_threshold_a_buffered_segment_beats_a_faster_bare_one() {
+        let at_threshold = |s: WireSegment| WireSegment { input_slew: 4, ..s };
+        let tech = TechChar::from_segments(
+            vec![
+                at_threshold(segment(2, 1, &[], 2)),
+                at_threshold(segment(2, 5, &[0.5], 1)),
+            ],
+            1,
+            2,
+        );
+        let search = SegmentQuery {
+            input_slew: 4,
+            ..query(2, 100)
+        };
+
+        let chosen = choose(&tech, &search);
+
+        assert_eq!(chosen, Some(1));
+    }
+
+    #[test]
+    fn a_bare_segment_raises_the_slew_and_adds_its_wire_to_the_unbuffered_run() {
+        let tech = TechChar::from_segments(
+            vec![WireSegment {
+                last_wl: 2,
+                ..segment(2, 1, &[], 2)
+            }],
+            1,
+            2,
+        );
+        let mut out = SegmentChoice {
+            curr_wl: 3,
+            ..NO_CHOICE
+        };
+
+        let _ = min_delay_segment(&tech, &query(2, 100), 1, &mut out);
+
+        assert_eq!((out.slew, out.curr_wl), (2, 5));
+    }
+
+    #[test]
+    fn a_buffered_segment_whose_first_buffer_is_past_the_wire_limit_is_passed_over() {
+        let tech = TechChar::from_segments(
+            vec![segment(2, 1, &[0.5], 6), segment(2, 5, &[0.5], 1)],
+            1,
+            2,
+        );
+
+        let chosen = choose(&tech, &query(2, 5));
+
+        assert_eq!(chosen, Some(1));
+    }
+
+    #[test]
+    fn a_levels_segments_add_up_to_its_branch_length() {
+        let scene = Scene::new(Vec::new());
+        let tech =
+            TechChar::from_segments(vec![segment(2, 1, &[], 2), segment(1, 1, &[], 1)], 1, 2);
+        let mut tree = builder();
+        tree.min_input_cap = 1;
+        tree.min_length_sink_region = 2;
+        tree.top_level_sinks_clustered = vec![(10.0, 50.0), (90.0, 50.0)];
+
+        tree.level_topology(&scene.ctx(), &tech, 1, 10.0, 10.0);
+
+        let lengths: Vec<u8> = tree.topologies[0]
+            .wire_segments
+            .iter()
+            .map(|&k| tech.segment(k).length)
+            .collect();
+        assert_eq!(lengths, [2, 2, 1]);
+    }
+
+    /// Where `SegmentBuilder` puts the buffers of `segments`, laid end to
+    /// end along the branch from `root` to `target`, in a tree whose unit
+    /// is one database unit.
+    fn buffers_along(
+        root: TreePoint,
+        target: TreePoint,
+        segments: Vec<WireSegment>,
+    ) -> Vec<Point<Dbu>> {
+        let scene = Scene::new(Vec::new()).with_buffer_size(1, 1);
+        let wires: Vec<usize> = (0..segments.len()).collect();
+        let tech = TechChar::from_segments(segments, 1, 2);
+        let mut tree = builder();
+        let driving = tree.clock.add_subnet("root");
+        let mut branch = SegmentBuilder {
+            inst_prefix: "b_".into(),
+            net_prefix: "n_".into(),
+            root,
+            target,
+            driving,
+            levels: 0,
+        };
+
+        branch.build(&mut tree, &scene.ctx(), &tech, &wires);
+
+        tree.clock.buffers.iter().map(|b| b.location).collect()
+    }
+
+    fn at(x: i64, y: i64) -> Point<Dbu> {
+        Point::new(Dbu(x), Dbu(y))
+    }
+
+    #[test]
+    fn a_buffer_halfway_along_a_straight_branch_sits_at_its_middle() {
+        let placed = buffers_along(
+            TreePoint::new(0.0, 50.0),
+            TreePoint::new(10.0, 50.0),
+            vec![segment(10, 1, &[0.5], 5)],
+        );
+
+        assert_eq!(placed, [at(5, 50)]);
+    }
+
+    #[test]
+    fn a_buffer_past_the_branchs_horizontal_run_turns_toward_its_target() {
+        let placed = buffers_along(
+            TreePoint::new(0.0, 0.0),
+            TreePoint::new(4.0, 10.0),
+            vec![segment(14, 1, &[0.5], 7)],
+        );
+
+        assert_eq!(placed, [at(4, 3)]);
+    }
+
+    #[test]
+    fn every_sink_hangs_off_one_leaf_net_driven_by_a_buffer() {
+        let scene = Scene::new(Vec::new()).with_buffer_size(1, 1);
+        let mut tech =
+            TechChar::from_segments(vec![segment(2, 1, &[0.5], 1), segment(1, 1, &[], 1)], 1, 2);
+        let mut clock = Clock::new(NetId::new(0), "clk", "clk");
+        for (i, (x, y)) in [(10, 10), (90, 10), (10, 90), (90, 90)]
+            .into_iter()
+            .enumerate()
+        {
+            clock.add_sink(ClockSink {
+                name: format!("ff{i}/CK"),
+                location: at(x, y),
+                pin: PinId::new(i),
+                input_cap: Farads32::ZERO,
+                insertion_delay: Seconds::ZERO,
+            });
+        }
+        let mut tree = Builder::new(clock, None);
+
+        tree.run(&scene.ctx(), &mut tech);
+
+        let mut reached = Vec::new();
+        for subnet in tree.clock.subnets.iter().filter(|s| s.leaf) {
+            assert!(matches!(subnet.driver(), InstRef::Buffer(_)), "{subnet:?}");
+            for &sink in subnet.sinks() {
+                if let InstRef::Sink(i) = sink {
+                    reached.push(i);
+                }
+            }
+        }
+        reached.sort_unstable();
+        assert_eq!(reached, [0, 1, 2, 3]);
+    }
+
+    #[test]
+    fn a_blockages_legal_locations_are_its_corners_and_where_the_branch_axes_cross_it() {
+        let blockage = TreeBox {
+            low: TreePoint::new(40.0, 40.0),
+            high: TreePoint::new(60.0, 60.0),
+        };
+
+        let found = Builder::legal_locations(
+            TreePoint::new(0.0, 50.0),
+            TreePoint::new(50.0, 50.0),
+            blockage,
+        );
+
+        let found: Vec<(f64, f64)> = found.iter().map(|p| (p.x, p.y)).collect();
+        assert_eq!(
+            found,
+            [
+                (40.0, 40.0),
+                (40.0, 60.0),
+                (60.0, 60.0),
+                (60.0, 40.0),
+                (50.0, 40.0),
+                (50.0, 60.0),
+                (40.0, 50.0),
+                (60.0, 50.0),
+                (40.0, 50.0),
+                (60.0, 50.0),
+            ]
+        );
+    }
+
+    #[test]
+    fn a_point_moved_along_a_blockage_keeps_its_distance_and_nears_the_sinks() {
+        let scene = Scene::new(vec![rect(40, 20, 70, 60)]);
+        let blockage = TreeBox {
+            low: TreePoint::new(40.0, 20.0),
+            high: TreePoint::new(70.0, 60.0),
+        };
+        let ctx = scene.ctx();
+        let sinks = [TreePoint::new(66.0, 18.0)];
+        let search = LegalSearch {
+            ctx: &ctx,
+            target: 30.0,
+            parent: TreePoint::new(50.0, 0.0),
+            sinks: &sinks,
+            direction: Direction::North,
+        };
+
+        let moved = builder().adjust_along_blockage(&search, TreePoint::new(45.0, 20.0), blockage);
+
+        assert!(
+            moved.is_some_and(|p| p.same(TreePoint::new(60.0, 20.0))),
+            "{moved:?}"
+        );
     }
 }
