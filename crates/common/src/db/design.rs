@@ -166,6 +166,11 @@ pub struct Row {
 }
 
 impl Row {
+    /// Whether the row holds any site.
+    pub const fn has_sites(&self) -> bool {
+        self.num_x > 0 && self.num_y > 0
+    }
+
     /// The area the row's sites cover.
     pub fn bbox(&self, library: &Library) -> Rect<Dbu> {
         let site = self.orient.oriented_size(library.site(self.site).size);
@@ -999,8 +1004,11 @@ impl NetlistDB {
     /// The core area as `OpenDB` reads it from a DEF: the box around the
     /// rows not made of pad sites, or the die area without such rows.
     pub fn core_area(&self) -> Rect<Dbu> {
+        // NOTE: dbRow::getBBox gives a row without sites Rect(0, 0, 0, 0),
+        // which computeCoreArea merges in all the same; PARE leaves it out.
         self.rows
             .iter()
+            .filter(|row| row.has_sites())
             .filter(|row| self.library.site(row.site).class != SiteClass::Pad)
             .map(|row| row.bbox(&self.library))
             .reduce(|a, b| a.union(&b))
