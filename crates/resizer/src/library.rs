@@ -6,6 +6,7 @@ use pare_common::db::design::{NetlistDB, PinOwner};
 use pare_common::db::indices::{CellId, IdVec, MacroId, MacroPinId, PinId, SiteId};
 use pare_common::db::liberty::{BufferCell, LibCell, LibCellId, LibPortId, Liberty};
 use pare_common::db::library::{CoreKind, MacroClass, PinDirection, SignalUse};
+use pare_common::geom::dbu::DbuArea;
 use pare_common::units::{Farads, Ohms, Watts};
 use std::collections::HashMap;
 
@@ -54,7 +55,7 @@ pub struct Link<'a> {
     dont_use: IdVec<LibCellId, bool>,
     class_of: IdVec<LibCellId, Option<usize>>,
     classes: Vec<Vec<LibCellId>>,
-    master_area: IdVec<LibCellId, Option<i64>>,
+    master_area: IdVec<LibCellId, Option<DbuArea>>,
 }
 
 /// How much one sizing step may grow a cell, as `set_opt_config`'s
@@ -69,8 +70,8 @@ pub(crate) struct SizingLimits {
 /// A cell's measures the sizing limits compare.
 #[derive(Clone, Copy, Debug, PartialEq)]
 struct CellMeasures {
-    /// Its master's area, in square database units.
-    area: Option<i64>,
+    /// Its master's area.
+    area: Option<DbuArea>,
     /// The power it leaks while idle, where the library gives it.
     leakage: Option<Watts>,
 }
@@ -92,7 +93,9 @@ impl SizingLimits {
     /// as `Resizer::getSwappableCells` filters; a missing measure passes.
     fn allows(self, from: CellMeasures, to: CellMeasures) -> bool {
         let area_ok = match (self.area, from.area, to.area) {
-            (Some(limit), Some(from), Some(to)) if from != 0 => to as f64 / from as f64 <= limit,
+            (Some(limit), Some(from), Some(to)) if from.get() != 0 => {
+                to.get() as f64 / from.get() as f64 <= limit
+            }
             _ => true,
         };
         let leakage_ok = match (self.leakage, from.leakage, to.leakage) {
@@ -146,7 +149,7 @@ impl<'a> Link<'a> {
             .map(|m| {
                 m.map(|m| {
                     let size = db.library.macros[m].size;
-                    size.x.get() * size.y.get()
+                    size.x * size.y
                 })
             })
             .collect();
@@ -680,7 +683,7 @@ mod tests {
 
     fn measures(area: i64, leakage_nw: f64) -> CellMeasures {
         CellMeasures {
-            area: Some(area),
+            area: Some(DbuArea(area)),
             leakage: Some(Watts::new(leakage_nw * 1e-9)),
         }
     }
