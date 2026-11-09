@@ -1053,8 +1053,7 @@ impl DetailedRouter<'_> {
         let mut tree: Vec<Node> = first.clone();
         let mut remaining: Vec<&Vec<Node>> = rest.iter().collect();
         let mut edges = Vec::new();
-        while !remaining.is_empty() {
-            let next = nearest_group(search, &tree, &remaining);
+        while let Some(next) = nearest_group(search, &tree, &remaining) {
             let group = remaining.swap_remove(next);
             let sources: Vec<(Node, f64)> = tree.iter().map(|&n| (n, 0.0)).collect();
             let targets: FxHashMap<Node, (usize, f64)> =
@@ -1151,8 +1150,9 @@ struct Score {
     violations: usize,
 }
 
-/// Index of the group in `groups` closest to any node of `tree`.
-fn nearest_group(search: &Search<'_>, tree: &[Node], groups: &[&Vec<Node>]) -> usize {
+/// Index of the group in `groups` closest to any node of `tree`, groups
+/// without nodes last; none when there are no groups.
+fn nearest_group(search: &Search<'_>, tree: &[Node], groups: &[&Vec<Node>]) -> Option<usize> {
     let point = |n: Node| search.tech.layer(n.layer).point(n.track, n.cross);
     let distance = |g: &Vec<Node>| {
         g.iter()
@@ -1163,11 +1163,11 @@ fn nearest_group(search: &Search<'_>, tree: &[Node], groups: &[&Vec<Node>]) -> u
                 })
             })
             .min()
-            .unwrap_or(i64::MAX)
     };
-    (0..groups.len())
-        .min_by_key(|&i| (distance(groups[i]), i))
-        .unwrap_or(0)
+    (0..groups.len()).min_by_key(|&i| {
+        let distance = distance(groups[i]);
+        (distance.is_none(), distance, i)
+    })
 }
 
 /// Whether `p` is in `r`, counting its lower and left edges but not its
