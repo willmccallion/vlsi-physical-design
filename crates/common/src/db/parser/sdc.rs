@@ -185,7 +185,7 @@ impl Interpreter<'_> {
     fn eval_script(&mut self, script: &str, first_line: usize) -> Result<String, ParseError> {
         let mut result = String::new();
         for (text, line) in split_commands(script, first_line) {
-            let words = split_words(&text, line).map_err(|m| self.error(line, m))?;
+            let words = split_words(&text).map_err(|m| self.error(line, m))?;
             if words.is_empty() {
                 continue;
             }
@@ -1263,10 +1263,15 @@ fn parse_args(args: &[String], options: &Options) -> Result<Args, String> {
     Ok(parsed)
 }
 
-/// The scale of a unit like `ps` or `1ns` with the given base suffix.
+/// The scale of a unit like `ps` or `1ns` with the given base suffix,
+/// matched in any case as `check_unit` does; the prefix keeps its case, so
+/// `M` is mega and `m` milli.
 fn unit_scale(text: &str, suffix: &str) -> Option<f64> {
-    let lower = text.to_ascii_lowercase();
-    let body = lower.strip_suffix(suffix)?;
+    let split = text.len().checked_sub(suffix.len())?;
+    if !text.get(split..)?.eq_ignore_ascii_case(suffix) {
+        return None;
+    }
+    let body = &text[..split];
     let (multiplier, prefix) = match body.chars().last() {
         Some(c) if c.is_ascii_alphabetic() => (&body[..body.len() - 1], Some(c)),
         _ => (body, None),
@@ -1410,7 +1415,7 @@ fn split_commands(script: &str, first_line: usize) -> Vec<(String, usize)> {
 }
 
 /// The words of one command.
-fn split_words(text: &str, _line: usize) -> Result<Vec<Word>, String> {
+fn split_words(text: &str) -> Result<Vec<Word>, String> {
     let chars: Vec<char> = text.chars().collect();
     let mut words = Vec::new();
     let mut i = 0;
@@ -2078,5 +2083,14 @@ set_output_delay [expr $clk_period * $clk_io_pct] -clock $clk_name [all_outputs]
         );
 
         assert_eq!(sdc.input_delays.len(), 1);
+    }
+
+    #[test]
+    fn unit_prefixes_keep_their_case_and_suffixes_do_not() {
+        assert_eq!(unit_scale("1Ms", "s"), Some(1e6));
+        assert_eq!(unit_scale("1ms", "s"), Some(1e-3));
+        assert_eq!(unit_scale("ps", "s"), Some(1e-12));
+        assert_eq!(unit_scale("fF", "f"), Some(1e-15));
+        assert_eq!(unit_scale("NS", "s"), None);
     }
 }
