@@ -443,3 +443,150 @@ impl Improver {
         self.grid.nodes[n].orient = to;
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::legalize::opendp::detailed_placement;
+    use pare_common::db::design::PlacementStatus;
+    use pare_common::db::parser::{def, lef};
+    use pare_common::geom::dbu::Dbu;
+    use pare_common::geom::point::Point;
+    use std::path::{Path, PathBuf};
+
+    fn fixture(name: &str) -> PathBuf {
+        Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../common/tests/fixtures")
+            .join(name)
+    }
+
+    /// The tiny design's six movable cells legalized from one spot, laid
+    /// out for improvement as `improve_placement` lays them before its
+    /// passes.
+    fn improver() -> Improver {
+        let units = def::read_units(&fixture("tiny.def")).unwrap();
+        let library = lef::parse_files(&[fixture("tiny.lef")], units).unwrap();
+        let mut db = def::parse(&fixture("tiny.def"), library).unwrap();
+        for name in ["u1", "u2", "u4", "u5", "u6", "u7"] {
+            let id = db.cell_id(name).unwrap();
+            let cell = &mut db.cells[id];
+            cell.location = Point::new(Dbu(1000), Dbu(1000));
+            cell.status = PlacementStatus::Placed;
+        }
+        let _ = detailed_placement(&mut db).unwrap();
+        let mut improver = Improver::new(&db, (5, 1)).unwrap();
+        shift::legalize(&mut improver).unwrap();
+        improver.grid.paint_fixed_cells();
+        improver
+    }
+
+    /// Where every movable cell stands and faces, and the cells of each
+    /// segment.
+    #[derive(Debug, PartialEq, Eq)]
+    struct Layout {
+        cells: Vec<(i64, i64, Orientation)>,
+        segments: Vec<Vec<NodeId>>,
+    }
+
+    fn layout(imp: &Improver) -> Layout {
+        Layout {
+            cells: imp
+                .movable_cells()
+                .into_iter()
+                .map(|n| (imp.left(n), imp.bottom(n), imp.grid.nodes[n].orient))
+                .collect(),
+            segments: imp.cells_in_seg.iter().cloned().collect(),
+        }
+    }
+
+    /// The first move of a movable cell to a site of any segment that
+    /// lands legally, left journaled.
+    fn first_legal_move(imp: &mut Improver) -> bool {
+        let spacing = imp.arch.rows[0].site_spacing;
+        for n in imp.movable_cells() {
+            let si = imp.cell_segs[n][0];
+            for sj in imp.segments.ids() {
+                let segment = imp.segments[sj];
+                let mut x = segment.min_x;
+                while x < segment.max_x {
+                    if x != imp.left(n) && imp.try_move(n, si, x, sj).unwrap() {
+                        return true;
+                    }
+                    x += spacing;
+                }
+            }
+        }
+        false
+    }
+
+    #[test]
+    fn a_legalized_placement_has_no_placement_problems() {
+        let imp = improver();
+
+        assert_eq!(imp.placement_problems().unwrap(), 0);
+    }
+
+    #[test]
+    fn a_rejected_move_puts_every_cell_back() {
+        let mut imp = improver();
+        let before = layout(&imp);
+        let hpwl = imp.total_hpwl();
+        assert!(first_legal_move(&mut imp));
+        assert_ne!(layout(&imp), before);
+
+        imp.reject_move().unwrap();
+
+        assert_eq!(layout(&imp), before);
+        assert_eq!(imp.total_hpwl(), hpwl);
+        assert_eq!(imp.placement_problems().unwrap(), 0);
+    }
+
+    #[test]
+    fn an_accepted_move_stays_and_stays_legal() {
+        let mut imp = improver();
+        let before = layout(&imp);
+        assert!(first_legal_move(&mut imp));
+
+        imp.accept_move();
+        imp.reject_move().unwrap();
+
+        assert_ne!(layout(&imp), before);
+        assert_eq!(imp.placement_problems().unwrap(), 0);
+    }
+
+    #[test]
+    fn a_cell_aligns_down_to_the_site_grid_within_its_span() {
+        let imp = improver();
+        let n = imp.movable_cells()[0];
+        let row = imp.arch.rows[0];
+        let site = |i: i64| row.left + i * row.site_spacing;
+
+        let aligned = imp.align(n, site(3) + 1, site(0), site(40));
+
+        assert_eq!(aligned, Some(site(3)));
+    }
+
+    #[test]
+    fn a_cell_aligned_past_its_span_stops_at_the_last_site_it_fits() {
+        let imp = improver();
+        let n = imp.movable_cells()[0];
+        let row = imp.arch.rows[0];
+        let site = |i: i64| row.left + i * row.site_spacing;
+        let right = site(40);
+
+        let aligned = imp.align(n, right, site(0), right).unwrap();
+
+        assert_eq!(aligned + imp.width(n), right);
+    }
+
+    #[test]
+    fn a_cell_wider_than_its_span_has_no_alignment() {
+        let imp = improver();
+        let n = imp.movable_cells()[0];
+        let left = imp.arch.rows[0].left;
+
+        let aligned = imp.align(n, left, left, left + imp.width(n) - 1);
+
+        assert_eq!(aligned, None);
+    }
+}
