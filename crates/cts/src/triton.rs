@@ -44,7 +44,7 @@ pub struct CtsInput<'a> {
     pub clock_rc: WireRc,
     /// The longest wire worth driving whole, as the resizer's
     /// `findMaxWireLength` gives it; without one, `TritonCTS`'s own
-    /// thresholds apply.
+    /// thresholds apply to the H-tree and no clock gate is cloned.
     pub max_wire_length: Option<Dbu>,
     /// What is asked.
     pub options: CtsOptions,
@@ -664,10 +664,15 @@ impl Cts<'_> {
         {
             return Ok(());
         }
+        // NOTE: findLongEdges reads no limit as 0, every edge long, and so
+        // clones the gate once per sink; PARE then clones no gate.
+        let Some(max_wire_length) = self.setup.settings.max_wire_length else {
+            return Ok(());
+        };
         let driver_at = db.average_pin_position(driver);
         point_pins.entry(driver_at).or_default().push(driver);
         let tree = prim_dijkstra(&points, 0, DEFAULT_ALPHA);
-        let clusters = long_edge_clusters(&tree, self.setup.settings.max_wire_length);
+        let clusters = long_edge_clusters(&tree, max_wire_length);
         let cluster_sinks: Vec<Vec<PinId>> = clusters
             .iter()
             .filter(|cluster| !cluster.is_empty())
@@ -1135,8 +1140,7 @@ pub(crate) fn sink_bbox_center(db: &NetlistDB, sinks: &[PinId]) -> Option<Point<
 
 /// Groups the nodes of a Steiner tree joined by edges shorter than
 /// `threshold`, as `TritonCTS::findLongEdges` clusters them.
-fn long_edge_clusters(tree: &SteinerTree, threshold: Option<Dbu>) -> Vec<Vec<usize>> {
-    let threshold = threshold.unwrap_or(Dbu(0));
+fn long_edge_clusters(tree: &SteinerTree, threshold: Dbu) -> Vec<Vec<usize>> {
     let mut cluster_of: FxHashMap<usize, usize> = FxHashMap::default();
     let mut clusters: Vec<Vec<usize>> = Vec::new();
     for (b, n) in tree.branches() {
@@ -1317,19 +1321,10 @@ mod tests {
     }
 
     #[test]
-    fn without_a_wire_length_limit_every_node_is_its_own_cluster() {
-        let tree = tree(&[0, 10, 20], &[None, Some(0), Some(1)]);
-
-        let clusters = long_edge_clusters(&tree, None);
-
-        assert_eq!(clusters, vec![vec![1], vec![0], vec![2]]);
-    }
-
-    #[test]
     fn short_edges_join_their_nodes_and_long_edges_part_them() {
         let tree = tree(&[0, 10, 1000, 1010], &[None, Some(0), Some(1), Some(2)]);
 
-        let clusters = long_edge_clusters(&tree, Some(Dbu(100)));
+        let clusters = long_edge_clusters(&tree, Dbu(100));
 
         assert_eq!(clusters, vec![vec![1, 0], vec![2, 3]]);
     }
@@ -1338,7 +1333,7 @@ mod tests {
     fn an_edge_as_long_as_the_limit_is_long() {
         let tree = tree(&[0, 100], &[None, Some(0)]);
 
-        let clusters = long_edge_clusters(&tree, Some(Dbu(100)));
+        let clusters = long_edge_clusters(&tree, Dbu(100));
 
         assert_eq!(clusters, vec![vec![1], vec![0]]);
     }
@@ -1352,7 +1347,7 @@ mod tests {
             &[None, Some(0), Some(3), Some(4), Some(0)],
         );
 
-        let clusters = long_edge_clusters(&tree, Some(Dbu(100)));
+        let clusters = long_edge_clusters(&tree, Dbu(100));
 
         assert_eq!(clusters, vec![vec![], vec![2, 3, 4, 1, 0]]);
     }

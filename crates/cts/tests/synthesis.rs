@@ -386,6 +386,15 @@ fn a_clock_gate_driving_far_apart_flops_is_cloned_as_it_always_is() {
 }
 
 #[test]
+fn without_a_wire_length_limit_no_gate_is_cloned() {
+    let (db, lib, constraints) = gated_grid();
+
+    let summary = synthesized_summary(db, &lib, &constraints);
+
+    assert_eq!((summary.clones, summary.sinks), (0, 256));
+}
+
+#[test]
 fn a_cluster_of_only_a_steiner_point_gets_no_clone() {
     // Three flops in a T: their Steiner point is over the wire length limit
     // from each, so it is a cluster of its own with no flop.
