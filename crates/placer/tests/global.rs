@@ -8,7 +8,6 @@ mod common;
 
 use pare_common::config::{Share, TargetDensity};
 use pare_common::db::design::{NetlistDB, PlacementStatus};
-use pare_common::db::indices::CellId;
 use pare_common::geom::orient::Orientation;
 use pare_common::geom::point::Point;
 use pare_common::testing;
@@ -59,10 +58,7 @@ impl TimingDriver for ScriptedRepair<'_> {
         let model = PlacementModel::from_db(db, &Zones::new(db).unwrap());
         Ok(Some(Reweighted {
             model,
-            cell_map: renumbering.cells[..cells]
-                .iter()
-                .map(|c| c.map(CellId::index))
-                .collect(),
+            cell_map: renumbering.cells[..cells].to_vec(),
         }))
     }
 }

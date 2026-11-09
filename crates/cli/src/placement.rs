@@ -724,12 +724,10 @@ fn reweighted_model(
             net.weight *= weight;
         }
     }
-    let cell_map = renumbering
-        .cells
-        .iter()
-        .map(|c| c.map(CellId::index))
-        .collect();
-    Ok(Reweighted { model, cell_map })
+    Ok(Reweighted {
+        model,
+        cell_map: renumbering.cells.clone(),
+    })
 }
 
 /// Draws the placement of `db` into the image at `path`.

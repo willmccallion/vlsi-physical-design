@@ -30,6 +30,7 @@ use crate::zones::Zone;
 use density::DensityGrid;
 use nesterov::Objects;
 use pare_common::config::{Share, TargetDensity};
+use pare_common::db::indices::CellId;
 use pare_common::geom::point::Point;
 use pare_common::geom::rect::Rect;
 use rand::rngs::StdRng;
@@ -77,7 +78,7 @@ pub struct Reweighted {
     pub model: PlacementModel,
     /// For each cell of the model before the repair, its index in the new
     /// model, or none if the repair removed it.
-    pub cell_map: Vec<Option<usize>>,
+    pub cell_map: Vec<Option<CellId>>,
 }
 
 /// What repairs the design between iterations of timing-driven placement.
@@ -356,7 +357,7 @@ impl Setup {
     fn rebuild(
         &self,
         model: &PlacementModel,
-        cell_map: &[Option<usize>],
+        cell_map: &[Option<CellId>],
         params: &GlobalParams,
         rng: &mut StdRng,
     ) -> (Self, Remap) {
@@ -397,12 +398,12 @@ impl Setup {
         &self,
         model: &PlacementModel,
         movable: &[usize],
-        cell_map: &[Option<usize>],
+        cell_map: &[Option<CellId>],
     ) -> (Objects, Vec<Option<usize>>, f64) {
         let mut old_object_of_new_cell = vec![None; model.num_cells()];
         for (k, &i) in self.movable.iter().enumerate() {
             if let Some(j) = cell_map[i] {
-                old_object_of_new_cell[j] = Some(k);
+                old_object_of_new_cell[j.index()] = Some(k);
             }
         }
         let mut objects = Objects {
@@ -733,12 +734,12 @@ fn build_netlist(model: &PlacementModel, movable: &[usize]) -> Netlist {
     for net in &model.nets {
         let pins = net.pins.iter().map(|pin| {
             let terminal = match pin.anchor {
-                PinAnchor::Cell { cell, offset } => match object_of_cell[cell] {
+                PinAnchor::Cell { cell, offset } => match object_of_cell[cell.index()] {
                     Some(index) => Terminal::Object {
                         index,
-                        offset: offset - model.sizes[cell] * 0.5,
+                        offset: offset - model.sizes[cell.index()] * 0.5,
                     },
-                    None => Terminal::Fixed(model.positions[cell] + offset),
+                    None => Terminal::Fixed(model.positions[cell.index()] + offset),
                 },
                 PinAnchor::Fixed(p) => Terminal::Fixed(p),
             };
