@@ -8,7 +8,7 @@
 #![allow(clippy::suboptimal_flops)]
 
 use crate::capacitance::Farads32;
-use crate::htree::Point;
+use crate::htree::TreePoint;
 use crate::techchar::SegmentLength;
 use pare_common::units::FaradsPerDbu;
 
@@ -20,7 +20,7 @@ const MAX_CAP_FACTOR: f64 = 10.0;
 /// solution over every size and diameter tried survives.
 #[derive(Clone, Debug)]
 pub(crate) struct SinkClustering {
-    points: Vec<Point>,
+    points: Vec<TreePoint>,
     caps: Vec<Farads32>,
     insertion_lengths: Vec<SegmentLength>,
     order: Vec<(f64, usize)>,
@@ -67,7 +67,7 @@ impl SinkClustering {
     /// capacitance `cap`, standing for `insertion` more clock wire beyond
     /// its pin.
     pub(crate) fn add_point(&mut self, x: f64, y: f64, cap: Farads32, insertion: SegmentLength) {
-        self.points.push(Point::new(x, y));
+        self.points.push(TreePoint::new(x, y));
         self.caps.push(cap);
         self.insertion_lengths.push(insertion);
     }
@@ -120,7 +120,7 @@ impl SinkClustering {
                 } else {
                     (p.y - y_min) / y_span
                 };
-                *p = Point::new(x, y);
+                *p = TreePoint::new(x, y);
             }
         }
         self.span = match (self.x_span == 0.0, self.y_span == 0.0) {
