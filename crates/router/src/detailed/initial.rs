@@ -379,3 +379,44 @@ fn union(sets: &mut [usize], a: usize, b: usize) {
         sets[ra.max(rb)] = ra.min(rb);
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::occupancy::{Origin, Owner};
+    use crate::tech::RouteTech;
+    use pare_common::db::indices::LayerId;
+
+    fn m2(x: u16, y: u16) -> GCell {
+        GCell {
+            layer: LayerId(1),
+            x,
+            y,
+        }
+    }
+
+    #[test]
+    fn a_bridge_every_track_of_which_fixed_metal_blocks_stays_nearest_the_middle() {
+        let (db, config) = crate::tests::placed_tiny();
+        let tech = RouteTech::new(&db, &config).unwrap();
+        let gcell = crate::gcell_size(&tech, &config);
+        let net = NetId::new(0);
+        let clear = DetailedRouter::new(&db, &tech, gcell);
+        let mut walled = DetailedRouter::new(&db, &tech, gcell);
+        let boundary = db.die_area.min.y + gcell * 2;
+        let wall = Rect::new(
+            Point::new(db.die_area.min.x, boundary - gcell / 2),
+            Point::new(db.die_area.max.x, boundary + gcell / 2),
+        );
+        walled
+            .occupancy
+            .add_rect(&tech, LayerId(1), &wall, Owner::Obstacle, Origin::Fixed);
+
+        let free = clear.bridge(net, m2(1, 1), m2(1, 2));
+        let blocked = walled.bridge(net, m2(1, 1), m2(1, 2));
+
+        assert!(free.is_some_and(|e| !clear.blocked_by_fixed(net, e)));
+        assert!(blocked.is_some_and(|e| walled.blocked_by_fixed(net, e)));
+        assert_eq!(blocked, free);
+    }
+}

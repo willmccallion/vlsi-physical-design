@@ -138,3 +138,22 @@ const fn next_multiple(value: i64, step: i64) -> i64 {
     let rem = value.rem_euclid(step);
     if rem == 0 { value } else { value + step - rem }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_length_rounds_up_to_the_next_grid_step_unless_on_it() {
+        assert_eq!(round_up(Dbu(101), Dbu(5)), Dbu(105));
+        assert_eq!(round_up(Dbu(100), Dbu(5)), Dbu(100));
+        assert_eq!(round_up(Dbu(-3), Dbu(5)), Dbu(0));
+    }
+
+    #[test]
+    fn a_strip_runs_long_enough_to_cover_the_area_rounded_up() {
+        assert_eq!(strip_length(DbuArea(1400), Dbu(70)), Dbu(20));
+        assert_eq!(strip_length(DbuArea(1401), Dbu(70)), Dbu(21));
+        assert_eq!(strip_length(DbuArea(0), Dbu(70)), Dbu(0));
+    }
+}
