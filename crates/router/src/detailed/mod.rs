@@ -61,6 +61,10 @@ pub enum RestoreRoutesError {
     /// does not offer, as when the placement or pin access has changed.
     #[error("the saved route of net {} uses an access point no longer offered", .0.index())]
     Access(NetId),
+    /// A saved via of the net does not join a node to the one right above
+    /// it.
+    #[error("the saved route of net {} has a via between nodes not one above the other", .0.index())]
+    Via(NetId),
 }
 
 /// How many nets' commits are worked out in parallel at a time, which
@@ -576,6 +580,9 @@ impl<'a> DetailedRouter<'a> {
             {
                 return Err(RestoreRoutesError::OffTracks(*net));
             }
+            if !route.edges.vias().iter().all(|&(l, u)| self.stacked(l, u)) {
+                return Err(RestoreRoutesError::Via(*net));
+            }
             let offered = |a: &AccessPoint| self.access[*net].iter().flatten().any(|o| o == a);
             if !route.access.iter().all(offered) {
                 return Err(RestoreRoutesError::Access(*net));
@@ -592,6 +599,12 @@ impl<'a> DetailedRouter<'a> {
         }
         let lt = self.tech.layer(n.layer);
         (n.track as usize) < lt.tracks.len() && (n.cross as usize) < lt.cross.len()
+    }
+
+    /// Whether `upper` is the node right above `lower`: on the next layer up
+    /// at the same point.
+    fn stacked(&self, lower: Node, upper: Node) -> bool {
+        upper.layer.index() == lower.layer.index() + 1 && self.point(lower) == self.point(upper)
     }
 
     /// Logs a violation of a traced net or in the traced area.
