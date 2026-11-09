@@ -11,7 +11,7 @@
 use super::lexer::{ParseError, read_file};
 use crate::db::design::NetlistDB;
 use crate::db::indices::{CellId, IoPinId};
-use crate::db::liberty::{Edge, Liberty, LibraryUnits, MinMax};
+use crate::db::liberty::{Edge, Liberty, LibraryUnits, MinMax, SideValues};
 use crate::db::library::{PinDirection, SignalUse};
 use crate::db::sdc::{
     Clock, ClockEdge, ClockId, FalsePath, MultiCyclePath, PathSpec, PortDelay, RiseFallMinMax, Sdc,
@@ -666,7 +666,7 @@ impl Interpreter<'_> {
                 rise,
                 fall,
                 sources,
-                uncertainty: [None, None],
+                uncertainty: SideValues::both(None),
                 propagated: false,
             };
             return Ok(String::new());
@@ -682,7 +682,7 @@ impl Interpreter<'_> {
             rise,
             fall,
             sources,
-            uncertainty: [None, None],
+            uncertainty: SideValues::both(None),
             propagated: false,
         });
         Ok(String::new())
@@ -800,7 +800,7 @@ impl Interpreter<'_> {
         let sides = sides_of_setup_hold(&parsed);
         for clock in self.clocks_of(clocks_text, line)? {
             for side in &sides {
-                self.sdc.clocks[clock.index()].uncertainty[side.index()] = Some(value);
+                self.sdc.clocks[clock.index()].uncertainty[*side] = Some(value);
             }
         }
         Ok(String::new())
@@ -956,17 +956,17 @@ impl Interpreter<'_> {
             for id in cells {
                 let derate = self.sdc.cell_derates.entry(id).or_default();
                 for &side in &sides {
-                    derate.cell[side.index()] = Some(factor);
+                    derate.cell[side] = Some(factor);
                 }
             }
             return Ok(String::new());
         }
         for side in sides {
             if cell {
-                self.sdc.derating.cell[side.index()] = factor;
+                self.sdc.derating.cell[side] = factor;
             }
             if net {
-                self.sdc.derating.net[side.index()] = factor;
+                self.sdc.derating.net[side] = factor;
             }
         }
         Ok(String::new())
@@ -1912,10 +1912,10 @@ set_output_delay [expr $clk_period * $clk_io_pct] -clock $clk_name [all_outputs]
 
         let close =
             |got: Option<Seconds>, want: f64| got.is_some_and(|g| (g.get() - want).abs() < 1e-20);
-        assert!(close(sdc.clocks[0].uncertainty[0], 0.15e-9));
-        assert!(close(sdc.clocks[0].uncertainty[1], 0.15e-9));
-        assert!(close(sdc.clocks[1].uncertainty[0], 0.05e-9));
-        assert_eq!(sdc.clocks[1].uncertainty[1], None);
+        assert!(close(sdc.clocks[0].uncertainty[MinMax::Min], 0.15e-9));
+        assert!(close(sdc.clocks[0].uncertainty[MinMax::Max], 0.15e-9));
+        assert!(close(sdc.clocks[1].uncertainty[MinMax::Min], 0.05e-9));
+        assert_eq!(sdc.clocks[1].uncertainty[MinMax::Max], None);
         assert_eq!(sdc.false_paths.len(), 1);
         assert_eq!(sdc.false_paths[0].paths.from_clocks, vec![ClockId(0)]);
         assert_eq!(sdc.false_paths[0].paths.to_clocks, vec![ClockId(1)]);
@@ -1928,8 +1928,8 @@ set_output_delay [expr $clk_period * $clk_io_pct] -clock $clk_name [all_outputs]
             vec![port(&db, "out[0]")]
         );
         assert!(!sdc.multicycle_paths[1].use_end_clock);
-        assert!((sdc.derating.cell[MinMax::Min.index()] - 0.95).abs() < 1e-12);
-        assert!((sdc.derating.net[MinMax::Max.index()] - 1.0).abs() < 1e-12);
+        assert!((sdc.derating.cell[MinMax::Min] - 0.95).abs() < 1e-12);
+        assert!((sdc.derating.net[MinMax::Max] - 1.0).abs() < 1e-12);
         assert_eq!(sdc.limits.max_fanout, Some(20.0));
         assert!((sdc.port_loads[&port(&db, "out[0]")].get() - 3e-15).abs() < 1e-30);
     }
@@ -2007,7 +2007,7 @@ set_output_delay [expr $clk_period * $clk_io_pct] -clock $clk_name [all_outputs]
              set_timing_derate -late 1.05 [get_cells core/*]\n",
         );
         assert!((globbed.cell_derate(Some(cell), MinMax::Max) - 1.05).abs() < 1e-12);
-        assert!((globbed.derating.cell[MinMax::Max.index()] - 1.0).abs() < 1e-12);
+        assert!((globbed.derating.cell[MinMax::Max] - 1.0).abs() < 1e-12);
     }
 
     #[test]
@@ -2021,7 +2021,7 @@ set_output_delay [expr $clk_period * $clk_io_pct] -clock $clk_name [all_outputs]
 
         assert!(sdc.cell_derates.is_empty());
         assert!((sdc.cell_derate(Some(cell), MinMax::Min) - 1.0).abs() < 1e-12);
-        assert!((sdc.derating.cell[MinMax::Min.index()] - 1.0).abs() < 1e-12);
+        assert!((sdc.derating.cell[MinMax::Min] - 1.0).abs() < 1e-12);
     }
 
     fn parse_error(text: &str) -> String {

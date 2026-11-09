@@ -650,7 +650,7 @@ impl Repair<'_, '_> {
                     && a.from_edge == prev.edge
                     && a.to_edge == point.edge
             })
-            .map(|a| a.delay[MinMax::Max.index()])?;
+            .map(|a| a.delay[MinMax::Max])?;
         Some(delay - intrinsic)
     }
 }

@@ -105,6 +105,15 @@ impl<T> std::ops::Index<Edge> for EdgeValues<T> {
     }
 }
 
+impl<T> std::ops::IndexMut<Edge> for EdgeValues<T> {
+    fn index_mut(&mut self, edge: Edge) -> &mut T {
+        match edge {
+            Edge::Rise => &mut self.rise,
+            Edge::Fall => &mut self.fall,
+        }
+    }
+}
+
 macro_rules! impl_edge_max {
     ($($value:ty),*) => {$(
         impl EdgeValues<$value> {
@@ -223,15 +232,6 @@ impl MinMax {
     /// Both sides, min first.
     pub const BOTH: [Self; 2] = [Self::Min, Self::Max];
 
-    /// Index into a pair of per-side values, min first.
-    #[must_use]
-    pub const fn index(self) -> usize {
-        match self {
-            Self::Min => 0,
-            Self::Max => 1,
-        }
-    }
-
     /// The time nothing beats on this side, which a search starts from.
     #[must_use]
     pub const fn init_value(self) -> Seconds {
@@ -256,6 +256,70 @@ impl MinMax {
         match self {
             Self::Min => Self::Max,
             Self::Max => Self::Min,
+        }
+    }
+}
+
+/// A value for each side of a delay range, as [`EdgeValues`] holds one for
+/// each edge.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct SideValues<T> {
+    /// For the early side.
+    pub min: T,
+    /// For the late side.
+    pub max: T,
+}
+
+impl<T: Copy> SideValues<T> {
+    /// `value` for both sides.
+    #[must_use]
+    pub const fn both(value: T) -> Self {
+        Self {
+            min: value,
+            max: value,
+        }
+    }
+
+    /// Each side's value, `f` of the side.
+    #[must_use]
+    pub fn from_fn(mut f: impl FnMut(MinMax) -> T) -> Self {
+        Self {
+            min: f(MinMax::Min),
+            max: f(MinMax::Max),
+        }
+    }
+
+    /// Both sides' values, min first.
+    pub fn iter(&self) -> impl Iterator<Item = &T> {
+        [&self.min, &self.max].into_iter()
+    }
+
+    /// `f` of each side's value.
+    #[must_use]
+    pub fn map<U>(self, mut f: impl FnMut(T) -> U) -> SideValues<U> {
+        SideValues {
+            min: f(self.min),
+            max: f(self.max),
+        }
+    }
+}
+
+impl<T> std::ops::Index<MinMax> for SideValues<T> {
+    type Output = T;
+
+    fn index(&self, side: MinMax) -> &T {
+        match side {
+            MinMax::Min => &self.min,
+            MinMax::Max => &self.max,
+        }
+    }
+}
+
+impl<T> std::ops::IndexMut<MinMax> for SideValues<T> {
+    fn index_mut(&mut self, side: MinMax) -> &mut T {
+        match side {
+            MinMax::Min => &mut self.min,
+            MinMax::Max => &mut self.max,
         }
     }
 }
