@@ -12,18 +12,65 @@ use crate::parasitics::{NetParasitics, PiElmore, WireRc};
 use crate::route_parasitics::RouteRc;
 use pare_common::db::design::PinOwner;
 use pare_common::db::global_route::RouteSource;
-use pare_common::db::indices::{CellId, IdVec, NetId, PinId};
+use pare_common::db::indices::{CellId, IdVec, IoPinId, NetId, PinId};
 use pare_common::db::liberty::{
     ArcRole, Edge, EdgeValues, FuncExpr, LibPortId, MinMax, SequentialKind, SideValues,
     TimingArcSet,
 };
 use pare_common::db::library::{MacroClass, SignalUse};
+use pare_common::db::sdc::{RiseFallMinMax, Sdc};
 use pare_common::units::{Farads, Ohms, Seconds};
-use std::collections::{BinaryHeap, VecDeque};
+use std::collections::{BinaryHeap, HashMap, VecDeque};
 
-/// The slew `OpenSTA` seeds a root with: an input port without a declared
-/// transition, or an undriven pin.
+/// The slew `OpenSTA` seeds a root with, its `default_slew`: an input port
+/// without a declared transition, or a driver without arcs.
 const ROOT_SLEW: Seconds = Seconds::ZERO;
+
+/// What the constraints say about the world beyond the design's ports, as
+/// delay calculation reads it: the loads `set_load` hangs on them and the
+/// transitions `set_input_transition` drives the inputs with.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub(crate) struct PortConditions {
+    loads: HashMap<IoPinId, Farads>,
+    slews: HashMap<IoPinId, RiseFallMinMax>,
+}
+
+impl PortConditions {
+    /// The port loads and input transitions `sdc` sets.
+    #[must_use]
+    pub(crate) fn from_sdc(sdc: &Sdc) -> Self {
+        Self {
+            loads: sdc.port_loads.clone(),
+            slews: sdc.input_slews.clone(),
+        }
+    }
+
+    /// The load outside the design on a port, as `Sdc::portExtCap`; zero
+    /// without one.
+    #[must_use]
+    pub(crate) fn load(&self, io: IoPinId) -> Farads {
+        self.loads.get(&io).copied().unwrap_or(Farads::ZERO)
+    }
+
+    /// The slews a driver without arcs switches at, as `GraphDelayCalc`'s
+    /// `seedNoDrvrCellSlew` seeds them: an input port's declared transition
+    /// where it has one, [`ROOT_SLEW`] elsewhere.
+    fn root_slews(&self, netlist: &Netlist<'_>, driver: PinId) -> PerSide {
+        let declared = match netlist.db.pins[driver].owner {
+            PinOwner::Io(io) => self.slews.get(&io),
+            PinOwner::Cell { .. } => None,
+        };
+        let slew = |edge: Edge, side: MinMax| {
+            declared
+                .and_then(|slews| slews.get(edge, side))
+                .unwrap_or(ROOT_SLEW)
+        };
+        SideValues::from_fn(|side| EdgeValues {
+            rise: slew(Edge::Rise, side),
+            fall: slew(Edge::Fall, side),
+        })
+    }
+}
 
 /// An arc into a driver: from which pin of its cell, through which set.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -83,6 +130,7 @@ pub(crate) struct TimingGraph {
     parasitics: IdVec<NetId, Option<NetParasitics>>,
     rc: WireRc,
     clock_rc: Option<WireRc>,
+    ports: PortConditions,
 }
 
 impl TimingGraph {
@@ -95,6 +143,7 @@ impl TimingGraph {
         rc: WireRc,
         clock_rc: Option<WireRc>,
         estimator: Estimator<'_>,
+        ports: PortConditions,
     ) -> Self {
         let db = netlist.db;
         let in_arcs = in_arcs(netlist, constants);
@@ -115,6 +164,7 @@ impl TimingGraph {
             parasitics,
             rc,
             clock_rc,
+            ports,
         };
         graph.find_all_slews(netlist, clocks);
         graph
@@ -213,6 +263,19 @@ impl TimingGraph {
         self.rc
     }
 
+    /// A load pin's capacitance for `edge`, as `ReduceToPi::pinCapacitance`:
+    /// an instance pin's Liberty value, a design pin's load from
+    /// `set_load`.
+    #[must_use]
+    pub(crate) fn pin_capacitance(&self, netlist: &Netlist<'_>, pin: PinId, edge: Edge) -> Farads {
+        match netlist.db.pins[pin].owner {
+            PinOwner::Io(io) => self.ports.load(io),
+            PinOwner::Cell { .. } => netlist
+                .lib_port(pin)
+                .map_or(Farads::ZERO, |port| port.capacitance.get(edge)),
+        }
+    }
+
     /// The pi model and Elmore delays `driver` sees for `edge`.
     #[must_use]
     pub(crate) fn pi_elmore(
@@ -224,7 +287,7 @@ impl TimingGraph {
         let net = netlist.db.pins[driver].net;
         self.parasitics[net].as_ref().and_then(|p| {
             p.pi_elmore(netlist, driver, edge, &|pin, e| {
-                pin_capacitance(netlist, pin, e)
+                self.pin_capacitance(netlist, pin, e)
             })
         })
     }
@@ -245,7 +308,7 @@ impl TimingGraph {
                 let net = netlist.db.pins[driver].net;
                 netlist
                     .loads(net)
-                    .map(|p| pin_capacitance(netlist, p, edge))
+                    .map(|p| self.pin_capacitance(netlist, p, edge))
                     .sum()
             },
             |pi| pi.load_cap(),
@@ -437,7 +500,7 @@ impl TimingGraph {
     }
 
     /// The slews and wire delays at the loads of a driver without arcs, an
-    /// input port with no driving cell, which switches at `root` slew with
+    /// input port with no driving cell, which switches at `root` slews with
     /// no resistance: the wire's Elmore delay to each load at the input
     /// threshold, and the slew it adds, as `OpenSTA`'s `inputPortDelay`.
     fn ideal_driver_loads(
@@ -445,16 +508,10 @@ impl TimingGraph {
         netlist: &Netlist<'_>,
         driver: PinId,
         loads: &[PinId],
-        root: EdgeValues<Seconds>,
+        root: PerSide,
     ) -> Vec<(PerSide, PerSide)> {
         let t = &netlist.link.liberty.thresholds;
-        let mut out = vec![
-            (
-                SideValues::both(root),
-                SideValues::both(EdgeValues::default())
-            );
-            loads.len()
-        ];
+        let mut out = vec![(root, SideValues::both(EdgeValues::default())); loads.len()];
         for edge in Edge::BOTH {
             let Some(pi) = self.pi_elmore(netlist, driver, edge) else {
                 continue;
@@ -468,8 +525,10 @@ impl TimingGraph {
                 else {
                     continue;
                 };
-                let slew = elmore.get().mul_add(slew_factor, root.get(edge).get());
                 for side in MinMax::BOTH {
+                    let slew = elmore
+                        .get()
+                        .mul_add(slew_factor, root[side].get(edge).get());
                     out[i].0[side].set(edge, Seconds::new(slew));
                     out[i].1[side].set(edge, elmore * delay_factor);
                 }
@@ -503,11 +562,11 @@ impl TimingGraph {
         let net = netlist.db.pins[driver].net;
         let loads: Vec<PinId> = netlist.loads(net).filter(|&p| p != driver).collect();
         let found = self.driver_delays(netlist, clocks, driver, &loads);
-        let root = EdgeValues::both(ROOT_SLEW);
+        let root = self.ports.root_slews(netlist, driver);
         let drvr_slew = if found.any_arc {
             found.driver_slew.map(Merged::values)
         } else {
-            SideValues::both(root)
+            root
         };
         if self.annotated[driver].is_none() {
             self.slew[driver] = drvr_slew;
@@ -674,15 +733,6 @@ impl Merged {
             fall: settle(self.fall),
         }
     }
-}
-
-/// A load pin's capacitance for `edge`: its Liberty value, or none for a
-/// design pin without a declared load.
-#[must_use]
-pub(crate) fn pin_capacitance(netlist: &Netlist<'_>, pin: PinId, edge: Edge) -> Farads {
-    netlist
-        .lib_port(pin)
-        .map_or(Farads::ZERO, |port| port.capacitance.get(edge))
 }
 
 /// A net's estimated parasitics. From global routes, as `OpenROAD`'s
@@ -899,4 +949,109 @@ fn find_back_edges(
         }
     }
     back
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::bnet::LoadModel;
+    use crate::testing::{
+        DefSections, cells, clock_cells_source, def_text, design, pin, with_timed_session,
+        with_wired_session,
+    };
+    use pare_common::db::design::NetlistDB;
+    use pare_common::db::liberty::MinMax;
+    use pare_common::units::{Farads, Seconds};
+
+    /// Whether `slew` is `nanoseconds` to within a femtosecond.
+    fn is_about(slew: Seconds, nanoseconds: f64) -> bool {
+        (slew - Seconds::new(nanoseconds * 1e-9)).abs() < Seconds::new(1e-15)
+    }
+
+    /// An input port `in` through buffer `b` to an output port `out`.
+    fn port_to_port() -> NetlistDB {
+        design(&def_text(
+            "ports",
+            &DefSections {
+                components: "- b BUF_X1 + PLACED ( 40000 2800 ) N ;\n",
+                nets: "- in ( PIN in ) ( b A ) ;\n- out ( b Z ) ( PIN out ) ;\n",
+                inputs: &["in"],
+                outputs: &["out"],
+            },
+        ))
+    }
+
+    /// The load buffer `b` of [`port_to_port`] drives under `constraints`.
+    fn buffer_load(constraints: &str) -> Farads {
+        let mut db = port_to_port();
+        let driver = pin(&db, "b/Z");
+        let mut load = Farads::ZERO;
+        with_timed_session(&mut db, &cells(&clock_cells_source()), constraints, |r| {
+            load = r.load_cap(driver);
+        });
+        load
+    }
+
+    #[test]
+    fn a_load_set_on_an_output_port_loads_its_driver() {
+        let bare = buffer_load("");
+
+        let loaded = buffer_load("set_load 50 [get_ports out]\n");
+
+        assert!(
+            ((loaded - bare).get() - 50e-15).abs() < 1e-20,
+            "{bare:?} -> {loaded:?}"
+        );
+    }
+
+    #[test]
+    fn a_buffering_tree_sees_the_load_set_on_an_output_port() {
+        let mut db = port_to_port();
+        let out = db.io_pins[db.io_pin_id("out").unwrap()].pin;
+        let constraints = "set_load 50 [get_ports out]\n";
+
+        with_timed_session(&mut db, &cells(&clock_cells_source()), constraints, |r| {
+            let cap = LoadModel::load(r, out).cap;
+
+            assert!((cap.get() - 50e-15).abs() < 1e-20, "{cap:?}");
+        });
+    }
+
+    #[test]
+    fn an_input_transition_is_the_slew_an_input_port_drives_its_loads_with() {
+        let mut db = port_to_port();
+        let load = pin(&db, "b/A");
+        let constraints = "set_input_transition -rise 0.3 [get_ports in]\n\
+                           set_input_transition -fall -max 0.2 [get_ports in]\n";
+
+        with_timed_session(&mut db, &cells(&clock_cells_source()), constraints, |r| {
+            let late = r.graph.slew_side(load, MinMax::Max);
+            let early = r.graph.slew_side(load, MinMax::Min);
+
+            assert!(is_about(late.rise, 0.3), "{late:?}");
+            assert!(is_about(late.fall, 0.2), "{late:?}");
+            assert!(is_about(early.rise, 0.3), "{early:?}");
+            assert!(is_about(early.fall, 0.0), "{early:?}");
+        });
+    }
+
+    #[test]
+    fn an_input_ports_wire_adds_its_elmore_slew_to_the_input_transition() {
+        let mut db = port_to_port();
+        let load = pin(&db, "b/A");
+        let lib = cells(&clock_cells_source());
+
+        let mut bare = Seconds::ZERO;
+        with_wired_session(&mut db, &lib, "", |r| bare = r.graph.slew(load).rise);
+        let mut driven = Seconds::ZERO;
+        let constraints = "set_input_transition 0.1 [get_ports in]\n";
+        with_wired_session(&mut db, &lib, constraints, |r| {
+            driven = r.graph.slew(load).rise;
+        });
+
+        assert!(bare > Seconds::new(1e-15));
+        assert!(
+            ((driven - bare).get() - 0.1e-9).abs() < 1e-18,
+            "{bare:?} -> {driven:?}"
+        );
+    }
 }
