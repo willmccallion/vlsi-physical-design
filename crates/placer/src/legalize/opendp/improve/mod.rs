@@ -37,8 +37,11 @@ use std::collections::BTreeSet;
 const RANDOM_SEED: u32 = 1;
 /// The most moves one trial may make.
 const MOVE_LIMIT: usize = 100;
-/// Nets with this many pins or more are left out of the wirelength the
-/// passes weigh.
+/// The pin count past which a net is left out of the wirelength the passes
+/// weigh, as the passes' `skipNetsLargerThanThis_` and set matching's
+/// `skipEdgesLargerThanThis_` default to; reordering, flipping and the
+/// wirelength objective leave out nets of exactly this many too, as their
+/// routines test `>=`.
 const SKIP_NETS_LARGER_THAN: usize = 100;
 
 /// Why detailed improvement stopped.
