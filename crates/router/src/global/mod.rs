@@ -1570,10 +1570,9 @@ fn route_initial(
     costs: GlobalCosts,
     routes: &mut GlobalRoutes,
 ) {
-    let chunk = rayon::current_num_threads().max(1) * INITIAL_PER_THREAD;
     let mut order: Vec<usize> = (0..nets.len()).collect();
     order.sort_by_key(|&i| (span(&nets[i].terminals), i));
-    for batch in order.chunks(chunk) {
+    for batch in order.chunks(INITIAL_CHUNK) {
         let shared: &GlobalGrid = grid;
         let found: Vec<(usize, Vec<Vec<GCell>>)> = batch
             .par_iter()
@@ -1586,8 +1585,12 @@ fn route_initial(
     }
 }
 
-/// Nets per thread pattern-routed in one chunk of the initial routing.
-const INITIAL_PER_THREAD: usize = 32;
+/// Nets pattern-routed together in one chunk of the initial routing; rayon
+/// spreads each chunk over the threads. Fixed rather than scaled by the
+/// thread count, so that the routes do not depend on the machine: 28
+/// threads times 32 nets each, which keeps a 28-thread machine's routes and
+/// wall time. PARE tunable, no `OpenROAD` counterpart.
+const INITIAL_CHUNK: usize = 896;
 
 /// An inclusive box of gcell columns `x0..=x1` and rows `y0..=y1`.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -1801,6 +1804,27 @@ mod tests {
             }
         }
         (grid, nets)
+    }
+
+    #[test]
+    fn initial_routes_do_not_depend_on_the_thread_count() {
+        let route_with = |threads: usize| {
+            let pool = rayon::ThreadPoolBuilder::new()
+                .num_threads(threads)
+                .build()
+                .unwrap();
+            pool.install(|| {
+                let (grid, nets) = chained_nets();
+                let mut routes = GlobalRoutes::default();
+                route_initial(&grid, &nets, FIRST_COSTS, &mut routes);
+                (routes.paths, grid.usage.snapshot())
+            })
+        };
+
+        let one = route_with(1);
+        let four = route_with(4);
+
+        assert_eq!(one, four);
     }
 
     #[test]
