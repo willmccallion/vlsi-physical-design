@@ -334,7 +334,7 @@ fn route_detailed(
     run: &mut RunOptions<'_>,
     report: &mut dyn FnMut(&Progress<'_>),
 ) -> Result<DetailedResult, RouteError> {
-    let via = 4.0 * tech.layer(tech.min_layer).pitch().to_f64();
+    let via = 4.0 * tech.min_layer_pitch.to_f64();
     let GlobalStage {
         mut dr,
         nets,
@@ -1188,6 +1188,10 @@ pub enum RouteError {
     /// A routable layer has no tracks and no pitch to derive them from.
     #[error("routing layer '{0}' has no tracks")]
     NoTracks(String),
+    /// The lowest routable layer has a single track, so no pitch to price
+    /// vias and size rip-ups by.
+    #[error("routing layer '{0}' has a single track; the lowest routing layer needs two or more")]
+    OneTrack(String),
     /// The routable layers all run one way, so no route can turn.
     #[error(
         "every routing layer from min_layer to max_layer runs {0:?}; routing needs both directions"

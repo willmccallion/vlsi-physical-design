@@ -93,13 +93,10 @@ impl LayerTech {
         (across, along)
     }
 
-    /// The smallest distance between neighbouring tracks.
-    pub fn pitch(&self) -> Dbu {
-        self.tracks
-            .windows(2)
-            .map(|w| w[1] - w[0])
-            .min()
-            .unwrap_or_default()
+    /// The smallest distance between neighbouring tracks; none with fewer
+    /// than two tracks.
+    pub fn pitch(&self) -> Option<Dbu> {
+        self.tracks.windows(2).map(|w| w[1] - w[0]).min()
     }
 
     /// Indices of tracks whose centerline lies in `[lo, hi]`.
@@ -196,6 +193,9 @@ pub struct RouteTech {
     pub access_vias: IdVec<CutLayerId, Vec<ViaTech>>,
     /// Spacing rules of every cut layer.
     pub cuts: IdVec<CutLayerId, CutTech>,
+    /// The track pitch of the lowest routable layer, which prices vias in
+    /// detailed routing and sizes its near-violation rip-up.
+    pub min_layer_pitch: Dbu,
     /// Every non-default rule's widths and spacings.
     rules: IdVec<NonDefaultRuleId, RuleTech>,
     /// The non-default rule each net follows.
@@ -328,6 +328,9 @@ impl RouteTech {
         )?;
         let layers: IdVec<LayerId, LayerTech> =
             tracks.ids().map(|l| layer_tech(lib, &tracks, l)).collect();
+        let min_layer_pitch = layers[min_layer]
+            .pitch()
+            .ok_or_else(|| RouteError::OneTrack(lib.routing_layers[min_layer].name.clone()))?;
 
         let cuts = lib.cut_layers.ids();
         let vias = cuts
@@ -352,6 +355,7 @@ impl RouteTech {
             vias,
             access_vias,
             cuts,
+            min_layer_pitch,
             rules: db
                 .non_default_rules
                 .iter()
