@@ -27,10 +27,14 @@ use rayon::prelude::*;
 use rustc_hash::{FxHashMap, FxHashSet};
 use std::collections::BTreeMap;
 
-/// Edge of a region, in gcells.
+/// Edge of a region, in gcells. PARE tunable.
+// NOTE: FlexDR::searchRepair tiles workers of 7 gcells at offsets 0 to -6;
+// PARE's regions are 6 gcells, shifted by a third of one per pass.
 pub(super) const REGION_GCELLS: Gcells = Gcells(6);
 
-/// Local rip-up and reroute rounds within one region.
+/// Local rip-up and reroute rounds within one region. PARE tunable.
+// NOTE: FlexDRWorker::canRipup lets a net reroute mazeEndIter times (3 to 64
+// by row); PARE's region negotiation is its own loop, with a fixed count.
 const LOCAL_ROUNDS: usize = 6;
 
 /// Local rounds in a row a net under a non-default rule may keep its route
@@ -109,9 +113,9 @@ pub(super) struct Verdict {
 }
 
 impl Verdict {
-    /// Whether the new wiring is worse and is not kept, as `TritonRoute`
-    /// keeps a worker's result unless it has more markers than it began
-    /// with.
+    /// Whether the new wiring is worse and is not kept, as `TritonRoute`'s
+    /// `FlexDRWorker::end` keeps a worker's result unless it has more
+    /// markers than it began with.
     pub(super) const fn rejected(self) -> bool {
         self.after > self.before
     }
@@ -301,13 +305,14 @@ pub enum Scope {
     Conflicts,
     /// The nets of each conflict and every net with wiring within
     /// `NEAR_TRACKS` tracks of it, in the region holding it, so that
-    /// wiring hemming a conflict in can move aside, as `TritonRoute`'s
-    /// near-violation rip-up does.
+    /// wiring hemming a conflict in can move aside.
     NearConflicts,
 }
 
 /// Tracks of the lowest routing layer around a conflict within which
-/// [`Scope::NearConflicts`] rips nets up.
+/// [`Scope::NearConflicts`] rips nets up. PARE tunable.
+// NOTE: FlexDRWorker::initRipUpNetsFromMarkers bloats a marker by twice its
+// layer's width on its layer alone; PARE reaches wider, on every layer.
 const NEAR_TRACKS: i64 = 3;
 
 /// What a pass did.
@@ -387,7 +392,8 @@ impl DetailedRouter<'_> {
     /// A worker's marks before it routes: those of the last round's
     /// `markers` that touch `area`, on the wiring of their nets as it
     /// stands, as `TritonRoute` seeds a worker's marker cost from the
-    /// markers in it.
+    /// markers in it (`FlexDRWorker::initMarkers` and
+    /// `initMazeCost_marker_route_queue`).
     pub(super) fn seed_marks(&self, area: &Rect<Dbu>, markers: &[usize]) -> Marks {
         let mut marks = Marks::default();
         for &i in markers {
@@ -909,7 +915,8 @@ impl DetailedRouter<'_> {
     }
 
     /// The nets to reroute after `judgment`: every net in a violation,
-    /// except that, as `TritonRoute` does, where a marker has more than one
+    /// except that, as `TritonRoute`'s
+    /// `FlexDRWorker::route_queue_update_from_marker` does, where a marker has more than one
     /// owner a net under a non-default rule keeps its route while some other
     /// net of the marker is rerouted, for up to [`NDR_RIPUP_HARDINESS`]
     /// rounds in a row, counted in `avoided`.

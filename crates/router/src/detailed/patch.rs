@@ -1,5 +1,6 @@
 //! Patch wires that bring thin pieces of a net's metal up to the minimum
-//! area, as `TritonRoute` adds them after routing a net.
+//! area, as `TritonRoute` adds them after routing a net
+//! (`FlexDRWorker::routeNet_postAstarAddPatchMetal`).
 
 use super::DetailedRouter;
 use super::judge::Candidate;
@@ -13,10 +14,8 @@ use pare_common::verify::drc::{Layout, Owner, ThinPiece, thin_pieces};
 
 impl DetailedRouter<'_> {
     /// Patches that bring every thin piece of the candidate's metal meeting
-    /// `area` up to its layer's minimum area. Each patch extends the piece
-    /// along the layer's preferred direction, as `TritonRoute` places its
-    /// patch wires, from one end or split between both, however `search`
-    /// prices lowest.
+    /// `area` up to its layer's minimum area, each the one of
+    /// [`Self::patch_for`] that `search` prices lowest.
     pub(super) fn min_area_patches(
         &self,
         candidate: &Candidate<'_>,
@@ -55,6 +54,8 @@ impl DetailedRouter<'_> {
     /// it, grown across the tracks the same ways over the piece's length; the
     /// box around the piece and the patch when split. `None` on a layer the
     /// router cannot use.
+    // NOTE: routeNet_postAstarAddPatchMetal patches one end along the
+    // preferred direction, the cleaner; PARE also tries splits and across.
     fn patch_for(&self, piece: &ThinPiece, search: &Search<'_>) -> Option<Patch> {
         if !self.tech.routable(piece.layer) {
             return None;

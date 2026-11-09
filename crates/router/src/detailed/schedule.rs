@@ -26,18 +26,24 @@ pub enum RipUp {
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Strategy {
     /// Rip-up and reroute iterations within one worker.
+    // NOTE: FlexDRWorker::canRipup caps a net's reroutes at mazeEndIter; PARE's
+    // regions run LOCAL_ROUNDS instead, so this only tells rows apart.
     maze_end_iter: u32,
     /// Cost per unit of length of a conflict with other wiring.
     conflict: f64,
     /// Cost per unit of length through a marked violation.
     marker: f64,
     /// Cost per unit of length of a conflict with fixed metal.
+    // NOTE: FlexGridGraph::getCosts charges it per unit length; PARE prices
+    // fixed metal as an obstacle in every round, so this only tells rows apart.
     fixed_shape: f64,
     /// Factor marker counters decay by after each net routed.
     decay: f64,
     /// Which nets the iteration rips up.
     pub ripup: RipUp,
     /// Whether routes keep to their global route.
+    // NOTE: FlexGridGraph::initGrids prices off-guide edges only when it is
+    // set; PARE's search keeps to the guide, then widens, so it tells rows apart.
     follow_guide: bool,
 }
 

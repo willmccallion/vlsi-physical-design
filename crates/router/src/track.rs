@@ -12,6 +12,11 @@
 //! even ones so that wires beside a panel's edge see their neighbours.
 //! Stretches of a wire that would still touch fixed metal are left out for
 //! detailed routing to go around.
+//!
+//! This is PARE's own assignment, not a port of `TritonRoute`'s `FlexTA`.
+// NOTE: FlexTA prices with TADRCCOST 32, TAPINCOST 4 and TAALIGNCOST 4 plus
+// next-iroute and alignment terms (FlexTAWorker::assignIroute_getCost); PARE
+// weighs overlap by its own FIXED_WEIGHT and OVERLAP_WEIGHT, then pin distance.
 
 use crate::access::Node;
 use crate::global::{GCell, GlobalGrid, GlobalRoutes};
@@ -30,13 +35,16 @@ use rustc_hash::FxHashMap;
 use std::collections::BTreeMap;
 use std::ops::Range;
 
-/// Cost per DBU of overlap with fixed metal of another owner.
+/// Cost per DBU of overlap with fixed metal of another owner. PARE tunable,
+/// no `OpenROAD` counterpart.
 const FIXED_WEIGHT: i64 = 64;
 
-/// Cost per DBU of overlap with another net's wire.
+/// Cost per DBU of overlap with another net's wire. PARE tunable, no
+/// `OpenROAD` counterpart.
 const OVERLAP_WEIGHT: i64 = 8;
 
-/// Rounds of placing overlapping iroutes again.
+/// Rounds of placing overlapping iroutes again. PARE tunable, no `OpenROAD`
+/// counterpart.
 const REASSIGN_ROUNDS: usize = 3;
 
 /// A net's wire along one track, from one crossing to a later one.

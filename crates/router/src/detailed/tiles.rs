@@ -21,14 +21,16 @@ use rustc_hash::FxHashMap;
 use std::cmp::Reverse;
 use std::collections::{BTreeMap, BTreeSet, BinaryHeap};
 
-/// Largest span, in gcells past the first, of a cluster of violations.
+/// Largest span, in gcells past the first, of a cluster of violations, as
+/// `stub_tiles::mergeBoxes` fixes it.
 const CLUSTER_SPAN: Gcells = Gcells(4);
 
 /// Span, in gcells past the first, of a tile around a cluster: tiles are
-/// seven gcells wide.
+/// seven gcells wide, as `stub_tiles::expandBoxes` makes them.
 const TILE_SPAN: Gcells = Gcells(6);
 
-/// Factors the conflict and marker costs of a stubborn tile are tried at.
+/// Factors the conflict and marker costs of a stubborn tile are tried at,
+/// as `FlexDR::stubbornTilesFlow` tries them.
 const COST_FACTORS: [f64; 3] = [1.0, 0.5, 2.0];
 
 /// A box of gcells by index, both ends included.
@@ -113,7 +115,10 @@ impl Taken {
 
     /// Grows `b` toward `side` one gcell at a time, at most `most`, while
     /// it stays on the die and off other clusters' tiles; returns how far
-    /// it grew.
+    /// it grew, as `stub_tiles::expandBox` does.
+    // NOTE: expandBox stops only at the die's west and south edges and grows
+    // past its east and north ones; PARE stops at every edge, as gcells off
+    // the die hold nothing to route.
     fn grow(&self, b: &mut CellBox, id: usize, side: Side, most: Gcells) -> Gcells {
         for step in Gcells(1).through(most) {
             let mut grown = *b;
@@ -196,6 +201,8 @@ fn expand_boxes(clusters: &[CellBox], limit: CellBox) -> Vec<BTreeSet<CellBox>> 
             },
         ];
         for growth in sided {
+            // NOTE: expandBoxes' priority_queue orders by expansions done
+            // alone and leaves ties to the heap; PARE breaks them first in, first out.
             queue.push(Reverse((1, order, id, growth)));
             order += 1;
         }
@@ -266,7 +273,7 @@ struct Outcome {
 
 impl DetailedRouter<'_> {
     /// Routes again, over the global routes of the nets in each violation,
-    /// the nets `scope` selects there.
+    /// the nets `scope` selects there, as `FlexDR::guideTilesFlow` does.
     pub(crate) fn repair_guides(&mut self, scope: Scope, costs: Costs) -> RepairStats {
         let mut boxes = Vec::new();
         for m in self.markers() {
@@ -285,7 +292,7 @@ impl DetailedRouter<'_> {
     /// Routes again, on tiles around each cluster of violations, the nets
     /// `scope` selects there, each tile with every mix of the conflict and
     /// marker costs times `COST_FACTORS`, keeping per cluster the result
-    /// with the fewest violations.
+    /// with the fewest violations, as `FlexDR::stubbornTilesFlow` does.
     pub(crate) fn repair_stubborn(&mut self, scope: Scope, costs: Costs) -> RepairStats {
         let limit = self.gcell_limit();
         let boxes = self
