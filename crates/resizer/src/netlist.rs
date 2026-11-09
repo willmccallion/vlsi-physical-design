@@ -5,7 +5,9 @@
 use crate::library::Link;
 use pare_common::db::design::{NetlistDB, PinOwner};
 use pare_common::db::indices::{CellId, IoPinId, NetId, PinId};
-use pare_common::db::liberty::{ArcRole, ClockGatePin, FuncExpr, LibCell, LibPort, Logic};
+use pare_common::db::liberty::{
+    ArcRole, ClockGatePin, FuncExpr, LibCell, LibPort, LibPortId, Logic,
+};
 use pare_common::db::library::{PinDirection, SignalUse};
 use pare_common::db::sdc::{ClockId, Sdc};
 use pare_common::geom::dbu::Dbu;
@@ -182,14 +184,14 @@ impl<'a> Netlist<'a> {
 
     /// The pin of `instance` for Liberty port `port`, if connected.
     #[must_use]
-    pub(crate) fn pin_of_port(&self, instance: CellId, port: usize) -> Option<PinId> {
+    pub(crate) fn pin_of_port(&self, instance: CellId, port: LibPortId) -> Option<PinId> {
         let (lib, _) = self.link.cell(self.db, instance)?;
         let macro_pin = self.link.macro_pin_of_port(lib, port)?;
         self.db.cells[instance.index()]
             .pins
             .iter()
             .copied()
-            .find(|&p| matches!(self.db.pins[p.index()].owner, PinOwner::Cell { pin, .. } if pin.index() == macro_pin))
+            .find(|&p| matches!(self.db.pins[p.index()].owner, PinOwner::Cell { pin, .. } if pin == macro_pin))
     }
 
     /// The level of each pin of `instance` by Liberty port name, as
@@ -347,8 +349,8 @@ impl Constants {
         &self,
         netlist: &Netlist<'_>,
         instance: CellId,
-        from_port: usize,
-        to_port: usize,
+        from_port: LibPortId,
+        to_port: LibPortId,
     ) -> bool {
         let Some((_, cell)) = netlist.link.cell(netlist.db, instance) else {
             return true;

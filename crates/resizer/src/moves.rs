@@ -13,7 +13,7 @@ use crate::sta::{Path, Sta};
 use pare_common::db::design::PinOwner;
 use pare_common::db::indices::{CellId, LayerId, NetId, PinId};
 use pare_common::db::liberty::{
-    Edge, EdgeValues, FuncExpr, LibCell, LibCellId, LibPort, Logic, MinMax,
+    Edge, EdgeValues, FuncExpr, LibCell, LibCellId, LibPortId, Logic, MinMax,
 };
 use pare_common::geom::dbu::Dbu;
 use pare_common::geom::point::Point;
@@ -142,7 +142,7 @@ pub(crate) struct Moves {
     pub log: MoveLog,
     /// The rebuffering search.
     pub rebuffer: Rebuffer,
-    equivalent_pins: FxHashMap<(LibCellId, usize), Vec<usize>>,
+    equivalent_pins: FxHashMap<(LibCellId, LibPortId), Vec<LibPortId>>,
 }
 
 /// The driver a move works on: where it sits on the path.
@@ -151,7 +151,7 @@ struct Site {
     driver: PinId,
     cell: CellId,
     lib: LibCellId,
-    port: usize,
+    port: LibPortId,
     edge: Edge,
     input: Option<PinId>,
     prev_driver: Option<PinId>,
@@ -414,7 +414,10 @@ impl Moves {
             touched.push(input_net);
         }
         let out_net = resizer.make_net("net", net)?;
-        let Some(out_port) = clone_cell.ports.iter().position(LibPort::is_output) else {
+        let Some(out_port) = clone_cell
+            .port_ids()
+            .find(|&p| clone_cell.ports[p].is_output())
+        else {
             return Ok(false);
         };
         let _ = resizer.connect(clone, clone_lib, out_port, out_net);
@@ -566,8 +569,8 @@ fn site(resizer: &Resizer<'_, Sta>, path: &Path, index: usize) -> Option<Site> {
 fn upsize_cell(
     resizer: &Resizer<'_, Sta>,
     lib: LibCellId,
-    in_port: usize,
-    drvr_port: usize,
+    in_port: LibPortId,
+    drvr_port: LibPortId,
     load_cap: Farads,
     prev_drive: Ohms,
 ) -> Option<LibCellId> {
@@ -575,7 +578,7 @@ fn upsize_cell(
     let cell = liberty.cell(lib);
     let in_name = &cell.ports[in_port].name;
     let out_name = &cell.ports[drvr_port].name;
-    let mut candidates: Vec<(LibCellId, usize, usize)> = resizer
+    let mut candidates: Vec<(LibCellId, LibPortId, LibPortId)> = resizer
         .swappable_cells(lib)
         .into_iter()
         .filter_map(|id| {
@@ -622,7 +625,7 @@ const fn driven_delay(prev_drive: Ohms, cap: Farads, gate_delay: Seconds) -> Sec
 
 /// The largest intrinsic delay of the arcs into `port`, as
 /// `LibertyPort::intrinsicDelay`.
-fn intrinsic_delay(cell: &LibCell, port: usize) -> Seconds {
+fn intrinsic_delay(cell: &LibCell, port: LibPortId) -> Seconds {
     cell.delay_arc_sets_to(port)
         .flat_map(|s| s.arcs.iter())
         .map(|a| a.gate_delay(Seconds::ZERO, Farads::ZERO).0)
@@ -673,14 +676,16 @@ fn half_driving_power_cell(resizer: &Resizer<'_, Sta>, lib: LibCellId) -> Option
 
 /// The input ports of `cell` that every output's function treats the same
 /// as `input`, as `SwapPinsMove::equivCellPins`.
-fn equivalent_pins(cell: &LibCell, input: usize) -> Vec<usize> {
+fn equivalent_pins(cell: &LibCell, input: LibPortId) -> Vec<LibPortId> {
     if !cell.sequentials.is_empty() {
         return Vec::new();
     }
-    let inputs: Vec<usize> = (0..cell.ports.len())
+    let inputs: Vec<LibPortId> = cell
+        .port_ids()
         .filter(|&p| cell.ports[p].is_input())
         .collect();
-    let outputs: Vec<usize> = (0..cell.ports.len())
+    let outputs: Vec<LibPortId> = cell
+        .port_ids()
         .filter(|&p| cell.ports[p].is_output())
         .collect();
     if outputs.is_empty() || inputs.len() < 2 || inputs.len() > MAX_SIMULATED_INPUTS {
@@ -713,10 +718,10 @@ fn equivalent_pins(cell: &LibCell, input: usize) -> Vec<usize> {
 /// `a` and `b` trade values, as `BaseMove::isPortEqiv`.
 fn ports_equivalent(
     function: &FuncExpr,
-    inputs: &[usize],
+    inputs: &[LibPortId],
     cell: &LibCell,
-    a: usize,
-    b: usize,
+    a: LibPortId,
+    b: LibPortId,
 ) -> bool {
     let n = inputs.len();
     for assignment in 0..(1u32 << n) {
@@ -756,15 +761,15 @@ fn ports_equivalent(
 /// than the critical input's, as `SwapPinsMove::findSwapPinCandidate`.
 fn swap_candidate(
     cell: &LibCell,
-    input: usize,
-    drvr_port: usize,
-    equivalent: &[usize],
+    input: LibPortId,
+    drvr_port: LibPortId,
+    equivalent: &[LibPortId],
     load_cap: Farads,
     input_slews: &PortSlews<'_>,
     target_slews: &EdgeValues<Seconds>,
-) -> Option<usize> {
+) -> Option<LibPortId> {
     let mut base_delay = -Seconds::INFINITY;
-    let mut port_delays: FxHashMap<usize, Seconds> = FxHashMap::default();
+    let mut port_delays: FxHashMap<LibPortId, Seconds> = FxHashMap::default();
     for set in cell.delay_arc_sets_to(drvr_port) {
         let from_name = &cell.ports[set.from].name;
         for arc in &set.arcs {
@@ -1236,16 +1241,16 @@ mod tests {
         lib.cells[0].clone()
     }
 
-    fn candidate(cell: &LibCell) -> Option<usize> {
+    fn candidate(cell: &LibCell) -> Option<LibPortId> {
         let slews = EdgeValues {
             rise: Seconds::ZERO,
             fall: Seconds::ZERO,
         };
         swap_candidate(
             cell,
-            0,
-            2,
-            &[1],
+            LibPortId::new(0),
+            LibPortId::new(2),
+            &[LibPortId::new(1)],
             Farads::ZERO,
             &PortSlews::default(),
             &slews,
@@ -1263,7 +1268,7 @@ mod tests {
     fn another_input_faster_on_every_arc_is_taken() {
         let cell = and2((0.05, 0.05), (0.04, 0.03));
 
-        assert_eq!(candidate(&cell), Some(1));
+        assert_eq!(candidate(&cell), Some(LibPortId::new(1)));
     }
 
     /// A flop launching through an inverter into another flop.
@@ -1355,6 +1360,6 @@ mod tests {
     fn the_critical_input_is_judged_by_its_slowest_arc() {
         let cell = and2((0.02, 0.06), (0.05, 0.05));
 
-        assert_eq!(candidate(&cell), Some(1));
+        assert_eq!(candidate(&cell), Some(LibPortId::new(1)));
     }
 }

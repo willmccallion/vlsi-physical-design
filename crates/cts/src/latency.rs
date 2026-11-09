@@ -12,8 +12,8 @@ use crate::triton::{
     ClockTrees, first_output, is_sink, net_cell_pins, pin_direction, sink_bbox_center,
 };
 use pare_common::db::design::{NetlistDB, PinOwner, PlacementStatus};
-use pare_common::db::indices::{MacroPinId, NetId, PinId};
-use pare_common::db::liberty::{ClockGatePin, Edge, SequentialKind};
+use pare_common::db::indices::{NetId, PinId};
+use pare_common::db::liberty::{ClockGatePin, Edge, LibPortId, SequentialKind};
 use pare_common::db::library::PinDirection;
 use pare_common::geom::dbu::Dbu;
 use pare_common::geom::orient::Orientation;
@@ -362,10 +362,9 @@ impl Balancer<'_> {
         let (in_port, out_port) = lib
             .buffer_ports()
             .ok_or_else(|| CtsError::NotABuffer(lib.name.clone()))?;
-        let pin_of = |port: usize| {
+        let pin_of = |port: LibPortId| {
             self.link
                 .macro_pin_of_port(buffer, port)
-                .map(MacroPinId::new)
                 .ok_or_else(|| CtsError::NotABuffer(lib.name.clone()))
         };
         let (in_pin, out_pin) = (pin_of(in_port)?, pin_of(out_port)?);

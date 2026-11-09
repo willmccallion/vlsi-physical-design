@@ -15,7 +15,7 @@ use pare_common::db::design::{
     NetlistDB, NonDefaultLayer, NonDefaultRule, PinOwner, PlacementStatus,
 };
 use pare_common::db::indices::{CellId, LayerId, MacroPinId, NetId, NonDefaultRuleId, PinId};
-use pare_common::db::liberty::{Edge, LibCellId, Liberty, MinMax};
+use pare_common::db::liberty::{Edge, LibCellId, LibPortId, Liberty, MinMax};
 use pare_common::db::library::{MacroClass, PinDirection, SignalUse};
 use pare_common::db::sdc::Sdc;
 use pare_common::geom::dbu::Dbu;
@@ -593,10 +593,9 @@ impl Cts<'_> {
         let (in_port, out_port) = lib
             .buffer_ports()
             .ok_or_else(|| CtsError::NotABuffer(lib.name.clone()))?;
-        let pin_of = |port: usize| {
+        let pin_of = |port: LibPortId| {
             self.link
                 .macro_pin_of_port(buffer, port)
-                .map(MacroPinId::new)
                 .ok_or_else(|| CtsError::NotABuffer(lib.name.clone()))
         };
         let in_pin = match input {
@@ -1045,7 +1044,6 @@ impl Cts<'_> {
         let pin = self
             .link
             .macro_pin_of_port(dummy, in_port)
-            .map(MacroPinId::new)
             .ok_or_else(|| CtsError::NotABuffer(lib.name.clone()))?;
         let input = db.connect_cell_pin(cell, pin, net);
         let clock = &mut self.builders[index].clock;

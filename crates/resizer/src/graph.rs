@@ -14,7 +14,7 @@ use pare_common::db::design::PinOwner;
 use pare_common::db::global_route::RouteSource;
 use pare_common::db::indices::{CellId, NetId, PinId};
 use pare_common::db::liberty::{
-    ArcRole, Edge, EdgeValues, FuncExpr, MinMax, SequentialKind, TimingArcSet,
+    ArcRole, Edge, EdgeValues, FuncExpr, LibPortId, MinMax, SequentialKind, TimingArcSet,
 };
 use pare_common::db::library::{MacroClass, SignalUse};
 use pare_common::units::{Farads, Ohms, Seconds};
@@ -345,7 +345,7 @@ impl TimingGraph {
     /// is where a repeater sits.
     pub fn grow(&mut self, netlist: &Netlist<'_>) {
         let db = netlist.db;
-        let constants_free = |_: CellId, _: usize, _: usize| true;
+        let constants_free = |_: CellId, _: LibPortId, _: LibPortId| true;
         while self.in_arcs.len() < db.pins.len() {
             let pin = PinId::new(self.in_arcs.len());
             self.in_arcs.push(in_arcs_of(netlist, pin, &constants_free));
@@ -740,8 +740,9 @@ fn is_non_leaf_clock(netlist: &Netlist<'_>, net: NetId) -> bool {
 /// The arcs `OpenSTA` searches into each driver: the delay arcs it does not
 /// disable, from the connected input pins of the driver's cell.
 fn in_arcs(netlist: &Netlist<'_>, constants: &Constants) -> Vec<Vec<InArc>> {
-    let enabled =
-        |cell: CellId, from: usize, to: usize| constants.arc_enabled(netlist, cell, from, to);
+    let enabled = |cell: CellId, from: LibPortId, to: LibPortId| {
+        constants.arc_enabled(netlist, cell, from, to)
+    };
     (0..netlist.db.pins.len())
         .map(|p| in_arcs_of(netlist, PinId::new(p), &enabled))
         .collect()
@@ -750,7 +751,7 @@ fn in_arcs(netlist: &Netlist<'_>, constants: &Constants) -> Vec<Vec<InArc>> {
 fn in_arcs_of(
     netlist: &Netlist<'_>,
     pin: PinId,
-    enabled: &dyn Fn(CellId, usize, usize) -> bool,
+    enabled: &dyn Fn(CellId, LibPortId, LibPortId) -> bool,
 ) -> Vec<InArc> {
     let db = netlist.db;
     let PinOwner::Cell { cell, .. } = db.pins[pin.index()].owner else {

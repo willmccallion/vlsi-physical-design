@@ -18,7 +18,7 @@ use crate::resizer::{RepairError, Resizer, buffer_delays, find_targets, meters_t
 use crate::sta::{Sta, Via};
 use pare_common::db::design::PinOwner;
 use pare_common::db::indices::{CellId, LayerId, NetId, PinId};
-use pare_common::db::liberty::{ArcRole, Edge, EdgeValues, LibCellId, MinMax};
+use pare_common::db::liberty::{ArcRole, Edge, EdgeValues, LibCellId, LibPortId, MinMax};
 use pare_common::geom::dbu::{Dbu, DbuPerMicron};
 use pare_common::geom::point::Point;
 use pare_common::units::{Farads, FaradsPerMeter, Meters, Ohms, OhmsPerMeter, Seconds};
@@ -59,7 +59,7 @@ struct DriverPoint {
 struct Driver {
     pin: PinId,
     cell: LibCellId,
-    port: usize,
+    port: LibPortId,
     fanout_limit: f64,
     max_slew: Seconds,
     load_high_water_mark: Farads,
@@ -172,7 +172,9 @@ impl Rebuffer {
         if has_top_level_output(resizer, net) {
             return Ok(0);
         }
-        self.set_driver(resizer, driver);
+        if !self.set_driver(resizer, driver) {
+            return Ok(0);
+        }
         let Some(tree) = make_tree(resizer, driver) else {
             return Ok(0);
         };
@@ -229,7 +231,9 @@ impl Rebuffer {
             if resizer.netlist().is_retired(driver) {
                 continue;
             }
-            self.set_driver(resizer, driver);
+            if !self.set_driver(resizer, driver) {
+                continue;
+            }
             let Some(original) = self.import_buffer_tree(resizer, driver) else {
                 continue;
             };
@@ -294,12 +298,14 @@ impl Rebuffer {
         Ok(())
     }
 
-    /// Notes the driver at hand: its fanout and slew limits, as `setPin`.
-    fn set_driver(&mut self, resizer: &Resizer<'_, Sta>, pin: PinId) {
-        let (cell, port) = resizer
-            .link
-            .pin_port(resizer.db, pin)
-            .unwrap_or((LibCellId(0), 0));
+    /// Notes the driver at hand: its fanout and slew limits, as `setPin`;
+    /// whether it has a Liberty port to model it by.
+    #[must_use]
+    fn set_driver(&mut self, resizer: &Resizer<'_, Sta>, pin: PinId) -> bool {
+        let Some((cell, port)) = resizer.link.pin_port(resizer.db, pin) else {
+            self.driver = None;
+            return false;
+        };
         let max_slew = resizer
             .driver_slew_limit(pin)
             .map_or(Seconds::INFINITY, |l| margined(l, SLEW_MARGIN));
@@ -312,6 +318,7 @@ impl Rebuffer {
             load_high_water_mark: Farads::ZERO,
             arrival_paths: [None, None],
         });
+        true
     }
 
     /// Gives each load the slack of its worst path measured at the driver,
@@ -1929,7 +1936,7 @@ mod tests {
             constraints,
             |resizer| {
                 let mut rebuffer = Rebuffer::new(resizer).unwrap();
-                rebuffer.set_driver(resizer, q);
+                assert!(rebuffer.set_driver(resizer, q));
                 let tree = make_tree(resizer, q).unwrap();
                 let tree = rebuffer.annotate_load_slacks(resizer, &tree, q);
 

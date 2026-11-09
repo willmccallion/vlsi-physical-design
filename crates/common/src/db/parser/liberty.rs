@@ -8,8 +8,8 @@
 
 use crate::db::liberty::{
     ArcRole, Axis, AxisVariable, ClockGatePin, ClockTreePath, Defaults, Edge, EdgeValues, FuncExpr,
-    LibCell, LibPort, Liberty, LibraryUnits, MinMax, PortDirection, Sequential, SequentialKind,
-    Statetable, Table, TimingArc, TimingArcSet, TimingSense,
+    LibCell, LibPort, LibPortId, Liberty, LibraryUnits, MinMax, PortDirection, Sequential,
+    SequentialKind, Statetable, Table, TimingArc, TimingArcSet, TimingSense,
 };
 use crate::db::parser::lexer::{ParseError, read_file};
 use crate::units::{Farads, Seconds, Watts};
@@ -895,7 +895,12 @@ impl Interpreter {
         Ok(())
     }
 
-    fn timing(&self, cell: &mut LibCell, to: usize, group: &Group<'_>) -> Result<(), ParseError> {
+    fn timing(
+        &self,
+        cell: &mut LibCell,
+        to: LibPortId,
+        group: &Group<'_>,
+    ) -> Result<(), ParseError> {
         let timing_type = group.attr_text("timing_type").unwrap_or("combinational");
         if let Some(bound) = clock_tree_path_bound(timing_type) {
             let path = self.clock_tree_path(group, bound)?;
