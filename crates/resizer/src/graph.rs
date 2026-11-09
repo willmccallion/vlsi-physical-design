@@ -14,7 +14,8 @@ use pare_common::db::design::PinOwner;
 use pare_common::db::global_route::RouteSource;
 use pare_common::db::indices::{CellId, IdVec, NetId, PinId};
 use pare_common::db::liberty::{
-    ArcRole, Edge, EdgeValues, FuncExpr, LibPortId, MinMax, SequentialKind, TimingArcSet,
+    ArcRole, Edge, EdgeValues, FuncExpr, LibPortId, MinMax, SequentialKind, SideValues,
+    TimingArcSet,
 };
 use pare_common::db::library::{MacroClass, SignalUse};
 use pare_common::units::{Farads, Ohms, Seconds};
@@ -49,7 +50,7 @@ pub(crate) struct ArcDelay {
     pub to_edge: Edge,
     /// The delay for each side: from the early input slew on the early
     /// side, the late one on the late side.
-    pub delay: [Seconds; 2],
+    pub delay: SideValues<Seconds>,
 }
 
 /// Where the graph's nets get their parasitics.
@@ -63,7 +64,7 @@ pub(crate) enum Estimator<'r> {
 }
 
 /// A value for each edge on each side of the delay range, min first.
-type PerSide = [EdgeValues<Seconds>; 2];
+type PerSide = SideValues<EdgeValues<Seconds>>;
 
 /// Slews and delays over the design, kept current as repair edits it.
 ///
@@ -107,10 +108,10 @@ impl TimingGraph {
             level,
             in_arcs,
             loop_arcs,
-            slew: IdVec::filled([EdgeValues::default(); 2], db.pins.len()),
+            slew: IdVec::filled(SideValues::both(EdgeValues::default()), db.pins.len()),
             annotated: IdVec::filled(None, db.pins.len()),
             arc_delays: IdVec::filled(Vec::new(), db.pins.len()),
-            wire_delay: IdVec::filled([EdgeValues::default(); 2], db.pins.len()),
+            wire_delay: IdVec::filled(SideValues::both(EdgeValues::default()), db.pins.len()),
             parasitics,
             rc,
             clock_rc,
@@ -146,7 +147,7 @@ impl TimingGraph {
     pub fn wire_delay(&self, load: PinId, edge: Edge, side: MinMax) -> Seconds {
         self.wire_delay
             .get(load)
-            .map_or(Seconds::ZERO, |d| d[side.index()].get(edge))
+            .map_or(Seconds::ZERO, |d| d[side].get(edge))
     }
 
     /// The pins driving nets, by rising level and then name, as `OpenROAD`
@@ -180,7 +181,7 @@ impl TimingGraph {
     pub(crate) fn slew_side(&self, pin: PinId, side: MinMax) -> EdgeValues<Seconds> {
         self.slew
             .get(pin)
-            .map_or_else(EdgeValues::default, |s| s[side.index()])
+            .map_or_else(EdgeValues::default, |s| s[side])
     }
 
     /// Holds a pin's slew at `slew` for both edges and sides until cleared,
@@ -188,7 +189,7 @@ impl TimingGraph {
     pub(crate) fn annotate_slew(&mut self, pin: PinId, slew: Seconds) {
         self.annotated[pin] = Some(slew);
         let both = EdgeValues::both(slew);
-        self.slew[pin] = [both, both];
+        self.slew[pin] = SideValues::both(both);
     }
 
     /// Drops every annotation and returns the pins that held one; their
@@ -334,10 +335,12 @@ impl TimingGraph {
             let pin =
                 self.in_arcs
                     .push(in_arcs_of(netlist, self.in_arcs.next_id(), &constants_free));
-            let _ = self.slew.push([EdgeValues::default(); 2]);
+            let _ = self.slew.push(SideValues::both(EdgeValues::default()));
             let _ = self.annotated.push(None);
             let _ = self.arc_delays.push(Vec::new());
-            let _ = self.wire_delay.push([EdgeValues::default(); 2]);
+            let _ = self
+                .wire_delay
+                .push(SideValues::both(EdgeValues::default()));
             let level = self.in_arcs[pin]
                 .iter()
                 .map(|a| self.level[a.from] + 1)
@@ -424,7 +427,7 @@ impl TimingGraph {
                 let Some(limit) = limit_of(load) else {
                     continue;
                 };
-                if self.slew[load][MinMax::Max.index()].max() > limit {
+                if self.slew[load][MinMax::Max].max() > limit {
                     self.annotate_slew(load, limit);
                     annotated.push((load, limit));
                 }
@@ -445,7 +448,13 @@ impl TimingGraph {
         root: EdgeValues<Seconds>,
     ) -> Vec<(PerSide, PerSide)> {
         let t = &netlist.link.liberty.thresholds;
-        let mut out = vec![([root, root], [EdgeValues::default(); 2]); loads.len()];
+        let mut out = vec![
+            (
+                SideValues::both(root),
+                SideValues::both(EdgeValues::default())
+            );
+            loads.len()
+        ];
         for edge in Edge::BOTH {
             let Some(pi) = self.pi_elmore(netlist, driver, edge) else {
                 continue;
@@ -460,7 +469,7 @@ impl TimingGraph {
                     continue;
                 };
                 let slew = elmore.get().mul_add(slew_factor, root.get(edge).get());
-                for side in 0..2 {
+                for side in MinMax::BOTH {
                     out[i].0[side].set(edge, Seconds::new(slew));
                     out[i].1[side].set(edge, elmore * delay_factor);
                 }
@@ -498,7 +507,7 @@ impl TimingGraph {
         let drvr_slew = if found.any_arc {
             found.driver_slew.map(Merged::values)
         } else {
-            [root, root]
+            SideValues::both(root)
         };
         if self.annotated[driver].is_none() {
             self.slew[driver] = drvr_slew;
@@ -540,7 +549,7 @@ impl TimingGraph {
         loads: &[PinId],
     ) -> DriverDelays {
         let db = netlist.db;
-        let unset = [Merged::new(MinMax::Min), Merged::new(MinMax::Max)];
+        let unset = SideValues::from_fn(Merged::new);
         let mut found = DriverDelays {
             driver_slew: unset,
             load_slews: vec![unset; loads.len()],
@@ -568,12 +577,12 @@ impl TimingGraph {
                     },
                     PiElmore::model,
                 );
-                let mut delay = [Seconds::ZERO; 2];
+                let mut delay = SideValues::both(Seconds::ZERO);
                 for side in MinMax::BOTH {
                     let in_slew = if set.role == ArcRole::RegClkToQ && clocks.is_ideal(arc.from) {
                         Seconds::ZERO
                     } else {
-                        self.slew[arc.from][side.index()].get(timing_arc.from_edge)
+                        self.slew[arc.from][side].get(timing_arc.from_edge)
                     };
                     let result = dmp::gate_delay(
                         timing_arc,
@@ -581,13 +590,13 @@ impl TimingGraph {
                         in_slew,
                         model,
                     );
-                    delay[side.index()] = result.delay;
-                    found.driver_slew[side.index()].take(edge, result.slew);
+                    delay[side] = result.delay;
+                    found.driver_slew[side].take(edge, result.slew);
                     for (i, &load) in loads.iter().enumerate() {
                         let elmore = pi.as_ref().map_or(Seconds::ZERO, |p| p.elmore_to(load));
                         let (load_delay, load_slew) = result.load_delay_slew(elmore);
-                        found.load_slews[i][side.index()].take(edge, load_slew);
-                        found.load_delays[i][side.index()].take(edge, load_delay);
+                        found.load_slews[i][side].take(edge, load_slew);
+                        found.load_delays[i][side].take(edge, load_delay);
                     }
                 }
                 found.arc_delays.push(ArcDelay {
@@ -605,9 +614,9 @@ impl TimingGraph {
 /// What the arcs into a driver give it: its slew and its loads' slews and
 /// wire delays on each side, merged over the arcs, and each arc's delays.
 struct DriverDelays {
-    driver_slew: [Merged; 2],
-    load_slews: Vec<[Merged; 2]>,
-    load_delays: Vec<[Merged; 2]>,
+    driver_slew: SideValues<Merged>,
+    load_slews: Vec<SideValues<Merged>>,
+    load_delays: Vec<SideValues<Merged>>,
     arc_delays: Vec<ArcDelay>,
     /// Whether any arc reached the driver; one without is ideal.
     any_arc: bool,
@@ -616,9 +625,10 @@ struct DriverDelays {
 /// Whether two sided slews are equal within `OpenSTA`'s tolerance, so a
 /// change too small to matter stops propagating.
 fn same_slews(a: &PerSide, b: &PerSide) -> bool {
-    a.iter()
-        .zip(b)
-        .all(|(x, y)| fuzzy::equal(x.rise, y.rise) && fuzzy::equal(x.fall, y.fall))
+    MinMax::BOTH.iter().all(|&side| {
+        let (x, y) = (a[side], b[side]);
+        fuzzy::equal(x.rise, y.rise) && fuzzy::equal(x.fall, y.fall)
+    })
 }
 
 /// Values for both edges merged over a driver's arcs on one side: the

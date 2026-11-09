@@ -7,7 +7,7 @@
 //! `set_units` says.
 
 use crate::db::indices::{CellId, IoPinId};
-use crate::db::liberty::{Edge, MinMax};
+use crate::db::liberty::{Edge, EdgeValues, MinMax, SideValues};
 use crate::units::{Farads, Seconds};
 use std::collections::HashMap;
 
@@ -36,21 +36,21 @@ pub struct ClockEdge {
 /// port delay or an input slew, which the commands set piecewise.
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub struct RiseFallMinMax {
-    values: [[Option<Seconds>; 2]; 2],
+    values: EdgeValues<SideValues<Option<Seconds>>>,
 }
 
 impl RiseFallMinMax {
     /// The value for `edge` on `side`, if set.
     #[must_use]
-    pub const fn get(&self, edge: Edge, side: MinMax) -> Option<Seconds> {
-        self.values[edge.index()][side.index()]
+    pub fn get(&self, edge: Edge, side: MinMax) -> Option<Seconds> {
+        self.values[edge][side]
     }
 
     /// Sets the value for every edge in `edges` and every side in `sides`.
     pub fn set(&mut self, edges: &[Edge], sides: &[MinMax], value: Seconds) {
         for &edge in edges {
             for &side in sides {
-                self.values[edge.index()][side.index()] = Some(value);
+                self.values[edge][side] = Some(value);
             }
         }
     }
@@ -61,7 +61,7 @@ impl RiseFallMinMax {
     pub fn merge(&mut self, edges: &[Edge], sides: &[MinMax], value: Seconds) {
         for &edge in edges {
             for &side in sides {
-                let slot = &mut self.values[edge.index()][side.index()];
+                let slot = &mut self.values[edge][side];
                 *slot = Some(match *slot {
                     Some(held) if !side.beats(value, held) => held,
                     _ => value,
@@ -73,7 +73,11 @@ impl RiseFallMinMax {
     /// Whether any value is set.
     #[must_use]
     pub fn is_empty(&self) -> bool {
-        self.values.iter().flatten().all(Option::is_none)
+        Edge::BOTH.iter().all(|&edge| {
+            MinMax::BOTH
+                .iter()
+                .all(|&side| self.values[edge][side].is_none())
+        })
     }
 }
 
@@ -91,7 +95,7 @@ pub struct Clock {
     /// The ports it enters at.
     pub sources: Vec<IoPinId>,
     /// Setup (late) and hold (early) uncertainty, where set.
-    pub uncertainty: [Option<Seconds>; 2],
+    pub uncertainty: SideValues<Option<Seconds>>,
     /// Whether it arrives through its network's delays rather than
     /// everywhere at once, as `set_propagated_clock` makes it.
     pub propagated: bool,
@@ -110,7 +114,7 @@ impl Clock {
     /// The uncertainty applied to checks on `side`; zero where none is set.
     #[must_use]
     pub fn uncertainty(&self, side: MinMax) -> Seconds {
-        self.uncertainty[side.index()].unwrap_or(Seconds::ZERO)
+        self.uncertainty[side].unwrap_or(Seconds::ZERO)
     }
 }
 
@@ -212,16 +216,16 @@ impl MultiCyclePath {
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Derating {
     /// Cell delay factors for the early and late sides.
-    pub cell: [f64; 2],
+    pub cell: SideValues<f64>,
     /// Wire delay factors for the early and late sides.
-    pub net: [f64; 2],
+    pub net: SideValues<f64>,
 }
 
 impl Default for Derating {
     fn default() -> Self {
         Self {
-            cell: [1.0, 1.0],
-            net: [1.0, 1.0],
+            cell: SideValues::both(1.0),
+            net: SideValues::both(1.0),
         }
     }
 }
@@ -231,7 +235,7 @@ impl Default for Derating {
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub struct CellDerating {
     /// The factor on each side, if set.
-    pub cell: [Option<f64>; 2],
+    pub cell: SideValues<Option<f64>>,
 }
 
 /// Limits applied to every pin of the design.
@@ -296,9 +300,9 @@ impl Sdc {
     /// instance's own where set, else the design's.
     #[must_use]
     pub fn cell_derate(&self, cell: Option<CellId>, side: MinMax) -> f64 {
-        let design = self.derating.cell[side.index()];
+        let design = self.derating.cell[side];
         cell.and_then(|c| self.cell_derates.get(&c))
-            .and_then(|d| d.cell[side.index()])
+            .and_then(|d| d.cell[side])
             .unwrap_or(design)
     }
 

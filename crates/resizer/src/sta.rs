@@ -16,7 +16,9 @@ use crate::graph::TimingGraph;
 use crate::netlist::{ClockNetwork, Constants, Netlist};
 use pare_common::db::design::PinOwner;
 use pare_common::db::indices::{CellId, IoPinId, PinId};
-use pare_common::db::liberty::{ArcRole, Edge, FuncExpr, Logic, MinMax, SequentialKind};
+use pare_common::db::liberty::{
+    ArcRole, Edge, FuncExpr, Logic, MinMax, SequentialKind, SideValues,
+};
 use pare_common::db::sdc::{ClockEdge, ClockId, MultiCyclePath, PathEnd, Sdc};
 use pare_common::units::Seconds;
 use rustc_hash::{FxHashMap, FxHashSet};
@@ -89,11 +91,11 @@ struct Prev {
 struct Entry {
     tag: TagId,
     /// Arrival per side; absent on a side nothing constrains.
-    arrival: [Option<Seconds>; 2],
+    arrival: SideValues<Option<Seconds>>,
     /// Required time per side: the latest allowed on the late side, the
     /// earliest on the early side; unconstrained starts at the identity.
-    required: [Seconds; 2],
-    prev: [Option<Prev>; 2],
+    required: SideValues<Seconds>,
+    prev: SideValues<Option<Prev>>,
 }
 
 /// What finding a pin's arrivals again did to its entries, by how much
@@ -113,29 +115,28 @@ impl Entry {
     const fn new(tag: TagId) -> Self {
         Self {
             tag,
-            arrival: [None, None],
+            arrival: SideValues::both(None),
             required: REQUIRED_INIT,
-            prev: [None, None],
+            prev: SideValues::both(None),
         }
     }
 
     fn slack(&self, side: MinMax) -> Seconds {
-        slack_of(
-            self.arrival[side.index()],
-            self.required[side.index()],
-            side,
-        )
+        slack_of(self.arrival[side], self.required[side], side)
     }
 }
 
 /// The required time nothing constrains: no bound on the early side, none
 /// on the late side.
-const REQUIRED_INIT: [Seconds; 2] = [Seconds::new(f64::NEG_INFINITY), Seconds::INFINITY];
+const REQUIRED_INIT: SideValues<Seconds> = SideValues {
+    min: Seconds::new(f64::NEG_INFINITY),
+    max: Seconds::INFINITY,
+};
 
 /// The required time of a pin `OpenSTA`'s required search never reaches,
 /// one with neither fanin nor fanout such as an unconnected input port:
 /// the zero its paths start with, so a late arrival leaves negative slack.
-const REQUIRED_UNREACHED: [Seconds; 2] = [Seconds::ZERO; 2];
+const REQUIRED_UNREACHED: SideValues<Seconds> = SideValues::both(Seconds::ZERO);
 
 /// Whether a required time is the unconstrained one.
 const fn unconstrained(required: Seconds) -> bool {
@@ -144,8 +145,10 @@ const fn unconstrained(required: Seconds) -> bool {
 
 /// Whether two pairs of times differ at all, bit for bit, which is what a
 /// change worth propagating means.
-fn differ(a: [Seconds; 2], b: [Seconds; 2]) -> bool {
-    a.iter().zip(&b).any(|(&x, &y)| !same_time(x, y))
+fn differ(a: SideValues<Seconds>, b: SideValues<Seconds>) -> bool {
+    MinMax::BOTH
+        .iter()
+        .any(|&side| !same_time(a[side], b[side]))
 }
 
 /// Whether two times, either possibly infinite, are equal within
@@ -308,9 +311,9 @@ pub struct Sta {
     endpoints: Vec<PinId>,
     is_endpoint: Vec<bool>,
     /// Each endpoint pin's slack from its own checks, per side.
-    end_slack: Vec<[Seconds; 2]>,
-    tns: [Seconds; 2],
-    worst: [Option<(Slack, Option<PinId>)>; 2],
+    end_slack: Vec<SideValues<Seconds>>,
+    tns: SideValues<Seconds>,
+    worst: SideValues<Option<(Slack, Option<PinId>)>>,
     accountings: FxHashMap<(ClockEdge, ClockEdge), Accounting>,
     exception_ports: FxHashSet<IoPinId>,
     latches: FxHashMap<CellId, Latch>,
@@ -327,18 +330,15 @@ pub struct Sta {
 #[derive(Clone, Copy, Debug)]
 struct Capture {
     edge: ClockEdge,
-    latency: [Seconds; 2],
+    latency: SideValues<Seconds>,
 }
 
 impl Capture {
     /// The latency a check on `side` captures with: the early arrival for
     /// setup and the late one for hold, as `OpenSTA` takes the capturing
     /// clock path on the side opposite the check.
-    const fn latency(&self, side: MinMax) -> Seconds {
-        match side {
-            MinMax::Max => self.latency[0],
-            MinMax::Min => self.latency[1],
-        }
+    fn latency(&self, side: MinMax) -> Seconds {
+        self.latency[side.opposite()]
     }
 }
 
@@ -370,9 +370,9 @@ impl Sta {
             entries: vec![Vec::new(); 2 * n],
             endpoints: Vec::new(),
             is_endpoint: vec![false; n],
-            end_slack: vec![[Seconds::INFINITY; 2]; n],
-            tns: [Seconds::ZERO; 2],
-            worst: [None, None],
+            end_slack: vec![SideValues::both(Seconds::INFINITY); n],
+            tns: SideValues::both(Seconds::ZERO),
+            worst: SideValues::both(None),
             accountings: FxHashMap::default(),
             exception_ports,
             latches: find_latches(netlist, constants),
@@ -418,7 +418,8 @@ impl Sta {
         }
         self.entries.resize(2 * n, Vec::new());
         self.is_endpoint.resize(n, false);
-        self.end_slack.resize(n, [Seconds::INFINITY; 2]);
+        self.end_slack
+            .resize(n, SideValues::both(Seconds::INFINITY));
         self.propagated.resize(n, false);
     }
 
@@ -520,7 +521,7 @@ impl Sta {
     pub fn arrival(&self, pin: PinId, edge: Edge, side: MinMax) -> Option<Seconds> {
         self.entries(pin, edge)
             .iter()
-            .filter_map(|e| e.arrival[side.index()])
+            .filter_map(|e| e.arrival[side])
             .reduce(|a, b| if side.beats(b, a) { b } else { a })
     }
 
@@ -534,7 +535,7 @@ impl Sta {
                 let tag = self.tags[e.tag.index()];
                 let rising = tag.launch.is_some_and(|l| l.edge == Edge::Rise);
                 (tag.is_clock && rising)
-                    .then_some(e.arrival[MinMax::Max.index()])
+                    .then_some(e.arrival[MinMax::Max])
                     .flatten()
             })
         })
@@ -546,26 +547,26 @@ impl Sta {
     pub fn required(&self, pin: PinId, edge: Edge, side: MinMax) -> Option<Seconds> {
         self.entries(pin, edge)
             .iter()
-            .map(|e| e.required[side.index()])
+            .map(|e| e.required[side])
             .filter(|&r| !unconstrained(r))
             .reduce(|a, b| if tighter(side, b, a) { b } else { a })
     }
 
     /// The sum of the negative endpoint slacks on `side`.
     #[must_use]
-    pub(crate) const fn total_negative_slack(&self, side: MinMax) -> Seconds {
-        self.tns[side.index()]
+    pub(crate) fn total_negative_slack(&self, side: MinMax) -> Seconds {
+        self.tns[side]
     }
 
     /// The least endpoint slack on `side` and its endpoint.
     #[must_use]
     pub fn worst_slack(&self, side: MinMax) -> (Slack, Option<PinId>) {
-        if let Some(worst) = self.worst[side.index()] {
+        if let Some(worst) = self.worst[side] {
             return worst;
         }
         let mut worst = (Slack::UNCONSTRAINED, None);
         for &end in &self.endpoints {
-            let slack = Slack(self.end_slack[end.index()][side.index()]);
+            let slack = Slack(self.end_slack[end.index()][side]);
             if slack < worst.0 {
                 worst = (slack, Some(end));
             }
@@ -577,9 +578,9 @@ impl Sta {
     /// changes.
     fn cache_worst(&mut self) {
         for side in MinMax::BOTH {
-            if self.worst[side.index()].is_none() {
+            if self.worst[side].is_none() {
                 let worst = self.worst_slack(side);
-                self.worst[side.index()] = Some(worst);
+                self.worst[side] = Some(worst);
             }
         }
     }
@@ -607,7 +608,7 @@ impl Sta {
         let mut at = (end, edge, entry);
         loop {
             let (pin, edge, entry) = at;
-            let via = match entry.prev[side.index()] {
+            let via = match entry.prev[side] {
                 None => Via::Start,
                 Some(Prev { set: None, .. }) => Via::Wire,
                 Some(Prev { set: Some(set), .. }) => Via::Arc { set: set as usize },
@@ -616,10 +617,10 @@ impl Sta {
                 pin,
                 edge,
                 tag: self.tags[entry.tag.index()],
-                arrival: entry.arrival[side.index()].unwrap_or(Seconds::ZERO),
+                arrival: entry.arrival[side].unwrap_or(Seconds::ZERO),
                 via,
             });
-            let Some(prev) = entry.prev[side.index()] else {
+            let Some(prev) = entry.prev[side] else {
                 break;
             };
             let prev_entry = self
@@ -771,11 +772,14 @@ impl Sta {
             }
         }
         let same_arrival = |o: &Entry, f: &Entry| {
-            o.arrival.iter().zip(&f.arrival).all(|(x, y)| match (x, y) {
-                (Some(x), Some(y)) => same_time(*x, *y),
-                (None, None) => true,
-                _ => false,
-            })
+            o.arrival
+                .iter()
+                .zip(f.arrival.iter())
+                .all(|(x, y)| match (x, y) {
+                    (Some(x), Some(y)) => same_time(*x, *y),
+                    (None, None) => true,
+                    _ => false,
+                })
         };
         let changed = slot.len() != fresh.len()
             || slot
@@ -808,9 +812,9 @@ impl Sta {
             });
             entries.push(Entry {
                 tag,
-                arrival: [Some(time), Some(time)],
+                arrival: SideValues::both(Some(time)),
                 required: REQUIRED_INIT,
-                prev: [None, None],
+                prev: SideValues::both(None),
             });
         }
         entries
@@ -828,9 +832,9 @@ impl Sta {
             });
             return vec![Entry {
                 tag,
-                arrival: [Some(Seconds::ZERO), Some(Seconds::ZERO)],
+                arrival: SideValues::both(Some(Seconds::ZERO)),
                 required: REQUIRED_INIT,
-                prev: [None, None],
+                prev: SideValues::both(None),
             }];
         }
         let from_port = self.exception_ports.contains(&io).then_some(io);
@@ -843,7 +847,7 @@ impl Sta {
             });
             let edge_time = self.sdc.edge_time(delay.reference);
             let arrival =
-                MinMax::BOTH.map(|side| delay.delays.get(edge, side).map(|d| edge_time + d));
+                SideValues::from_fn(|side| delay.delays.get(edge, side).map(|d| edge_time + d));
             if arrival.iter().all(Option::is_none) {
                 continue;
             }
@@ -851,7 +855,7 @@ impl Sta {
                 tag,
                 arrival,
                 required: REQUIRED_INIT,
-                prev: [None, None],
+                prev: SideValues::both(None),
             });
         }
         entries
@@ -944,10 +948,10 @@ impl Sta {
                     self.data_tag(from.tag)
                 };
                 for side in MinMax::BOTH {
-                    let Some(arrival) = from.arrival[side.index()] else {
+                    let Some(arrival) = from.arrival[side] else {
                         continue;
                     };
-                    let delay = arc.delay[side.index()] * derate[side.index()];
+                    let delay = arc.delay[side] * derate[side];
                     let prev = Prev {
                         pin: arc.arc.from,
                         edge: arc.from_edge,
@@ -987,7 +991,7 @@ impl Sta {
             }
             for from in self.entries(driver, edge) {
                 for side in MinMax::BOTH {
-                    let Some(arrival) = from.arrival[side.index()] else {
+                    let Some(arrival) = from.arrival[side] else {
                         continue;
                     };
                     let wire = graph.wire_delay(load, edge, side);
@@ -995,7 +999,7 @@ impl Sta {
                         &mut entries,
                         from.tag,
                         side,
-                        wire.mul_add(derate[side.index()], arrival),
+                        wire.mul_add(derate[side], arrival),
                         Prev {
                             pin: driver,
                             edge,
@@ -1161,10 +1165,10 @@ impl Sta {
                     if self.is_endpoint(pin) {
                         let checks = self.check_requireds(netlist, graph, pin, edge, entry);
                         for side in MinMax::BOTH {
-                            if let Some(check) = checks[side.index()]
-                                && tighter(side, check, required[side.index()])
+                            if let Some(check) = checks[side]
+                                && tighter(side, check, required[side])
                             {
-                                required[side.index()] = check;
+                                required[side] = check;
                             }
                         }
                     }
@@ -1186,12 +1190,12 @@ impl Sta {
     /// The factors the delays of the arcs into `driver` are scaled by, for
     /// the early and late sides: its instance's own derate where set, else
     /// the design's.
-    fn cell_derates(&self, netlist: &Netlist<'_>, driver: PinId) -> [f64; 2] {
+    fn cell_derates(&self, netlist: &Netlist<'_>, driver: PinId) -> SideValues<f64> {
         let cell = match netlist.db.pins[driver].owner {
             PinOwner::Cell { cell, .. } => Some(cell),
             PinOwner::Io(_) => None,
         };
-        MinMax::BOTH.map(|side| self.sdc.cell_derate(cell, side))
+        SideValues::from_fn(|side| self.sdc.cell_derate(cell, side))
     }
 
     /// The required times a pin's fanout imposes for one tag.
@@ -1202,7 +1206,7 @@ impl Sta {
         pin: PinId,
         edge: Edge,
         tag: TagId,
-    ) -> [Seconds; 2] {
+    ) -> SideValues<Seconds> {
         let mut required = REQUIRED_INIT;
         if netlist.is_driver(pin) {
             let net = netlist.db.pins[pin].net;
@@ -1213,14 +1217,14 @@ impl Sta {
                 }
                 for entry in self.entries(load, edge).iter().filter(|e| e.tag == tag) {
                     for side in MinMax::BOTH {
-                        let bound = entry.required[side.index()];
+                        let bound = entry.required[side];
                         if unconstrained(bound) {
                             continue;
                         }
                         let wire = graph.wire_delay(load, edge, side);
-                        let candidate = wire.mul_add(-derate[side.index()], bound);
-                        if tighter(side, candidate, required[side.index()]) {
-                            required[side.index()] = candidate;
+                        let candidate = wire.mul_add(-derate[side], bound);
+                        if tighter(side, candidate, required[side]) {
+                            required[side] = candidate;
                         }
                     }
                 }
@@ -1242,14 +1246,13 @@ impl Sta {
                         .filter(|e| e.tag == tag)
                     {
                         for side in MinMax::BOTH {
-                            let bound = entry.required[side.index()];
+                            let bound = entry.required[side];
                             if unconstrained(bound) {
                                 continue;
                             }
-                            let candidate =
-                                arc.delay[side.index()].mul_add(-derate[side.index()], bound);
-                            if tighter(side, candidate, required[side.index()]) {
-                                required[side.index()] = candidate;
+                            let candidate = arc.delay[side].mul_add(-derate[side], bound);
+                            if tighter(side, candidate, required[side]) {
+                                required[side] = candidate;
                             }
                         }
                     }
@@ -1268,14 +1271,14 @@ impl Sta {
         pin: PinId,
         edge: Edge,
         entry: &Entry,
-    ) -> [Option<Seconds>; 2] {
+    ) -> SideValues<Option<Seconds>> {
         let tag = self.tags[entry.tag.index()];
         let Some(launch) = tag.launch else {
-            return [None, None];
+            return SideValues::both(None);
         };
-        let mut required: [Option<Seconds>; 2] = [None, None];
+        let mut required: SideValues<Option<Seconds>> = SideValues::both(None);
         let mut tighten = |side: MinMax, candidate: Seconds| {
-            let slot = &mut required[side.index()];
+            let slot = &mut required[side];
             if slot.is_none_or(|held| tighter(side, candidate, held)) {
                 *slot = Some(candidate);
             }
@@ -1306,7 +1309,7 @@ impl Sta {
                     }
                 }
                 let Some((lib, port)) = netlist.link.pin_port(db, pin) else {
-                    return [None, None];
+                    return SideValues::both(None);
                 };
                 let latch = self
                     .latches
@@ -1328,7 +1331,7 @@ impl Sta {
                     let Some(side) = set.role.check_side() else {
                         continue;
                     };
-                    let Some(arrival) = entry.arrival[side.index()] else {
+                    let Some(arrival) = entry.arrival[side] else {
                         continue;
                     };
                     let data_slew = graph.slew_side(pin, side).get(edge);
@@ -1383,7 +1386,7 @@ impl Sta {
     ) -> Vec<(MinMax, Seconds)> {
         let mut out = Vec::new();
         for side in MinMax::BOTH {
-            if entry.arrival[side.index()].is_none() {
+            if entry.arrival[side].is_none() {
                 continue;
             }
             let clock_edge = gate.active.check_edge(side);
@@ -1520,15 +1523,15 @@ impl Sta {
 
     /// Recomputes an endpoint's own-check slack and the totals it enters.
     fn refresh_endpoint(&mut self, netlist: &Netlist<'_>, graph: &TimingGraph, pin: PinId) {
-        let mut slack = [Seconds::INFINITY; 2];
+        let mut slack = SideValues::both(Seconds::INFINITY);
         for edge in Edge::BOTH {
             let entries = self.entries(pin, edge).to_vec();
             for entry in entries {
                 let checks = self.check_requireds(netlist, graph, pin, edge, &entry);
                 for side in MinMax::BOTH {
-                    if let Some(required) = checks[side.index()] {
-                        let s = slack_of(entry.arrival[side.index()], required, side);
-                        slack[side.index()] = slack[side.index()].min(s);
+                    if let Some(required) = checks[side] {
+                        let s = slack_of(entry.arrival[side], required, side);
+                        slack[side] = slack[side].min(s);
                     }
                 }
             }
@@ -1538,14 +1541,13 @@ impl Sta {
             return;
         }
         for side in MinMax::BOTH {
-            let i = side.index();
-            if old[i].is_finite() && old[i] < Seconds::ZERO {
-                self.tns[i] -= old[i];
+            if old[side].is_finite() && old[side] < Seconds::ZERO {
+                self.tns[side] -= old[side];
             }
-            if slack[i].is_finite() && slack[i] < Seconds::ZERO {
-                self.tns[i] += slack[i];
+            if slack[side].is_finite() && slack[side] < Seconds::ZERO {
+                self.tns[side] += slack[side];
             }
-            self.worst[i] = None;
+            self.worst[side] = None;
         }
         self.end_slack[pin.index()] = slack;
     }
@@ -1650,10 +1652,10 @@ fn merge_arrival(entries: &mut Vec<Entry>, tag: TagId, side: MinMax, time: Secon
             entries.len() - 1
         });
     let entry = &mut entries[index];
-    let slot = &mut entry.arrival[side.index()];
+    let slot = &mut entry.arrival[side];
     if slot.is_none_or(|held| side.beats(time, held)) {
         *slot = Some(time);
-        entry.prev[side.index()] = Some(prev);
+        entry.prev[side] = Some(prev);
     }
 }
 
@@ -1821,7 +1823,7 @@ mod tests {
             rise: Seconds::new(rise),
             fall: Seconds::new(fall),
             sources: Vec::new(),
-            uncertainty: [None, None],
+            uncertainty: SideValues::both(None),
             propagated: false,
         }
     }
@@ -2010,7 +2012,14 @@ mod tests {
     #[test]
     fn slack_is_infinite_without_an_arrival_or_a_bound() {
         assert!(!slack_of(None, Seconds::new(1.0), MinMax::Max).is_finite());
-        assert!(!slack_of(Some(Seconds::new(1.0)), REQUIRED_INIT[1], MinMax::Max).is_finite());
+        assert!(
+            !slack_of(
+                Some(Seconds::new(1.0)),
+                REQUIRED_INIT[MinMax::Max],
+                MinMax::Max
+            )
+            .is_finite()
+        );
         assert!(
             (slack_of(Some(Seconds::new(1.0)), Seconds::new(3.0), MinMax::Max).get() - 2.0).abs()
                 < 1e-12
