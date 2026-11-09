@@ -1826,7 +1826,7 @@ mod tests {
     #[test]
     fn same_clock_captures_a_period_later_for_setup_and_at_once_for_hold() {
         let sdc = Sdc {
-            clocks: vec![clock("clk", 2e-9, 0.0, 1e-9)],
+            clocks: vec![clock("clk", 2e-9, 0.0, 1e-9)].into(),
             ..Sdc::default()
         };
 
@@ -1839,7 +1839,7 @@ mod tests {
     #[test]
     fn a_gated_clocks_hold_check_is_the_trailing_edge_of_the_same_cycle() {
         let sdc = Sdc {
-            clocks: vec![clock("clk", 2e-9, 0.0, 1e-9)],
+            clocks: vec![clock("clk", 2e-9, 0.0, 1e-9)].into(),
             ..Sdc::default()
         };
 
@@ -1853,7 +1853,7 @@ mod tests {
     #[test]
     fn a_falling_capture_of_a_rising_launch_is_half_a_period_away() {
         let sdc = Sdc {
-            clocks: vec![clock("clk", 2e-9, 0.0, 1e-9)],
+            clocks: vec![clock("clk", 2e-9, 0.0, 1e-9)].into(),
             ..Sdc::default()
         };
 
@@ -1866,7 +1866,7 @@ mod tests {
     #[test]
     fn a_latch_opening_on_the_fall_is_required_at_the_fall_before_the_close() {
         let sdc = Sdc {
-            clocks: vec![clock("clk", 2.2e-9, 0.0, 1.1e-9)],
+            clocks: vec![clock("clk", 2.2e-9, 0.0, 1.1e-9)].into(),
             ..Sdc::default()
         };
 
@@ -1882,7 +1882,8 @@ mod tests {
             clocks: vec![
                 clock("slow", 4e-9, 0.0, 2e-9),
                 clock("fast", 1e-9, 0.0, 0.5e-9),
-            ],
+            ]
+            .into(),
             ..Sdc::default()
         };
 

@@ -380,6 +380,19 @@ impl LayerId {
         Self(self.0 + 1)
     }
 
+    /// The routing layer one step from this one toward `target`, or `target`
+    /// itself when this is it.
+    #[must_use]
+    pub const fn toward(self, target: Self) -> Self {
+        if self.0 < target.0 {
+            Self(self.0 + 1)
+        } else if self.0 > target.0 {
+            Self(self.0 - 1)
+        } else {
+            self
+        }
+    }
+
     /// Every routing layer from this one up to `top`, both included.
     pub fn through(self, top: Self) -> impl Iterator<Item = Self> + use<> {
         (self.0..=top.0).map(Self)

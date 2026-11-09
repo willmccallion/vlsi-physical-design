@@ -443,7 +443,7 @@ fn no_reserve() -> RoutingConfig {
 fn every_track_through_a_gcell_counts_toward_its_capacity() {
     let db = tiny();
 
-    let reduction = capacity_reduction(&db, &no_reserve(), &[]).unwrap();
+    let reduction = capacity_reduction(&db, &no_reserve(), &IdVec::new()).unwrap();
 
     assert_eq!((reduction.nx, reduction.ny), (2, 2));
     assert_eq!(reduction.capacity, vec![24.0, 22.0, 23.0, 21.0]);
@@ -460,7 +460,7 @@ fn the_capacity_reserve_does_not_count_as_reduction() {
         ..RoutingConfig::default()
     };
 
-    let reduction = capacity_reduction(&db, &config, &[]).unwrap();
+    let reduction = capacity_reduction(&db, &config, &IdVec::new()).unwrap();
 
     assert_eq!(reduction.capacity, vec![24.0, 22.0, 23.0, 21.0]);
     assert!(reduction.reduction[0].abs() < 1e-9);
@@ -471,7 +471,7 @@ fn the_capacity_reserve_does_not_count_as_reduction() {
 fn the_layer_adjustment_counts_as_reduction_rounded_as_openroad_rounds_it() {
     let db = tiny();
 
-    let reduction = capacity_reduction(&db, &no_reserve(), &[share(0.5); 10]).unwrap();
+    let reduction = capacity_reduction(&db, &no_reserve(), &IdVec::filled(share(0.5), 10)).unwrap();
 
     assert!(
         (reduction.reduction[0] - (4.0 + 8.0)).abs() < 1e-9,
@@ -486,9 +486,10 @@ fn the_layer_adjustment_counts_as_reduction_rounded_as_openroad_rounds_it() {
 #[test]
 fn each_layer_counts_only_its_own_adjustment() {
     let db = tiny();
-    let all = capacity_reduction(&db, &no_reserve(), &[share(0.5); 10]).unwrap();
+    let all = capacity_reduction(&db, &no_reserve(), &IdVec::filled(share(0.5), 10)).unwrap();
 
-    let one_layer = capacity_reduction(&db, &no_reserve(), &[share(0.0), share(0.5)]).unwrap();
+    let one_layer =
+        capacity_reduction(&db, &no_reserve(), &vec![share(0.0), share(0.5)].into()).unwrap();
 
     assert!(one_layer.reduction[0] > 0.0, "{one_layer:?}");
     assert!(one_layer.reduction[0] < all.reduction[0], "{one_layer:?}");
@@ -498,7 +499,7 @@ fn each_layer_counts_only_its_own_adjustment() {
 fn a_fixed_block_takes_the_tracks_its_obstruction_crosses() {
     let db = tiny();
 
-    let reduction = capacity_reduction(&db, &no_reserve(), &[]).unwrap();
+    let reduction = capacity_reduction(&db, &no_reserve(), &IdVec::new()).unwrap();
 
     assert!(reduction.reduction[1] >= 10.0, "{reduction:?}");
     assert!(reduction.reduction[3] >= 10.0, "{reduction:?}");
@@ -512,7 +513,7 @@ fn a_layer_blocked_everywhere_counts_as_taken() {
         rect: db.die_area,
     });
 
-    let reduction = capacity_reduction(&db, &no_reserve(), &[]).unwrap();
+    let reduction = capacity_reduction(&db, &no_reserve(), &IdVec::new()).unwrap();
 
     assert_eq!(reduction.capacity, vec![24.0, 22.0, 23.0, 21.0]);
     assert!(
@@ -547,8 +548,8 @@ fn merged_fixed_stretches_give_the_capacity_the_occupancy_gives() {
     let from_stretches = GlobalGrid::new(&tech, &fixed, db.die_area, gcell, reserve(0.3));
 
     assert_eq!(
-        from_occupancy.capacity_reduction(&tech, &[share(0.5); 10], Dbu(100)),
-        from_stretches.capacity_reduction(&tech, &[share(0.5); 10], Dbu(100))
+        from_occupancy.capacity_reduction(&tech, &IdVec::filled(share(0.5), 10), Dbu(100)),
+        from_stretches.capacity_reduction(&tech, &IdVec::filled(share(0.5), 10), Dbu(100))
     );
 }
 
@@ -593,7 +594,7 @@ fn the_estimator_measures_congestion_where_the_given_locations_put_the_nets() {
         ..no_reserve()
     };
     let mut estimator = GlobalRouteEstimator::new(&db, &config).unwrap();
-    let tiles = estimator.capacity_reduction(&[]);
+    let tiles = estimator.capacity_reduction(&IdVec::new());
     let packed = IdVec::filled(Point::new(Dbu(0), Dbu(0)), db.num_cells());
     let spread: IdVec<CellId, Point<Dbu>> = db
         .cells

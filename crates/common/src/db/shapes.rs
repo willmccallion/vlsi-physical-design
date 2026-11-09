@@ -3,7 +3,7 @@
 use crate::db::design::{
     Cell, IoPin, NetlistDB, NonDefaultRule, PinOwner, RouteElem, SpecialNet, SpecialWire,
 };
-use crate::db::indices::{LayerId, NetId};
+use crate::db::indices::{IdVec, LayerId, NetId};
 use crate::db::library::{LayerRef, Shape};
 use crate::geom::dbu::Dbu;
 use crate::geom::point::Point;
@@ -277,16 +277,16 @@ fn fixed_shapes_of(
             layer: s.layer,
             rect: c.orient.place_rect(&s.rect, m.size, c.location),
         };
-        let mut pin_net = vec![None; m.pins.len()];
+        let mut pin_net = IdVec::filled(None, m.pins.len());
         for &pin in &c.pins {
             if let PinOwner::Cell { pin: mp, .. } = db.pins[pin].owner {
                 let net = db.pins[pin].net;
                 if is_signal_net(db, net) {
-                    pin_net[mp.index()] = Some(net);
+                    pin_net[mp] = Some(net);
                 }
             }
         }
-        for (k, mp) in m.pins.iter().enumerate() {
+        for (k, mp) in m.pins.iter_enumerated() {
             let owner = pin_net[k].map_or(Owner::Obstacle, Owner::Net);
             out.extend(mp.shapes.iter().map(|s| fixed(place(s), owner)));
         }

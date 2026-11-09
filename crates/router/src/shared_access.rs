@@ -10,9 +10,9 @@
 //! derived from its kind's.
 
 use crate::access::{AccessPoint, Node, access_points};
-use crate::tech::{RouteTech, index_u32};
+use crate::tech::RouteTech;
 use pare_common::db::design::{NetlistDB, PinOwner};
-use pare_common::db::indices::{CellId, LayerId, MacroId, PinId, ViaId};
+use pare_common::db::indices::{CellId, IdVec, LayerId, MacroId, MacroPinId, PinId, ViaId};
 use pare_common::db::library::LayerRef;
 use pare_common::geom::dbu::Dbu;
 use pare_common::geom::orient::Orientation;
@@ -55,15 +55,20 @@ struct RelativeAccess {
     vias: Vec<ViaId>,
 }
 
+pare_common::define_index!(
+    /// A kind of cell whose pins share their access candidates.
+    KindId(u32)
+);
+
 /// The access candidates of every pin of the cells that share them, by
 /// kind of cell.
 #[derive(Debug, Default)]
 pub struct SharedAccess {
     /// For each cell, its kind and its window of the grid.
-    cells: Vec<(u32, Window)>,
+    cells: IdVec<CellId, (KindId, Window)>,
     /// For each kind, the candidates of each pin of its master, none for a
     /// pin whose candidates cannot be shared.
-    kinds: Vec<Vec<Option<Vec<RelativeAccess>>>>,
+    kinds: IdVec<KindId, IdVec<MacroPinId, Option<Vec<RelativeAccess>>>>,
 }
 
 impl SharedAccess {
@@ -73,24 +78,23 @@ impl SharedAccess {
             .into_par_iter()
             .map(|c| kind_of(db, tech, CellId::new(c)))
             .collect();
-        let mut index: HashMap<Kind, u32> = HashMap::new();
-        let mut representatives: Vec<CellId> = Vec::new();
-        let cells: Vec<(u32, Window)> = cells
+        let mut index: HashMap<Kind, KindId> = HashMap::new();
+        let mut representatives: IdVec<KindId, CellId> = IdVec::new();
+        let cells: IdVec<CellId, (KindId, Window)> = cells
             .into_iter()
             .enumerate()
             .map(|(c, (kind, window))| {
-                let next = index_u32(representatives.len());
-                let k = *index.entry(kind).or_insert_with(|| {
-                    representatives.push(CellId::new(c));
-                    next
-                });
+                let k = *index
+                    .entry(kind)
+                    .or_insert_with(|| representatives.push(CellId::new(c)));
                 (k, window)
             })
             .collect();
         let kinds = representatives
-            .par_iter()
-            .map(|&cell| kind_candidates(db, tech, cell, &cells[cell.index()].1))
-            .collect();
+            .par_iter_enumerated()
+            .map(|(_, &cell)| kind_candidates(db, tech, cell, &cells[cell].1))
+            .collect::<Vec<_>>()
+            .into();
         Self { cells, kinds }
     }
 
@@ -105,8 +109,8 @@ impl SharedAccess {
         let PinOwner::Cell { cell, pin: own } = db.pins[pin].owner else {
             return None;
         };
-        let (kind, window) = self.cells.get(cell.index())?;
-        let table = self.kinds[*kind as usize].get(own.index())?.as_ref()?;
+        let (kind, window) = self.cells.get(cell)?;
+        let table = self.kinds[*kind].get(own)?.as_ref()?;
         Some(
             table
                 .iter()
@@ -130,11 +134,8 @@ impl SharedAccess {
         let PinOwner::Cell { cell, pin: own } = db.pins[pin].owner else {
             return None;
         };
-        let (kind, _) = self.cells.get(cell.index())?;
-        self.kinds[*kind as usize]
-            .get(own.index())?
-            .as_ref()
-            .map(Vec::len)
+        let (kind, _) = self.cells.get(cell)?;
+        self.kinds[*kind].get(own)?.as_ref().map(Vec::len)
     }
 }
 
@@ -177,9 +178,9 @@ fn kind_candidates(
     tech: &RouteTech,
     cell: CellId,
     window: &Window,
-) -> Vec<Option<Vec<RelativeAccess>>> {
+) -> IdVec<MacroPinId, Option<Vec<RelativeAccess>>> {
     let master = db.cell_macro(cell);
-    let mut table = vec![None; master.pins.len()];
+    let mut table = IdVec::filled(None, master.pins.len());
     for &pin in &db.cells[cell].pins {
         let PinOwner::Cell { pin: own, .. } = db.pins[pin].owner else {
             continue;
@@ -191,7 +192,7 @@ fn kind_candidates(
             .iter()
             .map(|a| relative_to(a, window))
             .collect();
-        if let Some(slot) = table.get_mut(own.index()) {
+        if let Some(slot) = table.get_mut(own) {
             *slot = relative;
         }
     }

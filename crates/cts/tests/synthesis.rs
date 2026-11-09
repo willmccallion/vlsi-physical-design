@@ -4,7 +4,7 @@
 #![allow(clippy::unwrap_used, clippy::expect_used)]
 
 use pare_common::db::design::{NetlistDB, PinOwner, PlacementStatus};
-use pare_common::db::indices::{IoPinId, NetId, PinId};
+use pare_common::db::indices::{IdVec, IoPinId, NetId, PinId};
 use pare_common::db::liberty::Liberty;
 use pare_common::db::library::{DuplicateName, SignalUse};
 use pare_common::db::parser::{def, lef, liberty, sdc};
@@ -341,15 +341,16 @@ fn the_faster_tree_of_a_clock_is_delayed_as_it_always_is() {
     let first_added = db.cells.len();
     let trees = synthesize(&mut db, &input).unwrap();
     let port = db.pin_position(db.io_pins[IoPinId(0)].pin);
-    let arrivals: Vec<Seconds> = (0..db.pins.len())
+    let arrivals: IdVec<PinId, Seconds> = db
+        .pins
+        .ids()
         .map(|p| {
-            let away = db.pin_position(PinId::new(p)).manhattan(port);
+            let away = db.pin_position(p).manhattan(port);
             Seconds::new(away.get() as f64 * 1e-15)
         })
         .collect();
 
-    let inserted =
-        balance_latencies(&mut db, &link, &trees, &|p| Some(arrivals[p.index()])).unwrap();
+    let inserted = balance_latencies(&mut db, &link, &trees, &|p| Some(arrivals[p])).unwrap();
 
     assert!(inserted > 0);
     assert_golden(

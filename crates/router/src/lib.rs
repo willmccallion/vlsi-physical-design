@@ -951,7 +951,7 @@ const fn next_scope(previous: Scope, improved: bool) -> Scope {
 pub fn capacity_reduction(
     db: &NetlistDB,
     config: &RoutingConfig,
-    adjustments: &[Share],
+    adjustments: &IdVec<LayerId, Share>,
 ) -> Result<CapacityReduction, RouteError> {
     let tech = RouteTech::new(db, config)?;
     let fixed = FixedTracks::new(&tech, obstruction_shapes(db));
@@ -1042,7 +1042,7 @@ impl<'a> GlobalRouteEstimator<'a> {
     /// The grid's capacities and what fixed metal and each layer's share
     /// of `adjustments`, by layer index, take of them.
     #[must_use]
-    pub fn capacity_reduction(&self, adjustments: &[Share]) -> CapacityReduction {
+    pub fn capacity_reduction(&self, adjustments: &IdVec<LayerId, Share>) -> CapacityReduction {
         let wire_width = layers_wire_width(self.db, &self.tech);
         self.grid
             .capacity_reduction(&self.tech, adjustments, wire_width)

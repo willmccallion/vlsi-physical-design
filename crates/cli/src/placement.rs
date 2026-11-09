@@ -11,7 +11,7 @@ use pare_common::config::{
     Config, CongestionEstimate, DesignInput, GlobalPlacementConfig, Share, TargetDensity,
 };
 use pare_common::db::design::{NetlistDB, PlacementStatus, Renumbering};
-use pare_common::db::indices::{CellId, IdVec, NetId};
+use pare_common::db::indices::{CellId, IdVec, LayerId, NetId};
 use pare_common::db::liberty::MinMax;
 use pare_common::db::writer;
 use pare_common::geom::dbu::Dbu;
@@ -779,16 +779,16 @@ fn routability_setup<'a>(
 }
 
 /// The share of each routing layer's capacity held back, by layer index.
-fn layer_adjustments(config: &Config, db: &NetlistDB) -> anyhow::Result<Vec<Share>> {
+fn layer_adjustments(config: &Config, db: &NetlistDB) -> anyhow::Result<IdVec<LayerId, Share>> {
     let gp = &config.global_placement;
     let layers = &db.library.routing_layers;
-    let mut adjustments = vec![gp.routing_layer_adjustment; layers.len()];
+    let mut adjustments = IdVec::filled(gp.routing_layer_adjustment, layers.len());
     for entry in &gp.layer_adjustments {
         let layer = db
             .library
             .routing_layer_id(&entry.layer)
             .with_context(|| format!("no routing layer named {}", entry.layer))?;
-        adjustments[layer.index()] = entry.adjustment;
+        adjustments[layer] = entry.adjustment;
     }
     Ok(adjustments)
 }
@@ -819,7 +819,7 @@ impl<'a> GlobalRouteCongestion<'a> {
         })
     }
 
-    fn capacity_reduction(&self, adjustments: &[Share]) -> CapacityReduction {
+    fn capacity_reduction(&self, adjustments: &IdVec<LayerId, Share>) -> CapacityReduction {
         self.estimator.capacity_reduction(adjustments)
     }
 }

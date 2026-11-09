@@ -19,7 +19,7 @@
 //! the cells above and below can never be connected.
 
 use crate::db::design::{NetlistDB, PinOwner};
-use crate::db::indices::{CellId, CutLayerId, LayerId, MacroPinId, NetId};
+use crate::db::indices::{CellId, CutLayerId, IdVec, LayerId, MacroPinId, NetId};
 use crate::db::library::{Direction, LayerRef, Macro};
 use crate::db::rules::{SpacingTable, WidthRangeSpacing};
 use crate::db::shapes::{Owner, obstruction_shapes};
@@ -717,13 +717,11 @@ impl PinAccess {
         let m = db.library.cell_macro(c.macro_id);
         let net_of = pin_nets(db, cell);
         m.pins
-            .iter()
-            .enumerate()
+            .iter_enumerated()
             .filter(|(_, pin)| !pin.signal_use.is_supply())
-            .filter(|&(k, _)| match net_of[k] {
+            .filter(|&(mp, _)| match net_of[mp] {
                 Some(net) if db.nets[net].signal_use.is_supply() => false,
                 net => {
-                    let mp = MacroPinId::new(k);
                     let holder = Holder {
                         net,
                         pin: Some((cell, mp)),
@@ -793,18 +791,17 @@ impl PinAccess {
         let m = db.library.cell_macro(c.macro_id);
         let net_of = pin_nets(db, cell);
         let mut relied = Vec::new();
-        for (k, pin) in m.pins.iter().enumerate() {
+        for (mp, pin) in m.pins.iter_enumerated() {
             if pin.signal_use.is_supply() {
                 continue;
             }
-            if let Some(net) = net_of[k]
+            if let Some(net) = net_of[mp]
                 && db.nets[net].signal_use.is_supply()
             {
                 continue;
             }
-            let mp = MacroPinId::new(k);
             let holder = Holder {
-                net: net_of[k],
+                net: net_of[mp],
                 pin: Some((cell, mp)),
             };
             relied.extend(self.pin_access(m, mp, holder, at, orient, &extra)?);
@@ -1159,14 +1156,14 @@ impl PinAccess {
 }
 
 /// The net of each pin of `cell`'s master, by pin index, where it is on one.
-fn pin_nets(db: &NetlistDB, cell: CellId) -> Vec<Option<NetId>> {
+fn pin_nets(db: &NetlistDB, cell: CellId) -> IdVec<MacroPinId, Option<NetId>> {
     let c = &db.cells[cell];
     let m = db.library.cell_macro(c.macro_id);
-    let mut net_of = vec![None; m.pins.len()];
+    let mut net_of = IdVec::filled(None, m.pins.len());
     for &p in &c.pins {
         let pin = &db.pins[p];
         if let PinOwner::Cell { pin: mp, .. } = pin.owner {
-            net_of[mp.index()] = Some(pin.net);
+            net_of[mp] = Some(pin.net);
         }
     }
     net_of
