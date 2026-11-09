@@ -9,7 +9,7 @@ use pare_common::db::parser::{def, lef};
 use pare_common::db::rules::{
     CellSide, ConvexCornerSpacing, CutApproach, CutSpacing, CutSpacingCondition, EdgeType,
     EndOfLineSpacing, Lef58CutSpacing, Lef58CutSpacingCondition, MinStep, MinimumCut, ParallelEdge,
-    SpacingTable, TwoWidthsRow, TwoWidthsTable, WidthRangeSpacing,
+    RuleSource, SpacingTable, TwoWidthsRow, TwoWidthsTable, WidthRangeSpacing,
 };
 use pare_common::geom::dbu::{Dbu, DbuArea};
 use pare_common::geom::point::Point;
@@ -112,6 +112,7 @@ fn metal_rules_are_read_from_statements_and_lef57_lef58_properties() {
         &[(
             "    WIDTH 0.3 0.11 0.2 ;\nEND M2",
             "    WIDTH 0.3 0.11 0.2 ;\n  MINWIDTH 0.1 ;\n  MAXWIDTH 5.0 ;\n  AREA 0.05 ;\n  \
+             MINSTEP 0.07 ;\n  \
              SPACING 0.12 ENDOFLINE 0.11 WITHIN 0.03 ;\n  \
              PROPERTY LEF57_SPACING \"SPACING 0.13 ENDOFLINE 0.11 WITHIN 0.03 PARALLELEDGE 0.1 \
              WITHIN 0.05 TWOEDGES ;\" ;\n  \
@@ -151,10 +152,18 @@ fn metal_rules_are_read_from_statements_and_lef57_lef58_properties() {
     );
     assert_eq!(
         rules.min_steps,
-        [MinStep {
-            length: Dbu(50),
-            max_edges: Some(1),
-        }]
+        [
+            MinStep {
+                length: Dbu(70),
+                max_edges: None,
+                source: RuleSource::Statement,
+            },
+            MinStep {
+                length: Dbu(50),
+                max_edges: Some(1),
+                source: RuleSource::Property,
+            },
+        ]
     );
     assert_eq!(
         rules.corner_spacing,

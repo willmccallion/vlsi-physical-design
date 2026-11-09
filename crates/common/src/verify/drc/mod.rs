@@ -69,16 +69,20 @@ pub enum Violation {
     OffGrid,
     /// A line end closer to facing metal than the end-of-line rule allows.
     EndOfLineSpacing,
-    /// More short boundary edges in a row than the minimum step rule allows.
+    /// More short boundary edges in a row than a minimum step statement
+    /// allows.
     MinStep,
+    /// More short boundary edges in a row than a `LEF57_MINSTEP` or
+    /// `LEF58_MINSTEP` property allows.
+    Lef58MinStep,
 }
 
 impl Violation {
     /// Whether the kind is reported for information only and does not
-    /// decide whether a routing passes: the minimum step rule, which
-    /// `OpenROAD` never checks when the LEF gives it as a property.
+    /// decide whether a routing passes: a minimum step rule given as a
+    /// property, which `OpenROAD` never checks.
     pub(crate) const fn is_advisory(self) -> bool {
-        matches!(self, Self::MinStep)
+        matches!(self, Self::Lef58MinStep)
     }
 
     /// The name `OpenROAD` reports the violation by.
@@ -97,7 +101,7 @@ impl Violation {
             Self::MinHole => "Min Hole",
             Self::OffGrid => "Off Grid",
             Self::EndOfLineSpacing => "EOL Spacing",
-            Self::MinStep => "Min Step",
+            Self::MinStep | Self::Lef58MinStep => "Min Step",
         }
     }
 }
@@ -367,6 +371,7 @@ fn narrowing_rule_wiring_makes(marker: &Marker, layout: &Layout) -> bool {
         | Violation::MinWidth
         | Violation::MinHole
         | Violation::MinStep
+        | Violation::Lef58MinStep
         | Violation::OffGrid => ruled(a) || ruled(b),
         Violation::MetalSpacing | Violation::SpacingTableTw | Violation::SpacingRange => {
             a == b && ruled(a)
