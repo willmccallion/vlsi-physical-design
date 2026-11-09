@@ -787,4 +787,22 @@ mod tests {
         };
         assert!(on_row(&narrow_paths) > on_row(&wide_paths));
     }
+
+    #[test]
+    fn a_dense_net_with_an_outlier_reaches_every_terminal() {
+        let grid = sized_grid(40, 40);
+        let mut terminals: Vec<GCell> = (1..=2)
+            .flat_map(|layer| (0..13).flat_map(move |x| (0..12).map(move |y| cell(layer, x, y))))
+            .collect();
+        terminals.push(cell(1, 35, 35));
+
+        let paths = route_tree(&grid, &net(&terminals), 2, COSTS, None);
+
+        let missed: Vec<GCell> = terminals
+            .iter()
+            .copied()
+            .filter(|&t| !reaches(&paths, t))
+            .collect();
+        assert_eq!(missed, []);
+    }
 }

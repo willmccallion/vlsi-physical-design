@@ -7,7 +7,7 @@
 //! and find the nearest earlier centre through a bucket grid, which keeps
 //! nets with tens of thousands of pins fast.
 
-use crate::bucket::{Bucket, bucket_at};
+use crate::bucket::{Bucket, bucket_at, buckets_between};
 use pare_common::geom::dbu::Dbu;
 use pare_common::geom::point::Point;
 use pare_common::geom::rect::Rect;
@@ -150,22 +150,12 @@ fn curve_order(points: &[Point<Dbu>]) -> (usize, Vec<Join>) {
         let mut nearest: Option<(Dbu, usize)> = None;
         let mut ring = Bucket(0);
         loop {
-            for x in (c.x - ring).through(c.x + ring) {
-                for y in (c.y - ring).through(c.y + ring) {
-                    if (x - c.x).abs() != ring && (y - c.y).abs() != ring {
-                        continue;
-                    }
-                    for &j in buckets.get(&Point::new(x, y)).into_iter().flatten() {
-                        let d = p.manhattan(points[j]);
-                        if nearest.is_none_or(|(b, k)| (d, j) < (b, k)) {
-                            nearest = Some((d, j));
-                        }
-                    }
-                }
-            }
-            // Anything beyond this ring is at least `ring` buckets away.
-            let found = nearest.is_some_and(|(d, _)| d <= ring.length(bucket));
-            if found || ring > Bucket(cells_per_side + 1) {
+            let in_ring = nearest_in_ring(points, &buckets, p, c, ring);
+            nearest = nearest.into_iter().chain(in_ring).min();
+            // Anything beyond ring r is more than r buckets away, and once
+            // the ring reaches across the span there is nothing beyond it.
+            let reach = ring.length(bucket);
+            if nearest.is_some_and(|(d, _)| d <= reach) || reach >= span {
                 break;
             }
             ring += Bucket(1);
@@ -176,6 +166,25 @@ fn curve_order(points: &[Point<Dbu>]) -> (usize, Vec<Join>) {
         buckets.entry(c).or_default().push(i);
     }
     (first, joins)
+}
+
+/// The nearest of the points filed in the buckets `ring` buckets from `c`,
+/// as its distance from `p` and its index; ties go to the lower index.
+fn nearest_in_ring(
+    points: &[Point<Dbu>],
+    buckets: &FxHashMap<Point<Bucket>, Vec<usize>>,
+    p: Point<Dbu>,
+    c: Point<Bucket>,
+    ring: Bucket,
+) -> Option<(Dbu, usize)> {
+    let on_ring = |b: &Point<Bucket>| (b.x - c.x).abs() == ring || (b.y - c.y).abs() == ring;
+    let corner = |r: Bucket| Point::new(c.x + r, c.y + r);
+    buckets_between(corner(Bucket(0) - ring), corner(ring))
+        .filter(on_ring)
+        .filter_map(|b| buckets.get(&b))
+        .flatten()
+        .map(|&j| (p.manhattan(points[j]), j))
+        .min()
 }
 
 #[cfg(test)]
@@ -234,9 +243,31 @@ mod tests {
 
         let (first, joins) = connection_order(&pins);
 
-        assert_eq!(joins.len(), 999);
+        assert_each_joins_its_nearest_earlier_point(&points, first, &joins);
+    }
+
+    #[test]
+    fn a_far_pin_after_a_dense_cluster_joins_its_nearest_earlier_pin() {
+        let cluster = (0..13).flat_map(|x| (0..12).map(move |y| pt(x, y)));
+        let mut points: Vec<Point<Dbu>> = cluster.clone().chain(cluster).collect();
+        points.push(pt(35, 35));
+        let pins: Vec<Rect<Dbu>> = points.iter().map(|&p| Rect::new(p, p)).collect();
+
+        let (first, joins) = connection_order(&pins);
+
+        assert_each_joins_its_nearest_earlier_point(&points, first, &joins);
+    }
+
+    /// Asserts that `joins` from `first` join every other point, each to
+    /// the nearest point joined before it.
+    fn assert_each_joins_its_nearest_earlier_point(
+        points: &[Point<Dbu>],
+        first: usize,
+        joins: &[Join],
+    ) {
+        assert_eq!(joins.len(), points.len() - 1);
         let mut earlier = vec![first];
-        for j in joins {
+        for &j in joins {
             let nearest = earlier
                 .iter()
                 .map(|&e| points[j.pin].manhattan(points[e]).get())
