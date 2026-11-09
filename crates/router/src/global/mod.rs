@@ -689,12 +689,12 @@ pub fn rudy_wire_width(pitches: &[Dbu]) -> Dbu {
     if inverse > 0.0 {
         Dbu((1.25 / inverse).trunc() as i64)
     } else {
-        Dbu(RUDY_DEFAULT_WIRE_WIDTH)
+        RUDY_DEFAULT_WIRE_WIDTH
     }
 }
 
 /// The wire width `grt::Rudy` keeps when no layer has a pitch.
-const RUDY_DEFAULT_WIRE_WIDTH: i64 = 100;
+const RUDY_DEFAULT_WIRE_WIDTH: Dbu = Dbu(100);
 
 /// The fraction of `stretch` along `track` that a wire crossing `boundary`
 /// can use between the fixed metal on either side of it.
