@@ -431,6 +431,78 @@ fn output_dir(config: &Config) -> PathBuf {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::testing::scratch_dir;
+
+    /// A configs directory holding an empty config at each of `files`.
+    fn configs_with(tag: &str, files: &[&str]) -> PathBuf {
+        let configs = scratch_dir(tag);
+        for file in files {
+            let path = configs.join(file);
+            std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+            std::fs::write(path, "").unwrap();
+        }
+        configs
+    }
+
+    #[test]
+    fn a_config_path_is_taken_as_it_is() {
+        let configs = configs_with("resolve-path", &[]);
+
+        for name in ["suite/design", "design.toml", "design.TOML"] {
+            assert_eq!(
+                resolve_config(Path::new(name), &configs).unwrap(),
+                PathBuf::from(name)
+            );
+        }
+    }
+
+    #[test]
+    fn a_design_name_finds_its_config_in_whichever_suite_has_it() {
+        let configs = configs_with("resolve-one", &["ibm/ibm01.toml", "openroad/aes.toml"]);
+
+        let path = resolve_config(Path::new("aes"), &configs).unwrap();
+
+        assert_eq!(path, configs.join("openroad/aes.toml"));
+    }
+
+    #[test]
+    fn a_design_name_without_a_config_says_where_to_get_one() {
+        let configs = configs_with("resolve-none", &["openroad/aes.toml"]);
+
+        let error = resolve_config(Path::new("ibex"), &configs).unwrap_err();
+
+        assert_eq!(
+            error.to_string(),
+            format!(
+                "no config for 'ibex' in {}/<suite>/; download it with scripts/download.py",
+                configs.display()
+            )
+        );
+    }
+
+    #[test]
+    fn a_design_name_in_two_suites_is_ambiguous() {
+        let configs = configs_with("resolve-two", &["a/gcd.toml", "b/gcd.toml"]);
+
+        let error = resolve_config(Path::new("gcd"), &configs).unwrap_err();
+
+        assert!(
+            error.to_string().starts_with("'gcd' names several configs"),
+            "{error}"
+        );
+    }
+
+    #[test]
+    fn a_design_name_without_a_configs_directory_names_the_directory() {
+        let missing = scratch_dir("resolve-missing").join("configs");
+
+        let error = resolve_config(Path::new("aes"), &missing).unwrap_err();
+
+        assert_eq!(
+            error.to_string(),
+            format!("cannot read {}/", missing.display())
+        );
+    }
 
     #[test]
     fn a_box_needs_four_corner_coordinates() {
