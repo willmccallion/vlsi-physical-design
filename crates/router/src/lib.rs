@@ -7,6 +7,7 @@
 //! touch or come closer than the layer spacing.
 
 mod access;
+mod bucket;
 mod detailed;
 mod global;
 mod occupancy;

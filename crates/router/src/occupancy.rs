@@ -18,6 +18,7 @@
 //! such as cut-layer obstructions over macros, are filed separately in
 //! coarser buckets so they do not widen every query.
 
+use crate::bucket::{Bucket, bucket_at, buckets_between};
 use crate::tech::{CutTech, LayerTech, RouteTech};
 use pare_common::db::indices::{CutLayerId, IdVec, LayerId, NetId, NonDefaultRuleId};
 use pare_common::db::library::LayerRef;
@@ -234,13 +235,13 @@ impl CutOccupant {
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub enum CutBucket {
     /// A cut no larger than a via cut, in the bucket holding its center.
-    Small((i64, i64)),
+    Small(Point<Bucket>),
     /// A larger shape, in every coarse bucket from `min` to `max`.
     Large {
         /// Lowest coarse bucket column and row.
-        min: (i64, i64),
+        min: Point<Bucket>,
         /// Highest coarse bucket column and row.
-        max: (i64, i64),
+        max: Point<Bucket>,
     },
 }
 
@@ -272,8 +273,8 @@ const LARGE_BUCKET_SCALE: i64 = 64;
 struct CutLayer {
     rules: CutTech,
     bucket: Dbu,
-    buckets: FxHashMap<(i64, i64), Vec<CutOccupant>>,
-    large: FxHashMap<(i64, i64), Vec<CutOccupant>>,
+    buckets: FxHashMap<Point<Bucket>, Vec<CutOccupant>>,
+    large: FxHashMap<Point<Bucket>, Vec<CutOccupant>>,
 }
 
 impl CutLayer {
@@ -286,16 +287,12 @@ impl CutLayer {
         }
     }
 
-    const fn key(&self, p: Point<Dbu>) -> (i64, i64) {
-        (
-            p.x.get().div_euclid(self.bucket.get()),
-            p.y.get().div_euclid(self.bucket.get()),
-        )
+    const fn key(&self, p: Point<Dbu>) -> Point<Bucket> {
+        bucket_at(p, self.bucket)
     }
 
-    const fn large_key(&self, p: Point<Dbu>) -> (i64, i64) {
-        let size = self.bucket.get() * LARGE_BUCKET_SCALE;
-        (p.x.get().div_euclid(size), p.y.get().div_euclid(size))
+    fn large_key(&self, p: Point<Dbu>) -> Point<Bucket> {
+        bucket_at(p, self.bucket * LARGE_BUCKET_SCALE)
     }
 
     /// Whether a shape fits within the largest via cut, so a query widened
@@ -320,7 +317,7 @@ impl CutLayer {
         match self.bucket_of(&cut.rect()) {
             CutBucket::Small(key) => self.buckets.entry(key).or_default().push(cut),
             CutBucket::Large { min, max } => {
-                for key in keys_between(min, max) {
+                for key in buckets_between(min, max) {
                     self.large.entry(key).or_default().push(cut);
                 }
             }
@@ -336,7 +333,7 @@ impl CutLayer {
                 }
             }
             CutBucket::Large { min, max } => {
-                for key in keys_between(min, max) {
+                for key in buckets_between(min, max) {
                     if let Some(list) = self.large.get_mut(&key) {
                         list.retain(&keep);
                     }
@@ -349,17 +346,17 @@ impl CutLayer {
     fn conflicts(&self, rect: Rect<Dbu>, owner: Owner) -> impl Iterator<Item = &CutOccupant> + '_ {
         let spacing = self.rules.spacing;
         let near = rect.expand(self.rules.reach());
-        let small = keys_between(self.key(near.min), self.key(near.max))
+        let small = buckets_between(self.key(near.min), self.key(near.max))
             .filter_map(|k| self.buckets.get(&k))
             .flatten();
         let around = rect.expand(spacing);
         let (q0, q1) = (self.large_key(around.min), self.large_key(around.max));
-        let large = keys_between(q0, q1)
+        let large = buckets_between(q0, q1)
             .filter_map(move |k| self.large.get(&k).map(|list| (k, list)))
             .flat_map(move |(k, list)| {
                 list.iter().filter(move |c| {
                     let first = self.large_key(c.rect().min);
-                    (first.0.max(q0.0), first.1.max(q0.1)) == k
+                    Point::new(first.x.max(q0.x), first.y.max(q0.y)) == k
                 })
             });
         small
@@ -382,11 +379,6 @@ impl CutLayer {
             list.retain(&keep);
         }
     }
-}
-
-/// Bucket keys from `min` to `max` inclusive, row by row.
-fn keys_between(min: (i64, i64), max: (i64, i64)) -> impl Iterator<Item = (i64, i64)> {
-    (min.0..=max.0).flat_map(move |x| (min.1..=max.1).map(move |y| (x, y)))
 }
 
 /// Whether two cuts touch or their edges are closer than `spacing`.
