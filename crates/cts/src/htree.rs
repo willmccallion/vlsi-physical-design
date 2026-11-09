@@ -335,7 +335,8 @@ impl Builder {
 
     /// The blockage `p` lies strictly inside, scaled to the tree's unit,
     /// as `TreeBuilder::findBlockage`.
-    fn find_blockage(ctx: &TreeContext<'_>, p: TreePoint, scale: f64) -> Option<TreeBox> {
+    fn find_blockage(&self, ctx: &TreeContext<'_>, p: TreePoint) -> Option<TreeBox> {
+        let scale = self.unit();
         let (bx, by) = (p.x * scale, p.y * scale);
         ctx.blockages.iter().find_map(|b| {
             let [x1, y1, x2, y2] = [b.min.x, b.min.y, b.max.x, b.max.y].map(|v| v.get() as f64);
@@ -348,22 +349,22 @@ impl Builder {
 
     /// Whether a buffer may stand at `p`: free, in the core and outside
     /// every blockage, as `TreeBuilder::checkLegalityLoc`.
-    fn legal_location(&self, ctx: &TreeContext<'_>, p: TreePoint, scale: f64) -> bool {
+    fn legal_location(&self, ctx: &TreeContext<'_>, p: TreePoint) -> bool {
         if self.is_occupied(p) {
             return false;
         }
-        let x = (p.x * scale) as i32;
-        let y = (p.y * scale) as i32;
+        let x = (p.x * self.unit()) as i32;
+        let y = (p.y * self.unit()) as i32;
         let core = ctx.core;
         let inside = core.min.x.get() <= i64::from(x)
             && i64::from(x) <= core.max.x.get()
             && core.min.y.get() <= i64::from(y)
             && i64::from(y) <= core.max.y.get();
-        inside && Self::find_blockage(ctx, p, scale).is_none()
+        inside && self.find_blockage(ctx, p).is_none()
     }
 
     fn buffer_size(&self, ctx: &TreeContext<'_>, buffer: BufferCell) -> (f64, f64) {
-        let size = ctx.buffer_sizes.get(&buffer).copied().unwrap_or_default();
+        let size = ctx.buffer_sizes[&buffer];
         (
             size.x.get() as f64 / self.unit(),
             size.y.get() as f64 / self.unit(),
@@ -381,7 +382,7 @@ impl Builder {
         let Some(TreeBox {
             low: TreePoint { x: x1, y: y1 },
             high: TreePoint { x: x2, y: y2 },
-        }) = Self::find_blockage(ctx, p, self.unit())
+        }) = self.find_blockage(ctx, p)
         else {
             return p;
         };
@@ -852,7 +853,6 @@ impl Builder {
         let new_top = self.legalize_one_buffer(ctx, old_top, ctx.root_buffer);
         self.sink_region.center = Some(new_top);
         self.commit_move(old_top, new_top);
-        let unit = self.unit();
         for level_idx in 0..self.topologies.len() {
             for idx in 0..self.topologies[level_idx].points.len() {
                 let point = self.topologies[level_idx].points[idx];
@@ -875,7 +875,7 @@ impl Builder {
                 let blockage = if self.is_occupied(point) {
                     None
                 } else {
-                    Self::find_blockage(ctx, point, unit)
+                    self.find_blockage(ctx, point)
                 };
                 let moved = if let Some(blockage) = blockage {
                     let candidates = Self::legal_locations(parent, point, blockage);
@@ -914,7 +914,6 @@ impl Builder {
     /// parent, as `HTreeBuilder::legalizeDummy`.
     fn legalize_dummies(&mut self, ctx: &TreeContext<'_>) {
         let top = self.sink_region.center();
-        let unit = self.unit();
         for level_idx in 0..self.topologies.len() {
             for idx in 0..self.topologies[level_idx].points.len() {
                 let parent_idx = self.topologies[level_idx].parents[idx];
@@ -934,7 +933,7 @@ impl Builder {
                     continue;
                 }
                 if !self.is_occupied(point)
-                    && let Some(blockage) = Self::find_blockage(ctx, point, unit)
+                    && let Some(blockage) = self.find_blockage(ctx, point)
                 {
                     let candidates = Self::legal_locations(parent, point, blockage);
                     let search = LegalSearch {
@@ -1046,8 +1045,8 @@ impl Builder {
             if !fuzzy_eq(self.compute_dist(c, parent), target, FUZZY_EPSILON) {
                 continue;
             }
-            let legal = (!self.is_occupied(c) && blockage.has_on_edge(c))
-                || self.legal_location(ctx, c, self.unit());
+            let legal =
+                (!self.is_occupied(c) && blockage.has_on_edge(c)) || self.legal_location(ctx, c);
             if !legal {
                 continue;
             }
@@ -1072,7 +1071,7 @@ impl Builder {
         } = *search;
         let mut candidates = arc_candidates(parent, target, direction);
         let straight = candidates[0];
-        if let Some(blockage) = Self::find_blockage(ctx, straight, self.unit()) {
+        if let Some(blockage) = self.find_blockage(ctx, straight) {
             candidates.extend(along_blockage(parent, target, blockage, direction));
         }
         let (w, h) = self.buffer_size(ctx, ctx.root_buffer);
@@ -1088,7 +1087,7 @@ impl Builder {
         let mut best_cost = f64::MAX;
         for c in candidates {
             if fuzzy_eq(self.compute_dist(c, parent), target, FUZZY_EPSILON)
-                && self.legal_location(ctx, c, self.unit())
+                && self.legal_location(ctx, c)
             {
                 let cost = self.weighted_distance(c, branch, sinks);
                 if cost < best_cost {
@@ -1375,7 +1374,8 @@ impl SegmentBuilder {
         for &wire in wires {
             let segment = tech.segment(wire);
             let length = f64::from(segment.length);
-            for (b, &location) in segment.buffer_locations.iter().enumerate() {
+            for (&location, &master) in segment.buffer_locations.iter().zip(&segment.buffer_masters)
+            {
                 connection += location * length;
                 let (x, y) = if connection < length_x {
                     let x = if low_to_high_x {
@@ -1392,11 +1392,6 @@ impl SegmentBuilder {
                     };
                     (self.target.x, y)
                 };
-                let master = segment
-                    .buffer_masters
-                    .get(b)
-                    .copied()
-                    .unwrap_or(ctx.root_buffer);
                 let at = TreePoint::new(x, y);
                 let legal = tree.legalize_one_buffer(ctx, at, master);
                 tree.commit_move(at, legal);
@@ -1574,12 +1569,14 @@ mod tests {
     }
 
     impl Scene {
+        /// The scene of `blockages`, its buffer of no size.
         fn new(blockages: Vec<Rect<Dbu>>) -> Self {
             Self {
                 settings: Settings::new(CtsOptions::default()),
                 buffer_sizes: FxHashMap::default(),
                 blockages,
             }
+            .with_buffer_size(0, 0)
         }
 
         fn with_buffer_size(mut self, width: i64, height: i64) -> Self {

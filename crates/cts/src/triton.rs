@@ -793,10 +793,7 @@ impl Cts<'_> {
                 .ok_or_else(|| CtsError::NoMaster(self.link.liberty.cell(b.id).name.clone()))?;
             let _ = sizes.insert(b, db.library.cell_macro(master).size);
         }
-        let root = sizes
-            .get(&self.setup.buffers.root)
-            .copied()
-            .unwrap_or_default();
+        let root = sizes[&self.setup.buffers.root];
         let unit = f64::from(tech.length_unit());
         let half = |side: Dbu| Dbu(((side.get() as f64 / unit) * unit / 2.0).ceil() as i64);
         let bloat = Point::new(half(root.x), half(root.y));
