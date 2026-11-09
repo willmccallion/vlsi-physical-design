@@ -165,6 +165,7 @@ impl SinkClustering {
                 }
             }
         }
+        // NOTE: findBestMatching reads past the sinks when fewer than group_size.
         for i in 0..group_size.min(n) {
             let idx = self.order[i].1;
             for run in runs.iter_mut().skip(i + 1) {
@@ -172,6 +173,7 @@ impl SinkClustering {
             }
         }
         let mut best = None;
+        // NOTE: kept: findBestMatching never picks the cut at offset 0.
         for (j, run) in runs.iter().enumerate().skip(1) {
             if run.cost < self.best_cost {
                 best = Some(j);
