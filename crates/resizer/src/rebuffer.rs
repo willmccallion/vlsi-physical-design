@@ -180,7 +180,7 @@ impl Rebuffer {
         };
         let mut tree = self.annotate_load_slacks(resizer, &tree, driver);
         for _ in 0..TIMING_ROUNDS {
-            match self.buffer_for_timing(resizer, &tree, true) {
+            match self.buffer_for_timing(resizer, &tree) {
                 Some(better) => tree = better,
                 None => return Ok(0),
             }
@@ -247,7 +247,7 @@ impl Rebuffer {
             };
             let mut found = true;
             for _ in 0..TIMING_ROUNDS {
-                if let Some(better) = self.buffer_for_timing(resizer, &timing_tree, true) {
+                if let Some(better) = self.buffer_for_timing(resizer, &timing_tree) {
                     timing_tree = better;
                 } else {
                     found = false;
@@ -563,13 +563,8 @@ impl Rebuffer {
     /// The buffering options for a tree, best slack last, as
     /// `bufferForTiming`'s recursion; the chosen one is the option with
     /// the most slack at the driver.
-    fn buffer_for_timing(
-        &mut self,
-        resizer: &Resizer<'_, Sta>,
-        tree: &BnetPtr,
-        allow_rewrite: bool,
-    ) -> Option<BnetPtr> {
-        let options = self.timing_options(resizer, tree, allow_rewrite);
+    fn buffer_for_timing(&mut self, resizer: &Resizer<'_, Sta>, tree: &BnetPtr) -> Option<BnetPtr> {
+        let options = self.timing_options(resizer, tree);
         let mut best: Option<(Fixed, BnetPtr)> = None;
         for option in options {
             let Some(slack) = self.evaluate_option(resizer, &option) else {
@@ -585,22 +580,17 @@ impl Rebuffer {
         best.map(|(_, option)| option)
     }
 
-    fn timing_options(
-        &self,
-        resizer: &Resizer<'_, Sta>,
-        node: &BnetPtr,
-        allow_rewrite: bool,
-    ) -> Vec<BnetPtr> {
+    fn timing_options(&self, resizer: &Resizer<'_, Sta>, node: &BnetPtr) -> Vec<BnetPtr> {
         match &node.kind {
             Kind::Load { .. } => vec![Rc::clone(node)],
             Kind::Junction { left, right } => {
-                let left_options = self.timing_options(resizer, left, allow_rewrite);
-                let right_options = self.timing_options(resizer, right, allow_rewrite);
-                self.junction_options(resizer, node, &left_options, &right_options, allow_rewrite)
+                let left_options = self.timing_options(resizer, left);
+                let right_options = self.timing_options(resizer, right);
+                self.junction_options(resizer, node, &left_options, &right_options)
             }
             Kind::Wire { to, .. } | Kind::Via { to, .. } | Kind::Buffer { to, .. } => {
                 let under = to.under_wires_and_buffers();
-                let options = self.timing_options(resizer, &under, allow_rewrite);
+                let options = self.timing_options(resizer, &under);
                 self.wire_options(resizer, node, &under, node.wire_layer_below(), options)
             }
         }
@@ -678,7 +668,6 @@ impl Rebuffer {
         node: &Bnet,
         left: &[BnetPtr],
         right: &[BnetPtr],
-        allow_rewrite: bool,
     ) -> Vec<BnetPtr> {
         let fanout_limit = self
             .driver
@@ -699,14 +688,11 @@ impl Rebuffer {
             while ri > 0 && right[ri - 1].slack >= left[li].slack {
                 ri -= 1;
             }
-            let rewritten = if allow_rewrite {
-                self.rewrite_topology(resizer, node, &left[li], &right[ri], best_cap)
-            } else {
-                None
-            };
-            let junction = rewritten.unwrap_or_else(|| {
-                Bnet::junction(node.at, Rc::clone(&left[li]), Rc::clone(&right[ri]))
-            });
+            let junction = self
+                .rewrite_topology(resizer, node, &left[li], &right[ri], best_cap)
+                .unwrap_or_else(|| {
+                    Bnet::junction(node.at, Rc::clone(&left[li]), Rc::clone(&right[ri]))
+                });
             if junction.fanout <= fanout_limit {
                 best_cap = junction.cap;
                 options.push(junction);
