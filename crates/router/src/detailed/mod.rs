@@ -67,6 +67,13 @@ pub enum RestoreRoutesError {
 /// bounds the memory their wiring takes while they wait to be recorded.
 const COMMIT_CHUNK: usize = 4096;
 
+/// How many nets are routed speculatively at a time; rayon spreads each
+/// batch over the threads. Fixed rather than the thread count, so that which
+/// nets reroute against which, and so the routes, do not depend on the
+/// machine; 28 keeps a 28-thread machine's batches. PARE tunable, no
+/// `OpenROAD` counterpart.
+const SPECULATIVE_BATCH: usize = 28;
+
 /// A net's commit worked out and waiting to be recorded.
 #[derive(Debug)]
 struct PreparedCommit {
@@ -347,11 +354,10 @@ impl<'a> DetailedRouter<'a> {
     /// earlier in its batch is routed once more in the next batch; after
     /// that, conflicts are left to negotiation.
     fn route_speculatively(&mut self, nets: Vec<NetId>, costs: Costs) {
-        let batch_size = rayon::current_num_threads().max(1);
         let mut pending: VecDeque<NetId> = nets.into();
         let mut retried: FxHashSet<NetId> = FxHashSet::default();
         while !pending.is_empty() {
-            let take = batch_size.min(pending.len());
+            let take = SPECULATIVE_BATCH.min(pending.len());
             let batch: Vec<NetId> = pending.drain(..take).collect();
             let results: Vec<(NetId, NetRoute)> = batch
                 .par_iter()
@@ -1678,6 +1684,30 @@ mod tests {
         let across = rect(220, 150, 260, 190);
 
         assert!(!pads.clear(LayerId::new(0), &across, NetId(2), Dbu(65)));
+    }
+
+    #[test]
+    fn speculative_routes_do_not_depend_on_the_thread_count() {
+        let (db, config) = crate::tests::placed_tiny();
+        let tech = RouteTech::new(&db, &config).unwrap();
+        let gcell = crate::gcell_size(&tech, &config);
+        let costs = round_costs(0, 4.0 * tech.layer(tech.min_layer).pitch().to_f64());
+        let route_with = |threads: usize| {
+            let pool = rayon::ThreadPoolBuilder::new()
+                .num_threads(threads)
+                .build()
+                .unwrap();
+            pool.install(|| {
+                let mut dr = DetailedRouter::new(&db, &tech, gcell);
+                dr.route_speculatively(routable_nets(&db), costs);
+                dr.routes
+            })
+        };
+
+        let one = route_with(1);
+        let eight = route_with(8);
+
+        assert_eq!(one, eight);
     }
 
     #[test]
