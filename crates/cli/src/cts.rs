@@ -1,5 +1,6 @@
 //! Clock tree synthesis and the repairs that follow it.
 
+use crate::phase::{Phase, PhaseTimer};
 use crate::repair::{NetlistRepair, TimedRepair};
 use crate::report::{ClockTreeSummary, Report};
 use crate::ui;
@@ -13,7 +14,6 @@ use pare_resizer::WireRc;
 use pare_resizer::max_wire_length_of;
 use pare_resizer::{Link, Repairer, Resizer, repair_clock_inverters};
 use rustc_hash::FxHashMap;
-use std::time::Instant;
 
 /// Builds the clock trees on the detailed placement and propagates the
 /// clocks through them, as `OpenROAD-flow-scripts`' clock tree stage runs
@@ -36,8 +36,7 @@ pub(crate) fn clock_tree_synthesis(
         .wires
         .clock
         .context("[netlist] clock trees need clock_wire")?;
-    let phase_start = Instant::now();
-    ui::phase("Clock Tree Synthesis");
+    let timer = PhaseTimer::start(Phase::ClockTreeSynthesis);
     let cloned_inverters = clone_clock_inverters(config, db, &mut timed)?;
     let trees = build_trees(config, db, &timed, clock_rc)?;
     for clock in &mut timed.sdc.clocks {
@@ -60,7 +59,7 @@ pub(crate) fn clock_tree_synthesis(
     };
     show_clock_trees(&summary, &cts.root_buffer);
     report.clock_tree = Some(summary);
-    report.phase("clock tree synthesis", phase_start);
+    timer.finish(report);
     Ok(true)
 }
 

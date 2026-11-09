@@ -1,6 +1,7 @@
 //! Global routing with repair on its parasitics, and detailed routing.
 
 use crate::checks::report_routing;
+use crate::phase::{Phase, PhaseTimer};
 use crate::placement::{CellPlaces, legalize};
 use crate::prepare_output_dir;
 use crate::repair::{NetlistRepair, show_design_repair, timing_repair_on};
@@ -22,7 +23,7 @@ use pare_resizer::WireRc;
 use pare_resizer::{Repairer, Resizer};
 use pare_router::{GlobalSession, Progress, Stage};
 use std::path::{Path, PathBuf};
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
 /// Pixels along the die's longer side in the routed design's image.
 const ROUTED_IMAGE_PIXELS: u32 = 2000;
@@ -84,11 +85,10 @@ pub(crate) fn global_route_with_repair(
         return Ok(None);
     };
     ui::section("Global Routing");
-    let phase_start = Instant::now();
-    ui::phase("Global Route");
+    let timer = PhaseTimer::start(Phase::GlobalRouting);
     let mut tables = RouteTables::default();
     let mut session = GlobalSession::new(db, &config.routing, &mut |p| tables.show(p))?;
-    report.phase("global routing", phase_start);
+    timer.finish(report);
     let route_rc = route_rc(config, db)?;
     let sites = SiteGrid::new(db).context("cannot lay out the core's site grid to legalize on")?;
     let legalize = |db: &mut NetlistDB, cell: CellId| sites.legalize(db, cell);
@@ -101,7 +101,7 @@ pub(crate) fn global_route_with_repair(
         if !enabled {
             continue;
         }
-        let phase_start = Instant::now();
+        let timer = PhaseTimer::start(step.phase());
         let stage = timed.stage(config, db)?;
         let routes = GlobalRouting {
             source: &mut session,
@@ -112,19 +112,17 @@ pub(crate) fn global_route_with_repair(
         let mut resizer = Resizer::on_global_routes(inputs, timed.sdc, routes)?;
         match step {
             RepairStep::Design => {
-                ui::phase("Design Repair");
                 let done = Repairer::new(&mut resizer).repair_design()?;
                 show_design_repair(&done, resizer.netlist().db.cells.len());
                 summary.design = DesignRepairSummary::of(&done);
             }
             RepairStep::Timing => {
-                ui::phase("Timing Repair");
                 summary.timing = Some(timing_repair_on(&mut resizer, timed.liberty)?);
             }
         }
         let renumbering = resizer.finish()?;
         session.renumber(&renumbering);
-        report.phase(step.phase_name(), phase_start);
+        timer.finish(report);
         legalize_and_reroute(db, &mut session, report)?;
     }
     report.global_route_repair = Some(summary);
@@ -139,10 +137,10 @@ enum RepairStep {
 }
 
 impl RepairStep {
-    const fn phase_name(self) -> &'static str {
+    const fn phase(self) -> Phase {
         match self {
-            Self::Design => "design repair on global routes",
-            Self::Timing => "timing repair on global routes",
+            Self::Design => Phase::DesignRepairOnGlobalRoutes,
+            Self::Timing => Phase::TimingRepairOnGlobalRoutes,
         }
     }
 }
@@ -155,8 +153,7 @@ fn legalize_and_reroute(
     session: &mut GlobalSession,
     report: &mut Report,
 ) -> anyhow::Result<()> {
-    let phase_start = Instant::now();
-    ui::phase("Legalization");
+    let timer = PhaseTimer::start(Phase::LegalizationOnGlobalRoutes);
     let before = CellPlaces::record(db);
     let _ = legalize(db, &Zones::new(db)?)?;
     let moved = before.moved(db);
@@ -173,7 +170,7 @@ fn legalize_and_reroute(
         "Nets updated:",
         &moved_nets.len().to_string(),
     );
-    report.phase("legalization on global routes", phase_start);
+    timer.finish(report);
     Ok(())
 }
 
@@ -243,8 +240,8 @@ pub(crate) fn route_global(
     guides: Option<&Path>,
     report: &mut Report,
 ) -> anyhow::Result<()> {
-    let phase_start = Instant::now();
     ui::section("Routing");
+    let timer = PhaseTimer::start(Phase::GlobalRouting);
     let mut tables = RouteTables::default();
     let global = pare_router::route_global_only(db, &config.routing, &mut |p| tables.show(p))?;
     ui::stat_row("Nets:", &global.summary.nets.to_string(), "", "");
@@ -252,7 +249,7 @@ pub(crate) fn route_global(
         write_guides(path, db, &global.guides)?;
         ui::wrote(path);
     }
-    report.phase("global routing", phase_start);
+    timer.finish(report);
     Ok(())
 }
 
@@ -266,11 +263,11 @@ pub(crate) fn route_detailed(
     global: Option<GlobalSession>,
     report: &mut Report,
 ) -> anyhow::Result<()> {
-    let phase_start = Instant::now();
     ui::section("Routing");
+    let timer = PhaseTimer::start(Phase::Routing);
     let summary = run_router(config, db, files, global)?;
     show_routing(&summary);
-    report.phase("routing", phase_start);
+    timer.finish(report);
     report.routing = Some(RoutingSummary {
         nets: summary.nets,
         rounds: summary.rounds,
@@ -279,15 +276,13 @@ pub(crate) fn route_detailed(
         conflicted: summary.conflicted.len(),
     });
 
-    let phase_start = Instant::now();
-    ui::phase("Verification");
+    let timer = PhaseTimer::start(Phase::Verification);
     let routing_ok = report_routing(db, report);
-    report.phase("verification", phase_start);
+    timer.finish(report);
 
-    let phase_start = Instant::now();
-    ui::phase("Output");
+    let timer = PhaseTimer::start(Phase::RoutingOutput);
     write_routed(db, &prepare_output_dir(config)?)?;
-    report.phase("routing output", phase_start);
+    timer.finish(report);
 
     if !routing_ok {
         anyhow::bail!("routing has opens or design rule violations");

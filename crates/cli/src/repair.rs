@@ -1,6 +1,7 @@
 //! Netlist repair around placement: buffer removal, port buffering, design
 //! repair and timing repair, and the wire parasitics they estimate with.
 
+use crate::phase::{Phase, PhaseTimer};
 use crate::ui;
 use anyhow::Context;
 use pare_common::config::{Config, LayerRcConfig, NetlistConfig};
@@ -18,7 +19,6 @@ use pare_resizer::{
     repair_setup,
 };
 use std::path::{Path, PathBuf};
-use std::time::Instant;
 
 /// Reads the Liberty files, the first one's thresholds and defaults
 /// standing for all.
@@ -198,8 +198,7 @@ pub(crate) fn repair_netlist(
     let mut namer = Namer::new();
     let mut summary = NetlistSummary::default();
     if config.netlist.remove_buffers {
-        let phase_start = Instant::now();
-        ui::phase("Buffer Removal");
+        let timer = PhaseTimer::start(Phase::BufferRemoval);
         let before = db.cells.len();
         summary.buffers_removed = pare_resizer::remove_buffers(db, &link, sdc.as_ref())?;
         ui::stat_row(
@@ -208,11 +207,10 @@ pub(crate) fn repair_netlist(
             "Cells:",
             &format!("{before} -> {}", db.cells.len()),
         );
-        report.phase("buffer removal", phase_start);
+        timer.finish(report);
     }
     if config.netlist.buffer_ports {
-        let phase_start = Instant::now();
-        ui::phase("Port Buffering");
+        let timer = PhaseTimer::start(Phase::PortBuffering);
         let stage = Stage::find(config, db, &liberty, sdc.as_ref())?;
         let done = pare_resizer::buffer_ports(
             db,
@@ -239,7 +237,7 @@ pub(crate) fn repair_netlist(
             "Clock pins:",
             &stage.clocks.sources().len().to_string(),
         );
-        report.phase("port buffering", phase_start);
+        timer.finish(report);
     }
     report.netlist = Some(summary.clone());
     Ok(Some(NetlistRepair {
@@ -263,8 +261,7 @@ pub(crate) fn repair_design(
     if !config.netlist.repair_design {
         return Ok(());
     }
-    let phase_start = Instant::now();
-    ui::phase("Design Repair");
+    let timer = PhaseTimer::start(Phase::DesignRepair);
     let stage = Stage::find(config, db, &repair.liberty, repair.sdc.as_ref())?;
     let inputs = stage.session(db, repair.wires, &mut repair.namer);
     let done = match repair.sdc.as_ref() {
@@ -273,7 +270,7 @@ pub(crate) fn repair_design(
     };
     repair.summary.design = DesignRepairSummary::of(&done);
     report.netlist = Some(repair.summary.clone());
-    report.phase("design repair", phase_start);
+    timer.finish(report);
     Ok(())
 }
 
@@ -324,13 +321,12 @@ pub(crate) fn repair_timing(
     let Some(timed) = repair.timed() else {
         return Ok(false);
     };
-    let phase_start = Instant::now();
-    ui::phase("Timing Repair");
+    let timer = PhaseTimer::start(Phase::TimingRepair);
     let stage = timed.stage(config, db)?;
     let mut resizer = Resizer::timed(stage.session(db, timed.wires, timed.namer), timed.sdc)?;
     report.timing = Some(timing_repair_on(&mut resizer, timed.liberty)?);
     let _ = resizer.finish()?;
-    report.phase("timing repair", phase_start);
+    timer.finish(report);
     Ok(true)
 }
 

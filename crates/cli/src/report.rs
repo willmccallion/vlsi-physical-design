@@ -1,13 +1,12 @@
 //! The record of a run that `--report` writes as JSON: what was run, how
 //! long each phase took, what the checks found and how much memory it took.
 
-use crate::ui;
 use anyhow::Context;
 use pare_resizer::{HoldSummary, RepairSummary, SetupSummary};
 use serde::{Serialize, Serializer};
 use std::collections::BTreeMap;
 use std::path::Path;
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
 /// Everything a run reports.
 #[derive(Debug, Default, Serialize)]
@@ -17,7 +16,7 @@ pub struct Report {
     /// The config file the run used.
     pub config: String,
     /// Wall time of each phase, in order.
-    pub phases: Vec<Phase>,
+    pub phases: Vec<PhaseTime>,
     /// Netlist repair results, when the run repaired the netlist.
     pub netlist: Option<NetlistSummary>,
     /// Clock tree synthesis results, when the run built clock trees.
@@ -42,11 +41,11 @@ pub struct Report {
     pub peak_rss_mb: Option<u64>,
 }
 
-/// One timed phase.
+/// The wall time of one phase.
 #[derive(Debug, Serialize)]
-pub struct Phase {
+pub struct PhaseTime {
     /// What the phase did.
-    pub name: String,
+    pub name: &'static str,
     /// Its wall time.
     #[serde(rename = "seconds", serialize_with = "as_seconds")]
     pub elapsed: Duration,
@@ -274,16 +273,6 @@ pub struct CheckSummary {
 }
 
 impl Report {
-    /// Records the time since `start` as phase `name` and prints it.
-    pub fn phase(&mut self, name: &str, start: Instant) {
-        let elapsed = start.elapsed();
-        ui::phase_time(elapsed);
-        self.phases.push(Phase {
-            name: name.to_string(),
-            elapsed,
-        });
-    }
-
     /// Writes the report as JSON to `path`.
     pub fn write(&self, path: &Path) -> anyhow::Result<()> {
         let text = serde_json::to_string_pretty(self)?;
@@ -346,8 +335,8 @@ mod tests {
     #[test]
     fn wall_times_report_as_seconds() {
         let report = Report {
-            phases: vec![Phase {
-                name: "routing".to_string(),
+            phases: vec![PhaseTime {
+                name: "routing",
                 elapsed: Duration::from_millis(1500),
             }],
             wall: Duration::from_millis(2250),

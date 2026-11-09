@@ -6,6 +6,7 @@
 mod checks;
 mod cts;
 mod logger;
+mod phase;
 mod placement;
 mod repair;
 mod report;
