@@ -637,11 +637,12 @@ impl Rebuffer {
                 .collect();
             self.insert_buffer_options(resizer, &mut options, remaining.min(step), None);
             if options.is_empty() {
+                let net = self
+                    .driver
+                    .as_ref()
+                    .map_or_else(|| "a net".to_owned(), |d| resizer.db.pin_name(d.pin));
                 log::warn!(
-                    "rebuffering {}: no option can drive the wire step; keeping the last that could",
-                    resizer
-                        .db
-                        .pin_name(self.driver.as_ref().map_or(PinId::new(0), |d| d.pin))
+                    "rebuffering {net}: no option can drive the wire step; keeping the last that could"
                 );
                 options = last_valid;
                 break;
