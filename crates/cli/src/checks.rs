@@ -189,8 +189,8 @@ pub(crate) fn report_routing(db: &NetlistDB, run: &mut Report) -> bool {
     }
 }
 
-/// A violation, where it is and what it involves, for the debug log.
-fn describe_marker(db: &NetlistDB, drc: &DrcReport, m: &Marker) -> String {
+/// A violation, where it is and what it involves.
+pub(crate) fn describe_marker(db: &NetlistDB, drc: &DrcReport, m: &Marker) -> String {
     let units = db.dbu();
     let layer = match m.layer {
         LayerRef::Routing(l) => db.library.layer(l).name.as_str(),

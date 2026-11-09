@@ -383,7 +383,13 @@ fn viewing_an_area_draws_it_and_lists_its_violations() {
 
     assert!(output.status.success(), "{}", printed(&output));
     let listed = String::from_utf8_lossy(&output.stdout);
-    assert!(listed.starts_with("Short on "), "{listed}");
+    assert!(
+        listed
+            .lines()
+            .any(|line| line
+                == "Short on M3 at (4.8000, 3.4000) - (5.1000, 3.6000) between VDD and n3"),
+        "{listed}"
+    );
     assert_eq!(image::image_dimensions(&image).unwrap(), (100, 100));
 }
 

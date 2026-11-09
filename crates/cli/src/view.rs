@@ -1,5 +1,6 @@
 //! The `view` command: one area of a design with its violations.
 
+use crate::checks::describe_marker;
 use crate::{ui, visualization};
 use anyhow::Context;
 use pare_common::db::design::NetlistDB;
@@ -21,7 +22,6 @@ pub(crate) fn view_area(
     size: u32,
 ) -> anyhow::Result<()> {
     use pare_common::verify::drc::{Layout, Owner, Rules, check_area};
-    let units = db.dbu();
     let layout = Layout::from_db(db);
     let rules = Rules::from_design(db);
     let report = check_area(&layout, &rules, area);
@@ -36,18 +36,7 @@ pub(crate) fn view_area(
     }
     let markers: Vec<&Marker> = report.violations.iter().chain(&report.advisory).collect();
     for m in &markers {
-        let name = |o: pare_common::verify::drc::OwnerIndex| report.owners[o].name(db);
-        println!(
-            "{} on {:?} at ({:.4}, {:.4})-({:.4}, {:.4}) between {} and {}",
-            m.violation.name(),
-            m.layer,
-            units.to_microns(m.bbox.min.x),
-            units.to_microns(m.bbox.min.y),
-            units.to_microns(m.bbox.max.x),
-            units.to_microns(m.bbox.max.y),
-            name(m.owners.0),
-            name(m.owners.1)
-        );
+        println!("{}", describe_marker(db, &report, m));
     }
     let boxes: Vec<_> = markers.iter().map(|m| m.bbox).collect();
     let mut shown = IdVec::filled(layers.is_empty(), db.library.routing_layers.len());
