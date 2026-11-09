@@ -38,6 +38,9 @@ pub fn repair_clock_inverters(
     let mut done = ClockInverterRepair::default();
     let mut removed = Vec::new();
     for inverter in inverters {
+        // NOTE: Resizer::repairClkInverters skips only set_dont_touch
+        // instances, which PARE lacks; PARE leaves fixed and library
+        // dont_touch inverters, which cloning would get around.
         if db.cells[inverter].status == PlacementStatus::Fixed
             || link
                 .cell(db, inverter)

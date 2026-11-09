@@ -315,6 +315,8 @@ pub fn repair_setup(
     summary.split = log.committed(MoveKind::SplitLoad);
     summary.cloned = log.committed(MoveKind::Clone);
     summary.swapped = log.committed(MoveKind::SwapPins);
+    // NOTE: repairSetup reports the legacy phase's count, last gasp
+    // counting on a copy; PARE's summary counts both phases.
     summary.iterations = repair.iteration;
     summary.area_change_percent = progress.area_change_percent;
     summary.failing_after = progress.failing;
@@ -473,6 +475,9 @@ impl Repair<'_, '_> {
                 self.report_progress();
             }
             if self.terminate(phase) {
+                // NOTE: repairSetup_LastGasp ends the journal here where the
+                // legacy phase restores it; at this point last gasp's
+                // journal holds nothing, so restoring is the same.
                 self.journal_restore()?;
                 return Ok(phase.terminated());
             }
