@@ -1000,4 +1000,74 @@ mod tests {
         assert_eq!(density.target, target);
         assert_eq!(density.bins, global::default_bins(&model, target.get()));
     }
+
+    fn set_io_status(db: &mut NetlistDB, name: &str, status: PlacementStatus) {
+        let pin = db.io_pin_id(name).unwrap();
+        db.io_pins[pin].status = status;
+    }
+
+    #[test]
+    fn placed_io_pins_keep_their_places_without_layers_to_move_them_to() {
+        let config = tiny_config("");
+
+        let layers = io_layers_to_place(&config, &tiny(), PlacementStart::Scratch).unwrap();
+
+        assert_eq!(layers, None);
+    }
+
+    #[test]
+    fn io_pins_are_placed_on_the_layers_the_config_names() {
+        let db = tiny();
+        let config =
+            tiny_config("[io_placement]\nhorizontal_layer = \"M3\"\nvertical_layer = \"M2\"");
+
+        let layers = io_layers_to_place(&config, &db, PlacementStart::Scratch).unwrap();
+
+        let id = |name: &str| db.library.routing_layer_id(name).unwrap();
+        assert_eq!(
+            layers,
+            Some(IoLayers {
+                horizontal: id("M3"),
+                vertical: id("M2"),
+            })
+        );
+    }
+
+    #[test]
+    fn a_given_placement_places_no_io_pins() {
+        let mut db = tiny();
+        set_io_status(&mut db, "out", PlacementStatus::Unplaced);
+        let config =
+            tiny_config("[io_placement]\nhorizontal_layer = \"M3\"\nvertical_layer = \"M2\"");
+
+        let layers = io_layers_to_place(&config, &db, PlacementStart::Given).unwrap();
+
+        assert_eq!(layers, None);
+    }
+
+    #[test]
+    fn fixed_io_pins_need_no_layers() {
+        let mut db = tiny();
+        set_io_status(&mut db, "out", PlacementStatus::Fixed);
+        let config =
+            tiny_config("[io_placement]\nhorizontal_layer = \"M3\"\nvertical_layer = \"M2\"");
+
+        let layers = io_layers_to_place(&config, &db, PlacementStart::Scratch).unwrap();
+
+        assert_eq!(layers, None);
+    }
+
+    #[test]
+    fn unplaced_io_pins_without_layers_to_place_them_on_are_an_error() {
+        let mut db = tiny();
+        set_io_status(&mut db, "out", PlacementStatus::Unplaced);
+
+        let error = io_layers_to_place(&tiny_config(""), &db, PlacementStart::Scratch).unwrap_err();
+
+        assert_eq!(
+            error.to_string(),
+            "1 I/O pins are unplaced; [io_placement] horizontal_layer and vertical_layer \
+             name the layers to place them on"
+        );
+    }
 }
