@@ -56,6 +56,8 @@ pub struct Link<'a> {
     class_of: IdVec<LibCellId, Option<usize>>,
     classes: Vec<Vec<LibCellId>>,
     master_area: IdVec<LibCellId, Option<DbuArea>>,
+    /// Whether each cell's master is of class `CORE`, as `dbMaster::isCore`.
+    core_master: IdVec<LibCellId, bool>,
 }
 
 /// How much one sizing step may grow a cell, as `set_opt_config`'s
@@ -153,6 +155,10 @@ impl<'a> Link<'a> {
                 })
             })
             .collect();
+        let core_master = macro_of_cell
+            .iter()
+            .map(|m| m.is_some_and(|m| matches!(db.library.macros[m].class, MacroClass::Core(_))))
+            .collect();
         Ok(Self {
             liberty,
             cell_of_macro,
@@ -162,6 +168,7 @@ impl<'a> Link<'a> {
             class_of,
             classes,
             master_area,
+            core_master,
         })
     }
 
@@ -223,20 +230,29 @@ impl<'a> Link<'a> {
     }
 
     /// The cells an instance of `cell` may be swapped for, itself included,
-    /// as `OpenROAD`'s `getSwappableCells`: the equivalent cells that have
-    /// a master, may be used and are within `limits` of `cell`, or just the
-    /// cell when it has no class.
+    /// as `OpenROAD`'s `getSwappableCells`: none for a cell whose master is
+    /// not a core cell; else the equivalent cells that have a master, may
+    /// be used, are within `limits` of `cell` and share its user function
+    /// class when it has one, or just the cell when it has no class.
     #[must_use]
     pub(crate) fn swappable_cells(&self, cell: LibCellId, limits: SizingLimits) -> Vec<LibCellId> {
+        if !self.core_master[cell] {
+            return Vec::new();
+        }
         let Some(class) = self.class_of[cell] else {
             return vec![cell];
         };
         let from = self.measures(cell);
+        let function_class = self.liberty.cell(cell).user_function_class.as_deref();
         self.classes[class]
             .iter()
             .copied()
             .filter(|&c| !self.dont_use(c) && self.is_link_cell(c))
             .filter(|&c| limits.allows(from, self.measures(c)))
+            .filter(|&c| {
+                function_class
+                    .is_none_or(|f| self.liberty.cell(c).user_function_class.as_deref() == Some(f))
+            })
             .collect()
     }
 
@@ -657,6 +673,72 @@ mod tests {
     #[test]
     fn a_library_of_only_clock_and_unusable_buffers_has_none_to_choose() {
         assert_eq!(find_among(&[]), Err(LinkError::NoBuffers));
+    }
+
+    /// The design of [`find_among`] over buffers `B0`, `B1`, ... copying
+    /// `BUF_X1`, each with the Liberty attributes in `attributes`.
+    fn attributed_buffers(attributes: &[&str]) -> (NetlistDB, Liberty) {
+        let names: Vec<String> = (0..attributes.len()).map(|i| format!("B{i}")).collect();
+        let copies: Vec<(&str, &str)> = names.iter().map(|n| ("BUF_X1", n.as_str())).collect();
+        let sections = DefSections {
+            components: "",
+            nets: "",
+            inputs: &[],
+            outputs: &[],
+        };
+        let db = design_with_copies(&def_text("buffers", &sections), &copies);
+        let extra: String = names
+            .iter()
+            .zip(attributes)
+            .map(|(name, attribute)| {
+                buffer_cell(name, "buf", 0.1).replacen(
+                    "area : 0.8 ;",
+                    &format!("area : 0.8 ; {attribute}"),
+                    1,
+                )
+            })
+            .collect();
+        (db, cells_with(&extra))
+    }
+
+    /// The names of `cells` of `lib`.
+    fn names(lib: &Liberty, cells: &[LibCellId]) -> Vec<String> {
+        cells.iter().map(|&c| lib.cell(c).name.clone()).collect()
+    }
+
+    #[test]
+    fn a_cell_whose_master_is_no_core_cell_has_no_sizes() {
+        let (mut db, lib) = attributed_buffers(&["", ""]);
+        let block = db.library.macro_id("B0").unwrap();
+        db.library.macros[block].class = MacroClass::Block;
+        let link = Link::new(&db, &lib, &[]).unwrap();
+        let id = |name: &str| lib.cell_id(name).unwrap();
+
+        let of_block = link.swappable_cells(id("B0"), SizingLimits::NONE);
+        let of_core = link.swappable_cells(id("B1"), SizingLimits::NONE);
+
+        assert_eq!(of_block, []);
+        assert!(of_core.contains(&id("B1")) && of_core.contains(&id("B0")));
+    }
+
+    #[test]
+    fn a_user_function_class_keeps_sizes_within_it() {
+        let class = |name: &str| format!("user_function_class : \"{name}\" ;");
+        let (db, lib) = attributed_buffers(&[&class("a"), &class("a"), &class("b"), ""]);
+        let link = Link::new(&db, &lib, &[]).unwrap();
+        let id = |name: &str| lib.cell_id(name).unwrap();
+
+        let of_a = names(&lib, &link.swappable_cells(id("B0"), SizingLimits::NONE));
+        let of_none = names(&lib, &link.swappable_cells(id("B3"), SizingLimits::NONE));
+
+        assert!(of_a.iter().all(|n| n == "B0" || n == "B1"), "{of_a:?}");
+        assert_eq!(of_a.len(), 2);
+        assert!(
+            ["B0", "B1", "B2", "B3"]
+                .iter()
+                .all(|n| of_none.iter().any(|m| m == n)),
+            "{of_none:?}"
+        );
     }
 
     #[test]
