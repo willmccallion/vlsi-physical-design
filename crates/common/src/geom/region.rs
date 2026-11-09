@@ -44,6 +44,30 @@ pub enum Heading {
     South,
 }
 
+impl Heading {
+    /// The heading a quarter turn counterclockwise.
+    #[must_use]
+    pub const fn turned_left(self) -> Self {
+        match self {
+            Self::East => Self::North,
+            Self::North => Self::West,
+            Self::West => Self::South,
+            Self::South => Self::East,
+        }
+    }
+
+    /// The heading a quarter turn clockwise.
+    #[must_use]
+    pub const fn turned_right(self) -> Self {
+        match self {
+            Self::East => Self::South,
+            Self::South => Self::West,
+            Self::West => Self::North,
+            Self::North => Self::East,
+        }
+    }
+}
+
 /// A maximal straight piece of a region's boundary, run with the region on
 /// its left.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]

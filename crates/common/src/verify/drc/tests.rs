@@ -7,6 +7,7 @@ use crate::db::rules::{
 };
 use crate::geom::dbu::DbuArea;
 use crate::geom::point::Point;
+use crate::geom::region::Heading;
 
 fn rect(x0: i64, y0: i64, x1: i64, y1: i64) -> Rect<Dbu> {
     Rect::from_corners(Point::new(Dbu(x0), Dbu(y0)), Point::new(Dbu(x1), Dbu(y1)))
@@ -1250,4 +1251,67 @@ fn building_tiles_when_checked_finds_what_bucketing_them_finds() {
     );
 
     assert_eq!(lazy, check_tiled(&layout, &rules, Dbu(1000), Dbu(500)));
+}
+
+/// Net 0's metal around a hole that meets the outside at the corner
+/// (200, 200), where the boundary passes twice.
+fn route_ring_pinched_at_a_corner(f: &mut Fixture) {
+    let a = f.a;
+    for r in [
+        rect(0, 0, 300, 100),
+        rect(0, 100, 100, 300),
+        rect(200, 100, 300, 200),
+        rect(100, 200, 200, 300),
+    ] {
+        f.route(M1, a, r);
+    }
+}
+
+#[test]
+fn each_edge_into_a_pinch_vertex_links_to_the_edge_turning_left() {
+    let mut f = Fixture::new();
+    route_ring_pinched_at_a_corner(&mut f);
+
+    let model = Model::new(&f.layout);
+
+    let edges = &model.metal[LayerId(0)].edges;
+    let pinch = Point::new(Dbu(200), Dbu(200));
+    let turns: Vec<(Heading, Heading)> = edges
+        .iter()
+        .filter(|e| e.edge.to == pinch)
+        .map(|e| (e.edge.heading(), edges[e.next as usize].edge.heading()))
+        .collect();
+    assert_eq!(turns.len(), 2);
+    assert!(
+        turns.contains(&(Heading::West, Heading::South)),
+        "{turns:?}"
+    );
+    assert!(
+        turns.contains(&(Heading::East, Heading::North)),
+        "{turns:?}"
+    );
+    for (k, e) in edges.iter().enumerate() {
+        assert_eq!(edges[e.next as usize].prev as usize, k);
+    }
+}
+
+#[test]
+fn a_line_end_at_a_pinch_vertex_breaks_the_eol_rule() {
+    let mut f = Fixture::new();
+    route_ring_pinched_at_a_corner(&mut f);
+    let b = f.b;
+    f.route(M1, b, rect(150, 350, 400, 600));
+
+    let report = f.check(&rules_with_eol(None));
+
+    let line_ends: Vec<Rect<Dbu>> = report
+        .violations
+        .iter()
+        .filter(|m| m.violation == Violation::EndOfLineSpacing)
+        .map(|m| m.bbox)
+        .collect();
+    assert!(
+        line_ends.contains(&rect(200, 200, 300, 350)),
+        "{line_ends:?}"
+    );
 }
