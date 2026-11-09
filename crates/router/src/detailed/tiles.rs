@@ -9,6 +9,7 @@
 
 use super::region::{Changes, RepairStats, Routed, Scope, Verdict};
 use super::{DetailedRouter, NetGuide};
+use crate::global::Gcells;
 use crate::search::Costs;
 use pare_common::db::indices::NetId;
 use pare_common::db::library::Direction;
@@ -21,11 +22,11 @@ use std::cmp::Reverse;
 use std::collections::{BTreeMap, BTreeSet, BinaryHeap};
 
 /// Largest span, in gcells past the first, of a cluster of violations.
-const CLUSTER_SPAN: i64 = 4;
+const CLUSTER_SPAN: Gcells = Gcells(4);
 
 /// Span, in gcells past the first, of a tile around a cluster: tiles are
 /// seven gcells wide.
-const TILE_SPAN: i64 = 6;
+const TILE_SPAN: Gcells = Gcells(6);
 
 /// Factors the conflict and marker costs of a stubborn tile are tried at.
 const COST_FACTORS: [f64; 3] = [1.0, 0.5, 2.0];
@@ -33,48 +34,34 @@ const COST_FACTORS: [f64; 3] = [1.0, 0.5, 2.0];
 /// A box of gcells by index, both ends included.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 struct CellBox {
-    x0: i64,
-    y0: i64,
-    x1: i64,
-    y1: i64,
+    x0: Gcells,
+    y0: Gcells,
+    x1: Gcells,
+    y1: Gcells,
 }
 
 impl CellBox {
-    const fn merge(self, other: Self) -> Self {
+    fn merge(self, other: Self) -> Self {
         Self {
-            x0: if self.x0 < other.x0 {
-                self.x0
-            } else {
-                other.x0
-            },
-            y0: if self.y0 < other.y0 {
-                self.y0
-            } else {
-                other.y0
-            },
-            x1: if self.x1 > other.x1 {
-                self.x1
-            } else {
-                other.x1
-            },
-            y1: if self.y1 > other.y1 {
-                self.y1
-            } else {
-                other.y1
-            },
+            x0: self.x0.min(other.x0),
+            y0: self.y0.min(other.y0),
+            x1: self.x1.max(other.x1),
+            y1: self.y1.max(other.y1),
         }
     }
 
-    const fn dx(self) -> i64 {
+    fn dx(self) -> Gcells {
         self.x1 - self.x0
     }
 
-    const fn dy(self) -> i64 {
+    fn dy(self) -> Gcells {
         self.y1 - self.y0
     }
 
-    fn cells(self) -> impl Iterator<Item = (i64, i64)> {
-        (self.x0..=self.x1).flat_map(move |x| (self.y0..=self.y1).map(move |y| (x, y)))
+    fn cells(self) -> impl Iterator<Item = Point<Gcells>> {
+        self.x0
+            .through(self.x1)
+            .flat_map(move |x| self.y0.through(self.y1).map(move |y| Point::new(x, y)))
     }
 }
 
@@ -107,7 +94,7 @@ enum Side {
 
 /// Which cluster each gcell taken by a tile belongs to.
 struct Taken {
-    owner: FxHashMap<(i64, i64), usize>,
+    owner: FxHashMap<Point<Gcells>, usize>,
     /// The gcells of the die.
     limit: CellBox,
 }
@@ -127,21 +114,21 @@ impl Taken {
     /// Grows `b` toward `side` one gcell at a time, at most `most`, while
     /// it stays on the die and off other clusters' tiles; returns how far
     /// it grew.
-    fn grow(&self, b: &mut CellBox, id: usize, side: Side, most: i64) -> i64 {
-        for step in 1..=most {
+    fn grow(&self, b: &mut CellBox, id: usize, side: Side, most: Gcells) -> Gcells {
+        for step in Gcells(1).through(most) {
             let mut grown = *b;
             match side {
-                Side::East => grown.x1 += 1,
-                Side::West => grown.x0 -= 1,
-                Side::North => grown.y1 += 1,
-                Side::South => grown.y0 -= 1,
+                Side::East => grown.x1 += Gcells(1),
+                Side::West => grown.x0 -= Gcells(1),
+                Side::North => grown.y1 += Gcells(1),
+                Side::South => grown.y0 -= Gcells(1),
             }
             let off_die = grown.x0 < self.limit.x0
                 || grown.y0 < self.limit.y0
                 || grown.x1 > self.limit.x1
                 || grown.y1 > self.limit.y1;
             if off_die || self.taken_by_other(grown, id) {
-                return step - 1;
+                return step - Gcells(1);
             }
             *b = grown;
         }
@@ -152,10 +139,10 @@ impl Taken {
 /// One way of growing a cluster into a tile: how far toward each side.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
 struct Growth {
-    east: i64,
-    west: i64,
-    north: i64,
-    south: i64,
+    east: Gcells,
+    west: Gcells,
+    north: Gcells,
+    south: Gcells,
 }
 
 /// Grows each cluster into tiles of up to [`TILE_SPAN`] gcells past the
@@ -184,28 +171,28 @@ fn expand_boxes(clusters: &[CellBox], limit: CellBox) -> Vec<BTreeSet<CellBox>> 
         let south = taken.grow(&mut centred, id, Side::South, tall - north);
         let sided = [
             Growth {
-                east: 0,
+                east: Gcells(0),
                 west: wide,
                 north,
                 south,
             },
             Growth {
                 east: wide,
-                west: 0,
+                west: Gcells(0),
                 north,
                 south,
             },
             Growth {
                 east,
                 west,
-                north: 0,
+                north: Gcells(0),
                 south: tall,
             },
             Growth {
                 east,
                 west,
                 north: tall,
-                south: 0,
+                south: Gcells(0),
             },
         ];
         for growth in sided {
@@ -414,13 +401,13 @@ impl DetailedRouter<'_> {
     /// The straight runs of a net's global route, layer by layer, as the
     /// areas of their gcells.
     fn guide_runs(&self, guide: &NetGuide) -> Vec<Rect<Dbu>> {
-        let mut lines: BTreeMap<(usize, bool, i64), Vec<i64>> = BTreeMap::new();
+        let mut lines: BTreeMap<(usize, bool, Gcells), Vec<Gcells>> = BTreeMap::new();
         for c in guide.tree.cells() {
             let across = self.tech.layer(c.layer).direction == Direction::Horizontal;
             let (line, along) = if across {
-                (i64::from(c.y), i64::from(c.x))
+                (Gcells::from(c.y), Gcells::from(c.x))
             } else {
-                (i64::from(c.x), i64::from(c.y))
+                (Gcells::from(c.x), Gcells::from(c.y))
             };
             lines
                 .entry((c.layer.index(), across, line))
@@ -433,7 +420,7 @@ impl DetailedRouter<'_> {
             along.dedup();
             let mut start = 0;
             for k in 1..=along.len() {
-                if k < along.len() && along[k] == along[k - 1] + 1 {
+                if k < along.len() && along[k] == along[k - 1] + Gcells(1) {
                     continue;
                 }
                 let (a0, a1) = (along[start], along[k - 1]);
@@ -461,23 +448,20 @@ impl DetailedRouter<'_> {
 
     /// The gcells of the die, by index.
     fn gcell_limit(&self) -> CellBox {
-        let span = |extent: Dbu| (extent.get() + self.gcell.get() - 1) / self.gcell.get();
+        let last = |extent: Dbu| (Gcells::covering(extent, self.gcell) - Gcells(1)).max(Gcells(0));
         let die = self.db.die_area;
         CellBox {
-            x0: 0,
-            y0: 0,
-            x1: (span(die.width()) - 1).max(0),
-            y1: (span(die.height()) - 1).max(0),
+            x0: Gcells(0),
+            y0: Gcells(0),
+            x1: last(die.width()),
+            y1: last(die.height()),
         }
     }
 
     /// The gcells `rect` lies in, within `limit`.
     fn cell_box(&self, rect: &Rect<Dbu>, limit: CellBox) -> CellBox {
-        let index = |at: Dbu, from: Dbu, last: i64| {
-            (at - from)
-                .get()
-                .div_euclid(self.gcell.get())
-                .clamp(0, last)
+        let index = |at: Dbu, from: Dbu, last: Gcells| {
+            Gcells::holding(at - from, self.gcell).clamp(Gcells(0), last)
         };
         CellBox {
             x0: index(rect.min.x, self.grid_origin.x, limit.x1),
@@ -489,8 +473,13 @@ impl DetailedRouter<'_> {
 
     /// The area of the gcells of `b`.
     fn cell_box_area(&self, b: CellBox) -> Rect<Dbu> {
-        let corner = |x: i64, y: i64| self.grid_origin + Point::new(self.gcell * x, self.gcell * y);
-        Rect::new(corner(b.x0, b.y0), corner(b.x1 + 1, b.y1 + 1))
+        let corner = |x: Gcells, y: Gcells| {
+            self.grid_origin + Point::new(x.length(self.gcell), y.length(self.gcell))
+        };
+        Rect::new(
+            corner(b.x0, b.y0),
+            corner(b.x1 + Gcells(1), b.y1 + Gcells(1)),
+        )
     }
 }
 
@@ -500,18 +489,18 @@ mod tests {
 
     const fn cell(x: i64, y: i64) -> CellBox {
         CellBox {
-            x0: x,
-            y0: y,
-            x1: x,
-            y1: y,
+            x0: Gcells(x),
+            y0: Gcells(y),
+            x1: Gcells(x),
+            y1: Gcells(y),
         }
     }
 
     const DIE: CellBox = CellBox {
-        x0: 0,
-        y0: 0,
-        x1: 99,
-        y1: 99,
+        x0: Gcells(0),
+        y0: Gcells(0),
+        x1: Gcells(99),
+        y1: Gcells(99),
     };
 
     fn rect(x0: i64, y0: i64, x1: i64, y1: i64) -> Rect<Dbu> {
@@ -525,10 +514,10 @@ mod tests {
         assert_eq!(
             clusters,
             [CellBox {
-                x0: 10,
-                y0: 10,
-                x1: 14,
-                y1: 12
+                x0: Gcells(10),
+                y0: Gcells(10),
+                x1: Gcells(14),
+                y1: Gcells(12)
             }]
         );
     }
@@ -546,34 +535,34 @@ mod tests {
 
         let expected = BTreeSet::from([
             CellBox {
-                x0: 47,
-                y0: 47,
-                x1: 53,
-                y1: 53,
+                x0: Gcells(47),
+                y0: Gcells(47),
+                x1: Gcells(53),
+                y1: Gcells(53),
             },
             CellBox {
-                x0: 44,
-                y0: 47,
-                x1: 50,
-                y1: 53,
+                x0: Gcells(44),
+                y0: Gcells(47),
+                x1: Gcells(50),
+                y1: Gcells(53),
             },
             CellBox {
-                x0: 50,
-                y0: 47,
-                x1: 56,
-                y1: 53,
+                x0: Gcells(50),
+                y0: Gcells(47),
+                x1: Gcells(56),
+                y1: Gcells(53),
             },
             CellBox {
-                x0: 47,
-                y0: 44,
-                x1: 53,
-                y1: 50,
+                x0: Gcells(47),
+                y0: Gcells(44),
+                x1: Gcells(53),
+                y1: Gcells(50),
             },
             CellBox {
-                x0: 47,
-                y0: 50,
-                x1: 53,
-                y1: 56,
+                x0: Gcells(47),
+                y0: Gcells(50),
+                x1: Gcells(53),
+                y1: Gcells(56),
             },
         ]);
         assert_eq!(tiles, [expected]);
@@ -583,12 +572,12 @@ mod tests {
     fn tiles_stop_at_the_die_edge() {
         let tiles = expand_boxes(&[cell(1, 50)], DIE);
 
-        assert!(tiles[0].iter().all(|t| t.x0 >= 0));
+        assert!(tiles[0].iter().all(|t| t.x0 >= Gcells(0)));
         assert!(tiles[0].contains(&CellBox {
-            x0: 0,
-            y0: 47,
-            x1: 4,
-            y1: 53
+            x0: Gcells(0),
+            y0: Gcells(47),
+            x1: Gcells(4),
+            y1: Gcells(53)
         }));
     }
 
