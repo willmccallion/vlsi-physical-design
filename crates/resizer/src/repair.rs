@@ -734,10 +734,9 @@ impl<'r, 'a, T: Timing> Repairer<'r, 'a, T> {
             max_load_slew_margined: self.resizer.margined_slew(rest.max_load_slew),
             r_drvr: wire.r_drvr,
         });
-        if split_length >= rest.length {
-            rest.length.to_f64()
-        } else {
-            split_length.to_f64() * (1.0 - LENGTH_MARGIN)
+        match split_length {
+            Some(split) if split < rest.length => split.to_f64() * (1.0 - LENGTH_MARGIN),
+            _ => rest.length.to_f64(),
         }
     }
 
@@ -791,11 +790,11 @@ impl<'r, 'a, T: Timing> Repairer<'r, 'a, T> {
     }
 
     /// How far back from the far end of a wire a repeater must go so the
-    /// rest meets the length, load and slew limits, in database units, as
-    /// the split length of `RepairDesign::repairNetWire`.
+    /// rest meets the length, load and slew limits, as the split length of
+    /// `RepairDesign::repairNetWire`; none when no limit is broken.
     // The slew estimates keep OpenROAD's grouping so they can be checked.
     #[allow(clippy::suboptimal_flops, clippy::suspicious_operation_groupings)]
-    fn split_length(&self, input: SplitInput) -> Dbu {
+    fn split_length(&self, input: SplitInput) -> Option<Dbu> {
         let dbu = self.resizer.db.dbu();
         let to_dbu = |m: f64| meters_to_dbu(Meters::new(m), dbu);
         let (wire_res, wire_cap) = (input.wire_res.get(), input.wire_cap.get());
@@ -810,13 +809,17 @@ impl<'r, 'a, T: Timing> Repairer<'r, 'a, T> {
             input.max_load_slew_margined.get(),
         );
         let mut split = match self.resizer.options.max_wire_length {
-            Some(max) if input.wire_length > max => (max - input.wire_length_ref)
-                .max(Dbu(0))
-                .min(input.length / 2),
-            _ => Dbu(i64::MAX),
+            Some(max) if input.wire_length > max => Some(
+                (max - input.wire_length_ref)
+                    .max(Dbu(0))
+                    .min(input.length / 2),
+            ),
+            _ => None,
         };
+        let tightened =
+            |split: Option<Dbu>, limit: Dbu| Some(split.map_or(limit, |s| s.min(limit)));
         if wire_cap > 0.0 && load_cap > max_cap {
-            split = split.min(to_dbu((max_cap - ref_cap) / wire_cap).max(Dbu(0)));
+            split = tightened(split, to_dbu((max_cap - ref_cap) / wire_cap).max(Dbu(0)));
         }
         if load_slew > max_load_slew {
             // `OpenROAD` solves the quadratic in single precision.
@@ -836,9 +839,9 @@ impl<'r, 'a, T: Timing> Repairer<'r, 'a, T> {
                 0.0
             };
             split = if l >= 0.0 {
-                split.min(to_dbu(f64::from(l)))
+                tightened(split, to_dbu(f64::from(l)))
             } else {
-                Dbu(0)
+                Some(Dbu(0))
             };
         }
         split
