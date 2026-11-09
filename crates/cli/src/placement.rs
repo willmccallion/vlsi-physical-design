@@ -446,7 +446,7 @@ fn place_globally(
             global::place(model, params, None, Some(&mut driver), show_global_progress).map_err(
                 |e| match e {
                     GlobalPlacementError::Repair(repair) => repair,
-                    GlobalPlacementError::NoRoom(no_room) => no_room.into(),
+                    other => other.into(),
                 },
             )
         }

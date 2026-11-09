@@ -1,7 +1,8 @@
 //! The Munkres assignment `OpenROAD`'s pin placer solves with, step for step,
 //! so that of equally cheap assignments it takes the same one.
 
-/// The state of the solver over a matrix of `rows` by `cols`.
+/// The state of the solver over a matrix of `rows` by `cols`, at least one
+/// of each.
 struct Munkres {
     rows: usize,
     cols: usize,
@@ -44,21 +45,24 @@ impl Munkres {
     fn subtract_row_minima(&mut self) {
         for row in 0..self.rows {
             let cells = self.at(row, 0)..self.at(row, 0) + self.cols;
-            let least = self.distance[cells.clone()].iter().copied().min();
+            let first = self.distance[cells.start];
+            let least = self.distance[cells.clone()]
+                .iter()
+                .fold(first, |m, &d| m.min(d));
             for at in cells {
-                self.distance[at] -= least.unwrap_or(0);
+                self.distance[at] -= least;
             }
         }
     }
 
     fn subtract_col_minima(&mut self) {
         for col in 0..self.cols {
-            let least = (0..self.rows)
-                .map(|row| self.distance[self.at(row, col)])
-                .min();
+            let first = self.distance[self.at(0, col)];
+            let least =
+                (1..self.rows).fold(first, |m, row| m.min(self.distance[self.at(row, col)]));
             for row in 0..self.rows {
                 let at = self.at(row, col);
-                self.distance[at] -= least.unwrap_or(0);
+                self.distance[at] -= least;
             }
         }
     }

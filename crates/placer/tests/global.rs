@@ -12,8 +12,8 @@ use pare_common::geom::orient::Orientation;
 use pare_common::geom::point::Point;
 use pare_common::testing;
 use pare_placer::global::{
-    self, GlobalParams, GlobalPlacementError, NoTiming, Reweighted, RoutabilityParams,
-    RoutingTiles, TimingDriver, TimingParams, ZoneWithoutRoom,
+    self, GlobalParams, GlobalPlacementError, MismatchedTiles, NoTiming, Reweighted,
+    RoutabilityParams, RoutingTiles, TimingDriver, TimingParams, ZoneWithoutRoom,
 };
 use pare_placer::model::PlacementModel;
 use pare_placer::zones::{Zone, Zones};
@@ -221,6 +221,39 @@ fn a_fence_holding_no_whole_row_is_an_error() {
         Err(GlobalPlacementError::NoRoom(ZoneWithoutRoom {
             zone: Zone::Fence(_),
             cells: 48
+        }))
+    ));
+}
+
+#[test]
+fn gcells_without_a_capacity_each_are_an_error() {
+    let db = common::ring(240);
+    let mut model = PlacementModel::from_db(&db, &Zones::new(&db).unwrap());
+    let tiles = RoutingTiles {
+        origin: Point::new(0.0, 0.0),
+        size: 6.0,
+        nx: 10,
+        ny: 10,
+        capacity: vec![12.0; 99],
+        reduction: vec![0.0; 100],
+    };
+    let params = GlobalParams {
+        routability: Some(RoutabilityParams {
+            tiles,
+            wire_width: 2.0,
+            target_congestion: 1.0,
+        }),
+        ..params()
+    };
+
+    let result = global::place::<NoTiming>(&mut model, &params, None, None, |_| {});
+
+    assert!(matches!(
+        result,
+        Err(GlobalPlacementError::Tiles(MismatchedTiles {
+            capacities: 99,
+            reductions: 100,
+            ..
         }))
     ));
 }

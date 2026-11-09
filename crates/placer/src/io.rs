@@ -442,7 +442,7 @@ fn edge_positions(
         lo: lo + size.half_width,
         hi: hi - size.half_width,
         apart: size.half_width * 2 + db.library.layer(layer).min_spacing,
-        max_corner: db.dbu().to_dbu(MAX_CORNER_MICRONS).unwrap_or(Dbu::ZERO),
+        max_corner: db.dbu().to_dbu_rounded(MAX_CORNER_MICRONS),
     };
     let patterns: Vec<&TrackDef> = db
         .tracks
