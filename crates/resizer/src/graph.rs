@@ -12,7 +12,7 @@ use crate::parasitics::{NetParasitics, PiElmore, WireRc};
 use crate::route_parasitics::RouteRc;
 use pare_common::db::design::PinOwner;
 use pare_common::db::global_route::RouteSource;
-use pare_common::db::indices::{CellId, NetId, PinId};
+use pare_common::db::indices::{CellId, IdVec, NetId, PinId};
 use pare_common::db::liberty::{
     ArcRole, Edge, EdgeValues, FuncExpr, LibPortId, MinMax, SequentialKind, TimingArcSet,
 };
@@ -72,14 +72,14 @@ type PerSide = [EdgeValues<Seconds>; 2];
 /// delay over a driver's arcs, the late side the largest.
 #[derive(Clone, Debug)]
 pub(crate) struct TimingGraph {
-    level: Vec<u32>,
-    in_arcs: Vec<Vec<InArc>>,
+    level: IdVec<PinId, u32>,
+    in_arcs: IdVec<PinId, Vec<InArc>>,
     loop_arcs: rustc_hash::FxHashSet<(PinId, PinId)>,
-    slew: Vec<PerSide>,
-    annotated: Vec<Option<Seconds>>,
-    arc_delays: Vec<Vec<ArcDelay>>,
-    wire_delay: Vec<PerSide>,
-    parasitics: Vec<Option<NetParasitics>>,
+    slew: IdVec<PinId, PerSide>,
+    annotated: IdVec<PinId, Option<Seconds>>,
+    arc_delays: IdVec<PinId, Vec<ArcDelay>>,
+    wire_delay: IdVec<PinId, PerSide>,
+    parasitics: IdVec<NetId, Option<NetParasitics>>,
     rc: WireRc,
     clock_rc: Option<WireRc>,
 }
@@ -98,26 +98,19 @@ impl TimingGraph {
         let db = netlist.db;
         let in_arcs = in_arcs(netlist, constants);
         let (level, loop_arcs) = levelize(netlist, &in_arcs);
-        let parasitics = (0..db.nets.len())
-            .map(|n| {
-                estimate_net(
-                    netlist,
-                    clocks,
-                    NetId::new(n),
-                    &rc,
-                    clock_rc.as_ref(),
-                    estimator,
-                )
-            })
+        let parasitics = db
+            .nets
+            .ids()
+            .map(|n| estimate_net(netlist, clocks, n, &rc, clock_rc.as_ref(), estimator))
             .collect();
         let mut graph = Self {
             level,
             in_arcs,
             loop_arcs,
-            slew: vec![[EdgeValues::default(); 2]; db.pins.len()],
-            annotated: vec![None; db.pins.len()],
-            arc_delays: vec![Vec::new(); db.pins.len()],
-            wire_delay: vec![[EdgeValues::default(); 2]; db.pins.len()],
+            slew: IdVec::filled([EdgeValues::default(); 2], db.pins.len()),
+            annotated: IdVec::filled(None, db.pins.len()),
+            arc_delays: IdVec::filled(Vec::new(), db.pins.len()),
+            wire_delay: IdVec::filled([EdgeValues::default(); 2], db.pins.len()),
             parasitics,
             rc,
             clock_rc,
@@ -129,7 +122,7 @@ impl TimingGraph {
     /// The arcs timing searches into a driver.
     #[must_use]
     pub(crate) fn in_arcs(&self, driver: PinId) -> &[InArc] {
-        self.in_arcs.get(driver.index()).map_or(&[], Vec::as_slice)
+        self.in_arcs.get(driver).map_or(&[], Vec::as_slice)
     }
 
     /// Whether the arc from `from` to `to` closes a combinational loop,
@@ -143,9 +136,7 @@ impl TimingGraph {
     /// The delays of the arcs into a driver at its present load.
     #[must_use]
     pub(crate) fn arc_delays(&self, driver: PinId) -> &[ArcDelay] {
-        self.arc_delays
-            .get(driver.index())
-            .map_or(&[], Vec::as_slice)
+        self.arc_delays.get(driver).map_or(&[], Vec::as_slice)
     }
 
     /// The delay from a load's driver to the load for `edge` on `side`:
@@ -154,7 +145,7 @@ impl TimingGraph {
     #[must_use]
     pub fn wire_delay(&self, load: PinId, edge: Edge, side: MinMax) -> Seconds {
         self.wire_delay
-            .get(load.index())
+            .get(load)
             .map_or(Seconds::ZERO, |d| d[side.index()].get(edge))
     }
 
@@ -162,18 +153,20 @@ impl TimingGraph {
     /// orders the drivers it repairs.
     #[must_use]
     pub(crate) fn drivers_by_level(&self, netlist: &Netlist<'_>) -> Vec<PinId> {
-        let mut drivers: Vec<PinId> = (0..netlist.db.pins.len())
-            .map(PinId::new)
+        let mut drivers: Vec<PinId> = netlist
+            .db
+            .pins
+            .ids()
             .filter(|&p| netlist.is_driver(p))
             .collect();
-        drivers.sort_by_cached_key(|&p| (self.level[p.index()], netlist.db.pin_name(p)));
+        drivers.sort_by_cached_key(|&p| (self.level[p], netlist.db.pin_name(p)));
         drivers
     }
 
     /// A pin's level.
     #[must_use]
     pub fn level(&self, pin: PinId) -> u32 {
-        self.level[pin.index()]
+        self.level[pin]
     }
 
     /// A pin's late-side slews, which the slew limits are checked against.
@@ -186,36 +179,31 @@ impl TimingGraph {
     #[must_use]
     pub(crate) fn slew_side(&self, pin: PinId, side: MinMax) -> EdgeValues<Seconds> {
         self.slew
-            .get(pin.index())
+            .get(pin)
             .map_or_else(EdgeValues::default, |s| s[side.index()])
     }
 
     /// Holds a pin's slew at `slew` for both edges and sides until cleared,
     /// as `OpenSTA`'s annotated slews.
     pub(crate) fn annotate_slew(&mut self, pin: PinId, slew: Seconds) {
-        self.annotated[pin.index()] = Some(slew);
+        self.annotated[pin] = Some(slew);
         let both = EdgeValues::both(slew);
-        self.slew[pin.index()] = [both, both];
+        self.slew[pin] = [both, both];
     }
 
     /// Drops every annotation and returns the pins that held one; their
     /// slews stay at the annotated value until found again.
     pub(crate) fn clear_annotations(&mut self) -> Vec<PinId> {
-        let annotated: Vec<PinId> = self
-            .annotated
-            .iter()
-            .enumerate()
-            .filter(|(_, a)| a.is_some())
-            .map(|(i, _)| PinId::new(i))
-            .collect();
-        self.annotated.fill(None);
-        annotated
+        self.annotated
+            .iter_enumerated_mut()
+            .filter_map(|(pin, annotation)| annotation.take().map(|_| pin))
+            .collect()
     }
 
     /// The estimated parasitics of a net, if it has any.
     #[must_use]
     pub fn parasitics(&self, net: NetId) -> Option<&NetParasitics> {
-        self.parasitics[net.index()].as_ref()
+        self.parasitics[net].as_ref()
     }
 
     /// The wire resistance and capacitance per length the estimates use.
@@ -233,7 +221,7 @@ impl TimingGraph {
         edge: Edge,
     ) -> Option<PiElmore> {
         let net = netlist.db.pins[driver].net;
-        self.parasitics[net.index()].as_ref().and_then(|p| {
+        self.parasitics[net].as_ref().and_then(|p| {
             p.pi_elmore(netlist, driver, edge, &|pin, e| {
                 pin_capacitance(netlist, pin, e)
             })
@@ -273,10 +261,10 @@ impl TimingGraph {
         net: NetId,
         estimator: Estimator<'_>,
     ) {
-        if net.index() >= self.parasitics.len() || netlist.db.pins.len() > self.slew.len() {
+        if self.parasitics.get(net).is_none() || netlist.db.pins.len() > self.slew.len() {
             self.grow(netlist);
         }
-        self.parasitics[net.index()] = estimate_net(
+        self.parasitics[net] = estimate_net(
             netlist,
             clocks,
             net,
@@ -303,37 +291,33 @@ impl TimingGraph {
         drivers: &[PinId],
     ) -> Vec<PinId> {
         let n = netlist.db.pins.len();
-        let mut queue: BinaryHeap<std::cmp::Reverse<(u32, usize)>> = BinaryHeap::new();
-        let mut queued = vec![false; n];
-        let mut visited_once = vec![false; n];
+        let mut queue: BinaryHeap<std::cmp::Reverse<(u32, PinId)>> = BinaryHeap::new();
+        let mut queued = IdVec::filled(false, n);
+        let mut visited_once = IdVec::filled(false, n);
         for &driver in drivers {
-            if !queued[driver.index()] {
-                queued[driver.index()] = true;
-                queue.push(std::cmp::Reverse((
-                    self.level[driver.index()],
-                    driver.index(),
-                )));
+            if !queued[driver] {
+                queued[driver] = true;
+                queue.push(std::cmp::Reverse((self.level[driver], driver)));
             }
         }
         let mut visited = Vec::new();
-        while let Some(std::cmp::Reverse((_, index))) = queue.pop() {
-            queued[index] = false;
-            let driver = PinId::new(index);
-            if !visited_once[index] {
-                visited_once[index] = true;
+        while let Some(std::cmp::Reverse((_, driver))) = queue.pop() {
+            queued[driver] = false;
+            if !visited_once[driver] {
+                visited_once[driver] = true;
                 visited.push(driver);
             }
             let changed = self.find_driver_slews(netlist, clocks, driver);
             for load in changed {
                 for (next, through_latch) in self.successor_drivers(netlist, load) {
                     if self.is_loop_arc(load, next)
-                        || (through_latch && visited_once[next.index()])
-                        || queued[next.index()]
+                        || (through_latch && visited_once[next])
+                        || queued[next]
                     {
                         continue;
                     }
-                    queued[next.index()] = true;
-                    queue.push(std::cmp::Reverse((self.level[next.index()], next.index())));
+                    queued[next] = true;
+                    queue.push(std::cmp::Reverse((self.level[next], next)));
                 }
             }
         }
@@ -347,33 +331,33 @@ impl TimingGraph {
         let db = netlist.db;
         let constants_free = |_: CellId, _: LibPortId, _: LibPortId| true;
         while self.in_arcs.len() < db.pins.len() {
-            let pin = PinId::new(self.in_arcs.len());
-            self.in_arcs.push(in_arcs_of(netlist, pin, &constants_free));
-            self.slew.push([EdgeValues::default(); 2]);
-            self.annotated.push(None);
-            self.arc_delays.push(Vec::new());
-            self.wire_delay.push([EdgeValues::default(); 2]);
-            let level = self.in_arcs[pin.index()]
+            let pin =
+                self.in_arcs
+                    .push(in_arcs_of(netlist, self.in_arcs.next_id(), &constants_free));
+            let _ = self.slew.push([EdgeValues::default(); 2]);
+            let _ = self.annotated.push(None);
+            let _ = self.arc_delays.push(Vec::new());
+            let _ = self.wire_delay.push([EdgeValues::default(); 2]);
+            let level = self.in_arcs[pin]
                 .iter()
-                .map(|a| self.level[a.from.index()] + 1)
+                .map(|a| self.level[a.from] + 1)
                 .max()
                 .or_else(|| {
                     if netlist.is_load(pin) {
                         let net = db.pins[pin].net;
                         netlist
                             .drivers(net)
-                            .filter(|d| d.index() < self.level.len())
-                            .map(|d| self.level[d.index()] + 1)
+                            .filter_map(|d| self.level.get(d).map(|l| l + 1))
                             .max()
                     } else {
                         None
                     }
                 })
                 .unwrap_or(0);
-            self.level.push(level);
+            let _ = self.level.push(level);
         }
         while self.parasitics.len() < db.nets.len() {
-            self.parasitics.push(None);
+            let _ = self.parasitics.push(None);
         }
     }
 
@@ -392,7 +376,7 @@ impl TimingGraph {
             .copied()
             .filter(|&out| netlist.is_driver(out))
             .filter_map(|out| {
-                let arc = self.in_arcs[out.index()].iter().find(|a| a.from == load)?;
+                let arc = self.in_arcs[out].iter().find(|a| a.from == load)?;
                 Some((out, arc.through_latch))
             })
             .collect()
@@ -408,7 +392,7 @@ impl TimingGraph {
             .iter()
             .copied()
             .filter(|&out| {
-                netlist.is_driver(out) && self.in_arcs[out.index()].iter().any(|a| a.from == load)
+                netlist.is_driver(out) && self.in_arcs[out].iter().any(|a| a.from == load)
             })
             .collect()
     }
@@ -427,20 +411,20 @@ impl TimingGraph {
         let mut annotated = Vec::new();
         let mut changed = Vec::new();
         for driver in self.drivers_by_level(netlist) {
-            let before = self.slew[driver.index()];
+            let before = self.slew[driver];
             let _ = self.find_driver_slews(netlist, clocks, driver);
-            if self.slew[driver.index()] != before {
+            if self.slew[driver] != before {
                 changed.push(driver);
             }
             let net = netlist.db.pins[driver].net;
             for load in netlist.loads(net).filter(|&p| p != driver) {
-                if self.annotated[load.index()].is_some() {
+                if self.annotated[load].is_some() {
                     continue;
                 }
                 let Some(limit) = limit_of(load) else {
                     continue;
                 };
-                if self.slew[load.index()][MinMax::Max.index()].max() > limit {
+                if self.slew[load][MinMax::Max.index()].max() > limit {
                     self.annotate_slew(load, limit);
                     annotated.push((load, limit));
                 }
@@ -486,11 +470,13 @@ impl TimingGraph {
     }
 
     fn find_all_slews(&mut self, netlist: &Netlist<'_>, clocks: &ClockNetwork) {
-        let mut order: Vec<PinId> = (0..netlist.db.pins.len())
-            .map(PinId::new)
+        let mut order: Vec<PinId> = netlist
+            .db
+            .pins
+            .ids()
             .filter(|&p| netlist.is_driver(p))
             .collect();
-        order.sort_by_key(|&p| self.level[p.index()]);
+        order.sort_by_key(|&p| self.level[p]);
         for driver in order {
             let _ = self.find_driver_slews(netlist, clocks, driver);
         }
@@ -514,10 +500,10 @@ impl TimingGraph {
         } else {
             [root, root]
         };
-        if self.annotated[driver.index()].is_none() {
-            self.slew[driver.index()] = drvr_slew;
+        if self.annotated[driver].is_none() {
+            self.slew[driver] = drvr_slew;
         }
-        self.arc_delays[driver.index()] = found.arc_delays;
+        self.arc_delays[driver] = found.arc_delays;
         let ideal = if found.any_arc {
             None
         } else {
@@ -532,12 +518,12 @@ impl TimingGraph {
                     found.load_delays[i].map(Merged::values),
                 ),
             };
-            self.wire_delay[load.index()] = delays;
-            if self.annotated[load.index()].is_some() {
+            self.wire_delay[load] = delays;
+            if self.annotated[load].is_some() {
                 continue;
             }
-            if !same_slews(&self.slew[load.index()], &slews) {
-                self.slew[load.index()] = slews;
+            if !same_slews(&self.slew[load], &slews) {
+                self.slew[load] = slews;
                 changed.push(load);
             }
         }
@@ -568,7 +554,7 @@ impl TimingGraph {
         let Some((_, lib)) = netlist.link.cell(db, cell) else {
             return found;
         };
-        for arc in &self.in_arcs[driver.index()] {
+        for arc in &self.in_arcs[driver] {
             let set: &TimingArcSet = &lib.arc_sets[arc.set];
             for timing_arc in &set.arcs {
                 found.any_arc = true;
@@ -587,7 +573,7 @@ impl TimingGraph {
                     let in_slew = if set.role == ArcRole::RegClkToQ && clocks.is_ideal(arc.from) {
                         Seconds::ZERO
                     } else {
-                        self.slew[arc.from.index()][side.index()].get(timing_arc.from_edge)
+                        self.slew[arc.from][side.index()].get(timing_arc.from_edge)
                     };
                     let result = dmp::gate_delay(
                         timing_arc,
@@ -739,12 +725,15 @@ fn is_non_leaf_clock(netlist: &Netlist<'_>, net: NetId) -> bool {
 
 /// The arcs `OpenSTA` searches into each driver: the delay arcs it does not
 /// disable, from the connected input pins of the driver's cell.
-fn in_arcs(netlist: &Netlist<'_>, constants: &Constants) -> Vec<Vec<InArc>> {
+fn in_arcs(netlist: &Netlist<'_>, constants: &Constants) -> IdVec<PinId, Vec<InArc>> {
     let enabled = |cell: CellId, from: LibPortId, to: LibPortId| {
         constants.arc_enabled(netlist, cell, from, to)
     };
-    (0..netlist.db.pins.len())
-        .map(|p| in_arcs_of(netlist, PinId::new(p), &enabled))
+    netlist
+        .db
+        .pins
+        .ids()
+        .map(|p| in_arcs_of(netlist, p, &enabled))
         .collect()
 }
 
@@ -795,24 +784,23 @@ fn in_arcs_of(
 /// `OpenSTA`'s `Levelize`; with the arcs that closed loops.
 fn levelize(
     netlist: &Netlist<'_>,
-    in_arcs: &[Vec<InArc>],
-) -> (Vec<u32>, rustc_hash::FxHashSet<(PinId, PinId)>) {
+    in_arcs: &IdVec<PinId, Vec<InArc>>,
+) -> (IdVec<PinId, u32>, rustc_hash::FxHashSet<(PinId, PinId)>) {
     let db = netlist.db;
     let n = db.pins.len();
-    let mut successors: Vec<Vec<usize>> = vec![Vec::new(); n];
-    for pin in 0..n {
-        let id = PinId::new(pin);
-        if netlist.is_driver(id) {
-            let net = db.pins[id].net;
+    let mut successors: IdVec<PinId, Vec<PinId>> = IdVec::filled(Vec::new(), n);
+    for pin in db.pins.ids() {
+        if netlist.is_driver(pin) {
+            let net = db.pins[pin].net;
             for load in netlist.loads(net) {
-                if load != id {
-                    successors[pin].push(load.index());
+                if load != pin {
+                    successors[pin].push(load);
                 }
             }
         }
         for arc in &in_arcs[pin] {
             if !arc.through_latch {
-                successors[arc.from.index()].push(pin);
+                successors[arc.from].push(pin);
             }
         }
     }
@@ -820,23 +808,27 @@ fn levelize(
         s.sort_unstable();
         s.dedup();
     }
-    let mut predecessors = vec![0usize; n];
+    let mut predecessors: IdVec<PinId, usize> = IdVec::filled(0, n);
     for s in &successors {
         for &to in s {
             predecessors[to] += 1;
         }
     }
     let back_edges = find_back_edges(&successors, &predecessors);
-    let mut in_degree = vec![0usize; n];
-    for (from, s) in successors.iter().enumerate() {
+    let mut in_degree: IdVec<PinId, usize> = IdVec::filled(0, n);
+    for (from, s) in successors.iter_enumerated() {
         for &to in s {
             if !back_edges.contains(&(from, to)) {
                 in_degree[to] += 1;
             }
         }
     }
-    let mut level = vec![0u32; n];
-    let mut queue: VecDeque<usize> = (0..n).filter(|&v| in_degree[v] == 0).collect();
+    let mut level = IdVec::filled(0u32, n);
+    let mut queue: VecDeque<PinId> = in_degree
+        .iter_enumerated()
+        .filter(|&(_, &d)| d == 0)
+        .map(|(v, _)| v)
+        .collect();
     while let Some(v) = queue.pop_front() {
         for &to in &successors[v] {
             if back_edges.contains(&(v, to)) {
@@ -849,46 +841,49 @@ fn levelize(
             }
         }
     }
-    let loop_arcs = back_edges
-        .into_iter()
-        .map(|(from, to)| (PinId::new(from), PinId::new(to)))
-        .collect();
-    (level, loop_arcs)
+    (level, back_edges)
+}
+
+/// Where a depth-first search stands with a pin.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Visit {
+    Unseen,
+    OnPath,
+    Done,
 }
 
 /// The edges a depth-first search from the roots follows back onto its own
 /// path.
 fn find_back_edges(
-    successors: &[Vec<usize>],
-    predecessors: &[usize],
-) -> rustc_hash::FxHashSet<(usize, usize)> {
-    let n = successors.len();
-    let mut color = vec![0u8; n];
+    successors: &IdVec<PinId, Vec<PinId>>,
+    predecessors: &IdVec<PinId, usize>,
+) -> rustc_hash::FxHashSet<(PinId, PinId)> {
+    let mut visit = IdVec::filled(Visit::Unseen, successors.len());
     let mut back = rustc_hash::FxHashSet::default();
-    let roots = (0..n).filter(|&v| predecessors[v] == 0);
-    let unrooted = 0..n;
+    let roots = successors.ids().filter(|&v| predecessors[v] == 0);
+    let unrooted = successors.ids();
     for start in roots.chain(unrooted) {
-        if color[start] != 0 {
+        if visit[start] != Visit::Unseen {
             continue;
         }
-        let mut stack: Vec<(usize, usize)> = vec![(start, 0)];
-        color[start] = 1;
+        let mut stack: Vec<(PinId, usize)> = vec![(start, 0)];
+        visit[start] = Visit::OnPath;
         while let Some(&mut (v, ref mut next)) = stack.last_mut() {
             if *next < successors[v].len() {
                 let to = successors[v][*next];
                 *next += 1;
-                match color[to] {
-                    0 => {
-                        color[to] = 1;
+                match visit[to] {
+                    Visit::Unseen => {
+                        visit[to] = Visit::OnPath;
                         stack.push((to, 0));
                     }
-                    1 => {
+                    Visit::OnPath => {
                         let _ = back.insert((v, to));
                     }
-                    _ => {}
+                    Visit::Done => {}
                 }
             } else {
-                color[v] = 2;
+                visit[v] = Visit::Done;
                 let _ = stack.pop();
             }
         }
