@@ -546,12 +546,45 @@ impl<'a, T: Timing> Resizer<'a, T> {
         Ok(self.db.remove(&[], &dead)?)
     }
 
-    /// The transition limit at an input pin: its own, else, as `OpenROAD`
-    /// fixes up for libraries like Nangate45, the library default meant
-    /// for outputs; infinite without either.
+    /// The transition limit at an input pin, as [`max_input_slew`] finds
+    /// it under the session's constraints.
     #[must_use]
     pub(crate) fn max_input_slew(&self, cell: &LibCell, port: &LibPort) -> Seconds {
-        max_input_slew(self.link, cell, port)
+        max_input_slew(self.link, self.design_slew_limit(), cell, port)
+    }
+
+    /// The transition limit the constraints set on the whole design.
+    fn design_slew_limit(&self) -> Option<Seconds> {
+        self.timing
+            .analysis()
+            .and_then(|s| s.sdc().limits.max_transition)
+    }
+
+    /// The slew limit at a load pin, where one applies: an instance pin's
+    /// [`max_input_slew`], a design pin's from the constraints, as
+    /// `CheckSlews::findLimit`.
+    fn load_slew_limit(&self, load: PinId) -> Option<Seconds> {
+        match self.netlist().lib_cell_port(load) {
+            Some((cell, port)) => Some(self.max_input_slew(cell, port)).filter(|l| l.is_finite()),
+            None if matches!(self.db.pins[load].owner, PinOwner::Io(_)) => self.design_slew_limit(),
+            None => None,
+        }
+    }
+
+    /// The late slew and the slew limit of each load of `driver`'s net
+    /// that has a limit.
+    #[must_use]
+    pub(crate) fn load_slews(&self, driver: PinId) -> Vec<(Seconds, Seconds)> {
+        let netlist = self.netlist();
+        let net = self.db.pins[driver].net;
+        netlist
+            .loads(net)
+            .filter(|&load| load != driver)
+            .filter_map(|load| {
+                let limit = self.load_slew_limit(load)?;
+                Some((self.graph.slew(load).max(), limit))
+            })
+            .collect()
     }
 
     /// Holds every input slew over its limit at that limit, each before
@@ -562,10 +595,11 @@ impl<'a, T: Timing> Resizer<'a, T> {
         let (annotated, mut dirty) = {
             let netlist = Netlist::new(self.db, self.link);
             let link = self.link;
+            let design_limit = self.design_slew_limit();
             let limit_of = |pin: PinId| {
                 netlist
                     .lib_cell_port(pin)
-                    .map(|(cell, port)| max_input_slew(link, cell, port))
+                    .map(|(cell, port)| max_input_slew(link, design_limit, cell, port))
             };
             self.graph
                 .sweep_annotating(&netlist, self.clocks, &limit_of)
@@ -601,11 +635,7 @@ impl<'a, T: Timing> Resizer<'a, T> {
         let own = netlist
             .lib_cell_port(driver)
             .and_then(|(c, p)| self.link.liberty.slew_limit(c, p));
-        let design = self
-            .timing
-            .analysis()
-            .and_then(|s| s.sdc().limits.max_transition);
-        match (own, design) {
+        match (own, self.design_slew_limit()) {
             (Some(a), Some(b)) => Some(a.min(b)),
             (a, b) => a.or(b),
         }
@@ -1281,11 +1311,21 @@ impl WeightScale {
     }
 }
 
-/// The transition limit at an input pin: its own, else, as `OpenROAD`
-/// fixes up for libraries like Nangate45, the library default meant for
-/// outputs; infinite without either.
-fn max_input_slew(link: &Link<'_>, cell: &LibCell, port: &LibPort) -> Seconds {
-    port.max_transition
+/// The transition limit at an input pin, as `Resizer::maxInputSlew`: the
+/// tighter of its own and the constraints' `design_limit`, else, as
+/// `OpenROAD` fixes up for libraries like Nangate45, the library default
+/// meant for outputs; infinite without any.
+fn max_input_slew(
+    link: &Link<'_>,
+    design_limit: Option<Seconds>,
+    cell: &LibCell,
+    port: &LibPort,
+) -> Seconds {
+    let found = match (port.max_transition, design_limit) {
+        (Some(own), Some(design)) => Some(own.min(design)),
+        (own, design) => own.or(design),
+    };
+    found
         .filter(|&l| l != Seconds::ZERO)
         .or_else(|| link.liberty.cell_defaults(cell).max_transition)
         .unwrap_or(Seconds::INFINITY)
