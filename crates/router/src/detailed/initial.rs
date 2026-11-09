@@ -25,7 +25,7 @@ use pare_common::geom::dbu::Dbu;
 use pare_common::geom::point::Point;
 use pare_common::geom::rect::Rect;
 use rayon::prelude::*;
-use rustc_hash::{FxHashMap, FxHashSet};
+use rustc_hash::FxHashSet;
 use std::collections::BTreeMap;
 
 /// How the first pass routes one net.
@@ -213,7 +213,7 @@ impl DetailedRouter<'_> {
             }
         }
 
-        let mut parts: FxHashMap<usize, Part> = FxHashMap::default();
+        let mut parts: BTreeMap<usize, Part> = BTreeMap::new();
         for (i, &c) in cells.iter().enumerate() {
             let part = parts.entry(find(&mut sets, i)).or_default();
             part.region = Some(region_of(c));
