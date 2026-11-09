@@ -311,8 +311,46 @@ fn parse_args<'a>(
 
 #[derive(Clone, Debug)]
 struct Template {
-    variables: Vec<AxisVariable>,
+    axes: Vec<TemplateAxis>,
     indices: Vec<Option<Vec<f64>>>,
+}
+
+/// The variable along one axis of a table template, as named and, when it
+/// is one timing tables are looked up along, as read.
+#[derive(Clone, Debug)]
+struct TemplateAxis {
+    name: String,
+    variable: Option<AxisVariable>,
+}
+
+/// How a timing table is looked up, which fixes the axes it may vary along.
+#[derive(Clone, Copy, Debug)]
+enum TableModel {
+    /// A delay or slew table.
+    Gate,
+    /// A check's constraint table.
+    Check,
+}
+
+impl TableModel {
+    /// Whether tables of this model may vary along `variable`, as
+    /// `GateTableModel::checkAxis` and `CheckTableModel::checkAxis` allow.
+    const fn accepts(self, variable: AxisVariable) -> bool {
+        match self {
+            Self::Gate => matches!(
+                variable,
+                AxisVariable::InputTransition
+                    | AxisVariable::OutputCapacitance
+                    | AxisVariable::RelatedOutputCapacitance
+            ),
+            Self::Check => matches!(
+                variable,
+                AxisVariable::RelatedPinTransition
+                    | AxisVariable::ConstrainedPinTransition
+                    | AxisVariable::RelatedOutputCapacitance
+            ),
+        }
+    }
 }
 
 /// A `type` group: the bits of a bus.
@@ -549,21 +587,24 @@ impl Interpreter {
             .ok_or_else(|| self.error(group.line, "lu_table_template without a name".into()))?
             .0
             .to_string();
-        let mut variables = Vec::new();
+        let mut axes = Vec::new();
         let mut indices = Vec::new();
         for k in 1..=3 {
             let Some(var) = group.attr_text(&format!("variable_{k}")) else {
                 break;
             };
             let variable = axis_variable(var);
-            variables.push(variable);
-            let index = group
-                .attr(&format!("index_{k}"))
-                .map(|a| self.axis_values(a, variable))
-                .transpose()?;
+            let index = match (variable, group.attr(&format!("index_{k}"))) {
+                (Some(variable), Some(attr)) => Some(self.axis_values(attr, variable)?),
+                _ => None,
+            };
+            axes.push(TemplateAxis {
+                name: var.to_string(),
+                variable,
+            });
             indices.push(index);
         }
-        Ok((name, Template { variables, indices }))
+        Ok((name, Template { axes, indices }))
     }
 
     fn bus_type(&self, group: &Group<'_>) -> Result<(String, BusType), ParseError> {
@@ -600,7 +641,6 @@ impl Interpreter {
             AxisVariable::OutputCapacitance | AxisVariable::RelatedOutputCapacitance => {
                 self.units.capacitance.get()
             }
-            AxisVariable::Other => 1.0,
         };
         let values = self.numbers(attr)?;
         Ok(values.into_iter().map(|v| v * scale).collect())
@@ -952,7 +992,7 @@ impl Interpreter {
             group
                 .groups_named(name)
                 .next()
-                .map(|g| self.table(g))
+                .map(|g| self.table(g, TableModel::Gate))
                 .transpose()
         };
         Ok(ClockTreePath {
@@ -968,20 +1008,26 @@ impl Interpreter {
     /// The delay and slew tables, or the constraint tables of a check, a
     /// timing group of `role` gives.
     fn arc_tables(&self, group: &Group<'_>, role: ArcRole) -> Result<ArcTables, ParseError> {
-        let names: &[(&str, Edge, TableKind)] = if role.is_delay() {
-            &[
-                ("cell_rise", Edge::Rise, TableKind::Delay),
-                ("cell_fall", Edge::Fall, TableKind::Delay),
-                ("rise_transition", Edge::Rise, TableKind::Slew),
-                ("fall_transition", Edge::Fall, TableKind::Slew),
-            ]
+        let (model, names): (TableModel, &[(&str, Edge, TableKind)]) = if role.is_delay() {
+            (
+                TableModel::Gate,
+                &[
+                    ("cell_rise", Edge::Rise, TableKind::Delay),
+                    ("cell_fall", Edge::Fall, TableKind::Delay),
+                    ("rise_transition", Edge::Rise, TableKind::Slew),
+                    ("fall_transition", Edge::Fall, TableKind::Slew),
+                ],
+            )
         } else if role.check_side().is_some() {
-            &[
-                ("rise_constraint", Edge::Rise, TableKind::Delay),
-                ("fall_constraint", Edge::Fall, TableKind::Delay),
-            ]
+            (
+                TableModel::Check,
+                &[
+                    ("rise_constraint", Edge::Rise, TableKind::Delay),
+                    ("fall_constraint", Edge::Fall, TableKind::Delay),
+                ],
+            )
         } else {
-            &[]
+            return Ok(ArcTables(Vec::new()));
         };
         let tables = names
             .iter()
@@ -989,18 +1035,18 @@ impl Interpreter {
                 group
                     .groups_named(name)
                     .next()
-                    .map(|g| self.table(g).map(|t| (edge, kind, t)))
+                    .map(|g| self.table(g, model).map(|t| (edge, kind, t)))
                     .transpose()
             })
             .collect::<Result<Vec<_>, _>>()?;
         Ok(ArcTables(tables.into_iter().flatten().collect()))
     }
 
-    fn table(&self, group: &Group<'_>) -> Result<Table, ParseError> {
+    fn table(&self, group: &Group<'_>, model: TableModel) -> Result<Table, ParseError> {
         let template_name = group.args.first().map_or("scalar", |v| v.0);
         let template = if template_name == "scalar" {
             Template {
-                variables: Vec::new(),
+                axes: Vec::new(),
                 indices: Vec::new(),
             }
         } else {
@@ -1012,9 +1058,10 @@ impl Interpreter {
             })?
         };
         let mut axes = Vec::new();
-        for (k, variable) in template.variables.iter().enumerate() {
+        for (k, axis) in template.axes.iter().enumerate() {
+            let variable = self.table_variable(group, axis, model)?;
             let values = match group.attr(&format!("index_{}", k + 1)) {
-                Some(attr) => self.axis_values(attr, *variable)?,
+                Some(attr) => self.axis_values(attr, variable)?,
                 None => template.indices[k].clone().ok_or_else(|| {
                     self.error(
                         group.line,
@@ -1026,10 +1073,7 @@ impl Interpreter {
                     )
                 })?,
             };
-            axes.push(Axis {
-                variable: *variable,
-                values,
-            });
+            axes.push(Axis { variable, values });
         }
         let values_attr = group
             .attr("values")
@@ -1051,6 +1095,23 @@ impl Interpreter {
             ));
         }
         Ok(table)
+    }
+
+    /// The variable a `model` table varies along `axis` of its template.
+    fn table_variable(
+        &self,
+        group: &Group<'_>,
+        axis: &TemplateAxis,
+        model: TableModel,
+    ) -> Result<AxisVariable, ParseError> {
+        // NOTE: LibertyReader::readTableModel warns (1251) and keeps such a
+        // table, looking it up at 0 along the axis; PARE refuses to time by it.
+        axis.variable.filter(|&v| model.accepts(v)).ok_or_else(|| {
+            self.error(
+                group.line,
+                format!("'{}' cannot vary along '{}'", group.name, axis.name),
+            )
+        })
     }
 
     fn statetable(&self, group: &Group<'_>) -> Result<Statetable, ParseError> {
@@ -1133,14 +1194,16 @@ fn unit_factor(text: &str, units: &[(&str, f64)]) -> Option<f64> {
         .map(|(_, factor)| scale * factor)
 }
 
-fn axis_variable(name: &str) -> AxisVariable {
+/// The variable a template axis named `name` varies, when timing tables are
+/// looked up along it.
+fn axis_variable(name: &str) -> Option<AxisVariable> {
     match name {
-        "input_net_transition" | "input_transition_time" => AxisVariable::InputTransition,
-        "total_output_net_capacitance" => AxisVariable::OutputCapacitance,
-        "related_out_total_output_net_capacitance" => AxisVariable::RelatedOutputCapacitance,
-        "related_pin_transition" => AxisVariable::RelatedPinTransition,
-        "constrained_pin_transition" => AxisVariable::ConstrainedPinTransition,
-        _ => AxisVariable::Other,
+        "input_net_transition" | "input_transition_time" => Some(AxisVariable::InputTransition),
+        "total_output_net_capacitance" => Some(AxisVariable::OutputCapacitance),
+        "related_out_total_output_net_capacitance" => Some(AxisVariable::RelatedOutputCapacitance),
+        "related_pin_transition" => Some(AxisVariable::RelatedPinTransition),
+        "constrained_pin_transition" => Some(AxisVariable::ConstrainedPinTransition),
+        _ => None,
     }
 }
 
@@ -1556,6 +1619,51 @@ library (tiny) {
             .unwrap();
         assert!(q.arcs.iter().all(|a| a.from_edge == Edge::Rise));
         assert_eq!(q.arcs.len(), 2);
+    }
+
+    /// The tiny library with `old` replaced by `new` once.
+    fn tiny_with(old: &str, new: &str) -> Result<Liberty, ParseError> {
+        assert!(LIB.contains(old), "no '{old}' in the tiny library");
+        parse_str(&LIB.replacen(old, new, 1), Path::new("tiny.lib"))
+    }
+
+    #[test]
+    fn a_delay_table_along_an_axis_delays_are_not_looked_up_on_is_refused() {
+        let unknown = tiny_with(
+            "variable_2 : total_output_net_capacitance;",
+            "variable_2 : equal_or_opposite_output_net_capacitance;",
+        );
+        let checks_only = tiny_with(
+            "variable_2 : total_output_net_capacitance;",
+            "variable_2 : constrained_pin_transition;",
+        );
+
+        for refused in [unknown, checks_only] {
+            let message = refused.map(|_| ()).unwrap_err().to_string();
+            assert!(message.contains("cannot vary along"), "{message}");
+        }
+    }
+
+    #[test]
+    fn a_check_table_along_the_output_load_is_refused() {
+        let refused = tiny_with(
+            "variable_2 : constrained_pin_transition;",
+            "variable_2 : total_output_net_capacitance;",
+        );
+
+        let message = refused.map(|_| ()).unwrap_err().to_string();
+        assert!(message.contains("cannot vary along"), "{message}");
+    }
+
+    #[test]
+    fn a_template_no_timing_table_uses_may_vary_along_anything() {
+        let lib = tiny_with(
+            "  lu_table_template (C2) {",
+            "  lu_table_template (P1) { variable_1 : input_voltage; index_1 (\"0.1\"); }\n  \
+             lu_table_template (C2) {",
+        );
+
+        assert!(lib.is_ok());
     }
 
     /// A macro whose clock pin `CK` has the clock tree path timing groups
