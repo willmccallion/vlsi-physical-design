@@ -897,3 +897,66 @@ fn point_back_along(to: Point<Dbu>, from: Point<Dbu>, distance: f64, length: Dbu
     };
     Point::new(along(to.x, from.x), along(to.y, from.y))
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::testing::{
+        DefSections, cells, clock_cells_source, def_text, design, pin, with_wired_session,
+    };
+    use pare_common::db::liberty::Edge;
+
+    /// A flop driving a flop at the far corner of the die.
+    fn across_the_die() -> pare_common::db::design::NetlistDB {
+        design(&def_text(
+            "across",
+            &DefSections {
+                components: "- f1 DFF_X1 + PLACED ( 2000 2800 ) N ;\n\
+                             - f2 DFF_X1 + PLACED ( 780000 780000 ) N ;\n",
+                nets: "- clk ( PIN clk ) ( f1 CK ) ( f2 CK ) ;\n- q ( f1 Q ) ( f2 D ) ;\n",
+                inputs: &["clk"],
+                outputs: &[],
+            },
+        ))
+    }
+
+    /// How far `pin`'s slower slew is past its limit; negative within it.
+    fn slew_excess<T: Timing>(resizer: &Resizer<'_, T>, pin: PinId) -> Seconds {
+        let netlist = resizer.netlist();
+        let (cell, port) = netlist.lib_cell_port(pin).unwrap();
+        let slew = resizer.graph.slew(pin);
+        slew[Edge::Rise].max(slew[Edge::Fall]) - resizer.max_input_slew(cell, port)
+    }
+
+    #[test]
+    fn a_net_across_the_die_gets_repeaters_that_bring_every_slew_within_its_limit() {
+        let mut db = across_the_die();
+        let lib = cells(&clock_cells_source());
+        let clock = "create_clock -name clk -period 10.0 [get_ports clk]\n";
+
+        with_wired_session(&mut db, &lib, clock, |resizer| {
+            let end = pin(resizer.db, "f2/D");
+            assert!(slew_excess(resizer, end) > Seconds::ZERO);
+
+            let summary = Repairer::new(resizer).repair_design().unwrap();
+
+            assert!(summary.inserted > 0, "{summary:?}");
+            let netlist = resizer.netlist();
+            let data_loads: Vec<PinId> = resizer
+                .db
+                .pins
+                .ids()
+                .filter(|&p| netlist.is_load(p) && !resizer.clocks.is_clock(p))
+                .collect();
+            assert!(data_loads.len() > 1);
+            for load in data_loads {
+                let excess = slew_excess(resizer, load);
+                assert!(
+                    excess <= Seconds::ZERO,
+                    "{}: {excess:?}",
+                    resizer.db.pin_name(load)
+                );
+            }
+        });
+    }
+}
