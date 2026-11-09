@@ -40,7 +40,7 @@ use std::time::{Duration, Instant};
 /// does not follow `OpenROAD`'s flow.
 const DETAILED_PASSES: usize = 3;
 
-/// Pixels across each side of a placement image.
+/// Pixels along the die's longer side in a placement image.
 const PLACEMENT_IMAGE_PIXELS: u32 = 1000;
 
 /// Iterations between rows of global placement's progress table.
@@ -767,7 +767,7 @@ fn reweighted_model(
 
 /// Draws the placement of `db` into the image at `path`.
 fn draw_placement(db: &NetlistDB, path: &Path) -> anyhow::Result<()> {
-    visualization::draw_placement(db, path, PLACEMENT_IMAGE_PIXELS, PLACEMENT_IMAGE_PIXELS)
+    visualization::draw_placement(db, path, PLACEMENT_IMAGE_PIXELS)
         .with_context(|| format!("cannot write {}", path.display()))
 }
 
@@ -905,7 +905,7 @@ fn routability_params(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::testing::{tiny, tiny_config};
+    use crate::testing::{half_height_tiny, scratch_dir, tiny, tiny_config};
 
     #[test]
     fn cells_moved_or_turned_since_the_record_are_the_moved_ones() {
@@ -918,6 +918,18 @@ mod tests {
         db.cells[turned].orient = Orientation::N;
 
         assert_eq!(before.moved(&db), vec![moved, turned]);
+    }
+
+    #[test]
+    fn a_placement_image_keeps_the_die_in_proportion() {
+        let path = scratch_dir("placement-image").join("placed.png");
+
+        draw_placement(&half_height_tiny(), &path).unwrap();
+
+        assert_eq!(
+            image::image_dimensions(&path).unwrap(),
+            (PLACEMENT_IMAGE_PIXELS, PLACEMENT_IMAGE_PIXELS / 2)
+        );
     }
 
     #[test]

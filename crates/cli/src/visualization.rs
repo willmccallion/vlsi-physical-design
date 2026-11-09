@@ -13,61 +13,75 @@ use pare_common::geom::rect::Rect;
 use pare_common::verify::drc::{Layout, LayoutShape, OwnerIndex};
 use std::path::Path;
 
+/// An image fitted to an area of the design: its pixels per database unit
+/// and its size, the same scale along both axes.
+#[derive(Clone, Copy, Debug)]
+struct Fit {
+    scale: f64,
+    width: u32,
+    height: u32,
+}
+
+impl Fit {
+    /// `size` pixels along the longer side of `area`, and the other side in
+    /// proportion, at least one pixel each.
+    fn new(area: &Rect<Dbu>, size: u32) -> Self {
+        let longer = area.width().max(area.height()).to_f64().max(1.0);
+        let scale = f64::from(size) / longer;
+        let pixels = |length: Dbu| ((length.to_f64() * scale).ceil() as u32).max(1);
+        Self {
+            scale,
+            width: pixels(area.width()),
+            height: pixels(area.height()),
+        }
+    }
+}
+
 /// Maps design coordinates to image pixels, with Y pointing down.
 struct PixelMap {
     min: Point<f64>,
-    scale_x: f64,
-    scale_y: f64,
+    scale: f64,
     height: f64,
 }
 
 impl PixelMap {
-    fn new(db: &NetlistDB, width: u32, height: u32) -> Option<Self> {
+    /// The map of the die of `db` onto the image `fit` sizes for it.
+    fn new(db: &NetlistDB, fit: Fit) -> Self {
         let die = db.die_area;
-        if die.width() <= Dbu::ZERO || die.height() <= Dbu::ZERO {
-            return None;
-        }
-        Some(Self {
+        Self {
             min: Point::new(die.min.x.to_f64(), die.min.y.to_f64()),
-            scale_x: f64::from(width) / die.width().to_f64(),
-            scale_y: f64::from(height) / die.height().to_f64(),
-            height: f64::from(height),
-        })
+            scale: fit.scale,
+            height: f64::from(fit.height),
+        }
     }
 
     fn map(&self, p: Point<Dbu>) -> (f64, f64) {
         (
-            (p.x.to_f64() - self.min.x) * self.scale_x,
-            (p.y.to_f64() - self.min.y).mul_add(-self.scale_y, self.height),
+            (p.x.to_f64() - self.min.x) * self.scale,
+            (p.y.to_f64() - self.min.y).mul_add(-self.scale, self.height),
         )
     }
 
     fn rect(&self, db: &NetlistDB, cell: CellId, min_px: f64) -> ImageRect {
         let b = db.cell_bbox(cell);
         let (x, y_bot) = self.map(b.min);
-        let w = (b.width().to_f64() * self.scale_x).max(min_px);
-        let h = (b.height().to_f64() * self.scale_y).max(min_px);
+        let w = (b.width().to_f64() * self.scale).max(min_px);
+        let h = (b.height().to_f64() * self.scale).max(min_px);
         ImageRect::at(x as i32, (y_bot - h) as i32).of_size(w as u32, h as u32)
     }
 }
 
 /// Draws every cell as a filled rectangle, fixed cells in a separate color,
-/// into an image of `width` by `height` pixels saved at `path`; a die of no
-/// area draws as the background alone.
+/// into an image of `size` pixels along the die's longer side saved at
+/// `path`.
 ///
 /// # Errors
 ///
 /// When the image cannot be saved.
-pub fn draw_placement(
-    db: &NetlistDB,
-    path: &Path,
-    width: u32,
-    height: u32,
-) -> image::ImageResult<()> {
-    let mut img = RgbImage::from_pixel(width, height, Rgb([20, 20, 20]));
-    if let Some(map) = PixelMap::new(db, width, height) {
-        paint_cells(db, &map, &mut img);
-    }
+pub fn draw_placement(db: &NetlistDB, path: &Path, size: u32) -> image::ImageResult<()> {
+    let fit = Fit::new(&db.die_area, size);
+    let mut img = RgbImage::from_pixel(fit.width, fit.height, Rgb([20, 20, 20]));
+    paint_cells(db, &PixelMap::new(db, fit), &mut img);
     img.save(path)
 }
 
@@ -89,33 +103,29 @@ fn paint_cells(db: &NetlistDB, map: &PixelMap, img: &mut RgbImage) {
 const MIN_ROUTED_PIXELS: u32 = 4000;
 
 /// Draws cells, wires colored by layer, vias and pins into an image of
-/// `width` by `height` pixels saved at `path`; a die of no area draws as the
-/// background alone.
+/// `size` pixels along the die's longer side saved at `path`.
 ///
-/// Draws at 4000 pixels across or more, then downsamples if a smaller
+/// Draws at [`MIN_ROUTED_PIXELS`] or more, then downsamples if a smaller
 /// image was asked for.
 ///
 /// # Errors
 ///
 /// When the image cannot be saved.
-pub fn draw_routed_design(
-    db: &NetlistDB,
-    path: &Path,
-    width: u32,
-    height: u32,
-) -> image::ImageResult<()> {
-    let w = width.max(MIN_ROUTED_PIXELS);
-    let h = height.max(MIN_ROUTED_PIXELS);
-    let mut img = RgbaImage::from_pixel(w, h, Rgba([0, 0, 0, 255]));
-    if let Some(map) = PixelMap::new(db, w, h) {
-        paint_routed(db, &map, &mut img);
+pub fn draw_routed_design(db: &NetlistDB, path: &Path, size: u32) -> image::ImageResult<()> {
+    let drawn = Fit::new(&db.die_area, size.max(MIN_ROUTED_PIXELS));
+    let mut img = RgbaImage::from_pixel(drawn.width, drawn.height, Rgba([0, 0, 0, 255]));
+    paint_routed(db, &PixelMap::new(db, drawn), &mut img);
+    let wanted = Fit::new(&db.die_area, size);
+    if (wanted.width, wanted.height) == (drawn.width, drawn.height) {
+        return img.save(path);
     }
-    if width < w || height < h {
-        image::imageops::resize(&img, width, height, image::imageops::FilterType::Lanczos3)
-            .save(path)
-    } else {
-        img.save(path)
-    }
+    image::imageops::resize(
+        &img,
+        wanted.width,
+        wanted.height,
+        image::imageops::FilterType::Lanczos3,
+    )
+    .save(path)
 }
 
 fn paint_routed(db: &NetlistDB, map: &PixelMap, img: &mut RgbaImage) {
@@ -235,10 +245,11 @@ pub fn draw_area(
     size: u32,
 ) -> image::ImageResult<()> {
     let shown = |l: LayerId| layers.get(l).copied().unwrap_or(true);
-    let longer = area.width().max(area.height()).to_f64().max(1.0);
-    let scale = f64::from(size) / longer;
-    let width = ((area.width().to_f64() * scale).ceil() as u32).max(1);
-    let height = ((area.height().to_f64() * scale).ceil() as u32).max(1);
+    let Fit {
+        scale,
+        width,
+        height,
+    } = Fit::new(&area, size);
     let mut canvas = Blend(RgbaImage::from_pixel(
         width,
         height,
