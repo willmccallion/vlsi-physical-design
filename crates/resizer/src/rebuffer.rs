@@ -23,7 +23,7 @@ use pare_common::db::liberty::{
 };
 use pare_common::geom::dbu::{Dbu, DbuPerMicron};
 use pare_common::geom::point::Point;
-use pare_common::units::{Farads, FaradsPerMeter, Meters, Ohms, OhmsPerMeter, Seconds};
+use pare_common::units::{CellArea, Farads, FaradsPerMeter, Meters, Ohms, OhmsPerMeter, Seconds};
 use std::ops::Mul;
 use std::rc::Rc;
 
@@ -886,7 +886,7 @@ impl Rebuffer {
         let root = with_arrivals(root, -correction);
         let options = self.area_options(resizer, &root, target, alpha, Dbu(0));
         let mut best_slack: Option<(Fixed, BnetPtr)> = None;
-        let mut best_area: Option<(f64, BnetPtr)> = None;
+        let mut best_area: Option<(CellArea, BnetPtr)> = None;
         for option in options {
             let Some(slack) = self.evaluate_option(resizer, &option) else {
                 continue;
@@ -1136,7 +1136,7 @@ struct Frontier {
     area_threshold: Option<Fixed>,
     envelope: Option<Metrics>,
     assured: bool,
-    best_area: f64,
+    best_area: CellArea,
     best_slack: Fixed,
     kept: Vec<BnetPtr>,
 }
@@ -1147,14 +1147,14 @@ impl Frontier {
             area_threshold: area.map(|(threshold, _)| threshold),
             envelope: area.map(|(threshold, exemplar)| exemplar.metrics().with_slack(threshold)),
             assured: area.is_none(),
-            best_area: f64::INFINITY,
+            best_area: CellArea::INFINITY,
             best_slack: -Fixed::INF,
             kept: Vec::with_capacity(capacity),
         }
     }
 
     /// Whether an option of `slack` and `area` is worth more than those kept.
-    fn improves(&self, slack: Fixed, area: f64) -> bool {
+    fn improves(&self, slack: Fixed, area: CellArea) -> bool {
         match self.area_threshold {
             Some(threshold) => fuzzy::less(area, self.best_area) && slack >= threshold,
             None => slack > self.best_slack,
@@ -1240,7 +1240,7 @@ fn assured_fallback(
         return options.iter().find(|o| o.fits(envelope)).map(Rc::clone);
     };
     let size = sizes.iter().find(|s| s.buffer == *buffer).copied()?;
-    let mut best: Option<(f64, BnetPtr)> = None;
+    let mut best: Option<(CellArea, BnetPtr)> = None;
     for option in options {
         if best.as_ref().is_some_and(|(a, _)| option.area >= *a) {
             continue;

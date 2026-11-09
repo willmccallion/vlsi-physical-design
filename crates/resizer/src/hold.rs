@@ -14,7 +14,7 @@ use pare_common::db::indices::PinId;
 use pare_common::db::liberty::{BufferCell, Edge, EdgeValues, LibCellId, MinMax};
 use pare_common::geom::dbu::Dbu;
 use pare_common::geom::point::Point;
-use pare_common::units::{Farads, Quantity, Seconds};
+use pare_common::units::{CellArea, Farads, Quantity, Seconds};
 
 /// How close a hold buffer's delay per area may come to the best's for the
 /// smaller of the two to be chosen.
@@ -180,11 +180,12 @@ fn hold_violations(
 /// [`BUFFER_METRIC_MARGIN`] of it, as `findHoldBuffer`.
 fn hold_buffer(resizer: &Resizer<'_, Sta>) -> Option<BufferCell> {
     let liberty = resizer.link.liberty;
-    let mut scored: Vec<(Seconds, BufferCell)> = hold_buffer_candidates(resizer)
+    let mut scored: Vec<(f64, BufferCell)> = hold_buffer_candidates(resizer)
         .iter()
         .filter_map(|&buffer| {
             let lib = liberty.cell(buffer.id);
-            (lib.area != 0.0).then(|| (hold_delay(resizer, buffer) / lib.area, buffer))
+            (lib.area != CellArea::ZERO)
+                .then(|| (hold_delay(resizer, buffer).get() / lib.area.get(), buffer))
         })
         .collect();
     scored.sort_by(|a, b| a.0.total_cmp(&b.0));

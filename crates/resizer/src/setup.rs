@@ -12,7 +12,7 @@ use pare_common::config::Share;
 use pare_common::db::design::PinOwner;
 use pare_common::db::indices::PinId;
 use pare_common::db::liberty::MinMax;
-use pare_common::units::{Farads, Seconds};
+use pare_common::units::{CellArea, Farads, Seconds};
 
 /// Passes an endpoint may go on failing to improve before its best state
 /// is restored.
@@ -152,7 +152,7 @@ struct Repair<'r, 'a> {
     moves: Moves,
     options: SetupOptions,
     report: &'r mut dyn FnMut(&SetupProgress),
-    initial_area: f64,
+    initial_area: CellArea,
     iteration: usize,
     min_violation: Seconds,
     max_violation: Seconds,

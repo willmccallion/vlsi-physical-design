@@ -209,6 +209,11 @@ define_quantity!(
     Meters
 );
 define_quantity!(
+    /// A cell's area in the Liberty library's own unit, which by
+    /// convention, and as `OpenROAD` reports it, is square microns.
+    CellArea
+);
+define_quantity!(
     /// A wire's resistance per length, in ohms per meter.
     OhmsPerMeter
 );

@@ -14,7 +14,7 @@ use pare_common::db::indices::{NetId, PinId};
 use pare_common::db::liberty::{ArcRole, BufferCell, LibCellId};
 use pare_common::geom::dbu::{Dbu, DbuPerMicron};
 use pare_common::geom::point::Point;
-use pare_common::units::{Farads, FaradsPerMeter, Meters, Ohms, OhmsPerMeter, Seconds};
+use pare_common::units::{CellArea, Farads, FaradsPerMeter, Meters, Ohms, OhmsPerMeter, Seconds};
 use std::collections::HashSet;
 
 /// How far short of the computed split a repeater is placed, as
@@ -400,7 +400,7 @@ impl<'r, 'a, T: Timing> Repairer<'r, 'a, T> {
             return Ok(false);
         }
         let input_slews = self.resizer.input_slews(cell);
-        let mut sizes: Vec<(Seconds, f64, LibCellId)> = candidates
+        let mut sizes: Vec<(Seconds, CellArea, LibCellId)> = candidates
             .into_iter()
             .filter_map(|size| {
                 let violation = self.slew_violation(size, &port_name, &input_slews, load_cap)?;
