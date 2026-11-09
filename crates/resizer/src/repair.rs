@@ -187,11 +187,13 @@ impl<'r, 'a, T: Timing> Repairer<'r, 'a, T> {
             self.resizer.graph.drivers_by_level(&netlist)
         };
         self.resizer.defer_timing();
-        for driver in drivers.into_iter().rev() {
-            self.repair_driver(driver)?;
-        }
+        let repaired = drivers
+            .into_iter()
+            .rev()
+            .try_for_each(|driver| self.repair_driver(driver));
         self.resizer.resume_timing();
         self.resizer.clear_slew_annotations();
+        repaired?;
         Ok(self.summary)
     }
 
@@ -291,8 +293,9 @@ impl<'r, 'a, T: Timing> Repairer<'r, 'a, T> {
             return Ok(());
         }
         self.resizer.batch_edits();
-        let _ = self.repair_tree(&tree, driver, needs.max_cap.unwrap_or(Farads::INFINITY))?;
+        let repaired = self.repair_tree(&tree, driver, needs.max_cap.unwrap_or(Farads::INFINITY));
         self.resizer.flush();
+        let _ = repaired?;
         self.summary.repaired_nets += 1;
         Ok(())
     }
@@ -892,10 +895,18 @@ fn point_back_along(to: Point<Dbu>, from: Point<Dbu>, distance: f64, length: Dbu
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::resizer::GlobalRouting;
+    use crate::route_parasitics::RouteRc;
     use crate::testing::{
         DefSections, cells, clock_cells_source, def_text, design, pin, with_wired_session,
     };
-    use pare_common::db::liberty::Edge;
+    use crate::testing::{metal2_wires, with_session_inputs};
+    use pare_common::db::design::NetlistDB;
+    use pare_common::db::global_route::{
+        NetRoute, PinGridLocation, RoutePoint, RouteSegment, RouteSource,
+    };
+    use pare_common::db::indices::{LayerId, NetId};
+    use pare_common::db::liberty::{Edge, MinMax};
 
     /// A flop driving a flop at the far corner of the die.
     fn across_the_die() -> pare_common::db::design::NetlistDB {
@@ -1015,6 +1026,78 @@ mod tests {
                 .unwrap();
 
             assert_eq!(repairer.summary.inserted, 0);
+        });
+    }
+
+    /// Global routes in which net `q` runs from its driver to its first
+    /// load and misses its second.
+    struct BrokenRoutes;
+
+    impl RouteSource for BrokenRoutes {
+        fn update(&mut self, _: &NetlistDB, _: &[NetId]) {}
+
+        fn route(&self, db: &NetlistDB, net: NetId) -> Option<NetRoute> {
+            if db.nets[net].name != "q" {
+                return None;
+            }
+            let at = |pin: PinId| RoutePoint {
+                at: db.pin_position(pin),
+                layer: LayerId(0),
+            };
+            let pins = &db.nets[net].pins;
+            Some(NetRoute {
+                segments: vec![RouteSegment {
+                    from: at(pins[0]),
+                    to: at(pins[1]),
+                }],
+                pins: pins
+                    .iter()
+                    .map(|&pin| PinGridLocation {
+                        pin,
+                        at: db.pin_position(pin),
+                        grid: db.pin_position(pin),
+                        layer: LayerId(0),
+                    })
+                    .collect(),
+            })
+        }
+    }
+
+    #[test]
+    fn a_design_repair_that_fails_leaves_the_session_timed_and_unbatched() {
+        let mut db = design(&def_text(
+            "fork",
+            &DefSections {
+                components: "- f1 DFF_X1 + PLACED ( 2000 2800 ) N ;\n\
+                             - f2 DFF_X1 + PLACED ( 202000 2800 ) N ;\n\
+                             - f3 DFF_X1 + PLACED ( 2000 202800 ) N ;\n",
+                nets: "- clk ( PIN clk ) ( f1 CK ) ( f2 CK ) ( f3 CK ) ;\n\
+                       - q ( f1 Q ) ( f2 D ) ( f3 D ) ;\n",
+                inputs: &["clk"],
+                outputs: &[],
+            },
+        ));
+        let lib = cells(&clock_cells_source());
+        let rc = RouteRc::new(&db.library, &[], &[], LayerId(0));
+        let wires = metal2_wires(&db);
+
+        with_session_inputs(&mut db, &lib, SLOW_CLOCK, wires, |inputs, sdc| {
+            let mut source = BrokenRoutes;
+            let routes = GlobalRouting {
+                source: &mut source,
+                rc,
+                legalize: &|_, _| {},
+            };
+            let mut resizer = Resizer::on_global_routes(inputs, sdc, routes).unwrap();
+
+            let repaired = Repairer::new(&mut resizer).repair_design();
+
+            assert!(
+                matches!(repaired, Err(RepairError::RouteTree { .. })),
+                "{repaired:?}"
+            );
+            let q = pin(resizer.db, "f1/Q");
+            assert!(resizer.sta().slack(q, MinMax::Max).is_constrained());
         });
     }
 
