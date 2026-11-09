@@ -1,6 +1,7 @@
 //! Columns, rows and spans of the gcell grid.
 
 use pare_common::geom::dbu::Dbu;
+use std::fmt;
 use std::ops::{Add, AddAssign, Div, Mul, Neg, Sub, SubAssign};
 
 /// A column, row or span of the gcell grid, in gcells.
@@ -32,6 +33,12 @@ impl Gcells {
     /// Every column or row from this one to `last`, both included.
     pub(crate) fn through(self, last: Self) -> impl Iterator<Item = Self> {
         (self.0..=last.0).map(Self)
+    }
+}
+
+impl fmt::Display for Gcells {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}", self.0)
     }
 }
 

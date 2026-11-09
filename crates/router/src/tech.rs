@@ -7,6 +7,7 @@
 //! lands on a track of both layers it joins.
 
 use crate::RouteError;
+use crate::global::Gcells;
 use pare_common::config::RoutingConfig;
 use pare_common::db::design::NetlistDB;
 use pare_common::db::design::NonDefaultRule;
@@ -254,12 +255,11 @@ pub(crate) fn index_u32(i: usize) -> u32 {
 
 /// The most gcells the global grid spans across, as its 16-bit coordinates
 /// hold.
-pub(crate) const MAX_GRID_SPAN: i64 = u16::MAX as i64;
+pub(crate) const MAX_GRID_SPAN: Gcells = Gcells(u16::MAX as i64);
 
 /// Fails when `die` spans more than [`MAX_GRID_SPAN`] gcells of `gcell`.
 fn check_grid_span(die: &Rect<Dbu>, gcell: Dbu) -> Result<(), RouteError> {
-    let extent = die.width().max(die.height()).get();
-    let cells = (extent + gcell.get() - 1) / gcell.get();
+    let cells = Gcells::covering(die.width().max(die.height()), gcell);
     if cells > MAX_GRID_SPAN {
         return Err(RouteError::GridTooLarge(cells));
     }
@@ -550,7 +550,7 @@ mod tests {
     fn a_die_past_the_grid_s_span_is_refused_with_its_gcells() {
         assert_eq!(
             check_grid_span(&die(65_535 * 100 + 1), Dbu(100)),
-            Err(RouteError::GridTooLarge(65_536))
+            Err(RouteError::GridTooLarge(Gcells(65_536)))
         );
     }
 
