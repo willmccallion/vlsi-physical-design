@@ -3,7 +3,7 @@
 //! which sizes a cell can swap to.
 
 use pare_common::db::design::{NetlistDB, PinOwner};
-use pare_common::db::indices::{CellId, MacroId, MacroPinId, PinId, SiteId};
+use pare_common::db::indices::{CellId, IdVec, MacroId, MacroPinId, PinId, SiteId};
 use pare_common::db::liberty::{BufferCell, LibCell, LibCellId, LibPortId, Liberty};
 use pare_common::db::library::{CoreKind, MacroClass, PinDirection, SignalUse};
 use pare_common::units::{Farads, Ohms, Watts};
@@ -35,13 +35,13 @@ pub struct BufferSet {
 pub struct Link<'a> {
     /// The timing library.
     pub liberty: &'a Liberty,
-    cell_of_macro: Vec<Option<LibCellId>>,
-    macro_of_cell: Vec<Option<MacroId>>,
-    port_of_pin: Vec<Vec<Option<LibPortId>>>,
-    dont_use: Vec<bool>,
-    class_of: Vec<Option<usize>>,
+    cell_of_macro: IdVec<MacroId, Option<LibCellId>>,
+    macro_of_cell: IdVec<LibCellId, Option<MacroId>>,
+    port_of_pin: IdVec<MacroId, IdVec<MacroPinId, Option<LibPortId>>>,
+    dont_use: IdVec<LibCellId, bool>,
+    class_of: IdVec<LibCellId, Option<usize>>,
     classes: Vec<Vec<LibCellId>>,
-    master_area: Vec<Option<i64>>,
+    master_area: IdVec<LibCellId, Option<i64>>,
 }
 
 /// How much one sizing step may grow a cell, as `set_opt_config`'s
@@ -101,24 +101,25 @@ impl<'a> Link<'a> {
         liberty: &'a Liberty,
         dont_use: &[String],
     ) -> Result<Self, LinkError> {
-        let mut dont_use_flags: Vec<bool> = liberty.cells.iter().map(|c| c.dont_use).collect();
+        let mut dont_use_flags: IdVec<LibCellId, bool> =
+            liberty.cells.iter().map(|c| c.dont_use).collect();
         for name in dont_use {
             let id = liberty
                 .cell_id(name)
                 .ok_or_else(|| LinkError::UnknownDontUse(name.clone()))?;
-            dont_use_flags[id.index()] = true;
+            dont_use_flags[id] = true;
         }
-        let mut macro_of_cell = vec![None; liberty.cells.len()];
-        let mut cell_of_macro = Vec::with_capacity(db.library.macros.len());
-        let mut port_of_pin = Vec::with_capacity(db.library.macros.len());
-        for (m, master) in db.library.macros.iter().enumerate() {
+        let mut macro_of_cell = IdVec::filled(None, liberty.cells.len());
+        let mut cell_of_macro = IdVec::with_capacity(db.library.macros.len());
+        let mut port_of_pin = IdVec::with_capacity(db.library.macros.len());
+        for (m, master) in db.library.macros.iter_enumerated() {
             let cell = liberty.cell_id(&master.name);
-            cell_of_macro.push(cell);
+            let _ = cell_of_macro.push(cell);
             if let Some(cell) = cell {
-                macro_of_cell[cell.index()] = Some(MacroId::new(m));
+                macro_of_cell[cell] = Some(m);
             }
             let lib_cell = cell.map(|c| liberty.cell(c));
-            port_of_pin.push(
+            let _ = port_of_pin.push(
                 master
                     .pins
                     .iter()
@@ -131,7 +132,7 @@ impl<'a> Link<'a> {
             .iter()
             .map(|m| {
                 m.map(|m| {
-                    let size = db.library.macros[m.index()].size;
+                    let size = db.library.macros[m].size;
                     size.x.get() * size.y.get()
                 })
             })
@@ -151,31 +152,31 @@ impl<'a> Link<'a> {
     /// The Liberty cell of a master.
     #[must_use]
     pub(crate) fn cell_of_macro(&self, master: MacroId) -> Option<LibCellId> {
-        self.cell_of_macro[master.index()]
+        self.cell_of_macro[master]
     }
 
     /// The master of a Liberty cell.
     #[must_use]
     pub fn macro_of(&self, cell: LibCellId) -> Option<MacroId> {
-        self.macro_of_cell[cell.index()]
+        self.macro_of_cell[cell]
     }
 
     /// Whether a Liberty cell has a master: `OpenROAD`'s link cell test.
     #[must_use]
     pub fn is_link_cell(&self, cell: LibCellId) -> bool {
-        self.macro_of_cell[cell.index()].is_some()
+        self.macro_of_cell[cell].is_some()
     }
 
     /// Whether the cell is not to be used.
     #[must_use]
     pub fn dont_use(&self, cell: LibCellId) -> bool {
-        self.dont_use[cell.index()]
+        self.dont_use[cell]
     }
 
     /// The Liberty cell of an instance.
     #[must_use]
     pub fn cell(&self, db: &NetlistDB, instance: CellId) -> Option<(LibCellId, &'a LibCell)> {
-        let id = self.cell_of_macro(db.cells[instance.index()].macro_id)?;
+        let id = self.cell_of_macro(db.cells[instance].macro_id)?;
         Some((id, self.liberty.cell(id)))
     }
 
@@ -185,13 +186,13 @@ impl<'a> Link<'a> {
         let PinOwner::Cell {
             cell,
             pin: macro_pin,
-        } = db.pins[pin.index()].owner
+        } = db.pins[pin].owner
         else {
             return None;
         };
-        let master = db.cells[cell.index()].macro_id;
+        let master = db.cells[cell].macro_id;
         let lib = self.cell_of_macro(master)?;
-        let port = self.port_of_pin[master.index()][macro_pin.index()]?;
+        let port = self.port_of_pin[master][macro_pin]?;
         Some((lib, port))
     }
 
@@ -199,10 +200,10 @@ impl<'a> Link<'a> {
     #[must_use]
     pub fn macro_pin_of_port(&self, cell: LibCellId, port: LibPortId) -> Option<MacroPinId> {
         let master = self.macro_of(cell)?;
-        self.port_of_pin[master.index()]
-            .iter()
-            .position(|p| *p == Some(port))
-            .map(MacroPinId::new)
+        self.port_of_pin[master]
+            .iter_enumerated()
+            .find(|&(_, &p)| p == Some(port))
+            .map(|(pin, _)| pin)
     }
 
     /// The cells an instance of `cell` may be swapped for, itself included,
@@ -211,7 +212,7 @@ impl<'a> Link<'a> {
     /// cell when it has no class.
     #[must_use]
     pub(crate) fn swappable_cells(&self, cell: LibCellId, limits: SizingLimits) -> Vec<LibCellId> {
-        let Some(class) = self.class_of[cell.index()] else {
+        let Some(class) = self.class_of[cell] else {
             return vec![cell];
         };
         let from = self.measures(cell);
@@ -225,7 +226,7 @@ impl<'a> Link<'a> {
 
     fn measures(&self, cell: LibCellId) -> CellMeasures {
         CellMeasures {
-            area: self.master_area[cell.index()],
+            area: self.master_area[cell],
             leakage: cell_leakage(self.liberty.cell(cell)),
         }
     }
@@ -426,12 +427,12 @@ fn is_clock_buffer(cell: &LibCell) -> bool {
 /// resistance; a cell in no class maps to `None`.
 fn equivalence_classes(
     liberty: &Liberty,
-    dont_use: &[bool],
-) -> (Vec<Option<usize>>, Vec<Vec<LibCellId>>) {
-    let mut class_of: Vec<Option<usize>> = vec![None; liberty.cells.len()];
+    dont_use: &IdVec<LibCellId, bool>,
+) -> (IdVec<LibCellId, Option<usize>>, Vec<Vec<LibCellId>>) {
+    let mut class_of: IdVec<LibCellId, Option<usize>> = IdVec::filled(None, liberty.cells.len());
     let mut classes: Vec<Vec<LibCellId>> = Vec::new();
-    let mut by_ports: HashMap<Vec<&str>, Vec<usize>> = HashMap::new();
-    for (i, cell) in liberty.cells.iter().enumerate() {
+    let mut by_ports: HashMap<Vec<&str>, Vec<LibCellId>> = HashMap::new();
+    for (i, cell) in liberty.cells.iter_enumerated() {
         if dont_use[i] {
             continue;
         }
@@ -443,11 +444,11 @@ fn equivalence_classes(
             .find(|&&other| liberty.cells[other].equivalent(cell))
             .and_then(|&other| class_of[other]);
         if let Some(class) = found {
-            classes[class].push(LibCellId(i as u32));
+            classes[class].push(i);
             class_of[i] = Some(class);
         } else {
             class_of[i] = Some(classes.len());
-            classes.push(vec![LibCellId(i as u32)]);
+            classes.push(vec![i]);
         }
         candidates.push(i);
     }
@@ -565,7 +566,7 @@ mod tests {
             "library (t) {{ leakage_power_unit : \"1nW\";
                cell (c) {{ {body} pin (A) {{ direction : input; capacitance : 1.0; }} }} }}"
         );
-        parse_str(&src, Path::new("t.lib")).unwrap().cells[0].clone()
+        parse_str(&src, Path::new("t.lib")).unwrap().cells[LibCellId(0)].clone()
     }
 
     #[test]
@@ -582,7 +583,7 @@ mod tests {
     fn equivalent_cells_run_from_weakest_drive_and_ties_keep_library_order() {
         let lib = buffers(&[("A", 0.2), ("B", 0.6), ("C", 0.4), ("D", 0.4)]);
 
-        let (_, classes) = equivalence_classes(&lib, &[false; 4]);
+        let (_, classes) = equivalence_classes(&lib, &IdVec::filled(false, 4));
         let names: Vec<&str> = classes[0]
             .iter()
             .map(|&c| lib.cell(c).name.as_str())

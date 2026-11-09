@@ -157,8 +157,8 @@ impl NetParasitics {
     #[must_use]
     pub fn from_route(db: &NetlistDB, net: NetId, route: NetRoute, rc: &RouteRc) -> Self {
         let ndr_width = |layer: LayerId| {
-            let rule = db.nets[net.index()].non_default_rule?;
-            db.non_default_rules[rule.index()]
+            let rule = db.nets[net].non_default_rule?;
+            db.non_default_rules[rule]
                 .layers
                 .iter()
                 .find(|l| l.layer == layer)
@@ -181,10 +181,7 @@ impl NetParasitics {
                     ndr_width(segment.from.layer),
                 )
             } else {
-                log::warn!(
-                    "Non wire or via route found on net {}.",
-                    db.nets[net.index()].name
-                );
+                log::warn!("Non wire or via route found on net {}.", db.nets[net].name);
                 (0.0, 0.0)
             };
             network.wire(from, to, res, cap);
@@ -210,7 +207,7 @@ impl NetParasitics {
                 log::warn!(
                     "Missing route to pin {} in net {}.",
                     db.pin_name(location.pin),
-                    db.nets[net.index()].name
+                    db.nets[net].name
                 );
                 continue;
             };

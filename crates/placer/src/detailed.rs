@@ -104,20 +104,20 @@ pub fn free_blocked_pins(db: &mut NetlistDB, zones: &Zones, access: &PinAccess) 
     let blocked_after = dp.count_blocked(db);
     if blocked_after > 0 && log::log_enabled!(log::Level::Debug) {
         for (&cell, &s) in &dp.segment_of {
-            let at = db.cells[cell.index()].location;
+            let at = db.cells[cell].location;
             let blocked = dp.blocked_now(db, cell, s);
             if blocked > 0 {
                 let beside: Vec<&str> = dp
                     .beside(db, cell, at, dp.segments[s].row, &[], Absent::NONE)
                     .iter()
-                    .map(|n| db.cells[n.cell.index()].name.as_str())
+                    .map(|n| db.cells[n.cell].name.as_str())
                     .collect();
-                let alone = dp.access.map_or(0, |a| {
-                    a.blocked_pins(db, cell, at, db.cells[cell.index()].orient)
-                });
+                let alone = dp
+                    .access
+                    .map_or(0, |a| a.blocked_pins(db, cell, at, db.cells[cell].orient));
                 log::debug!(
                     "cell {} at ({}, {}) keeps {blocked} blocked pins ({alone} by fixed metal alone) beside {beside:?}",
-                    db.cells[cell.index()].name,
+                    db.cells[cell].name,
                     at.x.get(),
                     at.y.get()
                 );
@@ -267,11 +267,7 @@ impl PairCheck {
             return true;
         };
         let gap = right.1 - (left.1 + db.cell_size(left.0).x);
-        let key = (
-            db.cells[left.0.index()].macro_id,
-            db.cells[right.0.index()].macro_id,
-            gap,
-        );
+        let key = (db.cells[left.0].macro_id, db.cells[right.0].macro_id, gap);
         if self.clear.contains(&key) {
             return true;
         }
@@ -334,7 +330,7 @@ impl<'a> DetailedPlacer<'a> {
             .unwrap_or(Dbu::ZERO);
         let mut segment_of = HashMap::new();
         for cell in std_cells {
-            let at = db.cells[cell.index()].location;
+            let at = db.cells[cell].location;
             let width = db.cell_size(cell).x;
             let r = rows.partition_point(|row| row.y < at.y);
             let zone = zones.of(cell);
@@ -351,7 +347,7 @@ impl<'a> DetailedPlacer<'a> {
             }
         }
         for seg in &mut segments {
-            seg.cells.sort_by_key(|&c| db.cells[c.index()].location.x);
+            seg.cells.sort_by_key(|&c| db.cells[c].location.x);
         }
 
         let mut nets_of = vec![Vec::new(); db.num_cells()];
@@ -360,7 +356,7 @@ impl<'a> DetailedPlacer<'a> {
                 continue;
             }
             for &pin in &net.pins {
-                if let PinOwner::Cell { cell, .. } = db.pins[pin.index()].owner {
+                if let PinOwner::Cell { cell, .. } = db.pins[pin].owner {
                     let list: &mut Vec<NetId> = &mut nets_of[cell.index()];
                     if list.last() != Some(&NetId::new(i)) {
                         list.push(NetId::new(i));
@@ -509,18 +505,18 @@ impl<'a> DetailedPlacer<'a> {
             .filter(|&s| absent.segment != Some(s))
             .flat_map(|s| {
                 let cells = &self.segments[s].cells;
-                let start = cells
-                    .partition_point(|&c| db.cells[c.index()].location.x + self.max_width <= lo);
+                let start =
+                    cells.partition_point(|&c| db.cells[c].location.x + self.max_width <= lo);
                 cells[start..]
                     .iter()
                     .copied()
-                    .take_while(move |&c| db.cells[c.index()].location.x < hi)
+                    .take_while(move |&c| db.cells[c].location.x < hi)
             })
             .filter(|&c| !elsewhere(c) && db.cell_bbox(c).max.x > lo)
             .map(|c| Neighbour {
                 cell: c,
-                at: db.cells[c.index()].location,
-                orient: db.cells[c.index()].orient,
+                at: db.cells[c].location,
+                orient: db.cells[c].orient,
             })
             .collect();
         beside.extend(
@@ -593,7 +589,7 @@ impl<'a> DetailedPlacer<'a> {
 
     /// Signal pins of `cell` blocked where it stands.
     fn blocked_now(&self, db: &NetlistDB, cell: CellId, s: usize) -> usize {
-        let at = db.cells[cell.index()].location;
+        let at = db.cells[cell].location;
         self.blocked_at(db, cell, at, self.segments[s].row, &[], Absent::NONE)
     }
 
@@ -613,8 +609,8 @@ impl<'a> DetailedPlacer<'a> {
         let plan = self.segment_plan(db, s)?;
         let mut moved = 0;
         for (c, p) in plan {
-            if db.cells[c.index()].location.x != p {
-                db.cells[c.index()].location.x = p;
+            if db.cells[c].location.x != p {
+                db.cells[c].location.x = p;
                 self.forget([c]);
                 moved += 1;
             }
@@ -629,7 +625,7 @@ impl<'a> DetailedPlacer<'a> {
         let row = &self.rows[seg.row];
         let mut candidates: Vec<Vec<(Dbu, i64)>> = Vec::with_capacity(seg.cells.len());
         for &c in &seg.cells {
-            let x = db.cells[c.index()].location.x;
+            let x = db.cells[c].location.x;
             let width = db.cell_size(c).x;
             let spots: Vec<(Dbu, i64)> = (-MAX_SHIFT_SITES..=MAX_SHIFT_SITES)
                 .map(|k| x + row.site * k)
@@ -711,7 +707,7 @@ impl<'a> DetailedPlacer<'a> {
         let cell = self.segments[s].cells[i];
         let row = self.segments[s].row;
         let site = self.rows[row].site;
-        let x = db.cells[cell.index()].location.x;
+        let x = db.cells[cell].location.x;
         for k in 1..=MAX_SHIFT_SITES {
             for dir in [-1, 1] {
                 if let Some(moves) = self.shift_plan(db, s, i, x + site * (k * dir)) {
@@ -722,7 +718,7 @@ impl<'a> DetailedPlacer<'a> {
                         moves.len() - 1
                     );
                     for (c, at) in moves {
-                        db.cells[c.index()].location = at;
+                        db.cells[c].location = at;
                         self.forget([c]);
                     }
                     return Freed::InPlace;
@@ -747,8 +743,8 @@ impl<'a> DetailedPlacer<'a> {
                     continue;
                 }
                 if let Some(partner) = self.swap_partner(db, cell, s, t, x, reach) {
-                    let here = db.cells[cell.index()].location;
-                    let there = db.cells[partner.index()].location;
+                    let here = db.cells[cell].location;
+                    let there = db.cells[partner].location;
                     log::trace!(
                         "cell {} at ({}, {}) swaps with {} at ({}, {})",
                         cell.index(),
@@ -758,10 +754,10 @@ impl<'a> DetailedPlacer<'a> {
                         there.x.get(),
                         there.y.get()
                     );
-                    db.cells[cell.index()].location = there;
-                    db.cells[cell.index()].orient = self.rows[other].orient;
-                    db.cells[partner.index()].location = here;
-                    db.cells[partner.index()].orient = self.rows[row].orient;
+                    db.cells[cell].location = there;
+                    db.cells[cell].orient = self.rows[other].orient;
+                    db.cells[partner].location = here;
+                    db.cells[partner].orient = self.rows[row].orient;
                     self.forget([cell, partner]);
                     self.swap_entries(db, cell, s, partner, t);
                     return Freed::Elsewhere;
@@ -778,7 +774,7 @@ impl<'a> DetailedPlacer<'a> {
                 };
                 let at = Point::new(gx, self.rows[other].y);
                 {
-                    let from = db.cells[cell.index()].location;
+                    let from = db.cells[cell].location;
                     log::trace!(
                         "cell {} moves from ({}, {}) to a gap at ({}, {})",
                         cell.index(),
@@ -787,8 +783,8 @@ impl<'a> DetailedPlacer<'a> {
                         at.x.get(),
                         at.y.get()
                     );
-                    db.cells[cell.index()].location = at;
-                    db.cells[cell.index()].orient = self.rows[other].orient;
+                    db.cells[cell].location = at;
+                    db.cells[cell].orient = self.rows[other].orient;
                     self.forget([cell]);
                     self.relocate(db, cell, s, t);
                     return Freed::Elsewhere;
@@ -812,19 +808,19 @@ impl<'a> DetailedPlacer<'a> {
         reach: Dbu,
     ) -> Option<CellId> {
         let width = db.cell_size(cell).x;
-        let here = db.cells[cell.index()].location;
+        let here = db.cells[cell].location;
         let (row_here, row_there) = (self.segments[s].row, self.segments[t].row);
         let cells = &self.segments[t].cells;
-        let k = cells.partition_point(|&c| db.cells[c.index()].location.x < x);
+        let k = cells.partition_point(|&c| db.cells[c].location.x < x);
         cells[k.saturating_sub(SWAP_REACH)..(k + SWAP_REACH).min(cells.len())]
             .iter()
             .copied()
             .filter(|&c| c != cell && db.cell_size(c).x == width)
-            .filter(|&c| (db.cells[c.index()].location.x - x).abs() <= reach)
+            .filter(|&c| (db.cells[c].location.x - x).abs() <= reach)
             .filter(|&c| self.zone_of[c.index()] == self.zone_of[cell.index()])
             .filter(|&c| db.cell_macro(c).symmetry.allows(self.rows[row_here].orient))
             .find(|&c| {
-                let there = db.cells[c.index()].location;
+                let there = db.cells[c].location;
                 let swapped = [(cell, there, row_there), (c, here, row_here)];
                 self.blocked_around(db, cell, there, row_there, &swapped, Absent::NONE) == 0
                     && self.blocked_around(db, c, here, row_here, &swapped, Absent::NONE) == 0
@@ -920,19 +916,19 @@ impl<'a> DetailedPlacer<'a> {
         let before = Self::cost_of(db, &nets);
         let saved: Vec<_> = placements
             .iter()
-            .map(|&(c, _, _)| (c, db.cells[c.index()].location, db.cells[c.index()].orient))
+            .map(|&(c, _, _)| (c, db.cells[c].location, db.cells[c].orient))
             .collect();
         let apply = |db: &mut NetlistDB| {
             for &(c, at, row) in placements {
-                db.cells[c.index()].location = at;
-                db.cells[c.index()].orient = self.rows[row].orient;
+                db.cells[c].location = at;
+                db.cells[c].orient = self.rows[row].orient;
             }
         };
         apply(db);
         let improves = Self::cost_of(db, &nets) < before - 1e-9;
         for &(c, at, orient) in &saved {
-            db.cells[c.index()].location = at;
-            db.cells[c.index()].orient = orient;
+            db.cells[c].location = at;
+            db.cells[c].orient = orient;
         }
         // Pin checks read the placement as it stands, so they run undone.
         let clear = improves
@@ -951,9 +947,9 @@ impl<'a> DetailedPlacer<'a> {
         let mut xs = Vec::new();
         let mut ys = Vec::new();
         for &n in &self.nets_of[cell.index()] {
-            let others = db.nets[n.index()].pins.iter().filter(|&&p| {
-                !matches!(db.pins[p.index()].owner, PinOwner::Cell { cell: c, .. } if c == cell)
-            });
+            let others = db.nets[n].pins.iter().filter(
+                |&&p| !matches!(db.pins[p].owner, PinOwner::Cell { cell: c, .. } if c == cell),
+            );
             let Some(bbox) = others
                 .map(|&p| {
                     let at = db.pin_position(p);
@@ -995,7 +991,7 @@ impl<'a> DetailedPlacer<'a> {
             return false;
         };
         let size = db.cell_size(cell);
-        let here = db.cells[cell.index()].location;
+        let here = db.cells[cell].location;
         if region.contains(here + Point::new(size.x / 2, size.y / 2)) {
             return false;
         }
@@ -1030,7 +1026,7 @@ impl<'a> DetailedPlacer<'a> {
                     }
                 }
                 if let Some(other) = self.equal_width_near(db, s, target.x, size.x, cell) {
-                    let other_at = db.cells[other.index()].location;
+                    let other_at = db.cells[other].location;
                     let other_row = self.segments[from].row;
                     if self.zone_of[other.index()] != self.segments[from].zone
                         || !db
@@ -1061,7 +1057,7 @@ impl<'a> DetailedPlacer<'a> {
         let seg = &self.segments[s];
         let k = seg
             .cells
-            .partition_point(|&c| db.cells[c.index()].location.x < target);
+            .partition_point(|&c| db.cells[c].location.x < target);
         let first = k.saturating_sub(REACH);
         let last = (k + REACH).min(seg.cells.len());
         (first..=last)
@@ -1074,7 +1070,7 @@ impl<'a> DetailedPlacer<'a> {
                 let gap_hi = if j == seg.cells.len() {
                     seg.hi
                 } else {
-                    db.cells[seg.cells[j].index()].location.x
+                    db.cells[seg.cells[j]].location.x
                 };
                 (gap_hi - gap_lo >= width).then_some((gap_lo, gap_hi - width))
             })
@@ -1142,19 +1138,19 @@ impl<'a> DetailedPlacer<'a> {
         let seg = &self.segments[s];
         let k = seg
             .cells
-            .partition_point(|&c| db.cells[c.index()].location.x < target);
+            .partition_point(|&c| db.cells[c].location.x < target);
         seg.cells[k.saturating_sub(2)..(k + 2).min(seg.cells.len())]
             .iter()
             .copied()
             .filter(|&c| c != cell && db.cell_size(c).x == width)
-            .min_by_key(|&c| (db.cells[c.index()].location.x - target).abs())
+            .min_by_key(|&c| (db.cells[c].location.x - target).abs())
     }
 
     fn relocate(&mut self, db: &NetlistDB, cell: CellId, from: usize, to: usize) {
         self.segments[from].cells.retain(|&c| c != cell);
-        let x = db.cells[cell.index()].location.x;
+        let x = db.cells[cell].location.x;
         let cells = &mut self.segments[to].cells;
-        let k = cells.partition_point(|&c| db.cells[c.index()].location.x < x);
+        let k = cells.partition_point(|&c| db.cells[c].location.x < x);
         cells.insert(k, cell);
         let _ = self.segment_of.insert(cell, to);
     }
@@ -1179,7 +1175,7 @@ impl<'a> DetailedPlacer<'a> {
         for s in [seg_a, seg_b] {
             self.segments[s]
                 .cells
-                .sort_by_key(|&c| db.cells[c.index()].location.x);
+                .sort_by_key(|&c| db.cells[c].location.x);
         }
     }
 
@@ -1195,8 +1191,8 @@ impl<'a> DetailedPlacer<'a> {
                     self.segments[s].cells[i + 1],
                     self.segments[s].cells[i + 2],
                 ];
-                let left = db.cells[window[0].index()].location.x;
-                let y = db.cells[window[0].index()].location.y;
+                let left = db.cells[window[0]].location.x;
+                let y = db.cells[window[0]].location.y;
                 for order in ORDERS {
                     let mut x = left;
                     let placements: Vec<_> = order
@@ -1225,7 +1221,7 @@ impl<'a> DetailedPlacer<'a> {
 
 /// Weighted half-perimeter wirelength of one net.
 fn net_cost(db: &NetlistDB, net: NetId) -> f64 {
-    let n = &db.nets[net.index()];
+    let n = &db.nets[net];
     let mut pins = n.pins.iter().map(|&p| db.pin_position(p));
     let Some(first) = pins.next() else { return 0.0 };
     let bbox = pins.fold(Rect::new(first, first), |b, p| b.union(&Rect::new(p, p)));
@@ -1236,7 +1232,7 @@ fn net_cost(db: &NetlistDB, net: NetId) -> f64 {
 mod tests {
     use super::*;
     use pare_common::db::design::{PlacementStatus, Region, RegionKind, Row};
-    use pare_common::db::indices::{LayerId, RegionId, SiteId};
+    use pare_common::db::indices::{LayerId, SiteId};
     use pare_common::db::library::{
         CoreKind, Direction, LayerElectrical, LayerRef, Library, Macro, MacroClass, MacroPin,
         PinDirection, RoutingLayer, Shape, SignalUse, Site, SiteClass, Symmetry,
@@ -1484,7 +1480,7 @@ mod tests {
             (1, 0),
             "{repair:?}"
         );
-        let gap = db.cells[1].location.x - (db.cells[0].location.x + Dbu(400));
+        let gap = db.cells[CellId(1)].location.x - (db.cells[CellId(0)].location.x + Dbu(400));
         assert!(gap >= Dbu(200), "gap {gap:?}");
         assert!(
             placement_violations(&db).is_empty(),
@@ -1504,7 +1500,7 @@ mod tests {
         let result = improve_zoned(&mut db);
 
         assert!(result.hpwl_after < result.hpwl_before, "{result:?}");
-        assert!(db.cells[2].location.x > db.cells[3].location.x);
+        assert!(db.cells[CellId(2)].location.x > db.cells[CellId(3)].location.x);
         assert!(
             placement_violations(&db).is_empty(),
             "{:?}",
@@ -1534,17 +1530,17 @@ mod tests {
     fn a_fence_member_moves_toward_its_net_only_up_to_the_fence_edge() {
         use PlacementStatus::{Fixed, Placed};
         let mut db = design(&[(0, Fixed), (180, Fixed), (40, Placed)], &[(2, 1)]);
-        db.regions.push(Region {
+        let fence = db.regions.push(Region {
             name: "f".into(),
             rects: vec![Rect::new(pt(0, 0), pt(100, 100))],
             kind: RegionKind::Fence,
             group_order: None,
         });
-        db.cells[2].region = Some(RegionId(0));
+        db.cells[CellId(2)].region = Some(fence);
 
         let result = improve_zoned(&mut db);
 
-        let x = db.cells[2].location.x;
+        let x = db.cells[CellId(2)].location.x;
         assert!(result.moves > 0, "{result:?}");
         assert!(Dbu(40) < x && x <= Dbu(80), "{x:?}");
         assert!(

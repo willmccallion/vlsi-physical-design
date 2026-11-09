@@ -28,10 +28,10 @@ fn tiny() -> NetlistDB {
 fn cell_pin(db: &NetlistDB, cell: &str, pin: &str) -> PinId {
     let c = db.cell_id(cell).unwrap();
     let m = db.cell_macro(c);
-    *db.cells[c.index()]
+    *db.cells[c]
         .pins
         .iter()
-        .find(|&&p| matches!(db.pins[p.index()].owner, PinOwner::Cell { pin: mp, .. } if m.pin(mp).name == pin))
+        .find(|&&p| matches!(db.pins[p].owner, PinOwner::Cell { pin: mp, .. } if m.pin(mp).name == pin))
         .unwrap()
 }
 
@@ -83,7 +83,7 @@ fn an_m1_pin_is_reached_by_the_one_via_that_fits_inside_it() {
 fn an_io_pin_on_a_routable_layer_is_reached_on_its_own_layer() {
     let db = tiny();
     let tech = RouteTech::new(&db, &RoutingConfig::default()).unwrap();
-    let pin = db.io_pins[db.io_pin_id("in").unwrap().index()].pin;
+    let pin = db.io_pins[db.io_pin_id("in").unwrap()].pin;
 
     let points = access_points(&db, &tech, pin, &|_, _| true);
 
@@ -96,7 +96,7 @@ fn an_io_pin_on_a_routable_layer_is_reached_on_its_own_layer() {
 }
 
 fn io_pin(db: &NetlistDB, name: &str) -> PinId {
-    db.io_pins[db.io_pin_id(name).unwrap().index()].pin
+    db.io_pins[db.io_pin_id(name).unwrap()].pin
 }
 
 /// Every crossing of its own layer's tracks inside a shape of `pin`.

@@ -37,7 +37,7 @@ pub fn write(
         if segments.is_empty() {
             continue;
         }
-        writeln!(out, "{}\n(", db.nets[net.index()].name)?;
+        writeln!(out, "{}\n(", db.nets[net].name)?;
         for s in segments {
             writeln!(out, "{} {}", point(&s.from), point(&s.to))?;
         }

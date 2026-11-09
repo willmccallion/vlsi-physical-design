@@ -4,7 +4,7 @@
 #![allow(clippy::unwrap_used, clippy::expect_used)]
 
 use pare_common::db::design::{NetlistDB, PinOwner, PlacementStatus};
-use pare_common::db::indices::{NetId, PinId};
+use pare_common::db::indices::{IoPinId, NetId, PinId};
 use pare_common::db::liberty::Liberty;
 use pare_common::db::library::{DuplicateName, SignalUse};
 use pare_common::db::parser::{def, lef, liberty, sdc};
@@ -113,14 +113,14 @@ fn clock_network(db: &NetlistDB, link: &Link<'_>, constraints: &Sdc) -> ClockNet
 
 /// The cell driving `net`, if one does.
 fn driver_cell(db: &NetlistDB, net: NetId) -> Option<String> {
-    db.nets[net.index()]
+    db.nets[net]
         .pins
         .iter()
-        .find_map(|&p| match db.pins[p.index()].owner {
+        .find_map(|&p| match db.pins[p].owner {
             PinOwner::Cell { cell, pin } => {
                 let macro_pin = db.cell_macro(cell).pin(pin);
                 (macro_pin.name == "Z" || macro_pin.name == "ZN")
-                    .then(|| db.cells[cell.index()].name.clone())
+                    .then(|| db.cells[cell].name.clone())
             }
             PinOwner::Io(_) => None,
         })
@@ -130,17 +130,17 @@ fn driver_cell(db: &NetlistDB, net: NetId) -> Option<String> {
 fn path_to_port(db: &NetlistDB, mut pin: PinId) -> Vec<String> {
     let mut path = Vec::new();
     for _ in 0..64 {
-        let net = db.pins[pin.index()].net;
+        let net = db.pins[pin].net;
         let Some(name) = driver_cell(db, net) else {
             return path;
         };
         let cell = db.cell_id(&name).unwrap();
         path.push(name);
-        pin = db.cells[cell.index()]
+        pin = db.cells[cell]
             .pins
             .iter()
             .copied()
-            .find(|&p| matches!(db.pins[p.index()].owner, PinOwner::Cell { pin, .. } if db.cell_macro(cell).pin(pin).name == "A"))
+            .find(|&p| matches!(db.pins[p].owner, PinOwner::Cell { pin, .. } if db.cell_macro(cell).pin(pin).name == "A"))
             .unwrap();
     }
     panic!("the clock path does not reach the port")
@@ -207,32 +207,21 @@ fn the_root_net_gets_the_clock_rule_of_doubled_spacing() {
 
     let _ = synthesize(&mut db, &input).unwrap();
 
-    let rule = db
+    let (rule, ndr) = db
         .non_default_rules
-        .iter()
-        .position(|r| r.name == "CTS_NDR_0")
+        .iter_enumerated()
+        .find(|(_, r)| r.name == "CTS_NDR_0")
         .unwrap();
-    let ndr = &db.non_default_rules[rule];
     let metal1 = &ndr.layers[0];
     assert_eq!(
         metal1.spacing.map(pare_common::geom::dbu::Dbu::get),
         Some(260)
     );
     let clk = db.net_id("clk").unwrap();
-    assert_eq!(
-        db.nets[clk.index()]
-            .non_default_rule
-            .map(pare_common::db::indices::NonDefaultRuleId::index),
-        Some(rule)
-    );
+    assert_eq!(db.nets[clk].non_default_rule, Some(rule));
     let root = db.net_id("clknet_0_clk").unwrap();
-    assert_eq!(
-        db.nets[root.index()]
-            .non_default_rule
-            .map(pare_common::db::indices::NonDefaultRuleId::index),
-        Some(rule)
-    );
-    assert_eq!(db.nets[root.index()].signal_use, SignalUse::Clock);
+    assert_eq!(db.nets[root].non_default_rule, Some(rule));
+    assert_eq!(db.nets[root].signal_use, SignalUse::Clock);
 }
 
 /// The 16 by 16 grid with its first `slow` flops alternately of
@@ -351,7 +340,7 @@ fn the_faster_tree_of_a_clock_is_delayed_as_it_always_is() {
     };
     let first_added = db.cells.len();
     let trees = synthesize(&mut db, &input).unwrap();
-    let port = db.pin_position(db.io_pins[0].pin);
+    let port = db.pin_position(db.io_pins[IoPinId(0)].pin);
     let arrivals: Vec<Seconds> = (0..db.pins.len())
         .map(|p| {
             let away = db.pin_position(PinId::new(p)).manhattan(port);
@@ -373,8 +362,8 @@ fn the_faster_tree_of_a_clock_is_delayed_as_it_always_is() {
 fn a_tree_whose_buffer_name_is_taken_is_refused_with_that_name() {
     let (mut db, lib, constraints) = load(16, 16, false);
     let ff0 = db.cell_id("ff0").unwrap();
-    let master = db.cells[ff0.index()].macro_id;
-    let location = db.cells[ff0.index()].location;
+    let master = db.cells[ff0].macro_id;
+    let location = db.cells[ff0].location;
     let _ = db
         .add_cell(
             "clkbuf_0_clk".to_string(),
@@ -420,8 +409,8 @@ fn each_load_of_a_clock_inverter_gets_its_own_copy() {
     assert_eq!(done.clones, 3);
     assert!(db.cell_id("clkinv").is_none());
     for pin in flop_clock_pins(&db) {
-        let net = db.pins[pin.index()].net;
-        assert_eq!(db.nets[net.index()].pins.len(), 2);
+        let net = db.pins[pin].net;
+        assert_eq!(db.nets[net].pins.len(), 2);
         assert!(driver_cell(&db, net).unwrap().starts_with("clkinv_"));
     }
 }
@@ -439,12 +428,12 @@ fn assert_golden(name: &str, actual: &str) {
 /// net with its rule, driver and loads, as text to pin a run down.
 fn clock_trees_text(db: &NetlistDB, first_added: usize, summary: &CtsSummary) -> String {
     let mut text = format!("{summary:#?}\n");
-    for cell in &db.cells[first_added..] {
+    for cell in db.cells.iter().skip(first_added) {
         let _ = writeln!(
             text,
             "cell {} {} {} {} {:?}",
             cell.name,
-            db.library.macros[cell.macro_id.index()].name,
+            db.library.macros[cell.macro_id].name,
             cell.location.x.get(),
             cell.location.y.get(),
             cell.orient
@@ -459,7 +448,7 @@ fn clock_trees_text(db: &NetlistDB, first_added: usize, summary: &CtsSummary) ->
     for net in nets {
         let rule = net
             .non_default_rule
-            .map_or("-", |r| db.non_default_rules[r.index()].name.as_str());
+            .map_or("-", |r| db.non_default_rules[r].name.as_str());
         let mut pins: Vec<String> = net.pins.iter().map(|&p| db.pin_name(p)).collect();
         pins.sort();
         let _ = writeln!(text, "net {} {rule} {}", net.name, pins.join(" "));

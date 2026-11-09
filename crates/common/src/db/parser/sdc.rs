@@ -637,7 +637,7 @@ impl Interpreter<'_> {
             let first = sources
                 .first()
                 .ok_or_else(|| self.error(line, "create_clock needs -name or a port"))?;
-            self.db.io_pins[first.index()].name.clone()
+            self.db.io_pins[*first].name.clone()
         };
         let (rise, fall) = match parsed.key("-waveform") {
             Some(text) => {
@@ -723,7 +723,7 @@ impl Interpreter<'_> {
             _ => "set_output_delay",
         };
         for port in ports {
-            let pin = &self.db.io_pins[port.index()];
+            let pin = &self.db.io_pins[port];
             let allowed = match direction {
                 PinDirection::Input => {
                     matches!(pin.direction, PinDirection::Input | PinDirection::Inout)

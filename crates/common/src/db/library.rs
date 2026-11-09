@@ -1,6 +1,8 @@
 //! Technology and cell library: layers, sites, cell masters and vias.
 
-use crate::db::indices::{CutLayerId, LayerId, MacroId, MacroPinId, SiteId, ViaId};
+use crate::db::indices::{
+    CutLayerId, IdVec, LayerId, MacroId, MacroPinId, SiteId, ViaId, ViaRuleId,
+};
 use crate::db::rules::{
     CellEdge, CutLayerRules, CutSpacingCondition, Lef58CutSpacingCondition, LibraryRules,
     RoutingLayerRules, SpacingTable, ViaRule,
@@ -336,7 +338,7 @@ pub struct Macro {
     /// Site the cell is built on, for row-based cells.
     pub site: Option<SiteId>,
     /// Its pins, indexed by [`MacroPinId`].
-    pub pins: Vec<MacroPin>,
+    pub pins: IdVec<MacroPinId, MacroPin>,
     /// Routing obstructions in macro coordinates.
     pub obstructions: Vec<Shape>,
     /// Edge types for cell edge spacing rules.
@@ -359,7 +361,7 @@ impl Macro {
             size,
             symmetry,
             site,
-            pins: Vec::new(),
+            pins: IdVec::new(),
             obstructions: Vec::new(),
             edges: Vec::new(),
             pin_by_name: HashMap::new(),
@@ -368,12 +370,12 @@ impl Macro {
 
     /// Adds a pin, returning `None` if one with that name exists.
     pub fn add_pin(&mut self, pin: MacroPin) -> Option<MacroPinId> {
-        let id = MacroPinId::new(self.pins.len());
+        let id = self.pins.next_id();
         if self.pin_by_name.contains_key(&pin.name) {
             return None;
         }
         let _ = self.pin_by_name.insert(pin.name.clone(), id);
-        self.pins.push(pin);
+        let _ = self.pins.push(pin);
         Some(id)
     }
 
@@ -384,7 +386,7 @@ impl Macro {
 
     /// The pin with this id.
     pub fn pin(&self, id: MacroPinId) -> &MacroPin {
-        &self.pins[id.index()]
+        &self.pins[id]
     }
 
     /// Whether the macro is a multi-row block rather than a standard cell.
@@ -450,17 +452,17 @@ pub struct Library {
     /// Database units per micron every value here is expressed in.
     pub dbu_per_micron: DbuPerMicron,
     /// Routing layers from the bottom up.
-    pub routing_layers: Vec<RoutingLayer>,
+    pub routing_layers: IdVec<LayerId, RoutingLayer>,
     /// Cut layers; cut `n` lies between routing layers `n` and `n + 1`.
-    pub cut_layers: Vec<CutLayer>,
+    pub cut_layers: IdVec<CutLayerId, CutLayer>,
     /// Placement sites.
-    pub sites: Vec<Site>,
+    pub sites: IdVec<SiteId, Site>,
     /// Cell masters.
-    pub macros: Vec<Macro>,
+    pub macros: IdVec<MacroId, Macro>,
     /// Via definitions.
-    pub vias: Vec<ViaDef>,
+    pub vias: IdVec<ViaId, ViaDef>,
     /// Rules for generating via arrays.
-    pub via_rules: Vec<ViaRule>,
+    pub via_rules: IdVec<ViaRuleId, ViaRule>,
     /// Technology-wide rules.
     pub rules: LibraryRules,
     layer_by_name: HashMap<String, LayerRef>,
@@ -484,12 +486,12 @@ impl Library {
     pub fn new(dbu_per_micron: DbuPerMicron) -> Self {
         Self {
             dbu_per_micron,
-            routing_layers: Vec::new(),
-            cut_layers: Vec::new(),
-            sites: Vec::new(),
-            macros: Vec::new(),
-            vias: Vec::new(),
-            via_rules: Vec::new(),
+            routing_layers: IdVec::new(),
+            cut_layers: IdVec::new(),
+            sites: IdVec::new(),
+            macros: IdVec::new(),
+            vias: IdVec::new(),
+            via_rules: IdVec::new(),
             rules: LibraryRules::default(),
             layer_by_name: HashMap::new(),
             site_by_name: HashMap::new(),
@@ -500,17 +502,17 @@ impl Library {
 
     /// Appends the next routing layer of the stack.
     pub fn add_routing_layer(&mut self, layer: RoutingLayer) -> Result<LayerId, DuplicateName> {
-        let id = LayerId::new(self.routing_layers.len());
+        let id = self.routing_layers.next_id();
         self.claim_layer_name(&layer.name, LayerRef::Routing(id))?;
-        self.routing_layers.push(layer);
+        let _ = self.routing_layers.push(layer);
         Ok(id)
     }
 
     /// Appends the next cut layer of the stack.
     pub fn add_cut_layer(&mut self, layer: CutLayer) -> Result<CutLayerId, DuplicateName> {
-        let id = CutLayerId::new(self.cut_layers.len());
+        let id = self.cut_layers.next_id();
         self.claim_layer_name(&layer.name, LayerRef::Cut(id))?;
-        self.cut_layers.push(layer);
+        let _ = self.cut_layers.push(layer);
         Ok(id)
     }
 
@@ -527,25 +529,25 @@ impl Library {
 
     /// Adds a site.
     pub fn add_site(&mut self, site: Site) -> Result<SiteId, DuplicateName> {
-        let id = SiteId::new(self.sites.len());
+        let id = self.sites.next_id();
         insert_unique(&mut self.site_by_name, "site", &site.name, id)?;
-        self.sites.push(site);
+        let _ = self.sites.push(site);
         Ok(id)
     }
 
     /// Adds a cell master.
     pub fn add_macro(&mut self, m: Macro) -> Result<MacroId, DuplicateName> {
-        let id = MacroId::new(self.macros.len());
+        let id = self.macros.next_id();
         insert_unique(&mut self.macro_by_name, "macro", &m.name, id)?;
-        self.macros.push(m);
+        let _ = self.macros.push(m);
         Ok(id)
     }
 
     /// Adds a via definition.
     pub fn add_via(&mut self, via: ViaDef) -> Result<ViaId, DuplicateName> {
-        let id = ViaId::new(self.vias.len());
+        let id = self.vias.next_id();
         insert_unique(&mut self.via_by_name, "via", &via.name, id)?;
-        self.vias.push(via);
+        let _ = self.vias.push(via);
         Ok(id)
     }
 
@@ -587,29 +589,29 @@ impl Library {
 
     /// The routing layer with this id.
     pub fn layer(&self, id: LayerId) -> &RoutingLayer {
-        &self.routing_layers[id.index()]
+        &self.routing_layers[id]
     }
 
     /// The cell master with this id.
     pub fn cell_macro(&self, id: MacroId) -> &Macro {
-        &self.macros[id.index()]
+        &self.macros[id]
     }
 
     /// The via with this id.
     pub fn via(&self, id: ViaId) -> &ViaDef {
-        &self.vias[id.index()]
+        &self.vias[id]
     }
 
     /// The site with this id.
     pub fn site(&self, id: SiteId) -> &Site {
-        &self.sites[id.index()]
+        &self.sites[id]
     }
 
     /// The name of a routing or cut layer.
     pub(crate) fn layer_name(&self, layer: LayerRef) -> &str {
         match layer {
-            LayerRef::Routing(id) => &self.routing_layers[id.index()].name,
-            LayerRef::Cut(id) => &self.cut_layers[id.index()].name,
+            LayerRef::Routing(id) => &self.routing_layers[id].name,
+            LayerRef::Cut(id) => &self.cut_layers[id].name,
         }
     }
 

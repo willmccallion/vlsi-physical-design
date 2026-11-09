@@ -338,7 +338,7 @@ impl HoldRepair<'_> {
     fn plan(&self, resizer: &Resizer<'_, Sta>, driver: PinId) -> Option<Vec<PinId>> {
         let netlist = resizer.netlist();
         let sta = resizer.sta();
-        let net = netlist.db.pins[driver.index()].net;
+        let net = netlist.db.pins[driver].net;
         let mut loads = Vec::new();
         let mut slacks = Slacks::new();
         let mut excluded_cap = Farads::ZERO;
@@ -387,7 +387,7 @@ impl HoldRepair<'_> {
         resizer.journal_begin();
         let setup_before = resizer.sta().worst_slack(MinMax::Max).0.time();
         let slew_before = resizer.graph().slew(driver).max();
-        let net = resizer.netlist().db.pins[driver.index()].net;
+        let net = resizer.netlist().db.pins[driver].net;
         let inserted = resizer.insert_buffer_before_loads(net, loads, self.buffer, at, "hold")?;
         let resized = !Self::load_in_hand(resizer, inserted.output)
             && resizer.resize_to_target_slew(inserted.output)?;
@@ -431,7 +431,7 @@ impl HoldRepair<'_> {
             return false;
         }
         let netlist = resizer.netlist();
-        let net = netlist.db.pins[output.index()].net;
+        let net = netlist.db.pins[output].net;
         netlist.loads(net).filter(|&l| l != output).all(|load| {
             netlist.lib_cell_port(load).is_none_or(|(cell, port)| {
                 let limit = resizer.max_input_slew(cell, port);

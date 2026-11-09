@@ -165,10 +165,10 @@ impl Rebuffer {
         resizer: &mut Resizer<'_, Sta>,
         driver: PinId,
     ) -> Result<usize, RepairError> {
-        let PinOwner::Cell { .. } = resizer.db.pins[driver.index()].owner else {
+        let PinOwner::Cell { .. } = resizer.db.pins[driver].owner else {
             return Ok(0);
         };
-        let net = resizer.db.pins[driver.index()].net;
+        let net = resizer.db.pins[driver].net;
         if has_top_level_output(resizer, net) {
             return Ok(0);
         }
@@ -209,8 +209,8 @@ impl Rebuffer {
             let netlist = resizer.netlist();
             let mut drivers = resizer.graph.drivers_by_level(&netlist);
             drivers.retain(|&driver| {
-                let net = resizer.db.pins[driver.index()].net;
-                let PinOwner::Cell { cell, .. } = resizer.db.pins[driver.index()].owner else {
+                let net = resizer.db.pins[driver].net;
+                let PinOwner::Cell { cell, .. } = resizer.db.pins[driver].owner else {
                     return false;
                 };
                 let Some((_, lib)) = resizer.link.cell(resizer.db, cell) else {
@@ -288,7 +288,7 @@ impl Rebuffer {
             resizer.batch_edits();
             self.inserted += export_tree(resizer, &area_tree, "place")?;
             for buffer in old_buffers {
-                if !resizer.db.cells[buffer.index()].retired {
+                if !resizer.db.cells[buffer].retired {
                     let _ = resizer.remove_buffer(buffer)?;
                     self.removed += 1;
                 }
@@ -1022,7 +1022,7 @@ impl Rebuffer {
                 Some(self.buffer_node(resizer, node.at, *buffer, inner))
             }
             Kind::Load { pin } => {
-                let PinOwner::Cell { cell, .. } = resizer.db.pins[pin.index()].owner else {
+                let PinOwner::Cell { cell, .. } = resizer.db.pins[*pin].owner else {
                     return Some(Rc::clone(node));
                 };
                 let Some((lib_id, lib)) = resizer.link.cell(resizer.db, cell) else {
@@ -1088,7 +1088,7 @@ fn export_node(
             if loads.is_empty() {
                 return Ok(loads);
             }
-            let current = resizer.db.pins[loads[0].index()].net;
+            let current = resizer.db.pins[loads[0]].net;
             let inserted =
                 resizer.insert_buffer_before_loads(current, &loads, *buffer, node.at, base)?;
             *count += 1;
@@ -1107,7 +1107,7 @@ fn resteiner(resizer: &Resizer<'_, Sta>, tree: &BnetPtr) -> Option<BnetPtr> {
 
 /// The tree of `driver`'s net over its estimated parasitics.
 fn make_tree(resizer: &Resizer<'_, Sta>, driver: PinId) -> Option<BnetPtr> {
-    let net = resizer.db.pins[driver.index()].net;
+    let net = resizer.db.pins[driver].net;
     let netlist = resizer.netlist();
     let parasitics = resizer.graph.parasitics(net)?;
     bnet::from_parasitics(&netlist, parasitics, driver, &resizer.tree_rc(), resizer)
@@ -1446,10 +1446,10 @@ fn collect_imported_buffers(
     let kept: rustc_hash::FxHashSet<PinId> = imported.loads().into_iter().collect();
     let netlist = resizer.netlist();
     let mut buffers = Vec::new();
-    let mut queue = vec![resizer.db.pins[driver.index()].net];
+    let mut queue = vec![resizer.db.pins[driver].net];
     while let Some(net) = queue.pop() {
         for load in netlist.loads(net) {
-            let PinOwner::Cell { cell, .. } = resizer.db.pins[load.index()].owner else {
+            let PinOwner::Cell { cell, .. } = resizer.db.pins[load].owner else {
                 continue;
             };
             let Some((_, lib)) = resizer.link.cell(resizer.db, cell) else {
@@ -1465,7 +1465,7 @@ fn collect_imported_buffers(
                 continue;
             }
             buffers.push(cell);
-            queue.push(resizer.db.pins[out_pin.index()].net);
+            queue.push(resizer.db.pins[out_pin].net);
         }
     }
     buffers
@@ -1475,12 +1475,12 @@ fn collect_imported_buffers(
 /// `isPortBuffer`.
 fn is_port_buffer(resizer: &Resizer<'_, Sta>, cell: CellId) -> bool {
     let netlist = resizer.netlist();
-    resizer.db.cells[cell.index()].pins.iter().any(|&pin| {
-        let net = resizer.db.pins[pin.index()].net;
-        let instance_pins = resizer.db.nets[net.index()]
+    resizer.db.cells[cell].pins.iter().any(|&pin| {
+        let net = resizer.db.pins[pin].net;
+        let instance_pins = resizer.db.nets[net]
             .pins
             .iter()
-            .filter(|&&p| matches!(resizer.db.pins[p.index()].owner, PinOwner::Cell { .. }))
+            .filter(|&&p| matches!(resizer.db.pins[p].owner, PinOwner::Cell { .. }))
             .count();
         instance_pins == 1 && netlist.has_port(net)
     })
@@ -1499,12 +1499,12 @@ pub(crate) fn can_remove_buffer(resizer: &Resizer<'_, Sta>, cell: CellId) -> boo
         return false;
     };
     let netlist = resizer.netlist();
-    let in_net = resizer.db.pins[in_pin.index()].net;
-    let out_net = resizer.db.pins[out_pin.index()].net;
+    let in_net = resizer.db.pins[in_pin].net;
+    let out_net = resizer.db.pins[out_pin].net;
     let constrained = |net: NetId| {
         let sta = resizer.sta();
-        resizer.db.nets[net.index()].pins.iter().any(|&p| {
-            matches!(resizer.db.pins[p.index()].owner, PinOwner::Io(io)
+        resizer.db.nets[net].pins.iter().any(|&p| {
+            matches!(resizer.db.pins[p].owner, PinOwner::Io(io)
                 if sta.sdc().input_delays.contains_key(&io)
                     || sta.sdc().output_delays.contains_key(&io)
                     || sta.sdc().clock_at(io).is_some())
@@ -1521,9 +1521,9 @@ pub(crate) fn can_remove_buffer(resizer: &Resizer<'_, Sta>, cell: CellId) -> boo
 
 /// Whether a net reaches an output port of the design.
 fn has_top_level_output(resizer: &Resizer<'_, Sta>, net: NetId) -> bool {
-    resizer.db.nets[net.index()].pins.iter().any(|&p| {
-        matches!(resizer.db.pins[p.index()].owner, PinOwner::Io(io)
-            if matches!(resizer.db.io_pins[io.index()].direction,
+    resizer.db.nets[net].pins.iter().any(|&p| {
+        matches!(resizer.db.pins[p].owner, PinOwner::Io(io)
+            if matches!(resizer.db.io_pins[io].direction,
                 pare_common::db::library::PinDirection::Output | pare_common::db::library::PinDirection::Inout))
     })
 }

@@ -6,6 +6,7 @@
 //! are skipped. Bundles are refused, since a model without them would be
 //! wrong.
 
+use crate::db::indices::IdVec;
 use crate::db::liberty::{
     ArcRole, Axis, AxisVariable, ClockGatePin, ClockTreePath, Defaults, Edge, EdgeValues, FuncExpr,
     LibCell, LibPort, LibPortId, Liberty, LibraryUnits, MinMax, PortDirection, Sequential,
@@ -650,7 +651,7 @@ impl Interpreter {
                 || Self::bool_attr(group, "is_isolation_cell")
                 || Self::bool_attr(group, "is_level_shifter"),
             footprint: group.attr_text("cell_footprint").map(str::to_string),
-            ports: Vec::new(),
+            ports: IdVec::new(),
             pg_pins: group
                 .groups_named("pg_pin")
                 .filter_map(|g| g.args.first())
@@ -670,14 +671,14 @@ impl Interpreter {
         };
         for pin in group.groups_named("pin") {
             for arg in &pin.args {
-                cell.ports.push(self.port(pin, arg.0)?);
+                let _ = cell.ports.push(self.port(pin, arg.0)?);
             }
         }
         let mut buses = Vec::new();
         for group in group.groups_named("bus") {
             let bus = self.bus(group, &cell.name)?;
             for bit in &bus.bits {
-                cell.ports.push(self.bus_bit_port(&bus, bit)?);
+                let _ = cell.ports.push(self.bus_bit_port(&bus, bit)?);
             }
             buses.push(bus);
         }
@@ -1351,6 +1352,7 @@ fn arc_role(timing_type: &str) -> ArcKind {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::db::liberty::LibCellId;
     use crate::db::library::DuplicateName;
     use crate::units::{Farads, Seconds, Watts};
 
@@ -1465,7 +1467,7 @@ library (tiny) {
         )
         .unwrap();
 
-        let cell = &lib.cells[0];
+        let cell = &lib.cells[LibCellId(0)];
         let got: Vec<f64> = cell.state_leakages.iter().map(|w| w.get()).collect();
 
         assert!((cell.leakage.unwrap().get() - 21.5e-9).abs() < 1e-20);
@@ -1476,7 +1478,7 @@ library (tiny) {
     fn leakage_without_a_unit_is_in_watts_and_a_valueless_state_is_passed_over() {
         let lib = leaky("", r#"leakage_power () { when : "A"; }"#).unwrap();
 
-        let cell = &lib.cells[0];
+        let cell = &lib.cells[LibCellId(0)];
 
         assert_eq!(cell.leakage, None);
         assert_eq!(cell.state_leakages, Vec::<Watts>::new());
@@ -1573,7 +1575,7 @@ library (tiny) {
     }
 
     fn clock_tree_delay(lib: &Liberty, slew: Seconds, edge: Edge, bound: MinMax) -> Seconds {
-        lib.cells[0].ports[0].clock_tree_delay(slew, edge, bound)
+        lib.cells[LibCellId(0)].ports[LibPortId(0)].clock_tree_delay(slew, edge, bound)
     }
 
     #[test]
@@ -1693,7 +1695,7 @@ library (tiny) {
     fn a_statetable_keeps_its_rows_for_comparison() {
         let src = "library (x) { cell (c) { statetable (\"CK E\", \"IQ\") { table : \"L L : - : L ,\\\n   L H : - : H \" ; } } }";
         let lib = parse_str(src, Path::new("x.lib")).unwrap();
-        let table = lib.cells[0].statetable.as_ref().unwrap();
+        let table = lib.cells[LibCellId(0)].statetable.as_ref().unwrap();
         assert_eq!(table.inputs, vec!["CK", "E"]);
         assert_eq!(table.outputs, vec!["IQ"]);
         assert_eq!(table.rows, vec!["L L : - : L", "L H : - : H"]);
@@ -1863,7 +1865,7 @@ library (x) {{
 "#
         );
         let lib = parse_str(&src, Path::new("x.lib")).unwrap();
-        lib.cells[0].clone()
+        lib.cells[LibCellId(0)].clone()
     }
 
     #[test]

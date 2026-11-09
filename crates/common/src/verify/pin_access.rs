@@ -713,7 +713,7 @@ impl PinAccess {
         neighbours: &[Neighbour],
     ) -> usize {
         let extra = self.cell_and_neighbour_metal(db, cell, at, orient, neighbours);
-        let c = &db.cells[cell.index()];
+        let c = &db.cells[cell];
         let m = db.library.cell_macro(c.macro_id);
         let net_of = pin_nets(db, cell);
         m.pins
@@ -721,7 +721,7 @@ impl PinAccess {
             .enumerate()
             .filter(|(_, pin)| !pin.signal_use.is_supply())
             .filter(|&(k, _)| match net_of[k] {
-                Some(net) if db.nets[net.index()].signal_use.is_supply() => false,
+                Some(net) if db.nets[net].signal_use.is_supply() => false,
                 net => {
                     let mp = MacroPinId::new(k);
                     let holder = Holder {
@@ -749,7 +749,7 @@ impl PinAccess {
         all.extend_from_slice(neighbours);
         all.push(Neighbour { cell, at, orient });
         let mut metal = self.neighbour_metal(db, &all);
-        let size = db.library.cell_macro(db.cells[cell.index()].macro_id).size;
+        let size = db.library.cell_macro(db.cells[cell].macro_id).size;
         let outline =
             orient.place_rect(&Rect::new(Point::new(Dbu::ZERO, Dbu::ZERO), size), size, at);
         let zone = outline.expand(self.check_margin());
@@ -789,7 +789,7 @@ impl PinAccess {
         neighbours: &[Neighbour],
     ) -> Option<Vec<(LayerId, Rect<Dbu>)>> {
         let extra = self.cell_and_neighbour_metal(db, cell, at, orient, neighbours);
-        let c = &db.cells[cell.index()];
+        let c = &db.cells[cell];
         let m = db.library.cell_macro(c.macro_id);
         let net_of = pin_nets(db, cell);
         let mut relied = Vec::new();
@@ -798,7 +798,7 @@ impl PinAccess {
                 continue;
             }
             if let Some(net) = net_of[k]
-                && db.nets[net.index()].signal_use.is_supply()
+                && db.nets[net].signal_use.is_supply()
             {
                 continue;
             }
@@ -821,7 +821,7 @@ impl PinAccess {
         at: Point<Dbu>,
         orient: Orientation,
     ) -> Vec<(LayerId, Rect<Dbu>)> {
-        let c = &db.cells[cell.index()];
+        let c = &db.cells[cell];
         let m = db.library.cell_macro(c.macro_id);
         m.pins
             .iter()
@@ -880,12 +880,12 @@ impl PinAccess {
     fn neighbour_metal(&self, db: &NetlistDB, neighbours: &[Neighbour]) -> NeighbourMetal {
         let mut metal = NeighbourMetal::default();
         for n in neighbours {
-            let c = &db.cells[n.cell.index()];
+            let c = &db.cells[n.cell];
             let m = db.library.cell_macro(c.macro_id);
             let place = |rect: &Rect<Dbu>| n.orient.place_rect(rect, m.size, n.at);
             let net_of = |mp: MacroPinId| {
                 c.pins.iter().find_map(|&p| {
-                    let pin = &db.pins[p.index()];
+                    let pin = &db.pins[p];
                     matches!(pin.owner, PinOwner::Cell { pin: own, .. } if own == mp)
                         .then_some(pin.net)
                 })
@@ -940,13 +940,13 @@ impl PinAccess {
         let mut clear_above = false;
         let mut on_pin_layer = false;
         let mut way_below: Option<Vec<Rect<Dbu>>> = None;
-        for s in &m.pins[mp.index()].shapes {
+        for s in &m.pins[mp].shapes {
             let rect = orient.place_rect(&s.rect, m.size, at);
             if s.layer == LayerRef::Routing(self.above) {
                 if !self.metal_above.clear(&rect, holder, extra, &extra.above) {
                     log::trace!(
                         "pin {} at {rect:?} meets other metal on its routing layer",
-                        m.pins[mp.index()].name
+                        m.pins[mp].name
                     );
                     return None;
                 }
@@ -962,7 +962,7 @@ impl PinAccess {
                 if !self.metal_below.clear(&rect, holder, extra, &extra.below) {
                     log::trace!(
                         "pin {} at {rect:?} meets other metal on the pin layer",
-                        m.pins[mp.index()].name
+                        m.pins[mp].name
                     );
                     return None;
                 }
@@ -977,7 +977,7 @@ impl PinAccess {
             let Some(way) = way_below else {
                 log::trace!(
                     "pin {} of a {} at {at:?} has no via up that escapes",
-                    m.pins[mp.index()].name,
+                    m.pins[mp].name,
                     m.name
                 );
                 return None;
@@ -1160,11 +1160,11 @@ impl PinAccess {
 
 /// The net of each pin of `cell`'s master, by pin index, where it is on one.
 fn pin_nets(db: &NetlistDB, cell: CellId) -> Vec<Option<NetId>> {
-    let c = &db.cells[cell.index()];
+    let c = &db.cells[cell];
     let m = db.library.cell_macro(c.macro_id);
     let mut net_of = vec![None; m.pins.len()];
     for &p in &c.pins {
-        let pin = &db.pins[p.index()];
+        let pin = &db.pins[p];
         if let PinOwner::Cell { pin: mp, .. } = pin.owner {
             net_of[mp.index()] = Some(pin.net);
         }
@@ -1207,7 +1207,7 @@ fn within(tracks: &[Dbu], lo: Dbu, hi: Dbu) -> impl Iterator<Item = Dbu> + Clone
 mod tests {
     use super::*;
     use crate::db::design::{PlacementStatus, SpecialNet, SpecialWire, TrackAxis, TrackDef};
-    use crate::db::indices::{CutLayerId, MacroId, MacroPinId, SiteId};
+    use crate::db::indices::{CutLayerId, IdVec, MacroId, MacroPinId, SiteId};
     use crate::db::library::{
         CoreKind, CutLayer, Library, Macro, MacroClass, MacroPin, PinDirection, RoutingLayer,
         Shape, SignalUse, Site, SiteClass, Symmetry, ViaDef, ViaSource,
@@ -1434,7 +1434,7 @@ mod tests {
         )];
         wires.extend(rail_y.map(|y| ground_wire(m1, 100, pt(0, y), pt(10_000, y), "FOLLOWPIN")));
         wires.extend(m3_stripe_y.map(|y| ground_wire(m3, 6000, pt(0, y), pt(10_000, y), "STRIPE")));
-        db.special_nets.push(SpecialNet {
+        let _ = db.special_nets.push(SpecialNet {
             name: "vss".into(),
             signal_use: SignalUse::Ground,
             connections: Vec::new(),
@@ -1548,9 +1548,10 @@ mod tests {
     #[test]
     fn a_via_whose_lower_metal_sticks_out_of_the_pin_still_reaches_it() {
         let (mut db, m) = design();
-        db.library
-            .vias
-            .retain(|v| v.name == "V12" || v.name == "V23");
+        db.library.vias = std::mem::take(&mut db.library.vias)
+            .into_iter()
+            .filter(|v| v.name == "V12" || v.name == "V23")
+            .collect();
 
         assert_eq!(blocked_in(&mut db, m, 1000), 0);
     }
@@ -1584,9 +1585,10 @@ mod tests {
             });
         }
         let pair = db.library.add_macro(pair).unwrap();
-        db.library
-            .vias
-            .retain(|v| v.name == keep || v.name == "V23");
+        db.library.vias = std::mem::take(&mut db.library.vias)
+            .into_iter()
+            .filter(|v| v.name == keep || v.name == "V23")
+            .collect();
         let cell = db
             .add_cell(
                 "p".into(),
@@ -1782,7 +1784,7 @@ mod tests {
     #[test]
     fn a_design_without_a_via_up_from_the_pins_has_no_check() {
         let (mut db, _) = design();
-        db.library.vias.clear();
+        db.library.vias = IdVec::new();
 
         assert!(PinAccess::new(&db, LayerId(1)).is_none());
     }

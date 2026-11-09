@@ -3,7 +3,7 @@
 
 #![allow(clippy::unwrap_used)]
 
-use pare_common::db::indices::{CutLayerId, LayerId};
+use pare_common::db::indices::{CutLayerId, LayerId, ViaRuleId};
 use pare_common::db::library::{LayerRef, Library, SignalUse};
 use pare_common::db::parser::{def, lef};
 use pare_common::db::rules::{
@@ -188,7 +188,7 @@ fn cut_spacing_counts_a_center_rule_as_its_value_less_the_cut_width() {
     )
     .unwrap();
 
-    let v2 = &lib.cut_layers[1];
+    let v2 = &lib.cut_layers[CutLayerId(1)];
     assert_eq!(v2.spacing, Some(Dbu(150)));
     assert_eq!(v2.rules.spacings.len(), 3);
     assert_eq!(
@@ -218,7 +218,7 @@ fn cut_spacing_properties_are_kept_apart_from_the_spacing_statements() {
     )
     .unwrap();
 
-    let v2 = &lib.cut_layers[1];
+    let v2 = &lib.cut_layers[CutLayerId(1)];
     assert_eq!(v2.rules.spacings.len(), 1);
     assert_eq!(
         v2.rules.lef58_spacings,
@@ -254,7 +254,7 @@ fn cut_spacing_property_forms_the_model_cannot_hold_are_errors() {
 fn via_generation_rules_keep_their_enclosures_and_cut_array() {
     let lib = library_with(&[], "via-rule").unwrap();
 
-    let rule = &lib.via_rules[0];
+    let rule = &lib.via_rules[ViaRuleId(0)];
     assert_eq!(rule.name, "M1M2GEN");
     assert_eq!(rule.cut, CutLayerId(0));
     assert_eq!(

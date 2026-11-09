@@ -187,7 +187,7 @@ impl<'r, 'a, T: Timing> Repairer<'r, 'a, T> {
         let annotated = self.resizer.annotate_violating_input_slews();
         let netlist = self.resizer.netlist();
         for load in annotated {
-            let net = self.resizer.db.pins[load.index()].net;
+            let net = self.resizer.db.pins[load].net;
             self.load_slew_violation_drivers
                 .extend(netlist.drivers(net));
         }
@@ -196,7 +196,7 @@ impl<'r, 'a, T: Timing> Repairer<'r, 'a, T> {
     fn repair_driver(&mut self, driver: PinId) -> Result<(), RepairError> {
         let (net, skip) = {
             let netlist = self.resizer.netlist();
-            let net = self.resizer.db.pins[driver.index()].net;
+            let net = self.resizer.db.pins[driver].net;
             let skip = netlist.is_special(net)
                 || self.resizer.clocks.is_clock(driver)
                 || self.resizer.constants.is_constant(driver)
@@ -236,13 +236,13 @@ impl<'r, 'a, T: Timing> Repairer<'r, 'a, T> {
                 .filter(|&p| {
                     self.resizer.clocks.is_clock(p)
                         && netlist.is_driver(p)
-                        && !netlist.is_special(self.resizer.db.pins[p.index()].net)
+                        && !netlist.is_special(self.resizer.db.pins[p].net)
                 })
                 .collect()
         };
         self.resizer.defer_timing();
         let result = drivers.into_iter().try_for_each(|driver| {
-            let net = self.resizer.db.pins[driver.index()].net;
+            let net = self.resizer.db.pins[driver].net;
             self.repair_net(net, driver, Checks::LengthOnly)
         });
         self.resizer.resume_timing();
@@ -352,7 +352,7 @@ impl<'r, 'a, T: Timing> Repairer<'r, 'a, T> {
     /// `Resizer::checkLoadSlews`.
     fn loads_violate_slew(&self, driver: PinId) -> bool {
         let netlist = self.resizer.netlist();
-        let net = self.resizer.db.pins[driver.index()].net;
+        let net = self.resizer.db.pins[driver].net;
         netlist.loads(net).filter(|&p| p != driver).any(|load| {
             let Some((cell, port)) = netlist.lib_cell_port(load) else {
                 return false;
@@ -376,7 +376,7 @@ impl<'r, 'a, T: Timing> Repairer<'r, 'a, T> {
     /// `RepairDesign::repairDriverSlew`; returns whether the cell changed.
     fn repair_driver_slew(&mut self, driver: PinId) -> Result<bool, RepairError> {
         let (cell, lib_id, port_name, load_cap, candidates) = {
-            let PinOwner::Cell { cell, .. } = self.resizer.db.pins[driver.index()].owner else {
+            let PinOwner::Cell { cell, .. } = self.resizer.db.pins[driver].owner else {
                 return Ok(false);
             };
             let Some((lib_id, lib)) = self.resizer.link.cell(self.resizer.db, cell) else {
@@ -834,7 +834,7 @@ impl<'r, 'a, T: Timing> Repairer<'r, 'a, T> {
         if branch.loads.is_empty() {
             return Ok(false);
         }
-        let old_net = self.resizer.db.pins[branch.loads[0].index()].net;
+        let old_net = self.resizer.db.pins[branch.loads[0]].net;
         let inserted =
             self.resizer
                 .insert_buffer_before_loads(old_net, &branch.loads, buffer, at, reason)?;

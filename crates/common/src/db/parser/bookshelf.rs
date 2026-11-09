@@ -109,7 +109,7 @@ pub fn read_placement(db: &mut NetlistDB, path: &Path) -> Result<(), ParseError>
                 _ => {}
             }
         }
-        let c = &mut db.cells[cell.index()];
+        let c = &mut db.cells[cell];
         c.location = Point::new(x, y);
         c.orient = orient;
         if fixed {
@@ -573,9 +573,11 @@ fn add_nets(db: &mut NetlistDB, nets: &[BookshelfNet]) {
 
 fn die_area(db: &NetlistDB) -> Rect<Dbu> {
     let rows = db.rows.iter().map(|r| r.bbox(&db.library));
-    let fixed = (0..db.cells.len())
-        .filter(|&i| !db.cells[i].status.is_movable())
-        .map(|i| db.cell_bbox(CellId::new(i)));
+    let fixed = db
+        .cells
+        .ids()
+        .filter(|&id| !db.cells[id].status.is_movable())
+        .map(|id| db.cell_bbox(id));
     rows.chain(fixed)
         .reduce(|a, b| a.union(&b))
         .unwrap_or_default()
@@ -625,7 +627,7 @@ mod tests {
                 Direction::Vertical
             ]
         );
-        assert_eq!(lib.routing_layers[0].track_pitch(), Dbu(400));
+        assert_eq!(lib.routing_layers[LayerId(0)].track_pitch(), Dbu(400));
         assert_eq!(lib.cut_layers.len(), 3);
         assert!((0..3).all(|c| lib.default_via(crate::db::indices::CutLayerId(c)).is_some()));
     }

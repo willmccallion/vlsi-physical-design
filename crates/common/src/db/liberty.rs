@@ -6,55 +6,20 @@
 //! them up, interpolating linearly between the two nearest axis points and
 //! extrapolating from the end pair outside the axis.
 
+use crate::db::indices::IdVec;
 use crate::db::library::DuplicateName;
 use crate::units::{Farads, Ohms, Seconds, Watts};
 use std::collections::HashMap;
 use std::fmt;
 
-/// A cell in [`Liberty::cells`].
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
-pub struct LibCellId(pub u32);
-
-impl LibCellId {
-    /// Index into [`Liberty::cells`].
-    #[must_use]
-    pub const fn index(self) -> usize {
-        self.0 as usize
-    }
-}
-
-/// A port of a cell, in its [`LibCell::ports`].
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
-pub struct LibPortId(pub u32);
-
-impl LibPortId {
-    /// The port at position `index` of its cell's ports.
-    #[must_use]
-    pub const fn new(index: usize) -> Self {
-        debug_assert!(index <= u32::MAX as usize, "port index past 32 bits");
-        Self(index as u32)
-    }
-
-    /// Index into [`LibCell::ports`].
-    #[must_use]
-    pub const fn index(self) -> usize {
-        self.0 as usize
-    }
-}
-
-impl std::ops::Index<LibPortId> for Vec<LibPort> {
-    type Output = LibPort;
-
-    fn index(&self, port: LibPortId) -> &LibPort {
-        &self[port.index()]
-    }
-}
-
-impl std::ops::IndexMut<LibPortId> for Vec<LibPort> {
-    fn index_mut(&mut self, port: LibPortId) -> &mut LibPort {
-        &mut self[port.index()]
-    }
-}
+crate::define_index!(
+    /// A cell in [`Liberty::cells`].
+    LibCellId(u32)
+);
+crate::define_index!(
+    /// A port of a cell, in its [`LibCell::ports`].
+    LibPortId(u32)
+);
 
 /// A cell of one input and one output and no other signal pin, as
 /// `OpenSTA`'s `bufferPorts` finds it: a buffer or an inverter, with those
@@ -842,7 +807,7 @@ pub struct LibCell {
     /// Its footprint class, when given.
     pub footprint: Option<String>,
     /// Signal pins.
-    pub ports: Vec<LibPort>,
+    pub ports: IdVec<LibPortId, LibPort>,
     /// Power and ground pin names.
     pub pg_pins: Vec<String>,
     /// Timing groups.
@@ -1013,7 +978,7 @@ pub struct Liberty {
     /// Values pins fall back on.
     pub defaults: Defaults,
     /// Its cells, indexed by [`LibCellId`].
-    pub cells: Vec<LibCell>,
+    pub cells: IdVec<LibCellId, LibCell>,
     cell_by_name: HashMap<String, LibCellId>,
     /// The defaults of each library absorbed, in order; a cell's
     /// [`LibCell::library`] counts from one into them.
@@ -1052,7 +1017,7 @@ impl Liberty {
             units: LibraryUnits::default(),
             thresholds: Thresholds::default(),
             defaults: Defaults::default(),
-            cells: Vec::new(),
+            cells: IdVec::new(),
             cell_by_name: HashMap::new(),
             absorbed_defaults: Vec::new(),
         }
@@ -1066,9 +1031,9 @@ impl Liberty {
                 name: cell.name,
             });
         }
-        let id = LibCellId(self.cells.len() as u32);
+        let id = self.cells.next_id();
         let _ = self.cell_by_name.insert(cell.name.clone(), id);
-        self.cells.push(cell);
+        let _ = self.cells.push(cell);
         Ok(id)
     }
 
@@ -1105,7 +1070,7 @@ impl Liberty {
     /// The cell with this id.
     #[must_use]
     pub fn cell(&self, id: LibCellId) -> &LibCell {
-        &self.cells[id.index()]
+        &self.cells[id]
     }
 
     /// The cell `id` with its one input and one output, when it has
@@ -1677,7 +1642,7 @@ mod tests {
             is_power_cell: false,
             library: 0,
             footprint: None,
-            ports,
+            ports: ports.into(),
             pg_pins: vec!["VDD".into(), "VSS".into()],
             arc_sets: Vec::new(),
             sequentials: Vec::new(),

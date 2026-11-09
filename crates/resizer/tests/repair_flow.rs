@@ -162,7 +162,7 @@ fn cells_text(db: &NetlistDB) -> String {
             text,
             "{} {} {} {}",
             cell.name,
-            db.library.macros[cell.macro_id.index()].name,
+            db.library.macros[cell.macro_id].name,
             cell.location.x.get(),
             cell.location.y.get()
         );

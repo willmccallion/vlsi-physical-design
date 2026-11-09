@@ -72,9 +72,8 @@ fn merge_overlapping(rows: Vec<RowSpan>) -> Vec<RowSpan> {
 pub(crate) fn classify(db: &NetlistDB, rows: &[RowSpan]) -> (Vec<CellId>, Vec<CellId>) {
     let mut macros = Vec::new();
     let mut cells = Vec::new();
-    for i in 0..db.num_cells() {
-        let id = CellId::new(i);
-        if !db.cells[i].status.is_movable() {
+    for id in db.cells.ids() {
+        if !db.cells[id].status.is_movable() {
             continue;
         }
         let m = db.cell_macro(id);
@@ -91,9 +90,11 @@ pub(crate) fn classify(db: &NetlistDB, rows: &[RowSpan]) -> (Vec<CellId>, Vec<Ce
 
 /// Fixed cells and hard placement blockages.
 pub(crate) fn fixed_obstacles(db: &NetlistDB) -> Vec<Rect<Dbu>> {
-    let mut out: Vec<Rect<Dbu>> = (0..db.num_cells())
+    let mut out: Vec<Rect<Dbu>> = db
+        .cells
+        .ids()
         .filter(|&i| !db.cells[i].status.is_movable())
-        .map(|i| db.cell_bbox(CellId::new(i)))
+        .map(|i| db.cell_bbox(i))
         .collect();
     out.extend(db.hard_placement_blockages());
     out

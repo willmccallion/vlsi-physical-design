@@ -5,7 +5,7 @@
 
 use pare_common::db::design::{NetlistDB, NonDefaultLayer, NonDefaultRule, PinOwner};
 use pare_common::db::global_route::{NetRoute, PinGridLocation, RoutePoint, RouteSegment};
-use pare_common::db::indices::{LayerId, NetId, NonDefaultRuleId, PinId};
+use pare_common::db::indices::{LayerId, NetId, PinId};
 use pare_common::db::parser::{def, lef, liberty};
 use pare_common::geom::dbu::{Dbu, DbuPerMicron};
 use pare_common::geom::point::Point;
@@ -55,11 +55,11 @@ const fn segment(from: RoutePoint, to: RoutePoint) -> RouteSegment {
 
 fn cell_pin(db: &NetlistDB, cell: &str, pin: &str) -> PinId {
     let cell = db.cell_id(cell).unwrap();
-    db.cells[cell.index()]
+    db.cells[cell]
         .pins
         .iter()
         .copied()
-        .find(|&p| match db.pins[p.index()].owner {
+        .find(|&p| match db.pins[p].owner {
             PinOwner::Cell { pin: m, .. } => db.cell_macro(cell).pin(m).name == pin,
             PinOwner::Io(_) => false,
         })
@@ -164,7 +164,7 @@ fn layers_without_set_values_take_their_lef_resistance_and_capacitance() {
 fn a_wider_non_default_rule_lowers_the_wire_resistance() {
     let mut db = tiny_design();
     let net = db.net_id("n1").unwrap();
-    db.non_default_rules.push(NonDefaultRule {
+    let rule = db.non_default_rules.push(NonDefaultRule {
         name: "wide".into(),
         hard_spacing: false,
         layers: vec![NonDefaultLayer {
@@ -177,7 +177,7 @@ fn a_wider_non_default_rule_lowers_the_wire_resistance() {
         via_rules: Vec::new(),
         min_cuts: Vec::new(),
     });
-    db.nets[net.index()].non_default_rule = Some(NonDefaultRuleId::new(0));
+    db.nets[net].non_default_rule = Some(rule);
     let rc = RouteRc::new(
         &db.library,
         &[(LayerId(1), per_meter_ohms(2.0e6), per_meter_farads(1.0e-10))],

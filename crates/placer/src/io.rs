@@ -192,9 +192,9 @@ impl Section {
 
 /// The I/O pins placement may move.
 pub fn movable_io_pins(db: &NetlistDB) -> Vec<IoPinId> {
-    (0..db.io_pins.len())
+    db.io_pins
+        .ids()
         .filter(|&i| db.io_pins[i].status.is_movable())
-        .map(IoPinId::new)
         .collect()
 }
 
@@ -238,7 +238,7 @@ pub fn place_io_pins(
 
     for (pin, slot) in placed {
         let size = PinSize::of(&db.library, slot.layer);
-        let io = &mut db.io_pins[pin.index()];
+        let io = &mut db.io_pins[pin];
         io.location = slot.at;
         io.orient = Orientation::N;
         io.shapes = vec![Shape {
@@ -293,11 +293,11 @@ fn hpwl_with(net: Option<Rect<Dbu>>, p: Point<Dbu>) -> i64 {
 /// The box around the cell pins on a pin's net, where `IOPlacer::initNetlist`
 /// takes them.
 fn net_box(db: &NetlistDB, pin: IoPinId) -> Option<Rect<Dbu>> {
-    let net = db.io_pins[pin.index()].net;
-    db.nets[net.index()]
+    let net = db.io_pins[pin].net;
+    db.nets[net]
         .pins
         .iter()
-        .filter(|&&p| matches!(db.pins[p.index()].owner, PinOwner::Cell { .. }))
+        .filter(|&&p| matches!(db.pins[p].owner, PinOwner::Cell { .. }))
         .map(|&p| {
             let at = db.average_pin_position(p);
             Rect::new(at, at)
@@ -382,7 +382,7 @@ fn macro_stretches(db: &NetlistDB) -> Vec<(Edge, Dbu, Dbu)> {
         .map(CellId::new)
         .filter(|&id| {
             db.cell_macro(id).class == MacroClass::Block
-                && db.cells[id.index()].status != PlacementStatus::Unplaced
+                && db.cells[id].status != PlacementStatus::Unplaced
         })
         .filter_map(|id| db.die_area.intersection(&db.cell_bbox(id)))
         .flat_map(|reached| stretches_on_die_edges(db.die_area, reached))

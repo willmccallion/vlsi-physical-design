@@ -49,9 +49,7 @@ HoldSummary {
     inserted: 8,
     resized: 0,
     buffer: Some(
-        LibCellId(
-            1,
-        ),
+        LibCellId(1),
     ),
 }
 ffa0 DFF_X1 5800 30000

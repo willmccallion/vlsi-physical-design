@@ -1,8 +1,8 @@
 //! The placed and routed design: instances, nets, rows, tracks and wiring.
 
 use crate::db::indices::{
-    CellId, CutLayerId, IoPinId, LayerId, MacroId, MacroPinId, NetId, NonDefaultRuleId, PinId,
-    RegionId, SiteId, ViaId, ViaRuleId,
+    BlockageId, CellId, CutLayerId, IdVec, IoPinId, LayerId, MacroId, MacroPinId, NetId,
+    NonDefaultRuleId, PinId, RegionId, SiteId, SpecialNetId, TableIndex, ViaId, ViaRuleId,
 };
 use crate::db::library::{
     Direction, DuplicateName, LayerRef, Library, Macro, PinDirection, Shape, SignalUse, SiteClass,
@@ -450,23 +450,23 @@ pub struct NetlistDB {
     /// The gcells routing works in.
     pub gcell_grid: Vec<GCellGridDef>,
     /// Placed instances.
-    pub cells: Vec<Cell>,
+    pub cells: IdVec<CellId, Cell>,
     /// Signal nets.
-    pub nets: Vec<Net>,
+    pub nets: IdVec<NetId, Net>,
     /// Net connections.
-    pub pins: Vec<Pin>,
+    pub pins: IdVec<PinId, Pin>,
     /// Top-level I/O pins.
-    pub io_pins: Vec<IoPin>,
+    pub io_pins: IdVec<IoPinId, IoPin>,
     /// Power and other special nets.
-    pub special_nets: Vec<SpecialNet>,
+    pub special_nets: IdVec<SpecialNetId, SpecialNet>,
     /// Areas no wire may use, per layer.
-    pub routing_blockages: Vec<Shape>,
+    pub routing_blockages: IdVec<BlockageId, Shape>,
     /// Areas cells keep out of.
     pub placement_blockages: Vec<PlacementBlockage>,
     /// Placement regions.
-    pub regions: Vec<Region>,
+    pub regions: IdVec<RegionId, Region>,
     /// Non-default routing rules.
-    pub non_default_rules: Vec<NonDefaultRule>,
+    pub non_default_rules: IdVec<NonDefaultRuleId, NonDefaultRule>,
     cell_by_name: HashMap<String, CellId>,
     net_by_name: HashMap<String, NetId>,
     io_pin_by_name: HashMap<String, IoPinId>,
@@ -495,47 +495,57 @@ pub enum EditError {
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct Renumbering {
     /// By old cell id.
-    pub cells: Vec<Option<CellId>>,
+    pub cells: IdVec<CellId, Option<CellId>>,
     /// By old net id.
-    pub nets: Vec<Option<NetId>>,
+    pub nets: IdVec<NetId, Option<NetId>>,
     /// By old pin id.
-    pub pins: Vec<Option<PinId>>,
+    pub pins: IdVec<PinId, Option<PinId>>,
+}
+
+/// Which instances and nets an edit drops, flagged by id.
+struct Dropped {
+    cells: IdVec<CellId, bool>,
+    nets: IdVec<NetId, bool>,
 }
 
 /// Keeps the items `dropped` does not flag, each after `update`.
-fn retain_kept<T>(items: &mut Vec<T>, dropped: &[bool], mut update: impl FnMut(&mut T)) {
-    let all = std::mem::take(items);
-    items.reserve(all.len());
-    for (mut item, &drop) in all.into_iter().zip(dropped) {
-        if !drop {
+fn retain_kept<I: TableIndex, T>(
+    items: &mut IdVec<I, T>,
+    dropped: &IdVec<I, bool>,
+    mut update: impl FnMut(&mut T),
+) {
+    *items = std::mem::take(items)
+        .into_iter()
+        .zip(dropped)
+        .filter(|&(_, &drop)| !drop)
+        .map(|(mut item, _)| {
             update(&mut item);
-            items.push(item);
-        }
-    }
+            item
+        })
+        .collect();
 }
 
 /// Each old index's new id, none for those `dropped`.
-fn new_ids<T>(dropped: &[bool], map: &[usize], id: impl Fn(usize) -> T) -> Vec<Option<T>> {
+fn new_ids<I: TableIndex>(dropped: &IdVec<I, bool>, map: &IdVec<I, I>) -> IdVec<I, Option<I>> {
     dropped
         .iter()
         .zip(map)
-        .map(|(&drop, &new)| (!drop).then(|| id(new)))
+        .map(|(&drop, &new)| (!drop).then_some(new))
         .collect()
 }
 
 /// The new index of each kept entry, with the dropped ones left at their old
 /// index, which nothing reads.
-fn renumber(dropped: &[bool]) -> Vec<usize> {
+fn renumber<I: TableIndex>(dropped: &IdVec<I, bool>) -> IdVec<I, I> {
     let mut next = 0;
     dropped
-        .iter()
-        .enumerate()
-        .map(|(i, &drop)| {
+        .iter_enumerated()
+        .map(|(id, &drop)| {
             if drop {
-                i
+                id
             } else {
                 next += 1;
-                next - 1
+                I::from_position(next - 1)
             }
         })
         .collect()
@@ -559,15 +569,15 @@ impl NetlistDB {
             rows: Vec::new(),
             tracks: Vec::new(),
             gcell_grid: Vec::new(),
-            cells: Vec::new(),
-            nets: Vec::new(),
-            pins: Vec::new(),
-            io_pins: Vec::new(),
-            special_nets: Vec::new(),
-            routing_blockages: Vec::new(),
+            cells: IdVec::new(),
+            nets: IdVec::new(),
+            pins: IdVec::new(),
+            io_pins: IdVec::new(),
+            special_nets: IdVec::new(),
+            routing_blockages: IdVec::new(),
             placement_blockages: Vec::new(),
-            regions: Vec::new(),
-            non_default_rules: Vec::new(),
+            regions: IdVec::new(),
+            non_default_rules: IdVec::new(),
             cell_by_name: HashMap::new(),
             net_by_name: HashMap::new(),
             io_pin_by_name: HashMap::new(),
@@ -593,16 +603,14 @@ impl NetlistDB {
         orient: Orientation,
         status: PlacementStatus,
     ) -> Result<CellId, DuplicateName> {
-        let id = CellId::new(self.cells.len());
         if self.cell_by_name.contains_key(&name) {
             return Err(DuplicateName {
                 kind: "component",
                 name,
             });
         }
-        let _ = self.cell_by_name.insert(name.clone(), id);
-        self.cells.push(Cell {
-            name,
+        let id = self.cells.push(Cell {
+            name: name.clone(),
             macro_id,
             location,
             orient,
@@ -612,6 +620,7 @@ impl NetlistDB {
             pins: Vec::new(),
             retired: false,
         });
+        let _ = self.cell_by_name.insert(name, id);
         Ok(id)
     }
 
@@ -619,26 +628,26 @@ impl NetlistDB {
     /// be undone with [`NetlistDB::unretire_cell`]; nothing changes for a
     /// cell already retired.
     pub fn retire_cell(&mut self, cell: CellId) {
-        if self.cells[cell.index()].retired {
+        if self.cells[cell].retired {
             return;
         }
-        for &pin in &self.cells[cell.index()].pins {
-            let net = self.pins[pin.index()].net;
-            self.nets[net.index()].pins.retain(|&p| p != pin);
+        for &pin in &self.cells[cell].pins {
+            let net = self.pins[pin].net;
+            self.nets[net].pins.retain(|&p| p != pin);
         }
-        self.cells[cell.index()].retired = true;
+        self.cells[cell].retired = true;
     }
 
     /// Puts a retired cell back on the nets its pins kept.
     pub fn unretire_cell(&mut self, cell: CellId) {
-        if !self.cells[cell.index()].retired {
+        if !self.cells[cell].retired {
             return;
         }
-        for &pin in &self.cells[cell.index()].pins {
-            let net = self.pins[pin.index()].net;
-            self.nets[net.index()].pins.push(pin);
+        for &pin in &self.cells[cell].pins {
+            let net = self.pins[pin].net;
+            self.nets[net].pins.push(pin);
         }
-        self.cells[cell.index()].retired = false;
+        self.cells[cell].retired = false;
     }
 
     /// Returns the net with this name, creating it if needed.
@@ -646,9 +655,7 @@ impl NetlistDB {
         if let Some(&id) = self.net_by_name.get(name) {
             return id;
         }
-        let id = NetId::new(self.nets.len());
-        let _ = self.net_by_name.insert(name.to_string(), id);
-        self.nets.push(Net {
+        let id = self.nets.push(Net {
             name: name.to_string(),
             signal_use: SignalUse::Signal,
             pins: Vec::new(),
@@ -656,28 +663,28 @@ impl NetlistDB {
             non_default_rule: None,
             routing: Vec::new(),
         });
+        let _ = self.net_by_name.insert(name.to_string(), id);
         id
     }
 
     /// The connection of an instance's macro pin, if it has one.
     #[must_use]
     pub fn cell_pin(&self, cell: CellId, macro_pin: MacroPinId) -> Option<PinId> {
-        self.cells[cell.index()]
+        self.cells[cell]
             .pins
             .iter()
             .copied()
-            .find(|p| matches!(self.pins[p.index()].owner, PinOwner::Cell { pin, .. } if pin == macro_pin))
+            .find(|&p| matches!(self.pins[p].owner, PinOwner::Cell { pin, .. } if pin == macro_pin))
     }
 
     /// Connects a pin of an instance to a net.
     pub fn connect_cell_pin(&mut self, cell: CellId, pin: MacroPinId, net: NetId) -> PinId {
-        let id = PinId::new(self.pins.len());
-        self.pins.push(Pin {
+        let id = self.pins.push(Pin {
             owner: PinOwner::Cell { cell, pin },
             net,
         });
-        self.cells[cell.index()].pins.push(id);
-        self.nets[net.index()].pins.push(id);
+        self.cells[cell].pins.push(id);
+        self.nets[net].pins.push(id);
         id
     }
 
@@ -694,18 +701,17 @@ impl NetlistDB {
         orient: Orientation,
         status: PlacementStatus,
     ) -> Result<IoPinId, DuplicateName> {
-        let id = IoPinId::new(self.io_pins.len());
         if self.io_pin_by_name.contains_key(&name) {
             return Err(DuplicateName { kind: "pin", name });
         }
+        let id = self.io_pins.next_id();
         let _ = self.io_pin_by_name.insert(name.clone(), id);
-        let pin = PinId::new(self.pins.len());
-        self.pins.push(Pin {
+        let pin = self.pins.push(Pin {
             owner: PinOwner::Io(id),
             net,
         });
-        self.nets[net.index()].pins.push(pin);
-        self.io_pins.push(IoPin {
+        self.nets[net].pins.push(pin);
+        let _ = self.io_pins.push(IoPin {
             name,
             net,
             direction,
@@ -732,13 +738,13 @@ impl NetlistDB {
 
     /// Renames a net.
     pub fn rename_net(&mut self, net: NetId, name: String) -> Result<(), DuplicateName> {
-        if self.nets[net.index()].name == name {
+        if self.nets[net].name == name {
             return Ok(());
         }
         if self.net_by_name.contains_key(&name) {
             return Err(DuplicateName { kind: "net", name });
         }
-        let old = std::mem::replace(&mut self.nets[net.index()].name, name.clone());
+        let old = std::mem::replace(&mut self.nets[net].name, name.clone());
         let _ = self.net_by_name.remove(&old);
         let _ = self.net_by_name.insert(name, net);
         Ok(())
@@ -747,17 +753,17 @@ impl NetlistDB {
     /// Gives an instance another master with the same pin names, keeping
     /// its connections and position.
     pub fn replace_master(&mut self, cell: CellId, master: MacroId) -> Result<(), EditError> {
-        let old = self.cells[cell.index()].macro_id;
+        let old = self.cells[cell].macro_id;
         if old == master {
             return Ok(());
         }
-        let new_pins: Vec<(PinId, MacroPinId)> = self.cells[cell.index()]
+        let new_pins: Vec<(PinId, MacroPinId)> = self.cells[cell]
             .pins
             .iter()
             .map(|&pin| {
-                let PinOwner::Cell { pin: old_pin, .. } = self.pins[pin.index()].owner else {
+                let PinOwner::Cell { pin: old_pin, .. } = self.pins[pin].owner else {
                     return Err(EditError::MissingPin {
-                        cell: self.cells[cell.index()].name.clone(),
+                        cell: self.cells[cell].name.clone(),
                         master: self.library.cell_macro(master).name.clone(),
                         pin: String::new(),
                     });
@@ -768,30 +774,30 @@ impl NetlistDB {
                     .pin_id(name)
                     .map(|new_pin| (pin, new_pin))
                     .ok_or_else(|| EditError::MissingPin {
-                        cell: self.cells[cell.index()].name.clone(),
+                        cell: self.cells[cell].name.clone(),
                         master: self.library.cell_macro(master).name.clone(),
                         pin: name.clone(),
                     })
             })
             .collect::<Result<_, _>>()?;
         for (pin, new_pin) in new_pins {
-            self.pins[pin.index()].owner = PinOwner::Cell { cell, pin: new_pin };
+            self.pins[pin].owner = PinOwner::Cell { cell, pin: new_pin };
         }
-        self.cells[cell.index()].macro_id = master;
+        self.cells[cell].macro_id = master;
         Ok(())
     }
 
     /// Moves a connection to another net.
     pub fn move_pin(&mut self, pin: PinId, to: NetId) {
-        let from = self.pins[pin.index()].net;
+        let from = self.pins[pin].net;
         if from == to {
             return;
         }
-        self.nets[from.index()].pins.retain(|&p| p != pin);
-        self.nets[to.index()].pins.push(pin);
-        self.pins[pin.index()].net = to;
-        if let PinOwner::Io(io) = self.pins[pin.index()].owner {
-            self.io_pins[io.index()].net = to;
+        self.nets[from].pins.retain(|&p| p != pin);
+        self.nets[to].pins.push(pin);
+        self.pins[pin].net = to;
+        if let PinOwner::Io(io) = self.pins[pin].owner {
+            self.io_pins[io].net = to;
         }
     }
 
@@ -800,12 +806,15 @@ impl NetlistDB {
     /// [`CellId`], [`NetId`] and [`PinId`] held before is stale afterwards,
     /// and the returned maps say where each went.
     pub fn remove(&mut self, cells: &[CellId], nets: &[NetId]) -> Result<Renumbering, EditError> {
-        let (drop_cell, drop_net) = self.dropped(cells, nets)?;
-        let drop_pin: Vec<bool> = self
+        let Dropped {
+            cells: drop_cell,
+            nets: drop_net,
+        } = self.dropped(cells, nets)?;
+        let drop_pin: IdVec<PinId, bool> = self
             .pins
             .iter()
             .map(|p| match p.owner {
-                PinOwner::Cell { cell, .. } => drop_cell[cell.index()],
+                PinOwner::Cell { cell, .. } => drop_cell[cell],
                 PinOwner::Io(_) => false,
             })
             .collect();
@@ -813,9 +822,9 @@ impl NetlistDB {
         let net_map = renumber(&drop_net);
         let pin_map = renumber(&drop_pin);
         let remap_pins = |pins: &mut Vec<PinId>| {
-            pins.retain(|p| !drop_pin[p.index()]);
+            pins.retain(|&p| !drop_pin[p]);
             for p in pins.iter_mut() {
-                *p = PinId::new(pin_map[p.index()]);
+                *p = pin_map[*p];
             }
         };
         retain_kept(&mut self.cells, &drop_cell, |cell| {
@@ -823,74 +832,71 @@ impl NetlistDB {
         });
         retain_kept(&mut self.nets, &drop_net, |net| remap_pins(&mut net.pins));
         retain_kept(&mut self.pins, &drop_pin, |pin| {
-            pin.net = NetId::new(net_map[pin.net.index()]);
+            pin.net = net_map[pin.net];
             if let PinOwner::Cell {
                 cell,
                 pin: macro_pin,
             } = pin.owner
             {
                 pin.owner = PinOwner::Cell {
-                    cell: CellId::new(cell_map[cell.index()]),
+                    cell: cell_map[cell],
                     pin: macro_pin,
                 };
             }
         });
         for io in &mut self.io_pins {
-            io.net = NetId::new(net_map[io.net.index()]);
-            io.pin = PinId::new(pin_map[io.pin.index()]);
+            io.net = net_map[io.net];
+            io.pin = pin_map[io.pin];
         }
         self.reindex_names();
         Ok(Renumbering {
-            cells: new_ids(&drop_cell, &cell_map, CellId::new),
-            nets: new_ids(&drop_net, &net_map, NetId::new),
-            pins: new_ids(&drop_pin, &pin_map, PinId::new),
+            cells: new_ids(&drop_cell, &cell_map),
+            nets: new_ids(&drop_net, &net_map),
+            pins: new_ids(&drop_pin, &pin_map),
         })
     }
 
     /// Which instances and nets [`Self::remove`] drops: those named and the
     /// retired instances; an error for a named net something still uses.
-    fn dropped(
-        &self,
-        cells: &[CellId],
-        nets: &[NetId],
-    ) -> Result<(Vec<bool>, Vec<bool>), EditError> {
-        let mut drop_cell: Vec<bool> = self.cells.iter().map(|c| c.retired).collect();
+    fn dropped(&self, cells: &[CellId], nets: &[NetId]) -> Result<Dropped, EditError> {
+        let mut drop_cell: IdVec<CellId, bool> = self.cells.iter().map(|c| c.retired).collect();
         for &c in cells {
-            drop_cell[c.index()] = true;
+            drop_cell[c] = true;
         }
-        let mut drop_net = vec![false; self.nets.len()];
+        let mut drop_net = IdVec::filled(false, self.nets.len());
         for &n in nets {
-            drop_net[n.index()] = true;
+            drop_net[n] = true;
         }
-        for (i, net) in self.nets.iter().enumerate() {
+        for (id, net) in self.nets.iter_enumerated() {
             let left = net
                 .pins
                 .iter()
-                .filter(|&&p| match self.pins[p.index()].owner {
-                    PinOwner::Cell { cell, .. } => !drop_cell[cell.index()],
+                .filter(|&&p| match self.pins[p].owner {
+                    PinOwner::Cell { cell, .. } => !drop_cell[cell],
                     PinOwner::Io(_) => true,
                 })
                 .count();
-            if drop_net[i] && left > 0 {
+            if drop_net[id] && left > 0 {
                 return Err(EditError::NetInUse(net.name.clone()));
             }
         }
-        Ok((drop_cell, drop_net))
+        Ok(Dropped {
+            cells: drop_cell,
+            nets: drop_net,
+        })
     }
 
     /// Finds every instance and net by name again after renumbering.
     fn reindex_names(&mut self) {
         self.cell_by_name = self
             .cells
-            .iter()
-            .enumerate()
-            .map(|(i, c)| (c.name.clone(), CellId::new(i)))
+            .iter_enumerated()
+            .map(|(id, c)| (c.name.clone(), id))
             .collect();
         self.net_by_name = self
             .nets
-            .iter()
-            .enumerate()
-            .map(|(i, n)| (n.name.clone(), NetId::new(i)))
+            .iter_enumerated()
+            .map(|(id, n)| (n.name.clone(), id))
             .collect();
     }
 
@@ -911,19 +917,19 @@ impl NetlistDB {
 
     /// The master of an instance.
     pub fn cell_macro(&self, cell: CellId) -> &Macro {
-        self.library.cell_macro(self.cells[cell.index()].macro_id)
+        self.library.cell_macro(self.cells[cell].macro_id)
     }
 
     /// Width and height of an instance as placed.
     pub fn cell_size(&self, cell: CellId) -> Point<Dbu> {
-        let c = &self.cells[cell.index()];
+        let c = &self.cells[cell];
         c.orient
             .oriented_size(self.library.cell_macro(c.macro_id).size)
     }
 
     /// The area an instance covers.
     pub fn cell_bbox(&self, cell: CellId) -> Rect<Dbu> {
-        let c = &self.cells[cell.index()];
+        let c = &self.cells[cell];
         Rect::new(c.location, c.location + self.cell_size(cell))
     }
 
@@ -940,12 +946,10 @@ impl NetlistDB {
 
     /// The design location of a connection's reference point.
     pub fn pin_position(&self, pin: PinId) -> Point<Dbu> {
-        match self.pins[pin.index()].owner {
-            PinOwner::Cell { cell, .. } => {
-                self.pin_position_at(pin, self.cells[cell.index()].location)
-            }
+        match self.pins[pin].owner {
+            PinOwner::Cell { cell, .. } => self.pin_position_at(pin, self.cells[cell].location),
             PinOwner::Io(io) => {
-                let p = &self.io_pins[io.index()];
+                let p = &self.io_pins[io];
                 p.placed_shapes()
                     .map(|s| s.rect)
                     .reduce(|a, b| a.union(&b))
@@ -957,9 +961,9 @@ impl NetlistDB {
     /// Where `pin` is with its cell's lower-left corner at `location`, or
     /// where it is now for an I/O pin.
     pub fn pin_position_at(&self, pin: PinId, location: Point<Dbu>) -> Point<Dbu> {
-        match self.pins[pin.index()].owner {
+        match self.pins[pin].owner {
             PinOwner::Cell { cell, pin } => {
-                let c = &self.cells[cell.index()];
+                let c = &self.cells[cell];
                 let m = self.library.cell_macro(c.macro_id);
                 let local = m
                     .pin(pin)
@@ -973,15 +977,15 @@ impl NetlistDB {
 
     /// The lowest routing layer `pin` has a shape on.
     pub fn pin_reference_layer(&self, pin: PinId) -> Option<LayerId> {
-        match self.pins[pin.index()].owner {
+        match self.pins[pin].owner {
             PinOwner::Cell { cell, pin } => {
-                let c = &self.cells[cell.index()];
+                let c = &self.cells[cell];
                 self.library
                     .cell_macro(c.macro_id)
                     .pin(pin)
                     .reference_layer()
             }
-            PinOwner::Io(io) => self.io_pins[io.index()]
+            PinOwner::Io(io) => self.io_pins[io]
                 .placed_shapes()
                 .filter_map(|s| match s.layer {
                     LayerRef::Routing(layer) => Some(layer),
@@ -1066,9 +1070,9 @@ impl NetlistDB {
 
     /// A connection's geometry in design coordinates.
     pub fn pin_shapes(&self, pin: PinId) -> Vec<Shape> {
-        match self.pins[pin.index()].owner {
+        match self.pins[pin].owner {
             PinOwner::Cell { cell, pin } => {
-                let c = &self.cells[cell.index()];
+                let c = &self.cells[cell];
                 let m = self.library.cell_macro(c.macro_id);
                 m.pin(pin)
                     .shapes
@@ -1079,7 +1083,7 @@ impl NetlistDB {
                     })
                     .collect()
             }
-            PinOwner::Io(io) => self.io_pins[io.index()].placed_shapes().collect(),
+            PinOwner::Io(io) => self.io_pins[io].placed_shapes().collect(),
         }
     }
 
@@ -1102,16 +1106,16 @@ impl NetlistDB {
 
     /// A readable name for a connection, such as `u1/A` or `PIN clk`.
     pub fn pin_name(&self, pin: PinId) -> String {
-        match self.pins[pin.index()].owner {
+        match self.pins[pin].owner {
             PinOwner::Cell { cell, pin } => {
-                let c = &self.cells[cell.index()];
+                let c = &self.cells[cell];
                 format!(
                     "{}/{}",
                     c.name,
                     self.library.cell_macro(c.macro_id).pin(pin).name
                 )
             }
-            PinOwner::Io(io) => format!("PIN {}", self.io_pins[io.index()].name),
+            PinOwner::Io(io) => format!("PIN {}", self.io_pins[io].name),
         }
     }
 }

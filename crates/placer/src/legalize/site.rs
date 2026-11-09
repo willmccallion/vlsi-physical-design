@@ -88,7 +88,7 @@ impl SiteGrid {
     /// orientation stays as it is.
     #[must_use]
     pub fn legal_position(&self, db: &NetlistDB, cell: CellId) -> Option<Point<Dbu>> {
-        let c = &db.cells[cell.index()];
+        let c = &db.cells[cell];
         let size = db.library.cell_macro(c.macro_id).size;
         let (width, height) = (size.x.get(), size.y.get());
         let init = (
@@ -111,7 +111,7 @@ impl SiteGrid {
     /// Moves `cell` where [`Self::legal_position`] puts it.
     pub fn legalize(&self, db: &mut NetlistDB, cell: CellId) {
         if let Some(at) = self.legal_position(db, cell) {
-            db.cells[cell.index()].location = at;
+            db.cells[cell].location = at;
         }
     }
 

@@ -124,7 +124,7 @@ fn io_layers_to_place(
     }
     let unplaced = movable_io
         .iter()
-        .filter(|&&p| db.io_pins[p.index()].status == PlacementStatus::Unplaced)
+        .filter(|&&p| db.io_pins[p].status == PlacementStatus::Unplaced)
         .count();
     if unplaced > 0 {
         anyhow::bail!(
@@ -551,7 +551,7 @@ fn show_global_result(db: &NetlistDB, result: &GlobalResult) -> anyhow::Result<(
     if result.zones.len() > 1 {
         for z in &result.zones {
             let name = match z.zone {
-                Zone::Fence(r) => db.regions[r.index()].name.as_str(),
+                Zone::Fence(r) => db.regions[r].name.as_str(),
                 Zone::Outside => "outside fences",
             };
             ui::stat_row(
@@ -717,7 +717,7 @@ fn reweighted_model(
     let mut model = PlacementModel::from_db(db, &zones);
     let weight_of: std::collections::HashMap<NetId, f64> = weights
         .into_iter()
-        .filter_map(|(net, weight)| renumbering.nets[net.index()].map(|new| (new, weight)))
+        .filter_map(|(net, weight)| renumbering.nets[net].map(|new| (new, weight)))
         .collect();
     for net in &mut model.nets {
         if let Some(weight) = weight_of.get(&net.net) {
@@ -877,8 +877,8 @@ mod tests {
         let moved = db.cell_id("u1").unwrap();
         let turned = db.cell_id("u2").unwrap();
 
-        db.cells[moved.index()].location.x += Dbu(200);
-        db.cells[turned.index()].orient = Orientation::N;
+        db.cells[moved].location.x += Dbu(200);
+        db.cells[turned].orient = Orientation::N;
 
         assert_eq!(before.moved(&db), vec![moved, turned]);
     }

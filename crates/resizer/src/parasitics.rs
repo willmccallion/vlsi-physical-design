@@ -119,7 +119,7 @@ impl NetParasitics {
     #[must_use]
     pub fn estimate(netlist: &Netlist<'_>, net: NetId, rc: &WireRc) -> Option<Self> {
         let db = netlist.db;
-        let mut pins: Vec<(PinId, Point<Dbu>)> = db.nets[net.index()]
+        let mut pins: Vec<(PinId, Point<Dbu>)> = db.nets[net]
             .pins
             .iter()
             .map(|&p| (p, netlist.pin_location(p)))
@@ -137,7 +137,7 @@ impl NetParasitics {
         if !steiner::is_valid(&tree) {
             log::debug!(
                 "Steiner tree of {} crosses itself; OpenROAD would fall back to FLUTE here",
-                db.nets[net.index()].name
+                db.nets[net].name
             );
         }
         let terminal_pins: Vec<Vec<PinId>> = pins.iter().map(|&(p, _)| vec![p]).collect();

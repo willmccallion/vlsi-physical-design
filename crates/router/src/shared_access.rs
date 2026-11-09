@@ -102,7 +102,7 @@ impl SharedAccess {
     /// The candidates of `pin` derived from its cell's kind, or none when
     /// they are not shared and must be found for the pin itself.
     pub fn candidates(&self, db: &NetlistDB, pin: PinId) -> Option<Vec<AccessPoint>> {
-        let PinOwner::Cell { cell, pin: own } = db.pins[pin.index()].owner else {
+        let PinOwner::Cell { cell, pin: own } = db.pins[pin].owner else {
             return None;
         };
         let (kind, window) = self.cells.get(cell.index())?;
@@ -127,7 +127,7 @@ impl SharedAccess {
     /// How many candidates `pin` has, without deriving them, when they are
     /// shared.
     pub fn count(&self, db: &NetlistDB, pin: PinId) -> Option<usize> {
-        let PinOwner::Cell { cell, pin: own } = db.pins[pin.index()].owner else {
+        let PinOwner::Cell { cell, pin: own } = db.pins[pin].owner else {
             return None;
         };
         let (kind, _) = self.cells.get(cell.index())?;
@@ -140,7 +140,7 @@ impl SharedAccess {
 
 /// The kind of `cell` and its window of the lowest routable layer's grid.
 fn kind_of(db: &NetlistDB, tech: &RouteTech, cell: CellId) -> (Kind, Window) {
-    let c = &db.cells[cell.index()];
+    let c = &db.cells[cell];
     let lt = tech.layer(tech.min_layer);
     let window = db.cell_bbox(cell).expand(tech.gcell_pitch * MARGIN_PITCHES);
     let ((a0, a1), (b0, b1)) = lt.across_along_rect(&window);
@@ -180,8 +180,8 @@ fn kind_candidates(
 ) -> Vec<Option<Vec<RelativeAccess>>> {
     let master = db.cell_macro(cell);
     let mut table = vec![None; master.pins.len()];
-    for &pin in &db.cells[cell.index()].pins {
-        let PinOwner::Cell { pin: own, .. } = db.pins[pin.index()].owner else {
+    for &pin in &db.cells[cell].pins {
+        let PinOwner::Cell { pin: own, .. } = db.pins[pin].owner else {
             continue;
         };
         if !below_routable_layers(db, tech, pin) {

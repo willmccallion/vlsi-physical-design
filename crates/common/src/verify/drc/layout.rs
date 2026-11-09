@@ -44,16 +44,12 @@ impl Owner {
     /// The owner's name in `db`, for reports.
     pub fn name(self, db: &NetlistDB) -> String {
         match self {
-            Self::Net(n) => db.nets[n.index()].name.clone(),
-            Self::SpecialNet(s) => db.special_nets[s.index()].name.clone(),
-            Self::Obstruction(c) => format!("{} (obstruction)", db.cells[c.index()].name),
+            Self::Net(n) => db.nets[n].name.clone(),
+            Self::SpecialNet(s) => db.special_nets[s].name.clone(),
+            Self::Obstruction(c) => format!("{} (obstruction)", db.cells[c].name),
             Self::Blockage(b) => format!("blockage {}", b.index()),
             Self::UnconnectedPin(c, p) => {
-                format!(
-                    "{}/{}",
-                    db.cells[c.index()].name,
-                    db.cell_macro(c).pin(p).name
-                )
+                format!("{}/{}", db.cells[c].name, db.cell_macro(c).pin(p).name)
             }
             Self::FloatingPower => "floating power".to_string(),
             Self::FloatingGround => "floating ground".to_string(),
@@ -342,7 +338,7 @@ impl Layout {
         if elems.is_empty() {
             return;
         }
-        let owner = self.owner(Owner::Net(net), db.nets[net.index()].signal_use.is_supply());
+        let owner = self.owner(Owner::Net(net), db.nets[net].signal_use.is_supply());
         for elem in elems {
             for s in route_elem_shapes(db, net, elem) {
                 if within.is_none_or(|w| w.touches(&s.rect)) {
@@ -384,16 +380,16 @@ impl Layout {
     }
 
     fn add_cell(&mut self, db: &NetlistDB, special: &SpecialOwners, cell: CellId) {
-        let c = &db.cells[cell.index()];
+        let c = &db.cells[cell];
         let m = db.cell_macro(cell);
         let origin = Origin::of_placed(c.status);
         let place = |s: &Shape| c.orient.place_rect(&s.rect, m.size, c.location);
         let mut net_of_pin: Vec<Option<NetId>> = vec![None; m.pins.len()];
         for &pin in &c.pins {
-            if let PinOwner::Cell { pin: mp, .. } = db.pins[pin.index()].owner
+            if let PinOwner::Cell { pin: mp, .. } = db.pins[pin].owner
                 && let Some(slot) = net_of_pin.get_mut(mp.index())
             {
-                *slot = Some(db.pins[pin.index()].net);
+                *slot = Some(db.pins[pin].net);
             }
         }
         for (k, mp) in m.pins.iter().enumerate() {
@@ -474,11 +470,11 @@ impl SpecialOwners {
 
     /// The owner of special net `s` and whether it carries a supply.
     fn owner(&self, db: &NetlistDB, s: SpecialNetId) -> (Owner, bool) {
-        let supply = db.special_nets[s.index()].signal_use.is_supply();
+        let supply = db.special_nets[s].signal_use.is_supply();
         match self.regular_net.get(s.index()).copied().flatten() {
             Some(net) => (
                 Owner::Net(net),
-                supply || db.nets[net.index()].signal_use.is_supply(),
+                supply || db.nets[net].signal_use.is_supply(),
             ),
             None => (Owner::SpecialNet(s), supply),
         }
@@ -486,9 +482,9 @@ impl SpecialOwners {
 }
 
 fn net_is_supply(db: &NetlistDB, special: &SpecialOwners, net: NetId) -> bool {
-    db.nets[net.index()].signal_use.is_supply()
+    db.nets[net].signal_use.is_supply()
         || special
             .special_of_net
             .get(&net)
-            .is_some_and(|s| db.special_nets[s.index()].signal_use.is_supply())
+            .is_some_and(|&s| db.special_nets[s].signal_use.is_supply())
 }

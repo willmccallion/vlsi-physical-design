@@ -30,7 +30,7 @@ use crate::zones::Zone;
 use density::DensityGrid;
 use nesterov::Objects;
 use pare_common::config::{Share, TargetDensity};
-use pare_common::db::indices::CellId;
+use pare_common::db::indices::{CellId, IdVec};
 use pare_common::geom::point::Point;
 use pare_common::geom::rect::Rect;
 use rand::rngs::StdRng;
@@ -78,7 +78,7 @@ pub struct Reweighted {
     pub model: PlacementModel,
     /// For each cell of the model before the repair, its index in the new
     /// model, or none if the repair removed it.
-    pub cell_map: Vec<Option<CellId>>,
+    pub cell_map: IdVec<CellId, Option<CellId>>,
 }
 
 /// What repairs the design between iterations of timing-driven placement.
@@ -357,7 +357,7 @@ impl Setup {
     fn rebuild(
         &self,
         model: &PlacementModel,
-        cell_map: &[Option<CellId>],
+        cell_map: &IdVec<CellId, Option<CellId>>,
         params: &GlobalParams,
         rng: &mut StdRng,
     ) -> (Self, Remap) {
@@ -398,11 +398,11 @@ impl Setup {
         &self,
         model: &PlacementModel,
         movable: &[usize],
-        cell_map: &[Option<CellId>],
+        cell_map: &IdVec<CellId, Option<CellId>>,
     ) -> (Objects, Vec<Option<usize>>, f64) {
         let mut old_object_of_new_cell = vec![None; model.num_cells()];
         for (k, &i) in self.movable.iter().enumerate() {
-            if let Some(j) = cell_map[i] {
+            if let Some(j) = cell_map[CellId::new(i)] {
                 old_object_of_new_cell[j.index()] = Some(k);
             }
         }
@@ -440,7 +440,7 @@ impl Setup {
             }
         }
         for (k, &i) in self.movable.iter().enumerate() {
-            if cell_map[i].is_none() {
+            if cell_map[CellId::new(i)].is_none() {
                 added_area -= area(self.model_sizes[k]);
             }
         }

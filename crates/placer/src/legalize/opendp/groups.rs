@@ -10,6 +10,7 @@ use super::{
     Placer, area, group_id, node_id,
 };
 use pare_common::db::design::NetlistDB;
+use pare_common::db::indices::{CellId, IdVec, RegionId};
 use pare_common::geom::dbu::Dbu;
 use pare_common::geom::point::Point;
 use pare_common::geom::rect::Rect;
@@ -41,11 +42,11 @@ impl Placer {
     /// `Opendp::setUpPlacementGroups`: in the order of the DEF's groups, each
     /// member where `OpenDB` lists it.
     pub(super) fn make_groups(&mut self, db: &NetlistDB) {
-        let mut node_of = vec![None; db.cells.len()];
+        let mut node_of = IdVec::filled(None, db.cells.len());
         for (n, node) in self.nodes.iter().enumerate() {
-            node_of[node.cell.index()] = Some(n);
+            node_of[node.cell] = Some(n);
         }
-        let mut regions: Vec<usize> = (0..db.regions.len()).collect();
+        let mut regions: Vec<RegionId> = db.regions.ids().collect();
         regions.sort_by_key(|&r| {
             let order = db.regions[r].group_order;
             (order.is_none(), order, r)
@@ -73,10 +74,12 @@ impl Placer {
                     Point::new(Dbu(0), Dbu(0)),
                 ));
             let g = self.groups.len();
-            let mut members: Vec<(usize, usize)> = (0..db.cells.len())
+            let mut members: Vec<(CellId, usize)> = db
+                .cells
+                .ids()
                 .filter(|&i| {
                     let c = &db.cells[i];
-                    !c.retired && c.region.map(pare_common::db::indices::RegionId::index) == Some(r)
+                    !c.retired && c.region == Some(r)
                 })
                 .filter_map(|i| node_of[i].map(|n| (i, n)))
                 .collect();
