@@ -989,7 +989,7 @@ impl Placer {
         let Some(orient) = self.site_orientation(x, y, node.site) else {
             return false;
         };
-        if !symmetry_allows(node.symmetry, orient) {
+        if !node.symmetry.allows(orient) {
             return false;
         }
         self.check_edge_spacing(node, x, y, orient)
@@ -1412,19 +1412,6 @@ fn transform_edge(
         Point::new(a.x.min(b.x) + shift.x, a.y.min(b.y) + shift.y),
         Point::new(a.x.max(b.x) + shift.x, a.y.max(b.y) + shift.y),
     )
-}
-
-/// Whether a master's symmetry lets it take a row's orientation, as
-/// `Opendp::checkMasterSym`.
-const fn symmetry_allows(symmetry: Symmetry, orient: Orientation) -> bool {
-    match orient {
-        Orientation::N => true,
-        Orientation::FS => symmetry.x,
-        Orientation::FN => symmetry.y,
-        Orientation::S => symmetry.x && symmetry.y,
-        Orientation::W | Orientation::E => symmetry.r90,
-        Orientation::FW | Orientation::FE => symmetry.r90 && symmetry.x && symmetry.y,
-    }
 }
 
 /// The layers a cell's signal pins use and the one above each, by routing
