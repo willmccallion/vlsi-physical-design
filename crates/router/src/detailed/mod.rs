@@ -346,12 +346,7 @@ impl<'a> DetailedRouter<'a> {
     /// commits them in order. A net whose wiring touches a net committed
     /// earlier in its batch is routed once more in the next batch; after
     /// that, conflicts are left to negotiation.
-    fn route_speculatively(
-        &mut self,
-        nets: Vec<NetId>,
-        costs: Costs,
-        done: &mut Vec<(NetId, NetRoute)>,
-    ) {
+    fn route_speculatively(&mut self, nets: Vec<NetId>, costs: Costs) {
         let batch_size = rayon::current_num_threads().max(1);
         let mut pending: VecDeque<NetId> = nets.into();
         let mut retried: FxHashSet<NetId> = FxHashSet::default();
@@ -372,7 +367,6 @@ impl<'a> DetailedRouter<'a> {
                 }
                 self.commit(n, &route);
                 let _ = committed.insert(n);
-                done.push((n, route));
             }
             for n in deferred.into_iter().rev() {
                 pending.push_front(n);

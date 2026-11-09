@@ -118,8 +118,7 @@ impl DetailedRouter<'_> {
             whole.len()
         );
         whole.sort_unstable();
-        let mut done = Vec::new();
-        self.route_speculatively(whole, costs, &mut done);
+        self.route_speculatively(whole, costs);
         stats
     }
 
