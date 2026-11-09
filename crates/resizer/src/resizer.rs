@@ -761,22 +761,11 @@ impl<'a, T: Timing> Resizer<'a, T> {
                     for &pin in &self.db.cells[cell].pins {
                         let _ = nets.insert(self.db.pins[pin].net);
                     }
-                    self.db.retire_cell(cell);
+                    let _ = self.db.retire_cell(cell);
                 }
                 Edit::NewNet(net) => self.dead_nets.push(net),
                 Edit::Retired { cell, places } => {
-                    self.db.unretire_cell(cell);
-                    let mut back: Vec<(PinId, PinPlace)> = self.db.cells[cell]
-                        .pins
-                        .iter()
-                        .copied()
-                        .zip(places)
-                        .collect();
-                    // Ascending, so each lands among the pins that stood before it.
-                    back.sort_by_key(|(_, place)| place.index);
-                    for (pin, place) in back {
-                        self.db.put_pin_back(pin, place);
-                    }
+                    self.db.unretire_cell(cell, places);
                     for &pin in &self.db.cells[cell].pins {
                         let _ = nets.insert(self.db.pins[pin].net);
                     }
@@ -1031,12 +1020,7 @@ impl<'a, T: Timing> Resizer<'a, T> {
             .collect();
         let survivor_name = self.db.nets[survivor].name.clone();
         let removed_name = self.db.nets[removed].name.clone();
-        let places = self.db.cells[buffer]
-            .pins
-            .iter()
-            .map(|&pin| self.db.pin_place(pin))
-            .collect();
-        self.db.retire_cell(buffer);
+        let places = self.db.retire_cell(buffer);
         self.record(Edit::Retired {
             cell: buffer,
             places,
