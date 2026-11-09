@@ -125,9 +125,6 @@ struct Pixel {
     /// The group whose region wholly covers the site, its index or
     /// [`Self::NO_GROUP`].
     group: u32,
-    /// The share of the site a region covers, as `Pixel::util` while
-    /// regions are laid on the grid.
-    util: f32,
     valid: bool,
     hopeless: bool,
     blocked_layers: u8,
@@ -142,7 +139,6 @@ impl Pixel {
     const EMPTY: Self = Self {
         occupant: Self::FREE,
         group: Self::NO_GROUP,
-        util: 0.0,
         valid: false,
         hopeless: false,
         blocked_layers: 0,
