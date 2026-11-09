@@ -271,14 +271,16 @@ impl RowGrid {
         below
     }
 
-    /// The offset of row edge `index`, the core's top past the last, as
-    /// `Grid::gridYToDbu`.
+    /// The offset of row edge `index` from the core's bottom, the core's
+    /// height past the last, as `Grid::gridYToDbu`.
     pub fn row_y(&self, index: GridY) -> Dbu {
+        // NOTE: Grid::gridYToDbu gives the core's absolute top past the last
+        // edge, though edges are relative; PARE gives its height.
         usize::try_from(index.get())
             .ok()
             .and_then(|i| self.row_edges.get(i))
             .copied()
-            .unwrap_or(self.core.max.y)
+            .unwrap_or_else(|| self.core.height())
     }
 
     /// The grid cells a rectangle covers, ends excluded, as
@@ -331,5 +333,39 @@ impl RowGrid {
             Point::new(at.x, block.max.y)
         };
         self.legal_pt(to, size)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use pare_common::db::parser::{def, lef};
+    use std::path::{Path, PathBuf};
+
+    fn fixture(name: &str) -> PathBuf {
+        Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../common/tests/fixtures")
+            .join(name)
+    }
+
+    /// The tiny design's three rows, 2 um high, raised 2 um off the die's
+    /// bottom, so the core runs from 2 to 8 um.
+    fn raised_rows() -> RowGrid {
+        let units = def::read_units(&fixture("tiny.def")).unwrap();
+        let library = lef::parse_files(&[fixture("tiny.lef")], units).unwrap();
+        let mut db = def::parse(&fixture("tiny.def"), library).unwrap();
+        for row in &mut db.rows {
+            row.origin.y += Dbu(2000);
+        }
+        RowGrid::new(&db, &core_rows(&db)).unwrap()
+    }
+
+    #[test]
+    fn past_the_last_row_edge_lies_the_core_top_relative_to_the_core() {
+        let rows = raised_rows();
+
+        let past_last = rows.row_y(rows.row_count() + 1);
+
+        assert_eq!(past_last, Dbu(6000));
     }
 }
