@@ -12,16 +12,16 @@ use pare_common::db::indices::{CellId, NetId};
 use pare_common::db::writer;
 use pare_common::units::Ohms;
 use pare_common::util::config::Config;
-use pare_common::util::{ui, visualization};
+use pare_common::util::{memory, ui, visualization};
 use pare_placer::legalize::site::SiteGrid;
 use pare_placer::zones::Zones;
 use pare_resizer::parasitics::WireRc;
 use pare_resizer::resizer::GlobalRouting;
 use pare_resizer::route_parasitics::RouteRc;
 use pare_resizer::{Repairer, Resizer};
-use pare_router::GlobalSession;
+use pare_router::{GlobalSession, Progress, Stage};
 use std::path::{Path, PathBuf};
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
 /// Pixels across each side of the routed design's image.
 const ROUTED_IMAGE_PIXELS: u32 = 2000;
@@ -85,7 +85,8 @@ pub(crate) fn global_route_with_repair(
     ui::section("Global Routing");
     let phase_start = Instant::now();
     ui::phase("Global Route");
-    let mut session = GlobalSession::new(db, &config.routing)?;
+    let mut tables = RouteTables::default();
+    let mut session = GlobalSession::new(db, &config.routing, &mut |p| tables.show(p))?;
     report.phase("global routing", phase_start);
     let route_rc = route_rc(config, db)?;
     let sites = SiteGrid::new(db).context("the design has no core rows to legalize on")?;
@@ -259,7 +260,8 @@ pub(crate) fn route_global(
 ) -> anyhow::Result<()> {
     let phase_start = Instant::now();
     ui::section("Routing");
-    let global = pare_router::route_global_only(db, &config.routing)?;
+    let mut tables = RouteTables::default();
+    let global = pare_router::route_global_only(db, &config.routing, &mut |p| tables.show(p))?;
     ui::stat_row("Nets:", &global.summary.nets.to_string(), "", "");
     if let Some(path) = guides {
         write_guides(path, db, &global.guides)?;
@@ -325,6 +327,8 @@ fn run_router(
         ui::wrote(path);
         Ok(())
     };
+    let mut tables = RouteTables::default();
+    let mut show = |p: &Progress<'_>| tables.show(p);
     let run = pare_router::RunOptions {
         resume: resume.as_ref(),
         save: files.save.as_ref().map(|&(_, after)| pare_router::Save {
@@ -332,6 +336,7 @@ fn run_router(
             write: &mut write,
         }),
         trace: files.trace.clone(),
+        report: Some(&mut show),
     };
     let summary = match global {
         Some(global) => pare_router::route_on(db, &config.routing, global, run)?,
@@ -367,6 +372,83 @@ fn show_routing(summary: &pare_router::RoutingSummary) {
         &summary.conflicted.len().to_string(),
         "",
         "",
+    );
+}
+
+/// Shows a routing run's progress as `pare`'s tables, the detailed table's
+/// header before its first round.
+#[derive(Debug, Default)]
+struct RouteTables {
+    detailed_started: bool,
+}
+
+impl RouteTables {
+    fn show(&mut self, progress: &Progress<'_>) {
+        match progress {
+            Progress::Stage { stage, elapsed } => show_stage(*stage, *elapsed),
+            Progress::GlobalRouted {
+                gcells: (nx, ny),
+                overflow,
+                layers,
+            } => {
+                ui::stat_row(
+                    "GCells:",
+                    &format!("{nx}x{ny}"),
+                    "GR overflow:",
+                    &overflow.to_string(),
+                );
+                ui::gr_layer_table_header();
+                for layer in *layers {
+                    ui::gr_layer_row(
+                        layer.name,
+                        layer.direction,
+                        layer.capacity,
+                        layer.usage,
+                        layer.overflow,
+                    );
+                }
+            }
+            Progress::GlobalSettled { kept, rerouted } => ui::stat_row(
+                "Routes kept:",
+                &kept.to_string(),
+                "Routed again:",
+                &rerouted.to_string(),
+            ),
+            Progress::DetailedRound(round) => {
+                if !self.detailed_started {
+                    ui::dr_table_header();
+                    self.detailed_started = true;
+                }
+                ui::dr_iter(
+                    round.round,
+                    round.markers,
+                    round.conflicted,
+                    round.repaired,
+                    round.conflict_cost,
+                    round.flow,
+                    round.elapsed.as_millis(),
+                );
+            }
+        }
+    }
+}
+
+/// Shows how long `stage` took and how much memory the process holds now.
+fn show_stage(stage: Stage, elapsed: Duration) {
+    let label = match stage {
+        Stage::PinAccess => "Pin access:",
+        Stage::GCellGrid => "GCell grid:",
+        Stage::GlobalRoute => "Global route:",
+        Stage::GlobalRestore => "Global restored:",
+        Stage::GlobalSettle => "Global settled:",
+        Stage::TrackAssignment => "Track assign:",
+    };
+    let resident = memory::current_rss_mb().map_or_else(String::new, |mb| format!("{mb} MB"));
+    ui::stat_row(
+        label,
+        &format!("{:.1}s", elapsed.as_secs_f64()),
+        "Resident:",
+        &resident,
     );
 }
 
