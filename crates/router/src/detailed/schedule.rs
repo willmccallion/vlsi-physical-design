@@ -150,7 +150,7 @@ pub fn round_costs(round: usize, via: f64) -> Costs {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use pare_common::util::config::RoutingConfig;
+    use pare_common::config::RoutingConfig;
 
     #[test]
     fn the_first_pass_has_no_marker_cost() {

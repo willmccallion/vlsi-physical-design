@@ -2,6 +2,7 @@
 
 #![allow(clippy::unwrap_used)]
 
+use pare_common::config::{LayerRangeError, RoutingConfig};
 use pare_common::db::design::{
     GCellGridDef, NetlistDB, PlacementStatus, RouteElem, TrackAxis, TrackDef,
 };
@@ -15,7 +16,6 @@ use pare_common::geom::dbu::{Dbu, DbuPerMicron};
 use pare_common::geom::orient::Orientation;
 use pare_common::geom::point::Point;
 use pare_common::geom::rect::Rect;
-use pare_common::util::config::{LayerRangeError, RoutingConfig};
 use std::path::{Path, PathBuf};
 
 fn fixture(name: &str) -> PathBuf {

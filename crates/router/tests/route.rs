@@ -2,6 +2,7 @@
 
 #![allow(clippy::unwrap_used)]
 
+use pare_common::config::{CapacityReserve, RoutingConfig, Share};
 use pare_common::db::design::{
     NetlistDB, NonDefaultLayer, NonDefaultRule, PlacementStatus, RouteElem,
 };
@@ -11,7 +12,6 @@ use pare_common::db::parser::{def, lef};
 use pare_common::geom::dbu::Dbu;
 use pare_common::geom::point::Point;
 use pare_common::geom::rect::Rect;
-use pare_common::util::config::{CapacityReserve, RoutingConfig, Share};
 use pare_common::verify::routing::net_components;
 use pare_common::verify::shapes::fixed_shapes;
 use pare_router::access::Node;

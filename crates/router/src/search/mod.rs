@@ -1042,8 +1042,8 @@ fn distance_to(r: &Rect<Dbu>, p: Point<Dbu>) -> i64 {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use pare_common::config::RoutingConfig;
     use pare_common::db::parser::{def, lef};
-    use pare_common::util::config::RoutingConfig;
     use std::path::{Path, PathBuf};
 
     fn fixture(name: &str) -> PathBuf {

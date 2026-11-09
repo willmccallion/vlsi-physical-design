@@ -219,8 +219,8 @@ fn marked_crossings(
 mod tests {
     use super::*;
     use crate::tech::RouteTech;
+    use pare_common::config::RoutingConfig;
     use pare_common::db::parser::{def, lef};
-    use pare_common::util::config::RoutingConfig;
     use std::path::{Path, PathBuf};
 
     fn fixture(name: &str) -> PathBuf {

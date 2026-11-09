@@ -2,10 +2,10 @@
 
 #![allow(clippy::unwrap_used)]
 
+use pare_common::config::IoLayerNames;
 use pare_common::db::design::{NetlistDB, PlacementStatus};
 use pare_common::db::library::LayerRef;
 use pare_common::db::parser::{def, lef};
-use pare_common::util::config::IoLayerNames;
 use pare_placer::io::{IoLayers, IoPlacementError, place_io_pins};
 use std::path::{Path, PathBuf};
 

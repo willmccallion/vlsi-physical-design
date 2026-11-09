@@ -10,6 +10,7 @@ use crate::detailed::{PinJudge, PinTerminal};
 use crate::global::{GCell, GlobalGrid, GlobalNet, GlobalRoutes, reroute, track_demand};
 use crate::tech::RouteTech;
 use crate::{GlobalStage, Progress, RouteError, check_routable, gcell_size, global_stage};
+use pare_common::config::RoutingConfig;
 use pare_common::db::design::{NetlistDB, PinOwner, Renumbering};
 use pare_common::db::global_route::{
     NetRoute, PinGridLocation, RoutePoint, RouteSegment, RouteSource,
@@ -20,7 +21,6 @@ use pare_common::geom::dbu::Dbu;
 use pare_common::geom::orient::Orientation;
 use pare_common::geom::point::Point;
 use pare_common::geom::rect::Rect;
-use pare_common::util::config::RoutingConfig;
 use pare_common::verify::shapes::is_signal_net;
 use rustc_hash::{FxHashMap, FxHashSet};
 
