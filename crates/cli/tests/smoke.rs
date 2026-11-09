@@ -76,8 +76,9 @@ fn write_config(dir: &Path, purpose: &str, tables: &str) -> PathBuf {
 }
 
 /// Writes a config for the timed fixture design, with its Liberty library
-/// and constraints, into `dir`, and returns its path.
-fn write_timed_config(dir: &Path) -> PathBuf {
+/// and constraints and the TOML `netlist` keys, into `dir`, and returns its
+/// path.
+fn write_timed_config(dir: &Path, netlist: &str) -> PathBuf {
     let input = format!(
         "lef_files = [{}]\ndef_file = {}\nliberty_files = [{}]\nsdc_file = {}\n",
         quoted(&fixture_of("cts", "clock.lef")),
@@ -91,7 +92,7 @@ fn write_timed_config(dir: &Path) -> PathBuf {
         )
     };
     let tables = format!(
-        "[netlist]\nsignal_wire = {}\nclock_wire = {}\n\
+        "[netlist]\n{netlist}signal_wire = {}\nclock_wire = {}\n\
          [routing]\nmin_layer = \"metal1\"\ndetailed_iterations = 1\n",
         wire("metal2"),
         wire("metal3"),
@@ -182,6 +183,53 @@ fn refining_a_given_placement_writes_a_legal_placed_def() {
     assert!(printed(&output).contains("Starting from the given placement"));
     assert!(printed(&output).contains("Placement is legal."));
     assert!(placed.exists());
+}
+
+#[test]
+fn refining_a_given_placement_reports_it_without_a_global_placement() {
+    let dir = work_dir("place-from-report");
+    let (config, placed) = place_tiny(&dir, "");
+    let given = dir.join("given.def");
+    std::fs::rename(&placed, &given).unwrap();
+    let report = dir.join("report.json");
+
+    let output = pare(&[
+        Path::new("place"),
+        &config,
+        Path::new("--from"),
+        &given,
+        Path::new("--report"),
+        &report,
+    ]);
+
+    assert!(output.status.success(), "{}", printed(&output));
+    let placement = &read_report(&report)["placement"];
+    assert!(placement["global"].is_null(), "{placement}");
+    assert!(placement["detailed_moves"].is_number(), "{placement}");
+    assert!(placement["final_hpwl_um"].is_number(), "{placement}");
+}
+
+/// The last half-perimeter wirelength the run printed.
+fn last_printed_hpwl(output: &Output) -> String {
+    const LABEL: &str = "HPWL (um):";
+    let printed = printed(output);
+    let line = printed.lines().rfind(|line| line.contains(LABEL)).unwrap();
+    let after = &line[line.find(LABEL).unwrap() + LABEL.len()..];
+    after.split_whitespace().next().unwrap().to_string()
+}
+
+#[test]
+fn the_final_wirelength_is_that_of_the_placement_written_out() {
+    let dir = work_dir("final-hpwl");
+    let config = write_timed_config(&dir, "repair_timing = false\n");
+    let report = dir.join("report.json");
+
+    let output = pare(&[Path::new("place"), &config, Path::new("--report"), &report]);
+
+    assert!(output.status.success(), "{}", printed(&output));
+    let placement = &read_report(&report)["placement"];
+    let final_hpwl = placement["final_hpwl_um"].as_f64().unwrap();
+    assert_eq!(format!("{final_hpwl:.0}"), last_printed_hpwl(&output));
 }
 
 #[test]
@@ -293,7 +341,7 @@ fn running_the_tiny_design_places_routes_and_reports_both() {
     assert!(dir.join("placed.def").exists());
     assert!(dir.join("routed.def").exists());
     let report = read_report(&report);
-    assert_eq!(report["placement"]["cells"], 6);
+    assert_eq!(report["placement"]["global"]["cells"], 6);
     assert_eq!(report["routing"]["nets"], 5);
     assert_eq!(report["passed"], false);
 }
@@ -301,7 +349,7 @@ fn running_the_tiny_design_places_routes_and_reports_both() {
 #[test]
 fn placing_a_timed_design_repairs_it_and_builds_its_clock_tree() {
     let dir = work_dir("timed-place");
-    let config = write_timed_config(&dir);
+    let config = write_timed_config(&dir, "");
     let report = dir.join("report.json");
 
     let output = pare(&[Path::new("place"), &config, Path::new("--report"), &report]);
@@ -332,7 +380,7 @@ fn placing_a_timed_design_repairs_it_and_builds_its_clock_tree() {
 #[test]
 fn running_a_timed_design_repairs_it_on_its_global_routes() {
     let dir = work_dir("timed-run");
-    let config = write_timed_config(&dir);
+    let config = write_timed_config(&dir, "");
     let report = dir.join("report.json");
 
     let _ = pare(&[Path::new("run"), &config, Path::new("--report"), &report]);

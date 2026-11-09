@@ -193,23 +193,37 @@ impl TimingSummary {
 }
 
 /// What placement did.
-#[derive(Debug, Default, Serialize)]
+#[derive(Debug, Serialize)]
 pub struct PlacementSummary {
+    /// What global placement did, when the run placed from scratch.
+    pub global: Option<GlobalPlacementSummary>,
+    /// Signal pins left where fixed metal blocks every via to them, when
+    /// vias reach the lowest signal layer.
+    pub blocked_pins: Option<usize>,
+    /// Cells detailed placement moved or turned.
+    pub detailed_moves: usize,
+    /// Half-perimeter wirelength after detailed placement, in microns.
+    pub detailed_hpwl_um: f64,
+    /// Half-perimeter wirelength of the placement written out, after the
+    /// clock trees, timing repair and legalization that follow detailed
+    /// placement, in microns.
+    pub final_hpwl_um: f64,
+}
+
+/// What global placement did.
+#[derive(Debug, Serialize)]
+pub struct GlobalPlacementSummary {
     /// Movable cells placed.
     pub cells: usize,
     /// Nets the placer optimised.
     pub nets: usize,
-    /// Global placement iterations run.
+    /// Iterations run.
     pub iterations: usize,
-    /// Density overflow where global placement stopped.
+    /// Density overflow where it stopped.
     pub overflow: f64,
-    /// Half-perimeter wirelength after detailed placement, in microns.
+    /// Half-perimeter wirelength where it stopped, in microns.
     pub hpwl_um: f64,
-    /// Cells detailed placement moved or turned.
-    pub detailed_moves: usize,
-    /// Signal pins left where fixed metal blocks every via to them.
-    pub blocked_pins: usize,
-    /// Timing-driven repairs made during global placement.
+    /// Timing-driven repairs made along the way.
     pub timing_rounds: usize,
 }
 
