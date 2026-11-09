@@ -81,7 +81,7 @@ struct DriverTiming {
 pub struct Rebuffer {
     sizes: Vec<BufferSize>,
     max_wire_length: Option<Dbu>,
-    wire_length_step: Dbu,
+    wire_length_step: Option<Dbu>,
     driver: Option<Driver>,
     /// Buffers taken out while rebuffering whole designs.
     pub removed: usize,
@@ -122,7 +122,11 @@ impl Rebuffer {
     /// the least of the longest wire repair allows and the wire the smallest
     /// buffer drives within its load's slew and its own load limit on the
     /// layer's RC.
-    fn wire_length_step_on(&self, resizer: &Resizer<'_, Sta>, layer: Option<LayerId>) -> Dbu {
+    fn wire_length_step_on(
+        &self,
+        resizer: &Resizer<'_, Sta>,
+        layer: Option<LayerId>,
+    ) -> Option<Dbu> {
         let (res, cap) = resizer.tree_rc().wire(layer);
         let (res, cap) = (res.get(), cap.get());
         if layer.is_none() || cap <= 0.0 || res <= 0.0 {
@@ -610,23 +614,9 @@ impl Rebuffer {
         let mut location = under.at;
         let full_length = node.at.manhattan(location);
         let step = self.wire_length_step_on(resizer, layer);
-        if full_length <= step / 2 {
-            let mut near: Vec<BnetPtr> = options
-                .iter()
-                .map(|o| wire(resizer, node.at, layer, Rc::clone(o)))
-                .collect();
-            self.insert_buffer_options(resizer, &mut near, Dbu(0), None);
-            if near.is_empty() {
-                let mut far = options;
-                self.insert_buffer_options(resizer, &mut far, full_length, None);
-                near = far
-                    .iter()
-                    .map(|o| wire(resizer, node.at, layer, Rc::clone(o)))
-                    .collect();
-                self.insert_buffer_options(resizer, &mut near, Dbu(0), None);
-            }
-            return near;
-        }
+        let Some(step) = step.filter(|&step| full_length > step / 2) else {
+            return self.short_wire_options(resizer, node, layer, options, full_length);
+        };
         self.insert_buffer_options(resizer, &mut options, full_length.min(step), None);
         while location != node.at {
             let last_valid = options.clone();
@@ -658,6 +648,33 @@ impl Rebuffer {
             }
         }
         options
+    }
+
+    /// Options for a wire no longer than half a step: buffers at its near
+    /// end, or, when none can go there, at its far end.
+    fn short_wire_options(
+        &self,
+        resizer: &Resizer<'_, Sta>,
+        node: &Bnet,
+        layer: Option<LayerId>,
+        options: Vec<BnetPtr>,
+        full_length: Dbu,
+    ) -> Vec<BnetPtr> {
+        let mut near: Vec<BnetPtr> = options
+            .iter()
+            .map(|o| wire(resizer, node.at, layer, Rc::clone(o)))
+            .collect();
+        self.insert_buffer_options(resizer, &mut near, Dbu(0), None);
+        if near.is_empty() {
+            let mut far = options;
+            self.insert_buffer_options(resizer, &mut far, full_length, None);
+            near = far
+                .iter()
+                .map(|o| wire(resizer, node.at, layer, Rc::clone(o)))
+                .collect();
+            self.insert_buffer_options(resizer, &mut near, Dbu(0), None);
+        }
+        near
     }
 
     /// The options for a junction: each side's options paired off from the
@@ -1595,14 +1612,13 @@ fn load_limit_by_driver_slew(resizer: &Resizer<'_, Sta>, buffer: BufferCell) -> 
 }
 
 /// The step of a wire search bound by the least of `limits`, at least one
-/// database unit; with no limit at all, one step spans any wire.
-fn least_length<const N: usize>(limits: [Option<Dbu>; N]) -> Dbu {
+/// database unit; none, so one step spans any wire, with no limit at all.
+fn least_length<const N: usize>(limits: [Option<Dbu>; N]) -> Option<Dbu> {
     limits
         .into_iter()
         .flatten()
         .min()
-        .unwrap_or(Dbu(i64::MAX))
-        .max(Dbu(1))
+        .map(|least| least.max(Dbu(1)))
 }
 
 /// The wire a buffer can drive before its load's slew limit is reached, in
