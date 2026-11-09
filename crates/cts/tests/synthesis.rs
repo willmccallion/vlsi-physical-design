@@ -478,6 +478,13 @@ fn the_faster_tree_of_a_clock_is_delayed_as_it_always_is() {
 }
 
 #[test]
+fn a_clock_arriving_at_time_zero_is_balanced_too() {
+    let (_, inserted) = balanced_slow_grid(|_, _| Seconds::ZERO);
+
+    assert!(inserted > 0);
+}
+
+#[test]
 fn registers_are_delayed_by_the_clock_tree_inside_the_slow_flops() {
     let (_, inserted) = balanced_slow_grid(|_, _| Seconds::new(1e-10));
 

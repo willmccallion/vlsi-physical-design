@@ -34,6 +34,9 @@ pub enum CtsError {
     /// A clock buffer has no delay arc from its input to its output.
     #[error("cell '{0}' has no delay arc from its input to its output")]
     NoDelayArc(String),
+    /// The root buffer has no rising delay to balance latencies with.
+    #[error("cell '{0}' has no rising delay arc to balance clock latencies with")]
+    NoRisingDelay(String),
     /// A clock buffer has no physical master.
     #[error("cell '{0}' has no master")]
     NoMaster(String),
