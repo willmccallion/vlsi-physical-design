@@ -265,11 +265,12 @@ const DENSITY_HEADROOM_SHARE: f64 = 0.2;
 ///
 /// As its `place_density_with_lb_addon`, this is the utilization rounded up
 /// to a hundredth, as `OpenROAD` reports it, plus a fifth of the room left
-/// above it and a hundredth, at most one.
-pub fn default_target_density(utilization: f64) -> f64 {
+/// above it and a hundredth, at most one; none for a utilization so far
+/// below zero that this is too.
+pub fn default_target_density(utilization: f64) -> Option<TargetDensity> {
     let lower_bound = (utilization * 100.0).ceil() / 100.0;
     let raised = (1.0 - lower_bound).mul_add(DENSITY_HEADROOM_SHARE, lower_bound);
-    (raised + 0.01).min(1.0)
+    TargetDensity::new((raised + 0.01).min(1.0))
 }
 
 /// Bins per side for `model`: sized for the average cell at the target
@@ -846,17 +847,26 @@ mod tests {
 
     #[test]
     fn the_default_target_density_adds_a_fifth_of_the_headroom() {
-        assert!((default_target_density(0.65) - 0.73).abs() < 1e-9);
+        assert!((density_of(0.65) - 0.73).abs() < 1e-9);
     }
 
     #[test]
     fn the_default_target_density_starts_from_the_utilization_rounded_up() {
-        assert!((default_target_density(0.0836) - 0.282).abs() < 1e-9);
+        assert!((density_of(0.0836) - 0.282).abs() < 1e-9);
     }
 
     #[test]
     fn the_default_target_density_is_at_most_one() {
-        assert!((default_target_density(0.995) - 1.0).abs() < f64::EPSILON);
+        assert!((density_of(0.995) - 1.0).abs() < f64::EPSILON);
+    }
+
+    #[test]
+    fn a_utilization_far_below_zero_gives_no_target_density() {
+        assert_eq!(default_target_density(-1.0), None);
+    }
+
+    fn density_of(utilization: f64) -> f64 {
+        default_target_density(utilization).unwrap().get()
     }
 
     fn row(y: f64, height: f64) -> Rect<f64> {

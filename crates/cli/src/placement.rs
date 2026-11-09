@@ -534,8 +534,7 @@ impl Density {
         let target = if let Some(target) = gp.target_density {
             target
         } else {
-            let derived = global::default_target_density(utilization);
-            TargetDensity::new(derived).with_context(|| {
+            global::default_target_density(utilization).with_context(|| {
                 format!("utilization {utilization} gives no target density in (0, 1]")
             })?
         };
