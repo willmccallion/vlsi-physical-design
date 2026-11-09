@@ -19,7 +19,7 @@ use pare_common::geom::orient::Orientation;
 use pare_common::geom::point::Point;
 use pare_common::geom::rect::Rect;
 use rayon::prelude::*;
-use std::collections::HashMap;
+use rustc_hash::FxHashMap;
 use std::ops::Range;
 
 /// How many gcell pitches beyond a cell's edge its kind takes the grid in.
@@ -78,7 +78,7 @@ impl SharedAccess {
             .into_par_iter()
             .map(|c| kind_of(db, tech, CellId::new(c)))
             .collect();
-        let mut index: HashMap<Kind, KindId> = HashMap::new();
+        let mut index: FxHashMap<Kind, KindId> = FxHashMap::default();
         let mut representatives: IdVec<KindId, CellId> = IdVec::new();
         let cells: IdVec<CellId, (KindId, Window)> = cells
             .into_iter()
