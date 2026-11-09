@@ -32,7 +32,7 @@ use std::collections::BTreeMap;
 /// What clock tree synthesis reads.
 #[derive(Clone, Copy, Debug)]
 pub struct CtsInput<'a> {
-    /// The library link.
+    /// The Liberty cells matched to the design's masters.
     pub link: &'a Link<'a>,
     /// The constraints whose clocks get trees.
     pub sdc: &'a Sdc,

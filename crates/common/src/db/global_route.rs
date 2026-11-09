@@ -12,7 +12,7 @@ use crate::geom::point::Point;
 pub struct RoutePoint {
     /// The gcell center.
     pub at: Point<Dbu>,
-    /// The routing layer.
+    /// The routing layer the route passes the gcell on.
     pub layer: LayerId,
 }
 

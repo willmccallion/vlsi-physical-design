@@ -99,7 +99,7 @@ impl WireDelayRate {
 /// What the characterization is built from.
 #[derive(Clone, Copy, Debug)]
 pub(crate) struct CharSetup<'a> {
-    /// The library link.
+    /// The Liberty cells matched to the design's masters.
     pub link: &'a Link<'a>,
     /// The design, for the buffers' masters.
     pub db: &'a NetlistDB,

@@ -147,7 +147,7 @@ pub enum Stage {
 pub struct LayerLoad<'a> {
     /// The layer's name.
     pub name: &'a str,
-    /// Its preferred direction.
+    /// The direction its tracks run.
     pub direction: Direction,
     /// Tracks its edges offer.
     pub capacity: i64,
