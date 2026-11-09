@@ -6,7 +6,7 @@ use crate::plan::{ClockSource, RepairPlan, Wires};
 use crate::ui;
 use anyhow::Context;
 use pare_common::config::Config;
-use pare_common::db::design::NetlistDB;
+use pare_common::db::design::{NetlistDB, Renumbering};
 use pare_common::db::liberty::Liberty;
 use pare_common::db::parser::{liberty, sdc};
 use pare_common::db::sdc::Sdc;
@@ -95,7 +95,7 @@ pub(crate) enum Constraints<'p> {
 
 impl Constraints<'_> {
     /// Where the clocks come from.
-    const fn clocks(&self) -> Clocks<'_> {
+    pub(crate) const fn clocks(&self) -> Clocks<'_> {
         match self {
             Self::Sdc(sdc) => Clocks::Sdc(sdc),
             Self::Ports(ports) => Clocks::Ports(ports),
@@ -292,7 +292,7 @@ pub(crate) fn repair_design(
     let clocks = repair.constraints.clocks();
     let stage = Stage::find(db, repair.plan, &repair.liberty, clocks)?;
     let inputs = stage.session(db, repair.plan.wires, &mut repair.namer);
-    let done = match clocks {
+    let (done, _) = match clocks {
         Clocks::Sdc(sdc) => repair_design_on(Resizer::timed(inputs, sdc)?)?,
         Clocks::Ports(_) => repair_design_on(Resizer::new(inputs)?)?,
     };
@@ -302,18 +302,18 @@ pub(crate) fn repair_design(
     Ok(())
 }
 
-/// Runs design repair over the session and ends it.
-fn repair_design_on<T: Timing>(
+/// Runs design repair over the session and ends it, returning what it did
+/// and how it renumbered the design.
+pub(crate) fn repair_design_on<T: Timing>(
     mut resizer: Resizer<'_, T>,
-) -> anyhow::Result<pare_resizer::RepairSummary> {
+) -> anyhow::Result<(pare_resizer::RepairSummary, Renumbering)> {
     let done = Repairer::new(&mut resizer).repair_design()?;
     show_design_repair(&done, resizer.netlist().db.cells.len());
-    let _ = resizer.finish()?;
-    Ok(done)
+    Ok((done, resizer.finish()?))
 }
 
 /// Shows what design repair found and did.
-pub(crate) fn show_design_repair(done: &pare_resizer::RepairSummary, cells: usize) {
+fn show_design_repair(done: &pare_resizer::RepairSummary, cells: usize) {
     ui::stat_row(
         "Slew violations:",
         &done.slew_violations.to_string(),

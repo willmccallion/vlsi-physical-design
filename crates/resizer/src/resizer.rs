@@ -303,6 +303,17 @@ impl<'a> Resizer<'a> {
     pub fn new(inputs: SessionInputs<'a>) -> Result<Self, RepairError> {
         Self::build(inputs, None, PortConditions::default(), |_, _| Untimed)
     }
+
+    /// Prepares a session as [`Resizer::new`] does, with every net's
+    /// parasitics along its global route, rerouted as edits change it.
+    pub fn untimed_on_global_routes(
+        inputs: SessionInputs<'a>,
+        routes: GlobalRouting<'a>,
+    ) -> Result<Self, RepairError> {
+        Self::build(inputs, Some(routes), PortConditions::default(), |_, _| {
+            Untimed
+        })
+    }
 }
 
 impl<'a> Resizer<'a, Sta> {

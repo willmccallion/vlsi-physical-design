@@ -43,7 +43,8 @@ pub(crate) struct RepairPlan {
     /// The wire clock trees are built on, when they are built: with clock
     /// trees on and an SDC file to time them.
     pub(crate) clock_tree: Option<WireRc>,
-    /// The layers' parasitics for repair on the global routes, when it runs.
+    /// The layers' parasitics for repair on the global routes, when the
+    /// design is routed and the config asks for it.
     pub(crate) on_global_routes: Option<RouteRc>,
     /// Cells repair neither inserts nor swaps to, beyond those the library
     /// marks.
@@ -67,7 +68,7 @@ impl RepairPlan {
             .then(|| wires.clock.context("[netlist] clock trees need clock_wire"))
             .transpose()?;
         let routed = config.purpose == Purpose::PlaceAndRoute;
-        let on_global_routes = (routed && timed && netlist.repair_on_global_routes)
+        let on_global_routes = (routed && netlist.repair_on_global_routes)
             .then(|| route_rc(config, db))
             .transpose()?;
         Ok(Some(Self {
@@ -338,6 +339,19 @@ mod tests {
         let repair = plan.repair.unwrap();
         assert_eq!(repair.clocks, ClockSource::Ports(vec!["in".to_string()]));
         assert_eq!(repair.clock_tree, None);
+    }
+
+    #[test]
+    fn without_an_sdc_file_the_design_is_still_repaired_on_global_routes() {
+        let config = tiny_config(
+            "liberty_files = [\"clock.lib\"]\n\
+             [netlist]\n\
+             signal_wire = { layer = \"M2\", resistance_ohm_per_um = 2.0, capacitance_ff_per_um = 0.5 }",
+        );
+
+        let plan = FlowPlan::resolve(&config, &tiny()).unwrap();
+
+        assert!(plan.repair.unwrap().on_global_routes.is_some());
     }
 
     #[test]
