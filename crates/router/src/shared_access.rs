@@ -109,8 +109,8 @@ impl SharedAccess {
         let PinOwner::Cell { cell, pin: own } = db.pins[pin].owner else {
             return None;
         };
-        let (kind, window) = self.cells.get(cell)?;
-        let table = self.kinds[*kind].get(own)?.as_ref()?;
+        let (kind, window) = &self.cells[cell];
+        let table = self.kinds[*kind][own].as_ref()?;
         Some(
             table
                 .iter()
@@ -134,8 +134,8 @@ impl SharedAccess {
         let PinOwner::Cell { cell, pin: own } = db.pins[pin].owner else {
             return None;
         };
-        let (kind, _) = self.cells.get(cell)?;
-        self.kinds[*kind].get(own)?.as_ref().map(Vec::len)
+        let (kind, _) = self.cells[cell];
+        self.kinds[kind][own].as_ref().map(Vec::len)
     }
 }
 
@@ -192,9 +192,7 @@ fn kind_candidates(
             .iter()
             .map(|a| relative_to(a, window))
             .collect();
-        if let Some(slot) = table.get_mut(own) {
-            *slot = relative;
-        }
+        table[own] = relative;
     }
     table
 }
