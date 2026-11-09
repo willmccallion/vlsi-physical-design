@@ -21,8 +21,8 @@ pub const DEFAULT_ALPHA: f64 = 0.3;
 pub struct SteinerTree {
     /// Every node's position.
     pub nodes: Vec<Point<Dbu>>,
-    /// Every node's parent, the root's being itself.
-    pub parent: Vec<usize>,
+    /// Every node's parent, none for the root.
+    pub parent: Vec<Option<usize>>,
     /// How many of the nodes are terminals.
     pub terminals: usize,
     /// The root, which is the driver's terminal.
@@ -30,14 +30,20 @@ pub struct SteinerTree {
 }
 
 impl SteinerTree {
+    /// Every branch, as a node and its parent.
+    pub fn branches(&self) -> impl Iterator<Item = (usize, usize)> + '_ {
+        self.parent
+            .iter()
+            .enumerate()
+            .filter_map(|(node, &parent)| Some((node, parent?)))
+    }
+
     /// The children of each node.
     #[must_use]
     pub fn children(&self) -> Vec<Vec<usize>> {
         let mut children = vec![Vec::new(); self.nodes.len()];
-        for (node, &parent) in self.parent.iter().enumerate() {
-            if parent != node {
-                children[parent].push(node);
-            }
+        for (node, parent) in self.branches() {
+            children[parent].push(node);
         }
         children
     }
@@ -45,10 +51,8 @@ impl SteinerTree {
     /// Total wire length.
     #[must_use]
     pub fn length(&self) -> Dbu {
-        self.parent
-            .iter()
-            .enumerate()
-            .map(|(node, &parent)| self.nodes[node].manhattan(self.nodes[parent]))
+        self.branches()
+            .map(|(node, parent)| self.nodes[node].manhattan(self.nodes[parent]))
             .sum()
     }
 }
@@ -99,24 +103,18 @@ impl Graph {
     /// Reads the graph out as a tree rooted at `driver`.
     fn into_tree(self, terminals: usize, driver: usize) -> SteinerTree {
         let n = self.points.len();
-        let mut parent = vec![usize::MAX; n];
+        let mut parent = vec![None; n];
         let mut order = vec![driver];
-        parent[driver] = driver;
         let mut i = 0;
         while i < order.len() {
             let node = order[i];
             for &next in &self.adjacent[node] {
-                if parent[next] == usize::MAX {
-                    parent[next] = node;
+                if next != driver && parent[next].is_none() {
+                    parent[next] = Some(node);
                     order.push(next);
                 }
             }
             i += 1;
-        }
-        for (node, p) in parent.iter_mut().enumerate() {
-            if *p == usize::MAX {
-                *p = node;
-            }
         }
         SteinerTree {
             nodes: self.points,
@@ -400,10 +398,8 @@ pub(crate) fn is_valid(tree: &SteinerTree) -> bool {
         return true;
     }
     let rects: Vec<(Point<Dbu>, Point<Dbu>)> = tree
-        .parent
-        .iter()
-        .enumerate()
-        .map(|(node, &parent)| {
+        .branches()
+        .map(|(node, parent)| {
             let (a, b) = (tree.nodes[node], tree.nodes[parent]);
             (
                 Point::new(a.x.min(b.x), a.y.min(b.y)),
@@ -447,7 +443,10 @@ mod tests {
                 if n == tree.root {
                     return true;
                 }
-                n = tree.parent[n];
+                let Some(parent) = tree.parent[n] else {
+                    return false;
+                };
+                n = parent;
             }
             false
         })
@@ -457,7 +456,7 @@ mod tests {
     fn two_points_make_one_edge() {
         let tree = prim_dijkstra(&[pt(0, 0), pt(10, 5)], 0, DEFAULT_ALPHA);
         assert_eq!(tree.nodes.len(), 2);
-        assert_eq!(tree.parent, vec![0, 0]);
+        assert_eq!(tree.parent, vec![None, Some(0)]);
         assert_eq!(tree.length(), Dbu(15));
     }
 

@@ -146,7 +146,7 @@ impl NetParasitics {
         if pins.len() < 2 {
             return None;
         }
-        pins.sort_by_key(|(_, at)| (at.x.get(), at.y.get()));
+        pins.sort_by_key(|&(_, at)| at);
         let driver = pins
             .iter()
             .position(|&(p, _)| netlist.is_driver(p))
@@ -163,14 +163,10 @@ impl NetParasitics {
 
         let mut resistors = Vec::new();
         let mut wire_cap: IdVec<RcNode, Farads> = IdVec::filled(Farads::ZERO, tree.nodes.len());
-        for (index, &parent_index) in tree.parent.iter().enumerate() {
-            if parent_index == index {
-                continue;
-            }
+        for (index, parent_index) in tree.branches() {
             let (node, parent) = (RcNode::new(index), RcNode::new(parent_index));
-            let (a, b) = (tree.nodes[index], tree.nodes[parent_index]);
-            let length_dbu = (a.x.get() - b.x.get()).abs() + (a.y.get() - b.y.get()).abs();
-            if length_dbu == 0 {
+            let length_dbu = tree.nodes[index].manhattan(tree.nodes[parent_index]);
+            if length_dbu == Dbu(0) {
                 resistors.push(Resistor {
                     a: node,
                     b: parent,
@@ -178,7 +174,7 @@ impl NetParasitics {
                 });
                 continue;
             }
-            let length = Meters::from_dbu(Dbu(length_dbu), db.dbu());
+            let length = Meters::from_dbu(length_dbu, db.dbu());
             let cap = length * rc.capacitance;
             wire_cap[node] += cap / 2.0;
             wire_cap[parent] += cap / 2.0;
