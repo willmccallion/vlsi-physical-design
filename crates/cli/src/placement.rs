@@ -163,7 +163,7 @@ fn keep_given_placement(db: &NetlistDB) -> anyhow::Result<()> {
     if unplaced > 0 {
         anyhow::bail!("{unplaced} cells of the given placement are unplaced");
     }
-    ui::check("Starting from the given placement");
+    ui::note("Starting from the given placement");
     Ok(())
 }
 
@@ -210,7 +210,7 @@ fn legalize_with_pin_access(
         .count();
     let timer = PhaseTimer::start(Phase::Legalization);
     let legalization = legalize(db, &zones)?;
-    ui::check(&format!("Legalized {movable_cells} cells"));
+    ui::note(&format!("Legalized {movable_cells} cells"));
     let access = config
         .routing
         .lowest_signal_layer(&db.library)?
@@ -636,7 +636,7 @@ fn show_global_result(db: &NetlistDB, result: &GlobalResult) -> anyhow::Result<(
         }
     }
     match result.outcome {
-        Outcome::Converged => ui::check(&format!(
+        Outcome::Converged => ui::pass(&format!(
             "Converged at iteration {} (overflow {:.3})",
             result.iterations, result.overflow
         )),
