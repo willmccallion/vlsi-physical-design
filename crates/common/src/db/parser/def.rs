@@ -601,14 +601,16 @@ impl<'a> DefParser<'a> {
     }
 
     /// Adds a via the DEF defines, unless the LEF already has one of its
-    /// name, which `OpenROAD` keeps.
+    /// name, which is kept.
     fn add_def_via(&mut self, via: ViaDef, line: usize) -> Result<(), ParseError> {
         let name = via.name.as_str();
         if let Some(existing) = self.db.library.via_id(name) {
+            // NOTE: io::Parser::setVias stops (DRT-337) on a DEF via that
+            // differs from the LEF via of its name; PARE keeps the LEF via.
             if !same_geometry(self.db.library.via(existing), &via) {
                 log::warn!(
                     "{}:{line}: via '{name}' differs from the LEF via of the same name; \
-                     using the LEF via, as OpenROAD does",
+                     using the LEF via",
                     self.lx.path().display()
                 );
             }

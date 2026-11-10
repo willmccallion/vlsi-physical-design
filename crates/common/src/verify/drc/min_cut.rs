@@ -79,6 +79,8 @@ impl LayerCheck<'_> {
         if rule.length.is_some() && (wide.rect.encloses(&cut.rect) || !self.joined(wide, cut)) {
             return;
         }
+        // NOTE: checkMinimumCut_main quirk kept: it counts no cuts, so every
+        // cut on the wide metal breaks the rule, however many it asks for.
         let marker = Marker::new(
             Violation::MinimumCut,
             k,
