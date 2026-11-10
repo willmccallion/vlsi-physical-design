@@ -106,7 +106,8 @@ impl Netlist {
 
     /// Writes the gradient of the weighted-average wirelength with respect
     /// to each object's center into `grads`, using `scratch` for per-terminal
-    /// gradients.
+    /// gradients, as `gpl`'s `updateWireLengthForceWA` and
+    /// `getWireLengthGradientWA`.
     pub(super) fn gradient(
         &self,
         centers: &ObjectPoints,

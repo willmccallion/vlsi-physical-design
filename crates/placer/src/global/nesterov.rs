@@ -30,20 +30,22 @@ use rand::rngs::StdRng;
 use rayon::prelude::*;
 
 /// Density penalty at the start, relative to the ratio of the wirelength and
-/// density gradient norms.
+/// density gradient norms, `gpl`'s `initDensityPenaltyFactor` of 0.00008.
 const INITIAL_PENALTY: f64 = 8e-5;
 
-/// Per-iteration bounds on how much the density penalty may change.
+/// Per-iteration bounds on how much the density penalty may change, `gpl`'s
+/// `minPhiCoef` and `maxPhiCoef` of 0.95 and 1.05.
 const PENALTY_GROWTH: (f64, f64) = (0.95, 1.05);
 
 /// The growth in wirelength over one iteration at which the density penalty
 /// holds steady, `gpl`'s default `-reference_hpwl`.
 const REFERENCE_HPWL: Dbu = Dbu(446_000_000);
 
-/// Overflow below which the penalty's highest growth is lowered, once.
+/// Overflow below which the penalty's highest growth is lowered, once, as
+/// `gpl`'s `nesterovAdjustPhi` lowers it below 0.35.
 const HOLD_GROWTH_OVERFLOW: f64 = 0.35;
 
-/// What that lowers the highest growth by.
+/// What that lowers the highest growth by, `nesterovAdjustPhi`'s 0.99.
 const HOLD_GROWTH_FACTOR: f64 = 0.99;
 
 /// Trial steps one iteration may evaluate, `gpl`'s `maxBackTrack` of 10.
@@ -417,8 +419,8 @@ impl<'a> Objective<'a> {
     }
 
     /// The preconditioned gradient of wirelength plus each field's weighted
-    /// density energy, written to `out`; objects of frozen fields and
-    /// removed fillers get none.
+    /// density energy, written to `out`, as `gpl`'s `updateGradients`;
+    /// objects of frozen fields and removed fillers get none.
     fn gradient(
         &mut self,
         centers: &ObjectPoints,
@@ -1126,7 +1128,8 @@ impl Run {
         (s, eval)
     }
 
-    /// Takes one Nesterov step from `s`; none when it diverged.
+    /// Takes one Nesterov step from `s`, as `gpl`'s `nesterovUpdateCoordinates`
+    /// and `updateNextIter`; none when it diverged.
     fn step(
         &mut self,
         objective: &mut Objective<'_>,
@@ -1449,7 +1452,8 @@ fn congestion_map(
     }
 }
 
-/// A first step length from the gradient change over a small probe move.
+/// A first step length from the gradient change over a small probe move,
+/// in place of `gpl`'s `initDensity2` and `updateInitialPrevSLPCoordi`.
 fn initial_step(
     objective: &mut Objective<'_>,
     at: &ObjectPoints,
