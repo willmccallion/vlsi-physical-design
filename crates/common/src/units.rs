@@ -28,7 +28,10 @@ macro_rules! define_quantity {
             /// None of it.
             pub const ZERO: Self = Self(0.0);
 
-            /// More than any amount, which marks the absence of a limit.
+            /// More than any amount: a fold's seed, or a limit that is only
+            /// compared, never the absence of a value in stored data.
+            // NOTE: OpenSTA's INF is the finite 1e30; IEEE infinity makes
+            // inf - inf NaN where OpenSTA gets 0, which users guard against.
             pub const INFINITY: Self = Self(f64::INFINITY);
 
             /// The quantity of `si` base units.
