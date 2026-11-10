@@ -2372,6 +2372,143 @@ mod tests {
     }
 
     #[test]
+    fn a_false_path_leaves_its_endpoint_unconstrained() {
+        let db = flop_to_flop_design();
+        let d = cell_pin(&db, "f2/D");
+        let clock = "create_clock -name clk -period 2.2 [get_ports clk]\n";
+        let false_path =
+            format!("{clock}set_false_path -from [get_clocks clk] -to [get_clocks clk]\n");
+
+        let timed_slack = slack_under(&db, clock, d, MinMax::Max);
+        let false_slack = slack_under(&db, &false_path, d, MinMax::Max);
+
+        assert!(timed_slack.is_finite());
+        assert!(false_slack.is_infinite());
+    }
+
+    /// A flop clocked from `clk` driving the output port `out`.
+    fn flop_to_port_design() -> NetlistDB {
+        design_with_copies(
+            &def_text(
+                "out",
+                &DefSections {
+                    components: "- f DFF_X1 + PLACED ( 2000 2800 ) N ;\n",
+                    nets: "- clk ( PIN clk ) ( f CK ) ;\n- out ( f Q ) ( PIN out ) ;\n",
+                    inputs: &["clk"],
+                    outputs: &["out"],
+                },
+            ),
+            &[],
+        )
+    }
+
+    #[test]
+    fn an_output_delay_takes_its_time_off_the_capturing_edge() {
+        let db = flop_to_port_design();
+        let out = db.io_pins[db.io_pin_id("out").unwrap()].pin;
+        let constraints = "create_clock -name clk -period 2.2 [get_ports clk]\n\
+                           set_output_delay 0.5 -clock clk [get_ports out]\n";
+
+        let (slack, arrival) = timed(&db, constraints, |_, sta| {
+            let latest = Edge::BOTH
+                .iter()
+                .filter_map(|&edge| sta.arrival(out, edge, MinMax::Max))
+                .fold(Seconds::new(f64::NEG_INFINITY), Seconds::max);
+            (sta.slack(out, MinMax::Max).time(), latest)
+        });
+
+        assert!(arrival > Seconds::ZERO);
+        assert!(
+            ((slack + arrival).get() - 1.7e-9).abs() < 1e-15,
+            "{slack:?} + {arrival:?}"
+        );
+    }
+
+    /// A flop clocked from `clk` through buffer `cb`.
+    fn buffered_clock_design() -> NetlistDB {
+        design_with_copies(
+            &def_text(
+                "cb",
+                &DefSections {
+                    components: "- cb BUF_X1 + PLACED ( 2000 2800 ) N ;\n\
+                                 - f DFF_X1 + PLACED ( 4000 2800 ) N ;\n",
+                    nets: "- clk ( PIN clk ) ( cb A ) ;\n- ck ( cb Z ) ( f CK ) ;\n",
+                    inputs: &["clk"],
+                    outputs: &[],
+                },
+            ),
+            &[],
+        )
+    }
+
+    #[test]
+    fn a_propagated_clock_arrives_through_its_buffers_and_an_ideal_one_at_once() {
+        let db = buffered_clock_design();
+        let ck = cell_pin(&db, "f/CK");
+        let clock = "create_clock -name clk -period 2.2 [get_ports clk]\n";
+        let propagated = format!("{clock}set_propagated_clock [all_clocks]\n");
+
+        let ideal = timed(&db, clock, |_, sta| sta.clock_rise_arrival(ck));
+        let late = timed(&db, &propagated, |_, sta| sta.clock_rise_arrival(ck));
+
+        assert_eq!(ideal, Some(Seconds::ZERO));
+        assert!(late.is_some_and(|t| t > Seconds::ZERO), "{late:?}");
+    }
+
+    /// The clock `clk` gated by the port `en` in and gate `g` on its way to
+    /// flop `f`.
+    fn gated_clock_design() -> NetlistDB {
+        design_with_copies(
+            &def_text(
+                "gated",
+                &DefSections {
+                    components: "- g GATE + PLACED ( 2000 2800 ) N ;\n\
+                                 - f DFF_X1 + PLACED ( 4000 2800 ) N ;\n",
+                    nets: "- clk ( PIN clk ) ( g A ) ;\n- en ( PIN en ) ( g B ) ;\n\
+                           - gck ( g Z ) ( f CK ) ;\n",
+                    inputs: &["clk", "en"],
+                    outputs: &[],
+                },
+            ),
+            &[("AND2_X1", "GATE")],
+        )
+    }
+
+    /// An and gate timed from both its inputs.
+    const GATE: &str = "cell (GATE) { area : 1.0 ;
+        pin (A) { direction : input ; capacitance : 1.0 ; }
+        pin (B) { direction : input ; capacitance : 1.0 ; }
+        pin (Z) { direction : output ; function : \"(A & B)\" ;
+          timing () { related_pin : \"A\" ; timing_sense : positive_unate ;
+            cell_rise (scalar) { values (\"0.05\") ; }
+            cell_fall (scalar) { values (\"0.05\") ; } }
+          timing () { related_pin : \"B\" ; timing_sense : positive_unate ;
+            cell_rise (scalar) { values (\"0.05\") ; }
+            cell_fall (scalar) { values (\"0.05\") ; } } } }";
+
+    #[test]
+    fn a_gated_clock_enable_is_checked_against_its_clock() {
+        let db = gated_clock_design();
+        let enable = cell_pin(&db, "g/B");
+        let constraints = "create_clock -name clk -period 2.2 [get_ports clk]\n\
+                           set_input_delay 0.3 -clock clk [get_ports en]\n";
+
+        let (setup, hold, ends) = timed_with(&db, &cells_with(GATE), constraints, |_, sta| {
+            (
+                sta.slack(enable, MinMax::Max),
+                sta.slack(enable, MinMax::Min),
+                sta.endpoints().contains(&enable),
+            )
+        });
+
+        assert!(ends);
+        assert!(
+            setup.is_constrained() && hold.is_constrained(),
+            "{setup:?} {hold:?}"
+        );
+    }
+
+    #[test]
     fn slack_is_infinite_without_an_arrival_or_a_bound() {
         assert!(!slack_of(None, Seconds::new(1.0), MinMax::Max).is_finite());
         assert!(
