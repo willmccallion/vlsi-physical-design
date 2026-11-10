@@ -694,7 +694,9 @@ struct Snapshot {
 }
 
 /// Each field's displacement in its last iteration and the largest it has
-/// had, which tell when placement has settled, as in `OpenROAD`.
+/// had, which tell when placement has settled.
+// NOTE: gpl's routabilitySnapshot measures congestion as soon as overflow
+// reaches routability_end_overflow; waiting to settle is PARE's own gate.
 #[derive(Clone, Debug)]
 struct Settling {
     last: FieldValues,
