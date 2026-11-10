@@ -30,12 +30,20 @@ use std::time::Duration;
 /// Pixels along the die's longer side in the routed design's image.
 const ROUTED_IMAGE_PIXELS: u32 = 2000;
 
-/// Where a run saves its state and when, and the state it resumes from.
+/// How the router runs: where it saves its state and when, the state it
+/// resumes from, and what it traces.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
-pub(crate) struct StateFiles {
-    pub(crate) save: Option<(PathBuf, pare_router::SavePoint)>,
+pub(crate) struct RouterRun {
+    pub(crate) save: Option<SaveRequest>,
     pub(crate) resume: Option<PathBuf>,
     pub(crate) trace: pare_router::TraceRequest,
+}
+
+/// Where to save the router's state, and after which stage.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) struct SaveRequest {
+    pub(crate) path: PathBuf,
+    pub(crate) after: pare_router::SavePoint,
 }
 
 /// A `--save-after` value: `global` or a detailed round number.
@@ -267,18 +275,18 @@ pub(crate) fn route_global(
 }
 
 /// Routes every signal net in detail, from the global routes of `global`
-/// when given, saving and resuming state as `files` say, then checks the
+/// when given, saving and resuming state as `run` says, then checks the
 /// result and writes it to the output directory.
 pub(crate) fn route_detailed(
     config: &Config,
     db: &mut NetlistDB,
-    files: &StateFiles,
+    run: &RouterRun,
     global: Option<GlobalSession>,
     report: &mut Report,
 ) -> anyhow::Result<()> {
     ui::section("Routing");
     let timer = PhaseTimer::start(Phase::Routing);
-    let summary = run_router(config, db, files, global)?;
+    let summary = run_router(config, db, run, global)?;
     show_routing(&summary);
     timer.finish(report);
     report.routing = Some(RoutingSummary {
@@ -304,43 +312,44 @@ pub(crate) fn route_detailed(
 }
 
 /// Runs the detailed router over `db`, saving and resuming its state as
-/// `files` say.
+/// `run` says.
 fn run_router(
     config: &Config,
     db: &mut NetlistDB,
-    files: &StateFiles,
+    run: &RouterRun,
     global: Option<GlobalSession>,
 ) -> anyhow::Result<pare_router::RoutingSummary> {
-    let resume = files.resume.as_deref().map(read_state).transpose()?;
+    let resume = run.resume.as_deref().map(read_state).transpose()?;
     let mut write = |state: &pare_router::RouteState| {
-        let Some((path, _)) = &files.save else {
+        let Some(save) = &run.save else {
             return Ok(());
         };
-        write_state(path, state).map_err(|e| pare_router::SaveError(format!("{e:#}")))?;
-        ui::wrote(path);
+        write_state(&save.path, state).map_err(|e| pare_router::SaveError(format!("{e:#}")))?;
+        ui::wrote(&save.path);
         Ok(())
     };
     let mut tables = RouteTables::default();
     let mut show = |p: &Progress<'_>| tables.show(p);
-    let run = pare_router::RunOptions {
+    let options = pare_router::RunOptions {
         resume: resume.as_ref(),
-        save: files.save.as_ref().map(|&(_, after)| pare_router::Save {
-            after,
+        save: run.save.as_ref().map(|save| pare_router::Save {
+            after: save.after,
             write: &mut write,
         }),
-        trace: files.trace.clone(),
+        trace: run.trace.clone(),
         report: Some(&mut show),
     };
     let summary = match global {
-        Some(global) => pare_router::route_on(db, &config.routing, global, run)?,
-        None => pare_router::route_with(db, &config.routing, run)?,
+        Some(global) => pare_router::route_on(db, &config.routing, global, options)?,
+        None => pare_router::route_with(db, &config.routing, options)?,
     };
-    if let Some((path, after)) = &files.save
+    if let Some(save) = &run.save
         && !summary.state_saved
     {
         log::warn!(
-            "routing ended before {after:?}, so no state was saved to {}",
-            path.display()
+            "routing ended before {:?}, so no state was saved to {}",
+            save.after,
+            save.path.display()
         );
     }
     Ok(summary)

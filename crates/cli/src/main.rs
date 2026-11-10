@@ -22,7 +22,8 @@ use crate::checks::{report_placement, report_routing};
 use crate::placement::{PlacementStart, run_placement};
 use crate::plan::FlowPlan;
 use crate::routing::{
-    StateFiles, global_route_with_repair, parse_save_point, route_detailed, route_global,
+    RouterRun, SaveRequest, global_route_with_repair, parse_save_point, route_detailed,
+    route_global,
 };
 use crate::view::{ViewRequest, view_area};
 use anyhow::Context;
@@ -302,8 +303,8 @@ fn route(args: RouteArgs, report: &mut Report) -> anyhow::Result<()> {
     if args.global_only {
         return route_global(&config, &db, args.guides.as_deref(), report);
     }
-    let files = state_files(args, db.dbu())?;
-    route_detailed(&config, &mut db, &files, None, report)
+    let run = router_run(args, db.dbu())?;
+    route_detailed(&config, &mut db, &run, None, report)
 }
 
 /// A box the command line gives by two opposite corners in microns, in
@@ -333,18 +334,16 @@ impl MicronBox {
     }
 }
 
-/// The state files `args` name, with the trace box in database `units`.
-fn state_files(args: RouteArgs, units: DbuPerMicron) -> anyhow::Result<StateFiles> {
+/// The router run `args` ask for, with the trace box in database `units`.
+fn router_run(args: RouteArgs, units: DbuPerMicron) -> anyhow::Result<RouterRun> {
     let area = args
         .trace_box
         .map(|corners| MicronBox::from_corners(&corners).map(|b| b.in_dbu(units)))
         .transpose()?;
-    Ok(StateFiles {
-        save: args.save_state.map(|path| {
-            (
-                path,
-                args.save_after.unwrap_or(pare_router::SavePoint::Global),
-            )
+    Ok(RouterRun {
+        save: args.save_state.map(|path| SaveRequest {
+            path,
+            after: args.save_after.unwrap_or(pare_router::SavePoint::Global),
         }),
         resume: args.resume,
         trace: pare_router::TraceRequest {
@@ -361,7 +360,7 @@ fn place_and_route(name: &Path, report: &mut Report) -> anyhow::Result<()> {
     let mut db = load_design(&config, None)?;
     report.design.clone_from(&db.name);
     if config.purpose == Purpose::Routing {
-        return route_detailed(&config, &mut db, &StateFiles::default(), None, report);
+        return route_detailed(&config, &mut db, &RouterRun::default(), None, report);
     }
     let plan = FlowPlan::resolve(&config, &db)?;
     let repair = run_placement(&config, &plan, &mut db, PlacementStart::Scratch, report)?;
@@ -372,7 +371,7 @@ fn place_and_route(name: &Path, report: &mut Report) -> anyhow::Result<()> {
         Some(mut repair) => global_route_with_repair(&config, &mut db, &mut repair, report)?,
         None => None,
     };
-    route_detailed(&config, &mut db, &StateFiles::default(), global, report)
+    route_detailed(&config, &mut db, &RouterRun::default(), global, report)
 }
 
 /// The `check` command: checks the placement, and the routing too unless
