@@ -297,6 +297,29 @@ impl RowGrid {
         }
     }
 
+    /// The grid cells under `r` that lie on the grid.
+    pub fn sites_under(&self, r: &Rect<Dbu>) -> impl Iterator<Item = GridPt> + use<> {
+        let cells = self.covering(r);
+        let (x0, x1) = (
+            cells.min.x.max(GridX::ZERO),
+            cells.max.x.min(self.row_site_count),
+        );
+        let (y0, y1) = (
+            cells.min.y.max(GridY::ZERO),
+            cells.max.y.min(self.row_count()),
+        );
+        y0.until(y1)
+            .flat_map(move |y| x0.until(x1).map(move |x| GridPt::new(x, y)))
+    }
+
+    /// The box of the site at `at`.
+    pub fn site_box(&self, at: GridPt) -> Rect<Dbu> {
+        Rect::new(
+            Point::new(at.x.to_dbu(self.site_width), self.row_y(at.y)),
+            Point::new((at.x + 1).to_dbu(self.site_width), self.row_y(at.y + 1)),
+        )
+    }
+
     /// Where a cell of `size` at `at` goes: clamped into the core and
     /// rounded onto the site grid and a row, as `Opendp::legalPt` with a
     /// point.

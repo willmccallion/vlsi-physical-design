@@ -122,38 +122,20 @@ impl Placer {
         Ok(())
     }
 
-    /// Blocks every site a region rectangle overlaps without covering, as
+    /// Blocks every site a region overlaps without covering, as
     /// `Opendp::groupInitPixels2`.
+    // NOTE: groupInitPixels2 blocks a site any one rectangle covers in part,
+    // even one the region's other rectangles cover the rest of; PARE blocks
+    // only sites the region as a whole covers in part.
     pub(super) fn mark_region_edges(&mut self) {
-        let rects: Vec<Rect<Dbu>> = self.groups.iter().flat_map(|g| g.rects.clone()).collect();
-        for rect in rects {
-            let x0 = self.rows.grid_x(rect.min.x).max(GridX::ZERO);
-            let x1 = self
-                .rows
-                .grid_end_x(rect.max.x)
-                .min(self.rows.row_site_count());
-            let y0 = self.rows.snap_down_y(rect.min.y).max(GridY::ZERO);
-            let y1 = self.rows.end_y(rect.max.y).min(self.rows.row_count());
-            for x in x0.until(x1) {
-                for y in y0.until(y1) {
-                    let sub = Rect::new(
-                        Point::new(x.to_dbu(self.rows.site_width()), self.rows.row_y(y)),
-                        Point::new(
-                            (x + 1).to_dbu(self.rows.site_width()),
-                            self.rows.row_y(y + 1),
-                        ),
-                    );
-                    let inside = rect.min.x <= sub.min.x
-                        && sub.max.x <= rect.max.x
-                        && rect.min.y <= sub.min.y
-                        && sub.max.y <= rect.max.y;
-                    let overlaps = rect.min.x < sub.max.x
-                        && rect.max.x > sub.min.x
-                        && rect.min.y < sub.max.y
-                        && rect.max.y > sub.min.y;
-                    if !inside
-                        && overlaps
-                        && let Some(p) = self.pixel_mut(x, y)
+        for g in self.groups.ids() {
+            let rects = self.groups[g].rects.clone();
+            for rect in &rects {
+                for at in self.rows.sites_under(rect) {
+                    let site = self.rows.site_box(at);
+                    if rect.overlaps(&site)
+                        && !site.covered_by(&rects)
+                        && let Some(p) = self.pixel_mut(at.x, at.y)
                     {
                         p.set_occupant(Occupant::Dummy);
                         p.valid = false;
@@ -163,11 +145,12 @@ impl Placer {
         }
     }
 
-    /// Gives each group the sites its region covers, as
-    /// `Opendp::groupInitPixels`, which counts each site's cover in
-    /// `Pixel::util`; here it is counted in site widths, exactly.
+    /// Gives each group with members every site its region covers whole,
+    /// unless an earlier group has it, as `Opendp::groupInitPixels`.
+    // NOTE: groupInitPixels takes each off-grid end from the first and last
+    // whole sites and leaves a site two rectangles cover to no one, so an
+    // off-grid or overlapping region loses whole sites; PARE claims them all.
     pub(super) fn mark_region_sites(&mut self) {
-        let mut cover = vec![Dbu::ZERO; self.pixels.len()];
         for g in self.groups.ids() {
             if self.groups[g].members.is_empty() {
                 if g != GroupId(0) {
@@ -177,62 +160,16 @@ impl Placer {
             }
             let rects = self.groups[g].rects.clone();
             for rect in &rects {
-                self.add_region_cover(&mut cover, rect);
-            }
-            for rect in &rects {
-                self.claim_covered_sites(&mut cover, g, rect);
-            }
-        }
-    }
-
-    /// Adds a site width to the cover of each site `rect` wholly covers,
-    /// less the part of either end off the site grid.
-    // NOTE: Opendp::groupInitPixels quirk kept: it takes each end's part off
-    // the grid from the first and last whole sites, not the partial ones, so
-    // an off-grid region loses them; a fix wants a union cover of the
-    // region's rectangles, which groupInitPixels2's edge test also lacks.
-    fn add_region_cover(&self, cover: &mut [Dbu], rect: &Rect<Dbu>) {
-        let site = self.rows.site_width();
-        let within = self.grid_within(rect);
-        let left_off_grid = Dbu(rect.min.x.get() % site.get());
-        let right_off_grid = Dbu((site - rect.max.x).get() % site.get());
-        for y in within.min.y.until(within.max.y) {
-            for x in within.min.x.until(within.max.x) {
-                if let Some(i) = self.pixel_index(x, y) {
-                    cover[i] += site;
-                }
-            }
-            if left_off_grid != Dbu::ZERO
-                && let Some(i) = self.pixel_index(within.min.x, y)
-            {
-                cover[i] -= left_off_grid;
-            }
-            if right_off_grid != Dbu::ZERO
-                && let Some(i) = self.pixel_index(within.max.x - 1, y)
-            {
-                cover[i] -= right_off_grid;
-            }
-        }
-    }
-
-    /// Gives group `g` each site in `rect` covered exactly once and blocks
-    /// each covered in part.
-    fn claim_covered_sites(&mut self, cover: &mut [Dbu], g: GroupId, rect: &Rect<Dbu>) {
-        let site = self.rows.site_width();
-        let within = self.grid_within(rect);
-        for y in within.min.y.until(within.max.y) {
-            for x in within.min.x.until(within.max.x) {
-                let Some(i) = self.pixel_index(x, y) else {
-                    continue;
-                };
-                let p = &mut self.pixels[i];
-                if cover[i] == site {
-                    p.set_group(g);
-                    p.valid = true;
-                } else if cover[i] > Dbu::ZERO && cover[i] < site {
-                    p.set_occupant(Occupant::Dummy);
-                    p.valid = false;
-                    cover[i] = Dbu::ZERO;
+                for at in self.rows.sites_under(rect) {
+                    if !self.rows.site_box(at).covered_by(&rects) {
+                        continue;
+                    }
+                    if let Some(p) = self.pixel_mut(at.x, at.y)
+                        && p.group().is_none_or(|h| h == g)
+                    {
+                        p.set_group(g);
+                        p.valid = true;
+                    }
                 }
             }
         }
@@ -767,19 +704,60 @@ mod tests {
         assert!((placer.groups[GroupId(0)].util - expected).abs() < 1e-12);
     }
 
+    /// The group of each of the bottom row's first ten sites.
+    fn bottom_row_groups(placer: &Placer) -> Vec<Option<GroupId>> {
+        (0..10)
+            .map(|x| {
+                placer
+                    .pixel(GridX::new(x), GridY::ZERO)
+                    .and_then(Pixel::group)
+            })
+            .collect()
+    }
+
     /// The region starts half way into the second site of the bottom row.
     #[test]
-    fn a_region_off_the_site_grid_loses_its_first_whole_site_as_opendp_does() {
+    fn a_region_off_the_site_grid_claims_every_whole_site_and_blocks_the_part() {
         let db = tiny_fenced("( 300 0 ) ( 2000 2000 )", "u1");
 
         let placer = placer_with_regions(&db);
 
-        let group_of = |x: i64| {
-            placer
-                .pixel(GridX::new(x), GridY::ZERO)
-                .and_then(Pixel::group)
-        };
-        assert_eq!([1, 2, 3].map(group_of), [None, None, Some(GroupId(0))]);
+        let g = Some(GroupId(0));
+        assert_eq!(
+            bottom_row_groups(&placer),
+            [None, None, g, g, g, g, g, g, g, g]
+        );
+        let partial = placer.pixel(GridX::new(1), GridY::ZERO).unwrap();
+        assert!(!partial.is_free() && !partial.valid);
+    }
+
+    /// Two rectangles overlap over sites 4 and 5; two more meet half way
+    /// into site 5 of the next pair.
+    #[test]
+    fn sites_the_region_covers_only_with_several_rectangles_are_its_own() {
+        let overlapping = tiny_fenced("( 0 0 ) ( 1200 2000 ) ( 800 0 ) ( 2000 2000 )", "u1");
+        let meeting = tiny_fenced("( 0 0 ) ( 1100 2000 ) ( 1100 0 ) ( 2000 2000 )", "u1");
+
+        let groups = [overlapping, meeting].map(|db| bottom_row_groups(&placer_with_regions(&db)));
+
+        assert_eq!(groups, [[Some(GroupId(0)); 10], [Some(GroupId(0)); 10]]);
+    }
+
+    #[test]
+    fn a_member_may_stand_across_two_rectangles_of_its_region() {
+        let db = tiny_fenced("( 0 0 ) ( 1000 2000 ) ( 1000 0 ) ( 2000 2000 )", "u1");
+        let placer = placer_with_regions(&db);
+        let u1 = placer.nodes.iter().find(|n| n.name == "u1").unwrap();
+
+        let allowed = placer.region_overlap_allowed(
+            u1,
+            GridX::new(4),
+            GridY::ZERO,
+            GridX::new(6),
+            GridY::new(1),
+        );
+
+        assert!(allowed);
     }
 
     #[test]
