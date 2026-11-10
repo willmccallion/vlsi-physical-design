@@ -26,11 +26,12 @@ use pare_common::geom::point::Point;
 use pare_common::geom::rect::Rect;
 
 /// Mean density overflow of the fields at which the state to resume from is
-/// saved.
+/// saved, `gpl`'s `routabilitySnapshotOverflow` of 0.6.
 pub(super) const SNAPSHOT_OVERFLOW: f64 = 0.6;
 
 /// Mean density overflow of the fields at or below which congestion is
-/// measured, once placement has settled.
+/// measured, once placement has settled, `gpl`'s
+/// `routabilityCheckOverflow` of 0.3.
 pub(super) const CHECK_OVERFLOW: f64 = 0.3;
 
 /// A field has settled once an iteration moves its objects at most this
@@ -55,16 +56,19 @@ const MAX_INFLATION_TOTAL: f64 = 0.30;
 /// One round may spend at most the growth budget divided by this.
 const BUDGET_PASSES: f64 = 6.0;
 
-/// Highest target density routability may raise a field to.
+/// Highest target density routability may raise a field to, `gpl`'s
+/// `routabilityMaxDensity` of 0.99.
 const MAX_DENSITY: f64 = 0.99;
 
 /// Relative drop in congestion that counts as a new minimum.
 const MIN_IMPROVEMENT: f64 = 0.005;
 
-/// Rounds in a row without a new minimum after which routability stops.
+/// Rounds in a row without a new minimum after which routability stops,
+/// `gpl`'s `max_routability_no_improvement_` of 3.
 const MAX_STALLED_ROUNDS: usize = 3;
 
-/// Rounds after which routability stops.
+/// Rounds after which routability stops, `gpl`'s `max_routability_revert_`
+/// of 50.
 const MAX_ROUNDS: usize = 50;
 
 /// Fractions of the most congested gcells averaged into the congestion
@@ -292,8 +296,7 @@ impl CongestionMap {
     }
 
     /// The mean congestion of the most congested gcells, averaged over the
-    /// fractions in [`TOP_FRACTIONS`], as `OpenROAD`'s weighted routing
-    /// congestion.
+    /// fractions in [`TOP_FRACTIONS`], as `gpl`'s `updateRudyAverage`.
     pub(super) fn metric(&self) -> f64 {
         let mut sorted: Vec<f64> = self
             .congestion
@@ -438,7 +441,8 @@ impl Routability {
     }
 
     /// Measures the congestion of `map` and grows the congested standard
-    /// cells of `fields`, deciding what placement does next.
+    /// cells of `fields`, deciding what placement does next, as `gpl`'s
+    /// `RouteBase::routability`.
     pub(super) fn check(
         &mut self,
         iteration: usize,
@@ -587,8 +591,8 @@ fn objects_area(objects: &Objects, range: ObjectRange) -> f64 {
 }
 
 /// Grows every standard cell of `field` in a congested gcell by `scale` of
-/// the growth `map` asks for. Returns how many cells grew and the area they
-/// gained.
+/// the growth `map` asks for, as `RouteBase::routability` bloats cells.
+/// Returns how many cells grew and the area they gained.
 fn grow(map: &CongestionMap, objects: &mut Objects, field: &Field, scale: f64) -> (usize, f64) {
     let mut inflated = 0;
     let mut added = 0.0;
@@ -608,10 +612,10 @@ fn grow(map: &CongestionMap, objects: &mut Objects, field: &Field, scale: f64) -
     (inflated, added)
 }
 
-/// Makes room in `field` for `added` area of cell growth: removes whole
-/// fillers, the last kept first, and when more than one filler's area is
-/// still missing, raises the target density to cover the cells and the
-/// fillers left.
+/// Makes room in `field` for `added` area of cell growth, as `gpl`'s
+/// `cutFillerCells`: removes whole fillers, the last kept first, and when
+/// more than one filler's area is still missing, raises the target density
+/// to cover the cells and the fillers left.
 fn remove_fillers(objects: &Objects, field: &mut Field, added: f64) {
     let single = field.filler.x * field.filler.y;
     let removed = if single > 0.0 {

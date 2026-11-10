@@ -186,7 +186,8 @@ impl DensityGrid {
         self.bins.size
     }
 
-    /// The footprint of an object of `size` whose bins count `charge`.
+    /// The footprint of an object of `size` whose bins count `charge`, as
+    /// `gpl`'s `updateDensitySize`.
     pub(super) fn footprint(&self, size: Point<f64>, charge: Charge) -> Footprint {
         let w = size.x.max(SQRT_2 * self.bins.size.x);
         let h = size.y.max(SQRT_2 * self.bins.size.y);
@@ -198,7 +199,8 @@ impl DensityGrid {
     }
 
     /// Deposits the objects in `cells` as cells and those in `fillers` as
-    /// fillers, and solves for the field. Returns the cell area above the
+    /// fillers, and solves for the field, as `gpl`'s
+    /// `updateBinsGCellDensityArea` and `updateDensityFieldBin`. Returns the cell area above the
     /// target density and all cell area.
     pub(super) fn update(
         &mut self,

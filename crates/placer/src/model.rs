@@ -36,7 +36,8 @@ pub enum CellKind {
     Macro,
 }
 
-/// Rows of height a cell must exceed to count as a macro.
+/// Rows of height a cell must exceed to count as a macro, `gpl`'s
+/// `Instance` `row_limit` of 6.
 const MACRO_ROWS: i64 = 6;
 
 /// One connection of a net.

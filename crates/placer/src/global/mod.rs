@@ -725,8 +725,9 @@ fn zone_target(requested: f64, utilization: f64) -> f64 {
 }
 
 /// The size and number of fillers that bring the free area to the target
-/// density: as tall as the median cell, with the mean area of the cells
-/// left after dropping the smallest and largest twentieth.
+/// density, in place of `gpl`'s `initFillerGCells`: as tall as the median
+/// cell, with the mean area of the cells left after dropping the smallest
+/// and largest twentieth.
 fn filler_layout(cells: &[Point<f64>], free_area: f64, target: f64) -> (Point<f64>, usize) {
     let cell_area: f64 = cells.iter().map(|s| s.x * s.y).sum();
     let filler_area = target.mul_add(free_area, -cell_area).max(0.0);
