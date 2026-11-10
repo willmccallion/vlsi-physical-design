@@ -558,12 +558,35 @@ impl TryFrom<InputTable> for InputConfig {
 /// not say.
 const DEFAULT_BOOKSHELF_LAYERS: usize = 6;
 
+/// Global placement's iteration limit.
+// NOTE: gpl's PlaceOptions::nesterovPlaceMaxIter is 5000; PARE defaults to
+// the 2000 every shipped config sets.
+const PLACER_MAX_ITERATIONS: usize = 2000;
+
+/// The overflow global placement stops at, as gpl's `PlaceOptions::overflow`.
+const TARGET_OVERFLOW: Share = Share(0.1);
+
+/// The overflows timing-driven placement repairs at, as gpl's
+/// `PlaceOptions::timingNetWeightOverflows` of 64 and 20 percent.
+const TIMING_DRIVEN_OVERFLOWS: [Share; 2] = [Share(0.64), Share(0.20)];
+
+/// The worst-slack net's weight, as gpl's `PlaceOptions::timingNetWeightMax`.
+const TIMING_NET_WEIGHT_MAX: f64 = 5.0;
+
+/// The congestion routability-driven placement aims below, as gpl's
+/// `PlaceOptions::routabilityTargetRcMetric`.
+const TARGET_CONGESTION: f64 = 1.01;
+
+/// Global routing's rip-up and reroute rounds, as
+/// `GlobalRouter::congestion_iterations_`.
+const GLOBAL_ITERATIONS: usize = 50;
+
 const fn default_placer_max_iterations() -> usize {
-    2000
+    PLACER_MAX_ITERATIONS
 }
 
 const fn default_target_overflow() -> Share {
-    Share(0.1)
+    TARGET_OVERFLOW
 }
 
 const fn default_seed() -> u64 {
@@ -571,15 +594,15 @@ const fn default_seed() -> u64 {
 }
 
 fn default_timing_driven_overflows() -> Vec<Share> {
-    vec![Share(0.64), Share(0.20)]
+    TIMING_DRIVEN_OVERFLOWS.to_vec()
 }
 
 const fn default_timing_net_weight_max() -> f64 {
-    5.0
+    TIMING_NET_WEIGHT_MAX
 }
 
 const fn default_target_congestion() -> f64 {
-    1.01
+    TARGET_CONGESTION
 }
 
 /// OpenROAD-flow-scripts' default `ROUTING_LAYER_ADJUSTMENT`, which its
@@ -597,7 +620,7 @@ const fn default_gcell_tracks() -> NonZeroU32 {
 }
 
 const fn default_global_iterations() -> usize {
-    50
+    GLOBAL_ITERATIONS
 }
 
 const fn default_global_capacity_reserve() -> CapacityReserve {
