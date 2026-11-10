@@ -236,3 +236,19 @@ fn an_out_of_range_value_is_reported_with_its_range() {
 
     assert!(error.to_string().contains("1 is outside [0, 1)"), "{error}");
 }
+
+#[test]
+fn zero_threads_is_rejected_rather_than_meaning_every_core() {
+    assert!(parse("threads = 0").is_err());
+}
+
+#[test]
+fn a_thread_count_is_kept() {
+    assert_eq!(
+        parse("threads = 4")
+            .unwrap()
+            .threads
+            .map(std::num::NonZeroUsize::get),
+        Some(4)
+    );
+}
