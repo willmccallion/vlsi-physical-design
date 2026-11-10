@@ -1376,14 +1376,14 @@ impl Sta {
                 }
             }
             PinOwner::Cell { cell, .. } => {
+                let Some((lib, port)) = netlist.link.pin_port(db, pin) else {
+                    return SideValues::both(None);
+                };
                 if let Some(&gate) = self.gated.get(&pin) {
                     for (side, value) in self.gated_requireds(tag, launch, entry, gate) {
                         tighten(side, value);
                     }
                 }
-                let Some((lib, port)) = netlist.link.pin_port(db, pin) else {
-                    return SideValues::both(None);
-                };
                 let latch = self
                     .latches
                     .get(&cell)
