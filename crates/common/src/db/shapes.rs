@@ -208,6 +208,7 @@ fn special_rect_box(rect: &Rect<Dbu>) -> Rect<Dbu> {
         (true, true) => dy >= dx,
         (true, false) => true,
         (false, true) => false,
+        // NOTE: dbSBox::create drops such a box; PARE keeps it as given.
         (false, false) => return *rect,
     };
     let width = if along_y { dx } else { dy };
