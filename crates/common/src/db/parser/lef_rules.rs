@@ -13,6 +13,7 @@ use crate::db::rules::{
     WidthRangeSpacing,
 };
 use crate::geom::dbu::{Dbu, DbuArea, DbuPerMicron};
+use std::path::Path;
 
 /// A metal layer `SPACING` statement.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -25,31 +26,70 @@ pub(crate) enum RoutingSpacing {
     EndOfLine(EndOfLineSpacing),
 }
 
-/// Reads rule statements from a lexer at a database resolution.
+/// The values of one file rounded onto the database grid: how many, and
+/// the first of them with its line.
+#[derive(Debug, Default)]
+pub(crate) struct OffGridValues {
+    count: usize,
+    first: Option<(String, usize)>,
+}
+
+impl OffGridValues {
+    fn note(&mut self, value: impl FnOnce() -> String, line: usize) {
+        self.count += 1;
+        if self.first.is_none() {
+            self.first = Some((value(), line));
+        }
+    }
+
+    /// The warning for `path` at `dbu`, if any of its values were rounded.
+    pub(crate) fn warning(&self, path: &Path, dbu: DbuPerMicron) -> Option<String> {
+        let (value, line) = self.first.as_ref()?;
+        Some(format!(
+            "{}: {} values off the 1/{} um grid rounded to the nearest unit, the first {value} \
+             at line {line}",
+            path.display(),
+            self.count,
+            dbu.get()
+        ))
+    }
+}
+
+/// Reads rule statements from a lexer at a database resolution, noting the
+/// values it rounds onto the grid.
 pub(crate) struct RuleReader<'l, 'a> {
     lx: &'l mut Lexer<'a>,
     dbu: DbuPerMicron,
+    off_grid: &'l mut OffGridValues,
 }
 
 impl<'l, 'a> RuleReader<'l, 'a> {
-    pub(crate) const fn new(lx: &'l mut Lexer<'a>, dbu: DbuPerMicron) -> Self {
-        Self { lx, dbu }
+    pub(crate) const fn new(
+        lx: &'l mut Lexer<'a>,
+        dbu: DbuPerMicron,
+        off_grid: &'l mut OffGridValues,
+    ) -> Self {
+        Self { lx, dbu, off_grid }
     }
 
     pub(crate) fn microns(&mut self, what: &str) -> Result<Dbu, ParseError> {
         let line = self.lx.line();
         let value: f64 = self.lx.number(what)?;
-        self.dbu
-            .to_dbu(value)
-            .map_err(|e| self.lx.error(line, e.to_string()))
+        let snapped = self.dbu.snap(value);
+        if snapped.off_grid {
+            self.off_grid.note(|| format!("{value} um"), line);
+        }
+        Ok(snapped.value)
     }
 
     pub(crate) fn area(&mut self, what: &str) -> Result<DbuArea, ParseError> {
         let line = self.lx.line();
         let value: f64 = self.lx.number(what)?;
-        self.dbu
-            .to_dbu_area(value)
-            .map_err(|e| self.lx.error(line, e.to_string()))
+        let snapped = self.dbu.snap_area(value);
+        if snapped.off_grid {
+            self.off_grid.note(|| format!("{value} um^2"), line);
+        }
+        Ok(snapped.value)
     }
 
     /// Consumes the next statement keyword of a property string, which must
@@ -406,5 +446,41 @@ impl<'l, 'a> RuleReader<'l, 'a> {
         }
         self.end("CELLEDGESPACINGTABLE")?;
         Ok(table)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn values_off_the_grid_are_rounded_counted_and_the_first_named() {
+        let mut lx = Lexer::new("0.0004 0.002\n250.0001 0.0000004 ;", Path::new("t.lef"));
+        let dbu = DbuPerMicron::new(1000).unwrap();
+        let mut off_grid = OffGridValues::default();
+        let mut rules = RuleReader::new(&mut lx, dbu, &mut off_grid);
+
+        let read: Vec<Dbu> = (0..3).map(|_| rules.microns("length").unwrap()).collect();
+        let area = rules.area("area").unwrap();
+
+        assert_eq!(read, [Dbu(0), Dbu(2), Dbu(250_000)]);
+        assert_eq!(area, DbuArea(0));
+        assert_eq!(
+            off_grid.warning(Path::new("t.lef"), dbu).as_deref(),
+            Some(
+                "t.lef: 3 values off the 1/1000 um grid rounded to the nearest unit, the \
+                 first 0.0004 um at line 1"
+            )
+        );
+    }
+
+    #[test]
+    fn a_file_on_the_grid_warns_of_nothing() {
+        let off_grid = OffGridValues::default();
+
+        assert_eq!(
+            off_grid.warning(Path::new("t.lef"), DbuPerMicron::new(1000).unwrap()),
+            None
+        );
     }
 }

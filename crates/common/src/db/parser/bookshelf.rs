@@ -204,7 +204,11 @@ fn number(text: &str, units: DbuPerMicron) -> Result<Dbu, String> {
     let value: f64 = text
         .parse()
         .map_err(|_| format!("expected a number, found '{text}'"))?;
-    units.to_dbu(value).map_err(|e| e.to_string())
+    let snapped = units.snap(value);
+    if snapped.off_grid {
+        return Err(format!("{value} is not a multiple of 1/{} um", units.get()));
+    }
+    Ok(snapped.value)
 }
 
 /// Lines with content, split into words, skipping headers and comments.

@@ -11,7 +11,7 @@ use crate::db::library::{
     CoreKind, CutLayer, Direction, LayerElectrical, LayerRef, Library, Macro, MacroClass, MacroPin,
     PinDirection, RoutingLayer, Shape, SignalUse, Site, SiteClass, Symmetry, ViaDef, ViaSource,
 };
-use crate::db::parser::lef_rules::{RoutingSpacing, RuleReader};
+use crate::db::parser::lef_rules::{OffGridValues, RoutingSpacing, RuleReader};
 use crate::db::parser::lexer::{Lexer, ParseError, Token, read_file};
 use crate::db::rules::{
     CellEdge, ClearanceMeasure, CutLayerRules, MaxViaStack, RoutingLayerRules, RuleSource,
@@ -39,8 +39,12 @@ pub fn parse_files(paths: &[PathBuf], dbu: DbuPerMicron) -> Result<Library, Pars
             ignored_layers: &mut ignored_layers,
             last_layer: &mut last_layer,
             warned: HashSet::new(),
+            off_grid: OffGridValues::default(),
         };
         parser.parse()?;
+        if let Some(warning) = parser.off_grid.warning(path, dbu) {
+            log::warn!("{warning}");
+        }
     }
     if library.routing_layers.is_empty() {
         return Err(ParseError::File {
@@ -169,6 +173,7 @@ struct LefParser<'a, 'l> {
     ignored_layers: &'l mut HashSet<String>,
     last_layer: &'l mut Option<StackKind>,
     warned: HashSet<(&'static str, &'a str)>,
+    off_grid: OffGridValues,
 }
 
 impl<'a> LefParser<'a, '_> {
@@ -245,7 +250,7 @@ impl<'a> LefParser<'a, '_> {
     }
 
     const fn rules(&mut self) -> RuleReader<'_, 'a> {
-        RuleReader::new(&mut self.lx, self.dbu)
+        RuleReader::new(&mut self.lx, self.dbu, &mut self.off_grid)
     }
 
     fn microns(&mut self, what: &str) -> Result<Dbu, ParseError> {
@@ -487,7 +492,7 @@ impl<'a> LefParser<'a, '_> {
             let name = self.lx.expect_token("property name")?;
             let value = self.lx.expect_token("property value")?;
             let mut sub = Lexer::starting_at(value.text, self.lx.path(), value.line);
-            let mut rules = RuleReader::new(&mut sub, self.dbu);
+            let mut rules = RuleReader::new(&mut sub, self.dbu, &mut self.off_grid);
             match (kind, name.text) {
                 // NOTE: lefinReader::layer parses LEF58_SPACING alone, and
                 // setRoutingLayerProperties skips most LEF58_MINSTEP; PARE
@@ -623,7 +628,7 @@ impl<'a> LefParser<'a, '_> {
             match (t.text, value) {
                 ("LIBRARY", Some(v)) if is_edge_table => {
                     let mut sub = Lexer::starting_at(v.text, self.lx.path(), v.line);
-                    let mut rules = RuleReader::new(&mut sub, self.dbu);
+                    let mut rules = RuleReader::new(&mut sub, self.dbu, &mut self.off_grid);
                     while rules.next_keyword("CELLEDGESPACINGTABLE")?.is_some() {
                         let table = rules.cell_edge_spacing_table()?;
                         self.lib.rules.cell_edge_spacing.extend(table);
@@ -1034,7 +1039,7 @@ impl<'a> LefParser<'a, '_> {
                 continue;
             }
             let mut sub = Lexer::starting_at(value.text, self.lx.path(), value.line);
-            let mut rules = RuleReader::new(&mut sub, self.dbu);
+            let mut rules = RuleReader::new(&mut sub, self.dbu, &mut self.off_grid);
             while rules.next_keyword("EDGETYPE")?.is_some() {
                 edges.push(rules.cell_edge()?);
             }
