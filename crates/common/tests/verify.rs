@@ -15,7 +15,9 @@ use pare_common::geom::orient::Orientation;
 use pare_common::geom::point::Point;
 use pare_common::geom::rect::Rect;
 use pare_common::verify::drc::{Violation, check_drc};
-use pare_common::verify::placement::{PlacementViolation, placement_violations};
+use pare_common::verify::placement::{
+    PlacementViolation, PlacementViolationKind, placement_violations, violation_counts,
+};
 use pare_common::verify::routing::check_routing;
 use std::path::{Path, PathBuf};
 
@@ -512,4 +514,29 @@ fn a_cell_abutting_a_fence_does_not_overlap_it() {
     add_region(&mut db, RegionKind::Fence, &[rect(600, 0, 900, 2000)], &[]);
 
     assert_eq!(region_violations(&db), []);
+}
+
+#[test]
+fn violations_are_counted_by_kind_in_the_kinds_order() {
+    let (a, b) = (CellId::new(0), CellId::new(1));
+    let violations = [
+        PlacementViolation::OffSite(a),
+        PlacementViolation::Overlap(a, b),
+        PlacementViolation::OffSite(b),
+    ];
+
+    let counts: Vec<_> = violation_counts(&violations).into_iter().collect();
+
+    assert_eq!(
+        counts,
+        [
+            (PlacementViolationKind::Overlap, 1),
+            (PlacementViolationKind::OffSite, 2)
+        ]
+    );
+}
+
+#[test]
+fn no_violations_have_no_counts() {
+    assert!(violation_counts(&[]).is_empty());
 }

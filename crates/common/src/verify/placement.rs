@@ -6,7 +6,7 @@ use crate::db::indices::{CellId, IdVec};
 use crate::db::library::MacroClass;
 use crate::geom::dbu::Dbu;
 use crate::geom::rect::Rect;
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 
 /// A placement rule a cell breaks.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -30,6 +30,78 @@ pub enum PlacementViolation {
     OutsideRegion(CellId),
     /// A movable cell not assigned to a fence region overlaps one.
     InFence(CellId),
+}
+
+/// The rule a placement violation breaks.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub enum PlacementViolationKind {
+    /// [`PlacementViolation::Unplaced`].
+    Unplaced,
+    /// [`PlacementViolation::OutsideDie`].
+    OutsideDie,
+    /// [`PlacementViolation::Overlap`].
+    Overlap,
+    /// [`PlacementViolation::InBlockage`].
+    InBlockage,
+    /// [`PlacementViolation::NotInRow`].
+    NotInRow,
+    /// [`PlacementViolation::OffSite`].
+    OffSite,
+    /// [`PlacementViolation::WrongOrientation`].
+    WrongOrientation,
+    /// [`PlacementViolation::OutsideRegion`].
+    OutsideRegion,
+    /// [`PlacementViolation::InFence`].
+    InFence,
+}
+
+impl PlacementViolationKind {
+    /// The kind's name, as reports print it.
+    #[must_use]
+    pub const fn name(self) -> &'static str {
+        match self {
+            Self::Unplaced => "Unplaced",
+            Self::OutsideDie => "Outside die",
+            Self::Overlap => "Overlap",
+            Self::InBlockage => "In blockage",
+            Self::NotInRow => "Not in a row",
+            Self::OffSite => "Off site",
+            Self::WrongOrientation => "Wrong orientation",
+            Self::OutsideRegion => "Outside region",
+            Self::InFence => "In a fence",
+        }
+    }
+}
+
+impl PlacementViolation {
+    /// The rule it breaks.
+    #[must_use]
+    pub const fn kind(self) -> PlacementViolationKind {
+        match self {
+            Self::Unplaced(_) => PlacementViolationKind::Unplaced,
+            Self::OutsideDie(_) => PlacementViolationKind::OutsideDie,
+            Self::Overlap(..) => PlacementViolationKind::Overlap,
+            Self::InBlockage(_) => PlacementViolationKind::InBlockage,
+            Self::NotInRow(_) => PlacementViolationKind::NotInRow,
+            Self::OffSite(_) => PlacementViolationKind::OffSite,
+            Self::WrongOrientation(_) => PlacementViolationKind::WrongOrientation,
+            Self::OutsideRegion(_) => PlacementViolationKind::OutsideRegion,
+            Self::InFence(_) => PlacementViolationKind::InFence,
+        }
+    }
+}
+
+/// How many of `violations` there are of each kind they have, in the
+/// kinds' order.
+#[must_use]
+pub fn violation_counts(
+    violations: &[PlacementViolation],
+) -> BTreeMap<PlacementViolationKind, usize> {
+    let mut counts = BTreeMap::new();
+    for violation in violations {
+        *counts.entry(violation.kind()).or_insert(0) += 1;
+    }
+    counts
 }
 
 /// Checks every movable cell; fixed cells only matter as obstacles, and
