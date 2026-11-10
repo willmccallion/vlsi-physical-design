@@ -1102,8 +1102,8 @@ impl Placer {
     }
 
     /// Whether the cell may cover `[x, x_end) x [y, y_end)` given the
-    /// regions: within one region box for a member of a group, clear of
-    /// every box otherwise, as `Opendp::checkRegionOverlap`.
+    /// regions: within its region for a member of a group, clear of every
+    /// region box otherwise, as `Opendp::checkRegionOverlap`.
     fn region_overlap_allowed(
         &self,
         node: &Node,
@@ -1112,27 +1112,16 @@ impl Placer {
         x_end: GridX,
         y_end: GridY,
     ) -> bool {
-        let query = Rect::new(
-            Point::new(x.to_dbu(self.rows.site_width()), self.rows.row_y(y)),
-            Point::new(
-                x_end.to_dbu(self.rows.site_width()) - Dbu(1),
-                self.rows.row_y(y_end) - Dbu(1),
-            ),
-        );
-        let mut hits = self
-            .region_boxes
-            .iter()
-            .filter(|b| closed_overlap(b, &query));
-        if node.group.is_some() {
-            let (Some(only), None) = (hits.next(), hits.next()) else {
-                return false;
-            };
-            return only.min.x <= query.min.x
-                && query.max.x <= only.max.x
-                && only.min.y <= query.min.y
-                && query.max.y <= only.max.y;
+        let corner = Point::new(x.to_dbu(self.rows.site_width()), self.rows.row_y(y));
+        let far = Point::new(x_end.to_dbu(self.rows.site_width()), self.rows.row_y(y_end));
+        if let Some(g) = node.group {
+            // NOTE: checkRegionOverlap wants one rectangle to hold the cell, so
+            // a cell across two rectangles of its region is refused; PARE asks
+            // the region as a whole.
+            return Rect::new(corner, far).covered_by(&self.groups[g].rects);
         }
-        hits.next().is_none()
+        let query = Rect::new(corner, far - Point::new(Dbu(1), Dbu(1)));
+        !self.region_boxes.iter().any(|b| closed_overlap(b, &query))
     }
 
     /// Writes the movable standard cells' places and orientations back, as
