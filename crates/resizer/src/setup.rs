@@ -15,19 +15,23 @@ use pare_common::db::liberty::{Edge, MinMax, TimingArcSet};
 use pare_common::units::{CellArea, Farads, Seconds};
 
 /// Passes an endpoint may go on failing to improve before its best state
-/// is restored.
+/// is restored, as `repairSetup_Legacy`'s `decreasing_slack_max_passes`.
 const DECREASING_SLACK_MAX_PASSES: usize = 50;
 
-/// Iterations between checks of the rate of repair.
+/// Iterations between checks of the rate of repair, as
+/// `RepairSetup::opto_small_interval_`.
 const SMALL_INTERVAL: usize = 100;
 
-/// Iterations between doublings of the rate the repair must keep.
+/// Iterations between doublings of the rate the repair must keep, as
+/// `RepairSetup::opto_large_interval_`.
 const LARGE_INTERVAL: usize = 1000;
 
-/// Iterations the repair runs before its rate is judged.
+/// Iterations the repair runs before its rate is judged, as
+/// `RepairSetup::terminateProgress` waits.
 const INITIAL_ITERATIONS: usize = 1000;
 
-/// The share of the initial violation each hundred iterations must fix.
+/// The share of the initial violation each hundred iterations must fix, as
+/// `RepairSetup::inc_fix_rate_threshold_`.
 const FIX_RATE_THRESHOLD: f64 = 0.0001;
 
 /// Every failing endpoint, as `OpenROAD-flow-scripts` repairs them with
@@ -37,14 +41,15 @@ const ALL_FAILING: Share = match Share::new(1.0) {
     None => panic!("1 is a share"),
 };
 
-/// Passes per endpoint in the last gasp.
+/// Passes per endpoint in the last gasp, as
+/// `RepairSetup::max_last_gasp_passes_`.
 const LAST_GASP_PASSES: usize = 10;
 
 /// The moves the last gasp tries: sizing only.
 const LAST_GASP_SEQUENCE: [MoveKind; 3] =
     [MoveKind::SizeUpMatch, MoveKind::SizeUp, MoveKind::SwapPins];
 
-/// Iterations between progress reports.
+/// Iterations between progress reports, as `RepairSetup::print_interval_`.
 const PRINT_INTERVAL: usize = 10;
 
 /// How setup repair runs.

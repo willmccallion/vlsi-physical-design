@@ -1,5 +1,9 @@
-//! Comparisons of times with the tolerance `OpenSTA` uses, so that two
-//! delays computed by different routes count as equal.
+//! Comparisons with the tolerance of `OpenSTA`'s `Fuzzy.cc`.
+//!
+//! Two delays computed by different routes count as equal. The tolerances
+//! are absolute in base units, made for seconds; `OpenROAD` applies the
+//! same comparisons to capacitances and areas in places, and PARE does
+//! where it follows it.
 
 use pare_common::units::Quantity;
 

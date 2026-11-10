@@ -28,22 +28,27 @@ use pare_common::units::{CellArea, Farads, FaradsPerMeter, Meters, Ohms, OhmsPer
 use std::ops::Mul;
 use std::rc::Rc;
 
-/// Margin kept in hand on slew limits while rebuffering, in percent.
+/// Margin kept in hand on slew limits while rebuffering, in percent, as
+/// `Rebuffer::slew_margin_`.
 const SLEW_MARGIN: f64 = 20.0;
 
-/// Margin kept in hand on load limits while rebuffering, in percent.
+/// Margin kept in hand on load limits while rebuffering, in percent, as
+/// `Rebuffer::cap_margin_`.
 const CAP_MARGIN: f64 = 20.0;
 
-/// Elmore factor for 20 to 80 percent slew thresholds.
+/// Elmore factor for 20 to 80 percent slew thresholds, as
+/// `Rebuffer::elmore_skew_factor_`.
 const ELMORE_SKEW_FACTOR: f64 = 1.39;
 
-/// How much of the critical delay the area recovery may give back.
+/// How much of the critical delay the area recovery may give back, as
+/// `Rebuffer::relaxation_factor_`.
 const RELAXATION_FACTOR: f64 = 0.01;
 
-/// Rounds of buffering for timing.
+/// Rounds of buffering for timing, as `Rebuffer::rebufferPin` runs them.
 const TIMING_ROUNDS: usize = 3;
 
-/// Rounds of area recovery, each allowed a larger share of the slack.
+/// Rounds of area recovery, each allowed a larger share of the slack, as
+/// `Rebuffer::rebufferPin` runs them.
 const AREA_ROUNDS: usize = 5;
 
 /// The timing of a path point at the driver being rebuffered: when it

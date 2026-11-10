@@ -21,21 +21,24 @@ use pare_common::units::{Farads, Meters, Ohms, Seconds};
 use rustc_hash::{FxHashMap, FxHashSet};
 use std::rc::Rc;
 
-/// Fanout above which a net is cloned or split rather than rebuffered.
+/// Fanout above which a net is cloned or split rather than rebuffered, as
+/// `BaseMove::split_load_min_fanout_`.
 const SPLIT_LOAD_MIN_FANOUT: usize = 8;
 
-/// Fanout at and above which rebuffering is not tried.
+/// Fanout at and above which rebuffering is not tried, as
+/// `BaseMove::rebuffer_max_fanout_`.
 const REBUFFER_MAX_FANOUT: usize = 20;
 
 /// Fanout a driver may take on when a buffer is removed, absent a limit,
 /// as `BaseMove::buffer_removal_max_fanout_`.
 const BUFFER_REMOVAL_MAX_FANOUT: f64 = 10.0;
 
-/// Inputs beyond which pin equivalence is not simulated.
+/// Inputs beyond which pin equivalence is not simulated, as
+/// `BaseMove::isPortEqiv` stops.
 const MAX_SIMULATED_INPUTS: usize = 16;
 
 /// How much worse an already failing side input may get when a buffer is
-/// removed, as a share of its violation.
+/// removed, as a share of its violation, as `kSlackDegradRatioLimit`.
 const SLACK_DEGRADE_RATIO_LIMIT: f64 = 0.1;
 
 /// A kind of move.

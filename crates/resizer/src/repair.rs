@@ -18,7 +18,7 @@ use pare_common::units::{CellArea, Farads, FaradsPerMeter, Meters, Ohms, OhmsPer
 use std::collections::HashSet;
 
 /// How far short of the computed split a repeater is placed, as
-/// `OpenROAD`'s `length_margin`.
+/// `RepairDesign::repairNetWire`'s `length_margin`.
 const LENGTH_MARGIN: f64 = 0.05;
 
 /// What repair found and did.
