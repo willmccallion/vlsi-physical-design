@@ -2018,4 +2018,204 @@ mod tests {
             );
         });
     }
+
+    /// Every original pin's late and early slack and late slews.
+    fn timing_of(resizer: &Resizer<'_, Sta>, pins: usize) -> Vec<(String, Slack, Slack, f64)> {
+        let sta = resizer.sta();
+        (0..pins)
+            .map(PinId::new)
+            .map(|p| {
+                (
+                    resizer.db.pin_name(p),
+                    sta.slack(p, MinMax::Max),
+                    sta.slack(p, MinMax::Min),
+                    resizer.graph.slew(p).max().get(),
+                )
+            })
+            .collect()
+    }
+
+    /// The pins whose timing differs between `before` and `after`.
+    fn timing_diffs(
+        before: &[(String, Slack, Slack, f64)],
+        after: &[(String, Slack, Slack, f64)],
+    ) -> Vec<String> {
+        before
+            .iter()
+            .zip(after)
+            .filter(|(b, a)| b != a)
+            .map(|(b, a)| format!("{b:?} -> {a:?}"))
+            .collect()
+    }
+
+    #[test]
+    fn restoring_the_journal_restores_the_timing_of_removals_resizes_and_insertions() {
+        let mut db = two_buffers();
+        let lib = cells(&clock_cells_source());
+        let rc = metal2_wires(&db);
+        with_session_inputs(&mut db, &lib, CLOCK, rc, |inputs, sdc| {
+            let mut resizer = Resizer::timed(inputs, sdc).unwrap();
+            let pins = resizer.db.pins.len();
+            let before = timing_of(&resizer, pins);
+            resizer.journal_begin();
+            let b1 = resizer.db.cell_id("b1").unwrap();
+            let _ = resizer.remove_buffer(b1).unwrap();
+            let b2 = resizer.db.cell_id("b2").unwrap();
+            let clock_buffer = resizer.link.liberty.cell_id("CLKBUF_X3").unwrap();
+            assert!(resizer.replace_cell(b2, clock_buffer).unwrap());
+            let d = resizer.db.net_id("d").unwrap();
+            let load = pin(resizer.db, "f2/D");
+            let buffer = resizer.buffers.lowest_drive;
+            let at = Point::new(Dbu(50_000), Dbu(2800));
+            let _ = resizer
+                .insert_buffer_before_loads(d, &[load], buffer, at, "rebuffer")
+                .unwrap();
+
+            resizer.journal_restore().unwrap();
+
+            let diffs = timing_diffs(&before, &timing_of(&resizer, pins));
+            assert!(diffs.is_empty(), "{}", diffs.join("\n"));
+        });
+    }
+
+    /// Two flops feeding an and gate `g` that drives two more.
+    fn gate_fanout() -> NetlistDB {
+        design(&def_text(
+            "gate",
+            &DefSections {
+                components: "- f1 DFF_X1 + PLACED ( 2000 2800 ) N ;\n\
+                             - f2 DFF_X1 + PLACED ( 2000 30000 ) N ;\n\
+                             - g AND2_X1 + PLACED ( 40000 16000 ) N ;\n\
+                             - f3 DFF_X1 + PLACED ( 80000 2800 ) N ;\n\
+                             - f4 DFF_X1 + PLACED ( 80000 30000 ) N ;\n",
+                nets: "- clk ( PIN clk ) ( f1 CK ) ( f2 CK ) ( f3 CK ) ( f4 CK ) ;\n\
+                       - a ( f1 Q ) ( g A ) ;\n- b ( f2 Q ) ( g B ) ;\n\
+                       - z ( g Z ) ( f3 D ) ( f4 D ) ;\n",
+                inputs: &["clk"],
+                outputs: &[],
+            },
+        ))
+    }
+
+    #[test]
+    fn restoring_the_journal_restores_the_timing_of_a_pin_swap_and_a_clone() {
+        let mut db = gate_fanout();
+        let lib = cells(&clock_cells_source());
+        let rc = metal2_wires(&db);
+        with_session_inputs(&mut db, &lib, CLOCK, rc, |inputs, sdc| {
+            let mut resizer = Resizer::timed(inputs, sdc).unwrap();
+            let pins = resizer.db.pins.len();
+            let before = timing_of(&resizer, pins);
+            let (a1, a2) = (pin(resizer.db, "g/A"), pin(resizer.db, "g/B"));
+            let (net_a, net_b) = (resizer.db.pins[a1].net, resizer.db.pins[a2].net);
+            resizer.journal_begin();
+            resizer.move_pin(a1, net_b);
+            resizer.move_pin(a2, net_a);
+            resizer.update_net(net_a);
+            resizer.update_net(net_b);
+            let and2 = resizer.link.liberty.cell_id("AND2_X1").unwrap();
+            let and_cell = resizer.link.liberty.cell(and2);
+            let at = Point::new(Dbu(60_000), Dbu(30_000));
+            let clone = resizer.make_instance(and2, at, "clone").unwrap();
+            let z = resizer.db.net_id("z").unwrap();
+            let cloned_out = resizer.make_net("net", z).unwrap();
+            for (port, net) in [("A", net_a), ("B", net_b), ("Z", cloned_out)] {
+                let port = and_cell.port(port).unwrap();
+                let _ = resizer.connect(clone, and2, port, net).unwrap();
+            }
+            resizer.move_pin(pin(resizer.db, "f4/D"), cloned_out);
+            for net in [net_a, net_b, z, cloned_out] {
+                resizer.update_net(net);
+            }
+
+            resizer.journal_restore().unwrap();
+
+            let diffs = timing_diffs(&before, &timing_of(&resizer, pins));
+            assert!(diffs.is_empty(), "{}", diffs.join("\n"));
+        });
+    }
+
+    /// The pins whose slack differs, beyond tolerance, between the session's
+    /// incrementally kept timing and timing found afresh.
+    fn stale_slacks(resizer: &Resizer<'_, Sta>) -> Vec<String> {
+        let netlist = resizer.netlist();
+        let fresh = Sta::new(
+            &netlist,
+            &resizer.graph,
+            resizer.clocks,
+            resizer.constants,
+            resizer.sta().sdc(),
+        );
+        let same = |a: Slack, b: Slack| {
+            a == b || (a.is_constrained() && b.is_constrained() && fuzzy::equal(a.time(), b.time()))
+        };
+        resizer
+            .db
+            .pins
+            .ids()
+            .filter(|&p| !netlist.is_retired(p))
+            .flat_map(|p| MinMax::BOTH.map(|side| (p, side)))
+            .filter_map(|(p, side)| {
+                let (kept, found) = (resizer.sta().slack(p, side), fresh.slack(p, side));
+                (!same(kept, found))
+                    .then(|| format!("{} {side:?}: {kept:?} vs {found:?}", resizer.db.pin_name(p)))
+            })
+            .collect()
+    }
+
+    /// One random edit of the chain of [`buffered_pair`]: a buffer resized,
+    /// removed or put in front of a load.
+    fn random_edit(resizer: &mut Resizer<'_, Sta>, draw: &mut impl FnMut(usize) -> usize) {
+        let buffers: Vec<CellId> = resizer
+            .db
+            .cells
+            .ids()
+            .filter(|&c| !resizer.db.cells[c].retired && resizer.buffer_pins(c).is_some())
+            .collect();
+        let cell = buffers[draw(buffers.len())];
+        match draw(3) {
+            0 => {
+                let sizes = ["BUF_X1", "CLKBUF_X3"];
+                let size = resizer.link.liberty.cell_id(sizes[draw(2)]).unwrap();
+                let _ = resizer.replace_cell(cell, size).unwrap();
+            }
+            1 if buffers.len() > 1 => {
+                let _ = resizer.remove_buffer(cell).unwrap();
+            }
+            _ => {
+                let (_, out) = resizer.buffer_pins(cell).unwrap();
+                let net = resizer.db.pins[out].net;
+                let loads: Vec<PinId> = resizer.netlist().loads(net).collect();
+                let at = Point::new(Dbu(2000 + 4000 * draw(18) as i64), Dbu(2800));
+                let buffer = resizer.buffers.lowest_drive;
+                let _ = resizer
+                    .insert_buffer_before_loads(net, &loads, buffer, at, "rebuffer")
+                    .unwrap();
+            }
+        }
+    }
+
+    #[test]
+    fn timing_kept_through_random_edits_matches_timing_found_afresh() {
+        let mut db = buffered_pair();
+        let lib = cells(&clock_cells_source());
+        let rc = metal2_wires(&db);
+        let mut state: u64 = 0x5eed;
+        let mut draw = |n: usize| {
+            state = state
+                .wrapping_mul(6_364_136_223_846_793_005)
+                .wrapping_add(1_442_695_040_888_963_407);
+            (state >> 33) as usize % n
+        };
+        with_session_inputs(&mut db, &lib, CLOCK, rc, |inputs, sdc| {
+            let mut resizer = Resizer::timed(inputs, sdc).unwrap();
+            for step in 0..40 {
+                random_edit(&mut resizer, &mut draw);
+
+                let stale = stale_slacks(&resizer);
+
+                assert!(stale.is_empty(), "after edit {step}:\n{}", stale.join("\n"));
+            }
+        });
+    }
 }
