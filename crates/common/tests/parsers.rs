@@ -516,12 +516,13 @@ fn a_def_via_differing_from_a_lef_via_of_its_name_leaves_the_lef_via_in_use() {
 }
 
 #[test]
-fn lef_values_off_the_dbu_grid_are_rejected() {
+fn lef_values_off_the_dbu_grid_round_half_away_from_zero() {
     let units = DbuPerMicron::new(100).unwrap();
 
-    let err = lef::parse_files(&[fixture("tiny.lef")], units).unwrap_err();
+    let lib = lef::parse_files(&[fixture("tiny.lef")], units).unwrap();
 
-    assert!(err.to_string().contains("tiny.lef"), "{err}");
+    assert_eq!(lib.rules.manufacturing_grid, Some(Dbu(1)));
+    assert_eq!(lib.layer(LayerId(1)).offset_y, Some(Dbu(13)));
 }
 
 fn tiny_bookshelf() -> NetlistDB {

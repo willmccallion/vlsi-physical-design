@@ -160,14 +160,28 @@ impl fmt::Display for DbuArea {
     }
 }
 
-/// A micron value that is not a whole number of database units.
-#[derive(Clone, Copy, Debug, PartialEq, thiserror::Error)]
-#[error("{microns} um is not a multiple of 1/{dbu_per_micron} um")]
-pub struct OffGrid {
-    /// The value that failed to convert.
-    pub microns: f64,
-    /// The database resolution it was converted at.
-    pub dbu_per_micron: u32,
+/// How far, in database units, a converted value may sit from a grid point
+/// and still count as on it: far below a unit, far above the float error of
+/// a decimal value times the resolution.
+const ON_GRID_NOISE: f64 = 1e-6;
+
+/// A value converted to the nearest database unit, and whether it lay off
+/// the grid.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) struct Snapped<T> {
+    /// The nearest grid value.
+    pub value: T,
+    /// Whether the value was further than float noise from it.
+    pub off_grid: bool,
+}
+
+/// `scaled`, a value in database units, at its nearest whole unit, rounded
+/// half away from zero, and whether it was off the grid.
+fn snap_scaled(scaled: f64) -> (i64, bool) {
+    // NOTE: lefin's dbdist and dbarea lround as this does, silently; PARE's
+    // readers warn of the values they round.
+    let rounded = scaled.round();
+    (rounded as i64, (scaled - rounded).abs() > ON_GRID_NOISE)
 }
 
 /// The number of database units per micron of a design.
@@ -187,38 +201,31 @@ impl DbuPerMicron {
         self.0
     }
 
-    /// Converts microns to DBU, failing if the value is not on the DBU grid.
-    pub fn to_dbu(self, microns: f64) -> Result<Dbu, OffGrid> {
-        let scaled = microns * f64::from(self.0);
-        let rounded = scaled.round();
-        if (scaled - rounded).abs() > 1e-6 * scaled.abs().max(1.0) {
-            return Err(OffGrid {
-                microns,
-                dbu_per_micron: self.0,
-            });
+    /// `microns` at the nearest DBU, as `lefin`'s `dbdist` rounds it, and
+    /// whether it was off the grid.
+    pub(crate) fn snap(self, microns: f64) -> Snapped<Dbu> {
+        let (value, off_grid) = snap_scaled(microns * f64::from(self.0));
+        Snapped {
+            value: Dbu(value),
+            off_grid,
         }
-        Ok(Dbu(rounded as i64))
     }
 
-    /// Converts square microns to square DBU, failing if the value is not a
-    /// whole number of square DBU.
-    pub(crate) fn to_dbu_area(self, square_microns: f64) -> Result<DbuArea, OffGrid> {
+    /// `square_microns` at the nearest square DBU, as `lefin`'s `dbarea`
+    /// rounds it, and whether it was off the grid.
+    pub(crate) fn snap_area(self, square_microns: f64) -> Snapped<DbuArea> {
         let per = f64::from(self.0);
-        let scaled = square_microns * per * per;
-        let rounded = scaled.round();
-        if (scaled - rounded).abs() > 1e-6 * scaled.abs().max(1.0) {
-            return Err(OffGrid {
-                microns: square_microns,
-                dbu_per_micron: self.0,
-            });
+        let (value, off_grid) = snap_scaled(square_microns * per * per);
+        Snapped {
+            value: DbuArea(value),
+            off_grid,
         }
-        Ok(DbuArea(rounded as i64))
     }
 
-    /// Converts microns to the nearest DBU.
+    /// Converts microns to the nearest DBU, halves away from zero.
     #[must_use]
     pub fn to_dbu_rounded(self, microns: f64) -> Dbu {
-        Dbu((microns * f64::from(self.0)).round() as i64)
+        self.snap(microns).value
     }
 
     /// Converts DBU to microns.
@@ -238,26 +245,53 @@ impl DbuPerMicron {
 mod tests {
     use super::*;
 
-    #[test]
-    fn exact_micron_values_convert_to_dbu() {
-        let units = DbuPerMicron::new(2000).unwrap();
+    const fn on_grid<T>(value: T) -> Snapped<T> {
+        Snapped {
+            value,
+            off_grid: false,
+        }
+    }
 
-        assert_eq!(units.to_dbu(0.095), Ok(Dbu(190)));
-        assert_eq!(units.to_dbu(-0.035), Ok(Dbu(-70)));
+    const fn off_grid<T>(value: T) -> Snapped<T> {
+        Snapped {
+            value,
+            off_grid: true,
+        }
     }
 
     #[test]
-    fn values_finer_than_a_dbu_are_rejected() {
+    fn decimal_micron_values_on_the_grid_convert_exactly() {
+        let units = DbuPerMicron::new(2000).unwrap();
+
+        assert_eq!(units.snap(0.095), on_grid(Dbu(190)));
+        assert_eq!(units.snap(-0.035), on_grid(Dbu(-70)));
+        assert_eq!(units.snap(296.2965), on_grid(Dbu(592_593)));
+    }
+
+    #[test]
+    fn small_and_large_values_off_the_grid_round_to_the_nearest_unit() {
         let units = DbuPerMicron::new(1000).unwrap();
 
-        assert!(units.to_dbu(0.0005).is_err());
+        assert_eq!(units.snap(0.0004), off_grid(Dbu(0)));
+        assert_eq!(units.snap(0.0006), off_grid(Dbu(1)));
+        assert_eq!(units.snap(296.2961), off_grid(Dbu(296_296)));
+        assert_eq!(units.snap(1000.0004), off_grid(Dbu(1_000_000)));
     }
 
     #[test]
-    fn square_microns_convert_to_square_dbu() {
+    fn a_value_half_way_between_units_rounds_away_from_zero() {
+        let units = DbuPerMicron::new(2).unwrap();
+
+        assert_eq!(units.snap(0.25), off_grid(Dbu(1)));
+        assert_eq!(units.snap(-0.25), off_grid(Dbu(-1)));
+    }
+
+    #[test]
+    fn square_microns_round_to_the_nearest_square_unit() {
         let units = DbuPerMicron::new(2000).unwrap();
 
-        assert_eq!(units.to_dbu_area(0.0115), Ok(DbuArea(46_000)));
+        assert_eq!(units.snap_area(0.0115), on_grid(DbuArea(46_000)));
+        assert_eq!(units.snap_area(0.125_000_01), off_grid(DbuArea(500_000)));
     }
 
     #[test]
