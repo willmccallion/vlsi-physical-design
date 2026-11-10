@@ -7,21 +7,36 @@ use pare_common::db::design::NetlistDB;
 use pare_common::db::indices::IdVec;
 use pare_common::geom::dbu::Dbu;
 use pare_common::geom::rect::Rect;
-use pare_common::verify::drc::Marker;
+use pare_common::verify::drc::{Layout, Marker, Owner, Rules, check_area};
 
-use std::path::Path;
+use std::path::PathBuf;
 
-/// Draws the area `box_um` of `db`, in microns, with `nets` bright, and
+/// What the `view` command draws, and where.
+#[derive(Debug)]
+pub(crate) struct ViewRequest {
+    /// The area to draw.
+    pub(crate) area: Rect<Dbu>,
+    /// The nets to draw bright, the others dimmed.
+    pub(crate) nets: Vec<String>,
+    /// The routing layers to draw by name; all of them when empty.
+    pub(crate) layers: Vec<String>,
+    /// The PNG to write.
+    pub(crate) out: PathBuf,
+    /// Pixels along the area's longer side.
+    pub(crate) size: u32,
+}
+
+/// Draws the area of `db` that `request` asks for, its nets bright, and
 /// lists the design rule violations there.
-pub(crate) fn view_area(
-    db: &NetlistDB,
-    area: Rect<Dbu>,
-    nets: &[String],
-    layers: &[String],
-    out: &Path,
-    size: u32,
-) -> anyhow::Result<()> {
-    use pare_common::verify::drc::{Layout, Owner, Rules, check_area};
+pub(crate) fn view_area(db: &NetlistDB, request: &ViewRequest) -> anyhow::Result<()> {
+    let ViewRequest {
+        area,
+        nets,
+        layers,
+        out,
+        size,
+    } = request;
+    let area = *area;
     let layout = Layout::from_db(db);
     let rules = Rules::from_design(db);
     let report = check_area(&layout, &rules, area);
@@ -47,7 +62,7 @@ pub(crate) fn view_area(
             .with_context(|| format!("no routing layer '{name}'"))?;
         shown[layer] = true;
     }
-    visualization::draw_area(&layout, area, &shown, &highlight, &boxes, out, size)
+    visualization::draw_area(&layout, area, &shown, &highlight, &boxes, out, *size)
         .with_context(|| format!("writing {}", out.display()))?;
     ui::wrote(out);
     Ok(())

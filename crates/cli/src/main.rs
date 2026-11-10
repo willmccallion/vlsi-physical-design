@@ -24,7 +24,7 @@ use crate::plan::FlowPlan;
 use crate::routing::{
     StateFiles, global_route_with_repair, parse_save_point, route_detailed, route_global,
 };
-use crate::view::view_area;
+use crate::view::{ViewRequest, view_area};
 use anyhow::Context;
 use clap::{Parser, Subcommand};
 use pare_common::config::{Config, DesignInput, Purpose};
@@ -254,14 +254,14 @@ fn run(command: Commands, report: &mut Report) -> anyhow::Result<()> {
         } => {
             let config = load_config(&config, report)?;
             let db = load_design(&config, placement.as_deref())?;
-            view_area(
-                &db,
-                MicronBox::from_corners(&area)?.in_dbu(db.dbu()),
-                &nets,
-                &layers,
-                &out,
+            let request = ViewRequest {
+                area: MicronBox::from_corners(&area)?.in_dbu(db.dbu()),
+                nets,
+                layers,
+                out,
                 size,
-            )
+            };
+            view_area(&db, &request)
         }
     }
 }
