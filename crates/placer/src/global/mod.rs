@@ -122,11 +122,13 @@ pub struct Progress {
 
 /// A zone whose movable cells have nowhere to go: no stretch of row inside
 /// it is free, or, in a design without rows, it has no area.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, thiserror::Error)]
-#[error("the {cells} movable cells of {zone} have no free stretch of row to go in")]
+#[derive(Clone, Debug, PartialEq, Eq, thiserror::Error)]
+#[error("the {cells} movable cells of {name} have no free stretch of row to go in")]
 pub struct ZoneWithoutRoom {
     /// The zone.
     pub zone: Zone,
+    /// How a message names it: a fence by its DEF name.
+    pub name: String,
     /// How many movable cells it has.
     pub cells: usize,
 }
@@ -678,8 +680,9 @@ fn build_fields(
             continue;
         }
         let area = zone.rects.clone();
-        let bounds = bounding_box(&area).ok_or(ZoneWithoutRoom {
+        let bounds = bounding_box(&area).ok_or_else(|| ZoneWithoutRoom {
             zone: zone.zone,
+            name: zone.name.clone(),
             cells: end - start,
         })?;
         let mut grid = DensityGrid::new(
