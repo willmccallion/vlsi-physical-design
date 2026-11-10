@@ -14,7 +14,7 @@ pub struct Config {
     /// What the design is a benchmark of.
     pub purpose: Purpose,
     /// Worker threads for every parallel step; every core if unset.
-    pub threads: Option<usize>,
+    pub threads: Option<NonZeroUsize>,
     /// Global placement parameters.
     #[serde(default)]
     pub global_placement: GlobalPlacementConfig,

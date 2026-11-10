@@ -34,6 +34,7 @@ use pare_common::geom::dbu::{Dbu, DbuPerMicron};
 use pare_common::geom::point::Point;
 use pare_common::geom::rect::Rect;
 use report::Report;
+use std::num::NonZeroUsize;
 use std::path::{Path, PathBuf};
 use std::time::Instant;
 
@@ -175,23 +176,32 @@ fn resolve_config(name: &Path, configs: &Path) -> anyhow::Result<PathBuf> {
     }
 }
 
-/// Reads the config, records it in the report and sizes the thread pool as
-/// it asks.
+/// Resolves the config `name`, records it in the report, reads it and
+/// sizes the thread pool as it asks.
 fn load_config(name: &Path, report: &mut Report) -> anyhow::Result<Config> {
     let path = resolve_config(name, Path::new(CONFIGS_DIR))?;
     ui::header("Config", &path.display().to_string());
     report.config = path.display().to_string();
-    let text = std::fs::read_to_string(&path)
-        .with_context(|| format!("cannot read config {}", path.display()))?;
-    let config: Config =
-        toml::from_str(&text).with_context(|| format!("invalid config {}", path.display()))?;
+    let config = read_config(&path)?;
     if let Some(threads) = config.threads {
-        rayon::ThreadPoolBuilder::new()
-            .num_threads(threads)
-            .build_global()
-            .context("cannot size the thread pool")?;
+        size_thread_pool(threads)?;
     }
     Ok(config)
+}
+
+/// The config in the TOML file at `path`.
+fn read_config(path: &Path) -> anyhow::Result<Config> {
+    let text = std::fs::read_to_string(path)
+        .with_context(|| format!("cannot read config {}", path.display()))?;
+    toml::from_str(&text).with_context(|| format!("invalid config {}", path.display()))
+}
+
+/// Gives every parallel step `threads` workers.
+fn size_thread_pool(threads: NonZeroUsize) -> anyhow::Result<()> {
+    rayon::ThreadPoolBuilder::new()
+        .num_threads(threads.get())
+        .build_global()
+        .context("cannot size the thread pool")
 }
 
 fn main() -> anyhow::Result<()> {
