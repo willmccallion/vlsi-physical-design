@@ -22,15 +22,6 @@ pub enum Zone {
     Outside,
 }
 
-impl std::fmt::Display for Zone {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Self::Fence(region) => write!(f, "fence region {}", region.index()),
-            Self::Outside => f.write_str("the space outside every fence"),
-        }
-    }
-}
-
 pare_common::define_index!(
     /// A zone's position in [`Zones::all`]: each fence, then the space
     /// outside them.
@@ -46,11 +37,19 @@ pub enum ZoneError {
     InclusiveRegion(String),
 }
 
+/// A fence region's rectangles, under its DEF name.
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct Fence {
+    region: RegionId,
+    name: String,
+    rects: Vec<Rect<Dbu>>,
+}
+
 /// The zone of every cell and the rectangles of every fence.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Zones {
     of_cell: IdVec<CellId, ZoneId>,
-    fences: Vec<(RegionId, Vec<Rect<Dbu>>)>,
+    fences: Vec<Fence>,
 }
 
 impl Zones {
@@ -63,7 +62,11 @@ impl Zones {
             match region.kind {
                 RegionKind::Fence => {
                     zone_of_region[id] = Some(ZoneId::new(fences.len()));
-                    fences.push((id, region.rects.clone()));
+                    fences.push(Fence {
+                        region: id,
+                        name: region.name.clone(),
+                        rects: region.rects.clone(),
+                    });
                 }
                 RegionKind::Inclusive => {
                     return Err(ZoneError::InclusiveRegion(region.name.clone()));
@@ -94,14 +97,30 @@ impl Zones {
     fn zone(&self, id: ZoneId) -> Zone {
         self.fences
             .get(id.index())
-            .map_or(Zone::Outside, |&(region, _)| Zone::Fence(region))
+            .map_or(Zone::Outside, |f| Zone::Fence(f.region))
+    }
+
+    /// The fence of `zone`, if it is one.
+    fn fence(&self, zone: Zone) -> Option<&Fence> {
+        match zone {
+            Zone::Fence(r) => self.fences.iter().find(|f| f.region == r),
+            Zone::Outside => None,
+        }
+    }
+
+    /// How a message names `zone`: a fence by its DEF name.
+    pub fn describe(&self, zone: Zone) -> String {
+        self.fence(zone).map_or_else(
+            || "the space outside every fence".to_string(),
+            |f| format!("fence region '{}'", f.name),
+        )
     }
 
     /// Every zone: each fence, then the space outside them.
     pub fn all(&self) -> impl Iterator<Item = Zone> + '_ {
         self.fences
             .iter()
-            .map(|&(r, _)| Zone::Fence(r))
+            .map(|f| Zone::Fence(f.region))
             .chain(std::iter::once(Zone::Outside))
     }
 
@@ -112,32 +131,17 @@ impl Zones {
 
     /// The rectangles of a fence, or nothing for the space outside them.
     pub(crate) fn fence_rects(&self, zone: Zone) -> &[Rect<Dbu>] {
-        match zone {
-            Zone::Fence(r) => self
-                .fences
-                .iter()
-                .find(|(id, _)| *id == r)
-                .map_or(&[], |(_, rects)| rects.as_slice()),
-            Zone::Outside => &[],
-        }
+        self.fence(zone).map_or(&[], |f| f.rects.as_slice())
     }
 
     /// The X intervals of `[lo, hi)` where a cell of `zone` spanning the band
     /// `[y0, y1)` may sit, ignoring obstacles.
     pub fn intervals(&self, zone: Zone, lo: Dbu, hi: Dbu, y0: Dbu, y1: Dbu) -> Vec<(Dbu, Dbu)> {
         match zone {
-            Zone::Fence(r) => self
-                .fences
-                .iter()
-                .find(|(id, _)| *id == r)
-                .map_or_else(Vec::new, |(_, rects)| inside(rects, lo, hi, y0, y1)),
-            Zone::Outside => outside(
-                self.fences.iter().flat_map(|(_, rects)| rects),
-                lo,
-                hi,
-                y0,
-                y1,
-            ),
+            Zone::Fence(_) => self
+                .fence(zone)
+                .map_or_else(Vec::new, |f| inside(&f.rects, lo, hi, y0, y1)),
+            Zone::Outside => outside(self.fences.iter().flat_map(|f| &f.rects), lo, hi, y0, y1),
         }
     }
 }

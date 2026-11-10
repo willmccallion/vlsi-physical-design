@@ -220,7 +220,8 @@ fn a_fence_holding_no_whole_row_is_an_error() {
         result,
         Err(GlobalPlacementError::NoRoom(ZoneWithoutRoom {
             zone: Zone::Fence(_),
-            cells: 48
+            cells: 48,
+            ..
         }))
     ));
 }
@@ -256,4 +257,15 @@ fn gcells_without_a_capacity_each_are_an_error() {
             ..
         }))
     ));
+}
+
+#[test]
+fn a_fence_without_room_is_named_as_the_def_names_it() {
+    let db = ring_fenced_by("( 20000 21000 ) ( 40000 21500 )");
+    let mut model = PlacementModel::from_db(&db, &Zones::new(&db).unwrap());
+
+    let result = global::place::<NoTiming>(&mut model, &params(), None, None, |_| {});
+
+    let message = result.err().map(|e| e.to_string()).unwrap_or_default();
+    assert!(message.contains("fence region 'fence'"), "{message}");
 }

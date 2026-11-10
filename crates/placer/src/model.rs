@@ -67,6 +67,8 @@ pub struct ModelNet {
 pub struct ZoneRows {
     /// The zone whose cells the rows hold.
     pub zone: Zone,
+    /// How a message names the zone: a fence by its DEF name.
+    pub name: String,
     /// Its stretches of row, each one row high; the zone's whole area for a
     /// design without rows.
     pub rects: Vec<Rect<f64>>,
@@ -179,7 +181,11 @@ fn zone_rows(db: &NetlistDB, zones: &Zones, spans: &[RowSpan]) -> IdVec<ZoneId, 
                     })
                     .collect()
             };
-            ZoneRows { zone, rects }
+            ZoneRows {
+                zone,
+                name: zones.describe(zone),
+                rects,
+            }
         })
         .collect()
 }
