@@ -419,6 +419,8 @@ impl ClockNetwork {
         network
     }
 
+    /// The pins each clock reaches from `clocks`' sources, as
+    /// `ClkNetwork::findClkPins`.
     fn find(
         netlist: &Netlist<'_>,
         clocks: &[(ClockId, Vec<IoPinId>)],

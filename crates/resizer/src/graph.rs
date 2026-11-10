@@ -427,8 +427,6 @@ impl TimingGraph {
         }
     }
 
-    /// The drivers of the cell `load` belongs to that an arc from `load`
-    /// reaches.
     /// The drivers of `load`'s cell with an arc from it, and whether that
     /// arc passes through a latch.
     fn successor_drivers(&self, netlist: &Netlist<'_>, load: PinId) -> Vec<(PinId, bool)> {
@@ -448,6 +446,7 @@ impl TimingGraph {
             .collect()
     }
 
+    /// The drivers of `load`'s cell that an arc from `load` reaches.
     pub(crate) fn drivers_fed_by(&self, netlist: &Netlist<'_>, load: PinId) -> Vec<PinId> {
         let db = netlist.db;
         let PinOwner::Cell { cell, .. } = db.pins[load].owner else {
@@ -747,7 +746,8 @@ impl Merged {
 /// none without one. From the placement, as `estimate_parasitics
 /// -placement` makes them: none for a special net or behind an ideal
 /// clock, the clock wire RC on a non-leaf clock net when there is one, and
-/// the signal wire RC elsewhere.
+/// the signal wire RC elsewhere, as
+/// `EstimateParasitics::estimateWireParasitic` picks among them.
 fn estimate_net(
     netlist: &Netlist<'_>,
     clocks: &ClockNetwork,

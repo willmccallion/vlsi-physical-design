@@ -18,14 +18,17 @@ use pare_common::geom::point::Point;
 use pare_common::units::{CellArea, Farads, Quantity, Seconds};
 
 /// How close a hold buffer's delay per area may come to the best's for the
-/// smaller of the two to be chosen.
+/// smaller of the two to be chosen, as `RepairHold::findHoldBuffer`'s
+/// margin.
 const BUFFER_METRIC_MARGIN: f64 = 0.95;
 
-/// How much a hold buffer may raise its driver's slew.
+/// How much a hold buffer may raise its driver's slew, as
+/// `RepairHold::repairEndHold` allows.
 const MAX_SLEW_GROWTH: f64 = 1.20;
 
 /// The share of a limit a hold buffer's slew and load must keep in hand
-/// for it to stay at the smallest size.
+/// for it to stay at the smallest size, as
+/// `RepairHold::hold_slack_limit_ratio_max_`.
 const SLACK_LIMIT_RATIO: f64 = 0.2;
 
 /// The least number of hold buffers the repair may insert, however small

@@ -567,8 +567,8 @@ impl<'a, T: Timing> Resizer<'a, T> {
         &self.graph
     }
 
-    /// Sets the longest wire design repair allows, in database units; zero
-    /// for no limit.
+    /// Sets the longest wire design repair allows, in database units, or
+    /// none for no limit.
     pub const fn set_max_wire_length(&mut self, length: Option<Dbu>) {
         self.options.max_wire_length = length;
     }

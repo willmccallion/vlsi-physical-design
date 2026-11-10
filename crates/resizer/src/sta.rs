@@ -141,8 +141,8 @@ const fn unconstrained(required: Seconds) -> bool {
     required.get().is_infinite()
 }
 
-/// Whether two pairs of times differ at all, bit for bit, which is what a
-/// change worth propagating means.
+/// Whether two pairs of times differ by more than `OpenSTA`'s tolerance,
+/// which is what a change worth propagating means.
 fn differ(a: SideValues<Seconds>, b: SideValues<Seconds>) -> bool {
     MinMax::BOTH
         .iter()
@@ -465,9 +465,9 @@ impl Sta {
             .map_or(&[], |entries| entries[edge].as_slice())
     }
 
-    /// The pins timing ends at: register inputs with checks from a clocked
-    /// pin, asynchronous controls with recovery or removal checks, and
-    /// output ports with delays.
+    /// The pins timing ends at, as `Search::isEndpoint`: register inputs
+    /// with checks from a clocked pin, asynchronous controls with recovery
+    /// or removal checks, and output ports with delays.
     fn find_endpoints(&mut self, netlist: &Netlist<'_>, clocks: &ClockNetwork) {
         let db = netlist.db;
         self.endpoints.clear();
@@ -678,7 +678,7 @@ impl Sta {
     }
 
     /// Finds arrivals again from `seeds` onward, following changes through
-    /// the fanout; returns the pins the required search must visit: those
+    /// the fanout, as `Search::findArrivals` with its `ArrivalVisitor`; returns the pins the required search must visit: those
     /// left with an entry that has no required time yet, and latch inputs
     /// whose arrival moved, since a borrowing latch requires its data when
     /// it arrives.
@@ -1179,7 +1179,8 @@ impl Sta {
     }
 
     /// Finds required times again from `seeds` back, following changes
-    /// through the fanin.
+    /// through the fanin, as `Search::findRequireds` with its
+    /// `RequiredVisitor`.
     fn find_requireds(&mut self, netlist: &Netlist<'_>, graph: &TimingGraph, seeds: &[PinId]) {
         let n = netlist.db.pins.len();
         let mut queued = IdVec::filled(false, n);
@@ -1268,7 +1269,8 @@ impl Sta {
         SideValues::from_fn(|side| self.sdc.cell_derate(cell, side))
     }
 
-    /// The required times a pin's fanout imposes for one tag.
+    /// The required times a pin's fanout imposes for one tag, as
+    /// `RequiredVisitor::visitFromToPath` brings them back.
     fn fanout_requireds(
         &self,
         netlist: &Netlist<'_>,
@@ -1333,7 +1335,8 @@ impl Sta {
     }
 
     /// The required times the checks at an endpoint impose for one entry:
-    /// the tightest over its check arcs or output delays, per side.
+    /// the tightest over its check arcs or output delays, per side, as
+    /// `VisitPathEnds::visitCheckEnd` and `PathEndCheck::requiredTime`.
     fn check_requireds(
         &mut self,
         netlist: &Netlist<'_>,
@@ -1649,9 +1652,10 @@ const fn opposite(edge: Edge) -> Edge {
     }
 }
 
-/// The latches of the design: cells with a level-sensitive group whose
-/// enable is one pin, open on its high level or, negated, its low level;
-/// a constant enable holds the latch open or closed.
+/// The latches of the design, as `Latches::latchDtoQEnable` reads them:
+/// cells with a level-sensitive group whose enable is one pin, open on its
+/// high level or, negated, its low level; a constant enable holds the
+/// latch open or closed.
 fn find_latches(netlist: &Netlist<'_>, constants: &Constants) -> FxHashMap<CellId, Latch> {
     let db = netlist.db;
     let mut latches = FxHashMap::default();
@@ -1704,8 +1708,8 @@ fn find_latches(netlist: &Netlist<'_>, constants: &Constants) -> FxHashMap<CellI
 }
 
 /// Keeps the arrival for `tag` on `side` in `entries`, adding the tag when
-/// new, as `OpenSTA` keeps the latest arrival for the late side and the
-/// earliest for the early side.
+/// new, as `ArrivalVisitor::visitFromToPath` keeps the latest arrival for
+/// the late side and the earliest for the early side.
 fn merge_arrival(entries: &mut Vec<Entry>, tag: TagId, side: MinMax, time: Seconds, prev: Prev) {
     let index = entries
         .iter()
