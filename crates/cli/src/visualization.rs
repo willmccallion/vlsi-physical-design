@@ -55,19 +55,21 @@ impl PixelMap {
         }
     }
 
-    fn map(&self, p: Point<Dbu>) -> (f64, f64) {
-        (
+    /// The pixel `p` falls on.
+    fn map(&self, p: Point<Dbu>) -> Point<f64> {
+        Point::new(
             (p.x.to_f64() - self.min.x) * self.scale,
             (p.y.to_f64() - self.min.y).mul_add(-self.scale, self.height),
         )
     }
 
+    /// The pixels of `cell`, at least `min_px` along each side.
     fn rect(&self, db: &NetlistDB, cell: CellId, min_px: f64) -> ImageRect {
         let b = db.cell_bbox(cell);
-        let (x, y_bot) = self.map(b.min);
+        let bottom_left = self.map(b.min);
         let w = (b.width().to_f64() * self.scale).max(min_px);
         let h = (b.height().to_f64() * self.scale).max(min_px);
-        ImageRect::at(x as i32, (y_bot - h) as i32).of_size(w as u32, h as u32)
+        ImageRect::at(bottom_left.x as i32, (bottom_left.y - h) as i32).of_size(w as u32, h as u32)
     }
 }
 
@@ -130,18 +132,10 @@ pub(crate) fn draw_routed_design(db: &NetlistDB, path: &Path, size: u32) -> imag
 
 fn paint_routed(db: &NetlistDB, map: &PixelMap, img: &mut RgbaImage) {
     let cell_color = Rgba([35, 35, 40, 255]);
-    for i in 0..db.num_cells() {
-        draw_filled_rect_mut(img, map.rect(db, CellId::new(i), 1.0), cell_color);
+    for cell in db.cells.ids() {
+        draw_filled_rect_mut(img, map.rect(db, cell, 1.0), cell_color);
     }
 
-    let colors = [
-        Rgba([0, 110, 255, 90]),
-        Rgba([255, 20, 80, 90]),
-        Rgba([0, 255, 100, 170]),
-        Rgba([255, 215, 0, 170]),
-        Rgba([180, 50, 255, 190]),
-        Rgba([0, 240, 255, 190]),
-    ];
     let mut wires: Vec<_> = db
         .nets
         .iter()
@@ -155,15 +149,19 @@ fn paint_routed(db: &NetlistDB, map: &PixelMap, img: &mut RgbaImage) {
         .collect();
     wires.sort_by_key(|w| w.0);
     for (layer, from, to) in wires {
-        let (x1, y1) = map.map(from);
-        let (x2, y2) = map.map(to);
-        let color = colors[layer.index().min(colors.len() - 1)];
-        draw_line_segment_mut(img, (x1 as f32, y1 as f32), (x2 as f32, y2 as f32), color);
+        let (a, b) = (map.map(from), map.map(to));
+        let color = routed_color(layer);
+        draw_line_segment_mut(
+            img,
+            (a.x as f32, a.y as f32),
+            (b.x as f32, b.y as f32),
+            color,
+        );
         if layer.index() >= 2 {
             draw_line_segment_mut(
                 img,
-                ((x1 + 0.5) as f32, (y1 + 0.5) as f32),
-                ((x2 + 0.5) as f32, (y2 + 0.5) as f32),
+                ((a.x + 0.5) as f32, (a.y + 0.5) as f32),
+                ((b.x + 0.5) as f32, (b.y + 0.5) as f32),
                 color,
             );
         }
@@ -173,18 +171,16 @@ fn paint_routed(db: &NetlistDB, map: &PixelMap, img: &mut RgbaImage) {
         for e in &net.routing {
             match *e {
                 RouteElem::Via { at, .. } => {
-                    let (x, y) = map.map(at);
-                    let rect = ImageRect::at(x as i32 - 1, y as i32 - 1).of_size(3, 3);
+                    let at = map.map(at);
+                    let rect = ImageRect::at(at.x as i32 - 1, at.y as i32 - 1).of_size(3, 3);
                     draw_filled_rect_mut(img, rect, Rgba([255, 255, 255, 200]));
                 }
                 RouteElem::Patch { layer, rect } => {
-                    let (x1, y1) = map.map(rect.min);
-                    let (x2, y2) = map.map(rect.max);
-                    let (w, h) = ((x2 - x1).abs().max(1.0), (y2 - y1).abs().max(1.0));
-                    let area = ImageRect::at(x1.min(x2) as i32, y1.min(y2) as i32)
+                    let (a, b) = (map.map(rect.min), map.map(rect.max));
+                    let (w, h) = ((b.x - a.x).abs().max(1.0), (b.y - a.y).abs().max(1.0));
+                    let area = ImageRect::at(a.x.min(b.x) as i32, a.y.min(b.y) as i32)
                         .of_size(w as u32, h as u32);
-                    let color = colors[layer.index().min(colors.len() - 1)];
-                    draw_filled_rect_mut(img, area, color);
+                    draw_filled_rect_mut(img, area, routed_color(layer));
                 }
                 RouteElem::Wire { .. } => {}
             }
@@ -192,11 +188,20 @@ fn paint_routed(db: &NetlistDB, map: &PixelMap, img: &mut RgbaImage) {
     }
 
     let pin_color = Rgba([255, 255, 255, 255]);
-    for pin in 0..db.pins.len() {
-        let (px, py) = map.map(db.pin_position(pare_common::db::indices::PinId::new(pin)));
-        let rect = ImageRect::at(px as i32, py as i32).of_size(2, 2);
+    for pin in db.pins.ids() {
+        let at = map.map(db.pin_position(pin));
+        let rect = ImageRect::at(at.x as i32, at.y as i32).of_size(2, 2);
         draw_filled_rect_mut(img, rect, pin_color);
     }
+}
+
+/// The opacity of routed metal in the routed design's image.
+const ROUTED_ALPHA: u8 = 170;
+
+/// The colour of routed metal on `layer` in the routed design's image.
+const fn routed_color(layer: LayerId) -> Rgba<u8> {
+    let [r, g, b] = LAYER_COLORS[layer.index() % LAYER_COLORS.len()];
+    Rgba([r, g, b, ROUTED_ALPHA])
 }
 
 /// Colours of routed metal, by routing layer from the lowest.
@@ -241,7 +246,7 @@ pub(crate) fn draw_area(
     layers: &IdVec<LayerId, bool>,
     highlight: &[OwnerIndex],
     markers: &[Rect<Dbu>],
-    filename: &Path,
+    path: &Path,
     size: u32,
 ) -> image::ImageResult<()> {
     let shown = |l: LayerId| layers.get(l).copied().unwrap_or(true);
@@ -313,5 +318,5 @@ pub(crate) fn draw_area(
             draw_hollow_rect_mut(&mut canvas, outer, Rgba([255, 40, 40, 255]));
         }
     }
-    canvas.0.save(filename)
+    canvas.0.save(path)
 }
