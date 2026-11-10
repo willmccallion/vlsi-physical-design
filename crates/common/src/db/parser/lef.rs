@@ -489,6 +489,9 @@ impl<'a> LefParser<'a, '_> {
             let mut sub = Lexer::starting_at(value.text, self.lx.path(), value.line);
             let mut rules = RuleReader::new(&mut sub, self.dbu);
             match (kind, name.text) {
+                // NOTE: lefinReader::layer parses LEF58_SPACING alone, and
+                // setRoutingLayerProperties skips most LEF58_MINSTEP; PARE
+                // reads the LEF57 and LEF58 forms as the LEF spec gives them.
                 (LayerKind::Routing, "LEF57_SPACING" | "LEF58_SPACING") => {
                     while let Some(t) = rules.next_keyword("SPACING")? {
                         match rules.routing_spacing()? {

@@ -195,6 +195,8 @@ impl Markers {
     fn add(&mut self, marker: Marker, involves: Involves) {
         match involves {
             Involves::Routing => self.violations.push(marker),
+            // NOTE: FlexGC's checks return early when both shapes are fixed
+            // (checkMetalSpacing_prl, _short); PARE keeps them as input defects.
             Involves::FixedOnly => self.fixed.push(marker),
         }
     }

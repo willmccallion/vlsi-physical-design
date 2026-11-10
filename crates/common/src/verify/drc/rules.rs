@@ -74,6 +74,8 @@ pub struct NonDefaultRules {
 impl NonDefaultRules {
     fn from_rule(rule: &NonDefaultRule, layers: usize) -> Self {
         let mut hard_spacing = vec![None; layers];
+        // NOTE: check_drc's checkMetalSpacing_main gets checkNDRs false, as
+        // AUTO_TAPER_NDR_NETS holds; PARE checks a HARDSPACING rule's spacing.
         if rule.hard_spacing {
             for l in &rule.layers {
                 if let Some(slot) = hard_spacing.get_mut(l.layer.index()) {
@@ -185,6 +187,7 @@ impl Rules {
                     .rules
                     .min_enclosed_areas
                     .iter()
+                    // NOTE: addRoutingLayer skips a rule with a WIDTH (DRT-139); kept.
                     .filter(|r| r.width.is_none())
                     .map(|r| r.area)
                     .collect(),
