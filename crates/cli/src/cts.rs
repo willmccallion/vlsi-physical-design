@@ -104,11 +104,13 @@ fn clock_arrivals(
     timed: &mut TimedRepair<'_>,
 ) -> anyhow::Result<FxHashMap<PinId, Seconds>> {
     let stage = timed.stage(db)?;
-    let pins = db.pins.len();
     let resizer = Resizer::timed(stage.session(db, timed.plan.wires, timed.namer), timed.sdc)?;
     let sta = resizer.sta();
-    Ok((0..pins)
-        .map(PinId::new)
+    Ok(resizer
+        .netlist()
+        .db
+        .pins
+        .ids()
         .filter_map(|p| sta.clock_rise_arrival(p).map(|a| (p, a)))
         .collect())
 }
