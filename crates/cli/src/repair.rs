@@ -408,8 +408,8 @@ fn show_setup_progress(progress: &SetupProgress) {
         cloned: progress.cloned,
         swaps: progress.swapped,
         area_change_percent: progress.area_change_percent,
-        wns_ns: progress.wns.nanos(),
-        tns_ns: progress.tns.nanos(),
+        wns: progress.wns,
+        tns: progress.tns,
         failing: progress.failing,
         worst: progress.worst.as_deref().unwrap_or(""),
     });

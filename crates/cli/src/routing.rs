@@ -381,13 +381,7 @@ impl RouteTables {
                 );
                 ui::gr_layer_table_header();
                 for layer in *layers {
-                    ui::gr_layer_row(
-                        layer.name,
-                        layer.direction,
-                        layer.capacity,
-                        layer.usage,
-                        layer.overflow,
-                    );
+                    ui::gr_layer_row(layer);
                 }
             }
             Progress::GlobalSettled { kept, rerouted } => ui::stat_pair(
