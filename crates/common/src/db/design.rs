@@ -870,7 +870,8 @@ impl NetlistDB {
     }
 
     /// Removes instances with their connections, every retired instance
-    /// too, and nets that have none left, renumbering what remains: every
+    /// too, and the nets named, which must have no connection left once
+    /// those instances are gone, renumbering what remains: every
     /// [`CellId`], [`NetId`] and [`PinId`] held before is stale afterwards,
     /// and the returned maps say where each went.
     pub fn remove(&mut self, cells: &[CellId], nets: &[NetId]) -> Result<Renumbering, EditError> {
@@ -1084,6 +1085,8 @@ impl NetlistDB {
             .filter(|t| t.axis == axis && t.layers.contains(&layer))
             .collect();
         match patterns.as_slice() {
+            // NOTE: getAverageTrackSpacing errors (ODB 414/415) on a layer
+            // without tracks; PARE takes the layer's pitch.
             [] => l.track_pitch(),
             [one] => one.step,
             several => {
@@ -1092,6 +1095,8 @@ impl NetlistDB {
                 coords.dedup();
                 let span = coords[coords.len() - 1] - coords[0];
                 let count = coords.len() as i64;
+                // NOTE: getAverageTrackPattern takes ceil((float) span / count),
+                // which a float rounds wrong past ~1e5 tracks; PARE's is exact.
                 Dbu((span.get() + count - 1) / count)
             }
         }
@@ -1118,6 +1123,8 @@ impl NetlistDB {
             .iter()
             .filter(|t| t.axis == axis && t.layers.contains(&layer))
             .flat_map(TrackDef::coords)
+            // NOTE: io::Parser::setTracks takes TRACKS as given; PARE drops a
+            // track whose wire would leave the die.
             .filter(wire_inside_die)
             .collect();
         if coords.is_empty() {

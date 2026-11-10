@@ -438,6 +438,8 @@ impl Table {
     }
 
     fn interpolate(&self, coordinates: &[f64]) -> Seconds {
+        // NOTE: OpenSTA's Table::findValue stores floats, interpolates in
+        // double and returns a float; PARE stays in f64, ~1e-7 relative apart.
         let axes = &self.axes[..coordinates.len()];
         let mut lower = [0usize; MAX_AXES];
         let mut fraction = [0.0; MAX_AXES];
