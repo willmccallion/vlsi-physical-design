@@ -3,7 +3,7 @@ use crate::db::indices::{CellId, CutLayerId, LayerId, NetId, NonDefaultRuleId};
 use crate::db::rules::{
     CutApproach, CutSpacing, CutSpacingCondition, EndOfLineSpacing, Lef58CutSpacing,
     Lef58CutSpacingCondition, MinStep, MinimumCut, ParallelEdge, ParallelRunLengthTable,
-    RuleSource, SpacingTable, WidthRangeSpacing,
+    RuleSource, SpacingTable, TwoWidthsRow, TwoWidthsTable, WidthRangeSpacing,
 };
 use crate::geom::dbu::DbuArea;
 use crate::geom::point::Point;
@@ -1355,5 +1355,204 @@ fn a_line_end_at_a_pinch_vertex_breaks_the_eol_rule() {
     assert!(
         line_ends.contains(&rect(200, 200, 300, 350)),
         "{line_ends:?}"
+    );
+}
+
+/// The violation kinds of net 0's `a` and net 1's `b` on `layer` under
+/// `rules`.
+fn pair_kinds(layer: LayerRef, a: Rect<Dbu>, b: Rect<Dbu>, rules: &Rules) -> Vec<Violation> {
+    let mut f = Fixture::new();
+    let (na, nb) = (f.a, f.b);
+    f.route(layer, na, a);
+    f.route(layer, nb, b);
+    kinds(&f.check(rules).violations)
+}
+
+#[test]
+fn cuts_exactly_the_spacing_apart_are_legal_and_one_closer_are_not() {
+    let rules = rules(vec![cut_rule(100)]);
+    let a = rect(0, 0, 100, 100);
+
+    assert_eq!(pair_kinds(V1, a, rect(200, 0, 300, 100), &rules), []);
+    assert_eq!(
+        pair_kinds(V1, a, rect(199, 0, 299, 100), &rules),
+        [Violation::CutSpacing]
+    );
+}
+
+#[test]
+fn cut_centers_exactly_the_spacing_apart_are_legal_and_one_closer_are_not() {
+    let rules = rules(vec![CutSpacing {
+        center_to_center: true,
+        ..cut_rule(200)
+    }]);
+    let a = rect(0, 0, 100, 100);
+
+    assert_eq!(pair_kinds(V1, a, rect(200, 0, 300, 100), &rules), []);
+    assert_eq!(
+        pair_kinds(V1, a, rect(199, 0, 299, 100), &rules),
+        [Violation::CutSpacing]
+    );
+}
+
+#[test]
+fn an_adjacent_cut_exactly_within_away_does_not_count_and_one_closer_does() {
+    let rule = CutSpacing {
+        condition: CutSpacingCondition::AdjacentCuts {
+            cuts: 2,
+            within: Dbu(300),
+        },
+        ..cut_rule(200)
+    };
+    let with_second_neighbour_at = |y: i64| {
+        let mut f = Fixture::new();
+        let (a, b) = (f.a, f.b);
+        f.route(V1, a, rect(0, 0, 100, 100));
+        f.route(V1, b, rect(250, 0, 350, 100));
+        f.route(V1, b, rect(0, y, 100, y + 100));
+        kinds(&f.check(&rules(vec![rule])).violations)
+    };
+
+    assert_eq!(with_second_neighbour_at(400), []);
+    assert!(with_second_neighbour_at(399).contains(&Violation::CutSpacing));
+}
+
+#[test]
+fn metal_exactly_the_eol_spacing_past_a_line_end_is_legal_and_one_closer_is_not() {
+    let line = rect(0, 0, 100, 1000);
+    let rules = rules_with_eol(None);
+
+    assert_eq!(pair_kinds(M1, line, rect(0, -1200, 100, -200), &rules), []);
+    assert_eq!(
+        pair_kinds(M1, line, rect(0, -1199, 100, -199), &rules),
+        [Violation::EndOfLineSpacing]
+    );
+}
+
+#[test]
+fn metal_exactly_within_beside_a_line_end_is_out_of_reach_and_one_closer_is_not() {
+    let line = rect(0, 0, 100, 1000);
+    let rules = rules_with_eol(None);
+
+    assert_eq!(
+        pair_kinds(M1, line, rect(145, -1150, 245, -150), &rules),
+        []
+    );
+    assert_eq!(
+        pair_kinds(M1, line, rect(144, -1150, 244, -150), &rules),
+        [Violation::EndOfLineSpacing]
+    );
+}
+
+#[test]
+fn a_parallel_edge_exactly_its_spacing_away_does_not_arm_the_rule_and_one_closer_does() {
+    let parallel = Some(ParallelEdge {
+        spacing: Dbu(150),
+        within: Dbu(150),
+        two_edges: false,
+    });
+    let with_neighbour_at = |x: i64| {
+        let mut f = Fixture::new();
+        let (a, b) = (f.a, f.b);
+        f.route(M1, a, rect(0, 0, 100, 1000));
+        f.route(M1, b, rect(0, -1150, 100, -150));
+        f.route(M1, b, rect(x - 100, -300, x, 500));
+        kinds(&f.check(&rules_with_eol(parallel)).violations)
+    };
+
+    assert_eq!(with_neighbour_at(-150), []);
+    assert_eq!(with_neighbour_at(-149), [Violation::EndOfLineSpacing]);
+}
+
+#[test]
+fn a_wire_exactly_the_minimum_width_is_legal_and_one_narrower_is_not() {
+    let rules = rules(Vec::new());
+    let mut wide = Fixture::new();
+    let a = wide.a;
+    wide.route(M1, a, rect(0, 0, 1000, 100));
+    let mut narrow = Fixture::new();
+    narrow.route(M1, a, rect(0, 0, 1000, 99));
+
+    assert_eq!(wide.check(&rules).violations, []);
+    assert_eq!(
+        kinds(&narrow.check(&rules).violations),
+        [Violation::MinWidth]
+    );
+}
+
+#[test]
+fn metal_exactly_a_minimum_cut_rule_wide_is_bound_by_it_and_one_narrower_is_not() {
+    let with_metal_width = |width: i64| {
+        let mut f = Fixture::new();
+        let a = f.a;
+        f.route(M1, a, rect(0, 0, 1000, width));
+        f.route(V1, a, rect(100, 100, 200, 200));
+        kinds(
+            &f.check(&rules_with_minimum_cut(minimum_cut(400)))
+                .violations,
+        )
+    };
+
+    assert_eq!(with_metal_width(400), [Violation::MinimumCut]);
+    assert_eq!(with_metal_width(399), []);
+}
+
+#[test]
+fn a_shape_exactly_a_width_range_maximum_wide_is_in_the_range_and_one_wider_is_not() {
+    let mut rules = rules(Vec::new());
+    rules.metal[LayerId(0)].ranges.push(WidthRangeSpacing {
+        spacing: Dbu(300),
+        min_width: Dbu(400),
+        max_width: Dbu(1000),
+    });
+    let neighbour = |width: i64| rect(0, width + 200, 3000, width + 300);
+
+    assert_eq!(
+        pair_kinds(M1, rect(0, 0, 3000, 1000), neighbour(1000), &rules),
+        [Violation::SpacingRange]
+    );
+    assert_eq!(
+        pair_kinds(M1, rect(0, 0, 3000, 1001), neighbour(1001), &rules),
+        []
+    );
+}
+
+#[test]
+fn an_edge_exactly_the_min_step_long_is_no_step_and_one_shorter_is() {
+    let with_step = |length: i64| {
+        let mut f = Fixture::new();
+        let a = f.a;
+        f.route(M1, a, rect(0, 0, 300, 100));
+        f.route(M1, a, rect(0, 100, 300 - length, 200));
+        kinds(&f.check(&rules_with_min_step(60, None)).advisory)
+    };
+
+    assert_eq!(with_step(60), []);
+    assert_eq!(with_step(59), [Violation::Lef58MinStep]);
+}
+
+#[test]
+fn a_two_widths_table_spaces_a_narrow_and_a_wide_shape_by_their_cell() {
+    let mut rules = rules(Vec::new());
+    rules.metal[LayerId(0)].spacing = SpacingTable::TwoWidths(TwoWidthsTable {
+        rows: vec![
+            TwoWidthsRow {
+                width: Dbu(0),
+                run_length: None,
+                spacings: vec![Dbu(100), Dbu(200)],
+            },
+            TwoWidthsRow {
+                width: Dbu(300),
+                run_length: None,
+                spacings: vec![Dbu(200), Dbu(400)],
+            },
+        ],
+    });
+    let narrow = rect(0, 0, 1000, 100);
+
+    assert_eq!(pair_kinds(M1, narrow, rect(0, 300, 1000, 700), &rules), []);
+    assert_eq!(
+        pair_kinds(M1, narrow, rect(0, 299, 1000, 699), &rules),
+        [Violation::SpacingTableTw]
     );
 }
