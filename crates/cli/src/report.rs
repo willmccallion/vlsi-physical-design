@@ -2,6 +2,8 @@
 //! long each phase took, what the checks found and how much memory it took.
 
 use anyhow::Context;
+use pare_common::verify::drc::{DrcReport, Violation};
+use pare_common::verify::routing::RoutingReport;
 use pare_resizer::{HoldSummary, RepairSummary, SetupSummary};
 use serde::{Serialize, Serializer};
 use std::collections::BTreeMap;
@@ -270,6 +272,32 @@ pub(crate) struct CheckSummary {
     pub(crate) from_placement: usize,
     /// Violations among fixed metal the input alone makes.
     pub(crate) in_input: usize,
+}
+
+impl CheckSummary {
+    /// Records what the connectivity and design rule checks found, with
+    /// the routing's total wirelength in microns.
+    pub(crate) fn record_routing(
+        &mut self,
+        connectivity: &RoutingReport,
+        drc: &DrcReport,
+        wirelength_um: f64,
+    ) {
+        let by_kind = |counts: Vec<(Violation, usize)>| {
+            counts
+                .into_iter()
+                .map(|(kind, n)| (kind.name().to_string(), n))
+                .collect()
+        };
+        self.opens = connectivity.opens.len();
+        self.wirelength_um = wirelength_um;
+        self.vias = connectivity.stats.vias;
+        self.violations = by_kind(drc.counts());
+        self.advisory = by_kind(drc.advisory_counts());
+        self.pin_obstructions = drc.pin_obstruction.len();
+        self.from_placement = drc.placement.len();
+        self.in_input = drc.input.len();
+    }
 }
 
 impl Report {

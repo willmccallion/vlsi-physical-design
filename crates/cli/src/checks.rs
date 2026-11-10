@@ -6,8 +6,8 @@ use pare_common::db::design::NetlistDB;
 use pare_common::db::indices::CellId;
 use pare_common::db::library::LayerRef;
 use pare_common::verify::drc::{DrcReport, Marker, OwnerIndex, check_drc};
-use pare_common::verify::placement::{PlacementViolation, placement_violations};
-use pare_common::verify::routing::check_routing;
+use pare_common::verify::placement::{PlacementViolation, placement_violations, violation_counts};
+use pare_common::verify::routing::{RoutingReport, check_routing};
 
 /// Prints placement violations by kind; returns whether there were none.
 pub(crate) fn report_placement(db: &NetlistDB, report: &mut Report) -> bool {
@@ -19,60 +19,18 @@ pub(crate) fn report_placement(db: &NetlistDB, report: &mut Report) -> bool {
     }
     if log::log_enabled!(log::Level::Debug) {
         for v in &violations {
-            log::debug!("placement violation: {}", describe_violation(db, v));
+            log::debug!("placement violation: {}", describe_violation(db, *v));
         }
     }
-    let count = |f: fn(&PlacementViolation) -> bool| violations.iter().filter(|v| f(v)).count();
     ui::fail(&format!("Placement has {} violations", violations.len()));
-    ui::stat_pair(
-        (
-            "Outside die:",
-            &count(|v| matches!(v, PlacementViolation::OutsideDie(_))).to_string(),
-        ),
-        (
-            "Overlaps:",
-            &count(|v| matches!(v, PlacementViolation::Overlap(..))).to_string(),
-        ),
-    );
-    ui::stat_pair(
-        (
-            "Not in a row:",
-            &count(|v| matches!(v, PlacementViolation::NotInRow(_))).to_string(),
-        ),
-        (
-            "Off site:",
-            &count(|v| matches!(v, PlacementViolation::OffSite(_))).to_string(),
-        ),
-    );
-    ui::stat_pair(
-        (
-            "Wrong orient:",
-            &count(|v| matches!(v, PlacementViolation::WrongOrientation(_))).to_string(),
-        ),
-        (
-            "In blockage:",
-            &count(|v| matches!(v, PlacementViolation::InBlockage(_))).to_string(),
-        ),
-    );
-    ui::stat_pair(
-        (
-            "Outside region:",
-            &count(|v| matches!(v, PlacementViolation::OutsideRegion(_))).to_string(),
-        ),
-        (
-            "In a fence:",
-            &count(|v| matches!(v, PlacementViolation::InFence(_))).to_string(),
-        ),
-    );
-    ui::stat(
-        "Unplaced:",
-        &count(|v| matches!(v, PlacementViolation::Unplaced(_))).to_string(),
-    );
+    for (kind, count) in violation_counts(&violations) {
+        ui::stat(&format!("  {}:", kind.name()), &count.to_string());
+    }
     false
 }
 
 /// A violation with the names, locations and sizes of the cells in it.
-fn describe_violation(db: &NetlistDB, v: &PlacementViolation) -> String {
+fn describe_violation(db: &NetlistDB, v: PlacementViolation) -> String {
     let cell = |c: CellId| {
         let bbox = db.cell_bbox(c);
         format!(
@@ -85,24 +43,44 @@ fn describe_violation(db: &NetlistDB, v: &PlacementViolation) -> String {
             bbox.max.y.get()
         )
     };
-    match *v {
-        PlacementViolation::Overlap(a, b) => format!("overlap {} with {}", cell(a), cell(b)),
-        PlacementViolation::Unplaced(c) => format!("unplaced {}", cell(c)),
-        PlacementViolation::OutsideDie(c) => format!("outside die {}", cell(c)),
-        PlacementViolation::InBlockage(c) => format!("in blockage {}", cell(c)),
-        PlacementViolation::NotInRow(c) => format!("not in a row {}", cell(c)),
-        PlacementViolation::OffSite(c) => format!("off site {}", cell(c)),
-        PlacementViolation::WrongOrientation(c) => format!("wrong orientation {}", cell(c)),
-        PlacementViolation::OutsideRegion(c) => format!("outside region {}", cell(c)),
-        PlacementViolation::InFence(c) => format!("in a fence {}", cell(c)),
+    match v {
+        PlacementViolation::Overlap(a, b) => format!("Overlap: {} with {}", cell(a), cell(b)),
+        PlacementViolation::Unplaced(c)
+        | PlacementViolation::OutsideDie(c)
+        | PlacementViolation::InBlockage(c)
+        | PlacementViolation::NotInRow(c)
+        | PlacementViolation::OffSite(c)
+        | PlacementViolation::WrongOrientation(c)
+        | PlacementViolation::OutsideRegion(c)
+        | PlacementViolation::InFence(c) => format!("{}: {}", v.kind().name(), cell(c)),
     }
 }
 
 /// Prints the connectivity and design rule check results; returns whether
 /// every net is connected and nothing routed breaks a rule.
-pub(crate) fn report_routing(db: &NetlistDB, run: &mut Report) -> bool {
-    let report = check_routing(db);
-    for open in &report.opens {
+pub(crate) fn report_routing(db: &NetlistDB, report: &mut Report) -> bool {
+    let connectivity = check_routing(db);
+    log_opens(db, &connectivity);
+    let wirelength = wirelength_um(db, &connectivity);
+    show_connectivity(&connectivity, wirelength);
+    let drc = check_drc(db);
+    log_markers(db, &drc);
+    show_drc(&drc);
+    report
+        .checks
+        .record_routing(&connectivity, &drc, wirelength);
+    let clean = connectivity.is_connected() && drc.violations.is_empty();
+    if clean {
+        ui::check("Routing is connected and clean.");
+    } else {
+        ui::fail("Routing has opens or design rule violations.");
+    }
+    clean
+}
+
+/// Logs each open net for debugging.
+fn log_opens(db: &NetlistDB, connectivity: &RoutingReport) {
+    for open in &connectivity.opens {
         log::debug!(
             "open: net {} '{}' in {} pieces",
             open.net.index(),
@@ -110,41 +88,57 @@ pub(crate) fn report_routing(db: &NetlistDB, run: &mut Report) -> bool {
             open.components
         );
     }
+}
+
+/// The total wirelength of the routing, in microns.
+fn wirelength_um(db: &NetlistDB, connectivity: &RoutingReport) -> f64 {
     let units = db.dbu();
-    let wirelength: f64 = report
+    connectivity
         .stats
         .wirelength
         .iter()
         .map(|&l| units.to_microns(l))
-        .sum();
+        .sum()
+}
+
+/// Shows the opens and the wiring's statistics.
+fn show_connectivity(connectivity: &RoutingReport, wirelength_um: f64) {
+    let stats = &connectivity.stats;
     ui::stat_pair(
-        ("Opens:", &report.opens.len().to_string()),
-        ("Wirelength (um):", &format!("{wirelength:.0}")),
+        ("Opens:", &connectivity.opens.len().to_string()),
+        ("Wirelength (um):", &format!("{wirelength_um:.0}")),
     );
     ui::stat_pair(
-        ("Vias:", &report.stats.vias.to_string()),
-        ("Off track:", &report.stats.off_track.to_string()),
+        ("Vias:", &stats.vias.to_string()),
+        ("Off track:", &stats.off_track.to_string()),
     );
     ui::stat_pair(
-        ("Wrong way:", &report.stats.wrong_way.to_string()),
-        ("Non-Manhattan:", &report.stats.non_manhattan.to_string()),
+        ("Wrong way:", &stats.wrong_way.to_string()),
+        ("Non-Manhattan:", &stats.non_manhattan.to_string()),
     );
-    let drc = check_drc(db);
-    for m in &drc.violations {
-        log::debug!("drc: {}", describe_marker(db, &drc, m));
+}
+
+/// Logs every marker of each class for debugging.
+fn log_markers(db: &NetlistDB, drc: &DrcReport) {
+    if !log::log_enabled!(log::Level::Debug) {
+        return;
     }
-    for m in &drc.advisory {
-        log::debug!("drc advisory: {}", describe_marker(db, &drc, m));
+    let classes = [
+        ("drc", &drc.violations),
+        ("drc advisory", &drc.advisory),
+        ("drc pin in obstruction", &drc.pin_obstruction),
+        ("drc from placement", &drc.placement),
+        ("drc in the input", &drc.input),
+    ];
+    for (class, markers) in classes {
+        for m in markers {
+            log::debug!("{class}: {}", describe_marker(db, drc, m));
+        }
     }
-    for m in &drc.pin_obstruction {
-        log::debug!("drc pin in obstruction: {}", describe_marker(db, &drc, m));
-    }
-    for m in &drc.placement {
-        log::debug!("drc from placement: {}", describe_marker(db, &drc, m));
-    }
-    for m in &drc.input {
-        log::debug!("drc in the input: {}", describe_marker(db, &drc, m));
-    }
+}
+
+/// Shows the design rule violations by class and kind.
+fn show_drc(drc: &DrcReport) {
     ui::stat_pair(
         ("DRC violations:", &drc.violations.len().to_string()),
         ("From placement:", &drc.placement.len().to_string()),
@@ -165,27 +159,6 @@ pub(crate) fn report_routing(db: &NetlistDB, run: &mut Report) -> bool {
             &format!("  {} (advisory):", kind.name()),
             &count.to_string(),
         );
-    }
-    let by_kind = |counts: Vec<(pare_common::verify::drc::Violation, usize)>| {
-        counts
-            .into_iter()
-            .map(|(kind, n)| (kind.name().to_string(), n))
-            .collect()
-    };
-    run.checks.opens = report.opens.len();
-    run.checks.wirelength_um = wirelength;
-    run.checks.vias = report.stats.vias;
-    run.checks.violations = by_kind(drc.counts());
-    run.checks.advisory = by_kind(drc.advisory_counts());
-    run.checks.pin_obstructions = drc.pin_obstruction.len();
-    run.checks.from_placement = drc.placement.len();
-    run.checks.in_input = drc.input.len();
-    if report.is_connected() && drc.violations.is_empty() {
-        ui::check("Routing is connected and clean.");
-        true
-    } else {
-        ui::fail("Routing has opens or design rule violations.");
-        false
     }
 }
 
