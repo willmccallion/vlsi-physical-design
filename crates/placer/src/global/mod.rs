@@ -573,6 +573,8 @@ impl Setup {
                 .map(|i| objects.sizes[i].x * objects.sizes[i].y)
                 .sum()
         };
+        // NOTE: gpl's runTimingDriven raises every region by the whole design's
+        // area delta; PARE raises each field by its own cells' gain.
         let gained = cell_area(objects, field.cells) - cell_area(&self.objects, old.cells);
         let free = field.grid.free_area();
         if free > 0.0 {
@@ -594,6 +596,8 @@ fn movable_cells(model: &PlacementModel) -> IdVec<ObjectId, CellId> {
 }
 
 /// The boxes of the model's fixed cells.
+// NOTE: gpl's PlacerBase snaps fixed instances outward to the site grid
+// before counting their blockage; PARE takes their boxes as they are.
 fn fixed_rects(model: &PlacementModel) -> Vec<Rect<f64>> {
     model
         .cells()
@@ -716,6 +720,8 @@ fn build_fields(
 /// The density a zone's cells are spread to: the requested target, or just
 /// above their utilization when that is higher, since the target could
 /// never be met otherwise.
+// NOTE: gpl's initFillerGCells falls back to the utilization rounded up to
+// a hundredth; PARE adds a hundredth.
 fn zone_target(requested: f64, utilization: f64) -> f64 {
     if utilization > requested {
         (utilization + ZONE_DENSITY_MARGIN).min(1.0)
@@ -728,6 +734,8 @@ fn zone_target(requested: f64, utilization: f64) -> f64 {
 /// density, in place of `gpl`'s `initFillerGCells`: as tall as the median
 /// cell, with the mean area of the cells left after dropping the smallest
 /// and largest twentieth.
+// NOTE: initFillerGCells averages width and height apart over the middle
+// 90% of each and rescales fillers past 10x the cell area; PARE differs.
 fn filler_layout(cells: &[Point<f64>], free_area: f64, target: f64) -> (Point<f64>, usize) {
     let cell_area: f64 = cells.iter().map(|s| s.x * s.y).sum();
     let filler_area = target.mul_add(free_area, -cell_area).max(0.0);
@@ -756,6 +764,8 @@ struct StartBoxes {
     of_cell: IdVec<ObjectId, Rect<f64>>,
 }
 
+// NOTE: gpl's initialPlace starts fence cells at the region boundary's box
+// center; PARE uses the box of the fence's free row stretches.
 impl StartBoxes {
     /// The boxes of the `cells` cell objects of `fields`.
     fn new(model: &PlacementModel, fields: &IdVec<FieldId, Field>, cells: usize) -> Self {

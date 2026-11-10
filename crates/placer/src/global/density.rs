@@ -235,6 +235,8 @@ impl DensityGrid {
             .zip(&self.potential)
             .map(|(q, phi)| q * phi)
             .sum();
+        // NOTE: gpl's overflow is over max(cell area, iteration share of 5% of
+        // the fixed area); PARE divides by the cell area alone.
         let cell_area: f64 = self.cells.iter().sum();
         if cell_area <= 0.0 {
             return Excess {

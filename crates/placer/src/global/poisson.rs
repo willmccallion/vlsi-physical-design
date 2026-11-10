@@ -64,6 +64,8 @@ impl PoissonSolver {
         for u in 0..dim2 {
             let kx = angular_frequency(u, dim2) / bin_w;
             for v in 0..dim2 {
+                // NOTE: gpl's fft.cpp scales wy by binSizeY / binSizeX, the ratio
+                // inverted; PARE divides each axis by its own bin size.
                 let ky = angular_frequency(v, dim2) / bin_h;
                 let eigenvalue = kx.mul_add(kx, ky * ky);
                 let idx = u * dim2 + v;

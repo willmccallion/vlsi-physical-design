@@ -227,6 +227,8 @@ fn pin_density_sizes(db: &NetlistDB) -> IdVec<CellId, Point<Dbu>> {
 }
 
 /// The kind of every cell of `db`, given the height of the shortest row.
+// NOTE: gpl's Instance measures rows by the first non-pad row's site
+// height; PARE by the shortest row.
 fn cell_kinds(db: &NetlistDB, row_height: Option<Dbu>) -> IdVec<CellId, CellKind> {
     db.cells
         .ids()
