@@ -4,8 +4,9 @@
 //! Uses `yansi` for ANSI colors with automatic TTY detection.
 
 use pare_common::db::library::Direction;
+use pare_common::units::Seconds;
 use pare_placer::global;
-use pare_router::RoundReport;
+use pare_router::{LayerLoad, RoundReport};
 use std::time::Duration;
 use yansi::Paint;
 
@@ -92,24 +93,19 @@ pub(crate) fn gr_layer_table_header() {
 }
 
 /// Prints one layer of the global routing table.
-pub(crate) fn gr_layer_row(
-    layer: &str,
-    direction: Direction,
-    capacity: i64,
-    usage: i64,
-    overflow: i64,
-) {
-    let direction = match direction {
+pub(crate) fn gr_layer_row(load: &LayerLoad<'_>) {
+    let direction = match load.direction {
         Direction::Horizontal => "horizontal",
         Direction::Vertical => "vertical",
     };
-    let percent = if capacity == 0 {
+    let percent = if load.capacity == 0 {
         0.0
     } else {
-        100.0 * usage as f64 / capacity as f64
+        100.0 * load.usage as f64 / load.capacity as f64
     };
     eprintln!(
-        "    {layer:<10} {direction:<10} {capacity:>12} {usage:>12} {percent:>7.1}% {overflow:>10}"
+        "    {:<10} {direction:<10} {:>12} {:>12} {percent:>7.1}% {:>10}",
+        load.name, load.capacity, load.usage, load.overflow
     );
 }
 
@@ -167,7 +163,7 @@ pub(crate) fn timing_table_header() {
     eprintln!("    {}", "-".repeat(96).dim());
 }
 
-/// One row of the timing repair table; slacks in nanoseconds.
+/// One row of the timing repair table.
 #[derive(Clone, Copy, Debug)]
 pub(crate) struct TimingRow<'a> {
     /// The iteration, or a label for the final row.
@@ -185,9 +181,9 @@ pub(crate) struct TimingRow<'a> {
     /// Cell area change since the start, as a percentage.
     pub(crate) area_change_percent: f64,
     /// Worst slack.
-    pub(crate) wns_ns: f64,
+    pub(crate) wns: Seconds,
     /// Total negative slack.
-    pub(crate) tns_ns: f64,
+    pub(crate) tns: Seconds,
     /// Endpoints still failing.
     pub(crate) failing: usize,
     /// The name of the endpoint with the worst slack, empty when there is none.
@@ -205,8 +201,8 @@ pub(crate) fn timing_iter(row: &TimingRow<'_>) {
         row.cloned,
         row.swaps,
         row.area_change_percent,
-        row.wns_ns,
-        row.tns_ns,
+        row.wns.nanos(),
+        row.tns.nanos(),
         row.failing,
         row.worst
     );
