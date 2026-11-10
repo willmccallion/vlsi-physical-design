@@ -3,6 +3,9 @@
 //! when the prediction overshoots. Every field weighs its own density
 //! energy, and its objects stop moving once its overflow reaches the target.
 //!
+//! Unlike `gpl`, which works in `float` with its `fastExp`, everything here
+//! is `f64` with exact `exp`.
+//!
 //! A single field's weight follows ePlace: it grows while wirelength
 //! shrinks. With several fields that one signal cannot tell which field
 //! still needs spreading, so their weights follow `DREAMPlace` 3.0 instead: a
@@ -198,6 +201,9 @@ impl Weights {
     /// by the field's weight; with a schedule it follows `DREAMPlace`,
     /// computed in its units of one site width.
     fn precondition(&self, k: FieldId, pins: f64, area: f64) -> f64 {
+        // NOTE: gpl's updateGradients takes density per bin over the target and
+        // a field per bin, so λ·area is unit-free; PARE's physical density
+        // and field scale it by 1 / (bin size · target) against gpl's.
         let Some(s) = self.schedule.as_ref() else {
             return self.penalties[k].mul_add(area, pins).max(1.0);
         };
@@ -801,6 +807,8 @@ impl Refund {
 /// trial suggests more than 95% of the step it tried or `MAX_BACKTRACKS`
 /// trials have run, as `gpl`'s `doBackTracking`; returns the step the last
 /// trial suggests.
+// NOTE: nesterovUpdateStepLength floors a shrinking step at 0.01 and keeps
+// it; PARE has no floor.
 fn backtrack_steps(step: f64, mut trial: impl FnMut(f64) -> f64) -> f64 {
     let mut step = step;
     for _ in 0..MAX_BACKTRACKS {
@@ -926,6 +934,8 @@ fn unspread_result(setup: &Setup) -> GlobalResult {
 }
 
 /// Writes the cell objects' centers into `model` as cell positions.
+// NOTE: gpl's updateDbGCells subtracts half the pin-density-extended width
+// from the center, putting cells off center; PARE takes the real size.
 fn write_positions(model: &mut PlacementModel, setup: &Setup) {
     for (k, &i) in setup.movable.iter_enumerated() {
         model.positions[i] = setup.objects.centers[k] - model.sizes[i] * 0.5;
@@ -1132,6 +1142,8 @@ impl Run {
 
     /// Takes one Nesterov step from `s`, as `gpl`'s `nesterovUpdateCoordinates`
     /// and `updateNextIter`; none when it diverged.
+    // NOTE: gpl's checkDivergence and isDiverged revert to the snapshot of
+    // least wirelength below overflow 0.25; PARE stops at non-finite values.
     fn step(
         &mut self,
         objective: &mut Objective<'_>,
@@ -1220,6 +1232,8 @@ impl Run {
                     s.major[i]
                 };
             }
+            // NOTE: nesterovUpdateCoordinates takes the reference point from the
+            // unclamped major point and clamps both; PARE clamps the major first.
             objective.clamp(&mut self.next_major);
             for (i, &moves) in moving.iter_enumerated() {
                 self.next_reference[i] = if moves {
@@ -1314,6 +1328,8 @@ impl Run {
         let Some(timing) = params.timing.as_ref().filter(|_| self.timing_on) else {
             return false;
         };
+        // NOTE: gpl's runTimingDriven waits on every routability refund
+        // iteration; PARE waits only while routability still has rounds.
         let routability_pending = self.snapshot.is_some()
             && self.routability.as_ref().is_some_and(Routability::active)
             && overflow > CHECK_OVERFLOW;
@@ -1456,6 +1472,8 @@ fn congestion_map(
 
 /// A first step length from the gradient change over a small probe move,
 /// in place of `gpl`'s `initDensity2` and `updateInitialPrevSLPCoordi`.
+// NOTE: gpl probes from cur - initialPrevCoordiUpdateCoef (100) times the
+// summed gradient, retried on NaN; PARE moves the largest by 0.01 bin.
 fn initial_step(
     objective: &mut Objective<'_>,
     at: &ObjectPoints,
