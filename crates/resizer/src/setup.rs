@@ -712,6 +712,37 @@ mod tests {
     };
     use std::fmt::Write;
 
+    fn slacks(worst: f64, end: f64, total: f64) -> PassSlacks {
+        PassSlacks {
+            worst: Seconds::new(worst),
+            end: Seconds::new(end),
+            total: Seconds::new(total),
+        }
+    }
+
+    #[test]
+    fn the_last_gasp_keeps_a_pass_only_when_neither_worst_nor_total_slack_worsens() {
+        let kept = slacks(-1e-10, -1e-10, -5e-10);
+        let rule = PassRule::LastGasp;
+
+        assert!(rule.keeps(kept, slacks(-0.9e-10, -0.9e-10, -4e-10), true));
+        assert!(rule.keeps(kept, kept, true));
+        assert!(!rule.keeps(kept, slacks(-0.9e-10, -0.9e-10, -6e-10), true));
+        assert!(!rule.keeps(kept, slacks(-1.1e-10, -0.5e-10, -4e-10), false));
+        assert_eq!(rule.worse_passes_tolerated(), 0);
+    }
+
+    #[test]
+    fn the_legacy_phase_keeps_a_better_endpoint_only_off_the_worst_one() {
+        let kept = slacks(-1e-10, -0.5e-10, -5e-10);
+        let better_end = slacks(-1e-10, -0.4e-10, -6e-10);
+        let rule = PassRule::Legacy;
+
+        assert!(rule.keeps(kept, slacks(-0.9e-10, -0.5e-10, -6e-10), true));
+        assert!(rule.keeps(kept, better_end, false));
+        assert!(!rule.keeps(kept, better_end, true));
+    }
+
     #[test]
     fn a_pass_makes_more_moves_the_worse_its_violation_and_at_least_one() {
         assert_eq!(scaled_repairs(5, 1.0), 5);

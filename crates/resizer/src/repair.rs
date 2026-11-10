@@ -1107,6 +1107,41 @@ mod tests {
     }
 
     #[test]
+    fn a_long_clock_net_gets_repeaters_and_the_session_keeps_its_options() {
+        let mut db = design(&def_text(
+            "long_clock",
+            &DefSections {
+                components: "- cb CLKBUF_X3 + PLACED ( 2000 2800 ) N ;\n\
+                             - f DFF_X1 + PLACED ( 602000 2800 ) N ;\n",
+                nets: "- clk ( PIN clk ) ( cb A ) ;\n- ck ( cb Z ) ( f CK ) ;\n",
+                inputs: &["clk"],
+                outputs: &[],
+            },
+        ));
+        let lib = cells(&clock_cells_source());
+        let constraints = format!("{SLOW_CLOCK}set_propagated_clock [all_clocks]\n");
+
+        with_wired_session(&mut db, &lib, &constraints, |resizer| {
+            let options = resizer.options;
+            let strongest = resizer.r_strongest_buffer;
+            let clock_buffer = resizer
+                .link
+                .liberty
+                .buffer_cell(resizer.link.liberty.cell_id("CLKBUF_X3").unwrap())
+                .unwrap();
+
+            let summary = Repairer::new(resizer)
+                .repair_clock_nets(&[clock_buffer], Some(Dbu(200_000)))
+                .unwrap();
+
+            assert!(summary.inserted > 0, "{summary:?}");
+            assert_eq!(summary.length_violations, 1);
+            assert_eq!(resizer.options, options);
+            assert_eq!(resizer.r_strongest_buffer, strongest);
+        });
+    }
+
+    #[test]
     fn clock_nets_without_clock_buffers_cannot_be_repaired() {
         let mut db = apart();
         let lib = cells(&clock_cells_source());
