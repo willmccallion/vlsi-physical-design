@@ -59,7 +59,7 @@ fn as_seconds<S: Serializer>(time: &Duration, serializer: S) -> Result<S::Ok, S:
 }
 
 /// What netlist repair did.
-#[derive(Clone, Debug, Default, Serialize)]
+#[derive(Debug, Default, Serialize)]
 pub(crate) struct NetlistSummary {
     /// Buffers from synthesis removed before placement.
     pub(crate) buffers_removed: usize,

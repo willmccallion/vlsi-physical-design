@@ -59,7 +59,6 @@ pub(crate) struct NetlistRepair<'p> {
     pub(crate) liberty: Liberty,
     pub(crate) constraints: Constraints<'p>,
     pub(crate) namer: Namer,
-    pub(crate) summary: NetlistSummary,
 }
 
 impl NetlistRepair<'_> {
@@ -211,63 +210,100 @@ pub(crate) fn repair_netlist<'p>(
     report: &mut Report,
 ) -> anyhow::Result<NetlistRepair<'p>> {
     let liberty = load_liberty(&config.input.liberty_files)?;
-    let constraints = match &plan.clocks {
-        ClockSource::Sdc(path) => {
-            ui::header("Input", &path.display().to_string());
-            Constraints::Sdc(Box::new(sdc::parse_file(path, db, &liberty)?))
-        }
-        ClockSource::Ports(ports) => Constraints::Ports(ports),
-    };
-    let link = Link::new(db, &liberty, &plan.dont_use)?;
+    let constraints = load_constraints(plan, db, &liberty)?;
     ui::section("Netlist");
-    let mut namer = Namer::new();
+    let mut repair = NetlistRepair {
+        plan,
+        liberty,
+        constraints,
+        namer: Namer::new(),
+    };
     let mut summary = NetlistSummary::default();
     // NOTE: ORFS's global_place.tcl removes buffers only with GPL_TIMING_DRIVEN; PARE
     // keeps [netlist] remove_buffers a switch of its own. The defaults agree.
     if config.netlist.remove_buffers {
         let timer = PhaseTimer::start(Phase::BufferRemoval);
-        let before = db.cells.len();
-        summary.buffers_removed = pare_resizer::remove_buffers(db, &link, sdc.as_ref())?;
-        ui::stat_pair(
-            ("Removed:", &summary.buffers_removed.to_string()),
-            ("Cells:", &format!("{before} -> {}", db.cells.len())),
-        );
+        summary.buffers_removed = remove_synthesis_buffers(db, &repair)?;
         timer.finish(report);
     }
     if config.netlist.buffer_ports {
         let timer = PhaseTimer::start(Phase::PortBuffering);
-        let stage = Stage::find(db, plan, &liberty, constraints.clocks())?;
-        let done = pare_resizer::buffer_ports(
-            db,
-            &stage.link,
-            &stage.buffers,
-            &stage.clocks,
-            &stage.constants,
-            &mut namer,
-        )?;
-        summary.input_buffers = done.inputs;
-        summary.output_buffers = done.outputs;
-        summary
-            .buffer_cell
-            .clone_from(&liberty.cell(stage.buffers.lowest_drive.id).name);
-        ui::stat_pair(
-            ("Input buffers:", &done.inputs.to_string()),
-            ("Output buffers:", &done.outputs.to_string()),
-        );
-        ui::stat_pair(
-            ("Buffer:", &summary.buffer_cell),
-            ("Clock pins:", &stage.clocks.sources().len().to_string()),
-        );
+        buffer_ports(db, &mut repair, &mut summary)?;
         timer.finish(report);
     }
-    report.netlist = Some(summary.clone());
-    Ok(NetlistRepair {
-        plan,
-        liberty,
-        constraints,
-        namer,
-        summary,
-    })
+    report.netlist = Some(summary);
+    Ok(repair)
+}
+
+/// The constraints `plan` names: the SDC file's, read against `db` and
+/// `liberty`, or the clock ports.
+fn load_constraints<'p>(
+    plan: &'p RepairPlan,
+    db: &NetlistDB,
+    liberty: &Liberty,
+) -> anyhow::Result<Constraints<'p>> {
+    match &plan.clocks {
+        ClockSource::Sdc(path) => {
+            ui::header("Input", &path.display().to_string());
+            Ok(Constraints::Sdc(Box::new(sdc::parse_file(
+                path, db, liberty,
+            )?)))
+        }
+        ClockSource::Ports(ports) => Ok(Constraints::Ports(ports)),
+    }
+}
+
+/// Removes the buffers synthesis left, as `remove_buffers`; returns how
+/// many it removed.
+fn remove_synthesis_buffers(
+    db: &mut NetlistDB,
+    repair: &NetlistRepair<'_>,
+) -> anyhow::Result<usize> {
+    let link = Link::new(db, &repair.liberty, &repair.plan.dont_use)?;
+    let sdc = match &repair.constraints {
+        Constraints::Sdc(sdc) => Some(sdc.as_ref()),
+        Constraints::Ports(_) => None,
+    };
+    let before = db.cells.len();
+    let removed = pare_resizer::remove_buffers(db, &link, sdc)?;
+    ui::stat_pair(
+        ("Removed:", &removed.to_string()),
+        ("Cells:", &format!("{before} -> {}", db.cells.len())),
+    );
+    Ok(removed)
+}
+
+/// Buffers every port, as `buffer_ports`, recording the buffers it added
+/// in `summary`.
+fn buffer_ports(
+    db: &mut NetlistDB,
+    repair: &mut NetlistRepair<'_>,
+    summary: &mut NetlistSummary,
+) -> anyhow::Result<()> {
+    let clocks = repair.constraints.clocks();
+    let stage = Stage::find(db, repair.plan, &repair.liberty, clocks)?;
+    let done = pare_resizer::buffer_ports(
+        db,
+        &stage.link,
+        &stage.buffers,
+        &stage.clocks,
+        &stage.constants,
+        &mut repair.namer,
+    )?;
+    summary.input_buffers = done.inputs;
+    summary.output_buffers = done.outputs;
+    summary
+        .buffer_cell
+        .clone_from(&repair.liberty.cell(stage.buffers.lowest_drive.id).name);
+    ui::stat_pair(
+        ("Input buffers:", &done.inputs.to_string()),
+        ("Output buffers:", &done.outputs.to_string()),
+    );
+    ui::stat_pair(
+        ("Buffer:", &summary.buffer_cell),
+        ("Clock pins:", &stage.clocks.sources().len().to_string()),
+    );
+    Ok(())
 }
 
 /// Resizes drivers and inserts repeaters where the placed netlist breaks
@@ -290,8 +326,7 @@ pub(crate) fn repair_design(
         Clocks::Sdc(sdc) => repair_design_on(Resizer::timed(inputs, sdc)?)?,
         Clocks::Ports(_) => repair_design_on(Resizer::new(inputs)?)?,
     };
-    repair.summary.design = DesignRepairSummary::of(&done);
-    report.netlist = Some(repair.summary.clone());
+    report.netlist.get_or_insert_default().design = DesignRepairSummary::of(&done);
     timer.finish(report);
     Ok(())
 }
