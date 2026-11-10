@@ -2048,6 +2048,34 @@ mod tests {
     }
 
     #[test]
+    fn rebuffering_a_whole_design_replaces_a_buffer_chain_and_keeps_it_timed() {
+        let mut db = design(
+            "VERSION 5.8 ;\nDIVIDERCHAR \"/\" ;\nBUSBITCHARS \"[]\" ;\nDESIGN chain ;\n\
+             UNITS DISTANCE MICRONS 2000 ;\nDIEAREA ( 0 0 ) ( 800000 40000 ) ;\n\
+             COMPONENTS 4 ;\n- f1 DFF_X1 + PLACED ( 2000 2800 ) N ;\n\
+             - b1 BUF_X1 + PLACED ( 4000 2800 ) N ;\n- b2 BUF_X1 + PLACED ( 6000 2800 ) N ;\n\
+             - f2 DFF_X1 + PLACED ( 602000 2800 ) N ;\nEND COMPONENTS\n\
+             PINS 1 ;\n- clk + NET clk + DIRECTION INPUT ;\nEND PINS\n\
+             NETS 4 ;\n- clk ( PIN clk ) ( f1 CK ) ( f2 CK ) ;\n- q ( f1 Q ) ( b1 A ) ;\n\
+             - m ( b1 Z ) ( b2 A ) ;\n- d ( b2 Z ) ( f2 D ) ;\nEND NETS\nEND DESIGN\n",
+        );
+        let lib = cells(&clock_cells_source());
+        let d = pin(&db, "f2/D");
+
+        with_wired_session(&mut db, &lib, CLOCK, |resizer| {
+            let mut rebuffer = Rebuffer::new(resizer).unwrap();
+
+            rebuffer.fully_rebuffer(resizer).unwrap();
+
+            assert!(rebuffer.removed > 0, "{rebuffer:?}");
+            assert!(resizer.sta().slack(d, MinMax::Max).is_constrained());
+            let netlist = resizer.netlist();
+            let q = pin(resizer.db, "f1/Q");
+            assert!(netlist.loads(resizer.db.pins[q].net).count() > 0);
+        });
+    }
+
+    #[test]
     fn a_placed_buffer_may_be_taken_out_and_a_fixed_one_may_not() {
         assert!(removable_under(buffer_between_flops("PLACED"), CLOCK));
         assert!(!removable_under(buffer_between_flops("FIXED"), CLOCK));
