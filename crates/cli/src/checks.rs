@@ -14,7 +14,7 @@ pub(crate) fn report_placement(db: &NetlistDB, report: &mut Report) -> bool {
     let violations = placement_violations(db);
     report.checks.placement_violations = violations.len();
     if violations.is_empty() {
-        ui::check("Placement is legal.");
+        ui::pass("Placement is legal.");
         return true;
     }
     if log::log_enabled!(log::Level::Debug) {
@@ -71,7 +71,7 @@ pub(crate) fn report_routing(db: &NetlistDB, report: &mut Report) -> bool {
         .record_routing(&connectivity, &drc, wirelength);
     let clean = connectivity.is_connected() && drc.violations.is_empty();
     if clean {
-        ui::check("Routing is connected and clean.");
+        ui::pass("Routing is connected and clean.");
     } else {
         ui::fail("Routing has opens or design rule violations.");
     }

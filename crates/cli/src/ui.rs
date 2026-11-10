@@ -208,9 +208,14 @@ pub(crate) fn timing_iter(row: &TimingRow<'_>) {
     );
 }
 
-/// Prints a green PASS line.
-pub(crate) fn check(msg: &str) {
+/// Prints a green PASS line, for a check that passed.
+pub(crate) fn pass(msg: &str) {
     eprintln!("  {} {}", "PASS".green().bold(), msg);
+}
+
+/// Prints a cyan NOTE line, for what a step did or starts from.
+pub(crate) fn note(msg: &str) {
+    eprintln!("  {} {}", "NOTE".cyan().bold(), msg);
 }
 
 /// Prints a red FAIL line.
