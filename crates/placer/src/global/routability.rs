@@ -1,4 +1,4 @@
-//! Routability-driven placement as `OpenROAD`'s global placer does it.
+//! Routability-driven placement after `gpl`'s `RouteBase::routability`.
 //!
 //! Routing demand is estimated with RUDY as `OpenROAD`'s `grt::Rudy` does
 //! it over the global router's gcells: each net lays wire of its
@@ -6,16 +6,18 @@
 //! the box of its pins' average points, and a gcell's congestion is the
 //! area that wire covers in it over its area, plus the share of its routing
 //! capacity taken before placement by fixed metal and the layer adjustment.
-//! Once spreading has nearly finished and settled, standard cells in congested
-//! gcells grow; their field removes fillers to make room and raises its
-//! target density by whatever the fillers cannot cover. Placement then
+//! Once spreading has nearly finished, standard cells in congested gcells
+//! grow, as in `gpl`; their field removes fillers to make room and raises
+//! its target density by whatever the fillers cannot cover. Placement then
 //! resumes from an earlier, less spread snapshot so the grown cells push
-//! their neighbours apart. The total growth is held to a budget spent over
-//! several rounds. Rounds end, keeping the growth, once congestion falls
-//! below a target; when congestion stops improving, a field would need a
-//! density above [`MAX_DENSITY`], the budget is spent or [`MAX_ROUNDS`]
-//! pass, the sizes revert to those of the round that measured least
-//! congestion.
+//! their neighbours apart. Rounds end, keeping the growth, once congestion
+//! falls below a target; when congestion stops improving, a field would
+//! need a density above [`MAX_DENSITY`] or [`MAX_ROUNDS`] pass, the sizes
+//! revert to those of the round that measured least congestion.
+//!
+//! Three parts are PARE's own, each marked where it diverges: a budget on
+//! the total growth, spent over several rounds; waiting for placement to
+//! settle before measuring; and a new minimum judged relative to the old.
 
 use super::nesterov::{Objects, remap_fields};
 use super::wirelength::Netlist;
@@ -159,8 +161,12 @@ impl RoutingTiles {
     }
 
     /// Every gcell `rect` overlaps, with the area of the overlap and of the
-    /// gcell, the grid clipped to `die`. The last gcell of a row or column
-    /// ends at the die where `OpenROAD`'s grid stretches it to there.
+    /// gcell, the grid clipped to `die`.
+    // NOTE: grt sizes its grid by floor and Rudy::makeGrid stretches the last
+    // gcell to the die; PARE's router sizes by ceil, so the last gcell is the
+    // remainder alone. makeGrid's x_extra ignores the die's origin and
+    // calculateRudyTiles puts the tile grid at 0, not the die origin; PARE
+    // measures from the gcells' own origin.
     fn overlaps(&self, rect: &Rect<f64>, die: &Rect<f64>) -> Vec<(usize, f64, f64)> {
         let columns = self.line(rect.min.x, self.origin.x, self.nx)
             ..=self.line(rect.max.x, self.origin.x, self.nx);
@@ -504,6 +510,8 @@ impl Routability {
         objects: &Objects,
         fields: &IdVec<FieldId, Field>,
     ) {
+        // NOTE: RouteBase::routability counts a new minimum when congestion
+        // drops by more than 0.001 absolute; PARE asks a relative drop.
         let improved = self
             .minimum
             .as_ref()
@@ -524,6 +532,8 @@ impl Routability {
 
     /// How much of the growth `map` asks for this round may take: at most the
     /// whole budget over [`BUDGET_PASSES`], and no more than is left.
+    // NOTE: RouteBase::routability grows every congested cell by its gcell's
+    // full ratio with no budget; PARE's budget is its own.
     fn budget_scale(&self, map: &CongestionMap, objects: &Objects) -> BudgetScale {
         let budget = MAX_INFLATION_TOTAL * self.original_area;
         let spent: f64 = self.grown.iter().sum();
@@ -626,6 +636,8 @@ fn remove_fillers(objects: &Objects, field: &mut Field, added: f64) {
     field.kept_fillers -= removed;
     let missing = (removed as f64).mul_add(-single, added);
     let free = field.grid.free_area();
+    // NOTE: cutFillerCells counts movable macros at their area times the
+    // target density (getNesterovInstsArea); PARE counts their whole area.
     if missing <= single || free <= 0.0 {
         return;
     }
