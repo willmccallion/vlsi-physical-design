@@ -65,8 +65,8 @@ fn orient_single_row_cell(imp: &mut Improver, n: NodeId, row: usize) -> bool {
     true
 }
 
-/// Mirrors single-row cells about their vertical axis where the rows allow
-/// it and it shortens their nets' horizontal spans, as
+/// Mirrors single-row cells about their vertical axis where their rows and
+/// masters allow it and it shortens their nets' horizontal spans, as
 /// `DetailedOrient::flipCells`.
 fn flip_cells(imp: &mut Improver) {
     let mut marks: IdVec<EdgeId, usize> = IdVec::filled(0, imp.net.edges.len());
@@ -128,10 +128,43 @@ fn flip_cells(imp: &mut Improver) {
                 Orientation::FS => Orientation::S,
                 _ => continue,
             };
+            // NOTE: diverges from DetailedOrient::flipCells, which asks only the
+            // row's symmetry; PARE also asks the master's.
+            if !imp.grid.nodes[n].symmetry.allows(to) {
+                continue;
+            }
             imp.orient_node(n, to);
             if imp.has_placement_violation(n) {
                 imp.orient_node(n, from);
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::super::tests::{improver_of, tiny_from_one_spot};
+    use super::*;
+
+    /// The tiny design's rows allow mirroring about Y; its masters here do
+    /// not.
+    #[test]
+    fn a_cell_whose_master_forbids_mirroring_is_not_flipped() {
+        let mut db = tiny_from_one_spot();
+        for m in &mut db.library.macros {
+            m.symmetry.y = false;
+        }
+        let mut imp = improver_of(db);
+
+        run(&mut imp);
+
+        let wrong: Vec<(String, Orientation)> = imp
+            .movable_cells()
+            .into_iter()
+            .map(|n| &imp.grid.nodes[n])
+            .filter(|node| !node.symmetry.allows(node.orient))
+            .map(|node| (node.name.clone(), node.orient))
+            .collect();
+        assert_eq!(wrong, []);
     }
 }
