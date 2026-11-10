@@ -960,13 +960,17 @@ fn find_back_edges(
 
 #[cfg(test)]
 mod tests {
+    use super::is_non_leaf_clock;
     use crate::bnet::LoadModel;
+    use crate::library::Link;
+    use crate::netlist::Netlist;
     use crate::testing::{
         DefSections, cells, clock_cells_source, def_text, design, pin, with_timed_session,
         with_wired_session,
     };
     use pare_common::db::design::NetlistDB;
     use pare_common::db::liberty::MinMax;
+    use pare_common::db::library::SignalUse;
     use pare_common::units::{Farads, Seconds};
 
     /// Whether `slew` is `nanoseconds` to within a femtosecond.
@@ -1060,5 +1064,55 @@ mod tests {
             ((driven - bare).get() - 0.1e-9).abs() < 1e-18,
             "{bare:?} -> {driven:?}"
         );
+    }
+
+    #[test]
+    fn a_loop_of_two_inverters_is_broken_at_one_arc() {
+        let mut db = design(&def_text(
+            "ring",
+            &DefSections {
+                components: "- i1 INV_X1 + PLACED ( 2000 2800 ) N ;\n\
+                             - i2 INV_X1 + PLACED ( 4000 2800 ) N ;\n",
+                nets: "- a ( i1 ZN ) ( i2 A ) ;\n- b ( i2 ZN ) ( i1 A ) ;\n",
+                inputs: &[],
+                outputs: &[],
+            },
+        ));
+        let arcs = [("i1/A", "i1/ZN"), ("i2/A", "i2/ZN")].map(|(a, z)| (pin(&db, a), pin(&db, z)));
+
+        with_timed_session(&mut db, &cells(&clock_cells_source()), "", |r| {
+            let broken: Vec<bool> = arcs
+                .iter()
+                .map(|&(a, z)| r.graph.is_loop_arc(a, z))
+                .collect();
+
+            assert_eq!(broken.iter().filter(|&&b| b).count(), 1, "{broken:?}");
+        });
+    }
+
+    #[test]
+    fn a_clock_net_driving_only_buffers_is_non_leaf_and_one_reaching_a_register_is_not() {
+        let mut db = design(&def_text(
+            "tree",
+            &DefSections {
+                components: "- c1 BUF_X1 + PLACED ( 2000 2800 ) N ;\n\
+                             - c2 BUF_X1 + PLACED ( 4000 2800 ) N ;\n\
+                             - f DFF_X1 + PLACED ( 6000 2800 ) N ;\n",
+                nets: "- clk ( PIN clk ) ( c1 A ) ;\n- trunk ( c1 Z ) ( c2 A ) ;\n\
+                       - leaf ( c2 Z ) ( f CK ) ;\n",
+                inputs: &["clk"],
+                outputs: &[],
+            },
+        ));
+        let (trunk, leaf) = (db.net_id("trunk").unwrap(), db.net_id("leaf").unwrap());
+        for net in [trunk, leaf] {
+            db.nets[net].signal_use = SignalUse::Clock;
+        }
+        let lib = cells(&clock_cells_source());
+        let link = Link::new(&db, &lib, &[]).unwrap();
+        let netlist = Netlist::new(&db, &link);
+
+        assert!(is_non_leaf_clock(&netlist, trunk));
+        assert!(!is_non_leaf_clock(&netlist, leaf));
     }
 }
