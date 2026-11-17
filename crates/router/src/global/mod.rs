@@ -603,18 +603,29 @@ impl GlobalGrid {
         }
     }
 
-    /// Places the demand of a net's paths.
-    pub(crate) fn place(&self, net: &GlobalNet, paths: &[Vec<GCell>]) {
-        self.add_tree(net, paths, Sign::Add);
+    /// Places the demand of `tree` on the grid.
+    pub(crate) fn place(&self, tree: NetTree) -> PlacedTree {
+        self.add_tree(&tree.net, &tree.paths, Sign::Add);
+        PlacedTree(tree)
     }
 
-    /// Lifts the demand of a net's paths, as [`Self::place`] put it.
-    pub(crate) fn lift(&self, net: &GlobalNet, paths: &[Vec<GCell>]) {
-        self.add_tree(net, paths, Sign::Remove);
+    /// Lifts the demand of `placed` off the grid, as [`Self::place`] put
+    /// it there.
+    pub(crate) fn lift(&self, placed: PlacedTree) -> NetTree {
+        let PlacedTree(tree) = placed;
+        self.add_tree(&tree.net, &tree.paths, Sign::Remove);
+        tree
     }
 
     fn overflowed(&self, e: usize) -> bool {
         self.usage.get(e) > self.capacity[e]
+    }
+
+    /// Whether `tree` crosses an overflowed edge.
+    fn crosses_overflow(&self, tree: &PlacedTree) -> bool {
+        tree.paths()
+            .iter()
+            .any(|p| self.path_edges(p).any(|e| self.overflowed(e)))
     }
 
     /// Total usage above capacity over all edges.
@@ -871,11 +882,43 @@ const MARGIN_STEP: u16 = 2;
 /// `OpenROAD` counterpart.
 const MAX_MARGIN: u16 = 12;
 
-/// Global routes of all nets.
-#[derive(Clone, Debug, Default)]
+/// Global routes of all nets, each placed on the grid that routed it.
+#[derive(Debug, Default, PartialEq, Eq)]
 pub struct GlobalRoutes {
-    /// The paths of each net's tree; each path starts on the tree built so far.
-    pub paths: FxHashMap<NetId, Vec<Vec<GCell>>>,
+    /// Each net's tree, its demand on the grid.
+    pub trees: FxHashMap<NetId, PlacedTree>,
+}
+
+/// A net and the paths of its global route; each path starts on the paths
+/// before it.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct NetTree {
+    /// The net, with the terminals and track demand its paths were found
+    /// for.
+    pub net: GlobalNet,
+    /// The paths.
+    pub paths: Vec<Vec<GCell>>,
+}
+
+/// A net's tree whose demand the grid holds. Only
+/// [`GlobalGrid::place`] makes one, and [`GlobalGrid::lift`] takes it off
+/// the grid with the very net it was placed with, so a tree's demand is
+/// lifted once, exactly as it was placed; `docs/global-routing.md` draws
+/// its states.
+#[derive(Debug, PartialEq, Eq)]
+pub struct PlacedTree(NetTree);
+
+impl PlacedTree {
+    /// Its paths.
+    #[must_use]
+    pub fn paths(&self) -> &[Vec<GCell>] {
+        &self.0.paths
+    }
+
+    /// Follows its net to the number `net` after a renumbering.
+    pub(crate) const fn renumber(&mut self, net: NetId) {
+        self.0.net.net = net;
+    }
 }
 
 /// A net's global route as a tree over its gcells, for finding the cells
@@ -962,7 +1005,7 @@ impl RouteTree {
 }
 
 /// A net to route globally: its pins' gcells and what its wires take.
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct GlobalNet {
     /// The net to route.
     pub net: NetId,
@@ -1085,8 +1128,11 @@ pub(crate) fn restore_global(
         if !net.terminals.iter().all(|t| cells.contains(t)) {
             return Err(RestoreError::Unreached(net.net));
         }
-        grid.add_tree(net, &tree, Sign::Add);
-        let _ = routes.paths.insert(net.net, tree);
+        let placed = grid.place(NetTree {
+            net: net.clone(),
+            paths: tree,
+        });
+        let _ = routes.trees.insert(net.net, placed);
     }
     Ok(routes)
 }
@@ -1122,10 +1168,10 @@ pub fn reroute(grid: &mut GlobalGrid, nets: &[GlobalNet], rounds: usize) -> Glob
     let mut routes = GlobalRoutes::default();
     route_initial(grid, nets, FIRST_COSTS, &mut routes);
     let crosses_overflow = nets.iter().any(|n| {
-        routes.paths.get(&n.net).is_some_and(|tree| {
-            tree.iter()
-                .any(|p| grid.path_edges(p).any(|e| grid.overflowed(e)))
-        })
+        routes
+            .trees
+            .get(&n.net)
+            .is_some_and(|t| grid.crosses_overflow(t))
     });
     if crosses_overflow {
         negotiate(grid, nets, &mut routes, rounds);
@@ -1202,16 +1248,15 @@ fn rip_up_overflowed(
 ) -> Vec<usize> {
     let mut ripped: Vec<usize> = (0..nets.len())
         .filter(|&i| {
-            routes.paths.get(&nets[i].net).is_some_and(|tree| {
-                tree.iter()
-                    .any(|p| grid.path_edges(p).any(|e| grid.overflowed(e)))
-            })
+            routes
+                .trees
+                .get(&nets[i].net)
+                .is_some_and(|t| grid.crosses_overflow(t))
         })
         .collect();
     for &i in &ripped {
-        if let Some(tree) = routes.paths.remove(&nets[i].net) {
-            grid.add_tree(&nets[i], &tree, Sign::Remove);
-            best.shelve(nets[i].net, tree);
+        if let Some(placed) = routes.trees.remove(&nets[i].net) {
+            best.shelve(grid.lift(placed));
         }
         margins[i] = margins[i].saturating_add(MARGIN_STEP).min(MAX_MARGIN);
     }
@@ -1256,7 +1301,10 @@ fn reroute_levels(
         let refreshing = std::time::Instant::now();
         let touched = touched_coarse_cells(
             grid,
-            level.iter().filter_map(|&i| routes.paths.get(&nets[i].net)),
+            level
+                .iter()
+                .filter_map(|&i| routes.trees.get(&nets[i].net))
+                .map(PlacedTree::paths),
         );
         coarse.refresh_cells(grid, &touched);
         spent.refreshing += refreshing.elapsed().as_secs_f64();
@@ -1325,8 +1373,9 @@ fn log_zero_capacity_crossings(grid: &GlobalGrid, routes: &GlobalRoutes) {
     if !log::log_enabled!(log::Level::Debug) {
         return;
     }
-    for (net, tree) in &routes.paths {
+    for (net, tree) in &routes.trees {
         let blocked = tree
+            .paths()
             .iter()
             .flat_map(|p| grid.path_edges(p))
             .filter(|&e| grid.capacity[e] == Tracks::ZERO)
@@ -1405,7 +1454,7 @@ const IGNORED_BLOCKAGE: f64 = 0.8;
 struct Best {
     overflow: Tracks,
     usage: Vec<Tracks>,
-    shelved: FxHashMap<NetId, Vec<Vec<GCell>>>,
+    shelved: FxHashMap<NetId, NetTree>,
 }
 
 impl Best {
@@ -1418,17 +1467,19 @@ impl Best {
         }
     }
 
-    /// Keeps the route `net` had in the best round as it is ripped up, the
+    /// Keeps the route a net had in the best round as it is ripped up, the
     /// first time since that round.
-    fn shelve(&mut self, net: NetId, tree: Vec<Vec<GCell>>) {
-        let _ = self.shelved.entry(net).or_insert(tree);
+    fn shelve(&mut self, tree: NetTree) {
+        let _ = self.shelved.entry(tree.net.net).or_insert(tree);
     }
 
     /// Puts the best round's routes and usage back.
     fn restore(self, grid: &mut GlobalGrid, routes: &mut GlobalRoutes) {
         grid.usage.restore(&self.usage);
         for (net, tree) in self.shelved {
-            let _ = routes.paths.insert(net, tree);
+            // No place: the restored usage already holds the demand of every
+            // route of the best round, these among them.
+            let _ = routes.trees.insert(net, PlacedTree(tree));
         }
     }
 }
@@ -1493,14 +1544,16 @@ fn route_disjoint(
     });
     for (k, tree) in schedule.trees.into_iter().enumerate() {
         let i = which[k];
-        let tree = if let Some(Ok(tree)) = tree.into_inner() {
-            tree
+        let placed = if let Some(Ok(placed)) = tree.into_inner() {
+            placed
         } else {
-            let tree = route_tree(grid, &nets[i], margins[i], costs, plans[k].as_ref());
-            grid.add_tree(&nets[i], &tree, Sign::Add);
-            tree
+            let paths = route_tree(grid, &nets[i], margins[i], costs, plans[k].as_ref());
+            grid.place(NetTree {
+                net: nets[i].clone(),
+                paths,
+            })
         };
-        let _ = routes.paths.insert(nets[i].net, tree);
+        let _ = routes.trees.insert(nets[i].net, placed);
     }
 }
 
@@ -1591,7 +1644,7 @@ struct Schedule<'a> {
     waits: Vec<AtomicU32>,
     /// The later nets waiting for each one.
     next: Vec<Vec<u32>>,
-    trees: Vec<OnceLock<Result<Vec<Vec<GCell>>, OutgrowsArea>>>,
+    trees: Vec<OnceLock<Result<PlacedTree, OutgrowsArea>>>,
 }
 
 impl Schedule<'_> {
@@ -1607,10 +1660,13 @@ impl Schedule<'_> {
             self.costs,
             self.plans[k].as_ref(),
         );
-        if let Ok(tree) = &tree {
-            self.grid.add_tree(&self.nets[i], tree, Sign::Add);
-        }
-        let _ = self.trees[k].set(tree);
+        let placed = tree.map(|paths| {
+            self.grid.place(NetTree {
+                net: self.nets[i].clone(),
+                paths,
+            })
+        });
+        let _ = self.trees[k].set(placed);
         for &later in &self.next[k] {
             let later = later as usize;
             if self.waits[later].fetch_sub(1, Ordering::AcqRel) == 1 {
@@ -1670,7 +1726,7 @@ fn disjoint_levels(grid: &GlobalGrid, nets: &[GlobalNet], ripped: &[usize]) -> V
 /// share.
 fn touched_coarse_cells<'a>(
     grid: &GlobalGrid,
-    trees: impl Iterator<Item = &'a Vec<Vec<GCell>>>,
+    trees: impl Iterator<Item = &'a [Vec<GCell>]>,
 ) -> Vec<(u16, u16)> {
     let mut cells: Vec<(u16, u16)> = trees
         .flatten()
@@ -1703,9 +1759,12 @@ fn route_initial(
             .par_iter()
             .map(|&i| (i, route_pattern(shared, &nets[i], costs)))
             .collect();
-        for (i, tree) in found {
-            grid.add_tree(&nets[i], &tree, Sign::Add);
-            let _ = routes.paths.insert(nets[i].net, tree);
+        for (i, paths) in found {
+            let placed = grid.place(NetTree {
+                net: nets[i].clone(),
+                paths,
+            });
+            let _ = routes.trees.insert(nets[i].net, placed);
         }
     }
 }
@@ -1883,9 +1942,12 @@ mod tests {
     fn route_in_order(grid: &GlobalGrid, nets: &[GlobalNet], order: &[usize]) -> GlobalRoutes {
         let mut routes = GlobalRoutes::default();
         for &i in order {
-            let tree = route_tree(grid, &nets[i], 1, COSTS, None);
-            grid.add_tree(&nets[i], &tree, Sign::Add);
-            let _ = routes.paths.insert(nets[i].net, tree);
+            let paths = route_tree(grid, &nets[i], 1, COSTS, None);
+            let placed = grid.place(NetTree {
+                net: nets[i].clone(),
+                paths,
+            });
+            let _ = routes.trees.insert(nets[i].net, placed);
         }
         routes
     }
@@ -1924,7 +1986,7 @@ mod tests {
         let expected = route_in_order(&serial, &nets, &order);
         let routes = route_level(&parallel, &nets, &order);
 
-        assert_eq!(routes.paths, expected.paths);
+        assert_eq!(routes.trees, expected.trees);
         assert!(serial.usage.iter().eq(parallel.usage.iter()));
     }
 
@@ -2066,7 +2128,7 @@ mod tests {
                 let (grid, nets) = chained_nets();
                 let mut routes = GlobalRoutes::default();
                 route_initial(&grid, &nets, FIRST_COSTS, &mut routes);
-                (routes.paths, grid.usage.snapshot())
+                (routes.trees, grid.usage.snapshot())
             })
         };
 
@@ -2086,7 +2148,7 @@ mod tests {
             let (parallel, _) = chained_nets();
             let routes = route_level(&parallel, &nets, &order);
 
-            assert_eq!(routes.paths, expected.paths);
+            assert_eq!(routes.trees, expected.trees);
             assert!(serial.usage.iter().eq(parallel.usage.iter()));
         }
     }
@@ -2114,7 +2176,7 @@ mod tests {
         let expected = route_in_order(&serial, &nets, &[1, 0]);
         let routes = route_level(&parallel, &nets, &[0, 1]);
 
-        assert_eq!(routes.paths, expected.paths);
+        assert_eq!(routes.trees, expected.trees);
         assert!(serial.usage.iter().eq(parallel.usage.iter()));
     }
 
@@ -2275,12 +2337,12 @@ mod tests {
     #[test]
     #[cfg(debug_assertions)]
     #[should_panic(expected = "more usage lifted")]
-    fn lifting_a_tree_that_was_never_placed_is_caught() {
+    fn removing_demand_that_was_never_added_is_caught() {
         let grid = grid();
         let net = net(vec![at(1, 2, 5), at(1, 4, 5)]);
         let paths = vec![vec![at(1, 2, 5), at(1, 3, 5), at(1, 4, 5)]];
 
-        grid.lift(&net, &paths);
+        grid.add_tree(&net, &paths, Sign::Remove);
     }
 
     #[test]

@@ -694,8 +694,8 @@ impl<'a> DetailedRouter<'a> {
 
     /// Restricts each net's detailed route to its global route.
     pub(crate) fn set_guides(&mut self, routes: GlobalRoutes, grid: &GlobalGrid) {
-        for (net, paths) in routes.paths {
-            let tree = RouteTree::new(&paths);
+        for (net, placed) in routes.trees {
+            let tree = RouteTree::new(placed.paths());
             let bbox = tree
                 .cells()
                 .iter()

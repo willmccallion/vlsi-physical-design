@@ -29,8 +29,8 @@ use detailed::{
 };
 pub use global::{CapacityReduction, rudy_wire_width};
 use global::{
-    GCell, Gcells, GlobalGrid, GlobalNet, GlobalRoutes, RestoreError, Tracks, restore_global,
-    route_global, track_demand,
+    GCell, Gcells, GlobalGrid, GlobalNet, GlobalRoutes, NetTree, RestoreError, Tracks,
+    restore_global, route_global, track_demand,
 };
 use occupancy::FixedTracks;
 use pare_common::config::{LayerRangeError, RoutingConfig, Share};
@@ -281,7 +281,7 @@ pub fn route_on(
     mut run: RunOptions<'_>,
 ) -> Result<RoutingSummary, RouteError> {
     check_routable(db)?;
-    let (tech, grid, routes, routed) = global.into_parts(db);
+    let (tech, grid, routes) = global.into_parts(db);
     let gcell = gcell_size(&tech, config);
     let mut silent = |_: &Progress<'_>| {};
     let report = run.report.take().unwrap_or(&mut silent);
@@ -294,7 +294,6 @@ pub fn route_on(
             Settling {
                 grid,
                 global: routes,
-                routed,
             },
             report,
         );
@@ -588,9 +587,9 @@ fn trace_of(db: &NetlistDB, request: &TraceRequest) -> Result<detailed::Trace, R
 /// Every globally routed net's name with the paths of its tree, by name.
 fn named_global(db: &NetlistDB, global: &GlobalRoutes) -> Vec<(String, Vec<Vec<GCell>>)> {
     let mut out: Vec<(String, Vec<Vec<GCell>>)> = global
-        .paths
+        .trees
         .iter()
-        .map(|(&n, paths)| (db.nets[n].name.clone(), paths.clone()))
+        .map(|(&n, tree)| (db.nets[n].name.clone(), tree.paths().to_vec()))
         .collect();
     out.sort_unstable_by(|a, b| a.0.cmp(&b.0));
     out
@@ -656,11 +655,11 @@ pub fn route_global_only(
         elapsed: start.elapsed(),
     });
     let mut guides: Vec<NetGuide> = global
-        .paths
+        .trees
         .iter()
-        .map(|(&net, paths)| NetGuide {
+        .map(|(&net, tree)| NetGuide {
             net,
-            boxes: guide_boxes(&grid, paths, db.die_area),
+            boxes: guide_boxes(&grid, tree.paths(), db.die_area),
         })
         .collect();
     guides.sort_unstable_by_key(|g| g.net);
@@ -824,11 +823,10 @@ fn global_stage<'a>(
 }
 
 /// The global routes a session kept, to settle against pin access found
-/// afresh: its grid, its routes and the nets they were routed for.
+/// afresh: its grid and its routes, each with the net it was routed for.
 struct Settling {
     grid: GlobalGrid,
     global: GlobalRoutes,
-    routed: FxHashMap<NetId, GlobalNet>,
 }
 
 /// Pin access found afresh, with the global routes a session kept: a net
@@ -846,7 +844,6 @@ fn settled_stage<'a>(
     let Settling {
         mut grid,
         mut global,
-        mut routed,
     } = settling;
     let start = Instant::now();
     let dr = DetailedRouter::new(db, tech, gcell);
@@ -857,7 +854,7 @@ fn settled_stage<'a>(
     });
     let start = Instant::now();
     let mut dirty = Vec::new();
-    let mut kept = FxHashSet::default();
+    let mut settled = GlobalRoutes::default();
     for &net in &nets {
         let Some(terminals) = dr.terminals(net, &grid) else {
             continue;
@@ -867,36 +864,33 @@ fn settled_stage<'a>(
             terminals,
             demand: global::track_demand(db, tech, net),
         };
-        let old = routed.remove(&net);
-        let tree = global.paths.remove(&net);
-        match (old, tree) {
-            (Some(old), Some(tree)) if reaches(&tree, &fresh.terminals) => {
-                grid.lift(&old, &tree);
-                grid.place(&fresh, &tree);
-                let _ = global.paths.insert(net, tree);
-                let _ = kept.insert(net);
+        match global.trees.remove(&net) {
+            Some(placed) if reaches(placed.paths(), &fresh.terminals) => {
+                let NetTree { paths, .. } = grid.lift(placed);
+                let placed = grid.place(NetTree { net: fresh, paths });
+                let _ = settled.trees.insert(net, placed);
             }
-            (old, tree) => {
-                if let (Some(old), Some(tree)) = (old, tree) {
-                    grid.lift(&old, &tree);
+            placed => {
+                if let Some(placed) = placed {
+                    let _ = grid.lift(placed);
                 }
                 dirty.push(fresh);
             }
         }
     }
-    for (net, old) in routed {
-        if let Some(tree) = global.paths.remove(&net) {
-            grid.lift(&old, &tree);
-        }
+    for (_, placed) in global.trees.drain() {
+        let _ = grid.lift(placed);
     }
+    let kept = settled.trees.len();
     let rerouted = global::reroute(&mut grid, &dirty, config.global_iterations);
-    global.paths.extend(rerouted.paths);
+    settled.trees.extend(rerouted.trees);
+    let global = settled;
     report(&Progress::Stage {
         stage: Stage::GlobalSettle,
         elapsed: start.elapsed(),
     });
     report(&Progress::GlobalSettled {
-        kept: kept.len(),
+        kept,
         rerouted: dirty.len(),
     });
     GlobalStage {

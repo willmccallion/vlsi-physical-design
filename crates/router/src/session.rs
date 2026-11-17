@@ -30,8 +30,9 @@ pub struct GlobalSession {
     tech: RouteTech,
     grid: GlobalGrid,
     routes: GlobalRoutes,
-    /// Each routed net as it was routed, with its pins' terminals.
-    nets: FxHashMap<NetId, (GlobalNet, Vec<PinTerminal>)>,
+    /// The pins' terminals of each routed net, whose route `routes` holds
+    /// with the net it was routed for.
+    nets: FxHashMap<NetId, Vec<PinTerminal>>,
     judge: PinJudge,
     /// Each pin's terminal as global routing found it.
     initial: FxHashMap<PinId, PinTerminal>,
@@ -60,21 +61,16 @@ impl GlobalSession {
                 dr, grid, global, ..
             } = global_stage(db, &tech, config, gcell, None, report)?;
             let mut nets = FxHashMap::default();
-            for &net in global.paths.keys() {
+            for &net in global.trees.keys() {
                 if let Some(terminals) = dr.pin_terminals(net, &grid) {
-                    let global_net = GlobalNet {
-                        net,
-                        terminals: terminals.iter().map(|t| t.cell).collect(),
-                        demand: track_demand(db, &tech, net),
-                    };
-                    let _ = nets.insert(net, (global_net, terminals));
+                    let _ = nets.insert(net, terminals);
                 }
             }
             (grid, global, nets, dr.into_pin_judge())
         };
         let initial = nets
             .values()
-            .flat_map(|(_, terminals)| terminals.iter().map(|t| (t.pin, *t)))
+            .flat_map(|terminals| terminals.iter().map(|t| (t.pin, *t)))
             .collect();
         let placed = db
             .cells
@@ -93,25 +89,12 @@ impl GlobalSession {
         })
     }
 
-    /// The technology, with each net's rule as `db` has it now, grid,
-    /// routes and routed nets, for detailed routing.
-    pub(crate) fn into_parts(
-        self,
-        db: &NetlistDB,
-    ) -> (
-        RouteTech,
-        GlobalGrid,
-        GlobalRoutes,
-        FxHashMap<NetId, GlobalNet>,
-    ) {
-        let nets = self
-            .nets
-            .into_iter()
-            .map(|(net, (global_net, _))| (net, global_net))
-            .collect();
+    /// The technology, with each net's rule as `db` has it now, grid and
+    /// routes, for detailed routing.
+    pub(crate) fn into_parts(self, db: &NetlistDB) -> (RouteTech, GlobalGrid, GlobalRoutes) {
         let mut tech = self.tech;
         tech.follow_net_rules(db);
-        (tech, self.grid, self.routes, nets)
+        (tech, self.grid, self.routes)
     }
 
     /// Follows the design's renumbering after cells and nets were removed:
@@ -119,16 +102,15 @@ impl GlobalSession {
     pub fn renumber(&mut self, renumbering: &Renumbering) {
         let pin = |p: PinId| renumbering.pins.get(p).copied().flatten();
         let mut nets = FxHashMap::default();
-        let mut paths = FxHashMap::default();
-        for (net, (mut global_net, terminals)) in std::mem::take(&mut self.nets) {
-            let tree = self.routes.paths.remove(&net);
+        let mut trees = FxHashMap::default();
+        for (net, terminals) in std::mem::take(&mut self.nets) {
+            let tree = self.routes.trees.remove(&net);
             let Some(new) = renumbering.nets.get(net).copied().flatten() else {
-                if let Some(tree) = tree {
-                    self.grid.lift(&global_net, &tree);
+                if let Some(placed) = tree {
+                    let _ = self.grid.lift(placed);
                 }
                 continue;
             };
-            global_net.net = new;
             let terminals = terminals
                 .into_iter()
                 .filter_map(|t| {
@@ -138,13 +120,14 @@ impl GlobalSession {
                     })
                 })
                 .collect();
-            if let Some(tree) = tree {
-                let _ = paths.insert(new, tree);
+            if let Some(mut placed) = tree {
+                placed.renumber(new);
+                let _ = trees.insert(new, placed);
             }
-            let _ = nets.insert(new, (global_net, terminals));
+            let _ = nets.insert(new, terminals);
         }
         self.nets = nets;
-        self.routes.paths = paths;
+        self.routes.trees = trees;
         self.initial = std::mem::take(&mut self.initial)
             .into_iter()
             .filter_map(|(p, t)| {
@@ -220,11 +203,11 @@ impl GlobalSession {
 
     /// Takes `net`'s route off the grid and forgets it.
     fn rip_up(&mut self, net: NetId) {
-        let Some((global_net, _)) = self.nets.remove(&net) else {
+        if self.nets.remove(&net).is_none() {
             return;
-        };
-        if let Some(tree) = self.routes.paths.remove(&net) {
-            self.grid.lift(&global_net, &tree);
+        }
+        if let Some(placed) = self.routes.trees.remove(&net) {
+            let _ = self.grid.lift(placed);
         }
     }
 
@@ -235,12 +218,12 @@ impl GlobalSession {
             return;
         }
         let global_nets: Vec<GlobalNet> = dirty.iter().map(|(n, _)| n.clone()).collect();
-        let routed = reroute(&mut self.grid, &global_nets, self.rounds);
+        let mut routed = reroute(&mut self.grid, &global_nets, self.rounds);
         for (global_net, terminals) in dirty {
             let net = global_net.net;
-            if let Some(tree) = routed.paths.get(&net) {
-                let _ = self.routes.paths.insert(net, tree.clone());
-                let _ = self.nets.insert(net, (global_net, terminals));
+            if let Some(placed) = routed.trees.remove(&net) {
+                let _ = self.routes.trees.insert(net, placed);
+                let _ = self.nets.insert(net, terminals);
             }
         }
     }
@@ -264,7 +247,7 @@ impl RouteSource for GlobalSession {
                 continue;
             }
             let fresh = self.terminals(db, net);
-            if let (Some((_, old)), Some(new)) = (self.nets.get_mut(&net), &fresh)
+            if let (Some(old), Some(new)) = (self.nets.get_mut(&net), &fresh)
                 && grid_positions(old) == grid_positions(new)
             {
                 old.clone_from(new);
@@ -284,8 +267,8 @@ impl RouteSource for GlobalSession {
     }
 
     fn route(&self, db: &NetlistDB, net: NetId) -> Option<NetRoute> {
-        let (_, terminals) = self.nets.get(&net)?;
-        let tree = self.routes.paths.get(&net)?;
+        let terminals = self.nets.get(&net)?;
+        let tree = self.routes.trees.get(&net)?.paths();
         Some(NetRoute {
             segments: route_segments(&|c| self.grid.cell_center(c), tree, terminals),
             pins: terminals

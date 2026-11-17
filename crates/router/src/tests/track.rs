@@ -2,7 +2,7 @@
 
 use super::tiny;
 use crate::detailed::DetailedRouter;
-use crate::global::{GCell, GlobalGrid, GlobalRoutes};
+use crate::global::{GCell, GlobalGrid, GlobalNet, GlobalRoutes, NetTree};
 use crate::occupancy::{Owner, Proximity};
 use crate::tech::RouteTech;
 use crate::track::{TrackWire, assign_tracks};
@@ -31,10 +31,21 @@ fn assign(db: &NetlistDB, paths: Vec<Vec<GCell>>) -> (RouteTech, Vec<TrackWire>)
         CapacityReserve::NONE,
     );
     let routes = GlobalRoutes {
-        paths: paths
+        trees: paths
             .into_iter()
             .enumerate()
-            .map(|(n, p)| (NetId::new(n), vec![p]))
+            .map(|(n, p)| {
+                let net = GlobalNet {
+                    net: NetId::new(n),
+                    terminals: Vec::new(),
+                    demand: Vec::new(),
+                };
+                let placed = grid.place(NetTree {
+                    net,
+                    paths: vec![p],
+                });
+                (NetId::new(n), placed)
+            })
             .collect(),
     };
     let pins = IdVec::filled(Vec::new(), db.nets.len());
