@@ -113,6 +113,39 @@ struct JunctionSides<'o> {
     right: &'o [BnetPtr],
 }
 
+impl JunctionSides<'_> {
+    /// The next pair of options down from `(left, right)`, stepping the
+    /// side whose next option has more slack, that sums to less
+    /// capacitance than `best_cap`; none once the stepped side runs out.
+    fn next_cheaper_pair(
+        &self,
+        (left, right): (usize, usize),
+        best_cap: Farads,
+    ) -> Option<(usize, usize)> {
+        let (mut li, mut ri) = (left, right);
+        loop {
+            let next_left = if li > 0 {
+                self.left[li - 1].slack
+            } else {
+                -Fixed::INF
+            };
+            let next_right = if ri > 0 {
+                self.right[ri - 1].slack
+            } else {
+                -Fixed::INF
+            };
+            if next_left > next_right {
+                li = li.checked_sub(1)?;
+            } else {
+                ri = ri.checked_sub(1)?;
+            }
+            if self.left[li].cap + self.right[ri].cap < best_cap {
+                return Some((li, ri));
+            }
+        }
+    }
+}
+
 /// The delay, slack correction and slew at the driver for a tree.
 #[derive(Clone, Copy, Debug, PartialEq)]
 struct DriverTiming {
@@ -796,38 +829,10 @@ impl Rebuffer {
                 best_cap = junction.cap;
                 options.push(junction);
             }
-            let mut exhausted = false;
-            loop {
-                let next_left = if li > 0 {
-                    left[li - 1].slack
-                } else {
-                    -Fixed::INF
-                };
-                let next_right = if ri > 0 {
-                    right[ri - 1].slack
-                } else {
-                    -Fixed::INF
-                };
-                if next_left > next_right {
-                    if li == 0 {
-                        exhausted = true;
-                        break;
-                    }
-                    li -= 1;
-                } else {
-                    if ri == 0 {
-                        exhausted = true;
-                        break;
-                    }
-                    ri -= 1;
-                }
-                if left[li].cap + right[ri].cap < best_cap {
-                    break;
-                }
-            }
-            if exhausted {
+            let Some(next) = sides.next_cheaper_pair((li, ri), best_cap) else {
                 break;
-            }
+            };
+            (li, ri) = next;
         }
         options.reverse();
         options
