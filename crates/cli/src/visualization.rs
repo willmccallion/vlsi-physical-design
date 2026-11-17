@@ -230,39 +230,70 @@ const NET_COLORS: [[u8; 3]; 6] = [
     [240, 240, 240],
 ];
 
-/// Draws one area of `layout` at its true geometry, as a PNG of `size`
-/// pixels along the area's longer side.
+/// One area of a layout to draw at its true geometry.
 ///
 /// Fixed metal is grey and routed metal has a colour per layer; cuts are
 /// white. When `highlight` names owners, each gets a colour of its own with
 /// every shape outlined, and every other owner is dimmed. `markers` are
 /// outlined in red. Only the routing layers `layers` marks, by index, are
 /// drawn, with the cuts between two of them; every layer when it is empty.
+pub(crate) struct AreaView<'a> {
+    pub(crate) layout: &'a Layout,
+    pub(crate) area: Rect<Dbu>,
+    pub(crate) layers: &'a IdVec<LayerId, bool>,
+    pub(crate) highlight: &'a [OwnerIndex],
+    pub(crate) markers: &'a [Rect<Dbu>],
+}
+
+/// Draws `view` as a PNG of `size` pixels along the area's longer side.
 ///
 /// # Errors
 ///
 /// When the image cannot be written.
-pub(crate) fn draw_area(
-    layout: &Layout,
-    area: Rect<Dbu>,
-    layers: &IdVec<LayerId, bool>,
-    highlight: &[OwnerIndex],
-    markers: &[Rect<Dbu>],
-    path: &Path,
-    size: u32,
-) -> image::ImageResult<()> {
-    let shown = |l: LayerId| layers.get(l).copied().unwrap_or(true);
+pub(crate) fn draw_area(view: &AreaView<'_>, path: &Path, size: u32) -> image::ImageResult<()> {
+    let shown = |l: LayerId| view.layers.get(l).copied().unwrap_or(true);
     let Fit {
         scale,
         width,
         height,
-    } = Fit::new(&area, size);
+    } = Fit::new(&view.area, size);
     let mut canvas = Blend(RgbaImage::from_pixel(
         width,
         height,
         Rgba([10, 10, 14, 255]),
     ));
-    let pixels = |r: &Rect<Dbu>| -> Option<ImageRect> {
+    let pixels = AreaPixels {
+        area: view.area,
+        scale,
+    };
+    let highlight = Highlight(view.highlight);
+    for l in view.layout.metal_layer_ids().filter(|&l| shown(l)) {
+        paint_area_metal(&mut canvas, view.layout.metal(l), l, &pixels, &highlight);
+        if l.above().is_some_and(shown) {
+            paint_area_cuts(
+                &mut canvas,
+                view.layout.cut(l.cut_above()),
+                &pixels,
+                &highlight,
+            );
+        }
+    }
+    paint_markers(&mut canvas, view.markers, &pixels);
+    canvas.0.save(path)
+}
+
+/// Maps an area of the design onto an image of it, `scale` pixels per
+/// database unit, with Y pointing down.
+struct AreaPixels {
+    area: Rect<Dbu>,
+    scale: f64,
+}
+
+impl AreaPixels {
+    /// The pixels of the part of `r` inside the area, at least one each
+    /// way; none when it lies outside.
+    fn rect(&self, r: &Rect<Dbu>) -> Option<ImageRect> {
+        let (area, scale) = (self.area, self.scale);
         let clipped = r.intersection(&area)?;
         let x0 = (clipped.min.x - area.min.x).to_f64() * scale;
         let x1 = (clipped.max.x - area.min.x).to_f64() * scale;
@@ -272,55 +303,87 @@ pub(crate) fn draw_area(
             ImageRect::at(x0 as i32, y0 as i32)
                 .of_size(((x1 - x0) as u32).max(1), ((y1 - y0) as u32).max(1)),
         )
-    };
-    let emphasis = |s: &LayoutShape| -> u8 {
-        if highlight.is_empty() {
+    }
+}
+
+/// The owners drawn bright, each in a colour of its own, in order.
+struct Highlight<'a>(&'a [OwnerIndex]);
+
+impl Highlight<'_> {
+    /// How opaque a shape of `owner` is drawn: brighter when highlighted,
+    /// dimmer when others are.
+    fn alpha(&self, owner: OwnerIndex) -> u8 {
+        if self.0.is_empty() {
             130
-        } else if highlight.contains(&s.owner) {
+        } else if self.0.contains(&owner) {
             220
         } else {
             45
         }
-    };
-    for l in layout.metal_layer_ids().filter(|&l| shown(l)) {
-        for s in layout.metal(l) {
-            let Some(rect) = pixels(&s.rect) else {
-                continue;
-            };
-            let alpha = emphasis(s);
-            if let Some(k) = highlight.iter().position(|&o| o == s.owner) {
-                let [r, g, b] = NET_COLORS[k % NET_COLORS.len()];
-                draw_filled_rect_mut(&mut canvas, rect, Rgba([r, g, b, alpha]));
-                draw_hollow_rect_mut(&mut canvas, rect, Rgba([r / 2, g / 2, b / 2, 255]));
-                continue;
-            }
-            let color = if s.is_fixed() {
-                let grey = 70 + (l.index() * 12).min(80) as u8;
-                Rgba([grey, grey, grey, alpha])
-            } else {
-                let [r, g, b] = LAYER_COLORS[l.index() % LAYER_COLORS.len()];
-                Rgba([r, g, b, alpha])
-            };
-            draw_filled_rect_mut(&mut canvas, rect, color);
+    }
+
+    /// The colour of `owner`, when it is highlighted.
+    fn color(&self, owner: OwnerIndex) -> Option<[u8; 3]> {
+        let k = self.0.iter().position(|&o| o == owner)?;
+        Some(NET_COLORS[k % NET_COLORS.len()])
+    }
+}
+
+/// Paints the metal `shapes` of routing layer `l`.
+fn paint_area_metal(
+    canvas: &mut Blend<RgbaImage>,
+    shapes: &[LayoutShape],
+    l: LayerId,
+    pixels: &AreaPixels,
+    highlight: &Highlight<'_>,
+) {
+    for s in shapes {
+        let Some(rect) = pixels.rect(&s.rect) else {
+            continue;
+        };
+        let alpha = highlight.alpha(s.owner);
+        if let Some([r, g, b]) = highlight.color(s.owner) {
+            draw_filled_rect_mut(canvas, rect, Rgba([r, g, b, alpha]));
+            draw_hollow_rect_mut(canvas, rect, Rgba([r / 2, g / 2, b / 2, 255]));
+            continue;
         }
-        if l.above().is_some_and(shown) {
-            for s in layout.cut(l.cut_above()) {
-                if let Some(rect) = pixels(&s.rect) {
-                    draw_filled_rect_mut(&mut canvas, rect, Rgba([255, 255, 255, emphasis(s)]));
-                }
-            }
+        let color = if s.is_fixed() {
+            let grey = 70 + (l.index() * 12).min(80) as u8;
+            Rgba([grey, grey, grey, alpha])
+        } else {
+            let [r, g, b] = LAYER_COLORS[l.index() % LAYER_COLORS.len()];
+            Rgba([r, g, b, alpha])
+        };
+        draw_filled_rect_mut(canvas, rect, color);
+    }
+}
+
+/// Paints the cut `shapes`, white.
+fn paint_area_cuts(
+    canvas: &mut Blend<RgbaImage>,
+    shapes: &[LayoutShape],
+    pixels: &AreaPixels,
+    highlight: &Highlight<'_>,
+) {
+    for s in shapes {
+        if let Some(rect) = pixels.rect(&s.rect) {
+            let alpha = highlight.alpha(s.owner);
+            draw_filled_rect_mut(canvas, rect, Rgba([255, 255, 255, alpha]));
         }
     }
+}
+
+/// Outlines each of `markers` in red, twice over, on a red tint.
+fn paint_markers(canvas: &mut Blend<RgbaImage>, markers: &[Rect<Dbu>], pixels: &AreaPixels) {
     for m in markers {
-        if let Some(rect) = pixels(m) {
-            draw_filled_rect_mut(&mut canvas, rect, Rgba([255, 30, 30, 70]));
-            draw_hollow_rect_mut(&mut canvas, rect, Rgba([255, 40, 40, 255]));
+        if let Some(rect) = pixels.rect(m) {
+            draw_filled_rect_mut(canvas, rect, Rgba([255, 30, 30, 70]));
+            draw_hollow_rect_mut(canvas, rect, Rgba([255, 40, 40, 255]));
             let outer = ImageRect::at(rect.left() - 1, rect.top() - 1)
                 .of_size(rect.width() + 2, rect.height() + 2);
-            draw_hollow_rect_mut(&mut canvas, outer, Rgba([255, 40, 40, 255]));
+            draw_hollow_rect_mut(canvas, outer, Rgba([255, 40, 40, 255]));
         }
     }
-    canvas.0.save(path)
 }
 
 #[cfg(test)]
@@ -359,17 +422,15 @@ mod tests {
         let layout = Layout::from_db(&db);
         let every_layer = IdVec::filled(true, db.library.routing_layers.len());
         let path = scratch_dir("area-plain").join("area.png");
+        let view = AreaView {
+            layout: &layout,
+            area: db.die_area,
+            layers: &every_layer,
+            highlight: &[],
+            markers: &[],
+        };
 
-        draw_area(
-            &layout,
-            db.die_area,
-            &every_layer,
-            &[],
-            &[],
-            &path,
-            AREA_PIXELS,
-        )
-        .unwrap();
+        draw_area(&view, &path, AREA_PIXELS).unwrap();
 
         assert_golden(&golden_dir(), "area_plain.txt", &pixel_rows(&path));
     }
@@ -388,17 +449,15 @@ mod tests {
             Point::new(Dbu(3000), Dbu(2000)),
         );
         let path = scratch_dir("area-highlight").join("area.png");
+        let view = AreaView {
+            layout: &layout,
+            area: db.die_area,
+            layers: &layers,
+            highlight: &highlight,
+            markers: &[marker],
+        };
 
-        draw_area(
-            &layout,
-            db.die_area,
-            &layers,
-            &highlight,
-            &[marker],
-            &path,
-            AREA_PIXELS,
-        )
-        .unwrap();
+        draw_area(&view, &path, AREA_PIXELS).unwrap();
 
         assert!(!highlight.is_empty());
         assert_golden(&golden_dir(), "area_highlight.txt", &pixel_rows(&path));

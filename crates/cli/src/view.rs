@@ -1,6 +1,7 @@
 //! The `view` command: one area of a design with its violations.
 
 use crate::checks::describe_marker;
+use crate::visualization::AreaView;
 use crate::{ui, visualization};
 use anyhow::Context;
 use pare_common::db::design::NetlistDB;
@@ -62,7 +63,14 @@ pub(crate) fn view_area(db: &NetlistDB, request: &ViewRequest) -> anyhow::Result
             .with_context(|| format!("no routing layer '{name}'"))?;
         shown[layer] = true;
     }
-    visualization::draw_area(&layout, area, &shown, &highlight, &boxes, out, *size)
+    let view = AreaView {
+        layout: &layout,
+        area,
+        layers: &shown,
+        highlight: &highlight,
+        markers: &boxes,
+    };
+    visualization::draw_area(&view, out, *size)
         .with_context(|| format!("writing {}", out.display()))?;
     ui::wrote(out);
     Ok(())
