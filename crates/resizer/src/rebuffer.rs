@@ -20,7 +20,7 @@ use crate::sta::{Sta, Via};
 use pare_common::db::design::PinOwner;
 use pare_common::db::indices::{CellId, LayerId, NetId, PinId};
 use pare_common::db::liberty::{
-    ArcRole, ArcSetId, BufferCell, Edge, EdgeValues, LibCellId, LibPortId, MinMax,
+    ArcRole, ArcSetId, BufferCell, Edge, EdgeValues, LibCell, LibCellId, LibPortId, MinMax,
 };
 use pare_common::geom::dbu::{Dbu, DbuPerMicron};
 use pare_common::geom::point::Point;
@@ -119,6 +119,63 @@ struct DriverTiming {
     delay: Seconds,
     correction: Seconds,
     slew: Seconds,
+}
+
+impl DriverTiming {
+    /// No delay, correction or slew, for a tree with no driver or no
+    /// timing.
+    const NONE: Self = Self {
+        delay: Seconds::ZERO,
+        correction: Seconds::ZERO,
+        slew: Seconds::ZERO,
+    };
+}
+
+/// The driver's timing on `edge` through the arc `point` arrived by, the
+/// gate timed again at `load`; none where `point` starts a path.
+fn timing_through(
+    resizer: &Resizer<'_, Sta>,
+    cell: &LibCell,
+    point: &DriverPoint,
+    edge: Edge,
+    load: Farads,
+) -> Option<DriverTiming> {
+    let (from_pin, from_edge, set) = point.from?;
+    let arc_set = &cell.arc_sets[set];
+    let in_slew = if arc_set.role == ArcRole::RegClkToQ && resizer.clocks.is_ideal(from_pin) {
+        Seconds::ZERO
+    } else {
+        resizer.graph.slew(from_pin).get(from_edge)
+    };
+    let mut delay = Seconds::ZERO;
+    let mut slew = Seconds::ZERO;
+    for arc in arc_set
+        .arcs
+        .iter()
+        .filter(|a| a.from_edge == from_edge && a.to_edge == edge)
+    {
+        let result = dmp::gate_delay(
+            arc,
+            &resizer.link.liberty.thresholds,
+            in_slew,
+            PiModel {
+                c2: load,
+                rpi: Ohms::ZERO,
+                c1: Farads::ZERO,
+            },
+        );
+        delay = delay.max(result.delay);
+        slew = slew.max(result.slew);
+    }
+    let prev_arrival = resizer
+        .sta()
+        .arrival(from_pin, from_edge, MinMax::Max)
+        .unwrap_or(Seconds::ZERO);
+    Some(DriverTiming {
+        delay,
+        correction: point.arrival - (prev_arrival + delay),
+        slew,
+    })
 }
 
 /// The rebuffering search with the buffers it may use.
@@ -500,22 +557,11 @@ impl Rebuffer {
     /// `drvrPinTiming`: the gate timed again at the tree's load, and the
     /// correction the arrival at the driver would take from that.
     fn driver_timing(&self, resizer: &Resizer<'_, Sta>, tree: &Bnet) -> DriverTiming {
-        let Some(driver) = &self.driver else {
-            return DriverTiming {
-                delay: Seconds::ZERO,
-                correction: Seconds::ZERO,
-                slew: Seconds::ZERO,
-            };
-        };
-        let Some(edges) = tree.slack_edges else {
-            return DriverTiming {
-                delay: Seconds::ZERO,
-                correction: Seconds::ZERO,
-                slew: Seconds::ZERO,
-            };
+        let (Some(driver), Some(edges)) = (&self.driver, tree.slack_edges) else {
+            return DriverTiming::NONE;
         };
         let cell = resizer.link.liberty.cell(driver.cell);
-        let out_cap = cell.ports[driver.port].capacitance();
+        let load = tree.cap + cell.ports[driver.port].capacitance();
         let mut delay = Seconds::ZERO;
         let mut correction = Seconds::INFINITY;
         let mut slew = Seconds::ZERO;
@@ -523,46 +569,13 @@ impl Rebuffer {
             let Some(point) = driver.arrival_paths[edge] else {
                 continue;
             };
-            let Some((from_pin, from_edge, set)) = point.from else {
+            let Some(through) = timing_through(resizer, cell, &point, edge, load) else {
                 correction = correction.min(Seconds::ZERO);
                 continue;
             };
-            let arc_set = &cell.arc_sets[set];
-            let in_slew = if arc_set.role == ArcRole::RegClkToQ && resizer.clocks.is_ideal(from_pin)
-            {
-                Seconds::ZERO
-            } else {
-                resizer.graph.slew(from_pin).get(from_edge)
-            };
-            let load = tree.cap + out_cap;
-            let mut rf_delay = Seconds::ZERO;
-            let mut rf_slew = Seconds::ZERO;
-            for arc in arc_set
-                .arcs
-                .iter()
-                .filter(|a| a.from_edge == from_edge && a.to_edge == edge)
-            {
-                let result = dmp::gate_delay(
-                    arc,
-                    &resizer.link.liberty.thresholds,
-                    in_slew,
-                    PiModel {
-                        c2: load,
-                        rpi: Ohms::ZERO,
-                        c1: Farads::ZERO,
-                    },
-                );
-                rf_delay = rf_delay.max(result.delay);
-                rf_slew = rf_slew.max(result.slew);
-            }
-            let prev_arrival = resizer
-                .sta()
-                .arrival(from_pin, from_edge, MinMax::Max)
-                .unwrap_or(Seconds::ZERO);
-            let rf_correction = point.arrival - (prev_arrival + rf_delay);
-            delay = delay.max(rf_delay);
-            correction = correction.min(rf_correction);
-            slew = slew.max(rf_slew);
+            delay = delay.max(through.delay);
+            correction = correction.min(through.correction);
+            slew = slew.max(through.slew);
         }
         if correction == Seconds::INFINITY {
             correction = Seconds::ZERO;
