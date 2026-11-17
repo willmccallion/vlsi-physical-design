@@ -755,13 +755,7 @@ fn global_stage<'a>(
     resume: Option<&RouteState>,
     report: &mut dyn FnMut(&Progress<'_>),
 ) -> Result<GlobalStage<'a>, RouteError> {
-    let start = Instant::now();
-    let dr = DetailedRouter::new(db, tech, gcell);
-    let nets = routable_nets(db);
-    report(&Progress::Stage {
-        stage: Stage::PinAccess,
-        elapsed: start.elapsed(),
-    });
+    let (dr, nets) = pin_access_stage(db, tech, gcell, report);
 
     let start = Instant::now();
     let mut grid = GlobalGrid::new(
@@ -778,13 +772,7 @@ fn global_stage<'a>(
     let start = Instant::now();
     let global_nets: Vec<GlobalNet> = nets
         .iter()
-        .filter_map(|&net| {
-            Some(GlobalNet {
-                net,
-                terminals: dr.terminals(net, &grid)?,
-                demand: track_demand(db, tech, net),
-            })
-        })
+        .filter_map(|&net| global_net(db, tech, &dr, &grid, net))
         .collect();
     let global = match resume {
         Some(state) => restored_global(db, tech, &grid, &global_nets, state)?,
@@ -798,6 +786,52 @@ fn global_stage<'a>(
         },
         elapsed: start.elapsed(),
     });
+    report_global_routed(db, &grid, report);
+    Ok(GlobalStage {
+        dr,
+        nets,
+        grid,
+        global,
+    })
+}
+
+/// Finds pin access afresh and the nets to route, reported as the pin
+/// access stage.
+fn pin_access_stage<'a>(
+    db: &'a NetlistDB,
+    tech: &'a RouteTech,
+    gcell: Dbu,
+    report: &mut dyn FnMut(&Progress<'_>),
+) -> (DetailedRouter<'a>, Vec<NetId>) {
+    let start = Instant::now();
+    let dr = DetailedRouter::new(db, tech, gcell);
+    let nets = routable_nets(db);
+    report(&Progress::Stage {
+        stage: Stage::PinAccess,
+        elapsed: start.elapsed(),
+    });
+    (dr, nets)
+}
+
+/// `net` as global routing sees it now: the gcell of each pin's access and
+/// its track demand; none while a pin has no access.
+fn global_net(
+    db: &NetlistDB,
+    tech: &RouteTech,
+    dr: &DetailedRouter<'_>,
+    grid: &GlobalGrid,
+    net: NetId,
+) -> Option<GlobalNet> {
+    Some(GlobalNet {
+        net,
+        terminals: dr.terminals(net, grid)?,
+        demand: track_demand(db, tech, net),
+    })
+}
+
+/// Reports the gcell grid's size, overflow and load per layer after
+/// global routing.
+fn report_global_routed(db: &NetlistDB, grid: &GlobalGrid, report: &mut dyn FnMut(&Progress<'_>)) {
     let layers: Vec<LayerLoad<'_>> = grid
         .layer_totals()
         .into_iter()
@@ -814,12 +848,6 @@ fn global_stage<'a>(
         overflow: grid.overflow().rounded(),
         layers: &layers,
     });
-    Ok(GlobalStage {
-        dr,
-        nets,
-        grid,
-        global,
-    })
 }
 
 /// The global routes a session kept, to settle against pin access found
@@ -845,24 +873,13 @@ fn settled_stage<'a>(
         mut grid,
         mut global,
     } = settling;
-    let start = Instant::now();
-    let dr = DetailedRouter::new(db, tech, gcell);
-    let nets = routable_nets(db);
-    report(&Progress::Stage {
-        stage: Stage::PinAccess,
-        elapsed: start.elapsed(),
-    });
+    let (dr, nets) = pin_access_stage(db, tech, gcell, report);
     let start = Instant::now();
     let mut dirty = Vec::new();
     let mut settled = GlobalRoutes::default();
     for &net in &nets {
-        let Some(terminals) = dr.terminals(net, &grid) else {
+        let Some(fresh) = global_net(db, tech, &dr, &grid, net) else {
             continue;
-        };
-        let fresh = GlobalNet {
-            net,
-            terminals,
-            demand: global::track_demand(db, tech, net),
         };
         match global.trees.remove(&net) {
             Some(placed) if reaches(placed.paths(), &fresh.terminals) => {
