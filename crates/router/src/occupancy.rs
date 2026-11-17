@@ -25,6 +25,7 @@ use pare_common::db::library::LayerRef;
 use pare_common::db::rules::SpacingTable;
 use pare_common::db::shapes::{self, OwnedShape};
 use pare_common::geom::dbu::Dbu;
+use pare_common::geom::interval::{Interval, merge_touching};
 use pare_common::geom::point::Point;
 use pare_common::geom::rect::Rect;
 use rustc_hash::FxHashMap;
@@ -574,22 +575,14 @@ impl Query {
 
 /// Where fixed metal lies along each track.
 pub trait FixedMetal {
-    /// The stretches of fixed metal on `track` that overlap `(lo, hi)`.
-    fn fixed_stretches(
-        &self,
-        track: TrackRef,
-        lo: Dbu,
-        hi: Dbu,
-    ) -> impl Iterator<Item = (Dbu, Dbu)>;
+    /// The stretches of fixed metal on `track` that overlap the open
+    /// interval `within`.
+    fn fixed_stretches(&self, track: TrackRef, within: Interval) -> impl Iterator<Item = Interval>;
 }
 
 impl FixedMetal for Occupancy {
-    fn fixed_stretches(
-        &self,
-        track: TrackRef,
-        lo: Dbu,
-        hi: Dbu,
-    ) -> impl Iterator<Item = (Dbu, Dbu)> {
+    fn fixed_stretches(&self, track: TrackRef, within: Interval) -> impl Iterator<Item = Interval> {
+        let Interval { lo, hi } = within;
         let l = track.layer;
         let min = self.min_spacing[l];
         let extra = self.reach[l] - min;
@@ -605,9 +598,9 @@ impl FixedMetal for Occupancy {
                     spacing: min,
                 };
                 let beside = rules.required(o, wire) - min;
-                (o.lo() - beside, o.hi() + beside)
+                Interval::new(o.lo() - beside, o.hi() + beside)
             })
-            .filter(move |&(start, end)| start < hi && lo < end)
+            .filter(move |s| s.lo < hi && lo < s.hi)
     }
 }
 
@@ -617,14 +610,14 @@ impl FixedMetal for Occupancy {
 #[derive(Clone, Debug, Default)]
 pub struct FixedTracks {
     /// Each layer's blocked stretches, by track number.
-    stretches: IdVec<LayerId, Vec<Vec<(Dbu, Dbu)>>>,
+    stretches: IdVec<LayerId, Vec<Vec<Interval>>>,
 }
 
 impl FixedTracks {
     /// The stretches `shapes` block on the layers `tech` routes, as
     /// [`Occupancy::add_fixed`] would record them.
     pub fn new(tech: &RouteTech, shapes: impl IntoIterator<Item = OwnedShape>) -> Self {
-        let mut stretches: IdVec<LayerId, Vec<Vec<(Dbu, Dbu)>>> = tech
+        let mut stretches: IdVec<LayerId, Vec<Vec<Interval>>> = tech
             .layers
             .iter()
             .map(|l| vec![Vec::new(); l.tracks.len()])
@@ -644,47 +637,30 @@ impl FixedTracks {
             let spacing = tech.wire_spacing(rule, layer);
             let extra = lt.spacing_around(&s.shape.rect).1.max(spacing) - lt.spacing;
             for b in blocked_stretches(lt, &s.shape.rect, spacing) {
-                stretches[layer][b.track as usize].push((b.lo - extra, b.hi + extra));
+                stretches[layer][b.track as usize].push(Interval::new(b.lo - extra, b.hi + extra));
             }
         }
         for track in stretches.iter_mut().flatten() {
-            merge_stretches(track);
+            track.sort_unstable();
+            *track = merge_touching(track.iter().copied());
         }
         Self { stretches }
     }
 }
 
 impl FixedMetal for FixedTracks {
-    fn fixed_stretches(
-        &self,
-        track: TrackRef,
-        lo: Dbu,
-        hi: Dbu,
-    ) -> impl Iterator<Item = (Dbu, Dbu)> {
+    fn fixed_stretches(&self, track: TrackRef, within: Interval) -> impl Iterator<Item = Interval> {
         let list = self
             .stretches
             .get(track.layer)
             .and_then(|l| l.get(track.track as usize))
             .map_or(&[][..], Vec::as_slice);
-        let first = list.partition_point(|&(_, end)| end <= lo);
+        let first = list.partition_point(|s| s.hi <= within.lo);
         list[first..]
             .iter()
             .copied()
-            .take_while(move |&(start, _)| start < hi)
+            .take_while(move |s| s.lo < within.hi)
     }
-}
-
-/// Sorts `stretches` and joins those that overlap or touch.
-fn merge_stretches(stretches: &mut Vec<(Dbu, Dbu)>) {
-    stretches.sort_unstable();
-    let mut merged: Vec<(Dbu, Dbu)> = Vec::with_capacity(stretches.len());
-    for &(lo, hi) in stretches.iter() {
-        match merged.last_mut() {
-            Some(last) if lo <= last.1 => last.1 = last.1.max(hi),
-            _ => merged.push((lo, hi)),
-        }
-    }
-    *stretches = merged;
 }
 
 /// Tracks whose wires `rect` could touch or crowd, and whether each runs
@@ -1113,26 +1089,12 @@ mod tests {
     use super::*;
 
     #[test]
-    fn overlapping_and_touching_stretches_merge() {
-        let mut stretches = vec![
-            (Dbu(50), Dbu(60)),
-            (Dbu(0), Dbu(10)),
-            (Dbu(10), Dbu(20)),
-            (Dbu(15), Dbu(30)),
-        ];
-
-        merge_stretches(&mut stretches);
-
-        assert_eq!(stretches, vec![(Dbu(0), Dbu(30)), (Dbu(50), Dbu(60))]);
-    }
-
-    #[test]
     fn fixed_tracks_return_the_stretches_overlapping_a_range() {
         let fixed = FixedTracks {
             stretches: vec![vec![vec![
-                (Dbu(0), Dbu(30)),
-                (Dbu(50), Dbu(60)),
-                (Dbu(80), Dbu(90)),
+                Interval::new(Dbu(0), Dbu(30)),
+                Interval::new(Dbu(50), Dbu(60)),
+                Interval::new(Dbu(80), Dbu(90)),
             ]]]
             .into(),
         };
@@ -1141,9 +1103,11 @@ mod tests {
             track: 0,
         };
 
-        let got: Vec<(Dbu, Dbu)> = fixed.fixed_stretches(track, Dbu(30), Dbu(80)).collect();
+        let got: Vec<Interval> = fixed
+            .fixed_stretches(track, Interval::new(Dbu(30), Dbu(80)))
+            .collect();
 
-        assert_eq!(got, vec![(Dbu(50), Dbu(60))]);
+        assert_eq!(got, vec![Interval::new(Dbu(50), Dbu(60))]);
     }
 
     fn rect(x0: i64, y0: i64, x1: i64, y1: i64) -> Rect<Dbu> {
