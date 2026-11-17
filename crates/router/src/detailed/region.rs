@@ -288,7 +288,7 @@ impl Changes {
 fn wiring_before<'e>(
     item: &'e Routed,
     given: bool,
-    carved: &'e FxHashMap<(usize, NetId), Wiring>,
+    carved: &'e Removed,
     region: usize,
 ) -> &'e Wiring {
     if given {
@@ -314,6 +314,9 @@ pub enum Scope {
 // NOTE: FlexDRWorker::initRipUpNetsFromMarkers bloats a marker by twice its
 // layer's width on its layer alone; PARE reaches wider, on every layer.
 const NEAR_TRACKS: i64 = 3;
+
+/// The wiring carved out of each region of a batch, by region and net.
+type Removed = FxHashMap<(usize, NetId), Wiring>;
 
 /// What a pass did.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -444,6 +447,32 @@ impl DetailedRouter<'_> {
             .par_iter()
             .map(|job| self.seed_marks(&job.area, &job.markers))
             .collect();
+        let (pieces, removed) = self.carve_batch(batch);
+        let work: Vec<(Rect<Dbu>, Vec<Piece>)> =
+            batch.iter().map(|job| job.area).zip(pieces).collect();
+        let routed: Vec<(Vec<Routed>, Verdict)> = work
+            .par_iter()
+            .zip(seeds)
+            .enumerate()
+            .map(|(r, ((area, pieces), marks))| {
+                let routed = self.route_region(area, pieces, costs, marks);
+                let given = pieces.len();
+                let verdict = self.judge_change(area, &routed, |i, item| {
+                    wiring_before(item, i < given, &removed, r)
+                });
+                if verdict.rejected() {
+                    return (routed.into_iter().map(Routed::undone).collect(), verdict);
+                }
+                (routed, verdict)
+            })
+            .collect();
+        self.apply_routed(&work, routed, &removed)
+    }
+
+    /// Takes out of each region of `batch` the wiring of its complete nets
+    /// and commits that; returns the pieces each region has to route again
+    /// and the wiring taken from each region and net.
+    fn carve_batch(&mut self, batch: &[RegionJob]) -> (Vec<Vec<Piece>>, Removed) {
         let mut regions_of: BTreeMap<NetId, Vec<usize>> = BTreeMap::new();
         for (r, job) in batch.iter().enumerate() {
             for &net in &job.nets {
@@ -453,7 +482,7 @@ impl DetailedRouter<'_> {
             }
         }
         let mut pieces: Vec<Vec<Piece>> = (0..batch.len()).map(|_| Vec::new()).collect();
-        let mut removed: FxHashMap<(usize, NetId), Wiring> = FxHashMap::default();
+        let mut removed: Removed = FxHashMap::default();
         let mut carved = Changes::default();
         let carvings: Vec<Vec<(Wiring, Option<Piece>)>> = regions_of
             .par_iter()
@@ -472,26 +501,19 @@ impl DetailedRouter<'_> {
             }
         }
         self.commit_changes(carved);
-        let work: Vec<(Rect<Dbu>, Vec<Piece>)> =
-            batch.iter().map(|job| job.area).zip(pieces).collect();
+        (pieces, removed)
+    }
 
-        let routed: Vec<(Vec<Routed>, Verdict)> = work
-            .par_iter()
-            .zip(seeds)
-            .enumerate()
-            .map(|(r, ((area, pieces), marks))| {
-                let routed = self.route_region(area, pieces, costs, marks);
-                let given = pieces.len();
-                let verdict = self.judge_change(area, &routed, |i, item| {
-                    wiring_before(item, i < given, &removed, r)
-                });
-                if verdict.rejected() {
-                    return (routed.into_iter().map(Routed::undone).collect(), verdict);
-                }
-                (routed, verdict)
-            })
-            .collect();
-
+    /// Commits what routing each region of `work` came to: new wiring
+    /// where it was kept, and the wiring `removed` took back where a piece
+    /// it was given came to nothing; returns the pieces and the regions
+    /// improved.
+    fn apply_routed(
+        &mut self,
+        work: &[(Rect<Dbu>, Vec<Piece>)],
+        routed: Vec<(Vec<Routed>, Verdict)>,
+        removed: &Removed,
+    ) -> RepairStats {
         let mut stats = RepairStats::default();
         let mut changes = Changes::default();
         for (r, ((_, pieces), (routed, verdict))) in work.iter().zip(routed).enumerate() {
