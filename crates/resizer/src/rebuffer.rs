@@ -250,86 +250,86 @@ impl Rebuffer {
     /// Strips the buffers from every net and buffers it again for timing,
     /// as `Rebuffer::fullyRebuffer` does for timing-driven placement.
     pub fn fully_rebuffer(&mut self, resizer: &mut Resizer<'_, Sta>) -> Result<(), RepairError> {
-        let drivers: Vec<PinId> = {
-            let netlist = resizer.netlist();
-            let mut drivers = resizer.graph.drivers_by_level(&netlist);
-            drivers.retain(|&driver| {
-                let net = resizer.db.pins[driver].net;
-                let PinOwner::Cell { cell, .. } = resizer.db.pins[driver].owner else {
-                    return false;
-                };
-                let Some((_, lib)) = resizer.link.cell(resizer.db, cell) else {
-                    return false;
-                };
-                !netlist.is_special(net)
-                    && !resizer.clocks.is_clock(driver)
-                    && !resizer.constants.is_constant(driver)
-                    && !resizer.is_tristate_driver(driver)
-                    && (!lib.is_buffer()
-                        || !is_logic_std_cell(resizer.db, cell)
-                        || is_port_buffer(resizer, cell))
-            });
-            drivers.reverse();
-            drivers
-        };
-        for driver in drivers {
-            if resizer.netlist().is_retired(driver) {
-                continue;
-            }
-            if !self.set_driver(resizer, driver) {
-                continue;
-            }
-            let Some(original) = self.import_buffer_tree(resizer, driver)? else {
-                continue;
-            };
-            let original = self.annotate_load_slacks(resizer, &original, driver);
-            let slack = self.slack_at_driver(resizer, &original).to_seconds();
-            let sta_slack = resizer.sta().slack(driver, MinMax::Max).time_or_infinity();
-            let slack_error = slack - sta_slack;
-            let unbuffered = resteiner(resizer, &strip_buffers(&original));
-            let Some(mut timing_tree) = unbuffered.clone() else {
-                continue;
-            };
-            let mut found = true;
-            for _ in 0..TIMING_ROUNDS {
-                let topology = Topology::Rewritable;
-                if let Some(better) = self.buffer_for_timing(resizer, &timing_tree, topology) {
-                    timing_tree = better;
-                } else {
-                    found = false;
-                    break;
-                }
-            }
-            if !found {
-                continue;
-            }
-            let timing = self.driver_timing(resizer, &timing_tree);
-            let target = if timing_tree.slack_edges.is_some() {
-                let relaxation = (self.slack_at_driver(resizer, &timing_tree).to_seconds()
-                    - slack_error.min(Seconds::ZERO))
-                .max(Seconds::ZERO)
-                    / 4.0
-                    + (timing.delay.max(Seconds::ZERO)
-                        + critical_path_delay(&timing_tree).to_seconds())
-                        * RELAXATION_FACTOR;
-                self.slack_at_driver(resizer, &timing_tree) - Fixed::from_seconds(relaxation)
-            } else {
-                -Fixed::INF
-            };
-            let mut area_tree = timing_tree;
-            for round in 0..AREA_ROUNDS {
-                let alpha = (round + 1) as f64 / AREA_ROUNDS as f64;
-                area_tree = self
-                    .recover_area(resizer, &area_tree, target, alpha)
-                    .map_err(|AreaRecoveryFailed| area_recovery_error(resizer, driver))?;
-            }
-            let old_buffers = collect_imported_buffers(resizer, driver, &original);
-            let batch = resizer.batch_edits();
-            let replaced = self.replace_buffers(resizer, &area_tree, &old_buffers);
-            resizer.flush(batch);
-            replaced?;
+        for driver in rebuffer_candidates(resizer) {
+            self.rebuffer_driver(resizer, driver)?;
         }
         Ok(())
+    }
+
+    /// Buffers `driver`'s net again for timing, then recovers area within
+    /// a relaxed slack target, and puts the result in the design.
+    fn rebuffer_driver(
+        &mut self,
+        resizer: &mut Resizer<'_, Sta>,
+        driver: PinId,
+    ) -> Result<(), RepairError> {
+        if resizer.netlist().is_retired(driver) || !self.set_driver(resizer, driver) {
+            return Ok(());
+        }
+        let Some(original) = self.import_buffer_tree(resizer, driver)? else {
+            return Ok(());
+        };
+        let original = self.annotate_load_slacks(resizer, &original, driver);
+        let slack = self.slack_at_driver(resizer, &original).to_seconds();
+        let sta_slack = resizer.sta().slack(driver, MinMax::Max).time_or_infinity();
+        let slack_error = slack - sta_slack;
+        let Some(unbuffered) = resteiner(resizer, &strip_buffers(&original)) else {
+            return Ok(());
+        };
+        let Some(timing_tree) = self.buffer_rounds_for_timing(resizer, unbuffered) else {
+            return Ok(());
+        };
+        let target = self.area_target(resizer, &timing_tree, slack_error);
+        let mut area_tree = timing_tree;
+        for round in 0..AREA_ROUNDS {
+            let alpha = (round + 1) as f64 / AREA_ROUNDS as f64;
+            area_tree = self
+                .recover_area(resizer, &area_tree, target, alpha)
+                .map_err(|AreaRecoveryFailed| area_recovery_error(resizer, driver))?;
+        }
+        let old_buffers = collect_imported_buffers(resizer, driver, &original);
+        let batch = resizer.batch_edits();
+        let replaced = self.replace_buffers(resizer, &area_tree, &old_buffers);
+        resizer.flush(batch);
+        replaced?;
+        Ok(())
+    }
+
+    /// `tree` buffered for timing [`TIMING_ROUNDS`] times over; none where
+    /// a round finds no buffering.
+    fn buffer_rounds_for_timing(
+        &mut self,
+        resizer: &Resizer<'_, Sta>,
+        tree: BnetPtr,
+    ) -> Option<BnetPtr> {
+        let mut tree = tree;
+        for _ in 0..TIMING_ROUNDS {
+            tree = self.buffer_for_timing(resizer, &tree, Topology::Rewritable)?;
+        }
+        Some(tree)
+    }
+
+    /// The slack area recovery must keep at the driver of `timing_tree`:
+    /// its slack less a relaxation that grows with the slack to spare and
+    /// the path's delay, `slack_error` being how far the tree's slack sits
+    /// above the analysis's.
+    fn area_target(
+        &self,
+        resizer: &Resizer<'_, Sta>,
+        timing_tree: &Bnet,
+        slack_error: Seconds,
+    ) -> Fixed {
+        if timing_tree.slack_edges.is_none() {
+            return -Fixed::INF;
+        }
+        let timing = self.driver_timing(resizer, timing_tree);
+        let relaxation = (self.slack_at_driver(resizer, timing_tree).to_seconds()
+            - slack_error.min(Seconds::ZERO))
+        .max(Seconds::ZERO)
+            / 4.0
+            + (timing.delay.max(Seconds::ZERO) + critical_path_delay(timing_tree).to_seconds())
+                * RELAXATION_FACTOR;
+        self.slack_at_driver(resizer, timing_tree) - Fixed::from_seconds(relaxation)
     }
 
     /// Puts the buffers of `tree` into the design and takes `old_buffers`
@@ -1202,6 +1202,32 @@ fn export_node(
             Ok(vec![inserted.input])
         }
     }
+}
+
+/// The drivers [`Rebuffer::fully_rebuffer`] buffers again, from the
+/// outputs back: every signal driver but tristates, constants, clocks and
+/// the logic buffers it strips, as `Rebuffer::fullyRebuffer` picks them.
+fn rebuffer_candidates(resizer: &Resizer<'_, Sta>) -> Vec<PinId> {
+    let netlist = resizer.netlist();
+    let mut drivers = resizer.graph.drivers_by_level(&netlist);
+    drivers.retain(|&driver| {
+        let net = resizer.db.pins[driver].net;
+        let PinOwner::Cell { cell, .. } = resizer.db.pins[driver].owner else {
+            return false;
+        };
+        let Some((_, lib)) = resizer.link.cell(resizer.db, cell) else {
+            return false;
+        };
+        !netlist.is_special(net)
+            && !resizer.clocks.is_clock(driver)
+            && !resizer.constants.is_constant(driver)
+            && !resizer.is_tristate_driver(driver)
+            && (!lib.is_buffer()
+                || !is_logic_std_cell(resizer.db, cell)
+                || is_port_buffer(resizer, cell))
+    });
+    drivers.reverse();
+    drivers
 }
 
 /// A fresh Steiner tree over the loads of `tree` from its top, as
