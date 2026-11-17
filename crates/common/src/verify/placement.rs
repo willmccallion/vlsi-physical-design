@@ -177,8 +177,8 @@ impl RowIndex {
         let Some(row) = row else {
             return Some(PlacementViolation::NotInRow(id));
         };
-        let step = row.step.x.get();
-        if step > 0 && (bbox.min.x - row.origin.x).get() % step != 0 {
+        let step = row.step.x;
+        if step > Dbu::ZERO && !(bbox.min.x - row.origin.x).is_multiple_of(step) {
             return Some(PlacementViolation::OffSite(id));
         }
         let orient = db.cells[id].orient;
@@ -243,8 +243,7 @@ struct Bin {
 
 /// The `side`-sized squares a non-empty rectangle touches.
 fn bins_covering(r: &Rect<Dbu>, side: Dbu) -> impl Iterator<Item = Bin> {
-    let squares =
-        |lo: Dbu, hi: Dbu| lo.get().div_euclid(side.get())..=(hi.get() - 1).div_euclid(side.get());
+    let squares = |lo: Dbu, hi: Dbu| lo.div_floor(side)..=(hi - Dbu(1)).div_floor(side);
     let rows = squares(r.min.y, r.max.y);
     squares(r.min.x, r.max.x)
         .flat_map(move |column| rows.clone().map(move |row| Bin { column, row }))

@@ -616,7 +616,7 @@ fn add_tracks(db: &mut NetlistDB) -> Result<(), String> {
             Direction::Horizontal => (TrackAxis::Y, die.min.y, die.height()),
             Direction::Vertical => (TrackAxis::X, die.min.x, die.width()),
         };
-        let count = ((extent - pitch / 2).get() / pitch.get() + 1).max(0);
+        let count = ((extent - pitch / 2).div_trunc(pitch) + 1).max(0);
         let count = u32::try_from(count)
             .map_err(|_| format!("the die is too large for the tracks of {}", layer.name))?;
         db.tracks.push(TrackDef {

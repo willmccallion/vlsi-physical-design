@@ -203,7 +203,7 @@ fn special_wire_box(wire: &SpecialWire) -> Rect<Dbu> {
 /// both are even) and the box grows by half of it along the other axis.
 fn special_rect_box(rect: &Rect<Dbu>) -> Rect<Dbu> {
     let (dx, dy) = (rect.width(), rect.height());
-    let even = |d: Dbu| d.get() % 2 == 0;
+    let even = |d: Dbu| d.is_multiple_of(Dbu(2));
     let along_y = match (even(dx), even(dy)) {
         (true, true) => dy >= dx,
         (true, false) => true,
