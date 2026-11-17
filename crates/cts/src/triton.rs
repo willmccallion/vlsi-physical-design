@@ -9,7 +9,10 @@ use crate::buffers::{ClockBuffers, fanout_limit};
 use crate::capacitance::Farads32;
 use crate::clock::{Clock, ClockSink, InstRef};
 use crate::htree::{Builder, TreeContext, TreeType};
-use crate::options::{CtsOptions, MACRO_MAX_DIAMETER, MAX_LEAF_SINKS, NdrStrategy, Settings};
+use crate::options::{
+    CtsOptions, DummyLoads, InsertionDelays, MACRO_MAX_DIAMETER, MAX_LEAF_SINKS, NdrStrategy,
+    Settings,
+};
 use crate::techchar::{CharSetup, LengthUnit, TechChar};
 use pare_common::db::design::{
     NetlistDB, NonDefaultLayer, NonDefaultRule, PinOwner, PlacementStatus,
@@ -460,7 +463,7 @@ impl Cts<'_> {
     /// The delay through the clock tree inside the cell of `pin`; zero
     /// when insertion delays are off, as `TritonCTS::computeInsertionDelay`.
     fn insertion_delay(&self, db: &NetlistDB, pin: PinId) -> Seconds {
-        if !self.setup.settings.insertion_delay {
+        if self.setup.settings.insertion_delays == InsertionDelays::Ignored {
             return Seconds::ZERO;
         }
         liberty_insertion_delay(self.link, db, pin)
@@ -522,9 +525,11 @@ impl Cts<'_> {
                 register_sinks.push(pin);
             }
         }
-        let forked_center = (self.setup.settings.insertion_delay && !macro_sinks.is_empty())
-            .then(|| sink_bbox_center(db, &register_sinks))
-            .flatten();
+        let forked_center = (self.setup.settings.insertion_delays
+            == InsertionDelays::SeparateTrees
+            && !macro_sinks.is_empty())
+        .then(|| sink_bbox_center(db, &register_sinks))
+        .flatten();
         let Some(center) = forked_center else {
             for pin in net_cell_pins(db, net) {
                 let Some((cell, _, _)) = pin_direction(db, pin) else {
@@ -848,7 +853,7 @@ impl Cts<'_> {
             if self.setup.settings.ndr != NdrStrategy::None {
                 self.write_ndr(db, i);
             }
-            if self.setup.settings.dummy_loads {
+            if self.setup.settings.dummy_loads == DummyLoads::Balance {
                 self.summary.dummies += self.write_dummy_loads(db, i)?;
             }
         }

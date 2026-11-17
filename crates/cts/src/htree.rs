@@ -18,7 +18,7 @@ use crate::kmeans::{Clustering, SinkPoint};
 use crate::options::{
     CLOCK_TREE_MAX_DEPTH, CLUSTERING_CAPACITY, CLUSTERING_POWER,
     FANOUT_LIMITED_CLUSTERING_CAPACITY, MACRO_SINK_CLUSTERING_SIZE, MAX_DIAMETER, MAX_LEAF_SINKS,
-    MAX_SLEW, SINK_CLUSTERING_SIZE, Settings,
+    MAX_SLEW, SINK_CLUSTERING_SIZE, Settings, SinkClusteringMode,
 };
 use crate::sink_clustering::SinkClustering;
 use crate::techchar::{CapSteps, LengthSteps, LengthUnit, SegmentLength, SlewSteps, TechChar};
@@ -538,7 +538,7 @@ impl Builder {
 
     fn sinks_per_sub_region(&self, ctx: &TreeContext<'_>, level: u32) -> u32 {
         let total = if self.clock.sinks.len() > self.min_clustering_sinks()
-            && ctx.settings.sink_clustering
+            && ctx.settings.sink_clustering == SinkClusteringMode::Clustered
         {
             self.top_level_sinks_clustered.len()
         } else {
@@ -568,7 +568,9 @@ impl Builder {
             .collect();
         let max_diameter = (diameter * f64::from(ctx.dbu) / self.unit()) as f32;
         self.pre_sink_clustering(ctx, tech, &sinks, max_diameter, size);
-        if sinks.len() <= self.min_clustering_sinks() || !ctx.settings.sink_clustering {
+        if sinks.len() <= self.min_clustering_sinks()
+            || ctx.settings.sink_clustering == SinkClusteringMode::Unclustered
+        {
             let region = self.clock.sink_region();
             let f = 1.0 / self.unit();
             self.sink_region = Region::new(
@@ -607,7 +609,9 @@ impl Builder {
     ) {
         self.index_sinks(tech);
         let mut top_level = BranchSinks::default();
-        if sinks.len() <= self.min_clustering_sinks() || !ctx.settings.sink_clustering {
+        if sinks.len() <= self.min_clustering_sinks()
+            || ctx.settings.sink_clustering == SinkClusteringMode::Unclustered
+        {
             for (i, &point) in sinks.iter().enumerate() {
                 top_level.push(point, InstRef::Sink(i));
             }

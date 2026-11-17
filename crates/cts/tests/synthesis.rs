@@ -13,7 +13,9 @@ use pare_common::geom::dbu::{Dbu, DbuPerMicron};
 use pare_common::geom::orient::Orientation;
 use pare_common::testing;
 use pare_common::units::{FaradsPerMeter, OhmsPerMeter, Seconds};
-use pare_cts::{CtsError, CtsInput, CtsOptions, CtsSummary, balance_latencies, synthesize};
+use pare_cts::{
+    CtsError, CtsInput, CtsOptions, CtsSummary, InsertionDelays, balance_latencies, synthesize,
+};
 use pare_resizer::WireRc;
 use pare_resizer::{ClockNetwork, Constants, Link, Namer, Netlist, repair_clock_inverters};
 use std::fmt::Write as _;
@@ -290,7 +292,10 @@ fn the_root_net_gets_the_clock_rule_of_doubled_spacing() {
 /// The 16 by 16 grid with its first `slow` flops alternately of
 /// `DFF_SLOW` and `DFF_SLOWER`, whose clock pins lead into 0.2 and 0.6 ns
 /// of clock tree of their own, synthesized with insertion delays on or off.
-fn synthesized_with_slow_flops(slow: usize, insertion_delay: bool) -> (NetlistDB, CtsSummary) {
+fn synthesized_with_slow_flops(
+    slow: usize,
+    insertion_delays: InsertionDelays,
+) -> (NetlistDB, CtsSummary) {
     let (db, lib, constraints) = load(16, 16, false);
     let mut text = design(16, 16, false);
     for i in 0..slow {
@@ -308,7 +313,7 @@ fn synthesized_with_slow_flops(slow: usize, insertion_delay: bool) -> (NetlistDB
         clock_rc: wire(&db, "metal3", 1.5, 0.11),
         max_wire_length: None,
         options: CtsOptions {
-            insertion_delay,
+            insertion_delays,
             ..CtsOptions::default()
         },
     };
@@ -320,7 +325,7 @@ fn synthesized_with_slow_flops(slow: usize, insertion_delay: bool) -> (NetlistDB
 
 #[test]
 fn sinks_with_insertion_delay_get_a_tree_apart_from_the_registers() {
-    let (_, summary) = synthesized_with_slow_flops(24, true);
+    let (_, summary) = synthesized_with_slow_flops(24, InsertionDelays::SeparateTrees);
 
     assert_eq!(summary.trees, 2);
     assert_eq!(summary.sinks, 256);
@@ -328,7 +333,7 @@ fn sinks_with_insertion_delay_get_a_tree_apart_from_the_registers() {
 
 #[test]
 fn without_insertion_delays_every_flop_shares_one_tree() {
-    let (_, summary) = synthesized_with_slow_flops(24, false);
+    let (_, summary) = synthesized_with_slow_flops(24, InsertionDelays::Ignored);
 
     assert_eq!(summary.trees, 1);
 }
@@ -336,7 +341,7 @@ fn without_insertion_delays_every_flop_shares_one_tree() {
 #[test]
 fn a_grid_with_slow_flops_gets_the_trees_it_always_has() {
     let first_added = 256;
-    let (db, summary) = synthesized_with_slow_flops(24, true);
+    let (db, summary) = synthesized_with_slow_flops(24, InsertionDelays::SeparateTrees);
 
     assert_golden(
         "grid_16x16_slow_24.txt",

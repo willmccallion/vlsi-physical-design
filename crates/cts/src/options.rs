@@ -18,36 +18,51 @@ pub enum NdrStrategy {
     Full,
 }
 
-/// The requests `clock_tree_synthesis` takes; the defaults are what
-/// `OpenROAD-flow-scripts` runs it with.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-#[allow(clippy::struct_excessive_bools)] // each is an independent command flag
-pub struct CtsOptions {
-    /// Clusters the sinks under leaf buffers (`-sink_clustering_enable`).
-    pub sink_clustering: bool,
-    /// Buffers clock nets longer than the longest wire worth driving whole
-    /// (`-repair_clock_nets`).
-    pub repair_clock_nets: bool,
-    /// Balances the buffers' loads with dummy cells (no
-    /// `-dont_use_dummy_load`).
-    pub dummy_loads: bool,
-    /// Builds separate trees for sinks with insertion delay (no
-    /// `-no_insertion_delay`).
-    pub insertion_delay: bool,
-    /// The non-default rule's levels (`-apply_ndr`).
-    pub ndr: NdrStrategy,
+/// Whether sinks are clustered under leaf buffers before the H-tree is
+/// built (`-sink_clustering_enable`).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum SinkClusteringMode {
+    /// Sinks are clustered, `OpenROAD-flow-scripts`' setting.
+    #[default]
+    Clustered,
+    /// Every sink is a leaf of the tree itself.
+    Unclustered,
 }
 
-impl Default for CtsOptions {
-    fn default() -> Self {
-        Self {
-            sink_clustering: true,
-            repair_clock_nets: true,
-            dummy_loads: true,
-            insertion_delay: true,
-            ndr: NdrStrategy::Half,
-        }
-    }
+/// Whether dummy cells balance the loads of a tree's buffers (no
+/// `-dont_use_dummy_load`).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum DummyLoads {
+    /// Dummy cells are added, `TritonCTS`'s default.
+    #[default]
+    Balance,
+    /// No dummy cells are added.
+    Omit,
+}
+
+/// Whether sinks with a Liberty insertion delay get trees of their own (no
+/// `-no_insertion_delay`).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum InsertionDelays {
+    /// Such sinks get their own trees, `TritonCTS`'s default.
+    #[default]
+    SeparateTrees,
+    /// Insertion delays are ignored.
+    Ignored,
+}
+
+/// The requests `clock_tree_synthesis` takes; the defaults are what
+/// `OpenROAD-flow-scripts` runs it with.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct CtsOptions {
+    /// Whether sinks are clustered under leaf buffers.
+    pub sink_clustering: SinkClusteringMode,
+    /// Whether dummy cells balance the buffers' loads.
+    pub dummy_loads: DummyLoads,
+    /// Whether sinks with insertion delay get trees of their own.
+    pub insertion_delays: InsertionDelays,
+    /// The non-default rule's levels (`-apply_ndr`).
+    pub ndr: NdrStrategy,
 }
 
 /// The most sinks a leaf region holds without a fanout limit, as
@@ -90,13 +105,13 @@ pub(crate) const MACRO_SINK_CLUSTERING_SIZE: u32 = 4;
 #[derive(Clone, Debug, PartialEq)]
 pub(crate) struct Settings {
     /// Whether sinks are clustered under leaf buffers.
-    pub sink_clustering: bool,
+    pub sink_clustering: SinkClusteringMode,
     /// Whether dummy loads balance the buffers' loads.
-    pub dummy_loads: bool,
+    pub dummy_loads: DummyLoads,
     /// The levels that get the clock's non-default rule.
     pub ndr: NdrStrategy,
     /// Whether sinks with insertion delay get trees of their own.
-    pub insertion_delay: bool,
+    pub insertion_delays: InsertionDelays,
     /// The most sinks a buffer drives, from the root and sink buffers'
     /// limits; none without one.
     pub max_fanout: Option<u32>,
@@ -115,7 +130,7 @@ impl Settings {
             sink_clustering: options.sink_clustering,
             dummy_loads: options.dummy_loads,
             ndr: options.ndr,
-            insertion_delay: options.insertion_delay,
+            insertion_delays: options.insertion_delays,
             max_fanout: None,
             sink_clustering_sizes: SINK_CLUSTERING_SIZES.to_vec(),
             macro_max_diameter: None,

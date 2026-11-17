@@ -20,7 +20,7 @@ mod techchar;
 mod triton;
 
 pub use latency::balance_latencies;
-pub use options::{CtsOptions, NdrStrategy};
+pub use options::{CtsOptions, DummyLoads, InsertionDelays, NdrStrategy, SinkClusteringMode};
 pub use triton::{ClockTrees, CtsInput, CtsSummary, synthesize};
 
 /// Why a clock tree could not be built.
