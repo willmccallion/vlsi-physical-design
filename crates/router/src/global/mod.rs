@@ -1518,7 +1518,7 @@ fn dependencies(
     } = *reroute;
     let blocks_x = usize::from(grid.nx.div_ceil(BATCH_BLOCK));
     let blocks_y = usize::from(grid.ny.div_ceil(BATCH_BLOCK));
-    let mut last = vec![u32::MAX; blocks_x * blocks_y];
+    let mut last: Vec<Option<u32>> = vec![None; blocks_x * blocks_y];
     let mut waits: Vec<AtomicU32> = Vec::with_capacity(which.len());
     let mut next: Vec<Vec<u32>> = vec![Vec::new(); which.len()];
     for (k, &i) in which.iter().enumerate() {
@@ -1536,11 +1536,7 @@ fn dependencies(
         blocks.dedup();
         let mut before: Vec<u32> = Vec::new();
         for b in blocks {
-            let slot = &mut last[b];
-            if *slot != u32::MAX {
-                before.push(*slot);
-            }
-            *slot = index_u32(k);
+            before.extend(last[b].replace(index_u32(k)));
         }
         before.sort_unstable();
         before.dedup();
