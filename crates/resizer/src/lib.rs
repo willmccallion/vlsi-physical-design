@@ -39,4 +39,4 @@ pub use resizer::{
 };
 pub use route_parasitics::RouteRc;
 pub use setup::{SetupOptions, SetupProgress, SetupSummary, repair_setup};
-pub use sta::{Path, PathPoint, Slack, Sta, Tag, Via};
+pub use sta::{EndpointSlack, Path, PathPoint, Slack, Sta, Tag, Via};

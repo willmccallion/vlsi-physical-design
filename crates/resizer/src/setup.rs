@@ -108,8 +108,8 @@ pub struct SetupProgress {
     pub swapped: usize,
     /// Area now over area at the start, as a percentage change.
     pub area_change_percent: f64,
-    /// Worst slack.
-    pub wns: Seconds,
+    /// Worst slack; none where no endpoint is constrained.
+    pub wns: Option<Seconds>,
     /// Total negative slack.
     pub tns: Seconds,
     /// Endpoints still failing.
@@ -125,10 +125,10 @@ pub struct SetupSummary {
     pub failing_before: usize,
     /// Endpoints failing at the end.
     pub failing_after: usize,
-    /// Worst slack at the start.
-    pub wns_before: Seconds,
+    /// Worst slack at the start; none where no endpoint is constrained.
+    pub wns_before: Option<Seconds>,
     /// Worst slack at the end.
-    pub wns_after: Seconds,
+    pub wns_after: Option<Seconds>,
     /// Total negative slack at the start.
     pub tns_before: Seconds,
     /// Total negative slack at the end.
@@ -293,7 +293,7 @@ pub fn repair_setup(
         fallback: false,
     };
     let violating = repair.violating_endpoints();
-    let (wns_before, _) = repair.worst();
+    let wns_before = repair.worst_slack();
     let tns_before = repair.tns();
     let mut summary = SetupSummary {
         failing_before: violating.len(),
@@ -338,16 +338,30 @@ impl Repair<'_, '_> {
         let mut ends: Vec<(PinId, Seconds)> = sta
             .endpoints()
             .iter()
-            .map(|&end| (end, sta.slack(end, MinMax::Max).time()))
+            .filter_map(|&end| Some((end, sta.slack(end, MinMax::Max).time()?)))
             .filter(|&(_, slack)| fuzzy::less(slack, self.options.margin))
             .collect();
         ends.sort_by(|a, b| a.1.total_cmp(&b.1));
         ends
     }
 
+    /// The worst endpoint slack; none where no endpoint is constrained.
+    fn worst_slack(&self) -> Option<Seconds> {
+        self.resizer
+            .sta()
+            .worst_slack(MinMax::Max)
+            .map(|worst| worst.slack)
+    }
+
+    /// The worst endpoint slack and its endpoint, the slack infinite where
+    /// no endpoint is constrained, as `RepairSetup` reads `OpenSTA`'s `INF`.
     fn worst(&self) -> (Seconds, Option<PinId>) {
-        let (slack, end) = self.resizer.sta().worst_slack(MinMax::Max);
-        (slack.time(), end)
+        self.resizer
+            .sta()
+            .worst_slack(MinMax::Max)
+            .map_or((Seconds::INFINITY, None), |worst| {
+                (worst.slack, Some(worst.pin))
+            })
     }
 
     fn tns(&self) -> Seconds {
@@ -355,7 +369,7 @@ impl Repair<'_, '_> {
     }
 
     fn progress(&self, iteration: Option<usize>) -> SetupProgress {
-        let (wns, worst) = self.worst();
+        let worst = self.resizer.sta().worst_slack(MinMax::Max);
         let area = self.resizer.design_area();
         let change = area_change_percent(self.initial_area, area);
         let log = &self.moves.log;
@@ -367,10 +381,10 @@ impl Repair<'_, '_> {
             cloned: log.made(MoveKind::Clone),
             swapped: log.made(MoveKind::SwapPins),
             area_change_percent: change,
-            wns,
+            wns: worst.map(|w| w.slack),
             tns: self.tns(),
             failing: self.violating_endpoints().len(),
-            worst: worst.map(|pin| self.resizer.db.pin_name(pin)),
+            worst: worst.map(|w| self.resizer.db.pin_name(w.pin)),
         }
     }
 
@@ -398,8 +412,13 @@ impl Repair<'_, '_> {
         }
     }
 
+    /// An endpoint's slack, infinite where nothing constrains it, as
+    /// `RepairSetup` reads `OpenSTA`'s `INF`.
     fn end_slack(&self, end: PinId) -> Seconds {
-        self.resizer.sta().slack(end, MinMax::Max).time()
+        self.resizer
+            .sta()
+            .slack(end, MinMax::Max)
+            .time_or_infinity()
     }
 
     /// Whether the repair has stopped paying off, as `terminateProgress`.
@@ -805,15 +824,15 @@ mod tests {
         let clock = "create_clock -name clk -period 0.25 [get_ports clk]\n";
 
         with_wired_session(&mut db, &lib, clock, |resizer| {
-            let (before, _) = resizer.sta().worst_slack(MinMax::Max);
+            let before = resizer.sta().worst_slack(MinMax::Max).unwrap().slack;
 
             let summary = repair_setup(resizer, SetupOptions::default(), &mut |_| {}).unwrap();
 
-            let (after, _) = resizer.sta().worst_slack(MinMax::Max);
-            assert!(before.time() < Seconds::ZERO);
-            assert!(after.time() > before.time(), "{before:?} to {after:?}");
-            assert_eq!(summary.wns_before, before.time());
-            assert_eq!(summary.wns_after, after.time());
+            let after = resizer.sta().worst_slack(MinMax::Max).unwrap().slack;
+            assert!(before < Seconds::ZERO);
+            assert!(after > before, "{before:?} to {after:?}");
+            assert_eq!(summary.wns_before, Some(before));
+            assert_eq!(summary.wns_after, Some(after));
         });
     }
 

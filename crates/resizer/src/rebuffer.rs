@@ -284,7 +284,7 @@ impl Rebuffer {
             };
             let original = self.annotate_load_slacks(resizer, &original, driver);
             let slack = self.slack_at_driver(resizer, &original).to_seconds();
-            let sta_slack = resizer.sta().slack(driver, MinMax::Max).time();
+            let sta_slack = resizer.sta().slack(driver, MinMax::Max).time_or_infinity();
             let slack_error = slack - sta_slack;
             let unbuffered = resteiner(resizer, &strip_buffers(&original));
             let Some(mut timing_tree) = unbuffered.clone() else {
@@ -2068,7 +2068,7 @@ mod tests {
             rebuffer.fully_rebuffer(resizer).unwrap();
 
             assert!(rebuffer.removed > 0, "{rebuffer:?}");
-            assert!(resizer.sta().slack(d, MinMax::Max).is_constrained());
+            assert!(resizer.sta().slack(d, MinMax::Max).time().is_some());
             let netlist = resizer.netlist();
             let q = pin(resizer.db, "f1/Q");
             assert!(netlist.loads(resizer.db.pins[q].net).count() > 0);
@@ -2215,7 +2215,7 @@ mod tests {
                 let tree = rebuffer.annotate_load_slacks(resizer, &tree, q);
 
                 let seen = rebuffer.slack_at_driver(resizer, &tree).to_seconds();
-                let timed = resizer.sta().slack(q, MinMax::Max).time();
+                let timed = resizer.sta().slack(q, MinMax::Max).time().unwrap();
 
                 assert!(
                     (seen - timed).abs() < Seconds::new(1e-14),

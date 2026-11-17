@@ -181,7 +181,7 @@ pub(crate) struct TimingRow<'a> {
     /// Cell area change since the start, as a percentage.
     pub(crate) area_change_percent: f64,
     /// Worst slack.
-    pub(crate) wns: Seconds,
+    pub(crate) wns: Option<Seconds>,
     /// Total negative slack.
     pub(crate) tns: Seconds,
     /// Endpoints still failing.
@@ -193,7 +193,7 @@ pub(crate) struct TimingRow<'a> {
 /// Prints one timing repair progress row.
 pub(crate) fn timing_iter(row: &TimingRow<'_>) {
     eprintln!(
-        "    {:<6} {:>7} {:>7} {:>8} {:>6} {:>5} {:>6.1}% {:>8.3} {:>9.1} {:>6}  {}",
+        "    {:<6} {:>7} {:>7} {:>8} {:>6} {:>5} {:>6.1}% {:>8} {:>9.1} {:>6}  {}",
         row.iter,
         row.removed,
         row.resized,
@@ -201,7 +201,7 @@ pub(crate) fn timing_iter(row: &TimingRow<'_>) {
         row.cloned,
         row.swaps,
         row.area_change_percent,
-        row.wns.nanos(),
+        slack_ns(row.wns, 3),
         row.tns.nanos(),
         row.failing,
         row.worst
@@ -229,6 +229,12 @@ pub(crate) fn wrote(path: &std::path::Path) {
 }
 
 /// A wall time in seconds, to a tenth.
+/// A slack in nanoseconds to `decimals` places, or `-` where nothing is
+/// constrained.
+pub(crate) fn slack_ns(slack: Option<Seconds>, decimals: usize) -> String {
+    slack.map_or_else(|| "-".to_owned(), |s| format!("{:.decimals$}", s.nanos()))
+}
+
 pub(crate) fn seconds(elapsed: Duration) -> String {
     format!("{:.1}s", elapsed.as_secs_f64())
 }

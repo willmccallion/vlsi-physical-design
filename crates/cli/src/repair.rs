@@ -422,9 +422,9 @@ fn show_timing_repair(setup: &SetupSummary, hold: &HoldSummary, liberty: &Libert
         (
             "WNS (ns):",
             &format!(
-                "{:.3} -> {:.3}",
-                setup.wns_before.nanos(),
-                setup.wns_after.nanos()
+                "{} -> {}",
+                ui::slack_ns(setup.wns_before, 3),
+                ui::slack_ns(setup.wns_after, 3)
             ),
         ),
         (
@@ -459,9 +459,9 @@ fn show_timing_repair(setup: &SetupSummary, hold: &HoldSummary, liberty: &Libert
         (
             "Hold WNS (ns):",
             &format!(
-                "{:.3} -> {:.3}",
-                hold.wns_before.nanos(),
-                hold.wns_after.nanos()
+                "{} -> {}",
+                ui::slack_ns(hold.wns_before, 3),
+                ui::slack_ns(hold.wns_after, 3)
             ),
         ),
         (

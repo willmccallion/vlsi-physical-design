@@ -25,36 +25,95 @@ use rustc_hash::{FxHashMap, FxHashSet};
 use std::cmp::Reverse;
 use std::collections::BinaryHeap;
 
-/// A slack as `OpenSTA` keeps it: [`Slack::UNCONSTRAINED`]
-/// where nothing constrains the pin, which `OpenSTA` holds as its finite
-/// `INF` and so orders after every real slack.
-#[derive(Clone, Copy, Debug, PartialEq, PartialOrd)]
-pub struct Slack(Seconds);
+/// A pin's slack as `OpenSTA` keeps it, where nothing constraining the pin
+/// is a value of its own that orders after every real slack.
+// NOTE: OpenSTA holds an unconstrained slack as its finite INF (1e30); PARE
+// keeps it apart from every time, ordered the same.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum Slack {
+    /// The slack of a constrained pin.
+    Constrained(Seconds),
+    /// Nothing constrains the pin.
+    Unconstrained,
+}
 
 impl Slack {
-    /// The slack of a pin nothing constrains.
-    // NOTE: OpenSTA holds this as its finite INF (1e30); PARE takes a real
-    // infinity, which orders the same and is never mistaken for a slack.
-    pub const UNCONSTRAINED: Self = Self(Seconds::INFINITY);
-
-    /// A slack of `time`.
-    #[cfg(test)]
-    #[must_use]
-    pub(crate) const fn new(time: Seconds) -> Self {
-        Self(time)
+    /// The slack of a time the analysis holds, where an infinite time
+    /// means nothing constrains the pin.
+    fn of(time: Seconds) -> Self {
+        if time == Seconds::INFINITY {
+            Self::Unconstrained
+        } else {
+            Self::Constrained(time)
+        }
     }
 
-    /// The slack's time, infinite where nothing constrains the pin.
+    /// The slack's time; none where nothing constrains the pin.
     #[must_use]
-    pub const fn time(self) -> Seconds {
-        self.0
+    pub const fn time(self) -> Option<Seconds> {
+        match self {
+            Self::Constrained(time) => Some(time),
+            Self::Unconstrained => None,
+        }
     }
 
-    /// Whether something constrains the pin.
+    /// Whether the pin is constrained and its slack below `bound`.
     #[must_use]
-    pub(crate) const fn is_constrained(self) -> bool {
-        self.0.is_finite()
+    pub(crate) fn is_below(self, bound: Seconds) -> bool {
+        self.time().is_some_and(|time| time < bound)
     }
+
+    /// The total order of slacks, an unconstrained one last.
+    #[must_use]
+    pub(crate) fn total_cmp(&self, other: &Self) -> std::cmp::Ordering {
+        use std::cmp::Ordering;
+        match (self, other) {
+            (Self::Constrained(a), Self::Constrained(b)) => a.total_cmp(b),
+            (Self::Constrained(_), Self::Unconstrained) => Ordering::Less,
+            (Self::Unconstrained, Self::Constrained(_)) => Ordering::Greater,
+            (Self::Unconstrained, Self::Unconstrained) => Ordering::Equal,
+        }
+    }
+
+    /// The slack's time with an unconstrained pin's as infinite, for the
+    /// arithmetic that mirrors `OpenSTA`'s `INF`.
+    #[must_use]
+    pub(crate) const fn time_or_infinity(self) -> Seconds {
+        match self {
+            Self::Constrained(time) => time,
+            Self::Unconstrained => Seconds::INFINITY,
+        }
+    }
+}
+
+impl PartialOrd for Slack {
+    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
+        use std::cmp::Ordering;
+        match (self, other) {
+            (Self::Constrained(a), Self::Constrained(b)) => a.partial_cmp(b),
+            (Self::Constrained(_), Self::Unconstrained) => Some(Ordering::Less),
+            (Self::Unconstrained, Self::Constrained(_)) => Some(Ordering::Greater),
+            (Self::Unconstrained, Self::Unconstrained) => Some(Ordering::Equal),
+        }
+    }
+}
+
+/// The worst endpoint slack a side last found, until an endpoint changes.
+#[derive(Clone, Copy, Debug, PartialEq)]
+enum WorstSlack {
+    /// Not found since an endpoint last changed.
+    Stale,
+    /// Found: the worst endpoint, none where no endpoint is constrained.
+    Found(Option<EndpointSlack>),
+}
+
+/// An endpoint and its slack.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct EndpointSlack {
+    /// The endpoint.
+    pub pin: PinId,
+    /// Its slack, which something constrains.
+    pub slack: Seconds,
 }
 
 /// What distinguishes the paths that reach a pin, as `OpenSTA`'s tags.
@@ -331,7 +390,8 @@ pub struct Sta {
     /// Each endpoint pin's slack from its own checks, per side.
     end_slack: IdVec<PinId, SideValues<Seconds>>,
     tns: SideValues<Seconds>,
-    worst: SideValues<Option<(Slack, Option<PinId>)>>,
+    /// The worst endpoint on each side, once found.
+    worst: SideValues<WorstSlack>,
     accountings: FxHashMap<(ClockEdge, ClockEdge), Accounting>,
     /// The pairs of clocks already warned of as having no common period.
     unaligned_clocks: FxHashSet<(ClockId, ClockId)>,
@@ -392,7 +452,7 @@ impl Sta {
             is_endpoint: IdVec::filled(false, n),
             end_slack: IdVec::filled(SideValues::both(Seconds::INFINITY), n),
             tns: SideValues::both(Seconds::ZERO),
-            worst: SideValues::both(None),
+            worst: SideValues::both(WorstSlack::Stale),
             accountings: FxHashMap::default(),
             unaligned_clocks: FxHashSet::default(),
             exception_ports,
@@ -515,10 +575,10 @@ impl Sta {
     /// `OpenSTA`'s vertex slack.
     #[must_use]
     pub fn slack(&self, pin: PinId, side: MinMax) -> Slack {
-        Slack(
+        Slack::of(
             Edge::BOTH
                 .iter()
-                .map(|&edge| self.slack_edge(pin, edge, side).0)
+                .map(|&edge| self.edge_slack_time(pin, edge, side))
                 .fold(Seconds::INFINITY, Seconds::min),
         )
     }
@@ -526,12 +586,16 @@ impl Sta {
     /// A pin's slack for one edge on `side`.
     #[must_use]
     pub(crate) fn slack_edge(&self, pin: PinId, edge: Edge, side: MinMax) -> Slack {
-        Slack(
-            self.entries(pin, edge)
-                .iter()
-                .map(|e| e.slack(side))
-                .fold(Seconds::INFINITY, Seconds::min),
-        )
+        Slack::of(self.edge_slack_time(pin, edge, side))
+    }
+
+    /// The least slack time over a pin's tags for one edge, infinite where
+    /// nothing constrains it.
+    fn edge_slack_time(&self, pin: PinId, edge: Edge, side: MinMax) -> Seconds {
+        self.entries(pin, edge)
+            .iter()
+            .map(|e| e.slack(side))
+            .fold(Seconds::INFINITY, Seconds::min)
     }
 
     /// The arrival at a pin for `edge` on `side`: the latest on the late
@@ -567,17 +631,18 @@ impl Sta {
         self.tns[side]
     }
 
-    /// The least endpoint slack on `side` and its endpoint.
+    /// The endpoint of least slack on `side`; none where no endpoint is
+    /// constrained.
     #[must_use]
-    pub fn worst_slack(&self, side: MinMax) -> (Slack, Option<PinId>) {
-        if let Some(worst) = self.worst[side] {
+    pub fn worst_slack(&self, side: MinMax) -> Option<EndpointSlack> {
+        if let WorstSlack::Found(worst) = self.worst[side] {
             return worst;
         }
-        let mut worst = (Slack::UNCONSTRAINED, None);
+        let mut worst: Option<EndpointSlack> = None;
         for &end in &self.endpoints {
-            let slack = Slack(self.end_slack[end][side]);
-            if fuzzy::less(slack.0, worst.0.0) {
-                worst = (slack, Some(end));
+            let slack = self.end_slack[end][side];
+            if slack.is_finite() && worst.is_none_or(|w| fuzzy::less(slack, w.slack)) {
+                worst = Some(EndpointSlack { pin: end, slack });
             }
         }
         worst
@@ -587,9 +652,8 @@ impl Sta {
     /// changes.
     fn cache_worst(&mut self) {
         for side in MinMax::BOTH {
-            if self.worst[side].is_none() {
-                let worst = self.worst_slack(side);
-                self.worst[side] = Some(worst);
+            if self.worst[side] == WorstSlack::Stale {
+                self.worst[side] = WorstSlack::Found(self.worst_slack(side));
             }
         }
     }
@@ -1633,7 +1697,7 @@ impl Sta {
             if counts_in_tns(slack[side]) {
                 self.tns[side] += slack[side];
             }
-            self.worst[side] = None;
+            self.worst[side] = WorstSlack::Stale;
         }
         self.end_slack[pin] = slack;
     }
@@ -2159,7 +2223,16 @@ mod tests {
     /// The slack at `pin` on `side` with the design timed under `constraints`
     /// and wires without resistance or capacitance.
     fn slack_under(db: &NetlistDB, constraints: &str, pin: PinId, side: MinMax) -> f64 {
-        timed(db, constraints, |_, sta| sta.slack(pin, side).time().get())
+        timed(db, constraints, |_, sta| {
+            sta.slack(pin, side).time().unwrap().get()
+        })
+    }
+
+    /// Whether `constraints` constrain `pin` on `side`.
+    fn constrained_under(db: &NetlistDB, constraints: &str, pin: PinId, side: MinMax) -> bool {
+        timed(db, constraints, |_, sta| {
+            sta.slack(pin, side).time().is_some()
+        })
     }
 
     /// What `inspect` reads from the design timed under `constraints` with
@@ -2258,9 +2331,15 @@ mod tests {
             )
         });
 
-        assert_eq!(worst, (pin_slack, Some(d)));
-        assert!(pin_slack.is_constrained(), "{pin_slack:?}");
-        assert_eq!(path.map(|p| p.slack), Some(pin_slack.time()));
+        let pin_slack = pin_slack.time().unwrap();
+        assert_eq!(
+            worst,
+            Some(EndpointSlack {
+                pin: d,
+                slack: pin_slack
+            })
+        );
+        assert_eq!(path.map(|p| p.slack), Some(pin_slack));
     }
 
     /// A latch transparent while `CK` is high, whose setup before the
@@ -2379,11 +2458,8 @@ mod tests {
         let false_path =
             format!("{clock}set_false_path -from [get_clocks clk] -to [get_clocks clk]\n");
 
-        let timed_slack = slack_under(&db, clock, d, MinMax::Max);
-        let false_slack = slack_under(&db, &false_path, d, MinMax::Max);
-
-        assert!(timed_slack.is_finite());
-        assert!(false_slack.is_infinite());
+        assert!(constrained_under(&db, clock, d, MinMax::Max));
+        assert!(!constrained_under(&db, &false_path, d, MinMax::Max));
     }
 
     /// A flop clocked from `clk` driving the output port `out`.
@@ -2414,7 +2490,7 @@ mod tests {
                 .iter()
                 .filter_map(|&edge| sta.arrival(out, edge, MinMax::Max))
                 .fold(Seconds::new(f64::NEG_INFINITY), Seconds::max);
-            (sta.slack(out, MinMax::Max).time(), latest)
+            (sta.slack(out, MinMax::Max).time().unwrap(), latest)
         });
 
         assert!(arrival > Seconds::ZERO);
@@ -2503,7 +2579,7 @@ mod tests {
 
         assert!(ends);
         assert!(
-            setup.is_constrained() && hold.is_constrained(),
+            setup.time().is_some() && hold.time().is_some(),
             "{setup:?} {hold:?}"
         );
     }
