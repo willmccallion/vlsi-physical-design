@@ -697,10 +697,7 @@ impl Cts<'_> {
         occupied: &mut FxHashSet<Point<Dbu>>,
     ) -> Result<(), CtsError> {
         let pins = net_cell_pins(db, net);
-        let driver = pins.iter().copied().find(|&p| {
-            pin_direction(db, p)
-                .is_some_and(|(_, d, u)| d == PinDirection::Output && !u.is_supply())
-        });
+        let driver = signal_driver(db, &pins);
         let mut points: Vec<Point<Dbu>> = Vec::new();
         let mut point_pins: BTreeMap<Point<Dbu>, Vec<PinId>> = BTreeMap::new();
         for &pin in &pins {
@@ -710,58 +707,24 @@ impl Cts<'_> {
             let at = db.average_pin_position(pin);
             points.push(at);
             point_pins.entry(at).or_default().push(pin);
-            if self.is_sink(db, pin) {
-                continue;
+            if let Some(gated_net) = self.net_gated_by(db, pin) {
+                self.clone_clock_gaters(db, gated_net, occupied)?;
             }
-            let Some((cell, _, _)) = pin_direction(db, pin) else {
-                continue;
-            };
-            let Some(output) = self.single_output(db, cell, pin) else {
-                continue;
-            };
-            let Some((_, lib)) = self.link.cell(db, cell) else {
-                continue;
-            };
-            if lib.is_inverter() || lib.is_buffer() {
-                continue;
-            }
-            let out_net = db.pins[output].net;
-            self.clone_clock_gaters(db, out_net, occupied)?;
         }
-        let Some(driver) = driver else {
+        let Some((driver, gate)) = driver.and_then(|d| self.cloneable_gate(db, d)) else {
             return Ok(());
         };
-        let Some((gate, _, _)) = pin_direction(db, driver) else {
-            return Ok(());
-        };
-        let gate_cell = &db.cells[gate];
-        if self.is_sink(db, driver)
-            || gate_cell.status == PlacementStatus::Fixed
-            || db.cell_macro(gate).class == MacroClass::Pad
-            || points.is_empty()
-        {
-            return Ok(());
-        }
         // NOTE: findLongEdges reads no limit as 0, every edge long, and so
         // clones the gate once per sink; PARE then clones no gate.
         let Some(max_wire_length) = self.setup.settings.max_wire_length else {
             return Ok(());
         };
+        if points.is_empty() {
+            return Ok(());
+        }
         let driver_at = db.average_pin_position(driver);
         point_pins.entry(driver_at).or_default().push(driver);
-        let tree = prim_dijkstra(&points, 0, DEFAULT_ALPHA);
-        let clusters = long_edge_clusters(&tree, max_wire_length);
-        let cluster_sinks: Vec<Vec<PinId>> = clusters
-            .iter()
-            .filter(|cluster| !cluster.is_empty())
-            .map(|cluster| {
-                cluster
-                    .iter()
-                    .flat_map(|&b| point_pins.get(&tree.nodes[b]).cloned().unwrap_or_default())
-                    .filter(|&p| is_input_signal(db, p))
-                    .collect()
-            })
-            .collect();
+        let cluster_sinks = sinks_by_long_edge(db, &points, &point_pins, max_wire_length);
         let gate = GateToClone {
             net,
             cell: gate,
@@ -769,6 +732,31 @@ impl Cts<'_> {
             driver_at,
         };
         self.place_gate_clones(db, &gate, &cluster_sinks, occupied)
+    }
+
+    /// The net a clock gate whose input is `pin` drives; none where `pin`
+    /// is a sink or its cell no single-output gate (inverters and buffers
+    /// are not gates).
+    fn net_gated_by(&self, db: &NetlistDB, pin: PinId) -> Option<NetId> {
+        if self.is_sink(db, pin) {
+            return None;
+        }
+        let (cell, _, _) = pin_direction(db, pin)?;
+        let output = self.single_output(db, cell, pin)?;
+        let (_, lib) = self.link.cell(db, cell)?;
+        if lib.is_inverter() || lib.is_buffer() {
+            return None;
+        }
+        Some(db.pins[output].net)
+    }
+
+    /// The cell of the gate `driver` drives from, unless that pin is a sink
+    /// or the gate is fixed or a pad.
+    fn cloneable_gate(&self, db: &NetlistDB, driver: PinId) -> Option<(PinId, CellId)> {
+        let (gate, _, _) = pin_direction(db, driver)?;
+        let is_fixed = db.cells[gate].status == PlacementStatus::Fixed;
+        let is_pad = db.cell_macro(gate).class == MacroClass::Pad;
+        (!self.is_sink(db, driver) && !is_fixed && !is_pad).then_some((driver, gate))
     }
 
     /// Gives each cluster of sinks a clone of `gate` at their center, the
@@ -1189,6 +1177,36 @@ fn sta_fuzzy_equal(a: Farads32, b: Farads32) -> bool {
 struct RegisterSinks<'a> {
     pins: &'a [PinId],
     center: Point<Dbu>,
+}
+
+/// The pin of `pins` driving the net: its signal output.
+fn signal_driver(db: &NetlistDB, pins: &[PinId]) -> Option<PinId> {
+    pins.iter().copied().find(|&p| {
+        pin_direction(db, p).is_some_and(|(_, d, u)| d == PinDirection::Output && !u.is_supply())
+    })
+}
+
+/// The input pins at `points`, grouped where a tree over the points has an
+/// edge longer than `max_wire_length`, as `TritonCTS::findLongEdges`
+/// clusters them.
+fn sinks_by_long_edge(
+    db: &NetlistDB,
+    points: &[Point<Dbu>],
+    point_pins: &BTreeMap<Point<Dbu>, Vec<PinId>>,
+    max_wire_length: Dbu,
+) -> Vec<Vec<PinId>> {
+    let tree = prim_dijkstra(points, 0, DEFAULT_ALPHA);
+    long_edge_clusters(&tree, max_wire_length)
+        .iter()
+        .filter(|cluster| !cluster.is_empty())
+        .map(|cluster| {
+            cluster
+                .iter()
+                .flat_map(|&b| point_pins.get(&tree.nodes[b]).cloned().unwrap_or_default())
+                .filter(|&p| is_input_signal(db, p))
+                .collect()
+        })
+        .collect()
 }
 
 /// A clock net a tree is built for, the net its tree's input comes from,
