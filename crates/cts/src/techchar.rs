@@ -1271,49 +1271,55 @@ fn compile(
         wire_delay_rate: None,
     };
     for line in lines {
-        let mut pin_slew = line.pin_slew;
-        if line.pure_wire && pin_slew <= line.in_slew {
-            pin_slew += 1.0;
-        }
-        let length = line.wirelength as u32 * ratio;
-        let scale = |share: f64| (share * f64::from(length)).round() as i32;
-        let mut segment = WireSegment {
-            length: length as u8,
-            load: line.load as u32 as u8,
-            output_slew: pin_slew as u32 as u8,
-            delay: line.pin_arrival as u32,
-            input_cap: line.total_cap as u32 as u8,
-            input_slew: line.in_slew as u32 as u8,
-            buffer_locations: Vec::new(),
-            buffer_masters: Vec::new(),
-            wl_to_first_buffer: 0,
-            last_wl: 0,
-        };
-        let first_share = match line.topology.first() {
-            Some(NormalizedPiece::Share(s)) => *s,
-            _ => 0.0,
-        };
-        segment.wl_to_first_buffer = scale(first_share);
-        if line.pure_wire {
-            segment.last_wl = segment.wl_to_first_buffer;
-        } else {
-            let paired = line.topology.len() - line.topology.len() % 2;
-            if paired < line.topology.len()
-                && let NormalizedPiece::Share(s) = line.topology[paired]
-            {
-                segment.last_wl = scale(s);
-            }
-            for piece in &line.topology[..paired] {
-                match *piece {
-                    NormalizedPiece::Share(s) => segment.buffer_locations.push(s),
-                    NormalizedPiece::Buffer(b) => segment.buffer_masters.push(masters[b]),
-                }
-            }
-        }
-        table.push(segment);
+        table.push(segment_from(line, ratio, masters));
     }
     table.wire_delay_rate = least_wire_delay_rate(&table.segments, delay_step(plan));
     Ok(table)
+}
+
+/// The table segment of one normalized measurement, its length scaled by
+/// `ratio` to length units, as `TechChar::compileLut` fills a segment.
+fn segment_from(line: &Normalized, ratio: u32, masters: &[BufferCell]) -> WireSegment {
+    let mut pin_slew = line.pin_slew;
+    if line.pure_wire && pin_slew <= line.in_slew {
+        pin_slew += 1.0;
+    }
+    let length = line.wirelength as u32 * ratio;
+    let scale = |share: f64| (share * f64::from(length)).round() as i32;
+    let mut segment = WireSegment {
+        length: length as u8,
+        load: line.load as u32 as u8,
+        output_slew: pin_slew as u32 as u8,
+        delay: line.pin_arrival as u32,
+        input_cap: line.total_cap as u32 as u8,
+        input_slew: line.in_slew as u32 as u8,
+        buffer_locations: Vec::new(),
+        buffer_masters: Vec::new(),
+        wl_to_first_buffer: 0,
+        last_wl: 0,
+    };
+    let first_share = match line.topology.first() {
+        Some(NormalizedPiece::Share(s)) => *s,
+        _ => 0.0,
+    };
+    segment.wl_to_first_buffer = scale(first_share);
+    if line.pure_wire {
+        segment.last_wl = segment.wl_to_first_buffer;
+        return segment;
+    }
+    let paired = line.topology.len() - line.topology.len() % 2;
+    if paired < line.topology.len()
+        && let NormalizedPiece::Share(s) = line.topology[paired]
+    {
+        segment.last_wl = scale(s);
+    }
+    for piece in &line.topology[..paired] {
+        match *piece {
+            NormalizedPiece::Share(s) => segment.buffer_locations.push(s),
+            NormalizedPiece::Buffer(b) => segment.buffer_masters.push(masters[b]),
+        }
+    }
+    segment
 }
 
 /// The time a step of a segment's delay stands for.
