@@ -129,7 +129,8 @@ impl NetRoute {
         let point = |n: Node| tech.layer(n.layer).point(n.track, n.cross);
         let clip = |run: Run| {
             let lt = tech.layer(run.layer);
-            let ((a0, a1), (b0, b1)) = lt.across_along_rect(area);
+            let (Interval { lo: a0, hi: a1 }, Interval { lo: b0, hi: b1 }) =
+                lt.across_along_rect(area);
             if !lt.tracks_within(a0, a1).contains(&run.track) {
                 return None;
             }
@@ -271,7 +272,8 @@ pub(crate) fn gap_fills(
             continue;
         }
         let lt = tech.layer(layer);
-        let ((a0, a1), (b0, b1)) = lt.across_along_rect(&rect);
+        let (Interval { lo: a0, hi: a1 }, Interval { lo: b0, hi: b1 }) =
+            lt.across_along_rect(&rect);
         let centre = a0.midpoint(a1);
         let track = lt
             .tracks_within(a0, a1)

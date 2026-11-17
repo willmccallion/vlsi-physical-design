@@ -9,6 +9,7 @@ use pare_common::db::design::{NetlistDB, PinOwner};
 use pare_common::db::indices::{LayerId, PinId};
 use pare_common::db::library::LayerRef;
 use pare_common::geom::dbu::Dbu;
+use pare_common::geom::interval::Interval;
 use pare_common::geom::point::Point;
 use pare_common::geom::rect::Rect;
 
@@ -97,7 +98,8 @@ fn crossings_inside(db: &NetlistDB, tech: &RouteTech, pin: PinId) -> Vec<Point<D
             continue;
         }
         let lt = tech.layer(layer);
-        let ((a0, a1), (b0, b1)) = lt.across_along_rect(&shape.rect);
+        let (Interval { lo: a0, hi: a1 }, Interval { lo: b0, hi: b1 }) =
+            lt.across_along_rect(&shape.rect);
         for track in lt.tracks_within(a0, a1) {
             for cross in lt.cross_within(b0, b1) {
                 found.push(lt.point(track, cross));

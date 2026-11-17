@@ -19,6 +19,7 @@ use pare_common::db::indices::{LayerId, NetId};
 use pare_common::db::library::LayerRef;
 use pare_common::db::shapes::wire_rect;
 use pare_common::geom::dbu::Dbu;
+use pare_common::geom::interval::Interval;
 use pare_common::geom::rect::Rect;
 
 /// Widths a violation is grown by, at most, to take in two crossings of a
@@ -117,7 +118,8 @@ impl DetailedRouter<'_> {
             {
                 continue;
             }
-            let ((a0, a1), (b0, b1)) = lt.across_along_rect(&patch.rect);
+            let (Interval { lo: a0, hi: a1 }, Interval { lo: b0, hi: b1 }) =
+                lt.across_along_rect(&patch.rect);
             let first = lt.cross.partition_point(|c| c.at < b0);
             let end = lt.cross.partition_point(|c| c.at <= b1);
             for track in lt.tracks_within(a0, a1) {
@@ -199,12 +201,12 @@ impl DetailedRouter<'_> {
 fn marked_crossings(
     lt: &LayerTech,
     wire: (u32, u32),
-    along: (Dbu, Dbu),
+    along: Interval,
     width: Dbu,
 ) -> Option<(u32, u32)> {
     let mut within = None;
     for bloat in 1..=MAX_BLOATS {
-        let (lo, hi) = (along.0 - width * bloat, along.1 + width * bloat);
+        let (lo, hi) = (along.lo - width * bloat, along.hi + width * bloat);
         let first = crate::tech::index_u32(lt.cross.partition_point(|c| c.at < lo)).max(wire.0);
         let end = crate::tech::index_u32(lt.cross.partition_point(|c| c.at <= hi)).min(wire.1 + 1);
         within = (first < end).then(|| (first, end - 1));
@@ -231,7 +233,7 @@ mod tests {
         let tech = tiny_tech();
         let lt = tech.layer(tech.min_layer);
         let (a, b) = (lt.cross[3].at, lt.cross[4].at);
-        let gap = (a + Dbu(1), b - Dbu(1));
+        let gap = Interval::new(a + Dbu(1), b - Dbu(1));
 
         let marked = marked_crossings(lt, (0, 8), gap, Dbu(1));
 
@@ -250,7 +252,7 @@ mod tests {
         let at = lt.cross[5].at;
         let width = nearer_gap(lt, 5);
 
-        let (from, to) = marked_crossings(lt, (0, 8), (at, at), width).unwrap();
+        let (from, to) = marked_crossings(lt, (0, 8), Interval::new(at, at), width).unwrap();
 
         assert!(from <= 5 && 5 <= to && to > from, "{from}..={to}");
         for i in from..=to {
@@ -264,7 +266,7 @@ mod tests {
         let lt = tech.layer(tech.min_layer);
         let at = lt.cross[5].at;
 
-        let marked = marked_crossings(lt, (0, 8), (at, at), Dbu(1));
+        let marked = marked_crossings(lt, (0, 8), Interval::new(at, at), Dbu(1));
 
         assert_eq!(marked, Some((5, 5)));
     }
@@ -276,7 +278,7 @@ mod tests {
         let at = lt.cross[5].at;
         let width = lt.cross[6].at - lt.cross[4].at;
 
-        let (from, _) = marked_crossings(lt, (5, 8), (at, at), width).unwrap();
+        let (from, _) = marked_crossings(lt, (5, 8), Interval::new(at, at), width).unwrap();
 
         assert_eq!(from, 5);
     }

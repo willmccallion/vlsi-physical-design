@@ -28,6 +28,7 @@ use pare_common::db::indices::{IdVec, LayerId, NetId};
 use pare_common::db::library::Direction;
 use pare_common::db::shapes::wire_rect;
 use pare_common::geom::dbu::Dbu;
+use pare_common::geom::interval::Interval;
 use pare_common::geom::point::Point;
 use pare_common::geom::rect::Rect;
 use rayon::prelude::*;
@@ -321,7 +322,7 @@ fn panels(
         .map(|(id, iroutes)| {
             let lt = tech.layer(id.layer);
             let (x, y) = cell_along(lt.direction, id.index, 0);
-            let ((a0, a1), _) = lt.across_along_rect(&grid.cell_rect(x, y));
+            let (Interval { lo: a0, hi: a1 }, _) = lt.across_along_rect(&grid.cell_rect(x, y));
             Panel {
                 id,
                 tracks: lt.tracks_within(a0, a1 - Dbu(1)),
@@ -503,7 +504,7 @@ impl<'a> Costing<'a> {
         neighbours: &[&Placed],
     ) -> Option<Cost> {
         let rect = self.metal(ir.net, track, ir.from, ir.to)?;
-        let (_, (lo, hi)) = self.lt.across_along_rect(&rect);
+        let (_, Interval { lo, hi }) = self.lt.across_along_rect(&rect);
         let spacing = self.spacing(ir.net);
         let mut wires = Dbu::ZERO;
         for (t, _) in affected_tracks(self.lt, &rect, spacing) {
@@ -544,7 +545,7 @@ impl<'a> Costing<'a> {
     fn place(&self, panel: &Panel, i: usize, track: u32, placed: &mut Placed) {
         let ir = &panel.iroutes[i];
         if let Some(rect) = self.metal(ir.net, track, ir.from, ir.to) {
-            let (_, (lo, hi)) = self.lt.across_along_rect(&rect);
+            let (_, Interval { lo, hi }) = self.lt.across_along_rect(&rect);
             placed.put(
                 track,
                 Span {

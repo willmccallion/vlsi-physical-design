@@ -60,8 +60,8 @@ impl Dbu32 {
         Self(d.get() as i32)
     }
 
-    fn pair((a, b): (Dbu, Dbu)) -> (Self, Self) {
-        (Self::of(a), Self::of(b))
+    fn pair(span: Interval) -> (Self, Self) {
+        (Self::of(span.lo), Self::of(span.hi))
     }
 
     const fn get(self) -> Dbu {
@@ -111,8 +111,8 @@ impl Occupant {
     }
 
     /// The shape's extent across the tracks.
-    const fn across(&self) -> (Dbu, Dbu) {
-        (self.across.0.get(), self.across.1.get())
+    const fn across(&self) -> Interval {
+        Interval::new(self.across.0.get(), self.across.1.get())
     }
 
     /// The spacing the owner's rule demands, at least the layer's.
@@ -160,8 +160,8 @@ impl<'a> LayerSpacing<'a> {
     /// it separately, or `None` when it keeps clear even of a run along the
     /// occupant's whole length.
     pub fn proximity(&self, o: &Occupant, query: Query) -> Option<Proximity> {
-        let (a0, a1) = o.across();
-        let across = (query.across.0 - a1).max(a0 - query.across.1);
+        let theirs = o.across();
+        let across = (query.across.lo - theirs.hi).max(theirs.lo - query.across.hi);
         let near = |s: Dbu| across < s && o.lo() < query.hi + s && query.lo < o.hi() + s;
         if near(self.required(o, query)) {
             return Some(Proximity::Within);
@@ -487,7 +487,7 @@ struct Blocked {
     /// The smaller side of the shape.
     width: Dbu,
     /// The shape's extent across the tracks.
-    across: (Dbu, Dbu),
+    across: Interval,
     /// The spacing the owner's rule demands.
     hard: Dbu,
 }
@@ -499,7 +499,7 @@ impl Blocked {
             lo: Dbu32::of(lo),
             hi: Dbu32::of(hi),
             width: Dbu32::of(self.width),
-            extent: Dbu32::pair((self.lo, self.hi)),
+            extent: Dbu32::pair(Interval::new(self.lo, self.hi)),
             across: Dbu32::pair(self.across),
             hard: Dbu32::of(self.hard),
             owner,
@@ -517,7 +517,7 @@ fn blocked_stretches<'t>(
     rect: &Rect<Dbu>,
     spacing: Dbu,
 ) -> impl Iterator<Item = Blocked> + use<'t> {
-    let (across, (lo, hi)) = lt.across_along_rect(rect);
+    let (across, Interval { lo, hi }) = lt.across_along_rect(rect);
     let reach = lt.spacing_around(rect).0.max(spacing);
     let width = narrow_side(rect);
     affected_tracks(lt, rect, reach).map(move |(track, centered)| Blocked {
@@ -552,7 +552,7 @@ pub struct Query {
     /// End of its extent along the track.
     pub hi: Dbu,
     /// Its extent across the tracks.
-    pub across: (Dbu, Dbu),
+    pub across: Interval,
     /// Its smaller side.
     pub width: Dbu,
     /// The spacing its owner's rule demands.
@@ -562,7 +562,7 @@ pub struct Query {
 impl Query {
     /// The query for `rect` on a layer, whose owner demands `spacing`.
     pub fn of(lt: &LayerTech, rect: &Rect<Dbu>, spacing: Dbu) -> Self {
-        let (across, (lo, hi)) = lt.across_along_rect(rect);
+        let (across, Interval { lo, hi }) = lt.across_along_rect(rect);
         Self {
             lo,
             hi,
@@ -670,7 +670,7 @@ pub(crate) fn affected_tracks<'t>(
     rect: &Rect<Dbu>,
     spacing: Dbu,
 ) -> impl Iterator<Item = (u32, bool)> + use<'t> {
-    let ((a0, a1), _) = lt.across_along_rect(rect);
+    let (Interval { lo: a0, hi: a1 }, _) = lt.across_along_rect(rect);
     let reach = spacing + lt.width / 2;
     let range = lt.tracks_within(a0 - reach + Dbu(1), a1 + reach - Dbu(1));
     range.map(move |t| {
@@ -913,7 +913,7 @@ impl Occupancy {
         rect: &Rect<Dbu>,
     ) -> impl Iterator<Item = Owner> + use<'a> {
         let lt = tech.layer(layer);
-        let ((a0, a1), (lo, hi)) = lt.across_along_rect(rect);
+        let (Interval { lo: a0, hi: a1 }, Interval { lo, hi }) = lt.across_along_rect(rect);
         lt.tracks_within(a0, a1).flat_map(move |track| {
             self.meeting(TrackRef { layer, track }, lo, hi)
                 .filter(|o| o.centered && o.origin == Origin::Wiring)
@@ -930,7 +930,7 @@ impl Occupancy {
         rect: &Rect<Dbu>,
     ) -> impl Iterator<Item = Owner> + use<'a> {
         let lt = tech.layer(layer);
-        let ((a0, a1), (lo, hi)) = lt.across_along_rect(rect);
+        let (Interval { lo: a0, hi: a1 }, Interval { lo, hi }) = lt.across_along_rect(rect);
         lt.tracks_within(a0, a1).flat_map(move |track| {
             self.meeting(TrackRef { layer, track }, lo, hi)
                 .filter(|o| o.centered)
