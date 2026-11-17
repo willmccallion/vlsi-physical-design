@@ -194,7 +194,7 @@ impl GlobalGrid {
         // NOTE: GlobalRouter::initGrid takes floor(die / gcell) gcells and
         // stretches the last; PARE covers the die by ceil, every gcell equal.
         let span = |extent: Dbu| {
-            let cells = (extent.get() + gcell.get() - 1) / gcell.get();
+            let cells = extent.div_ceil(gcell);
             grid_index(cells as usize).max(1)
         };
         let (nx, ny) = (span(die.width()), span(die.height()));
@@ -268,7 +268,7 @@ impl GlobalGrid {
             start + (end - start) / 2
         };
         for (t, &across) in lt.tracks.iter().enumerate() {
-            let row = (across - across_origin).get().div_euclid(self.gcell.get());
+            let row = (across - across_origin).div_floor(self.gcell);
             let Ok(row) = usize::try_from(row) else {
                 continue;
             };
@@ -426,7 +426,7 @@ impl GlobalGrid {
         };
         let mut count = vec![0.0; lines];
         for &across in &lt.tracks {
-            let line = (across - origin).get().div_euclid(self.gcell.get());
+            let line = (across - origin).div_floor(self.gcell);
             if let Ok(line) = usize::try_from(line)
                 && line < lines
             {
@@ -458,10 +458,7 @@ impl GlobalGrid {
     /// The gcell containing a point on a layer.
     pub fn cell_at(&self, layer: LayerId, p: Point<Dbu>) -> GCell {
         let coord = |v: Dbu, o: Dbu, n: u16| {
-            let c = (v - o)
-                .get()
-                .div_euclid(self.gcell.get())
-                .clamp(0, i64::from(n) - 1);
+            let c = (v - o).div_floor(self.gcell).clamp(0, i64::from(n) - 1);
             grid_index(c as usize)
         };
         GCell {

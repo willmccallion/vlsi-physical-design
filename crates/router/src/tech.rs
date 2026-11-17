@@ -221,7 +221,13 @@ const GCELL_PITCH_LAYERS: usize = 4;
 /// routing layer's when that is below the fourth, each rounded down to an
 /// even number. `spacing` gives a layer's spacing by index from zero.
 fn gcell_pitch(spacing: impl Fn(LayerId) -> Dbu, max_layer: LayerId) -> Dbu {
-    let even = |s: Dbu| if s.get() % 2 == 0 { s } else { s - Dbu(1) };
+    let even = |s: Dbu| {
+        if s.is_multiple_of(Dbu(2)) {
+            s
+        } else {
+            s - Dbu(1)
+        }
+    };
     if max_layer.index() + 1 < GCELL_PITCH_LAYERS {
         return even(spacing(max_layer));
     }
@@ -507,7 +513,7 @@ fn cut_tech(db: &NetlistDB, cut: CutLayerId) -> CutTech {
     let max_half = largest_cut(lib.vias.iter().flat_map(|v| v.shapes.iter()), cut);
     CutTech {
         spacing: lib.cut_layers[cut].spacing.unwrap_or_default(),
-        max_half: Dbu(max_half.get().div_euclid(2) + max_half.get().rem_euclid(2)),
+        max_half: Dbu(max_half.div_ceil(Dbu(2))),
     }
 }
 

@@ -7,7 +7,7 @@ use super::judge::Candidate;
 use crate::search::Search;
 use crate::wiring::Patch;
 use pare_common::db::library::{Direction, LayerRef};
-use pare_common::geom::dbu::{Dbu, DbuArea};
+use pare_common::geom::dbu::Dbu;
 use pare_common::geom::point::Point;
 use pare_common::geom::rect::Rect;
 use pare_common::verify::drc::{Layout, Owner, ThinPiece, thin_pieces};
@@ -66,8 +66,8 @@ impl DetailedRouter<'_> {
             .rules
             .manufacturing_grid
             .map_or(Dbu(1), |g| g.max(Dbu(1)));
-        let deficit = DbuArea(piece.min_area.get() - piece.area.get());
-        let length = round_up(strip_length(deficit, width), grid);
+        let deficit = piece.min_area - piece.area;
+        let length = round_up(deficit.div_ceil(width), grid);
         let ((a0, a1), (b0, b1)) = lt.across_along_rect(&piece.bbox);
         let across = if a1 - a0 == width {
             (a0, a1)
@@ -98,7 +98,7 @@ impl DetailedRouter<'_> {
             rect((b0 - below, b1 + above))
         });
         let run = (b1 - b0).max(Dbu(1));
-        let breadth = round_up(strip_length(deficit, run), grid);
+        let breadth = round_up(deficit.div_ceil(run), grid);
         let across_tracks = PATCH_SPLITS.iter().map(|&(low, of)| {
             let (below, above) = split(breadth, low, of);
             let (c0, c1) = (a0 - below, a1 + above);
@@ -123,20 +123,8 @@ impl DetailedRouter<'_> {
 const PATCH_SPLITS: [(i64, i64); 5] = [(1, 1), (0, 1), (1, 2), (1, 4), (3, 4)];
 
 /// `value` rounded up to a multiple of `step`, which is positive.
-const fn round_up(value: Dbu, step: Dbu) -> Dbu {
-    Dbu(next_multiple(value.get(), step.get()))
-}
-
-/// The whole length a strip `side` wide runs to cover `area`, rounded up;
-/// `side` is positive.
-const fn strip_length(area: DbuArea, side: Dbu) -> Dbu {
-    Dbu(next_multiple(area.get(), side.get()) / side.get())
-}
-
-/// The least multiple of `step`, which is positive, not below `value`.
-const fn next_multiple(value: i64, step: i64) -> i64 {
-    let rem = value.rem_euclid(step);
-    if rem == 0 { value } else { value + step - rem }
+fn round_up(value: Dbu, step: Dbu) -> Dbu {
+    step * value.div_ceil(step)
 }
 
 #[cfg(test)]
@@ -148,12 +136,5 @@ mod tests {
         assert_eq!(round_up(Dbu(101), Dbu(5)), Dbu(105));
         assert_eq!(round_up(Dbu(100), Dbu(5)), Dbu(100));
         assert_eq!(round_up(Dbu(-3), Dbu(5)), Dbu(0));
-    }
-
-    #[test]
-    fn a_strip_runs_long_enough_to_cover_the_area_rounded_up() {
-        assert_eq!(strip_length(DbuArea(1400), Dbu(70)), Dbu(20));
-        assert_eq!(strip_length(DbuArea(1401), Dbu(70)), Dbu(21));
-        assert_eq!(strip_length(DbuArea(0), Dbu(70)), Dbu(0));
     }
 }

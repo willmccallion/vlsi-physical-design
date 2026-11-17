@@ -43,7 +43,7 @@ impl ShapeTiles {
     /// Buckets every shape of `layout` by the `cell`-sized tiles over `die`;
     /// `cell` is positive.
     pub(super) fn new(layout: &Layout, die: &Rect<Dbu>, cell: Dbu) -> Self {
-        let count = |span: Dbu| (span.get() / cell.get() + 1) as usize;
+        let count = |span: Dbu| (span.div_trunc(cell) + 1) as usize;
         let (nx, ny) = (count(die.width()), count(die.height()));
         let mut tiles = Self {
             origin: die.min,
@@ -78,7 +78,7 @@ impl ShapeTiles {
     /// The columns and rows of tiles `rect` meets, clamped to the grid.
     fn span(&self, rect: &Rect<Dbu>) -> (usize, usize, usize, usize) {
         let index = |v: Dbu, origin: Dbu, count: usize| {
-            let at = (v - origin).get().div_euclid(self.cell.get());
+            let at = (v - origin).div_floor(self.cell);
             at.clamp(0, count as i64 - 1) as usize
         };
         (
