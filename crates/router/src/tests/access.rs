@@ -3,7 +3,7 @@
 use super::tiny;
 use crate::access::{AccessPoint, Node, access_points};
 use crate::shared_access::SharedAccess;
-use crate::tech::RouteTech;
+use crate::tech::{CrossIdx, RouteTech, TrackIdx};
 use pare_common::config::RoutingConfig;
 use pare_common::db::design::{NetlistDB, PinOwner};
 use pare_common::db::indices::{LayerId, PinId};
@@ -38,7 +38,7 @@ fn crossings_merge_the_tracks_of_both_neighbouring_layers() {
 
     let tech = RouteTech::new(&db, &RoutingConfig::default()).unwrap();
 
-    let first: Vec<i64> = tech.layer(LayerId(1)).cross[..6]
+    let first: Vec<i64> = tech.layer(LayerId(1)).cross.as_slice()[..6]
         .iter()
         .map(|c| c.at.get())
         .collect();
@@ -57,8 +57,8 @@ fn an_m1_pin_is_reached_by_the_one_via_that_fits_inside_it() {
         [AccessPoint {
             node: Node {
                 layer: LayerId(1),
-                track: 1,
-                cross: 3
+                track: TrackIdx(1),
+                cross: CrossIdx(3)
             },
             at: Point::new(Dbu(300), Dbu(500)),
             pin_layer: LayerId(0),

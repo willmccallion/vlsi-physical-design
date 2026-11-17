@@ -22,6 +22,7 @@ use crate::access::Node;
 use crate::global::{GCell, GlobalGrid, GlobalRoutes};
 use crate::occupancy::{LayerSpacing, Occupancy, Owner, Proximity, Query, affected_tracks};
 use crate::runs::Run;
+use crate::tech::{CrossIdx, IndexRange, TrackIdx};
 use crate::tech::{LayerTech, RouteTech};
 use crate::wiring::Edge;
 use pare_common::db::indices::{IdVec, LayerId, NetId};
@@ -34,7 +35,6 @@ use pare_common::geom::rect::Rect;
 use rayon::prelude::*;
 use rustc_hash::FxHashMap;
 use std::collections::BTreeMap;
-use std::ops::Range;
 
 /// Cost per DBU of overlap with fixed metal of another owner. PARE tunable,
 /// no `OpenROAD` counterpart.
@@ -55,23 +55,23 @@ pub struct TrackWire {
     pub net: NetId,
     /// Routing layer.
     pub layer: LayerId,
-    /// Track index on it.
-    pub track: u32,
+    /// The track on it.
+    pub track: TrackIdx,
     /// First crossing.
-    pub from: u32,
+    pub from: CrossIdx,
     /// Last crossing, after `from`.
-    pub to: u32,
+    pub to: CrossIdx,
 }
 
 impl TrackWire {
     /// Every crossing it covers.
     pub fn nodes(self) -> impl Iterator<Item = Node> {
-        (self.from..=self.to).map(move |cross| self.node(cross))
+        IndexRange::through(self.from, self.to).map(move |cross| self.node(cross))
     }
 
     /// The track graph edges it uses.
     pub fn edges(self) -> impl Iterator<Item = Edge> {
-        (self.from..self.to).map(move |cross| Edge::Wire(self.node(cross)))
+        self.run().edges()
     }
 
     /// Its wire as one run along its track.
@@ -84,7 +84,7 @@ impl TrackWire {
         }
     }
 
-    const fn node(self, cross: u32) -> Node {
+    const fn node(self, cross: CrossIdx) -> Node {
         Node {
             layer: self.layer,
             track: self.track,
@@ -106,8 +106,8 @@ struct PanelId {
 struct Iroute {
     net: NetId,
     /// Crossings nearest the centres of its first and last gcells.
-    from: u32,
-    to: u32,
+    from: CrossIdx,
+    to: CrossIdx,
     /// Across coordinates of the net's pins in its first and last gcells.
     pins: Vec<Dbu>,
 }
@@ -115,7 +115,7 @@ struct Iroute {
 #[derive(Debug)]
 struct Panel {
     id: PanelId,
-    tracks: Range<u32>,
+    tracks: IndexRange<TrackIdx>,
     iroutes: Vec<Iroute>,
 }
 
@@ -131,13 +131,13 @@ struct Span {
 /// The tracks a panel's iroutes are on.
 #[derive(Debug)]
 struct Placed {
-    tracks: Range<u32>,
+    tracks: IndexRange<TrackIdx>,
     spans: Vec<Vec<Span>>,
-    choice: Vec<Option<u32>>,
+    choice: Vec<Option<TrackIdx>>,
 }
 
 impl Placed {
-    fn new(tracks: Range<u32>, iroutes: usize) -> Self {
+    fn new(tracks: IndexRange<TrackIdx>, iroutes: usize) -> Self {
         Self {
             spans: vec![Vec::new(); tracks.len()],
             tracks,
@@ -145,20 +145,27 @@ impl Placed {
         }
     }
 
-    fn spans_on(&self, track: u32) -> Option<&[Span]> {
-        self.tracks
-            .contains(&track)
-            .then(|| self.spans[(track - self.tracks.start) as usize].as_slice())
+    /// Where `track`, one of the panel's tracks, is among them.
+    const fn slot(&self, track: TrackIdx) -> usize {
+        track.index() - self.tracks.start.index()
     }
 
-    fn put(&mut self, track: u32, span: Span) {
-        self.spans[(track - self.tracks.start) as usize].push(span);
+    fn spans_on(&self, track: TrackIdx) -> Option<&[Span]> {
+        self.tracks
+            .contains(track)
+            .then(|| self.spans[self.slot(track)].as_slice())
+    }
+
+    fn put(&mut self, track: TrackIdx, span: Span) {
+        let slot = self.slot(track);
+        self.spans[slot].push(span);
         self.choice[span.iroute] = Some(track);
     }
 
     fn take(&mut self, iroute: usize) {
         if let Some(track) = self.choice[iroute].take() {
-            self.spans[(track - self.tracks.start) as usize].retain(|s| s.iroute != iroute);
+            let slot = self.slot(track);
+            self.spans[slot].retain(|s| s.iroute != iroute);
         }
     }
 }
@@ -260,7 +267,7 @@ impl NetRuns<'_> {
     /// The cross of panel `id` at the `extreme` along it of the net's pins
     /// in end gcell `cell`, or of the gcell's center where it has none or
     /// another run of the net joins there.
-    fn reach(&self, id: PanelId, cell: (u16, u16), extreme: Extreme) -> Option<u32> {
+    fn reach(&self, id: PanelId, cell: (u16, u16), extreme: Extreme) -> Option<CrossIdx> {
         let lt = self.tech.layer(id.layer);
         let mut targets: Vec<Dbu> = self
             .pins_in(id.layer, cell)
@@ -404,13 +411,13 @@ fn runs(
 }
 
 /// Index of the crossing of `lt` nearest `along`.
-fn nearest_cross(lt: &LayerTech, along: Dbu) -> Option<u32> {
-    let k = lt.cross.partition_point(|c| c.at < along);
+fn nearest_cross(lt: &LayerTech, along: Dbu) -> Option<CrossIdx> {
+    let k = lt.cross.as_slice().partition_point(|c| c.at < along);
     [k.checked_sub(1), (k < lt.cross.len()).then_some(k)]
         .into_iter()
         .flatten()
+        .map(CrossIdx::new)
         .min_by_key(|&i| ((lt.cross[i].at - along).abs(), i))
-        .map(crate::tech::index_u32)
 }
 
 /// Length by which `[lo, hi]` and `[olo, ohi]` overlap once one is widened
@@ -421,10 +428,17 @@ fn overlap(lo: Dbu, hi: Dbu, olo: Dbu, ohi: Dbu, spacing: Dbu) -> Dbu {
 
 /// Runs of consecutive crossings in `from..=to` joined by edges that are
 /// not `blocked`, each as its first and last crossing.
-fn clear_runs(from: u32, to: u32, blocked: impl Fn(u32) -> bool) -> Vec<(u32, u32)> {
+fn clear_runs(
+    from: CrossIdx,
+    to: CrossIdx,
+    blocked: impl Fn(CrossIdx) -> bool,
+) -> Vec<(CrossIdx, CrossIdx)> {
     let mut out = Vec::new();
     let mut start = None;
-    for cross in from..to {
+    for cross in (IndexRange {
+        start: from,
+        end: to,
+    }) {
         match (blocked(cross), start) {
             (false, None) => start = Some(cross),
             (true, Some(s)) => {
@@ -472,7 +486,13 @@ impl<'a> Costing<'a> {
     }
 
     /// The wire of `net` from crossing `from` to `to` on `track`.
-    fn metal(&self, net: NetId, track: u32, from: u32, to: u32) -> Option<Rect<Dbu>> {
+    fn metal(
+        &self,
+        net: NetId,
+        track: TrackIdx,
+        from: CrossIdx,
+        to: CrossIdx,
+    ) -> Option<Rect<Dbu>> {
         let width = self.tech.wire_width(self.tech.net_rule(net), self.layer);
         wire_rect(self.lt.point(track, from), self.lt.point(track, to), width)
     }
@@ -499,7 +519,7 @@ impl<'a> Costing<'a> {
     fn cost(
         &self,
         ir: &Iroute,
-        track: u32,
+        track: TrackIdx,
         placed: &Placed,
         neighbours: &[&Placed],
     ) -> Option<Cost> {
@@ -517,7 +537,7 @@ impl<'a> Costing<'a> {
                 }
             }
         }
-        let across = self.lt.tracks[track as usize];
+        let across = self.lt.tracks[track];
         Some(Cost {
             overlap: FIXED_WEIGHT * self.fixed_overlap(ir.net, &rect).get()
                 + OVERLAP_WEIGHT * wires.get(),
@@ -532,7 +552,7 @@ impl<'a> Costing<'a> {
         i: usize,
         placed: &Placed,
         neighbours: &[&Placed],
-    ) -> Option<u32> {
+    ) -> Option<TrackIdx> {
         let ir = &panel.iroutes[i];
         panel
             .tracks
@@ -542,7 +562,7 @@ impl<'a> Costing<'a> {
             .map(|(_, t)| t)
     }
 
-    fn place(&self, panel: &Panel, i: usize, track: u32, placed: &mut Placed) {
+    fn place(&self, panel: &Panel, i: usize, track: TrackIdx, placed: &mut Placed) {
         let ir = &panel.iroutes[i];
         if let Some(rect) = self.metal(ir.net, track, ir.from, ir.to) {
             let (_, Interval { lo, hi }) = self.lt.across_along_rect(&rect);
@@ -565,7 +585,11 @@ impl<'a> Costing<'a> {
         let mut order: Vec<usize> = (0..panel.iroutes.len()).collect();
         order.sort_by_key(|&i| {
             let ir = &panel.iroutes[i];
-            (std::cmp::Reverse(ir.to - ir.from), ir.net, ir.from)
+            (
+                std::cmp::Reverse(ir.to.offset_from(ir.from)),
+                ir.net,
+                ir.from,
+            )
         });
         for &i in &order {
             if let Some(t) = self.best_track(panel, i, &placed, neighbours) {
@@ -601,9 +625,9 @@ impl<'a> Costing<'a> {
 
     /// The pieces of an iroute's wire on `track` that keep clear of fixed
     /// metal.
-    fn clear_pieces(&self, ir: &Iroute, track: u32) -> Vec<TrackWire> {
-        let blocked = |cross: u32| {
-            self.metal(ir.net, track, cross, cross + 1)
+    fn clear_pieces(&self, ir: &Iroute, track: TrackIdx) -> Vec<TrackWire> {
+        let blocked = |cross: CrossIdx| {
+            self.metal(ir.net, track, cross, cross.next())
                 .is_none_or(|r| self.fixed_overlap(ir.net, &r) > Dbu::ZERO)
         };
         clear_runs(ir.from, ir.to, blocked)
@@ -663,9 +687,12 @@ mod tests {
 
     #[test]
     fn a_wire_is_cut_around_its_blocked_edges() {
-        let pieces = clear_runs(0, 8, |c| c == 3 || c == 4 || c == 7);
+        let pieces = clear_runs(CrossIdx(0), CrossIdx(8), |c| [3, 4, 7].contains(&c.0));
 
-        assert_eq!(pieces, [(0, 3), (5, 7)]);
+        assert_eq!(
+            pieces,
+            [(CrossIdx(0), CrossIdx(3)), (CrossIdx(5), CrossIdx(7))]
+        );
     }
 
     #[test]

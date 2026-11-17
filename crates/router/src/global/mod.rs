@@ -269,15 +269,12 @@ impl GlobalGrid {
             let Interval { lo, hi } = extent(i);
             lo + (hi - lo) / 2
         };
-        for (t, &across) in lt.tracks.iter().enumerate() {
+        for (t, &across) in lt.tracks.iter_enumerated() {
             let row = (across - across_origin).div_floor(self.gcell);
             let Ok(row) = usize::try_from(row) else {
                 continue;
             };
-            let track = TrackRef {
-                layer,
-                track: index_u32(t),
-            };
+            let track = TrackRef { layer, track: t };
             for i in 0..along_cells {
                 let index = match lt.direction {
                     Direction::Horizontal if row < ny => row * nx + i,

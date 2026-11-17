@@ -12,6 +12,7 @@ use crate::access::{AccessPoint, Node};
 use crate::detailed::{Flow, Scope};
 use crate::global::GCell;
 use crate::runs::{EdgeSet, Run};
+use crate::tech::{CrossIdx, TrackIdx};
 use crate::wiring::{Edge, NetRoute, Patch};
 use pare_common::db::indices::{LayerId, ViaId};
 use pare_common::geom::dbu::Dbu;
@@ -184,7 +185,12 @@ fn write_detailed(out: &mut impl Write, d: &DetailedState) -> io::Result<()> {
             route.access.len()
         )?;
         for run in route.edges.runs() {
-            writeln!(out, "s {} {}", node_text(run.node(run.from)), run.to)?;
+            writeln!(
+                out,
+                "s {} {}",
+                node_text(run.node(run.from)),
+                run.to.index()
+            )?;
         }
         for &(lower, upper) in route.edges.vias() {
             writeln!(out, "v {} {}", node_text(lower), node_text(upper))?;
@@ -220,7 +226,12 @@ fn write_detailed(out: &mut impl Write, d: &DetailedState) -> io::Result<()> {
 }
 
 fn node_text(n: Node) -> String {
-    format!("{} {} {}", n.layer.index(), n.track, n.cross)
+    format!(
+        "{} {} {}",
+        n.layer.index(),
+        n.track.index(),
+        n.cross.index()
+    )
 }
 
 fn parse_detailed(lines: &mut Lines<'_>, header: &str) -> Result<DetailedState, StateParseError> {
@@ -290,7 +301,7 @@ fn parse_edges(lines: &mut Lines<'_>, count: usize) -> Result<EdgeSet, StatePars
         match e.word()?.as_str() {
             "s" => {
                 let first = e.node()?;
-                let to: u32 = e.int()?;
+                let to = CrossIdx(e.int()?);
                 if to <= first.cross {
                     return Err(e.error("a run must end after its first crossing"));
                 }
@@ -434,8 +445,8 @@ impl Fields<'_> {
     fn node(&mut self) -> Result<Node, StateParseError> {
         Ok(Node {
             layer: LayerId::new(self.int()?),
-            track: self.int()?,
-            cross: self.int()?,
+            track: TrackIdx(self.int()?),
+            cross: CrossIdx(self.int()?),
         })
     }
 
@@ -462,8 +473,8 @@ mod tests {
     fn node(layer: usize, track: u32, cross: u32) -> Node {
         Node {
             layer: LayerId::new(layer),
-            track,
-            cross,
+            track: TrackIdx(track),
+            cross: CrossIdx(cross),
         }
     }
 

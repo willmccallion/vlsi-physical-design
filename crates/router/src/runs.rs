@@ -7,6 +7,7 @@
 //! walks a route's edges sees what it always saw.
 
 use crate::access::Node;
+use crate::tech::{CrossIdx, IndexRange, TrackIdx};
 use crate::wiring::Edge;
 use pare_common::db::indices::LayerId;
 
@@ -17,17 +18,17 @@ use pare_common::db::indices::LayerId;
 pub struct Run {
     /// Routing layer.
     pub layer: LayerId,
-    /// Track index on that layer.
-    pub track: u32,
+    /// The track on that layer.
+    pub track: TrackIdx,
     /// First crossing.
-    pub from: u32,
+    pub from: CrossIdx,
     /// Last crossing, after `from`.
-    pub to: u32,
+    pub to: CrossIdx,
 }
 
 impl Run {
     /// The crossing `cross` of its track.
-    pub const fn node(self, cross: u32) -> Node {
+    pub const fn node(self, cross: CrossIdx) -> Node {
         Node {
             layer: self.layer,
             track: self.track,
@@ -37,7 +38,16 @@ impl Run {
 
     /// Its wire edges, first crossing first.
     pub fn edges(self) -> impl Iterator<Item = Edge> {
-        (self.from..self.to).map(move |cross| Edge::Wire(self.node(cross)))
+        self.crosses()
+            .map(move |cross| Edge::Wire(self.node(cross)))
+    }
+
+    /// Its crossings but the last: the starts of its wire edges.
+    const fn crosses(self) -> IndexRange<CrossIdx> {
+        IndexRange {
+            start: self.from,
+            end: self.to,
+        }
     }
 
     /// The single wire edge from crossing `cross` to the next.
@@ -46,12 +56,12 @@ impl Run {
             layer: n.layer,
             track: n.track,
             from: n.cross,
-            to: n.cross + 1,
+            to: n.cross.next(),
         }
     }
 
     const fn same_track(self, other: Self) -> bool {
-        self.layer.0 == other.layer.0 && self.track == other.track
+        self.layer.0 == other.layer.0 && self.track.0 == other.track.0
     }
 }
 
@@ -133,7 +143,7 @@ impl EdgeSet {
         let mut runs = Vec::with_capacity(self.runs.len());
         for &run in &self.runs {
             let mut start = None;
-            for cross in run.from..run.to {
+            for cross in run.crosses() {
                 match (keep(Edge::Wire(run.node(cross))), start) {
                     (true, None) => start = Some(cross),
                     (false, Some(from)) => {
@@ -253,8 +263,8 @@ mod tests {
     fn node(layer: u8, track: u32, cross: u32) -> Node {
         Node {
             layer: LayerId(layer),
-            track,
-            cross,
+            track: TrackIdx(track),
+            cross: CrossIdx(cross),
         }
     }
 
@@ -307,27 +317,27 @@ mod tests {
             [
                 Run {
                     layer: LayerId(1),
-                    track: 4,
-                    from: 5,
-                    to: 8
+                    track: TrackIdx(4),
+                    from: CrossIdx(5),
+                    to: CrossIdx(8)
                 },
                 Run {
                     layer: LayerId(1),
-                    track: 4,
-                    from: 9,
-                    to: 10
+                    track: TrackIdx(4),
+                    from: CrossIdx(9),
+                    to: CrossIdx(10)
                 },
                 Run {
                     layer: LayerId(1),
-                    track: 5,
-                    from: 0,
-                    to: 1
+                    track: TrackIdx(5),
+                    from: CrossIdx(0),
+                    to: CrossIdx(1)
                 },
                 Run {
                     layer: LayerId(2),
-                    track: 3,
-                    from: 1,
-                    to: 2
+                    track: TrackIdx(3),
+                    from: CrossIdx(1),
+                    to: CrossIdx(2)
                 },
             ]
         );
@@ -352,32 +362,32 @@ mod tests {
         let mut set = EdgeSet::from_runs([
             Run {
                 layer: LayerId(1),
-                track: 4,
-                from: 5,
-                to: 8,
+                track: TrackIdx(4),
+                from: CrossIdx(5),
+                to: CrossIdx(8),
             },
             Run {
                 layer: LayerId(1),
-                track: 4,
-                from: 12,
-                to: 20,
+                track: TrackIdx(4),
+                from: CrossIdx(12),
+                to: CrossIdx(20),
             },
         ]);
 
         set.subtract(&EdgeSet::from_runs([Run {
             layer: LayerId(1),
-            track: 4,
-            from: 0,
-            to: 14,
+            track: TrackIdx(4),
+            from: CrossIdx(0),
+            to: CrossIdx(14),
         }]));
 
         assert_eq!(
             set.runs(),
             [Run {
                 layer: LayerId(1),
-                track: 4,
-                from: 14,
-                to: 20
+                track: TrackIdx(4),
+                from: CrossIdx(14),
+                to: CrossIdx(20)
             }]
         );
     }
@@ -386,9 +396,9 @@ mod tests {
     fn retaining_splits_a_run_where_an_edge_is_dropped() {
         let mut set = EdgeSet::from_runs([Run {
             layer: LayerId(1),
-            track: 4,
-            from: 0,
-            to: 6,
+            track: TrackIdx(4),
+            from: CrossIdx(0),
+            to: CrossIdx(6),
         }]);
 
         set.retain(|e| e != wire(1, 4, 2) && e != wire(1, 4, 3));
@@ -398,15 +408,15 @@ mod tests {
             [
                 Run {
                     layer: LayerId(1),
-                    track: 4,
-                    from: 0,
-                    to: 2
+                    track: TrackIdx(4),
+                    from: CrossIdx(0),
+                    to: CrossIdx(2)
                 },
                 Run {
                     layer: LayerId(1),
-                    track: 4,
-                    from: 4,
-                    to: 6
+                    track: TrackIdx(4),
+                    from: CrossIdx(4),
+                    to: CrossIdx(6)
                 },
             ]
         );
@@ -416,25 +426,25 @@ mod tests {
     fn a_union_merges_runs_that_meet() {
         let mut set = EdgeSet::from_runs([Run {
             layer: LayerId(1),
-            track: 4,
-            from: 0,
-            to: 3,
+            track: TrackIdx(4),
+            from: CrossIdx(0),
+            to: CrossIdx(3),
         }]);
 
         set.union(&EdgeSet::from_runs([Run {
             layer: LayerId(1),
-            track: 4,
-            from: 3,
-            to: 5,
+            track: TrackIdx(4),
+            from: CrossIdx(3),
+            to: CrossIdx(5),
         }]));
 
         assert_eq!(
             set.runs(),
             [Run {
                 layer: LayerId(1),
-                track: 4,
-                from: 0,
-                to: 5
+                track: TrackIdx(4),
+                from: CrossIdx(0),
+                to: CrossIdx(5)
             }]
         );
     }

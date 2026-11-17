@@ -59,13 +59,14 @@ impl Marks {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::tech::{CrossIdx, TrackIdx};
     use pare_common::db::indices::LayerId;
 
     fn node(cross: u32) -> Node {
         Node {
             layer: LayerId::new(1),
-            track: 4,
-            cross,
+            track: TrackIdx(4),
+            cross: CrossIdx(cross),
         }
     }
 

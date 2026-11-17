@@ -22,6 +22,7 @@ use crate::access::{AccessPoint, Node};
 use crate::bucket::{Bucket, SpatialHash};
 use crate::global::{GCell, Gcells};
 use crate::occupancy::{LocalOccupancy, Occupancy, Origin, Owner, Proximity, too_close};
+use crate::tech::CrossIdx;
 use crate::tech::RouteTech;
 use crate::wiring::Edge;
 use pare_common::db::design::NetlistDB;
@@ -407,7 +408,7 @@ struct RecentVia {
     /// The layer the via came from.
     from: LayerId,
     /// The crossing it landed on, along the current track.
-    cross: u32,
+    cross: CrossIdx,
 }
 
 impl State {
@@ -674,7 +675,7 @@ impl Search<'_> {
     // PARE also charges the step leaving a marked node.
     fn step_price(&self, lower: Node, parts: &mut impl CostParts) -> Price {
         let upper = Node {
-            cross: lower.cross + 1,
+            cross: lower.cross.next(),
             ..lower
         };
         let (a, b) = (self.point(lower), self.point(upper));
@@ -791,9 +792,7 @@ impl Search<'_> {
         along: Dbu,
     ) -> Option<RecentVia> {
         let lt = self.tech.layer(layer);
-        recent.filter(|v| {
-            (along - lt.cross[v.cross as usize].at).abs() < self.via_reach(layer, v.from)
-        })
+        recent.filter(|v| (along - lt.cross[v.cross].at).abs() < self.via_reach(layer, v.from))
     }
 
     /// Whether a via from `state` to `to` would crowd the via the path just
@@ -803,7 +802,7 @@ impl Search<'_> {
     fn crowds_recent_via(&self, state: State, to: LayerId, along: Dbu) -> bool {
         let layer = state.node.layer;
         state.recent_via.is_some_and(|v| {
-            let at = self.tech.layer(layer).cross[v.cross as usize].at;
+            let at = self.tech.layer(layer).cross[v.cross].at;
             let cuts = v.from == to && (along - at).abs() < self.cut_reach(layer, to);
             let Interval { lo: a0, hi: a1 } = self.pad_along(layer, v.from);
             let Interval { lo: b0, hi: b1 } = self.pad_along(layer, to);
@@ -824,8 +823,8 @@ impl Search<'_> {
         let n = state.node;
         let lt = self.tech.layer(n.layer);
         let steps = [
-            (n.cross.checked_sub(1), Heading::Down),
-            (Some(n.cross + 1), Heading::Up),
+            (n.cross.prev(), Heading::Down),
+            (Some(n.cross.next()), Heading::Up),
         ];
         for (next, heading) in steps {
             let turns_back = matches!(
@@ -835,18 +834,14 @@ impl Search<'_> {
             let Some(next) = next.filter(|_| !turns_back) else {
                 continue;
             };
-            if (next as usize) < lt.cross.len() {
+            if next.index() < lt.cross.len() {
                 let m = Node { cross: next, ..n };
                 let p = lt.point(m.track, m.cross);
                 if window.contains(p) && self.allowed(m.layer, p) {
                     let moved = State {
                         node: m,
                         heading,
-                        recent_via: self.after_step(
-                            n.layer,
-                            state.recent_via,
-                            lt.cross[next as usize].at,
-                        ),
+                        recent_via: self.after_step(n.layer, state.recent_via, lt.cross[next].at),
                     };
                     let lower = Node {
                         cross: n.cross.min(m.cross),
@@ -873,17 +868,17 @@ impl Search<'_> {
         let n = state.node;
         let lt = self.tech.layer(n.layer);
         let here = lt.point(n.track, n.cross);
-        let cross = lt.cross[n.cross as usize];
+        let cross = lt.cross[n.cross];
         let (to, track, c) = match climb {
             Climb::Up => (
                 (n.layer < self.tech.max_layer).then(|| LayerId::new(n.layer.index() + 1)),
                 cross.up,
-                lt.track_up[n.track as usize],
+                lt.track_up[n.track],
             ),
             Climb::Down => (
                 (n.layer > self.tech.min_layer).then(|| LayerId::new(n.layer.index() - 1)),
                 cross.down,
-                lt.track_down[n.track as usize],
+                lt.track_down[n.track],
             ),
         };
         let to = to?;
@@ -1105,6 +1100,7 @@ fn distance_to(r: &Rect<Dbu>, p: Point<Dbu>) -> Dbu {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::tech::{CrossIdx, TrackIdx};
     use crate::tests::tiny;
     use pare_common::config::RoutingConfig;
     use pare_common::db::indices::NetId;
@@ -1129,8 +1125,7 @@ mod tests {
             }
             if path.get(j + 1).is_some_and(|n| n.layer == from.layer) {
                 let lt = tech.layer(onto.layer);
-                let run =
-                    (lt.cross[path[j].cross as usize].at - lt.cross[onto.cross as usize].at).abs();
+                let run = (lt.cross[path[j].cross].at - lt.cross[onto.cross].at).abs();
                 out.push((run, tech.via_above(from.layer.min(onto.layer)).cut_reach));
             }
             i = j + 1;
@@ -1174,8 +1169,8 @@ mod tests {
         let lt = tech.layer(m1);
         let node = |y: i64| Node {
             layer: m1,
-            track: lt.tracks.binary_search(&Dbu(y)).unwrap() as u32,
-            cross: lt.cross.partition_point(|c| c.at < Dbu(1100)) as u32,
+            track: TrackIdx::new(lt.tracks.as_slice().binary_search(&Dbu(y)).unwrap()),
+            cross: CrossIdx::new(lt.cross.as_slice().partition_point(|c| c.at < Dbu(1100))),
         };
         let targets: FxHashMap<Node, (usize, f64)> =
             std::iter::once((node(300), (0, 0.0))).collect();
@@ -1209,7 +1204,12 @@ mod tests {
         };
         let tech = RouteTech::new(db, &config).unwrap();
         let lt = tech.layer(LayerId(0));
-        let other = wire_rect(lt.point(1, 1), lt.point(1, 3), lt.width).unwrap();
+        let other = wire_rect(
+            lt.point(TrackIdx(1), CrossIdx(1)),
+            lt.point(TrackIdx(1), CrossIdx(3)),
+            lt.width,
+        )
+        .unwrap();
         let mut occupancy = Occupancy::new(&tech, Dbu(1000));
         occupancy.add_rect(
             &tech,
@@ -1224,8 +1224,8 @@ mod tests {
     fn step(track: u32, cross: u32) -> Node {
         Node {
             layer: LayerId(0),
-            track,
-            cross,
+            track: TrackIdx(track),
+            cross: CrossIdx(cross),
         }
     }
 
@@ -1233,7 +1233,7 @@ mod tests {
         let lt = tech.layer(lower.layer);
         let (a, b) = (
             lt.point(lower.track, lower.cross),
-            lt.point(lower.track, lower.cross + 1),
+            lt.point(lower.track, lower.cross.next()),
         );
         a.manhattan(b).to_f64()
     }

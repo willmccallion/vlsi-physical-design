@@ -20,7 +20,7 @@
 //! obstruction leaves metal reaching into it, and only a stub from a
 //! crossing outside reaches the pin cleanly.
 
-use crate::tech::{RouteTech, ViaTech, index_u32};
+use crate::tech::{CrossIdx, RouteTech, TrackIdx, ViaTech, index_u32};
 use pare_common::db::design::{NetlistDB, PinOwner};
 use pare_common::db::indices::{CutLayerId, LayerId, PinId, ViaId};
 use pare_common::db::library::{LayerRef, Shape};
@@ -35,10 +35,10 @@ use pare_common::geom::region::Region;
 pub struct Node {
     /// Routing layer.
     pub layer: LayerId,
-    /// Track index on that layer.
-    pub track: u32,
-    /// Crossing index along the track.
-    pub cross: u32,
+    /// Track on that layer.
+    pub track: TrackIdx,
+    /// Crossing along the track.
+    pub cross: CrossIdx,
 }
 
 /// One way into a pin.
@@ -193,10 +193,13 @@ fn stub_accesses(
     let lt = tech.layer(layer);
     let (Interval { lo: a0, hi: a1 }, Interval { lo: b0, hi: b1 }) = lt.across_along_rect(rect);
     let center = middle_on_grid(b0, b1, tech.manufacturing_grid);
-    let k = lt.cross.partition_point(|c| c.at < center);
-    let nearest = [k.checked_sub(1), (k < lt.cross.len()).then_some(k)];
+    let k = lt.cross.as_slice().partition_point(|c| c.at < center);
+    let nearest = [
+        k.checked_sub(1).map(CrossIdx::new),
+        (k < lt.cross.len()).then(|| CrossIdx::new(k)),
+    ];
     for track in lt.tracks_within(a0, a1) {
-        let across = lt.tracks[track as usize];
+        let across = lt.tracks[track];
         for cross in nearest.into_iter().flatten() {
             let node_along = lt.cross[cross].at;
             let candidates = [node_along.clamp(b0, b1), center];
@@ -210,7 +213,7 @@ fn stub_accesses(
                     let node = Node {
                         layer,
                         track,
-                        cross: index_u32(cross),
+                        cross,
                     };
                     for vias in fitting {
                         f(
@@ -292,15 +295,19 @@ fn stubs_from_beyond(
 ) -> Vec<(AccessPoint, Dbu)> {
     let lt = tech.layer(layer);
     let (Interval { lo: a0, hi: a1 }, Interval { lo: b0, hi: b1 }) = lt.across_along_rect(rect);
-    let before = lt.cross.partition_point(|c| c.at < b0).checked_sub(1);
-    let after = lt.cross.partition_point(|c| c.at <= b1);
+    let before = lt
+        .cross
+        .as_slice()
+        .partition_point(|c| c.at < b0)
+        .checked_sub(1);
+    let after = lt.cross.as_slice().partition_point(|c| c.at <= b1);
     let ends = [
-        before.map(|k| (k, b0)),
-        (after < lt.cross.len()).then_some((after, b1)),
+        before.map(|k| (CrossIdx::new(k), b0)),
+        (after < lt.cross.len()).then(|| (CrossIdx::new(after), b1)),
     ];
     let mut found = Vec::new();
     for track in lt.tracks_within(a0, a1) {
-        let across = lt.tracks[track as usize];
+        let across = lt.tracks[track];
         for (cross, end) in ends.into_iter().flatten() {
             let at = match lt.direction {
                 pare_common::db::library::Direction::Horizontal => Point::new(end, across),
@@ -310,7 +317,7 @@ fn stubs_from_beyond(
                 node: Node {
                     layer,
                     track,
-                    cross: index_u32(cross),
+                    cross,
                 },
                 at,
                 pin_layer: layer,
