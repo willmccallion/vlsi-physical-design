@@ -353,7 +353,7 @@ impl Improver {
     }
 
     fn is_fixed(&self, n: NodeId) -> bool {
-        self.grid.nodes.get(n).is_none_or(|c| c.fixed)
+        self.grid.nodes.get(n).is_none_or(|c| c.state.is_fixed())
     }
 
     fn is_terminal(&self, n: NodeId) -> bool {

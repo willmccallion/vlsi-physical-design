@@ -222,16 +222,50 @@ impl NodeClass {
     }
 }
 
+/// Whether and how a node is placed, as `OpenDP`'s `Node` flags `fixed_`,
+/// `placed_` and `hold_`.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum NodeState {
+    /// Fixed in the design: placed, and never moved.
+    Fixed,
+    /// Off the grid.
+    Unplaced,
+    /// On the grid, and movable.
+    Placed,
+    /// Placed early by region pre-placement, which later passes leave
+    /// alone.
+    Held,
+}
+
+impl NodeState {
+    const fn is_fixed(self) -> bool {
+        matches!(self, Self::Fixed)
+    }
+
+    const fn is_placed(self) -> bool {
+        !matches!(self, Self::Unplaced)
+    }
+
+    const fn is_held(self) -> bool {
+        matches!(self, Self::Held)
+    }
+
+    /// The state once the node is put on the grid: an unplaced node is
+    /// placed, any other stays as it was.
+    const fn placed(self) -> Self {
+        match self {
+            Self::Unplaced => Self::Placed,
+            state => state,
+        }
+    }
+}
+
 /// A cell as the legalizer sees it, as `OpenDP`'s `Node`.
 #[derive(Clone, Debug)]
-#[allow(clippy::struct_excessive_bools)] // each is one of the node's independent flags
 struct Node {
     cell: CellId,
     name: String,
-    fixed: bool,
-    placed: bool,
-    /// Placed early, which later passes leave alone.
-    hold: bool,
+    state: NodeState,
     group: Option<GroupId>,
     left: Dbu,
     bottom: Dbu,
@@ -353,8 +387,8 @@ impl Placer {
         check_pixel_ids(nodes.len(), db.regions.len())?;
         placer.nodes = nodes.into();
         for node in &mut placer.nodes {
-            if !node.fixed {
-                node.placed = false;
+            if !node.state.is_fixed() {
+                node.state = NodeState::Unplaced;
             }
         }
         placer.make_groups(db)?;
@@ -526,9 +560,13 @@ impl Placer {
             nodes.push(Node {
                 cell: id,
                 name: c.name.clone(),
-                fixed,
-                placed: c.status != PlacementStatus::Unplaced,
-                hold: false,
+                state: if fixed {
+                    NodeState::Fixed
+                } else if c.status == PlacementStatus::Unplaced {
+                    NodeState::Unplaced
+                } else {
+                    NodeState::Placed
+                },
                 group: None,
                 left: rel.min.x,
                 bottom: rel.min.y,
@@ -607,7 +645,7 @@ impl Placer {
     /// the pixels of a macro become hopeless so cells move off it.
     fn paint_fixed_cells(&mut self) {
         for n in self.nodes.ids() {
-            if !self.nodes[n].fixed {
+            if !self.nodes[n].state.is_fixed() {
                 continue;
             }
             let node = &self.nodes[n];
@@ -632,7 +670,7 @@ impl Placer {
     fn place(&mut self) -> Result<DetailedPlacement, DetailedPlacementError> {
         let mut order: Vec<NodeId> = Vec::new();
         for (n, node) in self.nodes.iter_enumerated() {
-            if node.class != NodeClass::Core || node.fixed || node.group.is_some() || node.placed {
+            if node.class != NodeClass::Core || node.group.is_some() || node.state.is_placed() {
                 continue;
             }
             if self.grid_width(node) > self.rows.row_site_count()
@@ -708,7 +746,7 @@ impl Placer {
         for x in (target.x - margin_width).through(target.x + margin_width) {
             for y in (target.y - RIP_UP_ROWS).through(target.y + RIP_UP_ROWS) {
                 if let Some(other) = self.pixel(x, y).and_then(Pixel::node)
-                    && !self.nodes[other].fixed
+                    && !self.nodes[other].state.is_fixed()
                 {
                     let _ = around.insert(other);
                 }
@@ -1060,7 +1098,7 @@ impl Placer {
         let node = &mut self.nodes[n];
         node.left = at.x.to_dbu(self.rows.site_width());
         node.bottom = bottom;
-        node.placed = true;
+        node.state = node.state.placed();
         if let Some(orient) = orient {
             node.orient = orient;
         }
@@ -1083,12 +1121,11 @@ impl Placer {
     /// Takes a cell off the grid, as `Opendp::unplaceCell`.
     fn unplace_cell(&mut self, n: NodeId) {
         let node = &self.nodes[n];
-        if node.fixed || !node.placed {
+        if node.state.is_fixed() || !node.state.is_placed() {
             return;
         }
         self.erase_pixels(n);
-        self.nodes[n].placed = false;
-        self.nodes[n].hold = false;
+        self.nodes[n].state = NodeState::Unplaced;
     }
 
     /// Frees the sites a cell holds where it stands, as `Grid::erasePixel`.
@@ -1146,7 +1183,7 @@ impl Placer {
     /// `Opendp::updateDbInstLocations`.
     fn write_back(&self, db: &mut NetlistDB) {
         for node in &self.nodes {
-            if node.fixed || !node.class.is_std_cell() {
+            if node.state.is_fixed() || !node.class.is_std_cell() {
                 continue;
             }
             let c = &mut db.cells[node.cell];
