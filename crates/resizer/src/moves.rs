@@ -408,59 +408,19 @@ impl Moves {
         {
             return Ok(false);
         }
-        let sta = resizer.sta();
         let net = resizer.db.pins[site.driver].net;
-        let driver_slack = sta
+        let driver_slack = resizer
+            .sta()
             .slack_edge(site.driver, site.edge, MinMax::Max)
             .time_or_infinity();
-        let mut fanouts: Vec<(Seconds, String, PinId)> = resizer
-            .netlist()
-            .loads(net)
-            .filter(|&l| l != site.driver)
-            .map(|load| {
-                let slack = sta
-                    .slack_edge(load, site.edge, MinMax::Max)
-                    .time_or_infinity();
-                (slack - driver_slack, resizer.db.pin_name(load), load)
-            })
-            .collect();
-        fanouts.sort_by(|a, b| b.0.total_cmp(&a.0).then_with(|| a.1.cmp(&b.1)));
-        let split = fanouts.len() / 2;
-        let moving: Vec<PinId> = fanouts[..split]
-            .iter()
-            .map(|(_, _, pin)| *pin)
-            .filter(|&p| matches!(resizer.db.pins[p].owner, PinOwner::Cell { .. }))
-            .collect();
+        let ranked = loads_by_spare_slack(resizer, site, driver_slack);
+        let roomiest = &ranked[..ranked.len() / 2];
+        let moving = cell_pins(resizer, roomiest);
         let clone_lib = half_driving_power_cell(resizer, site.lib).unwrap_or(site.lib);
-        let location = {
-            let netlist = resizer.netlist();
-            let mut sum = netlist.pin_location(site.driver);
-            let mut count = 1i64;
-            for (_, _, load) in &fanouts[..split] {
-                let at = netlist.pin_location(*load);
-                sum = Point::new(Dbu(sum.x.get() + at.x.get()), Dbu(sum.y.get() + at.y.get()));
-                count += 1;
-            }
-            Point::new(sum.x / count, sum.y / count)
-        };
+        let location = clone_location(resizer, site.driver, roomiest);
         let clone = resizer.make_instance(clone_lib, location, "clone")?;
-        let original = resizer.link.liberty.cell(site.lib);
+        let touched = connect_clone_inputs(resizer, site, clone, clone_lib);
         let clone_cell = resizer.link.liberty.cell(clone_lib);
-        let mut touched: Vec<NetId> = Vec::new();
-        for &pin in &resizer.db.cells[site.cell].pins.clone() {
-            let Some((_, port)) = resizer.link.pin_port(resizer.db, pin) else {
-                continue;
-            };
-            if !original.ports[port].is_input() {
-                continue;
-            }
-            let Some(clone_port) = clone_cell.port(&original.ports[port].name) else {
-                continue;
-            };
-            let input_net = resizer.db.pins[pin].net;
-            let _ = resizer.connect(clone, clone_lib, clone_port, input_net);
-            touched.push(input_net);
-        }
         let out_net = resizer.make_net("net", net)?;
         let Some(out_port) = clone_cell
             .port_ids()
@@ -494,27 +454,13 @@ impl Moves {
         {
             return Ok(false);
         }
-        let sta = resizer.sta();
         let net = resizer.db.pins[site.driver].net;
-        let driver_slack = sta.slack(site.driver, MinMax::Max).time_or_infinity();
-        let mut fanouts: Vec<(Seconds, String, PinId)> = resizer
-            .netlist()
-            .loads(net)
-            .filter(|&l| l != site.driver)
-            .map(|load| {
-                let slack = sta
-                    .slack_edge(load, site.edge, MinMax::Max)
-                    .time_or_infinity();
-                (slack - driver_slack, resizer.db.pin_name(load), load)
-            })
-            .collect();
-        fanouts.sort_by(|a, b| b.0.total_cmp(&a.0).then_with(|| a.1.cmp(&b.1)));
-        let split = fanouts.len() / 2;
-        let moving: Vec<PinId> = fanouts[..split]
-            .iter()
-            .map(|(_, _, pin)| *pin)
-            .filter(|&p| matches!(resizer.db.pins[p].owner, PinOwner::Cell { .. }))
-            .collect();
+        let driver_slack = resizer
+            .sta()
+            .slack(site.driver, MinMax::Max)
+            .time_or_infinity();
+        let ranked = loads_by_spare_slack(resizer, site, driver_slack);
+        let moving = cell_pins(resizer, &ranked[..ranked.len() / 2]);
         if moving.is_empty() {
             return Ok(false);
         }
@@ -687,6 +633,96 @@ fn intrinsic_delay(cell: &LibCell, port: LibPortId) -> Seconds {
         .map(|a| a.gate_delay(Seconds::ZERO, Farads::ZERO).0)
         .filter(|&d| d > Seconds::ZERO)
         .fold(Seconds::ZERO, Seconds::max)
+}
+
+/// A load of a net and the slack it has beyond its driver's.
+#[derive(Clone, Debug)]
+struct SpareLoad {
+    spare: Seconds,
+    name: String,
+    pin: PinId,
+}
+
+/// The loads on the net of `site`'s driver, the most slack beyond
+/// `driver_slack` first and by name among equals, as `CloneMove` and
+/// `SplitLoadMove` rank them.
+fn loads_by_spare_slack(
+    resizer: &Resizer<'_, Sta>,
+    site: &Site,
+    driver_slack: Seconds,
+) -> Vec<SpareLoad> {
+    let sta = resizer.sta();
+    let net = resizer.db.pins[site.driver].net;
+    let mut ranked: Vec<SpareLoad> = resizer
+        .netlist()
+        .loads(net)
+        .filter(|&l| l != site.driver)
+        .map(|load| {
+            let slack = sta
+                .slack_edge(load, site.edge, MinMax::Max)
+                .time_or_infinity();
+            SpareLoad {
+                spare: slack - driver_slack,
+                name: resizer.db.pin_name(load),
+                pin: load,
+            }
+        })
+        .collect();
+    ranked.sort_by(|a, b| {
+        b.spare
+            .total_cmp(&a.spare)
+            .then_with(|| a.name.cmp(&b.name))
+    });
+    ranked
+}
+
+/// The pins of `loads` that are on cells, not ports.
+fn cell_pins(resizer: &Resizer<'_, Sta>, loads: &[SpareLoad]) -> Vec<PinId> {
+    loads
+        .iter()
+        .map(|load| load.pin)
+        .filter(|&p| matches!(resizer.db.pins[p].owner, PinOwner::Cell { .. }))
+        .collect()
+}
+
+/// Where a clone of `driver`'s gate goes: the mean of the driver's place
+/// and the places of the loads it takes over.
+fn clone_location(resizer: &Resizer<'_, Sta>, driver: PinId, taken: &[SpareLoad]) -> Point<Dbu> {
+    let netlist = resizer.netlist();
+    let mut sum = netlist.pin_location(driver);
+    for load in taken {
+        sum += netlist.pin_location(load.pin);
+    }
+    let count = 1 + taken.len() as i64;
+    Point::new(sum.x / count, sum.y / count)
+}
+
+/// Connects each input of `clone` to the net on the same input of
+/// `site`'s gate, and gives those nets.
+fn connect_clone_inputs(
+    resizer: &mut Resizer<'_, Sta>,
+    site: &Site,
+    clone: CellId,
+    clone_lib: LibCellId,
+) -> Vec<NetId> {
+    let original = resizer.link.liberty.cell(site.lib);
+    let clone_cell = resizer.link.liberty.cell(clone_lib);
+    let mut inputs: Vec<NetId> = Vec::new();
+    for &pin in &resizer.db.cells[site.cell].pins.clone() {
+        let Some((_, port)) = resizer.link.pin_port(resizer.db, pin) else {
+            continue;
+        };
+        if !original.ports[port].is_input() {
+            continue;
+        }
+        let Some(clone_port) = clone_cell.port(&original.ports[port].name) else {
+            continue;
+        };
+        let input_net = resizer.db.pins[pin].net;
+        let _ = resizer.connect(clone, clone_lib, clone_port, input_net);
+        inputs.push(input_net);
+    }
+    inputs
 }
 
 /// Whether an instance is a single-output gate without state, as
