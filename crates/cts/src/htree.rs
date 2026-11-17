@@ -21,7 +21,9 @@ use crate::options::{
     MAX_SLEW, Microns, SINK_CLUSTERING_SIZE, Settings, SinkClusteringMode,
 };
 use crate::sink_clustering::SinkClustering;
-use crate::techchar::{CapSteps, LengthSteps, LengthUnit, SegmentLength, SlewSteps, TechChar};
+use crate::techchar::{
+    CapSteps, LengthSteps, LengthUnit, SegmentLength, SlewSteps, TechChar, WireSegment,
+};
 use pare_common::db::liberty::BufferCell;
 use pare_common::geom::dbu::Dbu;
 use pare_common::geom::point::Point;
@@ -210,21 +212,19 @@ struct LevelTopology {
     wire_segments: Vec<usize>,
     points: Vec<TreePoint>,
     sinks: Vec<BranchSinks>,
-    output_slew: SlewSteps,
-    output_cap: CapSteps,
-    curr_wl: LengthSteps,
+    /// Where the level's last segment leaves the slew, the load and the
+    /// wire since the last buffer, for the level below to start from.
+    end: SegmentChoice,
 }
 
 impl LevelTopology {
-    const fn new(length: f64) -> Self {
+    const fn new(length: f64, wire_segments: Vec<usize>, end: SegmentChoice) -> Self {
         Self {
             length,
-            wire_segments: Vec::new(),
+            wire_segments,
             points: Vec::new(),
             sinks: Vec::new(),
-            output_slew: SlewSteps::new(0),
-            output_cap: CapSteps::new(0),
-            curr_wl: LengthSteps::new(0),
+            end,
         }
     }
 
@@ -764,74 +764,104 @@ impl Builder {
         width: f64,
         height: f64,
     ) {
-        let min_length = self.min_length_sink_region;
-        let clamped = min_length.max(LengthSteps::new(1)).get() as f64;
         let side = if self.is_vertical(level) {
             height
         } else {
             width
         };
-        let segment_length = LengthSteps::new(i64::from(
+        let segment_length = self.branch_length(side);
+        let threshold = wire_length_threshold(ctx, tech);
+        let mut wire_segments = Vec::new();
+        let end = self.choose_segments(
+            tech,
+            (segment_length, threshold),
+            self.level_start(level),
+            &mut wire_segments,
+        );
+        let mut topology = LevelTopology::new(segment_length.get() as f64, wire_segments, end);
+        self.branching_points(ctx, level, &mut topology);
+        self.topologies.push(topology);
+    }
+
+    /// The length of a branch `side` long, in whole halves of the shortest
+    /// sink region, at least one length unit.
+    fn branch_length(&self, side: f64) -> LengthSteps {
+        let min_length = self.min_length_sink_region;
+        let clamped = min_length.max(LengthSteps::new(1)).get() as f64;
+        LengthSteps::new(i64::from(
             (((side / clamped).round() * min_length.get() as f64 / 2.0) as u32).max(1),
-        ));
-        let mut topology = LevelTopology::new(segment_length.get() as f64);
-        let (mut input_cap, mut input_slew, mut curr_wl) =
-            (self.min_input_cap, SlewSteps::FIRST, LengthSteps::new(0));
+        ))
+    }
+
+    /// Where a level's segments start: from the root for the first level,
+    /// else where the level above ended.
+    fn level_start(&self, level: u32) -> SegmentChoice {
         if level > 1 {
-            let previous = &self.topologies[level as usize - 2];
-            input_cap = previous.output_cap;
-            input_slew = previous.output_slew;
-            curr_wl = previous.curr_wl;
+            return self.topologies[level as usize - 2].end;
         }
-        let slew_threshold = SlewSteps::new(MAX_SLEW);
-        let wirelength_threshold = match ctx.settings.max_wire_length {
-            None => tech.max_segment_length() * i64::from(MAX_SLEW),
-            // NOTE: computeLevelTopology divides by the characterization unit,
-            // twice the length unit the segments count in; PARE by the latter.
-            Some(max) => tech.length_unit().steps_in(max),
-        };
+        SegmentChoice {
+            slew: SlewSteps::FIRST,
+            cap: self.min_input_cap,
+            curr_wl: LengthSteps::new(0),
+        }
+    }
+
+    /// Fills `segment_length` with segments, longest characterized length
+    /// first, from `start` under the wire length threshold, pushing each
+    /// chosen segment's key; returns where the last one leaves off.
+    fn choose_segments(
+        &self,
+        tech: &TechChar,
+        (segment_length, threshold): (LengthSteps, LengthSteps),
+        start: SegmentChoice,
+        keys: &mut Vec<usize>,
+    ) -> SegmentChoice {
+        let mut state = start;
         let mut length = LengthSteps::new(0);
         let mut char_length = tech.max_segment_length();
         while char_length >= LengthSteps::new(1) {
             let wires = (segment_length - length).count_of(char_length);
-            if wires >= 1 {
-                for _ in 0..wires {
-                    let mut out = SegmentChoice {
-                        slew: SlewSteps::new(0),
-                        cap: CapSteps::new(0),
-                        curr_wl,
-                    };
-                    let Some(key) = min_delay_segment(
-                        tech,
-                        &SegmentQuery {
-                            length: char_length,
-                            input_slew,
-                            input_cap,
-                            slew_threshold,
-                            wirelength_threshold,
-                        },
-                        1,
-                        &mut out,
-                    ) else {
-                        continue;
-                    };
-                    curr_wl = out.curr_wl;
-                    length += char_length;
-                    input_cap = out.cap.max(self.min_input_cap);
-                    input_slew = out.slew;
-                    topology.wire_segments.push(key);
-                }
-                if length == segment_length {
-                    break;
-                }
+            for _ in 0..wires {
+                let Some((key, next)) = self.next_segment(tech, char_length, state, threshold)
+                else {
+                    continue;
+                };
+                state = next;
+                length += char_length;
+                keys.push(key);
+            }
+            if wires >= 1 && length == segment_length {
+                break;
             }
             char_length = char_length - LengthSteps::new(1);
         }
-        topology.output_slew = input_slew;
-        topology.output_cap = input_cap;
-        topology.curr_wl = curr_wl;
-        self.branching_points(ctx, level, &mut topology);
-        self.topologies.push(topology);
+        state
+    }
+
+    /// The fastest segment `length` long from `state`, and where it leaves
+    /// off, its load no less than the least input capacitance.
+    fn next_segment(
+        &self,
+        tech: &TechChar,
+        length: LengthSteps,
+        state: SegmentChoice,
+        wirelength_threshold: LengthSteps,
+    ) -> Option<(usize, SegmentChoice)> {
+        let mut out = SegmentChoice {
+            slew: SlewSteps::new(0),
+            cap: CapSteps::new(0),
+            curr_wl: state.curr_wl,
+        };
+        let query = SegmentQuery {
+            length,
+            input_slew: state.slew,
+            input_cap: state.cap,
+            slew_threshold: SlewSteps::new(MAX_SLEW),
+            wirelength_threshold,
+        };
+        let key = min_delay_segment(tech, &query, 1, &mut out)?;
+        out.cap = out.cap.max(self.min_input_cap);
+        Some((key, out))
     }
 
     /// Places a level's branching points either side of each parent and
@@ -1317,6 +1347,17 @@ fn refine_with_clustering(
     }
 }
 
+/// The most wire allowed since the last buffer, from the max wire length
+/// when the resizer gave one, else `MAX_SLEW` of the longest segments.
+fn wire_length_threshold(ctx: &TreeContext<'_>, tech: &TechChar) -> LengthSteps {
+    match ctx.settings.max_wire_length {
+        None => tech.max_segment_length() * i64::from(MAX_SLEW),
+        // NOTE: computeLevelTopology divides by the characterization unit,
+        // twice the length unit the segments count in; PARE by the latter.
+        Some(max) => tech.length_unit().steps_in(max),
+    }
+}
+
 /// What a segment search starts from.
 #[derive(Clone, Copy, Debug)]
 struct SegmentQuery {
@@ -1328,7 +1369,8 @@ struct SegmentQuery {
     wirelength_threshold: LengthSteps,
 }
 
-/// The slew, load and wire since the last buffer a chosen segment leaves.
+/// The slew, load and wire since the last buffer a chosen segment leaves,
+/// and so where the next segment starts.
 #[derive(Clone, Copy, Debug)]
 struct SegmentChoice {
     slew: SlewSteps,
@@ -1346,54 +1388,17 @@ fn min_delay_segment(
     tolerance: u32,
     out: &mut SegmentChoice,
 ) -> Option<usize> {
-    let mut min_key = None;
-    let mut min_delay = u32::MAX;
-    let mut min_buf_key = None;
-    let mut min_buf_delay = u32::MAX;
-    for load in CapSteps::through(tech.max_capacitance()) {
-        for out_slew in SlewSteps::through(tech.max_slew()) {
-            for &key in tech.segments_with(query.length, load, out_slew) {
-                let seg = tech.segment(key);
-                if seg.input_cap_steps().steps_from(query.input_cap) > tolerance
-                    || seg.input_slew_steps().steps_from(query.input_slew) > tolerance
-                {
-                    continue;
-                }
-                let wl = out.curr_wl + seg.to_first_buffer();
-                let limit = if seg.is_buffered() {
-                    query.wirelength_threshold
-                } else {
-                    // NOTE: computeMinDelaySegment subtracts in unsigned, so a limit below
-                    // the shortest segment wraps and admits any bare wire; PARE's is signed.
-                    query.wirelength_threshold - tech.min_segment_length()
-                };
-                if wl > limit {
-                    continue;
-                }
-                if seg.delay < min_delay {
-                    min_delay = seg.delay;
-                    min_key = Some(key);
-                }
-                if seg.is_buffered() && seg.delay < min_buf_delay {
-                    min_buf_delay = seg.delay;
-                    min_buf_key = Some(key);
-                }
-            }
-        }
-    }
+    let fastest = fastest_segments(tech, query, tolerance, out.curr_wl);
     if query.input_slew >= query.slew_threshold {
-        if let Some(key) = min_buf_key {
-            let seg = tech.segment(key);
-            out.slew = seg.output_slew_steps();
-            out.cap = seg.load_steps();
-            out.curr_wl = seg.after_last_buffer();
+        if let Some(key) = fastest.buffered {
+            leave_buffered(tech.segment(key), out);
             return Some(key);
         }
         if tolerance < MAX_TOLERANCE {
             return min_delay_segment(tech, query, tolerance + 1, out);
         }
     }
-    let Some(key) = min_key else {
+    let Some(key) = fastest.any else {
         if tolerance >= MAX_TOLERANCE {
             return None;
         }
@@ -1401,14 +1406,91 @@ fn min_delay_segment(
     };
     let seg = tech.segment(key);
     if seg.is_buffered() {
-        out.slew = seg.output_slew_steps();
-        out.curr_wl = seg.after_last_buffer();
+        leave_buffered(seg, out);
     } else {
         out.slew = seg.output_slew_steps().max(query.input_slew.next());
         out.curr_wl += seg.after_last_buffer();
+        out.cap = seg.load_steps();
     }
-    out.cap = seg.load_steps();
     Some(key)
+}
+
+/// The fastest candidate segment, and the fastest buffered one.
+struct Fastest {
+    any: Option<usize>,
+    buffered: Option<usize>,
+}
+
+/// The fastest of the [`candidates`], the first of equal delays winning.
+fn fastest_segments(
+    tech: &TechChar,
+    query: &SegmentQuery,
+    tolerance: u32,
+    curr_wl: LengthSteps,
+) -> Fastest {
+    let mut fastest = Fastest {
+        any: None,
+        buffered: None,
+    };
+    let (mut min_delay, mut min_buf_delay) = (u32::MAX, u32::MAX);
+    for key in candidates(tech, query, tolerance, curr_wl) {
+        let seg = tech.segment(key);
+        if seg.delay < min_delay {
+            min_delay = seg.delay;
+            fastest.any = Some(key);
+        }
+        if seg.is_buffered() && seg.delay < min_buf_delay {
+            min_buf_delay = seg.delay;
+            fastest.buffered = Some(key);
+        }
+    }
+    fastest
+}
+
+/// The segments of `query.length` that start within `tolerance` of its
+/// slew and load and keep the wire since the last buffer, `curr_wl` so
+/// far, under its threshold; in table order, by load then output slew.
+fn candidates<'t>(
+    tech: &'t TechChar,
+    query: &'t SegmentQuery,
+    tolerance: u32,
+    curr_wl: LengthSteps,
+) -> impl Iterator<Item = usize> + 't {
+    CapSteps::through(tech.max_capacitance())
+        .flat_map(move |load| SlewSteps::through(tech.max_slew()).map(move |slew| (load, slew)))
+        .flat_map(move |(load, slew)| tech.segments_with(query.length, load, slew).iter().copied())
+        .filter(move |&key| fits(tech, tech.segment(key), query, (tolerance, curr_wl)))
+}
+
+/// Whether `seg` starts within `tolerance` of the query's slew and load and
+/// keeps the wire since the last buffer, `curr_wl` so far, under the limit.
+fn fits(
+    tech: &TechChar,
+    seg: &WireSegment,
+    query: &SegmentQuery,
+    (tolerance, curr_wl): (u32, LengthSteps),
+) -> bool {
+    if seg.input_cap_steps().steps_from(query.input_cap) > tolerance
+        || seg.input_slew_steps().steps_from(query.input_slew) > tolerance
+    {
+        return false;
+    }
+    let limit = if seg.is_buffered() {
+        query.wirelength_threshold
+    } else {
+        // NOTE: computeMinDelaySegment subtracts in unsigned, so a limit below
+        // the shortest segment wraps and admits any bare wire; PARE's is signed.
+        query.wirelength_threshold - tech.min_segment_length()
+    };
+    curr_wl + seg.to_first_buffer() <= limit
+}
+
+/// Leaves `out` where buffered segment `seg` ends: its slew and load, and
+/// the wire after its last buffer.
+fn leave_buffered(seg: &WireSegment, out: &mut SegmentChoice) {
+    out.slew = seg.output_slew_steps();
+    out.cap = seg.load_steps();
+    out.curr_wl = seg.after_last_buffer();
 }
 
 /// The buffers along one branch, from its parent's point to its own, as
@@ -1614,7 +1696,6 @@ mod tests {
     use super::*;
     use crate::clock::ClockSink;
     use crate::options::CtsOptions;
-    use crate::techchar::WireSegment;
     use pare_common::db::indices::{NetId, PinId};
     use pare_common::db::liberty::{LibCellId, LibPortId};
 
@@ -1688,7 +1769,7 @@ mod tests {
         // which the second blockage covers.
         let scene = Scene::new(vec![rect(60, 40, 80, 60), rect(55, 35, 65, 45)]);
         let mut builder = builder();
-        let mut level = LevelTopology::new(20.0);
+        let mut level = LevelTopology::new(20.0, Vec::new(), NO_CHOICE);
         let (dummy, branch) =
             level.add_branches(TreePoint::new(0.0, 0.0), TreePoint::new(30.0, 50.0));
         level.sinks[branch].push(SinkPoint::new(30.0, 40.0), InstRef::Sink(0));
