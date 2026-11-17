@@ -691,6 +691,39 @@ struct State {
     prev_hpwl: f64,
 }
 
+impl State {
+    /// Carries the state to the objects and fields of a rebuilt setup,
+    /// `carry` taking each object's point to its new index.
+    fn carry(
+        &mut self,
+        carry: &impl Fn(&ObjectPoints) -> ObjectPoints,
+        old_field_of_new: &IdVec<FieldId, Option<FieldId>>,
+    ) {
+        self.major = carry(&self.major);
+        self.reference = carry(&self.reference);
+        self.weights.remap(old_field_of_new);
+    }
+}
+
+/// Routability-driven placement as a run carries it out: the congestion
+/// checks, how far spreading has come, the iterations it gives back while
+/// it waits, and how far the fields have settled.
+struct RoutabilityRun {
+    checks: Routability,
+    phase: RoutabilityPhase,
+    refund: Refund,
+    settling: Settling,
+}
+
+/// How far spreading has come for routability.
+enum RoutabilityPhase {
+    /// Overflow has yet to fall to the snapshot overflow.
+    Spreading,
+    /// The state at the snapshot overflow, which each round of cell growth
+    /// goes back to.
+    Saved(Box<Snapshot>),
+}
+
 /// The state routability resumes from, with each field's density energy
 /// there as the cells were sized when it was saved.
 #[derive(Clone, Debug)]
@@ -855,11 +888,8 @@ struct Run {
     next_major: ObjectPoints,
     next_reference: ObjectPoints,
     next_grad: ObjectPoints,
-    settling: Settling,
-    snapshot: Option<Snapshot>,
-    routability: Option<Routability>,
+    routability: Option<RoutabilityRun>,
     limit: usize,
-    refund: Refund,
     /// The wirelength growth at which the density penalty holds steady.
     reference_hpwl: f64,
     growth_limit: GrowthLimit,
@@ -965,14 +995,13 @@ impl Run {
             next_major: zero.clone(),
             next_reference: zero.clone(),
             next_grad: zero,
-            settling: Settling::new(setup.fields.len()),
-            snapshot: None,
-            routability: params
-                .routability
-                .clone()
-                .map(|r| Routability::new(r, &setup.objects, &setup.fields)),
+            routability: params.routability.clone().map(|r| RoutabilityRun {
+                checks: Routability::new(r, &setup.objects, &setup.fields),
+                phase: RoutabilityPhase::Spreading,
+                refund: Refund::new(params.max_iterations),
+                settling: Settling::new(setup.fields.len()),
+            }),
             limit: params.max_iterations,
-            refund: Refund::new(params.max_iterations),
             reference_hpwl,
             growth_limit: GrowthLimit::new(),
             iterations: 0,
@@ -1022,7 +1051,10 @@ impl Run {
             iterations: self.iterations,
             overflow: finished.last.overflow,
             hpwl: finished.last.wirelength.hpwl,
-            congestion: self.routability.map(|r| r.rounds).unwrap_or_default(),
+            congestion: self
+                .routability
+                .map(|r| r.checks.rounds)
+                .unwrap_or_default(),
             final_congestion: finished.final_congestion,
             zones: finished.zones,
             timing_rounds: self.timing_rounds,
@@ -1041,19 +1073,15 @@ impl Run {
                 .collect()
         };
         if let Some(s) = self.s.as_mut() {
-            s.major = carry(&s.major);
-            s.reference = carry(&s.reference);
-            s.weights.remap(&remap.old_field_of_new);
+            s.carry(&carry, &remap.old_field_of_new);
         }
-        if let Some(snapshot) = self.snapshot.as_mut() {
-            snapshot.state.major = carry(&snapshot.state.major);
-            snapshot.state.reference = carry(&snapshot.state.reference);
-            snapshot.state.weights.remap(&remap.old_field_of_new);
-            snapshot.energy = remap_fields(&snapshot.energy, &remap.old_field_of_new, 0.0);
-        }
-        self.settling.remap(&remap.old_field_of_new);
         if let Some(r) = self.routability.as_mut() {
-            r.remap(remap, &rebuilt.objects, &rebuilt.fields);
+            if let RoutabilityPhase::Saved(snapshot) = &mut r.phase {
+                snapshot.state.carry(&carry, &remap.old_field_of_new);
+                snapshot.energy = remap_fields(&snapshot.energy, &remap.old_field_of_new, 0.0);
+            }
+            r.settling.remap(&remap.old_field_of_new);
+            r.checks.remap(remap, &rebuilt.objects, &rebuilt.fields);
         }
         let zero = IdVec::filled(Point::new(0.0, 0.0), remap.old_of_new.len());
         self.grad.clone_from(&zero);
@@ -1156,8 +1184,8 @@ impl Run {
         if !(next_step.is_finite() && all_finite(&self.next_major) && all_finite(&self.next_grad)) {
             return None;
         }
-        if self.routability.is_some() {
-            self.settling.observe(
+        if let Some(r) = self.routability.as_mut() {
+            r.settling.observe(
                 &objective.displacements(&s.reference, &self.next_reference),
                 &s.weights.frozen,
             );
@@ -1284,19 +1312,20 @@ impl Run {
             return false;
         };
         let overflow = mean(&eval.field_overflow);
-        if self.snapshot.is_some() && overflow > CHECK_OVERFLOW && self.refund.take() {
+        let is_saved = matches!(r.phase, RoutabilityPhase::Saved(_));
+        if is_saved && overflow > CHECK_OVERFLOW && r.refund.take() {
             self.limit += 1;
         }
-        if self.snapshot.is_none() && overflow <= SNAPSHOT_OVERFLOW {
-            self.snapshot = Some(Snapshot {
+        if !is_saved && overflow <= SNAPSHOT_OVERFLOW {
+            r.phase = RoutabilityPhase::Saved(Box::new(Snapshot {
                 state: s.clone(),
                 energy: eval.field_energy.clone(),
-            });
+            }));
         }
-        let Some(saved) = &self.snapshot else {
+        let RoutabilityPhase::Saved(saved) = &r.phase else {
             return false;
         };
-        if !(r.active() && overflow <= CHECK_OVERFLOW && self.settling.settled()) {
+        if !(r.checks.active() && overflow <= CHECK_OVERFLOW && r.settling.settled()) {
             return false;
         }
         objects.centers.clone_from(&s.major);
@@ -1306,12 +1335,12 @@ impl Run {
             objects,
             context.movable,
             &objective.die,
-            r.params(),
+            r.checks.params(),
         );
-        if r.check(self.k, &map, objects, objective.fields) == Verdict::Done {
+        if r.checks.check(self.k, &map, objects, objective.fields) == Verdict::Done {
             return false;
         }
-        self.refund.start_round();
+        r.refund.start_round();
         *s = revert(&saved.state, s, objective.fields);
         objective.refresh(objects);
         let resized = objective.evaluate(&s.reference, s.gamma);
@@ -1329,9 +1358,10 @@ impl Run {
         };
         // NOTE: gpl's runTimingDriven waits on every routability refund
         // iteration; PARE waits only while routability still has rounds.
-        let routability_pending = self.snapshot.is_some()
-            && self.routability.as_ref().is_some_and(Routability::active)
-            && overflow > CHECK_OVERFLOW;
+        let routability_pending =
+            self.routability.as_ref().is_some_and(|r| {
+                matches!(r.phase, RoutabilityPhase::Saved(_)) && r.checks.active()
+            }) && overflow > CHECK_OVERFLOW;
         !routability_pending && timing_due(&timing.overflows, fired, overflow)
     }
 
@@ -1353,7 +1383,7 @@ impl Run {
                 objects,
                 context.movable,
                 &objective.die,
-                r.params(),
+                r.checks.params(),
             )
             .metric()
         });
