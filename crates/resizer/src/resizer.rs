@@ -184,11 +184,44 @@ enum Edit {
     },
 }
 
-/// The edits since the last mark, as `OpenROAD`'s journal.
-#[derive(Clone, Debug, Default)]
-struct Journal {
-    recording: bool,
-    edits: Vec<Edit>,
+// The three mode tokens below are drawn as state machines in
+// docs/resizer-edit-modes.md.
+
+/// A trial of edits, open from [`Resizer::journal_begin`] until
+/// [`Resizer::journal_end`] keeps it or [`Resizer::journal_restore`] takes
+/// it back. Only opening makes one and closing takes it, so a trial is
+/// closed once, and only after it was opened.
+#[must_use = "a trial is closed by journal_end or journal_restore"]
+#[derive(Debug)]
+pub(crate) struct Trial(Sealed);
+
+/// Edits batched from [`Resizer::batch_edits`] until [`Resizer::flush`]
+/// brings their parasitics and timing up to date.
+#[must_use = "a batch is ended by flush"]
+#[derive(Debug)]
+pub(crate) struct EditBatch(Sealed);
+
+/// Timing left behind the graph from [`Resizer::defer_timing`] until
+/// [`Resizer::resume_timing`].
+#[must_use = "deferred timing is brought up to date by resume_timing"]
+#[derive(Debug)]
+pub(crate) struct DeferredTiming(Sealed);
+
+/// The private, uncopyable content of a mode token: only this module makes
+/// one, and closing the mode moves it out.
+#[derive(Debug)]
+struct Sealed;
+
+/// What an open [`EditBatch`] has yet to bring up to date.
+#[derive(Clone, Debug)]
+struct PendingEdits {
+    /// Drivers whose timing is to be found again.
+    drivers: Vec<PinId>,
+    /// Nets whose parasitics are to be estimated again.
+    nets: Vec<NetId>,
+    /// How many nets the design had when the batch began: the batch's own
+    /// edits read the nets it adds, so those are estimated as they change.
+    nets_before: usize,
 }
 
 /// A buffer newly inserted before some loads.
@@ -273,7 +306,8 @@ pub struct Resizer<'a, T: Timing = Untimed> {
     pub(crate) options: RepairOptions,
     pub(crate) slew_rc_factor: f64,
     pub(crate) r_strongest_buffer: Ohms,
-    journal: Journal,
+    /// The edits of the open [`Trial`]; none outside a trial.
+    journal: Option<Vec<Edit>>,
     dead_nets: Vec<NetId>,
     /// The multi-output cells design repair resized, as
     /// `resized_multi_output_insts_`.
@@ -281,19 +315,12 @@ pub struct Resizer<'a, T: Timing = Untimed> {
     // session runs design repair at most once, before anything else
     // resizes, so a set the session's length holds the same cells.
     resized_multi_output: HashSet<CellId>,
-    /// Drivers whose timing is to be found again at the next flush, while
-    /// edits are batched.
-    pending: Option<Vec<PinId>>,
-    /// Nets whose parasitics are to be estimated again at the next flush,
-    /// while edits are batched.
-    pending_nets: Vec<NetId>,
-    /// How many nets the design had when the batch began: the batch's own
-    /// edits read the nets it adds, so those are estimated as they change.
-    nets_before_batch: usize,
-    /// Whether the timing analysis is left behind the graph until
-    /// [`Resizer::resume_timing`], with the drivers it has yet to take in.
-    timing_deferred: bool,
-    stale_timing: Vec<PinId>,
+    /// What the open [`EditBatch`] has yet to bring up to date; none
+    /// outside a batch.
+    pending: Option<PendingEdits>,
+    /// The drivers the timing analysis has yet to take in while
+    /// [`DeferredTiming`] holds it back; none while it is current.
+    stale_timing: Option<Vec<PinId>>,
     routes: Option<GlobalRouting<'a>>,
 }
 
@@ -350,7 +377,7 @@ impl<'a> Resizer<'a, Sta> {
     #[must_use]
     pub fn sta(&self) -> &Sta {
         debug_assert!(
-            self.pending.is_none() && !self.timing_deferred,
+            self.pending.is_none() && self.stale_timing.is_none(),
             "timing read while edits are batched or timing is deferred"
         );
         &self.timing
@@ -438,14 +465,11 @@ impl<'a, T: Timing> Resizer<'a, T> {
             options: RepairOptions::default(),
             slew_rc_factor,
             r_strongest_buffer,
-            journal: Journal::default(),
+            journal: None,
             dead_nets: Vec::new(),
             resized_multi_output: HashSet::new(),
             pending: None,
-            pending_nets: Vec::new(),
-            nets_before_batch: 0,
-            timing_deferred: false,
-            stale_timing: Vec::new(),
+            stale_timing: None,
             routes,
         })
     }
@@ -504,20 +528,28 @@ impl<'a, T: Timing> Resizer<'a, T> {
     /// follow until [`Resizer::flush`], so that a run of edits on a net is
     /// estimated and propagated once; nets the batch adds are still
     /// estimated as they change, since the batch's own edits read them.
-    pub(crate) fn batch_edits(&mut self) {
-        if self.pending.is_none() {
-            self.pending = Some(Vec::new());
-            self.nets_before_batch = self.db.nets.len();
-        }
+    pub(crate) fn batch_edits(&mut self) -> EditBatch {
+        debug_assert!(self.pending.is_none(), "edit batches do not nest");
+        self.pending = Some(PendingEdits {
+            drivers: Vec::new(),
+            nets: Vec::new(),
+            nets_before: self.db.nets.len(),
+        });
+        EditBatch(Sealed)
     }
 
-    /// Estimates the nets and finds the timing again after the edits
-    /// batched so far, and ends the batch.
-    pub fn flush(&mut self) {
-        let Some(mut drivers) = self.pending.take() else {
+    /// Estimates the nets and finds the timing again after the edits of
+    /// `batch`, and ends it.
+    pub(crate) fn flush(&mut self, batch: EditBatch) {
+        let EditBatch(_sealed) = batch;
+        let Some(PendingEdits {
+            mut drivers,
+            mut nets,
+            ..
+        }) = self.pending.take()
+        else {
             return;
         };
-        let mut nets = std::mem::take(&mut self.pending_nets);
         nets.sort_unstable();
         nets.dedup();
         self.estimate_nets(&nets);
@@ -529,15 +561,19 @@ impl<'a, T: Timing> Resizer<'a, T> {
     /// Leaves the timing analysis behind the graph until
     /// [`Resizer::resume_timing`], for a run of edits that reads slews but
     /// no timing, as `OpenSTA` leaves arrivals until they are asked for.
-    pub(crate) const fn defer_timing(&mut self) {
-        self.timing_deferred = true;
+    pub(crate) fn defer_timing(&mut self) -> DeferredTiming {
+        debug_assert!(self.stale_timing.is_none(), "timing is deferred once");
+        self.stale_timing = Some(Vec::new());
+        DeferredTiming(Sealed)
     }
 
-    /// Brings the timing analysis up to date with every edit made while it
-    /// was deferred.
-    pub(crate) fn resume_timing(&mut self) {
-        self.timing_deferred = false;
-        let mut stale = std::mem::take(&mut self.stale_timing);
+    /// Brings the timing analysis up to date with every edit made while
+    /// `deferred` held it back.
+    pub(crate) fn resume_timing(&mut self, deferred: DeferredTiming) {
+        let DeferredTiming(_sealed) = deferred;
+        let Some(mut stale) = self.stale_timing.take() else {
+            return;
+        };
         stale.sort_unstable();
         stale.dedup();
         if let Some(sta) = self.timing.analysis_mut() {
@@ -549,8 +585,10 @@ impl<'a, T: Timing> Resizer<'a, T> {
     /// Estimates a net's parasitics again, or holds that for the flush
     /// while edits are batched and the net is older than the batch.
     fn invalidate_parasitics(&mut self, net: NetId) {
-        if self.pending.is_some() && net.index() < self.nets_before_batch {
-            self.pending_nets.push(net);
+        if let Some(pending) = self.pending.as_mut()
+            && net.index() < pending.nets_before
+        {
+            pending.nets.push(net);
             return;
         }
         self.estimate_nets(&[net]);
@@ -854,23 +892,24 @@ impl<'a, T: Timing> Resizer<'a, T> {
             .sum()
     }
 
-    /// Starts recording edits, as `journalBegin`.
-    pub(crate) fn journal_begin(&mut self) {
-        self.journal.recording = true;
-        self.journal.edits.clear();
+    /// Opens a trial, recording the edits that follow, as `journalBegin`.
+    pub(crate) fn journal_begin(&mut self) -> Trial {
+        debug_assert!(self.journal.is_none(), "trials do not nest");
+        self.journal = Some(Vec::new());
+        Trial(Sealed)
     }
 
-    /// Keeps the edits since the mark, as `journalEnd`.
-    pub(crate) fn journal_end(&mut self) {
-        self.journal.recording = false;
-        self.journal.edits.clear();
+    /// Keeps the edits of `trial`, as `journalEnd`.
+    pub(crate) fn journal_end(&mut self, trial: Trial) {
+        let Trial(_sealed) = trial;
+        self.journal = None;
     }
 
-    /// Takes back every edit since the mark and brings the timing up to
-    /// date, as `journalRestore`.
-    pub(crate) fn journal_restore(&mut self) -> Result<(), RepairError> {
-        self.journal.recording = false;
-        let edits = std::mem::take(&mut self.journal.edits);
+    /// Takes back every edit of `trial` and brings the timing up to date,
+    /// as `journalRestore`.
+    pub(crate) fn journal_restore(&mut self, trial: Trial) -> Result<(), RepairError> {
+        let Trial(_sealed) = trial;
+        let edits = self.journal.take().unwrap_or_default();
         let mut nets: FxHashSet<NetId> = FxHashSet::default();
         let mut cells: FxHashSet<CellId> = FxHashSet::default();
         for edit in edits.into_iter().rev() {
@@ -938,8 +977,8 @@ impl<'a, T: Timing> Resizer<'a, T> {
     }
 
     fn record(&mut self, edit: Edit) {
-        if self.journal.recording {
-            self.journal.edits.push(edit);
+        if let Some(edits) = self.journal.as_mut() {
+            edits.push(edit);
         }
     }
 
@@ -969,13 +1008,13 @@ impl<'a, T: Timing> Resizer<'a, T> {
     /// them for the flush while edits are batched.
     fn propagate(&mut self, drivers: &[PinId]) {
         if let Some(pending) = self.pending.as_mut() {
-            pending.extend_from_slice(drivers);
+            pending.drivers.extend_from_slice(drivers);
             return;
         }
         let netlist = Netlist::new(self.db, self.link);
         let dirty = self.graph.propagate_from(&netlist, self.clocks, drivers);
-        if self.timing_deferred {
-            self.stale_timing.extend(dirty);
+        if let Some(stale) = self.stale_timing.as_mut() {
+            stale.extend(dirty);
         } else if let Some(sta) = self.timing.analysis_mut() {
             sta.update(&netlist, &self.graph, self.clocks, &dirty);
         }
@@ -1844,7 +1883,7 @@ mod tests {
         let rc = metal2_wires(&db);
         with_session_inputs(&mut db, &lib, CLOCK, rc, |inputs, sdc| {
             let mut resizer = Resizer::timed(inputs, sdc).unwrap();
-            resizer.journal_begin();
+            let trial = resizer.journal_begin();
             let b1 = resizer.db.cell_id("b1").unwrap();
             let _ = resizer.remove_buffer(b1).unwrap();
             let b2 = resizer.db.cell_id("b2").unwrap();
@@ -1858,8 +1897,8 @@ mod tests {
                 .insert_buffer_before_loads(d, &[load], buffer, at, "rebuffer")
                 .unwrap();
             match close {
-                Close::Restore => resizer.journal_restore().unwrap(),
-                Close::End => resizer.journal_end(),
+                Close::Restore => resizer.journal_restore(trial).unwrap(),
+                Close::End => resizer.journal_end(trial),
             }
             let _ = resizer.finish().unwrap();
         });
@@ -2066,7 +2105,7 @@ mod tests {
             let mut resizer = Resizer::timed(inputs, sdc).unwrap();
             let pins = resizer.db.pins.len();
             let before = timing_of(&resizer, pins);
-            resizer.journal_begin();
+            let trial = resizer.journal_begin();
             let b1 = resizer.db.cell_id("b1").unwrap();
             let _ = resizer.remove_buffer(b1).unwrap();
             let b2 = resizer.db.cell_id("b2").unwrap();
@@ -2080,7 +2119,7 @@ mod tests {
                 .insert_buffer_before_loads(d, &[load], buffer, at, "rebuffer")
                 .unwrap();
 
-            resizer.journal_restore().unwrap();
+            resizer.journal_restore(trial).unwrap();
 
             let diffs = timing_diffs(&before, &timing_of(&resizer, pins));
             assert!(diffs.is_empty(), "{}", diffs.join("\n"));
@@ -2117,7 +2156,7 @@ mod tests {
             let before = timing_of(&resizer, pins);
             let (a1, a2) = (pin(resizer.db, "g/A"), pin(resizer.db, "g/B"));
             let (net_a, net_b) = (resizer.db.pins[a1].net, resizer.db.pins[a2].net);
-            resizer.journal_begin();
+            let trial = resizer.journal_begin();
             resizer.move_pin(a1, net_b);
             resizer.move_pin(a2, net_a);
             resizer.update_net(net_a);
@@ -2137,7 +2176,7 @@ mod tests {
                 resizer.update_net(net);
             }
 
-            resizer.journal_restore().unwrap();
+            resizer.journal_restore(trial).unwrap();
 
             let diffs = timing_diffs(&before, &timing_of(&resizer, pins));
             assert!(diffs.is_empty(), "{}", diffs.join("\n"));

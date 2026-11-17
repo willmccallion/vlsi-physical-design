@@ -324,9 +324,9 @@ impl Rebuffer {
                     .map_err(|AreaRecoveryFailed| area_recovery_error(resizer, driver))?;
             }
             let old_buffers = collect_imported_buffers(resizer, driver, &original);
-            resizer.batch_edits();
+            let batch = resizer.batch_edits();
             let replaced = self.replace_buffers(resizer, &area_tree, &old_buffers);
-            resizer.flush();
+            resizer.flush(batch);
             replaced?;
         }
         Ok(())

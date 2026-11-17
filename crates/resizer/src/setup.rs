@@ -6,7 +6,7 @@
 
 use crate::fuzzy;
 use crate::moves::{MoveKind, Moves};
-use crate::resizer::{RepairError, Resizer, area_change_percent};
+use crate::resizer::{RepairError, Resizer, Trial, area_change_percent};
 use crate::sta::{Path, Sta, Via};
 use pare_common::config::Share;
 use pare_common::db::design::PinOwner;
@@ -388,17 +388,17 @@ impl Repair<'_, '_> {
         }
     }
 
-    fn journal_begin(&mut self) {
-        self.resizer.journal_begin();
+    fn journal_begin(&mut self) -> Trial {
+        self.resizer.journal_begin()
     }
 
-    fn journal_end(&mut self) {
-        self.resizer.journal_end();
+    fn journal_end(&mut self, trial: Trial) {
+        self.resizer.journal_end(trial);
         self.moves.log.commit();
     }
 
-    fn journal_restore(&mut self) -> Result<(), RepairError> {
-        self.resizer.journal_restore()?;
+    fn journal_restore(&mut self, trial: Trial) -> Result<(), RepairError> {
+        self.resizer.journal_restore(trial)?;
         self.moves.log.undo();
         Ok(())
     }
@@ -492,7 +492,7 @@ impl Repair<'_, '_> {
         let mut end_slack = self.end_slack(end);
         let mut kept_end_slack = end_slack;
         let mut worse_passes = 0;
-        self.journal_begin();
+        let mut trial = self.journal_begin();
         for pass in 1..=phase.max_passes {
             self.iteration += 1;
             if rule == PassRule::Legacy {
@@ -502,7 +502,7 @@ impl Repair<'_, '_> {
                 // NOTE: repairSetup_LastGasp ends the journal here where the
                 // legacy phase restores it; at this point last gasp's
                 // journal holds nothing, so restoring is the same.
-                self.journal_restore()?;
+                self.journal_restore(trial)?;
                 return Ok(phase.terminated());
             }
             if self.iteration.is_multiple_of(SMALL_INTERVAL) {
@@ -514,7 +514,7 @@ impl Repair<'_, '_> {
             if fuzzy::greater_equal(end_slack, margin)
                 || !self.repair_endpoint(end, end_slack, &phase.sequence)?
             {
-                self.end_passes(pass)?;
+                self.end_passes(pass, trial)?;
                 return Ok(EndpointEnd::Next);
             }
             end_slack = self.end_slack(end);
@@ -536,16 +536,16 @@ impl Repair<'_, '_> {
                     phase.prev_tns = now.total;
                 }
                 worse_passes = 0;
-                self.journal_end();
+                self.journal_end(trial);
                 if pass == phase.max_passes {
                     return Ok(EndpointEnd::Next);
                 }
-                self.journal_begin();
+                trial = self.journal_begin();
             } else {
                 self.fallback = true;
                 worse_passes += 1;
                 if worse_passes > rule.worse_passes_tolerated() {
-                    self.journal_restore()?;
+                    self.journal_restore(trial)?;
                     return Ok(EndpointEnd::Next);
                 }
             }
@@ -555,19 +555,19 @@ impl Repair<'_, '_> {
                 end = worst;
             }
         }
-        self.journal_end();
+        self.journal_end(trial);
         Ok(EndpointEnd::Next)
     }
 
-    /// Closes the journal of passes that ended at `pass` with nothing more
+    /// Closes `trial`, the passes that ended at `pass` with nothing more
     /// to try: kept after the first, undone after a later one, whose moves
     /// since the last improvement did not pay.
-    fn end_passes(&mut self, pass: usize) -> Result<(), RepairError> {
+    fn end_passes(&mut self, pass: usize, trial: Trial) -> Result<(), RepairError> {
         if pass == 1 {
-            self.journal_end();
+            self.journal_end(trial);
             Ok(())
         } else {
-            self.journal_restore()
+            self.journal_restore(trial)
         }
     }
 
