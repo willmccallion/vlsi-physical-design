@@ -46,6 +46,7 @@ use pare_common::db::design::NetlistDB;
 use pare_common::db::indices::{IdVec, LayerId, NetId};
 use pare_common::db::library::Direction;
 use pare_common::geom::dbu::Dbu;
+use pare_common::geom::interval::Interval;
 use pare_common::geom::point::Point;
 use pare_common::geom::rect::Rect;
 use pattern::route_pattern;
@@ -262,11 +263,11 @@ impl GlobalGrid {
         let extent = |i: usize| {
             let start = along_origin + self.gcell * i as i64;
             let end = (start + self.gcell).min(along_end).max(start);
-            (start, end)
+            Interval::new(start, end)
         };
         let centre = |i: usize| {
-            let (start, end) = extent(i);
-            start + (end - start) / 2
+            let Interval { lo, hi } = extent(i);
+            lo + (hi - lo) / 2
         };
         for (t, &across) in lt.tracks.iter().enumerate() {
             let row = (across - across_origin).div_floor(self.gcell);
@@ -288,7 +289,7 @@ impl GlobalGrid {
                 }
                 if i + 1 < along_cells {
                     let boundary = along_origin + self.gcell * (i as i64 + 1);
-                    let stretch = (centre(i), centre(i + 1));
+                    let stretch = Interval::new(centre(i), centre(i + 1));
                     cap[index] += usable_fraction(fixed, track, boundary, stretch);
                 }
             }
@@ -738,40 +739,38 @@ fn usable_fraction(
     fixed: &impl FixedMetal,
     track: TrackRef,
     boundary: Dbu,
-    stretch: (Dbu, Dbu),
+    stretch: Interval,
 ) -> f64 {
-    let (lo, hi) = stretch;
-    if hi <= lo {
+    if stretch.is_empty() {
         return 0.0;
     }
-    let mut usable = (lo, hi);
-    for (start, end) in fixed.fixed_stretches(track, lo, hi) {
-        if start <= boundary && boundary <= end {
+    let mut usable = stretch;
+    for taken in fixed.fixed_stretches(track, stretch) {
+        if taken.lo <= boundary && boundary <= taken.hi {
             return 0.0;
         }
-        if end < boundary {
-            usable.0 = usable.0.max(end);
+        if taken.hi < boundary {
+            usable.lo = usable.lo.max(taken.hi);
         } else {
-            usable.1 = usable.1.min(start);
+            usable.hi = usable.hi.min(taken.lo);
         }
     }
-    (usable.1 - usable.0).to_f64() / (hi - lo).to_f64()
+    usable.len().to_f64() / stretch.len().to_f64()
 }
 
 /// Whether fixed metal leaves a gap of at least `length` on `track` within
 /// `extent`.
-fn has_gap(fixed: &impl FixedMetal, track: TrackRef, extent: (Dbu, Dbu), length: Dbu) -> bool {
-    let (lo, hi) = extent;
-    let mut taken: Vec<(Dbu, Dbu)> = fixed.fixed_stretches(track, lo, hi).collect();
+fn has_gap(fixed: &impl FixedMetal, track: TrackRef, extent: Interval, length: Dbu) -> bool {
+    let mut taken: Vec<Interval> = fixed.fixed_stretches(track, extent).collect();
     taken.sort_unstable();
-    let mut free_from = lo;
-    for (start, end) in taken {
-        if start - free_from >= length {
+    let mut free_from = extent.lo;
+    for stretch in taken {
+        if stretch.lo - free_from >= length {
             return true;
         }
-        free_from = free_from.max(end);
+        free_from = free_from.max(stretch.hi);
     }
-    hi - free_from >= length
+    extent.hi - free_from >= length
 }
 
 /// How far the pads of the vias touching `layer` reach along its tracks.
