@@ -10,8 +10,8 @@
 
 use super::coarse::{Corridor, Plan, SCALE};
 use super::grid_index;
+use super::stamped::StampedTable;
 use super::{BLOCKED_COST, GCell, GcellWindow, GlobalCosts, GlobalGrid, GlobalNet};
-use crate::tech::index_u32;
 use crate::tree::connection_order;
 use pare_common::db::indices::LayerId;
 use pare_common::db::library::Direction;
@@ -244,55 +244,8 @@ impl PartialOrd for Entry {
     }
 }
 
-/// A* state over the gcells of a search window, kept per thread between
-/// searches and cleared by bumping a generation stamp; nodes are numbered
-/// within the window, see [`Local`].
-#[derive(Debug, Default)]
-struct SearchState {
-    cost: Vec<f64>,
-    parent: Vec<u32>,
-    stamp: Vec<u32>,
-    generation: u32,
-}
-
-/// Marks a node without a parent.
-const NO_PARENT: u32 = u32::MAX;
-
-impl SearchState {
-    /// Forgets every node, sized for `nodes` nodes.
-    fn reset(&mut self, nodes: usize) {
-        if self.stamp.len() < nodes {
-            self.cost.resize(nodes, 0.0);
-            self.parent.resize(nodes, NO_PARENT);
-            self.stamp.resize(nodes, 0);
-        }
-        self.generation = self.generation.wrapping_add(1);
-        if self.generation == 0 {
-            self.stamp.fill(0);
-            self.generation = 1;
-        }
-    }
-
-    fn cost(&self, node: usize) -> Option<f64> {
-        (self.stamp[node] == self.generation).then(|| self.cost[node])
-    }
-
-    fn set(&mut self, node: usize, cost: f64, parent: u32) {
-        self.stamp[node] = self.generation;
-        self.cost[node] = cost;
-        self.parent[node] = parent;
-    }
-
-    /// Lets go of the state when it holds more than `nodes` nodes.
-    fn release_beyond(&mut self, nodes: usize) {
-        if self.stamp.len() > nodes {
-            *self = Self::default();
-        }
-    }
-}
-
 thread_local! {
-    static SEARCH: std::cell::RefCell<SearchState> = std::cell::RefCell::new(SearchState::default());
+    static SEARCH: std::cell::RefCell<StampedTable> = std::cell::RefCell::new(StampedTable::default());
 }
 
 /// Whether a search may cross edges and climb into cells that fixed metal
@@ -326,7 +279,7 @@ fn search(
 }
 
 fn search_with(
-    state: &mut SearchState,
+    state: &mut StampedTable,
     grid: &GlobalGrid,
     query: Query<'_>,
     sources: &[GCell],
@@ -338,7 +291,7 @@ fn search_with(
     state.reset(local.nodes());
     let mut heap = BinaryHeap::new();
     for (c, node) in sources.iter().filter_map(|&c| Some((c, local.index(c)?))) {
-        state.set(node, 0.0, NO_PARENT);
+        state.set(node, 0.0, None);
         heap.push(Entry {
             f: rules.estimate(c),
             g: 0.0,
@@ -359,7 +312,7 @@ fn search_with(
         for step in rules.moves_from(cell, &local).into_iter().flatten() {
             let ng = g + step.cost;
             if state.cost(step.node).is_none_or(|b| ng < b) {
-                state.set(step.node, ng, index_u32(node));
+                state.set(step.node, ng, Some(node));
                 heap.push(Entry {
                     f: ng + rules.estimate(step.cell),
                     g: ng,
@@ -374,12 +327,12 @@ fn search_with(
 }
 
 /// The path to `cell`, at node `at`, back through its parents to a source.
-fn traced_path(state: &SearchState, local: &Local<'_>, at: usize, cell: GCell) -> Vec<GCell> {
+fn traced_path(state: &StampedTable, local: &Local<'_>, at: usize, cell: GCell) -> Vec<GCell> {
     let mut path = vec![cell];
-    let mut node = state.parent[at];
-    while node != NO_PARENT {
-        path.push(local.cell(node as usize));
-        node = state.parent[node as usize];
+    let mut node = state.parent(at);
+    while let Some(at) = node {
+        path.push(local.cell(at));
+        node = state.parent(at);
     }
     path.reverse();
     path

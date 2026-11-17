@@ -8,6 +8,7 @@
 //! A* toward the pins still to join, which finds trees just as cheap while
 //! visiting far fewer cells of a long net.
 
+use super::stamped::StampedTable;
 use super::{GCell, GcellWindow, GlobalGrid, GlobalNet, grid_index};
 use crate::tech::index_u32;
 use pare_common::db::indices::LayerId;
@@ -148,10 +149,10 @@ impl CoarseGrid {
     /// The nodes of the cheapest coarse tree joining `pins`, each with its
     /// parent, searched as if no node could cost less than `floor`; none
     /// when fixed metal cuts a pin off.
-    fn tree_nodes(&self, pins: &[usize], floor: f64) -> Option<Vec<(usize, u32)>> {
+    fn tree_nodes(&self, pins: &[usize], floor: f64) -> Option<Vec<(usize, Option<usize>)>> {
         PLAN.with_borrow_mut(|state| {
             let tree = self.search(state, pins, floor)?;
-            Some(tree.into_iter().map(|n| (n, state.parent[n])).collect())
+            Some(tree.into_iter().map(|n| (n, state.parent(n))).collect())
         })
     }
 
@@ -160,7 +161,7 @@ impl CoarseGrid {
     /// those pins. The box only shrinks, so an estimate only rises: a queued
     /// node whose estimate rose since is queued again with it rather than
     /// expanded, which keeps every path the cheapest.
-    fn search(&self, state: &mut PlanState, pins: &[usize], floor: f64) -> Option<Vec<usize>> {
+    fn search(&self, state: &mut StampedTable, pins: &[usize], floor: f64) -> Option<Vec<usize>> {
         state.reset(self.nodes());
         let is_pin = |n: usize| pins.binary_search(&n).is_ok();
         let mut tree: FxHashSet<usize> = FxHashSet::default();
@@ -169,7 +170,7 @@ impl CoarseGrid {
         let _ = tree.insert(first);
         let mut remaining = pins.len() - 1;
         let mut toward = Toward::new(self, pins, &tree, remaining, floor);
-        state.set(first, 0.0, NO_PARENT);
+        state.set(first, 0.0, None);
         heap.push(Visit {
             key: toward.estimate(self, first),
             cost: 0.0,
@@ -204,13 +205,13 @@ impl CoarseGrid {
                 if is_pin(node) {
                     remaining -= 1;
                 }
-                let parent = state.parent[node];
+                let parent = state.parent(node);
                 state.set(node, 0.0, parent);
                 joined.push(node);
-                if parent == NO_PARENT {
+                let Some(parent) = parent else {
                     break;
-                }
-                node = parent as usize;
+                };
+                node = parent;
             }
             toward.narrow(self, pins, &tree, remaining);
             for node in joined {
@@ -226,7 +227,7 @@ impl CoarseGrid {
 
     fn relax(
         &self,
-        state: &mut PlanState,
+        state: &mut StampedTable,
         heap: &mut BinaryHeap<Visit>,
         node: usize,
         cost: f64,
@@ -236,7 +237,7 @@ impl CoarseGrid {
         let mut push = |next: usize, step: f64| {
             let reach = cost + step;
             if state.cost(next).is_none_or(|best| reach < best) {
-                state.set(next, reach, index_u32(node));
+                state.set(next, reach, Some(node));
                 heap.push(Visit {
                     key: reach + estimate(next),
                     cost: reach,
@@ -419,8 +420,8 @@ struct CoarseTree {
 
 impl CoarseTree {
     /// The tree of `nodes`, coarse grid nodes of `coarse` each with its
-    /// parent among them or [`NO_PARENT`] at the root.
-    fn new(coarse: &CoarseGrid, nodes: &[(usize, u32)]) -> Self {
+    /// parent among them, none at the root.
+    fn new(coarse: &CoarseGrid, nodes: &[(usize, Option<usize>)]) -> Self {
         let index: FxHashMap<usize, u32> = nodes
             .iter()
             .enumerate()
@@ -430,10 +431,7 @@ impl CoarseTree {
             .iter()
             .enumerate()
             .map(|(k, &(_, p))| {
-                index
-                    .get(&(p as usize))
-                    .copied()
-                    .filter(|_| p != NO_PARENT)
+                p.and_then(|p| index.get(&p).copied())
                     .unwrap_or_else(|| index_u32(k))
             })
             .collect();
@@ -677,46 +675,8 @@ fn outside<T: Ord + std::ops::Sub<Output = T> + Default>(v: T, (lo, hi): (T, T))
     }
 }
 
-/// Search state over the coarse grid, kept per thread between plans and
-/// cleared by bumping a generation stamp.
-#[derive(Debug, Default)]
-struct PlanState {
-    cost: Vec<f64>,
-    parent: Vec<u32>,
-    stamp: Vec<u32>,
-    generation: u32,
-}
-
-/// Marks a node without a parent.
-const NO_PARENT: u32 = u32::MAX;
-
-impl PlanState {
-    fn reset(&mut self, nodes: usize) {
-        if self.stamp.len() < nodes {
-            self.cost.resize(nodes, 0.0);
-            self.parent.resize(nodes, NO_PARENT);
-            self.stamp.resize(nodes, 0);
-        }
-        self.generation = self.generation.wrapping_add(1);
-        if self.generation == 0 {
-            self.stamp.fill(0);
-            self.generation = 1;
-        }
-    }
-
-    fn cost(&self, node: usize) -> Option<f64> {
-        (self.stamp[node] == self.generation).then(|| self.cost[node])
-    }
-
-    fn set(&mut self, node: usize, cost: f64, parent: u32) {
-        self.stamp[node] = self.generation;
-        self.cost[node] = cost;
-        self.parent[node] = parent;
-    }
-}
-
 thread_local! {
-    static PLAN: RefCell<PlanState> = RefCell::new(PlanState::default());
+    static PLAN: RefCell<StampedTable> = RefCell::new(StampedTable::default());
 }
 
 #[cfg(test)]
@@ -812,12 +772,11 @@ mod tests {
 
     /// The cost of the coarse tree of `nodes`, each with its parent, as the
     /// search prices each step.
-    fn tree_cost(coarse: &CoarseGrid, nodes: &[(usize, u32)]) -> f64 {
+    fn tree_cost(coarse: &CoarseGrid, nodes: &[(usize, Option<usize>)]) -> f64 {
         nodes
             .iter()
-            .filter(|&&(_, parent)| parent != NO_PARENT)
-            .map(|&(node, parent)| {
-                let parent = parent as usize;
+            .filter_map(|&(node, parent)| Some((node, parent?)))
+            .map(|(node, parent)| {
                 let both = coarse.price(node) + coarse.price(parent);
                 if coarse.position(node).0 == coarse.position(parent).0 {
                     f64::from(SCALE) * both
