@@ -422,27 +422,10 @@ impl CoarseTree {
                     .unwrap_or_else(|| index_u32(k))
             })
             .collect();
-        let mut depth = vec![u32::MAX; nodes.len()];
-        for start in 0..nodes.len() {
-            let mut chain = Vec::new();
-            let mut k = start;
-            while depth[k] == u32::MAX && parent[k] as usize != k {
-                chain.push(k);
-                k = parent[k] as usize;
-            }
-            if depth[k] == u32::MAX {
-                depth[k] = 0;
-            }
-            let mut d = depth[k];
-            for &c in chain.iter().rev() {
-                d += 1;
-                depth[c] = d;
-            }
-        }
         Self {
             cells: nodes.iter().map(|&(n, _)| coarse.plane(n)).collect(),
+            depth: depths(&parent),
             parent,
-            depth,
             index,
             first_layer: coarse.first_layer,
             nx: coarse.nx,
@@ -477,24 +460,43 @@ fn free_tracks(grid: &GlobalGrid, c: GCell) -> f64 {
     }
 }
 
+/// Each node's depth below its root in the forest of `parent`, where a root
+/// is its own parent, found from the roots down.
+fn depths(parent: &[u32]) -> Vec<u32> {
+    let mut children: Vec<Vec<usize>> = vec![Vec::new(); parent.len()];
+    let mut stack = Vec::new();
+    for (k, &p) in parent.iter().enumerate() {
+        if p as usize == k {
+            stack.push(k);
+        } else {
+            children[p as usize].push(k);
+        }
+    }
+    let mut depth = vec![0; parent.len()];
+    while let Some(k) = stack.pop() {
+        for &c in &children[k] {
+            depth[c] = depth[k] + 1;
+            stack.push(c);
+        }
+    }
+    depth
+}
+
 /// The coarse cells a net's reroute keeps to, on every layer.
 #[derive(Clone, Debug)]
 pub(super) struct Corridor {
     x0: u16,
     y0: u16,
     width: u16,
-    /// Position among `cells` of each coarse cell of the bounding box, or
-    /// [`NO_SLOT`].
-    slots: Vec<u32>,
+    /// Position among `cells` of each coarse cell of the bounding box; none
+    /// outside the corridor.
+    slots: Vec<Option<u32>>,
     cells: Vec<(u16, u16)>,
     /// The gcells of the bounding box, as (x0, x1, y0, y1).
     window: GcellWindow,
     nx: u16,
     ny: u16,
 }
-
-/// Marks a coarse cell of a corridor's bounding box outside the corridor.
-const NO_SLOT: u32 = u32::MAX;
 
 impl Corridor {
     fn new(mut cells: Vec<(u16, u16)>, grid: &GlobalGrid) -> Self {
@@ -505,9 +507,10 @@ impl Corridor {
         let y1 = cells.iter().map(|c| c.1).max().unwrap_or(0);
         let width = x1 - x0 + 1;
         let height = y1 - y0 + 1;
-        let mut slots = vec![NO_SLOT; usize::from(width) * usize::from(height)];
+        let mut slots = vec![None; usize::from(width) * usize::from(height)];
         for (k, &(x, y)) in cells.iter().enumerate() {
-            slots[usize::from(y - y0) * usize::from(width) + usize::from(x - x0)] = index_u32(k);
+            slots[usize::from(y - y0) * usize::from(width) + usize::from(x - x0)] =
+                Some(index_u32(k));
         }
         let window = GcellWindow {
             x0: x0 * SCALE,
@@ -548,11 +551,7 @@ impl Corridor {
             return None;
         }
         let i = usize::from(cy - self.y0) * usize::from(self.width) + usize::from(cx - self.x0);
-        self.slots
-            .get(i)
-            .copied()
-            .filter(|&s| s != NO_SLOT)
-            .map(|s| s as usize)
+        self.slots.get(i).copied().flatten().map(|s| s as usize)
     }
 
     /// Whether the corridor holds gcell (`x`, `y`).
@@ -696,6 +695,14 @@ mod tests {
     use pare_common::db::indices::NetId;
     use pare_common::geom::dbu::Dbu;
     use pare_common::geom::point::Point;
+
+    #[test]
+    fn each_node_lies_one_below_its_parent_and_roots_at_zero() {
+        // Two trees: 0 <- 2 <- 1 <- 4, and 3 alone.
+        let parent = [0, 2, 0, 3, 1];
+
+        assert_eq!(depths(&parent), [0, 2, 1, 0, 3]);
+    }
 
     /// A `nx` by `ny` grid with a horizontal layer 1 over a vertical layer
     /// 2, every edge holding 4 tracks.
