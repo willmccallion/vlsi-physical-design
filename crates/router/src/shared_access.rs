@@ -15,9 +15,9 @@ use pare_common::db::design::{NetlistDB, PinOwner};
 use pare_common::db::indices::{CellId, IdVec, LayerId, MacroId, MacroPinId, PinId, ViaId};
 use pare_common::db::library::LayerRef;
 use pare_common::geom::dbu::Dbu;
+use pare_common::geom::interval::Interval;
 use pare_common::geom::orient::Orientation;
 use pare_common::geom::point::Point;
-use pare_common::geom::rect::Rect;
 use rayon::prelude::*;
 use rustc_hash::FxHashMap;
 use std::ops::Range;
@@ -144,9 +144,8 @@ fn kind_of(db: &NetlistDB, tech: &RouteTech, cell: CellId) -> (Kind, Window) {
     let c = &db.cells[cell];
     let lt = tech.layer(tech.min_layer);
     let window = db.cell_bbox(cell).expand(tech.gcell_pitch * MARGIN_PITCHES);
-    let ((a0, a1), (b0, b1)) = lt.across_along_rect(&window);
-    let ((origin_across, _), (origin_along, _)) =
-        lt.across_along_rect(&Rect::new(c.location, c.location));
+    let (Interval { lo: a0, hi: a1 }, Interval { lo: b0, hi: b1 }) = lt.across_along_rect(&window);
+    let (origin_across, origin_along) = lt.across_along(c.location);
     let tracks = lt.tracks_within(a0, a1);
     let crossings = lt.cross_within(b0, b1);
     let kind = Kind {

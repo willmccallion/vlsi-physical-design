@@ -25,6 +25,7 @@ use pare_common::db::design::{NetlistDB, PinOwner};
 use pare_common::db::indices::{CutLayerId, LayerId, PinId, ViaId};
 use pare_common::db::library::{LayerRef, Shape};
 use pare_common::geom::dbu::Dbu;
+use pare_common::geom::interval::Interval;
 use pare_common::geom::point::Point;
 use pare_common::geom::rect::Rect;
 use pare_common::geom::region::Region;
@@ -190,7 +191,7 @@ fn stub_accesses(
     mut f: impl FnMut(AccessPoint, Dbu),
 ) {
     let lt = tech.layer(layer);
-    let ((a0, a1), (b0, b1)) = lt.across_along_rect(rect);
+    let (Interval { lo: a0, hi: a1 }, Interval { lo: b0, hi: b1 }) = lt.across_along_rect(rect);
     let center = middle_on_grid(b0, b1, tech.manufacturing_grid);
     let k = lt.cross.partition_point(|c| c.at < center);
     let nearest = [k.checked_sub(1), (k < lt.cross.len()).then_some(k)];
@@ -290,7 +291,7 @@ fn stubs_from_beyond(
     rect: &Rect<Dbu>,
 ) -> Vec<(AccessPoint, Dbu)> {
     let lt = tech.layer(layer);
-    let ((a0, a1), (b0, b1)) = lt.across_along_rect(rect);
+    let (Interval { lo: a0, hi: a1 }, Interval { lo: b0, hi: b1 }) = lt.across_along_rect(rect);
     let before = lt.cross.partition_point(|c| c.at < b0).checked_sub(1);
     let after = lt.cross.partition_point(|c| c.at <= b1);
     let ends = [
@@ -343,7 +344,7 @@ fn nodes_inside(
     mut f: impl FnMut(Node, Point<Dbu>) -> bool,
 ) -> bool {
     let lt = tech.layer(layer);
-    let ((a0, a1), (b0, b1)) = lt.across_along_rect(rect);
+    let (Interval { lo: a0, hi: a1 }, Interval { lo: b0, hi: b1 }) = lt.across_along_rect(rect);
     let mut any = false;
     for track in lt.tracks_within(a0, a1) {
         for cross in lt.cross_within(b0, b1) {

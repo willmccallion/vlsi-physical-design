@@ -44,6 +44,7 @@ use pare_common::db::indices::{CutLayerId, IdVec, LayerId, NetId, NonDefaultRule
 use pare_common::db::library::LayerRef;
 use pare_common::db::shapes::{fixed_shapes, is_signal_net};
 use pare_common::geom::dbu::Dbu;
+use pare_common::geom::interval::Interval;
 use pare_common::geom::point::Point;
 use pare_common::geom::rect::Rect;
 use pare_common::verify::drc::{Layout, Rules};
@@ -1042,7 +1043,8 @@ impl<'a> DetailedRouter<'a> {
         for l in lowest..=highest {
             let layer = LayerId::new(l);
             let lt = self.tech.layer(layer);
-            let ((a0, a1), (b0, b1)) = lt.across_along_rect(&area);
+            let (Interval { lo: a0, hi: a1 }, Interval { lo: b0, hi: b1 }) =
+                lt.across_along_rect(&area);
             for track in lt.tracks_within(a0, a1) {
                 for cross in lt.cross_within(b0, b1) {
                     let node = Node {

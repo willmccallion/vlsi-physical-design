@@ -29,6 +29,7 @@ use pare_common::db::indices::{CutLayerId, LayerId, NonDefaultRuleId, ViaId};
 use pare_common::db::library::LayerRef;
 use pare_common::db::shapes::wire_rect;
 use pare_common::geom::dbu::Dbu;
+use pare_common::geom::interval::Interval;
 use pare_common::geom::point::Point;
 use pare_common::geom::rect::Rect;
 use rustc_hash::FxHashMap;
@@ -605,7 +606,7 @@ impl Search<'_> {
     /// Its own length costs nothing, so that shapes of different extents
     /// compare by their conflicts alone.
     pub(crate) fn shape_cost(&self, layer: LayerId, rect: &Rect<Dbu>) -> f64 {
-        let (_, (b0, b1)) = self.tech.layer(layer).across_along_rect(rect);
+        let (_, Interval { lo: b0, hi: b1 }) = self.tech.layer(layer).across_along_rect(rect);
         let meets = self.metal_meets(layer, rect, false, &mut Total);
         let price = self.price((b1 - b0).to_f64(), meets, false);
         price.conflict + price.obstacle
@@ -708,7 +709,7 @@ impl Search<'_> {
 
     /// The along-track extent, relative to the via's center, of the metal
     /// on `layer` of the via between `layer` and `other`.
-    fn pad_along(&self, layer: LayerId, other: LayerId) -> (Dbu, Dbu) {
+    fn pad_along(&self, layer: LayerId, other: LayerId) -> Interval {
         let via = self.tech.via_above(layer.min(other));
         let pad = if other > layer { via.bottom } else { via.top };
         self.tech.layer(layer).across_along_rect(&pad).1
@@ -719,7 +720,7 @@ impl Search<'_> {
     /// its metal while another via's metal could end short of it by less
     /// than the spacing.
     fn via_reach(&self, layer: LayerId, from: LayerId) -> Dbu {
-        let (lo, hi) = self.pad_along(layer, from);
+        let Interval { lo, hi } = self.pad_along(layer, from);
         let neighbours = [layer.index().checked_sub(1), Some(layer.index() + 1)];
         let widest = neighbours
             .into_iter()
@@ -727,7 +728,7 @@ impl Search<'_> {
             .map(LayerId::new)
             .filter(|&l| self.tech.min_layer <= l && l <= self.tech.max_layer)
             .map(|l| {
-                let (a, b) = self.pad_along(layer, l);
+                let Interval { lo: a, hi: b } = self.pad_along(layer, l);
                 (-a).max(b)
             })
             .max()
@@ -758,8 +759,8 @@ impl Search<'_> {
         state.recent_via.is_some_and(|v| {
             let at = self.tech.layer(layer).cross[v.cross as usize].at;
             let cuts = v.from == to && (along - at).abs() < self.cut_reach(layer, to);
-            let (a0, a1) = self.pad_along(layer, v.from);
-            let (b0, b1) = self.pad_along(layer, to);
+            let Interval { lo: a0, hi: a1 } = self.pad_along(layer, v.from);
+            let Interval { lo: b0, hi: b1 } = self.pad_along(layer, to);
             let gap = (along + b0 - (at + a1)).max(at + a0 - (along + b1));
             cuts || (gap > Dbu::ZERO && gap < self.spacing(layer))
         })

@@ -15,6 +15,7 @@ use pare_common::db::indices::{CutLayerId, IdVec, LayerId, NetId, NonDefaultRule
 use pare_common::db::library::{Direction, LayerRef, Library, Shape};
 use pare_common::db::rules::SpacingTable;
 use pare_common::geom::dbu::{Dbu, DbuArea};
+use pare_common::geom::interval::Interval;
 use pare_common::geom::point::Point;
 use pare_common::geom::rect::Rect;
 
@@ -69,10 +70,10 @@ impl LayerTech {
     }
 
     /// Splits a rectangle into its (across, along) coordinate ranges.
-    pub const fn across_along_rect(&self, r: &Rect<Dbu>) -> ((Dbu, Dbu), (Dbu, Dbu)) {
+    pub const fn across_along_rect(&self, r: &Rect<Dbu>) -> (Interval, Interval) {
         match self.direction {
-            Direction::Horizontal => ((r.min.y, r.max.y), (r.min.x, r.max.x)),
-            Direction::Vertical => ((r.min.x, r.max.x), (r.min.y, r.max.y)),
+            Direction::Horizontal => (r.y_span(), r.x_span()),
+            Direction::Vertical => (r.x_span(), r.y_span()),
         }
     }
 
@@ -84,7 +85,8 @@ impl LayerTech {
         let Some(table) = &self.spacing_table else {
             return (self.spacing, self.spacing);
         };
-        let ((a0, a1), (b0, b1)) = self.across_along_rect(rect);
+        let (Interval { lo: a0, hi: a1 }, Interval { lo: b0, hi: b1 }) =
+            self.across_along_rect(rect);
         let width = (a1 - a0).min(b1 - b0).max(self.width);
         let across = table.spacing(width, self.width, b1 - b0).max(self.spacing);
         let along = table
@@ -427,7 +429,7 @@ fn merge_cross(a: Option<&[Dbu]>, b: Option<&[Dbu]>) -> Vec<Dbu> {
 /// How far a metal rectangle reaches across a layer's tracks beyond a
 /// centered wire.
 fn across_overhang(rect: &Rect<Dbu>, layer: &LayerTech) -> Dbu {
-    let ((lo, hi), _) = layer.across_along_rect(rect);
+    let (Interval { lo, hi }, _) = layer.across_along_rect(rect);
     let half = layer.width / 2;
     (hi - half).max(-lo - half).max(Dbu::ZERO)
 }

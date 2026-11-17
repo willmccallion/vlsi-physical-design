@@ -777,7 +777,7 @@ fn has_gap(fixed: &impl FixedMetal, track: TrackRef, extent: Interval, length: D
 fn via_pad_along(tech: &RouteTech, layer: LayerId) -> Dbu {
     let lt = tech.layer(layer);
     let along = |rect: &Rect<Dbu>| {
-        let (_, (b0, b1)) = lt.across_along_rect(rect);
+        let (_, Interval { lo: b0, hi: b1 }) = lt.across_along_rect(rect);
         b1 - b0
     };
     let from_below = layer

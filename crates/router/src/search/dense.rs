@@ -10,6 +10,7 @@ use super::{Heading, RecentVia, Search, State, StepCosts, Visits};
 use crate::access::Node;
 use pare_common::db::indices::LayerId;
 use pare_common::geom::dbu::Dbu;
+use pare_common::geom::interval::Interval;
 use pare_common::geom::rect::Rect;
 use std::cell::RefCell;
 
@@ -48,7 +49,8 @@ impl Numbering {
         let mut reach = 0;
         for layer in tech.routable_layers() {
             let lt = tech.layer(layer);
-            let ((a0, a1), (b0, b1)) = lt.across_along_rect(window);
+            let (Interval { lo: a0, hi: a1 }, Interval { lo: b0, hi: b1 }) =
+                lt.across_along_rect(window);
             let tracks = lt.tracks_within(a0, a1);
             let crosses = lt.cross_within(b0, b1);
             let span = Span {

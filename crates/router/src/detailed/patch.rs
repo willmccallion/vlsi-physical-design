@@ -8,6 +8,7 @@ use crate::search::Search;
 use crate::wiring::Patch;
 use pare_common::db::library::{Direction, LayerRef};
 use pare_common::geom::dbu::Dbu;
+use pare_common::geom::interval::Interval;
 use pare_common::geom::point::Point;
 use pare_common::geom::rect::Rect;
 use pare_common::verify::drc::{Layout, Owner, ThinPiece, thin_pieces};
@@ -68,7 +69,8 @@ impl DetailedRouter<'_> {
             .map_or(Dbu(1), |g| g.max(Dbu(1)));
         let deficit = piece.min_area - piece.area;
         let length = round_up(deficit.div_ceil(width), grid);
-        let ((a0, a1), (b0, b1)) = lt.across_along_rect(&piece.bbox);
+        let (Interval { lo: a0, hi: a1 }, Interval { lo: b0, hi: b1 }) =
+            lt.across_along_rect(&piece.bbox);
         let across = if a1 - a0 == width {
             (a0, a1)
         } else {
