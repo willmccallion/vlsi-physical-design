@@ -851,23 +851,34 @@ impl<'a> DetailedRouter<'a> {
             for (via, at) in self.path_vias(&path) {
                 own.add(via, at);
             }
-            for &n in &path {
-                tree.insert(n, self.point(n));
-            }
-            if starting {
-                self.join_terminal(
-                    terms,
-                    first_term,
-                    path.first().copied(),
-                    &mut tree,
-                    &mut out,
-                );
-            }
-            self.join_terminal(terms, term, path.last().copied(), &mut tree, &mut out);
-            out.paths.push(path);
+            let ends = PathEnds {
+                first: starting.then_some(first_term),
+                last: term,
+            };
+            self.add_path(terms, path, ends, &mut tree, &mut out);
         }
         out.nodes = tree.nodes.into_iter().collect();
         Some(out)
+    }
+
+    /// Adds `path` to the tree, joining terminal `ends.last` at its last
+    /// node and, when the tree was empty, `ends.first` at its first.
+    fn add_path(
+        &self,
+        terms: &Terminals<'_>,
+        path: Vec<Node>,
+        ends: PathEnds,
+        tree: &mut TreeIndex,
+        out: &mut SubTree,
+    ) {
+        for &n in &path {
+            tree.insert(n, self.point(n));
+        }
+        if let Some(first) = ends.first {
+            self.join_terminal(terms, first, path.first().copied(), tree, out);
+        }
+        self.join_terminal(terms, ends.last, path.last().copied(), tree, out);
+        out.paths.push(path);
     }
 
     /// Records terminal `term` as joined at node `at`: a pin keeps the
@@ -1288,6 +1299,14 @@ struct SubTree {
     paths: Vec<Vec<Node>>,
     used: Vec<(usize, usize)>,
     nodes: Vec<Node>,
+}
+
+/// The terminals a path joins: the one at its end, and the one at its
+/// start where the path is the tree's first.
+#[derive(Clone, Copy, Debug)]
+struct PathEnds {
+    first: Option<usize>,
+    last: usize,
 }
 
 /// A tree node and its location.
