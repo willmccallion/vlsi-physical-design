@@ -454,7 +454,7 @@ impl<'a> Objective<'a> {
 
     /// The L1 norms of the wirelength and density gradients over each
     /// field's objects, at the last evaluation.
-    fn gradient_norms(&self) -> IdVec<FieldId, (f64, f64)> {
+    fn gradient_norms(&self) -> FieldNorms {
         let l1 = |g: Point<f64>| g.x.abs() + g.y.abs();
         self.fields
             .iter()
@@ -474,18 +474,15 @@ impl<'a> Objective<'a> {
     fn initial_weights(&self, first: &Evaluation, site: f64) -> Weights {
         let norms = self.gradient_norms();
         if norms.len() == 1 {
-            let penalties = norms
-                .iter()
-                .map(|&(wirelength, density)| {
-                    if wirelength > 0.0 && density > 0.0 {
-                        INITIAL_PENALTY * wirelength / density
-                    } else {
-                        INITIAL_PENALTY
-                    }
-                })
-                .collect();
-            return Weights::eplace(penalties);
+            return eplace_weights(&norms);
         }
+        self.scheduled_weights(first, site, &norms)
+    }
+
+    /// `DREAMPlace`'s schedule over several fields, scaled so the density
+    /// gradient of all of them starts at [`INITIAL_PENALTY`] times the
+    /// wirelength gradient, from their gradient `norms`.
+    fn scheduled_weights(&self, first: &Evaluation, site: f64, norms: &FieldNorms) -> Weights {
         let precondition: FieldValues = first
             .field_energy
             .iter()
@@ -741,6 +738,26 @@ enum RoutabilityPhase {
     /// The state at the snapshot overflow, which each round of cell growth
     /// goes back to.
     Saved(Box<Snapshot>),
+}
+
+/// Each field's wirelength and density gradient norms.
+type FieldNorms = IdVec<FieldId, (f64, f64)>;
+
+/// ePlace's weight for a single field, from its gradient `norms`: the
+/// penalty that starts its density gradient at [`INITIAL_PENALTY`] times
+/// the wirelength gradient.
+fn eplace_weights(norms: &FieldNorms) -> Weights {
+    let penalties = norms
+        .iter()
+        .map(|&(wirelength, density)| {
+            if wirelength > 0.0 && density > 0.0 {
+                INITIAL_PENALTY * wirelength / density
+            } else {
+                INITIAL_PENALTY
+            }
+        })
+        .collect();
+    Weights::eplace(penalties)
 }
 
 /// The state routability resumes from, with each field's density energy
