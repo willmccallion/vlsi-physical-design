@@ -256,29 +256,12 @@ impl<'a> DetailedRouter<'a> {
         );
         let start = std::time::Instant::now();
         let shared = SharedAccess::new(db, tech);
-        let own: IdVec<NetId, Vec<Option<Vec<AccessPoint>>>> = (0..db.nets.len())
-            .into_par_iter()
-            .map(|n| {
-                let net = NetId::new(n);
-                if !is_signal_net(db, net) {
-                    return Vec::new();
-                }
-                let clean = |layer: LayerId, metal: &Rect<Dbu>| {
-                    judge::wiring_is_clean(&fixed, &fixed_tiles, &rules, net, layer, metal)
-                };
-                db.nets[net]
-                    .pins
-                    .iter()
-                    .map(|&p| {
-                        shared
-                            .count(db, p)
-                            .is_none()
-                            .then(|| access_points(db, tech, p, &clean))
-                    })
-                    .collect()
-            })
-            .collect::<Vec<_>>()
-            .into();
+        let judged = FixedJudge {
+            layout: &fixed,
+            tiles: &fixed_tiles,
+            rules: &rules,
+        };
+        let own = own_access_points(db, tech, &shared, &judged);
         log::debug!(
             "access points found in {:.1}s for {} kinds of cell, {} resident",
             start.elapsed().as_secs_f64(),
@@ -1424,6 +1407,50 @@ impl LowPads {
     }
 }
 
+/// Each signal net's access points of each pin, found on its own; none
+/// for a pin whose cell's kind shares its access points.
+type OwnAccess = IdVec<NetId, Vec<Option<Vec<AccessPoint>>>>;
+
+/// What fixed metal access points are judged clean against.
+struct FixedJudge<'a> {
+    layout: &'a Layout,
+    tiles: &'a ShapeTiles,
+    rules: &'a Rules,
+}
+
+/// The access points of every pin of every signal net of `db` whose
+/// cell's kind does not share them, each judged against fixed metal.
+fn own_access_points(
+    db: &NetlistDB,
+    tech: &RouteTech,
+    shared: &SharedAccess,
+    judged: &FixedJudge<'_>,
+) -> OwnAccess {
+    (0..db.nets.len())
+        .into_par_iter()
+        .map(|n| {
+            let net = NetId::new(n);
+            if !is_signal_net(db, net) {
+                return Vec::new();
+            }
+            let clean = |layer: LayerId, metal: &Rect<Dbu>| {
+                judge::wiring_is_clean(judged.layout, judged.tiles, judged.rules, net, layer, metal)
+            };
+            db.nets[net]
+                .pins
+                .iter()
+                .map(|&p| {
+                    shared
+                        .count(db, p)
+                        .is_none()
+                        .then(|| access_points(db, tech, p, &clean))
+                })
+                .collect()
+        })
+        .collect::<Vec<_>>()
+        .into()
+}
+
 /// Chooses one access point per pin and records its metal as the net's
 /// own, so other nets keep clear of it from the start; the chosen point
 /// becomes the pin's only one.
@@ -1443,7 +1470,7 @@ fn reserve_accesses(
     db: &NetlistDB,
     tech: &RouteTech,
     shared: &SharedAccess,
-    own: &IdVec<NetId, Vec<Option<Vec<AccessPoint>>>>,
+    own: &OwnAccess,
     occupancy: &mut Occupancy,
     fixed: &FixedView<'_>,
 ) -> IdVec<NetId, Vec<Vec<AccessPoint>>> {
