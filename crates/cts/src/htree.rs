@@ -18,7 +18,7 @@ use crate::kmeans::{Clustering, SinkPoint};
 use crate::options::{
     CLOCK_TREE_MAX_DEPTH, CLUSTERING_CAPACITY, CLUSTERING_POWER,
     FANOUT_LIMITED_CLUSTERING_CAPACITY, MACRO_SINK_CLUSTERING_SIZE, MAX_DIAMETER, MAX_LEAF_SINKS,
-    MAX_SLEW, SINK_CLUSTERING_SIZE, Settings, SinkClusteringMode,
+    MAX_SLEW, Microns, SINK_CLUSTERING_SIZE, Settings, SinkClusteringMode,
 };
 use crate::sink_clustering::SinkClustering;
 use crate::techchar::{CapSteps, LengthSteps, LengthUnit, SegmentLength, SlewSteps, TechChar};
@@ -35,9 +35,10 @@ const MIN_CLUSTERING_SINKS: usize = 200;
 /// The fewest macro sinks a tree clusters, as `HTreeBuilder`'s
 /// `min_clustering_macro_sinks_`.
 const MIN_CLUSTERING_MACRO_SINKS: usize = 10;
-/// The cluster diameters tried, in microns, as `CtsOptions`' default
+/// The cluster diameters tried, as `CtsOptions`' default
 /// `sinkClusteringDiameters`.
-const CLUSTER_DIAMETERS: [u32; 3] = [50, 100, 200];
+const CLUSTER_DIAMETERS: [Microns; 3] =
+    [Microns::new(50.0), Microns::new(100.0), Microns::new(200.0)];
 /// How far a segment search widens its slew and load match before giving
 /// up, as `HTreeBuilder::computeMinDelaySegment` stops.
 const MAX_TOLERANCE: u32 = 10;
@@ -566,7 +567,7 @@ impl Builder {
             .iter()
             .map(|s| in_segment_units(s.location, unit))
             .collect();
-        let max_diameter = (diameter * f64::from(ctx.dbu) / self.unit()) as f32;
+        let max_diameter = diameter.in_tree_units(ctx.dbu, self.unit());
         self.pre_sink_clustering(ctx, tech, &sinks, max_diameter, size);
         if sinks.len() <= self.min_clustering_sinks()
             || ctx.settings.sink_clustering == SinkClusteringMode::Unclustered
@@ -701,14 +702,14 @@ impl Builder {
             }
             (true, false) => {
                 for d in CLUSTER_DIAMETERS {
-                    let diameter = d as f32 * dbu / unit;
+                    let diameter = d.in_tree_units_single(dbu, unit);
                     matching.run(size as usize, diameter, unit_i);
                 }
             }
             (false, false) => {
                 for d in CLUSTER_DIAMETERS {
                     for &s in &ctx.settings.sink_clustering_sizes {
-                        let diameter = d as f32 * dbu / unit;
+                        let diameter = d.in_tree_units_single(dbu, unit);
                         matching.run(s as usize, diameter, unit_i);
                     }
                 }

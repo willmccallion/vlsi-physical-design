@@ -10,8 +10,8 @@ use crate::capacitance::Farads32;
 use crate::clock::{Clock, ClockSink, InstRef};
 use crate::htree::{Builder, TreeContext, TreeType};
 use crate::options::{
-    CtsOptions, DummyLoads, InsertionDelays, MACRO_MAX_DIAMETER, MAX_LEAF_SINKS, NdrStrategy,
-    Settings,
+    CtsOptions, DummyLoads, InsertionDelays, MACRO_MAX_DIAMETER, MAX_LEAF_SINKS, Microns,
+    NdrStrategy, Settings,
 };
 use crate::techchar::{CharSetup, LengthUnit, TechChar};
 use pare_common::db::design::{
@@ -834,7 +834,9 @@ impl Cts<'_> {
         let half = |side: Dbu| Dbu(((side.get() as f64 / unit) * unit / 2.0).ceil() as i64);
         let bloat = Point::new(half(root.x), half(root.y));
         let (blockages, macro_diameter) = merge_blockages(db, bloat);
-        if macro_diameter > 0.0 && self.setup.settings.macro_max_diameter.is_none() {
+        if let Some(macro_diameter) = macro_diameter
+            && self.setup.settings.macro_max_diameter.is_none()
+        {
             self.setup.settings.macro_max_diameter = Some(macro_diameter.max(MACRO_MAX_DIAMETER));
         }
         self.setup.buffer_sizes = sizes;
@@ -1213,7 +1215,7 @@ fn long_edge_clusters(tree: &SteinerTree, threshold: Dbu) -> Vec<Vec<usize>> {
 /// The placed blocks and hard placement blockages, each group closer than a
 /// buffer joined into the box around it, and the diameter macro clusters
 /// may take, as `TreeBuilder::mergeBlockages`.
-fn merge_blockages(db: &NetlistDB, bloat: Point<Dbu>) -> (Vec<Rect<Dbu>>, f64) {
+fn merge_blockages(db: &NetlistDB, bloat: Point<Dbu>) -> (Vec<Rect<Dbu>>, Option<Microns>) {
     let mut rects: Vec<Rect<Dbu>> = Vec::new();
     let (mut max_dx, mut max_dy) = (0_i64, 0_i64);
     for (c, cell) in db.cells.iter().enumerate() {
@@ -1257,11 +1259,7 @@ fn merge_blockages(db: &NetlistDB, bloat: Point<Dbu>) -> (Vec<Rect<Dbu>>, f64) {
     }
     (
         boxes.into_values().collect(),
-        if max_dx.max(max_dy) > 0 {
-            diameter
-        } else {
-            0.0
-        },
+        (max_dx.max(max_dy) > 0).then_some(Microns::new(diameter)),
     )
 }
 
@@ -1394,6 +1392,7 @@ mod tests {
                 corners(200_000, 200_000, 240_000, 240_000)
             ]
         );
+        let diameter = diameter.map(Microns::get).unwrap();
         assert!((diameter - 40.0).abs() < 1e-12, "{diameter}");
     }
 
@@ -1404,7 +1403,7 @@ mod tests {
         let (blockages, diameter) = merge_blockages(&db, Point::new(Dbu(100), Dbu(100)));
 
         assert!(blockages.is_empty());
-        assert!(diameter.abs() < 1e-12, "{diameter}");
+        assert_eq!(diameter, None);
     }
 
     #[test]
