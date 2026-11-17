@@ -355,15 +355,7 @@ fn route_detailed(
     };
     let mut state_saved = run.save_at(SavePoint::Global, || saver.global_state())?;
     dr.set_trace(trace_of(db, &run.trace)?);
-    let start = Instant::now();
-    let wires = assign_tracks(tech, &dr.occupancy, &grid, &global, &dr.pin_points());
-    dr.set_guides(global, &grid);
-    dr.set_track_wires(wires);
-    report(&Progress::Stage {
-        stage: Stage::TrackAssignment,
-        elapsed: start.elapsed(),
-    });
-    dr.log_inaccessible_pins();
+    assign_tracks_and_guides(tech, &mut dr, &grid, global, report);
     let mut summary = RoutingSummary {
         nets: nets.len(),
         inaccessible: dr.inaccessible_nets(),
@@ -379,30 +371,18 @@ fn route_detailed(
             saver.detailed_state(&dr, 0, &negotiation)
         })?;
     }
-    for round in negotiation.first_round..=config.detailed_iterations {
-        if negotiation.conflicted.is_empty() {
-            break;
-        }
-        let start = Instant::now();
-        let costs = round_costs(round, via);
-        let (flow, repaired) = negotiation.round(&mut dr, round, costs);
-        summary.rounds = round;
-        state_saved |= run.save_at(SavePoint::Round(round), || {
-            saver.detailed_state(&dr, round, &negotiation)
-        })?;
-        report(&Progress::DetailedRound(RoundReport {
-            round,
-            markers: dr.marker_count(),
-            conflicted: negotiation.conflicted.len(),
-            repaired: repaired.pieces,
-            conflict_cost: costs.conflict,
-            flow: flow.name(),
-            elapsed: start.elapsed(),
-        }));
+    let rounds = DetailedRounds {
+        saver: &saver,
+        via,
+        last: config.detailed_iterations,
+    };
+    let ran = rounds.run(&mut dr, &mut negotiation, run, report)?;
+    if let Some(last) = ran.last {
+        summary.rounds = last;
     }
     dr.log_conflicts();
     summary.conflicted = negotiation.conflicted;
-    summary.state_saved = state_saved;
+    summary.state_saved = state_saved || ran.saved;
     summary.incomplete = nets
         .iter()
         .copied()
@@ -416,6 +396,85 @@ fn route_detailed(
         .map(|&n| (n, dr.routes()[n].elems(tech)))
         .collect();
     Ok((wiring, summary, gcell_grid(db.die_area.min, gcell, nx, ny)))
+}
+
+/// Assigns tracks to the global routes, restricts each net's detailed
+/// route to its global route and gives the router the track wires,
+/// reported as the track assignment stage.
+fn assign_tracks_and_guides(
+    tech: &RouteTech,
+    dr: &mut DetailedRouter<'_>,
+    grid: &GlobalGrid,
+    global: GlobalRoutes,
+    report: &mut dyn FnMut(&Progress<'_>),
+) {
+    let start = Instant::now();
+    let wires = assign_tracks(tech, &dr.occupancy, grid, &global, &dr.pin_points());
+    dr.set_guides(global, grid);
+    dr.set_track_wires(wires);
+    report(&Progress::Stage {
+        stage: Stage::TrackAssignment,
+        elapsed: start.elapsed(),
+    });
+    dr.log_inaccessible_pins();
+}
+
+/// The rounds of detailed routing's negotiation after the first pass, up
+/// to round `last`, each priced from `via` and saved as the run asks.
+struct DetailedRounds<'s, 'a> {
+    saver: &'s StateSaver<'a>,
+    via: f64,
+    last: usize,
+}
+
+/// What the rounds did: the last round run, and whether any state was
+/// saved.
+struct RoundsRun {
+    last: Option<usize>,
+    saved: bool,
+}
+
+impl DetailedRounds<'_, '_> {
+    /// Runs rounds from the negotiation's first until none conflicts or
+    /// the last, reporting each.
+    ///
+    /// # Errors
+    ///
+    /// When a state the run asks for cannot be saved.
+    fn run(
+        &self,
+        dr: &mut DetailedRouter<'_>,
+        negotiation: &mut Negotiation,
+        run: &mut RunOptions<'_>,
+        report: &mut dyn FnMut(&Progress<'_>),
+    ) -> Result<RoundsRun, RouteError> {
+        let mut ran = RoundsRun {
+            last: None,
+            saved: false,
+        };
+        for round in negotiation.first_round..=self.last {
+            if negotiation.conflicted.is_empty() {
+                break;
+            }
+            let start = Instant::now();
+            let costs = round_costs(round, self.via);
+            let (flow, repaired) = negotiation.round(dr, round, costs);
+            ran.last = Some(round);
+            ran.saved |= run.save_at(SavePoint::Round(round), || {
+                self.saver.detailed_state(dr, round, negotiation)
+            })?;
+            report(&Progress::DetailedRound(RoundReport {
+                round,
+                markers: dr.marker_count(),
+                conflicted: negotiation.conflicted.len(),
+                repaired: repaired.pieces,
+                conflict_cost: costs.conflict,
+                flow: flow.name(),
+                elapsed: start.elapsed(),
+            }));
+        }
+        Ok(ran)
+    }
 }
 
 /// Where detailed routing's negotiation stands: the next round, the nets
