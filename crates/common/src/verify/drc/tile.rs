@@ -101,7 +101,7 @@ impl Grid {
     /// The grid of `core`-sized tiles covering `bounds`.
     fn from_bounds(bounds: Rect<Dbu>, core: Dbu) -> Self {
         let core = core.max(Dbu(1));
-        let count = |span: Dbu| (span.get() / core.get() + 1).max(1) as usize;
+        let count = |span: Dbu| (span.div_trunc(core) + 1).max(1) as usize;
         Self {
             origin: bounds.min,
             core,
@@ -162,7 +162,7 @@ impl Grid {
     /// The tile columns or rows from `lo` to `hi`, clamped to the grid.
     fn span(&self, lo: Dbu, hi: Dbu, origin: Dbu, count: usize) -> (usize, usize) {
         let index = |v: Dbu| {
-            usize::try_from((v - origin).get().div_euclid(self.core.get()))
+            usize::try_from((v - origin).div_floor(self.core))
                 .unwrap_or(0)
                 .min(count - 1)
         };

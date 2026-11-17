@@ -458,9 +458,7 @@ impl Escape {
             (db.die_area.min.x, db.die_area.width())
         };
         let chunk = (reach * PAD_CHUNK_REACHES).max(Dbu(1));
-        let chunks = usize::try_from((extent.get() + chunk.get() - 1) / chunk.get())
-            .unwrap_or(1)
-            .max(1);
+        let chunks = usize::try_from(extent.div_ceil(chunk)).unwrap_or(1).max(1);
         Self {
             pads: (0..tracks.len() * chunks)
                 .map(|_| OnceLock::new())
@@ -479,9 +477,7 @@ impl Escape {
     /// The chunk of via origins along a track that `along` falls in; the
     /// first and last chunks also take the origins beyond the die.
     fn chunk_of(&self, along: Dbu) -> usize {
-        let i = (along - self.chunk_origin)
-            .get()
-            .div_euclid(self.chunk.get());
+        let i = (along - self.chunk_origin).div_floor(self.chunk);
         (i.max(0) as usize).min(self.chunks - 1)
     }
 

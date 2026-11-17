@@ -166,7 +166,7 @@ impl PieceCheck<'_> {
         let r = rect.rect;
         let off = [r.min.x, r.min.y, r.max.x, r.max.y]
             .iter()
-            .any(|v| v.get() % grid.get() != 0);
+            .any(|v| !v.is_multiple_of(grid));
         if off && self.metal.has_route_in(rect.owner, &r) {
             let marker = Marker::new(
                 Violation::OffGrid,
