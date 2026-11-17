@@ -1,7 +1,7 @@
 //! Trial moves and swaps, journaled so they can be taken back, as
 //! `DetailedMgr::tryMove`, `DetailedMgr::trySwap` and their helpers.
 
-use super::{ImprovementError, Improver, Move, Result, Sealed, Trial};
+use super::{ArchRowId, ImprovementError, Improver, Move, Result, Sealed, Trial};
 use super::{NodeId, SegmentId};
 use pare_common::geom::dbu::Dbu;
 use pare_common::geom::point::Point;
@@ -178,14 +178,14 @@ impl Improver {
         let mut rb = self.segments[sj].row;
         // NOTE: DetailedMgr::tryMove3 tests >=, so a cell never reaches the
         // top `spanned` rows; PARE lowers it only when it would stick out.
-        while rb + spanned > self.arch.rows.len() {
-            let Some(below) = rb.checked_sub(1) else {
+        while rb.index() + spanned > self.arch.rows.len() {
+            let Some(below) = rb.down(1) else {
                 return Ok(false);
             };
             rb = below;
         }
         let mut segs = Vec::with_capacity(spanned);
-        for r in rb..rb + spanned {
+        for r in rb.stack(spanned) {
             let found = self.segs_in_row[r].iter().copied().find(|&s| {
                 let seg = &self.segments[s];
                 seg.region == self.group(n) && xj >= seg.min_x && xj <= seg.max_x
@@ -352,7 +352,7 @@ impl Improver {
         targets: &[Dbu],
         left_limit: Dbu,
         right_limit: Dbu,
-        row: usize,
+        row: ArchRowId,
     ) -> Option<Vec<Dbu>> {
         let row = &self.arch.rows[row];
         let (origin, spacing) = (row.left, row.site_spacing);
@@ -553,7 +553,7 @@ impl Improver {
     /// The site-aligned left edge nearest `x` that keeps the cell within
     /// `[xl, xr)`, as `DetailedMgr::alignPos`.
     pub(super) fn align(&self, n: NodeId, x: Dbu, xl: Dbu, xr: Dbu) -> Option<Dbu> {
-        let row = &self.arch.rows[0];
+        let row = &self.arch.rows[ArchRowId::BOTTOM];
         let xr = xr - self.width(n);
         let mut xp = xl.max(xr.min(x));
         xp = row.left + row.site_spacing * (xp - row.left).div_trunc(row.site_spacing);
@@ -753,7 +753,7 @@ mod tests {
                 "ROW ROW_1 core 200 2000 FS DO 29 BY 1 STEP 200 0 ;",
             )
         }));
-        let s = imp.segs_in_row[1][0];
+        let s = imp.segs_in_row[ArchRowId::new(1)][0];
         let cells = imp.cells_in_seg[s].clone();
 
         let pushed = imp

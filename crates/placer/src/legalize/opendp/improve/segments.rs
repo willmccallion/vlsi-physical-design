@@ -1,7 +1,7 @@
 //! Row segments and the cells in them, as `DetailedMgr` keeps them.
 
 use super::arch::merge_intervals;
-use super::{Blockage, ImprovementError, Improver, Result, Segment};
+use super::{ArchRowId, Blockage, ImprovementError, Improver, Result, Segment};
 use super::{NodeId, SegmentId};
 use crate::legalize::opendp::GroupId;
 use pare_common::db::indices::IdVec;
@@ -46,9 +46,9 @@ impl Improver {
     /// `DetailedMgr::findBlockages`.
     pub(super) fn find_blockages(&mut self) {
         let rows = self.arch.rows.len();
-        let mut blockages: Vec<Vec<Blockage>> = vec![Vec::new(); rows];
+        let mut blockages: IdVec<ArchRowId, Vec<Blockage>> = IdVec::filled(Vec::new(), rows);
         let mut block = |min_x: Dbu, max_x: Dbu, min_y: Dbu, max_y: Dbu| {
-            for (r, row) in self.arch.rows.iter().enumerate() {
+            for (r, row) in self.arch.rows.iter_enumerated() {
                 if min_y < row.top() && max_y > row.bottom {
                     blockages[r].push(Blockage { min_x, max_x });
                 }
@@ -91,8 +91,8 @@ impl Improver {
     /// their ends on sites, as `DetailedMgr::findSegments`.
     pub(super) fn find_segments(&mut self) -> Result<()> {
         self.segments = IdVec::new();
-        self.segs_in_row = vec![Vec::new(); self.arch.rows.len()];
-        for r in 0..self.arch.rows.len() {
+        self.segs_in_row = IdVec::filled(Vec::new(), self.arch.rows.len());
+        for r in self.arch.rows.ids() {
             let row = self.arch.rows[r];
             let lo = self.arch.min_x.max(row.left);
             let hi = self.arch.max_x.min(row.right());
@@ -122,7 +122,7 @@ impl Improver {
         }
         for region in self.grid.groups.ids() {
             let intervals = self.region_intervals(region);
-            for (r, row_intervals) in intervals.iter().enumerate() {
+            for (r, row_intervals) in intervals.iter_enumerated() {
                 for &(il, ir) in row_intervals {
                     self.split_segments(r, region, il, ir)?;
                 }
@@ -142,7 +142,7 @@ impl Improver {
         Ok(())
     }
 
-    fn add_segment(&mut self, row: usize, region: Option<GroupId>, min_x: Dbu, max_x: Dbu) {
+    fn add_segment(&mut self, row: ArchRowId, region: Option<GroupId>, min_x: Dbu, max_x: Dbu) {
         self.segs_in_row[row].push(self.segments.next_id());
         let _ = self.segments.push(Segment {
             row,
@@ -156,7 +156,7 @@ impl Improver {
     /// Gives the part of each segment of row `r` within `[il, ir)` to the
     /// region, splitting segments as needed; the pieces it adds are visited
     /// too, as in `DetailedMgr::findSegments`.
-    fn split_segments(&mut self, r: usize, region: GroupId, il: Dbu, ir: Dbu) -> Result<()> {
+    fn split_segments(&mut self, r: ArchRowId, region: GroupId, il: Dbu, ir: Dbu) -> Result<()> {
         let mut s = 0;
         while s < self.segs_in_row[r].len() {
             let id = self.segs_in_row[r][s];
@@ -193,15 +193,15 @@ impl Improver {
 
     /// The site-aligned spans of each row a region wholly covers in height,
     /// as `DetailedMgr::findRegionIntervals`.
-    fn region_intervals(&self, region: GroupId) -> Vec<Vec<(Dbu, Dbu)>> {
+    fn region_intervals(&self, region: GroupId) -> IdVec<ArchRowId, Vec<(Dbu, Dbu)>> {
         let rows = &self.arch.rows;
-        let height = rows[0].height;
-        let mut intervals = vec![Vec::new(); rows.len()];
+        let height = rows[ArchRowId::BOTTOM].height;
+        let mut intervals = IdVec::filled(Vec::new(), rows.len());
         for rect in &self.grid.groups[region].rects {
             let (xmin, xmax) = (rect.min.x, rect.max.x);
             let (ymin, ymax) = (rect.min.y, rect.max.y);
-            for (r, row) in rows.iter().enumerate() {
-                let lb = self.arch.min_y + height * r as i64;
+            for (r, row) in rows.iter_enumerated() {
+                let lb = self.arch.min_y + height * r.index() as i64;
                 if ymax < lb + height || ymin > lb {
                     continue;
                 }
@@ -227,7 +227,7 @@ impl Improver {
 
     /// Whether a cell's master may take the orientation of row `row`, as
     /// `checkMasterSymmetry`.
-    pub(super) fn master_symmetry_allows(&self, n: NodeId, row: usize) -> bool {
+    pub(super) fn master_symmetry_allows(&self, n: NodeId, row: ArchRowId) -> bool {
         match self.arch.rows[row].orient {
             Orientation::N | Orientation::FN => true,
             Orientation::FS | Orientation::S => self.grid.nodes[n].symmetry.x,
@@ -242,7 +242,7 @@ impl Improver {
         let (left, width) = (self.left(n), self.width(n));
         let mut best1: Option<(SegmentId, Dbu)> = None;
         let mut best2: Option<(SegmentId, Dbu)> = None;
-        let consider = |r: usize,
+        let consider = |r: ArchRowId,
                         vert: Dbu,
                         best1: &mut Option<(SegmentId, Dbu)>,
                         best2: &mut Option<(SegmentId, Dbu)>| {
@@ -267,14 +267,15 @@ impl Improver {
         };
         let rows = self.arch.rows.len();
         for offset in 1..=rows {
-            let vert = self.arch.rows[0].height * offset as i64;
-            if let Some(below) = row.checked_sub(offset)
+            let vert = self.arch.rows[ArchRowId::BOTTOM].height * offset as i64;
+            if let Some(below) = row.down(offset)
                 && within(vert, best1, best2)
             {
                 consider(below, vert, &mut best1, &mut best2);
             }
-            let above = row + offset;
-            if above < rows && within(vert, best1, best2) {
+            if let Some(above) = self.arch.row_up(row, offset)
+                && within(vert, best1, best2)
+            {
                 consider(above, vert, &mut best1, &mut best2);
             }
         }
@@ -291,9 +292,11 @@ impl Improver {
         }
         let mut best1: Option<(Vec<SegmentId>, f64)> = None;
         let mut best2: Option<(Vec<SegmentId>, f64)> = None;
-        for b in 0..self.arch.rows.len() {
-            let t = b + spanned - 1;
-            if t >= self.arch.rows.len() || !self.master_symmetry_allows(n, b) {
+        for b in self.arch.rows.ids() {
+            let Some(t) = self.arch.row_up(b, spanned - 1) else {
+                continue;
+            };
+            if !self.master_symmetry_allows(n, b) {
                 continue;
             }
             for &s in &self.segs_in_row[b] {
@@ -343,7 +346,7 @@ impl Improver {
         &self,
         s: SegmentId,
         (xmin, xmax): (Dbu, Dbu),
-        top: usize,
+        top: ArchRowId,
         spanned: usize,
         stack: &mut Vec<SegmentId>,
         candidates: &mut Vec<Vec<SegmentId>>,
@@ -351,7 +354,7 @@ impl Improver {
         stack.push(s);
         let row = self.segments[s].row;
         if row < top {
-            for &next in &self.segs_in_row[row + 1] {
+            for &next in &self.segs_in_row[row.up(1)] {
                 let seg = &self.segments[next];
                 if xmax.min(seg.max_x) - xmin.max(seg.min_x) > Dbu::ZERO {
                     let clipped = (xmin.max(seg.min_x), xmax.min(seg.max_x));
@@ -490,17 +493,17 @@ impl Improver {
                 }
             }
         }
-        let height = self.arch.rows[0].height;
+        let height = self.arch.rows[ArchRowId::BOTTOM].height;
         for n in self.net.nodes() {
             if self.is_terminal(n) || self.is_fixed(n) {
                 continue;
             }
             let rb = self.arch.closest_row(self.bottom(n));
-            let rt = rb + self.rows_spanned(n) - 1;
-            if rt >= self.arch.rows.len()
-                || self.bottom(n) != self.arch.rows[rb].bottom
-                || self.top(n) != self.arch.rows[rt].top()
-            {
+            let rt = self.arch.row_up(rb, self.rows_spanned(n) - 1);
+            if rt.is_none_or(|rt| {
+                self.bottom(n) != self.arch.rows[rb].bottom
+                    || self.top(n) != self.arch.rows[rt].top()
+            }) {
                 problems += 1;
             }
             if self.cell_segs[n].is_empty() {
@@ -514,7 +517,7 @@ impl Improver {
             }
             let first = (self.bottom(n) - self.arch.min_y).div_trunc(height);
             for r in first..first + spanned as i64 {
-                let Some(row) = usize::try_from(r).ok().and_then(|r| self.arch.rows.get(r)) else {
+                let Some(row) = self.arch.row_number(r).map(|r| &self.arch.rows[r]) else {
                     problems += 1;
                     continue;
                 };
@@ -529,7 +532,7 @@ impl Improver {
     /// Whether `position` lies within a blockage of a row the cell spans,
     /// as `DetailedMgr::isInsideABlockage`.
     fn inside_blockage(&self, n: NodeId, position: Dbu) -> bool {
-        let first = &self.arch.rows[0];
+        let first = &self.arch.rows[ArchRowId::BOTTOM];
         let rows = self.arch.rows.len() as i64;
         let start = (self.bottom(n) - first.bottom)
             .div_trunc(first.height)
@@ -540,7 +543,7 @@ impl Improver {
             .div_trunc(first.height)
             .min(rows);
         (start..end).any(|r| {
-            let row = &self.blockages[r as usize];
+            let row = &self.blockages[ArchRowId::new(r as usize)];
             let at = row.partition_point(|b| b.max_x < position);
             row.get(at)
                 .is_some_and(|b| position >= b.min_x && position <= b.max_x)
@@ -551,7 +554,7 @@ impl Improver {
     /// blockages, returning how many remain, as
     /// `DetailedMgr::getOneSiteGapViolationsPerSegment` with fixing on.
     pub(super) fn close_one_site_gaps(&mut self) -> Result<usize> {
-        let gap = self.arch.rows[0].site_width;
+        let gap = self.arch.rows[ArchRowId::BOTTOM].site_width;
         let mut violations = 0;
         for s in self.segments.ids() {
             if self.cells_in_seg[s].len() < 2 {
@@ -646,7 +649,7 @@ mod tests {
     fn a_blockage_of_the_top_row_is_seen_from_a_cell_in_it() {
         let mut imp = improver();
         let n = imp.movable_cells()[0];
-        let top_row = imp.arch.rows[imp.arch.rows.len() - 1].bottom;
+        let top_row = imp.arch.rows.iter().last().unwrap().bottom;
         imp.set_position(n, Point::new(Dbu(3000), top_row));
 
         assert!(imp.inside_blockage(n, Dbu(5000)));

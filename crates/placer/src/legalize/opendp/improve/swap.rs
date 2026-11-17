@@ -3,8 +3,8 @@
 //! or swap toward it, kept when the wirelength does not grow.
 
 use super::mis::converged;
+use super::{ArchRowId, Improver, Result, SKIP_NETS_LARGER_THAN, Trial};
 use super::{EdgeId, NetworkPinId, NodeId, SegmentId};
-use super::{Improver, Result, SKIP_NETS_LARGER_THAN, Trial};
 use pare_common::db::indices::IdVec;
 use pare_common::geom::dbu::Dbu;
 use pare_common::geom::point::Point;
@@ -181,7 +181,7 @@ fn centered(min: Dbu, max: Dbu, size: Dbu) -> Dbu {
 }
 
 /// The first segment of row `r` whose span holds `x`.
-pub(super) fn segment_at(imp: &Improver, r: usize, x: Dbu) -> Option<SegmentId> {
+pub(super) fn segment_at(imp: &Improver, r: ArchRowId, x: Dbu) -> Option<SegmentId> {
     imp.segs_in_row[r].iter().copied().find(|&s| {
         let seg = &imp.segments[s];
         x >= seg.min_x && x <= seg.max_x
@@ -240,7 +240,7 @@ fn vertical_trial(imp: &mut Improver, n: NodeId) -> Result<Option<Trial>> {
     let [si] = imp.cell_segs[n][..] else {
         return Ok(None);
     };
-    let ri = imp.segments[si].row;
+    let ri = imp.segments[si].row.index();
     let xj = centered(region.min.x, region.max.x, imp.width(n));
     let yj = centered(region.min.y, region.max.y, imp.height(n));
     let last = imp.arch.rows.len() - 1;
@@ -249,7 +249,7 @@ fn vertical_trial(imp: &mut Improver, n: NodeId) -> Result<Option<Trial>> {
     } else {
         (ri.saturating_sub(2), ri.saturating_sub(1))
     };
-    let rj = rmin + imp.random(rmax - rmin + 1);
+    let rj = ArchRowId::new(rmin + imp.random(rmax - rmin + 1));
     let Some(sj) = segment_at(imp, rj, xj) else {
         return Ok(None);
     };

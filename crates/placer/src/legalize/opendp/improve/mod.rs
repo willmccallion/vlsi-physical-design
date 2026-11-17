@@ -23,7 +23,7 @@ mod swap;
 
 use super::cpp::Mt19937;
 use super::{DetailedPlacementError, GroupId, NodeId, Placer};
-use arch::Arch;
+use arch::{Arch, ArchRowId};
 use network::Network;
 use pare_common::db::design::NetlistDB;
 use pare_common::db::indices::IdVec;
@@ -148,7 +148,7 @@ pare_common::define_index!(
 /// A stretch of a row between blockages and region edges, as `DetailedSeg`.
 #[derive(Clone, Copy, Debug)]
 struct Segment {
-    row: usize,
+    row: ArchRowId,
     region: Option<GroupId>,
     min_x: Dbu,
     max_x: Dbu,
@@ -215,13 +215,13 @@ struct Improver {
     arch: Arch,
     segments: IdVec<SegmentId, Segment>,
     /// The segments of each row.
-    segs_in_row: Vec<Vec<SegmentId>>,
+    segs_in_row: IdVec<ArchRowId, Vec<SegmentId>>,
     /// The cells of each segment by center, as `cellsInSeg_`.
     cells_in_seg: IdVec<SegmentId, Vec<NodeId>>,
     /// The segments each cell lies in, as `reverseCellToSegs_`.
     cell_segs: IdVec<NodeId, Vec<SegmentId>>,
     /// The blockages of each row.
-    blockages: Vec<Vec<Blockage>>,
+    blockages: IdVec<ArchRowId, Vec<Blockage>>,
     single_height: Vec<NodeId>,
     /// Multi-row cells by the rows they span.
     multi_height: Vec<Vec<NodeId>>,
@@ -246,7 +246,7 @@ impl Improver {
         let arch = Arch::new(db, &grid, &mut net)?;
         let node_count = net.node_count();
         let limit = Dbu(arch.width().max(arch.height()).get() << 1);
-        let row_height = arch.rows[0].height;
+        let row_height = arch.rows[ArchRowId::BOTTOM].height;
         let displacement = |rows: Option<RowHeights>| {
             rows.map_or(limit, |rows| rows.to_dbu(row_height).min(limit))
         };
@@ -260,10 +260,10 @@ impl Improver {
             ),
             arch,
             segments: IdVec::new(),
-            segs_in_row: Vec::new(),
+            segs_in_row: IdVec::new(),
             cells_in_seg: IdVec::new(),
             cell_segs: IdVec::filled(Vec::new(), node_count),
-            blockages: Vec::new(),
+            blockages: IdVec::new(),
             single_height: Vec::new(),
             multi_height: Vec::new(),
             fixed_cells: Vec::new(),
@@ -581,7 +581,7 @@ mod tests {
     /// The first move of a movable cell to a site of any segment that
     /// lands legally, its trial left open.
     fn first_legal_move(imp: &mut Improver) -> Option<Trial> {
-        let spacing = imp.arch.rows[0].site_spacing;
+        let spacing = imp.arch.rows[ArchRowId::BOTTOM].site_spacing;
         for n in imp.movable_cells() {
             let si = imp.cell_segs[n][0];
             for sj in imp.segments.ids() {
@@ -638,7 +638,7 @@ mod tests {
     fn a_cell_aligns_down_to_the_site_grid_within_its_span() {
         let imp = improver();
         let n = imp.movable_cells()[0];
-        let row = imp.arch.rows[0];
+        let row = imp.arch.rows[ArchRowId::BOTTOM];
         let site = |i: i64| row.left + row.site_spacing * i;
 
         let aligned = imp.align(n, site(3) + Dbu(1), site(0), site(40));
@@ -650,7 +650,7 @@ mod tests {
     fn a_cell_aligned_past_its_span_stops_at_the_last_site_it_fits() {
         let imp = improver();
         let n = imp.movable_cells()[0];
-        let row = imp.arch.rows[0];
+        let row = imp.arch.rows[ArchRowId::BOTTOM];
         let site = |i: i64| row.left + row.site_spacing * i;
         let right = site(40);
 
@@ -663,7 +663,7 @@ mod tests {
     fn a_cell_wider_than_its_span_has_no_alignment() {
         let imp = improver();
         let n = imp.movable_cells()[0];
-        let left = imp.arch.rows[0].left;
+        let left = imp.arch.rows[ArchRowId::BOTTOM].left;
 
         let aligned = imp.align(n, left, left, left + imp.width(n) - Dbu(1));
 
@@ -722,7 +722,7 @@ mod tests {
             .ids()
             .find(|&n| imp.grid.nodes[n].name == "tall")
             .unwrap();
-        let (si, sj) = (imp.cell_segs[n][0], imp.segs_in_row[2][0]);
+        let (si, sj) = (imp.cell_segs[n][0], imp.segs_in_row[ArchRowId::new(2)][0]);
 
         let moved = imp.try_move(n, si, Dbu(1000), sj).unwrap();
 
