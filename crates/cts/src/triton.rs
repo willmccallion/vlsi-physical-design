@@ -10,7 +10,7 @@ use crate::capacitance::Farads32;
 use crate::clock::{Clock, ClockSink, InstKind, InstRef};
 use crate::htree::{Builder, TreeContext, TreeType};
 use crate::options::{CtsOptions, MACRO_MAX_DIAMETER, MAX_LEAF_SINKS, NdrStrategy, Settings};
-use crate::techchar::{CharSetup, TechChar};
+use crate::techchar::{CharSetup, LengthUnit, TechChar};
 use pare_common::db::design::{
     NetlistDB, NonDefaultLayer, NonDefaultRule, PinOwner, PlacementStatus,
 };
@@ -121,6 +121,8 @@ pub(crate) struct TreeSetup {
     pub buffer_sizes: FxHashMap<BufferCell, Point<Dbu>>,
     /// Where buffers must not go.
     pub blockages: Vec<Rect<Dbu>>,
+    /// The characterization's length unit, the trees' too.
+    pub unit: LengthUnit,
 }
 
 impl TreeSetup {
@@ -180,6 +182,7 @@ pub fn synthesize(db: &mut NetlistDB, input: &CtsInput<'_>) -> Result<ClockTrees
             buffers,
             buffer_sizes: FxHashMap::default(),
             blockages: Vec::new(),
+            unit: tech.length_unit(),
         },
         builders: Vec::new(),
         visited: FxHashSet::default(),
@@ -464,7 +467,7 @@ impl Cts<'_> {
     }
 
     fn add_builder(&mut self, clock: Clock, input_net: NetId, parent: Option<usize>) -> usize {
-        let mut builder = Builder::new(clock, parent);
+        let mut builder = Builder::new(clock, parent, self.setup.unit);
         builder.top_input_net = Some(input_net);
         self.builders.push(builder);
         let index = self.builders.len() - 1;
@@ -822,7 +825,7 @@ impl Cts<'_> {
             let _ = sizes.insert(b, db.library.cell_macro(master).size);
         }
         let root = sizes[&self.setup.buffers.root];
-        let unit = f64::from(tech.length_unit().dbu());
+        let unit = tech.length_unit().to_f64();
         let half = |side: Dbu| Dbu(((side.get() as f64 / unit) * unit / 2.0).ceil() as i64);
         let bloat = Point::new(half(root.x), half(root.y));
         let (blockages, macro_diameter) = merge_blockages(db, bloat);

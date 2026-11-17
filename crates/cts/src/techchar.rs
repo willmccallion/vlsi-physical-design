@@ -230,6 +230,25 @@ impl SlewSteps {
 pub(crate) struct LengthUnit(u32);
 
 impl LengthUnit {
+    /// A unit `dbu` database units long.
+    #[must_use]
+    pub(crate) const fn new(dbu: u32) -> Self {
+        Self(dbu)
+    }
+
+    /// The unit in database units, in double precision.
+    #[must_use]
+    pub(crate) fn to_f64(self) -> f64 {
+        f64::from(self.0)
+    }
+
+    /// The unit in database units, in the single precision `TritonCTS`
+    /// scales sinks by.
+    #[must_use]
+    pub(crate) const fn to_f32(self) -> f32 {
+        self.0 as f32
+    }
+
     /// The unit in database units.
     #[must_use]
     pub(crate) const fn dbu(self) -> u32 {
@@ -607,7 +626,7 @@ impl TechChar {
             max_capacitance: CapSteps(range(|s| s.load).1),
             max_slew: SlewSteps(range(|s| s.output_slew).1),
             actual_min_input_cap: CapSteps(range(|s| s.input_cap).0),
-            length_unit: LengthUnit(length_unit),
+            length_unit: LengthUnit::new(length_unit),
             cap_per_dbu: FaradsPerDbu::new(0.0),
             sink_buffer_input_cap: Farads32::ZERO,
             wire_delay_rate: None,
@@ -1175,7 +1194,7 @@ fn compile(
         max_capacitance: CapSteps(bounds.cap.max),
         max_slew: SlewSteps(bounds.slew.max),
         actual_min_input_cap: CapSteps(actual_min_input_cap),
-        length_unit: LengthUnit(plan.length_unit),
+        length_unit: LengthUnit::new(plan.length_unit),
         cap_per_dbu,
         sink_buffer_input_cap: plan.sink_buffer_input_cap,
         wire_delay_rate: None,

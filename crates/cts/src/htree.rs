@@ -21,7 +21,7 @@ use crate::options::{
     MAX_SLEW, SINK_CLUSTERING_SIZE, Settings,
 };
 use crate::sink_clustering::SinkClustering;
-use crate::techchar::{CapSteps, LengthSteps, SegmentLength, SlewSteps, TechChar};
+use crate::techchar::{CapSteps, LengthSteps, LengthUnit, SegmentLength, SlewSteps, TechChar};
 use pare_common::db::liberty::BufferCell;
 use pare_common::geom::dbu::Dbu;
 use pare_common::geom::point::Point;
@@ -316,13 +316,13 @@ pub(crate) struct Builder {
     /// Where the sinks and leaf buffers are, which no buffer may take.
     sink_locations: FxHashSet<(u64, u64)>,
     top_level_sinks_clustered: BranchSinks,
-    wire_segment_unit: i32,
+    unit: LengthUnit,
     min_input_cap: CapSteps,
     min_length_sink_region: LengthSteps,
 }
 
 impl Builder {
-    pub fn new(clock: Clock, parent: Option<usize>) -> Self {
+    pub fn new(clock: Clock, parent: Option<usize>, unit: LengthUnit) -> Self {
         Self {
             clock,
             tree_type: TreeType::Regular,
@@ -337,7 +337,7 @@ impl Builder {
             topologies: Vec::new(),
             sink_locations: FxHashSet::default(),
             top_level_sinks_clustered: BranchSinks::default(),
-            wire_segment_unit: 0,
+            unit,
             min_input_cap: CapSteps::new(0),
             min_length_sink_region: LengthSteps::new(0),
         }
@@ -378,8 +378,9 @@ impl Builder {
         let _ = self.occupied.insert(to.key());
     }
 
+    /// The tree's length unit in database units.
     pub fn unit(&self) -> f64 {
-        f64::from(self.wire_segment_unit)
+        self.unit.to_f64()
     }
 
     /// The blockage `p` lies strictly inside, scaled to the tree's unit,
@@ -550,7 +551,6 @@ impl Builder {
     /// Clusters the sinks and finds the region the tree spans, as
     /// `HTreeBuilder::initSinkRegion`.
     fn init_sink_region(&mut self, ctx: &TreeContext<'_>, tech: &TechChar) {
-        self.wire_segment_unit = tech.length_unit().dbu() as i32;
         let (diameter, size) = if self.tree_type == TreeType::Macro {
             (
                 ctx.settings.macro_max_diameter(),
@@ -559,7 +559,7 @@ impl Builder {
         } else {
             (MAX_DIAMETER, SINK_CLUSTERING_SIZE)
         };
-        let unit = self.wire_segment_unit as f32;
+        let unit = self.unit.to_f32();
         let sinks: Vec<SinkPoint> = self
             .clock
             .sinks
@@ -631,7 +631,7 @@ impl Builder {
     /// has an insertion delay, the length of the tree's own clock wire with
     /// that delay, as `HTreeBuilder::preSinkClustering` does.
     fn index_sinks(&mut self, tech: &TechChar) {
-        let unit = self.wire_segment_unit as f32;
+        let unit = self.unit.to_f32();
         for s in &self.clock.sinks {
             let location = TreePoint::from_f32(in_segment_units(s.location, unit));
             let delay = s.insertion_delay;
@@ -667,7 +667,7 @@ impl Builder {
         max_diameter: f32,
         size: u32,
     ) -> Vec<Vec<usize>> {
-        let unit = self.wire_segment_unit as f32;
+        let unit = self.unit.to_f32();
         let is_macro = self.tree_type == TreeType::Macro;
         let mut matching =
             SinkClustering::new(!is_macro, tech.cap_per_dbu(), tech.sink_buffer_input_cap());
@@ -686,7 +686,7 @@ impl Builder {
         } else {
             (false, false)
         };
-        let unit_i = self.wire_segment_unit;
+        let unit_i = self.unit.dbu() as i32;
         let dbu = ctx.dbu as f32;
         match (size_set, diameter_set) {
             (true, true) => matching.run(size as usize, max_diameter, unit_i),
@@ -1667,8 +1667,11 @@ mod tests {
     /// A builder whose tree unit is one database unit, its sinks spread
     /// over the whole core.
     fn builder() -> Builder {
-        let mut builder = Builder::new(Clock::new(NetId::new(0), "clk", "clk"), None);
-        builder.wire_segment_unit = 1;
+        let mut builder = Builder::new(
+            Clock::new(NetId::new(0), "clk", "clk"),
+            None,
+            LengthUnit::new(1),
+        );
         builder.sink_region = Region::new(0.0, 0.0, 100.0, 100.0);
         builder
     }
@@ -1904,7 +1907,7 @@ mod tests {
             14_000,
         );
         let mut tree = builder();
-        tree.wire_segment_unit = 14_000;
+        tree.unit = LengthUnit::new(14_000);
         tree.min_input_cap = CapSteps::new(1);
         tree.min_length_sink_region = LengthSteps::new(20);
         tree.sink_region = Region::new(0.0, 0.0, 40.0, 40.0);
@@ -2005,7 +2008,7 @@ mod tests {
                 insertion_delay: Seconds::ZERO,
             });
         }
-        let mut tree = Builder::new(clock, None);
+        let mut tree = Builder::new(clock, None, tech.length_unit());
 
         tree.run(&scene.ctx(), &mut tech);
 
