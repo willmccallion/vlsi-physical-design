@@ -2,7 +2,7 @@
 //! cell is turned to suit its row, then mirrored about its vertical axis
 //! where that shortens its nets and breaks no placement rule.
 
-use super::{ArchRowId, EdgeId, NodeId};
+use super::{ArchRowId, EdgeId, NetworkPinId, NodeId, SegmentId};
 use super::{Improver, SKIP_NETS_LARGER_THAN};
 use pare_common::db::indices::IdVec;
 use pare_common::geom::dbu::Dbu;
@@ -72,8 +72,7 @@ fn flip_cells(imp: &mut Improver) {
     let mut marks: IdVec<EdgeId, usize> = IdVec::filled(0, imp.net.edges.len());
     let mut traversal = 0;
     for s in imp.segments.ids() {
-        let seg = imp.segments[s];
-        if !imp.arch.rows[seg.row].symmetry.y {
+        if !imp.arch.rows[imp.segments[s].row].symmetry.y {
             continue;
         }
         let count = imp.cells_in_seg[s].len();
@@ -83,61 +82,85 @@ fn flip_cells(imp: &mut Improver) {
                 continue;
             }
             traversal += 1;
-            let (mut old, mut new) = (0.0, 0.0);
-            for &pin in &imp.net.node_pins[n] {
-                let e = imp.net.pins[pin].edge;
-                let pins = &imp.net.edges[e];
-                if pins.len() <= 1 || pins.len() >= SKIP_NETS_LARGER_THAN || marks[e] == traversal {
-                    continue;
-                }
-                marks[e] = traversal;
-                let (mut old_lo, mut old_hi) = (f64::MAX, f64::MIN);
-                let (mut new_lo, mut new_hi) = (f64::MAX, f64::MIN);
-                for &p in pins {
-                    let other = &imp.net.pins[p];
-                    let center =
-                        imp.left(other.node).to_f64() + 0.5 * imp.width(other.node).to_f64();
-                    let x = center + other.offset.x.to_f64();
-                    old_lo = old_lo.min(x);
-                    old_hi = old_hi.max(x);
-                    let x = if other.node == n {
-                        center - other.offset.x.to_f64()
-                    } else {
-                        x
-                    };
-                    new_lo = new_lo.min(x);
-                    new_hi = new_hi.max(x);
-                }
-                old += old_hi - old_lo;
-                new += new_hi - new_lo;
-            }
-            if new >= old {
-                continue;
-            }
-            let cells = &imp.cells_in_seg[s];
-            let lx = i.checked_sub(1).map_or(seg.min_x, |p| imp.right(cells[p]));
-            let rx = cells.get(i + 1).map_or(seg.max_x, |&r| imp.left(r));
-            if imp.left(n) < lx || imp.right(n) > rx {
-                continue;
-            }
-            let from = imp.grid.nodes[n].orient;
-            let to = match from {
-                Orientation::N => Orientation::FN,
-                Orientation::S => Orientation::FS,
-                Orientation::FN => Orientation::N,
-                Orientation::FS => Orientation::S,
-                _ => continue,
-            };
-            // NOTE: diverges from DetailedOrient::flipCells, which asks only the
-            // row's symmetry; PARE also asks the master's.
-            if !imp.grid.nodes[n].symmetry.allows(to) {
-                continue;
-            }
-            imp.orient_node(n, to);
-            if imp.has_placement_violation(n) {
-                imp.orient_node(n, from);
+            let (old, new) = net_spans_flipped(imp, n, &mut marks, traversal);
+            if new < old {
+                flip_in_place(imp, s, i, n);
             }
         }
+    }
+}
+
+/// The summed horizontal spans of `n`'s nets as they are and with `n`
+/// mirrored, each net counted once in a `traversal`, skipping nets of one
+/// pin or of [`SKIP_NETS_LARGER_THAN`] or more.
+fn net_spans_flipped(
+    imp: &Improver,
+    n: NodeId,
+    marks: &mut IdVec<EdgeId, usize>,
+    traversal: usize,
+) -> (f64, f64) {
+    let (mut old, mut new) = (0.0, 0.0);
+    for &pin in &imp.net.node_pins[n] {
+        let e = imp.net.pins[pin].edge;
+        let pins = &imp.net.edges[e];
+        if pins.len() <= 1 || pins.len() >= SKIP_NETS_LARGER_THAN || marks[e] == traversal {
+            continue;
+        }
+        marks[e] = traversal;
+        let (old_span, new_span) = span_flipped(imp, pins, n);
+        old += old_span;
+        new += new_span;
+    }
+    (old, new)
+}
+
+/// The horizontal span of `pins` as they are and with node `n` mirrored.
+fn span_flipped(imp: &Improver, pins: &[NetworkPinId], n: NodeId) -> (f64, f64) {
+    let (mut old_lo, mut old_hi) = (f64::MAX, f64::MIN);
+    let (mut new_lo, mut new_hi) = (f64::MAX, f64::MIN);
+    for &p in pins {
+        let other = &imp.net.pins[p];
+        let center = imp.left(other.node).to_f64() + 0.5 * imp.width(other.node).to_f64();
+        let x = center + other.offset.x.to_f64();
+        old_lo = old_lo.min(x);
+        old_hi = old_hi.max(x);
+        let x = if other.node == n {
+            center - other.offset.x.to_f64()
+        } else {
+            x
+        };
+        new_lo = new_lo.min(x);
+        new_hi = new_hi.max(x);
+    }
+    (old_hi - old_lo, new_hi - new_lo)
+}
+
+/// Mirrors `n`, the `i`th cell of segment `s`, where it lies within its
+/// neighbours, its master allows it, and the result is legal.
+fn flip_in_place(imp: &mut Improver, s: SegmentId, i: usize, n: NodeId) {
+    let seg = imp.segments[s];
+    let cells = &imp.cells_in_seg[s];
+    let lx = i.checked_sub(1).map_or(seg.min_x, |p| imp.right(cells[p]));
+    let rx = cells.get(i + 1).map_or(seg.max_x, |&r| imp.left(r));
+    if imp.left(n) < lx || imp.right(n) > rx {
+        return;
+    }
+    let from = imp.grid.nodes[n].orient;
+    let to = match from {
+        Orientation::N => Orientation::FN,
+        Orientation::S => Orientation::FS,
+        Orientation::FN => Orientation::N,
+        Orientation::FS => Orientation::S,
+        _ => return,
+    };
+    // NOTE: diverges from DetailedOrient::flipCells, which asks only the
+    // row's symmetry; PARE also asks the master's.
+    if !imp.grid.nodes[n].symmetry.allows(to) {
+        return;
+    }
+    imp.orient_node(n, to);
+    if imp.has_placement_violation(n) {
+        imp.orient_node(n, from);
     }
 }
 
