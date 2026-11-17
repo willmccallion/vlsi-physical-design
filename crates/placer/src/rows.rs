@@ -5,6 +5,7 @@ use pare_common::db::design::{BlockageKind, NetlistDB};
 use pare_common::db::indices::CellId;
 use pare_common::db::library::MacroClass;
 use pare_common::geom::dbu::Dbu;
+use pare_common::geom::interval::{Interval, gaps};
 use pare_common::geom::orient::Orientation;
 use pare_common::geom::point::Point;
 use pare_common::geom::rect::Rect;
@@ -17,6 +18,18 @@ pub(crate) struct RowSpan {
     pub(crate) x_max: Dbu,
     pub(crate) site: Dbu,
     pub(crate) orient: Orientation,
+}
+
+impl RowSpan {
+    /// Its sites' stretch along X.
+    pub(crate) const fn span(&self) -> Interval {
+        Interval::new(self.x_min, self.x_max)
+    }
+
+    /// The band along Y it covers.
+    pub(crate) fn band(&self) -> Interval {
+        Interval::new(self.y, self.y + self.height)
+    }
 }
 
 /// Rows from the design, with multi-row `DO ... BY n` statements split up,
@@ -188,36 +201,22 @@ pub(crate) fn blocked_stretches(db: &NetlistDB, rows: &[RowSpan]) -> Vec<Vec<Rec
     blocked
 }
 
-/// Free X intervals of `[lo, hi)` not covered by any obstacle overlapping the
-/// open band `(y0, y1)`.
-pub(crate) fn free_intervals(
-    obstacles: &[Rect<Dbu>],
-    lo: Dbu,
-    hi: Dbu,
-    y0: Dbu,
-    y1: Dbu,
-) -> Vec<(Dbu, Dbu)> {
-    let mut blocked: Vec<(Dbu, Dbu)> = obstacles
-        .iter()
-        .filter(|r| r.min.y < y1 && r.max.y > y0 && r.min.x < hi && r.max.x > lo)
-        .map(|r| (r.min.x, r.max.x))
+/// The stretches of `span` along X that no obstacle overlapping the open
+/// band `band` along Y covers.
+pub(crate) fn free_intervals<'a>(
+    obstacles: impl IntoIterator<Item = &'a Rect<Dbu>>,
+    span: Interval,
+    band: Interval,
+) -> Vec<Interval> {
+    let mut blocked: Vec<Interval> = obstacles
+        .into_iter()
+        .filter(|r| {
+            r.min.y < band.hi && r.max.y > band.lo && r.min.x < span.hi && r.max.x > span.lo
+        })
+        .map(Rect::x_span)
         .collect();
-    blocked.sort();
-    let mut free = Vec::new();
-    let mut cursor = lo;
-    for (b0, b1) in blocked {
-        if b0 > cursor {
-            free.push((cursor, b0.min(hi)));
-        }
-        cursor = cursor.max(b1);
-        if cursor >= hi {
-            break;
-        }
-    }
-    if cursor < hi {
-        free.push((cursor, hi));
-    }
-    free
+    blocked.sort_unstable();
+    gaps(blocked, span)
 }
 
 /// Rounds `x` down to the site grid starting at `origin`.

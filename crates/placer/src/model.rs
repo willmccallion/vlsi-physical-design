@@ -10,6 +10,7 @@ use crate::zones::{Zone, ZoneId, Zones};
 use pare_common::db::design::{NetlistDB, PinOwner, PlacementStatus};
 use pare_common::db::indices::{CellId, IdVec, NetId, PinId};
 use pare_common::geom::dbu::{Dbu, DbuArea, DbuPerMicron};
+use pare_common::geom::interval::Interval;
 use pare_common::geom::point::Point;
 use pare_common::geom::rect::Rect;
 
@@ -107,11 +108,11 @@ pub struct PlacementModel {
     pub units: DbuPerMicron,
 }
 
-/// The rectangle from (`x0`, `y0`) to (`x1`, `y1`) in microns.
-fn microns_rect(units: DbuPerMicron, x0: Dbu, x1: Dbu, y0: Dbu, y1: Dbu) -> Rect<f64> {
+/// The rectangle spanning `x` and `y`, in microns.
+fn microns_rect(units: DbuPerMicron, x: Interval, y: Interval) -> Rect<f64> {
     Rect::new(
-        units.point_in_microns(Point::new(x0, y0)),
-        units.point_in_microns(Point::new(x1, y1)),
+        units.point_in_microns(Point::new(x.lo, y.lo)),
+        units.point_in_microns(Point::new(x.hi, y.hi)),
     )
 }
 
@@ -165,19 +166,19 @@ fn zone_rows(db: &NetlistDB, zones: &Zones, spans: &[RowSpan]) -> IdVec<ZoneId, 
             let rects = if spans.is_empty() {
                 whole_zone(db, zones, zone)
                     .iter()
-                    .map(|r| microns_rect(units, r.min.x, r.max.x, r.min.y, r.max.y))
+                    .map(|r| microns_rect(units, r.x_span(), r.y_span()))
                     .collect()
             } else {
                 spans
                     .iter()
                     .zip(&blocked)
                     .flat_map(|(r, stretches)| {
-                        let (y0, y1) = (r.y, r.y + r.height);
+                        let band = r.band();
                         zones
-                            .intervals(zone, r.x_min, r.x_max, y0, y1)
+                            .intervals(zone, r.span(), band)
                             .into_iter()
-                            .flat_map(move |(a, b)| free_intervals(stretches, a, b, y0, y1))
-                            .map(move |(a, b)| microns_rect(units, a, b, y0, y1))
+                            .flat_map(move |span| free_intervals(stretches, span, band))
+                            .map(move |span| microns_rect(units, span, band))
                     })
                     .collect()
             };
@@ -280,7 +281,7 @@ impl PlacementModel {
             die: Rect::new(um(db.die_area.min), um(db.die_area.max)),
             rows: spans
                 .iter()
-                .map(|r| microns_rect(units, r.x_min, r.x_max, r.y, r.y + r.height))
+                .map(|r| microns_rect(units, r.span(), r.band()))
                 .collect(),
             sizes: db.cells.ids().map(|id| um(db.cell_size(id))).collect(),
             density_sizes: pin_density_sizes(db).into_iter().map(um).collect(),

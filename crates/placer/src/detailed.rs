@@ -14,10 +14,11 @@
 use crate::rows::{
     RowSpan, classify, expand_rows, fixed_obstacles, free_intervals, snap_down, snap_up,
 };
-use crate::zones::{Zone, Zones, intersect};
+use crate::zones::{Zone, Zones};
 use pare_common::db::design::{NetlistDB, PinOwner};
 use pare_common::db::indices::{CellId, IdVec, LayerId, MacroId, NetId};
 use pare_common::geom::dbu::Dbu;
+use pare_common::geom::interval::{Interval, intersect_sorted};
 use pare_common::geom::orient::Orientation;
 use pare_common::geom::point::Point;
 use pare_common::geom::rect::Rect;
@@ -1321,12 +1322,16 @@ fn cut_segments(
     let mut of_row = IdVec::with_capacity(rows.len());
     for (r, row) in rows.iter_enumerated() {
         let start = segments.next_id();
-        let lo = row.x_min.max(db.die_area.min.x);
-        let hi = row.x_max.min(db.die_area.max.x);
-        let (y0, y1) = (row.y, row.y + row.height);
-        let free = free_intervals(obstacles, lo, hi, y0, y1);
+        let span = Interval::new(
+            row.x_min.max(db.die_area.min.x),
+            row.x_max.min(db.die_area.max.x),
+        );
+        let band = row.band();
+        let free = free_intervals(obstacles, span, band);
         for zone in zones.all() {
-            for (a, b) in intersect(&free, &zones.intervals(zone, lo, hi, y0, y1)) {
+            for Interval { lo: a, hi: b } in
+                intersect_sorted(&free, &zones.intervals(zone, span, band))
+            {
                 let (a, b) = (
                     snap_up(a, row.x_min, row.site),
                     snap_down(b, row.x_min, row.site),
