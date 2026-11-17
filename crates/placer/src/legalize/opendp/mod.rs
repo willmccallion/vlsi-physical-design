@@ -194,6 +194,34 @@ impl Pixel {
     }
 }
 
+/// The class of a node's master, of those the legalizer takes in.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum NodeClass {
+    /// `CORE`: a standard cell, which gets placed.
+    Core,
+    /// `ENDCAP`: placed already, written back with the standard cells.
+    Endcap,
+    /// `BLOCK`: a macro, whose sites are hopeless for other cells.
+    Block,
+}
+
+impl NodeClass {
+    /// The class of a master the legalizer takes in; none for any other.
+    const fn of(class: MacroClass) -> Option<Self> {
+        match class {
+            MacroClass::Core(_) => Some(Self::Core),
+            MacroClass::Endcap => Some(Self::Endcap),
+            MacroClass::Block => Some(Self::Block),
+            _ => None,
+        }
+    }
+
+    /// Whether it is a standard cell or an end cap, which get written back.
+    const fn is_std_cell(self) -> bool {
+        matches!(self, Self::Core | Self::Endcap)
+    }
+}
+
 /// A cell as the legalizer sees it, as `OpenDP`'s `Node`.
 #[derive(Clone, Debug)]
 #[allow(clippy::struct_excessive_bools)] // each is one of the node's independent flags
@@ -212,11 +240,7 @@ struct Node {
     orient: Orientation,
     /// Where the design had it, relative to the core.
     init: Point<Dbu>,
-    /// Whether it is a standard cell or an end cap, which get written back.
-    std_cell: bool,
-    /// Whether its master is of class `CORE`, which gets placed.
-    core: bool,
-    block: bool,
+    class: NodeClass,
     multi_row: bool,
     site: Option<SiteId>,
     symmetry: Symmetry,
@@ -489,13 +513,9 @@ impl Placer {
         for id in order {
             let c = &db.cells[id];
             let m = db.cell_macro(id);
-            let placeable = matches!(
-                m.class,
-                MacroClass::Core(_) | MacroClass::Block | MacroClass::Endcap
-            );
-            if !placeable {
+            let Some(class) = NodeClass::of(m.class) else {
                 continue;
-            }
+            };
             let fixed = matches!(c.status, PlacementStatus::Fixed | PlacementStatus::Cover);
             let bbox = db.cell_bbox(id);
             if fixed && !shell.intersects(&bbox) {
@@ -516,9 +536,7 @@ impl Placer {
                 height: size.y,
                 orient: c.orient,
                 init: c.location - self.rows.core().min,
-                std_cell: matches!(m.class, MacroClass::Core(_) | MacroClass::Endcap),
-                core: matches!(m.class, MacroClass::Core(_)),
-                block: m.class == MacroClass::Block,
+                class,
                 multi_row: uniform_row_height.is_some_and(|h| m.size.y > h),
                 site: m.site,
                 symmetry: m.symmetry,
@@ -593,7 +611,7 @@ impl Placer {
                 continue;
             }
             let node = &self.nodes[n];
-            let block = node.block;
+            let block = node.class == NodeClass::Block;
             // NOTE: Grid::visitCellPixels paints only a master's OVERLAP
             // obstructions when it has some; PARE's library drops OVERLAP.
             let cells = self.rows.covering(&node.bbox());
@@ -614,7 +632,7 @@ impl Placer {
     fn place(&mut self) -> Result<DetailedPlacement, DetailedPlacementError> {
         let mut order: Vec<NodeId> = Vec::new();
         for (n, node) in self.nodes.iter_enumerated() {
-            if !node.core || node.fixed || node.group.is_some() || node.placed {
+            if node.class != NodeClass::Core || node.fixed || node.group.is_some() || node.placed {
                 continue;
             }
             if self.grid_width(node) > self.rows.row_site_count()
@@ -744,7 +762,7 @@ impl Placer {
         }
         if let Some(block) = pixel.node() {
             let block = &self.nodes[block];
-            if block.block {
+            if block.class == NodeClass::Block {
                 let b = block.bbox();
                 if legal.x + node.width >= b.min.x
                     && legal.x <= b.max.x
@@ -1128,7 +1146,7 @@ impl Placer {
     /// `Opendp::updateDbInstLocations`.
     fn write_back(&self, db: &mut NetlistDB) {
         for node in &self.nodes {
-            if node.fixed || !node.std_cell {
+            if node.fixed || !node.class.is_std_cell() {
                 continue;
             }
             let c = &mut db.cells[node.cell];
