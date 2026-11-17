@@ -9,10 +9,11 @@
 use crate::dmp::PiModel;
 use crate::netlist::Netlist;
 use crate::steiner::{self, SteinerTree};
+use pare_common::db::design::NetlistDB;
 use pare_common::db::global_route::NetRoute;
 use pare_common::db::indices::{IdVec, LayerId, NetId, PinId};
 use pare_common::db::liberty::Edge;
-use pare_common::geom::dbu::Dbu;
+use pare_common::geom::dbu::{Dbu, DbuPerMicron};
 use pare_common::geom::point::Point;
 use pare_common::units::{Farads, FaradsPerMeter, Meters, Ohms, OhmsPerMeter, Seconds};
 
@@ -117,6 +118,99 @@ pub struct NetParasitics {
     pin_node: Vec<(PinId, RcNode)>,
 }
 
+/// The Steiner tree over `pins`, sorted by place, rooted at the driver.
+fn steiner_over(netlist: &Netlist<'_>, net: NetId, pins: &[(PinId, Point<Dbu>)]) -> SteinerTree {
+    let driver = pins
+        .iter()
+        .position(|&(p, _)| netlist.is_driver(p))
+        .unwrap_or(0);
+    let points: Vec<Point<Dbu>> = pins.iter().map(|&(_, at)| at).collect();
+    let tree = steiner::prim_dijkstra(&points, driver, steiner::DEFAULT_ALPHA);
+    // NOTE: SteinerTreeBuilder falls back to FLUTE when checkTree fails;
+    // PARE keeps the Prim-Dijkstra tree, which still joins every pin.
+    if !steiner::is_valid(&tree) {
+        log::debug!(
+            "Steiner tree of {} crosses itself; OpenROAD would fall back to FLUTE here",
+            netlist.db.nets[net].name
+        );
+    }
+    tree
+}
+
+/// The resistors and node capacitances of a Steiner-tree estimate as they
+/// are built: a node per tree node, then the pins' own nodes.
+struct SteinerNetwork {
+    resistors: Vec<Resistor>,
+    wire_cap: IdVec<RcNode, Farads>,
+}
+
+impl SteinerNetwork {
+    /// The wires along each branch of `tree`, half of each wire's
+    /// capacitance at either end, as `estimateWireParasiticSteiner`.
+    fn along(tree: &SteinerTree, rc: &WireRc, dbu: DbuPerMicron) -> Self {
+        let mut network = Self {
+            resistors: Vec::new(),
+            wire_cap: IdVec::filled(Farads::ZERO, tree.nodes.len()),
+        };
+        for (index, parent_index) in tree.branches() {
+            let (node, parent) = (RcNode::new(index), RcNode::new(parent_index));
+            let length_dbu = tree.nodes[index].manhattan(tree.nodes[parent_index]);
+            if length_dbu == Dbu(0) {
+                network.join(node, parent);
+                continue;
+            }
+            // NOTE: estimateWireParasiticSteiner weighs a branch by the
+            // horizontal and vertical RC, scales an NDR net's resistance by
+            // its width and keeps values in float; PARE takes the one wire RC
+            // in double, the same under set_wire_rc -layer bar the last bits.
+            let length = Meters::from_dbu(length_dbu, dbu);
+            let cap = length * rc.capacitance;
+            network.wire_cap[node] += cap / 2.0;
+            network.wire_cap[parent] += cap / 2.0;
+            network.resistors.push(Resistor {
+                a: node,
+                b: parent,
+                resistance: length * rc.resistance,
+            });
+        }
+        network
+    }
+
+    /// Joins `a` and `b` through the negligible resistance `OpenROAD` puts
+    /// between points that coincide.
+    fn join(&mut self, a: RcNode, b: RcNode) {
+        self.resistors.push(Resistor {
+            a,
+            b,
+            resistance: JOIN_RESISTANCE,
+        });
+    }
+
+    /// Gives `pin` a node of its own, joined to the tree node `terminal`
+    /// through a cut per layer between the pin's and the wires', and
+    /// returns that node.
+    fn join_pin(&mut self, db: &NetlistDB, pin: PinId, terminal: RcNode, rc: &WireRc) -> RcNode {
+        // NOTE: parasiticNodeConnectPins gives each cut set_layer_rc -via's
+        // resistance, at least 1 mOhm, and joins through one 1 mOhm cut
+        // without any set_layer_rc; PARE gives each cut 1 mOhm, the same
+        // where set_layer_rc sets layers but no vias, as ORFS Nangate45.
+        let pin_layer = db.pin_reference_layer(pin).unwrap_or(rc.layer);
+        let cuts = pin_layer.index().abs_diff(rc.layer.index()).max(1);
+        let pin_node = self.wire_cap.push(Farads::ZERO);
+        let mut from = pin_node;
+        for cut in 0..cuts {
+            let to = if cut + 1 == cuts {
+                terminal
+            } else {
+                self.wire_cap.push(Farads::ZERO)
+            };
+            self.join(from, to);
+            from = to;
+        }
+        pin_node
+    }
+}
+
 impl NetParasitics {
     /// Estimates the parasitics of `net` from where its pins are, or `None`
     /// for a net with fewer than two pins.
@@ -132,82 +226,23 @@ impl NetParasitics {
             return None;
         }
         pins.sort_by_key(|&(_, at)| at);
-        let driver = pins
+        let tree = steiner_over(netlist, net, &pins);
+        let mut network = SteinerNetwork::along(&tree, rc, db.dbu());
+        let pin_node = pins
             .iter()
-            .position(|&(p, _)| netlist.is_driver(p))
-            .unwrap_or(0);
-        let points: Vec<Point<Dbu>> = pins.iter().map(|&(_, at)| at).collect();
-        let tree = steiner::prim_dijkstra(&points, driver, steiner::DEFAULT_ALPHA);
-        // NOTE: SteinerTreeBuilder falls back to FLUTE when checkTree fails;
-        // PARE keeps the Prim-Dijkstra tree, which still joins every pin.
-        if !steiner::is_valid(&tree) {
-            log::debug!(
-                "Steiner tree of {} crosses itself; OpenROAD would fall back to FLUTE here",
-                db.nets[net].name
-            );
-        }
+            .enumerate()
+            .map(|(terminal, &(pin, _))| {
+                (pin, network.join_pin(db, pin, RcNode::new(terminal), rc))
+            })
+            .collect();
         let terminal_pins: Vec<Vec<PinId>> = pins.iter().map(|&(p, _)| vec![p]).collect();
-
-        let mut resistors = Vec::new();
-        let mut wire_cap: IdVec<RcNode, Farads> = IdVec::filled(Farads::ZERO, tree.nodes.len());
-        for (index, parent_index) in tree.branches() {
-            let (node, parent) = (RcNode::new(index), RcNode::new(parent_index));
-            let length_dbu = tree.nodes[index].manhattan(tree.nodes[parent_index]);
-            if length_dbu == Dbu(0) {
-                resistors.push(Resistor {
-                    a: node,
-                    b: parent,
-                    resistance: JOIN_RESISTANCE,
-                });
-                continue;
-            }
-            // NOTE: estimateWireParasiticSteiner weighs a branch by the
-            // horizontal and vertical RC, scales an NDR net's resistance by
-            // its width and keeps values in float; PARE takes the one wire RC
-            // in double, the same under set_wire_rc -layer bar the last bits.
-            let length = Meters::from_dbu(length_dbu, db.dbu());
-            let cap = length * rc.capacitance;
-            wire_cap[node] += cap / 2.0;
-            wire_cap[parent] += cap / 2.0;
-            resistors.push(Resistor {
-                a: node,
-                b: parent,
-                resistance: length * rc.resistance,
-            });
-        }
-
-        let mut pin_node = Vec::with_capacity(pins.len());
-        for (terminal, &(pin, _)) in pins.iter().enumerate() {
-            // NOTE: parasiticNodeConnectPins gives each cut set_layer_rc -via's
-            // resistance, at least 1 mOhm, and joins through one 1 mOhm cut
-            // without any set_layer_rc; PARE gives each cut 1 mOhm, the same
-            // where set_layer_rc sets layers but no vias, as ORFS Nangate45.
-            let pin_layer = db.pin_reference_layer(pin).unwrap_or(rc.layer);
-            let cuts = pin_layer.index().abs_diff(rc.layer.index());
-            let pin_rc_node = wire_cap.push(Farads::ZERO);
-            let mut from = pin_rc_node;
-            for cut in 0..cuts.max(1) {
-                let to = if cut + 1 == cuts.max(1) {
-                    RcNode::new(terminal)
-                } else {
-                    wire_cap.push(Farads::ZERO)
-                };
-                resistors.push(Resistor {
-                    a: from,
-                    b: to,
-                    resistance: JOIN_RESISTANCE,
-                });
-                from = to;
-            }
-            pin_node.push((pin, pin_rc_node));
-        }
         Some(Self {
             shape: WireShape::Steiner {
                 tree,
                 terminal_pins,
             },
-            resistors,
-            wire_cap,
+            resistors: network.resistors,
+            wire_cap: network.wire_cap,
             pin_node,
         })
     }
@@ -391,7 +426,6 @@ mod tests {
     use crate::testing::{
         DefSections, cells, clock_cells_source, def_text, design, metal2_wires, pin,
     };
-    use pare_common::db::design::NetlistDB;
 
     /// A flop driving two buffers, one level with it 20 microns away and
     /// one 100 microns above that, and a buffer whose output drives nothing.
