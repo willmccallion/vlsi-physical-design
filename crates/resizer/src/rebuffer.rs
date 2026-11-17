@@ -1066,33 +1066,50 @@ impl Rebuffer {
                 let right_options =
                     self.area_options(resizer, right, slack_target, alpha, upstream_wire)?;
                 let threshold = Fixed::lerp(node.slack, slack_target + node.arrival_delay, alpha);
-                let envelope = node.metrics().with_slack(threshold);
-                let fanout_limit = self
-                    .driver
-                    .as_ref()
-                    .map_or(f64::INFINITY, |d| d.fanout_limit);
-                let mut fallback: Option<BnetPtr> = None;
-                let mut options = Vec::with_capacity(left_options.len() * right_options.len());
-                for l in &left_options {
-                    for r in &right_options {
-                        let junction = Bnet::junction(node.at, Rc::clone(l), Rc::clone(r));
-                        if fallback.is_none() && junction.fits(&envelope) {
-                            fallback = Some(Rc::clone(&junction));
-                        }
-                        if junction.fanout <= fanout_limit {
-                            options.push(junction);
-                        }
-                    }
-                }
-                prune_cap_against_area(&mut options);
-                if !options.iter().any(|o| o.fits(&envelope))
-                    && let Some(fallback) = fallback
-                {
-                    insert_assured(&mut options, fallback);
-                }
-                options
+                let sides = JunctionSides {
+                    left: &left_options,
+                    right: &right_options,
+                };
+                self.paired_area_options(node, sides, threshold)
             }
         })
+    }
+
+    /// Every pairing of the junction `node`'s side options within the
+    /// fanout limit, pruned to those whose capacitance beats every
+    /// smaller one's, with the first pairing that fits `threshold` put
+    /// back where none left does.
+    fn paired_area_options(
+        &self,
+        node: &Bnet,
+        sides: JunctionSides<'_>,
+        threshold: Fixed,
+    ) -> Vec<BnetPtr> {
+        let envelope = node.metrics().with_slack(threshold);
+        let fanout_limit = self
+            .driver
+            .as_ref()
+            .map_or(f64::INFINITY, |d| d.fanout_limit);
+        let mut fallback: Option<BnetPtr> = None;
+        let mut options = Vec::with_capacity(sides.left.len() * sides.right.len());
+        for l in sides.left {
+            for r in sides.right {
+                let junction = Bnet::junction(node.at, Rc::clone(l), Rc::clone(r));
+                if fallback.is_none() && junction.fits(&envelope) {
+                    fallback = Some(Rc::clone(&junction));
+                }
+                if junction.fanout <= fanout_limit {
+                    options.push(junction);
+                }
+            }
+        }
+        prune_cap_against_area(&mut options);
+        if !options.iter().any(|o| o.fits(&envelope))
+            && let Some(fallback) = fallback
+        {
+            insert_assured(&mut options, fallback);
+        }
+        options
     }
 
     /// The tree of `driver`'s net with the removable buffers under it
