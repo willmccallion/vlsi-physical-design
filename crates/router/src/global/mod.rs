@@ -32,6 +32,7 @@ mod coarse;
 mod gcells;
 mod maze;
 mod pattern;
+mod stamped;
 mod steiner;
 mod tracks;
 
