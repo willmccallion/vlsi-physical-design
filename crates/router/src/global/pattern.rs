@@ -10,7 +10,7 @@
 //! them only when every plan must. The tree comes out as paths in the
 //! grid, each starting on the paths before it.
 
-use super::steiner::{Spot, steiner_tree};
+use super::steiner::{Spot, SteinerTree, steiner_tree};
 use super::{BLOCKED_COST, GCell, GlobalCosts, GlobalGrid, GlobalNet};
 use pare_common::db::indices::LayerId;
 use pare_common::db::library::Direction;
@@ -55,34 +55,67 @@ pub(super) fn route_pattern(
     net: &GlobalNet,
     costs: GlobalCosts,
 ) -> Vec<Vec<GCell>> {
-    let terminals = &net.terminals;
-    let mut spots: Vec<Spot> = terminals.iter().map(|c| (c.x, c.y)).collect();
+    let mut spots: Vec<Spot> = net.terminals.iter().map(|c| (c.x, c.y)).collect();
     spots.sort_unstable();
     spots.dedup();
     if spots.is_empty() {
         return Vec::new();
     }
     let tree = steiner_tree(&spots);
-    let layers = grid.directions.len();
-    let base = grid.min_layer.index();
-    let mut pins: Vec<Option<(usize, usize)>> = vec![None; tree.nodes.len()];
+    let planner = Planner {
+        grid,
+        net,
+        costs,
+        layers: grid.directions.len(),
+        base: grid.min_layer.index(),
+    };
+    let pins = pin_layer_spans(&net.terminals, &spots, planner.base, tree.nodes.len());
+    let children = children_of(&tree);
+    let plan = plan_layers(&planner, &tree, &pins, &children);
+    extract_paths(&planner, &tree, &children, &plan)
+}
+
+/// For each node of a tree over `spots`, the span of layers, counted from
+/// `base`, of the `terminals` there; none where it has none.
+fn pin_layer_spans(
+    terminals: &[GCell],
+    spots: &[Spot],
+    base: usize,
+    nodes: usize,
+) -> Vec<Option<(usize, usize)>> {
+    let mut pins: Vec<Option<(usize, usize)>> = vec![None; nodes];
     for t in terminals {
         let k = spots.partition_point(|&s| s < (t.x, t.y));
         let l = t.layer.index() - base;
         pins[k] = Some(pins[k].map_or((l, l), |(lo, hi)| (lo.min(l), hi.max(l))));
     }
+    pins
+}
+
+/// Each node's children in `tree`.
+fn children_of(tree: &SteinerTree) -> Vec<Vec<usize>> {
     let mut children: Vec<Vec<usize>> = vec![Vec::new(); tree.nodes.len()];
     for &v in &tree.order[1..] {
         children[tree.parent[v]].push(v);
     }
+    children
+}
 
-    let planner = Planner {
-        grid,
-        net,
-        costs,
-        layers,
-        base,
-    };
+/// The cheapest choice at each node and parent edge of a tree, per layer,
+/// found from the leaves up.
+struct LayerPlan {
+    node_best: Vec<Vec<Option<NodeChoice>>>,
+    edge_best: Vec<Vec<Option<EdgeChoice>>>,
+}
+
+/// Plans the layers of `tree` from the leaves up, keeping the cheapest
+/// choice per layer at each node and parent edge.
+fn plan_layers(
+    planner: &Planner<'_>,
+    tree: &SteinerTree,
+    pins: &[Option<(usize, usize)>],
+    children: &[Vec<usize>],
+) -> LayerPlan {
     let mut node_best: Vec<Vec<Option<NodeChoice>>> = vec![Vec::new(); tree.nodes.len()];
     let mut edge_best: Vec<Vec<Option<EdgeChoice>>> = vec![Vec::new(); tree.nodes.len()];
     for &v in tree.order.iter().rev() {
@@ -91,10 +124,25 @@ pub(super) fn route_pattern(
         }
         node_best[v] = planner.node(tree.nodes[v], pins[v], &children[v], &edge_best);
     }
+    LayerPlan {
+        node_best,
+        edge_best,
+    }
+}
 
+/// The paths `plan` picks, from the root's cheapest layer down: each edge
+/// on its cheapest layer within its parent's via stack, then the child's
+/// own via stack.
+fn extract_paths(
+    planner: &Planner<'_>,
+    tree: &SteinerTree,
+    children: &[Vec<usize>],
+    plan: &LayerPlan,
+) -> Vec<Vec<GCell>> {
+    let base = planner.base;
     let mut span = vec![(0, 0); tree.nodes.len()];
-    let Some(root) = (0..layers)
-        .filter_map(|l| node_best[0][l].map(|n| (n.cost, l, n)))
+    let Some(root) = (0..planner.layers)
+        .filter_map(|l| plan.node_best[0][l].map(|n| (n.cost, l, n)))
         .min_by(|a, b| a.0.total_cmp(&b.0).then(a.1.cmp(&b.1)))
     else {
         return Vec::new();
@@ -114,7 +162,7 @@ pub(super) fn route_pattern(
         for &c in &children[v] {
             let (low, high) = span[v];
             let Some((parent_layer, edge)) = (low..=high)
-                .filter_map(|l| edge_best[c][l].map(|e| (l, e)))
+                .filter_map(|l| plan.edge_best[c][l].map(|e| (l, e)))
                 .min_by(|a, b| a.1.cost.total_cmp(&b.1.cost).then(a.0.cmp(&b.0)))
             else {
                 continue;
