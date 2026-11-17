@@ -407,22 +407,6 @@ impl<'a> Model<'a> {
     }
 }
 
-/// The overlap of two intervals, or the gap between them when apart.
-pub(super) fn between(a: (Dbu, Dbu), b: (Dbu, Dbu)) -> (Dbu, Dbu) {
-    if a.1 < b.0 {
-        (a.1, b.0)
-    } else if b.1 < a.0 {
-        (b.1, a.0)
-    } else {
-        (a.0.max(b.0), a.1.min(b.1))
-    }
-}
-
-/// How far apart two intervals are; zero when they meet.
-pub(super) fn apart(a: (Dbu, Dbu), b: (Dbu, Dbu)) -> Dbu {
-    (b.0 - a.1).max(a.0 - b.1).max(Dbu::ZERO)
-}
-
 /// Where two rectangles relate: the rectangle between them (their overlap
 /// along an axis where they overlap, the gap where they are apart), the
 /// gaps along X and Y, and the run along X and Y, negative where apart.
@@ -437,17 +421,17 @@ pub(super) struct Facing {
 
 impl Facing {
     pub fn new(a: &Rect<Dbu>, b: &Rect<Dbu>) -> Self {
-        let (x0, x1) = between((a.min.x, a.max.x), (b.min.x, b.max.x));
-        let (y0, y1) = between((a.min.y, a.max.y), (b.min.y, b.max.y));
-        let dist_x = apart((a.min.x, a.max.x), (b.min.x, b.max.x));
-        let dist_y = apart((a.min.y, a.max.y), (b.min.y, b.max.y));
+        let x = a.x_span().between(b.x_span());
+        let y = a.y_span().between(b.y_span());
+        let dist_x = a.x_span().distance(b.x_span());
+        let dist_y = a.y_span().distance(b.y_span());
         let signed = |run: Dbu, dist: Dbu| if dist > Dbu::ZERO { -run } else { run };
         Self {
-            marker: Rect::new(Point::new(x0, y0), Point::new(x1, y1)),
+            marker: Rect::new(Point::new(x.lo, y.lo), Point::new(x.hi, y.hi)),
             dist_x,
             dist_y,
-            prl_x: signed(x1 - x0, dist_x),
-            prl_y: signed(y1 - y0, dist_y),
+            prl_x: signed(x.len(), dist_x),
+            prl_y: signed(y.len(), dist_y),
         }
     }
 
