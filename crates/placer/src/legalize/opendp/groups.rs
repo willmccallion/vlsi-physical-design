@@ -7,7 +7,7 @@
 use super::cpp::{Mt19937, sort};
 use super::{
     DetailedPlacementError, GroupId, MAX_DISPLACEMENT_X, MAX_DISPLACEMENT_Y, Node, NodeId,
-    Occupant, Placer, area, core_center,
+    NodeState, Occupant, Placer, area, core_center,
 };
 use crate::legalize::grid::{GridPt, GridX, GridY};
 use pare_common::db::design::NetlistDB;
@@ -232,7 +232,7 @@ impl Placer {
                 let n = self.groups[g].members[k].node;
                 let node = &self.nodes[n];
                 let rects = &self.groups[g].rects;
-                if node.fixed || node.placed || rects.iter().any(|r| is_inside(node, r)) {
+                if node.state.is_placed() || rects.iter().any(|r| is_inside(node, r)) {
                     continue;
                 }
                 let Some(rect) = nearest_rect(node, rects) else {
@@ -241,7 +241,7 @@ impl Placer {
                 let to = nearest_pt(node, &rect);
                 let legal = self.legal_grid_pt_at(n, to);
                 if self.diamond_move_from(n, legal) {
-                    self.nodes[n].hold = true;
+                    self.nodes[n].state = NodeState::Held;
                 }
             }
         }
@@ -252,7 +252,7 @@ impl Placer {
     fn pre_place(&mut self) {
         for n in self.nodes.ids() {
             let node = &self.nodes[n];
-            if node.group.is_some() || node.placed {
+            if node.group.is_some() || node.state.is_placed() {
                 continue;
             }
             let mut over = None;
@@ -267,7 +267,7 @@ impl Placer {
                 let to = nearest_pt(node, &rect);
                 let legal = self.legal_grid_pt_at(n, to);
                 if self.diamond_move_from(n, legal) {
-                    self.nodes[n].hold = true;
+                    self.nodes[n].state = NodeState::Held;
                 }
             }
         }
@@ -286,13 +286,13 @@ impl Placer {
         for g in self.groups.ids() {
             let mut order: Vec<NodeId> = self.groups[g]
                 .nodes()
-                .filter(|&n| !self.nodes[n].fixed && !self.nodes[n].placed)
+                .filter(|&n| self.nodes[n].state == NodeState::Unplaced)
                 .collect();
             let less = self.place_order_less();
             sort(&mut order, &|&a, &b| less(&self.nodes[a], &self.nodes[b]));
             let mut pass = true;
             for n in order {
-                if !self.nodes[n].fixed && !self.nodes[n].placed {
+                if self.nodes[n].state == NodeState::Unplaced {
                     pass = self.diamond_move(n);
                     if !pass {
                         break;
@@ -367,7 +367,10 @@ impl Placer {
             if i as f64 >= limit {
                 break;
             }
-            if !self.nodes[n].hold && !self.nodes[n].fixed && self.refine_move(n) {
+            if !self.nodes[n].state.is_held()
+                && !self.nodes[n].state.is_fixed()
+                && self.refine_move(n)
+            {
                 count += 1;
             }
         }
@@ -431,12 +434,12 @@ impl Placer {
     fn swap_cells(&mut self, a: NodeId, b: NodeId) -> bool {
         let (na, nb) = (&self.nodes[a], &self.nodes[b]);
         if a == b
-            || na.hold
-            || nb.hold
+            || na.state.is_held()
+            || nb.state.is_held()
             || na.width != nb.width
             || na.height != nb.height
-            || na.fixed
-            || nb.fixed
+            || na.state.is_fixed()
+            || nb.state.is_fixed()
         {
             return false;
         }
@@ -448,7 +451,7 @@ impl Placer {
         if change >= Dbu::ZERO {
             return false;
         }
-        let (a_was, b_was) = ((a_at, na.placed), (b_at, nb.placed));
+        let (a_was, b_was) = ((a_at, na.state.is_placed()), (b_at, nb.state.is_placed()));
         let a_to = GridPt::new(self.rows.grid_x(nb.left), self.rows.snap_down_y(nb.bottom));
         let b_to = GridPt::new(self.rows.grid_x(na.left), self.rows.snap_down_y(na.bottom));
         self.unplace_cell(a);
@@ -481,7 +484,7 @@ impl Placer {
         self.nodes[n].left = at.x;
         self.nodes[n].bottom = at.y;
         if !was_placed {
-            self.nodes[n].placed = false;
+            self.nodes[n].state = NodeState::Unplaced;
             return;
         }
         let (gx, gy) = (self.rows.grid_x(at.x), self.rows.round_y(at.y));
