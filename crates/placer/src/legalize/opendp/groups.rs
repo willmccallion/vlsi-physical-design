@@ -451,7 +451,14 @@ impl Placer {
         if change >= Dbu::ZERO {
             return false;
         }
-        let (a_was, b_was) = ((a_at, na.state.is_placed()), (b_at, nb.state.is_placed()));
+        let a_was = SavedPlace {
+            at: a_at,
+            state: na.state,
+        };
+        let b_was = SavedPlace {
+            at: b_at,
+            state: nb.state,
+        };
         let a_to = GridPt::new(self.rows.grid_x(nb.left), self.rows.snap_down_y(nb.bottom));
         let b_to = GridPt::new(self.rows.grid_x(na.left), self.rows.snap_down_y(na.bottom));
         self.unplace_cell(a);
@@ -479,12 +486,13 @@ impl Placer {
     /// Puts a moved cell back, as the journal undoes a `MoveCellAction`:
     /// its pixels cleared where it stands, its place restored and painted
     /// in that row's orientation when it was placed.
-    fn undo_move(&mut self, n: NodeId, (at, was_placed): (Point<Dbu>, bool)) {
+    fn undo_move(&mut self, n: NodeId, was: SavedPlace) {
+        let at = was.at;
         self.erase_pixels(n);
         self.nodes[n].left = at.x;
         self.nodes[n].bottom = at.y;
-        if !was_placed {
-            self.nodes[n].state = NodeState::Unplaced;
+        self.nodes[n].state = was.state;
+        if !was.state.is_placed() {
             return;
         }
         let (gx, gy) = (self.rows.grid_x(at.x), self.rows.round_y(at.y));
@@ -630,6 +638,13 @@ fn corner_dist(node: &Node, rect: &Rect<Dbu>) -> Dbu {
 /// How far a cell stands from where it started, as `Opendp::disp`.
 fn displacement(node: &Node) -> Dbu {
     (node.init.x - node.left).abs() + (node.init.y - node.bottom).abs()
+}
+
+/// Where a node stood and how it was placed before a trial move.
+#[derive(Clone, Copy, Debug)]
+struct SavedPlace {
+    at: Point<Dbu>,
+    state: NodeState,
 }
 
 #[cfg(test)]
