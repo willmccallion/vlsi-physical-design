@@ -2,6 +2,7 @@
 
 use crate::db::indices::LayerId;
 use crate::db::library::Library;
+use crate::units::{FaradsPerMeter, Ohms, OhmsPerMeter};
 use serde::Deserialize;
 use std::num::{NonZeroU32, NonZeroUsize};
 use std::ops::RangeInclusive;
@@ -98,24 +99,89 @@ pub struct LayerAdjustmentConfig {
 
 /// One routing layer's wire resistance and capacitance per length.
 #[derive(Debug, Deserialize)]
-#[serde(deny_unknown_fields)]
+#[serde(try_from = "LayerRcTable")]
 pub struct LayerRcConfig {
     /// The routing layer's name.
     pub layer: String,
-    /// Ohms per micron.
-    pub resistance_ohm_per_um: f64,
-    /// Femtofarads per micron.
-    pub capacitance_ff_per_um: f64,
+    /// The wire's resistance per length.
+    pub resistance: OhmsPerMeter,
+    /// The wire's capacitance per length.
+    pub capacitance: FaradsPerMeter,
+}
+
+/// A layer RC table as written, per micron as `set_layer_rc` takes it.
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct LayerRcTable {
+    layer: String,
+    resistance_ohm_per_um: f64,
+    capacitance_ff_per_um: f64,
+}
+
+impl TryFrom<LayerRcTable> for LayerRcConfig {
+    type Error = NegativeRc;
+
+    fn try_from(table: LayerRcTable) -> Result<Self, NegativeRc> {
+        let resistance = non_negative(table.resistance_ohm_per_um, &table.layer)?;
+        let capacitance = non_negative(table.capacitance_ff_per_um, &table.layer)?;
+        Ok(Self {
+            layer: table.layer,
+            resistance: OhmsPerMeter::from_ohms_per_micron(resistance),
+            capacitance: FaradsPerMeter::from_femtofarads_per_micron(capacitance),
+        })
+    }
 }
 
 /// One cut layer's resistance per cut.
 #[derive(Debug, Deserialize)]
-#[serde(deny_unknown_fields)]
+#[serde(try_from = "ViaRcTable")]
 pub struct ViaRcConfig {
     /// The cut layer's name.
     pub layer: String,
-    /// Ohms per cut.
-    pub resistance_ohm: f64,
+    /// The resistance of one cut.
+    pub resistance: Ohms,
+}
+
+/// A via RC table as written.
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct ViaRcTable {
+    layer: String,
+    resistance_ohm: f64,
+}
+
+impl TryFrom<ViaRcTable> for ViaRcConfig {
+    type Error = NegativeRc;
+
+    fn try_from(table: ViaRcTable) -> Result<Self, NegativeRc> {
+        let resistance = Ohms::new(non_negative(table.resistance_ohm, &table.layer)?);
+        Ok(Self {
+            layer: table.layer,
+            resistance,
+        })
+    }
+}
+
+/// A resistance or capacitance given as negative or not a number.
+#[derive(Debug, PartialEq, thiserror::Error)]
+#[error(
+    "layer '{layer}' has a resistance or capacitance of {value}, which is not a non-negative number"
+)]
+pub struct NegativeRc {
+    layer: String,
+    value: f64,
+}
+
+/// `value` when it is a non-negative number, read for `layer`.
+fn non_negative(value: f64, layer: &str) -> Result<f64, NegativeRc> {
+    if value >= 0.0 {
+        Ok(value)
+    } else {
+        Err(NegativeRc {
+            layer: layer.to_owned(),
+            value,
+        })
+    }
 }
 
 impl Default for NetlistConfig {

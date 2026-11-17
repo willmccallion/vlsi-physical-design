@@ -1076,6 +1076,7 @@ mod tests {
     use crate::fixtures;
     use pare_common::db::liberty::LibCellId;
     use pare_common::db::parser::liberty;
+    use pare_common::units::{FaradsPerMeter, OhmsPerMeter};
     use std::path::Path;
 
     /// A library of the one clock buffer `CLKBUF_X3`, with `defaults` at
@@ -1131,7 +1132,11 @@ mod tests {
             db,
             masters: &[buffer],
             sink_buffer: buffer,
-            clock_rc: WireRc::per_micron(1.5, 0.11, layer),
+            clock_rc: WireRc {
+                resistance: OhmsPerMeter::from_ohms_per_micron(1.5),
+                capacitance: FaradsPerMeter::from_femtofarads_per_micron(0.11),
+                layer,
+            },
         })
     }
 

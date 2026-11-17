@@ -3,6 +3,7 @@
 #![allow(clippy::unwrap_used)]
 
 use pare_common::config::{Config, DesignInput, InputConfig, InputError, IoLayerNames, OneIoLayer};
+use pare_common::units::{FaradsPerMeter, OhmsPerMeter};
 use std::path::{Path, PathBuf};
 
 /// Every `.toml` file under `dir`, in its subfolders too.
@@ -170,13 +171,29 @@ fn a_wire_is_read_as_its_layer_and_rc() {
 
     let wire = parsed.netlist.signal_wire.unwrap();
     assert_eq!(
+        (wire.layer.as_str(), wire.resistance, wire.capacitance),
         (
-            wire.layer.as_str(),
-            wire.resistance_ohm_per_um,
-            wire.capacitance_ff_per_um
-        ),
-        ("metal3", 3.5, 0.1)
+            "metal3",
+            OhmsPerMeter::from_ohms_per_micron(3.5),
+            FaradsPerMeter::from_femtofarads_per_micron(0.1)
+        )
     );
+}
+
+#[test]
+fn a_wire_with_a_negative_resistance_is_rejected() {
+    let parsed = parse(
+        "[netlist]\nsignal_wire = { layer = \"metal3\", resistance_ohm_per_um = -3.5, capacitance_ff_per_um = 0.1 }\n",
+    );
+
+    assert!(parsed.is_err());
+}
+
+#[test]
+fn a_via_with_a_negative_resistance_is_rejected() {
+    let parsed = parse("[netlist]\nvia_rc = [{ layer = \"via1\", resistance_ohm = -5.0 }]\n");
+
+    assert!(parsed.is_err());
 }
 
 #[test]

@@ -271,7 +271,11 @@ fn a_route_tree_climbs_by_vias_and_runs_wires_on_the_route_layers() {
         LayerId(1),
     );
     let rc = TreeRc {
-        signal: WireRc::per_micron(3.0, 0.1, LayerId(2)),
+        signal: WireRc {
+            resistance: OhmsPerMeter::from_ohms_per_micron(3.0),
+            capacitance: FaradsPerMeter::from_femtofarads_per_micron(0.1),
+            layer: LayerId(2),
+        },
         layers: Some(&route_rc),
         dbu: DbuPerMicron::new(2000).unwrap(),
     };
@@ -330,7 +334,11 @@ fn a_route_that_misses_a_load_fails_to_build_a_tree() {
     };
     let route_rc = RouteRc::new(&db.library, &[], &[], LayerId(0));
     let rc = TreeRc {
-        signal: WireRc::per_micron(3.0, 0.1, LayerId(0)),
+        signal: WireRc {
+            resistance: OhmsPerMeter::from_ohms_per_micron(3.0),
+            capacitance: FaradsPerMeter::from_femtofarads_per_micron(0.1),
+            layer: LayerId(0),
+        },
         layers: Some(&route_rc),
         dbu: DbuPerMicron::new(2000).unwrap(),
     };

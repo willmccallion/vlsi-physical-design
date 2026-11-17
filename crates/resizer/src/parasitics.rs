@@ -14,10 +14,7 @@ use pare_common::db::indices::{IdVec, LayerId, NetId, PinId};
 use pare_common::db::liberty::Edge;
 use pare_common::geom::dbu::Dbu;
 use pare_common::geom::point::Point;
-use pare_common::units::{
-    FARADS_PER_FEMTOFARAD, Farads, FaradsPerMeter, MICRONS_PER_METER, Meters, Ohms, OhmsPerMeter,
-    Seconds,
-};
+use pare_common::units::{Farads, FaradsPerMeter, Meters, Ohms, OhmsPerMeter, Seconds};
 
 /// The resistance `OpenROAD` gives a zero-length connection so the network
 /// stays joined.
@@ -48,18 +45,6 @@ pub struct WireRc {
     pub capacitance: FaradsPerMeter,
     /// The routing layer signal wires stand on.
     pub layer: LayerId,
-}
-
-impl WireRc {
-    /// Wire RC from values per micron: ohms and femtofarads.
-    #[must_use]
-    pub fn per_micron(ohm_per_um: f64, ff_per_um: f64, layer: LayerId) -> Self {
-        Self {
-            resistance: OhmsPerMeter::new(ohm_per_um * MICRONS_PER_METER),
-            capacitance: FaradsPerMeter::new(ff_per_um * FARADS_PER_FEMTOFARAD * MICRONS_PER_METER),
-            layer,
-        }
-    }
 }
 
 /// The pi model `OpenSTA` reduces a driver's network to, with the Elmore

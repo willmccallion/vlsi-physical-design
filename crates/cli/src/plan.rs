@@ -8,7 +8,6 @@ use pare_common::config::{
 };
 use pare_common::db::design::NetlistDB;
 use pare_common::db::indices::{IdVec, LayerId};
-use pare_common::units::Ohms;
 use pare_resizer::{RouteRc, WireRc};
 use std::path::PathBuf;
 
@@ -137,11 +136,11 @@ fn layer_wire_rc(wire: &LayerRcConfig, db: &NetlistDB) -> anyhow::Result<WireRc>
         .library
         .routing_layer_id(&wire.layer)
         .with_context(|| format!("unknown routing layer '{}'", wire.layer))?;
-    Ok(WireRc::per_micron(
-        wire.resistance_ohm_per_um,
-        wire.capacitance_ff_per_um,
+    Ok(WireRc {
+        resistance: wire.resistance,
+        capacitance: wire.capacitance,
         layer,
-    ))
+    })
 }
 
 /// Each routing layer's and cut layer's resistance and capacitance from
@@ -156,8 +155,7 @@ fn route_rc(config: &Config, db: &NetlistDB) -> anyhow::Result<RouteRc> {
             let id = lib
                 .routing_layer_id(&l.layer)
                 .with_context(|| format!("[netlist] layer_rc names unknown layer '{}'", l.layer))?;
-            let rc = WireRc::per_micron(l.resistance_ohm_per_um, l.capacitance_ff_per_um, id);
-            Ok((id, rc.resistance, rc.capacitance))
+            Ok((id, l.resistance, l.capacitance))
         })
         .collect::<anyhow::Result<Vec<_>>>()?;
     let vias = config
@@ -168,7 +166,7 @@ fn route_rc(config: &Config, db: &NetlistDB) -> anyhow::Result<RouteRc> {
             let cut = lib.cut_layer_id(&v.layer).with_context(|| {
                 format!("[netlist] via_rc names unknown cut layer '{}'", v.layer)
             })?;
-            Ok((cut, Ohms::new(v.resistance_ohm)))
+            Ok((cut, v.resistance))
         })
         .collect::<anyhow::Result<Vec<_>>>()?;
     let min_layer = *config.routing.layer_range(lib)?.start();
@@ -209,12 +207,13 @@ fn check_congestion_follows_timing(gp: &GlobalPlacementConfig) -> anyhow::Result
 mod tests {
     use super::*;
     use crate::testing::{tiny, tiny_config};
+    use pare_common::units::{FaradsPerMeter, OhmsPerMeter};
 
     fn wire(layer: &str) -> LayerRcConfig {
         LayerRcConfig {
             layer: layer.to_string(),
-            resistance_ohm_per_um: 2.0,
-            capacitance_ff_per_um: 0.5,
+            resistance: OhmsPerMeter::from_ohms_per_micron(2.0),
+            capacitance: FaradsPerMeter::from_femtofarads_per_micron(0.5),
         }
     }
 
@@ -229,7 +228,11 @@ mod tests {
 
         let wires = Wires::from_config(&config, &db).unwrap();
 
-        let m1 = WireRc::per_micron(2.0, 0.5, db.library.routing_layer_id("M1").unwrap());
+        let m1 = WireRc {
+            resistance: OhmsPerMeter::from_ohms_per_micron(2.0),
+            capacitance: FaradsPerMeter::from_femtofarads_per_micron(0.5),
+            layer: db.library.routing_layer_id("M1").unwrap(),
+        };
         assert_eq!(
             wires,
             Wires {
