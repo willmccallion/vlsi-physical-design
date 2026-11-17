@@ -705,6 +705,25 @@ impl State {
     }
 }
 
+/// Where Nesterov's method stands between stretches of iterations.
+enum Nesterov {
+    /// No stretch has run, so the next starts afresh; also the state while
+    /// a stretch runs, which holds the method's state itself.
+    Fresh,
+    /// Paused for a timing-driven repair.
+    Paused(State),
+    /// Carried to a rebuilt setup, so the penalty's reference wirelength
+    /// is stale and the fields still overflowing move again.
+    Rebuilt(State),
+}
+
+impl Nesterov {
+    /// The state as it stands, leaving [`Nesterov::Fresh`] behind.
+    const fn take(&mut self) -> Self {
+        std::mem::replace(self, Self::Fresh)
+    }
+}
+
 /// Routability-driven placement as a run carries it out: the congestion
 /// checks, how far spreading has come, the iterations it gives back while
 /// it waits, and how far the fields have settled.
@@ -883,7 +902,7 @@ struct Finished {
 /// Where a run stands between stretches of iterations, each carried out
 /// with the objective of the setup at hand.
 struct Run {
-    s: Option<State>,
+    nesterov: Nesterov,
     grad: ObjectPoints,
     next_major: ObjectPoints,
     next_reference: ObjectPoints,
@@ -899,9 +918,6 @@ struct Run {
     /// placement is off, from the start or once the driver declines.
     timing_fired: Option<Vec<bool>>,
     timing_rounds: usize,
-    /// Whether the setup changed since the last stretch, so the penalty's
-    /// reference wirelength is stale and frozen fields may need to thaw.
-    rebuilt: bool,
 }
 
 /// What a run calls out to: the congestion probe for routability, the
@@ -990,7 +1006,7 @@ impl Run {
         let n = setup.objects.centers.len();
         let zero = IdVec::filled(Point::new(0.0, 0.0), n);
         Self {
-            s: None,
+            nesterov: Nesterov::Fresh,
             grad: zero.clone(),
             next_major: zero.clone(),
             next_reference: zero.clone(),
@@ -1011,7 +1027,6 @@ impl Run {
                 .as_ref()
                 .map(|t| vec![false; t.overflows.len()]),
             timing_rounds: 0,
-            rebuilt: false,
         }
     }
 
@@ -1072,8 +1087,9 @@ impl Run {
                 .map(|(i, k)| k.map_or(rebuilt.objects.centers[i], |k| old[k]))
                 .collect()
         };
-        if let Some(s) = self.s.as_mut() {
+        if let Nesterov::Paused(mut s) | Nesterov::Rebuilt(mut s) = self.nesterov.take() {
             s.carry(&carry, &remap.old_field_of_new);
+            self.nesterov = Nesterov::Rebuilt(s);
         }
         if let Some(r) = self.routability.as_mut() {
             if let RoutabilityPhase::Saved(snapshot) = &mut r.phase {
@@ -1088,7 +1104,6 @@ impl Run {
         self.next_major.clone_from(&zero);
         self.next_reference.clone_from(&zero);
         self.next_grad = zero;
-        self.rebuilt = true;
     }
 
     /// Iterates until the run is over or a timing-driven repair is due,
@@ -1132,7 +1147,7 @@ impl Run {
                 Flow::Done(self.finish(objective, objects, context, &s, outcome))
             }
         };
-        self.s = Some(s);
+        self.nesterov = Nesterov::Paused(s);
         flow
     }
 
@@ -1144,9 +1159,11 @@ impl Run {
         objects: &Objects,
         context: &StretchContext<'_, '_>,
     ) -> (State, Evaluation) {
-        let mut s = match self.s.take() {
-            Some(s) => s,
-            None => initial_state(
+        let taken = self.nesterov.take();
+        let is_rebuilt = matches!(taken, Nesterov::Rebuilt(_));
+        let mut s = match taken {
+            Nesterov::Paused(s) | Nesterov::Rebuilt(s) => s,
+            Nesterov::Fresh => initial_state(
                 objective,
                 objects,
                 context.bin,
@@ -1155,14 +1172,13 @@ impl Run {
             ),
         };
         let eval = objective.gradient(&s.reference, s.gamma, &s.weights, &mut self.grad);
-        if self.rebuilt {
+        if is_rebuilt {
             s.prev_hpwl = eval.wirelength.hpwl;
             for (frozen, &overflow) in s.weights.frozen.iter_mut().zip(&eval.field_overflow) {
                 if overflow > context.params.target_overflow.get() {
                     *frozen = false;
                 }
             }
-            self.rebuilt = false;
         }
         (s, eval)
     }
