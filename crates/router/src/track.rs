@@ -213,6 +213,84 @@ pub fn assign_tracks(
         .collect()
 }
 
+/// One net's runs along panels, with what its iroutes are found from: its
+/// pins and the grid.
+struct NetRuns<'a> {
+    tech: &'a RouteTech,
+    grid: &'a GlobalGrid,
+    net: NetId,
+    runs: Vec<(PanelId, u16, u16)>,
+    pins: &'a [Point<Dbu>],
+}
+
+impl NetRuns<'_> {
+    /// The iroute of run `(id, first, last)`: from the cross nearest its
+    /// lowest pin or gcell center at its first end to the one nearest its
+    /// highest at its last; none where those leave no stretch.
+    fn iroute(&self, (id, first, last): (PanelId, u16, u16)) -> Option<Iroute> {
+        let lt = self.tech.layer(id.layer);
+        let ends = [first, last].map(|along| cell_along(lt.direction, id.index, along));
+        let from = self.reach(id, ends[0], Extreme::Lowest)?;
+        let to = self.reach(id, ends[1], Extreme::Highest)?;
+        if from >= to {
+            return None;
+        }
+        let pins = ends
+            .iter()
+            .flat_map(|&cell| self.pins_in(id.layer, cell))
+            .map(|&p| lt.across_along(p).0)
+            .collect();
+        Some(Iroute {
+            net: self.net,
+            from,
+            to,
+            pins,
+        })
+    }
+
+    /// The net's pins in gcell `cell` of `layer`.
+    fn pins_in(&self, layer: LayerId, cell: (u16, u16)) -> impl Iterator<Item = &Point<Dbu>> {
+        self.pins.iter().filter(move |&&p| {
+            let c = self.grid.cell_at(layer, p);
+            (c.x, c.y) == cell
+        })
+    }
+
+    /// The cross of panel `id` at the `extreme` along it of the net's pins
+    /// in end gcell `cell`, or of the gcell's center where it has none or
+    /// another run of the net joins there.
+    fn reach(&self, id: PanelId, cell: (u16, u16), extreme: Extreme) -> Option<u32> {
+        let lt = self.tech.layer(id.layer);
+        let mut targets: Vec<Dbu> = self
+            .pins_in(id.layer, cell)
+            .map(|&p| lt.across_along(p).1)
+            .collect();
+        let direction = |l: LayerId| self.tech.layer(l).direction;
+        let joins_run = self
+            .runs
+            .iter()
+            .any(|&run| run.0 != id && run_covers(direction(run.0.layer), run, cell));
+        if targets.is_empty() || joins_run {
+            targets.push(
+                lt.across_along(self.grid.cell_rect(cell.0, cell.1).center())
+                    .1,
+            );
+        }
+        let along = match extreme {
+            Extreme::Lowest => targets.iter().min(),
+            Extreme::Highest => targets.iter().max(),
+        };
+        nearest_cross(lt, *along?)
+    }
+}
+
+/// Which end of a run an iroute reaches toward.
+#[derive(Clone, Copy, Debug)]
+enum Extreme {
+    Lowest,
+    Highest,
+}
+
 /// Every panel that some iroute runs along, with its iroutes.
 fn panels(
     tech: &RouteTech,
@@ -224,51 +302,18 @@ fn panels(
         routes.trees.iter().map(|(&n, t)| (n, t.paths())).collect();
     nets.sort_unstable_by_key(|&(n, _)| n);
     let mut by_panel: BTreeMap<PanelId, Vec<Iroute>> = BTreeMap::new();
-    let direction = |l: LayerId| tech.layer(l).direction;
     for (net, paths) in nets {
-        let net_runs = runs(direction, paths);
-        let net_pins = pins.get(net).map_or(&[][..], Vec::as_slice);
-        for &(id, first, last) in &net_runs {
-            let lt = tech.layer(id.layer);
-            let ends = [first, last].map(|along| cell_along(lt.direction, id.index, along));
-            let pins_in = |cell: (u16, u16)| {
-                net_pins.iter().filter(move |&&p| {
-                    let c = grid.cell_at(id.layer, p);
-                    (c.x, c.y) == cell
-                })
-            };
-            let reach = |cell: (u16, u16), low: bool| {
-                let mut targets: Vec<Dbu> = pins_in(cell).map(|&p| lt.across_along(p).1).collect();
-                let joins_run = net_runs
-                    .iter()
-                    .any(|&run| run.0 != id && run_covers(direction(run.0.layer), run, cell));
-                if targets.is_empty() || joins_run {
-                    targets.push(lt.across_along(grid.cell_rect(cell.0, cell.1).center()).1);
-                }
-                let along = if low {
-                    targets.iter().min()
-                } else {
-                    targets.iter().max()
-                };
-                nearest_cross(lt, *along?)
-            };
-            let (Some(from), Some(to)) = (reach(ends[0], true), reach(ends[1], false)) else {
-                continue;
-            };
-            if from >= to {
-                continue;
+        let net_runs = NetRuns {
+            tech,
+            grid,
+            net,
+            runs: runs(|l| tech.layer(l).direction, paths),
+            pins: pins.get(net).map_or(&[][..], Vec::as_slice),
+        };
+        for &run in &net_runs.runs {
+            if let Some(iroute) = net_runs.iroute(run) {
+                by_panel.entry(run.0).or_default().push(iroute);
             }
-            let pin_across = ends
-                .iter()
-                .flat_map(|&cell| pins_in(cell))
-                .map(|&p| lt.across_along(p).0)
-                .collect();
-            by_panel.entry(id).or_default().push(Iroute {
-                net,
-                from,
-                to,
-                pins: pin_across,
-            });
         }
     }
     by_panel
