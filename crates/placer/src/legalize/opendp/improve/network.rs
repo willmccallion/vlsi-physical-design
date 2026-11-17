@@ -3,8 +3,8 @@
 //! fillers that close gaps between rows, with each signal net's pins on them.
 
 use super::{EdgeId, ImprovementError, NetworkPinId, NodeId, Placer, Result};
-use pare_common::db::design::{NetlistDB, PinOwner, PlacementStatus};
-use pare_common::db::indices::IdVec;
+use pare_common::db::design::{Net, NetlistDB, PinOwner, PlacementStatus};
+use pare_common::db::indices::{CellId, IdVec, IoPinId, MacroPinId};
 use pare_common::db::library::{Macro, SignalUse};
 use pare_common::geom::dbu::Dbu;
 use pare_common::geom::point::Point;
@@ -73,28 +73,7 @@ impl Network {
             node_of_cell[node.cell] = Some(n);
         }
         let core = grid.rows.core();
-        let mut fixed = Vec::new();
-        let mut node_of_io = IdVec::filled(None, db.io_pins.len());
-        for (i, io) in db.io_pins.iter_enumerated() {
-            if db.nets[io.net].signal_use.is_supply() || !is_placed(io.status) {
-                continue;
-            }
-            let bbox = io
-                .placed_shapes()
-                .map(|s| s.rect)
-                .reduce(|a, b| a.union(&b))
-                .ok_or_else(|| ImprovementError::PinWithoutShapes(io.name.clone()))?;
-            node_of_io[i] = Some(NodeId::new(cells + fixed.len()));
-            fixed.push(FixedNode {
-                left: bbox.min.x - core.min.x,
-                bottom: bbox.min.y - core.min.y,
-                width: bbox.width(),
-                // NOTE: Network::addNode(dbBTerm*) takes yMax - yMax, putting
-                // the pin at its shape's bottom; PARE takes the shape's height.
-                height: bbox.height(),
-                terminal: true,
-            });
-        }
+        let io = io_pin_nodes(db, cells, core)?;
         let orig = grid
             .nodes
             .iter()
@@ -107,7 +86,7 @@ impl Network {
             .collect();
         let mut network = Self {
             cells,
-            fixed,
+            fixed: io.fixed,
             orig,
             rails,
             pins: IdVec::new(),
@@ -121,44 +100,40 @@ impl Network {
         for _ in 0..network.fixed.len() {
             let _ = network.node_pins.push(Vec::new());
         }
-        for net in &db.nets {
-            if net.signal_use.is_supply() {
-                continue;
-            }
-            let edge = network.edges.push(Vec::new());
-            for &pin in &net.pins {
-                let PinOwner::Cell {
-                    cell,
-                    pin: macro_pin,
-                } = db.pins[pin].owner
-                else {
-                    continue;
-                };
-                let Some(node) = node_of_cell[cell] else {
-                    continue;
-                };
-                let m = db.cell_macro(cell);
-                let bbox = m
-                    .pin(macro_pin)
-                    .shapes
-                    .iter()
-                    .map(|s| s.rect)
-                    .reduce(|a, b| a.union(&b))
-                    .unwrap_or_default();
-                let center_x = Dbu(bbox.min.x.get().midpoint(bbox.max.x.get()));
-                let center_y = Dbu(bbox.min.y.get().midpoint(bbox.max.y.get()));
-                let offset = Point::new(center_x - m.size.x / 2, center_y - m.size.y / 2);
-                network.add_pin(node, edge, offset);
-            }
-            for &pin in &net.pins {
-                if let PinOwner::Io(io) = db.pins[pin].owner
-                    && let Some(node) = node_of_io[io]
-                {
-                    network.add_pin(node, edge, Point::new(Dbu::ZERO, Dbu::ZERO));
-                }
-            }
+        let nodes = NodesOf {
+            cell: node_of_cell,
+            io: io.node_of_io,
+        };
+        for net in db.nets.iter().filter(|net| !net.signal_use.is_supply()) {
+            network.add_net(db, net, &nodes);
         }
         Ok(network)
+    }
+
+    /// Adds `net` as an edge with a pin for each of its pins on a node:
+    /// those on cells first, then those on I/O pins.
+    fn add_net(&mut self, db: &NetlistDB, net: &Net, nodes: &NodesOf) {
+        let edge = self.edges.push(Vec::new());
+        for &pin in &net.pins {
+            let PinOwner::Cell {
+                cell,
+                pin: macro_pin,
+            } = db.pins[pin].owner
+            else {
+                continue;
+            };
+            let Some(node) = nodes.cell[cell] else {
+                continue;
+            };
+            self.add_pin(node, edge, cell_pin_offset(db, cell, macro_pin));
+        }
+        for &pin in &net.pins {
+            if let PinOwner::Io(io) = db.pins[pin].owner
+                && let Some(node) = nodes.io[io]
+            {
+                self.add_pin(node, edge, Point::new(Dbu::ZERO, Dbu::ZERO));
+            }
+        }
     }
 
     fn add_pin(&mut self, node: NodeId, edge: EdgeId, offset: Point<Dbu>) {
@@ -228,4 +203,61 @@ const fn is_placed(status: PlacementStatus) -> bool {
         status,
         PlacementStatus::Placed | PlacementStatus::Fixed | PlacementStatus::Cover
     )
+}
+/// The node each cell and each placed signal I/O pin is, where it is one.
+struct NodesOf {
+    cell: IdVec<CellId, Option<NodeId>>,
+    io: IdVec<IoPinId, Option<NodeId>>,
+}
+
+/// The fixed terminal nodes of the placed signal I/O pins.
+struct IoPinNodes {
+    /// One per placed signal I/O pin, numbered after the cell nodes.
+    fixed: Vec<FixedNode>,
+    /// The node of each I/O pin, where it is one.
+    node_of_io: IdVec<IoPinId, Option<NodeId>>,
+}
+
+/// A fixed terminal node for each placed signal I/O pin, numbered after
+/// the `cells` cell nodes.
+fn io_pin_nodes(db: &NetlistDB, cells: usize, core: Rect<Dbu>) -> Result<IoPinNodes> {
+    let mut fixed = Vec::new();
+    let mut node_of_io = IdVec::filled(None, db.io_pins.len());
+    for (i, io) in db.io_pins.iter_enumerated() {
+        if db.nets[io.net].signal_use.is_supply() || !is_placed(io.status) {
+            continue;
+        }
+        let bbox = io
+            .placed_shapes()
+            .map(|s| s.rect)
+            .reduce(|a, b| a.union(&b))
+            .ok_or_else(|| ImprovementError::PinWithoutShapes(io.name.clone()))?;
+        node_of_io[i] = Some(NodeId::new(cells + fixed.len()));
+        fixed.push(FixedNode {
+            left: bbox.min.x - core.min.x,
+            bottom: bbox.min.y - core.min.y,
+            width: bbox.width(),
+            // NOTE: Network::addNode(dbBTerm*) takes yMax - yMax, putting
+            // the pin at its shape's bottom; PARE takes the shape's height.
+            height: bbox.height(),
+            terminal: true,
+        });
+    }
+    Ok(IoPinNodes { fixed, node_of_io })
+}
+
+/// Where a cell's pin sits from the middle of its master: the center of
+/// the box around the pin's shapes, as `Network::addPin` measures it.
+fn cell_pin_offset(db: &NetlistDB, cell: CellId, macro_pin: MacroPinId) -> Point<Dbu> {
+    let m = db.cell_macro(cell);
+    let bbox = m
+        .pin(macro_pin)
+        .shapes
+        .iter()
+        .map(|s| s.rect)
+        .reduce(|a, b| a.union(&b))
+        .unwrap_or_default();
+    let center_x = Dbu(bbox.min.x.get().midpoint(bbox.max.x.get()));
+    let center_y = Dbu(bbox.min.y.get().midpoint(bbox.max.y.get()));
+    Point::new(center_x - m.size.x / 2, center_y - m.size.y / 2)
 }
