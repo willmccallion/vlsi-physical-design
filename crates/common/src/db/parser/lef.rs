@@ -20,6 +20,7 @@ use crate::db::rules::{
 use crate::geom::dbu::{Dbu, DbuPerMicron};
 use crate::geom::point::Point;
 use crate::geom::rect::Rect;
+use crate::units::Ohms;
 use std::collections::HashSet;
 use std::path::PathBuf;
 
@@ -125,7 +126,7 @@ struct LayerStatements {
     routing: RoutingLayerRules,
     cut: CutLayerRules,
     electrical: LayerElectrical,
-    cut_resistance: Option<f64>,
+    cut_resistance: Option<Ohms>,
 }
 
 impl LayerStatements {
@@ -453,7 +454,8 @@ impl<'a> LefParser<'a, '_> {
     ) -> Result<(), ParseError> {
         match t.text {
             "RESISTANCE" => {
-                statements.cut_resistance = Some(self.lx.number::<f64>("cut resistance")?);
+                statements.cut_resistance =
+                    Some(Ohms::new(self.lx.number::<f64>("cut resistance")?));
                 self.lx.skip_statement()?;
             }
             "SPACING" => statements.cut.spacings.push(self.rules().cut_spacing()?),

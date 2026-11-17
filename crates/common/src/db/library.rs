@@ -11,6 +11,7 @@ use crate::geom::dbu::{Dbu, DbuPerMicron};
 use crate::geom::orient::Orientation;
 use crate::geom::point::Point;
 use crate::geom::rect::Rect;
+use crate::units::{FARADS_PER_PICOFARAD, FaradsPerMeter, MICRONS_PER_METER, Ohms, OhmsPerMeter};
 use std::collections::HashMap;
 
 /// Preferred routing direction of a layer.
@@ -49,15 +50,44 @@ pub struct RoutingLayer {
     pub electrical: LayerElectrical,
 }
 
-/// A routing layer's resistance and capacitance from the LEF, in its units.
+/// A routing layer's resistance and capacitance from the LEF, kept in the
+/// LEF's units so the per-length values come out as `OpenROAD` derives them.
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub struct LayerElectrical {
     /// Ohms per square (`RESISTANCE RPERSQ`).
-    pub resistance_per_square: Option<f64>,
+    pub(crate) resistance_per_square: Option<f64>,
     /// Picofarads per square micron (`CAPACITANCE CPERSQDIST`).
-    pub capacitance_per_area: Option<f64>,
+    pub(crate) capacitance_per_area: Option<f64>,
     /// Picofarads per micron of edge (`EDGECAPACITANCE`).
-    pub edge_capacitance: Option<f64>,
+    pub(crate) edge_capacitance: Option<f64>,
+}
+
+impl LayerElectrical {
+    /// The resistance and capacitance per length of a wire `width` wide, a
+    /// value the LEF leaves out read as zero, as
+    /// `MakeWireParasitics::layerRC` falls back to them.
+    // OpenROAD holds the per-micron values in single precision and sums them
+    // unfused; a fused multiply-add would round differently.
+    #[allow(clippy::suboptimal_flops)]
+    #[must_use]
+    pub fn wire_rc(
+        &self,
+        width: Dbu,
+        dbu_per_micron: DbuPerMicron,
+    ) -> (OhmsPerMeter, FaradsPerMeter) {
+        let width_microns = dbu_per_micron.to_microns(width) as f32;
+        let res_ohm_per_micron =
+            (self.resistance_per_square.unwrap_or(0.0) / f64::from(width_microns)) as f32;
+        let cap_pf_per_micron = (f64::from(width_microns)
+            * self.capacitance_per_area.unwrap_or(0.0)
+            + 2.0 * self.edge_capacitance.unwrap_or(0.0)) as f32;
+        (
+            OhmsPerMeter::new(MICRONS_PER_METER * f64::from(res_ohm_per_micron)),
+            FaradsPerMeter::new(
+                MICRONS_PER_METER * FARADS_PER_PICOFARAD * f64::from(cap_pf_per_micron),
+            ),
+        )
+    }
 }
 
 impl RoutingLayer {
@@ -85,8 +115,8 @@ pub struct CutLayer {
     pub spacing: Option<Dbu>,
     /// All of the layer's cut spacing and enclosure rules.
     pub rules: CutLayerRules,
-    /// Resistance of one cut in ohms (`RESISTANCE`), if given.
-    pub resistance: Option<f64>,
+    /// Resistance of one cut (`RESISTANCE`), if given.
+    pub resistance: Option<Ohms>,
 }
 
 impl CutLayer {
@@ -654,6 +684,37 @@ fn insert_unique<I: Copy>(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn lef_layers_carry_their_resistance_and_capacitance() {
+        let fixtures = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures");
+        let units = crate::db::parser::def::read_units(&fixtures.join("tiny.def")).unwrap();
+        let lib = crate::db::parser::lef::parse_files(&[fixtures.join("tiny.lef")], units).unwrap();
+
+        let m1 = &lib.layer(LayerId(0)).electrical;
+        let m2 = &lib.layer(LayerId(1)).electrical;
+        assert_eq!(
+            (
+                m1.resistance_per_square,
+                m1.capacitance_per_area,
+                m1.edge_capacitance
+            ),
+            (Some(0.38), Some(7.7161e-05), Some(2.7365e-05))
+        );
+        assert_eq!(
+            (
+                m2.resistance_per_square,
+                m2.capacitance_per_area,
+                m2.edge_capacitance
+            ),
+            (Some(0.25), None, None)
+        );
+        assert_eq!(
+            lib.cut_layers[CutLayerId(0)].resistance,
+            Some(Ohms::new(5.0))
+        );
+        assert_eq!(lib.cut_layers[CutLayerId(1)].resistance, None);
+    }
 
     fn routing_layer(name: String) -> RoutingLayer {
         RoutingLayer {
