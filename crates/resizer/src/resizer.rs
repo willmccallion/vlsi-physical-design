@@ -212,6 +212,23 @@ pub(crate) struct DeferredTiming(Sealed);
 #[derive(Debug)]
 struct Sealed;
 
+/// The nets and resized cells an undo touched, whose parasitics and timing
+/// it leaves to be found again.
+#[derive(Debug, Default)]
+struct Touched {
+    nets: FxHashSet<NetId>,
+    cells: FxHashSet<CellId>,
+}
+
+impl Touched {
+    /// Notes every net on a pin of `cell`.
+    fn add_nets_of(&mut self, db: &NetlistDB, cell: CellId) {
+        for &pin in &db.cells[cell].pins {
+            let _ = self.nets.insert(db.pins[pin].net);
+        }
+    }
+}
+
 /// What an open [`EditBatch`] has yet to bring up to date.
 #[derive(Clone, Debug)]
 struct PendingEdits {
@@ -910,49 +927,53 @@ impl<'a, T: Timing> Resizer<'a, T> {
     pub(crate) fn journal_restore(&mut self, trial: Trial) -> Result<(), RepairError> {
         let Trial(_sealed) = trial;
         let edits = self.journal.take().unwrap_or_default();
-        let mut nets: FxHashSet<NetId> = FxHashSet::default();
-        let mut cells: FxHashSet<CellId> = FxHashSet::default();
+        let mut touched = Touched::default();
         for edit in edits.into_iter().rev() {
-            match edit {
-                Edit::Master { cell, old } => {
-                    self.db.replace_master(cell, old)?;
-                    let _ = cells.insert(cell);
-                    for &pin in &self.db.cells[cell].pins {
-                        let _ = nets.insert(self.db.pins[pin].net);
-                    }
-                }
-                Edit::Moved { cell, from } => {
-                    self.db.cells[cell].location = from;
-                    for &pin in &self.db.cells[cell].pins {
-                        let _ = nets.insert(self.db.pins[pin].net);
-                    }
-                }
-                Edit::MovedPin { pin, from } => {
-                    let _ = nets.insert(self.db.pins[pin].net);
-                    let _ = nets.insert(from.net);
-                    self.db.put_pin_back(pin, from);
-                }
-                Edit::NewCell(cell) => {
-                    for &pin in &self.db.cells[cell].pins {
-                        let _ = nets.insert(self.db.pins[pin].net);
-                    }
-                    let _ = self.db.retire_cell(cell);
-                }
-                Edit::NewNet(net) => self.dead_nets.push(net),
-                Edit::Retired { cell, places } => {
-                    self.db.unretire_cell(cell, places);
-                    for &pin in &self.db.cells[cell].pins {
-                        let _ = nets.insert(self.db.pins[pin].net);
-                    }
-                }
-                Edit::Renamed { net, old } => self.db.rename_net(net, old)?,
-            }
+            self.undo(edit, &mut touched)?;
         }
+        self.retime_touched(touched);
+        Ok(())
+    }
+
+    /// Takes back one journaled edit, noting the nets and cells it touched.
+    fn undo(&mut self, edit: Edit, touched: &mut Touched) -> Result<(), RepairError> {
+        match edit {
+            Edit::Master { cell, old } => {
+                self.db.replace_master(cell, old)?;
+                let _ = touched.cells.insert(cell);
+                touched.add_nets_of(self.db, cell);
+            }
+            Edit::Moved { cell, from } => {
+                self.db.cells[cell].location = from;
+                touched.add_nets_of(self.db, cell);
+            }
+            Edit::MovedPin { pin, from } => {
+                let _ = touched.nets.insert(self.db.pins[pin].net);
+                let _ = touched.nets.insert(from.net);
+                self.db.put_pin_back(pin, from);
+            }
+            Edit::NewCell(cell) => {
+                touched.add_nets_of(self.db, cell);
+                let _ = self.db.retire_cell(cell);
+            }
+            Edit::NewNet(net) => self.dead_nets.push(net),
+            Edit::Retired { cell, places } => {
+                self.db.unretire_cell(cell, places);
+                touched.add_nets_of(self.db, cell);
+            }
+            Edit::Renamed { net, old } => self.db.rename_net(net, old)?,
+        }
+        Ok(())
+    }
+
+    /// Estimates the nets an undo touched again and finds the timing again
+    /// from their drivers and the drivers around the cells it resized.
+    fn retime_touched(&mut self, touched: Touched) {
         {
             let netlist = Netlist::new(self.db, self.link);
             self.graph.grow(&netlist);
         }
-        let mut nets: Vec<NetId> = nets.into_iter().collect();
+        let mut nets: Vec<NetId> = touched.nets.into_iter().collect();
         nets.sort_unstable();
         self.estimate_nets(&nets);
         let mut dirty = Vec::new();
@@ -961,7 +982,7 @@ impl<'a, T: Timing> Resizer<'a, T> {
             for net in nets {
                 dirty.extend(netlist.drivers(net));
             }
-            for cell in cells {
+            for cell in touched.cells {
                 for &pin in &self.db.cells[cell].pins {
                     if netlist.is_load(pin) {
                         dirty.extend(netlist.drivers(self.db.pins[pin].net));
@@ -973,7 +994,6 @@ impl<'a, T: Timing> Resizer<'a, T> {
             }
         }
         self.propagate(&dirty);
-        Ok(())
     }
 
     fn record(&mut self, edit: Edit) {
