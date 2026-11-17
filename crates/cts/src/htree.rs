@@ -14,7 +14,7 @@
 
 use crate::capacitance::Farads32;
 use crate::clock::{Clock, InstRef};
-use crate::kmeans::Clustering;
+use crate::kmeans::{Clustering, SinkPoint};
 use crate::options::{
     CLOCK_TREE_MAX_DEPTH, CLUSTERING_CAPACITY, CLUSTERING_POWER,
     FANOUT_LIMITED_CLUSTERING_CAPACITY, MACRO_SINK_CLUSTERING_SIZE, MAX_DIAMETER, MAX_LEAF_SINKS,
@@ -58,8 +58,8 @@ impl TreePoint {
         Self { x, y }
     }
 
-    fn from_f32(p: (f32, f32)) -> Self {
-        Self::new(f64::from(p.0), f64::from(p.1))
+    fn from_f32(p: SinkPoint) -> Self {
+        Self::new(f64::from(p.x), f64::from(p.y))
     }
 
     /// The point in database units, `unit` of them to the tree's length
@@ -89,14 +89,19 @@ impl TreePoint {
     /// The key of the point rounded to single precision, as sink positions
     /// are stored.
     fn key_f32(self) -> (u64, u64) {
-        Self::new(f64::from(self.x as f32), f64::from(self.y as f32)).key()
+        Self::from_f32(self.to_sink_point()).key()
+    }
+
+    /// The point rounded to the single precision sinks are kept in.
+    const fn to_sink_point(self) -> SinkPoint {
+        SinkPoint::new(self.x as f32, self.y as f32)
     }
 }
 
 /// A position in database units in the tree's length unit, `unit`
 /// database units long, in single precision as `TritonCTS` takes sinks.
-fn in_segment_units(p: Point<Dbu>, unit: f32) -> (f32, f32) {
-    (p.x.get() as f32 / unit, p.y.get() as f32 / unit)
+fn in_segment_units(p: Point<Dbu>, unit: f32) -> SinkPoint {
+    SinkPoint::new(p.x.get() as f32 / unit, p.y.get() as f32 / unit)
 }
 
 /// `TritonCTS`'s `fuzzyEqual`.
@@ -255,12 +260,12 @@ impl LevelTopology {
 /// single precision `TritonCTS` keeps them in, and which it is.
 #[derive(Clone, Debug, Default)]
 struct BranchSinks {
-    points: Vec<(f32, f32)>,
+    points: Vec<SinkPoint>,
     insts: Vec<InstRef>,
 }
 
 impl BranchSinks {
-    fn push(&mut self, point: (f32, f32), inst: InstRef) {
+    fn push(&mut self, point: SinkPoint, inst: InstRef) {
         self.points.push(point);
         self.insts.push(inst);
     }
@@ -555,7 +560,7 @@ impl Builder {
             (MAX_DIAMETER, SINK_CLUSTERING_SIZE)
         };
         let unit = self.wire_segment_unit as f32;
-        let sinks: Vec<(f32, f32)> = self
+        let sinks: Vec<SinkPoint> = self
             .clock
             .sinks
             .iter()
@@ -575,11 +580,11 @@ impl Builder {
         } else {
             let (mut x_min, mut x_max) = (f32::MAX, f32::MIN);
             let (mut y_min, mut y_max) = (f32::MAX, f32::MIN);
-            for &(x, y) in &self.top_level_sinks_clustered.points {
-                x_min = x_min.min(x);
-                x_max = x_max.max(x);
-                y_min = y_min.min(y);
-                y_max = y_max.max(y);
+            for p in &self.top_level_sinks_clustered.points {
+                x_min = x_min.min(p.x);
+                x_max = x_max.max(p.x);
+                y_min = y_min.min(p.y);
+                y_max = y_max.max(p.y);
             }
             self.sink_region = Region::new(
                 f64::from(x_min),
@@ -596,7 +601,7 @@ impl Builder {
         &mut self,
         ctx: &TreeContext<'_>,
         tech: &TechChar,
-        sinks: &[(f32, f32)],
+        sinks: &[SinkPoint],
         max_diameter: f32,
         size: u32,
     ) {
@@ -658,7 +663,7 @@ impl Builder {
         &self,
         ctx: &TreeContext<'_>,
         tech: &TechChar,
-        sinks: &[(f32, f32)],
+        sinks: &[SinkPoint],
         max_diameter: f32,
         size: u32,
     ) -> Vec<Vec<usize>> {
@@ -666,7 +671,7 @@ impl Builder {
         let is_macro = self.tree_type == TreeType::Macro;
         let mut matching =
             SinkClustering::new(!is_macro, tech.cap_per_dbu(), tech.sink_buffer_input_cap());
-        for (i, &(x, y)) in sinks.iter().enumerate() {
+        for (i, &SinkPoint { x, y }) in sinks.iter().enumerate() {
             let cap = self.clock.sinks[i].input_cap;
             let cap = if cap == Farads32::ZERO {
                 tech.sink_buffer_input_cap()
@@ -713,14 +718,14 @@ impl Builder {
     fn add_leaf_buffer(
         &mut self,
         ctx: &TreeContext<'_>,
-        sinks: &[(f32, f32)],
+        sinks: &[SinkPoint],
         cluster: &[usize],
         count: usize,
-    ) -> ((f32, f32), InstRef) {
+    ) -> (SinkPoint, InstRef) {
         let (mut x_sum, mut y_sum) = (0.0_f32, 0.0_f32);
         for &idx in cluster {
-            x_sum += sinks[idx].0;
-            y_sum += sinks[idx].1;
+            x_sum += sinks[idx].x;
+            y_sum += sinks[idx].y;
         }
         let n = cluster.len() as f32;
         let center = TreePoint::new(f64::from(x_sum / n), f64::from(y_sum / n));
@@ -739,7 +744,7 @@ impl Builder {
             self.clock.subnets[subnet].add(InstRef::Sink(idx));
         }
         self.clock.subnets[subnet].leaf = true;
-        let point = (legal.x as f32, legal.y as f32);
+        let point = legal.to_sink_point();
         let _ = self.sink_locations.insert(TreePoint::from_f32(point).key());
         (point, buffer)
     }
@@ -1286,10 +1291,10 @@ fn refine_with_clustering(
     root: TreePoint,
     sinks: &BranchSinks,
 ) {
-    let mut engine = Clustering::new(&sinks.points, (root.x as f32, root.y as f32));
+    let mut engine = Clustering::new(&sinks.points, root.to_sink_point());
     let pa = topology.points[a];
     let pb = topology.points[b];
-    let mut means = [(pa.x as f32, pa.y as f32), (pb.x as f32, pb.y as f32)];
+    let mut means = [pa.to_sink_point(), pb.to_sink_point()];
     let share = if ctx.settings.max_fanout.is_some() {
         FANOUT_LIMITED_CLUSTERING_CAPACITY
     } else {
@@ -1678,7 +1683,7 @@ mod tests {
         let mut level = LevelTopology::new(20.0);
         let (dummy, branch) =
             level.add_branches(TreePoint::new(0.0, 0.0), TreePoint::new(30.0, 50.0));
-        level.sinks[branch].push((30.0, 40.0), InstRef::Sink(0));
+        level.sinks[branch].push(SinkPoint::new(30.0, 40.0), InstRef::Sink(0));
         builder.topologies.push(level);
 
         builder.legalize_dummies(&scene.ctx());
@@ -1866,7 +1871,7 @@ mod tests {
         tree.min_input_cap = CapSteps::new(1);
         tree.min_length_sink_region = LengthSteps::new(2);
         tree.top_level_sinks_clustered = BranchSinks {
-            points: vec![(10.0, 50.0), (90.0, 50.0)],
+            points: vec![SinkPoint::new(10.0, 50.0), SinkPoint::new(90.0, 50.0)],
             insts: vec![InstRef::Sink(0), InstRef::Sink(1)],
         };
 
@@ -1904,7 +1909,7 @@ mod tests {
         tree.min_length_sink_region = LengthSteps::new(20);
         tree.sink_region = Region::new(0.0, 0.0, 40.0, 40.0);
         tree.top_level_sinks_clustered = BranchSinks {
-            points: vec![(1.0, 1.0), (39.0, 39.0)],
+            points: vec![SinkPoint::new(1.0, 1.0), SinkPoint::new(39.0, 39.0)],
             insts: vec![InstRef::Sink(0), InstRef::Sink(1)],
         };
 
