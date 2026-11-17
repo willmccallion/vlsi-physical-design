@@ -822,7 +822,7 @@ impl Cts<'_> {
             let _ = sizes.insert(b, db.library.cell_macro(master).size);
         }
         let root = sizes[&self.setup.buffers.root];
-        let unit = f64::from(tech.length_unit());
+        let unit = f64::from(tech.length_unit().dbu());
         let half = |side: Dbu| Dbu(((side.get() as f64 / unit) * unit / 2.0).ceil() as i64);
         let bloat = Point::new(half(root.x), half(root.y));
         let (blockages, macro_diameter) = merge_blockages(db, bloat);
