@@ -821,13 +821,30 @@ fn backtrack_steps(step: f64, mut trial: impl FnMut(f64) -> f64) -> f64 {
     step
 }
 
-/// Why a stretch of iterations ended.
+/// Why the iterations of a stretch stopped.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum Flow {
-    /// The run is over.
-    Done,
+enum StretchEnd {
+    /// The run is over, as `Outcome` says.
+    Over(Outcome),
     /// A timing-driven repair is due at the objects' present positions.
     Timing,
+}
+
+/// How a stretch of iterations left the run.
+enum Flow {
+    /// The run is over, with its final placement.
+    Done(Finished),
+    /// A timing-driven repair is due at the objects' present positions.
+    Timing,
+}
+
+/// How a run ended, with its final placement's evaluation, congestion and
+/// zone outcomes.
+struct Finished {
+    outcome: Outcome,
+    last: Evaluation,
+    final_congestion: Option<f64>,
+    zones: Vec<ZoneOutcome>,
 }
 
 /// Where a run stands between stretches of iterations, each carried out
@@ -848,7 +865,6 @@ struct Run {
     growth_limit: GrowthLimit,
     iterations: usize,
     k: usize,
-    outcome: Outcome,
     /// Which of the timing overflows have fired.
     timing_fired: Vec<bool>,
     timing_rounds: usize,
@@ -856,8 +872,6 @@ struct Run {
     /// Whether the setup changed since the last stretch, so the penalty's
     /// reference wirelength is stale and frozen fields may need to thaw.
     rebuilt: bool,
-    /// The final placement's evaluation, congestion and zone outcomes.
-    last: Option<(Evaluation, Option<f64>, Vec<ZoneOutcome>)>,
 }
 
 /// What a run calls out to: the congestion probe for routability, the
@@ -885,10 +899,9 @@ pub(super) fn minimize<D: TimingDriver, R: FnMut(&Progress)>(
         return Ok(unspread_result(&setup));
     };
     let mut run = Run::new(&setup, params, model.units.to_microns(REFERENCE_HPWL));
-    loop {
-        let flow = run.resume_setup(&mut setup, model, params, bin, &mut hooks);
-        if flow == Flow::Done {
-            break;
+    let finished = loop {
+        if let Flow::Done(finished) = run.resume_setup(&mut setup, model, params, bin, &mut hooks) {
+            break finished;
         }
         write_positions(model, &setup);
         let repaired = match hooks.timing.as_mut() {
@@ -908,9 +921,9 @@ pub(super) fn minimize<D: TimingDriver, R: FnMut(&Progress)>(
         *model = reweighted.model;
         setup = rebuilt;
         run.timing_rounds += 1;
-    }
+    };
     write_positions(model, &setup);
-    Ok(run.result())
+    Ok(run.result(finished))
 }
 
 /// The result of a run with no field to spread: the wirelength of the
@@ -964,7 +977,6 @@ impl Run {
             growth_limit: GrowthLimit::new(),
             iterations: 0,
             k: 0,
-            outcome: Outcome::IterationLimit,
             timing_fired: params
                 .timing
                 .as_ref()
@@ -972,7 +984,6 @@ impl Run {
             timing_rounds: 0,
             timing_on: params.timing.is_some(),
             rebuilt: false,
-            last: None,
         }
     }
 
@@ -1005,29 +1016,16 @@ impl Run {
         self.resume(&mut objective, objects, &mut context, &mut hooks.report)
     }
 
-    /// What the run came to.
-    fn result(&mut self) -> GlobalResult {
-        let (last, final_congestion, zones) = self.last.take().unwrap_or_else(|| {
-            let empty = Evaluation {
-                wirelength: Wirelength::default(),
-                overflow: 0.0,
-                field_overflow: IdVec::new(),
-                field_energy: IdVec::new(),
-            };
-            (empty, None, Vec::new())
-        });
+    /// What the run came to, `finished` as it ended.
+    fn result(self, finished: Finished) -> GlobalResult {
         GlobalResult {
-            outcome: self.outcome,
+            outcome: finished.outcome,
             iterations: self.iterations,
-            overflow: last.overflow,
-            hpwl: last.wirelength.hpwl,
-            congestion: self
-                .routability
-                .take()
-                .map(|r| r.rounds)
-                .unwrap_or_default(),
-            final_congestion,
-            zones,
+            overflow: finished.last.overflow,
+            hpwl: finished.last.wirelength.hpwl,
+            congestion: self.routability.map(|r| r.rounds).unwrap_or_default(),
+            final_congestion: finished.final_congestion,
+            zones: finished.zones,
             timing_rounds: self.timing_rounds,
         }
     }
@@ -1077,14 +1075,13 @@ impl Run {
     ) -> Flow {
         let (mut s, mut eval) = self.start(objective, objects, context);
         let mut moving = objective.moving(&s.weights.frozen);
-        let flow = loop {
+        let end = loop {
             if self.k >= self.limit {
-                break Flow::Done;
+                break StretchEnd::Over(Outcome::IterationLimit);
             }
             self.iterations = self.k + 1;
             let Some(next_eval) = self.step(objective, &mut s, &eval, &moving) else {
-                self.outcome = Outcome::Diverged;
-                break Flow::Done;
+                break StretchEnd::Over(Outcome::Diverged);
             };
             eval = next_eval;
             report(&Progress {
@@ -1094,17 +1091,20 @@ impl Run {
                 penalty: s.weights.highest(),
                 step: s.step,
             });
-            if let Some(flow) =
+            if let Some(end) =
                 self.settle(objective, objects, context, &mut s, &mut eval, &mut moving)
             {
-                break flow;
+                break end;
             }
             self.k += 1;
         };
         objects.centers.clone_from(&s.major);
-        if flow == Flow::Done {
-            self.record_last(objective, objects, context, &s);
-        }
+        let flow = match end {
+            StretchEnd::Timing => Flow::Timing,
+            StretchEnd::Over(outcome) => {
+                Flow::Done(self.finish(objective, objects, context, &s, outcome))
+            }
+        };
         self.s = Some(s);
         flow
     }
@@ -1182,7 +1182,7 @@ impl Run {
         s: &mut State,
         eval: &mut Evaluation,
         moving: &mut IdVec<ObjectId, bool>,
-    ) -> Option<Flow> {
+    ) -> Option<StretchEnd> {
         let params = context.params;
         if self.k.is_multiple_of(50) && log::log_enabled!(log::Level::Debug) {
             s.weights.log(self.k, eval);
@@ -1202,11 +1202,10 @@ impl Run {
         }
         if self.timing_round_due(params, overflow) {
             self.k += 1;
-            return Some(Flow::Timing);
+            return Some(StretchEnd::Timing);
         }
         if converged {
-            self.outcome = Outcome::Converged;
-            return Some(Flow::Done);
+            return Some(StretchEnd::Over(Outcome::Converged));
         }
         None
     }
@@ -1336,14 +1335,16 @@ impl Run {
         !routability_pending && timing_due(&timing.overflows, &mut self.timing_fired, overflow)
     }
 
-    /// Keeps the final placement's evaluation, congestion and zone outcomes.
-    fn record_last(
-        &mut self,
+    /// The run's end with `outcome`: the final placement's evaluation,
+    /// congestion and zone outcomes.
+    fn finish(
+        &self,
         objective: &mut Objective<'_>,
         objects: &Objects,
         context: &mut StretchContext<'_, '_>,
         s: &State,
-    ) {
+        outcome: Outcome,
+    ) -> Finished {
         let last = objective.evaluate(&s.major, s.gamma);
         let final_congestion = self.routability.as_ref().map(|r| {
             congestion_map(
@@ -1357,7 +1358,12 @@ impl Run {
             .metric()
         });
         let zones = objective.outcomes(&last);
-        self.last = Some((last, final_congestion, zones));
+        Finished {
+            outcome,
+            last,
+            final_congestion,
+            zones,
+        }
     }
 }
 
