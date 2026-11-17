@@ -222,7 +222,7 @@ pub(crate) fn free_intervals(
 
 /// Rounds `x` down to the site grid starting at `origin`.
 pub(crate) fn snap_down(x: Dbu, origin: Dbu, site: Dbu) -> Dbu {
-    origin + site * (x - origin).get().div_euclid(site.get())
+    origin + site * (x - origin).div_floor(site)
 }
 
 /// Rounds `x` up to the site grid starting at `origin`.

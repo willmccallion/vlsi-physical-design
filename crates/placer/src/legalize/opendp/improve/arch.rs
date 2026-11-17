@@ -70,7 +70,7 @@ impl Arch {
             let end_gap = row.site_width - row.site_spacing;
             row.left = row.left.max(arch.min_x);
             if row.left + row.site_spacing * row.num_sites + end_gap > arch.max_x {
-                row.num_sites = (arch.max_x - end_gap - row.left).get() / row.site_spacing.get();
+                row.num_sites = (arch.max_x - end_gap - row.left).div_trunc(row.site_spacing);
             }
         }
         arch.merge_rows(network)?;
@@ -115,7 +115,7 @@ impl Arch {
             let mut row = self.rows[start];
             if r - start > 1 {
                 let (lx, rx) = (spans[0].0, spans[spans.len() - 1].1);
-                row.num_sites = (rx - lx).get() / row.site_spacing.get();
+                row.num_sites = (rx - lx).div_trunc(row.site_spacing);
                 row.left = lx;
             }
             if self.min_x < spans[0].0 {

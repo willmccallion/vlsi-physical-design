@@ -1360,7 +1360,7 @@ fn uniform_row_height(db: &NetlistDB, rows: &[&pare_common::db::design::Row]) ->
             None => Some(height),
             Some(u) => {
                 let (small, large) = (u.min(height), u.max(height));
-                if large.get() % small.get() != 0 {
+                if !large.is_multiple_of(small) {
                     return None;
                 }
                 Some(small)
