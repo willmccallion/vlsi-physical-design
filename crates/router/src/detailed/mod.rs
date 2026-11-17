@@ -237,14 +237,7 @@ impl<'a> DetailedRouter<'a> {
     /// Prepares routing: computes pin access and records obstacles, pins
     /// and fixed cuts.
     pub fn new(db: &'a NetlistDB, tech: &'a RouteTech, gcell: Dbu) -> Self {
-        let start = std::time::Instant::now();
-        let mut occupancy = Occupancy::new(tech, gcell);
-        occupancy.add_fixed(tech, fixed_shapes(db));
-        log::debug!(
-            "fixed shapes recorded in {:.1}s, {} resident",
-            start.elapsed().as_secs_f64(),
-            resident()
-        );
+        let mut occupancy = fixed_occupancy(db, tech, gcell);
         let start = std::time::Instant::now();
         let rules = Rules::from_design(db);
         let fixed = judge::fixed_layout(db);
@@ -1405,6 +1398,20 @@ impl LowPads {
                 .all(|(l, r, n)| *l != layer || *n == net || !r.overlaps(&reach))
         })
     }
+}
+
+/// The occupancy of `db`'s fixed shapes, its added metal split into pieces
+/// no longer than `gcell`.
+fn fixed_occupancy(db: &NetlistDB, tech: &RouteTech, gcell: Dbu) -> Occupancy {
+    let start = std::time::Instant::now();
+    let mut occupancy = Occupancy::new(tech, gcell);
+    occupancy.add_fixed(tech, fixed_shapes(db));
+    log::debug!(
+        "fixed shapes recorded in {:.1}s, {} resident",
+        start.elapsed().as_secs_f64(),
+        resident()
+    );
+    occupancy
 }
 
 /// Each signal net's access points of each pin, found on its own; none
