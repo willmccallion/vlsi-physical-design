@@ -192,8 +192,32 @@ impl Improver {
             };
             rb = below;
         }
+        let Some(segs) = self.segment_stack(n, rb, spanned, xj) else {
+            return Ok(false);
+        };
+        let Some((xmin, xmax)) = self.stack_gap(n, &segs, xj) else {
+            return Ok(false);
+        };
+        let Some(x) = self.align(n, xj, xmin, xmax) else {
+            return Ok(false);
+        };
+        let from_segs = self.cell_segs[n].clone();
+        let from = self.position(n);
+        let to = Point::new(x, self.arch.rows[rb].bottom);
+        self.add_to_move_list(n, from, &from_segs, to, &segs, Reach::Free)
+    }
+
+    /// The segment of `n`'s region holding `xj` in each of the `spanned`
+    /// rows from `bottom` up; none where a row has none.
+    fn segment_stack(
+        &self,
+        n: NodeId,
+        bottom: ArchRowId,
+        spanned: usize,
+        xj: Dbu,
+    ) -> Option<Vec<SegmentId>> {
         let mut segs = Vec::with_capacity(spanned);
-        for r in rb.stack(spanned) {
+        for r in bottom.stack(spanned) {
             let found = self.segs_in_row[r].iter().copied().find(|&s| {
                 let seg = &self.segments[s];
                 seg.region == self.group(n) && xj >= seg.min_x && xj <= seg.max_x
@@ -203,49 +227,52 @@ impl Improver {
             };
             segs.push(s);
         }
-        if segs.len() != spanned {
-            return Ok(false);
-        }
+        (segs.len() == spanned).then_some(segs)
+    }
+
+    /// The span free in every segment of `segs` around `xj` that `n` fits
+    /// in; none where it fits in no such span.
+    fn stack_gap(&self, n: NodeId, segs: &[SegmentId], xj: Dbu) -> Option<(Dbu, Dbu)> {
         let (mut xmin, mut xmax) = (Dbu(i64::from(i32::MIN)), Dbu(i64::from(i32::MAX)));
-        for &s in &segs {
-            let cells = &self.cells_in_seg[s];
-            let (mut left, mut right) = (None, None);
-            if !cells.is_empty() {
-                let at = self.lower_bound(s, xj);
-                if at == cells.len() {
-                    left = cells.last().copied();
-                } else {
-                    right = Some(cells[at]);
-                    if at > 0 {
-                        left = Some(cells[at - 1]);
-                        if left == Some(n) {
-                            left = (at > 1).then(|| cells[at - 2]);
-                        }
-                    }
-                }
-            }
+        for &s in segs {
+            let (left, right) = self.neighbours_besides(n, s, xj);
             if left == Some(n) || right == Some(n) {
-                return Ok(false);
+                return None;
             }
             let seg = &self.segments[s];
             let lx = left.map_or(seg.min_x, |l| self.right(l));
             let rx = right.map_or(seg.max_x, |r| self.left(r));
             if self.width(n) > rx - lx {
-                return Ok(false);
+                return None;
             }
             xmin = xmin.max(lx);
             xmax = xmax.min(rx);
         }
-        if self.width(n) > xmax - xmin {
-            return Ok(false);
+        (self.width(n) <= xmax - xmin).then_some((xmin, xmax))
+    }
+
+    /// The cells of segment `s` left and right of `xj`, the left one taken
+    /// from before `n` where `n` is the cell just left of `xj`.
+    fn neighbours_besides(
+        &self,
+        n: NodeId,
+        s: SegmentId,
+        xj: Dbu,
+    ) -> (Option<NodeId>, Option<NodeId>) {
+        let cells = &self.cells_in_seg[s];
+        if cells.is_empty() {
+            return (None, None);
         }
-        let Some(x) = self.align(n, xj, xmin, xmax) else {
-            return Ok(false);
-        };
-        let from_segs = self.cell_segs[n].clone();
-        let from = self.position(n);
-        let to = Point::new(x, self.arch.rows[rb].bottom);
-        self.add_to_move_list(n, from, &from_segs, to, &segs, Reach::Free)
+        let at = self.lower_bound(s, xj);
+        if at == cells.len() {
+            return (cells.last().copied(), None);
+        }
+        let right = Some(cells[at]);
+        let mut left = at.checked_sub(1).map(|i| cells[i]);
+        if left == Some(n) {
+            left = (at > 1).then(|| cells[at - 2]);
+        }
+        (left, right)
     }
 
     /// `DetailedMgr::trySwap1`: swaps two single-row cells, each into the
