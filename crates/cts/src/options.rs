@@ -84,9 +84,51 @@ pub(crate) const CLUSTERING_POWER: u32 = 4;
 /// The most levels a tree is built to, as `CtsOptions`' default
 /// `clockTreeMaxDepth`.
 pub(crate) const CLOCK_TREE_MAX_DEPTH: u32 = 100;
-/// The largest diameter of a cluster of register sinks, in microns, as
-/// `CtsOptions`' default `maxDiameter`.
-pub(crate) const MAX_DIAMETER: f64 = 50.0;
+/// A length in microns, as `CtsOptions` gives cluster diameters.
+#[derive(Clone, Copy, Debug, PartialEq, PartialOrd)]
+pub(crate) struct Microns(f64);
+
+impl Microns {
+    /// `microns` microns.
+    pub(crate) const fn new(microns: f64) -> Self {
+        Self(microns)
+    }
+
+    /// The longer of `self` and `other`.
+    #[must_use]
+    pub(crate) const fn max(self, other: Self) -> Self {
+        Self(self.0.max(other.0))
+    }
+
+    /// The length in a tree's length unit of `unit` database units, at
+    /// `dbu` of them to a micron, worked out in double precision and
+    /// rounded once to single, as `HTreeBuilder::initSinkRegion` scales
+    /// the largest diameter.
+    #[must_use]
+    pub(crate) fn in_tree_units(self, dbu: i32, unit: f64) -> f32 {
+        (self.0 * f64::from(dbu) / unit) as f32
+    }
+
+    /// The length in a tree's length unit as [`Microns::in_tree_units`]
+    /// gives it, but in single precision throughout, as
+    /// `HTreeBuilder::preSinkClustering` scales the diameters it tries.
+    #[must_use]
+    pub(crate) fn in_tree_units_single(self, dbu: f32, unit: f32) -> f32 {
+        self.0 as f32 * dbu / unit
+    }
+}
+
+#[cfg(test)]
+impl Microns {
+    /// The length in microns.
+    pub(crate) const fn get(self) -> f64 {
+        self.0
+    }
+}
+
+/// The largest diameter of a cluster of register sinks, as `CtsOptions`'
+/// default `maxDiameter`.
+pub(crate) const MAX_DIAMETER: Microns = Microns::new(50.0);
 /// The cluster sizes tried for register sinks before a buffer's fanout
 /// limit caps them, as `CtsOptions`' default `sinkClusteringSizes`.
 const SINK_CLUSTERING_SIZES: [u32; 3] = [10, 20, 30];
@@ -94,8 +136,8 @@ const SINK_CLUSTERING_SIZES: [u32; 3] = [10, 20, 30];
 /// `sinkClusteringSize`.
 pub(crate) const SINK_CLUSTERING_SIZE: u32 = 20;
 /// The largest diameter of a cluster of macro sinks before the macros give
-/// one, in microns, as `CtsOptions`' default `macroMaxDiameter`.
-pub(crate) const MACRO_MAX_DIAMETER: f64 = 50.0;
+/// one, as `CtsOptions`' default `macroMaxDiameter`.
+pub(crate) const MACRO_MAX_DIAMETER: Microns = Microns::new(50.0);
 /// The most macro sinks in a cluster, as `CtsOptions`' default
 /// `macroSinkClusteringSize`.
 pub(crate) const MACRO_SINK_CLUSTERING_SIZE: u32 = 4;
@@ -118,8 +160,8 @@ pub(crate) struct Settings {
     /// The cluster sizes tried for register sinks.
     pub sink_clustering_sizes: Vec<u32>,
     /// The largest diameter of a cluster of macro sinks once the macros
-    /// set it, in microns.
-    pub macro_max_diameter: Option<f64>,
+    /// set it.
+    pub macro_max_diameter: Option<Microns>,
     /// The longest wire worth driving whole, when the resizer gave one.
     pub max_wire_length: Option<Dbu>,
 }
@@ -138,8 +180,8 @@ impl Settings {
         }
     }
 
-    /// The largest diameter of a cluster of macro sinks, in microns.
-    pub(crate) fn macro_max_diameter(&self) -> f64 {
+    /// The largest diameter of a cluster of macro sinks.
+    pub(crate) fn macro_max_diameter(&self) -> Microns {
         self.macro_max_diameter.unwrap_or(MACRO_MAX_DIAMETER)
     }
 
