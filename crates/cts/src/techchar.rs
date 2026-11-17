@@ -14,6 +14,7 @@ use pare_common::db::design::NetlistDB;
 use pare_common::db::liberty::{
     AxisVariable, BufferCell, Edge, LibCell, LibPortId, Liberty, Thresholds,
 };
+use pare_common::geom::dbu::Dbu;
 use pare_common::units::{Farads, FaradsPerDbu, Ohms, OhmsPerDbu, Seconds};
 use pare_resizer::Link;
 use pare_resizer::WireRc;
@@ -77,6 +78,169 @@ impl WireSegment {
     pub(crate) const fn is_buffered(&self) -> bool {
         !self.buffer_locations.is_empty()
     }
+
+    /// The segment's length.
+    #[must_use]
+    pub(crate) fn length_steps(&self) -> LengthSteps {
+        LengthSteps(i64::from(self.length))
+    }
+
+    /// The load at its far end.
+    #[must_use]
+    pub(crate) fn load_steps(&self) -> CapSteps {
+        CapSteps(u32::from(self.load))
+    }
+
+    /// The slew at its far end.
+    #[must_use]
+    pub(crate) fn output_slew_steps(&self) -> SlewSteps {
+        SlewSteps(u32::from(self.output_slew))
+    }
+
+    /// The capacitance it presents at its start.
+    #[must_use]
+    pub(crate) fn input_cap_steps(&self) -> CapSteps {
+        CapSteps(u32::from(self.input_cap))
+    }
+
+    /// The slew at its start.
+    #[must_use]
+    pub(crate) fn input_slew_steps(&self) -> SlewSteps {
+        SlewSteps(u32::from(self.input_slew))
+    }
+
+    /// The wire from its start to its first buffer.
+    #[must_use]
+    pub(crate) fn to_first_buffer(&self) -> LengthSteps {
+        LengthSteps(i64::from(self.wl_to_first_buffer))
+    }
+
+    /// The wire after its last buffer.
+    #[must_use]
+    pub(crate) fn after_last_buffer(&self) -> LengthSteps {
+        LengthSteps(i64::from(self.last_wl))
+    }
+}
+
+/// A whole number of the characterization's length units, as table lengths
+/// and the wire since the last buffer count.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub(crate) struct LengthSteps(i64);
+
+impl LengthSteps {
+    /// `steps` length units.
+    #[must_use]
+    pub(crate) const fn new(steps: i64) -> Self {
+        Self(steps)
+    }
+
+    /// The number of length units.
+    #[must_use]
+    pub(crate) const fn get(self) -> i64 {
+        self.0
+    }
+
+    /// How many whole `step`s fit, rounding toward zero.
+    #[must_use]
+    pub(crate) const fn count_of(self, step: Self) -> i64 {
+        self.0 / step.0
+    }
+}
+
+impl std::ops::Add for LengthSteps {
+    type Output = Self;
+    fn add(self, rhs: Self) -> Self {
+        Self(self.0 + rhs.0)
+    }
+}
+
+impl std::ops::AddAssign for LengthSteps {
+    fn add_assign(&mut self, rhs: Self) {
+        self.0 += rhs.0;
+    }
+}
+
+impl std::ops::Sub for LengthSteps {
+    type Output = Self;
+    fn sub(self, rhs: Self) -> Self {
+        Self(self.0 - rhs.0)
+    }
+}
+
+impl std::ops::Mul<i64> for LengthSteps {
+    type Output = Self;
+    fn mul(self, rhs: i64) -> Self {
+        Self(self.0 * rhs)
+    }
+}
+
+/// A load in the characterization's capacitance steps.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub(crate) struct CapSteps(u32);
+
+/// A slew in the characterization's slew steps.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub(crate) struct SlewSteps(u32);
+
+macro_rules! step_count {
+    ($name:ident) => {
+        impl $name {
+            /// `steps` steps.
+            #[must_use]
+            pub(crate) const fn new(steps: u32) -> Self {
+                Self(steps)
+            }
+
+            /// The number of steps.
+            #[must_use]
+            pub(crate) const fn get(self) -> u32 {
+                self.0
+            }
+
+            /// How many steps apart `self` and `other` are.
+            #[must_use]
+            pub(crate) const fn steps_from(self, other: Self) -> u32 {
+                self.0.abs_diff(other.0)
+            }
+
+            /// Every step from the first through `last`.
+            pub(crate) fn through(last: Self) -> impl Iterator<Item = Self> {
+                (1..=last.0).map(Self)
+            }
+        }
+    };
+}
+
+step_count!(CapSteps);
+step_count!(SlewSteps);
+
+impl SlewSteps {
+    /// The first step, the least slew the characterization takes.
+    pub(crate) const FIRST: Self = Self(1);
+
+    /// The step after this one.
+    #[must_use]
+    pub(crate) const fn next(self) -> Self {
+        Self(self.0 + 1)
+    }
+}
+
+/// The database units one length unit of the characterization spans.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) struct LengthUnit(u32);
+
+impl LengthUnit {
+    /// The unit in database units.
+    #[must_use]
+    pub(crate) const fn dbu(self) -> u32 {
+        self.0
+    }
+
+    /// The whole length units in `length`, rounding toward zero.
+    #[must_use]
+    pub(crate) const fn steps_in(self, length: Dbu) -> LengthSteps {
+        LengthSteps(length.div_trunc(Dbu(self.0 as i64)))
+    }
 }
 
 /// A length along clock wire in the characterization's length unit, the
@@ -124,12 +288,12 @@ pub(crate) struct CharSetup<'a> {
 pub(crate) struct TechChar {
     segments: Vec<WireSegment>,
     by_key: FxHashMap<u32, Vec<usize>>,
-    min_segment_length: u32,
-    max_segment_length: u32,
-    max_capacitance: u32,
-    max_slew: u32,
-    actual_min_input_cap: u32,
-    length_unit: u32,
+    min_segment_length: LengthSteps,
+    max_segment_length: LengthSteps,
+    max_capacitance: CapSteps,
+    max_slew: SlewSteps,
+    actual_min_input_cap: CapSteps,
+    length_unit: LengthUnit,
     cap_per_dbu: FaradsPerDbu,
     sink_buffer_input_cap: Farads32,
     wire_delay_rate: Option<WireDelayRate>,
@@ -325,7 +489,12 @@ impl TechChar {
 
     /// The segments of a length, load and output slew, in table order.
     #[must_use]
-    pub(crate) fn segments_with(&self, length: u32, load: u32, output_slew: u32) -> &[usize] {
+    pub(crate) fn segments_with(
+        &self,
+        length: LengthSteps,
+        load: CapSteps,
+        output_slew: SlewSteps,
+    ) -> &[usize] {
         self.by_key
             .get(&key(length, load, output_slew))
             .map_or(&[], Vec::as_slice)
@@ -333,31 +502,31 @@ impl TechChar {
 
     /// The shortest characterized length, in length units.
     #[must_use]
-    pub(crate) const fn min_segment_length(&self) -> u32 {
+    pub(crate) const fn min_segment_length(&self) -> LengthSteps {
         self.min_segment_length
     }
 
     /// The longest characterized length, in length units.
     #[must_use]
-    pub(crate) const fn max_segment_length(&self) -> u32 {
+    pub(crate) const fn max_segment_length(&self) -> LengthSteps {
         self.max_segment_length
     }
 
     /// The largest normalized load.
     #[must_use]
-    pub const fn max_capacitance(&self) -> u32 {
+    pub const fn max_capacitance(&self) -> CapSteps {
         self.max_capacitance
     }
 
     /// The largest normalized slew.
     #[must_use]
-    pub const fn max_slew(&self) -> u32 {
+    pub const fn max_slew(&self) -> SlewSteps {
         self.max_slew
     }
 
     /// The smallest normalized input capacitance of any segment.
     #[must_use]
-    pub(crate) const fn actual_min_input_cap(&self) -> u32 {
+    pub(crate) const fn actual_min_input_cap(&self) -> CapSteps {
         self.actual_min_input_cap
     }
 
@@ -369,9 +538,9 @@ impl TechChar {
         self.wire_delay_rate
     }
 
-    /// The length unit, in database units.
+    /// The length unit.
     #[must_use]
-    pub(crate) const fn length_unit(&self) -> u32 {
+    pub(crate) const fn length_unit(&self) -> LengthUnit {
         self.length_unit
     }
 
@@ -390,16 +559,16 @@ impl TechChar {
     /// Copies every segment of `length` as a segment of `fake_length`, for
     /// sink regions shorter than the shortest characterized wire, as
     /// `TechChar::createFakeEntries`.
-    pub(crate) fn create_fake_entries(&mut self, length: u32, fake_length: u32) {
+    pub(crate) fn create_fake_entries(&mut self, length: LengthSteps, fake_length: LengthSteps) {
         if length == fake_length {
             return;
         }
-        for load in 1..=self.max_capacitance {
-            for output_slew in 1..=self.max_slew {
+        for load in CapSteps::through(self.max_capacitance) {
+            for output_slew in SlewSteps::through(self.max_slew) {
                 let found: Vec<usize> = self.segments_with(length, load, output_slew).to_vec();
                 for index in found {
                     let mut fake = self.segments[index].clone();
-                    fake.length = fake_length as u8;
+                    fake.length = fake_length.get() as u8;
                     self.push(fake);
                 }
             }
@@ -408,9 +577,9 @@ impl TechChar {
 
     fn push(&mut self, segment: WireSegment) {
         let k = key(
-            u32::from(segment.length),
-            u32::from(segment.load),
-            u32::from(segment.output_slew),
+            segment.length_steps(),
+            segment.load_steps(),
+            segment.output_slew_steps(),
         );
         self.segments.push(segment);
         self.by_key
@@ -433,12 +602,12 @@ impl TechChar {
         let mut table = Self {
             segments: Vec::new(),
             by_key: FxHashMap::default(),
-            min_segment_length,
-            max_segment_length,
-            max_capacitance: range(|s| s.load).1,
-            max_slew: range(|s| s.output_slew).1,
-            actual_min_input_cap: range(|s| s.input_cap).0,
-            length_unit,
+            min_segment_length: LengthSteps(i64::from(min_segment_length)),
+            max_segment_length: LengthSteps(i64::from(max_segment_length)),
+            max_capacitance: CapSteps(range(|s| s.load).1),
+            max_slew: SlewSteps(range(|s| s.output_slew).1),
+            actual_min_input_cap: CapSteps(range(|s| s.input_cap).0),
+            length_unit: LengthUnit(length_unit),
             cap_per_dbu: FaradsPerDbu::new(0.0),
             sink_buffer_input_cap: Farads32::ZERO,
             wire_delay_rate: None,
@@ -450,8 +619,10 @@ impl TechChar {
     }
 }
 
-const fn key(length: u32, load: u32, output_slew: u32) -> u32 {
-    length | (load << NUM_BITS_PER_FIELD) | (output_slew << (2 * NUM_BITS_PER_FIELD))
+const fn key(length: LengthSteps, load: CapSteps, output_slew: SlewSteps) -> u32 {
+    length.get() as u32
+        | (load.get() << NUM_BITS_PER_FIELD)
+        | (output_slew.get() << (2 * NUM_BITS_PER_FIELD))
 }
 
 /// Picks the characterization buffer, the lengths, loads and slews, as
@@ -983,30 +1154,32 @@ fn compile(
         .iter()
         .map(|line| line.total_cap as u32)
         .fold(bounds.cap.max, u32::min);
-    let mut table = TechChar {
-        segments: Vec::with_capacity(lines.len()),
-        by_key: FxHashMap::default(),
-        min_segment_length: bounds.wirelength.min * ratio,
-        max_segment_length: bounds.wirelength.max * ratio,
-        max_capacitance: bounds.cap.max,
-        max_slew: bounds.slew.max,
-        actual_min_input_cap,
-        length_unit: plan.length_unit,
-        cap_per_dbu,
-        sink_buffer_input_cap: plan.sink_buffer_input_cap,
-        wire_delay_rate: None,
-    };
+    let min_segment_length = bounds.wirelength.min * ratio;
+    let max_segment_length = bounds.wirelength.max * ratio;
     let limits = [
-        table.min_segment_length,
-        table.max_segment_length,
+        min_segment_length,
+        max_segment_length,
         bounds.cap.min,
-        table.max_capacitance,
+        bounds.cap.max,
         bounds.slew.min,
-        table.max_slew,
+        bounds.slew.max,
     ];
     if limits.iter().any(|&v| v > MAX_NORMALIZED) {
         return Err(CtsError::CharacterizationRange(MAX_NORMALIZED));
     }
+    let mut table = TechChar {
+        segments: Vec::with_capacity(lines.len()),
+        by_key: FxHashMap::default(),
+        min_segment_length: LengthSteps(i64::from(min_segment_length)),
+        max_segment_length: LengthSteps(i64::from(max_segment_length)),
+        max_capacitance: CapSteps(bounds.cap.max),
+        max_slew: SlewSteps(bounds.slew.max),
+        actual_min_input_cap: CapSteps(actual_min_input_cap),
+        length_unit: LengthUnit(plan.length_unit),
+        cap_per_dbu,
+        sink_buffer_input_cap: plan.sink_buffer_input_cap,
+        wire_delay_rate: None,
+    };
     for line in lines {
         let mut pin_slew = line.pin_slew;
         if line.pure_wire && pin_slew <= line.in_slew {

@@ -21,7 +21,7 @@ use crate::options::{
     MAX_SLEW, SINK_CLUSTERING_SIZE, Settings,
 };
 use crate::sink_clustering::SinkClustering;
-use crate::techchar::{SegmentLength, TechChar};
+use crate::techchar::{CapSteps, LengthSteps, SegmentLength, SlewSteps, TechChar};
 use pare_common::db::liberty::BufferCell;
 use pare_common::geom::dbu::Dbu;
 use pare_common::geom::point::Point;
@@ -204,9 +204,9 @@ struct LevelTopology {
     wire_segments: Vec<usize>,
     points: Vec<TreePoint>,
     sinks: Vec<BranchSinks>,
-    output_slew: u32,
-    output_cap: u32,
-    curr_wl: i32,
+    output_slew: SlewSteps,
+    output_cap: CapSteps,
+    curr_wl: LengthSteps,
 }
 
 impl LevelTopology {
@@ -216,9 +216,9 @@ impl LevelTopology {
             wire_segments: Vec::new(),
             points: Vec::new(),
             sinks: Vec::new(),
-            output_slew: 0,
-            output_cap: 0,
-            curr_wl: 0,
+            output_slew: SlewSteps::new(0),
+            output_cap: CapSteps::new(0),
+            curr_wl: LengthSteps::new(0),
         }
     }
 
@@ -312,8 +312,8 @@ pub(crate) struct Builder {
     sink_locations: FxHashSet<(u64, u64)>,
     top_level_sinks_clustered: BranchSinks,
     wire_segment_unit: i32,
-    min_input_cap: u32,
-    min_length_sink_region: u32,
+    min_input_cap: CapSteps,
+    min_length_sink_region: LengthSteps,
 }
 
 impl Builder {
@@ -333,8 +333,8 @@ impl Builder {
             sink_locations: FxHashSet::default(),
             top_level_sinks_clustered: BranchSinks::default(),
             wire_segment_unit: 0,
-            min_input_cap: 0,
-            min_length_sink_region: 0,
+            min_input_cap: CapSteps::new(0),
+            min_length_sink_region: LengthSteps::new(0),
         }
     }
 
@@ -485,10 +485,10 @@ impl Builder {
         for level in 1..=CLOCK_TREE_MAX_DEPTH {
             let per_region = self.sinks_per_sub_region(ctx, level);
             let (width, height) = self.sub_region_size(level);
-            let min_length = f64::from(self.min_length_sink_region);
+            let min_length = self.min_length_sink_region.get() as f64;
             if width < min_length || height < min_length {
-                tech.create_fake_entries(self.min_length_sink_region, 1);
-                self.min_length_sink_region = 1;
+                tech.create_fake_entries(self.min_length_sink_region, LengthSteps::new(1));
+                self.min_length_sink_region = LengthSteps::new(1);
             }
             self.level_topology(ctx, tech, level, width, height);
             if per_region < ctx.settings.max_fanout.unwrap_or(MAX_LEAF_SINKS) {
@@ -545,7 +545,7 @@ impl Builder {
     /// Clusters the sinks and finds the region the tree spans, as
     /// `HTreeBuilder::initSinkRegion`.
     fn init_sink_region(&mut self, ctx: &TreeContext<'_>, tech: &TechChar) {
-        self.wire_segment_unit = tech.length_unit() as i32;
+        self.wire_segment_unit = tech.length_unit().dbu() as i32;
         let (diameter, size) = if self.tree_type == TreeType::Macro {
             (
                 ctx.settings.macro_max_diameter(),
@@ -755,38 +755,40 @@ impl Builder {
         height: f64,
     ) {
         let min_length = self.min_length_sink_region;
-        let clamped = f64::from(min_length.max(1));
+        let clamped = min_length.max(LengthSteps::new(1)).get() as f64;
         let side = if self.is_vertical(level) {
             height
         } else {
             width
         };
-        let segment_length =
-            (((side / clamped).round() * f64::from(min_length) / 2.0) as u32).max(1);
-        let mut topology = LevelTopology::new(f64::from(segment_length));
-        let (mut input_cap, mut input_slew, mut curr_wl) = (self.min_input_cap, 1, 0);
+        let segment_length = LengthSteps::new(i64::from(
+            (((side / clamped).round() * min_length.get() as f64 / 2.0) as u32).max(1),
+        ));
+        let mut topology = LevelTopology::new(segment_length.get() as f64);
+        let (mut input_cap, mut input_slew, mut curr_wl) =
+            (self.min_input_cap, SlewSteps::FIRST, LengthSteps::new(0));
         if level > 1 {
             let previous = &self.topologies[level as usize - 2];
             input_cap = previous.output_cap;
             input_slew = previous.output_slew;
             curr_wl = previous.curr_wl;
         }
-        let slew_threshold = MAX_SLEW;
+        let slew_threshold = SlewSteps::new(MAX_SLEW);
         let wirelength_threshold = match ctx.settings.max_wire_length {
-            None => i64::from(slew_threshold * tech.max_segment_length()),
+            None => tech.max_segment_length() * i64::from(MAX_SLEW),
             // NOTE: computeLevelTopology divides by the characterization unit,
             // twice the length unit the segments count in; PARE by the latter.
-            Some(max) => max.get() / i64::from(tech.length_unit()),
+            Some(max) => tech.length_unit().steps_in(max),
         };
-        let mut length = 0;
+        let mut length = LengthSteps::new(0);
         let mut char_length = tech.max_segment_length();
-        while char_length >= 1 {
-            let wires = (segment_length - length) / char_length;
+        while char_length >= LengthSteps::new(1) {
+            let wires = (segment_length - length).count_of(char_length);
             if wires >= 1 {
                 for _ in 0..wires {
                     let mut out = SegmentChoice {
-                        slew: 0,
-                        cap: 0,
+                        slew: SlewSteps::new(0),
+                        cap: CapSteps::new(0),
                         curr_wl,
                     };
                     let Some(key) = min_delay_segment(
@@ -813,7 +815,7 @@ impl Builder {
                     break;
                 }
             }
-            char_length -= 1;
+            char_length = char_length - LengthSteps::new(1);
         }
         topology.output_slew = input_slew;
         topology.output_cap = input_cap;
@@ -1308,20 +1310,20 @@ fn refine_with_clustering(
 /// What a segment search starts from.
 #[derive(Clone, Copy, Debug)]
 struct SegmentQuery {
-    length: u32,
-    input_slew: u32,
-    input_cap: u32,
-    slew_threshold: u32,
-    /// The most wire since the last buffer, in length units.
-    wirelength_threshold: i64,
+    length: LengthSteps,
+    input_slew: SlewSteps,
+    input_cap: CapSteps,
+    slew_threshold: SlewSteps,
+    /// The most wire since the last buffer.
+    wirelength_threshold: LengthSteps,
 }
 
 /// The slew, load and wire since the last buffer a chosen segment leaves.
 #[derive(Clone, Copy, Debug)]
 struct SegmentChoice {
-    slew: u32,
-    cap: u32,
-    curr_wl: i32,
+    slew: SlewSteps,
+    cap: CapSteps,
+    curr_wl: LengthSteps,
 }
 
 /// The fastest segment of `query.length` that starts within `tolerance`
@@ -1338,24 +1340,22 @@ fn min_delay_segment(
     let mut min_delay = u32::MAX;
     let mut min_buf_key = None;
     let mut min_buf_delay = u32::MAX;
-    for load in 1..=tech.max_capacitance() {
-        for out_slew in 1..=tech.max_slew() {
+    for load in CapSteps::through(tech.max_capacitance()) {
+        for out_slew in SlewSteps::through(tech.max_slew()) {
             for &key in tech.segments_with(query.length, load, out_slew) {
                 let seg = tech.segment(key);
-                if (i64::from(seg.input_cap) - i64::from(query.input_cap)).abs()
-                    > i64::from(tolerance)
-                    || (i64::from(seg.input_slew) - i64::from(query.input_slew)).abs()
-                        > i64::from(tolerance)
+                if seg.input_cap_steps().steps_from(query.input_cap) > tolerance
+                    || seg.input_slew_steps().steps_from(query.input_slew) > tolerance
                 {
                     continue;
                 }
-                let wl = i64::from(out.curr_wl) + i64::from(seg.wl_to_first_buffer);
+                let wl = out.curr_wl + seg.to_first_buffer();
                 let limit = if seg.is_buffered() {
                     query.wirelength_threshold
                 } else {
                     // NOTE: computeMinDelaySegment subtracts in unsigned, so a limit below
                     // the shortest segment wraps and admits any bare wire; PARE's is signed.
-                    query.wirelength_threshold - i64::from(tech.min_segment_length())
+                    query.wirelength_threshold - tech.min_segment_length()
                 };
                 if wl > limit {
                     continue;
@@ -1374,9 +1374,9 @@ fn min_delay_segment(
     if query.input_slew >= query.slew_threshold {
         if let Some(key) = min_buf_key {
             let seg = tech.segment(key);
-            out.slew = u32::from(seg.output_slew);
-            out.cap = u32::from(seg.load);
-            out.curr_wl = seg.last_wl;
+            out.slew = seg.output_slew_steps();
+            out.cap = seg.load_steps();
+            out.curr_wl = seg.after_last_buffer();
             return Some(key);
         }
         if tolerance < MAX_TOLERANCE {
@@ -1391,13 +1391,13 @@ fn min_delay_segment(
     };
     let seg = tech.segment(key);
     if seg.is_buffered() {
-        out.slew = u32::from(seg.output_slew);
-        out.curr_wl = seg.last_wl;
+        out.slew = seg.output_slew_steps();
+        out.curr_wl = seg.after_last_buffer();
     } else {
-        out.slew = u32::from(seg.output_slew).max(query.input_slew + 1);
-        out.curr_wl += seg.last_wl;
+        out.slew = seg.output_slew_steps().max(query.input_slew.next());
+        out.curr_wl += seg.after_last_buffer();
     }
-    out.cap = u32::from(seg.load);
+    out.cap = seg.load_steps();
     Some(key)
 }
 
@@ -1749,20 +1749,20 @@ mod tests {
 
     /// A search for a segment `length` long from slew and load 1 with no
     /// wire since the last buffer, under `wirelength_threshold`.
-    const fn query(length: u32, wirelength_threshold: i64) -> SegmentQuery {
+    const fn query(length: i64, wirelength_threshold: i64) -> SegmentQuery {
         SegmentQuery {
-            length,
-            input_slew: 1,
-            input_cap: 1,
-            slew_threshold: MAX_SLEW,
-            wirelength_threshold,
+            length: LengthSteps::new(length),
+            input_slew: SlewSteps::FIRST,
+            input_cap: CapSteps::new(1),
+            slew_threshold: SlewSteps::new(MAX_SLEW),
+            wirelength_threshold: LengthSteps::new(wirelength_threshold),
         }
     }
 
     const NO_CHOICE: SegmentChoice = SegmentChoice {
-        slew: 0,
-        cap: 0,
-        curr_wl: 0,
+        slew: SlewSteps::new(0),
+        cap: CapSteps::new(0),
+        curr_wl: LengthSteps::new(0),
     };
 
     /// The segment `search` finds in `tech`, starting from no wire since
@@ -1817,7 +1817,7 @@ mod tests {
             1,
         );
         let search = SegmentQuery {
-            input_slew: 4,
+            input_slew: SlewSteps::new(4),
             ..query(2, 100)
         };
 
@@ -1836,13 +1836,16 @@ mod tests {
             1,
         );
         let mut out = SegmentChoice {
-            curr_wl: 3,
+            curr_wl: LengthSteps::new(3),
             ..NO_CHOICE
         };
 
         let _ = min_delay_segment(&tech, &query(2, 100), 1, &mut out);
 
-        assert_eq!((out.slew, out.curr_wl), (2, 5));
+        assert_eq!(
+            (out.slew, out.curr_wl),
+            (SlewSteps::new(2), LengthSteps::new(5))
+        );
     }
 
     #[test]
@@ -1860,8 +1863,8 @@ mod tests {
         let scene = Scene::new(Vec::new());
         let tech = TechChar::from_segments(vec![segment(2, 1, &[], 2), segment(1, 1, &[], 1)], 1);
         let mut tree = builder();
-        tree.min_input_cap = 1;
-        tree.min_length_sink_region = 2;
+        tree.min_input_cap = CapSteps::new(1);
+        tree.min_length_sink_region = LengthSteps::new(2);
         tree.top_level_sinks_clustered = BranchSinks {
             points: vec![(10.0, 50.0), (90.0, 50.0)],
             insts: vec![InstRef::Sink(0), InstRef::Sink(1)],
@@ -1897,8 +1900,8 @@ mod tests {
         );
         let mut tree = builder();
         tree.wire_segment_unit = 14_000;
-        tree.min_input_cap = 1;
-        tree.min_length_sink_region = 20;
+        tree.min_input_cap = CapSteps::new(1);
+        tree.min_length_sink_region = LengthSteps::new(20);
         tree.sink_region = Region::new(0.0, 0.0, 40.0, 40.0);
         tree.top_level_sinks_clustered = BranchSinks {
             points: vec![(1.0, 1.0), (39.0, 39.0)],
