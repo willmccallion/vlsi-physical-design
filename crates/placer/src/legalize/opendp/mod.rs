@@ -122,6 +122,13 @@ pare_common::define_index!(
     EdgeTypeId(u32)
 );
 
+/// An edge of a node where it would stand, with its edge type.
+#[derive(Clone, Copy, Debug)]
+struct PlacedEdge {
+    kind: EdgeTypeId,
+    rect: Rect<Dbu>,
+}
+
 /// One side of a node's master and the edge type it carries, in the
 /// master's frame.
 #[derive(Clone, Copy, Debug)]
@@ -1051,63 +1058,78 @@ impl Placer {
             return true;
         }
         let at = Point::new(x.to_dbu(self.rows.site_width()), self.rows.row_y(y));
-        for edge1 in &node.edges {
-            let max_spacing = self.edge_spacing.max_spacing(edge1.kind) + Dbu(1);
-            let edge1_box = transform_edge(edge1.segment, node.master_size, at, orient);
-            let vertical = is_vertical(&edge1_box);
-            let query = if vertical {
-                Rect::new(
-                    Point::new(edge1_box.min.x - max_spacing, edge1_box.min.y),
-                    Point::new(edge1_box.max.x + max_spacing, edge1_box.max.y),
-                )
-            } else {
-                Rect::new(
-                    Point::new(edge1_box.min.x, edge1_box.min.y - max_spacing),
-                    Point::new(edge1_box.max.x, edge1_box.max.y + max_spacing),
-                )
+        node.edges.iter().all(|edge| {
+            let placed = PlacedEdge {
+                kind: edge.kind,
+                rect: transform_edge(edge.segment, node.master_size, at, orient),
             };
-            let x_min = self.rows.grid_x(query.min.x);
-            let x_max = self.rows.grid_end_x(query.max.x);
-            let y_min = self.rows.end_y(query.min.y) - 1;
-            let y_max = self.rows.end_y(query.max.y);
-            let mut checked = BTreeSet::new();
-            for y1 in y_min.through(y_max) {
-                for x1 in x_min.through(x_max) {
-                    let Some(p) = self.pixel(x1, y1) else {
-                        continue;
-                    };
-                    let Some(other) = p.node() else {
-                        continue;
-                    };
-                    if self.nodes[other].cell == node.cell || !checked.insert(other) {
-                        continue;
-                    }
-                    let other = &self.nodes[other];
-                    for edge2 in &other.edges {
-                        let spacing = self.edge_spacing.spacing(edge1.kind, edge2.kind);
-                        let edge2_box = transform_edge(
-                            edge2.segment,
-                            other.master_size,
-                            Point::new(other.left, other.bottom),
-                            other.orient,
-                        );
-                        if is_vertical(&edge2_box) != vertical || !open_overlap(&query, &edge2_box)
-                        {
-                            continue;
-                        }
-                        let merged = edge1_box.union(&edge2_box);
-                        let dist = if vertical {
-                            merged.width()
-                        } else {
-                            merged.height()
-                        };
-                        // NOTE: PlacementDRC::checkEdgeSpacing also takes EXACT rules,
-                        // met only at their spacing; PARE's LEF reader has none.
-                        if dist < spacing {
-                            return false;
-                        }
-                    }
+            self.edge_clear_of_neighbours(node, placed)
+        })
+    }
+
+    /// Whether every edge of the other nodes within reach of `edge`, an
+    /// edge of `node` where it would stand, keeps the spacing the table
+    /// asks between their types.
+    fn edge_clear_of_neighbours(&self, node: &Node, edge: PlacedEdge) -> bool {
+        let max_spacing = self.edge_spacing.max_spacing(edge.kind) + Dbu(1);
+        let vertical = is_vertical(&edge.rect);
+        let query = if vertical {
+            Rect::new(
+                Point::new(edge.rect.min.x - max_spacing, edge.rect.min.y),
+                Point::new(edge.rect.max.x + max_spacing, edge.rect.max.y),
+            )
+        } else {
+            Rect::new(
+                Point::new(edge.rect.min.x, edge.rect.min.y - max_spacing),
+                Point::new(edge.rect.max.x, edge.rect.max.y + max_spacing),
+            )
+        };
+        let x_min = self.rows.grid_x(query.min.x);
+        let x_max = self.rows.grid_end_x(query.max.x);
+        let y_min = self.rows.end_y(query.min.y) - 1;
+        let y_max = self.rows.end_y(query.max.y);
+        let mut checked = BTreeSet::new();
+        for y1 in y_min.through(y_max) {
+            for x1 in x_min.through(x_max) {
+                let Some(other) = self.pixel(x1, y1).and_then(Pixel::node) else {
+                    continue;
+                };
+                if self.nodes[other].cell == node.cell || !checked.insert(other) {
+                    continue;
                 }
+                if !self.spaced_from(edge, &query, &self.nodes[other]) {
+                    return false;
+                }
+            }
+        }
+        true
+    }
+
+    /// Whether each edge of `other` facing `edge` across `query` is at
+    /// least the table's spacing away.
+    fn spaced_from(&self, edge: PlacedEdge, query: &Rect<Dbu>, other: &Node) -> bool {
+        let vertical = is_vertical(&edge.rect);
+        for edge2 in &other.edges {
+            let spacing = self.edge_spacing.spacing(edge.kind, edge2.kind);
+            let edge2_box = transform_edge(
+                edge2.segment,
+                other.master_size,
+                Point::new(other.left, other.bottom),
+                other.orient,
+            );
+            if is_vertical(&edge2_box) != vertical || !open_overlap(query, &edge2_box) {
+                continue;
+            }
+            let merged = edge.rect.union(&edge2_box);
+            let dist = if vertical {
+                merged.width()
+            } else {
+                merged.height()
+            };
+            // NOTE: PlacementDRC::checkEdgeSpacing also takes EXACT rules,
+            // met only at their spacing; PARE's LEF reader has none.
+            if dist < spacing {
+                return false;
             }
         }
         true
