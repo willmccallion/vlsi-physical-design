@@ -196,7 +196,7 @@ impl RoutedNet<'_> {
             let (Some(from), Some(to)) = (from, to) else {
                 continue;
             };
-            let (res, cap) = if segment.length() == Dbu(0) {
+            let (res, cap) = if segment.length() == Dbu::ZERO {
                 (rc.cut(segment.from.layer.min(segment.to.layer)), 0.0)
             } else if segment.from.layer == segment.to.layer {
                 rc.wire(
@@ -242,8 +242,7 @@ impl RoutedNet<'_> {
             );
             return;
         };
-        let length = Dbu((location.at.x.get() - location.grid.x.get()).abs()
-            + (location.at.y.get() - location.grid.y.get()).abs());
+        let length = location.at.manhattan(location.grid);
         let (res, cap) = self.rc.wire(length, layer, self.ndr_width(layer));
         network.wire(pin, grid, res + via_res, cap);
     }

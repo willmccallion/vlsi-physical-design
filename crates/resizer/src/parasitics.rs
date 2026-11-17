@@ -155,7 +155,7 @@ impl SteinerNetwork {
         for (index, parent_index) in tree.branches() {
             let (node, parent) = (RcNode::new(index), RcNode::new(parent_index));
             let length_dbu = tree.nodes[index].manhattan(tree.nodes[parent_index]);
-            if length_dbu == Dbu(0) {
+            if length_dbu == Dbu::ZERO {
                 network.join(node, parent);
                 continue;
             }
