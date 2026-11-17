@@ -7,6 +7,7 @@ use super::{ArchRowId, Improver, Result, SKIP_NETS_LARGER_THAN, Trial};
 use super::{EdgeId, NetworkPinId, NodeId, SegmentId};
 use pare_common::db::indices::IdVec;
 use pare_common::geom::dbu::Dbu;
+use pare_common::geom::interval::Interval;
 use pare_common::geom::point::Point;
 use pare_common::geom::rect::Rect;
 
@@ -176,8 +177,8 @@ fn region_elsewhere(imp: &Improver, n: NodeId) -> Option<Rect<Dbu>> {
 
 /// The left edge and bottom that center the cell in a box, as
 /// `std::floor(0.5 * (min + max) - 0.5 * size)`.
-fn centered(min: Dbu, max: Dbu, size: Dbu) -> Dbu {
-    Dbu((0.5 * (min + max).to_f64() - 0.5 * size.to_f64()).floor() as i64)
+fn centered(span: Interval, size: Dbu) -> Dbu {
+    Dbu((0.5 * (span.lo + span.hi).to_f64() - 0.5 * size.to_f64()).floor() as i64)
 }
 
 /// The first segment of row `r` whose span holds `x`.
@@ -195,13 +196,13 @@ fn global_trial(imp: &mut Improver, n: NodeId) -> Result<Option<Trial>> {
         return Ok(None);
     };
     let reach = imp.max_displacement;
-    let (x0, x1) = clip_to_reach(region.min.x, region.max.x, imp.left(n), reach.x);
-    let (y0, y1) = clip_to_reach(region.min.y, region.max.y, imp.bottom(n), reach.y);
+    let x = clip_to_reach(region.x_span(), imp.left(n), reach.x);
+    let y = clip_to_reach(region.y_span(), imp.bottom(n), reach.y);
     let [si] = imp.cell_segs[n][..] else {
         return Ok(None);
     };
-    let xj = centered(x0, x1, imp.width(n));
-    let yj = centered(y0, y1, imp.height(n));
+    let xj = centered(x, imp.width(n));
+    let yj = centered(y, imp.height(n));
     let rj = imp.arch.closest_row(yj);
     let Some(sj) = segment_at(imp, rj, xj) else {
         return Ok(None);
@@ -215,17 +216,25 @@ fn global_trial(imp: &mut Improver, n: NodeId) -> Result<Option<Trial>> {
     imp.try_swap(n, si, xj, sj)
 }
 
-/// The part of `[lo, hi]` within `reach` of `at`, or the reachable span
-/// toward it when none is.
-fn clip_to_reach(lo: Dbu, hi: Dbu, at: Dbu, reach: Dbu) -> (Dbu, Dbu) {
-    if at + reach <= lo {
-        (at, at + reach)
-    } else if at - reach >= hi {
-        (at - reach, at)
+/// The part of `span` within `reach` of `at`, or the reachable span toward
+/// it when none is.
+fn clip_to_reach(span: Interval, at: Dbu, reach: Dbu) -> Interval {
+    if at + reach <= span.lo {
+        Interval::new(at, at + reach)
+    } else if at - reach >= span.hi {
+        Interval::new(at - reach, at)
     } else {
-        (
-            if lo > at - reach { lo } else { at - reach },
-            if hi < at + reach { hi } else { at + reach },
+        Interval::new(
+            if span.lo > at - reach {
+                span.lo
+            } else {
+                at - reach
+            },
+            if span.hi < at + reach {
+                span.hi
+            } else {
+                at + reach
+            },
         )
     }
 }
@@ -241,8 +250,8 @@ fn vertical_trial(imp: &mut Improver, n: NodeId) -> Result<Option<Trial>> {
         return Ok(None);
     };
     let ri = imp.segments[si].row.index();
-    let xj = centered(region.min.x, region.max.x, imp.width(n));
-    let yj = centered(region.min.y, region.max.y, imp.height(n));
+    let xj = centered(region.x_span(), imp.width(n));
+    let yj = centered(region.y_span(), imp.height(n));
     let last = imp.arch.rows.len() - 1;
     let (rmin, rmax) = if yj > Dbu(i64::from(yi as i32)) {
         ((ri + 1).min(last), (ri + 2).min(last))
@@ -268,11 +277,11 @@ mod tests {
 
     #[test]
     fn a_cell_is_centered_in_a_box_rounding_down() {
-        assert_eq!(centered(Dbu(0), Dbu(11), Dbu(4)), Dbu(3));
+        assert_eq!(centered(Interval::new(Dbu(0), Dbu(11)), Dbu(4)), Dbu(3));
     }
 
     #[test]
     fn a_cell_centered_left_of_the_origin_rounds_toward_minus_infinity() {
-        assert_eq!(centered(Dbu(-10), Dbu(-1), Dbu(4)), Dbu(-8));
+        assert_eq!(centered(Interval::new(Dbu(-10), Dbu(-1)), Dbu(4)), Dbu(-8));
     }
 }

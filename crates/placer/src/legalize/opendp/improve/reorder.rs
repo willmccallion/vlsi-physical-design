@@ -7,6 +7,7 @@ use super::{ArchRowId, EdgeId, NodeId, SegmentId};
 use super::{Improver, Result, SKIP_NETS_LARGER_THAN};
 use pare_common::db::indices::IdVec;
 use pare_common::geom::dbu::Dbu;
+use pare_common::geom::interval::Interval;
 use pare_common::geom::point::Point;
 
 const WINDOW: usize = 3;
@@ -248,7 +249,7 @@ fn realign(imp: &mut Improver, w: &Window) -> Result<Option<bool>> {
     let mut left = w.left_limit;
     for i in w.first..=w.last {
         let n = imp.cells_in_seg[w.segment][i];
-        let Some(x) = imp.align(n, imp.left(n), left, w.right_limit) else {
+        let Some(x) = imp.align(n, imp.left(n), Interval::new(left, w.right_limit)) else {
             return Ok(None);
         };
         shifted |= x != imp.left(n);

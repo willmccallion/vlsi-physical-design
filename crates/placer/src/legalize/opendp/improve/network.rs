@@ -7,6 +7,7 @@ use pare_common::db::design::{Net, NetlistDB, PinOwner, PlacementStatus};
 use pare_common::db::indices::{CellId, IdVec, IoPinId, MacroPinId};
 use pare_common::db::library::{Macro, SignalUse};
 use pare_common::geom::dbu::Dbu;
+use pare_common::geom::interval::Interval;
 use pare_common::geom::point::Point;
 use pare_common::geom::rect::Rect;
 
@@ -186,15 +187,18 @@ fn master_rails(m: &Macro) -> Option<Rails> {
             .filter(|p| p.signal_use == supply)
             .flat_map(|p| &p.shapes)
             .map(|s| (s.rect.min.y + s.rect.max.y) / 2)
-            .fold(None, |span: Option<(Dbu, Dbu)>, y| {
-                Some(span.map_or((y, y), |(lo, hi)| (lo.min(y), hi.max(y))))
+            .fold(None, |span: Option<Interval>, y| {
+                Some(span.map_or_else(
+                    || Interval::new(y, y),
+                    |s| Interval::new(s.lo.min(y), s.hi.max(y)),
+                ))
             })
     };
     let (power, ground) = (centers(SignalUse::Power)?, centers(SignalUse::Ground)?);
     let nearer = |is_power: bool| if is_power { Rail::Power } else { Rail::Ground };
     Some(Rails {
-        bottom: nearer(power.0 < ground.0),
-        top: nearer(power.1 > ground.1),
+        bottom: nearer(power.lo < ground.lo),
+        top: nearer(power.hi > ground.hi),
     })
 }
 
