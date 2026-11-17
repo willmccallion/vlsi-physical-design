@@ -7,13 +7,14 @@
 //! nothing.
 
 use super::dbu::{Dbu, DbuArea};
+use super::interval::{Interval, merge_touching};
 use super::point::Point;
 use super::rect::Rect;
 use std::collections::{BTreeMap, HashMap};
 use std::ops::Bound;
 
 /// Disjoint, non-touching Y intervals in increasing order.
-type Spans = Vec<(Dbu, Dbu)>;
+type Spans = Vec<Interval>;
 
 /// One vertical slab of a [`Region`].
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -127,7 +128,7 @@ impl Region {
                 active.push(rects[next]);
                 next += 1;
             }
-            let spans = merged(active.iter().map(|r| (r.min.y, r.max.y)).collect());
+            let spans = merged(active.iter().map(Rect::y_span).collect());
             region.push_slab(x0, x1, spans);
         }
         region
@@ -158,7 +159,7 @@ impl Region {
     pub fn area(&self) -> DbuArea {
         self.slabs
             .iter()
-            .map(|s| (s.x1 - s.x0) * s.spans.iter().map(|&(lo, hi)| hi - lo).sum::<Dbu>())
+            .map(|s| (s.x1 - s.x0) * s.spans.iter().map(|span| span.len()).sum::<Dbu>())
             .sum()
     }
 
@@ -170,13 +171,13 @@ impl Region {
             .slabs
             .iter()
             .filter_map(|s| s.spans.first())
-            .map(|s| s.0)
+            .map(|s| s.lo)
             .min()?;
         let hi = self
             .slabs
             .iter()
             .filter_map(|s| s.spans.last())
-            .map(|s| s.1)
+            .map(|s| s.hi)
             .max()?;
         Some(Rect::new(Point::new(first.x0, lo), Point::new(last.x1, hi)))
     }
@@ -186,7 +187,7 @@ impl Region {
         self.slabs.iter().flat_map(|s| {
             s.spans
                 .iter()
-                .map(move |&(lo, hi)| Rect::new(Point::new(s.x0, lo), Point::new(s.x1, hi)))
+                .map(move |span| Rect::new(Point::new(s.x0, span.lo), Point::new(s.x1, span.hi)))
         })
     }
 
@@ -237,7 +238,7 @@ impl Region {
             .any(|s| {
                 s.spans
                     .iter()
-                    .any(|&(lo, hi)| lo < rect.max.y && rect.min.y < hi)
+                    .any(|span| span.lo < rect.max.y && rect.min.y < span.hi)
             })
     }
 
@@ -314,8 +315,8 @@ impl Region {
             }
             let (mut a, mut b) = (0, 0);
             while a < left.spans.len() && b < right.spans.len() {
-                let (la, ha) = left.spans[a];
-                let (lb, hb) = right.spans[b];
+                let Interval { lo: la, hi: ha } = left.spans[a];
+                let Interval { lo: lb, hi: hb } = right.spans[b];
                 let meet = match corners {
                     Corners::Separate => la < hb && lb < ha,
                     Corners::Join => la <= hb && lb <= ha,
@@ -333,7 +334,7 @@ impl Region {
         let mut index_of_root: HashMap<usize, usize> = HashMap::new();
         let mut pieces: Vec<Self> = Vec::new();
         for (k, s) in self.slabs.iter().enumerate() {
-            let mut by_piece: Vec<(usize, (Dbu, Dbu))> = Vec::with_capacity(s.spans.len());
+            let mut by_piece: Vec<(usize, Interval)> = Vec::with_capacity(s.spans.len());
             for (n, &span) in s.spans.iter().enumerate() {
                 let root = find(&mut parent, offsets[k] + n);
                 let piece = *index_of_root.entry(root).or_insert_with(|| {
@@ -379,13 +380,13 @@ impl Region {
                 .take(2)
                 .find(|s| s.x0 == x)
                 .map_or(&empty, |s| &s.spans);
-            for (lo, hi) in combine_spans(right, left, |r, l| r && !l) {
+            for Interval { lo, hi } in combine_spans(right, left, |r, l| r && !l) {
                 edges.push(Edge {
                     from: Point::new(x, hi),
                     to: Point::new(x, lo),
                 });
             }
-            for (lo, hi) in combine_spans(left, right, |l, r| l && !r) {
+            for Interval { lo, hi } in combine_spans(left, right, |l, r| l && !r) {
                 edges.push(Edge {
                     from: Point::new(x, lo),
                     to: Point::new(x, hi),
@@ -405,7 +406,7 @@ impl Region {
             }
             let mut bottom = HashMap::new();
             let mut top = HashMap::new();
-            for &(lo, hi) in &s.spans {
+            for &Interval { lo, hi } in &s.spans {
                 let b = if let Some(&e) = open_bottom.get(&lo) {
                     edges[e].to.x = s.x1;
                     e
@@ -446,7 +447,7 @@ impl Region {
         let n = self.slabs.len();
         let mut out = Vec::new();
         for i in 0..n {
-            let left: &[(Dbu, Dbu)] = if i > 0 && self.slabs[i - 1].x1 == self.slabs[i].x0 {
+            let left: &[Interval] = if i > 0 && self.slabs[i - 1].x1 == self.slabs[i].x0 {
                 &self.slabs[i - 1].spans
             } else {
                 &[]
@@ -455,7 +456,7 @@ impl Region {
                 .spans
                 .iter()
                 .copied()
-                .filter(|&(lo, hi)| !spans_cover(left, lo, hi))
+                .filter(|span| !spans_cover(left, span.lo, span.hi))
                 .collect();
             for j in i..n {
                 if j > i {
@@ -463,12 +464,12 @@ impl Region {
                         break;
                     }
                     common = combine_spans(&common, &self.slabs[j].spans, |a, b| a && b);
-                    common.retain(|&(lo, hi)| !spans_cover(left, lo, hi));
+                    common.retain(|span| !spans_cover(left, span.lo, span.hi));
                 }
                 if common.is_empty() {
                     break;
                 }
-                for &(lo, hi) in &common {
+                for &Interval { lo, hi } in &common {
                     let grows_right = j + 1 < n
                         && self.slabs[j + 1].x0 == self.slabs[j].x1
                         && spans_cover(&self.slabs[j + 1].spans, lo, hi);
@@ -681,7 +682,7 @@ impl Sweep {
 
 /// The spans of the slab of `slabs` covering `[x0, x1]`, advancing `cursor`
 /// past slabs that end before it; empty if no slab covers it.
-fn covering_spans<'a>(slabs: &'a [Slab], cursor: &mut usize, x0: Dbu, x1: Dbu) -> &'a [(Dbu, Dbu)] {
+fn covering_spans<'a>(slabs: &'a [Slab], cursor: &mut usize, x0: Dbu, x1: Dbu) -> &'a [Interval] {
     while *cursor < slabs.len() && slabs[*cursor].x1 <= x0 {
         *cursor += 1;
     }
@@ -694,24 +695,17 @@ fn covering_spans<'a>(slabs: &'a [Slab], cursor: &mut usize, x0: Dbu, x1: Dbu) -
 /// `spans` sorted, with overlapping or touching spans merged and empty ones
 /// dropped.
 fn merged(mut spans: Spans) -> Spans {
-    spans.retain(|&(lo, hi)| lo < hi);
+    spans.retain(|span| span.lo < span.hi);
     spans.sort_unstable();
-    let mut out: Spans = Vec::with_capacity(spans.len());
-    for (lo, hi) in spans {
-        match out.last_mut() {
-            Some(last) if lo <= last.1 => last.1 = last.1.max(hi),
-            _ => out.push((lo, hi)),
-        }
-    }
-    out
+    merge_touching(spans)
 }
 
 /// The spans where `keep` holds of membership in `a` and in `b`.
-fn combine_spans(a: &[(Dbu, Dbu)], b: &[(Dbu, Dbu)], keep: fn(bool, bool) -> bool) -> Spans {
+fn combine_spans(a: &[Interval], b: &[Interval], keep: fn(bool, bool) -> bool) -> Spans {
     let mut cuts: Vec<Dbu> = a
         .iter()
         .chain(b)
-        .flat_map(|&span| <[Dbu; 2]>::from(span))
+        .flat_map(|span| [span.lo, span.hi])
         .collect();
     cuts.sort_unstable();
     cuts.dedup();
@@ -719,29 +713,29 @@ fn combine_spans(a: &[(Dbu, Dbu)], b: &[(Dbu, Dbu)], keep: fn(bool, bool) -> boo
     let (mut i, mut j) = (0, 0);
     for w in cuts.windows(2) {
         let (y0, y1) = (w[0], w[1]);
-        while i < a.len() && a[i].1 <= y0 {
+        while i < a.len() && a[i].hi <= y0 {
             i += 1;
         }
-        while j < b.len() && b[j].1 <= y0 {
+        while j < b.len() && b[j].hi <= y0 {
             j += 1;
         }
-        let in_a = a.get(i).is_some_and(|&(lo, _)| lo <= y0);
-        let in_b = b.get(j).is_some_and(|&(lo, _)| lo <= y0);
+        let in_a = a.get(i).is_some_and(|s| s.lo <= y0);
+        let in_b = b.get(j).is_some_and(|s| s.lo <= y0);
         if !keep(in_a, in_b) {
             continue;
         }
         match out.last_mut() {
-            Some(last) if last.1 == y0 => last.1 = y1,
-            _ => out.push((y0, y1)),
+            Some(last) if last.hi == y0 => last.hi = y1,
+            _ => out.push(Interval::new(y0, y1)),
         }
     }
     out
 }
 
 /// Whether `spans` contain all of `[lo, hi]`.
-fn spans_cover(spans: &[(Dbu, Dbu)], lo: Dbu, hi: Dbu) -> bool {
-    let k = spans.partition_point(|&(_, b)| b < hi);
-    spans.get(k).is_some_and(|&(a, b)| a <= lo && hi <= b)
+fn spans_cover(spans: &[Interval], lo: Dbu, hi: Dbu) -> bool {
+    let k = spans.partition_point(|s| s.hi < hi);
+    spans.get(k).is_some_and(|s| s.lo <= lo && hi <= s.hi)
 }
 
 const fn find(parent: &mut [usize], mut x: usize) -> usize {
