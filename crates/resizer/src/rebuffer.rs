@@ -20,7 +20,7 @@ use crate::sta::{Sta, Via};
 use pare_common::db::design::PinOwner;
 use pare_common::db::indices::{CellId, LayerId, NetId, PinId};
 use pare_common::db::liberty::{
-    ArcRole, BufferCell, Edge, EdgeValues, LibCellId, LibPortId, MinMax,
+    ArcRole, ArcSetId, BufferCell, Edge, EdgeValues, LibCellId, LibPortId, MinMax,
 };
 use pare_common::geom::dbu::{Dbu, DbuPerMicron};
 use pare_common::geom::point::Point;
@@ -59,7 +59,7 @@ struct DriverPoint {
     arrival: Seconds,
     /// The input the data came through and the arc set, or none for a
     /// start such as an input port.
-    from: Option<(PinId, Edge, usize)>,
+    from: Option<(PinId, Edge, ArcSetId)>,
 }
 
 /// What the search knows about the driver of the net at hand.

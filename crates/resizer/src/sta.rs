@@ -17,7 +17,7 @@ use crate::netlist::{ClockNetwork, Constants, Netlist};
 use pare_common::db::design::PinOwner;
 use pare_common::db::indices::{CellId, IdVec, IoPinId, PinId};
 use pare_common::db::liberty::{
-    ArcRole, Edge, EdgeValues, FuncExpr, Logic, MinMax, SequentialKind, SideValues,
+    ArcRole, ArcSetId, Edge, EdgeValues, FuncExpr, Logic, MinMax, SequentialKind, SideValues,
 };
 use pare_common::db::sdc::{ClockEdge, ClockId, MultiCyclePath, PathEnd, Sdc};
 use pare_common::units::Seconds;
@@ -140,7 +140,7 @@ struct Prev {
     edge: Edge,
     tag: TagId,
     /// The timing group the step came through, or none for a wire.
-    set: Option<u32>,
+    set: Option<ArcSetId>,
 }
 
 /// One tag's times at one pin and edge.
@@ -257,8 +257,8 @@ pub enum Via {
     Wire,
     /// Through a timing group of the point's cell.
     Arc {
-        /// Index of the group in the cell's arc sets.
-        set: usize,
+        /// The group in the cell's arc sets.
+        set: ArcSetId,
     },
 }
 
@@ -684,7 +684,7 @@ impl Sta {
             let via = match entry.prev[side] {
                 None => Via::Start,
                 Some(Prev { set: None, .. }) => Via::Wire,
-                Some(Prev { set: Some(set), .. }) => Via::Arc { set: set as usize },
+                Some(Prev { set: Some(set), .. }) => Via::Arc { set },
             };
             points.push(PathPoint {
                 pin,
@@ -724,7 +724,7 @@ impl Sta {
 
     /// Whether the arc of `set` into `pin` leaves a register or an open
     /// latch, where `OpenSTA`'s expanded path starts.
-    fn starts_data(&self, netlist: &Netlist<'_>, pin: PinId, set: usize) -> bool {
+    fn starts_data(&self, netlist: &Netlist<'_>, pin: PinId, set: ArcSetId) -> bool {
         let PinOwner::Cell { cell, .. } = netlist.db.pins[pin].owner else {
             return false;
         };
@@ -1037,7 +1037,7 @@ impl Sta {
                         pin: arc.arc.from,
                         edge: arc.from_edge,
                         tag: from.tag,
-                        set: Some(arc.arc.set as u32),
+                        set: Some(arc.arc.set),
                     };
                     match through_latch {
                         Some(latch) if latch.state == LatchState::Enabled => {
@@ -1453,13 +1453,12 @@ impl Sta {
                     .get(&cell)
                     .copied()
                     .filter(|l| l.data == pin && l.state == LatchState::Enabled);
-                let sets: Vec<(usize, PinId)> = netlist
+                let sets: Vec<(ArcSetId, PinId)> = netlist
                     .link
                     .liberty
                     .cell(lib)
                     .arc_sets
-                    .iter()
-                    .enumerate()
+                    .iter_enumerated()
                     .filter(|(_, set)| set.to == port && set.role.check_side().is_some())
                     .filter_map(|(k, set)| netlist.pin_of_port(cell, set.from).map(|ck| (k, ck)))
                     .collect();

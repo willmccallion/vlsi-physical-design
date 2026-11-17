@@ -702,7 +702,7 @@ impl Interpreter {
                 .filter_map(|g| g.args.first())
                 .map(|v| v.0.to_string())
                 .collect(),
-            arc_sets: Vec::new(),
+            arc_sets: IdVec::new(),
             sequentials: Vec::new(),
             statetable: group
                 .groups_named("statetable")
@@ -978,7 +978,7 @@ impl Interpreter {
             let sense = stated_sense
                 .or_else(|| inferred_sense(&cell.ports[to], kind.role, related_name))
                 .unwrap_or(TimingSense::NonUnate);
-            cell.arc_sets.push(TimingArcSet {
+            let _ = cell.arc_sets.push(TimingArcSet {
                 from,
                 to,
                 role: kind.role,
@@ -1586,7 +1586,7 @@ library (tiny) {
     fn tables_take_their_own_indices_over_the_templates() {
         let lib = tiny();
         let buf = lib.cell(lib.cell_id("BUF_X1").unwrap());
-        let set = &buf.arc_sets[0];
+        let set = &buf.arc_sets[crate::db::liberty::ArcSetId::new(0)];
         assert_eq!(buf.ports[set.from].name, "A");
         assert_eq!(set.role, ArcRole::Combinational);
         assert_eq!(set.arcs.len(), 2);
@@ -2056,7 +2056,7 @@ library (x) {{
     fn a_missing_timing_sense_is_inferred_from_the_output_function() {
         let cell = sensed_cell(r#"function : "!(A & B)";"#, r#"related_pin : "A";"#);
 
-        let set = &cell.arc_sets[0];
+        let set = &cell.arc_sets[crate::db::liberty::ArcSetId::new(0)];
         let edges: Vec<(Edge, Edge)> = set.arcs.iter().map(|a| (a.from_edge, a.to_edge)).collect();
 
         assert_eq!(set.sense, TimingSense::NegativeUnate);
@@ -2067,7 +2067,7 @@ library (x) {{
     fn non_unate_arcs_come_falling_outputs_first_as_opensta_makes_them() {
         let cell = sensed_cell(r#"function : "A ^ B";"#, r#"related_pin : "A";"#);
 
-        let edges: Vec<(Edge, Edge)> = cell.arc_sets[0]
+        let edges: Vec<(Edge, Edge)> = cell.arc_sets[crate::db::liberty::ArcSetId::new(0)]
             .arcs
             .iter()
             .map(|a| (a.from_edge, a.to_edge))
@@ -2091,7 +2091,10 @@ library (x) {{
             r#"related_pin : "EN"; timing_type : three_state_enable;"#,
         );
 
-        assert_eq!(cell.arc_sets[0].sense, TimingSense::PositiveUnate);
+        assert_eq!(
+            cell.arc_sets[crate::db::liberty::ArcSetId::new(0)].sense,
+            TimingSense::PositiveUnate
+        );
     }
 
     #[test]
@@ -2101,7 +2104,7 @@ library (x) {{
             r#"related_pin : "B"; timing_type : clear; timing_sense : positive_unate;"#,
         );
 
-        let edges: Vec<(Edge, Edge)> = cell.arc_sets[0]
+        let edges: Vec<(Edge, Edge)> = cell.arc_sets[crate::db::liberty::ArcSetId::new(0)]
             .arcs
             .iter()
             .map(|a| (a.from_edge, a.to_edge))
@@ -2117,7 +2120,7 @@ library (x) {{
             r#"related_pin : "B"; timing_type : preset; timing_sense : negative_unate;"#,
         );
 
-        let edges: Vec<(Edge, Edge)> = cell.arc_sets[0]
+        let edges: Vec<(Edge, Edge)> = cell.arc_sets[crate::db::liberty::ArcSetId::new(0)]
             .arcs
             .iter()
             .map(|a| (a.from_edge, a.to_edge))
