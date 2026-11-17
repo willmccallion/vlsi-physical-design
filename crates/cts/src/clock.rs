@@ -10,29 +10,16 @@ use pare_common::geom::rect::Rect;
 use pare_common::units::Seconds;
 
 /// Whether a clock instance is a buffer the tree adds or a sink it reaches.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(crate) enum InstKind {
-    Buffer,
-    Sink,
-}
-
-/// A buffer or sink of a clock tree.
-#[derive(Clone, Debug, PartialEq)]
-pub(crate) struct ClockInst {
+/// A buffer the tree adds.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) struct ClockBuffer {
     pub name: String,
-    pub master: Option<BufferCell>,
-    pub kind: InstKind,
+    pub master: BufferCell,
     pub location: Point<Dbu>,
-    /// The sink's clock pin, or the buffer's input once it exists.
-    pub input_pin: Option<PinId>,
     /// The buffer's instance once it exists.
     pub cell: Option<CellId>,
-    pub input_cap: Farads32,
-    /// The delay through a sink's own clock tree; zero for a buffer.
-    pub insertion_delay: Seconds,
 }
 
-/// Which clock instance: a sink or a buffer, by index.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub(crate) enum InstRef {
     Sink(usize),
@@ -68,8 +55,8 @@ impl SubNet {
 pub(crate) struct Clock {
     pub net_name: String,
     pub sdc_name: String,
-    pub sinks: Vec<ClockInst>,
-    pub buffers: Vec<ClockInst>,
+    pub sinks: Vec<ClockSink>,
+    pub buffers: Vec<ClockBuffer>,
     pub subnets: Vec<SubNet>,
     pub net: NetId,
 }
@@ -87,16 +74,7 @@ impl Clock {
     }
 
     pub(crate) fn add_sink(&mut self, sink: ClockSink) {
-        self.sinks.push(ClockInst {
-            name: sink.name,
-            master: None,
-            kind: InstKind::Sink,
-            location: sink.location,
-            input_pin: Some(sink.pin),
-            cell: None,
-            input_cap: sink.input_cap,
-            insertion_delay: sink.insertion_delay,
-        });
+        self.sinks.push(sink);
     }
 
     /// Adds a buffer named `name` plus the net's name, as
@@ -107,17 +85,34 @@ impl Clock {
         master: BufferCell,
         location: Point<Dbu>,
     ) -> InstRef {
-        let full = format!("{name}_{}", self.net_name);
+        self.push_buffer(name, master, location, None)
+    }
+
+    /// Adds a buffer as [`Clock::add_buffer`] does, its instance `cell`
+    /// already in the design.
+    pub(crate) fn add_written_buffer(
+        &mut self,
+        name: &str,
+        master: BufferCell,
+        location: Point<Dbu>,
+        cell: CellId,
+    ) -> InstRef {
+        self.push_buffer(name, master, location, Some(cell))
+    }
+
+    fn push_buffer(
+        &mut self,
+        name: &str,
+        master: BufferCell,
+        location: Point<Dbu>,
+        cell: Option<CellId>,
+    ) -> InstRef {
         let inst = InstRef::Buffer(self.buffers.len());
-        self.buffers.push(ClockInst {
-            name: full,
-            master: Some(master),
-            kind: InstKind::Buffer,
+        self.buffers.push(ClockBuffer {
+            name: format!("{name}_{}", self.net_name),
+            master,
             location,
-            input_pin: None,
-            cell: None,
-            input_cap: Farads32::ZERO,
-            insertion_delay: Seconds::ZERO,
+            cell,
         });
         inst
     }
@@ -134,17 +129,11 @@ impl Clock {
         self.subnets.len() - 1
     }
 
-    pub(crate) fn inst(&self, inst: InstRef) -> &ClockInst {
+    /// The name of a sink or buffer.
+    pub(crate) fn name(&self, inst: InstRef) -> &str {
         match inst {
-            InstRef::Sink(i) => &self.sinks[i],
-            InstRef::Buffer(i) => &self.buffers[i],
-        }
-    }
-
-    pub(crate) fn inst_mut(&mut self, inst: InstRef) -> &mut ClockInst {
-        match inst {
-            InstRef::Sink(i) => &mut self.sinks[i],
-            InstRef::Buffer(i) => &mut self.buffers[i],
+            InstRef::Sink(i) => &self.sinks[i].name,
+            InstRef::Buffer(i) => &self.buffers[i].name,
         }
     }
 
@@ -232,6 +221,6 @@ mod tests {
             Point::default(),
         );
 
-        assert_eq!(clock.inst(buffer).name, "clkbuf_0_core\\/clk");
+        assert_eq!(clock.name(buffer), "clkbuf_0_core\\/clk");
     }
 }

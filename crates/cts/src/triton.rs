@@ -7,7 +7,7 @@
 use crate::CtsError;
 use crate::buffers::{ClockBuffers, fanout_limit};
 use crate::capacitance::Farads32;
-use crate::clock::{Clock, ClockSink, InstKind, InstRef};
+use crate::clock::{Clock, ClockSink, InstRef};
 use crate::htree::{Builder, TreeContext, TreeType};
 use crate::options::{CtsOptions, MACRO_MAX_DIAMETER, MAX_LEAF_SINKS, NdrStrategy, Settings};
 use crate::techchar::{CharSetup, LengthUnit, TechChar};
@@ -865,7 +865,7 @@ impl Cts<'_> {
         let mut buffers = Vec::new();
         for b in 0..self.builders[index].clock.buffers.len() {
             let inst = self.builders[index].clock.buffers[b].clone();
-            let master = inst.master.unwrap_or(self.setup.buffers.root);
+            let master = inst.master;
             let cell = self.make_buffer(db, master, &inst.name, inst.location)?;
             self.builders[index].clock.buffers[b].cell = Some(cell);
             buffers.push((cell, master));
@@ -895,13 +895,10 @@ impl Cts<'_> {
                 match sink {
                     InstRef::Buffer(b) => {
                         let (cell, master) = buffers[b];
-                        let (input, _) = self.connect_buffer(db, cell, master, Some(net), None)?;
-                        self.builders[index].clock.buffers[b].input_pin = input;
+                        let _ = self.connect_buffer(db, cell, master, Some(net), None)?;
                     }
                     InstRef::Sink(k) => {
-                        if let Some(pin) = self.builders[index].clock.sinks[k].input_pin {
-                            db.move_pin(pin, net);
-                        }
+                        db.move_pin(self.builders[index].clock.sinks[k].pin, net);
                     }
                 }
             }
@@ -911,10 +908,7 @@ impl Cts<'_> {
                 .iter()
                 .find(|(c, _)| *c == root)
                 .map_or(self.setup.buffers.root, |&(_, m)| m);
-            let (input, _) = self.connect_buffer(db, root, master, Some(top_net), None)?;
-            if let Some(pos) = buffers.iter().position(|(c, _)| *c == root) {
-                self.builders[index].clock.buffers[pos].input_pin = input;
-            }
+            let _ = self.connect_buffer(db, root, master, Some(top_net), None)?;
         }
         if let (Some(regs), Some(driving)) = (regs_buffer, self.builders[index].driving_net)
             && let Some(input) = first_input(db, regs)
@@ -1011,23 +1005,18 @@ impl Cts<'_> {
     /// The load each buffer of tree `index` drives, the load it should, the
     /// heaviest among its siblings, and the subnet it drives.
     fn buffer_loads(&self, db: &NetlistDB, index: usize) -> BufferLoads {
-        let first_input_cap = |inst: &crate::clock::ClockInst| -> Farads32 {
-            let pin = if inst.kind == InstKind::Buffer {
-                inst.cell.and_then(|c| first_input(db, c))
-            } else {
-                inst.input_pin
+        let clock = &self.builders[index].clock;
+        let first_input_cap = |inst: InstRef| -> Farads32 {
+            let pin = match inst {
+                InstRef::Buffer(b) => clock.buffers[b].cell.and_then(|c| first_input(db, c)),
+                InstRef::Sink(s) => Some(clock.sinks[s].pin),
             };
             pin.map_or(Farads32::ZERO, |p| self.input_cap(db, p))
         };
-        let clock = &self.builders[index].clock;
         let mut loads = BufferLoads::default();
         for (s, subnet) in clock.subnets.iter().enumerate() {
             let _ = loads.driven_subnet.insert(subnet.driver(), s);
-            let total: Farads32 = subnet
-                .sinks()
-                .iter()
-                .map(|&i| first_input_cap(clock.inst(i)))
-                .sum();
+            let total: Farads32 = subnet.sinks().iter().map(|&i| first_input_cap(i)).sum();
             let _ = loads.output.insert(subnet.driver(), total);
         }
         for subnet in &clock.subnets {
@@ -1075,11 +1064,9 @@ impl Cts<'_> {
             .link
             .macro_pin_of_port(dummy.id, dummy.input)
             .ok_or_else(|| CtsError::MissingPin(lib.name.clone()))?;
-        let input = db.connect_cell_pin(cell, pin, net);
+        let _ = db.connect_cell_pin(cell, pin, net);
         let clock = &mut self.builders[index].clock;
-        let dummy_ref = clock.add_buffer(&name, dummy, location);
-        clock.inst_mut(dummy_ref).cell = Some(cell);
-        clock.inst_mut(dummy_ref).input_pin = Some(input);
+        let dummy_ref = clock.add_written_buffer(&name, dummy, location, cell);
         clock.subnets[own].add(dummy_ref);
         Ok(true)
     }

@@ -1156,7 +1156,7 @@ impl Builder {
             .clock
             .add_buffer("clkbuf_0", ctx.root_buffer, legal_center.to_dbu(unit));
         if self.top_buffer_name.is_empty() {
-            self.top_buffer_name = self.clock.inst(root).name.clone();
+            self.top_buffer_name = self.clock.name(root).to_owned();
         }
         let root_net = self.clock.add_subnet("clknet_0");
         self.clock.subnets[root_net].level = Some(0);
@@ -1239,7 +1239,7 @@ impl Builder {
         let location = legal.to_dbu(unit);
         let root = self.clock.add_buffer("clkbuf_0", ctx.root_buffer, location);
         if self.top_buffer_name.is_empty() {
-            self.top_buffer_name = self.clock.inst(root).name.clone();
+            self.top_buffer_name = self.clock.name(root).to_owned();
         }
         let subnet = self.clock.add_subnet("clknet_0");
         self.clock.subnets[subnet].level = Some(0);
