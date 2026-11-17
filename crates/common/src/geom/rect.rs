@@ -138,11 +138,11 @@ impl Rect<Dbu> {
         let (x, y) = (self.min.x, self.min.y);
         if self.width() == Dbu::ZERO {
             let crossing = cover.iter().filter(|c| c.min.x <= x && x <= c.max.x);
-            return union_covers(crossing.map(|c| (c.min.y, c.max.y)), self.min.y, self.max.y);
+            return union_covers(crossing.map(Self::y_span), self.y_span());
         }
         if self.height() == Dbu::ZERO {
             let crossing = cover.iter().filter(|c| c.min.y <= y && y <= c.max.y);
-            return union_covers(crossing.map(|c| (c.min.x, c.max.x)), self.min.x, self.max.x);
+            return union_covers(crossing.map(Self::x_span), self.x_span());
         }
         let pieces: Vec<Self> = cover
             .iter()
@@ -166,23 +166,24 @@ impl Rect<Dbu> {
         let spanning = pieces
             .iter()
             .filter(|p| p.min.x <= x0 && x1 <= p.max.x)
-            .map(|p| (p.min.y, p.max.y));
-        union_covers(spanning, self.min.y, self.max.y)
+            .map(Self::y_span);
+        union_covers(spanning, self.y_span())
     }
 }
 
-/// Whether the closed intervals `spans` together hold all of `[lo, hi]`.
-fn union_covers(spans: impl Iterator<Item = (Dbu, Dbu)>, lo: Dbu, hi: Dbu) -> bool {
-    let mut spans: Vec<(Dbu, Dbu)> = spans.filter(|&(_, end)| end >= lo).collect();
+/// Whether the closed intervals `spans` together hold all of the closed
+/// interval `whole`.
+fn union_covers(spans: impl Iterator<Item = Interval>, whole: Interval) -> bool {
+    let mut spans: Vec<Interval> = spans.filter(|span| span.hi >= whole.lo).collect();
     spans.sort_unstable();
     let mut reached: Option<Dbu> = None;
-    for (start, end) in spans {
-        if start > reached.unwrap_or(lo) {
+    for span in spans {
+        if span.lo > reached.unwrap_or(whole.lo) {
             break;
         }
-        reached = Some(reached.map_or(end, |r| r.max(end)));
+        reached = Some(reached.map_or(span.hi, |r| r.max(span.hi)));
     }
-    reached.is_some_and(|r| r >= hi)
+    reached.is_some_and(|r| r >= whole.hi)
 }
 
 #[cfg(test)]
