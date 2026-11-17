@@ -146,6 +146,39 @@ impl TreeSetup {
 /// Builds and writes the clock trees of `db`.
 pub fn synthesize(db: &mut NetlistDB, input: &CtsInput<'_>) -> Result<ClockTrees, CtsError> {
     let buffers = ClockBuffers::infer(input.link, db, &input.signal_rc)?;
+    let settings = tree_settings(input, &buffers)?;
+    let mut tech = TechChar::new(&CharSetup {
+        link: input.link,
+        db,
+        masters: &buffers.characterized,
+        sink_buffer: buffers.sink,
+        clock_rc: input.clock_rc,
+    })?;
+    let setup = TreeSetup {
+        settings,
+        buffers,
+        buffer_sizes: FxHashMap::default(),
+        blockages: Vec::new(),
+        unit: tech.length_unit(),
+    };
+    let mut cts = Cts::new(input, setup);
+    cts.populate(db, input.sdc)?;
+    if !cts.builders.is_empty() {
+        cts.build(db, &mut tech)?;
+        cts.write(db)?;
+    }
+    Ok(ClockTrees {
+        builders: cts.builders,
+        setup: cts.setup,
+        cap_per_dbu: tech.cap_per_dbu(),
+        summary: cts.summary,
+    })
+}
+
+/// The settings the trees are built with: the options, and the fanout
+/// limit and cluster sizes the root and sink buffers' limits allow, as
+/// `TritonCTS::setupCharacterization` derives them.
+fn tree_settings(input: &CtsInput<'_>, buffers: &ClockBuffers) -> Result<Settings, CtsError> {
     let mut settings = Settings::new(input.options);
     let liberty = input.link.liberty;
     let design_fanout = input.sdc.limits.max_fanout;
@@ -170,48 +203,7 @@ pub fn synthesize(db: &mut NetlistDB, input: &CtsInput<'_>) -> Result<ClockTrees
         return Err(CtsError::FanoutLimitTooLow(limit));
     }
     settings.max_wire_length = input.max_wire_length;
-    let mut tech = TechChar::new(&CharSetup {
-        link: input.link,
-        db,
-        masters: &buffers.characterized,
-        sink_buffer: buffers.sink,
-        clock_rc: input.clock_rc,
-    })?;
-    let mut cts = Cts {
-        link: input.link,
-        clocks: input.clocks,
-        setup: TreeSetup {
-            settings,
-            buffers,
-            buffer_sizes: FxHashMap::default(),
-            blockages: Vec::new(),
-            unit: tech.length_unit(),
-        },
-        builders: Vec::new(),
-        visited: FxHashSet::default(),
-        net_builder: FxHashMap::default(),
-        clock_nets: FxHashSet::default(),
-        reg_tree_index: 0,
-        dummy_index: 0,
-        summary: CtsSummary::default(),
-    };
-    cts.summary
-        .root_buffer
-        .clone_from(&liberty.cell(cts.setup.buffers.root.id).name);
-    cts.summary
-        .sink_buffer
-        .clone_from(&liberty.cell(cts.setup.buffers.sink.id).name);
-    cts.populate(db, input.sdc)?;
-    if !cts.builders.is_empty() {
-        cts.build(db, &mut tech)?;
-        cts.write(db)?;
-    }
-    Ok(ClockTrees {
-        builders: cts.builders,
-        setup: cts.setup,
-        cap_per_dbu: tech.cap_per_dbu(),
-        summary: cts.summary,
-    })
+    Ok(settings)
 }
 
 struct Cts<'a> {
@@ -347,6 +339,31 @@ struct BufferLoads {
     ideal: FxHashMap<InstRef, Farads32>,
     /// Whether some buffer drives less than its ideal.
     unbalanced: bool,
+}
+
+impl<'a> Cts<'a> {
+    /// A run over `input` with no trees yet, its summary naming the root and
+    /// sink buffers.
+    fn new(input: &CtsInput<'a>, setup: TreeSetup) -> Self {
+        let liberty = input.link.liberty;
+        let summary = CtsSummary {
+            root_buffer: liberty.cell(setup.buffers.root.id).name.clone(),
+            sink_buffer: liberty.cell(setup.buffers.sink.id).name.clone(),
+            ..CtsSummary::default()
+        };
+        Self {
+            link: input.link,
+            clocks: input.clocks,
+            setup,
+            builders: Vec::new(),
+            visited: FxHashSet::default(),
+            net_builder: FxHashMap::default(),
+            clock_nets: FxHashSet::default(),
+            reg_tree_index: 0,
+            dummy_index: 0,
+            summary,
+        }
+    }
 }
 
 impl Cts<'_> {
