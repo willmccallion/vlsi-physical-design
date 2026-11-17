@@ -16,9 +16,7 @@ use pare_common::db::global_route::{NetRoute, RoutePoint};
 use pare_common::db::indices::{CutLayerId, IdVec, LayerId, NetId};
 use pare_common::db::library::Library;
 use pare_common::geom::dbu::{Dbu, DbuPerMicron};
-use pare_common::units::{
-    FARADS_PER_PICOFARAD, Farads, FaradsPerMeter, MICRONS_PER_METER, Meters, Ohms, OhmsPerMeter,
-};
+use pare_common::units::{Farads, FaradsPerMeter, Meters, Ohms, OhmsPerMeter};
 use rustc_hash::FxHashMap;
 
 /// The resistance and capacitance of each layer that global route
@@ -69,7 +67,7 @@ impl RouteRc {
         let lef_layer = library
             .routing_layers
             .iter()
-            .map(|l| lef_layer_rc(l.width, &l.electrical, dbu_per_micron))
+            .map(|l| l.electrical.wire_rc(l.width, dbu_per_micron))
             .collect();
         Self {
             layer,
@@ -79,7 +77,7 @@ impl RouteRc {
             lef_via: library
                 .cut_layers
                 .iter()
-                .map(|c| Ohms::new(c.resistance.unwrap_or(0.0)))
+                .map(|c| c.resistance.unwrap_or(Ohms::ZERO))
                 .collect(),
             min_layer,
             dbu_per_micron,
@@ -137,28 +135,6 @@ impl RouteRc {
     fn cut(&self, below: LayerId) -> f32 {
         self.via_resistance(below).get() as f32
     }
-}
-
-/// A routing layer's resistance and capacitance per length from its LEF
-/// values, as `MakeWireParasitics::layerRC` falls back to them.
-// OpenROAD holds them in single precision.
-fn lef_layer_rc(
-    width: Dbu,
-    electrical: &pare_common::db::library::LayerElectrical,
-    dbu_per_micron: DbuPerMicron,
-) -> (OhmsPerMeter, FaradsPerMeter) {
-    let width_microns = dbu_per_micron.to_microns(width) as f32;
-    let res_ohm_per_micron =
-        (electrical.resistance_per_square.unwrap_or(0.0) / f64::from(width_microns)) as f32;
-    let cap_pf_per_micron = (f64::from(width_microns)
-        * electrical.capacitance_per_area.unwrap_or(0.0)
-        + 2.0 * electrical.edge_capacitance.unwrap_or(0.0)) as f32;
-    (
-        OhmsPerMeter::new(MICRONS_PER_METER * f64::from(res_ohm_per_micron)),
-        FaradsPerMeter::new(
-            MICRONS_PER_METER * FARADS_PER_PICOFARAD * f64::from(cap_pf_per_micron),
-        ),
-    )
 }
 
 impl NetParasitics {
