@@ -18,6 +18,7 @@ use pare_common::db::design::PinOwner;
 use pare_common::db::indices::{CellId, IdVec, IoPinId, PinId};
 use pare_common::db::liberty::{
     ArcRole, ArcSetId, Edge, EdgeValues, FuncExpr, Logic, MinMax, SequentialKind, SideValues,
+    TimingArcSet,
 };
 use pare_common::db::sdc::{ClockEdge, ClockId, MultiCyclePath, PathEnd, Sdc};
 use pare_common::units::Seconds;
@@ -216,6 +217,48 @@ fn same_time(a: Seconds, b: Seconds) -> bool {
         return a.get().to_bits() == b.get().to_bits();
     }
     fuzzy::equal(a, b)
+}
+
+/// The tightest required time found so far on each side.
+#[derive(Clone, Copy, Debug)]
+struct TightestRequired(SideValues<Option<Seconds>>);
+
+impl Default for TightestRequired {
+    fn default() -> Self {
+        Self(SideValues::both(None))
+    }
+}
+
+impl TightestRequired {
+    /// Keeps `candidate` on `side` where it is tighter than the time held.
+    fn tighten(&mut self, side: MinMax, candidate: Seconds) {
+        let slot = &mut self.0[side];
+        if slot.is_none_or(|held| tighter(side, candidate, held)) {
+            *slot = Some(candidate);
+        }
+    }
+}
+
+/// One tag's entry at an endpoint and edge whose checks are being found,
+/// with the clock edge that launched it.
+#[derive(Clone, Copy, Debug)]
+struct CheckedEnd<'e> {
+    pin: PinId,
+    edge: Edge,
+    entry: &'e Entry,
+    tag: Tag,
+    launch: ClockEdge,
+}
+
+/// What a check arc's data pin feeds, which decides the clock edge its
+/// setup check captures on.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum CheckedInput {
+    /// A flop or a latch that is not transparent here.
+    Register,
+    /// An enabled latch's data input, whose setup is checked against the
+    /// closing edge, as `OpenSTA`'s latch `PathEndLatchCheck`.
+    EnabledLatch,
 }
 
 /// Whether `candidate` is a tighter required time than `held` on `side`
@@ -1413,100 +1456,136 @@ impl Sta {
         let Some(launch) = tag.launch else {
             return SideValues::both(None);
         };
-        let mut required: SideValues<Option<Seconds>> = SideValues::both(None);
-        let mut tighten = |side: MinMax, candidate: Seconds| {
-            let slot = &mut required[side];
-            if slot.is_none_or(|held| tighter(side, candidate, held)) {
-                *slot = Some(candidate);
-            }
+        let end = CheckedEnd {
+            pin,
+            edge,
+            entry,
+            tag,
+            launch,
         };
-        let db = netlist.db;
-        match db.pins[pin].owner {
-            PinOwner::Io(io) => {
-                let delays = self.sdc.output_delays.get(&io).cloned().unwrap_or_default();
-                for delay in delays {
-                    let target = delay.reference;
-                    for side in MinMax::BOTH {
-                        let Some(margin) = delay.delays.get(edge, side) else {
-                            continue;
-                        };
-                        let to = PathEnd::Port(io);
-                        if self.is_false(tag, to, Some(target.clock), side) {
-                            continue;
-                        }
-                        let base = self.target_arrival(tag, launch, target, to, side);
-                        tighten(side, base - margin);
-                    }
-                }
-            }
+        let mut required = TightestRequired::default();
+        match netlist.db.pins[pin].owner {
+            PinOwner::Io(io) => self.output_requireds(end, io, &mut required),
             PinOwner::Cell { cell, .. } => {
-                let Some((lib, port)) = netlist.link.pin_port(db, pin) else {
-                    return SideValues::both(None);
-                };
-                if let Some(&gate) = self.gated.get(&pin) {
-                    for (side, value) in self.gated_requireds(tag, launch, entry, gate) {
-                        tighten(side, value);
-                    }
-                }
-                let latch = self
-                    .latches
-                    .get(&cell)
-                    .copied()
-                    .filter(|l| l.data == pin && l.state == LatchState::Enabled);
-                let sets: Vec<(ArcSetId, PinId)> = netlist
-                    .link
-                    .liberty
-                    .cell(lib)
-                    .arc_sets
-                    .iter_enumerated()
-                    .filter(|(_, set)| set.to == port && set.role.check_side().is_some())
-                    .filter_map(|(k, set)| netlist.pin_of_port(cell, set.from).map(|ck| (k, ck)))
-                    .collect();
-                for (k, clock_pin) in sets {
-                    let set = &netlist.link.liberty.cell(lib).arc_sets[k];
-                    let Some(side) = set.role.check_side() else {
-                        continue;
-                    };
-                    let Some(arrival) = entry.arrival[side] else {
-                        continue;
-                    };
-                    let data_slew = graph.slew_side(pin, side).get(edge);
-                    for arc in &set.arcs {
-                        if arc.to_edge != edge {
-                            continue;
-                        }
-                        let clock_slew = self.clock_slew(graph, clock_pin, arc.from_edge, side);
-                        let margin = arc.check_value(clock_slew, data_slew);
-                        let is_latch_setup = latch.is_some() && set.role == ArcRole::Setup;
-                        let clock_edge = if is_latch_setup {
-                            opposite(arc.from_edge)
-                        } else {
-                            arc.from_edge
-                        };
-                        for capture in self.captures(clock_pin, clock_edge) {
-                            let target = capture.edge;
-                            let to = PathEnd::Clock(target.clock);
-                            if self.is_false(tag, to, Some(target.clock), side) {
-                                continue;
-                            }
-                            let value = if is_latch_setup {
-                                self.latch_timing(tag, launch, capture, to, arrival, margin)
-                                    .required
-                            } else {
-                                let base = self.target_arrival(tag, launch, target, to, side)
-                                    + capture.latency(side);
-                                match side {
-                                    MinMax::Max => base - margin,
-                                    MinMax::Min => base + margin,
-                                }
-                            };
-                            tighten(side, value);
-                        }
-                    }
-                }
+                self.cell_check_requireds(netlist, graph, end, cell, &mut required);
             }
         }
-        required
+        required.0
+    }
+
+    /// Tightens `required` by the output delays set on port `io`.
+    fn output_requireds(
+        &mut self,
+        end: CheckedEnd<'_>,
+        io: IoPinId,
+        required: &mut TightestRequired,
+    ) {
+        let delays = self.sdc.output_delays.get(&io).cloned().unwrap_or_default();
+        for delay in delays {
+            let target = delay.reference;
+            for side in MinMax::BOTH {
+                let Some(margin) = delay.delays.get(end.edge, side) else {
+                    continue;
+                };
+                let to = PathEnd::Port(io);
+                if self.is_false(end.tag, to, Some(target.clock), side) {
+                    continue;
+                }
+                let base = self.target_arrival(end.tag, end.launch, target, to, side);
+                required.tighten(side, base - margin);
+            }
+        }
+    }
+
+    /// Tightens `required` by the gated-clock check and the check arcs at
+    /// a pin of `cell`.
+    fn cell_check_requireds(
+        &mut self,
+        netlist: &Netlist<'_>,
+        graph: &TimingGraph,
+        end: CheckedEnd<'_>,
+        cell: CellId,
+        required: &mut TightestRequired,
+    ) {
+        let Some((lib, port)) = netlist.link.pin_port(netlist.db, end.pin) else {
+            return;
+        };
+        if let Some(&gate) = self.gated.get(&end.pin) {
+            for (side, value) in self.gated_requireds(end.tag, end.launch, end.entry, gate) {
+                required.tighten(side, value);
+            }
+        }
+        let is_enabled_latch_data = self
+            .latches
+            .get(&cell)
+            .is_some_and(|l| l.data == end.pin && l.state == LatchState::Enabled);
+        let input = if is_enabled_latch_data {
+            CheckedInput::EnabledLatch
+        } else {
+            CheckedInput::Register
+        };
+        let sets: Vec<(ArcSetId, PinId)> = netlist
+            .link
+            .liberty
+            .cell(lib)
+            .arc_sets
+            .iter_enumerated()
+            .filter(|(_, set)| set.to == port && set.role.check_side().is_some())
+            .filter_map(|(k, set)| netlist.pin_of_port(cell, set.from).map(|ck| (k, ck)))
+            .collect();
+        for (k, clock_pin) in sets {
+            let set = &netlist.link.liberty.cell(lib).arc_sets[k];
+            self.arc_set_requireds(graph, end, set, clock_pin, input, required);
+        }
+    }
+
+    /// Tightens `required` by the arcs of check group `set`, clocked at
+    /// `clock_pin`, that end on the end's edge.
+    fn arc_set_requireds(
+        &mut self,
+        graph: &TimingGraph,
+        end: CheckedEnd<'_>,
+        set: &TimingArcSet,
+        clock_pin: PinId,
+        input: CheckedInput,
+        required: &mut TightestRequired,
+    ) {
+        let Some(side) = set.role.check_side() else {
+            return;
+        };
+        let Some(arrival) = end.entry.arrival[side] else {
+            return;
+        };
+        let data_slew = graph.slew_side(end.pin, side).get(end.edge);
+        let is_latch_setup = input == CheckedInput::EnabledLatch && set.role == ArcRole::Setup;
+        for arc in set.arcs.iter().filter(|arc| arc.to_edge == end.edge) {
+            let clock_slew = self.clock_slew(graph, clock_pin, arc.from_edge, side);
+            let margin = arc.check_value(clock_slew, data_slew);
+            let clock_edge = if is_latch_setup {
+                opposite(arc.from_edge)
+            } else {
+                arc.from_edge
+            };
+            for capture in self.captures(clock_pin, clock_edge) {
+                let target = capture.edge;
+                let to = PathEnd::Clock(target.clock);
+                if self.is_false(end.tag, to, Some(target.clock), side) {
+                    continue;
+                }
+                let value = if is_latch_setup {
+                    self.latch_timing(end.tag, end.launch, capture, to, arrival, margin)
+                        .required
+                } else {
+                    let base = self.target_arrival(end.tag, end.launch, target, to, side)
+                        + capture.latency(side);
+                    match side {
+                        MinMax::Max => base - margin,
+                        MinMax::Min => base + margin,
+                    }
+                };
+                required.tighten(side, value);
+            }
+        }
     }
 
     /// The required times of a gated clock's enable, as `OpenSTA`'s
