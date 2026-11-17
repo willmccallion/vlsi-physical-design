@@ -7,6 +7,7 @@ use pare_common::db::design::NetlistDB;
 use pare_common::db::indices::IdVec;
 use pare_common::db::library::{SiteClass, Symmetry};
 use pare_common::geom::dbu::Dbu;
+use pare_common::geom::interval::{Interval, merge_touching};
 use pare_common::geom::orient::Orientation;
 use pare_common::geom::point::Point;
 use pare_common::geom::rect::Rect;
@@ -172,15 +173,15 @@ fn merge_rows(rows: &[Row], bounds: Rect<Dbu>, network: &mut Network) -> Vec<Row
         while r < rows.len() && rows[r].bottom == rows[start].bottom {
             r += 1;
         }
-        let mut spans: Vec<(Dbu, Dbu)> = rows[start..r]
+        let mut spans: Vec<Interval> = rows[start..r]
             .iter()
-            .map(|row| (row.left, row.right()))
+            .map(|row| Interval::new(row.left, row.right()))
             .collect();
         spans.sort_unstable();
-        let spans = merge_intervals(&spans);
+        let spans = merge_touching(spans);
         let mut row = rows[start];
         if r - start > 1 {
-            let (lx, rx) = (spans[0].0, spans[spans.len() - 1].1);
+            let (lx, rx) = (spans[0].lo, spans[spans.len() - 1].hi);
             row.num_sites = (rx - lx).div_trunc(row.site_spacing);
             row.left = lx;
         }
@@ -192,17 +193,17 @@ fn merge_rows(rows: &[Row], bounds: Rect<Dbu>, network: &mut Network) -> Vec<Row
 
 /// Fills the gaps of `row` outside `spans`, the merged stretches of the
 /// rows at its height, out to `bounds`.
-fn add_gap_fillers(network: &mut Network, row: &Row, spans: &[(Dbu, Dbu)], bounds: Rect<Dbu>) {
+fn add_gap_fillers(network: &mut Network, row: &Row, spans: &[Interval], bounds: Rect<Dbu>) {
     let (min_x, max_x) = (bounds.min.x, bounds.max.x);
-    if min_x < spans[0].0 {
-        network.add_filler(min_x, row.bottom, spans[0].0 - min_x, row.height);
+    if min_x < spans[0].lo {
+        network.add_filler(min_x, row.bottom, spans[0].lo - min_x, row.height);
     }
     for pair in spans.windows(2) {
-        if pair[1].0 > pair[0].1 {
-            network.add_filler(pair[0].1, row.bottom, pair[1].0 - pair[0].1, row.height);
+        if pair[1].lo > pair[0].hi {
+            network.add_filler(pair[0].hi, row.bottom, pair[1].lo - pair[0].hi, row.height);
         }
     }
-    let last = spans[spans.len() - 1].1;
+    let last = spans[spans.len() - 1].hi;
     if max_x > last {
         network.add_filler(last, row.bottom, max_x - last, row.height);
     }
@@ -249,19 +250,6 @@ fn site_spacing(row: &pare_common::db::design::Row, site_width: Dbu) -> Result<D
     Ok(row.step.x)
 }
 
-/// Sorted intervals with the overlapping and touching ones merged, as the
-/// stack merges `OpenDP` makes of rows, blockages and regions.
-pub(super) fn merge_intervals(sorted: &[(Dbu, Dbu)]) -> Vec<(Dbu, Dbu)> {
-    let mut merged: Vec<(Dbu, Dbu)> = Vec::with_capacity(sorted.len());
-    for &(lo, hi) in sorted {
-        match merged.last_mut() {
-            Some(top) if top.1 >= lo => top.1 = top.1.max(hi),
-            _ => merged.push((lo, hi)),
-        }
-    }
-    merged
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -289,22 +277,6 @@ mod tests {
             min_y: Dbu(0),
             max_y: ROW_HEIGHT * count,
         }
-    }
-
-    #[test]
-    fn overlapping_and_touching_intervals_merge_and_apart_ones_stay() {
-        let spans = |s: &[(i64, i64)]| -> Vec<(Dbu, Dbu)> {
-            s.iter().map(|&(lo, hi)| (Dbu(lo), Dbu(hi))).collect()
-        };
-
-        let merged = merge_intervals(&spans(&[(0, 2), (1, 3), (3, 4), (6, 7)]));
-
-        assert_eq!(merged, spans(&[(0, 4), (6, 7)]));
-    }
-
-    #[test]
-    fn no_intervals_merge_into_none() {
-        assert_eq!(merge_intervals(&[]), []);
     }
 
     #[test]

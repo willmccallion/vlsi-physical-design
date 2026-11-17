@@ -28,6 +28,7 @@ use network::Network;
 use pare_common::db::design::NetlistDB;
 use pare_common::db::indices::IdVec;
 use pare_common::geom::dbu::Dbu;
+use pare_common::geom::interval::Interval;
 use pare_common::geom::orient::Orientation;
 use pare_common::geom::point::Point;
 use pare_common::geom::rect::Rect;
@@ -159,6 +160,10 @@ struct Segment {
 impl Segment {
     fn width(&self) -> Dbu {
         self.max_x - self.min_x
+    }
+
+    const fn span(&self) -> Interval {
+        Interval::new(self.min_x, self.max_x)
     }
 }
 
@@ -641,7 +646,7 @@ mod tests {
         let row = imp.arch.rows[ArchRowId::BOTTOM];
         let site = |i: i64| row.left + row.site_spacing * i;
 
-        let aligned = imp.align(n, site(3) + Dbu(1), site(0), site(40));
+        let aligned = imp.align(n, site(3) + Dbu(1), Interval::new(site(0), site(40)));
 
         assert_eq!(aligned, Some(site(3)));
     }
@@ -654,7 +659,7 @@ mod tests {
         let site = |i: i64| row.left + row.site_spacing * i;
         let right = site(40);
 
-        let aligned = imp.align(n, right, site(0), right).unwrap();
+        let aligned = imp.align(n, right, Interval::new(site(0), right)).unwrap();
 
         assert_eq!(aligned + imp.width(n), right);
     }
@@ -665,7 +670,7 @@ mod tests {
         let n = imp.movable_cells()[0];
         let left = imp.arch.rows[ArchRowId::BOTTOM].left;
 
-        let aligned = imp.align(n, left, left, left + imp.width(n) - Dbu(1));
+        let aligned = imp.align(n, left, Interval::new(left, left + imp.width(n) - Dbu(1)));
 
         assert_eq!(aligned, None);
     }

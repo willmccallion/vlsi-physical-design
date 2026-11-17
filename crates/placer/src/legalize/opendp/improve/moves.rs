@@ -5,6 +5,7 @@ use super::arch::Row;
 use super::{ArchRowId, ImprovementError, Improver, Move, Result, Sealed, Trial};
 use super::{NodeId, SegmentId};
 use pare_common::geom::dbu::Dbu;
+use pare_common::geom::interval::Interval;
 use pare_common::geom::point::Point;
 
 /// How far a journaled move may take a cell from where improvement found
@@ -102,9 +103,11 @@ impl Improver {
         if self.width(n) + seg.util > seg.width() {
             return Ok(false);
         }
-        let lx = left.map_or(seg.min_x, |l| self.right(l));
-        let rx = right.map_or(seg.max_x, |r| self.left(r));
-        let Some(x) = self.align(n, xj, lx, rx) else {
+        let room = Interval::new(
+            left.map_or(seg.min_x, |l| self.right(l)),
+            right.map_or(seg.max_x, |r| self.left(r)),
+        );
+        let Some(x) = self.align(n, xj, room) else {
             return Ok(false);
         };
         xj = x;
@@ -154,12 +157,12 @@ impl Improver {
         let next = cells.get(ix + 1).copied();
         let seg = self.segments[sj];
         let gaps = [
-            (prev.map_or(seg.min_x, |p| self.right(p)), self.left(ndj)),
-            (self.right(ndj), next.map_or(seg.max_x, |p| self.left(p))),
+            Interval::new(prev.map_or(seg.min_x, |p| self.right(p)), self.left(ndj)),
+            Interval::new(self.right(ndj), next.map_or(seg.max_x, |p| self.left(p))),
         ];
-        for (lx, rx) in gaps {
-            if self.width(n) <= rx - lx {
-                let Some(x) = self.align(n, xj, lx, rx) else {
+        for gap in gaps {
+            if self.width(n) <= gap.len() {
+                let Some(x) = self.align(n, xj, gap) else {
                     return Ok(false);
                 };
                 let from = self.position(n);
@@ -195,10 +198,10 @@ impl Improver {
         let Some(segs) = self.segment_stack(n, rb, spanned, xj) else {
             return Ok(false);
         };
-        let Some((xmin, xmax)) = self.stack_gap(n, &segs, xj) else {
+        let Some(gap) = self.stack_gap(n, &segs, xj) else {
             return Ok(false);
         };
-        let Some(x) = self.align(n, xj, xmin, xmax) else {
+        let Some(x) = self.align(n, xj, gap) else {
             return Ok(false);
         };
         let from_segs = self.cell_segs[n].clone();
@@ -232,23 +235,24 @@ impl Improver {
 
     /// The span free in every segment of `segs` around `xj` that `n` fits
     /// in; none where it fits in no such span.
-    fn stack_gap(&self, n: NodeId, segs: &[SegmentId], xj: Dbu) -> Option<(Dbu, Dbu)> {
-        let (mut xmin, mut xmax) = (Dbu(i64::from(i32::MIN)), Dbu(i64::from(i32::MAX)));
+    fn stack_gap(&self, n: NodeId, segs: &[SegmentId], xj: Dbu) -> Option<Interval> {
+        let mut shared = Interval::new(Dbu(i64::from(i32::MIN)), Dbu(i64::from(i32::MAX)));
         for &s in segs {
             let (left, right) = self.neighbours_besides(n, s, xj);
             if left == Some(n) || right == Some(n) {
                 return None;
             }
             let seg = &self.segments[s];
-            let lx = left.map_or(seg.min_x, |l| self.right(l));
-            let rx = right.map_or(seg.max_x, |r| self.left(r));
-            if self.width(n) > rx - lx {
+            let gap = Interval::new(
+                left.map_or(seg.min_x, |l| self.right(l)),
+                right.map_or(seg.max_x, |r| self.left(r)),
+            );
+            if self.width(n) > gap.len() {
                 return None;
             }
-            xmin = xmin.max(lx);
-            xmax = xmax.min(rx);
+            shared = shared.overlap(gap);
         }
-        (self.width(n) <= xmax - xmin).then_some((xmin, xmax))
+        (self.width(n) <= shared.len()).then_some(shared)
     }
 
     /// The cells of segment `s` left and right of `xj`, the left one taken
@@ -343,7 +347,7 @@ impl Improver {
 
     /// The span between the neighbours of the cell at `index` of segment
     /// `s`, or the segment's end where it has none.
-    fn gap_around(&self, s: SegmentId, index: usize) -> (Dbu, Dbu) {
+    fn gap_around(&self, s: SegmentId, index: usize) -> Interval {
         let cells = &self.cells_in_seg[s];
         let seg = &self.segments[s];
         let lx = index
@@ -351,7 +355,7 @@ impl Improver {
             .and_then(|i| cells.get(i))
             .map_or(seg.min_x, |&p| self.right(p));
         let rx = cells.get(index + 1).map_or(seg.max_x, |&p| self.left(p));
-        (lx, rx)
+        Interval::new(lx, rx)
     }
 
     /// The new lefts `(xi, xj)` of a swap of cell `n` with cell `ndj`:
@@ -368,49 +372,49 @@ impl Improver {
         let row = self.segments[at_i.segment].row;
         let same_segment = at_i.segment == at_j.segment;
         if same_segment && at_i.index + 1 == at_j.index {
-            let span = (
-                self.gap_around(at_i.segment, at_i.index).0,
-                self.gap_around(at_j.segment, at_j.index).1,
+            let span = Interval::new(
+                self.gap_around(at_i.segment, at_i.index).lo,
+                self.gap_around(at_j.segment, at_j.index).hi,
             );
             return self
                 .shift_pair([ndj, n], [xi, xj], span, row)
                 .map(Into::into);
         }
         if same_segment && at_j.index + 1 == at_i.index {
-            let span = (
-                self.gap_around(at_j.segment, at_j.index).0,
-                self.gap_around(at_i.segment, at_i.index).1,
+            let span = Interval::new(
+                self.gap_around(at_j.segment, at_j.index).lo,
+                self.gap_around(at_i.segment, at_i.index).hi,
             );
             let [xj, xi] = self.shift_pair([n, ndj], [xj, xi], span, row)?;
             return Some((xi, xj));
         }
-        let (lx, rx) = self.gap_around(at_i.segment, at_i.index);
-        if self.width(ndj) > rx - lx {
+        let gap = self.gap_around(at_i.segment, at_i.index);
+        if self.width(ndj) > gap.len() {
             return None;
         }
-        let xi = self.align(ndj, xi, lx, rx)?;
-        let (lx, rx) = self.gap_around(at_j.segment, at_j.index);
-        if self.width(n) > rx - lx {
+        let xi = self.align(ndj, xi, gap)?;
+        let gap = self.gap_around(at_j.segment, at_j.index);
+        if self.width(n) > gap.len() {
             return None;
         }
-        let xj = self.align(n, xj, lx, rx)?;
+        let xj = self.align(n, xj, gap)?;
         Some((xi, xj))
     }
 
     /// The lefts of neighbours `cells`, left one first, shifted within
-    /// `(lx, rx)` toward `targets`; none where they do not fit.
+    /// `room` toward `targets`; none where they do not fit.
     fn shift_pair(
         &self,
         cells: [NodeId; 2],
         targets: [Dbu; 2],
-        (lx, rx): (Dbu, Dbu),
+        room: Interval,
         row: ArchRowId,
     ) -> Option<[Dbu; 2]> {
         let width = self.width(cells[0]) + self.width(cells[1]);
-        if width > rx - lx {
+        if width > room.len() {
             return None;
         }
-        let pos = self.shift(&cells, &targets, lx, rx, row)?;
+        let pos = self.shift(&cells, &targets, room.lo, room.hi, row)?;
         Some([pos[0], pos[1]])
     }
 
@@ -543,9 +547,10 @@ impl Improver {
 
     /// The site-aligned left edge nearest `x` that keeps the cell within
     /// `[xl, xr)`, as `DetailedMgr::alignPos`.
-    pub(super) fn align(&self, n: NodeId, x: Dbu, xl: Dbu, xr: Dbu) -> Option<Dbu> {
+    pub(super) fn align(&self, n: NodeId, x: Dbu, room: Interval) -> Option<Dbu> {
         let row = &self.arch.rows[ArchRowId::BOTTOM];
-        let xr = xr - self.width(n);
+        let xl = room.lo;
+        let xr = room.hi - self.width(n);
         let mut xp = xl.max(xr.min(x));
         xp = row.left + row.site_spacing * (xp - row.left).div_trunc(row.site_spacing);
         if xp < xl {

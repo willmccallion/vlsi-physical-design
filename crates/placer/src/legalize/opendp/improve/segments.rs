@@ -1,11 +1,11 @@
 //! Row segments and the cells in them, as `DetailedMgr` keeps them.
 
-use super::arch::merge_intervals;
 use super::{ArchRowId, Blockage, ImprovementError, Improver, Result, Segment};
 use super::{NodeId, SegmentId};
 use crate::legalize::opendp::GroupId;
 use pare_common::db::indices::IdVec;
 use pare_common::geom::dbu::Dbu;
+use pare_common::geom::interval::{Interval, merge_touching};
 use pare_common::geom::orient::Orientation;
 use pare_common::geom::point::Point;
 
@@ -123,8 +123,8 @@ impl Improver {
         for region in self.grid.groups.ids() {
             let intervals = self.region_intervals(region);
             for (r, row_intervals) in intervals.iter_enumerated() {
-                for &(il, ir) in row_intervals {
-                    self.split_segments(r, region, il, ir)?;
+                for &piece in row_intervals {
+                    self.split_segments(r, region, piece)?;
                 }
             }
         }
@@ -156,7 +156,8 @@ impl Improver {
     /// Gives the part of each segment of row `r` within `[il, ir)` to the
     /// region, splitting segments as needed; the pieces it adds are visited
     /// too, as in `DetailedMgr::findSegments`.
-    fn split_segments(&mut self, r: ArchRowId, region: GroupId, il: Dbu, ir: Dbu) -> Result<()> {
+    fn split_segments(&mut self, r: ArchRowId, region: GroupId, piece: Interval) -> Result<()> {
+        let Interval { lo: il, hi: ir } = piece;
         let mut s = 0;
         while s < self.segs_in_row[r].len() {
             let id = self.segs_in_row[r][s];
@@ -193,7 +194,7 @@ impl Improver {
 
     /// The site-aligned spans of each row a region wholly covers in height,
     /// as `DetailedMgr::findRegionIntervals`.
-    fn region_intervals(&self, region: GroupId) -> IdVec<ArchRowId, Vec<(Dbu, Dbu)>> {
+    fn region_intervals(&self, region: GroupId) -> IdVec<ArchRowId, Vec<Interval>> {
         let rows = &self.arch.rows;
         let height = rows[ArchRowId::BOTTOM].height;
         let mut intervals = IdVec::filled(Vec::new(), rows.len());
@@ -211,7 +212,7 @@ impl Improver {
                     i1 += 1;
                 }
                 if i1 > i0 {
-                    intervals[r].push((
+                    intervals[r].push(Interval::new(
                         row.left + row.site_spacing * i0,
                         row.left + row.site_spacing * i1,
                     ));
@@ -220,7 +221,7 @@ impl Improver {
         }
         for row in &mut intervals {
             row.sort_unstable();
-            *row = merge_intervals(row);
+            *row = merge_touching(row.iter().copied());
         }
         intervals
     }
@@ -302,14 +303,7 @@ impl Improver {
             for &s in &self.segs_in_row[b] {
                 let mut candidates = Vec::new();
                 let seg = &self.segments[s];
-                self.span_dfs(
-                    s,
-                    (seg.min_x, seg.max_x),
-                    t,
-                    spanned,
-                    &mut Vec::new(),
-                    &mut candidates,
-                )?;
+                self.span_dfs(s, seg.span(), t, spanned, &mut Vec::new(), &mut candidates)?;
                 for candidate in candidates {
                     if candidate
                         .iter()
@@ -345,7 +339,7 @@ impl Improver {
     fn span_dfs(
         &self,
         s: SegmentId,
-        (xmin, xmax): (Dbu, Dbu),
+        shared: Interval,
         top: ArchRowId,
         spanned: usize,
         stack: &mut Vec<SegmentId>,
@@ -355,9 +349,8 @@ impl Improver {
         let row = self.segments[s].row;
         if row < top {
             for &next in &self.segs_in_row[row.up(1)] {
-                let seg = &self.segments[next];
-                if xmax.min(seg.max_x) - xmin.max(seg.min_x) > Dbu::ZERO {
-                    let clipped = (xmin.max(seg.min_x), xmax.min(seg.max_x));
+                let clipped = shared.overlap(self.segments[next].span());
+                if !clipped.is_empty() {
                     self.span_dfs(next, clipped, top, spanned, stack, candidates)?;
                 }
             }
@@ -570,10 +563,8 @@ impl Improver {
                 if self.right(nd) != self.right(last) {
                     if (self.left(nd) - self.right(last)).abs() == gap {
                         for &cell in &at_last_x.clone() {
-                            if !spans_overlap(
-                                (self.bottom(cell), self.top(cell)),
-                                (self.bottom(nd), self.top(nd)),
-                            ) {
+                            let rows_of = |n| Interval::new(self.bottom(n), self.top(n));
+                            if !rows_of(cell).meets(rows_of(nd)) {
                                 continue;
                             }
                             if self.is_terminal(nd)
@@ -630,11 +621,6 @@ impl Improver {
         }
         Ok(false)
     }
-}
-
-/// Whether two closed spans meet.
-fn spans_overlap((b1, t1): (Dbu, Dbu), (b2, t2): (Dbu, Dbu)) -> bool {
-    (b2 <= b1 && b1 <= t2) || (b1 <= b2 && b2 <= t1)
 }
 
 #[cfg(test)]
