@@ -1146,64 +1146,24 @@ const FIRST_COSTS: GlobalCosts = GlobalCosts {
 // NOTE: CUGR::route runs pattern, detoured pattern and sparse maze stages and
 // keeps no history; PARE negotiates PathFinder-style, its own scheme.
 fn negotiate(grid: &mut GlobalGrid, nets: &[GlobalNet], routes: &mut GlobalRoutes, rounds: usize) {
-    let mut costs = FIRST_COSTS;
     let mut margins = vec![FIRST_MARGIN; nets.len()];
     let mut coarse = CoarseGrid::new(grid);
-    let mut best = Best::of(grid);
-    let mut progress_from = best.overflow;
-    let mut stalled = 0;
+    let mut negotiation = Negotiation::new(grid);
     for _ in 0..rounds {
-        if best.overflow == Tracks::ZERO || stalled >= STALL_ROUNDS {
+        if negotiation.is_over() {
             break;
         }
-        for e in 0..grid.usage.len() {
-            let over = grid.usage.get(e).saturating_sub(grid.capacity[e]);
-            grid.history[e] += over.to_f64() as f32;
-        }
-        let mut ripped: Vec<usize> = (0..nets.len())
-            .filter(|&i| {
-                routes.paths.get(&nets[i].net).is_some_and(|tree| {
-                    tree.iter()
-                        .any(|p| grid.path_edges(p).any(|e| grid.overflowed(e)))
-                })
-            })
-            .collect();
-        for &i in &ripped {
-            if let Some(tree) = routes.paths.remove(&nets[i].net) {
-                grid.add_tree(&nets[i], &tree, Sign::Remove);
-                best.shelve(nets[i].net, tree);
-            }
-            margins[i] = margins[i].saturating_add(MARGIN_STEP).min(MAX_MARGIN);
-        }
-        ripped.sort_by_key(|&i| (span(&nets[i].terminals), i));
+        accrue_history(grid);
+        let ripped = rip_up_overflowed(grid, nets, routes, &mut negotiation.best, &mut margins);
         let start = std::time::Instant::now();
         coarse.refresh(grid);
         let levels = disjoint_levels(grid, nets, &ripped);
-        let mut spent = RoundTimes::default();
-        for level in &levels {
-            let shared: &GlobalGrid = grid;
-            let planning = std::time::Instant::now();
-            let plans: Vec<Option<Plan>> = level
-                .par_iter()
-                .map(|&i| coarse.plan(shared, &nets[i]))
-                .collect();
-            spent.planning += planning.elapsed().as_secs_f64();
-            let reroute = Reroute {
-                which: level,
-                margins: &margins,
-                plans: &plans,
-            };
-            let routing = std::time::Instant::now();
-            route_disjoint(grid, nets, &reroute, costs, routes);
-            spent.routing += routing.elapsed().as_secs_f64();
-            let refreshing = std::time::Instant::now();
-            let touched = touched_coarse_cells(
-                grid,
-                level.iter().filter_map(|&i| routes.paths.get(&nets[i].net)),
-            );
-            coarse.refresh_cells(grid, &touched);
-            spent.refreshing += refreshing.elapsed().as_secs_f64();
-        }
+        let round = RerouteRound {
+            nets,
+            margins: &margins,
+            costs: negotiation.costs,
+        };
+        let spent = reroute_levels(grid, &mut coarse, &round, &levels, routes);
         log::debug!(
             "global round: {} nets ripped in {} levels (largest {}), overflow {}, {:.1}s: \
              {:.1}s planning, {:.1}s routing, {:.1}s refreshing",
@@ -1216,22 +1176,146 @@ fn negotiate(grid: &mut GlobalGrid, nets: &[GlobalNet], routes: &mut GlobalRoute
             spent.routing,
             spent.refreshing
         );
-        let overflow = grid.overflow();
-        if overflow < best.overflow {
-            costs.penalty *= PENALTY_STEP;
-            best = Best::of(grid);
-        } else {
-            costs.penalty /= PENALTY_STEP;
+        negotiation.after_round(grid);
+    }
+    negotiation.finish(grid, routes);
+}
+
+/// Adds each edge's overflow to its history.
+fn accrue_history(grid: &mut GlobalGrid) {
+    for e in 0..grid.usage.len() {
+        let over = grid.usage.get(e).saturating_sub(grid.capacity[e]);
+        grid.history[e] += over.to_f64() as f32;
+    }
+}
+
+/// Rips up the nets of `nets` whose routes cross an overflowed edge,
+/// shelving each route with `best` and widening its search margin, and
+/// returns them, the smallest spans first.
+fn rip_up_overflowed(
+    grid: &GlobalGrid,
+    nets: &[GlobalNet],
+    routes: &mut GlobalRoutes,
+    best: &mut Best,
+    margins: &mut [u16],
+) -> Vec<usize> {
+    let mut ripped: Vec<usize> = (0..nets.len())
+        .filter(|&i| {
+            routes.paths.get(&nets[i].net).is_some_and(|tree| {
+                tree.iter()
+                    .any(|p| grid.path_edges(p).any(|e| grid.overflowed(e)))
+            })
+        })
+        .collect();
+    for &i in &ripped {
+        if let Some(tree) = routes.paths.remove(&nets[i].net) {
+            grid.add_tree(&nets[i], &tree, Sign::Remove);
+            best.shelve(nets[i].net, tree);
         }
-        if overflow.to_f64() <= progress_from.to_f64() * (1.0 - MIN_PROGRESS) {
-            progress_from = overflow;
-            stalled = 0;
-        } else {
-            stalled += 1;
+        margins[i] = margins[i].saturating_add(MARGIN_STEP).min(MAX_MARGIN);
+    }
+    ripped.sort_by_key(|&i| (span(&nets[i].terminals), i));
+    ripped
+}
+
+/// What every level of a round's rerouting shares: the nets, their search
+/// margins and the round's costs.
+struct RerouteRound<'a> {
+    nets: &'a [GlobalNet],
+    margins: &'a [u16],
+    costs: GlobalCosts,
+}
+
+/// Plans and reroutes each of `levels` in turn, its nets at once, keeping
+/// the coarse grid up to date; returns where the time went.
+fn reroute_levels(
+    grid: &GlobalGrid,
+    coarse: &mut CoarseGrid,
+    round: &RerouteRound<'_>,
+    levels: &[Vec<usize>],
+    routes: &mut GlobalRoutes,
+) -> RoundTimes {
+    let nets = round.nets;
+    let mut spent = RoundTimes::default();
+    for level in levels {
+        let planning = std::time::Instant::now();
+        let plans: Vec<Option<Plan>> = level
+            .par_iter()
+            .map(|&i| coarse.plan(grid, &nets[i]))
+            .collect();
+        spent.planning += planning.elapsed().as_secs_f64();
+        let reroute = Reroute {
+            which: level,
+            margins: round.margins,
+            plans: &plans,
+        };
+        let routing = std::time::Instant::now();
+        route_disjoint(grid, nets, &reroute, round.costs, routes);
+        spent.routing += routing.elapsed().as_secs_f64();
+        let refreshing = std::time::Instant::now();
+        let touched = touched_coarse_cells(
+            grid,
+            level.iter().filter_map(|&i| routes.paths.get(&nets[i].net)),
+        );
+        coarse.refresh_cells(grid, &touched);
+        spent.refreshing += refreshing.elapsed().as_secs_f64();
+    }
+    spent
+}
+
+/// Where negotiation stands between rounds: the round with the lowest
+/// overflow, the costs the next round routes with, and the overflow when
+/// it last made progress, with the rounds since; `docs/global-routing.md`
+/// draws its states.
+struct Negotiation {
+    best: Best,
+    costs: GlobalCosts,
+    progress_from: Tracks,
+    stalled: usize,
+}
+
+impl Negotiation {
+    fn new(grid: &GlobalGrid) -> Self {
+        let best = Best::of(grid);
+        Self {
+            progress_from: best.overflow,
+            best,
+            costs: FIRST_COSTS,
+            stalled: 0,
         }
     }
-    if grid.overflow() > best.overflow {
-        best.restore(grid, routes);
+
+    /// Whether negotiation is over: the best round has no overflow, or
+    /// [`STALL_ROUNDS`] rounds have passed without enough progress.
+    fn is_over(&self) -> bool {
+        self.best.overflow == Tracks::ZERO || self.stalled >= STALL_ROUNDS
+    }
+
+    /// Takes in the overflow a round left on `grid`: keeps the round if it
+    /// is the best yet and raises the penalty, else lowers it, and counts
+    /// the round as progress or as stalled.
+    fn after_round(&mut self, grid: &GlobalGrid) {
+        let overflow = grid.overflow();
+        if overflow < self.best.overflow {
+            self.costs.penalty *= PENALTY_STEP;
+            self.best = Best::of(grid);
+        } else {
+            self.costs.penalty /= PENALTY_STEP;
+        }
+        if overflow.to_f64() <= self.progress_from.to_f64() * (1.0 - MIN_PROGRESS) {
+            self.progress_from = overflow;
+            self.stalled = 0;
+        } else {
+            self.stalled += 1;
+        }
+    }
+
+    /// Leaves `grid` and `routes` at the best round, where the last was
+    /// worse.
+    fn finish(self, grid: &mut GlobalGrid, routes: &mut GlobalRoutes) {
+        if grid.overflow() > self.best.overflow {
+            self.best.restore(grid, routes);
+        }
     }
 }
 
