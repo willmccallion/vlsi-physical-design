@@ -52,9 +52,39 @@ impl DetailedRouter<'_> {
     /// in some region cannot be connected, is routed whole instead.
     pub(crate) fn route_initial(&mut self, nets: &[NetId], costs: Costs) -> RepairStats {
         let grid = RegionGrid::of_pass(self, 0);
+        let (plans, mut whole) = self.plan_nets(nets, &grid);
+        self.commit_skeletons(&plans, &grid);
+        let mut regions: BTreeMap<RegionKey, Vec<Piece>> = BTreeMap::new();
+        let mut finished: Vec<(NetId, Vec<AccessPoint>)> = Vec::with_capacity(plans.len());
+        for plan in plans {
+            for (key, piece) in plan.pieces {
+                regions.entry(key).or_default().push(piece);
+            }
+            finished.push((plan.net, plan.access));
+        }
+        let mut stats = RepairStats {
+            regions: regions.len(),
+            ..RepairStats::default()
+        };
+        let failed = self.route_regions(regions, &grid, costs, &mut stats);
+        self.finish_routed(finished, &failed, &mut whole);
+        log::debug!(
+            "first pass: {} pieces in {} regions, {} nets routed whole",
+            stats.pieces,
+            stats.regions,
+            whole.len()
+        );
+        whole.sort_unstable();
+        self.route_speculatively(whole, costs);
+        stats
+    }
+
+    /// The plan of each of `nets` that splits into regions of `grid`, and
+    /// the nets that do not.
+    fn plan_nets(&self, nets: &[NetId], grid: &RegionGrid) -> (Vec<Plan>, Vec<NetId>) {
         let planned: Vec<Result<Plan, NetId>> = nets
             .par_iter()
-            .map(|&net| self.plan(net, &grid).ok_or(net))
+            .map(|&net| self.plan(net, grid).ok_or(net))
             .collect();
         let mut whole: Vec<NetId> = Vec::new();
         let mut plans: Vec<Plan> = Vec::new();
@@ -64,30 +94,35 @@ impl DetailedRouter<'_> {
                 Err(net) => whole.push(net),
             }
         }
-        let mut regions: BTreeMap<RegionKey, Vec<Piece>> = BTreeMap::new();
-        let mut finished: Vec<(NetId, Vec<AccessPoint>)> = Vec::with_capacity(plans.len());
+        (plans, whole)
+    }
+
+    /// Commits each planned net's skeleton: the wires that bridge the
+    /// region boundaries its global route crosses.
+    fn commit_skeletons(&mut self, plans: &[Plan], grid: &RegionGrid) {
         let skeletons: Vec<(NetId, NetRoute)> = plans
             .par_iter()
             .map(|plan| {
                 let route = NetRoute {
-                    edges: self.skeleton(plan.net, &plan.bridges, &grid),
+                    edges: self.skeleton(plan.net, &plan.bridges, grid),
                     ..NetRoute::default()
                 };
                 (plan.net, route)
             })
             .collect();
         self.commit_all(skeletons);
-        for plan in plans {
-            for (key, piece) in plan.pieces {
-                regions.entry(key).or_default().push(piece);
-            }
-            finished.push((plan.net, plan.access));
-        }
+    }
 
-        let mut stats = RepairStats {
-            regions: regions.len(),
-            ..RepairStats::default()
-        };
+    /// Routes the pieces of `regions` in four batches of regions that do
+    /// not touch, counting them in `stats`; returns the nets with a piece
+    /// that could not be connected.
+    fn route_regions(
+        &mut self,
+        mut regions: BTreeMap<RegionKey, Vec<Piece>>,
+        grid: &RegionGrid,
+        costs: Costs,
+        stats: &mut RepairStats,
+    ) -> FxHashSet<NetId> {
         let mut failed: FxHashSet<NetId> = FxHashSet::default();
         for batch_colour in 0..4 {
             let batch: Vec<(Rect<Dbu>, Vec<Piece>)> = regions
@@ -97,7 +132,18 @@ impl DetailedRouter<'_> {
             stats.pieces += batch.iter().map(|(_, p)| p.len()).sum::<usize>();
             failed.extend(self.route_batch(&batch, costs));
         }
+        failed
+    }
 
+    /// Marks each routed net of `finished` complete with its access points;
+    /// one in `failed` loses its route and joins `whole`, to be routed
+    /// whole.
+    fn finish_routed(
+        &mut self,
+        finished: Vec<(NetId, Vec<AccessPoint>)>,
+        failed: &FxHashSet<NetId>,
+        whole: &mut Vec<NetId>,
+    ) {
         let mut last: Vec<(NetId, NetRoute)> = Vec::with_capacity(finished.len());
         for (net, access) in finished {
             if failed.contains(&net) {
@@ -111,15 +157,6 @@ impl DetailedRouter<'_> {
             last.push((net, route));
         }
         self.commit_all(last);
-        log::debug!(
-            "first pass: {} pieces in {} regions, {} nets routed whole",
-            stats.pieces,
-            stats.regions,
-            whole.len()
-        );
-        whole.sort_unstable();
-        self.route_speculatively(whole, costs);
-        stats
     }
 
     /// Routes the pieces of regions that do not touch each other, after
