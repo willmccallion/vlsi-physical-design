@@ -490,8 +490,32 @@ impl Cts<'_> {
         sdc_name: &str,
         parent: Option<usize>,
     ) -> Result<Option<usize>, CtsError> {
-        let net_name = db.nets[net].name.clone();
-        let mut clock = Clock::new(net, &net_name, sdc_name);
+        let clock_net = ClockNet {
+            net,
+            input_net,
+            sdc_name,
+            parent,
+        };
+        let (macro_sinks, register_sinks) = self.split_sinks(db, net);
+        let forked_center = (self.setup.settings.insertion_delays
+            == InsertionDelays::SeparateTrees
+            && !macro_sinks.is_empty())
+        .then(|| sink_bbox_center(db, &register_sinks))
+        .flatten();
+        let Some(center) = forked_center else {
+            return Ok(self.single_tree(db, &clock_net));
+        };
+        let registers = RegisterSinks {
+            pins: &register_sinks,
+            center,
+        };
+        self.forked_trees(db, &clock_net, &macro_sinks, registers)
+            .map(Some)
+    }
+
+    /// The placed input pins of `net` a tree reaches, split into the macro
+    /// sinks and the register sinks, as `TritonCTS::initClock` sorts them.
+    fn split_sinks(&self, db: &NetlistDB, net: NetId) -> (Vec<PinId>, Vec<PinId>) {
         let mut macro_sinks = Vec::new();
         let mut register_sinks = Vec::new();
         for pin in net_cell_pins(db, net) {
@@ -501,64 +525,87 @@ impl Cts<'_> {
             if !is_input_signal(db, pin) || !is_placed(db, cell) {
                 continue;
             }
-            let mut non_sink_macro = !self.is_sink(db, pin);
-            if self
-                .link
-                .cell(db, cell)
-                .is_some_and(|(_, lib)| lib.is_inverter())
-            {
-                // In OpenDB's order, the first is get1stSignalInput's.
-                let inverted = first_output(db, cell).and_then(|out| {
-                    let out_net = db.pins[out].net;
-                    net_cell_pins(db, out_net)
-                        .into_iter()
-                        .find(|&p| is_input_signal(db, p))
-                });
-                non_sink_macro &= inverted
-                    .and_then(|p| pin_direction(db, p))
-                    .is_some_and(|(c, _, _)| is_block(db, c));
-            }
             let has_insertion_delay = self.insertion_delay(db, pin) != Seconds::ZERO;
-            if has_insertion_delay || non_sink_macro || is_block(db, cell) {
+            if has_insertion_delay || self.is_non_sink_macro(db, pin, cell) || is_block(db, cell) {
                 macro_sinks.push(pin);
             } else {
                 register_sinks.push(pin);
             }
         }
-        let forked_center = (self.setup.settings.insertion_delays
-            == InsertionDelays::SeparateTrees
-            && !macro_sinks.is_empty())
-        .then(|| sink_bbox_center(db, &register_sinks))
-        .flatten();
-        let Some(center) = forked_center else {
-            for pin in net_cell_pins(db, net) {
-                let Some((cell, _, _)) = pin_direction(db, pin) else {
-                    continue;
-                };
-                if is_input_signal(db, pin) && is_placed(db, cell) {
-                    clock.add_sink(self.sink(db, pin));
-                }
+        (macro_sinks, register_sinks)
+    }
+
+    /// Whether `pin` of `cell` is no register sink, an inverter counting
+    /// only when it drives a block.
+    fn is_non_sink_macro(&self, db: &NetlistDB, pin: PinId, cell: CellId) -> bool {
+        let non_sink = !self.is_sink(db, pin);
+        let is_inverter = self
+            .link
+            .cell(db, cell)
+            .is_some_and(|(_, lib)| lib.is_inverter());
+        if !is_inverter {
+            return non_sink;
+        }
+        // In OpenDB's order, the first is get1stSignalInput's.
+        let inverted = first_output(db, cell).and_then(|out| {
+            let out_net = db.pins[out].net;
+            net_cell_pins(db, out_net)
+                .into_iter()
+                .find(|&p| is_input_signal(db, p))
+        });
+        non_sink
+            && inverted
+                .and_then(|p| pin_direction(db, p))
+                .is_some_and(|(c, _, _)| is_block(db, c))
+    }
+
+    /// One tree over every placed input pin of the net; none for fewer than
+    /// two sinks.
+    fn single_tree(&mut self, db: &NetlistDB, clock_net: &ClockNet<'_>) -> Option<usize> {
+        let net_name = db.nets[clock_net.net].name.clone();
+        let mut clock = Clock::new(clock_net.net, &net_name, clock_net.sdc_name);
+        for pin in net_cell_pins(db, clock_net.net) {
+            let Some((cell, _, _)) = pin_direction(db, pin) else {
+                continue;
+            };
+            if is_input_signal(db, pin) && is_placed(db, cell) {
+                clock.add_sink(self.sink(db, pin));
             }
-            if clock.sinks.len() < 2 {
-                return Ok(None);
-            }
-            self.summary.sinks += clock.sinks.len();
-            return Ok(Some(self.add_builder(clock, input_net, parent)));
-        };
-        for &pin in &macro_sinks {
+        }
+        if clock.sinks.len() < 2 {
+            return None;
+        }
+        self.summary.sinks += clock.sinks.len();
+        Some(self.add_builder(clock, clock_net.input_net, clock_net.parent))
+    }
+
+    /// A tree over the macro sinks and, behind its own root buffer, one over
+    /// the register sinks; returns the macro tree.
+    fn forked_trees(
+        &mut self,
+        db: &mut NetlistDB,
+        clock_net: &ClockNet<'_>,
+        macro_sinks: &[PinId],
+        registers: RegisterSinks<'_>,
+    ) -> Result<usize, CtsError> {
+        let ClockNet {
+            net,
+            input_net,
+            sdc_name,
+            parent,
+        } = *clock_net;
+        let net_name = db.nets[net].name.clone();
+        let mut clock = Clock::new(net, &net_name, sdc_name);
+        for &pin in macro_sinks {
             clock.add_sink(self.sink(db, pin));
         }
         self.summary.sinks += clock.sinks.len();
         let first = self.add_builder(clock, input_net, parent);
         self.builders[first].tree_type = TreeType::Macro;
-        let registers = RegisterSinks {
-            pins: &register_sinks,
-            center,
-        };
         let (regs_net, top_buffer) =
             self.fork_register_network(db, net, &net_name, sdc_name, registers)?;
         let mut regs_clock = Clock::new(regs_net, &db.nets[regs_net].name.clone(), sdc_name);
-        for &pin in &register_sinks {
+        for &pin in registers.pins {
             regs_clock.add_sink(self.sink(db, pin));
         }
         self.summary.sinks += regs_clock.sinks.len();
@@ -567,7 +614,7 @@ impl Cts<'_> {
         builder.tree_type = TreeType::Register;
         builder.top_buffer_name = top_buffer;
         builder.driving_net = Some(net);
-        Ok(Some(first))
+        Ok(first)
     }
 
     /// Moves the register sinks to a new net behind a root buffer, as
@@ -1142,6 +1189,16 @@ fn sta_fuzzy_equal(a: Farads32, b: Farads32) -> bool {
 struct RegisterSinks<'a> {
     pins: &'a [PinId],
     center: Point<Dbu>,
+}
+
+/// A clock net a tree is built for, the net its tree's input comes from,
+/// its clock's name in the SDC, and the tree driving it, if any.
+#[derive(Clone, Copy, Debug)]
+struct ClockNet<'a> {
+    net: NetId,
+    input_net: NetId,
+    sdc_name: &'a str,
+    parent: Option<usize>,
 }
 
 /// The center of the box around some pins' average positions, as
