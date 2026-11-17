@@ -592,9 +592,8 @@ impl PartialOrd for Visit {
 /// never overestimates, so a net of many pins costs no more to aim.
 #[derive(Clone, Copy, Debug)]
 struct Toward {
-    x: (u16, u16),
-    y: (u16, u16),
-    layers: (usize, usize),
+    /// The box around the pins outside the tree; none once none is.
+    aim: Option<AimBox>,
     /// Pins outside the tree when the box was found.
     counted: usize,
     /// The lowest price a node can have.
@@ -609,20 +608,18 @@ impl Toward {
         remaining: usize,
         floor: f64,
     ) -> Self {
-        let mut aim = Self {
-            x: (u16::MAX, 0),
-            y: (u16::MAX, 0),
-            layers: (usize::MAX, 0),
+        let aim = pins
+            .iter()
+            .filter(|p| !tree.contains(p))
+            .map(|&pin| coarse.position(pin))
+            .fold(None, |aim: Option<AimBox>, at| {
+                Some(aim.map_or_else(|| AimBox::at(at), |aim| aim.including(at)))
+            });
+        Self {
+            aim,
             counted: remaining,
             floor,
-        };
-        for &pin in pins.iter().filter(|p| !tree.contains(p)) {
-            let (l, x, y) = coarse.position(pin);
-            aim.x = (aim.x.0.min(x), aim.x.1.max(x));
-            aim.y = (aim.y.0.min(y), aim.y.1.max(y));
-            aim.layers = (aim.layers.0.min(l), aim.layers.1.max(l));
         }
-        aim
     }
 
     /// Finds the box again once the pins outside the tree have halved.
@@ -640,11 +637,15 @@ impl Toward {
 
     /// A lower bound on the cost from `node` to the nearest pin outside the
     /// tree: every step toward the box along a layer passes two nodes
-    /// [`SCALE`] gcells apart, and every change of layer two nodes.
+    /// [`SCALE`] gcells apart, and every change of layer two nodes; zero
+    /// once no pin is outside.
     fn estimate(&self, coarse: &CoarseGrid, node: usize) -> f64 {
+        let Some(aim) = self.aim else {
+            return 0.0;
+        };
         let (l, x, y) = coarse.position(node);
-        let planar = outside(x, self.x) + outside(y, self.y);
-        let climbs = outside(l, self.layers);
+        let planar = outside(x, aim.x) + outside(y, aim.y);
+        let climbs = outside(l, aim.layers);
         let steps = (2.0 * f64::from(SCALE)).mul_add(f64::from(planar), 2.0 * climbs as f64);
         self.floor * steps
     }
@@ -670,6 +671,34 @@ fn join_to_tree(
         node = parent;
     }
     joined
+}
+
+/// The box around some coarse nodes, on the plane and across layers.
+#[derive(Clone, Copy, Debug)]
+struct AimBox {
+    x: (u16, u16),
+    y: (u16, u16),
+    layers: (usize, usize),
+}
+
+impl AimBox {
+    /// The box of the one node at `(layer, x, y)`.
+    const fn at((l, x, y): (usize, u16, u16)) -> Self {
+        Self {
+            x: (x, x),
+            y: (y, y),
+            layers: (l, l),
+        }
+    }
+
+    /// The box grown to hold the node at `(layer, x, y)`.
+    fn including(self, (l, x, y): (usize, u16, u16)) -> Self {
+        Self {
+            x: (self.x.0.min(x), self.x.1.max(x)),
+            y: (self.y.0.min(y), self.y.1.max(y)),
+            layers: (self.layers.0.min(l), self.layers.1.max(l)),
+        }
+    }
 }
 
 /// How far `v` lies outside the range from `lo` to `hi`.
