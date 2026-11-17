@@ -423,6 +423,13 @@ impl State {
     }
 }
 
+/// Which way a via climbs.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Climb {
+    Up,
+    Down,
+}
+
 /// A search state's priority, smallest estimated total cost first.
 #[derive(Clone, Copy, PartialEq)]
 struct Entry {
@@ -773,7 +780,6 @@ impl Search<'_> {
         out.clear();
         let n = state.node;
         let lt = self.tech.layer(n.layer);
-        let here = lt.point(n.track, n.cross);
         let steps = [
             (n.cross.checked_sub(1), Heading::Down),
             (Some(n.cross + 1), Heading::Up),
@@ -807,36 +813,51 @@ impl Search<'_> {
                 }
             }
         }
+        out.extend(self.via_move(state, Climb::Up, costs));
+        out.extend(self.via_move(state, Climb::Down, costs));
+    }
+
+    /// The via from `state` to the layer above or below, with what it
+    /// costs, priced at its lower end; none where there is no such layer,
+    /// the via is not allowed there or crowds the last one, or the other
+    /// layer has no track or cross there.
+    fn via_move(
+        &self,
+        state: State,
+        climb: Climb,
+        costs: &mut impl StepCosts,
+    ) -> Option<(State, f64)> {
+        let n = state.node;
+        let lt = self.tech.layer(n.layer);
+        let here = lt.point(n.track, n.cross);
         let cross = lt.cross[n.cross as usize];
-        let up = LayerId::new(n.layer.index() + 1);
-        if n.layer < self.tech.max_layer
-            && self.allowed(up, here)
-            && !self.crowds_recent_via(state, up, cross.at)
-            && let (Some(track), Some(c)) = (cross.up, lt.track_up[n.track as usize])
-        {
-            let m = Node {
-                layer: up,
-                track,
-                cross: c,
-            };
-            let step = costs.via(self, n) + self.own_via_cost(n.layer, here);
-            out.push((Self::via_state(m, n.layer), step));
+        let (to, track, c) = match climb {
+            Climb::Up => (
+                (n.layer < self.tech.max_layer).then(|| LayerId::new(n.layer.index() + 1)),
+                cross.up,
+                lt.track_up[n.track as usize],
+            ),
+            Climb::Down => (
+                (n.layer > self.tech.min_layer).then(|| LayerId::new(n.layer.index() - 1)),
+                cross.down,
+                lt.track_down[n.track as usize],
+            ),
+        };
+        let to = to?;
+        if !self.allowed(to, here) || self.crowds_recent_via(state, to, cross.at) {
+            return None;
         }
-        if n.layer > self.tech.min_layer {
-            let below = LayerId::new(n.layer.index() - 1);
-            if self.allowed(below, here)
-                && !self.crowds_recent_via(state, below, cross.at)
-                && let (Some(track), Some(c)) = (cross.down, lt.track_down[n.track as usize])
-            {
-                let m = Node {
-                    layer: below,
-                    track,
-                    cross: c,
-                };
-                let step = costs.via(self, m) + self.own_via_cost(below, here);
-                out.push((Self::via_state(m, n.layer), step));
-            }
-        }
+        let m = Node {
+            layer: to,
+            track: track?,
+            cross: c?,
+        };
+        let lower = match climb {
+            Climb::Up => n,
+            Climb::Down => m,
+        };
+        let step = costs.via(self, lower) + self.own_via_cost(lower.layer, here);
+        Some((Self::via_state(m, n.layer), step))
     }
 
     /// The state on `node` just after a via from `from`.
