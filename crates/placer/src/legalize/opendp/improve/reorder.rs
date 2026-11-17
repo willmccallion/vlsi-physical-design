@@ -3,7 +3,7 @@
 //! and the order with the shortest horizontal wirelength kept.
 
 use super::mis::converged;
-use super::{EdgeId, NodeId, SegmentId};
+use super::{ArchRowId, EdgeId, NodeId, SegmentId};
 use super::{Improver, Result, SKIP_NETS_LARGER_THAN};
 use pare_common::db::indices::IdVec;
 use pare_common::geom::dbu::Dbu;
@@ -132,7 +132,7 @@ fn reorder_window(imp: &mut Improver, marks: &mut EdgeMarks, w: &Window) -> Resu
     let cells: Vec<NodeId> = imp.cells_in_seg[w.segment][w.first..=w.last].to_vec();
     let original: Vec<Dbu> = cells.iter().map(|&n| imp.left(n)).collect();
     let width: Vec<Dbu> = cells.iter().map(|&n| imp.width(n)).collect();
-    let site_width = imp.arch.rows[0].site_width;
+    let site_width = imp.arch.rows[ArchRowId::BOTTOM].site_width;
     let Some(pads) = even_padding(&width, w.right_limit - w.left_limit, site_width) else {
         return Ok(());
     };

@@ -4,7 +4,7 @@
 
 use super::NodeId;
 use super::swap::Hpwl;
-use super::{ImprovementError, Improver, Result, Trial};
+use super::{ArchRowId, ImprovementError, Improver, Result, Trial};
 use pare_common::geom::dbu::Dbu;
 
 /// How far, in sites and rows, a random move may reach.
@@ -67,11 +67,11 @@ fn random_trial(imp: &mut Improver, candidates: &[NodeId]) -> Result<Option<Tria
     let arch = &imp.arch;
     let ydim = arch.rows.len();
     let span_x = (arch.max_x - arch.min_x).to_f64();
-    let xdim = ((span_x / arch.rows[0].site_spacing.to_f64()) as i32).max(0);
+    let xdim = ((span_x / arch.rows[ArchRowId::BOTTOM].site_spacing.to_f64()) as i32).max(0);
     let xwid = span_x / f64::from(xdim);
     let ywid = (arch.max_y - arch.min_y).to_f64() / ydim as f64;
     let (min_x, min_y) = (arch.min_x.to_f64(), arch.min_y.to_f64());
-    let row_height = arch.rows[0].height.to_f64();
+    let row_height = arch.rows[ArchRowId::BOTTOM].height.to_f64();
     let n = candidates[imp.random(candidates.len())];
     if imp.rows_spanned(n) != 1 {
         return Ok(None);
@@ -95,7 +95,7 @@ fn random_trial(imp: &mut Improver, candidates: &[NodeId]) -> Result<Option<Tria
         let xj = min_x + f64::from(grid_xj) * xwid;
         let yj = min_y + f64::from(grid_yj) * ywid;
         let rj = (((yj - min_y) / row_height) as i32).max(0).min(ydim - 1);
-        let rj = rj as usize;
+        let rj = ArchRowId::new(rj as usize);
         let x_truncated = Dbu(i64::from(xj as i32));
         let found = imp.segs_in_row[rj].iter().copied().find(|&s| {
             let seg = &imp.segments[s];

@@ -2,7 +2,7 @@
 //! cell is turned to suit its row, then mirrored about its vertical axis
 //! where that shortens its nets and breaks no placement rule.
 
-use super::{EdgeId, NodeId};
+use super::{ArchRowId, EdgeId, NodeId};
 use super::{Improver, SKIP_NETS_LARGER_THAN};
 use pare_common::db::indices::IdVec;
 use pare_common::geom::dbu::Dbu;
@@ -34,7 +34,7 @@ fn orient_cells(imp: &mut Improver) -> usize {
         let oriented = if imp.rows_spanned(n) == 1 {
             orient_single_row_cell(imp, n, row)
         } else {
-            row + imp.rows_spanned(n) <= imp.arch.rows.len()
+            row.index() + imp.rows_spanned(n) <= imp.arch.rows.len()
                 && imp.grid.nodes[n].symmetry.allows(imp.grid.nodes[n].orient)
         };
         if !oriented {
@@ -46,7 +46,7 @@ fn orient_cells(imp: &mut Improver) -> usize {
 
 /// `DetailedOrient::orientSingleHeightCellForRow`: a cell upside down for
 /// its row is turned over, mirrored ones only where the master allows.
-fn orient_single_row_cell(imp: &mut Improver, n: NodeId, row: usize) -> bool {
+fn orient_single_row_cell(imp: &mut Improver, n: NodeId, row: ArchRowId) -> bool {
     use Orientation::{FN, FS, N, S};
     let symmetry = imp.grid.nodes[n].symmetry;
     let cell = imp.grid.nodes[n].orient;
