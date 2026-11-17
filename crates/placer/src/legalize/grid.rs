@@ -98,7 +98,7 @@ impl GridX {
     /// The column holding `x`, truncating toward zero, as `Grid::gridX`
     /// and dpl's `dbuToGridFloor`, whose `divFloor` truncates.
     pub const fn from_dbu_trunc(x: Dbu, site_width: Dbu) -> Self {
-        Self(x.get() / site_width.get())
+        Self(x.div_trunc(site_width))
     }
 
     /// The first column at or right of `x`, in doubles as dpl's

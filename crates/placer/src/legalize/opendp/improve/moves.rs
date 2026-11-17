@@ -333,11 +333,11 @@ impl Improver {
     ) -> Option<Vec<Dbu>> {
         let row = &self.arch.rows[row];
         let (origin, spacing) = (row.left, row.site_spacing);
-        let mut i0 = (left_limit - origin).get() / spacing.get();
+        let mut i0 = (left_limit - origin).div_trunc(spacing);
         if origin + spacing * i0 < left_limit {
             i0 += 1;
         }
-        let mut i1 = (right_limit - origin).get() / spacing.get();
+        let mut i1 = (right_limit - origin).div_trunc(spacing);
         if origin + spacing * i1 + row.site_width >= right_limit {
             i1 -= 1;
         }
@@ -345,7 +345,7 @@ impl Improver {
         let ncells = cells.len();
         let swid: Vec<i64> = cells
             .iter()
-            .map(|&c| self.width(c).get() / spacing.get())
+            .map(|&c| self.width(c).div_trunc(spacing))
             .collect();
         if swid.iter().sum::<i64>() > i1 - i0 + 1 {
             return None;
@@ -519,7 +519,7 @@ impl Improver {
         let row = &self.arch.rows[0];
         let xr = xr - self.width(n);
         let mut xp = xl.max(xr.min(x));
-        xp = row.left + row.site_spacing * ((xp - row.left).get() / row.site_spacing.get());
+        xp = row.left + row.site_spacing * (xp - row.left).div_trunc(row.site_spacing);
         if xp < xl {
             xp += row.site_spacing;
         } else if xp > xr {
@@ -642,7 +642,7 @@ impl Improver {
 // NOTE: shift{Right,Left}Helper divide only originX by siteSpacing, a
 // precedence slip that flings cells far off; PARE divides the offset.
 fn site_holding(xj: Dbu, origin: Dbu, spacing: Dbu) -> Dbu {
-    origin + spacing * ((xj - origin).get() / spacing.get())
+    origin + spacing * (xj - origin).div_trunc(spacing)
 }
 
 #[cfg(test)]

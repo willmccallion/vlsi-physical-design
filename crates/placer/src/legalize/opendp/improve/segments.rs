@@ -130,12 +130,12 @@ impl Improver {
         }
         for seg in &mut self.segments {
             let row = &self.arch.rows[seg.row];
-            let mut ix = (seg.min_x - row.left).get() / row.site_spacing.get();
+            let mut ix = (seg.min_x - row.left).div_trunc(row.site_spacing);
             if row.left + row.site_spacing * ix < seg.min_x {
                 ix += 1;
             }
             seg.min_x = row.left + row.site_spacing * ix;
-            let ix = (seg.max_x - row.left).get() / row.site_spacing.get();
+            let ix = (seg.max_x - row.left).div_trunc(row.site_spacing);
             seg.max_x = row.left + row.site_spacing * ix;
         }
         self.cells_in_seg = IdVec::filled(Vec::new(), self.segments.len());
@@ -205,8 +205,8 @@ impl Improver {
                 if ymax < lb + height || ymin > lb {
                     continue;
                 }
-                let i0 = (xmin - row.left).get() / row.site_spacing.get();
-                let mut i1 = (xmax - row.left).get() / row.site_spacing.get();
+                let i0 = (xmin - row.left).div_trunc(row.site_spacing);
+                let mut i1 = (xmax - row.left).div_trunc(row.site_spacing);
                 if row.left + row.site_spacing * i1 != xmax {
                     i1 += 1;
                 }
@@ -506,19 +506,19 @@ impl Improver {
             if self.cell_segs[n].is_empty() {
                 continue;
             }
-            let spanned = (self.height(n).get() / height.get()) as usize;
+            let spanned = self.height(n).div_trunc(height) as usize;
             if self.cell_segs[n].len() != spanned {
                 return Err(ImprovementError::Internal(
                     "Reverse cell map incorrectly sized.",
                 ));
             }
-            let first = (self.bottom(n) - self.arch.min_y).get() / height.get();
+            let first = (self.bottom(n) - self.arch.min_y).div_trunc(height);
             for r in first..first + spanned as i64 {
                 let Some(row) = usize::try_from(r).ok().and_then(|r| self.arch.rows.get(r)) else {
                     problems += 1;
                     continue;
                 };
-                if (self.left(n) - row.left).get() % row.site_spacing.get() != 0 {
+                if !(self.left(n) - row.left).is_multiple_of(row.site_spacing) {
                     problems += 1;
                 }
             }
@@ -531,10 +531,14 @@ impl Improver {
     fn inside_blockage(&self, n: NodeId, position: Dbu) -> bool {
         let first = &self.arch.rows[0];
         let rows = self.arch.rows.len() as i64;
-        let start = ((self.bottom(n) - first.bottom).get() / first.height.get()).max(0);
+        let start = (self.bottom(n) - first.bottom)
+            .div_trunc(first.height)
+            .max(0);
         // NOTE: DetailedMgr::isInsideABlockage clamps its exclusive end to the
         // last row, so it never tests the top row; PARE tests every row spanned.
-        let end = ((self.top(n) - first.bottom).get() / first.height.get()).min(rows);
+        let end = (self.top(n) - first.bottom)
+            .div_trunc(first.height)
+            .min(rows);
         (start..end).any(|r| {
             let row = &self.blockages[r as usize];
             let at = row.partition_point(|b| b.max_x < position);

@@ -177,7 +177,7 @@ fn even_padding(width: &[Dbu], span: Dbu, site_width: Dbu) -> Option<(Vec<Dbu>, 
         return None;
     }
     let space_per_cell = (span - total_width) / size as i64;
-    let sites_per_cell = space_per_cell.get() / site_width.get();
+    let sites_per_cell = space_per_cell.div_trunc(site_width);
     let sites_right = sites_per_cell >> 1;
     let sites_left = sites_per_cell - sites_right;
     let mut padding = Dbu::ZERO;
