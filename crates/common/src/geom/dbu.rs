@@ -36,6 +36,32 @@ impl Dbu {
     pub const fn midpoint(self, other: Self) -> Self {
         Self((self.0 + other.0).div_euclid(2))
     }
+
+    /// How many whole `step`s fit, rounding toward zero as C++ `/` does.
+    #[must_use]
+    pub const fn div_trunc(self, step: Self) -> i64 {
+        self.0 / step.0
+    }
+
+    /// How many whole `step`s fit, rounding toward negative infinity: the
+    /// index of the `step`-wide slot holding `self` for a positive `step`.
+    #[must_use]
+    pub const fn div_floor(self, step: Self) -> i64 {
+        self.0.div_euclid(step.0)
+    }
+
+    /// How many `step`s it takes to cover `self`, rounding up, for a
+    /// positive `step`.
+    #[must_use]
+    pub const fn div_ceil(self, step: Self) -> i64 {
+        -(-self.0).div_euclid(step.0)
+    }
+
+    /// Whether `self` is a whole number of `step`s.
+    #[must_use]
+    pub const fn is_multiple_of(self, step: Self) -> bool {
+        self.0 % step.0 == 0
+    }
 }
 
 impl fmt::Display for Dbu {
@@ -133,6 +159,13 @@ impl DbuArea {
     pub const fn to_f64(self) -> f64 {
         self.0 as f64
     }
+
+    /// The length a strip `side` wide must run to cover the area, rounded
+    /// up, for a positive `side`.
+    #[must_use]
+    pub const fn div_ceil(self, side: Dbu) -> Dbu {
+        Dbu(-(-self.0).div_euclid(side.0))
+    }
 }
 
 impl Add for DbuArea {
@@ -145,6 +178,13 @@ impl Add for DbuArea {
 impl AddAssign for DbuArea {
     fn add_assign(&mut self, rhs: Self) {
         self.0 += rhs.0;
+    }
+}
+
+impl Sub for DbuArea {
+    type Output = Self;
+    fn sub(self, rhs: Self) -> Self {
+        Self(self.0 - rhs.0)
     }
 }
 
@@ -244,6 +284,35 @@ impl DbuPerMicron {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn truncating_division_rounds_toward_zero_and_floor_division_down() {
+        assert_eq!(Dbu(7).div_trunc(Dbu(2)), 3);
+        assert_eq!(Dbu(-7).div_trunc(Dbu(2)), -3);
+        assert_eq!(Dbu(7).div_floor(Dbu(2)), 3);
+        assert_eq!(Dbu(-7).div_floor(Dbu(2)), -4);
+    }
+
+    #[test]
+    fn ceiling_division_rounds_up_unless_exact() {
+        assert_eq!(Dbu(7).div_ceil(Dbu(2)), 4);
+        assert_eq!(Dbu(8).div_ceil(Dbu(2)), 4);
+        assert_eq!(Dbu(0).div_ceil(Dbu(2)), 0);
+        assert_eq!(Dbu(-7).div_ceil(Dbu(2)), -3);
+    }
+
+    #[test]
+    fn a_multiple_of_a_step_has_no_remainder_on_either_side_of_zero() {
+        assert!(Dbu(-6).is_multiple_of(Dbu(3)));
+        assert!(!Dbu(7).is_multiple_of(Dbu(3)));
+    }
+
+    #[test]
+    fn a_strip_runs_long_enough_to_cover_the_area_rounded_up() {
+        assert_eq!(DbuArea(1400).div_ceil(Dbu(70)), Dbu(20));
+        assert_eq!(DbuArea(1401).div_ceil(Dbu(70)), Dbu(21));
+        assert_eq!(DbuArea(0).div_ceil(Dbu(70)), Dbu(0));
+    }
 
     const fn on_grid<T>(value: T) -> Snapped<T> {
         Snapped {
