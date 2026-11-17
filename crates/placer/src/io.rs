@@ -361,9 +361,7 @@ fn boundary_slots(db: &NetlistDB, layers: IoLayers) -> Result<Vec<Slot>, IoPlace
                 too_close(&pin, r, spacing)
             });
             let along = if edge.runs_horizontally() { at.x } else { at.y };
-            let on_macro = macros
-                .iter()
-                .any(|&(e, lo, hi)| e == edge && lo < along && along < hi);
+            let on_macro = macros.iter().any(|m| m.holds(edge, along));
             out.push(Slot {
                 edge,
                 layer,
@@ -377,7 +375,7 @@ fn boundary_slots(db: &NetlistDB, layers: IoLayers) -> Result<Vec<Slot>, IoPlace
 
 /// The stretches of each edge that placed macros reach, as
 /// `IOPlacer::getBlockedRegionsFromMacros`.
-fn macro_stretches(db: &NetlistDB) -> Vec<(Edge, Dbu, Dbu)> {
+fn macro_stretches(db: &NetlistDB) -> Vec<EdgeStretch> {
     (0..db.cells.len())
         .map(CellId::new)
         .filter(|&id| {
@@ -389,20 +387,36 @@ fn macro_stretches(db: &NetlistDB) -> Vec<(Edge, Dbu, Dbu)> {
         .collect()
 }
 
+/// A stretch of one of the die's edges, from `lo` to `hi` along it.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+struct EdgeStretch {
+    edge: Edge,
+    lo: Dbu,
+    hi: Dbu,
+}
+
+impl EdgeStretch {
+    /// Whether `along`, a place along `edge`, is strictly inside it.
+    fn holds(&self, edge: Edge, along: Dbu) -> bool {
+        self.edge == edge && self.lo < along && along < self.hi
+    }
+}
+
 /// The stretches of the die's edges that `b`, inside it, touches.
-fn stretches_on_die_edges(die: Rect<Dbu>, b: Rect<Dbu>) -> Vec<(Edge, Dbu, Dbu)> {
+fn stretches_on_die_edges(die: Rect<Dbu>, b: Rect<Dbu>) -> Vec<EdgeStretch> {
+    let stretch = |edge, lo, hi| EdgeStretch { edge, lo, hi };
     let mut out = Vec::new();
     if b.min.y == die.min.y {
-        out.push((Edge::Bottom, b.min.x, b.max.x));
+        out.push(stretch(Edge::Bottom, b.min.x, b.max.x));
     }
     if b.max.y == die.max.y {
-        out.push((Edge::Top, b.min.x, b.max.x));
+        out.push(stretch(Edge::Top, b.min.x, b.max.x));
     }
     if b.min.x == die.min.x {
-        out.push((Edge::Left, b.min.y, b.max.y));
+        out.push(stretch(Edge::Left, b.min.y, b.max.y));
     }
     if b.max.x == die.max.x {
-        out.push((Edge::Right, b.min.y, b.max.y));
+        out.push(stretch(Edge::Right, b.min.y, b.max.y));
     }
     out
 }
@@ -585,8 +599,16 @@ mod tests {
         assert_eq!(
             stretches,
             vec![
-                (Edge::Bottom, Dbu(600), Dbu(1000)),
-                (Edge::Right, Dbu::ZERO, Dbu(300)),
+                EdgeStretch {
+                    edge: Edge::Bottom,
+                    lo: Dbu(600),
+                    hi: Dbu(1000)
+                },
+                EdgeStretch {
+                    edge: Edge::Right,
+                    lo: Dbu::ZERO,
+                    hi: Dbu(300)
+                },
             ]
         );
     }
