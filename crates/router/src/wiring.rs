@@ -13,6 +13,7 @@ use pare_common::db::indices::{CutLayerId, LayerId, NetId};
 use pare_common::db::library::LayerRef;
 use pare_common::db::shapes::route_elem_shapes;
 use pare_common::geom::dbu::Dbu;
+use pare_common::geom::interval::{Interval, merge_touching};
 use pare_common::geom::rect::Rect;
 use rustc_hash::FxHashMap;
 use std::collections::BTreeMap;
@@ -264,7 +265,7 @@ pub(crate) fn gap_fills(
     tech: &RouteTech,
     net: NetId,
 ) -> Vec<Edge> {
-    let mut metal: BTreeMap<(LayerId, u32), Vec<(Dbu, Dbu)>> = BTreeMap::new();
+    let mut metal: BTreeMap<(LayerId, u32), Vec<Interval>> = BTreeMap::new();
     for (layer, rect) in route.metal(db, tech, net) {
         if !tech.routable(layer) {
             continue;
@@ -276,7 +277,10 @@ pub(crate) fn gap_fills(
             .tracks_within(a0, a1)
             .min_by_key(|&t| (lt.tracks[t as usize] - centre).abs());
         if let Some(track) = track {
-            metal.entry((layer, track)).or_default().push((b0, b1));
+            metal
+                .entry((layer, track))
+                .or_default()
+                .push(Interval::new(b0, b1));
         }
     }
     let mut fills = Vec::new();
@@ -288,9 +292,9 @@ pub(crate) fn gap_fills(
         }
         let used = UsedCrossings::of(route, layer, track);
         let lt = tech.layer(layer);
-        for (a, b) in gaps {
-            let from = used.last_at_or_before(lt, a);
-            let to = used.first_at_or_after(lt, b);
+        for gap in gaps {
+            let from = used.last_at_or_before(lt, gap.lo);
+            let to = used.first_at_or_after(lt, gap.hi);
             if let (Some(from), Some(to)) = (from, to) {
                 fills.extend((from..to).map(|cross| {
                     Edge::Wire(Node {
@@ -308,19 +312,12 @@ pub(crate) fn gap_fills(
 /// The gaps between the merged `spans` of metal along a track that are
 /// wider than zero but narrower than `spacing`, as the end of one piece and
 /// the start of the next.
-fn narrow_gaps(mut spans: Vec<(Dbu, Dbu)>, spacing: Dbu) -> Vec<(Dbu, Dbu)> {
+fn narrow_gaps(mut spans: Vec<Interval>, spacing: Dbu) -> Vec<Interval> {
     spans.sort_unstable();
-    let mut merged: Vec<(Dbu, Dbu)> = Vec::new();
-    for (lo, hi) in spans {
-        match merged.last_mut() {
-            Some(last) if lo <= last.1 => last.1 = last.1.max(hi),
-            _ => merged.push((lo, hi)),
-        }
-    }
-    merged
+    merge_touching(spans)
         .windows(2)
-        .filter(|w| w[1].0 - w[0].1 < spacing)
-        .map(|w| (w[0].1, w[1].0))
+        .map(|w| Interval::new(w[0].hi, w[1].lo))
+        .filter(|gap| gap.len() < spacing)
         .collect()
 }
 
@@ -459,14 +456,10 @@ mod tests {
 
     #[test]
     fn only_gaps_narrower_than_the_spacing_are_reported() {
-        let spans = vec![
-            (Dbu(0), Dbu(100)),
-            (Dbu(150), Dbu(300)),
-            (Dbu(280), Dbu(400)),
-            (Dbu(600), Dbu(700)),
-        ];
+        let span = |lo, hi| Interval::new(Dbu(lo), Dbu(hi));
+        let spans = vec![span(0, 100), span(150, 300), span(280, 400), span(600, 700)];
 
-        assert_eq!(narrow_gaps(spans, Dbu(70)), [(Dbu(100), Dbu(150))]);
+        assert_eq!(narrow_gaps(spans, Dbu(70)), [span(100, 150)]);
     }
 
     #[test]
