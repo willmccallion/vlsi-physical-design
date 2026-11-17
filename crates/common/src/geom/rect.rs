@@ -1,6 +1,7 @@
 //! Axis-aligned rectangle type.
 
 use super::dbu::Dbu;
+use super::interval::Interval;
 use super::point::Point;
 use std::ops::{Mul, Sub};
 
@@ -67,6 +68,18 @@ impl<T: Copy + PartialOrd + Sub<Output = T>> Rect<T> {
 }
 
 impl Rect<Dbu> {
+    /// Its stretch along X.
+    #[must_use]
+    pub const fn x_span(&self) -> Interval {
+        Interval::new(self.min.x, self.max.x)
+    }
+
+    /// Its stretch along Y.
+    #[must_use]
+    pub const fn y_span(&self) -> Interval {
+        Interval::new(self.min.y, self.max.y)
+    }
+
     /// Creates a rectangle from two opposite corners in any order.
     pub fn from_corners(a: Point<Dbu>, b: Point<Dbu>) -> Self {
         Self::new(

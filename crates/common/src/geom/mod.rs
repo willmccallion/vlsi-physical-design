@@ -1,6 +1,7 @@
 //! Geometric primitives: points, rectangles, orientations and integer units.
 
 pub mod dbu;
+pub mod interval;
 pub mod orient;
 pub mod point;
 pub mod rect;
