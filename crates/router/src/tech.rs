@@ -317,15 +317,7 @@ impl RouteTech {
         let (min_layer, max_layer) = (*range.start(), *range.end());
         check_both_directions(lib, min_layer, max_layer)?;
 
-        let tracks: IdVec<LayerId, Vec<Dbu>> = lib
-            .routing_layers
-            .ids()
-            .map(|l| db.layer_tracks(l))
-            .collect();
-        if let Some(l) = min_layer.through(max_layer).find(|&l| tracks[l].is_empty()) {
-            return Err(RouteError::NoTracks(lib.routing_layers[l].name.clone()));
-        }
-
+        let tracks = routable_tracks(db, min_layer, max_layer)?;
         let gcell_pitch = gcell_pitch(|l| db.average_track_spacing(l), max_layer);
         if gcell_pitch <= Dbu::ZERO {
             return Err(RouteError::NoGcellPitch);
@@ -342,16 +334,7 @@ impl RouteTech {
             .ok_or_else(|| RouteError::OneTrack(lib.routing_layers[min_layer].name.clone()))?;
 
         let cuts = lib.cut_layers.ids();
-        let vias = cuts
-            .clone()
-            .map(|cut| {
-                ranked_vias(db, cut, &layers, Overhang::BothLayers)
-                    .into_iter()
-                    .next()
-                    .ok_or_else(|| RouteError::NoVia(lib.cut_layers[cut].name.clone()))
-            })
-            .collect::<Result<Vec<_>, _>>()?
-            .into();
+        let vias = best_vias(db, &layers)?;
         let access_vias = cuts
             .clone()
             .map(|cut| ranked_vias(db, cut, &layers, Overhang::UpperOnly))
@@ -525,6 +508,51 @@ enum Overhang {
     BothLayers,
     /// The upper layer alone, as vias up from a pin.
     UpperOnly,
+}
+
+/// The tracks of every routing layer of `db`.
+///
+/// # Errors
+///
+/// When a layer from `min_layer` through `max_layer` has none.
+fn routable_tracks(
+    db: &NetlistDB,
+    min_layer: LayerId,
+    max_layer: LayerId,
+) -> Result<IdVec<LayerId, Vec<Dbu>>, RouteError> {
+    let lib = &db.library;
+    let tracks: IdVec<LayerId, Vec<Dbu>> = lib
+        .routing_layers
+        .ids()
+        .map(|l| db.layer_tracks(l))
+        .collect();
+    if let Some(l) = min_layer.through(max_layer).find(|&l| tracks[l].is_empty()) {
+        return Err(RouteError::NoTracks(lib.routing_layers[l].name.clone()));
+    }
+    Ok(tracks)
+}
+
+/// The best via through each cut layer, its enclosures on both layers.
+///
+/// # Errors
+///
+/// When a cut layer has no via.
+fn best_vias(
+    db: &NetlistDB,
+    layers: &IdVec<LayerId, LayerTech>,
+) -> Result<IdVec<CutLayerId, ViaTech>, RouteError> {
+    let lib = &db.library;
+    Ok(lib
+        .cut_layers
+        .ids()
+        .map(|cut| {
+            ranked_vias(db, cut, layers, Overhang::BothLayers)
+                .into_iter()
+                .next()
+                .ok_or_else(|| RouteError::NoVia(lib.cut_layers[cut].name.clone()))
+        })
+        .collect::<Result<Vec<_>, _>>()?
+        .into())
 }
 
 /// Every LEF via through `cut`, ordered by how far its metal sticks out
