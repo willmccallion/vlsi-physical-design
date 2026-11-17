@@ -900,7 +900,8 @@ struct Finished {
 }
 
 /// Where a run stands between stretches of iterations, each carried out
-/// with the objective of the setup at hand.
+/// with the objective of the setup at hand; `docs/global-placement-run.md`
+/// draws its states.
 struct Run {
     nesterov: Nesterov,
     grad: ObjectPoints,
