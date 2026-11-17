@@ -648,85 +648,32 @@ const fn key(length: LengthSteps, load: CapSteps, output_slew: SlewSteps) -> u32
 /// `TechChar::initCharacterization`.
 fn plan(setup: &CharSetup<'_>) -> Result<Plan, CtsError> {
     let liberty = setup.link.liberty;
-    let mut char_buffer: Option<(usize, BufferCell)> = None;
-    let mut max_buffer_cap = 0.0_f32;
-    let mut axis_slews: Vec<f32> = Vec::new();
-    let mut axis_loads: Vec<f32> = Vec::new();
-    for (index, &master) in setup.masters.iter().enumerate() {
-        let cell = liberty.cell(master.id);
-        let (input, output) = (master.input, master.output);
-        let max_cap = cell.ports[output]
-            .max_capacitance
-            .or_else(|| liberty.cell_defaults(cell).max_capacitance)
-            .ok_or_else(|| CtsError::NoMaxCapacitance(cell.name.clone()))?
-            .get() as f32;
-        if max_cap >= max_buffer_cap {
-            max_buffer_cap = max_cap;
-            char_buffer = Some((index, master));
-        }
-        collect_table_axes(cell, input, output, &mut axis_slews, &mut axis_loads);
-    }
-    let (char_index, char_buffer) = char_buffer.ok_or(CtsError::NoBuffers)?;
-    let height = setup
-        .link
-        .macro_of(char_buffer.id)
-        .map(|m| setup.db.library.cell_macro(m).size.y.get())
-        .ok_or_else(|| CtsError::NoMaster(liberty.cell(char_buffer.id).name.clone()))?;
-    // NOTE: initCharacterization steps its wire lengths by ten heights
-    // and never ends on a zero-height buffer; PARE refuses it.
-    if height == 0 {
-        return Err(CtsError::ZeroHeightBuffer(
-            liberty.cell(char_buffer.id).name.clone(),
-        ));
-    }
+    let CharBuffer {
+        index: char_index,
+        buffer: char_buffer,
+        axes,
+    } = pick_char_buffer(setup)?;
+    let height = buffer_height(setup, char_buffer)?;
     let char_unit = (height * 10) as u32;
-    let max_wirelength = (char_unit * WIRELENGTH_ITERATIONS).max(2 * char_unit);
-    let mut wirelengths = Vec::new();
-    let mut wirelength = char_unit;
-    while wirelength <= max_wirelength && wirelength <= WIRELENGTH_ITERATIONS * char_unit {
-        wirelengths.push(wirelength);
-        wirelength += char_unit;
-    }
     let cell = liberty.cell(char_buffer.id);
-    let (input, output) = (char_buffer.input, char_buffer.output);
-    let max_slew = cell.ports[output]
-        .max_transition
-        .or(cell.ports[input].max_transition)
-        .or_else(|| liberty.cell_defaults(cell).max_transition)
-        .ok_or_else(|| CtsError::NoMaxSlew(cell.name.clone()))?
-        .get() as f32;
-    let max_cap = cell.ports[output]
-        .max_capacitance
-        .or_else(|| liberty.cell_defaults(cell).max_capacitance)
-        .ok_or_else(|| CtsError::NoMaxCapacitance(cell.name.clone()))?
-        .get() as f32;
+    let (max_slew, max_cap) = char_limits(liberty, cell, char_buffer)?;
     let sink = setup.sink_buffer;
     let sink_buffer_input_cap = Farads32::of(liberty.cell(sink.id).ports[sink.input].capacitance());
     let slew_step = max_slew / SLEW_STEPS as f32;
     let cap_step = max_cap / CAP_STEPS as f32;
-    let (slews, loads) = if axis_slews.is_empty() && axis_loads.is_empty() {
+    let (slews, loads) = if axes.slews.is_empty() && axes.loads.is_empty() {
         (
             (1..=SLEW_STEPS).map(|s| s as f32 * slew_step).collect(),
             (1..=CAP_STEPS).map(|s| s as f32 * cap_step).collect(),
         )
     } else {
-        // NOTE: initCharacterization expands an empty axis, reading past it; PARE refuses.
-        if axis_slews.is_empty() || axis_loads.is_empty() {
-            return Err(CtsError::NoTableAxes(cell.name.clone()));
-        }
-        axis_slews.push(max_slew);
-        sort_and_uniquify(&mut axis_slews);
-        axis_loads.push(max_cap);
-        sort_and_uniquify(&mut axis_loads);
-        reduce_or_expand(&mut axis_slews, SLEW_STEPS);
-        reduce_or_expand(&mut axis_loads, CAP_STEPS);
-        (axis_slews, axis_loads)
+        table_test_points(axes, (max_slew, max_cap), &cell.name)?
     };
     Ok(Plan {
         char_buffer: char_index,
         char_unit,
         length_unit: (height * 10 / 2) as u32,
-        wirelengths,
+        wirelengths: wire_lengths(char_unit),
         max_slew,
         slew_step,
         cap_step,
@@ -734,6 +681,130 @@ fn plan(setup: &CharSetup<'_>) -> Result<Plan, CtsError> {
         loads,
         sink_buffer_input_cap,
     })
+}
+
+/// The slews and loads of the buffers' delay tables.
+struct TableAxes {
+    slews: Vec<f32>,
+    loads: Vec<f32>,
+}
+
+/// The buffer characterized, its position among the masters, and the
+/// axes of every master's delay tables.
+struct CharBuffer {
+    index: usize,
+    buffer: BufferCell,
+    axes: TableAxes,
+}
+
+/// The buffer with the largest load limit, the last of equal ones.
+fn pick_char_buffer(setup: &CharSetup<'_>) -> Result<CharBuffer, CtsError> {
+    let liberty = setup.link.liberty;
+    let mut char_buffer: Option<(usize, BufferCell)> = None;
+    let mut max_buffer_cap = 0.0_f32;
+    let mut axis_slews: Vec<f32> = Vec::new();
+    let mut axis_loads: Vec<f32> = Vec::new();
+    for (index, &master) in setup.masters.iter().enumerate() {
+        let cell = liberty.cell(master.id);
+        let max_cap = max_capacitance(liberty, cell, master)?;
+        if max_cap >= max_buffer_cap {
+            max_buffer_cap = max_cap;
+            char_buffer = Some((index, master));
+        }
+        collect_table_axes(
+            cell,
+            master.input,
+            master.output,
+            &mut axis_slews,
+            &mut axis_loads,
+        );
+    }
+    let (index, buffer) = char_buffer.ok_or(CtsError::NoBuffers)?;
+    Ok(CharBuffer {
+        index,
+        buffer,
+        axes: TableAxes {
+            slews: axis_slews,
+            loads: axis_loads,
+        },
+    })
+}
+
+/// A buffer's output load limit, from the cell or the library's default.
+fn max_capacitance(liberty: &Liberty, cell: &LibCell, buffer: BufferCell) -> Result<f32, CtsError> {
+    Ok(cell.ports[buffer.output]
+        .max_capacitance
+        .or_else(|| liberty.cell_defaults(cell).max_capacitance)
+        .ok_or_else(|| CtsError::NoMaxCapacitance(cell.name.clone()))?
+        .get() as f32)
+}
+
+/// The characterization buffer's slew and load limits.
+fn char_limits(
+    liberty: &Liberty,
+    cell: &LibCell,
+    buffer: BufferCell,
+) -> Result<(f32, f32), CtsError> {
+    let max_slew = cell.ports[buffer.output]
+        .max_transition
+        .or(cell.ports[buffer.input].max_transition)
+        .or_else(|| liberty.cell_defaults(cell).max_transition)
+        .ok_or_else(|| CtsError::NoMaxSlew(cell.name.clone()))?
+        .get() as f32;
+    Ok((max_slew, max_capacitance(liberty, cell, buffer)?))
+}
+
+/// The height of a buffer's master, in database units.
+fn buffer_height(setup: &CharSetup<'_>, buffer: BufferCell) -> Result<i64, CtsError> {
+    let liberty = setup.link.liberty;
+    let height = setup
+        .link
+        .macro_of(buffer.id)
+        .map(|m| setup.db.library.cell_macro(m).size.y.get())
+        .ok_or_else(|| CtsError::NoMaster(liberty.cell(buffer.id).name.clone()))?;
+    // NOTE: initCharacterization steps its wire lengths by ten heights
+    // and never ends on a zero-height buffer; PARE refuses it.
+    if height == 0 {
+        return Err(CtsError::ZeroHeightBuffer(
+            liberty.cell(buffer.id).name.clone(),
+        ));
+    }
+    Ok(height)
+}
+
+/// The wire lengths characterized, a characterization unit apart.
+fn wire_lengths(char_unit: u32) -> Vec<u32> {
+    let max_wirelength = (char_unit * WIRELENGTH_ITERATIONS).max(2 * char_unit);
+    let mut wirelengths = Vec::new();
+    let mut wirelength = char_unit;
+    while wirelength <= max_wirelength && wirelength <= WIRELENGTH_ITERATIONS * char_unit {
+        wirelengths.push(wirelength);
+        wirelength += char_unit;
+    }
+    wirelengths
+}
+
+/// The slews and loads to test, from the delay tables' axes with the
+/// limits added, reduced or expanded to the step counts.
+fn table_test_points(
+    TableAxes {
+        mut slews,
+        mut loads,
+    }: TableAxes,
+    (max_slew, max_cap): (f32, f32),
+    cell_name: &str,
+) -> Result<(Vec<f32>, Vec<f32>), CtsError> {
+    // NOTE: initCharacterization expands an empty axis, reading past it; PARE refuses.
+    if slews.is_empty() || loads.is_empty() {
+        return Err(CtsError::NoTableAxes(cell_name.to_owned()));
+    }
+    slews.push(max_slew);
+    sort_and_uniquify(&mut slews);
+    loads.push(max_cap);
+    sort_and_uniquify(&mut loads);
+    reduce_or_expand(&mut slews, SLEW_STEPS);
+    reduce_or_expand(&mut loads, CAP_STEPS);
+    Ok((slews, loads))
 }
 
 /// The slews and loads of the delay tables of the first timing group from
