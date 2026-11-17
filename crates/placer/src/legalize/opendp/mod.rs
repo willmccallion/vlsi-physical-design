@@ -116,6 +116,20 @@ pare_common::define_index!(
     GroupId(u32)
 );
 
+pare_common::define_index!(
+    /// An edge type the cell edge spacing table names, as
+    /// `PlacementDRC` numbers them.
+    EdgeTypeId(u32)
+);
+
+/// One side of a node's master and the edge type it carries, in the
+/// master's frame.
+#[derive(Clone, Copy, Debug)]
+struct TypedEdge {
+    kind: EdgeTypeId,
+    segment: Rect<Dbu>,
+}
+
 /// What a pixel holds, as `OpenDP`'s `Pixel::cell` points to.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum Occupant {
@@ -280,7 +294,7 @@ struct Node {
     symmetry: Symmetry,
     used_layers: u8,
     /// Its edges with their edge types, in its master's frame.
-    edges: Vec<(usize, Rect<Dbu>)>,
+    edges: Vec<TypedEdge>,
     master_size: Point<Dbu>,
 }
 
@@ -311,40 +325,44 @@ struct RowSites {
 /// The cell edge spacing table, as `PlacementDRC` builds it.
 #[derive(Debug, Default)]
 struct EdgeSpacing {
-    index: HashMap<String, usize>,
-    table: Vec<Vec<Dbu>>,
+    ids: HashMap<String, EdgeTypeId>,
+    table: IdVec<EdgeTypeId, IdVec<EdgeTypeId, Dbu>>,
 }
 
 impl EdgeSpacing {
     fn new(db: &NetlistDB) -> Self {
-        let mut spacing = Self::default();
         let rules = &db.library.rules.cell_edge_spacing;
+        let mut ids: HashMap<String, EdgeTypeId> = HashMap::new();
         for rule in rules {
             for t in [&rule.first, &rule.second] {
-                let next = spacing.index.len();
-                let _ = spacing.index.entry(t.0.clone()).or_insert(next);
+                let next = EdgeTypeId::new(ids.len());
+                let _ = ids.entry(t.0.clone()).or_insert(next);
             }
         }
-        let n = spacing.index.len();
-        spacing.table = vec![vec![Dbu::ZERO; n]; n];
+        let n = ids.len();
+        let mut table = IdVec::filled(IdVec::filled(Dbu::ZERO, n), n);
         for rule in rules {
-            let a = spacing.index[&rule.first.0];
-            let b = spacing.index[&rule.second.0];
-            spacing.table[a][b] = rule.spacing;
-            spacing.table[b][a] = rule.spacing;
+            let (a, b) = (ids[&rule.first.0], ids[&rule.second.0]);
+            table[a][b] = rule.spacing;
+            table[b][a] = rule.spacing;
         }
-        spacing
+        Self { ids, table }
     }
 
     const fn is_empty(&self) -> bool {
         self.table.is_empty()
     }
 
-    fn type_index(&self, t: &EdgeType) -> Option<usize> {
-        self.index.get(&t.0).copied()
+    fn type_id(&self, t: &EdgeType) -> Option<EdgeTypeId> {
+        self.ids.get(&t.0).copied()
     }
 
-    fn max_spacing(&self, t: usize) -> Dbu {
+    /// The spacing the table asks between edges of types `a` and `b`.
+    fn spacing(&self, a: EdgeTypeId, b: EdgeTypeId) -> Dbu {
+        self.table[a][b]
+    }
+
+    fn max_spacing(&self, t: EdgeTypeId) -> Dbu {
         self.table[t].iter().copied().max().unwrap_or(Dbu::ZERO)
     }
 }
@@ -588,7 +606,7 @@ impl Placer {
 
     /// The typed edges of a cell's master, as `Network::addMaster` builds
     /// them; none without a cell edge spacing table or for a spacer.
-    fn master_edges(&self, db: &NetlistDB, cell: CellId) -> Vec<(usize, Rect<Dbu>)> {
+    fn master_edges(&self, db: &NetlistDB, cell: CellId) -> Vec<TypedEdge> {
         let m = db.cell_macro(cell);
         if self.edge_spacing.is_empty()
             || m.class == MacroClass::Core(pare_common::db::library::CoreKind::Spacer)
@@ -621,12 +639,15 @@ impl Placer {
             for &side in sides {
                 let rect = segment(side);
                 typed.push((side, rect));
-                if let Some(t) = self.edge_spacing.type_index(&edge.edge_type) {
-                    edges.push((t, rect));
+                if let Some(kind) = self.edge_spacing.type_id(&edge.edge_type) {
+                    edges.push(TypedEdge {
+                        kind,
+                        segment: rect,
+                    });
                 }
             }
         }
-        if let Some(default) = self.edge_spacing.type_index(&EdgeType("DEFAULT".into())) {
+        if let Some(default) = self.edge_spacing.type_id(&EdgeType("DEFAULT".into())) {
             for side in [
                 CellSide::Top,
                 CellSide::Right,
@@ -634,7 +655,10 @@ impl Placer {
                 CellSide::Left,
             ] {
                 if !typed.iter().any(|&(s, _)| s == side) {
-                    edges.push((default, segment(side)));
+                    edges.push(TypedEdge {
+                        kind: default,
+                        segment: segment(side),
+                    });
                 }
             }
         }
@@ -1027,9 +1051,9 @@ impl Placer {
             return true;
         }
         let at = Point::new(x.to_dbu(self.rows.site_width()), self.rows.row_y(y));
-        for &(t1, edge1) in &node.edges {
-            let max_spacing = self.edge_spacing.max_spacing(t1) + Dbu(1);
-            let edge1_box = transform_edge(edge1, node.master_size, at, orient);
+        for edge1 in &node.edges {
+            let max_spacing = self.edge_spacing.max_spacing(edge1.kind) + Dbu(1);
+            let edge1_box = transform_edge(edge1.segment, node.master_size, at, orient);
             let vertical = is_vertical(&edge1_box);
             let query = if vertical {
                 Rect::new(
@@ -1059,10 +1083,10 @@ impl Placer {
                         continue;
                     }
                     let other = &self.nodes[other];
-                    for &(t2, edge2) in &other.edges {
-                        let spacing = self.edge_spacing.table[t1][t2];
+                    for edge2 in &other.edges {
+                        let spacing = self.edge_spacing.spacing(edge1.kind, edge2.kind);
                         let edge2_box = transform_edge(
-                            edge2,
+                            edge2.segment,
                             other.master_size,
                             Point::new(other.left, other.bottom),
                             other.orient,
