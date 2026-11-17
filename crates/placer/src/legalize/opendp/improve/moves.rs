@@ -17,6 +17,13 @@ pub(super) enum Reach {
     Free,
 }
 
+/// A cell's segment and where it stands among the segment's cells.
+#[derive(Clone, Copy, Debug)]
+struct SwapSide {
+    segment: SegmentId,
+    index: usize,
+}
+
 /// A node's neighbours around `x` in a segment by center, as the
 /// `std::lower_bound` probes of `DetailedMgr`: the first at or right of `x`
 /// and the one before it.
@@ -247,7 +254,7 @@ impl Improver {
         &mut self,
         n: NodeId,
         si: SegmentId,
-        mut xj: Dbu,
+        xj: Dbu,
         sj: SegmentId,
     ) -> Result<bool> {
         let cells_j = &self.cells_in_seg[sj];
@@ -261,63 +268,17 @@ impl Improver {
         if self.rows_spanned(n) != 1 || self.rows_spanned(ndj) != 1 {
             return Ok(false);
         }
-        let ix_i = self.cells_in_seg[si].iter().position(|&c| c == n).ok_or(
-            ImprovementError::Internal("Cell not found in expected segment"),
-        )?;
-        let ix_j = self.cells_in_seg[sj].iter().position(|&c| c == ndj).ok_or(
-            ImprovementError::Internal("Cell not found in expected segment"),
-        )?;
-        let mut xi = self.left(n);
-        let gap_around = |imp: &Self, s: SegmentId, ix: usize| {
-            let cells = &imp.cells_in_seg[s];
-            let seg = &imp.segments[s];
-            let lx = ix
-                .checked_sub(1)
-                .and_then(|i| cells.get(i))
-                .map_or(seg.min_x, |&p| imp.right(p));
-            let rx = cells.get(ix + 1).map_or(seg.max_x, |&p| imp.left(p));
-            (lx, rx)
+        let at_i = SwapSide {
+            segment: si,
+            index: self.index_in_segment(n, si)?,
         };
-        if si == sj && ix_i + 1 == ix_j {
-            let rx = gap_around(self, sj, ix_j).1;
-            let lx = gap_around(self, si, ix_i).0;
-            if self.width(ndj) + self.width(n) > rx - lx {
-                return Ok(false);
-            }
-            let row = self.segments[si].row;
-            let Some(pos) = self.shift(&[ndj, n], &[xi, xj], lx, rx, row) else {
-                return Ok(false);
-            };
-            (xi, xj) = (pos[0], pos[1]);
-        } else if si == sj && ix_j + 1 == ix_i {
-            let rx = gap_around(self, si, ix_i).1;
-            let lx = gap_around(self, sj, ix_j).0;
-            if self.width(n) + self.width(ndj) > rx - lx {
-                return Ok(false);
-            }
-            let row = self.segments[si].row;
-            let Some(pos) = self.shift(&[n, ndj], &[xj, xi], lx, rx, row) else {
-                return Ok(false);
-            };
-            (xj, xi) = (pos[0], pos[1]);
-        } else {
-            let (lx, rx) = gap_around(self, si, ix_i);
-            if self.width(ndj) > rx - lx {
-                return Ok(false);
-            }
-            let Some(x) = self.align(ndj, xi, lx, rx) else {
-                return Ok(false);
-            };
-            xi = x;
-            let (lx, rx) = gap_around(self, sj, ix_j);
-            if self.width(n) > rx - lx {
-                return Ok(false);
-            }
-            let Some(x) = self.align(n, xj, lx, rx) else {
-                return Ok(false);
-            };
-            xj = x;
-        }
+        let at_j = SwapSide {
+            segment: sj,
+            index: self.index_in_segment(ndj, sj)?,
+        };
+        let Some((xi, xj)) = self.swapped_lefts((n, at_i), (ndj, at_j), xj) else {
+            return Ok(false);
+        };
         let (from_i, from_j) = (self.position(n), self.position(ndj));
         if !self.add_to_move_list(
             n,
@@ -341,6 +302,89 @@ impl Improver {
             return Ok(false);
         }
         Ok(true)
+    }
+
+    /// Where cell `n` stands in segment `s`'s cells.
+    fn index_in_segment(&self, n: NodeId, s: SegmentId) -> Result<usize> {
+        self.cells_in_seg[s]
+            .iter()
+            .position(|&c| c == n)
+            .ok_or(ImprovementError::Internal(
+                "Cell not found in expected segment",
+            ))
+    }
+
+    /// The span between the neighbours of the cell at `index` of segment
+    /// `s`, or the segment's end where it has none.
+    fn gap_around(&self, s: SegmentId, index: usize) -> (Dbu, Dbu) {
+        let cells = &self.cells_in_seg[s];
+        let seg = &self.segments[s];
+        let lx = index
+            .checked_sub(1)
+            .and_then(|i| cells.get(i))
+            .map_or(seg.min_x, |&p| self.right(p));
+        let rx = cells.get(index + 1).map_or(seg.max_x, |&p| self.left(p));
+        (lx, rx)
+    }
+
+    /// The new lefts `(xi, xj)` of a swap of cell `n` with cell `ndj`:
+    /// `xi` for `ndj` near `n`'s left and `xj` for `n` near `xj`, shifting
+    /// the pair as one where they are neighbours; none where either has no
+    /// room.
+    fn swapped_lefts(
+        &self,
+        (n, at_i): (NodeId, SwapSide),
+        (ndj, at_j): (NodeId, SwapSide),
+        xj: Dbu,
+    ) -> Option<(Dbu, Dbu)> {
+        let xi = self.left(n);
+        let row = self.segments[at_i.segment].row;
+        let same_segment = at_i.segment == at_j.segment;
+        if same_segment && at_i.index + 1 == at_j.index {
+            let span = (
+                self.gap_around(at_i.segment, at_i.index).0,
+                self.gap_around(at_j.segment, at_j.index).1,
+            );
+            return self
+                .shift_pair([ndj, n], [xi, xj], span, row)
+                .map(Into::into);
+        }
+        if same_segment && at_j.index + 1 == at_i.index {
+            let span = (
+                self.gap_around(at_j.segment, at_j.index).0,
+                self.gap_around(at_i.segment, at_i.index).1,
+            );
+            let [xj, xi] = self.shift_pair([n, ndj], [xj, xi], span, row)?;
+            return Some((xi, xj));
+        }
+        let (lx, rx) = self.gap_around(at_i.segment, at_i.index);
+        if self.width(ndj) > rx - lx {
+            return None;
+        }
+        let xi = self.align(ndj, xi, lx, rx)?;
+        let (lx, rx) = self.gap_around(at_j.segment, at_j.index);
+        if self.width(n) > rx - lx {
+            return None;
+        }
+        let xj = self.align(n, xj, lx, rx)?;
+        Some((xi, xj))
+    }
+
+    /// The lefts of neighbours `cells`, left one first, shifted within
+    /// `(lx, rx)` toward `targets`; none where they do not fit.
+    fn shift_pair(
+        &self,
+        cells: [NodeId; 2],
+        targets: [Dbu; 2],
+        (lx, rx): (Dbu, Dbu),
+        row: ArchRowId,
+    ) -> Option<[Dbu; 2]> {
+        let width = self.width(cells[0]) + self.width(cells[1]);
+        if width > rx - lx {
+            return None;
+        }
+        let pos = self.shift(&cells, &targets, lx, rx, row)?;
+        Some([pos[0], pos[1]])
     }
 
     /// Places `cells`, in order, on the sites of `[left_limit,
