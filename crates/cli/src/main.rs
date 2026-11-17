@@ -5,6 +5,7 @@
 
 mod checks;
 mod cts;
+mod flow;
 mod logger;
 mod phase;
 mod placement;
@@ -19,18 +20,14 @@ mod view;
 mod visualization;
 
 use crate::checks::{report_placement, report_routing};
-use crate::placement::{PlacementStart, run_placement};
+use crate::flow::{Design, read_design};
+use crate::placement::PlacementStart;
 use crate::plan::FlowPlan;
-use crate::routing::{
-    RouterRun, SaveRequest, global_route_with_repair, parse_save_point, route_detailed,
-    route_global,
-};
+use crate::routing::{RouterRun, SaveRequest, parse_save_point};
 use crate::view::{ViewRequest, view_area};
 use anyhow::Context;
 use clap::{Parser, Subcommand};
-use pare_common::config::{Config, DesignInput, Purpose};
-use pare_common::db::design::NetlistDB;
-use pare_common::db::parser::{bookshelf, def, lef};
+use pare_common::config::{Config, Purpose};
 use pare_common::geom::dbu::{Dbu, DbuPerMicron};
 use pare_common::geom::point::Point;
 use pare_common::geom::rect::Rect;
@@ -254,7 +251,7 @@ fn run(command: Commands, report: &mut Report) -> anyhow::Result<()> {
             size,
         } => {
             let config = load_config(&config, report)?;
-            let db = load_design(&config, placement.as_deref())?;
+            let db = read_design(&config, placement.as_deref())?;
             let request = ViewRequest {
                 area: MicronBox::from_corners(&area)?.in_dbu(db.dbu()),
                 nets,
@@ -277,15 +274,14 @@ fn place(name: &Path, from: Option<&Path>, report: &mut Report) -> anyhow::Resul
             name.display()
         );
     }
-    let mut db = load_design(&config, from)?;
-    report.design.clone_from(&db.name);
-    let plan = FlowPlan::resolve(&config, &db)?;
+    let design = Design::load(&config, from, report)?;
+    let plan = FlowPlan::resolve(&config, design.db())?;
     let start = if from.is_some() {
         PlacementStart::Given
     } else {
         PlacementStart::Scratch
     };
-    let _ = run_placement(&config, &plan, &mut db, start, report)?;
+    let _ = design.place(&config, &plan, start, report)?;
     Ok(())
 }
 
@@ -298,13 +294,14 @@ fn route(args: RouteArgs, report: &mut Report) -> anyhow::Result<()> {
             args.config.display()
         );
     }
-    let mut db = load_design(&config, args.placement.as_deref())?;
-    report.design.clone_from(&db.name);
+    let design = Design::load(&config, args.placement.as_deref(), report)?.placed_by_input();
     if args.global_only {
-        return route_global(&config, &db, args.guides.as_deref(), report);
+        return design.route_globally_only(&config, args.guides.as_deref(), report);
     }
-    let run = router_run(args, db.dbu())?;
-    route_detailed(&config, &mut db, &run, None, report)
+    let run = router_run(args, design.db().dbu())?;
+    design
+        .route_globally(&config, report)?
+        .route(&config, &run, report)
 }
 
 /// A box the command line gives by two opposite corners in microns, in
@@ -357,67 +354,35 @@ fn router_run(args: RouteArgs, units: DbuPerMicron) -> anyhow::Result<RouterRun>
 /// says.
 fn place_and_route(name: &Path, report: &mut Report) -> anyhow::Result<()> {
     let config = load_config(name, report)?;
-    let mut db = load_design(&config, None)?;
-    report.design.clone_from(&db.name);
-    if config.purpose == Purpose::Routing {
-        return route_detailed(&config, &mut db, &RouterRun::default(), None, report);
-    }
-    let plan = FlowPlan::resolve(&config, &db)?;
-    let repair = run_placement(&config, &plan, &mut db, PlacementStart::Scratch, report)?;
+    let design = Design::load(&config, None, report)?;
+    let plan;
+    let placed = match config.purpose {
+        Purpose::Routing => design.placed_by_input(),
+        Purpose::Placement | Purpose::PlaceAndRoute => {
+            plan = FlowPlan::resolve(&config, design.db())?;
+            design.place(&config, &plan, PlacementStart::Scratch, report)?
+        }
+    };
     if config.purpose == Purpose::Placement {
         return Ok(());
     }
-    let global = match repair {
-        Some(mut repair) => global_route_with_repair(&config, &mut db, &mut repair, report)?,
-        None => None,
-    };
-    route_detailed(&config, &mut db, &RouterRun::default(), global, report)
+    placed
+        .route_globally(&config, report)?
+        .route(&config, &RouterRun::default(), report)
 }
 
 /// The `check` command: checks the placement, and the routing too unless
 /// the design is a placement benchmark, which is never routed.
 fn check(name: &Path, placement: Option<&Path>, report: &mut Report) -> anyhow::Result<()> {
     let config = load_config(name, report)?;
-    let db = load_design(&config, placement)?;
-    report.design.clone_from(&db.name);
-    let placement_ok = report_placement(&db, report);
-    let routing_ok = config.purpose == Purpose::Placement || report_routing(&db, report);
+    let design = Design::load(&config, placement, report)?;
+    let db = design.db();
+    let placement_ok = report_placement(db, report);
+    let routing_ok = config.purpose == Purpose::Placement || report_routing(db, report);
     if !(placement_ok && routing_ok) {
         anyhow::bail!("{} failed its checks", db.name);
     }
     Ok(())
-}
-
-/// Reads the design named by the `[input]` section. `placement` replaces the
-/// input DEF, or for a Bookshelf design supplies a `.pl` to apply.
-fn load_design(config: &Config, placement: Option<&Path>) -> anyhow::Result<NetlistDB> {
-    match &config.input.design {
-        DesignInput::Bookshelf {
-            aux_file,
-            num_layers,
-        } => {
-            ui::header("Input", &aux_file.display().to_string());
-            let mut db = bookshelf::parse(aux_file, *num_layers)?;
-            if let Some(pl) = placement {
-                ui::header("Input", &pl.display().to_string());
-                bookshelf::read_placement(&mut db, pl)?;
-            }
-            Ok(db)
-        }
-        DesignInput::LefDef {
-            lef_files,
-            def_file,
-        } => {
-            let def_path = placement.unwrap_or(def_file);
-            for lef in lef_files {
-                ui::header("Input", &lef.display().to_string());
-            }
-            ui::header("Input", &def_path.display().to_string());
-            let units = def::read_units(def_path)?;
-            let library = lef::parse_files(lef_files, units)?;
-            Ok(def::parse(def_path, library)?)
-        }
-    }
 }
 
 /// Creates the directory for images and results, as [`output_dir`] names
