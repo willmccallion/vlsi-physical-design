@@ -20,6 +20,10 @@ crate::define_index!(
     /// A port of a cell, in its [`LibCell::ports`].
     LibPortId(u32)
 );
+crate::define_index!(
+    /// A timing group of a cell, in its [`LibCell::arc_sets`].
+    ArcSetId(u32)
+);
 
 /// A cell of one input and one output and no other signal pin, as
 /// `OpenSTA`'s `bufferPorts` finds it: a buffer or an inverter, with those
@@ -871,7 +875,7 @@ pub struct LibCell {
     /// Power and ground pin names.
     pub pg_pins: Vec<String>,
     /// Timing groups.
-    pub arc_sets: Vec<TimingArcSet>,
+    pub arc_sets: IdVec<ArcSetId, TimingArcSet>,
     /// Storage elements.
     pub sequentials: Vec<Sequential>,
     /// The state table of a cell described by one.
@@ -1716,7 +1720,7 @@ mod tests {
             user_function_class: None,
             ports: ports.into(),
             pg_pins: vec!["VDD".into(), "VSS".into()],
-            arc_sets: Vec::new(),
+            arc_sets: IdVec::new(),
             sequentials: Vec::new(),
             statetable: None,
             leakage: None,

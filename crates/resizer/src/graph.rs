@@ -14,7 +14,7 @@ use pare_common::db::design::PinOwner;
 use pare_common::db::global_route::RouteSource;
 use pare_common::db::indices::{CellId, IdVec, IoPinId, NetId, PinId};
 use pare_common::db::liberty::{
-    ArcRole, Edge, EdgeValues, FuncExpr, LibPortId, MinMax, SequentialKind, SideValues,
+    ArcRole, ArcSetId, Edge, EdgeValues, FuncExpr, LibPortId, MinMax, SequentialKind, SideValues,
     TimingArcSet,
 };
 use pare_common::db::library::{MacroClass, SignalUse};
@@ -77,8 +77,8 @@ impl PortConditions {
 pub(crate) struct InArc {
     /// The input pin the arc starts at.
     pub from: PinId,
-    /// Index of the timing group in the cell's arc sets.
-    pub set: usize,
+    /// The timing group in the cell's arc sets.
+    pub set: ArcSetId,
     /// Whether the arc is a latch's data input to its output, which
     /// levelization does not follow, as `OpenSTA`'s does not: latches are
     /// where its loops break.
@@ -828,7 +828,7 @@ fn in_arcs_of(
         .and_then(FuncExpr::as_port)
         .and_then(|name| lib.port(name));
     let mut arcs = Vec::new();
-    for (set_index, set) in lib.arc_sets.iter().enumerate() {
+    for (set_index, set) in lib.arc_sets.iter_enumerated() {
         if set.to != to_port || !set.role.is_searched() || set.arcs.is_empty() {
             continue;
         }

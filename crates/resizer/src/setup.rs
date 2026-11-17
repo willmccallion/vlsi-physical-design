@@ -729,6 +729,7 @@ mod tests {
     use crate::testing::{
         DefSections, cells, clock_cells_source, def_text, design, with_wired_session,
     };
+    use pare_common::db::liberty::ArcSetId;
     use std::fmt::Write;
 
     fn slacks(worst: f64, end: f64, total: f64) -> PassSlacks {
@@ -779,7 +780,7 @@ mod tests {
         ));
         let buffer = lib.cell(lib.cell_id("BUF_X1").unwrap());
 
-        let rise = intrinsic_delay(&buffer.arc_sets[0], Edge::Rise, Edge::Rise);
+        let rise = intrinsic_delay(&buffer.arc_sets[ArcSetId::new(0)], Edge::Rise, Edge::Rise);
 
         assert!(rise < Seconds::ZERO, "{rise:?}");
     }
