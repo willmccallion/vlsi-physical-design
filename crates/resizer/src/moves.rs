@@ -437,7 +437,7 @@ impl Moves {
                 sum = Point::new(Dbu(sum.x.get() + at.x.get()), Dbu(sum.y.get() + at.y.get()));
                 count += 1;
             }
-            Point::new(Dbu(sum.x.get() / count), Dbu(sum.y.get() / count))
+            Point::new(sum.x / count, sum.y / count)
         };
         let clone = resizer.make_instance(clone_lib, location, "clone")?;
         let original = resizer.link.liberty.cell(site.lib);
