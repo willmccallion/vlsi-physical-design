@@ -322,89 +322,21 @@ impl<'a> DetailedPlacer<'a> {
         let (macros, std_cells) = classify(db, rows.iter().as_slice());
         let mut obstacles = fixed_obstacles(db);
         obstacles.extend(macros.iter().map(|&c| db.cell_bbox(c)));
-
-        let mut segments: IdVec<SegmentId, Segment> = IdVec::new();
-        let mut row_segments = IdVec::with_capacity(rows.len());
-        for (r, row) in rows.iter_enumerated() {
-            let start = segments.next_id();
-            let lo = row.x_min.max(db.die_area.min.x);
-            let hi = row.x_max.min(db.die_area.max.x);
-            let (y0, y1) = (row.y, row.y + row.height);
-            let free = free_intervals(&obstacles, lo, hi, y0, y1);
-            for zone in zones.all() {
-                for (a, b) in intersect(&free, &zones.intervals(zone, lo, hi, y0, y1)) {
-                    let (a, b) = (
-                        snap_up(a, row.x_min, row.site),
-                        snap_down(b, row.x_min, row.site),
-                    );
-                    if b > a {
-                        let _ = segments.push(Segment {
-                            row: r,
-                            zone,
-                            lo: a,
-                            hi: b,
-                            cells: Vec::new(),
-                        });
-                    }
-                }
-            }
-            let _ = row_segments.push(SegmentSpan {
-                start,
-                end: segments.next_id(),
-            });
-        }
-
+        let mut cut = cut_segments(db, zones, &rows, &obstacles);
+        let segment_of = assign_segments(db, zones, &rows, &mut cut, &std_cells);
         let max_width = std_cells
             .iter()
             .map(|&c| db.cell_size(c).x)
             .max()
             .unwrap_or(Dbu::ZERO);
-        let mut segment_of = HashMap::new();
-        for cell in std_cells {
-            let at = db.cells[cell].location;
-            let width = db.cell_size(cell).x;
-            let r = rows.iter().as_slice().partition_point(|row| row.y < at.y);
-            let zone = zones.of(cell);
-            let found = (r..rows.len())
-                .map(RowId::new)
-                .take_while(|&r| rows[r].y == at.y)
-                .flat_map(|r| row_segments[r].ids())
-                .find(|&s| {
-                    let seg = &segments[s];
-                    seg.zone == zone && seg.lo <= at.x && at.x + width <= seg.hi
-                });
-            if let Some(s) = found {
-                segments[s].cells.push(cell);
-                let _ = segment_of.insert(cell, s);
-            }
-        }
-        for seg in &mut segments {
-            seg.cells.sort_by_key(|&c| db.cells[c].location.x);
-        }
-
-        let mut nets_of = IdVec::filled(Vec::new(), db.num_cells());
-        for (id, net) in db.nets.iter_enumerated() {
-            if net.signal_use.is_supply() || net.pins.len() < 2 || net.pins.len() > MAX_NET_PINS {
-                continue;
-            }
-            for &pin in &net.pins {
-                if let PinOwner::Cell { cell, .. } = db.pins[pin].owner {
-                    let list: &mut Vec<NetId> = &mut nets_of[cell];
-                    if list.last() != Some(&id) {
-                        list.push(id);
-                    }
-                }
-            }
-        }
-
         let max_row_height = rows.iter().map(|r| r.height).max().unwrap_or(Dbu::ZERO);
         Self {
             rows,
-            segments,
-            row_segments,
+            segments: cut.segments,
+            row_segments: cut.of_row,
             segment_of,
             zone_of: db.cells.ids().map(|id| zones.of(id)).collect(),
-            nets_of,
+            nets_of: cost_nets_of(db),
             access,
             max_width,
             max_row_height,
@@ -1293,6 +1225,107 @@ impl<'a> DetailedPlacer<'a> {
         }
         kept
     }
+}
+
+/// The segments of every row, and which belong to each row.
+struct CutSegments {
+    segments: IdVec<SegmentId, Segment>,
+    of_row: IdVec<RowId, SegmentSpan>,
+}
+
+/// Cuts each row into the stretches free of `obstacles` within each zone,
+/// their ends on sites.
+fn cut_segments(
+    db: &NetlistDB,
+    zones: &Zones,
+    rows: &IdVec<RowId, RowSpan>,
+    obstacles: &[Rect<Dbu>],
+) -> CutSegments {
+    let mut segments: IdVec<SegmentId, Segment> = IdVec::new();
+    let mut of_row = IdVec::with_capacity(rows.len());
+    for (r, row) in rows.iter_enumerated() {
+        let start = segments.next_id();
+        let lo = row.x_min.max(db.die_area.min.x);
+        let hi = row.x_max.min(db.die_area.max.x);
+        let (y0, y1) = (row.y, row.y + row.height);
+        let free = free_intervals(obstacles, lo, hi, y0, y1);
+        for zone in zones.all() {
+            for (a, b) in intersect(&free, &zones.intervals(zone, lo, hi, y0, y1)) {
+                let (a, b) = (
+                    snap_up(a, row.x_min, row.site),
+                    snap_down(b, row.x_min, row.site),
+                );
+                if b > a {
+                    let _ = segments.push(Segment {
+                        row: r,
+                        zone,
+                        lo: a,
+                        hi: b,
+                        cells: Vec::new(),
+                    });
+                }
+            }
+        }
+        let _ = of_row.push(SegmentSpan {
+            start,
+            end: segments.next_id(),
+        });
+    }
+    CutSegments { segments, of_row }
+}
+
+/// Puts each of `std_cells` in the segment of its zone that holds it, each
+/// segment's cells ordered by X, and returns each placed cell's segment.
+fn assign_segments(
+    db: &NetlistDB,
+    zones: &Zones,
+    rows: &IdVec<RowId, RowSpan>,
+    cut: &mut CutSegments,
+    std_cells: &[CellId],
+) -> HashMap<CellId, SegmentId> {
+    let mut segment_of = HashMap::new();
+    for &cell in std_cells {
+        let at = db.cells[cell].location;
+        let width = db.cell_size(cell).x;
+        let r = rows.iter().as_slice().partition_point(|row| row.y < at.y);
+        let zone = zones.of(cell);
+        let found = (r..rows.len())
+            .map(RowId::new)
+            .take_while(|&r| rows[r].y == at.y)
+            .flat_map(|r| cut.of_row[r].ids())
+            .find(|&s| {
+                let seg = &cut.segments[s];
+                seg.zone == zone && seg.lo <= at.x && at.x + width <= seg.hi
+            });
+        if let Some(s) = found {
+            cut.segments[s].cells.push(cell);
+            let _ = segment_of.insert(cell, s);
+        }
+    }
+    for seg in &mut cut.segments {
+        seg.cells.sort_by_key(|&c| db.cells[c].location.x);
+    }
+    segment_of
+}
+
+/// For each cell, the nets on it the cost counts: signal nets of two to
+/// [`MAX_NET_PINS`] pins.
+fn cost_nets_of(db: &NetlistDB) -> IdVec<CellId, Vec<NetId>> {
+    let mut nets_of = IdVec::filled(Vec::new(), db.num_cells());
+    for (id, net) in db.nets.iter_enumerated() {
+        if net.signal_use.is_supply() || net.pins.len() < 2 || net.pins.len() > MAX_NET_PINS {
+            continue;
+        }
+        for &pin in &net.pins {
+            if let PinOwner::Cell { cell, .. } = db.pins[pin].owner {
+                let list: &mut Vec<NetId> = &mut nets_of[cell];
+                if list.last() != Some(&id) {
+                    list.push(id);
+                }
+            }
+        }
+    }
+    nets_of
 }
 
 /// Weighted half-perimeter wirelength of one net.
