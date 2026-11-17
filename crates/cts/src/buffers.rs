@@ -183,6 +183,7 @@ mod tests {
     use super::*;
     use pare_common::db::indices::LayerId;
     use pare_common::db::parser::liberty;
+    use pare_common::units::{FaradsPerMeter, OhmsPerMeter};
     use std::fmt::Write as _;
     use std::path::Path;
 
@@ -261,7 +262,11 @@ mod tests {
 
     #[test]
     fn a_wires_capacitance_is_rounded_to_single_precision_once() {
-        let rc = WireRc::per_micron(1.0, 0.07, LayerId::new(0));
+        let rc = WireRc {
+            resistance: OhmsPerMeter::from_ohms_per_micron(1.0),
+            capacitance: FaradsPerMeter::from_femtofarads_per_micron(0.07),
+            layer: LayerId::new(0),
+        };
         let per_micron = rc.capacitance.per_micron();
 
         let cap = signal_wire_cap(&rc, 3.0);

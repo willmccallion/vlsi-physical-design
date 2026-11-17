@@ -261,6 +261,13 @@ impl Seconds {
 }
 
 impl OhmsPerMeter {
+    /// The resistance per length given in ohms per micron, as
+    /// `set_wire_rc` and `set_layer_rc` take it.
+    #[must_use]
+    pub fn from_ohms_per_micron(ohms_per_micron: f64) -> Self {
+        Self(ohms_per_micron * MICRONS_PER_METER)
+    }
+
     /// Ohms per database unit, at `dbu_per_micron` of them to a micron.
     #[must_use]
     pub fn per_dbu(self, dbu_per_micron: DbuPerMicron) -> OhmsPerDbu {
@@ -269,6 +276,13 @@ impl OhmsPerMeter {
 }
 
 impl FaradsPerMeter {
+    /// The capacitance per length given in femtofarads per micron, as
+    /// `set_wire_rc` and `set_layer_rc` take it.
+    #[must_use]
+    pub fn from_femtofarads_per_micron(femtofarads_per_micron: f64) -> Self {
+        Self(femtofarads_per_micron * FARADS_PER_FEMTOFARAD * MICRONS_PER_METER)
+    }
+
     /// Farads per database unit, at `dbu_per_micron` of them to a micron.
     #[must_use]
     pub fn per_dbu(self, dbu_per_micron: DbuPerMicron) -> FaradsPerDbu {

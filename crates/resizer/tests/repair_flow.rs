@@ -8,7 +8,7 @@ use pare_common::db::liberty::Liberty;
 use pare_common::db::parser::{def, lef, liberty, sdc};
 use pare_common::geom::dbu::{Dbu, DbuPerMicron};
 use pare_common::testing;
-use pare_common::units::Seconds;
+use pare_common::units::{FaradsPerMeter, OhmsPerMeter, Seconds};
 use pare_resizer::WireRc;
 use pare_resizer::{
     ClockNetwork, Constants, Context, HoldOptions, Link, Namer, Netlist, Repairer, Resizer,
@@ -196,7 +196,11 @@ fn repaired_text(
         let clocks = ClockNetwork::from_sdc(&netlist, &constraints, &constants);
         (constants, clocks)
     };
-    let rc = WireRc::per_micron(3.5, 0.1, db.library.routing_layer_id("metal2").unwrap());
+    let rc = WireRc {
+        resistance: OhmsPerMeter::from_ohms_per_micron(3.5),
+        capacitance: FaradsPerMeter::from_femtofarads_per_micron(0.1),
+        layer: db.library.routing_layer_id("metal2").unwrap(),
+    };
     let context = Context {
         link: &link,
         clocks: &clocks,

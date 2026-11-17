@@ -821,7 +821,11 @@ mod tests {
 
     #[test]
     fn a_wire_takes_its_elmore_delay_off_the_slack() {
-        let rc = WireRc::per_micron(1.0, 1.0, pare_common::db::indices::LayerId::new(0));
+        let rc = WireRc {
+            resistance: OhmsPerMeter::from_ohms_per_micron(1.0),
+            capacitance: FaradsPerMeter::from_femtofarads_per_micron(1.0),
+            layer: pare_common::db::indices::LayerId::new(0),
+        };
         let load = Bnet::load(
             Point::new(Dbu(2000), Dbu(0)),
             PinId::new(0),

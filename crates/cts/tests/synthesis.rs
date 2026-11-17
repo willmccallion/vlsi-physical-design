@@ -12,7 +12,7 @@ use pare_common::db::sdc::Sdc;
 use pare_common::geom::dbu::{Dbu, DbuPerMicron};
 use pare_common::geom::orient::Orientation;
 use pare_common::testing;
-use pare_common::units::Seconds;
+use pare_common::units::{FaradsPerMeter, OhmsPerMeter, Seconds};
 use pare_cts::{CtsError, CtsInput, CtsOptions, CtsSummary, balance_latencies, synthesize};
 use pare_resizer::WireRc;
 use pare_resizer::{ClockNetwork, Constants, Link, Namer, Netlist, repair_clock_inverters};
@@ -102,7 +102,11 @@ fn load_constrained(
 }
 
 fn wire(db: &NetlistDB, layer: &str, ohm: f64, ff: f64) -> WireRc {
-    WireRc::per_micron(ohm, ff, db.library.routing_layer_id(layer).unwrap())
+    WireRc {
+        resistance: OhmsPerMeter::from_ohms_per_micron(ohm),
+        capacitance: FaradsPerMeter::from_femtofarads_per_micron(ff),
+        layer: db.library.routing_layer_id(layer).unwrap(),
+    }
 }
 
 fn clock_network(db: &NetlistDB, link: &Link<'_>, constraints: &Sdc) -> ClockNetwork {

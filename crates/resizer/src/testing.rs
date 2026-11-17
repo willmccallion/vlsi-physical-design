@@ -114,7 +114,11 @@ const IDEAL_WIRES: WireRc = WireRc {
 
 /// Wires of 3.5 ohms and 0.1 fF a micron on metal2.
 pub(crate) fn metal2_wires(db: &NetlistDB) -> WireRc {
-    WireRc::per_micron(3.5, 0.1, db.library.routing_layer_id("metal2").unwrap())
+    WireRc {
+        resistance: OhmsPerMeter::from_ohms_per_micron(3.5),
+        capacitance: FaradsPerMeter::from_femtofarads_per_micron(0.1),
+        layer: db.library.routing_layer_id("metal2").unwrap(),
+    }
 }
 
 /// Runs `test` on a timed session over `db` with the cells of `lib`, under
