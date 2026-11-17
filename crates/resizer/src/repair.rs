@@ -186,12 +186,12 @@ impl<'r, 'a, T: Timing> Repairer<'r, 'a, T> {
             let netlist = self.resizer.netlist();
             self.resizer.graph.drivers_by_level(&netlist)
         };
-        self.resizer.defer_timing();
+        let deferred = self.resizer.defer_timing();
         let repaired = drivers
             .into_iter()
             .rev()
             .try_for_each(|driver| self.repair_driver(driver));
-        self.resizer.resume_timing();
+        self.resizer.resume_timing(deferred);
         self.resizer.clear_slew_annotations();
         repaired?;
         Ok(self.summary)
@@ -257,11 +257,11 @@ impl<'r, 'a, T: Timing> Repairer<'r, 'a, T> {
                 })
                 .collect()
         };
-        self.resizer.defer_timing();
+        let deferred = self.resizer.defer_timing();
         let result = drivers
             .into_iter()
             .try_for_each(|driver| self.repair_net(driver, Checks::LengthOnly));
-        self.resizer.resume_timing();
+        self.resizer.resume_timing(deferred);
         self.resizer.options = saved_options;
         self.resizer.r_strongest_buffer = saved_strongest;
         result?;
@@ -297,9 +297,9 @@ impl<'r, 'a, T: Timing> Repairer<'r, 'a, T> {
         if needs.max_cap.is_none() && !needs.load_slew && !too_long {
             return Ok(());
         }
-        self.resizer.batch_edits();
+        let batch = self.resizer.batch_edits();
         let repaired = self.repair_tree(&tree, driver, needs.max_cap.unwrap_or(Farads::INFINITY));
-        self.resizer.flush();
+        self.resizer.flush(batch);
         let _ = repaired?;
         self.summary.repaired_nets += 1;
         Ok(())

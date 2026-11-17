@@ -409,7 +409,7 @@ impl HoldRepair<'_> {
         loads: &[PinId],
         at: Point<Dbu>,
     ) -> Result<(), RepairError> {
-        resizer.journal_begin();
+        let trial = resizer.journal_begin();
         let setup_before = worst_slack_time(resizer.sta(), MinMax::Max);
         let slew_before = resizer.graph().slew(driver).max();
         let net = resizer.netlist().db.pins[driver].net;
@@ -430,9 +430,9 @@ impl HoldRepair<'_> {
             });
         if growth > MAX_SLEW_GROWTH || breaks_setup {
             // NOTE: repairEndHold zeroes its whole inserted count here.
-            resizer.journal_restore()?;
+            resizer.journal_restore(trial)?;
         } else {
-            resizer.journal_end();
+            resizer.journal_end(trial);
             self.inserted += 1;
             if resized {
                 self.resized += 1;
