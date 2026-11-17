@@ -7,11 +7,10 @@
 //! and find the nearest earlier centre through a bucket grid, which keeps
 //! nets with tens of thousands of pins fast.
 
-use crate::bucket::{Bucket, bucket_at, buckets_between};
+use crate::bucket::{Bucket, SpatialHash, buckets_between};
 use pare_common::geom::dbu::Dbu;
 use pare_common::geom::point::Point;
 use pare_common::geom::rect::Rect;
-use rustc_hash::FxHashMap;
 
 /// Nets up to this size are ordered by exact Prim.
 const PRIM_LIMIT: usize = 256;
@@ -137,16 +136,14 @@ fn curve_order(points: &[Point<Dbu>]) -> (usize, Vec<Join>) {
 
     let cells_per_side = (points.len() as f64).sqrt().ceil().max(1.0) as i64;
     let bucket = (span / cells_per_side).max(Dbu(1));
-    let origin = Point::new(min_x, min_y);
-    let key = |p: Point<Dbu>| bucket_at(p - origin, bucket);
-    let mut buckets: FxHashMap<Point<Bucket>, Vec<usize>> = FxHashMap::default();
+    let mut buckets: SpatialHash<usize> = SpatialHash::new(Point::new(min_x, min_y), bucket);
 
     let first = order[0];
-    buckets.entry(key(points[first])).or_default().push(first);
+    buckets.insert(buckets.bucket(points[first]), first);
     let mut joins = Vec::with_capacity(points.len() - 1);
     for &i in &order[1..] {
         let p = points[i];
-        let c = key(p);
+        let c = buckets.bucket(p);
         let mut nearest: Option<(Dbu, usize)> = None;
         let mut ring = Bucket(0);
         loop {
@@ -163,7 +160,7 @@ fn curve_order(points: &[Point<Dbu>]) -> (usize, Vec<Join>) {
         if let Some((_, parent)) = nearest {
             joins.push(Join { pin: i, parent });
         }
-        buckets.entry(c).or_default().push(i);
+        buckets.insert(c, i);
     }
     (first, joins)
 }
@@ -172,7 +169,7 @@ fn curve_order(points: &[Point<Dbu>]) -> (usize, Vec<Join>) {
 /// as its distance from `p` and its index; ties go to the lower index.
 fn nearest_in_ring(
     points: &[Point<Dbu>],
-    buckets: &FxHashMap<Point<Bucket>, Vec<usize>>,
+    buckets: &SpatialHash<usize>,
     p: Point<Dbu>,
     c: Point<Bucket>,
     ring: Bucket,
@@ -181,8 +178,7 @@ fn nearest_in_ring(
     let corner = |r: Bucket| Point::new(c.x + r, c.y + r);
     buckets_between(corner(Bucket(0) - ring), corner(ring))
         .filter(on_ring)
-        .filter_map(|b| buckets.get(&b))
-        .flatten()
+        .flat_map(|b| buckets.in_bucket(b))
         .map(|&j| (p.manhattan(points[j]), j))
         .min()
 }
