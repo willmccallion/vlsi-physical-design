@@ -4,7 +4,7 @@
 
 use super::NodeId;
 use super::swap::Hpwl;
-use super::{ImprovementError, Improver, Result};
+use super::{ImprovementError, Improver, Result, Trial};
 use pare_common::geom::dbu::Dbu;
 
 /// How far, in sites and rows, a random move may reach.
@@ -45,16 +45,16 @@ fn go(imp: &mut Improver, objective: &mut Hpwl, moves_per_candidate: f64) -> Res
     let mut current = initial;
     for _ in 0..attempts {
         let _generator = imp.random(1);
-        if !random_trial(imp, &candidates)? {
+        let Some(trial) = random_trial(imp, &candidates)? else {
             continue;
-        }
+        };
         let next = current - objective.delta(imp);
         if next <= current {
-            imp.accept_move();
+            imp.accept_trial(trial);
             objective.accept(imp);
             current = next;
         } else {
-            imp.reject_move()?;
+            imp.reject_trial(trial)?;
         }
     }
     let _ = objective.current(imp);
@@ -63,7 +63,7 @@ fn go(imp: &mut Improver, objective: &mut Hpwl, moves_per_candidate: f64) -> Res
 
 /// A move or else a swap of a random cell to a random spot nearby, as
 /// `RandomGenerator::generate`.
-fn random_trial(imp: &mut Improver, candidates: &[NodeId]) -> Result<bool> {
+fn random_trial(imp: &mut Improver, candidates: &[NodeId]) -> Result<Option<Trial>> {
     let arch = &imp.arch;
     let ydim = arch.rows.len();
     let span_x = (arch.max_x - arch.min_x).to_f64();
@@ -74,7 +74,7 @@ fn random_trial(imp: &mut Improver, candidates: &[NodeId]) -> Result<bool> {
     let row_height = arch.rows[0].height.to_f64();
     let n = candidates[imp.random(candidates.len())];
     if imp.rows_spanned(n) != 1 {
-        return Ok(false);
+        return Ok(None);
     }
     let [si] = imp.cell_segs[n][..] else {
         return Err(ImprovementError::Internal(
@@ -108,9 +108,12 @@ fn random_trial(imp: &mut Improver, candidates: &[NodeId]) -> Result<bool> {
             continue;
         }
         let x = Dbu(xj.round() as i64);
-        if imp.try_move(n, si, x, sj)? || imp.try_swap(n, si, x, sj)? {
-            return Ok(true);
+        if let Some(trial) = imp.try_move(n, si, x, sj)? {
+            return Ok(Some(trial));
+        }
+        if let Some(trial) = imp.try_swap(n, si, x, sj)? {
+            return Ok(Some(trial));
         }
     }
-    Ok(false)
+    Ok(None)
 }

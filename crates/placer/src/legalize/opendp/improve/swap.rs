@@ -4,7 +4,7 @@
 
 use super::mis::converged;
 use super::{EdgeId, NetworkPinId, NodeId, SegmentId};
-use super::{Improver, Result, SKIP_NETS_LARGER_THAN};
+use super::{Improver, Result, SKIP_NETS_LARGER_THAN, Trial};
 use pare_common::db::indices::IdVec;
 use pare_common::geom::dbu::Dbu;
 use pare_common::geom::point::Point;
@@ -73,9 +73,11 @@ pub(super) fn run_vertical(imp: &mut Improver, passes: usize, tolerance: f64) ->
     run(imp, passes, tolerance, vertical_trial)
 }
 
-type Trial = fn(&mut Improver, NodeId) -> Result<bool>;
+/// A way of trying a move of one cell: the open trial where it found a
+/// legal one.
+type Attempt = fn(&mut Improver, NodeId) -> Result<Option<Trial>>;
 
-fn run(imp: &mut Improver, passes: usize, tolerance: f64, trial: Trial) -> Result<()> {
+fn run(imp: &mut Improver, passes: usize, tolerance: f64, attempt: Attempt) -> Result<()> {
     let tolerance = tolerance.max(0.01);
     let mut hpwl = imp.total_hpwl();
     if hpwl == Dbu::ZERO {
@@ -83,7 +85,7 @@ fn run(imp: &mut Improver, passes: usize, tolerance: f64, trial: Trial) -> Resul
     }
     for _ in 0..passes.max(1) {
         let last = hpwl;
-        sweep(imp, trial)?;
+        sweep(imp, attempt)?;
         hpwl = imp.total_hpwl();
         if converged(last, hpwl, tolerance) {
             break;
@@ -95,21 +97,21 @@ fn run(imp: &mut Improver, passes: usize, tolerance: f64, trial: Trial) -> Resul
 /// One trial per single-row cell in random order, each kept unless it
 /// lengthens the nets, as `DetailedGlobalSwap::globalSwap` and
 /// `DetailedVerticalSwap::verticalSwap`.
-fn sweep(imp: &mut Improver, trial: Trial) -> Result<()> {
+fn sweep(imp: &mut Improver, attempt: Attempt) -> Result<()> {
     imp.resort_segments();
     let mut candidates = imp.single_height.clone();
     imp.shuffle(&mut candidates);
     let mut objective = Hpwl::new(imp);
     let _ = objective.current(imp);
     for n in candidates {
-        if !trial(imp, n)? {
+        let Some(trial) = attempt(imp, n)? else {
             continue;
-        }
+        };
         if objective.delta(imp) >= Dbu::ZERO {
             objective.accept(imp);
-            imp.accept_move();
+            imp.accept_trial(trial);
         } else {
-            imp.reject_move()?;
+            imp.reject_trial(trial)?;
         }
     }
     Ok(())
@@ -188,27 +190,27 @@ pub(super) fn segment_at(imp: &Improver, r: usize, x: Dbu) -> Option<SegmentId> 
 
 /// A move or else a swap of the cell to the middle of its optimal region
 /// within reach, as `legacy::DetailedGlobalSwap::generate`.
-fn global_trial(imp: &mut Improver, n: NodeId) -> Result<bool> {
+fn global_trial(imp: &mut Improver, n: NodeId) -> Result<Option<Trial>> {
     let Some(region) = region_elsewhere(imp, n) else {
-        return Ok(false);
+        return Ok(None);
     };
     let reach = imp.max_displacement;
     let (x0, x1) = clip_to_reach(region.min.x, region.max.x, imp.left(n), reach.x);
     let (y0, y1) = clip_to_reach(region.min.y, region.max.y, imp.bottom(n), reach.y);
     let [si] = imp.cell_segs[n][..] else {
-        return Ok(false);
+        return Ok(None);
     };
     let xj = centered(x0, x1, imp.width(n));
     let yj = centered(y0, y1, imp.height(n));
     let rj = imp.arch.closest_row(yj);
     let Some(sj) = segment_at(imp, rj, xj) else {
-        return Ok(false);
+        return Ok(None);
     };
     if imp.group(n) != imp.segments[sj].region {
-        return Ok(false);
+        return Ok(None);
     }
-    if imp.try_move(n, si, xj, sj)? {
-        return Ok(true);
+    if let Some(trial) = imp.try_move(n, si, xj, sj)? {
+        return Ok(Some(trial));
     }
     imp.try_swap(n, si, xj, sj)
 }
@@ -230,13 +232,13 @@ fn clip_to_reach(lo: Dbu, hi: Dbu, at: Dbu, reach: Dbu) -> (Dbu, Dbu) {
 
 /// A move or else a swap of the cell one or two rows toward its optimal
 /// region, picked at random, as `DetailedVerticalSwap::generate`.
-fn vertical_trial(imp: &mut Improver, n: NodeId) -> Result<bool> {
+fn vertical_trial(imp: &mut Improver, n: NodeId) -> Result<Option<Trial>> {
     let yi = imp.bottom(n).to_f64() + 0.5 * imp.height(n).to_f64();
     let Some(region) = region_elsewhere(imp, n) else {
-        return Ok(false);
+        return Ok(None);
     };
     let [si] = imp.cell_segs[n][..] else {
-        return Ok(false);
+        return Ok(None);
     };
     let ri = imp.segments[si].row;
     let xj = centered(region.min.x, region.max.x, imp.width(n));
@@ -249,13 +251,13 @@ fn vertical_trial(imp: &mut Improver, n: NodeId) -> Result<bool> {
     };
     let rj = rmin + imp.random(rmax - rmin + 1);
     let Some(sj) = segment_at(imp, rj, xj) else {
-        return Ok(false);
+        return Ok(None);
     };
     if imp.group(n) != imp.segments[sj].region {
-        return Ok(false);
+        return Ok(None);
     }
-    if imp.try_move(n, si, xj, sj)? {
-        return Ok(true);
+    if let Some(trial) = imp.try_move(n, si, xj, sj)? {
+        return Ok(Some(trial));
     }
     imp.try_swap(n, si, xj, sj)
 }
