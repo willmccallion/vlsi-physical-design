@@ -83,6 +83,71 @@ fn cells_on_one_spot_spread_along_the_nearest_row() {
     );
 }
 
+/// The tiny design with every INV's sides of an edge type that keeps
+/// 0.6 um between such sides, its movable cells at `places`.
+fn tiny_with_spaced_inverters(places: &[(i64, i64)]) -> NetlistDB {
+    let lef = std::fs::read_to_string(fixture("tiny.lef"))
+        .unwrap()
+        .replace(
+            "MANUFACTURINGGRID 0.005 ;",
+            "MANUFACTURINGGRID 0.005 ;\nPROPERTYDEFINITIONS\n  MACRO LEF58_EDGETYPE STRING ;\n  \
+             LIBRARY LEF58_CELLEDGESPACINGTABLE STRING \"CELLEDGESPACINGTABLE\n    \
+             EDGETYPE GAP GAP 0.6 ;\" ;\nEND PROPERTYDEFINITIONS",
+        )
+        .replace(
+            "MACRO INV\n  CLASS CORE ;",
+            "MACRO INV\n  PROPERTY LEF58_EDGETYPE \"EDGETYPE LEFT GAP ; EDGETYPE RIGHT GAP ;\" ;\n  \
+             CLASS CORE ;",
+        );
+    let lef_path = Path::new(env!("CARGO_TARGET_TMPDIR")).join("tiny_spaced_inverters.lef");
+    std::fs::write(&lef_path, lef).unwrap();
+    let units = def::read_units(&fixture("tiny.def")).unwrap();
+    let library = lef::parse_files(&[lef_path], units).unwrap();
+    let text = std::fs::read_to_string(fixture("tiny.def")).unwrap();
+    let mut db = def::parse_str(&text, &fixture("tiny.def"), library).unwrap();
+    for (name, &(x, y)) in MOVABLE.iter().zip(places) {
+        let id = db.cell_id(name).unwrap();
+        let c = &mut db.cells[id];
+        c.location = Point::new(Dbu(x), Dbu(y));
+        c.orient = Orientation::N;
+        c.status = PlacementStatus::Placed;
+    }
+    db
+}
+
+/// Where the inverters and the other movable cells of
+/// [`tiny_with_spaced_inverters`] land from one spot.
+const PINNED_SPACED_PLACES: [(i64, i64, Orientation); 6] = [
+    (1600, 2000, Orientation::FS),
+    (0, 2000, Orientation::FS),
+    (1000, 2000, Orientation::FS),
+    (2600, 2000, Orientation::FS),
+    (400, 2000, Orientation::FS),
+    (1000, 0, Orientation::N),
+];
+
+#[test]
+fn inverters_whose_sides_need_spacing_are_placed_apart() {
+    let mut db = tiny_with_spaced_inverters(&[(1000, 1000); 6]);
+
+    let _ = detailed_placement(&mut db).unwrap();
+
+    let inverters: Vec<(i64, i64)> = ["u1", "u2", "u5", "u7"]
+        .iter()
+        .map(|name| {
+            let c = &db.cells[db.cell_id(name).unwrap()];
+            (c.location.x.get(), c.location.y.get())
+        })
+        .collect();
+    for (i, a) in inverters.iter().enumerate() {
+        for b in &inverters[i + 1..] {
+            let side_gap = (a.0 - b.0).abs() - 400;
+            assert!(a.1 != b.1 || side_gap >= 600, "{a:?} and {b:?}");
+        }
+    }
+    assert_eq!(places(&db), PINNED_SPACED_PLACES);
+}
+
 #[test]
 fn cells_on_a_macro_move_off_it() {
     let mut db = tiny_with(&[
