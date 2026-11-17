@@ -12,12 +12,12 @@ impl Gcells {
     /// The gcell of side `gcell` holding a point `offset` from the grid's
     /// origin along one axis, each gcell holding its lower edge.
     pub(crate) const fn holding(offset: Dbu, gcell: Dbu) -> Self {
-        Self(offset.get().div_euclid(gcell.get()))
+        Self(offset.div_floor(gcell))
     }
 
     /// How many gcells of side `gcell` it takes to cover `extent`.
     pub(crate) const fn covering(extent: Dbu, gcell: Dbu) -> Self {
-        Self((extent.get() + gcell.get() - 1) / gcell.get())
+        Self(extent.div_ceil(gcell))
     }
 
     /// The length of this many gcells of side `gcell`.

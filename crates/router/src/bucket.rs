@@ -13,7 +13,7 @@ impl Bucket {
     /// The bucket of side `size` holding `at` along one axis, each bucket
     /// holding its lower edge.
     const fn holding(at: Dbu, size: Dbu) -> Self {
-        Self(at.get().div_euclid(size.get()))
+        Self(at.div_floor(size))
     }
 
     /// The size of an offset between columns or rows, whichever way it runs.

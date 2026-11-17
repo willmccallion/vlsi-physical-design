@@ -176,7 +176,7 @@ fn best_per_node(found: Vec<((bool, Dbu), AccessPoint)>) -> Vec<AccessPoint> {
 const fn middle_on_grid(low: Dbu, high: Dbu, grid: Dbu) -> Dbu {
     // NOTE: genAPCentered truncates both steps toward zero, which rounds up
     // below the origin; PARE floors both, so a shifted die keeps its points.
-    Dbu(low.midpoint(high).get().div_euclid(grid.get()) * grid.get())
+    Dbu(low.midpoint(high).div_floor(grid) * grid.get())
 }
 
 /// Off-crossing accesses on each track of `layer` through `rect`: the point
