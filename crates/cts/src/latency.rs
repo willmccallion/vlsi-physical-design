@@ -151,9 +151,7 @@ impl Balancer<'_> {
         let mut sum = 0.0_f32;
         let mut count = 0_u32;
         for sink in &self.trees.builders[builder].clock.sinks {
-            if let Some(pin) = sink.input_pin {
-                self.sink_arrivals(db, pin, &mut sum, &mut count);
-            }
+            self.sink_arrivals(db, sink.pin, &mut sum, &mut count);
         }
         (count > 0).then(|| sum / count as f32)
     }
