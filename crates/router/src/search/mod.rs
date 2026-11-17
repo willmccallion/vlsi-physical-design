@@ -420,6 +420,52 @@ impl State {
     }
 }
 
+/// A lower bound, weighted by the search's effort, on the cost from a node
+/// to the nearest target: the distance to the box around the targets plus
+/// a via to each layer between the node and the nearest target layer.
+struct GoalEstimate {
+    goal: Rect<Dbu>,
+    layers: Vec<usize>,
+    weight: f64,
+}
+
+impl GoalEstimate {
+    /// The estimate toward `targets` at `effort`; none for no target.
+    fn toward(
+        search: &Search<'_>,
+        targets: &FxHashMap<Node, (usize, f64)>,
+        effort: Effort,
+    ) -> Option<Self> {
+        let goal = targets
+            .keys()
+            .map(|&n| {
+                let p = search.point(n);
+                Rect::new(p, p)
+            })
+            .reduce(|a, b| a.union(&b))?;
+        let mut layers: Vec<usize> = targets.keys().map(|n| n.layer.index()).collect();
+        layers.sort_unstable();
+        layers.dedup();
+        Some(Self {
+            goal,
+            layers,
+            weight: effort.weight,
+        })
+    }
+
+    /// The estimate from node `n`.
+    fn at_node(&self, search: &Search<'_>, n: Node) -> f64 {
+        let layers = self
+            .layers
+            .iter()
+            .map(|&l| l.abs_diff(n.layer.index()))
+            .min()
+            .unwrap_or(0) as f64;
+        let plane = distance_to(&self.goal, search.point(n)).to_f64();
+        self.weight * search.costs.via.mul_add(layers, plane)
+    }
+}
+
 /// Which way a via climbs.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum Climb {
@@ -890,28 +936,8 @@ impl Search<'_> {
         visits: &mut impl Visits,
         costs: &mut impl StepCosts,
     ) -> Option<(Vec<Node>, usize)> {
-        let goal = targets
-            .keys()
-            .map(|&n| {
-                let p = self.point(n);
-                Rect::new(p, p)
-            })
-            .reduce(|a, b| a.union(&b))?;
-        let goal_layers: Vec<usize> = {
-            let mut l: Vec<usize> = targets.keys().map(|n| n.layer.index()).collect();
-            l.sort_unstable();
-            l.dedup();
-            l
-        };
-        let h = |n: Node| {
-            let layers = goal_layers
-                .iter()
-                .map(|&l| l.abs_diff(n.layer.index()))
-                .min()
-                .unwrap_or(0) as f64;
-            let plane = distance_to(&goal, self.point(n)).to_f64();
-            effort.weight * self.costs.via.mul_add(layers, plane)
-        };
+        let estimate = GoalEstimate::toward(self, targets, effort)?;
+        let h = |n: Node| estimate.at_node(self, n);
 
         visits.clear();
         let mut heap = BinaryHeap::new();
