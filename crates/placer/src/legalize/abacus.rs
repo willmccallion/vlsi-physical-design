@@ -18,7 +18,8 @@ use crate::rows::{
     RowSpan, classify, expand_rows, fixed_obstacles, free_intervals, rows_outward, snap_down,
     snap_up, squared,
 };
-use crate::zones::{Zone, Zones, intersect};
+use crate::zones::{Zone, Zones};
+use pare_common::geom::interval::{Interval, intersect_sorted};
 
 /// Why legalization failed.
 #[derive(Debug, thiserror::Error, PartialEq, Eq)]
@@ -99,10 +100,10 @@ fn legalize_macros(
             if row.y + size.y > die.max.y {
                 continue;
             }
-            let (y0, y1) = (row.y, row.y + size.y);
-            let free = free_intervals(obstacles, die.min.x, die.max.x, y0, y1);
-            let allowed = zones.intervals(zones.of(cell), die.min.x, die.max.x, y0, y1);
-            for (lo, hi) in intersect(&free, &allowed) {
+            let band = Interval::new(row.y, row.y + size.y);
+            let free = free_intervals(obstacles.iter(), die.x_span(), band);
+            let allowed = zones.intervals(zones.of(cell), die.x_span(), band);
+            for Interval { lo, hi } in intersect_sorted(&free, &allowed) {
                 let lo = snap_up(lo, row.x_min, row.site);
                 let hi = snap_down(hi - size.x, row.x_min, row.site);
                 if lo > hi {
@@ -238,12 +239,13 @@ fn build_subrows(
     let die = db.die_area;
     let mut out = Vec::new();
     for (r, row) in rows.iter().enumerate() {
-        let lo = row.x_min.max(die.min.x);
-        let hi = row.x_max.min(die.max.x);
-        let (y0, y1) = (row.y, row.y + row.height);
-        let free = free_intervals(obstacles, lo, hi, y0, y1);
+        let span = Interval::new(row.x_min.max(die.min.x), row.x_max.min(die.max.x));
+        let band = row.band();
+        let free = free_intervals(obstacles, span, band);
         for zone in zones.all() {
-            for (a, b) in intersect(&free, &zones.intervals(zone, lo, hi, y0, y1)) {
+            for Interval { lo: a, hi: b } in
+                intersect_sorted(&free, &zones.intervals(zone, span, band))
+            {
                 let a = snap_up(a, row.x_min, row.site);
                 let b = snap_down(b, row.x_min, row.site);
                 if b > a {
