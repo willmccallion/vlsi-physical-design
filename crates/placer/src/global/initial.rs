@@ -266,17 +266,10 @@ fn bicgstab(matrix: &Matrix, rhs: &[f64], x: &mut [f64]) -> f64 {
             restarts += 1;
         }
         let beta = (rho / rho_old) * (alpha / omega);
-        direction
-            .par_iter_mut()
-            .zip(&res)
-            .zip(&direction_image)
-            .for_each(|((d, &r), &v)| *d = beta.mul_add(omega.mul_add(-v, *d), r));
+        update_direction(&mut direction, &res, &direction_image, beta, omega);
         matrix.multiply(&direction, &mut direction_image);
         alpha = rho / dot(&shadow, &direction_image);
-        half.par_iter_mut()
-            .zip(&res)
-            .zip(&direction_image)
-            .for_each(|((h, &r), &v)| *h = alpha.mul_add(-v, r));
+        step_half(&mut half, &res, &direction_image, alpha);
         matrix.multiply(&half, &mut half_image);
         let image_sqnorm = dot(&half_image, &half_image);
         omega = if image_sqnorm > 0.0 {
@@ -284,17 +277,37 @@ fn bicgstab(matrix: &Matrix, rhs: &[f64], x: &mut [f64]) -> f64 {
         } else {
             0.0
         };
-        x.par_iter_mut()
-            .zip(&direction)
-            .zip(&half)
-            .for_each(|((x, &d), &h)| *x += alpha.mul_add(d, omega * h));
-        res.par_iter_mut()
-            .zip(&half)
-            .zip(&half_image)
-            .for_each(|((r, &h), &t)| *r = omega.mul_add(-t, h));
+        advance(x, &direction, &half, alpha, omega);
+        step_half(&mut res, &half, &half_image, omega);
         iterations += 1;
     }
     (dot(&res, &res) / rhs_sqnorm).sqrt()
+}
+
+/// `BiCGSTAB`'s search direction `p = r + beta * (p - omega * v)`.
+fn update_direction(direction: &mut [f64], res: &[f64], image: &[f64], beta: f64, omega: f64) {
+    direction
+        .par_iter_mut()
+        .zip(res)
+        .zip(image)
+        .for_each(|((d, &r), &v)| *d = beta.mul_add(omega.mul_add(-v, *d), r));
+}
+
+/// `out = from - step * image`: `BiCGSTAB`'s half step `s = r - alpha * v`
+/// and its new residual `r = s - omega * t`.
+fn step_half(out: &mut [f64], from: &[f64], image: &[f64], step: f64) {
+    out.par_iter_mut()
+        .zip(from)
+        .zip(image)
+        .for_each(|((o, &f), &v)| *o = step.mul_add(-v, f));
+}
+
+/// `BiCGSTAB`'s new iterate `x += alpha * p + omega * s`.
+fn advance(x: &mut [f64], direction: &[f64], half: &[f64], alpha: f64, omega: f64) {
+    x.par_iter_mut()
+        .zip(direction)
+        .zip(half)
+        .for_each(|((x, &d), &h)| *x += alpha.mul_add(d, omega * h));
 }
 
 /// Writes `rhs - matrix * x` into `out`.
