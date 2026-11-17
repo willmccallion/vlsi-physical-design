@@ -33,6 +33,19 @@ impl Interval {
         self.hi <= self.lo
     }
 
+    /// What both cover, from the higher `lo` to the lower `hi`; empty
+    /// where they do not overlap.
+    #[must_use]
+    pub fn overlap(self, other: Self) -> Self {
+        Self::new(self.lo.max(other.lo), self.hi.min(other.hi))
+    }
+
+    /// Whether the two, ends included, share a point.
+    #[must_use]
+    pub fn meets(self, other: Self) -> bool {
+        self.lo <= other.hi && other.lo <= self.hi
+    }
+
     /// The overlap of the two, or the gap between them when they are
     /// apart; touching intervals meet in a point.
     #[must_use]
@@ -138,6 +151,19 @@ mod tests {
     fn touching_intervals_meet_in_a_point_zero_apart() {
         assert_eq!(span(0, 10).between(span(10, 20)), span(10, 10));
         assert_eq!(span(0, 10).distance(span(10, 20)), Dbu::ZERO);
+    }
+
+    #[test]
+    fn the_overlap_is_what_both_cover_and_empty_when_apart() {
+        assert_eq!(span(0, 10).overlap(span(5, 20)), span(5, 10));
+        assert!(span(0, 10).overlap(span(12, 20)).is_empty());
+    }
+
+    #[test]
+    fn closed_intervals_meet_when_they_only_touch() {
+        assert!(span(0, 10).meets(span(10, 20)));
+        assert!(span(10, 20).meets(span(0, 10)));
+        assert!(!span(0, 10).meets(span(11, 20)));
     }
 
     #[test]
