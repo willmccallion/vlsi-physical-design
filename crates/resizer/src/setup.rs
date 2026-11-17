@@ -263,6 +263,15 @@ struct PassSlacks {
     total: Seconds,
 }
 
+/// Whether a pass goes ahead or the phase ends before it.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum PassStart {
+    /// The pass goes ahead.
+    Go,
+    /// The rate of repair has fallen too far; the phase ends.
+    Terminate,
+}
+
 /// What becomes of a phase once an endpoint's passes end.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum EndpointEnd {
@@ -494,22 +503,12 @@ impl Repair<'_, '_> {
         let mut worse_passes = 0;
         let mut trial = self.journal_begin();
         for pass in 1..=phase.max_passes {
-            self.iteration += 1;
-            if rule == PassRule::Legacy {
-                self.report_progress();
-            }
-            if self.terminate(phase) {
+            if self.begin_pass(rule, phase) == PassStart::Terminate {
                 // NOTE: repairSetup_LastGasp ends the journal here where the
                 // legacy phase restores it; at this point last gasp's
                 // journal holds nothing, so restoring is the same.
                 self.journal_restore(trial)?;
                 return Ok(phase.terminated());
-            }
-            if self.iteration.is_multiple_of(SMALL_INTERVAL) {
-                phase.just_terminated = false;
-            }
-            if rule == PassRule::LastGasp {
-                self.report_progress();
             }
             if fuzzy::greater_equal(end_slack, margin)
                 || !self.repair_endpoint(end, end_slack, &phase.sequence)?
@@ -517,13 +516,8 @@ impl Repair<'_, '_> {
                 self.end_passes(pass, trial)?;
                 return Ok(EndpointEnd::Next);
             }
-            end_slack = self.end_slack(end);
-            let (worst_slack, worst_vertex) = self.worst();
-            let now = PassSlacks {
-                worst: worst_slack,
-                end: end_slack,
-                total: self.tns(),
-            };
+            let (now, worst_vertex) = self.slacks_after_pass(end);
+            end_slack = now.end;
             let kept = PassSlacks {
                 worst: *kept_worst,
                 end: kept_end_slack,
@@ -557,6 +551,38 @@ impl Repair<'_, '_> {
         }
         self.journal_end(trial);
         Ok(EndpointEnd::Next)
+    }
+
+    /// Counts and reports a pass, and says whether the phase's rate of
+    /// repair has fallen far enough to end it.
+    fn begin_pass(&mut self, rule: PassRule, phase: &mut Phase) -> PassStart {
+        self.iteration += 1;
+        if rule == PassRule::Legacy {
+            self.report_progress();
+        }
+        if self.terminate(phase) {
+            return PassStart::Terminate;
+        }
+        if self.iteration.is_multiple_of(SMALL_INTERVAL) {
+            phase.just_terminated = false;
+        }
+        if rule == PassRule::LastGasp {
+            self.report_progress();
+        }
+        PassStart::Go
+    }
+
+    /// The slacks after a pass on endpoint `end`, and the endpoint now
+    /// worst.
+    fn slacks_after_pass(&self, end: PinId) -> (PassSlacks, Option<PinId>) {
+        let end_slack = self.end_slack(end);
+        let (worst, worst_vertex) = self.worst();
+        let slacks = PassSlacks {
+            worst,
+            end: end_slack,
+            total: self.tns(),
+        };
+        (slacks, worst_vertex)
     }
 
     /// Closes `trial`, the passes that ended at `pass` with nothing more
