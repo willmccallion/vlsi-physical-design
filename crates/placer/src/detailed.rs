@@ -1017,6 +1017,8 @@ impl<'a> DetailedPlacer<'a> {
         kept
     }
 
+    /// Moves `cell` toward its optimal region: into a gap there, or by
+    /// swapping places with a cell of its width there; whether it moved.
     fn global_move(&mut self, db: &mut NetlistDB, cell: CellId) -> bool {
         let Some(region) = self.optimal_region(db, cell) else {
             return false;
@@ -1036,7 +1038,13 @@ impl<'a> DetailedPlacer<'a> {
         let Some(&from) = self.segment_of.get(&cell) else {
             return false;
         };
-
+        let wanted = WantedMove {
+            cell,
+            from,
+            here,
+            target,
+            size,
+        };
         for row in rows_around(r, self.rows.len()).map(RowId::new) {
             if self.rows[row].height != size.y
                 || !db.cell_macro(cell).symmetry.allows(self.rows[row].orient)
@@ -1051,47 +1059,68 @@ impl<'a> DetailedPlacer<'a> {
                 {
                     continue;
                 }
-                if let Some(x) = self.gap_near(db, s, target.x, size.x) {
-                    let at = Point::new(x, self.rows[row].y);
-                    if self.try_move(db, &[cell], &[Placement { cell, at, row }]) {
-                        self.relocate(db, cell, from, s);
-                        return true;
-                    }
-                }
-                if let Some(other) = self.equal_width_near(db, s, target.x, size.x, cell) {
-                    let other_at = db.cells[other].location;
-                    let other_row = self.segments[from].row;
-                    if self.zone_of[other] != self.segments[from].zone
-                        || !db
-                            .cell_macro(other)
-                            .symmetry
-                            .allows(self.rows[other_row].orient)
-                    {
-                        continue;
-                    }
-                    if self.try_move(
-                        db,
-                        &[cell, other],
-                        &[
-                            Placement {
-                                cell,
-                                at: other_at,
-                                row,
-                            },
-                            Placement {
-                                cell: other,
-                                at: here,
-                                row: other_row,
-                            },
-                        ],
-                    ) {
-                        self.swap_entries(db, cell, from, other, s);
-                        return true;
-                    }
+                if self.move_into_segment(db, wanted, row, s) {
+                    return true;
                 }
             }
         }
         false
+    }
+
+    /// Moves the wanted cell into a gap of segment `s` of `row` near its
+    /// target, or else swaps it with a cell of its width there; whether it
+    /// moved.
+    fn move_into_segment(
+        &mut self,
+        db: &mut NetlistDB,
+        wanted: WantedMove,
+        row: RowId,
+        s: SegmentId,
+    ) -> bool {
+        let WantedMove {
+            cell,
+            from,
+            here,
+            target,
+            size,
+        } = wanted;
+        if let Some(x) = self.gap_near(db, s, target.x, size.x) {
+            let at = Point::new(x, self.rows[row].y);
+            if self.try_move(db, &[cell], &[Placement { cell, at, row }]) {
+                self.relocate(db, cell, from, s);
+                return true;
+            }
+        }
+        let Some(other) = self.equal_width_near(db, s, target.x, size.x, cell) else {
+            return false;
+        };
+        let other_at = db.cells[other].location;
+        let other_row = self.segments[from].row;
+        if self.zone_of[other] != self.segments[from].zone
+            || !db
+                .cell_macro(other)
+                .symmetry
+                .allows(self.rows[other_row].orient)
+        {
+            return false;
+        }
+        let swapped = [
+            Placement {
+                cell,
+                at: other_at,
+                row,
+            },
+            Placement {
+                cell: other,
+                at: here,
+                row: other_row,
+            },
+        ];
+        if !self.try_move(db, &[cell, other], &swapped) {
+            return false;
+        }
+        self.swap_entries(db, cell, from, other, s);
+        true
     }
 
     /// The free gaps of segment `s` between the few cells nearest `target`
@@ -1416,6 +1445,17 @@ fn trace_plan(
         k = best[i][k]?.1;
     }
     Some(plan)
+}
+
+/// A cell [`DetailedPlacer::global_move`] moves: its segment and place,
+/// where it is wanted and its size.
+#[derive(Clone, Copy, Debug)]
+struct WantedMove {
+    cell: CellId,
+    from: SegmentId,
+    here: Point<Dbu>,
+    target: Point<Dbu>,
+    size: Point<Dbu>,
 }
 
 /// A cell with a blocked pin, its segment and X, and how far it may move.
