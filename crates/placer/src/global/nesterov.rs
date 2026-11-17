@@ -865,10 +865,10 @@ struct Run {
     growth_limit: GrowthLimit,
     iterations: usize,
     k: usize,
-    /// Which of the timing overflows have fired.
-    timing_fired: Vec<bool>,
+    /// Which of the timing overflows have fired; none while timing-driven
+    /// placement is off, from the start or once the driver declines.
+    timing_fired: Option<Vec<bool>>,
     timing_rounds: usize,
-    timing_on: bool,
     /// Whether the setup changed since the last stretch, so the penalty's
     /// reference wirelength is stale and frozen fields may need to thaw.
     rebuilt: bool,
@@ -909,7 +909,7 @@ pub(super) fn minimize<D: TimingDriver, R: FnMut(&Progress)>(
             None => None,
         };
         let Some(reweighted) = repaired else {
-            run.timing_on = false;
+            run.timing_fired = None;
             continue;
         };
         let (rebuilt, remap) =
@@ -980,9 +980,8 @@ impl Run {
             timing_fired: params
                 .timing
                 .as_ref()
-                .map_or_else(Vec::new, |t| vec![false; t.overflows.len()]),
+                .map(|t| vec![false; t.overflows.len()]),
             timing_rounds: 0,
-            timing_on: params.timing.is_some(),
             rebuilt: false,
         }
     }
@@ -1324,7 +1323,8 @@ impl Run {
     /// Whether a timing-driven repair is due at `overflow`, routability
     /// first finishing any check it waits on.
     fn timing_round_due(&mut self, params: &GlobalParams, overflow: f64) -> bool {
-        let Some(timing) = params.timing.as_ref().filter(|_| self.timing_on) else {
+        let (Some(timing), Some(fired)) = (params.timing.as_ref(), self.timing_fired.as_mut())
+        else {
             return false;
         };
         // NOTE: gpl's runTimingDriven waits on every routability refund
@@ -1332,7 +1332,7 @@ impl Run {
         let routability_pending = self.snapshot.is_some()
             && self.routability.as_ref().is_some_and(Routability::active)
             && overflow > CHECK_OVERFLOW;
-        !routability_pending && timing_due(&timing.overflows, &mut self.timing_fired, overflow)
+        !routability_pending && timing_due(&timing.overflows, fired, overflow)
     }
 
     /// The run's end with `outcome`: the final placement's evaluation,
