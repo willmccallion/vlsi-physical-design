@@ -8,6 +8,7 @@
 
 use crate::CtsError;
 use crate::htree::TreePoint;
+use crate::options::InsertionDelays;
 use crate::triton::{
     ClockTrees, first_output, is_sink, liberty_insertion_delay, net_cell_pins, pin_direction,
     sink_bbox_center,
@@ -46,7 +47,7 @@ pub fn balance_latencies(
     trees: &ClockTrees,
     arrival: &dyn Fn(PinId) -> Option<Seconds>,
 ) -> Result<usize, CtsError> {
-    if !trees.setup.settings.insertion_delay {
+    if trees.setup.settings.insertion_delays == InsertionDelays::Ignored {
         return Ok(0);
     }
     let mut inserted = 0;
