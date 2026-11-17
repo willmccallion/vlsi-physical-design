@@ -198,21 +198,8 @@ impl CoarseGrid {
                     toward.estimate(self, n)
                 });
             };
-            let mut joined = Vec::new();
-            let mut node = reached;
-            while !tree.contains(&node) {
-                let _ = tree.insert(node);
-                if is_pin(node) {
-                    remaining -= 1;
-                }
-                let parent = state.parent(node);
-                state.set(node, 0.0, parent);
-                joined.push(node);
-                let Some(parent) = parent else {
-                    break;
-                };
-                node = parent;
-            }
+            let joined = join_to_tree(state, &mut tree, reached);
+            remaining -= joined.iter().filter(|&&n| is_pin(n)).count();
             toward.narrow(self, pins, &tree, remaining);
             for node in joined {
                 heap.push(Visit {
@@ -662,6 +649,28 @@ impl Toward {
         let steps = (2.0 * f64::from(SCALE)).mul_add(f64::from(planar), 2.0 * climbs as f64);
         self.floor * steps
     }
+}
+
+/// Adds to `tree` the path `state` found from `reached` back to it, each
+/// node of it now costing nothing to start from, and returns those nodes.
+fn join_to_tree(
+    state: &mut StampedTable,
+    tree: &mut FxHashSet<usize>,
+    reached: usize,
+) -> Vec<usize> {
+    let mut joined = Vec::new();
+    let mut node = reached;
+    while !tree.contains(&node) {
+        let _ = tree.insert(node);
+        let parent = state.parent(node);
+        state.set(node, 0.0, parent);
+        joined.push(node);
+        let Some(parent) = parent else {
+            break;
+        };
+        node = parent;
+    }
+    joined
 }
 
 /// How far `v` lies outside the range from `lo` to `hi`.
