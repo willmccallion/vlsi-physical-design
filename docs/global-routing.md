@@ -4,6 +4,38 @@
 reroutes the nets that cross an overflowed edge, round after round. This
 page draws the state that carries over between rounds.
 
+## A net's tree on the grid
+
+A net's global route adds demand to the edges it crosses. The demand
+depends on the net as well as its paths: its track demand on each layer,
+and the terminals whose vias add no via loss. So lifting a tree is only
+right when it uses the same net it was placed with.
+
+The types make that impossible to get wrong. A `NetTree` is a net with its
+paths. `GlobalGrid::place` takes a `NetTree` and returns a `PlacedTree`,
+and `GlobalGrid::lift` takes the `PlacedTree` back and returns the
+`NetTree`. `GlobalRoutes` holds only `PlacedTree`s, and `PlacedTree` cannot
+be cloned. So a tree is lifted once, after it was placed, and with its own
+net.
+
+```mermaid
+stateDiagram-v2
+    direction LR
+    [*] --> NetTree: routed (pattern, maze or saved state)
+    NetTree --> PlacedTree: GlobalGrid::place / demand added
+    PlacedTree --> NetTree: GlobalGrid::lift / the same demand removed
+    PlacedTree --> PlacedTree: renumber / net id follows the design
+    NetTree --> [*]: dropped or rerouted
+```
+
+One place makes a `PlacedTree` without `place`: `Best::restore`. It puts
+back the usage of the best round wholesale, and that usage already holds
+the demand of the routes it shelved, so it re-wraps those routes without
+placing them again.
+
+When pin access is found again after repair, `settled_stage` lifts each
+tree it keeps, then places the same paths again with the net as it is now.
+
 ## Negotiation
 
 `negotiate` keeps a `Negotiation` between rounds:

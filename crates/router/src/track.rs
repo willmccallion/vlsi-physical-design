@@ -220,8 +220,8 @@ fn panels(
     routes: &GlobalRoutes,
     pins: &IdVec<NetId, Vec<Point<Dbu>>>,
 ) -> Vec<Panel> {
-    let mut nets: Vec<(NetId, &Vec<Vec<GCell>>)> =
-        routes.paths.iter().map(|(&n, p)| (n, p)).collect();
+    let mut nets: Vec<(NetId, &[Vec<GCell>])> =
+        routes.trees.iter().map(|(&n, t)| (n, t.paths())).collect();
     nets.sort_unstable_by_key(|&(n, _)| n);
     let mut by_panel: BTreeMap<PanelId, Vec<Iroute>> = BTreeMap::new();
     let direction = |l: LayerId| tech.layer(l).direction;
