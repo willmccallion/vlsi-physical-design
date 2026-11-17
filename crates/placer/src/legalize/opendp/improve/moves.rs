@@ -1,7 +1,7 @@
 //! Trial moves and swaps, journaled so they can be taken back, as
 //! `DetailedMgr::tryMove`, `DetailedMgr::trySwap` and their helpers.
 
-use super::{ImprovementError, Improver, Move, Result};
+use super::{ImprovementError, Improver, Move, Result, Sealed, Trial};
 use super::{NodeId, SegmentId};
 use pare_common::geom::dbu::Dbu;
 use pare_common::geom::point::Point;
@@ -25,53 +25,42 @@ impl Improver {
     }
 
     /// Moves a cell to `(xj, yj)` in segment `sj`, pushing neighbours aside
-    /// as needed; the trial stays journaled when it is legal, as
-    /// `DetailedMgr::tryMove`.
+    /// as needed, as `DetailedMgr::tryMove`: the trial, left open for the
+    /// caller to keep or take back, where it is legal.
     pub(super) fn try_move(
         &mut self,
         n: NodeId,
         si: SegmentId,
         xj: Dbu,
         sj: SegmentId,
-    ) -> Result<bool> {
-        if !self.master_symmetry_allows(n, self.segments[sj].row) {
-            self.reject_move()?;
-            return Ok(false);
-        }
-        let moved = if self.rows_spanned(n) == 1 {
-            if si == sj {
-                self.try_move_within(n, si, xj, sj)?
-            } else {
-                self.try_move_across(n, si, xj, sj)?
-            }
-        } else {
+    ) -> Result<Option<Trial>> {
+        let trial = self.begin_trial();
+        let moved = if !self.master_symmetry_allows(n, self.segments[sj].row) {
+            false
+        } else if self.rows_spanned(n) != 1 {
             self.try_move_multi(n, xj, sj)?
+        } else if si == sj {
+            self.try_move_within(n, si, xj, sj)?
+        } else {
+            self.try_move_across(n, si, xj, sj)?
         };
-        if moved {
-            return self.verify_move();
-        }
-        self.reject_move()?;
-        Ok(false)
+        self.legal_trial(trial, moved)
     }
 
     /// Swaps a cell with the one at `xj` in segment `sj`, as
-    /// `DetailedMgr::trySwap`.
+    /// `DetailedMgr::trySwap`: the trial, left open for the caller to keep
+    /// or take back, where it is legal.
     pub(super) fn try_swap(
         &mut self,
         n: NodeId,
         si: SegmentId,
         xj: Dbu,
         sj: SegmentId,
-    ) -> Result<bool> {
-        if !self.master_symmetry_allows(n, self.segments[sj].row) {
-            self.reject_move()?;
-            return Ok(false);
-        }
-        if self.try_swap_single(n, si, xj, sj)? {
-            return self.verify_move();
-        }
-        self.reject_move()?;
-        Ok(false)
+    ) -> Result<Option<Trial>> {
+        let trial = self.begin_trial();
+        let swapped = self.master_symmetry_allows(n, self.segments[sj].row)
+            && self.try_swap_single(n, si, xj, sj)?;
+        self.legal_trial(trial, swapped)
     }
 
     /// `DetailedMgr::tryMove1`: a single-row cell into another segment.
@@ -82,7 +71,6 @@ impl Improver {
         mut xj: Dbu,
         sj: SegmentId,
     ) -> Result<bool> {
-        self.journal.clear();
         if sj == si || self.group(n) != self.segments[sj].region || self.rows_spanned(n) != 1 {
             return Ok(false);
         }
@@ -127,7 +115,6 @@ impl Improver {
         xj: Dbu,
         sj: SegmentId,
     ) -> Result<bool> {
-        self.journal.clear();
         if sj != si || self.group(n) != self.segments[sj].region || self.rows_spanned(n) != 1 {
             return Ok(false);
         }
@@ -160,7 +147,6 @@ impl Improver {
     /// `DetailedMgr::tryMove3`: a multi-row cell into the gap at `xj` of a
     /// stack of segments, one per row.
     fn try_move_multi(&mut self, n: NodeId, xj: Dbu, sj: SegmentId) -> Result<bool> {
-        self.journal.clear();
         let spanned = self.rows_spanned(n);
         if spanned <= 1 || spanned != self.cell_segs[n].len() {
             return Ok(false);
@@ -239,7 +225,6 @@ impl Improver {
         mut xj: Dbu,
         sj: SegmentId,
     ) -> Result<bool> {
-        self.journal.clear();
         let cells_j = &self.cells_in_seg[sj];
         if cells_j.is_empty() {
             return Ok(false);
@@ -585,27 +570,41 @@ impl Improver {
         self.journal.moves.push(m);
     }
 
-    /// Keeps the trial if no cell it moved breaks a placement rule, else
-    /// takes it back, as `DetailedMgr::verifyMove`.
-    pub(super) fn verify_move(&mut self) -> Result<bool> {
-        if self
-            .journal
-            .nodes
-            .iter()
-            .any(|&n| self.has_placement_violation(n))
-        {
-            self.reject_move()?;
-            return Ok(false);
-        }
-        Ok(true)
+    /// Opens a trial with an empty journal, as each `DetailedMgr::tryMove`
+    /// and `trySwap` variant clears it first, journaling the moves that
+    /// follow.
+    pub(super) fn begin_trial(&mut self) -> Trial {
+        debug_assert!(self.journal.moves.is_empty(), "trials do not nest");
+        self.journal.clear();
+        Trial(Sealed)
     }
 
-    pub(super) fn accept_move(&mut self) {
+    /// `trial` left open where it `moved` cells and none of them breaks a
+    /// placement rule, else taken back, as `DetailedMgr::verifyMove`.
+    pub(super) fn legal_trial(&mut self, trial: Trial, moved: bool) -> Result<Option<Trial>> {
+        let is_legal = moved
+            && !self
+                .journal
+                .nodes
+                .iter()
+                .any(|&n| self.has_placement_violation(n));
+        if is_legal {
+            return Ok(Some(trial));
+        }
+        self.reject_trial(trial)?;
+        Ok(None)
+    }
+
+    /// Keeps the moves of `trial`, as `DetailedMgr::acceptMove`.
+    pub(super) fn accept_trial(&mut self, trial: Trial) {
+        let Trial(_sealed) = trial;
         self.journal.clear();
     }
 
-    /// Takes the trial's moves back, last first, as `Journal::undo`.
-    pub(super) fn reject_move(&mut self) -> Result<()> {
+    /// Takes the moves of `trial` back, last first, as
+    /// `DetailedMgr::rejectMove`.
+    pub(super) fn reject_trial(&mut self, trial: Trial) -> Result<()> {
+        let Trial(_sealed) = trial;
         let moves = std::mem::take(&mut self.journal.moves);
         self.undo(&moves)?;
         self.journal.clear();

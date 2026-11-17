@@ -178,6 +178,19 @@ struct Move {
     to_segs: Vec<SegmentId>,
 }
 
+/// A trial of moves, open from [`Improver::begin_trial`] until
+/// [`Improver::accept_trial`] keeps its moves or [`Improver::reject_trial`]
+/// takes them back. Only opening makes one and closing takes it, so a trial
+/// is closed once, and only after it was opened. The improver's states are
+/// drawn in `docs/improver-trials.md`.
+#[must_use = "a trial is closed by accept_trial or reject_trial"]
+#[derive(Debug)]
+struct Trial(Sealed);
+
+/// The private, uncopyable content of a [`Trial`].
+#[derive(Debug)]
+struct Sealed;
+
 /// The moves of the trial under way, as `Journal`.
 #[derive(Debug, Default)]
 struct Journal {
@@ -566,8 +579,8 @@ mod tests {
     }
 
     /// The first move of a movable cell to a site of any segment that
-    /// lands legally, left journaled.
-    fn first_legal_move(imp: &mut Improver) -> bool {
+    /// lands legally, its trial left open.
+    fn first_legal_move(imp: &mut Improver) -> Option<Trial> {
         let spacing = imp.arch.rows[0].site_spacing;
         for n in imp.movable_cells() {
             let si = imp.cell_segs[n][0];
@@ -575,14 +588,16 @@ mod tests {
                 let segment = imp.segments[sj];
                 let mut x = segment.min_x;
                 while x < segment.max_x {
-                    if x != imp.left(n) && imp.try_move(n, si, x, sj).unwrap() {
-                        return true;
+                    if x != imp.left(n)
+                        && let Some(trial) = imp.try_move(n, si, x, sj).unwrap()
+                    {
+                        return Some(trial);
                     }
                     x += spacing;
                 }
             }
         }
-        false
+        None
     }
 
     #[test]
@@ -597,10 +612,10 @@ mod tests {
         let mut imp = improver();
         let before = layout(&imp);
         let hpwl = imp.total_hpwl();
-        assert!(first_legal_move(&mut imp));
+        let trial = first_legal_move(&mut imp).unwrap();
         assert_ne!(layout(&imp), before);
 
-        imp.reject_move().unwrap();
+        imp.reject_trial(trial).unwrap();
 
         assert_eq!(layout(&imp), before);
         assert_eq!(imp.total_hpwl(), hpwl);
@@ -611,10 +626,9 @@ mod tests {
     fn an_accepted_move_stays_and_stays_legal() {
         let mut imp = improver();
         let before = layout(&imp);
-        assert!(first_legal_move(&mut imp));
+        let trial = first_legal_move(&mut imp).unwrap();
 
-        imp.accept_move();
-        imp.reject_move().unwrap();
+        imp.accept_trial(trial);
 
         assert_ne!(layout(&imp), before);
         assert_eq!(imp.placement_problems().unwrap(), 0);
@@ -712,7 +726,7 @@ mod tests {
 
         let moved = imp.try_move(n, si, Dbu(1000), sj).unwrap();
 
-        assert!(moved);
+        assert!(moved.is_some());
         assert_eq!(imp.position(n), Point::new(Dbu(1000), Dbu(4000)));
     }
 

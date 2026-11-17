@@ -611,18 +611,20 @@ impl Improver {
         s: SegmentId,
         violating: NodeId,
     ) -> Result<bool> {
+        let trial = self.begin_trial();
         let to = self.right(violating) - gap;
-        if self.shift_left_helper(violating, to, s, violating)? && self.verify_move()? {
-            self.accept_move();
+        let shifted = self.shift_left_helper(violating, to, s, violating)?;
+        if let Some(trial) = self.legal_trial(trial, shifted)? {
+            self.accept_trial(trial);
             return Ok(true);
         }
-        self.reject_move()?;
+        let trial = self.begin_trial();
         let to = self.left(cell) + gap * 2;
-        if self.shift_right_helper(cell, to, s, violating)? && self.verify_move()? {
-            self.accept_move();
+        let shifted = self.shift_right_helper(cell, to, s, violating)?;
+        if let Some(trial) = self.legal_trial(trial, shifted)? {
+            self.accept_trial(trial);
             return Ok(true);
         }
-        self.reject_move()?;
         Ok(false)
     }
 }
