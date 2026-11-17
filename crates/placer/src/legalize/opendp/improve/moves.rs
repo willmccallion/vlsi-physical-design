@@ -1,6 +1,7 @@
 //! Trial moves and swaps, journaled so they can be taken back, as
 //! `DetailedMgr::tryMove`, `DetailedMgr::trySwap` and their helpers.
 
+use super::arch::Row;
 use super::{ArchRowId, ImprovementError, Improver, Move, Result, Sealed, Trial};
 use super::{NodeId, SegmentId};
 use pare_common::geom::dbu::Dbu;
@@ -354,99 +355,18 @@ impl Improver {
         right_limit: Dbu,
         row: ArchRowId,
     ) -> Option<Vec<Dbu>> {
-        let row = &self.arch.rows[row];
-        let (origin, spacing) = (row.left, row.site_spacing);
-        let mut i0 = (left_limit - origin).div_trunc(spacing);
-        if origin + spacing * i0 < left_limit {
-            i0 += 1;
-        }
-        let mut i1 = (right_limit - origin).div_trunc(spacing);
-        if origin + spacing * i1 + row.site_width >= right_limit {
-            i1 -= 1;
-        }
-        let nsites = usize::try_from(i1 - i0 + 1).ok()?;
-        let ncells = cells.len();
-        let swid: Vec<i64> = cells
+        let sites = ShiftSites::within(&self.arch.rows[row], left_limit, right_limit)?;
+        let widths: Vec<i64> = cells
             .iter()
-            .map(|&c| self.width(c).div_trunc(spacing))
+            .map(|&c| self.width(c).div_trunc(sites.spacing))
             .collect();
-        if swid.iter().sum::<i64>() > i1 - i0 + 1 {
+        if widths.iter().sum::<i64>() > sites.last - sites.first + 1 {
             return None;
         }
-        let mut site_l = vec![0; ncells];
-        let mut k = i0;
-        for i in 0..ncells {
-            site_l[i] = k;
-            k += swid[i];
-        }
-        let mut site_r = vec![0; ncells];
-        let mut k = i1 + 1;
-        for i in (0..ncells).rev() {
-            site_r[i] = k - swid[i];
-            k = site_r[i];
-            if site_r[i] < site_l[i] {
-                return None;
-            }
-        }
-        let site = |i: usize| i0 + i as i64 - 1;
-        let mut cost = vec![vec![0.0_f64; ncells + 1]; nsites + 1];
-        for j in 1..=ncells {
-            for (i, row_cost) in cost.iter_mut().enumerate().skip(1) {
-                let site_id = site(i);
-                if site_id < site_l[j - 1] || site_id > site_r[j - 1] {
-                    continue;
-                }
-                row_cost[j] = (origin + spacing * site_id - targets[j - 1]).abs().to_f64();
-            }
-        }
-        let mut tcost = vec![vec![f64::MAX; ncells + 1]; nsites + 1];
-        let mut prev = vec![vec![None::<(usize, usize)>; ncells + 1]; nsites + 1];
-        tcost[0][0] = 0.0;
-        for j in 1..=ncells {
-            let prev_wid = if j == 1 { 1 } else { swid[j - 2] };
-            let curr_wid = swid[j - 1];
-            for i in 1..=nsites {
-                let site_id = site(i);
-                let c = tcost[i - 1][j];
-                if c < tcost[i][j] {
-                    tcost[i][j] = c;
-                    prev[i][j] = Some((i - 1, j));
-                }
-                let ii = i as i64 - prev_wid;
-                if let Ok(ii) = usize::try_from(ii)
-                    && site_id + curr_wid - 1 <= i1
-                {
-                    let c = tcost[ii][j - 1] + cost[i][j];
-                    if c < tcost[i][j] {
-                        tcost[i][j] = c;
-                        prev[i][j] = Some((ii, j - 1));
-                    }
-                }
-            }
-        }
-        let mut at = Some((nsites, ncells));
-        let mut reached = false;
-        while let Some((i, j)) = at {
-            if (i, j) == (0, 0) {
-                reached = true;
-            }
-            at = prev[i][j];
-        }
-        if !reached {
-            return None;
-        }
-        let mut positions = vec![Dbu::ZERO; ncells];
-        let mut at = (nsites, ncells);
-        while at != (0, 0) {
-            let Some(back) = prev[at.0][at.1] else {
-                break;
-            };
-            if at.1 != back.1 {
-                positions[at.1 - 1] = origin + spacing * site(at.0);
-            }
-            at = back;
-        }
-        Some(positions)
+        let starts = StartBounds::packed(&sites, &widths)?;
+        let cost = displacement_costs(&sites, &starts, targets);
+        let steps = cheapest_steps(&sites, &widths, &cost);
+        trace_positions(&sites, &steps, cells.len())
     }
 
     /// Pushes `right` and the cells after it right of a cell placed at
@@ -695,6 +615,165 @@ impl Improver {
 // precedence slip that flings cells far off; PARE divides the offset.
 fn site_holding(xj: Dbu, origin: Dbu, spacing: Dbu) -> Dbu {
     origin + spacing * (xj - origin).div_trunc(spacing)
+}
+
+/// The sites `first..=last` of a row a shift may use, numbered from the
+/// row's origin, as `DetailedMgr::shift` finds them.
+struct ShiftSites {
+    origin: Dbu,
+    spacing: Dbu,
+    first: i64,
+    last: i64,
+    /// How many there are, the dynamic program's table rows less one.
+    count: usize,
+}
+
+impl ShiftSites {
+    /// The sites of `row` whole within `[left, right)`; none where there
+    /// are none.
+    fn within(row: &Row, left: Dbu, right: Dbu) -> Option<Self> {
+        let (origin, spacing) = (row.left, row.site_spacing);
+        let mut first = (left - origin).div_trunc(spacing);
+        if origin + spacing * first < left {
+            first += 1;
+        }
+        let mut last = (right - origin).div_trunc(spacing);
+        if origin + spacing * last + row.site_width >= right {
+            last -= 1;
+        }
+        Some(Self {
+            origin,
+            spacing,
+            first,
+            last,
+            count: usize::try_from(last - first + 1).ok()?,
+        })
+    }
+
+    /// The site of table row `i`, counted from one.
+    const fn site(&self, i: usize) -> i64 {
+        self.first + i as i64 - 1
+    }
+
+    fn x(&self, site: i64) -> Dbu {
+        self.origin + self.spacing * site
+    }
+}
+
+/// The first and last site each cell may start at, the cells before it
+/// packed to the left and those after it packed to the right.
+struct StartBounds {
+    left: Vec<i64>,
+    right: Vec<i64>,
+}
+
+impl StartBounds {
+    /// The bounds of cells `widths` sites wide; none where some cell has
+    /// no room.
+    fn packed(sites: &ShiftSites, widths: &[i64]) -> Option<Self> {
+        let mut left = vec![0; widths.len()];
+        let mut k = sites.first;
+        for (i, &width) in widths.iter().enumerate() {
+            left[i] = k;
+            k += width;
+        }
+        let mut right = vec![0; widths.len()];
+        let mut k = sites.last + 1;
+        for i in (0..widths.len()).rev() {
+            right[i] = k - widths[i];
+            k = right[i];
+            if right[i] < left[i] {
+                return None;
+            }
+        }
+        Some(Self { left, right })
+    }
+}
+
+/// The cost of starting cell `j` at the site of table row `i`: its
+/// distance from its target, zero where it cannot start there.
+fn displacement_costs(sites: &ShiftSites, starts: &StartBounds, targets: &[Dbu]) -> Vec<Vec<f64>> {
+    let cells = targets.len();
+    let mut cost = vec![vec![0.0_f64; cells + 1]; sites.count + 1];
+    for j in 1..=cells {
+        for (i, row_cost) in cost.iter_mut().enumerate().skip(1) {
+            let site_id = sites.site(i);
+            if site_id < starts.left[j - 1] || site_id > starts.right[j - 1] {
+                continue;
+            }
+            row_cost[j] = (sites.x(site_id) - targets[j - 1]).abs().to_f64();
+        }
+    }
+    cost
+}
+
+/// The step into each table entry of the cheapest way to have placed the
+/// first `j` cells within the first `i` sites: from `(i - 1, j)`, the site
+/// left empty, or from the entry the cell's predecessor ends at.
+fn cheapest_steps(
+    sites: &ShiftSites,
+    widths: &[i64],
+    cost: &[Vec<f64>],
+) -> Vec<Vec<Option<(usize, usize)>>> {
+    let cells = widths.len();
+    let mut tcost = vec![vec![f64::MAX; cells + 1]; sites.count + 1];
+    let mut prev = vec![vec![None::<(usize, usize)>; cells + 1]; sites.count + 1];
+    tcost[0][0] = 0.0;
+    for j in 1..=cells {
+        let prev_wid = if j == 1 { 1 } else { widths[j - 2] };
+        let curr_wid = widths[j - 1];
+        for i in 1..=sites.count {
+            let site_id = sites.site(i);
+            let c = tcost[i - 1][j];
+            if c < tcost[i][j] {
+                tcost[i][j] = c;
+                prev[i][j] = Some((i - 1, j));
+            }
+            let ii = i as i64 - prev_wid;
+            if let Ok(ii) = usize::try_from(ii)
+                && site_id + curr_wid - 1 <= sites.last
+            {
+                let c = tcost[ii][j - 1] + cost[i][j];
+                if c < tcost[i][j] {
+                    tcost[i][j] = c;
+                    prev[i][j] = Some((ii, j - 1));
+                }
+            }
+        }
+    }
+    prev
+}
+
+/// Where each of the `cells` starts, followed back from the last table
+/// entry; none where the steps never reach the first.
+fn trace_positions(
+    sites: &ShiftSites,
+    prev: &[Vec<Option<(usize, usize)>>],
+    cells: usize,
+) -> Option<Vec<Dbu>> {
+    let mut at = Some((sites.count, cells));
+    let mut reached = false;
+    while let Some((i, j)) = at {
+        if (i, j) == (0, 0) {
+            reached = true;
+        }
+        at = prev[i][j];
+    }
+    if !reached {
+        return None;
+    }
+    let mut positions = vec![Dbu::ZERO; cells];
+    let mut at = (sites.count, cells);
+    while at != (0, 0) {
+        let Some(back) = prev[at.0][at.1] else {
+            break;
+        };
+        if at.1 != back.1 {
+            positions[at.1 - 1] = sites.x(sites.site(at.0));
+        }
+        at = back;
+    }
+    Some(positions)
 }
 
 #[cfg(test)]
