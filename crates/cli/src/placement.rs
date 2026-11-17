@@ -695,7 +695,7 @@ impl TimingPlacement<'_> {
         let inputs = stage.session(self.db, self.repair.plan.wires, self.repair.namer);
         let mut resizer = Resizer::timed(inputs, self.repair.sdc)?;
         let area_before = resizer.design_area();
-        let wns_before = resizer.sta().worst_slack(MinMax::Max).0.time();
+        let wns_before = resizer.sta().worst_slack(MinMax::Max).map(|w| w.slack);
         resizer.set_max_wire_length(pare_resizer::max_wire_length(&resizer));
         let done = Repairer::new(&mut resizer).repair_design()?;
         let mut rebuffer = Rebuffer::new(&resizer)?;
@@ -703,11 +703,11 @@ impl TimingPlacement<'_> {
         let slacks = resizer.driver_net_slacks();
         let weights = timing_net_weights(&slacks, self.net_weight_max);
         log::debug!(
-            "timing weights: worst net slack {:.4} ns, largest weight {:.4}",
-            slacks.first().map_or(f64::INFINITY, |s| s.1.time().nanos()),
+            "timing weights: worst net slack {} ns, largest weight {:.4}",
+            ui::slack_ns(slacks.first().and_then(|s| s.1.time()), 4),
             weights.iter().map(|w| w.1).fold(1.0, f64::max)
         );
-        let wns_after = resizer.sta().worst_slack(MinMax::Max).0.time();
+        let wns_after = resizer.sta().worst_slack(MinMax::Max).map(|w| w.slack);
         let area_after = resizer.design_area();
         let renumbering = resizer.finish()?;
         let round = TimingRound {
@@ -729,8 +729,8 @@ impl TimingPlacement<'_> {
 
 /// What one round of timing-driven repair did.
 struct TimingRound {
-    wns_before: Seconds,
-    wns_after: Seconds,
+    wns_before: Option<Seconds>,
+    wns_after: Option<Seconds>,
     area_change_percent: f64,
     resized: usize,
     repeaters: usize,
@@ -750,9 +750,9 @@ fn show_timing_round(number: usize, round: &TimingRound, elapsed: Duration) {
         (
             &format!("Timing round {number}:"),
             &format!(
-                "WNS {:.3} -> {:.3} ns",
-                round.wns_before.nanos(),
-                round.wns_after.nanos()
+                "WNS {} -> {} ns",
+                ui::slack_ns(round.wns_before, 3),
+                ui::slack_ns(round.wns_after, 3)
             ),
         ),
         ("Area:", &format!("{:+.2}%", round.area_change_percent)),

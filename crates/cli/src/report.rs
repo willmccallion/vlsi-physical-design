@@ -2,6 +2,7 @@
 //! long each phase took, what the checks found and how much memory it took.
 
 use anyhow::Context;
+use pare_common::units::Seconds;
 use pare_common::verify::drc::{DrcReport, Violation};
 use pare_common::verify::routing::RoutingReport;
 use pare_resizer::{HoldSummary, RepairSummary, SetupSummary};
@@ -140,10 +141,10 @@ pub(crate) struct TimingSummary {
     pub(crate) failing_before: usize,
     /// Endpoints failing setup after repair.
     pub(crate) failing_after: usize,
-    /// Worst setup slack before repair.
-    pub(crate) wns_before_ns: f64,
+    /// Worst setup slack before repair; none where nothing is constrained.
+    pub(crate) wns_before_ns: Option<f64>,
     /// Worst setup slack after repair.
-    pub(crate) wns_after_ns: f64,
+    pub(crate) wns_after_ns: Option<f64>,
     /// Total negative setup slack before repair.
     pub(crate) tns_before_ns: f64,
     /// Total negative setup slack after repair.
@@ -166,12 +167,21 @@ pub(crate) struct TimingSummary {
     pub(crate) hold_failing_before: usize,
     /// Endpoints failing hold after it.
     pub(crate) hold_failing_after: usize,
-    /// Worst hold slack before hold repair.
-    pub(crate) hold_wns_before_ns: f64,
+    /// Worst hold slack before hold repair; none where nothing is
+    /// constrained.
+    pub(crate) hold_wns_before_ns: Option<f64>,
     /// Worst hold slack after it.
-    pub(crate) hold_wns_after_ns: f64,
+    pub(crate) hold_wns_after_ns: Option<f64>,
     /// Hold buffers inserted.
     pub(crate) hold_buffers: usize,
+}
+
+/// A time in nanoseconds, where there is one.
+const fn nanos(time: Option<Seconds>) -> Option<f64> {
+    match time {
+        Some(time) => Some(time.nanos()),
+        None => None,
+    }
 }
 
 impl TimingSummary {
@@ -180,8 +190,8 @@ impl TimingSummary {
         Self {
             failing_before: setup.failing_before,
             failing_after: setup.failing_after,
-            wns_before_ns: setup.wns_before.nanos(),
-            wns_after_ns: setup.wns_after.nanos(),
+            wns_before_ns: nanos(setup.wns_before),
+            wns_after_ns: nanos(setup.wns_after),
             tns_before_ns: setup.tns_before.nanos(),
             tns_after_ns: setup.tns_after.nanos(),
             removed: setup.removed,
@@ -193,8 +203,8 @@ impl TimingSummary {
             area_change_percent: setup.area_change_percent,
             hold_failing_before: hold.failing_before,
             hold_failing_after: hold.failing_after,
-            hold_wns_before_ns: hold.wns_before.nanos(),
-            hold_wns_after_ns: hold.wns_after.nanos(),
+            hold_wns_before_ns: nanos(hold.wns_before),
+            hold_wns_after_ns: nanos(hold.wns_after),
             hold_buffers: hold.inserted,
         }
     }

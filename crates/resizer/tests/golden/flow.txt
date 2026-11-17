@@ -10,11 +10,15 @@ reported (iteration, failing): [(Some(1), 8), (Some(10), 7), (Some(20), 3), (Non
 SetupSummary {
     failing_before: 8,
     failing_after: 0,
-    wns_before: Seconds(
-        -3.7384567754652005e-11,
+    wns_before: Some(
+        Seconds(
+            -3.7384567754652005e-11,
+        ),
     ),
-    wns_after: Seconds(
-        9.957325293975218e-12,
+    wns_after: Some(
+        Seconds(
+            9.957325293975218e-12,
+        ),
     ),
     tns_before: Seconds(
         -2.9907654203721377e-10,
@@ -34,17 +38,25 @@ SetupSummary {
 HoldSummary {
     failing_before: 4,
     failing_after: 0,
-    wns_before: Seconds(
-        7.00895746779772e-11,
+    wns_before: Some(
+        Seconds(
+            7.00895746779772e-11,
+        ),
     ),
-    wns_after: Seconds(
-        1.3084509580431128e-10,
+    wns_after: Some(
+        Seconds(
+            1.3084509580431128e-10,
+        ),
     ),
-    setup_wns_before: Seconds(
-        9.957325293975218e-12,
+    setup_wns_before: Some(
+        Seconds(
+            9.957325293975218e-12,
+        ),
     ),
-    setup_wns_after: Seconds(
-        9.957325293975218e-12,
+    setup_wns_after: Some(
+        Seconds(
+            9.957325293975218e-12,
+        ),
     ),
     inserted: 8,
     resized: 0,

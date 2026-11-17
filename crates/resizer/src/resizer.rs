@@ -375,11 +375,7 @@ impl<'a> Resizer<'a, Sta> {
             let _ = slack_of.insert(net, sta.slack(driver, MinMax::Max));
         }
         let mut slacks: Vec<(NetId, Slack)> = slack_of.into_iter().collect();
-        slacks.sort_by(|a, b| {
-            a.1.time()
-                .total_cmp(&b.1.time())
-                .then_with(|| a.0.cmp(&b.0))
-        });
+        slacks.sort_by(|a, b| a.1.total_cmp(&b.1).then_with(|| a.0.cmp(&b.0)));
         slacks
     }
 }
@@ -1365,23 +1361,20 @@ pub(crate) const WORST_SLACK_NETS_SHARE: f64 = 0.1;
 /// net is constrained.
 #[must_use]
 pub fn timing_net_weights(slacks: &[(NetId, Slack)], weight_max: f64) -> Vec<(NetId, f64)> {
-    let Some(&(_, slack_min)) = slacks.first() else {
+    let Some(slack_min) = slacks.first().and_then(|&(_, slack)| slack.time()) else {
         return Vec::new();
     };
-    if !slack_min.is_constrained() {
-        return Vec::new();
-    }
     let worst = ((slacks.len() as f64) * WORST_SLACK_NETS_SHARE).ceil() as usize;
     let slack_max = slacks[worst.clamp(1, slacks.len()) - 1].1;
     let scale = WeightScale {
-        slack_min: slack_min.time(),
+        slack_min,
         slack_max,
         weight_max,
     };
     slacks
         .iter()
         .filter(|(_, slack)| *slack < slack_max)
-        .map(|&(net, slack)| (net, scale.weight(slack)))
+        .filter_map(|&(net, slack)| Some((net, scale.weight(slack.time()?))))
         .collect()
 }
 
@@ -1397,15 +1390,14 @@ impl WeightScale {
     /// The weight at `slack`. An unconstrained `slack_max` gives every
     /// constrained slack `weight_max`, as `OpenSTA`'s finite `INF` does in
     /// `gpl`.
-    fn weight(&self, slack: Slack) -> f64 {
-        let max = self.slack_max.time();
+    fn weight(&self, slack: Seconds) -> f64 {
+        let Some(max) = self.slack_max.time() else {
+            return self.weight_max;
+        };
         if fuzzy::equal(max.get(), self.slack_min.get()) {
             return 1.0;
         }
-        if !self.slack_max.is_constrained() {
-            return self.weight_max;
-        }
-        ((self.weight_max - 1.0) * (max - slack.time()).get() / (max - self.slack_min).get()) + 1.0
+        ((self.weight_max - 1.0) * (max - slack).get() / (max - self.slack_min).get()) + 1.0
     }
 }
 
@@ -1723,8 +1715,7 @@ mod tests {
             }
 
             let sta = resizer.sta();
-            let path_slack = sta.slack(end, MinMax::Max).time();
-            assert!(path_slack.is_finite());
+            let path_slack = sta.slack(end, MinMax::Max).time().unwrap();
             let netlist = resizer.netlist();
             let mut at_pin = first;
             while at_pin != end {
@@ -1738,7 +1729,7 @@ mod tests {
                     .find(|&p| netlist.is_driver(p))
                     .unwrap();
                 for p in [at_pin, out] {
-                    let slack = sta.slack(p, MinMax::Max).time();
+                    let slack = sta.slack(p, MinMax::Max).time().unwrap();
                     assert!(
                         fuzzy::equal(slack, path_slack),
                         "{}: {slack:?} vs {path_slack:?}",
@@ -1754,7 +1745,14 @@ mod tests {
         values
             .iter()
             .enumerate()
-            .map(|(i, &v)| (NetId::new(i), Slack::new(Seconds::new(v))))
+            .map(|(i, &v)| {
+                let slack = if v.is_infinite() {
+                    Slack::Unconstrained
+                } else {
+                    Slack::Constrained(Seconds::new(v))
+                };
+                (NetId::new(i), slack)
+            })
             .collect()
     }
 
@@ -2158,7 +2156,7 @@ mod tests {
             resizer.sta().sdc(),
         );
         let same = |a: Slack, b: Slack| {
-            a == b || (a.is_constrained() && b.is_constrained() && fuzzy::equal(a.time(), b.time()))
+            a == b || matches!((a.time(), b.time()), (Some(a), Some(b)) if fuzzy::equal(a, b))
         };
         resizer
             .db

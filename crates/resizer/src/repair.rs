@@ -1102,7 +1102,7 @@ mod tests {
                 "{repaired:?}"
             );
             let q = pin(resizer.db, "f1/Q");
-            assert!(resizer.sta().slack(q, MinMax::Max).is_constrained());
+            assert!(resizer.sta().slack(q, MinMax::Max).time().is_some());
         });
     }
 

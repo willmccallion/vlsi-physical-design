@@ -77,14 +77,14 @@ pub struct HoldSummary {
     pub failing_before: usize,
     /// Endpoints failing hold at the end.
     pub failing_after: usize,
-    /// Worst hold slack at the start.
-    pub wns_before: Seconds,
+    /// Worst hold slack at the start; none where no endpoint is constrained.
+    pub wns_before: Option<Seconds>,
     /// Worst hold slack at the end.
-    pub wns_after: Seconds,
+    pub wns_after: Option<Seconds>,
     /// Worst setup slack at the start.
-    pub setup_wns_before: Seconds,
+    pub setup_wns_before: Option<Seconds>,
     /// Worst setup slack at the end.
-    pub setup_wns_after: Seconds,
+    pub setup_wns_after: Option<Seconds>,
     /// Hold buffers inserted.
     pub inserted: usize,
     /// Of them, resized to their load.
@@ -102,14 +102,14 @@ pub fn repair_hold(
     let sta = resizer.sta();
     let mut ends: Vec<PinId> = sta.endpoints().to_vec();
     ends.sort_unstable();
-    let setup_wns_before = sta.worst_slack(MinMax::Max).0.time();
+    let setup_wns_before = worst_slack_time(sta, MinMax::Max);
     let mut summary = HoldSummary {
         setup_wns_before,
         ..HoldSummary::default()
     };
     let (mut failures, mut worst) = hold_violations(resizer, &ends, options.hold_margin);
     summary.failing_before = failures.len();
-    summary.wns_before = sta.worst_slack(MinMax::Min).0.time();
+    summary.wns_before = worst_slack_time(sta, MinMax::Min);
     let Some(buffer) = hold_buffer(resizer) else {
         summary.failing_after = failures.len();
         summary.wns_after = summary.wns_before;
@@ -127,7 +127,7 @@ pub fn repair_hold(
     let mut pass = 1;
     let mut progress = true;
     while !failures.is_empty()
-        && worst < options.hold_margin
+        && worst.is_some_and(|w| w < options.hold_margin)
         && progress
         && repair.inserted <= budget
         && pass <= options.max_passes
@@ -136,8 +136,7 @@ pub fn repair_hold(
         let sta = resizer.sta();
         failures.sort_by(|&a, &b| {
             sta.slack(a, MinMax::Min)
-                .time()
-                .total_cmp(&sta.slack(b, MinMax::Min).time())
+                .total_cmp(&sta.slack(b, MinMax::Min))
                 .then(a.cmp(&b))
         });
         for &end in &failures {
@@ -152,8 +151,8 @@ pub fn repair_hold(
     }
     let sta = resizer.sta();
     summary.failing_after = failures.len();
-    summary.wns_after = sta.worst_slack(MinMax::Min).0.time();
-    summary.setup_wns_after = sta.worst_slack(MinMax::Max).0.time();
+    summary.wns_after = worst_slack_time(sta, MinMax::Min);
+    summary.setup_wns_after = worst_slack_time(sta, MinMax::Max);
     summary.inserted = repair.inserted;
     summary.resized = repair.resized;
     Ok(summary)
@@ -167,20 +166,29 @@ fn buffer_budget(db: &NetlistDB, share: Share) -> usize {
     ((share.get() * cells as f64) as usize).max(MIN_BUFFER_BUDGET)
 }
 
+/// The worst endpoint slack on `side`; none where no endpoint is
+/// constrained.
+fn worst_slack_time(sta: &Sta, side: MinMax) -> Option<Seconds> {
+    sta.worst_slack(side).map(|worst| worst.slack)
+}
+
 /// The endpoints whose hold slack is below `margin`, clock pins aside, and
-/// the worst of their slacks, as `findHoldViolations`.
+/// the worst of their slacks, as `findHoldViolations`; none when none
+/// fails.
 fn hold_violations(
     resizer: &Resizer<'_, Sta>,
     ends: &[PinId],
     margin: Seconds,
-) -> (Vec<PinId>, Seconds) {
+) -> (Vec<PinId>, Option<Seconds>) {
     let sta = resizer.sta();
-    let mut worst = Seconds::INFINITY;
+    let mut worst: Option<Seconds> = None;
     let mut failing = Vec::new();
     for &end in ends {
-        let slack = sta.slack(end, MinMax::Min).time();
+        let Some(slack) = sta.slack(end, MinMax::Min).time() else {
+            continue;
+        };
         if !resizer.clocks.is_clock(end) && slack < margin {
-            worst = worst.min(slack);
+            worst = Some(worst.map_or(slack, |w| w.min(slack)));
             failing.push(end);
         }
     }
@@ -290,8 +298,12 @@ impl Slacks {
     fn merge(&mut self, resizer: &Resizer<'_, Sta>, pin: PinId) {
         let sta = resizer.sta();
         for edge in Edge::BOTH {
-            self.early[edge] = self.early[edge].min(sta.slack_edge(pin, edge, MinMax::Min).time());
-            self.late[edge] = self.late[edge].max(sta.slack_edge(pin, edge, MinMax::Max).time());
+            // NOTE: RepairHold::mergeInto folds OpenSTA's INF slacks in, so an
+            // unconstrained load reads as infinite here, as there.
+            let early = sta.slack_edge(pin, edge, MinMax::Min).time_or_infinity();
+            let late = sta.slack_edge(pin, edge, MinMax::Max).time_or_infinity();
+            self.early[edge] = self.early[edge].min(early);
+            self.late[edge] = self.late[edge].max(late);
         }
     }
 }
@@ -357,7 +369,10 @@ impl HoldRepair<'_> {
             if netlist.is_retired(load) {
                 continue;
             }
-            if sta.slack(load, MinMax::Min).time() < self.options.hold_margin {
+            if sta
+                .slack(load, MinMax::Min)
+                .is_below(self.options.hold_margin)
+            {
                 loads.push(load);
                 slacks.merge(resizer, load);
             } else if let Some(port) = netlist.lib_port(load) {
@@ -395,22 +410,24 @@ impl HoldRepair<'_> {
         at: Point<Dbu>,
     ) -> Result<(), RepairError> {
         resizer.journal_begin();
-        let setup_before = resizer.sta().worst_slack(MinMax::Max).0.time();
+        let setup_before = worst_slack_time(resizer.sta(), MinMax::Max);
         let slew_before = resizer.graph().slew(driver).max();
         let net = resizer.netlist().db.pins[driver].net;
         let inserted = resizer.insert_buffer_before_loads(net, loads, self.buffer, at, "hold")?;
         let resized = !Self::load_in_hand(resizer, inserted.output)
             && resizer.resize_to_target_slew(inserted.output)?;
         let slew_after = resizer.graph().slew(driver).max();
-        let setup_after = resizer.sta().worst_slack(MinMax::Max).0.time();
+        let setup_after = worst_slack_time(resizer.sta(), MinMax::Max);
         let growth = if slew_before > Seconds::ZERO {
             slew_after / slew_before
         } else {
             1.0
         };
         let breaks_setup = !self.options.allow_setup_violations
-            && fuzzy::less(setup_after, setup_before)
-            && setup_after < self.options.setup_margin;
+            && setup_after.is_some_and(|after| {
+                setup_before.is_none_or(|before| fuzzy::less(after, before))
+                    && after < self.options.setup_margin
+            });
         if growth > MAX_SLEW_GROWTH || breaks_setup {
             // NOTE: repairEndHold zeroes its whole inserted count here.
             resizer.journal_restore()?;
@@ -495,7 +512,7 @@ mod tests {
         let mut repaired = None;
         with_timed_session(&mut db, &lib, CLOCK, |resizer| {
             let end = pin(resizer.db, "f2/D");
-            let before = resizer.sta().slack(end, MinMax::Min).time();
+            let before = resizer.sta().slack(end, MinMax::Min).time().unwrap();
             let options = HoldOptions {
                 hold_margin,
                 ..HoldOptions::default()
@@ -503,7 +520,7 @@ mod tests {
 
             let summary = repair_hold(resizer, &options).unwrap();
 
-            let after = resizer.sta().slack(end, MinMax::Min).time();
+            let after = resizer.sta().slack(end, MinMax::Min).time().unwrap();
             repaired = Some((summary, before, after));
         });
         repaired.unwrap()

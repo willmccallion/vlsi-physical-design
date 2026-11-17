@@ -410,13 +410,17 @@ impl Moves {
         }
         let sta = resizer.sta();
         let net = resizer.db.pins[site.driver].net;
-        let driver_slack = sta.slack_edge(site.driver, site.edge, MinMax::Max).time();
+        let driver_slack = sta
+            .slack_edge(site.driver, site.edge, MinMax::Max)
+            .time_or_infinity();
         let mut fanouts: Vec<(Seconds, String, PinId)> = resizer
             .netlist()
             .loads(net)
             .filter(|&l| l != site.driver)
             .map(|load| {
-                let slack = sta.slack_edge(load, site.edge, MinMax::Max).time();
+                let slack = sta
+                    .slack_edge(load, site.edge, MinMax::Max)
+                    .time_or_infinity();
                 (slack - driver_slack, resizer.db.pin_name(load), load)
             })
             .collect();
@@ -492,13 +496,15 @@ impl Moves {
         }
         let sta = resizer.sta();
         let net = resizer.db.pins[site.driver].net;
-        let driver_slack = sta.slack(site.driver, MinMax::Max).time();
+        let driver_slack = sta.slack(site.driver, MinMax::Max).time_or_infinity();
         let mut fanouts: Vec<(Seconds, String, PinId)> = resizer
             .netlist()
             .loads(net)
             .filter(|&l| l != site.driver)
             .map(|load| {
-                let slack = sta.slack_edge(load, site.edge, MinMax::Max).time();
+                let slack = sta
+                    .slack_edge(load, site.edge, MinMax::Max)
+                    .time_or_infinity();
                 (slack - driver_slack, resizer.db.pin_name(load), load)
             })
             .collect();
@@ -1011,7 +1017,7 @@ fn side_loads_ok(
         .copied()
         .filter(|&p| p != removal.prev_driver && p != removal.input);
     for side in sides {
-        let old_slack = sta.slack(side, MinMax::Max).time();
+        let old_slack = sta.slack(side, MinMax::Max).time_or_infinity();
         let new_slack = old_slack - change.delay_degrade - margin;
         if new_slack < Seconds::ZERO {
             let degrade = old_slack - new_slack;
@@ -1077,7 +1083,7 @@ fn input_slew_impact_ok(resizer: &Resizer<'_, Sta>, cell: CellId, impact: &SlewI
             Some(&slews_of(impact.new)),
         );
         let delay_diff = (new_delay.rise - old_delay.rise).max(new_delay.fall - old_delay.fall);
-        let old_slack = sta.slack(pin, MinMax::Max).time() - impact.margin;
+        let old_slack = sta.slack(pin, MinMax::Max).time_or_infinity() - impact.margin;
         // NOTE: OpenROAD takes the margin off the new slack a second time, so
         // under a margin even an unchanged output breaks the no-worse rule.
         let new_slack = old_slack - delay_diff - impact.adjust;
