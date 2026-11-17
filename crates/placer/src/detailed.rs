@@ -1126,7 +1126,7 @@ impl<'a> DetailedPlacer<'a> {
 
     /// The free gaps of segment `s` between the few cells nearest `target`
     /// that hold a cell of `width`, as the X range its left edge may take.
-    fn gaps_near(&self, db: &NetlistDB, s: SegmentId, target: Dbu, width: Dbu) -> Vec<(Dbu, Dbu)> {
+    fn gaps_near(&self, db: &NetlistDB, s: SegmentId, target: Dbu, width: Dbu) -> Vec<Interval> {
         const REACH: usize = 8;
         let seg = &self.segments[s];
         let k = seg
@@ -1146,7 +1146,7 @@ impl<'a> DetailedPlacer<'a> {
                 } else {
                     db.cells[seg.cells[j]].location.x
                 };
-                (gap_hi - gap_lo >= width).then_some((gap_lo, gap_hi - width))
+                (gap_hi - gap_lo >= width).then_some(Interval::new(gap_lo, gap_hi - width))
             })
             .collect()
     }
@@ -1157,7 +1157,7 @@ impl<'a> DetailedPlacer<'a> {
         let row = &self.rows[self.segments[s].row];
         self.gaps_near(db, s, target, width)
             .into_iter()
-            .map(|(lo, hi)| snap_down(target.clamp(lo, hi), row.x_min, row.site).max(lo))
+            .map(|left| snap_down(target.clamp(left.lo, left.hi), row.x_min, row.site).max(left.lo))
             .min_by_key(|&x| (x - target).abs())
     }
 
@@ -1175,7 +1175,7 @@ impl<'a> DetailedPlacer<'a> {
         let row = &self.rows[row_index];
         let width = db.cell_size(cell).x;
         let mut best: Option<Dbu> = None;
-        for (lo, hi) in self.gaps_near(db, s, target, width) {
+        for Interval { lo, hi } in self.gaps_near(db, s, target, width) {
             let lo = snap_up(lo.max(target - reach), row.x_min, row.site);
             let hi = snap_down(hi.min(target + reach), row.x_min, row.site);
             let mut x = lo;
