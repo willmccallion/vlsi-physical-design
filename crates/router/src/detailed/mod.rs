@@ -25,7 +25,7 @@ pub(crate) use schedule::{RipUp, round_costs, round_strategy};
 pub use trace::Trace;
 
 use crate::access::{AccessPoint, Node, access_points, fellow_boxes, order_toward};
-use crate::bucket::{Bucket, bucket_at, buckets_between};
+use crate::bucket::{Bucket, SpatialHash, buckets_between};
 use crate::global::{GCell, Gcells, GlobalGrid, GlobalRoutes, RouteTree};
 use crate::occupancy::{Occupancy, Origin, Owner, Proximity, Slot};
 use crate::runs::EdgeSet;
@@ -1388,26 +1388,24 @@ type LowPad = (LayerId, Rect<Dbu>, NetId);
 /// The pads below the routable layers that reserved access points put
 /// down, by bucket.
 struct LowPads {
-    bucket: Dbu,
-    pads: FxHashMap<Point<Bucket>, Vec<LowPad>>,
+    pads: SpatialHash<LowPad>,
 }
 
 impl LowPads {
     /// No pads, to be kept in buckets of the positive side `bucket`.
     fn new(bucket: Dbu) -> Self {
         Self {
-            bucket,
-            pads: FxHashMap::default(),
+            pads: SpatialHash::new(Point::new(Dbu::ZERO, Dbu::ZERO), bucket),
         }
     }
 
     fn keys(&self, r: &Rect<Dbu>) -> impl Iterator<Item = Point<Bucket>> + use<> {
-        buckets_between(bucket_at(r.min, self.bucket), bucket_at(r.max, self.bucket))
+        buckets_between(self.pads.bucket(r.min), self.pads.bucket(r.max))
     }
 
     fn add(&mut self, layer: LayerId, rect: Rect<Dbu>, net: NetId) {
         for key in self.keys(&rect) {
-            self.pads.entry(key).or_default().push((layer, rect, net));
+            self.pads.insert(key, (layer, rect, net));
         }
     }
 
@@ -1416,10 +1414,10 @@ impl LowPads {
     fn clear(&self, layer: LayerId, rect: &Rect<Dbu>, net: NetId, spacing: Dbu) -> bool {
         let reach = rect.expand(spacing);
         self.keys(&reach).all(|key| {
-            self.pads.get(&key).is_none_or(|pads| {
-                pads.iter()
-                    .all(|(l, r, n)| *l != layer || *n == net || !r.overlaps(&reach))
-            })
+            self.pads
+                .in_bucket(key)
+                .iter()
+                .all(|(l, r, n)| *l != layer || *n == net || !r.overlaps(&reach))
         })
     }
 }

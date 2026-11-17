@@ -19,7 +19,7 @@ mod marks;
 pub(crate) use marks::Marks;
 
 use crate::access::{AccessPoint, Node};
-use crate::bucket::{Bucket, bucket_at, buckets_between};
+use crate::bucket::{Bucket, SpatialHash};
 use crate::global::{GCell, Gcells};
 use crate::occupancy::{LocalOccupancy, Occupancy, Origin, Owner, Proximity, too_close};
 use crate::tech::RouteTech;
@@ -286,10 +286,9 @@ type PlacedVia = (ViaId, Point<Dbu>);
 /// The vias a net already has, which its new vias must not crowd.
 #[derive(Clone, Debug)]
 pub(crate) struct OwnVias {
-    bucket: Dbu,
     /// The non-default rule the net follows.
     rule: Option<NonDefaultRuleId>,
-    vias: FxHashMap<Point<Bucket>, Vec<PlacedVia>>,
+    vias: SpatialHash<PlacedVia>,
 }
 
 impl OwnVias {
@@ -310,18 +309,16 @@ impl OwnVias {
             .max()
             .unwrap_or_default();
         Self {
-            bucket: (widest + spacing).max(Dbu(1)),
             rule,
-            vias: FxHashMap::default(),
+            vias: SpatialHash::new(
+                Point::new(Dbu::ZERO, Dbu::ZERO),
+                (widest + spacing).max(Dbu(1)),
+            ),
         }
     }
 
-    const fn key(&self, p: Point<Dbu>) -> Point<Bucket> {
-        bucket_at(p, self.bucket)
-    }
-
     pub(crate) fn add(&mut self, via: ViaId, at: Point<Dbu>) {
-        self.vias.entry(self.key(at)).or_default().push((via, at));
+        self.vias.insert(self.vias.bucket(at), (via, at));
     }
 
     /// How many of the vias `via` at `at` would crowd: their cuts or metal
@@ -333,16 +330,15 @@ impl OwnVias {
         via: ViaId,
         at: Point<Dbu>,
     ) -> usize {
-        let key = self.key(at);
+        let key = self.vias.bucket(at);
         let one = Point::new(Bucket(1), Bucket(1));
         let shapes = &db.library.via(via).shapes;
         let spacing = |layer: LayerRef| match layer {
             LayerRef::Routing(l) => tech.wire_spacing(self.rule, l),
             LayerRef::Cut(c) => db.library.cut_layers[c].spacing.unwrap_or_default(),
         };
-        buckets_between(key - one, key + one)
-            .filter_map(|k| self.vias.get(&k))
-            .flatten()
+        self.vias
+            .between(key - one, key + one)
             .filter(|&&(other, p)| {
                 let theirs = &db.library.via(other).shapes;
                 shapes.iter().any(|a| {

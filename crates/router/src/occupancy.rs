@@ -18,7 +18,7 @@
 //! such as cut-layer obstructions over macros, are filed separately in
 //! coarser buckets so they do not widen every query.
 
-use crate::bucket::{Bucket, bucket_at, buckets_between};
+use crate::bucket::{Bucket, SpatialHash, buckets_between};
 use crate::tech::{CutTech, LayerTech, RouteTech};
 use pare_common::db::indices::{CutLayerId, IdVec, LayerId, NetId, NonDefaultRuleId};
 use pare_common::db::library::LayerRef;
@@ -272,27 +272,27 @@ const LARGE_BUCKET_SCALE: i64 = 64;
 #[derive(Clone, Debug)]
 struct CutLayer {
     rules: CutTech,
-    bucket: Dbu,
-    buckets: FxHashMap<Point<Bucket>, Vec<CutOccupant>>,
-    large: FxHashMap<Point<Bucket>, Vec<CutOccupant>>,
+    buckets: SpatialHash<CutOccupant>,
+    large: SpatialHash<CutOccupant>,
 }
 
 impl CutLayer {
     fn new(rules: CutTech) -> Self {
+        let origin = Point::new(Dbu::ZERO, Dbu::ZERO);
+        let bucket = (rules.reach() * 4).max(Dbu(1));
         Self {
             rules,
-            bucket: (rules.reach() * 4).max(Dbu(1)),
-            buckets: FxHashMap::default(),
-            large: FxHashMap::default(),
+            buckets: SpatialHash::new(origin, bucket),
+            large: SpatialHash::new(origin, bucket * LARGE_BUCKET_SCALE),
         }
     }
 
-    const fn key(&self, p: Point<Dbu>) -> Point<Bucket> {
-        bucket_at(p, self.bucket)
+    fn key(&self, p: Point<Dbu>) -> Point<Bucket> {
+        self.buckets.bucket(p)
     }
 
     fn large_key(&self, p: Point<Dbu>) -> Point<Bucket> {
-        bucket_at(p, self.bucket * LARGE_BUCKET_SCALE)
+        self.large.bucket(p)
     }
 
     /// Whether a shape fits within the largest via cut, so a query widened
@@ -315,10 +315,10 @@ impl CutLayer {
 
     fn add(&mut self, cut: CutOccupant) {
         match self.bucket_of(&cut.rect()) {
-            CutBucket::Small(key) => self.buckets.entry(key).or_default().push(cut),
+            CutBucket::Small(key) => self.buckets.insert(key, cut),
             CutBucket::Large { min, max } => {
                 for key in buckets_between(min, max) {
-                    self.large.entry(key).or_default().push(cut);
+                    self.large.insert(key, cut);
                 }
             }
         }
@@ -327,16 +327,10 @@ impl CutLayer {
     /// Keeps only the cuts in `bucket` that `keep` accepts.
     fn retain_in(&mut self, bucket: CutBucket, keep: impl Fn(&CutOccupant) -> bool) {
         match bucket {
-            CutBucket::Small(key) => {
-                if let Some(list) = self.buckets.get_mut(&key) {
-                    list.retain(&keep);
-                }
-            }
+            CutBucket::Small(key) => self.buckets.retain_in(key, &keep),
             CutBucket::Large { min, max } => {
                 for key in buckets_between(min, max) {
-                    if let Some(list) = self.large.get_mut(&key) {
-                        list.retain(&keep);
-                    }
+                    self.large.retain_in(key, &keep);
                 }
             }
         }
@@ -346,13 +340,11 @@ impl CutLayer {
     fn conflicts(&self, rect: Rect<Dbu>, owner: Owner) -> impl Iterator<Item = &CutOccupant> + '_ {
         let spacing = self.rules.spacing;
         let near = rect.expand(self.rules.reach());
-        let small = buckets_between(self.key(near.min), self.key(near.max))
-            .filter_map(|k| self.buckets.get(&k))
-            .flatten();
+        let small = self.buckets.between(self.key(near.min), self.key(near.max));
         let around = rect.expand(spacing);
         let (q0, q1) = (self.large_key(around.min), self.large_key(around.max));
         let large = buckets_between(q0, q1)
-            .filter_map(move |k| self.large.get(&k).map(|list| (k, list)))
+            .map(move |k| (k, self.large.in_bucket(k)))
             .flat_map(move |(k, list)| {
                 list.iter().filter(move |c| {
                     let first = self.large_key(c.rect().min);
@@ -367,17 +359,19 @@ impl CutLayer {
     /// Every cut once: each large shape is taken from its first bucket.
     #[cfg(test)]
     fn all(&self) -> impl Iterator<Item = &CutOccupant> + '_ {
-        let large = self.large.iter().flat_map(move |(&k, list)| {
+        let large = self.large.buckets().flat_map(move |(k, list)| {
             list.iter()
                 .filter(move |c| self.large_key(c.rect().min) == k)
         });
-        self.buckets.values().flatten().chain(large)
+        self.buckets
+            .buckets()
+            .flat_map(|(_, list)| list)
+            .chain(large)
     }
 
     fn retain(&mut self, keep: impl Fn(&CutOccupant) -> bool) {
-        for list in self.buckets.values_mut().chain(self.large.values_mut()) {
-            list.retain(&keep);
-        }
+        self.buckets.retain(&keep);
+        self.large.retain(&keep);
     }
 }
 
@@ -727,8 +721,7 @@ impl Occupancy {
         let cuts = self
             .cuts
             .iter()
-            .flat_map(|c| c.buckets.values().chain(c.large.values()))
-            .map(|v| v.capacity() * size_of::<CutOccupant>())
+            .map(|c| c.buckets.list_bytes() + c.large.list_bytes())
             .sum();
         (fixed, added, cuts)
     }
@@ -771,12 +764,9 @@ impl Occupancy {
         for track in self.tracks.iter_mut().flatten() {
             track.added.shrink_to_fit();
         }
-        for list in self
-            .cuts
-            .iter_mut()
-            .flat_map(|c| c.buckets.values_mut().chain(c.large.values_mut()))
-        {
-            list.shrink_to_fit();
+        for cut in &mut self.cuts {
+            cut.buckets.shrink_to_fit();
+            cut.large.shrink_to_fit();
         }
     }
 
