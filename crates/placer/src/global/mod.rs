@@ -311,7 +311,7 @@ pub fn default_target_density(utilization: f64) -> Option<TargetDensity> {
 /// Each bin then averages rows and channels, so cells may cross a channel
 /// to a less crowded row instead of facing a wall of blocked bins;
 /// legalization moves them into the rows.
-pub fn default_bins(model: &PlacementModel, target_density: f64) -> usize {
+pub fn default_bins(model: &PlacementModel, target_density: TargetDensity) -> usize {
     let movable = model.cells().filter(|&i| model.movable[i]);
     let (area, count) = movable.fold((0.0, 0usize), |(area, count), i| {
         (
@@ -322,7 +322,7 @@ pub fn default_bins(model: &PlacementModel, target_density: f64) -> usize {
         )
     });
     let average = if count == 0 { 0.0 } else { area / count as f64 };
-    let by_area = bins_for_cell_area(model.die.area(), average, target_density);
+    let by_area = bins_for_cell_area(model.die.area(), average, target_density.get());
     match channel_pitch(&model.rows) {
         Some(pitch) => {
             let rows = (model.die.height() / pitch).floor().max(1.0) as usize;

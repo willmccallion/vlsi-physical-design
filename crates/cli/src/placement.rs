@@ -575,10 +575,9 @@ impl Density {
                 format!("utilization {utilization} gives no target density in (0, 1]")
             })?
         };
-        let bins = gp.bin_dimension.map_or_else(
-            || global::default_bins(model, target.get()),
-            NonZeroUsize::get,
-        );
+        let bins = gp
+            .bin_dimension
+            .map_or_else(|| global::default_bins(model, target), NonZeroUsize::get);
         ui::stat_pair(
             ("Cells:", &movable_cells.to_string()),
             ("Nets:", &model.nets.len().to_string()),
@@ -1009,7 +1008,7 @@ mod tests {
             .sum();
         let target = global::default_target_density(movable_area / model.free_area()).unwrap();
         assert_eq!(density.target, target);
-        assert_eq!(density.bins, global::default_bins(&model, target.get()));
+        assert_eq!(density.bins, global::default_bins(&model, target));
     }
 
     fn set_io_status(db: &mut NetlistDB, name: &str, status: PlacementStatus) {
