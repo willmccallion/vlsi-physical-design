@@ -46,6 +46,68 @@ struct Part {
     groups: Vec<Vec<Node>>,
 }
 
+/// The parts of a net's global route: each run of its tree's cells joined
+/// without leaving a region, kept as a union-find over the cells.
+struct Parts {
+    sets: Vec<usize>,
+    parts: BTreeMap<usize, Part>,
+}
+
+impl Parts {
+    /// The parts of the tree of `cells` and `links`, each link joining two
+    /// cells of one region by `region_of`, and the links that cross from
+    /// one region to another.
+    fn split(
+        cells: &[GCell],
+        links: impl Iterator<Item = (usize, usize)>,
+        region_of: impl Fn(GCell) -> RegionKey,
+    ) -> (Self, Vec<(usize, usize)>) {
+        let mut sets: Vec<usize> = (0..cells.len()).collect();
+        let mut crossings: Vec<(usize, usize)> = Vec::new();
+        for (child, parent) in links {
+            if region_of(cells[child]) == region_of(cells[parent]) {
+                union(&mut sets, child, parent);
+            } else {
+                crossings.push((child, parent));
+            }
+        }
+        let mut parts: BTreeMap<usize, Part> = BTreeMap::new();
+        for (i, &c) in cells.iter().enumerate() {
+            let part = parts.entry(find(&mut sets, i)).or_default();
+            part.region = Some(region_of(c));
+        }
+        (Self { sets, parts }, crossings)
+    }
+
+    /// Adds `node` as a group of its own to the part of cell `cell`.
+    fn add_group(&mut self, cell: usize, node: Node) {
+        self.parts
+            .entry(find(&mut self.sets, cell))
+            .or_default()
+            .groups
+            .push(vec![node]);
+    }
+
+    /// The pieces of `net` to route: each part with two groups or more to
+    /// join, its groups sorted and without repeats.
+    fn into_pieces(self, net: NetId) -> Vec<(RegionKey, Piece)> {
+        let mut pieces = Vec::new();
+        for part in self.parts.into_values() {
+            let mut groups = part.groups;
+            groups.sort_unstable();
+            groups.dedup();
+            let Some(region) = part.region else {
+                continue;
+            };
+            if groups.len() < 2 {
+                continue;
+            }
+            pieces.push((region, Piece { net, groups }));
+        }
+        pieces
+    }
+}
+
 impl DetailedRouter<'_> {
     /// Routes `nets` region by region from their global routes and track
     /// assignment; a net that cannot be split into regions, or whose piece
@@ -239,22 +301,7 @@ impl DetailedRouter<'_> {
             return None;
         }
         let region_of = |c: GCell| grid.key(self.gcell_corner(c));
-
-        let mut sets: Vec<usize> = (0..cells.len()).collect();
-        let mut crossings: Vec<(usize, usize)> = Vec::new();
-        for (child, parent) in tree.links() {
-            if region_of(cells[child]) == region_of(cells[parent]) {
-                union(&mut sets, child, parent);
-            } else {
-                crossings.push((child, parent));
-            }
-        }
-
-        let mut parts: BTreeMap<usize, Part> = BTreeMap::new();
-        for (i, &c) in cells.iter().enumerate() {
-            let part = parts.entry(find(&mut sets, i)).or_default();
-            part.region = Some(region_of(c));
-        }
+        let (mut parts, crossings) = Parts::split(cells, tree.links(), region_of);
         let mut bridges = Vec::with_capacity(crossings.len());
         for (child, parent) in crossings {
             let bridge = self.bridge(net, cells[child], cells[parent])?;
@@ -263,11 +310,7 @@ impl DetailedRouter<'_> {
                 let cell = [child, parent]
                     .into_iter()
                     .find(|&c| region_of(cells[c]) == region)?;
-                parts
-                    .entry(find(&mut sets, cell))
-                    .or_default()
-                    .groups
-                    .push(vec![end]);
+                parts.add_group(cell, end);
             }
             bridges.push(bridge);
         }
@@ -276,31 +319,13 @@ impl DetailedRouter<'_> {
             if grid.key(self.point(a.node)) != region_of(cells[cell]) {
                 return None;
             }
-            parts
-                .entry(find(&mut sets, cell))
-                .or_default()
-                .groups
-                .push(vec![a.node]);
-        }
-
-        let mut pieces = Vec::new();
-        for part in parts.into_values() {
-            let mut groups = part.groups;
-            groups.sort_unstable();
-            groups.dedup();
-            let Some(region) = part.region else {
-                continue;
-            };
-            if groups.len() < 2 {
-                continue;
-            }
-            pieces.push((region, Piece { net, groups }));
+            parts.add_group(cell, a.node);
         }
         Some(Plan {
             net,
             access,
             bridges,
-            pieces,
+            pieces: parts.into_pieces(net),
         })
     }
 
