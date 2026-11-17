@@ -564,7 +564,7 @@ impl<'r, 'a, T: Timing> Repairer<'r, 'a, T> {
             cap: load.cap,
             fanout: load.fanout,
             max_load_slew: load.max_slew,
-            wire_length: Dbu(0),
+            wire_length: Dbu::ZERO,
             loads: vec![pin],
         }
     }
@@ -586,11 +586,11 @@ impl<'r, 'a, T: Timing> Repairer<'r, 'a, T> {
         let repeaters = self.junction_repeaters(&left, &right, driver);
         if repeaters.left {
             let _ = self.make_repeater(repeaters.reason, at, buffer_cell, &mut left)?;
-            left.wire_length = Dbu(0);
+            left.wire_length = Dbu::ZERO;
         }
         if repeaters.right {
             let _ = self.make_repeater(repeaters.reason, at, buffer_cell, &mut right)?;
-            right.wire_length = Dbu(0);
+            right.wire_length = Dbu::ZERO;
         }
         let mut loads = left.loads;
         loads.extend(right.loads);
@@ -693,7 +693,7 @@ impl<'r, 'a, T: Timing> Repairer<'r, 'a, T> {
                 to: at,
                 length,
                 wire_length: length,
-                wire_length_ref: Dbu(0),
+                wire_length_ref: Dbu::ZERO,
                 ref_cap: leaf.cap,
                 max_load_slew: leaf.max_load_slew,
             };
@@ -744,7 +744,7 @@ impl<'r, 'a, T: Timing> Repairer<'r, 'a, T> {
             cap: rest.ref_cap,
             fanout: branch.fanout,
             max_load_slew: rest.max_load_slew,
-            wire_length: Dbu(0),
+            wire_length: Dbu::ZERO,
             loads: std::mem::take(&mut branch.loads),
         };
         let inserted = self.make_repeater("wire", at, buffer_cell, &mut leaf)?;
@@ -797,7 +797,7 @@ impl<'r, 'a, T: Timing> Repairer<'r, 'a, T> {
         let mut split = match self.resizer.options.max_wire_length {
             Some(max) if input.wire_length > max => Some(
                 (max - input.wire_length_ref)
-                    .max(Dbu(0))
+                    .max(Dbu::ZERO)
                     .min(input.length / 2),
             ),
             _ => None,
@@ -805,7 +805,7 @@ impl<'r, 'a, T: Timing> Repairer<'r, 'a, T> {
         let tightened =
             |split: Option<Dbu>, limit: Dbu| Some(split.map_or(limit, |s| s.min(limit)));
         if wire_cap > 0.0 && load_cap > max_cap {
-            split = tightened(split, to_dbu((max_cap - ref_cap) / wire_cap).max(Dbu(0)));
+            split = tightened(split, to_dbu((max_cap - ref_cap) / wire_cap).max(Dbu::ZERO));
         }
         if load_slew > max_load_slew {
             // `OpenROAD` solves the quadratic in single precision.
@@ -827,7 +827,7 @@ impl<'r, 'a, T: Timing> Repairer<'r, 'a, T> {
             split = if l >= 0.0 {
                 tightened(split, to_dbu(f64::from(l)))
             } else {
-                Some(Dbu(0))
+                Some(Dbu::ZERO)
             };
         }
         split
@@ -885,7 +885,7 @@ fn back_along(to: Point<Dbu>, from: Point<Dbu>, distance: f64, length: Dbu) -> (
 // OpenROAD rounds the product before the sum; a fused one could move it.
 #[allow(clippy::suboptimal_flops)]
 fn point_back_along(to: Point<Dbu>, from: Point<Dbu>, distance: f64, length: Dbu) -> Point<Dbu> {
-    let share = if length == Dbu(0) {
+    let share = if length == Dbu::ZERO {
         0.0
     } else {
         distance / length.to_f64()
@@ -992,13 +992,16 @@ mod tests {
 
     #[test]
     fn the_wire_left_behind_a_repeater_is_measured_from_where_it_stands() {
-        let (left, right) = (Point::new(Dbu(0), Dbu(0)), Point::new(Dbu(100), Dbu(0)));
+        let (left, right) = (
+            Point::new(Dbu::ZERO, Dbu::ZERO),
+            Point::new(Dbu(100), Dbu::ZERO),
+        );
 
         let toward_left = back_along(right, left, 30.5, Dbu(100));
         let toward_right = back_along(left, right, 30.5, Dbu(100));
 
-        assert_eq!(toward_left, (Point::new(Dbu(69), Dbu(0)), Dbu(69)));
-        assert_eq!(toward_right, (Point::new(Dbu(30), Dbu(0)), Dbu(70)));
+        assert_eq!(toward_left, (Point::new(Dbu(69), Dbu::ZERO), Dbu(69)));
+        assert_eq!(toward_right, (Point::new(Dbu(30), Dbu::ZERO), Dbu(70)));
     }
 
     #[test]

@@ -173,13 +173,13 @@ impl<'a> Netlist<'a> {
             return shapes[0].rect.center();
         }
         let n = shapes.len() as i64;
-        let (sx, sy) = shapes.iter().fold((0i64, 0i64), |(sx, sy), s| {
+        let (sx, sy) = shapes.iter().fold((Dbu::ZERO, Dbu::ZERO), |(sx, sy), s| {
             (
-                sx + s.rect.min.x.get() + s.rect.max.x.get(),
-                sy + s.rect.min.y.get() + s.rect.max.y.get(),
+                sx + s.rect.min.x + s.rect.max.x,
+                sy + s.rect.min.y + s.rect.max.y,
             )
         });
-        Point::new(Dbu(sx / (2 * n)), Dbu(sy / (2 * n)))
+        Point::new(sx / (2 * n), sy / (2 * n))
     }
 
     /// The pin of `instance` for Liberty port `port`, if connected.

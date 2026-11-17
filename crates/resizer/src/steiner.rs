@@ -202,7 +202,7 @@ fn build_spanning_tree(graph: &mut Graph, driver: usize, alpha: f64, neighbors: 
     let mut heap = BinaryHeap::new();
     let start = SearchEdge {
         weight: 0.0,
-        path_length: Dbu(0),
+        path_length: Dbu::ZERO,
         parent: None,
         node: driver,
     };
@@ -253,11 +253,7 @@ struct Candidate {
 
 impl Ord for Candidate {
     fn cmp(&self, other: &Self) -> Ordering {
-        (self.gain, self.at.x.get(), self.at.y.get()).cmp(&(
-            other.gain,
-            other.at.x.get(),
-            other.at.y.get(),
-        ))
+        (self.gain, self.at.x, self.at.y).cmp(&(other.gain, other.at.x, other.at.y))
     }
 }
 
@@ -272,7 +268,7 @@ impl PartialOrd for Candidate {
 fn best_steiner_for_node(graph: &Graph, node: usize) -> Candidate {
     let pt = graph.points[node];
     let mut best = Candidate {
-        gain: Dbu(0),
+        gain: Dbu::ZERO,
         node,
         other1: node,
         other2: node,
@@ -329,7 +325,7 @@ fn steinerize(graph: &mut Graph) {
         push(graph, node, &mut heap, &mut version, &mut stamps);
     }
     while let Some(best) = heap.pop() {
-        if best.gain == Dbu(0) {
+        if best.gain == Dbu::ZERO {
             break;
         }
         let current = version[best.node];

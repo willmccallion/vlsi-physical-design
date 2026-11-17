@@ -227,12 +227,12 @@ impl Bnet {
     /// through the wire's own capacitance taken off the subtree's slack.
     #[must_use]
     pub fn wire(at: Point<Dbu>, to: BnetPtr, layer: Option<LayerId>, rc: &TreeRc<'_>) -> BnetPtr {
-        let length = at.manhattan(to.at).get();
-        let meters = Meters::from_dbu(Dbu(length), rc.dbu);
+        let length = at.manhattan(to.at);
+        let meters = Meters::from_dbu(length, rc.dbu);
         let (res_per_meter, cap_per_meter) = rc.wire(layer);
         let resistance = meters * res_per_meter;
         let capacitance = meters * cap_per_meter;
-        let delay = if length == 0 {
+        let delay = if length == Dbu::ZERO {
             Fixed::ZERO
         } else {
             Fixed::from_seconds(resistance * (capacitance / 2.0 + to.cap))
@@ -348,7 +348,7 @@ impl Bnet {
     pub fn length(&self) -> Dbu {
         match &self.kind {
             Kind::Wire { to, .. } => self.at.manhattan(to.at),
-            _ => Dbu(0),
+            _ => Dbu::ZERO,
         }
     }
 
@@ -362,7 +362,7 @@ impl Bnet {
             Kind::Junction { left, right } => left
                 .max_load_wire_length()
                 .max(right.max_load_wire_length()),
-            Kind::Load { .. } | Kind::Buffer { .. } => Dbu(0),
+            Kind::Load { .. } | Kind::Buffer { .. } => Dbu::ZERO,
         }
     }
 
@@ -827,7 +827,7 @@ mod tests {
             layer: pare_common::db::indices::LayerId::new(0),
         };
         let load = Bnet::load(
-            Point::new(Dbu(2000), Dbu(0)),
+            Point::new(Dbu(2000), Dbu::ZERO),
             PinId::new(0),
             pin_load(1e-15, 1e-9),
         );
@@ -842,7 +842,7 @@ mod tests {
             dbu: DbuPerMicron::new(2000).unwrap(),
         };
 
-        let wire = Bnet::wire(Point::new(Dbu(0), Dbu(0)), load, None, &tree_rc);
+        let wire = Bnet::wire(Point::new(Dbu::ZERO, Dbu::ZERO), load, None, &tree_rc);
 
         // One micron of wire: 1 ohm and 1 fF; delay = 1 * (0.5 fF + 1 fF).
         assert_eq!(wire.length(), Dbu(2000));
@@ -855,19 +855,19 @@ mod tests {
     #[test]
     fn a_junction_combines_its_sides() {
         let a = Bnet::load(
-            Point::new(Dbu(0), Dbu(0)),
+            Point::new(Dbu::ZERO, Dbu::ZERO),
             PinId::new(0),
             pin_load(1e-15, 2e-9),
         )
         .with_slack(Fixed(10), Some(SlackEdges::One(Edge::Rise)));
         let b = Bnet::load(
-            Point::new(Dbu(0), Dbu(0)),
+            Point::new(Dbu::ZERO, Dbu::ZERO),
             PinId::new(1),
             pin_load(2e-15, 1e-9),
         )
         .with_slack(Fixed(5), Some(SlackEdges::One(Edge::Fall)));
 
-        let junction = Bnet::junction(Point::new(Dbu(0), Dbu(0)), a, b);
+        let junction = Bnet::junction(Point::new(Dbu::ZERO, Dbu::ZERO), a, b);
 
         assert!((junction.cap - Farads::new(3e-15)).abs() < Farads::new(1e-30));
         assert!((junction.fanout - 2.0).abs() < 1e-12);

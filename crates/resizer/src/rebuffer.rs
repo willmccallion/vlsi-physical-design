@@ -278,7 +278,7 @@ impl Rebuffer {
             .capacitance_limit(lib, &lib.ports[smallest.buffer.output]);
         let cap_length = cap_limit.map(|limit| {
             let slack = margined(limit, CAP_MARGIN).get() - input_cap;
-            Dbu(meters_to_dbu(Meters::new(slack / cap), dbu).get().max(0))
+            meters_to_dbu(Meters::new(slack / cap), dbu).max(Dbu::ZERO)
         });
         let max_slew = margined(smallest.input_max_slew, SLEW_MARGIN).get();
         let a = res * cap;
@@ -734,8 +734,8 @@ impl Rebuffer {
                 let ratio = dx.abs().to_f64() / (dx.abs() + dy.abs()).to_f64();
                 let dx_abs = Dbu((ratio * step.to_f64()) as i64).min(step);
                 let dy_abs = step - dx_abs;
-                dx = if dx > Dbu(0) { dx_abs } else { -dx_abs };
-                dy = if dy > Dbu(0) { dy_abs } else { -dy_abs };
+                dx = if dx > Dbu::ZERO { dx_abs } else { -dx_abs };
+                dy = if dy > Dbu::ZERO { dy_abs } else { -dy_abs };
             }
             location = Point::new(location.x + dx, location.y + dy);
             let remaining = node.at.manhattan(location);
@@ -773,7 +773,7 @@ impl Rebuffer {
             .iter()
             .map(|o| wire(resizer, node.at, layer, Rc::clone(o)))
             .collect();
-        self.insert_buffer_options(resizer, &mut near, Dbu(0));
+        self.insert_buffer_options(resizer, &mut near, Dbu::ZERO);
         if near.is_empty() {
             let mut far = options;
             self.insert_buffer_options(resizer, &mut far, full_length);
@@ -781,7 +781,7 @@ impl Rebuffer {
                 .iter()
                 .map(|o| wire(resizer, node.at, layer, Rc::clone(o)))
                 .collect();
-            self.insert_buffer_options(resizer, &mut near, Dbu(0));
+            self.insert_buffer_options(resizer, &mut near, Dbu::ZERO);
         }
         near
     }
@@ -890,7 +890,7 @@ impl Rebuffer {
                 junction1.cap + size.output_cap,
             );
             let buffer_slack = junction1.slack - delay;
-            if buffer_slack >= junction_slack && can_drive(resizer, size, &junction1, Dbu(0)) {
+            if buffer_slack >= junction_slack && can_drive(resizer, size, &junction1, Dbu::ZERO) {
                 let buffer = Bnet::buffer(node.at, size, Rc::clone(&junction1), delay);
                 return Some(Bnet::junction(node.at, buffer, in3));
             }
@@ -994,7 +994,7 @@ impl Rebuffer {
             (Fixed::ZERO, -Fixed::INF)
         };
         let root = with_arrivals(root, -correction);
-        let options = self.area_options(resizer, &root, target, alpha, Dbu(0))?;
+        let options = self.area_options(resizer, &root, target, alpha, Dbu::ZERO)?;
         let mut best_slack: Option<(Fixed, BnetPtr)> = None;
         let mut best_area: Option<(CellArea, BnetPtr)> = None;
         for option in options {
@@ -1054,7 +1054,7 @@ impl Rebuffer {
                         .map(|o| wire(resizer, inner.at, *layer, o))
                         .collect()
                 } else {
-                    self.area_options(resizer, &inner, slack_target, alpha, Dbu(0))?
+                    self.area_options(resizer, &inner, slack_target, alpha, Dbu::ZERO)?
                 };
                 let threshold = Fixed::lerp(node.slack, slack_target + node.arrival_delay, alpha);
                 self.insert_area_options(resizer, &mut options, upstream_wire, (threshold, node))?;
@@ -1346,7 +1346,7 @@ impl Frontier {
         let mut best = None;
         for option in options {
             if !self.improves(option.slack - size.intrinsic_delay, option.area + size.area)
-                || !can_drive(resizer, size, option, Dbu(0))
+                || !can_drive(resizer, size, option, Dbu::ZERO)
             {
                 continue;
             }
@@ -1407,7 +1407,7 @@ fn assured_fallback(
             option.slack_edges,
             option.cap + size.output_cap,
         );
-        if can_drive(resizer, &size, option, Dbu(0)) && option.slack - delay >= threshold {
+        if can_drive(resizer, &size, option, Dbu::ZERO) && option.slack - delay >= threshold {
             let buffered = Bnet::buffer(option.at, &size, Rc::clone(option), delay);
             if buffered.fits(envelope) {
                 best = Some((option.area, buffered));
@@ -1786,7 +1786,7 @@ fn wire_length_limit_by_load_slew(
         return Ok(None);
     }
     let length = meters_to_dbu(Meters::new(meters), dbu);
-    if meters < 0.0 || length == Dbu(0) {
+    if meters < 0.0 || length == Dbu::ZERO {
         return Err(unreachable());
     }
     Ok(Some(length))
@@ -2177,7 +2177,7 @@ mod tests {
             max_slew: Seconds::INFINITY,
         };
         let slack = Fixed::from_seconds(Seconds::new(slack_ns * 1e-9));
-        Bnet::load(Point::new(Dbu(0), Dbu(0)), pin, load).with_slack(slack, None)
+        Bnet::load(Point::new(Dbu::ZERO, Dbu::ZERO), pin, load).with_slack(slack, None)
     }
 
     /// Whether a junction pulls a side under a buffer of its own making.
@@ -2195,18 +2195,18 @@ mod tests {
         with_timed_session(&mut db, &cells(&clock_cells_source()), CLOCK, |resizer| {
             let rebuffer = Rebuffer::new(resizer).unwrap();
             let critical = Bnet::junction(
-                Point::new(Dbu(0), Dbu(0)),
+                Point::new(Dbu::ZERO, Dbu::ZERO),
                 load_with(pin, 1.0, 1.0),
                 load_with(pin, 5.0, 5.0),
             );
             let buffered = Bnet::buffer(
-                Point::new(Dbu(0), Dbu(0)),
+                Point::new(Dbu::ZERO, Dbu::ZERO),
                 &rebuffer.sizes[0],
                 load_with(pin, 5.0, 10.0),
                 Fixed::ZERO,
             );
             let node = Bnet::junction(
-                Point::new(Dbu(0), Dbu(0)),
+                Point::new(Dbu::ZERO, Dbu::ZERO),
                 Rc::clone(&critical),
                 Rc::clone(&buffered),
             );
