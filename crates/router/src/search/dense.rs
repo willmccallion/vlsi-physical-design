@@ -8,6 +8,7 @@
 
 use super::{Heading, RecentVia, Search, State, StepCosts, Visits};
 use crate::access::Node;
+use crate::tech::{CrossIdx, TrackIdx};
 use pare_common::db::indices::LayerId;
 use pare_common::geom::dbu::Dbu;
 use pare_common::geom::interval::Interval;
@@ -24,9 +25,9 @@ const NONE: u32 = u32::MAX;
 /// The crossings of one layer inside the window.
 #[derive(Clone, Copy, Debug)]
 struct Span {
-    first_track: u32,
+    first_track: TrackIdx,
     tracks: u32,
-    first_cross: u32,
+    first_cross: CrossIdx,
     crosses: u32,
     base: usize,
 }
@@ -55,9 +56,9 @@ impl Numbering {
             let crosses = lt.cross_within(b0, b1);
             let span = Span {
                 first_track: tracks.start,
-                tracks: tracks.end - tracks.start,
+                tracks: crate::tech::index_u32(tracks.len()),
                 first_cross: crosses.start,
-                crosses: crosses.end - crosses.start,
+                crosses: crate::tech::index_u32(crosses.len()),
                 base: nodes,
             };
             nodes += span.tracks as usize * span.crosses as usize;
@@ -70,7 +71,7 @@ impl Numbering {
                 .map(|other| search.via_reach(layer, other))
                 .max()
                 .unwrap_or_default();
-            let at: Vec<Dbu> = crosses.map(|c| lt.cross[c as usize].at).collect();
+            let at: Vec<Dbu> = crosses.map(|c| lt.cross[c].at).collect();
             reach = reach.max(steps_within(&at, via_reach));
         }
         Self {
@@ -89,8 +90,8 @@ impl Numbering {
         let span = self
             .spans
             .get(n.layer.index().checked_sub(self.min_layer.index())?)?;
-        let t = n.track.checked_sub(span.first_track)?;
-        let c = n.cross.checked_sub(span.first_cross)?;
+        let t = n.track.steps_from(span.first_track)?;
+        let c = n.cross.steps_from(span.first_cross)?;
         (t < span.tracks && c < span.crosses)
             .then(|| span.base + t as usize * span.crosses as usize + c as usize)
     }
@@ -102,8 +103,12 @@ impl Numbering {
         let crosses = span.crosses as usize;
         Node {
             layer: LayerId::new(self.min_layer.index() + l),
-            track: span.first_track + crate::tech::index_u32(offset / crosses),
-            cross: span.first_cross + crate::tech::index_u32(offset % crosses),
+            track: span
+                .first_track
+                .plus(crate::tech::index_u32(offset / crosses)),
+            cross: span
+                .first_cross
+                .plus(crate::tech::index_u32(offset % crosses)),
         }
     }
 
@@ -117,7 +122,7 @@ impl Numbering {
             },
             Some(RecentVia { from, cross }) => {
                 let side = usize::from(from > state.node.layer);
-                let back = i64::from(state.node.cross) - i64::from(cross);
+                let back = state.node.cross.offset_from(cross);
                 let reach = i64::from(self.reach);
                 if back.abs() > reach {
                     return None;

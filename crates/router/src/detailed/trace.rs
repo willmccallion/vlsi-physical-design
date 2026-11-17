@@ -86,13 +86,13 @@ pub(super) fn route_text(db: &NetlistDB, tech: &RouteTech, edges: &[Edge]) -> St
     wires.sort_unstable();
     let mut out = String::new();
     let runs = wires.chunk_by(|prev, next| {
-        prev.layer == next.layer && prev.track == next.track && prev.cross + 1 == next.cross
+        prev.layer == next.layer && prev.track == next.track && prev.cross.next() == next.cross
     });
     for run in runs {
         let (start, end) = (run[0], run[run.len() - 1]);
         let lt = tech.layer(start.layer);
         let from = lt.point(start.track, start.cross);
-        let to = lt.point(end.track, end.cross + 1);
+        let to = lt.point(end.track, end.cross.next());
         let _ = write!(
             out,
             " {} ({}, {})-({}, {})",

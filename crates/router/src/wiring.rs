@@ -7,6 +7,7 @@
 
 use crate::access::{AccessPoint, Node};
 use crate::runs::{EdgeSet, Run};
+use crate::tech::{CrossIdx, IndexRange, TrackIdx};
 use crate::tech::{LayerTech, RouteTech};
 use pare_common::db::design::{NetlistDB, RouteElem};
 use pare_common::db::indices::{CutLayerId, LayerId, NetId};
@@ -36,7 +37,7 @@ impl Edge {
     /// The edge joining `a` and `b`, if they are neighbouring crossings on
     /// one track or crossings one layer apart.
     pub fn between(a: Node, b: Node) -> Option<Self> {
-        if a.layer == b.layer && a.track == b.track && a.cross.abs_diff(b.cross) == 1 {
+        if a.layer == b.layer && a.track == b.track && a.cross.offset_from(b.cross).abs() == 1 {
             return Some(Self::Wire(if a.cross < b.cross { a } else { b }));
         }
         if a.layer.index().abs_diff(b.layer.index()) == 1 {
@@ -52,7 +53,7 @@ impl Edge {
             Self::Wire(n) => (
                 n,
                 Node {
-                    cross: n.cross + 1,
+                    cross: n.cross.next(),
                     ..n
                 },
             ),
@@ -131,11 +132,11 @@ impl NetRoute {
             let lt = tech.layer(run.layer);
             let (Interval { lo: a0, hi: a1 }, Interval { lo: b0, hi: b1 }) =
                 lt.across_along_rect(area);
-            if !lt.tracks_within(a0, a1).contains(&run.track) {
+            if !lt.tracks_within(a0, a1).contains(run.track) {
                 return None;
             }
             let crosses = lt.cross_within(b0, b1);
-            let from = run.from.max(crosses.start.saturating_sub(1));
+            let from = run.from.max(crosses.start.prev().unwrap_or(crosses.start));
             let to = run.to.min(crosses.end);
             (from < to).then_some(Run { from, to, ..run })
         };
@@ -266,7 +267,7 @@ pub(crate) fn gap_fills(
     tech: &RouteTech,
     net: NetId,
 ) -> Vec<Edge> {
-    let mut metal: BTreeMap<(LayerId, u32), Vec<Interval>> = BTreeMap::new();
+    let mut metal: BTreeMap<(LayerId, TrackIdx), Vec<Interval>> = BTreeMap::new();
     for (layer, rect) in route.metal(db, tech, net) {
         if !tech.routable(layer) {
             continue;
@@ -277,7 +278,7 @@ pub(crate) fn gap_fills(
         let centre = a0.midpoint(a1);
         let track = lt
             .tracks_within(a0, a1)
-            .min_by_key(|&t| (lt.tracks[t as usize] - centre).abs());
+            .min_by_key(|&t| (lt.tracks[t] - centre).abs());
         if let Some(track) = track {
             metal
                 .entry((layer, track))
@@ -298,13 +299,19 @@ pub(crate) fn gap_fills(
             let from = used.last_at_or_before(lt, gap.lo);
             let to = used.first_at_or_after(lt, gap.hi);
             if let (Some(from), Some(to)) = (from, to) {
-                fills.extend((from..to).map(|cross| {
-                    Edge::Wire(Node {
-                        layer,
-                        track,
-                        cross,
+                fills.extend(
+                    (IndexRange {
+                        start: from,
+                        end: to,
                     })
-                }));
+                    .map(|cross| {
+                        Edge::Wire(Node {
+                            layer,
+                            track,
+                            cross,
+                        })
+                    }),
+                );
             }
         }
     }
@@ -328,12 +335,12 @@ fn narrow_gaps(mut spans: Vec<Interval>, spacing: Dbu) -> Vec<Interval> {
 /// points stand on.
 #[derive(Debug, Default)]
 struct UsedCrossings {
-    stretches: Vec<(u32, u32)>,
-    single: Vec<u32>,
+    stretches: Vec<(CrossIdx, CrossIdx)>,
+    single: Vec<CrossIdx>,
 }
 
 impl UsedCrossings {
-    fn of(route: &NetRoute, layer: LayerId, track: u32) -> Self {
+    fn of(route: &NetRoute, layer: LayerId, track: TrackIdx) -> Self {
         let runs = route.edges.runs();
         let first = runs.partition_point(|r| (r.layer, r.track) < (layer, track));
         let stretches = runs[first..]
@@ -355,11 +362,11 @@ impl UsedCrossings {
     }
 
     /// The last used crossing at or before `along`.
-    fn last_at_or_before(&self, lt: &LayerTech, along: Dbu) -> Option<u32> {
-        let at = |c: u32| lt.cross[c as usize].at;
-        let k = lt.cross.partition_point(|c| c.at <= along);
+    fn last_at_or_before(&self, lt: &LayerTech, along: Dbu) -> Option<CrossIdx> {
+        let at = |c: CrossIdx| lt.cross[c].at;
+        let k = lt.cross.as_slice().partition_point(|c| c.at <= along);
         let in_stretches = self.stretches.iter().filter_map(|&(from, to)| {
-            let last = u32::try_from(k).ok()?.checked_sub(1)?;
+            let last = k.checked_sub(1).map(CrossIdx::new)?;
             (last >= from).then(|| last.min(to))
         });
         let singles = self.single.iter().copied().filter(|&c| at(c) <= along);
@@ -367,13 +374,14 @@ impl UsedCrossings {
     }
 
     /// The first used crossing at or after `along`.
-    fn first_at_or_after(&self, lt: &LayerTech, along: Dbu) -> Option<u32> {
-        let at = |c: u32| lt.cross[c as usize].at;
-        let k = u32::try_from(lt.cross.partition_point(|c| c.at < along)).ok();
-        let in_stretches = self.stretches.iter().filter_map(|&(from, to)| {
-            let first = k?;
-            (first <= to).then(|| first.max(from))
-        });
+    fn first_at_or_after(&self, lt: &LayerTech, along: Dbu) -> Option<CrossIdx> {
+        let at = |c: CrossIdx| lt.cross[c].at;
+        let first = CrossIdx::new(lt.cross.as_slice().partition_point(|c| c.at < along));
+        let in_stretches = self
+            .stretches
+            .iter()
+            .filter(|&&(_, to)| first <= to)
+            .map(|&(from, _)| first.max(from));
         let singles = self.single.iter().copied().filter(|&c| at(c) >= along);
         in_stretches.chain(singles).min()
     }
@@ -435,8 +443,8 @@ mod tests {
     fn node(layer: u8, track: u32, cross: u32) -> Node {
         Node {
             layer: LayerId(layer),
-            track,
-            cross,
+            track: TrackIdx(track),
+            cross: CrossIdx(cross),
         }
     }
 

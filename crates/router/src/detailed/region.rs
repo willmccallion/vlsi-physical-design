@@ -1208,6 +1208,7 @@ mod tests {
     use super::*;
     use crate::runs::{EdgeSet, Run};
     use crate::tech::RouteTech;
+    use crate::tech::{CrossIdx, TrackIdx};
     use pare_common::db::design::{NetlistDB, NonDefaultLayer, NonDefaultRule};
     use pare_common::db::indices::LayerId;
 
@@ -1281,9 +1282,9 @@ mod tests {
         let layer = LayerId(1);
         let run = Run {
             layer,
-            track: 5,
-            from: 0,
-            to,
+            track: TrackIdx(5),
+            from: CrossIdx(0),
+            to: CrossIdx(to),
         };
         dr.routes[NetId::new(0)] = NetRoute {
             edges: EdgeSet::from_runs([run]),
@@ -1291,8 +1292,8 @@ mod tests {
         };
         let lt = tech.layer(layer);
         let area = Rect::new(
-            Point::new(Dbu(0), lt.cross[4].at),
-            Point::new(db.die_area.max.x, lt.cross[8].at),
+            Point::new(Dbu(0), lt.cross[CrossIdx(4)].at),
+            Point::new(db.die_area.max.x, lt.cross[CrossIdx(8)].at),
         );
         f(&dr, &area);
     }
@@ -1300,8 +1301,8 @@ mod tests {
     fn m2_track_5(cross: u32) -> Node {
         Node {
             layer: LayerId(1),
-            track: 5,
-            cross,
+            track: TrackIdx(5),
+            cross: CrossIdx(cross),
         }
     }
 

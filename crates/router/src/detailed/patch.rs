@@ -77,7 +77,7 @@ impl DetailedRouter<'_> {
             let mid = a0.midpoint(a1);
             let track = lt
                 .tracks_within(a0, a1)
-                .map(|t| lt.tracks[t as usize])
+                .map(|t| lt.tracks[t])
                 .min_by_key(|&t| (t - mid).abs())
                 .unwrap_or(mid);
             (track - width / 2, track + width / 2)

@@ -11,6 +11,7 @@
 
 use crate::access::{AccessPoint, Node, access_points};
 use crate::tech::RouteTech;
+use crate::tech::{CrossIdx, IndexRange, TrackIdx};
 use pare_common::db::design::{NetlistDB, PinOwner};
 use pare_common::db::indices::{CellId, IdVec, LayerId, MacroId, MacroPinId, PinId, ViaId};
 use pare_common::db::library::LayerRef;
@@ -20,7 +21,6 @@ use pare_common::geom::orient::Orientation;
 use pare_common::geom::point::Point;
 use rayon::prelude::*;
 use rustc_hash::FxHashMap;
-use std::ops::Range;
 
 /// How many gcell pitches beyond a cell's edge its kind takes the grid in.
 const MARGIN_PITCHES: i64 = 4;
@@ -39,8 +39,8 @@ struct Kind {
 /// The part of the lowest routable layer's grid around one cell.
 #[derive(Clone, Debug, PartialEq, Eq)]
 struct Window {
-    tracks: Range<u32>,
-    crossings: Range<u32>,
+    tracks: IndexRange<TrackIdx>,
+    crossings: IndexRange<CrossIdx>,
     location: Point<Dbu>,
 }
 
@@ -117,8 +117,8 @@ impl SharedAccess {
                 .map(|r| AccessPoint {
                     node: Node {
                         layer: r.layer,
-                        track: window.tracks.start + r.track,
-                        cross: window.crossings.start + r.cross,
+                        track: window.tracks.start.plus(r.track),
+                        cross: window.crossings.start.plus(r.cross),
                     },
                     at: window.location + r.at,
                     pin_layer: r.pin_layer,
@@ -153,11 +153,11 @@ fn kind_of(db: &NetlistDB, tech: &RouteTech, cell: CellId) -> (Kind, Window) {
         orient: c.orient,
         tracks: tracks
             .clone()
-            .map(|t| lt.tracks[t as usize] - origin_across)
+            .map(|t| lt.tracks[t] - origin_across)
             .collect(),
         crossings: crossings
             .clone()
-            .map(|k| lt.cross[k as usize].at - origin_along)
+            .map(|k| lt.cross[k].at - origin_along)
             .collect(),
     };
     let window = Window {
@@ -205,13 +205,13 @@ fn below_routable_layers(db: &NetlistDB, tech: &RouteTech, pin: PinId) -> bool {
 
 /// `a` relative to `window`, or none when its node lies outside it.
 fn relative_to(a: &AccessPoint, window: &Window) -> Option<RelativeAccess> {
-    if !window.tracks.contains(&a.node.track) || !window.crossings.contains(&a.node.cross) {
+    if !window.tracks.contains(a.node.track) || !window.crossings.contains(a.node.cross) {
         return None;
     }
     Some(RelativeAccess {
         layer: a.node.layer,
-        track: a.node.track - window.tracks.start,
-        cross: a.node.cross - window.crossings.start,
+        track: a.node.track.steps_from(window.tracks.start)?,
+        cross: a.node.cross.steps_from(window.crossings.start)?,
         at: a.at - window.location,
         pin_layer: a.pin_layer,
         vias: a.vias.clone(),

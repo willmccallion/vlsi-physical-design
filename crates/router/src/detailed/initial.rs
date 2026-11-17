@@ -18,6 +18,7 @@ use crate::access::{AccessPoint, Node};
 use crate::global::{GCell, Gcells};
 use crate::runs::EdgeSet;
 use crate::search::{Costs, Marks};
+use crate::tech::{CrossIdx, TrackIdx};
 use crate::wiring::Edge;
 use pare_common::db::indices::NetId;
 use pare_common::db::library::Direction;
@@ -363,14 +364,14 @@ impl DetailedRouter<'_> {
             ),
             _ => return None,
         };
-        let after = lt.cross.partition_point(|c| c.at < boundary);
-        let before = u32::try_from(after.checked_sub(1)?).ok()?;
+        let after = lt.cross.as_slice().partition_point(|c| c.at < boundary);
+        let before = CrossIdx(u32::try_from(after.checked_sub(1)?).ok()?);
         if after >= lt.cross.len() {
             return None;
         }
         let row = lt.tracks_within(row_start, row_start + self.gcell - Dbu(1));
         let assigned = self.wires[net].iter().find(|w| {
-            w.layer == layer && w.from <= before && before < w.to && row.contains(&w.track)
+            w.layer == layer && w.from <= before && before < w.to && row.contains(w.track)
         });
         if let Some(w) = assigned {
             return Some(Edge::Wire(Node {
@@ -380,8 +381,8 @@ impl DetailedRouter<'_> {
             }));
         }
         let middle = row_start + self.gcell / 2;
-        let mut tracks: Vec<u32> = row.collect();
-        tracks.sort_by_key(|&t| ((lt.tracks[t as usize] - middle).abs(), t));
+        let mut tracks: Vec<TrackIdx> = row.collect();
+        tracks.sort_by_key(|&t| ((lt.tracks[t] - middle).abs(), t));
         let candidates: Vec<Edge> = tracks
             .into_iter()
             .map(|track| {

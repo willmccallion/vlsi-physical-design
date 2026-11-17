@@ -19,6 +19,7 @@
 //! coarser buckets so they do not widen every query.
 
 use crate::bucket::{Bucket, SpatialHash, buckets_between};
+use crate::tech::TrackIdx;
 use crate::tech::{CutTech, LayerTech, RouteTech};
 use pare_common::db::indices::{CutLayerId, IdVec, LayerId, NetId, NonDefaultRuleId};
 use pare_common::db::library::LayerRef;
@@ -197,8 +198,8 @@ pub struct Conflict<'a> {
 pub struct TrackRef {
     /// Routing layer.
     pub layer: LayerId,
-    /// Track index on it.
-    pub track: u32,
+    /// The track.
+    pub track: TrackIdx,
 }
 
 /// One via cut.
@@ -479,7 +480,7 @@ impl Track {
 /// The stretch of one track that a shape blocks.
 #[derive(Clone, Copy, Debug)]
 struct Blocked {
-    track: u32,
+    track: TrackIdx,
     /// Whether the track runs through the shape itself.
     centered: bool,
     lo: Dbu,
@@ -637,7 +638,7 @@ impl FixedTracks {
             let spacing = tech.wire_spacing(rule, layer);
             let extra = lt.spacing_around(&s.shape.rect).1.max(spacing) - lt.spacing;
             for b in blocked_stretches(lt, &s.shape.rect, spacing) {
-                stretches[layer][b.track as usize].push(Interval::new(b.lo - extra, b.hi + extra));
+                stretches[layer][b.track.index()].push(Interval::new(b.lo - extra, b.hi + extra));
             }
         }
         for track in stretches.iter_mut().flatten() {
@@ -653,7 +654,7 @@ impl FixedMetal for FixedTracks {
         let list = self
             .stretches
             .get(track.layer)
-            .and_then(|l| l.get(track.track as usize))
+            .and_then(|l| l.get(track.track.index()))
             .map_or(&[][..], Vec::as_slice);
         let first = list.partition_point(|s| s.hi <= within.lo);
         list[first..]
@@ -669,12 +670,12 @@ pub(crate) fn affected_tracks<'t>(
     lt: &'t LayerTech,
     rect: &Rect<Dbu>,
     spacing: Dbu,
-) -> impl Iterator<Item = (u32, bool)> + use<'t> {
+) -> impl Iterator<Item = (TrackIdx, bool)> + use<'t> {
     let (Interval { lo: a0, hi: a1 }, _) = lt.across_along_rect(rect);
     let reach = spacing + lt.width / 2;
     let range = lt.tracks_within(a0 - reach + Dbu(1), a1 + reach - Dbu(1));
     range.map(move |t| {
-        let c = lt.tracks[t as usize];
+        let c = lt.tracks[t];
         (t, a0 <= c && c <= a1)
     })
 }
@@ -748,7 +749,7 @@ impl Occupancy {
 
     /// Occupants of a track whose stretch meets `[lo, hi]`.
     fn meeting(&self, t: TrackRef, lo: Dbu, hi: Dbu) -> impl Iterator<Item = &Occupant> {
-        self.tracks[t.layer][t.track as usize].meeting(lo, hi, self.chunk)
+        self.tracks[t.layer][t.track.index()].meeting(lo, hi, self.chunk)
     }
 
     /// Records a cut on `cut` for `owner`.
@@ -780,7 +781,7 @@ impl Occupancy {
                 LayerRef::Routing(layer) if tech.routable(layer) => {
                     let spacing = tech.wire_spacing(rule_of(tech, owner), layer);
                     for b in blocked_stretches(tech.layer(layer), &s.shape.rect, spacing) {
-                        let track = &mut self.tracks[layer][b.track as usize];
+                        let track = &mut self.tracks[layer][b.track.index()];
                         if track.fixed.len() == track.fixed_reach.len() {
                             settle.push(TrackRef {
                                 layer,
@@ -799,7 +800,7 @@ impl Occupancy {
             }
         }
         for t in settle {
-            self.tracks[t.layer][t.track as usize].settle_fixed();
+            self.tracks[t.layer][t.track.index()].settle_fixed();
         }
     }
 
@@ -815,7 +816,7 @@ impl Occupancy {
     ) {
         let spacing = tech.wire_spacing(rule_of(tech, owner), layer);
         for blocked in blocked_stretches(tech.layer(layer), rect, spacing) {
-            let track = &mut self.tracks[layer][blocked.track as usize];
+            let track = &mut self.tracks[layer][blocked.track.index()];
             let mut start = blocked.lo;
             loop {
                 let end = (start + self.chunk).min(blocked.hi);
@@ -863,7 +864,7 @@ impl Occupancy {
     pub fn remove_wiring(&mut self, slots: &[Slot], owner: Owner) {
         for slot in slots {
             match *slot {
-                Slot::Track(t) => self.tracks[t.layer][t.track as usize]
+                Slot::Track(t) => self.tracks[t.layer][t.track.index()]
                     .added
                     .retain(|o| o.owner != owner || o.origin == Origin::Fixed),
                 Slot::Cut(c) => self.cuts[c.cut]
@@ -1100,7 +1101,7 @@ mod tests {
         };
         let track = TrackRef {
             layer: LayerId(0),
-            track: 0,
+            track: TrackIdx(0),
         };
 
         let got: Vec<Interval> = fixed

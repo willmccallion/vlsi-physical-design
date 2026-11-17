@@ -599,7 +599,7 @@ impl<'a> DetailedRouter<'a> {
             return false;
         }
         let lt = self.tech.layer(n.layer);
-        (n.track as usize) < lt.tracks.len() && (n.cross as usize) < lt.cross.len()
+        n.track.index() < lt.tracks.len() && n.cross.index() < lt.cross.len()
     }
 
     /// Whether `upper` is the node right above `lower`: on the next layer up

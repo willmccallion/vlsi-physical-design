@@ -11,7 +11,9 @@ use crate::global::Gcells;
 use pare_common::config::RoutingConfig;
 use pare_common::db::design::NetlistDB;
 use pare_common::db::design::NonDefaultRule;
-use pare_common::db::indices::{CutLayerId, IdVec, LayerId, NetId, NonDefaultRuleId, ViaId};
+use pare_common::db::indices::{
+    CutLayerId, IdVec, LayerId, NetId, NonDefaultRuleId, TableIndex, ViaId,
+};
 use pare_common::db::library::{Direction, LayerRef, Library, Shape};
 use pare_common::db::rules::SpacingTable;
 use pare_common::geom::dbu::{Dbu, DbuArea};
@@ -19,15 +21,134 @@ use pare_common::geom::interval::Interval;
 use pare_common::geom::point::Point;
 use pare_common::geom::rect::Rect;
 
+pare_common::define_index!(
+    /// A track of a routing layer, counted across the layer from its
+    /// lowest centerline.
+    TrackIdx(u32)
+);
+
+pare_common::define_index!(
+    /// A crossing of a routing layer: a position along its tracks where a
+    /// track of the layer below or above crosses them, counted from the
+    /// lowest.
+    CrossIdx(u32)
+);
+
+/// The offsets along a layer's tracks or crossings that windows of the grid
+/// take.
+macro_rules! window_offsets {
+    ($name:ident) => {
+        impl $name {
+            /// The one `steps` further up.
+            #[must_use]
+            pub const fn plus(self, steps: u32) -> Self {
+                Self(self.0 + steps)
+            }
+
+            /// How many steps up from `base` this one is; none below it.
+            #[must_use]
+            pub const fn steps_from(self, base: Self) -> Option<u32> {
+                self.0.checked_sub(base.0)
+            }
+        }
+    };
+}
+
+window_offsets!(TrackIdx);
+window_offsets!(CrossIdx);
+
+impl CrossIdx {
+    /// The next crossing along.
+    #[must_use]
+    pub const fn next(self) -> Self {
+        Self(self.0 + 1)
+    }
+
+    /// The crossing before this one; none for the first.
+    #[must_use]
+    pub const fn prev(self) -> Option<Self> {
+        match self.0.checked_sub(1) {
+            Some(i) => Some(Self(i)),
+            None => None,
+        }
+    }
+
+    /// How many crossings along from `other` this one is, negative before
+    /// it.
+    #[must_use]
+    pub fn offset_from(self, other: Self) -> i64 {
+        i64::from(self.0) - i64::from(other.0)
+    }
+}
+
+/// The consecutive tracks or crossings from `start` up to, not including,
+/// `end`; as an iterator, it yields them lowest first, as a `Range` does.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct IndexRange<I> {
+    /// The first index.
+    pub start: I,
+    /// One past the last index.
+    pub end: I,
+}
+
+impl<I: TableIndex> IndexRange<I> {
+    /// The positions `start` up to `end` as indices.
+    pub(crate) fn of_positions(start: usize, end: usize) -> Self {
+        Self {
+            start: I::from_position(start),
+            end: I::from_position(end),
+        }
+    }
+
+    /// The indices from `first` through `last`, both included.
+    pub(crate) fn through(first: I, last: I) -> Self {
+        Self::of_positions(first.position(), last.position() + 1)
+    }
+
+    /// Whether it holds `i`.
+    #[must_use]
+    pub fn contains(&self, i: I) -> bool {
+        self.start.position() <= i.position() && i.position() < self.end.position()
+    }
+}
+
+impl<I: TableIndex> Iterator for IndexRange<I> {
+    type Item = I;
+
+    fn size_hint(&self) -> (usize, Option<usize>) {
+        let len = self.end.position().saturating_sub(self.start.position());
+        (len, Some(len))
+    }
+
+    fn next(&mut self) -> Option<I> {
+        (self.start.position() < self.end.position()).then(|| {
+            let i = self.start;
+            self.start = I::from_position(i.position() + 1);
+            i
+        })
+    }
+}
+
+impl<I: TableIndex> ExactSizeIterator for IndexRange<I> {}
+
+impl<I: TableIndex> DoubleEndedIterator for IndexRange<I> {
+    fn next_back(&mut self) -> Option<I> {
+        (self.start.position() < self.end.position()).then(|| {
+            self.end = I::from_position(self.end.position() - 1);
+            self.end
+        })
+    }
+}
+
 /// A position along a layer's tracks where a via may go.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Cross {
     /// Coordinate along the track.
     pub at: Dbu,
-    /// Index of this coordinate among the layer-below's tracks, if it is one.
-    pub down: Option<u32>,
-    /// Index of this coordinate among the layer-above's tracks, if it is one.
-    pub up: Option<u32>,
+    /// The layer-below's track at this coordinate, if it is one.
+    pub down: Option<TrackIdx>,
+    /// The layer-above's track at this coordinate, if it is one.
+    pub up: Option<TrackIdx>,
 }
 
 /// Tracks and via positions of one routing layer.
@@ -36,13 +157,13 @@ pub struct LayerTech {
     /// Preferred direction.
     pub direction: Direction,
     /// Track centerlines, as the coordinate across the wire, increasing.
-    pub tracks: Vec<Dbu>,
+    pub tracks: IdVec<TrackIdx, Dbu>,
     /// Via positions along every track, increasing.
-    pub cross: Vec<Cross>,
-    /// For each track, its index among the layer-below's crossings.
-    pub track_down: Vec<Option<u32>>,
-    /// For each track, its index among the layer-above's crossings.
-    pub track_up: Vec<Option<u32>>,
+    pub cross: IdVec<CrossIdx, Cross>,
+    /// For each track, the layer-below's crossing it is.
+    pub track_down: IdVec<TrackIdx, Option<CrossIdx>>,
+    /// For each track, the layer-above's crossing it is.
+    pub track_up: IdVec<TrackIdx, Option<CrossIdx>>,
     /// Wire width.
     pub width: Dbu,
     /// Minimum spacing to other nets.
@@ -53,8 +174,8 @@ pub struct LayerTech {
 
 impl LayerTech {
     /// The point at a track and crossing.
-    pub fn point(&self, track: u32, cross: u32) -> Point<Dbu> {
-        let (t, c) = (self.tracks[track as usize], self.cross[cross as usize].at);
+    pub fn point(&self, track: TrackIdx, cross: CrossIdx) -> Point<Dbu> {
+        let (t, c) = (self.tracks[track], self.cross[cross].at);
         match self.direction {
             Direction::Horizontal => Point::new(c, t),
             Direction::Vertical => Point::new(t, c),
@@ -98,21 +219,23 @@ impl LayerTech {
     /// The smallest distance between neighbouring tracks; none with fewer
     /// than two tracks.
     pub fn pitch(&self) -> Option<Dbu> {
-        self.tracks.windows(2).map(|w| w[1] - w[0]).min()
+        self.tracks.as_slice().windows(2).map(|w| w[1] - w[0]).min()
     }
 
     /// Indices of tracks whose centerline lies in `[lo, hi]`.
-    pub fn tracks_within(&self, lo: Dbu, hi: Dbu) -> std::ops::Range<u32> {
-        let a = self.tracks.partition_point(|&t| t < lo);
-        let b = self.tracks.partition_point(|&t| t <= hi);
-        index_u32(a)..index_u32(b)
+    pub fn tracks_within(&self, lo: Dbu, hi: Dbu) -> IndexRange<TrackIdx> {
+        let tracks = self.tracks.as_slice();
+        let a = tracks.partition_point(|&t| t < lo);
+        let b = tracks.partition_point(|&t| t <= hi);
+        IndexRange::of_positions(a, b)
     }
 
     /// Indices of crossings in `[lo, hi]`.
-    pub fn cross_within(&self, lo: Dbu, hi: Dbu) -> std::ops::Range<u32> {
-        let a = self.cross.partition_point(|c| c.at < lo);
-        let b = self.cross.partition_point(|c| c.at <= hi);
-        index_u32(a)..index_u32(b)
+    pub fn cross_within(&self, lo: Dbu, hi: Dbu) -> IndexRange<CrossIdx> {
+        let cross = self.cross.as_slice();
+        let a = cross.partition_point(|c| c.at < lo);
+        let b = cross.partition_point(|c| c.at <= hi);
+        IndexRange::of_positions(a, b)
     }
 }
 
@@ -468,7 +591,7 @@ fn layer_tech(lib: &Library, tracks: &IdVec<LayerId, Vec<Dbu>>, l: LayerId) -> L
                 up: track_index(above, at),
             })
             .collect(),
-        tracks: tracks[l].clone(),
+        tracks: tracks[l].clone().into(),
         width: layer.width,
         spacing: layer.min_spacing,
         spacing_table: layer.spacing_table.clone(),
@@ -476,10 +599,10 @@ fn layer_tech(lib: &Library, tracks: &IdVec<LayerId, Vec<Dbu>>, l: LayerId) -> L
 }
 
 /// Where `at` lies in the sorted coordinates `coords`, when it is one.
-fn track_index(coords: Option<&[Dbu]>, at: Dbu) -> Option<u32> {
+fn track_index<I: TableIndex>(coords: Option<&[Dbu]>, at: Dbu) -> Option<I> {
     coords
         .and_then(|c| c.binary_search(&at).ok())
-        .map(index_u32)
+        .map(I::from_position)
 }
 
 /// The largest extent, either way, of the cuts on `cut` among `shapes`;

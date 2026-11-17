@@ -6,7 +6,7 @@ use crate::detailed::RestoreRoutesError;
 use crate::global::{GCell, GlobalGrid, GlobalNet, route_global, track_demand};
 use crate::occupancy::{FixedTracks, Occupancy, Origin, Owner};
 use crate::runs::{EdgeSet, Run};
-use crate::tech::RouteTech;
+use crate::tech::{CrossIdx, RouteTech, TrackIdx};
 use crate::wiring::{Edge, NetRoute};
 use crate::{
     GlobalRouteEstimator, RouteError, RouteState, RunOptions, Save, SaveError, SavePoint,
@@ -314,8 +314,8 @@ fn removing_a_nets_wiring_keeps_its_fixed_metal() {
     let mut occupancy = Occupancy::new(&tech, Dbu(1000));
     let layer = LayerId(1);
     let around = |p: Point<Dbu>| Rect::new(p, p).expand(Dbu(50));
-    let pin = around(tech.layer(layer).point(0, 0));
-    let wire = around(tech.layer(layer).point(0, 20));
+    let pin = around(tech.layer(layer).point(TrackIdx(0), CrossIdx(0)));
+    let wire = around(tech.layer(layer).point(TrackIdx(0), CrossIdx(20)));
     let owner = Owner::Net(NetId(0));
     occupancy.add_rect(&tech, layer, &pin, owner, Origin::Fixed);
     occupancy.add_rect(&tech, layer, &wire, owner, Origin::Wiring);
@@ -429,8 +429,8 @@ fn consecutive_wire_edges_become_one_wire() {
     let tech = RouteTech::new(&db, &RoutingConfig::default()).unwrap();
     let node = |cross| Node {
         layer: LayerId(1),
-        track: 0,
-        cross,
+        track: TrackIdx(0),
+        cross: CrossIdx(cross),
     };
     let route = NetRoute {
         edges: [
@@ -450,8 +450,8 @@ fn consecutive_wire_edges_become_one_wire() {
         elems,
         [RouteElem::Wire {
             layer: LayerId(1),
-            from: lt.point(0, 0),
-            to: lt.point(0, 3),
+            from: lt.point(TrackIdx(0), CrossIdx(0)),
+            to: lt.point(TrackIdx(0), CrossIdx(3)),
             extensions: (None, None),
         }]
     );
@@ -765,8 +765,8 @@ fn a_wire_under_a_rule_keeps_its_track_clear_for_the_rules_spacing() {
 fn straight_route(tech: &RouteTech, layer: LayerId, crosses: u32) -> NetRoute {
     let node = |cross| Node {
         layer,
-        track: 0,
-        cross,
+        track: TrackIdx(0),
+        cross: CrossIdx(cross),
     };
     let above = Node {
         layer: LayerId(layer.0 + 1),
@@ -774,9 +774,9 @@ fn straight_route(tech: &RouteTech, layer: LayerId, crosses: u32) -> NetRoute {
     };
     let mut edges = EdgeSet::from_runs([Run {
         layer,
-        track: 0,
-        from: 0,
-        to: crosses,
+        track: TrackIdx(0),
+        from: CrossIdx(0),
+        to: CrossIdx(crosses),
     }]);
     edges.extend([Edge::Via {
         lower: node(0),
@@ -796,15 +796,18 @@ fn a_route_near_an_area_keeps_the_stretch_of_a_long_run_meeting_it() {
     let layer = LayerId(1);
     let lt = tech.layer(layer);
     let route = straight_route(&tech, layer, 20);
-    let area = Rect::new(lt.point(0, 8), lt.point(0, 11));
+    let area = Rect::new(
+        lt.point(TrackIdx(0), CrossIdx(8)),
+        lt.point(TrackIdx(0), CrossIdx(11)),
+    );
 
     let near = route.near(&tech, &area);
 
     let expected = Run {
         layer,
-        track: 0,
-        from: 7,
-        to: 12,
+        track: TrackIdx(0),
+        from: CrossIdx(7),
+        to: CrossIdx(12),
     };
     assert_eq!(near.edges.runs(), &[expected]);
 }
@@ -818,7 +821,13 @@ fn a_route_near_an_area_drops_the_vias_outside_it() {
     let route = straight_route(&tech, layer, 20);
     assert_eq!(route.edges.vias().len(), 1);
 
-    let near = route.near(&tech, &Rect::new(lt.point(0, 8), lt.point(0, 11)));
+    let near = route.near(
+        &tech,
+        &Rect::new(
+            lt.point(TrackIdx(0), CrossIdx(8)),
+            lt.point(TrackIdx(0), CrossIdx(11)),
+        ),
+    );
 
     assert_eq!(near.edges.vias(), []);
 }

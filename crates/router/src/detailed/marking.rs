@@ -14,6 +14,7 @@ use super::region::contains_half_open;
 use crate::access::Node;
 use crate::search::Marks;
 use crate::tech::LayerTech;
+use crate::tech::{CrossIdx, IndexRange, TrackIdx};
 use crate::wiring::{Edge, NetRoute};
 use pare_common::db::indices::{LayerId, NetId};
 use pare_common::db::library::LayerRef;
@@ -64,7 +65,7 @@ impl DetailedRouter<'_> {
         let width = self.tech.wire_width(self.tech.net_rule(net), layer);
         let along = lt.across_along_rect(bbox).1;
         let inside = |n: Node| contains_half_open(area, self.point(n));
-        let mut steps: Vec<(u32, u32)> = route
+        let mut steps: Vec<(TrackIdx, CrossIdx)> = route
             .edges
             .iter()
             .filter_map(|e| match e {
@@ -74,22 +75,22 @@ impl DetailedRouter<'_> {
             .filter(|&n| {
                 inside(n)
                     && inside(Node {
-                        cross: n.cross + 1,
+                        cross: n.cross.next(),
                         ..n
                     })
             })
             .map(|n| (n.track, n.cross))
             .collect();
         steps.sort_unstable();
-        for run in steps.chunk_by(|a, b| a.0 == b.0 && a.1 + 1 == b.1) {
+        for run in steps.chunk_by(|a, b| a.0 == b.0 && a.1.next() == b.1) {
             let (track, first) = run[0];
-            let last = run[run.len() - 1].1 + 1;
+            let last = run[run.len() - 1].1.next();
             let metal = wire_rect(lt.point(track, first), lt.point(track, last), width);
             if !metal.is_some_and(|m| m.touches(bbox)) {
                 continue;
             }
             if let Some((from, to)) = marked_crossings(lt, (first, last), along, width) {
-                for cross in from..=to {
+                for cross in IndexRange::through(from, to) {
                     marks.mark_planar(Node {
                         layer,
                         track,
@@ -120,14 +121,13 @@ impl DetailedRouter<'_> {
             }
             let (Interval { lo: a0, hi: a1 }, Interval { lo: b0, hi: b1 }) =
                 lt.across_along_rect(&patch.rect);
-            let first = lt.cross.partition_point(|c| c.at < b0);
-            let end = lt.cross.partition_point(|c| c.at <= b1);
+            let crosses = lt.cross_within(b0, b1);
             for track in lt.tracks_within(a0, a1) {
-                for cross in first..end {
+                for cross in crosses.clone() {
                     let node = Node {
                         layer,
                         track,
-                        cross: crate::tech::index_u32(cross),
+                        cross,
                     };
                     marks.mark_planar(node);
                     marks.mark_via(node);
@@ -184,8 +184,8 @@ impl DetailedRouter<'_> {
             return None;
         }
         let lt = self.tech.layer(node.layer);
-        let track = lt.cross[node.cross as usize].down?;
-        let cross = lt.track_down[node.track as usize]?;
+        let track = lt.cross[node.cross].down?;
+        let cross = lt.track_down[node.track]?;
         Some(Node {
             layer: LayerId::new(node.layer.index() - 1),
             track,
@@ -200,17 +200,20 @@ impl DetailedRouter<'_> {
 /// it or it has grown [`MAX_BLOATS`] times.
 fn marked_crossings(
     lt: &LayerTech,
-    wire: (u32, u32),
+    wire: (CrossIdx, CrossIdx),
     along: Interval,
     width: Dbu,
-) -> Option<(u32, u32)> {
+) -> Option<(CrossIdx, CrossIdx)> {
     let mut within = None;
     for bloat in 1..=MAX_BLOATS {
-        let (lo, hi) = (along.lo - width * bloat, along.hi + width * bloat);
-        let first = crate::tech::index_u32(lt.cross.partition_point(|c| c.at < lo)).max(wire.0);
-        let end = crate::tech::index_u32(lt.cross.partition_point(|c| c.at <= hi)).min(wire.1 + 1);
-        within = (first < end).then(|| (first, end - 1));
-        if end >= first + 2 {
+        let near = lt.cross_within(along.lo - width * bloat, along.hi + width * bloat);
+        let first = near.start.max(wire.0);
+        let end = near.end.min(wire.1.next());
+        within = end
+            .prev()
+            .filter(|&last| first <= last)
+            .map(|last| (first, last));
+        if end.steps_from(first).is_some_and(|steps| steps >= 2) {
             break;
         }
     }
@@ -224,6 +227,9 @@ mod tests {
     use crate::tests::tiny;
     use pare_common::config::RoutingConfig;
 
+    /// A wire over the crossings the tests look at.
+    const WHOLE_WIRE: (CrossIdx, CrossIdx) = (CrossIdx(0), CrossIdx(8));
+
     fn tiny_tech() -> RouteTech {
         RouteTech::new(&tiny(), &RoutingConfig::default()).unwrap()
     }
@@ -232,31 +238,33 @@ mod tests {
     fn a_violation_between_two_crossings_marks_both() {
         let tech = tiny_tech();
         let lt = tech.layer(tech.min_layer);
-        let (a, b) = (lt.cross[3].at, lt.cross[4].at);
+        let (a, b) = (lt.cross[CrossIdx(3)].at, lt.cross[CrossIdx(4)].at);
         let gap = Interval::new(a + Dbu(1), b - Dbu(1));
 
-        let marked = marked_crossings(lt, (0, 8), gap, Dbu(1));
+        let marked = marked_crossings(lt, WHOLE_WIRE, gap, Dbu(1));
 
-        assert_eq!(marked, Some((3, 4)));
+        assert_eq!(marked, Some((CrossIdx(3), CrossIdx(4))));
     }
 
     /// The distance from crossing `i` to its nearer neighbour along `lt`.
-    fn nearer_gap(lt: &LayerTech, i: usize) -> Dbu {
-        (lt.cross[i].at - lt.cross[i - 1].at).min(lt.cross[i + 1].at - lt.cross[i].at)
+    fn nearer_gap(lt: &LayerTech, i: CrossIdx) -> Dbu {
+        let at = |c: CrossIdx| lt.cross[c].at;
+        let before = i.prev().expect("a crossing before");
+        (at(i) - at(before)).min(at(i.next()) - at(i))
     }
 
     #[test]
     fn a_violation_on_one_crossing_is_grown_until_it_takes_in_a_neighbour() {
         let tech = tiny_tech();
         let lt = tech.layer(tech.min_layer);
-        let at = lt.cross[5].at;
-        let width = nearer_gap(lt, 5);
+        let at = lt.cross[CrossIdx(5)].at;
+        let width = nearer_gap(lt, CrossIdx(5));
 
-        let (from, to) = marked_crossings(lt, (0, 8), Interval::new(at, at), width).unwrap();
+        let (from, to) = marked_crossings(lt, WHOLE_WIRE, Interval::new(at, at), width).unwrap();
 
-        assert!(from <= 5 && 5 <= to && to > from, "{from}..={to}");
-        for i in from..=to {
-            assert!((lt.cross[i as usize].at - at).abs() <= width, "{i}");
+        assert!(from.0 <= 5 && 5 <= to.0 && to > from, "{from:?}..={to:?}");
+        for i in IndexRange::through(from, to) {
+            assert!((lt.cross[i].at - at).abs() <= width, "{i:?}");
         }
     }
 
@@ -264,22 +272,23 @@ mod tests {
     fn a_violation_with_no_neighbour_within_reach_marks_its_one_crossing() {
         let tech = tiny_tech();
         let lt = tech.layer(tech.min_layer);
-        let at = lt.cross[5].at;
+        let at = lt.cross[CrossIdx(5)].at;
 
-        let marked = marked_crossings(lt, (0, 8), Interval::new(at, at), Dbu(1));
+        let marked = marked_crossings(lt, WHOLE_WIRE, Interval::new(at, at), Dbu(1));
 
-        assert_eq!(marked, Some((5, 5)));
+        assert_eq!(marked, Some((CrossIdx(5), CrossIdx(5))));
     }
 
     #[test]
     fn only_the_wire_s_own_crossings_are_marked() {
         let tech = tiny_tech();
         let lt = tech.layer(tech.min_layer);
-        let at = lt.cross[5].at;
-        let width = lt.cross[6].at - lt.cross[4].at;
+        let at = lt.cross[CrossIdx(5)].at;
+        let width = lt.cross[CrossIdx(6)].at - lt.cross[CrossIdx(4)].at;
+        let wire = (CrossIdx(5), CrossIdx(8));
 
-        let (from, _) = marked_crossings(lt, (5, 8), Interval::new(at, at), width).unwrap();
+        let (from, _) = marked_crossings(lt, wire, Interval::new(at, at), width).unwrap();
 
-        assert_eq!(from, 5);
+        assert_eq!(from, CrossIdx(5));
     }
 }
