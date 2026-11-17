@@ -588,6 +588,15 @@ impl<'a> DetailedPlacer<'a> {
     /// The X of every cell of segment `s` in the re-placement
     /// [`Self::free_segment`] makes, without making it.
     fn segment_plan(&self, db: &NetlistDB, s: SegmentId) -> Option<Vec<(CellId, Dbu)>> {
+        let candidates = self.spot_candidates(db, s)?;
+        let best = self.least_displacement(db, s, &candidates);
+        trace_plan(&self.segments[s].cells, &candidates, &best)
+    }
+
+    /// For each cell of segment `s`, the spots within its shift reach that
+    /// leave no pin blocked with the rest of the segment away, with how far
+    /// each is from where it stands; none when some cell has no such spot.
+    fn spot_candidates(&self, db: &NetlistDB, s: SegmentId) -> Option<Vec<Vec<(Dbu, Dbu)>>> {
         let seg = &self.segments[s];
         let row = &self.rows[seg.row];
         let mut candidates: Vec<Vec<(Dbu, Dbu)>> = Vec::with_capacity(seg.cells.len());
@@ -614,11 +623,22 @@ impl<'a> DetailedPlacer<'a> {
             }
             candidates.push(spots);
         }
+        Some(candidates)
+    }
+
+    /// For each cell of segment `s` and each of its `candidates`, the least
+    /// total displacement of the cells up to it with it there, and the
+    /// spot of the cell before it that reaches it; none when unreachable.
+    fn least_displacement(
+        &self,
+        db: &NetlistDB,
+        s: SegmentId,
+        candidates: &[Vec<(Dbu, Dbu)>],
+    ) -> Vec<Vec<Reached>> {
+        let seg = &self.segments[s];
         let reach = self.access.map_or(Dbu::ZERO, PinAccess::reach);
         let mut pairs = PairCheck::default();
-        // Each spot's least total displacement over the cells up to it and
-        // the spot of the cell before that reaches it, none when unreachable.
-        let mut best: Vec<Vec<Option<(Dbu, usize)>>> = Vec::with_capacity(candidates.len());
+        let mut best: Vec<Vec<Reached>> = Vec::with_capacity(candidates.len());
         best.push(
             candidates[0]
                 .iter()
@@ -628,18 +648,9 @@ impl<'a> DetailedPlacer<'a> {
         for i in 1..candidates.len() {
             let (prev, cur) = (seg.cells[i - 1], seg.cells[i]);
             let width_before = db.cell_size(prev).x;
-            let mut prefix: Vec<Option<(Dbu, usize)>> = Vec::with_capacity(best[i - 1].len());
-            let mut low: Option<(Dbu, usize)> = None;
-            for (j, reached) in best[i - 1].iter().enumerate() {
-                if let Some((cost, _)) = *reached
-                    && low.is_none_or(|(least, _)| cost < least)
-                {
-                    low = Some((cost, j));
-                }
-                prefix.push(low);
-            }
+            let prefix = least_so_far(&best[i - 1]);
             let before = &candidates[i - 1];
-            let here: Vec<Option<(Dbu, usize)>> = candidates[i]
+            let here: Vec<Reached> = candidates[i]
                 .iter()
                 .map(|&(p, cost)| {
                     let fits = before.partition_point(|&(q, _)| q + width_before <= p);
@@ -656,19 +667,7 @@ impl<'a> DetailedPlacer<'a> {
                 .collect();
             best.push(here);
         }
-        let last = best.len() - 1;
-        let (mut k, _) = best[last]
-            .iter()
-            .enumerate()
-            .filter_map(|(k, reached)| reached.map(|(total, _)| (k, total)))
-            .min_by_key(|&(_, total)| total)?;
-        let mut plan = Vec::with_capacity(best.len());
-        for i in (0..=last).rev() {
-            let (p, _) = candidates[i][k];
-            plan.push((seg.cells[i], p));
-            k = best[i][k]?.1;
-        }
-        Some(plan)
+        best
     }
 
     /// Frees the pins of cell `i` of segment `s`: by the shortest shift
@@ -677,9 +676,29 @@ impl<'a> DetailedPlacer<'a> {
     /// stands, else by moving into a gap of a nearby row.
     fn free_cell(&mut self, db: &mut NetlistDB, s: SegmentId, i: usize) -> Freed {
         let cell = self.segments[s].cells[i];
-        let row = self.segments[s].row;
-        let site = self.rows[row].site;
+        let site = self.rows[self.segments[s].row].site;
         let x = db.cells[cell].location.x;
+        if self.shift_free(db, s, i, x) {
+            return Freed::InPlace;
+        }
+        let blocked = BlockedCell {
+            cell,
+            segment: s,
+            x,
+            reach: site * MAX_SHIFT_SITES,
+        };
+        let rows_near = self.rows_near(db, cell, self.segments[s].row);
+        if self.swap_free(db, blocked, &rows_near) || self.gap_free(db, blocked, &rows_near) {
+            return Freed::Elsewhere;
+        }
+        Freed::Not
+    }
+
+    /// Shifts cell `i` of segment `s`, standing at `x`, by the fewest sites
+    /// that leave it and every cell it pushes clear; whether one did.
+    fn shift_free(&self, db: &mut NetlistDB, s: SegmentId, i: usize, x: Dbu) -> bool {
+        let cell = self.segments[s].cells[i];
+        let site = self.rows[self.segments[s].row].site;
         for k in 1..=MAX_SHIFT_SITES {
             for dir in [-1, 1] {
                 if let Some(moves) = self.shift_plan(db, s, i, x + site * (k * dir)) {
@@ -693,78 +712,106 @@ impl<'a> DetailedPlacer<'a> {
                         db.cells[c].location = at;
                         self.forget([c]);
                     }
-                    return Freed::InPlace;
+                    return true;
                 }
             }
         }
-        let size = db.cell_size(cell);
-        let zone = self.zone_of[cell];
-        let reach = site * MAX_SHIFT_SITES;
-        let rows_near: Vec<RowId> = (0..=FREE_ROWS)
+        false
+    }
+
+    /// The rows within [`FREE_ROWS`] of `row`, each nearer one first, of
+    /// `cell`'s height and an orientation its master allows; `row` itself
+    /// comes twice, as it is both zero rows below and zero above.
+    fn rows_near(&self, db: &NetlistDB, cell: CellId, row: RowId) -> Vec<RowId> {
+        let height = db.cell_size(cell).y;
+        (0..=FREE_ROWS)
             .flat_map(|d| [row.index().checked_sub(d), Some(row.index() + d)])
             .flatten()
             .filter(|&r| r < self.rows.len())
             .map(RowId::new)
             .filter(|&r| {
-                self.rows[r].height == size.y
+                self.rows[r].height == height
                     && db.cell_macro(cell).symmetry.allows(self.rows[r].orient)
             })
-            .collect();
-        for &other in &rows_near {
+            .collect()
+    }
+
+    /// Swaps the blocked cell with a partner from a segment of its zone in
+    /// `rows_near`; whether it found one.
+    fn swap_free(&mut self, db: &mut NetlistDB, blocked: BlockedCell, rows_near: &[RowId]) -> bool {
+        let BlockedCell {
+            cell,
+            segment: s,
+            x,
+            reach,
+        } = blocked;
+        let row = self.segments[s].row;
+        for &other in rows_near {
             for t in self.row_segments[other].ids() {
-                if self.segments[t].zone != zone {
+                if self.segments[t].zone != self.zone_of[cell] {
                     continue;
                 }
-                if let Some(partner) = self.swap_partner(db, cell, s, t, x, reach) {
-                    let here = db.cells[cell].location;
-                    let there = db.cells[partner].location;
-                    log::trace!(
-                        "cell {} at ({}, {}) swaps with {} at ({}, {})",
-                        cell.index(),
-                        here.x.get(),
-                        here.y.get(),
-                        partner.index(),
-                        there.x.get(),
-                        there.y.get()
-                    );
-                    db.cells[cell].location = there;
-                    db.cells[cell].orient = self.rows[other].orient;
-                    db.cells[partner].location = here;
-                    db.cells[partner].orient = self.rows[row].orient;
-                    self.forget([cell, partner]);
-                    self.swap_entries(db, cell, s, partner, t);
-                    return Freed::Elsewhere;
-                }
+                let Some(partner) = self.swap_partner(db, cell, s, t, x, reach) else {
+                    continue;
+                };
+                let here = db.cells[cell].location;
+                let there = db.cells[partner].location;
+                log::trace!(
+                    "cell {} at ({}, {}) swaps with {} at ({}, {})",
+                    cell.index(),
+                    here.x.get(),
+                    here.y.get(),
+                    partner.index(),
+                    there.x.get(),
+                    there.y.get()
+                );
+                db.cells[cell].location = there;
+                db.cells[cell].orient = self.rows[other].orient;
+                db.cells[partner].location = here;
+                db.cells[partner].orient = self.rows[row].orient;
+                self.forget([cell, partner]);
+                self.swap_entries(db, cell, s, partner, t);
+                return true;
             }
         }
-        for &other in &rows_near {
+        false
+    }
+
+    /// Moves the blocked cell into a clear gap of a segment of its zone in
+    /// `rows_near`; whether it found one.
+    fn gap_free(&mut self, db: &mut NetlistDB, blocked: BlockedCell, rows_near: &[RowId]) -> bool {
+        let BlockedCell {
+            cell,
+            segment: s,
+            x,
+            reach,
+        } = blocked;
+        for &other in rows_near {
             for t in self.row_segments[other].ids() {
-                if self.segments[t].zone != zone {
+                if self.segments[t].zone != self.zone_of[cell] {
                     continue;
                 }
                 let Some(gx) = self.clear_spot_near(db, t, cell, x, reach) else {
                     continue;
                 };
                 let at = Point::new(gx, self.rows[other].y);
-                {
-                    let from = db.cells[cell].location;
-                    log::trace!(
-                        "cell {} moves from ({}, {}) to a gap at ({}, {})",
-                        cell.index(),
-                        from.x.get(),
-                        from.y.get(),
-                        at.x.get(),
-                        at.y.get()
-                    );
-                    db.cells[cell].location = at;
-                    db.cells[cell].orient = self.rows[other].orient;
-                    self.forget([cell]);
-                    self.relocate(db, cell, s, t);
-                    return Freed::Elsewhere;
-                }
+                let from = db.cells[cell].location;
+                log::trace!(
+                    "cell {} moves from ({}, {}) to a gap at ({}, {})",
+                    cell.index(),
+                    from.x.get(),
+                    from.y.get(),
+                    at.x.get(),
+                    at.y.get()
+                );
+                db.cells[cell].location = at;
+                db.cells[cell].orient = self.rows[other].orient;
+                self.forget([cell]);
+                self.relocate(db, cell, s, t);
+                return true;
             }
         }
-        Freed::Not
+        false
     }
 
     /// A cell of segment `t` within `reach` of `x`, as wide as `cell` and of
@@ -1326,6 +1373,58 @@ fn cost_nets_of(db: &NetlistDB) -> IdVec<CellId, Vec<NetId>> {
         }
     }
     nets_of
+}
+
+/// The least total displacement of the cells up to one with it at a spot,
+/// and the spot of the cell before it that reaches it; none when
+/// unreachable.
+type Reached = Option<(Dbu, usize)>;
+
+/// For each spot, the least reachable total among it and the spots before
+/// it, with the spot that has it.
+fn least_so_far(reached: &[Reached]) -> Vec<Reached> {
+    let mut prefix: Vec<Reached> = Vec::with_capacity(reached.len());
+    let mut low: Reached = None;
+    for (j, at) in reached.iter().enumerate() {
+        if let Some((cost, _)) = *at
+            && low.is_none_or(|(least, _)| cost < least)
+        {
+            low = Some((cost, j));
+        }
+        prefix.push(low);
+    }
+    prefix
+}
+
+/// The spot of each of `cells` in the least total displacement `best`
+/// reaches, followed back from the cheapest spot of the last cell.
+fn trace_plan(
+    cells: &[CellId],
+    candidates: &[Vec<(Dbu, Dbu)>],
+    best: &[Vec<Reached>],
+) -> Option<Vec<(CellId, Dbu)>> {
+    let last = best.len() - 1;
+    let (mut k, _) = best[last]
+        .iter()
+        .enumerate()
+        .filter_map(|(k, reached)| reached.map(|(total, _)| (k, total)))
+        .min_by_key(|&(_, total)| total)?;
+    let mut plan = Vec::with_capacity(best.len());
+    for i in (0..=last).rev() {
+        let (p, _) = candidates[i][k];
+        plan.push((cells[i], p));
+        k = best[i][k]?.1;
+    }
+    Some(plan)
+}
+
+/// A cell with a blocked pin, its segment and X, and how far it may move.
+#[derive(Clone, Copy, Debug)]
+struct BlockedCell {
+    cell: CellId,
+    segment: SegmentId,
+    x: Dbu,
+    reach: Dbu,
 }
 
 /// Weighted half-perimeter wirelength of one net.
