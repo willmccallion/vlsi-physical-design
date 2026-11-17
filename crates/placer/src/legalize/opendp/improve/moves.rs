@@ -6,6 +6,16 @@ use super::{NodeId, SegmentId};
 use pare_common::geom::dbu::Dbu;
 use pare_common::geom::point::Point;
 
+/// How far a journaled move may take a cell from where improvement found
+/// it.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(super) enum Reach {
+    /// Within the improver's maximum displacement.
+    Limited,
+    /// Anywhere: the multi-row moves of `try_move_multi`.
+    Free,
+}
+
 /// A node's neighbours around `x` in a segment by center, as the
 /// `std::lower_bound` probes of `DetailedMgr`: the first at or right of `x`
 /// and the one before it.
@@ -90,7 +100,14 @@ impl Improver {
             return Ok(false);
         };
         xj = x;
-        if !self.add_to_move_list(n, self.position(n), &[si], Point::new(xj, yj), &[sj], true)? {
+        if !self.add_to_move_list(
+            n,
+            self.position(n),
+            &[si],
+            Point::new(xj, yj),
+            &[sj],
+            Reach::Limited,
+        )? {
             return Ok(false);
         }
         if let Some(r) = right
@@ -138,7 +155,14 @@ impl Improver {
                     return Ok(false);
                 };
                 let from = self.position(n);
-                return self.add_to_move_list(n, from, &[si], Point::new(x, yj), &[sj], true);
+                return self.add_to_move_list(
+                    n,
+                    from,
+                    &[si],
+                    Point::new(x, yj),
+                    &[sj],
+                    Reach::Limited,
+                );
             }
         }
         Ok(false)
@@ -213,7 +237,7 @@ impl Improver {
         let from_segs = self.cell_segs[n].clone();
         let from = self.position(n);
         let to = Point::new(x, self.arch.rows[rb].bottom);
-        self.add_to_move_list(n, from, &from_segs, to, &segs, false)
+        self.add_to_move_list(n, from, &from_segs, to, &segs, Reach::Free)
     }
 
     /// `DetailedMgr::trySwap1`: swaps two single-row cells, each into the
@@ -294,10 +318,24 @@ impl Improver {
             xj = x;
         }
         let (from_i, from_j) = (self.position(n), self.position(ndj));
-        if !self.add_to_move_list(n, from_i, &[si], Point::new(xj, from_j.y), &[sj], true)? {
+        if !self.add_to_move_list(
+            n,
+            from_i,
+            &[si],
+            Point::new(xj, from_j.y),
+            &[sj],
+            Reach::Limited,
+        )? {
             return Ok(false);
         }
-        if !self.add_to_move_list(ndj, from_j, &[sj], Point::new(xi, from_i.y), &[si], true)? {
+        if !self.add_to_move_list(
+            ndj,
+            from_j,
+            &[sj],
+            Point::new(xi, from_i.y),
+            &[si],
+            Reach::Limited,
+        )? {
             self.paint(ndj)?;
             return Ok(false);
         }
@@ -441,7 +479,14 @@ impl Improver {
                 }
             }
             let from = self.position(ndr);
-            if !self.add_to_move_list(ndr, from, &[sj], Point::new(xj, from.y), &[sj], true)? {
+            if !self.add_to_move_list(
+                ndr,
+                from,
+                &[sj],
+                Point::new(xj, from.y),
+                &[sj],
+                Reach::Limited,
+            )? {
                 return Ok(false);
             }
             if xj + self.width(ndr) > self.segments[sj].max_x {
@@ -481,7 +526,14 @@ impl Improver {
                 xj = sx;
             }
             let from = self.position(ndl);
-            if !self.add_to_move_list(ndl, from, &[sj], Point::new(xj, from.y), &[sj], true)? {
+            if !self.add_to_move_list(
+                ndl,
+                from,
+                &[sj],
+                Point::new(xj, from.y),
+                &[sj],
+                Reach::Limited,
+            )? {
                 return Ok(false);
             }
             if xj < self.segments[sj].min_x {
@@ -514,8 +566,9 @@ impl Improver {
     }
 
     /// Moves a cell and journals the move, unless the trial has made too
-    /// many, the spot has no row of its site or, when `limited`, it is too
-    /// far from where the cell began, as `DetailedMgr::addToMoveList`.
+    /// many, the spot has no row of its site or, under [`Reach::Limited`],
+    /// it is too far from where the cell began, as
+    /// `DetailedMgr::addToMoveList`.
     pub(super) fn add_to_move_list(
         &mut self,
         n: NodeId,
@@ -523,7 +576,7 @@ impl Improver {
         from_segs: &[SegmentId],
         to: Point<Dbu>,
         to_segs: &[SegmentId],
-        limited: bool,
+        reach: Reach,
     ) -> Result<bool> {
         if self.journal.moves.len() >= self.move_limit {
             return Ok(false);
@@ -538,7 +591,7 @@ impl Improver {
             return Ok(false);
         }
         let orig = self.orig(n);
-        if limited
+        if reach == Reach::Limited
             && ((to.x - orig.x).abs() > self.max_displacement.x
                 || (to.y - orig.y).abs() > self.max_displacement.y)
         {
