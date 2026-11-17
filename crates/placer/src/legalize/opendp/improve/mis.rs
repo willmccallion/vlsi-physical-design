@@ -252,53 +252,133 @@ fn solve_match(imp: &mut Improver, nodes: &[NodeId]) -> Result<()> {
         return Ok(());
     }
     let count = nodes.len();
-    let pos: Vec<Point<Dbu>> = nodes.iter().map(|&n| imp.position(n)).collect();
-    let segs: Vec<Vec<SegmentId>> = nodes.iter().map(|&n| imp.cell_segs[n].clone()).collect();
-    let cell_node = |i: usize| 2 * i;
-    let spot_node = |i: usize| 2 * i + 1;
-    let (supply, demand) = (2 * count, 2 * count + 1);
-    let mut arcs = Vec::new();
-    let mut assignment = Vec::new();
-    for (i, &n) in nodes.iter().enumerate() {
-        arcs.push(Arc {
-            source: supply,
-            target: cell_node(i),
-            capacity: 1,
-            cost: 0,
-        });
-        arcs.push(Arc {
-            source: spot_node(i),
-            target: demand,
-            capacity: 1,
-            cost: 0,
-        });
-        let orig = imp.orig(n);
-        for (j, &at) in pos.iter().enumerate() {
-            if i != j
-                && ((at.x - orig.x).abs() > imp.max_displacement.x
-                    || (at.y - orig.y).abs() > imp.max_displacement.y)
-            {
-                continue;
-            }
-            let center = Point::new(at.x + imp.width(n) / 2, at.y + imp.height(n) / 2);
-            let cost = hpwl_at(imp, n, center).to_f64();
-            assignment.push((arcs.len(), i, j));
-            arcs.push(Arc {
-                source: cell_node(i),
-                target: spot_node(j),
-                capacity: 1,
-                cost: cost.min(f64::from(i32::MAX)) as i32,
-            });
-        }
-    }
+    let spots = Spots {
+        at: nodes.iter().map(|&n| imp.position(n)).collect(),
+        segs: nodes.iter().map(|&n| imp.cell_segs[n].clone()).collect(),
+    };
+    let matching = Matching::new(imp, nodes, &spots.at);
     let count_i32 = count as i32;
     // NOTE: solveMatch first checks with Preflow that every cell can be
     // matched; each cell's arc to its own spot makes that always so here.
-    let Ok(flow) = min_cost_flow(2 * count + 2, &arcs, supply, demand, count_i32) else {
+    let flow = min_cost_flow(
+        2 * count + 2,
+        &matching.arcs,
+        supply_node(count),
+        demand_node(count),
+        count_i32,
+    );
+    let Ok(flow) = flow else {
         return Ok(());
     };
+    let journal = move_to_matched_spots(imp, nodes, &spots, &matching.choices, &flow)?;
+    if nodes.iter().any(|&n| imp.has_placement_violation(n)) {
+        imp.undo(&journal)?;
+    }
+    Ok(())
+}
+
+/// Where each cell of a matching stands, and its segments.
+struct Spots {
+    at: Vec<Point<Dbu>>,
+    segs: Vec<Vec<SegmentId>>,
+}
+
+/// An arc of a matching that sends cell `cell` to spot `spot`.
+#[derive(Clone, Copy, Debug)]
+struct Choice {
+    arc: usize,
+    cell: usize,
+    spot: usize,
+}
+
+/// The flow network of a matching of cells to spots: the supply feeds
+/// each cell, each spot feeds the demand, and each cell may take each
+/// spot within its reach at the cost of its wirelength there.
+struct Matching {
+    arcs: Vec<Arc>,
+    choices: Vec<Choice>,
+}
+
+const fn cell_node(i: usize) -> usize {
+    2 * i
+}
+
+const fn spot_node(i: usize) -> usize {
+    2 * i + 1
+}
+
+const fn supply_node(count: usize) -> usize {
+    2 * count
+}
+
+const fn demand_node(count: usize) -> usize {
+    2 * count + 1
+}
+
+impl Matching {
+    fn new(imp: &Improver, nodes: &[NodeId], spots: &[Point<Dbu>]) -> Self {
+        let count = nodes.len();
+        let mut matching = Self {
+            arcs: Vec::new(),
+            choices: Vec::new(),
+        };
+        for (i, &n) in nodes.iter().enumerate() {
+            matching
+                .arcs
+                .push(unit_arc(supply_node(count), cell_node(i), 0));
+            matching
+                .arcs
+                .push(unit_arc(spot_node(i), demand_node(count), 0));
+            let orig = imp.orig(n);
+            for (j, &at) in spots.iter().enumerate() {
+                if i != j
+                    && ((at.x - orig.x).abs() > imp.max_displacement.x
+                        || (at.y - orig.y).abs() > imp.max_displacement.y)
+                {
+                    continue;
+                }
+                let center = Point::new(at.x + imp.width(n) / 2, at.y + imp.height(n) / 2);
+                let cost = hpwl_at(imp, n, center).to_f64();
+                matching.choices.push(Choice {
+                    arc: matching.arcs.len(),
+                    cell: i,
+                    spot: j,
+                });
+                let cost = cost.min(f64::from(i32::MAX)) as i32;
+                matching
+                    .arcs
+                    .push(unit_arc(cell_node(i), spot_node(j), cost));
+            }
+        }
+        matching
+    }
+}
+
+const fn unit_arc(source: usize, target: usize, cost: i32) -> Arc {
+    Arc {
+        source,
+        target,
+        capacity: 1,
+        cost,
+    }
+}
+
+/// Moves each cell the flow sends to another spot there, last choice
+/// first, and returns the moves.
+fn move_to_matched_spots(
+    imp: &mut Improver,
+    nodes: &[NodeId],
+    spots: &Spots,
+    choices: &[Choice],
+    flow: &[i32],
+) -> Result<Vec<Move>> {
     let mut journal = Vec::new();
-    for &(arc, i, j) in assignment.iter().rev() {
+    for &Choice {
+        arc,
+        cell: i,
+        spot: j,
+    } in choices.iter().rev()
+    {
         if flow[arc] == 0 || i == j {
             continue;
         }
@@ -306,33 +386,30 @@ fn solve_match(imp: &mut Improver, nodes: &[NodeId]) -> Result<()> {
         if imp.rows_spanned(n) != imp.rows_spanned(m)
             || imp.width(n) != imp.width(m)
             || imp.height(n) != imp.height(m)
-            || segs[i].len() != imp.rows_spanned(n)
-            || segs[j].len() != imp.rows_spanned(n)
+            || spots.segs[i].len() != imp.rows_spanned(n)
+            || spots.segs[j].len() != imp.rows_spanned(n)
         {
             return Err(ImprovementError::Internal(
                 "Unable to interpret flow during matching",
             ));
         }
-        for &s in &segs[i] {
+        for &s in &spots.segs[i] {
             imp.remove_cell_from_segment(n, s)?;
         }
         imp.erase(n);
-        imp.set_position(n, pos[j]);
+        imp.set_position(n, spots.at[j]);
         imp.paint(n)?;
-        for &s in &segs[j] {
+        for &s in &spots.segs[j] {
             imp.add_cell_to_segment(n, s)?;
         }
         journal.push(Move {
             node: n,
-            from: pos[i],
-            from_segs: segs[i].clone(),
-            to_segs: segs[j].clone(),
+            from: spots.at[i],
+            from_segs: spots.segs[i].clone(),
+            to_segs: spots.segs[j].clone(),
         });
     }
-    if nodes.iter().any(|&n| imp.has_placement_violation(n)) {
-        imp.undo(&journal)?;
-    }
-    Ok(())
+    Ok(journal)
 }
 
 /// The wirelength of a cell's nets with it centered at `center`, as
