@@ -102,6 +102,46 @@ struct Taken {
 }
 
 impl Taken {
+    /// The tile with cluster `cluster`, of owner `id`, in its middle, grown
+    /// as far toward [`TILE_SPAN`] each way as is free, and the growths of
+    /// the four tiles with it at the west, east, south and north side.
+    fn centre(&self, cluster: CellBox, id: usize) -> (CellBox, [Growth; 4]) {
+        let mut centred = cluster;
+        let wide = TILE_SPAN - cluster.dx();
+        let tall = TILE_SPAN - cluster.dy();
+        let east = self.grow(&mut centred, id, Side::East, wide / 2);
+        let west = self.grow(&mut centred, id, Side::West, wide - east);
+        let north = self.grow(&mut centred, id, Side::North, tall / 2);
+        let south = self.grow(&mut centred, id, Side::South, tall - north);
+        let sided = [
+            Growth {
+                east: Gcells(0),
+                west: wide,
+                north,
+                south,
+            },
+            Growth {
+                east: wide,
+                west: Gcells(0),
+                north,
+                south,
+            },
+            Growth {
+                east,
+                west,
+                north: Gcells(0),
+                south: tall,
+            },
+            Growth {
+                east,
+                west,
+                north: tall,
+                south: Gcells(0),
+            },
+        ];
+        (centred, sided)
+    }
+
     fn take(&mut self, b: CellBox, id: usize) {
         for cell in b.cells() {
             let _ = self.owner.insert(cell, id);
@@ -167,39 +207,7 @@ fn expand_boxes(clusters: &[CellBox], limit: CellBox) -> Vec<BTreeSet<CellBox>> 
     let mut queue: BinaryHeap<Reverse<(usize, usize, usize, Growth)>> = BinaryHeap::new();
     let mut order = 0;
     for (id, &cluster) in clusters.iter().enumerate() {
-        let mut centred = cluster;
-        let wide = TILE_SPAN - cluster.dx();
-        let tall = TILE_SPAN - cluster.dy();
-        let east = taken.grow(&mut centred, id, Side::East, wide / 2);
-        let west = taken.grow(&mut centred, id, Side::West, wide - east);
-        let north = taken.grow(&mut centred, id, Side::North, tall / 2);
-        let south = taken.grow(&mut centred, id, Side::South, tall - north);
-        let sided = [
-            Growth {
-                east: Gcells(0),
-                west: wide,
-                north,
-                south,
-            },
-            Growth {
-                east: wide,
-                west: Gcells(0),
-                north,
-                south,
-            },
-            Growth {
-                east,
-                west,
-                north: Gcells(0),
-                south: tall,
-            },
-            Growth {
-                east,
-                west,
-                north: tall,
-                south: Gcells(0),
-            },
-        ];
+        let (centred, sided) = taken.centre(cluster, id);
         for growth in sided {
             // NOTE: expandBoxes' priority_queue orders by expansions done
             // alone and leaves ties to the heap; PARE breaks them first in, first out.
