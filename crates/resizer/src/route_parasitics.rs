@@ -12,7 +12,7 @@
 
 use crate::parasitics::{NetParasitics, RcNode, Resistor, WireShape};
 use pare_common::db::design::NetlistDB;
-use pare_common::db::global_route::{NetRoute, RoutePoint};
+use pare_common::db::global_route::{NetRoute, PinGridLocation, RoutePoint};
 use pare_common::db::indices::{CutLayerId, IdVec, LayerId, NetId};
 use pare_common::db::library::Library;
 use pare_common::geom::dbu::{Dbu, DbuPerMicron};
@@ -142,18 +142,53 @@ impl NetParasitics {
     /// `MakeWireParasitics::estimateParasitics`.
     #[must_use]
     pub fn from_route(db: &NetlistDB, net: NetId, route: NetRoute, rc: &RouteRc) -> Self {
+        let routed = RoutedNet { db, net, rc };
+        let mut network = Network::default();
+        routed.add_segments(&mut network, &route);
+        let mut pin_node = Vec::with_capacity(route.pins.len());
+        for location in &route.pins {
+            let pin = network.add_node();
+            pin_node.push((location.pin, pin));
+            routed.join_pin(&mut network, pin, location);
+        }
+        Self::from_network(
+            WireShape::Route(route),
+            network.resistors,
+            network
+                .cap
+                .iter()
+                .map(|&c| Farads::new(f64::from(c)))
+                .collect(),
+            pin_node,
+        )
+    }
+}
+
+/// A net whose global route is being turned into parasitics.
+struct RoutedNet<'a> {
+    db: &'a NetlistDB,
+    net: NetId,
+    rc: &'a RouteRc,
+}
+
+impl RoutedNet<'_> {
+    /// The width the net's non-default rule gives wires on `layer`.
+    fn ndr_width(&self, layer: LayerId) -> Option<Dbu> {
         // NOTE: MakeWireParasitics::layerRC reads the rule for the layer
         // unchecked and crashes where the NDR has none; PARE leaves the
         // resistance unscaled there.
-        let ndr_width = |layer: LayerId| {
-            let rule = db.nets[net].non_default_rule?;
-            db.non_default_rules[rule]
-                .layers
-                .iter()
-                .find(|l| l.layer == layer)
-                .map(|l| l.width)
-        };
-        let mut network = Network::default();
+        let rule = self.db.nets[self.net].non_default_rule?;
+        self.db.non_default_rules[rule]
+            .layers
+            .iter()
+            .find(|l| l.layer == layer)
+            .map(|l| l.width)
+    }
+
+    /// Adds a wire or cut for each segment of `route` with both ends on
+    /// layers the parasitics count.
+    fn add_segments(&self, network: &mut Network, route: &NetRoute) {
+        let (db, rc) = (self.db, self.rc);
         for segment in &route.segments {
             let valid = |layer: LayerId| layer >= rc.min_layer || segment.is_via();
             let from = valid(segment.from.layer).then(|| network.node(segment.from));
@@ -167,57 +202,50 @@ impl NetParasitics {
                 rc.wire(
                     segment.length(),
                     segment.from.layer,
-                    ndr_width(segment.from.layer),
+                    self.ndr_width(segment.from.layer),
                 )
             } else {
-                log::warn!("Non wire or via route found on net {}.", db.nets[net].name);
+                log::warn!(
+                    "Non wire or via route found on net {}.",
+                    db.nets[self.net].name
+                );
                 (0.0, 0.0)
             };
             network.wire(from, to, res, cap);
         }
-        let mut pin_node = Vec::with_capacity(route.pins.len());
-        for location in &route.pins {
-            let pin = network.add_node();
-            pin_node.push((location.pin, pin));
-            let node_above = location.layer.above().and_then(|above| {
-                let at = RoutePoint {
-                    at: location.grid,
-                    layer: above,
-                };
-                network.nodes.get(&at).map(|&node| (node, above))
-            });
-            let (grid, layer, via_res) = if let Some((node, above)) = node_above {
-                (Some(node), above, rc.cut(location.layer))
-            } else {
-                let at = RoutePoint {
-                    at: location.grid,
-                    layer: location.layer,
-                };
-                (network.nodes.get(&at).copied(), location.layer, 0.0)
+    }
+
+    /// Wires node `pin` to the route at its grid point, through the via up
+    /// where the route arrives on the layer above.
+    fn join_pin(&self, network: &mut Network, pin: RcNode, location: &PinGridLocation) {
+        let node_above = location.layer.above().and_then(|above| {
+            let at = RoutePoint {
+                at: location.grid,
+                layer: above,
             };
-            let Some(grid) = grid else {
-                log::warn!(
-                    "Missing route to pin {} in net {}.",
-                    db.pin_name(location.pin),
-                    db.nets[net].name
-                );
-                continue;
+            network.nodes.get(&at).map(|&node| (node, above))
+        });
+        let (grid, layer, via_res) = if let Some((node, above)) = node_above {
+            (Some(node), above, self.rc.cut(location.layer))
+        } else {
+            let at = RoutePoint {
+                at: location.grid,
+                layer: location.layer,
             };
-            let length = Dbu((location.at.x.get() - location.grid.x.get()).abs()
-                + (location.at.y.get() - location.grid.y.get()).abs());
-            let (res, cap) = rc.wire(length, layer, ndr_width(layer));
-            network.wire(pin, grid, res + via_res, cap);
-        }
-        Self::from_network(
-            WireShape::Route(route),
-            network.resistors,
-            network
-                .cap
-                .iter()
-                .map(|&c| Farads::new(f64::from(c)))
-                .collect(),
-            pin_node,
-        )
+            (network.nodes.get(&at).copied(), location.layer, 0.0)
+        };
+        let Some(grid) = grid else {
+            log::warn!(
+                "Missing route to pin {} in net {}.",
+                self.db.pin_name(location.pin),
+                self.db.nets[self.net].name
+            );
+            return;
+        };
+        let length = Dbu((location.at.x.get() - location.grid.x.get()).abs()
+            + (location.at.y.get() - location.grid.y.get()).abs());
+        let (res, cap) = self.rc.wire(length, layer, self.ndr_width(layer));
+        network.wire(pin, grid, res + via_res, cap);
     }
 }
 
