@@ -15,11 +15,24 @@ use pare_common::network_simplex::{Arc, min_cost_flow};
 /// `Clustering::Kmeans` passes `minCostFlow`.
 const MAX_DIST: f32 = 5200.0;
 
+/// A sink or branching point in the tree's length units, in the single
+/// precision `TritonCTS` keeps sinks in.
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub(crate) struct SinkPoint {
+    pub x: f32,
+    pub y: f32,
+}
+
+impl SinkPoint {
+    pub(crate) const fn new(x: f32, y: f32) -> Self {
+        Self { x, y }
+    }
+}
+
 /// A sink to cluster, in the tree's length units.
 #[derive(Clone, Copy, Debug)]
 struct Sink {
-    x: f32,
-    y: f32,
+    at: SinkPoint,
     cluster: Option<usize>,
 }
 
@@ -29,24 +42,17 @@ pub(crate) struct Clustering {
     sinks: Vec<Sink>,
     clusters: Vec<Vec<usize>>,
     segment_length: f32,
-    branching_point: (f32, f32),
+    branching_point: SinkPoint,
 }
 
-const fn dist(a: (f32, f32), b: (f32, f32)) -> f32 {
-    (a.0 - b.0).abs() + (a.1 - b.1).abs()
+const fn dist(a: SinkPoint, b: SinkPoint) -> f32 {
+    (a.x - b.x).abs() + (a.y - b.y).abs()
 }
 
 impl Clustering {
-    pub fn new(sinks: &[(f32, f32)], branching_point: (f32, f32)) -> Self {
+    pub fn new(sinks: &[SinkPoint], branching_point: SinkPoint) -> Self {
         Self {
-            sinks: sinks
-                .iter()
-                .map(|&(x, y)| Sink {
-                    x,
-                    y,
-                    cluster: None,
-                })
-                .collect(),
+            sinks: sinks.iter().map(|&at| Sink { at, cluster: None }).collect(),
             clusters: Vec::new(),
             segment_length: 0.0,
             branching_point,
@@ -55,7 +61,7 @@ impl Clustering {
 
     /// Runs k-means once from the two `means`, as `iterKmeans(1, 2, cap,
     /// max, power, means)`, leaving the means where it puts them.
-    pub fn run(&mut self, cap: usize, max_rounds: u32, power: u32, means: &mut [(f32, f32); 2]) {
+    pub fn run(&mut self, cap: usize, max_rounds: u32, power: u32, means: &mut [SinkPoint; 2]) {
         self.segment_length = dist(means[0], means[1]);
         let mut tmp = *means;
         let silhouette = self.kmeans(cap, max_rounds, power, &mut tmp);
@@ -76,7 +82,7 @@ impl Clustering {
         &self.clusters
     }
 
-    fn fix_segment_lengths(&self, means: &mut [(f32, f32); 2]) {
+    fn fix_segment_lengths(&self, means: &mut [SinkPoint; 2]) {
         let half = self.segment_length / 2.0;
         fix_segment(self.branching_point, half, &mut means[0]);
         fix_segment(self.branching_point, half, &mut means[1]);
@@ -87,7 +93,7 @@ impl Clustering {
         cap: usize,
         max_rounds: u32,
         power: u32,
-        means: &mut [(f32, f32); 2],
+        means: &mut [SinkPoint; 2],
     ) -> f32 {
         for sink in &mut self.sinks {
             sink.cluster = None;
@@ -100,7 +106,7 @@ impl Clustering {
             for (i, sink) in self.sinks.iter().enumerate() {
                 let position = match sink.cluster {
                     Some(c) if c < 2 => c,
-                    _ => nearest_open_cluster(means, &clusters, cap, (sink.x, sink.y)),
+                    _ => nearest_open_cluster(means, &clusters, cap, sink.at),
                 };
                 clusters[position].push(i);
             }
@@ -111,12 +117,12 @@ impl Clustering {
                 }
                 let (mut sum_x, mut sum_y) = (0.0_f32, 0.0_f32);
                 for &m in members {
-                    sum_x += self.sinks[m].x;
-                    sum_y += self.sinks[m].y;
+                    sum_x += self.sinks[m].at.x;
+                    sum_y += self.sinks[m].at.y;
                 }
                 let previous = *mean;
-                *mean = (sum_x / members.len() as f32, sum_y / members.len() as f32);
-                delta += (previous.0 - mean.0).abs() + (previous.1 - mean.1).abs();
+                *mean = SinkPoint::new(sum_x / members.len() as f32, sum_y / members.len() as f32);
+                delta += (previous.x - mean.x).abs() + (previous.y - mean.y).abs();
             }
             self.clusters = clusters;
             if round > max_rounds || delta < 0.5 {
@@ -127,14 +133,14 @@ impl Clustering {
         self.silhouette(means)
     }
 
-    fn silhouette(&self, means: &[(f32, f32); 2]) -> f32 {
+    fn silhouette(&self, means: &[SinkPoint; 2]) -> f32 {
         let mut sum = 0.0_f32;
         for sink in &self.sinks {
             // NOTE: calcSilh quirk kept: an unassigned sink scores in_d = 0, a
             // perfect fit, as the clusters TritonCTS picks depend on it.
             let (mut in_d, mut out_d) = (0.0_f32, f32::MAX);
             for (j, &mean) in means.iter().enumerate() {
-                let d = dist(mean, (sink.x, sink.y));
+                let d = dist(mean, sink.at);
                 if sink.cluster == Some(j) {
                     in_d = d;
                 } else {
@@ -161,7 +167,7 @@ impl Clustering {
     /// sinks to the clusters, each sink an arc to every mean within reach
     /// costing its distance to the `power`, as `Clustering::minCostFlow`; a
     /// sink without flow keeps its assignment.
-    fn min_cost_flow(&mut self, means: &[(f32, f32); 2], cap: usize, power: u32) {
+    fn min_cost_flow(&mut self, means: &[SinkPoint; 2], cap: usize, power: u32) {
         let n = self.sinks.len();
         let (source, target) = (0, 1);
         let sink_node = |i: usize| 2 + i;
@@ -177,7 +183,7 @@ impl Clustering {
         let mut sink_arcs = Vec::new();
         for (i, sink) in self.sinks.iter().enumerate() {
             for (j, &mean) in means.iter().enumerate() {
-                let d = f64::from(dist(mean, (sink.x, sink.y)));
+                let d = f64::from(dist(mean, sink.at));
                 if d > f64::from(MAX_DIST) {
                     continue;
                 }
@@ -218,10 +224,10 @@ impl Clustering {
 /// The nearest cluster with room, or the first when none has room, as the
 /// fallback of `Clustering::Kmeans`.
 fn nearest_open_cluster(
-    means: &[(f32, f32); 2],
+    means: &[SinkPoint; 2],
     clusters: &[Vec<usize>],
     cap: usize,
-    point: (f32, f32),
+    point: SinkPoint,
 ) -> usize {
     let mut best: Option<(usize, f32)> = None;
     for (j, &mean) in means.iter().enumerate() {
@@ -238,15 +244,15 @@ fn nearest_open_cluster(
 
 /// Moves `movable` along the line from `fixed` to lie `target` from it,
 /// as `Clustering::fixSegment`.
-fn fix_segment(fixed: (f32, f32), target: f32, movable: &mut (f32, f32)) {
+fn fix_segment(fixed: SinkPoint, target: f32, movable: &mut SinkPoint) {
     let actual = dist(fixed, *movable);
     if actual == 0.0 {
         return;
     }
     let ratio = target / actual;
-    let dx = (movable.0 - fixed.0) * ratio;
-    let dy = (movable.1 - fixed.1) * ratio;
-    *movable = (fixed.0 + dx, fixed.1 + dy);
+    let dx = (movable.x - fixed.x) * ratio;
+    let dy = (movable.y - fixed.y) * ratio;
+    *movable = SinkPoint::new(fixed.x + dx, fixed.y + dy);
 }
 
 #[cfg(test)]
@@ -255,9 +261,14 @@ mod tests {
 
     #[test]
     fn sinks_split_toward_the_nearer_mean_within_capacity() {
-        let sinks = [(0.0, 0.0), (1.0, 0.0), (9.0, 0.0), (10.0, 0.0)];
-        let mut clustering = Clustering::new(&sinks, (5.0, 0.0));
-        let mut means = [(0.0, 0.0), (10.0, 0.0)];
+        let sinks = [
+            SinkPoint::new(0.0, 0.0),
+            SinkPoint::new(1.0, 0.0),
+            SinkPoint::new(9.0, 0.0),
+            SinkPoint::new(10.0, 0.0),
+        ];
+        let mut clustering = Clustering::new(&sinks, SinkPoint::new(5.0, 0.0));
+        let mut means = [SinkPoint::new(0.0, 0.0), SinkPoint::new(10.0, 0.0)];
 
         clustering.run(2, 5, 4, &mut means);
 
@@ -266,9 +277,14 @@ mod tests {
 
     #[test]
     fn capacity_forces_the_cheapest_sinks_to_move() {
-        let sinks = [(0.0, 0.0), (1.0, 0.0), (2.0, 0.0), (10.0, 0.0)];
-        let mut clustering = Clustering::new(&sinks, (5.0, 0.0));
-        let mut means = [(0.0, 0.0), (10.0, 0.0)];
+        let sinks = [
+            SinkPoint::new(0.0, 0.0),
+            SinkPoint::new(1.0, 0.0),
+            SinkPoint::new(2.0, 0.0),
+            SinkPoint::new(10.0, 0.0),
+        ];
+        let mut clustering = Clustering::new(&sinks, SinkPoint::new(5.0, 0.0));
+        let mut means = [SinkPoint::new(0.0, 0.0), SinkPoint::new(10.0, 0.0)];
 
         clustering.run(2, 0, 4, &mut means);
 
