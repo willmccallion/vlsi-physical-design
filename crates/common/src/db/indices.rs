@@ -177,6 +177,12 @@ impl<I: TableIndex, T> IdVec<I, T> {
         (0..self.entries.len()).map(I::from_position)
     }
 
+    /// Every entry, in order, as a slice for searching.
+    #[must_use]
+    pub fn as_slice(&self) -> &[T] {
+        &self.entries
+    }
+
     /// Every entry, in order.
     pub fn iter(&self) -> std::slice::Iter<'_, T> {
         self.entries.iter()
