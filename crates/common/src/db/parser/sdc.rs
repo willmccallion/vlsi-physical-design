@@ -631,52 +631,15 @@ impl Interpreter<'_> {
         if period <= Seconds::ZERO {
             return Err(self.error(line, "create_clock -period must be positive"));
         }
-        let name = if let Some(name) = parsed.key("-name") {
-            name.to_string()
-        } else {
-            let first = sources
-                .first()
-                .ok_or_else(|| self.error(line, "create_clock needs -name or a port"))?;
-            self.db.io_pins[*first].name.clone()
+        let name = match parsed.key("-name") {
+            Some(name) => name.to_string(),
+            None => self.clock_name_of(&sources, line)?,
         };
         let (rise, fall) = match parsed.key("-waveform") {
-            Some(text) => {
-                let edges = split_list(text);
-                let [r, f] = edges.as_slice() else {
-                    return Err(self.error(line, "-waveform wants two edge times"));
-                };
-                let rise = self.time(r, line, "-waveform edge")?;
-                let fall = self.time(f, line, "-waveform edge")?;
-                if fall < rise || fall > 2.0 * period {
-                    return Err(self.error(
-                        line,
-                        "-waveform edges must rise then fall within two periods",
-                    ));
-                }
-                (rise, fall)
-            }
+            Some(text) => self.waveform(text, period, line)?,
             None => (Seconds::ZERO, period / 2.0),
         };
-        if !parsed.flag("-add")
-            && let Some(existing) = self.sdc.clock_id(&name)
-        {
-            self.sdc.clocks[existing] = Clock {
-                name,
-                period,
-                rise,
-                fall,
-                sources,
-                uncertainty: SideValues::both(None),
-                propagated: false,
-            };
-            return Ok(String::new());
-        }
-        if !parsed.flag("-add") {
-            for clock in &mut self.sdc.clocks {
-                clock.sources.retain(|s| !sources.contains(s));
-            }
-        }
-        let _ = self.sdc.clocks.push(Clock {
+        let clock = Clock {
             name,
             period,
             rise,
@@ -684,8 +647,56 @@ impl Interpreter<'_> {
             sources,
             uncertainty: SideValues::both(None),
             propagated: false,
-        });
+        };
+        self.define_clock(clock, parsed.flag("-add"));
         Ok(String::new())
+    }
+
+    /// The name of a clock `create_clock` leaves unnamed: its first port's.
+    fn clock_name_of(&self, sources: &[IoPinId], line: usize) -> Result<String, ParseError> {
+        let first = sources
+            .first()
+            .ok_or_else(|| self.error(line, "create_clock needs -name or a port"))?;
+        Ok(self.db.io_pins[*first].name.clone())
+    }
+
+    /// The rise and fall times `-waveform` gives as `text`, which must rise
+    /// then fall within two periods of `period`.
+    fn waveform(
+        &self,
+        text: &str,
+        period: Seconds,
+        line: usize,
+    ) -> Result<(Seconds, Seconds), ParseError> {
+        let edges = split_list(text);
+        let [r, f] = edges.as_slice() else {
+            return Err(self.error(line, "-waveform wants two edge times"));
+        };
+        let rise = self.time(r, line, "-waveform edge")?;
+        let fall = self.time(f, line, "-waveform edge")?;
+        if fall < rise || fall > 2.0 * period {
+            return Err(self.error(
+                line,
+                "-waveform edges must rise then fall within two periods",
+            ));
+        }
+        Ok((rise, fall))
+    }
+
+    /// Defines `clock`: in place of the clock of its name, unless `add`;
+    /// else as a new clock, which takes its ports from the others unless
+    /// `add`.
+    fn define_clock(&mut self, clock: Clock, add: bool) {
+        if !add && let Some(existing) = self.sdc.clock_id(&clock.name) {
+            self.sdc.clocks[existing] = clock;
+            return;
+        }
+        if !add {
+            for other in &mut self.sdc.clocks {
+                other.sources.retain(|s| !clock.sources.contains(s));
+            }
+        }
+        let _ = self.sdc.clocks.push(clock);
     }
 
     fn set_port_delay(
@@ -714,64 +725,87 @@ impl Interpreter<'_> {
                 Edge::Rise
             },
         };
-        let edges = edges_of(&parsed);
-        let sides = sides_of(&parsed);
-        let add = parsed.flag("-add_delay");
-        let ports = self.ports_of(ports_text, line)?;
-        let command = match direction {
-            PinDirection::Input => "set_input_delay",
-            _ => "set_output_delay",
+        let spec = PortDelaySpec {
+            reference,
+            edges: edges_of(&parsed),
+            sides: sides_of(&parsed),
+            delay,
+            add: parsed.flag("-add_delay"),
         };
-        for port in ports {
-            let pin = &self.db.io_pins[port];
-            let allowed = match direction {
-                PinDirection::Input => {
-                    matches!(pin.direction, PinDirection::Input | PinDirection::Inout)
-                }
-                _ => matches!(pin.direction, PinDirection::Output | PinDirection::Inout),
-            };
-            if !allowed {
-                log::warn!(
-                    "{}:{line}: {command} not allowed on port '{}'",
-                    self.path.display(),
-                    pin.name
-                );
-                continue;
-            }
-            if self.sdc.clock(*clock).sources.contains(&port) {
-                log::warn!(
-                    "{}:{line}: {command} relative to a clock defined on the same port '{}' \
-                     not allowed",
-                    self.path.display(),
-                    pin.name
-                );
-                continue;
-            }
-            let delays = match direction {
-                PinDirection::Input => &mut self.sdc.input_delays,
-                _ => &mut self.sdc.output_delays,
-            };
-            let list = delays.entry(port).or_default();
-            if !add {
-                list.retain(|d| d.reference == reference);
-            }
-            let index = if let Some(index) = list.iter().position(|d| d.reference == reference) {
-                index
-            } else {
-                list.push(PortDelay {
-                    reference,
-                    delays: RiseFallMinMax::default(),
-                });
-                list.len() - 1
-            };
-            let entry = &mut list[index];
-            if add {
-                entry.delays.merge(&edges, &sides, delay);
-            } else {
-                entry.delays.set(&edges, &sides, delay);
+        for port in self.ports_of(ports_text, line)? {
+            if self.port_takes_delay(port, direction, *clock, line) {
+                self.record_port_delay(port, direction, &spec);
             }
         }
         Ok(String::new())
+    }
+
+    /// Whether a port delay in `direction` relative to `clock` may go on
+    /// `port`, warning where it may not.
+    fn port_takes_delay(
+        &self,
+        port: IoPinId,
+        direction: PinDirection,
+        clock: ClockId,
+        line: usize,
+    ) -> bool {
+        let pin = &self.db.io_pins[port];
+        let (command, allowed) = match direction {
+            PinDirection::Input => (
+                "set_input_delay",
+                matches!(pin.direction, PinDirection::Input | PinDirection::Inout),
+            ),
+            _ => (
+                "set_output_delay",
+                matches!(pin.direction, PinDirection::Output | PinDirection::Inout),
+            ),
+        };
+        if !allowed {
+            log::warn!(
+                "{}:{line}: {command} not allowed on port '{}'",
+                self.path.display(),
+                pin.name
+            );
+            return false;
+        }
+        if self.sdc.clock(clock).sources.contains(&port) {
+            log::warn!(
+                "{}:{line}: {command} relative to a clock defined on the same port '{}' \
+                 not allowed",
+                self.path.display(),
+                pin.name
+            );
+            return false;
+        }
+        true
+    }
+
+    /// Sets or adds `spec` among `port`'s delays in `direction`; set alone,
+    /// it clears the delays relative to other clock edges.
+    fn record_port_delay(&mut self, port: IoPinId, direction: PinDirection, spec: &PortDelaySpec) {
+        let delays = match direction {
+            PinDirection::Input => &mut self.sdc.input_delays,
+            _ => &mut self.sdc.output_delays,
+        };
+        let list = delays.entry(port).or_default();
+        if !spec.add {
+            list.retain(|d| d.reference == spec.reference);
+        }
+        let index = if let Some(index) = list.iter().position(|d| d.reference == spec.reference) {
+            index
+        } else {
+            list.push(PortDelay {
+                reference: spec.reference,
+                delays: RiseFallMinMax::default(),
+            });
+            list.len() - 1
+        };
+        let entry = &mut list[index];
+        if spec.add {
+            entry.delays.merge(&spec.edges, &spec.sides, spec.delay);
+        } else {
+            entry.delays.set(&spec.edges, &spec.sides, spec.delay);
+        }
     }
 
     /// `set_propagated_clock` on clocks; on ports or pins, which `OpenSTA`
@@ -1070,6 +1104,15 @@ fn setup_hold_side(parsed: &Args) -> Option<MinMax> {
         (false, true) => Some(MinMax::Min),
         _ => None,
     }
+}
+
+/// What one port delay command sets on each of its ports.
+struct PortDelaySpec {
+    reference: ClockEdge,
+    edges: Vec<Edge>,
+    sides: Vec<MinMax>,
+    delay: Seconds,
+    add: bool,
 }
 
 /// The options a command takes, as `OpenSTA` defines them: flags, keys
