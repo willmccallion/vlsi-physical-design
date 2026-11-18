@@ -11,7 +11,9 @@ use crate::db::design::{
     PlacementBlockage, PlacementStatus, Region, RegionKind, RouteElem, Row, SpecialNet,
     SpecialRect, SpecialWire, TrackAxis, TrackDef,
 };
-use crate::db::indices::{CellId, LayerId, NetId, NonDefaultRuleId, RegionId, ViaId, ViaRuleId};
+use crate::db::indices::{
+    CellId, CutLayerId, LayerId, MacroPinId, NetId, NonDefaultRuleId, RegionId, ViaId, ViaRuleId,
+};
 use crate::db::library::{LayerRef, Library, PinDirection, Shape, SignalUse, ViaDef, ViaSource};
 use crate::db::parser::lef::{parse_pin_direction, parse_signal_use, via_from_shapes};
 use crate::db::parser::lexer::{Lexer, ParseError, Token, read_file};
@@ -515,41 +517,7 @@ impl<'a> DefParser<'a> {
                     let rect = self.rect()?;
                     shapes.push(Shape { layer, rect });
                 }
-                "VIARULE" => {
-                    let _ = self.word("via rule name")?;
-                    rule.used = true;
-                }
-                "CUTSIZE" => rule.cut_size = self.dbu_pair("cut size")?,
-                "LAYERS" => {
-                    let (cut, bottom, top) = self.via_rule_layers(name, t.line)?;
-                    rule.cut = Some(cut);
-                    rule.bottom = Some(bottom);
-                    rule.top = Some(top);
-                }
-                "CUTSPACING" => rule.cut_spacing = self.dbu_pair("cut spacing")?,
-                "ENCLOSURE" => {
-                    rule.bottom_enclosure = self.dbu_pair("enclosure")?;
-                    rule.top_enclosure = self.dbu_pair("enclosure")?;
-                }
-                "ROWCOL" => {
-                    rule.rows = self.lx.number("row count")?;
-                    rule.cols = self.lx.number("column count")?;
-                }
-                "ORIGIN" => rule.origin = self.dbu_pair("origin")?,
-                "PATTERN" => {
-                    let p = self.lx.expect_token("cut pattern")?;
-                    rule.pattern = Some(p.text.to_string());
-                }
-                "OFFSET" => {
-                    rule.bottom_offset = self.dbu_pair("offset")?;
-                    rule.top_offset = self.dbu_pair("offset")?;
-                }
-                other => {
-                    return Err(self.lx.error(
-                        t.line,
-                        format!("via '{name}': unsupported option '{other}'"),
-                    ));
-                }
+                _ => self.via_rule_option(name, &t, &mut rule)?,
             }
         }
         self.lx.expect(";")?;
@@ -562,6 +530,53 @@ impl<'a> DefParser<'a> {
         let via =
             via_from_shapes(name, ViaSource::Def, shapes).map_err(|m| self.lx.error(line, m))?;
         self.add_def_via(via, line)
+    }
+
+    /// Reads the via rule option `option` of via `name` into `rule`.
+    fn via_rule_option(
+        &mut self,
+        name: &str,
+        option: &Token<'_>,
+        rule: &mut ViaRuleParams,
+    ) -> Result<(), ParseError> {
+        match option.text {
+            "VIARULE" => {
+                let _ = self.word("via rule name")?;
+                rule.used = true;
+            }
+            "CUTSIZE" => rule.cut_size = self.dbu_pair("cut size")?,
+            "LAYERS" => {
+                let (cut, bottom, top) = self.via_rule_layers(name, option.line)?;
+                rule.cut = Some(cut);
+                rule.bottom = Some(bottom);
+                rule.top = Some(top);
+            }
+            "CUTSPACING" => rule.cut_spacing = self.dbu_pair("cut spacing")?,
+            "ENCLOSURE" => {
+                rule.bottom_enclosure = self.dbu_pair("enclosure")?;
+                rule.top_enclosure = self.dbu_pair("enclosure")?;
+            }
+            "ROWCOL" => {
+                rule.rows = self.lx.number("row count")?;
+                rule.cols = self.lx.number("column count")?;
+            }
+            "ORIGIN" => rule.origin = self.dbu_pair("origin")?,
+            "PATTERN" => {
+                let p = self.lx.expect_token("cut pattern")?;
+                rule.pattern = Some(p.text.to_string());
+            }
+            "OFFSET" => {
+                rule.bottom_offset = self.dbu_pair("offset")?;
+                rule.top_offset = self.dbu_pair("offset")?;
+            }
+            other => {
+                return Err(self.lx.error(
+                    option.line,
+                    format!("via '{name}': unsupported option '{other}'"),
+                ));
+            }
+        }
+        Ok(())
     }
 
     /// The cut and the metal below and above it that a via rule's
@@ -746,13 +761,7 @@ impl<'a> DefParser<'a> {
         }
         self.lx.expect(";")?;
         let net = net.ok_or_else(|| self.lx.error(line, format!("pin '{name}' has no NET")))?;
-        if self.pending_by_name.contains_key(&name) || self.db.io_pin_id(&name).is_some() {
-            return Err(self.lx.error(line, format!("duplicate pin '{name}'")));
-        }
-        let _ = self
-            .pending_by_name
-            .insert(name.clone(), self.pending_io.len());
-        self.pending_io.push(Some(PendingIo {
+        self.queue_io_pin(PendingIo {
             line,
             name,
             net: net.to_string(),
@@ -760,7 +769,20 @@ impl<'a> DefParser<'a> {
             signal_use,
             shapes,
             placement,
-        }));
+        })
+    }
+
+    /// Holds `pin` to connect once the nets are read; its name must be new.
+    fn queue_io_pin(&mut self, pin: PendingIo) -> Result<(), ParseError> {
+        if self.pending_by_name.contains_key(&pin.name) || self.db.io_pin_id(&pin.name).is_some() {
+            return Err(self
+                .lx
+                .error(pin.line, format!("duplicate pin '{}'", pin.name)));
+        }
+        let _ = self
+            .pending_by_name
+            .insert(pin.name.clone(), self.pending_io.len());
+        self.pending_io.push(Some(pin));
         Ok(())
     }
 
@@ -1058,28 +1080,7 @@ impl<'a> DefParser<'a> {
         while self.lx.expect_token("')'")?.text != ")" {}
         let net_name = self.db.nets[net].name.clone();
         if owner == "PIN" {
-            let pending = self
-                .pending_by_name
-                .get(pin_name)
-                .and_then(|&i| self.pending_io[i].take())
-                .ok_or_else(|| {
-                    self.lx.error(
-                        line,
-                        format!(
-                            "net '{net_name}' uses unknown or already connected pin '{pin_name}'"
-                        ),
-                    )
-                })?;
-            if pending.net != net_name {
-                return Err(self.lx.error(
-                    line,
-                    format!(
-                        "pin '{pin_name}' is on net '{}', not '{net_name}'",
-                        pending.net
-                    ),
-                ));
-            }
-            return self.connect_io_pin(pending);
+            return self.connect_pending_pin(pin_name, &net_name, line);
         }
         if owner == "*" {
             return Err(self.lx.error(
@@ -1087,6 +1088,50 @@ impl<'a> DefParser<'a> {
                 format!("net '{net_name}': '*' connections are not supported"),
             ));
         }
+        let (cell, pin) = self.free_cell_pin(owner, pin_name, &net_name, line)?;
+        let _ = self.db.connect_cell_pin(cell, pin, net);
+        Ok(())
+    }
+
+    /// Connects the pin `pin_name` the `PINS` section held back, which must
+    /// name net `net_name`.
+    fn connect_pending_pin(
+        &mut self,
+        pin_name: &str,
+        net_name: &str,
+        line: usize,
+    ) -> Result<(), ParseError> {
+        let pending = self
+            .pending_by_name
+            .get(pin_name)
+            .and_then(|&i| self.pending_io[i].take())
+            .ok_or_else(|| {
+                self.lx.error(
+                    line,
+                    format!("net '{net_name}' uses unknown or already connected pin '{pin_name}'"),
+                )
+            })?;
+        if pending.net != net_name {
+            return Err(self.lx.error(
+                line,
+                format!(
+                    "pin '{pin_name}' is on net '{}', not '{net_name}'",
+                    pending.net
+                ),
+            ));
+        }
+        self.connect_io_pin(pending)
+    }
+
+    /// The pin `pin_name` of component `owner`, which must have routing
+    /// geometry and no net yet, for net `net_name`.
+    fn free_cell_pin(
+        &self,
+        owner: &str,
+        pin_name: &str,
+        net_name: &str,
+        line: usize,
+    ) -> Result<(CellId, MacroPinId), ParseError> {
         let cell = self.db.cell_id(owner).ok_or_else(|| {
             self.lx.error(
                 line,
@@ -1120,8 +1165,7 @@ impl<'a> DefParser<'a> {
                 ),
             ));
         }
-        let _ = self.db.connect_cell_pin(cell, pin, net);
-        Ok(())
+        Ok((cell, pin))
     }
 
     /// Reads regular wiring: `layer path [NEW layer path]*`.
@@ -1165,25 +1209,8 @@ impl<'a> DefParser<'a> {
                         return Err(self.lx.error(t.line, "VIRTUAL wiring is not supported"));
                     }
                     _ => {
-                        let t = self.lx.expect_token("via name")?;
-                        let via = self.via_id(t.line, t.text)?;
-                        let at = prev
-                            .map(|(at, _)| at)
-                            .ok_or_else(|| self.lx.error(t.line, "via before any point"))?;
-                        let def = self.db.library.via(via);
-                        layer = match def.top() {
-                            Some(top) if def.bottom() == layer => top,
-                            Some(top) if top == layer => def.bottom(),
-                            _ => {
-                                return Err(self.lx.error(
-                                    t.line,
-                                    format!(
-                                        "via '{}' does not touch the current wiring layer",
-                                        t.text
-                                    ),
-                                ));
-                            }
-                        };
+                        let (via, at, across) = self.wiring_via(prev.map(|(at, _)| at), layer)?;
+                        layer = across;
                         self.db.nets[net].routing.push(RouteElem::Via { via, at });
                         prev = Some((at, None));
                     }
@@ -1193,6 +1220,31 @@ impl<'a> DefParser<'a> {
                 return Ok(());
             }
         }
+    }
+
+    /// The via named next in a net's wiring on `layer`, the point it
+    /// stands at, the last point given, `at`, and its other metal layer,
+    /// which the wiring goes on along.
+    fn wiring_via(
+        &mut self,
+        at: Option<Point<Dbu>>,
+        layer: LayerId,
+    ) -> Result<(ViaId, Point<Dbu>, LayerId), ParseError> {
+        let t = self.lx.expect_token("via name")?;
+        let via = self.via_id(t.line, t.text)?;
+        let at = at.ok_or_else(|| self.lx.error(t.line, "via before any point"))?;
+        let def = self.db.library.via(via);
+        let across = match def.top() {
+            Some(top) if def.bottom() == layer => top,
+            Some(top) if top == layer => def.bottom(),
+            _ => {
+                return Err(self.lx.error(
+                    t.line,
+                    format!("via '{}' does not touch the current wiring layer", t.text),
+                ));
+            }
+        };
+        Ok((via, at, across))
     }
 
     /// `- name [+ HARDSPACING] {+ LAYER l WIDTH w [SPACING s] [WIREEXT e]}
@@ -1217,30 +1269,8 @@ impl<'a> DefParser<'a> {
                     let v = self.lx.expect_token("via name")?;
                     rule.vias.push(self.via_id(v.line, v.text)?);
                 }
-                "VIARULE" => {
-                    let v = self.lx.expect_token("via rule name")?;
-                    let id = self
-                        .db
-                        .library
-                        .via_rules
-                        .iter()
-                        .position(|r| r.name == v.text)
-                        .ok_or_else(|| {
-                            self.lx
-                                .error(v.line, format!("unknown via rule '{}'", v.text))
-                        })?;
-                    rule.via_rules.push(ViaRuleId::new(id));
-                }
-                "MINCUTS" => {
-                    let cut = match self.any_layer()? {
-                        LayerRef::Cut(c) => c,
-                        LayerRef::Routing(_) => {
-                            return Err(self.lx.error(t.line, "MINCUTS needs a cut layer"));
-                        }
-                    };
-                    let cuts = self.lx.number("cut count")?;
-                    rule.min_cuts.push((cut, cuts));
-                }
+                "VIARULE" => rule.via_rules.push(self.via_rule_named_next()?),
+                "MINCUTS" => rule.min_cuts.push(self.min_cuts(t.line)?),
                 "PROPERTY" => self.skip_option(),
                 other => {
                     return Err(self.lx.error(
@@ -1262,6 +1292,35 @@ impl<'a> DefParser<'a> {
         }
         let _ = self.db.non_default_rules.push(rule);
         Ok(())
+    }
+
+    /// The library via rule named next.
+    fn via_rule_named_next(&mut self) -> Result<ViaRuleId, ParseError> {
+        let v = self.lx.expect_token("via rule name")?;
+        let id = self
+            .db
+            .library
+            .via_rules
+            .iter()
+            .position(|r| r.name == v.text)
+            .ok_or_else(|| {
+                self.lx
+                    .error(v.line, format!("unknown via rule '{}'", v.text))
+            })?;
+        Ok(ViaRuleId::new(id))
+    }
+
+    /// A `MINCUTS` option on `line`: a cut layer and how many cuts a via
+    /// through it needs.
+    fn min_cuts(&mut self, line: usize) -> Result<(CutLayerId, u32), ParseError> {
+        let cut = match self.any_layer()? {
+            LayerRef::Cut(c) => c,
+            LayerRef::Routing(_) => {
+                return Err(self.lx.error(line, "MINCUTS needs a cut layer"));
+            }
+        };
+        let cuts = self.lx.number("cut count")?;
+        Ok((cut, cuts))
     }
 
     fn non_default_layer(&mut self) -> Result<NonDefaultLayer, ParseError> {
