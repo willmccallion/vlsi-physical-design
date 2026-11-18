@@ -1332,86 +1332,134 @@ enum Word {
 /// semicolons end a command outside braces, brackets and quotes, a
 /// backslash continues a line, and a `#` starting a command is a comment.
 fn split_commands(script: &str, first_line: usize) -> Vec<(String, usize)> {
-    let chars: Vec<char> = script.chars().collect();
-    let mut commands = Vec::new();
-    let mut current = String::new();
-    let mut start_line = first_line;
-    let mut line = first_line;
-    let mut brace_depth = 0usize;
-    let mut bracket_depth = 0usize;
-    let mut in_quotes = false;
-    let mut i = 0;
-    let mut at_command_start = true;
-    while i < chars.len() {
-        let c = chars[i];
-        if at_command_start {
-            if c == ' ' || c == '\t' {
-                i += 1;
-                continue;
-            }
-            if c == '\n' || c == ';' {
-                if c == '\n' {
-                    line += 1;
-                }
-                start_line = line;
-                i += 1;
-                continue;
-            }
-            if c == '#' {
-                while i < chars.len() && chars[i] != '\n' {
-                    if chars[i] == '\\' && i + 1 < chars.len() && chars[i + 1] == '\n' {
-                        line += 1;
-                        i += 1;
-                    }
-                    i += 1;
-                }
-                continue;
-            }
-            at_command_start = false;
-            start_line = line;
+    let mut splitter = CommandSplitter {
+        chars: script.chars().collect(),
+        i: 0,
+        line: first_line,
+        start_line: first_line,
+        current: String::new(),
+        brace_depth: 0,
+        bracket_depth: 0,
+        in_quotes: false,
+        at_command_start: true,
+        commands: Vec::new(),
+    };
+    while splitter.i < splitter.chars.len() {
+        let c = splitter.chars[splitter.i];
+        if splitter.at_command_start && splitter.between_commands(c) {
+            continue;
         }
+        splitter.within_command(c);
+    }
+    if !splitter.current.trim().is_empty() {
+        splitter
+            .commands
+            .push((splitter.current, splitter.start_line));
+    }
+    splitter.commands
+}
+
+/// Where [`split_commands`] is in a script, and the commands it has split.
+struct CommandSplitter {
+    chars: Vec<char>,
+    i: usize,
+    line: usize,
+    start_line: usize,
+    current: String,
+    brace_depth: usize,
+    bracket_depth: usize,
+    in_quotes: bool,
+    at_command_start: bool,
+    commands: Vec<(String, usize)>,
+}
+
+impl CommandSplitter {
+    /// Takes `c` between two commands, where blanks, empty commands and
+    /// comments are skipped; false when `c` starts the next command.
+    fn between_commands(&mut self, c: char) -> bool {
+        if c == ' ' || c == '\t' {
+            self.i += 1;
+            return true;
+        }
+        if c == '\n' || c == ';' {
+            if c == '\n' {
+                self.line += 1;
+            }
+            self.start_line = self.line;
+            self.i += 1;
+            return true;
+        }
+        if c == '#' {
+            self.skip_comment();
+            return true;
+        }
+        self.at_command_start = false;
+        self.start_line = self.line;
+        false
+    }
+
+    /// Skips a comment up to the end of its line, which a backslash
+    /// continues.
+    fn skip_comment(&mut self) {
+        let chars = &self.chars;
+        while self.i < chars.len() && chars[self.i] != '\n' {
+            if chars[self.i] == '\\' && self.i + 1 < chars.len() && chars[self.i + 1] == '\n' {
+                self.line += 1;
+                self.i += 1;
+            }
+            self.i += 1;
+        }
+    }
+
+    /// Takes `c` inside a command, ending the command at a newline or
+    /// semicolon outside braces, brackets and quotes.
+    fn within_command(&mut self, c: char) {
         match c {
-            '\\' if i + 1 < chars.len() => {
-                if chars[i + 1] == '\n' {
-                    line += 1;
-                    current.push(' ');
-                    i += 2;
-                    while i < chars.len() && (chars[i] == ' ' || chars[i] == '\t') {
-                        i += 1;
-                    }
-                    continue;
-                }
-                current.push(c);
-                current.push(chars[i + 1]);
-                i += 2;
-                continue;
+            '\\' if self.i + 1 < self.chars.len() => {
+                self.take_backslash();
+                return;
             }
-            '{' if !in_quotes => brace_depth += 1,
-            '}' if !in_quotes => brace_depth = brace_depth.saturating_sub(1),
-            '[' if !in_quotes && brace_depth == 0 => bracket_depth += 1,
-            ']' if !in_quotes && brace_depth == 0 => {
-                bracket_depth = bracket_depth.saturating_sub(1);
+            '{' if !self.in_quotes => self.brace_depth += 1,
+            '}' if !self.in_quotes => self.brace_depth = self.brace_depth.saturating_sub(1),
+            '[' if !self.in_quotes && self.brace_depth == 0 => self.bracket_depth += 1,
+            ']' if !self.in_quotes && self.brace_depth == 0 => {
+                self.bracket_depth = self.bracket_depth.saturating_sub(1);
             }
-            '"' if brace_depth == 0 => in_quotes = !in_quotes,
-            '\n' | ';' if brace_depth == 0 && bracket_depth == 0 && !in_quotes => {
+            '"' if self.brace_depth == 0 => self.in_quotes = !self.in_quotes,
+            '\n' | ';' if self.brace_depth == 0 && self.bracket_depth == 0 && !self.in_quotes => {
                 if c == '\n' {
-                    line += 1;
+                    self.line += 1;
                 }
-                commands.push((std::mem::take(&mut current), start_line));
-                at_command_start = true;
-                i += 1;
-                continue;
+                self.commands
+                    .push((std::mem::take(&mut self.current), self.start_line));
+                self.at_command_start = true;
+                self.i += 1;
+                return;
             }
-            '\n' => line += 1,
+            '\n' => self.line += 1,
             _ => {}
         }
-        current.push(c);
-        i += 1;
+        self.current.push(c);
+        self.i += 1;
     }
-    if !current.trim().is_empty() {
-        commands.push((current, start_line));
+
+    /// Takes a backslash and what follows: a line continuation becomes one
+    /// space, eating the next line's indent; any other pair is kept.
+    fn take_backslash(&mut self) {
+        let next = self.chars[self.i + 1];
+        if next == '\n' {
+            self.line += 1;
+            self.current.push(' ');
+            self.i += 2;
+            while self.i < self.chars.len() && matches!(self.chars[self.i], ' ' | '\t') {
+                self.i += 1;
+            }
+            return;
+        }
+        self.current.push('\\');
+        self.current.push(next);
+        self.i += 2;
     }
-    commands
 }
 
 /// The words of one command.
@@ -1424,69 +1472,87 @@ fn split_words(text: &str) -> Result<Vec<Word>, String> {
             i += 1;
             continue;
         }
-        if chars[i] == '{' {
-            let end = matching_brace(&chars, i).ok_or("unbalanced '{'")?;
-            words.push(Word::Braced(chars[i + 1..end].iter().collect()));
-            i = end + 1;
-            if i < chars.len() && !chars[i].is_whitespace() {
-                return Err("extra characters after close-brace".to_string());
-            }
-            continue;
-        }
-        if chars[i] == '"' {
-            let mut j = i + 1;
-            let mut word = String::new();
-            while j < chars.len() && chars[j] != '"' {
-                if chars[j] == '\\' && j + 1 < chars.len() {
-                    word.push(chars[j]);
-                    word.push(chars[j + 1]);
-                    j += 2;
-                    continue;
-                }
-                if chars[j] == '[' {
-                    let end = matching_bracket(&chars, j).ok_or("unbalanced '['")?;
-                    word.extend(&chars[j..=end]);
-                    j = end + 1;
-                    continue;
-                }
-                word.push(chars[j]);
-                j += 1;
-            }
-            if j >= chars.len() {
-                return Err("unbalanced '\"'".to_string());
-            }
-            words.push(Word::Plain(word));
-            i = j + 1;
-            continue;
-        }
-        let mut j = i;
-        let mut word = String::new();
-        while j < chars.len() && !chars[j].is_whitespace() {
-            if chars[j] == '\\' && j + 1 < chars.len() {
-                word.push(chars[j]);
-                word.push(chars[j + 1]);
-                j += 2;
-                continue;
-            }
-            if chars[j] == '[' {
-                let end = matching_bracket(&chars, j).ok_or("unbalanced '['")?;
-                word.extend(&chars[j..=end]);
-                j = end + 1;
-                continue;
-            }
-            if chars[j] == '{' {
-                let end = matching_brace(&chars, j).ok_or("unbalanced '{'")?;
-                word.extend(&chars[j..=end]);
-                j = end + 1;
-                continue;
-            }
-            word.push(chars[j]);
-            j += 1;
-        }
-        words.push(Word::Plain(word));
-        i = j;
+        let (word, next) = match chars[i] {
+            '{' => braced_word(&chars, i)?,
+            '"' => quoted_word(&chars, i)?,
+            _ => bare_word(&chars, i)?,
+        };
+        words.push(word);
+        i = next;
     }
     Ok(words)
+}
+
+/// The braced word opening at `open`, and the index after it, which must
+/// end the word.
+fn braced_word(chars: &[char], open: usize) -> Result<(Word, usize), String> {
+    let end = matching_brace(chars, open).ok_or("unbalanced '{'")?;
+    let word = Word::Braced(chars[open + 1..end].iter().collect());
+    let next = end + 1;
+    if next < chars.len() && !chars[next].is_whitespace() {
+        return Err("extra characters after close-brace".to_string());
+    }
+    Ok((word, next))
+}
+
+/// The quoted word opening at `open`, and the index after its closing
+/// quote.
+fn quoted_word(chars: &[char], open: usize) -> Result<(Word, usize), String> {
+    let mut j = open + 1;
+    let mut word = String::new();
+    while j < chars.len() && chars[j] != '"' {
+        if let Some(next) = copy_escape_or_command(chars, j, &mut word)? {
+            j = next;
+            continue;
+        }
+        word.push(chars[j]);
+        j += 1;
+    }
+    if j >= chars.len() {
+        return Err("unbalanced '\"'".to_string());
+    }
+    Ok((Word::Plain(word), j + 1))
+}
+
+/// The bare word starting at `start`, and the index of the blank after it.
+fn bare_word(chars: &[char], start: usize) -> Result<(Word, usize), String> {
+    let mut j = start;
+    let mut word = String::new();
+    while j < chars.len() && !chars[j].is_whitespace() {
+        if let Some(next) = copy_escape_or_command(chars, j, &mut word)? {
+            j = next;
+            continue;
+        }
+        if chars[j] == '{' {
+            let end = matching_brace(chars, j).ok_or("unbalanced '{'")?;
+            word.extend(&chars[j..=end]);
+            j = end + 1;
+            continue;
+        }
+        word.push(chars[j]);
+        j += 1;
+    }
+    Ok((Word::Plain(word), j))
+}
+
+/// Copies onto `word` the backslash pair or bracketed command starting at
+/// `j`, if one does, returning the index after it.
+fn copy_escape_or_command(
+    chars: &[char],
+    j: usize,
+    word: &mut String,
+) -> Result<Option<usize>, String> {
+    if chars[j] == '\\' && j + 1 < chars.len() {
+        word.push(chars[j]);
+        word.push(chars[j + 1]);
+        return Ok(Some(j + 2));
+    }
+    if chars[j] == '[' {
+        let end = matching_bracket(chars, j).ok_or("unbalanced '['")?;
+        word.extend(&chars[j..=end]);
+        return Ok(Some(end + 1));
+    }
+    Ok(None)
 }
 
 /// The index of the brace closing the one at `open`.
