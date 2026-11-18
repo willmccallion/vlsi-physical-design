@@ -44,10 +44,9 @@ fn pin_location(db: &NetlistDB, pin: PinId) -> Option<Point<Dbu>> {
                 .placed_shapes()
                 .map(|s| s.rect)
                 .reduce(|a, b| a.union(&b))?;
-            Some(Point::new(
-                Dbu::new(b.min.x.get().midpoint(b.max.x.get())),
-                Dbu::new(b.min.y.get().midpoint(b.max.y.get())),
-            ))
+            // NOTE: OpenROAD's box centers truncate toward zero; PARE rounds
+            // down as Rect::center does, which differs only below zero.
+            Some(b.center())
         }
     }
 }

@@ -1237,8 +1237,8 @@ struct ClockNet<'a> {
 }
 
 /// The center of the box around some pins' average positions, as
-/// `dbNet::getTermBBox` and `findLongEdges` take it, rounded toward zero
-/// as `Rect::xCenter` divides; none for no pins.
+/// `dbNet::getTermBBox` and `findLongEdges` take it, rounded down; none for
+/// no pins.
 pub(crate) fn sink_bbox_center(db: &NetlistDB, sinks: &[PinId]) -> Option<Point<Dbu>> {
     let bbox = sinks
         .iter()
@@ -1247,10 +1247,9 @@ pub(crate) fn sink_bbox_center(db: &NetlistDB, sinks: &[PinId]) -> Option<Point<
             Rect::new(p, p)
         })
         .reduce(|a, b| a.union(&b))?;
-    Some(Point::new(
-        Dbu::new(i64::midpoint(bbox.min.x.get(), bbox.max.x.get())),
-        Dbu::new(i64::midpoint(bbox.min.y.get(), bbox.max.y.get())),
-    ))
+    // NOTE: Rect::xCenter truncates toward zero; PARE rounds down as
+    // Rect::center does everywhere, which differs only at negative coordinates.
+    Some(bbox.center())
 }
 
 /// Groups the nodes of a Steiner tree joined by edges shorter than
