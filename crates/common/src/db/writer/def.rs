@@ -1,6 +1,6 @@
 //! DEF writer.
 
-use crate::db::design::{BlockageKind, Cell, NetlistDB, PinOwner, RouteElem, SpecialRect};
+use crate::db::design::{BlockageKind, Cell, Net, NetlistDB, PinOwner, RouteElem, SpecialRect};
 use crate::db::indices::{CellId, RegionId};
 use crate::db::library::{LayerRef, Library};
 use crate::geom::dbu::Dbu;
@@ -19,6 +19,24 @@ pub fn write_file(db: &NetlistDB, path: &Path) -> io::Result<()> {
 
 /// Writes the design as DEF 5.8.
 pub fn write(db: &NetlistDB, out: &mut impl Write) -> io::Result<()> {
+    write_header(db, out)?;
+    write_rows(db, out)?;
+    write_tracks(db, out)?;
+    write_gcell_grid(db, out)?;
+    write_vias(&db.library, out)?;
+    write_non_default_rules(db, out)?;
+    write_regions(db, out)?;
+    write_components(db, out)?;
+    write_pins(db, out)?;
+    write_blockages(db, out)?;
+    write_special_nets(db, out)?;
+    write_nets(db, out)?;
+    write_groups(db, out)?;
+    writeln!(out, "END DESIGN")
+}
+
+/// The version, syntax, design name, units and die area.
+fn write_header(db: &NetlistDB, out: &mut impl Write) -> io::Result<()> {
     let lib = &db.library;
     writeln!(out, "VERSION 5.8 ;")?;
     writeln!(out, "DIVIDERCHAR \"/\" ;")?;
@@ -30,8 +48,11 @@ pub fn write(db: &NetlistDB, out: &mut impl Write) -> io::Result<()> {
         "DIEAREA {} {} ;",
         pt(db.die_area.min),
         pt(db.die_area.max)
-    )?;
+    )
+}
 
+fn write_rows(db: &NetlistDB, out: &mut impl Write) -> io::Result<()> {
+    let lib = &db.library;
     for r in &db.rows {
         writeln!(
             out,
@@ -47,7 +68,11 @@ pub fn write(db: &NetlistDB, out: &mut impl Write) -> io::Result<()> {
             r.step.y
         )?;
     }
+    Ok(())
+}
 
+fn write_tracks(db: &NetlistDB, out: &mut impl Write) -> io::Result<()> {
+    let lib = &db.library;
     for t in &db.tracks {
         write!(
             out,
@@ -65,7 +90,10 @@ pub fn write(db: &NetlistDB, out: &mut impl Write) -> io::Result<()> {
         }
         writeln!(out, " ;")?;
     }
+    Ok(())
+}
 
+fn write_gcell_grid(db: &NetlistDB, out: &mut impl Write) -> io::Result<()> {
     for g in &db.gcell_grid {
         writeln!(
             out,
@@ -76,17 +104,7 @@ pub fn write(db: &NetlistDB, out: &mut impl Write) -> io::Result<()> {
             g.step
         )?;
     }
-
-    write_vias(lib, out)?;
-    write_non_default_rules(db, out)?;
-    write_regions(db, out)?;
-    write_components(db, out)?;
-    write_pins(db, out)?;
-    write_blockages(db, out)?;
-    write_special_nets(db, out)?;
-    write_nets(db, out)?;
-    write_groups(db, out)?;
-    writeln!(out, "END DESIGN")
+    Ok(())
 }
 
 fn pt(p: Point<Dbu>) -> String {
@@ -387,67 +405,79 @@ fn write_nets(db: &NetlistDB, out: &mut impl Write) -> io::Result<()> {
     let mut line = String::new();
     for net in &db.nets {
         line.clear();
-        let _ = write!(line, "- {}", net.name);
-        for &pin in &net.pins {
-            match db.pins[pin].owner {
-                PinOwner::Cell { cell, pin } => {
-                    let c = &db.cells[cell];
-                    let name = &lib.cell_macro(c.macro_id).pin(pin).name;
-                    let _ = write!(line, " ( {} {} )", c.name, name);
-                }
-                PinOwner::Io(io) => {
-                    let _ = write!(line, " ( PIN {} )", db.io_pins[io].name);
-                }
-            }
-        }
-        let _ = write!(line, " + USE {}", net.signal_use.as_str());
-        if (net.weight - 1.0).abs() > f64::EPSILON {
-            let _ = write!(line, " + WEIGHT {}", net.weight);
-        }
-        if let Some(r) = net.non_default_rule {
-            let _ = write!(line, " + NONDEFAULTRULE {}", db.non_default_rules[r].name);
-        }
+        push_net_header(db, net, &mut line);
         let mut keyword = "+ ROUTED";
         for elem in &net.routing {
-            match *elem {
-                RouteElem::Wire {
-                    layer,
-                    from,
-                    to,
-                    extensions: (from_extension, to_extension),
-                } => {
-                    let _ = write!(
-                        line,
-                        "\n  {keyword} {} {} {}",
-                        lib.layer(layer).name,
-                        wire_point(from, from_extension),
-                        wire_point(to, to_extension)
-                    );
-                }
-                RouteElem::Via { via, at } => {
-                    let v = lib.via(via);
-                    let _ = write!(
-                        line,
-                        "\n  {keyword} {} {} {}",
-                        lib.layer_name(LayerRef::Routing(v.bottom())),
-                        pt(at),
-                        v.name
-                    );
-                }
-                RouteElem::Patch { layer, rect } => {
-                    let _ = write!(
-                        line,
-                        "\n  {keyword} {} {} RECT ( 0 0 {} {} )",
-                        lib.layer(layer).name,
-                        pt(rect.min),
-                        rect.width(),
-                        rect.height()
-                    );
-                }
-            }
+            push_route_elem(lib, *elem, keyword, &mut line);
             keyword = "NEW";
         }
         writeln!(out, "{line} ;")?;
     }
     writeln!(out, "END NETS")
+}
+
+/// Appends to `line` a net's name, pins, use, weight and rule.
+fn push_net_header(db: &NetlistDB, net: &Net, line: &mut String) {
+    let lib = &db.library;
+    let _ = write!(line, "- {}", net.name);
+    for &pin in &net.pins {
+        match db.pins[pin].owner {
+            PinOwner::Cell { cell, pin } => {
+                let c = &db.cells[cell];
+                let name = &lib.cell_macro(c.macro_id).pin(pin).name;
+                let _ = write!(line, " ( {} {} )", c.name, name);
+            }
+            PinOwner::Io(io) => {
+                let _ = write!(line, " ( PIN {} )", db.io_pins[io].name);
+            }
+        }
+    }
+    let _ = write!(line, " + USE {}", net.signal_use.as_str());
+    if (net.weight - 1.0).abs() > f64::EPSILON {
+        let _ = write!(line, " + WEIGHT {}", net.weight);
+    }
+    if let Some(r) = net.non_default_rule {
+        let _ = write!(line, " + NONDEFAULTRULE {}", db.non_default_rules[r].name);
+    }
+}
+
+/// Appends to `line` one routing element on a line of its own, after
+/// `keyword`.
+fn push_route_elem(lib: &Library, elem: RouteElem, keyword: &str, line: &mut String) {
+    match elem {
+        RouteElem::Wire {
+            layer,
+            from,
+            to,
+            extensions: (from_extension, to_extension),
+        } => {
+            let _ = write!(
+                line,
+                "\n  {keyword} {} {} {}",
+                lib.layer(layer).name,
+                wire_point(from, from_extension),
+                wire_point(to, to_extension)
+            );
+        }
+        RouteElem::Via { via, at } => {
+            let v = lib.via(via);
+            let _ = write!(
+                line,
+                "\n  {keyword} {} {} {}",
+                lib.layer_name(LayerRef::Routing(v.bottom())),
+                pt(at),
+                v.name
+            );
+        }
+        RouteElem::Patch { layer, rect } => {
+            let _ = write!(
+                line,
+                "\n  {keyword} {} {} RECT ( 0 0 {} {} )",
+                lib.layer(layer).name,
+                pt(rect.min),
+                rect.width(),
+                rect.height()
+            );
+        }
+    }
 }
