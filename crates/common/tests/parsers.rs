@@ -523,6 +523,45 @@ fn tiny_bookshelf() -> NetlistDB {
     bookshelf::parse(&fixture("bookshelf/tiny.aux"), 6).unwrap()
 }
 
+/// Everything the Bookshelf reader builds of the tiny design's library and
+/// cells, one item per line, hashed.
+fn bookshelf_build_digest(db: &NetlistDB) -> u64 {
+    let lib = &db.library;
+    let mut lines: Vec<String> = Vec::new();
+    lines.extend(lib.routing_layers.iter().map(|l| format!("{l:?}")));
+    lines.extend(lib.cut_layers.iter().map(|c| format!("{c:?}")));
+    lines.extend(lib.vias.iter().map(|v| format!("{v:?}")));
+    lines.extend(lib.macros.iter().map(|m| {
+        let pins: Vec<String> = m.pins.iter().map(|p| format!("{p:?}")).collect();
+        format!(
+            "{} {:?} {:?} {:?} {pins:?}",
+            m.name, m.class, m.size, m.site
+        )
+    }));
+    lines.extend(
+        db.cells
+            .iter()
+            .map(|c| format!("{} {:?} {:?}", c.name, c.macro_id, c.status)),
+    );
+    lines
+        .iter()
+        .flat_map(|l| l.bytes())
+        .fold(0xcbf2_9ce4_8422_2325_u64, |h, b| {
+            (h ^ u64::from(b)).wrapping_mul(0x0100_0000_01b3)
+        })
+}
+
+/// [`bookshelf_build_digest`] as the reader gave it before its layer stack
+/// and cells were split into steps; a change means it builds otherwise.
+const BOOKSHELF_BUILD_DIGEST: u64 = 5_042_066_462_573_274_272;
+
+#[test]
+fn bookshelf_builds_the_same_layers_vias_macros_and_cells() {
+    let db = tiny_bookshelf();
+
+    assert_eq!(bookshelf_build_digest(&db), BOOKSHELF_BUILD_DIGEST);
+}
+
 #[test]
 fn bookshelf_rows_keep_their_gaps() {
     let db = tiny_bookshelf();
