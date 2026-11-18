@@ -178,7 +178,7 @@ fn region_elsewhere(imp: &Improver, n: NodeId) -> Option<Rect<Dbu>> {
 /// The left edge and bottom that center the cell in a box, as
 /// `std::floor(0.5 * (min + max) - 0.5 * size)`.
 fn centered(span: Interval, size: Dbu) -> Dbu {
-    Dbu((0.5 * (span.lo + span.hi).to_f64() - 0.5 * size.to_f64()).floor() as i64)
+    Dbu::new((0.5 * (span.lo + span.hi).to_f64() - 0.5 * size.to_f64()).floor() as i64)
 }
 
 /// The first segment of row `r` whose span holds `x`.
@@ -253,7 +253,7 @@ fn vertical_trial(imp: &mut Improver, n: NodeId) -> Result<Option<Trial>> {
     let xj = centered(region.x_span(), imp.width(n));
     let yj = centered(region.y_span(), imp.height(n));
     let last = imp.arch.rows.len() - 1;
-    let (rmin, rmax) = if yj > Dbu(i64::from(yi as i32)) {
+    let (rmin, rmax) = if yj > Dbu::new(i64::from(yi as i32)) {
         ((ri + 1).min(last), (ri + 2).min(last))
     } else {
         (ri.saturating_sub(2), ri.saturating_sub(1))
@@ -277,11 +277,17 @@ mod tests {
 
     #[test]
     fn a_cell_is_centered_in_a_box_rounding_down() {
-        assert_eq!(centered(Interval::new(Dbu(0), Dbu(11)), Dbu(4)), Dbu(3));
+        assert_eq!(
+            centered(Interval::new(Dbu::new(0), Dbu::new(11)), Dbu::new(4)),
+            Dbu::new(3)
+        );
     }
 
     #[test]
     fn a_cell_centered_left_of_the_origin_rounds_toward_minus_infinity() {
-        assert_eq!(centered(Interval::new(Dbu(-10), Dbu(-1)), Dbu(4)), Dbu(-8));
+        assert_eq!(
+            centered(Interval::new(Dbu::new(-10), Dbu::new(-1)), Dbu::new(4)),
+            Dbu::new(-8)
+        );
     }
 }

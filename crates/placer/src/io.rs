@@ -135,7 +135,7 @@ impl PinSize {
     /// minimum area that would make it longer.
     fn of(lib: &Library, layer: LayerId) -> Self {
         let width = lib.layer(layer).width;
-        let half_width = Dbu((width.get() + 1) / 2);
+        let half_width = Dbu::new((width.get() + 1) / 2);
         Self {
             half_width,
             length: half_width * 2,
@@ -508,7 +508,9 @@ impl SlotReach {
         let start = tracks.start.get();
         let first = ceil_div(self.lo.get() - start, between).max(0) + clear;
         let last = (i64::from(tracks.count) - 1).min((self.hi.get() - start) / between) - clear;
-        (first..=last).map(|i| Dbu(start + i * between)).collect()
+        (first..=last)
+            .map(|i| Dbu::new(start + i * between))
+            .collect()
     }
 }
 
@@ -525,7 +527,7 @@ mod tests {
             .map(|i| Slot {
                 edge: Edge::Bottom,
                 layer: LayerId::new(0),
-                at: Point::new(Dbu(i64::try_from(i).unwrap()), Dbu::ZERO),
+                at: Point::new(Dbu::new(i64::try_from(i).unwrap()), Dbu::ZERO),
                 blocked: false,
             })
             .collect()
@@ -557,41 +559,41 @@ mod tests {
 
         assert_eq!(section.slots.len(), 3);
         assert_eq!(section.free_slots, 2);
-        assert_eq!(section.middle().x, Dbu(1));
+        assert_eq!(section.middle().x, Dbu::new(1));
     }
 
     #[test]
     fn slots_count_from_the_track_start_past_the_die_edge_and_corner() {
         let tracks = TrackDef {
             axis: TrackAxis::X,
-            start: Dbu(70),
+            start: Dbu::new(70),
             count: 100,
-            step: Dbu(100),
+            step: Dbu::new(100),
             layers: Vec::new(),
         };
         let reach = SlotReach {
-            lo: Dbu(70),
-            hi: Dbu(9930),
-            apart: Dbu(180),
-            max_corner: Dbu(2000),
+            lo: Dbu::new(70),
+            hi: Dbu::new(9930),
+            apart: Dbu::new(180),
+            max_corner: Dbu::new(2000),
         };
 
         let slots = reach.slots_of(&tracks);
 
-        assert_eq!(slots.first(), Some(&Dbu(1670)));
-        assert_eq!(slots.last(), Some(&Dbu(8270)));
-        assert_eq!(slots[1] - slots[0], Dbu(200));
+        assert_eq!(slots.first(), Some(&Dbu::new(1670)));
+        assert_eq!(slots.last(), Some(&Dbu::new(8270)));
+        assert_eq!(slots[1] - slots[0], Dbu::new(200));
     }
 
     #[test]
     fn a_box_on_two_edges_reaches_both_stretches() {
         let die = Rect::new(
             Point::new(Dbu::ZERO, Dbu::ZERO),
-            Point::new(Dbu(1000), Dbu(1000)),
+            Point::new(Dbu::new(1000), Dbu::new(1000)),
         );
         let corner = Rect::new(
-            Point::new(Dbu(600), Dbu::ZERO),
-            Point::new(Dbu(1000), Dbu(300)),
+            Point::new(Dbu::new(600), Dbu::ZERO),
+            Point::new(Dbu::new(1000), Dbu::new(300)),
         );
 
         let stretches = stretches_on_die_edges(die, corner);
@@ -601,13 +603,13 @@ mod tests {
             vec![
                 EdgeStretch {
                     edge: Edge::Bottom,
-                    lo: Dbu(600),
-                    hi: Dbu(1000)
+                    lo: Dbu::new(600),
+                    hi: Dbu::new(1000)
                 },
                 EdgeStretch {
                     edge: Edge::Right,
                     lo: Dbu::ZERO,
-                    hi: Dbu(300)
+                    hi: Dbu::new(300)
                 },
             ]
         );
@@ -616,18 +618,18 @@ mod tests {
     #[test]
     fn pin_rectangles_point_into_the_die() {
         let size = PinSize {
-            half_width: Dbu(70),
-            length: Dbu(140),
+            half_width: Dbu::new(70),
+            length: Dbu::new(140),
         };
-        let at = Point::new(Dbu(1000), Dbu(0));
+        let at = Point::new(Dbu::new(1000), Dbu::new(0));
 
         let r = size.rect(Edge::Bottom, at);
 
         assert_eq!(
             r,
             Rect::new(
-                Point::new(Dbu(930), Dbu(0)),
-                Point::new(Dbu(1070), Dbu(140))
+                Point::new(Dbu::new(930), Dbu::new(0)),
+                Point::new(Dbu::new(1070), Dbu::new(140))
             )
         );
     }

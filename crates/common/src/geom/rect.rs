@@ -191,7 +191,10 @@ mod tests {
     use super::*;
 
     fn rect(x0: i64, y0: i64, x1: i64, y1: i64) -> Rect<Dbu> {
-        Rect::from_corners(Point::new(Dbu(x0), Dbu(y0)), Point::new(Dbu(x1), Dbu(y1)))
+        Rect::from_corners(
+            Point::new(Dbu::new(x0), Dbu::new(y0)),
+            Point::new(Dbu::new(x1), Dbu::new(y1)),
+        )
     }
 
     #[test]

@@ -463,7 +463,7 @@ mod tests {
         let read: Vec<Dbu> = (0..3).map(|_| rules.microns("length").unwrap()).collect();
         let area = rules.area("area").unwrap();
 
-        assert_eq!(read, [Dbu(0), Dbu(2), Dbu(250_000)]);
+        assert_eq!(read, [Dbu::new(0), Dbu::new(2), Dbu::new(250_000)]);
         assert_eq!(area, DbuArea(0));
         assert_eq!(
             off_grid.warning(Path::new("t.lef"), dbu).as_deref(),

@@ -23,7 +23,7 @@ impl Point<Dbu> {
     /// The Manhattan distance to `other`.
     #[must_use]
     pub const fn manhattan(self, other: Self) -> Dbu {
-        Dbu((self.x.get() - other.x.get()).abs() + (self.y.get() - other.y.get()).abs())
+        Dbu::new((self.x.get() - other.x.get()).abs() + (self.y.get() - other.y.get()).abs())
     }
 }
 
@@ -68,20 +68,20 @@ mod tests {
 
     #[test]
     fn the_manhattan_distance_adds_both_sides_whichever_way_they_run() {
-        let a = Point::new(Dbu(10), Dbu(-4));
-        let b = Point::new(Dbu(-2), Dbu(5));
+        let a = Point::new(Dbu::new(10), Dbu::new(-4));
+        let b = Point::new(Dbu::new(-2), Dbu::new(5));
 
-        assert_eq!(a.manhattan(b), Dbu(21));
-        assert_eq!(b.manhattan(a), Dbu(21));
-        assert_eq!(a.manhattan(a), Dbu(0));
+        assert_eq!(a.manhattan(b), Dbu::new(21));
+        assert_eq!(b.manhattan(a), Dbu::new(21));
+        assert_eq!(a.manhattan(a), Dbu::new(0));
     }
 
     #[test]
     fn points_order_by_x_then_y() {
         let mut points = vec![
-            Point::new(Dbu(2), Dbu(0)),
-            Point::new(Dbu(1), Dbu(9)),
-            Point::new(Dbu(1), Dbu(3)),
+            Point::new(Dbu::new(2), Dbu::new(0)),
+            Point::new(Dbu::new(1), Dbu::new(9)),
+            Point::new(Dbu::new(1), Dbu::new(3)),
         ];
 
         points.sort();
@@ -89,9 +89,9 @@ mod tests {
         assert_eq!(
             points,
             vec![
-                Point::new(Dbu(1), Dbu(3)),
-                Point::new(Dbu(1), Dbu(9)),
-                Point::new(Dbu(2), Dbu(0)),
+                Point::new(Dbu::new(1), Dbu::new(3)),
+                Point::new(Dbu::new(1), Dbu::new(9)),
+                Point::new(Dbu::new(2), Dbu::new(0)),
             ]
         );
     }

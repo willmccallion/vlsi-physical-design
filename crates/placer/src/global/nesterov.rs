@@ -42,7 +42,7 @@ const PENALTY_GROWTH: (f64, f64) = (0.95, 1.05);
 
 /// The growth in wirelength over one iteration at which the density penalty
 /// holds steady, `gpl`'s default `-reference_hpwl`.
-const REFERENCE_HPWL: Dbu = Dbu(446_000_000);
+const REFERENCE_HPWL: Dbu = Dbu::new(446_000_000);
 
 /// Overflow below which the penalty's highest growth is lowered, once, as
 /// `gpl`'s `nesterovAdjustPhi` lowers it below 0.35.

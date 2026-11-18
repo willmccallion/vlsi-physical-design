@@ -43,8 +43,8 @@ pub(crate) const TINY_ROUNDS: usize = 12;
 /// it into many gcells.
 pub(crate) fn placed_tiny() -> (NetlistDB, RoutingConfig) {
     let mut db = tiny();
-    place(&mut db, "u5", Point::new(Dbu(2000), Dbu(4000)));
-    place(&mut db, "u6", Point::new(Dbu(3000), Dbu(4000)));
+    place(&mut db, "u5", Point::new(Dbu::new(2000), Dbu::new(4000)));
+    place(&mut db, "u6", Point::new(Dbu::new(3000), Dbu::new(4000)));
     let config = RoutingConfig {
         gcell_tracks: NonZeroU32::new(3).unwrap(),
         detailed_iterations: TINY_ROUNDS,

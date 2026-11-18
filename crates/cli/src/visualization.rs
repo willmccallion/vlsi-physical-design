@@ -445,8 +445,8 @@ mod tests {
         let top = db.library.routing_layers.ids().last().unwrap();
         layers[top] = false;
         let marker = Rect::new(
-            Point::new(Dbu(1000), Dbu(1000)),
-            Point::new(Dbu(3000), Dbu(2000)),
+            Point::new(Dbu::new(1000), Dbu::new(1000)),
+            Point::new(Dbu::new(3000), Dbu::new(2000)),
         );
         let path = scratch_dir("area-highlight").join("area.png");
         let view = AreaView {

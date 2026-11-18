@@ -39,7 +39,7 @@ fn tiny_design() -> NetlistDB {
 }
 
 const fn pt(x: i64, y: i64) -> Point<Dbu> {
-    Point::new(Dbu(x), Dbu(y))
+    Point::new(Dbu::new(x), Dbu::new(y))
 }
 
 const fn at(x: i64, y: i64, layer: u8) -> RoutePoint {
@@ -179,7 +179,7 @@ fn a_wider_non_default_rule_lowers_the_wire_resistance() {
         hard_spacing: false,
         layers: vec![NonDefaultLayer {
             layer: LayerId(1),
-            width: Dbu(200),
+            width: Dbu::new(200),
             spacing: None,
             wire_extension: None,
         }],
@@ -290,7 +290,7 @@ fn a_route_tree_climbs_by_vias_and_runs_wires_on_the_route_layers() {
     assert_eq!(loads, vec![a, b]);
     assert!(matches!(tree.kind, Kind::Via { .. }));
     assert_eq!(tree.layer(), Some(LayerId(0)));
-    assert_eq!(tree.max_load_wire_length(), Dbu(20000));
+    assert_eq!(tree.max_load_wire_length(), Dbu::new(20000));
     let mut wire_layers = Vec::new();
     collect_wire_layers(&tree, &mut wire_layers);
     wire_layers.sort_unstable();

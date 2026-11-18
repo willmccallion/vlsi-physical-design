@@ -892,7 +892,7 @@ fn point_back_along(to: Point<Dbu>, from: Point<Dbu>, distance: f64, length: Dbu
     };
     let along = |to: Dbu, from: Dbu| {
         let (to, from) = (to.get(), from.get());
-        Dbu((to as f64 + share * (from - to) as f64) as i64)
+        Dbu::new((to as f64 + share * (from - to) as f64) as i64)
     };
     Point::new(along(to.x, from.x), along(to.y, from.y))
 }
@@ -994,14 +994,20 @@ mod tests {
     fn the_wire_left_behind_a_repeater_is_measured_from_where_it_stands() {
         let (left, right) = (
             Point::new(Dbu::ZERO, Dbu::ZERO),
-            Point::new(Dbu(100), Dbu::ZERO),
+            Point::new(Dbu::new(100), Dbu::ZERO),
         );
 
-        let toward_left = back_along(right, left, 30.5, Dbu(100));
-        let toward_right = back_along(left, right, 30.5, Dbu(100));
+        let toward_left = back_along(right, left, 30.5, Dbu::new(100));
+        let toward_right = back_along(left, right, 30.5, Dbu::new(100));
 
-        assert_eq!(toward_left, (Point::new(Dbu(69), Dbu::ZERO), Dbu(69)));
-        assert_eq!(toward_right, (Point::new(Dbu(30), Dbu::ZERO), Dbu(70)));
+        assert_eq!(
+            toward_left,
+            (Point::new(Dbu::new(69), Dbu::ZERO), Dbu::new(69))
+        );
+        assert_eq!(
+            toward_right,
+            (Point::new(Dbu::new(30), Dbu::ZERO), Dbu::new(70))
+        );
     }
 
     #[test]
@@ -1020,7 +1026,7 @@ mod tests {
 
         with_wired_session(&mut db, &lib, "", |resizer| {
             let driver = resizer.db.io_pins[resizer.db.io_pin_id("in").unwrap()].pin;
-            let at = Point::new(Dbu(2000), Dbu(2800));
+            let at = Point::new(Dbu::new(2000), Dbu::new(2800));
             let load = |name: &str| {
                 let pin = pin(resizer.db, name);
                 bnet::Bnet::load(at, pin, bnet::LoadModel::load(&*resizer, pin))
@@ -1134,7 +1140,7 @@ mod tests {
                 .unwrap();
 
             let summary = Repairer::new(resizer)
-                .repair_clock_nets(&[clock_buffer], Some(Dbu(200_000)))
+                .repair_clock_nets(&[clock_buffer], Some(Dbu::new(200_000)))
                 .unwrap();
 
             assert!(summary.inserted > 0, "{summary:?}");

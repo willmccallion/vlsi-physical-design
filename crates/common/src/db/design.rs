@@ -1097,7 +1097,7 @@ impl NetlistDB {
                 let count = coords.len() as i64;
                 // NOTE: getAverageTrackPattern takes ceil((float) span / count),
                 // which a float rounds wrong past ~1e5 tracks; PARE's is exact.
-                Dbu((span.get() + count - 1) / count)
+                Dbu::new((span.get() + count - 1) / count)
             }
         }
     }
@@ -1179,7 +1179,10 @@ impl NetlistDB {
             y += (s.rect.min.y.get() + s.rect.max.y.get()) as f64;
         }
         let corners = (2 * shapes.len()) as f64;
-        Point::new(Dbu((x / corners) as i64), Dbu((y / corners) as i64))
+        Point::new(
+            Dbu::new((x / corners) as i64),
+            Dbu::new((y / corners) as i64),
+        )
     }
 
     /// A readable name for a connection, such as `u1/A` or `PIN clk`.

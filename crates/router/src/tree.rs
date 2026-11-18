@@ -125,7 +125,7 @@ fn span(points: &[Point<Dbu>]) -> Dbu {
     let min_y = points.iter().map(|p| p.y).min().unwrap_or_default();
     let max_x = points.iter().map(|p| p.x).max().unwrap_or_default();
     let max_y = points.iter().map(|p| p.y).max().unwrap_or_default();
-    (max_x - min_x).max(max_y - min_y).max(Dbu(1))
+    (max_x - min_x).max(max_y - min_y).max(Dbu::new(1))
 }
 
 fn curve_order(points: &[Point<Dbu>]) -> (usize, Vec<Join>) {
@@ -135,7 +135,7 @@ fn curve_order(points: &[Point<Dbu>]) -> (usize, Vec<Join>) {
     let order = hilbert_order(points);
 
     let cells_per_side = (points.len() as f64).sqrt().ceil().max(1.0) as i64;
-    let bucket = (span / cells_per_side).max(Dbu(1));
+    let bucket = (span / cells_per_side).max(Dbu::new(1));
     let mut buckets: SpatialHash<usize> = SpatialHash::new(Point::new(min_x, min_y), bucket);
 
     let first = order[0];
@@ -188,7 +188,7 @@ mod tests {
     use super::*;
 
     fn pt(x: i64, y: i64) -> Point<Dbu> {
-        Point::new(Dbu(x), Dbu(y))
+        Point::new(Dbu::new(x), Dbu::new(y))
     }
 
     fn at(x: i64, y: i64) -> Rect<Dbu> {

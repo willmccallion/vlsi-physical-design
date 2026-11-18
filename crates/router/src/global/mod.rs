@@ -471,7 +471,7 @@ impl GlobalGrid {
     /// points (`grt::Grid::getPositionOnGrid`): half a gcell into it,
     /// whatever part of it the die holds.
     pub(crate) fn cell_center(&self, c: GCell) -> Point<Dbu> {
-        let half = Dbu(self.gcell.get() / 2);
+        let half = Dbu::new(self.gcell.get() / 2);
         self.origin
             + Point::new(
                 Gcells::from(c.x).length(self.gcell) + half,
@@ -721,14 +721,14 @@ pub fn rudy_wire_width(pitches: &[Dbu]) -> Dbu {
         .map(|p| 1.0 / p.to_f64())
         .sum();
     if inverse > 0.0 {
-        Dbu((1.25 / inverse).trunc() as i64)
+        Dbu::new((1.25 / inverse).trunc() as i64)
     } else {
         RUDY_DEFAULT_WIRE_WIDTH
     }
 }
 
 /// The wire width `grt::Rudy` keeps when no layer has a pitch.
-const RUDY_DEFAULT_WIRE_WIDTH: Dbu = Dbu(100);
+const RUDY_DEFAULT_WIRE_WIDTH: Dbu = Dbu::new(100);
 
 /// The fraction of `stretch` along `track` that a wire crossing `boundary`
 /// can use between the fixed metal on either side of it.
@@ -1887,8 +1887,8 @@ mod tests {
         let (nx, ny) = (10, 10);
         let edges = 2 * usize::from(nx) * usize::from(ny);
         GlobalGrid {
-            origin: Point::new(Dbu(0), Dbu(0)),
-            gcell: Dbu(100),
+            origin: Point::new(Dbu::new(0), Dbu::new(0)),
+            gcell: Dbu::new(100),
             nx,
             ny,
             min_layer: LayerId::new(1),

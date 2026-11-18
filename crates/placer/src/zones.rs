@@ -187,17 +187,20 @@ mod tests {
     use super::*;
 
     fn rect(x0: i64, y0: i64, x1: i64, y1: i64) -> Rect<Dbu> {
-        Rect::new(Point::new(Dbu(x0), Dbu(y0)), Point::new(Dbu(x1), Dbu(y1)))
+        Rect::new(
+            Point::new(Dbu::new(x0), Dbu::new(y0)),
+            Point::new(Dbu::new(x1), Dbu::new(y1)),
+        )
     }
 
     fn spans(list: &[(i64, i64)]) -> Vec<Interval> {
         list.iter()
-            .map(|&(a, b)| Interval::new(Dbu(a), Dbu(b)))
+            .map(|&(a, b)| Interval::new(Dbu::new(a), Dbu::new(b)))
             .collect()
     }
 
     fn span(lo: i64, hi: i64) -> Interval {
-        Interval::new(Dbu(lo), Dbu(hi))
+        Interval::new(Dbu::new(lo), Dbu::new(hi))
     }
 
     #[test]

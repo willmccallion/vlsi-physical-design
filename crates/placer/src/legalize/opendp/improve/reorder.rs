@@ -296,7 +296,7 @@ fn cost(imp: &Improver, marks: &mut EdgeMarks, cells: &[NodeId]) -> f64 {
                 continue;
             }
             marks.mark[e] = marks.traversal;
-            let (mut lo, mut hi) = (Dbu(i64::from(i32::MAX)), Dbu(i64::from(i32::MIN)));
+            let (mut lo, mut hi) = (Dbu::new(i64::from(i32::MAX)), Dbu::new(i64::from(i32::MIN)));
             for &p in pins {
                 let x = imp.pin_position(p).x;
                 lo = lo.min(x);
@@ -328,22 +328,22 @@ fn next_permutation(order: &mut [usize]) -> bool {
 mod tests {
     use super::*;
 
-    const SITE: Dbu = Dbu(10);
+    const SITE: Dbu = Dbu::new(10);
 
     fn lengths(values: &[i64]) -> Vec<Dbu> {
-        values.iter().copied().map(Dbu).collect()
+        values.iter().copied().map(Dbu::new).collect()
     }
 
     #[test]
     fn cells_are_padded_evenly_in_whole_sites_over_the_gap() {
-        let padding = even_padding(&lengths(&[20, 30]), Dbu(100), SITE);
+        let padding = even_padding(&lengths(&[20, 30]), Dbu::new(100), SITE);
 
         assert_eq!(padding, Some((lengths(&[10, 10]), lengths(&[10, 10]))));
     }
 
     #[test]
     fn cells_filling_the_gap_get_no_padding() {
-        let padding = even_padding(&lengths(&[20, 30]), Dbu(50), SITE);
+        let padding = even_padding(&lengths(&[20, 30]), Dbu::new(50), SITE);
 
         assert_eq!(padding, Some((lengths(&[0, 0]), lengths(&[0, 0]))));
     }
@@ -352,14 +352,14 @@ mod tests {
     fn padding_that_would_fill_the_gap_exactly_is_left_off() {
         // Three spare sites split one right and two left; the two left
         // would close the gap, so only the right one is taken.
-        let padding = even_padding(&lengths(&[10]), Dbu(40), SITE);
+        let padding = even_padding(&lengths(&[10]), Dbu::new(40), SITE);
 
         assert_eq!(padding, Some((lengths(&[0]), lengths(&[10]))));
     }
 
     #[test]
     fn cells_wider_than_the_gap_get_no_padding() {
-        assert_eq!(even_padding(&lengths(&[20, 30]), Dbu(40), SITE), None);
+        assert_eq!(even_padding(&lengths(&[20, 30]), Dbu::new(40), SITE), None);
     }
 
     #[test]

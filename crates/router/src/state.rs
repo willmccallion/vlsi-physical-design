@@ -116,7 +116,7 @@ impl RouteState {
         let design = lines.keyword("design")?.rest();
         let mut grid_line = lines.keyword("grid")?;
         let grid = GridShape {
-            gcell: Dbu(grid_line.int()?),
+            gcell: Dbu::new(grid_line.int()?),
             nx: grid_line.int()?,
             ny: grid_line.int()?,
             min_layer: LayerId::new(grid_line.int()?),
@@ -282,7 +282,10 @@ fn parse_route(lines: &mut Lines<'_>) -> Result<(String, NetRoute), StateParseEr
         p.done()?;
         route.patches.push(Patch {
             layer,
-            rect: Rect::new(Point::new(Dbu(x0), Dbu(y0)), Point::new(Dbu(x1), Dbu(y1))),
+            rect: Rect::new(
+                Point::new(Dbu::new(x0), Dbu::new(y0)),
+                Point::new(Dbu::new(x1), Dbu::new(y1)),
+            ),
         });
     }
     for _ in 0..access {
@@ -330,7 +333,7 @@ fn parse_edges(lines: &mut Lines<'_>, count: usize) -> Result<EdgeSet, StatePars
 fn parse_access(lines: &mut Lines<'_>) -> Result<AccessPoint, StateParseError> {
     let mut a = lines.keyword("a")?;
     let node = a.node()?;
-    let at = Point::new(Dbu(a.int()?), Dbu(a.int()?));
+    let at = Point::new(Dbu::new(a.int()?), Dbu::new(a.int()?));
     let pin_layer = LayerId::new(a.int()?);
     let mut vias = Vec::new();
     while !a.is_done() {
@@ -492,11 +495,14 @@ mod tests {
             .collect(),
             patches: vec![Patch {
                 layer: LayerId::new(2),
-                rect: Rect::new(Point::new(Dbu(-5), Dbu(10)), Point::new(Dbu(15), Dbu(40))),
+                rect: Rect::new(
+                    Point::new(Dbu::new(-5), Dbu::new(10)),
+                    Point::new(Dbu::new(15), Dbu::new(40)),
+                ),
             }],
             access: vec![AccessPoint {
                 node: node(2, 4, 7),
-                at: Point::new(Dbu(100), Dbu(-3)),
+                at: Point::new(Dbu::new(100), Dbu::new(-3)),
                 pin_layer: LayerId::new(1),
                 vias: vec![ViaId::new(3)],
             }],
@@ -505,7 +511,7 @@ mod tests {
         RouteState {
             design: "tiny design".to_string(),
             grid: GridShape {
-                gcell: Dbu(5700),
+                gcell: Dbu::new(5700),
                 nx: 12,
                 ny: 9,
                 min_layer: LayerId::new(2),

@@ -177,7 +177,7 @@ fn best_per_node(found: Vec<((bool, Dbu), AccessPoint)>) -> Vec<AccessPoint> {
 const fn middle_on_grid(low: Dbu, high: Dbu, grid: Dbu) -> Dbu {
     // NOTE: genAPCentered truncates both steps toward zero, which rounds up
     // below the origin; PARE floors both, so a shifted die keeps its points.
-    Dbu(low.midpoint(high).div_floor(grid) * grid.get())
+    Dbu::new(low.midpoint(high).div_floor(grid) * grid.get())
 }
 
 /// Off-crossing accesses on each track of `layer` through `rect`: the point
@@ -484,7 +484,10 @@ mod tests {
     use super::*;
 
     fn rect(x0: i64, y0: i64, x1: i64, y1: i64) -> Rect<Dbu> {
-        Rect::new(Point::new(Dbu(x0), Dbu(y0)), Point::new(Dbu(x1), Dbu(y1)))
+        Rect::new(
+            Point::new(Dbu::new(x0), Dbu::new(y0)),
+            Point::new(Dbu::new(x1), Dbu::new(y1)),
+        )
     }
 
     /// Nangate45 `DFFS_X1` pin QN in 2000ths of a micron: a tab across a bar.
@@ -492,10 +495,10 @@ mod tests {
         [rect(6390, 1120, 6720, 1400), rect(6390, 370, 6530, 1850)]
     }
 
-    const METAL1_SPACING: Dbu = Dbu(130);
+    const METAL1_SPACING: Dbu = Dbu::new(130);
 
     fn at(x: i64, y: i64) -> Point<Dbu> {
-        Point::new(Dbu(x), Dbu(y))
+        Point::new(Dbu::new(x), Dbu::new(y))
     }
 
     #[test]
@@ -517,24 +520,36 @@ mod tests {
         let area = rect(10, 10, 20, 20);
 
         assert_eq!(distance_outside(at(15, 20), &area), Dbu::ZERO);
-        assert_eq!(distance_outside(at(5, 15), &area), Dbu(5));
-        assert_eq!(distance_outside(at(23, 4), &area), Dbu(9));
+        assert_eq!(distance_outside(at(5, 15), &area), Dbu::new(5));
+        assert_eq!(distance_outside(at(23, 4), &area), Dbu::new(9));
     }
 
     #[test]
     fn the_middle_of_a_span_is_rounded_down_to_the_manufacturing_grid() {
-        assert_eq!(middle_on_grid(Dbu(100), Dbu(130), Dbu(10)), Dbu(110));
+        assert_eq!(
+            middle_on_grid(Dbu::new(100), Dbu::new(130), Dbu::new(10)),
+            Dbu::new(110)
+        );
     }
 
     #[test]
     fn the_middle_of_a_span_below_the_origin_is_rounded_down_too() {
-        assert_eq!(middle_on_grid(Dbu(-20), Dbu(-10), Dbu(10)), Dbu(-20));
-        assert_eq!(middle_on_grid(Dbu(-19), Dbu(0), Dbu(10)), Dbu(-10));
+        assert_eq!(
+            middle_on_grid(Dbu::new(-20), Dbu::new(-10), Dbu::new(10)),
+            Dbu::new(-20)
+        );
+        assert_eq!(
+            middle_on_grid(Dbu::new(-19), Dbu::new(0), Dbu::new(10)),
+            Dbu::new(-10)
+        );
     }
 
     #[test]
     fn the_middle_of_a_span_on_the_grid_stays_put() {
-        assert_eq!(middle_on_grid(Dbu(100), Dbu(140), Dbu(10)), Dbu(120));
+        assert_eq!(
+            middle_on_grid(Dbu::new(100), Dbu::new(140), Dbu::new(10)),
+            Dbu::new(120)
+        );
     }
 
     #[test]

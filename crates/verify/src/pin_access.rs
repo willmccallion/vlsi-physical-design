@@ -451,12 +451,15 @@ impl PadStretches {
     /// The stretches `pieces` cover, overlapping ones split where what
     /// blocks them changes.
     fn merged(pieces: &[PadStretch]) -> Self {
-        let mut bounds: Vec<Dbu> = pieces.iter().flat_map(|p| [p.lo, p.hi + Dbu(1)]).collect();
+        let mut bounds: Vec<Dbu> = pieces
+            .iter()
+            .flat_map(|p| [p.lo, p.hi + Dbu::new(1)])
+            .collect();
         bounds.sort_unstable();
         bounds.dedup();
         let mut out: Vec<PadStretch> = Vec::new();
         for w in bounds.windows(2) {
-            let (lo, hi) = (w[0], w[1] - Dbu(1));
+            let (lo, hi) = (w[0], w[1] - Dbu::new(1));
             let block = pieces
                 .iter()
                 .filter(|p| p.lo <= lo && hi <= p.hi)
@@ -465,7 +468,7 @@ impl PadStretches {
                 continue;
             }
             match out.last_mut() {
-                Some(last) if last.block == block && last.hi + Dbu(1) == lo => last.hi = hi,
+                Some(last) if last.block == block && last.hi + Dbu::new(1) == lo => last.hi = hi,
                 _ => out.push(PadStretch { lo, hi, block }),
             }
         }
@@ -492,7 +495,7 @@ impl Escape {
         } else {
             (db.die_area.min.x, db.die_area.width())
         };
-        let chunk = (reach * PAD_CHUNK_REACHES).max(Dbu(1));
+        let chunk = (reach * PAD_CHUNK_REACHES).max(Dbu::new(1));
         let chunks = usize::try_from(extent.div_ceil(chunk)).unwrap_or(1).max(1);
         Self {
             pads: (0..tracks.len() * chunks)
@@ -529,7 +532,7 @@ impl Escape {
     fn chunk_stretches(&self, t: usize, c: usize) -> Vec<PadStretches> {
         let track = self.tracks[t];
         let start = self.chunk_origin + self.chunk * c as i64;
-        let open = Dbu(i64::MAX / 4);
+        let open = Dbu::new(i64::MAX / 4);
         let lo = if c == 0 { -open } else { start };
         let hi = if c + 1 == self.chunks {
             open
@@ -616,10 +619,10 @@ impl Escape {
         if !blocks(centre) {
             return None;
         }
-        let below = along_shape.lo - along_pad.hi - metal.reach - Dbu(1);
-        let above = along_shape.hi - along_pad.lo + metal.reach + Dbu(1);
+        let below = along_shape.lo - along_pad.hi - metal.reach - Dbu::new(1);
+        let above = along_shape.hi - along_pad.lo + metal.reach + Dbu::new(1);
         let first_blocked = |mut clear: Dbu, mut blocked: Dbu| {
-            while (blocked - clear).abs() > Dbu(1) {
+            while (blocked - clear).abs() > Dbu::new(1) {
                 let mid = clear + (blocked - clear) / 2;
                 if blocks(mid) {
                     blocked = mid;
@@ -1209,7 +1212,7 @@ mod tests {
     use pare_common::geom::dbu::DbuPerMicron;
 
     const fn pt(x: i64, y: i64) -> Point<Dbu> {
-        Point::new(Dbu(x), Dbu(y))
+        Point::new(Dbu::new(x), Dbu::new(y))
     }
 
     fn rect(x0: i64, y0: i64, x1: i64, y1: i64) -> Rect<Dbu> {
@@ -1220,12 +1223,12 @@ mod tests {
         RoutingLayer {
             name: name.into(),
             direction,
-            pitch_x: Dbu(200),
-            pitch_y: Dbu(200),
+            pitch_x: Dbu::new(200),
+            pitch_y: Dbu::new(200),
             offset_x: None,
             offset_y: None,
-            width: Dbu(100),
-            min_spacing: Dbu(100),
+            width: Dbu::new(100),
+            min_spacing: Dbu::new(100),
             spacing_table: None,
             rules: RoutingLayerRules::default(),
             electrical: pare_common::db::library::LayerElectrical::default(),
@@ -1254,8 +1257,8 @@ mod tests {
     fn cut_layer(name: &str) -> CutLayer {
         CutLayer {
             name: name.into(),
-            width: Some(Dbu(100)),
-            spacing: Some(Dbu(120)),
+            width: Some(Dbu::new(100)),
+            spacing: Some(Dbu::new(120)),
             rules: CutLayerRules::default(),
             resistance: None,
         }
@@ -1323,7 +1326,7 @@ mod tests {
     ) -> SpecialWire {
         SpecialWire {
             layer,
-            width: Dbu(width),
+            width: Dbu::new(width),
             from,
             to,
             extensions: (Dbu::ZERO, Dbu::ZERO),
@@ -1406,16 +1409,16 @@ mod tests {
         db.die_area = rect(0, 0, 10_000, 4000);
         db.tracks.push(TrackDef {
             axis: TrackAxis::X,
-            start: Dbu(100),
+            start: Dbu::new(100),
             count: 50,
-            step: Dbu(200),
+            step: Dbu::new(200),
             layers: vec![m2],
         });
         db.tracks.push(TrackDef {
             axis: TrackAxis::Y,
-            start: Dbu(0),
+            start: Dbu::new(0),
             count: 21,
-            step: Dbu(200),
+            step: Dbu::new(200),
             layers: vec![m1, m3],
         });
         let mut wires = vec![ground_wire(
@@ -1441,8 +1444,11 @@ mod tests {
     /// Spacing 0.10 up to width 0.46 and 0.15 from there, at any run.
     fn wide_metal_table() -> SpacingTable {
         SpacingTable::ParallelRunLength(ParallelRunLengthTable {
-            run_lengths: vec![Dbu(0)],
-            rows: vec![(Dbu(0), vec![Dbu(100)]), (Dbu(460), vec![Dbu(150)])],
+            run_lengths: vec![Dbu::new(0)],
+            rows: vec![
+                (Dbu::new(0), vec![Dbu::new(100)]),
+                (Dbu::new(460), vec![Dbu::new(150)]),
+            ],
         })
     }
 
@@ -1718,7 +1724,7 @@ mod tests {
             access.blocked_pins(&db, right, pt(1000, 0), Orientation::N),
             0
         );
-        assert_eq!(access.reach(), Dbu(190));
+        assert_eq!(access.reach(), Dbu::new(190));
     }
 
     /// Master U placed at `x` with its M2 pin on no net.
@@ -1784,8 +1790,8 @@ mod tests {
 
     fn stretch(lo: i64, hi: i64, block: PadBlock) -> PadStretch {
         PadStretch {
-            lo: Dbu(lo),
-            hi: Dbu(hi),
+            lo: Dbu::new(lo),
+            hi: Dbu::new(hi),
             block,
         }
     }
@@ -1805,7 +1811,7 @@ mod tests {
                 stretch(16, 20, b)
             ]
         );
-        assert_eq!(merged.at(Dbu(21)), PadBlock::Clear);
+        assert_eq!(merged.at(Dbu::new(21)), PadBlock::Clear);
     }
 
     /// What fixed metal on `metal` blocks `pad`, shape by shape.
@@ -1831,7 +1837,7 @@ mod tests {
                     let at = pt(x, track.get());
                     let direct = pad_block_directly(&metal, &via.pad.translate(at));
                     assert_eq!(
-                        up.pad_block(t, k, Dbu(x)),
+                        up.pad_block(t, k, Dbu::new(x)),
                         direct,
                         "track {t} via {k} x {x}"
                     );

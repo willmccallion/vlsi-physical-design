@@ -31,7 +31,7 @@ fn fixture(name: &str) -> PathBuf {
 }
 
 const fn pt(x: i64, y: i64) -> Point<Dbu> {
-    Point::new(Dbu(x), Dbu(y))
+    Point::new(Dbu::new(x), Dbu::new(y))
 }
 
 /// An empty 10x10 um design over the fixture library.
@@ -185,7 +185,7 @@ fn wiring_stats_count_wrong_way_wires_and_vias() {
 
     assert_eq!(stats.vias, 2);
     assert_eq!(stats.wrong_way, 1);
-    assert_eq!(stats.wirelength[M2], Dbu(1000));
+    assert_eq!(stats.wirelength[M2], Dbu::new(1000));
 }
 
 /// Puts `net` under a nondefault rule of double width and hard double
@@ -196,8 +196,8 @@ fn double_width_rule(db: &mut NetlistDB, net: NetId, wire_extension: Option<Dbu>
         hard_spacing: true,
         layers: vec![NonDefaultLayer {
             layer: M2,
-            width: Dbu(200),
-            spacing: Some(Dbu(200)),
+            width: Dbu::new(200),
+            spacing: Some(Dbu::new(200)),
             wire_extension,
         }],
         vias: Vec::new(),
@@ -224,7 +224,7 @@ fn wires_of_a_net_under_a_nondefault_rule_take_its_width() {
 fn a_nondefault_wire_extension_replaces_the_half_width_at_the_ends() {
     let mut db = empty_design();
     let net = db.net_or_insert("n");
-    double_width_rule(&mut db, net, Some(Dbu(20)));
+    double_width_rule(&mut db, net, Some(Dbu::new(20)));
 
     let shapes = route_elem_shapes(&db, net, &wire(M2, pt(0, 500), pt(1000, 500)));
 
@@ -280,9 +280,9 @@ fn nondefault_wires_that_merge_at_their_width_are_spaced_at_the_default_width() 
 fn a_nondefault_wire_end_is_held_to_the_end_of_line_rule_at_the_default_width() {
     let mut db = empty_design();
     db.library.routing_layers[M2].rules.end_of_line = vec![EndOfLineSpacing {
-        spacing: Dbu(150),
-        eol_width: Dbu(150),
-        within: Dbu(50),
+        spacing: Dbu::new(150),
+        eol_width: Dbu::new(150),
+        within: Dbu::new(50),
         parallel_edge: None,
     }];
     let net = db.net_or_insert("n");

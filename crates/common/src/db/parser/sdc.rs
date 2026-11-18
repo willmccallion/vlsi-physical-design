@@ -1763,7 +1763,7 @@ mod tests {
             .add_macro(Macro::new(
                 "fakeram".into(),
                 MacroClass::Block,
-                Point::new(Dbu(2000), Dbu(2000)),
+                Point::new(Dbu::new(2000), Dbu::new(2000)),
                 Symmetry::default(),
                 None,
             ))
@@ -1773,7 +1773,7 @@ mod tests {
             .add_cell(
                 "core/mem/macro_mem".into(),
                 sram,
-                Point::new(Dbu(0), Dbu(0)),
+                Point::new(Dbu::new(0), Dbu::new(0)),
                 Orientation::N,
                 PlacementStatus::Placed,
             )
@@ -1799,7 +1799,7 @@ mod tests {
                         SignalUse::Signal
                     },
                     shapes: Vec::new(),
-                    location: Point::new(Dbu(0), Dbu(0)),
+                    location: Point::new(Dbu::new(0), Dbu::new(0)),
                     orient: Orientation::N,
                     status: PlacementStatus::Placed,
                 })

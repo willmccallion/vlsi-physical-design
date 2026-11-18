@@ -184,7 +184,7 @@ mod tests {
     fn sink_at(i: usize, x: i64, y: i64) -> ClockSink {
         ClockSink {
             name: format!("ff{i}/CK"),
-            location: Point::new(Dbu(x), Dbu(y)),
+            location: Point::new(Dbu::new(x), Dbu::new(y)),
             pin: PinId::new(i),
             input_cap: Farads32::ZERO,
             insertion_delay: Seconds::ZERO,
@@ -203,7 +203,10 @@ mod tests {
 
         assert_eq!(
             region,
-            Rect::new(Point::new(Dbu(1), Dbu(0)), Point::new(Dbu(99), Dbu(196)))
+            Rect::new(
+                Point::new(Dbu::new(1), Dbu::new(0)),
+                Point::new(Dbu::new(99), Dbu::new(196))
+            )
         );
     }
 

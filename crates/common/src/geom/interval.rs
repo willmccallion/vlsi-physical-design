@@ -133,7 +133,7 @@ mod tests {
     use super::*;
 
     fn span(lo: i64, hi: i64) -> Interval {
-        Interval::new(Dbu(lo), Dbu(hi))
+        Interval::new(Dbu::new(lo), Dbu::new(hi))
     }
 
     fn spans(list: &[(i64, i64)]) -> Vec<Interval> {
@@ -150,7 +150,7 @@ mod tests {
     fn apart_intervals_meet_across_the_gap_between_them_either_way_round() {
         assert_eq!(span(0, 10).between(span(14, 20)), span(10, 14));
         assert_eq!(span(14, 20).between(span(0, 10)), span(10, 14));
-        assert_eq!(span(14, 20).distance(span(0, 10)), Dbu(4));
+        assert_eq!(span(14, 20).distance(span(0, 10)), Dbu::new(4));
     }
 
     #[test]

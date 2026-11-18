@@ -380,7 +380,7 @@ fn a_clock_gate_driving_far_apart_flops_is_cloned_as_it_always_is() {
         clocks: &clocks,
         signal_rc: wire(&db, "metal2", 3.5, 0.1),
         clock_rc: wire(&db, "metal3", 1.5, 0.11),
-        max_wire_length: Some(Dbu(23_000)),
+        max_wire_length: Some(Dbu::new(23_000)),
         options: CtsOptions::default(),
     };
     let first_added = db.cells.len();
@@ -434,7 +434,7 @@ fn a_cluster_of_only_a_steiner_point_gets_no_clone() {
         clocks: &clocks,
         signal_rc: wire(&db, "metal2", 3.5, 0.1),
         clock_rc: wire(&db, "metal3", 1.5, 0.11),
-        max_wire_length: Some(Dbu(23_000)),
+        max_wire_length: Some(Dbu::new(23_000)),
         options: CtsOptions::default(),
     };
 
@@ -752,6 +752,6 @@ fn a_fanout_limit_of_one_is_refused() {
 fn a_grid_under_a_wire_length_limit_gets_the_trees_it_always_has() {
     assert_golden(
         "grid_24x24_wire_100um.txt",
-        &synthesized_grid(CLOCK, Some(Dbu(200_000))),
+        &synthesized_grid(CLOCK, Some(Dbu::new(200_000))),
     );
 }

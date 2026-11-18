@@ -66,7 +66,7 @@ impl DetailedRouter<'_> {
         let grid = self
             .rules
             .manufacturing_grid
-            .map_or(Dbu(1), |g| g.max(Dbu(1)));
+            .map_or(Dbu::new(1), |g| g.max(Dbu::new(1)));
         let deficit = piece.min_area - piece.area;
         let length = round_up(deficit.div_ceil(width), grid);
         let (Interval { lo: a0, hi: a1 }, Interval { lo: b0, hi: b1 }) =
@@ -99,7 +99,7 @@ impl DetailedRouter<'_> {
             let (below, above) = split(length, low, of);
             rect((b0 - below, b1 + above))
         });
-        let run = (b1 - b0).max(Dbu(1));
+        let run = (b1 - b0).max(Dbu::new(1));
         let breadth = round_up(deficit.div_ceil(run), grid);
         let across_tracks = PATCH_SPLITS.iter().map(|&(low, of)| {
             let (below, above) = split(breadth, low, of);
@@ -135,8 +135,8 @@ mod tests {
 
     #[test]
     fn a_length_rounds_up_to_the_next_grid_step_unless_on_it() {
-        assert_eq!(round_up(Dbu(101), Dbu(5)), Dbu(105));
-        assert_eq!(round_up(Dbu(100), Dbu(5)), Dbu(100));
-        assert_eq!(round_up(Dbu(-3), Dbu(5)), Dbu(0));
+        assert_eq!(round_up(Dbu::new(101), Dbu::new(5)), Dbu::new(105));
+        assert_eq!(round_up(Dbu::new(100), Dbu::new(5)), Dbu::new(100));
+        assert_eq!(round_up(Dbu::new(-3), Dbu::new(5)), Dbu::new(0));
     }
 }

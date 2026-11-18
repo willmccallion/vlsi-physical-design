@@ -100,7 +100,7 @@ struct Grid {
 impl Grid {
     /// The grid of `core`-sized tiles covering `bounds`.
     fn from_bounds(bounds: Rect<Dbu>, core: Dbu) -> Self {
-        let core = core.max(Dbu(1));
+        let core = core.max(Dbu::new(1));
         let count = |span: Dbu| (span.div_trunc(core) + 1).max(1) as usize;
         Self {
             origin: bounds.min,

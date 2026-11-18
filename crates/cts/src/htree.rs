@@ -68,7 +68,7 @@ impl TreePoint {
     /// The point in database units, `unit` of them to the tree's length
     /// unit, truncated to `int` as `TritonCTS` stores positions.
     pub(crate) fn to_dbu(self, unit: f64) -> Point<Dbu> {
-        let truncate = |v: f64| Dbu(i64::from((v * unit) as i32));
+        let truncate = |v: f64| Dbu::new(i64::from((v * unit) as i32));
         Point::new(truncate(self.x), truncate(self.y))
     }
 
@@ -1700,7 +1700,10 @@ mod tests {
     use pare_common::db::liberty::{LibCellId, LibPortId};
 
     fn rect(x0: i64, y0: i64, x1: i64, y1: i64) -> Rect<Dbu> {
-        Rect::new(Point::new(Dbu(x0), Dbu(y0)), Point::new(Dbu(x1), Dbu(y1)))
+        Rect::new(
+            Point::new(Dbu::new(x0), Dbu::new(y0)),
+            Point::new(Dbu::new(x1), Dbu::new(y1)),
+        )
     }
 
     fn buffer() -> BufferCell {
@@ -1733,7 +1736,7 @@ mod tests {
         fn with_buffer_size(mut self, width: i64, height: i64) -> Self {
             let _ = self
                 .buffer_sizes
-                .insert(buffer(), Point::new(Dbu(width), Dbu(height)));
+                .insert(buffer(), Point::new(Dbu::new(width), Dbu::new(height)));
             self
         }
 
@@ -1987,7 +1990,7 @@ mod tests {
     /// slower bare segment.
     fn first_level_under(limit_um: i64) -> Vec<usize> {
         let mut scene = Scene::new(Vec::new());
-        scene.settings.max_wire_length = Some(Dbu(limit_um * 2000));
+        scene.settings.max_wire_length = Some(Dbu::new(limit_um * 2000));
         let tech = TechChar::from_segments(
             vec![segment(10, 1, &[1.0], 10), segment(10, 9, &[], 10)],
             14_000,
@@ -2040,7 +2043,7 @@ mod tests {
     }
 
     fn at(x: i64, y: i64) -> Point<Dbu> {
-        Point::new(Dbu(x), Dbu(y))
+        Point::new(Dbu::new(x), Dbu::new(y))
     }
 
     #[test]

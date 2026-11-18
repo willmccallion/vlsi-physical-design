@@ -239,9 +239,9 @@ mod tests {
         let tech = tiny_tech();
         let lt = tech.layer(tech.min_layer);
         let (a, b) = (lt.cross[CrossIdx(3)].at, lt.cross[CrossIdx(4)].at);
-        let gap = Interval::new(a + Dbu(1), b - Dbu(1));
+        let gap = Interval::new(a + Dbu::new(1), b - Dbu::new(1));
 
-        let marked = marked_crossings(lt, WHOLE_WIRE, gap, Dbu(1));
+        let marked = marked_crossings(lt, WHOLE_WIRE, gap, Dbu::new(1));
 
         assert_eq!(marked, Some((CrossIdx(3), CrossIdx(4))));
     }
@@ -274,7 +274,7 @@ mod tests {
         let lt = tech.layer(tech.min_layer);
         let at = lt.cross[CrossIdx(5)].at;
 
-        let marked = marked_crossings(lt, WHOLE_WIRE, Interval::new(at, at), Dbu(1));
+        let marked = marked_crossings(lt, WHOLE_WIRE, Interval::new(at, at), Dbu::new(1));
 
         assert_eq!(marked, Some((CrossIdx(5), CrossIdx(5))));
     }

@@ -12,7 +12,7 @@ use pare_common::db::indices::{IdVec, LayerId, NetId};
 use pare_common::db::shapes::wire_rect;
 use pare_common::geom::dbu::Dbu;
 
-const GCELL: Dbu = Dbu(2000);
+const GCELL: Dbu = Dbu::new(2000);
 const M3: LayerId = LayerId(2);
 
 fn along_m3_row_0(from: u16, to: u16) -> Vec<GCell> {
@@ -74,7 +74,7 @@ fn a_wire_is_cut_where_it_would_cross_an_obstacle() {
 
     assert_ne!(wires, []);
     let lt = tech.layer(M3);
-    let stripe_x = Dbu(5000);
+    let stripe_x = Dbu::new(5000);
     for w in &wires {
         let (a, b) = (lt.point(w.track, w.from), lt.point(w.track, w.to));
         let metal = wire_rect(a, b, lt.width).unwrap();
@@ -84,10 +84,10 @@ fn a_wire_is_cut_where_it_would_cross_an_obstacle() {
         assert!(!blocked, "{w:?} crosses an obstacle");
         assert!(b.x < stripe_x, "{w:?} should stop before the stripe");
     }
-    let gcell_1_centre = Dbu(3000);
+    let gcell_1_centre = Dbu::new(3000);
     assert!(
         wires
             .iter()
-            .any(|w| (lt.point(w.track, w.from).x - gcell_1_centre).abs() <= Dbu(100))
+            .any(|w| (lt.point(w.track, w.from).x - gcell_1_centre).abs() <= Dbu::new(100))
     );
 }

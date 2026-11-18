@@ -36,8 +36,10 @@ impl RouteSegment {
     /// The Manhattan distance between the ends.
     #[must_use]
     pub const fn length(&self) -> Dbu {
-        Dbu((self.from.at.x.get() - self.to.at.x.get()).abs()
-            + (self.from.at.y.get() - self.to.at.y.get()).abs())
+        Dbu::new(
+            (self.from.at.x.get() - self.to.at.x.get()).abs()
+                + (self.from.at.y.get() - self.to.at.y.get()).abs(),
+        )
     }
 }
 

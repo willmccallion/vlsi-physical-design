@@ -466,10 +466,10 @@ mod tests {
 
     #[test]
     fn only_gaps_narrower_than_the_spacing_are_reported() {
-        let span = |lo, hi| Interval::new(Dbu(lo), Dbu(hi));
+        let span = |lo, hi| Interval::new(Dbu::new(lo), Dbu::new(hi));
         let spans = vec![span(0, 100), span(150, 300), span(280, 400), span(600, 700)];
 
-        assert_eq!(narrow_gaps(spans, Dbu(70)), [span(100, 150)]);
+        assert_eq!(narrow_gaps(spans, Dbu::new(70)), [span(100, 150)]);
     }
 
     #[test]

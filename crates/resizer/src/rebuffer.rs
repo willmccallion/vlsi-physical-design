@@ -732,7 +732,7 @@ impl Rebuffer {
             let mut dy = node.at.y - location.y;
             if dx.abs() + dy.abs() >= step {
                 let ratio = dx.abs().to_f64() / (dx.abs() + dy.abs()).to_f64();
-                let dx_abs = Dbu((ratio * step.to_f64()) as i64).min(step);
+                let dx_abs = Dbu::new((ratio * step.to_f64()) as i64).min(step);
                 let dy_abs = step - dx_abs;
                 dx = if dx > Dbu::ZERO { dx_abs } else { -dx_abs };
                 dy = if dy > Dbu::ZERO { dy_abs } else { -dy_abs };
@@ -1750,7 +1750,7 @@ fn least_length<const N: usize>(limits: [Option<Dbu>; N]) -> Option<Dbu> {
         .into_iter()
         .flatten()
         .min()
-        .map(|least| least.max(Dbu(1)))
+        .map(|least| least.max(Dbu::new(1)))
 }
 
 /// The wire a buffer can drive before its load's slew limit is reached, in

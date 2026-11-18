@@ -53,7 +53,7 @@ pub(super) fn steiner_tree(spots: &[Spot]) -> SteinerTree {
         let boxes: Vec<Rect<Dbu>> = nodes
             .iter()
             .map(|&(x, y)| {
-                let p = Point::new(Dbu(i64::from(x)), Dbu(i64::from(y)));
+                let p = Point::new(Dbu::new(i64::from(x)), Dbu::new(i64::from(y)));
                 Rect::new(p, p)
             })
             .collect();

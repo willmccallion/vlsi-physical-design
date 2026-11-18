@@ -369,7 +369,7 @@ impl DetailedRouter<'_> {
         if after >= lt.cross.len() {
             return None;
         }
-        let row = lt.tracks_within(row_start, row_start + self.gcell - Dbu(1));
+        let row = lt.tracks_within(row_start, row_start + self.gcell - Dbu::new(1));
         let assigned = self.wires[net].iter().find(|w| {
             w.layer == layer && w.from <= before && before < w.to && row.contains(w.track)
         });

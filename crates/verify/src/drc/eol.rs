@@ -174,12 +174,12 @@ impl LayerCheck<'_> {
         let probe = if between.width() <= Dbu::ZERO || between.height() <= Dbu::ZERO {
             match edge.edge.heading() {
                 Heading::East | Heading::West => Rect::new(
-                    Point::new(between.min.x - Dbu(1), between.min.y),
-                    Point::new(between.max.x + Dbu(1), between.max.y),
+                    Point::new(between.min.x - Dbu::new(1), between.min.y),
+                    Point::new(between.max.x + Dbu::new(1), between.max.y),
                 ),
                 Heading::North | Heading::South => Rect::new(
-                    Point::new(between.min.x, between.min.y - Dbu(1)),
-                    Point::new(between.max.x, between.max.y + Dbu(1)),
+                    Point::new(between.min.x, between.min.y - Dbu::new(1)),
+                    Point::new(between.max.x, between.max.y + Dbu::new(1)),
                 ),
             }
         } else {
@@ -243,7 +243,7 @@ const fn opposite(a: Heading, b: Heading) -> bool {
 /// The strip one unit deep just inside the metal along `edge`.
 fn inside_strip(edge: &Edge) -> Rect<Dbu> {
     let (from, to) = (edge.from, edge.to);
-    let one = Dbu(1);
+    let one = Dbu::new(1);
     match edge.heading() {
         Heading::East => Rect::new(from, Point::new(to.x, to.y + one)),
         Heading::West => Rect::new(Point::new(to.x, to.y - one), from),

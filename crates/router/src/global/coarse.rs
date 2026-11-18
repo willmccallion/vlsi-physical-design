@@ -738,8 +738,8 @@ mod tests {
     fn grid(nx: u16, ny: u16) -> GlobalGrid {
         let edges = 2 * usize::from(nx) * usize::from(ny);
         GlobalGrid {
-            origin: Point::new(Dbu(0), Dbu(0)),
-            gcell: Dbu(100),
+            origin: Point::new(Dbu::new(0), Dbu::new(0)),
+            gcell: Dbu::new(100),
             nx,
             ny,
             min_layer: LayerId::new(1),

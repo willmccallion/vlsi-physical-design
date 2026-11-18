@@ -161,10 +161,10 @@ mod tests {
 
     #[test]
     fn values_are_found_in_the_buckets_they_were_filed_in() {
-        let mut hash = SpatialHash::new(Point::new(Dbu(100), Dbu(0)), Dbu(10));
-        let key = hash.bucket(Point::new(Dbu(125), Dbu(5)));
+        let mut hash = SpatialHash::new(Point::new(Dbu::new(100), Dbu::new(0)), Dbu::new(10));
+        let key = hash.bucket(Point::new(Dbu::new(125), Dbu::new(5)));
         hash.insert(key, 'a');
-        hash.insert(hash.bucket(Point::new(Dbu(145), Dbu(5))), 'b');
+        hash.insert(hash.bucket(Point::new(Dbu::new(145), Dbu::new(5))), 'b');
 
         assert_eq!(key, Point::new(Bucket(2), Bucket(0)));
         assert_eq!(hash.in_bucket(key), ['a']);
@@ -177,7 +177,7 @@ mod tests {
 
     #[test]
     fn retaining_keeps_only_the_accepted_values_of_one_bucket() {
-        let mut hash = SpatialHash::new(Point::new(Dbu(0), Dbu(0)), Dbu(10));
+        let mut hash = SpatialHash::new(Point::new(Dbu::new(0), Dbu::new(0)), Dbu::new(10));
         let key = Point::new(Bucket(0), Bucket(0));
         hash.insert(key, 1);
         hash.insert(key, 2);
@@ -189,9 +189,12 @@ mod tests {
 
     #[test]
     fn a_point_below_the_origin_lies_in_a_bucket_before_the_first() {
-        let p = Point::new(Dbu(-1), Dbu(100));
+        let p = Point::new(Dbu::new(-1), Dbu::new(100));
 
-        assert_eq!(bucket_at(p, Dbu(100)), Point::new(Bucket(-1), Bucket(1)));
+        assert_eq!(
+            bucket_at(p, Dbu::new(100)),
+            Point::new(Bucket(-1), Bucket(1))
+        );
     }
 
     #[test]

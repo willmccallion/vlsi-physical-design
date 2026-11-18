@@ -38,7 +38,7 @@ fn tiny_with(places: &[(i64, i64)]) -> NetlistDB {
     for (name, &(x, y)) in MOVABLE.iter().zip(places) {
         let id = db.cell_id(name).unwrap();
         let c = &mut db.cells[id];
-        c.location = Point::new(Dbu(x), Dbu(y));
+        c.location = Point::new(Dbu::new(x), Dbu::new(y));
         c.orient = Orientation::N;
         c.status = PlacementStatus::Placed;
     }
@@ -108,7 +108,7 @@ fn tiny_with_spaced_inverters(places: &[(i64, i64)]) -> NetlistDB {
     for (name, &(x, y)) in MOVABLE.iter().zip(places) {
         let id = db.cell_id(name).unwrap();
         let c = &mut db.cells[id];
-        c.location = Point::new(Dbu(x), Dbu(y));
+        c.location = Point::new(Dbu::new(x), Dbu::new(y));
         c.orient = Orientation::N;
         c.status = PlacementStatus::Placed;
     }
@@ -202,7 +202,7 @@ fn a_design_too_full_for_its_rows_fails_naming_the_cells_left_out() {
             .add_cell(
                 format!("extra{i}"),
                 inv,
-                Point::new(Dbu(1000), Dbu(1000)),
+                Point::new(Dbu::new(1000), Dbu::new(1000)),
                 Orientation::N,
                 PlacementStatus::Placed,
             )
@@ -330,10 +330,10 @@ fn of_two_cells_wanting_one_spot_the_one_nearer_the_core_center_goes_first() {
         (1000, 4000),
     ]);
     for row in &mut db.rows {
-        row.origin.x += Dbu(SHIFT);
+        row.origin.x += Dbu::new(SHIFT);
     }
     for cell in &mut db.cells {
-        cell.location.x += Dbu(SHIFT);
+        cell.location.x += Dbu::new(SHIFT);
     }
 
     let _ = detailed_placement(&mut db).unwrap();
@@ -342,8 +342,8 @@ fn of_two_cells_wanting_one_spot_the_one_nearer_the_core_center_goes_first() {
     assert_eq!(
         (at("u1"), at("u2")),
         (
-            Point::new(Dbu(SHIFT + 3000), Dbu(2000)),
-            Point::new(Dbu(SHIFT + 2600), Dbu(2000))
+            Point::new(Dbu::new(SHIFT + 3000), Dbu::new(2000)),
+            Point::new(Dbu::new(SHIFT + 2600), Dbu::new(2000))
         )
     );
 }
@@ -364,12 +364,15 @@ fn rows_of_sites_of_different_widths_are_an_error() {
     let mut db = tiny_with(&[(1000, 1000); 6]);
     let mut wide = db.library.sites[db.rows[0].site].clone();
     wide.name = "wide".into();
-    wide.size.x = Dbu(400);
+    wide.size.x = Dbu::new(400);
     db.rows[2].site = db.library.sites.push(wide);
 
     assert_eq!(
         detailed_placement(&mut db),
-        Err(DetailedPlacementError::SiteWidths(Dbu(400), Dbu(200)))
+        Err(DetailedPlacementError::SiteWidths(
+            Dbu::new(400),
+            Dbu::new(200)
+        ))
     );
 }
 
@@ -379,7 +382,7 @@ fn a_cell_wider_than_the_core_is_an_error() {
     let u1 = db.cell_id("u1").unwrap();
     let mut wide = db.cell_macro(u1).clone();
     wide.name = "WIDE".into();
-    wide.size.x = Dbu(6200);
+    wide.size.x = Dbu::new(6200);
     db.cells[u1].macro_id = db.library.add_macro(wide).unwrap();
 
     assert_eq!(

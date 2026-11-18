@@ -115,7 +115,7 @@ impl GridX {
 
     /// The column's left edge, or the span's width, as dpl's `gridToDbu`.
     pub const fn to_dbu(self, site_width: Dbu) -> Dbu {
-        Dbu(self.0 * site_width.get())
+        Dbu::new(self.0 * site_width.get())
     }
 }
 
@@ -385,7 +385,7 @@ mod tests {
         let library = lef::parse_files(&[fixture("tiny.lef")], units).unwrap();
         let mut db = def::parse(&fixture("tiny.def"), library).unwrap();
         for row in &mut db.rows {
-            row.origin.y += Dbu(2000);
+            row.origin.y += Dbu::new(2000);
         }
         RowGrid::new(&db, &core_rows(&db)).unwrap()
     }
@@ -396,6 +396,6 @@ mod tests {
 
         let past_last = rows.row_y(rows.row_count() + 1);
 
-        assert_eq!(past_last, Dbu(6000));
+        assert_eq!(past_last, Dbu::new(6000));
     }
 }

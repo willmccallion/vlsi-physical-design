@@ -30,7 +30,7 @@ fn edited(name: &str, edits: &[(&str, &str)]) -> String {
 }
 
 const fn pt(x: i64, y: i64) -> Point<Dbu> {
-    Point::new(Dbu(x), Dbu(y))
+    Point::new(Dbu::new(x), Dbu::new(y))
 }
 
 fn rect(x0: i64, y0: i64, x1: i64, y1: i64) -> Rect<Dbu> {
@@ -89,9 +89,9 @@ fn regular_wire_end_extensions_stay_on_their_wire_ends() {
     assert_eq!(
         extensions,
         [
-            (Some(Dbu(30)), Some(Dbu(0))),
+            (Some(Dbu::new(30)), Some(Dbu::new(0))),
             (None, None),
-            (None, Some(Dbu(0))),
+            (None, Some(Dbu::new(0))),
         ]
     );
     let mut text = Vec::new();
@@ -395,8 +395,8 @@ fn non_default_rules_attach_to_their_nets() {
 
     let rule = &db.non_default_rules[NonDefaultRuleId(0)];
     assert!(rule.hard_spacing);
-    assert_eq!(rule.layers[0].spacing, Some(Dbu(150)));
-    assert_eq!(rule.layers[1].wire_extension, Some(Dbu(100)));
+    assert_eq!(rule.layers[0].spacing, Some(Dbu::new(150)));
+    assert_eq!(rule.layers[1].wire_extension, Some(Dbu::new(100)));
     assert_eq!(rule.min_cuts, [(CutLayerId(0), 2)]);
     let n2 = &db.nets[db.net_id("n2").unwrap()];
     assert!(n2.non_default_rule.is_some());

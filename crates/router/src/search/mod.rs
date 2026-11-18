@@ -314,7 +314,7 @@ impl OwnVias {
             rule,
             vias: SpatialHash::new(
                 Point::new(Dbu::ZERO, Dbu::ZERO),
-                (widest + spacing).max(Dbu(1)),
+                (widest + spacing).max(Dbu::new(1)),
             ),
         }
     }
@@ -1138,7 +1138,7 @@ mod tests {
         let db = tiny();
         let tech = RouteTech::new(&db, &RoutingConfig::default()).unwrap();
 
-        let guide = Guide::new(&[], db.die_area.min, Dbu(1000), &tech);
+        let guide = Guide::new(&[], db.die_area.min, Dbu::new(1000), &tech);
 
         assert!(guide.is_none());
     }
@@ -1151,7 +1151,7 @@ mod tests {
             ..RoutingConfig::default()
         };
         let tech = RouteTech::new(&db, &config).unwrap();
-        let occupancy = Occupancy::new(&tech, Dbu(1000));
+        let occupancy = Occupancy::new(&tech, Dbu::new(1000));
         let marks = Marks::default();
         let search = Search {
             db: &db,
@@ -1169,8 +1169,12 @@ mod tests {
         let lt = tech.layer(m1);
         let node = |y: i64| Node {
             layer: m1,
-            track: TrackIdx::new(lt.tracks.as_slice().binary_search(&Dbu(y)).unwrap()),
-            cross: CrossIdx::new(lt.cross.as_slice().partition_point(|c| c.at < Dbu(1100))),
+            track: TrackIdx::new(lt.tracks.as_slice().binary_search(&Dbu::new(y)).unwrap()),
+            cross: CrossIdx::new(
+                lt.cross
+                    .as_slice()
+                    .partition_point(|c| c.at < Dbu::new(1100)),
+            ),
         };
         let targets: FxHashMap<Node, (usize, f64)> =
             std::iter::once((node(300), (0, 0.0))).collect();
@@ -1210,7 +1214,7 @@ mod tests {
             lt.width,
         )
         .unwrap();
-        let mut occupancy = Occupancy::new(&tech, Dbu(1000));
+        let mut occupancy = Occupancy::new(&tech, Dbu::new(1000));
         occupancy.add_rect(
             &tech,
             LayerId(0),
@@ -1296,7 +1300,7 @@ mod tests {
     fn a_step_from_a_marked_crossing_pays_the_marker_cost_per_unit_of_length() {
         let db = tiny();
         let (tech, _) = beside_a_wire(&db);
-        let occupancy = Occupancy::new(&tech, Dbu(1000));
+        let occupancy = Occupancy::new(&tech, Dbu::new(1000));
         let mut marks = Marks::default();
         marks.mark_planar(step(4, 2));
         let search = Search {

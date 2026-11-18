@@ -261,7 +261,7 @@ fn cell_pin_offset(db: &NetlistDB, cell: CellId, macro_pin: MacroPinId) -> Point
         .map(|s| s.rect)
         .reduce(|a, b| a.union(&b))
         .unwrap_or_default();
-    let center_x = Dbu(bbox.min.x.get().midpoint(bbox.max.x.get()));
-    let center_y = Dbu(bbox.min.y.get().midpoint(bbox.max.y.get()));
+    let center_x = Dbu::new(bbox.min.x.get().midpoint(bbox.max.x.get()));
+    let center_y = Dbu::new(bbox.min.y.get().midpoint(bbox.max.y.get()));
     Point::new(center_x - m.size.x / 2, center_y - m.size.y / 2)
 }
