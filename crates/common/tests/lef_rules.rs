@@ -106,9 +106,10 @@ fn width_range_spacing_is_kept_apart_from_the_minimum_spacing() {
     );
 }
 
-#[test]
-fn metal_rules_are_read_from_statements_and_lef57_lef58_properties() {
-    let lib = library_with(
+/// The tiny library with M2's metal rules given by statements and by
+/// `LEF57_`/`LEF58_` properties.
+fn library_with_m2_metal_rules() -> Library {
+    library_with(
         &[(
             "    WIDTH 0.3 0.11 0.2 ;\nEND M2",
             "    WIDTH 0.3 0.11 0.2 ;\n  MINWIDTH 0.1 ;\n  MAXWIDTH 5.0 ;\n  AREA 0.05 ;\n  \
@@ -123,14 +124,25 @@ fn metal_rules_are_read_from_statements_and_lef57_lef58_properties() {
         )],
         "metal",
     )
-    .unwrap();
+    .unwrap()
+}
+
+#[test]
+fn metal_widths_and_area_are_read_from_statements() {
+    let lib = library_with_m2_metal_rules();
 
     let rules = &lib.layer(M2).rules;
     assert_eq!(rules.min_width, Some(Dbu::new(100)));
     assert_eq!(rules.max_width, Some(Dbu::new(5000)));
     assert_eq!(rules.min_area, Some(DbuArea(50_000)));
+}
+
+#[test]
+fn end_of_line_spacings_are_read_from_statements_and_lef57_properties() {
+    let lib = library_with_m2_metal_rules();
+
     assert_eq!(
-        rules.end_of_line,
+        lib.layer(M2).rules.end_of_line,
         [
             EndOfLineSpacing {
                 spacing: Dbu::new(120),
@@ -150,8 +162,14 @@ fn metal_rules_are_read_from_statements_and_lef57_lef58_properties() {
             },
         ]
     );
+}
+
+#[test]
+fn min_steps_are_read_from_statements_and_lef57_properties() {
+    let lib = library_with_m2_metal_rules();
+
     assert_eq!(
-        rules.min_steps,
+        lib.layer(M2).rules.min_steps,
         [
             MinStep {
                 length: Dbu::new(70),
@@ -165,15 +183,27 @@ fn metal_rules_are_read_from_statements_and_lef57_lef58_properties() {
             },
         ]
     );
+}
+
+#[test]
+fn corner_spacing_is_read_from_a_lef58_property() {
+    let lib = library_with_m2_metal_rules();
+
     assert_eq!(
-        rules.corner_spacing,
+        lib.layer(M2).rules.corner_spacing,
         Some(ConvexCornerSpacing {
             except_eol: Some(Dbu::new(110)),
             spacing_by_width: vec![(Dbu::new(0), Dbu::new(100)), (Dbu::new(200), Dbu::new(200))],
         })
     );
+}
+
+#[test]
+fn minimum_cuts_are_read_from_statements() {
+    let lib = library_with_m2_metal_rules();
+
     assert_eq!(
-        rules.minimum_cuts,
+        lib.layer(M2).rules.minimum_cuts,
         [MinimumCut {
             cuts: 2,
             width: Dbu::new(400),
