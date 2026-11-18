@@ -239,14 +239,17 @@ fn owner_geometry(shapes: &[LayoutShape], group: &[usize]) -> OwnerGeometry {
             .filter(LayoutShape::is_fixed)
             .map(|s| s.rect),
     );
-    let routed: Vec<Rect<Dbu>> = group
-        .iter()
-        .map(|&i| shapes[i])
-        .filter(|s| !s.is_fixed())
-        .map(|s| s.rect)
-        .collect();
     let fixed_rects: HashSet<Rect<Dbu>> = fixed.max_rectangles().into_iter().collect();
-    let fixed_edges: HashSet<Edge> = fixed.edges().into_iter().collect();
+    let owned = OwnedMetal {
+        owner,
+        fixed_edges: fixed.edges().into_iter().collect(),
+        routed: group
+            .iter()
+            .map(|&i| shapes[i])
+            .filter(|s| !s.is_fixed())
+            .map(|s| s.rect)
+            .collect(),
+    };
     let mut geometry = OwnerGeometry {
         rects: all
             .max_rectangles()
@@ -260,40 +263,58 @@ fn owner_geometry(shapes: &[LayoutShape], group: &[usize]) -> OwnerGeometry {
         ..OwnerGeometry::default()
     };
     for piece in all.components() {
-        let first = geometry.edges.len();
+        geometry.add_piece(piece, &owned);
+    }
+    geometry
+}
+
+/// What one owner's pieces of metal are judged by: whose they are, the
+/// edges of its fixed metal, and its routed shapes.
+struct OwnedMetal {
+    owner: OwnerIndex,
+    fixed_edges: HashSet<Edge>,
+    routed: Vec<Rect<Dbu>>,
+}
+
+impl OwnerGeometry {
+    /// Adds the edges of `piece`, one connected piece of `owned`'s metal,
+    /// and the piece itself as a polygon when it holds routed metal.
+    fn add_piece(&mut self, piece: Region, owned: &OwnedMetal) {
+        let first = self.edges.len();
         let boundary = piece.edges();
         let links = boundary_links(&boundary);
-        geometry.edges.extend(
+        let number = self.pieces;
+        self.edges.extend(
             boundary
                 .iter()
                 .zip(links)
                 .map(|(&edge, (prev, next))| GcEdge {
                     edge,
-                    owner,
-                    fixed: fixed_edges.contains(&edge),
-                    piece: geometry.pieces,
+                    owner: owned.owner,
+                    fixed: owned.fixed_edges.contains(&edge),
+                    piece: number,
                     prev: edge_index(first + prev),
                     next: edge_index(first + next),
                 }),
         );
-        geometry.pieces += 1;
+        self.pieces += 1;
         let Some(bbox) = piece.bounding_box() else {
-            continue;
+            return;
         };
-        let holds_route = routed
+        let holds_route = owned
+            .routed
             .iter()
             .any(|r| r.overlaps(&bbox) && piece.intersects_rect(r));
         if holds_route {
-            geometry.polygons.push(GcPolygon {
-                owner,
+            self.polygons.push(GcPolygon {
+                owner: owned.owner,
                 bbox,
                 area: piece.area(),
-                has_fixed_edge: geometry.edges[first..].iter().any(|e| e.fixed),
+                has_fixed_edge: self.edges[first..].iter().any(|e| e.fixed),
                 region: piece,
             });
         }
     }
-    geometry
 }
 
 /// The positions in `boundary`, one piece's edges, of each edge's
