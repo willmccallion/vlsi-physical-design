@@ -621,8 +621,9 @@ fn nearest_pt(node: &Node, rect: &Rect<Dbu>) -> Point<Dbu> {
 /// on, as `Opendp::rectDist` finds it.
 fn corner(node: &Node, rect: &Rect<Dbu>) -> Point<Dbu> {
     let Point { x, y } = node.init;
-    let cx = Dbu::new(i64::midpoint(rect.min.x.get(), rect.max.x.get()));
-    let cy = Dbu::new(i64::midpoint(rect.min.y.get(), rect.max.y.get()));
+    // NOTE: Opendp::rectDist halves with C++ `/`, truncating toward zero;
+    // PARE rounds down as Rect::center does, which differs only below zero.
+    let Point { x: cx, y: cy } = rect.center();
     Point::new(
         if x > cx { rect.max.x } else { rect.min.x },
         if y > cy { rect.max.y } else { rect.min.y },
