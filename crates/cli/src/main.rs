@@ -526,8 +526,8 @@ mod tests {
         assert_eq!(
             area,
             Rect::new(
-                Point::new(Dbu(2000), Dbu(5000)),
-                Point::new(Dbu(6001), Dbu(8000))
+                Point::new(Dbu::new(2000), Dbu::new(5000)),
+                Point::new(Dbu::new(6001), Dbu::new(8000))
             )
         );
     }

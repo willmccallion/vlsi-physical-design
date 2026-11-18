@@ -349,10 +349,16 @@ mod tests {
 
     #[test]
     fn steps_within_counts_the_longest_run_closer_than_the_reach() {
-        let at = [Dbu(0), Dbu(10), Dbu(20), Dbu(50), Dbu(55)];
+        let at = [
+            Dbu::new(0),
+            Dbu::new(10),
+            Dbu::new(20),
+            Dbu::new(50),
+            Dbu::new(55),
+        ];
 
-        assert_eq!(steps_within(&at, Dbu(21)), 2);
-        assert_eq!(steps_within(&at, Dbu(20)), 1);
-        assert_eq!(steps_within(&at, Dbu(1)), 0);
+        assert_eq!(steps_within(&at, Dbu::new(21)), 2);
+        assert_eq!(steps_within(&at, Dbu::new(20)), 1);
+        assert_eq!(steps_within(&at, Dbu::new(1)), 0);
     }
 }

@@ -22,7 +22,7 @@ const NET_WEIGHT_SCALE: f64 = 800.0;
 
 /// The pin distance below which a connection's weight stops growing, as
 /// `initialPlaceMinDiffLength`.
-pub(super) const MIN_DIFF_LENGTH: Dbu = Dbu(1500);
+pub(super) const MIN_DIFF_LENGTH: Dbu = Dbu::new(1500);
 
 /// Solver iterations per axis and round, as `initialPlaceMaxSolverIter`.
 const MAX_SOLVER_ITERATIONS: usize = 100;

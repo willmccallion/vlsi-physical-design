@@ -436,7 +436,10 @@ mod tests {
     }
 
     fn center(c: GCell) -> Point<Dbu> {
-        Point::new(Dbu(i64::from(c.x) * 10 + 5), Dbu(i64::from(c.y) * 10 + 5))
+        Point::new(
+            Dbu::new(i64::from(c.x) * 10 + 5),
+            Dbu::new(i64::from(c.y) * 10 + 5),
+        )
     }
 
     fn terminal(pin: usize, cell: GCell, pin_layer: u8) -> PinTerminal {
@@ -482,7 +485,7 @@ mod tests {
         let mut db = def::parse_str(&text, Path::new("tiny.def"), library).unwrap();
         for (name, x) in [("u5", 2000), ("u6", 3000)] {
             let cell = db.cells.iter_mut().find(|c| c.name == name).unwrap();
-            cell.location = Point::new(Dbu(x), Dbu(4000));
+            cell.location = Point::new(Dbu::new(x), Dbu::new(4000));
             cell.status = PlacementStatus::Placed;
         }
         let rule = db.non_default_rules.push(NonDefaultRule {
@@ -490,8 +493,8 @@ mod tests {
             hard_spacing: true,
             layers: vec![NonDefaultLayer {
                 layer: LayerId(0),
-                width: Dbu(200),
-                spacing: Some(Dbu(300)),
+                width: Dbu::new(200),
+                spacing: Some(Dbu::new(300)),
                 wire_extension: None,
             }],
             vias: Vec::new(),

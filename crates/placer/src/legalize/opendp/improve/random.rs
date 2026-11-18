@@ -96,7 +96,7 @@ fn random_trial(imp: &mut Improver, candidates: &[NodeId]) -> Result<Option<Tria
         let yj = min_y + f64::from(grid_yj) * ywid;
         let rj = (((yj - min_y) / row_height) as i32).max(0).min(ydim - 1);
         let rj = ArchRowId::new(rj as usize);
-        let x_truncated = Dbu(i64::from(xj as i32));
+        let x_truncated = Dbu::new(i64::from(xj as i32));
         let found = imp.segs_in_row[rj].iter().copied().find(|&s| {
             let seg = &imp.segments[s];
             x_truncated >= seg.min_x && x_truncated <= seg.max_x
@@ -107,7 +107,7 @@ fn random_trial(imp: &mut Improver, candidates: &[NodeId]) -> Result<Option<Tria
         if imp.group(n) != imp.segments[sj].region {
             continue;
         }
-        let x = Dbu(xj.round() as i64);
+        let x = Dbu::new(xj.round() as i64);
         if let Some(trial) = imp.try_move(n, si, x, sj)? {
             return Ok(Some(trial));
         }

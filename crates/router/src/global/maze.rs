@@ -85,7 +85,7 @@ fn grow_tree<E>(
     let points: Vec<Rect<Dbu>> = terminals
         .iter()
         .map(|c| {
-            let p = Point::new(Dbu(i64::from(c.x)), Dbu(i64::from(c.y)));
+            let p = Point::new(Dbu::new(i64::from(c.x)), Dbu::new(i64::from(c.y)));
             Rect::new(p, p)
         })
         .collect();
@@ -569,8 +569,8 @@ mod tests {
     fn sized_grid(nx: u16, ny: u16) -> GlobalGrid {
         let edges = 2 * usize::from(nx) * usize::from(ny);
         GlobalGrid {
-            origin: Point::new(Dbu(0), Dbu(0)),
-            gcell: Dbu(100),
+            origin: Point::new(Dbu::new(0), Dbu::new(0)),
+            gcell: Dbu::new(100),
             nx,
             ny,
             min_layer: LayerId::new(1),

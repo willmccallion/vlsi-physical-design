@@ -430,7 +430,7 @@ mod tests {
     use super::*;
 
     fn pt(x: i64, y: i64) -> Point<Dbu> {
-        Point::new(Dbu(x), Dbu(y))
+        Point::new(Dbu::new(x), Dbu::new(y))
     }
 
     fn connected_to_root(tree: &SteinerTree) -> bool {
@@ -467,7 +467,7 @@ mod tests {
         let tree = prim_dijkstra(&[pt(0, 0), pt(10, 5)], 0, DEFAULT_ALPHA);
         assert_eq!(tree.nodes.len(), 2);
         assert_eq!(tree.parent, vec![None, Some(0)]);
-        assert_eq!(tree.length(), Dbu(15));
+        assert_eq!(tree.length(), Dbu::new(15));
     }
 
     #[test]
@@ -476,7 +476,7 @@ mod tests {
         assert_eq!(tree.terminals, 3);
         assert_eq!(tree.nodes.len(), 4);
         assert_eq!(tree.nodes[3], pt(10, 0));
-        assert_eq!(tree.length(), Dbu(30));
+        assert_eq!(tree.length(), Dbu::new(30));
         assert!(connected_to_root(&tree));
         assert!(is_valid(&tree));
     }
@@ -487,7 +487,7 @@ mod tests {
         let tree = prim_dijkstra(&points, 0, DEFAULT_ALPHA);
         assert!(tree.children().iter().all(|c| c.len() <= 3));
         assert!(connected_to_root(&tree));
-        assert_eq!(tree.length(), Dbu(20));
+        assert_eq!(tree.length(), Dbu::new(20));
     }
 
     #[test]

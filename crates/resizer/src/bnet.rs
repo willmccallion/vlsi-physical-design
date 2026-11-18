@@ -827,7 +827,7 @@ mod tests {
             layer: pare_common::db::indices::LayerId::new(0),
         };
         let load = Bnet::load(
-            Point::new(Dbu(2000), Dbu::ZERO),
+            Point::new(Dbu::new(2000), Dbu::ZERO),
             PinId::new(0),
             pin_load(1e-15, 1e-9),
         );
@@ -845,11 +845,11 @@ mod tests {
         let wire = Bnet::wire(Point::new(Dbu::ZERO, Dbu::ZERO), load, None, &tree_rc);
 
         // One micron of wire: 1 ohm and 1 fF; delay = 1 * (0.5 fF + 1 fF).
-        assert_eq!(wire.length(), Dbu(2000));
+        assert_eq!(wire.length(), Dbu::new(2000));
         assert!((wire.cap - Farads::new(2e-15)).abs() < Farads::new(1e-30));
         assert_eq!(wire.delay, Fixed(1));
         assert_eq!(wire.slack, Fixed(1_000_000 - 1));
-        assert_eq!(wire.max_load_wire_length(), Dbu(2000));
+        assert_eq!(wire.max_load_wire_length(), Dbu::new(2000));
     }
 
     #[test]

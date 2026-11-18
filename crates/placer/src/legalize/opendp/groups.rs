@@ -82,7 +82,7 @@ impl Placer {
                 let rel = self.rows.relative(inside);
                 self.region_boxes.push(Rect::new(
                     rel.min,
-                    Point::new(rel.max.x - Dbu(1), rel.max.y - Dbu(1)),
+                    Point::new(rel.max.x - Dbu::new(1), rel.max.y - Dbu::new(1)),
                 ));
                 rects.push(rel);
             }
@@ -621,8 +621,8 @@ fn nearest_pt(node: &Node, rect: &Rect<Dbu>) -> Point<Dbu> {
 /// on, as `Opendp::rectDist` finds it.
 fn corner(node: &Node, rect: &Rect<Dbu>) -> Point<Dbu> {
     let Point { x, y } = node.init;
-    let cx = Dbu(i64::midpoint(rect.min.x.get(), rect.max.x.get()));
-    let cy = Dbu(i64::midpoint(rect.min.y.get(), rect.max.y.get()));
+    let cx = Dbu::new(i64::midpoint(rect.min.x.get(), rect.max.x.get()));
+    let cy = Dbu::new(i64::midpoint(rect.min.y.get(), rect.max.y.get()));
     Point::new(
         if x > cx { rect.max.x } else { rect.min.x },
         if y > cy { rect.max.y } else { rect.min.y },
@@ -661,7 +661,10 @@ mod tests {
     }
 
     fn rect(x0: i64, y0: i64, x1: i64, y1: i64) -> Rect<Dbu> {
-        Rect::new(Point::new(Dbu(x0), Dbu(y0)), Point::new(Dbu(x1), Dbu(y1)))
+        Rect::new(
+            Point::new(Dbu::new(x0), Dbu::new(y0)),
+            Point::new(Dbu::new(x1), Dbu::new(y1)),
+        )
     }
 
     /// The tiny design with `members` fenced into a region of `rects`,
@@ -697,7 +700,7 @@ mod tests {
     fn a_member_outside_its_region_is_packed_into_the_nearest_rectangle() {
         let mut db = tiny_fenced("( 0 0 ) ( 2000 2000 ) ( 3000 4000 ) ( 4000 6000 )", "u1 u2");
         let u1 = db.cell_id("u1").unwrap();
-        db.cells[u1].location = Point::new(Dbu(3800), Dbu(3000));
+        db.cells[u1].location = Point::new(Dbu::new(3800), Dbu::new(3000));
         let mut placer = placer_with_regions(&db);
         let u1 = placer
             .nodes
@@ -782,7 +785,7 @@ mod tests {
     fn outer_bricks_pack_a_member_toward_the_box_corner_on_its_side() {
         let mut db = tiny_fenced("( 0 0 ) ( 2000 2000 )", "u1");
         let u1 = db.cell_id("u1").unwrap();
-        db.cells[u1].location = Point::new(Dbu(1500), Dbu(1500));
+        db.cells[u1].location = Point::new(Dbu::new(1500), Dbu::new(1500));
         let mut placer = placer_with_regions(&db);
         let u1 = placer
             .nodes
@@ -793,6 +796,6 @@ mod tests {
         placer.brick_place_outer(GroupId(0)).unwrap();
 
         let at = placer.nodes[u1].bbox().min;
-        assert_eq!(at, Point::new(Dbu(1600), Dbu(0)));
+        assert_eq!(at, Point::new(Dbu::new(1600), Dbu::new(0)));
     }
 }

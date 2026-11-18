@@ -155,7 +155,7 @@ impl Clumping {
         left.vertices.extend(moved);
         left.weighted_position += weighted - dist.to_f64() * weight;
         left.weight += weight;
-        left.position = Dbu((left.weighted_position / left.weight).floor() as i64);
+        left.position = Dbu::new((left.weighted_position / left.weight).floor() as i64);
     }
 
     /// The clump the worst overlap of `r` on its left neighbours is with and

@@ -34,7 +34,7 @@ fn edited(name: &str, edits: &[(&str, &str)]) -> String {
 }
 
 const fn pt(x: i64, y: i64) -> Point<Dbu> {
-    Point::new(Dbu(x), Dbu(y))
+    Point::new(Dbu::new(x), Dbu::new(y))
 }
 
 fn rect(x0: i64, y0: i64, x1: i64, y1: i64) -> Rect<Dbu> {
@@ -70,20 +70,20 @@ fn two_widths_tables_are_read_with_their_run_lengths() {
     .unwrap();
 
     let m3 = lib.layer(M3);
-    assert_eq!(m3.min_spacing, Dbu(200));
+    assert_eq!(m3.min_spacing, Dbu::new(200));
     assert_eq!(
         m3.spacing_table,
         Some(SpacingTable::TwoWidths(TwoWidthsTable {
             rows: vec![
                 TwoWidthsRow {
-                    width: Dbu(0),
+                    width: Dbu::new(0),
                     run_length: None,
-                    spacings: vec![Dbu(200), Dbu(250)],
+                    spacings: vec![Dbu::new(200), Dbu::new(250)],
                 },
                 TwoWidthsRow {
-                    width: Dbu(400),
-                    run_length: Some(Dbu(500)),
-                    spacings: vec![Dbu(250), Dbu(300)],
+                    width: Dbu::new(400),
+                    run_length: Some(Dbu::new(500)),
+                    spacings: vec![Dbu::new(250), Dbu::new(300)],
                 },
             ],
         }))
@@ -95,13 +95,13 @@ fn width_range_spacing_is_kept_apart_from_the_minimum_spacing() {
     let lib = library_with(&[], "range").unwrap();
 
     let m3 = lib.layer(M3);
-    assert_eq!(m3.min_spacing, Dbu(200));
+    assert_eq!(m3.min_spacing, Dbu::new(200));
     assert_eq!(
         m3.rules.width_range_spacing,
         [WidthRangeSpacing {
-            spacing: Dbu(300),
-            min_width: Dbu(1000),
-            max_width: Dbu(10000),
+            spacing: Dbu::new(300),
+            min_width: Dbu::new(1000),
+            max_width: Dbu::new(10000),
         }]
     );
 }
@@ -126,25 +126,25 @@ fn metal_rules_are_read_from_statements_and_lef57_lef58_properties() {
     .unwrap();
 
     let rules = &lib.layer(M2).rules;
-    assert_eq!(rules.min_width, Some(Dbu(100)));
-    assert_eq!(rules.max_width, Some(Dbu(5000)));
+    assert_eq!(rules.min_width, Some(Dbu::new(100)));
+    assert_eq!(rules.max_width, Some(Dbu::new(5000)));
     assert_eq!(rules.min_area, Some(DbuArea(50_000)));
     assert_eq!(
         rules.end_of_line,
         [
             EndOfLineSpacing {
-                spacing: Dbu(120),
-                eol_width: Dbu(110),
-                within: Dbu(30),
+                spacing: Dbu::new(120),
+                eol_width: Dbu::new(110),
+                within: Dbu::new(30),
                 parallel_edge: None,
             },
             EndOfLineSpacing {
-                spacing: Dbu(130),
-                eol_width: Dbu(110),
-                within: Dbu(30),
+                spacing: Dbu::new(130),
+                eol_width: Dbu::new(110),
+                within: Dbu::new(30),
                 parallel_edge: Some(ParallelEdge {
-                    spacing: Dbu(100),
-                    within: Dbu(50),
+                    spacing: Dbu::new(100),
+                    within: Dbu::new(50),
                     two_edges: true,
                 }),
             },
@@ -154,12 +154,12 @@ fn metal_rules_are_read_from_statements_and_lef57_lef58_properties() {
         rules.min_steps,
         [
             MinStep {
-                length: Dbu(70),
+                length: Dbu::new(70),
                 max_edges: None,
                 source: RuleSource::Statement,
             },
             MinStep {
-                length: Dbu(50),
+                length: Dbu::new(50),
                 max_edges: Some(1),
                 source: RuleSource::Property,
             },
@@ -168,18 +168,18 @@ fn metal_rules_are_read_from_statements_and_lef57_lef58_properties() {
     assert_eq!(
         rules.corner_spacing,
         Some(ConvexCornerSpacing {
-            except_eol: Some(Dbu(110)),
-            spacing_by_width: vec![(Dbu(0), Dbu(100)), (Dbu(200), Dbu(200))],
+            except_eol: Some(Dbu::new(110)),
+            spacing_by_width: vec![(Dbu::new(0), Dbu::new(100)), (Dbu::new(200), Dbu::new(200))],
         })
     );
     assert_eq!(
         rules.minimum_cuts,
         [MinimumCut {
             cuts: 2,
-            width: Dbu(400),
+            width: Dbu::new(400),
             within: None,
             from: Some(CutApproach::Above),
-            length: Some((Dbu(400), Dbu(800))),
+            length: Some((Dbu::new(400), Dbu::new(800))),
         }]
     );
 }
@@ -198,17 +198,17 @@ fn cut_spacing_counts_a_center_rule_as_its_value_less_the_cut_width() {
     .unwrap();
 
     let v2 = &lib.cut_layers[CutLayerId(1)];
-    assert_eq!(v2.spacing, Some(Dbu(150)));
+    assert_eq!(v2.spacing, Some(Dbu::new(150)));
     assert_eq!(v2.rules.spacings.len(), 3);
     assert_eq!(
         v2.rules.spacings[2],
         CutSpacing {
-            spacing: Dbu(200),
+            spacing: Dbu::new(200),
             center_to_center: false,
             same_net: false,
             condition: CutSpacingCondition::AdjacentCuts {
                 cuts: 3,
-                within: Dbu(300),
+                within: Dbu::new(300),
             },
         }
     );
@@ -232,13 +232,13 @@ fn cut_spacing_properties_are_kept_apart_from_the_spacing_statements() {
     assert_eq!(
         v2.rules.lef58_spacings,
         vec![Lef58CutSpacing {
-            spacing: Dbu(130),
+            spacing: Dbu::new(130),
             center_to_center: false,
             same_net: false,
             condition: Lef58CutSpacingCondition::ParallelOverlap,
         }]
     );
-    assert_eq!(v2.spacing, Some(Dbu(130)));
+    assert_eq!(v2.spacing, Some(Dbu::new(130)));
 }
 
 #[test]
@@ -270,7 +270,7 @@ fn via_generation_rules_keep_their_enclosures_and_cut_array() {
         (rule.bottom.layer, rule.top.layer),
         (LayerId(0), LayerId(1))
     );
-    assert_eq!(rule.bottom.enclosure, (Dbu(0), Dbu(50)));
+    assert_eq!(rule.bottom.enclosure, (Dbu::new(0), Dbu::new(50)));
     assert_eq!(rule.cut_rect, rect(-50, -50, 50, 50));
     assert_eq!(rule.cut_pitch, pt(200, 200));
 }
@@ -296,7 +296,7 @@ fn library_rules_cover_grid_stacks_same_net_spacing_and_cell_edges() {
     )
     .unwrap();
 
-    assert_eq!(lib.rules.manufacturing_grid, Some(Dbu(5)));
+    assert_eq!(lib.rules.manufacturing_grid, Some(Dbu::new(5)));
     let stack = lib.rules.max_via_stack.unwrap();
     assert_eq!((stack.vias, stack.range), (2, Some((LayerId(0), M3))));
     let same_net = lib.rules.same_net_spacing[0];
@@ -309,7 +309,7 @@ fn library_rules_cover_grid_stacks_same_net_spacing_and_cell_edges() {
         )
     );
     assert_eq!(lib.rules.cell_edge_spacing.len(), 2);
-    assert_eq!(lib.rules.cell_edge_spacing[0].spacing, Dbu(400));
+    assert_eq!(lib.rules.cell_edge_spacing[0].spacing, Dbu::new(400));
     let inv = lib.cell_macro(lib.macro_id("INV").unwrap());
     assert_eq!(
         inv.edges

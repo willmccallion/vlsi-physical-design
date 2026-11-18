@@ -45,7 +45,7 @@ pub fn parse_str(
                 let point = |x: &str, y: &str, layer: &str| -> Result<RoutePoint, ParseError> {
                     let coordinate = |v: &str| {
                         v.parse::<i64>()
-                            .map(Dbu)
+                            .map(Dbu::new)
                             .map_err(|_| error(number, format!("bad coordinate '{v}'")))
                     };
                     let layer = db

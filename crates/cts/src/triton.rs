@@ -234,7 +234,7 @@ fn pin_position(db: &NetlistDB, pin: PinId) -> Point<Dbu> {
         y += s.rect.min.y.get() + (s.rect.max.y.get() - s.rect.min.y.get()) / 2;
     }
     let n = shapes.len() as i64;
-    Point::new(Dbu(x / n), Dbu(y / n))
+    Point::new(Dbu::new(x / n), Dbu::new(y / n))
 }
 
 /// The delay through the clock tree inside the cell of `pin` as its
@@ -811,7 +811,7 @@ impl Cts<'_> {
             };
             let mut at = center;
             while occupied.contains(&at) {
-                at.x += Dbu(1);
+                at.x += Dbu::new(1);
             }
             let _ = occupied.insert(at);
             let cell = &mut db.cells[clone];
@@ -883,7 +883,7 @@ impl Cts<'_> {
         }
         let root = sizes[&self.setup.buffers.root];
         let unit = tech.length_unit().to_f64();
-        let half = |side: Dbu| Dbu(((side.get() as f64 / unit) * unit / 2.0).ceil() as i64);
+        let half = |side: Dbu| Dbu::new(((side.get() as f64 / unit) * unit / 2.0).ceil() as i64);
         let bloat = Point::new(half(root.x), half(root.y));
         let (blockages, macro_diameter) = merge_blockages(db, bloat);
         if let Some(macro_diameter) = macro_diameter
@@ -1248,8 +1248,8 @@ pub(crate) fn sink_bbox_center(db: &NetlistDB, sinks: &[PinId]) -> Option<Point<
         })
         .reduce(|a, b| a.union(&b))?;
     Some(Point::new(
-        Dbu(i64::midpoint(bbox.min.x.get(), bbox.max.x.get())),
-        Dbu(i64::midpoint(bbox.min.y.get(), bbox.max.y.get())),
+        Dbu::new(i64::midpoint(bbox.min.x.get(), bbox.max.x.get())),
+        Dbu::new(i64::midpoint(bbox.min.y.get(), bbox.max.y.get())),
     ))
 }
 
@@ -1424,7 +1424,10 @@ mod tests {
     /// A tree rooted at node 0 over nodes at `xs` along the x axis.
     fn tree(xs: &[i64], parent: &[Option<usize>]) -> SteinerTree {
         SteinerTree {
-            nodes: xs.iter().map(|&x| Point::new(Dbu(x), Dbu(0))).collect(),
+            nodes: xs
+                .iter()
+                .map(|&x| Point::new(Dbu::new(x), Dbu::new(0)))
+                .collect(),
             parent: parent.to_vec(),
             terminals: xs.len(),
             root: 0,
@@ -1435,7 +1438,7 @@ mod tests {
     fn short_edges_join_their_nodes_and_long_edges_part_them() {
         let tree = tree(&[0, 10, 1000, 1010], &[None, Some(0), Some(1), Some(2)]);
 
-        let clusters = long_edge_clusters(&tree, Dbu(100));
+        let clusters = long_edge_clusters(&tree, Dbu::new(100));
 
         assert_eq!(clusters, vec![vec![1, 0], vec![2, 3]]);
     }
@@ -1444,7 +1447,7 @@ mod tests {
     fn an_edge_as_long_as_the_limit_is_long() {
         let tree = tree(&[0, 100], &[None, Some(0)]);
 
-        let clusters = long_edge_clusters(&tree, Dbu(100));
+        let clusters = long_edge_clusters(&tree, Dbu::new(100));
 
         assert_eq!(clusters, vec![vec![1], vec![0]]);
     }
@@ -1458,7 +1461,7 @@ mod tests {
             &[None, Some(0), Some(3), Some(4), Some(0)],
         );
 
-        let clusters = long_edge_clusters(&tree, Dbu(100));
+        let clusters = long_edge_clusters(&tree, Dbu::new(100));
 
         assert_eq!(clusters, vec![vec![], vec![2, 3, 4, 1, 0]]);
     }
@@ -1473,10 +1476,14 @@ mod tests {
              END COMPONENTS\n",
         );
 
-        let (blockages, diameter) = merge_blockages(&db, Point::new(Dbu(100), Dbu(100)));
+        let (blockages, diameter) = merge_blockages(&db, Point::new(Dbu::new(100), Dbu::new(100)));
 
-        let corners =
-            |x0, y0, x1, y1| Rect::new(Point::new(Dbu(x0), Dbu(y0)), Point::new(Dbu(x1), Dbu(y1)));
+        let corners = |x0, y0, x1, y1| {
+            Rect::new(
+                Point::new(Dbu::new(x0), Dbu::new(y0)),
+                Point::new(Dbu::new(x1), Dbu::new(y1)),
+            )
+        };
         assert_eq!(
             blockages,
             [
@@ -1492,7 +1499,7 @@ mod tests {
     fn without_blocks_macro_clusters_get_no_diameter() {
         let db = fixtures::design("");
 
-        let (blockages, diameter) = merge_blockages(&db, Point::new(Dbu(100), Dbu(100)));
+        let (blockages, diameter) = merge_blockages(&db, Point::new(Dbu::new(100), Dbu::new(100)));
 
         assert!(blockages.is_empty());
         assert_eq!(diameter, None);
@@ -1510,7 +1517,7 @@ mod tests {
 
         assert_eq!(
             pin_position(&db, pin),
-            Point::new(Dbu(120_000), Dbu(120_000))
+            Point::new(Dbu::new(120_000), Dbu::new(120_000))
         );
     }
 
@@ -1523,7 +1530,7 @@ mod tests {
     fn a_layers_net_spacing_is_its_min_spacing_without_other_rules() {
         let layer = metal1();
 
-        assert_eq!(net_spacing(&layer, layer.width), Dbu(130));
+        assert_eq!(net_spacing(&layer, layer.width), Dbu::new(130));
     }
 
     #[test]
@@ -1531,18 +1538,18 @@ mod tests {
         let mut layer = metal1();
         layer.rules.width_range_spacing = vec![
             WidthRangeSpacing {
-                spacing: Dbu(300),
-                min_width: Dbu(500),
-                max_width: Dbu(1000),
+                spacing: Dbu::new(300),
+                min_width: Dbu::new(500),
+                max_width: Dbu::new(1000),
             },
             WidthRangeSpacing {
-                spacing: Dbu(200),
-                min_width: Dbu(0),
-                max_width: Dbu(1000),
+                spacing: Dbu::new(200),
+                min_width: Dbu::new(0),
+                max_width: Dbu::new(1000),
             },
         ];
 
-        assert_eq!(net_spacing(&layer, layer.width), Dbu(200));
+        assert_eq!(net_spacing(&layer, layer.width), Dbu::new(200));
     }
 
     #[test]
@@ -1550,6 +1557,6 @@ mod tests {
         let mut layer = metal1();
         layer.min_spacing = Dbu::ZERO;
 
-        assert_eq!(net_spacing(&layer, layer.width), Dbu(140));
+        assert_eq!(net_spacing(&layer, layer.width), Dbu::new(140));
     }
 }

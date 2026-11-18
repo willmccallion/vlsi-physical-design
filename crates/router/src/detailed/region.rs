@@ -726,7 +726,7 @@ impl DetailedRouter<'_> {
     ) -> Vec<Routed> {
         let local = LocalRound {
             area,
-            window: Rect::new(area.min, area.max - Point::new(Dbu(1), Dbu(1))),
+            window: Rect::new(area.min, area.max - Point::new(Dbu::new(1), Dbu::new(1))),
             costs,
         };
         let mut best: Option<(Score, Vec<Option<Wiring>>)> = None;
@@ -1220,8 +1220,8 @@ mod tests {
             hard_spacing: true,
             layers: vec![NonDefaultLayer {
                 layer: LayerId(1),
-                width: Dbu(200),
-                spacing: Some(Dbu(300)),
+                width: Dbu::new(200),
+                spacing: Some(Dbu::new(300)),
                 wire_extension: None,
             }],
             vias: Vec::new(),
@@ -1292,7 +1292,7 @@ mod tests {
         };
         let lt = tech.layer(layer);
         let area = Rect::new(
-            Point::new(Dbu(0), lt.cross[CrossIdx(4)].at),
+            Point::new(Dbu::new(0), lt.cross[CrossIdx(4)].at),
             Point::new(db.die_area.max.x, lt.cross[CrossIdx(8)].at),
         );
         f(&dr, &area);
@@ -1331,9 +1331,15 @@ mod tests {
 
     #[test]
     fn a_region_holds_its_lower_left_edges_but_not_its_upper_right_ones() {
-        let r = Rect::new(Point::new(Dbu(0), Dbu(0)), Point::new(Dbu(10), Dbu(10)));
+        let r = Rect::new(
+            Point::new(Dbu::new(0), Dbu::new(0)),
+            Point::new(Dbu::new(10), Dbu::new(10)),
+        );
 
-        assert!(contains_half_open(&r, Point::new(Dbu(0), Dbu(9))));
-        assert!(!contains_half_open(&r, Point::new(Dbu(10), Dbu(5))));
+        assert!(contains_half_open(&r, Point::new(Dbu::new(0), Dbu::new(9))));
+        assert!(!contains_half_open(
+            &r,
+            Point::new(Dbu::new(10), Dbu::new(5))
+        ));
     }
 }

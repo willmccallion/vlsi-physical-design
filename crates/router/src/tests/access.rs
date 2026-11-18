@@ -60,7 +60,7 @@ fn an_m1_pin_is_reached_by_the_one_via_that_fits_inside_it() {
                 track: TrackIdx(1),
                 cross: CrossIdx(3)
             },
-            at: Point::new(Dbu(300), Dbu(500)),
+            at: Point::new(Dbu::new(300), Dbu::new(500)),
             pin_layer: LayerId(0),
             vias: vec![db.library.via_id("M1M2").unwrap()],
         }]
@@ -114,7 +114,7 @@ fn crossings_whose_wire_end_is_not_clean_are_dropped() {
     let db = tiny();
     let tech = RouteTech::new(&db, &RoutingConfig::default()).unwrap();
     let pin = io_pin(&db, "in");
-    let unclean = Point::new(Dbu(1100), Dbu(5900));
+    let unclean = Point::new(Dbu::new(1100), Dbu::new(5900));
     assert!(crossings_inside(&db, &tech, pin).contains(&unclean));
 
     let points = access_points(&db, &tech, pin, &|_, m: &Rect<Dbu>| !m.contains(unclean));
@@ -128,8 +128,8 @@ fn a_pin_with_no_clean_crossing_inside_is_reached_from_a_crossing_beyond_its_end
     let db = tiny();
     let tech = RouteTech::new(&db, &RoutingConfig::default()).unwrap();
     let pin = io_pin(&db, "in");
-    let bottom = Dbu(5800);
-    let reaches_below = |_: LayerId, m: &Rect<Dbu>| m.min.y < bottom - Dbu(100);
+    let bottom = Dbu::new(5800);
+    let reaches_below = |_: LayerId, m: &Rect<Dbu>| m.min.y < bottom - Dbu::new(100);
 
     let points = access_points(&db, &tech, pin, &reaches_below);
 

@@ -45,8 +45,8 @@ fn pin_location(db: &NetlistDB, pin: PinId) -> Option<Point<Dbu>> {
                 .map(|s| s.rect)
                 .reduce(|a, b| a.union(&b))?;
             Some(Point::new(
-                Dbu(b.min.x.get().midpoint(b.max.x.get())),
-                Dbu(b.min.y.get().midpoint(b.max.y.get())),
+                Dbu::new(b.min.x.get().midpoint(b.max.x.get())),
+                Dbu::new(b.min.y.get().midpoint(b.max.y.get())),
             ))
         }
     }

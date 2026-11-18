@@ -267,7 +267,7 @@ impl CutTech {
     /// How far beyond a cut another cut's center can be and still be too
     /// close to it.
     pub const fn reach(&self) -> Dbu {
-        Dbu(self.spacing.0 + self.max_half.0)
+        Dbu::new(self.spacing.get() + self.max_half.get())
     }
 }
 
@@ -347,10 +347,10 @@ const GCELL_PITCH_LAYERS: usize = 4;
 /// even number. `spacing` gives a layer's spacing by index from zero.
 fn gcell_pitch(spacing: impl Fn(LayerId) -> Dbu, max_layer: LayerId) -> Dbu {
     let even = |s: Dbu| {
-        if s.is_multiple_of(Dbu(2)) {
+        if s.is_multiple_of(Dbu::new(2)) {
             s
         } else {
-            s - Dbu(1)
+            s - Dbu::new(1)
         }
     };
     if max_layer.index() + 1 < GCELL_PITCH_LAYERS {
@@ -364,7 +364,7 @@ fn gcell_pitch(spacing: impl Fn(LayerId) -> Dbu, max_layer: LayerId) -> Dbu {
 /// How far from the origin, in database units, the die may reach: half the
 /// 32-bit range the occupancy stores, leaving room for shapes and spacing
 /// beyond the die's edges.
-pub(crate) const MAX_DIE_REACH: Dbu = Dbu(1 << 30);
+pub(crate) const MAX_DIE_REACH: Dbu = Dbu::new(1 << 30);
 
 /// How far the farthest corner of `die` lies from the origin along either
 /// axis.
@@ -484,7 +484,7 @@ impl RouteTech {
                 .rules
                 .manufacturing_grid
                 .filter(|g| g.get() > 0)
-                .unwrap_or(Dbu(1)),
+                .unwrap_or(Dbu::new(1)),
         })
     }
 
@@ -621,7 +621,7 @@ fn cut_tech(db: &NetlistDB, cut: CutLayerId) -> CutTech {
     let max_half = largest_cut(lib.vias.iter().flat_map(|v| v.shapes.iter()), cut);
     CutTech {
         spacing: lib.cut_layers[cut].spacing.unwrap_or_default(),
-        max_half: Dbu(max_half.div_ceil(Dbu(2))),
+        max_half: Dbu::new(max_half.div_ceil(Dbu::new(2))),
     }
 }
 
@@ -742,18 +742,24 @@ mod tests {
     use super::*;
 
     fn die(width: i64) -> Rect<Dbu> {
-        Rect::new(Point::new(Dbu(0), Dbu(0)), Point::new(Dbu(width), Dbu(10)))
+        Rect::new(
+            Point::new(Dbu::new(0), Dbu::new(0)),
+            Point::new(Dbu::new(width), Dbu::new(10)),
+        )
     }
 
     #[test]
     fn a_die_of_as_many_gcells_as_the_grid_holds_is_routable() {
-        assert_eq!(check_grid_span(&die(65_535 * 100), Dbu(100), 2), Ok(()));
+        assert_eq!(
+            check_grid_span(&die(65_535 * 100), Dbu::new(100), 2),
+            Ok(())
+        );
     }
 
     #[test]
     fn a_die_past_the_grid_s_span_is_refused_with_its_gcells() {
         assert_eq!(
-            check_grid_span(&die(65_535 * 100 + 1), Dbu(100), 2),
+            check_grid_span(&die(65_535 * 100 + 1), Dbu::new(100), 2),
             Err(RouteError::GridTooLarge(Gcells(65_536)))
         );
     }
@@ -761,39 +767,39 @@ mod tests {
     #[test]
     fn a_grid_with_more_nodes_than_32_bits_index_is_refused() {
         let square = Rect::new(
-            Point::new(Dbu(0), Dbu(0)),
-            Point::new(Dbu(40_000), Dbu(40_000)),
+            Point::new(Dbu::new(0), Dbu::new(0)),
+            Point::new(Dbu::new(40_000), Dbu::new(40_000)),
         );
 
         assert_eq!(
-            check_grid_span(&square, Dbu(1), 3),
+            check_grid_span(&square, Dbu::new(1), 3),
             Err(RouteError::GridTooManyNodes(4_800_000_000))
         );
     }
 
     fn spacings(of: &[i64]) -> impl Fn(LayerId) -> Dbu + '_ {
         let of: IdVec<LayerId, i64> = of.to_vec().into();
-        move |l| Dbu(of[l])
+        move |l| Dbu::new(of[l])
     }
 
     #[test]
     fn gcells_are_sized_by_the_middle_spacing_of_the_second_to_fourth_layers() {
         let pitch = gcell_pitch(spacings(&[280, 380, 280, 560, 560]), LayerId(4));
 
-        assert_eq!(pitch, Dbu(380));
+        assert_eq!(pitch, Dbu::new(380));
     }
 
     #[test]
     fn an_odd_track_spacing_is_rounded_down_to_an_even_one() {
         let pitch = gcell_pitch(spacings(&[200, 401, 401, 401]), LayerId(3));
 
-        assert_eq!(pitch, Dbu(400));
+        assert_eq!(pitch, Dbu::new(400));
     }
 
     #[test]
     fn below_four_routing_layers_the_highest_layer_sizes_the_gcells() {
         let pitch = gcell_pitch(spacings(&[200, 300, 500]), LayerId(2));
 
-        assert_eq!(pitch, Dbu(500));
+        assert_eq!(pitch, Dbu::new(500));
     }
 }

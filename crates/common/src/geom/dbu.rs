@@ -7,11 +7,17 @@ use std::ops::{Add, AddAssign, Div, Mul, Neg, Rem, Sub, SubAssign};
 
 /// A length or coordinate in database units.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, PartialOrd, Ord, Hash)]
-pub struct Dbu(pub i64);
+pub struct Dbu(i64);
 
 impl Dbu {
     /// Zero length.
     pub const ZERO: Self = Self(0);
+
+    /// The length or coordinate of `value` database units.
+    #[must_use]
+    pub const fn new(value: i64) -> Self {
+        Self(value)
+    }
 
     /// Returns the raw integer value.
     #[must_use]

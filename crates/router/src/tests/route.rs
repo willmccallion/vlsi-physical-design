@@ -72,7 +72,7 @@ fn routing_refuses_tracks_too_close_to_size_gcells_by() {
     let (mut db, config) = placed_tiny();
     let m3 = db.library.routing_layer_id("M3").unwrap();
     for t in db.tracks.iter_mut().filter(|t| t.layers.contains(&m3)) {
-        t.step = Dbu(1);
+        t.step = Dbu::new(1);
     }
 
     let result = route(&mut db, &config).map(|_| ());
@@ -311,9 +311,9 @@ fn a_state_of_another_design_is_refused() {
 fn removing_a_nets_wiring_keeps_its_fixed_metal() {
     let db = tiny();
     let tech = RouteTech::new(&db, &RoutingConfig::default()).unwrap();
-    let mut occupancy = Occupancy::new(&tech, Dbu(1000));
+    let mut occupancy = Occupancy::new(&tech, Dbu::new(1000));
     let layer = LayerId(1);
-    let around = |p: Point<Dbu>| Rect::new(p, p).expand(Dbu(50));
+    let around = |p: Point<Dbu>| Rect::new(p, p).expand(Dbu::new(50));
     let pin = around(tech.layer(layer).point(TrackIdx(0), CrossIdx(0)));
     let wire = around(tech.layer(layer).point(TrackIdx(0), CrossIdx(20)));
     let owner = Owner::Net(NetId(0));
@@ -338,12 +338,12 @@ fn removing_a_nets_wiring_keeps_its_fixed_metal() {
 fn cuts_of_different_nets_conflict_within_the_cut_spacing() {
     let db = tiny();
     let tech = RouteTech::new(&db, &RoutingConfig::default()).unwrap();
-    let mut occupancy = Occupancy::new(&tech, Dbu(1000));
+    let mut occupancy = Occupancy::new(&tech, Dbu::new(1000));
     let v1 = CutLayerId::new(0);
     let cut = |x: i64, y: i64| {
         Rect::new(
-            Point::new(Dbu(x), Dbu(y)),
-            Point::new(Dbu(x + 100), Dbu(y + 100)),
+            Point::new(Dbu::new(x), Dbu::new(y)),
+            Point::new(Dbu::new(x + 100), Dbu::new(y + 100)),
         )
     };
     occupancy.add_cut(v1, &cut(0, 0), Owner::Net(NetId(0)), Origin::Wiring);
@@ -368,12 +368,12 @@ fn cuts_of_different_nets_conflict_within_the_cut_spacing() {
 fn removing_a_nets_wiring_keeps_its_fixed_cuts() {
     let db = tiny();
     let tech = RouteTech::new(&db, &RoutingConfig::default()).unwrap();
-    let mut occupancy = Occupancy::new(&tech, Dbu(1000));
+    let mut occupancy = Occupancy::new(&tech, Dbu::new(1000));
     let v1 = CutLayerId::new(0);
     let cut = |x: i64| {
         Rect::new(
-            Point::new(Dbu(x), Dbu(0)),
-            Point::new(Dbu(x + 100), Dbu(100)),
+            Point::new(Dbu::new(x), Dbu::new(0)),
+            Point::new(Dbu::new(x + 100), Dbu::new(100)),
         )
     };
     let owner = Owner::Net(NetId(0));
@@ -393,11 +393,17 @@ fn wires_keep_the_table_spacing_from_a_long_wide_shape_and_the_minimum_from_a_wi
     let db = tiny();
     let tech = RouteTech::new(&db, &RoutingConfig::default()).unwrap();
     let m2 = tech.layer(LayerId(1));
-    let stripe = Rect::new(Point::new(Dbu(0), Dbu(0)), Point::new(Dbu(400), Dbu(2000)));
-    let wire = Rect::new(Point::new(Dbu(0), Dbu(0)), Point::new(Dbu(100), Dbu(2000)));
+    let stripe = Rect::new(
+        Point::new(Dbu::new(0), Dbu::new(0)),
+        Point::new(Dbu::new(400), Dbu::new(2000)),
+    );
+    let wire = Rect::new(
+        Point::new(Dbu::new(0), Dbu::new(0)),
+        Point::new(Dbu::new(100), Dbu::new(2000)),
+    );
 
-    assert_eq!(m2.spacing_around(&stripe), (Dbu(200), Dbu(110)));
-    assert_eq!(m2.spacing_around(&wire), (Dbu(110), Dbu(110)));
+    assert_eq!(m2.spacing_around(&stripe), (Dbu::new(200), Dbu::new(110)));
+    assert_eq!(m2.spacing_around(&wire), (Dbu::new(110), Dbu::new(110)));
 }
 
 #[test]
@@ -567,11 +573,11 @@ fn a_layer_blocked_everywhere_counts_as_taken() {
 
 #[test]
 fn rudy_wires_are_as_wide_as_openroad_makes_them() {
-    let nangate45 = [380, 280, 560, 560, 560, 1600, 1600, 3200, 3200].map(Dbu);
+    let nangate45 = [380, 280, 560, 560, 560, 1600, 1600, 3200, 3200].map(Dbu::new);
 
     let width = rudy_wire_width(&nangate45);
 
-    assert_eq!(width, Dbu(93));
+    assert_eq!(width, Dbu::new(93));
 }
 
 #[test]
@@ -587,8 +593,8 @@ fn merged_fixed_stretches_give_the_capacity_the_occupancy_gives() {
     let from_stretches = GlobalGrid::new(&tech, &fixed, db.die_area, gcell, reserve(0.3));
 
     assert_eq!(
-        from_occupancy.capacity_reduction(&tech, &IdVec::filled(share(0.5), 10), Dbu(100)),
-        from_stretches.capacity_reduction(&tech, &IdVec::filled(share(0.5), 10), Dbu(100))
+        from_occupancy.capacity_reduction(&tech, &IdVec::filled(share(0.5), 10), Dbu::new(100)),
+        from_stretches.capacity_reduction(&tech, &IdVec::filled(share(0.5), 10), Dbu::new(100))
     );
 }
 
@@ -634,12 +640,12 @@ fn the_estimator_measures_congestion_where_the_given_locations_put_the_nets() {
     };
     let mut estimator = GlobalRouteEstimator::new(&db, &config).unwrap();
     let tiles = estimator.capacity_reduction(&IdVec::new());
-    let packed = IdVec::filled(Point::new(Dbu(0), Dbu(0)), db.num_cells());
+    let packed = IdVec::filled(Point::new(Dbu::new(0), Dbu::new(0)), db.num_cells());
     let spread: IdVec<CellId, Point<Dbu>> = db
         .cells
         .ids()
         .map(|id| {
-            let far = Dbu(5000 * i64::from(u8::from(id.index() % 2 == 1)));
+            let far = Dbu::new(5000 * i64::from(u8::from(id.index() % 2 == 1)));
             Point::new(far, far)
         })
         .collect();
@@ -664,8 +670,8 @@ fn tiny_with_wide_rule() -> NetlistDB {
         hard_spacing: true,
         layers: vec![NonDefaultLayer {
             layer: LayerId(0),
-            width: Dbu(200),
-            spacing: Some(Dbu(300)),
+            width: Dbu::new(200),
+            spacing: Some(Dbu::new(300)),
             wire_extension: None,
         }],
         vias: Vec::new(),
@@ -684,27 +690,27 @@ fn a_rule_sets_the_width_and_spacing_of_its_nets_wires() {
 
     let rule = tech.net_rule(NetId(0));
     assert_eq!(rule, Some(NonDefaultRuleId::new(0)));
-    assert_eq!(tech.wire_width(rule, LayerId(0)), Dbu(200));
-    assert_eq!(tech.wire_spacing(rule, LayerId(0)), Dbu(300));
-    assert_eq!(tech.wire_width(rule, LayerId(1)), Dbu(100));
-    assert_eq!(tech.wire_width(None, LayerId(0)), Dbu(100));
-    assert_eq!(tech.wire_spacing(None, LayerId(0)), Dbu(100));
+    assert_eq!(tech.wire_width(rule, LayerId(0)), Dbu::new(200));
+    assert_eq!(tech.wire_spacing(rule, LayerId(0)), Dbu::new(300));
+    assert_eq!(tech.wire_width(rule, LayerId(1)), Dbu::new(100));
+    assert_eq!(tech.wire_width(None, LayerId(0)), Dbu::new(100));
+    assert_eq!(tech.wire_spacing(None, LayerId(0)), Dbu::new(100));
 }
 
 #[test]
 fn a_wire_under_a_rule_keeps_other_tracks_at_the_rules_spacing() {
     let db = tiny_with_wide_rule();
     let tech = RouteTech::new(&db, &RoutingConfig::default()).unwrap();
-    let mut occupancy = Occupancy::new(&tech, Dbu(1000));
+    let mut occupancy = Occupancy::new(&tech, Dbu::new(1000));
     let m1 = LayerId(0);
     let wide = Rect::new(
-        Point::new(Dbu(1000), Dbu(0)),
-        Point::new(Dbu(2000), Dbu(200)),
+        Point::new(Dbu::new(1000), Dbu::new(0)),
+        Point::new(Dbu::new(2000), Dbu::new(200)),
     );
     occupancy.add_rect(&tech, m1, &wide, Owner::Net(NetId(0)), Origin::Wiring);
     let two_tracks_up = Rect::new(
-        Point::new(Dbu(1000), Dbu(450)),
-        Point::new(Dbu(2000), Dbu(550)),
+        Point::new(Dbu::new(1000), Dbu::new(450)),
+        Point::new(Dbu::new(2000), Dbu::new(550)),
     );
 
     let conflicts = occupancy
@@ -718,16 +724,16 @@ fn a_wire_under_a_rule_keeps_other_tracks_at_the_rules_spacing() {
 fn a_wire_without_a_rule_leaves_tracks_beyond_the_layer_spacing_alone() {
     let db = tiny();
     let tech = RouteTech::new(&db, &RoutingConfig::default()).unwrap();
-    let mut occupancy = Occupancy::new(&tech, Dbu(1000));
+    let mut occupancy = Occupancy::new(&tech, Dbu::new(1000));
     let m1 = LayerId(0);
     let wire = Rect::new(
-        Point::new(Dbu(1000), Dbu(50)),
-        Point::new(Dbu(2000), Dbu(150)),
+        Point::new(Dbu::new(1000), Dbu::new(50)),
+        Point::new(Dbu::new(2000), Dbu::new(150)),
     );
     occupancy.add_rect(&tech, m1, &wire, Owner::Net(NetId(0)), Origin::Wiring);
     let two_tracks_up = Rect::new(
-        Point::new(Dbu(1000), Dbu(450)),
-        Point::new(Dbu(2000), Dbu(550)),
+        Point::new(Dbu::new(1000), Dbu::new(450)),
+        Point::new(Dbu::new(2000), Dbu::new(550)),
     );
 
     let conflicts = occupancy
@@ -741,16 +747,16 @@ fn a_wire_without_a_rule_leaves_tracks_beyond_the_layer_spacing_alone() {
 fn a_wire_under_a_rule_keeps_its_track_clear_for_the_rules_spacing() {
     let db = tiny_with_wide_rule();
     let tech = RouteTech::new(&db, &RoutingConfig::default()).unwrap();
-    let mut occupancy = Occupancy::new(&tech, Dbu(1000));
+    let mut occupancy = Occupancy::new(&tech, Dbu::new(1000));
     let m1 = LayerId(0);
     let wide = Rect::new(
-        Point::new(Dbu(1000), Dbu(0)),
-        Point::new(Dbu(2000), Dbu(200)),
+        Point::new(Dbu::new(1000), Dbu::new(0)),
+        Point::new(Dbu::new(2000), Dbu::new(200)),
     );
     occupancy.add_rect(&tech, m1, &wide, Owner::Net(NetId(0)), Origin::Wiring);
     let further_along = Rect::new(
-        Point::new(Dbu(2150), Dbu(50)),
-        Point::new(Dbu(3000), Dbu(150)),
+        Point::new(Dbu::new(2150), Dbu::new(50)),
+        Point::new(Dbu::new(3000), Dbu::new(150)),
     );
 
     let conflicts = occupancy

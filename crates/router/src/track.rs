@@ -332,7 +332,7 @@ fn panels(
             let (Interval { lo: a0, hi: a1 }, _) = lt.across_along_rect(&grid.cell_rect(x, y));
             Panel {
                 id,
-                tracks: lt.tracks_within(a0, a1 - Dbu(1)),
+                tracks: lt.tracks_within(a0, a1 - Dbu::new(1)),
                 iroutes,
             }
         })
@@ -698,12 +698,24 @@ mod tests {
     #[test]
     fn overlap_counts_the_spacing_and_is_zero_when_apart() {
         assert_eq!(
-            overlap(Dbu(0), Dbu(100), Dbu(50), Dbu(300), Dbu(10)),
-            Dbu(60)
+            overlap(
+                Dbu::new(0),
+                Dbu::new(100),
+                Dbu::new(50),
+                Dbu::new(300),
+                Dbu::new(10)
+            ),
+            Dbu::new(60)
         );
         assert_eq!(
-            overlap(Dbu(0), Dbu(100), Dbu(110), Dbu(300), Dbu(10)),
-            Dbu(0)
+            overlap(
+                Dbu::new(0),
+                Dbu::new(100),
+                Dbu::new(110),
+                Dbu::new(300),
+                Dbu::new(10)
+            ),
+            Dbu::new(0)
         );
     }
 }

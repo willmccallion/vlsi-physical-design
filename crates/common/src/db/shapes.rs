@@ -203,7 +203,7 @@ fn special_wire_box(wire: &SpecialWire) -> Rect<Dbu> {
 /// both are even) and the box grows by half of it along the other axis.
 fn special_rect_box(rect: &Rect<Dbu>) -> Rect<Dbu> {
     let (dx, dy) = (rect.width(), rect.height());
-    let even = |d: Dbu| d.is_multiple_of(Dbu(2));
+    let even = |d: Dbu| d.is_multiple_of(Dbu::new(2));
     let along_y = match (even(dx), even(dy)) {
         (true, true) => dy >= dx,
         (true, false) => true,
@@ -329,15 +329,18 @@ mod tests {
     use crate::db::indices::LayerId;
 
     fn rect(x0: i64, y0: i64, x1: i64, y1: i64) -> Rect<Dbu> {
-        Rect::from_corners(Point::new(Dbu(x0), Dbu(y0)), Point::new(Dbu(x1), Dbu(y1)))
+        Rect::from_corners(
+            Point::new(Dbu::new(x0), Dbu::new(y0)),
+            Point::new(Dbu::new(x1), Dbu::new(y1)),
+        )
     }
 
     fn wire(from: (i64, i64), to: (i64, i64), shape: Option<&str>) -> SpecialWire {
         SpecialWire {
             layer: LayerId(0),
-            width: Dbu(100),
-            from: Point::new(Dbu(from.0), Dbu(from.1)),
-            to: Point::new(Dbu(to.0), Dbu(to.1)),
+            width: Dbu::new(100),
+            from: Point::new(Dbu::new(from.0), Dbu::new(from.1)),
+            to: Point::new(Dbu::new(to.0), Dbu::new(to.1)),
             extensions: (Dbu::ZERO, Dbu::ZERO),
             shape: shape.map(str::to_string),
         }
@@ -345,10 +348,22 @@ mod tests {
 
     #[test]
     fn a_wire_end_extends_by_its_own_extension_whichever_way_the_wire_runs() {
-        let at = |x, y| Point::new(Dbu(x), Dbu(y));
+        let at = |x, y| Point::new(Dbu::new(x), Dbu::new(y));
 
-        let forward = wire_rect_with_ends(at(0, 0), at(1000, 0), Dbu(100), Dbu(0), Dbu(30));
-        let backward = wire_rect_with_ends(at(1000, 0), at(0, 0), Dbu(100), Dbu(30), Dbu(0));
+        let forward = wire_rect_with_ends(
+            at(0, 0),
+            at(1000, 0),
+            Dbu::new(100),
+            Dbu::new(0),
+            Dbu::new(30),
+        );
+        let backward = wire_rect_with_ends(
+            at(1000, 0),
+            at(0, 0),
+            Dbu::new(100),
+            Dbu::new(30),
+            Dbu::new(0),
+        );
 
         assert_eq!(forward, Some(rect(0, -50, 1030, 50)));
         assert_eq!(backward, forward);

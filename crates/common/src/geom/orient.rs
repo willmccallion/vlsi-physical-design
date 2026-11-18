@@ -81,7 +81,7 @@ impl Orientation {
 
     /// Rotates or mirrors a point about the origin.
     pub const fn apply(self, p: Point<Dbu>) -> Point<Dbu> {
-        let (x, y) = (p.x.0, p.y.0);
+        let (x, y) = (p.x.get(), p.y.get());
         let (tx, ty) = match self {
             Self::N => (x, y),
             Self::W => (-y, x),
@@ -92,7 +92,7 @@ impl Orientation {
             Self::FS => (x, -y),
             Self::FE => (-y, -x),
         };
-        Point::new(Dbu(tx), Dbu(ty))
+        Point::new(Dbu::new(tx), Dbu::new(ty))
     }
 
     /// Rotates or mirrors a rectangle about the origin.
@@ -157,16 +157,16 @@ mod tests {
     use super::*;
 
     fn pt(x: i64, y: i64) -> Point<Dbu> {
-        Point::new(Dbu(x), Dbu(y))
+        Point::new(Dbu::new(x), Dbu::new(y))
     }
 
     fn rect(x0: i64, y0: i64, x1: i64, y1: i64) -> Rect<Dbu> {
         Rect::from_corners(pt(x0, y0), pt(x1, y1))
     }
 
-    const SIZE: Point<Dbu> = Point::new(Dbu(10), Dbu(4));
-    const AT: Point<Dbu> = Point::new(Dbu(100), Dbu(200));
-    const PIN: Point<Dbu> = Point::new(Dbu(1), Dbu(1));
+    const SIZE: Point<Dbu> = Point::new(Dbu::new(10), Dbu::new(4));
+    const AT: Point<Dbu> = Point::new(Dbu::new(100), Dbu::new(200));
+    const PIN: Point<Dbu> = Point::new(Dbu::new(1), Dbu::new(1));
 
     #[test]
     fn every_orientation_keeps_the_body_at_the_location() {

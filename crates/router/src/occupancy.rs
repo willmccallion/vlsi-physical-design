@@ -66,7 +66,7 @@ impl Dbu32 {
     }
 
     const fn get(self) -> Dbu {
-        Dbu(self.0 as i64)
+        Dbu::new(self.0 as i64)
     }
 }
 
@@ -281,7 +281,7 @@ struct CutLayer {
 impl CutLayer {
     fn new(rules: CutTech) -> Self {
         let origin = Point::new(Dbu::ZERO, Dbu::ZERO);
-        let bucket = (rules.reach() * 4).max(Dbu(1));
+        let bucket = (rules.reach() * 4).max(Dbu::new(1));
         Self {
             rules,
             buckets: SpatialHash::new(origin, bucket),
@@ -441,7 +441,7 @@ impl Track {
     /// Sorts the fixed metal and records how far it reaches.
     fn settle_fixed(&mut self) {
         self.fixed.sort_by_key(|o| (o.lo, o.hi));
-        let mut furthest = Dbu(i64::MIN);
+        let mut furthest = Dbu::new(i64::MIN);
         self.fixed_reach = self
             .fixed
             .iter()
@@ -673,7 +673,7 @@ pub(crate) fn affected_tracks<'t>(
 ) -> impl Iterator<Item = (TrackIdx, bool)> + use<'t> {
     let (Interval { lo: a0, hi: a1 }, _) = lt.across_along_rect(rect);
     let reach = spacing + lt.width / 2;
-    let range = lt.tracks_within(a0 - reach + Dbu(1), a1 + reach - Dbu(1));
+    let range = lt.tracks_within(a0 - reach + Dbu::new(1), a1 + reach - Dbu::new(1));
     range.map(move |t| {
         let c = lt.tracks[t];
         (t, a0 <= c && c <= a1)
@@ -730,7 +730,7 @@ impl Occupancy {
                     tech.max_wire_spacing(l).max(table).max(lt.spacing)
                 })
                 .collect(),
-            chunk: chunk.max(Dbu(1)),
+            chunk: chunk.max(Dbu::new(1)),
             cuts: tech.cuts.iter().map(|&c| CutLayer::new(c)).collect(),
         }
     }
@@ -1093,9 +1093,9 @@ mod tests {
     fn fixed_tracks_return_the_stretches_overlapping_a_range() {
         let fixed = FixedTracks {
             stretches: vec![vec![vec![
-                Interval::new(Dbu(0), Dbu(30)),
-                Interval::new(Dbu(50), Dbu(60)),
-                Interval::new(Dbu(80), Dbu(90)),
+                Interval::new(Dbu::new(0), Dbu::new(30)),
+                Interval::new(Dbu::new(50), Dbu::new(60)),
+                Interval::new(Dbu::new(80), Dbu::new(90)),
             ]]]
             .into(),
         };
@@ -1105,22 +1105,25 @@ mod tests {
         };
 
         let got: Vec<Interval> = fixed
-            .fixed_stretches(track, Interval::new(Dbu(30), Dbu(80)))
+            .fixed_stretches(track, Interval::new(Dbu::new(30), Dbu::new(80)))
             .collect();
 
-        assert_eq!(got, vec![Interval::new(Dbu(50), Dbu(60))]);
+        assert_eq!(got, vec![Interval::new(Dbu::new(50), Dbu::new(60))]);
     }
 
     fn rect(x0: i64, y0: i64, x1: i64, y1: i64) -> Rect<Dbu> {
-        Rect::from_corners(Point::new(Dbu(x0), Dbu(y0)), Point::new(Dbu(x1), Dbu(y1)))
+        Rect::from_corners(
+            Point::new(Dbu::new(x0), Dbu::new(y0)),
+            Point::new(Dbu::new(x1), Dbu::new(y1)),
+        )
     }
 
     /// Via cuts are 100 wide with spacing 100, so fine buckets are 800 wide
     /// and coarse ones 51200.
     fn layer() -> CutLayer {
         CutLayer::new(CutTech {
-            spacing: Dbu(100),
-            max_half: Dbu(50),
+            spacing: Dbu::new(100),
+            max_half: Dbu::new(50),
         })
     }
 

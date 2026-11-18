@@ -469,8 +469,8 @@ impl HoldRepair<'_> {
 
 const fn midpoint(a: Point<Dbu>, b: Point<Dbu>) -> Point<Dbu> {
     Point::new(
-        Dbu(i64::midpoint(a.x.get(), b.x.get())),
-        Dbu(i64::midpoint(a.y.get(), b.y.get())),
+        Dbu::new(i64::midpoint(a.x.get(), b.x.get())),
+        Dbu::new(i64::midpoint(a.y.get(), b.y.get())),
     )
 }
 

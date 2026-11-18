@@ -228,7 +228,7 @@ impl<'a> DefParser<'a> {
     }
 
     fn dbu(&mut self, what: &str) -> Result<Dbu, ParseError> {
-        Ok(Dbu(self.lx.number(what)?))
+        Ok(Dbu::new(self.lx.number(what)?))
     }
 
     fn point(&mut self) -> Result<Point<Dbu>, ParseError> {
@@ -894,7 +894,7 @@ impl<'a> DefParser<'a> {
         if t.text == "*" {
             return prev.ok_or_else(|| self.lx.error(t.line, "'*' with no previous point"));
         }
-        t.text.parse().map(Dbu).map_err(|_| {
+        t.text.parse().map(Dbu::new).map_err(|_| {
             self.lx
                 .error(t.line, format!("expected a coordinate, found '{}'", t.text))
         })
@@ -1483,7 +1483,7 @@ impl ViaRuleParams {
             self.cut_size.x * cols + self.cut_spacing.x * (cols - 1),
             self.cut_size.y * rows + self.cut_spacing.y * (rows - 1),
         );
-        let lo = Point::new(Dbu(-(array.x.0 / 2)), Dbu(-(array.y.0 / 2)));
+        let lo = Point::new(-(array.x / 2), -(array.y / 2));
         let array_rect = Rect::new(lo, lo + array);
 
         let mut shapes = Vec::new();

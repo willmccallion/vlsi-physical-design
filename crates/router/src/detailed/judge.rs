@@ -337,7 +337,10 @@ mod tests {
     use pare_common::db::indices::CutLayerId;
 
     fn rect(x0: i64, y0: i64, x1: i64, y1: i64) -> Rect<Dbu> {
-        Rect::new(Point::new(Dbu(x0), Dbu(y0)), Point::new(Dbu(x1), Dbu(y1)))
+        Rect::new(
+            Point::new(Dbu::new(x0), Dbu::new(y0)),
+            Point::new(Dbu::new(x1), Dbu::new(y1)),
+        )
     }
 
     /// A 1000 by 1000 die in tiles of 100 with metal at two corners, one
@@ -350,7 +353,7 @@ mod tests {
         layout.add(metal, owner, rect(0, 0, 50, 50), Origin::Input);
         let cut = LayerRef::Cut(CutLayerId::new(0));
         layout.add(cut, owner, rect(960, 960, 990, 990), Origin::Input);
-        let tiles = ShapeTiles::new(&layout, &rect(0, 0, 1000, 1000), Dbu(100));
+        let tiles = ShapeTiles::new(&layout, &rect(0, 0, 1000, 1000), Dbu::new(100));
         (layout, tiles)
     }
 

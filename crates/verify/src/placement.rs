@@ -206,8 +206,8 @@ fn overlaps(db: &NetlistDB) -> Vec<PlacementViolation> {
         .filter(|&i| db.cells[i].status.is_movable())
         .map(|i| boxes[i].width().max(boxes[i].height()))
         .max()
-        .unwrap_or(Dbu(1))
-        .max(Dbu(1));
+        .unwrap_or(Dbu::new(1))
+        .max(Dbu::new(1));
 
     let mut bins: HashMap<Bin, Vec<CellId>> = HashMap::new();
     for i in boxes.ids().filter(|&i| checked(i)) {
@@ -243,7 +243,7 @@ struct Bin {
 
 /// The `side`-sized squares a non-empty rectangle touches.
 fn bins_covering(r: &Rect<Dbu>, side: Dbu) -> impl Iterator<Item = Bin> {
-    let squares = |lo: Dbu, hi: Dbu| lo.div_floor(side)..=(hi - Dbu(1)).div_floor(side);
+    let squares = |lo: Dbu, hi: Dbu| lo.div_floor(side)..=(hi - Dbu::new(1)).div_floor(side);
     let rows = squares(r.min.y, r.max.y);
     squares(r.min.x, r.max.x)
         .flat_map(move |column| rows.clone().map(move |row| Bin { column, row }))

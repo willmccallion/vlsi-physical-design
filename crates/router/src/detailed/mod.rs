@@ -1741,40 +1741,43 @@ mod tests {
     }
 
     fn rect(x0: i64, y0: i64, x1: i64, y1: i64) -> Rect<Dbu> {
-        Rect::new(Point::new(Dbu(x0), Dbu(y0)), Point::new(Dbu(x1), Dbu(y1)))
+        Rect::new(
+            Point::new(Dbu::new(x0), Dbu::new(y0)),
+            Point::new(Dbu::new(x1), Dbu::new(y1)),
+        )
     }
 
     #[test]
     fn a_pad_closer_than_the_spacing_to_another_nets_pad_is_not_clear() {
-        let mut pads = LowPads::new(Dbu(1000));
+        let mut pads = LowPads::new(Dbu::new(1000));
         pads.add(LayerId::new(0), rect(0, 0, 140, 70), NetId(1));
 
         let near = rect(260, 0, 400, 70);
         let far = rect(270, 0, 410, 70);
 
-        assert!(!pads.clear(LayerId::new(0), &near, NetId(2), Dbu(130)));
-        assert!(pads.clear(LayerId::new(0), &far, NetId(2), Dbu(130)));
+        assert!(!pads.clear(LayerId::new(0), &near, NetId(2), Dbu::new(130)));
+        assert!(pads.clear(LayerId::new(0), &far, NetId(2), Dbu::new(130)));
     }
 
     #[test]
     fn a_pad_is_clear_of_its_own_nets_pads_and_other_layers() {
-        let mut pads = LowPads::new(Dbu(1000));
+        let mut pads = LowPads::new(Dbu::new(1000));
         pads.add(LayerId::new(0), rect(0, 0, 140, 70), NetId(1));
 
         let touching = rect(140, 0, 280, 70);
 
-        assert!(pads.clear(LayerId::new(0), &touching, NetId(1), Dbu(130)));
-        assert!(pads.clear(LayerId::new(1), &touching, NetId(2), Dbu(130)));
+        assert!(pads.clear(LayerId::new(0), &touching, NetId(1), Dbu::new(130)));
+        assert!(pads.clear(LayerId::new(1), &touching, NetId(2), Dbu::new(130)));
     }
 
     #[test]
     fn pads_are_found_across_bucket_edges() {
-        let mut pads = LowPads::new(Dbu(100));
+        let mut pads = LowPads::new(Dbu::new(100));
         pads.add(LayerId::new(0), rect(150, 150, 190, 190), NetId(1));
 
         let across = rect(220, 150, 260, 190);
 
-        assert!(!pads.clear(LayerId::new(0), &across, NetId(2), Dbu(65)));
+        assert!(!pads.clear(LayerId::new(0), &across, NetId(2), Dbu::new(65)));
     }
 
     #[test]

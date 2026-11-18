@@ -1515,7 +1515,7 @@ pub fn area_change_percent(before: CellArea, after: CellArea) -> f64 {
 /// `meters` in database units, rounded and kept within an `int`, as
 /// `Resizer::metersToDbu`.
 pub(crate) fn meters_to_dbu(meters: Meters, dbu: DbuPerMicron) -> Dbu {
-    Dbu(i64::from(
+    Dbu::new(i64::from(
         ((meters.get() * f64::from(dbu.get()) * MICRONS_PER_METER).round() as i64 as i32)
             & i32::MAX,
     ))
@@ -1764,7 +1764,7 @@ mod tests {
 
         with_timed_session(&mut db, &cells(&clock_cells_source()), clock, |resizer| {
             let buffer = resizer.buffers.lowest_drive;
-            let at = Point::new(Dbu(10_000), Dbu(2800));
+            let at = Point::new(Dbu::new(10_000), Dbu::new(2800));
             let mut first = b1_in;
             for _ in 0..CHAIN {
                 first = resizer
@@ -1912,7 +1912,7 @@ mod tests {
             let d = resizer.db.net_id("d").unwrap();
             let load = pin(resizer.db, "f2/D");
             let buffer = resizer.buffers.lowest_drive;
-            let at = Point::new(Dbu(50_000), Dbu(2800));
+            let at = Point::new(Dbu::new(50_000), Dbu::new(2800));
             let _ = resizer
                 .insert_buffer_before_loads(d, &[load], buffer, at, "rebuffer")
                 .unwrap();
@@ -2134,7 +2134,7 @@ mod tests {
             let d = resizer.db.net_id("d").unwrap();
             let load = pin(resizer.db, "f2/D");
             let buffer = resizer.buffers.lowest_drive;
-            let at = Point::new(Dbu(50_000), Dbu(2800));
+            let at = Point::new(Dbu::new(50_000), Dbu::new(2800));
             let _ = resizer
                 .insert_buffer_before_loads(d, &[load], buffer, at, "rebuffer")
                 .unwrap();
@@ -2183,7 +2183,7 @@ mod tests {
             resizer.update_net(net_b);
             let and2 = resizer.link.liberty.cell_id("AND2_X1").unwrap();
             let and_cell = resizer.link.liberty.cell(and2);
-            let at = Point::new(Dbu(60_000), Dbu(30_000));
+            let at = Point::new(Dbu::new(60_000), Dbu::new(30_000));
             let clone = resizer.make_instance(and2, at, "clone").unwrap();
             let z = resizer.db.net_id("z").unwrap();
             let cloned_out = resizer.make_net("net", z).unwrap();
@@ -2254,7 +2254,7 @@ mod tests {
                 let (_, out) = resizer.buffer_pins(cell).unwrap();
                 let net = resizer.db.pins[out].net;
                 let loads: Vec<PinId> = resizer.netlist().loads(net).collect();
-                let at = Point::new(Dbu(2000 + 4000 * draw(18) as i64), Dbu(2800));
+                let at = Point::new(Dbu::new(2000 + 4000 * draw(18) as i64), Dbu::new(2800));
                 let buffer = resizer.buffers.lowest_drive;
                 let _ = resizer
                     .insert_buffer_before_loads(net, &loads, buffer, at, "rebuffer")

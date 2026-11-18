@@ -36,7 +36,7 @@ fn tiny_edited(edit: impl Fn(String) -> String) -> NetlistDB {
 /// where legalization moves it.
 fn legalized_in(mut db: NetlistDB, (x, y): (i64, i64), orient: Orientation) -> Option<Point<Dbu>> {
     let u1 = db.cell_id("u1").unwrap();
-    db.cells[u1].location = Point::new(Dbu(x), Dbu(y));
+    db.cells[u1].location = Point::new(Dbu::new(x), Dbu::new(y));
     db.cells[u1].orient = orient;
     let grid = SiteGrid::new(&db).unwrap();
     grid.legal_position(&db, u1)
@@ -47,7 +47,7 @@ fn legalized_in(mut db: NetlistDB, (x, y): (i64, i64), orient: Orientation) -> O
 fn legalized(x: i64, y: i64) -> Option<Point<Dbu>> {
     let mut db = tiny_design();
     let u1 = db.cell_id("u1").unwrap();
-    db.cells[u1].location = Point::new(Dbu(x), Dbu(y));
+    db.cells[u1].location = Point::new(Dbu::new(x), Dbu::new(y));
     let grid = SiteGrid::new(&db).unwrap();
     grid.legal_position(&db, u1)
 }
@@ -59,14 +59,17 @@ fn a_cell_on_a_site_and_row_stays() {
 
 #[test]
 fn a_cell_off_the_grid_goes_to_the_nearest_site_and_row() {
-    assert_eq!(legalized(250, 900), Some(Point::new(Dbu(200), Dbu(0))));
+    assert_eq!(
+        legalized(250, 900),
+        Some(Point::new(Dbu::new(200), Dbu::new(0)))
+    );
 }
 
 #[test]
 fn a_cell_on_a_macro_goes_past_its_nearest_edge() {
     assert_eq!(
         legalized(4500, 2000),
-        Some(Point::new(Dbu(4600), Dbu(4000)))
+        Some(Point::new(Dbu::new(4600), Dbu::new(4000)))
     );
 }
 
@@ -74,7 +77,7 @@ fn a_cell_on_a_macro_goes_past_its_nearest_edge() {
 fn a_cell_past_the_core_is_brought_inside() {
     assert_eq!(
         legalized(5900, 5500),
-        Some(Point::new(Dbu(5600), Dbu(4000)))
+        Some(Point::new(Dbu::new(5600), Dbu::new(4000)))
     );
 }
 
@@ -82,26 +85,26 @@ fn a_cell_past_the_core_is_brought_inside() {
 fn a_cell_near_the_top_of_a_raised_core_stays_on_its_top_row() {
     let mut db = tiny_design();
     for row in &mut db.rows {
-        row.origin.y += Dbu(2000);
+        row.origin.y += Dbu::new(2000);
     }
     let u1 = db.cell_id("u1").unwrap();
-    db.cells[u1].location = Point::new(Dbu(1000), Dbu(7900));
+    db.cells[u1].location = Point::new(Dbu::new(1000), Dbu::new(7900));
     let grid = SiteGrid::new(&db).unwrap();
 
     let legal = grid.legal_position(&db, u1);
 
-    assert_eq!(legal, Some(Point::new(Dbu(1000), Dbu(6000))));
+    assert_eq!(legal, Some(Point::new(Dbu::new(1000), Dbu::new(6000))));
 }
 
 #[test]
 fn a_cell_on_the_top_row_of_a_macro_off_the_rows_moves_past_its_edge() {
     let mut db = tiny_design();
     let ram = db.cell_id("ram0").unwrap();
-    db.cells[ram].location = Point::new(Dbu(4000), Dbu(1000));
+    db.cells[ram].location = Point::new(Dbu::new(4000), Dbu::new(1000));
 
     let legal = legalized_in(db, (4400, 4000), Orientation::N);
 
-    assert_eq!(legal, Some(Point::new(Dbu(3600), Dbu(4000))));
+    assert_eq!(legal, Some(Point::new(Dbu::new(3600), Dbu::new(4000))));
 }
 
 #[test]
@@ -117,14 +120,14 @@ fn a_cell_snaps_to_the_rows_a_row_statement_repeats() {
 
     let legal = legalized_in(db, (1000, 4100), Orientation::N);
 
-    assert_eq!(legal, Some(Point::new(Dbu(1000), Dbu(4000))));
+    assert_eq!(legal, Some(Point::new(Dbu::new(1000), Dbu::new(4000))));
 }
 
 #[test]
 fn a_turned_cell_is_kept_inside_the_core_by_its_turned_size() {
     let legal = legalized_in(tiny_design(), (5000, 4600), Orientation::W);
 
-    assert_eq!(legal, Some(Point::new(Dbu(4000), Dbu(4000))));
+    assert_eq!(legal, Some(Point::new(Dbu::new(4000), Dbu::new(4000))));
 }
 
 #[test]
@@ -133,7 +136,7 @@ fn rows_of_sites_of_different_widths_are_an_error() {
     let wide = db.library.sites.push(Site {
         name: "wide".into(),
         class: SiteClass::Core,
-        size: Point::new(Dbu(400), Dbu(2000)),
+        size: Point::new(Dbu::new(400), Dbu::new(2000)),
         symmetry: db.library.sites[db.rows[0].site].symmetry,
     });
     db.rows[2].site = wide;
@@ -142,6 +145,9 @@ fn rows_of_sites_of_different_widths_are_an_error() {
 
     assert_eq!(
         grid.map(|_| ()),
-        Err(DetailedPlacementError::SiteWidths(Dbu(400), Dbu(200)))
+        Err(DetailedPlacementError::SiteWidths(
+            Dbu::new(400),
+            Dbu::new(200)
+        ))
     );
 }

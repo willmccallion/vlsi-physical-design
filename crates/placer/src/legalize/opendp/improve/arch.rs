@@ -254,17 +254,17 @@ fn site_spacing(row: &pare_common::db::design::Row, site_width: Dbu) -> Result<D
 mod tests {
     use super::*;
 
-    const ROW_HEIGHT: Dbu = Dbu(100);
+    const ROW_HEIGHT: Dbu = Dbu::new(100);
 
     /// Rows `ROW_HEIGHT` high stacked from the bottom at zero.
     fn rows(count: i64) -> Arch {
         let rows: Vec<Row> = (0..count)
             .map(|r| Row {
-                left: Dbu(0),
+                left: Dbu::new(0),
                 bottom: ROW_HEIGHT * r,
                 height: ROW_HEIGHT,
-                site_spacing: Dbu(10),
-                site_width: Dbu(10),
+                site_spacing: Dbu::new(10),
+                site_width: Dbu::new(10),
                 num_sites: 10,
                 orient: Orientation::N,
                 symmetry: Symmetry::default(),
@@ -272,21 +272,21 @@ mod tests {
             .collect();
         Arch {
             rows: rows.into(),
-            min_x: Dbu(0),
-            max_x: Dbu(100),
-            min_y: Dbu(0),
+            min_x: Dbu::new(0),
+            max_x: Dbu::new(100),
+            min_y: Dbu::new(0),
             max_y: ROW_HEIGHT * count,
         }
     }
 
     #[test]
     fn a_point_below_the_rows_is_closest_to_the_first() {
-        assert_eq!(rows(3).closest_row(Dbu(-5)), ArchRowId::new(0));
+        assert_eq!(rows(3).closest_row(Dbu::new(-5)), ArchRowId::new(0));
     }
 
     #[test]
     fn a_point_above_the_rows_is_closest_to_the_last() {
-        assert_eq!(rows(3).closest_row(Dbu(500)), ArchRowId::new(2));
+        assert_eq!(rows(3).closest_row(Dbu::new(500)), ArchRowId::new(2));
     }
 
     #[test]
@@ -294,14 +294,14 @@ mod tests {
         let arch = rows(3);
 
         assert_eq!(
-            [40, 60, 100, 160].map(|y| arch.closest_row(Dbu(y))),
+            [40, 60, 100, 160].map(|y| arch.closest_row(Dbu::new(y))),
             [0, 1, 1, 2].map(ArchRowId::new)
         );
     }
 
     #[test]
     fn a_point_halfway_between_rows_is_closest_to_the_lower() {
-        assert_eq!(rows(3).closest_row(Dbu(150)), ArchRowId::new(1));
+        assert_eq!(rows(3).closest_row(Dbu::new(150)), ArchRowId::new(1));
     }
 
     #[test]
@@ -309,7 +309,7 @@ mod tests {
         let arch = rows(3);
 
         assert_eq!(
-            [100, 140, 150, 200].map(|h| arch.rows_spanned(Dbu(h))),
+            [100, 140, 150, 200].map(|h| arch.rows_spanned(Dbu::new(h))),
             [1, 1, 2, 2]
         );
     }
@@ -347,7 +347,7 @@ mod design_tests {
 
         let top = *arch.rows.iter().last().unwrap();
 
-        assert_eq!((top.left, top.right()), (Dbu(0), Dbu(200)));
+        assert_eq!((top.left, top.right()), (Dbu::new(0), Dbu::new(200)));
     }
 
     #[test]

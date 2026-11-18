@@ -335,7 +335,7 @@ mod tests {
     use pare_verify::placement::placement_violations;
 
     fn pt(x: i64, y: i64) -> Point<Dbu> {
-        Point::new(Dbu(x), Dbu(y))
+        Point::new(Dbu::new(x), Dbu::new(y))
     }
 
     fn legalize_zoned(db: &mut NetlistDB) -> Result<(), LegalizeError> {
@@ -410,7 +410,7 @@ mod tests {
         legalize_zoned(&mut db).unwrap();
 
         assert!(
-            db.cells[CellId(0)].location.x <= Dbu(30),
+            db.cells[CellId(0)].location.x <= Dbu::new(30),
             "{:?}",
             db.cells[CellId(0)].location
         );
@@ -425,7 +425,7 @@ mod tests {
         legalize_zoned(&mut db).unwrap();
 
         assert!(
-            db.cells[CellId(0)].location.x >= Dbu(50),
+            db.cells[CellId(0)].location.x >= Dbu::new(50),
             "{:?}",
             db.cells[CellId(0)].location
         );
@@ -507,10 +507,10 @@ mod tests {
         let mut xs: Vec<Dbu> = db
             .cells
             .iter()
-            .filter(|c| c.location.y == Dbu(0))
+            .filter(|c| c.location.y == Dbu::new(0))
             .map(|c| c.location.x)
             .collect();
         xs.sort();
-        assert_eq!(xs, [Dbu(10), Dbu(40), Dbu(70)]);
+        assert_eq!(xs, [Dbu::new(10), Dbu::new(40), Dbu::new(70)]);
     }
 }

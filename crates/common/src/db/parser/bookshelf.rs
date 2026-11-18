@@ -409,7 +409,7 @@ impl Scl {
     }
 
     fn add_rows(&self, db: &mut NetlistDB, row_height: Dbu) -> Result<SiteId, String> {
-        let site_width = self.rows.first().map_or(Dbu(1), |r| r.site_width);
+        let site_width = self.rows.first().map_or(Dbu::new(1), |r| r.site_width);
         let site = db
             .library
             .add_site(Site {
@@ -460,8 +460,8 @@ fn read_scl(path: &Path, units: DbuPerMicron) -> Result<Scl, ParseError> {
                     line,
                     y: Dbu::ZERO,
                     height: Dbu::ZERO,
-                    site_width: Dbu(i64::from(units.get())),
-                    site_spacing: Dbu(i64::from(units.get())),
+                    site_width: Dbu::new(i64::from(units.get())),
+                    site_spacing: Dbu::new(i64::from(units.get())),
                     x: Dbu::ZERO,
                     num_sites: 0,
                 });
@@ -638,7 +638,7 @@ mod tests {
     fn synthesized_stack_alternates_and_has_a_via_per_cut() {
         let mut lib = Library::new(BOOKSHELF_DBU);
 
-        synthesize_layer_stack(&mut lib, Dbu(6400), 4).unwrap();
+        synthesize_layer_stack(&mut lib, Dbu::new(6400), 4).unwrap();
 
         let dirs: Vec<_> = lib.routing_layers.iter().map(|l| l.direction).collect();
         assert_eq!(
@@ -650,7 +650,7 @@ mod tests {
                 Direction::Vertical
             ]
         );
-        assert_eq!(lib.routing_layers[LayerId(0)].track_pitch(), Dbu(400));
+        assert_eq!(lib.routing_layers[LayerId(0)].track_pitch(), Dbu::new(400));
         assert_eq!(lib.cut_layers.len(), 3);
         assert!((0..3).all(|c| lib.default_via(crate::db::indices::CutLayerId(c)).is_some()));
     }

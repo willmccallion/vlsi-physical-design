@@ -44,7 +44,7 @@ fn a_block_is_a_macro_and_a_row_high_cell_is_standard() {
 #[test]
 fn a_core_cell_more_than_six_rows_high_is_a_macro() {
     let mut db = tiny();
-    set_inv_height(&mut db, Dbu(12_200));
+    set_inv_height(&mut db, Dbu::new(12_200));
 
     assert_eq!(kind_of(&db, "u1"), CellKind::Macro);
 }
@@ -52,7 +52,7 @@ fn a_core_cell_more_than_six_rows_high_is_a_macro() {
 #[test]
 fn a_core_cell_six_rows_high_is_standard() {
     let mut db = tiny();
-    set_inv_height(&mut db, Dbu(12_000));
+    set_inv_height(&mut db, Dbu::new(12_000));
 
     assert_eq!(kind_of(&db, "u1"), CellKind::Standard);
 }

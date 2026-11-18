@@ -227,7 +227,7 @@ fn pin_density_sizes(db: &NetlistDB) -> IdVec<CellId, Point<Dbu>> {
             }
             let target = pins as f64 / average;
             let scale = (target / area(size).to_f64()).sqrt().clamp(0.95, 1.2);
-            let scaled = |side: Dbu| Dbu((side.get() as f64 * scale) as i64 / 2 * 2);
+            let scaled = |side: Dbu| Dbu::new((side.get() as f64 * scale) as i64 / 2 * 2);
             Point::new(scaled(size.x), scaled(size.y))
         })
         .collect()

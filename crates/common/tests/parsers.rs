@@ -26,7 +26,7 @@ fn fixture(name: &str) -> PathBuf {
 }
 
 const fn pt(x: i64, y: i64) -> Point<Dbu> {
-    Point::new(Dbu(x), Dbu(y))
+    Point::new(Dbu::new(x), Dbu::new(y))
 }
 
 fn rect(x0: i64, y0: i64, x1: i64, y1: i64) -> Rect<Dbu> {
@@ -77,13 +77,13 @@ fn lef_routing_layers_carry_direction_pitch_offset_width_and_spacing() {
     assert_eq!(lib.routing_layers.len(), 3);
     assert_eq!(
         (m1.direction, m1.track_pitch(), m1.offset_y),
-        (Direction::Horizontal, Dbu(200), Some(Dbu(100)))
+        (Direction::Horizontal, Dbu::new(200), Some(Dbu::new(100)))
     );
     assert_eq!(
         (m2.direction, m2.pitch_x, m2.pitch_y),
-        (Direction::Vertical, Dbu(200), Dbu(250))
+        (Direction::Vertical, Dbu::new(200), Dbu::new(250))
     );
-    assert_eq!(m2.offset_y, Some(Dbu(125)));
+    assert_eq!(m2.offset_y, Some(Dbu::new(125)));
     assert_eq!(m3.offset_x, None);
 }
 
@@ -127,7 +127,7 @@ fn lef_min_spacing_comes_from_plain_spacing_or_the_first_table_entry() {
     let lib = tiny_library();
 
     let spacings: Vec<Dbu> = lib.routing_layers.iter().map(|l| l.min_spacing).collect();
-    assert_eq!(spacings, [Dbu(100), Dbu(110), Dbu(200)]);
+    assert_eq!(spacings, [Dbu::new(100), Dbu::new(110), Dbu::new(200)]);
 }
 
 #[test]
@@ -140,12 +140,12 @@ fn lef_parallel_run_spacing_tables_are_read_whole() {
         panic!("M2 has a parallel run length table");
     };
 
-    assert_eq!(table.run_lengths, [Dbu(0), Dbu(500)]);
+    assert_eq!(table.run_lengths, [Dbu::new(0), Dbu::new(500)]);
     assert_eq!(
         table.rows,
         [
-            (Dbu(0), vec![Dbu(110), Dbu(110)]),
-            (Dbu(300), vec![Dbu(110), Dbu(200)])
+            (Dbu::new(0), vec![Dbu::new(110), Dbu::new(110)]),
+            (Dbu::new(300), vec![Dbu::new(110), Dbu::new(200)])
         ]
     );
 }
@@ -157,12 +157,27 @@ fn spacing_grows_only_once_both_width_and_run_exceed_their_thresholds() {
         .clone()
         .unwrap();
 
-    assert_eq!(table.spacing(Dbu(100), Dbu(100), Dbu(900)), Dbu(110));
-    assert_eq!(table.spacing(Dbu(300), Dbu(100), Dbu(500)), Dbu(110));
-    assert_eq!(table.spacing(Dbu(100), Dbu(300), Dbu(501)), Dbu(110));
-    assert_eq!(table.spacing(Dbu(100), Dbu(301), Dbu(501)), Dbu(200));
-    assert_eq!(table.spacing(Dbu(400), Dbu(100), Dbu(-50)), Dbu(110));
-    assert_eq!(table.max_spacing(), Dbu(200));
+    assert_eq!(
+        table.spacing(Dbu::new(100), Dbu::new(100), Dbu::new(900)),
+        Dbu::new(110)
+    );
+    assert_eq!(
+        table.spacing(Dbu::new(300), Dbu::new(100), Dbu::new(500)),
+        Dbu::new(110)
+    );
+    assert_eq!(
+        table.spacing(Dbu::new(100), Dbu::new(300), Dbu::new(501)),
+        Dbu::new(110)
+    );
+    assert_eq!(
+        table.spacing(Dbu::new(100), Dbu::new(301), Dbu::new(501)),
+        Dbu::new(200)
+    );
+    assert_eq!(
+        table.spacing(Dbu::new(400), Dbu::new(100), Dbu::new(-50)),
+        Dbu::new(110)
+    );
+    assert_eq!(table.max_spacing(), Dbu::new(200));
 }
 
 #[test]
@@ -217,9 +232,9 @@ fn def_reads_the_gcell_grid() {
         db.gcell_grid,
         [GCellGridDef {
             axis: TrackAxis::X,
-            start: Dbu(0),
+            start: Dbu::new(0),
             count: 4,
-            step: Dbu(2000),
+            step: Dbu::new(2000),
         }]
     );
 }
@@ -500,8 +515,8 @@ fn lef_values_off_the_dbu_grid_round_half_away_from_zero() {
 
     let lib = lef::parse_files(&[fixture("tiny.lef")], units).unwrap();
 
-    assert_eq!(lib.rules.manufacturing_grid, Some(Dbu(1)));
-    assert_eq!(lib.layer(LayerId(1)).offset_y, Some(Dbu(13)));
+    assert_eq!(lib.rules.manufacturing_grid, Some(Dbu::new(1)));
+    assert_eq!(lib.layer(LayerId(1)).offset_y, Some(Dbu::new(13)));
 }
 
 fn tiny_bookshelf() -> NetlistDB {
@@ -513,7 +528,7 @@ fn bookshelf_rows_keep_their_gaps() {
     let db = tiny_bookshelf();
 
     let ys: Vec<Dbu> = db.rows.iter().map(|r| r.origin.y).collect();
-    assert_eq!(ys, [Dbu(0), Dbu(3200)]);
+    assert_eq!(ys, [Dbu::new(0), Dbu::new(3200)]);
     assert_eq!(db.rows[0].bbox(&db.library), rect(0, 0, 4000, 1600));
 }
 
@@ -593,8 +608,8 @@ fn tracks_whose_wire_would_leave_the_die_are_not_routing_tracks() {
 
     let tracks = db.layer_tracks(LayerId(1));
 
-    assert_eq!(tracks.first(), Some(&Dbu(100)));
-    assert_eq!(tracks.last(), Some(&Dbu(2900)));
+    assert_eq!(tracks.first(), Some(&Dbu::new(100)));
+    assert_eq!(tracks.last(), Some(&Dbu::new(2900)));
     assert_eq!(tracks.len(), 15);
 }
 
@@ -609,9 +624,9 @@ fn preferred_axis(db: &NetlistDB) -> TrackAxis {
 fn pattern(axis: TrackAxis, start: i64, count: u32, step: i64) -> TrackDef {
     TrackDef {
         axis,
-        start: Dbu(start),
+        start: Dbu::new(start),
         count,
-        step: Dbu(step),
+        step: Dbu::new(step),
         layers: vec![LayerId(1)],
     }
 }
@@ -621,7 +636,7 @@ fn one_track_pattern_spaces_its_tracks_by_its_step() {
     let mut db = tiny_design();
     db.tracks = vec![pattern(preferred_axis(&db), 100, 10, 200)];
 
-    assert_eq!(db.average_track_spacing(LayerId(1)), Dbu(200));
+    assert_eq!(db.average_track_spacing(LayerId(1)), Dbu::new(200));
 }
 
 #[test]
@@ -630,7 +645,7 @@ fn several_track_patterns_space_their_tracks_by_span_over_count_rounded_up() {
     let axis = preferred_axis(&db);
     db.tracks = vec![pattern(axis, 0, 5, 200), pattern(axis, 100, 5, 200)];
 
-    assert_eq!(db.average_track_spacing(LayerId(1)), Dbu(90));
+    assert_eq!(db.average_track_spacing(LayerId(1)), Dbu::new(90));
 }
 
 #[test]

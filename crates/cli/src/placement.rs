@@ -941,7 +941,7 @@ mod tests {
         let moved = db.cell_id("u1").unwrap();
         let turned = db.cell_id("u2").unwrap();
 
-        db.cells[moved].location.x += Dbu(200);
+        db.cells[moved].location.x += Dbu::new(200);
         db.cells[turned].orient = Orientation::N;
 
         assert_eq!(before.moved(&db), vec![moved, turned]);

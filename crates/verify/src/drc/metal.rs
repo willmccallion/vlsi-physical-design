@@ -76,12 +76,12 @@ impl LayerCheck<'_> {
         let abut = facing.prl_x == Dbu::ZERO || facing.prl_y == Dbu::ZERO;
         let mut marker = facing.marker;
         if facing.prl_x == Dbu::ZERO {
-            marker.min.x -= Dbu(1);
-            marker.max.x += Dbu(1);
+            marker.min.x -= Dbu::new(1);
+            marker.max.x += Dbu::new(1);
         }
         if facing.prl_y == Dbu::ZERO {
-            marker.min.y -= Dbu(1);
-            marker.max.y += Dbu(1);
+            marker.min.y -= Dbu::new(1);
+            marker.max.y += Dbu::new(1);
         }
         if self.is_blockage(r1.owner) || self.is_blockage(r2.owner) {
             self.check_short_with_blockage(r1, r2, &marker, abut, found);
@@ -356,7 +356,7 @@ enum Between {
 }
 
 const fn in_range(min: Dbu, max: Dbu, width: Dbu) -> bool {
-    min.0 <= width.0 && width.0 <= max.0
+    min.get() <= width.get() && width.get() <= max.get()
 }
 
 /// Whether the diagonal of `rect` is at least `length` long.
@@ -373,12 +373,12 @@ fn diagonal_reaches(rect: &Rect<Dbu>, length: Dbu) -> bool {
 fn bloat_flat(rect: &Rect<Dbu>) -> Rect<Dbu> {
     let mut r = *rect;
     if r.width() == Dbu::ZERO {
-        r.min.x -= Dbu(1);
-        r.max.x += Dbu(1);
+        r.min.x -= Dbu::new(1);
+        r.max.x += Dbu::new(1);
     }
     if r.height() == Dbu::ZERO {
-        r.min.y -= Dbu(1);
-        r.max.y += Dbu(1);
+        r.min.y -= Dbu::new(1);
+        r.max.y += Dbu::new(1);
     }
     r
 }

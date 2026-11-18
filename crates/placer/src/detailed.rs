@@ -1503,7 +1503,7 @@ mod tests {
     use pare_verify::placement::placement_violations;
 
     const fn pt(x: i64, y: i64) -> Point<Dbu> {
-        Point::new(Dbu(x), Dbu(y))
+        Point::new(Dbu::new(x), Dbu::new(y))
     }
 
     fn improve_zoned(db: &mut NetlistDB) -> DetailedResult {
@@ -1523,12 +1523,12 @@ mod tests {
             .add_routing_layer(RoutingLayer {
                 name: "M1".into(),
                 direction: Direction::Horizontal,
-                pitch_x: Dbu(10),
-                pitch_y: Dbu(10),
+                pitch_x: Dbu::new(10),
+                pitch_y: Dbu::new(10),
                 offset_x: None,
                 offset_y: None,
-                width: Dbu(4),
-                min_spacing: Dbu(4),
+                width: Dbu::new(4),
+                min_spacing: Dbu::new(4),
                 spacing_table: None,
                 rules: RoutingLayerRules::default(),
                 electrical: LayerElectrical::default(),
@@ -1588,12 +1588,12 @@ mod tests {
         RoutingLayer {
             name: name.into(),
             direction,
-            pitch_x: Dbu(200),
-            pitch_y: Dbu(200),
+            pitch_x: Dbu::new(200),
+            pitch_y: Dbu::new(200),
             offset_x: None,
             offset_y: None,
-            width: Dbu(100),
-            min_spacing: Dbu(100),
+            width: Dbu::new(100),
+            min_spacing: Dbu::new(100),
             spacing_table: None,
             rules: RoutingLayerRules::default(),
             electrical: LayerElectrical::default(),
@@ -1616,8 +1616,8 @@ mod tests {
         let v1 = lib
             .add_cut_layer(CutLayer {
                 name: "V1".into(),
-                width: Some(Dbu(100)),
-                spacing: Some(Dbu(120)),
+                width: Some(Dbu::new(100)),
+                spacing: Some(Dbu::new(120)),
                 rules: CutLayerRules::default(),
                 resistance: None,
             })
@@ -1696,9 +1696,9 @@ mod tests {
         for (axis, start, count, layer) in [(TrackAxis::X, 100, 50, 1), (TrackAxis::Y, 0, 21, 0)] {
             db.tracks.push(TrackDef {
                 axis,
-                start: Dbu(start),
+                start: Dbu::new(start),
                 count,
-                step: Dbu(200),
+                step: Dbu::new(200),
                 layers: vec![LayerId(layer)],
             });
         }
@@ -1740,8 +1740,8 @@ mod tests {
             (1, 0),
             "{repair:?}"
         );
-        let gap = db.cells[CellId(1)].location.x - (db.cells[CellId(0)].location.x + Dbu(400));
-        assert!(gap >= Dbu(200), "gap {gap:?}");
+        let gap = db.cells[CellId(1)].location.x - (db.cells[CellId(0)].location.x + Dbu::new(400));
+        assert!(gap >= Dbu::new(200), "gap {gap:?}");
         assert!(
             placement_violations(&db).is_empty(),
             "{:?}",
@@ -1802,7 +1802,7 @@ mod tests {
 
         let x = db.cells[CellId(2)].location.x;
         assert!(result.moves > 0, "{result:?}");
-        assert!(Dbu(40) < x && x <= Dbu(80), "{x:?}");
+        assert!(Dbu::new(40) < x && x <= Dbu::new(80), "{x:?}");
         assert!(
             placement_violations(&db).is_empty(),
             "{:?}",

@@ -258,7 +258,7 @@ impl LengthUnit {
     /// The whole length units in `length`, rounding toward zero.
     #[must_use]
     pub(crate) const fn steps_in(self, length: Dbu) -> LengthSteps {
-        LengthSteps(length.div_trunc(Dbu(self.0 as i64)))
+        LengthSteps(length.div_trunc(Dbu::new(self.0 as i64)))
     }
 }
 
@@ -1440,7 +1440,7 @@ mod tests {
     fn a_characterization_buffer_of_no_height_is_refused() {
         let mut db = fixtures::design("");
         for master in &mut db.library.macros {
-            master.size.y = pare_common::geom::dbu::Dbu(0);
+            master.size.y = pare_common::geom::dbu::Dbu::ZERO;
         }
         let lib = clock_buffer_library(
             "",

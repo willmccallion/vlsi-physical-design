@@ -625,12 +625,16 @@ impl Placer {
         // HALFROW; PARE's LEF reader reads none, so each edge is a whole side.
         let segment = |side: CellSide| -> Rect<Dbu> {
             match side {
-                CellSide::Right => Rect::new(Point::new(w, Dbu(0)), Point::new(w, h)),
-                CellSide::Left | CellSide::Both => {
-                    Rect::new(Point::new(Dbu(0), Dbu(0)), Point::new(Dbu(0), h))
-                }
-                CellSide::Top => Rect::new(Point::new(Dbu(0), h), Point::new(w, h)),
-                CellSide::Bottom => Rect::new(Point::new(Dbu(0), Dbu(0)), Point::new(w, Dbu(0))),
+                CellSide::Right => Rect::new(Point::new(w, Dbu::new(0)), Point::new(w, h)),
+                CellSide::Left | CellSide::Both => Rect::new(
+                    Point::new(Dbu::new(0), Dbu::new(0)),
+                    Point::new(Dbu::new(0), h),
+                ),
+                CellSide::Top => Rect::new(Point::new(Dbu::new(0), h), Point::new(w, h)),
+                CellSide::Bottom => Rect::new(
+                    Point::new(Dbu::new(0), Dbu::new(0)),
+                    Point::new(w, Dbu::new(0)),
+                ),
             }
         };
         let mut edges = Vec::new();
@@ -1071,7 +1075,7 @@ impl Placer {
     /// edge of `node` where it would stand, keeps the spacing the table
     /// asks between their types.
     fn edge_clear_of_neighbours(&self, node: &Node, edge: PlacedEdge) -> bool {
-        let max_spacing = self.edge_spacing.max_spacing(edge.kind) + Dbu(1);
+        let max_spacing = self.edge_spacing.max_spacing(edge.kind) + Dbu::new(1);
         let vertical = is_vertical(&edge.rect);
         let query = if vertical {
             Rect::new(
@@ -1221,7 +1225,7 @@ impl Placer {
             // the region as a whole.
             return Rect::new(corner, far).covered_by(&self.groups[g].rects);
         }
-        let query = Rect::new(corner, far - Point::new(Dbu(1), Dbu(1)));
+        let query = Rect::new(corner, far - Point::new(Dbu::new(1), Dbu::new(1)));
         !self.region_boxes.iter().any(|b| closed_overlap(b, &query))
     }
 
@@ -1507,7 +1511,10 @@ mod tests {
     use pare_common::db::parser::{def, lef};
 
     fn rect(x0: i64, y0: i64, x1: i64, y1: i64) -> Rect<Dbu> {
-        Rect::new(Point::new(Dbu(x0), Dbu(y0)), Point::new(Dbu(x1), Dbu(y1)))
+        Rect::new(
+            Point::new(Dbu::new(x0), Dbu::new(y0)),
+            Point::new(Dbu::new(x1), Dbu::new(y1)),
+        )
     }
 
     #[test]

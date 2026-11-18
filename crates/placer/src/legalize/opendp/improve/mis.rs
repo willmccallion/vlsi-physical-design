@@ -422,8 +422,8 @@ fn hpwl_at(imp: &Improver, n: NodeId, center: Point<Dbu>) -> Dbu {
         if edge.len() <= 1 || edge.len() > SKIP_NETS_LARGER_THAN {
             continue;
         }
-        let (mut x0, mut y0) = (Dbu(i64::MAX), Dbu(i64::MAX));
-        let (mut x1, mut y1) = (Dbu(i64::MIN), Dbu(i64::MIN));
+        let (mut x0, mut y0) = (Dbu::new(i64::MAX), Dbu::new(i64::MAX));
+        let (mut x1, mut y1) = (Dbu::new(i64::MIN), Dbu::new(i64::MIN));
         for &p in edge {
             let other = &imp.net.pins[p];
             let at = if other.node == n {
@@ -501,21 +501,21 @@ mod tests {
 
     #[test]
     fn a_pass_converges_when_it_changes_the_wirelength_within_the_tolerance() {
-        assert!(converged(Dbu(1000), Dbu(995), TOLERANCE));
+        assert!(converged(Dbu::new(1000), Dbu::new(995), TOLERANCE));
     }
 
     #[test]
     fn a_pass_saving_more_than_the_tolerance_has_not_converged() {
-        assert!(!converged(Dbu(1000), Dbu(990), TOLERANCE));
+        assert!(!converged(Dbu::new(1000), Dbu::new(990), TOLERANCE));
     }
 
     #[test]
     fn a_pass_lengthening_the_nets_past_the_tolerance_has_not_converged() {
-        assert!(!converged(Dbu(1000), Dbu(1010), TOLERANCE));
+        assert!(!converged(Dbu::new(1000), Dbu::new(1010), TOLERANCE));
     }
 
     #[test]
     fn no_wirelength_to_improve_has_converged() {
-        assert!(converged(Dbu(0), Dbu(50), TOLERANCE));
+        assert!(converged(Dbu::new(0), Dbu::new(50), TOLERANCE));
     }
 }

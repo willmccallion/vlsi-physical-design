@@ -293,11 +293,11 @@ mod tests {
 
     fn span(y: i64, x_min: i64, x_max: i64) -> RowSpan {
         RowSpan {
-            y: Dbu(y),
-            height: Dbu(2000),
-            x_min: Dbu(x_min),
-            x_max: Dbu(x_max),
-            site: Dbu(200),
+            y: Dbu::new(y),
+            height: Dbu::new(2000),
+            x_min: Dbu::new(x_min),
+            x_max: Dbu::new(x_max),
+            site: Dbu::new(200),
             orient: Orientation::N,
         }
     }

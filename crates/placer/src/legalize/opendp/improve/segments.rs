@@ -387,7 +387,7 @@ impl Improver {
                 }
                 segs
             };
-            let (mut xmin, mut xmax) = (Dbu(i64::MIN), Dbu(i64::MAX));
+            let (mut xmin, mut xmax) = (Dbu::new(i64::MIN), Dbu::new(i64::MAX));
             for &s in &segs {
                 xmin = xmin.max(self.segments[s].min_x);
                 xmax = xmax.min(self.segments[s].max_x);
@@ -636,8 +636,8 @@ mod tests {
         let mut imp = improver();
         let n = imp.movable_cells()[0];
         let top_row = imp.arch.rows.iter().last().unwrap().bottom;
-        imp.set_position(n, Point::new(Dbu(3000), top_row));
+        imp.set_position(n, Point::new(Dbu::new(3000), top_row));
 
-        assert!(imp.inside_blockage(n, Dbu(5000)));
+        assert!(imp.inside_blockage(n, Dbu::new(5000)));
     }
 }

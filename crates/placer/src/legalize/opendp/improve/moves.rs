@@ -236,7 +236,8 @@ impl Improver {
     /// The span free in every segment of `segs` around `xj` that `n` fits
     /// in; none where it fits in no such span.
     fn stack_gap(&self, n: NodeId, segs: &[SegmentId], xj: Dbu) -> Option<Interval> {
-        let mut shared = Interval::new(Dbu(i64::from(i32::MIN)), Dbu(i64::from(i32::MAX)));
+        let mut shared =
+            Interval::new(Dbu::new(i64::from(i32::MIN)), Dbu::new(i64::from(i32::MAX)));
         for &s in segs {
             let (left, right) = self.neighbours_besides(n, s, xj);
             if left == Some(n) || right == Some(n) {
@@ -884,12 +885,12 @@ mod tests {
 
     #[test]
     fn a_position_snaps_to_the_start_of_the_site_holding_it() {
-        let (origin, spacing) = (Dbu(100), Dbu(10));
+        let (origin, spacing) = (Dbu::new(100), Dbu::new(10));
 
-        let inside = site_holding(Dbu(135), origin, spacing);
-        let on_edge = site_holding(Dbu(130), origin, spacing);
+        let inside = site_holding(Dbu::new(135), origin, spacing);
+        let on_edge = site_holding(Dbu::new(130), origin, spacing);
 
-        assert_eq!((inside, on_edge), (Dbu(130), Dbu(130)));
+        assert_eq!((inside, on_edge), (Dbu::new(130), Dbu::new(130)));
     }
 
     #[test]
@@ -912,11 +913,11 @@ mod tests {
         let cells = imp.cells_in_seg[s].clone();
 
         let pushed = imp
-            .shift_right_helper(cells[0], Dbu(500), s, cells[1])
+            .shift_right_helper(cells[0], Dbu::new(500), s, cells[1])
             .unwrap();
 
         assert!(pushed);
         let lefts: Vec<Dbu> = cells[1..].iter().map(|&n| imp.left(n)).collect();
-        assert_eq!(lefts, [1200, 1800, 2200, 2600, 3000].map(Dbu));
+        assert_eq!(lefts, [1200, 1800, 2200, 2600, 3000].map(Dbu::new));
     }
 }
