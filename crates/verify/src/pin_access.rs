@@ -20,7 +20,7 @@
 
 use pare_common::db::design::{NetlistDB, PinOwner};
 use pare_common::db::indices::{CellId, IdVec, LayerId, MacroPinId, NetId};
-use pare_common::db::library::{Direction, LayerRef, Macro};
+use pare_common::db::library::{Direction, LayerRef, Library, Macro, ViaDef};
 use pare_common::db::rules::{SpacingTable, WidthRangeSpacing};
 use pare_common::db::shapes::{Owner, obstruction_shapes};
 use pare_common::geom::dbu::Dbu;
@@ -90,6 +90,40 @@ struct ViaUp {
     cut: Rect<Dbu>,
     bottom: Rect<Dbu>,
     pad: Rect<Dbu>,
+}
+
+impl ViaUp {
+    /// Every library via, not one a DEF defines, through the cut above
+    /// routing layer `lower` that has metal on it and on `upper`, the
+    /// layer above.
+    fn all_between(lib: &Library, lower: LayerId, upper: LayerId) -> Vec<Self> {
+        let cut = lower.cut_above();
+        lib.vias
+            .iter()
+            .filter(|v| v.cut == cut && !v.is_from_def())
+            .filter_map(|v| {
+                let cut_rect = v
+                    .shapes
+                    .iter()
+                    .find(|s| s.layer == LayerRef::Cut(cut))?
+                    .rect;
+                Some(Self {
+                    cut: cut_rect,
+                    bottom: via_metal_on(v, lower)?,
+                    pad: via_metal_on(v, upper)?,
+                })
+            })
+            .collect()
+    }
+}
+
+/// The metal of via `v` on routing layer `layer`, as one box.
+fn via_metal_on(v: &ViaDef, layer: LayerId) -> Option<Rect<Dbu>> {
+    v.shapes
+        .iter()
+        .filter(|s| s.layer == LayerRef::Routing(layer))
+        .map(|s| s.rect)
+        .reduce(|a, b| a.union(&b))
 }
 
 /// A cell standing beside the one being checked, whose metal its vias must
@@ -618,32 +652,8 @@ impl PinAccess {
     /// signal wires use, or `None` when no library via joins the two.
     pub fn new(db: &NetlistDB, above: LayerId) -> Option<Self> {
         let pin_layer = above.below()?;
-        let cut = pin_layer.cut_above();
         let lib = &db.library;
-        let metal_on = |v: &pare_common::db::library::ViaDef, layer: LayerId| {
-            v.shapes
-                .iter()
-                .filter(|s| s.layer == LayerRef::Routing(layer))
-                .map(|s| s.rect)
-                .reduce(|a, b| a.union(&b))
-        };
-        let vias: Vec<ViaUp> = lib
-            .vias
-            .iter()
-            .filter(|v| v.cut == cut && !v.is_from_def())
-            .filter_map(|v| {
-                let cut_rect = v
-                    .shapes
-                    .iter()
-                    .find(|s| s.layer == LayerRef::Cut(cut))?
-                    .rect;
-                Some(ViaUp {
-                    cut: cut_rect,
-                    bottom: metal_on(v, pin_layer)?,
-                    pad: metal_on(v, above)?,
-                })
-            })
-            .collect();
+        let vias = ViaUp::all_between(lib, pin_layer, above);
         if vias.is_empty() {
             return None;
         }
@@ -652,25 +662,12 @@ impl PinAccess {
             .above()
             .filter(|&next| next.index() < lib.routing_layers.len() && crosses(next))
             .map(|next| {
-                let cut_up = above.cut_above();
-                let vias: Vec<ViaUp> = lib
-                    .vias
-                    .iter()
-                    .filter(|v| v.cut == cut_up && !v.is_from_def())
-                    .filter_map(|v| {
-                        let cut_rect = v
-                            .shapes
-                            .iter()
-                            .find(|s| s.layer == LayerRef::Cut(cut_up))?
-                            .rect;
-                        Some(ViaUp {
-                            cut: cut_rect,
-                            bottom: metal_on(v, above)?,
-                            pad: metal_on(v, next)?,
-                        })
-                    })
-                    .collect();
-                Escape::new(db, next, vias, escape_reach(db, above))
+                Escape::new(
+                    db,
+                    next,
+                    ViaUp::all_between(lib, above, next),
+                    escape_reach(db, above),
+                )
             })
             .filter(|up| !up.vias.is_empty());
         Some(Self {
