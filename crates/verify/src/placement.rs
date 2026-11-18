@@ -1,11 +1,11 @@
 //! Placement legality: die containment, overlaps, blockages, rows, sites,
 //! row orientation and placement regions.
 
-use crate::db::design::{NetlistDB, PlacementStatus, RegionKind};
-use crate::db::indices::{CellId, IdVec};
-use crate::db::library::MacroClass;
-use crate::geom::dbu::Dbu;
-use crate::geom::rect::Rect;
+use pare_common::db::design::{NetlistDB, PlacementStatus, RegionKind};
+use pare_common::db::indices::{CellId, IdVec};
+use pare_common::db::library::MacroClass;
+use pare_common::geom::dbu::Dbu;
+use pare_common::geom::rect::Rect;
 use std::collections::{BTreeMap, HashMap};
 
 /// A placement rule a cell breaks.

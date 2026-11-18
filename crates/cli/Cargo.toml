@@ -14,6 +14,7 @@ workspace = true
 
 [dependencies]
 pare-common = { path = "../common" }
+pare-verify = { path = "../verify" }
 pare-placer = { path = "../placer" }
 pare-router = { path = "../router" }
 pare-resizer = { path = "../resizer" }

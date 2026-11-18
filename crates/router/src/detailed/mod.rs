@@ -47,7 +47,7 @@ use pare_common::geom::dbu::Dbu;
 use pare_common::geom::interval::Interval;
 use pare_common::geom::point::Point;
 use pare_common::geom::rect::Rect;
-use pare_common::verify::drc::{Layout, Rules};
+use pare_verify::drc::{Layout, Rules};
 use rayon::prelude::*;
 use rustc_hash::{FxHashMap, FxHashSet};
 use std::collections::VecDeque;

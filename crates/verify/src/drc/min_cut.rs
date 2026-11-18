@@ -8,9 +8,9 @@
 use super::model::{Cut, Facing, GcRect, Metal, Model};
 use super::rules::Rules;
 use super::{Involves, Marker, Markers, Violation};
-use crate::db::indices::LayerId;
-use crate::db::library::LayerRef;
-use crate::db::rules::{CutApproach, MinimumCut};
+use pare_common::db::indices::LayerId;
+use pare_common::db::library::LayerRef;
+use pare_common::db::rules::{CutApproach, MinimumCut};
 
 /// Checks every maximal rectangle of every routing layer with rules.
 pub(super) fn check(model: &Model<'_>, rules: &Rules) -> Markers {

@@ -5,15 +5,15 @@
 //! obstructions; a blockage owns itself; a pin on no net is its own owner,
 //! except supply pins, which share one owner per supply.
 
-use crate::db::design::{NetlistDB, PinOwner, PlacementStatus, RouteElem};
-use crate::db::indices::{
+use pare_common::db::design::{NetlistDB, PinOwner, PlacementStatus, RouteElem};
+use pare_common::db::indices::{
     BlockageId, CellId, CutLayerId, IdVec, LayerId, MacroPinId, NetId, NonDefaultRuleId,
     SpecialNetId,
 };
-use crate::db::library::{LayerRef, Shape, SignalUse};
-use crate::db::shapes::{default_width_shapes, route_elem_shapes, special_net_metal};
-use crate::geom::dbu::Dbu;
-use crate::geom::rect::Rect;
+use pare_common::db::library::{LayerRef, Shape, SignalUse};
+use pare_common::db::shapes::{default_width_shapes, route_elem_shapes, special_net_metal};
+use pare_common::geom::dbu::Dbu;
+use pare_common::geom::rect::Rect;
 use std::collections::HashMap;
 use std::sync::Arc;
 
@@ -60,7 +60,7 @@ impl Owner {
     }
 }
 
-crate::define_index!(
+pare_common::define_index!(
     /// An owner's position in [`Layout::owners`]. Owners are nets, cells and
     /// I/O pins, which the design's 32-bit ids number.
     OwnerIndex(u32)

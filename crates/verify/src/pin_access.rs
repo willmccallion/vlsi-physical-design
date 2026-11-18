@@ -18,16 +18,16 @@
 //! only short stubs and a stub boxed in by stripes, I/O pins and the pins of
 //! the cells above and below can never be connected.
 
-use crate::db::design::{NetlistDB, PinOwner};
-use crate::db::indices::{CellId, IdVec, LayerId, MacroPinId, NetId};
-use crate::db::library::{Direction, LayerRef, Macro};
-use crate::db::rules::{SpacingTable, WidthRangeSpacing};
-use crate::db::shapes::{Owner, obstruction_shapes};
-use crate::geom::dbu::Dbu;
-use crate::geom::orient::Orientation;
-use crate::geom::point::Point;
-use crate::geom::rect::Rect;
-use crate::geom::region::Region;
+use pare_common::db::design::{NetlistDB, PinOwner};
+use pare_common::db::indices::{CellId, IdVec, LayerId, MacroPinId, NetId};
+use pare_common::db::library::{Direction, LayerRef, Macro};
+use pare_common::db::rules::{SpacingTable, WidthRangeSpacing};
+use pare_common::db::shapes::{Owner, obstruction_shapes};
+use pare_common::geom::dbu::Dbu;
+use pare_common::geom::orient::Orientation;
+use pare_common::geom::point::Point;
+use pare_common::geom::rect::Rect;
+use pare_common::geom::region::Region;
 use rstar::{AABB, RTree, RTreeObject};
 use rustc_hash::FxHashMap;
 use std::cell::RefCell;
@@ -618,7 +618,7 @@ impl PinAccess {
         let pin_layer = above.below()?;
         let cut = pin_layer.cut_above();
         let lib = &db.library;
-        let metal_on = |v: &crate::db::library::ViaDef, layer: LayerId| {
+        let metal_on = |v: &pare_common::db::library::ViaDef, layer: LayerId| {
             v.shapes
                 .iter()
                 .filter(|s| s.layer == LayerRef::Routing(layer))
@@ -1200,14 +1200,14 @@ fn within(tracks: &[Dbu], lo: Dbu, hi: Dbu) -> impl Iterator<Item = Dbu> + Clone
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::db::design::{PlacementStatus, SpecialNet, SpecialWire, TrackAxis, TrackDef};
-    use crate::db::indices::{CutLayerId, IdVec, MacroId, MacroPinId, SiteId};
-    use crate::db::library::{
+    use pare_common::db::design::{PlacementStatus, SpecialNet, SpecialWire, TrackAxis, TrackDef};
+    use pare_common::db::indices::{CutLayerId, IdVec, MacroId, MacroPinId, SiteId};
+    use pare_common::db::library::{
         CoreKind, CutLayer, Library, Macro, MacroClass, MacroPin, PinDirection, RoutingLayer,
         Shape, SignalUse, Site, SiteClass, Symmetry, ViaDef, ViaSource,
     };
-    use crate::db::rules::{CutLayerRules, ParallelRunLengthTable, RoutingLayerRules};
-    use crate::geom::dbu::DbuPerMicron;
+    use pare_common::db::rules::{CutLayerRules, ParallelRunLengthTable, RoutingLayerRules};
+    use pare_common::geom::dbu::DbuPerMicron;
 
     const fn pt(x: i64, y: i64) -> Point<Dbu> {
         Point::new(Dbu(x), Dbu(y))
@@ -1229,7 +1229,7 @@ mod tests {
             min_spacing: Dbu(100),
             spacing_table: None,
             rules: RoutingLayerRules::default(),
-            electrical: crate::db::library::LayerElectrical::default(),
+            electrical: pare_common::db::library::LayerElectrical::default(),
         }
     }
 
@@ -1238,7 +1238,7 @@ mod tests {
     /// by 2.0 cell master with a 0.1-wide M1 pin centred 0.1 in from its
     /// left edge; a 0.58-wide M2 ground stripe at x = 3.9 over a 10 by 4
     /// die.
-    fn design() -> (NetlistDB, crate::db::indices::MacroId) {
+    fn design() -> (NetlistDB, pare_common::db::indices::MacroId) {
         design_with(3900, None, None)
     }
 
@@ -1248,7 +1248,7 @@ mod tests {
         stripe_x: i64,
         table: Option<SpacingTable>,
         rail_y: Option<i64>,
-    ) -> (NetlistDB, crate::db::indices::MacroId) {
+    ) -> (NetlistDB, pare_common::db::indices::MacroId) {
         design_full(stripe_x, table, rail_y, None)
     }
 
@@ -1340,7 +1340,7 @@ mod tests {
         table: Option<SpacingTable>,
         rail_y: Option<i64>,
         m3_stripe_y: Option<i64>,
-    ) -> (NetlistDB, crate::db::indices::MacroId) {
+    ) -> (NetlistDB, pare_common::db::indices::MacroId) {
         let mut lib = Library::new(DbuPerMicron::new(1000).unwrap());
         let m1 = lib
             .add_routing_layer(layer("M1", Direction::Horizontal))
@@ -1447,7 +1447,7 @@ mod tests {
         })
     }
 
-    fn blocked_in(db: &mut NetlistDB, m: crate::db::indices::MacroId, x: i64) -> usize {
+    fn blocked_in(db: &mut NetlistDB, m: pare_common::db::indices::MacroId, x: i64) -> usize {
         let cell = cell_at(db, m, x);
         let access = PinAccess::new(db, LayerId(1)).unwrap();
         access.blocked_pins(db, cell, pt(x, 0), Orientation::N)
@@ -1565,7 +1565,7 @@ mod tests {
             MacroClass::Core(CoreKind::Regular),
             pt(400, 2000),
             symmetry,
-            Some(crate::db::indices::SiteId(0)),
+            Some(pare_common::db::indices::SiteId(0)),
         );
         for (name, x0) in [("a", 50), ("b", 250)] {
             let _ = pair.add_pin(MacroPin {
@@ -1610,7 +1610,7 @@ mod tests {
         assert_eq!(blocked_pair("V12V"), 0);
     }
 
-    fn cell_at(db: &mut NetlistDB, m: crate::db::indices::MacroId, x: i64) -> CellId {
+    fn cell_at(db: &mut NetlistDB, m: pare_common::db::indices::MacroId, x: i64) -> CellId {
         let cell = db
             .add_cell(
                 format!("c{x}"),
@@ -1654,7 +1654,7 @@ mod tests {
 
     fn blocked_upper(x: i64) -> usize {
         let (mut db, _) = design();
-        let cell = cell_at(&mut db, crate::db::indices::MacroId(1), x);
+        let cell = cell_at(&mut db, pare_common::db::indices::MacroId(1), x);
         let access = PinAccess::new(&db, LayerId(1)).unwrap();
         access.blocked_pins(&db, cell, pt(x, 0), Orientation::N)
     }

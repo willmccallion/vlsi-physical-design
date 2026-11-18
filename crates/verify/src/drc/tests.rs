@@ -1,13 +1,13 @@
 use super::*;
-use crate::db::indices::{CellId, CutLayerId, LayerId, NetId, NonDefaultRuleId};
-use crate::db::rules::{
+use pare_common::db::indices::{CellId, CutLayerId, LayerId, NetId, NonDefaultRuleId};
+use pare_common::db::rules::{
     CutApproach, CutSpacing, CutSpacingCondition, EndOfLineSpacing, Lef58CutSpacing,
     Lef58CutSpacingCondition, MinStep, MinimumCut, ParallelEdge, ParallelRunLengthTable,
     RuleSource, SpacingTable, TwoWidthsRow, TwoWidthsTable, WidthRangeSpacing,
 };
-use crate::geom::dbu::DbuArea;
-use crate::geom::point::Point;
-use crate::geom::region::Heading;
+use pare_common::geom::dbu::DbuArea;
+use pare_common::geom::point::Point;
+use pare_common::geom::region::Heading;
 
 fn rect(x0: i64, y0: i64, x1: i64, y1: i64) -> Rect<Dbu> {
     Rect::from_corners(Point::new(Dbu(x0), Dbu(y0)), Point::new(Dbu(x1), Dbu(y1)))

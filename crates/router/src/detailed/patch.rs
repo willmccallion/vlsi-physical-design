@@ -11,7 +11,7 @@ use pare_common::geom::dbu::Dbu;
 use pare_common::geom::interval::Interval;
 use pare_common::geom::point::Point;
 use pare_common::geom::rect::Rect;
-use pare_common::verify::drc::{Layout, Owner, ThinPiece, thin_pieces};
+use pare_verify::drc::{Layout, Owner, ThinPiece, thin_pieces};
 
 impl DetailedRouter<'_> {
     /// Patches that bring every thin piece of the candidate's metal meeting

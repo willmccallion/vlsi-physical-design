@@ -8,7 +8,7 @@ use pare_common::db::design::NetlistDB;
 use pare_common::db::indices::IdVec;
 use pare_common::geom::dbu::Dbu;
 use pare_common::geom::rect::Rect;
-use pare_common::verify::drc::{Layout, Marker, Owner, Rules, check_area};
+use pare_verify::drc::{Layout, Marker, Owner, Rules, check_area};
 
 use std::path::PathBuf;
 

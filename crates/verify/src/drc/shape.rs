@@ -4,10 +4,10 @@
 use super::model::{GcPolygon, GcRect, Metal, Model};
 use super::rules::{MetalRules, Rules};
 use super::{Involves, Marker, Markers, ThinPiece, Violation};
-use crate::db::indices::LayerId;
-use crate::db::library::LayerRef;
-use crate::geom::dbu::Dbu;
-use crate::geom::rect::Rect;
+use pare_common::db::indices::LayerId;
+use pare_common::db::library::LayerRef;
+use pare_common::geom::dbu::Dbu;
+use pare_common::geom::rect::Rect;
 
 /// Checks every piece of metal on every routing layer.
 pub(super) fn check(model: &Model<'_>, rules: &Rules) -> Markers {

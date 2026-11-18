@@ -22,7 +22,7 @@ use pare_common::db::shapes::fixed_shapes;
 use pare_common::geom::dbu::Dbu;
 use pare_common::geom::point::Point;
 use pare_common::geom::rect::Rect;
-use pare_common::verify::routing::net_components;
+use pare_verify::routing::net_components;
 use std::num::NonZeroU32;
 
 #[test]

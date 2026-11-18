@@ -11,13 +11,13 @@ use super::layout::OwnerIndex;
 use super::model::{Cut, Facing, GcRect, Metal, Model};
 use super::rules::CutRules;
 use super::{Involves, Marker, Markers, Violation};
-use crate::db::indices::{CutLayerId, IdVec};
-use crate::db::library::LayerRef;
-use crate::db::rules::{
+use pare_common::db::indices::{CutLayerId, IdVec};
+use pare_common::db::library::LayerRef;
+use pare_common::db::rules::{
     CutSpacing, CutSpacingCondition, Lef58CutSpacing, Lef58CutSpacingCondition,
 };
-use crate::geom::dbu::Dbu;
-use crate::geom::rect::Rect;
+use pare_common::geom::dbu::Dbu;
+use pare_common::geom::rect::Rect;
 
 /// Checks the cuts of every cut layer.
 pub(super) fn check(model: &Model<'_>, rules: &IdVec<CutLayerId, CutRules>) -> Markers {

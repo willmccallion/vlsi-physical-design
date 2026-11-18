@@ -6,11 +6,11 @@
 //! by one; a cut is fixed when a fixed cut of its owner has its rectangle.
 
 use super::layout::{Layout, LayoutShape, Origin, OwnerIndex};
-use crate::db::indices::{CutLayerId, IdVec, LayerId};
-use crate::geom::dbu::{Dbu, DbuArea};
-use crate::geom::point::Point;
-use crate::geom::rect::Rect;
-use crate::geom::region::{Edge, Heading, Region};
+use pare_common::db::indices::{CutLayerId, IdVec, LayerId};
+use pare_common::geom::dbu::{Dbu, DbuArea};
+use pare_common::geom::point::Point;
+use pare_common::geom::rect::Rect;
+use pare_common::geom::region::{Edge, Heading, Region};
 use rstar::{AABB, RTree, RTreeObject};
 use std::collections::{HashMap, HashSet};
 

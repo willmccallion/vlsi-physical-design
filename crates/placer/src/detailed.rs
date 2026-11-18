@@ -22,7 +22,7 @@ use pare_common::geom::interval::{Interval, intersect_sorted};
 use pare_common::geom::orient::Orientation;
 use pare_common::geom::point::Point;
 use pare_common::geom::rect::Rect;
-use pare_common::verify::pin_access::{Neighbour, PinAccess};
+use pare_verify::pin_access::{Neighbour, PinAccess};
 use std::collections::{HashMap, HashSet};
 use std::sync::{Mutex, PoisonError};
 
@@ -1500,7 +1500,7 @@ mod tests {
     use pare_common::db::rules::RoutingLayerRules;
     use pare_common::geom::dbu::DbuPerMicron;
     use pare_common::geom::orient::Orientation;
-    use pare_common::verify::placement::placement_violations;
+    use pare_verify::placement::placement_violations;
 
     const fn pt(x: i64, y: i64) -> Point<Dbu> {
         Point::new(Dbu(x), Dbu(y))

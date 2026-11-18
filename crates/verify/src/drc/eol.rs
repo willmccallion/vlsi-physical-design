@@ -12,13 +12,13 @@
 use super::model::{Facing, GcEdge, Metal, Model};
 use super::rules::Rules;
 use super::{Involves, Marker, Markers, Violation};
-use crate::db::indices::LayerId;
-use crate::db::library::LayerRef;
-use crate::db::rules::{EndOfLineSpacing, ParallelEdge};
-use crate::geom::dbu::Dbu;
-use crate::geom::point::Point;
-use crate::geom::rect::Rect;
-use crate::geom::region::{Edge, Heading};
+use pare_common::db::indices::LayerId;
+use pare_common::db::library::LayerRef;
+use pare_common::db::rules::{EndOfLineSpacing, ParallelEdge};
+use pare_common::geom::dbu::Dbu;
+use pare_common::geom::point::Point;
+use pare_common::geom::rect::Rect;
+use pare_common::geom::region::{Edge, Heading};
 
 /// Checks every boundary edge on every routing layer with end-of-line rules.
 pub(super) fn check(model: &Model<'_>, rules: &Rules) -> Markers {

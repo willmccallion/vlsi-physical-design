@@ -332,7 +332,7 @@ mod tests {
     };
     use pare_common::geom::dbu::DbuPerMicron;
     use pare_common::geom::orient::Orientation;
-    use pare_common::verify::placement::placement_violations;
+    use pare_verify::placement::placement_violations;
 
     fn pt(x: i64, y: i64) -> Point<Dbu> {
         Point::new(Dbu(x), Dbu(y))

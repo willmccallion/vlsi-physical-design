@@ -231,7 +231,7 @@ impl Region {
     }
 
     /// Whether the region and `rect` share area.
-    pub(crate) fn intersects_rect(&self, rect: &Rect<Dbu>) -> bool {
+    pub fn intersects_rect(&self, rect: &Rect<Dbu>) -> bool {
         self.slabs
             .iter()
             .filter(|s| s.x0 < rect.max.x && rect.min.x < s.x1)
@@ -244,7 +244,7 @@ impl Region {
 
     /// Whether the region, taken with its boundary, contains all of `rect`,
     /// by the rule of [`Rect::covered_by`].
-    pub(crate) fn covers_rect(&self, rect: &Rect<Dbu>) -> bool {
+    pub fn covers_rect(&self, rect: &Rect<Dbu>) -> bool {
         if rect.width() == Dbu::ZERO || rect.height() == Dbu::ZERO {
             return rect.covered_by(&self.rectangles().collect::<Vec<_>>());
         }
@@ -489,7 +489,7 @@ impl Region {
     /// cuts it with horizontal slicing: a sweep upward opens a rectangle
     /// over each horizontal run and closes it where a boundary edge next
     /// touches it.
-    pub(crate) fn horizontal_slices(&self) -> Vec<Rect<Dbu>> {
+    pub fn horizontal_slices(&self) -> Vec<Rect<Dbu>> {
         let events = self
             .edges()
             .into_iter()
@@ -504,7 +504,7 @@ impl Region {
     /// The region cut into rectangles as Boost.Polygon's `get_rectangles`
     /// cuts it with vertical slicing: [`Self::horizontal_slices`] with the
     /// axes swapped.
-    pub(crate) fn vertical_slices(&self) -> Vec<Rect<Dbu>> {
+    pub fn vertical_slices(&self) -> Vec<Rect<Dbu>> {
         let events = self
             .edges()
             .into_iter()

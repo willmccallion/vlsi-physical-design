@@ -660,6 +660,7 @@ dependencies = [
  "pare-placer",
  "pare-resizer",
  "pare-router",
+ "pare-verify",
  "rayon",
  "rustc-hash",
  "serde",
@@ -674,8 +675,6 @@ version = "0.1.0"
 dependencies = [
  "log",
  "rayon",
- "rstar",
- "rustc-hash",
  "serde",
  "thiserror",
  "toml",
@@ -698,6 +697,7 @@ version = "0.1.0"
 dependencies = [
  "log",
  "pare-common",
+ "pare-verify",
  "rand 0.8.5",
  "rayon",
  "rustfft",
@@ -720,9 +720,21 @@ version = "0.1.0"
 dependencies = [
  "log",
  "pare-common",
+ "pare-verify",
  "rayon",
  "rustc-hash",
  "thiserror",
+]
+
+[[package]]
+name = "pare-verify"
+version = "0.1.0"
+dependencies = [
+ "log",
+ "pare-common",
+ "rayon",
+ "rstar",
+ "rustc-hash",
 ]
 
 [[package]]

@@ -18,7 +18,7 @@ use pare_common::db::shapes::route_elem_shapes;
 use pare_common::geom::dbu::Dbu;
 use pare_common::geom::point::Point;
 use pare_common::geom::rect::Rect;
-use pare_common::verify::drc::{
+use pare_verify::drc::{
     Findings, Layout, Marker as DrcMarker, Origin, Owner, OwnerIndex, Rules, Violation,
     check_tiles_lazily, check_window,
 };
