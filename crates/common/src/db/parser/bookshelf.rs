@@ -114,6 +114,48 @@ pub fn read_placement(db: &mut NetlistDB, path: &Path) -> Result<(), ParseError>
     Ok(())
 }
 
+/// Adds cut layer `i`, below routing layer `i`, and its default via, whose
+/// cut and metal are all `square`.
+fn add_cut_and_via(
+    library: &mut Library,
+    i: usize,
+    square: Rect<Dbu>,
+    num_layers: usize,
+) -> Result<(), String> {
+    let width = square.width();
+    let cut = library
+        .add_cut_layer(CutLayer {
+            name: format!("V{i}"),
+            width: Some(width),
+            spacing: Some(width),
+            rules: CutLayerRules::default(),
+            resistance: None,
+        })
+        .map_err(|e| e.to_string())?;
+    let above = cut
+        .above()
+        .ok_or_else(|| format!("{num_layers} routing layers are more than ids count"))?;
+    let shapes = [
+        LayerRef::Routing(cut.below()),
+        LayerRef::Cut(cut),
+        LayerRef::Routing(above),
+    ]
+    .map(|layer| Shape {
+        layer,
+        rect: square,
+    })
+    .to_vec();
+    let _ = library
+        .add_via(ViaDef {
+            name: format!("VIA{i}{}", i + 1),
+            cut,
+            shapes,
+            source: ViaSource::LefDefault,
+        })
+        .map_err(|e| e.to_string())?;
+    Ok(())
+}
+
 /// Adds `num_layers` alternating routing layers (horizontal first), the cut
 /// layers between them and one default via per cut.
 ///
@@ -141,40 +183,7 @@ pub fn synthesize_layer_stack(
     );
     for i in 0..num_layers {
         if i > 0 {
-            let cut = library
-                .add_cut_layer(CutLayer {
-                    name: format!("V{i}"),
-                    width: Some(width),
-                    spacing: Some(width),
-                    rules: CutLayerRules::default(),
-                    resistance: None,
-                })
-                .map_err(|e| e.to_string())?;
-            let above = cut
-                .above()
-                .ok_or_else(|| format!("{num_layers} routing layers are more than ids count"))?;
-            let shapes = vec![
-                Shape {
-                    layer: LayerRef::Routing(cut.below()),
-                    rect: square,
-                },
-                Shape {
-                    layer: LayerRef::Cut(cut),
-                    rect: square,
-                },
-                Shape {
-                    layer: LayerRef::Routing(above),
-                    rect: square,
-                },
-            ];
-            let _ = library
-                .add_via(ViaDef {
-                    name: format!("VIA{i}{}", i + 1),
-                    cut,
-                    shapes,
-                    source: ViaSource::LefDefault,
-                })
-                .map_err(|e| e.to_string())?;
+            add_cut_and_via(library, i, square, num_layers)?;
         }
         let direction = if i % 2 == 0 {
             Direction::Horizontal
@@ -494,6 +503,53 @@ fn read_scl(path: &Path, units: DbuPerMicron) -> Result<Scl, ParseError> {
 /// Node size, terminal flag and pin offsets: nodes that agree share a macro.
 type MacroKey = (Point<Dbu>, bool, Vec<Point<Dbu>>);
 
+/// What every macro the Bookshelf reader makes shares: the core site, its
+/// row height, and the width of the square pins on the lowest layer.
+struct MacroStyle {
+    site: SiteId,
+    row_height: Dbu,
+    pin_width: Dbu,
+}
+
+/// The macro `name` for `node`: a pad for a terminal, a core cell one row
+/// high, a block otherwise, with a square pin at each of `pins`' offsets
+/// from its center.
+fn node_macro(
+    name: String,
+    node: &Node,
+    pins: &[(Point<Dbu>, PinDirection)],
+    style: &MacroStyle,
+) -> Macro {
+    let class = if node.terminal {
+        MacroClass::Pad
+    } else if node.size.y == style.row_height {
+        MacroClass::Core(CoreKind::Regular)
+    } else {
+        MacroClass::Block
+    };
+    let core_site = matches!(class, MacroClass::Core(_)).then_some(style.site);
+    let mut m = Macro::new(name, class, node.size, Symmetry::default(), core_site);
+    let (width, half) = (style.pin_width, style.pin_width / 2);
+    let center = Rect::new(Point::default(), node.size).center();
+    for (k, (offset, direction)) in pins.iter().enumerate() {
+        let at = center + *offset;
+        let rect = Rect::new(
+            Point::new(at.x - half, at.y - half),
+            Point::new(at.x - half + width, at.y - half + width),
+        );
+        let _ = m.add_pin(MacroPin {
+            name: format!("p{k}"),
+            direction: *direction,
+            signal_use: SignalUse::Signal,
+            shapes: vec![Shape {
+                layer: LayerRef::Routing(LayerId(0)),
+                rect,
+            }],
+        });
+    }
+    m
+}
+
 /// Creates one macro per distinct node size and pin-offset list, then the cells.
 fn add_cells(
     db: &mut NetlistDB,
@@ -513,11 +569,11 @@ fn add_cells(
             pins_of[p.node].push((p.offset, p.direction));
         }
     }
-    let row_height = db.library.site(site).size.y;
-    let pin_layer = LayerRef::Routing(LayerId(0));
-    let width = db.library.layer(LayerId(0)).width;
-    let half = width / 2;
-
+    let style = MacroStyle {
+        site,
+        row_height: db.library.site(site).size.y,
+        pin_width: db.library.layer(LayerId(0)).width,
+    };
     let mut macro_of: HashMap<MacroKey, MacroId> = HashMap::new();
     for (node, pins) in nodes.iter().zip(&pins_of) {
         let offsets: Vec<Point<Dbu>> = pins.iter().map(|p| p.0).collect();
@@ -525,38 +581,7 @@ fn add_cells(
         let macro_id = if let Some(&id) = macro_of.get(&key) {
             id
         } else {
-            let class = if node.terminal {
-                MacroClass::Pad
-            } else if node.size.y == row_height {
-                MacroClass::Core(CoreKind::Regular)
-            } else {
-                MacroClass::Block
-            };
-            let core_site = matches!(class, MacroClass::Core(_)).then_some(site);
-            let mut m = Macro::new(
-                format!("BLK{}", macro_of.len()),
-                class,
-                node.size,
-                Symmetry::default(),
-                core_site,
-            );
-            let center = Rect::new(Point::default(), node.size).center();
-            for (k, (offset, direction)) in pins.iter().enumerate() {
-                let at = center + *offset;
-                let rect = Rect::new(
-                    Point::new(at.x - half, at.y - half),
-                    Point::new(at.x - half + width, at.y - half + width),
-                );
-                let _ = m.add_pin(MacroPin {
-                    name: format!("p{k}"),
-                    direction: *direction,
-                    signal_use: SignalUse::Signal,
-                    shapes: vec![Shape {
-                        layer: pin_layer,
-                        rect,
-                    }],
-                });
-            }
+            let m = node_macro(format!("BLK{}", macro_of.len()), node, pins, &style);
             let id = db
                 .library
                 .add_macro(m)
