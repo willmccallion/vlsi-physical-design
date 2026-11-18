@@ -160,6 +160,47 @@ fn via_patterns_drop_the_cuts_they_mark_absent() {
 }
 
 #[test]
+fn via_rule_origins_and_offsets_shift_the_generated_shapes() {
+    let db = design_with(&[(
+        "+ ENCLOSURE 0 50 0 50 + ROWCOL 1 2 ;",
+        "+ ENCLOSURE 0 50 0 50 + ROWCOL 1 2 + ORIGIN 10 20 + OFFSET 5 0 0 5 ;",
+    )])
+    .unwrap();
+
+    let via = db.library.via(db.library.via_id("M1M2_2CUT").unwrap());
+    assert_eq!(
+        format!("{:?}", via.shapes),
+        "[Shape { layer: Cut(CutLayerId(0)), rect: Rect { min: Point { x: Dbu(-140), y: Dbu(-30) }, max: Point { x: Dbu(-40), y: Dbu(70) } } }, Shape { layer: Cut(CutLayerId(0)), rect: Rect { min: Point { x: Dbu(60), y: Dbu(-30) }, max: Point { x: Dbu(160), y: Dbu(70) } } }, Shape { layer: Routing(LayerId(0)), rect: Rect { min: Point { x: Dbu(-135), y: Dbu(-80) }, max: Point { x: Dbu(165), y: Dbu(120) } } }, Shape { layer: Routing(LayerId(1)), rect: Rect { min: Point { x: Dbu(-140), y: Dbu(-75) }, max: Point { x: Dbu(160), y: Dbu(125) } } }]"
+    );
+}
+
+#[test]
+fn a_via_of_rectangles_keeps_them_whatever_their_mask() {
+    let db = design_with(&[(
+        "VIAS 1 ;",
+        "VIAS 2 ;\n- RECTS + RECT M1 ( -100 -100 ) ( 100 100 ) + RECT V1 + MASK 2 ( -50 -50 ) ( 50 50 )\n  \
+         + RECT M2 ( -120 -80 ) ( 120 80 ) ;",
+    )])
+    .unwrap();
+
+    let via = db.library.via(db.library.via_id("RECTS").unwrap());
+    assert_eq!(
+        format!("{:?}", via.shapes),
+        "[Shape { layer: Routing(LayerId(0)), rect: Rect { min: Point { x: Dbu(-100), y: Dbu(-100) }, max: Point { x: Dbu(100), y: Dbu(100) } } }, Shape { layer: Cut(CutLayerId(0)), rect: Rect { min: Point { x: Dbu(-50), y: Dbu(-50) }, max: Point { x: Dbu(50), y: Dbu(50) } } }, Shape { layer: Routing(LayerId(1)), rect: Rect { min: Point { x: Dbu(-120), y: Dbu(-80) }, max: Point { x: Dbu(120), y: Dbu(80) } } }]"
+    );
+}
+
+#[test]
+fn a_via_option_def_does_not_know_is_an_error() {
+    let error = design_with(&[("+ ROWCOL 1 2 ;", "+ ROWCOL 1 2 + SHAPE RING ;")]).unwrap_err();
+
+    assert_eq!(
+        error,
+        "edited.def:22: via 'M1M2_2CUT': unsupported option 'SHAPE'"
+    );
+}
+
+#[test]
 fn via_layers_may_be_listed_in_any_order() {
     let db = design_with(&[("+ LAYERS M1 V1 M2", "+ LAYERS M1 M2 V1")]);
 
