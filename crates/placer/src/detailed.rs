@@ -1513,6 +1513,35 @@ mod tests {
 
     /// One 20-site row over a 200 x 100 die, with 20-wide one-pin cells.
     fn design(cells: &[(i64, PlacementStatus)], nets: &[(usize, usize)]) -> NetlistDB {
+        let (lib, m) = one_pin_cell_library();
+        let mut db = NetlistDB::new("t".into(), lib);
+        db.die_area = Rect::new(pt(0, 0), pt(200, 100));
+        db.rows.push(Row {
+            name: "r".into(),
+            site: SiteId(0),
+            origin: pt(0, 0),
+            orient: Orientation::N,
+            num_x: 20,
+            num_y: 1,
+            step: pt(10, 0),
+        });
+        for (i, &(x, status)) in cells.iter().enumerate() {
+            let _ = db
+                .add_cell(format!("c{i}"), m, pt(x, 0), Orientation::N, status)
+                .unwrap();
+        }
+        let pin = pare_common::db::indices::MacroPinId(0);
+        for (k, &(a, b)) in nets.iter().enumerate() {
+            let net = db.net_or_insert(&format!("n{k}"));
+            let _ = db.connect_cell_pin(CellId::new(a), pin, net);
+            let _ = db.connect_cell_pin(CellId::new(b), pin, net);
+        }
+        db
+    }
+
+    /// M1, a 10 by 100 site, and master C, 20 wide with one pin in its
+    /// middle.
+    fn one_pin_cell_library() -> (Library, MacroId) {
         let mut lib = Library::new(DbuPerMicron::new(1000).unwrap());
         let symmetry = Symmetry {
             x: true,
@@ -1559,29 +1588,7 @@ mod tests {
             }],
         });
         let m = lib.add_macro(m).unwrap();
-        let mut db = NetlistDB::new("t".into(), lib);
-        db.die_area = Rect::new(pt(0, 0), pt(200, 100));
-        db.rows.push(Row {
-            name: "r".into(),
-            site: SiteId(0),
-            origin: pt(0, 0),
-            orient: Orientation::N,
-            num_x: 20,
-            num_y: 1,
-            step: pt(10, 0),
-        });
-        for (i, &(x, status)) in cells.iter().enumerate() {
-            let _ = db
-                .add_cell(format!("c{i}"), m, pt(x, 0), Orientation::N, status)
-                .unwrap();
-        }
-        let pin = pare_common::db::indices::MacroPinId(0);
-        for (k, &(a, b)) in nets.iter().enumerate() {
-            let net = db.net_or_insert(&format!("n{k}"));
-            let _ = db.connect_cell_pin(CellId::new(a), pin, net);
-            let _ = db.connect_cell_pin(CellId::new(b), pin, net);
-        }
-        db
+        (lib, m)
     }
 
     fn access_layer(name: &str, direction: Direction) -> RoutingLayer {
@@ -1604,12 +1611,12 @@ mod tests {
         Rect::new(pt(x0, y0), pt(x1, y1))
     }
 
-    /// The library of [`access_design`], with its masters R and E.
-    fn access_library() -> (Library, MacroId, MacroId) {
+    /// Adds horizontal M1 and vertical M2 to `lib`, joined by a 0.1 cut
+    /// via with 0.1 by 0.18 pads on both.
+    fn add_m1_m2_and_via(lib: &mut Library) -> (LayerId, LayerId) {
         use pare_common::db::library::{CutLayer, ViaDef, ViaSource};
         use pare_common::db::rules::CutLayerRules;
 
-        let mut lib = Library::new(DbuPerMicron::new(1000).unwrap());
         let m1 = lib
             .add_routing_layer(access_layer("M1", Direction::Horizontal))
             .unwrap();
@@ -1644,6 +1651,13 @@ mod tests {
                 source: ViaSource::LefDefault,
             })
             .unwrap();
+        (m1, m2)
+    }
+
+    /// The library of [`access_design`], with its masters R and E.
+    fn access_library() -> (Library, MacroId, MacroId) {
+        let mut lib = Library::new(DbuPerMicron::new(1000).unwrap());
+        let (m1, m2) = add_m1_m2_and_via(&mut lib);
         let symmetry = Symmetry {
             x: true,
             y: true,
