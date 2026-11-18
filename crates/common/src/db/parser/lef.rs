@@ -370,6 +370,29 @@ impl<'a> LefParser<'a, '_> {
         }
     }
 
+    /// Reads a routing layer's `RESISTANCE`, `CAPACITANCE` or
+    /// `EDGECAPACITANCE` statement, `keyword`, keeping the per-square and
+    /// per-length values.
+    fn electrical_statement(
+        &mut self,
+        keyword: &str,
+        electrical: &mut LayerElectrical,
+    ) -> Result<(), ParseError> {
+        match keyword {
+            "RESISTANCE" if self.lx.accept("RPERSQ") => {
+                electrical.resistance_per_square = Some(self.lx.number::<f64>("resistance")?);
+            }
+            "CAPACITANCE" if self.lx.accept("CPERSQDIST") => {
+                electrical.capacitance_per_area = Some(self.lx.number::<f64>("capacitance")?);
+            }
+            "EDGECAPACITANCE" => {
+                electrical.edge_capacitance = Some(self.lx.number::<f64>("edge capacitance")?);
+            }
+            _ => {}
+        }
+        self.lx.skip_statement()
+    }
+
     /// Reads a statement only a routing layer has.
     fn routing_layer_statement(
         &mut self,
@@ -424,21 +447,8 @@ impl<'a> LefParser<'a, '_> {
                 .min_steps
                 .push(self.rules().min_step(RuleSource::Statement)?),
             "MINIMUMCUT" => routing.minimum_cuts.push(self.rules().minimum_cut()?),
-            "RESISTANCE" => {
-                if self.lx.accept("RPERSQ") {
-                    electrical.resistance_per_square = Some(self.lx.number::<f64>("resistance")?);
-                }
-                self.lx.skip_statement()?;
-            }
-            "CAPACITANCE" => {
-                if self.lx.accept("CPERSQDIST") {
-                    electrical.capacitance_per_area = Some(self.lx.number::<f64>("capacitance")?);
-                }
-                self.lx.skip_statement()?;
-            }
-            "EDGECAPACITANCE" => {
-                electrical.edge_capacitance = Some(self.lx.number::<f64>("edge capacitance")?);
-                self.lx.skip_statement()?;
+            "RESISTANCE" | "CAPACITANCE" | "EDGECAPACITANCE" => {
+                self.electrical_statement(t.text, electrical)?;
             }
             kw if is_ignored(LAYER_IGNORED, kw) => self.lx.skip_statement()?,
             _ => self.skip_unknown(t, "layer")?,
@@ -835,40 +845,50 @@ impl<'a> LefParser<'a, '_> {
                     format!("via rule '{name}': {} before LAYER", t.text),
                 ));
             };
-            match t.text {
-                "ENCLOSURE" => {
-                    current.enclosure =
-                        Some((self.microns("enclosure")?, self.microns("enclosure")?));
-                    self.lx.expect(";")?;
-                }
-                "WIDTH" => {
-                    let lo = self.microns("minimum width")?;
-                    self.lx.expect("TO")?;
-                    current.width_range = Some((lo, self.microns("maximum width")?));
-                    self.lx.expect(";")?;
-                }
-                "RECT" => {
-                    current.cut_rect = Some(self.rect()?);
-                    self.lx.expect(";")?;
-                }
-                "SPACING" => {
-                    let x = self.microns("x pitch")?;
-                    self.lx.expect("BY")?;
-                    current.cut_pitch = Some(Point::new(x, self.microns("y pitch")?));
-                    self.lx.expect(";")?;
-                }
-                "RESISTANCE" => self.lx.skip_statement()?,
-                other => {
-                    return Err(self.lx.error(
-                        t.line,
-                        format!("via rule '{name}': unsupported statement '{other}'"),
-                    ));
-                }
-            }
+            self.via_rule_layer_statement(name, t, current)?;
         }
         let rule = via_rule_from_layers(name, is_default, &layers)
             .map_err(|message| self.lx.error(line, message))?;
         let _ = self.lib.via_rules.push(rule);
+        Ok(())
+    }
+
+    /// Reads statement `t` of via rule `name` about its layer `current`.
+    fn via_rule_layer_statement(
+        &mut self,
+        name: &str,
+        t: Token<'a>,
+        current: &mut ViaRuleLayer,
+    ) -> Result<(), ParseError> {
+        match t.text {
+            "ENCLOSURE" => {
+                current.enclosure = Some((self.microns("enclosure")?, self.microns("enclosure")?));
+                self.lx.expect(";")?;
+            }
+            "WIDTH" => {
+                let lo = self.microns("minimum width")?;
+                self.lx.expect("TO")?;
+                current.width_range = Some((lo, self.microns("maximum width")?));
+                self.lx.expect(";")?;
+            }
+            "RECT" => {
+                current.cut_rect = Some(self.rect()?);
+                self.lx.expect(";")?;
+            }
+            "SPACING" => {
+                let x = self.microns("x pitch")?;
+                self.lx.expect("BY")?;
+                current.cut_pitch = Some(Point::new(x, self.microns("y pitch")?));
+                self.lx.expect(";")?;
+            }
+            "RESISTANCE" => self.lx.skip_statement()?,
+            other => {
+                return Err(self.lx.error(
+                    t.line,
+                    format!("via rule '{name}': unsupported statement '{other}'"),
+                ));
+            }
+        }
         Ok(())
     }
 
