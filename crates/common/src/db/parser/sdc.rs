@@ -1977,6 +1977,40 @@ set_output_delay [expr $clk_period * $clk_io_pct] -clock $clk_name [all_outputs]
     }
 
     #[test]
+    fn a_clock_redefined_by_name_is_replaced_in_place() {
+        let sdc = parse(
+            "create_clock -name c -period 2 [get_ports clk]\n\
+             create_clock -name d -period 3 [get_ports rst_n]\n\
+             create_clock -name c -period 5 -waveform {1 2} [get_ports clk]\n",
+        );
+
+        assert_eq!(sdc.clocks.len(), 2);
+        let c = &sdc.clocks[ClockId(0)];
+        assert_eq!(c.name, "c");
+        assert!((c.period.get() - 5e-9).abs() < 1e-20);
+        assert!((c.rise.get() - 1e-9).abs() < 1e-20);
+    }
+
+    #[test]
+    fn a_new_clock_takes_its_ports_from_the_others_unless_added() {
+        let db = design();
+        let taken = parse(
+            "create_clock -name c -period 2 [get_ports clk]\n\
+             create_clock -name d -period 3 [get_ports clk]\n",
+        );
+        let added = parse(
+            "create_clock -name c -period 2 [get_ports clk]\n\
+             create_clock -name d -period 3 -add [get_ports clk]\n",
+        );
+
+        let clk = port(&db, "clk");
+        assert!(!taken.clocks[ClockId(0)].sources.contains(&clk));
+        assert!(taken.clocks[ClockId(1)].sources.contains(&clk));
+        assert!(added.clocks[ClockId(0)].sources.contains(&clk));
+        assert!(added.clocks[ClockId(1)].sources.contains(&clk));
+    }
+
+    #[test]
     fn added_delays_merge_and_replaced_delays_clear() {
         let db = design();
         let sdc = parse(
