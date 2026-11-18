@@ -675,4 +675,47 @@ mod tests {
             assert_eq!(simplex_matching(&cost), (best.unwrap(), n), "{cost:?}");
         }
     }
+
+    /// The flows of assignments whose costs tie often, each asked for the
+    /// whole assignment and for one more than it can carry, hashed in order.
+    fn tied_assignment_flows_digest() -> u64 {
+        let mut state = 777;
+        let mut digest = 0xcbf2_9ce4_8422_2325_u64;
+        for _ in 0..500 {
+            let n = 1 + (state % 7) as usize;
+            let cost: Vec<Vec<Option<i32>>> = random_costs(&mut state, n)
+                .into_iter()
+                .map(|row| row.into_iter().map(|c| c.map(|c| c % 3)).collect())
+                .collect();
+            let (supply, demand) = (2 * n, 2 * n + 1);
+            let mut arcs = Vec::new();
+            for (i, row) in cost.iter().enumerate() {
+                arcs.push(arc(supply, 2 * i, 1, 0));
+                arcs.push(arc(2 * i + 1, demand, 1, 0));
+                for (j, c) in row.iter().enumerate() {
+                    if let Some(c) = *c {
+                        arcs.push(arc(2 * i, 2 * j + 1, 1, c));
+                    }
+                }
+            }
+            for asked in [n, n + 1] {
+                let flows = min_cost_flow(2 * n + 2, &arcs, supply, demand, asked as i32)
+                    .unwrap_or_else(|e| e.flows);
+                for f in flows {
+                    digest = (digest ^ u64::from(f as u32)).wrapping_mul(0x0100_0000_01b3);
+                }
+            }
+        }
+        digest
+    }
+
+    /// [`tied_assignment_flows_digest`] as this port gave it before its
+    /// setup and pivoting were split into steps; a change means the
+    /// pivots, and so the ties, came out differently.
+    const TIED_FLOWS_DIGEST: u64 = 13_035_736_887_052_952_343;
+
+    #[test]
+    fn tied_assignments_keep_the_flows_lemon_chooses() {
+        assert_eq!(tied_assignment_flows_digest(), TIED_FLOWS_DIGEST);
+    }
 }
