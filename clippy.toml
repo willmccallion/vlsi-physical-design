@@ -1,3 +1,6 @@
 allow-unwrap-in-tests = true
 allow-expect-in-tests = true
 allow-panic-in-tests = true
+
+# Every function, tests included, fits in 60 lines.
+too-many-lines-threshold = 60
