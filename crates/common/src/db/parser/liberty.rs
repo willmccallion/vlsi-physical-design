@@ -670,6 +670,24 @@ impl Interpreter {
     }
 
     fn cell(&self, group: &Group<'_>) -> Result<LibCell, ParseError> {
+        let mut cell = self.cell_attributes(group)?;
+        let buses = self.add_ports(&mut cell, group)?;
+        self.add_pin_timing(&mut cell, group)?;
+        self.add_bus_timing(&mut cell, &buses)?;
+        for (kind, name) in [
+            (SequentialKind::FlipFlop, "ff"),
+            (SequentialKind::Latch, "latch"),
+        ] {
+            for seq in group.groups_named(name) {
+                cell.sequentials.push(self.sequential(seq, kind)?);
+            }
+        }
+        Ok(cell)
+    }
+
+    /// A cell group's name and attributes, without its ports, arcs or
+    /// sequentials.
+    fn cell_attributes(&self, group: &Group<'_>) -> Result<LibCell, ParseError> {
         let name = group
             .args
             .first()
@@ -682,7 +700,7 @@ impl Interpreter {
                 format!("cell '{name}' has a 'bundle' group, which is not supported"),
             ));
         }
-        let mut cell = LibCell {
+        Ok(LibCell {
             name,
             area: CellArea::new(self.number_attr(group, "area")?.unwrap_or(0.0)),
             dont_use: Self::bool_attr(group, "dont_use"),
@@ -713,7 +731,16 @@ impl Interpreter {
                 .number_attr(group, "cell_leakage_power")?
                 .map(|v| v * self.units.leakage_power),
             state_leakages: self.state_leakages(group)?,
-        };
+        })
+    }
+
+    /// Adds the ports of the cell group's pins, then of its buses' bits,
+    /// returning the buses.
+    fn add_ports<'g, 'a>(
+        &self,
+        cell: &mut LibCell,
+        group: &'g Group<'a>,
+    ) -> Result<Vec<Bus<'g, 'a>>, ParseError> {
         for pin in group.groups_named("pin") {
             for arg in &pin.args {
                 let _ = cell.ports.push(self.port(pin, arg.0)?);
@@ -727,40 +754,43 @@ impl Interpreter {
             }
             buses.push(bus);
         }
+        Ok(buses)
+    }
+
+    /// Adds the timing arcs of the cell group's pins.
+    fn add_pin_timing(&self, cell: &mut LibCell, group: &Group<'_>) -> Result<(), ParseError> {
         for pin in group.groups_named("pin") {
             for arg in &pin.args {
                 let to = cell
                     .port(arg.0)
                     .ok_or_else(|| self.error(pin.line, format!("pin '{}' vanished", arg.0)))?;
                 for timing in pin.groups_named("timing") {
-                    self.timing(&mut cell, to, timing)?;
+                    self.timing(cell, to, timing)?;
                 }
             }
         }
-        for bus in &buses {
+        Ok(())
+    }
+
+    /// Adds the timing arcs of each bus bit: the bus's own, then those of
+    /// the pin groups within it that name the bit.
+    fn add_bus_timing(&self, cell: &mut LibCell, buses: &[Bus<'_, '_>]) -> Result<(), ParseError> {
+        for bus in buses {
             for bit in &bus.bits {
                 let to = cell.port(bit).ok_or_else(|| {
                     self.error(bus.group.line, format!("bus bit '{bit}' vanished"))
                 })?;
                 for timing in bus.group.groups_named("timing") {
-                    self.timing(&mut cell, to, timing)?;
+                    self.timing(cell, to, timing)?;
                 }
                 for pin in bus.pins_naming(bit) {
                     for timing in pin.groups_named("timing") {
-                        self.timing(&mut cell, to, timing)?;
+                        self.timing(cell, to, timing)?;
                     }
                 }
             }
         }
-        for (kind, name) in [
-            (SequentialKind::FlipFlop, "ff"),
-            (SequentialKind::Latch, "latch"),
-        ] {
-            for seq in group.groups_named(name) {
-                cell.sequentials.push(self.sequential(seq, kind)?);
-            }
-        }
-        Ok(cell)
+        Ok(())
     }
 
     /// A `bus` group's bits and the pin groups within it.
