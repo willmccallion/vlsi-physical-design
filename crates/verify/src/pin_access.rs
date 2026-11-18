@@ -24,6 +24,7 @@ use pare_common::db::library::{Direction, LayerRef, Macro};
 use pare_common::db::rules::{SpacingTable, WidthRangeSpacing};
 use pare_common::db::shapes::{Owner, obstruction_shapes};
 use pare_common::geom::dbu::Dbu;
+use pare_common::geom::interval::Interval;
 use pare_common::geom::orient::Orientation;
 use pare_common::geom::point::Point;
 use pare_common::geom::rect::Rect;
@@ -501,32 +502,30 @@ impl Escape {
         } else {
             start + self.chunk
         };
-        let extent = |f: fn(&Rect<Dbu>) -> (Dbu, Dbu)| {
+        let extent = |span: fn(&Rect<Dbu>) -> Interval| {
             self.vias
                 .iter()
-                .map(|v| f(&v.pad))
-                .fold((Dbu::ZERO, Dbu::ZERO), |(a, b), (c, d)| {
-                    (a.min(c), b.max(d))
-                })
+                .map(|v| span(&v.pad))
+                .fold(Interval::default(), Interval::hull)
         };
         let (along_pad, across_pad) = if self.vertical {
-            (
-                extent(|r| (r.min.y, r.max.y)),
-                extent(|r| (r.min.x, r.max.x)),
-            )
+            (extent(Rect::y_span), extent(Rect::x_span))
         } else {
-            (
-                extent(|r| (r.min.x, r.max.x)),
-                extent(|r| (r.min.y, r.max.y)),
-            )
+            (extent(Rect::x_span), extent(Rect::y_span))
         };
         let reach = self.metal.reach;
-        let (a0, a1) = (lo + along_pad.0 - reach, hi + along_pad.1 + reach);
-        let (b0, b1) = (track + across_pad.0 - reach, track + across_pad.1 + reach);
+        let along = Interval::new(lo + along_pad.lo - reach, hi + along_pad.hi + reach);
+        let across = Interval::new(track + across_pad.lo - reach, track + across_pad.hi + reach);
         let zone = if self.vertical {
-            Rect::new(Point::new(b0, a0), Point::new(b1, a1))
+            Rect::new(
+                Point::new(across.lo, along.lo),
+                Point::new(across.hi, along.hi),
+            )
         } else {
-            Rect::new(Point::new(a0, b0), Point::new(a1, b1))
+            Rect::new(
+                Point::new(along.lo, across.lo),
+                Point::new(along.hi, across.hi),
+            )
         };
         let near: Vec<&Fixed> = self
             .metal
@@ -539,7 +538,7 @@ impl Escape {
                 let pieces: Vec<PadStretch> = near
                     .iter()
                     .filter_map(|f| {
-                        let (lo, hi) =
+                        let Interval { lo, hi } =
                             Self::blocked_origins(&self.metal, f, &via.pad, track, self.vertical)?;
                         Some(PadStretch {
                             lo,
@@ -564,11 +563,11 @@ impl Escape {
         pad: &Rect<Dbu>,
         track: Dbu,
         vertical: bool,
-    ) -> Option<(Dbu, Dbu)> {
+    ) -> Option<Interval> {
         let (along_shape, along_pad) = if vertical {
-            ((f.rect.min.y, f.rect.max.y), (pad.min.y, pad.max.y))
+            (f.rect.y_span(), pad.y_span())
         } else {
-            ((f.rect.min.x, f.rect.max.x), (pad.min.x, pad.max.x))
+            (f.rect.x_span(), pad.x_span())
         };
         let blocks = |origin: Dbu| {
             let at = if vertical {
@@ -579,12 +578,12 @@ impl Escape {
             let placed = pad.translate(at);
             too_close(&placed, &f.rect, metal.required(&placed, f))
         };
-        let centre = (along_shape.0 + along_shape.1 - along_pad.0 - along_pad.1) / 2;
+        let centre = (along_shape.lo + along_shape.hi - along_pad.lo - along_pad.hi) / 2;
         if !blocks(centre) {
             return None;
         }
-        let below = along_shape.0 - along_pad.1 - metal.reach - Dbu(1);
-        let above = along_shape.1 - along_pad.0 + metal.reach + Dbu(1);
+        let below = along_shape.lo - along_pad.hi - metal.reach - Dbu(1);
+        let above = along_shape.hi - along_pad.lo + metal.reach + Dbu(1);
         let first_blocked = |mut clear: Dbu, mut blocked: Dbu| {
             while (blocked - clear).abs() > Dbu(1) {
                 let mid = clear + (blocked - clear) / 2;
@@ -596,7 +595,10 @@ impl Escape {
             }
             blocked
         };
-        Some((first_blocked(below, centre), first_blocked(above, centre)))
+        Some(Interval::new(
+            first_blocked(below, centre),
+            first_blocked(above, centre),
+        ))
     }
 
     /// Whether via `k` landing on the next layer's track `t` at `at` keeps
