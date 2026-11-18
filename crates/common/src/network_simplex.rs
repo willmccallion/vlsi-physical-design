@@ -70,6 +70,19 @@ pub fn min_cost_flow(
     }
 }
 
+/// The arcs in the order a `ListDigraph` iterates them: nodes last-added
+/// first, and each node's out-arcs last-added first.
+fn list_digraph_arc_order(node_count: usize, arcs: &[Arc]) -> Vec<usize> {
+    let mut out: Vec<Vec<usize>> = vec![Vec::new(); node_count];
+    for (a, arc) in arcs.iter().enumerate() {
+        out[arc.source].push(a);
+    }
+    (0..node_count)
+        .rev()
+        .flat_map(|n| out[n].iter().rev().copied().collect::<Vec<_>>())
+        .collect()
+}
+
 struct Simplex {
     node_num: usize,
     arc_num: usize,
@@ -117,14 +130,6 @@ impl Simplex {
         let node_num = node_count;
         let arc_num = arcs.len();
         let node_id: Vec<usize> = (0..node_count).map(|c| node_count - 1 - c).collect();
-        let mut out: Vec<Vec<usize>> = vec![Vec::new(); node_count];
-        for (a, arc) in arcs.iter().enumerate() {
-            out[arc.source].push(a);
-        }
-        let iteration: Vec<usize> = (0..node_count)
-            .rev()
-            .flat_map(|n| out[n].iter().rev().copied().collect::<Vec<_>>())
-            .collect();
         let max_arc_num = arc_num + 2 * node_num;
         let all_node_num = node_num + 1;
         let mut s = Self {
@@ -158,25 +163,31 @@ impl Simplex {
             u_out: 0,
             delta: 0,
         };
-        let mixing = node_num > 1;
-        let skip = (arc_num / node_num.max(1)).max(3);
+        s.load_arcs(arcs, &list_digraph_arc_order(node_count, arcs));
+        s
+    }
+
+    /// Stores `arcs`, met in `order`, at the positions the simplex mixes
+    /// them into, as `NetworkSimplex::reset` does.
+    fn load_arcs(&mut self, arcs: &[Arc], order: &[usize]) {
+        let mixing = self.node_num > 1;
+        let skip = (self.arc_num / self.node_num.max(1)).max(3);
         let (mut i, mut j) = (0, 0);
-        for (k, &a) in iteration.iter().enumerate() {
+        for (k, &a) in order.iter().enumerate() {
             let id = if mixing { i } else { k };
-            s.arc_id[a] = id;
-            s.source[id] = s.node_id[arcs[a].source];
-            s.target[id] = s.node_id[arcs[a].target];
-            s.cap[id] = arcs[a].capacity;
-            s.cost[id] = arcs[a].cost;
+            self.arc_id[a] = id;
+            self.source[id] = self.node_id[arcs[a].source];
+            self.target[id] = self.node_id[arcs[a].target];
+            self.cap[id] = arcs[a].capacity;
+            self.cost[id] = arcs[a].cost;
             if mixing {
                 i += skip;
-                if i >= arc_num {
+                if i >= self.arc_num {
                     j += 1;
                     i = j;
                 }
             }
         }
-        s
     }
 
     /// `NetworkSimplex::init` for equal supplies, then `start` with the
@@ -207,6 +218,19 @@ impl Simplex {
             // too; this port, run with equal supplies alone, refuses them.
             return Err(FlowProblem::Infeasible);
         }
+        self.start_artificial_tree();
+        self.pivot_until_optimal()?;
+        let artificial = self.search_arc_num..self.all_arc_num;
+        if self.flow[artificial].iter().any(|&f| f != 0) {
+            return Err(FlowProblem::Infeasible);
+        }
+        Ok(())
+    }
+
+    /// Hangs every node off the root by an artificial arc carrying its
+    /// supply, the spanning tree `NetworkSimplex::init` starts from.
+    fn start_artificial_tree(&mut self) {
+        let root = self.root;
         self.search_arc_num = self.arc_num;
         self.all_arc_num = self.arc_num + self.node_num;
         for u in 0..self.node_num {
@@ -235,6 +259,11 @@ impl Simplex {
                 self.cost[e] = ART_COST;
             }
         }
+    }
+
+    /// Pivots with the block search rule until no arc can enter, as
+    /// `NetworkSimplex::start` does; fails when the cost has no bound.
+    fn pivot_until_optimal(&mut self) -> Result<(), FlowProblem> {
         let block = ((self.search_arc_num as f64).sqrt() as usize).max(10);
         let mut next_arc = 0;
         while let Some(next) = self.find_entering_arc(block, next_arc) {
@@ -249,10 +278,6 @@ impl Simplex {
                 self.update_tree_structure();
                 self.update_potential();
             }
-        }
-        let artificial = self.search_arc_num..self.all_arc_num;
-        if self.flow[artificial].iter().any(|&f| f != 0) {
-            return Err(FlowProblem::Infeasible);
         }
         Ok(())
     }
