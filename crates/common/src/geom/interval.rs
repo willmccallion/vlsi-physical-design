@@ -40,6 +40,12 @@ impl Interval {
         Self::new(self.lo.max(other.lo), self.hi.min(other.hi))
     }
 
+    /// The smallest interval covering both.
+    #[must_use]
+    pub fn hull(self, other: Self) -> Self {
+        Self::new(self.lo.min(other.lo), self.hi.max(other.hi))
+    }
+
     /// Whether the two, ends included, share a point.
     #[must_use]
     pub fn meets(self, other: Self) -> bool {
@@ -157,6 +163,12 @@ mod tests {
     fn the_overlap_is_what_both_cover_and_empty_when_apart() {
         assert_eq!(span(0, 10).overlap(span(5, 20)), span(5, 10));
         assert!(span(0, 10).overlap(span(12, 20)).is_empty());
+    }
+
+    #[test]
+    fn the_hull_covers_both_and_any_gap_between_them() {
+        assert_eq!(span(0, 4).hull(span(8, 10)), span(0, 10));
+        assert_eq!(span(2, 9).hull(span(3, 5)), span(2, 9));
     }
 
     #[test]
