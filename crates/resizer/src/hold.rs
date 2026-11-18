@@ -467,11 +467,12 @@ impl HoldRepair<'_> {
     }
 }
 
+/// Halfway between `a` and `b`, rounded down.
+// NOTE: RepairHold::repairEndHold places the buffer at `(a + b) / 2`, which
+// truncates toward zero for no stated reason; PARE rounds down, as
+// Dbu::midpoint does. They differ by one DBU only at negative coordinates.
 const fn midpoint(a: Point<Dbu>, b: Point<Dbu>) -> Point<Dbu> {
-    Point::new(
-        Dbu::new(i64::midpoint(a.x.get(), b.x.get())),
-        Dbu::new(i64::midpoint(a.y.get(), b.y.get())),
-    )
+    Point::new(a.x.midpoint(b.x), a.y.midpoint(b.y))
 }
 
 /// Whether `value` leaves [`SLACK_LIMIT_RATIO`] of `limit` in hand.
@@ -524,6 +525,14 @@ mod tests {
             repaired = Some((summary, before, after));
         });
         repaired.unwrap()
+    }
+
+    #[test]
+    fn the_buffer_goes_halfway_between_the_pins_rounded_down() {
+        let at = |x: i64, y: i64| Point::new(Dbu::new(x), Dbu::new(y));
+
+        assert_eq!(midpoint(at(0, 10), at(5, 20)), at(2, 15));
+        assert_eq!(midpoint(at(-5, -20), at(0, -1)), at(-3, -11));
     }
 
     #[test]
