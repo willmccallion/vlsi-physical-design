@@ -1836,6 +1836,43 @@ set_input_delay [expr $clk_period * $clk_io_pct] -clock $clk_name $non_clock_inp
 set_output_delay [expr $clk_period * $clk_io_pct] -clock $clk_name [all_outputs]
 ";
 
+    /// A script that leans on every rule [`split_commands`] keeps.
+    const TRICKY_SCRIPT: &str = "  # a comment \\\n still the comment\nset a 1; set b {x;\ny}\n\
+        \n\tcreate_clock [get_ports \"clk;\"] \\\n    -period 2\nputs \"q;\\\"\" ; # after\nlast [a\nb]";
+
+    #[test]
+    fn a_script_splits_into_commands_at_their_lines() {
+        let commands = split_commands(TRICKY_SCRIPT, 1);
+
+        assert_eq!(
+            format!("{commands:?}"),
+            "[(\"set a 1\", 3), (\"set b {x;\\ny}\", 3), (\"create_clock [get_ports \\\"clk;\\\"]  -period 2\", 6), (\"puts \\\"q;\\\\\\\"\\\" \", 8), (\"last [a\\nb]\", 9)]"
+        );
+    }
+
+    #[test]
+    fn a_command_splits_into_braced_and_plain_words() {
+        let words = split_words("a {b {c} d} \"e [f \"g\"] \\\" h\" i[j k]{l m} n\\ o");
+
+        assert_eq!(
+            format!("{words:?}"),
+            "Ok([Plain(\"a\"), Braced(\"b {c} d\"), Plain(\"e [f \\\"g\\\"] \\\\\\\" h\"), Plain(\"i[j k]{l m}\"), Plain(\"n\\\\ o\")])"
+        );
+    }
+
+    #[test]
+    fn words_report_what_they_leave_unbalanced() {
+        let errors: Vec<_> = ["{a", "{a}b", "\"a", "a[b", "\"a[b\""]
+            .into_iter()
+            .map(split_words)
+            .collect();
+
+        assert_eq!(
+            format!("{errors:?}"),
+            "[Err(\"unbalanced '{'\"), Err(\"extra characters after close-brace\"), Err(\"unbalanced '\\\"'\"), Err(\"unbalanced '['\"), Err(\"unbalanced '['\")]"
+        );
+    }
+
     #[test]
     fn an_orfs_constraint_file_defines_the_clock_and_port_delays() {
         let db = design();
