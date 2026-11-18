@@ -14,11 +14,11 @@ use pare_common::geom::dbu::{Dbu, DbuArea, DbuPerMicron};
 use pare_common::geom::orient::Orientation;
 use pare_common::geom::point::Point;
 use pare_common::geom::rect::Rect;
-use pare_common::verify::drc::{Violation, check_drc};
-use pare_common::verify::placement::{
+use pare_verify::drc::{Violation, check_drc};
+use pare_verify::placement::{
     PlacementViolation, PlacementViolationKind, placement_violations, violation_counts,
 };
-use pare_common::verify::routing::check_routing;
+use pare_verify::routing::check_routing;
 use std::path::{Path, PathBuf};
 
 const M1: LayerId = LayerId(0);
@@ -26,7 +26,7 @@ const M2: LayerId = LayerId(1);
 
 fn fixture(name: &str) -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR"))
-        .join("tests/fixtures")
+        .join("../common/tests/fixtures")
         .join(name)
 }
 

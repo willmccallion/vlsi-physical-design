@@ -15,11 +15,11 @@ use super::layout::{Layout, LayoutShape, Owner, OwnerIndex};
 use super::model::Model;
 use super::rules::Rules;
 use super::{DrcReport, Findings, Marker, classify, run_checks};
-use crate::db::indices::IdVec;
-use crate::db::library::LayerRef;
-use crate::geom::dbu::Dbu;
-use crate::geom::point::Point;
-use crate::geom::rect::Rect;
+use pare_common::db::indices::IdVec;
+use pare_common::db::library::LayerRef;
+use pare_common::geom::dbu::Dbu;
+use pare_common::geom::point::Point;
+use pare_common::geom::rect::Rect;
 use rayon::prelude::*;
 
 /// Checks `layout` in square tiles of `core` a side, each seeing `halo`

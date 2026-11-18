@@ -5,9 +5,9 @@ use crate::ui;
 use pare_common::db::design::NetlistDB;
 use pare_common::db::indices::CellId;
 use pare_common::db::library::LayerRef;
-use pare_common::verify::drc::{DrcReport, Marker, OwnerIndex, check_drc};
-use pare_common::verify::placement::{PlacementViolation, placement_violations, violation_counts};
-use pare_common::verify::routing::{RoutingReport, check_routing};
+use pare_verify::drc::{DrcReport, Marker, OwnerIndex, check_drc};
+use pare_verify::placement::{PlacementViolation, placement_violations, violation_counts};
+use pare_verify::routing::{RoutingReport, check_routing};
 
 /// Prints placement violations by kind; returns whether there were none.
 pub(crate) fn report_placement(db: &NetlistDB, report: &mut Report) -> bool {

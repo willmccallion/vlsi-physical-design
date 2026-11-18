@@ -1,0 +1,20 @@
+[package]
+name = "pare-verify"
+version = "0.1.0"
+edition = "2024"
+description = "PARE — Placement And Routing Engine: independent checks of placement and routing"
+license.workspace = true
+repository.workspace = true
+readme.workspace = true
+keywords.workspace = true
+categories.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+pare-common = { path = "../common" }
+log = "0.4"
+rayon = "1.10"
+rstar = "0.13"
+rustc-hash = "2.1"

@@ -1,14 +1,14 @@
 //! The rules the checker applies, read from the library as `OpenROAD`'s
 //! detailed router reads them.
 
-use crate::db::design::{NetlistDB, NonDefaultRule};
-use crate::db::indices::{CutLayerId, IdVec, LayerId, NonDefaultRuleId};
-use crate::db::library::Library;
-use crate::db::rules::{
+use pare_common::db::design::{NetlistDB, NonDefaultRule};
+use pare_common::db::indices::{CutLayerId, IdVec, LayerId, NonDefaultRuleId};
+use pare_common::db::library::Library;
+use pare_common::db::rules::{
     CutSpacing, CutSpacingCondition, EndOfLineSpacing, Lef58CutSpacing, MinStep, MinimumCut,
     ParallelRunLengthTable, SpacingTable, WidthRangeSpacing,
 };
-use crate::geom::dbu::{Dbu, DbuArea};
+use pare_common::geom::dbu::{Dbu, DbuArea};
 
 /// Rules of one metal layer.
 #[derive(Clone, Debug, PartialEq, Eq)]

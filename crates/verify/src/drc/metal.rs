@@ -5,12 +5,12 @@ use super::layout::OwnerIndex;
 use super::model::{Facing, GcRect, Metal, Model};
 use super::rules::{MetalRules, Rules};
 use super::{Involves, Marker, Markers, Violation};
-use crate::db::indices::LayerId;
-use crate::db::library::LayerRef;
-use crate::db::rules::SpacingTable;
-use crate::geom::dbu::Dbu;
-use crate::geom::rect::Rect;
-use crate::geom::region::{Heading, Region};
+use pare_common::db::indices::LayerId;
+use pare_common::db::library::LayerRef;
+use pare_common::db::rules::SpacingTable;
+use pare_common::geom::dbu::Dbu;
+use pare_common::geom::rect::Rect;
+use pare_common::geom::region::{Heading, Region};
 
 /// Checks every pair of nearby maximal rectangles on every routing layer.
 pub(super) fn check(model: &Model<'_>, rules: &Rules) -> Markers {

@@ -10,7 +10,7 @@ use pare_common::db::indices::{CellId, IdVec, LayerId};
 use pare_common::geom::dbu::Dbu;
 use pare_common::geom::point::Point;
 use pare_common::geom::rect::Rect;
-use pare_common::verify::drc::{Layout, LayoutShape, OwnerIndex};
+use pare_verify::drc::{Layout, LayoutShape, OwnerIndex};
 use std::path::Path;
 #[cfg(test)]
 use std::path::PathBuf;
@@ -391,7 +391,7 @@ mod tests {
     use super::*;
     use crate::testing::{scratch_dir, tiny};
     use pare_common::testing::assert_golden;
-    use pare_common::verify::drc::Owner;
+    use pare_verify::drc::Owner;
     use std::fmt::Write as _;
 
     /// Pixels along the longer side of the area images the tests draw.

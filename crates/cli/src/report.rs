@@ -3,9 +3,9 @@
 
 use anyhow::Context;
 use pare_common::units::Seconds;
-use pare_common::verify::drc::{DrcReport, Violation};
-use pare_common::verify::routing::RoutingReport;
 use pare_resizer::{HoldSummary, RepairSummary, SetupSummary};
+use pare_verify::drc::{DrcReport, Violation};
+use pare_verify::routing::RoutingReport;
 use serde::{Serialize, Serializer};
 use std::collections::BTreeMap;
 use std::path::Path;

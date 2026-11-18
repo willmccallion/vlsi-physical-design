@@ -30,12 +30,12 @@ pub use tile::{check_tiles_lazily, check_window};
 /// How many halos wide a tile of [`check_drc`] is.
 const TILE_HALOS: i64 = 32;
 
-use crate::db::design::NetlistDB;
-use crate::db::indices::{IdVec, LayerId};
-use crate::db::library::LayerRef;
-use crate::geom::dbu::{Dbu, DbuArea};
-use crate::geom::rect::Rect;
 use model::Model;
+use pare_common::db::design::NetlistDB;
+use pare_common::db::indices::{IdVec, LayerId};
+use pare_common::db::library::LayerRef;
+use pare_common::geom::dbu::{Dbu, DbuArea};
+use pare_common::geom::rect::Rect;
 use std::collections::{HashMap, HashSet};
 
 /// A kind of design rule violation.

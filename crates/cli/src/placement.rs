@@ -21,7 +21,6 @@ use pare_common::geom::dbu::Dbu;
 use pare_common::geom::orient::Orientation;
 use pare_common::geom::point::Point;
 use pare_common::units::Seconds;
-use pare_common::verify::pin_access::PinAccess;
 use pare_placer::detailed;
 use pare_placer::global::{
     self, CongestionEstimator, GlobalParams, GlobalPlacementError, GlobalResult, Outcome,
@@ -35,6 +34,7 @@ use pare_placer::model::PlacementModel;
 use pare_placer::zones::{Zone, Zones};
 use pare_resizer::{Rebuffer, Repairer, Resizer, area_change_percent, timing_net_weights};
 use pare_router::{CapacityReduction, GlobalRouteEstimator};
+use pare_verify::pin_access::PinAccess;
 use std::num::NonZeroUsize;
 use std::path::Path;
 use std::time::{Duration, Instant};

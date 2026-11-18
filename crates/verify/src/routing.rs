@@ -1,11 +1,11 @@
 //! Connectivity of routed nets and wiring totals. Design rules are the
 //! business of [`super::drc`].
 
-use crate::db::design::{NetlistDB, RouteElem, TrackAxis};
-use crate::db::indices::{IdVec, LayerId, NetId};
-use crate::db::library::{Direction, LayerRef, Shape};
-use crate::db::shapes::{is_signal_net, route_elem_shapes};
-use crate::geom::dbu::Dbu;
+use pare_common::db::design::{NetlistDB, RouteElem, TrackAxis};
+use pare_common::db::indices::{IdVec, LayerId, NetId};
+use pare_common::db::library::{Direction, LayerRef, Shape};
+use pare_common::db::shapes::{is_signal_net, route_elem_shapes};
+use pare_common::geom::dbu::Dbu;
 use rayon::prelude::*;
 use std::collections::HashSet;
 
