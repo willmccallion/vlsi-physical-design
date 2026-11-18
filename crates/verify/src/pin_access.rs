@@ -1343,6 +1343,47 @@ mod tests {
         rail_y: Option<i64>,
         m3_stripe_y: Option<i64>,
     ) -> (NetlistDB, pare_common::db::indices::MacroId) {
+        let (mut lib, [m1, m2, m3], site) = three_layer_library(table);
+        let m = add_masters(&mut lib, site, m1, m2);
+        let mut db = NetlistDB::new("t".into(), lib);
+        db.die_area = rect(0, 0, 10_000, 4000);
+        db.tracks.push(TrackDef {
+            axis: TrackAxis::X,
+            start: Dbu::new(100),
+            count: 50,
+            step: Dbu::new(200),
+            layers: vec![m2],
+        });
+        db.tracks.push(TrackDef {
+            axis: TrackAxis::Y,
+            start: Dbu::new(0),
+            count: 21,
+            step: Dbu::new(200),
+            layers: vec![m1, m3],
+        });
+        let mut wires = vec![ground_wire(
+            m2,
+            580,
+            pt(stripe_x, 0),
+            pt(stripe_x, 4000),
+            "STRIPE",
+        )];
+        wires.extend(rail_y.map(|y| ground_wire(m1, 100, pt(0, y), pt(10_000, y), "FOLLOWPIN")));
+        wires.extend(m3_stripe_y.map(|y| ground_wire(m3, 6000, pt(0, y), pt(10_000, y), "STRIPE")));
+        let _ = db.special_nets.push(SpecialNet {
+            name: "vss".into(),
+            signal_use: SignalUse::Ground,
+            connections: Vec::new(),
+            wires,
+            rects: Vec::new(),
+            vias: Vec::new(),
+        });
+        (db, m)
+    }
+
+    /// M1, M2 with `table`, and M3, the vias between them, and a core site
+    /// 0.2 by 2.0.
+    fn three_layer_library(table: Option<SpacingTable>) -> (Library, [LayerId; 3], SiteId) {
         let mut lib = Library::new(DbuPerMicron::new(1000).unwrap());
         let m1 = lib
             .add_routing_layer(layer("M1", Direction::Horizontal))
@@ -1382,6 +1423,17 @@ mod tests {
                 },
             })
             .unwrap();
+        (lib, [m1, m2, m3], site)
+    }
+
+    /// Adds the masters `C`, an M1 input it returns, `U`, an M2 input, `R`,
+    /// an M1 input off centre, and `E`, an M2 output, on `site`.
+    fn add_masters(
+        lib: &mut Library,
+        site: SiteId,
+        m1: LayerId,
+        m2: LayerId,
+    ) -> pare_common::db::indices::MacroId {
         let input = |layer, rect| pin("a", PinDirection::Input, metal(layer, rect));
         let m = lib
             .add_macro(one_pin_master(
@@ -1405,40 +1457,7 @@ mod tests {
         ] {
             let _ = lib.add_macro(master).unwrap();
         }
-        let mut db = NetlistDB::new("t".into(), lib);
-        db.die_area = rect(0, 0, 10_000, 4000);
-        db.tracks.push(TrackDef {
-            axis: TrackAxis::X,
-            start: Dbu::new(100),
-            count: 50,
-            step: Dbu::new(200),
-            layers: vec![m2],
-        });
-        db.tracks.push(TrackDef {
-            axis: TrackAxis::Y,
-            start: Dbu::new(0),
-            count: 21,
-            step: Dbu::new(200),
-            layers: vec![m1, m3],
-        });
-        let mut wires = vec![ground_wire(
-            m2,
-            580,
-            pt(stripe_x, 0),
-            pt(stripe_x, 4000),
-            "STRIPE",
-        )];
-        wires.extend(rail_y.map(|y| ground_wire(m1, 100, pt(0, y), pt(10_000, y), "FOLLOWPIN")));
-        wires.extend(m3_stripe_y.map(|y| ground_wire(m3, 6000, pt(0, y), pt(10_000, y), "STRIPE")));
-        let _ = db.special_nets.push(SpecialNet {
-            name: "vss".into(),
-            signal_use: SignalUse::Ground,
-            connections: Vec::new(),
-            wires,
-            rects: Vec::new(),
-            vias: Vec::new(),
-        });
-        (db, m)
+        m
     }
 
     /// Spacing 0.10 up to width 0.46 and 0.15 from there, at any run.
