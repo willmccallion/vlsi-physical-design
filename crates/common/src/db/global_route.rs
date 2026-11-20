@@ -75,4 +75,17 @@ pub trait RouteSource {
 
     /// The route of `net` with where its pins meet it, if it has one.
     fn route(&self, db: &NetlistDB, net: NetId) -> Option<NetRoute>;
+
+    /// Opens a trial: until it ends, the routes [`Self::update`] changes
+    /// are kept as they were, as `OpenROAD`'s ECO journal keeps a net's
+    /// guides.
+    fn begin_trial(&mut self);
+
+    /// Ends the open trial, keeping the routes it made.
+    fn keep_trial(&mut self);
+
+    /// Ends the open trial, putting back every route it changed as it was
+    /// before, as `OpenROAD` restores a net's route from its guides
+    /// (`GlobalRouter::loadRoutingFromDBGuides`) once `undoEco` returns them.
+    fn restore_trial(&mut self);
 }

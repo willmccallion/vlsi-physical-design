@@ -615,6 +615,14 @@ impl GlobalGrid {
         tree
     }
 
+    /// Each edge's usage, for tests to compare whole grids.
+    #[cfg(test)]
+    pub(crate) fn usage_by_edge(&self) -> Vec<Tracks> {
+        (0..self.capacity.len())
+            .map(|e| self.usage.get(e))
+            .collect()
+    }
+
     fn overflowed(&self, e: usize) -> bool {
         self.usage.get(e) > self.capacity[e]
     }
