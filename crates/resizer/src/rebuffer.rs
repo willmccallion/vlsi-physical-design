@@ -2230,6 +2230,12 @@ mod tests {
     impl RouteSource for NoRoutes {
         fn update(&mut self, _: &NetlistDB, _: &[NetId]) {}
 
+        fn begin_trial(&mut self) {}
+
+        fn keep_trial(&mut self) {}
+
+        fn restore_trial(&mut self) {}
+
         fn route(&self, _: &NetlistDB, _: NetId) -> Option<NetRoute> {
             None
         }

@@ -7,7 +7,7 @@
 
 use crate::access::{access_points, fellow_boxes, order_toward};
 use crate::detailed::{PinJudge, PinTerminal};
-use crate::global::{GCell, GlobalGrid, GlobalNet, GlobalRoutes, reroute, track_demand};
+use crate::global::{GCell, GlobalGrid, GlobalNet, GlobalRoutes, NetTree, reroute, track_demand};
 use crate::tech::RouteTech;
 use crate::{GlobalStage, Progress, RouteError, check_routable, gcell_size, global_stage};
 use pare_common::config::RoutingConfig;
@@ -40,6 +40,18 @@ pub struct GlobalSession {
     /// found them; a pin of a cell that keeps them keeps its terminal.
     placed: Vec<(MacroId, Point<Dbu>, Orientation)>,
     rounds: usize,
+    /// While a trial is open, each net it changed as it stood before.
+    trial: Option<FxHashMap<NetId, Before>>,
+}
+
+/// A net as it stood when an open trial first changed it.
+#[derive(Debug)]
+struct Before {
+    /// Its pins' terminals then; none when it had no route.
+    terminals: Option<Vec<PinTerminal>>,
+    /// Its route, once the trial has taken it off the grid; none while
+    /// it is still there, or when it had none.
+    lifted: Option<NetTree>,
 }
 
 impl GlobalSession {
@@ -86,6 +98,7 @@ impl GlobalSession {
             initial,
             placed,
             rounds: config.global_iterations,
+            trial: None,
         })
     }
 
@@ -100,6 +113,7 @@ impl GlobalSession {
     /// Follows the design's renumbering after cells and nets were removed:
     /// the routes of nets it dropped are lifted, the rest keep theirs.
     pub fn renumber(&mut self, renumbering: &Renumbering) {
+        debug_assert!(self.trial.is_none(), "renumbering inside a trial");
         let pin = |p: PinId| renumbering.pins.get(p).copied().flatten();
         let mut nets = FxHashMap::default();
         let mut trees = FxHashMap::default();
@@ -201,13 +215,54 @@ impl GlobalSession {
             .collect()
     }
 
-    /// Takes `net`'s route off the grid and forgets it.
+    /// Notes `net` as it stands, if an open trial has not changed it yet.
+    fn remember(&mut self, net: NetId) {
+        let Some(trial) = self.trial.as_mut() else {
+            return;
+        };
+        let _ = trial.entry(net).or_insert_with(|| Before {
+            terminals: self.nets.get(&net).cloned(),
+            lifted: None,
+        });
+    }
+
+    /// Takes `net`'s route off the grid and forgets it, keeping it for an
+    /// open trial when it is the route the net had before the trial.
     fn rip_up(&mut self, net: NetId) {
+        self.remember(net);
         if self.nets.remove(&net).is_none() {
             return;
         }
-        if let Some(placed) = self.routes.trees.remove(&net) {
+        let Some(placed) = self.routes.trees.remove(&net) else {
+            return;
+        };
+        let lifted = self.grid.lift(placed);
+        if let Some(before) = self.trial.as_mut().and_then(|t| t.get_mut(&net))
+            && before.terminals.is_some()
+            && before.lifted.is_none()
+        {
+            before.lifted = Some(lifted);
+        }
+    }
+
+    /// Puts `net` back as it stood before the trial: its first route on
+    /// the grid again, in place of any the trial made, with its terminals.
+    fn put_back(&mut self, net: NetId, before: Before) {
+        let Before { terminals, lifted } = before;
+        let original_on_grid = terminals.is_some() && lifted.is_none();
+        if !original_on_grid && let Some(placed) = self.routes.trees.remove(&net) {
             let _ = self.grid.lift(placed);
+        }
+        if let Some(tree) = lifted {
+            let _ = self.routes.trees.insert(net, self.grid.place(tree));
+        }
+        match terminals {
+            Some(terminals) => {
+                let _ = self.nets.insert(net, terminals);
+            }
+            None => {
+                let _ = self.nets.remove(&net);
+            }
         }
     }
 
@@ -247,10 +302,13 @@ impl RouteSource for GlobalSession {
                 continue;
             }
             let fresh = self.terminals(db, net);
-            if let (Some(old), Some(new)) = (self.nets.get_mut(&net), &fresh)
+            if let (Some(old), Some(new)) = (self.nets.get(&net), &fresh)
                 && grid_positions(old) == grid_positions(new)
             {
-                old.clone_from(new);
+                if old != new {
+                    self.remember(net);
+                    let _ = self.nets.insert(net, new.clone());
+                }
                 continue;
             }
             self.rip_up(net);
@@ -264,6 +322,26 @@ impl RouteSource for GlobalSession {
             }
         }
         self.route_dirty(dirty);
+    }
+
+    fn begin_trial(&mut self) {
+        debug_assert!(self.trial.is_none(), "trials do not nest");
+        self.trial = Some(FxHashMap::default());
+    }
+
+    fn keep_trial(&mut self) {
+        self.trial = None;
+    }
+
+    fn restore_trial(&mut self) {
+        let Some(trial) = self.trial.take() else {
+            return;
+        };
+        let mut changed: Vec<(NetId, Before)> = trial.into_iter().collect();
+        changed.sort_unstable_by_key(|(net, _)| *net);
+        for (net, before) in changed {
+            self.put_back(net, before);
+        }
     }
 
     fn route(&self, db: &NetlistDB, net: NetId) -> Option<NetRoute> {
@@ -504,6 +582,52 @@ mod tests {
         let out = db.net_id("out").unwrap();
         db.nets[out].non_default_rule = Some(rule);
         db
+    }
+
+    /// Gives `net`'s route a stub one gcell out and back from its first
+    /// cell, which no router would choose, so that a route routed again
+    /// shows.
+    fn add_a_stub(session: &mut GlobalSession, net: NetId) {
+        let placed = session.routes.trees.remove(&net).unwrap();
+        let mut tree = session.grid.lift(placed);
+        let from = tree.paths[0][0];
+        let (nx, _) = session.grid.size();
+        let x = if from.x + 1 < nx {
+            from.x + 1
+        } else {
+            from.x - 1
+        };
+        tree.paths.push(vec![from, GCell { x, ..from }]);
+        let _ = session.routes.trees.insert(net, session.grid.place(tree));
+    }
+
+    #[test]
+    fn a_restored_trial_puts_back_the_routes_it_changed_and_their_usage() {
+        let (mut db, config) = crate::tests::placed_tiny();
+        let mut session = GlobalSession::new(&db, &config, &mut |_| {}).unwrap();
+        let u5 = db.cell_id("u5").unwrap();
+        let nets: Vec<NetId> = db.cells[u5].pins.iter().map(|&p| db.pins[p].net).collect();
+        let net = *nets
+            .iter()
+            .find(|n| session.routes.trees.contains_key(n))
+            .unwrap();
+        add_a_stub(&mut session, net);
+        let routes = |s: &GlobalSession, db: &NetlistDB| -> Vec<Option<NetRoute>> {
+            db.nets.ids().map(|n| s.route(db, n)).collect()
+        };
+        let (before, usage) = (routes(&session, &db), session.grid.usage_by_edge());
+        let home = db.cells[u5].location;
+        session.begin_trial();
+        db.cells[u5].location = Point::new(Dbu::new(6000), home.y);
+        session.update(&db, &nets);
+        assert_ne!(routes(&session, &db), before);
+
+        db.cells[u5].location = home;
+        session.restore_trial();
+        session.update(&db, &nets);
+
+        assert_eq!(routes(&session, &db), before);
+        assert_eq!(session.grid.usage_by_edge(), usage);
     }
 
     #[test]

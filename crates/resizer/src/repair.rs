@@ -1050,6 +1050,12 @@ mod tests {
     impl RouteSource for BrokenRoutes {
         fn update(&mut self, _: &NetlistDB, _: &[NetId]) {}
 
+        fn begin_trial(&mut self) {}
+
+        fn keep_trial(&mut self) {}
+
+        fn restore_trial(&mut self) {}
+
         fn route(&self, db: &NetlistDB, net: NetId) -> Option<NetRoute> {
             if db.nets[net].name != "q" {
                 return None;

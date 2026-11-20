@@ -913,6 +913,9 @@ impl<'a, T: Timing> Resizer<'a, T> {
     pub(crate) fn journal_begin(&mut self) -> Trial {
         debug_assert!(self.journal.is_none(), "trials do not nest");
         self.journal = Some(Vec::new());
+        if let Some(routes) = self.routes.as_mut() {
+            routes.source.begin_trial();
+        }
         Trial(Sealed)
     }
 
@@ -920,16 +923,22 @@ impl<'a, T: Timing> Resizer<'a, T> {
     pub(crate) fn journal_end(&mut self, trial: Trial) {
         let Trial(_sealed) = trial;
         self.journal = None;
+        if let Some(routes) = self.routes.as_mut() {
+            routes.source.keep_trial();
+        }
     }
 
-    /// Takes back every edit of `trial` and brings the timing up to date,
-    /// as `journalRestore`.
+    /// Takes back every edit of `trial`, puts back the global routes it
+    /// changed, and brings the timing up to date, as `journalRestore`.
     pub(crate) fn journal_restore(&mut self, trial: Trial) -> Result<(), RepairError> {
         let Trial(_sealed) = trial;
         let edits = self.journal.take().unwrap_or_default();
         let mut touched = Touched::default();
         for edit in edits.into_iter().rev() {
             self.undo(edit, &mut touched)?;
+        }
+        if let Some(routes) = self.routes.as_mut() {
+            routes.source.restore_trial();
         }
         self.retime_touched(touched);
         Ok(())
