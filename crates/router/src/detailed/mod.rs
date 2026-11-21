@@ -1721,6 +1721,7 @@ pub(crate) fn routable_nets(db: &NetlistDB) -> Vec<NetId> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::tech::LeafClockPins;
 
     fn cell(layer: u8, x: u16, y: u16) -> GCell {
         GCell {
@@ -1783,7 +1784,7 @@ mod tests {
     #[test]
     fn speculative_routes_do_not_depend_on_the_thread_count() {
         let (db, config) = crate::tests::placed_tiny();
-        let tech = RouteTech::new(&db, &config).unwrap();
+        let tech = RouteTech::new(&db, &config, LeafClockPins::default()).unwrap();
         let gcell = crate::gcell_size(&tech, &config);
         let costs = round_costs(0, crate::VIA_COST_PITCHES * tech.min_layer_pitch.to_f64());
         let route_with = |threads: usize| {

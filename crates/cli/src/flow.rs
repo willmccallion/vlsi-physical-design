@@ -6,12 +6,15 @@ use crate::placement::{PlacementStart, run_placement};
 use crate::plan::FlowPlan;
 use crate::repair::NetlistRepair;
 use crate::report::Report;
-use crate::routing::{RouterRun, global_route_with_repair, route_detailed, route_global};
+use crate::routing::{
+    RouteStart, RouterRun, design_leaf_clock_pins, global_route_with_repair, route_detailed,
+    route_global,
+};
 use crate::ui;
 use pare_common::config::{Config, DesignInput};
 use pare_common::db::design::NetlistDB;
 use pare_common::db::parser::{bookshelf, def, lef};
-use pare_router::GlobalSession;
+use pare_router::LeafClockPins;
 use std::path::Path;
 
 /// A design on its way through the flow, at stage `S`.
@@ -33,9 +36,9 @@ pub(crate) struct Placed<'p> {
 /// Routed globally, ready for detailed routing.
 pub(crate) struct GloballyRouted {
     /// The global routes repair ran on, which detailed routing goes on
-    /// from; none when no repair needed them, and detailed routing routes
-    /// globally itself.
-    session: Option<GlobalSession>,
+    /// from, or when no repair needed them, the leaf clock pins detailed
+    /// routing's own global routing takes.
+    start: RouteStart,
 }
 
 impl<S> Design<S> {
@@ -86,6 +89,12 @@ impl Design<Loaded> {
 }
 
 impl Design<Placed<'_>> {
+    /// The pins that make a clock net a leaf, by the Liberty placement's
+    /// repair read or else the config names.
+    fn leaf_clock_pins(&self, config: &Config) -> anyhow::Result<LeafClockPins> {
+        design_leaf_clock_pins(config, &self.db, self.stage.repair.as_ref())
+    }
+
     /// Routes the design globally and assigns tracks, without detailed
     /// routing, writing the guides to `guides` when given.
     pub(crate) fn route_globally_only(
@@ -94,7 +103,8 @@ impl Design<Placed<'_>> {
         guides: Option<&Path>,
         report: &mut Report,
     ) -> anyhow::Result<()> {
-        route_global(config, &self.db, guides, report)
+        let leaves = self.leaf_clock_pins(config)?;
+        route_global(config, &self.db, leaves, guides, report)
     }
 
     /// Routes the design globally and repairs it on the global routes'
@@ -105,6 +115,7 @@ impl Design<Placed<'_>> {
         config: &Config,
         report: &mut Report,
     ) -> anyhow::Result<Design<GloballyRouted>> {
+        let leaves = self.leaf_clock_pins(config)?;
         let Self {
             mut db,
             stage: Placed { repair },
@@ -113,9 +124,12 @@ impl Design<Placed<'_>> {
             Some(mut repair) => global_route_with_repair(config, &mut db, &mut repair, report)?,
             None => None,
         };
+        let start = session.map_or(RouteStart::FromScratch(leaves), |session| {
+            RouteStart::OnGlobalRoutes(Box::new(session))
+        });
         Ok(Design {
             db,
-            stage: GloballyRouted { session },
+            stage: GloballyRouted { start },
         })
     }
 }
@@ -131,9 +145,9 @@ impl Design<GloballyRouted> {
     ) -> anyhow::Result<()> {
         let Self {
             mut db,
-            stage: GloballyRouted { session },
+            stage: GloballyRouted { start },
         } = self;
-        route_detailed(config, &mut db, run, session, report)
+        route_detailed(config, &mut db, run, start, report)
     }
 }
 
@@ -187,7 +201,7 @@ mod tests {
             .route_globally(&tiny_config(""), &mut report)
             .unwrap();
 
-        assert!(routed.stage.session.is_none());
+        assert!(matches!(routed.stage.start, RouteStart::FromScratch(_)));
         assert!(report.phases.is_empty());
     }
 }

@@ -223,6 +223,7 @@ fn marked_crossings(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::tech::LeafClockPins;
     use crate::tech::RouteTech;
     use crate::tests::tiny;
     use pare_common::config::RoutingConfig;
@@ -231,7 +232,7 @@ mod tests {
     const WHOLE_WIRE: (CrossIdx, CrossIdx) = (CrossIdx(0), CrossIdx(8));
 
     fn tiny_tech() -> RouteTech {
-        RouteTech::new(&tiny(), &RoutingConfig::default()).unwrap()
+        RouteTech::new(&tiny(), &RoutingConfig::default(), LeafClockPins::default()).unwrap()
     }
 
     #[test]

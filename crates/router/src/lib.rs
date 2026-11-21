@@ -49,7 +49,8 @@ pub use session::GlobalSession;
 use state::{DetailedState, GridShape};
 pub use state::{RouteState, StateParseError};
 use std::time::{Duration, Instant};
-use tech::{MAX_DIE_REACH, MAX_GRID_NODES, MAX_GRID_SPAN, RouteTech};
+pub use tech::LeafClockPins;
+use tech::{MAX_DIE_REACH, MAX_GRID_NODES, MAX_GRID_SPAN, NetKind, RouteTech};
 use track::assign_tracks;
 
 /// Pitches of the lowest routing layer a via costs in detailed routing,
@@ -236,9 +237,14 @@ impl RunOptions<'_> {
     }
 }
 
-/// Routes every signal net of `db` and stores the wiring in the design.
-pub fn route(db: &mut NetlistDB, config: &RoutingConfig) -> Result<RoutingSummary, RouteError> {
-    route_with(db, config, RunOptions::default())
+/// Routes every signal net of `db` and stores the wiring in the design;
+/// its clock nets are leaves where they reach one of `leaf_clock_pins`.
+pub fn route(
+    db: &mut NetlistDB,
+    config: &RoutingConfig,
+    leaf_clock_pins: LeafClockPins,
+) -> Result<RoutingSummary, RouteError> {
+    route_with(db, config, leaf_clock_pins, RunOptions::default())
 }
 
 /// Routes every signal net of `db` as [`route`] does, resuming from and
@@ -249,10 +255,11 @@ pub fn route(db: &mut NetlistDB, config: &RoutingConfig) -> Result<RoutingSummar
 pub fn route_with(
     db: &mut NetlistDB,
     config: &RoutingConfig,
+    leaf_clock_pins: LeafClockPins,
     mut run: RunOptions<'_>,
 ) -> Result<RoutingSummary, RouteError> {
     check_routable(db)?;
-    let tech = RouteTech::new(db, config)?;
+    let tech = RouteTech::new(db, config, leaf_clock_pins)?;
     let gcell = gcell_size(&tech, config);
     let mut silent = |_: &Progress<'_>| {};
     let report = run.report.take().unwrap_or(&mut silent);
@@ -690,15 +697,17 @@ fn net_ids(db: &NetlistDB) -> FxHashMap<&str, NetId> {
         .collect()
 }
 
-/// Global routing and track assignment of every signal net of `db`, for
+/// Global routing and track assignment of every signal net of `db`, whose
+/// clock nets are leaves where they reach one of `leaf_clock_pins`, for
 /// measuring them on their own; the design is left as it is.
 pub fn route_global_only(
     db: &NetlistDB,
     config: &RoutingConfig,
+    leaf_clock_pins: LeafClockPins,
     report: &mut dyn FnMut(&Progress<'_>),
 ) -> Result<GlobalOnly, RouteError> {
     check_routable(db)?;
-    let tech = RouteTech::new(db, config)?;
+    let tech = RouteTech::new(db, config, leaf_clock_pins)?;
     let gcell = gcell_size(&tech, config);
     let GlobalStage {
         dr,
@@ -881,11 +890,7 @@ fn global_net(
     grid: &GlobalGrid,
     net: NetId,
 ) -> Option<GlobalNet> {
-    Some(GlobalNet {
-        net,
-        terminals: dr.terminals(net, grid)?,
-        demand: track_demand(db, tech, net),
-    })
+    Some(GlobalNet::of(db, tech, net, dr.terminals(net, grid)?))
 }
 
 /// Reports the gcell grid's size, overflow and load per layer after
@@ -1033,7 +1038,7 @@ pub fn capacity_reduction(
     config: &RoutingConfig,
     adjustments: &IdVec<LayerId, Share>,
 ) -> Result<CapacityReduction, RouteError> {
-    let tech = RouteTech::new(db, config)?;
+    let tech = RouteTech::new(db, config, LeafClockPins::default())?;
     let fixed = FixedTracks::new(&tech, obstruction_shapes(db));
     let grid = GlobalGrid::new(
         &tech,
@@ -1083,13 +1088,19 @@ struct EstimatedNet {
     net: NetId,
     pins: Vec<(PinId, LayerId)>,
     demand: Vec<Tracks>,
+    kind: NetKind,
 }
 
 impl<'a> GlobalRouteEstimator<'a> {
-    /// The estimator of `db` under `config`, over the gcell grid of
+    /// The estimator of `db` under `config`, whose clock nets are leaves
+    /// where they reach one of `leaf_clock_pins`, over the gcell grid of
     /// [`capacity_reduction`].
-    pub fn new(db: &'a NetlistDB, config: &RoutingConfig) -> Result<Self, RouteError> {
-        let tech = RouteTech::new(db, config)?;
+    pub fn new(
+        db: &'a NetlistDB,
+        config: &RoutingConfig,
+        leaf_clock_pins: LeafClockPins,
+    ) -> Result<Self, RouteError> {
+        let tech = RouteTech::new(db, config, leaf_clock_pins)?;
         let fixed = FixedTracks::new(&tech, obstruction_shapes(db));
         let grid = GlobalGrid::new(
             &tech,
@@ -1108,6 +1119,7 @@ impl<'a> GlobalRouteEstimator<'a> {
                     .map(|&pin| (pin, terminal_layer(db, &tech, pin)))
                     .collect(),
                 demand: track_demand(db, &tech, net),
+                kind: tech.net_kind(db, net),
             })
             .collect();
         Ok(Self {
@@ -1151,6 +1163,7 @@ impl<'a> GlobalRouteEstimator<'a> {
                     })
                     .collect(),
                 demand: n.demand.clone(),
+                kind: n.kind,
             })
             .collect();
         self.grid.clear();

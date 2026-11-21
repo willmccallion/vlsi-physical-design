@@ -5,8 +5,8 @@ use crate::phase::{Phase, PhaseTimer};
 use crate::placement::{CellPlaces, legalize};
 use crate::prepare_output_dir;
 use crate::repair::{
-    Clocks, NetlistRepair, Stage as RepairStage, TimedRepair, propagate_clocks, repair_design_on,
-    timing_repair_on,
+    Clocks, NetlistRepair, Stage as RepairStage, TimedRepair, load_liberty, propagate_clocks,
+    repair_design_on, timing_repair_on,
 };
 use crate::report::{
     DesignRepairSummary, GlobalRouteRepairSummary, Report, RoutingSummary, TimingSummary,
@@ -17,13 +17,15 @@ use pare_common::config::Config;
 use pare_common::db::design::{NetlistDB, Renumbering};
 use pare_common::db::global_route::RouteSource;
 use pare_common::db::indices::{CellId, NetId};
+use pare_common::db::liberty::Liberty;
+use pare_common::db::library::Library;
 use pare_common::db::writer;
 use pare_common::memory;
 use pare_placer::legalize::site::SiteGrid;
 use pare_placer::zones::Zones;
 use pare_resizer::GlobalRouting;
 use pare_resizer::{Resizer, RouteRc};
-use pare_router::{GlobalSession, Progress, Stage};
+use pare_router::{GlobalSession, LeafClockPins, Progress, Stage};
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
@@ -75,6 +77,54 @@ fn write_state(path: &Path, state: &pare_router::RouteState) -> anyhow::Result<(
         .with_context(|| format!("writing {}", path.display()))
 }
 
+/// The pins of `library`'s masters that make a clock net a leaf, as
+/// `liberty` tells them: those that clock a register or open a latch, and
+/// every pin of a pad cell.
+pub(crate) fn leaf_clock_pins(library: &Library, liberty: &Liberty) -> LeafClockPins {
+    let mut leaves = Vec::new();
+    for (master_id, master) in library.macros.iter_enumerated() {
+        let Some(cell) = liberty.cell_id(&master.name).map(|c| liberty.cell(c)) else {
+            continue;
+        };
+        for (pin_id, pin) in master.pins.iter_enumerated() {
+            let Some(port) = cell.port(&pin.name) else {
+                continue;
+            };
+            if cell.is_pad || cell.is_register_clock(port) {
+                leaves.push((master_id, pin_id));
+            }
+        }
+    }
+    leaves.into_iter().collect()
+}
+
+/// The leaf clock pins of `db`: by the Liberty `repair` read when given,
+/// else by the Liberty files `config` names; none without any, which makes
+/// every clock net a trunk, as `OpenROAD` finds them without Liberty.
+pub(crate) fn design_leaf_clock_pins(
+    config: &Config,
+    db: &NetlistDB,
+    repair: Option<&NetlistRepair<'_>>,
+) -> anyhow::Result<LeafClockPins> {
+    if let Some(repair) = repair {
+        return Ok(leaf_clock_pins(&db.library, &repair.liberty));
+    }
+    if config.input.liberty_files.is_empty() {
+        return Ok(LeafClockPins::default());
+    }
+    let liberty = load_liberty(&config.input.liberty_files)?;
+    Ok(leaf_clock_pins(&db.library, &liberty))
+}
+
+/// Where detailed routing starts.
+pub(crate) enum RouteStart {
+    /// From the global routes repair ran on.
+    OnGlobalRoutes(Box<GlobalSession>),
+    /// From global routing of its own, which takes a clock net for a leaf
+    /// where it reaches one of these pins.
+    FromScratch(LeafClockPins),
+}
+
 /// Global routing with design and timing repair on its parasitics, as
 /// OpenROAD-flow-scripts' global route stage does it.
 ///
@@ -97,7 +147,8 @@ pub(crate) fn global_route_with_repair(
     ui::section("Global Routing");
     let timer = PhaseTimer::start(Phase::GlobalRouting);
     let mut tables = RouteTables::default();
-    let mut session = GlobalSession::new(db, &config.routing, &mut |p| tables.show(p))?;
+    let leaves = leaf_clock_pins(&db.library, &repair.liberty);
+    let mut session = GlobalSession::new(db, &config.routing, leaves, &mut |p| tables.show(p))?;
     timer.finish(report);
     if let Some(timed) = repair.timed() {
         propagate_clocks(timed.sdc);
@@ -254,17 +305,21 @@ fn write_guides(
 }
 
 /// Routes every signal net globally and assigns tracks, without detailed
-/// routing, writing the global routes as guides to `guides` when given.
+/// routing, taking a clock net for a leaf where it reaches one of
+/// `leaf_clock_pins`, and writes the global routes as guides to `guides`
+/// when given.
 pub(crate) fn route_global(
     config: &Config,
     db: &NetlistDB,
+    leaf_clock_pins: LeafClockPins,
     guides: Option<&Path>,
     report: &mut Report,
 ) -> anyhow::Result<()> {
     ui::section("Routing");
     let timer = PhaseTimer::start(Phase::GlobalRouting);
     let mut tables = RouteTables::default();
-    let global = pare_router::route_global_only(db, &config.routing, &mut |p| tables.show(p))?;
+    let mut show = |p: &Progress<'_>| tables.show(p);
+    let global = pare_router::route_global_only(db, &config.routing, leaf_clock_pins, &mut show)?;
     ui::stat("Nets:", &global.summary.nets.to_string());
     if let Some(path) = guides {
         write_guides(path, db, &global.guides)?;
@@ -274,19 +329,19 @@ pub(crate) fn route_global(
     Ok(())
 }
 
-/// Routes every signal net in detail, from the global routes of `global`
-/// when given, saving and resuming state as `run` says, then checks the
-/// result and writes it to the output directory.
+/// Routes every signal net in detail from `start`, saving and resuming
+/// state as `run` says, then checks the result and writes it to the output
+/// directory.
 pub(crate) fn route_detailed(
     config: &Config,
     db: &mut NetlistDB,
     run: &RouterRun,
-    global: Option<GlobalSession>,
+    start: RouteStart,
     report: &mut Report,
 ) -> anyhow::Result<()> {
     ui::section("Routing");
     let timer = PhaseTimer::start(Phase::Routing);
-    let summary = run_router(config, db, run, global)?;
+    let summary = run_router(config, db, run, start)?;
     show_routing(&summary);
     timer.finish(report);
     report.routing = Some(RoutingSummary {
@@ -311,13 +366,13 @@ pub(crate) fn route_detailed(
     Ok(())
 }
 
-/// Runs the detailed router over `db`, saving and resuming its state as
-/// `run` says.
+/// Runs the detailed router over `db` from `start`, saving and resuming
+/// its state as `run` says.
 fn run_router(
     config: &Config,
     db: &mut NetlistDB,
     run: &RouterRun,
-    global: Option<GlobalSession>,
+    start: RouteStart,
 ) -> anyhow::Result<pare_router::RoutingSummary> {
     let resume = run.resume.as_deref().map(read_state).transpose()?;
     let mut write = |state: &pare_router::RouteState| {
@@ -339,9 +394,13 @@ fn run_router(
         trace: run.trace.clone(),
         report: Some(&mut show),
     };
-    let summary = match global {
-        Some(global) => pare_router::route_on(db, &config.routing, global, options)?,
-        None => pare_router::route_with(db, &config.routing, options)?,
+    let summary = match start {
+        RouteStart::OnGlobalRoutes(global) => {
+            pare_router::route_on(db, &config.routing, *global, options)?
+        }
+        RouteStart::FromScratch(leaves) => {
+            pare_router::route_with(db, &config.routing, leaves, options)?
+        }
     };
     if let Some(save) = &run.save
         && !summary.state_saved
@@ -440,11 +499,46 @@ mod tests {
     use crate::placement::{PlacementStart, run_placement};
     use crate::plan::FlowPlan;
     use crate::repair::Constraints;
-    use crate::testing::{half_height_tiny, scratch_dir, timed, timed_config, tiny};
+    use crate::testing::{cts_fixture, half_height_tiny, scratch_dir, timed, timed_config, tiny};
+    use pare_common::db::indices::{MacroId, MacroPinId};
+    use pare_common::db::parser::{lef, liberty};
     use pare_common::geom::dbu::Dbu;
+    use pare_common::geom::dbu::DbuPerMicron;
     use pare_common::geom::point::Point;
     use pare_common::geom::rect::Rect;
     use pare_router::{NetGuide, SavePoint};
+
+    fn pin_of(library: &Library, master: &str, pin: &str) -> (MacroId, MacroPinId) {
+        let (id, found) = library
+            .macros
+            .iter_enumerated()
+            .find(|(_, m)| m.name == master)
+            .unwrap();
+        (id, found.pin_id(pin).unwrap())
+    }
+
+    #[test]
+    fn register_clock_pins_and_the_signal_pins_of_pads_make_clock_nets_leaves() {
+        let units = DbuPerMicron::new(2000).unwrap();
+        let library = lef::parse_files(&[cts_fixture("clock.lef")], units).unwrap();
+        let source = std::fs::read_to_string(cts_fixture("clock.lib"))
+            .unwrap()
+            .replace("cell (BUF_X1) {", "cell (BUF_X1) { pad_cell : true;");
+        let cells = liberty::parse_str(&source, Path::new("clock.lib")).unwrap();
+
+        let leaves = leaf_clock_pins(&library, &cells);
+
+        let expected: LeafClockPins = [
+            pin_of(&library, "DFF_X1", "CK"),
+            pin_of(&library, "DFF_SLOW", "CK"),
+            pin_of(&library, "DFF_SLOWER", "CK"),
+            pin_of(&library, "BUF_X1", "A"),
+            pin_of(&library, "BUF_X1", "Z"),
+        ]
+        .into_iter()
+        .collect();
+        assert_eq!(leaves, expected);
+    }
 
     #[test]
     fn a_save_point_is_global_or_a_round_number() {

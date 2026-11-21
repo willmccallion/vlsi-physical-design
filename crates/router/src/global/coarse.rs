@@ -720,6 +720,7 @@ thread_local! {
 mod tests {
     use super::super::{GlobalGrid, Tracks, Usage};
     use super::*;
+    use crate::tech::NetKind;
     use pare_common::config::CapacityReserve;
     use pare_common::db::indices::NetId;
     use pare_common::geom::dbu::Dbu;
@@ -744,6 +745,7 @@ mod tests {
             ny,
             min_layer: LayerId::new(1),
             directions: vec![Direction::Horizontal, Direction::Vertical],
+            clock_layers: LayerId::new(1)..=LayerId::new(2),
             reserve: CapacityReserve::NONE,
             capacity: vec![Tracks::whole(4); edges],
             blocked: vec![false; edges],
@@ -767,6 +769,7 @@ mod tests {
             net: NetId::new(0),
             terminals: terminals.to_vec(),
             demand: vec![Tracks::ONE; 2],
+            kind: NetKind::Signal,
         }
     }
 

@@ -22,7 +22,7 @@ use std::path::{Path, PathBuf};
 
 /// Reads the Liberty files, the first one's thresholds and defaults
 /// standing for all.
-fn load_liberty(paths: &[PathBuf]) -> anyhow::Result<Liberty> {
+pub(crate) fn load_liberty(paths: &[PathBuf]) -> anyhow::Result<Liberty> {
     let mut merged: Option<Liberty> = None;
     for path in paths {
         ui::header("Input", &path.display().to_string());

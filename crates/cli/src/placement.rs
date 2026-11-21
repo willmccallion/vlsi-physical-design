@@ -8,6 +8,7 @@ use crate::plan::FlowPlan;
 use crate::prepare_output_dir;
 use crate::repair::{NetlistRepair, TimedRepair, repair_design, repair_netlist, repair_timing};
 use crate::report::{GlobalPlacementSummary, PlacementSummary, Report};
+use crate::routing::design_leaf_clock_pins;
 use crate::{ui, visualization};
 use anyhow::Context;
 use pare_common::config::{
@@ -33,7 +34,7 @@ use pare_placer::legalize::opendp::mirror::{hpwl, optimize_mirroring};
 use pare_placer::model::PlacementModel;
 use pare_placer::zones::{Zone, Zones};
 use pare_resizer::{Rebuffer, Repairer, Resizer, area_change_percent, timing_net_weights};
-use pare_router::{CapacityReduction, GlobalRouteEstimator};
+use pare_router::{CapacityReduction, GlobalRouteEstimator, LeafClockPins};
 use pare_verify::pin_access::PinAccess;
 use std::num::NonZeroUsize;
 use std::path::Path;
@@ -435,16 +436,17 @@ fn global_placement(
             repair,
         } => (Some(adjustments), repair),
     };
-    let timing = repair
-        .filter(|_| gp.timing_driven)
-        .and_then(NetlistRepair::timed);
     let (routability, estimator) = match adjustments.filter(|_| gp.routability_driven) {
         Some(adjustments) => {
-            let (params, estimator) = routability_setup(config, db, adjustments)?;
+            let (params, estimator) =
+                routability_setup(config, db, adjustments, repair.as_deref())?;
             (Some(params), estimator)
         }
         None => (None, None),
     };
+    let timing = repair
+        .filter(|_| gp.timing_driven)
+        .and_then(NetlistRepair::timed);
     let params = GlobalParams {
         initial_rounds,
         routability,
@@ -836,15 +838,18 @@ impl CellPlaces {
 
 /// The routability settings of `config` with the layers' capacity held
 /// back by `adjustment`, and the global-router estimator when congestion is
-/// to be measured that way.
+/// to be measured that way, which tells clock leaves by the Liberty of
+/// `repair` when given.
 fn routability_setup<'a>(
     config: &Config,
     db: &'a NetlistDB,
     adjustment: &IdVec<LayerId, Share>,
+    repair: Option<&NetlistRepair<'_>>,
 ) -> anyhow::Result<(RoutabilityParams, Option<GlobalRouteCongestion<'a>>)> {
     match config.global_placement.congestion_estimate {
         CongestionEstimate::GlobalRouter => {
-            let estimator = GlobalRouteCongestion::new(db, config)?;
+            let leaves = design_leaf_clock_pins(config, db, repair)?;
+            let estimator = GlobalRouteCongestion::new(db, config, leaves)?;
             let reduction = estimator.capacity_reduction(adjustment);
             Ok((routability_params(config, db, reduction), Some(estimator)))
         }
@@ -865,11 +870,15 @@ struct GlobalRouteCongestion<'a> {
 }
 
 impl<'a> GlobalRouteCongestion<'a> {
-    fn new(db: &'a NetlistDB, config: &Config) -> anyhow::Result<Self> {
+    fn new(
+        db: &'a NetlistDB,
+        config: &Config,
+        leaf_clock_pins: LeafClockPins,
+    ) -> anyhow::Result<Self> {
         let units = db.dbu();
         Ok(Self {
             db,
-            estimator: GlobalRouteEstimator::new(db, &config.routing)?,
+            estimator: GlobalRouteEstimator::new(db, &config.routing, leaf_clock_pins)?,
             sizes: db
                 .cells
                 .ids()

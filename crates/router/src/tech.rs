@@ -9,17 +9,18 @@
 use crate::RouteError;
 use crate::global::Gcells;
 use pare_common::config::RoutingConfig;
-use pare_common::db::design::NetlistDB;
-use pare_common::db::design::NonDefaultRule;
+use pare_common::db::design::{NetlistDB, NonDefaultRule, PinOwner};
 use pare_common::db::indices::{
-    CutLayerId, IdVec, LayerId, NetId, NonDefaultRuleId, TableIndex, ViaId,
+    CutLayerId, IdVec, LayerId, MacroId, MacroPinId, NetId, NonDefaultRuleId, TableIndex, ViaId,
 };
-use pare_common::db::library::{Direction, LayerRef, Library, Shape};
+use pare_common::db::library::{Direction, LayerRef, Library, Shape, SignalUse};
 use pare_common::db::rules::SpacingTable;
 use pare_common::geom::dbu::{Dbu, DbuArea};
 use pare_common::geom::interval::Interval;
 use pare_common::geom::point::Point;
 use pare_common::geom::rect::Rect;
+use rustc_hash::FxHashSet;
+use std::ops::RangeInclusive;
 
 pare_common::define_index!(
     /// A track of a routing layer, counted across the layer from its
@@ -301,6 +302,29 @@ impl RuleTech {
     }
 }
 
+/// The library pins that make a clock net a leaf.
+///
+/// `OpenROAD`'s global router tells them from Liberty (`isClkTerm`): those
+/// that clock a register or open a latch, and every pin of a pad cell.
+/// With none, as without Liberty, every clock net is a trunk.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct LeafClockPins(FxHashSet<(MacroId, MacroPinId)>);
+
+impl FromIterator<(MacroId, MacroPinId)> for LeafClockPins {
+    fn from_iter<I: IntoIterator<Item = (MacroId, MacroPinId)>>(pins: I) -> Self {
+        Self(pins.into_iter().collect())
+    }
+}
+
+/// Which layers a net's wires take.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum NetKind {
+    /// Any net but a clock trunk: the signal layers.
+    Signal,
+    /// A clock net that reaches no leaf clock pin: the clock layers.
+    ClockTrunk,
+}
+
 /// Everything the router needs to know about the technology. Its
 /// routable layers run both ways, as [`RouteTech::new`] checks.
 #[derive(Clone, Debug)]
@@ -309,6 +333,11 @@ pub struct RouteTech {
     pub min_layer: LayerId,
     /// Highest layer signal wires may use.
     pub max_layer: LayerId,
+    /// The layers the wires of clock trunks may use, within the signal
+    /// layers.
+    pub(crate) clock_layers: RangeInclusive<LayerId>,
+    /// The pins that make a clock net a leaf.
+    leaf_clock_pins: LeafClockPins,
     /// Every routing layer.
     pub layers: IdVec<LayerId, LayerTech>,
     /// The via on each cut.
@@ -431,8 +460,13 @@ fn check_both_directions(
 }
 
 impl RouteTech {
-    /// Builds the routing technology of `db`.
-    pub fn new(db: &NetlistDB, config: &RoutingConfig) -> Result<Self, RouteError> {
+    /// Builds the routing technology of `db`, whose clock nets are leaves
+    /// where they reach one of `leaf_clock_pins`.
+    pub fn new(
+        db: &NetlistDB,
+        config: &RoutingConfig,
+        leaf_clock_pins: LeafClockPins,
+    ) -> Result<Self, RouteError> {
         let reach = reach_from_origin(&db.die_area);
         if reach > MAX_DIE_REACH {
             return Err(RouteError::DieTooLarge(reach));
@@ -468,6 +502,8 @@ impl RouteTech {
         Ok(Self {
             min_layer,
             max_layer,
+            clock_layers: config.clock_layer_range(lib)?,
+            leaf_clock_pins,
             layers,
             vias,
             access_vias,
@@ -486,6 +522,29 @@ impl RouteTech {
                 .filter(|g| g.get() > 0)
                 .unwrap_or(Dbu::new(1)),
         })
+    }
+
+    /// What `net` of `db` is to the router: a clock trunk when it is a clock
+    /// net none of whose pins is a leaf clock pin, as `OpenROAD`'s
+    /// `isNonLeafClock` finds it.
+    #[must_use]
+    pub fn net_kind(&self, db: &NetlistDB, net: NetId) -> NetKind {
+        let n = &db.nets[net];
+        if n.signal_use != SignalUse::Clock {
+            return NetKind::Signal;
+        }
+        let reaches_leaf = n.pins.iter().any(|&p| match db.pins[p].owner {
+            PinOwner::Cell { cell, pin } => self
+                .leaf_clock_pins
+                .0
+                .contains(&(db.cells[cell].macro_id, pin)),
+            PinOwner::Io(_) => false,
+        });
+        if reaches_leaf {
+            NetKind::Signal
+        } else {
+            NetKind::ClockTrunk
+        }
     }
 
     /// Takes each net's rule from `db` again, after edits renumbered its

@@ -4,7 +4,8 @@ use super::tiny;
 use crate::detailed::DetailedRouter;
 use crate::global::{GCell, GlobalGrid, GlobalNet, GlobalRoutes, NetTree};
 use crate::occupancy::{Owner, Proximity};
-use crate::tech::RouteTech;
+use crate::tech::LeafClockPins;
+use crate::tech::{NetKind, RouteTech};
 use crate::track::{TrackWire, assign_tracks};
 use pare_common::config::{CapacityReserve, RoutingConfig};
 use pare_common::db::design::NetlistDB;
@@ -21,7 +22,7 @@ fn along_m3_row_0(from: u16, to: u16) -> Vec<GCell> {
 
 /// Assigns tracks to nets 0, 1, ... whose global routes are `paths`.
 fn assign(db: &NetlistDB, paths: Vec<Vec<GCell>>) -> (RouteTech, Vec<TrackWire>) {
-    let tech = RouteTech::new(db, &RoutingConfig::default()).unwrap();
+    let tech = RouteTech::new(db, &RoutingConfig::default(), LeafClockPins::default()).unwrap();
     let dr = DetailedRouter::new(db, &tech, GCELL);
     let grid = GlobalGrid::new(
         &tech,
@@ -39,6 +40,7 @@ fn assign(db: &NetlistDB, paths: Vec<Vec<GCell>>) -> (RouteTech, Vec<TrackWire>)
                     net: NetId::new(n),
                     terminals: Vec::new(),
                     demand: Vec::new(),
+                    kind: NetKind::Signal,
                 };
                 let placed = grid.place(NetTree {
                     net,
@@ -67,7 +69,7 @@ fn two_nets_along_one_panel_take_different_tracks() {
 #[test]
 fn a_wire_is_cut_where_it_would_cross_an_obstacle() {
     let db = tiny();
-    let tech = RouteTech::new(&db, &RoutingConfig::default()).unwrap();
+    let tech = RouteTech::new(&db, &RoutingConfig::default(), LeafClockPins::default()).unwrap();
     let occupancy = DetailedRouter::new(&db, &tech, GCELL).occupancy;
 
     let (tech, wires) = assign(&db, vec![along_m3_row_0(1, 2)]);
