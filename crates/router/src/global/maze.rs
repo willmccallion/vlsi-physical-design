@@ -405,11 +405,13 @@ impl<'a> MoveRules<'a> {
     }
 
     /// The cells one move from `cell` within `local` with what each move
-    /// costs: back and ahead along the layer's direction, then down and up.
+    /// costs: back and ahead along the layer's direction, where the net's
+    /// wires may run on it, then down and up.
     fn moves_from(&self, cell: GCell, local: &Local<'_>) -> [Option<Move>; 4] {
         let grid = self.grid;
         let (x, y) = (cell.x, cell.y);
         let (behind, ahead) = match grid.direction(cell.layer) {
+            _ if !grid.allows_wires(self.net.kind, cell.layer) => (None, None),
             Direction::Horizontal => (
                 x.checked_sub(1).map(|x| GCell { x, ..cell }),
                 (x + 1 < grid.nx).then(|| GCell { x: x + 1, ..cell }),
@@ -550,6 +552,7 @@ mod tests {
     use super::super::coarse::CoarseGrid;
     use super::super::{Tracks, Usage};
     use super::*;
+    use crate::tech::NetKind;
     use pare_common::config::CapacityReserve;
     use pare_common::db::indices::NetId;
 
@@ -575,6 +578,7 @@ mod tests {
             ny,
             min_layer: LayerId::new(1),
             directions: vec![Direction::Horizontal, Direction::Vertical],
+            clock_layers: LayerId::new(1)..=LayerId::new(2),
             reserve: CapacityReserve::NONE,
             capacity: vec![Tracks::whole(4); edges],
             blocked: vec![false; edges],
@@ -598,6 +602,7 @@ mod tests {
             net: NetId::new(0),
             terminals: terminals.to_vec(),
             demand: vec![Tracks::ONE; 2],
+            kind: NetKind::Signal,
         }
     }
 

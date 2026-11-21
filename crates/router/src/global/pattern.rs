@@ -225,7 +225,8 @@ impl Planner<'_> {
     }
 
     /// Cost of a leg on layer `l` from `from` to `to` along one row or
-    /// column, or `None` if `l` runs the other way.
+    /// column, or `None` if `l` runs the other way or the net's wires may
+    /// not use it.
     fn leg(&self, l: usize, from: Spot, to: Spot) -> Option<f64> {
         let horizontal = from.1 == to.1;
         let wanted = if horizontal {
@@ -233,7 +234,7 @@ impl Planner<'_> {
         } else {
             Direction::Vertical
         };
-        if self.direction(l) != wanted {
+        if self.direction(l) != wanted || !self.grid.allows_wires(self.net.kind, self.layer(l)) {
             return None;
         }
         let (lo, hi) = if horizontal {

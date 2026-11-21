@@ -3,6 +3,7 @@
 use super::tiny;
 use crate::access::{AccessPoint, Node, access_points};
 use crate::shared_access::SharedAccess;
+use crate::tech::LeafClockPins;
 use crate::tech::{CrossIdx, RouteTech, TrackIdx};
 use pare_common::config::RoutingConfig;
 use pare_common::db::design::{NetlistDB, PinOwner};
@@ -27,7 +28,7 @@ fn cell_pin(db: &NetlistDB, cell: &str, pin: &str) -> PinId {
 fn routing_defaults_to_the_second_layer_and_up() {
     let db = tiny();
 
-    let tech = RouteTech::new(&db, &RoutingConfig::default()).unwrap();
+    let tech = RouteTech::new(&db, &RoutingConfig::default(), LeafClockPins::default()).unwrap();
 
     assert_eq!((tech.min_layer, tech.max_layer), (LayerId(1), LayerId(2)));
 }
@@ -36,7 +37,7 @@ fn routing_defaults_to_the_second_layer_and_up() {
 fn crossings_merge_the_tracks_of_both_neighbouring_layers() {
     let db = tiny();
 
-    let tech = RouteTech::new(&db, &RoutingConfig::default()).unwrap();
+    let tech = RouteTech::new(&db, &RoutingConfig::default(), LeafClockPins::default()).unwrap();
 
     let first: Vec<i64> = tech.layer(LayerId(1)).cross.as_slice()[..6]
         .iter()
@@ -48,7 +49,7 @@ fn crossings_merge_the_tracks_of_both_neighbouring_layers() {
 #[test]
 fn an_m1_pin_is_reached_by_the_one_via_that_fits_inside_it() {
     let db = tiny();
-    let tech = RouteTech::new(&db, &RoutingConfig::default()).unwrap();
+    let tech = RouteTech::new(&db, &RoutingConfig::default(), LeafClockPins::default()).unwrap();
 
     let points = access_points(&db, &tech, cell_pin(&db, "u1", "A"), &|_, _| true);
 
@@ -70,7 +71,7 @@ fn an_m1_pin_is_reached_by_the_one_via_that_fits_inside_it() {
 #[test]
 fn an_io_pin_on_a_routable_layer_is_reached_on_its_own_layer() {
     let db = tiny();
-    let tech = RouteTech::new(&db, &RoutingConfig::default()).unwrap();
+    let tech = RouteTech::new(&db, &RoutingConfig::default(), LeafClockPins::default()).unwrap();
     let pin = db.io_pins[db.io_pin_id("in").unwrap()].pin;
 
     let points = access_points(&db, &tech, pin, &|_, _| true);
@@ -112,7 +113,7 @@ fn crossings_inside(db: &NetlistDB, tech: &RouteTech, pin: PinId) -> Vec<Point<D
 #[test]
 fn crossings_whose_wire_end_is_not_clean_are_dropped() {
     let db = tiny();
-    let tech = RouteTech::new(&db, &RoutingConfig::default()).unwrap();
+    let tech = RouteTech::new(&db, &RoutingConfig::default(), LeafClockPins::default()).unwrap();
     let pin = io_pin(&db, "in");
     let unclean = Point::new(Dbu::new(1100), Dbu::new(5900));
     assert!(crossings_inside(&db, &tech, pin).contains(&unclean));
@@ -126,7 +127,7 @@ fn crossings_whose_wire_end_is_not_clean_are_dropped() {
 #[test]
 fn a_pin_with_no_clean_crossing_inside_is_reached_from_a_crossing_beyond_its_end() {
     let db = tiny();
-    let tech = RouteTech::new(&db, &RoutingConfig::default()).unwrap();
+    let tech = RouteTech::new(&db, &RoutingConfig::default(), LeafClockPins::default()).unwrap();
     let pin = io_pin(&db, "in");
     let bottom = Dbu::new(5800);
     let reaches_below = |_: LayerId, m: &Rect<Dbu>| m.min.y < bottom - Dbu::new(100);
@@ -143,7 +144,7 @@ fn a_pin_with_no_clean_crossing_inside_is_reached_from_a_crossing_beyond_its_end
 #[test]
 fn a_pin_with_no_clean_access_keeps_its_crossings() {
     let db = tiny();
-    let tech = RouteTech::new(&db, &RoutingConfig::default()).unwrap();
+    let tech = RouteTech::new(&db, &RoutingConfig::default(), LeafClockPins::default()).unwrap();
     let pin = io_pin(&db, "in");
 
     let unjudged = access_points(&db, &tech, pin, &|_, _| true);
@@ -155,7 +156,7 @@ fn a_pin_with_no_clean_access_keeps_its_crossings() {
 #[test]
 fn shared_candidates_equal_those_found_for_each_pin() {
     let db = tiny();
-    let tech = RouteTech::new(&db, &RoutingConfig::default()).unwrap();
+    let tech = RouteTech::new(&db, &RoutingConfig::default(), LeafClockPins::default()).unwrap();
     let shared = SharedAccess::new(&db, &tech);
     let cell_pins = db.cells.iter().flat_map(|c| c.pins.iter().copied());
 

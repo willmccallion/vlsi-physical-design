@@ -37,7 +37,7 @@ mod steiner;
 mod tracks;
 
 use crate::occupancy::{FixedMetal, TrackRef};
-use crate::tech::{RouteTech, index_u32};
+use crate::tech::{NetKind, RouteTech, index_u32};
 use coarse::{CoarseGrid, Corridor, Plan, SCALE};
 pub use gcells::Gcells;
 use maze::{OutgrowsArea, route_tree, route_tree_within};
@@ -52,6 +52,7 @@ use pare_common::geom::rect::Rect;
 use pattern::route_pattern;
 use rayon::prelude::*;
 use rustc_hash::{FxHashMap, FxHashSet};
+use std::ops::RangeInclusive;
 use std::sync::OnceLock;
 use std::sync::atomic::{AtomicI64, AtomicU32, Ordering};
 pub use tracks::Tracks;
@@ -76,6 +77,8 @@ pub struct GlobalGrid {
     ny: u16,
     min_layer: LayerId,
     directions: Vec<Direction>,
+    /// The layers clock trunks' wires may use.
+    clock_layers: RangeInclusive<LayerId>,
     /// Share of each edge's usable tracks held back from `capacity`.
     reserve: CapacityReserve,
     capacity: Vec<Tracks>,
@@ -209,6 +212,7 @@ impl GlobalGrid {
             ny,
             min_layer: tech.min_layer,
             directions: layers.iter().map(|&l| tech.layer(l).direction).collect(),
+            clock_layers: tech.clock_layers.clone(),
             reserve,
             capacity: Vec::new(),
             blocked: Vec::new(),
@@ -517,8 +521,17 @@ impl GlobalGrid {
         layer.index() - self.min_layer.index()
     }
 
-    const fn layers(&self) -> std::ops::RangeInclusive<usize> {
+    const fn layers(&self) -> RangeInclusive<usize> {
         self.min_layer.index()..=self.min_layer.index() + self.directions.len() - 1
+    }
+
+    /// Whether wires of a net of `kind` may run on `layer`; vias may climb
+    /// through any layer, to reach pins below a clock trunk's layers.
+    fn allows_wires(&self, kind: NetKind, layer: LayerId) -> bool {
+        match kind {
+            NetKind::Signal => true,
+            NetKind::ClockTrunk => self.clock_layers.contains(&layer),
+        }
     }
 
     /// Whether no via pad fits in cell `c` on its layer.
@@ -1017,9 +1030,22 @@ pub struct GlobalNet {
     pub terminals: Vec<GCell>,
     /// Tracks one of its wires takes on each routable layer, lowest first.
     pub demand: Vec<Tracks>,
+    /// Which layers its wires take.
+    pub kind: NetKind,
 }
 
 impl GlobalNet {
+    /// `net` of `db` with its pins at `terminals`.
+    #[must_use]
+    pub fn of(db: &NetlistDB, tech: &RouteTech, net: NetId, terminals: Vec<GCell>) -> Self {
+        Self {
+            net,
+            terminals,
+            demand: track_demand(db, tech, net),
+            kind: tech.net_kind(db, net),
+        }
+    }
+
     /// Tracks a wire of the net takes on the layer at `offset` among the
     /// routable layers.
     fn demand(&self, offset: usize) -> Tracks {
@@ -1746,7 +1772,7 @@ fn touched_coarse_cells<'a>(
     cells
 }
 
-/// Pattern-routes every net, shortest first, in parallel chunks, each
+/// Pattern-routes every net in [`initial_order`], in parallel chunks, each
 /// against the usage left by the chunks before it. Nets in one chunk do not
 /// see each other; the rip-up rounds settle the overflow that causes.
 fn route_initial(
@@ -1755,9 +1781,7 @@ fn route_initial(
     costs: GlobalCosts,
     routes: &mut GlobalRoutes,
 ) {
-    let mut order: Vec<usize> = (0..nets.len()).collect();
-    order.sort_by_key(|&i| (span(&nets[i].terminals), i));
-    for batch in order.chunks(INITIAL_CHUNK) {
+    for batch in initial_order(nets).chunks(INITIAL_CHUNK) {
         let shared: &GlobalGrid = grid;
         let found: Vec<(usize, Vec<Vec<GCell>>)> = batch
             .par_iter()
@@ -1771,6 +1795,19 @@ fn route_initial(
             let _ = routes.trees.insert(nets[i].net, placed);
         }
     }
+}
+
+/// The order nets are first routed in: clock trunks, then the rest, each
+/// shortest first.
+// NOTE: GlobalRouter::findNets puts the clock trunks first too, but
+// orders each group by name; PARE keeps its shortest-first order within each.
+fn initial_order(nets: &[GlobalNet]) -> Vec<usize> {
+    let mut order: Vec<usize> = (0..nets.len()).collect();
+    order.sort_by_key(|&i| {
+        let is_trunk = nets[i].kind == NetKind::ClockTrunk;
+        (!is_trunk, span(&nets[i].terminals), i)
+    });
+    order
 }
 
 /// Nets pattern-routed together in one chunk of the initial routing; rayon
@@ -1901,6 +1938,7 @@ mod tests {
             ny,
             min_layer: LayerId::new(1),
             directions: vec![Direction::Horizontal, Direction::Vertical],
+            clock_layers: LayerId::new(1)..=LayerId::new(2),
             reserve: CapacityReserve::NONE,
             capacity: vec![Tracks::whole(4); edges],
             blocked: vec![false; edges],
@@ -1916,6 +1954,7 @@ mod tests {
             net: NetId::new(0),
             terminals,
             demand: vec![Tracks::ONE; 2],
+            kind: NetKind::Signal,
         }
     }
 
@@ -1924,6 +1963,82 @@ mod tests {
         congestion: 1.0,
         penalty: 1.0,
     };
+
+    /// A 10x10 grid like [`grid`] with a second horizontal layer 3 above,
+    /// whose clock trunks take layers 2 and 3.
+    fn three_layer_grid() -> GlobalGrid {
+        let edges = 3 * 10 * 10;
+        GlobalGrid {
+            directions: vec![
+                Direction::Horizontal,
+                Direction::Vertical,
+                Direction::Horizontal,
+            ],
+            clock_layers: LayerId::new(2)..=LayerId::new(3),
+            capacity: vec![Tracks::whole(4); edges],
+            blocked: vec![false; edges],
+            via_blocked: vec![false; edges],
+            via_loss: vec![Tracks::from_f64(0.1); 3],
+            usage: Usage::zeroed(edges),
+            history: vec![0.0; edges],
+            ..grid()
+        }
+    }
+
+    fn trunk(terminals: Vec<GCell>) -> GlobalNet {
+        GlobalNet {
+            kind: NetKind::ClockTrunk,
+            ..net(terminals)
+        }
+    }
+
+    /// The layers a tree runs along, without its vias.
+    fn wire_layers(paths: &[Vec<GCell>]) -> Vec<usize> {
+        let mut layers: Vec<usize> = paths
+            .iter()
+            .flat_map(|p| p.windows(2))
+            .filter(|w| w[0].layer == w[1].layer)
+            .map(|w| w[0].layer.index())
+            .collect();
+        layers.sort_unstable();
+        layers.dedup();
+        layers
+    }
+
+    #[test]
+    fn pattern_routing_keeps_a_clock_trunks_wires_on_the_clock_layers() {
+        let grid = three_layer_grid();
+        let terminals = vec![at(1, 2, 4), at(1, 7, 4)];
+
+        let signal = route_pattern(&grid, &net(terminals.clone()), COSTS);
+        let clock = route_pattern(&grid, &trunk(terminals), COSTS);
+
+        assert_eq!(wire_layers(&signal), vec![1]);
+        assert_eq!(wire_layers(&clock), vec![3]);
+    }
+
+    #[test]
+    fn maze_routing_keeps_a_clock_trunks_wires_on_the_clock_layers() {
+        let grid = three_layer_grid();
+        let terminals = vec![at(1, 2, 4), at(1, 7, 6)];
+
+        let signal = route_tree(&grid, &net(terminals.clone()), 2, COSTS, None);
+        let clock = route_tree(&grid, &trunk(terminals), 2, COSTS, None);
+
+        assert_eq!(wire_layers(&signal), vec![1, 2]);
+        assert_eq!(wire_layers(&clock), vec![2, 3]);
+    }
+
+    #[test]
+    fn clock_trunks_are_routed_first_then_the_shortest_nets() {
+        let nets = vec![
+            net(vec![cell(0, 0), cell(9, 9)]),
+            net(vec![cell(0, 0), cell(1, 0)]),
+            trunk(vec![cell(0, 0), cell(9, 0)]),
+        ];
+
+        assert_eq!(initial_order(&nets), vec![2, 1, 0]);
+    }
 
     /// Net `id` through `terminals`, one track wide.
     fn numbered(id: usize, terminals: Vec<GCell>) -> GlobalNet {
