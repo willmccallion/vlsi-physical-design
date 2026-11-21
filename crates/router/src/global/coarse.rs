@@ -10,7 +10,7 @@
 
 use super::stamped::StampedTable;
 use super::{GCell, GcellWindow, GlobalGrid, GlobalNet, grid_index};
-use crate::tech::index_u32;
+use crate::tech::{NetKind, index_u32};
 use pare_common::db::indices::LayerId;
 use pare_common::db::library::Direction;
 use rayon::prelude::*;
@@ -137,7 +137,8 @@ impl CoarseGrid {
         if footprint.len() <= 1 {
             return None;
         }
-        let nodes = self.tree_nodes(&pins, self.min_price)?;
+        let wire_layers = self.wire_layers(grid, net.kind);
+        let nodes = self.tree_nodes(&pins, &wire_layers, self.min_price)?;
         let tree = CoarseTree::new(self, &nodes);
         let cells: FxHashSet<(u16, u16)> = tree.cells.iter().copied().collect();
         Some(Plan {
@@ -146,12 +147,25 @@ impl CoarseGrid {
         })
     }
 
-    /// The nodes of the cheapest coarse tree joining `pins`, each with its
-    /// parent, searched as if no node could cost less than `floor`; none
-    /// when fixed metal cuts a pin off.
-    fn tree_nodes(&self, pins: &[usize], floor: f64) -> Option<Vec<(usize, Option<usize>)>> {
+    /// Whether a net of `kind` may run wires along each coarse layer.
+    fn wire_layers(&self, grid: &GlobalGrid, kind: NetKind) -> Vec<bool> {
+        (0..self.directions.len())
+            .map(|l| grid.allows_wires(kind, LayerId::new(self.first_layer + l)))
+            .collect()
+    }
+
+    /// The nodes of the cheapest coarse tree joining `pins` with wires only
+    /// along the layers `wire_layers` allows, each with its parent,
+    /// searched as if no node could cost less than `floor`; none when fixed
+    /// metal cuts a pin off.
+    fn tree_nodes(
+        &self,
+        pins: &[usize],
+        wire_layers: &[bool],
+        floor: f64,
+    ) -> Option<Vec<(usize, Option<usize>)>> {
         PLAN.with_borrow_mut(|state| {
-            let tree = self.search(state, pins, floor)?;
+            let tree = self.search(state, pins, wire_layers, floor)?;
             Some(tree.into_iter().map(|n| (n, state.parent(n))).collect())
         })
     }
@@ -161,7 +175,13 @@ impl CoarseGrid {
     /// those pins. The box only shrinks, so an estimate only rises: a queued
     /// node whose estimate rose since is queued again with it rather than
     /// expanded, which keeps every path the cheapest.
-    fn search(&self, state: &mut StampedTable, pins: &[usize], floor: f64) -> Option<Vec<usize>> {
+    fn search(
+        &self,
+        state: &mut StampedTable,
+        pins: &[usize],
+        wire_layers: &[bool],
+        floor: f64,
+    ) -> Option<Vec<usize>> {
         state.reset(self.nodes());
         let is_pin = |n: usize| pins.binary_search(&n).is_ok();
         let mut tree: FxHashSet<usize> = FxHashSet::default();
@@ -194,9 +214,15 @@ impl CoarseGrid {
                 if is_pin(node) && !tree.contains(&node) {
                     break node;
                 }
-                self.relax(state, &mut heap, node, cost, is_pin, |n| {
-                    toward.estimate(self, n)
-                });
+                let estimate = |n| toward.estimate(self, n);
+                self.relax(
+                    state,
+                    &mut heap,
+                    (node, cost),
+                    wire_layers,
+                    is_pin,
+                    estimate,
+                );
             };
             let joined = join_to_tree(state, &mut tree, reached);
             remaining -= joined.iter().filter(|&&n| is_pin(n)).count();
@@ -216,8 +242,8 @@ impl CoarseGrid {
         &self,
         state: &mut StampedTable,
         heap: &mut BinaryHeap<Visit>,
-        node: usize,
-        cost: f64,
+        (node, cost): (usize, f64),
+        wire_layers: &[bool],
         is_pin: impl Fn(usize) -> bool,
         estimate: impl Fn(usize) -> f64,
     ) {
@@ -235,6 +261,7 @@ impl CoarseGrid {
         let (l, x, y) = self.position(node);
         let along = |a: usize, b: usize| f64::from(SCALE) * (self.price(a) + self.price(b));
         let neighbours = match self.directions[l] {
+            _ if !wire_layers[l] => [None, None],
             Direction::Horizontal => [
                 x.checked_sub(1).map(|x| (x, y)),
                 (x + 1 < self.nx).then_some((x + 1, y)),
@@ -720,7 +747,6 @@ thread_local! {
 mod tests {
     use super::super::{GlobalGrid, Tracks, Usage};
     use super::*;
-    use crate::tech::NetKind;
     use pare_common::config::CapacityReserve;
     use pare_common::db::indices::NetId;
     use pare_common::geom::dbu::Dbu;
@@ -777,6 +803,55 @@ mod tests {
         let e = grid.edge(c);
         grid.capacity[e] = Tracks::ZERO;
         grid.blocked[e] = true;
+    }
+
+    /// The coarse layers `net`'s coarse tree on `grid` runs along.
+    fn coarse_wire_layers(grid: &GlobalGrid, net: &GlobalNet) -> Vec<usize> {
+        let coarse = CoarseGrid::new(grid);
+        let mut pins: Vec<usize> = net.terminals.iter().map(|&c| coarse.node_of(c)).collect();
+        pins.sort_unstable();
+        let wire_layers = coarse.wire_layers(grid, net.kind);
+        let nodes = coarse
+            .tree_nodes(&pins, &wire_layers, coarse.min_price)
+            .unwrap();
+        let mut along: Vec<usize> = nodes
+            .iter()
+            .filter_map(|&(node, parent)| {
+                let layer = coarse.position(node).0;
+                (coarse.position(parent?).0 == layer).then_some(layer)
+            })
+            .collect();
+        along.sort_unstable();
+        along.dedup();
+        along
+    }
+
+    #[test]
+    fn a_clock_trunks_coarse_tree_runs_along_only_the_clock_layers() {
+        let edges = 3 * 40 * 40;
+        let grid = GlobalGrid {
+            directions: vec![
+                Direction::Horizontal,
+                Direction::Vertical,
+                Direction::Horizontal,
+            ],
+            clock_layers: LayerId::new(2)..=LayerId::new(3),
+            capacity: vec![Tracks::whole(4); edges],
+            blocked: vec![false; edges],
+            via_blocked: vec![false; edges],
+            via_loss: vec![Tracks::ZERO; 3],
+            usage: Usage::zeroed(edges),
+            history: vec![0.0; edges],
+            ..grid(40, 40)
+        };
+        let signal = net(&[cell(1, 2, 4), cell(1, 37, 30)]);
+        let trunk = GlobalNet {
+            kind: NetKind::ClockTrunk,
+            ..signal.clone()
+        };
+
+        assert_eq!(coarse_wire_layers(&grid, &signal), vec![0, 1]);
+        assert_eq!(coarse_wire_layers(&grid, &trunk), vec![1, 2]);
     }
 
     #[test]
@@ -864,8 +939,9 @@ mod tests {
         let costs: Vec<(f64, f64)> = nets
             .iter()
             .map(|pins| {
-                let aimed = coarse.tree_nodes(pins, coarse.min_price).unwrap();
-                let unaimed = coarse.tree_nodes(pins, 0.0).unwrap();
+                let any = [true; 2];
+                let aimed = coarse.tree_nodes(pins, &any, coarse.min_price).unwrap();
+                let unaimed = coarse.tree_nodes(pins, &any, 0.0).unwrap();
                 (tree_cost(&coarse, &aimed), tree_cost(&coarse, &unaimed))
             })
             .collect();
