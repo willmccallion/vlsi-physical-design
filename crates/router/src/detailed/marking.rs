@@ -4,7 +4,8 @@
 //! part in the violation, not on the empty space around it: on each wire
 //! of a violating net that meets the violation, the crossings within the
 //! violation grown by the wire's width, grown again until at least two are
-//! taken in; one via of each violating net that meets it; and the
+//! taken in; both ends of each jog of a violating net that meets it; one
+//! via of each violating net that meets it; and the
 //! crossings under a patch that meets it, with the vias above and below
 //! them. Only wiring inside the worker's region is marked, since only that
 //! can move.
@@ -44,6 +45,7 @@ impl DetailedRouter<'_> {
                 && self.tech.routable(l)
             {
                 self.mark_wires(marks, area, l, bbox, net, route);
+                self.mark_jogs(marks, area, l, bbox, net, route);
                 self.mark_patches(marks, area, l, bbox, route);
             }
             self.mark_one_via(marks, area, layer, bbox, route);
@@ -97,6 +99,29 @@ impl DetailedRouter<'_> {
                         cross,
                     });
                 }
+            }
+        }
+    }
+
+    /// Marks both ends of each of `net`'s jogs on `layer` inside `area`
+    /// whose metal meets a violation at `bbox`.
+    fn mark_jogs(
+        &self,
+        marks: &mut Marks,
+        area: &Rect<Dbu>,
+        layer: LayerId,
+        bbox: &Rect<Dbu>,
+        net: NetId,
+        route: &NetRoute,
+    ) {
+        let width = self.tech.wire_width(self.tech.net_rule(net), layer);
+        for &lower in route.edges.jogs().iter().filter(|n| n.layer == layer) {
+            let (a, b) = Edge::Jog(lower).ends();
+            let (pa, pb) = (self.point(a), self.point(b));
+            let inside = contains_half_open(area, pa) && contains_half_open(area, pb);
+            if inside && wire_rect(pa, pb, width).is_some_and(|m| m.touches(bbox)) {
+                marks.mark_planar(a);
+                marks.mark_planar(b);
             }
         }
     }
@@ -227,6 +252,43 @@ mod tests {
     use crate::tech::RouteTech;
     use crate::tests::tiny;
     use pare_common::config::RoutingConfig;
+    use pare_common::geom::point::Point;
+
+    #[test]
+    fn a_violation_on_a_jog_marks_both_its_ends() {
+        let (db, config) = crate::tests::placed_tiny();
+        let tech = RouteTech::new(&db, &config, LeafClockPins::default()).unwrap();
+        let dr = DetailedRouter::new(&db, &tech, crate::gcell_size(&tech, &config));
+        let layer = tech.min_layer;
+        let cross = tech
+            .layer(layer)
+            .cross
+            .iter_enumerated()
+            .find(|(_, c)| c.up.is_some());
+        let lower = Node {
+            layer,
+            track: TrackIdx(1),
+            cross: cross.unwrap().0,
+        };
+        let route = NetRoute {
+            edges: std::iter::once(Edge::Jog(lower)).collect(),
+            ..NetRoute::default()
+        };
+        let (a, b) = Edge::Jog(lower).ends();
+        let (pa, pb) = (dr.point(a), dr.point(b));
+        let middle = Point::new(pa.x.midpoint(pb.x), pa.y.midpoint(pb.y));
+        let mut marks = Marks::default();
+
+        dr.mark_violation(
+            &mut marks,
+            &db.die_area,
+            LayerRef::Routing(layer),
+            &Rect::new(middle, middle),
+            &[(NetId(0), &route)],
+        );
+
+        assert!(marks.planar(a) && marks.planar(b));
+    }
 
     /// A wire over the crossings the tests look at.
     const WHOLE_WIRE: (CrossIdx, CrossIdx) = (CrossIdx(0), CrossIdx(8));

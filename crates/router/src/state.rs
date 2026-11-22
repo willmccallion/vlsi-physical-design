@@ -180,21 +180,11 @@ fn write_detailed(out: &mut impl Write, d: &DetailedState) -> io::Result<()> {
             out,
             "r {name} {} {} {} {}",
             u8::from(route.complete),
-            route.edges.runs().len() + route.edges.vias().len(),
+            route.edges.runs().len() + route.edges.vias().len() + route.edges.jogs().len(),
             route.patches.len(),
             route.access.len()
         )?;
-        for run in route.edges.runs() {
-            writeln!(
-                out,
-                "s {} {}",
-                node_text(run.node(run.from)),
-                run.to.index()
-            )?;
-        }
-        for &(lower, upper) in route.edges.vias() {
-            writeln!(out, "v {} {}", node_text(lower), node_text(upper))?;
-        }
+        write_edges(out, &route.edges)?;
         for p in &route.patches {
             let r = p.rect;
             writeln!(
@@ -221,6 +211,25 @@ fn write_detailed(out: &mut impl Write, d: &DetailedState) -> io::Result<()> {
             }
             writeln!(out)?;
         }
+    }
+    Ok(())
+}
+
+/// One line per run along a track, via and jog of `edges`.
+fn write_edges(out: &mut impl Write, edges: &EdgeSet) -> io::Result<()> {
+    for run in edges.runs() {
+        writeln!(
+            out,
+            "s {} {}",
+            node_text(run.node(run.from)),
+            run.to.index()
+        )?;
+    }
+    for &(lower, upper) in edges.vias() {
+        writeln!(out, "v {} {}", node_text(lower), node_text(upper))?;
+    }
+    for &lower in edges.jogs() {
+        writeln!(out, "j {}", node_text(lower))?;
     }
     Ok(())
 }
@@ -294,7 +303,7 @@ fn parse_route(lines: &mut Lines<'_>) -> Result<(String, NetRoute), StateParseEr
     Ok((name, route))
 }
 
-/// `count` edge lines: runs along a track, single wires and vias.
+/// `count` edge lines: runs along a track, single wires, vias and jogs.
 fn parse_edges(lines: &mut Lines<'_>, count: usize) -> Result<EdgeSet, StateParseError> {
     let mut runs = Vec::new();
     let mut steps = Vec::new();
@@ -320,6 +329,7 @@ fn parse_edges(lines: &mut Lines<'_>, count: usize) -> Result<EdgeSet, StatePars
                 lower: e.node()?,
                 upper: e.node()?,
             }),
+            "j" => steps.push(Edge::Jog(e.node()?)),
             other => return Err(e.error(&format!("unknown edge `{other}`"))),
         }
         e.done()?;
@@ -549,6 +559,22 @@ mod tests {
 
         saved.write(&mut text).unwrap();
         let read = RouteState::parse(std::str::from_utf8(&text).unwrap()).unwrap();
+
+        assert_eq!(read, saved);
+    }
+
+    #[test]
+    fn a_route_s_jogs_read_back_as_written() {
+        let mut saved = state();
+        let detailed = saved.detailed.as_mut().unwrap();
+        detailed.routes[0]
+            .1
+            .edges
+            .extend([Edge::Jog(node(2, 4, 7))]);
+        let mut text = Vec::new();
+        saved.write(&mut text).unwrap();
+
+        let read = RouteState::parse(&String::from_utf8(text).unwrap()).unwrap();
 
         assert_eq!(read, saved);
     }

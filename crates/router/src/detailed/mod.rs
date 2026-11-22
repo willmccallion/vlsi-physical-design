@@ -66,6 +66,9 @@ pub enum RestoreRoutesError {
     /// it.
     #[error("the saved route of net {} has a via between nodes not one above the other", .0.index())]
     Via(NetId),
+    /// A saved jog of the net leaves a crossing no jog may leave.
+    #[error("the saved route of net {} has a jog where none may run", .0.index())]
+    Jog(NetId),
 }
 
 /// How many nets' commits are worked out in parallel at a time, which
@@ -583,6 +586,9 @@ impl<'a> DetailedRouter<'a> {
             }
             if !route.edges.vias().iter().all(|&(l, u)| self.stacked(l, u)) {
                 return Err(RestoreRoutesError::Via(*net));
+            }
+            if !route.edges.jogs().iter().all(|&n| self.tech.jog_allowed(n)) {
+                return Err(RestoreRoutesError::Jog(*net));
             }
             let offered = |a: &AccessPoint| self.access[*net].iter().flatten().any(|o| o == a);
             if !route.access.iter().all(offered) {
@@ -1128,7 +1134,7 @@ impl<'a> DetailedRouter<'a> {
             Edge::Via { lower, .. } => {
                 Some((self.tech.via_above(lower.layer).via, self.point(lower)))
             }
-            Edge::Wire(_) => None,
+            Edge::Wire(_) | Edge::Jog(_) => None,
         })
     }
 
