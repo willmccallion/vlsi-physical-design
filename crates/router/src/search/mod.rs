@@ -22,8 +22,8 @@ use crate::access::{AccessPoint, Node};
 use crate::bucket::{Bucket, SpatialHash};
 use crate::global::{GCell, Gcells};
 use crate::occupancy::{LocalOccupancy, Occupancy, Origin, Owner, Proximity, too_close};
-use crate::tech::CrossIdx;
 use crate::tech::RouteTech;
+use crate::tech::{CrossIdx, TrackIdx};
 use crate::wiring::Edge;
 use pare_common::db::design::NetlistDB;
 use pare_common::db::indices::{CutLayerId, LayerId, NonDefaultRuleId, ViaId};
@@ -421,7 +421,9 @@ enum Heading {
 struct RecentVia {
     /// The layer the via came from.
     from: LayerId,
-    /// The crossing it landed on, along the current track.
+    /// The track it landed on, the current one or one a jog left.
+    track: TrackIdx,
+    /// The crossing it landed on.
     cross: CrossIdx,
 }
 
@@ -484,6 +486,13 @@ impl GoalEstimate {
 /// Which way a via climbs.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum Climb {
+    Up,
+    Down,
+}
+
+/// Which way a jog crosses its layer's tracks.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Across {
     Up,
     Down,
 }
@@ -838,6 +847,21 @@ impl Search<'_> {
         recent.filter(|v| (along - lt.cross[v.cross].at).abs() < self.via_reach(layer, v.from))
     }
 
+    /// The recent via of a path that jogs across to `track`: kept while it
+    /// lies across fewer than its reach away, where the along-track check
+    /// of a later via still applies, as if the via were on this track.
+    fn after_jog(
+        &self,
+        layer: LayerId,
+        recent: Option<RecentVia>,
+        track: TrackIdx,
+    ) -> Option<RecentVia> {
+        let lt = self.tech.layer(layer);
+        recent.filter(|v| {
+            (lt.tracks[track] - lt.tracks[v.track]).abs() < self.via_reach(layer, v.from)
+        })
+    }
+
     /// Whether a via from `state` to `to` would crowd the via the path just
     /// came through: their cuts when both pass through one cut, or their
     /// metal on this layer when it would end short of touching by less
@@ -894,8 +918,42 @@ impl Search<'_> {
                 }
             }
         }
+        out.extend(self.jog_move(state, Across::Up, window, costs));
+        out.extend(self.jog_move(state, Across::Down, window, costs));
         out.extend(self.via_move(state, Climb::Up, costs));
         out.extend(self.via_move(state, Climb::Down, costs));
+    }
+
+    /// The jog from `state` across to the same crossing of the next track
+    /// up or down, with what it costs, priced at its lower track; none where
+    /// no jog may run or it would leave `window` or the guide.
+    fn jog_move(
+        &self,
+        state: State,
+        across: Across,
+        window: &Rect<Dbu>,
+        costs: &mut impl StepCosts,
+    ) -> Option<(State, f64)> {
+        let n = state.node;
+        let track = match across {
+            Across::Up => n.track.plus(1),
+            Across::Down => TrackIdx::new(n.track.index().checked_sub(1)?),
+        };
+        let m = Node { track, ..n };
+        let lower = n.min(m);
+        if !self.tech.jog_allowed(lower) {
+            return None;
+        }
+        let p = self.point(m);
+        if !window.contains(p) || !self.allowed(m.layer, p) {
+            return None;
+        }
+        let moved = State {
+            node: m,
+            heading: Heading::Still,
+            recent_via: self.after_jog(n.layer, state.recent_via, track),
+        };
+        Some((moved, costs.jog(self, lower)))
     }
 
     /// The via from `state` to the layer above or below, with what it
@@ -948,6 +1006,7 @@ impl Search<'_> {
             heading: Heading::Still,
             recent_via: Some(RecentVia {
                 from,
+                track: node.track,
                 cross: node.cross,
             }),
         }
@@ -1074,6 +1133,8 @@ trait StepCosts {
     fn wire(&mut self, search: &Search<'_>, lower: Node) -> f64;
     /// The via from `lower` up to the layer above.
     fn via(&mut self, search: &Search<'_>, lower: Node) -> f64;
+    /// The jog from `lower` across to the next track.
+    fn jog(&mut self, search: &Search<'_>, lower: Node) -> f64;
 }
 
 /// Step costs computed afresh every time.
@@ -1086,6 +1147,10 @@ impl StepCosts for FreshCosts {
 
     fn via(&mut self, search: &Search<'_>, lower: Node) -> f64 {
         search.via_price(lower, &mut Total).total()
+    }
+
+    fn jog(&mut self, search: &Search<'_>, lower: Node) -> f64 {
+        search.jog_price(lower, &mut Total).total()
     }
 }
 
@@ -1144,7 +1209,7 @@ fn distance_to(r: &Rect<Dbu>, p: Point<Dbu>) -> Dbu {
 mod tests {
     use super::*;
     use crate::tech::LeafClockPins;
-    use crate::tech::{CrossIdx, TrackIdx};
+    use crate::tech::{Cross, CrossIdx, TrackIdx};
     use crate::tests::tiny;
     use pare_common::config::RoutingConfig;
     use pare_common::db::indices::NetId;
@@ -1235,6 +1300,111 @@ mod tests {
                 "a via returns after {run} of a {reach} reach: {path:?}"
             );
         }
+    }
+
+    /// A search for net 0 of the tiny design on M1 and up, with nothing
+    /// routed, at `costs`.
+    fn open_search<'a>(
+        db: &'a NetlistDB,
+        tech: &'a RouteTech,
+        occupancy: &'a Occupancy,
+        marks: &'a Marks,
+        costs: Costs,
+    ) -> Search<'a> {
+        Search {
+            db,
+            tech,
+            occupancy,
+            overlay: None,
+            marks,
+            owner: Owner::Net(NetId(0)),
+            costs,
+            guide: None,
+            own_vias: None,
+            ripped: &[],
+        }
+    }
+
+    fn m1_tech(db: &NetlistDB) -> RouteTech {
+        let config = RoutingConfig {
+            min_layer: Some("M1".to_string()),
+            ..RoutingConfig::default()
+        };
+        RouteTech::new(db, &config, LeafClockPins::default()).unwrap()
+    }
+
+    /// The first crossing of `layer` that `wanted` accepts, on track 1.
+    fn crossing_where(tech: &RouteTech, layer: LayerId, wanted: impl Fn(&Cross) -> bool) -> Node {
+        let cross = tech
+            .layer(layer)
+            .cross
+            .iter_enumerated()
+            .find(|(_, c)| wanted(c));
+        Node {
+            layer,
+            track: TrackIdx(1),
+            cross: cross.unwrap().0,
+        }
+    }
+
+    #[test]
+    fn a_path_to_the_next_track_jogs_across_when_vias_cost_more() {
+        let db = tiny();
+        let tech = m1_tech(&db);
+        let occupancy = Occupancy::new(&tech, Dbu::new(1000));
+        let marks = Marks::default();
+        let costs = Costs {
+            via: 10_000.0,
+            ..COSTS
+        };
+        let search = open_search(&db, &tech, &occupancy, &marks, costs);
+        let from = crossing_where(&tech, LayerId(0), |c| c.up.is_some());
+        let to = Node {
+            track: TrackIdx(2),
+            ..from
+        };
+        let targets: FxHashMap<Node, (usize, f64)> = std::iter::once((to, (0, 0.0))).collect();
+
+        let (path, _) = search.find(&[(from, 0.0)], &targets, &db.die_area).unwrap();
+
+        assert_eq!(path, [from, to]);
+    }
+
+    #[test]
+    fn no_jog_leaves_a_crossing_the_layer_above_does_not_cross() {
+        let db = tiny();
+        let tech = m1_tech(&db);
+        let occupancy = Occupancy::new(&tech, Dbu::new(1000));
+        let marks = Marks::default();
+        let search = open_search(&db, &tech, &occupancy, &marks, COSTS);
+        let n = crossing_where(&tech, LayerId(1), |c| c.up.is_none());
+        let mut out = Vec::new();
+
+        search.neighbours(State::start(n), &db.die_area, &mut FreshCosts, &mut out);
+
+        assert!(
+            out.iter()
+                .all(|(s, _)| s.node.track == n.track || s.node.layer != n.layer)
+        );
+    }
+
+    #[test]
+    fn a_jog_keeps_a_recent_via_only_while_it_lies_within_reach_across() {
+        let db = tiny();
+        let tech = m1_tech(&db);
+        let occupancy = Occupancy::new(&tech, Dbu::new(1000));
+        let marks = Marks::default();
+        let search = open_search(&db, &tech, &occupancy, &marks, COSTS);
+        let n = crossing_where(&tech, LayerId(0), |c| c.up.is_some());
+        let recent = Some(RecentVia {
+            from: LayerId(1),
+            track: n.track,
+            cross: n.cross,
+        });
+        let far = tech.layer(n.layer).tracks.len() - 1;
+
+        assert_eq!(search.after_jog(n.layer, recent, n.track), recent);
+        assert_eq!(search.after_jog(n.layer, recent, TrackIdx::new(far)), None);
     }
 
     const COSTS: Costs = Costs {

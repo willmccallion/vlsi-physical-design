@@ -2,8 +2,8 @@
 //!
 //! Every track crossing inside the window gets an index, and every search
 //! state on a crossing a slot: one per heading while no via is recent, and
-//! one per side the recent via came from and number of crossings back it
-//! landed. Costs, predecessors and step costs then live in arrays reused
+//! one per side the recent via came from, number of crossings back and
+//! number of tracks across it landed. Costs, predecessors and step costs then live in arrays reused
 //! from search to search through generation stamps, not in hash maps.
 
 use super::{Heading, RecentVia, Search, State, StepCosts, Visits};
@@ -40,6 +40,8 @@ struct Numbering {
     nodes: usize,
     /// Most crossings back along its track a recent via can lie.
     reach: u32,
+    /// Most tracks across a recent via can lie, after jogs.
+    across_reach: u32,
 }
 
 impl Numbering {
@@ -48,6 +50,7 @@ impl Numbering {
         let mut spans = Vec::new();
         let mut nodes = 0;
         let mut reach = 0;
+        let mut across_reach = 0;
         for layer in tech.routable_layers() {
             let lt = tech.layer(layer);
             let (Interval { lo: a0, hi: a1 }, Interval { lo: b0, hi: b1 }) =
@@ -73,17 +76,25 @@ impl Numbering {
                 .unwrap_or_default();
             let at: Vec<Dbu> = crosses.map(|c| lt.cross[c].at).collect();
             reach = reach.max(steps_within(&at, via_reach));
+            across_reach = across_reach.max(steps_within(lt.tracks.as_slice(), via_reach));
         }
         Self {
             min_layer: tech.min_layer,
             spans,
             nodes,
             reach,
+            across_reach,
         }
     }
 
+    /// Slots for one side's recent vias: one per crossing back and track
+    /// across.
+    const fn recent_slots(&self) -> usize {
+        (2 * self.reach as usize + 1) * (2 * self.across_reach as usize + 1)
+    }
+
     const fn slots_per_node(&self) -> usize {
-        3 + 2 * (2 * self.reach as usize + 1)
+        3 + 2 * self.recent_slots()
     }
 
     fn node_index(&self, n: Node) -> Option<usize> {
@@ -120,15 +131,18 @@ impl Numbering {
                 Heading::Up => 1,
                 Heading::Down => 2,
             },
-            Some(RecentVia { from, cross }) => {
+            Some(RecentVia { from, track, cross }) => {
                 let side = usize::from(from > state.node.layer);
                 let back = state.node.cross.offset_from(cross);
-                let reach = i64::from(self.reach);
-                if back.abs() > reach {
+                let over = i64::from(state.node.track.0) - i64::from(track.0);
+                let (reach, across) = (i64::from(self.reach), i64::from(self.across_reach));
+                if back.abs() > reach || over.abs() > across {
                     return None;
                 }
-                let offset = usize::try_from(back + reach).ok()?;
-                3 + side * (2 * self.reach as usize + 1) + offset
+                let along = usize::try_from(back + reach).ok()?;
+                let across_offset = usize::try_from(over + across).ok()?;
+                let offset = across_offset * (2 * self.reach as usize + 1) + along;
+                3 + side * self.recent_slots() + offset
             }
         };
         Some(node * self.slots_per_node() + within)
@@ -159,6 +173,7 @@ struct Buffers {
     seen_generation: u32,
     wire: Vec<f64>,
     via: Vec<f64>,
+    jog: Vec<f64>,
     priced: Vec<u8>,
     priced_generation: Vec<u32>,
     pricing: u32,
@@ -179,6 +194,7 @@ impl Buffers {
         if b.priced.len() < nodes {
             b.wire.resize(nodes, 0.0);
             b.via.resize(nodes, 0.0);
+            b.jog.resize(nodes, 0.0);
             b.priced.resize(nodes, 0);
             b.priced_generation.resize(nodes, 0);
         }
@@ -228,6 +244,7 @@ impl Dense {
             numbering: &self.numbering,
             wire: &mut b.wire,
             via: &mut b.via,
+            jog: &mut b.jog,
             priced: &mut b.priced,
             priced_generation: &mut b.priced_generation,
             pricing: b.pricing,
@@ -302,7 +319,9 @@ pub(super) struct CachedCosts<'a> {
     numbering: &'a Numbering,
     wire: &'a mut [f64],
     via: &'a mut [f64],
-    /// Which of a node's step costs are known: wire is bit 0, via bit 1.
+    jog: &'a mut [f64],
+    /// Which of a node's step costs are known: wire is bit 0, via bit 1,
+    /// jog bit 2.
     priced: &'a mut [u8],
     priced_generation: &'a mut [u32],
     pricing: u32,
@@ -341,11 +360,77 @@ impl StepCosts for CachedCosts<'_> {
         }
         self.via[i]
     }
+
+    fn jog(&mut self, search: &Search<'_>, lower: Node) -> f64 {
+        let Some(i) = self.numbering.node_index(lower) else {
+            return super::FreshCosts.jog(search, lower);
+        };
+        if self.known(i) & 4 == 0 {
+            self.jog[i] = super::FreshCosts.jog(search, lower);
+            self.priced[i] |= 4;
+        }
+        self.jog[i]
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    use crate::occupancy::{Occupancy, Owner};
+    use crate::search::{Costs, Marks};
+    use crate::tech::{LeafClockPins, RouteTech};
+    use pare_common::config::RoutingConfig;
+    use pare_common::db::indices::NetId;
+
+    #[test]
+    fn a_recent_via_a_jog_left_on_the_next_track_gets_its_own_slot() {
+        let db = crate::tests::tiny();
+        let config = RoutingConfig {
+            min_layer: Some("M1".to_string()),
+            ..RoutingConfig::default()
+        };
+        let tech = RouteTech::new(&db, &config, LeafClockPins::default()).unwrap();
+        let occupancy = Occupancy::new(&tech, Dbu::new(1000));
+        let marks = Marks::default();
+        let search = Search {
+            db: &db,
+            tech: &tech,
+            occupancy: &occupancy,
+            overlay: None,
+            marks: &marks,
+            owner: Owner::Net(NetId(0)),
+            costs: Costs {
+                via: 50.0,
+                conflict: 8.0,
+                marker: 32.0,
+                decay: 0.95,
+            },
+            guide: None,
+            own_vias: None,
+            ripped: &[],
+        };
+        let numbering = Numbering::new(&search, &db.die_area);
+        let node = Node {
+            layer: LayerId::new(0),
+            track: TrackIdx(2),
+            cross: CrossIdx(3),
+        };
+        let landed_on = |track: TrackIdx| State {
+            node,
+            heading: Heading::Still,
+            recent_via: Some(RecentVia {
+                from: LayerId::new(1),
+                track,
+                cross: node.cross,
+            }),
+        };
+
+        let here = numbering.slot(landed_on(TrackIdx(2)));
+        let beside = numbering.slot(landed_on(TrackIdx(1)));
+
+        assert!(here.is_some() && beside.is_some() && here != beside);
+    }
 
     #[test]
     fn steps_within_counts_the_longest_run_closer_than_the_reach() {
