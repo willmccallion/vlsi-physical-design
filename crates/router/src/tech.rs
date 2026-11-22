@@ -7,6 +7,7 @@
 //! lands on a track of both layers it joins.
 
 use crate::RouteError;
+use crate::access::Node;
 use crate::global::Gcells;
 use pare_common::config::RoutingConfig;
 use pare_common::db::design::{NetlistDB, NonDefaultRule, PinOwner};
@@ -598,6 +599,26 @@ impl RouteTech {
     pub fn routable(&self, layer: LayerId) -> bool {
         self.min_layer <= layer && layer <= self.max_layer
     }
+
+    /// Whether a jog may leave `n` across to the same crossing of the next
+    /// track: that track exists, and the crossing lines up with a track of
+    /// the routing layer above, or of the one below on the top layer, as
+    /// `FlexGridGraph::initEdges` lays non-preferred edges along that
+    /// layer's tracks.
+    // NOTE: TritonRoute's grid also has rows at other layers' track
+    // coordinates, so its wrong-way edges may end between this layer's
+    // tracks; PARE's jogs join neighbouring tracks of the layer only.
+    pub fn jog_allowed(&self, n: Node) -> bool {
+        let lt = self.layer(n.layer);
+        let (Some(_), Some(cross)) = (lt.tracks.get(n.track.plus(1)), lt.cross.get(n.cross)) else {
+            return false;
+        };
+        if n.layer < self.max_layer {
+            cross.up.is_some()
+        } else {
+            cross.down.is_some()
+        }
+    }
 }
 
 /// Sorted, deduplicated union of two coordinate lists.
@@ -799,6 +820,73 @@ fn ranked_vias(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The tiny fixture's tech on all its layers, M1 to M3.
+    fn tiny_tech() -> RouteTech {
+        let config = RoutingConfig {
+            min_layer: Some("M1".to_string()),
+            ..RoutingConfig::default()
+        };
+        RouteTech::new(&crate::tests::tiny(), &config, LeafClockPins::default()).unwrap()
+    }
+
+    /// The first crossing of `layer` that `wanted` accepts, on its first
+    /// track.
+    fn first_crossing(tech: &RouteTech, layer: LayerId, wanted: impl Fn(&Cross) -> bool) -> Node {
+        let cross = tech
+            .layer(layer)
+            .cross
+            .iter_enumerated()
+            .find(|(_, c)| wanted(c))
+            .unwrap()
+            .0;
+        Node {
+            layer,
+            track: TrackIdx(0),
+            cross,
+        }
+    }
+
+    #[test]
+    fn a_jog_may_leave_a_crossing_under_a_track_of_the_layer_above() {
+        let tech = tiny_tech();
+
+        let n = first_crossing(&tech, LayerId(1), |c| c.up.is_some());
+
+        assert!(tech.jog_allowed(n));
+    }
+
+    #[test]
+    fn no_jog_leaves_a_crossing_that_only_the_layer_below_crosses() {
+        let tech = tiny_tech();
+
+        let n = first_crossing(&tech, LayerId(1), |c| c.up.is_none());
+
+        assert!(!tech.jog_allowed(n));
+    }
+
+    #[test]
+    fn on_the_top_layer_a_jog_runs_along_a_track_of_the_layer_below() {
+        let tech = tiny_tech();
+
+        let n = first_crossing(&tech, tech.max_layer, |c| c.down.is_some());
+
+        assert!(tech.jog_allowed(n));
+    }
+
+    #[test]
+    fn no_jog_leaves_a_layer_s_last_track() {
+        let tech = tiny_tech();
+        let lt = tech.layer(LayerId(1));
+        let up = first_crossing(&tech, LayerId(1), |c| c.up.is_some());
+
+        let last = Node {
+            track: TrackIdx::new(lt.tracks.len() - 1),
+            ..up
+        };
+
+        assert!(!tech.jog_allowed(last));
+    }
 
     fn die(width: i64) -> Rect<Dbu> {
         Rect::new(

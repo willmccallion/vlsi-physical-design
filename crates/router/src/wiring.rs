@@ -1,7 +1,8 @@
 //! A net's wiring as edges of the track graph.
 //!
-//! An edge is a step between neighbouring crossings on one track, or a via
-//! from a crossing up to the one above it. Wiring kept as edges can be
+//! An edge is a step between neighbouring crossings on one track, a jog
+//! across to the same crossing of the next track, or a via from a crossing
+//! up to the one above it. Wiring kept as edges can be
 //! ripped up piece by piece, its connectivity is graph reachability, and it
 //! becomes metal and DEF wiring by merging consecutive steps along a track.
 
@@ -31,14 +32,21 @@ pub enum Edge {
         /// The crossing on the layer above.
         upper: Node,
     },
+    /// From a crossing across to the same crossing of the next track: a
+    /// wire against its layer's preferred direction.
+    Jog(Node),
 }
 
 impl Edge {
     /// The edge joining `a` and `b`, if they are neighbouring crossings on
-    /// one track or crossings one layer apart.
+    /// one track, the same crossing of neighbouring tracks, or crossings one
+    /// layer apart.
     pub fn between(a: Node, b: Node) -> Option<Self> {
         if a.layer == b.layer && a.track == b.track && a.cross.offset_from(b.cross).abs() == 1 {
             return Some(Self::Wire(if a.cross < b.cross { a } else { b }));
+        }
+        if a.layer == b.layer && a.cross == b.cross && a.track.0.abs_diff(b.track.0) == 1 {
+            return Some(Self::Jog(if a.track < b.track { a } else { b }));
         }
         if a.layer.index().abs_diff(b.layer.index()) == 1 {
             let (lower, upper) = if a.layer < b.layer { (a, b) } else { (b, a) };
@@ -58,6 +66,13 @@ impl Edge {
                 },
             ),
             Self::Via { lower, upper } => (lower, upper),
+            Self::Jog(n) => (
+                n,
+                Node {
+                    track: n.track.plus(1),
+                    ..n
+                },
+            ),
         }
     }
 }
@@ -141,9 +156,9 @@ impl NetRoute {
             (from < to).then_some(Run { from, to, ..run })
         };
         Self {
-            edges: self
-                .edges
-                .clipped(clip, |&(lower, _)| area.contains(point(lower))),
+            edges: self.edges.clipped(clip, |(a, b)| {
+                area.contains(point(a)) || area.contains(point(b))
+            }),
             patches: self
                 .patches
                 .iter()
@@ -164,8 +179,9 @@ impl NetRoute {
         }
     }
 
-    /// Its wiring for the design: runs of wire along each track, vias, and
-    /// the stub and via stack of every access point.
+    /// Its wiring for the design: runs of wire along each track, vias, runs
+    /// of jogs across tracks, and the stub and via stack of every access
+    /// point.
     pub fn elems(&self, tech: &RouteTech) -> Vec<RouteElem> {
         let point = |n: Node| tech.layer(n.layer).point(n.track, n.cross);
         let mut out: Vec<RouteElem> = self
@@ -183,6 +199,19 @@ impl NetRoute {
             to: point(run.node(run.to)),
             extensions: (None, None),
         }));
+        out.extend(
+            jog_runs(self.edges.jogs())
+                .into_iter()
+                .map(|(first, last)| RouteElem::Wire {
+                    layer: first.layer,
+                    from: point(first),
+                    to: point(Node {
+                        track: last.track.plus(1),
+                        ..last
+                    }),
+                    extensions: (None, None),
+                }),
+        );
         for a in &self.access {
             out.extend(access_elems(tech, a));
         }
@@ -220,6 +249,17 @@ impl NetRoute {
             .flat_map(|e| elem_cuts(db, e))
             .collect()
     }
+}
+
+/// The jogs, as each run of them across consecutive tracks at one crossing
+/// of one layer, by its first and last jog.
+fn jog_runs(jogs: &[Node]) -> Vec<(Node, Node)> {
+    let mut across: Vec<Node> = jogs.to_vec();
+    across.sort_unstable_by_key(|n| (n.layer, n.cross, n.track));
+    across
+        .chunk_by(|a, b| a.layer == b.layer && a.cross == b.cross && a.track.plus(1) == b.track)
+        .map(|run| (run[0], run[run.len() - 1]))
+        .collect()
 }
 
 /// Union-find over crossings.
@@ -331,7 +371,7 @@ fn narrow_gaps(mut spans: Vec<Interval>, spacing: Dbu) -> Vec<Interval> {
 }
 
 /// The crossings a route uses on one track: stretches of consecutive
-/// crossings its runs cover, and single crossings its vias and access
+/// crossings its runs cover, and single crossings its vias, jogs and access
 /// points stand on.
 #[derive(Debug, Default)]
 struct UsedCrossings {
@@ -354,6 +394,13 @@ impl UsedCrossings {
             .vias()
             .iter()
             .flat_map(|&pair| <[Node; 2]>::from(pair))
+            .chain(
+                route
+                    .edges
+                    .jogs()
+                    .iter()
+                    .flat_map(|&n| <[Node; 2]>::from(Edge::Jog(n).ends())),
+            )
             .chain(route.access.iter().map(|a| a.node))
             .filter(|&n| on_track(n))
             .map(|n| n.cross)
@@ -449,7 +496,7 @@ mod tests {
     }
 
     #[test]
-    fn neighbours_on_a_track_or_a_layer_apart_are_joined_by_one_edge() {
+    fn neighbours_on_a_track_across_tracks_or_a_layer_apart_are_joined_by_one_edge() {
         assert_eq!(
             Edge::between(node(1, 4, 7), node(1, 4, 6)),
             Some(Edge::Wire(node(1, 4, 6)))
@@ -461,7 +508,34 @@ mod tests {
                 upper: node(2, 9, 3)
             })
         );
-        assert_eq!(Edge::between(node(1, 4, 7), node(1, 5, 7)), None);
+        assert_eq!(
+            Edge::between(node(1, 5, 7), node(1, 4, 7)),
+            Some(Edge::Jog(node(1, 4, 7)))
+        );
+        assert_eq!(Edge::between(node(1, 4, 7), node(1, 6, 7)), None);
+        assert_eq!(Edge::between(node(1, 4, 7), node(1, 5, 8)), None);
+    }
+
+    #[test]
+    fn a_jog_joins_its_crossing_to_the_same_crossing_of_the_next_track() {
+        assert_eq!(
+            Edge::Jog(node(1, 4, 7)).ends(),
+            (node(1, 4, 7), node(1, 5, 7))
+        );
+    }
+
+    #[test]
+    fn jogs_across_consecutive_tracks_at_one_crossing_make_one_run() {
+        let jogs = [node(1, 5, 7), node(1, 4, 7), node(1, 7, 7), node(1, 4, 8)];
+
+        assert_eq!(
+            jog_runs(&jogs),
+            [
+                (node(1, 4, 7), node(1, 5, 7)),
+                (node(1, 7, 7), node(1, 7, 7)),
+                (node(1, 4, 8), node(1, 4, 8)),
+            ]
+        );
     }
 
     #[test]

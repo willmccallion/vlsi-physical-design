@@ -2,7 +2,7 @@
 //!
 //! A route's wire edges come in long stretches of consecutive crossings
 //! along one track, so a set of edges keeps each stretch as one [`Run`]
-//! rather than one edge per crossing, and its vias apart. It reads back as
+//! rather than one edge per crossing, and its vias and jogs apart. It reads back as
 //! the same edges in the order a sorted list of them takes, so code that
 //! walks a route's edges sees what it always saw.
 
@@ -66,18 +66,21 @@ impl Run {
 }
 
 /// A set of edges of the track graph: its wire edges merged into runs along
-/// each track, sorted, apart and not touching, and its vias sorted without
-/// repeats.
+/// each track, sorted, apart and not touching, and its vias and jogs each
+/// sorted without repeats.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct EdgeSet {
     runs: Vec<Run>,
     vias: Vec<(Node, Node)>,
+    jogs: Vec<Node>,
 }
 
 impl EdgeSet {
     /// Bytes its vectors hold on the heap.
     pub(crate) const fn heap_bytes(&self) -> usize {
-        self.runs.capacity() * size_of::<Run>() + self.vias.capacity() * size_of::<(Node, Node)>()
+        self.runs.capacity() * size_of::<Run>()
+            + self.vias.capacity() * size_of::<(Node, Node)>()
+            + self.jogs.capacity() * size_of::<Node>()
     }
 
     /// The set of the wire edges of `runs`.
@@ -85,6 +88,7 @@ impl EdgeSet {
         let mut set = Self {
             runs: runs.into_iter().filter(|r| r.to > r.from).collect(),
             vias: Vec::new(),
+            jogs: Vec::new(),
         };
         set.runs = merged(std::mem::take(&mut set.runs));
         set
@@ -92,26 +96,22 @@ impl EdgeSet {
 
     /// Adds `edges` to the set.
     pub fn extend(&mut self, edges: impl IntoIterator<Item = Edge>) {
-        let mut added_runs = false;
-        let mut added_vias = false;
+        let (runs, vias, jogs) = (self.runs.len(), self.vias.len(), self.jogs.len());
         for e in edges {
             match e {
-                Edge::Wire(n) => {
-                    self.runs.push(Run::step(n));
-                    added_runs = true;
-                }
-                Edge::Via { lower, upper } => {
-                    self.vias.push((lower, upper));
-                    added_vias = true;
-                }
+                Edge::Wire(n) => self.runs.push(Run::step(n)),
+                Edge::Via { lower, upper } => self.vias.push((lower, upper)),
+                Edge::Jog(n) => self.jogs.push(n),
             }
         }
-        if added_runs {
+        if self.runs.len() > runs {
             self.runs = merged(std::mem::take(&mut self.runs));
         }
-        if added_vias {
-            self.vias.sort_unstable();
-            self.vias.dedup();
+        if self.vias.len() > vias {
+            sort_and_dedup(&mut self.vias);
+        }
+        if self.jogs.len() > jogs {
+            sort_and_dedup(&mut self.jogs);
         }
     }
 
@@ -123,8 +123,11 @@ impl EdgeSet {
         }
         if !other.vias.is_empty() {
             self.vias.extend_from_slice(&other.vias);
-            self.vias.sort_unstable();
-            self.vias.dedup();
+            sort_and_dedup(&mut self.vias);
+        }
+        if !other.jogs.is_empty() {
+            self.jogs.extend_from_slice(&other.jogs);
+            sort_and_dedup(&mut self.jogs);
         }
     }
 
@@ -135,6 +138,9 @@ impl EdgeSet {
         }
         if !other.vias.is_empty() {
             self.vias.retain(|v| other.vias.binary_search(v).is_err());
+        }
+        if !other.jogs.is_empty() {
+            self.jogs.retain(|j| other.jogs.binary_search(j).is_err());
         }
     }
 
@@ -164,19 +170,32 @@ impl EdgeSet {
         self.runs = runs;
         self.vias
             .retain(|&(lower, upper)| keep(Edge::Via { lower, upper }));
+        self.jogs.retain(|&n| keep(Edge::Jog(n)));
     }
 
     /// The set of the part of each run `clip` keeps, which must lie within
-    /// the run, and the vias `keep_via` accepts.
+    /// the run, and the vias and jogs `keep_ends` accepts by the crossings
+    /// they join.
     #[must_use]
     pub fn clipped(
         &self,
         clip: impl FnMut(Run) -> Option<Run>,
-        keep_via: impl FnMut(&(Node, Node)) -> bool,
+        mut keep_ends: impl FnMut((Node, Node)) -> bool,
     ) -> Self {
         Self {
             runs: self.runs.iter().copied().filter_map(clip).collect(),
-            vias: self.vias.iter().copied().filter(keep_via).collect(),
+            vias: self
+                .vias
+                .iter()
+                .copied()
+                .filter(|&v| keep_ends(v))
+                .collect(),
+            jogs: self
+                .jogs
+                .iter()
+                .filter(|&&n| keep_ends(Edge::Jog(n).ends()))
+                .copied()
+                .collect(),
         }
     }
 
@@ -190,15 +209,31 @@ impl EdgeSet {
         &self.vias
     }
 
-    /// Its edges, in the order a sorted list of them takes: the wire edges
-    /// by layer, track and crossing, then the vias.
-    pub fn iter(&self) -> impl Iterator<Item = Edge> + '_ {
-        self.runs.iter().flat_map(|r| r.edges()).chain(
-            self.vias
-                .iter()
-                .map(|&(lower, upper)| Edge::Via { lower, upper }),
-        )
+    /// Its jogs, each as the crossing on the lower of its two tracks,
+    /// sorted.
+    pub fn jogs(&self) -> &[Node] {
+        &self.jogs
     }
+
+    /// Its edges, in the order a sorted list of them takes: the wire edges
+    /// by layer, track and crossing, then the vias, then the jogs.
+    pub fn iter(&self) -> impl Iterator<Item = Edge> + '_ {
+        self.runs
+            .iter()
+            .flat_map(|r| r.edges())
+            .chain(
+                self.vias
+                    .iter()
+                    .map(|&(lower, upper)| Edge::Via { lower, upper }),
+            )
+            .chain(self.jogs.iter().map(|&n| Edge::Jog(n)))
+    }
+}
+
+/// Sorts `items` and drops repeats.
+fn sort_and_dedup<T: Ord>(items: &mut Vec<T>) {
+    items.sort_unstable();
+    items.dedup();
 }
 
 impl FromIterator<Edge> for EdgeSet {
@@ -272,6 +307,10 @@ mod tests {
         Edge::Wire(node(layer, track, cross))
     }
 
+    fn jog(track: u32, cross: u32) -> Edge {
+        Edge::Jog(node(1, track, cross))
+    }
+
     fn via(track: u32, cross: u32) -> Edge {
         Edge::Via {
             lower: node(1, track, cross),
@@ -297,7 +336,10 @@ mod tests {
             wire(1, 4, 9),
             via(2, 2),
             wire(1, 4, 6),
+            jog(4, 6),
             wire(1, 5, 0),
+            jog(2, 3),
+            jog(4, 6),
         ]
     }
 
@@ -346,7 +388,13 @@ mod tests {
     #[test]
     fn subtracting_leaves_what_removing_each_edge_leaves() {
         let mut set: EdgeSet = mixed().into_iter().collect();
-        let gone = [wire(1, 4, 6), via(4, 9), wire(1, 5, 0), wire(3, 1, 1)];
+        let gone = [
+            wire(1, 4, 6),
+            via(4, 9),
+            wire(1, 5, 0),
+            jog(2, 3),
+            wire(3, 1, 1),
+        ];
 
         set.subtract(&gone.into_iter().collect());
 
@@ -447,6 +495,24 @@ mod tests {
                 to: CrossIdx(5)
             }]
         );
+    }
+
+    #[test]
+    fn clipping_keeps_the_jogs_whose_ends_it_accepts() {
+        let set: EdgeSet = mixed().into_iter().collect();
+
+        let clipped = set.clipped(|_| None, |(_, b)| b.track == TrackIdx(5));
+
+        assert_eq!(clipped.iter().collect::<Vec<_>>(), [jog(4, 6)]);
+    }
+
+    #[test]
+    fn retaining_drops_the_jogs_it_refuses() {
+        let mut set: EdgeSet = mixed().into_iter().collect();
+
+        set.retain(|e| e != jog(2, 3));
+
+        assert_eq!(set.jogs(), [node(1, 4, 6)]);
     }
 
     #[test]

@@ -71,16 +71,19 @@ pub(super) fn owner_text(db: &NetlistDB, owner: Owner) -> String {
     }
 }
 
-/// A route as its runs along tracks and its vias, in database units: each
-/// maximal run of wire edges on one track as `layer (x0, y0)-(x1, y1)` and
-/// each via as `layer^ (x, y)` on the layer below it.
+/// A route as its runs along tracks, its vias and its jogs, in database
+/// units: each maximal run of wire edges on one track as
+/// `layer (x0, y0)-(x1, y1)`, each via as `layer^ (x, y)` on the layer below
+/// it, and each jog as `layer~ (x0, y0)-(x1, y1)`.
 pub(super) fn route_text(db: &NetlistDB, tech: &RouteTech, edges: &[Edge]) -> String {
     let mut wires: Vec<Node> = Vec::new();
     let mut vias: Vec<Node> = Vec::new();
+    let mut jogs: Vec<Edge> = Vec::new();
     for edge in edges {
         match *edge {
             Edge::Wire(node) => wires.push(node),
             Edge::Via { lower, .. } => vias.push(lower),
+            Edge::Jog(_) => jogs.push(*edge),
         }
     }
     wires.sort_unstable();
@@ -113,13 +116,27 @@ pub(super) fn route_text(db: &NetlistDB, tech: &RouteTech, edges: &[Edge]) -> St
             at.y.get()
         );
     }
+    for jog in jogs {
+        let (a, b) = jog.ends();
+        let point = |n: Node| tech.layer(n.layer).point(n.track, n.cross);
+        let (from, to) = (point(a), point(b));
+        let _ = write!(
+            out,
+            " {}~ ({}, {})-({}, {})",
+            db.library.layer(a.layer).name,
+            from.x.get(),
+            from.y.get(),
+            to.x.get(),
+            to.y.get()
+        );
+    }
     out.trim_start().to_string()
 }
 
 /// An explanation as its total and its parts, and whose wiring it meets.
 pub(super) fn cost_text(db: &NetlistDB, e: &Explanation) -> String {
     let mut out = format!(
-        "{:.0} = length {:.0} + {} vias {:.0} + conflicts {:.0} + markers {:.0} + obstacles {:.0} + own vias {:.0}",
+        "{:.0} = length {:.0} + {} vias {:.0} + conflicts {:.0} + markers {:.0} + obstacles {:.0} + own vias {:.0} + wrong way {:.0}",
         e.total(),
         e.length,
         e.vias,
@@ -127,7 +144,8 @@ pub(super) fn cost_text(db: &NetlistDB, e: &Explanation) -> String {
         e.conflict,
         e.marker,
         e.obstacle,
-        e.own_vias
+        e.own_vias,
+        e.wrong_way
     );
     if !e.met.is_empty() {
         let names: Vec<String> = e.met.iter().map(|&o| owner_text(db, o)).collect();

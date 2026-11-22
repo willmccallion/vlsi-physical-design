@@ -42,6 +42,10 @@ use std::collections::BinaryHeap;
 // minWidth * 20 when blocked; PARE makes all fixed metal one near-wall price.
 const OBSTACLE_COST: f64 = 1e9;
 
+/// Cost per unit of length of a jog against its layer's preferred
+/// direction, beyond its length: `TritonRoute`'s `GRIDCOST` default of 2.
+const GRID_COST: f64 = 2.0;
+
 /// How hard one A* run tries.
 #[derive(Clone, Copy, Debug)]
 struct Effort {
@@ -112,11 +116,12 @@ struct Price {
     conflict: f64,
     marker: f64,
     obstacle: f64,
+    wrong_way: f64,
 }
 
 impl Price {
     fn total(self) -> f64 {
-        self.length + self.conflict + self.marker + self.obstacle
+        self.length + self.conflict + self.marker + self.obstacle + self.wrong_way
     }
 }
 
@@ -153,12 +158,21 @@ pub(crate) struct Explanation {
     pub obstacle: f64,
     /// What crowding the net's own vias costs.
     pub own_vias: f64,
+    /// What running against layers' preferred directions costs beyond its
+    /// length.
+    pub wrong_way: f64,
 }
 
 impl Explanation {
     /// The whole cost.
     pub fn total(&self) -> f64 {
-        self.length + self.via_cost + self.conflict + self.marker + self.obstacle + self.own_vias
+        self.length
+            + self.via_cost
+            + self.conflict
+            + self.marker
+            + self.obstacle
+            + self.own_vias
+            + self.wrong_way
     }
 }
 
@@ -644,6 +658,7 @@ impl Search<'_> {
                 0.0
             },
             obstacle: if meets.fixed { OBSTACLE_COST } else { 0.0 },
+            wrong_way: 0.0,
         }
     }
 
@@ -687,6 +702,28 @@ impl Search<'_> {
         self.price(length, meets, marked)
     }
 
+    /// Price of the jog from `lower` across to the same crossing of the
+    /// next track, telling `parts` whose metal it meets: what a wire step
+    /// of its length would cost, plus [`GRID_COST`] per unit of length for
+    /// running against the layer's preferred direction, as
+    /// `FlexGridGraph::initEdges` marks a non-preferred edge.
+    fn jog_price(&self, lower: Node, parts: &mut impl CostParts) -> Price {
+        let upper = Node {
+            track: lower.track.plus(1),
+            ..lower
+        };
+        let (a, b) = (self.point(lower), self.point(upper));
+        let length = a.manhattan(b).to_f64();
+        let meets = wire_rect(a, b, self.width(lower.layer)).map_or_else(Meets::default, |r| {
+            self.metal_meets(lower.layer, &r, true, parts)
+        });
+        let marked = self.marks.planar(lower) || self.marks.planar(upper);
+        Price {
+            wrong_way: GRID_COST * length,
+            ..self.price(length, meets, marked)
+        }
+    }
+
     /// Price of the via up from `lower`, apart from crowding the net's own
     /// vias, telling `parts` whose metal and cuts it meets. A via is as long
     /// as its cost.
@@ -720,6 +757,12 @@ impl Search<'_> {
                     parts.vias += 1;
                     parts.via_cost += price.length;
                     parts.own_vias += self.own_via_cost(lower.layer, self.point(lower));
+                    price
+                }
+                Edge::Jog(lower) => {
+                    let price = self.jog_price(lower, &mut parts);
+                    parts.length += price.length;
+                    parts.wrong_way += price.wrong_way;
                     price
                 }
             };
@@ -1272,6 +1315,34 @@ mod tests {
     }
 
     #[test]
+    fn a_free_jog_costs_its_length_and_the_grid_cost_per_unit_of_it() {
+        let db = tiny();
+        let (tech, _) = beside_a_wire(&db);
+        let occupancy = Occupancy::new(&tech, Dbu::new(1000));
+        let marks = Marks::default();
+        let search = Search {
+            db: &db,
+            tech: &tech,
+            occupancy: &occupancy,
+            overlay: None,
+            marks: &marks,
+            owner: Owner::Net(NetId(0)),
+            costs: COSTS,
+            guide: None,
+            own_vias: None,
+            ripped: &[],
+        };
+        let lower = step(1, 4);
+        let lt = tech.layer(lower.layer);
+        let length = (lt.tracks[TrackIdx(2)] - lt.tracks[TrackIdx(1)]).to_f64();
+
+        let price = search.jog_price(lower, &mut Total);
+
+        let total = (1.0 + GRID_COST) * length;
+        assert!((price.total() - total).abs() < 1e-9, "{price:?}");
+    }
+
+    #[test]
     fn a_step_over_wiring_being_routed_again_costs_only_its_length() {
         let db = tiny();
         let (tech, occupancy) = beside_a_wire(&db);
@@ -1352,6 +1423,7 @@ mod tests {
             .map(|e| match *e {
                 Edge::Wire(n) => FreshCosts.wire(&search, n),
                 Edge::Via { lower, .. } => FreshCosts.via(&search, lower),
+                Edge::Jog(lower) => search.jog_price(lower, &mut Total).total(),
             })
             .sum();
 
