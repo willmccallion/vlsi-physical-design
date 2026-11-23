@@ -346,22 +346,15 @@ impl OwnVias {
         via: ViaId,
         at: Point<Dbu>,
     ) -> usize {
-        let key = self.vias.bucket(at);
-        let one = Point::new(Bucket(1), Bucket(1));
         let shapes = &db.library.via(via).shapes;
-        let spacing = |layer: LayerRef| match layer {
-            LayerRef::Routing(l) => tech.wire_spacing(self.rule, l),
-            LayerRef::Cut(c) => db.library.cut_layers[c].spacing.unwrap_or_default(),
-        };
-        self.vias
-            .between(key - one, key + one)
+        self.near(&Rect::new(at, at))
             .filter(|&&(other, p)| {
                 let theirs = &db.library.via(other).shapes;
                 shapes.iter().any(|a| {
                     theirs.iter().any(|b| {
                         a.layer == b.layer
                             && too_close(
-                                spacing(a.layer),
+                                self.spacing(db, tech, a.layer),
                                 &a.rect.translate(at),
                                 &b.rect.translate(p),
                             )
@@ -369,6 +362,51 @@ impl OwnVias {
                 })
             })
             .count()
+    }
+
+    /// How many of the vias a piece of metal `rect` on `layer` would crowd
+    /// along the layer's tracks: their metal there lies across the same
+    /// tracks as `rect` and ends short of it by less than the spacing.
+    fn crowded_along(
+        &self,
+        db: &NetlistDB,
+        tech: &RouteTech,
+        layer: LayerId,
+        rect: &Rect<Dbu>,
+    ) -> usize {
+        let lt = tech.layer(layer);
+        let (across, _) = lt.across_along_rect(rect);
+        let on = LayerRef::Routing(layer);
+        let spacing = self.spacing(db, tech, on);
+        self.near(rect)
+            .filter(|&&(via, p)| {
+                db.library.via(via).shapes.iter().any(|s| {
+                    let theirs = s.rect.translate(p);
+                    let (their_across, _) = lt.across_along_rect(&theirs);
+                    s.layer == on
+                        && !across.overlap(their_across).is_empty()
+                        && too_close(spacing, rect, &theirs)
+                })
+            })
+            .count()
+    }
+
+    /// The vias filed close enough to `rect` that their shapes could crowd
+    /// a shape within it.
+    fn near(&self, rect: &Rect<Dbu>) -> impl Iterator<Item = &PlacedVia> {
+        let one = Point::new(Bucket(1), Bucket(1));
+        self.vias.between(
+            self.vias.bucket(rect.min) - one,
+            self.vias.bucket(rect.max) + one,
+        )
+    }
+
+    /// The spacing the net's shapes on `layer` keep.
+    fn spacing(&self, db: &NetlistDB, tech: &RouteTech, layer: LayerRef) -> Dbu {
+        match layer {
+            LayerRef::Routing(l) => tech.wire_spacing(self.rule, l),
+            LayerRef::Cut(c) => db.library.cut_layers[c].spacing.unwrap_or_default(),
+        }
     }
 }
 
@@ -772,6 +810,7 @@ impl Search<'_> {
                     let price = self.jog_price(lower, &mut parts);
                     parts.length += price.length;
                     parts.wrong_way += price.wrong_way;
+                    parts.own_vias += self.own_jog_cost(lower);
                     price
                 }
             };
@@ -791,6 +830,29 @@ impl Search<'_> {
             .is_some_and(|own| own.crowded(self.db, self.tech, via, at) > 0);
         if crowds {
             self.costs.conflict * self.costs.via
+        } else {
+            0.0
+        }
+    }
+
+    /// Cost of the jog from `lower` across to the next track crowding the
+    /// net's own vias along their tracks, such as the access via its first
+    /// node was reached from: a conflict over the jog's length.
+    // NOTE: FlexGridGraph::getNextPathCost charges a turn within
+    // viaForbiddenTurnLen of the path's last via; PARE checks the jog's
+    // metal against the net's via pads, which also sees access vias. A pad
+    // short of the jog across the tracks is left alone, since the next jog
+    // of a chain closes that gap.
+    fn own_jog_cost(&self, lower: Node) -> f64 {
+        let Some(own) = self.own_vias else {
+            return 0.0;
+        };
+        let (from, to) = Edge::Jog(lower).ends();
+        let (a, b) = (self.point(from), self.point(to));
+        let crowds = wire_rect(a, b, self.width(lower.layer))
+            .is_some_and(|r| own.crowded_along(self.db, self.tech, lower.layer, &r) > 0);
+        if crowds {
+            self.costs.conflict * a.manhattan(b).to_f64()
         } else {
             0.0
         }
@@ -953,7 +1015,7 @@ impl Search<'_> {
             heading: Heading::Still,
             recent_via: self.after_jog(n.layer, state.recent_via, track),
         };
-        Some((moved, costs.jog(self, lower)))
+        Some((moved, costs.jog(self, lower) + self.own_jog_cost(lower)))
     }
 
     /// The via from `state` to the layer above or below, with what it
@@ -1209,10 +1271,11 @@ fn distance_to(r: &Rect<Dbu>, p: Point<Dbu>) -> Dbu {
 mod tests {
     use super::*;
     use crate::tech::LeafClockPins;
-    use crate::tech::{Cross, CrossIdx, TrackIdx};
+    use crate::tech::{Cross, CrossIdx, LayerTech, TrackIdx};
     use crate::tests::tiny;
     use pare_common::config::RoutingConfig;
     use pare_common::db::indices::NetId;
+    use pare_common::db::library::Direction;
 
     /// Runs on one track between two vias through the same cut, as the run's
     /// length and the reach of that cut.
@@ -1510,6 +1573,117 @@ mod tests {
 
         let total = (1.0 + GRID_COST) * length;
         assert!((price.total() - total).abs() < 1e-9, "{price:?}");
+    }
+
+    /// The point `along` the track at `across` of `lt`.
+    fn across_along_point(lt: &LayerTech, across: Dbu, along: Dbu) -> Point<Dbu> {
+        match lt.direction {
+            Direction::Horizontal => Point::new(along, across),
+            Direction::Vertical => Point::new(across, along),
+        }
+    }
+
+    /// The net's own vias: one up from M1 on the track of `jog`, whose pad
+    /// ends `gap` short of the jog's metal along that track.
+    fn own_via_short_of(db: &NetlistDB, tech: &RouteTech, jog: Node, gap: Dbu) -> OwnVias {
+        let lt = tech.layer(jog.layer);
+        let via = tech.via_above(jog.layer);
+        let (_, pad) = lt.across_along_rect(&via.bottom);
+        let jog_end = lt.cross[jog.cross].at + lt.width / 2;
+        let at = across_along_point(lt, lt.tracks[jog.track], jog_end + gap - pad.lo);
+        let mut own = OwnVias::new(db, tech, None);
+        own.add(via.via, at);
+        own
+    }
+
+    #[test]
+    fn a_jog_whose_metal_crowds_the_nets_own_via_pays_a_conflict_over_its_length() {
+        let db = tiny();
+        let tech = m1_tech(&db);
+        let occupancy = Occupancy::new(&tech, Dbu::new(1000));
+        let marks = Marks::default();
+        let jog = crossing_where(&tech, LayerId(0), |c| c.up.is_some());
+        let own = own_via_short_of(&db, &tech, jog, tech.layer(jog.layer).spacing / 2);
+        let search = Search {
+            own_vias: Some(&own),
+            ..open_search(&db, &tech, &occupancy, &marks, COSTS)
+        };
+        let lt = tech.layer(jog.layer);
+        let jogged = Node {
+            track: jog.track.plus(1),
+            ..jog
+        };
+        let length = (lt.tracks[jogged.track] - lt.tracks[jog.track]).to_f64();
+        let mut out = Vec::new();
+
+        search.neighbours(State::start(jog), &db.die_area, &mut FreshCosts, &mut out);
+
+        let (_, cost) = out.iter().find(|(s, _)| s.node == jogged).unwrap();
+        let expected = (1.0 + GRID_COST + COSTS.conflict) * length;
+        assert!((cost - expected).abs() < 1e-9, "{cost} against {expected}");
+    }
+
+    #[test]
+    fn a_jog_whose_metal_overlaps_the_nets_own_via_pays_nothing_for_it() {
+        let db = tiny();
+        let tech = m1_tech(&db);
+        let occupancy = Occupancy::new(&tech, Dbu::new(1000));
+        let marks = Marks::default();
+        let jog = crossing_where(&tech, LayerId(0), |c| c.up.is_some());
+        let overlap = tech.layer(jog.layer).width;
+        let own = own_via_short_of(&db, &tech, jog, -overlap);
+        let search = Search {
+            own_vias: Some(&own),
+            ..open_search(&db, &tech, &occupancy, &marks, COSTS)
+        };
+
+        assert!(search.own_jog_cost(jog).abs() < 1e-9);
+    }
+
+    #[test]
+    fn a_jog_stopping_a_track_short_of_the_nets_own_via_pays_nothing_for_it() {
+        let db = tiny();
+        let tech = m1_tech(&db);
+        let occupancy = Occupancy::new(&tech, Dbu::new(1000));
+        let marks = Marks::default();
+        let jog = crossing_where(&tech, LayerId(0), |c| c.up.is_some());
+        let lt = tech.layer(jog.layer);
+        let via = tech.via_above(jog.layer);
+        let at = lt.point(jog.track.plus(2), jog.cross);
+        let mut own = OwnVias::new(&db, &tech, None);
+        own.add(via.via, at);
+        let (a, b) = (
+            lt.point(jog.track, jog.cross),
+            lt.point(jog.track.plus(1), jog.cross),
+        );
+        let metal = wire_rect(a, b, lt.width).unwrap();
+        assert!(too_close(lt.spacing, &metal, &via.bottom.translate(at)));
+        let search = Search {
+            own_vias: Some(&own),
+            ..open_search(&db, &tech, &occupancy, &marks, COSTS)
+        };
+
+        assert!(search.own_jog_cost(jog).abs() < 1e-9);
+    }
+
+    #[test]
+    fn explaining_a_jog_counts_its_crowding_the_nets_own_via() {
+        let db = tiny();
+        let tech = m1_tech(&db);
+        let occupancy = Occupancy::new(&tech, Dbu::new(1000));
+        let marks = Marks::default();
+        let jog = crossing_where(&tech, LayerId(0), |c| c.up.is_some());
+        let own = own_via_short_of(&db, &tech, jog, tech.layer(jog.layer).spacing / 2);
+        let search = Search {
+            own_vias: Some(&own),
+            ..open_search(&db, &tech, &occupancy, &marks, COSTS)
+        };
+        let paid = search.jog_price(jog, &mut Total).total() + search.own_jog_cost(jog);
+
+        let explanation = search.explain(&[Edge::Jog(jog)]);
+
+        assert!(explanation.own_vias > 0.0, "{explanation:?}");
+        assert!((explanation.total() - paid).abs() < 1e-9);
     }
 
     #[test]
