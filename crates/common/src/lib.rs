@@ -3,6 +3,7 @@
 pub mod config;
 pub mod db;
 pub mod geom;
+mod keyword_enum;
 pub mod memory;
 pub mod network_simplex;
 #[cfg(feature = "testing")]
