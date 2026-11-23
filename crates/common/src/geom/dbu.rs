@@ -2,8 +2,7 @@
 
 use crate::geom::point::Point;
 use std::fmt;
-use std::iter::Sum;
-use std::ops::{Add, AddAssign, Div, Mul, Neg, Rem, Sub, SubAssign};
+use std::ops::{Div, Mul, Rem};
 
 /// A length or coordinate in database units.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -76,45 +75,7 @@ impl fmt::Display for Dbu {
     }
 }
 
-impl Add for Dbu {
-    type Output = Self;
-    fn add(self, rhs: Self) -> Self {
-        Self(self.0 + rhs.0)
-    }
-}
-
-impl AddAssign for Dbu {
-    fn add_assign(&mut self, rhs: Self) {
-        self.0 += rhs.0;
-    }
-}
-
-impl Sub for Dbu {
-    type Output = Self;
-    fn sub(self, rhs: Self) -> Self {
-        Self(self.0 - rhs.0)
-    }
-}
-
-impl SubAssign for Dbu {
-    fn sub_assign(&mut self, rhs: Self) {
-        self.0 -= rhs.0;
-    }
-}
-
-impl Neg for Dbu {
-    type Output = Self;
-    fn neg(self) -> Self {
-        Self(-self.0)
-    }
-}
-
-impl Mul<i64> for Dbu {
-    type Output = Self;
-    fn mul(self, rhs: i64) -> Self {
-        Self(self.0 * rhs)
-    }
-}
+crate::newtype_ops!(Dbu: Add, AddAssign, Sub, SubAssign, Neg, Mul<i64>, Sum);
 
 impl Mul for Dbu {
     type Output = DbuArea;
@@ -137,12 +98,6 @@ impl Rem<i64> for Dbu {
     type Output = Self;
     fn rem(self, rhs: i64) -> Self {
         Self(self.0 % rhs)
-    }
-}
-
-impl Sum for Dbu {
-    fn sum<I: Iterator<Item = Self>>(iter: I) -> Self {
-        Self(iter.map(|d| d.0).sum())
     }
 }
 
@@ -174,31 +129,7 @@ impl DbuArea {
     }
 }
 
-impl Add for DbuArea {
-    type Output = Self;
-    fn add(self, rhs: Self) -> Self {
-        Self(self.0 + rhs.0)
-    }
-}
-
-impl AddAssign for DbuArea {
-    fn add_assign(&mut self, rhs: Self) {
-        self.0 += rhs.0;
-    }
-}
-
-impl Sub for DbuArea {
-    type Output = Self;
-    fn sub(self, rhs: Self) -> Self {
-        Self(self.0 - rhs.0)
-    }
-}
-
-impl Sum for DbuArea {
-    fn sum<I: Iterator<Item = Self>>(iter: I) -> Self {
-        Self(iter.map(|a| a.0).sum())
-    }
-}
+crate::newtype_ops!(DbuArea: Add, AddAssign, Sub, Sum);
 
 impl fmt::Display for DbuArea {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {

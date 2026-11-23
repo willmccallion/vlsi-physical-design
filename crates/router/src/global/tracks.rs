@@ -1,9 +1,6 @@
 //! Fractional tracks of a gcell edge, in fixed point so that adding and
 //! removing the same demand always cancels exactly.
 
-use std::iter::Sum;
-use std::ops::{Add, AddAssign, Sub, SubAssign};
-
 /// A number of tracks, possibly fractional.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct Tracks(i64);
@@ -55,39 +52,7 @@ impl Tracks {
     }
 }
 
-impl Add for Tracks {
-    type Output = Self;
-
-    fn add(self, rhs: Self) -> Self {
-        Self(self.0 + rhs.0)
-    }
-}
-
-impl AddAssign for Tracks {
-    fn add_assign(&mut self, rhs: Self) {
-        self.0 += rhs.0;
-    }
-}
-
-impl Sub for Tracks {
-    type Output = Self;
-
-    fn sub(self, rhs: Self) -> Self {
-        Self(self.0 - rhs.0)
-    }
-}
-
-impl SubAssign for Tracks {
-    fn sub_assign(&mut self, rhs: Self) {
-        self.0 -= rhs.0;
-    }
-}
-
-impl Sum for Tracks {
-    fn sum<I: Iterator<Item = Self>>(iter: I) -> Self {
-        iter.fold(Self::ZERO, |a, b| a + b)
-    }
-}
+pare_common::newtype_ops!(Tracks: Add, AddAssign, Sub, SubAssign, Sum);
 
 #[cfg(test)]
 mod tests {

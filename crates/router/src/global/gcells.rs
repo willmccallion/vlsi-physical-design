@@ -2,7 +2,6 @@
 
 use pare_common::geom::dbu::Dbu;
 use std::fmt;
-use std::ops::{Add, AddAssign, Div, Mul, Neg, Sub, SubAssign};
 
 /// A column, row or span of the gcell grid, in gcells.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -48,57 +47,7 @@ impl From<u16> for Gcells {
     }
 }
 
-impl Add for Gcells {
-    type Output = Self;
-
-    fn add(self, rhs: Self) -> Self {
-        Self(self.0 + rhs.0)
-    }
-}
-
-impl AddAssign for Gcells {
-    fn add_assign(&mut self, rhs: Self) {
-        self.0 += rhs.0;
-    }
-}
-
-impl Sub for Gcells {
-    type Output = Self;
-
-    fn sub(self, rhs: Self) -> Self {
-        Self(self.0 - rhs.0)
-    }
-}
-
-impl SubAssign for Gcells {
-    fn sub_assign(&mut self, rhs: Self) {
-        self.0 -= rhs.0;
-    }
-}
-
-impl Neg for Gcells {
-    type Output = Self;
-
-    fn neg(self) -> Self {
-        Self(-self.0)
-    }
-}
-
-impl Mul<i64> for Gcells {
-    type Output = Self;
-
-    fn mul(self, rhs: i64) -> Self {
-        Self(self.0 * rhs)
-    }
-}
-
-impl Div<i64> for Gcells {
-    type Output = Self;
-
-    fn div(self, rhs: i64) -> Self {
-        Self(self.0 / rhs)
-    }
-}
+pare_common::newtype_ops!(Gcells: Add, AddAssign, Sub, SubAssign, Neg, Mul<i64>, Div<i64>);
 
 #[cfg(test)]
 mod tests {

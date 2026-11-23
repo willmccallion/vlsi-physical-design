@@ -147,32 +147,7 @@ impl LengthSteps {
     }
 }
 
-impl std::ops::Add for LengthSteps {
-    type Output = Self;
-    fn add(self, rhs: Self) -> Self {
-        Self(self.0 + rhs.0)
-    }
-}
-
-impl std::ops::AddAssign for LengthSteps {
-    fn add_assign(&mut self, rhs: Self) {
-        self.0 += rhs.0;
-    }
-}
-
-impl std::ops::Sub for LengthSteps {
-    type Output = Self;
-    fn sub(self, rhs: Self) -> Self {
-        Self(self.0 - rhs.0)
-    }
-}
-
-impl std::ops::Mul<i64> for LengthSteps {
-    type Output = Self;
-    fn mul(self, rhs: i64) -> Self {
-        Self(self.0 * rhs)
-    }
-}
+pare_common::newtype_ops!(LengthSteps: Add, AddAssign, Sub, Mul<i64>);
 
 /// A load in the characterization's capacitance steps.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, PartialOrd, Ord, Hash)]

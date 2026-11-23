@@ -3,7 +3,6 @@
 use pare_common::geom::dbu::Dbu;
 use pare_common::geom::point::Point;
 use rustc_hash::FxHashMap;
-use std::ops::{Add, AddAssign, Sub};
 
 /// A column or row of a spatial hash's square buckets, counted from the
 /// origin the hash measures from, or an offset between two.
@@ -38,27 +37,7 @@ impl Bucket {
     }
 }
 
-impl Add for Bucket {
-    type Output = Self;
-
-    fn add(self, rhs: Self) -> Self {
-        Self(self.0 + rhs.0)
-    }
-}
-
-impl AddAssign for Bucket {
-    fn add_assign(&mut self, rhs: Self) {
-        self.0 += rhs.0;
-    }
-}
-
-impl Sub for Bucket {
-    type Output = Self;
-
-    fn sub(self, rhs: Self) -> Self {
-        Self(self.0 - rhs.0)
-    }
-}
+pare_common::newtype_ops!(Bucket: Add, AddAssign, Sub);
 
 /// The bucket of side `size` holding `p`.
 pub(crate) const fn bucket_at(p: Point<Dbu>, size: Dbu) -> Point<Bucket> {
