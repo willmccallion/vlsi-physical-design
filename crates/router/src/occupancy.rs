@@ -396,6 +396,14 @@ pub(crate) fn too_close(spacing: Dbu, a: &Rect<Dbu>, b: &Rect<Dbu>) -> bool {
     d > 0 && d < s * s
 }
 
+/// Whether two shapes of one net on the layer of `lt` lie across the same
+/// tracks and end short of each other along them by less than `spacing`.
+pub(crate) fn too_close_along(lt: &LayerTech, spacing: Dbu, a: &Rect<Dbu>, b: &Rect<Dbu>) -> bool {
+    let (a_across, _) = lt.across_along_rect(a);
+    let (b_across, _) = lt.across_along_rect(b);
+    !a_across.overlap(b_across).is_empty() && too_close(spacing, a, b)
+}
+
 /// Squared distance between two rectangles; zero when they touch.
 fn gap_sq(a: &Rect<Dbu>, b: &Rect<Dbu>) -> i128 {
     let gap = |lo_a: Dbu, hi_a: Dbu, lo_b: Dbu, hi_b: Dbu| {
