@@ -6,7 +6,7 @@ use crate::detailed::RestoreRoutesError;
 use crate::global::{GCell, GlobalGrid, GlobalNet, route_global};
 use crate::occupancy::{FixedTracks, Occupancy, Origin, Owner};
 use crate::runs::{EdgeSet, Run};
-use crate::tech::{CrossIdx, LeafClockPins, NetKind, RouteTech, TrackIdx};
+use crate::tech::{CrossIdx, NetKind, RouteSetup, RouteTech, TrackIdx};
 use crate::wiring::{Edge, NetRoute};
 use crate::{
     GlobalRouteEstimator, RouteError, RouteState, RunOptions, Save, SaveError, SavePoint,
@@ -31,7 +31,7 @@ use std::num::NonZeroU32;
 fn routing_refuses_a_design_with_unplaced_cells() {
     let mut db = tiny();
 
-    let result = route(&mut db, &RoutingConfig::default(), LeafClockPins::default());
+    let result = route(&mut db, &RouteSetup::from(&RoutingConfig::default()));
 
     assert_eq!(
         result,
@@ -51,7 +51,7 @@ fn routing_refuses_layers_that_all_run_one_way() {
         ..placed
     };
 
-    let result = route(&mut db, &config, LeafClockPins::default()).map(|_| ());
+    let result = route(&mut db, &RouteSetup::from(&config)).map(|_| ());
 
     assert_eq!(result, Err(RouteError::OneDirection(Direction::Vertical)));
 }
@@ -64,7 +64,7 @@ fn routing_refuses_a_lowest_layer_of_a_single_track() {
         t.count = 1;
     }
 
-    let result = route(&mut db, &config, LeafClockPins::default()).map(|_| ());
+    let result = route(&mut db, &RouteSetup::from(&config)).map(|_| ());
 
     assert_eq!(result, Err(RouteError::OneTrack("M2".to_string())));
 }
@@ -77,7 +77,7 @@ fn routing_refuses_tracks_too_close_to_size_gcells_by() {
         t.step = Dbu::new(1);
     }
 
-    let result = route(&mut db, &config, LeafClockPins::default()).map(|_| ());
+    let result = route(&mut db, &RouteSetup::from(&config)).map(|_| ());
 
     assert_eq!(result, Err(RouteError::NoGcellPitch));
 }
@@ -86,7 +86,7 @@ fn routing_refuses_tracks_too_close_to_size_gcells_by() {
 fn nets_crossing_many_regions_are_routed_connected() {
     let (mut db, config) = placed_tiny();
 
-    let summary = route(&mut db, &config, LeafClockPins::default()).unwrap();
+    let summary = route(&mut db, &RouteSetup::from(&config)).unwrap();
 
     assert!(summary.incomplete.is_empty(), "{:?}", summary.incomplete);
     for n in 0..db.nets.len() {
@@ -109,7 +109,7 @@ fn route_saving(point: SavePoint) -> (Vec<Vec<RouteElem>>, RouteState) {
         }),
         ..RunOptions::default()
     };
-    let _ = route_with(&mut db, &config, LeafClockPins::default(), run).unwrap();
+    let _ = route_with(&mut db, &RouteSetup::from(&config), run).unwrap();
     let wiring = db.nets.iter().map(|n| n.routing.clone()).collect();
     (wiring, saved.unwrap())
 }
@@ -121,7 +121,7 @@ fn route_resuming(state: &RouteState) -> Vec<Vec<RouteElem>> {
         resume: Some(state),
         ..RunOptions::default()
     };
-    let _ = route_with(&mut db, &config, LeafClockPins::default(), run).unwrap();
+    let _ = route_with(&mut db, &RouteSetup::from(&config), run).unwrap();
     db.nets.iter().map(|n| n.routing.clone()).collect()
 }
 
@@ -162,8 +162,7 @@ fn a_run_resumed_after_its_last_round_counts_the_rounds_before_it() {
 
     let summary = route_with(
         &mut db,
-        &config,
-        LeafClockPins::default(),
+        &RouteSetup::from(&config),
         RunOptions {
             resume: Some(&state),
             ..RunOptions::default()
@@ -186,7 +185,7 @@ fn a_save_that_fails_stops_the_run_with_its_error() {
         ..RunOptions::default()
     };
 
-    let result = route_with(&mut db, &config, LeafClockPins::default(), run);
+    let result = route_with(&mut db, &RouteSetup::from(&config), run);
 
     assert_eq!(
         result.map(|_| ()),
@@ -210,7 +209,7 @@ fn a_save_point_the_run_never_reaches_saves_nothing_and_says_so() {
         ..RunOptions::default()
     };
 
-    let summary = route_with(&mut db, &config, LeafClockPins::default(), run).unwrap();
+    let summary = route_with(&mut db, &RouteSetup::from(&config), run).unwrap();
 
     assert!(!saved);
     assert!(!summary.state_saved);
@@ -246,13 +245,13 @@ fn resume_tiny(state: &RouteState) -> Result<crate::RoutingSummary, RouteError> 
         resume: Some(state),
         ..RunOptions::default()
     };
-    route_with(&mut db, &config, LeafClockPins::default(), run)
+    route_with(&mut db, &RouteSetup::from(&config), run)
 }
 
 #[test]
 fn a_state_with_a_wire_past_the_end_of_its_track_is_refused() {
     let (db, config) = placed_tiny();
-    let tech = RouteTech::new(&db, &config, LeafClockPins::default()).unwrap();
+    let tech = RouteTech::new(&db, &RouteSetup::from(&config)).unwrap();
     let bad = tampered_state("s", |words| {
         let layer = LayerId::new(words[1].parse().unwrap());
         let past_end = tech.layer(layer).cross.len();
@@ -300,8 +299,7 @@ fn a_state_of_another_design_is_refused() {
 
     let result = route_with(
         &mut db,
-        &config,
-        LeafClockPins::default(),
+        &RouteSetup::from(&config),
         RunOptions {
             resume: Some(&state),
             ..RunOptions::default()
@@ -314,7 +312,7 @@ fn a_state_of_another_design_is_refused() {
 #[test]
 fn removing_a_nets_wiring_keeps_its_fixed_metal() {
     let db = tiny();
-    let tech = RouteTech::new(&db, &RoutingConfig::default(), LeafClockPins::default()).unwrap();
+    let tech = RouteTech::new(&db, &RouteSetup::from(&RoutingConfig::default())).unwrap();
     let mut occupancy = Occupancy::new(&tech, Dbu::new(1000));
     let layer = LayerId(1);
     let around = |p: Point<Dbu>| Rect::new(p, p).expand(Dbu::new(50));
@@ -341,7 +339,7 @@ fn removing_a_nets_wiring_keeps_its_fixed_metal() {
 #[test]
 fn cuts_of_different_nets_conflict_within_the_cut_spacing() {
     let db = tiny();
-    let tech = RouteTech::new(&db, &RoutingConfig::default(), LeafClockPins::default()).unwrap();
+    let tech = RouteTech::new(&db, &RouteSetup::from(&RoutingConfig::default())).unwrap();
     let mut occupancy = Occupancy::new(&tech, Dbu::new(1000));
     let v1 = CutLayerId::new(0);
     let cut = |x: i64, y: i64| {
@@ -371,7 +369,7 @@ fn cuts_of_different_nets_conflict_within_the_cut_spacing() {
 #[test]
 fn removing_a_nets_wiring_keeps_its_fixed_cuts() {
     let db = tiny();
-    let tech = RouteTech::new(&db, &RoutingConfig::default(), LeafClockPins::default()).unwrap();
+    let tech = RouteTech::new(&db, &RouteSetup::from(&RoutingConfig::default())).unwrap();
     let mut occupancy = Occupancy::new(&tech, Dbu::new(1000));
     let v1 = CutLayerId::new(0);
     let cut = |x: i64| {
@@ -395,7 +393,7 @@ fn removing_a_nets_wiring_keeps_its_fixed_cuts() {
 #[test]
 fn wires_keep_the_table_spacing_from_a_long_wide_shape_and_the_minimum_from_a_wire() {
     let db = tiny();
-    let tech = RouteTech::new(&db, &RoutingConfig::default(), LeafClockPins::default()).unwrap();
+    let tech = RouteTech::new(&db, &RouteSetup::from(&RoutingConfig::default())).unwrap();
     let m2 = tech.layer(LayerId(1));
     let stripe = Rect::new(
         Point::new(Dbu::new(0), Dbu::new(0)),
@@ -421,7 +419,7 @@ fn routing_refuses_pins_of_different_nets_that_overlap() {
     let (a, b) = (master.pin_id("A").unwrap(), master.pin_id("B").unwrap());
     master.pins[b].shapes = master.pins[a].shapes.clone();
 
-    let result = route(&mut db, &RoutingConfig::default(), LeafClockPins::default());
+    let result = route(&mut db, &RouteSetup::from(&RoutingConfig::default()));
 
     assert_eq!(
         result,
@@ -436,7 +434,7 @@ fn routing_refuses_pins_of_different_nets_that_overlap() {
 #[test]
 fn consecutive_wire_edges_become_one_wire() {
     let db = tiny();
-    let tech = RouteTech::new(&db, &RoutingConfig::default(), LeafClockPins::default()).unwrap();
+    let tech = RouteTech::new(&db, &RouteSetup::from(&RoutingConfig::default())).unwrap();
     let node = |cross| Node {
         layer: LayerId(1),
         track: TrackIdx(0),
@@ -587,7 +585,7 @@ fn rudy_wires_are_as_wide_as_openroad_makes_them() {
 #[test]
 fn merged_fixed_stretches_give_the_capacity_the_occupancy_gives() {
     let db = tiny();
-    let tech = RouteTech::new(&db, &RoutingConfig::default(), LeafClockPins::default()).unwrap();
+    let tech = RouteTech::new(&db, &RouteSetup::from(&RoutingConfig::default())).unwrap();
     let gcell = tech.min_layer_pitch * 15;
     let mut occupancy = Occupancy::new(&tech, gcell);
     occupancy.add_fixed(&tech, fixed_shapes(&db));
@@ -605,7 +603,7 @@ fn merged_fixed_stretches_give_the_capacity_the_occupancy_gives() {
 #[test]
 fn gcell_congestion_follows_the_routed_edges_of_the_grid() {
     let db = tiny();
-    let tech = RouteTech::new(&db, &no_reserve(), LeafClockPins::default()).unwrap();
+    let tech = RouteTech::new(&db, &RouteSetup::from(&no_reserve())).unwrap();
     let gcell = tech.min_layer_pitch * 5;
     let fixed = FixedTracks::new(&tech, fixed_shapes(&db));
     let mut grid = GlobalGrid::new(&tech, &fixed, db.die_area, gcell, CapacityReserve::NONE);
@@ -638,7 +636,7 @@ fn the_estimator_measures_congestion_where_the_given_locations_put_the_nets() {
         gcell_tracks: NonZeroU32::new(5).unwrap(),
         ..no_reserve()
     };
-    let mut estimator = GlobalRouteEstimator::new(&db, &config, LeafClockPins::default()).unwrap();
+    let mut estimator = GlobalRouteEstimator::new(&db, &RouteSetup::from(&config)).unwrap();
     let tiles = estimator.capacity_reduction(&IdVec::new());
     let packed = IdVec::filled(Point::new(Dbu::new(0), Dbu::new(0)), db.num_cells());
     let spread: IdVec<CellId, Point<Dbu>> = db
@@ -686,7 +684,7 @@ fn tiny_with_wide_rule() -> NetlistDB {
 fn a_rule_sets_the_width_and_spacing_of_its_nets_wires() {
     let db = tiny_with_wide_rule();
 
-    let tech = RouteTech::new(&db, &RoutingConfig::default(), LeafClockPins::default()).unwrap();
+    let tech = RouteTech::new(&db, &RouteSetup::from(&RoutingConfig::default())).unwrap();
 
     let rule = tech.net_rule(NetId(0));
     assert_eq!(rule, Some(NonDefaultRuleId::new(0)));
@@ -700,7 +698,7 @@ fn a_rule_sets_the_width_and_spacing_of_its_nets_wires() {
 #[test]
 fn a_wire_under_a_rule_keeps_other_tracks_at_the_rules_spacing() {
     let db = tiny_with_wide_rule();
-    let tech = RouteTech::new(&db, &RoutingConfig::default(), LeafClockPins::default()).unwrap();
+    let tech = RouteTech::new(&db, &RouteSetup::from(&RoutingConfig::default())).unwrap();
     let mut occupancy = Occupancy::new(&tech, Dbu::new(1000));
     let m1 = LayerId(0);
     let wide = Rect::new(
@@ -723,7 +721,7 @@ fn a_wire_under_a_rule_keeps_other_tracks_at_the_rules_spacing() {
 #[test]
 fn a_wire_without_a_rule_leaves_tracks_beyond_the_layer_spacing_alone() {
     let db = tiny();
-    let tech = RouteTech::new(&db, &RoutingConfig::default(), LeafClockPins::default()).unwrap();
+    let tech = RouteTech::new(&db, &RouteSetup::from(&RoutingConfig::default())).unwrap();
     let mut occupancy = Occupancy::new(&tech, Dbu::new(1000));
     let m1 = LayerId(0);
     let wire = Rect::new(
@@ -746,7 +744,7 @@ fn a_wire_without_a_rule_leaves_tracks_beyond_the_layer_spacing_alone() {
 #[test]
 fn a_wire_under_a_rule_keeps_its_track_clear_for_the_rules_spacing() {
     let db = tiny_with_wide_rule();
-    let tech = RouteTech::new(&db, &RoutingConfig::default(), LeafClockPins::default()).unwrap();
+    let tech = RouteTech::new(&db, &RouteSetup::from(&RoutingConfig::default())).unwrap();
     let mut occupancy = Occupancy::new(&tech, Dbu::new(1000));
     let m1 = LayerId(0);
     let wide = Rect::new(
@@ -798,7 +796,7 @@ fn straight_route(tech: &RouteTech, layer: LayerId, crosses: u32) -> NetRoute {
 #[test]
 fn a_route_near_an_area_keeps_the_stretch_of_a_long_run_meeting_it() {
     let db = tiny();
-    let tech = RouteTech::new(&db, &RoutingConfig::default(), LeafClockPins::default()).unwrap();
+    let tech = RouteTech::new(&db, &RouteSetup::from(&RoutingConfig::default())).unwrap();
     let layer = LayerId(1);
     let lt = tech.layer(layer);
     let route = straight_route(&tech, layer, 20);
@@ -821,7 +819,7 @@ fn a_route_near_an_area_keeps_the_stretch_of_a_long_run_meeting_it() {
 #[test]
 fn a_route_near_an_area_drops_the_vias_outside_it() {
     let db = tiny();
-    let tech = RouteTech::new(&db, &RoutingConfig::default(), LeafClockPins::default()).unwrap();
+    let tech = RouteTech::new(&db, &RouteSetup::from(&RoutingConfig::default())).unwrap();
     let layer = LayerId(1);
     let lt = tech.layer(layer);
     let route = straight_route(&tech, layer, 20);
@@ -855,9 +853,13 @@ fn master_pin(db: &NetlistDB, cell: &str, pin: &str) -> (MacroId, MacroPinId) {
 #[test]
 fn a_clock_net_reaching_no_leaf_clock_pin_is_a_trunk() {
     let (db, n1) = tiny_with_a_clock_net();
-    let leaves: LeafClockPins = std::iter::once(master_pin(&db, "ram0", "D")).collect();
+    let config = RoutingConfig::default();
+    let setup = RouteSetup {
+        config: &config,
+        leaf_clock_pins: std::iter::once(master_pin(&db, "ram0", "D")).collect(),
+    };
 
-    let tech = RouteTech::new(&db, &RoutingConfig::default(), leaves).unwrap();
+    let tech = RouteTech::new(&db, &setup).unwrap();
 
     assert_eq!(tech.net_kind(&db, n1), NetKind::ClockTrunk);
 }
@@ -865,9 +867,13 @@ fn a_clock_net_reaching_no_leaf_clock_pin_is_a_trunk() {
 #[test]
 fn a_clock_net_reaching_a_leaf_clock_pin_is_routed_as_a_signal() {
     let (db, n1) = tiny_with_a_clock_net();
-    let leaves: LeafClockPins = std::iter::once(master_pin(&db, "u3", "A")).collect();
+    let config = RoutingConfig::default();
+    let setup = RouteSetup {
+        config: &config,
+        leaf_clock_pins: std::iter::once(master_pin(&db, "u3", "A")).collect(),
+    };
 
-    let tech = RouteTech::new(&db, &RoutingConfig::default(), leaves).unwrap();
+    let tech = RouteTech::new(&db, &setup).unwrap();
 
     assert_eq!(tech.net_kind(&db, n1), NetKind::Signal);
 }
@@ -876,7 +882,7 @@ fn a_clock_net_reaching_a_leaf_clock_pin_is_routed_as_a_signal() {
 fn without_leaf_clock_pins_every_clock_net_is_a_trunk_and_no_other_net() {
     let (db, n1) = tiny_with_a_clock_net();
 
-    let tech = RouteTech::new(&db, &RoutingConfig::default(), LeafClockPins::default()).unwrap();
+    let tech = RouteTech::new(&db, &RouteSetup::from(&RoutingConfig::default())).unwrap();
 
     let trunks: Vec<NetId> = db
         .nets

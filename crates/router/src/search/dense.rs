@@ -405,7 +405,7 @@ mod tests {
 
     use crate::occupancy::{Occupancy, Owner};
     use crate::search::{Costs, Marks};
-    use crate::tech::{LeafClockPins, RouteTech};
+    use crate::tech::{RouteSetup, RouteTech};
     use pare_common::config::RoutingConfig;
     use pare_common::db::indices::NetId;
 
@@ -416,7 +416,7 @@ mod tests {
             min_layer: Some("M1".to_string()),
             ..RoutingConfig::default()
         };
-        let tech = RouteTech::new(&db, &config, LeafClockPins::default()).unwrap();
+        let tech = RouteTech::new(&db, &RouteSetup::from(&config)).unwrap();
         let occupancy = Occupancy::new(&tech, Dbu::new(1000));
         let marks = Marks::default();
         let search = Search {

@@ -25,7 +25,7 @@ use pare_placer::legalize::site::SiteGrid;
 use pare_placer::zones::Zones;
 use pare_resizer::GlobalRouting;
 use pare_resizer::{Resizer, RouteRc};
-use pare_router::{GlobalSession, LeafClockPins, Progress, Stage};
+use pare_router::{GlobalSession, LeafClockPins, Progress, RouteSetup, Stage};
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
@@ -147,8 +147,11 @@ pub(crate) fn global_route_with_repair(
     ui::section("Global Routing");
     let timer = PhaseTimer::start(Phase::GlobalRouting);
     let mut tables = RouteTables::default();
-    let leaves = leaf_clock_pins(&db.library, &repair.liberty);
-    let mut session = GlobalSession::new(db, &config.routing, leaves, &mut |p| tables.show(p))?;
+    let setup = RouteSetup {
+        config: &config.routing,
+        leaf_clock_pins: leaf_clock_pins(&db.library, &repair.liberty),
+    };
+    let mut session = GlobalSession::new(db, &setup, &mut |p| tables.show(p))?;
     timer.finish(report);
     if let Some(timed) = repair.timed() {
         propagate_clocks(timed.sdc);
@@ -319,7 +322,11 @@ pub(crate) fn route_global(
     let timer = PhaseTimer::start(Phase::GlobalRouting);
     let mut tables = RouteTables::default();
     let mut show = |p: &Progress<'_>| tables.show(p);
-    let global = pare_router::route_global_only(db, &config.routing, leaf_clock_pins, &mut show)?;
+    let setup = RouteSetup {
+        config: &config.routing,
+        leaf_clock_pins,
+    };
+    let global = pare_router::route_global_only(db, &setup, &mut show)?;
     ui::stat("Nets:", &global.summary.nets.to_string());
     if let Some(path) = guides {
         write_guides(path, db, &global.guides)?;
@@ -398,8 +405,12 @@ fn run_router(
         RouteStart::OnGlobalRoutes(global) => {
             pare_router::route_on(db, &config.routing, *global, options)?
         }
-        RouteStart::FromScratch(leaves) => {
-            pare_router::route_with(db, &config.routing, leaves, options)?
+        RouteStart::FromScratch(leaf_clock_pins) => {
+            let setup = RouteSetup {
+                config: &config.routing,
+                leaf_clock_pins,
+            };
+            pare_router::route_with(db, &setup, options)?
         }
     };
     if let Some(save) = &run.save

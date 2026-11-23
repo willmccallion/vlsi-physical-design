@@ -1221,7 +1221,7 @@ pub(super) fn contains_half_open(r: &Rect<Dbu>, p: Point<Dbu>) -> bool {
 mod tests {
     use super::*;
     use crate::runs::{EdgeSet, Run};
-    use crate::tech::LeafClockPins;
+    use crate::tech::RouteSetup;
     use crate::tech::RouteTech;
     use crate::tech::{CrossIdx, TrackIdx};
     use pare_common::db::design::{NetlistDB, NonDefaultLayer, NonDefaultRule};
@@ -1259,7 +1259,7 @@ mod tests {
     fn a_net_under_a_rule_is_spared_for_three_rounds_then_rerouted() {
         let db = tiny_with_a_rule_on_net_1();
         let (_, config) = crate::tests::placed_tiny();
-        let tech = RouteTech::new(&db, &config, LeafClockPins::default()).unwrap();
+        let tech = RouteTech::new(&db, &RouteSetup::from(&config)).unwrap();
         let dr = DetailedRouter::new(&db, &tech, crate::gcell_size(&tech, &config));
         let (ruled, plain) = (NetId::new(1), NetId::new(2));
         let judgment = marker_between(ruled, plain);
@@ -1279,7 +1279,7 @@ mod tests {
     fn a_net_under_a_rule_alone_in_a_marker_is_rerouted() {
         let db = tiny_with_a_rule_on_net_1();
         let (_, config) = crate::tests::placed_tiny();
-        let tech = RouteTech::new(&db, &config, LeafClockPins::default()).unwrap();
+        let tech = RouteTech::new(&db, &RouteSetup::from(&config)).unwrap();
         let dr = DetailedRouter::new(&db, &tech, crate::gcell_size(&tech, &config));
         let ruled = NetId::new(1);
 
@@ -1292,7 +1292,7 @@ mod tests {
     /// crossing 0 to `to`, and the area from crossing 4 to crossing 8.
     fn router_with_a_run_to(to: u32, f: impl FnOnce(&DetailedRouter<'_>, &Rect<Dbu>)) {
         let (db, config) = crate::tests::placed_tiny();
-        let tech = RouteTech::new(&db, &config, LeafClockPins::default()).unwrap();
+        let tech = RouteTech::new(&db, &RouteSetup::from(&config)).unwrap();
         let mut dr = DetailedRouter::new(&db, &tech, crate::gcell_size(&tech, &config));
         let layer = LayerId(1);
         let run = Run {
@@ -1347,7 +1347,7 @@ mod tests {
     #[test]
     fn a_nets_own_vias_leave_out_those_the_worker_ripped_up() {
         let (db, config) = crate::tests::placed_tiny();
-        let tech = RouteTech::new(&db, &config, LeafClockPins::default()).unwrap();
+        let tech = RouteTech::new(&db, &RouteSetup::from(&config)).unwrap();
         let mut dr = DetailedRouter::new(&db, &tech, crate::gcell_size(&tech, &config));
         let net = NetId::new(0);
         let lt = tech.layer(LayerId(1));

@@ -317,6 +317,27 @@ impl FromIterator<(MacroId, MacroPinId)> for LeafClockPins {
     }
 }
 
+/// What the router routes a design with: its settings and the clock pins
+/// that make a clock net a leaf.
+#[derive(Clone, Debug)]
+pub struct RouteSetup<'c> {
+    /// The routing settings.
+    pub config: &'c RoutingConfig,
+    /// The pins that make a clock net a leaf rather than a trunk.
+    pub leaf_clock_pins: LeafClockPins,
+}
+
+impl<'c> From<&'c RoutingConfig> for RouteSetup<'c> {
+    /// The setup of `config` with no leaf clock pins, which makes every
+    /// clock net a trunk, as without Liberty.
+    fn from(config: &'c RoutingConfig) -> Self {
+        Self {
+            config,
+            leaf_clock_pins: LeafClockPins::default(),
+        }
+    }
+}
+
 /// Which layers a net's wires take.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum NetKind {
@@ -461,13 +482,9 @@ fn check_both_directions(
 }
 
 impl RouteTech {
-    /// Builds the routing technology of `db`, whose clock nets are leaves
-    /// where they reach one of `leaf_clock_pins`.
-    pub fn new(
-        db: &NetlistDB,
-        config: &RoutingConfig,
-        leaf_clock_pins: LeafClockPins,
-    ) -> Result<Self, RouteError> {
+    /// Builds the routing technology of `db` under `setup`.
+    pub fn new(db: &NetlistDB, setup: &RouteSetup<'_>) -> Result<Self, RouteError> {
+        let config = setup.config;
         let reach = reach_from_origin(&db.die_area);
         if reach > MAX_DIE_REACH {
             return Err(RouteError::DieTooLarge(reach));
@@ -504,7 +521,7 @@ impl RouteTech {
             min_layer,
             max_layer,
             clock_layers: config.clock_layer_range(lib)?,
-            leaf_clock_pins,
+            leaf_clock_pins: setup.leaf_clock_pins.clone(),
             layers,
             vias,
             access_vias,
@@ -827,7 +844,7 @@ mod tests {
             min_layer: Some("M1".to_string()),
             ..RoutingConfig::default()
         };
-        RouteTech::new(&crate::tests::tiny(), &config, LeafClockPins::default()).unwrap()
+        RouteTech::new(&crate::tests::tiny(), &RouteSetup::from(&config)).unwrap()
     }
 
     /// The first crossing of `layer` that `wanted` accepts, on its first
