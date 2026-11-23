@@ -10,36 +10,20 @@ use super::schedule::{RipUp, Strategy, round_strategy};
 /// `TritonRoute`'s `STUBBORN_FLOW_VIOLATION_THRESHOLD`.
 const FEW_VIOLATIONS: usize = 100;
 
-/// The kind of repair a round runs.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum Flow {
-    /// The regular pass, region by region over the die.
-    Regular,
-    /// Workers over the global routes of the nets in each violation.
-    Guides,
-    /// Workers on tiles around clusters of violations, each tried with
-    /// several costs, the best kept.
-    Stubborn,
-    /// No repair this round.
-    Skip,
-}
-
-impl Flow {
-    /// The flow's name in logs and saved states.
-    pub const fn name(self) -> &'static str {
-        match self {
-            Self::Regular => "regular",
-            Self::Guides => "guides",
-            Self::Stubborn => "stubborn",
-            Self::Skip => "skip",
-        }
-    }
-
-    /// The flow named `name`.
-    pub fn from_name(name: &str) -> Option<Self> {
-        [Self::Regular, Self::Guides, Self::Stubborn, Self::Skip]
-            .into_iter()
-            .find(|f| f.name() == name)
+pare_common::keyword_enum! {
+    /// The kind of repair a round runs, named by its keyword in logs and
+    /// saved states.
+    #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+    pub enum Flow {
+        /// The regular pass, region by region over the die.
+        Regular = "regular",
+        /// Workers over the global routes of the nets in each violation.
+        Guides = "guides",
+        /// Workers on tiles around clusters of violations, each tried with
+        /// several costs, the best kept.
+        Stubborn = "stubborn",
+        /// No repair this round.
+        Skip = "skip",
     }
 }
 
@@ -187,7 +171,7 @@ mod tests {
     fn flows_are_found_by_their_names() {
         let names: Vec<Option<Flow>> = ["regular", "guides", "stubborn", "skip", "other"]
             .into_iter()
-            .map(Flow::from_name)
+            .map(Flow::from_keyword)
             .collect();
 
         assert_eq!(

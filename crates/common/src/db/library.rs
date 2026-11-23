@@ -248,69 +248,47 @@ pub enum MacroClass {
     Ring,
 }
 
-/// Signal direction of a pin.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
-pub enum PinDirection {
-    /// Driven from outside.
-    Input,
-    /// Drives the net.
-    Output,
-    /// Either way.
-    #[default]
-    Inout,
-    /// Passes through the cell.
-    Feedthru,
-}
-
-impl PinDirection {
-    /// The LEF/DEF keyword.
-    pub const fn as_str(self) -> &'static str {
-        match self {
-            Self::Input => "INPUT",
-            Self::Output => "OUTPUT",
-            Self::Inout => "INOUT",
-            Self::Feedthru => "FEEDTHRU",
-        }
+crate::keyword_enum! {
+    /// Signal direction of a pin.
+    #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+    pub enum PinDirection {
+        /// Driven from outside.
+        Input = "INPUT",
+        /// Drives the net.
+        Output = "OUTPUT",
+        /// Either way.
+        #[default]
+        Inout = "INOUT",
+        /// Passes through the cell.
+        Feedthru = "FEEDTHRU",
     }
 }
 
-/// What a pin or net carries.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
-pub enum SignalUse {
-    /// An ordinary signal.
-    #[default]
-    Signal,
-    /// A power supply.
-    Power,
-    /// A ground supply.
-    Ground,
-    /// A clock, as LEF's `USE CLOCK`.
-    Clock,
-    /// An analog signal.
-    Analog,
-    /// A scan chain signal.
-    Scan,
-    /// A reset signal.
-    Reset,
-    /// A tie-off.
-    Tieoff,
+crate::keyword_enum! {
+    /// What a pin or net carries.
+    #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+    pub enum SignalUse {
+        /// An ordinary signal.
+        #[default]
+        Signal = "SIGNAL",
+        /// A power supply.
+        Power = "POWER",
+        /// A ground supply.
+        Ground = "GROUND",
+        /// A clock, as LEF's `USE CLOCK`.
+        Clock = "CLOCK",
+        /// An analog signal.
+        Analog = "ANALOG",
+        /// A scan chain signal.
+        Scan = "SCAN",
+        /// A reset signal.
+        Reset = "RESET",
+        /// A tie-off.
+        Tieoff = "TIEOFF",
+    }
 }
 
 impl SignalUse {
-    /// The LEF/DEF keyword.
-    pub const fn as_str(self) -> &'static str {
-        match self {
-            Self::Signal => "SIGNAL",
-            Self::Power => "POWER",
-            Self::Ground => "GROUND",
-            Self::Clock => "CLOCK",
-            Self::Analog => "ANALOG",
-            Self::Scan => "SCAN",
-            Self::Reset => "RESET",
-            Self::Tieoff => "TIEOFF",
-        }
-    }
-
     /// Whether this is a supply that the signal router leaves alone.
     pub const fn is_supply(self) -> bool {
         matches!(self, Self::Power | Self::Ground)
