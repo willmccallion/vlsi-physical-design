@@ -1130,12 +1130,17 @@ impl<'a> DetailedRouter<'a> {
 
     /// The vias a path of crossings takes, with their locations.
     fn path_vias<'p>(&'p self, path: &'p [Node]) -> impl Iterator<Item = (ViaId, Point<Dbu>)> + 'p {
-        path_edges(path).filter_map(|e| match e {
+        path_edges(path).filter_map(|e| self.via_of(e))
+    }
+
+    /// The via `edge` places and where, if it is a via.
+    fn via_of(&self, edge: Edge) -> Option<(ViaId, Point<Dbu>)> {
+        match edge {
             Edge::Via { lower, .. } => {
                 Some((self.tech.via_above(lower.layer).via, self.point(lower)))
             }
             Edge::Wire(_) | Edge::Jog(_) => None,
-        })
+        }
     }
 
     /// The access vias of the pins among `terms` whose access point is

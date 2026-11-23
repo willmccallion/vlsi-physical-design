@@ -800,7 +800,7 @@ impl DetailedRouter<'_> {
             own_vias: None,
             ripped: &work.ripped,
         };
-        let own = self.vias_near(piece.net, area);
+        let own = self.vias_near(piece.net, area, work.removed(i));
         let edges = self.connect_groups(&search, &piece.groups, &local.window, own);
         if self.trace.wants(piece.net, area) {
             self.trace_piece(area, round, piece.net, &search, edges.as_deref());
@@ -1104,13 +1104,19 @@ impl DetailedRouter<'_> {
         Some(edges)
     }
 
-    /// The vias `net` has near `area`, which wiring routed there must not
-    /// crowd.
-    fn vias_near(&self, net: NetId, area: &Rect<Dbu>) -> OwnVias {
+    /// The vias `net` keeps near `area` while the worker routes it again
+    /// there, which that wiring must not crowd: its committed vias but those
+    /// of `removed`, the wiring the worker took out of it.
+    fn vias_near(&self, net: NetId, area: &Rect<Dbu>, removed: &Wiring) -> OwnVias {
         let near = area.expand(self.gcell);
+        let ripped: FxHashSet<_> = removed
+            .edges
+            .iter()
+            .filter_map(|&e| self.via_of(e))
+            .collect();
         let mut own = OwnVias::new(self.db, self.tech, self.tech.net_rule(net));
         for (via, at) in self.wiring_vias(net) {
-            if near.contains(at) {
+            if near.contains(at) && !ripped.contains(&(via, at)) {
                 own.add(via, at);
             }
         }
@@ -1328,6 +1334,57 @@ mod tests {
             assert!(piece.is_none());
             assert_eq!(removed.edges.len(), 2);
         });
+    }
+
+    #[test]
+    fn a_nets_own_vias_leave_out_those_the_worker_ripped_up() {
+        let (db, config) = crate::tests::placed_tiny();
+        let tech = RouteTech::new(&db, &config, LeafClockPins::default()).unwrap();
+        let mut dr = DetailedRouter::new(&db, &tech, crate::gcell_size(&tech, &config));
+        let net = NetId::new(0);
+        let lt = tech.layer(LayerId(1));
+        let lower = (4..8)
+            .map(m2_track_5)
+            .find(|n| lt.cross[n.cross].up.is_some())
+            .unwrap();
+        let upper = Node {
+            layer: LayerId(2),
+            track: lt.cross[lower.cross].up.unwrap(),
+            cross: lt.track_up[lower.track].unwrap(),
+        };
+        let edge = Edge::Via { lower, upper };
+        let mut edges = EdgeSet::default();
+        edges.extend([edge]);
+        dr.commit(
+            net,
+            &NetRoute {
+                edges,
+                ..NetRoute::default()
+            },
+        );
+        let area = Rect::new(
+            Point::new(Dbu::new(0), lt.cross[CrossIdx(4)].at),
+            Point::new(db.die_area.max.x, lt.cross[CrossIdx(8)].at),
+        );
+        let (via, at) = dr.via_of(edge).unwrap();
+        let widest = db
+            .library
+            .via(via)
+            .shapes
+            .iter()
+            .map(|s| s.rect.width())
+            .max()
+            .unwrap();
+        let beside = at + Point::new(widest + Dbu::new(1), Dbu::ZERO);
+        let (removed, _) = dr.carve(net, std::slice::from_ref(&area)).pop().unwrap();
+        let crowded = |taken: &Wiring| {
+            dr.vias_near(net, &area, taken)
+                .crowded(&db, &tech, via, beside)
+        };
+
+        let (kept, ripped) = (crowded(&Wiring::default()), crowded(&removed));
+
+        assert_eq!((kept, ripped), (1, 0));
     }
 
     #[test]
