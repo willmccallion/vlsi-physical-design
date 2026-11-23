@@ -21,7 +21,9 @@ pub(crate) use marks::Marks;
 use crate::access::{AccessPoint, Node};
 use crate::bucket::{Bucket, SpatialHash};
 use crate::global::{GCell, Gcells};
-use crate::occupancy::{LocalOccupancy, Occupancy, Origin, Owner, Proximity, too_close};
+use crate::occupancy::{
+    LocalOccupancy, Occupancy, Origin, Owner, Proximity, too_close, too_close_along,
+};
 use crate::tech::RouteTech;
 use crate::tech::{CrossIdx, TrackIdx};
 use crate::wiring::Edge;
@@ -375,17 +377,12 @@ impl OwnVias {
         rect: &Rect<Dbu>,
     ) -> usize {
         let lt = tech.layer(layer);
-        let (across, _) = lt.across_along_rect(rect);
         let on = LayerRef::Routing(layer);
         let spacing = self.spacing(db, tech, on);
         self.near(rect)
             .filter(|&&(via, p)| {
                 db.library.via(via).shapes.iter().any(|s| {
-                    let theirs = s.rect.translate(p);
-                    let (their_across, _) = lt.across_along_rect(&theirs);
-                    s.layer == on
-                        && !across.overlap(their_across).is_empty()
-                        && too_close(spacing, rect, &theirs)
+                    s.layer == on && too_close_along(lt, spacing, rect, &s.rect.translate(p))
                 })
             })
             .count()
@@ -847,15 +844,21 @@ impl Search<'_> {
         let Some(own) = self.own_vias else {
             return 0.0;
         };
-        let (from, to) = Edge::Jog(lower).ends();
-        let (a, b) = (self.point(from), self.point(to));
-        let crowds = wire_rect(a, b, self.width(lower.layer))
+        let crowds = self
+            .jog_metal(lower)
             .is_some_and(|r| own.crowded_along(self.db, self.tech, lower.layer, &r) > 0);
-        if crowds {
-            self.costs.conflict * a.manhattan(b).to_f64()
-        } else {
-            0.0
+        if !crowds {
+            return 0.0;
         }
+        let lt = self.tech.layer(lower.layer);
+        let length = lt.tracks[lower.track.plus(1)] - lt.tracks[lower.track];
+        self.costs.conflict * length.to_f64()
+    }
+
+    /// The metal of the jog from `lower` across to the next track.
+    fn jog_metal(&self, lower: Node) -> Option<Rect<Dbu>> {
+        let (from, to) = Edge::Jog(lower).ends();
+        wire_rect(self.point(from), self.point(to), self.width(lower.layer))
     }
 
     pub(crate) fn allowed(&self, layer: LayerId, p: Point<Dbu>) -> bool {
@@ -871,9 +874,18 @@ impl Search<'_> {
     /// The along-track extent, relative to the via's center, of the metal
     /// on `layer` of the via between `layer` and `other`.
     fn pad_along(&self, layer: LayerId, other: LayerId) -> Interval {
+        let (_, along) = self
+            .tech
+            .layer(layer)
+            .across_along_rect(&self.pad(layer, other));
+        along
+    }
+
+    /// The metal on `layer`, relative to the via's center, of the via
+    /// between `layer` and `other`.
+    fn pad(&self, layer: LayerId, other: LayerId) -> Rect<Dbu> {
         let via = self.tech.via_above(layer.min(other));
-        let pad = if other > layer { via.bottom } else { via.top };
-        self.tech.layer(layer).across_along_rect(&pad).1
+        if other > layer { via.bottom } else { via.top }
     }
 
     /// How far along a track a via onto `layer` crowds later vias off it:
@@ -940,6 +952,24 @@ impl Search<'_> {
         })
     }
 
+    /// Whether the jog from `state` across from `lower` would crowd the via
+    /// the path just came through along its tracks: the jog's metal ends
+    /// short of the via's metal on this layer by less than the spacing.
+    // NOTE: FlexGridGraph::getNextPathCost charges a turn within
+    // viaForbiddenTurnLen of the last via; PARE refuses it, as it refuses a
+    // via crowding the last one, since explaining a route sees no path order.
+    fn jog_crowds_recent_via(&self, state: State, lower: Node) -> bool {
+        let layer = state.node.layer;
+        let lt = self.tech.layer(layer);
+        state.recent_via.is_some_and(|v| {
+            let pad = self
+                .pad(layer, v.from)
+                .translate(lt.point(v.track, v.cross));
+            self.jog_metal(lower)
+                .is_some_and(|metal| too_close_along(lt, self.spacing(layer), &metal, &pad))
+        })
+    }
+
     /// States reachable from `state` in one step, with the step's cost.
     fn neighbours(
         &self,
@@ -1003,7 +1033,7 @@ impl Search<'_> {
         };
         let m = Node { track, ..n };
         let lower = n.min(m);
-        if !self.tech.jog_allowed(lower) {
+        if !self.tech.jog_allowed(lower) || self.jog_crowds_recent_via(state, lower) {
             return None;
         }
         let p = self.point(m);
@@ -1664,6 +1694,64 @@ mod tests {
         };
 
         assert!(search.own_jog_cost(jog).abs() < 1e-9);
+    }
+
+    /// The jogs `search` offers from `node` just after a via from M2 landed
+    /// at `via_cross` on its track.
+    fn jogs_after_a_via(search: &Search<'_>, node: Node, via_cross: CrossIdx) -> Vec<Node> {
+        let state = State {
+            node,
+            heading: Heading::Still,
+            recent_via: Some(RecentVia {
+                from: LayerId(1),
+                track: node.track,
+                cross: via_cross,
+            }),
+        };
+        let mut out = Vec::new();
+        search.neighbours(state, &search.db.die_area, &mut FreshCosts, &mut out);
+        out.into_iter()
+            .map(|(s, _)| s.node)
+            .filter(|m| m.layer == node.layer && m.track != node.track)
+            .collect()
+    }
+
+    #[test]
+    fn no_jog_leaves_where_its_metal_would_end_short_of_the_last_via_along_the_track() {
+        let db = tiny();
+        let mut tech = m1_tech(&db);
+        let m1 = &mut tech.layers[LayerId(0)];
+        m1.spacing = m1.spacing * 3 / 2;
+        let occupancy = Occupancy::new(&tech, Dbu::new(1000));
+        let marks = Marks::default();
+        let search = open_search(&db, &tech, &occupancy, &marks, COSTS);
+        let n = crossing_where(&tech, LayerId(0), |c| c.up.is_some());
+        let lt = tech.layer(n.layer);
+        let pad = search.pad(n.layer, LayerId(1));
+        let via_metal = pad.translate(lt.point(n.track, n.cross.next()));
+        let jog_metal = search.jog_metal(n).unwrap();
+        assert!(too_close_along(lt, lt.spacing, &jog_metal, &via_metal));
+
+        let jogs = jogs_after_a_via(&search, n, n.cross.next());
+
+        assert_eq!(jogs, []);
+    }
+
+    #[test]
+    fn a_jog_leaves_from_the_crossing_the_last_via_landed_on() {
+        let db = tiny();
+        let tech = m1_tech(&db);
+        let occupancy = Occupancy::new(&tech, Dbu::new(1000));
+        let marks = Marks::default();
+        let search = open_search(&db, &tech, &occupancy, &marks, COSTS);
+        let n = crossing_where(&tech, LayerId(0), |c| c.up.is_some());
+
+        let jogs = jogs_after_a_via(&search, n, n.cross);
+
+        assert!(jogs.contains(&Node {
+            track: n.track.plus(1),
+            ..n
+        }));
     }
 
     #[test]
