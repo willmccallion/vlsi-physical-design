@@ -801,9 +801,13 @@ impl DetailedRouter<'_> {
             ripped: &work.ripped,
         };
         let own = self.vias_near(piece.net, area, work.removed(i));
-        let edges = self.connect_groups(&search, &piece.groups, &local.window, own);
+        let edges = self.connect_groups(&search, &piece.groups, &local.window, &own);
         if self.trace.wants(piece.net, area) {
-            self.trace_piece(area, round, piece.net, &search, edges.as_deref());
+            let routed_with = Search {
+                own_vias: Some(&own),
+                ..search
+            };
+            self.trace_piece(area, round, piece.net, &routed_with, edges.as_deref());
         }
         let result = edges.map(|edges| {
             let wiring = Wiring {
@@ -973,7 +977,9 @@ impl DetailedRouter<'_> {
         reroute
     }
 
-    /// Logs a traced piece's route and what it cost the search.
+    /// Logs a traced piece's route and what it cost `search`, the search it
+    /// was routed with; crowding between the piece's own paths is left out,
+    /// as explaining edges sees no path order.
     fn trace_piece(
         &self,
         area: &Rect<Dbu>,
@@ -1067,15 +1073,17 @@ impl DetailedRouter<'_> {
 
     /// Joins `groups` into one tree inside `window`: each search runs from
     /// the tree so far to the nearest remaining group, keeping new vias
-    /// clear of `own`, the net's vias so far.
+    /// clear of `own`, the net's vias before it, and of the vias of the
+    /// paths found before it.
     fn connect_groups(
         &self,
         search: &Search<'_>,
         groups: &[Vec<Node>],
         window: &Rect<Dbu>,
-        mut own: OwnVias,
+        own: &OwnVias,
     ) -> Option<Vec<Edge>> {
         let (first, rest) = groups.split_first()?;
+        let mut own = own.clone();
         let mut cache = WindowCache::new(search, *window);
         let mut tree: Vec<Node> = first.clone();
         let mut remaining: Vec<&Vec<Node>> = rest.iter().collect();
