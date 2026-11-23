@@ -3,8 +3,10 @@
 //! Every track crossing inside the window gets an index, and every search
 //! state on a crossing a slot: one per heading while no via is recent, and
 //! one per side the recent via came from, number of crossings back and
-//! number of tracks across it landed. Costs, predecessors and step costs then live in arrays reused
-//! from search to search through generation stamps, not in hash maps.
+//! number of tracks across it landed; each of those once with no recent
+//! jog and once per number of crossings back a recent jog lies. Costs,
+//! predecessors and step costs then live in arrays reused from search to
+//! search through generation stamps, not in hash maps.
 
 use super::{Heading, RecentVia, Search, State, StepCosts, Visits};
 use crate::access::Node;
@@ -42,6 +44,9 @@ struct Numbering {
     reach: u32,
     /// Most tracks across a recent via can lie, after jogs.
     across_reach: u32,
+    /// Most crossings back along its track a recent jog can lie; none when
+    /// no jog in the window can be crowded, so none is ever held.
+    jog_reach: Option<u32>,
 }
 
 impl Numbering {
@@ -51,6 +56,7 @@ impl Numbering {
         let mut nodes = 0;
         let mut reach = 0;
         let mut across_reach = 0;
+        let mut jog_reach = None;
         for layer in tech.routable_layers() {
             let lt = tech.layer(layer);
             let (Interval { lo: a0, hi: a1 }, Interval { lo: b0, hi: b1 }) =
@@ -66,14 +72,14 @@ impl Numbering {
             };
             nodes += span.tracks as usize * span.crosses as usize;
             spans.push(span);
-            let neighbours = [layer.below(), layer.above()];
-            let via_reach = neighbours
-                .into_iter()
-                .flatten()
-                .filter(|&other| tech.min_layer <= other && other <= tech.max_layer)
+            let via_reach = search
+                .via_layers(layer)
                 .map(|other| search.via_reach(layer, other))
                 .max()
                 .unwrap_or_default();
+            if let Some(k) = farthest_jog_crowding(search, layer, crosses.clone()) {
+                jog_reach = Some(jog_reach.unwrap_or(0).max(k));
+            }
             let at: Vec<Dbu> = crosses.map(|c| lt.cross[c].at).collect();
             reach = reach.max(steps_within(&at, via_reach));
             across_reach = across_reach.max(steps_within(lt.tracks.as_slice(), via_reach));
@@ -84,6 +90,7 @@ impl Numbering {
             nodes,
             reach,
             across_reach,
+            jog_reach,
         }
     }
 
@@ -93,8 +100,16 @@ impl Numbering {
         (2 * self.reach as usize + 1) * (2 * self.across_reach as usize + 1)
     }
 
+    /// Slots for the recent jog: none, or one per crossing back it lies.
+    const fn jog_slots(&self) -> usize {
+        match self.jog_reach {
+            Some(k) => 2 + 2 * k as usize,
+            None => 1,
+        }
+    }
+
     const fn slots_per_node(&self) -> usize {
-        3 + 2 * self.recent_slots()
+        (3 + 2 * self.recent_slots()) * self.jog_slots()
     }
 
     fn node_index(&self, n: Node) -> Option<usize> {
@@ -145,8 +160,34 @@ impl Numbering {
                 3 + side * self.recent_slots() + offset
             }
         };
-        Some(node * self.slots_per_node() + within)
+        let jog = match (state.recent_jog, self.jog_reach) {
+            (None, _) => 0,
+            (Some(_), None) => return None,
+            (Some(cross), Some(k)) => {
+                let back = state.node.cross.offset_from(cross);
+                1 + usize::try_from(back + i64::from(k))
+                    .ok()
+                    .filter(|&j| j <= 2 * k as usize)?
+            }
+        };
+        Some(node * self.slots_per_node() + within * self.jog_slots() + jog)
     }
+}
+
+/// The most crossings back along their track from a jog at one of `crosses`
+/// of `layer` that a via could crowd it; none when no via could.
+fn farthest_jog_crowding(
+    search: &Search<'_>,
+    layer: LayerId,
+    crosses: impl Iterator<Item = CrossIdx>,
+) -> Option<u32> {
+    crosses
+        .flat_map(|jog| {
+            search
+                .jog_crowding_crosses(layer, jog)
+                .filter_map(move |c| c.steps_from(jog).or_else(|| jog.steps_from(c)))
+        })
+        .max()
 }
 
 /// The most steps along `at`, a sorted run of crossings, that stay closer
@@ -424,12 +465,84 @@ mod tests {
                 track,
                 cross: node.cross,
             }),
+            recent_jog: None,
         };
 
         let here = numbering.slot(landed_on(TrackIdx(2)));
         let beside = numbering.slot(landed_on(TrackIdx(1)));
 
         assert!(here.is_some() && beside.is_some() && here != beside);
+    }
+
+    /// `f` of the tiny design's search on M1 and up, with M1's spacing
+    /// scaled to `spacing_halves` halves of itself.
+    fn with_m1_spacing<R>(spacing_halves: i64, f: impl FnOnce(&Search<'_>) -> R) -> R {
+        let db = crate::tests::tiny();
+        let config = RoutingConfig {
+            min_layer: Some("M1".to_string()),
+            ..RoutingConfig::default()
+        };
+        let mut tech = RouteTech::new(&db, &config, LeafClockPins::default()).unwrap();
+        let m1 = &mut tech.layers[LayerId::new(0)];
+        m1.spacing = m1.spacing * spacing_halves / 2;
+        let occupancy = Occupancy::new(&tech, Dbu::new(1000));
+        let marks = Marks::default();
+        let search = Search {
+            db: &db,
+            tech: &tech,
+            occupancy: &occupancy,
+            overlay: None,
+            marks: &marks,
+            owner: Owner::Net(NetId(0)),
+            costs: Costs {
+                via: 50.0,
+                conflict: 8.0,
+                marker: 32.0,
+                decay: 0.95,
+            },
+            guide: None,
+            own_vias: None,
+            ripped: &[],
+        };
+        f(&search)
+    }
+
+    #[test]
+    fn a_jog_on_m1_can_be_crowded_only_once_its_spacing_reaches_past_a_crossing() {
+        let farthest = |search: &Search<'_>| {
+            let m1 = LayerId::new(0);
+            let crosses = search
+                .tech
+                .layer(m1)
+                .cross
+                .iter_enumerated()
+                .map(|(c, _)| c);
+            farthest_jog_crowding(search, m1, crosses)
+        };
+
+        let (plain, wide) = (with_m1_spacing(2, farthest), with_m1_spacing(3, farthest));
+
+        assert_eq!((plain, wide), (None, Some(1)));
+    }
+
+    #[test]
+    fn a_state_a_step_past_a_recent_jog_gets_its_own_slot() {
+        let numbering = with_m1_spacing(2, |search| Numbering::new(search, &search.db.die_area));
+        let node = Node {
+            layer: LayerId::new(0),
+            track: TrackIdx(2),
+            cross: CrossIdx(3),
+        };
+        let past = |recent_jog| State {
+            node,
+            heading: Heading::Up,
+            recent_via: None,
+            recent_jog,
+        };
+
+        let slots = [None, Some(CrossIdx(2))].map(|j| numbering.slot(past(j)));
+
+        assert!(slots.iter().all(Option::is_some) && slots[0] != slots[1]);
     }
 
     #[test]
