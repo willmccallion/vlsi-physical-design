@@ -472,7 +472,7 @@ impl DetailedRounds<'_, '_> {
                 conflicted: negotiation.conflicted.len(),
                 repaired: repaired.pieces,
                 conflict_cost: costs.conflict,
-                flow: flow.name(),
+                flow: flow.as_str(),
                 elapsed: start.elapsed(),
             }));
         }
@@ -509,7 +509,7 @@ impl Negotiation {
             conflicted: conflicted.len(),
             repaired: 0,
             conflict_cost: round_costs(saved.round, via).conflict,
-            flow: saved.flow.name(),
+            flow: saved.flow.as_str(),
             elapsed: start.elapsed(),
         }));
         Ok(Self {
@@ -540,7 +540,7 @@ impl Negotiation {
             conflicted: conflicted.len(),
             repaired: first.pieces,
             conflict_cost: round_costs(0, via).conflict,
-            flow: flows.current().name(),
+            flow: flows.current().as_str(),
             elapsed: start.elapsed(),
         }));
         Self {

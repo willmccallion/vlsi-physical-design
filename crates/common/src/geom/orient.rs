@@ -6,58 +6,34 @@ use super::rect::Rect;
 use std::fmt;
 use std::str::FromStr;
 
-/// One of the eight DEF orientations.
-///
-/// `W`/`S`/`E` rotate counter-clockwise by 90/180/270 degrees; the `F` forms
-/// mirror the corresponding rotation about the Y axis.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
-pub enum Orientation {
-    /// No rotation.
-    #[default]
-    N,
-    /// Rotated 180 degrees.
-    S,
-    /// Rotated 270 degrees counter-clockwise.
-    E,
-    /// Rotated 90 degrees counter-clockwise.
-    W,
-    /// Mirrored about the Y axis.
-    FN,
-    /// Mirrored about the X axis.
-    FS,
-    /// `E`, then mirrored about the Y axis.
-    FE,
-    /// `W`, then mirrored about the Y axis.
-    FW,
+crate::keyword_enum! {
+    /// One of the eight DEF orientations.
+    ///
+    /// `W`/`S`/`E` rotate counter-clockwise by 90/180/270 degrees; the `F` forms
+    /// mirror the corresponding rotation about the Y axis.
+    #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
+    pub enum Orientation {
+        /// No rotation.
+        #[default]
+        N = "N",
+        /// Rotated 180 degrees.
+        S = "S",
+        /// Rotated 270 degrees counter-clockwise.
+        E = "E",
+        /// Rotated 90 degrees counter-clockwise.
+        W = "W",
+        /// Mirrored about the Y axis.
+        FN = "FN",
+        /// Mirrored about the X axis.
+        FS = "FS",
+        /// `E`, then mirrored about the Y axis.
+        FE = "FE",
+        /// `W`, then mirrored about the Y axis.
+        FW = "FW",
+    }
 }
 
 impl Orientation {
-    /// All eight orientations.
-    pub const ALL: [Self; 8] = [
-        Self::N,
-        Self::S,
-        Self::E,
-        Self::W,
-        Self::FN,
-        Self::FS,
-        Self::FE,
-        Self::FW,
-    ];
-
-    /// The DEF keyword for this orientation.
-    pub const fn as_str(self) -> &'static str {
-        match self {
-            Self::N => "N",
-            Self::S => "S",
-            Self::E => "E",
-            Self::W => "W",
-            Self::FN => "FN",
-            Self::FS => "FS",
-            Self::FE => "FE",
-            Self::FW => "FW",
-        }
-    }
-
     /// The orientation mirrored about the vertical axis, as `OpenDP`'s
     /// `orientMirrorY`.
     #[must_use]
@@ -145,10 +121,7 @@ impl FromStr for Orientation {
     type Err = UnknownOrientation;
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
-        Self::ALL
-            .into_iter()
-            .find(|o| o.as_str() == s)
-            .ok_or_else(|| UnknownOrientation(s.to_string()))
+        Self::from_keyword(s).ok_or_else(|| UnknownOrientation(s.to_string()))
     }
 }
 

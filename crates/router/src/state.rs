@@ -171,7 +171,7 @@ fn write_detailed(out: &mut impl Write, d: &DetailedState) -> io::Result<()> {
         out,
         "detailed {} {scope} {} {} {}",
         d.round,
-        d.flow.name(),
+        d.flow.as_str(),
         u8::from(d.effective),
         d.routes.len()
     )?;
@@ -255,7 +255,7 @@ fn parse_detailed(lines: &mut Lines<'_>, header: &str) -> Result<DetailedState, 
         other => return Err(head.error(&format!("unknown scope `{other}`"))),
     };
     let flow_name = head.word()?;
-    let flow = Flow::from_name(&flow_name)
+    let flow = Flow::from_keyword(&flow_name)
         .ok_or_else(|| head.error(&format!("unknown flow `{flow_name}`")))?;
     let effective = head.flag("effectiveness")?;
     let count: usize = head.int()?;

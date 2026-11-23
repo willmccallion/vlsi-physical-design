@@ -1202,26 +1202,10 @@ pub(crate) fn via_from_shapes(
 
 /// Parses a LEF/DEF pin direction keyword, in any case.
 pub(crate) fn parse_pin_direction(word: &str) -> Option<PinDirection> {
-    match word.to_ascii_uppercase().as_str() {
-        "INPUT" => Some(PinDirection::Input),
-        "OUTPUT" => Some(PinDirection::Output),
-        "INOUT" => Some(PinDirection::Inout),
-        "FEEDTHRU" => Some(PinDirection::Feedthru),
-        _ => None,
-    }
+    PinDirection::from_keyword(&word.to_ascii_uppercase())
 }
 
 /// Parses a LEF/DEF `USE` keyword, in any case.
 pub(crate) fn parse_signal_use(word: &str) -> Option<SignalUse> {
-    match word.to_ascii_uppercase().as_str() {
-        "SIGNAL" => Some(SignalUse::Signal),
-        "POWER" => Some(SignalUse::Power),
-        "GROUND" => Some(SignalUse::Ground),
-        "CLOCK" => Some(SignalUse::Clock),
-        "ANALOG" => Some(SignalUse::Analog),
-        "SCAN" => Some(SignalUse::Scan),
-        "RESET" => Some(SignalUse::Reset),
-        "TIEOFF" => Some(SignalUse::Tieoff),
-        _ => None,
-    }
+    SignalUse::from_keyword(&word.to_ascii_uppercase())
 }
