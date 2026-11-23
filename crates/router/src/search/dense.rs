@@ -3,8 +3,10 @@
 //! Every track crossing inside the window gets an index, and every search
 //! state on a crossing a slot: one per heading while no via is recent, and
 //! one per side the recent via came from, number of crossings back and
-//! number of tracks across it landed. Costs, predecessors and step costs then live in arrays reused
-//! from search to search through generation stamps, not in hash maps.
+//! number of tracks across it landed, as far as a via reaches on the
+//! crossing's layer. Costs, predecessors and step costs then live in arrays
+//! reused from search to search through generation stamps, not in hash
+//! maps.
 
 use super::{Heading, RecentVia, Search, State, StepCosts, Visits};
 use crate::access::Node;
@@ -22,66 +24,27 @@ const MAX_SLOTS: usize = 1 << 22;
 /// No predecessor.
 const NONE: u32 = u32::MAX;
 
-/// The crossings of one layer inside the window.
+/// The crossings of one layer inside the window, and the slots of the
+/// states on them.
 #[derive(Clone, Copy, Debug)]
 struct Span {
     first_track: TrackIdx,
     tracks: u32,
     first_cross: CrossIdx,
     crosses: u32,
+    /// The index of its first crossing among the window's.
     base: usize,
-}
-
-/// The crossings inside a window, numbered layer by layer.
-#[derive(Debug)]
-struct Numbering {
-    min_layer: LayerId,
-    spans: Vec<Span>,
-    nodes: usize,
+    /// The first slot of its states.
+    first_slot: usize,
     /// Most crossings back along its track a recent via can lie.
     reach: u32,
     /// Most tracks across a recent via can lie, after jogs.
     across_reach: u32,
 }
 
-impl Numbering {
-    fn new(search: &Search<'_>, window: &Rect<Dbu>) -> Self {
-        let tech = search.tech;
-        let mut spans = Vec::new();
-        let mut nodes = 0;
-        let mut reach = 0;
-        let mut across_reach = 0;
-        for layer in tech.routable_layers() {
-            let lt = tech.layer(layer);
-            let (Interval { lo: a0, hi: a1 }, Interval { lo: b0, hi: b1 }) =
-                lt.across_along_rect(window);
-            let tracks = lt.tracks_within(a0, a1);
-            let crosses = lt.cross_within(b0, b1);
-            let span = Span {
-                first_track: tracks.start,
-                tracks: crate::tech::index_u32(tracks.len()),
-                first_cross: crosses.start,
-                crosses: crate::tech::index_u32(crosses.len()),
-                base: nodes,
-            };
-            nodes += span.tracks as usize * span.crosses as usize;
-            spans.push(span);
-            let via_reach = search
-                .via_layers(layer)
-                .map(|other| search.via_reach(layer, other))
-                .max()
-                .unwrap_or_default();
-            let at: Vec<Dbu> = crosses.map(|c| lt.cross[c].at).collect();
-            reach = reach.max(steps_within(&at, via_reach));
-            across_reach = across_reach.max(steps_within(lt.tracks.as_slice(), via_reach));
-        }
-        Self {
-            min_layer: tech.min_layer,
-            spans,
-            nodes,
-            reach,
-            across_reach,
-        }
+impl Span {
+    const fn nodes(&self) -> usize {
+        self.tracks as usize * self.crosses as usize
     }
 
     /// Slots for one side's recent vias: one per crossing back and track
@@ -94,36 +57,102 @@ impl Numbering {
         3 + 2 * self.recent_slots()
     }
 
-    fn node_index(&self, n: Node) -> Option<usize> {
-        let span = self
-            .spans
-            .get(n.layer.index().checked_sub(self.min_layer.index())?)?;
-        let t = n.track.steps_from(span.first_track)?;
-        let c = n.cross.steps_from(span.first_cross)?;
-        (t < span.tracks && c < span.crosses)
-            .then(|| span.base + t as usize * span.crosses as usize + c as usize)
+    /// The index of `n`, a node on this span's layer, among its crossings.
+    fn local_index(&self, n: Node) -> Option<usize> {
+        let t = n.track.steps_from(self.first_track)?;
+        let c = n.cross.steps_from(self.first_cross)?;
+        (t < self.tracks && c < self.crosses)
+            .then(|| t as usize * self.crosses as usize + c as usize)
     }
 
-    fn node_at(&self, index: usize) -> Node {
-        let l = self.spans.partition_point(|s| s.base <= index) - 1;
-        let span = self.spans[l];
-        let offset = index - span.base;
-        let crosses = span.crosses as usize;
+    /// The node at `local`, an index among its crossings, on `layer`.
+    fn node_at(&self, layer: LayerId, local: usize) -> Node {
+        let crosses = self.crosses as usize;
         Node {
-            layer: LayerId::new(self.min_layer.index() + l),
-            track: span
+            layer,
+            track: self
                 .first_track
-                .plus(crate::tech::index_u32(offset / crosses)),
-            cross: span
+                .plus(crate::tech::index_u32(local / crosses)),
+            cross: self
                 .first_cross
-                .plus(crate::tech::index_u32(offset % crosses)),
+                .plus(crate::tech::index_u32(local % crosses)),
         }
+    }
+}
+
+/// The crossings inside a window, numbered layer by layer, each layer's
+/// states given as many slots as its own reach for recent vias needs.
+#[derive(Debug)]
+struct Numbering {
+    min_layer: LayerId,
+    spans: Vec<Span>,
+    nodes: usize,
+    slots: usize,
+}
+
+impl Numbering {
+    fn new(search: &Search<'_>, window: &Rect<Dbu>) -> Self {
+        let tech = search.tech;
+        let mut spans = Vec::new();
+        let mut nodes = 0;
+        let mut slots = 0;
+        for layer in tech.routable_layers() {
+            let lt = tech.layer(layer);
+            let (Interval { lo: a0, hi: a1 }, Interval { lo: b0, hi: b1 }) =
+                lt.across_along_rect(window);
+            let tracks = lt.tracks_within(a0, a1);
+            let crosses = lt.cross_within(b0, b1);
+            let via_reach = search
+                .via_layers(layer)
+                .map(|other| search.via_reach(layer, other))
+                .max()
+                .unwrap_or_default();
+            let at: Vec<Dbu> = crosses.clone().map(|c| lt.cross[c].at).collect();
+            let span = Span {
+                first_track: tracks.start,
+                tracks: crate::tech::index_u32(tracks.len()),
+                first_cross: crosses.start,
+                crosses: crate::tech::index_u32(crosses.len()),
+                base: nodes,
+                first_slot: slots,
+                reach: steps_within(&at, via_reach),
+                across_reach: steps_within(lt.tracks.as_slice(), via_reach),
+            };
+            nodes += span.nodes();
+            slots += span.nodes() * span.slots_per_node();
+            spans.push(span);
+        }
+        Self {
+            min_layer: tech.min_layer,
+            spans,
+            nodes,
+            slots,
+        }
+    }
+
+    fn span(&self, layer: LayerId) -> Option<&Span> {
+        self.spans
+            .get(layer.index().checked_sub(self.min_layer.index())?)
+    }
+
+    fn node_index(&self, n: Node) -> Option<usize> {
+        let span = self.span(n.layer)?;
+        Some(span.base + span.local_index(n)?)
+    }
+
+    /// The node whose states hold `slot`.
+    fn node_of_slot(&self, slot: usize) -> Node {
+        let l = self.spans.partition_point(|s| s.first_slot <= slot) - 1;
+        let span = &self.spans[l];
+        let local = (slot - span.first_slot) / span.slots_per_node();
+        span.node_at(LayerId::new(self.min_layer.index() + l), local)
     }
 
     /// The slot of `state`, which its recent jog does not change: states
     /// are told apart by [`State::key`].
     fn slot(&self, state: State) -> Option<usize> {
-        let node = self.node_index(state.node)?;
+        let span = self.span(state.node.layer)?;
+        let local = span.local_index(state.node)?;
         let within = match state.recent_via {
             None => match state.heading {
                 Heading::Still => 0,
@@ -134,17 +163,17 @@ impl Numbering {
                 let side = usize::from(from > state.node.layer);
                 let back = state.node.cross.offset_from(cross);
                 let over = i64::from(state.node.track.0) - i64::from(track.0);
-                let (reach, across) = (i64::from(self.reach), i64::from(self.across_reach));
+                let (reach, across) = (i64::from(span.reach), i64::from(span.across_reach));
                 if back.abs() > reach || over.abs() > across {
                     return None;
                 }
                 let along = usize::try_from(back + reach).ok()?;
                 let across_offset = usize::try_from(over + across).ok()?;
-                let offset = across_offset * (2 * self.reach as usize + 1) + along;
-                3 + side * self.recent_slots() + offset
+                let offset = across_offset * (2 * span.reach as usize + 1) + along;
+                3 + side * span.recent_slots() + offset
             }
         };
-        Some(node * self.slots_per_node() + within)
+        Some(span.first_slot + local * span.slots_per_node() + within)
     }
 }
 
@@ -216,11 +245,10 @@ impl Dense {
     /// Numbers the window's crossings, or `None` if it holds too many.
     pub(super) fn new(search: &Search<'_>, window: &Rect<Dbu>) -> Option<Self> {
         let numbering = Numbering::new(search, window);
-        let slots = numbering.nodes.checked_mul(numbering.slots_per_node())?;
-        if slots > MAX_SLOTS {
+        if numbering.slots > MAX_SLOTS {
             return None;
         }
-        let buffers = Buffers::take(slots, numbering.nodes);
+        let buffers = Buffers::take(numbering.slots, numbering.nodes);
         Some(Self { numbering, buffers })
     }
 
@@ -294,7 +322,6 @@ impl Visits for DenseVisits<'_> {
     }
 
     fn path_to(&self, end: State) -> Vec<Node> {
-        let per_node = self.numbering.slots_per_node();
         let mut path = vec![end.node];
         let mut slot = self
             .numbering
@@ -305,7 +332,7 @@ impl Visits for DenseVisits<'_> {
             if prev == NONE {
                 break;
             }
-            path.push(self.numbering.node_at(prev as usize / per_node));
+            path.push(self.numbering.node_of_slot(prev as usize));
             slot = prev;
         }
         path.reverse();
@@ -382,8 +409,8 @@ mod tests {
     use pare_common::config::RoutingConfig;
     use pare_common::db::indices::NetId;
 
-    #[test]
-    fn a_recent_via_a_jog_left_on_the_next_track_gets_its_own_slot() {
+    /// The numbering of the tiny design's whole die, on M1 and up.
+    fn tiny_numbering() -> Numbering {
         let db = crate::tests::tiny();
         let config = RoutingConfig {
             min_layer: Some("M1".to_string()),
@@ -409,7 +436,74 @@ mod tests {
             own_vias: None,
             ripped: &[],
         };
-        let numbering = Numbering::new(&search, &db.die_area);
+        Numbering::new(&search, &db.die_area)
+    }
+
+    /// Every state the search can hold on `node`, by the reaches of its
+    /// layer's span.
+    fn states_on(numbering: &Numbering, node: Node) -> Vec<State> {
+        let span = numbering.span(node.layer).unwrap();
+        let still = [Heading::Still, Heading::Up, Heading::Down].map(|heading| State {
+            node,
+            heading,
+            recent_via: None,
+            recent_jog: None,
+        });
+        let (reach, across) = (i64::from(span.reach), i64::from(span.across_reach));
+        let sides = [node.layer.below(), node.layer.above()];
+        let after_vias = sides.into_iter().flatten().flat_map(|from| {
+            (-reach..=reach).flat_map(move |back| {
+                (-across..=across).filter_map(move |over| {
+                    let cross = u32::try_from(i64::from(node.cross.0) - back).ok()?;
+                    let track = u32::try_from(i64::from(node.track.0) - over).ok()?;
+                    Some(State {
+                        node,
+                        heading: Heading::Still,
+                        recent_via: Some(RecentVia {
+                            from,
+                            track: TrackIdx(track),
+                            cross: CrossIdx(cross),
+                        }),
+                        recent_jog: None,
+                    })
+                })
+            })
+        });
+        still.into_iter().chain(after_vias).collect()
+    }
+
+    #[test]
+    fn every_state_in_the_window_gets_its_own_slot_on_its_own_node() {
+        let numbering = tiny_numbering();
+        let nodes: Vec<Node> = numbering
+            .spans
+            .iter()
+            .enumerate()
+            .flat_map(|(l, span)| {
+                let layer = LayerId::new(numbering.min_layer.index() + l);
+                (0..span.nodes()).map(move |i| span.node_at(layer, i))
+            })
+            .collect();
+
+        let mut slots = Vec::new();
+        for &node in &nodes {
+            for state in states_on(&numbering, node) {
+                let slot = numbering.slot(state).unwrap();
+                assert_eq!(numbering.node_of_slot(slot), node);
+                slots.push(slot);
+            }
+        }
+
+        let count = slots.len();
+        slots.sort_unstable();
+        slots.dedup();
+        assert_eq!(slots.len(), count);
+        assert!(slots.iter().all(|&s| s < numbering.slots));
+    }
+
+    #[test]
+    fn a_recent_via_a_jog_left_on_the_next_track_gets_its_own_slot() {
+        let numbering = tiny_numbering();
         let node = Node {
             layer: LayerId::new(0),
             track: TrackIdx(2),
@@ -434,32 +528,7 @@ mod tests {
 
     #[test]
     fn a_state_s_recent_jog_leaves_its_slot_alone() {
-        let db = crate::tests::tiny();
-        let config = RoutingConfig {
-            min_layer: Some("M1".to_string()),
-            ..RoutingConfig::default()
-        };
-        let tech = RouteTech::new(&db, &config, LeafClockPins::default()).unwrap();
-        let occupancy = Occupancy::new(&tech, Dbu::new(1000));
-        let marks = Marks::default();
-        let search = Search {
-            db: &db,
-            tech: &tech,
-            occupancy: &occupancy,
-            overlay: None,
-            marks: &marks,
-            owner: Owner::Net(NetId(0)),
-            costs: Costs {
-                via: 50.0,
-                conflict: 8.0,
-                marker: 32.0,
-                decay: 0.95,
-            },
-            guide: None,
-            own_vias: None,
-            ripped: &[],
-        };
-        let numbering = Numbering::new(&search, &db.die_area);
+        let numbering = tiny_numbering();
         let past = |recent_jog| State {
             node: Node {
                 layer: LayerId::new(0),
