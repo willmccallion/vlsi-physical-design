@@ -428,15 +428,18 @@ pub(crate) struct Search<'a> {
 }
 
 /// A position in the search: a node, the way the path moves along the
-/// node's track, and the via the path last took if it is still within cut
+/// node's track, the via the path last took if it is still within cut
 /// spacing, since a via back through the same cut there would break that
-/// spacing. Paths never turn back along a track, so once one moves out of
-/// a via's reach it cannot return to crowd it.
+/// spacing, and the crossing of the jog it took onto its track while a via
+/// ahead could still end short of the jog's metal. Paths never turn back
+/// along a track, so once one moves out of a via's or a jog's reach it
+/// cannot return to crowd it.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
 struct State {
     node: Node,
     heading: Heading,
     recent_via: Option<RecentVia>,
+    recent_jog: Option<CrossIdx>,
 }
 
 /// Which way a path runs along its current track.
@@ -468,6 +471,7 @@ impl State {
             node,
             heading: Heading::Still,
             recent_via: None,
+            recent_jog: None,
         }
     }
 }
@@ -894,20 +898,97 @@ impl Search<'_> {
     /// than the spacing.
     fn via_reach(&self, layer: LayerId, from: LayerId) -> Dbu {
         let Interval { lo, hi } = self.pad_along(layer, from);
-        let neighbours = [layer.index().checked_sub(1), Some(layer.index() + 1)];
-        let widest = neighbours
+        let metal = (-lo).max(hi) + self.widest_pad_along(layer) + self.spacing(layer);
+        metal.max(self.cut_reach(layer, from))
+    }
+
+    /// The layers next to `layer` that a via off it may reach.
+    fn via_layers(&self, layer: LayerId) -> impl Iterator<Item = LayerId> + '_ {
+        [layer.index().checked_sub(1), Some(layer.index() + 1)]
             .into_iter()
             .flatten()
             .map(LayerId::new)
             .filter(|&l| self.tech.min_layer <= l && l <= self.tech.max_layer)
+    }
+
+    /// How far along its track, from the via's center, the metal on `layer`
+    /// of the longest via off it reaches.
+    fn widest_pad_along(&self, layer: LayerId) -> Dbu {
+        self.via_layers(layer)
             .map(|l| {
-                let Interval { lo: a, hi: b } = self.pad_along(layer, l);
-                (-a).max(b)
+                let Interval { lo, hi } = self.pad_along(layer, l);
+                (-lo).max(hi)
             })
             .max()
-            .unwrap_or_default();
-        let metal = (-lo).max(hi) + widest + self.spacing(layer);
-        metal.max(self.cut_reach(layer, from))
+            .unwrap_or_default()
+    }
+
+    /// How far along its track from a jog a via could still end short of
+    /// the jog's metal by less than the spacing.
+    fn jog_reach(&self, layer: LayerId) -> Dbu {
+        let width = self.width(layer);
+        width - width / 2 + self.widest_pad_along(layer) + self.spacing(layer)
+    }
+
+    /// Whether a via between `layer` and `other` at `via_along` would end
+    /// short of the metal of a jog at `jog_along`, along their track, by
+    /// less than the spacing; the via lies on the track the jog spans.
+    fn via_crowds_jog(
+        &self,
+        layer: LayerId,
+        other: LayerId,
+        jog_along: Dbu,
+        via_along: Dbu,
+    ) -> bool {
+        let width = self.width(layer);
+        let (j0, j1) = (jog_along - width / 2, jog_along + (width - width / 2));
+        let Interval { lo, hi } = self.pad_along(layer, other);
+        let gap = (via_along + lo - j1).max(j0 - (via_along + hi));
+        gap > Dbu::ZERO && gap < self.spacing(layer)
+    }
+
+    /// The crossings of `layer` at which some via would crowd the metal of
+    /// a jog at `jog`.
+    fn jog_crowding_crosses(
+        &self,
+        layer: LayerId,
+        jog: CrossIdx,
+    ) -> impl Iterator<Item = CrossIdx> + '_ {
+        let lt = self.tech.layer(layer);
+        let jog_along = lt.cross[jog].at;
+        let reach = self.jog_reach(layer);
+        let within = move |c: &CrossIdx| (lt.cross[*c].at - jog_along).abs() < reach;
+        let up = std::iter::successors(Some(jog.next()), |c| Some(c.next()))
+            .take_while(move |c| c.index() < lt.cross.len())
+            .take_while(within);
+        let down = std::iter::successors(jog.prev(), |c| c.prev()).take_while(within);
+        up.chain(down).filter(move |&c| {
+            self.via_layers(layer)
+                .any(|other| self.via_crowds_jog(layer, other, jog_along, lt.cross[c].at))
+        })
+    }
+
+    /// The recent jog of a path at crossing `at` of `layer` after a jog at
+    /// `jog`: kept while a via at `at` or further on, away from the jog,
+    /// could still crowd it.
+    fn hold_jog(&self, layer: LayerId, jog: CrossIdx, at: CrossIdx) -> Option<CrossIdx> {
+        let here = at.offset_from(jog);
+        self.jog_crowding_crosses(layer, jog)
+            .map(|c| c.offset_from(jog))
+            .any(|k| here == 0 || (k.signum() == here.signum() && k.abs() >= here.abs()))
+            .then_some(jog)
+    }
+
+    /// Whether a via from `state` to `to` at `along` would crowd the jog
+    /// the path took onto its track.
+    // NOTE: FlexGridGraph::getNextPathCost charges a via within
+    // viaForbiddenTurnLen of the last turn; PARE refuses it, as it refuses a
+    // via crowding the last one, since explaining a route sees no path order.
+    fn via_crowds_recent_jog(&self, state: State, to: LayerId, along: Dbu) -> bool {
+        let layer = state.node.layer;
+        state.recent_jog.is_some_and(|j| {
+            self.via_crowds_jog(layer, to, self.tech.layer(layer).cross[j].at, along)
+        })
     }
 
     /// The recent via of a path that steps along its track to `along`.
@@ -1001,6 +1082,9 @@ impl Search<'_> {
                         node: m,
                         heading,
                         recent_via: self.after_step(n.layer, state.recent_via, lt.cross[next].at),
+                        recent_jog: state
+                            .recent_jog
+                            .and_then(|j| self.hold_jog(n.layer, j, next)),
                     };
                     let lower = Node {
                         cross: n.cross.min(m.cross),
@@ -1044,6 +1128,7 @@ impl Search<'_> {
             node: m,
             heading: Heading::Still,
             recent_via: self.after_jog(n.layer, state.recent_via, track),
+            recent_jog: self.hold_jog(n.layer, n.cross, n.cross),
         };
         Some((moved, costs.jog(self, lower) + self.own_jog_cost(lower)))
     }
@@ -1075,7 +1160,10 @@ impl Search<'_> {
             ),
         };
         let to = to?;
-        if !self.allowed(to, here) || self.crowds_recent_via(state, to, cross.at) {
+        if !self.allowed(to, here)
+            || self.crowds_recent_via(state, to, cross.at)
+            || self.via_crowds_recent_jog(state, to, cross.at)
+        {
             return None;
         }
         let m = Node {
@@ -1101,6 +1189,7 @@ impl Search<'_> {
                 track: node.track,
                 cross: node.cross,
             }),
+            recent_jog: None,
         }
     }
 
@@ -1707,6 +1796,7 @@ mod tests {
                 track: node.track,
                 cross: via_cross,
             }),
+            recent_jog: None,
         };
         let mut out = Vec::new();
         search.neighbours(state, &search.db.die_area, &mut FreshCosts, &mut out);
@@ -1719,9 +1809,7 @@ mod tests {
     #[test]
     fn no_jog_leaves_where_its_metal_would_end_short_of_the_last_via_along_the_track() {
         let db = tiny();
-        let mut tech = m1_tech(&db);
-        let m1 = &mut tech.layers[LayerId(0)];
-        m1.spacing = m1.spacing * 3 / 2;
+        let tech = wide_m1_tech(&db);
         let occupancy = Occupancy::new(&tech, Dbu::new(1000));
         let marks = Marks::default();
         let search = open_search(&db, &tech, &occupancy, &marks, COSTS);
@@ -1752,6 +1840,69 @@ mod tests {
             track: n.track.plus(1),
             ..n
         }));
+    }
+
+    /// The tiny design on M1 and up, M1 spacing half as wide again, so that
+    /// metal one crossing along a track ends short of the spacing.
+    fn wide_m1_tech(db: &NetlistDB) -> RouteTech {
+        let mut tech = m1_tech(db);
+        let m1 = &mut tech.layers[LayerId(0)];
+        m1.spacing = m1.spacing * 3 / 2;
+        tech
+    }
+
+    /// Whether `search` offers a via up from `node`, reached by a step from
+    /// the jog the path took at crossing `jog` of its track.
+    fn via_up_after_a_jog(search: &Search<'_>, node: Node, jog: CrossIdx) -> bool {
+        let state = State {
+            node,
+            heading: Heading::Down,
+            recent_via: None,
+            recent_jog: Some(jog),
+        };
+        search.via_move(state, Climb::Up, &mut FreshCosts).is_some()
+    }
+
+    #[test]
+    fn no_via_leaves_where_its_metal_would_end_short_of_the_last_jog_along_the_track() {
+        let db = tiny();
+        let tech = wide_m1_tech(&db);
+        let occupancy = Occupancy::new(&tech, Dbu::new(1000));
+        let marks = Marks::default();
+        let search = open_search(&db, &tech, &occupancy, &marks, COSTS);
+        let n = crossing_where(&tech, LayerId(0), |c| c.up.is_some());
+        let lt = tech.layer(n.layer);
+        let (jog_along, via_along) = (lt.cross[n.cross.next()].at, lt.cross[n.cross].at);
+        assert!(search.via_crowds_jog(n.layer, LayerId(1), jog_along, via_along));
+
+        assert!(!via_up_after_a_jog(&search, n, n.cross.next()));
+    }
+
+    #[test]
+    fn a_via_leaves_from_the_crossing_the_last_jog_ran_across() {
+        let db = tiny();
+        let tech = wide_m1_tech(&db);
+        let occupancy = Occupancy::new(&tech, Dbu::new(1000));
+        let marks = Marks::default();
+        let search = open_search(&db, &tech, &occupancy, &marks, COSTS);
+        let n = crossing_where(&tech, LayerId(0), |c| c.up.is_some());
+
+        assert!(via_up_after_a_jog(&search, n, n.cross));
+    }
+
+    #[test]
+    fn a_jog_is_remembered_only_where_a_via_ahead_could_crowd_it() {
+        let db = tiny();
+        let (plain, wide) = (m1_tech(&db), wide_m1_tech(&db));
+        let occupancy = Occupancy::new(&plain, Dbu::new(1000));
+        let marks = Marks::default();
+        let n = crossing_where(&plain, LayerId(0), |c| c.up.is_some());
+        let held = |tech: &RouteTech| {
+            let search = open_search(&db, tech, &occupancy, &marks, COSTS);
+            search.hold_jog(n.layer, n.cross, n.cross)
+        };
+
+        assert_eq!((held(&plain), held(&wide)), (None, Some(n.cross)));
     }
 
     #[test]
