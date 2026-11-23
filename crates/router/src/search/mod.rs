@@ -466,6 +466,19 @@ struct RecentVia {
 }
 
 impl State {
+    /// What tells this state apart from others in a search: all of it but
+    /// the recent jog, which rides along with the cheapest path to the rest.
+    // NOTE: FlexGridGraph keeps a turn's length on the wavefront, outside
+    // the cost a grid node is visited at; PARE likewise leaves the recent jog
+    // out, which spares the slots a jog would multiply, at the price of a
+    // cheaper path's jog sometimes refusing a via a pruned path could take.
+    const fn key(self) -> Self {
+        Self {
+            recent_jog: None,
+            ..self
+        }
+    }
+
     const fn start(node: Node) -> Self {
         Self {
             node,
@@ -1288,16 +1301,16 @@ impl Visits for HashVisits {
     }
 
     fn best(&self, state: State) -> Option<f64> {
-        self.0.get(&state).map(|&(cost, _)| cost)
+        self.0.get(&state.key()).map(|&(cost, _)| cost)
     }
 
     fn record(&mut self, state: State, cost: f64, from: Option<State>) {
-        let _ = self.0.insert(state, (cost, from));
+        let _ = self.0.insert(state.key(), (cost, from.map(State::key)));
     }
 
     fn path_to(&self, end: State) -> Vec<Node> {
         let mut path = vec![end.node];
-        let mut cur = end;
+        let mut cur = end.key();
         while let Some(&(_, Some(prev))) = self.0.get(&cur) {
             path.push(prev.node);
             cur = prev;
@@ -1903,6 +1916,22 @@ mod tests {
         };
 
         assert_eq!((held(&plain), held(&wide)), (None, Some(n.cross)));
+    }
+
+    #[test]
+    fn a_hashed_visit_is_found_again_whatever_recent_jog_it_carried() {
+        let node = step(1, 3);
+        let carrying = |recent_jog| State {
+            node,
+            heading: Heading::Up,
+            recent_via: None,
+            recent_jog,
+        };
+        let mut visits = HashVisits::default();
+
+        visits.record(carrying(None), 5.0, None);
+
+        assert_eq!(visits.best(carrying(Some(CrossIdx(2)))), Some(5.0));
     }
 
     #[test]
