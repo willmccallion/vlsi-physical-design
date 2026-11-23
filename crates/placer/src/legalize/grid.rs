@@ -12,7 +12,6 @@ use pare_common::db::library::SiteClass;
 use pare_common::geom::dbu::Dbu;
 use pare_common::geom::point::Point;
 use pare_common::geom::rect::Rect;
-use std::ops::{Add, Mul, Sub};
 
 /// Defines one axis of the grid, as an instance of dpl's `TypedCoordinate`.
 macro_rules! grid_axis {
@@ -51,35 +50,8 @@ macro_rules! grid_axis {
             }
         }
 
-        impl Add for $name {
-            type Output = Self;
-            fn add(self, rhs: Self) -> Self {
-                Self(self.0 + rhs.0)
-            }
-        }
-
-        impl Sub for $name {
-            type Output = Self;
-            fn sub(self, rhs: Self) -> Self {
-                Self(self.0 - rhs.0)
-            }
-        }
-
-        /// A step of whole lines, as dpl adds an `int`.
-        impl Add<i64> for $name {
-            type Output = Self;
-            fn add(self, rhs: i64) -> Self {
-                Self(self.0 + rhs)
-            }
-        }
-
-        /// A step of whole lines, as dpl subtracts an `int`.
-        impl Sub<i64> for $name {
-            type Output = Self;
-            fn sub(self, rhs: i64) -> Self {
-                Self(self.0 - rhs)
-            }
-        }
+        // A bare `i64` is a step of whole lines, as dpl adds and subtracts an `int`.
+        pare_common::newtype_ops!($name: Add, Sub, Add<i64>, Sub<i64>);
     };
 }
 
@@ -119,13 +91,7 @@ impl GridX {
     }
 }
 
-/// A width scaled by a whole factor, as dpl scales a `GridX`'s value.
-impl Mul<i64> for GridX {
-    type Output = Self;
-    fn mul(self, rhs: i64) -> Self {
-        Self(self.0 * rhs)
-    }
-}
+pare_common::newtype_ops!(GridX: Mul<i64>);
 
 /// A point of the grid, as dpl's `GridPt`.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, PartialOrd, Ord)]

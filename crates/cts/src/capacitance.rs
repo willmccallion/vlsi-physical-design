@@ -2,8 +2,6 @@
 //! balancing a tree's loads rounds as it does.
 
 use pare_common::units::Farads;
-use std::iter::Sum;
-use std::ops::{Add, AddAssign, Sub};
 
 /// A capacitance in farads, held in single precision.
 #[derive(Clone, Copy, Debug, Default, PartialEq, PartialOrd)]
@@ -42,30 +40,4 @@ impl Farads32 {
     }
 }
 
-impl Add for Farads32 {
-    type Output = Self;
-
-    fn add(self, rhs: Self) -> Self {
-        Self(self.0 + rhs.0)
-    }
-}
-
-impl AddAssign for Farads32 {
-    fn add_assign(&mut self, rhs: Self) {
-        self.0 += rhs.0;
-    }
-}
-
-impl Sub for Farads32 {
-    type Output = Self;
-
-    fn sub(self, rhs: Self) -> Self {
-        Self(self.0 - rhs.0)
-    }
-}
-
-impl Sum for Farads32 {
-    fn sum<I: Iterator<Item = Self>>(loads: I) -> Self {
-        Self(loads.map(|c| c.0).sum())
-    }
-}
+pare_common::newtype_ops!(Farads32: Add, AddAssign, Sub, Sum);
