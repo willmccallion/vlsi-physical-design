@@ -1402,7 +1402,7 @@ fn distance_to(r: &Rect<Dbu>, p: Point<Dbu>) -> Dbu {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::tech::LeafClockPins;
+    use crate::tech::RouteSetup;
     use crate::tech::{Cross, CrossIdx, LayerTech, TrackIdx};
     use crate::tests::tiny;
     use pare_common::config::RoutingConfig;
@@ -1440,8 +1440,7 @@ mod tests {
     #[test]
     fn a_global_route_of_no_cells_gives_no_guide() {
         let db = tiny();
-        let tech =
-            RouteTech::new(&db, &RoutingConfig::default(), LeafClockPins::default()).unwrap();
+        let tech = RouteTech::new(&db, &RouteSetup::from(&RoutingConfig::default())).unwrap();
 
         let guide = Guide::new(&[], db.die_area.min, Dbu::new(1000), &tech);
 
@@ -1455,7 +1454,7 @@ mod tests {
             min_layer: Some("M1".to_string()),
             ..RoutingConfig::default()
         };
-        let tech = RouteTech::new(&db, &config, LeafClockPins::default()).unwrap();
+        let tech = RouteTech::new(&db, &RouteSetup::from(&config)).unwrap();
         let occupancy = Occupancy::new(&tech, Dbu::new(1000));
         let marks = Marks::default();
         let search = Search {
@@ -1525,7 +1524,7 @@ mod tests {
             min_layer: Some("M1".to_string()),
             ..RoutingConfig::default()
         };
-        RouteTech::new(db, &config, LeafClockPins::default()).unwrap()
+        RouteTech::new(db, &RouteSetup::from(&config)).unwrap()
     }
 
     /// The first crossing of `layer` that `wanted` accepts, on track 1.
@@ -1616,7 +1615,7 @@ mod tests {
             min_layer: Some("M1".to_string()),
             ..RoutingConfig::default()
         };
-        let tech = RouteTech::new(db, &config, LeafClockPins::default()).unwrap();
+        let tech = RouteTech::new(db, &RouteSetup::from(&config)).unwrap();
         let lt = tech.layer(LayerId(0));
         let other = wire_rect(
             lt.point(TrackIdx(1), CrossIdx(1)),

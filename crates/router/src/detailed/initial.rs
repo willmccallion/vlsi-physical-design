@@ -447,7 +447,7 @@ fn union(sets: &mut [usize], a: usize, b: usize) {
 mod tests {
     use super::*;
     use crate::occupancy::{Origin, Owner};
-    use crate::tech::LeafClockPins;
+    use crate::tech::RouteSetup;
     use crate::tech::RouteTech;
     use pare_common::db::indices::LayerId;
 
@@ -462,7 +462,7 @@ mod tests {
     #[test]
     fn a_bridge_every_track_of_which_fixed_metal_blocks_stays_nearest_the_middle() {
         let (db, config) = crate::tests::placed_tiny();
-        let tech = RouteTech::new(&db, &config, LeafClockPins::default()).unwrap();
+        let tech = RouteTech::new(&db, &RouteSetup::from(&config)).unwrap();
         let gcell = crate::gcell_size(&tech, &config);
         let net = NetId::new(0);
         let clear = DetailedRouter::new(&db, &tech, gcell);

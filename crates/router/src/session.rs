@@ -8,9 +8,8 @@
 use crate::access::{access_points, fellow_boxes, order_toward};
 use crate::detailed::{PinJudge, PinTerminal};
 use crate::global::{GCell, GlobalGrid, GlobalNet, GlobalRoutes, NetTree, reroute};
-use crate::tech::{LeafClockPins, RouteTech};
+use crate::tech::{RouteSetup, RouteTech};
 use crate::{GlobalStage, Progress, RouteError, check_routable, gcell_size, global_stage};
-use pare_common::config::RoutingConfig;
 use pare_common::db::design::{NetlistDB, PinOwner, Renumbering};
 use pare_common::db::global_route::{
     NetRoute, PinGridLocation, RoutePoint, RouteSegment, RouteSource,
@@ -55,20 +54,20 @@ struct Before {
 }
 
 impl GlobalSession {
-    /// Finds pin access and routes every signal net of `db` globally; its
-    /// clock nets are leaves where they reach one of `leaf_clock_pins`.
+    /// Finds pin access and routes every signal net of `db` globally under
+    /// `setup`.
     ///
     /// # Errors
     ///
     /// When `db` cannot be routed under `config`.
     pub fn new(
         db: &NetlistDB,
-        config: &RoutingConfig,
-        leaf_clock_pins: LeafClockPins,
+        setup: &RouteSetup<'_>,
         report: &mut dyn FnMut(&Progress<'_>),
     ) -> Result<Self, RouteError> {
         check_routable(db)?;
-        let tech = RouteTech::new(db, config, leaf_clock_pins)?;
+        let tech = RouteTech::new(db, setup)?;
+        let config = setup.config;
         let gcell = gcell_size(&tech, config);
         let (grid, routes, nets, judge) = {
             let GlobalStage {
@@ -500,6 +499,7 @@ fn straight_runs(links: &[(GCell, GCell)], terminals: &[PinTerminal]) -> Vec<(GC
 mod tests {
     use super::*;
     use crate::tests::fixture;
+    use pare_common::config::RoutingConfig;
     use pare_common::db::design::{NonDefaultLayer, NonDefaultRule, PlacementStatus};
     use pare_common::db::parser::{def, lef};
     use std::path::Path;
@@ -603,8 +603,7 @@ mod tests {
     #[test]
     fn a_restored_trial_puts_back_the_routes_it_changed_and_their_usage() {
         let (mut db, config) = crate::tests::placed_tiny();
-        let mut session =
-            GlobalSession::new(&db, &config, LeafClockPins::default(), &mut |_| {}).unwrap();
+        let mut session = GlobalSession::new(&db, &RouteSetup::from(&config), &mut |_| {}).unwrap();
         let u5 = db.cell_id("u5").unwrap();
         let nets: Vec<NetId> = db.cells[u5].pins.iter().map(|&p| db.pins[p].net).collect();
         let net = *nets
@@ -634,8 +633,7 @@ mod tests {
     fn detailed_routing_takes_each_nets_rule_as_it_is_after_renumbering() {
         let mut db = tiny_with_a_rule_after_a_spare_net();
         let config = RoutingConfig::default();
-        let mut session =
-            GlobalSession::new(&db, &config, LeafClockPins::default(), &mut |_| {}).unwrap();
+        let mut session = GlobalSession::new(&db, &RouteSetup::from(&config), &mut |_| {}).unwrap();
         let u7 = db.cell_id("u7").unwrap();
         let spare = db.net_id("spare").unwrap();
         let renumbering = db.remove(&[u7], &[spare]).unwrap();

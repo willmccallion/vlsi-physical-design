@@ -1,7 +1,7 @@
 //! Whole routing results on the placed fixture, pinned in golden files.
 
 use super::placed_tiny;
-use crate::tech::LeafClockPins;
+use crate::tech::RouteSetup;
 use crate::{Progress, RouteState, RunOptions, Save, SavePoint, route_with};
 use pare_common::db::design::{NetlistDB, RouteElem};
 use pare_common::geom::dbu::Dbu;
@@ -33,7 +33,7 @@ fn routed_tiny() -> (NetlistDB, RouteState, String) {
         report: Some(&mut report),
         ..RunOptions::default()
     };
-    let _ = route_with(&mut db, &config, LeafClockPins::default(), run).unwrap();
+    let _ = route_with(&mut db, &RouteSetup::from(&config), run).unwrap();
     (db, saved.unwrap(), progress)
 }
 

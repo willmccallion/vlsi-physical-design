@@ -248,7 +248,7 @@ fn marked_crossings(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::tech::LeafClockPins;
+    use crate::tech::RouteSetup;
     use crate::tech::RouteTech;
     use crate::tests::tiny;
     use pare_common::config::RoutingConfig;
@@ -257,7 +257,7 @@ mod tests {
     #[test]
     fn a_violation_on_a_jog_marks_both_its_ends() {
         let (db, config) = crate::tests::placed_tiny();
-        let tech = RouteTech::new(&db, &config, LeafClockPins::default()).unwrap();
+        let tech = RouteTech::new(&db, &RouteSetup::from(&config)).unwrap();
         let dr = DetailedRouter::new(&db, &tech, crate::gcell_size(&tech, &config));
         let layer = tech.min_layer;
         let cross = tech
@@ -294,7 +294,7 @@ mod tests {
     const WHOLE_WIRE: (CrossIdx, CrossIdx) = (CrossIdx(0), CrossIdx(8));
 
     fn tiny_tech() -> RouteTech {
-        RouteTech::new(&tiny(), &RoutingConfig::default(), LeafClockPins::default()).unwrap()
+        RouteTech::new(&tiny(), &RouteSetup::from(&RoutingConfig::default())).unwrap()
     }
 
     #[test]

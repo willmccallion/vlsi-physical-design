@@ -34,7 +34,7 @@ use pare_placer::legalize::opendp::mirror::{hpwl, optimize_mirroring};
 use pare_placer::model::PlacementModel;
 use pare_placer::zones::{Zone, Zones};
 use pare_resizer::{Rebuffer, Repairer, Resizer, area_change_percent, timing_net_weights};
-use pare_router::{CapacityReduction, GlobalRouteEstimator, LeafClockPins};
+use pare_router::{CapacityReduction, GlobalRouteEstimator, LeafClockPins, RouteSetup};
 use pare_verify::pin_access::PinAccess;
 use std::num::NonZeroUsize;
 use std::path::Path;
@@ -878,7 +878,13 @@ impl<'a> GlobalRouteCongestion<'a> {
         let units = db.dbu();
         Ok(Self {
             db,
-            estimator: GlobalRouteEstimator::new(db, &config.routing, leaf_clock_pins)?,
+            estimator: GlobalRouteEstimator::new(
+                db,
+                &RouteSetup {
+                    config: &config.routing,
+                    leaf_clock_pins,
+                },
+            )?,
             sizes: db
                 .cells
                 .ids()
