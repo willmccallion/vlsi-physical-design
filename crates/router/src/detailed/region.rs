@@ -799,6 +799,7 @@ impl DetailedRouter<'_> {
             costs: local.costs,
             guide: None,
             own_vias: None,
+            rules: &self.edge_rules,
             ripped: &work.ripped,
         };
         let own = self.vias_near(piece.net, area, work.removed(i));

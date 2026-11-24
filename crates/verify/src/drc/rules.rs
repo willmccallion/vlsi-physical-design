@@ -171,7 +171,7 @@ impl Rules {
             .iter()
             .map(|l| MetalRules {
                 width: l.width,
-                min_width: l.rules.min_width.unwrap_or(l.width).min(l.width),
+                min_width: l.min_width(),
                 spacing: l.spacing_table.clone().unwrap_or_else(|| {
                     SpacingTable::ParallelRunLength(ParallelRunLengthTable {
                         run_lengths: vec![Dbu::ZERO],

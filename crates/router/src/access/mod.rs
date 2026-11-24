@@ -23,7 +23,7 @@
 pub(crate) mod ways;
 
 use ways::WayCheck;
-pub use ways::{PinKind, Ways};
+pub use ways::{PinKind, Way, Ways};
 
 use crate::tech::{CrossIdx, RouteTech, TrackIdx, ViaTech, index_u32};
 use pare_common::db::design::{NetlistDB, PinOwner};

@@ -100,6 +100,12 @@ impl RoutingLayer {
             Direction::Vertical => self.pitch_x,
         }
     }
+
+    /// The narrowest legal wire: the layer's `MINWIDTH`, or its default
+    /// width without one, and never wider than the default width.
+    pub fn min_width(&self) -> Dbu {
+        self.rules.min_width.unwrap_or(self.width).min(self.width)
+    }
 }
 
 /// A via cut layer between two routing layers.

@@ -92,6 +92,7 @@ impl DetailedRouter<'_> {
             costs,
             guide: guide.as_ref(),
             own_vias: None,
+            rules: &self.edge_rules,
             ripped: &[],
         };
         let window = self.window(net);

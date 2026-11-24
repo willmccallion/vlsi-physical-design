@@ -34,6 +34,7 @@ use crate::global::{GCell, Gcells, GlobalGrid};
 use crate::occupancy::{Occupancy, Origin, Owner, Proximity, Slot};
 use crate::runs::EdgeSet;
 pub use crate::search::Costs;
+use crate::search::EdgeRules;
 use crate::shared_access::SharedAccess;
 use crate::tech::RouteTech;
 use crate::track::TrackWire;
@@ -120,6 +121,8 @@ pub struct DetailedRouter<'a> {
     /// Occupancy of every track.
     pub occupancy: Occupancy,
     access: IdVec<NetId, Vec<Vec<AccessPoint>>>,
+    /// Which edges around pins and obstructions are blocked to which nets.
+    edge_rules: EdgeRules,
     routes: IdVec<NetId, NetRoute>,
     window_margin: Dbu,
     gcell: Dbu,
@@ -198,6 +201,19 @@ fn resident() -> String {
         .map_or_else(|| "unknown".to_string(), |mb| format!("{mb} MB"))
 }
 
+/// Runs `step`, logging `what` it did with how long it took and the
+/// memory resident after.
+fn timed<T>(what: &str, step: impl FnOnce() -> T) -> T {
+    let start = std::time::Instant::now();
+    let done = step();
+    log::debug!(
+        "{what} in {:.1}s, {} resident",
+        start.elapsed().as_secs_f64(),
+        resident()
+    );
+    done
+}
+
 /// Bytes the vectors of `nested` hold on the heap, with their headers.
 fn nested_bytes<T>(nested: &IdVec<NetId, Vec<T>>) -> usize {
     nested
@@ -242,47 +258,40 @@ impl<'a> DetailedRouter<'a> {
     /// and fixed cuts.
     pub fn new(db: &'a NetlistDB, tech: &'a RouteTech, gcell: Dbu) -> Self {
         let mut occupancy = fixed_occupancy(db, tech, gcell);
-        let start = std::time::Instant::now();
-        let rules = Rules::from_design(db);
-        let fixed = judge::fixed_layout(db);
-        let fixed_tiles = ShapeTiles::new(&fixed, &db.die_area, gcell);
-        log::debug!(
-            "fixed layout built for the judge in {:.1}s, {} resident",
-            start.elapsed().as_secs_f64(),
-            resident()
-        );
-        let start = std::time::Instant::now();
-        let shared = SharedAccess::new(db, tech);
-        let judged = FixedJudge {
-            layout: &fixed,
-            tiles: &fixed_tiles,
-            rules: &rules,
-        };
-        let own = own_access_points(db, tech, &shared, &judged);
-        log::debug!(
-            "access points found in {:.1}s for {} kinds of cell, {} resident",
-            start.elapsed().as_secs_f64(),
-            shared.kinds(),
-            resident()
-        );
-        let start = std::time::Instant::now();
-        let fixed_view = FixedView {
-            layout: &fixed,
-            tiles: &fixed_tiles,
-            bucket: gcell,
-        };
-        let access = reserve_accesses(db, tech, &shared, &own, &mut occupancy, &fixed_view);
+        let (rules, fixed, fixed_tiles) = timed("fixed layout built for the judge", || {
+            let fixed = judge::fixed_layout(db);
+            let tiles = ShapeTiles::new(&fixed, &db.die_area, gcell);
+            (Rules::from_design(db), fixed, tiles)
+        });
+        let (shared, own) = timed("access points found", || {
+            let shared = SharedAccess::new(db, tech);
+            let judged = FixedJudge {
+                layout: &fixed,
+                tiles: &fixed_tiles,
+                rules: &rules,
+            };
+            let own = own_access_points(db, tech, &shared, &judged);
+            (shared, own)
+        });
+        log::debug!("{} kinds of cell share their access points", shared.kinds());
+        let access = timed("access points reserved", || {
+            let fixed_view = FixedView {
+                layout: &fixed,
+                tiles: &fixed_tiles,
+                bucket: gcell,
+            };
+            reserve_accesses(db, tech, &shared, &own, &mut occupancy, &fixed_view)
+        });
         drop(own);
-        log::debug!(
-            "access points reserved in {:.1}s, {} resident",
-            start.elapsed().as_secs_f64(),
-            resident()
-        );
+        let edge_rules = timed("edge rules built", || {
+            EdgeRules::new(db, tech, &access, gcell)
+        });
         Self {
             db,
             tech,
             occupancy,
             access,
+            edge_rules,
             routes: IdVec::filled(NetRoute::default(), db.nets.len()),
             window_margin: WINDOW_MARGIN_GCELLS.length(gcell),
             gcell,
