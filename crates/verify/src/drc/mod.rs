@@ -23,6 +23,7 @@ mod tests;
 mod tile;
 
 pub use layout::{Layout, LayoutShape, Origin, Owner, OwnerIndex};
+use pare_common::convert::SaturatingFrom;
 pub use rules::{CutRules, MetalRules, NonDefaultRules, Rules};
 use tile::check_tiled;
 pub use tile::{check_tiles_lazily, check_window};
@@ -139,7 +140,7 @@ impl Marker {
         );
         Self {
             violation,
-            rule: rule as u16,
+            rule: u16::saturating_from(rule),
             layer,
             bbox,
             owners: (a.min(b), a.max(b)),
