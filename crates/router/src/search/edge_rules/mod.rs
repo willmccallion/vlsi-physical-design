@@ -26,8 +26,11 @@
 // they are always closed to others; and where one stage both opens and
 // blocks an edge from its two ends, PARE keeps it blocked.
 
+mod lines;
 mod relief;
 
+pub(crate) use lines::GridCost;
+use lines::Lines;
 pub(crate) use relief::Relief;
 use relief::{Band, bands_of, relief_of};
 
@@ -54,6 +57,8 @@ pub(crate) struct EdgeRules {
     nodes: FxHashMap<Node, NodeRules>,
     /// The bands around each net's block pins, for nets with any.
     bands: FxHashMap<NetId, Vec<Band>>,
+    /// The grid cost lines out of macro and I/O pins' access points.
+    lines: Lines,
 }
 
 /// Rules that block nothing, for searches outside a routing run.
@@ -117,6 +122,7 @@ impl EdgeRules {
             cell_pins: Shapes::new(db.die_area.min, bucket),
             nodes: FxHashMap::default(),
             bands: FxHashMap::default(),
+            lines: Lines::default(),
         };
         rules.add_cells(db, tech);
         for s in &db.routing_blockages {
@@ -126,7 +132,7 @@ impl EdgeRules {
                 rules.obstructions.add(l, s.rect);
             }
         }
-        rules.add_access_points(db, access);
+        rules.add_access_points(db, tech, access);
         rules.add_io_pins(db, tech, access);
         for (net, candidates) in access.iter_enumerated() {
             let bands = bands_of(db, tech, net, candidates);
@@ -145,6 +151,7 @@ impl EdgeRules {
             cell_pins: Shapes::new(Point::default(), Dbu::new(1)),
             nodes: FxHashMap::default(),
             bands: FxHashMap::default(),
+            lines: Lines::default(),
         }
     }
 
@@ -173,9 +180,15 @@ impl EdgeRules {
     }
 
     /// Notes every candidate access point on its pin's own layer at its
-    /// node; one reaching its pin through vias from below stands on a node
+    /// node, with the grid cost lines out of those of macro and I/O pins;
+    /// one reaching its pin through vias from below stands on a node
     /// `TritonRoute`'s grid leaves plain.
-    fn add_access_points(&mut self, db: &NetlistDB, access: &IdVec<NetId, Vec<Vec<AccessPoint>>>) {
+    fn add_access_points(
+        &mut self,
+        db: &NetlistDB,
+        tech: &RouteTech,
+        access: &IdVec<NetId, Vec<Vec<AccessPoint>>>,
+    ) {
         for (net, pins) in access.iter_enumerated() {
             for (&pin, candidates) in db.nets[net].pins.iter().zip(pins) {
                 let kind = PinKind::of(db, pin);
@@ -185,6 +198,9 @@ impl EdgeRules {
                         ways: a.ways,
                         kind,
                     });
+                    if !kind.is_standard_in_routing() {
+                        self.lines.add(tech, net, a.node);
+                    }
                 }
             }
         }
@@ -278,6 +294,12 @@ impl EdgeRules {
         }
         ends.iter()
             .any(|&(n, _)| self.obstructions.hold(n.layer, at(n)))
+    }
+
+    /// The grid cost `edge` pays `net`, or a search of no net's, beyond
+    /// that of running against its layer's preferred direction.
+    pub(crate) fn grid_cost(&self, net: Option<NetId>, edge: Edge) -> GridCost {
+        self.lines.grid_cost(net, edge)
     }
 
     /// Which ends of `edge`, a wire or a jog, `net`'s own block pins
@@ -529,6 +551,34 @@ mod tests {
         let leaving = Edge::Wire(node_at(&tech, M3, 11210, 2380));
 
         assert_eq!(rules.relief(&tech, None, leaving), Relief::None);
+    }
+
+    #[test]
+    fn a_line_out_of_a_macro_access_point_takes_grid_cost_off_its_net_and_onto_others() {
+        let (tech, rules) = macro_edge_rules();
+        let leaving = Edge::Wire(node_at(&tech, M3, 11210, 2380));
+
+        assert_eq!(rules.grid_cost(Some(NetId(0)), leaving), GridCost::Off);
+        assert_eq!(rules.grid_cost(None, leaving), GridCost::On);
+    }
+
+    #[test]
+    fn a_line_out_of_a_macro_access_point_takes_in_the_vias_along_it() {
+        let (tech, rules) = macro_edge_rules();
+        let via = Edge::Via {
+            lower: node_at(&tech, M3, 11390, 2380),
+            upper: node_at(&tech, LayerId(3), 11390, 2380),
+        };
+
+        assert_eq!(rules.grid_cost(None, via), GridCost::On);
+    }
+
+    #[test]
+    fn a_line_out_of_a_macro_access_point_ends_ten_widths_out() {
+        let (tech, rules) = macro_edge_rules();
+        let far = Edge::Wire(node_at(&tech, M3, 9310, 2380));
+
+        assert_eq!(rules.grid_cost(None, far), GridCost::AsLaidOut);
     }
 
     #[test]

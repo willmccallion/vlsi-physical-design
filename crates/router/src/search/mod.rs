@@ -19,7 +19,7 @@ mod edge_rules;
 mod marks;
 
 pub(crate) use edge_rules::EdgeRules;
-use edge_rules::Relief;
+use edge_rules::{GridCost, Relief};
 pub(crate) use marks::Marks;
 
 use crate::access::{AccessPoint, Node};
@@ -49,8 +49,8 @@ use std::collections::BinaryHeap;
 // minWidth * 20 when blocked; PARE makes all fixed metal one near-wall price.
 const OBSTACLE_COST: f64 = 1e9;
 
-/// Cost per unit of length of a jog against its layer's preferred
-/// direction, beyond its length: `TritonRoute`'s `GRIDCOST` default of 2.
+/// Cost per unit of length of an edge with grid cost, beyond its length:
+/// `TritonRoute`'s `GRIDCOST` default of 2.
 const GRID_COST: f64 = 2.0;
 
 /// Cost of a blocked edge per minimum width of its layer, a twentieth of
@@ -140,13 +140,13 @@ struct Price {
     conflict: f64,
     marker: f64,
     obstacle: f64,
-    wrong_way: f64,
+    grid: f64,
     blocked: f64,
 }
 
 impl Price {
     fn total(self) -> f64 {
-        self.length + self.conflict + self.marker + self.obstacle + self.wrong_way + self.blocked
+        self.length + self.conflict + self.marker + self.obstacle + self.grid + self.blocked
     }
 }
 
@@ -183,9 +183,10 @@ pub(crate) struct Explanation {
     pub obstacle: f64,
     /// What crowding the net's own vias costs.
     pub own_vias: f64,
-    /// What running against layers' preferred directions costs beyond its
-    /// length.
-    pub wrong_way: f64,
+    /// What `TritonRoute`'s grid cost adds: running against layers'
+    /// preferred directions, and near other nets' macro and I/O access
+    /// points.
+    pub grid: f64,
     /// What taking edges the rules around pins and obstructions block
     /// costs.
     pub blocked: f64,
@@ -200,7 +201,7 @@ impl Explanation {
             + self.marker
             + self.obstacle
             + self.own_vias
-            + self.wrong_way
+            + self.grid
             + self.blocked
     }
 }
@@ -773,7 +774,7 @@ impl Search<'_> {
                 0.0
             },
             obstacle: if meets.fixed { OBSTACLE_COST } else { 0.0 },
-            wrong_way: 0.0,
+            grid: 0.0,
             blocked: 0.0,
         }
     }
@@ -823,26 +824,34 @@ impl Search<'_> {
     }
 
     /// Price of the jog from `lower` across to the same crossing of the
-    /// next track, telling `parts` whose metal it meets: what a wire step
-    /// of its length would cost, plus [`GRID_COST`] per unit of length for
-    /// running against the layer's preferred direction, as
-    /// `FlexGridGraph::initEdges` marks a non-preferred edge.
+    /// next track, telling `parts` whose metal it meets.
     fn jog_price(&self, lower: Node, parts: &mut impl CostParts) -> Price {
-        let price = self.planar_price(Edge::Jog(lower), parts);
-        Price {
-            wrong_way: GRID_COST * price.length,
-            ..price
-        }
+        self.planar_price(Edge::Jog(lower), parts)
+    }
+
+    /// What grid cost `edge`, a wire step, jog or via `length` long, pays:
+    /// [`GRID_COST`] per unit of its length on a jog against its layer's
+    /// preferred direction, as `FlexGridGraph::initEdges` marks one, and on
+    /// any edge of a line out of another net's macro or I/O access point,
+    /// but on none of a line out of the net's own.
+    fn grid_price(&self, edge: Edge, length: f64) -> f64 {
+        let charged = match self.rules.grid_cost(self.net(), edge) {
+            GridCost::AsLaidOut => matches!(edge, Edge::Jog(_)),
+            GridCost::Off => false,
+            GridCost::On => true,
+        };
+        if charged { GRID_COST * length } else { 0.0 }
     }
 
     /// Price of `edge`, a wire step or a jog, for its length, what its
-    /// metal meets, the marks at its ends and being blocked.
+    /// metal meets, the marks at its ends, its grid cost and being blocked.
     fn planar_price(&self, edge: Edge, parts: &mut impl CostParts) -> Price {
         let (a, b) = edge.ends();
         let length = self.point(a).manhattan(self.point(b)).to_f64();
         let meets = self.planar_meets(edge, parts);
         let marked = self.marks.planar(a) || self.marks.planar(b);
         Price {
+            grid: self.grid_price(edge, length),
             blocked: self.block_price(edge, a.layer),
             ..self.price(length, meets, marked)
         }
@@ -896,8 +905,10 @@ impl Search<'_> {
         for c in &via.cuts {
             meets = meets.and(self.cut_meets(lower.layer.cut_above(), &c.translate(at), parts));
         }
+        let edge = Edge::Via { lower, upper };
         Price {
-            blocked: self.block_price(Edge::Via { lower, upper }, lower.layer),
+            grid: self.grid_price(edge, self.costs.via),
+            blocked: self.block_price(edge, lower.layer),
             ..self.price(self.costs.via, meets, self.marks.via(lower))
         }
     }
@@ -924,11 +935,11 @@ impl Search<'_> {
                 Edge::Jog(lower) => {
                     let price = self.jog_price(lower, &mut parts);
                     parts.length += price.length;
-                    parts.wrong_way += price.wrong_way;
                     parts.own_vias += self.own_jog_cost(lower);
                     price
                 }
             };
+            parts.grid += price.grid;
             parts.conflict += price.conflict;
             parts.marker += price.marker;
             parts.obstacle += price.obstacle;

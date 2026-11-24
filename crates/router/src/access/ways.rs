@@ -154,6 +154,14 @@ pub enum PinKind {
 }
 
 impl PinKind {
+    /// Whether detailed routing treats it as a standard cell's, as
+    /// `FlexDRWorker::initMazeCost_ap_helper` tells the pins of blocks,
+    /// pads, rings and the design's I/O apart from the rest.
+    #[must_use]
+    pub const fn is_standard_in_routing(self) -> bool {
+        matches!(self, Self::Core | Self::EndcapOrCover)
+    }
+
     /// The kind of `pin` of `db`.
     pub fn of(db: &NetlistDB, pin: PinId) -> Self {
         let PinOwner::Cell { cell, .. } = db.pins[pin].owner else {
