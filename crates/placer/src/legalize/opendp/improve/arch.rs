@@ -3,6 +3,7 @@
 //! site, those at one height merged into one, with fillers over the gaps.
 
 use super::{ImprovementError, Network, Placer, Result};
+use pare_common::convert::SaturatingFrom;
 use pare_common::db::design::NetlistDB;
 use pare_common::db::indices::IdVec;
 use pare_common::db::library::{SiteClass, Symmetry};
@@ -132,7 +133,7 @@ impl Arch {
     /// `Architecture::getCellHeightInRows`.
     pub(super) fn rows_spanned(&self, height: Dbu) -> usize {
         let rows = (height.to_f64() / self.rows[ArchRowId::BOTTOM].height.to_f64()).round();
-        rows as usize
+        usize::saturating_from(rows)
     }
 
     /// The row whose bottom is nearest `y`, the lower on a tie, as

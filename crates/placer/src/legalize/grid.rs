@@ -7,6 +7,7 @@
 //! name the rounding, never arithmetic on the raw values.
 
 use super::opendp::DetailedPlacementError;
+use pare_common::convert::SaturatingFrom;
 use pare_common::db::design::{NetlistDB, Row};
 use pare_common::db::library::SiteClass;
 use pare_common::geom::dbu::Dbu;
@@ -76,13 +77,17 @@ impl GridX {
     /// The first column at or right of `x`, in doubles as dpl's
     /// `dbuToGridCeil` and `Grid::gridEndX` divide.
     pub fn from_dbu_ceil(x: Dbu, site_width: Dbu) -> Self {
-        Self((x.to_f64() / site_width.to_f64()).ceil() as i64)
+        Self(i64::saturating_from(
+            (x.to_f64() / site_width.to_f64()).ceil(),
+        ))
     }
 
     /// The column nearest `x`, halves away from zero, in doubles as dpl's
     /// `divRound` divides.
     pub fn from_dbu_round(x: Dbu, site_width: Dbu) -> Self {
-        Self((x.to_f64() / site_width.to_f64()).round() as i64)
+        Self(i64::saturating_from(
+            (x.to_f64() / site_width.to_f64()).round(),
+        ))
     }
 
     /// The column's left edge, or the span's width, as dpl's `gridToDbu`.
@@ -190,8 +195,8 @@ impl RowGrid {
 
     /// The rows, one between each pair of adjacent row edges, as
     /// `Grid::getRowCount`.
-    pub const fn row_count(&self) -> GridY {
-        GridY::new(self.row_edges.len() as i64 - 1)
+    pub fn row_count(&self) -> GridY {
+        GridY::new(i64::saturating_from(self.row_edges.len()) - 1)
     }
 
     /// Whether `at` lies on the grid.
@@ -218,12 +223,14 @@ impl RowGrid {
     /// The last row edge at or below `y`, as `Grid::gridSnapDownY`.
     pub fn snap_down_y(&self, y: Dbu) -> GridY {
         let above = self.row_edges.partition_point(|&e| e <= y);
-        GridY::new(above.saturating_sub(1) as i64)
+        GridY::new(i64::saturating_from(above.saturating_sub(1)))
     }
 
     /// The first row edge at or above `y`, as `Grid::gridEndY`.
     pub fn end_y(&self, y: Dbu) -> GridY {
-        GridY::new(self.row_edges.partition_point(|&e| e < y) as i64)
+        GridY::new(i64::saturating_from(
+            self.row_edges.partition_point(|&e| e < y),
+        ))
     }
 
     /// The nearer row edge to `y`, the upper on a tie, as `Grid::gridRoundY`.

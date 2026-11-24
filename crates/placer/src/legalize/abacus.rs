@@ -8,6 +8,7 @@
 //! their row's orientation. Every cell, macros included, is only tried in
 //! the stretches of row its zone may use, so fence regions hold.
 
+use pare_common::convert::SaturatingFrom;
 use pare_common::db::design::{NetlistDB, PlacementStatus};
 use pare_common::db::indices::CellId;
 use pare_common::geom::dbu::Dbu;
@@ -157,7 +158,7 @@ impl SubRow {
     /// Where a cluster lands: its optimum, snapped to a site and kept inside.
     fn position(&self, q: f64, weight: f64, width: Dbu, site: Dbu) -> Dbu {
         let ideal = q / weight;
-        let sites = ((ideal - self.lo.to_f64()) / site.to_f64()).round() as i64;
+        let sites = i64::saturating_from(((ideal - self.lo.to_f64()) / site.to_f64()).round());
         (self.lo + site * sites).clamp(self.lo, self.hi - width)
     }
 
@@ -365,7 +366,7 @@ mod tests {
             db.rows.push(Row {
                 name: format!("r{k}"),
                 site: SiteId(0),
-                origin: pt(0, 100 * k as i64),
+                origin: pt(0, 100 * i64::saturating_from(k)),
                 orient,
                 num_x: 10,
                 num_y: 1,

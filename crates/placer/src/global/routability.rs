@@ -23,6 +23,7 @@ use super::nesterov::{Objects, remap_fields};
 use super::wirelength::Netlist;
 use super::{Field, FieldId, ObjectPoints, ObjectRange, Remap};
 use crate::model::CellKind;
+use pare_common::convert::SaturatingFrom;
 use pare_common::db::indices::{CellId, IdVec};
 use pare_common::geom::point::Point;
 use pare_common::geom::rect::Rect;
@@ -157,7 +158,7 @@ impl RoutingTiles {
     /// The column or row of an axis starting at `origin` that holds `v`,
     /// within the `n` there are.
     fn line(&self, v: f64, origin: f64, n: usize) -> usize {
-        (((v - origin) / self.size).floor().max(0.0) as usize).min(n - 1)
+        usize::saturating_from(((v - origin) / self.size).floor().max(0.0)).min(n - 1)
     }
 
     /// Every gcell `rect` overlaps, with the area of the overlap and of the
@@ -281,8 +282,9 @@ impl CongestionMap {
         if self.nx == 0 || self.ny == 0 || self.size <= 0.0 {
             return None;
         }
-        let cell =
-            |v: f64, o: f64, n: usize| (((v - o) / self.size).floor().max(0.0) as usize).min(n - 1);
+        let cell = |v: f64, o: f64, n: usize| {
+            usize::saturating_from(((v - o) / self.size).floor().max(0.0)).min(n - 1)
+        };
         Some(cell(p.y, self.origin.y, self.ny) * self.nx + cell(p.x, self.origin.x, self.nx))
     }
 
@@ -315,7 +317,8 @@ impl CongestionMap {
         }
         sorted.sort_by(|a, b| b.total_cmp(a));
         let top_mean = |fraction: f64| {
-            let count = ((sorted.len() as f64 * fraction).ceil() as usize).clamp(1, sorted.len());
+            let count = usize::saturating_from((sorted.len() as f64 * fraction).ceil())
+                .clamp(1, sorted.len());
             sorted[..count].iter().sum::<f64>() / count as f64
         };
         TOP_FRACTIONS.iter().map(|&f| top_mean(f)).sum::<f64>() / TOP_FRACTIONS.len() as f64
@@ -629,7 +632,7 @@ fn grow(map: &CongestionMap, objects: &mut Objects, field: &Field, scale: f64) -
 fn remove_fillers(objects: &Objects, field: &mut Field, added: f64) {
     let single = field.filler.x * field.filler.y;
     let removed = if single > 0.0 {
-        ((added / single).floor() as usize).min(field.kept_fillers)
+        usize::saturating_from((added / single).floor()).min(field.kept_fillers)
     } else {
         0
     };

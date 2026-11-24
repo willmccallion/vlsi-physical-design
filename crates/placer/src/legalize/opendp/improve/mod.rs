@@ -25,6 +25,7 @@ use super::cpp::Mt19937;
 use super::{DetailedPlacementError, GroupId, NodeId, Placer};
 use arch::{Arch, ArchRowId};
 use network::Network;
+use pare_common::convert::SaturatingFrom;
 use pare_common::db::design::NetlistDB;
 use pare_common::db::indices::IdVec;
 use pare_common::geom::dbu::Dbu;
@@ -411,7 +412,7 @@ impl Improver {
 
     /// A draw below `limit`, as `DetailedMgr::getRandom`.
     fn random(&mut self, limit: usize) -> usize {
-        (self.rng.next_u32() % limit as u32) as usize
+        usize::saturating_from(self.rng.next_u32() % u32::saturating_from(limit))
     }
 
     /// `Utility::random_shuffle` with the improver's generator.

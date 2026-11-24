@@ -5,6 +5,7 @@
 use super::NodeId;
 use super::swap::Hpwl;
 use super::{ArchRowId, ImprovementError, Improver, Result, Trial};
+use pare_common::convert::SaturatingFrom;
 use pare_common::geom::dbu::Dbu;
 
 /// How far, in sites and rows, a random move may reach.
@@ -39,7 +40,7 @@ fn go(imp: &mut Improver, objective: &mut Hpwl, moves_per_candidate: f64) -> Res
     if candidates.is_empty() {
         return Ok(0.0);
     }
-    let attempts = (moves_per_candidate * candidates.len() as f64).ceil() as usize;
+    let attempts = usize::saturating_from((moves_per_candidate * candidates.len() as f64).ceil());
     imp.shuffle(&mut candidates);
     let initial = objective.current(imp);
     let mut current = initial;
@@ -67,7 +68,8 @@ fn random_trial(imp: &mut Improver, candidates: &[NodeId]) -> Result<Option<Tria
     let arch = &imp.arch;
     let ydim = arch.rows.len();
     let span_x = (arch.max_x - arch.min_x).to_f64();
-    let xdim = ((span_x / arch.rows[ArchRowId::BOTTOM].site_spacing.to_f64()) as i32).max(0);
+    let xdim =
+        i32::saturating_from(span_x / arch.rows[ArchRowId::BOTTOM].site_spacing.to_f64()).max(0);
     let xwid = span_x / f64::from(xdim);
     let ywid = (arch.max_y - arch.min_y).to_f64() / ydim as f64;
     let (min_x, min_y) = (arch.min_x.to_f64(), arch.min_y.to_f64());
@@ -81,22 +83,28 @@ fn random_trial(imp: &mut Improver, candidates: &[NodeId]) -> Result<Option<Tria
             "Only working with single height cells currently.",
         ));
     };
-    let ydim = ydim as i32;
-    let reach = REACH as i32;
+    let ydim = i32::saturating_from(ydim);
+    let reach = i32::saturating_from(REACH);
     for _ in 0..TRIES {
         let yi = imp.bottom(n).to_f64() + 0.5 * imp.height(n).to_f64();
         let xi = imp.left(n).to_f64() + 0.5 * imp.width(n).to_f64();
-        let grid_xi = (((xi - min_x) / xwid) as i32).max(0).min(xdim - 1);
-        let grid_yi = (((yi - min_y) / ywid) as i32).max(0).min(ydim - 1);
-        let rel_x = imp.random(2 * REACH + 1) as i32;
-        let rel_y = imp.random(2 * REACH + 1) as i32;
+        let grid_xi = i32::saturating_from((xi - min_x) / xwid)
+            .max(0)
+            .min(xdim - 1);
+        let grid_yi = i32::saturating_from((yi - min_y) / ywid)
+            .max(0)
+            .min(ydim - 1);
+        let rel_x = i32::saturating_from(imp.random(2 * REACH + 1));
+        let rel_y = i32::saturating_from(imp.random(2 * REACH + 1));
         let grid_xj = (grid_xi - reach + rel_x).max(0).min(xdim - 1);
         let grid_yj = (grid_yi - reach + rel_y).max(0).min(ydim - 1);
         let xj = min_x + f64::from(grid_xj) * xwid;
         let yj = min_y + f64::from(grid_yj) * ywid;
-        let rj = (((yj - min_y) / row_height) as i32).max(0).min(ydim - 1);
-        let rj = ArchRowId::new(rj as usize);
-        let x_truncated = Dbu::new(i64::from(xj as i32));
+        let rj = i32::saturating_from((yj - min_y) / row_height)
+            .max(0)
+            .min(ydim - 1);
+        let rj = ArchRowId::new(usize::saturating_from(rj));
+        let x_truncated = Dbu::new(i64::from(i32::saturating_from(xj)));
         let found = imp.segs_in_row[rj].iter().copied().find(|&s| {
             let seg = &imp.segments[s];
             x_truncated >= seg.min_x && x_truncated <= seg.max_x
@@ -107,7 +115,7 @@ fn random_trial(imp: &mut Improver, candidates: &[NodeId]) -> Result<Option<Tria
         if imp.group(n) != imp.segments[sj].region {
             continue;
         }
-        let x = Dbu::new(xj.round() as i64);
+        let x = Dbu::new(i64::saturating_from(xj.round()));
         if let Some(trial) = imp.try_move(n, si, x, sj)? {
             return Ok(Some(trial));
         }

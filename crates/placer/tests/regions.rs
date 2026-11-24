@@ -5,6 +5,7 @@
 
 mod common;
 
+use pare_common::convert::SaturatingFrom;
 use pare_common::db::design::{NetlistDB, PlacementStatus};
 use pare_common::geom::dbu::Dbu;
 use pare_common::geom::point::Point;
@@ -41,7 +42,7 @@ fn ring_fenced_by(rects: &str) -> NetlistDB {
         );
     let mut db = common::parse(&text);
     for (i, cell) in db.cells.iter_mut().enumerate() {
-        let i = i as i64;
+        let i = i64::saturating_from(i);
         cell.location = Point::new(Dbu::new(i * 977 % 58_000), Dbu::new(i * 1931 % 56_000));
         cell.status = PlacementStatus::Placed;
     }

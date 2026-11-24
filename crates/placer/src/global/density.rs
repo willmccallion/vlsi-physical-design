@@ -10,6 +10,7 @@
 
 use super::poisson::PoissonSolver;
 use super::{ObjectId, ObjectPoints, ObjectRange};
+use pare_common::convert::SaturatingFrom;
 use pare_common::db::indices::IdVec;
 use pare_common::geom::point::Point;
 use pare_common::geom::rect::Rect;
@@ -326,8 +327,8 @@ struct Coverage {
 
 /// The bins along one axis that `[lo, hi]` overlaps, with overlap lengths.
 fn overlaps(lo: f64, hi: f64, origin: f64, size: f64, count: usize) -> Vec<AxisOverlap> {
-    let first = ((lo - origin) / size).floor().max(0.0) as usize;
-    let last = (((hi - origin) / size).ceil().max(0.0) as usize).min(count);
+    let first = usize::saturating_from(((lo - origin) / size).floor().max(0.0));
+    let last = usize::saturating_from(((hi - origin) / size).ceil().max(0.0)).min(count);
     (first..last)
         .filter_map(|i| {
             let start = (i as f64).mul_add(size, origin);

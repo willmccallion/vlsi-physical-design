@@ -5,6 +5,7 @@
 use super::mis::converged;
 use super::{ArchRowId, EdgeId, NodeId, SegmentId};
 use super::{Improver, Result, SKIP_NETS_LARGER_THAN};
+use pare_common::convert::SaturatingFrom;
 use pare_common::db::indices::IdVec;
 use pare_common::geom::dbu::Dbu;
 use pare_common::geom::interval::Interval;
@@ -177,7 +178,7 @@ fn even_padding(width: &[Dbu], span: Dbu, site_width: Dbu) -> Option<(Vec<Dbu>, 
     if span < total_width {
         return None;
     }
-    let space_per_cell = (span - total_width) / size as i64;
+    let space_per_cell = (span - total_width) / i64::saturating_from(size);
     let sites_per_cell = space_per_cell.div_trunc(site_width);
     let sites_right = sites_per_cell >> 1;
     let sites_left = sites_per_cell - sites_right;

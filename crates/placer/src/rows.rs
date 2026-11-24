@@ -1,6 +1,7 @@
 //! Placement rows split into single-height spans, and helpers for fitting
 //! cells into them.
 
+use pare_common::convert::NearestFrom;
 use pare_common::db::design::{BlockageKind, NetlistDB};
 use pare_common::db::indices::CellId;
 use pare_common::db::library::MacroClass;
@@ -127,7 +128,7 @@ impl SitePattern {
     fn new(kind: BlockageKind) -> Self {
         let max_density = match kind {
             BlockageKind::Hard | BlockageKind::Soft => 0.0,
-            BlockageKind::Partial(density) => density as f32,
+            BlockageKind::Partial(density) => f32::nearest_from(density),
         };
         Self {
             blocked_share: (100.0 - max_density) / 100.0,

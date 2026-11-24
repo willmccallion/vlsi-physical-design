@@ -32,6 +32,7 @@ use crate::zones::Zone;
 use density::DensityGrid;
 use nesterov::Objects;
 use pare_common::config::{Share, TargetDensity};
+use pare_common::convert::SaturatingFrom;
 use pare_common::db::indices::{CellId, IdVec};
 use pare_common::geom::point::Point;
 use pare_common::geom::rect::Rect;
@@ -325,7 +326,7 @@ pub fn default_bins(model: &PlacementModel, target_density: TargetDensity) -> us
     let by_area = bins_for_cell_area(model.die.area(), average, target_density.get());
     match channel_pitch(&model.rows) {
         Some(pitch) => {
-            let rows = (model.die.height() / pitch).floor().max(1.0) as usize;
+            let rows = usize::saturating_from((model.die.height() / pitch).floor().max(1.0));
             let by_pitch = 1usize << rows.ilog2();
             by_area.min(by_pitch).max(MIN_BINS)
         }
@@ -757,7 +758,7 @@ fn filler_layout(cells: &[Point<f64>], free_area: f64, target: f64) -> (Point<f6
         return (Point::new(0.0, 0.0), 0);
     }
     let size = Point::new(mean_area / height, height);
-    (size, (filler_area / mean_area) as usize)
+    (size, usize::saturating_from(filler_area / mean_area))
 }
 
 /// The boxes the cells start in: the core, the box of the rows or the
