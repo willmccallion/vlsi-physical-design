@@ -35,7 +35,7 @@ use pare_common::convert::SaturatingFrom;
 use pare_common::db::design::NetlistDB;
 use pare_common::db::indices::{CutLayerId, LayerId, NetId, NonDefaultRuleId, ViaId};
 use pare_common::db::library::LayerRef;
-use pare_common::db::shapes::wire_rect;
+use pare_common::db::shapes::{wire_rect, wire_rect_with_ends};
 use pare_common::geom::dbu::Dbu;
 use pare_common::geom::interval::Interval;
 use pare_common::geom::point::Point;
@@ -858,16 +858,32 @@ impl Search<'_> {
     }
 
     /// What the metal of `edge`, a wire step or a jog, meets, telling
-    /// `parts` whose it is; where the net's own block pins relieve an end,
-    /// only the fixed metal the other end's wire comes near counts, or none
-    /// when they relieve both.
+    /// `parts` whose it is. Its metal stops at an end where the net's own
+    /// access point touches its pin, as the routed wire does. Where the
+    /// net's own block pins relieve an end, only the fixed metal the other
+    /// end's wire comes near counts, or none when they relieve both.
     // NOTE: TritonRoute charges fixed shapes per node entered, so one edge
     // costs differently by direction; PARE prices an edge the same both
     // ways, by its whole metal unless a block pin relieves an end.
     fn planar_meets(&self, edge: Edge, parts: &mut impl CostParts) -> Meets {
         let (a, b) = edge.ends();
         let layer = a.layer;
-        let Some(metal) = wire_rect(self.point(a), self.point(b), self.width(layer)) else {
+        let width = self.width(layer);
+        let extension = |n: Node| {
+            if self.rules.cut_off_at(self.net(), n) {
+                Dbu::ZERO
+            } else {
+                width / 2
+            }
+        };
+        let metal = wire_rect_with_ends(
+            self.point(a),
+            self.point(b),
+            width,
+            extension(a),
+            extension(b),
+        );
+        let Some(metal) = metal else {
             return Meets::default();
         };
         let relieved =

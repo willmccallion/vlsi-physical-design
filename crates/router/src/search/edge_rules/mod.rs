@@ -99,13 +99,14 @@ struct NodeRules {
     io_blocked: Ways,
 }
 
-/// An access point on its pin's own layer: whose it is, the ways it allows
-/// and what kind of pin it reaches.
+/// An access point on its pin's own layer: whose it is, the ways it allows,
+/// what kind of pin it reaches and whether it touches the pin at its node.
 #[derive(Clone, Copy, Debug)]
 struct PointRule {
     net: NetId,
     ways: Ways,
     kind: PinKind,
+    on_node: bool,
 }
 
 impl EdgeRules {
@@ -193,10 +194,12 @@ impl EdgeRules {
             for (&pin, candidates) in db.nets[net].pins.iter().zip(pins) {
                 let kind = PinKind::of(db, pin);
                 for a in candidates.iter().filter(|a| a.pin_layer == a.node.layer) {
+                    let node = tech.layer(a.node.layer).point(a.node.track, a.node.cross);
                     self.node_mut(a.node).points.push(PointRule {
                         net,
                         ways: a.ways,
                         kind,
+                        on_node: a.at == node,
                     });
                     if !kind.is_standard_in_routing() {
                         self.lines.add(tech, net, a.node);
@@ -294,6 +297,18 @@ impl EdgeRules {
         }
         ends.iter()
             .any(|&(n, _)| self.obstructions.hold(n.layer, at(n)))
+    }
+
+    /// Whether a wire of `net` ending at `node` stops there without its
+    /// usual extension: `node` holds an access point of the net that touches
+    /// its pin there, as `FlexDRWorker::checkPathSegStyle` cuts a path off at
+    /// an access point.
+    pub(crate) fn cut_off_at(&self, net: Option<NetId>, node: Node) -> bool {
+        net.is_some_and(|net| {
+            self.nodes
+                .get(&node)
+                .is_some_and(|r| r.points.iter().any(|p| p.net == net && p.on_node))
+        })
     }
 
     /// The grid cost `edge` pays `net`, or a search of no net's, beyond
@@ -579,6 +594,15 @@ mod tests {
         let far = Edge::Wire(node_at(&tech, M3, 9310, 2380));
 
         assert_eq!(rules.grid_cost(None, far), GridCost::AsLaidOut);
+    }
+
+    #[test]
+    fn a_wire_stops_at_its_own_nets_access_point_touching_its_pin() {
+        let (tech, rules) = macro_edge_rules();
+        let access = node_at(&tech, M3, 11390, 2380);
+
+        assert!(rules.cut_off_at(Some(NetId(0)), access));
+        assert!(!rules.cut_off_at(None, access));
     }
 
     #[test]
