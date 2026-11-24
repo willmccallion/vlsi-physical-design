@@ -6,6 +6,7 @@
 //! by one; a cut is fixed when a fixed cut of its owner has its rectangle.
 
 use super::layout::{Layout, LayoutShape, Origin, OwnerIndex};
+use pare_common::convert::SaturatingFrom;
 use pare_common::db::indices::{CutLayerId, IdVec, LayerId};
 use pare_common::geom::dbu::{Dbu, DbuArea};
 use pare_common::geom::point::Point;
@@ -465,6 +466,6 @@ impl Facing {
 /// Edge `i` of a model as the edges' own links hold it. A model covers one
 /// bounded tile, whose edges number far below `u32::MAX`.
 fn edge_index(i: usize) -> u32 {
-    debug_assert!(i < u32::MAX as usize, "edge {i} past the index");
-    i as u32
+    debug_assert!(u32::try_from(i).is_ok(), "edge {i} past the index");
+    u32::saturating_from(i)
 }

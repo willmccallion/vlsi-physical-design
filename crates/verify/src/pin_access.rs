@@ -18,6 +18,7 @@
 //! only short stubs and a stub boxed in by stripes, I/O pins and the pins of
 //! the cells above and below can never be connected.
 
+use pare_common::convert::SaturatingFrom;
 use pare_common::db::design::{NetlistDB, PinOwner};
 use pare_common::db::indices::{CellId, IdVec, LayerId, MacroPinId, NetId};
 use pare_common::db::library::{Direction, LayerRef, Library, Macro, ViaDef};
@@ -516,7 +517,7 @@ impl Escape {
     /// first and last chunks also take the origins beyond the die.
     fn chunk_of(&self, along: Dbu) -> usize {
         let i = (along - self.chunk_origin).div_floor(self.chunk);
-        (i.max(0) as usize).min(self.chunks - 1)
+        usize::saturating_from(i).min(self.chunks - 1)
     }
 
     /// What blocks via `k`'s upper pad with the via on track `t` at
@@ -531,7 +532,7 @@ impl Escape {
     /// every shape that can block a pad whose via stands in chunk `c`.
     fn chunk_stretches(&self, t: usize, c: usize) -> Vec<PadStretches> {
         let track = self.tracks[t];
-        let start = self.chunk_origin + self.chunk * c as i64;
+        let start = self.chunk_origin + self.chunk * i64::saturating_from(c);
         let open = Dbu::new(i64::MAX / 4);
         let lo = if c == 0 { -open } else { start };
         let hi = if c + 1 == self.chunks {

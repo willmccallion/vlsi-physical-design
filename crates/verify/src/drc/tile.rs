@@ -15,6 +15,7 @@ use super::layout::{Layout, LayoutShape, Owner, OwnerIndex};
 use super::model::Model;
 use super::rules::Rules;
 use super::{DrcReport, Findings, Marker, classify, run_checks};
+use pare_common::convert::SaturatingFrom;
 use pare_common::db::indices::IdVec;
 use pare_common::db::library::LayerRef;
 use pare_common::geom::dbu::Dbu;
@@ -101,7 +102,7 @@ impl Grid {
     /// The grid of `core`-sized tiles covering `bounds`.
     fn from_bounds(bounds: Rect<Dbu>, core: Dbu) -> Self {
         let core = core.max(Dbu::new(1));
-        let count = |span: Dbu| (span.div_trunc(core) + 1).max(1) as usize;
+        let count = |span: Dbu| usize::saturating_from((span.div_trunc(core) + 1).max(1));
         Self {
             origin: bounds.min,
             core,
@@ -113,7 +114,11 @@ impl Grid {
     /// The core of tile `k` and its window, the core grown by `halo`.
     fn tile_area(&self, k: usize, halo: Dbu) -> (Rect<Dbu>, Rect<Dbu>) {
         let (i, j) = (k % self.nx, k / self.nx);
-        let min = self.origin + Point::new(self.core * i as i64, self.core * j as i64);
+        let min = self.origin
+            + Point::new(
+                self.core * i64::saturating_from(i),
+                self.core * i64::saturating_from(j),
+            );
         let core = Rect::new(min, min + Point::new(self.core, self.core));
         (core, core.expand(halo))
     }
