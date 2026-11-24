@@ -8,7 +8,7 @@
 //!
 //! The file is plain text, one record a line.
 
-use crate::access::{AccessPoint, Node};
+use crate::access::{AccessPoint, Node, Ways};
 use crate::detailed::{Flow, Scope};
 use crate::global::GCell;
 use crate::runs::{EdgeSet, Run};
@@ -21,7 +21,7 @@ use pare_common::geom::rect::Rect;
 use std::io::{self, Write};
 
 /// The first line of every state file, naming the format and its version.
-const MAGIC: &str = "pare-route-state 1";
+const MAGIC: &str = "pare-route-state 2";
 
 /// A routing run saved after global routing or after a detailed round.
 #[derive(Clone, Debug, PartialEq)]
@@ -200,11 +200,12 @@ fn write_detailed(out: &mut impl Write, d: &DetailedState) -> io::Result<()> {
         for a in &route.access {
             write!(
                 out,
-                "a {} {} {} {}",
+                "a {} {} {} {} {}",
                 node_text(a.node),
                 a.at.x.get(),
                 a.at.y.get(),
-                a.pin_layer.index()
+                a.pin_layer.index(),
+                a.ways.bits()
             )?;
             for v in &a.vias {
                 write!(out, " {}", v.index())?;
@@ -339,12 +340,14 @@ fn parse_edges(lines: &mut Lines<'_>, count: usize) -> Result<EdgeSet, StatePars
     Ok(edges)
 }
 
-/// An `a` line: an access point's node, location, pin layer and vias.
+/// An `a` line: an access point's node, location, pin layer, the bits of
+/// its ways out and its vias.
 fn parse_access(lines: &mut Lines<'_>) -> Result<AccessPoint, StateParseError> {
     let mut a = lines.keyword("a")?;
     let node = a.node()?;
     let at = Point::new(Dbu::new(a.int()?), Dbu::new(a.int()?));
     let pin_layer = LayerId::new(a.int()?);
+    let ways = Ways::from_bits(a.int()?).ok_or_else(|| a.error("unknown bits among the ways"))?;
     let mut vias = Vec::new();
     while !a.is_done() {
         vias.push(ViaId::new(a.int()?));
@@ -354,6 +357,7 @@ fn parse_access(lines: &mut Lines<'_>) -> Result<AccessPoint, StateParseError> {
         at,
         pin_layer,
         vias,
+        ways,
     })
 }
 
@@ -482,6 +486,7 @@ impl Fields<'_> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::access::ways::Way;
 
     fn node(layer: usize, track: u32, cross: u32) -> Node {
         Node {
@@ -515,6 +520,7 @@ mod tests {
                 at: Point::new(Dbu::new(100), Dbu::new(-3)),
                 pin_layer: LayerId::new(1),
                 vias: vec![ViaId::new(3)],
+                ways: Ways::NONE.with(Way::AlongLower).with(Way::Up),
             }],
             complete: true,
         };

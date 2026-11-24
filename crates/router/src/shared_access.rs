@@ -9,7 +9,7 @@
 //! pin access finds them once per unique instance, and every cell's are
 //! derived from its kind's.
 
-use crate::access::{AccessPoint, Node, access_points};
+use crate::access::{AccessPoint, Node, Ways, access_points};
 use crate::tech::RouteTech;
 use crate::tech::{CrossIdx, IndexRange, TrackIdx};
 use pare_common::db::design::{NetlistDB, PinOwner};
@@ -53,6 +53,7 @@ struct RelativeAccess {
     at: Point<Dbu>,
     pin_layer: LayerId,
     vias: Vec<ViaId>,
+    ways: Ways,
 }
 
 pare_common::define_index!(
@@ -123,6 +124,7 @@ impl SharedAccess {
                     at: window.location + r.at,
                     pin_layer: r.pin_layer,
                     vias: r.vias.clone(),
+                    ways: r.ways,
                 })
                 .collect(),
         )
@@ -215,5 +217,6 @@ fn relative_to(a: &AccessPoint, window: &Window) -> Option<RelativeAccess> {
         at: a.at - window.location,
         pin_layer: a.pin_layer,
         vias: a.vias.clone(),
+        ways: a.ways,
     })
 }

@@ -1,7 +1,9 @@
 //! Pin access on the shared fixture design.
 
-use super::tiny;
-use crate::access::{AccessPoint, Node, access_points};
+use super::{macro_edge, tiny};
+use crate::access::ways::Way;
+use crate::access::{AccessPoint, Node, Ways, access_points};
+use crate::detailed::DetailedRouter;
 use crate::shared_access::SharedAccess;
 use crate::tech::RouteSetup;
 use crate::tech::{CrossIdx, RouteTech, TrackIdx};
@@ -64,6 +66,7 @@ fn an_m1_pin_is_reached_by_the_one_via_that_fits_inside_it() {
             at: Point::new(Dbu::new(300), Dbu::new(500)),
             pin_layer: LayerId(0),
             vias: vec![db.library.via_id("M1M2").unwrap()],
+            ways: Ways::ALL,
         }]
     );
 }
@@ -111,28 +114,29 @@ fn crossings_inside(db: &NetlistDB, tech: &RouteTech, pin: PinId) -> Vec<Point<D
 }
 
 #[test]
-fn crossings_whose_wire_end_is_not_clean_are_dropped() {
+fn crossings_with_no_clean_way_out_are_dropped() {
     let db = tiny();
     let tech = RouteTech::new(&db, &RouteSetup::from(&RoutingConfig::default())).unwrap();
     let pin = io_pin(&db, "in");
     let unclean = Point::new(Dbu::new(1100), Dbu::new(5900));
     assert!(crossings_inside(&db, &tech, pin).contains(&unclean));
+    let clear_of_it = |_: LayerId, metal: &[Rect<Dbu>]| !metal.iter().any(|m| m.contains(unclean));
 
-    let points = access_points(&db, &tech, pin, &|_, m: &Rect<Dbu>| !m.contains(unclean));
+    let points = access_points(&db, &tech, pin, &clear_of_it);
 
     assert_ne!(points, []);
     assert!(points.iter().all(|a| a.at != unclean), "{points:?}");
 }
 
 #[test]
-fn a_pin_with_no_clean_crossing_inside_is_reached_from_a_crossing_beyond_its_end() {
+fn a_pin_with_no_crossing_inside_that_has_a_way_out_is_reached_from_a_crossing_beyond_its_end() {
     let db = tiny();
     let tech = RouteTech::new(&db, &RouteSetup::from(&RoutingConfig::default())).unwrap();
     let pin = io_pin(&db, "in");
     let bottom = Dbu::new(5800);
-    let reaches_below = |_: LayerId, m: &Rect<Dbu>| m.min.y < bottom - Dbu::new(100);
+    let only_with_a_stub = |_: LayerId, metal: &[Rect<Dbu>]| metal.len() == 2;
 
-    let points = access_points(&db, &tech, pin, &reaches_below);
+    let points = access_points(&db, &tech, pin, &only_with_a_stub);
 
     assert_ne!(points, []);
     for a in &points {
@@ -142,15 +146,82 @@ fn a_pin_with_no_clean_crossing_inside_is_reached_from_a_crossing_beyond_its_end
 }
 
 #[test]
-fn a_pin_with_no_clean_access_keeps_its_crossings() {
+fn a_pin_with_no_way_out_keeps_its_crossings_with_every_way_closed() {
     let db = tiny();
     let tech = RouteTech::new(&db, &RouteSetup::from(&RoutingConfig::default())).unwrap();
     let pin = io_pin(&db, "in");
+    let place = |a: &AccessPoint| (a.node, a.at);
 
     let unjudged = access_points(&db, &tech, pin, &|_, _| true);
     let none_clean = access_points(&db, &tech, pin, &|_, _| false);
 
-    assert_eq!(none_clean, unjudged);
+    assert_eq!(
+        none_clean.iter().map(place).collect::<Vec<_>>(),
+        unjudged.iter().map(place).collect::<Vec<_>>()
+    );
+    assert!(
+        none_clean.iter().all(|a| a.ways == Ways::NONE),
+        "{none_clean:?}"
+    );
+}
+
+/// The tiny fixture with its I/O pin `in` stretched to a micron long, down
+/// from the die's top edge.
+fn tiny_with_a_long_io_pin() -> (NetlistDB, PinId) {
+    let mut db = tiny();
+    let io = db.io_pin_id("in").unwrap();
+    db.io_pins[io].shapes[0].rect = Rect::new(
+        Point::new(Dbu::new(-50), Dbu::ZERO),
+        Point::new(Dbu::new(50), Dbu::new(1000)),
+    );
+    let pin = db.io_pins[io].pin;
+    (db, pin)
+}
+
+#[test]
+fn a_way_whose_wire_would_end_inside_the_pin_is_closed() {
+    let (db, pin) = tiny_with_a_long_io_pin();
+    let tech = RouteTech::new(&db, &RouteSetup::from(&RoutingConfig::default())).unwrap();
+    let middle = Point::new(Dbu::new(1100), Dbu::new(5500));
+
+    let points = access_points(&db, &tech, pin, &|_, _| true);
+
+    let at_middle = points.iter().find(|a| a.at == middle).unwrap();
+    let across = Ways::NONE.with(Way::AcrossLower).with(Way::AcrossHigher);
+    assert_eq!(at_middle.ways, across);
+}
+
+#[test]
+fn an_io_pin_left_on_its_own_layer_gets_no_via_way() {
+    let (db, pin) = tiny_with_a_long_io_pin();
+    let tech = RouteTech::new(&db, &RouteSetup::from(&RoutingConfig::default())).unwrap();
+
+    let points = access_points(&db, &tech, pin, &|_, _| true);
+
+    assert_ne!(points, []);
+    assert!(
+        points
+            .iter()
+            .all(|a| !a.ways.contains(Way::Up) && !a.ways.contains(Way::Down)),
+        "{points:?}"
+    );
+}
+
+#[test]
+fn a_crossing_inside_a_block_pin_between_obstruction_strips_is_left_away_from_the_block() {
+    let db = macro_edge();
+    let config = RoutingConfig::default();
+    let tech = RouteTech::new(&db, &RouteSetup::from(&config)).unwrap();
+    let judge = DetailedRouter::new(&db, &tech, crate::gcell_size(&tech, &config)).into_pin_judge();
+    let pin = cell_pin(&db, "ram", "P[0]");
+    let net = db.pins[pin].net;
+    let clean = |layer: LayerId, metal: &[Rect<Dbu>]| judge.clean(net, layer, metal);
+
+    let points = access_points(&db, &tech, pin, &clean);
+
+    let found: Vec<(Point<Dbu>, Ways)> = points.iter().map(|a| (a.at, a.ways)).collect();
+    let crossing = Point::new(Dbu::new(11390), Dbu::new(2380));
+    assert_eq!(found, [(crossing, Ways::NONE.with(Way::AlongLower))]);
 }
 
 #[test]

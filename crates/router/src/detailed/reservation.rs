@@ -109,7 +109,7 @@ pub(super) fn own_access_points(
             if !is_signal_net(db, net) {
                 return Vec::new();
             }
-            let clean = |layer: LayerId, metal: &Rect<Dbu>| {
+            let clean = |layer: LayerId, metal: &[Rect<Dbu>]| {
                 judge::wiring_is_clean(judged.layout, judged.tiles, judged.rules, net, layer, metal)
             };
             db.nets[net]

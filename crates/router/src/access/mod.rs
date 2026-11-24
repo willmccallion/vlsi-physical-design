@@ -1,4 +1,5 @@
-//! Pin access: the routing nodes a net may use to reach each of its pins.
+//! Pin access: the routing nodes a net may use to reach each of its pins,
+//! and the ways a wire may leave each of them.
 //!
 //! A pin on a routable layer is reached by any node of that layer inside
 //! one of its shapes. A pin below the lowest routable layer is reached
@@ -14,11 +15,15 @@
 //! When no crossing falls on a usable spot, the pin is touched at an
 //! off-crossing point on one of its tracks, and a short stub along that
 //! track joins it to the nearest crossing. Candidates without a stub come
-//! first. On a routable layer a spot is usable when the design rule check
-//! finds the wire end it leaves clean, as `TritonRoute`'s pin access checks
-//! each access point: a crossing inside a macro pin that abuts the macro's
-//! obstruction leaves metal reaching into it, and only a stub from a
-//! crossing outside reaches the pin cleanly.
+//! first. On a routable layer a spot is usable when some way out of it is
+//! clean, as `TritonRoute`'s pin access checks each direction out of an
+//! access point: from a crossing inside a macro pin that abuts the macro's
+//! obstruction, only a wire leaving the macro is.
+
+pub(crate) mod ways;
+
+use ways::WayCheck;
+pub use ways::{PinKind, Ways};
 
 use crate::tech::{CrossIdx, RouteTech, TrackIdx, ViaTech, index_u32};
 use pare_common::db::design::{NetlistDB, PinOwner};
@@ -53,6 +58,11 @@ pub struct AccessPoint {
     pub pin_layer: LayerId,
     /// Vias from the pin layer up to the node's layer, bottom first.
     pub vias: Vec<ViaId>,
+    /// The ways a wire may leave `node`, as `FlexPA` marks an access
+    /// point's valid accesses. An access through vias from below the
+    /// routable layers allows every way: `TritonRoute` puts that access
+    /// point on the pin's own layer, below a plain node of its grid.
+    pub ways: Ways,
 }
 
 /// Most access nodes kept per pin, each with every via stack that fits.
@@ -99,14 +109,15 @@ fn distance_outside(p: Point<Dbu>, area: &Rect<Dbu>) -> Dbu {
 
 /// Access candidates for a pin, best first; empty if none is legal.
 ///
-/// On a routable layer, `clean` judges the metal a wire end leaves on a
-/// layer: the crossings inside the pin are tried first, then stubs, and
-/// when no candidate is clean they are kept all the same, crossings first.
+/// On a routable layer, `clean` judges metal on a layer against the fixed
+/// shapes, deciding which ways out of each candidate are open: the
+/// crossings inside the pin are tried first, then stubs, and when no
+/// candidate has a way out they are kept all the same, crossings first.
 pub fn access_points(
     db: &NetlistDB,
     tech: &RouteTech,
     pin: PinId,
-    clean: &impl Fn(LayerId, &Rect<Dbu>) -> bool,
+    clean: &impl Fn(LayerId, &[Rect<Dbu>]) -> bool,
 ) -> Vec<AccessPoint> {
     let shapes = db.pin_shapes(pin);
     let target = db.pin_position(pin);
@@ -118,38 +129,79 @@ pub fn access_points(
             continue;
         };
         if tech.routable(layer) {
-            found.extend(planar_accesses(tech, layer, &shape.rect, target, clean));
+            let pin_metal: Vec<Rect<Dbu>> = shapes
+                .iter()
+                .filter(|s| s.layer == shape.layer)
+                .map(|s| s.rect)
+                .collect();
+            let check = WayCheck {
+                db,
+                tech,
+                layer,
+                kind: PinKind::of(db, pin),
+                pin_metal: &pin_metal,
+                cell_box: cell_box(db, pin),
+                clean,
+            };
+            found.extend(planar_accesses(&check, &shape.rect, target));
         } else if layer < tech.min_layer {
             let stacks = |at: Point<Dbu>| via_stacks(tech, layer, at, &shapes, &blockers);
-            let on_grid = nodes_inside(tech, tech.min_layer, &shape.rect, |node, at| {
-                let fitting = stacks(at);
-                let any = !fitting.is_empty();
-                for vias in fitting {
-                    let access = AccessPoint {
-                        node,
-                        at,
-                        pin_layer: layer,
-                        vias,
-                    };
-                    found.push(((false, at.manhattan(target)), access));
-                }
-                any
-            });
-            if !on_grid {
-                stub_accesses(tech, tech.min_layer, &shape.rect, stacks, |a, stub| {
-                    found.push((
-                        (true, stub + a.at.manhattan(target)),
-                        AccessPoint {
-                            pin_layer: layer,
-                            ..a
-                        },
-                    ));
-                });
-            }
+            found.extend(stacked_accesses(tech, layer, &shape.rect, target, stacks));
         }
     }
     found.sort_by_key(|(key, a)| (*key, a.node));
     best_per_node(found)
+}
+
+/// The box of `pin`'s cell; none for an I/O pin.
+fn cell_box(db: &NetlistDB, pin: PinId) -> Option<Rect<Dbu>> {
+    match db.pins[pin].owner {
+        PinOwner::Cell { cell, .. } => Some(db.cell_bbox(cell)),
+        PinOwner::Io(_) => None,
+    }
+}
+
+/// The accesses to a pin shape `rect` on `pin_layer`, below the routable
+/// layers, through the via stacks `stacks` finds at a point, each keyed for
+/// ordering: at the lowest routable layer's crossings over the shape, or
+/// else off them on its tracks, joined to a crossing by a stub.
+fn stacked_accesses(
+    tech: &RouteTech,
+    pin_layer: LayerId,
+    rect: &Rect<Dbu>,
+    target: Point<Dbu>,
+    stacks: impl Fn(Point<Dbu>) -> Vec<Vec<ViaId>>,
+) -> Vec<((bool, Dbu), AccessPoint)> {
+    let mut found = Vec::new();
+    let on_grid = nodes_inside(tech, tech.min_layer, rect, |node, at| {
+        let fitting = stacks(at);
+        let any = !fitting.is_empty();
+        for vias in fitting {
+            let access = AccessPoint {
+                node,
+                at,
+                pin_layer,
+                vias,
+                ways: Ways::ALL,
+            };
+            found.push(((false, at.manhattan(target)), access));
+        }
+        any
+    });
+    if !on_grid {
+        let reach = StubReach {
+            layer: tech.min_layer,
+            rect,
+            ways: Ways::ALL,
+        };
+        stub_accesses(tech, &reach, stacks, |a, stub| {
+            found.push((
+                (true, stub + a.at.manhattan(target)),
+                AccessPoint { pin_layer, ..a },
+            ));
+        });
+    }
+    found
 }
 
 /// The candidates of the first [`MAX_CANDIDATE_NODES`] distinct nodes of
@@ -180,18 +232,29 @@ const fn middle_on_grid(low: Dbu, high: Dbu, grid: Dbu) -> Dbu {
     Dbu::new(low.midpoint(high).div_floor(grid) * grid.get())
 }
 
-/// Off-crossing accesses on each track of `layer` through `rect`: the point
-/// inside the rectangle nearest a crossing where `stack` finds vias, joined
-/// to that crossing. Calls `f` with the access and its stub length.
+/// Where off-crossing accesses are sought: the tracks of `layer` through
+/// `rect`, and the ways out of the accesses found there before any is
+/// judged.
+struct StubReach<'r> {
+    layer: LayerId,
+    rect: &'r Rect<Dbu>,
+    ways: Ways,
+}
+
+/// Off-crossing accesses on each track of `reach`'s layer through its
+/// rectangle: the point inside the rectangle nearest a crossing where
+/// `stack` finds vias, joined to that crossing. Calls `f` with the access
+/// and its stub length.
 fn stub_accesses(
     tech: &RouteTech,
-    layer: LayerId,
-    rect: &Rect<Dbu>,
+    reach: &StubReach<'_>,
     stacks: impl Fn(Point<Dbu>) -> Vec<Vec<ViaId>>,
     mut f: impl FnMut(AccessPoint, Dbu),
 ) {
+    let layer = reach.layer;
     let lt = tech.layer(layer);
-    let (Interval { lo: a0, hi: a1 }, Interval { lo: b0, hi: b1 }) = lt.across_along_rect(rect);
+    let (Interval { lo: a0, hi: a1 }, Interval { lo: b0, hi: b1 }) =
+        lt.across_along_rect(reach.rect);
     let center = middle_on_grid(b0, b1, tech.manufacturing_grid);
     let k = lt.cross.as_slice().partition_point(|c| c.at < center);
     let nearest = [
@@ -222,6 +285,7 @@ fn stub_accesses(
                                 at,
                                 pin_layer: layer,
                                 vias,
+                                ways: reach.ways,
                             },
                             (along - node_along).abs(),
                         );
@@ -233,18 +297,18 @@ fn stub_accesses(
     }
 }
 
-/// The accesses to a pin shape `rect` on routable `layer`, each keyed for
-/// ordering: the crossings inside it whose wire end `clean` accepts, or
-/// else the stubs whose wire `clean` accepts, from the crossings beyond
-/// its ends or nearest its middle, or else, none being clean, the
-/// crossings inside it or failing those the stubs nearest its middle.
-fn planar_accesses(
-    tech: &RouteTech,
-    layer: LayerId,
+/// The accesses to a pin shape `rect` on `check`'s routable layer, each
+/// keyed for ordering, with the ways out of them `check` finds: the
+/// crossings inside it that can be used, or else the stubs that can, from
+/// the crossings beyond its ends or nearest its middle, or else, none
+/// having a way out, the crossings inside it or failing those the stubs
+/// nearest its middle.
+fn planar_accesses<J: Fn(LayerId, &[Rect<Dbu>]) -> bool>(
+    check: &WayCheck<'_, J>,
     rect: &Rect<Dbu>,
     target: Point<Dbu>,
-    clean: &impl Fn(LayerId, &Rect<Dbu>) -> bool,
 ) -> Vec<((bool, Dbu), AccessPoint)> {
+    let (tech, layer) = (check.tech, check.layer);
     let mut crossings = Vec::new();
     let _ = nodes_inside(tech, layer, rect, |node, at| {
         let access = AccessPoint {
@@ -252,20 +316,24 @@ fn planar_accesses(
             at,
             pin_layer: layer,
             vias: Vec::new(),
+            ways: Ways::NONE,
         };
         crossings.push(((false, at.manhattan(target)), access));
         true
     });
-    let is_clean = |a: &AccessPoint| clean(layer, &wire_end_metal(tech, a));
-    if crossings.iter().any(|(_, a)| is_clean(a)) {
-        crossings.retain(|(_, a)| is_clean(a));
+    if check.judge(&mut crossings) {
+        crossings.retain(|(_, a)| check.usable(a));
         return crossings;
     }
     let mut stubs = Vec::new();
-    stub_accesses(
-        tech,
+    let reach = StubReach {
         layer,
         rect,
+        ways: Ways::NONE,
+    };
+    stub_accesses(
+        tech,
+        &reach,
         |_| vec![Vec::new()],
         |a, stub| stubs.push(((true, stub + a.at.manhattan(target)), a)),
     );
@@ -274,8 +342,8 @@ fn planar_accesses(
         .map(|(a, stub)| ((true, stub + a.at.manhattan(target)), a))
         .collect();
     reaching.extend(stubs.iter().cloned());
-    if reaching.iter().any(|(_, a)| is_clean(a)) {
-        reaching.retain(|(_, a)| is_clean(a));
+    if check.judge(&mut reaching) {
+        reaching.retain(|(_, a)| check.usable(a));
         return reaching;
     }
     if crossings.is_empty() {
@@ -322,24 +390,12 @@ fn stubs_from_beyond(
                 at,
                 pin_layer: layer,
                 vias: Vec::new(),
+                ways: Ways::NONE,
             };
             found.push((access, (end - lt.cross[cross].at).abs()));
         }
     }
     found
-}
-
-/// The metal a wire leaves where it reaches planar access `a`: its end at
-/// the node and the stub on to where it touches the pin, widened by half
-/// the layer's width on every side, as a wire's end extends.
-fn wire_end_metal(tech: &RouteTech, a: &AccessPoint) -> Rect<Dbu> {
-    let lt = tech.layer(a.node.layer);
-    let node = lt.point(a.node.track, a.node.cross);
-    Rect::new(
-        Point::new(node.x.min(a.at.x), node.y.min(a.at.y)),
-        Point::new(node.x.max(a.at.x), node.y.max(a.at.y)),
-    )
-    .expand(lt.width / 2)
 }
 
 /// Calls `f` for every node of `layer` whose point lies inside `rect`;

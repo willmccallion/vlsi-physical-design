@@ -107,16 +107,23 @@ impl ShapeTiles {
 }
 
 /// Whether wiring of `net` covering `metal` on `layer`, among the fixed
-/// shapes of `fixed` that `tiles` finds near it, breaks no design rule.
+/// shapes of `fixed` that `tiles` finds near it, breaks no design rule but
+/// the minimum area, which pin access leaves to routing as `FlexPA`'s
+/// checks do (`setIgnoreMinArea`).
+// NOTE: FlexPA's checker sees the pin's own cell (addTargetObj) and ignores
+// corner spacing; PARE's sees every fixed shape and checks no corner spacing.
 pub(super) fn wiring_is_clean(
     fixed: &Layout,
     tiles: &ShapeTiles,
     rules: &Rules,
     net: NetId,
     layer: LayerId,
-    metal: &Rect<Dbu>,
+    metal: &[Rect<Dbu>],
 ) -> bool {
-    let core = metal.expand(rules.max_reach());
+    let Some(span) = metal.iter().copied().reduce(|a, b| a.union(&b)) else {
+        return true;
+    };
+    let core = span.expand(rules.max_reach());
     let window = core.expand(rules.max_reach());
     let mut layout = Layout::with_owners_of(fixed);
     for (layer, i) in tiles.near(&window) {
@@ -129,10 +136,13 @@ pub(super) fn wiring_is_clean(
         }
     }
     let owner = layout.owner(Owner::Net(net), false);
-    layout.add(LayerRef::Routing(layer), owner, *metal, Origin::Routing);
+    for rect in metal {
+        layout.add(LayerRef::Routing(layer), owner, *rect, Origin::Routing);
+    }
     check_window(&layout, rules, core, window)
         .violations
-        .is_empty()
+        .iter()
+        .all(|m| m.violation == Violation::MinArea)
 }
 
 /// Whether `metal` of `net` on `layer` keeps `spacing` from every fixed
