@@ -8,6 +8,7 @@ use crate::bnet::{Bnet, BnetPtr, BufferSize, Fixed, Kind, Metrics, SlackEdges};
 use crate::fuzzy;
 use crate::resizer::{Resizer, buffer_delays};
 use crate::sta::{Sta, Via};
+use pare_common::convert::SaturatingFrom;
 use pare_common::db::indices::{LayerId, PinId};
 use pare_common::db::liberty::{BufferCell, EdgeValues, MinMax};
 use pare_common::geom::dbu::Dbu;
@@ -289,7 +290,7 @@ impl Rebuffer {
             let mut dy = node.at.y - location.y;
             if dx.abs() + dy.abs() >= step {
                 let ratio = dx.abs().to_f64() / (dx.abs() + dy.abs()).to_f64();
-                let dx_abs = Dbu::new((ratio * step.to_f64()) as i64).min(step);
+                let dx_abs = Dbu::new(i64::saturating_from(ratio * step.to_f64())).min(step);
                 let dy_abs = step - dx_abs;
                 dx = if dx > Dbu::ZERO { dx_abs } else { -dx_abs };
                 dy = if dy > Dbu::ZERO { dy_abs } else { -dy_abs };

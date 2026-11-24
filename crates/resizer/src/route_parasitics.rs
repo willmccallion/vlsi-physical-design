@@ -11,6 +11,7 @@
 #![allow(clippy::suboptimal_flops)]
 
 use crate::parasitics::{NetParasitics, RcNode, Resistor, WireShape};
+use pare_common::convert::NearestFrom;
 use pare_common::db::design::NetlistDB;
 use pare_common::db::global_route::{NetRoute, PinGridLocation, RoutePoint};
 use pare_common::db::indices::{CutLayerId, IdVec, LayerId, NetId};
@@ -122,10 +123,10 @@ impl RouteRc {
             let ratio = width.get() as f32 / self.width[layer].get() as f32;
             r_per_meter /= f64::from(ratio);
         }
-        let meters = Meters::from_dbu(length, self.dbu_per_micron).get() as f32;
+        let meters = f32::nearest_from(Meters::from_dbu(length, self.dbu_per_micron).get());
         (
-            (r_per_meter * f64::from(meters)) as f32,
-            (cap_per_meter * f64::from(meters)) as f32,
+            f32::nearest_from(r_per_meter * f64::from(meters)),
+            f32::nearest_from(cap_per_meter * f64::from(meters)),
         )
     }
 
@@ -133,7 +134,7 @@ impl RouteRc {
     /// above, as `MakeWireParasitics::getCutLayerRes` for one cut.
     // OpenROAD returns it in single precision.
     fn cut(&self, below: LayerId) -> f32 {
-        self.via_resistance(below).get() as f32
+        f32::nearest_from(self.via_resistance(below).get())
     }
 }
 

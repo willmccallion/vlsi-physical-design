@@ -9,6 +9,8 @@
 use crate::bnet::{self, BnetPtr, Kind};
 use crate::library::SizingLimits;
 use crate::resizer::{PortSlews, RepairError, Resizer, Timing, gate_slew, meters_to_dbu};
+use pare_common::convert::NearestFrom;
+use pare_common::convert::SaturatingFrom;
 use pare_common::db::design::PinOwner;
 use pare_common::db::indices::PinId;
 use pare_common::db::liberty::{ArcRole, BufferCell, LibCellId};
@@ -809,9 +811,10 @@ impl<'r, 'a, T: Timing> Repairer<'r, 'a, T> {
         }
         if load_slew > max_load_slew {
             // `OpenROAD` solves the quadratic in single precision.
-            let a = (wire_res * wire_cap / 2.0) as f32;
-            let b = (r_drvr * wire_cap + wire_res * ref_cap) as f32;
-            let c = (r_drvr * ref_cap - max_load_slew / self.resizer.slew_rc_factor) as f32;
+            let a = f32::nearest_from(wire_res * wire_cap / 2.0);
+            let b = f32::nearest_from(r_drvr * wire_cap + wire_res * ref_cap);
+            let c =
+                f32::nearest_from(r_drvr * ref_cap - max_load_slew / self.resizer.slew_rc_factor);
             let l = if f64::from(a) > 1e-12 {
                 let discriminant = b * b - 4.0 * a * c;
                 if discriminant >= 0.0 {
@@ -892,7 +895,7 @@ fn point_back_along(to: Point<Dbu>, from: Point<Dbu>, distance: f64, length: Dbu
     };
     let along = |to: Dbu, from: Dbu| {
         let (to, from) = (to.get(), from.get());
-        Dbu::new((to as f64 + share * (from - to) as f64) as i64)
+        Dbu::new(i64::saturating_from(to as f64 + share * (from - to) as f64))
     };
     Point::new(along(to.x, from.x), along(to.y, from.y))
 }

@@ -12,6 +12,7 @@ use crate::parasitics::{NetParasitics, WireRc, WireShape};
 use crate::resizer::RepairError;
 use crate::route_parasitics::RouteRc;
 use crate::steiner::{self, SteinerTree};
+use pare_common::convert::SaturatingFrom;
 use pare_common::db::global_route::{NetRoute, RoutePoint};
 use pare_common::db::indices::{LayerId, PinId};
 use pare_common::db::liberty::{BufferCell, Edge};
@@ -44,7 +45,9 @@ impl Fixed {
         if seconds <= -Self::INF.to_seconds() {
             return -Self::INF;
         }
-        Self((seconds.get() * Self::FEMTOSECONDS_PER_SECOND) as i64)
+        Self(i64::saturating_from(
+            seconds.get() * Self::FEMTOSECONDS_PER_SECOND,
+        ))
     }
 
     /// The time it holds.
@@ -59,7 +62,7 @@ impl Fixed {
         if t >= 1.0 {
             return b;
         }
-        Self(a.0 + ((b.0 - a.0) as f64 * t) as i64)
+        Self(a.0 + i64::saturating_from((b.0 - a.0) as f64 * t))
     }
 }
 

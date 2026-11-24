@@ -3,6 +3,13 @@
 //! cells have positions, sizing drivers and inserting repeaters until every
 //! pin's slew and every driver's load are within the library's limits.
 
+#![deny(
+    clippy::cast_possible_truncation,
+    clippy::cast_sign_loss,
+    clippy::cast_possible_wrap,
+    clippy::cast_lossless
+)]
+
 pub mod bnet;
 mod buffers;
 mod clock_inverters;

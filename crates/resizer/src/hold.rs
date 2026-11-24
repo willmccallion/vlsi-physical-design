@@ -10,6 +10,7 @@ use crate::fuzzy;
 use crate::resizer::{RepairError, Resizer, buffer_delays};
 use crate::sta::Sta;
 use pare_common::config::Share;
+use pare_common::convert::SaturatingFrom;
 use pare_common::db::design::NetlistDB;
 use pare_common::db::indices::PinId;
 use pare_common::db::liberty::{BufferCell, Edge, EdgeValues, LibCellId, MinMax};
@@ -163,7 +164,7 @@ pub fn repair_hold(
 /// [`MIN_BUFFER_BUDGET`].
 fn buffer_budget(db: &NetlistDB, share: Share) -> usize {
     let cells = db.cells.iter().filter(|c| !c.retired).count();
-    ((share.get() * cells as f64) as usize).max(MIN_BUFFER_BUDGET)
+    usize::saturating_from(share.get() * cells as f64).max(MIN_BUFFER_BUDGET)
 }
 
 /// The worst endpoint slack on `side`; none where no endpoint is
@@ -229,7 +230,7 @@ fn hold_buffer_candidates(resizer: &Resizer<'_, Sta>) -> Vec<BufferCell> {
     let link = resizer.link;
     let library = &resizer.db.library;
     let buffers: Vec<BufferCell> = (0..link.liberty.cells.len())
-        .map(|i| LibCellId(i as u32))
+        .map(LibCellId::new)
         .filter(|&id| {
             let cell = link.liberty.cell(id);
             cell.is_buffer() && !cell.is_power_cell && !link.dont_use(id) && link.is_link_cell(id)

@@ -13,6 +13,7 @@ use crate::netlist::{ClockNetwork, Constants, Namer, Netlist};
 use crate::parasitics::WireRc;
 use crate::route_parasitics::RouteRc;
 use crate::sta::{Slack, Sta};
+use pare_common::convert::SaturatingFrom;
 use pare_common::db::design::{EditError, NetlistDB, PinOwner, PinPlace, PlacementStatus};
 use pare_common::db::global_route::RouteSource;
 use pare_common::db::indices::{CellId, IdVec, MacroId, NetId, PinId};
@@ -1432,7 +1433,7 @@ pub fn timing_net_weights(slacks: &[(NetId, Slack)], weight_max: f64) -> Vec<(Ne
     let Some(slack_min) = slacks.first().and_then(|&(_, slack)| slack.time()) else {
         return Vec::new();
     };
-    let worst = ((slacks.len() as f64) * WORST_SLACK_NETS_SHARE).ceil() as usize;
+    let worst = usize::saturating_from(((slacks.len() as f64) * WORST_SLACK_NETS_SHARE).ceil());
     let slack_max = slacks[worst.clamp(1, slacks.len()) - 1].1;
     let scale = WeightScale {
         slack_min,
@@ -1524,10 +1525,10 @@ pub fn area_change_percent(before: CellArea, after: CellArea) -> f64 {
 /// `meters` in database units, rounded and kept within an `int`, as
 /// `Resizer::metersToDbu`.
 pub(crate) fn meters_to_dbu(meters: Meters, dbu: DbuPerMicron) -> Dbu {
-    Dbu::new(i64::from(
-        ((meters.get() * f64::from(dbu.get()) * MICRONS_PER_METER).round() as i64 as i32)
-            & i32::MAX,
-    ))
+    // Masking the low 31 bits is what `int` truncation and `& INT_MAX` keep.
+    let rounded =
+        i64::saturating_from((meters.get() * f64::from(dbu.get()) * MICRONS_PER_METER).round());
+    Dbu::new(rounded & i64::from(i32::MAX))
 }
 
 /// Target slews from the buffers and the load each usable cell meets them
@@ -1595,7 +1596,7 @@ fn find_target_load(cell: &LibCell, slews: &EdgeValues<Seconds>) -> Farads {
     if count == 0 {
         Farads::ZERO
     } else {
-        sum / count as f64
+        sum / f64::from(count)
     }
 }
 
@@ -2263,7 +2264,10 @@ mod tests {
                 let (_, out) = resizer.buffer_pins(cell).unwrap();
                 let net = resizer.db.pins[out].net;
                 let loads: Vec<PinId> = resizer.netlist().loads(net).collect();
-                let at = Point::new(Dbu::new(2000 + 4000 * draw(18) as i64), Dbu::new(2800));
+                let at = Point::new(
+                    Dbu::new(2000 + 4000 * i64::try_from(draw(18)).unwrap()),
+                    Dbu::new(2800),
+                );
                 let buffer = resizer.buffers.lowest_drive;
                 let _ = resizer
                     .insert_buffer_before_loads(net, &loads, buffer, at, "rebuffer")
