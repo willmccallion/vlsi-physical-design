@@ -181,9 +181,24 @@ impl NetRoute {
 
     /// Its wiring for the design: runs of wire along each track, vias, runs
     /// of jogs across tracks, and the stub and via stack of every access
-    /// point.
+    /// point. A wire ending at the node of an access point that touches its
+    /// pin there stops at the node, as `FlexDRWorker::checkPathSegStyle`
+    /// cuts a path off at an access point with no path of its own.
     pub fn elems(&self, tech: &RouteTech) -> Vec<RouteElem> {
         let point = |n: Node| tech.layer(n.layer).point(n.track, n.cross);
+        let on_pin: Vec<Node> = self
+            .access
+            .iter()
+            .filter(|a| a.pin_layer == a.node.layer && a.at == point(a.node))
+            .map(|a| a.node)
+            .collect();
+        let extension = |n: Node| on_pin.contains(&n).then_some(Dbu::ZERO);
+        let wire = |from: Node, to: Node| RouteElem::Wire {
+            layer: from.layer,
+            from: point(from),
+            to: point(to),
+            extensions: (extension(from), extension(to)),
+        };
         let mut out: Vec<RouteElem> = self
             .edges
             .vias()
@@ -193,23 +208,21 @@ impl NetRoute {
                 at: point(lower),
             })
             .collect();
-        out.extend(self.edges.runs().iter().map(|run| RouteElem::Wire {
-            layer: run.layer,
-            from: point(run.node(run.from)),
-            to: point(run.node(run.to)),
-            extensions: (None, None),
-        }));
+        out.extend(
+            self.edges
+                .runs()
+                .iter()
+                .map(|run| wire(run.node(run.from), run.node(run.to))),
+        );
         out.extend(
             jog_runs(self.edges.jogs())
                 .into_iter()
-                .map(|(first, last)| RouteElem::Wire {
-                    layer: first.layer,
-                    from: point(first),
-                    to: point(Node {
+                .map(|(first, last)| {
+                    let end = Node {
                         track: last.track.plus(1),
                         ..last
-                    }),
-                    extensions: (None, None),
+                    };
+                    wire(first, end)
                 }),
         );
         for a in &self.access {
@@ -486,6 +499,10 @@ pub(crate) fn elem_metal(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::access::Ways;
+    use crate::tech::RouteSetup;
+    use pare_common::config::RoutingConfig;
+    use pare_common::geom::point::Point;
 
     fn node(layer: u8, track: u32, cross: u32) -> Node {
         Node {
@@ -555,6 +572,73 @@ mod tests {
 
         assert_eq!(sets.find(node(1, 4, 3)), sets.find(node(1, 4, 1)));
         assert_ne!(sets.find(node(1, 4, 4)), sets.find(node(1, 4, 1)));
+    }
+
+    /// A route of the tiny fixture running along one second-layer track
+    /// from crossing 7 to crossing 9, reaching a pin through `access`.
+    fn run_to_access(tech: &RouteTech, access: AccessPoint) -> Vec<RouteElem> {
+        let run = Run {
+            layer: LayerId(1),
+            track: TrackIdx(5),
+            from: CrossIdx(7),
+            to: CrossIdx(9),
+        };
+        let route = NetRoute {
+            edges: EdgeSet::from_runs([run]),
+            access: vec![access],
+            ..NetRoute::default()
+        };
+        route.elems(tech)
+    }
+
+    #[test]
+    fn a_wire_ending_where_an_access_point_touches_its_pin_stops_at_the_node() {
+        let db = crate::tests::tiny();
+        let tech = RouteTech::new(&db, &RouteSetup::from(&RoutingConfig::default())).unwrap();
+        let point = |n: Node| tech.layer(n.layer).point(n.track, n.cross);
+        let (on_pin, far) = (node(1, 5, 7), node(1, 5, 9));
+        let access = AccessPoint {
+            node: on_pin,
+            at: point(on_pin),
+            pin_layer: LayerId(1),
+            vias: Vec::new(),
+            ways: Ways::ALL,
+        };
+
+        let elems = run_to_access(&tech, access);
+
+        let wire = RouteElem::Wire {
+            layer: LayerId(1),
+            from: point(on_pin),
+            to: point(far),
+            extensions: (Some(Dbu::ZERO), None),
+        };
+        assert!(elems.contains(&wire), "{elems:?}");
+    }
+
+    #[test]
+    fn a_wire_ending_at_an_access_point_with_a_stub_keeps_its_extension() {
+        let db = crate::tests::tiny();
+        let tech = RouteTech::new(&db, &RouteSetup::from(&RoutingConfig::default())).unwrap();
+        let point = |n: Node| tech.layer(n.layer).point(n.track, n.cross);
+        let (node_end, far) = (node(1, 5, 7), node(1, 5, 9));
+        let access = AccessPoint {
+            node: node_end,
+            at: point(node_end) - Point::new(Dbu::ZERO, Dbu::new(50)),
+            pin_layer: LayerId(1),
+            vias: Vec::new(),
+            ways: Ways::ALL,
+        };
+
+        let elems = run_to_access(&tech, access);
+
+        let wire = RouteElem::Wire {
+            layer: LayerId(1),
+            from: point(node_end),
+            to: point(far),
+            extensions: (None, None),
+        };
+        assert!(elems.contains(&wire), "{elems:?}");
     }
 
     #[test]
