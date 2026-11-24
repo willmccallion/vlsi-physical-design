@@ -1,5 +1,6 @@
 //! The placed and routed design: instances, nets, rows, tracks and wiring.
 
+use crate::convert::{SaturatingFrom, count_i64};
 use crate::db::indices::{
     BlockageId, CellId, CutLayerId, IdVec, IoPinId, LayerId, MacroId, MacroPinId, NetId,
     NonDefaultRuleId, PinId, RegionId, SiteId, SpecialNetId, TableIndex, ViaId, ViaRuleId,
@@ -1094,7 +1095,7 @@ impl NetlistDB {
                 coords.sort_unstable();
                 coords.dedup();
                 let span = coords[coords.len() - 1] - coords[0];
-                let count = coords.len() as i64;
+                let count = count_i64(coords.len());
                 // NOTE: getAverageTrackPattern takes ceil((float) span / count),
                 // which a float rounds wrong past ~1e5 tracks; PARE's is exact.
                 Dbu::new((span.get() + count - 1) / count)
@@ -1180,8 +1181,8 @@ impl NetlistDB {
         }
         let corners = (2 * shapes.len()) as f64;
         Point::new(
-            Dbu::new((x / corners) as i64),
-            Dbu::new((y / corners) as i64),
+            Dbu::new(i64::saturating_from(x / corners)),
+            Dbu::new(i64::saturating_from(y / corners)),
         )
     }
 

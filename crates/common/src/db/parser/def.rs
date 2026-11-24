@@ -1534,9 +1534,10 @@ impl ViaRuleParams {
         };
         let rows = self.rows.max(1);
         let cols = self.cols.max(1);
+        let size = |count: i64| usize::try_from(count).map_err(|_| "too many cuts".to_string());
         let present = match &self.pattern {
-            Some(p) => cut_pattern(p, rows as usize, cols as usize)?,
-            None => vec![vec![true; cols as usize]; rows as usize],
+            Some(p) => cut_pattern(p, size(rows)?, size(cols)?)?,
+            None => vec![vec![true; size(cols)?]; size(rows)?],
         };
         let array = Point::new(
             self.cut_size.x * cols + self.cut_spacing.x * (cols - 1),
@@ -1546,9 +1547,9 @@ impl ViaRuleParams {
         let array_rect = Rect::new(lo, lo + array);
 
         let mut shapes = Vec::new();
-        for r in 0..rows {
-            for c in 0..cols {
-                if !present[r as usize][c as usize] {
+        for (r, row) in (0..rows).zip(&present) {
+            for (c, &cut_present) in (0..cols).zip(row) {
+                if !cut_present {
                     continue;
                 }
                 let min = lo

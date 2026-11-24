@@ -30,6 +30,8 @@ macro_rules! define_index {
             #[inline]
             pub const fn new(index: usize) -> Self {
                 assert!(index <= <$repr>::MAX as usize, "table position past the index type");
+                // The assert above bounds it; `TryFrom` is not `const`.
+                #[allow(clippy::cast_possible_truncation)]
                 Self(index as $repr)
             }
 

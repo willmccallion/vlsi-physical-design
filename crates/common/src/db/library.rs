@@ -1,5 +1,6 @@
 //! Technology and cell library: layers, sites, cell masters and vias.
 
+use crate::convert::NearestFrom;
 use crate::db::indices::{
     CutLayerId, IdVec, LayerId, MacroId, MacroPinId, SiteId, TableFull, ViaId, ViaRuleId,
 };
@@ -75,12 +76,13 @@ impl LayerElectrical {
         width: Dbu,
         dbu_per_micron: DbuPerMicron,
     ) -> (OhmsPerMeter, FaradsPerMeter) {
-        let width_microns = dbu_per_micron.to_microns(width) as f32;
+        let width_microns = f32::nearest_from(dbu_per_micron.to_microns(width));
         let res_ohm_per_micron =
-            (self.resistance_per_square.unwrap_or(0.0) / f64::from(width_microns)) as f32;
-        let cap_pf_per_micron = (f64::from(width_microns)
-            * self.capacitance_per_area.unwrap_or(0.0)
-            + 2.0 * self.edge_capacitance.unwrap_or(0.0)) as f32;
+            f32::nearest_from(self.resistance_per_square.unwrap_or(0.0) / f64::from(width_microns));
+        let cap_pf_per_micron = f32::nearest_from(
+            f64::from(width_microns) * self.capacitance_per_area.unwrap_or(0.0)
+                + 2.0 * self.edge_capacitance.unwrap_or(0.0),
+        );
         (
             OhmsPerMeter::new(MICRONS_PER_METER * f64::from(res_ohm_per_micron)),
             FaradsPerMeter::new(
