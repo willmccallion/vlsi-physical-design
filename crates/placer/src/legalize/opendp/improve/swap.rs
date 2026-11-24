@@ -5,6 +5,7 @@
 use super::mis::converged;
 use super::{ArchRowId, Improver, Result, SKIP_NETS_LARGER_THAN, Trial};
 use super::{EdgeId, NetworkPinId, NodeId, SegmentId};
+use pare_common::convert::SaturatingFrom;
 use pare_common::db::indices::IdVec;
 use pare_common::geom::dbu::Dbu;
 use pare_common::geom::interval::Interval;
@@ -178,7 +179,9 @@ fn region_elsewhere(imp: &Improver, n: NodeId) -> Option<Rect<Dbu>> {
 /// The left edge and bottom that center the cell in a box, as
 /// `std::floor(0.5 * (min + max) - 0.5 * size)`.
 fn centered(span: Interval, size: Dbu) -> Dbu {
-    Dbu::new((0.5 * (span.lo + span.hi).to_f64() - 0.5 * size.to_f64()).floor() as i64)
+    Dbu::new(i64::saturating_from(
+        (0.5 * (span.lo + span.hi).to_f64() - 0.5 * size.to_f64()).floor(),
+    ))
 }
 
 /// The first segment of row `r` whose span holds `x`.
@@ -253,7 +256,7 @@ fn vertical_trial(imp: &mut Improver, n: NodeId) -> Result<Option<Trial>> {
     let xj = centered(region.x_span(), imp.width(n));
     let yj = centered(region.y_span(), imp.height(n));
     let last = imp.arch.rows.len() - 1;
-    let (rmin, rmax) = if yj > Dbu::new(i64::from(yi as i32)) {
+    let (rmin, rmax) = if yj > Dbu::new(i64::from(i32::saturating_from(yi))) {
         ((ri + 1).min(last), (ri + 2).min(last))
     } else {
         (ri.saturating_sub(2), ri.saturating_sub(1))

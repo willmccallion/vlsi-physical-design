@@ -2,6 +2,7 @@
 //! overlapping cells apart, which on a legal placement moves nothing.
 
 use super::{ImprovementError, Improver, NodeId, Result, SegmentId};
+use pare_common::convert::SaturatingFrom;
 use pare_common::db::indices::IdVec;
 use pare_common::geom::dbu::Dbu;
 use pare_common::geom::point::Point;
@@ -155,7 +156,9 @@ impl Clumping {
         left.vertices.extend(moved);
         left.weighted_position += weighted - dist.to_f64() * weight;
         left.weight += weight;
-        left.position = Dbu::new((left.weighted_position / left.weight).floor() as i64);
+        left.position = Dbu::new(i64::saturating_from(
+            (left.weighted_position / left.weight).floor(),
+        ));
     }
 
     /// The clump the worst overlap of `r` on its left neighbours is with and

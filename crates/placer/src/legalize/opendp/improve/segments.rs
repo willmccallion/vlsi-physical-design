@@ -3,6 +3,7 @@
 use super::{ArchRowId, Blockage, ImprovementError, Improver, Result, Segment};
 use super::{NodeId, SegmentId};
 use crate::legalize::opendp::GroupId;
+use pare_common::convert::SaturatingFrom;
 use pare_common::db::indices::IdVec;
 use pare_common::geom::dbu::Dbu;
 use pare_common::geom::interval::{Interval, merge_touching};
@@ -202,7 +203,7 @@ impl Improver {
             let (xmin, xmax) = (rect.min.x, rect.max.x);
             let (ymin, ymax) = (rect.min.y, rect.max.y);
             for (r, row) in rows.iter_enumerated() {
-                let lb = self.arch.min_y + height * r.index() as i64;
+                let lb = self.arch.min_y + height * i64::saturating_from(r.index());
                 if ymax < lb + height || ymin > lb {
                     continue;
                 }
@@ -268,7 +269,7 @@ impl Improver {
         };
         let rows = self.arch.rows.len();
         for offset in 1..=rows {
-            let vert = self.arch.rows[ArchRowId::BOTTOM].height * offset as i64;
+            let vert = self.arch.rows[ArchRowId::BOTTOM].height * i64::saturating_from(offset);
             if let Some(below) = row.down(offset)
                 && within(vert, best1, best2)
             {
@@ -502,14 +503,14 @@ impl Improver {
             if self.cell_segs[n].is_empty() {
                 continue;
             }
-            let spanned = self.height(n).div_trunc(height) as usize;
+            let spanned = usize::saturating_from(self.height(n).div_trunc(height));
             if self.cell_segs[n].len() != spanned {
                 return Err(ImprovementError::Internal(
                     "Reverse cell map incorrectly sized.",
                 ));
             }
             let first = (self.bottom(n) - self.arch.min_y).div_trunc(height);
-            for r in first..first + spanned as i64 {
+            for r in first..first + i64::saturating_from(spanned) {
                 let Some(row) = self.arch.row_number(r).map(|r| &self.arch.rows[r]) else {
                     problems += 1;
                     continue;
@@ -526,7 +527,7 @@ impl Improver {
     /// as `DetailedMgr::isInsideABlockage`.
     fn inside_blockage(&self, n: NodeId, position: Dbu) -> bool {
         let first = &self.arch.rows[ArchRowId::BOTTOM];
-        let rows = self.arch.rows.len() as i64;
+        let rows = i64::saturating_from(self.arch.rows.len());
         let start = (self.bottom(n) - first.bottom)
             .div_trunc(first.height)
             .max(0);
@@ -536,7 +537,7 @@ impl Improver {
             .div_trunc(first.height)
             .min(rows);
         (start..end).any(|r| {
-            let row = &self.blockages[ArchRowId::new(r as usize)];
+            let row = &self.blockages[ArchRowId::new(usize::saturating_from(r))];
             let at = row.partition_point(|b| b.max_x < position);
             row.get(at)
                 .is_some_and(|b| position >= b.min_x && position <= b.max_x)

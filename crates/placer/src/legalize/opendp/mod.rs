@@ -24,6 +24,7 @@ pub mod improve;
 pub mod mirror;
 
 use super::grid::{GridPt, GridRect, GridX, GridY, RowGrid, core_rows};
+use pare_common::convert::SaturatingFrom;
 use pare_common::db::design::{NetlistDB, PinOwner, PlacementStatus};
 use pare_common::db::indices::{CellId, IdVec, SiteId};
 use pare_common::db::library::{LayerRef, MacroClass, SiteClass, Symmetry};
@@ -397,8 +398,11 @@ impl Placer {
         let edge_spacing = EdgeSpacing::new(db);
         let mut placer = Self {
             rows: grid,
-            pixels: vec![Pixel::EMPTY; (row_site_count.get() * row_count.get()).max(0) as usize],
-            row_sites: vec![Vec::new(); row_count.get().max(0) as usize],
+            pixels: vec![
+                Pixel::EMPTY;
+                usize::saturating_from((row_site_count.get() * row_count.get()).max(0))
+            ],
+            row_sites: vec![Vec::new(); usize::saturating_from(row_count.get().max(0))],
             nodes: IdVec::new(),
             edge_spacing,
             disallow_one_site_gaps: !has_one_site_master(db),
@@ -423,7 +427,7 @@ impl Placer {
     fn pixel_index(&self, x: GridX, y: GridY) -> Option<usize> {
         self.rows
             .contains(GridPt::new(x, y))
-            .then(|| (y.get() * self.rows.row_site_count().get() + x.get()) as usize)
+            .then(|| usize::saturating_from(y.get() * self.rows.row_site_count().get() + x.get()))
     }
 
     fn pixel(&self, x: GridX, y: GridY) -> Option<&Pixel> {
@@ -1264,7 +1268,7 @@ impl SearchMarks {
     fn new() -> Self {
         Self {
             stamp: 0,
-            marks: vec![0; (Self::WIDTH.get() * Self::HEIGHT.get()) as usize],
+            marks: vec![0; usize::saturating_from(Self::WIDTH.get() * Self::HEIGHT.get())],
             center: GridPt::default(),
         }
     }
@@ -1283,7 +1287,7 @@ impl SearchMarks {
     fn visit(&mut self, at: GridPt) -> bool {
         let dx = at.x - self.center.x + MAX_DISPLACEMENT_X + 1;
         let dy = at.y - self.center.y + MAX_DISPLACEMENT_Y + 1;
-        let i = (dy.get() * Self::WIDTH.get() + dx.get()) as usize;
+        let i = usize::saturating_from(dy.get() * Self::WIDTH.get() + dx.get());
         if self.marks[i] == self.stamp {
             return false;
         }

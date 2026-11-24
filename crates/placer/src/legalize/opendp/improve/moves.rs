@@ -4,6 +4,7 @@
 use super::arch::Row;
 use super::{ArchRowId, ImprovementError, Improver, Move, Result, Sealed, Trial};
 use super::{NodeId, SegmentId};
+use pare_common::convert::SaturatingFrom;
 use pare_common::geom::dbu::Dbu;
 use pare_common::geom::interval::Interval;
 use pare_common::geom::point::Point;
@@ -728,8 +729,8 @@ impl ShiftSites {
     }
 
     /// The site of table row `i`, counted from one.
-    const fn site(&self, i: usize) -> i64 {
-        self.first + i as i64 - 1
+    fn site(&self, i: usize) -> i64 {
+        self.first + i64::saturating_from(i) - 1
     }
 
     fn x(&self, site: i64) -> Dbu {
@@ -806,7 +807,7 @@ fn cheapest_steps(
                 tcost[i][j] = c;
                 prev[i][j] = Some((i - 1, j));
             }
-            let ii = i as i64 - prev_wid;
+            let ii = i64::saturating_from(i) - prev_wid;
             if let Ok(ii) = usize::try_from(ii)
                 && site_id + curr_wid - 1 <= sites.last
             {

@@ -4,6 +4,7 @@
 
 use super::{ImprovementError, Improver, Move, Result, SKIP_NETS_LARGER_THAN};
 use super::{NodeId, SegmentId};
+use pare_common::convert::SaturatingFrom;
 use pare_common::db::indices::IdVec;
 use pare_common::geom::dbu::Dbu;
 use pare_common::geom::point::Point;
@@ -128,8 +129,8 @@ impl Bins {
         let side = (MAX_PROBLEM_SIZE as f64).sqrt();
         let step = (avg_w * side, avg_h * side);
         let dim = (
-            ((imp.arch.max_x - imp.arch.min_x).to_f64() / step.0).ceil() as usize,
-            ((imp.arch.max_y - imp.arch.min_y).to_f64() / step.1).ceil() as usize,
+            usize::saturating_from(((imp.arch.max_x - imp.arch.min_x).to_f64() / step.0).ceil()),
+            usize::saturating_from(((imp.arch.max_y - imp.arch.min_y).to_f64() / step.1).ceil()),
         );
         Self {
             step,
@@ -150,17 +151,17 @@ impl Bins {
             bin.clear();
         }
         self.bin_of.fill(None);
-        let last = |dim: usize| dim as i32 - 1;
+        let last = |dim: usize| i32::saturating_from(dim) - 1;
         for &n in candidates {
             let y = imp.bottom(n).to_f64() + 0.5 * imp.height(n).to_f64();
             let x = imp.left(n).to_f64() + 0.5 * imp.width(n).to_f64();
-            let j = (((y - imp.arch.min_y.to_f64()) / self.step.1) as i32)
+            let j = (i32::saturating_from((y - imp.arch.min_y.to_f64()) / self.step.1))
                 .min(last(self.dim.1))
                 .max(0);
-            let i = (((x - imp.arch.min_x.to_f64()) / self.step.0) as i32)
+            let i = (i32::saturating_from((x - imp.arch.min_x.to_f64()) / self.step.0))
                 .min(last(self.dim.0))
                 .max(0);
-            let bin = self.index(i as usize, j as usize);
+            let bin = self.index(usize::saturating_from(i), usize::saturating_from(j));
             self.nodes[bin].push(n);
             self.bin_of[n] = Some(bin);
         }
@@ -257,7 +258,7 @@ fn solve_match(imp: &mut Improver, nodes: &[NodeId]) -> Result<()> {
         segs: nodes.iter().map(|&n| imp.cell_segs[n].clone()).collect(),
     };
     let matching = Matching::new(imp, nodes, &spots.at);
-    let count_i32 = count as i32;
+    let count_i32 = i32::saturating_from(count);
     // NOTE: solveMatch first checks with Preflow that every cell can be
     // matched; each cell's arc to its own spot makes that always so here.
     let flow = min_cost_flow(
@@ -344,7 +345,7 @@ impl Matching {
                     cell: i,
                     spot: j,
                 });
-                let cost = cost.min(f64::from(i32::MAX)) as i32;
+                let cost = i32::saturating_from(cost.min(f64::from(i32::MAX)));
                 matching
                     .arcs
                     .push(unit_arc(cell_node(i), spot_node(j), cost));

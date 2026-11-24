@@ -7,6 +7,7 @@
 
 use crate::rows::{RowSpan, blocked_stretches, expand_rows, free_intervals};
 use crate::zones::{Zone, ZoneId, Zones};
+use pare_common::convert::SaturatingFrom;
 use pare_common::db::design::{NetlistDB, PinOwner, PlacementStatus};
 use pare_common::db::indices::{CellId, IdVec, NetId, PinId};
 use pare_common::geom::dbu::{Dbu, DbuArea, DbuPerMicron};
@@ -227,7 +228,8 @@ fn pin_density_sizes(db: &NetlistDB) -> IdVec<CellId, Point<Dbu>> {
             }
             let target = pins as f64 / average;
             let scale = (target / area(size).to_f64()).sqrt().clamp(0.95, 1.2);
-            let scaled = |side: Dbu| Dbu::new((side.get() as f64 * scale) as i64 / 2 * 2);
+            let scaled =
+                |side: Dbu| Dbu::new(i64::saturating_from(side.get() as f64 * scale) / 2 * 2);
             Point::new(scaled(size.x), scaled(size.y))
         })
         .collect()

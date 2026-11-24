@@ -566,7 +566,7 @@ impl<'a> Objective<'a> {
                 if count == 0 {
                     0.0
                 } else {
-                    (sum / (2 * count) as f64).sqrt()
+                    (sum / f64::from(2 * count)).sqrt()
                 }
             })
             .collect()

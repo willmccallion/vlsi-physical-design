@@ -3,6 +3,8 @@
 //! libstdc++'s `std::sort`, whose order among equal elements the search's
 //! results follow.
 
+use pare_common::convert::SaturatingFrom;
+
 /// The 32-bit Mersenne Twister, as `std::mt19937`.
 #[derive(Clone, Debug)]
 pub(super) struct Mt19937 {
@@ -19,7 +21,7 @@ impl Mt19937 {
             let previous = state[i - 1];
             state[i] = 1_812_433_253u32
                 .wrapping_mul(previous ^ (previous >> 30))
-                .wrapping_add(i as u32);
+                .wrapping_add(u32::saturating_from(i));
         }
         Self { state, index: 624 }
     }
