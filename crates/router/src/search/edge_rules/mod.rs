@@ -311,6 +311,18 @@ impl EdgeRules {
         })
     }
 
+    /// Whether `node` holds an access point of `net` on its pin's own layer
+    /// whose via up is a way out of it.
+    pub(crate) fn via_access_at(&self, net: Option<NetId>, node: Node) -> bool {
+        net.is_some_and(|net| {
+            self.nodes.get(&node).is_some_and(|r| {
+                r.points
+                    .iter()
+                    .any(|p| p.net == net && p.ways.contains(Way::Up))
+            })
+        })
+    }
+
     /// The grid cost `edge` pays `net`, or a search of no net's, beyond
     /// that of running against its layer's preferred direction.
     pub(crate) fn grid_cost(&self, net: Option<NetId>, edge: Edge) -> GridCost {
@@ -603,6 +615,28 @@ mod tests {
 
         assert!(rules.cut_off_at(Some(NetId(0)), access));
         assert!(!rules.cut_off_at(None, access));
+    }
+
+    #[test]
+    fn the_via_up_from_an_access_point_that_takes_it_is_its_nets_access_via() {
+        let db = tiny();
+        let tech = tech_of(&db);
+        let pin = db.io_pins[db.io_pin_id("in").unwrap()].pin;
+        let net = db.pins[pin].net;
+        let at = node_at(&tech, LayerId(1), 1100, 5900);
+        let mut access = no_access(&db);
+        let k = db.nets[net].pins.iter().position(|&p| p == pin).unwrap();
+        access[net][k] = vec![AccessPoint {
+            node: at,
+            at: tech.layer(at.layer).point(at.track, at.cross),
+            pin_layer: LayerId(1),
+            vias: Vec::new(),
+            ways: Ways::NONE.with(Way::Up),
+        }];
+        let rules = EdgeRules::new(&db, &tech, &access, Dbu::new(1000));
+
+        assert!(rules.via_access_at(Some(net), at));
+        assert!(!rules.via_access_at(None, at));
     }
 
     #[test]

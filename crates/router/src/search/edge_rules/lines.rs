@@ -2,6 +2,9 @@
 //! which `TritonRoute` turns its grid cost off for the pin's own net and on
 //! for every other (`FlexDRWorker::initMazeCost_ap_helper` and
 //! `initMazeCost_ap_planarGrid_helper`).
+// NOTE: initMazeCost_ap_helper also lays such lines on the layer above a
+// standard cell's access point off that layer's tracks; PARE's access vias
+// always land on a track of the layer above, so it has none.
 
 use crate::access::{Node, Way};
 use crate::tech::{RouteTech, TrackIdx};

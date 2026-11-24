@@ -129,7 +129,8 @@ impl Meets {
 enum FixedMetal {
     /// They count.
     Counts,
-    /// They do not, beside the routed net's own block pin.
+    /// They do not: beside the routed net's own block pin, or for the via
+    /// up from its own access point.
     Relieved,
 }
 
@@ -640,7 +641,10 @@ impl Search<'_> {
     }
 
     /// Cost of using an access point: its stub and its vias, each priced
-    /// as an edge of the graph by what its metal and cuts meet.
+    /// as an edge of the graph by what its metal and cuts meet. The first
+    /// via, up from the pin, pays nothing for fixed metal and cuts, as
+    /// `initMazeCost_ap_helper` overrides the fixed shape cost of the via up
+    /// from an access point on its pin's layer.
     pub(crate) fn access_cost(&self, a: &AccessPoint) -> f64 {
         let node = self.point(a.node);
         let mut cost = if node == a.at {
@@ -648,16 +652,21 @@ impl Search<'_> {
         } else {
             self.wire_price(a.node.layer, node, a.at).total()
         };
-        for &via in &a.vias {
+        for (k, &via) in a.vias.iter().enumerate() {
+            let fixed = if k == 0 {
+                FixedMetal::Relieved
+            } else {
+                FixedMetal::Counts
+            };
             let mut meets = Meets::default();
             for s in &self.db.library.via(via).shapes {
                 let rect = s.rect.translate(a.at);
                 meets = meets.and(match s.layer {
                     LayerRef::Routing(l) if self.tech.routable(l) => {
-                        self.metal_meets(l, &rect, false, &mut Total)
+                        self.meets_counting(l, &rect, false, fixed, &mut Total)
                     }
                     LayerRef::Routing(_) => Meets::default(),
-                    LayerRef::Cut(c) => self.cut_meets(c, &rect, &mut Total),
+                    LayerRef::Cut(c) => self.cut_meets(c, &rect, fixed, &mut Total),
                 });
             }
             cost += self.price(self.costs.via, meets, false).total();
@@ -682,11 +691,19 @@ impl Search<'_> {
     }
 
     /// What other owners' cuts a cut at `rect` on `cut` would touch or
-    /// crowd, telling `parts` whose they are.
-    fn cut_meets(&self, cut: CutLayerId, rect: &Rect<Dbu>, parts: &mut impl CostParts) -> Meets {
+    /// crowd, telling `parts` whose they are, with fixed cuts counting or
+    /// not as `fixed` says.
+    fn cut_meets(
+        &self,
+        cut: CutLayerId,
+        rect: &Rect<Dbu>,
+        fixed: FixedMetal,
+        parts: &mut impl CostParts,
+    ) -> Meets {
         let mut meets = Meets::default();
         for o in self.occupancy.cut_conflicts(cut, rect, self.owner) {
-            let met = self.occupant(o.owner, o.origin);
+            let mut met = self.occupant(o.owner, o.origin);
+            met.fixed &= fixed == FixedMetal::Counts;
             if met.any() {
                 parts.meets(o.owner);
             }
@@ -910,16 +927,24 @@ impl Search<'_> {
 
     /// Price of the via up from `lower` to `upper`, apart from crowding the
     /// net's own vias, telling `parts` whose metal and cuts it meets. A via
-    /// is as long as its cost.
+    /// is as long as its cost. Up from the net's own access point it pays
+    /// nothing for fixed metal and cuts, as `initMazeCost_ap_helper`
+    /// overrides the fixed shape cost of an access point's via.
     fn via_price(&self, lower: Node, upper: Node, parts: &mut impl CostParts) -> Price {
         let at = self.point(lower);
         let via = self.tech.via_above(lower.layer);
         let top = upper.layer;
+        let fixed = if self.rules.via_access_at(self.net(), lower) {
+            FixedMetal::Relieved
+        } else {
+            FixedMetal::Counts
+        };
         let mut meets = self
-            .metal_meets(lower.layer, &via.bottom.translate(at), false, parts)
-            .and(self.metal_meets(top, &via.top.translate(at), false, parts));
+            .meets_counting(lower.layer, &via.bottom.translate(at), false, fixed, parts)
+            .and(self.meets_counting(top, &via.top.translate(at), false, fixed, parts));
         for c in &via.cuts {
-            meets = meets.and(self.cut_meets(lower.layer.cut_above(), &c.translate(at), parts));
+            let rect = c.translate(at);
+            meets = meets.and(self.cut_meets(lower.layer.cut_above(), &rect, fixed, parts));
         }
         let edge = Edge::Via { lower, upper };
         Price {
