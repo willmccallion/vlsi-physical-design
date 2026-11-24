@@ -2,6 +2,7 @@
 //! the buffers a builder adds and the subnets joining them.
 
 use crate::capacitance::Farads32;
+use pare_common::convert::SaturatingFrom;
 use pare_common::db::indices::{CellId, NetId, PinId};
 use pare_common::db::liberty::BufferCell;
 use pare_common::geom::dbu::Dbu;
@@ -145,7 +146,7 @@ impl Clock {
         xs.sort_unstable();
         ys.sort_unstable();
         let n = xs.len();
-        let outliers = (0.01 * n as f64) as usize;
+        let outliers = usize::saturating_from(0.01 * n as f64);
         Rect::new(
             Point::new(xs[outliers], ys[outliers]),
             Point::new(xs[n - outliers - 1], ys[n - outliers - 1]),
@@ -195,7 +196,11 @@ mod tests {
     fn the_sink_region_leaves_out_the_outer_hundredth_of_the_sinks_on_each_side() {
         let mut clock = Clock::new(NetId::new(0), "clk", "clk");
         for i in 0..100 {
-            clock.add_sink(sink_at(i, i as i64, 2 * i as i64));
+            clock.add_sink(sink_at(
+                i,
+                i64::saturating_from(i),
+                2 * i64::saturating_from(i),
+            ));
         }
         clock.add_sink(sink_at(100, 10_000, -10_000));
 

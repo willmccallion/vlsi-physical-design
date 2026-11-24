@@ -3,6 +3,7 @@
 //! buffers characterized.
 
 use crate::CtsError;
+use pare_common::convert::{NearestFrom, SaturatingFrom};
 use pare_common::db::design::NetlistDB;
 use pare_common::db::liberty::{BufferCell, Liberty};
 use pare_common::units::Farads;
@@ -74,7 +75,7 @@ impl ClockBuffers {
 /// double precision and rounded once to single, as
 /// `TritonCTS::selectRootBuffer` and `selectSinkBuffer` estimate it.
 fn signal_wire_cap(signal_rc: &WireRc, length_um: f64) -> f32 {
-    (signal_rc.capacitance.per_micron() * length_um) as f32
+    f32::nearest_from(signal_rc.capacitance.per_micron() * length_um)
 }
 
 /// The smallest buffer whose derated load limit covers `total_cap`, or the
@@ -91,10 +92,10 @@ fn best_max_cap_buffer(
     let mut best_cap = 0.0_f32;
     for &buffer in buffers {
         let cell = liberty.cell(buffer.id);
-        let area = cell.area.get() as f32;
+        let area = f32::nearest_from(cell.area.get());
         let limit = cell.ports[buffer.output]
             .max_capacitance
-            .map(|c| c.get() as f32);
+            .map(|c| f32::nearest_from(c.get()));
         if let Some(max_cap) = limit
             && f64::from(max_cap) * MAX_CAP_DERATE > f64::from(total_cap)
             && area < best_area
@@ -116,9 +117,11 @@ fn best_max_cap_buffer(
 fn max_cap_limit(liberty: &Liberty, buffer: BufferCell) -> f32 {
     // NOTE: getMaxCapLimit reads a missing limit as zero, which decides the
     // buffers characterized; kept so the trees match TritonCTS's.
-    liberty.cell(buffer.id).ports[buffer.output]
-        .max_capacitance
-        .map_or(0.0, Farads::get) as f32
+    f32::nearest_from(
+        liberty.cell(buffer.id).ports[buffer.output]
+            .max_capacitance
+            .map_or(0.0, Farads::get),
+    )
 }
 
 /// The inferred buffers to characterize, as `TechChar::trimSortBufferList`
@@ -172,7 +175,7 @@ pub(crate) fn fanout_limit(
     [design_limit, port_limit]
         .into_iter()
         .flatten()
-        .map(|l| l as u32)
+        .map(u32::saturating_from)
         .min()
         // NOTE: kept: TritonCTS truncates a limit below one to 0 and its callers skip it.
         .filter(|&limit| limit > 0)
@@ -253,7 +256,7 @@ mod tests {
         // A limit of 1 pF derated lies above the load in double precision;
         // in single precision it rounds to the load itself.
         let lib = buffers(&[(1, None), (100, None)], None);
-        let load = (1e-12_f64 as f32) * 0.01_f32;
+        let load = f32::nearest_from(1e-12_f64) * 0.01_f32;
 
         let best = best_max_cap_buffer(&lib, &[id(&lib, 1), id(&lib, 100)], load);
 
@@ -271,8 +274,11 @@ mod tests {
 
         let cap = signal_wire_cap(&rc, 3.0);
 
-        assert_eq!(cap.to_bits(), ((per_micron * 3.0) as f32).to_bits());
-        assert_ne!(cap.to_bits(), (per_micron as f32 * 3.0).to_bits());
+        assert_eq!(cap.to_bits(), f32::nearest_from(per_micron * 3.0).to_bits());
+        assert_ne!(
+            cap.to_bits(),
+            (f32::nearest_from(per_micron) * 3.0).to_bits()
+        );
     }
 
     #[test]

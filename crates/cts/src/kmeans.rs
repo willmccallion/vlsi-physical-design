@@ -9,6 +9,7 @@
 //! among equally cheap ones the simplex's own choice, so the simplex is
 //! run as LEMON runs it.
 
+use pare_common::convert::SaturatingFrom;
 use pare_common::network_simplex::{Arc, min_cost_flow};
 
 /// The farthest a sink may be from a mean and still be assigned to it, as
@@ -194,7 +195,7 @@ impl Clustering {
                         source: sink_node(i),
                         target: cluster_node(j),
                         capacity: 1,
-                        cost: d as i32,
+                        cost: i32::saturating_from(d),
                     });
                 }
             }
@@ -204,11 +205,11 @@ impl Clustering {
             arcs.push(Arc {
                 source: cluster_node(j),
                 target,
-                capacity: (cap + usize::from(j < remaining)) as i32,
+                capacity: i32::saturating_from(cap + usize::from(j < remaining)),
                 cost: 0,
             });
         }
-        let supply = (means.len() * cap + remaining) as i32;
+        let supply = i32::saturating_from(means.len() * cap + remaining);
         // NOTE: Clustering::minCostFlow ignores run()'s outcome
         // (Clustering.cpp:370) and reads the flows as the simplex left them.
         let flows = min_cost_flow(2 + n + means.len(), &arcs, source, target, supply)

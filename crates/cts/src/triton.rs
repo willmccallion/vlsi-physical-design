@@ -14,6 +14,7 @@ use crate::options::{
     NdrStrategy, Settings,
 };
 use crate::techchar::{CharSetup, LengthUnit, TechChar};
+use pare_common::convert::SaturatingFrom;
 use pare_common::db::design::{
     NetlistDB, NonDefaultLayer, NonDefaultRule, PinOwner, PlacementStatus,
 };
@@ -134,7 +135,7 @@ impl TreeSetup {
         TreeContext {
             settings: &self.settings,
             core: db.core_area(),
-            dbu: db.dbu().get() as i32,
+            dbu: i32::saturating_from(db.dbu().get()),
             root_buffer: self.buffers.root,
             sink_buffer: self.buffers.sink,
             buffer_sizes: &self.buffer_sizes,
@@ -233,7 +234,7 @@ fn pin_position(db: &NetlistDB, pin: PinId) -> Point<Dbu> {
         x += s.rect.min.x.get() + (s.rect.max.x.get() - s.rect.min.x.get()) / 2;
         y += s.rect.min.y.get() + (s.rect.max.y.get() - s.rect.min.y.get()) / 2;
     }
-    let n = shapes.len() as i64;
+    let n = i64::saturating_from(shapes.len());
     Point::new(Dbu::new(x / n), Dbu::new(y / n))
 }
 
@@ -883,7 +884,11 @@ impl Cts<'_> {
         }
         let root = sizes[&self.setup.buffers.root];
         let unit = tech.length_unit().to_f64();
-        let half = |side: Dbu| Dbu::new(((side.get() as f64 / unit) * unit / 2.0).ceil() as i64);
+        let half = |side: Dbu| {
+            Dbu::new(i64::saturating_from(
+                ((side.get() as f64 / unit) * unit / 2.0).ceil(),
+            ))
+        };
         let bloat = Point::new(half(root.x), half(root.y));
         let (blockages, macro_diameter) = merge_blockages(db, bloat);
         if let Some(macro_diameter) = macro_diameter
@@ -1138,7 +1143,7 @@ impl Cts<'_> {
         let liberty = self.link.liberty;
         let mut candidates = self.setup.buffers.all.clone();
         let inverters: Vec<BufferCell> = (0..liberty.cells.len())
-            .map(|i| LibCellId(i as u32))
+            .map(LibCellId::new)
             .filter(|&id| {
                 liberty.cell(id).is_inverter()
                     && self.link.is_link_cell(id)
@@ -1320,7 +1325,8 @@ fn merge_blockages(db: &NetlistDB, bloat: Point<Dbu>) -> (Vec<Rect<Dbu>>, Option
         }
     }
     rects.extend(db.hard_placement_blockages());
-    let diameter = (2 * max_dx.max(max_dy)) as f64 / f64::from(db.dbu().get() as i32);
+    let diameter =
+        (2 * max_dx.max(max_dy)) as f64 / f64::from(i32::saturating_from(db.dbu().get()));
     let grown: Vec<Rect<Dbu>> = rects
         .iter()
         .map(|r| Rect::new(r.min - bloat, r.max + bloat))
