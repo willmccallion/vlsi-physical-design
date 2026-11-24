@@ -180,7 +180,7 @@ impl GlobalSession {
         {
             return Some(terminal);
         }
-        let clean = |layer: LayerId, metal: &_| self.judge.clean(net, layer, metal);
+        let clean = |layer: LayerId, metal: &[_]| self.judge.clean(net, layer, metal);
         let mut candidates = access_points(db, &self.tech, pin, &clean);
         if let Some(fellows) = fellows {
             order_toward(&mut candidates, fellows);

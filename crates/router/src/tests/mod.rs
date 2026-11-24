@@ -1,4 +1,4 @@
-//! Routing and its parts on the shared fixture design.
+//! Routing and its parts on the shared fixture designs.
 
 mod access;
 mod golden;
@@ -20,11 +20,24 @@ pub(crate) fn fixture(name: &str) -> PathBuf {
         .join(name)
 }
 
+/// The design of the fixture files `name`.lef and `name`.def.
+fn fixture_design(name: &str) -> NetlistDB {
+    let def_file = fixture(&format!("{name}.def"));
+    let units = def::read_units(&def_file).unwrap();
+    let library = lef::parse_files(&[fixture(&format!("{name}.lef"))], units).unwrap();
+    def::parse(&def_file, library).unwrap()
+}
+
 /// The shared tiny fixture design, two of its cells unplaced.
 pub(crate) fn tiny() -> NetlistDB {
-    let units = def::read_units(&fixture("tiny.def")).unwrap();
-    let library = lef::parse_files(&[fixture("tiny.lef")], units).unwrap();
-    def::parse(&fixture("tiny.def"), library).unwrap()
+    fixture_design("tiny")
+}
+
+/// A hard block whose left edge holds eight small metal3 pins between
+/// obstruction strips, as memory macros have, placed so that a metal4
+/// track crosses every pin, and one net joining the pins to an I/O pin.
+pub(crate) fn macro_edge() -> NetlistDB {
+    fixture_design("macro_edge")
 }
 
 /// Places the cell `name` of `db` at `at`.

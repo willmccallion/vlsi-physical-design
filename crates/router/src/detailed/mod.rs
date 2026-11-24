@@ -179,7 +179,7 @@ pub(crate) struct PinJudge {
 impl PinJudge {
     /// Whether `metal` of `net` on `layer` breaks no rule against the fixed
     /// shapes.
-    pub fn clean(&self, net: NetId, layer: LayerId, metal: &Rect<Dbu>) -> bool {
+    pub fn clean(&self, net: NetId, layer: LayerId, metal: &[Rect<Dbu>]) -> bool {
         judge::wiring_is_clean(
             &self.fixed,
             &self.fixed_tiles,

@@ -1,4 +1,4 @@
-pare-route-state 1
+pare-route-state 2
 design tiny
 grid 1200 5 5 1 2
 global 5

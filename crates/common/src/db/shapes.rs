@@ -41,7 +41,7 @@ pub fn wire_rect(from: Point<Dbu>, to: Point<Dbu>, width: Dbu) -> Option<Rect<Db
 /// The rectangle a wire of `width` covers, extended past `from` by
 /// `from_extension` and past `to` by `to_extension`; `None` for a diagonal
 /// wire.
-pub(crate) fn wire_rect_with_ends(
+pub fn wire_rect_with_ends(
     from: Point<Dbu>,
     to: Point<Dbu>,
     width: Dbu,
