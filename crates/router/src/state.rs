@@ -486,7 +486,7 @@ impl Fields<'_> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::access::ways::Way;
+    use crate::access::Way;
 
     fn node(layer: usize, track: u32, cross: u32) -> Node {
         Node {

@@ -1,5 +1,5 @@
-round 0 regular markers 7 conflicted 4 repaired 5
-round 1 regular markers 6 conflicted 3 repaired 4
+round 0 regular markers 9 conflicted 4 repaired 5
+round 1 regular markers 6 conflicted 3 repaired 5
 round 2 regular markers 5 conflicted 3 repaired 4
 round 3 guides markers 4 conflicted 3 repaired 5
 round 4 guides markers 4 conflicted 3 repaired 5
@@ -70,7 +70,7 @@ net n3 21
   via M1M2 ( 2100 4500 )
   via M1M2 ( 3100 4500 )
   via M1M2 ( 900 5500 )
-net out 14
+net out 16
   via M2M3 ( 3500 3000 )
   via M2M3 ( 3700 3400 )
   via M2M3 ( 3700 5400 )
@@ -79,9 +79,11 @@ net out 14
   wire M2 ( 3500 3000 ) ( 3500 3100 ) (None, None)
   wire M2 ( 3700 3400 ) ( 3700 5400 ) (None, None)
   wire M3 ( 3500 3000 ) ( 3700 3000 ) (None, None)
+  wire M3 ( 5700 4600 ) ( 5900 4600 ) (None, None)
   wire M3 ( 3700 5400 ) ( 4500 5400 ) (None, None)
-  wire M3 ( 5500 5400 ) ( 5900 5400 ) (None, None)
+  wire M3 ( 5500 5400 ) ( 5700 5400 ) (None, None)
   wire M2 ( 4500 5400 ) ( 5500 5400 ) (None, None)
   wire M3 ( 3700 3000 ) ( 3700 3400 ) (None, None)
-  wire M3 ( 5900 3000 ) ( 5900 5400 ) (Some(Dbu(0)), None)
+  wire M3 ( 5700 4600 ) ( 5700 5400 ) (None, None)
+  wire M3 ( 5900 3000 ) ( 5900 4600 ) (Some(Dbu(0)), None)
   via M1M2 ( 3500 3100 )

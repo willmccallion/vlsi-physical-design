@@ -1,7 +1,7 @@
 //! Pin access on the shared fixture design.
 
 use super::{macro_edge, tiny};
-use crate::access::ways::Way;
+use crate::access::Way;
 use crate::access::{AccessPoint, Node, Ways, access_points};
 use crate::detailed::DetailedRouter;
 use crate::shared_access::SharedAccess;

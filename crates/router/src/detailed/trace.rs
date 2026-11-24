@@ -136,7 +136,7 @@ pub(super) fn route_text(db: &NetlistDB, tech: &RouteTech, edges: &[Edge]) -> St
 /// An explanation as its total and its parts, and whose wiring it meets.
 pub(super) fn cost_text(db: &NetlistDB, e: &Explanation) -> String {
     let mut out = format!(
-        "{:.0} = length {:.0} + {} vias {:.0} + conflicts {:.0} + markers {:.0} + obstacles {:.0} + own vias {:.0} + wrong way {:.0}",
+        "{:.0} = length {:.0} + {} vias {:.0} + conflicts {:.0} + markers {:.0} + obstacles {:.0} + own vias {:.0} + wrong way {:.0} + blocked {:.0}",
         e.total(),
         e.length,
         e.vias,
@@ -145,7 +145,8 @@ pub(super) fn cost_text(db: &NetlistDB, e: &Explanation) -> String {
         e.marker,
         e.obstacle,
         e.own_vias,
-        e.wrong_way
+        e.wrong_way,
+        e.blocked
     );
     if !e.met.is_empty() {
         let names: Vec<String> = e.met.iter().map(|&o| owner_text(db, o)).collect();

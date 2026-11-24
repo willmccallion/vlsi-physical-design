@@ -7,15 +7,18 @@
 //! round's marker cost per unit of length if it runs where a violation was
 //! marked lately. Obstacles, and other nets' pins and reserved pin access,
 //! never move, so they cost so much that a route through one exists only
-//! when nothing else does. A guide limits the search to gcells near a net's
-//! global route.
+//! when nothing else does. An edge the [`EdgeRules`] block around pins and
+//! obstructions costs `TritonRoute`'s block cost on top. A guide limits the
+//! search to gcells near a net's global route.
 // NOTE: TritonRoute adds one per turn (FlexGridGraph::getNextPathCost) and
 // prices off-guide edges in getCosts; PARE has no turn cost and makes the
 // guide a hard bound, widened only when it holds no route.
 
 mod dense;
+mod edge_rules;
 mod marks;
 
+pub(crate) use edge_rules::EdgeRules;
 pub(crate) use marks::Marks;
 
 use crate::access::{AccessPoint, Node};
@@ -29,7 +32,7 @@ use crate::tech::{CrossIdx, TrackIdx};
 use crate::wiring::Edge;
 use pare_common::convert::SaturatingFrom;
 use pare_common::db::design::NetlistDB;
-use pare_common::db::indices::{CutLayerId, LayerId, NonDefaultRuleId, ViaId};
+use pare_common::db::indices::{CutLayerId, LayerId, NetId, NonDefaultRuleId, ViaId};
 use pare_common::db::library::LayerRef;
 use pare_common::db::shapes::wire_rect;
 use pare_common::geom::dbu::Dbu;
@@ -48,6 +51,14 @@ const OBSTACLE_COST: f64 = 1e9;
 /// Cost per unit of length of a jog against its layer's preferred
 /// direction, beyond its length: `TritonRoute`'s `GRIDCOST` default of 2.
 const GRID_COST: f64 = 2.0;
+
+/// Cost of a blocked edge per minimum width of its layer, a twentieth of
+/// it: `TritonRoute`'s `BLOCKCOST` default of 32.
+const BLOCK_COST: f64 = 32.0;
+
+/// Minimum widths of its layer a blocked edge costs `BLOCK_COST` per, as
+/// `FlexGridGraph::getCosts` charges `BLOCKCOST * minWidth * 20`.
+const BLOCK_COST_WIDTHS: f64 = 20.0;
 
 /// How hard one A* run tries.
 #[derive(Clone, Copy, Debug)]
@@ -120,11 +131,12 @@ struct Price {
     marker: f64,
     obstacle: f64,
     wrong_way: f64,
+    blocked: f64,
 }
 
 impl Price {
     fn total(self) -> f64 {
-        self.length + self.conflict + self.marker + self.obstacle + self.wrong_way
+        self.length + self.conflict + self.marker + self.obstacle + self.wrong_way + self.blocked
     }
 }
 
@@ -164,6 +176,9 @@ pub(crate) struct Explanation {
     /// What running against layers' preferred directions costs beyond its
     /// length.
     pub wrong_way: f64,
+    /// What taking edges the rules around pins and obstructions block
+    /// costs.
+    pub blocked: f64,
 }
 
 impl Explanation {
@@ -176,6 +191,7 @@ impl Explanation {
             + self.obstacle
             + self.own_vias
             + self.wrong_way
+            + self.blocked
     }
 }
 
@@ -425,6 +441,8 @@ pub(crate) struct Search<'a> {
     pub(crate) guide: Option<&'a Guide>,
     /// Vias the net already has, if new vias should keep clear of them.
     pub(crate) own_vias: Option<&'a OwnVias>,
+    /// Which edges around pins and obstructions are blocked.
+    pub(crate) rules: &'a EdgeRules,
     /// Nets the worker is routing again whose wiring in the shared
     /// occupancy therefore does not count; what they keep near the worker
     /// is in the overlay.
@@ -593,6 +611,14 @@ impl Search<'_> {
     }
 
     /// The width of the net's wires on `layer`.
+    /// The net the search routes; none for a search of no net's.
+    const fn net(&self) -> Option<NetId> {
+        match self.owner {
+            Owner::Net(n) => Some(n),
+            Owner::Obstacle => None,
+        }
+    }
+
     pub(crate) fn width(&self, layer: LayerId) -> Dbu {
         self.tech.wire_width(self.rule(), layer)
     }
@@ -724,6 +750,21 @@ impl Search<'_> {
             },
             obstacle: if meets.fixed { OBSTACLE_COST } else { 0.0 },
             wrong_way: 0.0,
+            blocked: 0.0,
+        }
+    }
+
+    /// What taking `edge`, leaving a node on `layer`, costs beyond its
+    /// price for being blocked to the net.
+    // NOTE: getCosts charges the minimum width of the layer a via is
+    // entered from, which differs by direction; PARE prices a via the same
+    // both ways, by its lower layer.
+    fn block_price(&self, edge: Edge, layer: LayerId) -> f64 {
+        if self.rules.blocked(self.tech, self.net(), edge) {
+            let min_width = self.db.library.routing_layers[layer].min_width();
+            BLOCK_COST * BLOCK_COST_WIDTHS * min_width.to_f64()
+        } else {
+            0.0
         }
     }
 
@@ -754,17 +795,7 @@ impl Search<'_> {
     // NOTE: FlexGridGraph::getMarkerCostAdj charges the node stepped into;
     // PARE also charges the step leaving a marked node.
     fn step_price(&self, lower: Node, parts: &mut impl CostParts) -> Price {
-        let upper = Node {
-            cross: lower.cross.next(),
-            ..lower
-        };
-        let (a, b) = (self.point(lower), self.point(upper));
-        let length = a.manhattan(b).to_f64();
-        let meets = wire_rect(a, b, self.width(lower.layer)).map_or_else(Meets::default, |r| {
-            self.metal_meets(lower.layer, &r, true, parts)
-        });
-        let marked = self.marks.planar(lower) || self.marks.planar(upper);
-        self.price(length, meets, marked)
+        self.planar_price(Edge::Wire(lower), parts)
     }
 
     /// Price of the jog from `lower` across to the same crossing of the
@@ -773,36 +804,53 @@ impl Search<'_> {
     /// running against the layer's preferred direction, as
     /// `FlexGridGraph::initEdges` marks a non-preferred edge.
     fn jog_price(&self, lower: Node, parts: &mut impl CostParts) -> Price {
-        let upper = Node {
-            track: lower.track.plus(1),
-            ..lower
-        };
-        let (a, b) = (self.point(lower), self.point(upper));
-        let length = a.manhattan(b).to_f64();
-        let meets = wire_rect(a, b, self.width(lower.layer)).map_or_else(Meets::default, |r| {
-            self.metal_meets(lower.layer, &r, true, parts)
-        });
-        let marked = self.marks.planar(lower) || self.marks.planar(upper);
+        let price = self.planar_price(Edge::Jog(lower), parts);
         Price {
-            wrong_way: GRID_COST * length,
+            wrong_way: GRID_COST * price.length,
+            ..price
+        }
+    }
+
+    /// Price of `edge`, a wire step or a jog, for its length, what its
+    /// metal meets, the marks at its ends and being blocked.
+    fn planar_price(&self, edge: Edge, parts: &mut impl CostParts) -> Price {
+        let (a, b) = edge.ends();
+        let length = self.point(a).manhattan(self.point(b)).to_f64();
+        let meets = self.planar_meets(edge, parts);
+        let marked = self.marks.planar(a) || self.marks.planar(b);
+        Price {
+            blocked: self.block_price(edge, a.layer),
             ..self.price(length, meets, marked)
         }
     }
 
-    /// Price of the via up from `lower`, apart from crowding the net's own
-    /// vias, telling `parts` whose metal and cuts it meets. A via is as long
-    /// as its cost.
-    fn via_price(&self, lower: Node, parts: &mut impl CostParts) -> Price {
+    /// What the metal of `edge`, a wire step or a jog, meets, telling
+    /// `parts` whose it is.
+    fn planar_meets(&self, edge: Edge, parts: &mut impl CostParts) -> Meets {
+        let (a, b) = edge.ends();
+        wire_rect(self.point(a), self.point(b), self.width(a.layer))
+            .map_or_else(Meets::default, |metal| {
+                self.metal_meets(a.layer, &metal, true, parts)
+            })
+    }
+
+    /// Price of the via up from `lower` to `upper`, apart from crowding the
+    /// net's own vias, telling `parts` whose metal and cuts it meets. A via
+    /// is as long as its cost.
+    fn via_price(&self, lower: Node, upper: Node, parts: &mut impl CostParts) -> Price {
         let at = self.point(lower);
         let via = self.tech.via_above(lower.layer);
-        let top = LayerId::new(lower.layer.index() + 1);
+        let top = upper.layer;
         let mut meets = self
             .metal_meets(lower.layer, &via.bottom.translate(at), false, parts)
             .and(self.metal_meets(top, &via.top.translate(at), false, parts));
         for c in &via.cuts {
             meets = meets.and(self.cut_meets(lower.layer.cut_above(), &c.translate(at), parts));
         }
-        self.price(self.costs.via, meets, self.marks.via(lower))
+        Price {
+            blocked: self.block_price(Edge::Via { lower, upper }, lower.layer),
+            ..self.price(self.costs.via, meets, self.marks.via(lower))
+        }
     }
 
     /// What routing `edges` costs this search, part by part: their length,
@@ -817,8 +865,8 @@ impl Search<'_> {
                     parts.length += price.length;
                     price
                 }
-                Edge::Via { lower, .. } => {
-                    let price = self.via_price(lower, &mut parts);
+                Edge::Via { lower, upper } => {
+                    let price = self.via_price(lower, upper, &mut parts);
                     parts.vias += 1;
                     parts.via_cost += price.length;
                     parts.own_vias += self.own_via_cost(lower.layer, self.point(lower));
@@ -835,6 +883,7 @@ impl Search<'_> {
             parts.conflict += price.conflict;
             parts.marker += price.marker;
             parts.obstacle += price.obstacle;
+            parts.blocked += price.blocked;
         }
         parts
     }
@@ -1188,11 +1237,11 @@ impl Search<'_> {
             track: track?,
             cross: c?,
         };
-        let lower = match climb {
-            Climb::Up => n,
-            Climb::Down => m,
+        let (lower, upper) = match climb {
+            Climb::Up => (n, m),
+            Climb::Down => (m, n),
         };
-        let step = costs.via(self, lower) + self.own_via_cost(lower.layer, here);
+        let step = costs.via(self, lower, upper) + self.own_via_cost(lower.layer, here);
         Some((Self::via_state(m, n.layer), step))
     }
 
@@ -1330,7 +1379,7 @@ trait StepCosts {
     /// The wire step from `lower` to the next crossing along its track.
     fn wire(&mut self, search: &Search<'_>, lower: Node) -> f64;
     /// The via from `lower` up to the layer above.
-    fn via(&mut self, search: &Search<'_>, lower: Node) -> f64;
+    fn via(&mut self, search: &Search<'_>, lower: Node, upper: Node) -> f64;
     /// The jog from `lower` across to the next track.
     fn jog(&mut self, search: &Search<'_>, lower: Node) -> f64;
 }
@@ -1343,8 +1392,8 @@ impl StepCosts for FreshCosts {
         search.step_price(lower, &mut Total).total()
     }
 
-    fn via(&mut self, search: &Search<'_>, lower: Node) -> f64 {
-        search.via_price(lower, &mut Total).total()
+    fn via(&mut self, search: &Search<'_>, lower: Node, upper: Node) -> f64 {
+        search.via_price(lower, upper, &mut Total).total()
     }
 
     fn jog(&mut self, search: &Search<'_>, lower: Node) -> f64 {
@@ -1405,6 +1454,7 @@ fn distance_to(r: &Rect<Dbu>, p: Point<Dbu>) -> Dbu {
 
 #[cfg(test)]
 mod tests {
+    use super::edge_rules::NO_RULES;
     use super::*;
     use crate::tech::RouteSetup;
     use crate::tech::{Cross, CrossIdx, LayerTech, TrackIdx};
@@ -1471,6 +1521,7 @@ mod tests {
             costs: COSTS,
             guide: None,
             own_vias: None,
+            rules: &NO_RULES,
             ripped: &[],
         };
         let m1 = LayerId(0);
@@ -1519,6 +1570,7 @@ mod tests {
             costs,
             guide: None,
             own_vias: None,
+            rules: &NO_RULES,
             ripped: &[],
         }
     }
@@ -1670,6 +1722,7 @@ mod tests {
             costs: COSTS,
             guide: None,
             own_vias: None,
+            rules: &NO_RULES,
             ripped: &[],
         };
         let lower = step(1, 1);
@@ -1698,6 +1751,7 @@ mod tests {
             costs: COSTS,
             guide: None,
             own_vias: None,
+            rules: &NO_RULES,
             ripped: &[],
         };
         let lower = step(1, 4);
@@ -1972,6 +2026,7 @@ mod tests {
             costs: COSTS,
             guide: None,
             own_vias: None,
+            rules: &NO_RULES,
             ripped: &[Owner::Net(NetId(1))],
         };
         let lower = step(1, 1);
@@ -2001,6 +2056,7 @@ mod tests {
             costs: COSTS,
             guide: None,
             own_vias: None,
+            rules: &NO_RULES,
             ripped: &[],
         };
         let (into, away) = (step(4, 1), step(4, 3));
@@ -2030,6 +2086,7 @@ mod tests {
             costs: COSTS,
             guide: None,
             own_vias: None,
+            rules: &NO_RULES,
             ripped: &[],
         };
         let edges = [Edge::Wire(step(1, 0)), Edge::Wire(step(1, 1))];
@@ -2037,7 +2094,7 @@ mod tests {
             .iter()
             .map(|e| match *e {
                 Edge::Wire(n) => FreshCosts.wire(&search, n),
-                Edge::Via { lower, .. } => FreshCosts.via(&search, lower),
+                Edge::Via { lower, upper } => FreshCosts.via(&search, lower, upper),
                 Edge::Jog(lower) => search.jog_price(lower, &mut Total).total(),
             })
             .sum();

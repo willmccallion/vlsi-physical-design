@@ -376,12 +376,12 @@ impl StepCosts for CachedCosts<'_> {
         self.wire[i]
     }
 
-    fn via(&mut self, search: &Search<'_>, lower: Node) -> f64 {
+    fn via(&mut self, search: &Search<'_>, lower: Node, upper: Node) -> f64 {
         let Some(i) = self.numbering.node_index(lower) else {
-            return super::FreshCosts.via(search, lower);
+            return super::FreshCosts.via(search, lower, upper);
         };
         if self.known(i) & 2 == 0 {
-            self.via[i] = super::FreshCosts.via(search, lower);
+            self.via[i] = super::FreshCosts.via(search, lower, upper);
             self.priced[i] |= 2;
         }
         self.via[i]
@@ -404,6 +404,7 @@ mod tests {
     use super::*;
 
     use crate::occupancy::{Occupancy, Owner};
+    use crate::search::edge_rules::NO_RULES;
     use crate::search::{Costs, Marks};
     use crate::tech::{RouteSetup, RouteTech};
     use pare_common::config::RoutingConfig;
@@ -434,6 +435,7 @@ mod tests {
             },
             guide: None,
             own_vias: None,
+            rules: &NO_RULES,
             ripped: &[],
         };
         Numbering::new(&search, &db.die_area)

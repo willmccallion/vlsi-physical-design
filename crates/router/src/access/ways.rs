@@ -54,6 +54,11 @@ impl Way {
         }
     }
 
+    /// Whether it stays on the node's layer.
+    pub(crate) const fn is_planar(self) -> bool {
+        !matches!(self, Self::Down | Self::Up)
+    }
+
     /// Whether it runs against its layer's preferred direction.
     const fn is_across(self) -> bool {
         matches!(self, Self::AcrossLower | Self::AcrossHigher)
@@ -98,6 +103,13 @@ impl Ways {
     #[must_use]
     pub const fn is_empty(self) -> bool {
         self.0 == 0
+    }
+
+    /// Whether a way along the track is among them: `hasHorzAccess` on a
+    /// horizontal layer, `hasVertAccess` on a vertical one.
+    #[must_use]
+    pub const fn has_along(self) -> bool {
+        self.contains(Way::AlongLower) || self.contains(Way::AlongHigher)
     }
 
     /// The bits a state file records them by.
