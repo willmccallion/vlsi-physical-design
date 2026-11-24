@@ -66,7 +66,7 @@ macro_rules! saturating_from_signed {
     };
 }
 
-saturating_from_unsigned!(u32 => u8, u16, i8, i16, i32);
+saturating_from_unsigned!(u32 => u8, u16, i8, i16, i32, usize, isize);
 saturating_from_unsigned!(u64 => u8, u16, u32, usize, i8, i16, i32, i64, isize);
 saturating_from_unsigned!(usize => u8, u16, u32, u64, i8, i16, i32, i64, isize);
 saturating_from_signed!(i32 => u8, u16, u32, u64, usize, i8, i16);
