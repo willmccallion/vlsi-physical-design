@@ -6,13 +6,6 @@
 //! crossings inside the corridors, repairing conflicts until no two nets
 //! touch or come closer than the layer spacing.
 
-#![deny(
-    clippy::cast_possible_truncation,
-    clippy::cast_sign_loss,
-    clippy::cast_possible_wrap,
-    clippy::cast_lossless
-)]
-
 mod access;
 mod bucket;
 mod detailed;

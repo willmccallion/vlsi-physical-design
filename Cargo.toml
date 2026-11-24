@@ -51,13 +51,10 @@ must_use_candidate = "allow"
 similar_names = "allow"
 inline_always = "allow"
 
-# Cast allows: coordinate arithmetic and grid index calculations require
-# intentional conversions between i32/u32/f64/usize throughout the codebase.
+# Integer-to-float conversions in geometry, density and timing maths lose
+# precision far below a database unit; every other numeric conversion goes
+# through pare_common::convert or TryFrom.
 cast_precision_loss = "allow"
-cast_possible_truncation = "allow"
-cast_sign_loss = "allow"
-cast_possible_wrap = "allow"
-cast_lossless = "allow"
 
 # These fire on reasonable code patterns in this codebase
 missing_errors_doc = "allow"
