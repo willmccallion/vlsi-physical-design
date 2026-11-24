@@ -1,5 +1,6 @@
 //! Integer database units (DBU), the exact coordinate type of a design.
 
+use crate::convert::SaturatingFrom;
 use crate::geom::point::Point;
 use std::fmt;
 use std::ops::{Div, Mul, Rem};
@@ -158,7 +159,10 @@ fn snap_scaled(scaled: f64) -> (i64, bool) {
     // NOTE: lefin's dbdist and dbarea lround as this does, silently; PARE's
     // readers warn of the values they round.
     let rounded = scaled.round();
-    (rounded as i64, (scaled - rounded).abs() > ON_GRID_NOISE)
+    (
+        i64::saturating_from(rounded),
+        (scaled - rounded).abs() > ON_GRID_NOISE,
+    )
 }
 
 /// The number of database units per micron of a design.

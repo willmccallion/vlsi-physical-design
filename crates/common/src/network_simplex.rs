@@ -36,6 +36,9 @@ pub enum FlowProblem {
     /// The cost falls without bound.
     #[error("the cost falls without bound")]
     Unbounded,
+    /// More nodes than LEMON's `int` spanning tree counts can hold.
+    #[error("too many nodes for the simplex's 32-bit counts")]
+    TooLarge,
 }
 
 /// A run that ended without an optimal flow: why, and the flow on each arc
@@ -209,7 +212,8 @@ impl Simplex {
         let root = self.root;
         self.thread[root] = 0;
         self.rev_thread[0] = root;
-        self.succ_num[root] = (self.node_num + 1) as i32;
+        self.succ_num[root] =
+            i32::try_from(self.node_num + 1).map_err(|_| FlowProblem::TooLarge)?;
         self.last_succ[root] = root - 1;
         self.supply[root] = sum_supply.wrapping_neg();
         self.pi[root] = 0;
@@ -264,7 +268,9 @@ impl Simplex {
     /// Pivots with the block search rule until no arc can enter, as
     /// `NetworkSimplex::start` does; fails when the cost has no bound.
     fn pivot_until_optimal(&mut self) -> Result<(), FlowProblem> {
-        let block = ((self.search_arc_num as f64).sqrt() as usize).max(10);
+        // NOTE: LEMON takes int(sqrt(double(n))); the integer square root
+        // is the same for every count below 2^52.
+        let block = self.search_arc_num.isqrt().max(10);
         let mut next_arc = 0;
         while let Some(next) = self.find_entering_arc(block, next_arc) {
             next_arc = next;
@@ -649,7 +655,7 @@ mod tests {
         (0..n)
             .map(|i| {
                 (0..n)
-                    .map(|j| (i == j || next(3) > 0).then(|| next(1000) as i32))
+                    .map(|j| (i == j || next(3) > 0).then(|| i32::try_from(next(1000)).unwrap()))
                     .collect()
             })
             .collect()
@@ -672,7 +678,8 @@ mod tests {
                 }
             }
         }
-        let flows = min_cost_flow(2 * n + 2, &arcs, supply, demand, n as i32).unwrap();
+        let flows =
+            min_cost_flow(2 * n + 2, &arcs, supply, demand, i32::try_from(n).unwrap()).unwrap();
         let used: Vec<i32> = assignment
             .iter()
             .filter(|&&(a, _)| flows[a] == 1)
@@ -724,10 +731,16 @@ mod tests {
                 }
             }
             for asked in [n, n + 1] {
-                let flows = min_cost_flow(2 * n + 2, &arcs, supply, demand, asked as i32)
-                    .unwrap_or_else(|e| e.flows);
+                let flows = min_cost_flow(
+                    2 * n + 2,
+                    &arcs,
+                    supply,
+                    demand,
+                    i32::try_from(asked).unwrap(),
+                )
+                .unwrap_or_else(|e| e.flows);
                 for f in flows {
-                    digest = (digest ^ u64::from(f as u32)).wrapping_mul(0x0100_0000_01b3);
+                    digest = (digest ^ u64::from(f.cast_unsigned())).wrapping_mul(0x0100_0000_01b3);
                 }
             }
         }
