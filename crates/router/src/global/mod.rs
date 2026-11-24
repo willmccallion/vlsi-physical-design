@@ -47,6 +47,7 @@ use batches::{
 pub use gcells::Gcells;
 pub use grid::{CapacityReduction, GlobalGrid, rudy_wire_width};
 pub use negotiate::{reroute, route_global};
+use pare_common::convert::SaturatingFrom;
 use pare_common::db::design::NetlistDB;
 use pare_common::db::indices::{LayerId, NetId};
 use pare_common::db::library::Direction;
@@ -272,7 +273,7 @@ pub fn track_demand(db: &NetlistDB, tech: &RouteTech, net: NetId) -> Vec<Tracks>
             };
             let span = (ndr.width + ndr.spacing.unwrap_or(lt.spacing)).get();
             let tracks = (span + pitch - 1) / pitch;
-            Tracks::whole(index_u32(tracks.max(1) as usize))
+            Tracks::whole(index_u32(usize::saturating_from(tracks.max(1))))
         })
         .collect()
 }
@@ -572,7 +573,12 @@ mod tests {
     /// meets the area of the ones before it.
     fn crowded_nets() -> Vec<GlobalNet> {
         (0..6)
-            .map(|k| numbered(k, vec![cell(0, 3 + k as u16 % 3), cell(9, 4)]))
+            .map(|k| {
+                numbered(
+                    k,
+                    vec![cell(0, 3 + u16::try_from(k % 3).unwrap()), cell(9, 4)],
+                )
+            })
             .collect()
     }
 

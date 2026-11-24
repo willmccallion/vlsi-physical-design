@@ -6,6 +6,7 @@ use super::{CONGESTION_SLOPE, GCell, GlobalCosts, GlobalNet, NetTree, PlacedTree
 use crate::occupancy::{FixedMetal, TrackRef};
 use crate::tech::{NetKind, RouteTech};
 use pare_common::config::{CapacityReserve, Share};
+use pare_common::convert::SaturatingFrom;
 use pare_common::db::indices::{IdVec, LayerId};
 use pare_common::db::library::Direction;
 use pare_common::geom::dbu::Dbu;
@@ -154,7 +155,7 @@ impl GlobalGrid {
         // stretches the last; PARE covers the die by ceil, every gcell equal.
         let span = |extent: Dbu| {
             let cells = extent.div_ceil(gcell);
-            grid_index(cells as usize).max(1)
+            grid_index(usize::saturating_from(cells)).max(1)
         };
         let (nx, ny) = (span(die.width()), span(die.height()));
         let layers: Vec<LayerId> = tech.routable_layers().collect();
@@ -219,7 +220,7 @@ impl GlobalGrid {
             Direction::Vertical => (self.origin.y, die.max.y, self.origin.x, ny),
         };
         let extent = |i: usize| {
-            let start = along_origin + self.gcell * i as i64;
+            let start = along_origin + self.gcell * i64::saturating_from(i);
             let end = (start + self.gcell).min(along_end).max(start);
             Interval::new(start, end)
         };
@@ -243,7 +244,7 @@ impl GlobalGrid {
                     room[index] = true;
                 }
                 if i + 1 < along_cells {
-                    let boundary = along_origin + self.gcell * (i as i64 + 1);
+                    let boundary = along_origin + self.gcell * (i64::saturating_from(i) + 1);
                     let stretch = Interval::new(centre(i), centre(i + 1));
                     cap[index] += usable_fraction(fixed, track, boundary, stretch);
                 }
@@ -416,7 +417,7 @@ impl GlobalGrid {
     pub fn cell_at(&self, layer: LayerId, p: Point<Dbu>) -> GCell {
         let coord = |v: Dbu, o: Dbu, n: u16| {
             let c = (v - o).div_floor(self.gcell).clamp(0, i64::from(n) - 1);
-            grid_index(c as usize)
+            grid_index(usize::saturating_from(c))
         };
         GCell {
             layer,
@@ -696,7 +697,7 @@ pub fn rudy_wire_width(pitches: &[Dbu]) -> Dbu {
         .map(|p| 1.0 / p.to_f64())
         .sum();
     if inverse > 0.0 {
-        Dbu::new((1.25 / inverse).trunc() as i64)
+        Dbu::new(i64::saturating_from((1.25 / inverse).trunc()))
     } else {
         RUDY_DEFAULT_WIRE_WIDTH
     }

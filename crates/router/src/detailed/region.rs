@@ -19,6 +19,7 @@ use crate::global::Gcells;
 use crate::occupancy::{LocalOccupancy, Owner};
 use crate::search::{Costs, Marks, OwnVias, Search, WindowCache};
 use crate::wiring::{DisjointSets, Edge, NetRoute, Patch, Wiring, path_edges, tidy_patches};
+use pare_common::convert::SaturatingFrom;
 use pare_common::db::indices::{CutLayerId, NetId};
 use pare_common::geom::dbu::Dbu;
 use pare_common::geom::point::Point;
@@ -60,7 +61,7 @@ impl RegionGrid {
     /// The grid of one pass: aligned with the gcells, shifted by a third of
     /// a region per `pass`.
     pub(super) fn of_pass(router: &DetailedRouter<'_>, pass: usize) -> Self {
-        let shift = (REGION_GCELLS * (pass as i64 % 3) / 3).length(router.gcell);
+        let shift = (REGION_GCELLS * i64::saturating_from(pass % 3) / 3).length(router.gcell);
         Self {
             origin: router.grid_origin - Point::new(shift, shift),
             size: REGION_GCELLS.length(router.gcell),

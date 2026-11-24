@@ -8,6 +8,7 @@
 //! nets with tens of thousands of pins fast.
 
 use crate::bucket::{Bucket, SpatialHash, buckets_between};
+use pare_common::convert::SaturatingFrom;
 use pare_common::geom::dbu::Dbu;
 use pare_common::geom::point::Point;
 use pare_common::geom::rect::Rect;
@@ -107,7 +108,7 @@ pub(crate) fn hilbert_order(points: &[Point<Dbu>]) -> Vec<usize> {
     let scale = |v: Dbu, lo: Dbu| {
         let s = (v - lo).get() * HILBERT_SIDE / span.get();
         debug_assert!((0..=HILBERT_SIDE).contains(&s), "{s} off the Hilbert curve");
-        s as u32
+        u32::saturating_from(s)
     };
     let mut order: Vec<usize> = (0..points.len()).collect();
     order.sort_by_key(|&i| {
@@ -134,7 +135,7 @@ fn curve_order(points: &[Point<Dbu>]) -> (usize, Vec<Join>) {
     let span = span(points);
     let order = hilbert_order(points);
 
-    let cells_per_side = (points.len() as f64).sqrt().ceil().max(1.0) as i64;
+    let cells_per_side = i64::saturating_from((points.len() as f64).sqrt().ceil().max(1.0));
     let bucket = (span / cells_per_side).max(Dbu::new(1));
     let mut buckets: SpatialHash<usize> = SpatialHash::new(Point::new(min_x, min_y), bucket);
 

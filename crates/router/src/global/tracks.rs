@@ -1,6 +1,8 @@
 //! Fractional tracks of a gcell edge, in fixed point so that adding and
 //! removing the same demand always cancels exactly.
 
+use pare_common::convert::SaturatingFrom;
+
 /// A number of tracks, possibly fractional.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct Tracks(i64);
@@ -21,7 +23,7 @@ impl Tracks {
 
     /// The nearest representable count to `tracks`.
     pub(crate) fn from_f64(tracks: f64) -> Self {
-        Self((tracks * Self::SCALE as f64).round() as i64)
+        Self(i64::saturating_from((tracks * Self::SCALE as f64).round()))
     }
 
     /// The count as a float.

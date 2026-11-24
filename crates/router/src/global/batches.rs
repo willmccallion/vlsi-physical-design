@@ -5,6 +5,7 @@ use super::maze::{OutgrowsArea, route_tree, route_tree_within};
 use super::pattern::route_pattern;
 use super::{GCell, GlobalCosts, GlobalGrid, GlobalNet, GlobalRoutes, NetTree, PlacedTree};
 use crate::tech::{NetKind, index_u32};
+use pare_common::convert::SaturatingFrom;
 use rayon::prelude::*;
 use std::sync::OnceLock;
 use std::sync::atomic::{AtomicU32, Ordering};
@@ -205,7 +206,7 @@ impl Schedule<'_> {
 /// grid would span more.
 pub(crate) fn grid_index(v: usize) -> u16 {
     debug_assert!(u16::try_from(v).is_ok(), "grid coordinate {v} past 16 bits");
-    v as u16
+    u16::saturating_from(v)
 }
 
 /// Seconds one rip-up round spends in each of its steps.

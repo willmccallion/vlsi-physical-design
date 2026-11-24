@@ -27,6 +27,7 @@ use crate::occupancy::{
 use crate::tech::RouteTech;
 use crate::tech::{CrossIdx, TrackIdx};
 use crate::wiring::Edge;
+use pare_common::convert::SaturatingFrom;
 use pare_common::db::design::NetlistDB;
 use pare_common::db::indices::{CutLayerId, LayerId, NonDefaultRuleId, ViaId};
 use pare_common::db::library::LayerRef;
@@ -228,7 +229,7 @@ impl Guide {
         let min_layer = tech.min_layer.index();
         let layers = tech.max_layer.index() - min_layer + 1;
         let (width, height) = (x1 - x0 + Gcells(1), y1 - y0 + Gcells(1));
-        let total = (width.get() * height.get()) as usize * layers;
+        let total = usize::saturating_from(width.get() * height.get()) * layers;
         let mut guide = Self {
             origin,
             gcell,
@@ -284,7 +285,10 @@ impl Guide {
             return None;
         }
         let (lx, ly) = (lx.get(), ly.get());
-        usize::try_from((layer as i64 * self.height.get() + ly) * self.width.get() + lx).ok()
+        usize::try_from(
+            (i64::saturating_from(layer) * self.height.get() + ly) * self.width.get() + lx,
+        )
+        .ok()
     }
 
     pub(crate) fn contains(&self, layer: LayerId, p: Point<Dbu>) -> bool {

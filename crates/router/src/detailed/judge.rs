@@ -11,6 +11,7 @@
 use super::{DetailedRouter, Marker};
 use crate::runs::EdgeSet;
 use crate::wiring::{NetRoute, Wiring, gap_fills, tidy_patches};
+use pare_common::convert::SaturatingFrom;
 use pare_common::db::design::{NetlistDB, RouteElem};
 use pare_common::db::indices::{IdVec, LayerId, NetId};
 use pare_common::db::library::LayerRef;
@@ -43,7 +44,7 @@ impl ShapeTiles {
     /// Buckets every shape of `layout` by the `cell`-sized tiles over `die`;
     /// `cell` is positive.
     pub(super) fn new(layout: &Layout, die: &Rect<Dbu>, cell: Dbu) -> Self {
-        let count = |span: Dbu| (span.div_trunc(cell) + 1) as usize;
+        let count = |span: Dbu| usize::saturating_from(span.div_trunc(cell) + 1);
         let (nx, ny) = (count(die.width()), count(die.height()));
         let mut tiles = Self {
             origin: die.min,
@@ -79,7 +80,7 @@ impl ShapeTiles {
     fn span(&self, rect: &Rect<Dbu>) -> (usize, usize, usize, usize) {
         let index = |v: Dbu, origin: Dbu, count: usize| {
             let at = (v - origin).div_floor(self.cell);
-            at.clamp(0, count as i64 - 1) as usize
+            usize::saturating_from(at.clamp(0, i64::saturating_from(count) - 1))
         };
         (
             index(rect.min.x, self.origin.x, self.nx),

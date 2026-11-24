@@ -6,6 +6,7 @@
 //! counter is.
 
 use crate::access::Node;
+use pare_common::convert::SaturatingFrom;
 use rustc_hash::FxHashMap;
 
 /// What one violation adds to the counter of each place it marks, as
@@ -49,7 +50,7 @@ impl Marks {
     pub(crate) fn decay(&mut self, factor: f64) {
         for counts in [&mut self.planar, &mut self.vias] {
             counts.retain(|_, count| {
-                *count = (f64::from(*count) * factor) as u8;
+                *count = u8::saturating_from(f64::from(*count) * factor);
                 *count > 0
             });
         }
