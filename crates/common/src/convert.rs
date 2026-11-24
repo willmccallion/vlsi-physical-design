@@ -73,6 +73,27 @@ saturating_from_signed!(i32 => u8, u16, u32, u64, usize, i8, i16);
 saturating_from_signed!(i64 => u8, u16, u32, u64, usize, i8, i16, i32, isize);
 saturating_from_signed!(isize => u8, u16, u32, u64, usize, i8, i16, i32);
 
+/// An integer narrowed to `Self` by keeping its low bits, as C++'s
+/// conversion to a narrower unsigned type does.
+pub trait WrappingFrom<F> {
+    /// The low bits of `value` that `Self` holds.
+    fn wrapping_from(value: F) -> Self;
+}
+
+impl WrappingFrom<u32> for u8 {
+    fn wrapping_from(value: u32) -> Self {
+        let [low, ..] = value.to_le_bytes();
+        low
+    }
+}
+
+impl WrappingFrom<i64> for u8 {
+    fn wrapping_from(value: i64) -> Self {
+        let [low, ..] = value.to_le_bytes();
+        low
+    }
+}
+
 impl NearestFrom<f64> for f32 {
     // The one place a double is narrowed: `as` rounds to the nearest float.
     #[allow(clippy::cast_possible_truncation)]
@@ -102,6 +123,18 @@ mod tests {
                 u32::saturating_from(5e9_f32)
             ],
             [0, u32::MAX]
+        );
+    }
+
+    #[test]
+    fn an_integer_narrows_to_its_low_bits() {
+        assert_eq!(
+            [u8::wrapping_from(200_u32), u8::wrapping_from(300_u32)],
+            [200, 44]
+        );
+        assert_eq!(
+            [u8::wrapping_from(300_i64), u8::wrapping_from(-1_i64)],
+            [44, 255]
         );
     }
 
