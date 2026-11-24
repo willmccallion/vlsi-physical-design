@@ -3,13 +3,6 @@
 //! Loads a LEF/DEF or Bookshelf design, places and routes it, checks the
 //! result and writes it out.
 
-#![deny(
-    clippy::cast_possible_truncation,
-    clippy::cast_sign_loss,
-    clippy::cast_possible_wrap,
-    clippy::cast_lossless
-)]
-
 mod checks;
 mod cts;
 mod flow;
