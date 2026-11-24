@@ -2,6 +2,7 @@
 
 use super::{Accounting, opposite};
 use crate::fuzzy;
+use pare_common::convert::SaturatingFrom;
 use pare_common::db::sdc::{ClockEdge, Sdc};
 use pare_common::units::Seconds;
 
@@ -27,7 +28,7 @@ pub(super) fn cycle_accounting(sdc: &Sdc, launch: ClockEdge, target: ClockEdge) 
     let tgt_max_cycle: i64 = if tgt_period > src_period {
         SLOWER_TARGET_CYCLES
     } else {
-        ((src_period / tgt_period).ceil() as i64).max(FASTER_TARGET_MIN_CYCLES)
+        i64::saturating_from((src_period / tgt_period).ceil()).max(FASTER_TARGET_MIN_CYCLES)
     };
     let mut tgt_cycle = first_cycle(tgt_edge_time, tgt_period);
     while tgt_cycle <= tgt_max_cycle {

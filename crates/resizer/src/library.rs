@@ -431,7 +431,7 @@ impl Link<'_> {
     #[must_use]
     pub fn infer_clock_buffers(&self, db: &NetlistDB) -> Vec<BufferCell> {
         let candidates: Vec<BufferCell> = (0..self.liberty.cells.len())
-            .map(|i| LibCellId(i as u32))
+            .map(LibCellId::new)
             .filter(|&id| {
                 self.liberty.cell(id).is_buffer()
                     && self.is_link_cell(id)

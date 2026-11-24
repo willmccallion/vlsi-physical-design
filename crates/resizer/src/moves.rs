@@ -10,6 +10,7 @@ use crate::library::is_logic_std_cell;
 use crate::rebuffer::{Rebuffer, can_remove_buffer};
 use crate::resizer::{PortSlews, RepairError, Resizer, buffer_delays, gate_delays};
 use crate::sta::{Path, Sta};
+use pare_common::convert::SaturatingFrom;
 use pare_common::db::design::PinOwner;
 use pare_common::db::indices::{CellId, NetId, PinId};
 use pare_common::db::liberty::{
@@ -693,7 +694,7 @@ fn clone_location(resizer: &Resizer<'_, Sta>, driver: PinId, taken: &[SpareLoad]
     for load in taken {
         sum += netlist.pin_location(load.pin);
     }
-    let count = 1 + taken.len() as i64;
+    let count = 1 + i64::saturating_from(taken.len());
     Point::new(sum.x / count, sum.y / count)
 }
 

@@ -9,6 +9,7 @@ use crate::moves::{MoveKind, Moves};
 use crate::resizer::{RepairError, Resizer, Trial, area_change_percent};
 use crate::sta::{Path, Sta, Via};
 use pare_common::config::Share;
+use pare_common::convert::SaturatingFrom;
 use pare_common::db::design::PinOwner;
 use pare_common::db::indices::PinId;
 use pare_common::db::liberty::{Edge, MinMax, TimingArcSet};
@@ -460,7 +461,8 @@ impl Repair<'_, '_> {
         self.min_violation = -violating[violating.len() - 1].1;
         self.max_violation = -violating[0].1;
         let max_end_repairs =
-            ((violating.len() as f64 * self.options.repair_tns_share.get()) as usize).max(1);
+            usize::saturating_from(violating.len() as f64 * self.options.repair_tns_share.get())
+                .max(1);
         let mut phase = Phase::new(
             self.options.sequence.clone(),
             self.options.max_passes,
@@ -746,7 +748,7 @@ fn intrinsic_delay(set: &TimingArcSet, from: Edge, to: Edge) -> Seconds {
 // least violation, take the count to zero or below, so the pass makes no
 // move; PARE makes at least one.
 fn scaled_repairs(max_repairs: usize, share: f64) -> usize {
-    1 + ((max_repairs - 1) as f64 * share).round().max(0.0) as usize
+    1 + usize::saturating_from(((max_repairs - 1) as f64 * share).round().max(0.0))
 }
 
 #[cfg(test)]

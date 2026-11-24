@@ -3,6 +3,7 @@
 //! what repair adds.
 
 use crate::library::Link;
+use pare_common::convert::SaturatingFrom;
 use pare_common::db::design::{NetlistDB, PinOwner};
 use pare_common::db::indices::{CellId, IdVec, IoPinId, NetId, PinId};
 use pare_common::db::liberty::{
@@ -172,7 +173,7 @@ impl<'a> Netlist<'a> {
         if matches!(self.db.pins[pin].owner, PinOwner::Io(_)) {
             return shapes[0].rect.center();
         }
-        let n = shapes.len() as i64;
+        let n = i64::saturating_from(shapes.len());
         let (sx, sy) = shapes.iter().fold((Dbu::ZERO, Dbu::ZERO), |(sx, sy), s| {
             (
                 sx + s.rect.min.x + s.rect.max.x,
