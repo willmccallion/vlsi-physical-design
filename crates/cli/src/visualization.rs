@@ -5,6 +5,7 @@ use imageproc::drawing::{
     Blend, draw_filled_rect_mut, draw_hollow_rect_mut, draw_line_segment_mut,
 };
 use imageproc::rect::Rect as ImageRect;
+use pare_common::convert::{NearestFrom, SaturatingFrom};
 use pare_common::db::design::{NetlistDB, RouteElem};
 use pare_common::db::indices::{CellId, IdVec, LayerId};
 use pare_common::geom::dbu::Dbu;
@@ -30,7 +31,7 @@ impl Fit {
     fn new(area: &Rect<Dbu>, size: u32) -> Self {
         let longer = area.width().max(area.height()).to_f64().max(1.0);
         let scale = f64::from(size) / longer;
-        let pixels = |length: Dbu| ((length.to_f64() * scale).ceil() as u32).max(1);
+        let pixels = |length: Dbu| u32::saturating_from((length.to_f64() * scale).ceil()).max(1);
         Self {
             scale,
             width: pixels(area.width()),
@@ -71,7 +72,11 @@ impl PixelMap {
         let bottom_left = self.map(b.min);
         let w = (b.width().to_f64() * self.scale).max(min_px);
         let h = (b.height().to_f64() * self.scale).max(min_px);
-        ImageRect::at(bottom_left.x as i32, (bottom_left.y - h) as i32).of_size(w as u32, h as u32)
+        ImageRect::at(
+            i32::saturating_from(bottom_left.x),
+            i32::saturating_from(bottom_left.y - h),
+        )
+        .of_size(u32::saturating_from(w), u32::saturating_from(h))
     }
 }
 
@@ -155,46 +160,56 @@ fn paint_routed(db: &NetlistDB, map: &PixelMap, img: &mut RgbaImage) {
         let color = routed_color(layer);
         draw_line_segment_mut(
             img,
-            (a.x as f32, a.y as f32),
-            (b.x as f32, b.y as f32),
+            (f32::nearest_from(a.x), f32::nearest_from(a.y)),
+            (f32::nearest_from(b.x), f32::nearest_from(b.y)),
             color,
         );
         if layer.index() >= 2 {
             draw_line_segment_mut(
                 img,
-                ((a.x + 0.5) as f32, (a.y + 0.5) as f32),
-                ((b.x + 0.5) as f32, (b.y + 0.5) as f32),
+                (f32::nearest_from(a.x + 0.5), f32::nearest_from(a.y + 0.5)),
+                (f32::nearest_from(b.x + 0.5), f32::nearest_from(b.y + 0.5)),
                 color,
             );
         }
     }
 
-    for net in &db.nets {
-        for e in &net.routing {
-            match *e {
-                RouteElem::Via { at, .. } => {
-                    let at = map.map(at);
-                    let rect = ImageRect::at(at.x as i32 - 1, at.y as i32 - 1).of_size(3, 3);
-                    draw_filled_rect_mut(img, rect, Rgba([255, 255, 255, 200]));
-                }
-                RouteElem::Patch { layer, rect } => {
-                    let (a, b) = (map.map(rect.min), map.map(rect.max));
-                    let (w, h) = ((b.x - a.x).abs().max(1.0), (b.y - a.y).abs().max(1.0));
-                    let area = ImageRect::at(a.x.min(b.x) as i32, a.y.min(b.y) as i32)
-                        .of_size(w as u32, h as u32);
-                    draw_filled_rect_mut(img, area, routed_color(layer));
-                }
-                RouteElem::Wire { .. } => {}
-            }
-        }
-    }
+    paint_vias_and_patches(db, map, img);
 
     let pin_color = Rgba([255, 255, 255, 255]);
     for pin in db.pins.ids() {
-        let at = map.map(db.pin_position(pin));
-        let rect = ImageRect::at(at.x as i32, at.y as i32).of_size(2, 2);
-        draw_filled_rect_mut(img, rect, pin_color);
+        let (x, y) = pixel_at(map.map(db.pin_position(pin)));
+        draw_filled_rect_mut(img, ImageRect::at(x, y).of_size(2, 2), pin_color);
     }
+}
+
+/// Paints every via as a small square and every patch as its rectangle.
+fn paint_vias_and_patches(db: &NetlistDB, map: &PixelMap, img: &mut RgbaImage) {
+    for e in db.nets.iter().flat_map(|n| n.routing.iter()) {
+        match *e {
+            RouteElem::Via { at, .. } => {
+                let (x, y) = pixel_at(map.map(at));
+                let rect = ImageRect::at(x - 1, y - 1).of_size(3, 3);
+                draw_filled_rect_mut(img, rect, Rgba([255, 255, 255, 200]));
+            }
+            RouteElem::Patch { layer, rect } => {
+                let (corner, opposite) = (map.map(rect.min), map.map(rect.max));
+                let width = (opposite.x - corner.x).abs().max(1.0);
+                let height = (opposite.y - corner.y).abs().max(1.0);
+                let top_left = Point::new(corner.x.min(opposite.x), corner.y.min(opposite.y));
+                let (left, top) = pixel_at(top_left);
+                let area = ImageRect::at(left, top)
+                    .of_size(u32::saturating_from(width), u32::saturating_from(height));
+                draw_filled_rect_mut(img, area, routed_color(layer));
+            }
+            RouteElem::Wire { .. } => {}
+        }
+    }
+}
+
+/// The whole pixel a point in pixels falls in, truncated toward zero.
+fn pixel_at(p: Point<f64>) -> (i32, i32) {
+    (i32::saturating_from(p.x), i32::saturating_from(p.y))
 }
 
 /// The opacity of routed metal in the routed design's image.
@@ -300,8 +315,10 @@ impl AreaPixels {
         let y0 = (area.max.y - clipped.max.y).to_f64() * scale;
         let y1 = (area.max.y - clipped.min.y).to_f64() * scale;
         Some(
-            ImageRect::at(x0 as i32, y0 as i32)
-                .of_size(((x1 - x0) as u32).max(1), ((y1 - y0) as u32).max(1)),
+            ImageRect::at(i32::saturating_from(x0), i32::saturating_from(y0)).of_size(
+                u32::saturating_from(x1 - x0).max(1),
+                u32::saturating_from(y1 - y0).max(1),
+            ),
         )
     }
 }
@@ -348,7 +365,7 @@ fn paint_area_metal(
             continue;
         }
         let color = if s.is_fixed() {
-            let grey = 70 + (l.index() * 12).min(80) as u8;
+            let grey = 70 + u8::saturating_from((l.index() * 12).min(80));
             Rgba([grey, grey, grey, alpha])
         } else {
             let [r, g, b] = LAYER_COLORS[l.index() % LAYER_COLORS.len()];
