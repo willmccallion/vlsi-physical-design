@@ -1,6 +1,7 @@
 //! Capacitance in the single precision `TritonCTS` sums loads in, so that
 //! balancing a tree's loads rounds as it does.
 
+use pare_common::convert::NearestFrom;
 use pare_common::units::Farads;
 
 /// A capacitance in farads, held in single precision.
@@ -17,8 +18,8 @@ impl Farads32 {
 
     /// `farads` rounded to single precision.
     #[must_use]
-    pub(crate) const fn of(farads: Farads) -> Self {
-        Self(farads.get() as f32)
+    pub(crate) fn of(farads: Farads) -> Self {
+        Self(f32::nearest_from(farads.get()))
     }
 
     /// The capacitance in farads.

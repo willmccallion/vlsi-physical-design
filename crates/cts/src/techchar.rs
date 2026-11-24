@@ -10,6 +10,7 @@
 
 use crate::CtsError;
 use crate::capacitance::Farads32;
+use pare_common::convert::{NearestFrom, SaturatingFrom, WrappingFrom};
 use pare_common::db::design::NetlistDB;
 use pare_common::db::liberty::{
     AxisVariable, BufferCell, Edge, LibCell, LibPortId, Liberty, Thresholds,
@@ -404,7 +405,7 @@ struct Bounds {
 /// `TechChar::characterizationPostProcess` normalizes it, widening
 /// `bounds` to take it in.
 fn normalize(bounds: &mut Option<Bounds>, value: f32, step: f32) -> u32 {
-    let normalized = ((value / step).ceil() as u32).max(1);
+    let normalized = u32::saturating_from((value / step).ceil()).max(1);
     *bounds = Some(bounds.map_or(
         Bounds {
             min: normalized,
@@ -562,7 +563,7 @@ impl TechChar {
                 let found: Vec<usize> = self.segments_with(length, load, output_slew).to_vec();
                 for index in found {
                     let mut fake = self.segments[index].clone();
-                    fake.length = fake_length.get() as u8;
+                    fake.length = u8::wrapping_from(fake_length.get());
                     self.push(fake);
                 }
             }
@@ -613,8 +614,8 @@ impl TechChar {
     }
 }
 
-const fn key(length: LengthSteps, load: CapSteps, output_slew: SlewSteps) -> u32 {
-    length.get() as u32
+fn key(length: LengthSteps, load: CapSteps, output_slew: SlewSteps) -> u32 {
+    u32::saturating_from(length.get())
         | (load.get() << NUM_BITS_PER_FIELD)
         | (output_slew.get() << (2 * NUM_BITS_PER_FIELD))
 }
@@ -629,7 +630,7 @@ fn plan(setup: &CharSetup<'_>) -> Result<Plan, CtsError> {
         axes,
     } = pick_char_buffer(setup)?;
     let height = buffer_height(setup, char_buffer)?;
-    let char_unit = (height * 10) as u32;
+    let char_unit = u32::saturating_from(height * 10);
     let cell = liberty.cell(char_buffer.id);
     let (max_slew, max_cap) = char_limits(liberty, cell, char_buffer)?;
     let sink = setup.sink_buffer;
@@ -647,7 +648,7 @@ fn plan(setup: &CharSetup<'_>) -> Result<Plan, CtsError> {
     Ok(Plan {
         char_buffer: char_index,
         char_unit,
-        length_unit: (height * 10 / 2) as u32,
+        length_unit: u32::saturating_from(height * 10 / 2),
         wirelengths: wire_lengths(char_unit),
         max_slew,
         slew_step,
@@ -707,11 +708,11 @@ fn pick_char_buffer(setup: &CharSetup<'_>) -> Result<CharBuffer, CtsError> {
 
 /// A buffer's output load limit, from the cell or the library's default.
 fn max_capacitance(liberty: &Liberty, cell: &LibCell, buffer: BufferCell) -> Result<f32, CtsError> {
-    Ok(cell.ports[buffer.output]
+    let limit = cell.ports[buffer.output]
         .max_capacitance
         .or_else(|| liberty.cell_defaults(cell).max_capacitance)
-        .ok_or_else(|| CtsError::NoMaxCapacitance(cell.name.clone()))?
-        .get() as f32)
+        .ok_or_else(|| CtsError::NoMaxCapacitance(cell.name.clone()))?;
+    Ok(f32::nearest_from(limit.get()))
 }
 
 /// The characterization buffer's slew and load limits.
@@ -720,12 +721,14 @@ fn char_limits(
     cell: &LibCell,
     buffer: BufferCell,
 ) -> Result<(f32, f32), CtsError> {
-    let max_slew = cell.ports[buffer.output]
-        .max_transition
-        .or(cell.ports[buffer.input].max_transition)
-        .or_else(|| liberty.cell_defaults(cell).max_transition)
-        .ok_or_else(|| CtsError::NoMaxSlew(cell.name.clone()))?
-        .get() as f32;
+    let max_slew = f32::nearest_from(
+        cell.ports[buffer.output]
+            .max_transition
+            .or(cell.ports[buffer.input].max_transition)
+            .or_else(|| liberty.cell_defaults(cell).max_transition)
+            .ok_or_else(|| CtsError::NoMaxSlew(cell.name.clone()))?
+            .get(),
+    );
     Ok((max_slew, max_capacitance(liberty, cell, buffer)?))
 }
 
@@ -805,10 +808,10 @@ fn collect_table_axes(
         for axis in table.axes.iter().take(2) {
             match axis.variable {
                 AxisVariable::InputTransition => {
-                    slews.extend(axis.values.iter().map(|&v| v as f32));
+                    slews.extend(axis.values.iter().map(|&v| f32::nearest_from(v)));
                 }
                 AxisVariable::OutputCapacitance => {
-                    loads.extend(axis.values.iter().map(|&v| v as f32));
+                    loads.extend(axis.values.iter().map(|&v| f32::nearest_from(v)));
                 }
                 _ => {}
             }
@@ -902,7 +905,7 @@ fn patterns(wirelength: u32, unit: u32) -> Vec<Pattern> {
 /// along the chain, until there have been as many as there are such
 /// assignments.
 fn buffer_configs(masters: usize, nodes: usize, start: usize) -> Vec<Vec<usize>> {
-    let total = masters.pow(nodes as u32);
+    let total = masters.pow(u32::saturating_from(nodes));
     let digits = |mut number: usize| -> Vec<usize> {
         (0..nodes)
             .map(|_| {
@@ -914,7 +917,9 @@ fn buffer_configs(masters: usize, nodes: usize, start: usize) -> Vec<Vec<usize>>
     };
     let monotonic = |config: &[usize]| config.windows(2).all(|w| w[1] >= w[0]);
     let count = (0..total).filter(|&n| monotonic(&digits(n))).count();
-    let mut number: usize = (0..nodes).map(|i| start * masters.pow(i as u32)).sum();
+    let mut number: usize = (0..nodes)
+        .map(|i| start * masters.pow(u32::saturating_from(i)))
+        .sum();
     let mut configs = vec![digits(number)];
     while configs.len() < count {
         loop {
@@ -990,9 +995,9 @@ impl Chain<'_> {
         let length = f64::from(self.pattern.nets[net] * self.unit);
         let cap = length * self.wire.cap.get();
         let res = length * self.wire.res.get();
-        let c2 = (cap / 2.0) as f32;
-        let rpi = res as f32;
-        let c1 = (cap / 2.0) as f32;
+        let c2 = f32::nearest_from(cap / 2.0);
+        let rpi = f32::nearest_from(res);
+        let c1 = f32::nearest_from(cap / 2.0);
         if net + 1 == self.pattern.nets.len() {
             WirePi {
                 c2,
@@ -1005,7 +1010,7 @@ impl Chain<'_> {
                 c2,
                 rpi,
                 c1,
-                elmore: (res * cap) as f32,
+                elmore: f32::nearest_from(res * cap),
             }
         }
     }
@@ -1019,8 +1024,8 @@ impl Chain<'_> {
         let t = self.thresholds;
         let with_wires = edge == Edge::Rise;
         let mut arrival = if with_wires {
-            let vth = f64::from(t.input.get(edge) as f32);
-            (-f64::from(self.wire_pi(0, load).elmore) * (1.0 - vth).ln()) as f32
+            let vth = f64::from(f32::nearest_from(t.input.get(edge)));
+            f32::nearest_from(-f64::from(self.wire_pi(0, load).elmore) * (1.0 - vth).ln())
         } else {
             0.0
         };
@@ -1040,10 +1045,12 @@ impl Chain<'_> {
             } else {
                 let pin_cap = self.config.get(i + 1).map_or(0.0, |&next| {
                     let next = self.masters[next];
-                    self.liberty.cell(next.id).ports[next.input]
-                        .capacitance
-                        .get(edge)
-                        .get() as f32
+                    f32::nearest_from(
+                        self.liberty.cell(next.id).ports[next.input]
+                            .capacitance
+                            .get(edge)
+                            .get(),
+                    )
                 });
                 let model = PiModel {
                     c2: Farads::ZERO,
@@ -1058,8 +1065,10 @@ impl Chain<'_> {
                     let gate = dmp::gate_delay(arc, t, Seconds::new(f64::from(slew)), model);
                     let (wire_delay, load_slew) =
                         elmore.map_or((Seconds::ZERO, gate.slew), |e| gate.load_delay_slew(e));
-                    let at = arrival + gate.delay.get() as f32 + wire_delay.get() as f32;
-                    let s = load_slew.get() as f32;
+                    let at = arrival
+                        + f32::nearest_from(gate.delay.get())
+                        + f32::nearest_from(wire_delay.get());
+                    let s = f32::nearest_from(load_slew.get());
                     worst = Some(worst.map_or((at, s), |(a, w)| (a.max(at), w.max(s))));
                 }
             }
@@ -1081,17 +1090,21 @@ impl Chain<'_> {
         topology: &[Piece],
     ) -> Result<Measured, CtsError> {
         let in_cap = if self.pattern.is_pure_wire() {
-            (f64::from(load) + f64::from(wirelength) * self.wire.cap.get()) as f32
+            f32::nearest_from(f64::from(load) + f64::from(wirelength) * self.wire.cap.get())
         } else {
             let first_length = match topology.first() {
-                Some(Piece::Wire(length)) => *length as f32,
+                Some(Piece::Wire(length)) => f32::nearest_from(*length),
                 _ => 0.0,
             };
             let first = self.masters[self.config[0]];
-            let first_pin_cap = self.liberty.cell(first.id).ports[first.input]
-                .capacitance()
-                .get() as f32;
-            (f64::from(first_pin_cap) + f64::from(first_length) * self.wire.cap.get()) as f32
+            let first_pin_cap = f32::nearest_from(
+                self.liberty.cell(first.id).ports[first.input]
+                    .capacitance()
+                    .get(),
+            );
+            f32::nearest_from(
+                f64::from(first_pin_cap) + f64::from(first_length) * self.wire.cap.get(),
+            )
         };
         let total_cap = (in_cap / plan.cap_step).round() * plan.cap_step;
         let (fall_arrival, fall_slew) = self.propagate(Edge::Fall, load, in_slew)?;
@@ -1217,7 +1230,7 @@ fn compile(
     // The top of the load range bounds every input capacitance from above.
     let actual_min_input_cap = lines
         .iter()
-        .map(|line| line.total_cap as u32)
+        .map(|line| u32::saturating_from(line.total_cap))
         .fold(bounds.cap.max, u32::min);
     let min_segment_length = bounds.wirelength.min * ratio;
     let max_segment_length = bounds.wirelength.max * ratio;
@@ -1259,15 +1272,15 @@ fn segment_from(line: &Normalized, ratio: u32, masters: &[BufferCell]) -> WireSe
     if line.pure_wire && pin_slew <= line.in_slew {
         pin_slew += 1.0;
     }
-    let length = line.wirelength as u32 * ratio;
-    let scale = |share: f64| (share * f64::from(length)).round() as i32;
+    let length = u32::saturating_from(line.wirelength) * ratio;
+    let scale = |share: f64| i32::saturating_from((share * f64::from(length)).round());
     let mut segment = WireSegment {
-        length: length as u8,
-        load: line.load as u32 as u8,
-        output_slew: pin_slew as u32 as u8,
-        delay: line.pin_arrival as u32,
-        input_cap: line.total_cap as u32 as u8,
-        input_slew: line.in_slew as u32 as u8,
+        length: u8::wrapping_from(length),
+        load: u8::wrapping_from(u32::saturating_from(line.load)),
+        output_slew: u8::wrapping_from(u32::saturating_from(pin_slew)),
+        delay: u32::saturating_from(line.pin_arrival),
+        input_cap: u8::wrapping_from(u32::saturating_from(line.total_cap)),
+        input_slew: u8::wrapping_from(u32::saturating_from(line.in_slew)),
         buffer_locations: Vec::new(),
         buffer_masters: Vec::new(),
         wl_to_first_buffer: 0,

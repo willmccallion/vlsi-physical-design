@@ -1,6 +1,7 @@
 //! What clock tree synthesis is asked to do, and the settings `TritonCTS`
 //! fixes or derives before building the trees.
 
+use pare_common::convert::NearestFrom;
 use pare_common::geom::dbu::Dbu;
 
 /// Which levels of each clock tree get the clock's non-default rule of
@@ -106,7 +107,7 @@ impl Microns {
     /// the largest diameter.
     #[must_use]
     pub(crate) fn in_tree_units(self, dbu: i32, unit: f64) -> f32 {
-        (self.0 * f64::from(dbu) / unit) as f32
+        f32::nearest_from(self.0 * f64::from(dbu) / unit)
     }
 
     /// The length in a tree's length unit as [`Microns::in_tree_units`]
@@ -114,7 +115,7 @@ impl Microns {
     /// `HTreeBuilder::preSinkClustering` scales the diameters it tries.
     #[must_use]
     pub(crate) fn in_tree_units_single(self, dbu: f32, unit: f32) -> f32 {
-        self.0 as f32 * dbu / unit
+        f32::nearest_from(self.0) * dbu / unit
     }
 }
 

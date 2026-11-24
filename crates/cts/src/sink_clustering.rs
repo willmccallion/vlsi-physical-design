@@ -10,6 +10,7 @@
 use crate::capacitance::Farads32;
 use crate::htree::TreePoint;
 use crate::techchar::SegmentLength;
+use pare_common::convert::{NearestFrom, SaturatingFrom};
 use pare_common::units::FaradsPerDbu;
 
 /// How much load a leaf buffer may drive, as a multiple of its own input
@@ -129,8 +130,9 @@ impl SinkClustering {
             (false, true) => self.x_span,
             (false, false) => self.x_span.min(self.y_span),
         };
-        self.max_internal_diameter = (f64::from(max_diameter) / self.span) as f32;
-        self.cap_per_unit = (self.cap_per_dbu.get() * f64::from(scale_factor) * self.span) as f32;
+        self.max_internal_diameter = f32::nearest_from(f64::from(max_diameter) / self.span);
+        self.cap_per_unit =
+            f32::nearest_from(self.cap_per_dbu.get() * f64::from(scale_factor) * self.span);
     }
 
     fn limit_exceeded(&self, size: usize, cost: f64, cap_cost: f64, size_limit: usize) -> bool {
@@ -232,8 +234,8 @@ fn theta(x: f64, y: f64) -> f64 {
     if is_one(x) && is_one(y) {
         return 0.5;
     }
-    let qx = ((2.0 * x) as u32).min(1);
-    let qy = ((2.0 * y) as u32).min(1);
+    let qx = u32::saturating_from(2.0 * x).min(1);
+    let qy = u32::saturating_from(2.0 * y).min(1);
     let quad = match (qx, qy) {
         (0, 0) => 0,
         (0, 1) => 1,

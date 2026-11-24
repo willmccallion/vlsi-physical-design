@@ -13,6 +13,7 @@ use crate::triton::{
     ClockTrees, first_output, is_sink, liberty_insertion_delay, net_cell_pins, pin_direction,
     sink_bbox_center,
 };
+use pare_common::convert::{NearestFrom, SaturatingFrom};
 use pare_common::db::design::{NetlistDB, PinOwner, PlacementStatus};
 use pare_common::db::indices::{NetId, PinId};
 use pare_common::db::liberty::{
@@ -142,8 +143,8 @@ impl Balancer<'_> {
     fn sink_arrival(&self, db: &NetlistDB, pin: PinId) -> Option<f32> {
         // NOTE: getVertexClkArrival warns and takes 0 for a pin with no
         // clock path; PARE leaves such a sink out of the balance.
-        let arrival = (self.arrival)(pin)?.get() as f32;
-        Some(arrival + liberty_insertion_delay(self.link, db, pin).get() as f32)
+        let arrival = f32::nearest_from((self.arrival)(pin)?.get());
+        Some(arrival + f32::nearest_from(liberty_insertion_delay(self.link, db, pin).get()))
     }
 
     /// The mean arrival at a tree's sinks that have one, as
@@ -284,13 +285,13 @@ impl Balancer<'_> {
             return Ok(());
         };
         let gap = f64::from(self.worse_delay) - arrival;
-        let first = (gap / f64::from(self.buffer_delay)) as i32;
+        let first = i32::saturating_from(gap / f64::from(self.buffer_delay));
         let sink = db.average_pin_position(input);
         let dx = (sink.x - src.x).get() as f32 / (first + 1) as f32;
         let dy = (sink.y - src.y).get() as f32 / (first + 1) as f32;
         let wire = Farads::new(f64::from(dx.abs() + dy.abs()) * self.trees.cap_per_dbu.get());
         let delay = self.root_buffer_delay(wire)?;
-        self.nodes[node].buffers = Some((gap / f64::from(delay)) as i32);
+        self.nodes[node].buffers = Some(i32::saturating_from(gap / f64::from(delay)));
         Ok(())
     }
 
@@ -421,8 +422,9 @@ fn rising_delay(liberty: &Liberty, buffer: BufferCell, extra: Farads) -> Option<
             let mut in_slew = 0.0_f32;
             let mut d = 0.0_f32;
             for _ in 0..3 {
-                d = delay.lookup(Seconds::new(f64::from(in_slew)), load).get() as f32;
-                in_slew = slew.lookup(Seconds::new(f64::from(in_slew)), load).get() as f32;
+                d = f32::nearest_from(delay.lookup(Seconds::new(f64::from(in_slew)), load).get());
+                in_slew =
+                    f32::nearest_from(slew.lookup(Seconds::new(f64::from(in_slew)), load).get());
             }
             latest = Some(latest.map_or(d, |l| l.max(d)));
         }

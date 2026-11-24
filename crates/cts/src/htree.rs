@@ -24,6 +24,7 @@ use crate::sink_clustering::SinkClustering;
 use crate::techchar::{
     CapSteps, LengthSteps, LengthUnit, SegmentLength, SlewSteps, TechChar, WireSegment,
 };
+use pare_common::convert::{NearestFrom, SaturatingFrom};
 use pare_common::db::liberty::BufferCell;
 use pare_common::geom::dbu::Dbu;
 use pare_common::geom::point::Point;
@@ -68,7 +69,7 @@ impl TreePoint {
     /// The point in database units, `unit` of them to the tree's length
     /// unit, truncated to `int` as `TritonCTS` stores positions.
     pub(crate) fn to_dbu(self, unit: f64) -> Point<Dbu> {
-        let truncate = |v: f64| Dbu::new(i64::from((v * unit) as i32));
+        let truncate = |v: f64| Dbu::new(i64::from(i32::saturating_from(v * unit)));
         Point::new(truncate(self.x), truncate(self.y))
     }
 
@@ -96,8 +97,8 @@ impl TreePoint {
     }
 
     /// The point rounded to the single precision sinks are kept in.
-    const fn to_sink_point(self) -> SinkPoint {
-        SinkPoint::new(self.x as f32, self.y as f32)
+    fn to_sink_point(self) -> SinkPoint {
+        SinkPoint::new(f32::nearest_from(self.x), f32::nearest_from(self.y))
     }
 }
 
@@ -404,8 +405,8 @@ impl Builder {
         if self.is_occupied(p) {
             return false;
         }
-        let x = (p.x * self.unit()) as i32;
-        let y = (p.y * self.unit()) as i32;
+        let x = i32::saturating_from(p.x * self.unit());
+        let y = i32::saturating_from(p.y * self.unit());
         let core = ctx.core;
         let inside = core.min.x.get() <= i64::from(x)
             && i64::from(x) <= core.max.x.get()
@@ -545,8 +546,8 @@ impl Builder {
         } else {
             self.clock.sinks.len()
         };
-        let roots = 2_f64.powi(level as i32) as u32;
-        (total as f64 / f64::from(roots)).ceil() as u32
+        let roots = u32::saturating_from(2_f64.powi(i32::saturating_from(level)));
+        u32::saturating_from((total as f64 / f64::from(roots)).ceil())
     }
 
     /// Clusters the sinks and finds the region the tree spans, as
@@ -691,7 +692,7 @@ impl Builder {
         } else {
             (false, false)
         };
-        let unit_i = self.unit.dbu() as i32;
+        let unit_i = i32::saturating_from(self.unit.dbu());
         let dbu = ctx.dbu as f32;
         match (size_set, diameter_set) {
             (true, true) => matching.run(size as usize, max_diameter, unit_i),
@@ -789,7 +790,7 @@ impl Builder {
         let min_length = self.min_length_sink_region;
         let clamped = min_length.max(LengthSteps::new(1)).get() as f64;
         LengthSteps::new(i64::from(
-            (((side / clamped).round() * min_length.get() as f64 / 2.0) as u32).max(1),
+            u32::saturating_from((side / clamped).round() * min_length.get() as f64 / 2.0).max(1),
         ))
     }
 
@@ -936,7 +937,7 @@ impl Builder {
             for idx in 0..self.topologies[level_idx].points.len() {
                 let point = self.topologies[level_idx].points[idx];
                 let parent = self.parent_point(level_idx, idx, new_top);
-                let direction = if self.is_horizontal(level_idx as u32 + 1) {
+                let direction = if self.is_horizontal(u32::saturating_from(level_idx) + 1) {
                     if point.x - parent.x > 0.0 {
                         Direction::East
                     } else {
@@ -1245,7 +1246,7 @@ impl Builder {
         let legal = self.legalize_one_buffer(ctx, point, ctx.root_buffer);
         self.commit_move(point, legal);
         if level_idx > 0 && self.clock.subnets[driving].level.is_none() {
-            self.clock.subnets[driving].level = Some(level_idx as u32);
+            self.clock.subnets[driving].level = Some(u32::saturating_from(level_idx));
         }
         let wires = self.topologies[level_idx].wire_segments.clone();
         let mut segment = SegmentBuilder {
@@ -1335,7 +1336,7 @@ fn refine_with_clustering(
     } else {
         CLUSTERING_CAPACITY
     };
-    let cap = (sinks.len() as f64 * share) as usize;
+    let cap = usize::saturating_from(sinks.len() as f64 * share);
     engine.run(cap, KMEANS_ROUNDS, CLUSTERING_POWER, &mut means);
     topology.points[a] = TreePoint::from_f32(means[0]);
     topology.points[b] = TreePoint::from_f32(means[1]);
