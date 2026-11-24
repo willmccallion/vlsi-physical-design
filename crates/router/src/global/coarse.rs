@@ -745,7 +745,8 @@ thread_local! {
 
 #[cfg(test)]
 mod tests {
-    use super::super::{GlobalGrid, Tracks, Usage};
+    use super::super::grid::Usage;
+    use super::super::{GlobalGrid, Tracks};
     use super::*;
     use pare_common::config::CapacityReserve;
     use pare_common::db::indices::NetId;
