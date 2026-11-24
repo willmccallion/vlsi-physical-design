@@ -7,6 +7,7 @@ use super::{
     NetTree, PlacedTree, Reroute, RoundTimes, disjoint_levels, route_disjoint, route_initial, span,
     touched_coarse_cells,
 };
+use pare_common::convert::NearestFrom;
 use pare_common::db::indices::NetId;
 use pare_common::geom::point::Point;
 use rayon::prelude::*;
@@ -112,7 +113,7 @@ pub(super) fn negotiate(
 fn accrue_history(grid: &mut GlobalGrid) {
     for e in 0..grid.usage.len() {
         let over = grid.usage.get(e).saturating_sub(grid.capacity[e]);
-        grid.history[e] += over.to_f64() as f32;
+        grid.history[e] += f32::nearest_from(over.to_f64());
     }
 }
 

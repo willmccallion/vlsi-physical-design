@@ -21,6 +21,7 @@
 use crate::bucket::{Bucket, SpatialHash, buckets_between};
 use crate::tech::TrackIdx;
 use crate::tech::{CutTech, LayerTech, RouteTech};
+use pare_common::convert::SaturatingFrom;
 use pare_common::db::indices::{CutLayerId, IdVec, LayerId, NetId, NonDefaultRuleId};
 use pare_common::db::library::LayerRef;
 use pare_common::db::rules::SpacingTable;
@@ -58,7 +59,7 @@ struct Dbu32(i32);
 impl Dbu32 {
     fn of(d: Dbu) -> Self {
         debug_assert!(i32::try_from(d.get()).is_ok(), "{d:?} past 32 bits");
-        Self(d.get() as i32)
+        Self(i32::saturating_from(d.get()))
     }
 
     fn pair(span: Interval) -> (Self, Self) {

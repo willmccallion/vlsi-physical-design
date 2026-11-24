@@ -10,6 +10,7 @@ use crate::RouteError;
 use crate::access::Node;
 use crate::global::Gcells;
 use pare_common::config::RoutingConfig;
+use pare_common::convert::SaturatingFrom;
 use pare_common::db::design::{NetlistDB, NonDefaultRule, PinOwner};
 use pare_common::db::indices::{
     CutLayerId, IdVec, LayerId, MacroId, MacroPinId, NetId, NonDefaultRuleId, TableIndex, ViaId,
@@ -434,7 +435,7 @@ fn reach_from_origin(die: &Rect<Dbu>) -> Dbu {
 /// [`MAX_GRID_NODES`].
 pub(crate) fn index_u32(i: usize) -> u32 {
     debug_assert!(u32::try_from(i).is_ok(), "router index {i} past 32 bits");
-    i as u32
+    u32::saturating_from(i)
 }
 
 /// The most gcells the global grid spans across, as its 16-bit coordinates
@@ -457,7 +458,7 @@ fn check_grid_span(die: &Rect<Dbu>, gcell: Dbu, layers: usize) -> Result<(), Rou
     if cells > MAX_GRID_SPAN {
         return Err(RouteError::GridTooLarge(cells));
     }
-    let nodes = nx.get() * ny.get() * layers as i64;
+    let nodes = nx.get() * ny.get() * i64::saturating_from(layers);
     if nodes >= MAX_GRID_NODES {
         return Err(RouteError::GridTooManyNodes(nodes));
     }
