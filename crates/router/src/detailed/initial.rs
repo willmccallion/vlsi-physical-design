@@ -118,12 +118,12 @@ impl DetailedRouter<'_> {
         let (plans, mut whole) = self.plan_nets(nets, &grid);
         self.commit_skeletons(&plans, &grid);
         let mut regions: BTreeMap<RegionKey, Vec<Piece>> = BTreeMap::new();
-        let mut finished: Vec<(NetId, Vec<AccessPoint>)> = Vec::with_capacity(plans.len());
+        let mut finished: Vec<NetId> = Vec::with_capacity(plans.len());
         for plan in plans {
             for (key, piece) in plan.pieces {
                 regions.entry(key).or_default().push(piece);
             }
-            finished.push((plan.net, plan.access));
+            finished.push(plan.net);
         }
         let mut stats = RepairStats {
             regions: regions.len(),
@@ -161,13 +161,16 @@ impl DetailedRouter<'_> {
     }
 
     /// Commits each planned net's skeleton: the wires that bridge the
-    /// region boundaries its global route crosses.
+    /// region boundaries its global route crosses, and the access points
+    /// its pins are reached through, so that every region judges the
+    /// wiring it routes with their stubs and vias in place.
     fn commit_skeletons(&mut self, plans: &[Plan], grid: &RegionGrid) {
         let skeletons: Vec<(NetId, NetRoute)> = plans
             .par_iter()
             .map(|plan| {
                 let route = NetRoute {
                     edges: self.skeleton(plan.net, &plan.bridges, grid),
+                    access: plan.access.clone(),
                     ..NetRoute::default()
                 };
                 (plan.net, route)
@@ -198,24 +201,22 @@ impl DetailedRouter<'_> {
         failed
     }
 
-    /// Marks each routed net of `finished` complete with its access points;
-    /// one in `failed` loses its route and joins `whole`, to be routed
-    /// whole.
+    /// Marks each routed net of `finished` complete; one in `failed` loses
+    /// its route and joins `whole`, to be routed whole.
     fn finish_routed(
         &mut self,
-        finished: Vec<(NetId, Vec<AccessPoint>)>,
+        finished: Vec<NetId>,
         failed: &FxHashSet<NetId>,
         whole: &mut Vec<NetId>,
     ) {
         let mut last: Vec<(NetId, NetRoute)> = Vec::with_capacity(finished.len());
-        for (net, access) in finished {
+        for net in finished {
             if failed.contains(&net) {
                 last.push((net, NetRoute::default()));
                 whole.push(net);
                 continue;
             }
             let mut route = self.routes[net].clone();
-            route.access = access;
             route.complete = true;
             last.push((net, route));
         }
@@ -446,9 +447,14 @@ fn union(sets: &mut [usize], a: usize, b: usize) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::access::PinKind;
+    use crate::detailed::judge::Candidate;
     use crate::occupancy::{Origin, Owner};
     use crate::tech::RouteSetup;
     use crate::tech::RouteTech;
+    use crate::wiring::Wiring;
+    use pare_common::config::RoutingConfig;
+    use pare_common::db::design::NetlistDB;
     use pare_common::db::indices::LayerId;
 
     fn m2(x: u16, y: u16) -> GCell {
@@ -482,5 +488,61 @@ mod tests {
         assert!(free.is_some_and(|e| !clear.blocked_by_fixed(net, e)));
         assert!(blocked.is_some_and(|e| walled.blocked_by_fixed(net, e)));
         assert_eq!(blocked, free);
+    }
+
+    /// The macro edge fixture with its block moved right, so that no
+    /// crossing falls inside its pins: a stub from the crossing before each
+    /// pin reaches it.
+    fn macro_edge_reached_by_stubs() -> NetlistDB {
+        let mut db = crate::tests::macro_edge();
+        let ram = db.cell_id("ram").unwrap();
+        db.cells[ram].location.x = Dbu::new(11670);
+        db
+    }
+
+    #[test]
+    fn the_first_pass_judges_wiring_with_its_nets_access_stubs_in_place() {
+        let db = macro_edge_reached_by_stubs();
+        let config = RoutingConfig::default();
+        let tech = RouteTech::new(&db, &RouteSetup::from(&config)).unwrap();
+        let mut dr = DetailedRouter::new(&db, &tech, crate::gcell_size(&tech, &config));
+        let net = NetId::new(0);
+        let access: Vec<AccessPoint> = dr.access[net].iter().map(|c| c[0].clone()).collect();
+        let block_pins = db.nets[net]
+            .pins
+            .iter()
+            .zip(&access)
+            .filter(|&(&pin, _)| PinKind::of(&db, pin) == PinKind::Block);
+        let to_pins = Wiring {
+            edges: block_pins
+                .flat_map(|(_, a)| {
+                    (1..=2).map(|back| {
+                        Edge::Wire(Node {
+                            cross: CrossIdx::new(a.node.cross.index() - back),
+                            ..a.node
+                        })
+                    })
+                })
+                .collect(),
+            patches: Vec::new(),
+        };
+        let plan = Plan {
+            net,
+            access,
+            bridges: Vec::new(),
+            pieces: Vec::new(),
+        };
+        let grid = RegionGrid::of_pass(&dr, 0);
+
+        dr.commit_skeletons(&[plan], &grid);
+        let candidate = Candidate {
+            net,
+            without: &Wiring::default(),
+            with: &to_pins,
+        };
+        let judgment = dr.judge(&db.die_area, &[candidate]);
+
+        assert!(!to_pins.edges.is_empty());
+        assert_eq!(judgment.findings.violations, []);
     }
 }

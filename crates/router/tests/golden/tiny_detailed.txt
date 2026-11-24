@@ -1,16 +1,16 @@
-round 0 regular markers 7 conflicted 5 repaired 5
+round 0 regular markers 8 conflicted 5 repaired 5
 round 1 regular markers 6 conflicted 3 repaired 5
 round 2 regular markers 5 conflicted 3 repaired 4
-round 3 guides markers 5 conflicted 3 repaired 5
-round 4 stubborn markers 5 conflicted 3 repaired 3
-round 5 skip markers 5 conflicted 3 repaired 0
-round 6 skip markers 5 conflicted 3 repaired 0
-round 7 skip markers 5 conflicted 3 repaired 0
-round 8 skip markers 5 conflicted 3 repaired 0
-round 9 skip markers 5 conflicted 3 repaired 0
+round 3 guides markers 4 conflicted 3 repaired 5
+round 4 guides markers 4 conflicted 3 repaired 5
+round 5 stubborn markers 4 conflicted 3 repaired 3
+round 6 skip markers 4 conflicted 3 repaired 0
+round 7 skip markers 4 conflicted 3 repaired 0
+round 8 skip markers 4 conflicted 3 repaired 0
+round 9 skip markers 4 conflicted 3 repaired 0
 round 10 guides markers 4 conflicted 3 repaired 5
-round 11 guides markers 4 conflicted 3 repaired 5
-round 12 stubborn markers 4 conflicted 3 repaired 3
+round 11 stubborn markers 4 conflicted 3 repaired 3
+round 12 skip markers 4 conflicted 3 repaired 0
 net in 8
   via M2M3 ( 700 5800 )
   via M2M3 ( 1100 5800 )
@@ -54,21 +54,21 @@ net n3 24
   via M2M3 ( 2100 4600 )
   via M2M3 ( 2500 4600 )
   via M2M3 ( 3100 4600 )
+  via M2M3 ( 3300 3800 )
   via M2M3 ( 4500 5000 )
   wire M2 ( 900 4600 ) ( 900 5500 ) (None, None)
   wire M2 ( 2100 4500 ) ( 2100 4600 ) (None, None)
   wire M2 ( 2500 1400 ) ( 2500 4600 ) (None, None)
-  wire M2 ( 3100 3800 ) ( 3100 4600 ) (None, None)
+  wire M2 ( 3100 4500 ) ( 3100 4600 ) (None, None)
   wire M2 ( 3300 3500 ) ( 3300 3800 ) (None, None)
   wire M2 ( 5700 4600 ) ( 5700 5000 ) (None, None)
   wire M2 ( 5900 3800 ) ( 5900 4600 ) (None, None)
   wire M3 ( 900 4600 ) ( 3300 4600 ) (None, None)
   wire M3 ( 3300 5000 ) ( 4500 5000 ) (None, None)
-  wire M2 ( 3100 3800 ) ( 3300 3800 ) (None, None)
   wire M2 ( 4900 3800 ) ( 5900 3800 ) (Some(Dbu(0)), None)
   wire M2 ( 5700 4600 ) ( 5900 4600 ) (None, None)
   wire M2 ( 4500 5000 ) ( 5700 5000 ) (None, None)
-  wire M3 ( 3300 4600 ) ( 3300 5000 ) (None, None)
+  wire M3 ( 3300 3800 ) ( 3300 5000 ) (None, None)
   via M1M2 ( 2500 1400 )
   via M1M2 ( 3300 3500 )
   via M1M2 ( 2100 4500 )
