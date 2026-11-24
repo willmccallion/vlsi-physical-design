@@ -112,6 +112,12 @@ impl Ways {
         self.contains(Way::AlongLower) || self.contains(Way::AlongHigher)
     }
 
+    /// Whether a way across the tracks is among them.
+    #[must_use]
+    pub const fn has_across(self) -> bool {
+        self.contains(Way::AcrossLower) || self.contains(Way::AcrossHigher)
+    }
+
     /// The bits a state file records them by.
     #[must_use]
     pub const fn bits(self) -> u8 {

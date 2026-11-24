@@ -19,6 +19,7 @@ mod edge_rules;
 mod marks;
 
 pub(crate) use edge_rules::EdgeRules;
+use edge_rules::Relief;
 pub(crate) use marks::Marks;
 
 use crate::access::{AccessPoint, Node};
@@ -121,6 +122,15 @@ impl Meets {
     const fn any(self) -> bool {
         self.fixed || self.wiring
     }
+}
+
+/// Whether a shape's conflicts with fixed metal count.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum FixedMetal {
+    /// They count.
+    Counts,
+    /// They do not, beside the routed net's own block pin.
+    Relieved,
 }
 
 /// The cost of one edge of the graph, part by part.
@@ -701,12 +711,25 @@ impl Search<'_> {
         alongside: bool,
         parts: &mut impl CostParts,
     ) -> Meets {
+        self.meets_counting(layer, rect, alongside, FixedMetal::Counts, parts)
+    }
+
+    /// [`Self::metal_meets`], with fixed metal counting or not as `fixed`
+    /// says.
+    fn meets_counting(
+        &self,
+        layer: LayerId,
+        rect: &Rect<Dbu>,
+        alongside: bool,
+        fixed: FixedMetal,
+        parts: &mut impl CostParts,
+    ) -> Meets {
         let mut meets = Meets::default();
         for c in self
             .occupancy
             .rect_conflicts(self.tech, layer, rect, self.owner)
         {
-            let met = match c.proximity {
+            let mut met = match c.proximity {
                 Proximity::Within => self.occupant(c.occupant.owner, c.occupant.origin),
                 Proximity::Alongside if alongside => Meets {
                     fixed: false,
@@ -714,6 +737,7 @@ impl Search<'_> {
                 },
                 Proximity::Alongside => Meets::default(),
             };
+            met.fixed &= fixed == FixedMetal::Counts;
             if met.any() {
                 parts.meets(c.occupant.owner);
             }
@@ -825,13 +849,38 @@ impl Search<'_> {
     }
 
     /// What the metal of `edge`, a wire step or a jog, meets, telling
-    /// `parts` whose it is.
+    /// `parts` whose it is; where the net's own block pins relieve an end,
+    /// only the fixed metal the other end's wire comes near counts, or none
+    /// when they relieve both.
+    // NOTE: TritonRoute charges fixed shapes per node entered, so one edge
+    // costs differently by direction; PARE prices an edge the same both
+    // ways, by its whole metal unless a block pin relieves an end.
     fn planar_meets(&self, edge: Edge, parts: &mut impl CostParts) -> Meets {
         let (a, b) = edge.ends();
-        wire_rect(self.point(a), self.point(b), self.width(a.layer))
-            .map_or_else(Meets::default, |metal| {
-                self.metal_meets(a.layer, &metal, true, parts)
-            })
+        let layer = a.layer;
+        let Some(metal) = wire_rect(self.point(a), self.point(b), self.width(layer)) else {
+            return Meets::default();
+        };
+        let relieved =
+            |parts: &mut _| self.meets_counting(layer, &metal, true, FixedMetal::Relieved, parts);
+        match self.rules.relief(self.tech, self.net(), edge) {
+            Relief::None => self.metal_meets(layer, &metal, true, parts),
+            Relief::Whole => relieved(parts),
+            Relief::Partly { charged } => {
+                let end = self.end_square(charged);
+                relieved(parts).and(self.metal_meets(layer, &end, false, parts))
+            }
+        }
+    }
+
+    /// The square a wire of the net covers around `node`.
+    fn end_square(&self, node: Node) -> Rect<Dbu> {
+        let half = self.width(node.layer) / 2;
+        let p = self.point(node);
+        Rect::new(
+            Point::new(p.x - half, p.y - half),
+            Point::new(p.x + half, p.y + half),
+        )
     }
 
     /// Price of the via up from `lower` to `upper`, apart from crowding the
