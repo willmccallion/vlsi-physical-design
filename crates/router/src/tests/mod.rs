@@ -2,6 +2,7 @@
 
 mod access;
 mod golden;
+mod macro_edge;
 mod route;
 mod track;
 

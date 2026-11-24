@@ -1,6 +1,7 @@
 //! What `TritonRoute`'s maze cost set-up marks on the edges of its grid
 //! around pins and obstructions (`FlexDRWorker::initMazeCost`): which edges
-//! are blocked, costing a net that takes one `BLOCKCOST`.
+//! are blocked, costing a net that takes one `BLOCKCOST`, and where a net's
+//! own block pins relieve it of fixed metal ([`Relief`]).
 //!
 //! An edge is blocked or open by the last of these to touch it, latest
 //! first:
@@ -25,13 +26,18 @@
 // they are always closed to others; and where one stage both opens and
 // blocks an edge from its two ends, PARE keeps it blocked.
 
+mod relief;
+
+pub(crate) use relief::Relief;
+use relief::{Band, bands_of, relief_of};
+
 use crate::access::{AccessPoint, Node, PinKind, Way, Ways};
 use crate::bucket::{SpatialHash, buckets_between};
 use crate::tech::RouteTech;
 use crate::wiring::Edge;
 use pare_common::db::design::NetlistDB;
 use pare_common::db::indices::{IdVec, LayerId, NetId};
-use pare_common::db::library::LayerRef;
+use pare_common::db::library::{Direction, LayerRef};
 use pare_common::geom::dbu::Dbu;
 use pare_common::geom::point::Point;
 use pare_common::geom::rect::Rect;
@@ -46,6 +52,8 @@ pub(crate) struct EdgeRules {
     cell_pins: Shapes,
     /// Access points and I/O pins, by the node they mark.
     nodes: FxHashMap<Node, NodeRules>,
+    /// The bands around each net's block pins, for nets with any.
+    bands: FxHashMap<NetId, Vec<Band>>,
 }
 
 /// Rules that block nothing, for searches outside a routing run.
@@ -108,6 +116,7 @@ impl EdgeRules {
             obstructions: Shapes::new(db.die_area.min, bucket),
             cell_pins: Shapes::new(db.die_area.min, bucket),
             nodes: FxHashMap::default(),
+            bands: FxHashMap::default(),
         };
         rules.add_cells(db, tech);
         for s in &db.routing_blockages {
@@ -119,6 +128,12 @@ impl EdgeRules {
         }
         rules.add_access_points(db, access);
         rules.add_io_pins(db, tech, access);
+        for (net, candidates) in access.iter_enumerated() {
+            let bands = bands_of(db, tech, net, candidates);
+            if !bands.is_empty() {
+                let _ = rules.bands.insert(net, bands);
+            }
+        }
         rules
     }
 
@@ -129,6 +144,7 @@ impl EdgeRules {
             obstructions: Shapes::new(Point::default(), Dbu::new(1)),
             cell_pins: Shapes::new(Point::default(), Dbu::new(1)),
             nodes: FxHashMap::default(),
+            bands: FxHashMap::default(),
         }
     }
 
@@ -262,6 +278,20 @@ impl EdgeRules {
         }
         ends.iter()
             .any(|&(n, _)| self.obstructions.hold(n.layer, at(n)))
+    }
+
+    /// Which ends of `edge`, a wire or a jog, `net`'s own block pins
+    /// relieve of fixed metal; a via is never relieved.
+    pub(crate) fn relief(&self, tech: &RouteTech, net: Option<NetId>, edge: Edge) -> Relief {
+        let Some(bands) = net.and_then(|n| self.bands.get(&n)) else {
+            return Relief::None;
+        };
+        let horizontal = match edge {
+            Edge::Wire(n) => tech.layer(n.layer).direction == Direction::Horizontal,
+            Edge::Jog(n) => tech.layer(n.layer).direction == Direction::Vertical,
+            Edge::Via { .. } => return Relief::None,
+        };
+        relief_of(tech, bands, edge.ends(), horizontal)
     }
 }
 
@@ -454,6 +484,51 @@ mod tests {
         assert!(rules.blocked(&tech, Some(io.net), Edge::Jog(inside)));
         assert!(rules.blocked(&tech, Some(io.net), via));
         assert!(!rules.blocked(&tech, Some(io.net), along));
+    }
+
+    /// The macro edge fixture's rules with its pins' access points.
+    fn macro_edge_rules() -> (RouteTech, EdgeRules) {
+        let db = macro_edge();
+        let tech = tech_of(&db);
+        let rules = EdgeRules::new(&db, &tech, &found_access(&db, &tech), Dbu::new(4000));
+        (tech, rules)
+    }
+
+    #[test]
+    fn a_wire_out_of_a_block_pin_the_way_it_is_left_is_relieved_at_both_ends() {
+        let (tech, rules) = macro_edge_rules();
+        let leaving = Edge::Wire(node_at(&tech, M3, 11210, 2380));
+
+        assert_eq!(rules.relief(&tech, Some(NetId(0)), leaving), Relief::Whole);
+    }
+
+    #[test]
+    fn a_wire_ending_beside_a_block_pin_is_charged_at_its_far_end_only() {
+        let (tech, rules) = macro_edge_rules();
+        let far = node_at(&tech, M3, 10830, 2380);
+
+        let relief = rules.relief(&tech, Some(NetId(0)), Edge::Wire(far));
+
+        assert_eq!(relief, Relief::Partly { charged: far });
+    }
+
+    #[test]
+    fn a_jog_beside_a_block_pin_left_along_its_track_is_not_relieved() {
+        let (tech, rules) = macro_edge_rules();
+        let access = node_at(&tech, M3, 11390, 2380);
+
+        assert_eq!(
+            rules.relief(&tech, Some(NetId(0)), Edge::Jog(access)),
+            Relief::None
+        );
+    }
+
+    #[test]
+    fn another_nets_wire_beside_a_block_pin_is_not_relieved() {
+        let (tech, rules) = macro_edge_rules();
+        let leaving = Edge::Wire(node_at(&tech, M3, 11210, 2380));
+
+        assert_eq!(rules.relief(&tech, None, leaving), Relief::None);
     }
 
     #[test]
