@@ -549,8 +549,9 @@ impl<'a> Local<'a> {
 
 #[cfg(test)]
 mod tests {
+    use super::super::Tracks;
     use super::super::coarse::CoarseGrid;
-    use super::super::{Tracks, Usage};
+    use super::super::grid::Usage;
     use super::*;
     use crate::tech::NetKind;
     use pare_common::config::CapacityReserve;

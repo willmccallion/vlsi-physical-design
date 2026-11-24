@@ -430,8 +430,9 @@ impl Planner<'_> {
 
 #[cfg(test)]
 mod tests {
+    use super::super::Tracks;
+    use super::super::grid::Usage;
     use super::super::tests::{COSTS, at, grid, net};
-    use super::super::{Tracks, Usage};
     use super::*;
 
     /// The 10x10 grid of [`grid`] with a third, horizontal, layer on top.
