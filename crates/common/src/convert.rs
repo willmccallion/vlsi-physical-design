@@ -1,10 +1,13 @@
 //! Conversions between numeric types that have no lossless `From`, each
 //! named for what it does with a value the target type cannot hold.
 
-/// A float made an integer of `Self` toward zero, saturating at the bounds
-/// of `Self`, NaN made zero: what Rust's `as` does, named at the call.
+/// A number made a `Self`, clamped to the range of `Self`.
+///
+/// From a float it goes toward zero, NaN made zero: what Rust's `as` does,
+/// named at the call. From an integer it is the value itself whenever it
+/// fits, where `as` would wrap it.
 pub trait SaturatingFrom<F> {
-    /// `value` toward zero, clamped to the range of `Self`.
+    /// `value` clamped to the range of `Self`.
     fn saturating_from(value: F) -> Self;
 }
 
@@ -39,20 +42,43 @@ macro_rules! saturating_from_floats {
 
 saturating_from_floats!(i8, i16, i32, i64, isize, u8, u16, u32, u64, usize);
 
+macro_rules! saturating_from_unsigned {
+    ($from:ty => $($int:ty),+) => {
+        $(
+            impl SaturatingFrom<$from> for $int {
+                fn saturating_from(value: $from) -> Self {
+                    Self::try_from(value).unwrap_or(Self::MAX)
+                }
+            }
+        )+
+    };
+}
+
+macro_rules! saturating_from_signed {
+    ($from:ty => $($int:ty),+) => {
+        $(
+            impl SaturatingFrom<$from> for $int {
+                fn saturating_from(value: $from) -> Self {
+                    Self::try_from(value).unwrap_or(if value < 0 { Self::MIN } else { Self::MAX })
+                }
+            }
+        )+
+    };
+}
+
+saturating_from_unsigned!(u32 => u8, u16, i8, i16, i32);
+saturating_from_unsigned!(u64 => u8, u16, u32, usize, i8, i16, i32, i64, isize);
+saturating_from_unsigned!(usize => u8, u16, u32, u64, i8, i16, i32, i64, isize);
+saturating_from_signed!(i32 => u8, u16, u32, u64, usize, i8, i16);
+saturating_from_signed!(i64 => u8, u16, u32, u64, usize, i8, i16, i32, isize);
+saturating_from_signed!(isize => u8, u16, u32, u64, usize, i8, i16, i32);
+
 impl NearestFrom<f64> for f32 {
     // The one place a double is narrowed: `as` rounds to the nearest float.
     #[allow(clippy::cast_possible_truncation)]
     fn nearest_from(value: f64) -> Self {
         value as Self
     }
-}
-
-/// A count of things held in memory, such as a slice's length, as an
-/// `i64`: such counts never exceed `isize::MAX`, which `i64` holds on every
-/// target.
-#[must_use]
-pub fn count_i64(count: usize) -> i64 {
-    i64::try_from(count).unwrap_or(i64::MAX)
 }
 
 #[cfg(test)]
@@ -85,7 +111,22 @@ mod tests {
     }
 
     #[test]
-    fn a_count_converts_as_it_is() {
-        assert_eq!(count_i64(42), 42);
+    fn an_integer_that_fits_converts_as_it_is_and_one_that_does_not_clamps() {
+        assert_eq!(
+            [
+                i64::saturating_from(42_usize),
+                i64::saturating_from(usize::MAX)
+            ],
+            [42, i64::MAX]
+        );
+        assert_eq!(
+            [
+                usize::saturating_from(7_i64),
+                usize::saturating_from(-3_i64)
+            ],
+            [7, 0]
+        );
+        assert_eq!(u16::saturating_from(70_000_u32), u16::MAX);
+        assert_eq!(i8::saturating_from(-500_i32), i8::MIN);
     }
 }
