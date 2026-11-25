@@ -375,7 +375,7 @@ impl Sta {
         let mut entries: Vec<Entry> = Vec::new();
         let net = netlist.db.pins[load].net;
         let derate = self.sdc.derating.net;
-        for driver in netlist.drivers(net) {
+        for &driver in graph.drivers(net) {
             if driver == load {
                 continue;
             }

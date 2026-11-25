@@ -860,7 +860,7 @@ fn predecessors(netlist: &Netlist<'_>, graph: &TimingGraph, pin: PinId) -> Vec<P
     let mut prev = Vec::new();
     if netlist.is_load(pin) {
         let net = netlist.db.pins[pin].net;
-        prev.extend(netlist.drivers(net).filter(|&d| d != pin));
+        prev.extend(graph.drivers(net).iter().copied().filter(|&d| d != pin));
     }
     if netlist.is_driver(pin) {
         prev.extend(

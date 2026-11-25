@@ -203,11 +203,10 @@ impl<'r, 'a, T: Timing> Repairer<'r, 'a, T> {
     /// driver does not upsize the next, as `OpenROAD`'s forward pass.
     fn annotate_violating_loads(&mut self) {
         let annotated = self.resizer.annotate_violating_input_slews();
-        let netlist = self.resizer.netlist();
         for load in annotated {
             let net = self.resizer.db.pins[load].net;
             self.load_slew_violation_drivers
-                .extend(netlist.drivers(net));
+                .extend(self.resizer.graph.drivers(net));
         }
     }
 
