@@ -949,7 +949,7 @@ impl<'a, T: Timing> Resizer<'a, T> {
     fn undo(&mut self, edit: Edit, touched: &mut Touched) -> Result<(), RepairError> {
         match edit {
             Edit::Master { cell, old } => {
-                self.db.replace_master(cell, old)?;
+                self.set_master(cell, old)?;
                 let _ = touched.cells.insert(cell);
                 touched.add_nets_of(self.db, cell);
             }
@@ -958,17 +958,20 @@ impl<'a, T: Timing> Resizer<'a, T> {
                 touched.add_nets_of(self.db, cell);
             }
             Edit::MovedPin { pin, from } => {
-                let _ = touched.nets.insert(self.db.pins[pin].net);
+                let current = self.db.pins[pin].net;
+                let _ = touched.nets.insert(current);
                 let _ = touched.nets.insert(from.net);
                 self.db.put_pin_back(pin, from);
+                self.graph
+                    .pin_moved(&Netlist::new(self.db, self.link), pin, current);
             }
             Edit::NewCell(cell) => {
                 touched.add_nets_of(self.db, cell);
-                let _ = self.db.retire_cell(cell);
+                let _ = self.retire(cell);
             }
             Edit::NewNet(net) => self.dead_nets.push(net),
             Edit::Retired { cell, places } => {
-                self.db.unretire_cell(cell, places);
+                self.unretire(cell, places);
                 touched.add_nets_of(self.db, cell);
             }
             Edit::Renamed { net, old } => self.db.rename_net(net, old)?,
@@ -990,12 +993,12 @@ impl<'a, T: Timing> Resizer<'a, T> {
         {
             let netlist = Netlist::new(self.db, self.link);
             for net in nets {
-                dirty.extend(netlist.drivers(net));
+                dirty.extend_from_slice(self.graph.drivers(net));
             }
             for cell in touched.cells {
                 for &pin in &self.db.cells[cell].pins {
                     if netlist.is_load(pin) {
-                        dirty.extend(netlist.drivers(self.db.pins[pin].net));
+                        dirty.extend_from_slice(self.graph.drivers(self.db.pins[pin].net));
                     }
                     if netlist.is_driver(pin) {
                         dirty.push(pin);
@@ -1025,7 +1028,7 @@ impl<'a, T: Timing> Resizer<'a, T> {
                     drivers.push(pin);
                 }
                 if netlist.is_load(pin) {
-                    drivers.extend(netlist.drivers(self.db.pins[pin].net));
+                    drivers.extend_from_slice(self.graph.drivers(self.db.pins[pin].net));
                 }
             }
         }
@@ -1053,7 +1056,7 @@ impl<'a, T: Timing> Resizer<'a, T> {
     /// Re-estimates a net and everything timed through it.
     pub(crate) fn update_net(&mut self, net: NetId) {
         self.invalidate_parasitics(net);
-        let drivers: Vec<PinId> = self.netlist().drivers(net).collect();
+        let drivers = self.graph.drivers(net).to_vec();
         self.propagate(&drivers);
     }
 
@@ -1069,7 +1072,7 @@ impl<'a, T: Timing> Resizer<'a, T> {
                     nets.push(net);
                 }
                 if netlist.is_load(pin) {
-                    drivers.extend(netlist.drivers(net));
+                    drivers.extend_from_slice(self.graph.drivers(net));
                 }
                 if netlist.is_driver(pin) {
                     drivers.push(pin);
@@ -1098,7 +1101,7 @@ impl<'a, T: Timing> Resizer<'a, T> {
         if old == master {
             return Ok(false);
         }
-        self.db.replace_master(cell, master)?;
+        self.set_master(cell, master)?;
         self.record(Edit::Master { cell, old });
         self.legalize_for_routes(cell);
         self.update_cell(cell);
@@ -1112,7 +1115,38 @@ impl<'a, T: Timing> Resizer<'a, T> {
             return;
         }
         self.db.move_pin(pin, to);
+        self.graph
+            .pin_moved(&Netlist::new(self.db, self.link), pin, from.net);
         self.record(Edit::MovedPin { pin, from });
+    }
+
+    /// Gives `cell` the master `master`, the timing graph following which
+    /// of its pins drive.
+    fn set_master(&mut self, cell: CellId, master: MacroId) -> Result<(), RepairError> {
+        self.db.replace_master(cell, master)?;
+        self.graph
+            .master_replaced(&Netlist::new(self.db, self.link), cell);
+        Ok(())
+    }
+
+    /// Takes `cell` off its nets, the timing graph following; returns where
+    /// its pins stood.
+    fn retire(&mut self, cell: CellId) -> Vec<PinPlace> {
+        let places = self.db.retire_cell(cell);
+        for &pin in &self.db.cells[cell].pins {
+            self.graph.pin_disconnected(self.db.pins[pin].net, pin);
+        }
+        places
+    }
+
+    /// Puts a retired `cell` back where `places` say its pins stood, the
+    /// timing graph following.
+    fn unretire(&mut self, cell: CellId, places: Vec<PinPlace>) {
+        self.db.unretire_cell(cell, places);
+        let netlist = Netlist::new(self.db, self.link);
+        for &pin in &self.db.cells[cell].pins {
+            self.graph.pin_connected(&netlist, pin);
+        }
     }
 
     /// Adds an instance of `cell` at `at`, named from `base`, recording
@@ -1156,7 +1190,10 @@ impl<'a, T: Timing> Resizer<'a, T> {
         net: NetId,
     ) -> Option<PinId> {
         let macro_pin = self.link.macro_pin_of_port(lib, port)?;
-        Some(self.db.connect_cell_pin(cell, macro_pin, net))
+        let pin = self.db.connect_cell_pin(cell, macro_pin, net);
+        self.graph
+            .pin_connected(&Netlist::new(self.db, self.link), pin);
+        Some(pin)
     }
 
     /// Puts a buffer of `buffer` at `at` between `net` and `loads`, which
@@ -1189,7 +1226,7 @@ impl<'a, T: Timing> Resizer<'a, T> {
         }
         self.invalidate_parasitics(net);
         self.invalidate_parasitics(new_net);
-        let mut drivers: Vec<PinId> = self.netlist().drivers(net).collect();
+        let mut drivers = self.graph.drivers(net).to_vec();
         drivers.push(output);
         self.propagate(&drivers);
         Ok(InsertedBuffer {
@@ -1219,7 +1256,7 @@ impl<'a, T: Timing> Resizer<'a, T> {
             .collect();
         let survivor_name = self.db.nets[survivor].name.clone();
         let removed_name = self.db.nets[removed].name.clone();
-        let places = self.db.retire_cell(buffer);
+        let places = self.retire(buffer);
         self.record(Edit::Retired {
             cell: buffer,
             places,
@@ -1243,7 +1280,7 @@ impl<'a, T: Timing> Resizer<'a, T> {
         self.dead_nets.push(removed);
         self.invalidate_parasitics(survivor);
         self.invalidate_parasitics(removed);
-        let drivers: Vec<PinId> = self.netlist().drivers(survivor).collect();
+        let drivers = self.graph.drivers(survivor).to_vec();
         self.propagate(&drivers);
         Ok(survivor)
     }
@@ -1368,7 +1405,7 @@ impl<'a, T: Timing> Resizer<'a, T> {
                 continue;
             }
             let net = self.db.pins[pin].net;
-            for driver in netlist.drivers(net) {
+            for &driver in self.graph.drivers(net) {
                 if !self.cap_ok(driver, delta) {
                     return false;
                 }

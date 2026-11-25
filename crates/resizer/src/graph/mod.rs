@@ -22,6 +22,8 @@ use pare_common::db::sdc::{RiseFallMinMax, Sdc};
 use pare_common::units::{Farads, Ohms, Seconds};
 use std::collections::{BinaryHeap, HashMap, VecDeque};
 
+mod drivers;
+
 /// The slew `OpenSTA` seeds a root with, its `default_slew`: an input port
 /// without a declared transition, or a driver without arcs.
 const ROOT_SLEW: Seconds = Seconds::ZERO;
@@ -123,6 +125,8 @@ pub(crate) struct TimingGraph {
     level: IdVec<PinId, u32>,
     in_arcs: IdVec<PinId, Vec<InArc>>,
     loop_arcs: rustc_hash::FxHashSet<(PinId, PinId)>,
+    /// Each net's drivers, in the order the net lists its pins.
+    net_drivers: IdVec<NetId, Vec<PinId>>,
     slew: IdVec<PinId, PerSide>,
     annotated: IdVec<PinId, Option<Seconds>>,
     arc_delays: IdVec<PinId, Vec<ArcDelay>>,
@@ -157,6 +161,7 @@ impl TimingGraph {
             level,
             in_arcs,
             loop_arcs,
+            net_drivers: drivers::find_drivers(netlist),
             slew: IdVec::filled(SideValues::both(EdgeValues::default()), db.pins.len()),
             annotated: IdVec::filled(None, db.pins.len()),
             arc_delays: IdVec::filled(Vec::new(), db.pins.len()),
@@ -411,9 +416,9 @@ impl TimingGraph {
                 .or_else(|| {
                     if netlist.is_load(pin) {
                         let net = db.pins[pin].net;
-                        netlist
-                            .drivers(net)
-                            .filter_map(|d| self.level.get(d).map(|l| l + 1))
+                        self.drivers(net)
+                            .iter()
+                            .filter_map(|&d| self.level.get(d).map(|l| l + 1))
                             .max()
                     } else {
                         None
