@@ -1,10 +1,16 @@
 {
   description = "PARE: Placement And Routing Engine";
 
-  inputs.nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
+  inputs = {
+    nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
+    rust-overlay = {
+      url = "github:oxalica/rust-overlay";
+      inputs.nixpkgs.follows = "nixpkgs";
+    };
+  };
 
   outputs =
-    { nixpkgs, ... }:
+    { nixpkgs, rust-overlay, ... }:
     let
       systems = [
         "x86_64-linux"
@@ -12,15 +18,33 @@
         "x86_64-darwin"
         "aarch64-darwin"
       ];
-      forAllSystems = f: nixpkgs.lib.genAttrs systems (system: f nixpkgs.legacyPackages.${system});
-      rustTools =
-        pkgs: with pkgs; [
-          cargo
-          rustc
-          clippy
-          rustfmt
-          rust-analyzer
-        ];
+      forAllSystems =
+        f:
+        nixpkgs.lib.genAttrs systems (
+          system:
+          f (
+            import nixpkgs {
+              inherit system;
+              overlays = [ rust-overlay.overlays.default ];
+            }
+          )
+        );
+      # The Rust project's own build of the toolchain CI uses. nixpkgs' rustc generates code with
+      # nixpkgs' LLVM but builds its profiler runtime from its own newer LLVM sources, so
+      # coverage-instrumented binaries write profiles llvm-profdata cannot read, or crash on exit.
+      # The editor's components join the file's, which CI has no use for.
+      pinned = (fromTOML (builtins.readFile ./rust-toolchain.toml)).toolchain;
+      rustTools = pkgs: [
+        (pkgs.rust-bin.fromRustupToolchain (
+          pinned
+          // {
+            components = pinned.components ++ [
+              "rust-src"
+              "rust-analyzer"
+            ];
+          }
+        ))
+      ];
     in
     {
       devShells = forAllSystems (pkgs: let
