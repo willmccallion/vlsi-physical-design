@@ -30,3 +30,19 @@ jobs:
       - run: cargo doc --workspace --no-deps --locked
         env:
           RUSTDOCFLAGS: -D rustdoc::all
+
+  # Line coverage of the product code fails below 90%. Test code lives in files of its own
+  # (tests.rs, tests/, testing.rs, fixtures.rs), which the count leaves out.
+  coverage:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      # rust-toolchain.toml's toolchain, llvm-tools included.
+      - run: rustup toolchain install
+      - uses: Swatinem/rust-cache@v2
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-llvm-cov
+      - run: >-
+          cargo llvm-cov --workspace --locked --summary-only --fail-under-lines 90
+          --ignore-filename-regex '(^|/)(\w+_)?tests(/|\.rs$)|/(testing|fixtures)\.rs$'
