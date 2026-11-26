@@ -1,0 +1,18 @@
+profile = "mutants"
+
+# Output meant for people, and helpers only tests use: a mutant there is something a person would
+# see before any test could fail on it. Anything else no test can tell from the original goes here
+# too, with the reason.
+exclude_globs = [
+    "crates/cli/src/visualization.rs",     # PNG pictures of designs, judged by eye
+    "crates/cli/src/view.rs",              # the view command's picture
+    "crates/cli/src/ui.rs",                # terminal colours and layout
+    "crates/cli/src/logger.rs",            # log line styling
+    "crates/router/src/detailed/trace.rs", # debugging logs of chosen nets
+    "crates/common/src/memory.rs",         # resident memory, for log lines and the report
+    "crates/common/src/testing.rs",        # helpers for tests
+]
+exclude_re = [
+    "<impl (\\w+::)*Debug for ",           # debug printing
+    "replace resident -> String",          # the memory figure in the router's log lines
+]

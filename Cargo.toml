@@ -23,6 +23,13 @@ debug = true
 lto = "fat"
 codegen-units = 1
 
+# cargo mutants builds with this (.cargo/mutants.toml): the tests route whole fixtures, which an
+# optimized build runs many times faster than a debug one.
+[profile.mutants]
+inherits = "test"
+opt-level = 1
+debug = "none"
+
 [workspace.lints.rust]
 missing_docs = "warn"
 missing_debug_implementations = "warn"
