@@ -639,7 +639,6 @@ impl Cts<'_> {
         let builder = &mut self.builders[second];
         builder.tree_type = TreeType::Register;
         builder.top_buffer_name = top_buffer;
-        builder.driving_net = Some(net);
         Ok(first)
     }
 
@@ -925,10 +924,6 @@ impl Cts<'_> {
     /// Creates a tree's buffers and nets, as `TritonCTS::writeClockNetsToDb`.
     fn write_clock_nets(&mut self, db: &mut NetlistDB, index: usize) -> Result<(), CtsError> {
         let top_net = self.builders[index].clock.net;
-        let is_register = self.builders[index].tree_type == TreeType::Register;
-        let regs_buffer = is_register
-            .then(|| db.cell_id(&self.builders[index].top_buffer_name))
-            .flatten();
         let mut buffers = Vec::new();
         for b in 0..self.builders[index].clock.buffers.len() {
             let inst = self.builders[index].clock.buffers[b].clone();
@@ -951,6 +946,9 @@ impl Cts<'_> {
             nets.push(net);
         }
         self.summary.nets += nets.len();
+        // NOTE: writeClockNetsToDb first disconnects every input from the top
+        // net, then reconnects the register tree's top buffer; PARE moves only
+        // the tree's own sinks, so other inputs there stay connected.
         for (s, &net) in nets.iter().enumerate() {
             let subnet = self.builders[index].clock.subnets[s].clone();
             let InstRef::Buffer(d) = subnet.driver() else {
@@ -971,16 +969,8 @@ impl Cts<'_> {
             }
         }
         if let Some(root) = root_cell {
-            let master = buffers
-                .iter()
-                .find(|(c, _)| *c == root)
-                .map_or(self.setup.buffers.root, |&(_, m)| m);
+            let master = self.setup.buffers.root;
             let _ = self.connect_buffer(db, root, master, Some(top_net), None)?;
-        }
-        if let (Some(regs), Some(driving)) = (regs_buffer, self.builders[index].driving_net)
-            && let Some(input) = first_input(db, regs)
-        {
-            db.move_pin(input, driving);
         }
         Ok(())
     }
