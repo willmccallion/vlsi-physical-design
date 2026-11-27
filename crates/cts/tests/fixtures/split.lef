@@ -1,0 +1,38 @@
+# A cell passing its one input to two outputs, read after clock.lef for the
+# clock tree synthesis tests.
+VERSION 5.8 ;
+BUSBITCHARS "[]" ;
+DIVIDERCHAR "/" ;
+
+MACRO CLKSPLIT
+  CLASS CORE ;
+  ORIGIN 0 0 ;
+  SIZE 0.76 BY 1.4 ;
+  SITE core ;
+  PIN A
+    DIRECTION INPUT ;
+    USE SIGNAL ;
+    PORT
+      LAYER metal1 ;
+        RECT 0.10 0.4 0.20 0.6 ;
+    END
+  END A
+  PIN Z1
+    DIRECTION OUTPUT ;
+    USE SIGNAL ;
+    PORT
+      LAYER metal1 ;
+        RECT 0.30 0.4 0.40 0.6 ;
+    END
+  END Z1
+  PIN Z2
+    DIRECTION OUTPUT ;
+    USE SIGNAL ;
+    PORT
+      LAYER metal1 ;
+        RECT 0.50 0.4 0.60 0.6 ;
+    END
+  END Z2
+END CLKSPLIT
+
+END LIBRARY
