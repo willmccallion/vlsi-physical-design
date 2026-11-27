@@ -1,0 +1,74 @@
+name: Mutants
+
+# Mutation testing on GitHub's runners, for runs too big for one machine. Pushing a branch under
+# mutants/ starts one; the branch's mutants-run.env sets the cargo mutants arguments
+# (MUTANTS_ARGS), a file listing the mutants to test (MUTANTS_TARGETS, all when unset) and the
+# number of shards (MUTANTS_SHARDS). The shards run 16 at a time, leaving runners for pull
+# requests, and their outcomes come together in the mutants-results artifact.
+on:
+  push:
+    branches: ["mutants/**"]
+
+env:
+  CARGO_TERM_COLOR: never
+
+jobs:
+  plan:
+    runs-on: ubuntu-latest
+    outputs:
+      shards: ${{ steps.shards.outputs.list }}
+      count: ${{ steps.shards.outputs.count }}
+    steps:
+      - uses: actions/checkout@v5
+      # 64 shards by default: each must finish within a job's 6 hours.
+      - id: shards
+        run: |
+          count=$(sed -n 's/^MUTANTS_SHARDS=//p' mutants-run.env 2>/dev/null)
+          count=${count:-64}
+          echo "count=$count" >> "$GITHUB_OUTPUT"
+          echo "list=$(python3 -c "import json; print(json.dumps(list(range($count))))")" >> "$GITHUB_OUTPUT"
+
+  shard:
+    needs: plan
+    runs-on: ubuntu-latest
+    timeout-minutes: 350
+    strategy:
+      fail-fast: false
+      max-parallel: 16
+      matrix:
+        shard: ${{ fromJSON(needs.plan.outputs.shards) }}
+    steps:
+      - uses: actions/checkout@v5
+      - run: rustup toolchain install
+      - uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: mutants
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-mutants@27.1.0
+      - run: python3 scripts/mutants_shard.py ${{ matrix.shard }} ${{ needs.plan.outputs.count }}
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: mutants-shard-${{ matrix.shard }}
+          path: target/mutants-shard/mutants.out/*.txt
+
+  collect:
+    needs: shard
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v5
+        with:
+          pattern: mutants-shard-*
+          path: shards
+      - run: |
+          mkdir results
+          for outcome in caught missed timeout unviable; do
+            cat shards/*/"$outcome".txt 2>/dev/null | sort > "results/$outcome.txt"
+            echo "$outcome: $(wc -l < "results/$outcome.txt")" >> "$GITHUB_STEP_SUMMARY"
+          done
+      - uses: actions/upload-artifact@v4
+        with:
+          name: mutants-results
+          path: results
