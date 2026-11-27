@@ -717,3 +717,123 @@ fn names_start_with_letters_digits_or_bus_and_path_characters() {
         assert!(!FuncParser::starts_name(c), "{c:?}");
     }
 }
+
+#[test]
+fn hold_and_removal_check_the_early_side() {
+    assert_eq!(ArcRole::Hold.check_side(), Some(MinMax::Min));
+    assert_eq!(ArcRole::Removal.check_side(), Some(MinMax::Min));
+    assert_eq!(ArcRole::Setup.check_side(), Some(MinMax::Max));
+    assert_eq!(ArcRole::Combinational.check_side(), None);
+}
+
+#[test]
+fn inputs_and_inouts_take_signals_in() {
+    assert!(port("A", PortDirection::Input, None).is_input());
+    assert!(port("A", PortDirection::Inout, None).is_input());
+    assert!(!port("Z", PortDirection::Output, None).is_input());
+}
+
+#[test]
+fn edge_and_side_values_set_and_list_their_parts() {
+    let mut caps = EdgeValues::both(1);
+    caps.set(Edge::Fall, 2);
+    let sides = SideValues { min: 3, max: 4 };
+
+    assert_eq!((caps.rise, caps.fall), (1, 2));
+    assert_eq!(sides.iter().copied().collect::<Vec<_>>(), [3, 4]);
+}
+
+#[test]
+fn a_cell_lists_every_pin() {
+    assert_eq!(
+        buffer("BUF").port_ids().collect::<Vec<_>>(),
+        [LibPortId::new(0), LibPortId::new(1)]
+    );
+}
+
+#[test]
+fn a_function_that_is_just_a_pin_names_it() {
+    assert_eq!(FuncExpr::parse("A").unwrap().as_port(), Some("A"));
+    assert_eq!(FuncExpr::parse("A & B").unwrap().as_port(), None);
+}
+
+#[test]
+fn a_register_clock_is_the_pin_a_clock_to_output_arc_starts_from() {
+    let reg = functionless(&[(ArcRole::RegClkToQ, TimingSense::NonUnate, None)]);
+    let logic = functionless(&[(ArcRole::Combinational, TimingSense::PositiveUnate, None)]);
+
+    assert!(reg.is_register_clock(LibPortId::new(0)));
+    assert!(!reg.is_register_clock(LibPortId::new(1)));
+    assert!(!logic.is_register_clock(LibPortId::new(0)));
+}
+
+/// An arc whose slew rises to `slew` at a load of 4.
+fn arc_slewing_to(slew: f64) -> TimingArc {
+    TimingArc {
+        from_edge: Edge::Rise,
+        to_edge: Edge::Rise,
+        delay: None,
+        slew: Some(Table {
+            axes: vec![Axis {
+                variable: AxisVariable::OutputCapacitance,
+                values: vec![1.0, 4.0],
+            }],
+            values: times(&[1.0, slew]),
+        }),
+    }
+}
+
+#[test]
+fn a_cell_s_drive_resistance_is_its_arcs_largest() {
+    let mut c = functionless(&[(ArcRole::Combinational, TimingSense::PositiveUnate, None)]);
+    c.arc_sets[ArcSetId::new(0)].arcs = vec![arc_slewing_to(7.0), arc_slewing_to(12.0)];
+
+    assert!((c.drive_resistance(LibPortId::new(1)).get() - 3.0).abs() < 1e-12);
+}
+
+#[test]
+fn a_cell_with_an_extra_pin_is_not_equivalent() {
+    let mut wider = buffer("BUF_EN");
+    let _ = wider.ports.push(port("EN", PortDirection::Input, None));
+
+    assert!(!buffer("BUF").equivalent(&wider));
+    assert!(!wider.equivalent(&buffer("BUF")));
+}
+
+#[test]
+fn a_buffer_cell_names_its_one_input_and_one_output() {
+    let lib =
+        crate::db::parser::liberty::parse_str(LIMITS_LIB, std::path::Path::new("l.lib")).unwrap();
+    let id = lib.cell_id("BUF").unwrap();
+
+    let cell = lib.buffer_cell(id).unwrap();
+    assert_eq!(
+        (cell.id, cell.input, cell.output),
+        (id, LibPortId::new(0), LibPortId::new(1))
+    );
+}
+
+#[test]
+fn a_fanout_load_is_the_pin_s_else_the_library_s_else_zero() {
+    let with_default = LIMITS_LIB.replace(
+        "default_max_capacitance : 40 ;",
+        "default_max_capacitance : 40 ;\n  default_fanout_load : 2 ;",
+    );
+    let lib = crate::db::parser::liberty::parse_str(&with_default, std::path::Path::new("l.lib"))
+        .unwrap();
+    let plain =
+        crate::db::parser::liberty::parse_str(LIMITS_LIB, std::path::Path::new("l.lib")).unwrap();
+    let buf = lib.cell(lib.cell_id("BUF").unwrap());
+    let mut own = buf.ports[LibPortId::new(0)].clone();
+    own.fanout_load = Some(3.0);
+
+    assert!((lib.fanout_load(buf, &own) - 3.0).abs() < 1e-12);
+    assert!((lib.fanout_load(buf, &buf.ports[LibPortId::new(0)]) - 2.0).abs() < 1e-12);
+    let plain_buf = plain.cell(plain.cell_id("BUF").unwrap());
+    assert!(
+        plain
+            .fanout_load(plain_buf, &plain_buf.ports[LibPortId::new(0)])
+            .abs()
+            < 1e-12
+    );
+}
