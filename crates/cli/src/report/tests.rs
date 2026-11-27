@@ -46,6 +46,18 @@ fn a_report_has_the_keys_compare_reads() {
 }
 
 #[test]
+fn a_time_reports_in_nanoseconds() {
+    let ns = nanos(Some(Seconds::new(2.5e-9))).unwrap();
+
+    assert!((ns - 2.5).abs() < 1e-12, "{ns}");
+}
+
+#[test]
+fn no_time_reports_as_none() {
+    assert_eq!(nanos(None), None);
+}
+
+#[test]
 fn wall_times_report_as_seconds() {
     let report = Report {
         phases: vec![PhaseTime {
