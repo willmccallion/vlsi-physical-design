@@ -42,72 +42,167 @@ fn quoted(path: &Path) -> String {
     format!("{:?}", path.display().to_string())
 }
 
-/// Writes a config of `purpose` reading the design `input`, a TOML
-/// `[input]` table's keys, into `dir`, with the TOML `tables` after it, and
-/// returns its path. The run writes its results into `dir` too.
-fn write_config_for(dir: &Path, purpose: &str, input: &str, tables: &str) -> PathBuf {
+/// The parts of a test config that vary between tests.
+#[derive(Default)]
+struct ConfigParts<'a> {
+    /// What the design is for: `placement`, `routing` or `place_and_route`.
+    purpose: &'a str,
+    /// Top-level keys after the purpose.
+    top_level: &'a str,
+    /// `[global_placement]` keys besides the iteration limit.
+    global_placement: &'a str,
+    /// `[input]` keys naming the design, without the output DEF.
+    input: String,
+    /// The TOML tables after `[input]`.
+    tables: String,
+}
+
+/// Writes a config of `parts` into `dir` and returns its path. The run
+/// writes its results into `dir` too.
+fn write_config_parts(dir: &Path, parts: &ConfigParts<'_>) -> PathBuf {
     let config = dir.join("design.toml");
     std::fs::write(
         &config,
         format!(
-            "purpose = \"{purpose}\"\n\
+            "purpose = \"{}\"\n\
+             {}\n\
              [global_placement]\n\
              placer_max_iterations = {PLACER_ITERATIONS}\n\
+             {}\n\
              [input]\n\
-             {input}\
+             {}\
              output_def = {}\n\
-             {tables}",
+             {}",
+            parts.purpose,
+            parts.top_level,
+            parts.global_placement,
+            parts.input,
             quoted(&dir.join("placed.def")),
+            parts.tables,
         ),
     )
     .unwrap();
     config
 }
 
+/// The `[input]` keys of the tiny design read from the DEF at `def`.
+fn tiny_input(def: &Path) -> String {
+    format!(
+        "lef_files = [{}]\ndef_file = {}\n",
+        quoted(&fixture("tiny.lef")),
+        quoted(def),
+    )
+}
+
 /// Writes a config for the tiny design of `purpose` into `dir`, with the
 /// TOML `tables` after its input, and returns its path.
 fn write_config(dir: &Path, purpose: &str, tables: &str) -> PathBuf {
+    write_config_parts(
+        dir,
+        &ConfigParts {
+            purpose,
+            input: tiny_input(&fixture("tiny.def")),
+            tables: tables.to_string(),
+            ..ConfigParts::default()
+        },
+    )
+}
+
+/// A run of a timed design over the clock tree synthesis tests' cells.
+struct TimedRun<'a> {
+    /// The design.
+    def: PathBuf,
+    /// Its constraints.
+    sdc: PathBuf,
+    /// The signal wire's resistance in ohms and capacitance in femtofarads,
+    /// per micron.
+    signal_rc: (f64, f64),
+    /// `[netlist]` keys besides the wires.
+    netlist: &'a str,
+    /// `[global_placement]` keys besides the iteration limit.
+    global_placement: &'a str,
+    /// TOML tables after `[routing]`.
+    tables: &'a str,
+}
+
+impl Default for TimedRun<'_> {
+    fn default() -> Self {
+        Self {
+            def: fixture_of("cli", "timed.def"),
+            sdc: fixture_of("cli", "timed.sdc"),
+            signal_rc: (3.0, 0.1),
+            netlist: "",
+            global_placement: "",
+            tables: "",
+        }
+    }
+}
+
+/// Writes a config for `run`, with the Liberty library of its cells, into
+/// `dir`, and returns its path.
+fn write_timed_run(dir: &Path, run: &TimedRun<'_>) -> PathBuf {
     let input = format!(
-        "lef_files = [{}]\ndef_file = {}\n",
-        quoted(&fixture("tiny.lef")),
-        quoted(&fixture("tiny.def")),
+        "lef_files = [{}]\ndef_file = {}\nliberty_files = [{}]\nsdc_file = {}\n",
+        quoted(&fixture_of("cts", "clock.lef")),
+        quoted(&run.def),
+        quoted(&fixture_of("cts", "clock.lib")),
+        quoted(&run.sdc),
     );
-    write_config_for(dir, purpose, &input, tables)
+    let wire = |layer: &str, (resistance, capacitance): (f64, f64)| {
+        format!(
+            "{{ layer = \"{layer}\", resistance_ohm_per_um = {resistance:?}, \
+             capacitance_ff_per_um = {capacitance:?} }}"
+        )
+    };
+    let tables = format!(
+        "[netlist]\n{}\nsignal_wire = {}\nclock_wire = {}\n\
+         [routing]\nmin_layer = \"metal1\"\ndetailed_iterations = 1\n{}",
+        run.netlist,
+        wire("metal2", run.signal_rc),
+        wire("metal3", (3.0, 0.1)),
+        run.tables,
+    );
+    write_config_parts(
+        dir,
+        &ConfigParts {
+            purpose: "place_and_route",
+            global_placement: run.global_placement,
+            input,
+            tables,
+            ..ConfigParts::default()
+        },
+    )
 }
 
 /// Writes a config for the timed fixture design, with its Liberty library
 /// and constraints and the TOML `netlist` keys, into `dir`, and returns its
 /// path.
 fn write_timed_config(dir: &Path, netlist: &str) -> PathBuf {
-    let input = format!(
-        "lef_files = [{}]\ndef_file = {}\nliberty_files = [{}]\nsdc_file = {}\n",
-        quoted(&fixture_of("cts", "clock.lef")),
-        quoted(&fixture_of("cli", "timed.def")),
-        quoted(&fixture_of("cts", "clock.lib")),
-        quoted(&fixture_of("cli", "timed.sdc")),
-    );
-    let wire = |layer: &str| {
-        format!(
-            "{{ layer = \"{layer}\", resistance_ohm_per_um = 3.0, capacitance_ff_per_um = 0.1 }}"
-        )
-    };
-    let tables = format!(
-        "[netlist]\n{netlist}signal_wire = {}\nclock_wire = {}\n\
-         [routing]\nmin_layer = \"metal1\"\ndetailed_iterations = 1\n",
-        wire("metal2"),
-        wire("metal3"),
-    );
-    write_config_for(dir, "place_and_route", &input, &tables)
+    write_timed_run(
+        dir,
+        &TimedRun {
+            netlist,
+            ..TimedRun::default()
+        },
+    )
 }
 
 /// Writes a config for the Bookshelf fixture design, a placement
-/// benchmark, into `dir`, and returns its path.
-fn write_bookshelf_config(dir: &Path) -> PathBuf {
-    let input = format!(
-        "bookshelf_aux_file = {}\n",
-        quoted(&fixture("bookshelf/tiny.aux"))
-    );
-    write_config_for(dir, "placement", &input, "")
+/// benchmark, with the top-level keys `top_level`, into `dir`, and returns
+/// its path.
+fn write_bookshelf_config(dir: &Path, top_level: &str) -> PathBuf {
+    write_config_parts(
+        dir,
+        &ConfigParts {
+            purpose: "placement",
+            top_level,
+            input: format!(
+                "bookshelf_aux_file = {}\n",
+                quoted(&fixture("bookshelf/tiny.aux"))
+            ),
+            ..ConfigParts::default()
+        },
+    )
 }
 
 fn pare(args: &[&Path]) -> Output {
@@ -235,7 +330,7 @@ fn the_final_wirelength_is_that_of_the_placement_written_out() {
 #[test]
 fn placing_a_bookshelf_design_writes_its_placement_as_pl() {
     let dir = work_dir("bookshelf");
-    let config = write_bookshelf_config(&dir);
+    let config = write_bookshelf_config(&dir, "");
 
     let output = pare(&[Path::new("place"), &config]);
 
@@ -491,7 +586,7 @@ fn checking_an_unrouted_placement_passes_the_placement_and_fails_the_routing() {
 #[test]
 fn checking_a_placement_benchmark_checks_only_its_placement() {
     let dir = work_dir("check-placement");
-    let config = write_bookshelf_config(&dir);
+    let config = write_bookshelf_config(&dir, "");
     let placed = pare(&[Path::new("place"), &config]);
     assert!(placed.status.success(), "{}", printed(&placed));
 
