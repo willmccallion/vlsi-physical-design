@@ -1486,8 +1486,6 @@ impl SegmentBuilder {
         wires: &[usize],
     ) {
         let length_x = (self.root.x - self.target.x).abs();
-        let low_to_high_x = self.root.x < self.target.x;
-        let low_to_high_y = self.root.y < self.target.y;
         let mut connection = 0.0_f64;
         let unit = tree.unit();
         for &wire in wires {
@@ -1499,19 +1497,16 @@ impl SegmentBuilder {
                 connection += location * length;
                 to_last_buffer += location * length;
                 let (x, y) = if connection < length_x {
-                    let x = if low_to_high_x {
-                        self.root.x + connection
-                    } else {
-                        self.root.x - connection
-                    };
-                    (x, self.root.y)
+                    (
+                        step_toward(self.root.x, self.target.x, connection),
+                        self.root.y,
+                    )
                 } else {
-                    let y = if low_to_high_y {
-                        self.root.y + (connection - length_x)
-                    } else {
-                        self.root.y - (connection - length_x)
-                    };
-                    (self.target.x, y)
+                    let along = connection - length_x;
+                    (
+                        self.target.x,
+                        step_toward(self.root.y, self.target.y, along),
+                    )
                 };
                 let at = TreePoint::new(x, y);
                 let legal = tree.legalize_one_buffer(ctx, at, master);
@@ -1553,6 +1548,11 @@ impl SegmentBuilder {
         self.driving = tree.clock.add_subnet(&format!("{}_leaf", self.net_prefix));
         tree.clock.subnets[self.driving].add(buffer);
     }
+}
+
+/// `from` moved `by` toward `to`, away from it when they are equal.
+fn step_toward(from: f64, to: f64, by: f64) -> f64 {
+    if from < to { from + by } else { from - by }
 }
 
 /// The points at distance `target` from `parent` toward `direction`:
