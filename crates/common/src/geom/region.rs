@@ -245,7 +245,9 @@ impl Region {
     /// Whether the region, taken with its boundary, contains all of `rect`,
     /// by the rule of [`Rect::covered_by`].
     pub fn covers_rect(&self, rect: &Rect<Dbu>) -> bool {
-        if rect.width() == Dbu::ZERO || rect.height() == Dbu::ZERO {
+        // The sweep finds no slab inside a rectangle without width; one
+        // without height it covers by each slab's closed spans.
+        if rect.width() == Dbu::ZERO {
             return rect.covered_by(&self.rectangles().collect::<Vec<_>>());
         }
         let mut reached = rect.min.x;
