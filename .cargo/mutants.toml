@@ -57,4 +57,6 @@ exclude_re = [
     # Equal values are already fuzzily equal, so the strict side of a fuzzy bound cannot tell.
     "replace > with >= in fuzzy_ge",
     "replace < with <= in fuzzy_le",
+    # A buffer exactly at a branch's corner lies on both of its legs.
+    "replace < with <= in SegmentBuilder::build",
 ]
