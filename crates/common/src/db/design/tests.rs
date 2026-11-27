@@ -129,3 +129,107 @@ fn tracks_whose_wire_would_leave_the_die_are_dropped() {
 
     assert_eq!(db.layer_tracks(m3), coords(&[100, 150, 5850, 5900]));
 }
+
+#[test]
+fn a_row_of_sites_stacked_upward_spans_each_step_and_its_last_site() {
+    let row = Row {
+        num_x: 1,
+        num_y: 3,
+        step: pt(0, 2000),
+        ..tiny().rows[0].clone()
+    };
+
+    // The core site is 200 by 2000.
+    assert_eq!(row.bbox(&tiny().library), rect(0, 0, 200, 6000));
+}
+
+/// The cell named `name`.
+fn cell(db: &NetlistDB, name: &str) -> CellId {
+    db.cell_id(name).unwrap()
+}
+
+#[test]
+fn a_placed_cell_covers_its_macro_from_its_location() {
+    let db = tiny();
+    let u1 = cell(&db, "u1");
+
+    assert_eq!(db.num_cells(), 8);
+    assert_eq!(db.cell_size(u1), pt(400, 2000));
+    assert_eq!(db.cell_bbox(u1), rect(200, 0, 600, 2000));
+}
+
+#[test]
+fn the_core_is_the_box_around_the_rows_not_of_pad_sites() {
+    let mut db = tiny();
+    db.rows.truncate(1);
+    let core_rows = db.core_area();
+    let site = db.rows[0].site;
+    db.library.sites[site].class = SiteClass::Pad;
+
+    let pad_rows = db.core_area();
+
+    assert_eq!(core_rows, rect(0, 0, 6000, 2000));
+    assert_eq!(pad_rows, db.die_area);
+}
+
+#[test]
+fn a_layers_one_track_pattern_sets_its_spacing_and_tracks() {
+    let db = tiny();
+    let m3 = db.library.routing_layer_id("M3").unwrap();
+
+    assert_eq!(db.average_track_spacing(m3), Dbu::new(400));
+    assert_eq!(
+        db.layer_tracks(m3),
+        coords(&(0..15).map(|k| 200 + 400 * k).collect::<Vec<_>>())
+    );
+}
+
+#[test]
+fn the_span_of_several_track_patterns_runs_from_their_first_track() {
+    let mut db = tiny();
+    let m3 = db.library.routing_layer_id("M3").unwrap();
+    db.tracks = vec![y_tracks(m3, 100, 3, 10), y_tracks(m3, 105, 2, 10)];
+
+    assert_eq!(db.average_track_spacing(m3), Dbu::new(4));
+}
+
+#[test]
+fn a_layer_without_tracks_or_pitch_has_no_tracks() {
+    let mut db = tiny();
+    db.tracks.clear();
+    let m3 = db.library.routing_layer_id("M3").unwrap();
+    db.library.routing_layers[m3].pitch_y = Dbu::ZERO;
+
+    assert_eq!(db.layer_tracks(m3), Vec::new());
+}
+
+/// The connection named `name`, as [`NetlistDB::pin_name`] gives it.
+fn pin(db: &NetlistDB, name: &str) -> PinId {
+    db.pins.ids().find(|&p| db.pin_name(p) == name).unwrap()
+}
+
+#[test]
+fn a_cell_pins_shapes_are_placed_with_its_cell() {
+    let db = tiny();
+
+    let rects: Vec<Rect<Dbu>> = db
+        .pin_shapes(pin(&db, "u1/Y"))
+        .iter()
+        .map(|s| s.rect)
+        .collect();
+
+    assert_eq!(
+        rects,
+        [rect(450, 200, 550, 1800), rect(450, 1000, 500, 1100)]
+    );
+}
+
+#[test]
+fn a_pin_sits_at_the_mean_of_its_shapes_corners_truncated() {
+    let db = tiny();
+
+    let positions = ["u1/A", "u1/Y", "PIN in"].map(|name| db.average_pin_position(pin(&db, name)));
+
+    // u1/Y's corners average to x 487.5; the pin `in` is turned about its point.
+    assert_eq!(positions, [pt(300, 500), pt(487, 1025), pt(1100, 5900)]);
+}
