@@ -462,17 +462,21 @@ fn balanced_slow_grid(arrival: Arrival) -> (String, usize) {
     let (db, lib, constraints) = load(16, 16, false);
     let text = with_slow_flops(design(16, 16, false));
     let db = def::parse_str(&text, Path::new("grid.def"), db.library).unwrap();
-    balanced(db, &lib, &constraints, arrival)
+    balanced(db, &lib, &constraints, (arrival, CLOCK_WIRE_FF))
 }
 
-/// The trees of `db` synthesized and balanced with the clock arriving at
-/// each pin at `arrival` of it: the trees as text and how many delay
-/// buffers went in.
+/// The clock wire's capacitance in the generated designs, femtofarads
+/// per micron.
+const CLOCK_WIRE_FF: f64 = 0.11;
+
+/// The trees of `db` synthesized on clock wire of `clock_wire_ff` per
+/// micron and balanced with the clock arriving at each pin at `arrival` of
+/// it: the trees as text and how many delay buffers went in.
 fn balanced(
     mut db: NetlistDB,
     lib: &Liberty,
     constraints: &Sdc,
-    arrival: Arrival,
+    (arrival, clock_wire_ff): (Arrival, f64),
 ) -> (String, usize) {
     let link = Link::new(&db, lib, &[]).unwrap();
     let clocks = clock_network(&db, &link, constraints);
@@ -481,7 +485,7 @@ fn balanced(
         sdc: constraints,
         clocks: &clocks,
         signal_rc: wire(&db, "metal2", 3.5, 0.1),
-        clock_rc: wire(&db, "metal3", 1.5, 0.11),
+        clock_rc: wire(&db, "metal3", 1.5, clock_wire_ff),
         max_wire_length: None,
         options: CtsOptions::default(),
     };
@@ -511,6 +515,9 @@ fn arrival_by_distance(db: &NetlistDB, pin: PinId) -> Seconds {
 fn slow_arrival_by_distance(db: &NetlistDB, pin: PinId) -> Seconds {
     Seconds::new(distance_from_port(db, pin) * 4e-15)
 }
+
+/// [`slow_arrival_by_distance`] at every pin.
+const SLOW_ARRIVAL: Arrival = |db, pin| Some(slow_arrival_by_distance(db, pin));
 
 #[test]
 fn the_faster_tree_of_a_clock_is_delayed_as_it_always_is() {
@@ -575,9 +582,7 @@ fn gated_slow_grid() -> (NetlistDB, Liberty, Sdc) {
 fn the_trees_behind_a_clock_gate_are_delayed_as_they_always_are() {
     let (db, lib, constraints) = gated_slow_grid();
 
-    let (trees, inserted) = balanced(db, &lib, &constraints, |db, pin| {
-        Some(slow_arrival_by_distance(db, pin))
-    });
+    let (trees, inserted) = balanced(db, &lib, &constraints, (SLOW_ARRIVAL, CLOCK_WIRE_FF));
 
     assert_golden(
         "gated_slow_grid_balanced.txt",
@@ -600,10 +605,22 @@ fn a_tree_whose_sinks_have_no_arrival_is_left_out_of_the_balance() {
         }
     };
 
-    let (trees, inserted) = balanced(db, &lib, &constraints, slow_unknown);
+    let (trees, inserted) = balanced(db, &lib, &constraints, (slow_unknown, CLOCK_WIRE_FF));
 
     assert_golden(
         "gated_slow_grid_unknown_slow.txt",
+        &format!("{inserted} delay buffers\n{trees}"),
+    );
+}
+
+#[test]
+fn a_heavy_clock_wire_slows_each_delay_buffer_by_the_wire_to_the_next() {
+    let (db, lib, constraints) = gated_slow_grid();
+
+    let (trees, inserted) = balanced(db, &lib, &constraints, (SLOW_ARRIVAL, 5.0));
+
+    assert_golden(
+        "gated_slow_grid_heavy_wire.txt",
         &format!("{inserted} delay buffers\n{trees}"),
     );
 }
@@ -614,9 +631,7 @@ fn a_gate_driving_a_lone_flop_is_timed_through_to_the_flop() {
     // tree over the gate has one child and its arrival is the flop's.
     let (db, lib, constraints) = parsed(&gated_grid_text(1..256));
 
-    let (trees, inserted) = balanced(db, &lib, &constraints, |db, pin| {
-        Some(slow_arrival_by_distance(db, pin))
-    });
+    let (trees, inserted) = balanced(db, &lib, &constraints, (SLOW_ARRIVAL, CLOCK_WIRE_FF));
 
     assert_golden(
         "gated_lone_flop_balanced.txt",

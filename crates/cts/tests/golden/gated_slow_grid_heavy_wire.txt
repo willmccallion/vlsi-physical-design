@@ -1,0 +1,260 @@
+77 delay buffers
+CtsSummary {
+    trees: 4,
+    sinks: 257,
+    buffers: 40,
+    nets: 40,
+    dummies: 8,
+    clones: 0,
+    ndr_nets: 10,
+    root_buffer: "CLKBUF_X3",
+    sink_buffer: "CLKBUF_X3",
+}
+cell clkbuf_regs_0_core_clock CLKBUF_X3 87730 339000 N
+cell clkbuf_regs_1_core_clock CLKBUF_X3 182730 171000 N
+cell clkbuf_0_clk CLKBUF_X3 181530 171000 N
+cell clkbuf_1_0_0_clk CLKBUF_X3 167277 184747 N
+cell clkbuf_1_1_0_clk CLKBUF_X3 209529 171000 N
+cell clkload0 CLKBUF_X3 167277 184747 N
+cell clkbuf_0_clk_regs CLKBUF_X3 87730 339000 N
+cell clkbuf_1_0_0_clk_regs CLKBUF_X3 52730 339000 N
+cell clkbuf_1_1_0_clk_regs CLKBUF_X3 122730 339000 N
+cell clkbuf_0_clk_n CLKBUF_X3 182730 14200 N
+cell clkbuf_1_0_0_clk_n CLKBUF_X3 154730 14200 N
+cell clkbuf_1_1_0_clk_n CLKBUF_X3 210729 14200 N
+cell clkload1 INV_X1 210729 14200 N
+cell clkbuf_0_clk_n_regs CLKBUF_X3 182730 171000 N
+cell clkbuf_1_0_0_clk_n_regs CLKBUF_X3 154730 171000 N
+cell clkbuf_1_1_0_clk_n_regs CLKBUF_X3 210729 171000 N
+cell clkbuf_2_0_0_clk_n_regs CLKBUF_X3 90197 169250 N
+cell clkbuf_2_1_0_clk_n_regs CLKBUF_X3 88929 189199 N
+cell clkbuf_2_2_0_clk_n_regs CLKBUF_X3 277065 153335 N
+cell clkbuf_2_3_0_clk_n_regs CLKBUF_X3 277065 188664 N
+cell clkbuf_3_0_0_clk_n_regs CLKBUF_X3 62197 113250 N
+cell clkbuf_3_1_0_clk_n_regs CLKBUF_X3 118197 113250 N
+cell clkbuf_3_2_0_clk_n_regs CLKBUF_X3 60929 245199 N
+cell clkbuf_3_3_0_clk_n_regs CLKBUF_X3 116929 245199 N
+cell clkbuf_3_4_0_clk_n_regs CLKBUF_X3 249065 97335 N
+cell clkbuf_3_5_0_clk_n_regs CLKBUF_X3 305065 97335 N
+cell clkbuf_3_6_0_clk_n_regs CLKBUF_X3 249065 244664 N
+cell clkbuf_3_7_0_clk_n_regs CLKBUF_X3 305065 244664 N
+cell clkbuf_4_0__f_clk_n_regs CLKBUF_X3 40930 78517 N
+cell clkbuf_4_1__f_clk_n_regs CLKBUF_X3 40864 130103 N
+cell clkbuf_4_2__f_clk_n_regs CLKBUF_X3 135468 76552 N
+cell clkbuf_4_3__f_clk_n_regs CLKBUF_X3 135484 130536 N
+cell clkbuf_4_4__f_clk_n_regs CLKBUF_X3 39553 223823 N
+cell clkbuf_4_5__f_clk_n_regs CLKBUF_X3 39061 275960 N
+cell clkbuf_4_6__f_clk_n_regs CLKBUF_X3 136661 225467 N
+cell clkbuf_4_7__f_clk_n_regs CLKBUF_X3 137413 274998 N
+cell clkbuf_4_8__f_clk_n_regs CLKBUF_X3 228533 66519 N
+cell clkbuf_4_9__f_clk_n_regs CLKBUF_X3 229169 117231 N
+cell clkbuf_4_10__f_clk_n_regs CLKBUF_X3 326383 65991 N
+cell clkbuf_4_11__f_clk_n_regs CLKBUF_X3 325899 118169 N
+cell clkbuf_4_12__f_clk_n_regs CLKBUF_X3 229169 224768 N
+cell clkbuf_4_13__f_clk_n_regs CLKBUF_X3 228533 275480 N
+cell clkbuf_4_14__f_clk_n_regs CLKBUF_X3 325899 223830 N
+cell clkbuf_4_15__f_clk_n_regs CLKBUF_X3 326383 276008 N
+cell clkload2 INV_X1 39061 275960 N
+cell clkload3 INV_X1 137413 274998 N
+cell clkload4 INV_X1 228533 66519 N
+cell clkload5 INV_X1 326383 65991 N
+cell clkload6 INV_X1 228533 275480 N
+cell clkload7 INV_X1 326383 276008 N
+cell delaybuf_0_core_clock CLKBUF_X3 221015 205400 N
+cell delaybuf_1_core_clock CLKBUF_X3 232201 238800 N
+cell delaybuf_2_core_clock CLKBUF_X3 243387 272200 N
+cell delaybuf_3_core_clock CLKBUF_X3 254573 305600 N
+cell delaybuf_4_core_clock CLKBUF_X3 221248 197175 N
+cell delaybuf_5_core_clock CLKBUF_X3 232668 222350 N
+cell delaybuf_6_core_clock CLKBUF_X3 244087 247525 N
+cell delaybuf_7_core_clock CLKBUF_X3 229020 204195 N
+cell delaybuf_8_core_clock CLKBUF_X3 248212 236391 N
+cell delaybuf_9_core_clock CLKBUF_X3 11812 3642 N
+cell delaybuf_10_core_clock CLKBUF_X3 21324 4284 N
+cell delaybuf_11_core_clock CLKBUF_X3 30836 4926 N
+cell delaybuf_12_core_clock CLKBUF_X3 40348 5568 N
+cell delaybuf_13_core_clock CLKBUF_X3 49860 6210 N
+cell delaybuf_14_core_clock CLKBUF_X3 59372 6852 N
+cell delaybuf_15_core_clock CLKBUF_X3 68884 7494 N
+cell delaybuf_16_core_clock CLKBUF_X3 78396 8136 N
+cell delaybuf_17_core_clock CLKBUF_X3 87908 8778 N
+cell delaybuf_18_core_clock CLKBUF_X3 97421 9421 N
+cell delaybuf_19_core_clock CLKBUF_X3 106933 10063 N
+cell delaybuf_20_core_clock CLKBUF_X3 116445 10705 N
+cell delaybuf_21_core_clock CLKBUF_X3 125957 11347 N
+cell delaybuf_22_core_clock CLKBUF_X3 135469 11989 N
+cell delaybuf_23_core_clock CLKBUF_X3 144981 12631 N
+cell delaybuf_24_core_clock CLKBUF_X3 154493 13273 N
+cell delaybuf_25_core_clock CLKBUF_X3 164005 13915 N
+cell delaybuf_26_core_clock CLKBUF_X3 173517 14557 N
+cell delaybuf_27_core_clock CLKBUF_X3 157854 174997 N
+cell delaybuf_28_core_clock CLKBUF_X3 148132 164247 N
+cell delaybuf_29_core_clock CLKBUF_X3 138410 153497 N
+cell delaybuf_30_core_clock CLKBUF_X3 128688 142747 N
+cell delaybuf_31_core_clock CLKBUF_X3 118966 131997 N
+cell delaybuf_32_core_clock CLKBUF_X3 109243 121248 N
+cell delaybuf_33_core_clock CLKBUF_X3 99521 110498 N
+cell delaybuf_34_core_clock CLKBUF_X3 89799 99748 N
+cell delaybuf_35_core_clock CLKBUF_X3 80077 88998 N
+cell delaybuf_36_core_clock CLKBUF_X3 70355 78248 N
+cell delaybuf_37_core_clock CLKBUF_X3 60633 67498 N
+cell delaybuf_38_core_clock CLKBUF_X3 50910 56749 N
+cell delaybuf_39_core_clock CLKBUF_X3 41188 45999 N
+cell delaybuf_40_core_clock CLKBUF_X3 31466 35249 N
+cell delaybuf_41_core_clock CLKBUF_X3 21744 24499 N
+cell delaybuf_42_core_clock CLKBUF_X3 12022 13749 N
+cell delaybuf_43_core_clock CLKBUF_X3 169789 203684 N
+cell delaybuf_44_core_clock CLKBUF_X3 172002 221622 N
+cell delaybuf_45_core_clock CLKBUF_X3 174214 239560 N
+cell delaybuf_46_core_clock CLKBUF_X3 172896 202966 N
+cell delaybuf_47_core_clock CLKBUF_X3 178215 220185 N
+cell delaybuf_48_core_clock CLKBUF_X3 183535 237404 N
+cell delaybuf_49_core_clock CLKBUF_X3 188854 254622 N
+cell delaybuf_50_core_clock CLKBUF_X3 181182 172624 N
+cell delaybuf_51_core_clock CLKBUF_X3 180534 173249 N
+cell delaybuf_52_core_clock CLKBUF_X3 179886 173874 N
+cell delaybuf_53_core_clock CLKBUF_X3 179238 174499 N
+cell delaybuf_54_core_clock CLKBUF_X3 178590 175124 N
+cell delaybuf_55_core_clock CLKBUF_X3 177942 175749 N
+cell delaybuf_56_core_clock CLKBUF_X3 177294 176374 N
+cell delaybuf_57_core_clock CLKBUF_X3 176647 176998 N
+cell delaybuf_58_core_clock CLKBUF_X3 175999 177623 N
+cell delaybuf_59_core_clock CLKBUF_X3 175351 178248 N
+cell delaybuf_60_core_clock CLKBUF_X3 174703 178873 N
+cell delaybuf_61_core_clock CLKBUF_X3 174055 179498 N
+cell delaybuf_62_core_clock CLKBUF_X3 173407 180123 N
+cell delaybuf_63_core_clock CLKBUF_X3 172759 180748 N
+cell delaybuf_64_core_clock CLKBUF_X3 172112 181372 N
+cell delaybuf_65_core_clock CLKBUF_X3 171464 181997 N
+cell delaybuf_66_core_clock CLKBUF_X3 170816 182622 N
+cell delaybuf_67_core_clock CLKBUF_X3 170168 183247 N
+cell delaybuf_68_core_clock CLKBUF_X3 169520 183872 N
+cell delaybuf_69_core_clock CLKBUF_X3 168872 184497 N
+cell delaybuf_70_core_clock CLKBUF_X3 168224 185122 N
+cell delaybuf_71_core_clock CLKBUF_X3 184004 48601 N
+cell delaybuf_72_core_clock CLKBUF_X3 168008 97167 N
+cell delaybuf_73_core_clock CLKBUF_X3 152012 145734 N
+cell delaybuf_74_core_clock CLKBUF_X3 136017 194300 N
+cell delaybuf_75_core_clock CLKBUF_X3 120021 242867 N
+cell delaybuf_76_core_clock CLKBUF_X3 104025 291433 N
+net clk CTS_NDR_0 PIN clk clkbuf_0_clk/A delaybuf_71_core_clock/A
+net clk_n CTS_NDR_2 clkbuf_regs_1_core_clock/A clkgate/Z delaybuf_9_core_clock/A
+net clk_n_regs CTS_NDR_3 clkbuf_0_clk_n_regs/A clkbuf_regs_1_core_clock/Z
+net clk_regs CTS_NDR_1 clkbuf_0_clk_regs/A clkbuf_regs_0_core_clock/Z
+net clknet_0_clk CTS_NDR_0 clkbuf_0_clk/Z clkbuf_1_1_0_clk/A delaybuf_50_core_clock/A
+net clknet_0_clk_n CTS_NDR_2 clkbuf_0_clk_n/Z clkbuf_1_0_0_clk_n/A clkbuf_1_1_0_clk_n/A
+net clknet_0_clk_n_regs CTS_NDR_3 clkbuf_0_clk_n_regs/Z clkbuf_1_0_0_clk_n_regs/A clkbuf_1_1_0_clk_n_regs/A
+net clknet_0_clk_regs CTS_NDR_1 clkbuf_0_clk_regs/Z clkbuf_1_0_0_clk_regs/A clkbuf_1_1_0_clk_regs/A
+net clknet_1_0_0_clk - clkbuf_1_0_0_clk/Z clkload0/A delaybuf_46_core_clock/A ff250/CK
+net clknet_1_0_0_clk_n - clkbuf_1_0_0_clk_n/Z ff0/CK ff1/CK ff16/CK ff17/CK ff18/CK ff19/CK ff2/CK ff20/CK ff21/CK ff22/CK ff3/CK ff4/CK ff5/CK ff6/CK
+net clknet_1_0_0_clk_n_regs CTS_NDR_3 clkbuf_1_0_0_clk_n_regs/Z clkbuf_2_0_0_clk_n_regs/A clkbuf_2_1_0_clk_n_regs/A
+net clknet_1_0_0_clk_regs - clkbuf_1_0_0_clk_regs/Z ff240/CK ff241/CK ff242/CK ff243/CK
+net clknet_1_1_0_clk - clkbuf_1_1_0_clk/Z delaybuf_7_core_clock/A ff254/CK ff255/CK
+net clknet_1_1_0_clk_n - clkbuf_1_1_0_clk_n/Z clkload1/A ff10/CK ff11/CK ff12/CK ff13/CK ff14/CK ff15/CK ff23/CK ff7/CK ff8/CK ff9/CK
+net clknet_1_1_0_clk_n_regs CTS_NDR_3 clkbuf_1_1_0_clk_n_regs/Z clkbuf_2_2_0_clk_n_regs/A clkbuf_2_3_0_clk_n_regs/A
+net clknet_1_1_0_clk_regs - clkbuf_1_1_0_clk_regs/Z ff244/CK ff245/CK ff246/CK ff247/CK
+net clknet_2_0_0_clk_n_regs - clkbuf_2_0_0_clk_n_regs/Z clkbuf_3_0_0_clk_n_regs/A clkbuf_3_1_0_clk_n_regs/A
+net clknet_2_1_0_clk_n_regs - clkbuf_2_1_0_clk_n_regs/Z clkbuf_3_2_0_clk_n_regs/A clkbuf_3_3_0_clk_n_regs/A
+net clknet_2_2_0_clk_n_regs - clkbuf_2_2_0_clk_n_regs/Z clkbuf_3_4_0_clk_n_regs/A clkbuf_3_5_0_clk_n_regs/A
+net clknet_2_3_0_clk_n_regs - clkbuf_2_3_0_clk_n_regs/Z clkbuf_3_6_0_clk_n_regs/A clkbuf_3_7_0_clk_n_regs/A
+net clknet_3_0_0_clk_n_regs - clkbuf_3_0_0_clk_n_regs/Z clkbuf_4_0__f_clk_n_regs/A clkbuf_4_1__f_clk_n_regs/A
+net clknet_3_1_0_clk_n_regs - clkbuf_3_1_0_clk_n_regs/Z clkbuf_4_2__f_clk_n_regs/A clkbuf_4_3__f_clk_n_regs/A
+net clknet_3_2_0_clk_n_regs - clkbuf_3_2_0_clk_n_regs/Z clkbuf_4_4__f_clk_n_regs/A clkbuf_4_5__f_clk_n_regs/A
+net clknet_3_3_0_clk_n_regs - clkbuf_3_3_0_clk_n_regs/Z clkbuf_4_6__f_clk_n_regs/A clkbuf_4_7__f_clk_n_regs/A
+net clknet_3_4_0_clk_n_regs - clkbuf_3_4_0_clk_n_regs/Z clkbuf_4_8__f_clk_n_regs/A clkbuf_4_9__f_clk_n_regs/A
+net clknet_3_5_0_clk_n_regs - clkbuf_3_5_0_clk_n_regs/Z clkbuf_4_10__f_clk_n_regs/A clkbuf_4_11__f_clk_n_regs/A
+net clknet_3_6_0_clk_n_regs - clkbuf_3_6_0_clk_n_regs/Z clkbuf_4_12__f_clk_n_regs/A clkbuf_4_13__f_clk_n_regs/A
+net clknet_3_7_0_clk_n_regs - clkbuf_3_7_0_clk_n_regs/Z clkbuf_4_14__f_clk_n_regs/A clkbuf_4_15__f_clk_n_regs/A
+net clknet_4_0__leaf_clk_n_regs - clkbuf_4_0__f_clk_n_regs/Z ff32/CK ff33/CK ff34/CK ff35/CK ff48/CK ff49/CK ff50/CK ff51/CK ff64/CK ff65/CK ff66/CK ff67/CK
+net clknet_4_10__leaf_clk_n_regs - clkbuf_4_10__f_clk_n_regs/Z clkload5/A ff28/CK ff29/CK ff30/CK ff31/CK ff44/CK ff45/CK ff46/CK ff47/CK ff60/CK ff61/CK ff62/CK ff63/CK
+net clknet_4_11__leaf_clk_n_regs - clkbuf_4_11__f_clk_n_regs/Z ff108/CK ff109/CK ff110/CK ff111/CK ff124/CK ff125/CK ff126/CK ff127/CK ff76/CK ff77/CK ff78/CK ff79/CK ff92/CK ff93/CK ff94/CK ff95/CK
+net clknet_4_12__leaf_clk_n_regs - clkbuf_4_12__f_clk_n_regs/Z ff136/CK ff137/CK ff138/CK ff139/CK ff152/CK ff153/CK ff154/CK ff155/CK ff168/CK ff169/CK ff170/CK ff171/CK ff184/CK ff185/CK ff186/CK ff187/CK
+net clknet_4_13__leaf_clk_n_regs - clkbuf_4_13__f_clk_n_regs/Z clkload6/A ff200/CK ff201/CK ff202/CK ff203/CK ff216/CK ff217/CK ff218/CK ff219/CK ff232/CK ff233/CK ff234/CK ff235/CK
+net clknet_4_14__leaf_clk_n_regs - clkbuf_4_14__f_clk_n_regs/Z ff140/CK ff141/CK ff142/CK ff143/CK ff156/CK ff157/CK ff158/CK ff159/CK ff172/CK ff173/CK ff174/CK ff175/CK ff188/CK ff189/CK ff190/CK ff191/CK
+net clknet_4_15__leaf_clk_n_regs - clkbuf_4_15__f_clk_n_regs/Z clkload7/A ff204/CK ff205/CK ff206/CK ff207/CK ff220/CK ff221/CK ff222/CK ff223/CK ff236/CK ff237/CK ff238/CK ff239/CK
+net clknet_4_1__leaf_clk_n_regs - clkbuf_4_1__f_clk_n_regs/Z ff112/CK ff113/CK ff114/CK ff115/CK ff80/CK ff81/CK ff82/CK ff83/CK ff96/CK ff97/CK ff98/CK ff99/CK
+net clknet_4_2__leaf_clk_n_regs - clkbuf_4_2__f_clk_n_regs/Z ff36/CK ff37/CK ff38/CK ff39/CK ff52/CK ff53/CK ff54/CK ff55/CK ff68/CK ff69/CK ff70/CK ff71/CK
+net clknet_4_3__leaf_clk_n_regs - clkbuf_4_3__f_clk_n_regs/Z ff100/CK ff101/CK ff102/CK ff103/CK ff116/CK ff117/CK ff118/CK ff119/CK ff84/CK ff85/CK ff86/CK ff87/CK
+net clknet_4_4__leaf_clk_n_regs - clkbuf_4_4__f_clk_n_regs/Z ff128/CK ff129/CK ff130/CK ff131/CK ff144/CK ff145/CK ff146/CK ff147/CK ff160/CK ff161/CK ff162/CK ff163/CK ff176/CK ff177/CK ff178/CK ff179/CK
+net clknet_4_5__leaf_clk_n_regs - clkbuf_4_5__f_clk_n_regs/Z clkload2/A ff192/CK ff193/CK ff194/CK ff195/CK ff208/CK ff209/CK ff210/CK ff211/CK ff224/CK ff225/CK ff226/CK ff227/CK
+net clknet_4_6__leaf_clk_n_regs - clkbuf_4_6__f_clk_n_regs/Z ff132/CK ff133/CK ff134/CK ff135/CK ff148/CK ff149/CK ff150/CK ff151/CK ff164/CK ff165/CK ff166/CK ff167/CK ff180/CK ff181/CK ff182/CK ff183/CK
+net clknet_4_7__leaf_clk_n_regs - clkbuf_4_7__f_clk_n_regs/Z clkload3/A ff196/CK ff197/CK ff198/CK ff199/CK ff212/CK ff213/CK ff214/CK ff215/CK ff228/CK ff229/CK ff230/CK ff231/CK
+net clknet_4_8__leaf_clk_n_regs - clkbuf_4_8__f_clk_n_regs/Z clkload4/A ff24/CK ff25/CK ff26/CK ff27/CK ff40/CK ff41/CK ff42/CK ff43/CK ff56/CK ff57/CK ff58/CK ff59/CK
+net clknet_4_9__leaf_clk_n_regs - clkbuf_4_9__f_clk_n_regs/Z ff104/CK ff105/CK ff106/CK ff107/CK ff120/CK ff121/CK ff122/CK ff123/CK ff72/CK ff73/CK ff74/CK ff75/CK ff88/CK ff89/CK ff90/CK ff91/CK
+net delaynet_0_core_clock - delaybuf_0_core_clock/Z delaybuf_1_core_clock/A
+net delaynet_10_core_clock CTS_NDR_2 delaybuf_10_core_clock/Z delaybuf_11_core_clock/A
+net delaynet_11_core_clock CTS_NDR_2 delaybuf_11_core_clock/Z delaybuf_12_core_clock/A
+net delaynet_12_core_clock CTS_NDR_2 delaybuf_12_core_clock/Z delaybuf_13_core_clock/A
+net delaynet_13_core_clock CTS_NDR_2 delaybuf_13_core_clock/Z delaybuf_14_core_clock/A
+net delaynet_14_core_clock CTS_NDR_2 delaybuf_14_core_clock/Z delaybuf_15_core_clock/A
+net delaynet_15_core_clock CTS_NDR_2 delaybuf_15_core_clock/Z delaybuf_16_core_clock/A
+net delaynet_16_core_clock CTS_NDR_2 delaybuf_16_core_clock/Z delaybuf_17_core_clock/A
+net delaynet_17_core_clock CTS_NDR_2 delaybuf_17_core_clock/Z delaybuf_18_core_clock/A
+net delaynet_18_core_clock CTS_NDR_2 delaybuf_18_core_clock/Z delaybuf_19_core_clock/A
+net delaynet_19_core_clock CTS_NDR_2 delaybuf_19_core_clock/Z delaybuf_20_core_clock/A
+net delaynet_1_core_clock - delaybuf_1_core_clock/Z delaybuf_2_core_clock/A
+net delaynet_20_core_clock CTS_NDR_2 delaybuf_20_core_clock/Z delaybuf_21_core_clock/A
+net delaynet_21_core_clock CTS_NDR_2 delaybuf_21_core_clock/Z delaybuf_22_core_clock/A
+net delaynet_22_core_clock CTS_NDR_2 delaybuf_22_core_clock/Z delaybuf_23_core_clock/A
+net delaynet_23_core_clock CTS_NDR_2 delaybuf_23_core_clock/Z delaybuf_24_core_clock/A
+net delaynet_24_core_clock CTS_NDR_2 delaybuf_24_core_clock/Z delaybuf_25_core_clock/A
+net delaynet_25_core_clock CTS_NDR_2 delaybuf_25_core_clock/Z delaybuf_26_core_clock/A
+net delaynet_26_core_clock CTS_NDR_2 clkbuf_0_clk_n/A delaybuf_26_core_clock/Z
+net delaynet_27_core_clock - delaybuf_27_core_clock/Z delaybuf_28_core_clock/A
+net delaynet_28_core_clock - delaybuf_28_core_clock/Z delaybuf_29_core_clock/A
+net delaynet_29_core_clock - delaybuf_29_core_clock/Z delaybuf_30_core_clock/A
+net delaynet_2_core_clock - delaybuf_2_core_clock/Z delaybuf_3_core_clock/A
+net delaynet_30_core_clock - delaybuf_30_core_clock/Z delaybuf_31_core_clock/A
+net delaynet_31_core_clock - delaybuf_31_core_clock/Z delaybuf_32_core_clock/A
+net delaynet_32_core_clock - delaybuf_32_core_clock/Z delaybuf_33_core_clock/A
+net delaynet_33_core_clock - delaybuf_33_core_clock/Z delaybuf_34_core_clock/A
+net delaynet_34_core_clock - delaybuf_34_core_clock/Z delaybuf_35_core_clock/A
+net delaynet_35_core_clock - delaybuf_35_core_clock/Z delaybuf_36_core_clock/A
+net delaynet_36_core_clock - delaybuf_36_core_clock/Z delaybuf_37_core_clock/A
+net delaynet_37_core_clock - delaybuf_37_core_clock/Z delaybuf_38_core_clock/A
+net delaynet_38_core_clock - delaybuf_38_core_clock/Z delaybuf_39_core_clock/A
+net delaynet_39_core_clock - delaybuf_39_core_clock/Z delaybuf_40_core_clock/A
+net delaynet_3_core_clock - delaybuf_3_core_clock/Z ff251/CK
+net delaynet_40_core_clock - delaybuf_40_core_clock/Z delaybuf_41_core_clock/A
+net delaynet_41_core_clock - delaybuf_41_core_clock/Z delaybuf_42_core_clock/A
+net delaynet_42_core_clock - clkgate/A delaybuf_42_core_clock/Z
+net delaynet_43_core_clock - delaybuf_43_core_clock/Z delaybuf_44_core_clock/A
+net delaynet_44_core_clock - delaybuf_44_core_clock/Z delaybuf_45_core_clock/A
+net delaynet_45_core_clock - delaybuf_27_core_clock/A delaybuf_45_core_clock/Z ff248/CK
+net delaynet_46_core_clock - delaybuf_46_core_clock/Z delaybuf_47_core_clock/A
+net delaynet_47_core_clock - delaybuf_47_core_clock/Z delaybuf_48_core_clock/A
+net delaynet_48_core_clock - delaybuf_48_core_clock/Z delaybuf_49_core_clock/A
+net delaynet_49_core_clock - delaybuf_43_core_clock/A delaybuf_49_core_clock/Z ff249/CK
+net delaynet_4_core_clock - delaybuf_4_core_clock/Z delaybuf_5_core_clock/A
+net delaynet_50_core_clock CTS_NDR_0 delaybuf_50_core_clock/Z delaybuf_51_core_clock/A
+net delaynet_51_core_clock CTS_NDR_0 delaybuf_51_core_clock/Z delaybuf_52_core_clock/A
+net delaynet_52_core_clock CTS_NDR_0 delaybuf_52_core_clock/Z delaybuf_53_core_clock/A
+net delaynet_53_core_clock CTS_NDR_0 delaybuf_53_core_clock/Z delaybuf_54_core_clock/A
+net delaynet_54_core_clock CTS_NDR_0 delaybuf_54_core_clock/Z delaybuf_55_core_clock/A
+net delaynet_55_core_clock CTS_NDR_0 delaybuf_55_core_clock/Z delaybuf_56_core_clock/A
+net delaynet_56_core_clock CTS_NDR_0 delaybuf_56_core_clock/Z delaybuf_57_core_clock/A
+net delaynet_57_core_clock CTS_NDR_0 delaybuf_57_core_clock/Z delaybuf_58_core_clock/A
+net delaynet_58_core_clock CTS_NDR_0 delaybuf_58_core_clock/Z delaybuf_59_core_clock/A
+net delaynet_59_core_clock CTS_NDR_0 delaybuf_59_core_clock/Z delaybuf_60_core_clock/A
+net delaynet_5_core_clock - delaybuf_5_core_clock/Z delaybuf_6_core_clock/A
+net delaynet_60_core_clock CTS_NDR_0 delaybuf_60_core_clock/Z delaybuf_61_core_clock/A
+net delaynet_61_core_clock CTS_NDR_0 delaybuf_61_core_clock/Z delaybuf_62_core_clock/A
+net delaynet_62_core_clock CTS_NDR_0 delaybuf_62_core_clock/Z delaybuf_63_core_clock/A
+net delaynet_63_core_clock CTS_NDR_0 delaybuf_63_core_clock/Z delaybuf_64_core_clock/A
+net delaynet_64_core_clock CTS_NDR_0 delaybuf_64_core_clock/Z delaybuf_65_core_clock/A
+net delaynet_65_core_clock CTS_NDR_0 delaybuf_65_core_clock/Z delaybuf_66_core_clock/A
+net delaynet_66_core_clock CTS_NDR_0 delaybuf_66_core_clock/Z delaybuf_67_core_clock/A
+net delaynet_67_core_clock CTS_NDR_0 delaybuf_67_core_clock/Z delaybuf_68_core_clock/A
+net delaynet_68_core_clock CTS_NDR_0 delaybuf_68_core_clock/Z delaybuf_69_core_clock/A
+net delaynet_69_core_clock CTS_NDR_0 delaybuf_69_core_clock/Z delaybuf_70_core_clock/A
+net delaynet_6_core_clock - delaybuf_0_core_clock/A delaybuf_6_core_clock/Z ff252/CK
+net delaynet_70_core_clock CTS_NDR_0 clkbuf_1_0_0_clk/A delaybuf_70_core_clock/Z
+net delaynet_71_core_clock CTS_NDR_0 delaybuf_71_core_clock/Z delaybuf_72_core_clock/A
+net delaynet_72_core_clock CTS_NDR_0 delaybuf_72_core_clock/Z delaybuf_73_core_clock/A
+net delaynet_73_core_clock CTS_NDR_0 delaybuf_73_core_clock/Z delaybuf_74_core_clock/A
+net delaynet_74_core_clock CTS_NDR_0 delaybuf_74_core_clock/Z delaybuf_75_core_clock/A
+net delaynet_75_core_clock CTS_NDR_0 delaybuf_75_core_clock/Z delaybuf_76_core_clock/A
+net delaynet_76_core_clock CTS_NDR_0 clkbuf_regs_0_core_clock/A delaybuf_76_core_clock/Z
+net delaynet_7_core_clock - delaybuf_7_core_clock/Z delaybuf_8_core_clock/A
+net delaynet_8_core_clock - delaybuf_4_core_clock/A delaybuf_8_core_clock/Z ff253/CK
+net delaynet_9_core_clock CTS_NDR_2 delaybuf_10_core_clock/A delaybuf_9_core_clock/Z
