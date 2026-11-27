@@ -151,3 +151,89 @@ fn without_any_fanout_limit_there_is_none() {
 
     assert_eq!(fanout_limit(&lib, id(&lib, 10), None), None);
 }
+
+#[test]
+fn a_derated_limit_equal_to_the_load_does_not_cover_it() {
+    let lib = buffers(&[(79, None), (100, None)], None);
+    let limit = max_cap_limit(&lib, id(&lib, 79));
+    let load = f32::nearest_from(f64::from(limit) * MAX_CAP_DERATE);
+    assert_eq!(
+        f64::from(load).to_bits(),
+        (f64::from(limit) * MAX_CAP_DERATE).to_bits()
+    );
+
+    let best = best_max_cap_buffer(&lib, &[id(&lib, 79), id(&lib, 100)], load);
+
+    assert_eq!(best, Some(id(&lib, 100)));
+}
+
+#[test]
+fn with_no_limit_covering_the_load_the_first_of_the_largest_is_taken() {
+    let lib = liberty::parse_str(
+        "library (x) {
+               cell (P) { pin (A) { direction : input; }
+                 pin (Z) { direction : output; function : \"A\"; max_capacitance : 60; } }
+               cell (Q) { pin (A) { direction : input; }
+                 pin (Z) { direction : output; function : \"A\"; max_capacitance : 60; } }
+               cell (R) { pin (A) { direction : input; }
+                 pin (Z) { direction : output; function : \"A\"; max_capacitance : 10; } }
+             }",
+        Path::new("x.lib"),
+    )
+    .unwrap();
+    let named = |name: &str| lib.buffer_cell(lib.cell_id(name).unwrap()).unwrap();
+    let all = [named("R"), named("P"), named("Q")];
+
+    let best = best_max_cap_buffer(&lib, &all, 1.0);
+
+    assert_eq!(best, Some(named("P")));
+}
+
+/// The fixture design's two buffers, both clock cells, `CLKBUF_X3` first.
+fn clock_cell_buffers() -> Liberty {
+    liberty::parse_str(
+        "library (x) {
+               capacitive_load_unit (1,ff) ;
+               cell (CLKBUF_X3) { area : 1.33 ; is_clock_cell : true ;
+                 pin (A) { direction : input ; capacitance : 1.4 ; }
+                 pin (Z) { direction : output ; function : \"A\" ; max_capacitance : 180.0 ; } }
+               cell (BUF_X1) { area : 0.8 ; is_clock_cell : true ;
+                 pin (A) { direction : input ; capacitance : 0.97 ; }
+                 pin (Z) { direction : output ; function : \"A\" ; max_capacitance : 60.0 ; } }
+             }",
+        Path::new("x.lib"),
+    )
+    .unwrap()
+}
+
+/// The names of the root and sink buffers inferred for the fixture design,
+/// 200 microns a side, with signal wire of `femtofarads_per_micron`.
+fn root_and_sink(lib: &Liberty, femtofarads_per_micron: f64) -> (String, String) {
+    let db = crate::fixtures::design("");
+    let link = Link::new(&db, lib, &[]).unwrap();
+    let signal_rc = WireRc {
+        resistance: OhmsPerMeter::from_ohms_per_micron(1.0),
+        capacitance: FaradsPerMeter::from_femtofarads_per_micron(femtofarads_per_micron),
+        layer: LayerId::new(0),
+    };
+    let buffers = ClockBuffers::infer(&link, &db, &signal_rc).unwrap();
+    let name = |b: BufferCell| lib.cell(b.id).name.clone();
+    (name(buffers.root), name(buffers.sink))
+}
+
+#[test]
+fn the_root_buffer_drives_half_the_cores_wire_and_the_sink_buffer_all_of_it() {
+    let lib = clock_cell_buffers();
+    let picks = [0.002, 0.005, 0.01].map(|cap| root_and_sink(&lib, cap));
+
+    // BUF_X1 covers 0.6 fF derated, CLKBUF_X3 1.8 fF; the core is 200 microns.
+    let named = |root: &str, sink: &str| (root.to_string(), sink.to_string());
+    assert_eq!(
+        picks,
+        [
+            named("BUF_X1", "BUF_X1"),
+            named("BUF_X1", "CLKBUF_X3"),
+            named("CLKBUF_X3", "CLKBUF_X3"),
+        ]
+    );
+}
