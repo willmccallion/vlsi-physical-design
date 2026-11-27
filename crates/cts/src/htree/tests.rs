@@ -729,3 +729,135 @@ fn no_search_leaves_a_buffer_inside_a_blockage() {
         }
     }
 }
+
+/// A seeded tree to build: up to sixty sinks over a core 200 microns a
+/// side, spread wide or packed close, on a grid so that they stack and line
+/// up, some loading more than a sink buffer or delayed inside their cell;
+/// the tree regular or over macros, its sinks clustered or not, under a
+/// fanout limit or none, with a blockage or two now and then.
+struct TreeCase {
+    clock: Clock,
+    tree_type: TreeType,
+    settings: Settings,
+    blockages: Vec<Rect<Dbu>>,
+}
+
+/// A whole number of `step`s below `count`, in database units.
+fn steps(rng: &mut SeededRng, count: u64, step: i64) -> i64 {
+    step * i64::try_from(rng.below(count)).unwrap()
+}
+
+fn random_tree_case(rng: &mut SeededRng) -> TreeCase {
+    let mut clock = Clock::new(NetId::new(0), "clk", "clk");
+    let (origin, step) = (steps(rng, 4, 80_000), rng.pick(&[200, 2000, 8000]));
+    for i in 0..=rng.below(60) {
+        let location = Point::new(
+            Dbu::new(origin + steps(rng, 40, step)),
+            Dbu::new(origin + steps(rng, 40, step)),
+        );
+        clock.add_sink(ClockSink {
+            name: format!("ff{i}/CK"),
+            location,
+            pin: PinId::new(usize::try_from(i).unwrap()),
+            input_cap: Farads32::of(pare_common::units::Farads::new(
+                rng.pick(&[0.0, 1e-15, 4e-15]),
+            )),
+            insertion_delay: Seconds::new(rng.pick(&[0.0, 0.0, 2e-10])),
+        });
+    }
+    let mut settings = Settings::new(CtsOptions {
+        sink_clustering: rng.pick(&[
+            SinkClusteringMode::Clustered,
+            SinkClusteringMode::Unclustered,
+        ]),
+        ..CtsOptions::default()
+    });
+    settings.max_fanout = rng.pick(&[None, Some(4), Some(12)]);
+    let blockages = (0..rng.below(3))
+        .map(|_| {
+            let (x, y) = (steps(rng, 16, 20_000), steps(rng, 16, 20_000));
+            rect(
+                x,
+                y,
+                x + 20_000 + steps(rng, 4, 20_000),
+                y + 20_000 + steps(rng, 4, 20_000),
+            )
+        })
+        .collect();
+    TreeCase {
+        clock,
+        tree_type: rng.pick(&[TreeType::Regular, TreeType::Regular, TreeType::Macro]),
+        settings,
+        blockages,
+    }
+}
+
+/// What building the tree of `case` gives: its buffers and its subnets.
+fn built_tree_lines(case: TreeCase, tech: &TechChar, buffer: BufferCell) -> Vec<String> {
+    let mut buffer_sizes = FxHashMap::default();
+    let _ = buffer_sizes.insert(buffer, Point::new(Dbu::new(1900), Dbu::new(2800)));
+    let ctx = TreeContext {
+        settings: &case.settings,
+        core: rect(0, 0, 400_000, 400_000),
+        dbu: 2000,
+        root_buffer: buffer,
+        sink_buffer: buffer,
+        buffer_sizes: &buffer_sizes,
+        blockages: &case.blockages,
+    };
+    let sinks: Vec<String> = case
+        .clock
+        .sinks
+        .iter()
+        .map(|s| format!("({} {})", s.location.x.get(), s.location.y.get()))
+        .collect();
+    let mut lines = vec![format!(
+        "{:?} {:?} fanout {:?} blockages {:?} sinks {}",
+        case.tree_type,
+        case.settings.sink_clustering,
+        case.settings.max_fanout,
+        case.blockages
+            .iter()
+            .map(|b| (b.min.x.get(), b.min.y.get(), b.max.x.get(), b.max.y.get()))
+            .collect::<Vec<_>>(),
+        sinks.join(" ")
+    )];
+    let mut tree = Builder::new(case.clock, None, tech.length_unit());
+    tree.tree_type = case.tree_type;
+
+    tree.run(&ctx, &mut tech.clone());
+
+    for b in &tree.clock.buffers {
+        lines.push(format!(
+            "  {} at ({} {})",
+            b.name,
+            b.location.x.get(),
+            b.location.y.get()
+        ));
+    }
+    for s in &tree.clock.subnets {
+        lines.push(format!(
+            "  {} leaf {} level {:?}: {:?}",
+            s.name, s.leaf, s.level, s.insts
+        ));
+    }
+    lines
+}
+
+#[test]
+fn seeded_sinks_get_the_trees_they_always_have() {
+    let (tech, buffer) = crate::fixtures::clock_tech();
+    let mut rng = SeededRng::new(53);
+    let lines: Vec<String> = (0..60)
+        .flat_map(|_| built_tree_lines(random_tree_case(&mut rng), &tech, buffer))
+        .collect();
+
+    let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/golden");
+    assert_golden(&dir, "htree_seeded_trees.txt", &(lines.join("\n") + "\n"));
+}
+
+#[test]
+fn values_exactly_the_tolerance_apart_are_not_fuzzily_equal() {
+    assert!(!fuzzy_eq(1e-6, 0.0, 1e-6));
+    assert!(fuzzy_eq(0.5e-6, 0.0, 1e-6));
+}
