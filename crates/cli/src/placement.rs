@@ -18,7 +18,7 @@ use pare_common::db::design::{NetlistDB, PlacementStatus, Renumbering};
 use pare_common::db::indices::{CellId, IdVec, LayerId, NetId};
 use pare_common::db::liberty::MinMax;
 use pare_common::db::writer;
-use pare_common::geom::dbu::Dbu;
+use pare_common::geom::dbu::{Dbu, DbuPerMicron};
 use pare_common::geom::orient::Orientation;
 use pare_common::geom::point::Point;
 use pare_common::units::Seconds;
@@ -447,12 +447,12 @@ fn global_placement(
     let timing = repair
         .filter(|_| gp.timing_driven)
         .and_then(NetlistRepair::timed);
-    let params = GlobalParams {
+    let drivers = Drivers {
         initial_rounds,
         routability,
         timing: timing.as_ref().map(|_| timing_params(gp)),
-        ..global_params(gp, &density)
     };
+    let params = global_params(gp, &density, drivers);
     let steering = match timing {
         Some(repair) => {
             drop(estimator);
@@ -490,18 +490,26 @@ enum Steering<'a> {
     Congestion(Option<Box<GlobalRouteCongestion<'a>>>),
 }
 
-/// The global placer's parameters for the configured placement, without
-/// initial rounds and neither routability- nor timing-driven.
-const fn global_params(gp: &GlobalPlacementConfig, density: &Density) -> GlobalParams {
+/// What a pass steers global placement with besides wirelength and density.
+struct Drivers {
+    /// Rounds of initial placement before the Nesterov iterations.
+    initial_rounds: usize,
+    routability: Option<RoutabilityParams>,
+    timing: Option<TimingParams>,
+}
+
+/// The global placer's parameters for the configured placement, steered by
+/// `drivers`.
+fn global_params(gp: &GlobalPlacementConfig, density: &Density, drivers: Drivers) -> GlobalParams {
     GlobalParams {
         target_density: density.target,
         target_overflow: gp.target_overflow,
         max_iterations: gp.placer_max_iterations,
-        initial_rounds: 0,
+        initial_rounds: drivers.initial_rounds,
         bins: density.bins,
         seed: gp.seed,
-        routability: None,
-        timing: None,
+        routability: drivers.routability,
+        timing: drivers.timing,
     }
 }
 
@@ -903,19 +911,28 @@ impl<'a> GlobalRouteCongestion<'a> {
 
 impl CongestionEstimator for GlobalRouteCongestion<'_> {
     fn congestion(&mut self, centers: &IdVec<CellId, Point<f64>>) -> Vec<f64> {
-        let units = self.db.dbu();
-        let locations: IdVec<CellId, Point<Dbu>> = centers
-            .iter()
-            .zip(&self.sizes)
-            .map(|(c, size)| {
-                Point::new(
-                    units.to_dbu_rounded(size.x.mul_add(-0.5, c.x)),
-                    units.to_dbu_rounded(size.y.mul_add(-0.5, c.y)),
-                )
-            })
-            .collect();
-        self.estimator.congestion(&locations)
+        let corners = lower_left_corners(centers, &self.sizes, self.db.dbu());
+        self.estimator.congestion(&corners)
     }
+}
+
+/// Where each cell's lower-left corner is, from its center and its size, both
+/// in microns.
+fn lower_left_corners(
+    centers: &IdVec<CellId, Point<f64>>,
+    sizes: &IdVec<CellId, Point<f64>>,
+    units: DbuPerMicron,
+) -> IdVec<CellId, Point<Dbu>> {
+    centers
+        .iter()
+        .zip(sizes)
+        .map(|(c, size)| {
+            Point::new(
+                units.to_dbu_rounded(size.x.mul_add(-0.5, c.x)),
+                units.to_dbu_rounded(size.y.mul_add(-0.5, c.y)),
+            )
+        })
+        .collect()
 }
 
 /// What routability-driven placement takes from the router: its gcells
