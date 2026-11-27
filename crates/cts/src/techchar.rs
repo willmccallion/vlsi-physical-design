@@ -245,6 +245,14 @@ impl SegmentLength {
     }
 }
 
+#[cfg(test)]
+impl SegmentLength {
+    /// A length of `units` length units.
+    pub(crate) const fn new(units: f64) -> Self {
+        Self(units)
+    }
+}
+
 /// The delay one length unit of the tree's own buffered clock wire adds.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub(crate) struct WireDelayRate(Seconds);
