@@ -3,6 +3,8 @@
 
 #![allow(clippy::unwrap_used)]
 
+use pare_common::db::design::NetlistDB;
+use pare_common::db::parser::{def, lef};
 use std::path::{Path, PathBuf};
 use std::process::{Command, Output};
 
@@ -304,13 +306,34 @@ fn refining_a_given_placement_reports_it_without_a_global_placement() {
     assert!(placement["final_hpwl_um"].is_number(), "{placement}");
 }
 
+/// The first word after `label` in `line`.
+fn word_after<'a>(line: &'a str, label: &str) -> &'a str {
+    let after = &line[line.find(label).unwrap() + label.len()..];
+    after.split_whitespace().next().unwrap()
+}
+
 /// The last half-perimeter wirelength the run printed.
 fn last_printed_hpwl(output: &Output) -> String {
     const LABEL: &str = "HPWL (um):";
     let printed = printed(output);
     let line = printed.lines().rfind(|line| line.contains(LABEL)).unwrap();
-    let after = &line[line.find(LABEL).unwrap() + LABEL.len()..];
-    after.split_whitespace().next().unwrap().to_string()
+    word_after(line, LABEL).to_string()
+}
+
+/// The value the run printed after `label`, on the first line with it.
+fn printed_stat(printed: &str, label: &str) -> String {
+    let line = printed
+        .lines()
+        .find(|line| line.contains(label))
+        .unwrap_or_else(|| panic!("no {label} in:\n{printed}"));
+    word_after(line, label).to_string()
+}
+
+/// The design of the DEF at `def` over the cells of the LEF at `lef`.
+fn read_design(lef: &Path, def: &Path) -> NetlistDB {
+    let units = def::read_units(def).unwrap();
+    let library = lef::parse_files(&[lef.to_path_buf()], units).unwrap();
+    def::parse(def, library).unwrap()
 }
 
 #[test]
@@ -325,6 +348,14 @@ fn the_final_wirelength_is_that_of_the_placement_written_out() {
     let placement = &read_report(&report)["placement"];
     let final_hpwl = placement["final_hpwl_um"].as_f64().unwrap();
     assert_eq!(format!("{final_hpwl:.0}"), last_printed_hpwl(&output));
+    let written = read_design(&fixture_of("cts", "clock.lef"), &dir.join("placed.def"));
+    let written_hpwl = written
+        .dbu()
+        .to_microns(pare_placer::legalize::opendp::mirror::hpwl(&written));
+    assert!(
+        (final_hpwl - written_hpwl).abs() < 1e-9,
+        "{final_hpwl} {written_hpwl}"
+    );
 }
 
 #[test]
@@ -390,6 +421,20 @@ fn routing_a_placed_design_in_detail_writes_and_checks_the_routed_def() {
     assert!(dir.join("routed.png").exists());
     let report = read_report(&report);
     assert_eq!(report["routing"]["nets"], 5);
+    let written = read_design(&fixture("tiny.lef"), &dir.join("routed.def"));
+    let units = written.dbu();
+    let written_um: f64 = pare_verify::routing::check_routing(&written)
+        .stats
+        .wirelength
+        .iter()
+        .map(|&length| units.to_microns(length))
+        .sum();
+    let reported_um = report["checks"]["wirelength_um"].as_f64().unwrap();
+    assert!(written_um > 0.0);
+    assert!(
+        (reported_um - written_um).abs() < 1e-9,
+        "{reported_um} {written_um}"
+    );
     assert_eq!(
         phase_names(&report),
         ["routing", "verification", "routing output"]
@@ -421,6 +466,7 @@ fn a_saved_routing_state_is_resumed_from() {
     let resumed = route(&[Path::new("--resume"), &state]);
 
     assert!(state.exists(), "{saved}");
+    assert!(!saved.contains("no state was saved"), "{saved}");
     assert!(resumed.contains("Global restored:"), "{resumed}");
 }
 
@@ -468,8 +514,17 @@ fn placing_a_timed_design_repairs_it_and_builds_its_clock_tree() {
         ]
     );
     assert_eq!(report["netlist"]["buffers_removed"], 1);
+    assert_eq!(report["netlist"]["input_buffers"], 1);
+    assert_eq!(report["netlist"]["output_buffers"], 1);
     assert_eq!(report["clock_tree"]["sinks"], 4);
+    assert_eq!(report["clock_tree"]["cloned_inverters"], 0);
+    assert_eq!(report["clock_tree"]["clock_net_repeaters"], 0);
     assert!(report["timing"]["wns_after_ns"].is_number());
+    let placed = std::fs::read_to_string(dir.join("placed.def")).unwrap();
+    assert!(
+        !placed.contains("- b0 "),
+        "the synthesis buffer is left:\n{placed}"
+    );
 }
 
 #[test]
@@ -707,6 +762,93 @@ fn an_image_that_cannot_be_written_fails_the_run() {
         printed(&output).contains(&format!("Error: cannot write {}", image.display())),
         "{}",
         printed(&output)
+    );
+}
+
+#[test]
+fn placing_shows_how_global_placement_ended_and_the_cells_legalization_moved() {
+    let dir = work_dir("place-shown");
+    let config = write_config(&dir, "place_and_route", "");
+
+    let output = pare(&[Path::new("place"), &config]);
+
+    let printed = printed(&output);
+    assert!(output.status.success(), "{printed}");
+    assert!(printed.contains("Final congestion:"), "{printed}");
+    assert!(
+        printed.contains("Stopped at the iteration limit"),
+        "{printed}"
+    );
+    assert!(printed.contains("Legalized 6 cells"), "{printed}");
+    assert!(!printed.contains("Zone "), "{printed}");
+}
+
+#[test]
+fn detailed_routing_shows_the_counts_its_report_records() {
+    let dir = work_dir("route-shown");
+    let (config, placed) = place_tiny(&dir, QUICK_ROUTING);
+    let report = dir.join("report.json");
+
+    let output = pare(&[
+        Path::new("route"),
+        &config,
+        Path::new("--placement"),
+        &placed,
+        Path::new("--report"),
+        &report,
+    ]);
+
+    let printed = printed(&output);
+    let report = read_report(&report);
+    let checks = &report["checks"];
+    assert_eq!(
+        printed_stat(&printed, "Opens:"),
+        checks["opens"].to_string()
+    );
+    assert_eq!(printed_stat(&printed, "Vias:"), checks["vias"].to_string());
+    let violations: u64 = checks["violations"]
+        .as_object()
+        .unwrap()
+        .values()
+        .map(|count| count.as_u64().unwrap())
+        .sum();
+    assert_eq!(
+        printed_stat(&printed, "DRC violations:"),
+        violations.to_string()
+    );
+    assert_eq!(
+        printed_stat(&printed, "Rounds:"),
+        report["routing"]["rounds"].to_string()
+    );
+    assert_eq!(printed.matches("DR Iter").count(), 1, "{printed}");
+}
+
+#[test]
+fn placing_a_timed_design_shows_what_each_repair_did() {
+    let dir = work_dir("timed-shown");
+    let config = write_timed_config(&dir, "");
+    let report = dir.join("report.json");
+
+    let output = pare(&[Path::new("place"), &config, Path::new("--report"), &report]);
+
+    let printed = printed(&output);
+    assert!(output.status.success(), "{printed}");
+    let report = read_report(&report);
+    assert_eq!(
+        printed_stat(&printed, "Slew violations:"),
+        report["netlist"]["slew_violations"].to_string()
+    );
+    assert_eq!(
+        printed_stat(&printed, "Sinks:"),
+        report["clock_tree"]["sinks"].to_string()
+    );
+    assert_eq!(
+        printed_stat(&printed, "Iterations:"),
+        report["timing"]["iterations"].to_string()
+    );
+    assert_eq!(
+        printed_stat(&printed, "Hold buffers:"),
+        report["timing"]["hold_buffers"].to_string()
     );
 }
 
