@@ -28,6 +28,12 @@ impl Farads32 {
         self.0
     }
 
+    /// The larger of `self` and `other`.
+    #[must_use]
+    pub(crate) const fn max(self, other: Self) -> Self {
+        Self(self.0.max(other.0))
+    }
+
     /// The size of the capacitance, whatever its sign.
     #[must_use]
     pub(crate) const fn abs(self) -> Self {
