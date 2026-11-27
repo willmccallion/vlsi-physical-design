@@ -310,3 +310,18 @@ fn clock_layers_must_lie_within_the_signal_layers() {
     assert!(range("max_layer = \"M2\"\nclock_max_layer = \"M3\"").is_err());
     assert!(range("max_layer = \"M3\"\nclock_max_layer = \"M2\"").is_ok());
 }
+
+#[test]
+fn routing_runs_tritonroutes_rounds_and_holds_back_a_quarter_by_default() {
+    let parsed = parse("").unwrap().routing;
+    let built = pare_common::config::RoutingConfig::default();
+
+    for routing in [&parsed, &built] {
+        assert_eq!(
+            (routing.global_iterations, routing.detailed_iterations),
+            (50, 64)
+        );
+        let left = routing.global_capacity_reserve.left();
+        assert!((left - 0.75).abs() < 1e-12, "{left}");
+    }
+}

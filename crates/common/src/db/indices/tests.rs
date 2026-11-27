@@ -96,3 +96,32 @@ fn a_layer_steps_toward_a_target_one_layer_at_a_time() {
     assert_eq!(LayerId(4).toward(LayerId(1)), LayerId(3));
     assert_eq!(LayerId(3).toward(LayerId(3)), LayerId(3));
 }
+
+#[test]
+fn a_table_is_filled_changed_and_copied_entry_by_entry() {
+    let mut names: IdVec<CellId, &str> = IdVec::filled("x", 3);
+
+    names.fill("y");
+    *names.get_mut(CellId(1)).unwrap() = "z";
+    for (id, name) in names.iter_enumerated_mut() {
+        if id == CellId(2) {
+            *name = "w";
+        }
+    }
+    let mut copy: IdVec<CellId, &str> = IdVec::filled("q", 1);
+    copy.clone_from(&names);
+
+    assert_eq!(names.as_slice(), ["y", "z", "w"]);
+    assert_eq!(names.get_mut(CellId(3)), None);
+    assert_eq!(copy.as_slice(), names.as_slice());
+}
+
+#[test]
+fn layers_step_down_one_at_a_time_and_run_up_through_a_top() {
+    assert_eq!(LayerId(3).below(), Some(LayerId(2)));
+    assert_eq!(LayerId(0).below(), None);
+    assert_eq!(
+        LayerId(1).through(LayerId(3)).collect::<Vec<_>>(),
+        [LayerId(1), LayerId(2), LayerId(3)]
+    );
+}
