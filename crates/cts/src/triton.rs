@@ -1033,7 +1033,7 @@ impl Cts<'_> {
     /// dummy cell, as `TritonCTS::writeDummyLoadsToDb`.
     fn write_dummy_loads(&mut self, db: &mut NetlistDB, index: usize) -> Result<usize, CtsError> {
         let loads = self.buffer_loads(db, index);
-        let candidates = self.dummy_candidates();
+        let candidates = dummy_candidates(self.link, &self.setup.buffers.all);
         let mut inserted = 0;
         let subnet_count = self.builders[index].clock.subnets.len();
         for s in 0..subnet_count {
@@ -1136,53 +1136,52 @@ impl Cts<'_> {
         clock.subnets[own].add(dummy_ref);
         Ok(true)
     }
+}
 
-    /// The cells dummy loads are made of, by increasing input capacitance,
-    /// as `TritonCTS::findCandidateDummyCells`: the clock buffers and the
-    /// clock-cell inverters, else the inverters named `CLKINV`, else those
-    /// named `INV`, else every candidate inverter.
-    fn dummy_candidates(&self) -> Vec<BufferCell> {
-        let liberty = self.link.liberty;
-        let mut candidates = self.setup.buffers.all.clone();
-        let inverters: Vec<BufferCell> = (0..liberty.cells.len())
-            .map(LibCellId::new)
-            .filter(|&id| {
-                liberty.cell(id).is_inverter()
-                    && self.link.is_link_cell(id)
-                    && self.link.is_clock_cell_candidate(id)
-            })
-            .filter_map(|id| liberty.buffer_cell(id))
-            .collect();
-        // NOTE: findCandidateDummyCells asks for a case-insensitive regexp, but
-        // `^*CLKINV*$` never compiles and OpenSTA falls back to a case-sensitive
-        // glob; PARE matches without case, as meant.
-        let named = |pattern: &str| -> Vec<BufferCell> {
-            inverters
-                .iter()
-                .copied()
-                .filter(|b| {
-                    liberty
-                        .cell(b.id)
-                        .name
-                        .to_ascii_uppercase()
-                        .contains(pattern)
-                })
-                .collect()
-        };
-        let clock_cells: Vec<BufferCell> = inverters
+/// The cells dummy loads are made of, by increasing input capacitance,
+/// as `TritonCTS::findCandidateDummyCells`: the clock buffers and the
+/// clock-cell inverters, else the inverters named `CLKINV`, else those
+/// named `INV`, else every candidate inverter.
+fn dummy_candidates(link: &Link<'_>, clock_buffers: &[BufferCell]) -> Vec<BufferCell> {
+    let liberty = link.liberty;
+    let mut candidates = clock_buffers.to_vec();
+    let inverters: Vec<BufferCell> = (0..liberty.cells.len())
+        .map(LibCellId::new)
+        .filter(|&id| {
+            liberty.cell(id).is_inverter()
+                && link.is_link_cell(id)
+                && link.is_clock_cell_candidate(id)
+        })
+        .filter_map(|id| liberty.buffer_cell(id))
+        .collect();
+    // NOTE: findCandidateDummyCells asks for a case-insensitive regexp, but
+    // `^*CLKINV*$` never compiles and OpenSTA falls back to a case-sensitive
+    // glob; PARE matches without case, as meant.
+    let named = |pattern: &str| -> Vec<BufferCell> {
+        inverters
             .iter()
             .copied()
-            .filter(|b| liberty.cell(b.id).is_clock_cell)
-            .collect();
-        let chosen = [clock_cells, named("CLKINV"), named("INV")]
-            .into_iter()
-            .find(|c| !c.is_empty())
-            .unwrap_or(inverters);
-        candidates.extend(chosen);
-        candidates
-            .sort_by(|&a, &b| dummy_input_cap(liberty, a).total_cmp(dummy_input_cap(liberty, b)));
-        candidates
-    }
+            .filter(|b| {
+                liberty
+                    .cell(b.id)
+                    .name
+                    .to_ascii_uppercase()
+                    .contains(pattern)
+            })
+            .collect()
+    };
+    let clock_cells: Vec<BufferCell> = inverters
+        .iter()
+        .copied()
+        .filter(|b| liberty.cell(b.id).is_clock_cell)
+        .collect();
+    let chosen = [clock_cells, named("CLKINV"), named("INV")]
+        .into_iter()
+        .find(|c| !c.is_empty())
+        .unwrap_or(inverters);
+    candidates.extend(chosen);
+    candidates.sort_by(|&a, &b| dummy_input_cap(liberty, a).total_cmp(dummy_input_cap(liberty, b)));
+    candidates
 }
 
 /// The input capacitance of a dummy load cell.
