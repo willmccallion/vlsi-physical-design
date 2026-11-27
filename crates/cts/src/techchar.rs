@@ -31,11 +31,11 @@ const CAP_STEPS: usize = 20;
 /// The wire lengths characterized, in characterization units, as
 /// `CtsOptions`' default `charWirelengthIterations`.
 const WIRELENGTH_ITERATIONS: u32 = 4;
-/// The bits of each field of a segment's key, as `TechChar`'s
+/// The bits `TechChar` packs each field of a segment's key into, as its
 /// `NUM_BITS_PER_FIELD`.
 const NUM_BITS_PER_FIELD: u32 = 10;
-/// The largest normalized value a key field holds, as `TechChar`'s
-/// `MAX_NORMALIZED_VAL`.
+/// The largest normalized value the characterization takes, the most a
+/// key field holds, as `TechChar`'s `MAX_NORMALIZED_VAL`.
 const MAX_NORMALIZED: u32 = (1 << NUM_BITS_PER_FIELD) - 1;
 /// Steps of a segment's delay per slew step, as
 /// `TechChar::characterizationPostProcess` normalizes delays.
@@ -78,12 +78,6 @@ impl WireSegment {
     #[must_use]
     pub(crate) const fn is_buffered(&self) -> bool {
         !self.buffer_locations.is_empty()
-    }
-
-    /// The segment's length.
-    #[must_use]
-    pub(crate) fn length_steps(&self) -> LengthSteps {
-        LengthSteps(i64::from(self.length))
     }
 
     /// The load at its far end.
@@ -282,7 +276,7 @@ pub(crate) struct CharSetup<'a> {
 #[derive(Clone, Debug)]
 pub(crate) struct TechChar {
     segments: Vec<WireSegment>,
-    by_key: FxHashMap<u32, Vec<usize>>,
+    by_key: FxHashMap<SegmentKey, Vec<usize>>,
     min_segment_length: LengthSteps,
     max_segment_length: LengthSteps,
     max_capacitance: CapSteps,
@@ -480,7 +474,7 @@ impl TechChar {
         output_slew: SlewSteps,
     ) -> &[usize] {
         self.by_key
-            .get(&key(length, load, output_slew))
+            .get(&SegmentKey::new(length, load, output_slew))
             .map_or(&[], Vec::as_slice)
     }
 
@@ -560,14 +554,10 @@ impl TechChar {
     }
 
     fn push(&mut self, segment: WireSegment) {
-        let k = key(
-            segment.length_steps(),
-            segment.load_steps(),
-            segment.output_slew_steps(),
-        );
+        let key = SegmentKey::of(&segment);
         self.segments.push(segment);
         self.by_key
-            .entry(k)
+            .entry(key)
             .or_default()
             .push(self.segments.len() - 1);
     }
@@ -603,10 +593,35 @@ impl TechChar {
     }
 }
 
-fn key(length: LengthSteps, load: CapSteps, output_slew: SlewSteps) -> u32 {
-    u32::saturating_from(length.get())
-        | (load.get() << NUM_BITS_PER_FIELD)
-        | (output_slew.get() << (2 * NUM_BITS_PER_FIELD))
+/// What the table files a segment under: its length, load and output
+/// slew, each in the eight bits `TechChar::computeKey` takes it in.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+struct SegmentKey {
+    length: u8,
+    load: u8,
+    output_slew: u8,
+}
+
+impl SegmentKey {
+    /// The key a lookup of these steps lands on.
+    // NOTE: kept: computeKey takes eight-bit fields, so a lookup past 255
+    // wraps as the segments' own eight-bit fields do.
+    fn new(length: LengthSteps, load: CapSteps, output_slew: SlewSteps) -> Self {
+        Self {
+            length: u8::wrapping_from(length.get()),
+            load: u8::wrapping_from(load.get()),
+            output_slew: u8::wrapping_from(output_slew.get()),
+        }
+    }
+
+    /// The key `segment` is filed under.
+    const fn of(segment: &WireSegment) -> Self {
+        Self {
+            length: segment.length,
+            load: segment.load,
+            output_slew: segment.output_slew,
+        }
+    }
 }
 
 /// Picks the characterization buffer, the lengths, loads and slews, as
