@@ -413,3 +413,70 @@ fn unit_prefixes_keep_their_case_and_suffixes_do_not() {
     assert_eq!(unit_scale("fF", "f"), Some(1e-15));
     assert_eq!(unit_scale("NS", "s"), None);
 }
+
+/// What `script` evaluates to over the test design: its last command's
+/// result.
+fn eval(script: &str) -> Result<String, ParseError> {
+    let db = design();
+    let mut interpreter = Interpreter {
+        db: &db,
+        units: liberty().units,
+        path: Path::new("t.sdc"),
+        variables: HashMap::new(),
+        sdc: Sdc::default(),
+    };
+    interpreter.eval_script(script, 1)
+}
+
+/// The value `expr` gives for `text`.
+fn expr(text: &str) -> Result<String, ParseError> {
+    eval(&format!("expr {{{text}}}"))
+}
+
+#[test]
+fn integer_arithmetic_stays_integer() {
+    for (text, value) in [
+        ("7 + 2", "9"),
+        ("7 - 2", "5"),
+        ("7 * 2", "14"),
+        ("7 / 2", "3"),
+        ("7 % 3", "1"),
+        ("5-2", "3"),
+        ("2 + 3 * 4", "14"),
+        ("1 - 2", "-1"),
+    ] {
+        assert_eq!(expr(text).unwrap(), value, "{text}");
+    }
+}
+
+#[test]
+fn integer_division_rounds_down_and_the_remainder_takes_the_sign_of_the_divisor() {
+    for (text, value) in [
+        ("-7 / 2", "-4"),
+        ("7 / -2", "-4"),
+        ("-7 / -2", "3"),
+        ("-8 / 2", "-4"),
+        ("-7 % 2", "1"),
+        ("7 % -2", "-1"),
+        ("-7 % -2", "-1"),
+        ("-6 % 3", "0"),
+    ] {
+        assert_eq!(expr(text).unwrap(), value, "{text}");
+    }
+}
+
+#[test]
+fn an_integer_quotient_that_overflows_is_an_error() {
+    assert_eq!(
+        expr("(-9223372036854775807 - 1) / 1").unwrap(),
+        "-9223372036854775808"
+    );
+    assert!(expr("(-9223372036854775807 - 1) / -1").is_err());
+}
+
+#[test]
+fn dividing_by_zero_is_an_error() {
+    for text in ["7 / 0", "7 % 0", "1.5 / 0"] {
+        assert!(expr(text).is_err(), "{text}");
+    }
+}
