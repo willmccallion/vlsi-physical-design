@@ -384,3 +384,63 @@ fn seeded_blocks_merge_into_the_blockages_they_always_have() {
     let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/golden");
     assert_golden(&dir, "merged_blockages.txt", &merged_blockages_text());
 }
+
+/// A library of the fixture buffers and `cells`, Liberty cell text over
+/// the fixture masters.
+fn buffers_and(cells: &str) -> pare_common::db::liberty::Liberty {
+    let src = format!(
+        r#"library (dummies) {{
+  capacitive_load_unit (1,ff) ;
+  cell (CLKBUF_X3) {{ pin (A) {{ direction : input ; capacitance : 1.4 ; }}
+    pin (Z) {{ direction : output ; function : "A" ; }} }}
+  cell (BUF_X1) {{ pin (A) {{ direction : input ; capacitance : 0.97 ; }}
+    pin (Z) {{ direction : output ; function : "A" ; }} }}
+  {cells}
+}}"#
+    );
+    pare_common::db::parser::liberty::parse_str(&src, std::path::Path::new("dummies.lib")).unwrap()
+}
+
+/// The names of the dummy load cells `lib` gives with `CLKBUF_X3` the one
+/// clock buffer and `dont_use` left out.
+fn dummy_cells(lib: &pare_common::db::liberty::Liberty, dont_use: &[&str]) -> Vec<String> {
+    let db = fixtures::design("");
+    let dont_use: Vec<String> = dont_use.iter().map(|s| (*s).to_string()).collect();
+    let link = Link::new(&db, lib, &dont_use).unwrap();
+    let clock_buffer = lib.buffer_cell(lib.cell_id("CLKBUF_X3").unwrap()).unwrap();
+
+    dummy_candidates(&link, &[clock_buffer])
+        .iter()
+        .map(|b| lib.cell(b.id).name.clone())
+        .collect()
+}
+
+const INV_X1: &str = r#"cell (INV_X1) { pin (A) { direction : input ; capacitance : 1.6 ; }
+    pin (ZN) { direction : output ; function : "!A" ; } }"#;
+
+#[test]
+fn dummy_loads_are_the_clock_buffers_and_the_inverters_named_inv_by_input_cap() {
+    assert_eq!(
+        dummy_cells(&buffers_and(INV_X1), &[]),
+        ["CLKBUF_X3", "INV_X1"]
+    );
+}
+
+#[test]
+fn a_dont_use_inverter_is_no_dummy_load() {
+    assert_eq!(
+        dummy_cells(&buffers_and(INV_X1), &["INV_X1"]),
+        ["CLKBUF_X3"]
+    );
+}
+
+#[test]
+fn without_an_inverter_named_inv_every_inverter_but_no_buffer_is_a_dummy_load() {
+    let not_named_inv = r#"cell (AND2_X1) { pin (A) { direction : input ; capacitance : 0.5 ; }
+    pin (Z) { direction : output ; function : "!A" ; } }"#;
+
+    assert_eq!(
+        dummy_cells(&buffers_and(not_named_inv), &[]),
+        ["AND2_X1", "CLKBUF_X3"]
+    );
+}
