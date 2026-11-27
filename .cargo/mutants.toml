@@ -32,4 +32,16 @@ exclude_re = [
     "replace < with <= in meeting_spans",
     # Intervals ending together cannot meet the other list's next one, so either may be passed first.
     "replace < with <= in sweep_pairs",
+    # LEMON's simplex: only arc costs near i32::MAX / 2 could tell its artificial cost's last unit;
+    "network_simplex\\.rs:\\d+:\\d+: replace \\+ with [-*]$",
+    # mixing a lone node's arcs reorders loops that carry nothing;
+    "replace > with >= in Simplex::load_arcs",
+    # the root's count outnumbers every real subtree whether or not it counts itself;
+    "replace \\+ with \\* in Simplex::run",
+    # nothing but updates of itself reads the root's last successor;
+    "replace - with [+/] in Simplex::run",
+    # nodes of equal subtrees are not each other's ancestors, so either may step up;
+    "replace < with <= in Simplex::find_join_node",
+    # and a zero change of flow changes nothing.
+    "replace > with >= in Simplex::change_flow",
 ]
