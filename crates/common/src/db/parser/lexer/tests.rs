@@ -63,3 +63,23 @@ fn an_unterminated_quoted_string_is_an_error_at_its_line() {
 fn a_hash_inside_a_word_is_not_a_comment() {
     assert_eq!(words("net#1 ;"), [("net#1", 1), (";", 1)]);
 }
+
+#[test]
+fn a_comment_may_end_the_source() {
+    assert_eq!(words("END ;\n# last"), [("END", 1), (";", 1)]);
+}
+
+#[test]
+fn lines_count_on_past_a_quoted_string_spanning_lines() {
+    assert_eq!(words("\"a\nb\" next"), [("a\nb", 1), ("next", 2)]);
+}
+
+#[test]
+fn skipping_a_statement_stops_after_its_semicolon() {
+    let mut lexer = Lexer::new("A B C ; D", Path::new("t"));
+    let _ = lexer.next_token();
+
+    lexer.skip_statement().unwrap();
+
+    assert_eq!(lexer.next_token().map(|t| t.text), Some("D"));
+}

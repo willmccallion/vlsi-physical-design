@@ -32,3 +32,8 @@ fn microns_are_exact_at_the_finest_binary_resolution() {
 fn a_resolution_without_exact_decimals_has_no_format() {
     assert!(MicronFormat::new(DbuPerMicron::new(3).unwrap()).is_none());
 }
+
+#[test]
+fn zero_microns_have_no_sign() {
+    assert_eq!(microns(Dbu::ZERO, DbuPerMicron::new(100).unwrap()), "0");
+}
