@@ -444,3 +444,13 @@ fn without_an_inverter_named_inv_every_inverter_but_no_buffer_is_a_dummy_load() 
         ["AND2_X1", "CLKBUF_X3"]
     );
 }
+
+#[test]
+fn blockages_grow_by_half_the_root_buffer_rounded_up() {
+    let size = Point::new(Dbu::new(1900), Dbu::new(2801));
+
+    assert_eq!(
+        blockage_bloat(size, LengthUnit::new(14_000)),
+        Point::new(Dbu::new(950), Dbu::new(1401))
+    );
+}

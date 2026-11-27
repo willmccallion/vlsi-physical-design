@@ -892,14 +892,7 @@ impl Cts<'_> {
                 .ok_or_else(|| CtsError::NoMaster(self.link.liberty.cell(b.id).name.clone()))?;
             let _ = sizes.insert(b, db.library.cell_macro(master).size);
         }
-        let root = sizes[&self.setup.buffers.root];
-        let unit = tech.length_unit().to_f64();
-        let half = |side: Dbu| {
-            Dbu::new(i64::saturating_from(
-                ((side.get() as f64 / unit) * unit / 2.0).ceil(),
-            ))
-        };
-        let bloat = Point::new(half(root.x), half(root.y));
+        let bloat = blockage_bloat(sizes[&self.setup.buffers.root], tech.length_unit());
         let (blockages, macro_diameter) = merge_blockages(db, bloat);
         if let Some(macro_diameter) = macro_diameter
             && self.setup.settings.macro_max_diameter.is_none()
@@ -1307,6 +1300,19 @@ fn long_edge_clusters(tree: &SteinerTree, threshold: Dbu) -> Vec<Vec<usize>> {
         }
     }
     clusters
+}
+
+/// How far each blockage grows before blockages are merged: half the root
+/// buffer's `size` each way, taken through the tree's length `unit` and
+/// rounded up, as `TritonCTS::buildClockTrees` sizes it.
+fn blockage_bloat(size: Point<Dbu>, unit: LengthUnit) -> Point<Dbu> {
+    let unit = unit.to_f64();
+    let half = |side: Dbu| {
+        Dbu::new(i64::saturating_from(
+            ((side.get() as f64 / unit) * unit / 2.0).ceil(),
+        ))
+    };
+    Point::new(half(size.x), half(size.y))
 }
 
 /// The placed blocks and hard placement blockages, each group closer than a
