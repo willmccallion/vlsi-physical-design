@@ -1,5 +1,5 @@
 use super::*;
-use crate::testing::{tiny, tiny_config};
+use crate::testing::{scratch_dir, timed, timed_config, tiny, tiny_config};
 
 #[test]
 fn a_design_placed_by_its_input_leaves_global_routing_to_the_detailed_router() {
@@ -16,4 +16,18 @@ fn a_design_placed_by_its_input_leaves_global_routing_to_the_detailed_router() {
 
     assert!(matches!(routed.stage.start, RouteStart::FromScratch(_)));
     assert!(report.phases.is_empty());
+}
+
+#[test]
+fn a_placed_design_takes_its_leaf_clock_pins_from_the_liberty_its_config_names() {
+    let config = timed_config("", &scratch_dir("flow-leaves"));
+    let design = Design {
+        db: timed(),
+        stage: Loaded,
+    }
+    .placed_by_input();
+
+    let leaves = design.leaf_clock_pins(&config).unwrap();
+
+    assert_ne!(leaves, LeafClockPins::default());
 }
