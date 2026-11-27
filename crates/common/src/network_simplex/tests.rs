@@ -160,3 +160,66 @@ const TIED_FLOWS_DIGEST: u64 = 13_035_736_887_052_952_343;
 fn tied_assignments_keep_the_flows_lemon_chooses() {
     assert_eq!(tied_assignment_flows_digest(), TIED_FLOWS_DIGEST);
 }
+
+/// The next draw below `bound` of the generator `state`.
+fn draw(state: &mut u64, bound: u64) -> u64 {
+    *state = state
+        .wrapping_mul(6_364_136_223_846_793_005)
+        .wrapping_add(1_442_695_040_888_963_407);
+    (*state >> 33) % bound
+}
+
+/// A seeded flow problem: two to eight nodes, the source first and the
+/// target last, and up to sixteen arcs of small or unbounded capacity and
+/// small costs, some negative, so that pivots degenerate and costs tie.
+fn random_network(state: &mut u64) -> (usize, Vec<Arc>, i32) {
+    let small = |state: &mut u64, bound| i32::try_from(draw(state, bound)).unwrap();
+    let nodes = 2 + usize::try_from(draw(state, 7)).unwrap();
+    let count = 1 + draw(state, 16);
+    let arcs = (0..count)
+        .map(|_| {
+            let source = usize::try_from(draw(state, nodes as u64)).unwrap();
+            let target = usize::try_from(draw(state, nodes as u64)).unwrap();
+            let capacity = if draw(state, 8) == 0 {
+                i32::MAX
+            } else {
+                small(state, 5)
+            };
+            arc(source, target, capacity, small(state, 13) - 3)
+        })
+        .collect();
+    (nodes, arcs, small(state, 7))
+}
+
+/// What the simplex makes of seeded flow problems.
+fn network_flows_text() -> String {
+    let mut state = 99;
+    let mut lines = Vec::new();
+    for _ in 0..400 {
+        let (nodes, arcs, supply) = random_network(&mut state);
+        let listed: Vec<String> = arcs
+            .iter()
+            .map(|a| {
+                format!(
+                    "{}>{} cap {} cost {}",
+                    a.source, a.target, a.capacity, a.cost
+                )
+            })
+            .collect();
+        let outcome = match min_cost_flow(nodes, &arcs, 0, nodes - 1, supply) {
+            Ok(flows) => format!("{flows:?}"),
+            Err(e) => format!("{:?} {:?}", e.problem, e.flows),
+        };
+        lines.push(format!(
+            "{nodes} nodes, supply {supply}: {}\n  {outcome}",
+            listed.join(", ")
+        ));
+    }
+    lines.join("\n") + "\n"
+}
+
+#[test]
+fn seeded_networks_flow_as_they_always_have() {
+    let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/golden");
+    crate::testing::assert_golden(&dir, "network_simplex_flows.txt", &network_flows_text());
+}
