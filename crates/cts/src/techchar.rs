@@ -929,12 +929,11 @@ fn patterns(wirelength: u32, unit: u32) -> Vec<Pattern> {
         .collect()
 }
 
-/// The assignments of buffer types to a pattern's `nodes` buffers, in the
-/// order `TechChar` steps through them: every buffer first of the type
-/// `start`, the characterization buffer, then each next number in base
-/// `masters`, the first buffer the lowest digit, that never decreases
-/// along the chain, until there have been as many as there are such
-/// assignments.
+/// The assignments of buffer types to a pattern's `nodes` buffers that
+/// never decrease along the chain, in the order `TechChar` steps through
+/// them: the numbers in base `masters`, the first buffer the lowest digit,
+/// from every buffer of the type `start`, the characterization buffer, on
+/// round to the one before it.
 fn buffer_configs(masters: usize, nodes: usize, start: usize) -> Vec<Vec<usize>> {
     let total = masters.pow(u32::saturating_from(nodes));
     let digits = |mut number: usize| -> Vec<usize> {
@@ -946,23 +945,14 @@ fn buffer_configs(masters: usize, nodes: usize, start: usize) -> Vec<Vec<usize>>
             })
             .collect()
     };
-    let monotonic = |config: &[usize]| config.windows(2).all(|w| w[1] >= w[0]);
-    let count = (0..total).filter(|&n| monotonic(&digits(n))).count();
-    let mut number: usize = (0..nodes)
+    let first: usize = (0..nodes)
         .map(|i| start * masters.pow(u32::saturating_from(i)))
         .sum();
-    let mut configs = vec![digits(number)];
-    while configs.len() < count {
-        loop {
-            number = (number + 1) % total;
-            let config = digits(number);
-            if monotonic(&config) {
-                configs.push(config);
-                break;
-            }
-        }
-    }
-    configs
+    (first..total)
+        .chain(0..first)
+        .map(digits)
+        .filter(|config| config.windows(2).all(|w| w[1] >= w[0]))
+        .collect()
 }
 
 /// Clock wire resistance and capacitance per database unit.
