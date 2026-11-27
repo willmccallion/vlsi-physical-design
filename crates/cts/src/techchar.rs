@@ -331,6 +331,18 @@ struct Measured {
     topology: Vec<Piece>,
 }
 
+impl Measured {
+    /// The key the measurement is grouped under.
+    const fn key(&self) -> CharKey {
+        CharKey {
+            load: self.load,
+            wirelength: self.wirelength,
+            pin_slew: self.pin_slew,
+            total_cap: self.total_cap,
+        }
+    }
+}
+
 /// The key `TritonCTS` groups measurements under, ordered as its map.
 #[derive(Clone, Copy, Debug)]
 struct CharKey {
@@ -437,41 +449,18 @@ struct Plan {
 impl TechChar {
     /// Characterizes the buffers of `setup`, as `TechChar::create`.
     pub fn new(setup: &CharSetup<'_>) -> Result<Self, CtsError> {
-        let liberty = setup.link.liberty;
         let plan = plan(setup)?;
-        let wire = WirePerDbu::of(setup);
         let mut groups: BTreeMap<CharKey, Vec<Measured>> = BTreeMap::new();
-        for &wirelength in &plan.wirelengths {
-            for pattern in patterns(wirelength, plan.char_unit) {
-                let configs =
-                    buffer_configs(setup.masters.len(), pattern.buffers.len(), plan.char_buffer);
-                for config in configs {
-                    let chain = Chain {
-                        liberty,
-                        thresholds: &liberty.thresholds,
-                        masters: setup.masters,
-                        config: &config,
-                        pattern: &pattern,
-                        unit: plan.char_unit,
-                        wire,
-                    };
-                    let topology = chain.topology();
-                    for &load in &plan.loads {
-                        for &in_slew in &plan.slews {
-                            let measured =
-                                chain.measure(&plan, load, in_slew, wirelength, &topology)?;
-                            let key = CharKey {
-                                load: measured.load,
-                                wirelength: measured.wirelength,
-                                pin_slew: measured.pin_slew,
-                                total_cap: measured.total_cap,
-                            };
-                            groups.entry(key).or_default().push(measured);
-                        }
-                    }
+        for_each_chain(setup, &plan, |chain, wirelength| {
+            let topology = chain.topology();
+            for &load in &plan.loads {
+                for &in_slew in &plan.slews {
+                    let measured = chain.measure(&plan, load, in_slew, wirelength, &topology)?;
+                    groups.entry(measured.key()).or_default().push(measured);
                 }
             }
-        }
+            Ok(())
+        })?;
         let measurements: Vec<Measured> = groups.into_values().flatten().collect();
         tabulate(setup, &plan, &measurements)
     }
@@ -863,6 +852,38 @@ fn reduce_or_expand(values: &mut Vec<f32>, limit: usize) {
         let split = f32::midpoint(values[largest], values[largest + 1]);
         values.insert(largest + 1, split);
     }
+}
+
+/// Calls `visit` with each chain `TechChar::create` times and its length,
+/// in its order: every pattern of each characterized length, with each
+/// assignment of buffer types to it.
+fn for_each_chain(
+    setup: &CharSetup<'_>,
+    plan: &Plan,
+    mut visit: impl FnMut(&Chain<'_>, u32) -> Result<(), CtsError>,
+) -> Result<(), CtsError> {
+    let liberty = setup.link.liberty;
+    let wire = WirePerDbu::of(setup);
+    let patterns_by_length = plan.wirelengths.iter().flat_map(|&wirelength| {
+        patterns(wirelength, plan.char_unit)
+            .into_iter()
+            .map(move |pattern| (wirelength, pattern))
+    });
+    for (wirelength, pattern) in patterns_by_length {
+        for config in buffer_configs(setup.masters.len(), pattern.buffers.len(), plan.char_buffer) {
+            let chain = Chain {
+                liberty,
+                thresholds: &liberty.thresholds,
+                masters: setup.masters,
+                config: &config,
+                pattern: &pattern,
+                unit: plan.char_unit,
+                wire,
+            };
+            visit(&chain, wirelength)?;
+        }
+    }
+    Ok(())
 }
 
 /// Every placement of buffers at the nodes of a wire `wirelength` long, a
