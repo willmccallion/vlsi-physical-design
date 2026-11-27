@@ -2,7 +2,9 @@ use super::*;
 use crate::placement::{PlacementStart, run_placement};
 use crate::plan::FlowPlan;
 use crate::repair::Constraints;
-use crate::testing::{cts_fixture, half_height_tiny, scratch_dir, timed, timed_config, tiny};
+use crate::testing::{
+    cts_fixture, half_height_tiny, scratch_dir, timed, timed_config, tiny, tiny_config,
+};
 use pare_common::db::indices::{MacroId, MacroPinId};
 use pare_common::db::parser::{lef, liberty};
 use pare_common::geom::dbu::Dbu;
@@ -41,6 +43,25 @@ fn register_clock_pins_and_the_signal_pins_of_pads_make_clock_nets_leaves() {
     .into_iter()
     .collect();
     assert_eq!(leaves, expected);
+}
+
+#[test]
+fn without_a_repair_the_leaf_clock_pins_come_from_the_liberty_of_the_config() {
+    let config = timed_config("", &scratch_dir("config-leaves"));
+    let db = timed();
+    let liberty = load_liberty(&config.input.liberty_files).unwrap();
+
+    let leaves = design_leaf_clock_pins(&config, &db, None).unwrap();
+
+    assert_eq!(leaves, leaf_clock_pins(&db.library, &liberty));
+    assert_ne!(leaves, LeafClockPins::default());
+}
+
+#[test]
+fn without_liberty_files_no_clock_net_has_leaves() {
+    let leaves = design_leaf_clock_pins(&tiny_config(""), &tiny(), None).unwrap();
+
+    assert_eq!(leaves, LeafClockPins::default());
 }
 
 #[test]
