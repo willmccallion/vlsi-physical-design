@@ -1188,6 +1188,10 @@ impl Liberty {
     }
 }
 
+/// The pins of unknown level beyond which [`FuncExpr::depends_on`] stops
+/// trying their levels and takes the expression to depend on the pin.
+const MAX_FREE_PINS: usize = 16;
+
 /// A three-valued logic level.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Logic {
@@ -1396,35 +1400,22 @@ impl FuncExpr {
             .into_iter()
             .filter(|p| *p != port && !known(p).is_constant())
             .collect();
-        if free.len() > 16 {
+        if free.len() > MAX_FREE_PINS {
             return true;
         }
-        for assignment in 0..(1u32 << free.len()) {
-            let level_of = |p: &str, port_level: Logic| -> Logic {
-                if p == port {
-                    return port_level;
-                }
-                let k = known(p);
-                if k.is_constant() {
-                    return k;
-                }
-                free.iter()
-                    .position(|f| *f == p)
-                    .map_or(Logic::Unknown, |i| {
-                        if (assignment >> i) & 1 == 1 {
-                            Logic::One
-                        } else {
-                            Logic::Zero
-                        }
-                    })
-            };
-            let low = self.eval(&|p| level_of(p, Logic::Zero));
-            let high = self.eval(&|p| level_of(p, Logic::One));
-            if low != high {
-                return true;
-            }
-        }
-        false
+        self.depends_under(port, &free, &|p| known(p))
+    }
+
+    /// Whether the value changes with `port` for some levels of the `free`
+    /// pins, the other pins at `level_of`'s.
+    fn depends_under(&self, port: &str, free: &[&str], level_of: &dyn Fn(&str) -> Logic) -> bool {
+        let Some((&pin, rest)) = free.split_first() else {
+            let value_at = |level| self.eval(&|p| if p == port { level } else { level_of(p) });
+            return value_at(Logic::Zero) != value_at(Logic::One);
+        };
+        [Logic::Zero, Logic::One].into_iter().any(|level| {
+            self.depends_under(port, rest, &|p| if p == pin { level } else { level_of(p) })
+        })
     }
 }
 
