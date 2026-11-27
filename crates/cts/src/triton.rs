@@ -451,12 +451,10 @@ impl Cts<'_> {
             let _ = self.net_builder.entry(input_net).or_insert(b);
         }
         let _ = self.visited.insert(driver_net);
-        let driver = net_cell_pins(db, driver_net).into_iter().find(|&p| {
-            pin_direction(db, p)
-                .is_some_and(|(_, d, u)| d == PinDirection::Output && !u.is_supply())
-        });
         for pin in net_cell_pins(db, driver_net) {
-            if Some(pin) == driver || !is_input_signal(db, pin) || self.is_sink(db, pin) {
+            // NOTE: initOneClockTree also passes over the net's first output,
+            // which isInputSignal already leaves out.
+            if !is_input_signal(db, pin) || self.is_sink(db, pin) {
                 continue;
             }
             let Some((cell, _, _)) = pin_direction(db, pin) else {
@@ -731,7 +729,9 @@ impl Cts<'_> {
         let mut points: Vec<Point<Dbu>> = Vec::new();
         let mut point_pins: BTreeMap<Point<Dbu>, Vec<PinId>> = BTreeMap::new();
         for &pin in &pins {
-            if Some(pin) == driver || !is_input_signal(db, pin) {
+            // NOTE: cloneClockGaters also passes over the net's first output,
+            // which isInputSignal already leaves out.
+            if !is_input_signal(db, pin) {
                 continue;
             }
             let at = db.average_pin_position(pin);
