@@ -1,0 +1,1190 @@
+Regular Clustered fanout Some(12) blockages [] sinks (247000 243000) (245200 240200) (243000 243800) (246800 241800) (243600 243000) (241400 245000) (246200 244200) (246200 243000) (243800 247000) (244800 244600) (244000 244200) (240000 240000) (246600 243400) (247600 242400) (245400 246000) (241400 240000) (240400 241800) (247600 246600) (245000 247600) (244000 241400) (244000 240400) (245400 241400) (247800 246400) (241200 243000) (240000 245600) (244200 246000) (241200 246000) (247600 246800) (246800 247600) (246400 247000) (247600 243400) (242400 246400) (244600 244200) (240600 244600) (247000 243800) (241200 243000) (243400 240800) (240400 242400) (246400 247600) (246800 242200) (244000 245600) (240200 240000) (243200 247200) (243600 244400) (243200 241600) (243400 240600) (246600 246800) (245800 242400) (244600 243400) (243400 241400) (243400 246400) (245000 245600) (244000 242400) (246400 244600)
+  clkbuf_0_clk at (243900 243800)
+  clkbuf_3_0__f_clk at (236216 249580)
+  clkbuf_3_1__f_clk at (242880 230819)
+  clkbuf_3_2__f_clk at (238073 235626)
+  clkbuf_3_3__f_clk at (235066 238633)
+  clkbuf_3_4__f_clk at (251050 250649)
+  clkbuf_3_5__f_clk at (252807 248892)
+  clkbuf_3_6__f_clk at (254392 247307)
+  clkbuf_3_7__f_clk at (249093 252606)
+  clknet_0_clk leaf false level Some(0): [Buffer(0), Buffer(1), Buffer(2), Buffer(3), Buffer(4), Buffer(5), Buffer(6), Buffer(7), Buffer(8)]
+  clknet_3_0__leaf_clk leaf true level None: [Buffer(1), Sink(2), Sink(5), Sink(26), Sink(32), Sink(43), Sink(44), Sink(50)]
+  clknet_3_1__leaf_clk leaf true level None: [Buffer(2), Sink(1), Sink(15), Sink(19), Sink(20), Sink(21), Sink(49), Sink(52)]
+  clknet_3_2__leaf_clk leaf true level None: [Buffer(3), Sink(4), Sink(11), Sink(23), Sink(35), Sink(36), Sink(41), Sink(45)]
+  clknet_3_3__leaf_clk leaf true level None: [Buffer(4), Sink(0), Sink(7), Sink(16), Sink(24), Sink(33), Sink(37)]
+  clknet_3_4__leaf_clk leaf true level None: [Buffer(5), Sink(8), Sink(14), Sink(18), Sink(29), Sink(48), Sink(51), Sink(53)]
+  clknet_3_5__leaf_clk leaf true level None: [Buffer(6), Sink(6), Sink(10), Sink(22), Sink(25), Sink(30), Sink(42), Sink(46)]
+  clknet_3_6__leaf_clk leaf true level None: [Buffer(7), Sink(3), Sink(12), Sink(13), Sink(28), Sink(34), Sink(38), Sink(47)]
+  clknet_3_7__leaf_clk leaf true level None: [Buffer(8), Sink(9), Sink(17), Sink(27), Sink(31), Sink(39), Sink(40)]
+Macro Unclustered fanout Some(4) blockages [] sinks (22000 28000) (68000 18000) (72000 68000) (16000 4000) (72000 6000) (52000 8000) (14000 56000) (48000 50000) (42000 6000) (58000 48000) (74000 44000) (74000 16000) (46000 14000) (24000 62000) (16000 38000) (36000 32000) (22000 62000) (38000 40000) (0 20000) (60000 74000) (40000 36000) (48000 34000) (30000 60000) (38000 64000)
+  clkbuf_0_clk at (37000 39000)
+  clkbuf_3_0__f_clk at (15021 24209)
+  clkbuf_3_1__f_clk at (34892 32338)
+  clkbuf_3_2__f_clk at (19580 60348)
+  clkbuf_3_3__f_clk at (40165 55064)
+  clkbuf_3_4__f_clk at (48713 15604)
+  clkbuf_3_5__f_clk at (60547 20547)
+  clkbuf_3_6__f_clk at (40015 44386)
+  clkbuf_3_7__f_clk at (59928 51548)
+  clknet_0_clk leaf false level Some(0): [Buffer(0), Buffer(1), Buffer(2), Buffer(3), Buffer(4), Buffer(5), Buffer(6), Buffer(7), Buffer(8)]
+  clknet_3_0__leaf_clk leaf true level None: [Buffer(1), Sink(3), Sink(14), Sink(18)]
+  clknet_3_1__leaf_clk leaf true level None: [Buffer(2), Sink(0), Sink(15), Sink(20)]
+  clknet_3_2__leaf_clk leaf true level None: [Buffer(3), Sink(6), Sink(13), Sink(16)]
+  clknet_3_3__leaf_clk leaf true level None: [Buffer(4), Sink(17), Sink(22), Sink(23)]
+  clknet_3_4__leaf_clk leaf true level None: [Buffer(5), Sink(5), Sink(8), Sink(12)]
+  clknet_3_5__leaf_clk leaf true level None: [Buffer(6), Sink(1), Sink(4), Sink(11)]
+  clknet_3_6__leaf_clk leaf true level None: [Buffer(7), Sink(7), Sink(9), Sink(21)]
+  clknet_3_7__leaf_clk leaf true level None: [Buffer(8), Sink(2), Sink(10), Sink(19)]
+Regular Unclustered fanout None blockages [(100000, 280000, 120000, 320000)] sinks (5000 5000) (4800 2800) (7000 2200) (5600 5800) (3200 2800) (1800 400) (1000 4200) (7200 6000) (5600 5800) (2400 2200) (2800 7200) (7600 7200) (6600 1600) (5000 6000) (2400 5600) (4600 5800) (2600 4400) (400 5200) (5800 5200) (6800 4000) (7400 1800) (3600 7200) (5600 4400) (4200 200)
+  clkbuf_0_clk at (4000 3700)
+  clkbuf_1_0__f_clk at (-8039 5660)
+  clkbuf_1_1__f_clk at (12790 8909)
+  clknet_0_clk leaf false level Some(0): [Buffer(0), Buffer(1), Buffer(2)]
+  clknet_1_0__leaf_clk leaf true level None: [Buffer(1), Sink(1), Sink(3), Sink(5), Sink(6), Sink(9), Sink(13), Sink(16), Sink(17), Sink(21), Sink(23)]
+  clknet_1_1__leaf_clk leaf true level None: [Buffer(2), Sink(0), Sink(2), Sink(4), Sink(7), Sink(8), Sink(10), Sink(11), Sink(12), Sink(14), Sink(15), Sink(18), Sink(19), Sink(20), Sink(22)]
+Regular Clustered fanout Some(12) blockages [(20000, 300000, 60000, 320000), (240000, 280000, 260000, 300000)] sinks (46000 22000) (76000 42000) (76000 18000) (18000 68000) (30000 76000) (38000 34000) (42000 64000) (58000 60000)
+  clkbuf_0_clk at (47000 47000)
+  clkbuf_1_0__f_clk at (52599 38599)
+  clkbuf_1_1__f_clk at (42333 56333)
+  clknet_0_clk leaf false level Some(0): [Buffer(0), Buffer(1), Buffer(2)]
+  clknet_1_0__leaf_clk leaf true level None: [Buffer(1), Sink(0), Sink(1), Sink(2), Sink(5)]
+  clknet_1_1__leaf_clk leaf true level None: [Buffer(2), Sink(3), Sink(4), Sink(6), Sink(7)]
+Regular Clustered fanout None blockages [(20000, 40000, 40000, 80000), (220000, 0, 240000, 80000)] sinks (2800 2000) (6400 6600) (4400 800) (2800 1400) (3200 7600) (5600 1800) (0 800)
+  clkbuf_0_clk at (3200 4200)
+  clkbuf_1_0__f_clk at (2816 -9416)
+  clkbuf_1_1__f_clk at (8177 13222)
+  clknet_0_clk leaf false level Some(0): [Buffer(0), Buffer(1), Buffer(2)]
+  clknet_1_0__leaf_clk leaf true level None: [Buffer(1), Sink(0), Sink(2), Sink(3), Sink(5), Sink(6)]
+  clknet_1_1__leaf_clk leaf true level None: [Buffer(2), Sink(1), Sink(4)]
+Regular Clustered fanout Some(12) blockages [(120000, 240000, 160000, 320000)] sinks (286000 246000) (240000 256000) (268000 250000) (254000 302000) (294000 258000) (260000 270000) (256000 312000) (296000 262000) (312000 300000) (286000 304000) (240000 266000) (300000 314000) (302000 274000) (294000 252000) (288000 240000) (274000 242000) (242000 240000) (260000 302000) (304000 278000) (308000 256000) (268000 308000) (306000 262000) (288000 242000) (296000 274000) (274000 302000) (252000 286000) (266000 316000) (308000 256000) (312000 246000) (286000 258000) (312000 246000) (284000 288000) (258000 268000) (308000 270000) (288000 314000) (242000 262000) (286000 288000) (264000 286000) (284000 290000) (252000 282000) (284000 256000) (296000 274000) (296000 272000) (304000 280000)
+  clkbuf_0_clk at (276000 278000)
+  clkbuf_2_0__f_clk at (269889 261498)
+  clkbuf_2_1__f_clk at (287078 261078)
+  clkbuf_2_2__f_clk at (270944 293849)
+  clkbuf_2_3__f_clk at (293477 288382)
+  clknet_0_clk leaf false level Some(0): [Buffer(0), Buffer(1), Buffer(2), Buffer(3), Buffer(4)]
+  clknet_2_0__leaf_clk leaf true level None: [Buffer(1), Sink(1), Sink(2), Sink(5), Sink(7), Sink(10), Sink(15), Sink(16), Sink(29), Sink(32), Sink(35), Sink(40)]
+  clknet_2_1__leaf_clk leaf true level None: [Buffer(2), Sink(0), Sink(4), Sink(13), Sink(14), Sink(19), Sink(21), Sink(22), Sink(27), Sink(28), Sink(30), Sink(33)]
+  clknet_2_2__leaf_clk leaf true level None: [Buffer(3), Sink(3), Sink(6), Sink(17), Sink(20), Sink(24), Sink(25), Sink(26), Sink(31), Sink(37), Sink(38), Sink(39)]
+  clknet_2_3__leaf_clk leaf true level None: [Buffer(4), Sink(8), Sink(9), Sink(11), Sink(12), Sink(18), Sink(23), Sink(34), Sink(36), Sink(41), Sink(42), Sink(43)]
+Regular Clustered fanout Some(4) blockages [(240000, 80000, 300000, 160000), (280000, 0, 340000, 60000)] sinks (166000 165600) (165600 162200) (167800 165600) (162800 160800) (164800 164600) (164600 167800) (161200 162000) (164400 163600) (164400 165000) (165400 167400) (167000 160400) (167600 163600) (165000 164600) (163000 167800) (162200 161600) (160800 162600) (166000 162400) (166800 163200) (161000 164400) (161200 160000) (164000 166600) (160400 167800) (160600 166400) (164800 167000) (162600 166800) (162600 167400) (161200 161200) (167200 163800)
+  clkbuf_0_clk at (164100 163900)
+  clkbuf_4_0_0_clk at (164434 157234)
+  clkbuf_4_1_0_clk at (162508 155308)
+  clkbuf_4_2_0_clk at (169576 162376)
+  clkbuf_4_3_0_clk at (169576 162376)
+  clkbuf_4_4_0_clk at (165742 158542)
+  clkbuf_4_5_0_clk at (163591 156391)
+  clkbuf_4_6_0_clk at (164742 171542)
+  clkbuf_4_7_0_clk at (166158 170126)
+  clkbuf_4_8_0_clk at (162556 169356)
+  clkbuf_4_9_0_clk at (162556 169356)
+  clkbuf_4_10_0_clk at (164580 171380)
+  clkbuf_4_11_0_clk at (165329 172129)
+  clkbuf_4_12_0_clk at (165354 172154)
+  clkbuf_4_13_0_clk at (161253 168053)
+  clkbuf_4_14_0_clk at (163829 170629)
+  clkbuf_4_15_0_clk at (162443 169243)
+  clknet_0_clk leaf false level Some(0): [Buffer(0), Buffer(1), Buffer(2), Buffer(3), Buffer(4), Buffer(5), Buffer(6), Buffer(7), Buffer(8), Buffer(9), Buffer(10), Buffer(11), Buffer(12), Buffer(13), Buffer(14), Buffer(15), Buffer(16)]
+  clknet_4_0_0_clk leaf true level None: [Buffer(1), Sink(3), Sink(27)]
+  clknet_4_1_0_clk leaf true level None: [Buffer(2), Sink(7), Sink(19)]
+  clknet_4_2_0_clk leaf true level None: [Buffer(3), Sink(11), Sink(17)]
+  clknet_4_3_0_clk leaf true level None: [Buffer(4), Sink(1)]
+  clknet_4_4_0_clk leaf true level None: [Buffer(5), Sink(0), Sink(16)]
+  clknet_4_5_0_clk leaf true level None: [Buffer(6), Sink(10), Sink(14)]
+  clknet_4_6_0_clk leaf true level None: [Buffer(7), Sink(9), Sink(12)]
+  clknet_4_7_0_clk leaf true level None: [Buffer(8), Sink(2)]
+  clknet_4_8_0_clk leaf true level None: [Buffer(9), Sink(5), Sink(26)]
+  clknet_4_9_0_clk leaf true level None: [Buffer(10), Sink(8), Sink(13)]
+  clknet_4_10_0_clk leaf true level None: [Buffer(11), Sink(24), Sink(25)]
+  clknet_4_11_0_clk leaf true level None: [Buffer(12), Sink(20)]
+  clknet_4_12_0_clk leaf true level None: [Buffer(13), Sink(4), Sink(23)]
+  clknet_4_13_0_clk leaf true level None: [Buffer(14), Sink(6), Sink(15)]
+  clknet_4_14_0_clk leaf true level None: [Buffer(15), Sink(21), Sink(22)]
+  clknet_4_15_0_clk leaf true level None: [Buffer(16), Sink(18)]
+Regular Clustered fanout Some(12) blockages [(20000, 0, 100000, 40000), (80000, 160000, 100000, 180000)] sinks (28000 78000) (24000 74000) (26000 30000) (48000 56000) (50000 74000) (32000 30000)
+  clkbuf_0_clk at (37000 54000)
+  clkbuf_1_0__f_clk at (35627 41372)
+  clkbuf_1_1__f_clk at (35273 66273)
+  clknet_0_clk leaf false level Some(0): [Buffer(0), Buffer(1), Buffer(2)]
+  clknet_1_0__leaf_clk leaf true level None: [Buffer(1), Sink(2), Sink(3), Sink(5)]
+  clknet_1_1__leaf_clk leaf true level None: [Buffer(2), Sink(0), Sink(1), Sink(4)]
+Regular Unclustered fanout Some(4) blockages [(180000, 220000, 220000, 300000), (300000, 140000, 380000, 160000)] sinks (82200 80600) (86200 82800) (87000 80600) (87800 80800) (82000 84000) (85400 84600) (82200 86600) (83600 82200) (84400 86400) (83600 84600) (86200 80800) (85400 86600) (83200 80200) (80600 84800) (87800 83400) (84400 82800) (86000 81800) (84000 87200) (82600 81200) (87400 83400) (87800 85200) (86000 80600) (84600 84200) (83800 84400) (83000 83200) (80200 80200) (86400 81000) (87600 81800) (85200 83800) (80400 86000) (81200 87400)
+  clkbuf_0_clk at (84000 83800)
+  clkbuf_4_0_0_clk at (84390 91190)
+  clkbuf_4_1_0_clk at (84195 90995)
+  clkbuf_4_2_0_clk at (82216 79181)
+  clkbuf_4_3_0_clk at (82216 79181)
+  clkbuf_4_4_0_clk at (83040 77204)
+  clkbuf_4_5_0_clk at (84139 76105)
+  clkbuf_4_6_0_clk at (82049 88849)
+  clkbuf_4_7_0_clk at (84841 91641)
+  clkbuf_4_8_0_clk at (85611 78411)
+  clkbuf_4_9_0_clk at (85611 78411)
+  clkbuf_4_10_0_clk at (84993 77793)
+  clkbuf_4_11_0_clk at (84993 77793)
+  clkbuf_4_12_0_clk at (84840 77640)
+  clkbuf_4_13_0_clk at (84840 77640)
+  clkbuf_4_14_0_clk at (85825 78625)
+  clkbuf_4_15_0_clk at (85825 78625)
+  clknet_0_clk leaf false level Some(0): [Buffer(0), Buffer(1), Buffer(2), Buffer(3), Buffer(4), Buffer(5), Buffer(6), Buffer(7), Buffer(8), Buffer(9), Buffer(10), Buffer(11), Buffer(12), Buffer(13), Buffer(14), Buffer(15), Buffer(16)]
+  clknet_4_0_0_clk leaf true level None: [Buffer(1), Sink(8), Sink(29)]
+  clknet_4_1_0_clk leaf true level None: [Buffer(2), Sink(13), Sink(17)]
+  clknet_4_2_0_clk leaf true level None: [Buffer(3), Sink(4), Sink(24)]
+  clknet_4_3_0_clk leaf true level None: [Buffer(4), Sink(7), Sink(23)]
+  clknet_4_4_0_clk leaf true level None: [Buffer(5), Sink(0), Sink(25)]
+  clknet_4_5_0_clk leaf true level None: [Buffer(6), Sink(5), Sink(18)]
+  clknet_4_6_0_clk leaf true level None: [Buffer(7), Sink(6), Sink(30)]
+  clknet_4_7_0_clk leaf true level None: [Buffer(8), Sink(9), Sink(11)]
+  clknet_4_8_0_clk leaf true level None: [Buffer(9), Sink(12), Sink(28)]
+  clknet_4_9_0_clk leaf true level None: [Buffer(10), Sink(20), Sink(22)]
+  clknet_4_10_0_clk leaf true level None: [Buffer(11), Sink(1), Sink(26)]
+  clknet_4_11_0_clk leaf true level None: [Buffer(12), Sink(15), Sink(19)]
+  clknet_4_12_0_clk leaf true level None: [Buffer(13), Sink(2), Sink(27)]
+  clknet_4_13_0_clk leaf true level None: [Buffer(14), Sink(3), Sink(10)]
+  clknet_4_14_0_clk leaf true level None: [Buffer(15), Sink(16), Sink(21)]
+  clknet_4_15_0_clk leaf true level None: [Buffer(16), Sink(14)]
+Regular Unclustered fanout Some(12) blockages [(180000, 120000, 260000, 160000), (0, 100000, 40000, 140000)] sinks (180000 182000) (188000 194000) (182000 236000) (228000 216000) (176000 228000) (204000 196000) (184000 172000)
+  clkbuf_0_clk at (202000 204000)
+  clkbuf_1_0__f_clk at (196129 195870)
+  clkbuf_1_1__f_clk at (198818 214818)
+  clknet_0_clk leaf false level Some(0): [Buffer(0), Buffer(1), Buffer(2)]
+  clknet_1_0__leaf_clk leaf true level None: [Buffer(1), Sink(0), Sink(1), Sink(5), Sink(6)]
+  clknet_1_1__leaf_clk leaf true level None: [Buffer(2), Sink(2), Sink(3), Sink(4)]
+Regular Clustered fanout None blockages [(220000, 260000, 300000, 320000), (200000, 220000, 280000, 240000)] sinks (86000 84400)
+  clkbuf_0_clk at (86001 84400)
+  clkbuf_1_0__f_clk at (79001 91400)
+  clknet_0_clk leaf false level Some(0): [Buffer(0), Buffer(1)]
+  clknet_1_0__leaf_clk leaf true level None: [Buffer(1), Sink(0)]
+Macro Unclustered fanout None blockages [] sinks (1000 1400) (4000 600) (6600 2000) (3600 5600) (800 6000) (4400 7400) (7200 2800) (1400 2000) (1200 4800) (5400 3800) (5000 2200) (4200 4600) (2200 5400) (600 1600) (3400 1800) (3000 3200) (5800 3400) (5200 7200) (5600 7600) (3400 600) (2200 400) (4600 2000) (3600 7000) (4400 3800) (2400 2200) (200 1000) (5400 800) (2000 6000) (3400 6600) (6400 5800) (6800 800) (2800 2800) (2600 5400) (2600 3800) (6600 5400) (200 3000) (6400 2200) (2600 1400) (2000 7000) (3400 1200) (4000 5000) (7400 600) (5400 600) (600 5600) (800 4200) (4000 5200) (6400 6200) (3000 200) (3000 2000) (4400 2800) (5200 7000) (600 3000) (5000 800) (5000 5000) (6200 600) (200 0) (5000 3400) (4600 1800) (6000 3200) (5200 6000)
+  clkbuf_0_clk at (3800 3800)
+  clkbuf_3_0__f_clk at (-4730 -1669)
+  clkbuf_3_1__f_clk at (1008 -7408)
+  clkbuf_3_2__f_clk at (-3856 -2543)
+  clkbuf_3_3__f_clk at (324 -6724)
+  clkbuf_3_4__f_clk at (13444 8155)
+  clkbuf_3_5__f_clk at (8317 13282)
+  clkbuf_3_6__f_clk at (13876 -1024)
+  clkbuf_3_7__f_clk at (3395 16494)
+  clknet_0_clk leaf false level Some(0): [Buffer(0), Buffer(1), Buffer(2), Buffer(3), Buffer(4), Buffer(5), Buffer(6), Buffer(7), Buffer(8)]
+  clknet_3_0__leaf_clk leaf true level None: [Buffer(1), Sink(0), Sink(8), Sink(13), Sink(37), Sink(43), Sink(54)]
+  clknet_3_1__leaf_clk leaf true level None: [Buffer(2), Sink(7), Sink(20), Sink(24), Sink(39), Sink(42), Sink(48), Sink(52)]
+  clknet_3_2__leaf_clk leaf true level None: [Buffer(3), Sink(4), Sink(10), Sink(19), Sink(31), Sink(35), Sink(44), Sink(55), Sink(57)]
+  clknet_3_3__leaf_clk leaf true level None: [Buffer(4), Sink(1), Sink(14), Sink(15), Sink(21), Sink(25), Sink(26), Sink(33), Sink(47), Sink(49), Sink(51)]
+  clknet_3_4__leaf_clk leaf true level None: [Buffer(5), Sink(29), Sink(40), Sink(46), Sink(56), Sink(59)]
+  clknet_3_5__leaf_clk leaf true level None: [Buffer(6), Sink(3), Sink(22), Sink(32), Sink(34), Sink(38), Sink(45), Sink(53)]
+  clknet_3_6__leaf_clk leaf true level None: [Buffer(7), Sink(2), Sink(6), Sink(9), Sink(16), Sink(30), Sink(36), Sink(41), Sink(58)]
+  clknet_3_7__leaf_clk leaf true level None: [Buffer(8), Sink(5), Sink(11), Sink(12), Sink(17), Sink(18), Sink(23), Sink(27), Sink(28), Sink(50)]
+Regular Unclustered fanout Some(4) blockages [(200000, 80000, 240000, 140000)] sinks (166000 202000) (180000 160000) (222000 160000) (190000 162000) (210000 194000) (186000 192000) (160000 190000) (188000 182000) (204000 198000) (234000 186000) (174000 178000) (176000 176000) (192000 190000) (178000 220000) (224000 222000) (236000 232000) (182000 210000) (168000 226000) (206000 188000) (170000 238000) (204000 212000) (222000 238000) (194000 162000) (234000 234000) (174000 216000) (206000 170000) (178000 162000) (196000 210000) (204000 236000) (210000 226000) (220000 224000)
+  clkbuf_0_clk at (198000 199000)
+  clkbuf_4_0_0_clk at (179533 168466)
+  clkbuf_4_1_0_clk at (192946 167880)
+  clkbuf_4_2_0_clk at (169987 183303)
+  clkbuf_4_3_0_clk at (183987 183303)
+  clkbuf_4_4_0_clk at (200000 172879)
+  clkbuf_4_5_0_clk at (212172 171052)
+  clkbuf_4_6_0_clk at (203709 193515)
+  clkbuf_4_7_0_clk at (217709 193515)
+  clkbuf_4_8_0_clk at (179667 201631)
+  clkbuf_4_9_0_clk at (193667 201631)
+  clkbuf_4_10_0_clk at (172423 221093)
+  clkbuf_4_11_0_clk at (171961 220631)
+  clkbuf_4_12_0_clk at (212946 232453)
+  clkbuf_4_13_0_clk at (220246 225753)
+  clkbuf_4_14_0_clk at (222923 223076)
+  clkbuf_4_15_0_clk at (208923 223076)
+  clknet_0_clk leaf false level Some(0): [Buffer(0), Buffer(1), Buffer(2), Buffer(3), Buffer(4), Buffer(5), Buffer(6), Buffer(7), Buffer(8), Buffer(9), Buffer(10), Buffer(11), Buffer(12), Buffer(13), Buffer(14), Buffer(15), Buffer(16)]
+  clknet_4_0_0_clk leaf true level None: [Buffer(1), Sink(1), Sink(26)]
+  clknet_4_1_0_clk leaf true level None: [Buffer(2), Sink(3), Sink(22)]
+  clknet_4_2_0_clk leaf true level None: [Buffer(3), Sink(6), Sink(10)]
+  clknet_4_3_0_clk leaf true level None: [Buffer(4), Sink(5), Sink(11)]
+  clknet_4_4_0_clk leaf true level None: [Buffer(5), Sink(7), Sink(18)]
+  clknet_4_5_0_clk leaf true level None: [Buffer(6), Sink(2), Sink(25)]
+  clknet_4_6_0_clk leaf true level None: [Buffer(7), Sink(8), Sink(12)]
+  clknet_4_7_0_clk leaf true level None: [Buffer(8), Sink(4), Sink(9)]
+  clknet_4_8_0_clk leaf true level None: [Buffer(9), Sink(0), Sink(16)]
+  clknet_4_9_0_clk leaf true level None: [Buffer(10), Sink(20), Sink(27)]
+  clknet_4_10_0_clk leaf true level None: [Buffer(11), Sink(17), Sink(19)]
+  clknet_4_11_0_clk leaf true level None: [Buffer(12), Sink(13), Sink(24)]
+  clknet_4_12_0_clk leaf true level None: [Buffer(13), Sink(21), Sink(28)]
+  clknet_4_13_0_clk leaf true level None: [Buffer(14), Sink(23), Sink(30)]
+  clknet_4_14_0_clk leaf true level None: [Buffer(15), Sink(14), Sink(15)]
+  clknet_4_15_0_clk leaf true level None: [Buffer(16), Sink(29)]
+Regular Clustered fanout Some(4) blockages [] sinks (272000 176000) (304000 192000) (280000 184000) (336000 240000) (392000 104000) (336000 128000) (224000 184000) (272000 240000) (248000 88000) (168000 80000) (128000 192000) (256000 288000) (272000 80000) (384000 136000) (120000 240000) (176000 184000) (272000 120000) (136000 248000) (240000 208000) (192000 184000) (168000 200000) (96000 192000) (112000 160000) (232000 96000) (384000 128000) (216000 176000) (256000 152000) (200000 168000) (104000 344000) (136000 216000) (344000 312000) (376000 144000) (344000 296000) (384000 360000) (392000 264000) (296000 344000) (168000 352000) (272000 352000) (224000 240000) (112000 336000) (368000 264000) (112000 248000) (184000 280000)
+  clkbuf_0_clk at (244000 220000)
+  clkbuf_4_0_0_clk at (151844 141058)
+  clkbuf_4_1_0_clk at (149324 174292)
+  clkbuf_4_2_0_clk at (222528 152735)
+  clkbuf_4_3_0_clk at (211236 182686)
+  clkbuf_4_4_0_clk at (130663 260498)
+  clkbuf_4_5_0_clk at (125498 298096)
+  clkbuf_4_6_0_clk at (185632 266600)
+  clkbuf_4_7_0_clk at (175043 306757)
+  clkbuf_4_8_0_clk at (278938 113779)
+  clkbuf_4_9_0_clk at (281937 147208)
+  clkbuf_4_10_0_clk at (365115 121223)
+  clkbuf_4_11_0_clk at (362719 133732)
+  clkbuf_4_12_0_clk at (302947 265875)
+  clkbuf_4_13_0_clk at (299982 308662)
+  clkbuf_4_14_0_clk at (360315 266382)
+  clkbuf_4_15_0_clk at (356835 307616)
+  clknet_0_clk leaf false level Some(0): [Buffer(0), Buffer(1), Buffer(2), Buffer(3), Buffer(4), Buffer(5), Buffer(6), Buffer(7), Buffer(8), Buffer(9), Buffer(10), Buffer(11), Buffer(12), Buffer(13), Buffer(14), Buffer(15), Buffer(16)]
+  clknet_4_0_0_clk leaf true level None: [Buffer(1), Sink(9), Sink(15), Sink(22)]
+  clknet_4_1_0_clk leaf true level None: [Buffer(2), Sink(10), Sink(21), Sink(27)]
+  clknet_4_2_0_clk leaf true level None: [Buffer(3), Sink(6), Sink(23), Sink(25)]
+  clknet_4_3_0_clk leaf true level None: [Buffer(4), Sink(18), Sink(19)]
+  clknet_4_4_0_clk leaf true level None: [Buffer(5), Sink(14), Sink(29), Sink(41)]
+  clknet_4_5_0_clk leaf true level None: [Buffer(6), Sink(17), Sink(28), Sink(39)]
+  clknet_4_6_0_clk leaf true level None: [Buffer(7), Sink(7), Sink(20), Sink(38)]
+  clknet_4_7_0_clk leaf true level None: [Buffer(8), Sink(36), Sink(42)]
+  clknet_4_8_0_clk leaf true level None: [Buffer(9), Sink(8), Sink(12), Sink(16)]
+  clknet_4_9_0_clk leaf true level None: [Buffer(10), Sink(0), Sink(2), Sink(26)]
+  clknet_4_10_0_clk leaf true level None: [Buffer(11), Sink(4), Sink(5), Sink(24)]
+  clknet_4_11_0_clk leaf true level None: [Buffer(12), Sink(13), Sink(31)]
+  clknet_4_12_0_clk leaf true level None: [Buffer(13), Sink(1), Sink(11), Sink(32)]
+  clknet_4_13_0_clk leaf true level None: [Buffer(14), Sink(35), Sink(37)]
+  clknet_4_14_0_clk leaf true level None: [Buffer(15), Sink(3), Sink(34), Sink(40)]
+  clknet_4_15_0_clk leaf true level None: [Buffer(16), Sink(30), Sink(33)]
+Macro Clustered fanout Some(4) blockages [(240000, 40000, 320000, 120000)] sinks (162800 161400) (160600 166600) (165600 164600) (160400 164800) (165600 164600) (161000 161600) (162000 161800) (165600 164200) (167400 166200) (163400 167200) (163400 160600) (166000 161200) (165200 167400) (167200 165600) (167200 163000) (164800 162800) (161600 161200) (166000 160800) (161600 162800) (164000 163800) (166400 161600) (160800 163400) (167200 160200) (162200 164000) (165600 164800) (166800 165400) (167400 161800) (164400 166800) (166400 165200) (164600 166200) (162600 163000) (161000 160200) (166200 164400) (160800 167800) (161000 164000) (163800 164800) (161600 165200) (160400 163400) (164200 162000) (161200 164600) (164600 167800) (160200 164600) (163200 163800) (165400 166200)
+  clkbuf_leaf_4_clk at (162899 163400)
+  clkbuf_leaf_6_clk at (161400 164900)
+  clkbuf_leaf_8_clk at (160299 164700)
+  clkbuf_leaf_11_clk at (164050 166250)
+  clkbuf_leaf_12_clk at (164900 167599)
+  clkbuf_leaf_20_clk at (165600 164600)
+  clkbuf_leaf_25_clk at (167299 161000)
+  clkbuf_leaf_27_clk at (164999 162000)
+  clkbuf_leaf_29_clk at (162699 161200)
+  clkbuf_0_clk at (163849 163999)
+  clkbuf_4_0_0_clk at (162511 158338)
+  clkbuf_4_1_0_clk at (164378 156471)
+  clkbuf_4_2_0_clk at (157986 165860)
+  clkbuf_4_3_0_clk at (157986 165860)
+  clkbuf_4_4_0_clk at (163174 157675)
+  clkbuf_4_5_0_clk at (163174 157675)
+  clkbuf_4_6_0_clk at (161104 159745)
+  clkbuf_4_7_0_clk at (161104 159745)
+  clkbuf_4_8_0_clk at (170699 163338)
+  clkbuf_4_9_0_clk at (170699 163338)
+  clkbuf_4_10_0_clk at (164186 170663)
+  clkbuf_4_11_0_clk at (164887 169962)
+  clkbuf_4_12_0_clk at (170076 163762)
+  clkbuf_4_13_0_clk at (170076 163762)
+  clkbuf_4_14_0_clk at (163450 171399)
+  clkbuf_4_15_0_clk at (163750 171099)
+  clknet_leaf_4_clk leaf true level None: [Buffer(0), Sink(30), Sink(42)]
+  clknet_leaf_6_clk leaf true level None: [Buffer(1), Sink(36), Sink(39)]
+  clknet_leaf_8_clk leaf true level None: [Buffer(2), Sink(41), Sink(3)]
+  clknet_leaf_11_clk leaf true level None: [Buffer(3), Sink(9), Sink(35), Sink(29), Sink(27)]
+  clknet_leaf_12_clk leaf true level None: [Buffer(4), Sink(40), Sink(12)]
+  clknet_leaf_20_clk leaf true level None: [Buffer(5), Sink(2), Sink(4)]
+  clknet_leaf_25_clk leaf true level None: [Buffer(6), Sink(26), Sink(22)]
+  clknet_leaf_27_clk leaf true level None: [Buffer(7), Sink(11), Sink(38), Sink(15)]
+  clknet_leaf_29_clk leaf true level None: [Buffer(8), Sink(10), Sink(6)]
+  clknet_0_clk leaf false level Some(0): [Buffer(9), Buffer(10), Buffer(11), Buffer(12), Buffer(13), Buffer(14), Buffer(15), Buffer(16), Buffer(17), Buffer(18), Buffer(19), Buffer(20), Buffer(21), Buffer(22), Buffer(23), Buffer(24), Buffer(25)]
+  clknet_4_0_0_clk leaf true level None: [Buffer(10), Buffer(0), Sink(16)]
+  clknet_4_1_0_clk leaf true level None: [Buffer(11), Buffer(7), Sink(0)]
+  clknet_4_2_0_clk leaf true level None: [Buffer(12), Sink(37), Sink(1)]
+  clknet_4_3_0_clk leaf true level None: [Buffer(13), Sink(23), Buffer(2)]
+  clknet_4_4_0_clk leaf true level None: [Buffer(14), Sink(21), Sink(31)]
+  clknet_4_5_0_clk leaf true level None: [Buffer(15), Sink(34), Sink(17)]
+  clknet_4_6_0_clk leaf true level None: [Buffer(16), Sink(5), Buffer(8)]
+  clknet_4_7_0_clk leaf true level None: [Buffer(17), Sink(18), Buffer(1)]
+  clknet_4_8_0_clk leaf true level None: [Buffer(18), Sink(28), Sink(20)]
+  clknet_4_9_0_clk leaf true level None: [Buffer(19), Sink(7), Sink(19)]
+  clknet_4_10_0_clk leaf true level None: [Buffer(20), Buffer(3), Sink(24)]
+  clknet_4_11_0_clk leaf true level None: [Buffer(21), Sink(8), Sink(32)]
+  clknet_4_12_0_clk leaf true level None: [Buffer(22), Sink(25), Buffer(6)]
+  clknet_4_13_0_clk leaf true level None: [Buffer(23), Sink(13), Buffer(5)]
+  clknet_4_14_0_clk leaf true level None: [Buffer(24), Sink(33), Sink(14)]
+  clknet_4_15_0_clk leaf true level None: [Buffer(25), Buffer(4), Sink(43)]
+Regular Clustered fanout Some(4) blockages [(300000, 120000, 380000, 140000), (100000, 60000, 160000, 120000)] sinks (232000 160000) (264000 200000) (160000 320000) (368000 256000) (88000 104000) (192000 112000) (272000 112000) (240000 280000) (264000 296000) (240000 368000) (272000 344000)
+  clkbuf_0_clk at (228000 236000)
+  clkbuf_2_0__f_clk at (195065 128934)
+  clkbuf_2_1__f_clk at (236671 199328)
+  clkbuf_2_2__f_clk at (305108 298891)
+  clkbuf_2_3__f_clk at (223139 322632)
+  clknet_0_clk leaf false level Some(0): [Buffer(0), Buffer(1), Buffer(2), Buffer(3), Buffer(4)]
+  clknet_2_0__leaf_clk leaf true level None: [Buffer(1), Sink(4), Sink(5), Sink(6)]
+  clknet_2_1__leaf_clk leaf true level None: [Buffer(2), Sink(0), Sink(1), Sink(7)]
+  clknet_2_2__leaf_clk leaf true level None: [Buffer(3), Sink(3), Sink(8), Sink(10)]
+  clknet_2_3__leaf_clk leaf true level None: [Buffer(4), Sink(2), Sink(9)]
+Regular Unclustered fanout Some(4) blockages [(180000, 60000, 220000, 80000), (240000, 0, 260000, 60000)] sinks (282000 284000) (306000 248000) (282000 314000) (298000 284000) (312000 292000) (256000 304000) (260000 264000)
+  clkbuf_0_clk at (284000 281000)
+  clkbuf_2_0__f_clk at (275677 272677)
+  clkbuf_2_1__f_clk at (297945 266945)
+  clkbuf_2_2__f_clk at (276548 301548)
+  clkbuf_2_3__f_clk at (296422 293422)
+  clknet_0_clk leaf false level Some(0): [Buffer(0), Buffer(1), Buffer(2), Buffer(3), Buffer(4)]
+  clknet_2_0__leaf_clk leaf true level None: [Buffer(1), Sink(0), Sink(6)]
+  clknet_2_1__leaf_clk leaf true level None: [Buffer(2), Sink(1), Sink(3)]
+  clknet_2_2__leaf_clk leaf true level None: [Buffer(3), Sink(2), Sink(5)]
+  clknet_2_3__leaf_clk leaf true level None: [Buffer(4), Sink(4)]
+Regular Clustered fanout Some(4) blockages [(60000, 240000, 100000, 300000)] sinks (1800 3600) (6000 7600) (2400 6800) (3200 2800) (5600 5600) (2000 4000) (3000 7000) (4600 6600) (1200 7800) (1400 5800) (3000 7200) (4000 1400) (1800 7000) (5600 5400) (6000 6600) (4000 7000) (4600 7400) (4400 4400) (4800 5000) (1200 1400) (4200 3600) (2600 5400) (3000 4400) (7400 1600) (5200 6000) (4400 800) (6600 400) (4600 6400) (3800 7200) (4800 600) (200 7400) (1600 7400) (4000 400) (4200 1200) (7000 2200) (1000 800) (2800 1000) (6400 4000) (400 6200) (6600 7600) (200 1000)
+  clkbuf_0_clk at (3800 4100)
+  clkbuf_4_0_0_clk at (1490 -2289)
+  clkbuf_4_1_0_clk at (4003 -4803)
+  clkbuf_4_2_0_clk at (8472 4727)
+  clkbuf_4_3_0_clk at (8472 4727)
+  clkbuf_4_4_0_clk at (4645 -2054)
+  clkbuf_4_5_0_clk at (5133 -1566)
+  clkbuf_4_6_0_clk at (5193 -2189)
+  clkbuf_4_7_0_clk at (4462 -1458)
+  clkbuf_4_8_0_clk at (4269 11569)
+  clkbuf_4_9_0_clk at (3570 10870)
+  clkbuf_4_10_0_clk at (4205 11736)
+  clkbuf_4_11_0_clk at (4496 11445)
+  clkbuf_4_12_0_clk at (3654 10954)
+  clkbuf_4_13_0_clk at (2651 9951)
+  clkbuf_4_14_0_clk at (4030 11330)
+  clkbuf_4_15_0_clk at (1726 9444)
+  clknet_0_clk leaf false level Some(0): [Buffer(0), Buffer(1), Buffer(2), Buffer(3), Buffer(4), Buffer(5), Buffer(6), Buffer(7), Buffer(8), Buffer(9), Buffer(10), Buffer(11), Buffer(12), Buffer(13), Buffer(14), Buffer(15), Buffer(16)]
+  clknet_4_0_0_clk leaf true level None: [Buffer(1), Sink(19), Sink(35), Sink(40)]
+  clknet_4_1_0_clk leaf true level None: [Buffer(2), Sink(3), Sink(11), Sink(33)]
+  clknet_4_2_0_clk leaf true level None: [Buffer(3), Sink(17), Sink(25), Sink(36)]
+  clknet_4_3_0_clk leaf true level None: [Buffer(4), Sink(4), Sink(13)]
+  clknet_4_4_0_clk leaf true level None: [Buffer(5), Sink(29), Sink(34), Sink(37)]
+  clknet_4_5_0_clk leaf true level None: [Buffer(6), Sink(18), Sink(23)]
+  clknet_4_6_0_clk leaf true level None: [Buffer(7), Sink(22), Sink(26), Sink(32)]
+  clknet_4_7_0_clk leaf true level None: [Buffer(8), Sink(7), Sink(20)]
+  clknet_4_8_0_clk leaf true level None: [Buffer(9), Sink(9), Sink(15), Sink(28)]
+  clknet_4_9_0_clk leaf true level None: [Buffer(10), Sink(0), Sink(6)]
+  clknet_4_10_0_clk leaf true level None: [Buffer(11), Sink(16), Sink(31), Sink(39)]
+  clknet_4_11_0_clk leaf true level None: [Buffer(12), Sink(1), Sink(10)]
+  clknet_4_12_0_clk leaf true level None: [Buffer(13), Sink(21), Sink(24), Sink(30)]
+  clknet_4_13_0_clk leaf true level None: [Buffer(14), Sink(5), Sink(12)]
+  clknet_4_14_0_clk leaf true level None: [Buffer(15), Sink(14), Sink(27), Sink(38)]
+  clknet_4_15_0_clk leaf true level None: [Buffer(16), Sink(2), Sink(8)]
+Regular Unclustered fanout Some(12) blockages [(60000, 200000, 80000, 280000), (240000, 180000, 320000, 260000)] sinks (248000 120000) (16000 16000) (192000 32000) (224000 40000) (40000 248000) (216000 56000) (304000 88000) (240000 248000) (296000 232000) (88000 88000) (96000 72000) (104000 136000) (144000 224000) (272000 24000) (224000 72000) (88000 128000) (248000 48000) (112000 296000)
+  clkbuf_0_clk at (160000 156000)
+  clkbuf_1_0__f_clk at (87006 144993)
+  clkbuf_1_1__f_clk at (208644 120644)
+  clknet_0_clk leaf false level Some(0): [Buffer(0), Buffer(1), Buffer(2)]
+  clknet_1_0__leaf_clk leaf true level None: [Buffer(1), Sink(0), Sink(1), Sink(4), Sink(9), Sink(10), Sink(11), Sink(12), Sink(15), Sink(17)]
+  clknet_1_1__leaf_clk leaf true level None: [Buffer(2), Sink(2), Sink(3), Sink(5), Sink(6), Sink(7), Sink(8), Sink(13), Sink(14), Sink(16)]
+Regular Unclustered fanout Some(12) blockages [] sinks (160000 88000) (264000 288000) (312000 272000) (280000 144000) (160000 112000) (168000 216000) (280000 168000) (104000 320000) (256000 240000) (368000 376000) (320000 336000) (96000 296000) (104000 176000) (272000 104000) (152000 248000) (192000 136000) (296000 344000) (192000 208000) (184000 144000) (376000 112000) (96000 152000) (328000 80000) (184000 144000) (168000 160000) (280000 344000) (328000 136000) (112000 144000)
+  clkbuf_0_clk at (236000 228000)
+  clkbuf_2_0__f_clk at (153027 142973)
+  clkbuf_2_1__f_clk at (269697 128860)
+  clkbuf_2_2__f_clk at (191827 272172)
+  clkbuf_2_3__f_clk at (318981 306262)
+  clknet_0_clk leaf false level Some(0): [Buffer(0), Buffer(1), Buffer(2), Buffer(3), Buffer(4)]
+  clknet_2_0__leaf_clk leaf true level None: [Buffer(1), Sink(0), Sink(4), Sink(12), Sink(18), Sink(20), Sink(23), Sink(26)]
+  clknet_2_1__leaf_clk leaf true level None: [Buffer(2), Sink(3), Sink(13), Sink(15), Sink(19), Sink(21), Sink(22), Sink(25)]
+  clknet_2_2__leaf_clk leaf true level None: [Buffer(3), Sink(1), Sink(5), Sink(7), Sink(8), Sink(11), Sink(14), Sink(17)]
+  clknet_2_3__leaf_clk leaf true level None: [Buffer(4), Sink(2), Sink(6), Sink(9), Sink(10), Sink(16), Sink(24)]
+Macro Clustered fanout Some(4) blockages [] sinks (52000 20000) (38000 6000) (46000 74000) (38000 32000) (56000 56000) (68000 48000) (14000 20000) (36000 38000) (48000 18000) (28000 12000) (68000 4000)
+  clkbuf_leaf_0_clk at (24999 28999)
+  clkbuf_leaf_2_clk at (64000 35999)
+  clkbuf_leaf_4_clk at (42666 19333)
+  clkbuf_0_clk at (44500 42999)
+  clkbuf_1_0__f_clk at (39526 33973)
+  clkbuf_1_1__f_clk at (57950 42450)
+  clknet_leaf_0_clk leaf true level None: [Buffer(0), Sink(6), Sink(7)]
+  clknet_leaf_2_clk leaf true level None: [Buffer(1), Sink(4), Sink(5), Sink(10)]
+  clknet_leaf_4_clk leaf true level None: [Buffer(2), Sink(0), Sink(3), Sink(1)]
+  clknet_0_clk leaf false level Some(0): [Buffer(3), Buffer(4), Buffer(5)]
+  clknet_1_0__leaf_clk leaf true level None: [Buffer(4), Buffer(0), Buffer(2), Sink(9)]
+  clknet_1_1__leaf_clk leaf true level None: [Buffer(5), Sink(2), Buffer(1), Sink(8)]
+Regular Clustered fanout Some(4) blockages [(240000, 160000, 300000, 200000), (300000, 280000, 380000, 320000)] sinks (72000 78000) (22000 78000) (26000 44000) (46000 76000) (52000 24000) (30000 76000) (26000 44000) (4000 50000) (16000 48000) (74000 20000) (32000 52000)
+  clkbuf_0_clk at (39000 49000)
+  clkbuf_2_0__f_clk at (19269 48986)
+  clkbuf_2_1__f_clk at (26391 64391)
+  clkbuf_2_2__f_clk at (52553 36181)
+  clkbuf_2_3__f_clk at (54991 61008)
+  clknet_0_clk leaf false level Some(0): [Buffer(0), Buffer(1), Buffer(2), Buffer(3), Buffer(4)]
+  clknet_2_0__leaf_clk leaf true level None: [Buffer(1), Sink(6), Sink(7), Sink(8)]
+  clknet_2_1__leaf_clk leaf true level None: [Buffer(2), Sink(1), Sink(2), Sink(5)]
+  clknet_2_2__leaf_clk leaf true level None: [Buffer(3), Sink(4), Sink(9), Sink(10)]
+  clknet_2_3__leaf_clk leaf true level None: [Buffer(4), Sink(0), Sink(3)]
+Regular Unclustered fanout Some(12) blockages [(200000, 60000, 240000, 120000)] sinks (536000 296000) (448000 312000) (360000 352000) (408000 360000) (280000 296000) (368000 320000) (488000 336000) (360000 384000) (288000 304000) (464000 552000) (288000 352000) (272000 288000) (368000 544000) (352000 496000) (336000 360000) (248000 240000) (504000 536000) (488000 552000) (408000 520000) (480000 328000) (296000 288000) (384000 272000) (392000 456000) (488000 288000) (304000 256000) (376000 312000) (328000 400000) (296000 408000) (272000 456000) (440000 360000) (352000 488000) (504000 368000) (240000 424000) (520000 352000) (256000 280000) (376000 360000)
+  clkbuf_0_clk at (388000 396000)
+  clkbuf_2_0__f_clk at (320197 295802)
+  clkbuf_2_1__f_clk at (458194 325805)
+  clkbuf_2_2__f_clk at (335818 402681)
+  clkbuf_2_3__f_clk at (410258 496241)
+  clknet_0_clk leaf false level Some(0): [Buffer(0), Buffer(1), Buffer(2), Buffer(3), Buffer(4)]
+  clknet_2_0__leaf_clk leaf true level None: [Buffer(1), Sink(4), Sink(8), Sink(10), Sink(11), Sink(15), Sink(20), Sink(21), Sink(24), Sink(34)]
+  clknet_2_1__leaf_clk leaf true level None: [Buffer(2), Sink(0), Sink(1), Sink(6), Sink(19), Sink(23), Sink(25), Sink(29), Sink(31), Sink(33)]
+  clknet_2_2__leaf_clk leaf true level None: [Buffer(3), Sink(2), Sink(5), Sink(7), Sink(14), Sink(26), Sink(27), Sink(28), Sink(32), Sink(35)]
+  clknet_2_3__leaf_clk leaf true level None: [Buffer(4), Sink(3), Sink(9), Sink(12), Sink(13), Sink(16), Sink(17), Sink(18), Sink(22), Sink(30)]
+Macro Unclustered fanout Some(12) blockages [(140000, 160000, 200000, 200000), (200000, 260000, 240000, 340000)] sinks (416000 528000) (368000 376000) (504000 544000) (480000 416000) (256000 480000) (464000 280000) (304000 320000) (240000 376000) (528000 296000) (280000 520000) (352000 336000) (248000 432000) (424000 496000) (328000 400000) (528000 536000) (288000 272000) (336000 424000) (536000 400000) (464000 488000) (304000 376000) (368000 248000) (536000 240000) (496000 264000) (520000 512000) (304000 480000) (264000 536000) (544000 448000) (512000 328000) (336000 304000) (496000 312000) (464000 288000) (336000 512000) (320000 392000) (344000 352000) (248000 544000) (352000 264000) (520000 328000) (376000 296000) (416000 440000) (368000 352000) (312000 304000) (384000 488000) (288000 392000) (328000 240000) (248000 312000) (504000 432000) (272000 368000) (440000 456000) (480000 408000) (256000 464000)
+  clkbuf_0_clk at (392000 392000)
+  clkbuf_3_0__f_clk at (305746 312584)
+  clkbuf_3_1__f_clk at (306492 362014)
+  clkbuf_3_2__f_clk at (443077 274599)
+  clkbuf_3_3__f_clk at (453516 305992)
+  clkbuf_3_4__f_clk at (319375 445768)
+  clkbuf_3_5__f_clk at (306031 488424)
+  clkbuf_3_6__f_clk at (485967 452654)
+  clkbuf_3_7__f_clk at (476578 499266)
+  clknet_0_clk leaf false level Some(0): [Buffer(0), Buffer(1), Buffer(2), Buffer(3), Buffer(4), Buffer(5), Buffer(6), Buffer(7), Buffer(8)]
+  clknet_3_0__leaf_clk leaf true level None: [Buffer(1), Sink(6), Sink(10), Sink(15), Sink(19), Sink(40), Sink(43), Sink(44)]
+  clknet_3_1__leaf_clk leaf true level None: [Buffer(2), Sink(7), Sink(32), Sink(33), Sink(39), Sink(42), Sink(46)]
+  clknet_3_2__leaf_clk leaf true level None: [Buffer(3), Sink(5), Sink(20), Sink(21), Sink(22), Sink(30), Sink(35)]
+  clknet_3_3__leaf_clk leaf true level None: [Buffer(4), Sink(8), Sink(27), Sink(28), Sink(29), Sink(36), Sink(37)]
+  clknet_3_4__leaf_clk leaf true level None: [Buffer(5), Sink(1), Sink(11), Sink(13), Sink(16), Sink(24), Sink(38), Sink(49)]
+  clknet_3_5__leaf_clk leaf true level None: [Buffer(6), Sink(4), Sink(9), Sink(25), Sink(31), Sink(34), Sink(41)]
+  clknet_3_6__leaf_clk leaf true level None: [Buffer(7), Sink(3), Sink(17), Sink(26), Sink(45), Sink(47), Sink(48)]
+  clknet_3_7__leaf_clk leaf true level None: [Buffer(8), Sink(0), Sink(2), Sink(12), Sink(14), Sink(18), Sink(23)]
+Regular Clustered fanout Some(4) blockages [(80000, 240000, 100000, 260000), (140000, 60000, 220000, 100000)] sinks (318000 308000) (296000 270000) (266000 298000) (286000 282000) (260000 318000) (258000 294000) (312000 304000) (274000 300000) (292000 244000) (274000 308000) (290000 310000) (312000 302000) (298000 306000) (312000 290000) (300000 294000) (262000 266000) (288000 248000) (276000 304000) (240000 306000) (258000 266000) (254000 248000) (314000 254000) (292000 296000) (274000 272000) (294000 268000) (284000 300000) (250000 284000) (256000 312000) (242000 308000) (280000 282000) (302000 272000) (262000 248000) (272000 308000) (314000 254000) (288000 266000) (316000 260000) (280000 242000) (314000 294000) (312000 312000)
+  clkbuf_0_clk at (279000 280000)
+  clkbuf_4_0_0_clk at (257999 261807)
+  clkbuf_4_1_0_clk at (257994 275785)
+  clkbuf_4_2_0_clk at (271877 266809)
+  clkbuf_4_3_0_clk at (281442 271244)
+  clkbuf_4_4_0_clk at (257242 307242)
+  clkbuf_4_5_0_clk at (251757 301757)
+  clkbuf_4_6_0_clk at (281048 302256)
+  clkbuf_4_7_0_clk at (271887 307096)
+  clkbuf_4_8_0_clk at (288768 258104)
+  clkbuf_4_9_0_clk at (295960 264911)
+  clkbuf_4_10_0_clk at (312464 266275)
+  clkbuf_4_11_0_clk at (302980 270790)
+  clkbuf_4_12_0_clk at (293753 300246)
+  clkbuf_4_13_0_clk at (307753 300246)
+  clkbuf_4_14_0_clk at (313007 294992)
+  clkbuf_4_15_0_clk at (310668 297331)
+  clknet_0_clk leaf false level Some(0): [Buffer(0), Buffer(1), Buffer(2), Buffer(3), Buffer(4), Buffer(5), Buffer(6), Buffer(7), Buffer(8), Buffer(9), Buffer(10), Buffer(11), Buffer(12), Buffer(13), Buffer(14), Buffer(15), Buffer(16)]
+  clknet_4_0_0_clk leaf true level None: [Buffer(1), Sink(19), Sink(20), Sink(31)]
+  clknet_4_1_0_clk leaf true level None: [Buffer(2), Sink(2), Sink(26)]
+  clknet_4_2_0_clk leaf true level None: [Buffer(3), Sink(15), Sink(23), Sink(36)]
+  clknet_4_3_0_clk leaf true level None: [Buffer(4), Sink(3), Sink(29)]
+  clknet_4_4_0_clk leaf true level None: [Buffer(5), Sink(4), Sink(5), Sink(27)]
+  clknet_4_5_0_clk leaf true level None: [Buffer(6), Sink(18), Sink(28)]
+  clknet_4_6_0_clk leaf true level None: [Buffer(7), Sink(7), Sink(17), Sink(25)]
+  clknet_4_7_0_clk leaf true level None: [Buffer(8), Sink(9), Sink(32)]
+  clknet_4_8_0_clk leaf true level None: [Buffer(9), Sink(8), Sink(16), Sink(34)]
+  clknet_4_9_0_clk leaf true level None: [Buffer(10), Sink(1), Sink(24)]
+  clknet_4_10_0_clk leaf true level None: [Buffer(11), Sink(21), Sink(33), Sink(35)]
+  clknet_4_11_0_clk leaf true level None: [Buffer(12), Sink(14), Sink(30)]
+  clknet_4_12_0_clk leaf true level None: [Buffer(13), Sink(10), Sink(12), Sink(22)]
+  clknet_4_13_0_clk leaf true level None: [Buffer(14), Sink(0), Sink(6)]
+  clknet_4_14_0_clk leaf true level None: [Buffer(15), Sink(13), Sink(37)]
+  clknet_4_15_0_clk leaf true level None: [Buffer(16), Sink(11), Sink(38)]
+Macro Clustered fanout Some(12) blockages [(240000, 300000, 300000, 320000), (100000, 80000, 120000, 120000)] sinks (87400 83400) (84000 84600)
+  clkbuf_0_clk at (85700 84000)
+  clkbuf_1_0__f_clk at (75352 87652)
+  clkbuf_1_1__f_clk at (96047 80347)
+  clknet_0_clk leaf false level Some(0): [Buffer(0), Buffer(1), Buffer(2)]
+  clknet_1_0__leaf_clk leaf true level None: [Buffer(1), Sink(1)]
+  clknet_1_1__leaf_clk leaf true level None: [Buffer(2), Sink(0)]
+Regular Unclustered fanout Some(12) blockages [(140000, 100000, 200000, 120000)] sinks (416000 232000) (168000 168000) (432000 464000) (472000 208000) (432000 448000) (304000 368000) (400000 408000) (424000 336000) (272000 248000) (304000 168000) (392000 472000) (192000 440000) (384000 432000) (160000 408000) (312000 240000) (264000 424000) (464000 224000) (368000 184000) (336000 200000) (328000 448000) (312000 232000) (184000 200000) (368000 192000) (312000 440000) (336000 264000) (432000 312000) (256000 464000) (456000 400000) (472000 176000) (272000 264000) (160000 344000) (312000 160000) (168000 296000) (296000 232000) (168000 168000) (192000 384000) (288000 288000) (248000 328000) (240000 360000) (304000 328000) (456000 352000) (256000 424000) (456000 312000) (256000 320000) (352000 160000)
+  clkbuf_0_clk at (316000 316000)
+  clkbuf_3_0__f_clk at (248056 206143)
+  clkbuf_3_1__f_clk at (267587 242612)
+  clkbuf_3_2__f_clk at (394623 198623)
+  clkbuf_3_3__f_clk at (405256 243791)
+  clkbuf_3_4__f_clk at (235091 359920)
+  clkbuf_3_5__f_clk at (232064 407322)
+  clkbuf_3_6__f_clk at (391942 396825)
+  clkbuf_3_7__f_clk at (379153 439858)
+  clknet_0_clk leaf false level Some(0): [Buffer(0), Buffer(1), Buffer(2), Buffer(3), Buffer(4), Buffer(5), Buffer(6), Buffer(7), Buffer(8)]
+  clknet_3_0__leaf_clk leaf true level None: [Buffer(1), Sink(1), Sink(8), Sink(9), Sink(21), Sink(31), Sink(34)]
+  clknet_3_1__leaf_clk leaf true level None: [Buffer(2), Sink(14), Sink(20), Sink(29), Sink(32), Sink(33), Sink(36)]
+  clknet_3_2__leaf_clk leaf true level None: [Buffer(3), Sink(3), Sink(17), Sink(18), Sink(22), Sink(28), Sink(44)]
+  clknet_3_3__leaf_clk leaf true level None: [Buffer(4), Sink(0), Sink(16), Sink(24), Sink(25), Sink(42)]
+  clknet_3_4__leaf_clk leaf true level None: [Buffer(5), Sink(30), Sink(35), Sink(37), Sink(38), Sink(39), Sink(43)]
+  clknet_3_5__leaf_clk leaf true level None: [Buffer(6), Sink(11), Sink(13), Sink(15), Sink(26), Sink(41)]
+  clknet_3_6__leaf_clk leaf true level None: [Buffer(7), Sink(5), Sink(6), Sink(7), Sink(12), Sink(27), Sink(40)]
+  clknet_3_7__leaf_clk leaf true level None: [Buffer(8), Sink(2), Sink(4), Sink(10), Sink(19), Sink(23)]
+Macro Unclustered fanout Some(4) blockages [(140000, 200000, 180000, 220000), (140000, 200000, 220000, 220000)] sinks (88000 264000) (200000 288000) (184000 192000) (328000 168000) (288000 344000) (352000 136000) (304000 360000) (344000 248000) (320000 144000) (128000 304000) (352000 192000) (88000 328000) (96000 288000) (296000 200000) (96000 376000) (280000 224000) (144000 352000) (360000 184000) (320000 216000) (184000 360000) (176000 112000) (88000 312000) (272000 320000) (176000 120000) (208000 152000) (192000 352000) (192000 176000) (96000 360000) (384000 336000) (184000 136000) (344000 208000) (208000 272000) (272000 208000) (296000 336000) (272000 112000) (304000 296000) (216000 88000) (376000 120000) (224000 208000)
+  clkbuf_0_clk at (236000 231999)
+  clkbuf_4_0_0_clk at (184564 139253)
+  clkbuf_4_1_0_clk at (201284 141284)
+  clkbuf_4_2_0_clk at (193685 186000)
+  clkbuf_4_3_0_clk at (207685 228000)
+  clkbuf_4_4_0_clk at (102054 297132)
+  clkbuf_4_5_0_clk at (110035 330035)
+  clkbuf_4_6_0_clk at (119654 328066)
+  clkbuf_4_7_0_clk at (159355 335275)
+  clkbuf_4_8_0_clk at (306497 136328)
+  clkbuf_4_9_0_clk at (297169 181169)
+  clkbuf_4_10_0_clk at (360964 148915)
+  clkbuf_4_11_0_clk at (348201 192153)
+  clkbuf_4_12_0_clk at (283304 294974)
+  clkbuf_4_13_0_clk at (294401 339876)
+  clkbuf_4_14_0_clk at (326572 266572)
+  clkbuf_4_15_0_clk at (335568 305979)
+  clknet_0_clk leaf false level Some(0): [Buffer(0), Buffer(1), Buffer(2), Buffer(3), Buffer(4), Buffer(5), Buffer(6), Buffer(7), Buffer(8), Buffer(9), Buffer(10), Buffer(11), Buffer(12), Buffer(13), Buffer(14), Buffer(15), Buffer(16)]
+  clknet_4_0_0_clk leaf true level None: [Buffer(1), Sink(20), Sink(23), Sink(29)]
+  clknet_4_1_0_clk leaf true level None: [Buffer(2), Sink(24), Sink(36)]
+  clknet_4_2_0_clk leaf true level None: [Buffer(3), Sink(2), Sink(26), Sink(38)]
+  clknet_4_3_0_clk leaf true level None: [Buffer(4), Sink(1), Sink(31)]
+  clknet_4_4_0_clk leaf true level None: [Buffer(5), Sink(0), Sink(12), Sink(21)]
+  clknet_4_5_0_clk leaf true level None: [Buffer(6), Sink(14), Sink(27)]
+  clknet_4_6_0_clk leaf true level None: [Buffer(7), Sink(9), Sink(11), Sink(16)]
+  clknet_4_7_0_clk leaf true level None: [Buffer(8), Sink(19), Sink(25)]
+  clknet_4_8_0_clk leaf true level None: [Buffer(9), Sink(3), Sink(8), Sink(34)]
+  clknet_4_9_0_clk leaf true level None: [Buffer(10), Sink(13), Sink(32)]
+  clknet_4_10_0_clk leaf true level None: [Buffer(11), Sink(5), Sink(17), Sink(37)]
+  clknet_4_11_0_clk leaf true level None: [Buffer(12), Sink(10), Sink(30)]
+  clknet_4_12_0_clk leaf true level None: [Buffer(13), Sink(15), Sink(22), Sink(33)]
+  clknet_4_13_0_clk leaf true level None: [Buffer(14), Sink(4), Sink(6)]
+  clknet_4_14_0_clk leaf true level None: [Buffer(15), Sink(7), Sink(18)]
+  clknet_4_15_0_clk leaf true level None: [Buffer(16), Sink(28), Sink(35)]
+Regular Unclustered fanout Some(12) blockages [(140000, 0, 180000, 20000)] sinks (134000 124000) (142000 100000) (144000 80000) (110000 110000) (146000 88000) (154000 156000) (150000 134000) (140000 86000) (132000 84000) (100000 148000) (152000 154000) (116000 100000) (112000 154000) (110000 98000) (126000 154000) (108000 86000) (140000 148000) (154000 146000) (102000 108000) (136000 86000) (128000 124000) (120000 122000) (86000 122000) (80000 120000) (90000 86000) (98000 92000) (102000 90000) (118000 120000) (128000 132000) (120000 82000) (152000 136000) (92000 124000) (134000 146000) (156000 142000) (142000 114000) (136000 142000) (102000 116000) (82000 116000) (88000 116000) (128000 136000) (118000 80000) (88000 134000) (116000 122000) (122000 112000) (158000 148000) (118000 92000) (112000 106000) (112000 126000) (132000 118000) (100000 124000) (114000 88000) (110000 144000) (94000 116000) (150000 130000) (96000 154000) (120000 156000)
+  clkbuf_0_clk at (119000 118000)
+  clkbuf_3_0__f_clk at (101884 94915)
+  clkbuf_3_1__f_clk at (116875 94531)
+  clkbuf_3_2__f_clk at (91131 119080)
+  clkbuf_3_3__f_clk at (102494 135716)
+  clkbuf_3_4__f_clk at (126810 120063)
+  clkbuf_3_5__f_clk at (135948 101200)
+  clkbuf_3_6__f_clk at (138779 140220)
+  clkbuf_3_7__f_clk at (141466 137533)
+  clknet_0_clk leaf false level Some(0): [Buffer(0), Buffer(1), Buffer(2), Buffer(3), Buffer(4), Buffer(5), Buffer(6), Buffer(7), Buffer(8)]
+  clknet_3_0__leaf_clk leaf true level None: [Buffer(1), Sink(3), Sink(13), Sink(15), Sink(18), Sink(24), Sink(25), Sink(26)]
+  clknet_3_1__leaf_clk leaf true level None: [Buffer(2), Sink(11), Sink(29), Sink(40), Sink(43), Sink(45), Sink(46), Sink(50)]
+  clknet_3_2__leaf_clk leaf true level None: [Buffer(3), Sink(22), Sink(23), Sink(31), Sink(36), Sink(37), Sink(38), Sink(52)]
+  clknet_3_3__leaf_clk leaf true level None: [Buffer(4), Sink(9), Sink(12), Sink(41), Sink(47), Sink(49), Sink(51), Sink(54)]
+  clknet_3_4__leaf_clk leaf true level None: [Buffer(5), Sink(0), Sink(20), Sink(21), Sink(27), Sink(28), Sink(42), Sink(48)]
+  clknet_3_5__leaf_clk leaf true level None: [Buffer(6), Sink(1), Sink(2), Sink(4), Sink(7), Sink(8), Sink(19), Sink(34)]
+  clknet_3_6__leaf_clk leaf true level None: [Buffer(7), Sink(5), Sink(14), Sink(17), Sink(32), Sink(33), Sink(44), Sink(55)]
+  clknet_3_7__leaf_clk leaf true level None: [Buffer(8), Sink(6), Sink(10), Sink(16), Sink(30), Sink(35), Sink(39), Sink(53)]
+Macro Clustered fanout Some(12) blockages [] sinks (200 3000) (200 6800) (1800 3600) (2400 7800) (3000 5800) (7000 3600) (6000 5200) (4400 1800) (7400 800) (5000 0) (4800 6200) (4800 7400) (6000 6600) (6000 7200) (7200 1000) (6200 6400) (6400 1400) (7000 6000) (2400 200) (6400 6600) (7000 4200) (5000 2600) (7200 3800) (3800 2400) (7000 3200) (3600 2400) (6600 4800) (2200 7600) (600 2200)
+  clkbuf_leaf_1_clk at (2533 7066)
+  clkbuf_leaf_7_clk at (6299 6500)
+  clkbuf_leaf_9_clk at (6250 3899)
+  clkbuf_leaf_10_clk at (7100 3500)
+  clkbuf_leaf_12_clk at (7300 900)
+  clkbuf_leaf_14_clk at (3550 1700)
+  clkbuf_leaf_15_clk at (400 2600)
+  clkbuf_0_clk at (3750 3699)
+  clkbuf_1_0__f_clk at (12722 -1327)
+  clkbuf_1_1__f_clk at (7863 13586)
+  clknet_leaf_1_clk leaf true level None: [Buffer(0), Sink(27), Sink(3), Sink(4)]
+  clknet_leaf_7_clk leaf true level None: [Buffer(1), Sink(19), Sink(15)]
+  clknet_leaf_9_clk leaf true level None: [Buffer(2), Sink(20), Sink(6), Sink(21), Sink(5)]
+  clknet_leaf_10_clk leaf true level None: [Buffer(3), Sink(22), Sink(24)]
+  clknet_leaf_12_clk leaf true level None: [Buffer(4), Sink(14), Sink(8)]
+  clknet_leaf_14_clk leaf true level None: [Buffer(5), Sink(7), Sink(23), Sink(25), Sink(18)]
+  clknet_leaf_15_clk leaf true level None: [Buffer(6), Sink(28), Sink(0)]
+  clknet_0_clk leaf false level Some(0): [Buffer(7), Buffer(8), Buffer(9)]
+  clknet_1_0__leaf_clk leaf true level None: [Buffer(8), Sink(17), Sink(26), Buffer(2), Buffer(3), Sink(16), Sink(9), Buffer(5), Buffer(6), Sink(2)]
+  clknet_1_1__leaf_clk leaf true level None: [Buffer(9), Sink(1), Buffer(0), Sink(10), Sink(11), Sink(12), Sink(13), Buffer(1), Buffer(4)]
+Macro Clustered fanout Some(12) blockages [(100000, 180000, 140000, 200000)] sinks (192000 392000) (192000 104000) (136000 256000) (320000 176000) (392000 216000) (112000 272000) (360000 360000) (128000 104000) (328000 320000) (264000 168000) (392000 264000) (280000 96000) (176000 344000) (368000 392000) (240000 296000) (248000 392000) (224000 256000) (104000 248000) (288000 128000) (248000 336000) (144000 88000) (392000 360000) (248000 168000) (272000 376000) (328000 200000) (248000 136000) (392000 200000) (168000 192000) (120000 328000) (272000 288000) (144000 88000) (152000 248000) (208000 256000) (224000 168000) (256000 200000) (256000 344000) (344000 200000) (232000 168000) (144000 264000) (304000 192000) (288000 352000) (160000 352000)
+  clkbuf_leaf_0_clk at (143999 255999)
+  clkbuf_leaf_2_clk at (115999 300000)
+  clkbuf_leaf_3_clk at (168000 348000)
+  clkbuf_leaf_5_clk at (245333 341333)
+  clkbuf_leaf_6_clk at (272000 339999)
+  clkbuf_leaf_7_clk at (364000 376000)
+  clkbuf_leaf_11_clk at (323999 191999)
+  clkbuf_leaf_14_clk at (277333 130666)
+  clkbuf_leaf_17_clk at (234666 157333)
+  clkbuf_leaf_23_clk at (216000 256000)
+  clkbuf_0_clk at (247999 239999)
+  clkbuf_2_0__f_clk at (187554 132445)
+  clkbuf_2_1__f_clk at (306256 181742)
+  clkbuf_2_2__f_clk at (176072 304492)
+  clkbuf_2_3__f_clk at (317266 331298)
+  clknet_leaf_0_clk leaf true level None: [Buffer(0), Sink(31), Sink(38), Sink(2)]
+  clknet_leaf_2_clk leaf true level None: [Buffer(1), Sink(5), Sink(28)]
+  clknet_leaf_3_clk leaf true level None: [Buffer(2), Sink(41), Sink(12)]
+  clknet_leaf_5_clk leaf true level None: [Buffer(3), Sink(15), Sink(19), Sink(14)]
+  clknet_leaf_6_clk leaf true level None: [Buffer(4), Sink(29), Sink(35), Sink(23), Sink(40)]
+  clknet_leaf_7_clk leaf true level None: [Buffer(5), Sink(6), Sink(13)]
+  clknet_leaf_11_clk leaf true level None: [Buffer(6), Sink(39), Sink(3), Sink(24), Sink(36)]
+  clknet_leaf_14_clk leaf true level None: [Buffer(7), Sink(18), Sink(11), Sink(9)]
+  clknet_leaf_17_clk leaf true level None: [Buffer(8), Sink(37), Sink(33), Sink(25)]
+  clknet_leaf_23_clk leaf true level None: [Buffer(9), Sink(16), Sink(32)]
+  clknet_0_clk leaf false level Some(0): [Buffer(10), Buffer(11), Buffer(12), Buffer(13), Buffer(14)]
+  clknet_2_0__leaf_clk leaf true level None: [Buffer(11), Buffer(8), Sink(1), Sink(20), Sink(30), Sink(7), Sink(27)]
+  clknet_2_1__leaf_clk leaf true level None: [Buffer(12), Buffer(6), Sink(4), Sink(26), Buffer(7), Sink(34), Sink(22)]
+  clknet_2_2__leaf_clk leaf true level None: [Buffer(13), Buffer(0), Sink(17), Buffer(1), Buffer(2), Sink(0), Buffer(9)]
+  clknet_2_3__leaf_clk leaf true level None: [Buffer(14), Buffer(3), Buffer(4), Buffer(5), Sink(21), Sink(8), Sink(10)]
+Regular Unclustered fanout Some(4) blockages [(200000, 80000, 240000, 120000), (60000, 300000, 80000, 360000)] sinks (164200 161400) (164600 162600) (164000 164400) (160200 166000) (162400 165800) (161400 162200) (163000 162600) (167600 163200) (161000 162400) (163600 165200) (166000 163400) (160000 162000) (161400 160600) (163800 166000) (160800 164400) (162400 160400) (163200 160400) (164600 166600) (165800 160800) (162000 160400) (163000 166000) (161200 167400)
+  clkbuf_0_clk at (163800 163900)
+  clkbuf_3_0__f_clk at (156679 170779)
+  clkbuf_3_1__f_clk at (151614 165714)
+  clkbuf_3_2__f_clk at (154053 168153)
+  clkbuf_3_3__f_clk at (155371 169471)
+  clkbuf_3_4__f_clk at (160022 154114)
+  clkbuf_3_5__f_clk at (175267 161367)
+  clkbuf_3_6__f_clk at (162751 150421)
+  clkbuf_3_7__f_clk at (168370 154470)
+  clknet_0_clk leaf false level Some(0): [Buffer(0), Buffer(1), Buffer(2), Buffer(3), Buffer(4), Buffer(5), Buffer(6), Buffer(7), Buffer(8)]
+  clknet_3_0__leaf_clk leaf true level None: [Buffer(1), Sink(11), Sink(17), Sink(21)]
+  clknet_3_1__leaf_clk leaf true level None: [Buffer(2), Sink(5), Sink(9), Sink(14)]
+  clknet_3_2__leaf_clk leaf true level None: [Buffer(3), Sink(8), Sink(13), Sink(20)]
+  clknet_3_3__leaf_clk leaf true level None: [Buffer(4), Sink(3), Sink(4)]
+  clknet_3_4__leaf_clk leaf true level None: [Buffer(5), Sink(15), Sink(16), Sink(19)]
+  clknet_3_5__leaf_clk leaf true level None: [Buffer(6), Sink(2), Sink(7), Sink(10)]
+  clknet_3_6__leaf_clk leaf true level None: [Buffer(7), Sink(6), Sink(12), Sink(18)]
+  clknet_3_7__leaf_clk leaf true level None: [Buffer(8), Sink(0), Sink(1)]
+Macro Clustered fanout Some(12) blockages [] sinks (248000 240000) (184000 288000) (448000 464000) (384000 232000) (472000 384000) (288000 296000) (440000 336000) (280000 368000)
+  clkbuf_0_clk at (328000 348000)
+  clkbuf_1_0__f_clk at (276812 315187)
+  clkbuf_1_1__f_clk at (407578 352421)
+  clknet_0_clk leaf false level Some(0): [Buffer(0), Buffer(1), Buffer(2)]
+  clknet_1_0__leaf_clk leaf true level None: [Buffer(1), Sink(0), Sink(1), Sink(5), Sink(7)]
+  clknet_1_1__leaf_clk leaf true level None: [Buffer(2), Sink(2), Sink(3), Sink(4), Sink(6)]
+Regular Unclustered fanout Some(12) blockages [] sinks (166400 166400)
+  clkbuf_0_clk at (166401 166400)
+  clkbuf_1_0__f_clk at (159401 173400)
+  clknet_0_clk leaf false level Some(0): [Buffer(0), Buffer(1)]
+  clknet_1_0__leaf_clk leaf true level None: [Buffer(1), Sink(0)]
+Regular Clustered fanout Some(12) blockages [(260000, 200000, 340000, 280000)] sinks (160000 264000) (424000 440000) (240000 256000) (224000 336000) (160000 256000) (256000 376000) (360000 392000) (392000 216000) (296000 368000) (208000 416000) (368000 160000) (208000 168000) (248000 416000) (312000 240000) (360000 368000) (248000 240000) (160000 192000) (208000 384000) (240000 216000) (224000 296000) (440000 336000) (264000 400000) (400000 392000) (328000 432000) (232000 192000) (352000 472000) (432000 424000) (408000 176000) (432000 336000) (272000 256000) (264000 168000) (280000 232000) (424000 392000) (432000 400000) (248000 256000) (280000 352000) (248000 176000) (424000 232000) (304000 232000) (320000 456000) (192000 320000) (272000 184000) (208000 248000) (456000 392000) (224000 208000) (192000 432000) (384000 344000) (320000 432000) (304000 248000) (392000 336000)
+  clkbuf_0_clk at (308000 316000)
+  clkbuf_3_0__f_clk at (218155 210816)
+  clkbuf_3_1__f_clk at (210015 258676)
+  clkbuf_3_2__f_clk at (344000 252000)
+  clkbuf_3_3__f_clk at (340000 256000)
+  clkbuf_3_4__f_clk at (269717 371415)
+  clkbuf_3_5__f_clk at (269369 427068)
+  clkbuf_3_6__f_clk at (402753 361246)
+  clkbuf_3_7__f_clk at (414367 405632)
+  clknet_0_clk leaf false level Some(0): [Buffer(0), Buffer(1), Buffer(2), Buffer(3), Buffer(4), Buffer(5), Buffer(6), Buffer(7), Buffer(8)]
+  clknet_3_0__leaf_clk leaf true level None: [Buffer(1), Sink(11), Sink(15), Sink(16), Sink(24), Sink(36), Sink(42), Sink(44)]
+  clknet_3_1__leaf_clk leaf true level None: [Buffer(2), Sink(0), Sink(2), Sink(4), Sink(19), Sink(34), Sink(40)]
+  clknet_3_2__leaf_clk leaf true level None: [Buffer(3), Sink(7), Sink(10), Sink(13), Sink(27), Sink(30), Sink(41)]
+  clknet_3_3__leaf_clk leaf true level None: [Buffer(4), Sink(18), Sink(29), Sink(31), Sink(37), Sink(38), Sink(48)]
+  clknet_3_4__leaf_clk leaf true level None: [Buffer(5), Sink(3), Sink(5), Sink(6), Sink(8), Sink(17), Sink(21), Sink(35)]
+  clknet_3_5__leaf_clk leaf true level None: [Buffer(6), Sink(9), Sink(12), Sink(23), Sink(39), Sink(45), Sink(47)]
+  clknet_3_6__leaf_clk leaf true level None: [Buffer(7), Sink(14), Sink(20), Sink(22), Sink(28), Sink(46), Sink(49)]
+  clknet_3_7__leaf_clk leaf true level None: [Buffer(8), Sink(1), Sink(25), Sink(26), Sink(32), Sink(33), Sink(43)]
+Regular Unclustered fanout None blockages [(200000, 80000, 260000, 140000), (40000, 200000, 60000, 220000)] sinks (8000 304000) (312000 8000) (104000 56000) (8000 8000) (232000 240000) (264000 64000) (88000 64000) (256000 8000) (0 168000) (56000 232000) (96000 168000) (112000 184000) (216000 24000) (0 296000) (240000 136000) (128000 200000) (144000 128000) (240000 184000) (232000 0) (296000 200000) (264000 304000) (176000 72000) (24000 144000) (272000 184000) (64000 72000) (288000 144000) (40000 16000) (272000 264000) (184000 80000) (136000 192000) (144000 200000) (16000 16000) (168000 216000) (96000 72000) (128000 208000) (40000 176000) (216000 136000) (272000 32000) (0 72000) (56000 184000) (208000 312000) (128000 232000) (176000 24000)
+  clkbuf_0_clk at (156000 156000)
+  clkbuf_2_0__f_clk at (91013 62008)
+  clkbuf_2_1__f_clk at (229938 61938)
+  clkbuf_2_2__f_clk at (68472 203599)
+  clkbuf_2_3__f_clk at (207105 232965)
+  clknet_0_clk leaf false level Some(0): [Buffer(0), Buffer(1), Buffer(2), Buffer(3), Buffer(4)]
+  clknet_2_0__leaf_clk leaf true level None: [Buffer(1), Sink(2), Sink(3), Sink(6), Sink(16), Sink(24), Sink(26), Sink(31), Sink(33), Sink(38)]
+  clknet_2_1__leaf_clk leaf true level None: [Buffer(2), Sink(1), Sink(5), Sink(7), Sink(12), Sink(14), Sink(18), Sink(21), Sink(25), Sink(28), Sink(36), Sink(37), Sink(42)]
+  clknet_2_2__leaf_clk leaf true level None: [Buffer(3), Sink(0), Sink(8), Sink(9), Sink(10), Sink(11), Sink(13), Sink(15), Sink(22), Sink(29), Sink(30), Sink(34), Sink(35), Sink(39)]
+  clknet_2_3__leaf_clk leaf true level None: [Buffer(4), Sink(4), Sink(17), Sink(19), Sink(20), Sink(23), Sink(27), Sink(32), Sink(40), Sink(41)]
+Regular Unclustered fanout Some(4) blockages [(160000, 260000, 200000, 300000)] sinks (208000 120000) (224000 200000) (344000 376000) (328000 80000) (176000 224000) (304000 280000) (96000 184000) (128000 144000) (328000 112000) (320000 272000) (208000 272000) (240000 376000) (136000 304000) (368000 280000) (232000 368000) (96000 200000) (296000 120000) (184000 112000) (344000 376000) (136000 80000) (184000 216000) (232000 336000) (216000 232000) (272000 320000) (240000 376000) (376000 96000) (248000 216000) (296000 112000) (312000 328000) (360000 304000) (152000 184000) (280000 168000) (288000 368000) (328000 232000)
+  clkbuf_0_clk at (236000 228000)
+  clkbuf_4_0_0_clk at (125154 183020)
+  clkbuf_4_1_0_clk at (138448 148686)
+  clkbuf_4_2_0_clk at (179837 219297)
+  clkbuf_4_3_0_clk at (194187 204946)
+  clkbuf_4_4_0_clk at (259687 112265)
+  clkbuf_4_5_0_clk at (305878 106218)
+  clkbuf_4_6_0_clk at (249476 146131)
+  clkbuf_4_7_0_clk at (281108 137448)
+  clkbuf_4_8_0_clk at (199431 305210)
+  clkbuf_4_9_0_clk at (236670 294296)
+  clkbuf_4_10_0_clk at (235614 375560)
+  clkbuf_4_11_0_clk at (253514 363127)
+  clkbuf_4_12_0_clk at (318568 260037)
+  clkbuf_4_13_0_clk at (355404 275098)
+  clkbuf_4_14_0_clk at (338478 301886)
+  clkbuf_4_15_0_clk at (338824 349175)
+  clknet_0_clk leaf false level Some(0): [Buffer(0), Buffer(1), Buffer(2), Buffer(3), Buffer(4), Buffer(5), Buffer(6), Buffer(7), Buffer(8), Buffer(9), Buffer(10), Buffer(11), Buffer(12), Buffer(13), Buffer(14), Buffer(15), Buffer(16)]
+  clknet_4_0_0_clk leaf true level None: [Buffer(1), Sink(6), Sink(15), Sink(30)]
+  clknet_4_1_0_clk leaf true level None: [Buffer(2), Sink(7), Sink(19)]
+  clknet_4_2_0_clk leaf true level None: [Buffer(3), Sink(4), Sink(20)]
+  clknet_4_3_0_clk leaf true level None: [Buffer(4), Sink(1), Sink(22)]
+  clknet_4_4_0_clk leaf true level None: [Buffer(5), Sink(8), Sink(17)]
+  clknet_4_5_0_clk leaf true level None: [Buffer(6), Sink(3), Sink(25)]
+  clknet_4_6_0_clk leaf true level None: [Buffer(7), Sink(0), Sink(31)]
+  clknet_4_7_0_clk leaf true level None: [Buffer(8), Sink(16), Sink(27)]
+  clknet_4_8_0_clk leaf true level None: [Buffer(9), Sink(10), Sink(12), Sink(21)]
+  clknet_4_9_0_clk leaf true level None: [Buffer(10), Sink(23), Sink(26)]
+  clknet_4_10_0_clk leaf true level None: [Buffer(11), Sink(11), Sink(14)]
+  clknet_4_11_0_clk leaf true level None: [Buffer(12), Sink(24), Sink(32)]
+  clknet_4_12_0_clk leaf true level None: [Buffer(13), Sink(5), Sink(33)]
+  clknet_4_13_0_clk leaf true level None: [Buffer(14), Sink(9), Sink(13)]
+  clknet_4_14_0_clk leaf true level None: [Buffer(15), Sink(28), Sink(29)]
+  clknet_4_15_0_clk leaf true level None: [Buffer(16), Sink(2), Sink(18)]
+Regular Clustered fanout Some(4) blockages [(260000, 280000, 300000, 320000)] sinks (184000 184000) (392000 184000) (336000 384000) (264000 392000) (464000 240000) (400000 216000) (328000 160000) (176000 192000) (376000 472000) (360000 312000) (184000 288000) (368000 216000) (248000 192000) (376000 232000) (312000 392000) (264000 432000) (168000 192000) (408000 168000) (408000 288000) (176000 160000) (160000 336000)
+  clkbuf_0_clk at (312000 316000)
+  clkbuf_3_0__f_clk at (251586 180413)
+  clkbuf_3_1__f_clk at (230930 201069)
+  clkbuf_3_2__f_clk at (380122 201634)
+  clkbuf_3_3__f_clk at (392227 221551)
+  clkbuf_3_4__f_clk at (217251 352748)
+  clkbuf_3_5__f_clk at (247007 378992)
+  clkbuf_3_6__f_clk at (356832 332831)
+  clkbuf_3_7__f_clk at (350853 377659)
+  clknet_0_clk leaf false level Some(0): [Buffer(0), Buffer(1), Buffer(2), Buffer(3), Buffer(4), Buffer(5), Buffer(6), Buffer(7), Buffer(8)]
+  clknet_3_0__leaf_clk leaf true level None: [Buffer(1), Sink(6), Sink(12), Sink(19)]
+  clknet_3_1__leaf_clk leaf true level None: [Buffer(2), Sink(0), Sink(7), Sink(16)]
+  clknet_3_2__leaf_clk leaf true level None: [Buffer(3), Sink(1), Sink(11), Sink(17)]
+  clknet_3_3__leaf_clk leaf true level None: [Buffer(4), Sink(4), Sink(5)]
+  clknet_3_4__leaf_clk leaf true level None: [Buffer(5), Sink(3), Sink(10), Sink(20)]
+  clknet_3_5__leaf_clk leaf true level None: [Buffer(6), Sink(14), Sink(15)]
+  clknet_3_6__leaf_clk leaf true level None: [Buffer(7), Sink(9), Sink(13), Sink(18)]
+  clknet_3_7__leaf_clk leaf true level None: [Buffer(8), Sink(2), Sink(8)]
+Regular Clustered fanout Some(4) blockages [] sinks (224000 80000) (136000 120000) (168000 176000) (104000 368000) (352000 328000) (288000 288000) (120000 304000) (200000 176000) (200000 360000) (160000 320000) (104000 392000) (304000 152000) (136000 200000) (96000 392000) (192000 144000) (224000 240000) (112000 96000) (144000 344000) (264000 320000) (104000 352000) (152000 112000) (320000 104000) (144000 216000) (328000 272000) (312000 200000) (344000 200000) (376000 296000) (120000 152000) (240000 304000) (368000 192000) (280000 136000) (208000 80000) (376000 384000) (368000 136000) (272000 392000) (328000 136000) (352000 280000) (112000 352000) (328000 192000) (296000 360000) (200000 120000) (288000 352000) (320000 312000) (88000 184000) (136000 272000)
+  clkbuf_0_clk at (231999 236000)
+  clkbuf_4_0_0_clk at (144767 112830)
+  clkbuf_4_1_0_clk at (183864 109041)
+  clkbuf_4_2_0_clk at (139005 176182)
+  clkbuf_4_3_0_clk at (173098 154275)
+  clkbuf_4_4_0_clk at (296187 164555)
+  clkbuf_4_5_0_clk at (325942 138310)
+  clkbuf_4_6_0_clk at (272566 196933)
+  clkbuf_4_7_0_clk at (320692 193189)
+  clkbuf_4_8_0_clk at (143398 308160)
+  clkbuf_4_9_0_clk at (186403 321155)
+  clkbuf_4_10_0_clk at (130686 358686)
+  clkbuf_4_11_0_clk at (121716 349716)
+  clkbuf_4_12_0_clk at (288171 306728)
+  clkbuf_4_13_0_clk at (332561 295118)
+  clkbuf_4_14_0_clk at (296603 358929)
+  clkbuf_4_15_0_clk at (335762 350798)
+  clknet_0_clk leaf false level Some(0): [Buffer(0), Buffer(1), Buffer(2), Buffer(3), Buffer(4), Buffer(5), Buffer(6), Buffer(7), Buffer(8), Buffer(9), Buffer(10), Buffer(11), Buffer(12), Buffer(13), Buffer(14), Buffer(15), Buffer(16)]
+  clknet_4_0_0_clk leaf true level None: [Buffer(1), Sink(1), Sink(16), Sink(20)]
+  clknet_4_1_0_clk leaf true level None: [Buffer(2), Sink(0), Sink(31), Sink(40)]
+  clknet_4_2_0_clk leaf true level None: [Buffer(3), Sink(12), Sink(22), Sink(43)]
+  clknet_4_3_0_clk leaf true level None: [Buffer(4), Sink(2), Sink(14), Sink(27)]
+  clknet_4_4_0_clk leaf true level None: [Buffer(5), Sink(11), Sink(24), Sink(30)]
+  clknet_4_5_0_clk leaf true level None: [Buffer(6), Sink(21), Sink(33), Sink(35)]
+  clknet_4_6_0_clk leaf true level None: [Buffer(7), Sink(7), Sink(15), Sink(38)]
+  clknet_4_7_0_clk leaf true level None: [Buffer(8), Sink(25), Sink(29)]
+  clknet_4_8_0_clk leaf true level None: [Buffer(9), Sink(6), Sink(17), Sink(44)]
+  clknet_4_9_0_clk leaf true level None: [Buffer(10), Sink(8), Sink(9), Sink(28)]
+  clknet_4_10_0_clk leaf true level None: [Buffer(11), Sink(3), Sink(10), Sink(13)]
+  clknet_4_11_0_clk leaf true level None: [Buffer(12), Sink(19), Sink(37)]
+  clknet_4_12_0_clk leaf true level None: [Buffer(13), Sink(5), Sink(18), Sink(42)]
+  clknet_4_13_0_clk leaf true level None: [Buffer(14), Sink(23), Sink(26), Sink(36)]
+  clknet_4_14_0_clk leaf true level None: [Buffer(15), Sink(34), Sink(39), Sink(41)]
+  clknet_4_15_0_clk leaf true level None: [Buffer(16), Sink(4), Sink(32)]
+Regular Clustered fanout None blockages [(0, 60000, 20000, 80000), (300000, 140000, 360000, 180000)] sinks (64000 8000) (78000 16000) (60000 32000) (22000 36000) (0 24000) (50000 34000)
+  clkbuf_0_clk at (39000 22000)
+  clkbuf_1_0__f_clk at (30369 27369)
+  clkbuf_1_1__f_clk at (51526 20526)
+  clknet_0_clk leaf false level Some(0): [Buffer(0), Buffer(1), Buffer(2)]
+  clknet_1_0__leaf_clk leaf true level None: [Buffer(1), Sink(3), Sink(4), Sink(5)]
+  clknet_1_1__leaf_clk leaf true level None: [Buffer(2), Sink(0), Sink(1), Sink(2)]
+Macro Clustered fanout Some(4) blockages [] sinks (161000 160200) (166400 161400) (161200 164400) (160000 163400) (162200 161600) (162200 166200) (162600 164400) (163400 161600) (164600 167600) (165000 165400) (164200 167400) (160000 160600) (160000 160000) (165800 165800) (163800 163800) (161400 162800) (167200 162400) (166000 165000) (167800 164600) (166200 162600) (160600 164600) (167200 160800) (166800 163200) (161800 165400) (163600 166800) (162800 161200) (163200 167600) (162400 161400) (162000 167400) (166200 163600) (163400 164000) (165000 162800) (163400 167000) (163200 167800) (166800 166600) (163400 165200) (167000 167400) (163800 161200) (163400 164400) (167800 163200) (161400 167200) (166200 166200) (160400 164000) (162000 162600) (162600 160400) (167400 163000) (162400 161600) (165800 167000) (164200 166600) (161000 163800) (163200 161600) (162400 167200) (162600 161000)
+  clkbuf_leaf_9_clk at (160899 165049)
+  clkbuf_leaf_11_clk at (162699 167500)
+  clkbuf_leaf_12_clk at (163500 166900)
+  clkbuf_leaf_17_clk at (164866 167333)
+  clkbuf_leaf_20_clk at (167000 165399)
+  clkbuf_leaf_22_clk at (166000 164199)
+  clkbuf_leaf_24_clk at (167299 162950)
+  clkbuf_leaf_25_clk at (165599 162200)
+  clkbuf_leaf_29_clk at (163600 161400)
+  clkbuf_0_clk at (163650 163750)
+  clkbuf_4_0_0_clk at (163091 157308)
+  clkbuf_4_1_0_clk at (162574 157825)
+  clkbuf_4_2_0_clk at (162697 157702)
+  clkbuf_4_3_0_clk at (163333 157066)
+  clkbuf_4_4_0_clk at (163989 156410)
+  clkbuf_4_5_0_clk at (161944 158455)
+  clkbuf_4_6_0_clk at (156912 164577)
+  clkbuf_4_7_0_clk at (156912 164577)
+  clkbuf_4_8_0_clk at (165159 169240)
+  clkbuf_4_9_0_clk at (161752 172647)
+  clkbuf_4_10_0_clk at (165125 169274)
+  clkbuf_4_11_0_clk at (165125 169274)
+  clkbuf_4_12_0_clk at (163532 170867)
+  clkbuf_4_13_0_clk at (163575 170824)
+  clkbuf_4_14_0_clk at (164077 170322)
+  clkbuf_4_15_0_clk at (163065 171334)
+  clknet_leaf_9_clk leaf true level None: [Buffer(0), Sink(2), Sink(42), Sink(20), Sink(40)]
+  clknet_leaf_11_clk leaf true level None: [Buffer(1), Sink(51), Sink(28), Sink(26), Sink(33)]
+  clknet_leaf_12_clk leaf true level None: [Buffer(2), Sink(32), Sink(24)]
+  clknet_leaf_17_clk leaf true level None: [Buffer(3), Sink(10), Sink(8), Sink(47)]
+  clknet_leaf_20_clk leaf true level None: [Buffer(4), Sink(41), Sink(18)]
+  clknet_leaf_22_clk leaf true level None: [Buffer(5), Sink(13), Sink(19)]
+  clknet_leaf_24_clk leaf true level None: [Buffer(6), Sink(22), Sink(39), Sink(45), Sink(16)]
+  clknet_leaf_25_clk leaf true level None: [Buffer(7), Sink(21), Sink(1), Sink(31), Sink(14)]
+  clknet_leaf_29_clk leaf true level None: [Buffer(8), Sink(7), Sink(37)]
+  clknet_0_clk leaf false level Some(0): [Buffer(9), Buffer(10), Buffer(11), Buffer(12), Buffer(13), Buffer(14), Buffer(15), Buffer(16), Buffer(17), Buffer(18), Buffer(19), Buffer(20), Buffer(21), Buffer(22), Buffer(23), Buffer(24), Buffer(25)]
+  clknet_4_0_0_clk leaf true level None: [Buffer(10), Sink(50), Sink(52), Sink(0)]
+  clknet_4_1_0_clk leaf true level None: [Buffer(11), Sink(3), Sink(43)]
+  clknet_4_2_0_clk leaf true level None: [Buffer(12), Buffer(0), Sink(4)]
+  clknet_4_3_0_clk leaf true level None: [Buffer(13), Buffer(8), Sink(44)]
+  clknet_4_4_0_clk leaf true level None: [Buffer(14), Sink(46), Sink(25), Sink(27)]
+  clknet_4_5_0_clk leaf true level None: [Buffer(15), Sink(12), Sink(11)]
+  clknet_4_6_0_clk leaf true level None: [Buffer(16), Sink(49), Sink(23)]
+  clknet_4_7_0_clk leaf true level None: [Buffer(17), Sink(15), Sink(6)]
+  clknet_4_8_0_clk leaf true level None: [Buffer(18), Buffer(3), Buffer(5), Buffer(7)]
+  clknet_4_9_0_clk leaf true level None: [Buffer(19), Sink(5), Buffer(1)]
+  clknet_4_10_0_clk leaf true level None: [Buffer(20), Sink(48), Buffer(6)]
+  clknet_4_11_0_clk leaf true level None: [Buffer(21), Sink(34), Buffer(4)]
+  clknet_4_12_0_clk leaf true level None: [Buffer(22), Buffer(2), Sink(29)]
+  clknet_4_13_0_clk leaf true level None: [Buffer(23), Sink(9), Sink(36)]
+  clknet_4_14_0_clk leaf true level None: [Buffer(24), Sink(30), Sink(17)]
+  clknet_4_15_0_clk leaf true level None: [Buffer(25), Sink(35), Sink(38)]
+Regular Unclustered fanout Some(4) blockages [] sinks (96000 280000) (176000 72000) (240000 88000) (16000 184000)
+  clkbuf_0_clk at (128000 176000)
+  clkbuf_1_0__f_clk at (96500 200499)
+  clkbuf_1_1__f_clk at (153454 145454)
+  clknet_0_clk leaf false level Some(0): [Buffer(0), Buffer(1), Buffer(2)]
+  clknet_1_0__leaf_clk leaf true level None: [Buffer(1), Sink(0), Sink(3)]
+  clknet_1_1__leaf_clk leaf true level None: [Buffer(2), Sink(1), Sink(2)]
+Macro Clustered fanout Some(12) blockages [(260000, 140000, 320000, 180000)] sinks (81600 86800) (86400 84600) (84800 85800) (85800 84800) (83600 87400) (83800 85000) (83600 87800) (87400 87000) (80200 86600) (80000 86000) (86800 80400) (81400 84200) (82400 85000) (81000 83600) (82000 84800) (84000 81600) (85600 82400) (81400 81800) (83200 82400) (81600 81000) (84200 82800) (83400 87400) (83400 83200) (87200 80800) (87800 85400) (84600 81000) (82200 80000) (81600 87800) (80600 82600)
+  clkbuf_leaf_2_clk at (81699 84400)
+  clkbuf_leaf_3_clk at (80850 86799)
+  clkbuf_leaf_9_clk at (86849 85449)
+  clkbuf_leaf_10_clk at (86050 81150)
+  clkbuf_0_clk at (83725 83900)
+  clkbuf_1_0__f_clk at (79939 73685)
+  clkbuf_1_1__f_clk at (82887 97062)
+  clknet_leaf_2_clk leaf true level None: [Buffer(0), Sink(13), Sink(14), Sink(12), Sink(11)]
+  clknet_leaf_3_clk leaf true level None: [Buffer(1), Sink(9), Sink(8), Sink(27), Sink(0)]
+  clknet_leaf_9_clk leaf true level None: [Buffer(2), Sink(7), Sink(24), Sink(1), Sink(3)]
+  clknet_leaf_10_clk leaf true level None: [Buffer(3), Sink(16), Sink(23), Sink(10), Sink(25)]
+  clknet_0_clk leaf false level Some(0): [Buffer(4), Buffer(5), Buffer(6)]
+  clknet_1_0__leaf_clk leaf true level None: [Buffer(5), Sink(17), Sink(28), Buffer(3), Sink(15), Sink(20), Sink(22), Sink(18), Sink(26), Sink(19)]
+  clknet_1_1__leaf_clk leaf true level None: [Buffer(6), Buffer(0), Buffer(1), Sink(21), Sink(6), Sink(4), Sink(5), Sink(2), Buffer(2)]
+Regular Clustered fanout Some(12) blockages [(300000, 60000, 340000, 100000)] sinks (208000 352000) (440000 424000) (328000 408000) (392000 176000) (440000 264000) (200000 224000) (456000 376000) (304000 424000)
+  clkbuf_0_clk at (328000 300000)
+  clkbuf_1_0__f_clk at (296266 324266)
+  clkbuf_1_1__f_clk at (379087 304912)
+  clknet_0_clk leaf false level Some(0): [Buffer(0), Buffer(1), Buffer(2)]
+  clknet_1_0__leaf_clk leaf true level None: [Buffer(1), Sink(0), Sink(2), Sink(5), Sink(7)]
+  clknet_1_1__leaf_clk leaf true level None: [Buffer(2), Sink(1), Sink(3), Sink(4), Sink(6)]
+Regular Unclustered fanout Some(4) blockages [(200000, 100000, 280000, 180000)] sinks (112000 232000) (176000 368000) (328000 160000) (216000 288000) (344000 280000) (184000 312000) (288000 152000) (312000 88000) (280000 320000) (280000 112000) (120000 104000) (296000 328000) (360000 376000) (392000 320000) (216000 104000) (144000 296000) (144000 104000) (392000 216000) (336000 352000) (392000 392000) (296000 384000) (312000 328000) (112000 248000) (376000 256000) (96000 392000) (288000 296000) (392000 360000) (160000 160000) (320000 264000) (352000 352000) (136000 256000) (256000 88000) (120000 96000) (360000 248000)
+  clkbuf_0_clk at (244000 240000)
+  clkbuf_4_0_0_clk at (120732 197776)
+  clkbuf_4_1_0_clk at (140411 167648)
+  clkbuf_4_2_0_clk at (144197 251288)
+  clkbuf_4_3_0_clk at (167772 252287)
+  clkbuf_4_4_0_clk at (280000 133645)
+  clkbuf_4_5_0_clk at (280000 189645)
+  clkbuf_4_6_0_clk at (280000 170354)
+  clkbuf_4_7_0_clk at (301000 191354)
+  clkbuf_4_8_0_clk at (294351 327982)
+  clkbuf_4_9_0_clk at (312422 349761)
+  clkbuf_4_10_0_clk at (219869 365500)
+  clkbuf_4_11_0_clk at (266848 356479)
+  clkbuf_4_12_0_clk at (329690 270852)
+  clkbuf_4_13_0_clk at (359892 263640)
+  clkbuf_4_14_0_clk at (371651 336348)
+  clkbuf_4_15_0_clk at (365541 342458)
+  clknet_0_clk leaf false level Some(0): [Buffer(0), Buffer(1), Buffer(2), Buffer(3), Buffer(4), Buffer(5), Buffer(6), Buffer(7), Buffer(8), Buffer(9), Buffer(10), Buffer(11), Buffer(12), Buffer(13), Buffer(14), Buffer(15), Buffer(16)]
+  clknet_4_0_0_clk leaf true level None: [Buffer(1), Sink(0), Sink(10), Sink(30)]
+  clknet_4_1_0_clk leaf true level None: [Buffer(2), Sink(16), Sink(32)]
+  clknet_4_2_0_clk leaf true level None: [Buffer(3), Sink(15), Sink(22)]
+  clknet_4_3_0_clk leaf true level None: [Buffer(4), Sink(3), Sink(5)]
+  clknet_4_4_0_clk leaf true level None: [Buffer(5), Sink(14), Sink(31)]
+  clknet_4_5_0_clk leaf true level None: [Buffer(6), Sink(7), Sink(9)]
+  clknet_4_6_0_clk leaf true level None: [Buffer(7), Sink(6), Sink(27)]
+  clknet_4_7_0_clk leaf true level None: [Buffer(8), Sink(2), Sink(17)]
+  clknet_4_8_0_clk leaf true level None: [Buffer(9), Sink(11), Sink(21), Sink(25)]
+  clknet_4_9_0_clk leaf true level None: [Buffer(10), Sink(18), Sink(29)]
+  clknet_4_10_0_clk leaf true level None: [Buffer(11), Sink(1), Sink(24)]
+  clknet_4_11_0_clk leaf true level None: [Buffer(12), Sink(8), Sink(20)]
+  clknet_4_12_0_clk leaf true level None: [Buffer(13), Sink(4), Sink(28)]
+  clknet_4_13_0_clk leaf true level None: [Buffer(14), Sink(23), Sink(33)]
+  clknet_4_14_0_clk leaf true level None: [Buffer(15), Sink(13), Sink(19)]
+  clknet_4_15_0_clk leaf true level None: [Buffer(16), Sink(12), Sink(26)]
+Macro Unclustered fanout Some(12) blockages [(260000, 240000, 320000, 280000), (100000, 280000, 140000, 300000)] sinks (344000 168000) (272000 184000) (296000 136000) (176000 88000) (312000 208000) (120000 168000) (112000 208000) (304000 80000) (224000 96000) (344000 328000) (360000 128000) (192000 240000) (112000 80000) (184000 248000) (112000 240000) (272000 104000) (312000 80000) (384000 216000) (248000 80000) (312000 312000) (216000 144000) (128000 96000) (144000 344000) (160000 88000) (280000 304000) (96000 376000) (264000 128000) (144000 392000) (120000 256000) (312000 328000) (312000 104000) (200000 264000) (304000 392000) (240000 88000) (80000 256000) (104000 208000) (232000 128000) (80000 368000) (208000 144000) (104000 344000) (184000 280000) (120000 184000) (304000 80000) (240000 392000) (360000 264000) (328000 120000) (240000 216000)
+  clkbuf_0_clk at (232000 236000)
+  clkbuf_3_0__f_clk at (191931 105162)
+  clkbuf_3_1__f_clk at (187252 140933)
+  clkbuf_3_2__f_clk at (307484 115484)
+  clkbuf_3_3__f_clk at (313933 157174)
+  clkbuf_3_4__f_clk at (140000 284000)
+  clkbuf_3_5__f_clk at (116578 316578)
+  clkbuf_3_6__f_clk at (259428 280000)
+  clkbuf_3_7__f_clk at (283353 312074)
+  clknet_0_clk leaf false level Some(0): [Buffer(0), Buffer(1), Buffer(2), Buffer(3), Buffer(4), Buffer(5), Buffer(6), Buffer(7), Buffer(8)]
+  clknet_3_0__leaf_clk leaf true level None: [Buffer(1), Sink(8), Sink(12), Sink(18), Sink(21), Sink(23), Sink(33)]
+  clknet_3_1__leaf_clk leaf true level None: [Buffer(2), Sink(3), Sink(5), Sink(20), Sink(26), Sink(36), Sink(41)]
+  clknet_3_2__leaf_clk leaf true level None: [Buffer(3), Sink(7), Sink(10), Sink(15), Sink(16), Sink(30), Sink(42)]
+  clknet_3_3__leaf_clk leaf true level None: [Buffer(4), Sink(0), Sink(1), Sink(2), Sink(4), Sink(17), Sink(45)]
+  clknet_3_4__leaf_clk leaf true level None: [Buffer(5), Sink(6), Sink(11), Sink(13), Sink(14), Sink(34), Sink(35)]
+  clknet_3_5__leaf_clk leaf true level None: [Buffer(6), Sink(22), Sink(25), Sink(27), Sink(28), Sink(37), Sink(39)]
+  clknet_3_6__leaf_clk leaf true level None: [Buffer(7), Sink(24), Sink(31), Sink(38), Sink(40), Sink(44), Sink(46)]
+  clknet_3_7__leaf_clk leaf true level None: [Buffer(8), Sink(9), Sink(19), Sink(29), Sink(32), Sink(43)]
+Regular Unclustered fanout Some(12) blockages [] sinks (368000 384000) (344000 208000) (80000 232000) (240000 312000) (352000 320000) (344000 248000) (232000 272000) (208000 280000) (312000 184000) (376000 224000) (280000 312000) (200000 376000) (368000 264000) (384000 120000) (192000 216000) (256000 272000) (208000 208000) (168000 344000) (128000 200000) (184000 304000) (112000 384000) (240000 240000) (312000 80000) (120000 248000) (384000 392000) (176000 176000) (112000 312000) (296000 328000) (248000 384000) (224000 160000) (360000 288000) (200000 192000) (264000 208000) (240000 280000) (104000 184000) (368000 176000) (112000 360000) (192000 80000) (296000 344000) (368000 192000) (192000 312000) (88000 152000) (392000 168000) (288000 288000) (168000 192000) (232000 336000) (104000 328000) (376000 144000)
+  clkbuf_0_clk at (236000 236000)
+  clkbuf_3_0__f_clk at (170140 169416)
+  clkbuf_3_1__f_clk at (177400 205400)
+  clkbuf_3_2__f_clk at (345587 169529)
+  clkbuf_3_3__f_clk at (324086 204027)
+  clkbuf_3_4__f_clk at (166106 303570)
+  clkbuf_3_5__f_clk at (154951 348415)
+  clkbuf_3_6__f_clk at (304992 307007)
+  clkbuf_3_7__f_clk at (320882 347117)
+  clknet_0_clk leaf false level Some(0): [Buffer(0), Buffer(1), Buffer(2), Buffer(3), Buffer(4), Buffer(5), Buffer(6), Buffer(7), Buffer(8)]
+  clknet_3_0__leaf_clk leaf true level None: [Buffer(1), Sink(25), Sink(29), Sink(34), Sink(37), Sink(41), Sink(44)]
+  clknet_3_1__leaf_clk leaf true level None: [Buffer(2), Sink(2), Sink(14), Sink(16), Sink(18), Sink(21), Sink(31)]
+  clknet_3_2__leaf_clk leaf true level None: [Buffer(3), Sink(13), Sink(22), Sink(35), Sink(39), Sink(42), Sink(47)]
+  clknet_3_3__leaf_clk leaf true level None: [Buffer(4), Sink(1), Sink(5), Sink(8), Sink(9), Sink(15), Sink(32)]
+  clknet_3_4__leaf_clk leaf true level None: [Buffer(5), Sink(6), Sink(7), Sink(19), Sink(23), Sink(26), Sink(40)]
+  clknet_3_5__leaf_clk leaf true level None: [Buffer(6), Sink(11), Sink(17), Sink(20), Sink(36), Sink(45), Sink(46)]
+  clknet_3_6__leaf_clk leaf true level None: [Buffer(7), Sink(3), Sink(10), Sink(12), Sink(30), Sink(33), Sink(43)]
+  clknet_3_7__leaf_clk leaf true level None: [Buffer(8), Sink(0), Sink(4), Sink(24), Sink(27), Sink(28), Sink(38)]
+Macro Unclustered fanout Some(12) blockages [(120000, 140000, 160000, 180000)] sinks (20000 16000) (66000 30000) (30000 14000) (8000 68000) (56000 64000) (76000 68000) (14000 34000) (56000 0) (54000 48000) (8000 0) (48000 68000) (12000 48000)
+  clkbuf_0_clk at (42000 34000)
+  clkbuf_1_0__f_clk at (37166 24833)
+  clkbuf_1_1__f_clk at (42172 47827)
+  clknet_0_clk leaf false level Some(0): [Buffer(0), Buffer(1), Buffer(2)]
+  clknet_1_0__leaf_clk leaf true level None: [Buffer(1), Sink(0), Sink(1), Sink(2), Sink(6), Sink(7), Sink(9)]
+  clknet_1_1__leaf_clk leaf true level None: [Buffer(2), Sink(3), Sink(4), Sink(5), Sink(8), Sink(10), Sink(11)]
+Macro Clustered fanout Some(12) blockages [] sinks (250000 280000) (296000 244000) (270000 260000) (284000 286000) (308000 268000) (308000 246000) (302000 258000) (264000 258000) (304000 254000) (282000 278000) (316000 262000) (254000 272000) (292000 278000) (258000 266000) (294000 286000) (294000 308000) (260000 280000) (282000 280000) (294000 314000) (254000 282000) (292000 298000) (306000 274000) (310000 248000) (240000 312000) (280000 256000) (286000 250000) (312000 288000) (314000 254000) (288000 268000) (264000 252000) (306000 252000) (266000 310000) (276000 244000) (318000 252000) (276000 296000) (252000 266000) (284000 296000) (312000 256000) (278000 260000) (256000 254000) (290000 274000) (318000 300000) (284000 306000) (296000 240000) (244000 256000) (312000 304000) (262000 256000) (274000 306000) (286000 272000) (312000 314000) (262000 282000) (248000 290000) (318000 244000) (266000 302000)
+  clkbuf_leaf_0_clk at (252999 269000)
+  clkbuf_leaf_2_clk at (260999 280999)
+  clkbuf_leaf_8_clk at (269999 308000)
+  clkbuf_leaf_10_clk at (283000 283000)
+  clkbuf_leaf_17_clk at (315000 301999)
+  clkbuf_leaf_19_clk at (293000 281999)
+  clkbuf_leaf_23_clk at (307000 271000)
+  clkbuf_leaf_26_clk at (304999 252999)
+  clkbuf_leaf_28_clk at (315000 249499)
+  clkbuf_leaf_29_clk at (296500 245000)
+  clkbuf_leaf_30_clk at (283999 262000)
+  clkbuf_leaf_36_clk at (259000 255000)
+  clkbuf_0_clk at (277999 279000)
+  clkbuf_2_0__f_clk at (263934 265065)
+  clkbuf_2_1__f_clk at (264215 287773)
+  clkbuf_2_2__f_clk at (296393 270025)
+  clkbuf_2_3__f_clk at (294767 290232)
+  clknet_leaf_0_clk leaf true level None: [Buffer(0), Sink(11), Sink(35)]
+  clknet_leaf_2_clk leaf true level None: [Buffer(1), Sink(16), Sink(50)]
+  clknet_leaf_8_clk leaf true level None: [Buffer(2), Sink(31), Sink(47)]
+  clknet_leaf_10_clk leaf true level None: [Buffer(3), Sink(17), Sink(3)]
+  clknet_leaf_17_clk leaf true level None: [Buffer(4), Sink(45), Sink(41)]
+  clknet_leaf_19_clk leaf true level None: [Buffer(5), Sink(14), Sink(12)]
+  clknet_leaf_23_clk leaf true level None: [Buffer(6), Sink(21), Sink(4)]
+  clknet_leaf_26_clk leaf true level None: [Buffer(7), Sink(8), Sink(30)]
+  clknet_leaf_28_clk leaf true level None: [Buffer(8), Sink(27), Sink(33), Sink(22), Sink(52)]
+  clknet_leaf_29_clk leaf true level None: [Buffer(9), Sink(5), Sink(1), Sink(43), Sink(25)]
+  clknet_leaf_30_clk leaf true level None: [Buffer(10), Sink(24), Sink(28)]
+  clknet_leaf_36_clk leaf true level None: [Buffer(11), Sink(46), Sink(39)]
+  clknet_0_clk leaf false level Some(0): [Buffer(12), Buffer(13), Buffer(14), Buffer(15), Buffer(16)]
+  clknet_2_0__leaf_clk leaf true level None: [Buffer(13), Buffer(0), Sink(13), Buffer(1), Sink(38), Sink(2), Sink(7), Sink(32), Sink(29), Buffer(11), Sink(44)]
+  clknet_2_1__leaf_clk leaf true level None: [Buffer(14), Sink(0), Sink(19), Sink(51), Sink(23), Sink(53), Buffer(2), Sink(34), Buffer(3), Sink(9)]
+  clknet_2_2__leaf_clk leaf true level None: [Buffer(15), Sink(48), Sink(40), Buffer(6), Sink(10), Sink(6), Buffer(7), Sink(37), Buffer(8), Buffer(9), Buffer(10)]
+  clknet_2_3__leaf_clk leaf true level None: [Buffer(16), Sink(20), Sink(36), Sink(42), Sink(18), Sink(15), Sink(49), Buffer(4), Sink(26), Buffer(5)]
+Regular Unclustered fanout None blockages [] sinks (164400 161800) (163600 160200) (162800 167000) (167600 162600) (166600 164400) (166200 161200) (163600 162800) (163000 163600) (165200 165200) (167800 167800) (161000 163600) (167000 162600) (163600 166200) (165800 161600) (163600 160000) (161200 167800) (163200 167800) (164600 162000) (164000 165200) (164000 161000) (162400 165200) (161400 167400) (160800 163800) (164800 163600) (163600 164800) (160000 161800) (162600 161000) (162400 167800) (166000 164600) (167800 162000) (161800 161800) (165000 164800) (164600 160800) (164400 160200) (164000 162600) (165400 165800) (162800 162000) (166000 167200) (163000 166600) (162800 166600) (164600 161800) (166400 163400) (166800 163600) (160200 166800) (162800 160200) (164000 163800) (161400 164200) (163200 167200) (163400 162200) (167200 161800) (163400 160200)
+  clkbuf_0_clk at (163900 163900)
+  clkbuf_2_0__f_clk at (163763 163763)
+  clkbuf_2_1__f_clk at (164006 164006)
+  clkbuf_2_2__f_clk at (163192 163192)
+  clkbuf_2_3__f_clk at (164381 164381)
+  clknet_0_clk leaf false level Some(0): [Buffer(0), Buffer(1), Buffer(2), Buffer(3), Buffer(4)]
+  clknet_2_0__leaf_clk leaf true level None: [Buffer(1), Sink(1), Sink(17), Sink(28), Sink(31), Sink(32), Sink(34), Sink(36), Sink(41), Sink(42), Sink(45), Sink(48), Sink(50)]
+  clknet_2_1__leaf_clk leaf true level None: [Buffer(2), Sink(0), Sink(3), Sink(4), Sink(5), Sink(6), Sink(8), Sink(11), Sink(13), Sink(14), Sink(19), Sink(23), Sink(26), Sink(29), Sink(33), Sink(40), Sink(44), Sink(49)]
+  clknet_2_2__leaf_clk leaf true level None: [Buffer(3), Sink(2), Sink(10), Sink(12), Sink(20), Sink(25), Sink(35), Sink(39), Sink(43), Sink(46)]
+  clknet_2_3__leaf_clk leaf true level None: [Buffer(4), Sink(7), Sink(9), Sink(15), Sink(16), Sink(18), Sink(21), Sink(22), Sink(24), Sink(27), Sink(30), Sink(37), Sink(38), Sink(47)]
+Regular Unclustered fanout Some(4) blockages [] sinks (392000 296000) (280000 392000) (256000 240000) (272000 160000) (320000 464000) (368000 368000) (440000 352000) (352000 240000) (264000 392000) (432000 160000) (208000 440000) (264000 424000) (184000 216000) (456000 192000) (192000 176000) (208000 400000) (296000 432000) (392000 304000) (184000 416000) (232000 392000) (360000 320000) (208000 328000) (368000 456000) (368000 240000) (376000 216000) (192000 280000) (216000 376000) (232000 416000) (160000 232000) (400000 424000) (432000 272000) (416000 232000) (328000 376000) (232000 376000) (352000 208000) (440000 416000) (208000 328000) (448000 296000) (432000 240000) (424000 216000) (160000 408000) (376000 424000) (464000 256000) (224000 448000) (336000 448000) (456000 328000)
+  clkbuf_0_clk at (312000 312000)
+  clkbuf_4_0_0_clk at (247642 234612)
+  clkbuf_4_1_0_clk at (252953 214570)
+  clkbuf_4_2_0_clk at (339093 229228)
+  clkbuf_4_3_0_clk at (332831 246692)
+  clkbuf_4_4_0_clk at (429746 219849)
+  clkbuf_4_5_0_clk at (447448 232126)
+  clkbuf_4_6_0_clk at (405259 301937)
+  clkbuf_4_7_0_clk at (435588 299962)
+  clkbuf_4_8_0_clk at (214942 350074)
+  clkbuf_4_9_0_clk at (238966 382050)
+  clkbuf_4_10_0_clk at (184000 408000)
+  clkbuf_4_11_0_clk at (219161 428528)
+  clkbuf_4_12_0_clk at (352543 424528)
+  clkbuf_4_13_0_clk at (388633 404618)
+  clkbuf_4_14_0_clk at (294951 417581)
+  clkbuf_4_15_0_clk at (325250 443281)
+  clknet_0_clk leaf false level Some(0): [Buffer(0), Buffer(1), Buffer(2), Buffer(3), Buffer(4), Buffer(5), Buffer(6), Buffer(7), Buffer(8), Buffer(9), Buffer(10), Buffer(11), Buffer(12), Buffer(13), Buffer(14), Buffer(15), Buffer(16)]
+  clknet_4_0_0_clk leaf true level None: [Buffer(1), Sink(2), Sink(25), Sink(28)]
+  clknet_4_1_0_clk leaf true level None: [Buffer(2), Sink(3), Sink(12), Sink(14)]
+  clknet_4_2_0_clk leaf true level None: [Buffer(3), Sink(24), Sink(31), Sink(34)]
+  clknet_4_3_0_clk leaf true level None: [Buffer(4), Sink(7), Sink(20), Sink(23)]
+  clknet_4_4_0_clk leaf true level None: [Buffer(5), Sink(9), Sink(30), Sink(39)]
+  clknet_4_5_0_clk leaf true level None: [Buffer(6), Sink(13), Sink(38), Sink(42)]
+  clknet_4_6_0_clk leaf true level None: [Buffer(7), Sink(0), Sink(5), Sink(17)]
+  clknet_4_7_0_clk leaf true level None: [Buffer(8), Sink(37), Sink(45)]
+  clknet_4_8_0_clk leaf true level None: [Buffer(9), Sink(21), Sink(26), Sink(36)]
+  clknet_4_9_0_clk leaf true level None: [Buffer(10), Sink(8), Sink(19), Sink(33)]
+  clknet_4_10_0_clk leaf true level None: [Buffer(11), Sink(15), Sink(18), Sink(40)]
+  clknet_4_11_0_clk leaf true level None: [Buffer(12), Sink(10), Sink(27), Sink(43)]
+  clknet_4_12_0_clk leaf true level None: [Buffer(13), Sink(22), Sink(32), Sink(41)]
+  clknet_4_13_0_clk leaf true level None: [Buffer(14), Sink(6), Sink(29), Sink(35)]
+  clknet_4_14_0_clk leaf true level None: [Buffer(15), Sink(1), Sink(11), Sink(16)]
+  clknet_4_15_0_clk leaf true level None: [Buffer(16), Sink(4), Sink(44)]
+Regular Unclustered fanout Some(12) blockages [(260000, 0, 320000, 60000)] sinks (161200 163600) (162000 163400) (167800 160000) (161600 165200) (167200 160400) (165000 167200) (163600 162800) (164600 167800) (163800 161600) (162200 161800) (160400 167000) (165000 162400) (160600 165200) (165000 161400) (165600 161800) (161000 160400) (164200 161400) (160200 160400) (166200 167600) (166000 161600) (161200 166400) (160600 167000) (163600 167800) (164000 167200) (161800 164000) (166000 164400) (164200 166200)
+  clkbuf_0_clk at (164000 163900)
+  clkbuf_2_0__f_clk at (164420 164320)
+  clkbuf_2_1__f_clk at (163602 163502)
+  clkbuf_2_2__f_clk at (164980 164880)
+  clkbuf_2_3__f_clk at (162723 162623)
+  clknet_0_clk leaf false level Some(0): [Buffer(0), Buffer(1), Buffer(2), Buffer(3), Buffer(4)]
+  clknet_2_0__leaf_clk leaf true level None: [Buffer(1), Sink(2), Sink(6), Sink(8), Sink(13), Sink(17), Sink(19), Sink(25)]
+  clknet_2_1__leaf_clk leaf true level None: [Buffer(2), Sink(1), Sink(4), Sink(9), Sink(11), Sink(14), Sink(15), Sink(16)]
+  clknet_2_2__leaf_clk leaf true level None: [Buffer(3), Sink(0), Sink(5), Sink(7), Sink(18), Sink(21), Sink(22), Sink(26)]
+  clknet_2_3__leaf_clk leaf true level None: [Buffer(4), Sink(3), Sink(10), Sink(12), Sink(20), Sink(23), Sink(24)]
+Regular Clustered fanout Some(4) blockages [(240000, 220000, 280000, 260000)] sinks (286000 316000) (276000 252000) (248000 308000) (280000 256000) (280000 302000) (316000 306000) (302000 296000) (266000 242000) (250000 296000) (312000 298000) (310000 260000) (274000 244000) (298000 266000) (318000 312000) (270000 288000) (270000 304000) (266000 294000) (294000 282000) (262000 280000) (300000 302000) (300000 298000) (306000 314000) (250000 244000) (246000 266000) (282000 314000) (314000 244000) (284000 250000) (284000 250000) (254000 292000) (288000 292000) (242000 272000) (258000 302000) (290000 244000) (308000 282000) (268000 312000) (312000 314000)
+  clkbuf_0_clk at (280000 279000)
+  clkbuf_4_0_0_clk at (248825 262481)
+  clkbuf_4_1_0_clk at (252737 266393)
+  clkbuf_4_2_0_clk at (279373 261961)
+  clkbuf_4_3_0_clk at (275276 266058)
+  clkbuf_4_4_0_clk at (263634 297634)
+  clkbuf_4_5_0_clk at (249634 297634)
+  clkbuf_4_6_0_clk at (281561 297966)
+  clkbuf_4_7_0_clk at (269568 299973)
+  clkbuf_4_8_0_clk at (287049 258979)
+  clkbuf_4_9_0_clk at (292206 267822)
+  clkbuf_4_10_0_clk at (309703 267229)
+  clkbuf_4_11_0_clk at (304922 276447)
+  clkbuf_4_12_0_clk at (304649 303350)
+  clkbuf_4_13_0_clk at (290649 303350)
+  clkbuf_4_14_0_clk at (309443 298556)
+  clkbuf_4_15_0_clk at (308018 299981)
+  clknet_0_clk leaf false level Some(0): [Buffer(0), Buffer(1), Buffer(2), Buffer(3), Buffer(4), Buffer(5), Buffer(6), Buffer(7), Buffer(8), Buffer(9), Buffer(10), Buffer(11), Buffer(12), Buffer(13), Buffer(14), Buffer(15), Buffer(16)]
+  clknet_4_0_0_clk leaf true level None: [Buffer(1), Sink(7), Sink(22), Sink(23)]
+  clknet_4_1_0_clk leaf true level None: [Buffer(2), Sink(18), Sink(30)]
+  clknet_4_2_0_clk leaf true level None: [Buffer(3), Sink(1), Sink(11)]
+  clknet_4_3_0_clk leaf true level None: [Buffer(4), Sink(3), Sink(14)]
+  clknet_4_4_0_clk leaf true level None: [Buffer(5), Sink(16), Sink(28), Sink(31)]
+  clknet_4_5_0_clk leaf true level None: [Buffer(6), Sink(2), Sink(8)]
+  clknet_4_6_0_clk leaf true level None: [Buffer(7), Sink(4), Sink(17)]
+  clknet_4_7_0_clk leaf true level None: [Buffer(8), Sink(15), Sink(34)]
+  clknet_4_8_0_clk leaf true level None: [Buffer(9), Sink(26), Sink(27), Sink(32)]
+  clknet_4_9_0_clk leaf true level None: [Buffer(10), Sink(12), Sink(29)]
+  clknet_4_10_0_clk leaf true level None: [Buffer(11), Sink(10), Sink(25)]
+  clknet_4_11_0_clk leaf true level None: [Buffer(12), Sink(20), Sink(33)]
+  clknet_4_12_0_clk leaf true level None: [Buffer(13), Sink(5), Sink(19), Sink(35)]
+  clknet_4_13_0_clk leaf true level None: [Buffer(14), Sink(0), Sink(24)]
+  clknet_4_14_0_clk leaf true level None: [Buffer(15), Sink(6), Sink(9)]
+  clknet_4_15_0_clk leaf true level None: [Buffer(16), Sink(13), Sink(21)]
+Macro Unclustered fanout Some(4) blockages [] sinks (400 6600) (1200 4800) (2400 2200) (2200 7000) (7600 6600) (6400 7800) (800 4400) (7600 1400) (3800 4400) (7600 2000) (2600 3600) (6800 2800) (800 4200) (3400 7200) (6000 7200) (7400 600) (200 5200) (6200 1600) (7600 2400) (7000 2600) (3200 600) (6600 1200) (3800 2800) (4400 5400) (1200 3600) (4600 6800) (4400 6800) (5000 1600) (0 3400) (5200 600) (2000 1600) (200 3400) (800 3800)
+  clkbuf_0_clk at (3800 4200)
+  clkbuf_4_0_0_clk at (-2520 4879)
+  clkbuf_4_1_0_clk at (-2520 4879)
+  clkbuf_4_2_0_clk at (3340 10740)
+  clkbuf_4_3_0_clk at (4022 11422)
+  clkbuf_4_4_0_clk at (-1327 2536)
+  clkbuf_4_5_0_clk at (-1327 2536)
+  clkbuf_4_6_0_clk at (3123 11338)
+  clkbuf_4_7_0_clk at (4558 11958)
+  clkbuf_4_8_0_clk at (5252 -1347)
+  clkbuf_4_9_0_clk at (3274 -3325)
+  clkbuf_4_10_0_clk at (4703 -1896)
+  clkbuf_4_11_0_clk at (4425 -2174)
+  clkbuf_4_12_0_clk at (4094 -2505)
+  clkbuf_4_13_0_clk at (4356 -2243)
+  clkbuf_4_14_0_clk at (3440 -3159)
+  clkbuf_4_15_0_clk at (4609 -1990)
+  clknet_0_clk leaf false level Some(0): [Buffer(0), Buffer(1), Buffer(2), Buffer(3), Buffer(4), Buffer(5), Buffer(6), Buffer(7), Buffer(8), Buffer(9), Buffer(10), Buffer(11), Buffer(12), Buffer(13), Buffer(14), Buffer(15), Buffer(16)]
+  clknet_4_0_0_clk leaf true level None: [Buffer(1), Sink(16), Sink(31), Sink(32)]
+  clknet_4_1_0_clk leaf true level None: [Buffer(2), Sink(1), Sink(12)]
+  clknet_4_2_0_clk leaf true level None: [Buffer(3), Sink(3), Sink(26)]
+  clknet_4_3_0_clk leaf true level None: [Buffer(4), Sink(13), Sink(23)]
+  clknet_4_4_0_clk leaf true level None: [Buffer(5), Sink(6), Sink(28)]
+  clknet_4_5_0_clk leaf true level None: [Buffer(6), Sink(8), Sink(24)]
+  clknet_4_6_0_clk leaf true level None: [Buffer(7), Sink(0), Sink(14)]
+  clknet_4_7_0_clk leaf true level None: [Buffer(8), Sink(5), Sink(10)]
+  clknet_4_8_0_clk leaf true level None: [Buffer(9), Sink(4), Sink(29)]
+  clknet_4_9_0_clk leaf true level None: [Buffer(10), Sink(11), Sink(20)]
+  clknet_4_10_0_clk leaf true level None: [Buffer(11), Sink(15), Sink(25)]
+  clknet_4_11_0_clk leaf true level None: [Buffer(12), Sink(19), Sink(22)]
+  clknet_4_12_0_clk leaf true level None: [Buffer(13), Sink(7), Sink(30)]
+  clknet_4_13_0_clk leaf true level None: [Buffer(14), Sink(18), Sink(21)]
+  clknet_4_14_0_clk leaf true level None: [Buffer(15), Sink(2), Sink(27)]
+  clknet_4_15_0_clk leaf true level None: [Buffer(16), Sink(9), Sink(17)]
+Regular Unclustered fanout Some(12) blockages [(240000, 220000, 260000, 240000), (280000, 120000, 300000, 140000)] sinks (238000 236000)
+  clkbuf_0_clk at (238000 236000)
+  clkbuf_1_0__f_clk at (231000 243000)
+  clknet_0_clk leaf false level Some(0): [Buffer(0), Buffer(1)]
+  clknet_1_0__leaf_clk leaf true level None: [Buffer(1), Sink(0)]
+Macro Clustered fanout None blockages [] sinks (170000 190000) (216000 192000) (206000 234000) (222000 188000) (226000 238000) (176000 196000) (226000 176000) (180000 194000) (178000 218000) (220000 182000) (188000 194000) (170000 200000) (172000 176000) (166000 172000) (224000 198000) (228000 198000) (214000 182000) (186000 162000) (192000 186000) (224000 218000) (180000 184000) (224000 218000) (216000 180000) (160000 162000) (216000 162000) (184000 174000) (180000 170000) (220000 170000) (236000 168000) (230000 234000) (200000 198000) (176000 180000) (172000 234000) (188000 176000) (168000 176000) (208000 188000) (222000 214000) (204000 166000) (204000 218000) (234000 196000)
+  clkbuf_leaf_4_clk at (175499 187500)
+  clkbuf_leaf_8_clk at (184666 223333)
+  clkbuf_leaf_24_clk at (214000 169500)
+  clkbuf_leaf_25_clk at (210999 185000)
+  clkbuf_0_clk at (198000 199999)
+  clkbuf_2_0__f_clk at (185873 184126)
+  clkbuf_2_1__f_clk at (204389 184969)
+  clkbuf_2_2__f_clk at (211150 214849)
+  clkbuf_2_3__f_clk at (214858 200040)
+  clknet_leaf_4_clk leaf true level None: [Buffer(0), Sink(31), Sink(5), Sink(0), Sink(20)]
+  clknet_leaf_8_clk leaf true level None: [Buffer(1), Sink(8), Sink(32), Sink(38)]
+  clknet_leaf_24_clk leaf true level None: [Buffer(2), Sink(27), Sink(24), Sink(37), Sink(22)]
+  clknet_leaf_25_clk leaf true level None: [Buffer(3), Sink(16), Sink(35)]
+  clknet_0_clk leaf false level Some(0): [Buffer(4), Buffer(5), Buffer(6), Buffer(7), Buffer(8)]
+  clknet_2_0__leaf_clk leaf true level None: [Buffer(5), Sink(23), Sink(13), Sink(34), Sink(12), Buffer(0), Sink(7), Sink(10), Sink(11), Sink(33), Sink(17), Sink(26), Sink(25)]
+  clknet_2_1__leaf_clk leaf true level None: [Buffer(6), Sink(3), Sink(9), Sink(6), Sink(28), Buffer(2), Buffer(3), Sink(18)]
+  clknet_2_2__leaf_clk leaf true level None: [Buffer(7), Buffer(1), Sink(2), Sink(4), Sink(29), Sink(19), Sink(21), Sink(36)]
+  clknet_2_3__leaf_clk leaf true level None: [Buffer(8), Sink(30), Sink(1), Sink(14), Sink(15), Sink(39)]
+Regular Clustered fanout Some(4) blockages [(120000, 200000, 200000, 280000)] sinks (114000 82000) (112000 122000) (124000 110000) (124000 144000) (90000 86000) (86000 102000) (120000 96000) (140000 156000) (86000 138000) (152000 154000) (154000 128000) (88000 146000) (156000 94000) (122000 124000) (90000 110000) (118000 92000) (110000 122000) (102000 156000) (110000 114000) (108000 86000) (86000 122000) (116000 106000) (96000 90000) (154000 148000) (126000 96000) (116000 154000) (90000 150000) (122000 124000) (152000 86000) (126000 102000) (138000 122000) (102000 140000) (122000 154000) (96000 122000) (128000 146000) (94000 102000) (120000 124000) (90000 122000) (152000 130000) (106000 112000) (100000 120000) (150000 112000) (86000 90000) (158000 82000)
+  clkbuf_0_clk at (122000 119000)
+  clkbuf_4_0_0_clk at (98245 93754)
+  clkbuf_4_1_0_clk at (112245 93754)
+  clkbuf_4_2_0_clk at (93084 106857)
+  clkbuf_4_3_0_clk at (107084 106857)
+  clkbuf_4_4_0_clk at (128896 96956)
+  clkbuf_4_5_0_clk at (142896 96956)
+  clkbuf_4_6_0_clk at (119344 115404)
+  clkbuf_4_7_0_clk at (133344 115404)
+  clkbuf_4_8_0_clk at (93370 123468)
+  clkbuf_4_9_0_clk at (107370 123468)
+  clkbuf_4_10_0_clk at (92869 138869)
+  clkbuf_4_11_0_clk at (102518 143220)
+  clkbuf_4_12_0_clk at (133492 134801)
+  clkbuf_4_13_0_clk at (147492 134801)
+  clkbuf_4_14_0_clk at (121224 148338)
+  clkbuf_4_15_0_clk at (135224 148338)
+  clknet_0_clk leaf false level Some(0): [Buffer(0), Buffer(1), Buffer(2), Buffer(3), Buffer(4), Buffer(5), Buffer(6), Buffer(7), Buffer(8), Buffer(9), Buffer(10), Buffer(11), Buffer(12), Buffer(13), Buffer(14), Buffer(15), Buffer(16)]
+  clknet_4_0_0_clk leaf true level None: [Buffer(1), Sink(4), Sink(22), Sink(42)]
+  clknet_4_1_0_clk leaf true level None: [Buffer(2), Sink(0), Sink(15), Sink(19)]
+  clknet_4_2_0_clk leaf true level None: [Buffer(3), Sink(5), Sink(14), Sink(35)]
+  clknet_4_3_0_clk leaf true level None: [Buffer(4), Sink(18), Sink(39)]
+  clknet_4_4_0_clk leaf true level None: [Buffer(5), Sink(6), Sink(24), Sink(29)]
+  clknet_4_5_0_clk leaf true level None: [Buffer(6), Sink(12), Sink(28), Sink(43)]
+  clknet_4_6_0_clk leaf true level None: [Buffer(7), Sink(21), Sink(27), Sink(36)]
+  clknet_4_7_0_clk leaf true level None: [Buffer(8), Sink(2), Sink(41)]
+  clknet_4_8_0_clk leaf true level None: [Buffer(9), Sink(20), Sink(33), Sink(37)]
+  clknet_4_9_0_clk leaf true level None: [Buffer(10), Sink(1), Sink(16), Sink(40)]
+  clknet_4_10_0_clk leaf true level None: [Buffer(11), Sink(8), Sink(11), Sink(26)]
+  clknet_4_11_0_clk leaf true level None: [Buffer(12), Sink(17), Sink(31)]
+  clknet_4_12_0_clk leaf true level None: [Buffer(13), Sink(7), Sink(13), Sink(30)]
+  clknet_4_13_0_clk leaf true level None: [Buffer(14), Sink(10), Sink(23), Sink(38)]
+  clknet_4_14_0_clk leaf true level None: [Buffer(15), Sink(3), Sink(25), Sink(32)]
+  clknet_4_15_0_clk leaf true level None: [Buffer(16), Sink(9), Sink(34)]
+Regular Unclustered fanout None blockages [] sinks (161200 164000) (166000 161800) (166000 166400) (161200 160800) (167400 166800) (166000 161000) (160600 164400) (160400 165800) (160600 166400) (164200 166000) (165800 166800) (166800 167600) (166800 163600) (167800 161000) (160800 161000) (162800 160400) (164800 163800) (161400 164400) (166800 165200) (164400 160000) (162200 165600) (163600 165000) (162800 160800) (165000 166200) (164200 162600) (166600 167400) (164400 160000) (165800 166000)
+  clkbuf_0_clk at (164100 163800)
+  clkbuf_1_0__f_clk at (165340 151040)
+  clkbuf_1_1__f_clk at (163611 177311)
+  clknet_0_clk leaf false level Some(0): [Buffer(0), Buffer(1), Buffer(2)]
+  clknet_1_0__leaf_clk leaf true level None: [Buffer(1), Sink(1), Sink(3), Sink(5), Sink(12), Sink(13), Sink(14), Sink(15), Sink(16), Sink(19), Sink(22), Sink(24), Sink(26)]
+  clknet_1_1__leaf_clk leaf true level None: [Buffer(2), Sink(0), Sink(2), Sink(4), Sink(6), Sink(7), Sink(8), Sink(9), Sink(10), Sink(11), Sink(17), Sink(18), Sink(20), Sink(21), Sink(23), Sink(25), Sink(27)]
+Regular Unclustered fanout Some(12) blockages [] sinks (176000 214000) (190000 172000) (210000 164000) (174000 186000) (172000 166000) (176000 228000) (198000 188000) (210000 166000) (188000 226000) (224000 228000) (186000 228000) (224000 176000) (180000 176000) (206000 184000) (174000 222000) (192000 232000) (236000 196000) (202000 230000) (202000 176000) (170000 196000) (176000 174000) (186000 188000) (180000 228000) (190000 220000) (206000 198000) (194000 184000) (172000 236000) (196000 204000) (162000 192000) (208000 178000) (202000 206000) (176000 164000) (236000 220000) (180000 208000) (218000 220000) (226000 176000) (226000 226000) (204000 216000) (206000 238000) (214000 216000) (238000 216000)
+  clkbuf_0_clk at (200000 201000)
+  clkbuf_2_0__f_clk at (182921 190550)
+  clkbuf_2_1__f_clk at (183800 212800)
+  clkbuf_2_2__f_clk at (212715 188284)
+  clkbuf_2_3__f_clk at (215520 213479)
+  clknet_0_clk leaf false level Some(0): [Buffer(0), Buffer(1), Buffer(2), Buffer(3), Buffer(4)]
+  clknet_2_0__leaf_clk leaf true level None: [Buffer(1), Sink(1), Sink(3), Sink(4), Sink(6), Sink(12), Sink(19), Sink(20), Sink(21), Sink(25), Sink(28), Sink(31)]
+  clknet_2_1__leaf_clk leaf true level None: [Buffer(2), Sink(0), Sink(5), Sink(8), Sink(10), Sink(14), Sink(15), Sink(22), Sink(23), Sink(26), Sink(33)]
+  clknet_2_2__leaf_clk leaf true level None: [Buffer(3), Sink(2), Sink(7), Sink(11), Sink(13), Sink(16), Sink(18), Sink(24), Sink(27), Sink(29), Sink(35)]
+  clknet_2_3__leaf_clk leaf true level None: [Buffer(4), Sink(9), Sink(17), Sink(30), Sink(32), Sink(34), Sink(36), Sink(37), Sink(38), Sink(39), Sink(40)]
+Regular Unclustered fanout Some(4) blockages [(20000, 20000, 80000, 80000), (180000, 220000, 220000, 240000)] sinks (74000 10000) (44000 66000) (62000 26000) (50000 12000) (30000 54000) (52000 60000) (44000 0) (2000 14000) (8000 52000) (78000 74000) (44000 78000) (50000 40000) (30000 64000) (48000 20000) (60000 70000) (68000 6000) (4000 62000) (18000 30000) (62000 76000) (44000 2000) (18000 12000) (4000 78000) (40000 14000) (32000 28000) (26000 62000) (38000 66000) (78000 34000) (16000 70000) (10000 50000) (74000 6000) (54000 48000) (22000 22000) (60000 32000) (76000 54000) (60000 70000) (38000 2000) (60000 60000) (0 4000) (66000 46000) (60000 18000) (74000 12000) (52000 74000) (4000 60000)
+  clkbuf_0_clk at (18100 39000)
+  clkbuf_4_0_0_clk at (20000 5900)
+  clkbuf_4_1_0_clk at (34000 5900)
+  clkbuf_4_2_0_clk at (20099 20000)
+  clkbuf_4_3_0_clk at (20000 20099)
+  clkbuf_4_4_0_clk at (20000 26900)
+  clkbuf_4_5_0_clk at (18100 30400)
+  clkbuf_4_6_0_clk at (19037 34862)
+  clkbuf_4_7_0_clk at (20000 33143)
+  clkbuf_4_8_0_clk at (6000 58100)
+  clkbuf_4_9_0_clk at (6000 58100)
+  clkbuf_4_10_0_clk at (14196 52296)
+  clkbuf_4_11_0_clk at (20000 44100)
+  clkbuf_4_12_0_clk at (20000 61636)
+  clkbuf_4_13_0_clk at (13000 54636)
+  clkbuf_4_14_0_clk at (20000 19636)
+  clkbuf_4_15_0_clk at (18100 26636)
+  clknet_0_clk leaf false level Some(0): [Buffer(0), Buffer(1), Buffer(2), Buffer(3), Buffer(4), Buffer(5), Buffer(6), Buffer(7), Buffer(8), Buffer(9), Buffer(10), Buffer(11), Buffer(12), Buffer(13), Buffer(14), Buffer(15), Buffer(16)]
+  clknet_4_0_0_clk leaf true level None: [Buffer(1), Sink(22), Sink(35), Sink(37)]
+  clknet_4_1_0_clk leaf true level None: [Buffer(2), Sink(6), Sink(13), Sink(19)]
+  clknet_4_2_0_clk leaf true level None: [Buffer(3), Sink(7), Sink(20), Sink(31)]
+  clknet_4_3_0_clk leaf true level None: [Buffer(4), Sink(17), Sink(23)]
+  clknet_4_4_0_clk leaf true level None: [Buffer(5), Sink(3), Sink(15), Sink(39)]
+  clknet_4_5_0_clk leaf true level None: [Buffer(6), Sink(0), Sink(29), Sink(40)]
+  clknet_4_6_0_clk leaf true level None: [Buffer(7), Sink(11), Sink(30), Sink(32)]
+  clknet_4_7_0_clk leaf true level None: [Buffer(8), Sink(2), Sink(26)]
+  clknet_4_8_0_clk leaf true level None: [Buffer(9), Sink(8), Sink(16), Sink(28)]
+  clknet_4_9_0_clk leaf true level None: [Buffer(10), Sink(21), Sink(27), Sink(42)]
+  clknet_4_10_0_clk leaf true level None: [Buffer(11), Sink(4), Sink(12), Sink(24)]
+  clknet_4_11_0_clk leaf true level None: [Buffer(12), Sink(1), Sink(25)]
+  clknet_4_12_0_clk leaf true level None: [Buffer(13), Sink(5), Sink(34), Sink(36)]
+  clknet_4_13_0_clk leaf true level None: [Buffer(14), Sink(33), Sink(38)]
+  clknet_4_14_0_clk leaf true level None: [Buffer(15), Sink(10), Sink(18), Sink(41)]
+  clknet_4_15_0_clk leaf true level None: [Buffer(16), Sink(9), Sink(14)]

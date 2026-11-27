@@ -54,4 +54,7 @@ exclude_re = [
     "replace < with <= in arc_cost",
     # Pairing each blockage with itself too joins a group to itself, which changes nothing.
     "replace \\+ with \\* in merge_blockages",
+    # Equal values are already fuzzily equal, so the strict side of a fuzzy bound cannot tell.
+    "replace > with >= in fuzzy_ge",
+    "replace < with <= in fuzzy_le",
 ]
