@@ -755,3 +755,63 @@ fn a_grid_under_a_wire_length_limit_gets_the_trees_it_always_has() {
         &synthesized_grid(CLOCK, Some(Dbu::new(200_000))),
     );
 }
+
+/// The 16 by 16 grid with hard placement blockages over `blockages`,
+/// `(x0, y0, x1, y1)` each, synthesized.
+fn synthesized_around(blockages: &[(i64, i64, i64, i64)]) -> (NetlistDB, CtsSummary) {
+    let (db, lib, constraints) = load(16, 16, false);
+    let mut section = format!("BLOCKAGES {} ;\n", blockages.len());
+    for (x0, y0, x1, y1) in blockages {
+        let _ = writeln!(section, "- PLACEMENT RECT ( {x0} {y0} ) ( {x1} {y1} ) ;");
+    }
+    section.push_str("END BLOCKAGES\nCOMPONENTS");
+    let text = design(16, 16, false).replacen("COMPONENTS", &section, 1);
+    let mut db = def::parse_str(&text, Path::new("grid.def"), db.library).unwrap();
+    let link = Link::new(&db, &lib, &[]).unwrap();
+    let clocks = clock_network(&db, &link, &constraints);
+    let input = CtsInput {
+        link: &link,
+        sdc: &constraints,
+        clocks: &clocks,
+        signal_rc: wire(&db, "metal2", 3.5, 0.1),
+        clock_rc: wire(&db, "metal3", 1.5, 0.11),
+        max_wire_length: None,
+        options: CtsOptions::default(),
+    };
+
+    let trees = synthesize(&mut db, &input).unwrap();
+
+    (db, trees.summary)
+}
+
+/// A wide blockage across the middle and a tall one at the left edge.
+const BLOCKAGES: [(i64, i64, i64, i64); 2] = [
+    (100_000, 150_000, 300_000, 250_000),
+    (10_000, 20_000, 60_000, 380_000),
+];
+
+#[test]
+fn a_grid_around_blockages_gets_the_trees_it_always_has() {
+    let (db, summary) = synthesized_around(&BLOCKAGES);
+
+    assert_golden(
+        "grid_16x16_blockages.txt",
+        &clock_trees_text(&db, 256, &summary),
+    );
+}
+
+#[test]
+fn no_clock_buffer_stands_inside_a_blockage() {
+    let (db, _) = synthesized_around(&BLOCKAGES);
+
+    for cell in db.cells.iter().skip(256) {
+        let (x, y) = (cell.location.x.get(), cell.location.y.get());
+        for (x0, y0, x1, y1) in BLOCKAGES {
+            assert!(
+                !(x0 < x && x < x1 && y0 < y && y < y1),
+                "{} at ({x}, {y}) is inside the blockage ({x0}, {y0}) - ({x1}, {y1})",
+                cell.name
+            );
+        }
+    }
+}
