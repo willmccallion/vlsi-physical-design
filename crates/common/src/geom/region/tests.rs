@@ -451,3 +451,105 @@ fn slices_partition_random_regions_with_holes() {
         assert_partition(&region, &region.vertical_slices());
     }
 }
+
+#[test]
+fn a_rectangle_without_width_adds_nothing_even_across_another() {
+    let region = Region::from_rects([rect(1, 0, 1, 8), rect(0, 0, 2, 2)]);
+
+    assert_eq!(region, Region::from_rects([rect(0, 0, 2, 2)]));
+}
+
+#[test]
+fn a_region_with_area_is_not_empty() {
+    assert!(!ell().is_empty());
+}
+
+#[test]
+fn a_rectangle_only_touching_the_region_does_not_intersect_it() {
+    let square = Region::from_rects([rect(0, 0, 10, 10)]);
+
+    assert!(!square.intersects_rect(&rect(10, 0, 20, 10)));
+    assert!(!square.intersects_rect(&rect(0, 10, 10, 20)));
+    assert!(square.intersects_rect(&rect(9, 9, 20, 20)));
+}
+
+#[test]
+fn covering_starts_at_the_slab_the_rectangle_starts_in() {
+    let region = Region::from_rects([rect(0, 0, 10, 5), rect(10, 0, 20, 10)]);
+
+    assert!(region.covers_rect(&rect(10, 0, 20, 10)));
+    assert!(region.covers_rect(&rect(0, 0, 20, 5)));
+    assert!(!region.covers_rect(&rect(5, 0, 20, 10)));
+}
+
+#[test]
+fn rectangles_meeting_at_either_diagonal_corner_are_separate_pieces() {
+    let rising = Region::from_rects([rect(0, 0, 5, 5), rect(5, 5, 10, 10)]);
+    let falling = Region::from_rects([rect(0, 5, 5, 10), rect(5, 0, 10, 5)]);
+
+    assert_eq!(rising.components().len(), 2);
+    assert_eq!(falling.components().len(), 2);
+}
+
+#[test]
+fn a_union_merges_the_spans_it_joins() {
+    let big = Region::from_rects([rect(0, 0, 10, 10)]);
+    let split = Region::from_rects([rect(0, 0, 10, 4), rect(0, 6, 10, 10)]);
+
+    assert_eq!(big.union(&split), big);
+}
+
+/// The 4-connected groups of `cells`, each as a set.
+fn flood_fill(cells: &HashSet<(i64, i64)>) -> Vec<HashSet<(i64, i64)>> {
+    let mut left = cells.clone();
+    let mut groups = Vec::new();
+    while let Some(&start) = left.iter().next() {
+        let mut group = HashSet::new();
+        let mut stack = vec![start];
+        while let Some((x, y)) = stack.pop() {
+            if left.remove(&(x, y)) {
+                let _ = group.insert((x, y));
+                stack.extend([(x + 1, y), (x - 1, y), (x, y + 1), (x, y - 1)]);
+            }
+        }
+        groups.push(group);
+    }
+    groups
+}
+
+#[test]
+fn components_match_the_edge_connected_groups_of_cells() {
+    let mut lcg = Lcg(19);
+    for _ in 0..300 {
+        let region = Region::from_rects(lcg.rects(6, 12));
+
+        let mut pieces: Vec<Vec<(i64, i64)>> = region
+            .components()
+            .iter()
+            .map(|c| sorted(cells(c, 12).into_iter().collect()))
+            .collect();
+        let mut groups: Vec<Vec<(i64, i64)>> = flood_fill(&cells(&region, 12))
+            .into_iter()
+            .map(|g| sorted(g.into_iter().collect()))
+            .collect();
+        pieces.sort();
+        groups.sort();
+
+        assert_eq!(pieces, groups);
+    }
+}
+
+#[test]
+fn covering_matches_cell_by_cell_membership() {
+    let mut lcg = Lcg(23);
+    for _ in 0..300 {
+        let region = Region::from_rects(lcg.rects(4, 12));
+        let inside = cells(&region, 12);
+        let probe = lcg.rects(1, 12)[0];
+
+        let expected = (probe.min.x.get()..probe.max.x.get())
+            .all(|x| (probe.min.y.get()..probe.max.y.get()).all(|y| inside.contains(&(x, y))));
+
+        assert_eq!(region.covers_rect(&probe), expected, "{probe:?}");
+    }
+}
