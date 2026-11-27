@@ -709,3 +709,15 @@ fn an_image_that_cannot_be_written_fails_the_run() {
         printed(&output)
     );
 }
+
+#[test]
+fn the_report_records_the_worker_threads_the_config_sets() {
+    let dir = work_dir("threads");
+    let config = write_bookshelf_config(&dir, "threads = 1");
+    let report = dir.join("report.json");
+
+    let output = pare(&[Path::new("place"), &config, Path::new("--report"), &report]);
+
+    assert!(output.status.success(), "{}", printed(&output));
+    assert_eq!(read_report(&report)["threads"], 1);
+}
