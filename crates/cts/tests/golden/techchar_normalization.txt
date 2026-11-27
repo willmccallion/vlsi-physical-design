@@ -1,0 +1,251 @@
+case 0: 1 measurements
+  lengths LengthSteps(4) to LengthSteps(4), max load CapSteps(17), max slew SlewSteps(6), least input cap CapSteps(16), rate None
+  length 4 load 17 slew 6 delay 31 input cap 16 slew 1 buffers at [0.5] [LibCellId(0)] first 2 last 2
+case 1: 8 measurements
+  lengths LengthSteps(4) to LengthSteps(8), max load CapSteps(24), max slew SlewSteps(7), least input cap CapSteps(1), rate Some(WireDelayRate(Seconds(8.571428723042063e-12)))
+  length 4 load 20 slew 7 delay 26 input cap 17 slew 5 buffers at [0.5] [LibCellId(1)] first 2 last 2
+  length 4 load 14 slew 3 delay 22 input cap 15 slew 2 buffers at [1.0] [LibCellId(0)] first 4 last 0
+  length 6 load 4 slew 5 delay 33 input cap 1 slew 5 buffers at [0.666667, 0.333333] [LibCellId(1), LibCellId(1)] first 4 last 0
+  length 6 load 2 slew 6 delay 41 input cap 9 slew 3 buffers at [0.333333, 0.666667] [LibCellId(1), LibCellId(1)] first 2 last 0
+  length 6 load 14 slew 3 delay 9 input cap 24 slew 6 buffers at [0.333333, 0.666667] [LibCellId(0), LibCellId(1)] first 2 last 0
+  length 8 load 5 slew 1 delay 14 input cap 18 slew 2 buffers at [0.5] [LibCellId(0)] first 4 last 4
+case 2: 9 measurements
+  lengths LengthSteps(2) to LengthSteps(8), max load CapSteps(22), max slew SlewSteps(7), least input cap CapSteps(4), rate Some(WireDelayRate(Seconds(2.5000000442206016e-11)))
+  length 8 load 18 slew 4 delay 35 input cap 7 slew 4 buffers at [0.25, 0.5] [LibCellId(0), LibCellId(1)] first 2 last 2
+  length 8 load 6 slew 1 delay 42 input cap 21 slew 7 buffers at [0.25, 0.5] [LibCellId(0), LibCellId(1)] first 2 last 2
+  length 4 load 2 slew 6 delay 42 input cap 4 slew 5 buffers at [] [] first 4 last 4
+  length 8 load 10 slew 3 delay 2 input cap 12 slew 4 buffers at [] [] first 8 last 8
+  length 2 load 14 slew 6 delay 14 input cap 22 slew 2 buffers at [] [] first 2 last 2
+  length 4 load 7 slew 7 delay 16 input cap 22 slew 4 buffers at [0.5, 0.5] [LibCellId(1), LibCellId(1)] first 2 last 0
+  length 2 load 12 slew 2 delay 39 input cap 15 slew 3 buffers at [] [] first 2 last 2
+case 3: 0 measurements
+  none within the slew limit
+case 4: 2 measurements
+  lengths LengthSteps(6) to LengthSteps(8), max load CapSteps(23), max slew SlewSteps(6), least input cap CapSteps(5), rate Some(WireDelayRate(Seconds(2.0714286080684985e-11)))
+  length 8 load 6 slew 3 delay 29 input cap 5 slew 6 buffers at [0.75] [LibCellId(0)] first 6 last 2
+  length 6 load 10 slew 5 delay 7 input cap 23 slew 4 buffers at [0.666667] [LibCellId(0)] first 4 last 2
+case 5: 8 measurements
+  lengths LengthSteps(2) to LengthSteps(8), max load CapSteps(23), max slew SlewSteps(7), least input cap CapSteps(3), rate Some(WireDelayRate(Seconds(1.9047619384537917e-11)))
+  length 4 load 1 slew 7 delay 31 input cap 23 slew 5 buffers at [] [] first 4 last 4
+  length 6 load 4 slew 3 delay 20 input cap 3 slew 5 buffers at [0.333333, 0.666667] [LibCellId(1), LibCellId(0)] first 2 last 0
+  length 4 load 7 slew 2 delay 14 input cap 11 slew 4 buffers at [] [] first 4 last 4
+  length 2 load 20 slew 3 delay 17 input cap 7 slew 2 buffers at [] [] first 2 last 2
+  length 8 load 16 slew 6 delay 9 input cap 3 slew 5 buffers at [0.5, 0.25, 0.25] [LibCellId(1), LibCellId(0), LibCellId(1)] first 4 last 0
+  length 8 load 16 slew 2 delay 29 input cap 11 slew 5 buffers at [0.75, 0.25] [LibCellId(1), LibCellId(0)] first 6 last 0
+case 6: 7 measurements
+  lengths LengthSteps(2) to LengthSteps(8), max load CapSteps(25), max slew SlewSteps(7), least input cap CapSteps(2), rate Some(WireDelayRate(Seconds(1.500000026532361e-11)))
+  length 6 load 19 slew 4 delay 30 input cap 2 slew 2 buffers at [0.333333] [LibCellId(1)] first 2 last 4
+  length 8 load 4 slew 4 delay 34 input cap 18 slew 5 buffers at [0.5, 0.5] [LibCellId(0), LibCellId(1)] first 4 last 0
+  length 8 load 17 slew 1 delay 21 input cap 7 slew 7 buffers at [0.25, 0.25, 0.25, 0.25] [LibCellId(0), LibCellId(1), LibCellId(1), LibCellId(1)] first 2 last 0
+  length 4 load 14 slew 1 delay 20 input cap 25 slew 7 buffers at [0.5] [LibCellId(1)] first 2 last 2
+  length 2 load 20 slew 2 delay 8 input cap 24 slew 3 buffers at [] [] first 2 last 2
+  length 8 load 11 slew 2 delay 42 input cap 19 slew 3 buffers at [0.5] [LibCellId(1)] first 4 last 4
+case 7: 11 measurements
+  lengths LengthSteps(2) to LengthSteps(8), max load CapSteps(24), max slew SlewSteps(7), least input cap CapSteps(4), rate Some(WireDelayRate(Seconds(9.523809692268959e-12)))
+  length 8 load 20 slew 5 delay 38 input cap 15 slew 3 buffers at [0.5, 0.5] [LibCellId(0), LibCellId(1)] first 4 last 0
+  length 4 load 2 slew 4 delay 7 input cap 14 slew 5 buffers at [] [] first 4 last 4
+  length 2 load 16 slew 2 delay 2 input cap 16 slew 3 buffers at [] [] first 2 last 2
+  length 2 load 15 slew 6 delay 29 input cap 20 slew 6 buffers at [] [] first 2 last 2
+  length 4 load 17 slew 4 delay 23 input cap 14 slew 7 buffers at [0.5] [LibCellId(0)] first 2 last 2
+  length 2 load 6 slew 5 delay 9 input cap 18 slew 2 buffers at [1.0] [LibCellId(1)] first 2 last 0
+  length 6 load 18 slew 3 delay 10 input cap 17 slew 5 buffers at [0.666667] [LibCellId(1)] first 4 last 2
+  length 4 load 16 slew 7 delay 12 input cap 14 slew 2 buffers at [1.0] [LibCellId(0)] first 4 last 0
+  length 6 load 1 slew 2 delay 5 input cap 24 slew 4 buffers at [] [] first 6 last 6
+  length 8 load 17 slew 4 delay 10 input cap 4 slew 3 buffers at [0.25, 0.5, 0.25] [LibCellId(0), LibCellId(1), LibCellId(1)] first 2 last 0
+case 8: 3 measurements
+  lengths LengthSteps(6) to LengthSteps(8), max load CapSteps(22), max slew SlewSteps(7), least input cap CapSteps(2), rate Some(WireDelayRate(Seconds(2.3571428988365672e-11)))
+  length 8 load 15 slew 2 delay 33 input cap 22 slew 7 buffers at [0.25, 0.75] [LibCellId(1), LibCellId(0)] first 2 last 0
+  length 6 load 10 slew 2 delay 28 input cap 2 slew 6 buffers at [0.333333, 0.666667] [LibCellId(0), LibCellId(0)] first 2 last 0
+case 9: 3 measurements
+  lengths LengthSteps(6) to LengthSteps(8), max load CapSteps(15), max slew SlewSteps(7), least input cap CapSteps(9), rate Some(WireDelayRate(Seconds(2.214285753452533e-11)))
+  length 8 load 10 slew 7 delay 36 input cap 15 slew 3 buffers at [0.25, 0.5, 0.25] [LibCellId(0), LibCellId(1), LibCellId(0)] first 2 last 0
+  length 6 load 15 slew 2 delay 25 input cap 9 slew 1 buffers at [] [] first 6 last 6
+  length 8 load 3 slew 3 delay 31 input cap 10 slew 3 buffers at [0.25, 0.25] [LibCellId(0), LibCellId(1)] first 2 last 4
+case 10: 6 measurements
+  lengths LengthSteps(2) to LengthSteps(8), max load CapSteps(20), max slew SlewSteps(6), least input cap CapSteps(2), rate Some(WireDelayRate(Seconds(5.000000088441203e-12)))
+  length 8 load 8 slew 6 delay 7 input cap 19 slew 6 buffers at [0.25, 0.5] [LibCellId(0), LibCellId(0)] first 2 last 2
+  length 6 load 5 slew 1 delay 10 input cap 11 slew 1 buffers at [0.333333, 0.333333] [LibCellId(0), LibCellId(1)] first 2 last 2
+  length 4 load 2 slew 2 delay 42 input cap 14 slew 4 buffers at [0.5, 0.5] [LibCellId(1), LibCellId(0)] first 2 last 0
+  length 6 load 20 slew 2 delay 11 input cap 2 slew 1 buffers at [] [] first 6 last 6
+  length 2 load 2 slew 3 delay 30 input cap 14 slew 2 buffers at [1.0] [LibCellId(1)] first 2 last 0
+case 11: 5 measurements
+  lengths LengthSteps(2) to LengthSteps(8), max load CapSteps(18), max slew SlewSteps(7), least input cap CapSteps(14), rate Some(WireDelayRate(Seconds(6.428571542281547e-12)))
+  length 2 load 15 slew 6 delay 35 input cap 18 slew 5 buffers at [1.0] [LibCellId(1)] first 2 last 0
+  length 2 load 5 slew 7 delay 12 input cap 14 slew 6 buffers at [] [] first 2 last 2
+  length 8 load 5 slew 5 delay 9 input cap 18 slew 6 buffers at [0.25, 0.25, 0.5] [LibCellId(0), LibCellId(0), LibCellId(1)] first 2 last 0
+case 12: 2 measurements
+  lengths LengthSteps(6) to LengthSteps(6), max load CapSteps(17), max slew SlewSteps(4), least input cap CapSteps(5), rate None
+  length 6 load 17 slew 4 delay 37 input cap 5 slew 2 buffers at [0.333333, 0.666667] [LibCellId(1), LibCellId(0)] first 2 last 0
+case 13: 9 measurements
+  lengths LengthSteps(2) to LengthSteps(8), max load CapSteps(16), max slew SlewSteps(7), least input cap CapSteps(5), rate Some(WireDelayRate(Seconds(1.0000000176882406e-11)))
+  length 6 load 8 slew 1 delay 14 input cap 7 slew 4 buffers at [0.333333] [LibCellId(1)] first 2 last 4
+  length 8 load 16 slew 1 delay 29 input cap 16 slew 2 buffers at [0.25, 0.25, 0.5] [LibCellId(1), LibCellId(0), LibCellId(0)] first 2 last 0
+  length 8 load 8 slew 4 delay 21 input cap 12 slew 7 buffers at [0.25, 0.75] [LibCellId(1), LibCellId(1)] first 2 last 0
+  length 2 load 12 slew 5 delay 20 input cap 7 slew 6 buffers at [] [] first 2 last 2
+  length 8 load 6 slew 1 delay 14 input cap 10 slew 6 buffers at [1.0] [LibCellId(0)] first 8 last 0
+  length 8 load 1 slew 7 delay 12 input cap 6 slew 6 buffers at [0.5] [LibCellId(1)] first 4 last 4
+  length 8 load 15 slew 2 delay 39 input cap 5 slew 3 buffers at [0.25, 0.5, 0.25] [LibCellId(1), LibCellId(0), LibCellId(0)] first 2 last 0
+case 14: 4 measurements
+  lengths LengthSteps(2) to LengthSteps(6), max load CapSteps(21), max slew SlewSteps(6), least input cap CapSteps(1), rate Some(WireDelayRate(Seconds(5.000000088441203e-11)))
+  length 6 load 6 slew 6 delay 35 input cap 21 slew 3 buffers at [0.333333, 0.666667] [LibCellId(1), LibCellId(1)] first 2 last 0
+  length 2 load 10 slew 6 delay 34 input cap 1 slew 6 buffers at [1.0] [LibCellId(0)] first 2 last 0
+  length 4 load 8 slew 5 delay 35 input cap 18 slew 5 buffers at [0.5, 0.5] [LibCellId(1), LibCellId(0)] first 2 last 0
+case 15: 7 measurements
+  lengths LengthSteps(2) to LengthSteps(8), max load CapSteps(21), max slew SlewSteps(7), least input cap CapSteps(3), rate Some(WireDelayRate(Seconds(1.2142857357642922e-11)))
+  length 4 load 4 slew 2 delay 41 input cap 12 slew 7 buffers at [0.5, 0.5] [LibCellId(0), LibCellId(0)] first 2 last 0
+  length 2 load 14 slew 3 delay 33 input cap 21 slew 1 buffers at [] [] first 2 last 2
+  length 4 load 2 slew 1 delay 42 input cap 10 slew 7 buffers at [0.5] [LibCellId(1)] first 2 last 2
+  length 2 load 11 slew 6 delay 27 input cap 3 slew 5 buffers at [] [] first 2 last 2
+  length 8 load 7 slew 1 delay 17 input cap 5 slew 1 buffers at [0.25] [LibCellId(1)] first 2 last 6
+  length 2 load 3 slew 5 delay 43 input cap 14 slew 3 buffers at [] [] first 2 last 2
+case 16: 8 measurements
+  lengths LengthSteps(2) to LengthSteps(8), max load CapSteps(24), max slew SlewSteps(7), least input cap CapSteps(6), rate Some(WireDelayRate(Seconds(1.4285714538403438e-12)))
+  length 2 load 3 slew 2 delay 8 input cap 10 slew 1 buffers at [] [] first 2 last 2
+  length 4 load 7 slew 1 delay 1 input cap 24 slew 2 buffers at [0.5, 0.5] [LibCellId(0), LibCellId(1)] first 2 last 0
+  length 6 load 9 slew 7 delay 2 input cap 6 slew 6 buffers at [0.333333, 0.333333] [LibCellId(1), LibCellId(0)] first 2 last 2
+  length 8 load 8 slew 1 delay 33 input cap 23 slew 2 buffers at [0.5, 0.25] [LibCellId(1), LibCellId(0)] first 4 last 2
+  length 4 load 1 slew 1 delay 29 input cap 11 slew 6 buffers at [1.0] [LibCellId(1)] first 4 last 0
+  length 4 load 16 slew 7 delay 16 input cap 9 slew 7 buffers at [1.0] [LibCellId(0)] first 4 last 0
+case 17: 7 measurements
+  lengths LengthSteps(2) to LengthSteps(8), max load CapSteps(19), max slew SlewSteps(7), least input cap CapSteps(1), rate Some(WireDelayRate(Seconds(2.1428571807605157e-12)))
+  length 2 load 6 slew 3 delay 17 input cap 2 slew 5 buffers at [1.0] [LibCellId(0)] first 2 last 0
+  length 8 load 19 slew 5 delay 33 input cap 15 slew 6 buffers at [1.0] [LibCellId(0)] first 8 last 0
+  length 8 load 15 slew 3 delay 3 input cap 19 slew 6 buffers at [0.5, 0.5] [LibCellId(0), LibCellId(1)] first 4 last 0
+  length 4 load 2 slew 1 delay 24 input cap 1 slew 6 buffers at [0.5, 0.5] [LibCellId(1), LibCellId(1)] first 2 last 0
+  length 6 load 2 slew 7 delay 5 input cap 4 slew 5 buffers at [0.333333] [LibCellId(1)] first 2 last 4
+  length 8 load 8 slew 4 delay 38 input cap 19 slew 4 buffers at [0.25, 0.25, 0.25] [LibCellId(0), LibCellId(1), LibCellId(1)] first 2 last 2
+case 18: 2 measurements
+  lengths LengthSteps(6) to LengthSteps(8), max load CapSteps(20), max slew SlewSteps(7), least input cap CapSteps(18), rate Some(WireDelayRate(Seconds(7.142857269201719e-12)))
+  length 6 load 15 slew 1 delay 41 input cap 20 slew 2 buffers at [0.666667] [LibCellId(0)] first 4 last 2
+  length 8 load 15 slew 6 delay 10 input cap 18 slew 7 buffers at [1.0] [LibCellId(1)] first 8 last 0
+case 19: 2 measurements
+  lengths LengthSteps(2) to LengthSteps(2), max load CapSteps(17), max slew SlewSteps(7), least input cap CapSteps(5), rate None
+  length 2 load 10 slew 2 delay 4 input cap 5 slew 4 buffers at [] [] first 2 last 2
+  length 2 load 16 slew 7 delay 26 input cap 17 slew 4 buffers at [] [] first 2 last 2
+case 20: 7 measurements
+  lengths LengthSteps(4) to LengthSteps(8), max load CapSteps(21), max slew SlewSteps(7), least input cap CapSteps(4), rate Some(WireDelayRate(Seconds(2.4285714715285844e-11)))
+  length 8 load 16 slew 3 delay 34 input cap 7 slew 3 buffers at [0.5, 0.25, 0.25] [LibCellId(1), LibCellId(1), LibCellId(0)] first 4 last 0
+  length 4 load 15 slew 5 delay 12 input cap 19 slew 4 buffers at [] [] first 4 last 4
+  length 4 load 17 slew 6 delay 25 input cap 4 slew 7 buffers at [0.5, 0.5] [LibCellId(0), LibCellId(0)] first 2 last 0
+  length 4 load 14 slew 3 delay 36 input cap 17 slew 2 buffers at [0.5, 0.5] [LibCellId(1), LibCellId(1)] first 2 last 0
+  length 4 load 1 slew 3 delay 20 input cap 21 slew 1 buffers at [1.0] [LibCellId(0)] first 4 last 0
+  length 4 load 9 slew 7 delay 34 input cap 6 slew 3 buffers at [0.5] [LibCellId(1)] first 2 last 2
+case 21: 6 measurements
+  lengths LengthSteps(2) to LengthSteps(8), max load CapSteps(18), max slew SlewSteps(7), least input cap CapSteps(1), rate Some(WireDelayRate(Seconds(2.5714286169126188e-11)))
+  length 6 load 6 slew 2 delay 27 input cap 13 slew 3 buffers at [0.333333, 0.333333, 0.333333] [LibCellId(0), LibCellId(1), LibCellId(1)] first 2 last 0
+  length 8 load 18 slew 4 delay 42 input cap 1 slew 7 buffers at [0.5, 0.25, 0.25] [LibCellId(0), LibCellId(1), LibCellId(1)] first 4 last 0
+  length 2 load 4 slew 3 delay 44 input cap 1 slew 3 buffers at [1.0] [LibCellId(1)] first 2 last 0
+case 22: 2 measurements
+  lengths LengthSteps(8) to LengthSteps(8), max load CapSteps(25), max slew SlewSteps(5), least input cap CapSteps(25), rate Some(WireDelayRate(Seconds(1.3571428811483266e-11)))
+  length 8 load 11 slew 1 delay 19 input cap 25 slew 5 buffers at [0.5, 0.25, 0.25] [LibCellId(0), LibCellId(0), LibCellId(0)] first 4 last 0
+case 23: 5 measurements
+  lengths LengthSteps(2) to LengthSteps(6), max load CapSteps(24), max slew SlewSteps(6), least input cap CapSteps(10), rate None
+  length 6 load 15 slew 6 delay 7 input cap 16 slew 4 buffers at [0.333333, 0.333333, 0.333333] [LibCellId(0), LibCellId(1), LibCellId(1)] first 2 last 0
+  length 2 load 5 slew 2 delay 24 input cap 24 slew 6 buffers at [] [] first 2 last 2
+  length 2 load 19 slew 5 delay 20 input cap 10 slew 2 buffers at [] [] first 2 last 2
+  length 4 load 2 slew 4 delay 18 input cap 19 slew 1 buffers at [0.5] [LibCellId(1)] first 2 last 2
+case 24: 4 measurements
+  lengths LengthSteps(2) to LengthSteps(8), max load CapSteps(24), max slew SlewSteps(7), least input cap CapSteps(10), rate Some(WireDelayRate(Seconds(2.761904810757998e-11)))
+  length 8 load 14 slew 7 delay 37 input cap 10 slew 4 buffers at [0.5, 0.25] [LibCellId(1), LibCellId(0)] first 4 last 2
+  length 6 load 4 slew 2 delay 5 input cap 18 slew 1 buffers at [] [] first 6 last 6
+  length 2 load 14 slew 6 delay 37 input cap 18 slew 7 buffers at [] [] first 2 last 2
+  length 6 load 7 slew 1 delay 29 input cap 24 slew 7 buffers at [0.666667, 0.333333] [LibCellId(1), LibCellId(0)] first 4 last 0
+case 25: 8 measurements
+  lengths LengthSteps(2) to LengthSteps(8), max load CapSteps(19), max slew SlewSteps(7), least input cap CapSteps(1), rate Some(WireDelayRate(Seconds(0.0)))
+  length 8 load 8 slew 4 delay 3 input cap 1 slew 1 buffers at [0.5, 0.25] [LibCellId(1), LibCellId(0)] first 4 last 2
+  length 8 load 7 slew 1 delay 13 input cap 19 slew 3 buffers at [0.25] [LibCellId(1)] first 2 last 6
+  length 4 load 3 slew 5 delay 0 input cap 5 slew 5 buffers at [0.5, 0.5] [LibCellId(1), LibCellId(1)] first 2 last 0
+  length 2 load 4 slew 3 delay 39 input cap 17 slew 2 buffers at [] [] first 2 last 2
+  length 4 load 12 slew 5 delay 41 input cap 5 slew 1 buffers at [] [] first 4 last 4
+  length 8 load 4 slew 4 delay 14 input cap 16 slew 5 buffers at [] [] first 8 last 8
+  length 6 load 19 slew 5 delay 41 input cap 10 slew 7 buffers at [0.666667] [LibCellId(1)] first 4 last 2
+case 26: 8 measurements
+  lengths LengthSteps(2) to LengthSteps(8), max load CapSteps(20), max slew SlewSteps(7), least input cap CapSteps(7), rate Some(WireDelayRate(Seconds(8.571428723042063e-12)))
+  length 8 load 19 slew 1 delay 24 input cap 11 slew 3 buffers at [1.0] [LibCellId(1)] first 8 last 0
+  length 4 load 17 slew 2 delay 18 input cap 11 slew 6 buffers at [0.5] [LibCellId(0)] first 2 last 2
+  length 2 load 10 slew 3 delay 42 input cap 17 slew 7 buffers at [] [] first 2 last 2
+  length 8 load 3 slew 5 delay 15 input cap 20 slew 7 buffers at [0.25, 0.25] [LibCellId(1), LibCellId(0)] first 2 last 4
+  length 4 load 10 slew 6 delay 6 input cap 8 slew 7 buffers at [1.0] [LibCellId(0)] first 4 last 0
+  length 6 load 3 slew 7 delay 34 input cap 7 slew 5 buffers at [0.333333, 0.666667] [LibCellId(0), LibCellId(0)] first 2 last 0
+  length 4 load 17 slew 4 delay 26 input cap 9 slew 4 buffers at [0.5] [LibCellId(0)] first 2 last 2
+case 27: 3 measurements
+  lengths LengthSteps(8) to LengthSteps(8), max load CapSteps(20), max slew SlewSteps(7), least input cap CapSteps(20), rate Some(WireDelayRate(Seconds(1.142857163072275e-11)))
+  length 8 load 19 slew 3 delay 16 input cap 20 slew 7 buffers at [0.5, 0.25, 0.25] [LibCellId(1), LibCellId(0), LibCellId(0)] first 4 last 0
+case 28: 4 measurements
+  lengths LengthSteps(2) to LengthSteps(6), max load CapSteps(22), max slew SlewSteps(6), least input cap CapSteps(10), rate Some(WireDelayRate(Seconds(9.523809692268959e-13)))
+  length 4 load 6 slew 4 delay 29 input cap 22 slew 4 buffers at [1.0] [LibCellId(1)] first 4 last 0
+  length 6 load 11 slew 4 delay 1 input cap 10 slew 6 buffers at [0.666667] [LibCellId(1)] first 4 last 2
+  length 2 load 7 slew 2 delay 7 input cap 12 slew 5 buffers at [] [] first 2 last 2
+case 29: 5 measurements
+  lengths LengthSteps(4) to LengthSteps(8), max load CapSteps(19), max slew SlewSteps(7), least input cap CapSteps(1), rate Some(WireDelayRate(Seconds(2.0000000353764813e-11)))
+  length 4 load 1 slew 1 delay 22 input cap 1 slew 1 buffers at [0.5] [LibCellId(0)] first 2 last 2
+  length 8 load 2 slew 4 delay 28 input cap 17 slew 7 buffers at [0.25, 0.25, 0.5] [LibCellId(1), LibCellId(1), LibCellId(1)] first 2 last 0
+  length 8 load 19 slew 4 delay 5 input cap 14 slew 2 buffers at [0.5] [LibCellId(1)] first 4 last 4
+  length 4 load 4 slew 4 delay 26 input cap 10 slew 2 buffers at [0.5, 0.5] [LibCellId(1), LibCellId(0)] first 2 last 0
+  length 6 load 8 slew 4 delay 40 input cap 7 slew 6 buffers at [0.666667, 0.333333] [LibCellId(1), LibCellId(0)] first 4 last 0
+case 30: 2 measurements
+  lengths LengthSteps(6) to LengthSteps(8), max load CapSteps(15), max slew SlewSteps(7), least input cap CapSteps(3), rate Some(WireDelayRate(Seconds(1.4285714538403438e-12)))
+  length 8 load 15 slew 6 delay 2 input cap 3 slew 7 buffers at [0.5] [LibCellId(0)] first 4 last 4
+  length 6 load 9 slew 3 delay 13 input cap 6 slew 5 buffers at [0.333333] [LibCellId(1)] first 2 last 4
+case 31: 1 measurements
+  lengths LengthSteps(2) to LengthSteps(2), max load CapSteps(22), max slew SlewSteps(7), least input cap CapSteps(22), rate None
+  length 2 load 17 slew 7 delay 30 input cap 22 slew 2 buffers at [] [] first 2 last 2
+case 32: 7 measurements
+  lengths LengthSteps(2) to LengthSteps(8), max load CapSteps(23), max slew SlewSteps(6), least input cap CapSteps(2), rate Some(WireDelayRate(Seconds(2.0714286080684985e-11)))
+  length 6 load 19 slew 5 delay 15 input cap 20 slew 2 buffers at [0.333333, 0.333333] [LibCellId(0), LibCellId(0)] first 2 last 2
+  length 8 load 17 slew 1 delay 29 input cap 17 slew 3 buffers at [1.0] [LibCellId(1)] first 8 last 0
+  length 4 load 14 slew 4 delay 13 input cap 2 slew 3 buffers at [1.0] [LibCellId(0)] first 4 last 0
+  length 8 load 15 slew 1 delay 32 input cap 11 slew 2 buffers at [0.25, 0.5, 0.25] [LibCellId(1), LibCellId(0), LibCellId(0)] first 2 last 0
+  length 2 load 10 slew 6 delay 28 input cap 6 slew 4 buffers at [1.0] [LibCellId(1)] first 2 last 0
+  length 4 load 3 slew 4 delay 19 input cap 23 slew 2 buffers at [0.5] [LibCellId(1)] first 2 last 2
+  length 4 load 11 slew 1 delay 23 input cap 9 slew 1 buffers at [0.5] [LibCellId(0)] first 2 last 2
+case 33: 5 measurements
+  lengths LengthSteps(4) to LengthSteps(8), max load CapSteps(20), max slew SlewSteps(6), least input cap CapSteps(1), rate Some(WireDelayRate(Seconds(1.142857163072275e-11)))
+  length 4 load 1 slew 1 delay 8 input cap 3 slew 4 buffers at [1.0] [LibCellId(0)] first 4 last 0
+  length 8 load 9 slew 5 delay 4 input cap 19 slew 4 buffers at [0.25, 0.75] [LibCellId(1), LibCellId(0)] first 2 last 0
+  length 8 load 14 slew 2 delay 42 input cap 1 slew 1 buffers at [0.25, 0.25, 0.25] [LibCellId(1), LibCellId(1), LibCellId(1)] first 2 last 2
+  length 6 load 14 slew 6 delay 5 input cap 20 slew 5 buffers at [0.333333] [LibCellId(0)] first 2 last 4
+case 34: 7 measurements
+  lengths LengthSteps(4) to LengthSteps(8), max load CapSteps(23), max slew SlewSteps(7), least input cap CapSteps(9), rate Some(WireDelayRate(Seconds(1.2857143084563094e-11)))
+  length 4 load 12 slew 1 delay 22 input cap 15 slew 2 buffers at [0.5] [LibCellId(0)] first 2 last 2
+  length 8 load 12 slew 4 delay 39 input cap 17 slew 5 buffers at [0.25, 0.5, 0.25] [LibCellId(0), LibCellId(0), LibCellId(1)] first 2 last 0
+  length 8 load 10 slew 4 delay 24 input cap 23 slew 6 buffers at [0.5] [LibCellId(1)] first 4 last 4
+  length 4 load 2 slew 6 delay 24 input cap 15 slew 4 buffers at [1.0] [LibCellId(1)] first 4 last 0
+  length 4 load 14 slew 4 delay 11 input cap 9 slew 7 buffers at [] [] first 4 last 4
+  length 4 load 17 slew 2 delay 9 input cap 21 slew 4 buffers at [0.5, 0.5] [LibCellId(1), LibCellId(1)] first 2 last 0
+case 35: 0 measurements
+  none within the slew limit
+case 36: 9 measurements
+  lengths LengthSteps(2) to LengthSteps(8), max load CapSteps(23), max slew SlewSteps(7), least input cap CapSteps(4), rate Some(WireDelayRate(Seconds(9.285714449962235e-12)))
+  length 2 load 14 slew 4 delay 38 input cap 10 slew 7 buffers at [] [] first 2 last 2
+  length 8 load 16 slew 3 delay 13 input cap 4 slew 4 buffers at [0.25, 0.5, 0.25] [LibCellId(1), LibCellId(0), LibCellId(0)] first 2 last 0
+  length 2 load 1 slew 6 delay 26 input cap 22 slew 4 buffers at [1.0] [LibCellId(0)] first 2 last 0
+  length 6 load 1 slew 5 delay 24 input cap 23 slew 1 buffers at [0.333333] [LibCellId(0)] first 2 last 4
+  length 2 load 18 slew 6 delay 25 input cap 10 slew 6 buffers at [] [] first 2 last 2
+  length 2 load 8 slew 2 delay 20 input cap 20 slew 3 buffers at [1.0] [LibCellId(1)] first 2 last 0
+  length 6 load 18 slew 7 delay 27 input cap 15 slew 3 buffers at [0.333333] [LibCellId(1)] first 2 last 4
+case 37: 3 measurements
+  lengths LengthSteps(2) to LengthSteps(8), max load CapSteps(23), max slew SlewSteps(5), least input cap CapSteps(14), rate Some(WireDelayRate(Seconds(2.7857143349886704e-11)))
+  length 2 load 1 slew 3 delay 4 input cap 23 slew 5 buffers at [] [] first 2 last 2
+  length 8 load 3 slew 1 delay 39 input cap 14 slew 4 buffers at [0.25, 0.5, 0.25] [LibCellId(0), LibCellId(1), LibCellId(0)] first 2 last 0
+case 38: 7 measurements
+  lengths LengthSteps(2) to LengthSteps(8), max load CapSteps(22), max slew SlewSteps(7), least input cap CapSteps(2), rate Some(WireDelayRate(Seconds(1.0476190661495854e-11)))
+  length 2 load 3 slew 5 delay 17 input cap 22 slew 2 buffers at [1.0] [LibCellId(1)] first 2 last 0
+  length 6 load 19 slew 4 delay 29 input cap 20 slew 1 buffers at [0.666667, 0.333333] [LibCellId(1), LibCellId(1)] first 4 last 0
+  length 6 load 10 slew 3 delay 11 input cap 2 slew 7 buffers at [0.333333] [LibCellId(1)] first 2 last 4
+  length 6 load 19 slew 3 delay 13 input cap 7 slew 1 buffers at [] [] first 6 last 6
+  length 8 load 8 slew 5 delay 43 input cap 13 slew 2 buffers at [0.5, 0.25] [LibCellId(0), LibCellId(1)] first 4 last 2
+  length 6 load 14 slew 5 delay 33 input cap 15 slew 7 buffers at [0.666667] [LibCellId(1)] first 4 last 2
+  length 4 load 11 slew 4 delay 22 input cap 14 slew 1 buffers at [0.5, 0.5] [LibCellId(0), LibCellId(1)] first 2 last 0
+case 39: 10 measurements
+  lengths LengthSteps(2) to LengthSteps(8), max load CapSteps(22), max slew SlewSteps(7), least input cap CapSteps(2), rate Some(WireDelayRate(Seconds(4.285714361521031e-12)))
+  length 4 load 19 slew 5 delay 43 input cap 2 slew 5 buffers at [] [] first 4 last 4
+  length 8 load 15 slew 3 delay 1 input cap 22 slew 2 buffers at [0.25] [LibCellId(0)] first 2 last 6
+  length 6 load 18 slew 7 delay 34 input cap 2 slew 4 buffers at [0.333333, 0.666667] [LibCellId(0), LibCellId(0)] first 2 last 0
+  length 4 load 9 slew 4 delay 40 input cap 8 slew 3 buffers at [1.0] [LibCellId(0)] first 4 last 0
+  length 2 load 8 slew 7 delay 17 input cap 14 slew 6 buffers at [] [] first 2 last 2
+  length 2 load 10 slew 1 delay 21 input cap 15 slew 5 buffers at [1.0] [LibCellId(1)] first 2 last 0
+  length 2 load 15 slew 7 delay 43 input cap 5 slew 5 buffers at [1.0] [LibCellId(1)] first 2 last 0
+  length 2 load 7 slew 6 delay 12 input cap 11 slew 1 buffers at [1.0] [LibCellId(1)] first 2 last 0
+  length 4 load 1 slew 2 delay 0 input cap 17 slew 1 buffers at [1.0] [LibCellId(0)] first 4 last 0
+  length 8 load 1 slew 1 delay 6 input cap 10 slew 3 buffers at [0.5, 0.5] [LibCellId(1), LibCellId(1)] first 4 last 0
