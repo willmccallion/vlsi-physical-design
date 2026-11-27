@@ -194,3 +194,6 @@ impl Settings {
         self.sink_clustering_sizes.push(limit);
     }
 }
+
+#[cfg(test)]
+mod tests;
