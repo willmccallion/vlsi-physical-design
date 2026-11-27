@@ -202,9 +202,6 @@ impl Simplex {
         let sum_supply = self.supply[..self.node_num]
             .iter()
             .fold(0_i32, |a, &b| a.wrapping_add(b));
-        if sum_supply > 0 {
-            return Err(FlowProblem::Infeasible);
-        }
         for e in 0..self.arc_num {
             self.flow[e] = 0;
             self.state[e] = STATE_LOWER;
@@ -218,8 +215,9 @@ impl Simplex {
         self.supply[root] = sum_supply.wrapping_neg();
         self.pi[root] = 0;
         if sum_supply != 0 {
-            // NOTE: NetworkSimplex::init solves supplies short of the demand
-            // too; this port, run with equal supplies alone, refuses them.
+            // NOTE: NetworkSimplex::init refuses a positive total supply and
+            // solves one short of the demand; this port, run with equal
+            // supplies alone, refuses any total but zero.
             return Err(FlowProblem::Infeasible);
         }
         self.start_artificial_tree();
