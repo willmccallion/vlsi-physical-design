@@ -808,6 +808,53 @@ fn a_fixed_gate_is_not_cloned() {
     assert_eq!(summary.clones, 0);
 }
 
+/// The cell `CLKSPLIT` of `split.lef`: its input passed to both outputs.
+const CLKSPLIT: &str = r#"
+  cell (CLKSPLIT) {
+    pin (A) { direction : input ; capacitance : 1.0 ; }
+    pin (Z1) { direction : output ; function : "A" ;
+      timing () { related_pin : "A" ; timing_sense : positive_unate ;
+        cell_rise (scalar) { values ("0.02") ; } cell_fall (scalar) { values ("0.02") ; }
+        rise_transition (scalar) { values ("0.01") ; } fall_transition (scalar) { values ("0.01") ; } } }
+    pin (Z2) { direction : output ; function : "A" ;
+      timing () { related_pin : "A" ; timing_sense : positive_unate ;
+        cell_rise (scalar) { values ("0.02") ; } cell_fall (scalar) { values ("0.02") ; }
+        rise_transition (scalar) { values ("0.01") ; } fall_transition (scalar) { values ("0.01") ; } } }
+  }
+}"#;
+
+#[test]
+fn the_clock_is_followed_through_the_first_of_two_outputs() {
+    let units = DbuPerMicron::new(2000).unwrap();
+    let library = lef::parse_files(&[fixture("clock.lef"), fixture("split.lef")], units).unwrap();
+    let both = (8..16).fold(String::new(), |mut pins, i| {
+        let _ = write!(pins, " ( ff{i} CK )");
+        pins
+    });
+    let text = design(4, 4, true)
+        .replace("- clkinv INV_X1 ", "- clksplit CLKSPLIT ")
+        .replace("( clkinv A )", "( clksplit A )")
+        .replace(&both, "")
+        .replace("( clkinv ZN )", "( clksplit Z1 )")
+        .replace(
+            "NETS 2 ;",
+            &format!("NETS 3 ;\n- clk_m ( clksplit Z2 ){both} + USE CLOCK ;"),
+        );
+    let db = def::parse_str(&text, Path::new("split.def"), library).unwrap();
+    let clock_lib = std::fs::read_to_string(fixture("clock.lib")).unwrap();
+    let end = clock_lib.rfind('}').unwrap();
+    let lib = liberty::parse_str(
+        &format!("{}{CLKSPLIT}", &clock_lib[..end]),
+        Path::new("split.lib"),
+    )
+    .unwrap();
+    let constraints = sdc::parse_str(CLOCK, Path::new("split.sdc"), &db, &lib).unwrap();
+
+    let summary = synthesized_summary(db, &lib, &constraints);
+
+    assert_eq!((summary.trees, summary.sinks), (1, 8));
+}
+
 /// Where the gate of the gated grid placed at `at` ends up when its sinks
 /// are one cluster, no wire between them too long.
 fn gate_moved_from(at: Point<Dbu>) -> Point<Dbu> {
