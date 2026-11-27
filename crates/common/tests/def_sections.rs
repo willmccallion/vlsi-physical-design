@@ -594,3 +594,82 @@ fn a_row_without_sites_adds_nothing_to_the_core() {
 
     assert_eq!(db.core_area(), rect(0, 0, 6000, 6000));
 }
+
+const WIDE_RULE: &str =
+    "NONDEFAULTRULES 1 ;\n- wide\n  + LAYER M2 WIDTH 200 ;\nEND NONDEFAULTRULES\n\nCOMPONENTS 8 ;";
+
+#[test]
+fn a_net_s_rule_sets_its_wire_width_on_the_layers_it_names() {
+    let db = design_with(&[
+        ("COMPONENTS 8 ;", WIDE_RULE),
+        ("+ WEIGHT 2 ;", "+ WEIGHT 2 + NONDEFAULTRULE wide ;"),
+    ])
+    .unwrap();
+    let layer = |name: &str| db.library.routing_layer_id(name).unwrap();
+    let (n1, n2) = (db.net_id("n1").unwrap(), db.net_id("n2").unwrap());
+
+    assert_eq!(
+        pare_common::db::shapes::wire_width(&db, n2, layer("M2")),
+        Dbu::new(200)
+    );
+    assert_eq!(
+        pare_common::db::shapes::wire_width(&db, n2, layer("M3")),
+        Dbu::new(200)
+    );
+    assert_eq!(
+        pare_common::db::shapes::wire_width(&db, n1, layer("M2")),
+        Dbu::new(100)
+    );
+}
+
+/// The DEF `db` writes.
+fn written(db: &NetlistDB, tag: &str) -> String {
+    let path = std::env::temp_dir().join(format!("pare-written-{tag}-{}.def", std::process::id()));
+    writer::def::write_file(db, &path).unwrap();
+    let text = std::fs::read_to_string(&path).unwrap();
+    std::fs::remove_file(&path).unwrap();
+    text
+}
+
+#[test]
+fn routing_blockages_alone_are_written() {
+    let db = design_with(&[(
+        "COMPONENTS 8 ;",
+        "BLOCKAGES 1 ;\n- LAYER M2 RECT ( 300 0 ) ( 400 100 ) ;\nEND BLOCKAGES\nCOMPONENTS 8 ;",
+    )])
+    .unwrap();
+
+    assert!(written(&db, "blockages").contains("BLOCKAGES 1 ;"));
+}
+
+#[test]
+fn only_a_net_weight_other_than_one_is_written() {
+    let text = written(&design_with(&[]).unwrap(), "weights");
+
+    assert_eq!(text.matches("+ WEIGHT").count(), 1, "{text}");
+    assert!(text.contains("+ WEIGHT 2"), "{text}");
+}
+
+#[test]
+fn a_component_put_in_a_grouped_region_by_hand_keeps_its_region_when_written() {
+    let db = design_with(&[
+        (
+            "COMPONENTS 8 ;",
+            "REGIONS 1 ;\n- left ( 0 0 ) ( 2000 4000 ) + TYPE FENCE ;\nEND REGIONS\nCOMPONENTS 8 ;",
+        ),
+        (
+            "- u2 INV + PLACED ( 1000 2000 ) FS ;",
+            "- u2 INV + PLACED ( 1000 2000 ) FS + REGION left ;",
+        ),
+        (
+            "END NETS\n",
+            "END NETS\n\nGROUPS 1 ;\n- grp u1 + REGION left ;\nEND GROUPS\n",
+        ),
+    ])
+    .unwrap();
+
+    let reread =
+        def::parse_str(&written(&db, "regions"), Path::new("w.def"), tiny_library()).unwrap();
+    let u2 = reread.cell_id("u2").unwrap();
+    assert_eq!(reread.cells[u2].region, Some(RegionId(0)));
+}

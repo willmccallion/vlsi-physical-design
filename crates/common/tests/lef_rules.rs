@@ -389,3 +389,20 @@ fn a_cut_s_unconditional_spacing_leaves_out_same_net_rules() {
 
     assert_eq!(lib.cut_layers[CutLayerId(0)].spacing, Some(Dbu::new(120)));
 }
+
+#[test]
+fn a_two_widths_row_short_of_a_spacing_is_refused() {
+    let short = library_with(
+        &[(
+            "  SPACING 0.2 ;\n  SPACING 0.3 RANGE 1.0 10.0 ;",
+            "  SPACINGTABLE TWOWIDTHS\n    WIDTH 0.0 0.2 0.25\n    WIDTH 0.4 0.25 ;",
+        )],
+        "two-widths-short",
+    );
+
+    assert!(
+        short
+            .unwrap_err()
+            .contains("one spacing per width in every row")
+    );
+}
