@@ -1,0 +1,1058 @@
+blockages [Rect { min: Point { x: Dbu(5), y: Dbu(13) }, max: Point { x: Dbu(10), y: Dbu(14) } }, Rect { min: Point { x: Dbu(4), y: Dbu(11) }, max: Point { x: Dbu(7), y: Dbu(12) } }, Rect { min: Point { x: Dbu(6), y: Dbu(12) }, max: Point { x: Dbu(7), y: Dbu(17) } }] taken [(15.0, 8.0)] parent TreePoint { x: 19.0, y: 17.0 } point TreePoint { x: 0.0, y: 10.0 } sinks [TreePoint { x: 5.0, y: 11.0 }, TreePoint { x: 20.0, y: 15.0 }, TreePoint { x: 4.0, y: 11.0 }] target 2 West
+  find_blockage None
+  legal_location true
+  legalize_in_blockages TreePoint { x: 0.0, y: 10.0 }
+  legalize_one_buffer TreePoint { x: 0.0, y: 10.0 }
+  adjust_beyond_blockage TreePoint { x: 18.0, y: 16.0 }
+  weighted_distance 114.0
+blockages [Rect { min: Point { x: Dbu(11), y: Dbu(8) }, max: Point { x: Dbu(12), y: Dbu(13) } }, Rect { min: Point { x: Dbu(15), y: Dbu(8) }, max: Point { x: Dbu(20), y: Dbu(9) } }] taken [(16.0, 13.0)] parent TreePoint { x: 18.0, y: 9.0 } point TreePoint { x: 1.0, y: 20.0 } sinks [TreePoint { x: 6.0, y: 4.0 }] target 4 South
+  find_blockage None
+  legal_location true
+  legalize_in_blockages TreePoint { x: 1.0, y: 20.0 }
+  legalize_one_buffer TreePoint { x: 1.0, y: 20.0 }
+  adjust_beyond_blockage TreePoint { x: 16.0, y: 7.0 }
+  weighted_distance 49.0
+blockages [Rect { min: Point { x: Dbu(3), y: Dbu(12) }, max: Point { x: Dbu(6), y: Dbu(17) } }] taken [] parent TreePoint { x: 11.0, y: 17.0 } point TreePoint { x: 1.0, y: 14.0 } sinks [TreePoint { x: 0.0, y: 10.0 }] target 7 West
+  find_blockage None
+  legal_location true
+  legalize_in_blockages TreePoint { x: 1.0, y: 14.0 }
+  legalize_one_buffer TreePoint { x: 1.0, y: 14.0 }
+  adjust_beyond_blockage TreePoint { x: 4.0, y: 17.0 }
+  weighted_distance 18.0
+blockages [Rect { min: Point { x: Dbu(9), y: Dbu(6) }, max: Point { x: Dbu(13), y: Dbu(7) } }, Rect { min: Point { x: Dbu(3), y: Dbu(11) }, max: Point { x: Dbu(5), y: Dbu(13) } }] taken [(7.0, 19.0), (18.0, 5.0), (20.0, 17.0)] parent TreePoint { x: 6.0, y: 17.0 } point TreePoint { x: 4.0, y: 2.0 } sinks [TreePoint { x: 18.0, y: 8.0 }, TreePoint { x: 1.0, y: 10.0 }, TreePoint { x: 20.0, y: 12.0 }] target 13 South
+  find_blockage None
+  legal_location true
+  legalize_in_blockages TreePoint { x: 4.0, y: 2.0 }
+  legalize_one_buffer TreePoint { x: 4.0, y: 2.0 }
+  adjust_beyond_blockage TreePoint { x: 6.0, y: 4.0 }
+  weighted_distance 108.0
+blockages [Rect { min: Point { x: Dbu(15), y: Dbu(0) }, max: Point { x: Dbu(16), y: Dbu(5) } }, Rect { min: Point { x: Dbu(11), y: Dbu(6) }, max: Point { x: Dbu(15), y: Dbu(8) } }] taken [(19.0, 20.0)] parent TreePoint { x: 6.0, y: 16.0 } point TreePoint { x: 18.0, y: 1.0 } sinks [TreePoint { x: 11.0, y: 5.0 }, TreePoint { x: 8.0, y: 4.0 }] target 14 South
+  find_blockage None
+  legal_location true
+  legalize_in_blockages TreePoint { x: 18.0, y: 1.0 }
+  legalize_one_buffer TreePoint { x: 18.0, y: 1.0 }
+  adjust_beyond_blockage TreePoint { x: 8.0, y: 4.0 }
+  weighted_distance 78.0
+blockages [Rect { min: Point { x: Dbu(9), y: Dbu(13) }, max: Point { x: Dbu(14), y: Dbu(17) } }, Rect { min: Point { x: Dbu(1), y: Dbu(9) }, max: Point { x: Dbu(4), y: Dbu(12) } }, Rect { min: Point { x: Dbu(8), y: Dbu(9) }, max: Point { x: Dbu(13), y: Dbu(13) } }] taken [(10.0, 11.0), (16.0, 4.0), (16.0, 14.0)] parent TreePoint { x: 9.0, y: 20.0 } point TreePoint { x: 9.0, y: 3.0 } sinks [TreePoint { x: 0.0, y: 20.0 }, TreePoint { x: 6.0, y: 17.0 }, TreePoint { x: 19.0, y: 13.0 }] target 15 South
+  find_blockage None
+  legal_location true
+  legalize_in_blockages TreePoint { x: 9.0, y: 3.0 }
+  legalize_one_buffer TreePoint { x: 9.0, y: 3.0 }
+  adjust_beyond_blockage TreePoint { x: 9.0, y: 5.0 }
+  weighted_distance 114.0
+blockages [Rect { min: Point { x: Dbu(12), y: Dbu(11) }, max: Point { x: Dbu(17), y: Dbu(15) } }] taken [(12.0, 5.0), (14.0, 19.0), (18.0, 14.0)] parent TreePoint { x: 7.0, y: 11.0 } point TreePoint { x: 9.0, y: 10.0 } sinks [TreePoint { x: 4.0, y: 10.0 }, TreePoint { x: 20.0, y: 16.0 }] target 14 East
+  find_blockage None
+  legal_location true
+  legalize_in_blockages TreePoint { x: 9.0, y: 10.0 }
+  legalize_one_buffer TreePoint { x: 9.0, y: 10.0 }
+  adjust_beyond_blockage TreePoint { x: 17.5, y: 14.5 }
+  weighted_distance 28.0
+blockages [Rect { min: Point { x: Dbu(1), y: Dbu(0) }, max: Point { x: Dbu(2), y: Dbu(5) } }] taken [] parent TreePoint { x: 8.0, y: 3.0 } point TreePoint { x: 5.0, y: 7.0 } sinks [TreePoint { x: 0.0, y: 15.0 }, TreePoint { x: 0.0, y: 18.0 }] target 7 East
+  find_blockage None
+  legal_location true
+  legalize_in_blockages TreePoint { x: 5.0, y: 7.0 }
+  legalize_one_buffer TreePoint { x: 5.0, y: 7.0 }
+  adjust_beyond_blockage TreePoint { x: 11.5, y: 6.5 }
+  weighted_distance 43.0
+blockages [Rect { min: Point { x: Dbu(0), y: Dbu(5) }, max: Point { x: Dbu(3), y: Dbu(9) } }] taken [(1.0, 6.0)] parent TreePoint { x: 8.0, y: 18.0 } point TreePoint { x: 4.0, y: 3.0 } sinks [TreePoint { x: 11.0, y: 11.0 }, TreePoint { x: 15.0, y: 15.0 }] target 19 West
+  find_blockage None
+  legal_location true
+  legalize_in_blockages TreePoint { x: 4.0, y: 3.0 }
+  legalize_one_buffer TreePoint { x: 4.0, y: 3.0 }
+  adjust_beyond_blockage TreePoint { x: 4.0, y: 3.0 }
+  weighted_distance 76.0
+blockages [Rect { min: Point { x: Dbu(9), y: Dbu(7) }, max: Point { x: Dbu(14), y: Dbu(10) } }, Rect { min: Point { x: Dbu(11), y: Dbu(12) }, max: Point { x: Dbu(16), y: Dbu(13) } }, Rect { min: Point { x: Dbu(3), y: Dbu(10) }, max: Point { x: Dbu(6), y: Dbu(12) } }] taken [(18.0, 14.0)] parent TreePoint { x: 15.0, y: 0.0 } point TreePoint { x: 18.0, y: 11.0 } sinks [TreePoint { x: 3.0, y: 14.0 }, TreePoint { x: 15.0, y: 18.0 }, TreePoint { x: 19.0, y: 5.0 }] target 24 South
+  find_blockage None
+  legal_location true
+  legalize_in_blockages TreePoint { x: 18.0, y: 11.0 }
+  legalize_one_buffer TreePoint { x: 18.0, y: 11.0 }
+  adjust_beyond_blockage TreePoint { x: 18.0, y: 11.0 }
+  weighted_distance 77.0
+blockages [Rect { min: Point { x: Dbu(5), y: Dbu(2) }, max: Point { x: Dbu(10), y: Dbu(7) } }] taken [(16.0, 11.0), (20.0, 18.0)] parent TreePoint { x: 2.0, y: 20.0 } point TreePoint { x: 20.0, y: 18.0 } sinks [TreePoint { x: 12.0, y: 10.0 }, TreePoint { x: 16.0, y: 7.0 }, TreePoint { x: 3.0, y: 12.0 }] target 6 West
+  find_blockage None
+  legal_location false
+  legalize_in_blockages TreePoint { x: 20.0, y: 18.0 }
+  legalize_one_buffer TreePoint { x: 20.0, y: 18.0 }
+  adjust_beyond_blockage TreePoint { x: 20.0, y: 18.0 }
+  weighted_distance 114.0
+blockages [Rect { min: Point { x: Dbu(5), y: Dbu(9) }, max: Point { x: Dbu(8), y: Dbu(13) } }, Rect { min: Point { x: Dbu(0), y: Dbu(3) }, max: Point { x: Dbu(5), y: Dbu(8) } }] taken [(15.0, 10.0)] parent TreePoint { x: 15.0, y: 6.0 } point TreePoint { x: 5.0, y: 3.0 } sinks [TreePoint { x: 6.0, y: 6.0 }, TreePoint { x: 19.0, y: 10.0 }] target 17 South
+  find_blockage None
+  legal_location true
+  legalize_in_blockages TreePoint { x: 5.0, y: 3.0 }
+  legalize_one_buffer TreePoint { x: 5.0, y: 3.0 }
+  adjust_beyond_blockage TreePoint { x: 5.0, y: 3.0 }
+  weighted_distance 51.0
+blockages [Rect { min: Point { x: Dbu(0), y: Dbu(2) }, max: Point { x: Dbu(3), y: Dbu(5) } }, Rect { min: Point { x: Dbu(14), y: Dbu(5) }, max: Point { x: Dbu(18), y: Dbu(10) } }, Rect { min: Point { x: Dbu(3), y: Dbu(5) }, max: Point { x: Dbu(5), y: Dbu(7) } }] taken [(9.0, 12.0), (10.0, 1.0)] parent TreePoint { x: 4.0, y: 16.0 } point TreePoint { x: 0.0, y: 11.0 } sinks [TreePoint { x: 7.0, y: 10.0 }, TreePoint { x: 6.0, y: 8.0 }, TreePoint { x: 2.0, y: 1.0 }] target 15 West
+  find_blockage None
+  legal_location true
+  legalize_in_blockages TreePoint { x: 0.0, y: 11.0 }
+  legalize_one_buffer TreePoint { x: 0.0, y: 11.0 }
+  adjust_beyond_blockage TreePoint { x: 4.0, y: 1.0 }
+  weighted_distance 56.0
+blockages [Rect { min: Point { x: Dbu(0), y: Dbu(3) }, max: Point { x: Dbu(4), y: Dbu(7) } }, Rect { min: Point { x: Dbu(1), y: Dbu(14) }, max: Point { x: Dbu(5), y: Dbu(17) } }, Rect { min: Point { x: Dbu(5), y: Dbu(11) }, max: Point { x: Dbu(9), y: Dbu(12) } }] taken [] parent TreePoint { x: 10.0, y: 20.0 } point TreePoint { x: 0.0, y: 1.0 } sinks [TreePoint { x: 12.0, y: 2.0 }, TreePoint { x: 5.0, y: 9.0 }, TreePoint { x: 8.0, y: 18.0 }] target 16 West
+  find_blockage None
+  legal_location true
+  legalize_in_blockages TreePoint { x: 0.0, y: 1.0 }
+  legalize_one_buffer TreePoint { x: 0.0, y: 1.0 }
+  adjust_beyond_blockage TreePoint { x: 3.0, y: 11.0 }
+  weighted_distance 138.0
+blockages [Rect { min: Point { x: Dbu(14), y: Dbu(9) }, max: Point { x: Dbu(16), y: Dbu(12) } }, Rect { min: Point { x: Dbu(1), y: Dbu(1) }, max: Point { x: Dbu(3), y: Dbu(4) } }, Rect { min: Point { x: Dbu(8), y: Dbu(13) }, max: Point { x: Dbu(13), y: Dbu(17) } }] taken [(4.0, 20.0), (7.0, 1.0), (19.0, 12.0)] parent TreePoint { x: 1.0, y: 20.0 } point TreePoint { x: 0.0, y: 18.0 } sinks [TreePoint { x: 20.0, y: 5.0 }, TreePoint { x: 17.0, y: 7.0 }] target 12 South
+  find_blockage None
+  legal_location true
+  legalize_in_blockages TreePoint { x: 0.0, y: 18.0 }
+  legalize_one_buffer TreePoint { x: 0.0, y: 18.0 }
+  adjust_beyond_blockage TreePoint { x: 1.0, y: 8.0 }
+  weighted_distance 67.0
+blockages [Rect { min: Point { x: Dbu(0), y: Dbu(13) }, max: Point { x: Dbu(1), y: Dbu(15) } }, Rect { min: Point { x: Dbu(12), y: Dbu(9) }, max: Point { x: Dbu(17), y: Dbu(13) } }, Rect { min: Point { x: Dbu(7), y: Dbu(0) }, max: Point { x: Dbu(11), y: Dbu(1) } }] taken [(14.0, 12.0), (20.0, 16.0)] parent TreePoint { x: 4.0, y: 19.0 } point TreePoint { x: 4.0, y: 10.0 } sinks [TreePoint { x: 6.0, y: 9.0 }] target 20 South
+  find_blockage None
+  legal_location true
+  legalize_in_blockages TreePoint { x: 4.0, y: 10.0 }
+  legalize_one_buffer TreePoint { x: 4.0, y: 10.0 }
+  adjust_beyond_blockage TreePoint { x: 14.0, y: 9.0 }
+  weighted_distance 12.0
+blockages [Rect { min: Point { x: Dbu(1), y: Dbu(14) }, max: Point { x: Dbu(3), y: Dbu(17) } }, Rect { min: Point { x: Dbu(14), y: Dbu(10) }, max: Point { x: Dbu(19), y: Dbu(14) } }, Rect { min: Point { x: Dbu(6), y: Dbu(7) }, max: Point { x: Dbu(9), y: Dbu(12) } }] taken [(9.0, 17.0)] parent TreePoint { x: 16.0, y: 10.0 } point TreePoint { x: 0.0, y: 12.0 } sinks [TreePoint { x: 11.0, y: 3.0 }] target 24 South
+  find_blockage None
+  legal_location true
+  legalize_in_blockages TreePoint { x: 0.0, y: 12.0 }
+  legalize_one_buffer TreePoint { x: 0.0, y: 12.0 }
+  adjust_beyond_blockage TreePoint { x: 0.0, y: 12.0 }
+  weighted_distance 38.0
+blockages [Rect { min: Point { x: Dbu(13), y: Dbu(9) }, max: Point { x: Dbu(15), y: Dbu(14) } }] taken [(12.0, 0.0)] parent TreePoint { x: 20.0, y: 8.0 } point TreePoint { x: 8.0, y: 6.0 } sinks [TreePoint { x: 3.0, y: 4.0 }, TreePoint { x: 7.0, y: 4.0 }, TreePoint { x: 14.0, y: 6.0 }] target 8 South
+  find_blockage None
+  legal_location true
+  legalize_in_blockages TreePoint { x: 8.0, y: 6.0 }
+  legalize_one_buffer TreePoint { x: 8.0, y: 6.0 }
+  adjust_beyond_blockage TreePoint { x: 16.0, y: 4.0 }
+  weighted_distance 58.0
+blockages [Rect { min: Point { x: Dbu(9), y: Dbu(12) }, max: Point { x: Dbu(12), y: Dbu(16) } }, Rect { min: Point { x: Dbu(14), y: Dbu(0) }, max: Point { x: Dbu(16), y: Dbu(4) } }, Rect { min: Point { x: Dbu(8), y: Dbu(3) }, max: Point { x: Dbu(10), y: Dbu(7) } }] taken [(1.0, 7.0), (18.0, 8.0)] parent TreePoint { x: 1.0, y: 6.0 } point TreePoint { x: 19.0, y: 10.0 } sinks [TreePoint { x: 9.0, y: 12.0 }, TreePoint { x: 5.0, y: 6.0 }, TreePoint { x: 6.0, y: 7.0 }] target 2 North
+  find_blockage None
+  legal_location true
+  legalize_in_blockages TreePoint { x: 19.0, y: 10.0 }
+  legalize_one_buffer TreePoint { x: 19.0, y: 10.0 }
+  adjust_beyond_blockage TreePoint { x: 2.0, y: 7.0 }
+  weighted_distance 112.0
+blockages [Rect { min: Point { x: Dbu(11), y: Dbu(0) }, max: Point { x: Dbu(15), y: Dbu(1) } }, Rect { min: Point { x: Dbu(14), y: Dbu(2) }, max: Point { x: Dbu(15), y: Dbu(5) } }, Rect { min: Point { x: Dbu(4), y: Dbu(1) }, max: Point { x: Dbu(5), y: Dbu(3) } }] taken [(16.0, 5.0)] parent TreePoint { x: 4.0, y: 7.0 } point TreePoint { x: 7.0, y: 11.0 } sinks [TreePoint { x: 7.0, y: 17.0 }, TreePoint { x: 4.0, y: 3.0 }] target 8 East
+  find_blockage None
+  legal_location true
+  legalize_in_blockages TreePoint { x: 7.0, y: 11.0 }
+  legalize_one_buffer TreePoint { x: 7.0, y: 11.0 }
+  adjust_beyond_blockage TreePoint { x: 8.0, y: 11.0 }
+  weighted_distance 31.0
+blockages [Rect { min: Point { x: Dbu(12), y: Dbu(3) }, max: Point { x: Dbu(15), y: Dbu(4) } }, Rect { min: Point { x: Dbu(15), y: Dbu(4) }, max: Point { x: Dbu(16), y: Dbu(8) } }] taken [(13.0, 0.0), (20.0, 20.0)] parent TreePoint { x: 13.0, y: 9.0 } point TreePoint { x: 13.0, y: 8.0 } sinks [TreePoint { x: 11.0, y: 1.0 }, TreePoint { x: 19.0, y: 3.0 }] target 10 South
+  find_blockage None
+  legal_location true
+  legalize_in_blockages TreePoint { x: 13.0, y: 8.0 }
+  legalize_one_buffer TreePoint { x: 13.0, y: 8.0 }
+  adjust_beyond_blockage TreePoint { x: 15.5, y: 1.5 }
+  weighted_distance 22.0
+blockages [Rect { min: Point { x: Dbu(15), y: Dbu(6) }, max: Point { x: Dbu(18), y: Dbu(7) } }] taken [(0.0, 17.0), (3.0, 11.0), (9.0, 15.0)] parent TreePoint { x: 14.0, y: 18.0 } point TreePoint { x: 0.0, y: 7.0 } sinks [TreePoint { x: 20.0, y: 12.0 }] target 19 North
+  find_blockage None
+  legal_location true
+  legalize_in_blockages TreePoint { x: 0.0, y: 7.0 }
+  legalize_one_buffer TreePoint { x: 0.0, y: 7.0 }
+  adjust_beyond_blockage TreePoint { x: 0.0, y: 7.0 }
+  weighted_distance 50.0
+blockages [Rect { min: Point { x: Dbu(9), y: Dbu(12) }, max: Point { x: Dbu(13), y: Dbu(15) } }] taken [(20.0, 1.0)] parent TreePoint { x: 16.0, y: 2.0 } point TreePoint { x: 17.0, y: 19.0 } sinks [TreePoint { x: 19.0, y: 17.0 }, TreePoint { x: 6.0, y: 3.0 }] target 22 South
+  find_blockage None
+  legal_location true
+  legalize_in_blockages TreePoint { x: 17.0, y: 19.0 }
+  legalize_one_buffer TreePoint { x: 17.0, y: 19.0 }
+  adjust_beyond_blockage TreePoint { x: 17.0, y: 19.0 }
+  weighted_distance 67.0
+blockages [Rect { min: Point { x: Dbu(2), y: Dbu(4) }, max: Point { x: Dbu(6), y: Dbu(5) } }, Rect { min: Point { x: Dbu(5), y: Dbu(9) }, max: Point { x: Dbu(7), y: Dbu(14) } }] taken [(12.0, 9.0)] parent TreePoint { x: 4.0, y: 6.0 } point TreePoint { x: 13.0, y: 16.0 } sinks [TreePoint { x: 17.0, y: 5.0 }] target 6 East
+  find_blockage None
+  legal_location true
+  legalize_in_blockages TreePoint { x: 13.0, y: 16.0 }
+  legalize_one_buffer TreePoint { x: 13.0, y: 16.0 }
+  adjust_beyond_blockage TreePoint { x: 10.0, y: 6.0 }
+  weighted_distance 34.0
+blockages [Rect { min: Point { x: Dbu(6), y: Dbu(8) }, max: Point { x: Dbu(11), y: Dbu(12) } }, Rect { min: Point { x: Dbu(11), y: Dbu(11) }, max: Point { x: Dbu(13), y: Dbu(15) } }] taken [(19.0, 15.0)] parent TreePoint { x: 13.0, y: 8.0 } point TreePoint { x: 15.0, y: 15.0 } sinks [TreePoint { x: 19.0, y: 19.0 }, TreePoint { x: 1.0, y: 2.0 }] target 20 East
+  find_blockage None
+  legal_location true
+  legalize_in_blockages TreePoint { x: 15.0, y: 15.0 }
+  legalize_one_buffer TreePoint { x: 15.0, y: 15.0 }
+  adjust_beyond_blockage TreePoint { x: 15.0, y: 15.0 }
+  weighted_distance 53.0
+blockages [Rect { min: Point { x: Dbu(5), y: Dbu(5) }, max: Point { x: Dbu(9), y: Dbu(7) } }, Rect { min: Point { x: Dbu(4), y: Dbu(7) }, max: Point { x: Dbu(5), y: Dbu(11) } }, Rect { min: Point { x: Dbu(8), y: Dbu(12) }, max: Point { x: Dbu(11), y: Dbu(14) } }] taken [(0.0, 2.0), (5.0, 8.0), (19.0, 20.0)] parent TreePoint { x: 5.0, y: 9.0 } point TreePoint { x: 4.0, y: 12.0 } sinks [TreePoint { x: 1.0, y: 6.0 }] target 1 West
+  find_blockage None
+  legal_location true
+  legalize_in_blockages TreePoint { x: 4.0, y: 12.0 }
+  legalize_one_buffer TreePoint { x: 4.0, y: 12.0 }
+  adjust_beyond_blockage TreePoint { x: 4.0, y: 9.0 }
+  weighted_distance 13.0
+blockages [Rect { min: Point { x: Dbu(7), y: Dbu(11) }, max: Point { x: Dbu(12), y: Dbu(15) } }, Rect { min: Point { x: Dbu(10), y: Dbu(5) }, max: Point { x: Dbu(15), y: Dbu(8) } }, Rect { min: Point { x: Dbu(11), y: Dbu(6) }, max: Point { x: Dbu(12), y: Dbu(9) } }] taken [(3.0, 2.0), (9.0, 13.0)] parent TreePoint { x: 17.0, y: 15.0 } point TreePoint { x: 9.0, y: 16.0 } sinks [TreePoint { x: 13.0, y: 8.0 }, TreePoint { x: 14.0, y: 20.0 }] target 0 North
+  find_blockage None
+  legal_location true
+  legalize_in_blockages TreePoint { x: 9.0, y: 16.0 }
+  legalize_one_buffer TreePoint { x: 9.0, y: 16.0 }
+  adjust_beyond_blockage TreePoint { x: 17.0, y: 15.0 }
+  weighted_distance 39.0
+blockages [Rect { min: Point { x: Dbu(8), y: Dbu(15) }, max: Point { x: Dbu(12), y: Dbu(20) } }] taken [(2.0, 19.0), (8.0, 16.0)] parent TreePoint { x: 7.0, y: 3.0 } point TreePoint { x: 0.0, y: 18.0 } sinks [TreePoint { x: 13.0, y: 16.0 }] target 1 West
+  find_blockage None
+  legal_location true
+  legalize_in_blockages TreePoint { x: 0.0, y: 18.0 }
+  legalize_one_buffer TreePoint { x: 0.0, y: 18.0 }
+  adjust_beyond_blockage TreePoint { x: 6.5, y: 3.5 }
+  weighted_distance 37.0
+blockages [Rect { min: Point { x: Dbu(3), y: Dbu(1) }, max: Point { x: Dbu(7), y: Dbu(6) } }, Rect { min: Point { x: Dbu(10), y: Dbu(12) }, max: Point { x: Dbu(15), y: Dbu(13) } }, Rect { min: Point { x: Dbu(0), y: Dbu(6) }, max: Point { x: Dbu(3), y: Dbu(9) } }] taken [] parent TreePoint { x: 18.0, y: 14.0 } point TreePoint { x: 19.0, y: 6.0 } sinks [TreePoint { x: 16.0, y: 15.0 }] target 8 North
+  find_blockage None
+  legal_location true
+  legalize_in_blockages TreePoint { x: 19.0, y: 6.0 }
+  legalize_one_buffer TreePoint { x: 19.0, y: 6.0 }
+  adjust_beyond_blockage TreePoint { x: 14.0, y: 18.0 }
+  weighted_distance 21.0
+blockages [Rect { min: Point { x: Dbu(10), y: Dbu(15) }, max: Point { x: Dbu(13), y: Dbu(17) } }, Rect { min: Point { x: Dbu(8), y: Dbu(5) }, max: Point { x: Dbu(10), y: Dbu(7) } }] taken [(8.0, 16.0), (19.0, 11.0)] parent TreePoint { x: 7.0, y: 11.0 } point TreePoint { x: 2.0, y: 18.0 } sinks [TreePoint { x: 6.0, y: 20.0 }] target 1 South
+  find_blockage None
+  legal_location true
+  legalize_in_blockages TreePoint { x: 2.0, y: 18.0 }
+  legalize_one_buffer TreePoint { x: 2.0, y: 18.0 }
+  adjust_beyond_blockage TreePoint { x: 6.5, y: 10.5 }
+  weighted_distance 18.0
+blockages [Rect { min: Point { x: Dbu(1), y: Dbu(15) }, max: Point { x: Dbu(6), y: Dbu(20) } }] taken [] parent TreePoint { x: 19.0, y: 17.0 } point TreePoint { x: 13.0, y: 7.0 } sinks [TreePoint { x: 3.0, y: 14.0 }] target 8 West
+  find_blockage None
+  legal_location true
+  legalize_in_blockages TreePoint { x: 13.0, y: 7.0 }
+  legalize_one_buffer TreePoint { x: 13.0, y: 7.0 }
+  adjust_beyond_blockage TreePoint { x: 13.0, y: 15.0 }
+  weighted_distance 33.0
+blockages [Rect { min: Point { x: Dbu(0), y: Dbu(4) }, max: Point { x: Dbu(3), y: Dbu(9) } }, Rect { min: Point { x: Dbu(8), y: Dbu(8) }, max: Point { x: Dbu(9), y: Dbu(9) } }] taken [] parent TreePoint { x: 10.0, y: 4.0 } point TreePoint { x: 7.0, y: 12.0 } sinks [TreePoint { x: 4.0, y: 0.0 }, TreePoint { x: 3.0, y: 12.0 }, TreePoint { x: 4.0, y: 18.0 }] target 16 East
+  find_blockage None
+  legal_location true
+  legalize_in_blockages TreePoint { x: 7.0, y: 12.0 }
+  legalize_one_buffer TreePoint { x: 7.0, y: 12.0 }
+  adjust_beyond_blockage TreePoint { x: 18.0, y: 12.0 }
+  weighted_distance 61.0
+blockages [Rect { min: Point { x: Dbu(2), y: Dbu(2) }, max: Point { x: Dbu(4), y: Dbu(4) } }, Rect { min: Point { x: Dbu(4), y: Dbu(15) }, max: Point { x: Dbu(9), y: Dbu(18) } }] taken [] parent TreePoint { x: 6.0, y: 3.0 } point TreePoint { x: 19.0, y: 10.0 } sinks [TreePoint { x: 11.0, y: 10.0 }, TreePoint { x: 13.0, y: 1.0 }] target 1 North
+  find_blockage None
+  legal_location true
+  legalize_in_blockages TreePoint { x: 19.0, y: 10.0 }
+  legalize_one_buffer TreePoint { x: 19.0, y: 10.0 }
+  adjust_beyond_blockage TreePoint { x: 6.5, y: 3.5 }
+  weighted_distance 63.0
+blockages [Rect { min: Point { x: Dbu(0), y: Dbu(3) }, max: Point { x: Dbu(4), y: Dbu(7) } }] taken [] parent TreePoint { x: 4.0, y: 17.0 } point TreePoint { x: 2.0, y: 5.0 } sinks [TreePoint { x: 17.0, y: 18.0 }, TreePoint { x: 2.0, y: 14.0 }] target 20 South
+  find_blockage Some(TreeBox { low: TreePoint { x: 0.0, y: 3.0 }, high: TreePoint { x: 4.0, y: 7.0 } })
+  legal_location false
+  legalize_in_blockages TreePoint { x: 4.0, y: 5.0 }
+  legalize_one_buffer TreePoint { x: 4.0, y: 5.0 }
+  adjust_beyond_blockage TreePoint { x: 12.0, y: 5.0 }
+  weighted_distance 65.0
+  adjust_along_blockage Some(TreePoint { x: 12.0, y: 5.0 })
+  best_legal_location TreePoint { x: 1.6666666666666667, y: -0.666666666666667 }
+blockages [Rect { min: Point { x: Dbu(7), y: Dbu(12) }, max: Point { x: Dbu(10), y: Dbu(13) } }, Rect { min: Point { x: Dbu(11), y: Dbu(11) }, max: Point { x: Dbu(13), y: Dbu(13) } }, Rect { min: Point { x: Dbu(15), y: Dbu(8) }, max: Point { x: Dbu(19), y: Dbu(11) } }] taken [] parent TreePoint { x: 4.0, y: 4.0 } point TreePoint { x: 17.0, y: 8.0 } sinks [TreePoint { x: 6.0, y: 0.0 }, TreePoint { x: 5.0, y: 13.0 }] target 14 East
+  find_blockage None
+  legal_location true
+  legalize_in_blockages TreePoint { x: 17.0, y: 8.0 }
+  legalize_one_buffer TreePoint { x: 17.0, y: 8.0 }
+  adjust_beyond_blockage TreePoint { x: 14.5, y: 7.5 }
+  weighted_distance 70.0
+blockages [Rect { min: Point { x: Dbu(5), y: Dbu(10) }, max: Point { x: Dbu(6), y: Dbu(14) } }] taken [] parent TreePoint { x: 7.0, y: 2.0 } point TreePoint { x: 0.0, y: 11.0 } sinks [TreePoint { x: 9.0, y: 2.0 }] target 4 North
+  find_blockage None
+  legal_location true
+  legalize_in_blockages TreePoint { x: 0.0, y: 11.0 }
+  legalize_one_buffer TreePoint { x: 0.0, y: 11.0 }
+  adjust_beyond_blockage TreePoint { x: 7.0, y: 6.0 }
+  weighted_distance 34.0
+blockages [Rect { min: Point { x: Dbu(1), y: Dbu(8) }, max: Point { x: Dbu(6), y: Dbu(9) } }, Rect { min: Point { x: Dbu(4), y: Dbu(11) }, max: Point { x: Dbu(9), y: Dbu(15) } }, Rect { min: Point { x: Dbu(2), y: Dbu(14) }, max: Point { x: Dbu(5), y: Dbu(15) } }] taken [(5.0, 2.0)] parent TreePoint { x: 18.0, y: 15.0 } point TreePoint { x: 11.0, y: 16.0 } sinks [TreePoint { x: 7.0, y: 6.0 }] target 10 West
+  find_blockage None
+  legal_location true
+  legalize_in_blockages TreePoint { x: 11.0, y: 16.0 }
+  legalize_one_buffer TreePoint { x: 11.0, y: 16.0 }
+  adjust_beyond_blockage TreePoint { x: 8.0, y: 15.0 }
+  weighted_distance 22.0
+blockages [Rect { min: Point { x: Dbu(8), y: Dbu(7) }, max: Point { x: Dbu(12), y: Dbu(9) } }, Rect { min: Point { x: Dbu(15), y: Dbu(1) }, max: Point { x: Dbu(19), y: Dbu(5) } }] taken [] parent TreePoint { x: 2.0, y: 16.0 } point TreePoint { x: 20.0, y: 20.0 } sinks [TreePoint { x: 7.0, y: 13.0 }, TreePoint { x: 7.0, y: 5.0 }] target 12 West
+  find_blockage None
+  legal_location true
+  legalize_in_blockages TreePoint { x: 20.0, y: 20.0 }
+  legalize_one_buffer TreePoint { x: 20.0, y: 20.0 }
+  adjust_beyond_blockage TreePoint { x: 20.0, y: 20.0 }
+  weighted_distance 92.0
+blockages [Rect { min: Point { x: Dbu(0), y: Dbu(12) }, max: Point { x: Dbu(5), y: Dbu(14) } }, Rect { min: Point { x: Dbu(12), y: Dbu(12) }, max: Point { x: Dbu(16), y: Dbu(16) } }, Rect { min: Point { x: Dbu(6), y: Dbu(14) }, max: Point { x: Dbu(10), y: Dbu(16) } }] taken [(10.0, 9.0)] parent TreePoint { x: 14.0, y: 2.0 } point TreePoint { x: 2.0, y: 1.0 } sinks [TreePoint { x: 12.0, y: 8.0 }] target 23 North
+  find_blockage None
+  legal_location true
+  legalize_in_blockages TreePoint { x: 2.0, y: 1.0 }
+  legalize_one_buffer TreePoint { x: 2.0, y: 1.0 }
+  adjust_beyond_blockage TreePoint { x: 8.25, y: 19.25 }
+  weighted_distance 30.0
+blockages [Rect { min: Point { x: Dbu(14), y: Dbu(7) }, max: Point { x: Dbu(16), y: Dbu(11) } }, Rect { min: Point { x: Dbu(6), y: Dbu(2) }, max: Point { x: Dbu(8), y: Dbu(6) } }, Rect { min: Point { x: Dbu(4), y: Dbu(0) }, max: Point { x: Dbu(5), y: Dbu(4) } }] taken [] parent TreePoint { x: 12.0, y: 2.0 } point TreePoint { x: 4.0, y: 7.0 } sinks [TreePoint { x: 1.0, y: 5.0 }, TreePoint { x: 9.0, y: 9.0 }, TreePoint { x: 9.0, y: 14.0 }] target 8 East
+  find_blockage None
+  legal_location true
+  legalize_in_blockages TreePoint { x: 4.0, y: 7.0 }
+  legalize_one_buffer TreePoint { x: 4.0, y: 7.0 }
+  adjust_beyond_blockage TreePoint { x: 16.0, y: 6.0 }
+  weighted_distance 63.0
+blockages [Rect { min: Point { x: Dbu(15), y: Dbu(6) }, max: Point { x: Dbu(20), y: Dbu(8) } }] taken [] parent TreePoint { x: 13.0, y: 18.0 } point TreePoint { x: 6.0, y: 15.0 } sinks [TreePoint { x: 10.0, y: 4.0 }, TreePoint { x: 11.0, y: 1.0 }, TreePoint { x: 12.0, y: 15.0 }] target 7 East
+  find_blockage None
+  legal_location true
+  legalize_in_blockages TreePoint { x: 6.0, y: 15.0 }
+  legalize_one_buffer TreePoint { x: 6.0, y: 15.0 }
+  adjust_beyond_blockage TreePoint { x: 16.5, y: 14.5 }
+  weighted_distance 70.0
+blockages [Rect { min: Point { x: Dbu(6), y: Dbu(11) }, max: Point { x: Dbu(10), y: Dbu(12) } }, Rect { min: Point { x: Dbu(5), y: Dbu(8) }, max: Point { x: Dbu(6), y: Dbu(12) } }] taken [(4.0, 7.0), (5.0, 16.0)] parent TreePoint { x: 15.0, y: 2.0 } point TreePoint { x: 6.0, y: 3.0 } sinks [TreePoint { x: 4.0, y: 1.0 }, TreePoint { x: 13.0, y: 13.0 }] target 7 East
+  find_blockage None
+  legal_location true
+  legalize_in_blockages TreePoint { x: 6.0, y: 3.0 }
+  legalize_one_buffer TreePoint { x: 6.0, y: 3.0 }
+  adjust_beyond_blockage TreePoint { x: 18.5, y: 5.5 }
+  weighted_distance 41.0
+blockages [Rect { min: Point { x: Dbu(10), y: Dbu(14) }, max: Point { x: Dbu(11), y: Dbu(16) } }, Rect { min: Point { x: Dbu(2), y: Dbu(12) }, max: Point { x: Dbu(3), y: Dbu(16) } }] taken [(5.0, 13.0), (9.0, 8.0), (16.0, 3.0)] parent TreePoint { x: 13.0, y: 10.0 } point TreePoint { x: 7.0, y: 14.0 } sinks [TreePoint { x: 15.0, y: 8.0 }] target 24 South
+  find_blockage None
+  legal_location true
+  legalize_in_blockages TreePoint { x: 7.0, y: 14.0 }
+  legalize_one_buffer TreePoint { x: 7.0, y: 14.0 }
+  adjust_beyond_blockage TreePoint { x: 7.0, y: 14.0 }
+  weighted_distance 24.0
+blockages [Rect { min: Point { x: Dbu(9), y: Dbu(4) }, max: Point { x: Dbu(14), y: Dbu(8) } }, Rect { min: Point { x: Dbu(7), y: Dbu(12) }, max: Point { x: Dbu(12), y: Dbu(16) } }, Rect { min: Point { x: Dbu(8), y: Dbu(14) }, max: Point { x: Dbu(9), y: Dbu(19) } }] taken [(2.0, 9.0), (11.0, 9.0), (19.0, 4.0)] parent TreePoint { x: 10.0, y: 18.0 } point TreePoint { x: 13.0, y: 19.0 } sinks [TreePoint { x: 8.0, y: 9.0 }, TreePoint { x: 1.0, y: 9.0 }] target 0 North
+  find_blockage None
+  legal_location true
+  legalize_in_blockages TreePoint { x: 13.0, y: 19.0 }
+  legalize_one_buffer TreePoint { x: 13.0, y: 19.0 }
+  adjust_beyond_blockage TreePoint { x: 10.0, y: 18.0 }
+  weighted_distance 45.0
+blockages [Rect { min: Point { x: Dbu(8), y: Dbu(3) }, max: Point { x: Dbu(10), y: Dbu(4) } }, Rect { min: Point { x: Dbu(3), y: Dbu(6) }, max: Point { x: Dbu(6), y: Dbu(9) } }] taken [] parent TreePoint { x: 8.0, y: 5.0 } point TreePoint { x: 5.0, y: 5.0 } sinks [TreePoint { x: 18.0, y: 14.0 }, TreePoint { x: 2.0, y: 10.0 }, TreePoint { x: 20.0, y: 18.0 }] target 16 North
+  find_blockage None
+  legal_location true
+  legalize_in_blockages TreePoint { x: 5.0, y: 5.0 }
+  legalize_one_buffer TreePoint { x: 5.0, y: 5.0 }
+  adjust_beyond_blockage TreePoint { x: 4.0, y: 17.0 }
+  weighted_distance 67.0
+blockages [Rect { min: Point { x: Dbu(12), y: Dbu(3) }, max: Point { x: Dbu(13), y: Dbu(7) } }] taken [] parent TreePoint { x: 19.0, y: 16.0 } point TreePoint { x: 1.0, y: 16.0 } sinks [TreePoint { x: 0.0, y: 7.0 }, TreePoint { x: 6.0, y: 16.0 }, TreePoint { x: 1.0, y: 2.0 }] target 9 East
+  find_blockage None
+  legal_location true
+  legalize_in_blockages TreePoint { x: 1.0, y: 16.0 }
+  legalize_one_buffer TreePoint { x: 1.0, y: 16.0 }
+  adjust_beyond_blockage TreePoint { x: 1.0, y: 16.0 }
+  weighted_distance 83.0
+blockages [Rect { min: Point { x: Dbu(0), y: Dbu(9) }, max: Point { x: Dbu(3), y: Dbu(14) } }, Rect { min: Point { x: Dbu(7), y: Dbu(3) }, max: Point { x: Dbu(10), y: Dbu(4) } }, Rect { min: Point { x: Dbu(8), y: Dbu(7) }, max: Point { x: Dbu(13), y: Dbu(10) } }] taken [(1.0, 13.0), (12.0, 8.0)] parent TreePoint { x: 20.0, y: 12.0 } point TreePoint { x: 16.0, y: 8.0 } sinks [TreePoint { x: 7.0, y: 5.0 }] target 3 West
+  find_blockage None
+  legal_location true
+  legalize_in_blockages TreePoint { x: 16.0, y: 8.0 }
+  legalize_one_buffer TreePoint { x: 16.0, y: 8.0 }
+  adjust_beyond_blockage TreePoint { x: 17.0, y: 12.0 }
+  weighted_distance 20.0
+blockages [Rect { min: Point { x: Dbu(7), y: Dbu(7) }, max: Point { x: Dbu(8), y: Dbu(11) } }] taken [(6.0, 3.0), (20.0, 6.0)] parent TreePoint { x: 5.0, y: 19.0 } point TreePoint { x: 19.0, y: 20.0 } sinks [TreePoint { x: 8.0, y: 12.0 }, TreePoint { x: 1.0, y: 2.0 }] target 14 North
+  find_blockage None
+  legal_location true
+  legalize_in_blockages TreePoint { x: 19.0, y: 20.0 }
+  legalize_one_buffer TreePoint { x: 19.0, y: 20.0 }
+  adjust_beyond_blockage TreePoint { x: 19.0, y: 20.0 }
+  weighted_distance 85.0
+blockages [Rect { min: Point { x: Dbu(0), y: Dbu(8) }, max: Point { x: Dbu(5), y: Dbu(13) } }] taken [] parent TreePoint { x: 8.0, y: 17.0 } point TreePoint { x: 5.0, y: 20.0 } sinks [TreePoint { x: 1.0, y: 12.0 }, TreePoint { x: 3.0, y: 6.0 }] target 12 North
+  find_blockage None
+  legal_location true
+  legalize_in_blockages TreePoint { x: 5.0, y: 20.0 }
+  legalize_one_buffer TreePoint { x: 5.0, y: 20.0 }
+  adjust_beyond_blockage TreePoint { x: 5.0, y: 20.0 }
+  weighted_distance 40.0
+blockages [Rect { min: Point { x: Dbu(1), y: Dbu(7) }, max: Point { x: Dbu(5), y: Dbu(11) } }, Rect { min: Point { x: Dbu(0), y: Dbu(3) }, max: Point { x: Dbu(4), y: Dbu(5) } }, Rect { min: Point { x: Dbu(11), y: Dbu(10) }, max: Point { x: Dbu(12), y: Dbu(13) } }] taken [(9.0, 15.0), (14.0, 18.0), (20.0, 3.0)] parent TreePoint { x: 17.0, y: 9.0 } point TreePoint { x: 7.0, y: 3.0 } sinks [TreePoint { x: 18.0, y: 6.0 }, TreePoint { x: 6.0, y: 1.0 }] target 18 East
+  find_blockage None
+  legal_location true
+  legalize_in_blockages TreePoint { x: 7.0, y: 3.0 }
+  legalize_one_buffer TreePoint { x: 7.0, y: 3.0 }
+  adjust_beyond_blockage TreePoint { x: 7.0, y: 3.0 }
+  weighted_distance 49.0
+blockages [Rect { min: Point { x: Dbu(4), y: Dbu(4) }, max: Point { x: Dbu(6), y: Dbu(8) } }, Rect { min: Point { x: Dbu(8), y: Dbu(8) }, max: Point { x: Dbu(11), y: Dbu(13) } }] taken [(19.0, 14.0)] parent TreePoint { x: 19.0, y: 5.0 } point TreePoint { x: 10.0, y: 15.0 } sinks [TreePoint { x: 4.0, y: 19.0 }, TreePoint { x: 7.0, y: 0.0 }] target 16 West
+  find_blockage None
+  legal_location true
+  legalize_in_blockages TreePoint { x: 10.0, y: 15.0 }
+  legalize_one_buffer TreePoint { x: 10.0, y: 15.0 }
+  adjust_beyond_blockage TreePoint { x: 11.0, y: 13.0 }
+  weighted_distance 66.0
+blockages [Rect { min: Point { x: Dbu(2), y: Dbu(3) }, max: Point { x: Dbu(7), y: Dbu(5) } }, Rect { min: Point { x: Dbu(9), y: Dbu(14) }, max: Point { x: Dbu(11), y: Dbu(17) } }] taken [(0.0, 19.0), (15.0, 0.0), (16.0, 19.0)] parent TreePoint { x: 8.0, y: 1.0 } point TreePoint { x: 14.0, y: 16.0 } sinks [TreePoint { x: 15.0, y: 4.0 }, TreePoint { x: 9.0, y: 5.0 }] target 24 East
+  find_blockage None
+  legal_location true
+  legalize_in_blockages TreePoint { x: 14.0, y: 16.0 }
+  legalize_one_buffer TreePoint { x: 14.0, y: 16.0 }
+  adjust_beyond_blockage TreePoint { x: 20.0, y: 13.0 }
+  weighted_distance 71.0
+blockages [Rect { min: Point { x: Dbu(14), y: Dbu(10) }, max: Point { x: Dbu(18), y: Dbu(15) } }] taken [(1.0, 18.0), (6.0, 12.0)] parent TreePoint { x: 13.0, y: 14.0 } point TreePoint { x: 13.0, y: 0.0 } sinks [TreePoint { x: 0.0, y: 2.0 }, TreePoint { x: 12.0, y: 2.0 }] target 8 East
+  find_blockage None
+  legal_location true
+  legalize_in_blockages TreePoint { x: 13.0, y: 0.0 }
+  legalize_one_buffer TreePoint { x: 13.0, y: 0.0 }
+  adjust_beyond_blockage TreePoint { x: 17.0, y: 10.0 }
+  weighted_distance 46.0
+blockages [Rect { min: Point { x: Dbu(6), y: Dbu(15) }, max: Point { x: Dbu(10), y: Dbu(16) } }, Rect { min: Point { x: Dbu(3), y: Dbu(11) }, max: Point { x: Dbu(4), y: Dbu(14) } }, Rect { min: Point { x: Dbu(13), y: Dbu(2) }, max: Point { x: Dbu(17), y: Dbu(4) } }] taken [(3.0, 7.0)] parent TreePoint { x: 6.0, y: 9.0 } point TreePoint { x: 0.0, y: 9.0 } sinks [TreePoint { x: 14.0, y: 12.0 }, TreePoint { x: 14.0, y: 13.0 }] target 22 North
+  find_blockage None
+  legal_location true
+  legalize_in_blockages TreePoint { x: 0.0, y: 9.0 }
+  legalize_one_buffer TreePoint { x: 0.0, y: 9.0 }
+  adjust_beyond_blockage TreePoint { x: 17.0, y: 20.0 }
+  weighted_distance 47.0
+blockages [Rect { min: Point { x: Dbu(4), y: Dbu(4) }, max: Point { x: Dbu(7), y: Dbu(9) } }] taken [(7.0, 6.0), (16.0, 18.0)] parent TreePoint { x: 2.0, y: 16.0 } point TreePoint { x: 20.0, y: 10.0 } sinks [TreePoint { x: 10.0, y: 4.0 }, TreePoint { x: 4.0, y: 19.0 }] target 23 West
+  find_blockage None
+  legal_location true
+  legalize_in_blockages TreePoint { x: 20.0, y: 10.0 }
+  legalize_one_buffer TreePoint { x: 20.0, y: 10.0 }
+  adjust_beyond_blockage TreePoint { x: 20.0, y: 10.0 }
+  weighted_distance 89.0
+blockages [Rect { min: Point { x: Dbu(12), y: Dbu(5) }, max: Point { x: Dbu(16), y: Dbu(9) } }, Rect { min: Point { x: Dbu(5), y: Dbu(0) }, max: Point { x: Dbu(7), y: Dbu(3) } }] taken [(11.0, 12.0), (19.0, 20.0), (20.0, 20.0)] parent TreePoint { x: 6.0, y: 10.0 } point TreePoint { x: 9.0, y: 13.0 } sinks [TreePoint { x: 2.0, y: 8.0 }] target 15 North
+  find_blockage None
+  legal_location true
+  legalize_in_blockages TreePoint { x: 9.0, y: 13.0 }
+  legalize_one_buffer TreePoint { x: 9.0, y: 13.0 }
+  adjust_beyond_blockage TreePoint { x: 13.5, y: 17.5 }
+  weighted_distance 18.0
+blockages [Rect { min: Point { x: Dbu(15), y: Dbu(5) }, max: Point { x: Dbu(20), y: Dbu(8) } }, Rect { min: Point { x: Dbu(11), y: Dbu(6) }, max: Point { x: Dbu(13), y: Dbu(7) } }, Rect { min: Point { x: Dbu(8), y: Dbu(1) }, max: Point { x: Dbu(9), y: Dbu(3) } }] taken [] parent TreePoint { x: 12.0, y: 5.0 } point TreePoint { x: 20.0, y: 19.0 } sinks [TreePoint { x: 11.0, y: 6.0 }, TreePoint { x: 12.0, y: 5.0 }, TreePoint { x: 17.0, y: 3.0 }] target 4 South
+  find_blockage None
+  legal_location true
+  legalize_in_blockages TreePoint { x: 20.0, y: 19.0 }
+  legalize_one_buffer TreePoint { x: 20.0, y: 19.0 }
+  adjust_beyond_blockage TreePoint { x: 14.0, y: 3.0 }
+  weighted_distance 129.0
+blockages [Rect { min: Point { x: Dbu(0), y: Dbu(14) }, max: Point { x: Dbu(5), y: Dbu(17) } }] taken [(6.0, 5.0)] parent TreePoint { x: 19.0, y: 8.0 } point TreePoint { x: 12.0, y: 17.0 } sinks [TreePoint { x: 3.0, y: 0.0 }, TreePoint { x: 3.0, y: 7.0 }] target 8 South
+  find_blockage None
+  legal_location true
+  legalize_in_blockages TreePoint { x: 12.0, y: 17.0 }
+  legalize_one_buffer TreePoint { x: 12.0, y: 17.0 }
+  adjust_beyond_blockage TreePoint { x: 15.0, y: 4.0 }
+  weighted_distance 77.0
+blockages [Rect { min: Point { x: Dbu(13), y: Dbu(3) }, max: Point { x: Dbu(15), y: Dbu(6) } }, Rect { min: Point { x: Dbu(0), y: Dbu(1) }, max: Point { x: Dbu(5), y: Dbu(6) } }] taken [(4.0, 7.0)] parent TreePoint { x: 7.0, y: 16.0 } point TreePoint { x: 4.0, y: 11.0 } sinks [TreePoint { x: 16.0, y: 20.0 }] target 19 West
+  find_blockage None
+  legal_location true
+  legalize_in_blockages TreePoint { x: 4.0, y: 11.0 }
+  legalize_one_buffer TreePoint { x: 4.0, y: 11.0 }
+  adjust_beyond_blockage TreePoint { x: 3.0, y: 1.0 }
+  weighted_distance 29.0
+blockages [Rect { min: Point { x: Dbu(6), y: Dbu(8) }, max: Point { x: Dbu(8), y: Dbu(13) } }, Rect { min: Point { x: Dbu(8), y: Dbu(15) }, max: Point { x: Dbu(11), y: Dbu(18) } }] taken [] parent TreePoint { x: 13.0, y: 0.0 } point TreePoint { x: 14.0, y: 12.0 } sinks [TreePoint { x: 16.0, y: 12.0 }, TreePoint { x: 10.0, y: 18.0 }, TreePoint { x: 15.0, y: 11.0 }] target 9 South
+  find_blockage None
+  legal_location true
+  legalize_in_blockages TreePoint { x: 14.0, y: 12.0 }
+  legalize_one_buffer TreePoint { x: 14.0, y: 12.0 }
+  adjust_beyond_blockage TreePoint { x: 4.0, y: 0.0 }
+  weighted_distance 53.0
+blockages [Rect { min: Point { x: Dbu(9), y: Dbu(8) }, max: Point { x: Dbu(13), y: Dbu(13) } }, Rect { min: Point { x: Dbu(4), y: Dbu(11) }, max: Point { x: Dbu(9), y: Dbu(12) } }, Rect { min: Point { x: Dbu(15), y: Dbu(6) }, max: Point { x: Dbu(18), y: Dbu(10) } }] taken [(3.0, 12.0), (16.0, 10.0), (16.0, 16.0)] parent TreePoint { x: 16.0, y: 9.0 } point TreePoint { x: 3.0, y: 5.0 } sinks [TreePoint { x: 17.0, y: 15.0 }, TreePoint { x: 5.0, y: 20.0 }, TreePoint { x: 0.0, y: 13.0 }] target 14 South
+  find_blockage None
+  legal_location true
+  legalize_in_blockages TreePoint { x: 3.0, y: 5.0 }
+  legalize_one_buffer TreePoint { x: 3.0, y: 5.0 }
+  adjust_beyond_blockage TreePoint { x: 9.0, y: 2.0 }
+  weighted_distance 103.0
+blockages [Rect { min: Point { x: Dbu(5), y: Dbu(1) }, max: Point { x: Dbu(8), y: Dbu(5) } }, Rect { min: Point { x: Dbu(1), y: Dbu(10) }, max: Point { x: Dbu(2), y: Dbu(13) } }] taken [(7.0, 8.0), (8.0, 6.0), (16.0, 20.0)] parent TreePoint { x: 1.0, y: 5.0 } point TreePoint { x: 1.0, y: 0.0 } sinks [TreePoint { x: 6.0, y: 4.0 }, TreePoint { x: 9.0, y: 19.0 }, TreePoint { x: 20.0, y: 6.0 }] target 7 South
+  find_blockage None
+  legal_location true
+  legalize_in_blockages TreePoint { x: 1.0, y: 0.0 }
+  legalize_one_buffer TreePoint { x: 1.0, y: 0.0 }
+  adjust_beyond_blockage TreePoint { x: 4.5, y: 1.5 }
+  weighted_distance 76.0
+blockages [Rect { min: Point { x: Dbu(8), y: Dbu(13) }, max: Point { x: Dbu(11), y: Dbu(18) } }, Rect { min: Point { x: Dbu(11), y: Dbu(10) }, max: Point { x: Dbu(12), y: Dbu(11) } }, Rect { min: Point { x: Dbu(3), y: Dbu(12) }, max: Point { x: Dbu(4), y: Dbu(14) } }] taken [(15.0, 3.0)] parent TreePoint { x: 2.0, y: 20.0 } point TreePoint { x: 11.0, y: 8.0 } sinks [TreePoint { x: 18.0, y: 7.0 }] target 18 South
+  find_blockage None
+  legal_location true
+  legalize_in_blockages TreePoint { x: 11.0, y: 8.0 }
+  legalize_one_buffer TreePoint { x: 11.0, y: 8.0 }
+  adjust_beyond_blockage TreePoint { x: 11.0, y: 11.0 }
+  weighted_distance 29.0
+blockages [Rect { min: Point { x: Dbu(7), y: Dbu(2) }, max: Point { x: Dbu(9), y: Dbu(3) } }] taken [(5.0, 2.0), (18.0, 11.0)] parent TreePoint { x: 13.0, y: 3.0 } point TreePoint { x: 4.0, y: 18.0 } sinks [TreePoint { x: 1.0, y: 2.0 }] target 12 West
+  find_blockage None
+  legal_location true
+  legalize_in_blockages TreePoint { x: 4.0, y: 18.0 }
+  legalize_one_buffer TreePoint { x: 4.0, y: 18.0 }
+  adjust_beyond_blockage TreePoint { x: 1.0, y: 3.0 }
+  weighted_distance 43.0
+blockages [Rect { min: Point { x: Dbu(4), y: Dbu(8) }, max: Point { x: Dbu(9), y: Dbu(11) } }] taken [(3.0, 13.0), (11.0, 6.0), (15.0, 0.0)] parent TreePoint { x: 11.0, y: 1.0 } point TreePoint { x: 1.0, y: 3.0 } sinks [TreePoint { x: 11.0, y: 11.0 }, TreePoint { x: 0.0, y: 2.0 }, TreePoint { x: 19.0, y: 11.0 }] target 7 South
+  find_blockage None
+  legal_location true
+  legalize_in_blockages TreePoint { x: 1.0, y: 3.0 }
+  legalize_one_buffer TreePoint { x: 1.0, y: 3.0 }
+  adjust_beyond_blockage TreePoint { x: 1.0, y: 3.0 }
+  weighted_distance 82.0
+blockages [Rect { min: Point { x: Dbu(3), y: Dbu(5) }, max: Point { x: Dbu(6), y: Dbu(6) } }, Rect { min: Point { x: Dbu(0), y: Dbu(13) }, max: Point { x: Dbu(4), y: Dbu(16) } }, Rect { min: Point { x: Dbu(8), y: Dbu(14) }, max: Point { x: Dbu(9), y: Dbu(18) } }] taken [(17.0, 18.0), (19.0, 12.0)] parent TreePoint { x: 2.0, y: 2.0 } point TreePoint { x: 2.0, y: 10.0 } sinks [TreePoint { x: 8.0, y: 8.0 }, TreePoint { x: 7.0, y: 5.0 }] target 7 North
+  find_blockage None
+  legal_location true
+  legalize_in_blockages TreePoint { x: 2.0, y: 10.0 }
+  legalize_one_buffer TreePoint { x: 2.0, y: 10.0 }
+  adjust_beyond_blockage TreePoint { x: 2.0, y: 9.0 }
+  weighted_distance 34.0
+blockages [Rect { min: Point { x: Dbu(10), y: Dbu(15) }, max: Point { x: Dbu(13), y: Dbu(16) } }, Rect { min: Point { x: Dbu(4), y: Dbu(4) }, max: Point { x: Dbu(9), y: Dbu(6) } }] taken [(12.0, 4.0), (18.0, 19.0), (20.0, 12.0)] parent TreePoint { x: 16.0, y: 13.0 } point TreePoint { x: 10.0, y: 1.0 } sinks [TreePoint { x: 4.0, y: 5.0 }, TreePoint { x: 6.0, y: 0.0 }, TreePoint { x: 7.0, y: 13.0 }] target 24 West
+  find_blockage None
+  legal_location true
+  legalize_in_blockages TreePoint { x: 10.0, y: 1.0 }
+  legalize_one_buffer TreePoint { x: 10.0, y: 1.0 }
+  adjust_beyond_blockage TreePoint { x: 4.0, y: 1.0 }
+  weighted_distance 84.0
+blockages [Rect { min: Point { x: Dbu(6), y: Dbu(6) }, max: Point { x: Dbu(10), y: Dbu(8) } }] taken [(3.0, 6.0), (17.0, 3.0), (20.0, 20.0)] parent TreePoint { x: 3.0, y: 8.0 } point TreePoint { x: 3.0, y: 18.0 } sinks [TreePoint { x: 16.0, y: 18.0 }] target 24 South
+  find_blockage None
+  legal_location true
+  legalize_in_blockages TreePoint { x: 3.0, y: 18.0 }
+  legalize_one_buffer TreePoint { x: 3.0, y: 18.0 }
+  adjust_beyond_blockage TreePoint { x: 3.0, y: 18.0 }
+  weighted_distance 23.0
+blockages [Rect { min: Point { x: Dbu(14), y: Dbu(10) }, max: Point { x: Dbu(17), y: Dbu(12) } }, Rect { min: Point { x: Dbu(5), y: Dbu(9) }, max: Point { x: Dbu(9), y: Dbu(13) } }] taken [] parent TreePoint { x: 0.0, y: 10.0 } point TreePoint { x: 2.0, y: 11.0 } sinks [TreePoint { x: 4.0, y: 10.0 }, TreePoint { x: 8.0, y: 9.0 }] target 24 South
+  find_blockage None
+  legal_location true
+  legalize_in_blockages TreePoint { x: 2.0, y: 11.0 }
+  legalize_one_buffer TreePoint { x: 2.0, y: 11.0 }
+  adjust_beyond_blockage TreePoint { x: 2.0, y: 11.0 }
+  weighted_distance 17.0
+blockages [Rect { min: Point { x: Dbu(13), y: Dbu(5) }, max: Point { x: Dbu(17), y: Dbu(10) } }] taken [(5.0, 1.0), (17.0, 5.0)] parent TreePoint { x: 1.0, y: 0.0 } point TreePoint { x: 14.0, y: 19.0 } sinks [TreePoint { x: 5.0, y: 11.0 }, TreePoint { x: 7.0, y: 4.0 }] target 22 West
+  find_blockage None
+  legal_location true
+  legalize_in_blockages TreePoint { x: 14.0, y: 19.0 }
+  legalize_one_buffer TreePoint { x: 14.0, y: 19.0 }
+  adjust_beyond_blockage TreePoint { x: 14.0, y: 19.0 }
+  weighted_distance 103.0
+blockages [Rect { min: Point { x: Dbu(13), y: Dbu(1) }, max: Point { x: Dbu(18), y: Dbu(2) } }, Rect { min: Point { x: Dbu(12), y: Dbu(4) }, max: Point { x: Dbu(15), y: Dbu(7) } }] taken [(4.0, 13.0), (4.0, 18.0), (11.0, 19.0)] parent TreePoint { x: 16.0, y: 19.0 } point TreePoint { x: 5.0, y: 0.0 } sinks [TreePoint { x: 4.0, y: 2.0 }] target 17 West
+  find_blockage None
+  legal_location true
+  legalize_in_blockages TreePoint { x: 5.0, y: 0.0 }
+  legalize_one_buffer TreePoint { x: 5.0, y: 0.0 }
+  adjust_beyond_blockage TreePoint { x: 7.5, y: 10.5 }
+  weighted_distance 33.0
+blockages [Rect { min: Point { x: Dbu(10), y: Dbu(2) }, max: Point { x: Dbu(12), y: Dbu(6) } }, Rect { min: Point { x: Dbu(10), y: Dbu(8) }, max: Point { x: Dbu(11), y: Dbu(10) } }, Rect { min: Point { x: Dbu(6), y: Dbu(6) }, max: Point { x: Dbu(10), y: Dbu(11) } }] taken [(3.0, 7.0), (15.0, 12.0), (16.0, 6.0)] parent TreePoint { x: 13.0, y: 2.0 } point TreePoint { x: 17.0, y: 11.0 } sinks [TreePoint { x: 0.0, y: 12.0 }, TreePoint { x: 9.0, y: 15.0 }] target 3 East
+  find_blockage None
+  legal_location true
+  legalize_in_blockages TreePoint { x: 17.0, y: 11.0 }
+  legalize_one_buffer TreePoint { x: 17.0, y: 11.0 }
+  adjust_beyond_blockage TreePoint { x: 14.5, y: 3.5 }
+  weighted_distance 56.0
+blockages [Rect { min: Point { x: Dbu(5), y: Dbu(9) }, max: Point { x: Dbu(7), y: Dbu(14) } }] taken [] parent TreePoint { x: 4.0, y: 3.0 } point TreePoint { x: 8.0, y: 18.0 } sinks [TreePoint { x: 13.0, y: 15.0 }, TreePoint { x: 12.0, y: 5.0 }] target 6 West
+  find_blockage None
+  legal_location true
+  legalize_in_blockages TreePoint { x: 8.0, y: 18.0 }
+  legalize_one_buffer TreePoint { x: 8.0, y: 18.0 }
+  adjust_beyond_blockage TreePoint { x: 3.0, y: 8.0 }
+  weighted_distance 63.0
+blockages [Rect { min: Point { x: Dbu(15), y: Dbu(13) }, max: Point { x: Dbu(19), y: Dbu(17) } }] taken [] parent TreePoint { x: 18.0, y: 19.0 } point TreePoint { x: 15.0, y: 0.0 } sinks [TreePoint { x: 1.0, y: 10.0 }, TreePoint { x: 15.0, y: 8.0 }] target 0 South
+  find_blockage None
+  legal_location true
+  legalize_in_blockages TreePoint { x: 15.0, y: 0.0 }
+  legalize_one_buffer TreePoint { x: 15.0, y: 0.0 }
+  adjust_beyond_blockage TreePoint { x: 18.0, y: 19.0 }
+  weighted_distance 76.0
+blockages [Rect { min: Point { x: Dbu(7), y: Dbu(9) }, max: Point { x: Dbu(12), y: Dbu(14) } }, Rect { min: Point { x: Dbu(15), y: Dbu(12) }, max: Point { x: Dbu(16), y: Dbu(14) } }] taken [(9.0, 14.0)] parent TreePoint { x: 5.0, y: 15.0 } point TreePoint { x: 7.0, y: 11.0 } sinks [TreePoint { x: 2.0, y: 17.0 }] target 0 South
+  find_blockage None
+  legal_location true
+  legalize_in_blockages TreePoint { x: 7.0, y: 11.0 }
+  legalize_one_buffer TreePoint { x: 7.0, y: 11.0 }
+  adjust_beyond_blockage TreePoint { x: 5.0, y: 15.0 }
+  weighted_distance 17.0
+blockages [Rect { min: Point { x: Dbu(13), y: Dbu(11) }, max: Point { x: Dbu(18), y: Dbu(15) } }] taken [(2.0, 4.0)] parent TreePoint { x: 6.0, y: 13.0 } point TreePoint { x: 15.0, y: 9.0 } sinks [TreePoint { x: 8.0, y: 14.0 }, TreePoint { x: 5.0, y: 6.0 }] target 14 South
+  find_blockage None
+  legal_location true
+  legalize_in_blockages TreePoint { x: 15.0, y: 9.0 }
+  legalize_one_buffer TreePoint { x: 15.0, y: 9.0 }
+  adjust_beyond_blockage TreePoint { x: 13.0, y: 6.0 }
+  weighted_distance 51.0
+blockages [Rect { min: Point { x: Dbu(3), y: Dbu(4) }, max: Point { x: Dbu(6), y: Dbu(7) } }] taken [(17.0, 5.0)] parent TreePoint { x: 19.0, y: 20.0 } point TreePoint { x: 16.0, y: 15.0 } sinks [TreePoint { x: 6.0, y: 16.0 }, TreePoint { x: 19.0, y: 20.0 }] target 2 West
+  find_blockage None
+  legal_location true
+  legalize_in_blockages TreePoint { x: 16.0, y: 15.0 }
+  legalize_one_buffer TreePoint { x: 16.0, y: 15.0 }
+  adjust_beyond_blockage TreePoint { x: 17.0, y: 20.0 }
+  weighted_distance 35.0
+blockages [Rect { min: Point { x: Dbu(14), y: Dbu(1) }, max: Point { x: Dbu(19), y: Dbu(5) } }] taken [(5.0, 1.0), (19.0, 18.0)] parent TreePoint { x: 13.0, y: 19.0 } point TreePoint { x: 0.0, y: 15.0 } sinks [TreePoint { x: 4.0, y: 7.0 }, TreePoint { x: 8.0, y: 19.0 }, TreePoint { x: 14.0, y: 4.0 }] target 4 East
+  find_blockage None
+  legal_location true
+  legalize_in_blockages TreePoint { x: 0.0, y: 15.0 }
+  legalize_one_buffer TreePoint { x: 0.0, y: 15.0 }
+  adjust_beyond_blockage TreePoint { x: 15.0, y: 17.0 }
+  weighted_distance 100.0
+blockages [Rect { min: Point { x: Dbu(6), y: Dbu(2) }, max: Point { x: Dbu(8), y: Dbu(3) } }] taken [(11.0, 5.0), (20.0, 6.0)] parent TreePoint { x: 16.0, y: 9.0 } point TreePoint { x: 5.0, y: 7.0 } sinks [TreePoint { x: 0.0, y: 9.0 }] target 15 North
+  find_blockage None
+  legal_location true
+  legalize_in_blockages TreePoint { x: 5.0, y: 7.0 }
+  legalize_one_buffer TreePoint { x: 5.0, y: 7.0 }
+  adjust_beyond_blockage TreePoint { x: 8.5, y: 16.5 }
+  weighted_distance 20.0
+blockages [Rect { min: Point { x: Dbu(15), y: Dbu(5) }, max: Point { x: Dbu(20), y: Dbu(8) } }, Rect { min: Point { x: Dbu(4), y: Dbu(7) }, max: Point { x: Dbu(6), y: Dbu(12) } }] taken [(19.0, 9.0)] parent TreePoint { x: 6.0, y: 14.0 } point TreePoint { x: 12.0, y: 12.0 } sinks [TreePoint { x: 17.0, y: 0.0 }] target 7 South
+  find_blockage None
+  legal_location true
+  legalize_in_blockages TreePoint { x: 12.0, y: 12.0 }
+  legalize_one_buffer TreePoint { x: 12.0, y: 12.0 }
+  adjust_beyond_blockage TreePoint { x: 9.5, y: 10.5 }
+  weighted_distance 25.0
+blockages [Rect { min: Point { x: Dbu(6), y: Dbu(15) }, max: Point { x: Dbu(10), y: Dbu(18) } }] taken [(18.0, 18.0)] parent TreePoint { x: 7.0, y: 6.0 } point TreePoint { x: 11.0, y: 5.0 } sinks [TreePoint { x: 7.0, y: 0.0 }] target 20 West
+  find_blockage None
+  legal_location true
+  legalize_in_blockages TreePoint { x: 11.0, y: 5.0 }
+  legalize_one_buffer TreePoint { x: 11.0, y: 5.0 }
+  adjust_beyond_blockage TreePoint { x: 11.0, y: 5.0 }
+  weighted_distance 14.0
+blockages [Rect { min: Point { x: Dbu(3), y: Dbu(13) }, max: Point { x: Dbu(7), y: Dbu(18) } }, Rect { min: Point { x: Dbu(15), y: Dbu(6) }, max: Point { x: Dbu(19), y: Dbu(10) } }, Rect { min: Point { x: Dbu(5), y: Dbu(11) }, max: Point { x: Dbu(10), y: Dbu(13) } }] taken [(17.0, 16.0)] parent TreePoint { x: 19.0, y: 13.0 } point TreePoint { x: 12.0, y: 11.0 } sinks [TreePoint { x: 4.0, y: 3.0 }, TreePoint { x: 12.0, y: 6.0 }, TreePoint { x: 7.0, y: 13.0 }] target 6 West
+  find_blockage None
+  legal_location true
+  legalize_in_blockages TreePoint { x: 12.0, y: 11.0 }
+  legalize_one_buffer TreePoint { x: 12.0, y: 11.0 }
+  adjust_beyond_blockage TreePoint { x: 13.0, y: 13.0 }
+  weighted_distance 55.0
+blockages [Rect { min: Point { x: Dbu(0), y: Dbu(11) }, max: Point { x: Dbu(5), y: Dbu(15) } }, Rect { min: Point { x: Dbu(15), y: Dbu(7) }, max: Point { x: Dbu(20), y: Dbu(12) } }] taken [(6.0, 3.0)] parent TreePoint { x: 8.0, y: 13.0 } point TreePoint { x: 12.0, y: 1.0 } sinks [TreePoint { x: 11.0, y: 5.0 }, TreePoint { x: 9.0, y: 17.0 }] target 8 South
+  find_blockage None
+  legal_location true
+  legalize_in_blockages TreePoint { x: 12.0, y: 1.0 }
+  legalize_one_buffer TreePoint { x: 12.0, y: 1.0 }
+  adjust_beyond_blockage TreePoint { x: 10.0, y: 7.0 }
+  weighted_distance 56.0
+blockages [Rect { min: Point { x: Dbu(12), y: Dbu(3) }, max: Point { x: Dbu(17), y: Dbu(7) } }, Rect { min: Point { x: Dbu(0), y: Dbu(13) }, max: Point { x: Dbu(2), y: Dbu(16) } }] taken [(2.0, 7.0), (5.0, 5.0), (14.0, 11.0)] parent TreePoint { x: 9.0, y: 10.0 } point TreePoint { x: 16.0, y: 6.0 } sinks [TreePoint { x: 19.0, y: 0.0 }] target 19 South
+  find_blockage Some(TreeBox { low: TreePoint { x: 12.0, y: 3.0 }, high: TreePoint { x: 17.0, y: 7.0 } })
+  legal_location false
+  legalize_in_blockages TreePoint { x: 17.0, y: 6.0 }
+  legalize_one_buffer TreePoint { x: 17.0, y: 6.0 }
+  adjust_beyond_blockage TreePoint { x: 18.5, y: 0.5 }
+  weighted_distance 20.0
+  adjust_along_blockage None
+  best_legal_location TreePoint { x: 18.5, y: 0.5 }
+blockages [Rect { min: Point { x: Dbu(0), y: Dbu(8) }, max: Point { x: Dbu(3), y: Dbu(10) } }] taken [(4.0, 12.0), (6.0, 2.0)] parent TreePoint { x: 20.0, y: 2.0 } point TreePoint { x: 20.0, y: 6.0 } sinks [TreePoint { x: 17.0, y: 11.0 }, TreePoint { x: 2.0, y: 1.0 }, TreePoint { x: 17.0, y: 20.0 }] target 12 North
+  find_blockage None
+  legal_location true
+  legalize_in_blockages TreePoint { x: 20.0, y: 6.0 }
+  legalize_one_buffer TreePoint { x: 20.0, y: 6.0 }
+  adjust_beyond_blockage TreePoint { x: 17.0, y: 11.0 }
+  weighted_distance 60.0
+blockages [Rect { min: Point { x: Dbu(7), y: Dbu(9) }, max: Point { x: Dbu(10), y: Dbu(10) } }, Rect { min: Point { x: Dbu(5), y: Dbu(11) }, max: Point { x: Dbu(9), y: Dbu(16) } }] taken [(0.0, 19.0), (12.0, 11.0), (15.0, 8.0)] parent TreePoint { x: 4.0, y: 7.0 } point TreePoint { x: 11.0, y: 8.0 } sinks [TreePoint { x: 8.0, y: 1.0 }, TreePoint { x: 0.0, y: 0.0 }, TreePoint { x: 15.0, y: 15.0 }] target 17 North
+  find_blockage None
+  legal_location true
+  legalize_in_blockages TreePoint { x: 11.0, y: 8.0 }
+  legalize_one_buffer TreePoint { x: 11.0, y: 8.0 }
+  adjust_beyond_blockage TreePoint { x: 12.5, y: 15.5 }
+  weighted_distance 64.0
+blockages [Rect { min: Point { x: Dbu(6), y: Dbu(11) }, max: Point { x: Dbu(11), y: Dbu(12) } }] taken [(16.0, 11.0), (17.0, 2.0)] parent TreePoint { x: 7.0, y: 9.0 } point TreePoint { x: 15.0, y: 7.0 } sinks [TreePoint { x: 10.0, y: 8.0 }, TreePoint { x: 8.0, y: 11.0 }, TreePoint { x: 11.0, y: 11.0 }] target 0 West
+  find_blockage None
+  legal_location true
+  legalize_in_blockages TreePoint { x: 15.0, y: 7.0 }
+  legalize_one_buffer TreePoint { x: 15.0, y: 7.0 }
+  adjust_beyond_blockage TreePoint { x: 7.0, y: 9.0 }
+  weighted_distance 55.0
+blockages [Rect { min: Point { x: Dbu(2), y: Dbu(11) }, max: Point { x: Dbu(3), y: Dbu(16) } }, Rect { min: Point { x: Dbu(11), y: Dbu(14) }, max: Point { x: Dbu(16), y: Dbu(17) } }] taken [(3.0, 14.0)] parent TreePoint { x: 5.0, y: 2.0 } point TreePoint { x: 15.0, y: 16.0 } sinks [TreePoint { x: 17.0, y: 12.0 }] target 2 West
+  find_blockage Some(TreeBox { low: TreePoint { x: 11.0, y: 14.0 }, high: TreePoint { x: 16.0, y: 17.0 } })
+  legal_location false
+  legalize_in_blockages TreePoint { x: 16.0, y: 16.0 }
+  legalize_one_buffer TreePoint { x: 16.0, y: 16.0 }
+  adjust_beyond_blockage TreePoint { x: 4.0, y: 3.0 }
+  weighted_distance 30.0
+  adjust_along_blockage None
+  best_legal_location TreePoint { x: 5.0, y: 4.0 }
+blockages [Rect { min: Point { x: Dbu(12), y: Dbu(11) }, max: Point { x: Dbu(16), y: Dbu(15) } }, Rect { min: Point { x: Dbu(13), y: Dbu(5) }, max: Point { x: Dbu(17), y: Dbu(10) } }] taken [(2.0, 8.0), (9.0, 17.0), (17.0, 15.0)] parent TreePoint { x: 14.0, y: 0.0 } point TreePoint { x: 1.0, y: 5.0 } sinks [TreePoint { x: 2.0, y: 18.0 }, TreePoint { x: 4.0, y: 7.0 }] target 21 South
+  find_blockage None
+  legal_location true
+  legalize_in_blockages TreePoint { x: 1.0, y: 5.0 }
+  legalize_one_buffer TreePoint { x: 1.0, y: 5.0 }
+  adjust_beyond_blockage TreePoint { x: 1.0, y: 5.0 }
+  weighted_distance 55.0
+blockages [Rect { min: Point { x: Dbu(12), y: Dbu(7) }, max: Point { x: Dbu(17), y: Dbu(11) } }] taken [(14.0, 18.0), (16.0, 20.0)] parent TreePoint { x: 9.0, y: 6.0 } point TreePoint { x: 18.0, y: 1.0 } sinks [TreePoint { x: 5.0, y: 8.0 }] target 10 North
+  find_blockage None
+  legal_location true
+  legalize_in_blockages TreePoint { x: 18.0, y: 1.0 }
+  legalize_one_buffer TreePoint { x: 18.0, y: 1.0 }
+  adjust_beyond_blockage TreePoint { x: 14.0, y: 11.0 }
+  weighted_distance 34.0
+blockages [Rect { min: Point { x: Dbu(2), y: Dbu(3) }, max: Point { x: Dbu(6), y: Dbu(6) } }, Rect { min: Point { x: Dbu(3), y: Dbu(3) }, max: Point { x: Dbu(8), y: Dbu(5) } }, Rect { min: Point { x: Dbu(0), y: Dbu(3) }, max: Point { x: Dbu(3), y: Dbu(5) } }] taken [(3.0, 3.0), (7.0, 5.0)] parent TreePoint { x: 14.0, y: 10.0 } point TreePoint { x: 1.0, y: 20.0 } sinks [TreePoint { x: 17.0, y: 4.0 }, TreePoint { x: 19.0, y: 16.0 }] target 9 North
+  find_blockage None
+  legal_location true
+  legalize_in_blockages TreePoint { x: 1.0, y: 20.0 }
+  legalize_one_buffer TreePoint { x: 1.0, y: 20.0 }
+  adjust_beyond_blockage TreePoint { x: 14.0, y: 19.0 }
+  weighted_distance 100.0
+blockages [Rect { min: Point { x: Dbu(10), y: Dbu(11) }, max: Point { x: Dbu(11), y: Dbu(14) } }, Rect { min: Point { x: Dbu(1), y: Dbu(7) }, max: Point { x: Dbu(6), y: Dbu(8) } }, Rect { min: Point { x: Dbu(7), y: Dbu(10) }, max: Point { x: Dbu(9), y: Dbu(11) } }] taken [(2.0, 1.0), (7.0, 4.0)] parent TreePoint { x: 18.0, y: 4.0 } point TreePoint { x: 3.0, y: 2.0 } sinks [TreePoint { x: 14.0, y: 14.0 }, TreePoint { x: 17.0, y: 3.0 }, TreePoint { x: 15.0, y: 4.0 }] target 19 North
+  find_blockage None
+  legal_location true
+  legalize_in_blockages TreePoint { x: 3.0, y: 2.0 }
+  legalize_one_buffer TreePoint { x: 3.0, y: 2.0 }
+  adjust_beyond_blockage TreePoint { x: 8.5, y: 13.5 }
+  weighted_distance 103.0
+blockages [Rect { min: Point { x: Dbu(10), y: Dbu(6) }, max: Point { x: Dbu(14), y: Dbu(7) } }, Rect { min: Point { x: Dbu(9), y: Dbu(5) }, max: Point { x: Dbu(11), y: Dbu(6) } }, Rect { min: Point { x: Dbu(12), y: Dbu(13) }, max: Point { x: Dbu(14), y: Dbu(18) } }] taken [(0.0, 7.0), (1.0, 0.0), (17.0, 18.0)] parent TreePoint { x: 16.0, y: 7.0 } point TreePoint { x: 2.0, y: 0.0 } sinks [TreePoint { x: 20.0, y: 6.0 }, TreePoint { x: 16.0, y: 5.0 }] target 24 South
+  find_blockage None
+  legal_location true
+  legalize_in_blockages TreePoint { x: 2.0, y: 0.0 }
+  legalize_one_buffer TreePoint { x: 2.0, y: 0.0 }
+  adjust_beyond_blockage TreePoint { x: 2.0, y: 0.0 }
+  weighted_distance 85.0
+blockages [Rect { min: Point { x: Dbu(10), y: Dbu(12) }, max: Point { x: Dbu(15), y: Dbu(13) } }, Rect { min: Point { x: Dbu(15), y: Dbu(11) }, max: Point { x: Dbu(18), y: Dbu(15) } }, Rect { min: Point { x: Dbu(0), y: Dbu(3) }, max: Point { x: Dbu(4), y: Dbu(7) } }] taken [(11.0, 12.0), (13.0, 14.0), (15.0, 19.0)] parent TreePoint { x: 19.0, y: 1.0 } point TreePoint { x: 10.0, y: 5.0 } sinks [TreePoint { x: 12.0, y: 1.0 }, TreePoint { x: 5.0, y: 8.0 }, TreePoint { x: 3.0, y: 12.0 }] target 22 East
+  find_blockage None
+  legal_location true
+  legalize_in_blockages TreePoint { x: 10.0, y: 5.0 }
+  legalize_one_buffer TreePoint { x: 10.0, y: 5.0 }
+  adjust_beyond_blockage TreePoint { x: 10.0, y: 5.0 }
+  weighted_distance 67.0
+blockages [Rect { min: Point { x: Dbu(12), y: Dbu(3) }, max: Point { x: Dbu(13), y: Dbu(6) } }, Rect { min: Point { x: Dbu(11), y: Dbu(12) }, max: Point { x: Dbu(14), y: Dbu(16) } }] taken [(11.0, 9.0)] parent TreePoint { x: 13.0, y: 10.0 } point TreePoint { x: 8.0, y: 7.0 } sinks [TreePoint { x: 16.0, y: 6.0 }, TreePoint { x: 6.0, y: 10.0 }] target 9 South
+  find_blockage None
+  legal_location true
+  legalize_in_blockages TreePoint { x: 8.0, y: 7.0 }
+  legalize_one_buffer TreePoint { x: 8.0, y: 7.0 }
+  adjust_beyond_blockage TreePoint { x: 8.5, y: 5.5 }
+  weighted_distance 30.0
+blockages [Rect { min: Point { x: Dbu(14), y: Dbu(2) }, max: Point { x: Dbu(17), y: Dbu(3) } }, Rect { min: Point { x: Dbu(6), y: Dbu(4) }, max: Point { x: Dbu(11), y: Dbu(5) } }, Rect { min: Point { x: Dbu(12), y: Dbu(11) }, max: Point { x: Dbu(14), y: Dbu(16) } }] taken [(5.0, 13.0), (11.0, 7.0)] parent TreePoint { x: 9.0, y: 17.0 } point TreePoint { x: 16.0, y: 9.0 } sinks [TreePoint { x: 5.0, y: 4.0 }] target 11 North
+  find_blockage None
+  legal_location true
+  legalize_in_blockages TreePoint { x: 16.0, y: 9.0 }
+  legalize_one_buffer TreePoint { x: 16.0, y: 9.0 }
+  adjust_beyond_blockage TreePoint { x: 16.0, y: 9.0 }
+  weighted_distance 31.0
+blockages [Rect { min: Point { x: Dbu(1), y: Dbu(15) }, max: Point { x: Dbu(2), y: Dbu(17) } }, Rect { min: Point { x: Dbu(15), y: Dbu(3) }, max: Point { x: Dbu(20), y: Dbu(4) } }] taken [(14.0, 16.0), (18.0, 4.0)] parent TreePoint { x: 12.0, y: 18.0 } point TreePoint { x: 2.0, y: 3.0 } sinks [TreePoint { x: 2.0, y: 8.0 }] target 9 South
+  find_blockage None
+  legal_location true
+  legalize_in_blockages TreePoint { x: 2.0, y: 3.0 }
+  legalize_one_buffer TreePoint { x: 2.0, y: 3.0 }
+  adjust_beyond_blockage TreePoint { x: 12.0, y: 9.0 }
+  weighted_distance 30.0
+blockages [Rect { min: Point { x: Dbu(13), y: Dbu(13) }, max: Point { x: Dbu(16), y: Dbu(17) } }] taken [(5.0, 17.0), (16.0, 2.0)] parent TreePoint { x: 0.0, y: 18.0 } point TreePoint { x: 7.0, y: 12.0 } sinks [TreePoint { x: 18.0, y: 13.0 }] target 6 North
+  find_blockage None
+  legal_location true
+  legalize_in_blockages TreePoint { x: 7.0, y: 12.0 }
+  legalize_one_buffer TreePoint { x: 7.0, y: 12.0 }
+  adjust_beyond_blockage TreePoint { x: 7.0, y: 12.0 }
+  weighted_distance 25.0
+blockages [Rect { min: Point { x: Dbu(4), y: Dbu(14) }, max: Point { x: Dbu(5), y: Dbu(19) } }] taken [] parent TreePoint { x: 4.0, y: 5.0 } point TreePoint { x: 10.0, y: 4.0 } sinks [TreePoint { x: 13.0, y: 11.0 }, TreePoint { x: 20.0, y: 11.0 }] target 15 North
+  find_blockage None
+  legal_location true
+  legalize_in_blockages TreePoint { x: 10.0, y: 4.0 }
+  legalize_one_buffer TreePoint { x: 10.0, y: 4.0 }
+  adjust_beyond_blockage TreePoint { x: 11.5, y: 12.5 }
+  weighted_distance 41.0
+blockages [Rect { min: Point { x: Dbu(9), y: Dbu(2) }, max: Point { x: Dbu(10), y: Dbu(7) } }] taken [] parent TreePoint { x: 10.0, y: 15.0 } point TreePoint { x: 15.0, y: 5.0 } sinks [TreePoint { x: 1.0, y: 2.0 }] target 18 North
+  find_blockage None
+  legal_location true
+  legalize_in_blockages TreePoint { x: 15.0, y: 5.0 }
+  legalize_one_buffer TreePoint { x: 15.0, y: 5.0 }
+  adjust_beyond_blockage TreePoint { x: 15.0, y: 5.0 }
+  weighted_distance 32.0
+blockages [Rect { min: Point { x: Dbu(13), y: Dbu(9) }, max: Point { x: Dbu(16), y: Dbu(10) } }, Rect { min: Point { x: Dbu(2), y: Dbu(15) }, max: Point { x: Dbu(3), y: Dbu(16) } }, Rect { min: Point { x: Dbu(11), y: Dbu(15) }, max: Point { x: Dbu(14), y: Dbu(17) } }] taken [] parent TreePoint { x: 8.0, y: 15.0 } point TreePoint { x: 0.0, y: 17.0 } sinks [TreePoint { x: 9.0, y: 18.0 }, TreePoint { x: 17.0, y: 7.0 }] target 9 West
+  find_blockage None
+  legal_location true
+  legalize_in_blockages TreePoint { x: 0.0, y: 17.0 }
+  legalize_one_buffer TreePoint { x: 0.0, y: 17.0 }
+  adjust_beyond_blockage TreePoint { x: 1.25, y: 17.25 }
+  weighted_distance 57.0
+blockages [Rect { min: Point { x: Dbu(3), y: Dbu(7) }, max: Point { x: Dbu(8), y: Dbu(9) } }, Rect { min: Point { x: Dbu(0), y: Dbu(9) }, max: Point { x: Dbu(1), y: Dbu(14) } }, Rect { min: Point { x: Dbu(8), y: Dbu(14) }, max: Point { x: Dbu(11), y: Dbu(15) } }] taken [] parent TreePoint { x: 10.0, y: 18.0 } point TreePoint { x: 2.0, y: 2.0 } sinks [TreePoint { x: 20.0, y: 5.0 }, TreePoint { x: 18.0, y: 20.0 }, TreePoint { x: 14.0, y: 10.0 }] target 10 North
+  find_blockage None
+  legal_location true
+  legalize_in_blockages TreePoint { x: 2.0, y: 2.0 }
+  legalize_one_buffer TreePoint { x: 2.0, y: 2.0 }
+  adjust_beyond_blockage TreePoint { x: 2.0, y: 2.0 }
+  weighted_distance 147.0
+blockages [Rect { min: Point { x: Dbu(15), y: Dbu(15) }, max: Point { x: Dbu(18), y: Dbu(19) } }, Rect { min: Point { x: Dbu(9), y: Dbu(15) }, max: Point { x: Dbu(14), y: Dbu(17) } }, Rect { min: Point { x: Dbu(9), y: Dbu(10) }, max: Point { x: Dbu(12), y: Dbu(13) } }] taken [(12.0, 20.0), (14.0, 17.0), (17.0, 3.0)] parent TreePoint { x: 4.0, y: 7.0 } point TreePoint { x: 17.0, y: 0.0 } sinks [TreePoint { x: 18.0, y: 20.0 }, TreePoint { x: 13.0, y: 5.0 }] target 20 South
+  find_blockage None
+  legal_location true
+  legalize_in_blockages TreePoint { x: 17.0, y: 0.0 }
+  legalize_one_buffer TreePoint { x: 17.0, y: 0.0 }
+  adjust_beyond_blockage TreePoint { x: 17.0, y: 0.0 }
+  weighted_distance 70.0
+blockages [Rect { min: Point { x: Dbu(2), y: Dbu(14) }, max: Point { x: Dbu(3), y: Dbu(16) } }, Rect { min: Point { x: Dbu(0), y: Dbu(4) }, max: Point { x: Dbu(3), y: Dbu(7) } }] taken [(0.0, 12.0), (2.0, 19.0), (17.0, 11.0)] parent TreePoint { x: 18.0, y: 3.0 } point TreePoint { x: 17.0, y: 0.0 } sinks [TreePoint { x: 10.0, y: 0.0 }] target 8 East
+  find_blockage None
+  legal_location true
+  legalize_in_blockages TreePoint { x: 17.0, y: 0.0 }
+  legalize_one_buffer TreePoint { x: 17.0, y: 0.0 }
+  adjust_beyond_blockage TreePoint { x: 19.0, y: 10.0 }
+  weighted_distance 11.0
+blockages [Rect { min: Point { x: Dbu(0), y: Dbu(14) }, max: Point { x: Dbu(1), y: Dbu(15) } }, Rect { min: Point { x: Dbu(8), y: Dbu(12) }, max: Point { x: Dbu(13), y: Dbu(14) } }] taken [(5.0, 20.0)] parent TreePoint { x: 8.0, y: 8.0 } point TreePoint { x: 4.0, y: 8.0 } sinks [TreePoint { x: 9.0, y: 3.0 }, TreePoint { x: 14.0, y: 10.0 }, TreePoint { x: 0.0, y: 15.0 }] target 5 North
+  find_blockage None
+  legal_location true
+  legalize_in_blockages TreePoint { x: 4.0, y: 8.0 }
+  legalize_one_buffer TreePoint { x: 4.0, y: 8.0 }
+  adjust_beyond_blockage TreePoint { x: 5.5, y: 10.5 }
+  weighted_distance 45.0
+blockages [Rect { min: Point { x: Dbu(15), y: Dbu(4) }, max: Point { x: Dbu(19), y: Dbu(5) } }, Rect { min: Point { x: Dbu(7), y: Dbu(9) }, max: Point { x: Dbu(8), y: Dbu(14) } }] taken [(3.0, 7.0), (7.0, 12.0), (11.0, 4.0)] parent TreePoint { x: 18.0, y: 6.0 } point TreePoint { x: 3.0, y: 18.0 } sinks [TreePoint { x: 11.0, y: 3.0 }, TreePoint { x: 5.0, y: 13.0 }] target 16 South
+  find_blockage None
+  legal_location true
+  legalize_in_blockages TreePoint { x: 3.0, y: 18.0 }
+  legalize_one_buffer TreePoint { x: 3.0, y: 18.0 }
+  adjust_beyond_blockage TreePoint { x: 3.0, y: 18.0 }
+  weighted_distance 84.0
+blockages [Rect { min: Point { x: Dbu(0), y: Dbu(10) }, max: Point { x: Dbu(2), y: Dbu(12) } }] taken [(6.0, 2.0), (12.0, 12.0), (19.0, 15.0)] parent TreePoint { x: 16.0, y: 2.0 } point TreePoint { x: 0.0, y: 14.0 } sinks [TreePoint { x: 20.0, y: 3.0 }, TreePoint { x: 20.0, y: 9.0 }, TreePoint { x: 9.0, y: 14.0 }] target 17 West
+  find_blockage None
+  legal_location true
+  legalize_in_blockages TreePoint { x: 0.0, y: 14.0 }
+  legalize_one_buffer TreePoint { x: 0.0, y: 14.0 }
+  adjust_beyond_blockage TreePoint { x: 7.5, y: 10.5 }
+  weighted_distance 149.0
+blockages [Rect { min: Point { x: Dbu(4), y: Dbu(7) }, max: Point { x: Dbu(9), y: Dbu(12) } }] taken [(8.0, 7.0)] parent TreePoint { x: 7.0, y: 11.0 } point TreePoint { x: 11.0, y: 5.0 } sinks [TreePoint { x: 13.0, y: 19.0 }, TreePoint { x: 8.0, y: 7.0 }] target 4 West
+  find_blockage None
+  legal_location true
+  legalize_in_blockages TreePoint { x: 11.0, y: 5.0 }
+  legalize_one_buffer TreePoint { x: 11.0, y: 5.0 }
+  adjust_beyond_blockage TreePoint { x: 7.0, y: 15.0 }
+  weighted_distance 41.0
+blockages [Rect { min: Point { x: Dbu(13), y: Dbu(3) }, max: Point { x: Dbu(14), y: Dbu(4) } }] taken [(20.0, 2.0)] parent TreePoint { x: 15.0, y: 10.0 } point TreePoint { x: 1.0, y: 17.0 } sinks [TreePoint { x: 0.0, y: 15.0 }] target 10 West
+  find_blockage None
+  legal_location true
+  legalize_in_blockages TreePoint { x: 1.0, y: 17.0 }
+  legalize_one_buffer TreePoint { x: 1.0, y: 17.0 }
+  adjust_beyond_blockage TreePoint { x: 5.0, y: 10.0 }
+  weighted_distance 24.0
+blockages [Rect { min: Point { x: Dbu(5), y: Dbu(2) }, max: Point { x: Dbu(8), y: Dbu(3) } }, Rect { min: Point { x: Dbu(12), y: Dbu(3) }, max: Point { x: Dbu(15), y: Dbu(7) } }, Rect { min: Point { x: Dbu(12), y: Dbu(3) }, max: Point { x: Dbu(15), y: Dbu(4) } }] taken [(6.0, 18.0), (13.0, 0.0)] parent TreePoint { x: 19.0, y: 8.0 } point TreePoint { x: 5.0, y: 12.0 } sinks [TreePoint { x: 2.0, y: 16.0 }, TreePoint { x: 10.0, y: 6.0 }] target 19 South
+  find_blockage None
+  legal_location true
+  legalize_in_blockages TreePoint { x: 5.0, y: 12.0 }
+  legalize_one_buffer TreePoint { x: 5.0, y: 12.0 }
+  adjust_beyond_blockage TreePoint { x: 5.0, y: 12.0 }
+  weighted_distance 54.0
+blockages [Rect { min: Point { x: Dbu(14), y: Dbu(15) }, max: Point { x: Dbu(16), y: Dbu(16) } }, Rect { min: Point { x: Dbu(14), y: Dbu(12) }, max: Point { x: Dbu(19), y: Dbu(13) } }, Rect { min: Point { x: Dbu(14), y: Dbu(12) }, max: Point { x: Dbu(18), y: Dbu(14) } }] taken [(13.0, 11.0)] parent TreePoint { x: 8.0, y: 4.0 } point TreePoint { x: 9.0, y: 5.0 } sinks [TreePoint { x: 20.0, y: 1.0 }] target 21 South
+  find_blockage None
+  legal_location true
+  legalize_in_blockages TreePoint { x: 9.0, y: 5.0 }
+  legalize_one_buffer TreePoint { x: 9.0, y: 5.0 }
+  adjust_beyond_blockage TreePoint { x: 9.0, y: 5.0 }
+  weighted_distance 17.0
+blockages [Rect { min: Point { x: Dbu(10), y: Dbu(2) }, max: Point { x: Dbu(11), y: Dbu(6) } }] taken [(0.0, 16.0), (4.0, 12.0), (11.0, 1.0)] parent TreePoint { x: 4.0, y: 15.0 } point TreePoint { x: 7.0, y: 6.0 } sinks [TreePoint { x: 5.0, y: 20.0 }] target 0 North
+  find_blockage None
+  legal_location true
+  legalize_in_blockages TreePoint { x: 7.0, y: 6.0 }
+  legalize_one_buffer TreePoint { x: 7.0, y: 6.0 }
+  adjust_beyond_blockage TreePoint { x: 4.0, y: 15.0 }
+  weighted_distance 28.0
+blockages [Rect { min: Point { x: Dbu(11), y: Dbu(6) }, max: Point { x: Dbu(13), y: Dbu(7) } }] taken [] parent TreePoint { x: 11.0, y: 18.0 } point TreePoint { x: 1.0, y: 6.0 } sinks [TreePoint { x: 5.0, y: 1.0 }, TreePoint { x: 16.0, y: 8.0 }] target 23 North
+  find_blockage None
+  legal_location true
+  legalize_in_blockages TreePoint { x: 1.0, y: 6.0 }
+  legalize_one_buffer TreePoint { x: 1.0, y: 6.0 }
+  adjust_beyond_blockage TreePoint { x: 1.0, y: 6.0 }
+  weighted_distance 70.0
+blockages [Rect { min: Point { x: Dbu(4), y: Dbu(12) }, max: Point { x: Dbu(5), y: Dbu(17) } }, Rect { min: Point { x: Dbu(2), y: Dbu(12) }, max: Point { x: Dbu(3), y: Dbu(14) } }, Rect { min: Point { x: Dbu(1), y: Dbu(0) }, max: Point { x: Dbu(6), y: Dbu(5) } }] taken [(8.0, 11.0)] parent TreePoint { x: 14.0, y: 13.0 } point TreePoint { x: 7.0, y: 14.0 } sinks [TreePoint { x: 5.0, y: 7.0 }, TreePoint { x: 15.0, y: 18.0 }, TreePoint { x: 13.0, y: 15.0 }] target 7 South
+  find_blockage None
+  legal_location true
+  legalize_in_blockages TreePoint { x: 7.0, y: 14.0 }
+  legalize_one_buffer TreePoint { x: 7.0, y: 14.0 }
+  adjust_beyond_blockage TreePoint { x: 10.5, y: 9.5 }
+  weighted_distance 52.0
+blockages [Rect { min: Point { x: Dbu(4), y: Dbu(2) }, max: Point { x: Dbu(8), y: Dbu(6) } }, Rect { min: Point { x: Dbu(4), y: Dbu(14) }, max: Point { x: Dbu(5), y: Dbu(17) } }, Rect { min: Point { x: Dbu(11), y: Dbu(10) }, max: Point { x: Dbu(14), y: Dbu(14) } }] taken [] parent TreePoint { x: 20.0, y: 7.0 } point TreePoint { x: 14.0, y: 14.0 } sinks [TreePoint { x: 3.0, y: 16.0 }] target 12 South
+  find_blockage None
+  legal_location true
+  legalize_in_blockages TreePoint { x: 14.0, y: 14.0 }
+  legalize_one_buffer TreePoint { x: 14.0, y: 14.0 }
+  adjust_beyond_blockage TreePoint { x: 14.0, y: 1.0 }
+  weighted_distance 26.0
+blockages [Rect { min: Point { x: Dbu(7), y: Dbu(7) }, max: Point { x: Dbu(12), y: Dbu(10) } }] taken [(2.0, 7.0)] parent TreePoint { x: 3.0, y: 20.0 } point TreePoint { x: 0.0, y: 3.0 } sinks [TreePoint { x: 16.0, y: 18.0 }, TreePoint { x: 2.0, y: 1.0 }] target 18 South
+  find_blockage None
+  legal_location true
+  legalize_in_blockages TreePoint { x: 0.0, y: 3.0 }
+  legalize_one_buffer TreePoint { x: 0.0, y: 3.0 }
+  adjust_beyond_blockage TreePoint { x: 3.0, y: 2.0 }
+  weighted_distance 75.0
+blockages [Rect { min: Point { x: Dbu(8), y: Dbu(15) }, max: Point { x: Dbu(9), y: Dbu(17) } }, Rect { min: Point { x: Dbu(1), y: Dbu(4) }, max: Point { x: Dbu(3), y: Dbu(5) } }, Rect { min: Point { x: Dbu(0), y: Dbu(0) }, max: Point { x: Dbu(3), y: Dbu(4) } }] taken [(6.0, 14.0), (12.0, 7.0), (16.0, 18.0)] parent TreePoint { x: 20.0, y: 16.0 } point TreePoint { x: 16.0, y: 6.0 } sinks [TreePoint { x: 15.0, y: 15.0 }] target 16 North
+  find_blockage None
+  legal_location true
+  legalize_in_blockages TreePoint { x: 16.0, y: 6.0 }
+  legalize_one_buffer TreePoint { x: 16.0, y: 6.0 }
+  adjust_beyond_blockage TreePoint { x: 6.0, y: 18.0 }
+  weighted_distance 24.0
+blockages [Rect { min: Point { x: Dbu(12), y: Dbu(2) }, max: Point { x: Dbu(13), y: Dbu(6) } }, Rect { min: Point { x: Dbu(5), y: Dbu(1) }, max: Point { x: Dbu(8), y: Dbu(4) } }] taken [(1.0, 5.0), (18.0, 15.0)] parent TreePoint { x: 13.0, y: 12.0 } point TreePoint { x: 8.0, y: 8.0 } sinks [TreePoint { x: 9.0, y: 2.0 }, TreePoint { x: 10.0, y: 19.0 }, TreePoint { x: 0.0, y: 20.0 }] target 13 East
+  find_blockage None
+  legal_location true
+  legalize_in_blockages TreePoint { x: 8.0, y: 8.0 }
+  legalize_one_buffer TreePoint { x: 8.0, y: 8.0 }
+  adjust_beyond_blockage TreePoint { x: 19.5, y: 5.5 }
+  weighted_distance 67.0
+blockages [Rect { min: Point { x: Dbu(2), y: Dbu(4) }, max: Point { x: Dbu(4), y: Dbu(9) } }, Rect { min: Point { x: Dbu(13), y: Dbu(10) }, max: Point { x: Dbu(14), y: Dbu(13) } }, Rect { min: Point { x: Dbu(12), y: Dbu(2) }, max: Point { x: Dbu(13), y: Dbu(5) } }] taken [(3.0, 1.0), (7.0, 15.0)] parent TreePoint { x: 9.0, y: 16.0 } point TreePoint { x: 11.0, y: 4.0 } sinks [TreePoint { x: 12.0, y: 18.0 }, TreePoint { x: 7.0, y: 10.0 }] target 18 East
+  find_blockage None
+  legal_location true
+  legalize_in_blockages TreePoint { x: 11.0, y: 4.0 }
+  legalize_one_buffer TreePoint { x: 11.0, y: 4.0 }
+  adjust_beyond_blockage TreePoint { x: 18.0, y: 7.0 }
+  weighted_distance 53.0
+blockages [Rect { min: Point { x: Dbu(0), y: Dbu(12) }, max: Point { x: Dbu(4), y: Dbu(17) } }] taken [] parent TreePoint { x: 1.0, y: 20.0 } point TreePoint { x: 12.0, y: 3.0 } sinks [TreePoint { x: 1.0, y: 11.0 }] target 4 West
+  find_blockage None
+  legal_location true
+  legalize_in_blockages TreePoint { x: 12.0, y: 3.0 }
+  legalize_one_buffer TreePoint { x: 12.0, y: 3.0 }
+  adjust_beyond_blockage TreePoint { x: 12.0, y: 3.0 }
+  weighted_distance 47.0
+blockages [Rect { min: Point { x: Dbu(5), y: Dbu(3) }, max: Point { x: Dbu(9), y: Dbu(6) } }, Rect { min: Point { x: Dbu(0), y: Dbu(4) }, max: Point { x: Dbu(3), y: Dbu(7) } }, Rect { min: Point { x: Dbu(5), y: Dbu(3) }, max: Point { x: Dbu(6), y: Dbu(7) } }] taken [(6.0, 5.0), (11.0, 8.0)] parent TreePoint { x: 1.0, y: 1.0 } point TreePoint { x: 6.0, y: 14.0 } sinks [TreePoint { x: 11.0, y: 2.0 }] target 20 West
+  find_blockage None
+  legal_location true
+  legalize_in_blockages TreePoint { x: 6.0, y: 14.0 }
+  legalize_one_buffer TreePoint { x: 6.0, y: 14.0 }
+  adjust_beyond_blockage TreePoint { x: 6.0, y: 14.0 }
+  weighted_distance 35.0
+blockages [Rect { min: Point { x: Dbu(1), y: Dbu(4) }, max: Point { x: Dbu(6), y: Dbu(7) } }, Rect { min: Point { x: Dbu(11), y: Dbu(3) }, max: Point { x: Dbu(16), y: Dbu(8) } }] taken [] parent TreePoint { x: 0.0, y: 0.0 } point TreePoint { x: 18.0, y: 13.0 } sinks [TreePoint { x: 6.0, y: 15.0 }, TreePoint { x: 7.0, y: 11.0 }, TreePoint { x: 18.0, y: 16.0 }] target 14 West
+  find_blockage None
+  legal_location true
+  legalize_in_blockages TreePoint { x: 18.0, y: 13.0 }
+  legalize_one_buffer TreePoint { x: 18.0, y: 13.0 }
+  adjust_beyond_blockage TreePoint { x: 18.0, y: 13.0 }
+  weighted_distance 123.0
+blockages [Rect { min: Point { x: Dbu(7), y: Dbu(3) }, max: Point { x: Dbu(9), y: Dbu(4) } }, Rect { min: Point { x: Dbu(10), y: Dbu(6) }, max: Point { x: Dbu(14), y: Dbu(11) } }, Rect { min: Point { x: Dbu(3), y: Dbu(9) }, max: Point { x: Dbu(7), y: Dbu(11) } }] taken [(4.0, 7.0), (6.0, 10.0)] parent TreePoint { x: 2.0, y: 5.0 } point TreePoint { x: 1.0, y: 9.0 } sinks [TreePoint { x: 13.0, y: 10.0 }] target 0 North
+  find_blockage None
+  legal_location true
+  legalize_in_blockages TreePoint { x: 1.0, y: 9.0 }
+  legalize_one_buffer TreePoint { x: 1.0, y: 9.0 }
+  adjust_beyond_blockage TreePoint { x: 2.0, y: 5.0 }
+  weighted_distance 18.0
+blockages [Rect { min: Point { x: Dbu(10), y: Dbu(10) }, max: Point { x: Dbu(13), y: Dbu(11) } }, Rect { min: Point { x: Dbu(3), y: Dbu(8) }, max: Point { x: Dbu(8), y: Dbu(10) } }] taken [(5.0, 0.0), (9.0, 18.0), (11.0, 6.0)] parent TreePoint { x: 6.0, y: 8.0 } point TreePoint { x: 20.0, y: 9.0 } sinks [TreePoint { x: 6.0, y: 9.0 }] target 14 East
+  find_blockage None
+  legal_location true
+  legalize_in_blockages TreePoint { x: 20.0, y: 9.0 }
+  legalize_one_buffer TreePoint { x: 20.0, y: 9.0 }
+  adjust_beyond_blockage TreePoint { x: 20.0, y: 8.0 }
+  weighted_distance 29.0
+blockages [Rect { min: Point { x: Dbu(4), y: Dbu(7) }, max: Point { x: Dbu(5), y: Dbu(10) } }] taken [] parent TreePoint { x: 7.0, y: 7.0 } point TreePoint { x: 3.0, y: 1.0 } sinks [TreePoint { x: 7.0, y: 14.0 }, TreePoint { x: 15.0, y: 8.0 }] target 15 West
+  find_blockage None
+  legal_location true
+  legalize_in_blockages TreePoint { x: 3.0, y: 1.0 }
+  legalize_one_buffer TreePoint { x: 3.0, y: 1.0 }
+  adjust_beyond_blockage TreePoint { x: -0.5, y: -0.5 }
+  weighted_distance 56.0
+blockages [Rect { min: Point { x: Dbu(1), y: Dbu(4) }, max: Point { x: Dbu(4), y: Dbu(8) } }, Rect { min: Point { x: Dbu(2), y: Dbu(8) }, max: Point { x: Dbu(5), y: Dbu(13) } }, Rect { min: Point { x: Dbu(1), y: Dbu(5) }, max: Point { x: Dbu(5), y: Dbu(10) } }] taken [(6.0, 11.0), (6.0, 20.0)] parent TreePoint { x: 19.0, y: 10.0 } point TreePoint { x: 1.0, y: 17.0 } sinks [TreePoint { x: 16.0, y: 3.0 }, TreePoint { x: 10.0, y: 1.0 }, TreePoint { x: 14.0, y: 12.0 }] target 21 East
+  find_blockage None
+  legal_location true
+  legalize_in_blockages TreePoint { x: 1.0, y: 17.0 }
+  legalize_one_buffer TreePoint { x: 1.0, y: 17.0 }
+  adjust_beyond_blockage TreePoint { x: 1.0, y: 17.0 }
+  weighted_distance 147.0
+blockages [Rect { min: Point { x: Dbu(1), y: Dbu(13) }, max: Point { x: Dbu(5), y: Dbu(15) } }, Rect { min: Point { x: Dbu(15), y: Dbu(5) }, max: Point { x: Dbu(18), y: Dbu(7) } }] taken [(7.0, 7.0)] parent TreePoint { x: 16.0, y: 9.0 } point TreePoint { x: 11.0, y: 1.0 } sinks [TreePoint { x: 2.0, y: 4.0 }, TreePoint { x: 13.0, y: 19.0 }, TreePoint { x: 10.0, y: 16.0 }] target 5 South
+  find_blockage None
+  legal_location true
+  legalize_in_blockages TreePoint { x: 11.0, y: 1.0 }
+  legalize_one_buffer TreePoint { x: 11.0, y: 1.0 }
+  adjust_beyond_blockage TreePoint { x: 13.5, y: 6.5 }
+  weighted_distance 87.0
+blockages [Rect { min: Point { x: Dbu(8), y: Dbu(12) }, max: Point { x: Dbu(13), y: Dbu(13) } }, Rect { min: Point { x: Dbu(4), y: Dbu(2) }, max: Point { x: Dbu(8), y: Dbu(5) } }] taken [] parent TreePoint { x: 4.0, y: 1.0 } point TreePoint { x: 14.0, y: 13.0 } sinks [TreePoint { x: 15.0, y: 7.0 }, TreePoint { x: 4.0, y: 14.0 }] target 9 East
+  find_blockage None
+  legal_location true
+  legalize_in_blockages TreePoint { x: 14.0, y: 13.0 }
+  legalize_one_buffer TreePoint { x: 14.0, y: 13.0 }
+  adjust_beyond_blockage TreePoint { x: 8.5, y: 5.5 }
+  weighted_distance 62.0
+blockages [Rect { min: Point { x: Dbu(10), y: Dbu(1) }, max: Point { x: Dbu(13), y: Dbu(4) } }, Rect { min: Point { x: Dbu(6), y: Dbu(0) }, max: Point { x: Dbu(10), y: Dbu(2) } }, Rect { min: Point { x: Dbu(1), y: Dbu(14) }, max: Point { x: Dbu(2), y: Dbu(16) } }] taken [(1.0, 20.0), (7.0, 10.0), (18.0, 1.0)] parent TreePoint { x: 3.0, y: 17.0 } point TreePoint { x: 9.0, y: 1.0 } sinks [TreePoint { x: 16.0, y: 1.0 }, TreePoint { x: 12.0, y: 16.0 }] target 14 North
+  find_blockage Some(TreeBox { low: TreePoint { x: 6.0, y: 0.0 }, high: TreePoint { x: 10.0, y: 2.0 } })
+  legal_location false
+  legalize_in_blockages TreePoint { x: 10.0, y: 1.0 }
+  legalize_one_buffer TreePoint { x: 10.0, y: 1.0 }
+  adjust_beyond_blockage TreePoint { x: 9.0, y: 1.0 }
+  weighted_distance 69.0
+  adjust_along_blockage Some(TreePoint { x: 9.0, y: 9.0 })
+  best_legal_location TreePoint { x: 6.0, y: 6.0 }
+blockages [Rect { min: Point { x: Dbu(0), y: Dbu(14) }, max: Point { x: Dbu(4), y: Dbu(18) } }] taken [] parent TreePoint { x: 4.0, y: 6.0 } point TreePoint { x: 9.0, y: 1.0 } sinks [TreePoint { x: 4.0, y: 12.0 }, TreePoint { x: 1.0, y: 8.0 }] target 0 North
+  find_blockage None
+  legal_location true
+  legalize_in_blockages TreePoint { x: 9.0, y: 1.0 }
+  legalize_one_buffer TreePoint { x: 9.0, y: 1.0 }
+  adjust_beyond_blockage TreePoint { x: 4.0, y: 6.0 }
+  weighted_distance 51.0
+blockages [Rect { min: Point { x: Dbu(10), y: Dbu(9) }, max: Point { x: Dbu(11), y: Dbu(12) } }, Rect { min: Point { x: Dbu(11), y: Dbu(6) }, max: Point { x: Dbu(12), y: Dbu(8) } }] taken [(2.0, 10.0), (3.0, 12.0), (14.0, 3.0)] parent TreePoint { x: 6.0, y: 19.0 } point TreePoint { x: 2.0, y: 12.0 } sinks [TreePoint { x: 2.0, y: 20.0 }, TreePoint { x: 16.0, y: 15.0 }, TreePoint { x: 13.0, y: 9.0 }] target 1 South
+  find_blockage None
+  legal_location true
+  legalize_in_blockages TreePoint { x: 2.0, y: 12.0 }
+  legalize_one_buffer TreePoint { x: 2.0, y: 12.0 }
+  adjust_beyond_blockage TreePoint { x: 6.0, y: 18.0 }
+  weighted_distance 72.0
+blockages [Rect { min: Point { x: Dbu(11), y: Dbu(1) }, max: Point { x: Dbu(15), y: Dbu(2) } }, Rect { min: Point { x: Dbu(14), y: Dbu(6) }, max: Point { x: Dbu(17), y: Dbu(9) } }, Rect { min: Point { x: Dbu(9), y: Dbu(0) }, max: Point { x: Dbu(14), y: Dbu(1) } }] taken [(5.0, 1.0), (5.0, 19.0), (19.0, 15.0)] parent TreePoint { x: 19.0, y: 14.0 } point TreePoint { x: 18.0, y: 3.0 } sinks [TreePoint { x: 0.0, y: 4.0 }, TreePoint { x: 3.0, y: 9.0 }] target 1 South
+  find_blockage None
+  legal_location true
+  legalize_in_blockages TreePoint { x: 18.0, y: 3.0 }
+  legalize_one_buffer TreePoint { x: 18.0, y: 3.0 }
+  adjust_beyond_blockage TreePoint { x: 19.0, y: 13.0 }
+  weighted_distance 64.0
+blockages [Rect { min: Point { x: Dbu(14), y: Dbu(6) }, max: Point { x: Dbu(18), y: Dbu(11) } }] taken [(11.0, 20.0)] parent TreePoint { x: 11.0, y: 3.0 } point TreePoint { x: 18.0, y: 6.0 } sinks [TreePoint { x: 11.0, y: 5.0 }, TreePoint { x: 0.0, y: 14.0 }] target 13 East
+  find_blockage None
+  legal_location true
+  legalize_in_blockages TreePoint { x: 18.0, y: 6.0 }
+  legalize_one_buffer TreePoint { x: 18.0, y: 6.0 }
+  adjust_beyond_blockage TreePoint { x: 20.75, y: 6.25 }
+  weighted_distance 54.0
+blockages [Rect { min: Point { x: Dbu(5), y: Dbu(8) }, max: Point { x: Dbu(9), y: Dbu(12) } }, Rect { min: Point { x: Dbu(14), y: Dbu(0) }, max: Point { x: Dbu(17), y: Dbu(2) } }] taken [] parent TreePoint { x: 18.0, y: 12.0 } point TreePoint { x: 19.0, y: 14.0 } sinks [TreePoint { x: 19.0, y: 13.0 }, TreePoint { x: 3.0, y: 0.0 }, TreePoint { x: 19.0, y: 3.0 }] target 0 East
+  find_blockage None
+  legal_location true
+  legalize_in_blockages TreePoint { x: 19.0, y: 14.0 }
+  legalize_one_buffer TreePoint { x: 19.0, y: 14.0 }
+  adjust_beyond_blockage TreePoint { x: 18.0, y: 12.0 }
+  weighted_distance 51.0
+blockages [Rect { min: Point { x: Dbu(2), y: Dbu(7) }, max: Point { x: Dbu(6), y: Dbu(8) } }, Rect { min: Point { x: Dbu(0), y: Dbu(11) }, max: Point { x: Dbu(4), y: Dbu(15) } }, Rect { min: Point { x: Dbu(11), y: Dbu(1) }, max: Point { x: Dbu(12), y: Dbu(3) } }] taken [(13.0, 4.0)] parent TreePoint { x: 4.0, y: 18.0 } point TreePoint { x: 14.0, y: 16.0 } sinks [TreePoint { x: 19.0, y: 7.0 }, TreePoint { x: 8.0, y: 1.0 }, TreePoint { x: 12.0, y: 13.0 }] target 6 West
+  find_blockage None
+  legal_location true
+  legalize_in_blockages TreePoint { x: 14.0, y: 16.0 }
+  legalize_one_buffer TreePoint { x: 14.0, y: 16.0 }
+  adjust_beyond_blockage TreePoint { x: 1.0, y: 15.0 }
+  weighted_distance 76.0
+blockages [Rect { min: Point { x: Dbu(2), y: Dbu(12) }, max: Point { x: Dbu(3), y: Dbu(15) } }, Rect { min: Point { x: Dbu(5), y: Dbu(14) }, max: Point { x: Dbu(7), y: Dbu(19) } }] taken [(7.0, 1.0), (7.0, 14.0)] parent TreePoint { x: 16.0, y: 13.0 } point TreePoint { x: 11.0, y: 20.0 } sinks [TreePoint { x: 8.0, y: 15.0 }, TreePoint { x: 6.0, y: 13.0 }, TreePoint { x: 3.0, y: 9.0 }] target 21 North
+  find_blockage None
+  legal_location true
+  legalize_in_blockages TreePoint { x: 11.0, y: 20.0 }
+  legalize_one_buffer TreePoint { x: 11.0, y: 20.0 }
+  adjust_beyond_blockage TreePoint { x: 1.0, y: 19.0 }
+  weighted_distance 75.0
+blockages [Rect { min: Point { x: Dbu(10), y: Dbu(15) }, max: Point { x: Dbu(11), y: Dbu(17) } }, Rect { min: Point { x: Dbu(15), y: Dbu(0) }, max: Point { x: Dbu(19), y: Dbu(2) } }] taken [(4.0, 15.0), (6.0, 17.0), (18.0, 20.0)] parent TreePoint { x: 15.0, y: 0.0 } point TreePoint { x: 10.0, y: 10.0 } sinks [TreePoint { x: 7.0, y: 18.0 }, TreePoint { x: 18.0, y: 13.0 }, TreePoint { x: 14.0, y: 8.0 }] target 0 East
+  find_blockage None
+  legal_location true
+  legalize_in_blockages TreePoint { x: 10.0, y: 10.0 }
+  legalize_one_buffer TreePoint { x: 10.0, y: 10.0 }
+  adjust_beyond_blockage TreePoint { x: 15.0, y: 0.0 }
+  weighted_distance 73.0
+blockages [Rect { min: Point { x: Dbu(15), y: Dbu(14) }, max: Point { x: Dbu(17), y: Dbu(16) } }] taken [(0.0, 14.0), (10.0, 14.0)] parent TreePoint { x: 4.0, y: 0.0 } point TreePoint { x: 4.0, y: 15.0 } sinks [TreePoint { x: 3.0, y: 3.0 }, TreePoint { x: 10.0, y: 3.0 }, TreePoint { x: 20.0, y: 13.0 }] target 18 South
+  find_blockage None
+  legal_location true
+  legalize_in_blockages TreePoint { x: 4.0, y: 15.0 }
+  legalize_one_buffer TreePoint { x: 4.0, y: 15.0 }
+  adjust_beyond_blockage TreePoint { x: 4.0, y: 15.0 }
+  weighted_distance 94.0
+blockages [Rect { min: Point { x: Dbu(6), y: Dbu(10) }, max: Point { x: Dbu(8), y: Dbu(11) } }, Rect { min: Point { x: Dbu(14), y: Dbu(1) }, max: Point { x: Dbu(17), y: Dbu(6) } }] taken [] parent TreePoint { x: 0.0, y: 19.0 } point TreePoint { x: 12.0, y: 16.0 } sinks [TreePoint { x: 7.0, y: 2.0 }, TreePoint { x: 1.0, y: 1.0 }, TreePoint { x: 6.0, y: 6.0 }] target 16 West
+  find_blockage None
+  legal_location true
+  legalize_in_blockages TreePoint { x: 12.0, y: 16.0 }
+  legalize_one_buffer TreePoint { x: 12.0, y: 16.0 }
+  adjust_beyond_blockage TreePoint { x: 12.0, y: 16.0 }
+  weighted_distance 106.0
+blockages [Rect { min: Point { x: Dbu(9), y: Dbu(8) }, max: Point { x: Dbu(12), y: Dbu(10) } }] taken [(5.0, 17.0)] parent TreePoint { x: 0.0, y: 20.0 } point TreePoint { x: 20.0, y: 5.0 } sinks [TreePoint { x: 13.0, y: 10.0 }, TreePoint { x: 5.0, y: 6.0 }, TreePoint { x: 1.0, y: 9.0 }] target 7 North
+  find_blockage None
+  legal_location true
+  legalize_in_blockages TreePoint { x: 20.0, y: 5.0 }
+  legalize_one_buffer TreePoint { x: 20.0, y: 5.0 }
+  adjust_beyond_blockage TreePoint { x: 20.0, y: 5.0 }
+  weighted_distance 156.0
+blockages [Rect { min: Point { x: Dbu(9), y: Dbu(14) }, max: Point { x: Dbu(10), y: Dbu(15) } }, Rect { min: Point { x: Dbu(1), y: Dbu(7) }, max: Point { x: Dbu(3), y: Dbu(12) } }] taken [(12.0, 0.0)] parent TreePoint { x: 12.0, y: 7.0 } point TreePoint { x: 6.0, y: 7.0 } sinks [TreePoint { x: 0.0, y: 15.0 }] target 1 West
+  find_blockage None
+  legal_location true
+  legalize_in_blockages TreePoint { x: 6.0, y: 7.0 }
+  legalize_one_buffer TreePoint { x: 6.0, y: 7.0 }
+  adjust_beyond_blockage TreePoint { x: 11.0, y: 7.0 }
+  weighted_distance 20.0
+blockages [Rect { min: Point { x: Dbu(3), y: Dbu(13) }, max: Point { x: Dbu(6), y: Dbu(18) } }, Rect { min: Point { x: Dbu(8), y: Dbu(2) }, max: Point { x: Dbu(11), y: Dbu(6) } }, Rect { min: Point { x: Dbu(5), y: Dbu(9) }, max: Point { x: Dbu(6), y: Dbu(12) } }] taken [(9.0, 13.0), (10.0, 7.0), (15.0, 7.0)] parent TreePoint { x: 17.0, y: 19.0 } point TreePoint { x: 13.0, y: 14.0 } sinks [TreePoint { x: 6.0, y: 6.0 }, TreePoint { x: 9.0, y: 0.0 }] target 7 West
+  find_blockage None
+  legal_location true
+  legalize_in_blockages TreePoint { x: 13.0, y: 14.0 }
+  legalize_one_buffer TreePoint { x: 13.0, y: 14.0 }
+  adjust_beyond_blockage TreePoint { x: 13.5, y: 15.5 }
+  weighted_distance 51.0
+blockages [Rect { min: Point { x: Dbu(1), y: Dbu(12) }, max: Point { x: Dbu(6), y: Dbu(13) } }, Rect { min: Point { x: Dbu(4), y: Dbu(4) }, max: Point { x: Dbu(9), y: Dbu(6) } }, Rect { min: Point { x: Dbu(9), y: Dbu(3) }, max: Point { x: Dbu(12), y: Dbu(5) } }] taken [] parent TreePoint { x: 19.0, y: 1.0 } point TreePoint { x: 20.0, y: 19.0 } sinks [TreePoint { x: 19.0, y: 19.0 }, TreePoint { x: 3.0, y: 3.0 }] target 5 North
+  find_blockage None
+  legal_location true
+  legalize_in_blockages TreePoint { x: 20.0, y: 19.0 }
+  legalize_one_buffer TreePoint { x: 20.0, y: 19.0 }
+  adjust_beyond_blockage TreePoint { x: 19.0, y: 6.0 }
+  weighted_distance 72.0
+blockages [Rect { min: Point { x: Dbu(2), y: Dbu(12) }, max: Point { x: Dbu(5), y: Dbu(13) } }] taken [(8.0, 1.0), (12.0, 15.0), (13.0, 14.0)] parent TreePoint { x: 10.0, y: 12.0 } point TreePoint { x: 14.0, y: 10.0 } sinks [TreePoint { x: 9.0, y: 8.0 }, TreePoint { x: 20.0, y: 2.0 }] target 6 North
+  find_blockage None
+  legal_location true
+  legalize_in_blockages TreePoint { x: 14.0, y: 10.0 }
+  legalize_one_buffer TreePoint { x: 14.0, y: 10.0 }
+  adjust_beyond_blockage TreePoint { x: 13.0, y: 15.0 }
+  weighted_distance 33.0
+blockages [Rect { min: Point { x: Dbu(2), y: Dbu(12) }, max: Point { x: Dbu(5), y: Dbu(16) } }, Rect { min: Point { x: Dbu(11), y: Dbu(8) }, max: Point { x: Dbu(14), y: Dbu(9) } }] taken [(5.0, 13.0), (11.0, 19.0), (16.0, 1.0)] parent TreePoint { x: 18.0, y: 15.0 } point TreePoint { x: 18.0, y: 11.0 } sinks [TreePoint { x: 17.0, y: 0.0 }, TreePoint { x: 14.0, y: 13.0 }, TreePoint { x: 10.0, y: 20.0 }] target 14 South
+  find_blockage None
+  legal_location true
+  legalize_in_blockages TreePoint { x: 18.0, y: 11.0 }
+  legalize_one_buffer TreePoint { x: 18.0, y: 11.0 }
+  adjust_beyond_blockage TreePoint { x: 11.0, y: 8.0 }
+  weighted_distance 47.0
+blockages [Rect { min: Point { x: Dbu(12), y: Dbu(6) }, max: Point { x: Dbu(13), y: Dbu(8) } }, Rect { min: Point { x: Dbu(6), y: Dbu(5) }, max: Point { x: Dbu(7), y: Dbu(8) } }, Rect { min: Point { x: Dbu(1), y: Dbu(2) }, max: Point { x: Dbu(6), y: Dbu(6) } }] taken [] parent TreePoint { x: 1.0, y: 19.0 } point TreePoint { x: 1.0, y: 0.0 } sinks [TreePoint { x: 16.0, y: 16.0 }, TreePoint { x: 16.0, y: 6.0 }, TreePoint { x: 20.0, y: 13.0 }] target 23 South
+  find_blockage None
+  legal_location true
+  legalize_in_blockages TreePoint { x: 1.0, y: 0.0 }
+  legalize_one_buffer TreePoint { x: 1.0, y: 0.0 }
+  adjust_beyond_blockage TreePoint { x: 6.75, y: 1.75 }
+  weighted_distance 141.0
+blockages [Rect { min: Point { x: Dbu(1), y: Dbu(11) }, max: Point { x: Dbu(4), y: Dbu(12) } }, Rect { min: Point { x: Dbu(6), y: Dbu(11) }, max: Point { x: Dbu(8), y: Dbu(12) } }] taken [(17.0, 8.0)] parent TreePoint { x: 14.0, y: 17.0 } point TreePoint { x: 18.0, y: 15.0 } sinks [TreePoint { x: 2.0, y: 20.0 }, TreePoint { x: 13.0, y: 2.0 }] target 9 South
+  find_blockage None
+  legal_location true
+  legalize_in_blockages TreePoint { x: 18.0, y: 15.0 }
+  legalize_one_buffer TreePoint { x: 18.0, y: 15.0 }
+  adjust_beyond_blockage TreePoint { x: 18.5, y: 12.5 }
+  weighted_distance 51.0
+blockages [Rect { min: Point { x: Dbu(5), y: Dbu(2) }, max: Point { x: Dbu(8), y: Dbu(3) } }] taken [(3.0, 18.0), (20.0, 6.0)] parent TreePoint { x: 15.0, y: 1.0 } point TreePoint { x: 7.0, y: 8.0 } sinks [TreePoint { x: 20.0, y: 3.0 }, TreePoint { x: 19.0, y: 0.0 }] target 19 East
+  find_blockage None
+  legal_location true
+  legalize_in_blockages TreePoint { x: 7.0, y: 8.0 }
+  legalize_one_buffer TreePoint { x: 7.0, y: 8.0 }
+  adjust_beyond_blockage TreePoint { x: 17.0, y: 18.0 }
+  weighted_distance 68.0
+blockages [Rect { min: Point { x: Dbu(3), y: Dbu(10) }, max: Point { x: Dbu(6), y: Dbu(12) } }, Rect { min: Point { x: Dbu(15), y: Dbu(4) }, max: Point { x: Dbu(18), y: Dbu(8) } }, Rect { min: Point { x: Dbu(11), y: Dbu(10) }, max: Point { x: Dbu(12), y: Dbu(14) } }] taken [(6.0, 8.0), (12.0, 6.0), (18.0, 16.0)] parent TreePoint { x: 16.0, y: 16.0 } point TreePoint { x: 13.0, y: 20.0 } sinks [TreePoint { x: 7.0, y: 17.0 }, TreePoint { x: 7.0, y: 2.0 }] target 1 West
+  find_blockage None
+  legal_location true
+  legalize_in_blockages TreePoint { x: 13.0, y: 20.0 }
+  legalize_one_buffer TreePoint { x: 13.0, y: 20.0 }
+  adjust_beyond_blockage TreePoint { x: 15.0, y: 16.0 }
+  weighted_distance 47.0
+blockages [Rect { min: Point { x: Dbu(2), y: Dbu(13) }, max: Point { x: Dbu(4), y: Dbu(17) } }, Rect { min: Point { x: Dbu(13), y: Dbu(11) }, max: Point { x: Dbu(18), y: Dbu(13) } }] taken [(5.0, 0.0)] parent TreePoint { x: 10.0, y: 17.0 } point TreePoint { x: 10.0, y: 20.0 } sinks [TreePoint { x: 16.0, y: 9.0 }] target 13 South
+  find_blockage None
+  legal_location true
+  legalize_in_blockages TreePoint { x: 10.0, y: 20.0 }
+  legalize_one_buffer TreePoint { x: 10.0, y: 20.0 }
+  adjust_beyond_blockage TreePoint { x: 16.5, y: 10.5 }
+  weighted_distance 20.0

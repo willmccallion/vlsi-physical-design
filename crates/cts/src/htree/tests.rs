@@ -3,6 +3,7 @@ use crate::clock::ClockSink;
 use crate::options::CtsOptions;
 use pare_common::db::indices::{NetId, PinId};
 use pare_common::db::liberty::{LibCellId, LibPortId};
+use pare_common::testing::{SeededRng, assert_golden};
 
 fn rect(x0: i64, y0: i64, x1: i64, y1: i64) -> Rect<Dbu> {
     Rect::new(
@@ -487,4 +488,244 @@ fn a_north_branch_blocked_ahead_moves_along_the_blockage_edge_toward_its_sinks()
     let moved = builder().adjust_beyond_blockage(&search, TreePoint::new(50.0, 30.0));
 
     assert!(moved.same(TreePoint::new(60.0, 20.0)), "{moved:?}");
+}
+
+/// A number in `0..n`, as a tree coordinate.
+fn draw(rng: &mut SeededRng, n: u64) -> f64 {
+    rng.below(n) as f64
+}
+
+/// A point at whole tree units in a 20-unit square, so that points fall on
+/// edges, axes and each other often enough to tell `<` from `<=`.
+fn grid_point(rng: &mut SeededRng) -> TreePoint {
+    TreePoint::new(draw(rng, 21), draw(rng, 21))
+}
+
+/// The corners of a box of whole units inside the 20-unit square.
+#[derive(Clone, Copy, Debug)]
+struct GridBox([i64; 4]);
+
+impl GridBox {
+    fn random(rng: &mut SeededRng) -> Self {
+        let whole = |v: u64| i64::try_from(v).unwrap();
+        let (x1, y1) = (whole(rng.below(16)), whole(rng.below(16)));
+        let (w, h) = (whole(1 + rng.below(5)), whole(1 + rng.below(5)));
+        Self([x1, y1, x1 + w, y1 + h])
+    }
+
+    fn tree(self) -> TreeBox {
+        let [x1, y1, x2, y2] = self.0.map(|v| v as f64);
+        TreeBox {
+            low: TreePoint::new(x1, y1),
+            high: TreePoint::new(x2, y2),
+        }
+    }
+
+    fn rect(self) -> Rect<Dbu> {
+        let [x1, y1, x2, y2] = self.0;
+        rect(x1, y1, x2, y2)
+    }
+}
+
+const DIRECTIONS: [Direction; 4] = [
+    Direction::North,
+    Direction::East,
+    Direction::South,
+    Direction::West,
+];
+
+/// What the blockage geometry gives for seeded inputs on whole units.
+fn blockage_geometry_text() -> String {
+    let mut rng = SeededRng::new(17);
+    let mut lines = Vec::new();
+    for _ in 0..400 {
+        let (parent, branch) = (grid_point(&mut rng), grid_point(&mut rng));
+        let target = draw(&mut rng, 25);
+        let blockage = GridBox::random(&mut rng).tree();
+        let direction = rng.pick(&DIRECTIONS);
+        let scale = rng.pick(&[0.0, 0.25, 0.5]);
+        let margin = (draw(&mut rng, 4), draw(&mut rng, 4));
+        lines.push(format!(
+            "{parent:?} {branch:?} target {target} {blockage:?} {direction:?} scale {scale} margin {margin:?}"
+        ));
+        lines.push(format!(
+            "  scale_position {:?}",
+            scale_position(branch, parent, target, scale)
+        ));
+        lines.push(format!(
+            "  along_blockage {:?}",
+            along_blockage(parent, target, blockage, direction)
+        ));
+        lines.push(format!(
+            "  beside_branch {:?}",
+            beside_branch(parent, branch, target, margin, direction)
+        ));
+        lines.push(format!(
+            "  legal_locations {:?}",
+            Builder::legal_locations(parent, branch, blockage)
+        ));
+    }
+    lines.join("\n") + "\n"
+}
+
+/// A seeded scene for a builder's blockage searches: blockages and taken
+/// spots on whole units of a core 20 units a side, buffers a unit wide.
+struct SearchCase {
+    scene: Scene,
+    builder: Builder,
+    parent: TreePoint,
+    point: TreePoint,
+    sinks: Vec<TreePoint>,
+    target: f64,
+    direction: Direction,
+}
+
+impl SearchCase {
+    fn random(rng: &mut SeededRng) -> Self {
+        let blockages = (0..=rng.below(3))
+            .map(|_| GridBox::random(rng).rect())
+            .collect();
+        let mut builder = builder();
+        for _ in 0..rng.below(4) {
+            builder.commit(grid_point(rng));
+        }
+        Self {
+            scene: Scene::new(blockages).with_buffer_size(1, 1),
+            builder,
+            parent: grid_point(rng),
+            point: grid_point(rng),
+            sinks: (0..=rng.below(3)).map(|_| grid_point(rng)).collect(),
+            target: draw(rng, 25),
+            direction: rng.pick(&DIRECTIONS),
+        }
+    }
+
+    fn ctx(&self) -> TreeContext<'_> {
+        TreeContext {
+            core: rect(0, 0, 20, 20),
+            ..self.scene.ctx()
+        }
+    }
+
+    /// The case's spots taken, as coordinates.
+    fn taken(&self) -> Vec<(f64, f64)> {
+        let mut taken: Vec<(f64, f64)> = self
+            .builder
+            .occupied
+            .iter()
+            .map(|&(x, y)| (f64::from_bits(x), f64::from_bits(y)))
+            .collect();
+        taken.sort_unstable_by(|a, b| a.partial_cmp(b).unwrap());
+        taken
+    }
+
+    /// What each search gives in the case, one line each.
+    fn describe(&self) -> Vec<String> {
+        let (ctx, b, point) = (self.ctx(), &self.builder, self.point);
+        let search = LegalSearch {
+            ctx: &ctx,
+            target: self.target,
+            parent: self.parent,
+            sinks: &self.sinks,
+            direction: self.direction,
+        };
+        let blockage = b.find_blockage(&ctx, point);
+        let mut lines = vec![
+            format!(
+                "blockages {:?} taken {:?} parent {:?} point {point:?} sinks {:?} target {} {:?}",
+                self.scene.blockages,
+                self.taken(),
+                self.parent,
+                self.sinks,
+                self.target,
+                self.direction
+            ),
+            format!("  find_blockage {blockage:?}"),
+            format!("  legal_location {}", b.legal_location(&ctx, point)),
+            format!(
+                "  legalize_in_blockages {:?}",
+                b.legalize_in_blockages(&ctx, point, buffer())
+            ),
+            format!(
+                "  legalize_one_buffer {:?}",
+                b.clone().legalize_one_buffer(&ctx, point, buffer())
+            ),
+            format!(
+                "  adjust_beyond_blockage {:?}",
+                b.adjust_beyond_blockage(&search, point)
+            ),
+            format!(
+                "  weighted_distance {:?}",
+                b.weighted_distance(point, self.parent, &self.sinks)
+            ),
+        ];
+        if let Some(blockage) = blockage {
+            let candidates = Builder::legal_locations(self.parent, point, blockage);
+            lines.push(format!(
+                "  adjust_along_blockage {:?}",
+                b.adjust_along_blockage(&search, point, blockage)
+            ));
+            lines.push(format!(
+                "  best_legal_location {:?}",
+                b.best_legal_location(&search, point, &candidates, blockage)
+            ));
+        }
+        lines
+    }
+}
+
+/// What a builder's blockage searches give in seeded scenes.
+fn blockage_search_text() -> String {
+    let mut rng = SeededRng::new(29);
+    let lines: Vec<String> = (0..150)
+        .flat_map(|_| SearchCase::random(&mut rng).describe())
+        .collect();
+    lines.join("\n") + "\n"
+}
+
+fn golden_dir() -> std::path::PathBuf {
+    std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/golden")
+}
+
+#[test]
+fn the_blockage_geometry_gives_what_it_always_has() {
+    assert_golden(
+        &golden_dir(),
+        "htree_blockage_geometry.txt",
+        &blockage_geometry_text(),
+    );
+}
+
+#[test]
+fn the_blockage_searches_give_what_they_always_have() {
+    assert_golden(
+        &golden_dir(),
+        "htree_blockage_searches.txt",
+        &blockage_search_text(),
+    );
+}
+
+#[test]
+fn no_search_leaves_a_buffer_inside_a_blockage() {
+    let mut rng = SeededRng::new(31);
+    for _ in 0..200 {
+        let blockage = GridBox::random(&mut rng);
+        let scene = Scene::new(vec![blockage.rect()]).with_buffer_size(1, 1);
+        let ctx = TreeContext {
+            core: rect(0, 0, 20, 20),
+            ..scene.ctx()
+        };
+        let builder = builder();
+        let point = grid_point(&mut rng);
+
+        let moved = builder.legalize_in_blockages(&ctx, point, buffer());
+
+        assert!(
+            builder.find_blockage(&ctx, moved).is_none(),
+            "{point:?} -> {moved:?} in {blockage:?}"
+        );
+        if builder.find_blockage(&ctx, point).is_none() {
+            assert!(moved.same(point), "{point:?} -> {moved:?}");
+        }
+    }
 }
