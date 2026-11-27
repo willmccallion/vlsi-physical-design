@@ -775,3 +775,47 @@ fn measurements_normalize_and_compile_as_they_always_have() {
         &normalization_text(),
     );
 }
+
+/// The arrival and slew a chain leaves its output with.
+type Timing = (f32, f32);
+
+/// The rising and the falling timing through every chain of `CLKBUF_X3`
+/// with its rising tables and the falling ones `fall`, at a few of the
+/// plan's loads and slews.
+fn edges_with_falling_tables(fall: &str) -> (Vec<Timing>, Vec<Timing>) {
+    let lib = BufferText {
+        limits: LIMITS,
+        timing: &format!(
+            "cell_rise (delay_t) {{ values (\"0.02, 0.08\", \"0.03, 0.09\") ; }}
+             rise_transition (delay_t) {{ values (\"0.006, 0.12\", \"0.02, 0.13\") ; }}
+             cell_fall {fall} fall_transition {fall}"
+        ),
+        ..BufferText::default()
+    }
+    .library();
+    characterized((&fixtures::design(""), &lib), &["CLKBUF_X3"], |setup| {
+        let plan = plan(setup).unwrap();
+        let (mut rises, mut falls) = (Vec::new(), Vec::new());
+        for_each_chain(setup, &plan, |chain, _| {
+            for (load, slew) in timing_points(&plan) {
+                rises.push(chain.propagate(Edge::Rise, load, slew)?);
+                falls.push(chain.propagate(Edge::Fall, load, slew)?);
+            }
+            Ok(())
+        })
+        .unwrap();
+        (rises, falls)
+    })
+}
+
+#[test]
+fn each_edge_is_timed_by_its_own_tables() {
+    let quick = "(delay_t) { values (\"0.01, 0.04\", \"0.02, 0.05\") ; }";
+    let slow = "(delay_t) { values (\"0.1, 0.4\", \"0.2, 0.5\") ; }";
+
+    let (quick_rises, quick_falls) = edges_with_falling_tables(quick);
+    let (slow_rises, slow_falls) = edges_with_falling_tables(slow);
+
+    assert_eq!(quick_rises, slow_rises);
+    assert_ne!(quick_falls, slow_falls);
+}
