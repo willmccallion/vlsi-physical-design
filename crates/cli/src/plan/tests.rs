@@ -182,6 +182,31 @@ fn timing_driven_placement_beside_the_global_router_estimate_fails_the_plan() {
 }
 
 #[test]
+fn placement_that_is_not_timing_driven_may_use_the_global_router_estimate() {
+    let plan = timed_plan(
+        "clock_tree = false",
+        "[global_placement]\ntiming_driven = false\ncongestion_estimate = \"global_router\"",
+    )
+    .unwrap();
+
+    assert!(plan.repair.is_some());
+}
+
+#[test]
+fn a_design_that_is_only_placed_is_not_repaired_on_global_routes() {
+    let mut config = tiny_config(
+        "liberty_files = [\"clock.lib\"]\n\
+             [netlist]\n\
+             signal_wire = { layer = \"M2\", resistance_ohm_per_um = 2.0, capacitance_ff_per_um = 0.5 }",
+    );
+    config.purpose = Purpose::Placement;
+
+    let plan = FlowPlan::resolve(&config, &tiny()).unwrap();
+
+    assert!(plan.repair.unwrap().on_global_routes.is_none());
+}
+
+#[test]
 fn without_liberty_files_nothing_is_repaired() {
     let plan = FlowPlan::resolve(&tiny_config(""), &tiny()).unwrap();
 
