@@ -125,9 +125,8 @@ impl<I: TableIndex, T> IdVec<I, T> {
     where
         T: Clone,
     {
-        if self.entries.len() < len {
-            self.entries.resize(len, entry);
-        }
+        let missing = len.saturating_sub(self.entries.len());
+        self.entries.extend(std::iter::repeat_n(entry, missing));
     }
 
     /// Sets every entry to `entry`.
