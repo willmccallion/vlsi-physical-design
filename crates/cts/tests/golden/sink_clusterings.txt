@@ -1,0 +1,900 @@
+max cap false FaradsPerDbu(1e-17) one row: (0 100 2fF +0) (75 100 3fF +10) (50 100 3fF +10) (50 100 3fF +0) (75 100 3fF +0) (100 100 1fF +30) (100 100 1fF +30) (25 100 2fF +10) (75 100 2fF +10) (50 100 3fF +10)
+  size 2 diameter 100 scale 10: [[5, 6], [1, 4], [8, 2], [3, 9], [7, 0]] cost 1.25
+  size 4 diameter 100 scale 1: [[1, 4, 8, 2], [3, 9, 7, 0], [5, 6]] cost 1.05
+max cap false FaradsPerDbu(0.0) scattered: (75 25 2fF +10)
+  size 5 diameter 35 scale 10: [[0]] cost 0
+  size 5 diameter 35 scale 1: [[0]] cost 0
+max cap false FaradsPerDbu(1e-17) one column: (25 25 3fF +30) (25 0 1fF +30) (25 100 1fF +0) (25 25 1fF +0) (25 75 3fF +0) (25 0 3fF +0) (25 0 3fF +30) (25 50 2fF +10)
+  size 3 diameter 35 scale 10: [[5, 6], [0, 3], [7], [4, 2], [1]] cost 1.1999999940395356
+  size 1 diameter 25 scale 1: [[5, 6], [0, 3], [7], [4, 2], [1]] cost 1.1999999940395356
+max cap false FaradsPerDbu(1e-17) one column: (50 0 3fF +0) (50 75 3fF +0) (50 100 2fF +0) (50 50 3fF +0) (50 50 2fF +0) (50 100 1fF +0) (50 50 2fF +10) (50 50 3fF +0) (50 100 1fF +30) (50 50 3fF +0)
+  size 2 diameter 25 scale 1: [[0], [3, 4], [6, 7], [9, 1], [2, 5], [8]] cost 1.1
+  size 4 diameter 50 scale 1: [[6, 7, 9, 1], [2, 5, 8], [0, 3, 4]] cost 0.6499999999999999
+max cap true FaradsPerDbu(0.0) one column: (0 0 2fF +0) (0 75 2fF +10) (0 100 2fF +10)
+  size 1 diameter 100 scale 10: [[0, 1, 2]] cost 0
+  size 1 diameter 50 scale 10: [[0, 1, 2]] cost 0
+max cap false FaradsPerDbu(0.0) one column: (0 75 3fF +0) (0 100 1fF +0) (0 0 2fF +10) (0 50 1fF +10) (0 50 1fF +30) (0 100 3fF +0) (0 25 1fF +0) (0 0 2fF +0) (0 50 2fF +10)
+  size 4 diameter 100 scale 10: [[6, 3, 4, 8], [0, 1, 5], [2, 7]] cost 0.8
+  size 1 diameter 50 scale 1: [[6, 3, 4, 8], [0, 1, 5], [2, 7]] cost 0.8
+max cap false FaradsPerDbu(0.0) one row: (50 50 2fF +0) (50 50 2fF +30) (50 50 3fF +10) (100 50 3fF +0) (50 50 3fF +30)
+  size 2 diameter 50 scale 10: [[0, 1], [2, 4], [3]] cost 1.4
+  size 2 diameter 25 scale 10: [[0, 1], [2, 4], [3]] cost 1.4
+max cap true FaradsPerDbu(1e-17) one column: (100 100 3fF +0) (100 0 2fF +0) (100 50 3fF +0) (100 75 1fF +0)
+  size 4 diameter 35 scale 10: [[3, 0], [1, 2]] cost 0.25
+  size 1 diameter 100 scale 1: [[3, 0], [1, 2]] cost 0.25
+max cap false FaradsPerDbu(1e-17) one column: (100 25 3fF +10) (100 100 3fF +0) (100 50 3fF +0) (100 100 3fF +0) (100 50 3fF +0)
+  size 5 diameter 50 scale 10: [[0, 2, 4], [1, 3]] cost 0.4666666666666667
+  size 3 diameter 100 scale 1: [[0, 2, 4], [1, 3]] cost 0.4666666666666667
+max cap false FaradsPerDbu(0.0) scattered: (50 0 1fF +0) (0 100 3fF +0) (100 100 2fF +10) (25 100 1fF +30) (100 0 3fF +0) (0 0 3fF +30) (0 100 1fF +30)
+  size 3 diameter 35 scale 1: [[5], [1, 6], [3], [2], [4], [0]] cost 1.6999999761581421
+  size 1 diameter 50 scale 10: [[5], [1, 6], [3], [2], [4], [0]] cost 1.6999999761581421
+max cap true FaradsPerDbu(1e-17) scattered: (0 75 2fF +0) (0 0 3fF +0) (50 75 3fF +0) (75 100 2fF +10) (75 50 3fF +0)
+  size 5 diameter 25 scale 1: [[3, 4], [1, 0, 2]] cost 0.6333333333333333
+  size 4 diameter 100 scale 1: [[3, 4], [1, 0, 2]] cost 0.6333333333333333
+max cap false FaradsPerDbu(0.0) one column: (0 0 3fF +0) (0 50 2fF +30) (0 50 1fF +0) (0 100 2fF +10) (0 50 1fF +0) (0 25 3fF +0) (0 50 1fF +0) (0 25 1fF +0) (0 25 2fF +10) (0 0 2fF +0)
+  size 2 diameter 100 scale 10: [[9, 5], [7, 8], [1, 2], [4, 6], [3], [0]] cost 2.65
+  size 1 diameter 35 scale 1: [[9, 5], [7, 8], [1, 2], [4, 6], [3], [0]] cost 2.65
+max cap false FaradsPerDbu(1e-17) one column: (0 100 3fF +0) (0 75 3fF +0) (0 75 2fF +0) (0 75 1fF +0) (0 25 3fF +30) (0 0 1fF +30) (0 75 3fF +0) (0 0 2fF +0) (0 25 1fF +30)
+  size 1 diameter 50 scale 1: [[5], [7], [4], [8], [1], [2], [3], [6], [0]] cost 4
+  size 2 diameter 50 scale 10: [[5, 7], [4], [8], [1, 2], [3, 6], [0]] cost 2.3
+max cap false FaradsPerDbu(1e-17) one row: (25 25 1fF +0) (25 25 2fF +0) (25 25 2fF +30) (75 25 2fF +0) (25 25 3fF +30) (0 25 2fF +10) (75 25 3fF +30) (0 25 1fF +30) (0 25 2fF +0) (0 25 3fF +0) (0 25 1fF +0)
+  size 1 diameter 50 scale 10: [[5], [7], [8], [9], [10], [3], [6], [0], [1], [2], [4]] cost 6.666666865348816
+  size 3 diameter 50 scale 10: [[5, 7, 8], [9, 10], [3, 6], [0, 1, 2], [4]] cost 2.0000000198682146
+max cap false FaradsPerDbu(0.0) one row: (25 0 2fF +30) (50 0 2fF +0)
+  size 2 diameter 100 scale 1: [[0, 1]] cost 0
+  size 4 diameter 35 scale 10: [[0, 1]] cost 0
+max cap false FaradsPerDbu(1e-17) one column: (100 75 2fF +10) (100 25 3fF +0) (100 100 2fF +30) (100 75 3fF +30) (100 100 2fF +30) (100 50 2fF +0) (100 0 3fF +0) (100 75 1fF +30) (100 50 1fF +0) (100 50 2fF +0)
+  size 2 diameter 50 scale 10: [[6, 1], [5, 8], [9, 0], [3], [7], [2], [4]] cost 2.6
+  size 1 diameter 100 scale 10: [[6, 1], [5, 8], [9, 0], [3], [7], [2], [4]] cost 2.6
+max cap false FaradsPerDbu(0.0) one row: (50 100 2fF +30)
+  size 4 diameter 50 scale 10: [[0]] cost 0
+  size 2 diameter 35 scale 10: [[0]] cost 0
+max cap true FaradsPerDbu(0.0) scattered: (50 75 2fF +0) (50 0 3fF +10) (100 75 1fF +0) (25 50 1fF +10) (75 25 3fF +0) (75 25 2fF +0) (50 50 2fF +10) (25 25 3fF +0) (50 50 3fF +0) (75 0 1fF +10)
+  size 2 diameter 50 scale 10: [[7, 6, 8, 3], [0, 2, 9, 4, 5], [1]] cost 2.2666666666666666
+  size 1 diameter 50 scale 1: [[7, 6, 8, 3], [0, 2, 9, 4, 5], [1]] cost 2.2666666666666666
+max cap false FaradsPerDbu(1e-17) one row: (50 25 3fF +30) (100 25 1fF +0) (75 25 3fF +0) (50 25 1fF +30) (25 25 2fF +0) (50 25 2fF +0) (75 25 2fF +0) (100 25 3fF +10) (25 25 1fF +10) (25 25 3fF +0)
+  size 2 diameter 25 scale 10: [[8, 9], [1, 7], [2, 6], [0], [3], [5, 4]] cost 1.266666696468989
+  size 2 diameter 50 scale 10: [[8, 9], [1, 7], [2, 6], [0], [3], [5, 4]] cost 1.266666696468989
+max cap true FaradsPerDbu(0.0) one column: (75 75 2fF +30) (75 50 2fF +10) (75 75 2fF +0) (75 100 1fF +10) (75 50 2fF +0) (75 75 2fF +0) (75 100 3fF +0) (75 50 3fF +0) (75 0 1fF +30) (75 75 3fF +10)
+  size 4 diameter 50 scale 10: [[1, 4, 7, 0], [2, 5, 9, 3], [6, 8]] cost 1.1
+  size 1 diameter 50 scale 1: [[1, 4, 7, 0], [2, 5, 9, 3], [6, 8]] cost 1.1
+max cap true FaradsPerDbu(1e-17) one column: (0 75 3fF +10) (0 75 2fF +0) (0 50 3fF +0) (0 0 1fF +10) (0 0 2fF +0) (0 50 2fF +10)
+  size 2 diameter 100 scale 1: [[4, 2, 5], [0, 1, 3]] cost 0.7999999999999999
+  size 3 diameter 50 scale 1: [[2, 5, 0], [1, 3, 4]] cost 0.6000000000000001
+max cap true FaradsPerDbu(1e-17) one column: (0 100 2fF +30) (0 50 3fF +30) (0 25 1fF +0) (0 25 2fF +0) (0 100 1fF +0) (0 50 1fF +0) (0 0 1fF +30) (0 100 1fF +0) (0 75 3fF +10)
+  size 2 diameter 100 scale 10: [[6, 2, 3], [1, 5], [8], [0, 4, 7]] cost 1.85
+  size 2 diameter 50 scale 1: [[6, 2, 3, 1, 5], [8, 0, 4, 7]] cost 1.1
+max cap false FaradsPerDbu(0.0) scattered: (50 50 2fF +30)
+  size 3 diameter 100 scale 1: [[0]] cost 0
+  size 2 diameter 35 scale 1: [[0]] cost 0
+max cap false FaradsPerDbu(0.0) one column: (100 25 1fF +0) (100 50 3fF +10) (100 0 3fF +10) (100 100 2fF +10) (100 100 3fF +10) (100 0 2fF +10) (100 75 1fF +10) (100 75 2fF +30) (100 25 3fF +0) (100 75 3fF +10) (100 75 2fF +0)
+  size 2 diameter 35 scale 1: [[2, 5], [0, 8], [1], [6], [7], [9, 10], [3, 4]] cost 1.6999999761581421
+  size 1 diameter 35 scale 1: [[2, 5], [0, 8], [1], [6], [7], [9, 10], [3, 4]] cost 1.6999999761581421
+max cap false FaradsPerDbu(1e-17) one column: (25 0 1fF +10) (25 100 2fF +10) (25 0 3fF +0) (25 25 2fF +0) (25 100 1fF +0) (25 0 2fF +0) (25 50 1fF +10)
+  size 3 diameter 25 scale 10: [[0, 2, 5], [3], [6], [1, 4]] cost 0.6
+  size 1 diameter 35 scale 10: [[0, 2, 5], [3], [6], [1, 4]] cost 0.6
+max cap false FaradsPerDbu(1e-17) scattered: (0 50 2fF +0) (100 75 1fF +0) (50 100 3fF +0) (50 0 2fF +0) (75 75 1fF +0)
+  size 2 diameter 100 scale 10: [[0, 2], [4, 1], [3]] cost 1.25
+  size 3 diameter 50 scale 10: [[0, 2], [4, 1], [3]] cost 1.25
+max cap true FaradsPerDbu(1e-17) one row: (50 0 1fF +10) (0 0 2fF +0)
+  size 2 diameter 100 scale 10: [[1, 0]] cost 0
+  size 5 diameter 100 scale 10: [[1, 0]] cost 0
+max cap false FaradsPerDbu(0.0) one column: (0 100 2fF +10) (0 50 2fF +0) (0 25 3fF +0) (0 100 2fF +30)
+  size 3 diameter 25 scale 1: [[2, 1], [0], [3]] cost 0.666666676600774
+  size 2 diameter 50 scale 1: [[2, 1], [0, 3]] cost 0.3333333333333333
+max cap false FaradsPerDbu(0.0) scattered: (50 50 2fF +0) (75 75 1fF +0) (0 75 3fF +10)
+  size 1 diameter 35 scale 10: [[2], [1], [0]] cost 2.799999952316284
+  size 2 diameter 35 scale 10: [[1, 0], [2]] cost 1.3333333333333335
+max cap false FaradsPerDbu(0.0) scattered: (0 50 1fF +0)
+  size 4 diameter 35 scale 1: [[0]] cost 0
+  size 4 diameter 35 scale 1: [[0]] cost 0
+max cap true FaradsPerDbu(1e-17) one column: (0 75 2fF +30) (0 100 3fF +30) (0 0 2fF +10) (0 100 3fF +0) (0 25 2fF +10)
+  size 2 diameter 100 scale 1: [[2, 4, 0], [1, 3]] cost 1.15
+  size 1 diameter 50 scale 1: [[2, 4, 0], [1, 3]] cost 1.15
+max cap true FaradsPerDbu(0.0) one column: (100 75 3fF +10) (100 75 3fF +10)
+  size 1 diameter 35 scale 10: [[0, 1]] cost 0
+  size 2 diameter 25 scale 1: [[0, 1]] cost 0
+max cap false FaradsPerDbu(0.0) one row: (25 50 2fF +0)
+  size 2 diameter 35 scale 10: [[0]] cost 0
+  size 3 diameter 25 scale 10: [[0]] cost 0
+max cap false FaradsPerDbu(1e-17) scattered: (100 0 1fF +0) (50 25 1fF +10) (100 0 2fF +0) (25 25 2fF +10) (75 25 2fF +10) (0 75 3fF +10) (25 25 3fF +0) (0 50 3fF +10)
+  size 2 diameter 50 scale 10: [[3, 6], [7, 5], [4], [0, 2], [1]] cost 2.0666667064030966
+  size 4 diameter 100 scale 10: [[3, 6, 7, 5], [4, 0, 2, 1]] cost 1.1833333333333333
+max cap true FaradsPerDbu(0.0) scattered: (100 25 2fF +0) (50 50 3fF +0)
+  size 3 diameter 100 scale 10: [[1, 0]] cost 0
+  size 4 diameter 50 scale 1: [[1, 0]] cost 0
+max cap true FaradsPerDbu(1e-17) scattered: (75 100 2fF +10) (75 25 2fF +30) (75 0 2fF +30) (100 100 3fF +0) (0 0 1fF +0) (100 50 1fF +30) (75 100 2fF +10) (75 75 1fF +0) (50 25 3fF +10) (0 25 2fF +30) (0 50 3fF +30)
+  size 1 diameter 25 scale 10: [[4, 9], [10], [7, 0], [6, 3], [5], [2], [1], [8]] cost 2.25
+  size 1 diameter 25 scale 10: [[4, 9], [10], [7, 0], [6, 3], [5], [2], [1], [8]] cost 2.25
+max cap true FaradsPerDbu(0.0) one column: (50 75 1fF +0) (50 75 3fF +0) (50 25 1fF +0) (50 50 3fF +30) (50 0 3fF +30) (50 0 1fF +0) (50 50 1fF +0) (50 75 1fF +30)
+  size 1 diameter 25 scale 10: [[4, 5, 2, 3, 6, 0], [1, 7]] cost 1.4666666666666668
+  size 5 diameter 100 scale 10: [[5, 2, 3, 6, 0, 1], [7, 4]] cost 1.0666666666666667
+max cap false FaradsPerDbu(0.0) one column: (0 75 2fF +10)
+  size 4 diameter 50 scale 1: [[0]] cost 0
+  size 1 diameter 35 scale 10: [[0]] cost 0
+max cap true FaradsPerDbu(1e-17) one row: (75 75 2fF +0) (75 75 3fF +30) (50 75 3fF +0)
+  size 4 diameter 100 scale 10: [[2, 0], [1]] cost 1
+  size 3 diameter 100 scale 10: [[2, 0], [1]] cost 1
+max cap false FaradsPerDbu(1e-17) one column: (0 75 2fF +10) (0 0 2fF +0) (0 50 2fF +0) (0 50 1fF +0) (0 25 3fF +10) (0 25 1fF +0) (0 25 3fF +0) (0 100 1fF +30) (0 50 2fF +30) (0 75 2fF +30) (0 75 3fF +10)
+  size 4 diameter 25 scale 10: [[1], [4, 5, 6], [2, 3], [8], [0], [9], [10], [7]] cost 1.6
+  size 3 diameter 35 scale 1: [[1], [4, 5, 6], [2, 3], [8], [0], [9], [10], [7]] cost 1.6
+max cap true FaradsPerDbu(1e-17) one row: (100 0 3fF +0) (75 0 2fF +10) (50 0 2fF +30) (75 0 2fF +10)
+  size 4 diameter 35 scale 10: [[1, 3], [2], [0]] cost 1.099999988079071
+  size 4 diameter 25 scale 1: [[0, 1, 3], [2]] cost 0.7
+max cap false FaradsPerDbu(0.0) one row: (75 100 1fF +10) (50 100 1fF +10) (50 100 1fF +0) (75 100 3fF +0) (75 100 1fF +30) (50 100 3fF +10) (25 100 1fF +0)
+  size 1 diameter 100 scale 1: [[6], [0], [3], [4], [1], [2], [5]] cost 12
+  size 2 diameter 35 scale 1: [[6], [0, 3], [4], [1, 2], [5]] cost 1.799999976158142
+max cap false FaradsPerDbu(1e-17) one column: (75 0 1fF +10)
+  size 3 diameter 35 scale 1: [[0]] cost 0
+  size 3 diameter 25 scale 1: [[0]] cost 0
+max cap false FaradsPerDbu(1e-17) one column: (50 0 2fF +10)
+  size 2 diameter 25 scale 10: [[0]] cost 0
+  size 1 diameter 25 scale 10: [[0]] cost 0
+max cap true FaradsPerDbu(0.0) scattered: (0 50 2fF +10) (100 100 2fF +10) (25 25 2fF +30) (25 25 2fF +0) (75 50 2fF +0)
+  size 4 diameter 100 scale 10: [[0, 1, 4, 2, 3]] cost 0
+  size 1 diameter 35 scale 10: [[0, 1, 4, 2, 3]] cost 0
+max cap false FaradsPerDbu(1e-17) one column: (0 100 1fF +0) (0 75 2fF +10) (0 25 1fF +10) (0 100 2fF +0) (0 75 1fF +0) (0 100 2fF +0) (0 0 2fF +0) (0 25 1fF +30) (0 0 1fF +0) (0 0 2fF +30)
+  size 2 diameter 35 scale 1: [[8, 9], [2], [7], [1, 4], [0, 3], [5], [6]] cost 1.7999999761581422
+  size 4 diameter 100 scale 10: [[8, 9, 2, 7], [1, 4, 0, 3], [5, 6]] cost 1.2
+max cap true FaradsPerDbu(0.0) scattered: (25 50 2fF +10) (75 0 1fF +0) (75 50 1fF +0) (75 50 3fF +0)
+  size 2 diameter 50 scale 10: [[0, 2, 3, 1]] cost 0
+  size 4 diameter 50 scale 1: [[0, 2, 3, 1]] cost 0
+max cap false FaradsPerDbu(0.0) one column: (0 0 1fF +0) (0 75 1fF +0) (0 50 1fF +0) (0 50 3fF +0) (0 0 1fF +0) (0 50 1fF +10) (0 75 3fF +10) (0 0 2fF +0) (0 100 3fF +10) (0 25 2fF +30) (0 75 2fF +0)
+  size 3 diameter 100 scale 10: [[7, 9, 2], [3, 5, 1], [6, 10, 8], [0, 4]] cost 1.35
+  size 3 diameter 35 scale 10: [[0, 4, 7], [9], [2, 3, 5], [1, 6, 10], [8]] cost 0.899999988079071
+max cap false FaradsPerDbu(1e-17) scattered: (25 25 1fF +0) (0 0 2fF +30) (75 75 1fF +30) (100 0 2fF +10) (75 100 2fF +0) (0 25 2fF +0) (25 75 2fF +30) (50 75 1fF +10)
+  size 5 diameter 100 scale 10: [[6, 7], [2, 4], [3], [0, 1, 5]] cost 2.2
+  size 4 diameter 50 scale 1: [[6, 7], [2, 4], [3], [0, 1, 5]] cost 2.2
+max cap true FaradsPerDbu(0.0) one column: (25 100 2fF +0) (25 50 2fF +0) (25 100 3fF +0) (25 100 3fF +0) (25 50 2fF +0) (25 50 2fF +30)
+  size 2 diameter 25 scale 1: [[1, 4, 5, 0], [2, 3]] cost 1.6
+  size 5 diameter 35 scale 1: [[0, 2, 3, 1], [4, 5]] cost 1
+max cap true FaradsPerDbu(0.0) one column: (75 0 1fF +10) (75 100 1fF +0) (75 0 2fF +10) (75 0 3fF +0)
+  size 2 diameter 50 scale 1: [[0, 2, 3, 1]] cost 0
+  size 2 diameter 50 scale 1: [[0, 2, 3, 1]] cost 0
+max cap false FaradsPerDbu(1e-17) one row: (0 25 3fF +0) (0 25 2fF +10) (25 25 2fF +0) (25 25 2fF +0) (50 25 3fF +0) (0 25 3fF +0) (0 25 2fF +0) (50 25 3fF +0)
+  size 2 diameter 35 scale 10: [[0, 1], [5, 6], [4, 7], [2, 3]] cost 1.599999976158142
+  size 3 diameter 50 scale 10: [[1, 5, 6], [4, 7, 2], [3, 0]] cost 0.7
+max cap false FaradsPerDbu(1e-17) one column: (100 25 3fF +0) (100 100 3fF +30) (100 100 2fF +0) (100 50 1fF +30) (100 50 3fF +0) (100 25 2fF +0) (100 0 2fF +30) (100 50 1fF +30) (100 0 3fF +30)
+  size 4 diameter 35 scale 1: [[8], [0, 5], [3, 4], [7], [1, 2], [6]] cost 1.6499999821186067
+  size 3 diameter 50 scale 1: [[8], [0, 5], [3, 4], [7], [1, 2], [6]] cost 1.6499999821186067
+max cap true FaradsPerDbu(0.0) scattered: (25 25 1fF +0) (25 25 2fF +0) (25 75 3fF +10) (25 0 3fF +0) (25 75 2fF +30) (50 100 2fF +0) (25 25 3fF +30) (25 100 3fF +0) (100 0 2fF +0)
+  size 4 diameter 35 scale 10: [[3, 0, 1, 6], [2, 4, 7, 5], [8]] cost 1.6333333333333333
+  size 1 diameter 50 scale 1: [[3, 0, 1, 6], [2, 4, 7, 5], [8]] cost 1.6333333333333333
+max cap false FaradsPerDbu(0.0) scattered: (100 75 2fF +30) (50 25 2fF +0) (50 25 3fF +10) (75 25 3fF +0) (75 75 2fF +0) (50 75 3fF +10) (0 50 2fF +0)
+  size 3 diameter 50 scale 10: [[5, 4], [0], [3, 1, 2], [6]] cost 1.9
+  size 4 diameter 35 scale 1: [[5, 4], [0], [3, 1, 2], [6]] cost 1.599999988079071
+max cap true FaradsPerDbu(1e-17) scattered: (0 25 2fF +10)
+  size 1 diameter 100 scale 1: [[0]] cost 0
+  size 3 diameter 35 scale 10: [[0]] cost 0
+max cap false FaradsPerDbu(1e-17) scattered: (0 25 2fF +0)
+  size 2 diameter 50 scale 10: [[0]] cost 0
+  size 1 diameter 50 scale 1: [[0]] cost 0
+max cap false FaradsPerDbu(0.0) one row: (50 100 1fF +0) (0 100 1fF +0) (25 100 3fF +0) (25 100 1fF +30) (50 100 1fF +0) (75 100 3fF +10) (100 100 2fF +30) (100 100 1fF +0) (25 100 1fF +10) (25 100 2fF +30)
+  size 3 diameter 100 scale 10: [[6, 7, 5], [0, 4, 2], [3, 8, 9], [1]] cost 1.5
+  size 2 diameter 100 scale 10: [[6, 7], [5, 0], [4, 2], [3, 8], [9, 1]] cost 1.2999999999999998
+max cap false FaradsPerDbu(1e-17) scattered: (50 50 2fF +10) (75 25 3fF +30) (0 50 3fF +10) (0 75 1fF +30) (75 25 1fF +0)
+  size 2 diameter 50 scale 10: [[3], [0], [1, 4], [2]] cost 2.6
+  size 5 diameter 25 scale 10: [[2], [3], [0], [1], [4]] cost 2
+max cap true FaradsPerDbu(1e-17) one row: (0 50 3fF +0) (0 50 2fF +10) (25 50 1fF +30) (0 50 2fF +30) (0 50 1fF +0) (25 50 3fF +30)
+  size 5 diameter 50 scale 1: [[0, 1, 3, 4], [2, 5]] cost 1.6
+  size 2 diameter 35 scale 10: [[0, 1, 3, 4], [2, 5]] cost 1.6
+max cap false FaradsPerDbu(1e-17) one row: (50 50 2fF +0) (50 50 1fF +30) (0 50 1fF +0) (75 50 3fF +30) (0 50 3fF +0) (50 50 1fF +0)
+  size 5 diameter 50 scale 10: [[3], [0, 1, 5], [2, 4]] cost 1.0666666865348815
+  size 4 diameter 25 scale 1: [[3], [0, 1, 5], [2, 4]] cost 1.0666666865348815
+max cap false FaradsPerDbu(0.0) one row: (50 0 2fF +0) (75 0 3fF +0) (0 0 3fF +10)
+  size 4 diameter 35 scale 1: [[1, 0], [2]] cost 0.33333333333333337
+  size 3 diameter 25 scale 10: [[1, 0], [2]] cost 0.33333333333333337
+max cap true FaradsPerDbu(1e-17) scattered: (100 100 1fF +10) (100 50 2fF +30) (75 25 2fF +0) (25 50 1fF +30)
+  size 4 diameter 50 scale 1: [[3, 0, 1, 2]] cost 0
+  size 2 diameter 100 scale 10: [[3, 0, 1, 2]] cost 0
+max cap false FaradsPerDbu(1e-17) one row: (100 100 2fF +0) (75 100 3fF +0) (25 100 2fF +30) (75 100 3fF +10) (0 100 3fF +0) (75 100 2fF +0) (100 100 1fF +30)
+  size 5 diameter 25 scale 10: [[4], [0], [6], [1, 3, 5], [2]] cost 0.85
+  size 3 diameter 100 scale 1: [[4], [0], [6], [1, 3, 5], [2]] cost 0.85
+max cap false FaradsPerDbu(1e-17) one row: (0 50 2fF +30) (75 50 2fF +10) (75 50 1fF +0) (25 50 2fF +0) (25 50 2fF +30)
+  size 5 diameter 50 scale 1: [[1, 2], [3, 4], [0]] cost 0.5333333333333333
+  size 2 diameter 100 scale 10: [[1, 2], [3, 4], [0]] cost 0.5333333333333333
+max cap false FaradsPerDbu(0.0) scattered: (75 50 1fF +30) (25 75 1fF +30) (75 75 1fF +0) (75 75 3fF +0) (0 100 3fF +30) (50 100 3fF +0)
+  size 3 diameter 35 scale 10: [[1], [4], [5], [2, 3], [0]] cost 2.799999952316284
+  size 1 diameter 50 scale 10: [[1], [4], [5], [2, 3], [0]] cost 2.799999952316284
+max cap false FaradsPerDbu(0.0) scattered: (100 50 2fF +30) (0 50 3fF +10) (100 100 1fF +0) (75 75 3fF +10) (100 25 3fF +0) (100 50 2fF +0) (25 100 3fF +0) (25 75 2fF +0)
+  size 3 diameter 35 scale 10: [[1], [7, 6], [2], [3], [0, 5], [4]] cost 2.133333339293798
+  size 5 diameter 100 scale 1: [[1, 7, 6], [2, 3, 0, 5, 4]] cost 1.05
+max cap true FaradsPerDbu(0.0) one column: (25 25 1fF +0) (25 100 3fF +30) (25 50 2fF +30) (25 100 3fF +10) (25 75 3fF +10) (25 0 1fF +10) (25 75 3fF +30) (25 25 1fF +10) (25 50 1fF +0) (25 75 2fF +30) (25 0 3fF +10)
+  size 2 diameter 50 scale 1: [[5, 10, 0, 7, 2, 8], [4, 6, 9], [1, 3]] cost 1.5
+  size 2 diameter 25 scale 10: [[5, 10, 0, 7, 2, 8], [4, 6, 9], [1, 3]] cost 1.5
+max cap false FaradsPerDbu(0.0) one row: (50 0 2fF +0) (0 0 2fF +10) (50 0 3fF +10)
+  size 5 diameter 100 scale 10: [[1, 0, 2]] cost 0
+  size 4 diameter 100 scale 1: [[1, 0, 2]] cost 0
+max cap false FaradsPerDbu(1e-17) scattered: (75 25 3fF +0) (25 50 2fF +0) (100 75 2fF +10) (25 75 3fF +0) (100 75 2fF +30) (0 25 3fF +10) (50 25 3fF +30) (50 100 3fF +10) (25 0 1fF +10) (75 75 1fF +30) (25 25 1fF +30)
+  size 2 diameter 35 scale 10: [[5], [1, 3], [7], [9], [2], [4], [0], [6], [10], [8]] cost 3.049999952316284
+  size 1 diameter 25 scale 10: [[5], [1], [3], [7], [9], [2], [4], [0], [6], [10], [8]] cost 2.5
+max cap true FaradsPerDbu(1e-17) one row: (100 0 2fF +0) (25 0 1fF +10) (100 0 1fF +30) (75 0 1fF +0) (0 0 2fF +10) (25 0 3fF +0) (25 0 2fF +30) (75 0 3fF +10)
+  size 2 diameter 35 scale 1: [[0, 2, 3, 7], [1, 5, 6, 4]] cost 0.65
+  size 1 diameter 50 scale 10: [[0, 2, 3, 7], [1, 5, 6, 4]] cost 0.65
+max cap true FaradsPerDbu(1e-17) one column: (50 75 3fF +30) (50 75 1fF +10) (50 25 2fF +0) (50 100 1fF +30) (50 75 1fF +30) (50 50 2fF +30) (50 50 3fF +0)
+  size 4 diameter 35 scale 1: [[2, 5, 6], [0, 1, 4, 3]] cost 0.7333333333333334
+  size 1 diameter 50 scale 1: [[2, 5, 6], [0, 1, 4, 3]] cost 0.7333333333333334
+max cap false FaradsPerDbu(1e-17) one row: (75 0 3fF +30) (25 0 1fF +10) (75 0 3fF +30) (25 0 1fF +0) (0 0 2fF +0) (0 0 1fF +10) (75 0 3fF +30) (0 0 2fF +30) (100 0 1fF +0) (0 0 1fF +0) (50 0 2fF +10)
+  size 3 diameter 35 scale 1: [[4, 5], [7, 9], [8], [0], [2], [6], [10], [1, 3]] cost 2.1499999701976775
+  size 2 diameter 50 scale 1: [[4, 5], [7, 9], [8], [0], [2], [6], [10], [1, 3]] cost 2.1499999701976775
+max cap true FaradsPerDbu(1e-17) one column: (75 0 3fF +0)
+  size 3 diameter 100 scale 1: [[0]] cost 0
+  size 5 diameter 25 scale 1: [[0]] cost 0
+max cap true FaradsPerDbu(1e-17) one column: (75 0 2fF +10)
+  size 5 diameter 100 scale 10: [[0]] cost 0
+  size 2 diameter 35 scale 1: [[0]] cost 0
+max cap false FaradsPerDbu(0.0) scattered: (25 50 2fF +0) (100 75 3fF +0) (25 50 2fF +0) (50 100 2fF +0) (100 50 2fF +30)
+  size 1 diameter 25 scale 1: [[0], [2], [3], [1], [4]] cost 2
+  size 1 diameter 100 scale 10: [[0], [2], [3], [1], [4]] cost 2
+max cap true FaradsPerDbu(0.0) one row: (100 0 3fF +30) (25 0 3fF +0) (25 0 1fF +30)
+  size 1 diameter 35 scale 10: [[1, 2, 0]] cost 0
+  size 2 diameter 50 scale 10: [[1, 2, 0]] cost 0
+max cap false FaradsPerDbu(1e-17) scattered: (50 0 3fF +0) (75 100 3fF +10)
+  size 1 diameter 25 scale 1: [[0], [1]] cost 1
+  size 2 diameter 35 scale 1: [[0], [1]] cost 1
+max cap false FaradsPerDbu(0.0) one column: (75 100 2fF +0) (75 0 1fF +30) (75 0 2fF +10)
+  size 4 diameter 50 scale 10: [[1, 2], [0]] cost 0.4
+  size 4 diameter 35 scale 10: [[1, 2], [0]] cost 0.4
+max cap false FaradsPerDbu(0.0) one column: (0 50 2fF +0) (0 0 1fF +0)
+  size 4 diameter 25 scale 1: [[1], [0]] cost 0.5
+  size 2 diameter 100 scale 1: [[1, 0]] cost 0
+max cap true FaradsPerDbu(0.0) one row: (75 75 2fF +0) (0 75 2fF +0) (0 75 3fF +10) (50 75 1fF +10) (25 75 3fF +30) (25 75 2fF +30) (75 75 3fF +0) (25 75 1fF +10) (0 75 2fF +0)
+  size 2 diameter 50 scale 1: [[1, 2, 8, 0], [6, 3, 4, 5, 7]] cost 1.1333333333333333
+  size 4 diameter 25 scale 1: [[0, 6, 3, 4], [5, 7, 1, 2, 8]] cost 1.0666666666666669
+max cap true FaradsPerDbu(1e-17) one column: (75 75 3fF +30)
+  size 5 diameter 100 scale 10: [[0]] cost 0
+  size 3 diameter 25 scale 1: [[0]] cost 0
+max cap true FaradsPerDbu(1e-17) scattered: (50 75 1fF +0) (100 50 2fF +0) (100 0 3fF +10) (0 25 2fF +30)
+  size 2 diameter 35 scale 1: [[0, 1, 2], [3]] cost 1.6333333333333333
+  size 2 diameter 100 scale 1: [[0, 1, 2], [3]] cost 1.6333333333333333
+max cap true FaradsPerDbu(1e-17) one column: (25 25 3fF +10) (25 75 1fF +0) (25 0 1fF +0) (25 0 2fF +0) (25 100 3fF +0) (25 0 3fF +30) (25 0 3fF +0) (25 25 3fF +10) (25 100 3fF +30) (25 75 1fF +0) (25 100 3fF +10)
+  size 5 diameter 50 scale 1: [[2, 3, 5, 6], [0, 7, 1, 9], [4, 8, 10]] cost 0.8999999999999999
+  size 4 diameter 50 scale 10: [[2, 3, 5, 6], [0, 7, 1, 9], [4, 8, 10]] cost 0.8999999999999999
+max cap false FaradsPerDbu(0.0) one column: (100 25 3fF +0) (100 100 2fF +30) (100 75 2fF +30) (100 25 2fF +10) (100 100 1fF +0) (100 75 1fF +0) (100 0 1fF +10) (100 25 1fF +0)
+  size 4 diameter 100 scale 10: [[6, 0, 3, 7], [2, 5, 1, 4]] cost 0.45
+  size 1 diameter 50 scale 1: [[6, 0, 3, 7], [2, 5, 1, 4]] cost 0.45
+max cap false FaradsPerDbu(1e-17) one row: (0 75 3fF +10) (100 75 1fF +30) (0 75 1fF +0) (0 75 2fF +30) (100 75 3fF +30) (0 75 2fF +10)
+  size 3 diameter 25 scale 1: [[0, 2], [3], [5], [1], [4]] cost 0.85
+  size 1 diameter 35 scale 1: [[0, 2], [3], [5], [1], [4]] cost 0.85
+max cap true FaradsPerDbu(0.0) one row: (75 25 2fF +0)
+  size 3 diameter 35 scale 10: [[0]] cost 0
+  size 1 diameter 35 scale 10: [[0]] cost 0
+max cap true FaradsPerDbu(1e-17) scattered: (25 25 1fF +0) (100 50 3fF +30) (100 25 2fF +0) (75 0 2fF +30) (50 75 2fF +0) (100 75 1fF +0)
+  size 4 diameter 25 scale 10: [[1], [2], [3], [0], [4, 5]] cost 1.3333333730697632
+  size 4 diameter 25 scale 10: [[1], [2], [3], [0], [4, 5]] cost 1.3333333730697632
+max cap true FaradsPerDbu(1e-17) one column: (25 75 3fF +30) (25 50 3fF +10) (25 50 1fF +10) (25 75 1fF +30) (25 0 2fF +0) (25 50 3fF +10) (25 0 1fF +0) (25 75 1fF +0) (25 50 1fF +0)
+  size 4 diameter 100 scale 10: [[4, 6], [1, 2], [5, 8], [0, 3], [7]] cost 2.5333333730697634
+  size 1 diameter 25 scale 10: [[4, 6], [1, 2], [5, 8], [0, 3], [7]] cost 1.5333333432674408
+max cap true FaradsPerDbu(0.0) scattered: (25 100 1fF +30) (0 75 2fF +0) (50 0 2fF +30) (75 75 1fF +0) (100 100 2fF +30) (75 0 3fF +0) (0 50 1fF +0) (50 100 1fF +30)
+  size 4 diameter 50 scale 10: [[6, 1, 0, 7, 3, 4], [5, 2]] cost 1.8
+  size 2 diameter 25 scale 10: [[6, 1, 0, 7, 3, 4], [5, 2]] cost 1.8
+max cap false FaradsPerDbu(0.0) scattered: (75 75 3fF +30) (100 100 2fF +10) (100 50 3fF +10) (50 75 1fF +10)
+  size 3 diameter 35 scale 10: [[3], [0], [1], [2]] cost 2.099999964237213
+  size 5 diameter 100 scale 10: [[3, 0, 1, 2]] cost 0
+max cap true FaradsPerDbu(0.0) scattered: (100 100 1fF +10)
+  size 3 diameter 25 scale 10: [[0]] cost 0
+  size 4 diameter 100 scale 10: [[0]] cost 0
+max cap false FaradsPerDbu(0.0) one row: (100 25 1fF +0) (50 25 3fF +0)
+  size 1 diameter 100 scale 10: [[1], [0]] cost 2
+  size 3 diameter 100 scale 10: [[1, 0]] cost 0
+max cap false FaradsPerDbu(0.0) scattered: (100 100 3fF +30) (75 0 3fF +0) (75 100 1fF +10)
+  size 3 diameter 100 scale 1: [[1, 2, 0]] cost 0
+  size 1 diameter 35 scale 1: [[1, 2, 0]] cost 0
+max cap true FaradsPerDbu(0.0) one column: (75 75 3fF +10) (75 75 1fF +0) (75 25 1fF +0) (75 50 3fF +0) (75 25 1fF +10) (75 100 1fF +0)
+  size 2 diameter 25 scale 1: [[2, 4, 3, 0, 1, 5]] cost 0
+  size 2 diameter 100 scale 10: [[2, 4, 3, 0, 1, 5]] cost 0
+max cap true FaradsPerDbu(1e-17) scattered: (25 25 3fF +30) (25 100 2fF +0) (75 25 3fF +0) (25 75 1fF +10) (25 100 1fF +0) (0 50 1fF +10)
+  size 1 diameter 35 scale 10: [[5, 3], [1, 4], [2], [0]] cost 1.8666666706403097
+  size 3 diameter 50 scale 10: [[3, 1, 4], [2], [0], [5]] cost 1.80000003973643
+max cap true FaradsPerDbu(0.0) scattered: (0 75 1fF +0) (75 75 3fF +0) (25 75 1fF +30) (75 75 1fF +30)
+  size 3 diameter 35 scale 10: [[0, 1, 3, 2]] cost 0
+  size 4 diameter 35 scale 1: [[0, 1, 3, 2]] cost 0
+max cap true FaradsPerDbu(0.0) scattered: (50 0 2fF +0) (50 25 1fF +30) (50 100 1fF +0) (75 100 1fF +0)
+  size 3 diameter 25 scale 1: [[0, 1, 2, 3]] cost 0
+  size 1 diameter 25 scale 1: [[0, 1, 2, 3]] cost 0
+max cap false FaradsPerDbu(0.0) one row: (75 50 3fF +10)
+  size 2 diameter 35 scale 1: [[0]] cost 0
+  size 5 diameter 35 scale 10: [[0]] cost 0
+max cap false FaradsPerDbu(0.0) one column: (100 25 1fF +10) (100 50 2fF +30) (100 0 1fF +10)
+  size 1 diameter 50 scale 1: [[2], [0], [1]] cost 2
+  size 3 diameter 25 scale 10: [[2], [0], [1]] cost 1
+max cap false FaradsPerDbu(1e-17) scattered: (100 100 3fF +30) (0 25 2fF +30) (75 75 3fF +0) (50 50 3fF +0) (0 25 3fF +30) (25 75 1fF +30) (100 50 3fF +10) (100 50 3fF +10) (75 0 2fF +0) (100 50 1fF +10) (50 75 1fF +30)
+  size 2 diameter 35 scale 1: [[1], [4], [5], [3], [10], [2], [0], [6, 7], [9], [8]] cost 2.9999999523162844
+  size 2 diameter 100 scale 10: [[1], [4], [5], [3], [10], [2], [0], [6, 7], [9], [8]] cost 2.9999999523162844
+max cap true FaradsPerDbu(1e-17) one column: (100 0 3fF +0) (100 0 3fF +0) (100 50 2fF +30) (100 100 2fF +10)
+  size 4 diameter 35 scale 10: [[0, 1], [2], [3]] cost 0.699999988079071
+  size 1 diameter 35 scale 10: [[0, 1], [2], [3]] cost 0.699999988079071
+max cap false FaradsPerDbu(1e-17) one row: (100 100 2fF +30) (0 100 3fF +30)
+  size 5 diameter 100 scale 1: [[1], [0]] cost 1
+  size 4 diameter 50 scale 10: [[1], [0]] cost 0.5
+max cap false FaradsPerDbu(0.0) scattered: (100 25 1fF +0) (50 75 2fF +0) (100 0 2fF +30)
+  size 5 diameter 50 scale 10: [[0, 2], [1]] cost 0.9333333333333333
+  size 2 diameter 25 scale 1: [[0, 2], [1]] cost 0.9333333333333333
+max cap false FaradsPerDbu(0.0) one column: (75 75 2fF +30) (75 100 2fF +0) (75 75 1fF +30)
+  size 2 diameter 25 scale 10: [[0], [2], [1]] cost 2
+  size 5 diameter 50 scale 10: [[0], [2], [1]] cost 2
+max cap false FaradsPerDbu(1e-17) one column: (100 50 2fF +0) (100 75 1fF +0) (100 0 2fF +30) (100 100 3fF +0) (100 100 3fF +30) (100 0 2fF +0) (100 50 1fF +0) (100 100 1fF +0) (100 75 3fF +10) (100 100 2fF +0) (100 100 3fF +10)
+  size 2 diameter 100 scale 1: [[5, 0], [6, 1], [8, 3], [4, 7], [9, 10], [2]] cost 1.5000000000000002
+  size 2 diameter 100 scale 10: [[5, 0], [6, 1], [8, 3], [4, 7], [9, 10], [2]] cost 1.5000000000000002
+max cap false FaradsPerDbu(0.0) one column: (100 50 1fF +30) (100 75 3fF +0) (100 25 3fF +0) (100 0 2fF +0) (100 0 1fF +10) (100 25 3fF +0)
+  size 3 diameter 100 scale 1: [[3, 4, 2], [5, 0, 1]] cost 0.4666666666666667
+  size 3 diameter 35 scale 1: [[3, 4, 2], [5, 0, 1]] cost 0.4666666666666667
+max cap false FaradsPerDbu(1e-17) one column: (0 0 3fF +0) (0 50 3fF +10) (0 100 2fF +10) (0 100 3fF +10) (0 75 2fF +0)
+  size 3 diameter 25 scale 1: [[1], [4], [2, 3], [0]] cost 0.7
+  size 2 diameter 35 scale 1: [[1], [4], [2, 3], [0]] cost 0.7
+max cap true FaradsPerDbu(0.0) scattered: (100 100 1fF +10) (25 50 3fF +30) (25 75 2fF +30) (50 0 1fF +0)
+  size 3 diameter 50 scale 1: [[1, 2, 0, 3]] cost 0
+  size 1 diameter 50 scale 10: [[1, 2, 0, 3]] cost 0
+max cap false FaradsPerDbu(1e-17) scattered: (25 25 1fF +10) (25 75 2fF +30) (75 0 2fF +10) (100 0 2fF +0) (0 0 2fF +0) (25 25 2fF +10)
+  size 2 diameter 50 scale 10: [[0, 5], [1], [3, 2], [4]] cost 1.3166666865348815
+  size 1 diameter 100 scale 1: [[0, 5], [1], [3, 2], [4]] cost 1.3166666865348815
+max cap false FaradsPerDbu(1e-17) one row: (0 100 1fF +30) (75 100 3fF +30) (50 100 2fF +10) (100 100 3fF +10) (100 100 3fF +30) (50 100 3fF +0) (0 100 2fF +30) (100 100 3fF +10) (25 100 2fF +30) (75 100 2fF +30)
+  size 3 diameter 50 scale 1: [[0], [6], [3, 4, 7], [1], [9], [2, 5], [8]] cost 2.5
+  size 5 diameter 50 scale 10: [[0], [6], [3, 4, 7], [1], [9], [2, 5], [8]] cost 2.5
+max cap false FaradsPerDbu(1e-17) scattered: (0 50 2fF +0) (75 25 1fF +0) (25 100 2fF +0) (25 50 2fF +10)
+  size 4 diameter 35 scale 1: [[1], [3, 0], [2]] cost 0.9333333353201548
+  size 1 diameter 50 scale 10: [[1], [3, 0], [2]] cost 0.9333333353201548
+max cap false FaradsPerDbu(0.0) one row: (25 75 1fF +30) (0 75 3fF +30) (100 75 1fF +10) (75 75 1fF +0)
+  size 4 diameter 50 scale 10: [[1], [2, 3], [0]] cost 0.85
+  size 3 diameter 100 scale 10: [[2, 3], [0, 1]] cost 0.35
+max cap true FaradsPerDbu(1e-17) one row: (75 50 1fF +0) (25 50 2fF +30) (50 50 2fF +30)
+  size 5 diameter 50 scale 1: [[1, 0, 2]] cost 0
+  size 4 diameter 50 scale 1: [[1, 0, 2]] cost 0
+max cap true FaradsPerDbu(1e-17) one column: (50 50 3fF +0) (50 75 1fF +0) (50 75 3fF +0) (50 0 1fF +0) (50 75 3fF +10) (50 25 2fF +0) (50 25 1fF +0) (50 75 1fF +30) (50 0 3fF +0)
+  size 1 diameter 35 scale 1: [[3, 8, 5, 6], [0, 1, 2], [4, 7]] cost 0.6666666666666667
+  size 4 diameter 100 scale 10: [[3, 8, 5, 6], [0, 1, 2], [4, 7]] cost 0.6666666666666667
+max cap false FaradsPerDbu(1e-17) scattered: (75 100 3fF +0) (50 75 1fF +30) (50 50 1fF +10) (50 50 2fF +0) (0 0 3fF +10) (50 25 3fF +30) (25 50 1fF +0) (25 75 1fF +0) (100 75 3fF +0)
+  size 1 diameter 25 scale 1: [[4], [6], [7], [2], [3], [1], [0], [8], [5]] cost 2
+  size 1 diameter 25 scale 10: [[4], [6], [7], [2], [3], [1], [0], [8], [5]] cost 2
+max cap false FaradsPerDbu(1e-17) one column: (75 50 3fF +0) (75 25 1fF +30)
+  size 1 diameter 35 scale 1: [[1], [0]] cost 1.399999976158142
+  size 1 diameter 100 scale 10: [[1], [0]] cost 1.399999976158142
+max cap false FaradsPerDbu(0.0) one column: (0 100 1fF +30) (0 75 2fF +0)
+  size 2 diameter 100 scale 1: [[1, 0]] cost 0
+  size 5 diameter 35 scale 1: [[1, 0]] cost 0
+max cap false FaradsPerDbu(0.0) scattered: (75 50 1fF +0) (25 0 1fF +0) (25 0 3fF +0)
+  size 4 diameter 50 scale 1: [[1, 2], [0]] cost 1
+  size 3 diameter 50 scale 1: [[1, 2], [0]] cost 1
+max cap false FaradsPerDbu(1e-17) one row: (75 25 1fF +10) (50 25 1fF +0) (75 25 2fF +10) (50 25 1fF +0) (0 25 1fF +10) (50 25 2fF +0)
+  size 2 diameter 35 scale 10: [[4], [0, 2], [1, 3], [5]] cost 1.200000003973643
+  size 2 diameter 50 scale 1: [[4], [0, 2], [1, 3], [5]] cost 1.200000003973643
+max cap true FaradsPerDbu(1e-17) scattered: (25 50 1fF +10) (0 25 3fF +0) (0 50 2fF +0) (0 100 2fF +10) (25 0 3fF +0) (100 50 1fF +10) (100 100 2fF +30) (100 75 3fF +10)
+  size 2 diameter 25 scale 1: [[0, 2, 3], [6, 7, 5], [4, 1]] cost 1.85
+  size 3 diameter 50 scale 1: [[0, 2, 3], [6, 7, 5], [4, 1]] cost 1.85
+max cap false FaradsPerDbu(0.0) one column: (75 0 1fF +0) (75 100 1fF +30)
+  size 4 diameter 50 scale 10: [[0], [1]] cost 0.5
+  size 4 diameter 100 scale 10: [[0], [1]] cost 0.5
+max cap true FaradsPerDbu(0.0) one column: (100 0 3fF +10)
+  size 4 diameter 35 scale 10: [[0]] cost 0
+  size 1 diameter 50 scale 10: [[0]] cost 0
+max cap true FaradsPerDbu(1e-17) one row: (0 75 2fF +10) (100 75 3fF +30) (100 75 1fF +30) (50 75 3fF +10) (50 75 2fF +10) (50 75 2fF +30) (100 75 3fF +10)
+  size 4 diameter 100 scale 10: [[2, 6], [3, 4], [5], [0], [1]] cost 2.6
+  size 1 diameter 35 scale 1: [[0, 1, 2], [6, 3, 4], [5]] cost 2.0999999999999996
+max cap true FaradsPerDbu(1e-17) scattered: (0 75 3fF +30) (75 0 3fF +0) (0 25 3fF +10) (25 25 1fF +30) (50 0 1fF +30) (0 75 2fF +30)
+  size 4 diameter 50 scale 10: [[2], [0], [5], [1, 4], [3]] cost 2.733333392937978
+  size 5 diameter 50 scale 10: [[2], [0], [5], [1, 4], [3]] cost 2.733333392937978
+max cap false FaradsPerDbu(0.0) one column: (0 0 2fF +0) (0 0 3fF +30) (0 25 1fF +0) (0 0 3fF +10)
+  size 3 diameter 25 scale 10: [[1], [3], [2, 0]] cost 2
+  size 5 diameter 35 scale 1: [[1], [3], [2, 0]] cost 2
+max cap false FaradsPerDbu(0.0) one column: (75 75 2fF +0) (75 25 2fF +0) (75 75 2fF +30) (75 50 2fF +10) (75 25 1fF +0) (75 25 3fF +10) (75 25 1fF +30) (75 100 1fF +10) (75 25 3fF +10) (75 75 3fF +0) (75 75 3fF +30)
+  size 4 diameter 35 scale 10: [[1, 4, 5], [6], [8], [3, 0], [2, 9], [10], [7]] cost 2.4000000059604645
+  size 5 diameter 50 scale 1: [[1, 4, 5, 6, 8], [3, 0], [2, 9], [10], [7]] cost 2.0666666865348815
+max cap false FaradsPerDbu(0.0) scattered: (0 100 3fF +10) (75 50 3fF +10)
+  size 2 diameter 35 scale 10: [[0], [1]] cost 0.699999988079071
+  size 1 diameter 25 scale 10: [[0], [1]] cost 0.5
+max cap true FaradsPerDbu(1e-17) scattered: (25 75 1fF +30) (25 100 2fF +30) (100 25 1fF +10) (50 50 2fF +30) (50 25 2fF +30) (75 75 1fF +0) (75 0 2fF +0) (100 50 1fF +10) (75 50 1fF +0) (75 100 3fF +10)
+  size 4 diameter 35 scale 1: [[0, 1, 5, 9], [7, 8, 2, 6], [4, 3]] cost 2.4166666666666665
+  size 4 diameter 35 scale 10: [[0, 1, 5, 9], [7, 8, 2, 6], [4, 3]] cost 2.4166666666666665
+max cap true FaradsPerDbu(1e-17) one column: (50 25 1fF +0) (50 0 1fF +30) (50 75 1fF +0) (50 75 3fF +0) (50 75 1fF +10) (50 25 1fF +10) (50 25 3fF +10) (50 75 2fF +0)
+  size 5 diameter 50 scale 10: [[0, 5, 6], [2, 3, 4, 7], [1]] cost 0.4
+  size 2 diameter 100 scale 1: [[0, 5, 6], [2, 3, 4, 7], [1]] cost 0.4
+max cap true FaradsPerDbu(0.0) one row: (100 25 3fF +0) (75 25 1fF +0) (25 25 2fF +0) (0 25 1fF +0) (0 25 1fF +0) (100 25 2fF +10) (50 25 1fF +30) (75 25 1fF +30) (100 25 2fF +0) (0 25 2fF +0) (100 25 1fF +0)
+  size 2 diameter 25 scale 10: [[3, 4, 9, 0, 5], [8, 10, 1, 7, 6, 2]] cost 1.1
+  size 2 diameter 100 scale 10: [[3, 4, 9, 0, 5], [8, 10, 1, 7, 6, 2]] cost 1.1
+max cap false FaradsPerDbu(1e-17) scattered: (0 25 2fF +30) (100 100 2fF +0) (50 25 2fF +10) (50 50 3fF +30)
+  size 3 diameter 35 scale 1: [[0], [1], [2], [3]] cost 1.4000000059604645
+  size 2 diameter 50 scale 1: [[0], [1], [2], [3]] cost 1.4000000059604645
+max cap false FaradsPerDbu(1e-17) one row: (0 50 3fF +0) (50 50 1fF +0) (25 50 3fF +0)
+  size 2 diameter 50 scale 1: [[1, 2], [0]] cost 0.5
+  size 5 diameter 25 scale 10: [[1, 2], [0]] cost 0.5
+max cap false FaradsPerDbu(1e-17) one column: (25 0 1fF +10) (25 0 2fF +0) (25 25 2fF +0) (25 100 1fF +0) (25 100 2fF +0) (25 50 1fF +0) (25 0 3fF +30) (25 50 3fF +10) (25 50 2fF +0) (25 100 1fF +0)
+  size 3 diameter 25 scale 1: [[0, 1], [6], [2, 5], [7, 8], [3, 4, 9]] cost 0.7
+  size 4 diameter 35 scale 1: [[0, 1], [6], [2, 5], [7, 8], [3, 4, 9]] cost 0.7
+max cap true FaradsPerDbu(0.0) one row: (50 25 1fF +0) (100 25 3fF +30)
+  size 1 diameter 25 scale 10: [[0, 1]] cost 0
+  size 3 diameter 100 scale 1: [[0, 1]] cost 0
+max cap false FaradsPerDbu(1e-17) scattered: (50 0 3fF +0) (25 50 1fF +30) (25 75 1fF +30) (75 100 3fF +30) (50 100 2fF +0) (25 50 2fF +0)
+  size 1 diameter 25 scale 1: [[1], [5], [2], [4], [3], [0]] cost 2.5
+  size 3 diameter 25 scale 10: [[1], [5], [2], [4], [3], [0]] cost 2.5
+max cap false FaradsPerDbu(0.0) scattered: (0 50 1fF +10) (75 25 3fF +0) (50 75 3fF +10) (75 0 1fF +0) (100 100 1fF +30)
+  size 1 diameter 35 scale 1: [[0], [2], [4], [3], [1]] cost 1.399999976158142
+  size 5 diameter 100 scale 1: [[3, 1], [0, 2], [4]] cost 1.2
+max cap true FaradsPerDbu(0.0) one row: (50 25 3fF +0) (100 25 1fF +0) (75 25 3fF +10) (25 25 1fF +0) (50 25 3fF +0) (25 25 2fF +0) (75 25 1fF +30) (75 25 3fF +10) (0 25 1fF +0)
+  size 4 diameter 50 scale 1: [[1, 2, 6, 7], [0, 4, 3, 5, 8]] cost 0.55
+  size 3 diameter 50 scale 10: [[1, 2, 6, 7], [0, 4, 3, 5, 8]] cost 0.55
+max cap true FaradsPerDbu(1e-17) one row: (100 25 1fF +10) (0 25 3fF +0) (50 25 3fF +0) (100 25 3fF +0) (75 25 1fF +0)
+  size 5 diameter 50 scale 10: [[0, 3], [4, 2], [1]] cost 0.35
+  size 2 diameter 35 scale 1: [[0, 3], [4, 2], [1]] cost 0.35
+max cap false FaradsPerDbu(0.0) scattered: (75 25 3fF +30) (50 0 1fF +10) (50 75 3fF +0) (0 50 1fF +30) (25 0 2fF +30) (100 50 1fF +0) (50 50 2fF +0) (100 50 2fF +30) (0 25 2fF +30)
+  size 3 diameter 35 scale 10: [[8], [3], [6, 2], [5, 7], [0], [1], [4]] cost 2.600000007947286
+  size 2 diameter 50 scale 10: [[8], [3], [6, 2], [5, 7], [0], [1], [4]] cost 2.600000007947286
+max cap false FaradsPerDbu(1e-17) one column: (50 0 2fF +0)
+  size 1 diameter 25 scale 10: [[0]] cost 0
+  size 1 diameter 25 scale 10: [[0]] cost 0
+max cap false FaradsPerDbu(1e-17) one row: (25 0 1fF +0) (100 0 3fF +10) (75 0 2fF +0) (0 0 3fF +10) (100 0 1fF +10) (100 0 1fF +10)
+  size 3 diameter 100 scale 10: [[1, 4, 5], [2, 0, 3]] cost 0.2
+  size 5 diameter 25 scale 1: [[1, 4, 5], [2, 0, 3]] cost 0.2
+max cap true FaradsPerDbu(1e-17) one row: (75 75 2fF +30) (75 75 2fF +30) (100 75 2fF +0) (75 75 2fF +30) (0 75 2fF +10) (50 75 1fF +0) (75 75 2fF +10) (50 75 3fF +0) (25 75 3fF +10) (25 75 3fF +0) (100 75 3fF +10)
+  size 2 diameter 35 scale 1: [[2, 10, 0], [1, 3, 6, 5], [7, 8, 9], [4]] cost 1.6
+  size 3 diameter 25 scale 10: [[2, 10], [0, 1], [3, 6], [5, 7], [8, 9], [4]] cost 1.4500000000000002
+max cap true FaradsPerDbu(1e-17) one row: (50 50 1fF +30) (50 50 1fF +0) (50 50 3fF +0) (0 50 3fF +10) (25 50 1fF +30) (25 50 2fF +0) (50 50 2fF +0) (25 50 1fF +10) (25 50 1fF +10)
+  size 2 diameter 100 scale 1: [[0, 1, 2, 6], [4, 5, 7, 8, 3]] cost 0.6
+  size 3 diameter 35 scale 10: [[0, 1, 2, 6], [4, 5, 7, 8, 3]] cost 0.6
+max cap false FaradsPerDbu(1e-17) one column: (75 0 3fF +0) (75 50 2fF +30) (75 75 2fF +0) (75 25 2fF +0) (75 100 1fF +30)
+  size 5 diameter 35 scale 1: [[0, 3], [1], [2], [4]] cost 0.949999988079071
+  size 4 diameter 100 scale 10: [[2, 4], [0, 3, 1]] cost 0.55
+max cap true FaradsPerDbu(0.0) one row: (0 75 3fF +0) (25 75 1fF +10) (0 75 3fF +10) (75 75 1fF +30)
+  size 4 diameter 25 scale 10: [[0, 2, 3, 1]] cost 0
+  size 1 diameter 35 scale 10: [[0, 2, 3, 1]] cost 0
+max cap true FaradsPerDbu(0.0) one row: (100 0 3fF +10) (100 0 3fF +0) (75 0 2fF +10) (100 0 2fF +0) (25 0 2fF +30) (0 0 2fF +10) (50 0 1fF +0) (75 0 2fF +0) (25 0 3fF +0) (25 0 1fF +0)
+  size 5 diameter 35 scale 1: [[1, 3, 2, 7, 6], [4, 8, 9, 5], [0]] cost 1.15
+  size 4 diameter 50 scale 1: [[1, 3, 2, 7, 6], [4, 8, 9, 5], [0]] cost 1.15
+max cap true FaradsPerDbu(1e-17) one row: (75 25 3fF +30) (50 25 2fF +30) (100 25 2fF +30) (50 25 2fF +0)
+  size 3 diameter 50 scale 1: [[3, 2, 0], [1]] cost 1.7
+  size 5 diameter 100 scale 1: [[3, 2, 0], [1]] cost 1.7
+max cap true FaradsPerDbu(0.0) scattered: (50 50 3fF +0) (100 25 2fF +30) (0 25 1fF +10) (0 100 3fF +0) (25 50 2fF +30) (0 25 1fF +30) (50 50 2fF +30) (75 100 2fF +0) (25 0 1fF +0) (75 50 1fF +30)
+  size 4 diameter 25 scale 1: [[2, 5, 4, 3, 0], [6, 7, 9, 1, 8]] cost 1.1
+  size 2 diameter 25 scale 1: [[2, 5, 4, 3, 0], [6, 7, 9, 1, 8]] cost 1.1
+max cap true FaradsPerDbu(0.0) one row: (25 75 3fF +10) (0 75 1fF +0)
+  size 4 diameter 25 scale 1: [[1, 0]] cost 0
+  size 1 diameter 25 scale 1: [[1, 0]] cost 0
+max cap false FaradsPerDbu(1e-17) one column: (25 0 2fF +10) (25 100 2fF +0) (25 25 1fF +0) (25 100 2fF +10) (25 25 3fF +30) (25 0 1fF +10) (25 100 1fF +10) (25 50 2fF +30)
+  size 4 diameter 35 scale 10: [[0, 5], [2, 4], [7], [1, 3, 6]] cost 0.8499999940395355
+  size 4 diameter 50 scale 1: [[0, 5], [2, 4], [7], [1, 3, 6]] cost 0.8499999940395355
+max cap false FaradsPerDbu(1e-17) one row: (75 25 1fF +30) (0 25 2fF +30) (75 25 1fF +0) (50 25 3fF +30) (75 25 1fF +0)
+  size 4 diameter 100 scale 1: [[0, 2, 4, 3], [1]] cost 1.1333333333333333
+  size 1 diameter 35 scale 10: [[0, 2, 4, 3], [1]] cost 1.1333333333333333
+max cap true FaradsPerDbu(1e-17) one row: (25 0 3fF +0) (0 0 1fF +30) (0 0 2fF +0) (100 0 3fF +0) (25 0 2fF +0)
+  size 3 diameter 35 scale 1: [[3, 0, 4], [1, 2]] cost 0.75
+  size 3 diameter 35 scale 10: [[1, 2], [3], [0, 4]] cost 0.6499999940395356
+max cap false FaradsPerDbu(0.0) scattered: (75 0 1fF +30) (75 0 2fF +10) (100 100 2fF +0) (50 50 1fF +0) (75 25 1fF +30) (75 50 3fF +0) (75 0 2fF +0) (25 75 1fF +0) (100 75 2fF +0) (75 75 1fF +0)
+  size 1 diameter 25 scale 10: [[3], [7], [9], [2], [8], [5], [0], [1], [6], [4]] cost 3.000000089406967
+  size 1 diameter 50 scale 10: [[3], [7], [9], [2], [8], [5], [0], [1], [6], [4]] cost 3.000000089406967
+max cap false FaradsPerDbu(0.0) one column: (25 25 3fF +10) (25 25 2fF +0) (25 75 1fF +0) (25 100 1fF +30) (25 75 2fF +0) (25 50 2fF +10) (25 50 3fF +10) (25 75 1fF +0) (25 75 3fF +0) (25 75 3fF +10) (25 50 3fF +30)
+  size 4 diameter 100 scale 10: [[0, 1, 5, 6], [10, 2, 4, 7], [8, 9, 3]] cost 1.3333333333333335
+  size 2 diameter 25 scale 1: [[0, 1, 5, 6], [10, 2, 4, 7], [8, 9, 3]] cost 1.3333333333333335
+max cap true FaradsPerDbu(0.0) one column: (100 25 1fF +30) (100 100 3fF +10) (100 0 3fF +0)
+  size 1 diameter 100 scale 10: [[2, 0, 1]] cost 0
+  size 2 diameter 35 scale 1: [[2, 0, 1]] cost 0
+max cap false FaradsPerDbu(1e-17) scattered: (75 0 1fF +10) (50 100 3fF +30) (50 100 2fF +0) (75 25 3fF +0) (25 25 2fF +30) (50 50 1fF +10)
+  size 5 diameter 100 scale 1: [[3, 0], [4, 5], [1, 2]] cost 2
+  size 1 diameter 50 scale 1: [[3, 0], [4, 5], [1, 2]] cost 2
+max cap false FaradsPerDbu(0.0) one column: (50 0 3fF +10) (50 75 3fF +10) (50 100 1fF +30) (50 0 1fF +0) (50 75 1fF +10) (50 50 3fF +0) (50 50 3fF +10) (50 50 2fF +30) (50 50 1fF +30)
+  size 5 diameter 100 scale 1: [[5, 6, 7, 8, 1], [4, 2], [0, 3]] cost 1.3
+  size 3 diameter 50 scale 10: [[0, 3], [5, 6, 7], [8], [1, 4], [2]] cost 1.2
+max cap false FaradsPerDbu(0.0) one row: (50 0 3fF +0) (0 0 3fF +30) (25 0 2fF +0) (25 0 3fF +10) (100 0 1fF +0) (25 0 1fF +10) (25 0 1fF +0) (75 0 1fF +30) (75 0 3fF +0) (100 0 2fF +0)
+  size 4 diameter 35 scale 10: [[4, 9], [7, 8], [0, 2], [3, 5, 6], [1]] cost 1.0999999940395355
+  size 2 diameter 25 scale 1: [[4, 9], [7], [8, 0], [2, 3], [5, 6], [1]] cost 0.95
+max cap false FaradsPerDbu(1e-17) one row: (25 50 2fF +0) (0 50 1fF +0) (0 50 3fF +0) (100 50 2fF +30) (0 50 1fF +0) (75 50 3fF +0) (100 50 1fF +0) (75 50 2fF +0) (75 50 3fF +0) (25 50 2fF +30) (75 50 1fF +10)
+  size 5 diameter 25 scale 10: [[1, 2, 4], [3], [6, 5, 7, 8], [10], [0], [9]] cost 1.25
+  size 2 diameter 25 scale 1: [[1, 2, 4], [3], [6, 5, 7, 8], [10], [0], [9]] cost 1.25
+max cap false FaradsPerDbu(1e-17) one row: (0 25 1fF +30) (100 25 1fF +30) (50 25 1fF +0) (25 25 3fF +30) (25 25 2fF +30)
+  size 4 diameter 50 scale 10: [[0], [1], [2], [3], [4]] cost 2
+  size 5 diameter 50 scale 10: [[0], [1], [2], [3], [4]] cost 2
+max cap true FaradsPerDbu(1e-17) one row: (50 50 3fF +0) (25 50 3fF +0) (50 50 3fF +0) (50 50 1fF +0) (75 50 1fF +30) (25 50 2fF +0) (25 50 1fF +0) (25 50 2fF +0) (50 50 1fF +0) (50 50 2fF +0)
+  size 2 diameter 50 scale 10: [[1, 5, 6, 7], [4, 0], [2, 3, 8, 9]] cost 2.1
+  size 3 diameter 25 scale 1: [[1, 5, 6, 7], [4, 0, 2, 3, 8], [9]] cost 1.6
+max cap true FaradsPerDbu(1e-17) scattered: (75 50 2fF +0) (75 25 2fF +30) (100 100 1fF +0) (100 75 3fF +0) (50 75 2fF +10) (100 25 2fF +0) (0 0 1fF +0) (50 100 3fF +0) (50 25 2fF +10) (50 100 3fF +30)
+  size 1 diameter 100 scale 1: [[6, 4, 7], [9, 2, 3], [0, 5, 1, 8]] cost 2.55
+  size 4 diameter 35 scale 10: [[7, 9], [2, 3], [0, 5], [1], [8], [6], [4]] cost 2.0999999821186064
+max cap true FaradsPerDbu(1e-17) scattered: (25 75 2fF +0) (100 50 3fF +0) (0 50 1fF +0) (75 25 1fF +30) (100 75 3fF +30) (25 100 3fF +0) (25 100 1fF +10)
+  size 4 diameter 50 scale 1: [[2, 0, 5, 6], [4, 1, 3]] cost 1.05
+  size 3 diameter 25 scale 1: [[2, 0, 5, 6], [4, 1, 3]] cost 1.05
+max cap false FaradsPerDbu(0.0) one row: (25 100 2fF +30) (50 100 2fF +0) (50 100 3fF +0) (25 100 1fF +10) (75 100 2fF +30) (100 100 1fF +30) (50 100 1fF +30) (25 100 3fF +30) (0 100 1fF +10) (25 100 1fF +0)
+  size 4 diameter 50 scale 1: [[5], [4], [1, 2, 6], [0, 3], [7, 9], [8]] cost 2
+  size 2 diameter 35 scale 1: [[5], [4], [1, 2, 6], [0, 3], [7, 9], [8]] cost 2
+max cap true FaradsPerDbu(0.0) one column: (75 0 2fF +10) (75 50 1fF +0)
+  size 5 diameter 100 scale 1: [[0, 1]] cost 0
+  size 1 diameter 50 scale 10: [[0, 1]] cost 0
+max cap false FaradsPerDbu(0.0) one row: (100 25 3fF +0) (50 25 2fF +10) (100 25 2fF +10) (0 25 2fF +0)
+  size 4 diameter 35 scale 1: [[3], [0, 2], [1]] cost 0.4499999940395355
+  size 4 diameter 50 scale 1: [[3], [0, 2], [1]] cost 0.4499999940395355
+max cap true FaradsPerDbu(0.0) one column: (50 50 1fF +0) (50 25 1fF +0) (50 0 2fF +30)
+  size 3 diameter 25 scale 10: [[2, 1, 0]] cost 0
+  size 5 diameter 100 scale 1: [[2, 1, 0]] cost 0
+max cap false FaradsPerDbu(0.0) one column: (75 50 1fF +0) (75 0 3fF +30) (75 50 1fF +0) (75 100 2fF +30) (75 100 3fF +0) (75 0 2fF +0) (75 50 1fF +0) (75 50 2fF +10) (75 0 3fF +30)
+  size 4 diameter 100 scale 1: [[0, 2, 6, 7], [3, 4], [1, 5, 8]] cost 0.4
+  size 2 diameter 35 scale 1: [[0, 2, 6, 7], [3, 4], [1, 5, 8]] cost 0.4
+max cap false FaradsPerDbu(0.0) one row: (50 75 1fF +0) (100 75 2fF +0) (25 75 1fF +10) (50 75 3fF +0) (100 75 2fF +0) (100 75 2fF +0) (75 75 3fF +0) (0 75 2fF +30)
+  size 2 diameter 50 scale 1: [[7], [1, 4], [5, 6], [0, 3], [2]] cost 1.75
+  size 5 diameter 35 scale 1: [[7], [1, 4, 5, 6], [0, 3], [2]] cost 0.949999988079071
+max cap false FaradsPerDbu(1e-17) one column: (50 75 3fF +30) (50 25 1fF +0) (50 50 3fF +30) (50 75 1fF +30) (50 75 1fF +0)
+  size 4 diameter 25 scale 1: [[1], [2], [0], [3], [4]] cost 2
+  size 3 diameter 50 scale 1: [[1], [2], [0], [3], [4]] cost 2
+max cap true FaradsPerDbu(0.0) scattered: (100 25 1fF +0) (0 75 1fF +30) (25 0 3fF +0) (0 75 2fF +10) (25 0 3fF +0) (50 75 1fF +10) (0 100 2fF +0) (50 0 1fF +0) (50 50 1fF +10) (75 50 1fF +0) (0 75 1fF +10)
+  size 1 diameter 35 scale 10: [[1, 3, 10, 6, 8, 5, 9, 0], [7, 2, 4]] cost 1.8
+  size 2 diameter 25 scale 1: [[3, 10, 6, 8, 5, 9, 0, 7], [2, 4, 1]] cost 1.75
+max cap false FaradsPerDbu(0.0) scattered: (0 25 1fF +0) (50 0 1fF +0)
+  size 1 diameter 100 scale 10: [[0], [1]] cost 4
+  size 1 diameter 35 scale 1: [[0], [1]] cost 1.399999976158142
+max cap true FaradsPerDbu(1e-17) scattered: (25 50 3fF +10) (50 50 2fF +10) (0 75 3fF +0) (0 50 2fF +30) (75 25 2fF +30) (50 25 2fF +0) (50 50 3fF +30)
+  size 3 diameter 35 scale 1: [[0, 3, 2], [1, 6, 4], [5]] cost 3.1666666666666665
+  size 4 diameter 100 scale 10: [[0, 3, 2], [1, 6, 4], [5]] cost 3.1666666666666665
+max cap false FaradsPerDbu(0.0) one column: (25 0 2fF +10) (25 75 1fF +10) (25 25 2fF +0) (25 25 1fF +0) (25 25 1fF +30) (25 100 1fF +30) (25 0 3fF +0) (25 100 2fF +30) (25 0 3fF +0) (25 100 1fF +0) (25 0 2fF +30)
+  size 5 diameter 50 scale 10: [[2, 3, 4], [1], [5], [7, 9], [0, 6, 8, 10]] cost 1.6
+  size 1 diameter 25 scale 1: [[2, 3, 4], [1], [5], [7, 9], [0, 6, 8, 10]] cost 1.6
+max cap true FaradsPerDbu(0.0) one row: (75 100 1fF +30) (50 100 3fF +30) (75 100 3fF +30)
+  size 3 diameter 35 scale 10: [[1, 0, 2]] cost 0
+  size 5 diameter 35 scale 10: [[1, 0, 2]] cost 0
+max cap true FaradsPerDbu(1e-17) scattered: (50 100 3fF +0) (25 25 3fF +0) (75 100 1fF +0) (100 100 1fF +0) (50 75 3fF +0) (100 0 2fF +10) (25 100 3fF +0) (100 25 3fF +0) (25 75 3fF +30) (25 100 1fF +30) (25 75 1fF +0)
+  size 3 diameter 35 scale 1: [[8, 10, 6, 9], [0, 4, 2, 3], [7, 5, 1]] cost 1.9666666666666668
+  size 5 diameter 50 scale 1: [[8, 10, 6, 9], [0, 4, 2, 3], [7, 5, 1]] cost 1.9666666666666668
+max cap true FaradsPerDbu(0.0) one column: (75 100 1fF +30) (75 100 2fF +10) (75 100 1fF +10)
+  size 3 diameter 100 scale 10: [[0, 1, 2]] cost 0
+  size 4 diameter 35 scale 1: [[0, 1, 2]] cost 0
+max cap true FaradsPerDbu(0.0) one column: (25 25 2fF +0) (25 75 3fF +0) (25 100 3fF +10)
+  size 4 diameter 35 scale 1: [[0, 1, 2]] cost 0
+  size 4 diameter 50 scale 10: [[0, 1, 2]] cost 0
+max cap true FaradsPerDbu(1e-17) one row: (75 75 2fF +0) (100 75 3fF +10) (50 75 2fF +10) (100 75 2fF +0)
+  size 1 diameter 35 scale 1: [[2, 1, 3, 0]] cost 0
+  size 3 diameter 50 scale 1: [[2, 1, 3, 0]] cost 0
+max cap true FaradsPerDbu(1e-17) scattered: (100 25 3fF +30) (100 100 2fF +0) (75 100 2fF +0) (25 25 3fF +0) (100 75 1fF +30) (25 100 2fF +30) (100 100 2fF +10) (75 100 3fF +0) (100 50 3fF +0)
+  size 4 diameter 25 scale 10: [[3], [5], [2, 7], [1, 6], [4, 8], [0]] cost 1.866666696468989
+  size 4 diameter 50 scale 1: [[7, 1, 6, 4], [8, 0], [3, 5, 2]] cost 1.8000000000000003
+max cap true FaradsPerDbu(0.0) one row: (100 25 2fF +30) (50 25 2fF +0)
+  size 4 diameter 25 scale 1: [[1, 0]] cost 0
+  size 5 diameter 100 scale 10: [[1, 0]] cost 0
+max cap false FaradsPerDbu(0.0) scattered: (75 75 3fF +0) (50 25 2fF +30) (0 25 1fF +30) (100 100 1fF +0) (25 25 3fF +0) (50 75 1fF +0) (0 75 1fF +10)
+  size 3 diameter 100 scale 1: [[6, 5], [3, 0], [1, 4, 2]] cost 1.2166666666666668
+  size 3 diameter 100 scale 1: [[6, 5], [3, 0], [1, 4, 2]] cost 1.2166666666666668
+max cap false FaradsPerDbu(1e-17) one column: (50 50 3fF +30) (50 100 2fF +0) (50 75 2fF +10) (50 75 3fF +10) (50 75 2fF +0) (50 100 2fF +30) (50 0 3fF +10)
+  size 3 diameter 25 scale 1: [[6], [0], [2, 3, 4], [1], [5]] cost 0.95
+  size 5 diameter 100 scale 1: [[4, 1, 5], [6, 0, 2, 3]] cost 0.55
+max cap false FaradsPerDbu(1e-17) one row: (0 75 2fF +10) (75 75 1fF +0) (0 75 3fF +0) (100 75 1fF +30) (0 75 2fF +0)
+  size 3 diameter 50 scale 10: [[0, 2, 4], [3], [1]] cost 0.6
+  size 2 diameter 100 scale 1: [[0, 2, 4], [3], [1]] cost 0.6
+max cap false FaradsPerDbu(1e-17) one column: (50 50 1fF +10) (50 75 2fF +10) (50 75 3fF +30) (50 75 3fF +0) (50 0 2fF +0) (50 100 1fF +30) (50 0 3fF +0) (50 0 1fF +30) (50 50 3fF +0) (50 0 1fF +0) (50 0 2fF +0)
+  size 4 diameter 50 scale 10: [[4, 6, 7, 9], [10], [0, 8, 1], [2, 3], [5]] cost 1.55
+  size 2 diameter 25 scale 1: [[4, 6, 7, 9], [10], [0, 8, 1], [2, 3], [5]] cost 1.55
+max cap true FaradsPerDbu(0.0) one column: (25 100 2fF +10) (25 100 2fF +30) (25 50 2fF +0) (25 0 3fF +0) (25 0 1fF +0)
+  size 1 diameter 50 scale 1: [[3, 4, 2, 0, 1]] cost 0
+  size 4 diameter 50 scale 10: [[3, 4, 2, 0, 1]] cost 0
+max cap true FaradsPerDbu(1e-17) one row: (75 75 2fF +0) (100 75 1fF +0)
+  size 5 diameter 50 scale 10: [[0, 1]] cost 0
+  size 3 diameter 100 scale 1: [[0, 1]] cost 0
+max cap true FaradsPerDbu(0.0) one row: (25 0 1fF +10) (100 0 1fF +30) (100 0 2fF +30) (75 0 2fF +0) (0 0 1fF +0) (0 0 3fF +30) (100 0 2fF +0) (25 0 1fF +30) (0 0 3fF +30)
+  size 2 diameter 25 scale 10: [[4, 5, 8, 1, 2], [6, 3, 0, 7]] cost 1.6
+  size 1 diameter 25 scale 10: [[4, 5, 8, 1, 2], [6, 3, 0, 7]] cost 1.6
+max cap false FaradsPerDbu(0.0) scattered: (0 0 2fF +30) (100 100 2fF +0) (100 0 2fF +0) (100 75 2fF +0) (0 100 2fF +30) (25 0 3fF +0) (25 25 3fF +30) (50 0 1fF +30) (25 50 1fF +10) (0 100 3fF +0) (50 50 1fF +30)
+  size 5 diameter 35 scale 10: [[0], [8], [4, 9], [10], [1, 3], [2], [7], [6], [5]] cost 2.649999964237213
+  size 5 diameter 100 scale 1: [[0], [8], [4, 9], [10], [1, 3], [2], [7], [6], [5]] cost 2.649999964237213
+max cap false FaradsPerDbu(1e-17) scattered: (75 25 2fF +0) (100 0 1fF +30) (75 50 3fF +30) (75 25 3fF +30) (0 0 1fF +30) (100 25 1fF +0) (25 0 1fF +0) (100 50 1fF +0) (100 25 2fF +0) (50 0 1fF +0)
+  size 2 diameter 100 scale 10: [[2, 7], [5, 8], [0, 3], [1, 9], [6, 4]] cost 4.550000000000001
+  size 4 diameter 50 scale 10: [[2, 7], [5, 8, 0, 3], [1], [9, 6], [4]] cost 2.95
+max cap true FaradsPerDbu(1e-17) scattered: (100 100 2fF +0) (25 0 2fF +0) (75 25 1fF +30) (75 25 1fF +0) (100 50 1fF +0) (0 50 1fF +0) (100 50 2fF +0) (0 25 2fF +0) (75 50 2fF +10) (25 100 3fF +30)
+  size 4 diameter 25 scale 10: [[7, 5], [9], [0, 4, 6], [8, 2], [3], [1]] cost 1.9
+  size 3 diameter 25 scale 1: [[7, 5], [9], [0, 4, 6], [8, 2], [3], [1]] cost 1.9
+max cap false FaradsPerDbu(0.0) one column: (0 75 3fF +30) (0 50 1fF +30) (0 75 1fF +0) (0 0 1fF +0) (0 25 2fF +0) (0 75 1fF +0) (0 75 1fF +10) (0 50 2fF +0) (0 25 2fF +0) (0 0 3fF +10) (0 100 2fF +30)
+  size 2 diameter 50 scale 10: [[3, 9], [4, 8], [1, 7], [0, 2], [5, 6], [10]] cost 1.3
+  size 4 diameter 50 scale 1: [[3, 9, 4, 8], [1, 7], [0, 2, 5, 6], [10]] cost 1.0499999999999998
+max cap true FaradsPerDbu(0.0) one column: (50 100 1fF +10) (50 75 1fF +10)
+  size 5 diameter 35 scale 1: [[1, 0]] cost 0
+  size 3 diameter 35 scale 1: [[1, 0]] cost 0
+max cap true FaradsPerDbu(1e-17) one column: (75 100 2fF +0) (75 0 2fF +10) (75 25 1fF +0) (75 25 2fF +10) (75 100 2fF +30) (75 25 1fF +10) (75 75 2fF +0) (75 100 2fF +0) (75 100 2fF +0)
+  size 1 diameter 50 scale 10: [[1, 2], [3, 5], [6, 0], [4, 7, 8]] cost 0.8
+  size 1 diameter 25 scale 1: [[1, 2], [3, 5], [6, 0], [4, 7, 8]] cost 0.8
+max cap false FaradsPerDbu(0.0) scattered: (50 100 1fF +0) (25 25 1fF +0)
+  size 4 diameter 25 scale 10: [[1], [0]] cost 1
+  size 5 diameter 50 scale 1: [[1, 0]] cost 0
+max cap true FaradsPerDbu(1e-17) scattered: (25 0 1fF +0) (75 0 2fF +30) (50 75 3fF +30) (25 0 2fF +10) (100 50 2fF +10)
+  size 2 diameter 35 scale 10: [[0, 3], [2], [4], [1]] cost 1.0666666706403096
+  size 2 diameter 25 scale 1: [[0, 3], [2], [4], [1]] cost 1.0666666706403096
+max cap true FaradsPerDbu(1e-17) one column: (75 0 3fF +10) (75 75 2fF +0) (75 25 2fF +0) (75 50 1fF +30) (75 75 2fF +30) (75 50 3fF +0) (75 50 3fF +10) (75 0 1fF +0) (75 100 1fF +10) (75 100 2fF +10)
+  size 5 diameter 35 scale 10: [[5, 6], [1, 4], [8, 9], [0, 7], [2, 3]] cost 0.7000000000000001
+  size 3 diameter 35 scale 10: [[5, 6], [1, 4], [8, 9], [0, 7], [2, 3]] cost 0.7000000000000001
+max cap true FaradsPerDbu(1e-17) scattered: (75 25 1fF +0) (50 100 1fF +10) (50 75 2fF +0) (25 0 3fF +0) (75 25 1fF +10)
+  size 2 diameter 25 scale 1: [[2, 1, 0, 4], [3]] cost 1.65
+  size 5 diameter 35 scale 10: [[2, 1], [0, 4], [3]] cost 0.65
+max cap true FaradsPerDbu(0.0) one column: (100 100 1fF +0) (100 25 1fF +0)
+  size 3 diameter 100 scale 1: [[1, 0]] cost 0
+  size 2 diameter 25 scale 1: [[1, 0]] cost 0
+max cap true FaradsPerDbu(0.0) one row: (100 50 2fF +0) (25 50 1fF +30) (75 50 3fF +30) (50 50 3fF +0) (75 50 2fF +30)
+  size 5 diameter 35 scale 10: [[0, 2, 4, 3], [1]] cost 0.8
+  size 1 diameter 25 scale 10: [[0, 2, 4, 3], [1]] cost 0.8
+max cap true FaradsPerDbu(0.0) one row: (75 50 2fF +0) (100 50 1fF +30)
+  size 5 diameter 100 scale 1: [[0, 1]] cost 0
+  size 2 diameter 25 scale 10: [[0, 1]] cost 0
+max cap true FaradsPerDbu(0.0) scattered: (75 25 2fF +30)
+  size 5 diameter 35 scale 10: [[0]] cost 0
+  size 4 diameter 35 scale 1: [[0]] cost 0
+max cap false FaradsPerDbu(1e-17) scattered: (100 25 3fF +0) (25 0 2fF +10) (50 50 2fF +0) (100 75 1fF +10) (75 0 1fF +0) (25 25 2fF +30) (100 100 2fF +0) (0 0 1fF +0) (100 100 3fF +10) (75 75 1fF +30) (50 0 1fF +0)
+  size 1 diameter 35 scale 10: [[7], [2], [9], [6], [8], [3], [0], [4], [10], [5], [1]] cost 3.4999999403953552
+  size 2 diameter 50 scale 10: [[2], [9], [6, 8], [3], [0, 4], [10], [5], [1, 7]] cost 3.1
+max cap false FaradsPerDbu(1e-17) one row: (100 25 1fF +30) (25 25 1fF +10) (25 25 3fF +0) (25 25 3fF +0) (25 25 1fF +0) (25 25 2fF +0) (100 25 3fF +0) (25 25 3fF +30) (100 25 3fF +0) (0 25 2fF +30)
+  size 1 diameter 100 scale 10: [[9], [0], [6], [8], [1], [2], [3], [4], [5], [7]] cost 9
+  size 5 diameter 50 scale 10: [[9], [0, 6, 8], [1, 2, 3, 4, 5], [7]] cost 0.9
+max cap true FaradsPerDbu(1e-17) one column: (50 0 1fF +30) (50 0 1fF +0) (50 50 1fF +0) (50 25 1fF +30) (50 25 2fF +0) (50 75 3fF +10) (50 75 2fF +0) (50 100 3fF +0) (50 0 2fF +10) (50 0 3fF +10) (50 100 3fF +0)
+  size 4 diameter 50 scale 1: [[9, 3, 4, 2], [5, 6, 7], [10, 0, 1, 8]] cost 1
+  size 1 diameter 100 scale 1: [[9, 3, 4, 2], [5, 6, 7], [10, 0, 1, 8]] cost 1
+max cap false FaradsPerDbu(1e-17) one column: (75 75 2fF +0) (75 50 1fF +30) (75 0 3fF +30) (75 25 3fF +0) (75 0 2fF +0) (75 75 1fF +0) (75 25 2fF +30) (75 75 1fF +0) (75 50 1fF +0) (75 75 2fF +0)
+  size 2 diameter 25 scale 1: [[2], [4, 3], [6], [1], [8, 0], [5, 7], [9]] cost 2.0000000397364297
+  size 4 diameter 35 scale 1: [[2, 4], [3, 6], [1, 8], [0, 5, 7, 9]] cost 1.2000000000000002
+max cap true FaradsPerDbu(0.0) scattered: (100 0 1fF +0) (25 100 3fF +10) (75 50 2fF +10) (50 50 1fF +30)
+  size 2 diameter 100 scale 1: [[3, 1, 2, 0]] cost 0
+  size 5 diameter 50 scale 10: [[3, 1, 2, 0]] cost 0
+max cap true FaradsPerDbu(1e-17) one column: (100 50 2fF +30) (100 0 2fF +0) (100 0 3fF +30) (100 50 1fF +0) (100 100 2fF +10) (100 25 1fF +0) (100 50 2fF +10) (100 75 2fF +30) (100 50 1fF +10) (100 0 2fF +0) (100 0 3fF +10)
+  size 2 diameter 50 scale 10: [[1, 2, 9], [10, 5], [0, 3, 6], [8, 7], [4]] cost 1.6999999999999997
+  size 4 diameter 50 scale 1: [[2, 9, 10], [5, 0, 3, 6, 8], [7, 4, 1]] cost 0.9500000000000001
+max cap false FaradsPerDbu(1e-17) one row: (0 25 1fF +10) (50 25 1fF +0) (25 25 2fF +0) (75 25 2fF +0) (25 25 3fF +10) (25 25 1fF +0) (25 25 2fF +0) (100 25 2fF +10) (50 25 1fF +30) (0 25 1fF +0) (25 25 2fF +0)
+  size 5 diameter 100 scale 10: [[0, 9], [7, 3, 1, 8, 2], [4, 5, 6, 10]] cost 1
+  size 2 diameter 100 scale 10: [[0, 9], [7, 3, 1, 8, 2], [4, 5, 6, 10]] cost 1
+max cap true FaradsPerDbu(1e-17) one row: (100 25 2fF +0) (50 25 2fF +30) (0 25 1fF +0) (100 25 2fF +30)
+  size 4 diameter 25 scale 10: [[1], [2], [0, 3]] cost 0.5
+  size 1 diameter 100 scale 1: [[2, 0, 3, 1]] cost 0
+max cap false FaradsPerDbu(0.0) one column: (0 25 3fF +10) (0 50 1fF +0) (0 25 3fF +10) (0 100 2fF +30) (0 25 3fF +0)
+  size 2 diameter 35 scale 10: [[0, 2], [4, 1], [3]] cost 0.6
+  size 1 diameter 100 scale 1: [[0, 2], [4, 1], [3]] cost 0.6
+max cap false FaradsPerDbu(0.0) one row: (50 75 3fF +0)
+  size 3 diameter 100 scale 1: [[0]] cost 0
+  size 5 diameter 50 scale 1: [[0]] cost 0
+max cap false FaradsPerDbu(0.0) scattered: (25 25 2fF +0) (75 25 1fF +10) (25 25 2fF +10) (25 0 3fF +0) (50 25 3fF +10) (0 0 1fF +0) (25 25 2fF +30) (0 25 3fF +0) (0 0 1fF +10)
+  size 3 diameter 50 scale 1: [[5, 8, 7], [0, 2, 6], [4, 1], [3]] cost 4.133333333333333
+  size 5 diameter 25 scale 10: [[7, 0, 2], [6], [4], [1], [3, 5, 8]] cost 3.7333333333333334
+max cap true FaradsPerDbu(1e-17) one row: (50 100 1fF +0)
+  size 3 diameter 35 scale 10: [[0]] cost 0
+  size 4 diameter 35 scale 1: [[0]] cost 0
+max cap false FaradsPerDbu(0.0) scattered: (100 75 2fF +30) (0 75 3fF +30) (75 25 2fF +10)
+  size 2 diameter 25 scale 1: [[1], [0], [2]] cost 1
+  size 3 diameter 25 scale 1: [[1], [0], [2]] cost 1
+max cap true FaradsPerDbu(0.0) scattered: (100 50 2fF +10) (25 75 3fF +0) (50 75 1fF +30) (25 25 1fF +0) (75 25 3fF +10) (50 100 3fF +0) (50 100 1fF +30) (0 75 2fF +10)
+  size 1 diameter 50 scale 10: [[1, 7, 2, 5, 6], [0, 4, 3]] cost 1.3666666666666667
+  size 1 diameter 100 scale 1: [[1, 7, 2, 5, 6], [0, 4, 3]] cost 1.3666666666666667
+max cap true FaradsPerDbu(1e-17) scattered: (0 25 3fF +0) (75 100 1fF +0)
+  size 3 diameter 100 scale 10: [[0], [1]] cost 1.3333333730697632
+  size 1 diameter 35 scale 10: [[0], [1]] cost 0.46666666865348816
+max cap false FaradsPerDbu(0.0) one row: (0 0 2fF +0) (0 0 1fF +0) (0 0 3fF +10) (25 0 2fF +10) (50 0 1fF +0) (75 0 1fF +30) (0 0 2fF +0) (0 0 2fF +10) (25 0 2fF +30)
+  size 1 diameter 35 scale 1: [[0], [1], [2], [6], [7], [5], [4], [3], [8]] cost 3.7333333492279053
+  size 1 diameter 100 scale 1: [[0], [1], [2], [6], [7], [5], [4], [3], [8]] cost 3.7333333492279053
+max cap true FaradsPerDbu(0.0) one row: (100 25 1fF +0) (100 25 2fF +30) (50 25 2fF +0) (50 25 2fF +0)
+  size 4 diameter 50 scale 1: [[2, 3, 0, 1]] cost 0
+  size 3 diameter 50 scale 10: [[2, 3, 0, 1]] cost 0
+max cap false FaradsPerDbu(1e-17) one column: (75 75 2fF +0) (75 75 1fF +30) (75 25 3fF +30) (75 0 1fF +0) (75 0 1fF +0) (75 100 3fF +0) (75 50 1fF +0) (75 100 1fF +0) (75 25 3fF +0) (75 0 1fF +0)
+  size 4 diameter 35 scale 10: [[3, 4, 9], [2, 8], [6, 0], [1], [5, 7]] cost 1.249999988079071
+  size 1 diameter 25 scale 1: [[3, 4, 9], [2, 8], [6, 0], [1], [5, 7]] cost 1.249999988079071
+max cap true FaradsPerDbu(1e-17) one column: (75 50 3fF +0) (75 100 3fF +0)
+  size 5 diameter 25 scale 1: [[0, 1]] cost 0
+  size 5 diameter 35 scale 10: [[0, 1]] cost 0
+max cap true FaradsPerDbu(0.0) scattered: (25 0 2fF +0) (50 25 1fF +10)
+  size 3 diameter 100 scale 1: [[0, 1]] cost 0
+  size 4 diameter 35 scale 1: [[0, 1]] cost 0
+max cap true FaradsPerDbu(0.0) scattered: (50 100 2fF +0) (50 100 2fF +10) (50 0 2fF +0) (100 100 1fF +0) (75 25 2fF +30) (0 25 3fF +0) (50 100 1fF +30) (75 25 1fF +0) (0 25 3fF +30) (50 0 3fF +30) (75 25 1fF +30)
+  size 2 diameter 35 scale 1: [[8, 0, 1, 6, 3], [4, 7, 10, 2, 9], [5]] cost 3.15
+  size 1 diameter 25 scale 1: [[8, 0, 1, 6, 3], [4, 7, 10, 2, 9], [5]] cost 3.15
+max cap false FaradsPerDbu(0.0) one row: (0 25 2fF +30) (75 25 3fF +30) (25 25 3fF +10) (25 25 1fF +10) (50 25 1fF +0) (25 25 3fF +0) (25 25 1fF +0) (75 25 3fF +0)
+  size 3 diameter 35 scale 10: [[0], [1, 7], [4, 2, 3], [5, 6]] cost 1.3333333353201549
+  size 3 diameter 35 scale 10: [[0], [1, 7], [4, 2, 3], [5, 6]] cost 1.3333333353201549
+max cap true FaradsPerDbu(1e-17) one column: (75 75 1fF +30) (75 100 1fF +30) (75 100 3fF +0) (75 100 1fF +0) (75 0 1fF +0) (75 100 3fF +10)
+  size 1 diameter 50 scale 1: [[4, 0, 1, 2, 3], [5]] cost 1.3
+  size 2 diameter 50 scale 10: [[4, 0, 1, 2, 3], [5]] cost 1.3
+max cap true FaradsPerDbu(1e-17) one column: (50 50 3fF +30) (50 50 3fF +0) (50 50 2fF +0) (50 50 3fF +10) (50 75 1fF +30)
+  size 1 diameter 25 scale 1: [[0, 1, 2], [3, 4]] cost 1.2
+  size 1 diameter 25 scale 1: [[0, 1, 2], [3, 4]] cost 1.2
+max cap true FaradsPerDbu(1e-17) scattered: (0 100 2fF +0) (50 100 1fF +30) (50 50 1fF +0) (25 75 2fF +10) (50 75 3fF +10) (75 25 3fF +0) (0 75 2fF +30) (0 0 2fF +30) (0 75 3fF +0)
+  size 5 diameter 35 scale 1: [[8, 0, 3], [4, 1, 2], [5, 7, 6]] cost 1.6166666666666667
+  size 1 diameter 25 scale 1: [[8, 0, 3], [4, 1, 2], [5, 7, 6]] cost 1.6166666666666667
+max cap false FaradsPerDbu(1e-17) one row: (25 100 2fF +0) (100 100 2fF +0) (100 100 2fF +10) (75 100 3fF +0) (0 100 2fF +30) (75 100 3fF +10) (100 100 2fF +0) (100 100 2fF +10) (75 100 3fF +0) (0 100 1fF +0)
+  size 1 diameter 35 scale 10: [[4], [9], [1], [2], [6], [7], [3], [5], [8], [0]] cost 3.1499999463558197
+  size 4 diameter 100 scale 1: [[4, 9], [1, 2, 6, 7], [3, 5, 8, 0]] cost 0.5
+max cap false FaradsPerDbu(0.0) one row: (75 0 1fF +30) (0 0 1fF +0) (50 0 2fF +0) (75 0 3fF +0) (100 0 2fF +0) (25 0 2fF +30) (0 0 2fF +30) (0 0 3fF +30) (0 0 2fF +10)
+  size 1 diameter 25 scale 10: [[1], [6], [7], [8], [4], [0], [3], [2], [5]] cost 2
+  size 5 diameter 50 scale 10: [[1], [6], [7], [8], [4], [0], [3], [2], [5]] cost 2
+max cap false FaradsPerDbu(1e-17) one column: (0 100 2fF +30) (0 0 3fF +0) (0 25 1fF +30) (0 0 2fF +0) (0 0 3fF +10) (0 100 1fF +0) (0 25 2fF +30) (0 100 2fF +0) (0 75 1fF +30)
+  size 3 diameter 35 scale 1: [[1, 3, 4], [2], [6], [8], [0, 5, 7]] cost 1.1499999821186067
+  size 5 diameter 50 scale 1: [[1, 3, 4], [2], [6], [8], [0, 5, 7]] cost 1.1499999821186067
+max cap false FaradsPerDbu(1e-17) one row: (0 0 2fF +0) (100 0 2fF +0) (50 0 1fF +0) (100 0 1fF +10) (75 0 3fF +10)
+  size 1 diameter 35 scale 1: [[0], [1], [3], [4], [2]] cost 1.399999976158142
+  size 4 diameter 35 scale 1: [[0], [1, 3], [4], [2]] cost 0.799999988079071
+max cap true FaradsPerDbu(1e-17) one row: (50 0 2fF +30) (0 0 3fF +0) (0 0 2fF +30) (0 0 3fF +10) (50 0 2fF +0) (50 0 2fF +0) (25 0 2fF +0) (75 0 2fF +0) (75 0 1fF +0)
+  size 2 diameter 25 scale 10: [[2, 3], [7, 8], [0, 4, 5], [6, 1]] cost 1.2666666766007741
+  size 2 diameter 50 scale 10: [[2, 3], [7, 8], [0, 4, 5], [6, 1]] cost 1.2666666766007741
+max cap true FaradsPerDbu(0.0) one row: (75 100 2fF +0) (100 100 1fF +0) (100 100 1fF +0) (0 100 2fF +10) (100 100 2fF +30) (25 100 1fF +0) (75 100 1fF +0)
+  size 5 diameter 100 scale 1: [[3, 1, 2, 4, 0, 6, 5]] cost 0
+  size 4 diameter 100 scale 10: [[3, 1, 2, 4, 0, 6, 5]] cost 0
+max cap true FaradsPerDbu(0.0) scattered: (100 50 2fF +30) (75 75 2fF +30) (75 100 1fF +10) (0 0 1fF +0)
+  size 3 diameter 25 scale 10: [[3, 1, 2, 0]] cost 0
+  size 3 diameter 35 scale 1: [[3, 1, 2, 0]] cost 0
+max cap false FaradsPerDbu(0.0) scattered: (100 0 3fF +0) (0 0 1fF +10) (0 50 3fF +0) (50 75 1fF +0)
+  size 5 diameter 100 scale 10: [[2, 3], [0, 1]] cost 0.8333333333333334
+  size 1 diameter 100 scale 1: [[2, 3], [0, 1]] cost 0.8333333333333334
+max cap true FaradsPerDbu(0.0) one row: (50 100 2fF +30) (100 100 2fF +30) (50 100 1fF +0) (100 100 2fF +30) (50 100 1fF +10) (50 100 3fF +0) (0 100 3fF +0) (25 100 3fF +10) (75 100 1fF +0) (50 100 2fF +0)
+  size 4 diameter 100 scale 1: [[8, 0, 2, 4, 5, 9], [7, 6, 1, 3]] cost 0.55
+  size 3 diameter 50 scale 1: [[8, 0, 2, 4, 5, 9], [7, 6, 1, 3]] cost 0.55
+max cap false FaradsPerDbu(0.0) scattered: (50 100 1fF +0) (25 100 1fF +0) (0 25 2fF +0) (25 25 2fF +0) (25 50 1fF +30)
+  size 2 diameter 25 scale 1: [[2], [1, 0], [3], [4]] cost 1.5
+  size 1 diameter 100 scale 10: [[2], [1, 0], [3], [4]] cost 1.5
+max cap true FaradsPerDbu(1e-17) scattered: (25 75 3fF +10) (75 25 2fF +0) (100 75 2fF +0) (0 100 1fF +0) (100 75 2fF +0) (25 75 3fF +10) (100 25 2fF +0) (0 25 2fF +10) (75 100 2fF +0) (25 50 3fF +30) (0 25 1fF +0)
+  size 3 diameter 35 scale 10: [[7, 10], [9], [0, 5], [3, 8], [2, 4], [6, 1]] cost 2.0833333373069762
+  size 1 diameter 50 scale 1: [[7, 10], [9], [0, 5], [3, 8], [2, 4], [6, 1]] cost 2.0833333373069762
+max cap false FaradsPerDbu(1e-17) one row: (50 50 3fF +30) (25 50 2fF +0) (100 50 2fF +30) (75 50 2fF +10) (50 50 3fF +0) (75 50 2fF +0) (75 50 3fF +10) (50 50 1fF +0) (100 50 3fF +10) (100 50 1fF +30)
+  size 4 diameter 50 scale 10: [[2, 8], [9], [3, 5, 6], [0, 4, 7], [1]] cost 1.8666666865348813
+  size 4 diameter 50 scale 1: [[2, 8], [9], [3, 5, 6], [0, 4, 7], [1]] cost 1.8666666865348813
+max cap true FaradsPerDbu(0.0) one column: (50 50 3fF +0) (50 50 1fF +30) (50 25 2fF +10) (50 75 3fF +10) (50 25 1fF +30) (50 0 2fF +10) (50 100 1fF +30) (50 25 2fF +0)
+  size 4 diameter 35 scale 10: [[5, 2, 4, 7, 0], [1, 3, 6]] cost 0.65
+  size 1 diameter 50 scale 1: [[5, 2, 4, 7, 0], [1, 3, 6]] cost 0.65
+max cap false FaradsPerDbu(0.0) one column: (75 25 1fF +10)
+  size 5 diameter 35 scale 10: [[0]] cost 0
+  size 4 diameter 50 scale 10: [[0]] cost 0
+max cap true FaradsPerDbu(0.0) one row: (25 25 3fF +0) (75 25 1fF +0) (25 25 1fF +0)
+  size 5 diameter 100 scale 1: [[0, 2, 1]] cost 0
+  size 4 diameter 25 scale 1: [[0, 2, 1]] cost 0
+max cap false FaradsPerDbu(0.0) one row: (100 25 3fF +0) (0 25 2fF +0) (25 25 1fF +30) (50 25 2fF +0) (0 25 1fF +0) (50 25 1fF +30) (100 25 1fF +0)
+  size 3 diameter 100 scale 10: [[0, 6, 3], [5, 2, 1], [4]] cost 1.35
+  size 5 diameter 35 scale 10: [[1, 4], [0, 6], [3, 5], [2]] cost 0.9999999880790711
+max cap true FaradsPerDbu(1e-17) one row: (75 0 2fF +10)
+  size 4 diameter 100 scale 10: [[0]] cost 0
+  size 3 diameter 50 scale 10: [[0]] cost 0
+max cap false FaradsPerDbu(1e-17) one column: (0 75 3fF +0) (0 25 1fF +0) (0 50 1fF +30) (0 100 2fF +0) (0 100 1fF +30)
+  size 5 diameter 35 scale 10: [[1], [2], [0, 3], [4]] cost 1.2666666706403098
+  size 1 diameter 50 scale 10: [[1], [2], [0, 3], [4]] cost 1.2666666706403098
+max cap true FaradsPerDbu(1e-17) one column: (50 25 3fF +0) (50 75 2fF +0) (50 50 2fF +0) (50 75 2fF +30)
+  size 4 diameter 100 scale 10: [[0, 2], [1, 3]] cost 0.5
+  size 2 diameter 100 scale 1: [[0, 2], [1, 3]] cost 0.5
+max cap true FaradsPerDbu(0.0) one row: (50 75 1fF +0) (25 75 3fF +0) (0 75 1fF +0) (50 75 1fF +30) (50 75 1fF +0)
+  size 5 diameter 35 scale 1: [[2, 0, 3, 4, 1]] cost 0
+  size 2 diameter 35 scale 10: [[2, 0, 3, 4, 1]] cost 0
+max cap true FaradsPerDbu(1e-17) one row: (100 0 2fF +0)
+  size 2 diameter 50 scale 10: [[0]] cost 0
+  size 1 diameter 50 scale 10: [[0]] cost 0
+max cap false FaradsPerDbu(0.0) one column: (50 75 2fF +0) (50 25 3fF +0) (50 25 2fF +10) (50 50 3fF +0)
+  size 2 diameter 25 scale 10: [[1, 2], [3, 0]] cost 0.2
+  size 5 diameter 100 scale 1: [[1, 2, 3, 0]] cost 0
+max cap true FaradsPerDbu(1e-17) one column: (50 0 2fF +30) (50 25 2fF +10) (50 50 2fF +0) (50 0 1fF +0) (50 50 3fF +0) (50 100 2fF +30) (50 100 1fF +0) (50 0 2fF +0) (50 25 3fF +0) (50 75 3fF +10) (50 100 3fF +0)
+  size 2 diameter 100 scale 10: [[0, 3, 7], [1, 8], [2, 4], [9], [5, 6, 10]] cost 2.4
+  size 2 diameter 35 scale 10: [[0, 3, 7], [1, 8], [2, 4], [9], [5, 6, 10]] cost 1.099999988079071
+max cap false FaradsPerDbu(0.0) one row: (50 50 3fF +10) (75 50 3fF +10) (25 50 3fF +0) (100 50 1fF +10) (50 50 2fF +0) (100 50 2fF +30) (75 50 3fF +10) (0 50 3fF +0) (25 50 3fF +30)
+  size 5 diameter 100 scale 1: [[3, 5, 1, 6, 0], [4, 2, 8, 7]] cost 0.9
+  size 5 diameter 100 scale 1: [[3, 5, 1, 6, 0], [4, 2, 8, 7]] cost 0.9
+max cap true FaradsPerDbu(0.0) one row: (50 50 1fF +0) (0 50 3fF +0) (50 50 1fF +0) (100 50 1fF +10) (25 50 1fF +10) (100 50 1fF +0)
+  size 5 diameter 25 scale 1: [[1, 3, 5, 0, 2, 4]] cost 0
+  size 4 diameter 35 scale 1: [[1, 3, 5, 0, 2, 4]] cost 0
+max cap false FaradsPerDbu(1e-17) one row: (50 75 1fF +30) (50 75 1fF +10) (0 75 1fF +0) (75 75 2fF +0) (25 75 3fF +0) (100 75 2fF +0) (100 75 2fF +10)
+  size 3 diameter 100 scale 1: [[5, 6, 3], [0, 1, 4], [2]] cost 0.9
+  size 3 diameter 100 scale 10: [[5, 6, 3], [0, 1, 4], [2]] cost 0.9
+max cap false FaradsPerDbu(0.0) one column: (100 75 1fF +0) (100 0 2fF +30) (100 0 1fF +30) (100 100 1fF +30) (100 75 2fF +30) (100 50 2fF +0) (100 75 3fF +0)
+  size 1 diameter 25 scale 10: [[1], [2], [5], [0], [4], [6], [3]] cost 1.5
+  size 4 diameter 50 scale 1: [[1], [2], [5], [0], [4], [6], [3]] cost 1.5
+max cap false FaradsPerDbu(0.0) one row: (75 75 2fF +10) (50 75 3fF +0) (100 75 2fF +30) (25 75 3fF +30) (75 75 3fF +0) (75 75 2fF +30) (100 75 3fF +10)
+  size 3 diameter 25 scale 10: [[3], [2], [6], [0, 4], [5], [1]] cost 1.4666667064030965
+  size 1 diameter 35 scale 10: [[3], [2], [6], [0, 4], [5], [1]] cost 1.4666667064030965
+max cap true FaradsPerDbu(1e-17) one row: (0 50 1fF +0) (25 50 3fF +10) (50 50 1fF +0) (50 50 3fF +10) (75 50 1fF +0) (25 50 1fF +30) (75 50 3fF +30) (25 50 3fF +10) (25 50 3fF +0) (50 50 3fF +0)
+  size 5 diameter 25 scale 10: [[4, 6], [2, 3, 9], [1, 5], [7, 8], [0]] cost 1.2
+  size 3 diameter 50 scale 10: [[4, 6], [2, 3, 9], [1, 5], [7, 8], [0]] cost 1.2
+max cap false FaradsPerDbu(1e-17) one row: (0 75 1fF +0) (50 75 3fF +10) (75 75 1fF +30) (50 75 2fF +0) (50 75 3fF +0) (25 75 1fF +0) (25 75 3fF +0) (25 75 1fF +0)
+  size 3 diameter 100 scale 1: [[2, 1, 3], [4, 5, 6], [7, 0]] cost 1.2
+  size 1 diameter 35 scale 1: [[2, 1, 3], [4, 5, 6], [7, 0]] cost 1.2
+max cap true FaradsPerDbu(1e-17) scattered: (50 50 3fF +30)
+  size 3 diameter 50 scale 10: [[0]] cost 0
+  size 5 diameter 100 scale 1: [[0]] cost 0
+max cap false FaradsPerDbu(0.0) scattered: (75 75 1fF +0) (25 75 2fF +0) (50 75 3fF +0) (0 75 2fF +30) (0 50 3fF +0) (100 100 2fF +0) (75 50 3fF +30) (25 25 1fF +0)
+  size 4 diameter 25 scale 10: [[4], [1], [3], [2], [5], [0], [6], [7]] cost 2.3333334028720856
+  size 4 diameter 35 scale 10: [[4], [1], [3], [2], [5], [0], [6], [7]] cost 2.3333334028720856
+max cap false FaradsPerDbu(0.0) one row: (75 75 1fF +10) (25 75 2fF +0) (50 75 2fF +0) (50 75 3fF +0) (50 75 3fF +30) (100 75 3fF +10) (25 75 2fF +0) (75 75 1fF +30) (0 75 1fF +0) (25 75 2fF +0)
+  size 4 diameter 25 scale 1: [[5], [0], [7], [2, 3], [4], [1, 6, 9, 8]] cost 1.25
+  size 5 diameter 35 scale 1: [[0], [7], [2, 3, 4], [1, 6, 9, 8], [5]] cost 1.249999988079071
+max cap false FaradsPerDbu(1e-17) one row: (0 50 3fF +10) (25 50 3fF +30) (100 50 1fF +0) (75 50 1fF +10) (50 50 1fF +10) (75 50 1fF +0) (50 50 2fF +0) (75 50 1fF +30)
+  size 2 diameter 35 scale 1: [[2], [3, 5], [7], [4, 6], [1], [0]] cost 1.2499999821186065
+  size 5 diameter 25 scale 10: [[0], [2], [3, 5], [7], [4, 6], [1]] cost 0.95
+max cap true FaradsPerDbu(0.0) one row: (75 75 1fF +30) (0 75 2fF +10) (0 75 1fF +30) (75 75 2fF +10) (25 75 3fF +10) (25 75 3fF +10)
+  size 4 diameter 50 scale 1: [[0, 3, 4, 5], [1, 2]] cost 1.2000000000000002
+  size 5 diameter 100 scale 10: [[0, 3, 4, 5], [1, 2]] cost 1.2000000000000002
+max cap true FaradsPerDbu(1e-17) one column: (100 0 2fF +0) (100 0 2fF +0) (100 100 1fF +0)
+  size 5 diameter 35 scale 1: [[0, 1, 2]] cost 0
+  size 1 diameter 25 scale 10: [[0, 1, 2]] cost 0
+max cap true FaradsPerDbu(0.0) one column: (50 25 3fF +10) (50 50 3fF +0) (50 0 1fF +10) (50 100 1fF +0) (50 50 3fF +10) (50 75 2fF +30) (50 75 2fF +0) (50 0 1fF +30)
+  size 3 diameter 35 scale 10: [[0, 1, 4], [5, 6, 3, 2, 7]] cost 0.45
+  size 4 diameter 50 scale 10: [[0, 1, 4], [5, 6, 3, 2, 7]] cost 0.45
+max cap true FaradsPerDbu(1e-17) one column: (75 50 3fF +0) (75 50 1fF +30) (75 100 3fF +10) (75 100 3fF +0) (75 25 2fF +10) (75 75 2fF +10) (75 0 1fF +30) (75 0 3fF +30) (75 0 2fF +0)
+  size 5 diameter 25 scale 10: [[8, 4], [0, 1], [5, 2], [3], [6, 7]] cost 1.3499999999999999
+  size 1 diameter 100 scale 1: [[6, 7, 8, 4], [0, 1, 5], [2, 3]] cost 1.3
+max cap true FaradsPerDbu(0.0) scattered: (50 100 3fF +30) (100 25 1fF +30) (100 25 1fF +10)
+  size 1 diameter 35 scale 10: [[0, 1, 2]] cost 0
+  size 5 diameter 25 scale 10: [[0, 1, 2]] cost 0
+max cap false FaradsPerDbu(0.0) one column: (0 100 1fF +10) (0 75 2fF +0) (0 100 3fF +0) (0 25 3fF +0) (0 50 3fF +10) (0 0 1fF +10) (0 0 2fF +0)
+  size 2 diameter 100 scale 10: [[6, 3], [4, 1], [0, 2], [5]] cost 0.7
+  size 3 diameter 50 scale 10: [[3, 4, 1], [0, 2], [5, 6]] cost 0.6
+max cap false FaradsPerDbu(1e-17) one row: (25 75 3fF +0) (25 75 3fF +0) (75 75 3fF +10) (25 75 1fF +0) (25 75 2fF +10) (50 75 1fF +0) (75 75 2fF +10) (75 75 1fF +10) (0 75 2fF +10)
+  size 3 diameter 50 scale 1: [[2, 6, 7], [5, 0, 1], [3, 4, 8]] cost 0.6
+  size 2 diameter 50 scale 1: [[2, 6, 7], [5, 0, 1], [3, 4, 8]] cost 0.6
+max cap false FaradsPerDbu(1e-17) one column: (0 100 3fF +30) (0 100 2fF +0) (0 50 1fF +10) (0 50 3fF +30) (0 100 3fF +0) (0 0 3fF +0) (0 75 3fF +10) (0 25 1fF +30) (0 50 1fF +10) (0 75 2fF +10) (0 75 2fF +0)
+  size 2 diameter 35 scale 1: [[5], [7], [2], [3], [8], [6, 9], [10], [0, 1], [4]] cost 2.599999964237213
+  size 3 diameter 100 scale 1: [[2, 3, 8], [6, 9, 10], [0, 1, 4], [5, 7]] cost 0.9000000000000001
+max cap true FaradsPerDbu(1e-17) one row: (25 100 1fF +10) (100 100 3fF +0)
+  size 5 diameter 25 scale 1: [[0, 1]] cost 0
+  size 2 diameter 25 scale 10: [[0, 1]] cost 0
+max cap false FaradsPerDbu(0.0) one column: (50 25 1fF +0)
+  size 5 diameter 50 scale 10: [[0]] cost 0
+  size 2 diameter 100 scale 10: [[0]] cost 0
+max cap false FaradsPerDbu(1e-17) scattered: (100 75 3fF +10) (0 25 3fF +0) (25 25 3fF +0)
+  size 5 diameter 25 scale 10: [[2, 1], [0]] cost 0.25
+  size 3 diameter 100 scale 10: [[2, 1], [0]] cost 0.25
+max cap false FaradsPerDbu(1e-17) one row: (100 50 1fF +0) (100 50 3fF +10) (50 50 2fF +10) (0 50 1fF +0) (50 50 2fF +10)
+  size 3 diameter 100 scale 10: [[0, 1, 2], [4, 3]] cost 0.7
+  size 2 diameter 100 scale 10: [[0, 1], [2, 4], [3]] cost 0.30000000000000004
+max cap false FaradsPerDbu(1e-17) one row: (100 25 3fF +0) (0 25 2fF +30)
+  size 1 diameter 100 scale 10: [[1], [0]] cost 1
+  size 4 diameter 50 scale 1: [[1], [0]] cost 0.5
+max cap true FaradsPerDbu(0.0) one column: (50 0 1fF +30) (50 50 3fF +0) (50 50 3fF +0) (50 100 3fF +10) (50 75 2fF +0) (50 50 1fF +10) (50 50 3fF +30) (50 25 2fF +0)
+  size 1 diameter 100 scale 1: [[0, 7, 1, 2, 5], [6, 4, 3]] cost 0.9
+  size 1 diameter 50 scale 10: [[0, 7, 1, 2, 5], [6, 4, 3]] cost 0.9
+max cap false FaradsPerDbu(0.0) scattered: (25 25 1fF +10) (0 25 1fF +10) (75 75 1fF +10) (100 100 1fF +0)
+  size 2 diameter 100 scale 1: [[3, 2], [0, 1]] cost 0.7166666666666667
+  size 5 diameter 25 scale 1: [[3, 2], [0, 1]] cost 0.7166666666666667
+max cap true FaradsPerDbu(0.0) one row: (25 0 1fF +0)
+  size 4 diameter 25 scale 1: [[0]] cost 0
+  size 5 diameter 25 scale 1: [[0]] cost 0
+max cap false FaradsPerDbu(1e-17) one row: (100 75 3fF +30) (50 75 3fF +10)
+  size 5 diameter 25 scale 1: [[1], [0]] cost 0.5
+  size 5 diameter 35 scale 10: [[1], [0]] cost 0.5
+max cap true FaradsPerDbu(1e-17) scattered: (25 100 3fF +0) (75 100 2fF +0) (75 25 3fF +0)
+  size 1 diameter 50 scale 1: [[0, 1, 2]] cost 0
+  size 1 diameter 35 scale 1: [[0, 1, 2]] cost 0
+max cap false FaradsPerDbu(0.0) one column: (100 0 2fF +0) (100 25 1fF +30)
+  size 4 diameter 100 scale 1: [[0, 1]] cost 0
+  size 2 diameter 100 scale 1: [[0, 1]] cost 0
+max cap false FaradsPerDbu(1e-17) one column: (75 50 3fF +0) (75 25 3fF +0) (75 100 2fF +0) (75 0 2fF +0) (75 75 1fF +0) (75 100 2fF +0) (75 75 2fF +0)
+  size 5 diameter 35 scale 1: [[3, 1], [0, 4, 6], [2, 5]] cost 0.5
+  size 4 diameter 35 scale 1: [[3, 1], [0, 4, 6], [2, 5]] cost 0.5
+max cap false FaradsPerDbu(0.0) one column: (0 100 1fF +30) (0 75 1fF +0) (0 25 2fF +0) (0 100 3fF +30)
+  size 1 diameter 50 scale 1: [[2], [1], [0], [3]] cost 2.0000000596046448
+  size 5 diameter 25 scale 1: [[2], [1], [0], [3]] cost 1.0000000298023224
+max cap true FaradsPerDbu(1e-17) scattered: (75 75 1fF +0) (25 25 3fF +30) (75 100 3fF +0) (0 100 3fF +10) (50 100 1fF +0) (100 50 3fF +10) (100 50 3fF +10) (50 75 1fF +30) (25 75 1fF +0) (25 0 2fF +10)
+  size 1 diameter 100 scale 1: [[3, 8, 7, 4, 0], [2, 5], [6, 1], [9]] cost 3.4
+  size 4 diameter 50 scale 1: [[4, 0, 2], [5, 6], [1, 9], [3, 8, 7]] cost 1.35
+max cap false FaradsPerDbu(0.0) scattered: (75 25 2fF +10)
+  size 3 diameter 100 scale 10: [[0]] cost 0
+  size 5 diameter 50 scale 10: [[0]] cost 0
+max cap true FaradsPerDbu(0.0) one column: (50 25 2fF +10) (50 0 1fF +0) (50 50 1fF +10) (50 100 3fF +0) (50 0 1fF +0) (50 50 2fF +10) (50 50 3fF +0)
+  size 3 diameter 25 scale 10: [[0, 2, 5, 6], [3, 1, 4]] cost 0.45
+  size 1 diameter 25 scale 1: [[0, 2, 5, 6], [3, 1, 4]] cost 0.45
+max cap false FaradsPerDbu(1e-17) one row: (25 0 1fF +10) (0 0 3fF +30)
+  size 3 diameter 35 scale 10: [[1], [0]] cost 1.399999976158142
+  size 1 diameter 100 scale 1: [[1], [0]] cost 1.399999976158142
+max cap true FaradsPerDbu(1e-17) scattered: (100 50 1fF +10) (0 0 2fF +10) (100 50 2fF +0) (0 0 3fF +0) (75 75 2fF +0) (0 50 2fF +10) (75 25 2fF +0) (100 100 2fF +0) (75 50 3fF +10)
+  size 4 diameter 25 scale 1: [[1, 3, 5], [4, 7, 0, 2], [8, 6]] cost 1.2999999999999998
+  size 1 diameter 100 scale 1: [[1, 3, 5], [4, 7, 0, 2], [8, 6]] cost 1.2999999999999998
+max cap false FaradsPerDbu(1e-17) scattered: (25 75 3fF +10) (25 25 2fF +0) (75 0 2fF +30)
+  size 2 diameter 25 scale 10: [[1], [0], [2]] cost 1
+  size 3 diameter 100 scale 10: [[1, 0], [2]] cost 0.8666666666666667
+max cap true FaradsPerDbu(1e-17) one row: (100 25 1fF +0)
+  size 5 diameter 25 scale 10: [[0]] cost 0
+  size 4 diameter 50 scale 1: [[0]] cost 0
+max cap true FaradsPerDbu(1e-17) scattered: (0 100 1fF +10) (25 0 3fF +0) (75 75 3fF +0) (50 25 3fF +30)
+  size 2 diameter 50 scale 10: [[0], [2], [3], [1]] cost 2.0000000596046448
+  size 1 diameter 35 scale 10: [[0], [2], [3], [1]] cost 1.4000000059604645
+max cap true FaradsPerDbu(1e-17) one column: (25 75 3fF +0) (25 25 3fF +30) (25 25 1fF +0) (25 75 2fF +0) (25 0 2fF +30) (25 75 3fF +0) (25 25 3fF +0) (25 75 1fF +30) (25 0 2fF +0) (25 25 3fF +0)
+  size 4 diameter 25 scale 10: [[1, 2, 6], [9], [0, 3, 5], [7], [4, 8]] cost 1.4000000298023223
+  size 3 diameter 100 scale 10: [[1, 2, 6], [9], [0, 3, 5], [7], [4, 8]] cost 1.4000000298023223
+max cap true FaradsPerDbu(1e-17) one row: (100 100 2fF +30) (75 100 1fF +10) (0 100 2fF +10) (0 100 1fF +10) (25 100 3fF +30) (50 100 3fF +0) (75 100 2fF +0) (25 100 2fF +0) (25 100 3fF +0) (0 100 1fF +0) (75 100 2fF +30)
+  size 4 diameter 25 scale 10: [[3, 9], [0, 1], [6, 10], [5], [4, 7], [8, 2]] cost 1.6
+  size 1 diameter 50 scale 1: [[3, 9], [0, 1], [6, 10], [5], [4, 7], [8, 2]] cost 1.6
+max cap true FaradsPerDbu(1e-17) one row: (25 50 1fF +30) (50 50 1fF +0) (100 50 2fF +30) (75 50 3fF +30) (25 50 2fF +30) (100 50 2fF +10) (25 50 1fF +0) (0 50 2fF +10) (100 50 1fF +0) (25 50 1fF +30) (25 50 2fF +30)
+  size 1 diameter 50 scale 1: [[7, 2, 5, 8], [3, 1, 0, 4, 6], [9, 10]] cost 2.5
+  size 5 diameter 35 scale 10: [[7], [2, 5, 8], [3, 1], [0, 4, 6], [9, 10]] cost 1.8999999940395358
+max cap true FaradsPerDbu(0.0) scattered: (25 0 1fF +30) (100 100 3fF +10)
+  size 5 diameter 100 scale 10: [[0, 1]] cost 0
+  size 3 diameter 35 scale 1: [[0, 1]] cost 0
+max cap true FaradsPerDbu(1e-17) scattered: (100 100 2fF +10) (100 50 2fF +0) (100 50 1fF +10) (50 0 3fF +0) (50 0 3fF +30) (25 100 2fF +0)
+  size 2 diameter 100 scale 10: [[0, 1], [2], [3, 4], [5]] cost 2.3666667064030964
+  size 1 diameter 25 scale 10: [[5], [0, 1], [2], [3, 4]] cost 1.300000019868215
+max cap false FaradsPerDbu(1e-17) one row: (100 100 3fF +0) (100 100 3fF +0) (50 100 3fF +30) (75 100 2fF +0) (100 100 1fF +0) (50 100 2fF +0) (100 100 2fF +0) (75 100 3fF +0) (25 100 2fF +0) (25 100 2fF +0) (75 100 1fF +30)
+  size 2 diameter 25 scale 1: [[8, 9], [0, 1], [4, 6], [3, 7], [10], [2], [5]] cost 2.0000000596046448
+  size 5 diameter 100 scale 10: [[0, 1, 4, 6, 3], [7, 10, 2, 5, 8], [9]] cost 1.4666666666666668
+max cap true FaradsPerDbu(0.0) one column: (75 75 1fF +0) (75 0 2fF +10) (75 0 1fF +30) (75 50 2fF +10) (75 25 2fF +0) (75 75 2fF +0) (75 0 1fF +30) (75 50 1fF +0) (75 50 1fF +0) (75 50 2fF +30)
+  size 5 diameter 50 scale 1: [[4, 3, 7, 8, 9, 0], [5, 1, 2, 6]] cost 0.7333333333333334
+  size 3 diameter 25 scale 10: [[4, 3, 7, 8, 9, 0], [5, 1, 2, 6]] cost 0.7333333333333334
+max cap true FaradsPerDbu(0.0) one row: (50 75 2fF +10) (50 75 1fF +0) (0 75 3fF +0) (75 75 3fF +10) (25 75 2fF +0) (100 75 1fF +0) (100 75 2fF +0) (25 75 2fF +30)
+  size 5 diameter 35 scale 10: [[5, 6, 3, 0, 1], [4, 7, 2]] cost 0.6
+  size 3 diameter 50 scale 10: [[5, 6, 3, 0, 1], [4, 7, 2]] cost 0.6
+max cap false FaradsPerDbu(1e-17) one column: (0 100 3fF +30) (0 0 3fF +0) (0 25 3fF +30) (0 100 3fF +10) (0 0 2fF +0) (0 100 3fF +0) (0 25 2fF +30) (0 100 2fF +0) (0 75 3fF +30) (0 0 2fF +0) (0 100 1fF +0)
+  size 4 diameter 100 scale 1: [[4, 9, 2, 6], [8, 0, 3, 5], [7, 10, 1]] cost 1.45
+  size 1 diameter 100 scale 1: [[4, 9, 2, 6], [8, 0, 3, 5], [7, 10, 1]] cost 1.45
