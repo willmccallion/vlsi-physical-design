@@ -45,3 +45,10 @@ fn two_quantities_of_one_kind_divide_to_a_plain_ratio() {
 
     assert!((ratio - 1.5).abs() < 1e-12);
 }
+
+#[test]
+fn a_capacitance_per_meter_reads_per_micron() {
+    let per_micron = FaradsPerMeter::from_femtofarads_per_micron(0.5).per_micron();
+
+    assert!((per_micron - 0.5e-15).abs() < 1e-27, "{per_micron}");
+}

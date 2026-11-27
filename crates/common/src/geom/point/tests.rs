@@ -29,3 +29,8 @@ fn points_order_by_x_then_y() {
         ]
     );
 }
+
+#[test]
+fn dividing_a_point_divides_both_coordinates() {
+    assert_eq!(Point::new(6.0, -8.0) / 2.0, Point::new(3.0, -4.0));
+}

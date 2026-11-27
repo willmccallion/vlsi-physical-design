@@ -96,3 +96,8 @@ fn midpoint_rounds_down() {
     assert_eq!(Dbu(-3).midpoint(Dbu(0)), Dbu(-2));
     assert_eq!(Dbu(3).midpoint(Dbu(4)), Dbu(3));
 }
+
+#[test]
+fn an_area_prints_as_its_number() {
+    assert_eq!(DbuArea(42).to_string(), "42");
+}
