@@ -46,4 +46,6 @@ exclude_re = [
     "replace > with >= in Simplex::change_flow",
     # A single-precision share is never the double 0.1 the limits are compared with.
     "replace < with <= in trim_and_sort",
+    # Only 1 - epsilon lies epsilon from the far corner, and the curve puts it where the corner is.
+    "replace < with <= in theta",
 ]
