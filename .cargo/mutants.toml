@@ -25,4 +25,6 @@ exclude_re = [
     "replace > with >= in Interpreter<'_>::set_units",
     # Swapping high and low on every axis visits the same corners in another order.
     "replace == with != in Table::interpolate",
+    # A single-precision share is never the double 0.1 the limits are compared with.
+    "replace < with <= in trim_and_sort",
 ]
