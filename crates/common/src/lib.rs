@@ -8,6 +8,6 @@ mod keyword_enum;
 pub mod memory;
 pub mod network_simplex;
 mod newtype_ops;
-#[cfg(feature = "testing")]
+#[cfg(any(test, feature = "testing"))]
 pub mod testing;
 pub mod units;
