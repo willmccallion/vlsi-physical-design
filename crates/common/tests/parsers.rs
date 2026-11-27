@@ -844,3 +844,36 @@ fn a_def_without_units_is_an_error_of_the_whole_file() {
 
     assert!(matches!(error, ParseError::File { .. }), "{error}");
 }
+
+#[test]
+fn routes_written_to_a_file_read_back_from_it() {
+    let db = tiny_design();
+    let net = db.net_id("n1").unwrap();
+    let segments = vec![RouteSegment {
+        from: RoutePoint {
+            at: pt(1000, 1000),
+            layer: LayerId(0),
+        },
+        to: RoutePoint {
+            at: pt(1000, 3000),
+            layer: LayerId(0),
+        },
+    }];
+    let path = std::env::temp_dir().join(format!("pare-segs-{}.segs", std::process::id()));
+
+    writer::segments::write_file(&db, &[(net, &segments)], &path).unwrap();
+    let read = segments::parse_file(&path, &db);
+
+    std::fs::remove_file(&path).unwrap();
+    assert_eq!(read.unwrap(), vec![(net, segments)]);
+}
+
+#[test]
+fn a_bad_route_line_is_named_by_its_number() {
+    let db = tiny_design();
+
+    let error =
+        segments::parse_str("n1\n(\n1000 1000 M1\n)\n", Path::new("r.segs"), &db).unwrap_err();
+
+    assert!(error.to_string().contains(":3:"), "{error}");
+}

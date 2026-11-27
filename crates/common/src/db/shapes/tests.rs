@@ -120,3 +120,33 @@ fn only_special_rects_without_a_shape_are_stretched() {
 
     assert_eq!(boxes, [rect(0, 0, 900, 45), rect(0, -450, 900, 495)]);
 }
+
+fn tiny() -> NetlistDB {
+    let fixtures = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures");
+    let units = crate::db::parser::def::read_units(&fixtures.join("tiny.def")).unwrap();
+    let library = crate::db::parser::lef::parse_files(&[fixtures.join("tiny.lef")], units).unwrap();
+    crate::db::parser::def::parse(&fixtures.join("tiny.def"), library).unwrap()
+}
+
+#[test]
+fn the_router_connects_signal_nets_of_two_pins_or_more() {
+    let mut db = tiny();
+    let (n1, out) = (db.net_id("n1").unwrap(), db.net_id("out").unwrap());
+
+    assert!(is_signal_net(&db, n1));
+    db.nets[n1].signal_use = crate::db::library::SignalUse::Power;
+    assert!(!is_signal_net(&db, n1));
+    let _ = db.nets[out].pins.pop();
+    assert!(!is_signal_net(&db, out));
+}
+
+#[test]
+fn placement_avoids_the_shapes_of_fixed_pins_but_not_of_placed_ones() {
+    let db = tiny();
+    let (fixed, placed) = (db.net_id("in").unwrap(), db.net_id("out").unwrap());
+
+    let owners: Vec<Owner> = obstruction_shapes(&db).iter().map(|s| s.owner).collect();
+
+    assert!(owners.contains(&Owner::Net(fixed)));
+    assert!(!owners.contains(&Owner::Net(placed)));
+}
