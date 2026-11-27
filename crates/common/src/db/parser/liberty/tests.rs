@@ -1,5 +1,5 @@
 use super::*;
-use crate::db::liberty::LibCellId;
+use crate::db::liberty::{ArcSetId, LibCellId};
 use crate::db::library::DuplicateName;
 use crate::units::{Farads, Seconds, Watts};
 
@@ -705,4 +705,151 @@ fn a_bundle_group_is_refused() {
     let src = "library (x) { cell (c) { bundle (b) { } } }";
     let err = parse_str(src, Path::new("x.lib")).unwrap_err();
     assert!(err.to_string().contains("bundle"));
+}
+
+#[test]
+fn each_timing_type_gives_its_role_and_edges() {
+    use Edge::{Fall, Rise};
+    let expected = [
+        ("combinational", ArcRole::Combinational, None, None),
+        (
+            "combinational_rise",
+            ArcRole::Combinational,
+            None,
+            Some(Rise),
+        ),
+        (
+            "combinational_fall",
+            ArcRole::Combinational,
+            None,
+            Some(Fall),
+        ),
+        ("rising_edge", ArcRole::RegClkToQ, Some(Rise), None),
+        ("falling_edge", ArcRole::RegClkToQ, Some(Fall), None),
+        (
+            "three_state_enable_rise",
+            ArcRole::TristateEnable,
+            None,
+            Some(Rise),
+        ),
+        (
+            "three_state_enable_fall",
+            ArcRole::TristateEnable,
+            None,
+            Some(Fall),
+        ),
+        ("three_state_disable", ArcRole::TristateDisable, None, None),
+        (
+            "three_state_disable_rise",
+            ArcRole::TristateDisable,
+            None,
+            Some(Rise),
+        ),
+        (
+            "three_state_disable_fall",
+            ArcRole::TristateDisable,
+            None,
+            Some(Fall),
+        ),
+        ("hold_falling", ArcRole::Hold, Some(Fall), None),
+        ("recovery_rising", ArcRole::Recovery, Some(Rise), None),
+        ("recovery_falling", ArcRole::Recovery, Some(Fall), None),
+        ("removal_rising", ArcRole::Removal, Some(Rise), None),
+        ("removal_falling", ArcRole::Removal, Some(Fall), None),
+    ];
+
+    for (timing_type, role, from_edge, to_edge) in expected {
+        let kind = arc_role(timing_type).unwrap_or_else(|| panic!("{timing_type}"));
+        assert_eq!(
+            (kind.role, kind.from_edge, kind.to_edge),
+            (role, from_edge, to_edge),
+            "{timing_type}"
+        );
+    }
+}
+
+#[test]
+fn a_stated_non_unate_sense_wins_over_the_function() {
+    let lib = tiny_with(
+        "timing_sense : positive_unate;",
+        "timing_sense : non_unate;",
+    )
+    .unwrap();
+
+    let buf = lib.cell(lib.cell_id("BUF_X1").unwrap());
+    assert_eq!(buf.arc_sets[ArcSetId::new(0)].sense, TimingSense::NonUnate);
+}
+
+#[test]
+fn a_tristate_disable_arc_takes_its_sense_from_the_three_state_condition() {
+    let tbuf = r#"  cell (TBUF) {
+    area : 1;
+    pin (A) { direction : input; capacitance : 1; }
+    pin (EN) { direction : input; capacitance : 1; }
+    pin (Z) { direction : output; function : "A"; three_state : "!EN";
+      timing () { related_pin : "EN"; timing_type : three_state_disable;
+        cell_rise(T2) { values ("1,2,3,4"); } cell_fall(T2) { values ("1,2,3,4"); } } }
+  }
+  cell (DFF_X1) {"#;
+    let lib = tiny_with("  cell (DFF_X1) {", tbuf).unwrap();
+
+    let cell = lib.cell(lib.cell_id("TBUF").unwrap());
+    let disable = cell
+        .arc_sets
+        .iter()
+        .find(|s| s.role == ArcRole::TristateDisable)
+        .unwrap();
+    assert_eq!(disable.sense, TimingSense::NegativeUnate);
+}
+
+#[test]
+fn a_clock_gate_pin_attribute_names_the_pin_s_part() {
+    let lib = tiny_with(
+        "pin (CK) { direction : input; clock : true; capacitance : 0.9; }",
+        "pin (CK) { direction : input; clock : true; capacitance : 0.9; clock_gate_clock_pin : true; }",
+    )
+    .unwrap();
+
+    let dff = lib.cell(lib.cell_id("DFF_X1").unwrap());
+    let gate = |name: &str| dff.ports[dff.port(name).unwrap()].clock_gate;
+    assert_eq!(gate("CK"), ClockGatePin::Clock);
+    assert_eq!(gate("D"), ClockGatePin::None);
+}
+
+#[test]
+fn a_related_output_load_axis_is_known() {
+    assert_eq!(
+        axis_variable("related_out_total_output_net_capacitance"),
+        Some(AxisVariable::RelatedOutputCapacitance)
+    );
+}
+
+#[test]
+fn a_bus_pin_naming_bits_of_another_bus_is_refused() {
+    let refused = bus_library("pin (\"q[1:0]\") { capacitance : 1.0; }", "");
+
+    let message = refused.map(|_| ()).unwrap_err().to_string();
+    assert!(
+        message.contains("pin 'q[1:0]' is not a bit of bus 'd'"),
+        "{message}"
+    );
+}
+
+#[test]
+fn a_group_left_open_is_an_error_at_the_end_of_the_file() {
+    let error = parse_str(
+        "library (x) {\n  cell (a) {\n    area : 1;\n",
+        Path::new("x.lib"),
+    )
+    .unwrap_err();
+
+    assert!(
+        matches!(error, ParseError::Syntax { line: 4, .. }),
+        "{error}"
+    );
+}
+
+#[test]
+fn a_closing_brace_outside_any_group_is_an_error() {
+    assert!(parse_str("library (x) { }\n}\n", Path::new("x.lib")).is_err());
 }
