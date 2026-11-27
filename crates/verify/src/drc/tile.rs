@@ -7,6 +7,10 @@
 //! A marker belongs to the tile holding its lower-left corner, which keeps
 //! each violation to one tile; a piece cut short by a window's edge is never
 //! judged for its area, and its false ends lie in the halo, outside the tile.
+//! A tile sees a net's maximal rectangles only as far as its window, so one
+//! violation's markers can be split or sized differently than checking the
+//! whole layout gives, as in `OpenROAD`'s tiled checker; the violations
+//! found, each a kind, rule, layer and pair of owners, are the same.
 //! Tiles are checked in parallel; within a tile every check runs on one
 //! thread, since a tile or a router's region is small and the checks of
 //! many of them run at once.
