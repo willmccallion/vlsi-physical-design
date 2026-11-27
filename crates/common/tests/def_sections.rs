@@ -673,3 +673,43 @@ fn a_component_put_in_a_grouped_region_by_hand_keeps_its_region_when_written() {
     let u2 = reread.cell_id("u2").unwrap();
     assert_eq!(reread.cells[u2].region, Some(RegionId(0)));
 }
+
+#[test]
+fn a_cell_in_a_groups_region_by_its_own_region_is_written_apart_from_the_group() {
+    let db = design_with(&[
+        (
+            "COMPONENTS 8 ;",
+            "REGIONS 1 ;\n- left ( 0 0 ) ( 6000 4000 ) ;\nEND REGIONS\n\nCOMPONENTS 8 ;",
+        ),
+        (
+            "- u2 INV + PLACED ( 1000 2000 ) FS ;",
+            "- u2 INV + PLACED ( 1000 2000 ) FS + REGION left ;",
+        ),
+        (
+            "END NETS",
+            "END NETS\n\nGROUPS 1 ;\n- g u1 + REGION left ;\nEND GROUPS",
+        ),
+    ])
+    .unwrap();
+
+    let mut text = Vec::new();
+    writer::def::write(&db, &mut text).unwrap();
+    let written = String::from_utf8(text).unwrap();
+    let reread = def::parse_str(&written, Path::new("written.def"), tiny_library()).unwrap();
+
+    assert_eq!(reread, db, "{written}");
+}
+
+#[test]
+fn a_net_weight_within_a_floats_step_of_one_is_not_written() {
+    let mut db = design_with(&[]).unwrap();
+    let n1 = db.net_id("n1").unwrap();
+    db.nets[n1].weight = 1.0 + f64::EPSILON;
+
+    let mut text = Vec::new();
+    writer::def::write(&db, &mut text).unwrap();
+    let written = String::from_utf8(text).unwrap();
+
+    let n1_line = written.lines().find(|l| l.starts_with("- n1 ")).unwrap();
+    assert!(!n1_line.contains("WEIGHT"), "{n1_line}");
+}

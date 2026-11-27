@@ -1,4 +1,5 @@
 use super::*;
+use crate::db::design::PinOwner;
 
 #[test]
 fn synthesized_stack_alternates_and_has_a_via_per_cut() {
@@ -90,4 +91,21 @@ fn each_layer_gets_tracks_across_the_die_from_half_a_pitch_in() {
     assert_eq!(first.start, die.min.y + pitch / 2);
     let last = first.start + pitch * i64::from(first.count - 1);
     assert!(last + pitch / 2 <= die.max.y && die.max.y < last + pitch + pitch / 2);
+}
+
+#[test]
+fn a_node_takes_its_pins_in_the_order_its_nets_list_it() {
+    let db = tiny();
+    let a1 = db.cell_id("a1").unwrap();
+
+    let pins: Vec<MacroPinId> = db.cells[a1]
+        .pins
+        .iter()
+        .filter_map(|&p| match db.pins[p].owner {
+            PinOwner::Cell { pin, .. } => Some(pin),
+            PinOwner::Io(_) => None,
+        })
+        .collect();
+
+    assert_eq!(pins, [MacroPinId(0), MacroPinId(1)]);
 }
