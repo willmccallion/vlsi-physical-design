@@ -15,4 +15,10 @@ exclude_globs = [
 exclude_re = [
     "<impl (\\w+::)*Debug for ",           # debug printing
     "replace resident -> String",          # the memory figure in the router's log lines
+    # The CLI's debug logs and progress rows, shown while a step runs; its summaries are tested.
+    "replace (log_markers|log_opens|show_global_progress|show_setup_progress|show_timing_round) with \\(\\)",
+    "delete ! in log_markers",             # whether the debug log is on
+    "replace describe_violation -> String", # a placement violation's debug log line
+    # The timing round's number, shown only in its progress row.
+    "replace \\+= with \\*= in <impl TimingDriver for TimingPlacement<'_>>::repair",
 ]
