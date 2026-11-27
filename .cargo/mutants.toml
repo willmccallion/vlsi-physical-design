@@ -29,4 +29,6 @@ exclude_re = [
     "replace > with >= in Clustering::run",
     # No distance a sink can have, to the power, is exactly i32::MAX.
     "replace < with <= in arc_cost",
+    # Pairing each blockage with itself too joins a group to itself, which changes nothing.
+    "replace \\+ with \\* in merge_blockages",
 ]
