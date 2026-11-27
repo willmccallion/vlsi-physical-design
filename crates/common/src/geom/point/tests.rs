@@ -34,3 +34,13 @@ fn points_order_by_x_then_y() {
 fn dividing_a_point_divides_both_coordinates() {
     assert_eq!(Point::new(6.0, -8.0) / 2.0, Point::new(3.0, -4.0));
 }
+
+#[test]
+fn points_add_in_place_and_scale_by_a_factor() {
+    let mut p = Point::new(Dbu::new(1), Dbu::new(2));
+    p += Point::new(Dbu::new(10), Dbu::new(20));
+    let scaled = Point::new(2.0, 3.0) * 2.0;
+
+    assert_eq!(p, Point::new(Dbu::new(11), Dbu::new(22)));
+    assert!((scaled.x - 4.0).abs() < f64::EPSILON && (scaled.y - 6.0).abs() < f64::EPSILON);
+}

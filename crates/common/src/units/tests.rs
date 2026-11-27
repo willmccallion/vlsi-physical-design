@@ -52,3 +52,9 @@ fn a_capacitance_per_meter_reads_per_micron() {
 
     assert!((per_micron - 0.5e-15).abs() < 1e-27, "{per_micron}");
 }
+
+#[test]
+fn a_bare_number_is_its_own_base_value_and_a_micron_rate_scales_to_meters() {
+    assert!((2.5_f64.base() - 2.5).abs() < f64::EPSILON);
+    assert!((OhmsPerMeter::from_ohms_per_micron(1.5).get() - 1.5e6).abs() < 1e-6);
+}
