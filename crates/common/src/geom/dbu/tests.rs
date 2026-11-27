@@ -101,3 +101,18 @@ fn midpoint_rounds_down() {
 fn an_area_prints_as_its_number() {
     assert_eq!(DbuArea(42).to_string(), "42");
 }
+
+#[test]
+fn the_remainder_keeps_the_sign_of_the_dividend_as_cs_does() {
+    assert_eq!((Dbu(7) % 3, Dbu(-7) % 3), (Dbu(1), Dbu(-1)));
+}
+
+#[test]
+fn an_area_and_a_length_convert_to_floats_and_microns() {
+    let units = DbuPerMicron::new(1000).unwrap();
+
+    assert!((DbuArea(12).to_f64() - 12.0).abs() < f64::EPSILON);
+    assert!((units.to_microns(Dbu(250)) - 0.25).abs() < f64::EPSILON);
+    assert_eq!(units.to_dbu_rounded(0.1234), Dbu(123));
+    assert_eq!(units.to_dbu_rounded(-0.0005), Dbu(-1));
+}

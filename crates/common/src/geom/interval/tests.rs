@@ -101,3 +101,28 @@ fn intervals_that_only_touch_have_no_overlap_of_length() {
     assert_eq!(intersect_sorted(&[span(0, 5)], &[span(5, 9)]), []);
     assert_eq!(intersect_sorted(&[span(0, 5)], &[span(4, 9)]), [span(4, 5)]);
 }
+
+#[test]
+fn an_interval_without_length_is_empty() {
+    assert_eq!(
+        [span(1, 3), span(3, 3), span(4, 3)].map(Interval::is_empty),
+        [false, true, true]
+    );
+}
+
+#[test]
+fn sorted_lists_intersect_whichever_runs_out_first() {
+    let long = spans(&[(0, 10)]);
+    let short = spans(&[(1, 2), (4, 6)]);
+
+    assert_eq!(intersect_sorted(&long, &short), spans(&[(1, 2), (4, 6)]));
+    assert_eq!(intersect_sorted(&short, &long), spans(&[(1, 2), (4, 6)]));
+}
+
+#[test]
+fn gaps_leave_out_the_empty_stretches_at_a_blockages_ends() {
+    let within = span(0, 10);
+
+    assert_eq!(gaps(spans(&[(0, 5)]), within), spans(&[(5, 10)]));
+    assert_eq!(gaps(spans(&[(2, 10)]), within), spans(&[(0, 2)]));
+}
