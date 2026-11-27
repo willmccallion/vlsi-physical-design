@@ -150,3 +150,142 @@ fn placement_avoids_the_shapes_of_fixed_pins_but_not_of_placed_ones() {
     assert!(owners.contains(&Owner::Net(fixed)));
     assert!(!owners.contains(&Owner::Net(placed)));
 }
+
+fn pt(x: i64, y: i64) -> Point<Dbu> {
+    Point::new(Dbu::new(x), Dbu::new(y))
+}
+
+#[test]
+fn a_default_width_wire_reaches_half_its_width_past_each_end() {
+    let width = Dbu::new(100);
+
+    assert_eq!(
+        wire_rect(pt(0, 0), pt(1000, 0), width),
+        Some(rect(-50, -50, 1050, 50))
+    );
+    assert_eq!(
+        wire_rect(pt(0, 0), pt(0, 1000), width),
+        Some(rect(-50, -50, 50, 1050))
+    );
+    assert_eq!(wire_rect(pt(0, 0), pt(1000, 1000), width), None);
+}
+
+/// The tiny design with net `n3` under a rule of metal1 wires 200 wide
+/// reaching `extension` past their ends, and metal2 wires 300 wide.
+fn under_wide_rule(extension: Option<i64>) -> (NetlistDB, NetId) {
+    let mut db = tiny();
+    let layer = |name: &str| db.library.routing_layer_id(name).unwrap();
+    let rule_layer =
+        |layer, width, wire_extension: Option<i64>| crate::db::design::NonDefaultLayer {
+            layer,
+            width: Dbu::new(width),
+            spacing: None,
+            wire_extension: wire_extension.map(Dbu::new),
+        };
+    let rule = crate::db::design::NonDefaultRule {
+        name: "wide".into(),
+        hard_spacing: false,
+        layers: vec![
+            rule_layer(layer("M2"), 300, None),
+            rule_layer(layer("M1"), 200, extension),
+        ],
+        vias: Vec::new(),
+        via_rules: Vec::new(),
+        min_cuts: Vec::new(),
+    };
+    let id = db.non_default_rules.push(rule);
+    let n3 = db.net_id("n3").unwrap();
+    db.nets[n3].non_default_rule = Some(id);
+    (db, n3)
+}
+
+/// A metal1 wire of the tiny design from (2500, 1000) to (2700, 1000).
+fn m1_wire(db: &NetlistDB, extensions: (Option<i64>, Option<i64>)) -> RouteElem {
+    RouteElem::Wire {
+        layer: db.library.routing_layer_id("M1").unwrap(),
+        from: pt(2500, 1000),
+        to: pt(2700, 1000),
+        extensions: (extensions.0.map(Dbu::new), extensions.1.map(Dbu::new)),
+    }
+}
+
+fn rects(shapes: &[Shape]) -> Vec<Rect<Dbu>> {
+    shapes.iter().map(|s| s.rect).collect()
+}
+
+#[test]
+fn a_wire_takes_its_nets_rule_for_its_layer() {
+    let (db, n3) = under_wide_rule(None);
+
+    let shapes = route_elem_shapes(&db, n3, &m1_wire(&db, (None, None)));
+
+    assert_eq!(rects(&shapes), [rect(2400, 900, 2800, 1100)]);
+}
+
+#[test]
+fn a_wire_reaches_its_rules_extension_unless_its_path_gives_one() {
+    let (db, n3) = under_wide_rule(Some(30));
+
+    let shapes = route_elem_shapes(&db, n3, &m1_wire(&db, (Some(0), None)));
+
+    assert_eq!(rects(&shapes), [rect(2500, 900, 2730, 1100)]);
+}
+
+#[test]
+fn default_width_shapes_read_every_wire_at_its_layers_width() {
+    let (db, _) = under_wide_rule(Some(30));
+
+    let shapes = default_width_shapes(&db, &m1_wire(&db, (None, None)));
+
+    assert_eq!(rects(&shapes), [rect(2450, 950, 2750, 1050)]);
+}
+
+#[test]
+fn a_via_and_a_patch_are_placed_where_the_route_puts_them() {
+    let db = tiny();
+    let m1 = db.library.routing_layer_id("M1").unwrap();
+    let via = RouteElem::Via {
+        via: db.library.via_id("M1M2").unwrap(),
+        at: pt(2700, 1000),
+    };
+    let patch = RouteElem::Patch {
+        layer: m1,
+        rect: rect(0, 0, 10, 20),
+    };
+
+    let via_rects = rects(&default_width_shapes(&db, &via));
+
+    assert_eq!(
+        via_rects,
+        [
+            rect(2650, 950, 2750, 1050),
+            rect(2650, 900, 2750, 1100),
+            rect(2650, 900, 2750, 1100)
+        ]
+    );
+    assert_eq!(
+        rects(&default_width_shapes(&db, &patch)),
+        [rect(0, 0, 10, 20)]
+    );
+}
+
+#[test]
+fn fixed_shapes_keep_the_io_pins_asked_for() {
+    let db = tiny();
+    let out = &db.io_pins[db.io_pin_id("out").unwrap()];
+    let boxes = |shapes: Vec<OwnedShape>| -> Vec<Rect<Dbu>> {
+        shapes.iter().map(|s| s.shape.rect).collect()
+    };
+
+    let all = boxes(fixed_shapes(&db));
+    let without_out = boxes(fixed_shapes_keeping_io(&db, |p| p.name != "out"));
+
+    let dropped: Vec<Rect<Dbu>> = all
+        .iter()
+        .filter(|r| !without_out.contains(r))
+        .copied()
+        .collect();
+    let out_pin: Vec<Rect<Dbu>> = out.placed_shapes().map(|s| s.rect).collect();
+    assert_eq!(dropped, out_pin);
+    assert_eq!(all.len(), without_out.len() + out_pin.len());
+}
