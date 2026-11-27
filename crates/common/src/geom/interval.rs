@@ -86,20 +86,29 @@ pub fn merge_touching(sorted: impl IntoIterator<Item = Interval>) -> Vec<Interva
 #[must_use]
 pub fn intersect_sorted(a: &[Interval], b: &[Interval]) -> Vec<Interval> {
     let mut out = Vec::new();
-    let (mut i, mut j) = (0, 0);
-    while i < a.len() && j < b.len() {
+    sweep_pairs(a, b, |i, j| {
         let lo = a[i].lo.max(b[j].lo);
         let hi = a[i].hi.min(b[j].hi);
         if lo < hi {
             out.push(Interval::new(lo, hi));
         }
-        if a[i].hi < b[j].hi {
+    });
+    out
+}
+
+/// Calls `visit` with the indices of each pair of intervals of `a` and `b`,
+/// sorted lists of disjoint intervals, that a sweep up both brings side by
+/// side, passing whichever of the two ends first.
+fn sweep_pairs(a: &[Interval], b: &[Interval], mut visit: impl FnMut(usize, usize)) {
+    let (mut i, mut j) = (0, 0);
+    while let (Some(x), Some(y)) = (a.get(i), b.get(j)) {
+        visit(i, j);
+        if x.hi < y.hi {
             i += 1;
         } else {
             j += 1;
         }
     }
-    out
 }
 
 /// The stretches of `within` that none of `blocked`, ordered by `lo`,
