@@ -48,4 +48,6 @@ exclude_re = [
     "replace < with <= in trim_and_sort",
     # Only 1 - epsilon lies epsilon from the far corner, and the curve puts it where the corner is.
     "replace < with <= in theta",
+    # No distance a sink can have, to the power, is exactly i32::MAX.
+    "replace < with <= in arc_cost",
 ]

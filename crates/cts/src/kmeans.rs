@@ -187,14 +187,13 @@ impl Clustering {
                 if d > f64::from(MAX_DIST) {
                     continue;
                 }
-                let d = d.powf(f64::from(power));
-                if d < f64::from(i32::MAX) {
+                if let Some(cost) = arc_cost(d, power) {
                     sink_arcs.push((arcs.len(), i, j));
                     arcs.push(Arc {
                         source: sink_node(i),
                         target: cluster_node(j),
                         capacity: 1,
-                        cost: i32::saturating_from(d),
+                        cost,
                     });
                 }
             }
@@ -219,6 +218,14 @@ impl Clustering {
             }
         }
     }
+}
+
+/// The cost of a sink's arc to a mean `distance` away, the distance to the
+/// `power` in the whole numbers the simplex takes; none when it does not
+/// fit them, as `Clustering::minCostFlow` leaves such an arc out.
+fn arc_cost(distance: f64, power: u32) -> Option<i32> {
+    let cost = distance.powf(f64::from(power));
+    (cost < f64::from(i32::MAX)).then(|| i32::saturating_from(cost))
 }
 
 /// The nearest cluster with room, or the first when none has room, as the
