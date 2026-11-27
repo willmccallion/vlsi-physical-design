@@ -275,3 +275,445 @@ fn a_pin_the_function_does_not_read_has_no_sense() {
     assert_eq!(sense("A & B", "C"), None);
     assert_eq!(sense("A | (B & 1)", "B"), Some(TimingSense::PositiveUnate));
 }
+
+#[test]
+fn the_min_side_prefers_the_smaller_and_the_max_side_the_larger() {
+    assert!(MinMax::Min.beats(1, 2));
+    assert!(!MinMax::Min.beats(2, 1));
+    assert!(!MinMax::Min.beats(1, 1));
+    assert!(MinMax::Max.beats(2, 1));
+    assert!(!MinMax::Max.beats(1, 2));
+    assert!(!MinMax::Max.beats(1, 1));
+}
+
+fn axis(values: &[f64]) -> Axis {
+    Axis {
+        variable: AxisVariable::InputTransition,
+        values: values.to_vec(),
+    }
+}
+
+#[test]
+fn a_lookup_interpolates_between_the_points_around_the_value() {
+    let a = axis(&[1.0, 2.0, 4.0, 8.0]);
+
+    assert_eq!(a.lower_index(3.0), 1);
+    assert_eq!(a.lower_index(4.0), 2);
+    assert_eq!(a.lower_index(0.5), 0);
+    assert_eq!(a.lower_index(9.0), 2);
+    assert_eq!(axis(&[5.0]).lower_index(9.0), 0);
+}
+
+#[test]
+fn a_table_is_consistent_only_with_a_value_per_point_of_at_most_three_axes() {
+    let mut short = table_7x7_like();
+    short.values.truncate(5);
+    let empty = Table {
+        axes: Vec::new(),
+        values: Vec::new(),
+    };
+    let four_axes = Table {
+        axes: vec![axis(&[1.0]); 4],
+        values: times(&[1.0]),
+    };
+
+    assert!(table_7x7_like().is_consistent());
+    assert!(!short.is_consistent());
+    assert!(!empty.is_consistent());
+    assert!(!four_axes.is_consistent());
+}
+
+#[test]
+fn only_the_output_capacitance_axes_give_capacitance_points() {
+    let points: Vec<f64> = table_7x7_like()
+        .capacitance_points()
+        .map(Farads::get)
+        .collect();
+
+    assert_eq!(points, [10.0, 20.0]);
+}
+
+#[test]
+fn a_lookup_reads_the_related_capacitance_along_its_axis() {
+    let t = Table {
+        axes: vec![Axis {
+            variable: AxisVariable::RelatedOutputCapacitance,
+            values: vec![0.0, 10.0],
+        }],
+        values: times(&[1.0, 3.0]),
+    };
+
+    let value = t.lookup_with_related(Seconds::ZERO, Farads::ZERO, Farads::new(5.0));
+
+    assert!((value.get() - 2.0).abs() < 1e-12, "{value:?}");
+}
+
+#[test]
+fn timing_checks_and_set_or_clear_arcs_are_not_searched() {
+    for role in [
+        ArcRole::Setup,
+        ArcRole::Hold,
+        ArcRole::RegSetClr,
+        ArcRole::TristateDisable,
+    ] {
+        assert!(!role.is_searched(), "{role:?}");
+    }
+    assert!(ArcRole::Combinational.is_searched());
+}
+
+#[test]
+fn a_pin_read_the_same_way_twice_keeps_its_sense() {
+    assert_eq!(sense("A & A", "A"), Some(TimingSense::PositiveUnate));
+}
+
+fn flop() -> Sequential {
+    Sequential {
+        kind: SequentialKind::FlipFlop,
+        output: "IQ".into(),
+        output_inv: Some("IQN".into()),
+        clock: Some(FuncExpr::parse("CK").unwrap()),
+        data: Some(FuncExpr::parse("D").unwrap()),
+        clear: Some(FuncExpr::parse("!RN").unwrap()),
+        preset: None,
+    }
+}
+
+#[test]
+fn storage_is_equivalent_only_when_every_part_matches() {
+    let same = flop();
+    let variants = [
+        Sequential {
+            kind: SequentialKind::Latch,
+            ..flop()
+        },
+        Sequential {
+            output: "Q".into(),
+            ..flop()
+        },
+        Sequential {
+            output_inv: None,
+            ..flop()
+        },
+        Sequential {
+            clock: Some(FuncExpr::parse("!CK").unwrap()),
+            ..flop()
+        },
+        Sequential {
+            data: None,
+            ..flop()
+        },
+        Sequential {
+            clear: None,
+            ..flop()
+        },
+        Sequential {
+            preset: Some(FuncExpr::parse("!SN").unwrap()),
+            ..flop()
+        },
+    ];
+
+    assert!(flop().equiv(&same));
+    for variant in &variants {
+        assert!(!flop().equiv(variant), "{variant:?}");
+    }
+}
+
+fn buffer(name: &str) -> LibCell {
+    cell(
+        name,
+        vec![
+            port("A", PortDirection::Input, None),
+            port("Z", PortDirection::Output, Some("A")),
+        ],
+    )
+}
+
+#[test]
+fn a_cell_holds_state_when_it_has_storage() {
+    let mut reg = buffer("REG");
+    reg.sequentials.push(flop());
+
+    assert!(reg.is_sequential());
+    assert!(!buffer("BUF").is_sequential());
+}
+
+#[test]
+fn a_cell_has_functions_when_any_pin_has_one() {
+    let blank = cell("BLANK", vec![port("A", PortDirection::Input, None)]);
+
+    assert!(buffer("BUF").has_functions());
+    assert!(!blank.has_functions());
+}
+
+#[test]
+fn cells_differing_in_storage_power_pins_or_a_pin_are_not_equivalent() {
+    let mut stateful = buffer("REG");
+    stateful.sequentials.push(flop());
+    let mut other_power = buffer("BUF_P");
+    other_power.pg_pins = vec!["VDDX".into(), "VSS".into()];
+    let mut fewer_power = buffer("BUF_1P");
+    fewer_power.pg_pins.truncate(1);
+    let mut tristate = buffer("TBUF");
+    tristate.ports[LibPortId::new(1)].three_state = Some(FuncExpr::parse("!EN").unwrap());
+    let mut flipped = buffer("BUF_IN");
+    flipped.ports[LibPortId::new(0)].direction = PortDirection::Output;
+
+    for other in [&stateful, &other_power, &fewer_power, &tristate, &flipped] {
+        assert!(!buffer("BUF").equivalent(other), "{}", other.name);
+    }
+    let mut also_stateful = buffer("REG_X2");
+    also_stateful.sequentials.push(flop());
+    assert!(stateful.equivalent(&also_stateful));
+}
+
+/// A cell of pins `A` and `Z` without functions, its arcs from `A` to `Z`
+/// of the given roles, senses and conditions.
+fn functionless(arcs: &[(ArcRole, TimingSense, Option<&str>)]) -> LibCell {
+    let mut c = cell(
+        "MACRO",
+        vec![
+            port("A", PortDirection::Input, None),
+            port("Z", PortDirection::Output, None),
+        ],
+    );
+    for &(role, sense, when) in arcs {
+        let _ = c.arc_sets.push(TimingArcSet {
+            from: LibPortId::new(0),
+            to: LibPortId::new(1),
+            role,
+            sense,
+            when: when.map(|w| FuncExpr::parse(w).unwrap()),
+            arcs: Vec::new(),
+        });
+    }
+    c
+}
+
+#[test]
+fn cells_without_functions_are_equivalent_only_with_the_same_arcs() {
+    let base = [(
+        ArcRole::Combinational,
+        TimingSense::PositiveUnate,
+        Some("B"),
+    )];
+    let variants: [&[(ArcRole, TimingSense, Option<&str>)]; 5] = [
+        &[(ArcRole::RegClkToQ, TimingSense::PositiveUnate, Some("B"))],
+        &[(
+            ArcRole::Combinational,
+            TimingSense::NegativeUnate,
+            Some("B"),
+        )],
+        &[(ArcRole::Combinational, TimingSense::PositiveUnate, None)],
+        &[],
+        &[
+            (
+                ArcRole::Combinational,
+                TimingSense::PositiveUnate,
+                Some("B"),
+            ),
+            (ArcRole::Setup, TimingSense::NonUnate, None),
+        ],
+    ];
+
+    assert!(functionless(&base).equivalent(&functionless(&base)));
+    for arcs in variants {
+        assert!(
+            !functionless(&base).equivalent(&functionless(arcs)),
+            "{arcs:?}"
+        );
+    }
+}
+
+#[test]
+fn arcs_match_by_their_pins_names_whatever_their_order() {
+    let mut reordered = functionless(&[(ArcRole::Combinational, TimingSense::PositiveUnate, None)]);
+    reordered.ports = vec![
+        port("Z", PortDirection::Output, None),
+        port("A", PortDirection::Input, None),
+    ]
+    .into();
+    reordered.arc_sets[ArcSetId::new(0)].from = LibPortId::new(1);
+    reordered.arc_sets[ArcSetId::new(0)].to = LibPortId::new(0);
+    let base = functionless(&[(ArcRole::Combinational, TimingSense::PositiveUnate, None)]);
+    let mut backwards = base.clone();
+    backwards.arc_sets[ArcSetId::new(0)].from = LibPortId::new(1);
+    backwards.arc_sets[ArcSetId::new(0)].to = LibPortId::new(0);
+
+    assert!(base.equivalent(&reordered));
+    assert!(!base.equivalent(&backwards));
+}
+
+#[test]
+fn the_delay_arcs_into_a_pin_leave_out_its_checks_and_other_pins() {
+    let c = functionless(&[
+        (ArcRole::Combinational, TimingSense::PositiveUnate, None),
+        (ArcRole::Setup, TimingSense::NonUnate, None),
+    ]);
+
+    let into_z: Vec<ArcRole> = c
+        .delay_arc_sets_to(LibPortId::new(1))
+        .map(|s| s.role)
+        .collect();
+
+    assert_eq!(into_z, [ArcRole::Combinational]);
+    assert_eq!(c.delay_arc_sets_to(LibPortId::new(0)).count(), 0);
+}
+
+const LIMITS_LIB: &str = r#"
+library (limits) {
+  time_unit : "1ns" ;
+  capacitive_load_unit (1, ff) ;
+  default_max_transition : 0.5 ;
+  default_max_capacitance : 40 ;
+  cell (BUF) {
+    area : 1 ;
+    pin (A) { direction : input ; capacitance : 1 ; }
+    pin (Z) { direction : output ; function : "A" ; }
+  }
+}
+"#;
+
+#[test]
+fn library_limits_apply_to_outputs_only() {
+    let lib =
+        crate::db::parser::liberty::parse_str(LIMITS_LIB, std::path::Path::new("l.lib")).unwrap();
+    let buf = lib.cell(lib.cell_id("BUF").unwrap());
+    let pin = |name: &str| &buf.ports[buf.port(name).unwrap()];
+
+    assert_eq!(lib.slew_limit(buf, pin("A")), None);
+    assert_eq!(lib.capacitance_limit(buf, pin("A")), None);
+    let slew = lib.slew_limit(buf, pin("Z")).unwrap().get();
+    let cap = lib.capacitance_limit(buf, pin("Z")).unwrap().get();
+    assert!((slew - 0.5e-9).abs() < 1e-18, "{slew}");
+    assert!((cap - 40e-15).abs() < 1e-24, "{cap}");
+}
+
+#[test]
+fn three_valued_logic_follows_its_truth_tables() {
+    use Logic::{One, Unknown, Zero};
+    let levels = [Zero, One, Unknown];
+    let and = [
+        [Zero, Zero, Zero],
+        [Zero, One, Unknown],
+        [Zero, Unknown, Unknown],
+    ];
+    let or = [
+        [Zero, One, Unknown],
+        [One, One, One],
+        [Unknown, One, Unknown],
+    ];
+    let xor = [
+        [Zero, One, Unknown],
+        [One, Zero, Unknown],
+        [Unknown, Unknown, Unknown],
+    ];
+
+    for (i, a) in levels.into_iter().enumerate() {
+        for (j, b) in levels.into_iter().enumerate() {
+            assert_eq!(a.and(b), and[i][j], "{a:?} and {b:?}");
+            assert_eq!(a.or(b), or[i][j], "{a:?} or {b:?}");
+            assert_eq!(a.xor(b), xor[i][j], "{a:?} xor {b:?}");
+        }
+    }
+}
+
+#[test]
+fn expressions_are_equivalent_only_with_the_same_shape() {
+    let a = FuncExpr::parse("A").unwrap();
+    let b = FuncExpr::parse("B").unwrap();
+
+    assert!(!a.equiv(&b));
+    assert!(FuncExpr::equiv_opt(None, None));
+    assert!(!FuncExpr::equiv_opt(Some(&a), None));
+    assert!(!FuncExpr::equiv_opt(Some(&a), Some(&b)));
+}
+
+#[test]
+fn only_zero_and_one_are_constant_expressions() {
+    assert!(FuncExpr::Zero.is_constant());
+    assert!(FuncExpr::One.is_constant());
+    assert!(!FuncExpr::parse("A").unwrap().is_constant());
+}
+
+#[test]
+fn a_pin_counts_when_some_levels_of_the_unknown_pins_let_it_through() {
+    let unknown = |_: &str| Logic::Unknown;
+
+    assert!(
+        FuncExpr::parse("A & B & C")
+            .unwrap()
+            .depends_on("C", &unknown)
+    );
+    assert!(
+        FuncExpr::parse("A & !B & C")
+            .unwrap()
+            .depends_on("C", &unknown)
+    );
+    assert!(
+        !FuncExpr::parse("A & !A & C")
+            .unwrap()
+            .depends_on("C", &unknown)
+    );
+}
+
+#[test]
+fn a_known_pin_stays_at_its_level() {
+    let b_zero = |p: &str| {
+        if p == "B" {
+            Logic::Zero
+        } else {
+            Logic::Unknown
+        }
+    };
+
+    assert!(!FuncExpr::parse("B & C").unwrap().depends_on("C", &b_zero));
+}
+
+/// The conjunction of `n` pins `P0`, `P1`, ... and a pin `Q`: `n + 1` pins.
+fn wide_and(n: usize) -> FuncExpr {
+    let pins: Vec<String> = (0..n).map(|i| format!("P{i}")).collect();
+    FuncExpr::parse(&format!("{} & Q", pins.join(" & "))).unwrap()
+}
+
+#[test]
+fn too_many_unknown_pins_count_as_a_dependence_without_trying_them() {
+    let unknown = |_: &str| Logic::Unknown;
+
+    assert!(!wide_and(MAX_FREE_PINS - 1).depends_on("R", &unknown));
+    assert!(wide_and(MAX_FREE_PINS).depends_on("R", &unknown));
+}
+
+#[test]
+fn an_expression_prints_with_its_grouping() {
+    let f = FuncExpr::parse("!A & (B | C)").unwrap();
+
+    assert_eq!(f.to_string(), "(!A & (B | C))");
+}
+
+#[test]
+fn a_parenthesis_or_negation_after_a_term_ands_it() {
+    assert_eq!(
+        FuncExpr::parse("A (B | C)").unwrap(),
+        FuncExpr::parse("A & (B | C)").unwrap()
+    );
+    assert_eq!(
+        FuncExpr::parse("A !B").unwrap(),
+        FuncExpr::parse("A & !B").unwrap()
+    );
+}
+
+#[test]
+fn one_is_a_constant_and_an_operator_cannot_start_a_term() {
+    assert_eq!(FuncExpr::parse("1").unwrap(), FuncExpr::One);
+    assert!(FuncExpr::parse("& A").is_err());
+}
+
+#[test]
+fn names_start_with_letters_digits_or_bus_and_path_characters() {
+    for c in ['a', 'Z', '0', '_', '[', ']', '.', '\\'] {
+        assert!(FuncParser::starts_name(c), "{c:?}");
+    }
+    for c in ['&', '(', '!', ' ', '^'] {
+        assert!(!FuncParser::starts_name(c), "{c:?}");
+    }
+}
