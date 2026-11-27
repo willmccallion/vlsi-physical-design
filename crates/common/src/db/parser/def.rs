@@ -1668,3 +1668,6 @@ fn same_geometry(a: &ViaDef, b: &ViaDef) -> bool {
             .is_some()
     })
 }
+
+#[cfg(test)]
+mod tests;
