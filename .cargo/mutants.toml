@@ -21,4 +21,6 @@ exclude_re = [
     "replace describe_violation -> String", # a placement violation's debug log line
     # The timing round's number, shown only in its progress row.
     "replace \\+= with \\*= in <impl TimingDriver for TimingPlacement<'_>>::repair",
+    # A floating-point tolerance: no input lands exactly on its boundary.
+    "replace > with >= in Interpreter<'_>::set_units",
 ]

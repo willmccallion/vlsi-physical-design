@@ -480,3 +480,326 @@ fn dividing_by_zero_is_an_error() {
         assert!(expr(text).is_err(), "{text}");
     }
 }
+
+#[test]
+fn a_fraction_makes_the_arithmetic_floating() {
+    for (text, value) in [
+        ("7.5 - 2", "5.5"),
+        ("5 / 2.0", "2.5"),
+        ("1e-3 * 1000", "1.0"),
+        ("2e+1", "20.0"),
+        ("-1.5", "-1.5"),
+    ] {
+        assert_eq!(expr(text).unwrap(), value, "{text}");
+    }
+}
+
+#[test]
+fn unary_signs_apply_to_what_follows() {
+    for (text, value) in [
+        ("-3", "-3"),
+        ("+3", "3"),
+        ("-3 + 1", "-2"),
+        ("2 * -3", "-6"),
+    ] {
+        assert_eq!(expr(text).unwrap(), value, "{text}");
+    }
+}
+
+#[test]
+fn an_operator_where_a_number_belongs_is_an_error() {
+    assert!(expr("* 3").is_err());
+}
+
+#[test]
+fn a_backslash_escapes_the_character_after_it() {
+    assert_eq!(eval("set v x\\ty").unwrap(), "x\ty");
+    assert_eq!(eval("set v \"a\\\"b\"").unwrap(), "a\"b");
+}
+
+#[test]
+fn a_backslash_ending_a_word_stays_a_backslash() {
+    assert_eq!(eval("set v x\\").unwrap(), "x\\");
+}
+
+#[test]
+fn a_dollar_without_a_name_stays_a_dollar() {
+    assert_eq!(eval("set v \"cost $ 5\"").unwrap(), "cost $ 5");
+}
+
+#[test]
+fn a_braced_variable_name_may_hold_any_character() {
+    assert_eq!(eval("set a.b 1; set v x${a.b}y").unwrap(), "x1y");
+}
+
+#[test]
+fn set_with_only_a_name_gives_the_value() {
+    assert_eq!(eval("set x 5; set x").unwrap(), "5");
+}
+
+#[test]
+fn llength_counts_the_elements_of_a_list() {
+    assert_eq!(eval("llength {a b {c d}}").unwrap(), "3");
+}
+
+#[test]
+fn lindex_picks_an_element_by_position_or_the_last() {
+    assert_eq!(eval("lindex {a b c} 1").unwrap(), "b");
+    assert_eq!(eval("lindex {a b c} end").unwrap(), "c");
+    assert_eq!(eval("lindex {a b} 5").unwrap(), "");
+}
+
+#[test]
+fn a_bracketed_command_skips_escaped_braced_and_quoted_brackets() {
+    for (script, value) in [
+        ("set v [list x\\]]", "{x]}"),
+        ("set v [list {a]b}]", "{a]b}"),
+        ("set v [list \"a]b\"]", "{a]b}"),
+        ("set v [list \"a\\\"]b\"]", "{a\"]b}"),
+    ] {
+        assert_eq!(eval(script).unwrap(), value, "{script}");
+    }
+}
+
+#[test]
+fn set_units_checks_the_units_without_a_result() {
+    assert_eq!(eval("set_units -time ns -capacitance fF").unwrap(), "");
+    let error = eval("set_units -time parsecs").unwrap_err().to_string();
+    assert!(error.contains("unknown unit 'parsecs'"), "{error}");
+}
+
+#[test]
+fn set_units_warns_only_where_the_library_differs() {
+    let matching = crate::testing::capture_logs(|| {
+        let _ = eval("set_units -time 1000ps -capacitance fF").unwrap();
+    });
+    let differing = crate::testing::capture_logs(|| {
+        let _ = eval("set_units -time ps").unwrap();
+    });
+
+    assert_eq!(matching, Vec::<String>::new());
+    assert_eq!(differing.len(), 1, "{differing:?}");
+    assert!(differing[0].contains("set_units -time ps"), "{differing:?}");
+}
+
+#[test]
+fn a_port_matching_nothing_is_an_error_unless_quiet() {
+    assert!(eval("get_ports nosuch").is_err());
+    assert_eq!(eval("get_ports -quiet nosuch").unwrap(), "");
+}
+
+#[test]
+fn an_instance_matching_nothing_warns_unless_quiet() {
+    let unmatched = crate::testing::capture_logs(|| {
+        let _ = eval("get_cells nosuch").unwrap();
+    });
+    let quiet = crate::testing::capture_logs(|| {
+        let _ = eval("get_cells -quiet nosuch").unwrap();
+    });
+    let matched = crate::testing::capture_logs(|| {
+        let _ = eval("get_cells core/*").unwrap();
+    });
+
+    assert_eq!(unmatched.len(), 1, "{unmatched:?}");
+    assert!(
+        unmatched[0].contains("no instance matches 'nosuch'"),
+        "{unmatched:?}"
+    );
+    assert_eq!(quiet, Vec::<String>::new());
+    assert_eq!(matched, Vec::<String>::new());
+}
+
+#[test]
+fn clocks_match_by_glob_and_a_clock_matching_nothing_is_an_error_unless_quiet() {
+    let clocks = "create_clock -name core_clock -period 2 [get_ports clk]\n";
+
+    assert_eq!(
+        eval(&format!("{clocks}get_clocks core*")).unwrap(),
+        "_sta_clock:core_clock"
+    );
+    assert!(eval(&format!("{clocks}get_clocks nosuch")).is_err());
+    assert_eq!(
+        eval(&format!("{clocks}get_clocks -quiet nosuch")).unwrap(),
+        ""
+    );
+}
+
+#[test]
+fn a_clock_without_ports_is_a_virtual_clock() {
+    let sdc = parse("create_clock -name v -period 2\n");
+
+    assert_eq!(sdc.clocks[ClockId(0)].name, "v");
+    assert!(sdc.clocks[ClockId(0)].sources.is_empty());
+}
+
+#[test]
+fn an_unnamed_clock_takes_its_first_port_name() {
+    let sdc = parse("create_clock -period 2 [get_ports clk]\n");
+
+    assert_eq!(sdc.clocks[ClockId(0)].name, "clk");
+}
+
+/// The error a clock of period 2 with `waveform` gives, if any.
+fn waveform_error(waveform: &str) -> Option<String> {
+    parse_str(
+        &format!("create_clock -name c -period 2 -waveform {{{waveform}}} [get_ports clk]\n"),
+        Path::new("t.sdc"),
+        &design(),
+        &liberty(),
+    )
+    .err()
+    .map(|error| error.to_string())
+}
+
+#[test]
+fn a_waveform_rises_then_falls_within_two_periods_as_opensta_checks() {
+    assert_eq!(waveform_error("0 1"), None);
+    assert_eq!(waveform_error("1 1"), None);
+    assert_eq!(waveform_error("0 4"), None);
+    assert!(waveform_error("1 0").is_some());
+    assert!(waveform_error("0 5").is_some());
+}
+
+#[test]
+fn a_port_delay_goes_only_on_ports_of_its_direction() {
+    let db = design();
+    let mut sdc = Sdc::default();
+    let warnings = crate::testing::capture_logs(|| {
+        sdc = parse(
+            "create_clock -name a -period 2 [get_ports clk]\n\
+             set_input_delay 1 -clock a [get_ports {out[0]}]\n",
+        );
+    });
+
+    assert!(!sdc.input_delays.contains_key(&port(&db, "out[0]")));
+    assert_eq!(warnings.len(), 1, "{warnings:?}");
+    assert!(
+        warnings[0].contains("set_input_delay not allowed on port 'out[0]'"),
+        "{warnings:?}"
+    );
+}
+
+#[test]
+fn a_multicycle_path_counts_from_the_start_clock_with_start() {
+    let sdc = parse(
+        "create_clock -name a -period 2 [get_ports clk]\n\
+         set_multicycle_path 2 -start -from [get_clocks a]\n",
+    );
+
+    assert!(!sdc.multicycle_paths[0].use_end_clock);
+}
+
+#[test]
+fn a_multicycle_path_cannot_count_from_both_clocks() {
+    let error = parse_error(
+        "create_clock -name a -period 2 [get_ports clk]\n\
+         set_multicycle_path 2 -start -end -from [get_clocks a]\n",
+    );
+
+    assert!(error.contains("cannot use -start with -end"), "{error}");
+}
+
+const TWO_CLOCKS: &str = "create_clock -name a -period 2 [get_ports clk]\n\
+     create_clock -name b -period 4 [get_ports rst_n]\n";
+
+#[test]
+fn clock_groups_make_paths_between_different_groups_false() {
+    let sdc = parse(&format!(
+        "{TWO_CLOCKS}set_clock_groups -name g -comment {{two}} -asynchronous \
+         -group [get_clocks a] -group [get_clocks b]\n"
+    ));
+
+    let paths: Vec<_> = sdc
+        .false_paths
+        .iter()
+        .map(|f| (f.paths.from_clocks.clone(), f.paths.to_clocks.clone()))
+        .collect();
+    assert_eq!(
+        paths,
+        [
+            (vec![ClockId(0)], vec![ClockId(1)]),
+            (vec![ClockId(1)], vec![ClockId(0)])
+        ]
+    );
+}
+
+#[test]
+fn clock_groups_that_allow_paths_add_no_false_path() {
+    let sdc = parse(&format!(
+        "{TWO_CLOCKS}set_clock_groups -allow_paths -asynchronous \
+         -group [get_clocks a] -group [get_clocks b]\n"
+    ));
+
+    assert!(sdc.false_paths.is_empty());
+}
+
+#[test]
+fn an_unknown_word_of_clock_groups_is_named() {
+    let error = parse_error(&format!(
+        "{TWO_CLOCKS}set_clock_groups -asynchronous -bogus -group [get_clocks a]\n"
+    ));
+
+    assert!(error.contains("unexpected '-bogus'"), "{error}");
+}
+
+#[test]
+fn a_late_derate_leaves_the_early_side() {
+    let sdc = parse("set_timing_derate -late 1.05\n");
+
+    assert!((sdc.derating.cell[MinMax::Max] - 1.05).abs() < 1e-12);
+    assert!((sdc.derating.cell[MinMax::Min] - 1.0).abs() < 1e-12);
+}
+
+#[test]
+fn a_design_limit_on_ports_is_refused_and_on_the_design_is_kept() {
+    let error = parse_error("set_max_fanout 20 [get_ports clk]\n");
+    let sdc = parse("set_max_fanout 20 top\n");
+
+    assert!(
+        error.contains("set_max_fanout on ports is not supported"),
+        "{error}"
+    );
+    assert_eq!(sdc.limits.max_fanout, Some(20.0));
+}
+
+#[test]
+fn a_lone_dash_is_a_value_not_an_option() {
+    assert!(!is_option("-"));
+    assert!(is_option("-name"));
+}
+
+#[test]
+fn a_unit_without_a_prefix_has_its_number_for_scale() {
+    assert_eq!(unit_scale("1s", "s"), Some(1.0));
+}
+
+#[test]
+fn leading_stars_match_an_empty_name() {
+    assert!(glob_matches("*", ""));
+    assert!(glob_matches("**", ""));
+    assert!(!glob_matches("*a", ""));
+}
+
+#[test]
+fn a_list_splits_at_blanks_keeping_braced_and_quoted_elements_whole() {
+    for (text, items) in [
+        ("a {b c} d", vec!["a", "b c", "d"]),
+        ("x y \"b c\" z", vec!["x", "y", "b c", "z"]),
+        ("\"a\\\"b\" c", vec!["a\"b", "c"]),
+        ("a\\ b c", vec!["a b", "c"]),
+        ("a\\nb", vec!["a\nb"]),
+        ("{a\\}b} c", vec!["a\\}b", "c"]),
+        ("a\\", vec!["a\\"]),
+        ("\"a\\", vec!["a\\"]),
+    ] {
+        assert_eq!(split_list(text), items, "{text:?}");
+    }
+}
+
+#[test]
+fn a_list_braces_the_elements_that_need_it() {
+    let items = |words: &[&str]| words.iter().map(|w| (*w).to_string()).collect::<Vec<_>>();
+
+    assert_eq!(join_list(&items(&["", "a"])), "{} a");
+    assert_eq!(join_list(&items(&["a b", "a$b", "c"])), "{a b} {a$b} c");
+}
