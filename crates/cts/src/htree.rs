@@ -931,15 +931,9 @@ impl Builder {
                 let point = self.topologies[level_idx].points[idx];
                 let parent = self.parent_point(level_idx, idx, new_top);
                 let direction = if self.is_horizontal(u32::saturating_from(level_idx) + 1) {
-                    if point.x - parent.x > 0.0 {
-                        Direction::East
-                    } else {
-                        Direction::West
-                    }
-                } else if point.y - parent.y > 0.0 {
-                    Direction::North
+                    east_or_west(point, parent)
                 } else {
-                    Direction::South
+                    north_or_south(point, parent)
                 };
                 let sinks = self.topologies[level_idx].sinks[idx].tree_points();
                 let length = self.topologies[level_idx].length;
@@ -1547,6 +1541,26 @@ impl SegmentBuilder {
         tree.clock.subnets[self.driving].add(buffer);
         self.driving = tree.clock.add_subnet(&format!("{}_leaf", self.net_prefix));
         tree.clock.subnets[self.driving].add(buffer);
+    }
+}
+
+/// Whether `point` lies east of `parent`, else west, as
+/// `HTreeBuilder::legalize` takes a horizontal branch's way.
+fn east_or_west(point: TreePoint, parent: TreePoint) -> Direction {
+    if point.x - parent.x > 0.0 {
+        Direction::East
+    } else {
+        Direction::West
+    }
+}
+
+/// Whether `point` lies north of `parent`, else south, as
+/// `HTreeBuilder::legalize` takes a vertical branch's way.
+fn north_or_south(point: TreePoint, parent: TreePoint) -> Direction {
+    if point.y - parent.y > 0.0 {
+        Direction::North
+    } else {
+        Direction::South
     }
 }
 
