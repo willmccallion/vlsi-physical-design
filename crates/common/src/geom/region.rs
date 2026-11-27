@@ -308,22 +308,8 @@ impl Region {
             if left.x1 != right.x0 {
                 continue;
             }
-            let (mut a, mut b) = (0, 0);
-            while a < left.spans.len() && b < right.spans.len() {
-                let Interval { lo: la, hi: ha } = left.spans[a];
-                let Interval { lo: lb, hi: hb } = right.spans[b];
-                let meet = match corners {
-                    Corners::Separate => la < hb && lb < ha,
-                    Corners::Join => la <= hb && lb <= ha,
-                };
-                if meet {
-                    union(&mut parent, offsets[k - 1] + a, offsets[k] + b);
-                }
-                if ha < hb {
-                    a += 1;
-                } else {
-                    b += 1;
-                }
+            for (a, b) in meeting_spans(&left.spans, &right.spans, corners) {
+                union(&mut parent, offsets[k - 1] + a, offsets[k] + b);
             }
         }
         let mut index_of_root: HashMap<usize, usize> = HashMap::new();
@@ -726,6 +712,33 @@ fn combine_spans(a: &[Interval], b: &[Interval], keep: fn(bool, bool) -> bool) -
 }
 
 /// Whether `spans` contain all of `[lo, hi]`.
+/// The pairs of spans of two abutting slabs that meet, by their indices
+/// in each.
+fn meeting_spans(left: &[Interval], right: &[Interval], corners: Corners) -> Vec<(usize, usize)> {
+    let mut pairs = Vec::new();
+    let (mut a, mut b) = (0, 0);
+    while let (Some(&l), Some(&r)) = (left.get(a), right.get(b)) {
+        if spans_meet(l, r, corners) {
+            pairs.push((a, b));
+        }
+        if l.hi < r.hi {
+            a += 1;
+        } else {
+            b += 1;
+        }
+    }
+    pairs
+}
+
+/// Whether spans of abutting slabs meet, sharing an edge or, where corners
+/// join, a point.
+fn spans_meet(l: Interval, r: Interval, corners: Corners) -> bool {
+    match corners {
+        Corners::Separate => l.lo < r.hi && r.lo < l.hi,
+        Corners::Join => l.lo <= r.hi && r.lo <= l.hi,
+    }
+}
+
 fn spans_cover(spans: &[Interval], lo: Dbu, hi: Dbu) -> bool {
     let k = spans.partition_point(|s| s.hi < hi);
     spans.get(k).is_some_and(|s| s.lo <= lo && hi <= s.hi)
