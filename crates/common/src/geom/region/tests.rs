@@ -553,3 +553,35 @@ fn covering_matches_cell_by_cell_membership() {
         assert_eq!(region.covers_rect(&probe), expected, "{probe:?}");
     }
 }
+
+#[test]
+fn a_rectangle_meeting_the_region_only_along_an_edge_shares_no_area() {
+    let region = ell();
+
+    let beside = [rect(-5, 0, 0, 5), rect(0, -5, 5, 0), rect(10, 0, 15, 2)];
+
+    assert!(
+        beside.iter().all(|r| !region.intersects_rect(r)),
+        "{beside:?}"
+    );
+    assert!(region.intersects_rect(&rect(-5, 0, 1, 5)));
+    assert!(region.intersects_rect(&rect(0, -5, 5, 1)));
+}
+
+#[test]
+fn covering_agrees_with_the_regions_rectangles_covering() {
+    let mut lcg = Lcg(11);
+    for _ in 0..300 {
+        let region = Region::from_rects(lcg.rects(3, 12));
+        let pieces: Vec<Rect<Dbu>> = region.rectangles().collect();
+        let (x, y) = (lcg.below(13), lcg.below(13));
+        let (w, h) = (lcg.below(13 - x), lcg.below(13 - y));
+        let probe = rect(x, y, x + w, y + h);
+
+        assert_eq!(
+            region.covers_rect(&probe),
+            probe.covered_by(&pieces),
+            "{probe:?} in {pieces:?}"
+        );
+    }
+}
