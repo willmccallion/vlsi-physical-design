@@ -25,4 +25,6 @@ exclude_re = [
     "replace > with >= in Interpreter<'_>::set_units",
     # Swapping high and low on every axis visits the same corners in another order.
     "replace == with != in Table::interpolate",
+    # Spans ending together cannot meet the other's next span, so either may be passed first.
+    "replace < with <= in meeting_spans",
 ]
