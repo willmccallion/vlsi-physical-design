@@ -105,10 +105,9 @@ impl Clustering {
             self.min_cost_flow(means, cap, power);
             let mut clusters: Vec<Vec<usize>> = vec![Vec::new(); 2];
             for (i, sink) in self.sinks.iter().enumerate() {
-                let position = match sink.cluster {
-                    Some(c) if c < 2 => c,
-                    _ => nearest_open_cluster(means, &clusters, cap, sink.at),
-                };
+                let position = sink
+                    .cluster
+                    .unwrap_or_else(|| nearest_open_cluster(means, &clusters, cap, sink.at));
                 clusters[position].push(i);
             }
             let mut delta = 0.0_f32;
