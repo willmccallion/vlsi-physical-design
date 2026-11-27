@@ -134,3 +134,6 @@ fn show_clock_trees(summary: &ClockTreeSummary, root_buffer: &str) {
         ("Delay buffers:", &summary.delay_buffers.to_string()),
     );
 }
+
+#[cfg(test)]
+mod tests;
