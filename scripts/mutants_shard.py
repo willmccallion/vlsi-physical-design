@@ -42,13 +42,14 @@ def seed_caught(targets):
     names = subprocess.run(listing, check=True, capture_output=True, text=True).stdout.splitlines()
     wanted = set(targets.read_text().splitlines())
     outcomes = OUTPUT / "mutants.out"
-    outcomes.mkdir(parents=True, exist_ok=True)
+    outcomes.mkdir(exist_ok=True)
     others = (name for name in names if name not in wanted)
     (outcomes / "previously_caught.txt").write_text("".join(f"{name}\n" for name in others))
 
 
 def main():
     shard, shards = sys.argv[1], sys.argv[2]
+    OUTPUT.mkdir(parents=True, exist_ok=True)
     config = run_config()
     extra = shlex.split(config.get("MUTANTS_ARGS", ""))
     targets = config.get("MUTANTS_TARGETS")
