@@ -87,3 +87,17 @@ fn with_nothing_blocked_the_whole_is_one_gap() {
 fn blocked_intervals_past_the_end_leave_no_gap_there() {
     assert_eq!(gaps(spans(&[(5, 30)]), span(0, 10)), spans(&[(0, 5)]));
 }
+
+#[test]
+fn between_spans_the_overlap_or_the_gap() {
+    assert_eq!(span(0, 5).between(span(3, 9)), span(3, 5));
+    assert_eq!(span(0, 3).between(span(5, 9)), span(3, 5));
+    assert_eq!(span(5, 9).between(span(0, 3)), span(3, 5));
+    assert_eq!(span(0, 5).between(span(5, 9)), span(5, 5));
+}
+
+#[test]
+fn intervals_that_only_touch_have_no_overlap_of_length() {
+    assert_eq!(intersect_sorted(&[span(0, 5)], &[span(5, 9)]), []);
+    assert_eq!(intersect_sorted(&[span(0, 5)], &[span(4, 9)]), [span(4, 5)]);
+}

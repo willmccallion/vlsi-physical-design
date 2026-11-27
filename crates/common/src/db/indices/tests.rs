@@ -57,3 +57,42 @@ fn an_index_past_the_end_gets_nothing() {
     assert_eq!(names.get(CellId(1)), Some(&"x"));
     assert_eq!(names.get(CellId(2)), None);
 }
+
+#[test]
+fn a_table_is_empty_only_without_entries() {
+    let mut names: IdVec<CellId, &str> = IdVec::new();
+    assert!(names.is_empty());
+    let _ = names.push("a");
+    assert!(!names.is_empty());
+}
+
+#[test]
+fn tables_are_equal_only_with_the_same_entries() {
+    let a: IdVec<CellId, i32> = IdVec::from(vec![1, 2]);
+
+    assert_eq!(a, IdVec::from(vec![1, 2]));
+    assert_ne!(a, IdVec::from(vec![1, 3]));
+}
+
+#[test]
+fn growing_appends_copies_up_to_the_length_and_never_shrinks() {
+    let mut a: IdVec<CellId, i32> = IdVec::from(vec![1, 2]);
+
+    a.grow_to(4, 0);
+    assert_eq!(a, IdVec::from(vec![1, 2, 0, 0]));
+    a.grow_to(1, 9);
+    assert_eq!(a, IdVec::from(vec![1, 2, 0, 0]));
+}
+
+#[test]
+fn a_routing_layer_has_the_cut_below_it_unless_it_is_the_first() {
+    assert_eq!(LayerId(2).cut_below(), Some(CutLayerId(1)));
+    assert_eq!(LayerId(0).cut_below(), None);
+}
+
+#[test]
+fn a_layer_steps_toward_a_target_one_layer_at_a_time() {
+    assert_eq!(LayerId(1).toward(LayerId(4)), LayerId(2));
+    assert_eq!(LayerId(4).toward(LayerId(1)), LayerId(3));
+    assert_eq!(LayerId(3).toward(LayerId(3)), LayerId(3));
+}

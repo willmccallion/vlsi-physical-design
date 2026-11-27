@@ -15,6 +15,9 @@ exclude_globs = [
 exclude_re = [
     "<impl (\\w+::)*Debug for ",           # debug printing
     "replace resident -> String",          # the memory figure in the router's log lines
+    # A floating-point noise bound: no input lands exactly on it.
+    "replace > with >= in snap_scaled",
+    "replace IdVec<I, T>::with_capacity -> Self with Default::default\\(\\)", # a capacity hint
     # The CLI's debug logs and progress rows, shown while a step runs; its summaries are tested.
     "replace (log_markers|log_opens|show_global_progress|show_setup_progress|show_timing_round) with \\(\\)",
     "delete ! in log_markers",             # whether the debug log is on

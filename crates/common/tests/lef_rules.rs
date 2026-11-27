@@ -375,3 +375,17 @@ fn rule_options_the_model_cannot_hold_are_errors() {
         "{err}"
     );
 }
+
+#[test]
+fn a_cut_s_unconditional_spacing_leaves_out_same_net_rules() {
+    let lib = library_with(
+        &[(
+            "  SPACING 0.12 ;",
+            "  SPACING 0.12 ;\n  SPACING 0.3 SAMENET ;",
+        )],
+        "samenet",
+    )
+    .unwrap();
+
+    assert_eq!(lib.cut_layers[CutLayerId(0)].spacing, Some(Dbu::new(120)));
+}
