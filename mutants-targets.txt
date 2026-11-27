@@ -1,0 +1,360 @@
+crates/cts/src/htree.rs:1007:58: replace || with && in Builder::legalize_dummies
+crates/cts/src/htree.rs:1009:59: replace - with + in Builder::legalize_dummies
+crates/cts/src/htree.rs:1119:31: replace - with + in Builder::adjust_along_blockage
+crates/cts/src/htree.rs:1119:31: replace - with / in Builder::adjust_along_blockage
+crates/cts/src/htree.rs:1119:40: replace + with * in Builder::adjust_along_blockage
+crates/cts/src/htree.rs:1119:40: replace + with - in Builder::adjust_along_blockage
+crates/cts/src/htree.rs:1119:46: replace - with + in Builder::adjust_along_blockage
+crates/cts/src/htree.rs:1119:46: replace - with / in Builder::adjust_along_blockage
+crates/cts/src/htree.rs:113:19: replace < with <= in fuzzy_eq
+crates/cts/src/htree.rs:1163:19: replace * with / in Builder::adjust_beyond_blockage
+crates/cts/src/htree.rs:1163:29: replace * with / in Builder::adjust_beyond_blockage
+crates/cts/src/htree.rs:120:40: replace > with >= in fuzzy_ge
+crates/cts/src/htree.rs:1248:22: replace > with < in Builder::build_branch
+crates/cts/src/htree.rs:1248:22: replace > with == in Builder::build_branch
+crates/cts/src/htree.rs:1248:22: replace > with >= in Builder::build_branch
+crates/cts/src/htree.rs:124:40: replace < with <= in fuzzy_le
+crates/cts/src/htree.rs:1270:9: replace Builder::single_buffer_clock_net with ()
+crates/cts/src/htree.rs:1398:22: replace < with <= in min_delay_segment
+crates/cts/src/htree.rs:1398:22: replace < with == in min_delay_segment
+crates/cts/src/htree.rs:1398:22: replace < with > in min_delay_segment
+crates/cts/src/htree.rs:1399:61: replace + with * in min_delay_segment
+crates/cts/src/htree.rs:1399:61: replace + with - in min_delay_segment
+crates/cts/src/htree.rs:1443:30: replace && with || in fastest_segments
+crates/cts/src/htree.rs:1443:43: replace < with <= in fastest_segments
+crates/cts/src/htree.rs:1474:58: replace > with >= in fits
+crates/cts/src/htree.rs:1475:64: replace > with == in fits
+crates/cts/src/htree.rs:1475:64: replace > with >= in fits
+crates/cts/src/htree.rs:1492:5: replace leave_buffered with ()
+crates/cts/src/htree.rs:1517:41: replace < with <= in SegmentBuilder::build
+crates/cts/src/htree.rs:1518:41: replace < with <= in SegmentBuilder::build
+crates/cts/src/htree.rs:1529:44: replace < with <= in SegmentBuilder::build
+crates/cts/src/htree.rs:1552:20: delete ! in SegmentBuilder::build
+crates/cts/src/htree.rs:1553:32: replace -= with += in SegmentBuilder::build
+crates/cts/src/htree.rs:1553:32: replace -= with /= in SegmentBuilder::build
+crates/cts/src/htree.rs:1583:21: replace += with *= in SegmentBuilder::force_buffer
+crates/cts/src/htree.rs:367:19: replace + with - in Builder::compute_dist
+crates/cts/src/htree.rs:367:52: replace + with * in Builder::compute_dist
+crates/cts/src/htree.rs:367:52: replace + with - in Builder::compute_dist
+crates/cts/src/htree.rs:444:31: replace - with / in Builder::legalize_in_blockages
+crates/cts/src/htree.rs:444:40: replace + with * in Builder::legalize_in_blockages
+crates/cts/src/htree.rs:444:40: replace + with - in Builder::legalize_in_blockages
+crates/cts/src/htree.rs:445:31: replace - with / in Builder::legalize_in_blockages
+crates/cts/src/htree.rs:445:40: replace - with + in Builder::legalize_in_blockages
+crates/cts/src/htree.rs:445:40: replace - with / in Builder::legalize_in_blockages
+crates/cts/src/htree.rs:447:36: replace + with * in Builder::legalize_in_blockages
+crates/cts/src/htree.rs:447:36: replace + with - in Builder::legalize_in_blockages
+crates/cts/src/htree.rs:448:36: replace - with + in Builder::legalize_in_blockages
+crates/cts/src/htree.rs:448:36: replace - with / in Builder::legalize_in_blockages
+crates/cts/src/htree.rs:451:32: replace - with + in Builder::legalize_in_blockages
+crates/cts/src/htree.rs:451:32: replace - with / in Builder::legalize_in_blockages
+crates/cts/src/htree.rs:453:32: replace + with * in Builder::legalize_in_blockages
+crates/cts/src/htree.rs:453:32: replace + with - in Builder::legalize_in_blockages
+crates/cts/src/htree.rs:454:32: replace - with + in Builder::legalize_in_blockages
+crates/cts/src/htree.rs:454:32: replace - with / in Builder::legalize_in_blockages
+crates/cts/src/htree.rs:497:22: replace < with <= in Builder::run
+crates/cts/src/htree.rs:497:22: replace < with == in Builder::run
+crates/cts/src/htree.rs:497:45: replace < with <= in Builder::run
+crates/cts/src/htree.rs:542:47: replace > with >= in Builder::sinks_per_sub_region
+crates/cts/src/htree.rs:543:13: replace && with || in Builder::sinks_per_sub_region
+crates/cts/src/htree.rs:556:50: replace == with != in Builder::init_sink_region
+crates/cts/src/htree.rs:834:22: replace >= with < in Builder::choose_segments
+crates/cts/src/htree.rs:941:43: replace > with >= in Builder::legalize
+crates/cts/src/htree.rs:946:46: replace > with >= in Builder::legalize
+crates/cts/src/latency.rs:263:48: replace / with % in Balancer<'_>::delay_buffers_needed
+crates/cts/src/techchar.rs:1093:65: replace == with != in Chain<'_>::propagate
+crates/cts/src/triton.rs:98:9: replace ClockTrees::clock_buffers -> &[BufferCell] with Vec::leak(Vec::new())
+crates/cts/src/triton.rs:98:9: replace ClockTrees::clock_buffers -> &[BufferCell] with Vec::leak(vec![Default::default()])
+crates/cts/src/triton.rs:105:9: replace ClockTrees::max_wire_length -> Option<Dbu> with None
+crates/cts/src/triton.rs:105:9: replace ClockTrees::max_wire_length -> Option<Dbu> with Some(Default::default())
+crates/cts/src/triton.rs:135:9: replace TreeSetup::context -> TreeContext<'_> with Default::default()
+crates/cts/src/triton.rs:149:5: replace synthesize -> Result<ClockTrees, CtsError> with Ok(Default::default())
+crates/cts/src/triton.rs:167:8: delete ! in synthesize
+crates/cts/src/triton.rs:183:5: replace tree_settings -> Result<Settings, CtsError> with Ok(Default::default())
+crates/cts/src/triton.rs:206:5: replace fanout_settings -> Result<Settings, CtsError> with Ok(Default::default())
+crates/cts/src/triton.rs:207:60: replace < with == in fanout_settings
+crates/cts/src/triton.rs:207:60: replace < with > in fanout_settings
+crates/cts/src/triton.rs:207:60: replace < with <= in fanout_settings
+crates/cts/src/triton.rs:215:9: replace && with || in fanout_settings
+crates/cts/src/triton.rs:215:18: replace < with == in fanout_settings
+crates/cts/src/triton.rs:215:18: replace < with > in fanout_settings
+crates/cts/src/triton.rs:215:18: replace < with <= in fanout_settings
+crates/cts/src/triton.rs:238:5: replace pin_position -> Point<Dbu> with Point::new()
+crates/cts/src/triton.rs:238:5: replace pin_position -> Point<Dbu> with Point::from_iter([Default::default()])
+crates/cts/src/triton.rs:238:5: replace pin_position -> Point<Dbu> with Point::new(Default::default())
+crates/cts/src/triton.rs:238:5: replace pin_position -> Point<Dbu> with Point::from(Default::default())
+crates/cts/src/triton.rs:246:11: replace += with -= in pin_position
+crates/cts/src/triton.rs:246:11: replace += with *= in pin_position
+crates/cts/src/triton.rs:246:33: replace + with - in pin_position
+crates/cts/src/triton.rs:246:33: replace + with * in pin_position
+crates/cts/src/triton.rs:246:77: replace / with % in pin_position
+crates/cts/src/triton.rs:246:77: replace / with * in pin_position
+crates/cts/src/triton.rs:246:55: replace - with + in pin_position
+crates/cts/src/triton.rs:246:55: replace - with / in pin_position
+crates/cts/src/triton.rs:247:11: replace += with -= in pin_position
+crates/cts/src/triton.rs:247:11: replace += with *= in pin_position
+crates/cts/src/triton.rs:247:33: replace + with - in pin_position
+crates/cts/src/triton.rs:247:33: replace + with * in pin_position
+crates/cts/src/triton.rs:247:77: replace / with % in pin_position
+crates/cts/src/triton.rs:247:77: replace / with * in pin_position
+crates/cts/src/triton.rs:247:55: replace - with + in pin_position
+crates/cts/src/triton.rs:247:55: replace - with / in pin_position
+crates/cts/src/triton.rs:250:27: replace / with % in pin_position
+crates/cts/src/triton.rs:250:27: replace / with * in pin_position
+crates/cts/src/triton.rs:250:44: replace / with % in pin_position
+crates/cts/src/triton.rs:250:44: replace / with * in pin_position
+crates/cts/src/triton.rs:259:5: replace liberty_insertion_delay -> Seconds with Default::default()
+crates/cts/src/triton.rs:265:30: replace && with || in liberty_insertion_delay
+crates/cts/src/triton.rs:265:13: replace != with == in liberty_insertion_delay
+crates/cts/src/triton.rs:265:38: replace != with == in liberty_insertion_delay
+crates/cts/src/triton.rs:266:23: replace / with % in liberty_insertion_delay
+crates/cts/src/triton.rs:266:23: replace / with * in liberty_insertion_delay
+crates/cts/src/triton.rs:266:15: replace + with - in liberty_insertion_delay
+crates/cts/src/triton.rs:266:15: replace + with * in liberty_insertion_delay
+crates/cts/src/triton.rs:268:14: replace + with - in liberty_insertion_delay
+crates/cts/src/triton.rs:268:14: replace + with * in liberty_insertion_delay
+crates/cts/src/triton.rs:275:5: replace net_cell_pins -> Vec<PinId> with vec![]
+crates/cts/src/triton.rs:275:5: replace net_cell_pins -> Vec<PinId> with vec![Default::default()]
+crates/cts/src/triton.rs:288:5: replace pin_direction -> Option<(CellId, PinDirection, SignalUse)> with None
+crates/cts/src/triton.rs:288:5: replace pin_direction -> Option<(CellId, PinDirection, SignalUse)> with Some((Default::default(), Default::default(), Default::default()))
+crates/cts/src/triton.rs:298:5: replace is_input_signal -> bool with true
+crates/cts/src/triton.rs:298:5: replace is_input_signal -> bool with false
+crates/cts/src/triton.rs:299:64: replace && with || in is_input_signal
+crates/cts/src/triton.rs:299:67: delete ! in is_input_signal
+crates/cts/src/triton.rs:304:5: replace is_placed -> bool with true
+crates/cts/src/triton.rs:304:5: replace is_placed -> bool with false
+crates/cts/src/triton.rs:304:27: replace != with == in is_placed
+crates/cts/src/triton.rs:308:5: replace is_block -> bool with true
+crates/cts/src/triton.rs:308:5: replace is_block -> bool with false
+crates/cts/src/triton.rs:308:31: replace == with != in is_block
+crates/cts/src/triton.rs:313:5: replace first_output -> Option<PinId> with None
+crates/cts/src/triton.rs:313:5: replace first_output -> Option<PinId> with Some(Default::default())
+crates/cts/src/triton.rs:314:80: replace && with || in first_output
+crates/cts/src/triton.rs:314:56: replace == with != in first_output
+crates/cts/src/triton.rs:314:83: delete ! in first_output
+crates/cts/src/triton.rs:320:5: replace first_input -> Option<PinId> with None
+crates/cts/src/triton.rs:320:5: replace first_input -> Option<PinId> with Some(Default::default())
+crates/cts/src/triton.rs:331:5: replace is_sink -> bool with true
+crates/cts/src/triton.rs:331:5: replace is_sink -> bool with false
+crates/cts/src/triton.rs:382:9: replace Cts<'_>::is_sink -> bool with true
+crates/cts/src/triton.rs:382:9: replace Cts<'_>::is_sink -> bool with false
+crates/cts/src/triton.rs:386:9: replace Cts<'_>::input_cap -> Farads32 with Default::default()
+crates/cts/src/triton.rs:396:9: replace Cts<'_>::single_output -> Option<PinId> with None
+crates/cts/src/triton.rs:396:9: replace Cts<'_>::single_output -> Option<PinId> with Some(Default::default())
+crates/cts/src/triton.rs:399:17: replace && with || in Cts<'_>::single_output
+crates/cts/src/triton.rs:398:17: replace && with || in Cts<'_>::single_output
+crates/cts/src/triton.rs:397:15: replace != with == in Cts<'_>::single_output
+crates/cts/src/triton.rs:398:67: replace == with != in Cts<'_>::single_output
+crates/cts/src/triton.rs:406:9: replace Cts<'_>::populate -> Result<(), CtsError> with Ok(())
+crates/cts/src/triton.rs:418:20: delete ! in Cts<'_>::populate
+crates/cts/src/triton.rs:428:20: delete ! in Cts<'_>::populate
+crates/cts/src/triton.rs:447:9: replace Cts<'_>::init_one_clock_tree -> Result<(), CtsError> with Ok(())
+crates/cts/src/triton.rs:455:42: replace || with && in Cts<'_>::init_one_clock_tree
+crates/cts/src/triton.rs:455:16: delete ! in Cts<'_>::init_one_clock_tree
+crates/cts/src/triton.rs:480:9: replace Cts<'_>::sink -> ClockSink with Default::default()
+crates/cts/src/triton.rs:492:9: replace Cts<'_>::insertion_delay -> Seconds with Default::default()
+crates/cts/src/triton.rs:492:49: replace == with != in Cts<'_>::insertion_delay
+crates/cts/src/triton.rs:499:9: replace Cts<'_>::add_builder -> usize with 0
+crates/cts/src/triton.rs:499:9: replace Cts<'_>::add_builder -> usize with 1
+crates/cts/src/triton.rs:502:41: replace - with + in Cts<'_>::add_builder
+crates/cts/src/triton.rs:502:41: replace - with / in Cts<'_>::add_builder
+crates/cts/src/triton.rs:519:9: replace Cts<'_>::init_clock -> Result<Option<usize>, CtsError> with Ok(None)
+crates/cts/src/triton.rs:519:9: replace Cts<'_>::init_clock -> Result<Option<usize>, CtsError> with Ok(Some(0))
+crates/cts/src/triton.rs:519:9: replace Cts<'_>::init_clock -> Result<Option<usize>, CtsError> with Ok(Some(1))
+crates/cts/src/triton.rs:528:13: replace && with || in Cts<'_>::init_clock
+crates/cts/src/triton.rs:527:13: replace == with != in Cts<'_>::init_clock
+crates/cts/src/triton.rs:528:16: delete ! in Cts<'_>::init_clock
+crates/cts/src/triton.rs:545:9: replace Cts<'_>::split_sinks -> (Vec<PinId>, Vec<PinId>) with (vec![], vec![])
+crates/cts/src/triton.rs:545:9: replace Cts<'_>::split_sinks -> (Vec<PinId>, Vec<PinId>) with (vec![], vec![Default::default()])
+crates/cts/src/triton.rs:545:9: replace Cts<'_>::split_sinks -> (Vec<PinId>, Vec<PinId>) with (vec![Default::default()], vec![])
+crates/cts/src/triton.rs:545:9: replace Cts<'_>::split_sinks -> (Vec<PinId>, Vec<PinId>) with (vec![Default::default()], vec![Default::default()])
+crates/cts/src/triton.rs:551:42: replace || with && in Cts<'_>::split_sinks
+crates/cts/src/triton.rs:551:16: delete ! in Cts<'_>::split_sinks
+crates/cts/src/triton.rs:551:45: delete ! in Cts<'_>::split_sinks
+crates/cts/src/triton.rs:554:69: replace != with == in Cts<'_>::split_sinks
+crates/cts/src/triton.rs:555:77: replace || with && in Cts<'_>::split_sinks
+crates/cts/src/triton.rs:555:36: replace || with && in Cts<'_>::split_sinks
+crates/cts/src/triton.rs:567:9: replace Cts<'_>::is_non_sink_macro -> bool with true
+crates/cts/src/triton.rs:567:9: replace Cts<'_>::is_non_sink_macro -> bool with false
+crates/cts/src/triton.rs:567:24: delete ! in Cts<'_>::is_non_sink_macro
+crates/cts/src/triton.rs:572:12: delete ! in Cts<'_>::is_non_sink_macro
+crates/cts/src/triton.rs:583:13: replace && with || in Cts<'_>::is_non_sink_macro
+crates/cts/src/triton.rs:591:9: replace Cts<'_>::single_tree -> Option<usize> with None
+crates/cts/src/triton.rs:591:9: replace Cts<'_>::single_tree -> Option<usize> with Some(0)
+crates/cts/src/triton.rs:591:9: replace Cts<'_>::single_tree -> Option<usize> with Some(1)
+crates/cts/src/triton.rs:597:41: replace && with || in Cts<'_>::single_tree
+crates/cts/src/triton.rs:601:30: replace < with == in Cts<'_>::single_tree
+crates/cts/src/triton.rs:601:30: replace < with > in Cts<'_>::single_tree
+crates/cts/src/triton.rs:601:30: replace < with <= in Cts<'_>::single_tree
+crates/cts/src/triton.rs:604:28: replace += with -= in Cts<'_>::single_tree
+crates/cts/src/triton.rs:604:28: replace += with *= in Cts<'_>::single_tree
+crates/cts/src/triton.rs:617:9: replace Cts<'_>::forked_trees -> Result<usize, CtsError> with Ok(0)
+crates/cts/src/triton.rs:617:9: replace Cts<'_>::forked_trees -> Result<usize, CtsError> with Ok(1)
+crates/cts/src/triton.rs:628:28: replace += with -= in Cts<'_>::forked_trees
+crates/cts/src/triton.rs:628:28: replace += with *= in Cts<'_>::forked_trees
+crates/cts/src/triton.rs:637:28: replace += with -= in Cts<'_>::forked_trees
+crates/cts/src/triton.rs:637:28: replace += with *= in Cts<'_>::forked_trees
+crates/cts/src/triton.rs:656:9: replace Cts<'_>::fork_register_network -> Result<(NetId, String), CtsError> with Ok((Default::default(), String::new()))
+crates/cts/src/triton.rs:656:9: replace Cts<'_>::fork_register_network -> Result<(NetId, String), CtsError> with Ok((Default::default(), "xyzzy".into()))
+crates/cts/src/triton.rs:663:29: replace += with -= in Cts<'_>::fork_register_network
+crates/cts/src/triton.rs:663:29: replace += with *= in Cts<'_>::fork_register_network
+crates/cts/src/triton.rs:676:9: replace Cts<'_>::make_buffer -> Result<CellId, CtsError> with Ok(Default::default())
+crates/cts/src/triton.rs:699:9: replace Cts<'_>::connect_buffer -> Result<(Option<PinId>, Option<PinId>), CtsError> with Ok((None, None))
+crates/cts/src/triton.rs:699:9: replace Cts<'_>::connect_buffer -> Result<(Option<PinId>, Option<PinId>), CtsError> with Ok((None, Some(Default::default())))
+crates/cts/src/triton.rs:699:9: replace Cts<'_>::connect_buffer -> Result<(Option<PinId>, Option<PinId>), CtsError> with Ok((Some(Default::default()), None))
+crates/cts/src/triton.rs:699:9: replace Cts<'_>::connect_buffer -> Result<(Option<PinId>, Option<PinId>), CtsError> with Ok((Some(Default::default()), Some(Default::default())))
+crates/cts/src/triton.rs:725:9: replace Cts<'_>::clone_clock_gaters -> Result<(), CtsError> with Ok(())
+crates/cts/src/triton.rs:732:16: delete ! in Cts<'_>::clone_clock_gaters
+crates/cts/src/triton.rs:769:9: replace Cts<'_>::net_gated_by -> Option<NetId> with None
+crates/cts/src/triton.rs:769:9: replace Cts<'_>::net_gated_by -> Option<NetId> with Some(Default::default())
+crates/cts/src/triton.rs:775:30: replace || with && in Cts<'_>::net_gated_by
+crates/cts/src/triton.rs:784:9: replace Cts<'_>::cloneable_gate -> Option<(PinId, CellId)> with None
+crates/cts/src/triton.rs:784:9: replace Cts<'_>::cloneable_gate -> Option<(PinId, CellId)> with Some((Default::default(), Default::default()))
+crates/cts/src/triton.rs:785:46: replace == with != in Cts<'_>::cloneable_gate
+crates/cts/src/triton.rs:786:48: replace == with != in Cts<'_>::cloneable_gate
+crates/cts/src/triton.rs:787:49: replace && with || in Cts<'_>::cloneable_gate
+crates/cts/src/triton.rs:787:36: replace && with || in Cts<'_>::cloneable_gate
+crates/cts/src/triton.rs:787:10: delete ! in Cts<'_>::cloneable_gate
+crates/cts/src/triton.rs:787:39: delete ! in Cts<'_>::cloneable_gate
+crates/cts/src/triton.rs:787:52: delete ! in Cts<'_>::cloneable_gate
+crates/cts/src/triton.rs:800:9: replace Cts<'_>::place_gate_clones -> Result<(), CtsError> with Ok(())
+crates/cts/src/triton.rs:817:43: replace == with != in Cts<'_>::place_gate_clones
+crates/cts/src/triton.rs:820:24: replace += with -= in Cts<'_>::place_gate_clones
+crates/cts/src/triton.rs:820:24: replace += with *= in Cts<'_>::place_gate_clones
+crates/cts/src/triton.rs:825:22: replace += with -= in Cts<'_>::place_gate_clones
+crates/cts/src/triton.rs:825:22: replace += with *= in Cts<'_>::place_gate_clones
+crates/cts/src/triton.rs:844:9: replace Cts<'_>::clone_gate -> Result<CellId, CtsError> with Ok(Default::default())
+crates/cts/src/triton.rs:861:44: replace || with && in Cts<'_>::clone_gate
+crates/cts/src/triton.rs:861:29: replace == with != in Cts<'_>::clone_gate
+crates/cts/src/triton.rs:864:39: replace == with != in Cts<'_>::clone_gate
+crates/cts/src/triton.rs:880:29: replace += with -= in Cts<'_>::clone_gate
+crates/cts/src/triton.rs:880:29: replace += with *= in Cts<'_>::clone_gate
+crates/cts/src/triton.rs:886:9: replace Cts<'_>::build -> Result<(), CtsError> with Ok(())
+crates/cts/src/triton.rs:898:13: replace && with || in Cts<'_>::build
+crates/cts/src/triton.rs:913:9: replace Cts<'_>::write -> Result<(), CtsError> with Ok(())
+crates/cts/src/triton.rs:915:40: replace != with == in Cts<'_>::write
+crates/cts/src/triton.rs:918:48: replace == with != in Cts<'_>::write
+crates/cts/src/triton.rs:919:38: replace += with -= in Cts<'_>::write
+crates/cts/src/triton.rs:919:38: replace += with *= in Cts<'_>::write
+crates/cts/src/triton.rs:927:9: replace Cts<'_>::write_clock_nets -> Result<(), CtsError> with Ok(())
+crates/cts/src/triton.rs:928:58: replace == with != in Cts<'_>::write_clock_nets
+crates/cts/src/triton.rs:940:30: replace += with -= in Cts<'_>::write_clock_nets
+crates/cts/src/triton.rs:940:30: replace += with *= in Cts<'_>::write_clock_nets
+crates/cts/src/triton.rs:953:27: replace += with -= in Cts<'_>::write_clock_nets
+crates/cts/src/triton.rs:953:27: replace += with *= in Cts<'_>::write_clock_nets
+crates/cts/src/triton.rs:976:35: replace == with != in Cts<'_>::write_clock_nets
+crates/cts/src/triton.rs:981:13: replace && with || in Cts<'_>::write_clock_nets
+crates/cts/src/triton.rs:991:9: replace Cts<'_>::write_ndr with ()
+crates/cts/src/triton.rs:996:25: delete ! in Cts<'_>::write_ndr
+crates/cts/src/triton.rs:1014:17: replace && with || in Cts<'_>::write_ndr
+crates/cts/src/triton.rs:1013:17: replace && with || in Cts<'_>::write_ndr
+crates/cts/src/triton.rs:1012:16: delete ! in Cts<'_>::write_ndr
+crates/cts/src/triton.rs:1022:31: replace += with -= in Cts<'_>::write_ndr
+crates/cts/src/triton.rs:1022:31: replace += with *= in Cts<'_>::write_ndr
+crates/cts/src/triton.rs:1028:9: replace Cts<'_>::write_dummy_loads -> Result<usize, CtsError> with Ok(0)
+crates/cts/src/triton.rs:1028:9: replace Cts<'_>::write_dummy_loads -> Result<usize, CtsError> with Ok(1)
+crates/cts/src/triton.rs:1049:74: replace == with != in Cts<'_>::write_dummy_loads
+crates/cts/src/triton.rs:1053:36: replace - with + in Cts<'_>::write_dummy_loads
+crates/cts/src/triton.rs:1053:36: replace - with / in Cts<'_>::write_dummy_loads
+crates/cts/src/triton.rs:1055:59: replace - with + in Cts<'_>::write_dummy_loads
+crates/cts/src/triton.rs:1055:59: replace - with / in Cts<'_>::write_dummy_loads
+crates/cts/src/triton.rs:1056:60: replace - with + in Cts<'_>::write_dummy_loads
+crates/cts/src/triton.rs:1056:60: replace - with / in Cts<'_>::write_dummy_loads
+crates/cts/src/triton.rs:1062:30: replace += with -= in Cts<'_>::write_dummy_loads
+crates/cts/src/triton.rs:1062:30: replace += with *= in Cts<'_>::write_dummy_loads
+crates/cts/src/triton.rs:1072:9: replace Cts<'_>::buffer_loads -> BufferLoads with Default::default()
+crates/cts/src/triton.rs:1113:9: replace Cts<'_>::add_dummy_load -> Result<bool, CtsError> with Ok(true)
+crates/cts/src/triton.rs:1113:9: replace Cts<'_>::add_dummy_load -> Result<bool, CtsError> with Ok(false)
+crates/cts/src/triton.rs:1119:26: replace += with -= in Cts<'_>::add_dummy_load
+crates/cts/src/triton.rs:1119:26: replace += with *= in Cts<'_>::add_dummy_load
+crates/cts/src/triton.rs:1139:5: replace dummy_candidates -> Vec<BufferCell> with vec![]
+crates/cts/src/triton.rs:1139:5: replace dummy_candidates -> Vec<BufferCell> with vec![Default::default()]
+crates/cts/src/triton.rs:1146:17: replace && with || in dummy_candidates
+crates/cts/src/triton.rs:1145:17: replace && with || in dummy_candidates
+crates/cts/src/triton.rs:1173:19: delete ! in dummy_candidates
+crates/cts/src/triton.rs:1182:5: replace dummy_input_cap -> Farads32 with Default::default()
+crates/cts/src/triton.rs:1187:5: replace sta_fuzzy_equal -> bool with true
+crates/cts/src/triton.rs:1187:5: replace sta_fuzzy_equal -> bool with false
+crates/cts/src/triton.rs:1200:5: replace signal_driver -> Option<PinId> with None
+crates/cts/src/triton.rs:1200:5: replace signal_driver -> Option<PinId> with Some(Default::default())
+crates/cts/src/triton.rs:1201:80: replace && with || in signal_driver
+crates/cts/src/triton.rs:1201:56: replace == with != in signal_driver
+crates/cts/src/triton.rs:1201:83: delete ! in signal_driver
+crates/cts/src/triton.rs:1214:5: replace sinks_by_long_edge -> Vec<Vec<PinId>> with vec![]
+crates/cts/src/triton.rs:1214:5: replace sinks_by_long_edge -> Vec<Vec<PinId>> with vec![vec![]]
+crates/cts/src/triton.rs:1214:5: replace sinks_by_long_edge -> Vec<Vec<PinId>> with vec![vec![Default::default()]]
+crates/cts/src/triton.rs:1217:27: delete ! in sinks_by_long_edge
+crates/cts/src/triton.rs:1242:5: replace sink_bbox_center -> Option<Point<Dbu>> with None
+crates/cts/src/triton.rs:1242:5: replace sink_bbox_center -> Option<Point<Dbu>> with Some(Point::new())
+crates/cts/src/triton.rs:1242:5: replace sink_bbox_center -> Option<Point<Dbu>> with Some(Point::from_iter([Default::default()]))
+crates/cts/src/triton.rs:1242:5: replace sink_bbox_center -> Option<Point<Dbu>> with Some(Point::new(Default::default()))
+crates/cts/src/triton.rs:1242:5: replace sink_bbox_center -> Option<Point<Dbu>> with Some(Point::from(Default::default()))
+crates/cts/src/triton.rs:1257:5: replace long_edge_clusters -> Vec<Vec<usize>> with vec![]
+crates/cts/src/triton.rs:1257:5: replace long_edge_clusters -> Vec<Vec<usize>> with vec![vec![]]
+crates/cts/src/triton.rs:1257:5: replace long_edge_clusters -> Vec<Vec<usize>> with vec![vec![0]]
+crates/cts/src/triton.rs:1257:5: replace long_edge_clusters -> Vec<Vec<usize>> with vec![vec![1]]
+crates/cts/src/triton.rs:1263:14: replace >= with < in long_edge_clusters
+crates/cts/src/triton.rs:1274:57: replace >= with < in long_edge_clusters
+crates/cts/src/triton.rs:1279:25: replace != with == in long_edge_clusters
+crates/cts/src/triton.rs:1309:5: replace blockage_bloat -> Point<Dbu> with Point::new()
+crates/cts/src/triton.rs:1309:5: replace blockage_bloat -> Point<Dbu> with Point::from_iter([Default::default()])
+crates/cts/src/triton.rs:1309:5: replace blockage_bloat -> Point<Dbu> with Point::new(Default::default())
+crates/cts/src/triton.rs:1309:5: replace blockage_bloat -> Point<Dbu> with Point::from(Default::default())
+crates/cts/src/triton.rs:1312:48: replace / with % in blockage_bloat
+crates/cts/src/triton.rs:1312:48: replace / with * in blockage_bloat
+crates/cts/src/triton.rs:1312:41: replace * with + in blockage_bloat
+crates/cts/src/triton.rs:1312:41: replace * with / in blockage_bloat
+crates/cts/src/triton.rs:1312:33: replace / with % in blockage_bloat
+crates/cts/src/triton.rs:1312:33: replace / with * in blockage_bloat
+crates/cts/src/triton.rs:1322:5: replace merge_blockages -> (Vec<Rect<Dbu>>, Option<Microns>) with (vec![], None)
+crates/cts/src/triton.rs:1322:5: replace merge_blockages -> (Vec<Rect<Dbu>>, Option<Microns>) with (vec![], Some(Default::default()))
+crates/cts/src/triton.rs:1322:5: replace merge_blockages -> (Vec<Rect<Dbu>>, Option<Microns>) with (vec![Rect::new()], None)
+crates/cts/src/triton.rs:1322:5: replace merge_blockages -> (Vec<Rect<Dbu>>, Option<Microns>) with (vec![Rect::new()], Some(Default::default()))
+crates/cts/src/triton.rs:1322:5: replace merge_blockages -> (Vec<Rect<Dbu>>, Option<Microns>) with (vec![Rect::from_iter([Default::default()])], None)
+crates/cts/src/triton.rs:1322:5: replace merge_blockages -> (Vec<Rect<Dbu>>, Option<Microns>) with (vec![Rect::from_iter([Default::default()])], Some(Default::default()))
+crates/cts/src/triton.rs:1322:5: replace merge_blockages -> (Vec<Rect<Dbu>>, Option<Microns>) with (vec![Rect::new(Default::default())], None)
+crates/cts/src/triton.rs:1322:5: replace merge_blockages -> (Vec<Rect<Dbu>>, Option<Microns>) with (vec![Rect::new(Default::default())], Some(Default::default()))
+crates/cts/src/triton.rs:1322:5: replace merge_blockages -> (Vec<Rect<Dbu>>, Option<Microns>) with (vec![Rect::from(Default::default())], None)
+crates/cts/src/triton.rs:1322:5: replace merge_blockages -> (Vec<Rect<Dbu>>, Option<Microns>) with (vec![Rect::from(Default::default())], Some(Default::default()))
+crates/cts/src/triton.rs:1326:57: replace && with || in merge_blockages
+crates/cts/src/triton.rs:1326:36: replace == with != in merge_blockages
+crates/cts/src/triton.rs:1326:72: replace != with == in merge_blockages
+crates/cts/src/triton.rs:1336:41: replace / with % in merge_blockages
+crates/cts/src/triton.rs:1336:41: replace / with * in merge_blockages
+crates/cts/src/triton.rs:1336:12: replace * with + in merge_blockages
+crates/cts/src/triton.rs:1336:12: replace * with / in merge_blockages
+crates/cts/src/triton.rs:1339:34: replace - with + in merge_blockages
+crates/cts/src/triton.rs:1339:34: replace - with / in merge_blockages
+crates/cts/src/triton.rs:1339:49: replace + with - in merge_blockages
+crates/cts/src/triton.rs:1343:21: replace + with - in merge_blockages
+crates/cts/src/triton.rs:1346:50: replace <= with > in merge_blockages
+crates/cts/src/triton.rs:1347:50: replace <= with > in merge_blockages
+crates/cts/src/triton.rs:1349:17: replace || with && in merge_blockages
+crates/cts/src/triton.rs:1348:69: replace && with || in merge_blockages
+crates/cts/src/triton.rs:1348:46: replace < with == in merge_blockages
+crates/cts/src/triton.rs:1348:46: replace < with > in merge_blockages
+crates/cts/src/triton.rs:1348:46: replace < with <= in merge_blockages
+crates/cts/src/triton.rs:1349:65: replace && with || in merge_blockages
+crates/cts/src/triton.rs:1349:42: replace < with == in merge_blockages
+crates/cts/src/triton.rs:1349:42: replace < with > in merge_blockages
+crates/cts/src/triton.rs:1349:42: replace < with <= in merge_blockages
+crates/cts/src/triton.rs:1366:29: replace > with == in merge_blockages
+crates/cts/src/triton.rs:1366:29: replace > with < in merge_blockages
+crates/cts/src/triton.rs:1366:29: replace > with >= in merge_blockages
+crates/cts/src/triton.rs:1372:5: replace root -> usize with 0
+crates/cts/src/triton.rs:1372:5: replace root -> usize with 1
+crates/cts/src/triton.rs:1372:20: replace != with == in root
+crates/cts/src/triton.rs:1382:5: replace add_clock_ndr -> NonDefaultRuleId with Default::default()
+crates/cts/src/triton.rs:1385:12: delete ! in add_clock_ndr
+crates/cts/src/triton.rs:1385:56: replace == with != in add_clock_ndr
+crates/cts/src/triton.rs:1388:15: replace += with -= in add_clock_ndr
+crates/cts/src/triton.rs:1388:15: replace += with *= in add_clock_ndr
+crates/cts/src/triton.rs:1397:59: replace * with + in add_clock_ndr
+crates/cts/src/triton.rs:1397:59: replace * with / in add_clock_ndr
+crates/cts/src/triton.rs:1413:5: replace net_spacing -> Dbu with Default::default()
+crates/cts/src/triton.rs:1419:46: replace && with || in net_spacing
+crates/cts/src/triton.rs:1419:31: replace >= with < in net_spacing
+crates/cts/src/triton.rs:1419:55: replace <= with > in net_spacing
+crates/cts/src/triton.rs:1423:16: replace == with != in net_spacing
+crates/cts/src/triton.rs:1424:29: replace - with + in net_spacing
+crates/cts/src/triton.rs:1424:29: replace - with / in net_spacing
