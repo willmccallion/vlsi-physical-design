@@ -1,0 +1,800 @@
+sinks (2600 5200) (2600 3900) (3250 5200) branching point (4550 5200) means (3900 1950) (1950 3250) cap 1 rounds 4 power 2
+  clusters [[1, 2], [0]] means (3389.2856 4735.7144) (2925 5200) silhouette 0.09306746
+sinks (1950 3250) (650 4550) (1950 1300) (1300 1950) (5200 1300) (2600 4550) (3250 3900) (5200 3900) (4550 1300) branching point (5200 1300) means (5200 650) (2600 3900) cap 6 rounds 0 power 4
+  clusters [[4, 7, 8], [0, 1, 2, 3, 5, 6]] means (4615.0005 3640.0005) (3371.875 2396.875) silhouette 1
+sinks (650 1950) (650 5200) (3900 1300) (1950 4550) (5200 1300) (2600 4550) (1950 1950) (3900 0) branching point (4550 1950) means (3900 1950) (4550 0) cap 5 rounds 3 power 4
+  clusters [[0, 1, 3, 5, 6], [2, 4, 7]] means (3719.4443 2419.4443) (4333.3335 866.6665) silhouette 0.9166666
+sinks (5200 1950) (2600 3250) branching point (1950 2600) means (5200 1300) (4550 3250) cap 1 rounds 2 power 2
+  clusters [[0], [1]] means (3033.3335 2383.3333) (2600 3250) silhouette 0.6666667
+sinks (5200 3900) (2600 7800) (9100 2600) branching point (6500 3900) means (3900 2600) (1300 5200) cap 2 rounds 0 power 4
+  clusters [[2], [0, 1]] means (8233.333 3033.3333) (5014.2856 5014.2856) silhouette 1
+sinks (3900 3250) (3250 4550) (0 1300) (650 650) (5200 1950) (3900 3250) (650 650) (4550 5200) (650 2600) (2600 3250) (650 650) branching point (5200 0) means (650 4550) (3900 3900) cap 4 rounds 3 power 2
+  clusters [[1, 2, 3, 5, 6, 10], [0, 4, 7, 8, 9]] means (3900 650) (4500 1250) silhouette 0.31829965
+sinks (3900 10400) (2600 10400) (0 6500) (3900 5200) (3900 7800) (3900 0) branching point (7800 0) means (2600 3900) (1300 1300) cap 1 rounds 4 power 2
+  clusters [[0, 2, 3, 4], [1, 5]] means (7030.263 1180.2631) (6890 1040) silhouette 0.84417987
+sinks (2600 0) (9100 0) (0 9100) (6500 1300) (1300 3900) (0 5200) (6500 5200) (9100 1300) (5200 3900) branching point (7800 9100) means (2600 0) (7800 2600) cap 3 rounds 4 power 1
+  clusters [[0, 2, 4], [1, 3, 5, 6, 7, 8]] means (5550 7450) (6956.757 6043.243) silhouette 0.68348986
+sinks (4550 0) (650 5200) (3900 0) (4550 3900) (1950 3900) (650 2600) (2600 1300) (650 5200) (3250 3250) branching point (1300 3250) means (3900 5200) (3250 650) cap 1 rounds 3 power 1
+  clusters [[1, 2, 3, 4, 5, 7, 8], [0, 6]] means (3466.6665 3683.3335) (2513.3335 1863.3333) silhouette 0.8342292
+sinks (50 100) (200 50) (100 300) (100 250) (300 300) branching point (150 300) means (100 100) (100 150) cap 4 rounds 0 power 2
+  clusters [[1], [0, 2, 3, 4]] means (154.16667 279.16666) (145.83333 279.16666) silhouette 0.044463128
+sinks (1950 1300) (5200 650) (650 0) (650 0) branching point (3250 4550) means (650 0) (0 3900) cap 1 rounds 0 power 4
+  clusters [[0, 2, 3], [1]] means (2465.5173 3059.483) (4008.3335 3033.3333) silhouette 1
+sinks (0 4550) (0 0) (1950 1300) (2600 1950) (1950 3250) (3250 4550) (1300 2600) (1300 3250) (3900 3250) branching point (5200 4550) means (2600 1300) (0 4550) cap 9 rounds 3 power 4
+  clusters [[1, 2, 3, 6, 8], [0, 4, 5, 7]] means (3610.3262 3214.6738) (2725 4100) silhouette 1
+sinks (350 250) (350 150) (250 400) (300 50) (250 300) (250 200) (250 200) (100 150) (250 350) (350 100) (400 0) branching point (200 300) means (50 300) (150 300) cap 11 rounds 2 power 4
+  clusters [[0, 1, 3, 5, 6, 7, 9, 10], [2, 4, 8]] means (218.29268 268.2927) (225 325) silhouette 0.6432186
+sinks (3250 3900) (650 5200) (650 3250) (1300 650) (4550 1950) branching point (4550 5200) means (4550 0) (3900 1300) cap 4 rounds 3 power 2
+  clusters [[3, 4], [0, 1, 2]] means (4263.2354 4511.7646) (3831.579 4943.421) silhouette 0.286657
+sinks (0 150) (300 350) (50 250) (50 350) (200 250) (150 300) (0 150) (300 0) branching point (100 400) means (0 250) (200 200) cap 5 rounds 2 power 1
+  clusters [[0, 2, 3, 6], [1, 4, 5, 7]] means (62.5 312.5) (155 330) silhouette 0.42658433
+sinks (0 400) (200 400) (0 300) (400 400) (100 300) (200 300) (250 300) (200 50) (300 100) branching point (100 200) means (250 100) (150 300) cap 7 rounds 3 power 2
+  clusters [[7, 8], [0, 1, 2, 3, 4, 5, 6]] means (181.81818 131.81818) (146.55173 303.44827) silhouette 0.5648975
+sinks (300 350) (50 350) (250 250) branching point (0 300) means (250 50) (400 50) cap 3 rounds 1 power 4
+  clusters [[2], [0, 1]] means (62.5 287.5) (58.333336 316.66666) silhouette 0.81481475
+sinks (5200 3900) (5200 3900) (1300 1300) (2600 2600) (1300 3900) (3250 650) (4550 3250) (3250 0) (2600 3250) (3900 5200) branching point (650 3250) means (1300 3900) (650 0) cap 8 rounds 3 power 4
+  clusters [[0, 1, 3, 4, 6, 8, 9], [2, 5, 7]] means (2617.5674 3557.4324) (1625 1950) silhouette 1
+sinks (2600 0) (5200 650) (1300 0) (0 5200) branching point (2600 4550) means (1300 1300) (1300 3900) cap 1 rounds 4 power 4
+  clusters [[0, 2, 3], [1]] means (2189.4736 3660.5264) (3120 3770) silhouette 1
+sinks (400 400) (50 400) (400 200) (200 150) (0 150) (200 50) branching point (50 200) means (150 400) (350 350) cap 5 rounds 4 power 2
+  clusters [[1, 4], [0, 2, 3, 5]] means (18.75 293.75) (175 200) silhouette 0.4777813
+sinks (0 400) (0 200) (250 300) (150 350) (400 100) (100 350) (0 100) (350 250) (50 100) branching point (250 100) means (350 400) (400 150) cap 7 rounds 1 power 1
+  clusters [[2, 3, 5, 7], [0, 1, 4, 6, 8]] means (227.5 227.5) (150 150) silhouette 0.25524104
+sinks (50 200) (150 350) (300 200) (300 200) (150 300) (100 300) (200 0) (150 250) branching point (350 250) means (50 50) (400 300) cap 8 rounds 3 power 4
+  clusters [[0, 1, 2, 3, 4, 5, 6, 7], []] means (87.5 212.5) (500 400) silhouette 0.84068227
+sinks (400 100) (0 150) (100 350) (350 400) branching point (150 350) means (200 0) (200 300) cap 2 rounds 0 power 4
+  clusters [[0, 1], [2, 3]] means (177.27274 227.27272) (262.5 387.5) silhouette 1
+sinks (350 100) (250 200) (300 100) (200 200) (150 50) (400 0) (0 350) (200 150) (50 150) (400 100) (350 0) branching point (200 250) means (250 50) (300 150) cap 3 rounds 3 power 1
+  clusters [[3, 4, 5, 6, 7, 8, 9, 10], [0, 1, 2]] means (209.78261 184.78261) (234.61539 209.61539) silhouette 0.5379614
+sinks (3900 3900) (1300 6500) (9100 2600) (7800 5200) (6500 3900) (7800 6500) (9100 9100) (0 1300) (5200 0) branching point (10400 10400) means (5200 5200) (3900 1300) cap 6 rounds 0 power 2
+  clusters [[0, 1, 2, 3, 4, 6], [5, 7, 8]] means (9251.163 8948.837) (9262.5 8937.5) silhouette 0.6744184
+sinks (400 200) (0 400) (50 0) (50 200) (350 250) (100 100) (50 0) (150 300) (200 0) (150 200) branching point (0 100) means (100 300) (150 350) cap 10 rounds 2 power 1
+  clusters [[1, 3, 9], [0, 2, 4, 5, 6, 7, 8]] means (14.285715 135.7143) (44.827587 105.17242) silhouette 0.15855655
+sinks (1300 4550) (0 1950) (2600 5200) (2600 2600) (3900 4550) (650 0) (650 2600) branching point (1950 1950) means (3250 3250) (1950 650) cap 2 rounds 1 power 4
+  clusters [[0, 1, 4, 5, 6], [2, 3]] means (1063.6364 3013.6362) (2437.5 3412.5) silhouette 1
+sinks (1300 5200) (2600 1950) (2600 5200) (1300 650) (650 3250) (3900 3900) (1300 3900) (1300 0) (2600 650) branching point (3250 0) means (650 3900) (0 3250) cap 6 rounds 4 power 2
+  clusters [[0, 2, 5, 8], [1, 3, 4, 6, 7]] means (3153.7036 553.70374) (2936.2068 336.2069) silhouette 0.14186287
+sinks (300 300) (250 400) (400 50) branching point (200 200) means (0 250) (400 400) cap 3 rounds 2 power 4
+  clusters [[], [0, 1, 2]] means (-20 255) (392.5 282.5) silhouette 0.690708
+sinks (6500 0) (3900 3900) (7800 3900) branching point (9100 5200) means (9100 1300) (2600 1300) cap 3 rounds 1 power 2
+  clusters [[], [0, 1, 2]] means (9100 1950) (7350 3700) silhouette 0.42983684
+sinks (5200 0) (4550 3250) (1950 3900) (650 1950) (2600 1300) (1300 4550) (0 1300) (3900 1300) (4550 650) branching point (3900 5200) means (2600 4550) (650 0) cap 8 rounds 0 power 1
+  clusters [[2, 5], [0, 1, 3, 4, 6, 7, 8]] means (1625 4225) (3315 2535.0002) silhouette 0.5300682
+sinks (50 200) branching point (400 50) means (250 150) (400 400) cap 1 rounds 1 power 4
+  clusters [[0], []] means (260 110) (400 250) silhouette 1
+sinks (3900 3250) (3900 5200) (2600 3900) (650 3900) (0 0) (2600 5200) branching point (650 3250) means (3900 2600) (0 5200) cap 1 rounds 0 power 4
+  clusters [[0, 2, 3, 4, 5], [1]] means (3900 3250) (2681.25 4468.75) silhouette 0.8333333
+sinks (150 50) (100 400) (100 0) (50 250) (100 0) (300 250) (250 0) (300 200) (350 350) (50 50) branching point (150 50) means (150 250) (400 100) cap 2 rounds 1 power 4
+  clusters [[0, 1, 3, 5, 8, 9], [2, 4, 6, 7]] means (167.39131 232.60869) (350 50) silhouette 0.748066
+sinks (250 150) (50 0) (400 350) (300 0) (150 50) (400 100) (100 0) (0 100) (300 400) (300 400) (0 250) branching point (50 150) means (300 400) (300 50) cap 6 rounds 3 power 1
+  clusters [[0, 2, 8, 9, 10], [1, 3, 4, 5, 6, 7]] means (147.22223 227.77777) (140.74075 65.740746) silhouette 0.41205028
+sinks (7800 1300) (5200 1300) (7800 1300) (6500 3900) (0 6500) (9100 3900) (0 9100) (10400 10400) (0 0) (2600 0) (5200 10400) branching point (1300 7800) means (10400 2600) (7800 0) cap 3 rounds 1 power 1
+  clusters [[0, 1, 2, 4, 7, 8, 9, 10], [3, 5, 6]] means (2543.4783 6443.4785) (2971.4287 6871.4287) silhouette 0.83838385
+sinks (3900 3900) (3900 2600) (6500 5200) (2600 6500) (1300 0) (7800 6500) branching point (0 9100) means (10400 2600) (1300 2600) cap 4 rounds 0 power 4
+  clusters [[0, 1, 2, 3], [4, 5]] means (2190.7407 6740.7407) (1990.625 6540.625) silhouette 1
+sinks (0 1950) branching point (3900 5200) means (2600 3900) (3250 2600) cap 1 rounds 0 power 4
+  clusters [[0], []] means (3368.182 4756.8184) (3705 4420) silhouette 1
+sinks (150 350) (300 400) (150 350) (0 250) (250 400) (0 350) (200 300) (300 250) (300 200) (400 150) (200 150) branching point (300 250) means (400 0) (350 50) cap 10 rounds 3 power 1
+  clusters [[1, 9], [0, 2, 3, 4, 5, 6, 7, 8, 10]] means (333.33334 266.66666) (261.66666 261.66666) silhouette 0.20151615
+sinks (3900 3900) (1300 7800) (1300 10400) (1300 3900) (1300 10400) (6500 5200) branching point (0 1300) means (9100 3900) (3900 10400) cap 6 rounds 0 power 1
+  clusters [[0, 5], [1, 2, 3, 4]] means (3600 3550) (936.00006 6214) silhouette 0.6461637
+sinks (400 100) (250 200) (350 400) branching point (100 0) means (0 0) (400 0) cap 2 rounds 0 power 4
+  clusters [[2], [0, 1]] means (176.92308 123.07693) (220 80.00001) silhouette 1
+sinks (5200 7800) (7800 10400) branching point (10400 7800) means (6500 7800) (0 10400) cap 2 rounds 4 power 2
+  clusters [[0], [1]] means (5850 7800) (8125 10075) silhouette 0.86607146
+sinks (3900 0) (0 3900) (2600 4550) (4550 5200) (1300 3900) (2600 3250) (4550 5200) (0 1950) (1950 1950) branching point (3900 3900) means (2600 4550) (4550 2600) cap 4 rounds 1 power 1
+  clusters [[1, 2, 3, 4, 6], [0, 5, 7, 8]] means (2600 4550) (3006.25 2843.75) silhouette 0.3940995
+sinks (100 200) (200 250) (400 100) (350 350) (50 200) (350 400) (150 300) (250 350) branching point (50 250) means (0 50) (0 400) cap 1 rounds 1 power 1
+  clusters [[0, 1, 3, 4, 5, 7], [2, 6]] means (190.00002 285) (193.18181 218.18182) silhouette 0.50196975
+sinks (350 100) branching point (0 0) means (200 150) (200 100) cap 1 rounds 1 power 1
+  clusters [[], [0]] means (14.285715 10.714286) (19.444445 5.555556) silhouette 0
+sinks (50 50) (150 50) (150 250) (200 50) (0 200) (300 50) branching point (100 400) means (50 50) (250 100) cap 2 rounds 2 power 2
+  clusters [[0, 3, 4, 5], [1, 2]] means (113.39286 288.39285) (120.83333 295.83334) silhouette 0.35261226
+sinks (1300 9100) (2600 10400) (2600 2600) (10400 10400) (2600 6500) (0 7800) (6500 3900) (3900 5200) (10400 10400) (6500 7800) branching point (5200 10400) means (0 5200) (5200 10400) cap 2 rounds 1 power 4
+  clusters [[0, 1, 4, 5, 6, 7, 8, 9], [2, 3]] means (3843.4783 6556.5215) (6500 6500) silhouette 1
+sinks (10400 5200) (10400 6500) (9100 0) (1300 2600) branching point (6500 7800) means (10400 5200) (7800 0) cap 4 rounds 2 power 1
+  clusters [[0, 1, 2], [3]] means (8335.294 5735.294) (4550 5850) silhouette 0.79117644
+sinks (0 250) (400 0) (0 250) branching point (250 250) means (200 350) (350 0) cap 2 rounds 0 power 4
+  clusters [[0, 2], [1]] means (0 250) (343.75 93.75) silhouette 0.25641027
+sinks (5200 4550) (2600 2600) (650 650) (0 1950) (3900 1950) (3250 3900) (2600 650) (4550 1300) (3900 3250) branching point (5200 4550) means (0 4550) (5200 2600) cap 5 rounds 4 power 2
+  clusters [[1, 3, 5, 8], [0, 2, 4, 6, 7]] means (2949.0742 3225.9258) (3770 2405) silhouette 0.22274107
+sinks (100 50) branching point (250 300) means (0 350) (150 350) cap 1 rounds 0 power 1
+  clusters [[0], []] means (221.875 253.125) (200 325) silhouette 0.13333334
+sinks (3900 3900) (650 650) (650 1300) (0 5200) (5200 0) (3250 1950) branching point (650 3250) means (650 650) (4550 1950) cap 5 rounds 4 power 4
+  clusters [[1, 2, 3, 4], [0, 5]] means (1690 1689.9999) (2990 2990) silhouette 0.9259259
+sinks (6500 6500) (5200 9100) (7800 6500) (7800 5200) (1300 5200) (3900 1300) (3900 7800) (5200 0) (3900 2600) (0 2600) (7800 1300) branching point (6500 5200) means (3900 6500) (9100 1300) cap 8 rounds 2 power 4
+  clusters [[0, 1, 2, 3, 4, 6, 9], [5, 7, 8, 10]] means (3033.333 6933.333) (5200 1300) silhouette 1
+sinks (9100 2600) (3900 2600) (10400 3900) (0 6500) (10400 10400) (2600 0) (1300 6500) (6500 10400) (6500 9100) (3900 1300) (10400 9100) branching point (2600 3900) means (9100 10400) (2600 9100) cap 1 rounds 0 power 2
+  clusters [[0, 1, 4, 5, 6, 7, 8, 9, 10], [2, 3]] means (5129.7295 5270.2705) (5200 5200) silhouette 0.7277641
+sinks (5200 2600) (0 10400) (6500 0) (10400 9100) (2600 9100) (9100 6500) branching point (10400 9100) means (6500 5200) (2600 0) cap 3 rounds 2 power 4
+  clusters [[2, 3, 5], [0, 1, 4]] means (9000 5950) (6677.273 8272.728) silhouette 1
+sinks (1950 4550) (3900 1300) branching point (1300 0) means (4550 3900) (1300 1950) cap 1 rounds 0 power 4
+  clusters [[1], [0]] means (3033.3335 866.6667) (1625 2275) silhouette 1
+sinks (1300 650) (5200 4550) (1950 2600) (0 650) branching point (2600 1300) means (0 2600) (0 5200) cap 3 rounds 3 power 2
+  clusters [[0, 3], [1, 2]] means (1625 975) (2990 2210) silhouette 0.5004329
+sinks (200 400) (400 300) (250 100) (300 50) (150 200) branching point (300 300) means (0 100) (150 350) cap 4 rounds 1 power 1
+  clusters [[2, 3, 4], [0, 1]] means (246.66666 153.33333) (300 500) silhouette 0.50511783
+sinks (6500 5200) (2600 6500) (6500 7800) (7800 0) (2600 2600) (9100 5200) (2600 7800) (9100 5200) (10400 10400) (2600 5200) branching point (6500 5200) means (10400 10400) (7800 0) cap 7 rounds 3 power 4
+  clusters [[0, 2, 5, 7, 8], [1, 3, 4, 6, 9]] means (10000 8200) (1392.8574 3807.1428) silhouette 0.90178573
+sinks (9100 2600) (1300 10400) branching point (5200 9100) means (1300 5200) (3900 10400) cap 2 rounds 0 power 1
+  clusters [[0], [1]] means (6662.5 6662.5) (2275 10075) silhouette 0.92857146
+sinks (3900 6500) (0 9100) (10400 10400) (5200 2600) (1300 6500) branching point (2600 6500) means (5200 3900) (5200 0) cap 3 rounds 1 power 1
+  clusters [[0, 1, 2], [3, 4]] means (3575 7475) (3087.5 5037.5) silhouette 0.40025973
+sinks (350 150) (350 350) (250 100) (100 250) (250 400) (400 150) (300 0) branching point (0 400) means (300 400) (150 150) cap 5 rounds 3 power 2
+  clusters [[1, 4], [0, 2, 3, 5, 6]] means (184.61539 384.6154) (101.818184 301.81818) silhouette 0.25037867
+sinks (150 0) (300 250) (200 250) (250 300) (200 350) (300 100) (300 400) (0 150) (300 400) (400 250) (0 100) branching point (250 150) means (200 300) (350 150) cap 9 rounds 4 power 2
+  clusters [[0, 1, 2, 3, 4, 6, 7, 8, 10], [5, 9]] means (191.07143 241.07143) (370 180) silhouette 0.38099384
+sinks (5200 10400) (3900 0) (3900 0) (2600 10400) (9100 7800) (3900 3900) (6500 7800) (10400 3900) (6500 7800) (9100 9100) branching point (1300 2600) means (1300 6500) (2600 1300) cap 10 rounds 4 power 4
+  clusters [[0, 3, 4, 5, 6, 7, 8, 9], [1, 2]] means (2975.7813 4174.2188) (2925 975) silhouette 1
+sinks (0 1950) (3250 650) (650 0) (2600 1950) (0 2600) (4550 1950) (0 3250) (650 3250) (5200 650) branching point (1300 1950) means (3250 650) (3900 5200) cap 2 rounds 3 power 2
+  clusters [[1, 3, 5, 8], [0, 2, 4, 6, 7]] means (3380 1430) (-780 2470) silhouette 0.7299823
+sinks (7800 9100) (7800 7800) (2600 5200) (10400 6500) (7800 7800) branching point (7800 0) means (6500 0) (0 5200) cap 1 rounds 4 power 2
+  clusters [[0, 1, 3, 4], [2]] means (8250 5400) (4875 2925) silhouette 0.69829065
+sinks (400 350) (150 300) (50 250) (300 250) (150 100) branching point (300 200) means (350 250) (100 250) cap 4 rounds 0 power 4
+  clusters [[0, 3], [1, 2, 4]] means (341.66666 283.3333) (185.41667 210.41667) silhouette 0.5266444
+sinks (200 400) (400 250) (50 250) (200 100) (300 300) (350 200) (300 200) (100 200) branching point (300 250) means (300 50) (150 350) cap 4 rounds 0 power 1
+  clusters [[1, 3, 5, 6], [0, 2, 4, 7]] means (337.5 62.5) (123.214294 298.2143) silhouette 0.48647058
+sinks (250 150) branching point (300 50) means (200 350) (150 150) cap 1 rounds 0 power 1
+  clusters [[0], []] means (258.33334 133.33333) (225 100) silhouette 0.66666645
+sinks (1950 650) (3250 650) (0 2600) (4550 1950) (2600 3250) (3900 650) (0 650) (0 3250) (2600 1300) (2600 3900) (2600 1950) branching point (5200 4550) means (1950 1300) (0 5200) cap 4 rounds 2 power 2
+  clusters [[0, 2, 3, 5, 8, 10], [1, 4, 6, 7, 9]] means (3850 2975) (3405.1138 3419.8862) silhouette 0.22871853
+sinks (3250 650) (3250 2600) (650 3900) (4550 5200) (1950 1950) (1950 0) (3250 3900) (4550 3900) (1300 3900) branching point (1950 0) means (3900 3900) (650 650) cap 4 rounds 1 power 4
+  clusters [[0, 1, 3, 4, 8], [2, 5, 6, 7]] means (2734.4827 2465.517) (2540.9092 2659.091) silhouette 1
+sinks (2600 10400) (0 0) (2600 0) (0 7800) (5200 3900) (6500 3900) (10400 3900) (10400 7800) branching point (5200 3900) means (3900 9100) (7800 10400) cap 7 rounds 1 power 2
+  clusters [[0, 1, 2, 3], [4, 5, 6, 7]] means (2971.4285 4271.4287) (7150 4550) silhouette 0.70705783
+sinks (1300 0) (650 650) (1300 4550) (2600 3900) (5200 3900) (3250 0) branching point (3900 4550) means (5200 650) (4550 3250) cap 4 rounds 0 power 2
+  clusters [[0, 1, 5], [2, 3, 4]] means (3358.3335 3466.6665) (2816.6667 4008.3333) silhouette 0.5300443
+sinks (0 2600) (4550 0) (3900 2600) (1300 4550) (5200 650) (650 1950) (4550 4550) (5200 0) (3900 1300) branching point (3250 3250) means (3250 2600) (4550 5200) cap 5 rounds 0 power 1
+  clusters [[0, 1, 4, 5, 7, 8], [2, 3, 6]] means (3250 1300) (3250 5200) silhouette 0.43785474
+sinks (3250 3250) (1300 0) (3900 1950) (0 4550) branching point (1300 3900) means (1950 650) (1300 4550) cap 1 rounds 2 power 4
+  clusters [[0, 2, 3], [1]] means (2721.875 3046.875) (1300 1625) silhouette 1
+sinks (0 3900) (3900 3900) (10400 6500) (6500 6500) (3900 9100) (2600 2600) branching point (6500 9100) means (1300 2600) (9100 0) cap 4 rounds 1 power 2
+  clusters [[0, 1, 4, 5], [2, 3]] means (4004 6396) (8728.571 6128.5713) silhouette 0.5698052
+sinks (7800 2600) (0 0) (6500 2600) (3900 2600) (1300 7800) (3900 9100) (0 6500) (7800 5200) branching point (7800 3900) means (1300 2600) (2600 6500) cap 1 rounds 2 power 2
+  clusters [[1, 2, 3, 4, 5, 6, 7], [0]] means (5648.276 4348.276) (7800 1300) silhouette 0.737069
+sinks (100 0) (150 0) (350 250) branching point (150 350) means (150 350) (350 100) cap 2 rounds 0 power 1
+  clusters [[0], [1, 2]] means (121.875 153.125) (219.23077 194.23076) silhouette 0.1852365
+sinks (5200 2600) (9100 1300) (9100 3900) (0 5200) (7800 10400) branching point (6500 7800) means (5200 1300) (5200 1300) cap 1 rounds 4 power 2
+  clusters [[0, 2, 3, 4], [1]] means (6500 7800) (6500 7800) silhouette 0.8
+sinks (2600 0) branching point (1300 4550) means (1300 650) (0 2600) cap 1 rounds 4 power 2
+  clusters [[0], []] means (1661.1111 3286.111) (650 3575) silhouette 0.23529412
+sinks (650 1300) (0 4550) (5200 3250) (3250 650) (2600 0) (1300 3900) (2600 1300) (4550 3250) (1950 1300) branching point (1300 2600) means (3250 3900) (1300 1950) cap 3 rounds 0 power 4
+  clusters [[1, 2, 5, 6, 7, 8], [0, 3, 4]] means (2860 2990) (1900 1250.0001) silhouette 1
+sinks (7800 0) (2600 0) (10400 1300) (3900 5200) (3900 7800) (9100 1300) (6500 0) (9100 2600) (1300 5200) (7800 5200) branching point (0 0) means (0 5200) (1300 7800) cap 1 rounds 3 power 1
+  clusters [[2, 3, 4, 5, 6, 7, 8, 9], [0, 1]] means (1258.0645 691.9355) (1950 0) silhouette 0.89026344
+sinks (200 250) (200 0) (300 400) (100 150) (400 400) (150 200) (200 150) (300 200) branching point (100 250) means (300 250) (50 0) cap 2 rounds 0 power 2
+  clusters [[0, 2, 4, 5, 6, 7], [1, 3]] means (326.1905 273.8095) (155.55556 55.555542) silhouette 0.793421
+sinks (100 400) (300 50) (50 400) (100 400) (50 300) (100 0) (350 0) branching point (200 300) means (150 100) (400 0) cap 1 rounds 0 power 4
+  clusters [[0, 2, 3, 4, 5, 6], [1]] means (95 230) (250 175) silhouette 0.9350649
+sinks (9100 0) (1300 3900) (2600 5200) (2600 1300) (5200 7800) (10400 7800) (0 9100) branching point (10400 6500) means (5200 6500) (6500 9100) cap 6 rounds 2 power 2
+  clusters [[0, 1, 2, 3], [4, 5, 6]] means (9181.25 5768.75) (8937.5 6987.5) silhouette 0.79189193
+sinks (4550 4550) (1950 0) (2600 5200) (650 4550) (4550 1300) (5200 4550) (1950 4550) (1950 650) branching point (3900 4550) means (3900 1300) (1950 650) cap 5 rounds 0 power 4
+  clusters [[0, 1, 4, 5, 7], [2, 3, 6]] means (3770 3380) (2718.1816 4668.1816) silhouette 1
+sinks (10400 7800) (0 10400) (10400 6500) (5200 0) branching point (2600 0) means (5200 6500) (0 2600) cap 4 rounds 4 power 4
+  clusters [[0, 2, 3], [1]] means (5148 2001.9999) (1690 3640) silhouette 1
+sinks (7800 6500) (0 10400) (9100 7800) (3900 3900) (9100 1300) (7800 1300) (2600 3900) (9100 10400) branching point (9100 5200) means (10400 9100) (3900 9100) cap 8 rounds 2 power 2
+  clusters [[0, 1, 2, 7], [3, 4, 5, 6]] means (7731.579 7081.579) (7294.4443 3755.5557) silhouette 0.6619704
+sinks (300 250) (50 300) (350 50) (250 200) branching point (200 200) means (0 200) (100 150) cap 3 rounds 2 power 4
+  clusters [[0, 1], [2, 3]] means (181.25 256.25) (242.85715 167.85715) silhouette 0.5624542
+sinks (650 1300) (4550 3900) (2600 2600) (1300 1950) (2600 1300) (3250 3900) (650 5200) (650 1300) (1300 650) branching point (3900 2600) means (0 0) (0 2600) cap 8 rounds 4 power 4
+  clusters [[0, 3, 4, 7, 8], [1, 2, 5, 6]] means (3033.3333 2166.6667) (3293.3333 3293.3335) silhouette 0.8472222
+sinks (2600 4550) branching point (5200 0) means (1950 3250) (650 2600) cap 1 rounds 0 power 2
+  clusters [[0], []] means (4845.4546 620.4546) (4579.5454 354.54544) silhouette 1
+sinks (2600 1300) (6500 2600) (0 1300) (7800 9100) (5200 10400) (7800 10400) (6500 3900) (7800 2600) (2600 3900) (9100 5200) branching point (10400 2600) means (1300 1300) (0 3900) cap 7 rounds 3 power 2
+  clusters [[0, 1, 2, 7], [3, 4, 5, 6, 8, 9]] means (8635.714 2414.2856) (9500 3650) silhouette 0.75579435
+sinks (4550 4550) branching point (3250 2600) means (4550 2600) (0 1300) cap 1 rounds 0 power 4
+  clusters [[0], []] means (4420 4355) (1160.7144 1764.2856) silhouette 1
+sinks (3250 0) (1300 3250) (0 1300) (3900 0) (1950 0) (3900 650) branching point (3900 1950) means (4550 2600) (1300 5200) cap 1 rounds 1 power 4
+  clusters [[1, 2, 3, 4, 5], [0]] means (1998.75 926.25) (3168.75 -243.75) silhouette 1
+sinks (400 50) (0 0) (300 200) (0 150) (50 150) branching point (400 0) means (150 350) (350 300) cap 5 rounds 1 power 4
+  clusters [[1, 3, 4], [0, 2]] means (300.86206 25.862068) (364.2857 89.28571) silhouette 0.67832166
+sinks (1950 1300) (2600 3900) branching point (4550 0) means (5200 1300) (1950 3900) cap 1 rounds 1 power 1
+  clusters [[1], [0]] means (3575 1950) (2600 975) silhouette 0.2857143
+sinks (2600 5200) (2600 0) (6500 10400) (10400 0) (6500 10400) (5200 5200) (9100 0) (3900 7800) branching point (2600 10400) means (3900 10400) (9100 3900) cap 1 rounds 1 power 1
+  clusters [[1, 2, 3, 4, 5, 6], [0, 7]] means (4964.8936 6914.8936) (3435.7144 5385.7144) silhouette 0.6007041
+sinks (5200 3900) (6500 10400) (5200 10400) (7800 10400) (5200 9100) (6500 0) branching point (9100 10400) means (7800 7800) (3900 5200) cap 6 rounds 2 power 1
+  clusters [[0, 5], [1, 2, 3, 4]] means (8197.223 8052.7773) (6175 10075) silhouette 0.7338956
+sinks (650 4550) branching point (1950 0) means (0 4550) (4550 1300) cap 1 rounds 1 power 1
+  clusters [[0], []] means (1083.3333 3033.3335) (4550 1300) silhouette 0.72727275
+sinks (6500 7800) (5200 2600) (10400 0) (7800 6500) (7800 10400) (0 2600) (0 7800) (9100 7800) (1300 5200) branching point (10400 1300) means (0 9100) (10400 6500) cap 2 rounds 3 power 1
+  clusters [[0, 1, 3, 5, 6, 8], [2, 4, 7]] means (6321.5684 3721.5686) (9007.143 6407.143) silhouette 0.5636428
+sinks (1300 1300) (650 4550) (1950 2600) (3900 1300) branching point (650 4550) means (4550 3250) (4550 4550) cap 3 rounds 4 power 1
+  clusters [[1, 2, 3], [0]] means (953.3334 4203.3335) (758.3333 4008.3333) silhouette 0.25000006
+sinks (200 400) (300 250) (150 250) (200 300) (0 250) (150 0) (0 50) (150 250) (400 100) branching point (350 200) means (250 300) (50 100) cap 2 rounds 3 power 2
+  clusters [[0, 2, 4, 5, 6, 7, 8], [1, 3]] means (163.33334 186.66666) (235.71428 285.7143) silhouette 0.55171776
+sinks (50 0) (100 150) (150 100) (50 150) (0 250) (350 50) (150 250) branching point (150 300) means (400 200) (150 400) cap 5 rounds 2 power 4
+  clusters [[0, 1, 2, 3, 4], [5, 6]] means (78 147) (240 165) silhouette 0.5528382
+sinks (650 3250) (1300 5200) (2600 2600) (1300 1300) (5200 2600) (650 0) (0 5200) branching point (1950 2600) means (1950 4550) (0 2600) cap 6 rounds 3 power 1
+  clusters [[1, 2, 4], [0, 3, 5, 6]] means (3033.3333 3466.6667) (216.66663 2383.3333) silhouette 0.40776816
+sinks (4550 3250) (0 3250) (0 1300) (3250 4550) (2600 1300) (0 3900) (1300 650) branching point (0 2600) means (4550 4550) (1950 2600) cap 3 rounds 0 power 2
+  clusters [[1, 3, 5, 6], [0, 2, 4]] means (1592.5 3282.5) (1787.5 2112.5) silhouette 0.17697784
+sinks (5200 10400) (5200 3900) (9100 9100) branching point (9100 3900) means (9100 1300) (2600 2600) cap 3 rounds 0 power 4
+  clusters [[2], [0, 1]] means (9100 7800) (6972.7275 5672.7275) silhouette 1
+sinks (2600 10400) (9100 1300) (10400 3900) (3900 1300) (0 3900) (10400 3900) branching point (9100 7800) means (1300 1300) (9100 9100) cap 6 rounds 4 power 1
+  clusters [[0, 1, 2, 3, 4, 5], []] means (5577.419 3522.5806) (9100 15600) silhouette 0.9189516
+sinks (1300 0) (3900 1300) (650 3900) (2600 5200) (650 2600) (3900 1300) (3900 3900) (5200 650) branching point (5200 2600) means (1950 3250) (3250 0) cap 4 rounds 4 power 4
+  clusters [[2, 3, 4, 6], [0, 1, 5, 7]] means (3575 3250) (4116.6665 1408.3333) silhouette 1
+sinks (50 150) (250 200) (0 350) branching point (200 50) means (250 300) (350 100) cap 2 rounds 3 power 2
+  clusters [[0, 1, 2], []] means (147.05882 147.05882) (312.5 87.5) silhouette 0.39761856
+sinks (5200 4550) (2600 5200) (0 3250) (0 1300) (0 650) (4550 0) (650 1950) (5200 650) (3250 4550) (4550 0) branching point (4550 3250) means (5200 1950) (3250 3900) cap 6 rounds 1 power 4
+  clusters [[0, 3, 4, 5, 6, 7], [1, 2, 8, 9]] means (3517.647 2332.353) (2600 3250) silhouette 1
+sinks (5200 2600) (3900 10400) (6500 0) (5200 6500) (9100 10400) (2600 7800) (3900 2600) branching point (10400 1300) means (2600 1300) (7800 2600) cap 6 rounds 2 power 1
+  clusters [[0, 1, 2, 3, 5, 6], [4]] means (8405.682 2555.6816) (9993.75 4143.75) silhouette 0.7581851
+sinks (300 300) (0 50) (100 150) (50 400) (350 300) (100 50) (150 150) (300 400) (100 400) (200 400) branching point (100 50) means (50 300) (150 250) cap 5 rounds 3 power 1
+  clusters [[1, 2, 3, 5, 8], [0, 4, 6, 7, 9]] means (88.1579 113.1579) (128.57143 96.42857) silhouette 0.12520203
+sinks (2600 0) (3900 0) (2600 2600) branching point (1300 1950) means (3900 1950) (0 5200) cap 1 rounds 2 power 2
+  clusters [[0, 1], [2]] means (3087.5 162.5) (3683.3335 3141.6667) silhouette 0.66675854
+sinks (1300 3900) (2600 5200) (9100 10400) (6500 5200) (3900 9100) (0 3900) (9100 0) branching point (7800 10400) means (6500 7800) (5200 5200) cap 2 rounds 2 power 1
+  clusters [[0, 1, 4, 5, 6], [2, 3]] means (6971.25 9278.75) (7800 8450) silhouette 0.6122449
+sinks (650 1950) (0 4550) (4550 1950) (0 5200) (5200 650) (5200 1300) branching point (5200 0) means (4550 2600) (1950 0) cap 1 rounds 2 power 1
+  clusters [[0, 3, 5], [1, 2, 4]] means (3807.143 1207.1428) (4030 1430) silhouette 0.52916664
+sinks (1300 1300) (5200 5200) (3900 0) (10400 7800) (2600 5200) (1300 1300) (9100 9100) (5200 10400) (9100 6500) branching point (3900 7800) means (7800 3900) (0 5200) cap 6 rounds 1 power 1
+  clusters [[3, 6, 7, 8], [0, 1, 2, 4, 5]] means (7881.25 8368.75) (3141.6665 4008.3333) silhouette 0.7501536
+sinks (1300 1950) (0 1950) (3250 5200) (5200 650) (650 2600) (0 1950) (2600 3250) (3900 3250) branching point (3900 2600) means (4550 1950) (1950 5200) cap 8 rounds 0 power 4
+  clusters [[3], [0, 1, 2, 4, 5, 6, 7]] means (5070 845) (1300.0002 2925) silhouette 1
+sinks (50 150) (50 200) (250 400) (400 250) (300 400) (50 50) (300 350) branching point (300 200) means (300 250) (150 0) cap 2 rounds 2 power 4
+  clusters [[2, 3, 4, 5, 6], [0, 1]] means (238.46153 338.46155) (118.18181 181.81818) silhouette 0.82074976
+sinks (10400 2600) (0 1300) (0 10400) (7800 1300) (2600 10400) (6500 3900) (9100 2600) (9100 0) branching point (2600 3900) means (9100 0) (10400 0) cap 8 rounds 3 power 4
+  clusters [[1, 2, 4], [0, 3, 5, 6, 7]] means (2383.3333 4333.3335) (3098.3333 3748.3333) silhouette 1
+sinks (6500 6500) (1300 0) branching point (1300 5200) means (10400 2600) (0 6500) cap 1 rounds 4 power 4
+  clusters [[0], [1]] means (7020 6630) (1300 -1950) silhouette 1
+sinks (3250 1300) branching point (1950 2600) means (1300 3900) (0 4550) cap 1 rounds 4 power 1
+  clusters [[], [0]] means (1625 3250) (2437.5 2112.5) silhouette 0.54545456
+sinks (400 150) (350 250) (200 100) (100 100) (200 150) (100 50) (200 150) (400 250) branching point (50 350) means (250 100) (300 0) cap 6 rounds 3 power 2
+  clusters [[5, 7], [0, 1, 2, 3, 4, 6]] means (87.5 312.5) (86.702126 311.70212) silhouette 0
+sinks (3900 6500) (9100 1300) branching point (1300 1300) means (9100 2600) (5200 10400) cap 1 rounds 1 power 1
+  clusters [[1], [0]] means (7150 1300) (3250 5200) silhouette 0.7846154
+sinks (4550 650) (3900 2600) (1300 2600) (3900 5200) (5200 3900) (4550 650) (3900 4550) (650 1300) (2600 5200) (0 5200) branching point (650 3900) means (1300 2600) (650 5200) cap 3 rounds 4 power 4
+  clusters [[0, 1, 2, 6, 7, 8, 9], [3, 4, 5]] means (1793.5186 3418.5186) (2042.8572 3667.8572) silhouette 1
+sinks (10400 1300) (3900 9100) (5200 3900) (1300 7800) branching point (7800 10400) means (0 3900) (9100 6500) cap 3 rounds 3 power 4
+  clusters [[1, 2, 3], [0]] means (4550 7800) (9100 5850) silhouette 1
+sinks (5200 3900) (5200 2600) (0 10400) branching point (10400 6500) means (10400 3900) (1300 9100) cap 3 rounds 3 power 4
+  clusters [[], [0, 1, 2]] means (10400 -650) (4044.4443 5705.5557) silhouette 1
+sinks (4550 1300) (0 1950) (3900 650) (650 3900) (3250 2600) (1950 3900) (0 1300) (0 650) branching point (4550 650) means (650 3250) (650 5200) cap 1 rounds 1 power 4
+  clusters [[1, 2, 3, 4, 5, 6, 7], [0]] means (3887 962) (4550 1625) silhouette 1
+sinks (100 350) (200 200) (0 100) (50 100) (200 100) (250 350) (200 350) branching point (350 350) means (200 200) (100 50) cap 7 rounds 4 power 2
+  clusters [[0, 3, 4, 5, 6], [1, 2]] means (268.10345 306.89655) (280.55554 294.44446) silhouette 0.08252227
+sinks (100 250) (50 50) (150 0) (200 350) (250 50) (400 350) (150 300) (300 50) (100 50) (50 150) branching point (350 0) means (300 400) (50 150) cap 4 rounds 0 power 4
+  clusters [[3, 5, 6, 9], [0, 1, 2, 4, 7, 8]] means (264.2857 164.28572) (170.3125 70.31249) silhouette 0.75715816
+sinks (5200 1300) (4550 0) (2600 3250) (3250 4550) (5200 2600) (650 650) (0 4550) (2600 4550) branching point (2600 1950) means (3900 3250) (1300 5200) cap 8 rounds 2 power 1
+  clusters [[0, 1, 4], [2, 3, 5, 6, 7]] means (4387.5 1462.5) (1841.6667 3466.6665) silhouette 0.57329094
+sinks (7800 2600) (0 10400) (3900 6500) (10400 2600) (1300 7800) (10400 3900) (9100 7800) (2600 7800) (3900 5200) branching point (0 1300) means (9100 1300) (3900 5200) cap 6 rounds 1 power 1
+  clusters [[0, 3, 5, 6, 8], [1, 2, 4, 7]] means (3309.091 2540.9092) (1011.1111 4838.8887) silhouette 0.5873854
+sinks (250 0) (100 50) (350 150) (350 150) (300 350) (300 0) (50 200) (400 0) (0 50) (50 100) branching point (0 150) means (0 150) (400 100) cap 9 rounds 3 power 1
+  clusters [[1, 8, 9], [0, 2, 3, 4, 5, 6, 7]] means (84.37499 9.375) (204.54547 129.54546) silhouette 0.3190723
+sinks (6500 10400) (2600 2600) (7800 9100) (0 3900) (10400 7800) (3900 10400) branching point (0 5200) means (9100 0) (0 2600) cap 4 rounds 3 power 2
+  clusters [[0, 1, 2, 4], [3, 5]] means (4387.5 6662.5) (2925 8125) silhouette 0.5384615
+sinks (0 650) (3250 0) (3250 0) (3250 0) (1300 2600) (650 3900) (3900 3250) (1300 1950) (4550 3900) (1950 4550) branching point (650 3250) means (1300 1300) (3250 2600) cap 8 rounds 0 power 1
+  clusters [[0, 2, 3, 4, 7], [1, 5, 6, 8, 9]] means (1212.5 2187.5) (2184.7222 3159.7222) silhouette 0.32922384
+sinks (2600 6500) (2600 6500) (5200 3900) (2600 3900) (1300 10400) (9100 10400) (6500 7800) branching point (9100 10400) means (9100 9100) (1300 10400) cap 6 rounds 3 power 4
+  clusters [[0, 1, 2, 3, 6], [4, 5]] means (6705.263 8244.736) (4550 10400) silhouette 1
+sinks (5200 1950) (0 3900) (1950 2600) (3250 3900) (3900 3250) (2600 4550) branching point (1300 4550) means (3250 0) (4550 1950) cap 2 rounds 4 power 4
+  clusters [[0, 1, 4, 5], [2, 3]] means (2255.8823 3880.8823) (2112.5 3737.5) silhouette 1
+sinks (10400 3900) (2600 1300) (10400 6500) branching point (9100 10400) means (2600 0) (2600 9100) cap 2 rounds 2 power 1
+  clusters [[0, 1, 2], []] means (8341.667 6608.3335) (5308.333 9641.667) silhouette 0.76561403
+sinks (650 1950) (5200 0) (5200 4550) (5200 3250) (3250 0) (5200 3900) (4550 1300) (3900 3900) branching point (1300 2600) means (1300 650) (4550 3250) cap 1 rounds 0 power 1
+  clusters [[0, 2, 3, 4, 5, 6], [1, 7]] means (4112.5 2487.5) (3737.5 2112.5) silhouette 0.7011816
+sinks (1300 4550) (2600 2600) branching point (0 1300) means (0 2600) (650 1950) cap 1 rounds 3 power 1
+  clusters [[1], [0]] means (433.33334 1516.6666) (185.7143 1764.2858) silhouette 0
+sinks (4550 1300) (3250 650) (4550 3900) (3900 4550) (1950 1300) (1950 3900) (4550 650) branching point (4550 5200) means (0 1950) (2600 3900) cap 6 rounds 4 power 4
+  clusters [[0, 1, 2, 4, 6], [3, 5]] means (4148.5293 3326.4707) (3128.125 4346.875) silhouette 1
+sinks (3900 0) (4550 2600) (0 0) branching point (5200 3900) means (3900 2600) (1950 3900) cap 2 rounds 3 power 2
+  clusters [[2], [0, 1]] means (4271.4287 3203.5713) (4756.8184 2718.1816) silhouette 0.5438596
+sinks (650 650) branching point (3250 1950) means (650 1950) (650 650) cap 1 rounds 2 power 4
+  clusters [[0], []] means (2816.6667 1733.3334) (2816.6667 1733.3334) silhouette 1
+sinks (0 200) (0 350) (350 0) (0 250) (150 350) (0 300) branching point (400 300) means (150 0) (150 100) cap 5 rounds 2 power 4
+  clusters [[0, 2, 3], [1, 4, 5]] means (367.30768 282.69232) (354.34784 304.34784) silhouette 1
+sinks (3250 3250) (2600 4550) (5200 1300) branching point (3900 1300) means (1300 1300) (3900 5200) cap 1 rounds 3 power 1
+  clusters [[0, 2], [1]] means (4712.5 3737.5) (2971.4285 3621.4287) silhouette 0.08201065
+sinks (3250 0) branching point (2600 650) means (1300 3900) (1300 0) cap 1 rounds 4 power 4
+  clusters [[], [0]] means (2042.8572 2042.8572) (3575 -325) silhouette 1
+sinks (200 400) (0 350) (250 300) (100 100) (250 400) (350 250) (300 250) branching point (350 150) means (400 0) (50 50) cap 2 rounds 0 power 1
+  clusters [[2, 4, 5, 6], [0, 1, 3]] means (291.17648 291.17645) (219.56522 219.56522) silhouette 0.5501428
+sinks (0 150) (100 200) (400 300) (300 0) (300 400) branching point (100 300) means (300 350) (200 150) cap 1 rounds 1 power 2
+  clusters [[1, 2, 3, 4], [0]] means (205 255) (39.999996 210) silhouette 0.4096505
+sinks (9100 2600) (1300 10400) (7800 10400) (5200 7800) (9100 3900) branching point (0 2600) means (3900 0) (3900 6500) cap 2 rounds 3 power 1
+  clusters [[0, 2, 4], [1, 3]] means (2407.4077 3442.5928) (1083.3334 4766.667) silhouette 1
+sinks (0 6500) branching point (1300 1300) means (1300 6500) (9100 5200) cap 1 rounds 0 power 1
+  clusters [[0], []] means (390 4940) (4333.3335 2816.6667) silhouette 0.7567568
+sinks (6500 7800) branching point (5200 6500) means (10400 5200) (1300 5200) cap 1 rounds 4 power 2
+  clusters [[0], []] means (7475 8775) (1787.5 5362.5) silhouette 0.72727275
+sinks (2600 2600) (650 3900) (1300 650) (4550 2600) branching point (3250 1300) means (1300 650) (1300 5200) cap 2 rounds 4 power 4
+  clusters [[0, 1], [2, 3]] means (2215.9092 2540.9092) (2112.5 2437.5) silhouette 1
+sinks (1950 3250) (1950 3250) (5200 3250) branching point (1300 0) means (1300 3900) (0 3900) cap 1 rounds 4 power 2
+  clusters [[1, 2], [0]] means (1567.6471 382.35294) (1408.3334 541.6667) silhouette 0.33333334
+sinks (5200 650) (3250 1950) branching point (3900 3900) means (1950 650) (650 3250) cap 1 rounds 1 power 1
+  clusters [[0], [1]] means (4457.143 2507.1428) (3412.5 2437.5) silhouette 0.45215315
+sinks (0 4550) (3900 4550) (1300 3250) (1300 1300) (5200 5200) (1300 3250) (3900 650) (650 3900) (650 4550) (3250 3900) branching point (3250 1300) means (650 0) (650 0) cap 9 rounds 4 power 4
+  clusters [[0, 1, 2, 3, 4, 5, 6, 7, 8], [9]] means (3250 1300) (3250 1300) silhouette 1
+sinks (0 1950) branching point (3250 4550) means (3900 2600) (1300 3250) cap 1 rounds 1 power 2
+  clusters [[], [0]] means (3656.25 3331.25) (2347.2222 3827.7778) silhouette 0.16129032
+sinks (5200 1300) (1300 0) branching point (2600 2600) means (650 1300) (5200 3250) cap 1 rounds 2 power 2
+  clusters [[1], [0]] means (1516.6667 433.3335) (4766.6665 1516.6667) silhouette 0.86335397
+sinks (50 150) (400 400) (50 100) (100 250) branching point (100 100) means (0 300) (50 300) cap 4 rounds 1 power 1
+  clusters [[0, 2], [1, 3]] means (83.33333 108.333336) (110 115) silhouette 0.19849399
+sinks (0 200) (200 150) (250 0) (200 0) (250 100) (0 0) branching point (100 250) means (400 250) (150 300) cap 4 rounds 1 power 2
+  clusters [[1, 2, 3, 4], [0, 5]] means (160 160) (39.999996 160) silhouette 0.47077522
+sinks (0 50) branching point (150 50) means (0 350) (200 150) cap 1 rounds 0 power 4
+  clusters [[0], []] means (-50 50) (216.66666 183.33333) silhouette 1
+sinks (1950 4550) (5200 4550) (3900 4550) (4550 650) (0 1300) (1950 3250) (2600 650) (4550 650) branching point (2600 2600) means (5200 3900) (0 1300) cap 4 rounds 4 power 4
+  clusters [[0, 1, 2, 3], [4, 5, 6, 7]] means (4828.5713 4271.4287) (1733.3333 -433.3335) silhouette 0.9444444
+sinks (1950 4550) (3900 3250) (5200 4550) (1300 2600) (1300 1300) (1300 3250) (650 5200) (1300 3250) (3250 650) (3900 3900) branching point (3900 1950) means (2600 1300) (5200 1300) cap 1 rounds 4 power 4
+  clusters [[0, 2, 3, 4, 5, 6, 7, 8, 9], [1]] means (3170.7317 2520.7317) (3900 3250) silhouette 1
+sinks (1300 650) (3900 1950) (650 4550) (4550 0) branching point (2600 0) means (1300 1950) (3900 650) cap 3 rounds 4 power 4
+  clusters [[0, 2], [1, 3]] means (1850 1200) (3818.75 731.25) silhouette 1
+sinks (650 5200) (3250 5200) (2600 5200) (1300 5200) (5200 3900) (3900 5200) (1950 5200) (3250 0) branching point (0 650) means (0 1950) (1950 0) cap 1 rounds 3 power 1
+  clusters [[0, 2, 3, 4, 5, 6], [1, 7]] means (731.25 1868.75) (1218.75 1381.25) silhouette 0.8055556
+sinks (7800 7800) (3900 5200) (0 3900) (9100 0) (3900 1300) (7800 6500) (9100 0) (5200 0) branching point (9100 5200) means (9100 7800) (1300 5200) cap 5 rounds 4 power 4
+  clusters [[3, 4, 6, 7], [0, 1, 2, 5]] means (7445.4546 1654.5454) (4593.333 5893.3335) silhouette 0.97555554
+sinks (100 300) (250 200) (50 350) (0 250) (100 0) (100 150) (400 200) (50 400) (50 200) branching point (300 50) means (400 100) (350 200) cap 3 rounds 0 power 1
+  clusters [[0, 3, 4, 6, 7], [1, 2, 5, 8]] means (263.5714 88.57143) (261.2069 86.206894) silhouette 0.22221853
+sinks (5200 4550) (1950 2600) (3250 5200) (3900 4550) (1950 3900) (5200 4550) (3250 0) (5200 1950) branching point (5200 1950) means (650 5200) (3900 0) cap 6 rounds 3 power 1
+  clusters [[0, 1, 2, 3, 4, 5], [6, 7]] means (3439.5833 4414.5835) (3087.5 -162.5) silhouette 0.60711294
+sinks (0 0) (1300 3900) (0 0) (2600 3900) (2600 5200) (5200 6500) (5200 7800) branching point (5200 10400) means (1300 1300) (7800 0) cap 3 rounds 4 power 4
+  clusters [[0, 1, 2, 6], [3, 4, 5]] means (3938.2354 7761.7646) (4225 7475) silhouette 1
+sinks (650 1300) (3250 2600) (4550 0) (1950 3250) (5200 4550) (3250 3250) (650 3900) (3250 1300) (1300 1950) branching point (4550 3900) means (3900 2600) (0 3250) cap 1 rounds 1 power 2
+  clusters [[0, 2, 3, 4, 5, 6, 7, 8], [1]] means (3250 2925) (3412.5 2762.5) silhouette 0.7407408
+sinks (9100 7800) (6500 2600) branching point (1300 3900) means (3900 0) (2600 9100) cap 1 rounds 4 power 2
+  clusters [[1], [0]] means (5460 2860) (4766.667 5633.3335) silhouette 0.8636364
+sinks (2600 1300) (4550 5200) (1300 1300) (3900 3900) (1950 1950) branching point (1300 0) means (4550 3250) (5200 1300) cap 1 rounds 1 power 1
+  clusters [[0, 2, 3], [1, 4]] means (1787.5 812.5) (1758.8235 841.17645) silhouette 0.38823527
+sinks (4550 0) (4550 1950) (3250 2600) (5200 1300) (0 3250) (5200 0) (650 0) (1950 2600) (2600 2600) (4550 4550) (650 1300) branching point (1950 3250) means (1300 2600) (3900 2600) cap 10 rounds 1 power 2
+  clusters [[4, 6, 7, 10], [0, 1, 2, 3, 5, 8, 9]] means (1381.25 2518.75) (2762.5 2762.5) silhouette 0.37363818
+sinks (10400 5200) (1300 0) (10400 0) (6500 5200) branching point (3900 10400) means (5200 5200) (9100 5200) cap 2 rounds 1 power 2
+  clusters [[0, 1], [2, 3]] means (4290 8840) (4618.421 9168.421) silhouette 1
+sinks (2600 0) (2600 5200) (5200 2600) (6500 7800) (5200 1300) (1300 0) (2600 3900) (7800 1300) branching point (10400 0) means (7800 0) (0 5200) cap 3 rounds 1 power 1
+  clusters [[0, 1, 2, 4, 5], [3, 6, 7]] means (5238.2354 1338.2352) (6995.2383 3095.2383) silhouette 0.4508435
+sinks (300 0) (150 50) (200 50) (200 250) branching point (150 0) means (300 400) (400 100) cap 3 rounds 0 power 2
+  clusters [[2, 3], [0, 1]] means (200 150) (300 50) silhouette 0.36666667
+sinks (6500 10400) (5200 9100) (3900 1300) branching point (10400 10400) means (7800 3900) (3900 0) cap 3 rounds 4 power 1
+  clusters [[2], [0, 1]] means (8775 8125) (6987.5 9912.5) silhouette 0.7380953
+sinks (650 1300) branching point (0 1300) means (2600 3250) (3250 5200) cap 1 rounds 2 power 1
+  clusters [[0], []] means (1300 1300) (590.9091 2009.091) silhouette 0.15384616
+sinks (5200 5200) (2600 3900) (1950 1300) (1300 3900) (650 0) (650 1950) (3900 1300) (2600 5200) branching point (1950 0) means (4550 3900) (3250 3250) cap 6 rounds 3 power 1
+  clusters [[0, 4], [1, 2, 3, 5, 6, 7]] means (2215.9092 709.09094) (2017.2415 907.7586) silhouette 0.21275556
+sinks (3250 1300) branching point (4550 4550) means (0 4550) (1300 1300) cap 1 rounds 2 power 2
+  clusters [[], [0]] means (2275 4550) (3900 2925) silhouette 0.46153846
+sinks (4550 650) (3250 1950) (0 1300) branching point (3900 1300) means (650 1950) (4550 4550) cap 2 rounds 3 power 4
+  clusters [[1, 2], [0]] means (1056.25 1706.25) (5525 -325) silhouette 1
+sinks (400 300) (50 400) (150 200) (150 200) (50 350) (250 400) branching point (50 350) means (0 400) (400 350) cap 5 rounds 0 power 2
+  clusters [[1], [0, 2, 3, 4, 5]] means (50 575) (210.71428 285.7143) silhouette 0.5019762
+sinks (3900 9100) (9100 1300) (6500 3900) branching point (3900 3900) means (6500 9100) (0 3900) cap 1 rounds 3 power 4
+  clusters [[0, 2], [1]] means (5850 7800) (7800 1950) silhouette 1
+sinks (400 250) (150 0) (350 300) (400 250) (200 300) (0 100) (250 100) (200 150) branching point (0 0) means (50 50) (400 50) cap 6 rounds 4 power 4
+  clusters [[0, 2, 3, 4, 5, 7], [1, 6]] means (93.534485 81.465515) (140 35) silhouette 0.640884
+sinks (100 50) (150 50) (100 100) (200 200) (100 250) (250 350) (300 150) (300 200) (350 250) branching point (250 200) means (250 250) (200 200) cap 6 rounds 4 power 1
+  clusters [[4, 5, 7, 8], [0, 1, 2, 3, 6]] means (250 250) (226.47058 173.52942) silhouette 0.33742
+sinks (9100 9100) (2600 6500) (6500 6500) (3900 2600) (9100 6500) (9100 10400) (7800 0) branching point (9100 2600) means (7800 1300) (2600 10400) cap 2 rounds 4 power 1
+  clusters [[1, 2, 3, 4, 6], [0, 5]] means (4584.2104 5234.2104) (9100 9750) silhouette 0.50097775
+sinks (400 350) (350 100) (300 100) (50 100) (150 0) (350 300) (400 0) (250 0) (350 250) (100 250) (350 250) branching point (0 300) means (150 0) (300 350) cap 4 rounds 4 power 4
+  clusters [[1, 2, 3, 4, 8, 10], [0, 5, 6, 7, 9]] means (151.9608 201.96078) (178.57143 228.57143) silhouette 0.7624296
+sinks (150 250) (0 200) branching point (350 250) means (350 150) (250 150) cap 2 rounds 1 power 2
+  clusters [[1], [0]] means (306.25 243.75) (300 250) silhouette 0.03846154
+sinks (400 250) (300 200) (400 0) branching point (100 250) means (250 350) (400 350) cap 3 rounds 3 power 1
+  clusters [[], [0, 1, 2]] means (145 280) (154.54546 229.54546) silhouette 0.14481811
+sinks (1300 1300) (5200 0) (4550 3900) (4550 1300) (3900 650) (5200 650) (4550 1300) (0 650) (1950 650) (3250 650) (1950 5200) branching point (0 650) means (3900 650) (5200 650) cap 10 rounds 2 power 2
+  clusters [[2, 3, 6, 10], [0, 1, 4, 5, 7, 8, 9]] means (410.5263 889.4737) (650 650) silhouette 0.24843654
+sinks (350 300) (350 400) (250 400) branching point (300 0) means (200 250) (200 50) cap 3 rounds 3 power 1
+  clusters [[0, 1, 2], []] means (304.34784 95.65218) (233.33334 33.33334) silhouette 0.22932012
+sinks (5200 3250) branching point (1300 0) means (650 1950) (3900 4550) cap 1 rounds 1 power 1
+  clusters [[], [0]] means (568.75 2193.75) (2895.4546 1329.5454) silhouette 0.25714287
+sinks (0 1300) (3250 4550) (0 2600) (0 1950) (2600 5200) (3250 1950) (5200 1950) (1300 5200) (0 2600) (1300 4550) branching point (0 1300) means (2600 3250) (650 5200) cap 1 rounds 1 power 4
+  clusters [[0, 2, 3, 4, 5, 6, 7, 8, 9], [1]] means (910 2340) (975.00006 2275) silhouette 1
+sinks (10400 7800) (3900 10400) (7800 2600) (7800 0) (3900 3900) branching point (6500 3900) means (1300 5200) (9100 2600) cap 3 rounds 1 power 4
+  clusters [[1, 4], [0, 2, 3]] means (4188.8887 6788.8887) (10833.334 3033.3335) silhouette 1
+sinks (50 100) (50 250) (150 300) branching point (300 350) means (250 200) (400 50) cap 2 rounds 4 power 1
+  clusters [[0, 1, 2], []] means (207.14285 292.85715) (337.5 237.5) silhouette 0.4175537
+sinks (150 250) (350 400) (100 250) (0 100) (0 350) (50 350) (400 0) (100 0) (400 0) (100 200) branching point (50 300) means (0 50) (150 400) cap 2 rounds 3 power 4
+  clusters [[0, 2, 3, 5, 6, 7, 8, 9], [1, 4]] means (154.65117 154.65115) (206.25 393.75) silhouette 0.8407693
+sinks (350 0) (400 300) (0 100) (0 100) (400 100) (400 250) (150 0) (200 250) (400 250) (300 400) branching point (350 150) means (0 50) (350 350) cap 7 rounds 0 power 4
+  clusters [[0, 2, 3, 4, 6, 7], [1, 5, 8, 9]] means (109.25926 65.74074) (396.42856 428.5714) silhouette 0.92082417
+sinks (6500 7800) (3900 10400) (10400 9100) (3900 7800) (5200 9100) (3900 9100) branching point (10400 7800) means (6500 9100) (0 10400) cap 4 rounds 0 power 1
+  clusters [[1, 2], [0, 3, 4, 5]] means (7962.5 9262.5) (6910.5264 8210.526) silhouette 0.2823979
+sinks (3900 10400) (7800 9100) (0 7800) (9100 0) (2600 1300) branching point (6500 0) means (9100 9100) (2600 0) cap 4 rounds 3 power 4
+  clusters [[0, 1, 3], [2, 4]] means (6987.5 7312.5) (2340 3640) silhouette 1
+sinks (3900 1950) (3250 0) (2600 1950) (2600 1950) (3900 650) branching point (3900 1300) means (650 0) (1950 3250) cap 5 rounds 1 power 2
+  clusters [[1, 4], [0, 2, 3]] means (3331.25 -406.25) (2600 2275) silhouette 0.7023392
+sinks (400 0) (350 300) (0 150) branching point (400 100) means (350 250) (50 400) cap 1 rounds 3 power 1
+  clusters [[0, 1], [2]] means (325 250) (200 125) silhouette 0.413273
+sinks (400 0) (100 100) (0 150) (0 50) (400 150) (300 50) (150 350) (150 350) (100 350) (50 350) (250 300) branching point (200 50) means (100 0) (150 250) cap 10 rounds 1 power 1
+  clusters [[0, 1, 3, 5], [2, 4, 6, 7, 8, 9, 10]] means (200 50) (176.92308 176.92307) silhouette 0.34005287
+sinks (9100 1300) (10400 9100) (2600 2600) (0 10400) (10400 1300) (10400 3900) (1300 3900) (3900 3900) (9100 2600) branching point (5200 0) means (5200 9100) (6500 10400) cap 9 rounds 2 power 2
+  clusters [[2, 3, 6, 7], [0, 1, 4, 5, 8]] means (4700 800) (5931.25 568.75) silhouette 0.5635686
+sinks (300 250) (0 150) (50 350) (150 100) (0 400) (0 100) (350 250) (350 300) branching point (400 200) means (0 0) (0 0) cap 3 rounds 2 power 4
+  clusters [[1, 2, 3], [0, 4, 5, 6, 7]] means (400 200) (400 200) silhouette 0.625
+sinks (250 0) (100 150) (150 200) branching point (400 300) means (400 150) (200 200) cap 1 rounds 4 power 4
+  clusters [[0, 2], [1]] means (337.5 237.5) (316.66666 258.33334) silhouette 1
+sinks (9100 1300) (1300 2600) (1300 2600) branching point (5200 2600) means (3900 0) (7800 2600) cap 3 rounds 4 power 2
+  clusters [[1, 2], [0]] means (1950 2600) (7637.5 1787.5) silhouette 0.86247087
+sinks (5200 0) (6500 3900) (9100 2600) (5200 0) (9100 3900) (9100 7800) (5200 5200) (5200 5200) branching point (3900 3900) means (3900 9100) (3900 10400) cap 2 rounds 2 power 4
+  clusters [[1, 3, 4, 5, 6, 7], [0, 2]] means (4463.3335 3986.6667) (4261.1113 3611.111) silhouette 1
+sinks (1950 650) (2600 4550) (1950 2600) (1950 1300) (1300 3900) branching point (1300 4550) means (0 1950) (1300 1950) cap 3 rounds 0 power 1
+  clusters [[0, 1], [2, 3, 4]] means (1516.6666 4116.6665) (1418.1818 4018.182) silhouette 0.11389749
+sinks (50 350) (300 150) (400 150) (300 350) (100 50) (300 0) (150 150) (150 0) branching point (100 400) means (400 0) (200 100) cap 7 rounds 0 power 4
+  clusters [[0, 1, 2, 3, 5], [4, 6, 7]] means (168.91891 318.9189) (113.63636 263.63635) silhouette 0.70085555
+sinks (7800 7800) (6500 7800) (3900 10400) (2600 5200) (3900 10400) (10400 5200) (1300 2600) branching point (10400 7800) means (7800 5200) (9100 9100) cap 5 rounds 0 power 4
+  clusters [[0, 1, 3, 5, 6], [2, 4]] means (8600 7000) (8542.857 8542.857) silhouette 1
+sinks (5200 10400) (3900 6500) branching point (10400 7800) means (10400 0) (2600 2600) cap 2 rounds 4 power 1
+  clusters [[], [0, 1]] means (10400 2600) (5720 8320) silhouette 0.725
+sinks (0 400) branching point (150 100) means (150 350) (0 0) cap 1 rounds 1 power 4
+  clusters [[0], []] means (66.666664 266.6667) (0 0) silhouette 1
+sinks (100 50) (300 200) (250 300) (400 150) (0 150) (250 150) (0 350) (200 150) (200 350) (150 0) branching point (400 200) means (250 100) (250 400) cap 6 rounds 0 power 1
+  clusters [[0, 3, 4, 5, 7, 9], [1, 2, 6, 8]] means (294.5946 155.40541) (298 248) silhouette 0.32827088
+sinks (200 100) (200 200) (50 100) (300 250) (150 350) (150 300) (100 150) (400 0) (200 300) branching point (350 400) means (50 0) (350 150) cap 1 rounds 3 power 1
+  clusters [[0, 2, 4, 5, 6, 7, 8], [1, 3]] means (250 275) (268.18182 256.81818) silhouette 0.67074794
+sinks (6500 5200) (5200 3900) branching point (2600 0) means (2600 1300) (10400 5200) cap 2 rounds 0 power 2
+  clusters [[], [0, 1]] means (2600 5850) (5037.5 3412.5) silhouette 0.5714286
+sinks (1300 3250) (3900 0) (3250 3250) (0 0) (650 1300) (4550 4550) branching point (3900 1300) means (1950 1300) (1300 1950) cap 4 rounds 4 power 1
+  clusters [[1, 3, 4], [0, 2, 5]] means (3423.3333 1126.6666) (3726.6667 1776.6666) silhouette 0.16063963
+sinks (9100 2600) (7800 10400) (0 2600) (2600 2600) (7800 3900) (3900 9100) (5200 6500) (3900 7800) (1300 5200) branching point (2600 2600) means (10400 9100) (0 9100) cap 9 rounds 0 power 2
+  clusters [[0, 1, 3, 4, 6], [2, 5, 7, 8]] means (5720 4680) (2166.6667 7366.667) silhouette 0.68268824
+sinks (9100 7800) branching point (9100 1300) means (5200 2600) (7800 10400) cap 1 rounds 0 power 2
+  clusters [[], [0]] means (5200 2600) (9100 6500) silhouette 0.85714287
+sinks (0 2600) (4550 1950) (3250 1950) branching point (3900 0) means (1950 650) (2600 2600) cap 1 rounds 1 power 4
+  clusters [[0, 2], [1]] means (3250 650) (4225 975) silhouette 1
+sinks (2600 3250) (4550 4550) (5200 2600) (0 3900) (4550 5200) (5200 4550) (3250 650) (0 5200) branching point (4550 5200) means (3250 3250) (2600 3900) cap 1 rounds 3 power 2
+  clusters [[0, 2, 3, 4, 5, 6, 7], [1]] means (4225 4875) (4550 4550) silhouette 0.875
+sinks (250 50) (400 50) (0 350) (350 300) (250 100) (350 300) (250 200) (0 200) (300 300) (200 50) branching point (200 200) means (0 0) (100 150) cap 1 rounds 4 power 1
+  clusters [[1, 2, 3, 5, 6, 8], [0, 4, 7, 9]] means (275 250) (175 100) silhouette 0.7793207
+sinks (1300 650) (3250 1950) (3250 0) (2600 5200) (5200 1950) (650 2600) (1950 3250) (5200 5200) branching point (650 0) means (5200 1950) (4550 3900) cap 3 rounds 4 power 4
+  clusters [[1, 3, 4, 6, 7], [0, 2, 5]] means (1248 702) (1300 650) silhouette 1
+sinks (5200 4550) (4550 0) (1950 1950) (1950 0) branching point (2600 5200) means (4550 650) (2600 3900) cap 4 rounds 0 power 1
+  clusters [[0], [1, 2, 3]] means (4680 4680) (2718.182 2718.1821) silhouette 0.5378723
+sinks (0 1950) (1950 3250) (4550 4550) (4550 3250) (0 4550) branching point (1300 5200) means (0 4550) (3900 650) cap 5 rounds 3 power 2
+  clusters [[0, 4], [1, 2, 3]] means (-260.00012 2860) (3683.3333 3683.3333) silhouette 0.6010857
+sinks (250 250) (300 350) (350 50) (100 0) (150 0) branching point (0 300) means (250 50) (350 250) cap 3 rounds 1 power 1
+  clusters [[3, 4], [0, 1, 2]] means (44.11765 194.11765) (117.39131 267.3913) silhouette 0.18100086
+sinks (200 350) (250 300) (100 200) (300 350) (300 200) (0 300) (350 350) (50 350) branching point (0 350) means (300 400) (200 150) cap 2 rounds 4 power 4
+  clusters [[0, 1, 4, 6, 7], [2, 3, 5]] means (149.07407 324.07407) (116.66667 291.6667) silhouette 0.5284462
+sinks (7800 0) (3900 2600) (10400 5200) (10400 7800) (2600 6500) (5200 7800) (5200 5200) (7800 6500) (5200 7800) branching point (9100 1300) means (10400 6500) (3900 6500) cap 4 rounds 0 power 1
+  clusters [[2, 3, 8], [0, 1, 4, 5, 6, 7]] means (8867.857 4317.8574) (7425.7573 2875.7576) silhouette 0.5055844
+sinks (4550 5200) (0 3900) (3250 3900) (3900 3250) (650 0) (3900 4550) (0 1300) branching point (2600 3900) means (1950 3900) (1950 3900) cap 1 rounds 2 power 4
+  clusters [[0, 2, 3, 4, 5, 6], [1]] means (2600 3900) (2600 3900) silhouette 1
+sinks (350 350) branching point (350 0) means (100 0) (200 350) cap 1 rounds 2 power 4
+  clusters [[], [0]] means (125 0) (350 225) silhouette 0.7826087
+sinks (1300 3900) (9100 0) (0 0) (9100 0) (6500 1300) (10400 5200) branching point (6500 0) means (3900 10400) (5200 1300) cap 6 rounds 1 power 4
+  clusters [[1, 3, 5], [0, 2, 4]] means (9809.091 1890.9092) (2900.0002 1600) silhouette 1
+sinks (5200 3900) (1300 3250) (650 5200) (5200 5200) (3250 650) (3250 5200) (3250 5200) (650 1300) branching point (2600 1950) means (1300 1950) (1300 2600) cap 4 rounds 2 power 1
+  clusters [[1, 2, 7], [0, 3, 4, 5, 6]] means (2414.2856 2089.2856) (2732.4075 2142.5925) silhouette 0.20852718
+sinks (250 0) (150 100) (150 0) (50 50) (50 350) (200 200) (350 300) (50 400) (200 300) branching point (100 200) means (250 200) (150 400) cap 7 rounds 1 power 4
+  clusters [[0, 1, 2, 3, 5], [4, 6, 7, 8]] means (147.36842 97.368416) (146.875 303.125) silhouette 0.7265352
+sinks (250 50) (350 200) (150 200) (300 150) (0 350) (150 100) (0 200) (0 200) (150 300) (300 400) branching point (300 300) means (50 400) (150 100) cap 2 rounds 1 power 4
+  clusters [[2, 4, 5, 6, 7, 8, 9], [0, 1, 3]] means (141.17647 258.82352) (300 100) silhouette 0.8662467
+sinks (650 1950) (1300 1300) (3250 3250) (2600 4550) branching point (2600 650) means (3900 650) (1300 3900) cap 2 rounds 1 power 4
+  clusters [[2, 3], [0, 1]] means (2865.9092 3309.0908) (771.875 1746.875) silhouette 1
+sinks (5200 1300) (1950 4550) branching point (3250 5200) means (1300 4550) (0 1300) cap 1 rounds 4 power 4
+  clusters [[1], [0]] means (1733.3334 4441.6665) (4008.3335 3683.3333) silhouette 1
+sinks (300 50) (300 400) branching point (200 100) means (250 100) (400 100) cap 2 rounds 3 power 1
+  clusters [[1], [0]] means (218.75 156.25) (250 75) silhouette 0.36666667
+sinks (1300 3250) (3250 0) (5200 4550) (2600 650) (1300 3900) branching point (4550 3900) means (650 1950) (0 650) cap 5 rounds 2 power 4
+  clusters [[0, 1, 2, 3], [4]] means (4111.25 3363.75) (3575 3900) silhouette 1
+sinks (3900 3900) (1300 1300) (1300 2600) (3900 7800) (1300 6500) (6500 10400) (1300 3900) (6500 3900) branching point (3900 7800) means (5200 9100) (10400 1300) cap 5 rounds 2 power 4
+  clusters [[3, 5, 7], [0, 1, 2, 4, 6]] means (9100 6500) (1733.3335 3466.667) silhouette 1
+sinks (100 100) (400 350) (0 350) (300 250) (150 100) (200 100) (400 100) (400 100) (150 50) (100 200) branching point (150 150) means (400 0) (250 400) cap 8 rounds 2 power 2
+  clusters [[0, 4, 5, 6, 7, 8], [1, 2, 3, 9]] means (311.7647 36.764687) (223.33334 351.6667) silhouette 0.44339466
+sinks (650 1950) (1300 3900) (650 1950) (3250 3900) (3900 1950) (3250 1300) (3900 1300) branching point (650 3900) means (3250 5200) (2600 0) cap 4 rounds 4 power 1
+  clusters [[1, 3, 4, 5, 6], [0, 2]] means (2502.5 2827.5) (650 975) silhouette 0.455074
+sinks (0 0) (7800 1300) (7800 5200) (7800 3900) (1300 5200) (5200 7800) (2600 2600) branching point (10400 6500) means (6500 1300) (7800 6500) cap 7 rounds 0 power 4
+  clusters [[0, 1, 2, 3, 6], [4, 5]] means (8542.857 5107.1426) (7150 6500) silhouette 1
+sinks (200 200) (50 200) (300 50) (250 50) (100 400) (250 250) (250 200) (100 350) (200 250) (350 350) branching point (300 150) means (300 400) (250 150) cap 5 rounds 2 power 2
+  clusters [[5, 6, 7, 8, 9], [0, 1, 2, 3, 4]] means (247.5 247.5) (180 180) silhouette 0.3216936
+sinks (4550 1950) branching point (2600 0) means (2600 650) (3250 1300) cap 1 rounds 3 power 2
+  clusters [[], [0]] means (2600 650) (2925 325) silhouette 0
+sinks (0 100) (400 100) (100 200) (400 50) (200 300) (200 400) (400 300) (300 100) (200 350) branching point (350 150) means (400 400) (100 300) cap 9 rounds 4 power 4
+  clusters [[1, 3, 6], [0, 2, 4, 5, 7, 8]] means (550 150) (216.66667 216.66667) silhouette 0.79438835
+sinks (1300 3250) (2600 1300) (1950 1950) (4550 3900) (1950 1300) (3900 650) branching point (3900 4550) means (4550 2600) (4550 650) cap 3 rounds 4 power 2
+  clusters [[3, 4, 5], [0, 1, 2]] means (3760.7144 3714.2856) (3461.25 4013.75) silhouette 0.057783067
+sinks (7800 5200) (2600 9100) (0 0) (1300 6500) (10400 1300) (2600 6500) (7800 9100) (5200 3900) (3900 2600) (1300 1300) branching point (6500 10400) means (6500 1300) (1300 0) cap 10 rounds 2 power 1
+  clusters [[0, 2, 3, 4, 5, 8, 9], [1, 6, 7]] means (5625 8025) (5525 8125) silhouette 0.5087242
+sinks (100 150) branching point (300 300) means (100 100) (50 0) cap 1 rounds 0 power 4
+  clusters [[0], []] means (257.14285 267.85715) (265.9091 259.0909) silhouette 1
+sinks (150 400) (150 300) (100 250) branching point (200 150) means (50 150) (300 100) cap 1 rounds 4 power 1
+  clusters [[1, 2], [0]] means (143.75 243.75) (175 275) silhouette 0.12564103
+sinks (200 0) (250 0) (400 100) (0 50) (150 250) (100 250) (0 100) (250 200) (100 0) branching point (300 100) means (100 50) (200 300) cap 8 rounds 2 power 1
+  clusters [[0, 1, 2, 3, 6, 8], [4, 5, 7]] means (176.04166 48.958336) (212.5 187.5) silhouette 0.445033
+sinks (3900 2600) (2600 1300) (7800 10400) branching point (5200 6500) means (6500 1300) (6500 3900) cap 2 rounds 2 power 2
+  clusters [[0, 1], [2]] means (4810 5590) (5720 7280) silhouette 0.5777778
+sinks (0 6500) (0 5200) (3900 0) branching point (10400 10400) means (5200 1300) (6500 6500) cap 2 rounds 1 power 1
+  clusters [[0, 1], [2]] means (8139.131 9410.869) (9150 8400) silhouette 1
+sinks (5200 3900) (9100 10400) (0 6500) (6500 7800) (5200 1300) (5200 10400) (7800 6500) (0 0) (7800 3900) (6500 7800) (6500 5200) branching point (5200 3900) means (7800 3900) (5200 6500) cap 4 rounds 2 power 4
+  clusters [[0, 1, 3, 4, 8, 9, 10], [2, 5, 6, 7]] means (6355.5557 5344.4443) (3900 5200) silhouette 0.939394
+sinks (50 250) (250 150) branching point (0 300) means (150 50) (400 250) cap 1 rounds 2 power 2
+  clusters [[1], [0]] means (140.625 215.625) (112.5 187.5) silhouette 0
+sinks (5200 2600) (4550 3900) (1950 1950) (3250 650) (4550 1950) (0 4550) (4550 2600) (2600 3250) branching point (1300 3900) means (5200 650) (1300 3900) cap 3 rounds 0 power 2
+  clusters [[0, 1, 3, 4, 6], [2, 5, 7]] means (3683.3333 2708.3335) (2193.7498 1218.75) silhouette 0.39254385
+sinks (0 5200) (3900 2600) (3900 2600) (0 4550) (5200 3250) (0 2600) (3900 1300) (0 1300) (650 5200) (3250 3900) branching point (0 3250) means (650 0) (5200 0) cap 3 rounds 2 power 4
+  clusters [[0, 3, 5, 6, 7, 8, 9], [1, 2, 4]] means (1950 3575) (2068.1816 3043.182) silhouette 1
+sinks (1950 3250) (0 0) (3250 650) (3250 4550) (2600 1950) (2600 5200) branching point (3250 3250) means (3900 3900) (650 650) cap 1 rounds 4 power 4
+  clusters [[0, 2, 3, 4, 5], [1]] means (650 2600) (1625 1625) silhouette 1
+sinks (650 2600) (3250 0) (3250 1300) (3250 2600) (3250 4550) (1300 2600) branching point (1300 0) means (2600 2600) (3900 1950) cap 6 rounds 4 power 4
+  clusters [[0, 2, 3, 4, 5], [1]] means (1568.9656 706.0345) (2275 0) silhouette 1
+sinks (6500 0) (3900 9100) (5200 7800) (5200 1300) (1300 6500) (7800 1300) (10400 6500) (5200 6500) branching point (10400 0) means (1300 9100) (7800 3900) cap 1 rounds 0 power 1
+  clusters [[0, 2, 3, 4, 6, 7], [1, 5]] means (7475 2925) (7670 3120.0002) silhouette 0.7613636
+sinks (1300 1950) (1300 1950) branching point (3250 3250) means (0 0) (1950 5200) cap 1 rounds 2 power 2
+  clusters [[1], [0]] means (1105 1820) (1105 1820) silhouette 0
+sinks (10400 10400) (2600 9100) (10400 5200) branching point (2600 9100) means (7800 3900) (3900 7800) cap 2 rounds 4 power 1
+  clusters [[0, 1], [2]] means (5942.8574 9657.143) (5200 7800) silhouette 0.44444445
+sinks (0 10400) (2600 0) (7800 9100) (1300 2600) (6500 0) branching point (10400 6500) means (1300 2600) (1300 3900) cap 4 rounds 3 power 2
+  clusters [[1, 3, 4], [0, 2]] means (10041.379 6208.6206) (9966.667 6716.6665) silhouette 0.82270736
+sinks (1300 650) (1300 5200) (1300 2600) branching point (3900 4550) means (0 0) (3250 2600) cap 3 rounds 2 power 4
+  clusters [[0, 1, 2], []] means (2144.9998 3380) (3168.75 2356.25) silhouette 1
+sinks (0 7800) (3900 1300) (1300 3900) (1300 5200) (5200 5200) (10400 9100) (5200 10400) (5200 2600) branching point (3900 0) means (2600 5200) (1300 7800) cap 3 rounds 1 power 1
+  clusters [[0, 2, 3, 6], [1, 4, 5, 7]] means (3466.6667 1516.6666) (4550 1300) silhouette 0.5862393
+sinks (350 0) (100 400) branching point (100 350) means (250 50) (350 400) cap 1 rounds 0 power 4
+  clusters [[0], [1]] means (193.75 218.75) (100 575) silhouette 1
+sinks (3250 4550) (1950 0) branching point (1950 3900) means (650 1300) (4550 3900) cap 2 rounds 4 power 4
+  clusters [[1], [0]] means (1950 650) (4116.6665 4983.333) silhouette 1
+sinks (100 250) (0 100) (200 300) (100 50) (100 200) branching point (350 0) means (50 100) (350 100) cap 4 rounds 4 power 1
+  clusters [[1, 2, 3], [0, 4]] means (256.25 56.25) (271.05264 71.05263) silhouette 0.030821925
+sinks (2600 3250) (3900 5200) (1950 5200) (2600 1950) (1300 1950) branching point (2600 2600) means (3250 2600) (4550 650) cap 2 rounds 1 power 4
+  clusters [[0, 1, 4], [2, 3]] means (2600 4225) (2193.75 3818.75) silhouette 1
+sinks (0 250) (100 50) (200 100) (0 100) (100 300) (100 300) (100 250) branching point (300 350) means (50 0) (150 50) cap 1 rounds 2 power 1
+  clusters [[0, 2, 3, 4, 5], [1, 6]] means (254.16667 320.83334) (262.5 312.5) silhouette 0.5714286
+sinks (0 150) (150 250) (400 350) (100 100) (200 100) (400 300) (350 200) (300 100) (0 150) branching point (100 200) means (0 250) (50 150) cap 2 rounds 2 power 2
+  clusters [[1, 2, 3, 4, 6, 7], [0, 5, 8]] means (167.5 192.5) (175 200) silhouette 0.31927043
+sinks (400 250) (400 0) (300 250) (100 100) (150 200) (100 150) (350 0) (0 300) branching point (0 0) means (0 250) (350 0) cap 7 rounds 0 power 2
+  clusters [[4, 5, 7], [0, 1, 2, 3, 6]] means (83.333336 216.66667) (216.27907 83.720924) silhouette 0.3445281
+sinks (2600 7800) (3900 9100) (0 9100) (0 10400) (7800 3900) (6500 3900) (7800 9100) (2600 0) branching point (9100 5200) means (6500 3900) (5200 1300) cap 7 rounds 2 power 2
+  clusters [[0, 1, 2, 3, 6], [4, 5, 7]] means (7900 5950) (7985.7144 4364.2856) silhouette 0.8090099
+sinks (1950 5200) (1300 650) (3250 3900) (0 5200) (2600 650) (3900 5200) (1950 2600) (0 650) (650 0) (5200 1950) branching point (4550 1950) means (1300 1950) (5200 3250) cap 10 rounds 0 power 2
+  clusters [[0, 1, 3, 4, 6, 7, 8], [2, 5, 9]] means (2086.842 2086.842) (4029.9998 4029.9998) silhouette 0.45247698
+sinks (10400 2600) (0 6500) (1300 7800) (9100 0) (7800 5200) (0 5200) (10400 5200) (3900 7800) (9100 0) (5200 5200) (2600 6500) branching point (2600 7800) means (2600 1300) (9100 6500) cap 3 rounds 0 power 4
+  clusters [[1, 2, 3, 6, 7, 8, 9, 10], [0, 4, 5]] means (5352.9414 4702.941) (5525 4875) silhouette 1
+sinks (1950 1950) (650 5200) (3250 5200) (1300 3900) (3900 0) (3900 650) (650 650) (1300 1300) (5200 4550) (1950 1950) (1300 2600) branching point (1950 3250) means (5200 4550) (650 1950) cap 7 rounds 2 power 2
+  clusters [[2, 4, 5, 8], [0, 1, 3, 6, 7, 9, 10]] means (4683.8237 2408.8235) (281.66675 1343.3333) silhouette 0.45338485
+sinks (200 200) (350 100) (400 200) (50 200) (150 250) (100 250) (150 150) (250 400) (100 0) (350 200) (300 250) branching point (350 50) means (150 350) (300 250) cap 2 rounds 2 power 2
+  clusters [[0, 1, 4, 5, 6, 7, 8], [2, 3, 9, 10]] means (283.13953 108.13953) (310.5263 135.52632) silhouette 0.52908844
+sinks (2600 9100) (10400 5200) (5200 1300) (1300 3900) (6500 10400) branching point (5200 7800) means (1300 0) (5200 10400) cap 4 rounds 0 power 1
+  clusters [[0, 1, 2, 3], [4]] means (4485 1365) (7583.3335 12566.667) silhouette 0.91204965
+sinks (7800 9100) (2600 1300) (5200 0) (0 9100) branching point (5200 10400) means (0 5200) (0 6500) cap 1 rounds 2 power 4
+  clusters [[0, 2, 3], [1]] means (5091.6665 9858.333) (5055.5557 9894.444) silhouette 1
+sinks (4550 3900) (3250 5200) (3250 3900) (4550 4550) (5200 1950) branching point (3250 4550) means (0 3250) (650 650) cap 1 rounds 4 power 2
+  clusters [[0, 1, 2, 4], [3]] means (4062.5 3737.5) (4875 4550) silhouette 0.53095233
+sinks (3900 0) (3900 1300) (0 1950) (2600 0) (2600 5200) branching point (1300 1300) means (0 4550) (0 1950) cap 2 rounds 0 power 1
+  clusters [[1, 3, 4], [0, 2]] means (2166.6665 1733.3334) (2166.6667 866.6666) silhouette -0.046969775
+sinks (9100 6500) (7800 1300) (1300 2600) (0 7800) (10400 9100) (1300 2600) (1300 5200) branching point (10400 1300) means (10400 6500) (5200 7800) cap 2 rounds 0 power 4
+  clusters [[0, 3, 4, 5, 6], [1, 2]] means (8620.238 2770.238) (7475 1625) silhouette 1
+sinks (5200 3250) (1300 5200) (0 0) (1950 3250) (1300 1300) (2600 3250) (3250 650) branching point (5200 1300) means (650 4550) (0 1950) cap 3 rounds 3 power 1
+  clusters [[0, 1, 3, 5], [2, 4, 6]] means (4387.5 2112.5) (3818.75 1056.25) silhouette 0.4120099
+sinks (50 150) (200 150) branching point (0 0) means (250 0) (50 200) cap 2 rounds 1 power 4
+  clusters [[1], [0]] means (114.28572 85.71429) (50 150) silhouette 0.5
+sinks (350 400) branching point (150 200) means (150 100) (50 200) cap 1 rounds 4 power 1
+  clusters [[], [0]] means (150 100) (200 250) silhouette 0.4
+sinks (0 10400) (10400 1300) (1300 7800) (9100 9100) (6500 9100) (3900 7800) (5200 1300) (0 1300) (6500 2600) (5200 2600) (9100 7800) branching point (10400 10400) means (0 5200) (10400 9100) cap 1 rounds 2 power 1
+  clusters [[0, 2, 3, 4, 5, 6, 7, 8, 9, 10], [1]] means (6366.667 7283.3335) (10400 3250) silhouette 0.9395763
+sinks (7800 7800) (7800 9100) (0 6500) (10400 9100) (10400 6500) branching point (1300 6500) means (5200 6500) (0 2600) cap 1 rounds 4 power 2
+  clusters [[0, 1, 3, 4], [2]] means (5065.517 7284.483) (-3250 6500) silhouette 0.7695907
+sinks (6500 7800) (6500 0) branching point (6500 3900) means (9100 10400) (5200 6500) cap 1 rounds 3 power 1
+  clusters [[0], [1]] means (6500 7800) (6500 0) silhouette 1
+sinks (350 200) (400 200) (150 350) (0 0) (50 150) (250 0) (50 400) (350 250) branching point (300 300) means (50 0) (100 400) cap 5 rounds 3 power 4
+  clusters [[0, 1, 3, 4, 5], [2, 6, 7]] means (227.67857 147.32143) (125 350) silhouette 0.76758975
+sinks (100 400) (100 350) (250 150) (350 350) branching point (150 200) means (0 150) (100 350) cap 3 rounds 0 power 1
+  clusters [[2], [0, 1, 3]] means (250 150) (175 325) silhouette 0.6681548
+sinks (5200 7800) (0 10400) (1300 10400) (9100 1300) (9100 1300) (10400 3900) branching point (6500 1300) means (5200 10400) (9100 2600) cap 3 rounds 3 power 4
+  clusters [[0, 1, 2], [3, 4, 5]] means (4482.759 5132.759) (11050 2600.0002) silhouette 1
+sinks (0 250) (400 350) (250 0) (400 200) (300 50) (100 400) branching point (250 0) means (0 200) (250 300) cap 1 rounds 3 power 1
+  clusters [[0, 2, 5], [1, 3, 4]] means (183.33333 108.333336) (314.4737 110.52632) silhouette 0.6673102
+sinks (650 1950) (5200 650) (650 5200) (3900 3250) (0 5200) (1950 3250) (1300 650) (4550 2600) (1300 3900) (4550 4550) branching point (1300 1300) means (3900 5200) (3250 0) cap 2 rounds 2 power 4
+  clusters [[0, 2, 4, 5, 6, 7, 8, 9], [1, 3]] means (1920.4546 3604.5454) (3737.5 1787.5) silhouette 1
+sinks (150 400) (400 400) branching point (100 400) means (400 150) (400 200) cap 2 rounds 1 power 1
+  clusters [[], [0, 1]] means (113.63635 388.63635) (125 400) silhouette 0.27626333
+sinks (1300 2600) (9100 6500) (0 0) (10400 7800) (7800 3900) branching point (6500 1300) means (6500 0) (3900 2600) cap 5 rounds 0 power 4
+  clusters [[], [0, 1, 2, 3, 4]] means (6500 -1300) (5942.857 3342.8572) silhouette 1
+sinks (250 400) (250 200) (50 100) (250 400) (400 200) (150 50) (250 350) (50 250) (200 150) branching point (50 150) means (150 200) (0 400) cap 4 rounds 3 power 4
+  clusters [[0, 2, 3, 6, 7], [1, 4, 5, 8]] means (127.77777 247.22223) (225 150) silhouette 0.8132709
+sinks (5200 1300) (1950 1950) (5200 3900) (2600 2600) (3900 4550) (1300 650) (3250 2600) (4550 5200) (3900 650) (1950 4550) (4550 4550) branching point (4550 3900) means (3250 2600) (0 5200) cap 5 rounds 1 power 2
+  clusters [[0, 1, 3, 5, 6, 8], [2, 4, 7, 9, 10]] means (3380 2145) (3250 5525) silhouette 0.5119421
+sinks (100 50) (0 50) (0 0) (250 300) (200 400) (100 0) (150 300) (300 150) (250 350) (400 100) (150 100) branching point (350 100) means (0 350) (200 250) cap 3 rounds 2 power 2
+  clusters [[0, 1, 2, 5, 6, 9, 10], [3, 4, 7, 8]] means (209.09091 90.90909) (300 200) silhouette 0.557355
+sinks (150 400) (0 150) (300 100) (350 50) (400 350) (350 250) (150 200) (300 250) (300 250) (250 50) branching point (250 350) means (250 250) (250 250) cap 4 rounds 3 power 4
+  clusters [[0, 1, 2, 3, 9], [4, 5, 6, 7, 8]] means (250 350) (250 350) silhouette 0.6
+sinks (300 250) (350 100) (300 350) branching point (250 300) means (100 150) (300 150) cap 3 rounds 4 power 1
+  clusters [[], [0, 1, 2]] means (200 250) (300 250) silhouette 0.6111111
+sinks (250 200) (0 400) (50 200) (0 0) (250 400) (200 100) (300 100) (200 200) (150 0) (250 100) (200 300) branching point (300 350) means (400 350) (300 150) cap 8 rounds 4 power 4
+  clusters [[1, 4], [0, 2, 3, 5, 6, 7, 8, 9, 10]] means (183.33333 383.33334) (245.90164 254.09836) silhouette 0.71101296
+sinks (0 5200) (5200 3250) (1950 4550) (1950 1300) (3900 3250) (1300 5200) (3900 5200) (4550 0) branching point (1950 2600) means (3900 0) (3250 650) cap 3 rounds 0 power 2
+  clusters [[0, 1, 4, 6, 7], [2, 3, 5]] means (2383.3333 2816.6667) (1841.6666 3141.6667) silhouette 0.357581
+sinks (0 9100) (1300 9100) (6500 2600) (10400 1300) (7800 1300) (7800 1300) (3900 6500) (2600 10400) (7800 0) (2600 2600) (5200 6500) branching point (1300 10400) means (1300 6500) (3900 6500) cap 10 rounds 0 power 2
+  clusters [[0, 1, 2, 3, 4, 5, 8, 9, 10], [6, 7]] means (1802.6666 9602.667) (1950 9750) silhouette 0.6840711
+sinks (0 4550) (2600 4550) (2600 1950) (2600 1950) (650 0) branching point (1950 0) means (3900 0) (1950 3250) cap 5 rounds 0 power 2
+  clusters [[], [0, 1, 2, 3, 4]] means (4550 0) (1713.6364 2363.6365) silhouette 0.5106493
+sinks (300 50) (150 300) (50 250) (250 300) (0 350) (200 50) branching point (250 350) means (400 300) (100 200) cap 5 rounds 4 power 4
+  clusters [[0, 3, 5], [1, 2, 4]] means (250 150) (92.85715 307.14285) silhouette 0.57667524
+sinks (4550 3250) (1300 3900) (650 2600) (5200 650) (1950 1300) (1950 3250) (1950 1300) (2600 3900) (3900 5200) (0 2600) branching point (5200 4550) means (3250 3900) (1300 3250) cap 7 rounds 2 power 1
+  clusters [[0, 1, 3, 5, 7, 9], [2, 4, 6, 8]] means (4400 4050) (4403.2256 4046.7742) silhouette 0.09877781
+sinks (650 0) (1950 650) (0 4550) branching point (4550 3900) means (0 5200) (3900 3900) cap 2 rounds 4 power 4
+  clusters [[2], [0, 1]] means (2275 4225) (3311.9048 2538.0952) silhouette 1
+sinks (1950 1950) (650 5200) (3250 3250) (4550 4550) (2600 3900) (4550 0) branching point (5200 0) means (2600 1950) (3250 650) cap 2 rounds 0 power 2
+  clusters [[0, 1, 3], [2, 4, 5]] means (4791.129 566.129) (4789.4736 564.4737) silhouette 0.33401683
+sinks (300 300) (200 250) (300 0) (0 100) (50 150) branching point (250 200) means (200 0) (150 300) cap 1 rounds 3 power 2
+  clusters [[1, 2, 3, 4], [0]] means (145 130) (308.33334 316.66666) silhouette 0.48844647
+sinks (0 3250) (0 0) branching point (3900 0) means (1300 4550) (1950 3250) cap 2 rounds 0 power 2
+  clusters [[0], [1]] means (3368.182 443.18182) (2925 0) silhouette 0.61627907
+sinks (150 200) (400 350) branching point (100 350) means (350 400) (200 100) cap 1 rounds 2 power 1
+  clusters [[1], [0]] means (325 350) (156.25 181.25) silhouette 0.8706294
+sinks (3900 3250) (1950 1950) (1950 3250) (650 4550) (3900 0) (3900 1950) (1300 4550) (0 1950) branching point (4550 4550) means (650 0) (1950 4550) cap 5 rounds 4 power 1
+  clusters [[0, 4, 5], [1, 2, 3, 6, 7]] means (4001.5625 2173.4375) (2437.5 3737.5) silhouette 0.46359304
+sinks (10400 5200) (10400 7800) (7800 1300) (1300 7800) (5200 7800) (2600 7800) (3900 7800) (7800 3900) (3900 5200) (5200 5200) (7800 7800) branching point (10400 7800) means (5200 0) (5200 1300) cap 5 rounds 2 power 1
+  clusters [[0, 2, 7, 8, 9], [1, 3, 4, 5, 6, 10]] means (10087.037 7462.963) (9750 7800) silhouette 0.6903019
+sinks (400 0) (50 400) branching point (250 400) means (0 0) (100 200) cap 2 rounds 2 power 1
+  clusters [[0], [1]] means (290.9091 290.9091) (100 400) silhouette 0.64285713
+sinks (4550 1300) (3250 650) (1950 5200) branching point (5200 2600) means (5200 650) (3900 650) cap 2 rounds 2 power 4
+  clusters [[0, 1], [2]] means (4911.1113 2238.889) (4838.8887 2888.889) silhouette 1
+sinks (3900 0) (3250 3250) (1300 3900) branching point (1950 5200) means (1950 3250) (5200 3250) cap 2 rounds 1 power 1
+  clusters [[0, 2], [1]] means (2220.8333 3845.8335) (2600 4225) silhouette 0.4666668
+sinks (350 350) (400 0) (150 350) branching point (200 100) means (200 300) (150 300) cap 3 rounds 2 power 2
+  clusters [[0, 2], [1]] means (204.16667 120.833336) (216.66667 91.666664) silhouette 0.100779116
+sinks (0 650) (5200 5200) (2600 4550) (1950 650) branching point (1950 2600) means (0 650) (3250 650) cap 1 rounds 3 power 4
+  clusters [[0, 2, 3], [1]] means (1300 1625) (2852.7778 3322.2222) silhouette 1
+sinks (650 3900) (0 3250) (4550 1300) (650 0) (4550 3250) branching point (2600 3250) means (1300 5200) (3250 2600) cap 5 rounds 3 power 4
+  clusters [[0, 1, 3], [2, 4]] means (975.0001 2600) (4116.667 2491.6665) silhouette 1
+sinks (4550 1300) (650 0) (650 0) (1300 5200) (1950 3900) (0 0) (0 3250) (0 4550) (4550 1950) (3900 0) branching point (650 3900) means (0 2600) (2600 5200) cap 9 rounds 0 power 4
+  clusters [[0, 1, 2, 5, 6, 8, 9], [3, 4, 7]] means (1479.7871 2129.7874) (1690 5460) silhouette 1
+sinks (0 5200) (9100 5200) (1300 2600) branching point (10400 7800) means (3900 3900) (3900 6500) cap 1 rounds 3 power 2
+  clusters [[0, 1], [2]] means (9500 7400) (9572.728 7327.2725) silhouette 0.6666667
+sinks (1300 2600) (9100 1300) (3900 9100) (2600 5200) (1300 6500) (0 6500) (10400 9100) (3900 6500) (7800 6500) (5200 6500) (2600 0) branching point (9100 5200) means (10400 7800) (2600 2600) cap 9 rounds 4 power 1
+  clusters [[6, 8], [0, 1, 2, 3, 4, 5, 7, 9, 10]] means (9100 11700) (2909.5234 4890.4766) silhouette 0.74488086
+sinks (3250 1950) (3900 4550) (3250 1950) (2600 5200) (2600 3250) (5200 0) branching point (1950 1300) means (4550 4550) (3900 4550) cap 1 rounds 1 power 4
+  clusters [[1, 2, 3, 4, 5], [0]] means (2106 1469) (2166.6667 1408.3334) silhouette 1
+sinks (2600 0) (3900 2600) (3250 3900) (3250 1300) branching point (5200 5200) means (1950 5200) (3250 1300) cap 3 rounds 0 power 4
+  clusters [[0], [1, 2, 3]] means (4333.3335 3466.6665) (4160 3640) silhouette 1
+sinks (6500 3900) (6500 9100) (2600 1300) (9100 5200) (9100 7800) (5200 1300) (0 2600) (5200 1300) branching point (6500 6500) means (9100 1300) (10400 5200) cap 6 rounds 1 power 2
+  clusters [[0, 2, 5, 6, 7], [1, 3, 4]] means (5537.037 4862.963) (8233.333 7366.6665) silhouette 0.64100534
+sinks (0 0) (9100 0) (10400 7800) branching point (3900 5200) means (9100 9100) (5200 10400) cap 1 rounds 0 power 2
+  clusters [[0, 2], [1]] means (5200 3900) (5200 3900) silhouette 1
+sinks (3900 3900) (3900 9100) (2600 1300) branching point (1300 2600) means (10400 0) (1300 3900) cap 3 rounds 4 power 2
+  clusters [[2], [0, 1]] means (4550 -650) (3900 6500) silhouette 0.55
+sinks (300 200) (50 200) (250 150) (100 300) (200 100) branching point (300 250) means (100 100) (300 250) cap 5 rounds 1 power 2
+  clusters [[1, 2, 3, 4], [0]] means (176.47058 198.52942) (300 75) silhouette 0.25743943
+sinks (3250 1300) (1950 3250) (3900 1950) (3900 2600) (3900 4550) (1300 2600) (1300 3900) (4550 5200) (3250 1950) (3250 3900) (1950 3250) branching point (3900 3250) means (3250 3250) (1950 1300) cap 3 rounds 1 power 2
+  clusters [[1, 4, 5, 6, 7, 9, 10], [0, 2, 3, 8]] means (2762.5 3737.5) (3575 1950) silhouette 0.7659008
+sinks (4550 0) (0 2600) (2600 1300) (4550 4550) (4550 1300) branching point (0 2600) means (3250 1300) (1300 1950) cap 5 rounds 1 power 2
+  clusters [[0, 1, 3, 4], [2]] means (1137.5 2437.5) (866.6667 2166.6667) silhouette 0.4
+sinks (2600 5200) (2600 7800) branching point (10400 10400) means (3900 0) (3900 6500) cap 2 rounds 4 power 1
+  clusters [[0, 1], []] means (8233.333 9316.667) (8368.75 9181.25) silhouette 1
+sinks (300 100) (0 100) (100 150) (150 0) (100 150) (300 0) (150 350) branching point (50 200) means (150 0) (350 200) cap 1 rounds 0 power 1
+  clusters [[1, 2, 3, 4, 5, 6], [0]] means (155.26315 105.26315) (192.85715 142.85715) silhouette 0.6292655
+sinks (100 0) (350 0) (50 50) (50 400) (50 300) (250 250) (400 100) (100 400) (250 400) (200 100) (300 0) branching point (0 400) means (400 200) (0 150) cap 7 rounds 3 power 1
+  clusters [[1, 3, 7, 8], [0, 2, 4, 5, 6, 9, 10]] means (146.73914 321.73914) (90.671646 265.67163) silhouette 0.13060969
+sinks (100 400) (50 200) (300 250) (100 150) (50 0) (250 200) branching point (350 0) means (150 300) (350 200) cap 6 rounds 3 power 4
+  clusters [[1, 4], [0, 2, 3, 5]] means (237.5 37.5) (290.9091 90.909096) silhouette 0.75521445
+sinks (350 300) (200 50) (100 100) (200 50) (300 200) branching point (150 250) means (250 350) (250 50) cap 5 rounds 3 power 2
+  clusters [[0, 4], [1, 2, 3]] means (300 250) (162.5 112.5) silhouette 0.7260318
+sinks (5200 1300) (3900 10400) (6500 7800) (6500 3900) (9100 3900) (6500 0) (1300 10400) (9100 9100) branching point (0 3900) means (6500 9100) (2600 0) cap 2 rounds 3 power 2
+  clusters [[1, 2, 4, 6, 7], [0, 3, 5]] means (3737.5 6662.5) (4789.4736 2189.4736) silhouette 0.7269068
+sinks (5200 3250) (2600 3250) (2600 4550) branching point (4550 2600) means (650 0) (650 3250) cap 1 rounds 0 power 4
+  clusters [[1, 2], [0]] means (3575 3250) (5362.5 3412.5) silhouette 1
+sinks (10400 10400) (6500 9100) branching point (6500 1300) means (0 9100) (10400 6500) cap 1 rounds 0 power 2
+  clusters [[1], [0]] means (6500 7800) (8450 5850) silhouette 1
+sinks (350 400) (200 150) (250 400) (400 100) branching point (400 300) means (0 400) (200 350) cap 1 rounds 0 power 1
+  clusters [[1, 2, 3], [0]] means (327.08334 247.91666) (358.33334 383.3333) silhouette 0.60064936
+sinks (3900 2600) (6500 3900) branching point (1300 10400) means (6500 1300) (3900 7800) cap 2 rounds 0 power 1
+  clusters [[0, 1], []] means (2905.8823 7455.8823) (3575 8125) silhouette 1
+sinks (650 1950) (650 1300) (1300 4550) (3250 650) branching point (3900 1300) means (3250 0) (1300 3900) cap 3 rounds 0 power 2
+  clusters [[3], [0, 1, 2]] means (2437.5 -162.5) (1852.4999 2177.5) silhouette 0.48444444
+sinks (400 150) (100 0) (150 100) branching point (300 50) means (50 100) (100 0) cap 1 rounds 1 power 1
+  clusters [[0, 2], [1]] means (281.25 106.25) (240 35) silhouette 0.30443284
+sinks (2600 0) (1300 7800) branching point (0 9100) means (7800 10400) (10400 10400) cap 1 rounds 3 power 2
+  clusters [[], [0, 1]] means (1114.2861 9285.714) (354.54547 8154.5454) silhouette 0.6111109
+sinks (0 2600) (3900 0) (1300 4550) branching point (3900 5200) means (3900 650) (0 3250) cap 2 rounds 1 power 4
+  clusters [[1], [0, 2]] means (3900 1950) (1733.3333 4116.6665) silhouette 1
+sinks (300 150) branching point (200 150) means (350 0) (100 150) cap 1 rounds 2 power 1
+  clusters [[0], []] means (400 150) (0 150) silhouette 0.6666667
+sinks (200 200) (0 150) branching point (350 0) means (350 100) (150 200) cap 1 rounds 1 power 1
+  clusters [[1], [0]] means (245 45) (285.7143 85.71429) silhouette 0
+sinks (5200 2600) (2600 0) (650 2600) (3250 5200) branching point (4550 3900) means (3250 1300) (650 3900) cap 4 rounds 4 power 2
+  clusters [[0, 1], [2, 3]] means (4030 1820) (1950 3900) silhouette 0.40178573
+sinks (2600 7800) (5200 7800) (2600 0) (5200 6500) branching point (0 0) means (10400 3900) (9100 7800) cap 2 rounds 0 power 1
+  clusters [[0, 1, 2], [3]] means (1040 1559.9999) (1155.5555 1444.4445) silhouette 0.7314815
+sinks (3900 1300) branching point (2600 5200) means (1950 650) (3900 5200) cap 1 rounds 2 power 2
+  clusters [[0], []] means (3412.5 2762.5) (5850 5200) silhouette 0.6666667
+sinks (2600 2600) branching point (1300 2600) means (0 0) (1300 650) cap 1 rounds 2 power 1
+  clusters [[], [0]] means (975 1950) (2275 2600) silhouette 0.85714287
+sinks (350 300) (200 250) (50 50) (400 200) (300 100) (0 100) (100 300) (150 400) (200 400) (300 400) branching point (0 150) means (0 150) (200 50) cap 7 rounds 3 power 4
+  clusters [[0, 5, 6, 7, 8, 9], [1, 2, 3, 4]] means (78.57143 221.42856) (150 150) silhouette 0.65
+sinks (3900 4550) (4550 5200) branching point (0 1950) means (0 0) (1950 3900) cap 2 rounds 3 power 1
+  clusters [[], [0, 1]] means (0 -975) (1728.409 3146.5908) silhouette 0.58307207
+sinks (100 250) (0 0) (50 50) (250 200) (0 50) branching point (350 150) means (250 250) (250 0) cap 1 rounds 0 power 2
+  clusters [[0, 3, 4], [1, 2]] means (233.33334 158.33333) (259.72223 115.27777) silhouette 0.535069
+sinks (300 250) (150 0) (350 150) (250 350) (250 0) (150 50) (0 300) (100 300) (250 200) (0 400) (150 100) branching point (400 200) means (200 50) (100 150) cap 8 rounds 3 power 1
+  clusters [[1, 2, 4, 5, 10], [0, 3, 6, 7, 8, 9]] means (342.42426 157.57576) (328.5714 228.57143) silhouette 0.29036567
+sinks (0 7800) (2600 10400) (1300 10400) (6500 2600) branching point (1300 0) means (1300 6500) (2600 1300) cap 1 rounds 4 power 2
+  clusters [[0, 2], [1, 3]] means (1083.3334 3033.3335) (2383.3335 2166.6667) silhouette 0.8055556
+sinks (300 250) (300 350) (150 0) (250 250) (100 200) branching point (400 350) means (250 100) (150 250) cap 2 rounds 1 power 2
+  clusters [[0, 2, 4], [1, 3]] means (335 290) (310.7143 314.2857) silhouette 0.102255605
+sinks (1950 5200) (5200 2600) (5200 1300) (650 2600) (3900 0) (650 3250) (1300 0) (0 2600) (1950 3250) (3900 5200) branching point (3250 1300) means (3250 1950) (1950 3250) cap 10 rounds 1 power 1
+  clusters [[0, 1, 5, 9], [2, 3, 4, 6, 7, 8]] means (3113.158 2463.158) (2250 1600) silhouette 0.11695564
+sinks (0 2600) (5200 3250) (3900 0) (0 1950) (4550 2600) (1300 3250) (0 3900) (3900 1950) (1950 4550) (3900 1950) (1300 0) branching point (3250 3250) means (3250 1300) (650 5200) cap 4 rounds 1 power 1
+  clusters [[1, 2, 4, 7, 9, 10], [0, 3, 5, 6, 8]] means (4062.5 812.5) (0 3250) silhouette 0.6541224
+sinks (0 400) (200 300) (250 300) (100 150) (200 150) (250 400) (100 50) (200 400) (200 100) (50 0) (200 0) branching point (250 400) means (0 100) (350 50) cap 7 rounds 2 power 4
+  clusters [[0, 1, 2, 5, 6, 7, 9], [3, 4, 8, 10]] means (165.15152 284.84848) (210 239.99998) silhouette 0.64830166
+sinks (1300 6500) (3900 2600) (6500 6500) (9100 6500) branching point (0 3900) means (1300 3900) (9100 1300) cap 3 rounds 1 power 1
+  clusters [[0, 2, 3], [1]] means (3557.8948 5542.1055) (3900 2600) silhouette 0.7263158
+sinks (3900 2600) (0 650) (0 3900) (2600 3900) (2600 650) (1950 0) (650 3900) (2600 3250) (0 3900) (3250 2600) (3250 2600) branching point (3250 2600) means (2600 3900) (0 3900) cap 10 rounds 2 power 1
+  clusters [[2, 3, 6, 7, 8], [0, 1, 4, 5, 9, 10]] means (2418 3068) (2714.706 1835.2941) silhouette 0.29685107
+sinks (9100 9100) (1300 3900) (0 0) (1300 3900) (6500 2600) (3900 1300) (0 2600) (0 1300) branching point (5200 10400) means (0 3900) (0 7800) cap 4 rounds 0 power 1
+  clusters [[0, 1, 2, 3], [4, 5, 6, 7]] means (4675 8975) (4741.1763 8908.823) silhouette 0.875
+sinks (650 5200) (2600 650) (1300 1950) branching point (4550 0) means (3250 1950) (650 650) cap 3 rounds 1 power 2
+  clusters [[0, 2], [1]] means (3575 975) (3087.5 487.5) silhouette 0.5
+sinks (100 400) branching point (100 250) means (300 350) (350 400) cap 1 rounds 2 power 2
+  clusters [[], [0]] means (133.33334 266.66666) (100 300) silhouette 0.40000007
+sinks (400 50) (50 400) (200 0) (150 400) (200 100) (150 300) (150 300) (350 300) branching point (0 300) means (400 50) (150 400) cap 2 rounds 0 power 2
+  clusters [[0, 2, 4, 5, 6, 7], [1, 3]] means (197.72726 197.72728) (150 450) silhouette 0.76517856
+sinks (250 150) (300 50) (400 350) (400 250) branching point (0 0) means (250 200) (400 100) cap 1 rounds 2 power 1
+  clusters [[0, 2, 3], [1]] means (72.916664 52.083332) (107.14286 17.857143) silhouette 0.50454545
+sinks (400 200) (250 0) (400 150) branching point (400 100) means (250 150) (100 300) cap 2 rounds 3 power 1
+  clusters [[1], [0, 2]] means (310 39.999996) (400 250) silhouette 0.68333334
+sinks (1300 1300) (1300 6500) (0 7800) (5200 0) (10400 7800) (7800 10400) (1300 10400) branching point (3900 10400) means (10400 2600) (6500 9100) cap 7 rounds 3 power 1
+  clusters [[0, 1, 2, 3, 6], [4, 5]] means (2414.2856 6685.714) (8060 9360) silhouette 0.75822765
+sinks (1300 2600) (650 3900) (650 1300) (1950 4550) (650 1300) (3250 4550) (0 4550) branching point (2600 1950) means (2600 650) (650 1300) cap 4 rounds 0 power 2
+  clusters [[2, 4, 5], [0, 1, 3, 6]] means (1671.4285 2321.4285) (2009.0908 2659.0908) silhouette 0.055412453
+sinks (1300 2600) branching point (1300 1300) means (7800 10400) (7800 5200) cap 1 rounds 1 power 2
+  clusters [[0], []] means (1300 3900) (2925 2275) silhouette 0.33333334
+sinks (1950 650) (3250 3900) (3900 1300) (4550 4550) (3250 2600) (0 650) (3900 1300) (1300 0) (4550 5200) branching point (5200 4550) means (650 0) (3900 650) cap 6 rounds 2 power 1
+  clusters [[0, 1, 2, 4, 5, 6], [3, 7, 8]] means (4284.694 3515.3062) (4085.7144 3714.2856) silhouette 0.19106959
+sinks (2600 7800) (7800 7800) (1300 3900) (0 2600) (10400 7800) (0 5200) (1300 3900) (5200 7800) (0 7800) branching point (3900 10400) means (6500 10400) (5200 9100) cap 9 rounds 3 power 2
+  clusters [[1, 4, 7], [0, 2, 3, 5, 6, 8]] means (4680 9880) (3421.0527 9578.947) silhouette 0.67006177
+sinks (1950 0) (1950 2600) (5200 0) (3250 4550) (0 3900) (2600 5200) (0 650) (2600 1300) branching point (2600 0) means (3250 1300) (1300 2600) cap 2 rounds 1 power 2
+  clusters [[1, 2, 4, 5, 7], [0, 3, 6]] means (2522.6191 1547.619) (2058.3335 1083.3334) silhouette 0.53510976
+sinks (1950 3900) (4550 2600) branching point (1950 4550) means (2600 5200) (1950 650) cap 1 rounds 2 power 2
+  clusters [[0], [1]] means (1950 1950) (3435.7144 3435.7144) silhouette 0.2
+sinks (2600 3900) (2600 650) (3900 1300) (2600 5200) (3900 1950) (2600 1950) (650 650) (1950 1950) branching point (1950 650) means (1300 2600) (4550 1950) cap 5 rounds 1 power 2
+  clusters [[0, 3, 7], [1, 2, 4, 5, 6]] means (2193.75 2356.25) (3013.6362 1536.3636) silhouette 0.30071592
+sinks (5200 9100) (3900 2600) (0 9100) (2600 1300) branching point (5200 3900) means (2600 7800) (2600 3900) cap 3 rounds 1 power 2
+  clusters [[0, 2], [1, 3]] means (4550 5200) (4225 2925) silhouette 0.6520202
+sinks (350 250) branching point (400 350) means (200 350) (150 200) cap 1 rounds 3 power 4
+  clusters [[], [0]] means (300 350) (366.66666 283.3333) silhouette 0.66666687
+sinks (250 0) (250 200) (300 250) (150 250) (100 250) (150 0) (100 100) (300 150) branching point (200 350) means (50 300) (150 0) cap 2 rounds 2 power 4
+  clusters [[3, 4, 5, 6], [0, 1, 2, 7]] means (145.45454 204.54546) (254.54546 204.54546) silhouette 0.7744977
+sinks (10400 5200) (5200 5200) (7800 6500) (6500 2600) (3900 3900) (0 9100) branching point (2600 1300) means (3900 0) (9100 7800) cap 2 rounds 1 power 2
+  clusters [[1, 4, 5], [0, 2, 3]] means (3141.6665 7258.333) (6623.8096 3776.1904) silhouette 0.41688275
+sinks (5200 3250) (0 0) (4550 0) (3900 3250) (2600 2600) branching point (2600 4550) means (0 1300) (5200 3900) cap 3 rounds 4 power 4
+  clusters [[1, 4], [0, 2, 3]] means (1485.7142 1764.2856) (4355 2404.9998) silhouette 1
+sinks (3900 10400) (10400 5200) (10400 7800) (3900 1300) (6500 2600) (1300 10400) branching point (7800 2600) means (3900 5200) (6500 3900) cap 2 rounds 3 power 1
+  clusters [[0, 3, 4, 5], [1, 2]] means (6782.609 3532.6086) (8580 3770) silhouette 0.7159498
+sinks (200 100) (150 0) (150 100) (350 400) (300 200) (50 300) branching point (150 200) means (300 250) (200 0) cap 1 rounds 0 power 4
+  clusters [[1, 2, 3, 4, 5], [0]] means (325 200) (208.33333 83.333336) silhouette 0.9614815
+sinks (0 1300) (1300 7800) (2600 1300) (0 1300) (3900 6500) (1300 6500) (5200 2600) (10400 10400) branching point (10400 2600) means (6500 9100) (10400 1300) cap 8 rounds 0 power 2
+  clusters [[0, 1, 2, 3, 4, 5, 6, 7], []] means (5861.207 3911.2068) (10400 -3250) silhouette 0.96500003
+sinks (5200 650) (650 3900) (3250 2600) (3250 1300) branching point (0 5200) means (1950 650) (3900 1300) cap 2 rounds 3 power 1
+  clusters [[0, 3], [1, 2]] means (650 4550) (650 4550) silhouette 0.5
+sinks (200 300) (350 100) (350 250) (0 100) branching point (100 150) means (0 400) (50 100) cap 2 rounds 3 power 2
+  clusters [[0, 2], [1, 3]] means (202.08333 222.91666) (205 80) silhouette 0.4477635
+sinks (1300 3900) (2600 2600) (0 9100) (2600 1300) (9100 5200) (5200 2600) (2600 6500) (0 0) branching point (6500 6500) means (0 3900) (9100 10400) cap 7 rounds 3 power 1
+  clusters [[0, 1, 2, 3, 5, 6, 7], [4]] means (1700 3499.9998) (11700 3900) silhouette 0.7282127
+sinks (10400 9100) (1300 5200) (9100 9100) branching point (6500 5200) means (2600 3900) (0 7800) cap 3 rounds 3 power 2
+  clusters [[1], [0, 2]] means (3250 5200) (7977.273 6972.7275) silhouette 0.6747109
+sinks (350 400) (50 400) branching point (0 200) means (0 350) (400 0) cap 2 rounds 1 power 1
+  clusters [[1], [0]] means (75 500) (238.63637 336.36365) silhouette 0.51891893
+sinks (3250 1300) (3250 2600) (3250 650) (1300 1950) (4550 1950) (1300 4550) (3250 650) branching point (1950 2600) means (4550 5200) (1300 3900) cap 4 rounds 3 power 1
+  clusters [[0, 1, 2, 4, 6], [3, 5]] means (3250 1625) (812.5 3737.5) silhouette 0.6781258
+sinks (50 250) (250 400) (100 300) (150 150) (300 0) branching point (300 0) means (100 0) (0 0) cap 1 rounds 1 power 4
+  clusters [[0, 2, 3], [1, 4]] means (276.92307 26.923079) (294.44446 44.444447) silhouette 0.8000001
+sinks (4550 1300) (1950 650) (3250 1950) (2600 3250) (5200 1950) (5200 1300) (3250 4550) (3900 1300) branching point (650 4550) means (3900 3900) (4550 1300) cap 1 rounds 3 power 4
+  clusters [[0, 2, 3, 4, 5, 6, 7], [1]] means (1609.0165 3884.0164) (1056.25 3331.25) silhouette 1
+sinks (3900 5200) (1300 5200) (4550 0) (3250 650) (0 3250) (2600 4550) (650 1950) (3900 1300) branching point (1950 1950) means (1950 1300) (0 1300) cap 8 rounds 1 power 4
+  clusters [[0, 2, 3, 5, 7], [1, 4, 6]] means (2742.1875 2132.8125) (1500 2475) silhouette 1
+sinks (4550 0) (1950 0) (0 5200) (2600 3900) (5200 2600) (1950 3250) (1300 3900) (2600 2600) (2600 2600) (1300 1950) branching point (2600 1300) means (2600 4550) (1300 2600) cap 8 rounds 3 power 2
+  clusters [[0, 4], [1, 2, 3, 5, 6, 7, 8, 9]] means (4225 1300) (2058.3333 2383.3335) silhouette 0.57107127
+sinks (10400 10400) (3900 5200) (5200 5200) (5200 3900) (6500 9100) (0 7800) (9100 5200) (7800 2600) (6500 9100) (10400 2600) (9100 6500) branching point (6500 3900) means (6500 6500) (9100 6500) cap 9 rounds 4 power 1
+  clusters [[1, 2, 3, 4, 5, 8], [0, 6, 7, 9, 10]] means (5968.1816 4668.1816) (7341.177 4358.8237) silhouette 0.4347749
+sinks (150 50) (300 250) (150 50) (0 400) (400 50) (250 200) (50 300) branching point (300 150) means (0 100) (50 100) cap 7 rounds 3 power 1
+  clusters [[1, 3, 5, 6], [0, 2, 4]] means (286.9565 161.95653) (290 135) silhouette 0.13294572
+sinks (9100 6500) (6500 1300) (1300 1300) (3900 0) (0 0) branching point (1300 0) means (5200 0) (7800 6500) cap 1 rounds 4 power 2
+  clusters [[0, 1, 3, 4], [2]] means (4244.1177 1605.8823) (1300 4550) silhouette 0.68482107
+sinks (200 200) (250 100) (0 250) (400 200) (100 0) (50 150) (50 100) (200 50) branching point (0 200) means (300 250) (400 150) cap 8 rounds 1 power 1
+  clusters [[2], [0, 1, 3, 4, 5, 6, 7]] means (0 300) (67.567566 167.56757) silhouette 0.53250754
+sinks (2600 0) branching point (0 3900) means (0 1300) (3900 7800) cap 1 rounds 4 power 1
+  clusters [[0], []] means (2080 780) (2600 6500) silhouette 0.8
+sinks (200 350) (400 400) (400 350) (250 250) (150 150) branching point (200 400) means (250 200) (300 350) cap 4 rounds 0 power 1
+  clusters [[0, 3, 4], [1, 2]] means (200 300) (288.8889 388.8889) silhouette 0.5018753
+sinks (1300 2600) (650 0) (2600 4550) (3900 1300) (0 3250) (3900 3250) (3900 5200) branching point (2600 3250) means (3250 1950) (1300 4550) cap 6 rounds 4 power 4
+  clusters [[1, 3, 5], [0, 2, 4, 6]] means (2852.7778 1227.7778) (1462.5 4387.5) silhouette 1
+sinks (10400 5200) (9100 0) (2600 0) (0 0) (10400 5200) branching point (1300 7800) means (3900 2600) (10400 0) cap 5 rounds 1 power 1
+  clusters [[1, 2, 3], [0, 4]] means (2437.5 4387.5) (4838.8887 6788.8887) silhouette 0.8992001
+sinks (5200 3250) branching point (3250 650) means (1300 5200) (5200 650) cap 1 rounds 2 power 4
+  clusters [[0], []] means (5060.7144 3064.2856) (7475 650) silhouette 1
+sinks (250 100) (150 250) branching point (150 400) means (0 400) (150 150) cap 2 rounds 1 power 4
+  clusters [[], [0, 1]] means (-50 400) (186.36363 236.36363) silhouette 0.92857146
+sinks (100 300) (0 0) branching point (300 250) means (250 400) (200 100) cap 1 rounds 1 power 4
+  clusters [[0], [1]] means (160 285) (204.54546 170.45454) silhouette 0.83980584
