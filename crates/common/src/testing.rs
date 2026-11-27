@@ -45,3 +45,39 @@ pub fn assert_golden(dir: &Path, name: &str, actual: &str) {
         path.display()
     );
 }
+
+/// A small generator for tests that try many inputs: the same seed gives
+/// the same sequence on every machine, so a failure reproduces.
+#[derive(Clone, Debug)]
+pub struct SeededRng(u64);
+
+impl SeededRng {
+    /// The generator started from `seed`.
+    #[must_use]
+    pub const fn new(seed: u64) -> Self {
+        Self(seed)
+    }
+
+    /// A number in `0..n`.
+    ///
+    /// # Panics
+    ///
+    /// When `n` is zero.
+    pub const fn below(&mut self, n: u64) -> u64 {
+        self.0 = self
+            .0
+            .wrapping_mul(6_364_136_223_846_793_005)
+            .wrapping_add(1_442_695_040_888_963_407);
+        (self.0 >> 33) % n
+    }
+
+    /// One of `choices`.
+    ///
+    /// # Panics
+    ///
+    /// When `choices` is empty.
+    pub fn pick<T: Copy>(&mut self, choices: &[T]) -> T {
+        let n = u64::try_from(choices.len()).unwrap_or(u64::MAX);
+        choices[usize::try_from(self.below(n)).unwrap_or(0)]
+    }
+}
