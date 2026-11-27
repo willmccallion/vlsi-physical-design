@@ -139,12 +139,8 @@ impl Number {
                 '+' => a.checked_add(b).map(Self::Int),
                 '-' => a.checked_sub(b).map(Self::Int),
                 '*' => a.checked_mul(b).map(Self::Int),
-                '/' if b != 0 => Some(Self::Int(
-                    a.div_euclid(b) - i64::from(b < 0 && a.rem_euclid(b) != 0),
-                )),
-                '%' if b != 0 => Some(Self::Int(
-                    a - b * (a.div_euclid(b) - i64::from(b < 0 && a.rem_euclid(b) != 0)),
-                )),
+                '/' => floor_div_rem(a, b).map(|(quotient, _)| Self::Int(quotient)),
+                '%' => floor_div_rem(a, b).map(|(_, remainder)| Self::Int(remainder)),
                 _ => None,
             };
         }
@@ -157,6 +153,18 @@ impl Number {
             _ => None,
         }
     }
+}
+
+/// `a / b` rounded down, and the remainder, which takes `b`'s sign, as
+/// Tcl's integer `/` and `%` give them; none when `b` is zero or the
+/// quotient overflows.
+fn floor_div_rem(a: i64, b: i64) -> Option<(i64, i64)> {
+    let (a, b, sign) = match b.signum() {
+        0 => return None,
+        1 => (a, b, 1),
+        _ => (a.checked_neg()?, b.checked_neg()?, -1),
+    };
+    Some((a.div_euclid(b), sign * a.rem_euclid(b)))
 }
 
 struct Interpreter<'a> {
