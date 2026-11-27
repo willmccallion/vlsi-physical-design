@@ -111,3 +111,6 @@ impl PhaseTimer {
         });
     }
 }
+
+#[cfg(test)]
+mod tests;
