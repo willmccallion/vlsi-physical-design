@@ -1471,7 +1471,7 @@ impl CommandSplitter {
                 return;
             }
             '{' if !self.in_quotes => self.brace_depth += 1,
-            '}' if !self.in_quotes => self.brace_depth = self.brace_depth.saturating_sub(1),
+            '}' => self.brace_depth = self.brace_depth.saturating_sub(1),
             '[' if !self.in_quotes && self.brace_depth == 0 => self.bracket_depth += 1,
             ']' if !self.in_quotes && self.brace_depth == 0 => {
                 self.bracket_depth = self.bracket_depth.saturating_sub(1);
