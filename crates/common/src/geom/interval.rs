@@ -56,13 +56,8 @@ impl Interval {
     /// apart; touching intervals meet in a point.
     #[must_use]
     pub fn between(self, other: Self) -> Self {
-        if self.hi < other.lo {
-            Self::new(self.hi, other.lo)
-        } else if other.hi < self.lo {
-            Self::new(other.hi, self.lo)
-        } else {
-            Self::new(self.lo.max(other.lo), self.hi.min(other.hi))
-        }
+        let (lo, hi) = (self.lo.max(other.lo), self.hi.min(other.hi));
+        Self::new(lo.min(hi), lo.max(hi))
     }
 
     /// How far apart the two are; zero when they touch or overlap.
