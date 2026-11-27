@@ -590,7 +590,7 @@ impl SearchCase {
             builder.commit(grid_point(rng));
         }
         Self {
-            scene: Scene::new(blockages).with_buffer_size(1, 1),
+            scene: Scene::new(blockages).with_buffer_size(rng.pick(&[1, 2]), rng.pick(&[1, 3])),
             builder,
             parent: grid_point(rng),
             point: grid_point(rng),
@@ -1119,5 +1119,92 @@ fn branches_place_their_buffers_as_they_always_have() {
         &golden_dir(),
         "htree_branch_buffers.txt",
         &branch_buffers_text(),
+    );
+}
+
+#[test]
+fn a_point_straight_across_from_its_parent_lies_west_or_south() {
+    let (parent, across) = (TreePoint::new(5.0, 5.0), TreePoint::new(5.0, 5.0));
+
+    assert_eq!(east_or_west(across, parent), Direction::West);
+    assert_eq!(north_or_south(across, parent), Direction::South);
+    assert_eq!(
+        east_or_west(TreePoint::new(6.0, 5.0), parent),
+        Direction::East
+    );
+    assert_eq!(
+        north_or_south(TreePoint::new(5.0, 6.0), parent),
+        Direction::North
+    );
+}
+
+/// A builder whose one level, ten units long, has the branching points
+/// `points` with `sinks` sinks each.
+fn one_level(points: [TreePoint; 2], sinks: [usize; 2]) -> Builder {
+    let mut tree = builder();
+    let mut topology = LevelTopology::new(10.0, Vec::new(), NO_CHOICE);
+    for (point, count) in points.into_iter().zip(sinks) {
+        let mut branch = BranchSinks::default();
+        for i in 0..count {
+            branch.push(point.to_sink_point(), InstRef::Sink(i));
+        }
+        topology.points.push(point);
+        topology.sinks.push(branch);
+    }
+    tree.topologies.push(topology);
+    tree
+}
+
+#[test]
+fn a_branching_point_without_sinks_mirrors_its_sibling_about_their_parent() {
+    let scene = Scene::new(Vec::new());
+    let mut tree = one_level(
+        [TreePoint::new(60.0, 50.0), TreePoint::new(70.0, 50.0)],
+        [1, 0],
+    );
+
+    tree.legalize_dummies(&scene.ctx());
+
+    // Mirrored to (40, 50), then moved a tenth of its length out and across.
+    assert!(tree.topologies[0].points[1].same(TreePoint::new(39.0, 51.0)));
+}
+
+#[test]
+fn a_branching_point_on_its_sibling_moves_off_it() {
+    let scene = Scene::new(Vec::new());
+    let mut tree = one_level(
+        [TreePoint::new(40.0, 50.0), TreePoint::new(40.0, 50.0)],
+        [1, 1],
+    );
+
+    tree.legalize_dummies(&scene.ctx());
+
+    assert!(tree.topologies[0].points[0].same(TreePoint::new(39.0, 51.0)));
+}
+
+#[test]
+fn a_sub_region_exactly_the_shortest_sink_region_needs_no_fake_segments() {
+    // Segments of two units make four the shortest sink region; the sinks
+    // span four by eight, so the first level's halves are four by four.
+    let scene = Scene::new(Vec::new()).with_buffer_size(1, 1);
+    let mut tech =
+        TechChar::from_segments(vec![segment(2, 1, &[0.5], 1), segment(4, 2, &[], 2)], 1);
+    let mut clock = Clock::new(NetId::new(0), "clk", "clk");
+    for (i, (x, y)) in [(0, 0), (4, 0), (0, 8), (4, 8)].into_iter().enumerate() {
+        clock.add_sink(ClockSink {
+            name: format!("ff{i}/CK"),
+            location: at(x, y),
+            pin: PinId::new(i),
+            input_cap: Farads32::ZERO,
+            insertion_delay: Seconds::ZERO,
+        });
+    }
+    let mut tree = Builder::new(clock, None, tech.length_unit());
+
+    tree.run(&scene.ctx(), &mut tech);
+
+    assert!(
+        tech.segments_with(LengthSteps::new(1), CapSteps::new(1), SlewSteps::new(1))
+            .is_empty()
     );
 }
